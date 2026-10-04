@@ -24,8 +24,9 @@ def test_every_default_home_re_exports_the_same_file() -> None:
     """The copies that used to disagree (repo-rooted vs working-directory)."""
     from src.dashboard import paths as dashboard_paths
     from src.decode import dbc, engineering
+    from src.features import feature_cache, feature_pipeline
     from src.models import spec_producibility
-    from src.preprocessing import decode, feature_cache, feature_pipeline
+    from src.preprocessing import decode
 
     assert dashboard_paths.DEFAULT_BINDINGS_PATH == paths.BINDINGS_YAML
     assert dashboard_paths.DEFAULT_DIDS_PATH == paths.DIDS_YAML
@@ -43,7 +44,7 @@ def test_every_default_home_re_exports_the_same_file() -> None:
 def test_feature_cache_key_hashes_the_dids_file_it_is_given(tmp_path: Path) -> None:
     """The cache key used to hash a fixed constant, whatever DID map the build
     loaded, so a build against another catalog could be served a stale frame."""
-    from src.preprocessing.feature_cache import build_feature_frame_cache_key
+    from src.features.feature_cache import build_feature_frame_cache_key
 
     config = example_config(REPO_ROOT / "canary.example.yaml")
     other = tmp_path / "dids.yaml"
@@ -77,7 +78,7 @@ def _did_session(root: Path) -> Path:
 def test_build_feature_frame_did_columns_do_not_depend_on_the_working_directory(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from src.preprocessing.feature_pipeline import build_feature_frame
+    from src.features.feature_pipeline import build_feature_frame
 
     config = example_config(REPO_ROOT / "canary.example.yaml")
     session = _did_session(tmp_path / "sessions")
@@ -102,7 +103,7 @@ def test_build_feature_frame_cache_key_hashes_the_dids_file_it_loads(tmp_path: P
     another DID catalog cannot be served the repo catalog's cached frame."""
     import json
 
-    from src.preprocessing.feature_pipeline import build_feature_frame
+    from src.features.feature_pipeline import build_feature_frame
 
     config = example_config(REPO_ROOT / "canary.example.yaml")
     session = _did_session(tmp_path / "sessions")
@@ -149,12 +150,12 @@ def test_mirror_constants_and_per_vehicle_catalogs_are_repo_rooted() -> None:
     (``behavior_models`` and its siblings) are rooted at the checkout, so a
     tool started from another directory reads the daemon's own files."""
     from src.alerts.tuning import DEFAULT_TUNING_AUDIT_PATH, DEFAULT_TUNING_PATH
+    from src.behavior.accepted_baselines import DEFAULT_ACCEPTED_BASELINES_PATH
     from src.collection.custom_pids import DEFAULT_CUSTOM_PIDS_PATH
     from src.config import DaemonConfig, SensorCanConfig
-    from src.decode.accepted_baselines import DEFAULT_ACCEPTED_BASELINES_PATH
+    from src.features.feature_pipeline import DEFAULT_FEATURE_CACHE_DIR
     from src.models.feedback import DEFAULT_FEEDBACK_PATH
     from src.models.training_ledger import DEFAULT_TRAINING_LEDGER_PATH
-    from src.preprocessing.feature_pipeline import DEFAULT_FEATURE_CACHE_DIR
 
     daemon = DaemonConfig()
     assert DEFAULT_FEEDBACK_PATH == daemon.feedback_log

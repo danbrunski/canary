@@ -14,13 +14,13 @@ from src.analysis.fingerprint import (
     is_stale,
     write_fingerprint,
 )
-from src.config import CanaryConfig
-from src.decode.behavior_models import (
+from src.behavior.behavior_models import (
     Axis1D,
     BehaviorModel1D,
     BehaviorModels,
     PolynomialFit,
 )
+from src.config import CanaryConfig
 from src.storage.parquet_writer import write_records_to_parquet
 from src.storage.session_products import (
     FINGERPRINT_FILENAME,

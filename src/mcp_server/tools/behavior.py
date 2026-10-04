@@ -6,8 +6,8 @@ from pathlib import Path
 from typing import Any
 
 from src.analysis.session_deviations import analyze_session, compare_session_deviations
+from src.behavior.behavior_models import load_behavior_models
 from src.config import CanaryConfig
-from src.decode.behavior_models import load_behavior_models
 from src.mcp_server.client import DaemonClient
 from src.storage.sessions import resolve_session
 from src.vehicle.profiles import resolve_profile_for_tooling, scope_config

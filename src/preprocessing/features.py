@@ -35,7 +35,7 @@ from src.columns import (
 )
 from src.dataframe_utils import require_columns as _require_columns
 
-#: Mirrors ``src.preprocessing.session_context.CONTEXT_PREFIX`` (kept local to
+#: Mirrors ``src.behavior.session_context.CONTEXT_PREFIX`` (kept local to
 #: avoid importing the behavior schema into this leaf module).
 CONTEXT_COLUMN_PREFIX = "context:"
 
@@ -288,7 +288,7 @@ def _value_columns(
         col = str(raw)
         if col in skip_exact:
             continue
-        # Serving context (B01.5, src.preprocessing.session_context) is
+        # Serving context (B01.5, src.behavior.session_context) is
         # per-start bookkeeping for behavior eligibility, not telemetry.
         if col.startswith(CONTEXT_COLUMN_PREFIX):
             continue

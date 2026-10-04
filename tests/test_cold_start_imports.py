@@ -118,8 +118,8 @@ _MOVED_OFF_THE_RECORDING_PATH = {
     # The pandas feature pipeline, decode layer and scoring worker: in the
     # thread that builds the live source.
     "src.daemon.inference": "runtime.build_live_feature_source",
-    "src.preprocessing.live": "runtime.build_live_feature_source",
-    "src.preprocessing.feature_pipeline": "runtime.build_live_feature_source",
+    "src.features.live": "runtime.build_live_feature_source",
+    "src.features.feature_pipeline": "runtime.build_live_feature_source",
     # Isolation Forest (and through it the FSM limits and pdfplumber): the
     # emitter wanted five column names from it.
     "src.models.isolation_forest": "the model poller's thread",
@@ -154,10 +154,11 @@ def test_recording_path_does_not_import(module: str, recording_path_modules: set
 
 def test_preprocessing_package_lazy_reexports_still_resolve() -> None:
     import src.preprocessing as preprocessing
-    from src.preprocessing import ResampleConfig, feature_pipeline
+    from src.features import feature_pipeline
+    from src.preprocessing import ResampleConfig
 
     assert ResampleConfig is preprocessing.ResampleConfig
-    assert feature_pipeline.__name__ == "src.preprocessing.feature_pipeline"
+    assert feature_pipeline.__name__ == "src.features.feature_pipeline"
     with pytest.raises(AttributeError):
         _ = preprocessing.not_a_preprocessing_export  # type: ignore[attr-defined]
 

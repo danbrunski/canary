@@ -39,6 +39,7 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
+from src.decode.on_read import can_channel_spellings, on_read_catalog
 from src.session import format_session_timestamp
 from src.storage.sessions import is_session_dir_name, session_started_at
 from src.telemetry import CAN_SOURCE, DECODED_SOURCE
@@ -241,7 +242,6 @@ def _decoded_seconds(chunks: Sequence[Path]) -> np.ndarray[Any, Any]:
     import pyarrow.dataset as ds
 
     from src.can_ids import parse_can_channel
-    from src.decode.on_read import can_channel_spellings, on_read_catalog
 
     catalog = on_read_catalog()
     if catalog is None or not chunks:

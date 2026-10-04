@@ -69,7 +69,7 @@ from src.analysis.behavior_validation import (
     validation_document_path,
 )
 from src.analysis.refit import Recipe, attach_criteria, default_recipes, refit_all
-from src.decode.behavior_models import (
+from src.behavior.behavior_models import (
     apply_behavior_policy,
     behavior_policy_path,
     dump_behavior_models,
@@ -79,8 +79,8 @@ from src.decode.behavior_models import (
     unknown_operating_modes,
 )
 from src.decode.dbc import DEFAULT_DBC_DIR
+from src.features.feature_pipeline import DEFAULT_DIDS_PATH, build_feature_frame
 from src.log import configure_logging
-from src.preprocessing.feature_pipeline import DEFAULT_DIDS_PATH, build_feature_frame
 from src.session import format_session_timestamp, session_sort_key
 from src.storage.capture_manifest import read_capture_manifest
 from src.storage.session_files import has_telemetry

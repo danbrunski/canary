@@ -21,7 +21,8 @@ from fastapi.staticfiles import StaticFiles
 from src.alerts.emitter import AnomalyEventEmitter
 from src.alerts.tuning import AlertTuner
 from src.analysis.gps_tracker import GpsTracker
-from src.collection.capture_profiles import CaptureProfileStore
+from src.behavior.accepted_baselines import DEFAULT_ACCEPTED_BASELINES_PATH
+from src.collection.capture_profiles import CaptureProfileSources, CaptureProfileStore
 from src.collection.imu_collector import ImuHealth
 from src.collection.kline.plan import KlineCatalog
 from src.collection.obd_scheduler import ForcePollTrigger
@@ -70,7 +71,6 @@ from src.dashboard.status import (
 )
 from src.dashboard.version import _canary_version
 from src.dashboard.websockets import _publish_on_app_loop
-from src.decode.accepted_baselines import DEFAULT_ACCEPTED_BASELINES_PATH
 from src.models.feedback import FeedbackStore
 from src.storage.async_writer import AsyncParquetTelemetryWriter
 from src.vehicle.vehicle_ledger import VehicleLedgerStore
@@ -178,7 +178,7 @@ def create_app(
         # One store for the routes and the lifecycle they drive.
         capture_profile_store = profile_capture.profile_store
     resolved_capture_profile_store = capture_profile_store or CaptureProfileStore(
-        config.daemon.capture_profiles,
+        CaptureProfileSources.of(config.daemon),
         config.collection,
         behavior_models_path,
         custom_pids_path=config.daemon.custom_pids,

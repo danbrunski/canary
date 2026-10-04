@@ -12,13 +12,13 @@ NaN then flows through whatever missingness machinery already exists for
 that path, so this module adds no new plumbing:
 
 * **Training** — wired into
-  ``src.preprocessing.feature_pipeline._decode_session_to_resampled``,
+  ``src.features.feature_pipeline._decode_session_to_resampled``,
   between ``to_wide`` and ``resample_wide``. A gated-out cell is simply
   absent from the resampler's ``dropna()``-based "last observed" tracking,
   so it gets the resampler's existing bounded ffill + ``__gap`` flag — a
   reject looks exactly like any other gap.
 * **Live scoring** — wired into
-  ``src.preprocessing.live.LiveFeatureSource._set_value``, the single
+  ``src.features.live.LiveFeatureSource._set_value``, the single
   choke point every observed value (OBD, decoded CAN, DBC, DID) passes
   through. A rejected value is simply never stored as a "current value" —
   the channel ages out via the exact same ``_last_observed_at`` /

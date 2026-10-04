@@ -55,8 +55,9 @@ from src.analysis.lambda_delivery import (
 )
 from src.analysis.noise_floor import FloorRefusal, NoiseFloor
 from src.analysis.tuning_frame import ProviderRegistry
-from src.decode.surface_eval import bin_indices
+from src.behavior.surface_eval import bin_indices
 from src.paths import BINDINGS_YAML, DIDS_YAML
+from src.preprocessing.loader import read_session
 from src.signals.afr import AfrCalibration
 from src.signals.pairing import (
     PairingPolicy,
@@ -334,7 +335,6 @@ def _session_rows(
     """
     if not isinstance(session, Path):
         return session
-    from src.preprocessing.loader import read_session
 
     filters = raw_read_filters(specs, bindings_path=bindings_path, dids_path=dids_path)
     return read_session(session, filters=filters or None)
@@ -918,7 +918,7 @@ class SessionComparison:
 
 
 def _cell_labels(values: pd.Series, edges: Sequence[float]) -> pd.Series:
-    """Each value's cell under the one bin rule (:func:`src.decode.surface_eval.bin_indices`).
+    """Each value's cell under the one bin rule (:func:`src.behavior.surface_eval.bin_indices`).
 
     Labels read ``[lo, hi)`` (the last cell ``[lo, hi]``). Values outside the
     edges get no cell. R05.10: this used right-closed ``pd.cut``, under which

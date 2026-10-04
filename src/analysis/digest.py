@@ -37,12 +37,15 @@ from typing import Any
 from src.alerts.event_logger import event_log_path, read_events
 from src.analysis.fingerprint import compute_fingerprint
 from src.analysis.reference_epoch import read_reference_epoch
+from src.analysis.rolling_circumference import measure_session, write_rolling_circumference
 from src.analysis.session_classifier import classify_session
 from src.config import CanaryConfig
 from src.preprocessing.loader import resample_and_segment
 from src.session import DTC_SIDECAR_FILENAME
+from src.storage.catalog import record_session_best_effort
 from src.storage.session_files import count_session_rows, session_time_span_seconds
 from src.storage.session_products import DIGEST_FILENAME, DIGEST_SKIPPED_FILENAME, read_digest
+from src.storage.sessions import is_session_dir_name, session_started_at
 from src.storage.sidecar import read_json_object, write_json_sidecar
 from src.timefmt import format_timestamp as _format_timestamp
 from src.timefmt import parse_iso_utc
@@ -99,7 +102,7 @@ REASON_NO_SPEED_SOURCE = "no_speed_source"
 _TOP_N = 5
 
 #: Prefix fingerprint stats append for behavior-surface deviations
-#: (mirrors ``src.decode.behavior_decoder.DEVIATION_COLUMN_PREFIX`` stripped
+#: (mirrors ``src.behavior.behavior_decoder.DEVIATION_COLUMN_PREFIX`` stripped
 #: of its ``deviation:`` wide-column form — see
 #: ``fingerprint._add_behavior_deviation_stats``).
 _BEHAVIOR_DEVIATION_STAT_PREFIX = "behavior_deviation_abs_mean:"
@@ -138,6 +141,14 @@ class SessionDigest:
     #: capture started mid-drive, or a restart, from silently dropping the
     #: rest of the drive. ``None`` for an on-demand or shutdown-less digest.
     trip: dict[str, Any] | None = None
+    #: The driven tyres' rolling circumference measured over this drive's
+    #: steady cruise (:mod:`src.analysis.rolling_circumference`), or why there
+    #: is none. Computed here because the digest already reads the session in
+    #: its bounded child, but **not part of ``digest.json``**: :func:`write_digest`
+    #: stores it as its own ``rolling_circumference.json``, the one place
+    #: :mod:`src.control.tyres` reads, so a drive refused a digest can still
+    #: carry one.
+    rolling_circumference: dict[str, Any] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -410,7 +421,6 @@ def digest_preflight(
       2,622,370 rows, and the 8 GB Pi's cliff was bracketed between ~4.5 M
       rows (completed) and ~5.9 M rows (OOM-killed).
     """
-    from src.storage.sessions import is_session_dir_name
 
     if not is_session_dir_name(session_dir.name):
         # Derived from the child's address-space ceiling when unset, so a
@@ -477,7 +487,6 @@ def clear_digest_skipped(session_dir: Path) -> None:
 
 
 def _session_start(session_dir: Path) -> datetime | None:
-    from src.storage.sessions import session_started_at
 
     return session_started_at(session_dir)
 
@@ -671,6 +680,7 @@ def compute_digest(
         new_dtcs=_new_dtcs(session_dir),
         new_ledger_events=_new_ledger_events(ledger, start, end),
         tuning=_tuning_section(session_dir, config),
+        rolling_circumference=measure_session(session_dir, config),
     )
 
 
@@ -679,6 +689,8 @@ def write_digest(session_dir: Path, digest: SessionDigest) -> Path:
     ``fingerprint.json`` / ``dtc.json`` / ``trip_summary.json``."""
     path = session_dir / DIGEST_FILENAME
     write_json_sidecar(path, digest.to_dict(), default=_json_default)
+    if digest.rolling_circumference is not None:
+        write_rolling_circumference(session_dir, digest.rolling_circumference)
     return path
 
 
@@ -702,9 +714,66 @@ def persist_digest(
     """
     write_digest(session_dir, digest)
     clear_digest_skipped(session_dir)
-    # Lazy: src.storage.catalog imports this module's package at module level.
-    from src.storage.catalog import record_session_best_effort
 
+    record_session_best_effort(catalog_db, session_dir)
+    return read_digest(session_dir)
+
+
+def tuning_section(session_dir: Path, config: CanaryConfig) -> dict[str, Any] | None:
+    """:func:`_tuning_section` for the digest child's tuning refresh (R05.16)."""
+    return _tuning_section(session_dir, config)
+
+
+def stale_tuning_version(payload: dict[str, Any]) -> int | None:
+    """The stored tuning section's schema version when it predates
+    :data:`~src.analysis.tuning_digest.TUNING_SCHEMA_VERSION`, else ``None``.
+
+    Nothing re-reads a digest once it is written (A06.5), so a section
+    computed by an older engine stays on disk: a section without
+    ``schema_version`` is 1, the 1 s last-cell delivery engine, whose numbers
+    are not comparable with the acquisition-paired 2 (R05.16). Only the tuning
+    section may be refreshed. It reads nothing but the session, whereas a
+    whole recompute's anomaly window would end at "now" (A06.5). A recorded
+    section failure is a failure, not stale numbers, and is not retried here.
+    """
+    from src.analysis.tuning_digest import TUNING_SCHEMA_VERSION
+
+    section = payload.get("tuning")
+    if not isinstance(section, dict) or section.get("kind") == "failed":
+        return None
+    version = section.get("schema_version", 1)
+    if not isinstance(version, int) or version >= TUNING_SCHEMA_VERSION:
+        return None
+    return version
+
+
+def write_refreshed_tuning(
+    session_dir: Path,
+    payload: dict[str, Any],
+    section: dict[str, Any] | None,
+    *,
+    from_version: int,
+    now: datetime | None = None,
+    catalog_db: Path | None = None,
+) -> dict[str, Any] | None:
+    """Replace a stale tuning section in ``digest.json``, and say so.
+
+    Everything else in the stored digest is kept as written at trip end.
+    ``tuning_refreshed`` records which section version was replaced and
+    when, so a refreshed digest never passes for one computed whole.
+    """
+    from src.analysis.tuning_digest import TUNING_SCHEMA_VERSION
+
+    refreshed = {
+        **payload,
+        "tuning": section,
+        "tuning_refreshed": {
+            "from_schema_version": from_version,
+            "to_schema_version": TUNING_SCHEMA_VERSION,
+            "refreshed_at": _format_timestamp(datetime.now(UTC) if now is None else now),
+        },
+    }
+    write_json_sidecar(session_dir / DIGEST_FILENAME, refreshed, default=_json_default)
     record_session_best_effort(catalog_db, session_dir)
     return read_digest(session_dir)
 

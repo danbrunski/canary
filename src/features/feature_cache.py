@@ -16,7 +16,7 @@ from src.artifact_hash import sha256_file
 from src.config import CanaryConfig, require_profile_scoped
 from src.decode.dbc import DEFAULT_DBC_DIR
 from src.paths import BINDINGS_YAML, DIDS_YAML
-from src.storage.session_files import PARQUET_PATTERN
+from src.storage.session_files import session_files_fingerprint
 from src.vehicle.profiles import active_registry_sources
 
 log = logging.getLogger(__name__)
@@ -117,7 +117,7 @@ def _feature_frame_cache_metadata(
     require_profile_scoped(config, reader="feature-frame cache key")
     payload: dict[str, Any] = {
         "cache_version": FEATURE_FRAME_CACHE_VERSION,
-        "sessions": [_session_cache_entry(session_dir) for session_dir in session_dirs],
+        "sessions": [session_files_fingerprint(session_dir) for session_dir in session_dirs],
         "preprocessing": config.preprocessing.model_dump(mode="json"),
         # P02.10: the broadcast stale class lives beside the storage setting it
         # must equal, outside ``preprocessing``, so it is hashed by name.
@@ -141,27 +141,6 @@ def _feature_frame_cache_metadata(
         "vehicle_parameters": config.vehicle.parameters.model_dump(mode="json"),
     }
     return {**payload, "cache_key": _stable_hash(payload)}
-
-
-def _session_cache_entry(session_dir: Path) -> dict[str, Any]:
-    files: list[dict[str, Any]] = []
-    for file in sorted(session_dir.glob(PARQUET_PATTERN)):
-        try:
-            stat = file.stat()
-        except OSError:
-            continue
-        files.append(
-            {
-                "name": file.name,
-                "size": stat.st_size,
-                "mtime_ns": stat.st_mtime_ns,
-            }
-        )
-    return {
-        "path": _stable_path(session_dir),
-        "name": session_dir.name,
-        "files": files,
-    }
 
 
 def _directory_cache_entry(directory: Path, *, pattern: str) -> dict[str, Any]:

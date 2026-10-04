@@ -8,7 +8,7 @@ inventory question directly, per **engine run** rather than per directory:
 
 * A start counts only when it was *observed* — an RPM transition from stopped
   to running, or a run-time clock young enough to place the start. That rule
-  is :class:`~src.preprocessing.session_context.EngineStartTracker`, the same
+  is :class:`~src.behavior.session_context.EngineStartTracker`, the same
   implementation serving uses, not a copy of it: a session whose recording
   began mid-drive has an **unknown** initial temperature, never a cold one.
 * Warm restarts and mid-session fragments are reported as their own
@@ -39,9 +39,10 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
+from src.behavior.session_context import EngineStartTracker, StartContextSpec
 from src.dataframe_utils import numeric_values
 from src.operating import ENGINE_RUNNING_MIN_RPM
-from src.preprocessing.session_context import EngineStartTracker, StartContextSpec
+from src.preprocessing.drives import DRIVE_GAP_SECONDS, physical_drives
 from src.signals.pairing import to_seconds
 
 #: The serving contract's channels, thresholds and cold ceiling. Defaults
@@ -363,7 +364,6 @@ def group_into_drives(
     longer joins the evening and morning cold starts into one drive (operator,
     2026-09-23). A cold start belongs to the drive whose span holds its start.
     """
-    from src.preprocessing.drives import DRIVE_GAP_SECONDS, physical_drives
 
     gap = DRIVE_GAP_SECONDS if join_gap_seconds is None else join_gap_seconds
     by_session = {inventory.session: inventory for inventory in inventories}

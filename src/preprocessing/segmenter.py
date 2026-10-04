@@ -81,9 +81,10 @@ DEFAULT_SIGNAL_COLUMNS: Mapping[str, tuple[str, ...]] = {
     # against a P265/75R16 stock fitment and 4.08 diffs in place of 3.69, and
     # both ECU-derived speeds read ~8% under true ground speed (per-row median
     # obd/gps 0.9203, flat across speed bands). Steady-cruise engine-rpm
-    # clusters resolve the driveline exactly against GPS — gear ratios of
-    # 1.000 (direct drive), 1.309 and 1.740 at FD 4.08 and a 2.609 m loaded
-    # circumference — which a mis-scaled speed reference could not produce.
+    # clusters resolve the driveline exactly against GPS — the published
+    # gearbox ratios for 2nd-6th, within 0.4 %, at FD 4.08 and a 2.559 m
+    # rolling circumference (H07.11, 2026-10-03) — which a mis-scaled speed
+    # reference could not produce.
     # Tire size accounts for only ~4 points of the 8; the rest is unexplained
     # and is tracked on the 0x6F7 binding in bindings.yaml.
     #

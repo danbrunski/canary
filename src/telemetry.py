@@ -53,12 +53,13 @@ DERIVED_SOURCE: Final = "derived"
 #: convention, same as ``_archive``), so a foreign log format riding this
 #: source can never reach the training corpus or a live capture.
 UPREV_SOURCE: Final = "uprev"
-#: Add-on sensors that are not the vehicle's own: a CAN-output gauge on a
-#: second, private CAN interface (``sensor:FUEL_PRESSURE`` from an AEM X-Series
-#: gauge), and later an ADC-read sender (boost MAP). A first-class source like
-#: GPS: it rides a ``TelemetryRecord`` and is persisted into every session while
-#: the hardware is configured. Frame layouts are data
-#: (``data/sensor_can_signals.yaml``), not code.
+#: Add-on sensors that are not the vehicle's own: analog senders read through
+#: a USB ADC (``sensor:FUEL_PRESSURE`` from the AEM X-Series gauge's analog
+#: output; ``data/usb_adc_sensors.yaml``), CAN-output sensors on a second,
+#: private CAN interface (``data/sensor_can_signals.yaml``), and later boost
+#: MAP. A first-class source like GPS: it rides a ``TelemetryRecord`` and is
+#: persisted into every session while the hardware is configured. Layouts and
+#: calibrations are data, not code.
 SENSOR_SOURCE: Final = "sensor"
 #: ECU data CANary reads itself over K-line, through the CANary-HAT's own
 #: transceiver (``src.collection.kline``): module-scoped values
@@ -104,7 +105,7 @@ assert set(get_args(TelemetrySource)) == {
 
 #: Sources the live pipeline **re-derives from a raw row** rather than
 #: receiving from a collector: ``decoded`` comes from a raw ``can`` frame
-#: (:meth:`src.preprocessing.live.LiveFeatureSource._apply_can_decode` for the
+#: (:meth:`src.features.live.LiveFeatureSource._apply_can_decode` for the
 #: detectors; the session readers decode it on read, and nothing stores it
 #: since P02.8) and ``derived`` from the inference tick's computed channels
 #: (:mod:`src.daemon.inference`). Anything that re-injects stored rows into the

@@ -21,10 +21,10 @@ import pytest
 from src.decode.bindings import load_bindings
 from src.decode.dbc import DEFAULT_DBC_DIR, load_dbc_dir
 from src.decode.dids import load_did_map
+from src.features.feature_pipeline import resample_long_session, resample_session_bounded
 from src.paths import BINDINGS_YAML, DIDS_YAML
-from src.preprocessing import feature_pipeline
+from src.preprocessing import session_decode
 from src.preprocessing.derived import grid_interval_ns, reduce_long_frames, resample_reduced
-from src.preprocessing.feature_pipeline import resample_long_session, resample_session_bounded
 from src.preprocessing.loader import iter_session_parts, read_session, to_wide
 from src.preprocessing.quality_gate import apply_quality_gate
 from src.preprocessing.resampler import ResampleConfig
@@ -80,7 +80,7 @@ def test_real_drive_slice_matches_the_whole_session_chain(
     dids = load_did_map(DIDS_YAML)
 
     parts: list[int] = []
-    real = feature_pipeline.iter_session_parts
+    real = session_decode.iter_session_parts
 
     def spy(
         session_dir: Path, *, target_rows: int, filters: object = None, decoded: str = "on_read"
@@ -94,7 +94,7 @@ def test_real_drive_slice_matches_the_whole_session_chain(
             parts.append(len(part))
             yield part
 
-    monkeypatch.setattr(feature_pipeline, "iter_session_parts", spy)
+    monkeypatch.setattr(session_decode, "iter_session_parts", spy)
     bounded = resample_session_bounded(
         session, bindings, dbc, dids, ResampleConfig(), part_rows=2_000
     )
@@ -269,7 +269,7 @@ def _synthetic_long(hz_seed: int) -> pd.DataFrame:
     dupes["value"] = [np.nan if i % 2 else 7.0 for i in range(len(dupes))]
     long = pd.concat([long, dupes], ignore_index=True)
     long["source_channel"] = long["source"] + ":" + long["channel"]
-    return feature_pipeline._decode_long_frame(long, None, None, None)
+    return session_decode.decode_long_frame(long, None, None, None)
 
 
 @pytest.mark.parametrize("hz", [1.0, 2.0, 0.5, 0.25])

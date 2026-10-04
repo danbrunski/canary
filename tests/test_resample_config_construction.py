@@ -137,7 +137,7 @@ def test_resample_config_for_carries_every_gap_rule(tuned: CanaryConfig) -> None
 
 
 def test_feature_pipeline_reexports_the_same_function() -> None:
-    from src.preprocessing import feature_pipeline
+    from src.features import feature_pipeline
 
     assert feature_pipeline.resample_config_for is resample_config_for
 
@@ -145,7 +145,7 @@ def test_feature_pipeline_reexports_the_same_function() -> None:
 def test_manifest_max_gap_seconds_honours_max_gap_factor(tuned: CanaryConfig) -> None:
     """It recorded ResampleConfig(hz=...).max_gap — the default factor 2.0 —
     while the live source applied the configured factor."""
-    from src.preprocessing.feature_pipeline import build_feature_spec
+    from src.features.feature_pipeline import build_feature_spec
 
     features = pd.DataFrame(
         {
@@ -169,7 +169,7 @@ def test_manifest_max_gap_seconds_honours_max_gap_factor(tuned: CanaryConfig) ->
 
 
 def test_live_source_stale_ceilings_match_the_recipe(tuned: CanaryConfig) -> None:
-    from src.preprocessing.live import LiveFeatureSource
+    from src.features.live import LiveFeatureSource
 
     source = LiveFeatureSource(config=tuned)
     recipe = resample_config_for(tuned)
@@ -263,7 +263,8 @@ def test_replay_script_uses_the_recipe(
 def test_evaluation_session_loader_uses_the_recipe(
     tuned: CanaryConfig, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from src.preprocessing import derived, feature_pipeline
+    from src.features import feature_pipeline
+    from src.preprocessing import derived
 
     # evaluate_detectors (and so retrain's benchmark gate, R06.5) loads
     # sessions with the trainers' own per-session chain, which since P01.1
@@ -279,7 +280,7 @@ def test_evaluation_session_loader_uses_the_recipe(
 def test_disposition_report_uses_the_recipe(
     tuned: CanaryConfig, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from src.preprocessing import feature_pipeline
+    from src.features import feature_pipeline
 
     # The screen scripts/disposition_report.py runs (R06.4: moved to src).
     seen = _spy_resample_wide(monkeypatch, feature_pipeline, stop=True)

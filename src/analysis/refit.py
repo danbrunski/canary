@@ -50,16 +50,14 @@ from src.analysis.behavior_validation import (
 )
 from src.analysis.surface_1d import fit_binned_lookup, fit_polynomial, fit_robust_baseline
 from src.analysis.surface_2d import fit_grid_binned_mean
-from src.columns import MODE_COLUMN, SESSION_COLUMN, roc_column
-from src.decode.behavior_eligibility import (
+from src.behavior.behavior_eligibility import (
     ServingSpec,
     eligibility_reasons,
     eligible_mask,
     reason_code,
     summarize_reasons,
 )
-from src.decode.behavior_models import (
-    CLOSED_LOOP_FUEL_STATES,
+from src.behavior.behavior_models import (
     CURRENT_SCHEMA_VERSION,
     BandExcessPersistence,
     BehaviorModel1D,
@@ -79,13 +77,14 @@ from src.decode.behavior_models import (
     fingerprint,
     refuse_non_trainable_sources,
 )
-from src.operating import ENGINE_RUNNING_MIN_RPM
-from src.preprocessing.local_range import append_local_ranges, local_range_column
-from src.preprocessing.session_context import (
+from src.behavior.local_range import append_local_ranges, local_range_column
+from src.behavior.session_context import (
     StartContextSpec,
     append_start_context,
     start_context_columns,
 )
+from src.columns import MODE_COLUMN, SESSION_COLUMN, roc_column
+from src.operating import CLOSED_LOOP_FUEL_STATES, ENGINE_RUNNING_MIN_RPM
 from src.signals.derived import (
     STFT_BANK_BALANCE_SMOOTHING_SECONDS,
     VE_AMBIENT_CHANNEL,

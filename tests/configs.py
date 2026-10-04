@@ -140,7 +140,10 @@ def isolated_config(
     _merge(
         isolated,
         {
-            "profiles": {"registry_path": tmp_path / "profiles.yaml"},
+            "profiles": {
+                "registry_path": tmp_path / "profiles.yaml",
+                "registry_overlay_path": tmp_path / "profiles.overlay.yaml",
+            },
             "llm_assist": {"cards_path": tmp_path / "data" / "analyses" / "llm_assist_cards.jsonl"},
         },
     )
@@ -248,7 +251,10 @@ def isolate(config: CanaryConfig, tmp_path: Path) -> CanaryConfig:
     update: dict[str, Any] = {}
     if not config.profiles.registry_path.is_relative_to(tmp_path):
         update["profiles"] = config.profiles.model_copy(
-            update={"registry_path": tmp_path / "profiles.yaml"}
+            update={
+                "registry_path": tmp_path / "profiles.yaml",
+                "registry_overlay_path": tmp_path / "profiles.overlay.yaml",
+            }
         )
     if not config.llm_assist.cards_path.is_relative_to(tmp_path):
         update["llm_assist"] = config.llm_assist.model_copy(

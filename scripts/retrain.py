@@ -83,8 +83,16 @@ except ImportError:  # loaded as `scripts.retrain` — repo root on path, not sc
 
 from src.analysis.training_disposition import classify_dispositions, compute_quarantine_mask
 from src.artifact_hash import sha256_file_or_none
+from src.behavior.accepted_baselines import AcceptedBaselines, load_accepted_baselines
 from src.config import CanaryConfig
-from src.decode.accepted_baselines import AcceptedBaselines, load_accepted_baselines
+from src.features.feature_pipeline import (
+    DEFAULT_FEATURE_CACHE_DIR,
+    FeaturePolicy,
+    build_feature_frame,
+    candidate_feature_columns,
+    disposition_screen_frames,
+    resolve_feature_policy,
+)
 from src.log import configure_logging
 from src.models import training_entry
 from src.models.alert_budget import (
@@ -144,14 +152,6 @@ from src.models.training_ledger import (
     build_run_record_from_manifest,
 )
 from src.preprocessing.derived_store import on_the_pi, use_store
-from src.preprocessing.feature_pipeline import (
-    DEFAULT_FEATURE_CACHE_DIR,
-    FeaturePolicy,
-    build_feature_frame,
-    candidate_feature_columns,
-    disposition_screen_frames,
-    resolve_feature_policy,
-)
 from src.preprocessing.quality_gate import apply_quarantine_gate
 
 log = logging.getLogger(__name__)

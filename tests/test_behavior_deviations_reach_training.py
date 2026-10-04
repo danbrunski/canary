@@ -20,8 +20,16 @@ from pathlib import Path
 import pytest
 import yaml
 
+from src.behavior.behavior_models import load_behavior_models
 from src.config import CanaryConfig, UnscopedConfigError
-from src.decode.behavior_models import load_behavior_models
+from src.features.feature_cache import build_feature_frame_cache_key
+from src.features.feature_pipeline import (
+    build_feature_frame,
+    build_feature_spec,
+    configured_behavior_models,
+    featurize_perturbed_frame,
+    featurize_wide_frame,
+)
 from src.models.evaluation import (
     NonDefaultProfileTrainingError,
     refuse_non_default_profile_sessions,
@@ -30,14 +38,6 @@ from src.models.training_entry import (
     SEQUENCE_BACKBONES,
     train_isolation_forest,
     train_sequence_detector,
-)
-from src.preprocessing.feature_cache import build_feature_frame_cache_key
-from src.preprocessing.feature_pipeline import (
-    build_feature_frame,
-    build_feature_spec,
-    configured_behavior_models,
-    featurize_perturbed_frame,
-    featurize_wide_frame,
 )
 from src.storage.parquet_writer import write_records_to_parquet
 from src.telemetry import TelemetryRecord

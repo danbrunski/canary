@@ -24,10 +24,10 @@ import pytest
 from src.collection.replay import ReplayEmissionStats, replay_session
 from src.config import CanaryConfig, VehicleParameters
 from src.decode.dids import load_repo_did_map
+from src.features.feature_pipeline import featurize_wide_frame
+from src.features.live import LiveFeatureSource, build_prepared_live_tick
 from src.paths import DATA_DIR
 from src.preprocessing.channel_units import channel_units_for
-from src.preprocessing.feature_pipeline import featurize_wide_frame
-from src.preprocessing.live import LiveFeatureSource, build_prepared_live_tick
 from src.signals.afr import (
     TARGET_AFR,
     TARGET_MAP_UNRECORDED,

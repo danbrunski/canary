@@ -67,6 +67,7 @@ from src.analysis.dyno import (
 )
 from src.decode.bindings import Bindings
 from src.decode.engineering import is_decoded_column, physical_series, repo_bindings
+from src.preprocessing.decode import decode_can_rows, keep_can_ids
 from src.preprocessing.imu_session import (
     RAW_ACCEL_COLUMNS,
     SF_LON_COLUMN,
@@ -74,6 +75,7 @@ from src.preprocessing.imu_session import (
     read_imu_frame_sidecar,
     specific_force_from_sidecar,
 )
+from src.preprocessing.loader import read_session
 from src.signals.committees import SPEED_COMMITTEE, STANDARD_GRAVITY
 from src.storage.broadcast_storage import held_series, session_can_storage
 from src.telemetry import CAN_SOURCE, SOURCE_SEP
@@ -712,8 +714,6 @@ def read_motion_inputs(
     decodes only ``confirmed`` ones on read), and scaled through the catalog.
     Specific force comes through ``imu_frame.json`` (:func:`read_imu_specific_force`).
     """
-    from src.preprocessing.decode import decode_can_rows, keep_can_ids
-    from src.preprocessing.loader import read_session
 
     catalog = bindings if bindings is not None else repo_bindings()
     wanted = {s.channel for s in sources.speed} | set(sources.rpm)

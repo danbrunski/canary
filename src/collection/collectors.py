@@ -28,7 +28,7 @@ from src.collection.can_obd_collector import (
     ObdSchedulerMetrics,
     collect_can_obd_from_config,
 )
-from src.collection.capture_profiles import CaptureProfileStore
+from src.collection.capture_profiles import CaptureProfileSources, CaptureProfileStore
 from src.collection.gps_collector import GpsSpec, collect_gps_from_config
 from src.collection.gps_gpsd import GpsdSpec, collect_gpsd_from_config
 from src.collection.imu_collector import ImuHealth, collect_imu_from_config
@@ -43,7 +43,10 @@ from src.collection.queueing import CollectorHandoffStats
 from src.collection.reconnect import ReconnectPolicy
 from src.collection.sensor_can_collector import collect_sensor_can_from_config
 from src.collection.supply_voltage_collector import collect_supply_voltage_from_config
+from src.collection.usb_adc_collector import collect_usb_adc_from_config
 from src.config import CanaryConfig
+from src.decode.analog_sensors import load_analog_sensor_catalog
+from src.decode.sensor_can import load_sensor_can_catalog
 from src.telemetry import TelemetryRecord
 from src.vehicle.profiles import active_registry
 from src.vehicle.tune_revisions import RegistryConflictError
@@ -78,7 +81,7 @@ def default_collectors(
     in, so ``/status`` can read them.
     """
     capture_store = CaptureProfileStore(
-        config.daemon.capture_profiles,
+        CaptureProfileSources.of(config.daemon),
         config.collection,
         config.daemon.behavior_models,
         custom_pids_path=config.daemon.custom_pids,
@@ -106,6 +109,7 @@ def default_collectors(
         *_sensor_collectors(config, reconnect_policy),
         *_imu_collectors(config, reconnect_policy, health=imu_health),
         *_supply_voltage_collectors(config, reconnect_policy),
+        *_usb_adc_collectors(config, reconnect_policy),
         *_kline_collectors(config),
     ]
 
@@ -309,6 +313,37 @@ def _supply_voltage_collectors(
         )
 
     return [supply_voltage_collector]
+
+
+def _usb_adc_collectors(
+    config: CanaryConfig,
+    reconnect_policy: ReconnectPolicy,
+) -> list[CollectorStarter]:
+    """The USB ADC collector, or empty when it is not enabled.
+
+    Refuses a channel the sensor CAN bus also produces: two instruments
+    writing one ``sensor:<name>`` would interleave in a single column, and
+    nothing downstream could tell which reading came from which.
+    """
+    usb_adc = config.hardware.usb_adc
+    if not usb_adc.enabled:
+        return []
+    if config.hardware.sensor_can.enabled:
+        analog = {c.name for c in load_analog_sensor_catalog(usb_adc.sensors).channels}
+        can_names = {
+            s.name for s in load_sensor_can_catalog(config.hardware.sensor_can.signals).signals
+        }
+        shared = sorted(analog & can_names)
+        if shared:
+            raise ValueError(
+                f"sensor channels {shared} are produced by both hardware.usb_adc and "
+                "hardware.sensor_can; disable one, or rename the channel in one catalog"
+            )
+
+    async def usb_adc_collector(queue: asyncio.Queue[TelemetryRecord], stop: asyncio.Event) -> None:
+        await collect_usb_adc_from_config(usb_adc, queue, stop, reconnect_policy=reconnect_policy)
+
+    return [usb_adc_collector]
 
 
 def _kline_collectors(config: CanaryConfig) -> list[CollectorStarter]:

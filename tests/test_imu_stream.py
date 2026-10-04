@@ -20,6 +20,7 @@ import pandas as pd
 import pytest
 
 from src.config import CanaryConfig
+from src.features.live import LiveFeatureSource
 from src.preprocessing.derived import grid_interval_ns, reduce_numeric_session
 from src.preprocessing.derived_store import DerivedStore, use_store
 from src.preprocessing.imu_session import (
@@ -36,7 +37,6 @@ from src.preprocessing.imu_stream import (
     iter_framed_numeric_parts,
     plan_imu_frame,
 )
-from src.preprocessing.live import LiveFeatureSource
 from src.preprocessing.loader import (
     iter_session_numeric_parts,
     resample_and_segment,
@@ -592,7 +592,7 @@ def test_the_training_chain_is_the_same_with_or_without_the_sidecar(
     """The detectors' feature frame (``build_feature_frame``) does not read
     through the ``value_number`` chain, so resolving a session's IMU frame
     changes nothing in it, and no ``imu:`` column is trainable either way."""
-    from src.preprocessing.feature_pipeline import build_feature_frame, trainable_feature_columns
+    from src.features.feature_pipeline import build_feature_frame, trainable_feature_columns
 
     session = write_session(tmp_path)
     with_frame = build_feature_frame([session], config, max_workers=1)

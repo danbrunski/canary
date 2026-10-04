@@ -20,14 +20,14 @@ import pytest
 
 from src.config import CanaryConfig, UnscopedConfigError
 from src.decode.dids import load_repo_did_map
-from src.models.sequence_feature_set import sequence_roles_path
-from src.preprocessing.feature_cache import build_feature_frame_cache_key
-from src.preprocessing.feature_pipeline import (
+from src.features.feature_cache import build_feature_frame_cache_key
+from src.features.feature_pipeline import (
     build_feature_frame,
     featurize_perturbed_frame,
     featurize_wide_frame,
 )
-from src.preprocessing.live import LiveFeatureSource
+from src.features.live import LiveFeatureSource
+from src.models.sequence_feature_set import sequence_roles_path
 from src.signals.afr import load_afr_calibration, voltage_to_afr
 from src.vehicle.profiles import resolve_profile_for_tooling, scope_config
 from tests.configs import EXAMPLE_YAML, profiles_disabled
@@ -238,7 +238,7 @@ def test_the_feature_spec_records_the_calibration_by_content() -> None:
     with; ``sha256: None`` is the "without one" every pre-P02.11 frame had."""
     import hashlib
 
-    from src.preprocessing.feature_pipeline import build_feature_spec
+    from src.features.feature_pipeline import build_feature_spec
 
     features = featurize_wide_frame(
         _wide(), _scoped(), behavior_models=None, did_map=load_repo_did_map()

@@ -954,7 +954,7 @@ No task here changes the order in `OVERNIGHT-QUEUE.md`.
     noticed a call. The helper was checked to fire on the probing path.
   - The `test_can_collector` load flake it hit is T01.14.
 
-- [ ] **R09.6 `src/behavior/` and `src/features/`, landed together.**
+- [x] **R09.6 `src/behavior/` and `src/features/`, landed together.**
   - **Behaviour models** move to `src/behavior/` (layer 4):
     `decode/behavior_models.py`, `behavior_decoder.py`,
     `behavior_eligibility.py`, `accepted_baselines.py` and `surface_eval.py`,
@@ -982,6 +982,53 @@ No task here changes the order in `OVERNIGHT-QUEUE.md`.
   This is the largest sweep: `feature_pipeline` is referenced from 80 files,
   `behavior_models` from 69, `live` from 55. Check that no other
   session has `feature_pipeline.py` open first. Size **L**.
+
+  *Done 2026-10-03.* The plan above covered only part of what was needed.
+  Five more lower-layer edges came out of the AST walk, and each was moved to
+  the layer it belongs to rather than allowed:
+  - **Moves.** `src/behavior/`: `behavior_models`, `behavior_decoder`,
+    `behavior_eligibility`, `accepted_baselines`, `surface_eval`, **plus
+    `session_context` and `local_range`**. Both are behavior serving context
+    (B01.5, B07.6), and every importer sits at layer 4 or above. So
+    `LocalRangeCondition` stays where it was and nothing is split.
+    `src/features/`: `feature_pipeline`, `live`, `feature_cache`. Bodies are
+    unchanged; 151 files had paths rewritten, plus the package-relative
+    `from src.preprocessing import feature_pipeline` forms.
+  - **`preprocessing/session_decode.py` (new).** `decode_long_frame` (was
+    `feature_pipeline._decode_long_frame`) and `reduce_session` are decode
+    and reduce, not feature assembly. The derived store and plausibility's
+    offline reader needed them, and they would otherwise have imported
+    `features` from below. `feature_pipeline` imports them back.
+  - **`storage.session_files.session_files_fingerprint`.** This was
+    `feature_cache._session_cache_entry`, which `derived_store` needed. It
+    moved verbatim, so cache keys are unchanged.
+  - **`src/operating.py`** now holds `FUEL_STATUS_STATES`,
+    `CLOSED_LOOP_FUEL_STATES` and `fuel_status_name`, J1979 constants that
+    `anomaly_injection` (layer 3) needed.
+  - **`features/capture_inputs.model_input_warnings`.** `CaptureProfileStore.save`
+    no longer returns warnings, because collection cannot load behavior
+    models. The dashboard route computes them after saving.
+    `capture_profiles.channel_satisfied` is now public: it is the profile's
+    own question.
+  - **`ml_paths.txt`:** `src/behavior/` and `src/features/` added.
+  - **Not changed:** the `behavior_policy.yaml` header comment still names
+    `src.decode.behavior_models`. It is a tracked data file, and editing it
+    for a comment was not worth the risk to anything that hashes it.
+
+  **Accept:**
+  - `decode → preprocessing` is gone and no `preprocessing ↔ behavior` pair
+    exists: `OWED` is `{}`, and `test_layering.py` passes with `behavior` and
+    `features` at layer 4.
+  - **Replay:** `cdcc4ee` against the moved tree, session
+    `2026-09-18T213818`, 900 s. 18 events identical (8,316 floats, max
+    |delta| 0); IF 0 of 901, LSTM 0 of 872, fused 0 of 872 differ.
+  - **`artifact_fingerprint` and `contract_fingerprint`** are identical for
+    all 49 behavior models: the deployed set and every `_candidates/` set,
+    loaded by the old and new modules.
+  - **Suites:** ground truth and recipe golden 37, `-m ml_training` 122,
+    inner tier 6,393. The only test change of substance:
+    `test_capture_profiles` now asks `model_input_warnings` instead of
+    `save`.
 
 - [x] **R09.7 `alerts ↔ models`: fusion belongs to the detectors.**
   - **`alerts/fusion.py` → `models/fusion.py`.** It imports only `config`.
@@ -1097,7 +1144,7 @@ No task here changes the order in `OVERNIGHT-QUEUE.md`.
       running beside it, passed alone and under load; it is recorded as
       T01.15.
 
-- [ ] **R09.9 Close-out: measure, then remove the workarounds.**
+- [x] **R09.9 Close-out: measure, then remove the workarounds.**
   - **`OWED` is `{}`.**
   - **Re-measure** package edges, pairs importing each other (expected 0)
     and function-level cross-package imports, and record before/after here.
@@ -1109,3 +1156,40 @@ No task here changes the order in `OVERNIGHT-QUEUE.md`.
     `tests/test_layering.py` as the source of truth, not a copy of the map.
 
   Size **S**.
+
+  *Done 2026-10-03.*
+  - **Measured.** One AST walker counts every import, function-level and
+    `TYPE_CHECKING` included. It is calibrated on the commit that opened R09
+    (`6d76091`), where it reproduces this file's 91 / 19 / 148 exactly.
+
+    | | package edges | pairs importing each other | function-level cross-package imports |
+    |---|---|---|---|
+    | `6d76091` (R09 opened) | 91 | 19 | 148 |
+    | after R09.9 | 108 | **1** | 117 |
+
+    Edges went up because there are more packages (`signals`, `vehicle`,
+    `behavior`, `features`). An edge into one of them used to be an edge
+    into `analysis`, `preprocessing` or `decode`. The one remaining pair is
+    `STANDING`: `daemon/server.py` serves `dashboard.api`, and the dashboard
+    reads daemon objects downward. `OWED` and `OWED_PAIRS` are `{}`.
+  - **Workarounds removed: 29 imports in 19 files hoisted to module level.**
+    A function-level import was treated as a cycle workaround when its
+    target package imported its importer's package at `6d76091` and no
+    longer does. That gave 34 candidates. Two said so in a comment
+    (`digest.py` and `dtc_state.py`: "src.storage.catalog imports this
+    module's package"), and those comments are gone. Kept deferred, for
+    cost and not cycles:
+    - `alerts/emitter.py → models` (S01.3, the daemon's path to recording);
+    - `analysis/replay_window.py → models.inference/lstm_training` (torch,
+      inside a `try`);
+    - `control/capture_finalize.py → analysis` (keeps `analysis` off the
+      daemon's capture path);
+    - `control/trends.py → storage.catalog` (inside a `try`).
+
+    The other 117 function-level imports were never cycle workarounds by
+    this test. Most are cost deferrals with no comment saying so.
+  - **Checked:** every one of the 439 `src` modules imports in a fresh
+    interpreter; `test_cold_start_imports.py` (the S01.3 guard) and
+    `test_layering.py` pass; the inner tier 6,393 and `-m ml_training` 122
+    pass after the hoist.
+  - **AGENTS.md** has the "Package layers" paragraph.

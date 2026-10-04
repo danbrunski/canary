@@ -324,6 +324,28 @@ class SupplyVoltageConfig(_Strict):
     rate_hz: float = Field(default=10.0, gt=0.0, le=200.0)
 
 
+class UsbAdcConfig(_Strict):
+    """A USB serial ADC module reading analog sensors (first: the AEM fuel gauge).
+
+    The transport only; the channels and every calibration number are data
+    (``sensors``). Disabled by default. Recorded as ``sensor:<name>``, an
+    external-sensor channel: never trains or scores the anomaly detectors.
+    """
+
+    enabled: bool = False
+    #: Name the module by its USB port (``/dev/serial/by-path/...``): a plain
+    #: CH340 has no serial number, so ``by-id`` cannot tell two apart and
+    #: ``/dev/ttyUSB*`` follows probe order.
+    port: str = "/dev/ttyUSB0"
+    baudrate: int = 115200
+    #: One blocking read's limit; bounds shutdown latency.
+    read_timeout_seconds: float = Field(default=1.0, gt=0.0, le=5.0)
+    #: No parseable line for this long reopens the port. The stock firmware
+    #: sends every 0.5 s, ``firmware/usb-adc`` every 10 ms.
+    stall_seconds: float = Field(default=5.0, gt=0.0)
+    sensors: Path = DATA_DIR / "usb_adc_sensors.yaml"
+
+
 class KlineConfig(_Strict):
     """The CANary-HAT's K-line transceiver (TLIN1027 on uart0).
 
@@ -359,6 +381,7 @@ class HardwareConfig(_Strict):
     imu: ImuConfig = ImuConfig()
     sensor_can: SensorCanConfig = SensorCanConfig()
     supply_voltage: SupplyVoltageConfig = SupplyVoltageConfig()
+    usb_adc: UsbAdcConfig = UsbAdcConfig()
     kline: KlineConfig = KlineConfig()
 
 
@@ -1078,6 +1101,16 @@ class DaemonConfig(_Strict):
     #: ``scope_config`` always sets it, per vehicle (R05.15: it used to be one
     #: directory inside ``jobs/`` shared by every profile).
     calibration_dir: Path = CONTROL_DIR / "calibration"
+    #: Capture profiles saved or deleted on this machine, layered over the
+    #: tracked ``capture_profiles`` catalog by name (S03.4). Operational state:
+    #: the tracked catalog is never written at runtime.
+    capture_profile_overrides: Path = CONTROL_DIR / "capture_profile_overrides.yaml"
+    #: Root for everything the daemon writes at runtime (S03). When set, every
+    #: path in :data:`DAEMON_STATE_LAYOUT` that the YAML does not set itself
+    #: resolves under it, so nothing the Pi writes lands in the git checkout
+    #: (where ``canary-update`` refuses tracked edits). ``None`` keeps the
+    #: checkout-rooted defaults the laptop uses. The Pi sets ``/data/canary``.
+    state_dir: Path | None = None
     #: Ceiling on the stored rows a whole-session *raw* read in the digest
     #: child may attempt (D03.6): a capture's tuning section (``read_channels``
     #: with no row filter) and the workbench jobs. Since P02.1 the rest of the
@@ -1120,6 +1153,47 @@ class DaemonConfig(_Strict):
     retention_sweep_seconds: float = 3600.0
     broadcaster_queue_size: int = 100
     control_token_env: str = "CANARY_CONTROL_TOKEN"
+
+    @model_validator(mode="after")
+    def _root_state_paths(self) -> Self:
+        """Re-root every unset runtime path under ``state_dir`` (S03.1)."""
+        if self.state_dir is None:
+            return self
+        for name, relative in DAEMON_STATE_LAYOUT.items():
+            if name not in self.model_fields_set:
+                setattr(self, name, self.state_dir / relative)
+        return self
+
+
+#: Where each runtime-written :class:`DaemonConfig` path goes under
+#: ``state_dir`` (S03.1), before ``scope_config`` nests it per vehicle.
+#: Trained artifacts sit with the models (operator decision 2026-10-04: they
+#: are Pi-owned), control-plane state under ``control/``.
+DAEMON_STATE_LAYOUT: dict[str, Path] = {
+    "anomalies_dir": Path("anomalies"),
+    "models_dir": Path("models"),
+    "behavior_models": Path("models/behavior_models.yaml"),
+    "jobs_dir": Path("control/jobs"),
+    "audit_log": Path("control/audit.jsonl"),
+    "feedback_log": Path("control/anomaly_feedback.jsonl"),
+    "vehicle_ledger": Path("control/vehicle_ledger.jsonl"),
+    "reference_epoch": Path("control/reference_epoch.json"),
+    "training_ledger": Path("control/training_runs.jsonl"),
+    "tuning_config": Path("control/tuning.yaml"),
+    "tuning_audit": Path("control/tuning_audit.jsonl"),
+    "trip_state": Path("control/trip_odometer.json"),
+    "trend_alert_state": Path("control/trend_alert_state.json"),
+    "catalog_db": Path("control/catalog.db"),
+    "custom_pids": Path("control/custom_pids.yaml"),
+    "capture_profile_overrides": Path("control/capture_profile_overrides.yaml"),
+}
+#: :class:`DaemonConfig` paths that name version-controlled data the daemon
+#: only reads. Every ``Path`` field is in exactly one of these two tables or
+#: is ``state_dir``/``calibration_dir`` (``tests/test_state_dir.py``), so a new
+#: field cannot default into the checkout unclassified.
+DAEMON_TRACKED_PATHS: frozenset[str] = frozenset(
+    {"accepted_baselines", "afr_calibration", "capture_profiles", "kline_profile"}
+)
 
 
 class TrendsConfig(_Strict):
@@ -1235,6 +1309,11 @@ class ProfilesConfig(_Strict):
     #: VIN → profile registry (a daemon-managed *data* file, not canary.yaml).
     #: Not scoped per vehicle — it is the index that maps VIN to slug.
     registry_path: Path = Path("profiles.yaml")
+    #: What this machine learned about its vehicles (display names, VINs seen,
+    #: calibration ID / CVN), merged over ``registry_path`` by slug (S03.2).
+    #: The tracked registry holds the laptop-authored vehicle parameters and is
+    #: never written at runtime. Under ``daemon.state_dir`` when that is set.
+    registry_overlay_path: Path = CONTROL_DIR / "profiles.yaml"
     #: Persist a freshly-seen VIN to the registry automatically (with a blank
     #: display name for the operator to fill in via the dashboard).
     auto_register: bool = True
@@ -1360,6 +1439,22 @@ class CanaryConfig(_Strict):
     def scoped_profile(self) -> str | None:
         """The profile slug this config is scoped to, or ``None`` (unscoped)."""
         return self._scoped_profile
+
+    @model_validator(mode="after")
+    def _root_state_paths(self) -> Self:
+        """The non-daemon runtime paths follow ``daemon.state_dir`` too (S03.1)."""
+        state = self.daemon.state_dir
+        if state is None:
+            return self
+        if "registry_overlay_path" not in self.profiles.model_fields_set:
+            self.profiles = self.profiles.model_copy(
+                update={"registry_overlay_path": state / "control" / "profiles.yaml"}
+            )
+        if "cards_path" not in self.llm_assist.model_fields_set:
+            self.llm_assist = self.llm_assist.model_copy(
+                update={"cards_path": state / "analyses" / "llm_assist_cards.jsonl"}
+            )
+        return self
 
     @model_validator(mode="after")
     def _broadcast_timeout_inside_session_gap(self) -> Self:

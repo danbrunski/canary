@@ -37,7 +37,7 @@ The pieces, each used by both ``src.analysis.refit`` (publication) and
 * **Criteria** come from the vehicle profile's ``behavior_validation.yaml``;
   :func:`apply_criteria` turns metrics into ``passed`` / ``failed`` /
   ``insufficient_evidence`` with every failure named, and
-  :func:`src.decode.behavior_models.serving_status` is the only consumer of
+  :func:`src.behavior.behavior_models.serving_status` is the only consumer of
   that verdict.
 """
 
@@ -72,17 +72,14 @@ from src.analysis.splits import (
     training_leaks,
 )
 from src.artifact_hash import sha256_file_or_none
-from src.columns import MODE_COLUMN, SESSION_COLUMN, TIMESTAMP_COLUMN, gap_column
-from src.config import CanaryConfig
-from src.dataframe_utils import numeric_values
-from src.decode.behavior_decoder import band_half_widths, explain_expected_column, grade_deviation
-from src.decode.behavior_eligibility import (
+from src.behavior.behavior_decoder import band_half_widths, explain_expected_column, grade_deviation
+from src.behavior.behavior_eligibility import (
     OFF_MAP,
     ServingSpec,
     eligibility_reasons,
     serving_spec,
 )
-from src.decode.behavior_models import (
+from src.behavior.behavior_models import (
     BandExcessPersistence,
     BehaviorModel1D,
     BehaviorModel2D,
@@ -95,15 +92,22 @@ from src.decode.behavior_models import (
     ValidationCriteria,
     ValidationEvidence,
     contract_fingerprint,
+    governing_profile_file,
 )
-from src.decode.surface_eval import bin_indices, containing_cell_indices, trusted_cell_mask
-from src.models.fusion import BandExcessAccumulator, PersistenceGate
-from src.preprocessing import drives as _drives
-from src.preprocessing.session_context import (
+from src.behavior.session_context import (
     StartContextSpec,
     append_start_context,
     start_context_columns,
 )
+from src.behavior.surface_eval import bin_indices, containing_cell_indices, trusted_cell_mask
+from src.columns import MODE_COLUMN, SESSION_COLUMN, TIMESTAMP_COLUMN, gap_column
+from src.config import CanaryConfig
+from src.dataframe_utils import numeric_values
+from src.models.evaluation import default_profile_exclusion
+from src.models.fusion import BandExcessAccumulator, PersistenceGate
+from src.preprocessing import drives as _drives
+from src.preprocessing.decode import decode_on_read, read_session_decoded_subset
+from src.preprocessing.features import compute_rate_of_change
 from src.session import SessionKind, session_kind
 from src.signals.pairing import to_seconds
 
@@ -260,7 +264,9 @@ class BehaviorValidationDocument(_Strict):
 
 
 def validation_document_path(behavior_models_path: Path) -> Path:
-    return behavior_models_path.parent / VALIDATION_FILENAME
+    """The tracked validation document for the artifact (S03.3: from the profile
+    directory when the artifact is a machine's own copy outside the checkout)."""
+    return governing_profile_file(behavior_models_path, VALIDATION_FILENAME)
 
 
 def load_validation_document(path: Path) -> BehaviorValidationDocument | None:
@@ -385,7 +391,6 @@ def profile_exclusions(sessions: Sequence[Path]) -> dict[str, str]:
     than restated: a ``_tuning-*`` session, or a capture whose own manifest
     says it is not corpus-eligible.
     """
-    from src.models.evaluation import default_profile_exclusion
 
     return {
         Path(session).name: reason
@@ -1071,7 +1076,6 @@ def regime_labels(
     ``rate_unavailable`` if any rate is undefined, else ``steady``.
     """
     from src.columns import roc_column
-    from src.preprocessing.features import compute_rate_of_change
 
     out: dict[str, np.ndarray] = {}
     if revision_of_piece is not None and SESSION_COLUMN in frame.columns:
@@ -1604,8 +1608,8 @@ def evaluation_decoded_signals(models: BehaviorModels) -> set[str]:
     """Binding names the evaluation frame must decode from raw CAN: the
     segmenter's ``decoded:`` mode candidates plus any ``decoded:`` channel a
     model reads (input, output, gate or required context)."""
-    from src.decode.behavior_eligibility import required_channel_groups
-    from src.preprocessing.feature_pipeline import segmenter_input_columns
+    from src.behavior.behavior_eligibility import required_channel_groups
+    from src.features.feature_pipeline import segmenter_input_columns
 
     names: set[str] = set()
     columns: list[str] = list(segmenter_input_columns())
@@ -1661,8 +1665,7 @@ def build_evaluation_frame(
     """
     from src.decode.bindings import load_bindings
     from src.decode.dids import load_did_map
-    from src.preprocessing.decode import decode_on_read, read_session_decoded_subset
-    from src.preprocessing.feature_pipeline import (
+    from src.features.feature_pipeline import (
         drop_fully_stale_rows,
         featurize_wide_frame,
         resample_config_for,

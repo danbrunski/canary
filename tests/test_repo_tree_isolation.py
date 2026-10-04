@@ -22,6 +22,10 @@ from tests.repo_guard import REPO, RepoTreeGuard, RepoTreeWriteError
 #: ``data/control/trip_odometer.json`` and ``catalog.db`` were rewritten by a
 #: test run on 2026-09-24; both are among these.
 PATH_FIELDS = sorted(_daemon_path_fields())
+#: The fields that name a place the daemon writes. ``state_dir`` is the root
+#: the others derive from (S03.1), ``None`` unless a deployment sets it; the
+#: paths derived from it are the ones checked here.
+WRITTEN_PATH_FIELDS = [name for name in PATH_FIELDS if name != "state_dir"]
 
 
 def _under(path: Path, root: Path) -> bool:
@@ -32,7 +36,7 @@ def test_rebase_covers_every_path_field_of_the_daemon_config(tmp_path: Path) -> 
     config = CanaryConfig.from_yaml(EXAMPLE_YAML)
     rebased = rebase_state_paths(config, tmp_path)
     assert len(PATH_FIELDS) >= 19
-    for name in PATH_FIELDS:
+    for name in WRITTEN_PATH_FIELDS:
         path = getattr(rebased.daemon, name)
         assert _under(path, tmp_path), name
         # Relative defaults keep their shape, so two fields never collide.
@@ -110,7 +114,7 @@ def test_validation_harness_rebases_everything_but_its_declared_inputs(tmp_path:
     from src.validation.harness import _REAL_TREE_DAEMON_INPUTS, harness_config
 
     config = harness_config(tmp_path / "scratch", models_enabled=False)
-    for name in PATH_FIELDS:
+    for name in WRITTEN_PATH_FIELDS:
         path = getattr(config.daemon, name)
         if name in _REAL_TREE_DAEMON_INPUTS:
             continue
@@ -122,10 +126,11 @@ def test_validation_harness_rebases_everything_but_its_declared_inputs(tmp_path:
 @pytest.mark.parametrize("base", ["minimal", "daemon", "example"])
 def test_isolated_config_has_no_writable_path_in_the_repo(tmp_path: Path, base: str) -> None:
     config = isolated_config(tmp_path, base)  # type: ignore[arg-type]
-    for name in PATH_FIELDS:
+    for name in WRITTEN_PATH_FIELDS:
         assert _under(getattr(config.daemon, name), tmp_path), name
     assert _under(config.collection.storage_path, tmp_path)
     assert _under(config.profiles.registry_path, tmp_path)
+    assert _under(config.profiles.registry_overlay_path, tmp_path)
     assert _under(config.llm_assist.cards_path, tmp_path)
 
 
@@ -310,7 +315,8 @@ def test_isolate_keeps_the_yamls_tmp_paths_and_moves_every_repo_default(tmp_path
     )
     isolated = isolate(config, tmp_path)
     assert isolated.daemon.anomalies_dir == named
-    for name in PATH_FIELDS:
+    for name in WRITTEN_PATH_FIELDS:
         assert _under(getattr(isolated.daemon, name), tmp_path), name
     assert _under(isolated.profiles.registry_path, tmp_path)
+    assert _under(isolated.profiles.registry_overlay_path, tmp_path)
     assert _under(isolated.llm_assist.cards_path, tmp_path)

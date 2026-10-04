@@ -1265,6 +1265,34 @@ cannot, and an estimator matching BFS cannot identify where UpRev computes it.
   - **Remaining:** (truck) one live fast-exit retry, as above. Separately,
     the FF-only failure needs a decision on whether to bound the CF wait
     under this item or a new one.
+  - *CF wait bounded 2026-10-03 (operator: "if it is a good feature then yes
+    implement it").* `isotp.await_response`, the one receive policy for every
+    exchange (collector and standalone client), now bounds a started
+    multi-frame response by ISO 15765-2 N_Cr:
+    `CONSECUTIVE_FRAME_TIMEOUT_SECONDS = 0.15`.
+    - **Why 150 ms.** We send flow control with STmin 0. The stored 0x7E8
+      frames of `2026-09-23T150658` put all 2,155 FF→CF and 2,251 CF→CF gaps
+      under 0.1 ms at the recorder's resolution, so 150 ms is far above any
+      healthy gap and frees ~0.85 s per loss.
+    - **No CF at all after the FF** (70 of 71 losses): flow control is
+      re-sent once and the bound restarts. Ours may not have reached the
+      ECM, which waits its own N_Bs for it. Then the exchange ends.
+    - **A CF lost mid-response** (the 02.422 case: receive-side loss): it
+      ends at N_Cr, with no resend.
+    - **Visible.** `Exchange.continuation_lost` / `flow_control_resent` name
+      the outcome. The loop counts `continuation_losses`,
+      `flow_control_resends` and `flow_control_rescues`, all in
+      `/status` `health.obd_scheduler.receive`, so a slower ECU would show
+      up as losses rather than hide. `consecutive_frame_timeout=None` keeps
+      the old wait-to-deadline.
+    - **Effect on the 2026-09-23 pair:** two 1.0 s timeouts become at most
+      2 × 0.30 s (FF-only, resend included) or 0.15 s (mid-response). Not
+      yet observed live; the next drive's `receive` counters will say how
+      often the resend rescues.
+    - Tests: `tests/test_isotp_continuation_timeout.py` (6: healthy, FF-only
+      with resend, a resend rescue, mid-response loss, unbounded, silence and
+      single frames not counted) and
+      `test_obd_scheduler_receive_metrics.py`.
 
 - [x] **D03.19 A key-off boot disabled multi-PID batching for the whole session.**
   Silent timeouts from a sleeping ECM counted as batch rejections (6→4→2→off in
@@ -1399,6 +1427,20 @@ live here now, so the documents could be archived
   answer rate (2026-09-21).
   **Remaining — (a):** the batched-vs-single alternating-window cross-check on
   real data.
+  *Desk proxy for (a), 2026-10-03; it does not close it.* An offset walk in
+  batched decoding would show as a drifting ratio against an independent
+  instrument. Every September session on disk with both, 35 of them, was
+  checked: Mode 01 `obd:RPM` against broadcast `decoded:ECM_RPM`, paired
+  same-instant (`align_pairs`, 20 ms), above 600 rpm, 200–4,651 pairs per
+  session.
+  - The per-sample ratio's median is **0.992–0.999** in every session, with
+    p05–p95 inside 0.987–1.002.
+  - The first and last thirds of each drive differ by at most 0.004.
+  - So there is no walk on any drive. The small sub-1 bias is consistent
+    across sessions, which is what the 20 ms pairing skew on changing rpm
+    would give; it is not a drift.
+  - What only the truck can show is a single-read window beside a batched
+    one, which is (a) itself.
 - [~] **D03.25 Retrain and verify after the Phase-1 distribution change.**
   *From `../archive/ml-correctness-hardening.md` 1.6.* The laptop half landed
   (smoke retrain, LSTM replay diff —
@@ -1460,9 +1502,25 @@ live here now, so the documents could be archived
     (A06.3).
   - **Remaining:**
     - the Pi side of D03.22 (`label_sessions.py` there, with the Pi idle);
-    - the IF-side replay diff (the IF is not being redeployed);
     - an IF retrain once idle and highway clear the 3-drive floor on this
       calibration.
+  - **IF-side replay diff, done 2026-10-03 (desk).** Deployed IF
+    `isolation_forest_2026-09-20T054703` (`af1720e7…`) against the
+    2026-09-23 candidate (`69463c07…`), each beside the served r2 LSTM
+    (`f7389acf…`). `tools/replay_event_diff.py run`, same tree, held-out D6
+    live session `2026-09-23T150658` (1,142 s, 782 IF ticks):
+    - **Events identical:** 5 LSTM `evidence` events on both sides, and no IF
+      event from either.
+    - **Coverage.** The candidate scores **422 of 782** ticks, the deployed IF
+      748. The candidate has no highway model (refused at training on the
+      3-drive floor), so all **242 highway ticks** are missing features, and
+      it misses 103 city ticks against 20.
+    - **Margins.** Neither crosses its threshold. The deployed IF's closest
+      approach is 0.002 below (p99 0.010 below), the candidate's 0.019 below.
+    - **Reading.** This supports keeping the deployed IF (operator,
+      2026-09-23). The candidate would blind the IF on highway for any drive
+      like D6. The IF retrain stays owed until idle and highway clear the
+      floor on this calibration.
 - [~] **D03.26 Backfill the vehicle ledger.** *From
   `../archive/eval-longitudinal-and-dtc.md` 3.6.* The ledger has one placeholder
   entry; real entries need the operator's history and go in through
@@ -2175,6 +2233,89 @@ live here now, so the documents could be archived
   - **Not decided here:**
     - A throttle cross-check (commanded vs actual, pedal D vs E) was the one
       reason to keep the dropped throttle PIDs, and it was not built.
+
+- [~] **D03.35 Tyre wear from GPS: rolling circumference trended into tread
+  depth.** *Operator request, 2026-10-03.* H07.11 showed that a drive's steady
+  cruise fixes the driven tyres' rolling circumference: same-instant rpm /
+  GPS speed through the gearbox and final drive.
+  **Reliability, measured first** (18 September drives, so no wear between
+  them):
+  - one drive's median carries a standard error of 0.03–0.10 %;
+  - drive to drive they scatter by 0.15 % σ (2.550–2.564 m);
+  - 1 mm of tread is 2π mm of circumference, 0.25 %;
+  - so one drive resolves ~±0.6 mm of tread, and a month of drives
+    ~±0.15 mm. Tread wears ~1 mm per 5,000–10,000 km.
+
+  It is a trend, not an absolute depth: a tyre model is good to ~±1 %, about
+  ±4 mm. Absolute depth needs one gauge reading as the baseline.
+  *Built 2026-10-03:*
+  - **Measurement.** `src/analysis/rolling_circumference.py` takes the
+    steady-cruise pairs (5 GPS fixes ≤ 6 s, speed and rpm/speed within 1 %,
+    > 40 km/h, within 5 % of a gear at the profile's circumference) and
+    returns the median, n, SE, gears and speed range, or a named refusal
+    (`too_few_steady_pairs`, `inputs_missing`, `not_configured`).
+    - The rpm sources come from the vehicle's `dyno.yaml`
+      `motion_sources.rpm`, else Mode 01. Nothing names a vehicle.
+    - The prior only picks the gear: wear moves C far less than the 5 %
+      tolerance, and a tyre of another size is refused.
+    - Reproduces the analysis on `2026-09-18T213818` (2.55465 m) and
+      `2026-09-20T211925` (2.55779 m).
+  - **Each drive's own sidecar**, `rolling_circumference.json` (2026-10-04;
+    first built as a digest field). The digest measures it in its bounded
+    child and writes it there, not into `digest.json`. A drive refused a
+    digest is measured by trip end alone, in a child of its own. Not a
+    `_replay-*`: that is not a drive. `scripts/backfill_rolling_circumference.py`
+    measures every stored session, digest or not, and copies a 2026-10-03
+    digest field rather than re-measuring. Run it parked on the Pi.
+    - Why: a digest field meant no measurement for a drive with no digest.
+      On the Pi that was 17 drives refused `over_row_budget` before P02.1,
+      the two reference drives among them, and ~40 more of ≥10 MB with no
+      digest at all (pre-D03.6), the long highway drives the trend needs.
+      The 37 sessions of ≤1 MB were the Pi on with the engine off (operator).
+  - **Ledger.** `VehicleEvent.tyres: TyreRecord` with `action` ∈
+    {`tread_measured` (requires `tread_depth_mm`), `rotated`, `replaced`,
+    `pressure_changed`}. Carried on `POST /control/vehicle-ledger` and the
+    MCP `record_vehicle_event` (`tyres=`).
+  - **Trend.** `src/control/tyres.py`, served at `GET /control/tyres`, reads
+    the digests and the ledger only. Rules:
+    - a rotation or replacement starts a new series;
+    - the gauge reading is tied to the ≤5 measured drives nearest it within
+      21 days, so a wide window cannot absorb later wear;
+    - estimated depth = gauge − (C_baseline − C_now) / 2π, with an
+      uncertainty from the drives' own scatter;
+    - a pressure change since the baseline is named.
+  - **Dashboard.** Diagnose ▸ **Tyres** (was TPMS): a "Tread wear" card
+    under the TPMS stub shows estimated depth ± uncertainty, worn since the
+    gauge, rolling circumference ± and drives, a sparkline, the caveats, and
+    a form to record a gauge reading, pressure, rotation or replacement.
+  - **Tests.** `tests/test_tyre_wear.py` (9: recovery from a synthetic
+    drive, refusals, `TyreRecord` validation, no baseline, a fixed estimate
+    of 1.5 mm worn, a rotation restarting the series, a pressure caveat, the
+    route) and `TreadWearCard.test.ts` (4). The route-table, MCP-tool and
+    script-CLI snapshots are updated.
+
+  *Pi, 2026-10-04:* deployed (`1e82c29`); the scoped profile resolves
+  2.559 m; the backfill measured 9 of 63 digests (54 refused: 38
+  `too_few_steady_pairs`, 16 `inputs_missing`), and 137 sessions have no
+  digest at all. The 9 drives (2026-08-05..09-20) scatter **0.43 %** σ,
+  not the laptop's 0.15 %. One drive, `2026-09-10T002208`, reads 2.584 m
+  (+1 %), and the rest sit within 2.546–2.571 m. So one Pi drive resolves
+  only ~±1.7 mm of tread; the median of 10 is ~±0.6 mm. Most drives
+  are too short or too slow to measure, so the trend fills in slowly.
+
+  *Pi, after the sidecar change (`54ffc64`):* the backfill measured **48**
+  drives (2026-08-05..09-21; 39 new, 9 copied from digests, 98 refused).
+  Spread is 0.26 % σ over all 48 and **0.14 %** over the 23 with ≥300
+  pairs, the laptop's figure again. Every drive more than 0.5 % off had
+  fewer than 100 pairs and a per-drive SE ≥0.14 %; `2026-09-10T002208` is
+  one of them (55 pairs, SE 0.25 %). Current: 2.5587 m ± 0.0021 (last 10).
+  Not yet used: the trend weights the last 10 drives equally, though
+  each drive carries its own SE.
+
+  **Remaining (operator):**
+  - one gauge reading on the driven (rear) tyres, recorded from the card,
+    to turn the trend into depth;
+
 
 ## Deferred by decision, not blocked
 

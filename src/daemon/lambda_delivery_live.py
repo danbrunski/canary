@@ -69,7 +69,7 @@ from src.telemetry import TelemetryRecord
 if TYPE_CHECKING:
     from src.daemon.components import DaemonComponents
     from src.daemon.inference_metrics import InferenceTimingRecorder
-    from src.preprocessing.live import LiveFeatureSource
+    from src.features.live import LiveFeatureSource
 
 log = logging.getLogger(__name__)
 

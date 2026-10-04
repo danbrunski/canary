@@ -13,7 +13,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
 
-from src.preprocessing.feature_pipeline import FeatureSpecReconciliation
+from src.features.feature_pipeline import FeatureSpecReconciliation
 
 
 def structural_blindness(report: FeatureSpecReconciliation) -> dict[str, Any] | None:

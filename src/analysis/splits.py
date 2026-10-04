@@ -16,8 +16,8 @@ from typing import Literal
 
 import pandas as pd
 
+from src.behavior.behavior_models import DriveRecord, DriveSplitRecord
 from src.columns import SESSION_COLUMN, TIMESTAMP_COLUMN
-from src.decode.behavior_models import DriveRecord, DriveSplitRecord
 from src.preprocessing import drives as _drives
 from src.storage.sessions import session_started_at
 
@@ -55,7 +55,7 @@ class Drive:
     ``SessionSpan`` records and the recording names asked about. A split is built
     from an in-memory frame: its unit is the *piece* (``<session>#<segment>``
     rows, which ``PhysicalDrive`` has no field for), and every fold and
-    evidence record (:class:`~src.decode.behavior_models.DriveRecord`) names
+    evidence record (:class:`~src.behavior.behavior_models.DriveRecord`) names
     pieces. Which pieces share a drive is still decided by ``drives``: the
     ``drive_rows`` labels :func:`group_drives` groups on come from its
     ``row_drive_labels`` and the range fallback joins with its ``join_spans``,

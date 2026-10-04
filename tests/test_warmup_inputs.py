@@ -256,7 +256,7 @@ def test_start_context_measures_the_start_window_in_real_seconds() -> None:
     would accept a reading taken two minutes after the start as the start
     temperature. The conversion goes through ``src.signals.pairing.to_seconds``.
     """
-    from src.preprocessing.session_context import StartContextSpec, append_start_context
+    from src.behavior.session_context import StartContextSpec, append_start_context
 
     spec = StartContextSpec(
         rpm_channel="obd:RPM",

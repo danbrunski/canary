@@ -315,7 +315,7 @@ def _write_feature_matrix(
     Imported lazily — ``build_feature_frame`` pulls in the decode/behavior
     stack, and a CSV-only export shouldn't pay that import cost.
     """
-    from src.preprocessing.feature_pipeline import (
+    from src.features.feature_pipeline import (
         build_feature_frame,
         trainable_feature_columns,
     )

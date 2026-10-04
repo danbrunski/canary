@@ -21,7 +21,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from src.decode.behavior_models import (
+from src.behavior.behavior_models import (
     BehaviorModel1D,
     BehaviorModel2D,
     GridCell,

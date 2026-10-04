@@ -11,28 +11,28 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from src.coerce import finite_float
-from src.collection import tuning_profile
-from src.daemon.broadcast import Broadcaster
-from src.decode.accepted_baselines import load_accepted_baselines
-from src.decode.behavior_models import (
+from src.behavior.accepted_baselines import load_accepted_baselines
+from src.behavior.behavior_models import (
     diagnostic_only_models,
     load_behavior_models,
     unknown_operating_modes,
 )
+from src.coerce import finite_float
+from src.collection import tuning_profile
+from src.daemon.broadcast import Broadcaster
 from src.decode.bindings import load_bindings
 from src.decode.dbc import DEFAULT_DBC_DIR, load_dbc_dir
 from src.decode.dids import load_did_map
+from src.features.feature_pipeline import (
+    ALL_MODE,
+    DEFAULT_DIDS_PATH,
+)
+from src.features.live import LiveFeatureSource, build_prepared_live_tick
 from src.models.fusion import (
     FusionScorer,
     FusionSource,
 )
 from src.paths import BINDINGS_YAML as DEFAULT_BINDINGS_PATH
-from src.preprocessing.feature_pipeline import (
-    ALL_MODE,
-    DEFAULT_DIDS_PATH,
-)
-from src.preprocessing.live import LiveFeatureSource, build_prepared_live_tick
 from src.storage.async_writer import AsyncParquetTelemetryWriter
 from src.telemetry import TelemetryRecord, channel_of
 from src.timefmt import format_timestamp

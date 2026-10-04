@@ -439,7 +439,7 @@ def test_an_evaluator_refuses_to_run_without_a_profile() -> None:
 
 
 def test_the_live_source_hands_every_value_to_the_observer_before_the_quality_gate() -> None:
-    from src.preprocessing.live import LiveFeatureSource
+    from src.features.live import LiveFeatureSource
     from src.telemetry import TelemetryRecord
 
     config = example_config(REPO / "canary.example.yaml")
@@ -478,7 +478,7 @@ def test_plausibility_is_off_by_default_and_withheld_without_a_vehicle_file(
 ) -> None:
     from src.daemon.inference import _build_plausibility
     from src.daemon.inference_metrics import InferenceTimingRecorder
-    from src.preprocessing.live import LiveFeatureSource
+    from src.features.live import LiveFeatureSource
 
     assert example_config(REPO / "canary.example.yaml").plausibility.enabled is False
     recorder = InferenceTimingRecorder()
@@ -497,7 +497,7 @@ def test_plausibility_is_off_by_default_and_withheld_without_a_vehicle_file(
 def test_live_plausibility_records_cost_and_evidence_per_tick(tmp_path: Path) -> None:
     from src.daemon.inference import _build_plausibility
     from src.daemon.inference_metrics import InferenceTimingRecorder
-    from src.preprocessing.live import LiveFeatureSource
+    from src.features.live import LiveFeatureSource
     from src.telemetry import TelemetryRecord
 
     components = _live_components(tmp_path, enabled=True, with_profile=True)
@@ -755,7 +755,7 @@ def test_the_evaluation_script_grades_every_fault_and_names_no_ops(tmp_path: Pat
 def test_an_enabled_evaluator_with_a_broken_file_is_withheld_not_off(tmp_path: Path) -> None:
     from src.daemon.inference import _build_plausibility
     from src.daemon.inference_metrics import InferenceTimingRecorder
-    from src.preprocessing.live import LiveFeatureSource
+    from src.features.live import LiveFeatureSource
 
     components = _live_components(tmp_path, enabled=True, with_profile=True)
     (tmp_path / "vehicle" / PLAUSIBILITY_FILENAME).write_text("schema_version: [1\n  tiers: {")
@@ -775,7 +775,7 @@ def test_an_unexpected_start_failure_is_withheld_not_off(
     from src.daemon import plausibility_live
     from src.daemon.inference import _build_plausibility
     from src.daemon.inference_metrics import InferenceTimingRecorder
-    from src.preprocessing.live import LiveFeatureSource
+    from src.features.live import LiveFeatureSource
 
     def boom(*_args: Any, **_kwargs: Any) -> None:
         raise RuntimeError("catalog exploded")
@@ -791,8 +791,8 @@ def test_an_unexpected_start_failure_is_withheld_not_off(
 
 
 def test_offline_mode_labels_read_exactly_the_live_segmenter_columns() -> None:
+    from src.features.feature_pipeline import _SEGMENTER_SIGNAL_COLUMNS
     from src.plausibility.offline import segmenter_channels, segmenter_decoded
-    from src.preprocessing.feature_pipeline import _SEGMENTER_SIGNAL_COLUMNS
 
     expected: set[str] = set()
     for value in _SEGMENTER_SIGNAL_COLUMNS.values():

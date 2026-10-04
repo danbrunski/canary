@@ -6,6 +6,8 @@
 # live engine (tests/test_lstm_inference.py), so a serving change needs them.
 src/models/
 src/preprocessing/
+src/behavior/
+src/features/
 src/columns.py
 src/artifact_hash.py
 src/decode/on_read.py

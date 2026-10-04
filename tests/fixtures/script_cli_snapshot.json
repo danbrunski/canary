@@ -173,6 +173,58 @@
       }
     }
   },
+  "backfill_rolling_circumference.py": {
+    "options": {
+      "--config": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": "Path(canary.yaml)",
+        "dest": "config",
+        "nargs": null,
+        "option_strings": [
+          "--config"
+        ],
+        "required": false,
+        "type": "Path"
+      },
+      "--dry-run": {
+        "action": "_StoreTrueAction",
+        "choices": null,
+        "default": false,
+        "dest": "dry_run",
+        "nargs": 0,
+        "option_strings": [
+          "--dry-run"
+        ],
+        "required": false,
+        "type": null
+      },
+      "--force": {
+        "action": "_StoreTrueAction",
+        "choices": null,
+        "default": false,
+        "dest": "force",
+        "nargs": 0,
+        "option_strings": [
+          "--force"
+        ],
+        "required": false,
+        "type": null
+      },
+      "--profile": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": null,
+        "dest": "profile",
+        "nargs": null,
+        "option_strings": [
+          "--profile"
+        ],
+        "required": false,
+        "type": null
+      }
+    }
+  },
   "benchmark_live_pipeline.py": {
     "options": {
       "--bindings": {
@@ -3770,7 +3822,7 @@
       "--threshold": {
         "action": "_StoreAction",
         "choices": null,
-        "default": 2.0,
+        "default": 1.5,
         "dest": "threshold",
         "nargs": null,
         "option_strings": [

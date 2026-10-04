@@ -13,10 +13,10 @@ import pytest
 from scripts import _cli, retrain
 from src.config import CanaryConfig
 from src.decode.dids import load_repo_did_map
+from src.features.feature_pipeline import load_resampled_session
 from src.models import evaluation as model_evaluation
 from src.models import training_entry
 from src.models.feedback import FeedbackStore
-from src.preprocessing.feature_pipeline import load_resampled_session
 from tests.builders import IFConfig, write_fixture_session
 from tests.configs import example_config, retrain_argv
 from tests.repo_guard import RepoTreeGuard
@@ -862,9 +862,9 @@ def test_run_benchmark_gate_runs_the_evaluation_protocol_and_discovers_prior_bas
     (scripts/evaluate_detectors.py) in its own process, passes over a
     grid-era report by name, finds the newest comparable report, and a cell
     the baseline graded and this run did not is a regression."""
+    from src.features.feature_pipeline import featurize_wide_frame
     from src.models.benchmark_gate import PROTOCOL_NAME
     from src.models.isolation_forest import default_manifest_path, fit_isolation_forest
-    from src.preprocessing.feature_pipeline import featurize_wide_frame
 
     config = example_config(EXAMPLE_YAML)
     # A sequence detector disabled in config is not scored (the gate would

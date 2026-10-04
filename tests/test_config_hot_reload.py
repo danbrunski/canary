@@ -20,7 +20,7 @@ import yaml
 from src.config import CanaryConfig
 from src.daemon import polling
 from src.daemon.polling import poll_config
-from src.preprocessing.live import LiveFeatureSource
+from src.features.live import LiveFeatureSource
 from src.telemetry import TelemetryRecord
 from tests.configs import TEST_PROFILE, isolated_config, scoped_test_config
 

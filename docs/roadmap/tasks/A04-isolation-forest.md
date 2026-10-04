@@ -436,6 +436,26 @@ confirms which artifact the Pi runs.
     [Report](../../../data/analyses/2026-09-23-a06-3-retrain-evaluation.md).
   - **Remaining:** the Pi's per-tick IF cost at 600. `max_samples` and
     `max_features` are not swept.
+  - *`max_samples` × `max_features` swept 2026-10-03 (desk): neither
+    measurably moves seed agreement, so the sklearn defaults stand.*
+    - **Setup.** `seed_stability_sweep` takes `params` now (passed to every
+      fit; `test_seed_stability_sweep_passes_model_params_to_every_fit`). The
+      2026-09-23 candidate's city features (147), scaler and medians were
+      applied to its own city training sessions (563 complete rows) and to
+      held-out D6's city rows (400), at 600 trees.
+    - **Grid.** `max_samples` ∈ {auto (256), 128, 512, all} × `max_features`
+      ∈ {1.0, 0.75, 0.5}.
+    - **First pass,** top 2 % (8 rows), seeds 0–3: mean Jaccard 0.50–0.70.
+      With 8 flagged rows one row is ~0.1 of Jaccard, and the minimum sat at
+      5/11 almost everywhere, so this was too coarse to read.
+    - **Second pass,** top 5 % (20 rows), seeds 0–7: every setting gives
+      0.62–0.70 mean (0.43–0.54 min). The first pass's ordering did not
+      replicate: all-rows / all-features led at 0.70 there and trailed at
+      0.63 here.
+    - **Conclusion.** These spreads are seed noise, not an effect, so
+      `max_samples=auto` and `max_features=1.0` stay. Seed stability is
+      governed by the ensemble size (the table above), which is set (600).
+      Highway could not be swept: the candidate has no highway model.
 - [~] **A04.11 — Count exceedance episodes, not rows.** The rule of at least
   10 exceedances per calibration treats 1 Hz rows as independent, despite
   30 s rolling windows. On `134345` the warmup top 1 % was 4 rows forming 1

@@ -58,7 +58,7 @@ from src.analysis.dyno import (
 )
 from src.config import VehicleParameters
 from src.signals.committees import STANDARD_GRAVITY as G
-from src.vehicle.profiles import load_registry
+from src.vehicle.profiles import read_registry_file
 
 REPO = Path(__file__).resolve().parents[1]
 
@@ -1186,17 +1186,19 @@ def test_two_gear_fit_refuses_degenerate_pulls(driveline: Driveline) -> None:
 
 
 def test_xterra_profile_builds_a_driveline_with_estimated_inertia() -> None:
-    (xterra,) = [p for p in load_registry(REPO / "profiles.yaml") if p.slug == "nissan-xterra-2008"]
+    registry = read_registry_file(REPO / "profiles.yaml")
+    (xterra,) = [p for p in registry if p.slug == "nissan-xterra-2008"]
     profile = load_dyno_profile(REPO / "data" / "nissan-xterra-2008" / DYNO_FILENAME)
     assert profile is not None
     built = Driveline.from_vehicle(xterra.parameters, profile.inertia)
     assert isinstance(built, Driveline)
     assert built.inertia == "estimated"
-    # The file's own evidence: ~119 kg wheel side + ~62 kg engine side (η·I_e,
-    # η = 0.85 from the profile's drivetrain_loss_fraction) in 3rd.
+    # The file's own evidence: ~119 kg wheel side + ~65 kg engine side (η·I_e,
+    # η = 0.85 from the profile's drivetrain_loss_fraction) in 3rd, at the
+    # 2.559 m rolling circumference (H07.11; ~62 kg at the old 2.609 m).
     test_mass = xterra.parameters.mass_kg + (xterra.parameters.usual_payload_kg or 0.0)
     rotating = built.effective_mass(test_mass, 3) - test_mass
-    assert rotating == pytest.approx(181.0, abs=2.0)
+    assert rotating == pytest.approx(184.0, abs=2.0)
 
 
 # ---------------------------------------------------------------------------

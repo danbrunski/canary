@@ -25,7 +25,7 @@ from src.vehicle.vehicle_ledger import VehicleLedgerStore
 if TYPE_CHECKING:
     # Annotation only: it loads the feature pipeline, and this module is on
     # the daemon's path to recording (S01.3).
-    from src.preprocessing.live import LiveFeatureSource
+    from src.features.live import LiveFeatureSource
 
 log = logging.getLogger(__name__)
 

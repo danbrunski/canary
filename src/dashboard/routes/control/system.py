@@ -73,7 +73,7 @@ def build_router(ctx: ControlContext) -> APIRouter:
         # The active profile's slug is the scoped storage path's final component
         # (see src.vehicle.profiles.scope_config).
         active_slug = config.collection.storage_path.name
-        profiles = load_registry(config.profiles.registry_path)
+        profiles = load_registry(config.profiles)
         return {
             "profiles": [profile.to_dict() for profile in profiles],
             "active_slug": active_slug,
@@ -86,7 +86,7 @@ def build_router(ctx: ControlContext) -> APIRouter:
         request: ProfileNameUpdateRequest,
     ) -> dict[str, Any]:
         try:
-            profile = update_profile_name(config.profiles.registry_path, slug, request.name)
+            profile = update_profile_name(config.profiles, slug, request.name)
         except KeyError as exc:
             raise HTTPException(status_code=404, detail=f"no profile with slug {slug!r}") from exc
         payload = {"profile": profile.to_dict()}

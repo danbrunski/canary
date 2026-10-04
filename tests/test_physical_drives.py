@@ -19,11 +19,11 @@ import pytest
 from scripts.evaluate_detectors import record_seen
 from src.analysis.behavior_validation import group_drives, piece_time_ranges
 from src.config import CanaryConfig
+from src.features.feature_pipeline import build_feature_frame
 from src.models.evaluation import drives_of_sessions, holdout_by_drive
 from src.models.isolation_forest import _drive_count
 from src.models.sequence_training import choose_validation_sessions
 from src.preprocessing.drives import DRIVE_COLUMN, count_drives, physical_drives, piece_units
-from src.preprocessing.feature_pipeline import build_feature_frame
 from src.storage.parquet_writer import write_records_to_parquet
 from src.telemetry import TelemetryRecord
 from tests.configs import example_config

@@ -48,15 +48,16 @@ from typing import Any
 import pandas as pd
 
 from src.can_ids import parse_can_channel
+from src.decode.on_read import on_read_catalog
 from src.decode.slices import sentinel_channel
 from src.paths import DATA_DIR
 from src.preprocessing.derived import CELL_COLUMNS, ReducedSession, grid_interval_ns
-from src.preprocessing.feature_cache import _session_cache_entry
 from src.preprocessing.loader import SESSION_PART_ROWS
 from src.preprocessing.resampler import ResampleConfig
+from src.preprocessing.session_decode import reduce_session
 from src.signals.fsm import PHYSICAL_LIMITS
 from src.storage.broadcast_storage import refuse_shorter_read_timeout, session_can_storage
-from src.storage.session_files import PARQUET_PATTERN
+from src.storage.session_files import PARQUET_PATTERN, session_files_fingerprint
 from src.telemetry import DBC_SOURCE, DECODED_SOURCE, SOURCE_SEP
 
 log = logging.getLogger(__name__)
@@ -310,7 +311,6 @@ class DerivedStore:
         rebuilds it, naming the cause) and the session's IMU frame
         (``imu_frame.json``, H02.4).
         """
-        from src.decode.on_read import on_read_catalog
         from src.preprocessing.decode import on_read_hash
         from src.preprocessing.derived import reduce_numeric_session
         from src.preprocessing.imu_stream import plan_imu_frame
@@ -396,7 +396,6 @@ class DerivedStore:
         part_rows: int,
     ) -> tuple[ReducedSession, dict[str, Any]]:
         refuse_on_the_pi()
-        from src.preprocessing.feature_pipeline import reduce_session
 
         raw_pairs: set[tuple[str, str]] = set()
         reduced = reduce_session(
@@ -441,7 +440,6 @@ class DerivedStore:
         part_rows: int,
     ) -> tuple[ReducedSession, dict[str, Any], int]:
         refuse_on_the_pi()
-        from src.preprocessing.feature_pipeline import reduce_session
 
         dropped: set[str] = set()
         for uid in [*gone, *(u.uid for u in changed)]:
@@ -500,7 +498,7 @@ class DerivedStore:
 def _expected_units(decoders: DecodeInputs, raw_pairs: Iterable[Sequence[str]]) -> dict[str, _Unit]:
     """The decode units that produce this session's channels under ``decoders``.
 
-    Mirrors ``_decode_long_frame``: raw CAN rows never become channels; a
+    Mirrors ``session_decode.decode_long_frame``: raw CAN rows never become channels; a
     binding (or DID entry) makes its channel from the CAN (or ``DID_<hex>``)
     rows it reads *and* from any stored rows of that channel; every other
     recorded channel passes through as itself. That chain reads sessions as
@@ -715,7 +713,7 @@ def _numeric_staleness(
 
 
 def _source_entry(session_dir: Path) -> dict[str, Any]:
-    entry = _session_cache_entry(session_dir)
+    entry = session_files_fingerprint(session_dir)
     # The chunk list is what matters; the directory's own path is the frame
     # directory's key already.
     return {"files": entry.get("files", []), "pattern": PARQUET_PATTERN}

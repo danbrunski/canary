@@ -77,6 +77,7 @@ from src.analysis.digest import (
     REASON_CHILD_TIMED_OUT,
     REASON_INTERRUPTED_AT_SHUTDOWN,
     REASON_NO_SPEED_SOURCE,
+    REASON_NOT_A_SESSION,
     SKIP_SCHEMA_VERSION,
     DigestBudgets,
     DigestSkipped,
@@ -86,11 +87,20 @@ from src.analysis.digest import (
     digest_preflight,
     get_or_compute_digest,
     persist_digest,
+    stale_tuning_version,
+    tuning_section,
     write_digest_skipped,
+    write_refreshed_tuning,
 )
+from src.analysis.rolling_circumference import measure_session, write_rolling_circumference
 from src.config import CanaryConfig
 from src.control import child_pool
-from src.storage.session_products import read_digest, read_digest_skipped
+from src.storage.session_products import (
+    read_digest,
+    read_digest_skipped,
+    read_rolling_circumference,
+)
+from src.storage.sessions import is_session_dir_name
 from src.timefmt import format_timestamp
 
 if TYPE_CHECKING:
@@ -156,6 +166,30 @@ def compute_digest_under_limit(
     return compute_digest(session_dir, config, now=now)
 
 
+def tuning_section_under_limit(
+    session_dir: Path, config: CanaryConfig, *, address_space_bytes: int | None = None
+) -> dict[str, Any] | None:
+    """The tuning refresh's child entry point (R05.16): cap, then compute
+    only the digest's tuning section, which reads nothing but the session."""
+    if address_space_bytes is not None:
+        limit_address_space(address_space_bytes)
+    return tuning_section(session_dir, config)
+
+
+def measure_tyres_under_limit(
+    session_dir: Path, config: CanaryConfig, *, address_space_bytes: int | None = None
+) -> dict[str, Any]:
+    """The tyre measurement's child entry point (D03.35): cap, then measure.
+
+    Runs only when the digest was refused; a digest that runs measures the
+    tyres in its own child. Two channels, so it fits any drive the digest's
+    budgets refuse.
+    """
+    if address_space_bytes is not None:
+        limit_address_space(address_space_bytes)
+    return measure_session(session_dir, config)
+
+
 async def compute_digest_off_loop(
     session_dir: Path,
     config: CanaryConfig,
@@ -189,6 +223,23 @@ async def compute_digest_off_loop(
         now=now,
         address_space_bytes=ceiling,
     )
+    digest: SessionDigest = await _in_digest_child(
+        call, session_dir, executor=executor, timeout=timeout, what="digest"
+    )
+    return digest
+
+
+async def _in_digest_child(
+    call: Any,
+    session_dir: Path,
+    *,
+    executor: Executor | None,
+    timeout: float,
+    what: str,
+) -> Any:
+    """Run ``call`` in a single-use ``spawn`` child (or ``executor``), bounded
+    by ``timeout``. The digest and its tuning refresh share it, so both
+    fail the same named ways (:class:`TripEndDigestUnavailableError`)."""
     owned = executor is None
     pool: Executor = _spawn_pool() if executor is None else executor
     finished = False
@@ -198,22 +249,22 @@ async def compute_digest_off_loop(
         except Exception as exc:
             raise TripEndDigestUnavailableError(
                 REASON_CHILD_FAILED,
-                f"digest for {session_dir.name} could not start: {type(exc).__name__}: {exc}",
+                f"{what} for {session_dir.name} could not start: {type(exc).__name__}: {exc}",
             ) from exc
         try:
-            digest = await asyncio.wait_for(future, timeout)
+            result = await asyncio.wait_for(future, timeout)
         except TimeoutError as exc:
             raise TripEndDigestUnavailableError(
                 REASON_CHILD_TIMED_OUT,
-                f"digest for {session_dir.name} did not finish within {timeout:.0f}s",
+                f"{what} for {session_dir.name} did not finish within {timeout:.0f}s",
             ) from exc
         except BrokenExecutor as exc:
             raise TripEndDigestUnavailableError(
                 REASON_CHILD_FAILED,
-                f"digest process for {session_dir.name} failed: {type(exc).__name__}: {exc}",
+                f"{what} process for {session_dir.name} failed: {type(exc).__name__}: {exc}",
             ) from exc
         finished = True
-        return digest
+        return result
     finally:
         if owned:
             _discard_pool(pool, terminate=not finished)
@@ -336,6 +387,8 @@ async def handle_trip_end_off_loop(  # noqa: PLR0913
     skipped = digest_preflight(session_dir, config, now=now)
     if skipped is not None:
         write_digest_skipped(session_dir, skipped)
+        if skipped.reason != REASON_NOT_A_SESSION:
+            await _measure_tyres_off_loop(session_dir, config, executor=executor, timeout=timeout)
         return None
 
     if current_task is not None:
@@ -417,6 +470,39 @@ async def handle_trip_end_off_loop(  # noqa: PLR0913
     return payload
 
 
+async def _measure_tyres_off_loop(
+    session_dir: Path,
+    config: CanaryConfig,
+    *,
+    executor: Executor | None,
+    timeout: float,
+) -> None:
+    """Measure a digest-refused drive's tyres in a child; never raises.
+
+    A refused digest used to mean no tyre measurement either, and the drives
+    the digest refuses are the long ones (17 on the Pi by 2026-10-04, the two
+    reference drives among them). A sidecar already present is kept.
+    """
+    if read_rolling_circumference(session_dir) is not None:
+        return
+    call = functools.partial(
+        measure_tyres_under_limit,
+        session_dir,
+        config,
+        address_space_bytes=digest_address_space_bytes(config),
+    )
+    try:
+        block = await _in_digest_child(
+            call, session_dir, executor=executor, timeout=timeout, what="tyre measurement"
+        )
+    except asyncio.CancelledError:
+        raise
+    except Exception:  # noqa: BLE001 — a report, not a gate; MemoryError included
+        log.warning("tyre measurement for %s failed", session_dir.name, exc_info=True)
+        return
+    write_rolling_circumference(session_dir, block)
+
+
 def _child_failure(
     session_dir: Path,
     config: CanaryConfig,
@@ -467,7 +553,6 @@ def record_trip_end_unobservable(
     directory that is not a session (replay output describes no drive).
     Returns what it wrote, or ``None``.
     """
-    from src.storage.sessions import is_session_dir_name
 
     if not is_session_dir_name(session_dir.name) or not session_dir.is_dir():
         return None
@@ -526,6 +611,8 @@ def handle_trip_end(
 
 
 __all__ = [
+    "refresh_stale_tuning_off_loop",
+    "tuning_section_under_limit",
     "DIGEST_TIMEOUT_SECONDS",
     "TripEndDigestUnavailableError",
     "compute_digest_off_loop",
@@ -537,3 +624,86 @@ __all__ = [
     "record_trip_end_unobservable",
     "trip_block",
 ]
+
+
+#: Sessions whose stale tuning section is being refreshed (single flight:
+#: a second reader gets the stored digest and a ``running`` note).
+_TUNING_IN_FLIGHT: set[Path] = set()
+
+
+async def refresh_stale_tuning_off_loop(
+    session_dir: Path,
+    config: CanaryConfig,
+    payload: dict[str, Any],
+    *,
+    catalog_db: Path | None = None,
+    executor: Executor | None = None,
+    timeout: float = DIGEST_TIMEOUT_SECONDS,
+    now: datetime | None = None,
+) -> tuple[dict[str, Any], dict[str, Any] | None]:
+    """Serve ``payload`` with a stale tuning section recomputed (R05.16).
+
+    Returns ``(digest, note)``. ``note`` is ``None`` when the section was
+    current or has just been refreshed and written. Otherwise it says why the
+    stored, stale section is what was served:
+    - ``deferred``: a capture is recording, and analysis never competes with
+      one (the workbench's ``capture_deferral``);
+    - ``running``: another request is already refreshing it;
+    - ``failed``: the child could not finish, and why.
+
+    The stored digest is never rewritten on a failure, and a stale section
+    is never served as if it were current.
+    """
+    from src.analysis.tuning_digest import TUNING_SCHEMA_VERSION
+    from src.collection import tuning_profile
+
+    from_version = stale_tuning_version(payload)
+    if from_version is None:
+        return payload, None
+    note = {
+        "stored_schema_version": from_version,
+        "current_schema_version": TUNING_SCHEMA_VERSION,
+    }
+    if tuning_profile.is_active():
+        return payload, {
+            **note,
+            "status": "deferred",
+            "reason": "capture_active",
+            "profile": tuning_profile.active_profile().name,
+        }
+    if session_dir in _TUNING_IN_FLIGHT:
+        return payload, {**note, "status": "running"}
+    _TUNING_IN_FLIGHT.add(session_dir)
+    try:
+        call = functools.partial(
+            tuning_section_under_limit,
+            session_dir,
+            config,
+            address_space_bytes=digest_address_space_bytes(config),
+        )
+        try:
+            section = await _in_digest_child(
+                call, session_dir, executor=executor, timeout=timeout, what="tuning refresh"
+            )
+        except TripEndDigestUnavailableError as exc:
+            return payload, {**note, "status": "failed", "reason": exc.reason, "detail": str(exc)}
+        except MemoryError:
+            return payload, {
+                **note,
+                "status": "failed",
+                "reason": REASON_CHILD_OUT_OF_MEMORY,
+                "detail": f"tuning refresh exceeded its "
+                f"{digest_address_space_bytes(config) // _MIB} MiB address-space ceiling",
+            }
+        written = await asyncio.to_thread(
+            write_refreshed_tuning,
+            session_dir,
+            payload,
+            section,
+            from_version=from_version,
+            now=now,
+            catalog_db=catalog_db,
+        )
+    finally:
+        _TUNING_IN_FLIGHT.discard(session_dir)
+    return (payload if written is None else written), None

@@ -44,6 +44,23 @@ def read_digest_skipped(session_dir: Path) -> dict[str, Any] | None:
 
 
 # --------------------------------------------------------------------------- #
+# Rolling circumference (analysis.rolling_circumference)
+# --------------------------------------------------------------------------- #
+
+#: The driven tyres' rolling circumference over one drive, or why there is
+#: none (D03.35). Its own product, not a digest field: a drive refused a digest
+#: (a capture over the row budget, or one recorded before P02.1 lifted the row
+#: budget from ordinary drives) still has steady cruise to measure, and those
+#: long drives are the measurement's best input.
+ROLLING_CIRCUMFERENCE_FILENAME = "rolling_circumference.json"
+
+
+def read_rolling_circumference(session_dir: Path) -> dict[str, Any] | None:
+    """Load the sidecar dict, or ``None`` if absent / unreadable."""
+    return read_json_object(session_dir / ROLLING_CIRCUMFERENCE_FILENAME)
+
+
+# --------------------------------------------------------------------------- #
 # Fingerprint (analysis.fingerprint)
 # --------------------------------------------------------------------------- #
 
@@ -224,6 +241,7 @@ __all__ = [
     "DIGEST_SKIPPED_FILENAME",
     "FINGERPRINT_FILENAME",
     "FINGERPRINT_SCHEMA_VERSION",
+    "ROLLING_CIRCUMFERENCE_FILENAME",
     "DetectedEvent",
     "Disposition",
     "ModeSegment",
@@ -233,4 +251,5 @@ __all__ = [
     "read_digest",
     "read_digest_skipped",
     "read_fingerprint",
+    "read_rolling_circumference",
 ]

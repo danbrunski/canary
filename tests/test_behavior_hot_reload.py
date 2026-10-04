@@ -13,15 +13,15 @@ from pathlib import Path
 
 import pytest
 
-from src.daemon import poll_behavior_models
-from src.decode.behavior_models import (
+from src.behavior.behavior_models import (
     Axis1D,
     BehaviorModel1D,
     BehaviorModels,
     PolynomialFit,
     dump_behavior_models,
 )
-from src.preprocessing.live import LiveFeatureSource
+from src.daemon import poll_behavior_models
+from src.features.live import LiveFeatureSource
 from tests.configs import example_config
 
 
@@ -126,8 +126,8 @@ async def test_hot_reloaded_cold_start_contract_cannot_qualify_mid_drive(tmp_pat
     daemon restart."""
     from datetime import UTC, datetime, timedelta
 
-    from src.decode.behavior_decoder import deviation
-    from src.decode.behavior_models import (
+    from src.behavior.behavior_decoder import deviation
+    from src.behavior.behavior_models import (
         CURRENT_SCHEMA_VERSION,
         ColdStartRequirement,
         EngineStateRequirement,

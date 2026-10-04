@@ -5,11 +5,12 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+import yaml
 from fastapi.testclient import TestClient
 
 import src.vehicle.profiles as profiles_mod
 from src.collection.vehicle_probe import probe_vehicle_info
-from src.config import CanaryConfig, DaemonConfig
+from src.config import CanaryConfig, DaemonConfig, ProfilesConfig, VehicleParameters
 from src.dashboard.api import create_app
 from src.paths import CONTROL_DIR
 from src.vehicle.profiles import (
@@ -36,7 +37,10 @@ def _base_config(tmp_path: Path, *, obd_source: str = "disabled") -> CanaryConfi
         update={
             "collection": config.collection.model_copy(update={"obd_source": obd_source}),
             "profiles": config.profiles.model_copy(
-                update={"registry_path": tmp_path / "profiles.yaml"}
+                update={
+                    "registry_path": tmp_path / "profiles.yaml",
+                    "registry_overlay_path": tmp_path / "profiles.overlay.yaml",
+                }
             ),
         }
     )
@@ -49,28 +53,73 @@ def test_slugify_is_filesystem_safe():
     assert slugify("") == "vehicle"
 
 
+def _registry(tmp_path: Path) -> ProfilesConfig:
+    return ProfilesConfig(
+        registry_path=tmp_path / "profiles.yaml",
+        registry_overlay_path=tmp_path / "state" / "profiles.yaml",
+    )
+
+
 def test_registry_roundtrip(tmp_path: Path):
-    path = tmp_path / "profiles.yaml"
-    assert load_registry(path) == []  # missing file → empty
+    registry = _registry(tmp_path)
+    assert load_registry(registry) == []  # missing files → empty
     profiles = [
         VehicleProfile(slug="nissan-xterra-2008", vin="VIN123", name="2008 Xterra", year=2008),
         VehicleProfile(slug="vin999", vin="VIN999", name=""),
     ]
-    save_registry(path, profiles)
-    loaded = load_registry(path)
+    save_registry(registry, profiles)
+    loaded = load_registry(registry)
     assert [p.slug for p in loaded] == ["nissan-xterra-2008", "vin999"]
     assert loaded[0].name == "2008 Xterra"
     assert loaded[0].year == 2008
 
 
 def test_update_profile_name(tmp_path: Path):
-    path = tmp_path / "profiles.yaml"
-    save_registry(path, [VehicleProfile(slug="vin999", vin="VIN999", name="")])
-    updated = update_profile_name(path, "vin999", "  Daily Driver  ")
+    registry = _registry(tmp_path)
+    save_registry(registry, [VehicleProfile(slug="vin999", vin="VIN999", name="")])
+    updated = update_profile_name(registry, "vin999", "  Daily Driver  ")
     assert updated.name == "Daily Driver"  # trimmed
-    assert load_registry(path)[0].name == "Daily Driver"
+    assert load_registry(registry)[0].name == "Daily Driver"
     with pytest.raises(KeyError):
-        update_profile_name(path, "missing", "x")
+        update_profile_name(registry, "missing", "x")
+
+
+def _write_tracked(registry: ProfilesConfig, *profiles: VehicleProfile) -> None:
+    registry.registry_path.write_text(
+        yaml.safe_dump({"schema_version": 1, "profiles": [p.to_dict() for p in profiles]})
+    )
+
+
+def test_runtime_writes_never_touch_the_tracked_registry(tmp_path: Path):
+    """S03.2: the Pi's rename lands in the overlay; the tracked file is untouched."""
+    registry = _registry(tmp_path)
+    _write_tracked(registry, VehicleProfile(slug="xterra", vin="", name="Xterra", year=2008))
+    tracked_before = registry.registry_path.read_text()
+    update_profile_name(registry, "xterra", "The Truck")
+    assert registry.registry_path.read_text() == tracked_before
+    overlay = yaml.safe_load(registry.registry_overlay_path.read_text())
+    assert overlay["profiles"] == [{"slug": "xterra", "name": "The Truck"}]
+
+
+def test_a_later_laptop_edit_to_parameters_still_reaches_the_pi(tmp_path: Path):
+    """The overlay stores only what this machine changed, so the tracked file's
+    other fields keep flowing (operator decision 2026-10-04)."""
+    registry = _registry(tmp_path)
+    _write_tracked(registry, VehicleProfile(slug="xterra", vin="", name="Xterra", year=2008))
+    update_profile_name(registry, "xterra", "The Truck")
+    _write_tracked(  # the laptop commits a weighed mass
+        registry,
+        VehicleProfile(
+            slug="xterra",
+            vin="",
+            name="Xterra",
+            year=2008,
+            parameters=VehicleParameters(mass_kg=2200.0),
+        ),
+    )
+    (merged,) = load_registry(registry)
+    assert merged.name == "The Truck"
+    assert merged.parameters.mass_kg == 2200.0
 
 
 def test_read_vin_noop_when_not_canable(tmp_path: Path):
@@ -296,7 +345,7 @@ def test_resolve_falls_back_to_default_and_registers(tmp_path: Path):
     )
     assert profile.name  # default gets the "year make model" label
     # Persisted so the dashboard can list/rename it.
-    registered = load_registry(config.profiles.registry_path)
+    registered = load_registry(config.profiles)
     assert any(p.slug == profile.slug for p in registered)
 
 
@@ -313,7 +362,7 @@ def _must_not_probe(_config: CanaryConfig) -> VehicleInfoProbe:
 def test_resolve_override_returns_registry_entry(tmp_path: Path):
     config = _base_config(tmp_path)
     save_registry(
-        config.profiles.registry_path,
+        config.profiles,
         [VehicleProfile(slug="work-truck", vin="VINWORK", name="Work Truck")],
     )
     profile = resolve_active_profile(config, probe=_must_not_probe, override_slug="work-truck")
@@ -324,7 +373,7 @@ def test_resolve_override_unknown_slug_synthesizes(tmp_path: Path):
     config = _base_config(tmp_path)
     profile = resolve_active_profile(config, probe=_must_not_probe, override_slug="brand-new")
     assert profile.slug == "brand-new"
-    assert any(p.slug == "brand-new" for p in load_registry(config.profiles.registry_path))
+    assert any(p.slug == "brand-new" for p in load_registry(config.profiles))
 
 
 def test_resolve_disabled_does_not_write(tmp_path: Path):
@@ -352,14 +401,14 @@ def test_resolve_persists_calibration_id_and_cvn_on_first_probe(tmp_path: Path):
     the registry alongside its VIN."""
     config = _base_config_with_ledger(tmp_path)
     save_registry(
-        config.profiles.registry_path,
+        config.profiles,
         [VehicleProfile(slug="work-truck", vin="VINWORK", name="Work Truck")],
     )
     probe = VehicleInfoProbe(vin="VINWORK", calibration_id="CAL0001", cvn="CVN0001")
     profile = resolve_active_profile(config, probe=lambda _config: probe)
     assert profile.calibration_id == "CAL0001"
     assert profile.cvn == "CVN0001"
-    reloaded = {p.slug: p for p in load_registry(config.profiles.registry_path)}
+    reloaded = {p.slug: p for p in load_registry(config.profiles)}
     assert reloaded["work-truck"].calibration_id == "CAL0001"
     # First-ever read: a baseline, not a reflash — no ledger entry.
     assert (
@@ -375,7 +424,7 @@ def test_resolve_flags_a_changed_calibration_id_as_a_corpus_boundary(tmp_path: P
     one is an ECU reflash: a `corpus_boundary` vehicle-ledger event."""
     config = _base_config_with_ledger(tmp_path)
     save_registry(
-        config.profiles.registry_path,
+        config.profiles,
         [
             VehicleProfile(
                 slug="work-truck",
@@ -404,7 +453,7 @@ def test_resolve_flags_a_changed_calibration_id_as_a_corpus_boundary(tmp_path: P
 def test_resolve_unchanged_calibration_id_does_not_flag_a_boundary(tmp_path: Path):
     config = _base_config_with_ledger(tmp_path)
     save_registry(
-        config.profiles.registry_path,
+        config.profiles,
         [
             VehicleProfile(
                 slug="work-truck", vin="VINWORK", name="Work Truck", calibration_id="CAL0001"
@@ -483,10 +532,12 @@ def test_scope_config_covers_every_daemon_path_field(tmp_path: Path):
     profile = VehicleProfile(slug="xterra", vin="VIN42", name="X")
     scoped = scope_config(config, profile)
 
+    # ``state_dir`` is the machine's state root, shared by every vehicle: the
+    # per-vehicle paths are derived from it and scoped (S03.1).
     path_fields = [
         name
         for name, f in DaemonConfig.model_fields.items()
-        if f.annotation is Path or f.annotation == Path | None
+        if (f.annotation is Path or f.annotation == Path | None) and name != "state_dir"
     ]
     assert path_fields  # sanity: DaemonConfig still has Path fields to check
     for name in path_fields:
@@ -513,7 +564,7 @@ def _api(tmp_path: Path) -> tuple[TestClient, CanaryConfig]:
         update={"collection": config.collection.model_copy(update={"storage_path": storage})}
     )
     save_registry(
-        config.profiles.registry_path,
+        config.profiles,
         [
             VehicleProfile(slug="nissan-xterra-2008", vin="VINX", name=""),
             VehicleProfile(slug="work-truck", vin="VINW", name="Work Truck"),
@@ -545,7 +596,7 @@ def test_post_profile_name_persists(tmp_path: Path):
     )
     assert resp.status_code == 200
     assert resp.json()["profile"]["name"] == "2008 Xterra"
-    persisted = {p.slug: p.name for p in load_registry(config.profiles.registry_path)}
+    persisted = {p.slug: p.name for p in load_registry(config.profiles)}
     assert persisted["nissan-xterra-2008"] == "2008 Xterra"
 
 

@@ -23,7 +23,7 @@ catalog bound that is wrong is fixed in the catalog.
 ``mem:`` values arrive scaled (raw counts when their scale is unpinned, and
 their bounds are then stated in counts too, as the catalog already does);
 ``decoded:`` values arrive as the binding's **raw integer** (see
-``src.preprocessing.live``), so their engineering bounds are converted to raw
+``src.features.live``), so their engineering bounds are converted to raw
 here, and ``plausibility.yaml`` states decoded limits in engineering units
 too. A decoded channel with no pinned scale cannot take an engineering limit
 and is refused rather than guessed.

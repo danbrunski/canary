@@ -8,7 +8,7 @@ import pytest
 import yaml
 from pydantic import ValidationError
 
-from src.decode.behavior_models import (
+from src.behavior.behavior_models import (
     Axis1D,
     Axis2D,
     BehaviorModel1D,
@@ -317,7 +317,7 @@ def test_yaml_round_trip(tmp_path: Path) -> None:
 
 def test_yaml_round_trip_preserves_serving_contract(tmp_path: Path) -> None:
     """B01.6 — a schema-2 contract survives dump/load exactly."""
-    from src.decode.behavior_models import (
+    from src.behavior.behavior_models import (
         CURRENT_SCHEMA_VERSION,
         ColdStartRequirement,
         EngineStateRequirement,
@@ -348,7 +348,7 @@ def test_yaml_round_trip_preserves_serving_contract(tmp_path: Path) -> None:
 
 
 def test_fuel_control_rejects_non_j1979_states() -> None:
-    from src.decode.behavior_models import FuelControlRequirement
+    from src.behavior.behavior_models import FuelControlRequirement
 
     with pytest.raises(ValidationError, match="J1979"):
         FuelControlRequirement(allowed_states=[3])
@@ -358,7 +358,7 @@ def test_shipped_artifact_loads_diagnostic_only() -> None:
     """B01.6/B03.9 — no shipped model is a trusted alert source until one passes
     B02, and every one says why (the 2026-09-23 current-calibration refresh was
     promoted diagnostic-only: all ten refits failed validation)."""
-    from src.decode.behavior_models import diagnostic_only_models
+    from src.behavior.behavior_models import diagnostic_only_models
 
     path = Path(__file__).resolve().parents[1] / "data/nissan-xterra-2008/behavior_models.yaml"
     models = load_behavior_models(path)
@@ -473,7 +473,7 @@ def test_flatten_grid_rejects_empty() -> None:
 def test_unknown_operating_modes_flags_unservable_models() -> None:
     """A catalog model gated on a mode the segmenter can't emit silently
     never evaluates — the loader-side check makes that loud."""
-    from src.decode.behavior_models import unknown_operating_modes
+    from src.behavior.behavior_models import unknown_operating_modes
 
     models = BehaviorModels(
         schema_version=1,

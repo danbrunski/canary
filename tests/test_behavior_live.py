@@ -16,6 +16,19 @@ import pandas as pd
 import pytest
 from fastapi.testclient import TestClient
 
+from src.behavior.accepted_baselines import (
+    AcceptedBaselineOverride,
+    AcceptedBaselines,
+    DirectionalBand,
+    Provenance,
+)
+from src.behavior.behavior_models import (
+    Axis1D,
+    BehaviorModel1D,
+    BehaviorModels,
+    DeviationConfig,
+    PolynomialFit,
+)
 from src.config import CanaryConfig
 from src.daemon import _observe_behavior
 from src.daemon.behavior_live import (
@@ -24,19 +37,6 @@ from src.daemon.behavior_live import (
     BehaviorObservation,
 )
 from src.dashboard.api import create_app
-from src.decode.accepted_baselines import (
-    AcceptedBaselineOverride,
-    AcceptedBaselines,
-    DirectionalBand,
-    Provenance,
-)
-from src.decode.behavior_models import (
-    Axis1D,
-    BehaviorModel1D,
-    BehaviorModels,
-    DeviationConfig,
-    PolynomialFit,
-)
 
 
 def _cfg_yaml(storage: Path) -> str:

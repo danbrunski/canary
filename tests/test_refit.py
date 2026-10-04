@@ -14,13 +14,13 @@ from src.analysis.refit import (
     fit_recipe,
     refit_all,
 )
-from src.columns import MODE_COLUMN, SESSION_COLUMN
-from src.decode.behavior_models import (
+from src.behavior.behavior_models import (
     BehaviorModel1D,
     BehaviorModel2D,
     BehaviorModels,
     DeviationConfig,
 )
+from src.columns import MODE_COLUMN, SESSION_COLUMN
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -319,7 +319,7 @@ def test_fit_recipe_swallows_internal_fitter_exceptions() -> None:
 
 def _existing_model(name: str, version: int) -> BehaviorModel1D:
     """A minimal prior model with the right name + version for the carry-over tests."""
-    from src.decode.behavior_models import Axis1D, PolynomialFit
+    from src.behavior.behavior_models import Axis1D, PolynomialFit
 
     return BehaviorModel1D(
         name=name,

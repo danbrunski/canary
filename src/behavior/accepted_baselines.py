@@ -9,7 +9,7 @@ provenance (who/when/why) and a ``review_by`` date so an accepted fault
 can't quietly age into masking a *second*, newly-failing one.
 
 Loaded the same strict-Pydantic way as ``behavior_models.yaml``
-(``src.decode.behavior_models``), but **profile-scoped** — every override is
+(``src.behavior.behavior_models``), but **profile-scoped** — every override is
 a this-vehicle fact (a second vehicle profile must never inherit the
 Xterra's weak-injector override), so the path is resolved through
 ``src.vehicle.profiles.scope_config`` under the active vehicle's data tree, never a
@@ -25,7 +25,7 @@ there an active override for this (channel, mode)?" for the Phase 1
 disposition classifier (``src.analysis.training_disposition``) and, as of
 Phase 2 (:meth:`AcceptedBaselineOverride.to_deviation_config`), converts an
 override into the runtime directional ``DeviationConfig`` variant
-(``src.decode.behavior_models``) that ``src.decode.behavior_decoder``
+(``src.behavior.behavior_models``) that ``src.behavior.behavior_decoder``
 actually grades live deviations against — one severity-grading
 implementation shared by statically-authored directional models and
 dynamically-applied overrides alike.
@@ -40,7 +40,7 @@ from typing import Literal
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from src.decode.behavior_models import DeviationConfig
+from src.behavior.behavior_models import DeviationConfig
 from src.paths import DATA_DIR
 
 #: Default (unscoped) location — always resolve the real path through
@@ -162,7 +162,7 @@ class AcceptedBaselineOverride(_Strict):
         only the one-sided band. A ``channel`` target always carries
         ``accepted_center`` (schema-enforced at construction) and it is
         included here — there's no fitted surface to read a center from,
-        so the caller (``src.decode.behavior_decoder``) grades directly
+        so the caller (``src.behavior.behavior_decoder``) grades directly
         against this fixed number.
         """
         return DeviationConfig(

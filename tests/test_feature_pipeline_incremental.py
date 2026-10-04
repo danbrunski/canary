@@ -14,18 +14,13 @@ import numpy as np
 import pandas as pd
 import pytest
 
+from src.behavior.behavior_models import load_behavior_models
 from src.columns import TIMESTAMP_COLUMN
 from src.config import CanaryConfig
-from src.decode.behavior_models import load_behavior_models
 from src.decode.bindings import load_bindings
 from src.decode.dids import load_repo_did_map
-from src.preprocessing import feature_pipeline
-from src.preprocessing.anomaly_injection import (
-    REALISTIC_FAULTS,
-    inject_realistic_fault,
-    load_fault_channel_roles,
-)
-from src.preprocessing.feature_pipeline import (
+from src.features import feature_pipeline
+from src.features.feature_pipeline import (
     _append_derived_channels,
     _column_root,
     _derived_ancestors,
@@ -34,6 +29,11 @@ from src.preprocessing.feature_pipeline import (
     featurize_perturbed_frame,
     featurize_wide_frame,
     load_resampled_session,
+)
+from src.preprocessing.anomaly_injection import (
+    REALISTIC_FAULTS,
+    inject_realistic_fault,
+    load_fault_channel_roles,
 )
 from src.signals.committees import committee_channel_reason
 from tests.configs import example_config
@@ -256,7 +256,7 @@ def test_every_derived_channel_reads_only_its_declared_inputs(
 def test_every_behavior_model_reads_only_the_channels_it_names(
     config: CanaryConfig, inputs: dict[str, object]
 ) -> None:
-    from src.decode.behavior_decoder import append_deviation_columns
+    from src.behavior.behavior_decoder import append_deviation_columns
 
     frame: pd.DataFrame = inputs["frame"]  # type: ignore[assignment]
     behavior = inputs["behavior"]

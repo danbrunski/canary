@@ -1046,6 +1046,48 @@ code:
   section identifiable but not refreshed; a refresh belongs to
   `src/control/trip_end.py` / the digest route.
 
+  *(2) done 2026-10-03; (1), the deploy, is still the operator's.*
+  - **Scope: only the tuning section.** A06.5 rules out recomputing a whole
+    digest late, because its anomaly window would end at "now". The tuning
+    section reads nothing but the session (`_tuning_section`), so it alone
+    is recomputed and everything else stays as written at trip end.
+  - **Stale** (`digest.stale_tuning_version`) means the tuning section's
+    `schema_version`, where a missing one counts as 1, is below
+    `TUNING_SCHEMA_VERSION`. A recorded section failure (`kind: failed`) is a
+    failure, not stale numbers, and is not retried. An ordinary drive has no
+    section.
+  - **The refresh** (`trip_end.refresh_stale_tuning_off_loop`) runs
+    `tuning_section_under_limit` in the digest's own child: the same
+    single-use spawn process, address-space ceiling and timeout, now shared
+    through `_in_digest_child`. It is single-flight per session. It rewrites
+    `digest.json` and the catalog row with the new section plus
+    `tuning_refreshed: {from_schema_version, to_schema_version,
+    refreshed_at}`, so a refreshed digest never passes for one computed
+    whole.
+  - **The digest route** (`GET /control/sessions/{id}/digest`) runs it before
+    serving. When it cannot, the stored digest is served with
+    `tuning_refresh: {status, ...}` naming why, and disk is untouched:
+    - `deferred` / `capture_active` with the profile, while a capture
+      records;
+    - `running`, when another request has it;
+    - `failed`, with the child's reason (`child_timed_out`, `child_failed`,
+      `child_out_of_memory`).
+  - **Real data.** The 09-17 hybrid capture's stored schema-1 digest, copied
+    and refreshed through the real spawn child (91 s, 414 MB peak, the
+    P02.2-narrowed reads): delivery now reads n = 67, −0.462 %
+    band-averaged, engine 2, the same answer `delivery_error` gives on that
+    capture directly. Every other key is unchanged, and disk equals what was
+    served. A first attempt run from a stdin script showed the failure path:
+    spawn could not re-import `<stdin>`, the child died, and the refresh
+    reported `child_failed` and left the digest alone.
+  - **Tests.** `tests/test_digest_tuning_refresh.py` (9):
+    - which sections are stale (five cases);
+    - recompute with nothing else moving, and a second read needing no
+      child;
+    - capture deferral;
+    - a timed-out child leaving disk untouched;
+    - the route end to end.
+
 - [x] **R05.17 A flash hand-added to the tracked registry after migration is
   never seen.** *Found by R05.15's rework, 2026-09-25; pre-existing.* Once the
   per-vehicle operational registry exists it wins over the tracked

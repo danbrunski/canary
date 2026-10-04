@@ -315,7 +315,7 @@ def test_main_writes_output_yaml(
     assert "mode_taxonomy:unapproved_mode:launch" in evidence["failures"]
     assert report["recipes"][0]["serving_status"]["state"] == "diagnostic_only"
     # YAML loads cleanly and contains the model
-    from src.decode.behavior_models import load_behavior_models
+    from src.behavior.behavior_models import load_behavior_models
 
     models = load_behavior_models(out)
     assert [m.name for m in models.models] == ["coolant_warmup"]
@@ -510,7 +510,7 @@ def test_main_keeps_version_on_identical_second_run(
     refit_cli.main(args)
     refit_cli.main(args)  # second run against the same synthetic fixture data
 
-    from src.decode.behavior_models import load_behavior_models
+    from src.behavior.behavior_models import load_behavior_models
 
     models = load_behavior_models(out)
     assert models.models[0].version == 1
@@ -546,7 +546,7 @@ def test_main_bumps_version_when_underlying_data_changes(
     )
     refit_cli.main(args)
 
-    from src.decode.behavior_models import load_behavior_models
+    from src.behavior.behavior_models import load_behavior_models
 
     models = load_behavior_models(out)
     assert models.models[0].version == 2
@@ -615,7 +615,7 @@ def test_main_names_explicit_tuning_paths_and_never_trains_on_them(
     err = capsys.readouterr().err
     assert "1 session(s) are not default-profile evidence" in err
     assert "_tuning-2026-05-12T121000: tuning session" in err
-    from src.decode.behavior_models import load_behavior_models
+    from src.behavior.behavior_models import load_behavior_models
 
     model = load_behavior_models(out).models[0]
     assert model.fit.sessions and tuning.name not in model.fit.sessions

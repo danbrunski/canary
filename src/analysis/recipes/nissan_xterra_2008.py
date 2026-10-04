@@ -22,7 +22,7 @@ from src.analysis.refit import (
     _surface_1d,
     _surface_2d,
 )
-from src.decode.behavior_models import BandExcessPersistence, DeviationConfig
+from src.behavior.behavior_models import BandExcessPersistence, DeviationConfig
 from src.operating import ENGINE_RUNNING_MIN_RPM
 from src.signals.afr import LAMBDA_BANK_BALANCE_AF_VOLTAGE
 

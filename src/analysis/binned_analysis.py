@@ -28,7 +28,7 @@ from typing import Any, Literal
 import numpy as np
 import pandas as pd
 
-from src.decode.surface_eval import bin_indices
+from src.behavior.surface_eval import bin_indices
 from src.preprocessing.loader import to_wide
 from src.preprocessing.resampler import ResampleConfig, resample_wide
 
@@ -112,7 +112,7 @@ def rows_to_resampled_frame(
     Reuses :func:`src.preprocessing.loader.to_wide` (pivot) +
     :func:`src.preprocessing.resampler.resample_wide` (forward-fill onto a
     fixed-hz grid, per session) — the exact pattern
-    :func:`src.preprocessing.feature_pipeline.featurize_wide_frame` builds
+    :func:`src.features.feature_pipeline.featurize_wide_frame` builds
     training frames with — rather than a fresh alignment implementation.
     Returns an empty frame (with the requested columns) when ``rows`` is
     empty.
@@ -233,7 +233,7 @@ def compute_binned_analysis(
     }
 
 
-#: ``bin_indices`` is the one bin rule (:mod:`src.decode.surface_eval`, R05.10),
+#: ``bin_indices`` is the one bin rule (:mod:`src.behavior.surface_eval`, R05.10),
 #: re-exported for analysis callers.
 __all__ = [
     "DEFAULT_BIN_COUNT",

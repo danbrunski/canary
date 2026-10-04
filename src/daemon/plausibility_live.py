@@ -42,9 +42,9 @@ from src.plausibility.evaluator import (
 if TYPE_CHECKING:
     from src.daemon.components import DaemonComponents
     from src.daemon.inference_metrics import InferenceTimingRecorder
+    from src.features.live import LiveFeatureSource
     from src.plausibility.evaluator import EvidenceRecord
     from src.plausibility.limits import LimitsCatalog
-    from src.preprocessing.live import LiveFeatureSource
 
 log = logging.getLogger(__name__)
 

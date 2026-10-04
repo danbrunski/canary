@@ -50,6 +50,7 @@ except ImportError:  # loaded as `scripts.sequence_bakeoff` — repo root on pat
     )
 
 from src.config import CanaryConfig
+from src.features.feature_pipeline import DEFAULT_BINDINGS_PATH
 from src.log import configure_logging
 from src.models.evaluation import (
     holdout_by_drive,
@@ -69,7 +70,6 @@ from src.models.training_entry import (
     train_sequence_detector,
 )
 from src.preprocessing import discover_sessions
-from src.preprocessing.feature_pipeline import DEFAULT_BINDINGS_PATH
 
 log = logging.getLogger(__name__)
 

@@ -44,6 +44,7 @@ from src.collection.capture_quality import (
     evaluate_capture_quality,
     profile_requests,
 )
+from src.collection.obd_scheduler import parse_did_token
 from src.storage.capture_manifest import (
     SCOPE_RECOMPUTE,
     normalize_quality_payload,
@@ -62,7 +63,6 @@ SOURCE_NO_ROUNDS = "no_round_evidence"
 
 def did_channel_for(name: str) -> str | None:
     """``ECM_MAF_GPS`` -> ``DID_1209`` via the DID catalogue, or ``None``."""
-    from src.collection.obd_scheduler import parse_did_token
 
     try:
         return f"{DID_PREFIX}{parse_did_token(name):04X}"

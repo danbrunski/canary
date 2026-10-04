@@ -146,6 +146,29 @@ what the code says it means.
   --sequence-model models/_ablation-a03/<set>/model.pt --out
   data/analyses/<date>-a03-ablation-<set>.json`. Compare per drive against
   A02.11. A06 decides which, if either, is deployed.
+  *Ablation attempted 2026-10-03; `engine_response` is refused by the
+  trainer's own coverage guard on this corpus.*
+  - **Setup.** r2's exact split (training D1, D2, D4; calibration D5, D3;
+    evaluation D6; the same `--accept-thin-calibration` reason) through a
+    scratch sessions root holding r2's 26 live sessions plus the 22
+    post-flash captures, so drive grouping bridges as it did for r2.
+    `train_sequence.py --backbone lstm --feature-set {all_channels,
+    engine_response}`, outputs in `models/_ablation-a03/` (not deployed).
+  - **`all_channels` trained:** best epoch 29, early stopped. On its built-in
+    D6 evaluation no swept k met the 1 alert/hour budget (k 0.95: FPR
+    0.106, 363/h; k 0.99–0.999: FPR 0.076, 262/h).
+  - **`engine_response` refused:** "training dataset observation coverage
+    is unusable: 82.4 % of windows meet the 1.0 % observed-cell floor;
+    require 90.0 %". Its 39 target columns (trims, lambda, timing, air
+    mass, the DIDs) are polled far more sparsely than the 43 context
+    columns. With targets as the only loss, too many windows carry almost
+    no observed target.
+  - **So the A02-protocol comparison cannot run yet**, and that is a
+    finding, not a fault to bypass. Either the targets are polled densely
+    enough on `default` (the D03.34 poll-list work), or the coverage floor
+    for an `engine_response` artifact becomes a decision. That is A06's and
+    the operator's call; the floor is not lowered here. A03.7 stays blocked
+    on this.
 - [~] **A03.3 — De-duplicate sources and justify every derived column.**
   - Four coolant channels contribute 19.2 % of the global-score numerator
     from 7.1 % of the observed cells.

@@ -13,7 +13,7 @@ from src.analysis.training_disposition import (
     compute_golden_baselines,
     compute_quarantine_mask,
 )
-from src.decode.accepted_baselines import (
+from src.behavior.accepted_baselines import (
     AcceptedBaselineOverride,
     AcceptedBaselines,
     DirectionalBand,

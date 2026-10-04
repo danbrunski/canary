@@ -85,7 +85,7 @@ from src.collection.can_obd_client import PID_DECODERS
 from src.config import CanaryConfig
 from src.dashboard.version import _git_sha
 from src.decode.bindings import Bindings, load_bindings
-from src.preprocessing.live import LiveFeatureSource
+from src.features.live import LiveFeatureSource
 from src.telemetry import TelemetryRecord
 
 #: Start of scenario time. Every observation timestamp and every tick is

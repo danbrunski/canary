@@ -9,14 +9,11 @@ import pandas as pd
 
 from src.alerts.event_logger import read_events_dir
 from src.alerts.events import AnomalyEvent
-from src.config import CanaryConfig
-from src.dashboard.paths import DEFAULT_BINDINGS_PATH
-from src.dashboard.status import _resolve_latest_session
-from src.decode.accepted_baselines import (
+from src.behavior.accepted_baselines import (
     DEFAULT_ACCEPTED_BASELINES_PATH,
     load_accepted_baselines,
 )
-from src.decode.behavior_models import (
+from src.behavior.behavior_models import (
     artifact_identity,
     behavior_policy_path,
     load_behavior_models,
@@ -24,6 +21,9 @@ from src.decode.behavior_models import (
     serving_status,
     validation_scope,
 )
+from src.config import CanaryConfig
+from src.dashboard.paths import DEFAULT_BINDINGS_PATH
+from src.dashboard.status import _resolve_latest_session
 from src.decode.bindings import load_bindings
 from src.decode.dbc import DEFAULT_DBC_DIR, dbc_channel, load_dbc_dir
 from src.decode.on_read import on_read_catalog

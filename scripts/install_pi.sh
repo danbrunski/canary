@@ -98,7 +98,8 @@ if ! id -u "${CANARY_USER}" >/dev/null 2>&1; then
 fi
 
 install -d -m 0755 "${CANARY_CONFIG_DIR}"
-install -d -m 0755 "${CANARY_DATA_DIR}" "${CANARY_DATA_DIR}/sessions" "${CANARY_DATA_DIR}/anomalies"
+install -d -m 0755 "${CANARY_DATA_DIR}" "${CANARY_DATA_DIR}/sessions" "${CANARY_DATA_DIR}/anomalies" \
+  "${CANARY_DATA_DIR}/control" "${CANARY_DATA_DIR}/models"
 # canary-mcp writes its audit log here as user ``canary``; pre-create so
 # ControlAuditLogger doesn't try to ``mkdir`` under a path it can't reach.
 install -d -m 0750 "${CANARY_DATA_DIR}/audit"

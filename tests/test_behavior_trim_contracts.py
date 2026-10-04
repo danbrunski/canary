@@ -32,9 +32,9 @@ from src.analysis.refit import (
     default_recipes,
     recipe_serving_spec,
 )
+from src.behavior.behavior_eligibility import point_eligibility
 from src.columns import MODE_COLUMN, SESSION_COLUMN, TIMESTAMP_COLUMN
-from src.decode.behavior_eligibility import point_eligibility
-from src.decode.behavior_models import CLOSED_LOOP_FUEL_STATES
+from src.operating import CLOSED_LOOP_FUEL_STATES
 
 CATALOG = {recipe.name: recipe for recipe in default_recipes("nissan-xterra-2008")}
 TOTAL_TRIM = ("total_trim_vs_rpm_load_b1", "total_trim_vs_rpm_load_b2")

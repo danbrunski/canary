@@ -313,7 +313,7 @@ def _active_profile(config: CanaryConfig) -> dict[str, str | None] | None:
     try:
         from src.vehicle.profiles import load_registry
 
-        for profile in load_registry(config.profiles.registry_path):
+        for profile in load_registry(config.profiles):
             if profile.slug == slug:
                 return {"slug": profile.slug, "name": profile.name, "vin": profile.vin}
     except Exception:  # noqa: BLE001 — status must never fail on a bad registry

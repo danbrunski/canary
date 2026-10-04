@@ -27,7 +27,7 @@ from pathlib import Path
 from typing import Any, Literal
 from uuid import uuid4
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from src.jsonl_store import JsonlStore, latest_by_key
 from src.paths import CONTROL_DIR
@@ -37,6 +37,8 @@ log = logging.getLogger(__name__)
 __all__ = [
     "DEFAULT_VEHICLE_LEDGER_PATH",
     "VEHICLE_EVENT_KINDS",
+    "TyreAction",
+    "TyreRecord",
     "VehicleEvent",
     "VehicleEventKind",
     "VehicleLedgerStore",
@@ -49,6 +51,33 @@ VehicleEventKind = Literal["maintenance", "mod", "repair", "observation", "dtc"]
 VEHICLE_EVENT_KINDS: frozenset[str] = frozenset(
     {"maintenance", "mod", "repair", "observation", "dtc"}
 )
+
+
+TyreAction = Literal["tread_measured", "rotated", "replaced", "pressure_changed"]
+
+
+class TyreRecord(BaseModel):
+    """A tyre fact on a ledger event, readable by code (tyre wear).
+
+    ``tread_measured`` is a gauge reading: the baseline that turns the trip
+    digests' rolling circumference into tread depth (:mod:`src.control.tyres`).
+    ``rotated`` and ``replaced`` change which tyres the driven axle carries,
+    so a circumference trend restarts there; ``pressure_changed`` is named
+    because ~6 psi moves the circumference as much as ~0.8 mm of tread.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    action: TyreAction
+    #: Gauge reading, driven-axle tyres, mm (required for ``tread_measured``).
+    tread_depth_mm: float | None = Field(default=None, gt=0.0, lt=40.0)
+    pressure_psi: float | None = Field(default=None, gt=0.0, lt=120.0)
+
+    @model_validator(mode="after")
+    def _a_measurement_has_a_depth(self) -> TyreRecord:
+        if self.action == "tread_measured" and self.tread_depth_mm is None:
+            raise ValueError("a tread_measured record needs tread_depth_mm")
+        return self
 
 
 class VehicleEvent(BaseModel):
@@ -74,6 +103,8 @@ class VehicleEvent(BaseModel):
     #: expected sensor behavior should bisect the training corpus (Task 3.5);
     #: routine maintenance and observations usually don't.
     corpus_boundary: bool = False
+    #: A tyre fact the tyre-wear trend reads, or ``None``.
+    tyres: TyreRecord | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return self.model_dump(mode="json")
@@ -110,6 +141,7 @@ class VehicleLedgerStore(JsonlStore[VehicleEvent]):
         affected_channels: list[str] | None = None,
         corpus_boundary: bool = False,
         event_id: str | None = None,
+        tyres: TyreRecord | None = None,
     ) -> VehicleEvent:
         """Build and append a :class:`VehicleEvent`. Convenience wrapper
         around :meth:`append` for the common "new event" case."""
@@ -121,6 +153,7 @@ class VehicleLedgerStore(JsonlStore[VehicleEvent]):
             "odometer_km": odometer_km,
             "affected_channels": affected_channels or [],
             "corpus_boundary": corpus_boundary,
+            "tyres": tyres,
         }
         if event_id is not None:
             kwargs["id"] = event_id

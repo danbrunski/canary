@@ -5,23 +5,23 @@ import logging
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from src.collection import bus_budget, tx_gate
-from src.config import CanaryConfig, UnscopedConfigError, require_profile_scoped
-from src.daemon.health import HealthMonitor
-from src.decode.behavior_models import (
+from src.behavior.behavior_models import (
     behavior_policy_path,
     diagnostic_only_models,
     load_behavior_models,
     unknown_operating_modes,
 )
+from src.collection import bus_budget, tx_gate
+from src.config import CanaryConfig, UnscopedConfigError, require_profile_scoped
+from src.daemon.health import HealthMonitor
 from src.models.manager import ModelManager
 from src.vehicle.profiles import rescope_like
 
 if TYPE_CHECKING:
     # Annotation only: it loads the feature pipeline, and this module is on
     # the daemon's path to recording (S01.3).
+    from src.features.live import LiveFeatureSource
     from src.models.role_gate import DetectorRoleGate
-    from src.preprocessing.live import LiveFeatureSource
 
 log = logging.getLogger(__name__)
 

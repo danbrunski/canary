@@ -15,13 +15,11 @@ from pathlib import Path
 import pandas as pd
 import pytest
 
+from src.behavior.behavior_models import BehaviorModels
 from src.columns import GAP_SUFFIX, MEAN_SUFFIX, MODE_COLUMN, ROC_SUFFIX, STD_SUFFIX
 from src.config import CanaryConfig
-from src.decode.behavior_models import BehaviorModels
 from src.decode.dids import load_repo_did_map
-from src.preprocessing.decode import decode_can_rows
-from src.preprocessing.drives import DRIVE_COLUMN
-from src.preprocessing.feature_pipeline import (
+from src.features.feature_pipeline import (
     ALL_MODE,
     BELOW_ROW_COVERAGE,
     MIN_DETECTOR_COVERAGE,
@@ -41,6 +39,9 @@ from src.preprocessing.feature_pipeline import (
     summarize_feature_health,
     trainable_feature_columns,
 )
+from src.preprocessing import session_decode
+from src.preprocessing.decode import decode_can_rows
+from src.preprocessing.drives import DRIVE_COLUMN
 from src.preprocessing.features import FeatureConfig
 from tests.configs import example_config
 
@@ -373,7 +374,7 @@ def test_build_feature_frame_parallel_matches_serial(tmp_path: Path) -> None:
     """The ProcessPool-parallel per-session feature build must produce a frame
     byte-equal to the serial path — same rows in the same order, identical
     feature values. Sessions are independent so this should hold exactly."""
-    from src.preprocessing.feature_pipeline import build_feature_frame
+    from src.features.feature_pipeline import build_feature_frame
 
     config = example_config(Path("canary.example.yaml"))
     # 3 sessions ⇒ above the parallel threshold; forcing max_workers=2 forces
@@ -394,7 +395,7 @@ def test_build_feature_frame_skips_parallel_under_threshold(tmp_path: Path) -> N
     """Below the threshold (here: 2 sessions), the pool isn't spun up even when
     ``max_workers`` would allow it — pool startup cost would outweigh the win.
     The result still has to equal the serial path."""
-    from src.preprocessing.feature_pipeline import build_feature_frame
+    from src.features.feature_pipeline import build_feature_frame
 
     config = example_config(Path("canary.example.yaml"))
     sessions = [
@@ -414,7 +415,7 @@ def test_build_feature_frame_quality_gate_rejects_impossible_cell(tmp_path: Path
     NaN'd before the resampler, so it ffills from the last good reading
     exactly like any other gap, rather than poisoning the corpus with a
     16383 rpm "reading"."""
-    from src.preprocessing.feature_pipeline import build_feature_frame
+    from src.features.feature_pipeline import build_feature_frame
     from src.storage.parquet_writer import write_records_to_parquet
     from src.telemetry import TelemetryRecord
 
@@ -443,7 +444,7 @@ def test_build_feature_frame_tail_matches_standalone_featurize_wide_frame(
     it calls) with no bindings/DBC/DID (this session is OBD-only, so those
     are no-ops), then asserts featurize_wide_frame on that resampled frame
     is byte-identical to build_feature_frame's actual output."""
-    from src.preprocessing.feature_pipeline import (
+    from src.features.feature_pipeline import (
         _decode_session_to_resampled,
         build_feature_frame,
     )
@@ -481,7 +482,7 @@ def test_build_feature_frame_tail_matches_standalone_featurize_wide_frame(
 def test_expand_suppress_channels_matches_base_and_rolling_siblings() -> None:
     """Listing a base channel auto-includes its rolling-derivative siblings
     (``__mean``, ``__std``, ``__roc``) — the operator lists the sensor once."""
-    from src.preprocessing.feature_pipeline import expand_suppress_channels
+    from src.features.feature_pipeline import expand_suppress_channels
 
     columns = [
         "obd:FUEL_LEVEL",
@@ -504,7 +505,7 @@ def test_expand_suppress_channels_matches_base_and_rolling_siblings() -> None:
 def test_expand_suppress_channels_silently_drops_unknown_entries() -> None:
     """A typo or a channel that disappears from the corpus should become a
     no-op, not break the serve path."""
-    from src.preprocessing.feature_pipeline import expand_suppress_channels
+    from src.features.feature_pipeline import expand_suppress_channels
 
     columns = ["obd:RPM", "obd:RPM__mean"]
     # ``obd:DOES_NOT_EXIST`` doesn't match anything → empty result
@@ -570,7 +571,7 @@ def test_resolve_worker_count_trims_pool_to_available_memory(
 ) -> None:
     """The OOM this replaces: 4 fixed workers × a multi-GB frame each on a box
     with ~2 GB actually free. The budget has to win over the CPU ceiling."""
-    from src.preprocessing import feature_pipeline as fp
+    from src.features import feature_pipeline as fp
 
     sessions = _sized_sessions(tmp_path, 6, megabytes=45.0)  # ~1.8 GB/worker at 40×
     monkeypatch.setattr(fp, "_available_memory_bytes", lambda: 2 * 1024**3)
@@ -584,7 +585,7 @@ def test_resolve_worker_count_uses_cpu_ceiling_when_memory_is_ample(
 ) -> None:
     """Small sessions on a roomy box: the memory budget must not throttle
     below what the CPU/cap ceiling already allows."""
-    from src.preprocessing import feature_pipeline as fp
+    from src.features import feature_pipeline as fp
 
     sessions = _sized_sessions(tmp_path, 8, megabytes=1.0)
     monkeypatch.setattr(fp, "_available_memory_bytes", lambda: 64 * 1024**3)
@@ -596,7 +597,7 @@ def test_resolve_worker_count_uses_cpu_ceiling_when_memory_is_ample(
 def test_resolve_worker_count_is_bounded_by_session_count(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from src.preprocessing import feature_pipeline as fp
+    from src.features import feature_pipeline as fp
 
     sessions = _sized_sessions(tmp_path, 2, megabytes=1.0)
     monkeypatch.setattr(fp, "_available_memory_bytes", lambda: 64 * 1024**3)
@@ -610,7 +611,7 @@ def test_resolve_worker_count_honours_explicit_override(
 ) -> None:
     """An explicit ``max_workers`` is the caller's call — the memory heuristic
     must not second-guess it (nor consult memory at all)."""
-    from src.preprocessing import feature_pipeline as fp
+    from src.features import feature_pipeline as fp
 
     sessions = _sized_sessions(tmp_path, 6, megabytes=45.0)
 
@@ -628,7 +629,7 @@ def test_resolve_worker_count_falls_back_when_memory_is_unknown(
 ) -> None:
     """On a platform that won't report free memory, keep the previous
     CPU/cap-only behaviour rather than collapsing to serial."""
-    from src.preprocessing import feature_pipeline as fp
+    from src.features import feature_pipeline as fp
 
     sessions = _sized_sessions(tmp_path, 6, megabytes=45.0)
     monkeypatch.setattr(fp, "_available_memory_bytes", lambda: None)
@@ -638,7 +639,7 @@ def test_resolve_worker_count_falls_back_when_memory_is_unknown(
 
 
 def test_available_memory_bytes_is_plausible_or_none() -> None:
-    from src.preprocessing import feature_pipeline as fp
+    from src.features import feature_pipeline as fp
 
     available = fp._available_memory_bytes()
     assert available is None or available > 0
@@ -647,7 +648,7 @@ def test_available_memory_bytes_is_plausible_or_none() -> None:
 # ---------------------------------------------------------------------------
 # Chunked CAN decode (2026-07-26 OOM). Decoding 4.5M raw CAN rows in one pass
 # held every raw row AND every decoded row at once (~14.6M object-dtype rows,
-# ~7.6 GB RSS) and got feature-build workers OOM-killed. `_decode_long_frame`
+# ~7.6 GB RSS) and got feature-build workers OOM-killed. `decode_long_frame`
 # chunks it; these lock the equivalence that makes that safe.
 # ---------------------------------------------------------------------------
 
@@ -680,7 +681,7 @@ def _synth_can_long(n: int, can_id: int = 0x551) -> pd.DataFrame:
 
 def _single_pass_decode(long: pd.DataFrame, bindings) -> pd.DataFrame:
     """The pre-chunking implementation, kept here as the parity reference."""
-    from src.preprocessing.feature_pipeline import _LONG_SORT_COLUMNS
+    from src.preprocessing.session_decode import _LONG_SORT_COLUMNS
 
     out = decode_can_rows(long, bindings)
     out = out[out["source"] != "can"]
@@ -690,7 +691,6 @@ def _single_pass_decode(long: pd.DataFrame, bindings) -> pd.DataFrame:
 def test_chunked_can_decode_matches_single_pass(monkeypatch: pytest.MonkeyPatch) -> None:
     """Chunk boundaries must not change a single decoded value or row."""
     from src.decode.bindings import Bindings, Signal
-    from src.preprocessing import feature_pipeline as fp
 
     bindings = Bindings(
         schema_version=1,
@@ -708,8 +708,8 @@ def test_chunked_can_decode_matches_single_pass(monkeypatch: pytest.MonkeyPatch)
 
     # Chunk size that does NOT divide the row count, so a chunk boundary lands
     # mid-frame and the last chunk is short.
-    monkeypatch.setattr(fp, "_CAN_DECODE_CHUNK_ROWS", 7)
-    got = fp._decode_long_frame(long, bindings, None, None).reset_index(drop=True)
+    monkeypatch.setattr(session_decode, "_CAN_DECODE_CHUNK_ROWS", 7)
+    got = session_decode.decode_long_frame(long, bindings, None, None).reset_index(drop=True)
 
     assert len(got) == 100  # 50 frames x 2 signals
     pd.testing.assert_frame_equal(got, expected)
@@ -717,7 +717,6 @@ def test_chunked_can_decode_matches_single_pass(monkeypatch: pytest.MonkeyPatch)
 
 def test_chunked_decode_drops_raw_can_rows() -> None:
     from src.decode.bindings import Bindings, Signal
-    from src.preprocessing import feature_pipeline as fp
 
     bindings = Bindings(
         schema_version=1,
@@ -727,7 +726,7 @@ def test_chunked_decode_drops_raw_can_rows() -> None:
             )
         ],
     )
-    out = fp._decode_long_frame(_synth_can_long(10), bindings, None, None)
+    out = session_decode.decode_long_frame(_synth_can_long(10), bindings, None, None)
     assert (out["source"] != "can").all()
     assert len(out) == 10
 
@@ -735,7 +734,6 @@ def test_chunked_decode_drops_raw_can_rows() -> None:
 def test_decode_long_frame_without_decoders_keeps_non_can_rows() -> None:
     """No bindings and no DBC: the CAN rows still go (nothing can decode them)
     and the non-CAN rows survive untouched."""
-    from src.preprocessing import feature_pipeline as fp
 
     can = _synth_can_long(4)
     obd = can.iloc[:2].copy()
@@ -743,17 +741,18 @@ def test_decode_long_frame_without_decoders_keeps_non_can_rows() -> None:
     obd["channel"] = "RPM"
     obd["source_channel"] = "obd:RPM"
     obd["value"] = [800.0, 900.0]
-    out = fp._decode_long_frame(pd.concat([can, obd], ignore_index=True), None, None, None)
+    out = session_decode.decode_long_frame(
+        pd.concat([can, obd], ignore_index=True), None, None, None
+    )
     assert out["source"].unique().tolist() == ["obd"]
     assert sorted(out["value"].tolist()) == [800.0, 900.0]
 
 
 def test_decode_long_frame_handles_empty_and_missing_source() -> None:
-    from src.preprocessing import feature_pipeline as fp
 
-    assert fp._decode_long_frame(pd.DataFrame(), None, None, None).empty
+    assert session_decode.decode_long_frame(pd.DataFrame(), None, None, None).empty
     bare = pd.DataFrame({"timestamp": pd.to_datetime(["2026-05-13T12:00:00Z"])})
-    pd.testing.assert_frame_equal(fp._decode_long_frame(bare, None, None, None), bare)
+    pd.testing.assert_frame_equal(session_decode.decode_long_frame(bare, None, None, None), bare)
 
 
 # ---------------------------------------------------------------------------

@@ -55,6 +55,11 @@ except ImportError:  # loaded as `scripts.train_anomaly_model` — repo root on 
 
 from src.config import CanaryConfig
 from src.decode.bindings import load_bindings
+from src.features.feature_pipeline import (
+    DEFAULT_BINDINGS_PATH,
+    configured_behavior_models,
+    featurize_wide_frame,
+)
 from src.log import configure_logging
 from src.models.isolation_forest import (
     MissingModelDependencyError,
@@ -68,11 +73,6 @@ from src.preprocessing import (
     read_session,
     resample_wide,
     to_wide,
-)
-from src.preprocessing.feature_pipeline import (
-    DEFAULT_BINDINGS_PATH,
-    configured_behavior_models,
-    featurize_wide_frame,
 )
 from src.preprocessing.resampler import resample_config_for
 from src.telemetry import DECODED_SOURCE, source_of

@@ -34,6 +34,7 @@ from src.columns import (
     is_flag_column,
 )
 from src.dataframe_utils import require_columns as _require_columns
+from src.features.feature_pipeline import build_feature_spec
 from src.models.manifest import (
     manifest_path_for,
     read_artifact,
@@ -41,7 +42,7 @@ from src.models.manifest import (
     write_artifact,
 )
 from src.models.sequence_calibration import coerce_timestamp
-from src.preprocessing.feature_pipeline import build_feature_spec
+from src.preprocessing.drives import count_drives
 from src.preprocessing.normalization import ZScoreScaler
 from src.timefmt import format_timestamp as _format_timestamp
 from src.trainability import source_exclusion_reason
@@ -803,7 +804,6 @@ def _drive_count(rows: pd.DataFrame, *, timestamp_column: str, session_column: s
     """Independent physical drives among ``rows`` (:func:`src.preprocessing.drives.count_drives`:
     the frame's stamped physical drive, captures and in-recording pauses
     included; rows from one drive either side of a capture count once)."""
-    from src.preprocessing.drives import count_drives
 
     return count_drives(rows, session_column=session_column, timestamp_column=timestamp_column)
 
@@ -2209,19 +2209,21 @@ def seed_stability_sweep(
     seeds: Sequence[int] = (0, 1, 2, 3),
     flag_rate: float = 0.01,
     n_jobs: int = 1,
+    params: Mapping[str, Any] | None = None,
 ) -> dict[int, dict[str, Any]]:
     """A04.10 — for each ensemble size, refit on the same rows with each seed,
     flag the top ``flag_rate`` of ``eval_x`` (held-out rows), and report the
     pairwise Jaccard of the flagged sets. The ensemble size is chosen where
     this stops improving; the 2026-09-20 highway rows gave 0.68 at 200 trees
-    and 0.86 at 1,000."""
+    and 0.86 at 1,000. ``params`` (e.g. ``max_samples``, ``max_features``)
+    go to every fit unchanged, so the same sweep measures them too."""
     cls = _isolation_forest_cls()
     out: dict[int, dict[str, Any]] = {}
     k = max(1, int(round(flag_rate * len(eval_x))))
     for size in n_estimators:
         flagged: list[set[int]] = []
         for seed in seeds:
-            model = cls(n_estimators=size, random_state=seed, n_jobs=n_jobs)
+            model = cls(n_estimators=size, random_state=seed, n_jobs=n_jobs, **(params or {}))
             model.fit(fit_x)
             scores = -model.decision_function(eval_x)
             flagged.append(set(np.argsort(-scores, kind="stable")[:k].tolist()))

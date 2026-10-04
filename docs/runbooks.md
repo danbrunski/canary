@@ -219,7 +219,7 @@ named, provenanced fault.
 - **Author one (operator-only — never an unattended/overnight task):**
   edit the profile-scoped `<data>/<vehicle-slug>/accepted_baselines.yaml`
   (schema + a commented worked example in
-  `src/decode/accepted_baselines.py`). Required fields: target (`channel`
+  `src/behavior/accepted_baselines.py`). Required fields: target (`channel`
   **or** `behavior_model`, never both), `band` (`tolerance`,
   `worse_direction`, `worse_warning`/`worse_critical`,
   `better_direction: ignore` — the only value today), and `provenance`
@@ -236,7 +236,7 @@ named, provenanced fault.
   trips warning/critical, the improving side never alerts, and the fired
   event's `detail.override_reason` echoes the declared `reason` so a
   recentered/suppressed channel always reads back *why*.
-  `src.decode.behavior_decoder.deviation_for_override` is consulted
+  `src.behavior.behavior_decoder.deviation_for_override` is consulted
   directly by `_observe_behavior`'s channel-override branch for a
   raw-channel target evaluated on its own (no behavior model/surface in
   the loop) — the same per-tick call graded against `accepted_center`

@@ -19,8 +19,8 @@ import pytest
 from src.config import AutoTagConfig, CanaryConfig
 from src.daemon.autotag_hook import LiveAutoTagHook
 from src.decode.bindings import load_bindings
+from src.features.live import LiveFeatureSource
 from src.preprocessing.imu_live import LiveImuFrame
-from src.preprocessing.live import LiveFeatureSource
 from src.signals.committees import STANDARD_GRAVITY
 from src.telemetry import TelemetryRecord
 from tests.configs import example_config

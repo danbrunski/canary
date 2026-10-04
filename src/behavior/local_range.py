@@ -2,11 +2,11 @@
 
 A persisted rate gate reads ``<channel>__roc``: the *net* change over the 30 s
 feature horizon, so an up-and-back excursion inside the horizon passes it. A
-:class:`~src.decode.behavior_models.LocalRangeCondition` bounds the channel's
+:class:`~src.behavior.behavior_models.LocalRangeCondition` bounds the channel's
 ``max - min`` over a short trailing window instead. The value is computed
 here, once, for every path that grades a behavior model: the batch refit and
 evaluation frames and the live ring buffer both reach it through
-:func:`src.decode.behavior_decoder.append_behavior_prerequisites`, and the
+:func:`src.behavior.behavior_decoder.append_behavior_prerequisites`, and the
 refit appends it before selecting training rows.
 
 Semantics, per session in time order: for a row at ``t`` the window is the
@@ -30,8 +30,8 @@ from collections.abc import Iterable
 import numpy as np
 import pandas as pd
 
+from src.behavior.behavior_models import LocalRangeCondition
 from src.columns import SESSION_COLUMN, TIMESTAMP_COLUMN, gap_column
-from src.decode.behavior_models import LocalRangeCondition
 from src.preprocessing.features import CONTEXT_COLUMN_PREFIX
 from src.signals.pairing import to_seconds
 

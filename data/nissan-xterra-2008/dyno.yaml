@@ -64,7 +64,7 @@ inertia:
   evidence: >-
     ESTIMATES, 2026-09-26, none measured. Wheel side: four road wheels at the
     profile's measured 40.3 kg per wheel and tyre (wheel_tire_assembly_kg) and
-    the 2.609 m loaded circumference (r = 0.415 m), with a shape factor of 0.7
+    the 2.559 m rolling circumference (r = 0.407 m; 2.609 m until 2026-10-03, H07.11), with a shape factor of 0.7
     of m*r^2 (an LT tyre's mass sits near the rim; a solid disc is 0.5, a thin
     ring 1.0) -- about 19.4 kg m^2. driveline_output_kg_m2 (propshaft,
     differentials, axle shafts, hubs and rotors, referred to the wheels) is an
@@ -75,7 +75,7 @@ inertia:
     eta = 1 - drivetrain_loss_fraction from profiles.yaml (0.85). The one
     convention is dyno.INERTIA_CONVENTION. H07.6's two-gear pulls measure
     eta*I_e and replace the estimate (measured_engine). In 3rd (overall 7.11)
-    the estimates add ~119 kg (wheel side) + ~62 kg (0.85 x 0.25 kg m^2
+    the estimates add ~119 kg (wheel side) + ~65 kg (0.85 x 0.25 kg m^2
     through the ratio) to a ~2,311 kg test mass. A 40 % error in the
     engine-side estimate therefore moves 3rd-gear wheel force during a pull by
     ~1.0 %.

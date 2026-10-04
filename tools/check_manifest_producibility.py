@@ -57,8 +57,8 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
 def main(argv: Sequence[str] | None = None) -> int:
     args = parse_args(argv)
     sys.path.insert(0, str(REPO_ROOT))
+    from src.behavior.behavior_models import load_behavior_models
     from src.config import CanaryConfig
-    from src.decode.behavior_models import load_behavior_models
     from src.models.spec_producibility import (
         behavior_feature_conflicts,
         behavior_fingerprint_mismatches,

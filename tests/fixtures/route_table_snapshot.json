@@ -530,6 +530,14 @@
     {
       "auth": "control",
       "body": false,
+      "method": "POST",
+      "path": "/control/capture/profiles/{name}/revert",
+      "query": [],
+      "status_code": null
+    },
+    {
+      "auth": "control",
+      "body": false,
       "method": "GET",
       "path": "/control/capture/quality",
       "query": [],
@@ -1102,6 +1110,14 @@
       "body": true,
       "method": "POST",
       "path": "/control/tuning/revert",
+      "query": [],
+      "status_code": null
+    },
+    {
+      "auth": "control",
+      "body": false,
+      "method": "GET",
+      "path": "/control/tyres",
       "query": [],
       "status_code": null
     },

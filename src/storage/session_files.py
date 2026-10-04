@@ -126,3 +126,31 @@ def session_time_span_seconds(session_dir: Path) -> float | None:
     denominator that does (D02.9). ``None`` when no chunk carries statistics.
     """
     return session_footer_span(session_dir).span_seconds
+
+
+def session_files_fingerprint(session_dir: Path) -> dict[str, Any]:
+    """A session's parquet chunks by name, size and mtime, plus its resolved path.
+
+    What a cache keyed on a session's contents (the feature-frame cache, the
+    derived store) compares: any chunk added, removed or rewritten changes it.
+    Moved verbatim from ``feature_cache._session_cache_entry`` (R09.6), so
+    existing cache keys are unchanged.
+    """
+    files: list[dict[str, Any]] = []
+    for file in sorted(session_dir.glob(PARQUET_PATTERN)):
+        try:
+            stat = file.stat()
+        except OSError:
+            continue
+        files.append(
+            {
+                "name": file.name,
+                "size": stat.st_size,
+                "mtime_ns": stat.st_mtime_ns,
+            }
+        )
+    return {
+        "path": str(session_dir.expanduser().resolve()),
+        "name": session_dir.name,
+        "files": files,
+    }

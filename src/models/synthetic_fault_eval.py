@@ -61,6 +61,7 @@ import pandas as pd
 from src.columns import TIMESTAMP_COLUMN
 from src.config import CanaryConfig
 from src.decode.dids import DidMap
+from src.features.feature_pipeline import configured_behavior_models, featurize_wide_frame
 from src.models.fusion import (
     FusionScorer,
     FusionSource,
@@ -80,7 +81,6 @@ from src.models.isolation_forest import (
 )
 from src.models.sequence_protocol import TrainedSequenceModel
 from src.preprocessing.anomaly_injection import AnomalyInjector, AnomalyKind
-from src.preprocessing.feature_pipeline import configured_behavior_models, featurize_wide_frame
 from src.preprocessing.resampler import resample_config_for
 
 DEFAULT_FAULT_KINDS: tuple[AnomalyKind, ...] = (

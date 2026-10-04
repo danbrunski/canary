@@ -36,8 +36,8 @@ from src.collection.capture_profiles import (
 from src.columns import arrived_column, gap_column
 from src.config import CanaryConfig
 from src.decode.bindings import load_bindings
+from src.features.live import LiveFeatureSource
 from src.preprocessing.derived import reduce_numeric_session
-from src.preprocessing.live import LiveFeatureSource
 from src.preprocessing.loader import read_session, read_sessions, resample_and_segment
 from src.preprocessing.resampler import ResampleConfig, resample_config_for
 from src.storage.broadcast_storage import (
@@ -781,13 +781,13 @@ async def test_a_session_stored_with_a_longer_timeout_than_the_daemons_is_not_re
 def test_every_training_read_path_refuses_a_shorter_read_timeout(
     tmp_path: Path, config: CanaryConfig
 ) -> None:
-    from src.preprocessing.derived import resample_reduced
-    from src.preprocessing.feature_pipeline import (
+    from src.features.feature_pipeline import (
         default_decode_inputs,
         reduce_session,
         resample_long_session,
         resample_session_bounded,
     )
+    from src.preprocessing.derived import resample_reduced
 
     session = tmp_path / "2026-09-26T120000"
     write_records_to_parquet(_drive(60.0), session, can_storage=CanStorage.change_only(20.0))

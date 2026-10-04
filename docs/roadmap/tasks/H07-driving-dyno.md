@@ -420,6 +420,42 @@ under GPS. Defects a dyno would inherit:
     job needs both.
   - the truck's curve (H07.12).
 
+  *Finding pulls: done at the desk 2026-10-03.*
+  - **`src/analysis/pulls.py`** holds `RpmSeries`, `Pull` and `detect_pulls`,
+    moved verbatim from `tools/pull_report.py`. The tool imports them back,
+    and its 14 tests pass unchanged.
+  - **`src/analysis/dyno_pulls.find_power_pulls(session, sources, driveline,
+    demand_channel)`** returns every rpm rise found, each as a `FoundPull`
+    with its window, rpm span and GPS course, and either a `PowerPull` or the
+    refusal:
+    - `lift_or_shift`: the detector's dip flag, refused before anything is
+      read;
+    - any `read_motion_inputs` or `DynoInputs.motion()` refusal, handed on
+      unchanged;
+    - `gear_unresolved`: the window's median implied overall ratio
+      (rpm·2πr/60v) is more than `POWER_GEAR_TOLERANCE` from every gear.
+      `compute_power` still checks every sample.
+
+    An empty list means no rpm rise, never candidates quietly dropped. The
+    rpm source is the profile's first `motion_sources.rpm`, held between
+    changes in a change-only session.
+  - **`label_headings`** groups pulls whose courses are within 30° (circular,
+    so 358° and 5° are one direction) into `course-<deg>` labels, which is
+    what `compute_power` pairs. A pull with no course is its own direction,
+    `course-unknown`.
+  - Refusal kinds `gear_unresolved` and `lift_or_shift` were added to
+    `RefusalKind`.
+  - `tests/test_dyno_pulls.py` (6): two opposite pulls found in gear with
+    their courses and labels, a part lift refused by name and never read, a
+    clutch-slip window refused rather than rounded to a gear, a motion
+    refusal handed on, heading grouping across north, and no rpm meaning no
+    pulls (a vehicle with no rpm source is a `ValueError`).
+  - **Not used:** `WotInventory`. WOT is `compute_power`'s own check on the
+    demand channel (`not_wot`), so this needs no digest provenance.
+  - **H07.9** can now go session → `find_power_pulls` → `label_headings` →
+    `compute_power`. Its job kind and page remain, and real coefficients
+    wait on H07.12.
+
   `src/analysis/dyno.py` `compute_power(pulls, *, driveline, test_mass_kg,
   road_load, squat, pitch_offset, wot, conditions, correction=None)` returns
   `DynoPower` or a `DynoRefusal`.
@@ -551,6 +587,29 @@ under GPS. Defects a dyno would inherit:
   with less margin (H07.3's scaled speed removes it). Still owed on the truck:
   hand-selected steady cruise in each gear, to confirm 1st, 2nd, 4th and 6th
   and explain 4th's 2 %.
+  *2026-10-03 (desk, every September drive on disk):*
+  [`2026-10-03-gear-ratios-steady-cruise.md`](../../../data/analyses/2026-10-03-gear-ratios-steady-cruise.md).
+  - **Method.** Same-instant `decoded:ECM_RPM` / `gps:speed` pairs
+    (`align_pairs`, 60 ms) on steady cruise.
+  - **2nd–6th: confirmed.** Relative to 5th, the gears are 2.528 / 1.745 /
+    1.282 / 0.769 against published 2.518 / 1.743 / 1.283 / 0.769 (2nd
+    +0.4 % on 24 pairs; 3rd, 4th and 6th within 0.1 % on 412–5,952 pairs).
+  - **4th's 2 % is explained.** Every gear reads +1.85–2.34 % against the
+    profile, by one common factor in final drive × tyre, not the gearbox. With
+    the 4.08 regear, these drives imply a rolling circumference of
+    **2.559 m** (2.609 / 1.0194), not the profile's 2.609 m (5th: 9,611
+    pairs, 22 sessions, p10–p90 ±1.1 %).
+    - The first version said 2.660 m, multiplying where it should divide;
+      corrected the same day.
+    - Cross-checked against the LT285/75R16 load-range-E tyre at ~34 psi:
+      free circumference 2.617 m, published 634 rev/mi = 2.538 m, and a
+      Rhyne-stiffness load/pressure model gives 2.583 m new. The 0.9 % gap is
+      about 4 mm of tread wear. Details in the note.
+  - **Set 2026-10-03 (operator: "yes on tire value"):**
+    `tyre_loaded_circumference_m: 2.559` in `profiles.yaml`, with the
+    evidence string. `dyno.yaml`'s inertia note follows: r = 0.407 m, and the
+    3rd-gear rotating equivalent is ~184 kg, up from ~181.
+  - **Still owed (truck):** 1st, which has 2 steady pairs on disk.
 - [ ] **H07.12 NA baseline.** On one flat, straight road: coast-downs both
   directions for H07.5, flat-ground accelerations for H07.4, then three pull
   pairs in 3rd from ≤ 2,500 rpm to the limiter (supercharger NA1/NA5).

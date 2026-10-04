@@ -155,8 +155,8 @@ def _main_args(root: Path, artifact: Path, tmp_path: Path) -> list[str]:
 
 
 def test_main_scores_only_unseen_drives_and_names_every_skip(tmp_path: Path) -> None:
+    from src.features.feature_pipeline import featurize_wide_frame, load_resampled_session
     from src.models.isolation_forest import default_manifest_path, fit_isolation_forest
-    from src.preprocessing.feature_pipeline import featurize_wide_frame, load_resampled_session
 
     config = example_config(EXAMPLE_YAML)
     root = tmp_path / "sessions"
@@ -336,8 +336,8 @@ def test_evidence_role_detectors_are_not_held_to_the_alert_budget() -> None:
 def _unseen_drive_fixture(tmp_path: Path) -> tuple[Path, Path]:
     """One training session (not scored) and one unseen session under
     ``sessions/``; returns ``(sessions root, IF artifact)``."""
+    from src.features.feature_pipeline import featurize_wide_frame, load_resampled_session
     from src.models.isolation_forest import default_manifest_path, fit_isolation_forest
-    from src.preprocessing.feature_pipeline import featurize_wide_frame, load_resampled_session
 
     config = example_config(EXAMPLE_YAML)
     training = _write_session(tmp_path / "train", "2026-05-12T000000", start=1_778_544_000.0)
@@ -440,7 +440,7 @@ def test_rows_are_featurized_with_the_behavior_models(
     featurization here carries the profile's (or ``--behavior-models``) set,
     and the report says which file."""
     import scripts.evaluate_detectors as harness
-    from src.preprocessing import feature_pipeline
+    from src.features import feature_pipeline
 
     root, artifact = _unseen_drive_fixture(tmp_path)
     models_path = _behavior_models_file(tmp_path / "behavior_models.yaml")
@@ -494,8 +494,8 @@ def _report_body(path: Path) -> dict[str, object]:
 
 
 def _fit_if(session: Path, artifact: Path, *, seed: int) -> None:
+    from src.features.feature_pipeline import featurize_wide_frame, load_resampled_session
     from src.models.isolation_forest import default_manifest_path, fit_isolation_forest
-    from src.preprocessing.feature_pipeline import featurize_wide_frame, load_resampled_session
 
     config = example_config(EXAMPLE_YAML)
     trained = fit_isolation_forest(

@@ -275,7 +275,7 @@ def test_segmenter_fallback_reproduces_mode01_labels() -> None:
     """
     from src.columns import MODE_COLUMN
     from src.config import CanaryConfig
-    from src.preprocessing.feature_pipeline import (
+    from src.features.feature_pipeline import (
         _decode_session_to_resampled,
         segment_or_constant,
     )

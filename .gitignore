@@ -73,21 +73,11 @@ data/control/
 # in data/fsm/ which IS committed (factual identifiers).
 xterra_fsm/
 
-# Trained model artifacts (not committed; manifests live alongside the binary).
-# Recursive — models live in per-type subdirs (models/isolation_forest/…).
-models/**/*.pt
-models/**/*.pth
-models/**/*.pkl
-models/**/*.joblib
-models/**/*.onnx
-models/*.pt
-models/*.pth
-models/*.pkl
-models/*.joblib
-models/*.onnx
-# Underscore-prefixed dirs are scratch (bake-off / replay output), excluded
-# everywhere else by the leading-`_` convention — keep them out of git too.
-models/_*/
+# Trained model artifacts, manifests included: models belong to the machine that
+# runs them (S03, operator 2026-10-04). On the Pi they live under
+# /data/canary/models; laptop-trained ones travel by upload or scp, never git.
+# Anchored: a bare `models/` would also match the src/models package.
+/models/
 
 # Claude Code local/runtime state (settings.json, hooks, agents, commands ARE versioned)
 .claude/overnight-mode

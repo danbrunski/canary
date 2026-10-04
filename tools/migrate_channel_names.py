@@ -449,6 +449,7 @@ def resolve_targets(args: argparse.Namespace) -> Targets:
         targets.files += [
             config.daemon.behavior_models,
             config.daemon.capture_profiles,
+            config.daemon.capture_profile_overrides,
             args.config,
         ]
     return targets
@@ -475,7 +476,8 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         type=Path,
         default=None,
         help="canary.yaml: adds its (profile-scoped) sessions root, models dir, "
-        "behavior_models, capture_profiles and the config file itself.",
+        "behavior_models, capture_profiles (and this machine's overrides) and the config "
+        "file itself.",
     )
     parser.add_argument("--profile", default=None, help="Vehicle profile slug for --config.")
     parser.add_argument(

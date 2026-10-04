@@ -37,10 +37,10 @@ from dataclasses import dataclass
 import numpy as np
 import pandas as pd
 
+from src.behavior.behavior_models import BehaviorModels, ColdStartRequirement
 from src.coerce import finite_float
 from src.columns import SESSION_COLUMN, TIMESTAMP_COLUMN
 from src.dataframe_utils import numeric_values
-from src.decode.behavior_models import BehaviorModels, ColdStartRequirement
 from src.preprocessing.features import CONTEXT_COLUMN_PREFIX
 from src.signals.pairing import to_seconds
 

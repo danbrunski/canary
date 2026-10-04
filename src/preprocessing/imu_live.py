@@ -1,7 +1,7 @@
 """Live IMU frame resolution and per-tick decimation (H02.4).
 
 The streaming counterpart of :mod:`src.preprocessing.imu_session`'s linear
-family, feeding :class:`~src.preprocessing.live.LiveFeatureSource`: raw
+family, feeding :class:`~src.features.live.LiveFeatureSource`: raw
 ``imu:ACCEL_X/Y/Z`` samples in, and once per tick the same aggregates
 ``imu_decimation.decimate_imu_wide`` computes offline —
 ``imu:ACCEL_LON_MAX`` / ``imu:ACCEL_LON_RMS`` / ``imu:ACCEL_LAT_MAX`` /

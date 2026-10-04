@@ -218,7 +218,7 @@ def reduce_long_frames(
     """Reduce a session's *decoded* long frames, given as time-disjoint parts.
 
     Each part must hold every row of its timestamps (``iter_session_parts``
-    guarantees it) and be in the decoder's order (``_decode_long_frame``
+    guarantees it) and be in the decoder's order (``session_decode.decode_long_frame``
     sorts it), because the pivot's ``aggfunc="last"`` picks, per timestamp and
     channel, the last non-null value in that order.
 

@@ -135,6 +135,12 @@ class CanObdLoopStats:
     requests_sent: int = 0
     readings_emitted: int = 0
     request_timeouts: int = 0
+    #: D03.18: multi-frame responses whose continuation never completed
+    #: within N_Cr (isotp.CONSECUTIVE_FRAME_TIMEOUT_SECONDS), and how often a
+    #: re-sent flow control was tried and then rescued the response.
+    continuation_losses: int = 0
+    flow_control_resends: int = 0
+    flow_control_rescues: int = 0
     #: Formal ECU refusals (0x7F <service> <NRC>) — distinct from
     #: `request_timeouts` (no frame at all). Folding these together made a
     #: silent ECU indistinguishable from one promptly saying "no" with a
@@ -755,6 +761,11 @@ def _receive_metrics(stats: CanObdLoopStats) -> dict[str, Any]:
         "frames_seen": stats.frames_seen,
         "parse_errors": stats.parse_errors,
         "discovery_frames_seen": stats.discovery_frames_seen,
+        # D03.18: a lost ISO-TP continuation ends at N_Cr, not the request
+        # timeout; these say how often, and how often re-sent FC saved it.
+        "continuation_losses": stats.continuation_losses,
+        "flow_control_resends": stats.flow_control_resends,
+        "flow_control_rescues": stats.flow_control_rescues,
     }
 
 

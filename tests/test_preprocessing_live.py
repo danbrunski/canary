@@ -13,8 +13,8 @@ import pytest
 
 from src.config import CanaryConfig, OperatingModeSpec
 from src.decode.bindings import Bindings, load_bindings
-from src.preprocessing.feature_pipeline import build_feature_frame
-from src.preprocessing.live import LiveFeatureSource, build_prepared_live_tick
+from src.features.feature_pipeline import build_feature_frame
+from src.features.live import LiveFeatureSource, build_prepared_live_tick
 from src.storage.parquet_writer import write_records_to_parquet
 from src.telemetry import TelemetryRecord
 from tests.configs import example_config
@@ -374,7 +374,7 @@ def test_live_gap_flags_follow_a_non_default_fast_channels_like_the_resampler(
     the same cells stale at serve as the resampler does offline. Before, live
     re-derived the rule from the default slow-channel hints and disagreed on
     both channels."""
-    import src.preprocessing.live as live_module
+    import src.features.live as live_module
     from src.columns import SESSION_COLUMN, TIMESTAMP_COLUMN, gap_column
     from src.preprocessing.resampler import ResampleConfig, resample_wide
 

@@ -31,7 +31,7 @@ import numpy as np
 import pandas as pd
 
 from src.analysis.fit_provenance import fitted_now, training_data_hash
-from src.decode.behavior_models import (
+from src.behavior.behavior_models import (
     Axis1D,
     BehaviorModel1D,
     DeviationConfig,
@@ -39,7 +39,7 @@ from src.decode.behavior_models import (
     PolynomialFit,
     RobustBaselineFit,
 )
-from src.decode.surface_eval import bin_indices, evaluate_1d
+from src.behavior.surface_eval import bin_indices, evaluate_1d
 
 log = logging.getLogger(__name__)
 
@@ -343,6 +343,6 @@ def _coefficient_of_determination(actual: np.ndarray, predicted: np.ndarray) -> 
     return 1.0 - ss_res / ss_tot
 
 
-#: :func:`evaluate_1d` lives in :mod:`src.decode.surface_eval` (R05.10);
+#: :func:`evaluate_1d` lives in :mod:`src.behavior.surface_eval` (R05.10);
 #: re-exported so analysis callers keep one import for a surface family.
 __all__ = ["evaluate_1d", "fit_binned_lookup", "fit_polynomial", "fit_robust_baseline"]

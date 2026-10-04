@@ -5,6 +5,8 @@
 // never accidentally render an HTML 500 page as if it were valid JSON.
 
 import type {
+  TyreAction,
+  TyreStatus,
   AnomaliesResponse,
   BehaviorLiveResponse,
   BehaviorModelsResponse,
@@ -652,6 +654,45 @@ export function updateProfileName(
  *  read routes. */
 export function getTrends(token: string, signal?: AbortSignal): Promise<TrendsResponse> {
   return controlJson<TrendsResponse>("/control/trends", token, { signal });
+}
+
+/** `/control/tyres` — tyre wear from the trip digests (rolling circumference
+ *  trend, estimated tread depth once a gauge reading is on the ledger). */
+export function getTyres(token: string, signal?: AbortSignal): Promise<TyreStatus> {
+  return controlJson<TyreStatus>("/control/tyres", token, { signal });
+}
+
+/** Record a tyre fact on the vehicle ledger: a gauge tread reading (the
+ *  baseline), a rotation or replacement (restarts the trend), or a pressure
+ *  change (named as a caveat). */
+export function recordTyreEvent(
+  token: string,
+  event: {
+    occurredAt: string;
+    action: TyreAction;
+    treadDepthMm?: number;
+    pressurePsi?: number;
+  },
+): Promise<{ event: unknown }> {
+  const titles: Record<TyreAction, string> = {
+    tread_measured: `Tread depth gauge reading: ${event.treadDepthMm ?? "?"} mm`,
+    rotated: "Tyres rotated",
+    replaced: "Tyres replaced",
+    pressure_changed: `Tyre pressure set to ${event.pressurePsi ?? "?"} psi`,
+  };
+  return controlJson("/control/vehicle-ledger", token, {
+    method: "POST",
+    body: jsonBody({
+      occurred_at: event.occurredAt,
+      kind: "maintenance",
+      title: titles[event.action],
+      tyres: {
+        action: event.action,
+        tread_depth_mm: event.treadDepthMm ?? null,
+        pressure_psi: event.pressurePsi ?? null,
+      },
+    }),
+  });
 }
 
 export function getPowerStatus(token: string, signal?: AbortSignal): Promise<PowerStatusResponse> {

@@ -43,7 +43,7 @@ from typing import TYPE_CHECKING, Any, cast
 import yaml
 
 from src.atomic_write import atomic_write_text
-from src.config import CanaryConfig, VehicleParameters
+from src.config import CanaryConfig, ProfilesConfig, VehicleParameters
 
 if TYPE_CHECKING:
     from src.signals.afr import FlashHistory
@@ -139,35 +139,75 @@ def _dedupe_slug(slug: str, taken: set[str]) -> str:
     return f"{slug}-{i}"
 
 
-def load_registry(path: Path) -> list[VehicleProfile]:
-    """Load the VIN → profile registry. A missing file is an empty registry."""
+def _registry_entries(path: Path) -> list[dict[str, Any]]:
     if not path.exists():
         return []
     raw = yaml.safe_load(path.read_text()) or {}
     entries = raw.get("profiles", []) if isinstance(raw, dict) else []
-    return [VehicleProfile.from_dict(entry) for entry in entries]
+    return [dict(entry) for entry in entries]
 
 
-def save_registry(path: Path, profiles: list[VehicleProfile]) -> None:
-    """Persist the registry (atomic temp-file + replace)."""
-    payload = {
-        "schema_version": REGISTRY_SCHEMA_VERSION,
-        "profiles": [p.to_dict() for p in profiles],
-    }
-    atomic_write_text(path, yaml.safe_dump(payload, sort_keys=False), mkdir=True)
+def read_registry_file(path: Path) -> list[VehicleProfile]:
+    """One registry file as written, with no overlay. A missing file is empty.
+
+    For reading the tracked registry's own content (its vehicle parameters);
+    the daemon's view of its vehicles is :func:`load_registry`.
+    """
+    return [VehicleProfile.from_dict(entry) for entry in _registry_entries(path)]
 
 
-def update_profile_name(path: Path, slug: str, name: str) -> VehicleProfile:
+def load_registry(profiles: ProfilesConfig) -> list[VehicleProfile]:
+    """The VIN → profile registry: the tracked file with this machine's overlay
+    merged over it by slug (S03.2).
+
+    The tracked ``registry_path`` holds the laptop-authored vehicle facts and is
+    never written at runtime. ``registry_overlay_path`` holds what this machine
+    learned: per tracked slug, only the top-level fields that differ (a display
+    name, a VIN, the calibration ID / CVN); a vehicle the tracked registry does
+    not know, whole. So a later laptop edit to a vehicle's parameters still
+    takes effect here, unless this machine has changed that same field.
+    """
+    merged = {entry["slug"]: entry for entry in _registry_entries(profiles.registry_path)}
+    for entry in _registry_entries(profiles.registry_overlay_path):
+        slug = entry["slug"]
+        merged[slug] = {**merged.get(slug, {}), **entry}
+    return [VehicleProfile.from_dict(entry) for entry in merged.values()]
+
+
+def save_registry(profiles: ProfilesConfig, entries: list[VehicleProfile]) -> None:
+    """Persist ``entries`` as the overlay over the tracked registry (atomic).
+
+    Stores only what differs from the tracked registry (see
+    :func:`load_registry`); the tracked file is never written.
+    """
+    tracked = {p.slug: p.to_dict() for p in read_registry_file(profiles.registry_path)}
+    overlay: list[dict[str, Any]] = []
+    for profile in entries:
+        current = profile.to_dict()
+        base = tracked.get(profile.slug)
+        if base is None:
+            overlay.append(current)
+            continue
+        changed = {key: value for key, value in current.items() if base.get(key) != value}
+        if changed:
+            overlay.append({"slug": profile.slug, **changed})
+    payload = {"schema_version": REGISTRY_SCHEMA_VERSION, "profiles": overlay}
+    atomic_write_text(
+        profiles.registry_overlay_path, yaml.safe_dump(payload, sort_keys=False), mkdir=True
+    )
+
+
+def update_profile_name(profiles: ProfilesConfig, slug: str, name: str) -> VehicleProfile:
     """Set a profile's display name in the registry; return the updated profile.
 
     Raises ``KeyError`` if no profile has that slug. Renaming touches only the
     ``name`` field — the slug and every path stays put.
     """
-    profiles = load_registry(path)
-    for profile in profiles:
+    registry = load_registry(profiles)
+    for profile in registry:
         if profile.slug == slug:
             profile.name = name.strip()
-            save_registry(path, profiles)
+            save_registry(profiles, registry)
             return profile
     raise KeyError(slug)
 
@@ -237,7 +277,7 @@ def _maybe_persist(
     if any(p.slug == profile.slug for p in profiles):
         return
     profiles.append(profile)
-    save_registry(config.profiles.registry_path, profiles)
+    save_registry(config.profiles, profiles)
     log.warning(
         "registered vehicle profile %r (vin=%s) — set a display name in the "
         "dashboard Profiles panel",
@@ -271,11 +311,13 @@ def _apply_calibration_probe(
         and probe.calibration_id
         and probe.calibration_id != previous_calibration_id
     )
+    before = (profile.calibration_id, profile.cvn)
     if probe.calibration_id:
         profile.calibration_id = probe.calibration_id
     if probe.cvn:
         profile.cvn = probe.cvn
-    save_registry(config.profiles.registry_path, profiles)
+    if (profile.calibration_id, profile.cvn) != before:
+        save_registry(config.profiles, profiles)
     if reflashed:
         _record_calibration_boundary(config, profile, previous_calibration_id)
 
@@ -331,7 +373,7 @@ def _resolve_active_profile(
     A registered profile's calibration ID/CVN (Task 3.4) is refreshed from the
     same probe; a changed calibration ID is logged as a corpus-boundary event.
     """
-    profiles = load_registry(config.profiles.registry_path)
+    profiles = load_registry(config.profiles)
     by_slug = {p.slug: p for p in profiles}
     by_vin = {p.vin: p for p in profiles if p.vin}
 
@@ -381,11 +423,47 @@ def resolve_active_profile(
     is logged, never fatal: the read-only fallback still finds the files.
     """
     profile = _resolve_active_profile(config, probe=probe, override_slug=override_slug)
+    scoped = scope_config(config, profile)
     try:
-        migrate_legacy_calibration(scope_config(config, profile))
+        migrate_legacy_calibration(scoped)
     except (OSError, ValueError) as exc:
         log.warning("legacy calibration migration failed: %s", exc)
+    try:
+        seed_machine_owned_files(scoped)
+    except OSError as exc:
+        log.warning("seeding machine-owned files failed: %s", exc)
     return profile
+
+
+#: Files a machine owns once it has them, seeded from the tracked profile
+#: directory the first time (S03.3). ``behavior_models.yaml``: the Pi's refit
+#: job rewrites it, so it is a trained artifact, Pi-owned (operator decision
+#: 2026-10-04); the tracked copy is only where a fresh install starts.
+SEEDED_FROM_PROFILE: tuple[str, ...] = ("behavior_models",)
+
+
+def seed_machine_owned_files(config: CanaryConfig) -> list[Path]:
+    """Copy each :data:`SEEDED_FROM_PROFILE` file from the tracked profile
+    directory to its configured location when that is somewhere else and empty.
+
+    Never overwrites: after the first copy the machine's file is authoritative,
+    and a laptop-trained replacement arrives the way models do (upload or
+    ``scp``), not through git. Returns the files written.
+    """
+    written: list[Path] = []
+    for name in SEEDED_FROM_PROFILE:
+        target: Path = getattr(config.daemon, name)
+        source = profile_dir(config) / target.name
+        if target.exists() or not source.exists() or target.resolve() == source.resolve():
+            continue
+        atomic_write_text(target, source.read_text(), mkdir=True)
+        log.info(
+            "seeded %s from the tracked profile",
+            name,
+            extra={"source": str(source), "target": str(target)},
+        )
+        written.append(target)
+    return written
 
 
 def resolve_profile_for_tooling(config: CanaryConfig, slug: str | None) -> VehicleProfile:
@@ -399,7 +477,7 @@ def resolve_profile_for_tooling(config: CanaryConfig, slug: str | None) -> Vehic
     """
     slug = slug if slug is not None else config.scoped_profile
     if slug is not None:
-        for profile in load_registry(config.profiles.registry_path):
+        for profile in load_registry(config.profiles):
             if profile.slug == slug:
                 return profile
         return _default_profile(config, slug=slug)
@@ -465,6 +543,7 @@ def scope_config(config: CanaryConfig, profile: VehicleProfile) -> CanaryConfig:
             "accepted_baselines": _scope_file(config.daemon.accepted_baselines, slug),
             "custom_pids": _scope_file(config.daemon.custom_pids, slug),
             "capture_profiles": _scope_file(config.daemon.capture_profiles, slug),
+            "capture_profile_overrides": _scope_file(config.daemon.capture_profile_overrides, slug),
             "afr_calibration": _scope_file(config.daemon.afr_calibration, slug),
             "kline_profile": _scope_file(config.daemon.kline_profile, slug),
             "catalog_db": _scope_file(config.daemon.catalog_db, slug),
@@ -634,7 +713,7 @@ def legacy_adoption(config: CanaryConfig) -> LegacyAdoption:
         shares, why = _registries_share_history(config, legacy_registry)
         return LegacyAdoption(legacy, shares, why)
     slug = config.collection.storage_path.name
-    registered = [profile.slug for profile in load_registry(config.profiles.registry_path)]
+    registered = [profile.slug for profile in load_registry(config.profiles)]
     if registered == [slug]:
         return LegacyAdoption(
             legacy, True, "it has no flash registry and this is the only registered profile"

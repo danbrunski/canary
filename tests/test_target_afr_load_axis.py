@@ -20,8 +20,7 @@ import pandas as pd
 import pytest
 
 from src.decode.dids import load_repo_did_map
-from src.preprocessing.channel_units import catalog_channel_unit, channel_units_for
-from src.preprocessing.feature_pipeline import (
+from src.features.feature_pipeline import (
     DID_VIEW_EXCLUSION,
     FeaturePolicy,
     build_feature_spec,
@@ -29,6 +28,7 @@ from src.preprocessing.feature_pipeline import (
     derived_channels_reached,
     feature_policy_exclusions,
 )
+from src.preprocessing.channel_units import catalog_channel_unit, channel_units_for
 from src.signals import vehicle_signals
 from src.signals.afr import (
     DEFAULT_TARGET_LOAD_AXIS,

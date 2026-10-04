@@ -370,14 +370,14 @@ def test_read_behavior_models_returns_empty_when_file_missing(tmp_path: Path) ->
 def test_read_behavior_models_round_trips_yaml(tmp_path: Path) -> None:
     """Persisted behavior_models.yaml deserializes back through the loader
     cleanly and the JSON-mode dump is dashboard-ready."""
-    from src.dashboard.api import read_behavior_models
-    from src.decode.behavior_models import (
+    from src.behavior.behavior_models import (
         Axis1D,
         BehaviorModel1D,
         BehaviorModels,
         PolynomialFit,
         dump_behavior_models,
     )
+    from src.dashboard.api import read_behavior_models
 
     models = BehaviorModels(
         schema_version=1,
@@ -437,7 +437,7 @@ def test_behavior_models_endpoint_returns_yaml_content(
     config: CanaryConfig, anomalies_dir: Path, tmp_path: Path
 ) -> None:
     """End-to-end: refit dumps yaml → endpoint surfaces it for the dashboard."""
-    from src.decode.behavior_models import (
+    from src.behavior.behavior_models import (
         Axis1D,
         BehaviorModel1D,
         BehaviorModels,
@@ -484,7 +484,7 @@ def test_behavior_models_endpoint_returns_yaml_content(
 def _write_accepted_baselines(
     path: Path, *, review_by: str = "2026-11-17", reason: str = "known weak #3 injector"
 ) -> None:
-    from src.decode.accepted_baselines import (
+    from src.behavior.accepted_baselines import (
         AcceptedBaselineOverride,
         AcceptedBaselines,
         DirectionalBand,

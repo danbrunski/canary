@@ -215,12 +215,25 @@ daemon health endpoint. It uses the checkout's configured Git remote, so
 private-repository installs still need a working deploy key or SSH credential
 for now.
 
-`models/` belongs to the Pi, not to git. A manifest describes the binary beside
-it, and binaries never travel by git (`canaryctl models upload`, scp, or a
-retrain on the Pi), so a pulled manifest would not match the binary on disk.
-Local changes there never block an update, and neither the pull nor a rollback
-changes anything under `models/` — every tracked path there is put back exactly
-as it was.
+Models belong to the Pi, not to git. A manifest describes the binary beside it,
+and binaries never travel by git (`canaryctl models upload`, scp, or a retrain
+on the Pi), so a pulled manifest would not match the binary on disk. Since S03
+(2026-10-04) nothing under `models/` is tracked at all, and the Pi keeps its
+models in `daemon.state_dir` (`/data/canary/models/<vehicle>/`, with
+`behavior_models.yaml`). The updater still puts any tracked `models/` path back
+exactly as it was after a pull or rollback, which matters only when crossing
+the commit that untracked the two manifests.
+
+**Nothing the Pi writes is in the checkout.** With `daemon.state_dir:
+/data/canary` (set in `canary.pi.example.yaml`), every runtime path resolves
+under it: `anomalies/`, `models/`, and `control/` (jobs, ledgers, audit, the
+session catalog, capture-profile overrides, the vehicle-registry overlay). The
+tracked files the daemon reads stay in the checkout and are never written:
+the capture-profile catalog (the dashboard saves overrides beside the other
+state, layered by profile name), `profiles.yaml` (names, VINs and calibration
+IDs learned on the Pi go to the overlay) and the behavior policy and validation
+documents. Don't also pin individual paths in `canary.yaml`: an explicit path
+wins over `state_dir`.
 
 What runs is decided from `git diff --name-only <before> <after>` and from the
 artefacts on disk, and every decision is printed as `ran (<reason>)` or

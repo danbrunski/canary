@@ -99,7 +99,7 @@ class BandExcessAccumulator:
     """Two-sided CUSUM of a residual's excess beyond its warning half-width.
 
     The arithmetic of ``BandExcessPersistence`` (B05.3,
-    ``src.decode.behavior_models``), in one place for the daemon's gate, the
+    ``src.behavior.behavior_models``), in one place for the daemon's gate, the
     offline evaluator and the training-fold fit: ``high`` accumulates
     ``r - w`` and ``low`` accumulates ``-r - w``, each floored at zero. Call
     :meth:`update` only for evaluated ticks; a gap longer than
