@@ -311,7 +311,9 @@ system starting beside it.
   19:43Z daemon's drive (cold-boot tick included) missed 23 of 2,271 inference
   ticks, 8 `compute_busy` and 15 `overrun`.
   The first-tick cost has grown with the corpus (49.8 s cold on 2026-09-24 at
-  33,273 files). Still owed: a *steady-state* tick (0 footers) during a drive,
+  33,273 files). The next tick, 21:46Z, parked (`no_data`), was the
+  steady-state kind: 1.18 s, 4 footers read (the day's new sessions), 47,165
+  files statted. Still owed: a *steady-state* tick (0 footers) during a drive,
   which needs a drive running at least an hour past the daemon's last start.
 
 ## Needs the truck
