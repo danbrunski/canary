@@ -946,7 +946,13 @@ def test_row_pairing_and_counting_callers_refuse_a_change_only_decoded_provider(
         runtime_clock_report(long_changed, runtime_spec=rpm)
 
     # rom_trace: cell residency counts and times pairs of stored rows.
-    axis = {"axis_mapping": "verified", "scale": 1.0, "offset": 0.0, "evidence": "test"}
+    axis = {
+        "axis_mapping": "verified",
+        "axis_units": "display",
+        "scale": 1.0,
+        "offset": 0.0,
+        "evidence": "test",
+    }
     table = TableInfo(
         kind="fuel_targets", title="t", x_label="x", x_unit="rpm", y_label="y",
         y_unit="rpm", unit="afr",

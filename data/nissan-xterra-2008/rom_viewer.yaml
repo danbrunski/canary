@@ -13,26 +13,43 @@ tables:
     # W05.1 — the ECM's own coordinates into this table (data/dids.yaml
     # `memory:`). `axis_mapping` is a required state per axis: an unverified
     # axis carries no scale, and the page and the cell-residency endpoint
-    # refuse to place an ECM cell until it is settled.
+    # refuse to place an ECM cell until it is settled. A verified axis names
+    # the breakpoints it is compared with (`axis_units`): `raw` compares the
+    # channel's raw count (its catalog decode undone) with the ROM's axis
+    # bytes; `display` compares the stored value with the displayed axis.
     trace:
       x:
         channel: 'mem:ECM_FUEL_TARGET_MAP_X_TRACE'
-        axis_mapping: unverified
+        axis_mapping: verified
+        axis_units: raw
+        scale: 1.0
+        offset: 0.0
         evidence: >-
-          Not settled. UpRev displays this word as raw x 0.250859 ("Fuel
-          Target X Trace", 405 rows, 2026-09-20), but how that value lands on
-          the loaded ROM's BFS axis (raw 0x34-0x80, displayed 8.76-21.57 ms)
-          is not established, and no recorded session holds the channel: the
-          rom-trace profile that polled it stalled with zero requests sent,
-          and none of the 2026-09-21 captures (fuel-target-research, tuning x2)
-          selected it. To settle it, capture this channel beside
-          did:ECM_AIR_CHARGE (BFS, confirmed raw x 0.00049 ms) holding steady
-          points in at least three load columns, fit trace against BFS
-          same-instant with compare_channels, and check the fit puts each
-          steady point in the column its BFS names.
+          Settled 2026-10-04 from the ECM program and a drive
+          (docs/ecu-firmware-analysis.md, "Target AFR lookup, decoded
+          (settles W05.1)" and "Live verification: the 2026-10-04 drive").
+          Code: the Target AFR function 0x055DB2 passes the byte at
+          0xFFFF103E straight into its lookup 0x0269AC, whose load-axis
+          search 0x027114 compares it directly with the raw BFS axis bytes
+          (0x34-0x80 at 0xC894), with no scale or offset, and interpolates
+          bilinearly (0x026F40). So the raw X count lands on the raw axis
+          bytes unchanged; the catalog stores the byte as raw x 0.250859,
+          and that decode is undone before the comparison, never compared
+          scaled. The byte is min(255, BFS x 128 / 44019) of the BFS word at
+          0xFFFF103A (44019 is UpRev's Load Point Scaler), so one X count is
+          0.1685 ms of BFS. Drive: on _capture-ram-study-2026-10-04T204557 X
+          equals floor(BFS word x 128 / 44019) on 168 of 194 same-read
+          pairs, and the other 26 are -4..+2 counts, both signs, at
+          transients (1,564 of 1,564 on P02.14's steadier capture). Pinned
+          by tests/test_rom_trace.py on a committed slice of that drive.
+          Caveat: while the pedal-switch enrichment flag (bit 0 of
+          mem:ECM_PEDAL_ENRICH_FLAGS) is set, the lookup reads the last
+          column (its load input becomes 0xFF) but this byte keeps its BFS
+          value, so the ECM cell then sits off the column actually read.
       y:
         channel: 'mem:ECM_ENGINE_SPEED_RAM'
         axis_mapping: verified
+        axis_units: display
         scale: 1.0
         offset: 0.0
         evidence: >-
@@ -40,7 +57,21 @@ tables:
           2,825/3,000 same-reply reads (ram-timing-repro, 2026-09-21), and
           UpRev reads this address as its own "Fuel Target Y Trace" (raw x
           12.4995, 2026-09-20 CSV). The table's rpm axis is decoded as count x
-          50 rpm, so coordinate and breakpoints share units unchanged.
+          50 rpm, so coordinate and breakpoints share units unchanged. The
+          code agrees (docs/ecu-firmware-analysis.md, 2026-10-04): the
+          rpm-axis search 0x027194 compares the word (12.5 rpm per count)
+          with axis byte x 4, which is word x 12.5 against byte x 50 rpm,
+          the same comparison in rpm.
+      # Both axes, both ends: what the lookup reads past an axis end.
+      out_of_range:
+        behaviour: clamp
+        evidence: >-
+          The interpolation at 0x026F40 clamps past either end of either
+          axis to the first or last row and column
+          (docs/ecu-firmware-analysis.md, "Target AFR lookup, decoded").
+          Two of the four edges were found independently from UpRev logs
+          (P02.15: afr_calibration.yaml load_axis_out_of_range.below_first
+          and rpm_axis_out_of_range.above_last).
       unavailable_note: >-
         No capture profile polls the fuel-target trace channels on 2026-09-21:
         the rom-trace profile was retired after its continuous session stalled
@@ -54,6 +85,6 @@ tables:
     y_unit: rpm
     unit: '%'
 warnings:
-  - 'RPM/BFS tracing is an inferred lookup, not an ECU-reported active cell. Pedal enrichment can override the normal fuel-target column. The ECM cell, drawn beside it, comes from the map-trace memory channels and only where their axis mapping is verified.'
-  - 'Fuel Compensation has one verified cell but not a verified complete layout. Its live Volumetric Flow Ratio channel is also unresolved; throttle, calculated load and BFS are not substitutes.'
+  - 'RPM/BFS tracing is an inferred lookup, not an ECU-reported active cell. The ECM cell, drawn beside it, comes from the map-trace memory channels and only where their axis mapping is verified; past an axis end it is the edge cell, because the ECM clamps there. Pedal enrichment moves the ECM''s read to the last load column without moving the X trace, so neither marker shows it.'
+  - 'Fuel Compensation has one verified cell but not a verified complete layout. Its load (Volumetric Flow Ratio) input is the RAM byte 0xFFFF118A (mem:ECM_FUEL_COMP_X_INPUT) and its axes are verified from code (0xCACD rpm, 0xCB29 load, the reverse of UpRev''s labels), but what that byte measures is still open, so no operating point is traced on it; throttle, calculated load and BFS are not substitutes.'
   - 'Map selection is for viewing only. CANary does not read or change the ECU active map slot here.'

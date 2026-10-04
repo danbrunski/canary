@@ -183,38 +183,75 @@ const X = "mem:ECM_FUEL_TARGET_MAP_X_TRACE";
 const Y = "mem:ECM_ENGINE_SPEED_RAM";
 const NOTE =
   "No capture profile polls the fuel-target trace channels: the rom-trace profile was retired.";
+/** A synthetic trace whose stored values are already in axis units, or the
+ *  unverified state (kept as a schema state after W05.1 settled the X axis). */
 function withTrace(verified: boolean): RomInspection {
   const trace: TableTrace = {
     x: verified
       ? {
           channel: X,
           axis_mapping: "verified",
+          axis_units: "display",
           scale: 1,
           offset: 0,
           evidence: "synthetic",
           request_channel: "mem:fuel_axis",
+          stored_decode: { scale: 1, offset: 0 },
         }
       : {
           channel: X,
           axis_mapping: "unverified",
+          axis_units: null,
           scale: null,
           offset: null,
           evidence: "Not settled: needs a capture beside BFS.",
           request_channel: "mem:fuel_axis",
+          stored_decode: { scale: 1, offset: 0 },
         },
     y: {
       channel: Y,
       axis_mapping: "verified",
+      axis_units: "display",
       scale: 1,
       offset: 0,
       evidence: "rpm",
       request_channel: "mem:spark",
+      stored_decode: { scale: 12.5, offset: 0 },
     },
     unavailable_note: NOTE,
+    out_of_range: null,
   };
   return {
     ...result,
     tables: result.tables.map((t) => (t.status === "available" ? { ...t, trace } : t)),
+  };
+}
+/** W05.1 as shipped: the X byte is stored as raw × 0.250859 and lands on the
+ *  ROM's raw BFS axis bytes (0x34 = 8.76 ms, 0x44 = 11.46 ms); both clamp. */
+const X_STORED_SCALE = 0.250859;
+function withShippedTrace(): RomInspection {
+  const base = withTrace(true);
+  return {
+    ...base,
+    tables: base.tables.map((t) =>
+      t.status === "available" && t.trace
+        ? {
+            ...t,
+            x_axis_raw: [0x34, 0x44],
+            y_axis_raw: [0x18, 0x20],
+            trace: {
+              ...t.trace,
+              x: {
+                ...t.trace.x,
+                axis_units: "raw" as const,
+                evidence: "firmware",
+                stored_decode: { scale: X_STORED_SCALE, offset: 0 },
+              },
+              out_of_range: { behaviour: "clamp" as const, evidence: "0x026F40" },
+            },
+          }
+        : t,
+    ),
   };
 }
 /** Memory rows arrive on the stream keyed `obd:mem:<NAME>`. */
@@ -296,6 +333,52 @@ describe("ROM maps — ECM trace (W05.1–W05.5)", () => {
       vi.advanceTimersByTime(300);
     });
     expect(screen.getByText(/Disagreed on 1 of 1 ECM samples/)).toBeInTheDocument();
+  });
+
+  it("draws the ECM cell from the raw X byte on the raw BFS axis (W05.1)", async () => {
+    // Stored 17.06 (= 0x44 x 0.250859) is the byte 0x44: column 1, 11.46 ms.
+    // Compared scaled against the raw bytes it would sit below 0x34.
+    routeControl(withShippedTrace());
+    const view = render(
+      <RomMapsPanel
+        {...traceProps(
+          0x44 * X_STORED_SCALE,
+          1200,
+          polling(["ECM_FUEL_TARGET_MAP_X_TRACE", "ECM_ENGINE_SPEED_RAM"]),
+        )}
+      />,
+    );
+    await upload();
+    await confirm();
+    const ecm = view.container.querySelectorAll('[data-ecm="cell"]');
+    expect(ecm).toHaveLength(1);
+    expect(ecm[0]).toHaveAttribute("aria-label", expect.stringContaining("11.46 ms"));
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "ECM cell differs from the inferred cell by +1 column (ECM 11.46 vs inferred 8.76 ms)",
+    );
+    expect(screen.queryByText(/ECM cell not drawn/)).not.toBeInTheDocument();
+  });
+
+  it("outlines the edge cell the ECM reads past the axes, and says so", async () => {
+    // Idle: X byte 17 (BFS ~2.9 ms) and 750 rpm are below both first breakpoints.
+    routeControl(withShippedTrace());
+    const view = render(
+      <RomMapsPanel
+        {...traceProps(
+          17 * X_STORED_SCALE,
+          750,
+          polling(["ECM_FUEL_TARGET_MAP_X_TRACE", "ECM_ENGINE_SPEED_RAM"]),
+        )}
+      />,
+    );
+    await upload();
+    await confirm();
+    const ecm = view.container.querySelectorAll('[data-ecm="cell"]');
+    expect(ecm).toHaveLength(1);
+    expect(ecm[0]).toHaveAttribute("aria-label", expect.stringContaining("1200 RPM, 8.76 ms"));
+    expect(
+      screen.getByText(/Edge cell: .*below the first breakpoint.*reads the edge there/),
+    ).toBeInTheDocument();
   });
 
   it("says the cells agree when they do", async () => {

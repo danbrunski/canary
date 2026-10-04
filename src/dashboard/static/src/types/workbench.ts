@@ -397,6 +397,11 @@ export interface RomTable {
   reason: string | null;
   x_axis: number[];
   y_axis: number[];
+  /** W05.1: the ROM's axis bytes, which a `raw` trace axis lands on. Empty
+   *  on TBD tables; absent where nothing carries them (a raw trace axis is
+   *  then refused by name, never compared with the displayed axis). */
+  x_axis_raw?: number[];
+  y_axis_raw?: number[];
   values: number[][];
   raw: number[][];
   /** W05.1: the ECM's trace channels for this table and whether their
@@ -419,17 +424,29 @@ export interface RomInspection {
 export interface AxisTrace {
   channel: string;
   axis_mapping: "verified" | "unverified";
+  /** Which breakpoints the mapped value lands on: the axis in its displayed
+   *  units, or the ROM's raw axis bytes (from the channel's raw count). Null
+   *  when unverified. */
+  axis_units: "display" | "raw" | null;
+  /** `axis = input × scale + offset`; the input is the stored value
+   *  (`display`) or the raw count (`raw`). */
   scale: number | null;
   offset: number | null;
   evidence: string;
   /** Scheduler request carrying the channel (`mem:<window>`), or null. */
   request_channel: string | null;
+  /** The catalog decode the channel is stored under, which a `raw` axis
+   *  undoes; null when it is not a catalog memory channel. */
+  stored_decode: { scale: number; offset: number } | null;
 }
 
 export interface TableTrace {
   x: AxisTrace;
   y: AxisTrace;
   unavailable_note: string | null;
+  /** What the ECM's lookup reads past an axis end; null when not
+   *  established (no cell is then placed past an end). */
+  out_of_range: { behaviour: "clamp"; evidence: string } | null;
 }
 
 /** `GET /control/sessions/{id}/cell-residency` (W05.6). */
@@ -445,6 +462,9 @@ export type CellResidency =
       dwell_s: number[][];
       samples: number;
       outside_axes: number;
+      /** Samples past an axis end, binned in the edge cell the ECM reads
+       *  (only when the table declares the clamp). */
+      clamped_samples?: number;
       reason: null;
     }
   | {

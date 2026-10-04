@@ -19,7 +19,7 @@ once that stall is found.
 
 ## Trace
 
-- [~] **W05.1 — Map each table to its trace channels in data, not code.** Add
+- [x] **W05.1 — Map each table to its trace channels in data, not code.** Add
   to `rom_viewer.yaml`, per table: the X and Y trace channel and how a trace
   value maps onto that table's axis breakpoints. The X trace is in axis units
   scaled ×0.250859 and its relation to BFS milliseconds is **not** established
@@ -68,24 +68,86 @@ once that stall is found.
   ≈0.1695 ms per count against the axis decode of 0.1685. It stays `[~]`
   until the lookup's interpolation helpers are decoded, which shows they
   compare the inputs with the raw axis bytes.
+  *2026-10-04, closed:* the helpers are decoded (`docs/ecu-firmware-analysis.md`,
+  "Target AFR lookup, decoded (settles W05.1)"): the load search `0x027114`
+  compares the byte at `0xFFFF103E` directly with the raw BFS axis bytes
+  (`0x34…0x80` at `0xC894`), no scale or offset; the rpm search `0x027194`
+  compares the word (12.5 rpm/count) with axis byte × 4; interpolation is
+  bilinear (`0x026F40`) and clamps at the edges. Live check
+  (`_capture-ram-study-2026-10-04T204557`): X = floor(BFS word × 128 / 44019)
+  on 168 of 194 same-read pairs, the rest −4..+2 counts at transients.
+  `rom_viewer.yaml` X is now `axis_mapping: verified`, `axis_units: raw`,
+  scale 1, offset 0, with that evidence; Y gains `axis_units: display` and
+  the code corroboration; the table declares `out_of_range: clamp`. Schema
+  (`src/analysis/rom_trace.py`): a verified axis must state `axis_units`
+  (`display` = displayed breakpoints, `raw` = the ROM's axis bytes), so a
+  scaled value can no longer be compared with raw bytes by omission. A `raw`
+  axis undoes the channel's own `data/dids.yaml` decode (`stored_decode`,
+  never a copied reciprocal) and refuses values that do not come back to
+  whole counts (`stored_not_whole_counts`). The inspect response carries
+  `x_axis_raw`/`y_axis_raw` and each axis's `stored_decode` (from
+  `TargetEditor.export()`, which gains `rpm_raw`/`bfs_raw`, so
+  `scripts/rom_targets.py`'s JSON output carries them too); `lib/romTrace.ts`
+  lands the ECM point on the raw bytes, refusing by name when a table lacks
+  them. Still refusing: an `unverified` axis (no shipped table keeps one);
+  Fuel Compensation (no trace mapping, no verified layout:
+  `no_trace_mapping` / `table_axes_unverified`). Tests:
+  `test_rom_trace.py::test_an_x_byte_on_a_breakpoint_lands_exactly_on_that_column`,
+  `::test_an_x_byte_between_breakpoints_interpolates_proportionally`,
+  `::test_an_x_byte_past_the_axis_reads_the_edge_column`,
+  `::test_real_drive_ecm_cell_lands_where_bfs_and_rpm_put_it` (committed
+  slice `tests/fixtures/rom_trace/_capture-ram-study-2026-10-04T204557`,
+  568 rows. On the axis (BFS inside 8.76–21.57 ms, decided by BFS alone so
+  every mapping is scored on the same pairs) the ECM cell equals the cell
+  inferred from the same-read BFS word and the rpm word on **36 of 38**
+  pairs, four load columns reached, both misses one column with X within 4
+  counts of the BFS count. Controls on the same 38 fail: stored value
+  against the raw bytes 6/38 (every stored value is below 0x34, so it
+  clamps), raw+4 27/38, raw×1.1 19/38, raw−8 18/38. All 141 pairs agree on
+  139, a clamp-inclusive figure: 103 of them sit below 8.76 ms, where both
+  sides clamp to column 0 whatever the mapping),
+  `::test_real_drive_residency_through_the_shipped_mapping`,
+  `::test_a_verified_axis_must_state_which_breakpoints_it_lands_on`,
+  `::test_an_unverified_axis_still_refuses_by_name`,
+  `::test_shipped_fuel_compensation_table_still_has_no_trace`,
+  `::test_residency_bins_raw_counts_on_the_raw_axis`,
+  `::test_residency_names_values_stored_under_another_decode`,
+  `::test_residency_clamps_past_the_axes_when_the_table_declares_it`, and
+  `::test_shipped_profile_maps_the_fuel_target_trace_with_both_axes_verified`
+  (renamed from `..._but_refuses_its_x_axis`, cited in the 2026-09-21 note);
+  `test_rom_maps_api.py::test_profile_driven_slots_and_unverified_tables`;
+  `romTrace.test.ts` "ECM trace on the raw BFS axis (W05.1)" (4 tests);
+  `RomMapsPanel.test.tsx` "draws the ECM cell from the raw X byte on the raw
+  BFS axis (W05.1)", "outlines the edge cell the ECM reads past the axes".
+  Known limit: while the pedal-switch flag (bit 0 of
+  `mem:ECM_PEDAL_ENRICH_FLAGS`) is set the ECM reads the last column but the
+  X byte keeps its BFS value, so the ECM cell sits off the column read; stated
+  in the X evidence and the page warning, not modelled.
 - [x] **W05.2 — Draw the ECM's cell.** From the live telemetry stream
   (`useTelemetryStream`), outline the cell the trace channels point at. Keep
   today's nearest-breakpoint / dashed-neighbour rendering for the *inferred*
   lookup and draw both.
-  *Done in code, inert on the truck until W05.1's X axis is verified:*
-  `lib/romTrace.ts` `ecmPoint`/`ecmPosition` (memory rows are read on their
-  real stream key `obd:mem:<NAME>`), drawn as a double ring (`data-ecm="cell"`)
-  beside the inferred outline; refused with the mapping's evidence when
-  unverified. Tests: `RomMapsPanel.test.tsx` "outlines the ECM cell beside the
-  inferred one…", "refuses the ECM cell while the X-trace mapping is
-  unverified…"; `romTrace.test.ts` "maps a verified trace…"; e2e
-  `romMaps.spec.ts` asserts the named refusal.
+  *Done in code; live since W05.1 (2026-10-04) wherever a profile polls the
+  trace channels:* `lib/romTrace.ts` `ecmPoint`/`ecmPosition` (memory rows are
+  read on their real stream key `obd:mem:<NAME>`; the X byte lands on the
+  ROM's raw BFS axis bytes; past an axis end the edge cell, said as such),
+  drawn as a double ring (`data-ecm="cell"`) beside the inferred outline;
+  still refused with the mapping's evidence for any unverified axis. Tests:
+  `RomMapsPanel.test.tsx` "outlines the ECM cell beside the inferred one…",
+  "refuses the ECM cell while the X-trace mapping is unverified…", "draws the
+  ECM cell from the raw X byte on the raw BFS axis (W05.1)", "outlines the
+  edge cell the ECM reads past the axes"; `romTrace.test.ts` "maps a verified
+  trace…"; e2e `romMaps.spec.ts` (shipped verified mapping, nothing polling
+  the trace channels) asserts the trace greys out ("ECM trace greyed out"),
+  no ECM cell is drawn, and no "ECM cell not drawn" refusal is shown.
 - [x] **W05.3 — Show the disagreement.** When the ECM's cell and the inferred
   cell differ, say so and by how much. A persistent disagreement is a finding
   — a wrong axis decode, a wrong BFS scale, or interpolation the inference does
   not model — and the point of keeping both is to see it.
-  *Done (same W05.1 caveat):* `cellDisagreement`/`describeDisagreement` state
-  ±rows/columns with both coordinates in axis units; a running tally ("disagreed
+  *Done; live since W05.1:* `cellDisagreement`/`describeDisagreement` state
+  ±rows/columns with both coordinates in displayed axis units (the raw X byte
+  placed between the displayed breakpoints of its cell; "≤8.76" when it is
+  below the axis); a running tally ("disagreed
   on k of n ECM samples…; current disagreement for N s") makes persistence
   visible. Tests: `RomMapsPanel.test.tsx` "outlines the ECM cell…" / "says the
   cells agree when they do"; `romTrace.test.ts` "measures disagreement…".
@@ -134,7 +196,14 @@ once that stall is found.
   in `src/dashboard/routes/workbench.py`. `available: false` + `reason` for
   `axis_mapping_unverified` (refused before spawning a child — the shipped
   state until W05.1), `not_captured` (+`missing`), `revision_unknown`,
-  `axes_not_recorded`, `table_axes_unverified`. Documented in
+  `axes_not_recorded`, `table_axes_unverified`. *Since W05.1 (2026-10-04)*
+  the fuel-target table bins: X as raw counts on the raw BFS axis bytes,
+  clamped samples in the edge cell (`edges`, `clamped_samples`, `clamped`),
+  new reasons `raw_axes_not_recorded`, `stored_decode_unknown`,
+  `stored_not_whole_counts`. On the 2026-10-04 ram-study drive only 1 of 194
+  X reads pairs with an rpm word inside `PAIR_MAX_SEPARATION` (250 ms): that
+  profile read the two windows a median 0.6 s apart every 5 s
+  (`::test_real_drive_residency_through_the_shipped_mapping`). Documented in
   `docs/headless-api.md`. Tests: `test_rom_trace.py::test_residency_*`,
   `::test_cell_residency_route_runs_through_the_child`,
   `::test_cell_residency_route_refuses_unverified_mapping_without_a_child`,
@@ -155,7 +224,7 @@ once that stall is found.
   overlay a log binned on another revision's axes".
 - [x] **W05.8 — Live coverage.** The same overlay accumulating from the stream
   during an active capture, client-side only, reset when the capture ends.
-  *Done (ECM-trace based, so inert until W05.1):* one count per new ECM
+  *Done (ECM-trace based; live since W05.1):* one count per new ECM
   sample while a capture is active; reset when the capture ends or another
   starts. Test: `RomMapsPanel.test.tsx` "accumulates live coverage during a
   capture and resets when it ends".
@@ -177,6 +246,6 @@ With a profile carrying the trace channels recording, the trace follows the ECM'
 any disagreement with the inferred cell; with nothing polling them, it greys
 out and names the fix; the overlay shows which cells a selected log visited.
 *Truck check:* one drive watching the fuel-target trace cross at least three
-load columns. **Open** — the Pi/truck was unreachable on 2026-09-21, and the
-check first needs W05.1's X mapping settled and a profile carrying the trace
-channels (the `rom-trace` stall).
+load columns. **Open** — the Pi/truck was unreachable on 2026-09-21. W05.1's X
+mapping is settled (2026-10-04); the check still needs a profile in the
+catalog carrying the trace channels (the `rom-trace` stall) and the drive.

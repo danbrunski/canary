@@ -4,15 +4,21 @@ import type { CaptureProfile, StatusResponse } from "../types";
 import type { RomTable } from "./romMaps";
 import {
   addCoverage,
+  axisPosition,
   cellDisagreement,
   coverageClass,
   coverageColor,
+  describeClamp,
+  describeDisagreement,
+  ecmDisplay,
   ecmPoint,
   ecmPosition,
+  ecmValueRefusal,
   emptyCoverage,
   mappingRefusal,
   profilesCarrying,
   residencyMatchesTable,
+  traceBreakpoints,
   traceLiveness,
   traceGate,
   traceSample,
@@ -48,30 +54,61 @@ const verified: TableTrace = {
   x: {
     channel: X,
     axis_mapping: "verified",
+    axis_units: "display",
     scale: 0.5,
     offset: 1,
     evidence: "synthetic",
     request_channel: "mem:fuel_axis",
+    stored_decode: { scale: 0.250859, offset: 0 },
   },
   y: {
     channel: Y,
     axis_mapping: "verified",
+    axis_units: "display",
     scale: 1,
     offset: 0,
     evidence: "rpm",
     request_channel: "mem:spark",
+    stored_decode: { scale: 12.5, offset: 0 },
   },
   unavailable_note: "retired",
+  out_of_range: null,
 };
 const unverified: TableTrace = {
   ...verified,
   x: {
     ...verified.x,
     axis_mapping: "unverified",
+    axis_units: null,
     scale: null,
     offset: null,
     evidence: "Not settled.",
   },
+};
+/** W05.1 as shipped: the X byte (stored raw × 0.250859) lands on the ROM's
+ *  raw BFS axis bytes unchanged, rpm on the rpm axis, and both clamp. */
+const X_STORED_SCALE = 0.250859;
+const shipped: TableTrace = {
+  x: {
+    ...verified.x,
+    axis_units: "raw",
+    scale: 1,
+    offset: 0,
+    evidence: "firmware",
+    stored_decode: { scale: X_STORED_SCALE, offset: 0 },
+  },
+  y: { ...verified.y, scale: 1, offset: 0 },
+  unavailable_note: null,
+  out_of_range: { behaviour: "clamp", evidence: "0x026F40" },
+};
+const shippedTable: RomTable = {
+  ...table,
+  x_axis: [8.76, 11.46, 15.67, 16.85, 18.2, 18.54, 21.4, 21.57],
+  x_axis_raw: [0x34, 0x44, 0x5d, 0x64, 0x6c, 0x6e, 0x7f, 0x80],
+  y_axis: [1200, 1600, 2000, 2800, 3600, 4000, 4400, 5200],
+  values: Array.from({ length: 8 }, () => Array.from({ length: 8 }, () => 14.7)),
+  raw: Array.from({ length: 8 }, () => Array.from({ length: 8 }, () => 128)),
+  trace: shipped,
 };
 const row = (channel: string, value: unknown, at = now): [string, ChannelSnapshot] => [
   `obd:${channel}`,
@@ -111,8 +148,76 @@ describe("ECM trace mapping", () => {
     const channels = new Map([row(X, 22), row(Y, 1990, now - 100)]);
     const point = ecmPoint(verified, channels, now);
     expect(point).toMatchObject({ x: 12, y: 1990 });
-    expect(ecmPosition(table, point)).toMatchObject({ row: 1, column: 1 });
+    expect(ecmPosition({ ...table, trace: verified }, point)).toMatchObject({ row: 1, column: 1 });
     expect(ecmPoint(verified, new Map([row(X, 22), row(Y, 1990, now - 900)]), now)).toBeNull();
+  });
+});
+
+describe("ECM trace on the raw BFS axis (W05.1)", () => {
+  const at = (raw: number, rpm: number) => new Map([row(X, raw * X_STORED_SCALE), row(Y, rpm)]);
+
+  it("lands an X byte equal to an axis breakpoint exactly on that column", () => {
+    expect(traceBreakpoints(shippedTable, "x")).toEqual(shippedTable.x_axis_raw);
+    shippedTable.x_axis_raw!.forEach((raw, column) => {
+      const point = ecmPoint(shipped, at(raw, 2000), now);
+      expect(point?.x).toBe(raw);
+      expect(axisPosition(shippedTable.x_axis_raw!, point!.x, true)).toEqual({
+        position: column,
+        edge: null,
+      });
+      expect(ecmPosition(shippedTable, point)).toMatchObject({ row: 2, column, columns: [column] });
+      expect(ecmDisplay(shippedTable, point!)?.x).toBeCloseTo(shippedTable.x_axis[column], 12);
+    });
+  });
+
+  it("interpolates an X byte between breakpoints proportionally", () => {
+    // 80 counts is 12/25 of the way from 0x44 (68) to 0x5D (93).
+    const point = ecmPoint(shipped, at(80, 1400), now);
+    expect(point).toMatchObject({ x: 80, y: 1400 });
+    expect(axisPosition(shippedTable.x_axis_raw!, 80, true)?.position).toBeCloseTo(1.48, 12);
+    expect(ecmPosition(shippedTable, point)).toMatchObject({
+      row: 0, // 1,400 rpm is the exact midpoint: ties go low
+      column: 1,
+      rows: [0, 1],
+      columns: [1, 2],
+      edges: { x: null, y: null },
+    });
+    expect(ecmDisplay(shippedTable, point!)?.x).toBeCloseTo(11.46 + (15.67 - 11.46) * 0.48, 12);
+  });
+
+  it("reads the edge cell past the axes only where the profile declares the clamp", () => {
+    const idle = ecmPoint(shipped, at(17, 750), now);
+    const position = ecmPosition(shippedTable, idle);
+    expect(position).toMatchObject({ row: 0, column: 0, edges: { x: "below", y: "below" } });
+    expect(describeClamp(position!, shippedTable)).toMatch(
+      /BFS coordinate is below the first breakpoint and the ECM's RPM coordinate is below the first breakpoint, and the ECM's lookup reads the edge/,
+    );
+    expect(ecmDisplay(shippedTable, idle!)).toMatchObject({ x: 8.76, edges: { x: "below" } });
+    const noClamp = { ...shippedTable, trace: { ...shipped, out_of_range: null } };
+    expect(ecmPosition(noClamp, idle)).toBeNull();
+    const d = cellDisagreement(
+      { rows: [0], columns: [0], row: 0, column: 0 },
+      { rows: [0, 1], columns: [0, 1], row: 0, column: 1 },
+      ecmDisplay(shippedTable, idle!)!,
+      { x: 11, y: 1300 },
+    );
+    expect(describeDisagreement(d!, shippedTable)).toContain("(ECM ≤8.76 vs inferred 11.00 ms)");
+  });
+
+  it("never compares a stored (scaled) value with raw bytes", () => {
+    // Without the ROM's raw axis bytes there is nothing to land on: refused
+    // by name rather than falling back to the displayed axis.
+    const noRaw = { ...shippedTable, x_axis_raw: undefined };
+    expect(mappingRefusal(shipped, noRaw)).toMatch(/raw axis bytes, which this ROM inspection/);
+    expect(ecmPosition(noRaw, ecmPoint(shipped, at(68, 2000), now))).toBeNull();
+    const noDecode = { ...shipped, x: { ...shipped.x, stored_decode: null } };
+    expect(mappingRefusal(noDecode)).toMatch(/names no decode to undo/);
+    expect(ecmPoint(noDecode, at(68, 2000), now)).toBeNull();
+    // A value stored under another decode is not a whole count: no point.
+    const other = new Map([row(X, 68 * 0.25), row(Y, 2000)]);
+    expect(ecmPoint(shipped, other, now)).toBeNull();
+    expect(ecmValueRefusal(shipped, other, now)).toMatch(/does not return to a whole raw count/);
+    expect(ecmValueRefusal(shipped, at(68, 2000), now)).toBeNull();
   });
 
   it("measures disagreement in rows and columns, and none when the cells agree", () => {

@@ -63,6 +63,9 @@ def inspect_rom(
                     else "TBD — complete table location and axes not verified.",
                     "x_axis": target["bfs_ms"] if available else [],
                     "y_axis": target["rpm"] if available else [],
+                    # The ROM's axis bytes, which a `raw` trace axis lands on.
+                    "x_axis_raw": target["bfs_raw"] if available else [],
+                    "y_axis_raw": target["rpm_raw"] if available else [],
                     "values": target["afr"] if available else [],
                     "raw": target["raw"] if available else [],
                 }

@@ -38,27 +38,34 @@ test("ROM picker, colored target table, live trace and five-slot TBD navigation"
         values: Array.from({ length: 8 }, (_, r) =>
           Array.from({ length: 8 }, (_, c) => 1881.6 / (128 + r * 3 + c)),
         ),
-        // W05.1 as shipped: the X trace's mapping onto BFS is unverified.
+        // W05.1 as shipped: the X byte lands on the raw BFS axis bytes.
+        x_axis_raw: [0x30, 0x3b, 0x47, 0x53, 0x5f, 0x6b, 0x77, 0x82],
+        y_axis_raw: [0x18, 0x20, 0x28, 0x38, 0x48, 0x50, 0x58, 0x68],
         trace:
           slot === 1 && kind === "fuel_targets"
             ? {
                 x: {
                   channel: "mem:ECM_FUEL_TARGET_MAP_X_TRACE",
-                  axis_mapping: "unverified" as const,
-                  scale: null,
-                  offset: null,
-                  evidence: "Not settled.",
+                  axis_mapping: "verified" as const,
+                  axis_units: "raw" as const,
+                  scale: 1,
+                  offset: 0,
+                  evidence: "firmware",
                   request_channel: "mem:fuel_axis",
+                  stored_decode: { scale: 0.250859, offset: 0 },
                 },
                 y: {
                   channel: "mem:ECM_ENGINE_SPEED_RAM",
                   axis_mapping: "verified" as const,
+                  axis_units: "display" as const,
                   scale: 1,
                   offset: 0,
                   evidence: "rpm",
                   request_channel: "mem:spark",
+                  stored_decode: { scale: 12.5, offset: 0 },
                 },
                 unavailable_note: "No capture profile polls the fuel-target trace channels.",
+                out_of_range: { behaviour: "clamp" as const, evidence: "0x026F40" },
               }
             : null,
       })),
@@ -117,10 +124,11 @@ test("ROM picker, colored target table, live trace and five-slot TBD navigation"
   await expect(table.locator("td")).toHaveCount(64);
   await page.getByRole("checkbox", { name: /I confirm/ }).check();
   await expect(table.locator('[data-trace="nearest"]')).toHaveCount(1);
-  // The ECM cell is refused by name while its mapping is unverified, and the
-  // trace greys out rather than freezing when nothing polls its channels.
+  // The mapping is verified, but nothing polls the trace channels: the trace
+  // greys out rather than freezing, and no ECM cell is drawn.
   await expect(table.locator("[data-ecm]")).toHaveCount(0);
-  await expect(page.getByText(/ECM cell not drawn: how the X trace/)).toBeVisible();
+  await expect(page.getByText(/ECM trace greyed out/)).toBeVisible();
+  await expect(page.getByText(/ECM cell not drawn/)).toHaveCount(0);
   await expect(page.locator("[data-trace-liveness]")).not.toHaveAttribute(
     "data-trace-liveness",
     "live",

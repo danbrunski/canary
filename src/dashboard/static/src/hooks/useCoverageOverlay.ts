@@ -136,7 +136,7 @@ export function useCoverageOverlay({
           dwell: null,
           note: "No capture is recording; live coverage accumulates only during a capture and resets when it ends.",
         };
-      const refusal = mappingRefusal(table.trace);
+      const refusal = mappingRefusal(table.trace, table);
       if (refusal)
         return { grid: null, dwell: null, note: `Live coverage unavailable. ${refusal}` };
       const grid = liveGrids[key] ?? emptyCoverage(table);
@@ -174,7 +174,7 @@ export function useCoverageOverlay({
     return {
       grid: result.counts,
       dwell: result.dwell_s,
-      note: `${selectedLogId}: ${result.samples} ECM samples${result.outside_axes ? `, ${result.outside_axes} outside the axes` : ""}.`,
+      note: `${selectedLogId}: ${result.samples} ECM samples${result.outside_axes ? `, ${result.outside_axes} outside the axes` : ""}${result.clamped_samples ? `, ${result.clamped_samples} past an axis end, counted in the edge cell the ECM reads` : ""}.`,
     };
   };
 

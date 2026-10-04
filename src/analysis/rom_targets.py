@@ -166,6 +166,10 @@ class TargetEditor:
             "column_axis": "bfs_ms",
             "rpm": self.target.rpm_breakpoints,
             "bfs_ms": self.target.load_breakpoints,
+            # The axis bytes as the ROM stores them, verified against the
+            # image in __init__; what a raw trace mapping lands on (W05.1).
+            "rpm_raw": self.target.raw_rpm_breakpoints,
+            "bfs_raw": self.target.raw_load_breakpoints,
             "raw": self.target.raw_values,
             "afr": self.target.afr,
             "afr_formula": f"{self.definition.afr_numerator} / raw",

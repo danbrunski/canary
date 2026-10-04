@@ -11,14 +11,17 @@ import { liveValue, streamRow, tracePosition } from "../lib/romMaps";
 import type { RomInspection, RomTable } from "../lib/romMaps";
 import {
   cellDisagreement,
+  describeClamp,
   describeDisagreement,
+  ecmDisplay,
   ecmPoint,
   ecmPosition,
+  ecmValueRefusal,
   mappingRefusal,
   traceGate,
   traceLiveness,
 } from "../lib/romTrace";
-import type { CellPosition, TraceLiveness } from "../lib/romTrace";
+import type { EcmDisplay, EcmPosition, TraceLiveness } from "../lib/romTrace";
 import { buttonClass, inputClass } from "../styles";
 import type { StatusResponse, WorkbenchItem } from "../types";
 import { MapTable } from "./MapTable";
@@ -153,8 +156,8 @@ export function RomMapsPanel({
   const ecm = new Map<
     string,
     {
-      position: CellPosition | null;
-      at: { x: number; y: number } | null;
+      position: EcmPosition | null;
+      at: EcmDisplay | null;
       liveness: TraceLiveness | null;
       reason: string;
       xTimestamp: number | null;
@@ -163,19 +166,22 @@ export function RomMapsPanel({
   for (const table of slotTables) {
     if (table.status !== "available" || !table.trace) continue;
     const liveness = traceLiveness(table.trace, channels, now, status, profiles);
-    const refusal = mappingRefusal(table.trace);
+    const refusal = mappingRefusal(table.trace, table);
     const point = ecmPoint(table.trace, channels, now);
     let reason =
       gateReason ||
       refusal ||
       (liveness.state !== "live" ? "ECM trace greyed out (see above)." : "");
     const position = !reason && point ? ecmPosition(table, point) : null;
-    if (!reason && !point) reason = "Waiting for paired X/Y trace samples within 750 ms.";
+    if (!reason && !point)
+      reason =
+        ecmValueRefusal(table.trace, channels, now) ??
+        "Waiting for paired X/Y trace samples within 750 ms.";
     else if (!reason && !position)
       reason = "ECM coordinates are outside this table's axes; no ECM cell outlined.";
     ecm.set(tableKey(table), {
       position,
-      at: point ? { x: point.x, y: point.y } : null,
+      at: point ? ecmDisplay(table, point) : null,
       liveness,
       reason,
       xTimestamp: point?.xTimestamp ?? null,
@@ -221,6 +227,7 @@ export function RomMapsPanel({
       state?.position && inferred && rpm && bfs && state.at
         ? cellDisagreement(state.position, inferred, state.at, { x: bfs.value, y: rpm.value })
         : null;
+    const clampNote = state?.position ? describeClamp(state.position, table) : "";
     const counts = tally[key];
     const coverage = overlay.view(table);
     const source = overlay.sourceFor(table);
@@ -252,7 +259,7 @@ export function RomMapsPanel({
             </p>
             <p className="text-fg-dim">
               {state.position
-                ? "ECM cell: double ring — the cell the ECM's own trace coordinates point at."
+                ? `ECM cell: double ring — the cell the ECM's own trace coordinates point at.${clampNote ? ` ${clampNote}` : ""}`
                 : state.reason}
             </p>
             {disagreement && (

@@ -31,8 +31,14 @@ memory channels — the ECM's own coordinates — and states any disagreement
 with the inferred cell in rows/columns. Each table's trace channels and
 whether their mapping onto the axes is established live in `rom_viewer.yaml`
 (`trace.x/y.axis_mapping`); an `unverified` axis carries no scale and the ECM
-cell is refused with its evidence. As of 2026-09-21 the fuel-target X trace
-is unverified, so only the inferred cell draws. The ECM trace greys out after
+cell is refused with its evidence. A verified axis names the breakpoints it is
+compared with (`axis_units`). Since 2026-10-04 (W05.1) both fuel-target axes
+are verified from the ECM program: the X byte's raw count, with its catalog
+decode (raw × 0.250859) undone, lands on the ROM's raw BFS axis bytes, and the
+rpm word lands on the rpm axis in rpm. The lookup clamps past either end
+(`trace.out_of_range`), so there the ECM cell is the edge cell and the page
+says so. Pedal-switch enrichment moves the ECM's read to the last load column
+without moving the X trace, so neither marker shows it. The ECM trace greys out after
 3 s without samples and names why: no ECM data, not polled by the active
 profile (naming a catalog profile that carries the channels, if any), or
 polled but not answering (per-request counters). Tracing is also refused when

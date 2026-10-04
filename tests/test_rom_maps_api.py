@@ -65,6 +65,8 @@ def test_profile_driven_slots_and_unverified_tables(tmp_path, monkeypatch):
             "revision": "synthetic",
             "bfs_ms": [8, 12],
             "rpm": [1000, 2000],
+            "bfs_raw": [0x34, 0x44],
+            "rpm_raw": [0x14, 0x28],
             "afr": [[14.7, 13], [13, 12]],
             "raw": [[128, 145], [145, 157]],
         },
@@ -82,13 +84,20 @@ def test_profile_driven_slots_and_unverified_tables(tmp_path, monkeypatch):
     assert result["live"]["base_fuel_schedule"]["factor"] == 0.00049
     assert not result["matches_recorded_revision"]
     assert result["live"]["rpm"]["spec"] == "did:ECM_RPM"
-    # W05.1: the available table carries its trace mapping and request
-    # channels; the X axis is unverified, so it carries no scale.
+    # W05.1: the available table carries its trace mapping, request channels
+    # and the catalog decode each axis is stored under. The X byte lands on
+    # the raw axis bytes, so the table carries those too.
     trace = available[0]["trace"]
-    assert trace["x"]["axis_mapping"] == "unverified" and trace["x"]["scale"] is None
+    assert trace["x"]["axis_mapping"] == "verified" and trace["x"]["axis_units"] == "raw"
+    assert (trace["x"]["scale"], trace["x"]["offset"]) == (1.0, 0.0)
+    assert trace["x"]["stored_decode"] == {"scale": 0.250859, "offset": 0.0}
     assert trace["x"]["request_channel"] == "mem:fuel_axis"
     assert trace["y"]["channel"] == "mem:ECM_ENGINE_SPEED_RAM"
-    assert trace["y"]["axis_mapping"] == "verified"
+    assert trace["y"]["axis_mapping"] == "verified" and trace["y"]["axis_units"] == "display"
+    assert trace["out_of_range"]["behaviour"] == "clamp"
+    assert available[0]["x_axis_raw"] == [0x34, 0x44]
+    assert available[0]["y_axis_raw"] == [0x14, 0x28]
     assert all(t["trace"] is None for t in result["tables"] if t["status"] == "tbd")
+    assert all(t["x_axis_raw"] == [] for t in result["tables"] if t["status"] == "tbd")
     with pytest.raises(ValueError, match="empty"):
         rom_maps.inspect_rom(b"", tmp_path, revisions=None)
