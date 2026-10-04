@@ -1,5 +1,16 @@
 # Implementation task index
 
+**Status 2026-10-04: E01–E05, second brain and ECU digital twin.**
+[`E00-second-brain-README.md`](E00-second-brain-README.md) indexes the
+implementation checklists for evidence/memory, the first target-φ twin,
+deterministic investigations/learning, Pi runtime and acceptance, and broader
+reproduction of decoded ECU application logic. The Pi is the required host
+for prediction, verification, reasoning, persistence and post-collection
+evaluation; a phone dashboard is sufficient and a laptop is optional for
+development. The application-code work carries forward the October 4
+firmware findings and expands qualified outputs incrementally. All new
+implementation work starts unchecked; the overnight queue is unchanged.
+
 **Status 2026-09-27: R09, package layering.**
 [`R09-package-layering.md`](R09-package-layering.md) gives `src/` one import
 direction. Nineteen pairs of packages import each other, up from 3 in May and

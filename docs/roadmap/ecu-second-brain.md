@@ -19,6 +19,14 @@ The design target is someone with only a Pi and an Android phone showing
 the dashboard: no laptop, no Claude, no fast internet. Everything the brain
 concludes must reach that user without a language model.
 
+**Runtime and twin clarification (operator, 2026-10-04).** The second brain
+runs on the Pi, including persistent memory and post-collection evaluation
+and promotion. Its digital twin reproduces decoded ECU application logic
+to predict outputs and verify observations. A laptop is optional for
+development and firmware research; required operation works with only the
+Pi and phone dashboard. The detailed implementation checklists are
+[E00–E05](tasks/E00-second-brain-README.md).
+
 ## Purpose
 
 Make CANary a supervisory brain that remembers the vehicle's history,
@@ -169,6 +177,10 @@ and per-sample ratio checks where meaningful. Across interventions, compare
 matched operating conditions, preserving independent-drive evidence. Do not
 infer an improvement from aggregate means with different drive composition.
 
+The [deterministic ECM twin](#first-ecm-twin-slice-target-equivalence-ratio)
+below is a concrete model for this capability: reproduce one decoded ECM
+calculation, then qualify its disagreement with the observed command.
+
 ### 4. An investigator that selects the next measurement
 
 When evidence is ambiguous, propose a targeted capture recipe and a
@@ -198,12 +210,12 @@ If a physical action is required, describe that action and its purpose.
 An eventual automatic capture selector can use deterministic policies;
 live operation must not depend on an LLM response.
 
-No heavy session analysis runs on the Pi while it collects. Laptop analysis
-remains the development workflow. In the standalone scenario, where the
-laptop is absent, the investigator runs on the Pi as streaming updates
-during the drive (next section). Anything that reads whole sessions waits
-until collection is inactive. The optional language interface runs
-wherever a host exists.
+No heavy session analysis runs on the Pi while it collects. The investigator
+runs on the Pi as streaming updates during the drive (next section), and
+bounded session analysis runs there after collection stops. A laptop can
+accelerate development and research. Required investigation, evaluation and
+memory workflows complete on the Pi without one. The optional language
+interface runs wherever a host exists.
 
 ### 5. A learning loop around repairs and calibration
 
@@ -238,9 +250,10 @@ project policy.
 ## Reasoning and learning while driving
 
 "Reason and self-improve while driving" is done by deterministic streaming
-methods on the Pi, not by a language model. They cost microseconds per
-update, the same order as work the daemon already does, so they can run
-live without competing with collection. They work at different timescales:
+methods on the Pi, not by a language model. Small numerical updates are
+expected to be cheap; their individual and combined costs must pass the
+Pi's measured collection/tick budget before enablement. They work at
+different timescales:
 
 | Loop | When it runs | Where | What it decides or learns |
 |---|---|---|---|
@@ -248,8 +261,9 @@ live without competing with collection. They work at different timescales:
 | Parameter tracking | Every qualifying sample | Pi, live | Slowly varying physical parameters (the adaptive candidate) |
 | Hypothesis tracking | When evidence changes | Pi, live | How likely each open explanation now is |
 | Opportunistic measurement | When the drive enters a useful region | Pi, live | What to capture next, and when |
-| Promotion and memory | After the drive | Pi when parked, or laptop | Which candidates replace references; outcomes recorded |
-| Model structure and calibration | Occasionally | Laptop | Residual generators, fault signature matrix, conformal calibration, refits |
+| Promotion and memory | After collection stops | Pi | Which candidates replace references; outcomes recorded |
+| Reference calibration and refits | When enough independent evidence exists, after collection stops | Pi, bounded jobs | Interval calibration, candidate evaluation and qualified refits |
+| Model structure and firmware research | Occasionally | Development environment; laptop optional | New residual generators, fault signatures and decoded application paths deployed to the Pi |
 
 **Opportunistic measurement is the live form of capability 4.** The
 investigator keeps two lists: operating regions that would separate its
@@ -288,14 +302,14 @@ orders of magnitude, to be measured on the Pi before enabling each one.
 | Predict behavior | Existing behavior surfaces and physical residuals | Pi, live | Arithmetic and a surface lookup | Periodic refits through the existing lifecycle |
 | Flag anomalies (existing) | Isolation Forest and the sequence autoencoder | Pi, live (scoring child, 1 Hz) | Existing budget | Batch retraining |
 | Detect change | CUSUM for a known shift size; GLR when size and time are unknown; Bayesian online changepoint detection as an option | Pi, live | CUSUM constant; windowed GLR linear in the window | Fixed tests; alarms become evidence |
-| Bound predictions | Conformal intervals per operating mode or baro band | Calibrated on the laptop; checked live on the Pi | A quantile lookup | Recalibrated with each promoted reference |
+| Bound predictions | Conformal intervals per operating mode or baro band | Calibrated on the Pi after collection stops; checked live | A quantile lookup | Recalibrated with each promoted reference |
 | Track slow parameters | Recursive least squares with forgetting, a Kalman random-walk filter, or a discount dynamic linear model | Pi, live | Quadratic in the few parameters tracked (≤ ~10) | Online, as the isolated adaptive candidate |
 | Track hypotheses | Bayesian update over a discrete hypothesis set, using fault-signature evidence | Pi, live | Hypotheses × residuals | As evidence arrives |
 | Choose the next measurement | Expected information gain divided by cost | Pi, live, when evidence changes | Hypotheses × candidate measurements | As hypothesis probabilities change |
-| Design residuals | Structural analysis and the fault signature matrix (Fault Diagnosis Toolbox) | Laptop | Offline | When the model equations change |
+| Design residuals | Structural analysis and the fault signature matrix (Fault Diagnosis Toolbox) | Development environment; deploy artifacts to the Pi | Offline research | When the model equations change |
 | Represent temporal behavior | Existing sequence model; a small GRU/TCN only for a demonstrated gap | Pi, live | Existing budget | Batch training with recalibration |
-| Smooth surfaces with uncertainty | Sparse online Gaussian process | Laptop | Too heavy for live use on the Pi | Offline |
-| Remember findings | Structured evidence and intervention store | Pi appends; laptop analyses | An append | Append evidence, outcomes, and explicit supersession |
+| Smooth surfaces with uncertainty (optional research) | Sparse online Gaussian process | Development environment | Not qualified for live Pi use | Offline experiments; not a required brain dependency |
+| Remember findings | Structured evidence and intervention store | Pi appends and queries; bounded analysis after collection stops | An append | Append evidence, outcomes, and explicit supersession |
 | Explain (optional) | A language model ([below](#optional-language-interface-lower-priority)) | Phone, sidecar, laptop, hosted; Pi last | Minutes per answer on the Pi | Fixed weights; improves through memory |
 
 ### Adaptive numerical models
@@ -844,53 +858,255 @@ Retire the naturally aspirated references under that intervention.
 No new model is required just to prove the evidence/memory workflow.
 Add adaptive numerical modeling only where it improves this measured task.
 
+## Digital twin of decoded ECU application logic
+
+The long-term twin is an executable model of the ECU's decoded calculations
+and state transitions, running alongside observation on the Pi. It consumes
+observed inputs and identified state, predicts intermediate quantities and
+commands, and checks those predictions against RAM/diagnostic observations.
+Each result identifies which dependencies were predicted and which were
+supplied from observed RAM; matching a downstream output cannot validate
+an upstream calculation that the twin did not execute.
+
+The [October 4 application-code findings](../ecu-firmware-analysis.md) make
+this concrete: Target AFR's actual axis/interpolation helpers, the UpRev
+pointer redirection into the active RAM slot, map initialization/selection,
+pedal-enrichment override, BFS scaling, Fuel Comp/K and timing-trim readers.
+The twin must reproduce their integer arithmetic, branches and relevant
+state/update order. Exact image identity binds the calibration; verified
+program/patch identity binds the implementation. Diagnostic transport belongs
+in observation provenance because CAN and K-line DIDs can name different RAM.
+
+Implement and qualify one connected path at a time. E02 starts with target φ
+using observed lookup inputs. [E05](tasks/E05-ecu-application-twin.md) expands
+upstream fuelling, stateful overrides and later outputs, with explicit
+coverage and unknown dependencies. The undocumented MCU/peripherals and
+remaining application logic limit any claim of full ECU emulation. Shared
+register aliases, such as PID 0x44 and the target RAM word, validate decoding
+but do not provide independent confirmations of the algorithm. Computed
+residuals feed the brain's investigations; learning cannot change the decoded
+code semantics or ROM constants to hide disagreement.
+
+## First ECM twin slice: target equivalence ratio
+
+### Purpose and boundary
+
+The twin answers: **"Given this exact calibration and the ECM's observed
+lookup inputs, what fuel target should its decoded logic command here, and
+does the command agree?"** The brain currently compares commands with
+responses and learned references; reproducing the command adds evidence
+about where a discrepancy enters the chain. This serves capability **3,
+Models that explain discrepancies**, and later capability **5**, by recording
+predicted command changes before a calibration intervention.
+
+The first output is **commanded equivalence ratio, φ**, compared with
+`mem:ECM_TARGET_EQUIV_RATIO`. Implement the Target AFR table lookup described
+in [ECM firmware analysis](../ecu-firmware-analysis.md#target-afr-lookup-decoded-settles-w051):
+raw load and rpm axis search, bilinear interpolation, edge clamping, and
+the observed pedal-enrichment flag forcing the last load column. This is
+conditional on observed RAM inputs; it does not yet reconstruct air charge
+from MAF, or predict the flag from pedal position.
+
+Initial applicability is **warm, steady, open-loop fuelling in a validated
+rpm/load region**, with a stable, verified active map and no fuel-cut
+sentinel. Include both ordinary table lookup and the sustained
+pedal-enrichment branch, but qualify each independently. Required profile
+fields must declare coolant bounds, rpm/load coverage, input freshness,
+maximum acquisition skew, and steadiness/dwell limits before evaluation;
+missing limits make the region unevaluable. Region selection must use
+inputs and mode evidence, never agreement with the target being tested.
+
+Cold start/warm-up, closed-loop stoichiometric operation, tip-in/lift-off,
+DFCO and its entry/recovery, map-switch transitions, and unvalidated
+protection/enrichment regimes are out of scope: their overrides, state or
+timing are not yet reproduced. Boost and other ECU programs are also outside
+the initial evidence. A decoded lookup alone does not establish the final
+command in any of those regions. Idle/cruise observations may test lookup
+arithmetic, but closed-loop samples cannot validate this final-command model.
+
+### Inputs and calibration identity
+
+Use the same input contract for live samples and stored-session replay.
+Names below are from [data/dids.yaml](../../data/dids.yaml); memory channels
+are stored with the `mem:` prefix.
+
+| Channel | Role |
+|---|---|
+| `mem:ECM_FUEL_TARGET_MAP_X_TRACE` | Observed load coordinate. Use its raw byte; the catalog's `0.250859` display scale is not the raw BFS axis scale. |
+| `mem:ECM_ENGINE_SPEED_RAM` | Lookup rpm word (12.5 rpm/count); compare in the firmware's raw axis domain. |
+| `mem:ECM_PEDAL_ENRICH_FLAGS` | Bit 0 selects forced-last-column lookup. Consume the measured flag; its transition logic is future work. |
+| `mem:ECM_ACTIVE_MAP`, `mem:ECM_UPREV_MAGIC`, `mem:ECM_UPREV_MAP_SELECTOR` | Establish map identity and reject uninitialised or switching state. For this verified program, active-map 0 with valid magic and cold-boot provenance means default slot 1. |
+| `mem:ECM_TARGET_EQUIV_RATIO` and its generated `_SENTINEL` channel | Observed final command and fuel-cut state; target values are validation outputs, never lookup inputs. |
+| `mem:ECM_AIR_CHARGE_SLOT_103A` | Independent check of the load-coordinate formula against the X trace; not a substitute for the observed X input. |
+| `ECM_COOLANT_TEMP` (DID `0x1101`) | Warm-region gate when this DID is captured. A declared Mode 01 `obd:COOLANT_TEMP` source can supply the same gate in `ram-study`. |
+
+Also require acquisition timestamps, source/window identity and operating
+mode evidence (`obd:FUEL_STATUS` when captured), plus vehicle/program identity
+and the session's calibration provenance. An absent or unverified mode
+source cannot be inferred from φ being close to the prediction. Check live
+`vehicle_state` first; replay uses recorded conditions and remains labelled
+`replay`.
+
+Read axes, cell bytes and their definitions from the per-vehicle
+[ROM Library (W08)](tasks/W08-rom-library.md). Every prediction carries the
+**plain image SHA-256**, active slot, table/axis references, profile/decoder
+version and twin code version; a tune name or `.OsirisROM` container hash
+alone is insufficient. The October 4 reference is image
+`a46baa248f16db8d5ed9854913e614dd7d77b7579bb6c36bddb792741531be50`,
+revision `ZS44A-20260920`. Resolve it through the library and verify the
+active RAM table against that image's slot before qualifying live use.
+Unknown image/program, missing tables or unresolved slot means unevaluable.
+Vehicle addresses, flag meanings and lookup definitions belong in profile
+data. ROM images and disassembly remain outside Git.
+
+### Per-sample result and residual
+
+Emit acquisition time, input references and skew, applicability status and
+reason, selected branch/cells/weights, predicted `phi`, observed `phi`, and
+the signed residual **`observed_phi - predicted_phi`**, with the provenance
+above. Compare in φ; an optional AFR display uses the profile's stoichiometric
+AFR. A positive residual means the ECM commanded richer than the reproduced
+logic predicts. It does **not** establish lean delivery, a sensor fault, a
+bad tune or an ECU defect: omitted logic, wrong provenance and acquisition
+timing are competing explanations.
+
+An unevaluable sample has a null qualified residual and a named reason,
+never zero or "normal". Preserve any calculable diagnostic difference with
+its excluded/unevaluable status. Missing inputs, stale/skewed reads, unknown
+mode, uncovered regions and fuel-cut sentinels get distinct counts. Even a
+zero qualified residual establishes command agreement only, not engine
+health or correct fuel delivery.
+
+Use `src.analysis.compare.compare_channels` for signal comparisons and its
+acquisition-time pairing rules for the prediction/observation adapter; do
+not average signals into bins or reuse a target to inflate `n_pairs`.
+Retain per-sample differences and ratios where meaningful. A shared RAM
+window shares acquisition time but does not guarantee that the ECM updated
+every variable in the same firmware iteration. Evidence records are minted
+by the evaluator with sample/window references and computed values; cards
+and investigations render those records rather than typing new evidence.
+
+### Acceptance: preserve a known answer first
+
+The source is **`_capture-ram-study-2026-10-04T204557`**,
+20:45:56–21:12:49Z. The committed ground-truth fixture currently covers an
+August drive, **not this capture**. First extract and commit a compact raw
+telemetry slice under `tests/fixtures/ground_truth/`, with its own manifest
+and expectations: source/session hash, exact retained times, channel/decode
+versions, image hash, pairing policy and region gates. Retain both enrichment
+observations and their neighbours, ordinary lookup coverage, and the full
+194-pair BFS/X check. Do not commit the ROM image or manufacture missing
+channels. If the capture cannot supply eligible tuples, record the gap and
+obtain the targeted capture below before qualifying that branch.
+
+Acceptance has three distinct checks:
+
+1. **Known override:** reproduce the two recorded flag-set commands at
+   **φ = 1.1640625** (`0x95 / 128`, target RAM word `0x4A80`) exactly for
+   the corresponding lookup vectors. A live-command pass additionally
+   requires the declared mode, freshness and steadiness gates; two points
+   alone cannot qualify the whole WOT region.
+2. **Known axis relation:** reproduce
+   `X = min(255, floor(BFS * 128 / 44019))` using the image's scaler, with
+   **168/194 exact** and the remaining **26/194 within ±1–4 raw X counts**,
+   as reported in the firmware doc's
+   [live verification](../ecu-firmware-analysis.md#live-verification-the-2026-10-04-drive).
+   This is a regression expectation for those retained pairs, not an
+   allowance to loosen every prediction by four counts.
+3. **New final-command acceptance target:** every eligible steady pair in
+   the committed slice must agree within **one Q14 count (1/16384 φ)**.
+   This is a proposed requirement, **not an accuracy already measured**.
+   Pin firmware interpolation/rounding before claiming it passes; do not
+   enlarge the tolerance to absorb unexplained misses. Require nonempty
+   ordinary-lookup and override coverage and record exact per-branch counts,
+   rpm/load bounds and visited cells. Constant-region checks use exact
+   values, not a regression that would fail the moving-signal gate.
+
+Freeze eligibility and pairing limits before scoring (initial maximum skew
+250 ms, consistent with `rom_trace`; never carry a 5-second-old RAM value
+forward to fill a tuple). Count **all** candidate samples, matched pairs,
+eligible passes/misses, transient exclusions, and other unevaluable samples.
+A transient with a computable difference outside tolerance remains a reported
+transient miss; one lacking a valid pair remains unevaluable. Neither is
+silently dropped or counted as a steady pass. The 26 axis misses above are
+consistent with firmware update timing, not proof of that cause for every
+future miss. Keep the residual trace around transitions and investigate
+unexplained steady misses.
+
+### Execution and inherited rules
+
+Develop against stored sessions (a laptop is optional), then run the same
+known-answer evaluator through replay on the **Pi**. The required runtime is
+**streaming on the Pi during the drive**, inside the inference tick/scoring
+child described in
+[Reasoning and learning while driving](#reasoning-and-learning-while-driving).
+Preload the table; each new complete tuple needs a bounded lookup and a small
+state update. Never read a whole session or load a ROM in the collection path.
+
+Proposed enablement budget: **at most 1 ms p99 and 5 ms maximum added compute
+per 1 Hz inference tick, and at most 1 MiB incremental resident table/state**,
+measured on the Pi under representative collection load. These are targets,
+not benchmark results. Require no additional missed ticks or collector record
+loss relative to the matched baseline. Use bounded handoff with no collector
+wait; a busy consumer reports skipped evaluation instead of accumulating work
+or blocking collection. More RAM samples in a tick must still fit that budget.
+Whole-session evaluation completes on the Pi after collection has stopped;
+the laptop can run the same evaluator during development. Evidence persists
+under the existing per-vehicle state directory.
+
+The twin is **read-only toward the ECU**; it can read telemetry and append
+predictions/evidence. It initiates no calibration, actuation or adaptive ECU
+writes. The project policy still governs any later intervention: each
+non-volatile write requires explicit permission for that operation and a
+fresh `vehicle_state: ignition_only` verdict (key on, engine off, stationary);
+engine-running and unclassifiable states refuse. This roadmap authorizes no
+write. Capability 5 can compare predicted command changes across exact ROM
+hashes only after the required pre-intervention prediction has been recorded.
+
+### Open logic and the measurement that closes it
+
+| Open item and effect on the first slice | Work needed to close it |
+|---|---|
+| Exact fixed-point interpolation/rounding and final-command applicability: prerequisites to qualifying the first slice | Trace the remaining arithmetic and command writers; capture warm steady open-loop points across cells and edges with all required windows. Match the Q14 target before qualifying ordinary lookup. |
+| Cold/warm-up, closed-loop overrides, transient enrichment, DFCO entry/recovery and protection logic | Identify their flags/inputs and writers, then capture cold-to-warm operation, mode transitions, tip-in/lift-off and fuel-cut recovery at sufficient rate. Qualify each regime separately. |
+| Pedal threshold input and hysteresis timing | Trace the `0xCEDB` curve's input and capture pedal/flag/target through repeated threshold crossings; the two October 4 set samples establish the override, not its full transition model. |
+| RAM-copy identity is a prerequisite; map-switch transitions remain out of scope | Read the live Target AFR table and compare bytes with the library slot. Then observe an operator-selected switch with `ECM_MAP_SELECT_INPUT`, selector, magic and active-map channels, and repeat the comparison. The reference drive never switched. |
+| Full BFS computation, Fuel Comp's x-coordinate and which Load Point Scaler copy is read | Trace callers and capture MAF, rpm, BFS, `ECM_FUEL_COMP_X_INPUT` and X across steady load/rpm points and transients. Test per-sample ratios and neighbouring-byte controls; correlation alone cannot identify the formula. |
+| Timing trims, the unidentified slot `+0x260` map, and unnamed 1-D/2-D maps | Trace each reader to an output and identify its inputs before designing a capture. For timing, capture select flags, timing and both lookup coordinates through a flag change. Cam/throttle candidates need independent commanded/measured channels before naming the map. These outputs are later slices. |
+
 ## Future implementation checklist
 
 ### Part A — the deterministic brain (priority)
 
-- [ ] Define required investigation, evidence, prediction, intervention, and
-  outcome schemas with per-vehicle scope, valid and record times, and
-  explicit applicability. Extend `tune_revisions.yaml` to hardware
-  interventions rather than starting a parallel record.
-- [ ] Mint evidence records from analysis tools. Replace free-text card
-  evidence with evidence ids that must resolve (LLM roadmap S.5).
-- [ ] Connect existing analyses and structured cards to persistent records;
-  distinguish unsupported, missing, and contradictory evidence. Cards must
-  read completely with template text and no language model.
-- [ ] Settle the naturally aspirated WOT-lean investigation before teardown
-  (supercharger-build NA2), or record it as superseded by the build.
-- [ ] Record the supercharger build as an intervention, with predictions
-  written before first start.
-- [ ] Implement the fuel-delivery vertical slice over stored sessions.
-- [ ] Spike the Fault Diagnosis Toolbox on the air/fuel relations. Produce
-  the fault signature matrix, isolability with the current channels, and
-  its sensor-placement output.
-- [ ] Build known-answer investigation cases, including absent channels,
-  misleading correlations, changed tune, repeated findings, and retractions.
-- [ ] Add residual change detection (CUSUM/GLR) against frozen references,
-  and conformal intervals per mode or baro band calibrated per held-out
-  drive.
-- [ ] Evaluate candidate/reference numerical learning through replay, with
-  predictions scored before learning and independent-drive promotion
-  checks. Start with recursive least squares or a Kalman filter over a few
-  physical parameters.
-- [ ] Add hypothesis tracking and next-measurement selection by expected
-  information gain, with timing and capture-ownership constraints; evaluate
-  them over stored sessions and replay first.
-- [ ] Run the live loop on the Pi (residuals, change detection, parameter
-  tracking, hypothesis tracking) inside the inference tick or scoring
-  child. Measure per-tick cost against the missed-tick budget before
-  enabling it on a drive.
-- [ ] Add opportunistic measurement: when the drive enters a region that
-  separates open hypotheses or fills a reference gap, raise polling or
-  open a capture window within the profile's bus budget. Evaluate the
-  selection in replay before enabling it live; an operator-owned capture
-  always wins.
-- [ ] Expose the store and evidence tools over MCP, and use them from Claude
-  Code on the laptop.
-- [ ] Demonstrate an end-to-end retained investigation with no language
-  model: recognize recurrence, retrieve prior evidence, identify missing
-  inputs, choose a useful next measurement, and evaluate its result.
+Detailed task truth and dependencies live in
+[E00–E05](tasks/E00-second-brain-README.md). These five boxes summarize that
+work; check one only when the linked tasks meet their acceptance, including
+required Pi measurements. All work below is planned, not implemented.
+
+- [ ] Build evidence and persistent memory ([E01](tasks/E01-evidence-and-memory.md)).
+  **Accept:** tools mint resolvable evidence, records preserve conditions and
+  both times, prediction ordering is enforced, and known-answer cases render
+  and recur through template cards without a language model.
+- [ ] Qualify the first target-φ twin ([E02](tasks/E02-target-phi-twin.md)).
+  **Accept:** exact ROM/active-slot identity, the committed October 4 known
+  answers, nonempty eligible coverage of both branches and the proposed
+  one-Q14-count target; all exclusions and transient misses remain counted.
+- [ ] Complete investigations and isolated learning
+  ([E03](tasks/E03-investigations-and-learning.md)). **Accept:** the retained
+  fuel-delivery case selects a separating measurement, records and evaluates
+  a prior prediction, preserves unresolved outcomes and promotes candidates
+  only with independent evidence; interventions retire affected references.
+- [ ] Run the standalone brain and twin on the Pi
+  ([E04](tasks/E04-pi-runtime-and-acceptance.md)). **Accept:** live/stored parity,
+  measured compute/state budgets, no collector blocking or added record loss,
+  durable memory and bounded post-collection evaluation, demonstrated through
+  the phone dashboard with no laptop, internet or language-model dependency.
+- [ ] Expand the digital twin from decoded application code
+  ([E05](tasks/E05-ecu-application-twin.md)). **Accept:** a versioned dependency
+  model reproduces qualified upstream computations, state transitions and
+  additional outputs against independent observations, names all remaining
+  unknown/observed dependencies, and passes Pi parity/resource gates for each
+  increment without changing earlier qualified behavior silently.
 
 ### Part B — the optional language interface (lower priority)
 
