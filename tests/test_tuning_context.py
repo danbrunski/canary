@@ -9,7 +9,7 @@ overrode, so a diesel profile's workbench AFR was a gasoline AFR.
 
 from __future__ import annotations
 
-from datetime import UTC, datetime, timedelta
+from datetime import timedelta
 from pathlib import Path
 
 import pytest
@@ -31,10 +31,16 @@ from src.vehicle.profiles import (
     scope_config,
     source_registry_path,
 )
-from src.vehicle.tune_revisions import TuneRevision
+from src.vehicle.tune_revisions import TuneRevision, load_tune_revisions
 
-#: After every flash in the tracked Xterra registry, so the new one is newest.
-T0 = datetime(2026, 10, 2, 14, 0, 0, tzinfo=UTC)
+_TRACKED = load_tune_revisions(Path("data/nissan-xterra-2008/tune_revisions.yaml"))
+assert _TRACKED is not None
+#: Two days after the newest flash in the tracked Xterra registry, so the
+#: synthetic flash below is newest. Derived, not pinned: the registry refuses
+#: out-of-order revisions and gains real flashes (2026-10-04 broke a fixed date).
+T0 = max(r.flashed_at for r in _TRACKED.revisions) + timedelta(days=2)
+#: Session directory stamps for captures that start at T0 and an hour later.
+STAMP, LATER = (f"{t:%Y-%m-%dT%H%M%S}" for t in (T0, T0 + timedelta(hours=1)))
 FLASH = TuneRevision(revision="R05-dashboard-flash", flashed_at=T0 - timedelta(days=1))
 
 
@@ -86,7 +92,7 @@ def test_a_dashboard_flash_resolves_in_the_digest(tmp_path: Path) -> None:
     assert active_registry_path(config) == operational_registry_path(config)
     assert active_registry_path(config) != source_registry_path(config)
 
-    session = _capture(config.collection.storage_path, "_capture-fuel-map-2026-10-02T140000")
+    session = _capture(config.collection.storage_path, f"_capture-fuel-map-{STAMP}")
     digest = compute_tuning_digest(session, config)
     assert digest is not None
     assert digest.tune_revision == FLASH.revision
@@ -101,8 +107,8 @@ def test_a_dashboard_flash_resolves_in_the_mcp_tuning_tools(tmp_path: Path) -> N
     append_flash(config, FLASH)
 
     root = config.collection.storage_path
-    a = _capture(root, "_capture-fuel-map-2026-10-02T140000")
-    b = _capture(root, "_capture-fuel-map-2026-10-02T150000")
+    a = _capture(root, f"_capture-fuel-map-{STAMP}")
+    b = _capture(root, f"_capture-fuel-map-{LATER}")
 
     delivery = tuning_analysis.get_delivery_error(config_path, session=a.name, min_load=None)
     assert delivery["ok"], delivery
@@ -133,7 +139,7 @@ def test_a_diesel_profiles_workbench_afr_uses_its_stoich(tmp_path: Path) -> None
         config, bindings_path=Path("data/bindings.yaml"), dids_path=Path("data/dids.yaml")
     )
     assert inputs.afr_stoich == 14.5
-    session = _capture(config.collection.storage_path, "2026-10-02T140000")
+    session = _capture(config.collection.storage_path, STAMP)
     frame = session_frame(session, ["obd:RPM", "obd:COMMANDED_AFR"], inputs=inputs)
     afr = set(frame["values"]["obd:COMMANDED_AFR"])
     ratio = 1.2

@@ -64,6 +64,7 @@ from src.signals.pairing import PairingPolicy, match_ordered, to_seconds
 from src.storage.capture_manifest import CAPTURE_MANIFEST_FILENAME
 from src.storage.parquet_writer import write_records_to_parquet
 from src.telemetry import TelemetryRecord
+from src.vehicle.tune_revisions import load_tune_revisions
 
 BINDINGS = Path("data/bindings.yaml")
 DIDS = Path("data/dids.yaml")
@@ -373,9 +374,11 @@ def test_real_drive_ecm_cell_lands_where_bfs_and_rpm_put_it() -> None:
     """
     trace = _shipped_trace()
     calibration = load_afr_calibration(PROFILE / "afr_calibration.yaml")
-    # The drive ran ZS44A-20260920 (flashed 2026-09-21); every revision
-    # shares these axes.
-    revision = calibration.active_revision
+    # The drive ran ZS44A-20260920 (flashed 2026-09-21; the next flash came
+    # after it, at 23:02Z); every revision shares these axes.
+    registry = load_tune_revisions(PROFILE / "tune_revisions.yaml")
+    assert registry is not None
+    revision = registry.at(datetime(2026, 10, 4, 20, 45, 56, tzinfo=UTC)).revision
     assert revision == "ZS44A-20260920"
     axes = trace_axes(load_viewer_definition(PROFILE).table("fuel_targets"), revision, calibration)  # type: ignore[arg-type]
     assert not isinstance(axes, dict)

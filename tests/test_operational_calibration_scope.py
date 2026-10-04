@@ -11,7 +11,7 @@ found, and must not be found by anyone else.
 from __future__ import annotations
 
 import json
-from datetime import UTC, datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -48,7 +48,20 @@ from src.vehicle.profiles import (
 from src.vehicle.tune_revisions import TuneRevision, load_tune_revisions
 
 XTERRA = "nissan-xterra-2008"
-FLASH = TuneRevision(revision="R05-15-flash", flashed_at=datetime(2026, 10, 2, tzinfo=UTC))
+
+
+def _after_real_flashes() -> datetime:
+    """A day after the newest real flash, so synthetic flashes stay newest.
+
+    The registry refuses revisions out of flashed_at order, and the tracked
+    file gains real flashes over time (2026-10-04 broke fixed dates)."""
+    real = load_tune_revisions(Path("data") / XTERRA / "tune_revisions.yaml")
+    assert real is not None
+    return max(r.flashed_at for r in real.revisions) + timedelta(days=1)
+
+
+AFTER = _after_real_flashes()
+FLASH = TuneRevision(revision="R05-15-flash", flashed_at=AFTER + timedelta(days=1))
 
 
 @pytest.fixture(autouse=True)
@@ -137,7 +150,7 @@ def test_the_first_flash_migrates_the_shared_registry(tmp_path: Path) -> None:
     legacy = _write_legacy_registry(base, source_registry_path(xterra), FLASH)
     before = legacy.read_text()
 
-    later = TuneRevision(revision="R05-15-later", flashed_at=datetime(2026, 10, 3, tzinfo=UTC))
+    later = TuneRevision(revision="R05-15-later", flashed_at=AFTER + timedelta(days=2))
     append_flash(xterra, later)
     migrated = load_tune_revisions(active_registry_path(xterra))
     assert active_registry_path(xterra) == operational_registry_path(xterra)
@@ -262,7 +275,7 @@ def test_a_hand_added_tracked_flash_does_not_orphan_dashboard_flashes(tmp_path: 
     tracked = source_registry_path(xterra)
     tracked.parent.mkdir(parents=True)
     real = Path("data") / XTERRA / "tune_revisions.yaml"
-    hand = TuneRevision(revision="hand-added", flashed_at=datetime(2026, 10, 1, tzinfo=UTC))
+    hand = TuneRevision(revision="hand-added", flashed_at=AFTER)
 
     def write(path: Path, *extra: TuneRevision) -> None:
         registry = load_tune_revisions(real)

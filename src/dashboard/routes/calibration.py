@@ -44,6 +44,9 @@ class FlashRequest(BaseModel):
     k: float | None = None
     rom_file: str | None = None
     rom_sha256: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
+    #: sha256 of the plain 1:1 flash image (W08.2). Without it a ROM Library
+    #: image or ECU read of this flash cannot be matched to its revision.
+    image_sha256: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
     notes: str = ""
 
 

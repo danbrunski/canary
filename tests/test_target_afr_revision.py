@@ -403,7 +403,7 @@ def _replay_into(source: LiveFeatureSource, session: Path) -> datetime:
 
 def test_replaying_a_k106_session_gets_the_k106_map_not_todays(tmp_path: Path) -> None:
     """Replay rebases every row to wall-clock. Resolved at the emit stamp, a
-    k106 session would get ZS44A-20260920 (flashed now); the live source reads
+    k106 session would get the revision in force today; the live source reads
     the recorded instant off each replayed record instead."""
     config = _xterra_config(tmp_path)
     session = _recorded_session(tmp_path / "sessions", datetime(2026, 8, 4, 16, 44, tzinfo=UTC))
@@ -415,7 +415,9 @@ def test_replaying_a_k106_session_gets_the_k106_map_not_todays(tmp_path: Path) -
     assert prepared.flash_history.revisions_at(prepared.wide["timestamp"]).tolist() == [
         "ZS44A-k106"
     ]
-    assert _registry().revisions_at(prepared.wide["timestamp"]).tolist() == ["ZS44A-20260920"]
+    today = _registry().at(now).revision
+    assert today != "ZS44A-k106"
+    assert _registry().revisions_at(prepared.wide["timestamp"]).tolist() == [today]
     point = build_prepared_live_tick(pickle.loads(pickle.dumps(prepared))).operating_point
     assert point[TARGET_AFR] == pytest.approx(K106_CELL, abs=1e-3)
 
@@ -424,7 +426,7 @@ def test_replaying_a_k106_session_gets_the_k106_map_not_todays(tmp_path: Path) -
     source.observe(TelemetryRecord.obd(now.timestamp(), "RPM", CELL_RPM, "rpm"))
     live = source.prepare_tick(now)
     assert live is not None
-    assert live.flash_history.revisions_at(live.wide["timestamp"]).tolist() == ["ZS44A-20260920"]
+    assert live.flash_history.revisions_at(live.wide["timestamp"]).tolist() == [today]
 
 
 def test_replaying_a_pre_flash_session_is_refused_by_name(

@@ -274,4 +274,4 @@ def test_actual_revision_boundary_and_historical_table():
         (r, c) for r in range(8) for c in range(8) if old.raw_values[r][c] != new.raw_values[r][c]
     ]
     assert differences == [(7, 4)]
-    assert calibration.active_revision == new.revision
+    assert calibration.active_revision == registry.at(datetime.now(UTC)).revision

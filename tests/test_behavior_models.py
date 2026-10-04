@@ -372,7 +372,9 @@ def test_shipped_air_charge_surface_is_revision_scoped() -> None:
     surface = load_behavior_models(path).by_name("air_charge_vs_rpm_throttle_did")
 
     assert surface is not None
-    # Scoped to the calibration in force: the newest flashed revision.
+    # Scoped to one registered calibration. Not necessarily the newest: a
+    # flash is recorded before any drive on it exists to refit from
+    # (ZS44A-20261004 was flashed after the 2026-09-23 refresh).
     import yaml
 
     revisions = yaml.safe_load(
@@ -380,7 +382,7 @@ def test_shipped_air_charge_surface_is_revision_scoped() -> None:
             Path(__file__).resolve().parents[1] / "data/nissan-xterra-2008/tune_revisions.yaml"
         ).read_text()
     )["revisions"]
-    assert surface.fit.tune_revision == revisions[-1]["revision"]
+    assert surface.fit.tune_revision in {r["revision"] for r in revisions}
     assert surface.fit.validation_sample_count > 0
     assert surface.fit.validation_warning_rate is not None
 
