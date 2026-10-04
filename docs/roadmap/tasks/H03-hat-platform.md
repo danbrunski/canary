@@ -165,6 +165,60 @@ other checklist leans on.
     GPS refclock would have stepped the clock 14 s on a boot without network
     (`makestep 1 -1`). The NMEA lag is now 62–68 ms.
 
+  **Fixed the same afternoon (on the road): `#* PPS` at −205 ns ± 621 ns.**
+  Three faults stacked:
+  - **`precision 5e-1` on the GPS line made the PPS unusable.** chrony cannot
+    number a pulse against a reference that may be half a second out, so it
+    drops every one. A throwaway `chronyd -x` showed it: `strace` had it
+    fetching each pulse (`PPS_FETCH`), and `refclocks.log` had 0 PPS samples
+    with or without `lock`. With `precision 1e-1 offset 0.065` (the measured
+    62–68 ms NMEA lag at 115200), it logged 62 in 60 s and selected PPS.
+  - **gpsd never fed the SOCK.** A standalone `/dev/pps*` given to gpsd
+    produced no samples on SHM or the socket.
+  - **That attachment took SHM unit 0** whenever it beat the receiver. A
+    `gpsdctl remove` did not free the unit; only a gpsd restart with the
+    receiver alone attached moved its time back to NTP0.
+
+  The new path (`install_pi.sh`):
+  - chrony reads `/dev/pps-canary` directly. The `refclock PPS … lock GPS`
+    line is written at each chrony start by
+    `chrony.service.d/canary-pps.conf` (`ExecStartPre=+`, since the unit runs
+    as `_chrony` under `ProtectSystem=strict`), as
+    `/run/canary-chrony-pps.conf`, only when the device exists.
+  - `canary-gps.conf` pulls it in with `include /run/canary-chrony-*.conf`.
+    chrony 4.6.1, checked with `chronyd -p`: a glob matching nothing is
+    ignored, a missing plain include is fatal, and so is a glob whose
+    directory is missing (the first attempt used `/run/canary-chrony/*.conf`
+    and failed that check before anything was restarted).
+  - `70-canary-pps.rules` now pulls in `canary-chrony-pps.service`, which
+    restarts chrony once if its generated file lacks the line. That covers a
+    chrony that won the udev race at boot.
+  - The HAT's GPS line is `refclock SHM 0 refid GPS precision 1e-1 offset
+    0.065`. The USB receiver path is byte-identical to before.
+  - `canary-gpsd-pps.service` and `gpsd.service.d/canary-reattach-pps.conf`
+    are removed on upgrade.
+
+  Tests: `test_a_canary_hat_offers_chrony_its_pps_only_when_the_device_exists`,
+  `test_a_canary_hat_states_its_measured_nmea_lag`,
+  `test_upgrading_removes_the_gpsd_pps_attachment`, and the no-HAT and
+  no-static-`refclock PPS` guards, 32/32.
+
+  **On the Pi, 2026-10-04 20:54–20:59Z** (files byte-identical to the
+  installer's output):
+  - `chronyd -p` parses the real config with the generated file absent (the
+    missing-device case) and present.
+  - After a gpsd restart the receiver published on NTP0. After a chrony
+    restart PPS was selected within 60 s: −205 ns ± 621 ns, `Last offset`
+    −2.2 µs.
+  - `canary-chrony-pps.service` left chrony alone when the line was there.
+    With the line deleted, it restarted chrony, the generator rewrote the
+    line, and PPS was back at −300 ns 75 s later.
+
+  **Still owed:**
+  - A real start with the overlay removed (shown so far only by `chronyd -p`
+    on the generated-file-absent config).
+  - A cold boot away from the network that steps the clock once, early.
+
   Also found that day, and fixed (`install_pi.sh`): `PartOf=gpsd.service`
   carries a stop and a restart of gpsd to `canary-gpsd@` and
   `canary-gpsd-pps`, but not a fresh start. The 2026-10-03 `apt upgrade`

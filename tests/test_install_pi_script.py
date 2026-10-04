@@ -91,7 +91,7 @@ _INSTALLED_UNIT_FILES = (
     "canary-modules.conf",
     "tmpfiles-canary.conf",
     "canary-gpsd@.service",
-    "canary-gpsd-pps.service",
+    "canary-chrony-pps.service",
 )
 
 
@@ -451,20 +451,59 @@ def test_a_canary_hat_gets_a_stable_pps_name_but_no_fatal_refclock(
     assert 'ATTR{name}=="canary-pps*", SYMLINK+="pps-canary"' in rule
 
 
-def test_a_canary_hat_feeds_pps_to_chrony_through_a_gpsd_socket(installer: Installer) -> None:
-    """H03.3: the pulse reaches chrony as `refclock SOCK`, which chronyd creates
-    itself, so a missing overlay costs a source and never chronyd. gpsd names
-    the socket after the path it was handed, so the attach unit hands it the
-    stable symlink."""
+def _chrony_conf(installer: Installer) -> str:
+    return (installer.root / "etc" / "chrony" / "conf.d" / "canary-gps.conf").read_text()
+
+
+def test_a_canary_hat_offers_chrony_its_pps_only_when_the_device_exists(
+    installer: Installer,
+) -> None:
+    """H03.3, 2026-10-04: chrony reads the PPS directly. The `refclock PPS` line
+    is generated at each chrony start only when /dev/pps-canary exists, and
+    pulled in by a glob include, which chrony ignores when nothing matches (a
+    missing plain include is fatal)."""
     installer.run(CANARY_HAT_PRODUCT_FILE=str(_hat_product_file(installer)))
 
-    chrony = (installer.root / "etc" / "chrony" / "conf.d" / "canary-gps.conf").read_text()
-    assert "refclock SOCK /run/chrony.pps-canary.sock refid PPS lock GPS" in chrony
+    chrony = _chrony_conf(installer)
+    assert "include /run/canary-chrony-*.conf" in chrony
+    assert "refclock SOCK" not in chrony
+    units = installer.root / "etc" / "systemd" / "system"
+    pre = (units / "chrony.service.d" / "canary-pps.conf").read_text()
+    # `+`: chrony.service runs as _chrony under ProtectSystem=strict.
+    assert "ExecStartPre=+/bin/sh -c" in pre
+    assert "if [ -e /dev/pps-canary ]" in pre
+    assert '"refclock PPS /dev/pps-canary refid PPS lock GPS" >/run/canary-chrony-pps.conf' in pre
     rule = (installer.root / "etc" / "udev" / "rules.d" / "70-canary-pps.rules").read_text()
-    assert 'ENV{SYSTEMD_WANTS}+="canary-gpsd-pps.service"' in rule
-    unit = (installer.root / "etc" / "systemd" / "system" / "canary-gpsd-pps.service").read_text()
-    assert "ExecStart=/usr/sbin/gpsdctl add /dev/pps-canary" in unit
-    assert "BindsTo=dev-pps\\x2dcanary.device" in unit
+    assert 'ENV{SYSTEMD_WANTS}+="canary-chrony-pps.service"' in rule
+    late = (units / "canary-chrony-pps.service").read_text()
+    assert "systemctl try-restart chrony.service" in late
+    assert 'grep -qs "^refclock PPS /dev/pps-canary" /run/canary-chrony-pps.conf' in late
+
+
+def test_a_canary_hat_states_its_measured_nmea_lag(installer: Installer) -> None:
+    """With `precision 5e-1` chrony could not number the pulses and dropped
+    every one. The HAT receiver's NMEA lag measured 62-68 ms at 115200."""
+    installer.run(CANARY_HAT_PRODUCT_FILE=str(_hat_product_file(installer)))
+
+    assert "refclock SHM 0 refid GPS precision 1e-1 offset 0.065" in _chrony_conf(installer)
+    assert "refclock SHM 0 refid GPS precision 5e-1" not in _chrony_conf(installer)
+
+
+def test_upgrading_removes_the_gpsd_pps_attachment(installer: Installer) -> None:
+    """The 2026-09-23..10-04 path attached /dev/pps-canary to gpsd. gpsd never
+    fed chrony from it, and it took SHM unit 0 from the receiver."""
+    units = installer.root / "etc" / "systemd" / "system"
+    (units / "gpsd.service.d").mkdir(parents=True)
+    (units / "canary-gpsd-pps.service").write_text("[Unit]\n")
+    (units / "gpsd.service.d" / "canary-reattach-pps.conf").write_text("[Service]\n")
+
+    result = installer.run(CANARY_HAT_PRODUCT_FILE=str(_hat_product_file(installer)))
+
+    assert not (units / "canary-gpsd-pps.service").exists()
+    assert not (units / "gpsd.service.d" / "canary-reattach-pps.conf").exists()
+    assert "systemctl stop canary-gpsd-pps.service" in installer.calls("systemctl stop")
+    assert "systemctl restart chrony" in installer.restarts()
+    assert "removed" in result.stdout
 
 
 def test_without_a_hat_chrony_has_no_pps_source(installer: Installer) -> None:
@@ -473,8 +512,12 @@ def test_without_a_hat_chrony_has_no_pps_source(installer: Installer) -> None:
     chrony = (installer.root / "etc" / "chrony" / "conf.d" / "canary-gps.conf").read_text()
     assert "refclock PPS" not in chrony
     assert "refclock SOCK" not in chrony
+    assert "include /run/canary-chrony" not in chrony
+    assert "refclock SHM 0 refid GPS precision 5e-1 offset 0.0" in chrony
     assert not (installer.root / "etc" / "udev" / "rules.d" / "70-canary-pps.rules").exists()
-    assert not (installer.root / "etc" / "systemd" / "system" / "canary-gpsd-pps.service").exists()
+    units = installer.root / "etc" / "systemd" / "system"
+    assert not (units / "canary-chrony-pps.service").exists()
+    assert not (units / "chrony.service.d" / "canary-pps.conf").exists()
 
 
 def _unit_dir(installer: Installer) -> Path:
@@ -492,7 +535,7 @@ def test_every_gpsd_start_replays_the_receivers_add_event(installer: Installer) 
     assert not (_unit_dir(installer) / "gpsd.service.d" / "canary-reattach-pps.conf").exists()
 
 
-def test_a_canary_hat_reattaches_its_pps_and_sets_the_gnss_baud(installer: Installer) -> None:
+def test_a_canary_hat_reattaches_its_receiver_and_sets_the_gnss_baud(installer: Installer) -> None:
     """At 9600 baud the HAT's MAX-M10M overflowed its transmit buffer and its
     time ran ~14 s late (2026-10-04). It forgets the speed at every power cut,
     so it is set on every attach."""
@@ -501,8 +544,7 @@ def test_a_canary_hat_reattaches_its_pps_and_sets_the_gnss_baud(installer: Insta
     units = _unit_dir(installer)
     reattach = (units / "gpsd.service.d" / "canary-reattach.conf").read_text()
     assert "udevadm trigger --action=add /dev/ttyAMA2" in reattach
-    pps = (units / "gpsd.service.d" / "canary-reattach-pps.conf").read_text()
-    assert "ExecStartPost=-/usr/bin/udevadm trigger --action=add /dev/pps-canary" in pps
+    assert not (units / "gpsd.service.d" / "canary-reattach-pps.conf").exists()
     baud = (units / "canary-gpsd@ttyAMA2.service.d" / "canary-baud.conf").read_text()
     assert "/usr/bin/gpsctl -s 115200 /dev/ttyAMA2" in baud
     # gpsctl can hang and ignores SIGTERM; an unbounded try never retries.

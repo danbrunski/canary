@@ -363,39 +363,62 @@ EOF
   # order (the Ethernet PHY's PTP clock and gpsd's tty line discipline are
   # other /dev/pps devices), so a udev rule gives it a stable name.
   #
-  # It is NOT given to chrony as `refclock PPS` here: chronyd exits fatally
-  # when a configured PPS device does not exist, so a missing overlay or a
-  # udev race at boot would take all time sync down. It did, on 2026-09-23,
-  # the first time this shipped (the rule matched `canary-pps` exactly and
-  # never fired). The safe path is a SOCK refclock fed by gpsd (H03.3): chronyd
-  # creates /run/chrony.pps-canary.sock itself, and canary-gpsd-pps.service
-  # hands /dev/pps-canary to gpsd, which writes each pulse there with the time
-  # it belongs to. No pulse, no samples; chronyd keeps running either way.
+  # chrony reads it directly as `refclock PPS`, but never from a static line:
+  # chronyd exits fatally when a configured PPS device does not exist, and on
+  # 2026-09-23 a rule that never fired took all time sync down. So the line is
+  # generated at every chrony start, only when /dev/pps-canary exists
+  # (chrony.service.d/canary-pps.conf), as /run/canary-chrony-pps.conf, which
+  # canary-gps.conf pulls in with a *glob* include. chrony 4.6.1, checked on
+  # the Pi: a glob matching no file is ignored, but a missing plain include is
+  # fatal, and so is a glob whose directory does not exist. Hence a glob
+  # directly in /run, which always exists. A PPS that appears after chrony started (udev race at boot)
+  # pulls in canary-chrony-pps.service, which restarts chrony once if the
+  # generated file lacks the line.
+  #
+  # Replaced 2026-10-04: a SOCK refclock fed by gpsd (canary-gpsd-pps.service
+  # attaching /dev/pps-canary to gpsd). gpsd never wrote a pulse for a
+  # standalone PPS device, and attaching it took SHM unit 0 whenever it beat
+  # the receiver, which moved the receiver's time to unit 1, where chrony does
+  # not look. Both are removed below.
+  #
+  # The PPS can only be numbered (`lock GPS`) when the GPS refclock's own
+  # error is well under half a second, so the HAT's GPS line states the lag
+  # actually measured: 62–68 ms at 115200 baud (2026-10-04), steady to < 1 ms.
+  # With `precision 5e-1` chrony dropped every pulse.
+  CHRONY_GPS_LINE='refclock SHM 0 refid GPS precision 5e-1 offset 0.0'
   CHRONY_PPS_LINE=""
+  UNIT_DIR="$(dirname "${CANARY_SERVICE}")"
+  for _old in "${UNIT_DIR}/canary-gpsd-pps.service" "${UNIT_DIR}/gpsd.service.d/canary-reattach-pps.conf"; do
+    if [[ -e "${_old}" ]]; then
+      [[ "${_old}" == *canary-gpsd-pps.service ]] && { systemctl stop canary-gpsd-pps.service || true; }
+      rm -f "${_old}"
+      echo "  removed ${_old}"
+      CONFIG_CHANGED[chrony]=1
+    fi
+  done
   if [[ "${hat_product:-}" == CANary-HAT* ]]; then
-    write_managed chrony "$(dirname "${CANARY_SERVICE}")/canary-gpsd-pps.service" \
-      <"${CANARY_HOME}/systemd/canary-gpsd-pps.service"
-    # Same PartOf gap as the receiver's attach unit (see canary-reattach.conf).
-    install -d -m 0755 "$(dirname "${CANARY_SERVICE}")/gpsd.service.d"
-    write_managed chrony "$(dirname "${CANARY_SERVICE}")/gpsd.service.d/canary-reattach-pps.conf" <<'EOF'
-# Managed by canary scripts/install_pi.sh — re-attach the HAT PPS after any gpsd start.
+    CHRONY_GPS_LINE='refclock SHM 0 refid GPS precision 1e-1 offset 0.065'
+    write_managed chrony "${UNIT_DIR}/canary-chrony-pps.service" \
+      <"${CANARY_HOME}/systemd/canary-chrony-pps.service"
+    install -d -m 0755 "${UNIT_DIR}/chrony.service.d"
+    write_managed chrony "${UNIT_DIR}/chrony.service.d/canary-pps.conf" <<'EOF'
+# Managed by canary scripts/install_pi.sh — offer chrony the HAT PPS only when it exists (H03.3).
 [Service]
-ExecStartPost=-/usr/bin/udevadm trigger --action=add /dev/pps-canary
+ExecStartPre=+/bin/sh -c 'if [ -e /dev/pps-canary ]; then echo "refclock PPS /dev/pps-canary refid PPS lock GPS" >/run/canary-chrony-pps.conf; else rm -f /run/canary-chrony-pps.conf; fi'
 EOF
     write_managed chrony "${ROOT}/etc/udev/rules.d/70-canary-pps.rules" <<'EOF'
-# Managed by canary scripts/install_pi.sh — stable name for the CANary-HAT's GNSS PPS,
-# and canary-gpsd-pps.service attaches it to gpsd for chrony's SOCK refclock (H03.3).
-SUBSYSTEM=="pps", ATTR{name}=="canary-pps*", SYMLINK+="pps-canary", TAG+="systemd", ENV{SYSTEMD_WANTS}+="canary-gpsd-pps.service"
+# Managed by canary scripts/install_pi.sh — stable name for the CANary-HAT's GNSS PPS;
+# canary-chrony-pps.service restarts chrony if it started before the device existed (H03.3).
+SUBSYSTEM=="pps", ATTR{name}=="canary-pps*", SYMLINK+="pps-canary", TAG+="systemd", ENV{SYSTEMD_WANTS}+="canary-chrony-pps.service"
 EOF
     CHRONY_PPS_LINE='
-# CANary-HAT TIMEPULSE through gpsd (H03.3). SOCK, never a direct PPS device: chronyd
-# exits when a configured PPS device is missing, and it did on 2026-09-23.
-# Locked to the NMEA source above, which numbers each pulse.
-refclock SOCK /run/chrony.pps-canary.sock refid PPS lock GPS'
+# CANary-HAT TIMEPULSE: its PPS refclock line is generated at chrony start
+# only when /dev/pps-canary exists (see chrony.service.d/canary-pps.conf). A
+# glob, so no generated file is not an error.
+include /run/canary-chrony-*.conf'
     if [[ -n "${CONFIG_CHANGED[chrony]:-}" ]]; then
       systemctl daemon-reload
       udevadm control --reload || true
-      udevadm trigger --subsystem-match=pps --action=add || true
     fi
   fi
 
@@ -409,7 +432,9 @@ refclock SOCK /run/chrony.pps-canary.sock refid PPS lock GPS'
 # makes chrony flag GPS as a falseticker against network NTP and refuse to use
 # it. 5e-1 covers the real lag and is still three orders of magnitude tighter
 # than the hours of drift being corrected, and far tighter than telemetry needs.
-refclock SHM 0 refid GPS precision 5e-1 offset 0.0
+EOF
+    printf '%s\n' "${CHRONY_GPS_LINE}"
+    cat <<'EOF'
 
 # Step the clock by ANY offset, at ANY point in the session — not just the
 # first few updates. The failure being fixed is a large correction landing

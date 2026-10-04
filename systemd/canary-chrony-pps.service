@@ -1,0 +1,14 @@
+[Unit]
+Description=Restart chrony once if it started before the CANary-HAT PPS existed (H03.3)
+Documentation=man:chrony.conf(5)
+# Pulled in by 70-canary-pps.rules when /dev/pps-canary appears. chrony's
+# ExecStartPre (chrony.service.d/canary-pps.conf) writes the `refclock PPS`
+# line only when the device exists, so a chrony that won the udev race at boot
+# has no PPS source. Restart it once; a chrony that already has the line is
+# left alone. try-restart does nothing when chrony is not running, and its
+# own start will then see the device.
+After=chrony.service
+
+[Service]
+Type=oneshot
+ExecStart=/bin/sh -c 'grep -qs "^refclock PPS /dev/pps-canary" /run/canary-chrony-pps.conf || systemctl try-restart chrony.service'
