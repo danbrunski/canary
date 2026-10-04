@@ -58,8 +58,21 @@ to name the receiver when autodetection can't (more than one serial device).
 On a CANary-HAT (the firmware reports it in `/proc/device-tree/hat/product`) the
 board's own MAX-M10M on `/dev/ttyAMA2` is chosen automatically, and the udev rule
 matches it by kernel name — a device-tree UART has no `by-id` symlink. Its
-TIMEPULSE is `pps-gpio` on GPIO18 (a `/dev/ppsN` named `canary-pps`); feeding
-that to chrony as a PPS refclock is not done yet.
+TIMEPULSE is `pps-gpio` on GPIO18 (a `/dev/ppsN` named `canary-pps`, given the
+stable name `/dev/pps-canary` by `70-canary-pps.rules`), and chrony reads it
+directly as `refclock PPS /dev/pps-canary refid PPS lock GPS`: the NMEA time
+numbers each pulse, and the pulse carries the precision (selected at −205 ns ±
+621 ns on 2026-10-04). chronyd exits when a configured PPS device is missing,
+so that line is never in a static file. `chrony.service.d/canary-pps.conf`
+writes it to `/run/canary-chrony-pps.conf` at each chrony start, only when the
+device exists, and `canary-gps.conf` pulls it in with a glob include
+(`include /run/canary-chrony-*.conf`; a glob matching nothing is ignored, but a
+plain missing include, or a glob in a missing directory, is fatal). If the
+device appears after chrony started, `canary-chrony-pps.service` restarts chrony
+once. The receiver also needs 115200 baud, set on every attach: at its power-up
+9600 its NMEA overflowed and ran ~14 s late. gpsd does not hold the PPS. Handed
+a standalone `/dev/pps*`, it fed chrony nothing and took SHM unit 0 from the
+receiver (H03.3).
 
 Re-running the installer (every `canary-update` that touches it does) restarts
 gpsd only when `/etc/default/gpsd`, `70-canary-gps.rules` or
@@ -113,6 +126,12 @@ Config lands in `/etc/chrony/conf.d/canary-gps.conf` rather than by rewriting
 refclock SHM 0 refid GPS precision 5e-1 offset 0.0
 makestep 1 -1
 ```
+
+(On a CANary-HAT the first line is `refclock SHM 0 refid GPS precision 1e-1
+offset 0.065`, plus the PPS include above. Its NMEA lag is a measured, steady
+62–68 ms at 115200 baud. A `lock`ed PPS can only be numbered against a
+reference well under half a second out, and with `5e-1` chrony dropped every
+pulse.)
 
 `precision 5e-1` is deliberately loose. NMEA time has no PPS pulse to align to,
 so it arrives a few hundred milliseconds late — measured ~355 ms on this
