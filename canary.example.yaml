@@ -60,6 +60,14 @@ hardware:
     # sample_rate_hz: 104
     # accel_range_g: 8
     # gyro_range_dps: 2000
+  # Optional USB serial ADC module reading analog sensors (NOYITO 10-channel
+  # STM32 + CH340). Channels, wiring and every calibration number are data:
+  # data/usb_adc_sensors.yaml. Recorded as sensor:<name>, never trained on.
+  # Prefer the /dev/serial/by-path/... symlink: a CH340 has no serial number.
+  usb_adc:
+    enabled: false
+    port: /dev/ttyUSB0
+    # sensors: data/usb_adc_sensors.yaml
 
 collection:
   # canable = one Canable does broadcast CAN + active OBD/UDS ISO-TP.

@@ -324,6 +324,28 @@ class SupplyVoltageConfig(_Strict):
     rate_hz: float = Field(default=10.0, gt=0.0, le=200.0)
 
 
+class UsbAdcConfig(_Strict):
+    """A USB serial ADC module reading analog sensors (first: the AEM fuel gauge).
+
+    The transport only; the channels and every calibration number are data
+    (``sensors``). Disabled by default. Recorded as ``sensor:<name>``, an
+    external-sensor channel: never trains or scores the anomaly detectors.
+    """
+
+    enabled: bool = False
+    #: Name the module by its USB port (``/dev/serial/by-path/...``): a plain
+    #: CH340 has no serial number, so ``by-id`` cannot tell two apart and
+    #: ``/dev/ttyUSB*`` follows probe order.
+    port: str = "/dev/ttyUSB0"
+    baudrate: int = 115200
+    #: One blocking read's limit; bounds shutdown latency.
+    read_timeout_seconds: float = Field(default=1.0, gt=0.0, le=5.0)
+    #: No parseable line for this long reopens the port. The stock firmware
+    #: sends every 0.5 s.
+    stall_seconds: float = Field(default=5.0, gt=0.0)
+    sensors: Path = DATA_DIR / "usb_adc_sensors.yaml"
+
+
 class KlineConfig(_Strict):
     """The CANary-HAT's K-line transceiver (TLIN1027 on uart0).
 
@@ -359,6 +381,7 @@ class HardwareConfig(_Strict):
     imu: ImuConfig = ImuConfig()
     sensor_can: SensorCanConfig = SensorCanConfig()
     supply_voltage: SupplyVoltageConfig = SupplyVoltageConfig()
+    usb_adc: UsbAdcConfig = UsbAdcConfig()
     kline: KlineConfig = KlineConfig()
 
 

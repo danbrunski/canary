@@ -34,6 +34,13 @@ hardware:
   # imu:
   #   source: lsm6dsox
   #   sample_rate_hz: 104
+  # USB ADC module for analog sensors: the AEM fuel-pressure gauge's analog
+  # output on CH0, recorded as sensor:FUEL_PRESSURE (kPa). Every calibration
+  # number is in data/usb_adc_sensors.yaml. Name it by USB port, not
+  # /dev/ttyUSB*: a CH340 has no serial number (ls -l /dev/serial/by-path/).
+  usb_adc:
+    enabled: true
+    port: /dev/serial/by-path/platform-xhci-hcd.1-usb-0:2:1.0-port0
 
 collection:
   obd_source: canable

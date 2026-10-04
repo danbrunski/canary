@@ -2,6 +2,11 @@
 # (config `hardware.sensor_can`). Recorded as `sensor:<name>`. Every decode
 # field is required; see src/decode/sensor_can.py.
 signals:
+  # NOT the installed path: the operator's 30-0301 turned out to have no AEMnet
+  # wires (2026-10-03). Its analog output is read through the USB ADC
+  # (data/usb_adc_sensors.yaml), which records the same sensor:FUEL_PRESSURE;
+  # the daemon refuses to start with both hardware.sensor_can and
+  # hardware.usb_adc producing it.
   # AEM X-Series oil/fuel pressure gauge 30-0301 (100 psig sensor).
   # Manual "10-0301", 2020-03-23, AEMnet section: CAN 2.0B, 500 kbit/s, 29-bit
   # ID 0x000A0301, DLC 8, 20 Hz, big-endian; byte 0 "Pressure (gauge)",

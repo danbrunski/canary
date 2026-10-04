@@ -1,0 +1,49 @@
+# Analog sensors read through the USB ADC module (config `hardware.usb_adc`).
+# Recorded as `sensor:<name>`; a reading outside its sensor's valid window is
+# recorded as the state `sensor:<name>_FAULT` instead (below_window /
+# above_window), never as a number. Every calibration number lives here, so a
+# re-measured part is an edit to this file. Schema: src/decode/analog_sensors.py.
+# Build and bring-up: docs/aem-fuel-pressure-analog-input.md.
+
+module:
+  device: NOYITO 10-channel 12-bit USB ADC (STM32F103C8T6 + CH340), stock firmware
+  # The ADC's reference is the module's own 3.3 V regulator, so this is that
+  # pin measured to GND with the module plugged into the Pi (DMM, 2026-10-03).
+  # Re-measure if the module or the USB port powering it changes.
+  reference_volts: 3.282
+  full_scale_counts: 4095
+
+channels:
+  - name: FUEL_PRESSURE
+    input: 0
+    device: AEM X-Series 30-0301 fuel pressure gauge, analog output (WHITE +, BROWN -)
+    source: AEM install manual 10-0301, analog output section (psig = 25.00 x V - 12.50)
+    # R1 from WHITE to the CH0 node, R2 from the node to module GND (where
+    # BROWN also lands). Values measured with a DMM before soldering; nominal
+    # 10k / 20k 5 %. Ratio (R1 + R2) / R2 = 1.5000.
+    divider:
+      r_top_ohms: 9820
+      r_bottom_ohms: 19640
+    transfer:
+      slope: 25.00
+      intercept: -12.50
+      unit: psi
+    # AEM: outside 0.50-4.50 V the gauge reads SENSOR ERROR.
+    valid_volts:
+      min: 0.50
+      max: 4.50
+    record_unit: kPa
+    # Trim in psi, added after the transfer function. Left at 0: on 2026-10-03
+    # the analog output read a constant +1.8 +/- 0.3 psi above the gauge face
+    # from 0 to 51 psi, KOEO and running (DMM confirmed the gauge really
+    # outputs 0.574 V at zero), but which of the two is right is unresolved:
+    # the face read 0 at zero pressure, while the analog output's running
+    # 51.0 psi matches the factory 350 kPa (50.8 psi). Settle it with the
+    # sensor vented to atmosphere (next time the fuel system is open), then
+    # set this to minus whatever the analog output reads there.
+    offset: 0.0
+    notes: >-
+      Electrical chain checked 2026-10-03 without a calibration run: DMM at
+      the ADC pins 382.5 mV vs 381.8 mV from counts; gauge output 0.574 V vs
+      0.573 V from counts; WHITE-to-gauge-ground 2.58 V vs 2.582 V from counts
+      plus the 40 mV BROWN-to-ground offset.
