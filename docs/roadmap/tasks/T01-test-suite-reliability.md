@@ -536,3 +536,26 @@ measurement in hand.
     (`install_clock`, and `_SchedulerDidEcu(clock=clock)`), with a 0.5 s fake
     deadline. The file passed 3 of 3 runs, and the test passed 20 of 20 copies
     (four rounds of five concurrent `pytest -n0`) beside 12 CPU burners.
+
+- [ ] **T01.17 `tests/test_inference_scheduling.py::test_run_live_inference_records_timing_and_shuts_down`
+  failed again under load after T01.12.**
+  - **Seen** 2026-10-04 in the push gate for `12a2351` (USB ADC v2, which
+    touched no inference code), parallel run; it passed on the serial
+    rerun. Log: `.git/ci-gate/failed-logs/20261004T212734Z-12a2351-pytest.log`.
+  - **What failed:** the ticks arrived (T01.12's wait held), but
+    `snap.stages` lacked `compute` and `isolation_forest`: the log shows
+    "in-flight inference compute did not finish within 1.0s; releasing the
+    worker without waiting" and 46 overrun deadlines. Under load no compute
+    finished before `stop`, so no compute stage was ever timed.
+  - **Do:** wait for `ticks_completed >= 1` (a computed tick), not only
+    `ticks_scheduled >= 3`, before setting `stop`, with the same 10 s bound.
+
+- [ ] **T01.18 `tests/test_sequence_bakeoff.py::test_main_writes_json` crashed
+  its xdist worker in the `ml_training` tier.**
+  - **Seen** 2026-10-04 in the push gate for `12a2351`: "worker 'gw8'
+    crashed", 1 failed, 121 passed in 433 s. Passes alone (`-n0`, 79 s).
+  - **Suspected shape:** memory. Torch bake-offs in parallel workers on the
+    laptop. The crash left no traceback, so the next occurrence should
+    check `dmesg` for the OOM killer first.
+  - **Do:** confirm the cause, then cap the tier's workers or mark the
+    bake-off serial.
