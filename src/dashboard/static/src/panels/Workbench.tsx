@@ -59,6 +59,7 @@ import { AnalysisPage } from "./tuning/AnalysisPage";
 import { LoggingPage } from "./tuning/LoggingPage";
 import { LogsPage } from "./tuning/LogsPage";
 import { CalibrationPage } from "./tuning/CalibrationPage";
+import { RomLibraryPage } from "./tuning/RomLibraryPage";
 import { TuningContextBar } from "./tuning/TuningContextBar";
 
 export interface DashboardData {
@@ -244,6 +245,8 @@ function renderItem(
       return <LogsPage token={d.token} context={tuning} />;
     case "tuning-analysis":
       return <AnalysisPage token={d.token} status={d.status} context={tuning} />;
+    case "tuning-rom-library":
+      return <RomLibraryPage token={d.token} status={d.status} />;
     case "tuning-calibration":
       return <CalibrationPage token={d.token} status={d.status} />;
     case "tuning-rom-editor":

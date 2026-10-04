@@ -780,3 +780,51 @@ async def test_no_capture_armed_means_no_ledger_rows() -> None:
     stop.set()
     await task
     assert capture_lifetime.snapshot(time.monotonic()) is None
+
+
+async def test_the_ecu_backup_holds_the_ecm_so_no_kline_session_starts() -> None:
+    """W08.7: while the flash read holds the ECM's one session, the K-line
+    reader waits, as it does for a foreign tester."""
+    tx_gate.claim_ecm_session("rom_backup", ttl_seconds=60.0)
+    collector = _collector([ENTRIES])
+    stop = asyncio.Event()
+    task = asyncio.create_task(collector.run(asyncio.Queue(), stop))
+    await asyncio.sleep(0.1)
+    stop.set()
+    await task
+    assert FakeTransport.instances == []
+    assert MODULE_SESSIONS.owner(0x10) == "none"
+
+
+async def test_a_backup_that_starts_after_the_plan_resolves_still_wins() -> None:
+    """The window between ``_wants_command`` and the wake-up: a backup claim
+    taken there is re-checked in ``_session``, so the transceiver never opens."""
+    collector = _collector([ENTRIES])
+    prepare = collector._prepare
+
+    def backup_after_prepare(entries: tuple[str, ...]) -> object:
+        prepared = prepare(entries)
+        tx_gate.claim_ecm_session("rom_backup", ttl_seconds=60.0)
+        return prepared
+
+    collector._prepare = backup_after_prepare  # type: ignore[assignment,method-assign]
+    stop = asyncio.Event()
+    task = asyncio.create_task(collector.run(asyncio.Queue(), stop))
+    await asyncio.sleep(0.1)
+    stop.set()
+    await task
+    assert FakeTransport.instances == []
+    assert tx_gate.snapshot()["ecm_session_claims"].keys() == {"rom_backup"}
+
+
+async def test_an_abs_read_is_not_held_up_by_the_ecu_backup() -> None:
+    """W08.7 holds the ECM's session only: the ABS shares the wire, not that
+    session, so its reads go on while the backup runs."""
+    tx_gate.claim_ecm_session("rom_backup", ttl_seconds=60.0)
+    collector = _abs_collector([("ABS:ENGINE_SPEED",)])
+    stop = asyncio.Event()
+    task, records = await _records_until(collector, 1, stop)
+    stop.set()
+    await task
+    assert records and records[0].channel.startswith("ABS:")
+    assert tx_gate.snapshot()["ecm_session_claims"].keys() == {"rom_backup"}

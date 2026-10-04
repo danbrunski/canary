@@ -17,6 +17,7 @@ export type WorkbenchItem =
   | "tuning-logs"
   | "tuning-analysis"
   | "tuning-rom-maps"
+  | "tuning-rom-library"
   | "tuning-calibration"
   | "tuning-rom-editor"
   | "tuning-flash"

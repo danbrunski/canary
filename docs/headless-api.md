@@ -223,6 +223,13 @@ Control endpoints:
 | `PUT /control/capture/profiles` / `DELETE /control/capture/profiles/{name}` | save or delete a capture profile (`default` cannot be deleted); DID weights must be finite, positive, and name selected `mode22` members |
 | `POST /control/capture` / `DELETE /control/capture` | start a named isolated capture / return to default collection; start returns capture session path and budget state, stop returns `ended_capture_dir` and restores the exact pre-capture budget. Retrying an identical active start or immediately repeated stop returns the existing result with `idempotent: true`; that stop-response cache does not survive a daemon restart. |
 | `POST /control/rom/inspect` | authenticated, read-only ROM inspection: raw `application/octet-stream`, maximum 2 MiB. Decodes in memory, validates source hash/CRCs/table evidence, returns maps, axes, verified live-channel providers, each available table's `trace` (its X/Y trace channels, `axis_mapping` state + evidence, and the scheduler `request_channel` carrying each) and explicit TBD entries. Does not persist the file, change the active tune, or communicate with the ECU. |
+| `POST /control/rom/library?filename=<name>` | ROM library upload (W08.3): raw `application/octet-stream`, 2 MiB cap (413). Accepts a plain image of the vehicle's exact size (1,048,576 bytes on the Xterra) or an `.OsirisROM`; the UpRev encrypted backup `.bin` and anything else are refused by name (422). Stored per vehicle under `daemon.rom_library_dir`, content-addressed by the plain image's sha256; the same image again keeps one entry and adds the source. Returns the entry plus `created`. See [ROM library and ECU backup](#rom-library-and-ecu-backup-w08). |
+| `GET /control/rom/library` / `GET /control/rom/library/{sha}` | entries newest first (`{entries, count}`) / the full W08.2 description of one image plus its `entry` |
+| `GET /control/rom/library/{sha}/download` | the plain image, `application/octet-stream`, `Content-Disposition: attachment; filename="<label>-<sha8>.bin"` (no `.OsirisROM` export) |
+| `PATCH /control/rom/library/{sha}` / `DELETE /control/rom/library/{sha}` | set the label (`{"label": str \| null}`, the only editable field) / remove the entry |
+| `GET /control/rom/library/{sha}/tables` | every mapped table in every map slot: raw cells, decoded cells where a decode is declared, axes, confidence and evidence (W08.4) |
+| `GET /control/rom/compare?a=<sha>&b=<sha>` | changed byte ranges a -> b merged with a 16-byte gap, each labelled with the regions and tables it overlaps; table ranges carry per-cell old/new values, decoded where declared (W08.5) |
+| `GET /control/rom/backup` / `POST /control/rom/backup` / `POST /control/rom/backup/cancel` | ECU flash backup job (W08.7), read-only: state + live preconditions / start (202, or 409 naming every refusing precondition) / cancel a running read (409 when none runs) |
 
 The frame and every `/analysis/*` route in this table (W04) run in the digest's bounded single-flight child and refuse while a capture is recording: `409 {"error": "analysis_deferred", "profile", "message", "laptop_path"}`. A second, different analysis (or a running digest) is `409 analysis_busy`; a child failure is `503 analysis_unavailable`. Calculated load is refused as an axis.
 
@@ -267,6 +274,175 @@ comparison workflow.
 Job state is append-only in `daemon.jobs_dir/jobs.jsonl`, so recent job history
 survives daemon restarts. Control mutations are appended to
 `daemon.audit_log` as JSONL audit events and are also broadcast live.
+
+## ROM library and ECU backup (W08)
+
+Read-only throughout: these routes store and describe flash images and read
+the ECU's flash. Nothing writes the ECU. The vehicle's image layout is data
+(`<profile>/rom_map.yaml`, validated by `src/analysis/rom_map.py`; every
+region and table carries `confidence` = `verified` / `inferred` / `unknown`
+and required `evidence`), and so is the read recipe
+(`<profile>/rom_backup.yaml`). Addresses in payloads are integers (byte
+offsets into the plain image).
+
+**Library entry** (`POST` response, `GET /control/rom/library` `entries[]`,
+`PATCH` response):
+
+```json
+{
+  "sha256": "a46baa24...be50", "crc32": "95b993c5", "size": 1048576,
+  "container_sha256": "03d00051...28a2",
+  "source": "upload_osirisrom",
+  "sources": ["upload_osirisrom", "ecu_read"],
+  "source_records": [{"source": "upload_osirisrom", "filename": "ZS44A-Tuned-20260920.OsirisROM",
+                      "added_at": "...", "container_sha256": "...", "read_meta": null}],
+  "filename": "ZS44A-Tuned-20260920.OsirisROM", "label": null,
+  "added_at": "...", "last_added_at": "...",
+  "calibration_id": "1ZS44A00000",
+  "checksum": {"ok": true, "stored": {"sum": "0x...", "xor": "0x..."},
+               "computed": {"sum": "0x...", "xor": "0x..."}, "reason": null,
+               "algorithm": "be32_sum_xor"},
+  "revision_match": {"revision": "ZS44A-20260920", "status": "matched", "reference": null},
+  "map_reason": null,
+  "read_meta": null
+}
+```
+
+`source` is the first source; `sources` every distinct source, oldest first.
+`revision_match.status` is `matched` (a flashed revision's `image_sha256` in
+`tune_revisions.yaml`), `reference` (a never-flashed known image, e.g. the
+UpRev base, named in `reference`), `unrecognised`, or `unknown` when the flash
+history could not be read (`reason` says why; the image was never compared). `checksum` is `null`, and
+`map_reason` says why, when no map definition covers the image's calibration
+ID. A failing checksum is reported, never refused. `read_meta` is the latest
+ECU read's metadata (below), `null` for uploads.
+
+**Description** (`GET /control/rom/library/{sha}`): `sha256`, `crc32`,
+`container_sha256`, `calibration_id`, `size`, `checksum`, `revision_match`,
+then
+
+- `blocks`: 256 entries `{offset, ff_pct, entropy, class}`, one per 4 KiB;
+  `ff_pct` 0-100, `entropy` bits per byte, `class` `erased` / `sparse` (>= 50 %
+  0xFF) / `dense` (>= 6 bits/byte) / `data`;
+- `regions`: `{name, start, end, size, kind, confidence, added_by_uprev,
+  evidence, slot}`, sorted by start, nested regions after their parent; map-slot
+  spans resolved per slot (`slot` set, name `Map n: ...`);
+- `tables`: one per table placement `{id, kind, name, label, slot, offset, end,
+  rows, cols, dtype, role, decode, axes: {rows, cols} (table ids), confidence,
+  evidence}`;
+- `map_slots`: `{base, stride, count, end, confidence, evidence, slots: [{slot,
+  start, end}]}`;
+- `map`: `{definition, calibration_id, calibration_ids, image_size,
+  erase_sectors: [{index, start, end, size, confidence, evidence}], checksums}`;
+- `map_reason`: `null`, or e.g. `"no map definition for calibration 1ZS04C00000"`
+  (then `map`, `map_slots` and `checksum` are `null`, `regions`/`tables` empty;
+  identity and `blocks` are still there);
+- `entry`: the library entry above.
+
+**Tables** (`GET /control/rom/library/{sha}/tables`): `{sha256, calibration_id,
+map_slots: [1, 2, 3, 4, 5], tables: [...], reason}`. Each table:
+
+```json
+{"id": "fuel_targets", "kind": "fuel_targets", "name": "Fuel Targets",
+ "label": "Fuel Targets (Map 1)", "slot": 1, "offset": 918048, "end": 918111,
+ "rows": 8, "cols": 8, "dtype": "u8", "role": "table", "unit": "AFR",
+ "raw": [[128, 128, ...], ...], "decoded": [[14.7, 14.7, ...], ...],
+ "decode": {"formula": "afr = 1881.6 / raw", "kind": "reciprocal", "quantity": "afr",
+            "unit": "AFR", "confidence": "verified", "evidence": "..."},
+ "axes": {"rows": {"id": "fuel_targets_rpm_axis", "name": "...", "offset": 51877,
+                   "raw": [24, 32, ...], "decoded": [1200.0, 1600.0, ...], "unit": "rpm",
+                   "decode": {...}, "confidence": "verified"},
+          "cols": {"id": "fuel_targets_bfs_axis", "raw": [52, 68, ...], "decoded": null, ...}},
+ "confidence": "verified", "evidence": "..."}
+```
+
+A table without a declared decode (`K`, `be16` at slot +0x762, `inferred`)
+has `decoded: null` and is shown raw; a scalar is `[[value]]`. `role` is
+`axis` for a table another table uses as an axis. `slot` is `null` for a
+single-copy table.
+
+**Compare** (`GET /control/rom/compare?a=&b=`): `{a, b, changed_bytes, gap: 16,
+ranges, map_applied, map_reason}`; each range `{start, end, length, changed,
+labels: [str], overlaps: [{type: table|checksum|slot_region|region, id, label,
+slot, confidence}], cells: [{table, table_label, slot, row, col, address, old,
+new, old_decoded, new_decoded, unit}]}`. `end` is inclusive and is the last
+changed byte; `changed` counts differing bytes. Labels are tables first, then
+checksum words, then regions innermost first. The map labels ranges only when
+both images' calibration IDs are mapped.
+
+**Backup** (`GET /control/rom/backup`, and the `POST` responses; `...` marks values not yet measured on the truck, W08.9):
+
+```json
+{"state": "running", "phase": "reading", "reason": null,
+ "blocks_done": 5120, "blocks_total": 16645, "bytes": 322560, "bytes_total": 1048576,
+ "elapsed_s": ..., "eta_s": ..., "retries": 0, "requests": ..., "timeouts": 0,
+ "send_errors": 0, "negative_responses": {}, "started_at": "...", "ended_at": null,
+ "stored": false, "sha256": null, "verified": null, "integrity": null, "revision_match": null,
+ "polling_resumed_s": null, "polling_resume_note": null,
+ "preconditions": null, "can_start": false, "blocked_by": "a backup is running"}
+```
+
+`state` is `idle`, `refused` (with `reason`), `running`, `done` (image stored
+and verified: `stored: true`, `sha256`, `revision_match`), `failed` (with
+`reason`) or `cancelled`. `stored` says whether the image is in the library,
+and `sha256` is set only when it is: an image that read completely but failed
+integrity is still stored, marked unverified (`reason` starts `unverified:`,
+`stored: true`), while a read that finished but could not be written is
+`failed` with `stored: false`, no `sha256`, and a reason ending "nothing was
+kept". `send_errors` counts frames the bus itself refused (`can.CanError`);
+they are retried like timeouts and named "CAN send failed", never confused
+with the transmit gate suppressing a frame. `integrity` is
+`{checksum, calibration_id: {image, ecu, ok}, reread: {blocks, mismatches}}`,
+or `null` if the checks themselves failed. While not
+running, `preconditions` lists every start check `{id, ok, detail}` — ids
+`backup`, `recipe`, `obd_source`, `vehicle_state`, `engine_watch`, `passive`,
+`foreign_tester`, `ecm_session`, `capture` — with `can_start` and `blocked_by`.
+`polling_resumed_s` is the time from releasing the ECM session to the first
+OBD reading after it (`null` with `polling_resume_note` if none came within
+60 s).
+
+The read refuses unless `vehicle_state` is `ignition_only` **and** the fresh
+broadcast engine speed is below the running threshold (400 rpm; the classifier
+alone prefers a fresh OBD rpm, whose last `0` stays fresh for up to 10 s after
+polling pauses), a fresh broadcast engine speed is available to watch (OBD
+polling pauses for the read), passive is off, no other tester has been heard
+within 120 s or holds the ECM session, nothing else holds the session, and no
+capture window or profile capture is active; it re-checks these during the
+read and aborts on an engine start, judged the same way. It
+takes the ECM session as holder `rom_backup` (`/status.passive.ecm_session_owner`
+reads `rom_backup` meanwhile, and the OBD loop pauses), sends the recipe's
+session sequence and `23 [BE32 addr] [BE16 len]` reads with a per-request
+timeout and bounded retries, and on every exit path sends the recipe's exit
+sub-function (`10 81`), closes its bus and releases the session. Its frames are
+kept out of raw telemetry, judged by each frame's own acquisition time against
+the hold window, so a capture tap that drains its queue late still drops them
+(`frames_excluded` is counted at release; frames a late tap drops afterwards
+are not in it). The control-event log gets `rom_backup.start` and
+`rom_backup.end` (with the summary) on every exit path. A daemon shutdown or
+restart mid-read cancels the job: it sends the exit sequence, releases the
+ECM and records the end event (`reason` "cancelled: the daemon is shutting
+down"). `scripts/restart_canary.sh` refuses while a backup holds the ECM
+(`rom_backup` in `/status.passive.ecm_session_claims`), as it does for a
+capture (and so does `canary-update`, exit 3); `--force` ends it and says so.
+A stop during the post-read wait for polling to resume ends that wait at once
+(`polling_resume_note` "not checked: the daemon is shutting down") and still
+records the end event. While the backup holds the ECM, K-line reads of the ECM
+wait and a K-line diagnostic function on the ECM is refused ("the ECU backup
+holds the ECM session"); other K-line modules (ABS, SRS) share the wire, not
+the ECM's session, and are unaffected. The image must pass the checksums, carry
+the ECM-reported calibration ID and match a 64-block re-read; the result goes
+into the library as `source: ecu_read` with `read_meta`:
+
+```json
+{"started_at": "...", "ended_at": "...", "duration_s": ..., "requests": ...,
+ "retries": 0, "timeouts": 0, "send_errors": 0, "negative_responses": {}, "frames_excluded": ...,
+ "blocks": 16645, "block_size": 63, "range": ["0x000000", "0x0FFFFF"],
+ "request_id": "0x7E0", "response_id": "0x7E8", "recipe": "rom_backup.yaml",
+ "verified": true, "unverified_reason": null,
+ "integrity": {"checksum": {...}, "calibration_id": {"image": "1ZS44A00000",
+               "ecu": "1ZS44A00000", "ok": true}, "reread": {"blocks": 64, "mismatches": []}},
+ "revision_match": {"revision": "ZS44A-20260920", "status": "matched", "reference": null}}
+```
 
 ## WebSockets
 

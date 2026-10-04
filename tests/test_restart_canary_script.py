@@ -81,7 +81,7 @@ def test_an_unpersisted_passive_arm_is_a_loud_warning(run_script: Any) -> None:
     assert result.returncode == 0
     assert "WARNING: passive mode is armed (source control, no TTL)" in result.stderr
     assert "comes up TRANSMITTING" in result.stderr
-    assert "restart safe: no capture is active" in result.stdout
+    assert "restart safe: no capture or ECU backup is active" in result.stdout
 
 
 def test_no_passive_no_note(run_script: Any) -> None:
@@ -120,3 +120,41 @@ def test_a_failed_persist_is_a_warning_not_a_promise(
     assert result.returncode == 0
     assert "WARNING: passive mode is armed (source control" in result.stderr
     assert "restores it before transmitting" not in result.stdout
+
+
+def _backup_running() -> dict[str, Any]:
+    """``/status.passive`` while the W08.7 backup holds the ECM session."""
+    return {
+        "passive": {
+            "enabled": False,
+            "ecm_session_owner": "rom_backup",
+            "ecm_session_claims": {"rom_backup": 29.6},
+        }
+    }
+
+
+def test_a_running_ecu_backup_refuses_the_restart(run_script: Any) -> None:
+    result = run_script(_backup_running())
+    assert result.returncode == 3
+    assert "refusing: an ECU backup (ROM read) is running" in result.stderr
+    assert "POST /control/rom/backup/cancel" in result.stderr
+    assert not run_script.log.exists()
+    check = run_script(_backup_running(), "--check")
+    assert check.returncode == 3
+
+
+def test_force_ends_the_backup_and_says_so(run_script: Any) -> None:
+    result = run_script(_backup_running(), "--force")
+    assert result.returncode == 0, result.stderr
+    assert "WARNING: --force given; this ends the running ECU backup (ROM read)" in result.stderr
+    assert "systemctl restart canary.service" in run_script.log.read_text()
+
+
+def test_the_gate_snapshot_during_a_backup_trips_the_refusal(run_script: Any) -> None:
+    """The real ``tx_gate.snapshot()`` shape, not a hand-written one."""
+    from src.collection import tx_gate
+
+    tx_gate.claim_ecm_session("rom_backup", ttl_seconds=30)
+    result = run_script({"passive": tx_gate.snapshot()}, "--check")
+    assert result.returncode == 3
+    assert "ECU backup (ROM read) is running" in result.stderr

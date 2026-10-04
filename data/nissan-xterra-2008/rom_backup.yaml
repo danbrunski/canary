@@ -1,0 +1,48 @@
+schema_version: 1
+# W08.7: how this ECM hands out its flash, read-only. Loaded by
+# src/control/rom_backup.py, which holds no vehicle constants of its own.
+#
+# Provenance: UpRev's own ROM backup, captured 2026-10-04 with CANary passive
+# (docs/skunkworks/uprev-backup-20261004.md). Osiris sent `10 85` once, then
+# `10 FB` and `23 [BE32 address] [BE16 0x003F]` per 63-byte block, about
+# 35 ms per cycle, 624 s for 1 MiB, with no SecurityAccess. The ECM answered
+# on 0x7E8 with ISO-TP multi-frame `63` + 63 bytes. The reassembled image is
+# byte-identical to the decoded ZS44A-Tuned-20260920.OsirisROM (sha256
+# a46baa24...be50). Nothing is written to the ECU.
+request_id: 0x7E0
+response_id: 0x7E8
+session:
+  # DiagnosticSessionControl sub-functions (service 0x10).
+  enter_once: [0x85]
+  before_each_read: [0xFB]
+  # After the read: back to the default session. On this ECM `10 81` is the
+  # only fast exit; Mode 01 answers on the very next request after it, where
+  # `10 01` leaves Mode 01 dead for more than 30 s (data/dids.yaml access,
+  # exit_session, confirmed in-vehicle 2026-08-04).
+  exit: [0x81]
+read:
+  # ReadMemoryByAddress, KWP32 form (32-bit address, 16-bit length), the only
+  # form this ECM answers. 0x100000 is not a multiple of 63, so the last read
+  # is the 4 bytes at 0x0FFFFC, as UpRev's was.
+  start: 0x000000
+  end: 0x0FFFFF
+  block_size: 63
+pacing:
+  # One cycle (`10 FB` + one read) at most every 35 ms: UpRev's measured
+  # cycle, which this ECM is known to sustain for the whole read. That cycle
+  # includes Osiris's own USB round trips, so it is not an ECM limit; lower
+  # it only after a truck run shows a faster read holds (W08.9).
+  min_cycle_seconds: 0.035
+  request_timeout_seconds: 0.5
+  retries_per_block: 3
+verify:
+  # Blocks re-read, spread evenly across the image, and compared byte for
+  # byte with the first read.
+  reread_blocks: 64
+provenance:
+  capture: docs/skunkworks/uprev-backup-20261004.md
+  evidence: >-
+    UpRev's 2026-10-04 read, recorded on USB (Wireshark) and on CAN (raw
+    candump, 183,080 frames on 0x7E0 and 183,079 on 0x7E8): 16,644 reads of
+    63 bytes and one of 4, three negatives (7F 23 22 once, 7F AC 11 twice),
+    covering 0x000000-0x0FFFFF exactly.

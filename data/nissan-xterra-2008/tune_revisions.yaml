@@ -44,6 +44,8 @@ revisions:
     k: 1.06
     rom_file: ZS44A-Tuned.OsirisROM
     rom_sha256: c5325776b08c3084edd49d8f68587dad4668e02b0e77c7686f7548fb6f7c8fa9
+    # W08.2: sha256 of the decoded plain image (ROMData), what an ECU read returns.
+    image_sha256: e01cc0cb45d5beb879f82931be3054c79b7be3955220b3d93045deaabd23f18e
     notes: >
       K 1.05 -> 1.06 plus smoothed AFR targets and added spark at 3000-4500
       high load, all in one flash. That combination is why the spark edit was
@@ -56,6 +58,8 @@ revisions:
     k: 1.06
     rom_file: ZS44A-Tuned-20260920.OsirisROM
     rom_sha256: 03d00051a59b86251ac0d5d9cf2ac9651682cfcba978edce81f07371f1c128a2
+    # Equal to the 2026-10-04 ECU read (docs/skunkworks/uprev-backup-20261004.md).
+    image_sha256: a46baa248f16db8d5ed9854913e614dd7d77b7579bb6c36bddb792741531be50
     notes: >
       Single Fuel Targets Map 1 edit at 5200 RPM / BFS 18.20:
       raw A2 -> A3, AFR 11.6148148 -> 11.5435583. K and all other
@@ -66,3 +70,16 @@ revisions:
       Sessions spanning the flash require splitting before tune comparison;
       the session resolver assigns by session start, not per-sample time.
       See docs/skunkworks/uprev-flash-20260920.md.
+# Known images that were never flashed as-is (W08.2). Not revisions: they have
+# no flash boundary, so sessions are never assigned to them.
+reference_images:
+  - name: ZS44A-uprev-base
+    rom_file: ROM Store/ZS44A.OsirisROM
+    rom_sha256: 8468e11bedeab3d8247a7750b56c0f1b0dd475ef5c4509df1482425acfebb292
+    image_sha256: 8201208033e0926b4f5f5d758f0f4efdfa2cef39e069d0dffae2d950683bc203
+    notes: >
+      UpRev's ROM Store base for calibration 1ZS44A00000, the file every
+      Osiris tune here was edited from. Not itself a recorded flash: the first
+      Osiris flash (ZS44A-osiris-initial) ran K 1.07. K at map slot +0x762
+      reads 27,089 here and 28,715 on k106 (ratio 1.0600). Hashes computed
+      from the operator's file on 2026-10-04.

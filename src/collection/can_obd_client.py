@@ -176,11 +176,16 @@ class RawReply:
     gate or the bus refused to send), ``negative_response_code`` set (the ECU
     answered ``7F <service> <NRC>``), and both ``None`` (silence within the
     timeout). ``payload`` is the bytes after the positive service byte.
+
+    ``sent=False`` itself has two causes, also kept apart: ``send_error`` is
+    set when the bus raised (``can.CanError``: a full TX queue, a bus-off),
+    and is ``None`` when the transmit gate suppressed the frame.
     """
 
     sent: bool
     payload: bytes | None = None
     negative_response_code: int | None = None
+    send_error: str | None = None
 
     @property
     def positive(self) -> bool:
@@ -236,8 +241,13 @@ class CanObdClient:
         on_frame: FrameTap | None = None,
         on_parse_error: ParseErrorTap | None = None,
         parse_error_owner: str = DEFAULT_PARSE_ERROR_OWNER,
+        tx_holder: tx_gate.EcmSessionHolder | None = None,
     ) -> None:
         self._bus = bus
+        #: The ECM-session claim this client transmits under (W08.7), passed
+        #: to every ``tx_gate.send``; ``None`` for the ordinary client, whose
+        #: frames any claim suppresses.
+        self._tx_holder = tx_holder
         self._request_id = request_id
         self._response_id_min = response_id_min
         self._response_id_max = response_id_max
@@ -295,7 +305,9 @@ class CanObdClient:
             is_extended_id=False,
         )
         try:
-            if not tx_gate.send(self._bus, message, what=f"batch {len(pids)} PIDs"):
+            if not tx_gate.send(
+                self._bus, message, what=f"batch {len(pids)} PIDs", holder=self._tx_holder
+            ):
                 return None
         except can.CanError:
             log.warning("CAN send failed", extra={"service": 0x01, "batch_size": len(pids)})
@@ -383,7 +395,9 @@ class CanObdClient:
             is_extended_id=False,
         )
         try:
-            if not tx_gate.send(self._bus, message, what="request service=0x22 (batched)"):
+            if not tx_gate.send(
+                self._bus, message, what="request service=0x22 (batched)", holder=self._tx_holder
+            ):
                 return BatchedMode22Reply(response=None, sent=False)
         except can.CanError:
             log.warning("CAN send failed", extra={"service": 0x22, "batch": len(dids)})
@@ -435,11 +449,13 @@ class CanObdClient:
             is_extended_id=False,
         )
         try:
-            if not tx_gate.send(self._bus, message, what=f"probe service=0x{service:02X}"):
+            if not tx_gate.send(
+                self._bus, message, what=f"probe service=0x{service:02X}", holder=self._tx_holder
+            ):
                 return RawReply(sent=False)
-        except can.CanError:
+        except can.CanError as exc:
             log.warning("CAN send failed", extra={"service": service, "body": body.hex()})
-            return RawReply(sent=False)
+            return RawReply(sent=False, send_error=f"{type(exc).__name__}: {exc}")
         response, nrc = self._collect_response_or_nrc(
             service=service, pid_echo=None, request_id=message.arbitration_id
         )
@@ -608,7 +624,9 @@ class CanObdClient:
             is_extended_id=False,
         )
         try:
-            if not tx_gate.send(self._bus, message, what=f"request service=0x{service:02X}"):
+            if not tx_gate.send(
+                self._bus, message, what=f"request service=0x{service:02X}", holder=self._tx_holder
+            ):
                 return None, None
         except can.CanError:
             log.warning("CAN send failed", extra={"service": service, "pid": pid})
@@ -646,7 +664,9 @@ class CanObdClient:
             is_extended_id=False,
         )
         try:
-            if not tx_gate.send(self._bus, message, what=f"probe service=0x{service:02X}"):
+            if not tx_gate.send(
+                self._bus, message, what=f"probe service=0x{service:02X}", holder=self._tx_holder
+            ):
                 return SupportProbe(sent=False)
         except can.CanError:
             log.warning("CAN send failed", extra={"service": service, "pid": pid})
@@ -749,6 +769,7 @@ class CanObdClient:
                     is_extended_id=False,
                 ),
                 what="flow-control",
+                holder=self._tx_holder,
             )
         except can.CanError:
             log.warning("CAN flow-control send failed", extra={"flow_control_id": arbitration_id})

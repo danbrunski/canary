@@ -1105,6 +1105,12 @@ class DaemonConfig(_Strict):
     #: tracked ``capture_profiles`` catalog by name (S03.4). Operational state:
     #: the tracked catalog is never written at runtime.
     capture_profile_overrides: Path = CONTROL_DIR / "capture_profile_overrides.yaml"
+    #: The ROM library (W08.3): plain flash images, content-addressed by their
+    #: sha256 (``<sha256>.bin`` + ``<sha256>.json``), uploaded or read from the
+    #: ECU. Proprietary bytes, so never in the checkout: under ``state_dir`` on
+    #: the Pi, gitignored ``data/control/`` on the laptop, and per vehicle
+    #: (``scope_config``).
+    rom_library_dir: Path = CONTROL_DIR / "rom_library"
     #: Root for everything the daemon writes at runtime (S03). When set, every
     #: path in :data:`DAEMON_STATE_LAYOUT` that the YAML does not set itself
     #: resolves under it, so nothing the Pi writes lands in the git checkout
@@ -1186,6 +1192,7 @@ DAEMON_STATE_LAYOUT: dict[str, Path] = {
     "catalog_db": Path("control/catalog.db"),
     "custom_pids": Path("control/custom_pids.yaml"),
     "capture_profile_overrides": Path("control/capture_profile_overrides.yaml"),
+    "rom_library_dir": Path("control/rom_library"),
 }
 #: :class:`DaemonConfig` paths that name version-controlled data the daemon
 #: only reads. Every ``Path`` field is in exactly one of these two tables or

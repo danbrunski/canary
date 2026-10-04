@@ -243,3 +243,26 @@ def test_clear_returns_the_collectors_result(tmp_path: Path) -> None:
         True,
         "54",
     )
+
+
+async def test_a_module_off_the_ecm_runs_during_an_ecu_backup() -> None:
+    """W08.7 holds the ECM's diagnostic session, not the K-line wire: a code
+    clear on the airbag module goes ahead while the backup reads."""
+    tx_gate.claim_ecm_session("rom_backup", ttl_seconds=60.0)
+    actions = KlineActions()
+    transports: list[ClearingModule] = []
+    result = await _run_one(actions, _collector(actions, transports), _clear())
+    assert result.ok, result.detail
+    assert transports and transports[0].calls[:2] == ["open", "start 58"]
+
+
+async def test_an_ecm_function_is_refused_while_the_ecu_backup_holds_it() -> None:
+    tx_gate.claim_ecm_session("rom_backup", ttl_seconds=60.0)
+    actions = KlineActions()
+    transports: list[ClearingModule] = []
+    ecm = KlineAction(kind="clear_codes", module="ECM", address=0x10, request=b"\x14")
+    result = await _run_one(actions, _collector(actions, transports), ecm)
+    assert not result.ok
+    assert result.detail == "refused: the ECU backup holds the ECM session"
+    assert transports == []  # not one byte, not even the transceiver
+    assert tx_gate.snapshot()["ecm_session_claims"].keys() == {"rom_backup"}

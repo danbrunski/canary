@@ -14,7 +14,13 @@ set -euo pipefail
 # An armed passive mode is named in the output (it survives the restart on a
 # daemon that persists it, D03.30), never refused.
 #
-#   scripts/restart_canary.sh            refuse if a capture is active
+# An ECU backup (W08.7) is refused like a capture: it holds the ECM session
+# and pauses all polling for ~10 minutes, and a restart throws the read away.
+# It shows as the `rom_backup` holder in /status passive.ecm_session_claims.
+# With --force the daemon cancels it on the way down (the ECM is sent back to
+# its default session and the end event is recorded).
+#
+#   scripts/restart_canary.sh            refuse if a capture or backup is active
 #   scripts/restart_canary.sh --check    check whether a restart is safe
 #   scripts/restart_canary.sh --force    restart anyway (says what it killed)
 
@@ -35,6 +41,7 @@ done
 status_json="$(curl -fsS --max-time 5 "${STATUS_URL}" 2>/dev/null || true)"
 
 # One line per fact: `capture<TAB>name<TAB>session_dir` for an active capture,
+# `backup<TAB>holder` for an ECU backup holding the ECM session,
 # `passive<TAB>source<TAB>ttl_left<TAB>survives_restart` for an armed passive.
 facts="$(printf '%s' "${status_json}" | python3 -c '
 import json, sys
@@ -46,6 +53,8 @@ profile = status.get("capture_profile") or {}
 if profile.get("active"):
     print("capture", profile.get("name") or "unknown", profile.get("session_dir") or "", sep="\t")
 passive = status.get("passive") or {}
+if "rom_backup" in (passive.get("ecm_session_claims") or {}):
+    print("backup", "rom_backup", sep="\t")
 if passive.get("enabled"):
     ttl = passive.get("ttl_remaining_seconds")
     print(
@@ -58,6 +67,7 @@ if passive.get("enabled"):
 ' || true)"
 
 active="$(printf '%s\n' "${facts}" | sed -n 's/^capture\t//p')"
+backup="$(printf '%s\n' "${facts}" | sed -n 's/^backup\t//p')"
 passive="$(printf '%s\n' "${facts}" | sed -n 's/^passive\t//p')"
 
 # Passive mode (D03.30) is named, never refused: an armed passive is the
@@ -92,11 +102,22 @@ if [[ -n "${active}" ]]; then
   echo "WARNING: --force given; this ends capture '${name}' (${session})." >&2
 fi
 
+if [[ -n "${backup}" ]]; then
+  if [[ "${FORCE}" -ne 1 ]]; then
+    echo "refusing: an ECU backup (ROM read) is running; it holds the ECM session." >&2
+    echo "A restart throws the read away. Wait for it to finish (GET /control/rom/backup)," >&2
+    echo "cancel it (POST /control/rom/backup/cancel), or pass --force if ending it is intended." >&2
+    exit 3
+  fi
+  echo "WARNING: --force given; this ends the running ECU backup (ROM read). The daemon cancels" >&2
+  echo "it on the way down: the ECM is sent back to its default session and nothing is stored." >&2
+fi
+
 if [[ "${CHECK_ONLY}" -eq 1 ]]; then
-  if [[ -n "${active}" ]]; then
+  if [[ -n "${active}" || -n "${backup}" ]]; then
     echo "restart permitted by --force"
   else
-    echo "restart safe: no capture is active"
+    echo "restart safe: no capture or ECU backup is active"
   fi
   exit 0
 fi

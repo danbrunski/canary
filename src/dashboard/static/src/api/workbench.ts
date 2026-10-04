@@ -19,7 +19,16 @@ import type {
   VerifyMemoryRequest,
   VerifyMemoryResponse,
 } from "../types/workbench";
-import { controlJson, jsonBody, queryString } from "./core";
+import type {
+  RomBackupState,
+  RomCompareResponse,
+  RomDescription,
+  RomLibraryEntry,
+  RomLibraryResponse,
+  RomTablesResponse,
+  RomUploadResponse,
+} from "../types/romLibrary";
+import { controlBlob, controlJson, jsonBody, queryString } from "./core";
 
 function choiceParams(choice: SessionChoice) {
   return { sessions: choice.sessions.join(","), revision: choice.revision };
@@ -151,4 +160,89 @@ export function getCellResidency(
     token,
     { signal },
   );
+}
+
+// ROM library (W08.3–W08.5) and ECU backup (W08.7). Shapes: types/romLibrary.
+
+function librarySha(sha: string) {
+  return `/control/rom/library/${encodeURIComponent(sha)}`;
+}
+
+/** `GET /control/rom/library` — stored images, newest first. */
+export function getRomLibrary(token: string, signal?: AbortSignal) {
+  return controlJson<RomLibraryResponse>("/control/rom/library", token, { signal });
+}
+
+/** `POST /control/rom/library` — store a plain image or an `.OsirisROM`. The
+ *  server detects the format and refuses anything else by name. */
+export function uploadRomImage(token: string, file: File, signal?: AbortSignal) {
+  return controlJson<RomUploadResponse>(
+    `/control/rom/library${queryString({ filename: file.name })}`,
+    token,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/octet-stream" },
+      body: file,
+      signal,
+    },
+  );
+}
+
+/** `GET /control/rom/library/{sha}` — identity, block statistics, map. */
+export function getRomDescription(token: string, sha: string, signal?: AbortSignal) {
+  return controlJson<RomDescription>(librarySha(sha), token, { signal });
+}
+
+/** `GET /control/rom/library/{sha}/tables` — every table, every slot. */
+export function getRomTables(token: string, sha: string, signal?: AbortSignal) {
+  return controlJson<RomTablesResponse>(`${librarySha(sha)}/tables`, token, { signal });
+}
+
+/** `PATCH /control/rom/library/{sha}` — the label is the only mutable field;
+ *  null clears it. */
+export function renameRomImage(token: string, sha: string, label: string | null) {
+  return controlJson<RomLibraryEntry>(librarySha(sha), token, {
+    method: "PATCH",
+    body: jsonBody({ label }),
+  });
+}
+
+/** `DELETE /control/rom/library/{sha}`. */
+export function deleteRomImage(token: string, sha: string) {
+  return controlJson<unknown>(librarySha(sha), token, { method: "DELETE" });
+}
+
+/** `GET /control/rom/library/{sha}/download` — the plain image. */
+export function downloadRomImage(token: string, sha: string) {
+  return controlBlob(`${librarySha(sha)}/download`, token, {
+    headers: { Accept: "application/octet-stream" },
+  });
+}
+
+/** `GET /control/rom/compare?a=&b=` — changed ranges from `a` to `b`. */
+export function compareRomImages(token: string, a: string, b: string, signal?: AbortSignal) {
+  return controlJson<RomCompareResponse>(`/control/rom/compare${queryString({ a, b })}`, token, {
+    signal,
+  });
+}
+
+/** `GET /control/rom/backup` — the ECU backup job's state. */
+export function getRomBackup(token: string, signal?: AbortSignal) {
+  return controlJson<RomBackupState>("/control/rom/backup", token, { signal });
+}
+
+/** `POST /control/rom/backup` — start reading the ECU's flash. */
+export function startRomBackup(token: string) {
+  return controlJson<RomBackupState>("/control/rom/backup", token, {
+    method: "POST",
+    body: jsonBody({}),
+  });
+}
+
+/** `POST /control/rom/backup/cancel`. */
+export function cancelRomBackup(token: string) {
+  return controlJson<RomBackupState>("/control/rom/backup/cancel", token, {
+    method: "POST",
+    body: jsonBody({}),
+  });
 }

@@ -21,6 +21,8 @@ from dataclasses import dataclass, replace
 
 import can
 
+from src.collection import private_traffic
+
 # Bus construction and the shared frame primitives moved to can_bus
 # (R02.12); these names stay importable from here.
 from src.collection.can_bus import bus_factory as bus_factory
@@ -131,6 +133,10 @@ class CanReader(threading.Thread):
                 if msg is None:
                     continue
                 flush_dropped_can_frame_log(owner=self.name)
+                if private_traffic.exclude(msg):
+                    # W08.7: acquired while an exchange in this process held
+                    # its id (the ECU backup's flash read); not telemetry.
+                    continue
                 self.frames += 1
                 self._handoff.push(frame_to_record(msg))
         except Exception as exc:  # noqa: BLE001 — bus-level failure, owner decides

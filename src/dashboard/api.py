@@ -59,6 +59,7 @@ from src.dashboard.routes import (
     register_stream_routes,
 )
 from src.dashboard.routes.calibration import register_calibration_routes
+from src.dashboard.routes.rom_library import register_rom_library_routes
 from src.dashboard.routes.rom_maps import register_rom_routes
 from src.dashboard.routes.workbench import register_workbench_routes
 from src.dashboard.security import _client_is_loopback, _require_control_auth
@@ -257,6 +258,15 @@ def create_app(
     )
     register_rom_routes(
         app, config=config, resolved_control_token=resolved_control_token, dids_path=dids_path
+    )
+    register_rom_library_routes(
+        app,
+        config=config,
+        resolved_control_token=resolved_control_token,
+        live_source=live_source,
+        replay_controller=replay_controller,
+        capture_controller=capture_controller,
+        publish_control_event=publish_control_event,
     )
     register_calibration_routes(
         app,

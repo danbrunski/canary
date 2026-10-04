@@ -30,6 +30,7 @@ from collections.abc import Callable
 
 import can
 
+from src.collection import private_traffic
 from src.collection.can_bus import bus_factory, frame_to_record
 from src.collection.can_obd_client import (
     PID_DECODERS,
@@ -170,6 +171,10 @@ async def collect_can_obd_from_config(
             capture(bus)
 
             def on_frame(msg: can.Message) -> None:
+                if private_traffic.exclude(msg):
+                    # W08.7: acquired while another exchange in this process
+                    # held its id (the ECU backup's flash read); not telemetry.
+                    return
                 enqueue(frame_to_record(msg))
 
             def on_reading(reading: ObdReading) -> None:

@@ -14,6 +14,7 @@ from src.collection import (
     capture_generation,
     capture_lifetime,
     discovery,
+    private_traffic,
     queueing,
     tuning_profile,
     tx_gate,
@@ -47,6 +48,7 @@ def _state() -> dict[str, Any]:
         "drop_logs": dict(queueing._CAN_FRAME_DROP_LOGS),
         "unattributed_drops": queueing._UNATTRIBUTED_QUEUE_DROPS.dropped,
         "kline": MODULE_SESSIONS.snapshot(now=now),
+        "private_traffic": private_traffic.snapshot(),
     }
 
 
@@ -54,6 +56,7 @@ def _dirty_everything() -> None:
     tx_gate.set_passive(True, source="test", ttl_seconds=600)
     tx_gate.claim_ecm_session("foreign")
     tx_gate.note_foreign_tester(tester_address=0xFC, module_address=0x10)
+    private_traffic.hold("test", {0x7E0, 0x7E8})
     # Suppressed (passive), so the bus is never touched.
     tx_gate.send(None, can.Message(arbitration_id=0x7DF, data=b"\x02\x01\x0c"), what="test")  # type: ignore[arg-type]
     bus_budget.set_override(5.0, source="test", ttl_seconds=600)

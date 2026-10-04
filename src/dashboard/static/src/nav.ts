@@ -24,6 +24,7 @@ export const NAV: NavGroupDef[] = [
       { id: "tuning-logs", label: "Logs", group: "tuning" },
       { id: "tuning-analysis", label: "Analysis", group: "tuning" },
       { id: "tuning-rom-maps", label: "ROM Maps", group: "tuning" },
+      { id: "tuning-rom-library", label: "ROM Library", group: "tuning" },
       { id: "tuning-calibration", label: "Calibration", group: "tuning" },
       { id: "tuning-rom-editor", label: "ROM Editor", group: "tuning", planned: true },
       { id: "tuning-flash", label: "Flash", group: "tuning", planned: true },
@@ -81,6 +82,8 @@ export const ITEM_ALIASES: Record<string, WorkbenchItem> = {
   "live-alarms": "observe-alarms",
   "live-builder": "observe-builder",
   "live-rom-maps": "tuning-rom-maps",
+  // W08.6: the checklist names the page `#wb/rom-library`.
+  "rom-library": "tuning-rom-library",
   "models-tuning": "model-thresholds",
   "data-health": "model-dataset-health",
   "diag-data": "system-data-sources",

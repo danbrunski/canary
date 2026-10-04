@@ -548,6 +548,7 @@ def scope_config(config: CanaryConfig, profile: VehicleProfile) -> CanaryConfig:
             "kline_profile": _scope_file(config.daemon.kline_profile, slug),
             "catalog_db": _scope_file(config.daemon.catalog_db, slug),
             "calibration_dir": _scope_dir(_calibration_base(config), slug),
+            "rom_library_dir": _scope_dir(config.daemon.rom_library_dir, slug),
         }
     )
     vehicle = config.vehicle.model_copy(

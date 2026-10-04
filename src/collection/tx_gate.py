@@ -53,7 +53,10 @@ what every existing caller means (the OBD loop, record arming and idle
 shutdown all treat it as "OBD is stale by design"), so they need no change.
 A foreign claim outranks our own; claims may carry a TTL, and
 :func:`check_expiry` releases one whose TTL has passed. Broadcast CAN capture
-is listen-only and never affected.
+is listen-only and never affected. A third holder, ``rom_backup`` (W08.7), is
+CANary's own flash read: it claims the session so the poll loop pauses, and
+transmits as that holder (``send(..., holder="rom_backup")``) only while its
+claim is the only one.
 
 **An armed passive survives a daemon restart (D03.30).** On 2026-09-24 the
 operator had a scan tool connected with passive armed (TTL 1800 s); a deploy
@@ -140,8 +143,8 @@ def passive_state_path(config: CanaryConfig) -> Path:
     return config.daemon.trip_state.parent / PASSIVE_STATE_FILENAME
 
 
-EcmSessionHolder = Literal["kline", "foreign"]
-EcmSessionOwner = Literal["can_diagnostics", "kline", "foreign"]
+EcmSessionHolder = Literal["kline", "foreign", "rom_backup"]
+EcmSessionOwner = Literal["can_diagnostics", "kline", "foreign", "rom_backup"]
 #: Holder -> ``time.monotonic()`` expiry, or ``None`` for "until released".
 _claims: dict[str, float | None] = {}
 
@@ -187,6 +190,8 @@ def _owner_locked() -> EcmSessionOwner:
         return "foreign"
     if "kline" in _claims:
         return "kline"
+    if "rom_backup" in _claims:
+        return "rom_backup"
     return "can_diagnostics"
 
 
@@ -213,6 +218,17 @@ def ecm_session_owner() -> EcmSessionOwner:
     """Who owns the ECM's diagnostic session right now."""
     with _lock:
         return _owner_locked()
+
+
+def claim_held(holder: EcmSessionHolder) -> bool:
+    """Whether ``holder`` has a claim standing, whoever outranks it.
+
+    :func:`ecm_session_owner` reports only the highest-ranked holder, so it
+    cannot answer "is the ROM backup reading?" while another claim also
+    stands.
+    """
+    with _lock:
+        return holder in _claims
 
 
 def _owner_changed(previous: EcmSessionOwner, current: EcmSessionOwner, now: float) -> None:
@@ -283,7 +299,7 @@ def reset_ecm_session_claims(*, now: float | None = None) -> None:
     """Drop every claim and the last foreign tester heard (test and
     validation-harness setup)."""
     global _foreign_tester
-    for holder in ("foreign", "kline"):
+    for holder in ("foreign", "kline", "rom_backup"):
         release_ecm_session(holder, now=now)
     with _lock:
         _foreign_tester = None
@@ -574,12 +590,25 @@ def snapshot(*, now: float | None = None) -> dict[str, Any]:
         }
 
 
-def send(bus: can.BusABC, message: can.Message, *, what: str) -> bool:
+def send(
+    bus: can.BusABC,
+    message: can.Message,
+    *,
+    what: str,
+    holder: EcmSessionHolder | None = None,
+) -> bool:
     """Transmit ``message`` unless passive mode is on.
 
     Returns True if the frame went out, False if it was suppressed. Callers
     must treat False as "no response is coming" — it is not an error, and it
     must not be counted as a bus fault or a request timeout.
+
+    ``holder`` names the claim a sender acts under (W08.7: the ROM backup
+    claims the ECM session so the poll loop pauses, then must itself still
+    transmit). Its frames go out only while that holder's claim is the *only*
+    one and passive is not armed: a foreign tester or the K-line reader
+    claiming mid-read suppresses them like every other frame. Without
+    ``holder``, any claim suppresses the frame, as before.
 
     ``can.CanError`` is deliberately NOT caught here: existing call sites have
     their own logging and recovery for a genuinely failed send, and swallowing
@@ -587,7 +616,12 @@ def send(bus: can.BusABC, message: can.Message, *, what: str) -> bool:
     """
     global _suppressed
     with _lock:
-        if _passive or _claims:
+        if holder is None:
+            blocked = _passive or bool(_claims)
+        else:
+            # A holder's frames need its claim, alone: not merely "no claim".
+            blocked = _passive or set(_claims) != {holder}
+        if blocked:
             _suppressed += 1
             suppressed = _suppressed
         else:
@@ -611,6 +645,7 @@ __all__ = [
     "UNTRUSTED_STATE_SOURCE",
     "check_expiry",
     "claim_ecm_session",
+    "claim_held",
     "configure_persistence",
     "passive_state_path",
     "ecm_session_owner",

@@ -44,6 +44,28 @@ class TuneRevision(_Strict):
     #: campaign moves, so worth carrying alongside the results it explains.
     k: float | None = None
     rom_file: str | None = None
+    #: sha256 of the ROM *file* as saved (for an Osiris flash, the container).
+    rom_sha256: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
+    #: sha256 of the plain 1:1 flash image (the decoded ``ROMData``, or what an
+    #: ECU read returns). W08.2: an image matches this revision when its plain
+    #: sha256 equals this; ``rom_sha256`` names a container, which an ECU read
+    #: never produces.
+    image_sha256: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
+    notes: str = ""
+
+
+class ReferenceImage(_Strict):
+    """A known image that was never flashed as-is, e.g. a tuner's base ROM.
+
+    Kept out of :attr:`TuneRevisionRegistry.revisions` on purpose: a revision
+    is a flash boundary that sessions are assigned to by time, and an image
+    nobody flashed has no such boundary. Listing it here lets the ROM library
+    name it (W08.2) without inventing a ``flashed_at``.
+    """
+
+    name: str = Field(min_length=1)
+    image_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    rom_file: str | None = None
     rom_sha256: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
     notes: str = ""
 
@@ -51,6 +73,7 @@ class TuneRevision(_Strict):
 class TuneRevisionRegistry(_Strict):
     schema_version: int = 1
     revisions: list[TuneRevision] = Field(default_factory=list)
+    reference_images: list[ReferenceImage] = Field(default_factory=list)
 
     @model_validator(mode="after")
     def _ordered(self) -> TuneRevisionRegistry:
@@ -58,6 +81,37 @@ class TuneRevisionRegistry(_Strict):
         if any(a > b for a, b in zip(stamps, stamps[1:], strict=False)):
             raise ValueError("revisions must be listed oldest-first by flashed_at")
         return self
+
+    @model_validator(mode="after")
+    def _image_hashes_unique(self) -> TuneRevisionRegistry:
+        """One plain image names one thing: a revision or a reference image."""
+        seen: dict[str, str] = {}
+        claims = [(r.revision, r.image_sha256) for r in self.revisions if r.image_sha256] + [
+            (ref.name, ref.image_sha256) for ref in self.reference_images
+        ]
+        for name, digest in claims:
+            if digest in seen:
+                raise ValueError(
+                    f"image_sha256 {digest[:12]}... is claimed by both {seen[digest]!r} and "
+                    f"{name!r}; one image cannot be two calibrations"
+                )
+            seen[digest] = name
+        if len({ref.name for ref in self.reference_images}) != len(self.reference_images):
+            raise ValueError("reference_images names must be unique")
+        return self
+
+    def match_image(self, image_sha256: str) -> tuple[str | None, str | None]:
+        """``(revision, reference)`` whose plain-image hash equals ``image_sha256``.
+
+        At most one of the two is set; both ``None`` means unrecognised.
+        """
+        for revision in self.revisions:
+            if revision.image_sha256 == image_sha256:
+                return revision.revision, None
+        for reference in self.reference_images:
+            if reference.image_sha256 == image_sha256:
+                return None, reference.name
+        return None, None
 
     def at(self, when: datetime) -> TuneRevision | None:
         """The revision in force at ``when``, or ``None`` before the first flash."""
@@ -219,16 +273,37 @@ def merge_tune_registries(
                 else getattr(own, name) != getattr(item, name)
             )
         )
+        # ``image_sha256`` (W08.2) is filled in the tracked file after the
+        # fact, so an operational copy written before it existed lacks it:
+        # absent on one side is not a conflict, two different hashes are.
+        if own.image_sha256 and item.image_sha256 and own.image_sha256 != item.image_sha256:
+            differ = (*differ, "image_sha256")
         if differ:
             raise RegistryConflictError(item.revision, operational_path, tracked_path, differ)
+        update: dict[str, object] = {}
         if own.notes != item.notes:
-            merged[merged.index(own)] = own.model_copy(update={"notes": item.notes})
+            update["notes"] = item.notes
+        if own.image_sha256 is None and item.image_sha256 is not None:
+            update["image_sha256"] = item.image_sha256
+        if update:
+            merged[merged.index(own)] = own.model_copy(update=update)
     merged.sort(key=lambda revision: _aware(revision.flashed_at))
-    return TuneRevisionRegistry(schema_version=operational.schema_version, revisions=merged)
+    references = {ref.name: ref for ref in operational.reference_images}
+    for ref in tracked.reference_images:
+        own_ref = references.get(ref.name)
+        if own_ref is not None and own_ref.image_sha256 != ref.image_sha256:
+            raise RegistryConflictError(ref.name, operational_path, tracked_path, ("image_sha256",))
+        references[ref.name] = ref
+    return TuneRevisionRegistry(
+        schema_version=operational.schema_version,
+        revisions=merged,
+        reference_images=list(references.values()),
+    )
 
 
 __all__ = [
     "calibration_matches",
+    "ReferenceImage",
     "RegistryConflictError",
     "TuneRevision",
     "TuneRevisionRegistry",

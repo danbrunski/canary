@@ -126,6 +126,9 @@ export interface StatusResponse {
    *  already drives everything else — no separate authenticated call. Null
    *  when the daemon has no replay controller wired (tests / bare app). */
   replay?: ReplayStatus | null;
+  /** The CAN transmit gate (`tx_gate.snapshot()`): passive switch, ECM
+   *  session owner and the last foreign tester heard. Null when unwired. */
+  passive?: PassiveGateStatus | null;
   capture_profile?: CaptureProfileState | null;
   last_capture?: {
     name: string;
@@ -166,6 +169,29 @@ export type ReadinessKey =
   "ups_soc" | "storage_free_mb" | "memory_channels" | "calibration" | "vehicle_state";
 
 export type TuningReadiness = Partial<Record<ReadinessKey, ReadinessEntry>>;
+
+/** `/status.passive` — mirrors `src.collection.tx_gate.snapshot()`. */
+export interface PassiveGateStatus {
+  /** The operator's passive switch is armed. */
+  enabled: boolean;
+  source: string | null;
+  suppressed_frames: number;
+  ttl_remaining_seconds: number | null;
+  /** Who holds the ECM's diagnostic session right now. */
+  ecm_session_owner: "can_diagnostics" | "kline" | "foreign" | "rom_backup";
+  /** Holder → seconds left on its claim (null: no expiry). */
+  ecm_session_claims: Record<string, number | null>;
+  tx_suppressed: boolean;
+  /** The last frame another tester sent (H06.4); kept after its claim
+   *  expires. Null: no other tester heard since start-up. */
+  foreign_tester: {
+    tester_address: string | null;
+    module_address: string | null;
+    last_heard_at: string;
+    seconds_since_heard: number;
+  } | null;
+  survives_restart: boolean;
+}
 
 /** `/status.vehicle_state` — mirrors
  *  `src.dashboard.status.VehicleState.to_dict()`. */

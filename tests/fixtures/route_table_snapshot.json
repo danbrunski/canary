@@ -880,8 +880,101 @@
     {
       "auth": "control",
       "body": false,
+      "method": "GET",
+      "path": "/control/rom/backup",
+      "query": [],
+      "status_code": null
+    },
+    {
+      "auth": "control",
+      "body": false,
+      "method": "POST",
+      "path": "/control/rom/backup",
+      "query": [],
+      "status_code": 202
+    },
+    {
+      "auth": "control",
+      "body": false,
+      "method": "POST",
+      "path": "/control/rom/backup/cancel",
+      "query": [],
+      "status_code": null
+    },
+    {
+      "auth": "control",
+      "body": false,
+      "method": "GET",
+      "path": "/control/rom/compare",
+      "query": [
+        "a",
+        "b"
+      ],
+      "status_code": null
+    },
+    {
+      "auth": "control",
+      "body": false,
       "method": "POST",
       "path": "/control/rom/inspect",
+      "query": [],
+      "status_code": null
+    },
+    {
+      "auth": "control",
+      "body": false,
+      "method": "GET",
+      "path": "/control/rom/library",
+      "query": [],
+      "status_code": null
+    },
+    {
+      "auth": "control",
+      "body": false,
+      "method": "POST",
+      "path": "/control/rom/library",
+      "query": [
+        "filename"
+      ],
+      "status_code": null
+    },
+    {
+      "auth": "control",
+      "body": false,
+      "method": "DELETE",
+      "path": "/control/rom/library/{sha}",
+      "query": [],
+      "status_code": null
+    },
+    {
+      "auth": "control",
+      "body": false,
+      "method": "GET",
+      "path": "/control/rom/library/{sha}",
+      "query": [],
+      "status_code": null
+    },
+    {
+      "auth": "control",
+      "body": true,
+      "method": "PATCH",
+      "path": "/control/rom/library/{sha}",
+      "query": [],
+      "status_code": null
+    },
+    {
+      "auth": "control",
+      "body": false,
+      "method": "GET",
+      "path": "/control/rom/library/{sha}/download",
+      "query": [],
+      "status_code": null
+    },
+    {
+      "auth": "control",
+      "body": false,
+      "method": "GET",
+      "path": "/control/rom/library/{sha}/tables",
       "query": [],
       "status_code": null
     },

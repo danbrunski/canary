@@ -307,7 +307,23 @@ def test_refuses_while_a_capture_is_active(harness: Harness) -> None:
     assert "refusing: capture 'tuning' is active" in result.stderr
     assert harness.head() == before, "refusal must happen before the fetch"
     assert harness.canary_restarts() == 0
-    assert "result: refused: capture active (exit 3)" in _summary(result.stdout)
+    assert "result: refused: capture or ECU backup active (exit 3)" in _summary(result.stdout)
+
+
+def test_refuses_while_an_ecu_backup_is_running(harness: Harness) -> None:
+    """W08.7: a backup holding the ECM (``rom_backup`` claim) refuses like a
+    capture, before the fetch, under the same exit code."""
+    before = harness.head()
+    harness.commit_upstream("docs", **{"docs/readme.md": "new docs\n"})
+
+    status = '{"passive": {"enabled": false, "ecm_session_claims": {"rom_backup": 29.5}}}'
+    result = harness.run(SHIM_STATUS_JSON=status)
+
+    assert result.returncode == EXIT_CAPTURE, result.stdout + result.stderr
+    assert "refusing: an ECU backup (ROM read) is running" in result.stderr
+    assert harness.head() == before, "refusal must happen before the fetch"
+    assert harness.canary_restarts() == 0
+    assert "result: refused: capture or ECU backup active (exit 3)" in _summary(result.stdout)
 
 
 def test_refuses_a_checkout_with_tracked_local_changes(harness: Harness) -> None:
@@ -782,7 +798,7 @@ def test_usage_documents_the_exit_codes(harness: Harness) -> None:
 
     assert result.returncode == 0
     for code, phrase in [
-        (3, "capture is active"),
+        (3, "capture or ECU backup is active"),
         (4, "tracked local changes"),
         (5, "fetch or fast-forward failed"),
         (6, "rolled back"),

@@ -158,7 +158,9 @@ def append_flash(config: CanaryConfig, revision: TuneRevision) -> TuneRevisionRe
     registry = active_registry(config) or TuneRevisionRegistry()
     if any(item.revision == revision.revision for item in registry.revisions):
         raise ValueError(f"revision {revision.revision!r} already exists")
-    updated = TuneRevisionRegistry(revisions=[*registry.revisions, revision])
+    updated = TuneRevisionRegistry(
+        revisions=[*registry.revisions, revision], reference_images=registry.reference_images
+    )
     atomic_write_text(
         destination,
         yaml.safe_dump(updated.model_dump(mode="json"), sort_keys=False),

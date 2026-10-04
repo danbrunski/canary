@@ -268,6 +268,7 @@ describe("Workbench renders the bar on Engine Tuning pages", () => {
       "tuning-logs",
       "tuning-analysis",
       "tuning-rom-maps",
+      "tuning-rom-library",
       "tuning-calibration",
     ] as const) {
       const view = render(<Workbench active={item} onNavigate={() => {}} data={DATA} />);

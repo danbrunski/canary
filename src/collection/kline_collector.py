@@ -216,6 +216,8 @@ class KlineCollector:
         self._clock = clock
         self._refused: tuple[str, ...] | None = None
         self._said: set[str] = set()
+        #: ``(entries, targets the ECM)`` for :meth:`_targets_ecm`.
+        self._ecm_target: tuple[tuple[str, ...], bool] | None = None
         self.drop_counter = QueueDropCounter("kline")
         self.sessions = 0
         self.replies = 0
@@ -248,7 +250,42 @@ class KlineCollector:
             )
             return None
         self._said.discard("foreign-wait")
+        if tx_gate.claim_held("rom_backup") and self._targets_ecm(entries):
+            # W08.7: the ECM's one diagnostic session is shared by CAN and
+            # K-line, and the flash read holds it. Other modules (ABS, SRS) do
+            # not share it and are not held up.
+            self._say_once(
+                "rom-backup-wait",
+                "K-line requested by the capture profile; the ECU backup holds the ECM "
+                "session, so it waits",
+            )
+            return None
+        self._said.discard("rom-backup-wait")
         return entries
+
+    def _targets_ecm(self, entries: tuple[str, ...]) -> bool:
+        """Whether ``entries`` resolve to a plan on the ECM.
+
+        Cached per entries (the sniff loop asks on every pass). A plan that does
+        not resolve is "no": :meth:`_prepare` refuses it with its own reason.
+        """
+        cached = self._ecm_target
+        if cached is not None and cached[0] == entries:
+            return cached[1]
+        catalog = KlineCatalog(self.profile_path, self.dids_path, self.config.poll_interval_seconds)
+        try:
+            profile, plan = catalog.resolve(entries)
+            answer = plan.address == profile.ecm_address
+        except (KlineNotConfiguredError, KlinePlanError, ValueError):
+            answer = False
+        self._ecm_target = (entries, answer)
+        return answer
+
+    @staticmethod
+    def _ecm_held_by_backup(address: int | None, profile: KlineProfile) -> bool:
+        """W08.7: ``address`` is the ECM and the ECU backup holds its session.
+        Only the ECM: its diagnostic session is the one CAN and K-line share."""
+        return address == profile.ecm_address and tx_gate.claim_held("rom_backup")
 
     @staticmethod
     def _line_is_theirs() -> bool:
@@ -371,6 +408,10 @@ class KlineCollector:
             # Armed (or another tester heard) since _wants_command: not one
             # byte, not even the transceiver's enable.
             return
+        if self._ecm_held_by_backup(plan.address, profile):
+            # W08.7: the ECU backup claimed the ECM since _wants_command; the
+            # next pass waits there (sniffing, if configured) until it ends.
+            return
         is_ecm = plan.address == profile.ecm_address
         MODULE_SESSIONS.claim(plan.address, "kline")
         if is_ecm:
@@ -425,6 +466,13 @@ class KlineCollector:
             action.finish(ok=False, started=started, detail=f"refused: {exc}")
             return
         is_ecm = action.address == profile.ecm_address
+        if self._ecm_held_by_backup(action.address, profile):
+            action.finish(
+                ok=False,
+                started=started,
+                detail="refused: the ECU backup holds the ECM session",
+            )
+            return
         MODULE_SESSIONS.claim(action.address, "kline")
         if is_ecm:
             tx_gate.claim_ecm_session("kline")

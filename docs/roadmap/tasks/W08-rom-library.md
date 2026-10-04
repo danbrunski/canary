@@ -44,7 +44,26 @@ Evidence this builds on:
 
 ## Items
 
-- [ ] **W08.1 ROM map definition as vehicle data.**
+- [x] **W08.1 ROM map definition as vehicle data.**
+  - *Done 2026-10-04:* `src/analysis/rom_map.py` (`RomMap`, `load_rom_map`)
+    and `data/nissan-xterra-2008/rom_map.yaml`: 19 regions, 16 erase sectors
+    (sectors 8 and 15 verified from the 2026-09-20 flash, the rest inferred
+    CRC partitions), 5 map slots with two slot spans (timing-like cells
+    +0x09C-0x0BF, Fuel Compensation span +0x670-0x761, both inferred), 7
+    tables (Fuel Targets Map 1 verified; Maps 2-5 and the 0x00A169 copy
+    inferred; both Fuel Targets axes verified; Fuel Comp rpm axis and K
+    inferred, K raw only). `evidence`, `confidence` and `added_by_uprev` are
+    required; regions may nest but not partly overlap. `load_rom_map` refuses
+    any drift from `rom_targets.yaml` by name. `tests/test_rom_map.py`
+    (22 passed): missing/empty evidence (region, table, slot span, erase
+    sector), unknown confidence, overlapping tables in one slot (and absolute
+    ones), an address beyond the image (6 cases), axis references, and
+    `test_shipped_map_loads_and_matches_every_verified_rom_targets_fact` plus
+    `test_drift_from_rom_targets_is_refused_by_name`. Populated from the
+    doc's 2026-10-04 section; the published artifact itself is not in the
+    repo, so it was not compared row by row. One correction from the bytes:
+    0x006000-0x007FFF is not wholly erased (48 non-0xFF bytes at
+    0x006EFE-0x006F2D, recorded as an `unknown` region).
   - Add `data/nissan-xterra-2008/rom_map.yaml` with a validated schema
     (pydantic, required fields, refusal by name), covering:
     - image size and calibration-ID location;
@@ -66,7 +85,22 @@ Evidence this builds on:
     verified fact already in `rom_targets.yaml` (table offset, axes,
     checksum offsets), so the two files cannot drift.
 
-- [ ] **W08.2 Image analysis core.** Given bytes, return a description.
+- [x] **W08.2 Image analysis core.** Given bytes, return a description.
+  - *Done 2026-10-04:* `src/analysis/rom_image.py` (`load_image`,
+    `describe`, vectorised `checksum_values` pinned equal to
+    `Checksums.values`). `tune_revisions.yaml` gains `image_sha256` for k106
+    (`e01cc0cb…f18e`) and 20260920 (`a46baa24…be50`); the UpRev base
+    (`82012080…c203`) is a new `reference_images` entry, not a revision,
+    because it was never flashed as-is and a revision is a flash boundary
+    (match status `reference`). `tests/test_rom_image.py` (23 passed, 6 of
+    them `slow`, run on the operator's files): 20260920 decoded sha256 ==
+    the 2026-10-04 ECU read's `a46baa24…be50`, CRC32 `95b993c5`, checksums
+    pass, revision ZS44A-20260920; k106 matched, base `reference`; a flipped
+    byte reports `checksum.ok: false` with the description intact; ZS04C cal
+    ID gives `map: null` + "no map definition for calibration 1ZS04C00000";
+    encrypted backup refused by name (synthetic, and all 3 operator `.bin`
+    files); other sizes refused with the size. `tests/test_tune_revision_images.py`
+    (5 passed) covers the registry fields and their merge.
   - **Format detection:** `.OsirisROM`, decoded with `osiris.py`; plain
     1 MiB image; UpRev encrypted backup, refused by name; anything else,
     refused by name with its size.
@@ -92,8 +126,21 @@ Evidence this builds on:
     ROM bytes stay outside Git: tests use synthetic images with the real
     layout, or skip when the operator's files are absent.
 
-- [ ] **W08.3 Library storage and routes** (control-token auth, like
+- [x] **W08.3 Library storage and routes** (control-token auth, like
   `/control/rom/inspect`).
+  - *Done 2026-10-04:* `src/control/rom_library.py`,
+    `src/dashboard/routes/rom_library.py`; new config path
+    `daemon.rom_library_dir` (`control/rom_library` under `state_dir`,
+    scoped per vehicle by `scope_config`). Routes in `docs/headless-api.md`
+    ("ROM library and ECU backup (W08)") and
+    `tests/fixtures/route_table_snapshot.json` (11 rows added; no MCP parity
+    test covers these routes). `tests/test_rom_library_api.py` (11 passed):
+    auth on all 11 routes, plain then `.OsirisROM` upload of one image keeps
+    one entry with both sources, encrypted backup 422 by name, 413 over
+    2 MiB, 415, missing filename, list newest first, describe, download
+    bytes + filename, label-only PATCH, DELETE, 404 on unknown/malformed sha,
+    tables and compare routes, `test_nothing_is_written_under_the_repo`
+    (`repo_guard` snapshot diff empty), 409 without a map definition.
   - **Storage:** a per-vehicle directory from config (scoped like the other
     per-vehicle paths), holding `<sha256>.bin` and `<sha256>.json`. The
     metadata records:
@@ -118,8 +165,16 @@ Evidence this builds on:
   - **Accept:** route tests for each, including the encrypted-backup refusal
     and the 2 MiB cap, and a test that nothing is written under the repo.
 
-- [ ] **W08.4 Table values.** `GET /control/rom/library/{sha}/tables`
+- [x] **W08.4 Table values.** `GET /control/rom/library/{sha}/tables`
   returns each W08.1 table for each slot:
+  - *Done 2026-10-04:* `rom_image.table_values` / `tables_payload`;
+    `/control/rom/inspect` unchanged (`tests/test_rom_maps_api.py` passes).
+    `test_tables_known_answer_20260920_fuel_targets_cell_for_cell` (operator
+    file): Map 1 raw and AFR equal the `afr_calibration.yaml` 20260920 map
+    cell for cell, rpm axis decoded 1200-5200, BFS axis raw (no scale
+    declared). `test_tables_known_answer_k`: K slot 1 = 28,715 on k106 and
+    20260920, 27,089 on the UpRev base, `confidence: inferred`, `decoded:
+    null`. Synthetic equivalents always run.
   - raw values, plus decoded values where a decode is declared;
   - axes, confidence and evidence.
   - The existing Fuel Targets payload in `/control/rom/inspect` stays as it
@@ -129,10 +184,21 @@ Evidence this builds on:
     `be16`) reads 28,715 on k106/20260920 and 27,089 on the UpRev base,
     labelled inferred.
 
-- [ ] **W08.5 Compare.** `GET /control/rom/compare?a=<sha>&b=<sha>` returns
+- [x] **W08.5 Compare.** `GET /control/rom/compare?a=<sha>&b=<sha>` returns
   the changed byte ranges (merged with a 16-byte gap), each labelled with
   the regions and tables it overlaps. Table ranges also carry per-cell old
   and new values, decoded where declared.
+  - *Done 2026-10-04:* `rom_image.compare_images`.
+    `test_compare_known_answer_base_to_k106` (operator files): 248 bytes,
+    9 ranges, labelled checksum words, Fuel Compensation rpm axis, Map 1
+    Ignition timing (probable), Fuel Targets (Map 1) with 10 cells, Map 1
+    Fuel Compensation span + K, and K in Maps 2-5 (27,089 -> 28,715).
+    `test_compare_known_answer_k106_to_20260920`: 3 bytes, the checksum words
+    and one Fuel Targets cell 11.61 -> 11.54 AFR, at **row 7, column 4**
+    (zero-based; 0x0E025C - 0x0E0220 = 60, as `afr_calibration.yaml` also
+    says). The "col 6" below is a transcription slip. Synthetic
+    `test_compare_synthetic_labels_and_cells` and
+    `test_changed_ranges_merge_within_a_16_byte_gap` always run.
   - **Accept:**
     - **UpRev base → k106:** 248 bytes in 9 ranges, labelled checksums,
       Fuel Comp rpm axis, slot-1 timing-like cells, Fuel Targets (10 cells),
@@ -142,9 +208,23 @@ Evidence this builds on:
     - These run as tests when the operator's ROM files are present and skip
       otherwise, plus a synthetic-image test that always runs.
 
-- [ ] **W08.6 Dashboard page: ROM Library.** A new Engine Tuning page
+- [x] **W08.6 Dashboard page: ROM Library.** A new Engine Tuning page
   alongside ROM Maps (`#wb/rom-library`). It stands alone, and its empty
   state names its cause and offers the fix (upload, or back up the ECU).
+  - *Done 2026-10-04:* `panels/tuning/RomLibraryPage.tsx` (nav item
+    `tuning-rom-library`, alias `rom-library`) with `RomMemoryMap.tsx`,
+    `RomTablesView.tsx`, `RomCompare.tsx`; payload types in
+    `types/romLibrary.ts`, routes in `api/workbench.ts`. Evidence:
+    `RomLibraryPage.test.tsx` (22 tests: direct load of `#wb/rom-library` with
+    an empty library names the cause and offers "Upload an image" / "Back up
+    the ECU"; the encrypted-backup 422 and a 413 shown verbatim; 256-cell grid
+    readout on focus/hover/tap with `aria-live`, arrow keys; region chips and
+    evidence; Fuel Targets through `MapTable`, K raw labelled Inferred; no-map
+    reason; rename/delete-with-confirmation/download), `RomCompare.test.tsx`
+    (6: k106 → 20260920 ranges, labels, cell 11.61 → 11.54 AFR),
+    `lib/romLibrary.test.ts` (19). `pnpm typecheck`, `pnpm lint`,
+    `pnpm format:check` clean; `pnpm test` 70 files / 549 tests. Routes are
+    mocked; the types follow the backend's 2026-10-04 draft.
   - **Library list:** label, source, calibration ID, revision match chip,
     checksum chip and date. Upload (drag-and-drop or picker) accepts `.bin`
     and `.OsirisROM`; a refusal shows its reason. Rename, delete with
@@ -161,7 +241,110 @@ Evidence this builds on:
     new components. Load `#wb/rom-library` directly in a test with empty
     state.
 
-- [ ] **W08.7 ECU backup job** (daemon side).
+- [x] **W08.7 ECU backup job** (daemon side).
+  - *Done 2026-10-04 (offline; the truck run is W08.9):*
+    `src/control/rom_backup.py` (`RomBackupJob`, recipe schema) and
+    `data/nissan-xterra-2008/rom_backup.yaml` (0x7E0/0x7E8, `10 85` once,
+    `10 FB` per read, exit `10 81`, 0x000000-0x0FFFFF in 63-byte reads with
+    the 4-byte tail, 35 ms minimum cycle, 0.5 s timeout, 3 retries, 64-block
+    re-read; provenance the capture doc). The claim is a new `tx_gate` holder
+    `rom_backup` (the OBD loop pauses on it as on any claim), and the job
+    transmits through `CanObdClient(tx_holder=...)`, which `tx_gate.send`
+    lets out only while that claim is the only one. The read's ids are held
+    in `src/collection/private_traffic.py`, which both raw-capture taps
+    (`can_obd_collector`, `can_collector.CanReader`) consult. The K-line
+    reader waits while the backup holds the session. Start/end events go to
+    the control-event log (`rom_backup.start` / `rom_backup.end`).
+    `tests/test_rom_backup.py` (37 passed, fake ECU on a virtual bus): each
+    refusal by name (engine running, engine off, no engine watch, passive,
+    foreign claim, foreign tester heard, K-line session, capture, ELM327
+    source, no recipe, backup already running); claim and hold released after
+    success, timeout, NRC, cancel, bus-open failure and an unexpected
+    exception (`_assert_released`); engine start, lost engine watch, passive,
+    foreign claim, K-line tester, a CAN frame on 0x7DF and a capture start
+    mid-read each abort; a dropped read retries 3 times then aborts "read at
+    0x0001B9 (63 bytes) failed after 3 attempts"; NRC reported as `0x22`;
+    no 0x7E0/0x7E8 rows from `CanReader` or `collect_can_obd_from_config`
+    while broadcast rows continue; checksum failure, cal-ID mismatch and a
+    re-read mismatch each keep the image `verified: false`; the stored image
+    byte-matches the fake ECU's; `10 81` is sent last; polling-resume
+    detection and its timeout. The pause of the real OBD loop and the
+    resume within a minute are W08.9's to confirm on the truck.
+  - *Verifier fixes, 2026-10-04 (second pass):*
+    - **Telemetry race (was ~15 % flaky):** `private_traffic` now records each
+      hold as a wall-clock window and `exclude(msg)` decides by the frame's
+      own acquisition time (`frame_arrival`), so a tap that drains late still
+      drops the `10 81`/`50 81` tail. `test_the_reads_traffic_is_not_written_as_telemetry`
+      adds a second tap that reads nothing until the hold has ended and
+      asserts the exact dropped count (2 × 568 frames);
+      `test_privacy_is_decided_by_the_frames_own_timestamp`. 50 serial runs:
+      50 passed. A mutation that judges by processing time fails both.
+    - **Engine-start blind window:** a fresh broadcast rpm >= 400
+      (`ENGINE_RUNNING_MIN_RPM`) refuses the start and aborts mid-read
+      whatever `vehicle_state` says (it prefers a fresh OBD 0 for up to 10 s).
+      `test_vehicle_reading_from_a_live_source`,
+      `test_a_running_engine_refuses_while_obd_still_reads_a_fresh_zero`,
+      `test_an_engine_start_inside_the_obd_freshness_window_aborts`, all
+      through `vehicle_reading` with a live source.
+    - **Store can no longer strand the job:** nothing that can raise runs
+      before `add_image` (integrity wrapped; `RomLibrary.revision_match`
+      reads a broken flash history as `status: "unknown"` with the reason);
+      the post-read phase ends `failed` on any error and always emits the end
+      event. New `stored` flag; `sha256` only when stored.
+      `test_a_store_failure_keeps_nothing_and_says_so`,
+      `test_a_broken_flash_history_does_not_lose_the_image`,
+      `test_an_integrity_check_error_keeps_the_image_unverified`,
+      `test_any_error_after_the_read_ends_the_job_as_failed`.
+    - **Shutdown/restart mid-read:** the app lifespan calls
+      `RomBackupJob.shutdown()` (cancel, `10 81`, release, end event; no new
+      start). `scripts/restart_canary.sh` refuses while `rom_backup` is in
+      `/status.passive.ecm_session_claims` (`--force` ends it and says so).
+      `test_daemon_shutdown_cancels_the_read_cleanly`,
+      `test_the_app_lifespan_shuts_the_job_down`, and 3 new tests in
+      `tests/test_restart_canary_script.py` (8 passed).
+    - **Send error vs gate:** `RawReply.send_error` carries a `can.CanError`;
+      the job retries it as a failed attempt named "CAN send failed (...)",
+      counted in `send_errors`. `test_a_transient_send_error_is_retried`,
+      `test_a_persistent_send_error_is_named_as_one`.
+    - **K-line race:** `_session` re-checks the backup claim after
+      `_wants_command`. `test_the_ecu_backup_holds_the_ecm_so_no_kline_session_starts`,
+      `test_a_backup_that_starts_after_the_plan_resolves_still_wins` (fails
+      when the re-check is removed).
+    - `tests/test_rom_backup.py` now 50 passed.
+  - *Verifier fixes, 2026-10-04 (third pass):*
+    - **Resume wait honours shutdown:** `_wait_for_polling` checks the
+      shutdown flag on every pass and sleeps on that event, not
+      `time.sleep` (the 35 ms pacing pause waits on the cancel event too).
+      `test_shutdown_during_the_resume_wait_still_records_the_end`: the join
+      returns in under 2 s with a 30 s resume window, state `done`/stored,
+      note "not checked: the daemon is shutting down", end event recorded.
+      The old sleep fails it (join times out).
+    - **`canary-update` wording:** `scripts/update_canary.sh` help (`--force`,
+      exit 3) and summary now say "capture or ECU backup active".
+      `tests/test_update_canary_script.py::test_refuses_while_an_ecu_backup_is_running`
+      (real `restart_canary.sh`, `rom_backup` claim in `/status`): exit 3
+      before the fetch, no restart. The usage test now matches the new phrase.
+    - **K-line scope, behaviour:** the backup holds only the ECM's diagnostic
+      session, so only K-line work on the ECM (`profile.ecm_address`) waits
+      for it. `_line_is_theirs()` is back to passive/foreign only. The new
+      `_ecm_held_by_backup()` guards `_session` and `_run_action`, and
+      `_wants_command` uses a cached `_targets_ecm(entries)`. An ECM function
+      is refused with "refused: the ECU backup holds the ECM session"; an SRS
+      (0x58) code clear or an ABS read runs during a backup.
+      `test_a_module_off_the_ecm_runs_during_an_ecu_backup`,
+      `test_an_ecm_function_is_refused_while_the_ecu_backup_holds_it`
+      (`tests/test_kline_actions.py`),
+      `test_an_abs_read_is_not_held_up_by_the_ecu_backup`
+      (`tests/test_kline_collector.py`).
+    - **Optional, done:** for a held frame, `private_traffic` believes the
+      driver stamp up to `RETAIN_SECONDS` (60 s) old instead of the shared
+      policy's 5 s, so a tap stalled up to a minute still drops it. Beyond
+      that it falls back to processing time; the limit is documented on the
+      constant. Covered in `test_privacy_is_decided_by_the_frames_own_timestamp`
+      (a 20 s stall is dropped; a stall past retention is the documented
+      fallback).
+    - `tests/test_rom_backup.py` 51 passed; `test_kline_collector.py` +
+      `test_kline_actions.py` 40 passed.
   - **Routes:**
     - `POST /control/rom/backup` starts it;
     - `GET /control/rom/backup` returns its state: idle, refused + reason,
@@ -213,7 +396,7 @@ Evidence this builds on:
   - Load `vehicle-nissan-xterra-2008` and `ecu-reverse-engineering` for the
     protocol.
 
-- [ ] **W08.8 Dashboard: Back up ECU.** On the ROM Library page:
+- [x] **W08.8 Dashboard: Back up ECU.** On the ROM Library page:
   - show the preconditions as live chips (vehicle state, passive, foreign
     tester, capture), with Start disabled and the reason shown while any
     blocks it;
@@ -223,6 +406,28 @@ Evidence this builds on:
     new library entry, with its revision match;
   - a failure shows the named reason.
   - **Accept:** vitest for each state, with the route mocked.
+  - *Done 2026-10-04:* `panels/tuning/EcuBackupCard.tsx`. The chips read
+    `/status` (`vehicle_state`, `passive.enabled`, a `foreign` ECM claim,
+    `capture_profile.active`) and merge the daemon's own `preconditions` from
+    `GET /control/rom/backup`, so no chip reads green where Start would be
+    refused; an unreported field blocks. Evidence: `EcuBackupCard.test.tsx`
+    (21 tests): idle, refused (job state and a 409 shown verbatim), running
+    (blocks 4,161 of 16,645, 25.0 %, ETA 07:48, retries, Cancel posts
+    `/control/rom/backup/cancel`), done (opens the new entry, revision chip),
+    failed (named reason; an unverified image kept and linked), cancelled;
+    in-page confirmation (about 10 minutes, key on/engine off, read-only), and
+    a spy shows `window.confirm` is never called.
+  - *Second pass, 2026-10-04 (backend agent):* the card links a result only
+    when the job says `stored: true` (`storedSha`), so a read that could not
+    be stored no longer reads "kept, marked unverified"; `RevisionChip` shows
+    `unknown` (unreadable flash history) with its reason. `types/romLibrary.ts`
+    declares `stored`, `send_errors`, `integrity`, the description tables'
+    `decode`/`axes`, and revision status `unknown`. The table fixtures now
+    have the backend's real shapes (`k_constant`, BFS axis raw with no
+    decode). `EcuBackupCard.test.tsx` 23 tests (new: nothing kept on a store
+    failure; a `sha256` without `stored` is never shown as kept). `pnpm
+    typecheck`, `pnpm lint`, `pnpm format:check` clean; `pnpm test` 71 files /
+    557 tests passed.
 
 - [ ] **W08.9 Known answer on the truck** (needs the truck, key on, engine
   off).

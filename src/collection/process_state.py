@@ -30,6 +30,7 @@ from src.collection import (
     capture_lifetime,
     capture_profiles,
     discovery,
+    private_traffic,
     queueing,
     tuning_profile,
     tx_gate,
@@ -48,6 +49,7 @@ COVERED_MODULES: frozenset[str] = frozenset(
         "discovery.py",
         "kline/actions.py",
         "kline/sessions.py",
+        "private_traffic.py",
         "queueing.py",
         "tuning_profile.py",
         "tx_gate.py",
@@ -65,6 +67,7 @@ COVERED_GLOBALS: frozenset[tuple[str, str]] = frozenset(
         ("discovery.py", "_remembered"),
         ("kline/actions.py", "KLINE_ACTIONS"),
         ("kline/sessions.py", "MODULE_SESSIONS"),
+        ("private_traffic.py", "_dropped"),
         ("queueing.py", "_CAN_FRAME_DROP_LOGS"),
         ("queueing.py", "_UNATTRIBUTED_QUEUE_DROPS"),
         ("tuning_profile.py", "_did_channels"),
@@ -86,6 +89,7 @@ def reset_process_state_for_tests() -> None:
     tx_gate.set_passive(False, source="default")
     tx_gate.reset_ecm_session_claims()
     tx_gate.reset_suppressed()
+    private_traffic.reset()
     bus_budget.reset()
     tuning_profile._reset_for_tests()
     discovery.reset_discovery()

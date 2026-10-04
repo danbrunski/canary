@@ -27,7 +27,7 @@ changes there are expected. They never block an update, and neither the pull
 nor a rollback changes anything under models/.
 
 Options:
-  --force        Restart even if a capture is active (ends that capture).
+  --force        Restart even if a capture or ECU backup is active (ends it).
   --full         Run every step regardless of what changed: dashboard build,
                  pip install, install_pi.sh. First installs and "something is
                  wrong" runs use this.
@@ -37,7 +37,7 @@ Exit codes:
   0  updated (or already current) and healthy
   1  setup error (not root, missing checkout or installer)
   2  usage error
-  3  refused: a capture is active (from restart_canary.sh --check)
+  3  refused: a capture or ECU backup is active (from restart_canary.sh --check)
   4  refused: the checkout has tracked local changes (outside models/)
   5  fetch or fast-forward failed; nothing was changed
   6  new code failed its health check; rolled back to the previous commit,
@@ -232,7 +232,7 @@ fi
 rc=0
 "${CANARY_HOME}/scripts/restart_canary.sh" "${restart_args[@]}" || rc=$?
 if [[ "${rc}" -ne 0 ]]; then
-  SUMMARY_RESULT="refused: capture active"
+  SUMMARY_RESULT="refused: capture or ECU backup active"
   if [[ "${rc}" -ne "${EXIT_CAPTURE}" ]]; then
     SUMMARY_RESULT="refused: restart_canary.sh --check exited ${rc}"
   fi
@@ -410,7 +410,7 @@ apply_steps() {
 
 restart_services() {
   # Only ever through restart_canary.sh: it is the one place that knows
-  # whether a capture would die.
+  # whether a capture or an ECU backup would die.
   local args=()
   if [[ "${FORCE}" -eq 1 ]]; then
     args+=(--force)

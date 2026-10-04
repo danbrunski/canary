@@ -1,0 +1,378 @@
+schema_version: 1
+# W08.1: the 2008 Xterra ECM's 1 MiB flash image, as data
+# (src/analysis/rom_map.py validates it).
+#
+# Sources: the image read from the ECU on 2026-10-04, byte-identical to the
+# decoded ZS44A-Tuned-20260920.OsirisROM (docs/skunkworks/uprev-backup-20261004.md);
+# docs/uprev-rom-table-verification.md, "2026-10-04: image map and three
+# candidate tables"; the erase geometry seen in the 2026-09-20 flash
+# (docs/skunkworks/uprev-flash-20260920.md).
+#
+# Offsets are into the plain image (the decoded ROMData, or what an ECU read
+# returns), never Osiris container offsets. Confidence is a field:
+#   verified  checked against an independent answer;
+#   inferred  strong evidence, not yet confirmed by a deliberate single-change
+#             save;
+#   unknown   bytes whose meaning is not known.
+# Every fact rom_targets.yaml relies on (Fuel Targets offset and slot, axes,
+# checksum words) is checked against that file when this one loads.
+image_size: 1048576
+calibration_ids: [1ZS44A00000]
+calibration_id:
+  offset: 0x8204
+  length: 11
+  evidence: >-
+    ASCII 1ZS44A00000 at 0x008204, where the checksum range starts. The ECM
+    reports the same id for service 0x21 local identifier 0x10
+    (data/dids.yaml access.calibration_id). UpRev flashes keep it unchanged.
+refused_formats:
+  - name: UpRev encrypted ROM backup
+    size: 1048592
+    prefix_hex: 32bec582
+    reason: >-
+      This is an UpRev ROM backup (.bin, 1,048,592 bytes). UpRev encrypts it
+      on the PC after reading the ECU, with a key held in its own software, so
+      CANary cannot decode it (docs/skunkworks/uprev-backup-20261004.md).
+      Upload the .OsirisROM instead, or back up the ECU from CANary.
+# Identical to rom_targets.yaml; load_rom_map refuses any difference.
+checksums:
+  algorithm: be32_sum_xor
+  start: 0x8204
+  excluded: [0x20000, 0x9598, 0x95A0]
+  sum_offset: 0x95A0
+  xor_offset: 0x9598
+  markers:
+    0x20008: 0xFFFF7FFC
+    0x20010: 0xFFFF7FFC
+# The loader's geometry in the 2026-09-20 flash: sixteen range CRCs partition
+# the image, and UpRev erased sectors 8 and 15. That fixes those two sectors;
+# the others are the CRC partitions, which no erase command confirmed.
+erase_sectors:
+  - {index: 0, start: 0x000000, end: 0x000FFF, confidence: inferred, evidence: 4 KiB range-CRC partition (2026-09-20); never erased in a capture.}
+  - {index: 1, start: 0x001000, end: 0x001FFF, confidence: inferred, evidence: 4 KiB range-CRC partition (2026-09-20); never erased in a capture.}
+  - {index: 2, start: 0x002000, end: 0x002FFF, confidence: inferred, evidence: 4 KiB range-CRC partition (2026-09-20); never erased in a capture.}
+  - {index: 3, start: 0x003000, end: 0x003FFF, confidence: inferred, evidence: 4 KiB range-CRC partition (2026-09-20); never erased in a capture.}
+  - {index: 4, start: 0x004000, end: 0x004FFF, confidence: inferred, evidence: 4 KiB range-CRC partition (2026-09-20); never erased in a capture.}
+  - {index: 5, start: 0x005000, end: 0x005FFF, confidence: inferred, evidence: 4 KiB range-CRC partition (2026-09-20); never erased in a capture.}
+  - {index: 6, start: 0x006000, end: 0x006FFF, confidence: inferred, evidence: 4 KiB range-CRC partition (2026-09-20); never erased in a capture.}
+  - {index: 7, start: 0x007000, end: 0x007FFF, confidence: inferred, evidence: 4 KiB range-CRC partition (2026-09-20); never erased in a capture.}
+  - {index: 8, start: 0x008000, end: 0x01FFFF, confidence: verified, evidence: 'EraseFlashBlock sector 08 acknowledged in the 2026-09-20 flash; the checksum words changed here.'}
+  - {index: 9, start: 0x020000, end: 0x03FFFF, confidence: inferred, evidence: 128 KiB range-CRC partition (2026-09-20); never erased in a capture.}
+  - {index: 10, start: 0x040000, end: 0x05FFFF, confidence: inferred, evidence: 128 KiB range-CRC partition (2026-09-20); never erased in a capture.}
+  - {index: 11, start: 0x060000, end: 0x07FFFF, confidence: inferred, evidence: 128 KiB range-CRC partition (2026-09-20); never erased in a capture.}
+  - {index: 12, start: 0x080000, end: 0x09FFFF, confidence: inferred, evidence: 128 KiB range-CRC partition (2026-09-20); never erased in a capture.}
+  - {index: 13, start: 0x0A0000, end: 0x0BFFFF, confidence: inferred, evidence: 128 KiB range-CRC partition (2026-09-20); never erased in a capture.}
+  - {index: 14, start: 0x0C0000, end: 0x0DFFFF, confidence: inferred, evidence: 128 KiB range-CRC partition (2026-09-20); never erased in a capture.}
+  - {index: 15, start: 0x0E0000, end: 0x0FFFFF, confidence: verified, evidence: 'EraseFlashBlock sector 0F acknowledged in the 2026-09-20 flash; the Fuel Targets byte changed here.'}
+# Absolute spans. One may sit wholly inside another; partial overlaps are
+# refused.
+regions:
+  - name: Boot
+    start: 0x000000
+    end: 0x007FFF
+    kind: boot
+    confidence: inferred
+    added_by_uprev: false
+    evidence: >-
+      Starts with the boot vector table. The span is erase sectors 0-7, which
+      the 2026-09-20 flash did not touch; the factory and ZS44A UpRev backups'
+      ciphertexts agree through it.
+  - name: Boot vector table
+    start: 0x000000
+    end: 0x000007
+    kind: boot
+    confidence: verified
+    added_by_uprev: false
+    evidence: Reset vector 0x0000261C and initial stack 0xFFFF7FFC, read from the bytes.
+  - name: Erased
+    start: 0x006000
+    end: 0x006EFD
+    kind: erased
+    confidence: verified
+    added_by_uprev: false
+    evidence: All 0xFF in the 2026-10-04 image.
+  - name: Data in the erased page
+    start: 0x006EFE
+    end: 0x006F2D
+    kind: unknown
+    confidence: unknown
+    added_by_uprev: false
+    evidence: >-
+      48 bytes that are not 0xFF, inside the 0x006000-0x007FFF range the
+      2026-10-04 notes list as erased. The bytes say so; what they are is
+      unknown.
+  - name: Erased
+    start: 0x006F2E
+    end: 0x007FFF
+    kind: erased
+    confidence: verified
+    added_by_uprev: false
+    evidence: All 0xFF in the 2026-10-04 image.
+  - name: Calibration
+    start: 0x008000
+    end: 0x01FFFF
+    kind: calibration
+    confidence: inferred
+    added_by_uprev: false
+    evidence: >-
+      Erase sector 8, which UpRev erased and rewrote for a one-cell calibration
+      edit on 2026-09-20. It holds the calibration ID, the checksum words, the
+      calibration's own Fuel Targets copy and the axes. The checksum covers
+      more than this: it runs from 0x008204 to the end of the image.
+  - name: Calibration ID
+    start: 0x008204
+    end: 0x00820E
+    kind: calibration
+    confidence: verified
+    added_by_uprev: false
+    evidence: ASCII 1ZS44A00000, equal to the ECM-reported id; the checksum range starts here.
+  - name: Checksum XOR word
+    start: 0x009598
+    end: 0x00959B
+    kind: calibration
+    confidence: verified
+    added_by_uprev: false
+    evidence: The BE32 XOR over 0x008204 onward (excluding 0x020000 and both words) equals it; changed with the 2026-09-20 edit.
+  - name: Checksum sum word
+    start: 0x0095A0
+    end: 0x0095A3
+    kind: calibration
+    confidence: verified
+    added_by_uprev: false
+    evidence: The BE32 sum over the same words equals it; changed with the 2026-09-20 edit.
+  - name: Erased
+    start: 0x012000
+    end: 0x01FFFF
+    kind: erased
+    confidence: verified
+    added_by_uprev: false
+    evidence: All 0xFF in the 2026-10-04 image.
+  - name: Application
+    start: 0x020000
+    end: 0x0DFFFF
+    kind: application
+    confidence: inferred
+    added_by_uprev: false
+    evidence: >-
+      Erase sectors 9-14, unchanged and not programmed by the 2026-09-20 flash.
+      Starts with the application header and vector table. Its end is the
+      sector boundary, not a decoded program size.
+  - name: Application header word
+    start: 0x020000
+    end: 0x020003
+    kind: application
+    confidence: verified
+    added_by_uprev: false
+    evidence: 0x1F95FFFF; the checksum skips this word.
+  - name: Application vector table
+    start: 0x020004
+    end: 0x02000B
+    kind: application
+    confidence: verified
+    added_by_uprev: false
+    evidence: Reset vector 0x00021C24 and stack 0xFFFF7FFC, read from the bytes.
+  - name: Sparse block with UpRev text
+    start: 0x0DE000
+    end: 0x0DEFFF
+    kind: uprev
+    confidence: inferred
+    added_by_uprev: true
+    evidence: >-
+      The text UpRev at 0x0DE194, an UpRev ROM-patch banner, with data to
+      0x0DE47F and 0xFF after. Taken as code UpRev added; not diffed against
+      the factory image, which survives only inside encrypted backups.
+  - name: Erased
+    start: 0x0DF000
+    end: 0x0DFFFF
+    kind: erased
+    confidence: verified
+    added_by_uprev: false
+    evidence: All 0xFF in the 2026-10-04 image.
+  - name: UpRev map sector
+    start: 0x0E0000
+    end: 0x0FFFFF
+    kind: uprev
+    confidence: inferred
+    added_by_uprev: true
+    evidence: >-
+      Erase sector 15, which UpRev erases and rewrites on every flash. It holds
+      the five map slots. Whether the factory image used this sector is not
+      known (the factory image survives only encrypted).
+  - name: UpRev map slots
+    start: 0x0E0000
+    end: 0x0E27FF
+    kind: uprev
+    confidence: inferred
+    added_by_uprev: true
+    evidence: >-
+      Five 2 KiB copies (map_slots below). The slot structure is verified from
+      the bytes; attributing it to UpRev rests on UpRev's Map 1-5 editing
+      changing exactly these bytes.
+  - name: Erased
+    start: 0x0E3000
+    end: 0x0FEFFF
+    kind: erased
+    confidence: verified
+    added_by_uprev: false
+    evidence: All 0xFF in the 2026-10-04 image.
+  - name: End values
+    start: 0x0FFF80
+    end: 0x0FFF87
+    kind: unknown
+    confidence: unknown
+    added_by_uprev: false
+    evidence: >-
+      0x01 at 0x0FFF80 and 0x4E4855F9 at 0x0FFF84, read from the bytes. Meaning
+      unknown; they sit in the sector UpRev rewrites on every flash.
+map_slots:
+  base: 0x0E0000
+  stride: 0x800
+  count: 5
+  confidence: verified
+  evidence: >-
+    Five 2 KiB copies at 0x0E0000 + (n-1) x 0x800: Fuel Targets sits at +0x220
+    and K at +0x762 in all five, and in the UpRev base all five Fuel Targets
+    copies equal the calibration's own table at 0x00A169. The tunes edited only
+    slot 1, UpRev's "Map 1", except K, which they wrote to all five.
+  regions:
+    - name: Ignition timing (probable)
+      start: 0x09C
+      end: 0x0BF
+      kind: calibration
+      confidence: inferred
+      added_by_uprev: true
+      evidence: >-
+        These cells rose one count in slot 1 in k106, whose note says "added
+        spark at 3000-4500 high load". The table's bounds and axes are
+        unknown, so it is a span, not a table.
+    - name: Fuel Compensation (span)
+      start: 0x670
+      end: 0x761
+      kind: calibration
+      confidence: inferred
+      added_by_uprev: true
+      evidence: >-
+        The base -> k106 changed bytes around the one cell verified earlier
+        (slot 1 +0x75F, the operator's Map1Change edit in
+        docs/uprev-rom-table-verification.md). Rows, columns and axes are not
+        established, so it is a span, not a table.
+tables:
+  - id: fuel_targets
+    kind: fuel_targets
+    name: Fuel Targets
+    slot_offset: 0x220
+    slots: [1]
+    rows: 8
+    cols: 8
+    dtype: u8
+    decode:
+      kind: reciprocal
+      quantity: afr
+      unit: AFR
+      numerator: 1881.6
+      confidence: verified
+      evidence: AFR = 14.7 x 128 / raw reproduces every transcribed AFR in afr_calibration.yaml.
+    axes: {rows: fuel_targets_rpm_axis, cols: fuel_targets_bfs_axis}
+    confidence: verified
+    evidence: >-
+      Map 1 at 0x0E0220 reproduces the independently transcribed table in
+      afr_calibration.yaml cell for cell, row-major, 8 rpm rows x 8 BFS
+      columns (k106 and 20260920); the 2026-09-20 edit changed 0x0E025C.
+      rom_targets.yaml edits exactly this table.
+  - id: fuel_targets_maps_2_5
+    kind: fuel_targets
+    name: Fuel Targets
+    slot_offset: 0x220
+    slots: [2, 3, 4, 5]
+    rows: 8
+    cols: 8
+    dtype: u8
+    decode:
+      kind: reciprocal
+      quantity: afr
+      unit: AFR
+      numerator: 1881.6
+      confidence: verified
+      evidence: The Map 1 decode; the bytes are the same table.
+    axes: {rows: fuel_targets_rpm_axis, cols: fuel_targets_bfs_axis}
+    confidence: inferred
+    evidence: >-
+      In the UpRev base all five slots hold this table, equal to the
+      calibration's own copy at 0x00A169. No edit in Maps 2-5 has confirmed
+      the layout there.
+  - id: fuel_targets_calibration
+    kind: fuel_targets
+    name: Fuel Targets (calibration copy)
+    offset: 0xA169
+    rows: 8
+    cols: 8
+    dtype: u8
+    decode:
+      kind: reciprocal
+      quantity: afr
+      unit: AFR
+      numerator: 1881.6
+      confidence: inferred
+      evidence: The Map 1 decode, assumed for an identical copy.
+    axes: {rows: fuel_targets_rpm_axis, cols: fuel_targets_bfs_axis}
+    confidence: inferred
+    evidence: >-
+      Equal to all five slot copies in the UpRev base. Whether the ECM reads it
+      while a map slot is active is not known.
+  - id: fuel_targets_rpm_axis
+    name: Fuel Targets rpm axis
+    offset: 0xCAA5
+    rows: 8
+    cols: 1
+    dtype: u8
+    decode:
+      kind: linear
+      quantity: rpm
+      unit: rpm
+      scale: 50
+      confidence: verified
+      evidence: raw x 50 reproduces the transcribed rpm breakpoints 1200-5200 in afr_calibration.yaml.
+    confidence: verified
+    evidence: The only match for raw 18 20 28 38 48 50 58 68 in the image (docs/uprev-rom-table-verification.md).
+  - id: fuel_targets_bfs_axis
+    name: Fuel Targets BFS axis
+    offset: 0xC894
+    rows: 1
+    cols: 8
+    dtype: u8
+    confidence: verified
+    evidence: >-
+      The only match for raw 34 44 5D 64 6C 6E 7F 80 in the image. No scale to
+      ms is established (the ms values in afr_calibration.yaml are the
+      editor's transcription), so it is shown raw.
+  - id: fuel_comp_rpm_axis
+    name: Fuel Compensation rpm axis
+    offset: 0xCB29
+    rows: 16
+    cols: 1
+    dtype: u8
+    decode:
+      kind: linear
+      quantity: rpm
+      unit: rpm
+      scale: 50
+      confidence: inferred
+      evidence: >-
+        The k105 note's rescale, 800-12750 -> 800-7200 rpm, is exactly base
+        0x10..0xFF and k106 0x10..0x90 at x 50.
+    confidence: inferred
+    evidence: >-
+      Sixteen steps that changed base -> k106 exactly as the k105 note
+      describes. Needs a deliberate single-change save to confirm.
+  - id: k_constant
+    kind: k_constant
+    name: K (injector constant)
+    slot_offset: 0x762
+    rows: 1
+    cols: 1
+    dtype: be16
+    confidence: inferred
+    evidence: >-
+      UpRev base 27,089 and k106 28,715 in all five slots: the ratio 1.0600
+      matches the registry's K 1.06 for k106. Raw only, no scale declared.
+      Needs a deliberate single-change save to confirm.
