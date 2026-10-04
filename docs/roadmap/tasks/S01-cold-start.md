@@ -307,8 +307,9 @@ system starting beside it.
   *2026-10-04 (partial):* four ticks fell in drives, each one the first after a
   start, so each read every footer: 70.5 s after the 19:43Z cold boot (142
   sessions, 44,738 footers), 68.4 s after the 20:27Z boot, and 15.3 s / 16.9 s
-  after warm restarts at 20:41Z and 20:45Z (engine running, moving). Over the
-  same drives inference missed 23 of 2,271 ticks, none attributed to storage.
+  after warm restarts at 20:41Z and 20:45Z (engine running, moving). The
+  19:43Z daemon's drive (cold-boot tick included) missed 23 of 2,271 inference
+  ticks, 8 `compute_busy` and 15 `overrun`.
   The first-tick cost has grown with the corpus (49.8 s cold on 2026-09-24 at
   33,273 files). Still owed: a *steady-state* tick (0 footers) during a drive,
   which needs a drive running at least an hour past the daemon's last start.
