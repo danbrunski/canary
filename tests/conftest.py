@@ -6,6 +6,8 @@ Session-wide guards that keep tests independent of each other.
 from __future__ import annotations
 
 import logging
+import os
+import zlib
 from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
@@ -18,8 +20,8 @@ from tests.repo_guard import GUARD, RepoTreeGuard
 
 #: Tests measured slower than the push gate can afford (scripts/mark_slow_tests.py
 #: writes this from a ``--durations`` run). They get the ``slow`` marker here, so
-#: the one-minute push gate skips them; bare ``pytest`` and GitHub CI still run
-#: them on every push (operator, 2026-09-24).
+#: the one-minute push gate and per-push CI skip them; a nightly workflow runs
+#: them (operator, 2026-10-04; .github/workflows/nightly-slow.yml).
 _SLOW_TESTS_FILE = Path(__file__).with_name("slow_tests.txt")
 
 
@@ -33,11 +35,41 @@ def _measured_slow_tests() -> frozenset[str]:
     )
 
 
-def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
+#: ``CANARY_TEST_SHARD=<index>/<count>`` keeps one share of the collected tests,
+#: chosen by a stable hash of each test's node id, so CI can split the suite
+#: across parallel jobs (operator, 2026-10-04). Unset, nothing is deselected.
+SHARD_ENV = "CANARY_TEST_SHARD"
+
+
+def parse_shard(value: str) -> tuple[int, int]:
+    """``"i/n"`` -> ``(i, n)``; refuses anything but ``0 <= i < n``."""
+    try:
+        index_text, count_text = value.split("/")
+        index, count = int(index_text), int(count_text)
+    except ValueError as exc:
+        raise pytest.UsageError(f"{SHARD_ENV}={value!r}: expected '<index>/<count>'") from exc
+    if count < 1 or not 0 <= index < count:
+        raise pytest.UsageError(f"{SHARD_ENV}={value!r}: need 0 <= index < count")
+    return index, count
+
+
+def in_shard(nodeid: str, index: int, count: int) -> bool:
+    return zlib.crc32(nodeid.encode()) % count == index
+
+
+def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item]) -> None:
     slow = _measured_slow_tests()
     for item in items:
         if item.nodeid in slow:
             item.add_marker(pytest.mark.slow)
+    shard = os.environ.get(SHARD_ENV)
+    if shard:
+        index, count = parse_shard(shard)
+        keep = [item for item in items if in_shard(item.nodeid, index, count)]
+        dropped = [item for item in items if not in_shard(item.nodeid, index, count)]
+        if dropped:
+            config.hook.pytest_deselected(items=dropped)
+        items[:] = keep
 
 
 _REPO_BASELINE = pytest.StashKey[repo_guard.RunBaseline]()

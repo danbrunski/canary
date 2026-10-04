@@ -146,11 +146,17 @@ to direct HTTP.
 - **Python**: always `.venv/bin/python` (3.12), never system `python3`.
 - **Branching**: work directly on `main`, no feature branches or PRs; push
   with `scripts/push.sh` (see "Push with" below).
-- **Lint/test gate: about a minute locally, everything in CI** (operator,
-  2026-09-24). A pre-commit hook runs ruff + mypy. The push gate
-  (`scripts/push.sh`, below) runs lint, types and every test except the
-  `slow` tier; **GitHub CI runs the whole suite on every push**, slow tier
-  included. While iterating, run the test files you are working on. For dashboard
+- **Lint/test gate: about a minute locally; CI per push without the slow
+  tier; the slow tier nightly** (operator, 2026-09-24; slow tier moved to a
+  nightly run on 2026-10-04). A pre-commit hook runs ruff + mypy. The push
+  gate (`scripts/push.sh`, below) runs lint, types and every test except the
+  `slow` tier. **GitHub CI runs the same suite on every push**, plus the full
+  frontend checks. It runs lint and types once, and splits pytest across 4
+  parallel jobs (`CANARY_TEST_SHARD=i/4`, a stable node-id hash in
+  `tests/conftest.py`). **The slow tier runs nightly**
+  (`.github/workflows/nightly-slow.yml`, 09:00 UTC) and on demand with
+  `gh workflow run nightly-slow.yml`. Run it on demand after changing code
+  those tests cover. A red nightly is fixed like a red main. While iterating, run the test files you are working on. For dashboard
   changes, `pnpm typecheck`, `pnpm format`, `pnpm lint` and the vitest files you
   touched (re-run `TuningFeedback.test.ts` once on flake before treating it as a
   regression). ESLint is type-aware, and its pre-existing violations are
@@ -191,9 +197,10 @@ to direct HTTP.
   before anything else is pushed. If a pushed test flaked, re-run it alone
   before calling it a flake, and open a task for the flake either way.
 - **Test tiers** (pytest runs in parallel via `-n auto`, needs
-  `pytest-xdist` from the `dev` extra): bare `pytest` is **CI's suite** —
+  `pytest-xdist` from the `dev` extra): bare `pytest` is the full suite —
   everything except `integration` and `ml_training`, about 5 minutes on a
-  quiet laptop. The push gate runs the affected, non-`slow` part of it.
+  quiet laptop. Per-push CI and the push gate run its non-`slow` part. The
+  `slow` part runs nightly.
   **The torch training / bake-off / FP-benchmark suites (`ml_training`)
   are not a commit gate** (operator, 2026-09-23): `scripts/ci_gate.sh` and
   CI run them only when a change touches a path in `scripts/ml_paths.txt`
