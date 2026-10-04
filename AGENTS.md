@@ -60,7 +60,11 @@ Reflashing is a direction this project is moving in, not something it
 forbids (operator decision 2026-09-21, replacing the earlier blanket rule
 that `canary` never writes non-volatile memory). Reads of any depth remain
 fine, and so do volatile, reversible writes (clear DTC, actuation tests,
-session control) — those need neither condition. Bench-ECU groundwork is in
+session control) — those need neither condition. That covers **every module
+on the vehicle, not only the ECM**: reading and clearing codes on the airbag
+(SRS), ABS, BCM or any other module, running their active tests, and
+observing a scan tool do the same so CANary can learn it, are routine
+diagnostic work (operator, 2026-10-04). Don't hedge about them. Bench-ECU groundwork is in
 `docs/skunkworks/ecu-rw-bench-research.md`.
 
 Two narrower cases, neither of them the policy above: the broadcast
