@@ -162,7 +162,11 @@ this truck:
   confirms it (`docs/ecu-firmware-analysis.md`): the target function at
   `0x055DB2` replaces the lookup's load input with `0xFF`, the last column,
   while a flag is set. The flag switches with +8 counts of hysteresis on a
-  value from the 1-D table at `0xCEDB`.
+  value from the 1-D table at `0xCEDB`. **Confirmed live on 2026-10-04:**
+  - the flag (bit 0 of RAM `0xFFFF2841`, `mem:ECM_PEDAL_ENRICH_FLAGS`) set at
+    broadcast pedal 4.29–4.58 V, and never at or below 3.80 V;
+  - while it was set, commanded φ read exactly 1.1640625, the last-column
+    value, even though BFS sat mid-table.
 - **Fuel Compensation** is the second fuel table: 16 × 16 at slot `+0x660`.
   Its x-axis is "Volumetric Flow Ratio" % (`0xCACD`, raw `08…80`) and its rpm
   axis is `0xCB29` (raw × 50 = 800–7,200 rpm). The layout is code-verified.
@@ -224,9 +228,10 @@ this truck:
 - **The map is selected by a switch input, not a command.** Bits 1 and 3 of
   RAM byte `0xFFFF2EE0` are debounced, and each transition steps the
   selector. The committed active map is at `0xFFFFB008`, as 1–5; it reads 0
-  after a cold boot, meaning slot 1 is loaded by default. That address is not
-  a CANary channel yet, so until it is, confirm the active slot with the
-  operator before tracing a table.
+  after a cold boot, meaning slot 1 is loaded by default. It is now the
+  channel `mem:ECM_ACTIVE_MAP`, and it read 0 all through the 2026-10-04
+  drive. The magic value `0xAA5555AA` at `0xFFFFB004` was confirmed on the
+  same drive. A non-zero reading is the only sign the map was switched.
 - **What's in a slot, confirmed from the code that reads the RAM copy:**
 
   | Offset | Table |

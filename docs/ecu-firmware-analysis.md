@@ -143,13 +143,32 @@ Local outputs: `~/ecu-re/out/ram_vars.yaml`, `tables_1d.yaml`, `tables_2d.yaml`,
 
 - `0x006000–0x007FFF` is not entirely erased: 48 bytes at `0x006EFE–0x006F2D` are in use. `rom_map.yaml` records this.
 
+## Live verification: the 2026-10-04 drive
+
+The firmware-located RAM channels were added to `data/dids.yaml` (commit
+`dd189c2`) and logged on a drive. Capture
+`_capture-ram-study-2026-10-04T204557`, 20:45:56–21:12:49Z, profile
+`ram-study` (default polling plus the memory channels, DID/memory window
+every 5 s, about 190 samples of each). Pairing used acquisition time.
+
+| Prediction from the code | What the drive showed | Verdict |
+|---|---|---|
+| UpRev magic `0xAA5555AA` at `0xFFFFB004` | 196 of 196 reads = 2,857,719,210 = `0xAA5555AA` | **Confirmed** |
+| `0xFFFFB008` reads 0 after a cold boot (slot 1 loaded by default) and changes only when the selector commits | 0 on all 196 reads. Selector `0xFFFFB003` was also 0 throughout. | **Confirmed** (no switch event occurred) |
+| The map switch watches bits 1 and 3 of `0xFFFF2EE0` | Bits 1 and 3 never set. Bit 4 (16) was set on 148 of 186 reads, mostly off idle (median 2,441 rpm). Bit 5 (32) was set on 21 of 186, at idle (median 788 rpm, pedal released). | Consistent. Bits 4 and 5 are other inputs, still unidentified. |
+| Pedal-switch flag: bit 0 of `0xFFFF2841` sets near full pedal and forces Target AFR's last load column | Set on 2 samples, at broadcast pedal 4.285 V and 4.582 V (full scale 4.58 V). Never set at or below 3.795 V, the highest pedal seen while it was clear. While set, the commanded φ RAM word read **exactly 1.1640625** (`0x95/128`, the last-column value) while the X trace sat mid-table (~100 counts). | **Confirmed live.** The threshold lies between 3.80 and 4.29 V, which fits the 2026-09-18 data figure of ≥ ~227/255. |
+| Timing-trim select flag at `0xFFFF2842` | Constant 4 (bit 2) all drive | Steady; which value selects which trim is still unconfirmed |
+| `X = floor(BFS × 128 / 44019)` | 168 of 194 same-read pairs exact. The rest are within ±1–4 counts, **both signs**, at transients. | Formula **confirmed**. The misses fit the two words being updated at different points in the ECM's loop, not a wrong formula. (P02.14's 1,564 of 1,564 came from a capture with steadier conditions.) |
+| Fuel Comp x input at `0xFFFF118A` is a load-like quantity | Tracks BFS (r = 0.98 against DID `0x1208`, 0.89 against the RAM word). It is not a fixed scaling: the per-sample ratio to BFS/256 spreads from 1.43 to 2.85, and a straight-line fit has a +28 intercept. | Load-like, as the "Volumetric Flow Ratio" axis name says. Its exact definition is still open. |
+
 ## Open
 
 - **Catalog:** apply the Mode 22 corrections to `data/dids.yaml`, with the
   known answers.
-- **New channel:** add `mem:ECM_ACTIVE_MAP` (`0xFFFFB008`) to the memory
-  catalog. Verify it on the truck: it reads 0 or 1 after a boot, and the
-  live Target AFR copy at `0xFFFFB260` equals that slot's flash table.
+- **Active map:** `mem:ECM_ACTIVE_MAP` is catalogued and read 0 all drive
+  (2026-10-04). Still to see it change: the selector stepping when the map
+  switch is used, which is the operator's call. Also to check: the live
+  Target AFR copy at `0xFFFFB260` equals that slot's flash table.
 - **ROM map data:** move the confirmed slot tables (timing trims, Fuel
   Comp, K, Load Point Scaler) into `rom_map.yaml`, and lift `rom_trace`'s
   BFS-axis refusal (W05.1).

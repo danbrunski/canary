@@ -1695,7 +1695,7 @@ memory:
     address: 0xFFFFB004
     length: 4
     byte_length: 4
-    confidence: hypothesized
+    confidence: confirmed
     verified_tune_revision: ZS44A-20260920
     window: uprev_state
     notes: Expected constant 0xAA5555AA (2857719210) once UpRev's init has run.
@@ -1705,11 +1705,15 @@ memory:
         finding: >
           UpRev init at 0x0DE1A4 writes 0xAA5555AA here and copies slot 1 to
           0xFFFFB040 whenever it finds a different value.
+      - session: _capture-ram-study-2026-10-04T204557
+        method: live_drive_check
+        finding: >
+          196/196 reads = 0xAA5555AA on a 26-minute drive.
   - name: ECM_ACTIVE_MAP
     address: 0xFFFFB008
     length: 1
     byte_length: 1
-    confidence: hypothesized
+    confidence: high
     verified_tune_revision: ZS44A-20260920
     window: uprev_state
     plausible_min: 0
@@ -1726,6 +1730,10 @@ memory:
           to 1-5, alongside the 2 KiB copy into 0xFFFFB040.
   # Fuel Compensation's x input ("Volumetric Flow Ratio"), read clamped by the
   # BFS routine at 0x03C4D0 before the 16x16 lookup at slot +0x660.
+      - session: _capture-ram-study-2026-10-04T204557
+        method: live_drive_check
+        finding: >
+          0 on 196/196 reads, as predicted for a cold boot with no map switch; the selector stayed 0 too.
   - name: ECM_FUEL_COMP_X_INPUT
     address: 0xFFFF118A
     length: 1
@@ -1746,7 +1754,7 @@ memory:
     address: 0xFFFF2841
     length: 1
     byte_length: 1
-    confidence: hypothesized
+    confidence: high
     verified_tune_revision: ZS44A-20260920
     window: flags_2841
     evidence:
@@ -1756,6 +1764,10 @@ memory:
           Bit 0 set/cleared with +8 hysteresis in 0x055DB2; while set the Target
           AFR lookup's load input is 0xFF (last column). Expected to set near WOT
           pedal (2026-09-18 data: >= ~227/255 broadcast pedal).
+      - session: _capture-ram-study-2026-10-04T204557
+        method: live_drive_check
+        finding: >
+          Bit 0 set only at broadcast pedal 4.29-4.58 V (never <= 3.80 V); while set, mem:ECM_TARGET_EQUIV_RATIO read exactly 1.1640625, the last-column value.
   - name: ECM_TIMING_TRIM_SELECT_FLAGS
     address: 0xFFFF2842
     length: 1
