@@ -225,6 +225,13 @@ class ObdRequestRequest(_ControlRequest):
     timeout_seconds: float | None = Field(default=None, gt=0.0, le=10.0)
 
 
+class ClearCodesRequest(_ControlRequest):
+    """``POST /control/diagnostics/clear_codes``: clear one module's stored
+    codes, by its name in the vehicle's K-line profile (``SRS``)."""
+
+    module: str = Field(min_length=1)
+
+
 class PassiveModeRequest(_ControlRequest):
     """Arm/disarm the CAN transmit gate (passive, receive-only mode).
 

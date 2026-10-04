@@ -652,6 +652,22 @@
     },
     {
       "auth": "control",
+      "body": true,
+      "method": "POST",
+      "path": "/control/diagnostics/clear_codes",
+      "query": [],
+      "status_code": null
+    },
+    {
+      "auth": "control",
+      "body": false,
+      "method": "GET",
+      "path": "/control/diagnostics/functions",
+      "query": [],
+      "status_code": null
+    },
+    {
+      "auth": "control",
       "body": false,
       "method": "GET",
       "path": "/control/feedback",

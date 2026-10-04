@@ -199,6 +199,27 @@ class ModuleReader(_Strict):
         return self
 
 
+class ClearCodes(_Strict):
+    """How a module's stored codes are cleared: the request a scan tool was
+    seen to send it. Absent: CANary never clears that module's codes."""
+
+    #: The whole request, service byte first (``[0x14]`` for the airbag
+    #: module: a bare ClearDiagnosticInformation, no group bytes).
+    request: tuple[int, ...] = Field(min_length=1)
+    evidence: str = Field(min_length=1)
+
+    @field_validator("request")
+    @classmethod
+    def _is_a_clear(cls, value: tuple[int, ...]) -> tuple[int, ...]:
+        if value[0] != 0x14:
+            raise ValueError(
+                f"clear_codes request starts 0x{value[0]:02x}; ClearDiagnosticInformation is 0x14"
+            )
+        if any(not 0 <= b <= 0xFF for b in value):
+            raise ValueError("clear_codes request bytes must be 0x00-0xFF")
+        return value
+
+
 class KlineModule(_Strict):
     """One module on this vehicle's K-line, by its KWP2000 address."""
 
@@ -207,6 +228,7 @@ class KlineModule(_Strict):
     #: The key bytes its StartCommunication reply carried.
     key_bytes: tuple[int, int] | None = None
     reader: ModuleReader | None = None
+    clear_codes: ClearCodes | None = None
     dids: tuple[ModuleDid, ...] = ()
 
     @field_validator("name")
@@ -327,6 +349,7 @@ def load_kline_profile(path: Path) -> KlineProfile:
 
 __all__ = [
     "UNKNOWN_MODULE",
+    "ClearCodes",
     "Flag",
     "KlineModule",
     "KlineNotConfiguredError",

@@ -33,6 +33,7 @@ import { CustomDashboardPanel } from "./CustomDashboardPanel";
 import { CustomPidsPanel } from "./CustomPidsPanel";
 import { DataSourcesPanel } from "./DataSourcesPanel";
 import { DatasetHealthPanel } from "./DatasetHealthPanel";
+import { DiagnosticFunctionsPage } from "./DiagnosticFunctionsPage";
 import { DtcPanel } from "./DtcPanel";
 import { ExplorePanel } from "./ExplorePanel";
 import { ExportPanel } from "./ExportPanel";
@@ -206,6 +207,8 @@ function renderItem(
       return <TripPanel channels={d.channels} status={d.status} token={d.token} />;
     case "diag-dtc":
       return <DtcPanel />;
+    case "diag-functions":
+      return <DiagnosticFunctionsPage token={d.token} />;
     case "diag-monitors":
       return <MonitorsPanel />;
     case "diag-trends":

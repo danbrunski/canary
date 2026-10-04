@@ -21,8 +21,9 @@ is refused rather than guessed, because one wrong boundary misattributes every
 later value. Duplicate descriptors are legal on the wire (UpRev defines RAM
 ``0xFFFF13FE`` twice); only the builders for *our* requests refuse them.
 
-**What this client may ask for.** Reads, session control and volatile
-definitions only (:data:`ALLOWED_SERVICES`). Every other service id is refused
+**What this client may ask for.** Reads, session control, volatile
+definitions and ClearDiagnosticInformation (:data:`ALLOWED_SERVICES`; clearing
+codes is routine diagnostic work on any module, AGENTS.md). Every other service id is refused
 here, by id, with the reason — there is no raw-request escape hatch. Writing
 an ECU's non-volatile memory needs the operator's explicit permission per
 operation and a parked, engine-off vehicle (AGENTS.md), and nothing in this
@@ -36,6 +37,9 @@ from dataclasses import dataclass
 from typing import TypeAlias
 
 SID_START_DIAGNOSTIC_SESSION = 0x10
+#: Clears a module's stored codes. Sent only as a vehicle profile records the
+#: module's scan-tool clear (``KlineModule.clear_codes``).
+SID_CLEAR_DIAGNOSTIC_INFORMATION = 0x14
 SID_READ_ECU_IDENTIFICATION = 0x1A
 SID_READ_DATA_BY_LOCAL_ID = 0x21
 SID_READ_DATA_BY_COMMON_ID = 0x22
@@ -55,6 +59,7 @@ SID_IO_CONTROL_BY_LOCAL_ID = 0x30
 ALLOWED_SERVICES: frozenset[int] = frozenset(
     {
         SID_START_DIAGNOSTIC_SESSION,
+        SID_CLEAR_DIAGNOSTIC_INFORMATION,
         SID_READ_ECU_IDENTIFICATION,
         SID_READ_DATA_BY_LOCAL_ID,
         SID_READ_DATA_BY_COMMON_ID,
@@ -72,7 +77,6 @@ REFUSED_SUBFUNCTIONS: Mapping[int, frozenset[int]] = {
 }
 #: Named non-volatile write services, for a precise refusal message.
 WRITE_SERVICES: Mapping[int, str] = {
-    0x14: "ClearDiagnosticInformation",
     0x27: "SecurityAccess",
     0x2E: "WriteDataByCommonIdentifier",
     0x31: "StartRoutineByLocalIdentifier",
@@ -88,7 +92,7 @@ WRITE_SERVICES: Mapping[int, str] = {
 SERVICE_NAMES: Mapping[int, str] = {
     SID_START_DIAGNOSTIC_SESSION: "StartDiagnosticSession",
     0x11: "ECUReset",
-    0x14: "ClearDiagnosticInformation",
+    SID_CLEAR_DIAGNOSTIC_INFORMATION: "ClearDiagnosticInformation",
     0x17: "ReadStatusOfDiagnosticTroubleCodes",
     0x18: "ReadDiagnosticTroubleCodesByStatus",
     SID_READ_ECU_IDENTIFICATION: "ReadEcuIdentification",
@@ -207,7 +211,7 @@ def decode_length_frame(raw: bytes) -> bytes:
 
 
 def check_request(payload: bytes) -> None:
-    """Refuse anything but the read/session/define services, by id."""
+    """Refuse anything but the read/session/define/clear-codes services, by id."""
     if not payload:
         raise KlineProtocolError("empty request")
     service = payload[0]

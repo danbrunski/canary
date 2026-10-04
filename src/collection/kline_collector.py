@@ -60,6 +60,7 @@ from queue import Empty, SimpleQueue
 
 from src.collection import capture_lifetime, tuning_profile, tx_gate
 from src.collection.kline import protocol as kp
+from src.collection.kline.actions import KLINE_ACTIONS, KlineAction, KlineActions
 from src.collection.kline.names import FRAME_CHANNEL, capture_key, did_channel, ram_channel
 from src.collection.kline.plan import (
     KlineCatalog,
@@ -193,8 +194,10 @@ class KlineCollector:
         transport_factory: TransportFactory | None = None,
         reconnect_policy: ReconnectPolicy | None = None,
         clock: Callable[[], float] = time.time,
+        actions: KlineActions = KLINE_ACTIONS,
     ) -> None:
         self.config = config
+        self._actions = actions
         self.profile_path = profile_path
         self.dids_path = dids_path
         self._entries = entries
@@ -219,6 +222,7 @@ class KlineCollector:
         self.keepalives = 0
         self.sniffed_frames = 0
         self.foreign_frames = 0
+        self.actions_run = 0
 
     def _say_once(self, key: str, message: str, *args: object) -> None:
         if key not in self._said:
@@ -257,12 +261,33 @@ class KlineCollector:
 
     def _may_continue(self, entries: tuple[str, ...], stop: asyncio.Event) -> bool:
         """Whether an open command session keeps going. Passive armed mid-session
-        ends it: the operator is handing the line to another tool."""
-        return not stop.is_set() and self._entries() == entries and not tx_gate.passive_armed()
+        ends it: the operator is handing the line to another tool. A queued
+        diagnostic function ends it too; the next pass runs the function and
+        then reopens the session."""
+        return (
+            not stop.is_set()
+            and self._entries() == entries
+            and not tx_gate.passive_armed()
+            and not self._actions.pending()
+        )
 
     async def run(self, queue: asyncio.Queue[TelemetryRecord], stop: asyncio.Event) -> None:
+        self._actions.attach()
+        try:
+            await self._run(queue, stop)
+        finally:
+            self._actions.detach()
+
+    async def _run(self, queue: asyncio.Queue[TelemetryRecord], stop: asyncio.Event) -> None:
         delay = self._policy.initial_delay_seconds
         while not stop.is_set():
+            action = self._actions.take()
+            if action is not None:
+                try:
+                    await self._run_action(action)
+                finally:
+                    self._actions.done(action)
+                continue
             entries = self._wants_command()
             if entries is None:
                 if not self.config.sniff:
@@ -382,6 +407,59 @@ class KlineCollector:
             MODULE_SESSIONS.release(plan.address, "kline")
             if is_ecm:
                 tx_gate.release_ecm_session("kline")
+
+    async def _run_action(self, action: KlineAction) -> None:
+        """One diagnostic function in a session of its own: StartCommunication,
+        the request, StopCommunication. Always finishes ``action``'s future."""
+        started = time.time()
+        if self._line_is_theirs():
+            action.finish(
+                ok=False,
+                started=started,
+                detail="refused: passive mode is armed or another tester holds the line",
+            )
+            return
+        try:
+            profile = load_kline_profile(self.profile_path)
+        except (KlineNotConfiguredError, ValueError) as exc:
+            action.finish(ok=False, started=started, detail=f"refused: {exc}")
+            return
+        is_ecm = action.address == profile.ecm_address
+        MODULE_SESSIONS.claim(action.address, "kline")
+        if is_ecm:
+            tx_gate.claim_ecm_session("kline")
+        transport = self._factory(profile, Mode.COMMAND)
+        try:
+            await asyncio.to_thread(transport.open)
+            try:
+                await asyncio.to_thread(transport.start_communication, action.address)
+                params = await asyncio.to_thread(transport.request, action.request)
+                try:
+                    await asyncio.to_thread(transport.stop_communication)
+                except (KlineTransportError, kp.KlineProtocolError, kp.NegativeResponseError):
+                    pass  # the function is done; the module times the session out
+            finally:
+                await asyncio.to_thread(transport.close)
+        except kp.NegativeResponseError as exc:
+            action.finish(ok=False, started=started, detail=f"{action.module} refused: {exc}")
+        except (KlineTransportError, kp.KlineProtocolError) as exc:
+            action.finish(ok=False, started=started, detail=f"K-line failed: {exc}")
+        else:
+            self.actions_run += 1
+            reply = bytes([action.request[0] + kp.POSITIVE_OFFSET]) + params
+            action.finish(ok=True, started=started, reply=reply, detail="positive response")
+        finally:
+            MODULE_SESSIONS.release(action.address, "kline")
+            if is_ecm:
+                tx_gate.release_ecm_session("kline")
+        result = action.future.result()
+        log.info(
+            "K-line %s on %s: %s",
+            action.kind,
+            action.module,
+            result.detail,
+            extra={"kline_action": result.to_dict()},
+        )
 
     async def _poll_local_id(
         self,
@@ -515,7 +593,9 @@ class KlineCollector:
             extra={"tty": self.config.tty, "baud": profile.baud},
         )
         try:
-            while not stop.is_set() and self._wants_command() is None:
+            while (
+                not stop.is_set() and self._wants_command() is None and not self._actions.pending()
+            ):
                 await wait_for_stop_or_timeout(stop, SNIFF_DRAIN_SECONDS)
                 to_epoch = time.time() - time.monotonic()
                 while True:

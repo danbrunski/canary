@@ -236,7 +236,12 @@ modules:
       times (19:48:57.98, 19:49:00.52, 19:49:30.96Z). Just before it, at
       19:48:54.56Z, the tool sent 02 10 C0 on CAN 0x752 and nothing answered,
       so this module is K-line only (data/analyses/2026-10-04-srs-kline-scan-tool.md).
-      No reader: CANary has never commanded it.
+      No reader: CANary does not poll it.
+    clear_codes:
+      request: [0x14]
+      evidence: >-
+        The scan tool's clear, session 2026-10-04T194342: a bare 14 at
+        19:49:31.63Z, answered 7F 14 78 (responsePending) for ~350 ms, then 54.
     dids:
       - did: 0x1100
         width: 4

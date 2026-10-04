@@ -35,6 +35,7 @@ export const NAV: NavGroupDef[] = [
     items: [
       { id: "diag-anomalies", label: "Anomalies", group: "diagnose" },
       { id: "diag-dtc", label: "Trouble Codes", group: "diagnose" },
+      { id: "diag-functions", label: "Diagnostic Functions", group: "diagnose" },
       { id: "diag-monitors", label: "Monitors", group: "diagnose" },
       { id: "diag-trends", label: "Drift Trends", group: "diagnose" },
       { id: "diag-tpms", label: "Tyres", group: "diagnose" },

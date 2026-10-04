@@ -229,6 +229,7 @@ The frame and every `/analysis/*` route in this table (W04) run in the digest's 
 `GET /control/sessions?captures=true` lists only `_capture-*` sessions and
 tags each from its `capture_profile.json` sidecar; the default listing remains
 normal drive sessions only.
+| `GET /control/diagnostics/functions` / `POST /control/diagnostics/clear_codes` | diagnostic functions the vehicle profile records; clear one K-line module's stored codes — `{module}` (see [Diagnostic functions](#diagnostic-functions)) |
 | `POST /control/obd_request` | one-shot OBD/UDS request — `{service, identifier?, header?, timeout_seconds?}`; `service` accepts any byte, including state-changing and actuation services. CANary must never use it to write ECU non-volatile memory or reflash a module |
 | `GET /control/tuning-mode` / `POST /control/tuning-mode` | inspect / arm the focused high-rate tuning poll profile (narrows Mode 01 to a tuning channel set, suspends DID windows) |
 | `GET /control/feedback` / `POST /control/feedback` | read / record anomaly-feedback verdicts |
@@ -471,6 +472,35 @@ timeout_seconds)`.
 This transmits like any other OBD request, so the same [passive
 mode](#passive-mode) caveat applies: arm it first if another tool currently
 owns a diagnostic session with the target module.
+
+## Diagnostic functions
+
+One-shot routines a scan tool runs on a module, done by CANary itself and
+shown on the dashboard's **Diagnose → Diagnostic Functions** page. Today there
+is one: clearing a K-line module's stored codes. It is offered only for a
+module whose vehicle profile (`daemon.kline_profile`) records the request a
+scan tool was seen to send (`modules.<addr>.clear_codes`). On the Xterra that
+is the airbag module (`SRS`, `0x58`), whose clear was sniffed on 2026-10-04
+(`data/analyses/2026-10-04-srs-kline-scan-tool.md`).
+
+```bash
+curl -s http://canary.local:8000/control/diagnostics/functions \
+  -H "Authorization: Bearer $CANARY_CONTROL_TOKEN"
+curl -sX POST http://canary.local:8000/control/diagnostics/clear_codes \
+  -H "Authorization: Bearer $CANARY_CONTROL_TOKEN" \
+  -H 'Content-Type: application/json' -d '{"module": "SRS"}'
+```
+
+The K-line collector owns the serial port, so it runs the clear: it stops
+sniffing (or ends a capture profile's K-line read), wakes the line, sends
+StartCommunication, the recorded request (waiting through `7F 14 78`
+responsePending) and StopCommunication, then resumes. The reply is
+`{"clear_codes": {module, address, ok, reply_hex, detail, duration_s, ...}}`;
+a module's refusal is `ok: false` with its reason. Refusals before anything is
+sent: 404 for an unknown module, 409 for a module with no recorded clear, while
+passive mode is armed or another tester is on the K-line, or while another
+function is running, and 503 when no K-line collector is running. A clear only
+erases stored codes. A fault that is still present sets its code again.
 
 ## DID sweep + diff
 

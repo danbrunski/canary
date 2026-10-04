@@ -62,6 +62,7 @@ import type {
   VehicleProfilesResponse,
   VersionResponse,
 } from "../types";
+import type { ClearCodesResult, DiagnosticFunctionsResponse } from "../types/diagnostics";
 import { controlBlob, controlJson, fetchJson, jsonBody, queryString } from "./core";
 
 export { HttpError, NetworkError } from "./core";
@@ -794,5 +795,28 @@ export function importCustomPidsCsv(
   return controlJson("/control/custom-pids/import", token, {
     method: "POST",
     body: jsonBody({ csv_text: csvText }),
+  });
+}
+
+/** `/control/diagnostics/functions`: the diagnostic functions this vehicle's
+ *  profile records (today, clearing a K-line module's codes). */
+export function getDiagnosticFunctions(
+  token: string,
+  signal?: AbortSignal,
+): Promise<DiagnosticFunctionsResponse> {
+  return controlJson<DiagnosticFunctionsResponse>("/control/diagnostics/functions", token, {
+    signal,
+  });
+}
+
+/** Clear one module's stored codes. Resolves after the module answered (or
+ *  refused); a refusal is `ok: false` with the module's reason. */
+export function clearModuleCodes(
+  token: string,
+  module: string,
+): Promise<{ clear_codes: ClearCodesResult }> {
+  return controlJson("/control/diagnostics/clear_codes", token, {
+    method: "POST",
+    body: jsonBody({ module }),
   });
 }

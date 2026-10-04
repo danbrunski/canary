@@ -22,6 +22,7 @@ export type WorkbenchItem =
   | "tuning-flash"
   | "diag-anomalies"
   | "diag-dtc"
+  | "diag-functions"
   | "diag-monitors"
   | "diag-trends"
   | "diag-explore"

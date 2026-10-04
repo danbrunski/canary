@@ -179,10 +179,16 @@ def test_an_undefined_include_is_refused() -> None:
         kp.expand_local_id(0x82, {0x82: (IncludeDescriptor(0x81),)})
 
 
-@pytest.mark.parametrize("service", [0x14, 0x27, 0x2E, 0x31, 0x34, 0x36, 0x37, 0x3B, 0x3D])
+@pytest.mark.parametrize("service", [0x27, 0x2E, 0x31, 0x34, 0x36, 0x37, 0x3B, 0x3D])
 def test_every_write_service_is_refused_by_name(service: int) -> None:
     with pytest.raises(ServiceRefusedError, match="does not write ECU memory"):
         kp.check_request(bytes([service, 0x00]))
+
+
+def test_clearing_codes_is_allowed() -> None:
+    # Routine diagnostic work on any module (AGENTS.md, operator 2026-10-04);
+    # which modules are cleared, and how, is the vehicle profile's clear_codes.
+    kp.check_request(bytes([kp.SID_CLEAR_DIAGNOSTIC_INFORMATION]))
 
 
 def test_services_off_the_allowlist_are_refused() -> None:
