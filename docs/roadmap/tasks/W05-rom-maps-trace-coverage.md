@@ -59,6 +59,15 @@ once that stall is found.
   offset. Coverage above the first column is thin. The capture asked for
   above still decides. This log is the prior that capture should confirm or
   refute.
+  *2026-10-04, disassembly (`docs/ecu-firmware-analysis.md`):* the ECM's
+  Target AFR function (`0x055DB2`) passes exactly these two channels into its
+  table lookup (`0x0269AC`): the byte at `0xFFFF103E` as the load input, and
+  the word at `0xFFFF11D8` (base `0xFFFF11C4` + `0x14`) as the rpm input. So
+  the channel choice is confirmed from the code. The X value goes in
+  unscaled, so it is in the BFS axis's raw counts. That fits P02.14's fit of
+  ≈0.1695 ms per count against the axis decode of 0.1685. It stays `[~]`
+  until the lookup's interpolation helpers are decoded, which shows they
+  compare the inputs with the raw axis bytes.
 - [x] **W05.2 — Draw the ECM's cell.** From the live telemetry stream
   (`useTelemetryStream`), outline the cell the trace channels point at. Keep
   today's nearest-breakpoint / dashed-neighbour rendering for the *inferred*

@@ -95,6 +95,8 @@ copying them. Paths are under `data/nissan-xterra-2008/` unless shown.
 | Run-to-run noise floor (by condition) | `noise_floor.yaml` |
 | K-line addresses, wake-up, modules (ECM, ABS) | `kline.yaml` |
 | ROM tables, axes, verified extraction | `rom_viewer.yaml`, `docs/uprev-rom-table-verification.md` |
+| Flash image layout, map slots, candidate tables | `rom_map.yaml` (W08), `docs/uprev-rom-table-verification.md` |
+| What the ECM's code computes (disassembly findings) | `docs/ecu-firmware-analysis.md` |
 | Factory service manual (engine control = EC) | `xterra_fsm/ec.pdf` |
 | Per-vehicle partitioning of all learned state | `src/vehicle/profiles.py`, keyed by VIN |
 

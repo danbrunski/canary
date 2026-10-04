@@ -158,14 +158,22 @@ this truck:
   (`docs/roadmap/tasks/N01-na-rom-response-experiments.md` → "Not now").
 - **Mid-rpm WOT enrichment is a pedal switch** (≥ ~227/255 broadcast pedal) into
   the Target AFR table's last BFS column, overriding the column the BFS lookup
-  would pick. `0x1134` holds that active rich target (raw/64 as φ).
+  would pick. `0x1134` holds that active rich target (raw/64 as φ). The code
+  confirms it (`docs/ecu-firmware-analysis.md`): the target function at
+  `0x055DB2` replaces the lookup's load input with `0xFF`, the last column,
+  while a flag is set. The flag switches with +8 counts of hysteresis on a
+  value from the 1-D table at `0xCEDB`.
 - **Fuel Compensation** is the second fuel table (x = "Volumetric Flow Ratio"
   %, y = rpm). Only one cell of its layout is verified, and its live x channel
   is unresolved, so don't place an operating point on it yet.
 - The RAM map-trace channels (`mem:ECM_FUEL_TARGET_MAP_X_TRACE`,
   `mem:ECM_ENGINE_SPEED_RAM`) are the ECM's *own* coordinates into the Target
-  AFR table. The rpm axis mapping is verified; the BFS axis mapping is not yet.
-  `src.analysis.rom_trace` refuses to place a cell on an unverified axis.
+  AFR table. The disassembly shows they are exactly the two inputs the code
+  passes to the lookup: the load byte at `0xFFFF103E` and the rpm word at
+  `0xFFFF11D8`. The rpm axis mapping is verified. The BFS axis mapping is
+  inferred (raw axis counts, ≈0.1685 ms each) until the lookup's interpolation
+  helpers are decoded (W05.1). Until then `src.analysis.rom_trace` refuses to
+  place a cell on that axis.
 
 ## Spark and knock on this ECM
 
@@ -197,8 +205,26 @@ this truck:
 - Table names and axes follow UpRev's *Nissan Tuning Guide*. The rom viewer
   cites Rev 8, pp. 9–10; the public Rev 2 PDF on uprev.com has the same
   structure. Not every ROM version has every table.
-- Five map slots exist. CANary does not read which slot is active. Confirm it
-  with the operator before tracing a table.
+- **Five map slots exist, and the engine reads a RAM copy of one.** UpRev's
+  patch copies the selected slot (2 KiB, at `0x0E0000 + 0x800·(n−1)`) into RAM
+  at `0xFFFFB040`. Its state block is at `0xFFFFB000`: magic `0xAA5555AA` at
+  `+4`, selector nibble at `+3`, current map number at `+8`. At start-up it
+  loads slot 1. Nissan's Target AFR pointer now points at the RAM copy
+  (`0xFFFFB260` = copy + `0x220`), and the calibration's own table at
+  `0x00A169` is unused. The active map number is probably readable at
+  `0xFFFFB008`, but that is not a CANary channel yet. Until it is, confirm the
+  active slot with the operator before tracing a table.
+- **Flash image layout** (`docs/uprev-rom-table-verification.md`, 2026-10-04
+  section, and the "Xterra ECM Flash Map" artifact):
+  - boot block `0x000000–0x007FFF`, with vectors at `0x0`;
+  - calibration block `0x008000–0x01FFFF`: calibration ID at `0x008204`,
+    where the checksum range starts; checksum words at `0x9598`/`0x95A0`;
+  - application `0x020000–0x0DFFFF`, with vectors at `0x020004`;
+  - UpRev's patch code near `0x0DE000`;
+  - map slots from `0x0E0000`.
+  About 120 1-D curves (8- and 16-entry) are packed at `0x00CC1B–0x00D379`
+  and read through two shared routines. Their names come from the variables
+  each call passes (`docs/ecu-firmware-analysis.md`).
 - Every flash, even the single-byte 2026-09-20 edit, reset LTFT to 0.00 %.
 - **The injector swap needs more than K.** For the 700 cc injectors, UpRev's
   procedure is: lower K (first cut K × old/new flow), enter the new latency

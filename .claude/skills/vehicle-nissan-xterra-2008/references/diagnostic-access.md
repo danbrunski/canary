@@ -115,6 +115,14 @@ site.
   by comparing ids. Resolve the calibration by flash time from
   `tune_revisions.yaml`.
 
+- **The whole 1 MiB flash is readable with plain requests, with no
+  SecurityAccess.** UpRev's backup on 2026-10-04 sent `10 85` once, then
+  `10 FB` before each `23 [BE32 address] [BE16 0x003F]`, on 0x7E0/0x7E8, at
+  about 35 ms per read. 1 MiB took 624 s. The result was byte-identical to
+  the decoded tune. It was only done key on, engine off. See
+  `docs/skunkworks/uprev-backup-20261004.md` and
+  `data/nissan-xterra-2008/rom_backup.yaml` (the recipe as data, from W08).
+
 ## CAN: the BCM (0x745 → 0x765)
 
 - The BCM answers on CAN in the same Nissan `10 C0` session as the ECM
