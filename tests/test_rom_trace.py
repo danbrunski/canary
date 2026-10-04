@@ -241,17 +241,17 @@ def test_shipped_fuel_compensation_table_still_has_no_trace() -> None:
     assert refusal is not None and refusal["reason"] == "no_trace_mapping"
 
 
-def test_shipped_fuel_compensation_labels_its_load_axis_not_uprevs_vfr() -> None:
-    """The column axis is the load byte compared with 0xFFFF118A, unit not
-    established; UpRev's "Volumetric Flow Ratio" % is a label UpRev puts on
-    the rpm axis's bytes. The viewer carries the same swapped-label record as
-    rom_map.yaml, so the ROM Maps card warns even while the table is TBD."""
+def test_shipped_fuel_compensation_labels_its_load_axis_as_throttle_based_vfr() -> None:
+    """The column axis is the load byte compared with 0xFFFF118A: throttle
+    flow per rev through a saturating curve, i.e. what UpRev calls Volumetric Flow Ratio,
+    shown at UpRev's % scale. UpRev itself puts that label on the rpm axis's
+    bytes; the viewer carries the same swapped-label record as rom_map.yaml,
+    so the ROM Maps card warns even while the table is TBD."""
     table = load_viewer_definition(PROFILE).table("fuel_compensation")
     assert table is not None
-    assert table.x_unit == ""
-    assert "%" not in table.x_unit
-    assert "Volumetric Flow Ratio" not in table.x_label
-    assert "0xFFFF118A" in table.x_label
+    assert table.x_unit == "%"
+    assert "Volumetric Flow Ratio" in table.x_label
+    assert "throttle" in table.x_label
     assert table.y_unit == "rpm"
     assert table.editor_disagreement is not None
     assert table.editor_disagreement.positions_match is True

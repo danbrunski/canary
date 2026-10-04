@@ -80,11 +80,13 @@ tables:
   - kind: fuel_compensation
     title: Fuel Compensation
     # The column axis is the load byte the code compares with RAM 0xFFFF118A
-    # (mem:ECM_FUEL_COMP_X_INPUT), not UpRev's "Volumetric Flow Ratio" %; its
-    # physical unit is not established, so it has none (rom_map.yaml
-    # fuel_comp_flow_axis).
-    x_label: Load input (0xFFFF118A, raw counts)
-    x_unit: ''
+    # (mem:ECM_FUEL_COMP_X_INPUT): throttle-derived flow per revolution
+    # through a saturating curve, an alpha-N fill estimate, which is what
+    # UpRev calls Volumetric Flow Ratio -- but UpRev puts that label on the
+    # rpm axis's bytes. Shown at UpRev's own % scale (raw x 100/256); see
+    # rom_map.yaml fuel_comp_flow_axis and data/dids.yaml ECM_FUEL_COMP_X_INPUT.
+    x_label: Volumetric Flow Ratio (throttle-based)
+    x_unit: '%'
     y_label: Rotations Per Minute
     y_unit: rpm
     unit: '%'
@@ -104,8 +106,8 @@ tables:
         "VFR" axis.
       translation: >-
         Real rpm of row i = UpRev's column-i "VFR %" label x 128; real load of
-        column j = UpRev's row-j "RPM" label / 128 as UpRev's VFR %, or / 50
-        as the raw count shown here.
+        column j = UpRev's row-j "RPM" label / 128, which is the
+        Volumetric Flow Ratio % shown here.
       evidence: >-
         Operator check 2026-10-04 (docs/ecu-firmware-analysis.md, "UpRev's
         Fuel Comp display, checked against memory"; d4fee9e): UpRev's Map 1

@@ -551,8 +551,8 @@ tables:
         "VFR" axis.
       translation: >-
         Real rpm of row i = UpRev's column-i "VFR %" label x 128; real load of
-        column j = UpRev's row-j "RPM" label / 128 as UpRev's VFR %, or / 50
-        as the raw count shown here.
+        column j = UpRev's row-j "RPM" label / 128, which is the
+        Volumetric Flow Ratio % shown here.
       evidence: >-
         Operator check 2026-10-04 (docs/ecu-firmware-analysis.md, "UpRev's
         Fuel Comp display, checked against memory"; d4fee9e): UpRev's Map 1
@@ -614,16 +614,34 @@ tables:
       swapped, so a cell's rpm and load read from UpRev's labels are wrong
       (the table's editor_disagreement). Not yet seen live on this table.
   - id: fuel_comp_flow_axis
-    name: Fuel Compensation flow axis (as the ECM reads it)
+    name: Fuel Compensation load axis (Volumetric Flow Ratio, throttle-based)
     offset: 0xCB29
     rows: 1
     cols: 16
     dtype: u8
+    decode:
+      kind: linear
+      quantity: volumetric flow ratio
+      unit: '%'
+      scale: 0.390625
+      confidence: inferred
+      evidence: >-
+        The axis is compared directly with the byte 0xFFFF118A, which
+        FUN_0003c444 computes as a saturating curve (0xEAEC/0xEACC, 5..224) of
+        a throttle-derived flow per revolution (curve 0xDD94 of the throttle
+        word 0xFFFF2CC8, plus a second flow term, x k/rpm): an alpha-N
+        estimate of cylinder fill, which is what UpRev's name "Volumetric Flow
+        Ratio" describes. It is not calculated load (it reads ~20 % at idle
+        like PID 0x04, but diverges in cruise). raw x 100/256 is
+        UpRev's own display convention for that quantity (0x80 = 50.00 %),
+        applied here to the axis that actually carries it; what 100 % means
+        physically is not established (the ECM never exceeds 224 = 87.5 %).
     confidence: verified
     evidence: >-
       Role verified from the code (call site 0x02DC34-46, wrapper 0x026A24,
       0x027114: a direct byte compare with the stack byte loaded from
-      0xFFFF118A); its physical unit is not established, so it is shown raw.
+      0xFFFF118A, whose writer is decoded in data/dids.yaml
+      ECM_FUEL_COMP_X_INPUT); its % scale is a display convention (decode).
       The code compares it byte for byte with 0xFFFF118A
       (mem:ECM_FUEL_COMP_X_INPUT, load-like, 0-218 on the 2026-10-04 drive),
       which makes it the column axis. UpRev's editor shows it as the rpm rows
@@ -632,7 +650,7 @@ tables:
       became k106 10 18 20 ... 90 ("800-7,200 rpm"), and UpRev moved the table
       rows with it (k106 rows 2, 4, 6 equal base rows 1, 2, 3). If the code
       is right, that edit compressed this load axis and shifted the rows along
-      rpm. Shown raw: no scale is established.
+      rpm.
   - id: load_point_scaler
     kind: load_point_scaler
     name: Load Point Scaler

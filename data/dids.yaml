@@ -1929,17 +1929,25 @@ memory:
           Sole writer FUN_0003c444 (store at 0x03C4BA), decoded 2026-10-04:
           X = w116A * (w1124/512 + w139E/2048), clamped to 0xFFFF, where
           w116A = 0xDC1D00 / clamp16(158 [cal 0x8D25] * rpm word 0xFFFF1210)
-          (so proportional to 1/rpm), w1124 = MAF airflow 0xFFFF2C32 (curve
-          0xDD94 of sensor word 0xFFFF2CC8 x 4, minus 0xFFFF63FC, floored at
-          0) or the cal constant 782 (0x90BE) when status bit 0xFFFF484E.2 is
-          set, and w139E an extra term (written at 0x06E2C4; not identified).
+          (so proportional to 1/rpm), w1124 = 0xFFFF2C32 (curve 0xDD94, 32
+          rising points, of 4 x 0xFFFF2CC8, minus 0xFFFF63FC, floored at 0) or
+          the cal constant 782 (0x90BE) when status bit 0xFFFF484E.2 is set,
+          and w139E an extra flow term (written at 0x06E2C4; not identified,
+          plausibly idle bypass). 0xFFFF2CC8 is selected (0x03F670, flag
+          0xFFFF28B5) from 0xFFFF2CCE -- the word Mode 01 PID 0x11 throttle
+          position reads -- or 0xFFFF2CD0, so w1124 is a throttle-derived flow,
+          not MAF (an earlier version of this note said MAF; wrong).
           The byte is then a two-segment 16-point curve of X (0xEAEC for X <
           0x3C00 using X*4, else 0xEACC using X - 0x3C00), >> 8: 5 at X=0,
           64, 109, 142, 162, 175, ... 205 at 0x3C00, saturating at 224. So it
-          is air per revolution (Qa/Ne, the quantity BFS is K times) through a
-          calibrated saturating curve: a normalised load, not a flow. Its
-          rate of change is stored at 0xFFFF114A. Open: what w139E is, and
-          the curve's physical scale.
+          is throttle flow per revolution through a saturating fill curve: an
+          alpha-N estimate of cylinder fill (linear while the throttle limits
+          flow, flat as manifold pressure nears ambient). On steady points of
+          the 2026-10-04 ram-study capture it tracks throttle/rpm (r=0.92)
+          and not MAF/rpm (r=0.36): at 3,684 rpm, 43 g/s and 18 % throttle it
+          read 51, the same as idle, where throttle/rpm is nearly equal. Its
+          rate of change is stored at 0xFFFF114A. Open: w139E, the units of
+          curve 0xDD94 and of 0xFFFF2CC8, hence any absolute scale.
   # Flag bytes: bit 0 of 0xFFFF2841 is the pedal-switch enrichment flag that
   # forces the Target AFR lookup to its last BFS column; a bit of 0xFFFF2842
   # selects between the two timing-trim tables (slot +0x020 / +0x120).

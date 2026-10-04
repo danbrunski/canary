@@ -281,7 +281,9 @@ def test_compare_known_answer_base_to_k106() -> None:
     ranges = result["ranges"]
     assert len(ranges) == 9
     assert {"Checksum sum word", "Checksum XOR word"} <= set(ranges[0]["labels"])
-    assert "Fuel Compensation flow axis (as the ECM reads it)" in ranges[1]["labels"]
+    assert (
+        "Fuel Compensation load axis (Volumetric Flow Ratio, throttle-based)" in ranges[1]["labels"]
+    )
     assert "Ignition timing trim A (Map 1)" in ranges[2]["labels"]
     assert "Fuel Targets (Map 1)" in ranges[3]["labels"]
     assert len(ranges[3]["cells"]) == 10

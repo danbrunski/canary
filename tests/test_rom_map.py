@@ -292,7 +292,15 @@ def test_slot_table_axes_are_the_ones_the_lookup_wrappers_search() -> None:
         50,
         "verified",
     )
-    assert (cols.offset, cols.confidence, cols.decode) == (0xCB29, "verified", None)
+    assert (cols.offset, cols.confidence) == (0xCB29, "verified")
+    # The load byte at UpRev's VFR scale (0x80 = 50 %): a display convention.
+    assert cols.decode is not None
+    assert (cols.decode.scale, cols.decode.unit, cols.decode.confidence) == (
+        0.390625,
+        "%",
+        "inferred",
+    )
+    assert cols.decode.apply(0x80) == pytest.approx(50.0)
     assert fuel_comp.decode is not None
     assert fuel_comp.decode.apply(132) == pytest.approx(103.125)  # UpRev showed 103.13
     assert fuel_comp.decode.apply(131) == pytest.approx(102.34375)  # and 102.34
