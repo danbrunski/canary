@@ -52,7 +52,7 @@ method that "doesn't cause git or updater problems".
   `models/` wholesale.
 - [x] **S03.6 Pi configuration.** `canary.pi.example.yaml` sets
   `daemon.state_dir: /data/canary`; docs and the updater's comments follow.
-- [ ] **S03.7 Migrate the dev Pi.** Move `data/control/*` and `models/<slug>` out
+- [x] **S03.7 Migrate the dev Pi.** Move `data/control/*` and `models/<slug>` out
   of the clone into `/data/canary`, set `state_dir`, deploy, and check
   `git status` is clean afterwards.
 
@@ -90,6 +90,18 @@ method that "doesn't cause git or updater problems".
   drops the per-field pins (`models_dir: models` would have won over it).
   `install_pi.sh` creates `control/` and `models/`. AGENTS.md and
   `docs/pi-setup.md` updated.
+- **S03.7** 2026-10-04 on the dev Pi (truck off, no capture): `canary-update`
+  to `09eae49` on the old config first, then with both services stopped,
+  `models/nissan-xterra-2008` → `/data/canary/models/`, the five
+  `data/control/nissan-xterra-2008/` files → `/data/canary/control/nissan-xterra-2008/`
+  (no collisions), the checkout's stray `audit.jsonl`/`control.token` →
+  `/data/canary/control/_from-checkout-2026-10-04/`, and the four daemon path
+  pins → `state_dir: /data/canary` (backup `/etc/canary/canary.yaml.bak-pre-s03`).
+  After the restart the daemon seeded `behavior_models.yaml` from the tracked
+  copy, loaded the same IF/LSTM versions from `/data/canary/models`, and
+  `git status --ignored` in the checkout shows only build caches.
+  `restart_canary.sh` brings back only `canary`, so `canary-mcp` needed a
+  separate `systemctl start` after the stop.
 
 ## Found along the way
 
