@@ -1,8 +1,10 @@
 """Read analog sensors through a USB serial ADC module.
 
 The module (``hardware.usb_adc``; first: a NOYITO 10-channel STM32F103 + CH340
-board) needs no commands: on power-up its stock firmware prints every input,
-every 0.5 s, as one text frame::
+board) needs no commands: on power-up it prints one text frame per period.
+The stock firmware prints every input every 0.5 s; CANary's own
+(``firmware/usb-adc``) prints only the configured inputs, averaged, at 100 Hz
+and without the volts column. This reads both::
 
     CH0:0477\t0.382V\r\n
     CH1:1513\t1.218V\r\n
@@ -10,8 +12,8 @@ every 0.5 s, as one text frame::
     CH9:2212\t1.782V\r\n
     \r\n
 
-Only the counts are used. The firmware's volts column assumes a nominal 3.3 V
-reference; the catalog (``data/usb_adc_sensors.yaml``) carries the measured
+Only the counts are used. The stock firmware's volts column assumes a nominal
+3.3 V reference; the catalog (``data/usb_adc_sensors.yaml``) carries the measured
 one. Each configured input becomes a ``sensor:<name>`` record stamped when its
 line arrived, or a ``sensor:<name>_FAULT`` state when the sensor is outside its
 valid window (:mod:`src.decode.analog_sensors`). The raw line rides along as

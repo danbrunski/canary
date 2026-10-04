@@ -6,7 +6,10 @@
 # Build and bring-up: docs/aem-fuel-pressure-analog-input.md.
 
 module:
-  device: NOYITO 10-channel 12-bit USB ADC (STM32F103C8T6 + CH340), stock firmware
+  # Running CANary's firmware (firmware/usb-adc): CH0 only, the mean of each
+  # 10 ms, at 100 Hz. Its counts at ACC matched the stock firmware's to 3
+  # counts (0.09 psi), so the constants below carry over unchanged.
+  device: NOYITO 10-channel 12-bit USB ADC (STM32F103x6 + CH340), firmware/usb-adc
   # The ADC's reference is the module's own 3.3 V regulator, so this is that
   # pin measured to GND with the module plugged into the Pi (DMM, 2026-10-03).
   # Re-measure if the module or the USB port powering it changes.

@@ -2,8 +2,8 @@
 
 How the AEM X-Series `30-0301` fuel pressure gauge's 0–5 V analog output
 reaches the Pi **today**, on HAT rev 2.0, through a NOYITO 10-channel
-STM32F103 + CH340 USB ADC module. Built, checked and recording as of
-2026-10-03: `sensor:FUEL_PRESSURE` in kPa (gauge pressure).
+STM32F103 + CH340 USB ADC module, running CANary's own 100 Hz firmware.
+Built and checked 2026-10-03/04: `sensor:FUEL_PRESSURE` in kPa (gauge pressure).
 
 > **This is not the rev 2.1 plan.** `CANary-HAT-Rev2.1.md` §13.5.4 routes the
 > same gauge into an ADS8688A at 0–5.12 V with **no divider at all**. That board
@@ -195,7 +195,7 @@ boost) are right to within ~1 % of the change either way.
 |---|---|
 | Config | `hardware.usb_adc` (`enabled`, `port`, `baudrate`, `stall_seconds`, `sensors`) |
 | Calibration | `data/usb_adc_sensors.yaml`: module reference, and per channel the input, divider, transfer, window, record unit and offset |
-| Code | `src/collection/usb_adc_collector.py` (serial, frame sync, records); `src/decode/analog_sensors.py` (catalog, counts → value, gate) |
+| Code | `src/collection/usb_adc_collector.py` (serial, frame sync, records); `src/decode/analog_sensors.py` (catalog, counts → value, gate); `firmware/usb-adc/` (the module's firmware) |
 | Channels | `sensor:FUEL_PRESSURE` (kPa); `sensor:FUEL_PRESSURE_FAULT` (`below_window`/`above_window`) |
 | Per record | metadata `adc_input`, `adc_counts`, `sensor_volts`; payload the raw `CHn:…` line, so a corrected constant can be re-applied to stored sessions |
 | Tests | `tests/test_usb_adc.py`, with the 2026-10-03 readings as known answers |
@@ -220,36 +220,35 @@ boost) are right to within ~1 % of the change either way.
 
 ## Firmware and sample rate
 
-**Stock firmware: 2 Hz, no commands.** Measured on the Pi: one frame of all ten
-inputs every 0.516 s. It answered nothing sent to it (`?`, `help`, `AT`, single
-bytes), matching the [ADC-10-F103C notes](https://github.com/swharden/ADC-10-F103C)
-("no configuration required"). A frame is ~172 bytes, 15 ms of wire time at
-115200 baud, so the firmware is idle ~97 % of the time. The rate is a delay in
-the firmware, not a limit of the link or the ADC.
+**The module runs CANary's own firmware since 2026-10-04: CH0 at 100 Hz**
+(`firmware/usb-adc/`, ~700 bytes). Each reading is the mean of every conversion
+in its 10 ms (~420), and the text format is the stock one minus the volts column,
+so the collector reads either firmware unchanged. At ACC with the gauge at 0 psi
+the two firmwares agreed to 3 counts (476.4 stock, 479.4 new; 0.09 psi), so the
+constants carried over. Noise fell from ±5 counts to ±1.5.
 
-2 Hz is enough for rail pressure at idle and cruise, but not to resolve sag
-through a WOT pull. **The only way to go faster is to replace the firmware.**
+**Why it was replaced.** The stock firmware printed all ten inputs every
+0.516 s and answered nothing sent to it (`?`, `help`, `AT`, single bytes;
+see also the [ADC-10-F103C notes](https://github.com/swharden/ADC-10-F103C)).
+A frame is 15 ms of wire time at 115200 baud, so the 2 Hz was a delay in the
+firmware, not a limit of the link or the ADC, and 2 Hz cannot resolve rail
+sag through a WOT pull.
 
-- **What is achievable.** The STM32F103's ADC does 1 MSPS. At 115200 baud an
-  8-byte `CH0:dddd\r\n` line allows ~1 kHz. A useful target is **CH0 only, 16×
-  oversampled, at 100 Hz**, in the **same text format**, so the collector
-  needs no change. Check the gauge first, though: its own analog output updates
-  at some rate of its own, and sampling faster than that only oversamples.
-- **How to flash it.** Either:
-  - the STM32's ROM UART bootloader through the module's own CH340, which needs
-    BOOT0 held high at reset and the CH340 wired to USART1 (PA9/PA10); or
-  - SWD with an ST-Link V2 clone, if the board breaks out SWDIO/SWCLK.
+**How it was flashed.** The board has a **BOOT0 jumper** (GND or 3V3). At 3V3
+the STM32's ROM bootloader answers on the same USB serial port, so
+`stm32flash` (installed on the Pi) needs no extra hardware. The chip identified
+as **STM32F103x6** (device ID `0x0412`, 32 KB flash, 10 KB RAM), not the C8 the
+listing claims. Read-out protection was off, so the stock image was read out
+first: `firmware/usb-adc/stock-noyito.bin`. Build, flash and restore steps are
+in `firmware/usb-adc/README.md`.
 
-  Either way, first read out the stock image (`stm32flash -r`, if read-out
-  protection is off) so the module can be put back.
-- **Not done yet.** Both routes need the board inspected for BOOT0 and SWD
-  access, and a flashing tool (`stm32flash`, or `openocd`/`st-flash`) that is
-  not installed on the laptop or the Pi. The laptop already has
-  `arm-none-eabi-gcc` to build the firmware.
+**What to check before going faster.** The gauge regenerates its analog output
+at some rate of its own. Sampling faster than that only oversamples. At 100 Hz,
+look at a WOT pull's trace for steps before raising `OUTPUT_HZ`.
 
 ## Status
 
-- [x] Module identified: NOYITO 10-ch, STM32F103C8T6 + CH340 (`1a86:7523`), 115200 baud, text frames at 2 Hz
+- [x] Module identified: NOYITO 10-ch, STM32F103x6 (ID 0x0412, not the listed C8) + CH340 (`1a86:7523`), 115200 baud, stock text frames at 2 Hz
 - [x] No onboard input network: gauge-side 0.574 V (DMM) vs 0.573 V from counts through the measured divider; a resistor at the pin would have to be ≳10 MΩ to hide in that 0.2 %
 - [x] Wire colours: WHITE +, BROWN − (operator, per the manual)
 - [x] Divider built and connected (R1 9.82k, R2 19.64k, 100 nF, no clamp)
@@ -260,4 +259,4 @@ through a WOT pull. **The only way to go faster is to replace the firmware.**
 - [x] Collector written: `sensor:FUEL_PRESSURE`, `sensor:FUEL_PRESSURE_FAULT`
 - [ ] Enabled in `/etc/canary/canary.yaml` on the Pi (`hardware.usb_adc`)
 - [ ] Offset settled with the sensor vented to atmosphere
-- [ ] Faster firmware (board inspection for BOOT0/SWD first)
+- [x] Faster firmware: `firmware/usb-adc`, 100 Hz, flashed 2026-10-04 via the BOOT0 jumper; stock image saved

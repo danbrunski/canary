@@ -341,7 +341,7 @@ class UsbAdcConfig(_Strict):
     #: One blocking read's limit; bounds shutdown latency.
     read_timeout_seconds: float = Field(default=1.0, gt=0.0, le=5.0)
     #: No parseable line for this long reopens the port. The stock firmware
-    #: sends every 0.5 s.
+    #: sends every 0.5 s, ``firmware/usb-adc`` every 10 ms.
     stall_seconds: float = Field(default=5.0, gt=0.0)
     sensors: Path = DATA_DIR / "usb_adc_sensors.yaml"
 

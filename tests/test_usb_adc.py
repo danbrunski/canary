@@ -137,6 +137,7 @@ def test_two_channels_on_one_input_are_refused() -> None:
 def test_parse_line() -> None:
     assert parse_line(b"CH0:0477\t0.382V") == (0, 477)
     assert parse_line(b"CH9:2212\t1.782V") == (9, 2212)
+    assert parse_line(b"CH0:2114") == (0, 2114)  # firmware/usb-adc: no volts column
     assert parse_line(b"0477\t0.382V") is None  # the tail of a line cut by the open
     assert parse_line(b"") is None
     assert parse_line(b"CH0:") is None

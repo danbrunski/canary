@@ -28,3 +28,11 @@ scripts/build_canable_fw.sh          # clones, builds, sha256-verifies vs this f
 ```
 
 Flash and full rationale: **`docs/canable-firmware.md`**.
+
+## `usb-adc/` — NOYITO USB ADC module (STM32F103x6 + CH340)
+
+CANary's own firmware for the analog-input module that reads the AEM fuel
+gauge: CH0 averaged over each 10 ms, printed at 100 Hz in the stock text
+format (the stock firmware is a fixed 2 Hz). Source, build, the BOOT0-jumper
+flashing procedure, and the stock image read out before the first flash
+(`usb-adc/stock-noyito.bin`) are in **`usb-adc/README.md`**.
