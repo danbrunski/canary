@@ -179,6 +179,16 @@ this truck:
   reads the last column. That flattens the base table's +5–8 % high-load,
   high-rpm enrichment to about +2 %, a plausible contributor to the WOT lean.
   Plan any Fuel Comp edit by the code's axes, not UpRev's labels.
+  **Reading UpRev's Fuel Comp view (operator check, 2026-10-04):**
+  - **The cells are right.** UpRev's 16 × 16 grid matched memory row for row,
+    256/256, with rows = rpm and columns = load.
+  - **The two axis lists are swapped.**
+    - Real rpm of row *i* = the "VFR %" label of column *i* × 128: 3.13 %
+      reads as 400 rpm, 50 % as 6,400 rpm.
+    - Real load of column *j* = the "RPM" label of row *j* ÷ 128 (as VFR %):
+      800 reads as 6.25 %, 12,750 as 99.6 %.
+  - **Edits:** to change Fuel Comp's load breakpoints in UpRev, edit its "RPM"
+    axis; to change rpm breakpoints, edit its "VFR" axis.
 - The RAM map-trace channels (`mem:ECM_FUEL_TARGET_MAP_X_TRACE`,
   `mem:ECM_ENGINE_SPEED_RAM`) are the ECM's *own* coordinates into the Target
   AFR table. The disassembly shows they are exactly the two inputs the code

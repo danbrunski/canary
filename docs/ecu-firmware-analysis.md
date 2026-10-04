@@ -125,6 +125,21 @@ UpRev's axis list at `0x0DE460` resolves to these four switchable maps, as axis 
 - `{0xCACD, 0xCB29}` Fuel Comp (probably `0xCACD` rpm, `0xCB29` VFR; see above);
 - `{0xCAE9, 0xE25E}` the `+0x260` map.
 
+### UpRev's Fuel Comp display, checked against memory
+
+The operator pasted UpRev's Map 1 Fuel Comp grid for the corrected
+`ZS44A-Tuned-20261004.OsirisROM`. It equals the decoded table at
+`0xE0660` **row-major, 256/256**; transposed, only 60/256 match.
+
+So UpRev's rows are the ECM's rpm rows and its columns are the load
+columns, and the cell values are where the code reads them. What UpRev gets
+wrong is which breakpoint list belongs to which axis:
+- the row axis, named "RPM", shows `0xCB29` × 50 (800–12,750);
+- the column axis, named "VFR %", shows `0xCACD` / 256 (3.13–50.00 %).
+
+The true values follow by swapping the two lists: row *i*'s rpm = column
+*i*'s "VFR %" × 128, and column *j*'s load = row *j*'s "RPM" ÷ 128 (as VFR %).
+
 ### UpRev's map selector
 
 | What | Confidence | Evidence |
