@@ -7,6 +7,8 @@
 import type {
   TyreAction,
   TyreStatus,
+  VehicleLedgerDraft,
+  VehicleLedgerEvent,
   AnomaliesResponse,
   BehaviorLiveResponse,
   BehaviorModelsResponse,
@@ -692,6 +694,36 @@ export function recordTyreEvent(
         pressure_psi: event.pressurePsi ?? null,
       },
     }),
+  });
+}
+
+/** `/control/vehicle-ledger` — every entry, oldest first. */
+export function getVehicleLedger(
+  token: string,
+  signal?: AbortSignal,
+): Promise<{ events: VehicleLedgerEvent[]; count: number }> {
+  return controlJson("/control/vehicle-ledger", token, { signal });
+}
+
+/** Add an entry, or (with `event_id`) replace that entry on disk: a typo or a
+ *  wrong reading is gone, not kept under its correction. */
+export function saveVehicleEvent(
+  token: string,
+  draft: VehicleLedgerDraft,
+): Promise<{ event: VehicleLedgerEvent }> {
+  return controlJson("/control/vehicle-ledger", token, {
+    method: "POST",
+    body: jsonBody(draft),
+  });
+}
+
+/** `DELETE /control/vehicle-ledger/{id}` — remove an erroneous entry outright. */
+export function deleteVehicleEvent(
+  token: string,
+  eventId: string,
+): Promise<{ deleted: { id: string; title: string } }> {
+  return controlJson(`/control/vehicle-ledger/${encodeURIComponent(eventId)}`, token, {
+    method: "DELETE",
   });
 }
 

@@ -745,9 +745,9 @@ def _register_write_tools(
         it (``--since-boundary``).
 
         Pass ``event_id`` (from `list_vehicle_events`) to CORRECT an existing
-        entry: the ledger is append-only and reads collapse to the latest
-        line per id, so the correction wins while the original stays on
-        disk. Re-state the whole event, not just the changed field.
+        entry: the correction replaces it on disk, and the original is gone.
+        Re-state the whole event, not just the changed field. Removing an
+        entry outright is ``DELETE /control/vehicle-ledger/{id}``.
 
         ``tyres`` records a tyre fact the tyre-wear trend reads:
         ``{"action": "tread_measured", "tread_depth_mm": 9.5}`` (a gauge

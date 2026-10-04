@@ -67,11 +67,10 @@ def test_post_and_get_vehicle_ledger(tmp_path: Path) -> None:
 
 
 def test_event_id_corrects_in_place(tmp_path: Path) -> None:
-    """Re-posting under an existing id supersedes it without losing the original.
+    """Re-posting under an existing id replaces it, on disk as well as in reads.
 
-    The store is append-only and reads collapse to the latest line per id, but
-    nothing exposed that through the API — correcting a typo'd entry meant
-    hand-appending JSON to the ledger file over ssh.
+    Correcting a typo'd entry once meant hand-appending JSON over ssh, and an
+    erroneous reading kept under its correction meant cutting it out by hand.
     """
     client, store = _client(tmp_path)
     first = client.post(
@@ -108,8 +107,31 @@ def test_event_id_corrects_in_place(tmp_path: Path) -> None:
     assert listed["events"][0]["details"] == "corrected"
     assert listed["events"][0]["corpus_boundary"] is True
 
-    # The superseded line is still on disk — corrections amend the view, not history.
-    assert len(list(store.raw_records())) == 2
+    # The erroneous version is gone from disk, not superseded.
+    assert len(list(store.raw_records())) == 1
+    assert "typo'd" not in store.path.read_text()
+
+
+def test_delete_removes_an_entry_and_audits_only_its_name(tmp_path: Path) -> None:
+    client, store = _client(tmp_path)
+    posted = client.post(
+        "/control/vehicle-ledger",
+        headers=_auth(),
+        json={
+            "occurred_at": "2026-10-04",
+            "kind": "maintenance",
+            "title": "Tread depth gauge reading: 15.0 mm",
+            "tyres": {"action": "tread_measured", "tread_depth_mm": 15.04},
+        },
+    ).json()["event"]
+    assert client.delete(f"/control/vehicle-ledger/{posted['id']}").status_code == 401
+    resp = client.delete(f"/control/vehicle-ledger/{posted['id']}", headers=_auth())
+    assert resp.status_code == 200
+    assert resp.json()["deleted"] == {"id": posted["id"], "title": posted["title"]}
+    assert store.records() == []
+    assert "15.04" not in store.path.read_text()
+    missing = client.delete(f"/control/vehicle-ledger/{posted['id']}", headers=_auth())
+    assert missing.status_code == 404
 
 
 def test_invalid_kind_rejected(tmp_path: Path) -> None:

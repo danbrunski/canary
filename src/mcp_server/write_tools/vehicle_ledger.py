@@ -52,9 +52,8 @@ async def record_vehicle_event(
         (see ``--since-boundary`` on ``scripts/retrain.py`` /
         ``scripts/refit_behavior_models.py``).
     event_id:
-        Correct an existing entry by re-stating it under that id. The store
-        is append-only and keeps the latest line per id, so the original
-        stays on disk while reads see the correction. Pass the id from
+        Correct an existing entry by re-stating it under that id; the
+        correction replaces the original on disk. Pass the id from
         ``list_vehicle_events``; omit it for a new event.
     tyres:
         A tyre fact the tyre-wear trend reads: ``{"action": "tread_measured",

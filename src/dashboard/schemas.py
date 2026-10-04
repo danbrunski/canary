@@ -137,11 +137,10 @@ class VehicleEventRequest(_ControlRequest):
     odometer_km: float | None = None
     affected_channels: list[str] = Field(default_factory=list)
     corpus_boundary: bool = False
-    #: Correct an existing entry by re-stating it under the same id. The
-    #: ledger is append-only and ``VehicleLedgerStore.records`` keeps the
-    #: latest line per id, so a correction supersedes without losing the
-    #: original — but nothing exposed that, and fixing a typo'd entry meant
-    #: hand-appending JSON over ssh. Omit for a new event.
+    #: Correct an existing entry by re-stating it under the same id: the
+    #: correction replaces it on disk (``VehicleLedgerStore.replace``), so a
+    #: typo or wrong reading is gone rather than superseded. Omit for a new
+    #: event; ``DELETE /control/vehicle-ledger/{id}`` removes one outright.
     event_id: str | None = None
     #: A tyre fact (gauge tread depth, rotation, replacement, pressure) the
     #: tyre-wear trend reads; validated by ``TyreRecord``.

@@ -38,31 +38,71 @@ def test_record_append_and_list_round_trip(tmp_path: Path) -> None:
     assert records[1].affected_channels == ["obd:MAF"]
 
 
-def test_correction_appends_new_line_but_collapses_by_id(tmp_path: Path) -> None:
-    """A relabel/correction is just another append with the same id —
-    JSONL append-only semantics: no rewrite of prior entries."""
+def test_a_correction_replaces_the_entry_on_disk(tmp_path: Path) -> None:
+    """2026-10-04: a mis-measured tread depth stayed in the file under its
+    correction and had to be cut out by hand. A correction now replaces it."""
     path = tmp_path / "ledger.jsonl"
     store = VehicleLedgerStore(path)
     event = store.record(occurred_at=date(2026, 1, 1), kind="observation", title="Rough idle")
+    other = store.record(occurred_at=date(2026, 1, 2), kind="maintenance", title="Oil change")
     store.record(
         occurred_at=date(2026, 1, 1),
         kind="observation",
         title="Rough idle — corrected: was actually a vacuum leak",
         event_id=event.id,
     )
-    # Two lines on disk (no rewrite of the first).
-    lines = path.read_text().strip().splitlines()
-    assert len(lines) == 2
-    # Full chain preserved.
-    raw = store.raw_records()
-    assert len(raw) == 2
-    assert raw[0].title == "Rough idle"
-    # Latest-by-id collapses to the correction.
-    records = store.records()
-    assert len(records) == 1
-    assert records[0].title.startswith("Rough idle — corrected")
-    assert store.get(event.id) is not None
-    assert store.get(event.id).title.startswith("Rough idle — corrected")  # type: ignore[union-attr]
+    assert 'Rough idle"' not in path.read_text(), "the erroneous version is gone"
+    assert len(store.raw_records()) == 2
+    assert [r.title for r in store.records()] == [
+        "Rough idle — corrected: was actually a vacuum leak",
+        "Oil change",
+    ]
+    assert store.get(other.id) == other
+
+
+def test_remove_deletes_every_line_for_the_id_and_nothing_else(tmp_path: Path) -> None:
+    path = tmp_path / "ledger.jsonl"
+    store = VehicleLedgerStore(path)
+    wrong = store.record(occurred_at=date(2026, 10, 4), kind="maintenance", title="0.592 in")
+    kept = store.record(occurred_at=date(2026, 10, 4), kind="maintenance", title="0.475 in")
+    # A file written before replace existed can hold two lines for one id,
+    # and a torn line must survive an edit of something else.
+    with path.open("a") as handle:
+        handle.write(wrong.model_copy(update={"title": "0.59 in"}).model_dump_json() + "\n")
+        handle.write('{"torn": \n')
+    removed = store.remove(wrong.id)
+    assert removed is not None and removed.title == "0.59 in"
+    text = path.read_text()
+    assert "0.59" not in text
+    assert '{"torn": ' in text
+    assert store.records() == [kept]
+    assert store.remove(wrong.id) is None
+
+
+def test_replace_and_append_share_one_lock_per_file(tmp_path: Path) -> None:
+    """Every store instance on a file serializes on one lock, so a rewrite
+    cannot drop a concurrent append (the DTC auto-append builds its own store)."""
+    import threading
+
+    path = tmp_path / "ledger.jsonl"
+    first = VehicleLedgerStore(path)
+    target = first.record(occurred_at=date(2026, 1, 1), kind="observation", title="x")
+
+    def appender() -> None:
+        store = VehicleLedgerStore(path)
+        for n in range(50):
+            store.record(occurred_at=date(2026, 1, 2), kind="dtc", title=f"P{n:04d}")
+
+    thread = threading.Thread(target=appender)
+    thread.start()
+    for n in range(50):
+        first.record(
+            occurred_at=date(2026, 1, 1), kind="observation", title=f"x{n}", event_id=target.id
+        )
+    thread.join()
+    titles = [r.title for r in first.records()]
+    assert titles.count("x49") == 1
+    assert sum(t.startswith("P") for t in titles) == 50
 
 
 def test_get_unknown_id_returns_none(tmp_path: Path) -> None:

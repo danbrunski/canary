@@ -26,6 +26,7 @@ export type WorkbenchItem =
   | "diag-trends"
   | "diag-explore"
   | "diag-tpms"
+  | "diag-ledger"
   | "diag-llm-assist"
   | "models-overview"
   | "models-behavior"

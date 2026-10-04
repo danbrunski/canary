@@ -38,6 +38,7 @@ export const NAV: NavGroupDef[] = [
       { id: "diag-monitors", label: "Monitors", group: "diagnose" },
       { id: "diag-trends", label: "Drift Trends", group: "diagnose" },
       { id: "diag-tpms", label: "Tyres", group: "diagnose" },
+      { id: "diag-ledger", label: "Vehicle Ledger", group: "diagnose" },
       { id: "diag-llm-assist", label: "LLM Assist", group: "diagnose" },
       { id: "diag-explore", label: "Explore", group: "diagnose" },
     ],

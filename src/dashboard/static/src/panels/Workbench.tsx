@@ -52,6 +52,7 @@ import { TripPanel } from "./TripPanel";
 import { TuningPanel } from "./TuningPanel";
 import { TpmsPanel } from "./TpmsPanel";
 import { TreadWearCard } from "./TreadWearCard";
+import { VehicleLedgerPage } from "./VehicleLedgerPage";
 import { RomMapsPanel } from "./RomMapsPanel";
 import { AnalysisPage } from "./tuning/AnalysisPage";
 import { LoggingPage } from "./tuning/LoggingPage";
@@ -173,6 +174,8 @@ function renderItem(
           <TreadWearCard token={d.token} />
         </>
       );
+    case "diag-ledger":
+      return <VehicleLedgerPage token={d.token} />;
     case "models-overview":
       return <ModelPanel status={d.status} events={d.events} />;
     case "models-behavior":

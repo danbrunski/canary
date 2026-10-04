@@ -98,4 +98,18 @@ def build_router(ctx: ControlContext) -> APIRouter:
         publish_control_event("vehicle_ledger.record", "ok", event.to_dict())
         return {"event": event.to_dict()}
 
+    @router.delete("/control/vehicle-ledger/{event_id}")
+    def delete_vehicle_ledger(event_id: str) -> dict[str, Any]:
+        """Remove an entry outright: a typo'd or erroneous record (2026-10-04).
+
+        The audit names what was removed, not its content: an erroneous
+        reading kept in the audit log would be the copy this exists to stop.
+        """
+        removed = _vehicle_ledger().remove(event_id)
+        if removed is None:
+            raise HTTPException(status_code=404, detail=f"no vehicle ledger entry {event_id}")
+        summary = {"id": removed.id, "title": removed.title}
+        publish_control_event("vehicle_ledger.delete", "ok", summary)
+        return {"deleted": summary}
+
     return router

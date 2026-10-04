@@ -1140,6 +1140,14 @@
     {
       "auth": "control",
       "body": false,
+      "method": "DELETE",
+      "path": "/control/vehicle-ledger/{event_id}",
+      "query": [],
+      "status_code": null
+    },
+    {
+      "auth": "control",
+      "body": false,
       "method": "GET",
       "path": "/control/version",
       "query": [],
