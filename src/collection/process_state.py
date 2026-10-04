@@ -34,6 +34,7 @@ from src.collection import (
     tuning_profile,
     tx_gate,
 )
+from src.collection.kline.actions import KLINE_ACTIONS
 from src.collection.kline.sessions import MODULE_SESSIONS
 
 #: Every collection module holding process-global state this function resets,
@@ -45,6 +46,7 @@ COVERED_MODULES: frozenset[str] = frozenset(
         "capture_lifetime.py",
         "capture_profiles.py",
         "discovery.py",
+        "kline/actions.py",
         "kline/sessions.py",
         "queueing.py",
         "tuning_profile.py",
@@ -61,6 +63,7 @@ COVERED_GLOBALS: frozenset[tuple[str, str]] = frozenset(
         ("capture_lifetime.py", "_ledger"),
         ("capture_profiles.py", "_SHADOW_WARNED"),
         ("discovery.py", "_remembered"),
+        ("kline/actions.py", "KLINE_ACTIONS"),
         ("kline/sessions.py", "MODULE_SESSIONS"),
         ("queueing.py", "_CAN_FRAME_DROP_LOGS"),
         ("queueing.py", "_UNATTRIBUTED_QUEUE_DROPS"),
@@ -88,6 +91,7 @@ def reset_process_state_for_tests() -> None:
     discovery.reset_discovery()
     queueing._reset_for_tests()
     MODULE_SESSIONS.reset()
+    KLINE_ACTIONS.reset()
     capture_lifetime._reset_for_tests()
     capture_generation._reset_for_tests()
     capture_profiles._reset_for_tests()

@@ -117,6 +117,13 @@ class KlineActions:
             if self._running is action:
                 self._running = None
 
+    def reset(self) -> None:
+        """Back to start-up: no collector, nothing queued (tests only)."""
+        with self._lock:
+            self._queued = None
+            self._running = None
+            self._collectors = 0
+
     # -- the control route's side
 
     @property
