@@ -3770,7 +3770,7 @@
       "--threshold": {
         "action": "_StoreAction",
         "choices": null,
-        "default": 2.0,
+        "default": 1.5,
         "dest": "threshold",
         "nargs": null,
         "option_strings": [
