@@ -17,6 +17,7 @@ commit, screenshot, or measurement), `[~]` for partial with the remainder named.
 | [W05](W05-rom-maps-trace-coverage.md) | ECM-coordinate trace, coverage overlay | W7, W8 | final check only |
 | [W06](archive/W06-calibration-page.md) ✅ | flash history, memory-channel state, re-verify | W9 | final check only |
 | [W07](archive/W07-flash-interlocks.md) ✅ | the two AGENTS.md conditions as server-side code | W11 | no |
+| [W08](W08-rom-library.md) | ROM library, memory map, compare, ECU backup (read-only) | operator request 2026-10-04 | W08.9 only (KOEO) |
 
 ✅ complete and moved to [`archive/`](archive/). W02 and W05 stay live: each
 has one item that needs the truck (W02.1 KOEO probe; W05.1 X-trace mapping,
