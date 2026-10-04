@@ -46,7 +46,7 @@ observation. **Inferred** means strong evidence, not yet confirmed.
 | Start-up: if the magic is absent, initialise the block and copy slot 1 | `0x0DE1A4` | Verified | Same literals, plus a 0x200-word copy. It also writes `0x15`/`0x55`/`0x15` to 16-bit registers at `0xFFFFF73A`, whose meaning is unknown. |
 | Nissan's Target AFR table pointer redirected to the RAM copy | literal `0x055EC4` = `0xFFFFB260` | Verified | `0xFFFFB040 + 0x220`. The calibration's own table at `0x00A169` is no longer referenced. |
 | The active map number is readable as RAM byte `0xFFFFB008` | — | Inferred | It is the routine's own record of the selected slot. Not yet a CANary channel, so verify before adding one. |
-| A list of axis addresses for UpRev's switchable tables | `0x0DE460` | Inferred | `0xCC83, 0xCC93, 0xC894, 0xCAA5, 0xCACD, 0xCB29, 0xE25E, 0xCAE9`. These include the Target AFR axes and the Fuel Comp rpm axis; the rest are not yet identified. |
+| A list of axis addresses for UpRev's switchable tables | `0x0DE460` | Inferred | `0xCC83, 0xCC93, 0xC894, 0xCAA5, 0xCACD, 0xCB29, 0xE25E, 0xCAE9`. These include the Target AFR axes and both Fuel Comp axes (see "Map-slot tables"). |
 
 ### 1-D curves
 
@@ -112,17 +112,17 @@ Applied to `data/dids.yaml` on 2026-10-04 (roadmap D03.36): `ECM_VEHICLE_SPEED_C
 
 | Slot offset (RAM) | Table | Confidence | Evidence |
 |---|---|---|---|
-| `+0x020` (`0xFFFFB060`) and `+0x120` (`0xFFFFB160`) | **Ignition timing trims**, two 16 × 16 tables. Their axes are BFS-X counts (`0xCC93`) × rpm (`0xCC83`), and cells are read masked with `& 0x7F`. A flag bit at `0xFFFF2842` chooses between them. | Verified location; the Main / High Det roles are inferred | The readers of both tables, and the flag gating. The `+0x09C` cells k106 changed are **inside** the `+0x020` table (cell `0x7C`), not a separate table. |
+| `+0x020` (`0xFFFFB060`) and `+0x120` (`0xFFFFB160`) | **Ignition timing trims**, two 16 × 16 tables. Their axes are rpm (`0xCC93`, raw × 50 = 400–6,000 rpm) × BFS-X counts (`0xCC83`, 8–128), and cells are read masked with `& 0x7F`. (Corrected 2026-10-04: an earlier version swapped the two axes. canary-60 found it from the wrapper's register use, and the axis contents agree.) A flag bit at `0xFFFF2842` chooses between them. | Verified location; the Main / High Det roles are inferred | The readers of both tables, and the flag gating. The `+0x09C` cells k106 changed are **inside** the `+0x020` table (cell `0x7C`), not a separate table. |
 | `+0x220` (`0xFFFFB260`) | Target AFR, 8 × 8 | Verified | As above. |
 | `+0x260` (`0xFFFFB2A0`) | A 16-bit-valued map on the axes `0xCAE9` (rpm-like) and `0xE25E` (16-bit). It is the most-read switchable map, with at least 21 readers. | Location verified; identity unknown | Candidates: cam phasing, or electronic throttle / torque. |
-| `+0x660` (`0xFFFFB6A0`) | **Fuel Compensation**, 16 × 16 (`+0x660–0x75F`). Its x-axis is `0xCACD` (Volumetric Flow Ratio) and its rpm axis is `0xCB29`. | Verified | Readers at `0x02D5F4` and `0x03C4D0`. The base is `+0x660`; the diff only showed changed cells from about `+0x670`. |
+| `+0x660` (`0xFFFFB6A0`) | **Fuel Compensation**, 16 × 16 (`+0x660–0x75F`). Axes: **probably rpm = `0xCACD`** (raw × 50 = 400–6,400) and **Volumetric Flow Ratio = `0xCB29`**, compared bytewise with `0xFFFF118A`. That is the **reverse** of UpRev's editor labels and of this doc's earlier version. | Location verified; axis roles inferred, pending a live check | Both readers' literal pools load `0xCACD` then `0xCB29` (`0x02DEB0`/`B4`, `0x03D18C`/`90`), the same order the Target AFR reader uses (rpm axis, then load axis). The wrapper `0x026A24` passes the first to the rpm search and the second to the bytewise search (canary-60, 2026-10-04). Stock `0xCB29` runs to `0xFF`, which would be 12,750 rpm at × 50, impossible for this engine. **So the k105/k106 "rpm axis rescale 800–12,750 → 800–7,200" most likely compressed the load axis**: VFR inputs above 144 now clamp to the last column. On the 2026-10-04 drive the input reached 218. |
 | `+0x760` | Load Point Scaler copy (44019) | Verified (bytes) | See above. |
 | `+0x762` (`0xFFFFB7A2`) | **K**, big-endian 16-bit, multiplied into the air-charge accumulator: Tp = K · Qa / Ne. | Verified | The read at `0x03C6E0` inside `0x03C4D0`. It holds 28,715 in all five slots, and the base value 27,089 is in the ratio 1.0600. |
 
 UpRev's axis list at `0x0DE460` resolves to these four switchable maps, as axis pairs:
-- `{0xCC83, 0xCC93}` timing trims;
+- `{0xCC83, 0xCC93}` timing trims (`0xCC93` rpm, `0xCC83` BFS-X);
 - `{0xC894, 0xCAA5}` Target AFR;
-- `{0xCACD, 0xCB29}` Fuel Comp;
+- `{0xCACD, 0xCB29}` Fuel Comp (probably `0xCACD` rpm, `0xCB29` VFR; see above);
 - `{0xCAE9, 0xE25E}` the `+0x260` map.
 
 ### UpRev's map selector

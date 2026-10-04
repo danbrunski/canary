@@ -168,11 +168,17 @@ this truck:
   - while it was set, commanded φ read exactly 1.1640625, the last-column
     value, even though BFS sat mid-table.
 - **Fuel Compensation** is the second fuel table: 16 × 16 at slot `+0x660`.
-  Its x-axis is "Volumetric Flow Ratio" % (`0xCACD`, raw `08…80`) and its rpm
-  axis is `0xCB29` (raw × 50 = 800–7,200 rpm). The layout is code-verified.
-  Its x input is RAM byte `0xFFFF118A` (inferred from the reader at
-  `0x03C4D0`). That isn't a CANary channel yet, so don't place an operating
-  point on this table until it is verified.
+  **Its axes are probably the reverse of UpRev's labels** (firmware, 2026-10-04):
+  - rpm is `0xCACD` (raw × 50 = 400–6,400);
+  - "Volumetric Flow Ratio" is `0xCB29`, compared with RAM byte `0xFFFF118A`
+    (`mem:ECM_FUEL_COMP_X_INPUT`, a load-like quantity that reached 218 on a
+    drive).
+
+  Stock `0xCB29` ran to `0xFF`, which would be 12,750 rpm as rpm. So the k105
+  "rpm axis 800–12,750 → 800–7,200" edit most likely compressed the **load**
+  axis, and VFR above 144 now clamps to the last column. **Don't plan a Fuel
+  Comp edit (N01.1's cruise block) by UpRev's row and column labels until a
+  live check settles which axis is which.**
 - The RAM map-trace channels (`mem:ECM_FUEL_TARGET_MAP_X_TRACE`,
   `mem:ECM_ENGINE_SPEED_RAM`) are the ECM's *own* coordinates into the Target
   AFR table. The disassembly shows they are exactly the two inputs the code
@@ -236,10 +242,10 @@ this truck:
 
   | Offset | Table |
   |---|---|
-  | `+0x020` and `+0x120` | two 16 × 16 **timing trims** (BFS-X × rpm, cells masked `& 0x7F`; a flag at `0xFFFF2842` picks one, likely Main vs High Det) |
+  | `+0x020` and `+0x120` | two 16 × 16 **timing trims** (rpm `0xCC93` × BFS-X `0xCC83`, cells masked `& 0x7F`; a flag at `0xFFFF2842` picks one, likely Main vs High Det) |
   | `+0x220` | Target AFR, 8 × 8 |
   | `+0x260` | a heavily used 16-bit map whose identity is still unknown |
-  | `+0x660` | **Fuel Comp**, 16 × 16 (Volumetric Flow Ratio `0xCACD` × rpm `0xCB29`) |
+  | `+0x660` | **Fuel Comp**, 16 × 16 (probably rpm `0xCACD` × VFR `0xCB29`, the reverse of UpRev's labels; see above) |
   | `+0x760` | Load Point Scaler |
   | `+0x762` | **K**, big-endian 16-bit, multiplied into Tp = K · Qa / Ne |
 
