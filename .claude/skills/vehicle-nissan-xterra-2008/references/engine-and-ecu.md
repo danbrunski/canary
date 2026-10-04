@@ -168,17 +168,17 @@ this truck:
   - while it was set, commanded φ read exactly 1.1640625, the last-column
     value, even though BFS sat mid-table.
 - **Fuel Compensation** is the second fuel table: 16 × 16 at slot `+0x660`.
-  **Its axes are probably the reverse of UpRev's labels** (firmware, 2026-10-04):
-  - rpm is `0xCACD` (raw × 50 = 400–6,400);
-  - "Volumetric Flow Ratio" is `0xCB29`, compared with RAM byte `0xFFFF118A`
-    (`mem:ECM_FUEL_COMP_X_INPUT`, a load-like quantity that reached 218 on a
-    drive).
+  **UpRev's editor labels its axes the wrong way round**; this is verified from
+  the code (2026-10-04, `docs/ecu-firmware-analysis.md`):
+  - **rpm** is `0xCACD`, which UpRev calls "VFR": raw × 50 = 400–6,400 rpm.
+  - **Load** is `0xCB29`, which UpRev calls "RPM": raw 16…255, compared with
+    RAM byte `0xFFFF118A` (`mem:ECM_FUEL_COMP_X_INPUT`).
 
-  Stock `0xCB29` ran to `0xFF`, which would be 12,750 rpm as rpm. So the k105
-  "rpm axis 800–12,750 → 800–7,200" edit most likely compressed the **load**
-  axis, and VFR above 144 now clamps to the last column. **Don't plan a Fuel
-  Comp edit (N01.1's cruise block) by UpRev's row and column labels until a
-  live check settles which axis is which.**
+  The k105 "rpm axis 800–12,750 → 800–7,200" edit therefore compressed the
+  **load** axis to 16–144. Load above 144 (25 % of a 2026-10-04 drive) now
+  reads the last column. That flattens the base table's +5–8 % high-load,
+  high-rpm enrichment to about +2 %, a plausible contributor to the WOT lean.
+  Plan any Fuel Comp edit by the code's axes, not UpRev's labels.
 - The RAM map-trace channels (`mem:ECM_FUEL_TARGET_MAP_X_TRACE`,
   `mem:ECM_ENGINE_SPEED_RAM`) are the ECM's *own* coordinates into the Target
   AFR table. The disassembly shows they are exactly the two inputs the code
@@ -190,9 +190,12 @@ this truck:
   Interpolation is bilinear, clamped at the edges.
   `X = min(255, BFS × 128 / 44019)`, where 44019 is UpRev's **Load Point
   Scaler** (at `0x9416`, with a copy in each slot at `+0x760`). One X count is
-  0.1685 ms. Both axis mappings are code-verified (W05.1);
-  `src.analysis.rom_trace` still refuses the BFS axis until its data is
-  updated.
+  0.1685 ms. Both axis mappings are code-verified (W05.1) and recorded in
+  `rom_viewer.yaml`: the X byte's raw count (catalog decode undone) against
+  the raw axis bytes, rpm against the rpm axis, clamped at the edges. The ROM
+  Maps page and the cell-residency endpoint now place the ECM cell. While the
+  pedal-switch enrichment flag is set the ECM reads the last load column but
+  the X byte keeps its BFS value, so the ECM cell sits off the column read.
 
 ## Spark and knock on this ECM
 
@@ -245,7 +248,7 @@ this truck:
   | `+0x020` and `+0x120` | two 16 × 16 **timing trims** (rpm `0xCC93` × BFS-X `0xCC83`, cells masked `& 0x7F`; a flag at `0xFFFF2842` picks one, likely Main vs High Det) |
   | `+0x220` | Target AFR, 8 × 8 |
   | `+0x260` | a heavily used 16-bit map whose identity is still unknown |
-  | `+0x660` | **Fuel Comp**, 16 × 16 (probably rpm `0xCACD` × VFR `0xCB29`, the reverse of UpRev's labels; see above) |
+  | `+0x660` | **Fuel Comp**, 16 × 16 (rpm `0xCACD` × load `0xCB29`, the reverse of UpRev's labels, verified from code) |
   | `+0x760` | Load Point Scaler |
   | `+0x762` | **K**, big-endian 16-bit, multiplied into Tp = K · Qa / Ne |
 
