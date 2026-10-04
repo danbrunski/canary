@@ -115,7 +115,7 @@ Applied to `data/dids.yaml` on 2026-10-04 (roadmap D03.36): `ECM_VEHICLE_SPEED_C
 | `+0x020` (`0xFFFFB060`) and `+0x120` (`0xFFFFB160`) | **Ignition timing trims**, two 16 × 16 tables. Their axes are rpm (`0xCC93`, raw × 50 = 400–6,000 rpm) × BFS-X counts (`0xCC83`, 8–128), and cells are read masked with `& 0x7F`. (Corrected 2026-10-04: an earlier version swapped the two axes. canary-60 found it from the wrapper's register use, and the axis contents agree.) A flag bit at `0xFFFF2842` chooses between them. | Verified location; the Main / High Det roles are inferred | The readers of both tables, and the flag gating. The `+0x09C` cells k106 changed are **inside** the `+0x020` table (cell `0x7C`), not a separate table. |
 | `+0x220` (`0xFFFFB260`) | Target AFR, 8 × 8 | Verified | As above. |
 | `+0x260` (`0xFFFFB2A0`) | A 16-bit-valued map on the axes `0xCAE9` (rpm-like) and `0xE25E` (16-bit). It is the most-read switchable map, with at least 21 readers. | Location verified; identity unknown | Candidates: cam phasing, or electronic throttle / torque. |
-| `+0x660` (`0xFFFFB6A0`) | **Fuel Compensation**, 16 × 16 (`+0x660–0x75F`). Axes: **rpm = `0xCACD`** (raw × 50 = 400–6,400) and **load ("Volumetric Flow Ratio") = `0xCB29`**, compared bytewise with `0xFFFF118A`. **UpRev's editor labels them the other way round.** | Verified from code (2026-10-04) | Call site `0x02DC34–0x02DC46`: r4 = table `0xFFFFB6A0`, r5 = `0xCACD`, r6 = `0xCB29`, r7 = engine-speed word `0xFFFF1210` (the PID 0x0C rpm word), stack byte = `0xFFFF118A`. Wrapper `0x026A24` searches r5's axis with r7 through `0x027194` (axis byte `shll2`, compared with the word: the rpm search), and r6's axis with the byte through `0x027114` (a direct byte compare: the load search), then interpolates through `0x026F40`. It is the Target AFR wrapper `0x0269AC` instruction for instruction, apart from the table size, and that mapping is verified on live data (W05.1). Stock `0xCB29` runs 16…255, the full range of a load byte (12,750 "rpm" in UpRev's display). **The k105/k106 "rpm axis 800–12,750 → 800–7,200" edit compressed the load axis to 16–144**: 25 % of the 2026-10-04 drive's samples (up to 218) now read the last column. |
+| `+0x660` (`0xFFFFB6A0`) | **Fuel Compensation**, 16 × 16 (`+0x660–0x75F`). Axes: **rpm = `0xCACD`** (raw × 50 = 400–6,400) and **load ("Volumetric Flow Ratio") = `0xCB29`**, compared bytewise with `0xFFFF118A`. **UpRev's editor labels them the other way round.** | Verified from code (2026-10-04) | Call site `0x02DC34–0x02DC46`: r4 = table `0xFFFFB6A0`, r5 = `0xCACD`, r6 = `0xCB29`, r7 = engine-speed word `0xFFFF1210` (the PID 0x0C rpm word), stack byte = `0xFFFF118A`. Wrapper `0x026A24` searches r5's axis with r7 through `0x027194` (axis byte `shll2`, compared with the word: the rpm search), and r6's axis with the byte through `0x027114` (a direct byte compare: the load search), then interpolates through `0x026F40`. It is the Target AFR wrapper `0x0269AC` instruction for instruction, apart from the table size, and that mapping is verified on live data (W05.1). Stock `0xCB29` runs 16…255, the full range of a load byte (12,750 "rpm" in UpRev's display). **The k105/k106 "rpm axis 800–12,750 → 800–7,200" edit compressed the load axis to 16–144**: 25 % of the 2026-10-04 drive's samples (up to 218) read the last column. **ZS44A-20261004 restored the axis to 16…255** and slot-1 cells to base (flashed 2026-10-04 23:02Z; read back byte-exact). |
 | `+0x760` | Load Point Scaler copy (44019) | Verified (bytes) | See above. |
 | `+0x762` (`0xFFFFB7A2`) | **K**, big-endian 16-bit, multiplied into the air-charge accumulator: Tp = K · Qa / Ne. | Verified | The read at `0x03C6E0` inside `0x03C4D0`. It holds 28,715 in all five slots, and the base value 27,089 is in the ratio 1.0600. |
 
@@ -176,7 +176,42 @@ every 5 s, about 190 samples of each). Pairing used acquisition time.
 | Pedal-switch flag: bit 0 of `0xFFFF2841` sets near full pedal and forces Target AFR's last load column | Set on 2 samples, at broadcast pedal 4.285 V and 4.582 V (full scale 4.58 V). Never set at or below 3.795 V, the highest pedal seen while it was clear. While set, the commanded φ RAM word read **exactly 1.1640625** (`0x95/128`, the last-column value) while the X trace sat mid-table (~100 counts). | **Confirmed live.** The threshold lies between 3.80 and 4.29 V, which fits the 2026-09-18 data figure of ≥ ~227/255. |
 | Timing-trim select flag at `0xFFFF2842` | Constant 4 (bit 2) all drive | Steady; which value selects which trim is still unconfirmed |
 | `X = floor(BFS × 128 / 44019)` | 168 of 194 same-read pairs exact. The rest are within ±1–4 counts, **both signs**, at transients. | Formula **confirmed**. The misses fit the two words being updated at different points in the ECM's loop, not a wrong formula. (P02.14's 1,564 of 1,564 came from a capture with steadier conditions.) |
-| Fuel Comp x input at `0xFFFF118A` is a load-like quantity | Tracks BFS (r = 0.98 against DID `0x1208`, 0.89 against the RAM word). It is not a fixed scaling: the per-sample ratio to BFS/256 spreads from 1.43 to 2.85, and a straight-line fit has a +28 intercept. | Load-like, as the "Volumetric Flow Ratio" axis name says. Its exact definition is still open. |
+| Fuel Comp x input at `0xFFFF118A` is a load-like quantity | Tracks BFS (r = 0.98 against DID `0x1208`, 0.89 against the RAM word). It is not a fixed scaling: the per-sample ratio to BFS/256 spreads from 1.43 to 2.85, and a straight-line fit has a +28 intercept. | **Not air: a throttle-based (alpha-N) fill estimate.** Its writer has been decoded (below). Throttle flow per rev, passed through a saturating curve, is why its ratio to BFS is not fixed. On steady points it tracks throttle/rpm (r = 0.92), not MAF/rpm (r = 0.36). |
+
+### Fuel Comp load input `0xFFFF118A`: its writer
+
+Decoded from `out/full.asm` by another session (2026-10-04); Ghidra was not
+opened. `FUN_0003c3a4` is the only writer, and it runs five steps in order:
+
+| Step | Computes |
+|---|---|
+| `0x3c3ba` | `w227C = clamp16(cal byte 0x8D25 (158) × rpm word 0xFFFF1210)` |
+| `0x3c3e4` | `w116A = clamp16(0xDC1D00 / w227C)` through divide helper `0x21d6c`, so `w116A ∝ 1/rpm` |
+| `0x3c416` | `w1124 = w2C32`, or cal constant `0x90BE` = 782 when bit 2 of `0xFFFF484E` is set (probably a sensor-fault fallback; cal byte `0x8ACF` bit `0x40` inverts the test). `w2C32` is written at `0x3c5c8`: curve `0xDD94` (32 rising points, via `0x26D58`) of `4 × w2CC8`, minus `w63FC`, floored at 0. `w2CC8` comes from `w2CCE` (the word Mode 01 PID 0x11 throttle position reads) or `w2CD0`, chosen by flag `0xFFFF28B5` (`0x3f670`). So `w1124` is a **throttle-derived flow, not MAF**. |
+| `0x3c444` | `X = w116A × (w1124/512 + w139E/2048)`, clamped to `0xFFFF`, also stored at `0xFFFF2136`. Below `0x3C00`, lookup `0x26C28` on table `0xEAEC` with `X × 4`; otherwise on `0xEACC` with `X − 0x3C00`. Each table is 16 u16 entries indexed by `x >> 12`, interpolated. The result `>> 8` is stored at `0xFFFF118A`; `0xFFFF114A` holds new − old. |
+| `0x3c4d0` | (runs next; part of the E05.2 trace) |
+
+The curve gives 5, 64, 109, 142, 162, 175, 183, 189 … 205 at `0x3C00`, then
+rises slowly to a cap of 224. So `0xFFFF118A` is throttle flow per revolution
+through a saturating fill curve: an **alpha-N estimate of cylinder fill**. It
+is linear while the throttle limits flow and flattens as manifold pressure
+nears ambient. It is not Qa/Ne from the MAF. Steady points of the
+ram-study capture agree: r = 0.92 against throttle/rpm and 0.36 against
+MAF/rpm. At 3,684 rpm, 43 g/s and 18 % throttle it read 51, the same as
+idle, where throttle/rpm is nearly equal. UpRev's name for the axis,
+"Volumetric Flow Ratio", is a fair description; only UpRev's axis labels
+are swapped. So Fuel Comp corrects fuel by **throttle fill × rpm**, while
+BFS and Target AFR's X come from the MAF. A Fuel Comp cell is addressed by
+throttle angle at a given rpm, not by airflow.
+
+An earlier version of this decode read `w1124` as MAF airflow. That was
+wrong, and `b25c130`'s commit message still says so.
+
+Still open: what `w139E` is (an extra flow term, written at `0x6e2c4` from a
+32-bit accumulator `>> 18`, × cal `0x82FE` (144) `>> 7`; plausibly idle
+bypass), what `w2CD0` is, and the units of curve `0xDD94` and `w2CC8`, hence
+any absolute scale. The decode is also recorded in
+`data/dids.yaml` (`ECM_FUEL_COMP_X_INPUT` evidence).
 
 ## Open
 
