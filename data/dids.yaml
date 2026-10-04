@@ -1920,8 +1920,26 @@ memory:
       - session: firmware-ZS44A-20260920
         method: disassembly
         finding: >
-          Byte passed (clamped) as the x input of the Fuel Comp lookup wrapper
-          0x026A24 from 0x03C4D0; the table's x axis (0xCACD) runs 0x08-0x80.
+          The Fuel Comp lookup's load input: call site 0x02DC34 passes it
+          against the column axis 0xCB29 (bytewise compare); the rpm axis is
+          0xCACD. (An earlier note here called 0xCACD its axis; that was wrong.)
+      - session: firmware-ZS44A-20260920
+        method: disassembly
+        finding: >
+          Sole writer FUN_0003c444 (store at 0x03C4BA), decoded 2026-10-04:
+          X = w116A * (w1124/512 + w139E/2048), clamped to 0xFFFF, where
+          w116A = 0xDC1D00 / clamp16(158 [cal 0x8D25] * rpm word 0xFFFF1210)
+          (so proportional to 1/rpm), w1124 = MAF airflow 0xFFFF2C32 (curve
+          0xDD94 of sensor word 0xFFFF2CC8 x 4, minus 0xFFFF63FC, floored at
+          0) or the cal constant 782 (0x90BE) when status bit 0xFFFF484E.2 is
+          set, and w139E an extra term (written at 0x06E2C4; not identified).
+          The byte is then a two-segment 16-point curve of X (0xEAEC for X <
+          0x3C00 using X*4, else 0xEACC using X - 0x3C00), >> 8: 5 at X=0,
+          64, 109, 142, 162, 175, ... 205 at 0x3C00, saturating at 224. So it
+          is air per revolution (Qa/Ne, the quantity BFS is K times) through a
+          calibrated saturating curve: a normalised load, not a flow. Its
+          rate of change is stored at 0xFFFF114A. Open: what w139E is, and
+          the curve's physical scale.
   # Flag bytes: bit 0 of 0xFFFF2841 is the pedal-switch enrichment flag that
   # forces the Target AFR lookup to its last BFS column; a bit of 0xFFFF2842
   # selects between the two timing-trim tables (slot +0x020 / +0x120).
