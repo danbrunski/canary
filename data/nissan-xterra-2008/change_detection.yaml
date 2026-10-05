@@ -1,0 +1,158 @@
+# Change detection against a frozen reference (E03.3) and the adaptive
+# candidate beside it (E03.5). Read by src/analysis/change_evaluation.py; the
+# kernels are src/models/change_detection.py and src/models/adaptive_candidate.py.
+#
+# Every number below is a declaration the verdicts depend on, so evidence
+# records cite this file's hash. Change one and the evaluation is a new one.
+#
+# Provenance of the choices, honestly: the first version of this file was
+# run on 2026-10-04 against every drive, test drives included, and four
+# choices were then changed after seeing that run: light and cruise cells
+# merged into part_load, the dependence limit raised, GLR h 8 -> 5 with a
+# 60-block window, and clip_sigma added. Those are now *tuning candidates*
+# below, selected on an inner split of train + calibration only; the test
+# drives are monitored only after a policy_frozen record names the policy.
+# The test drives' earlier exposure cannot be undone and is stated in E03.
+schema: canary-change-residuals/2
+residuals:
+  - name: stft_bank_balance
+    description: >-
+      Closed-loop short-term trim, bank 1 minus bank 2, paired on acquisition
+      time. Both banks share one fuel calculation and one calibration, so the
+      difference is engine response (a per-bank delivery or unmetered-air
+      difference), not the ECU's arithmetic. It is the B05 behavior residual
+      whose per-row band models failed validation only on control events per
+      hour (stft_bank_balance_city/highway); this treats the same signal as a
+      blocked, dependence-corrected change-detection problem instead.
+    evidence_class: engine_response
+    minuend: obd:SHORT_FUEL_TRIM_1
+    subtrahend: obd:SHORT_FUEL_TRIM_2
+    unit: percent
+    condition: obd:MAF
+    # Bank 1 and 2 trims are polled in one round; on 2026-10-04 the 99th
+    # percentile separation was 0.67 s, earlier drives 0 ms.
+    pairing_max_separation_s: 1.0
+    gate_max_separation_s: 1.5
+    gates:
+      # Mode 01 PID 0x03: 2 = closed loop using the oxygen sensor. Open-loop
+      # trims hold a frozen value that is not a measurement of balance.
+      - {spec: obd:FUEL_STATUS, equals: 2.0, reason: open_loop}
+      - {spec: obd:COOLANT_TEMP, min: 70.0, reason: cold}
+      - {spec: obd:RPM, min: 400.0, reason: not_running}
+      # The balance is defined on short-term trim alone, which is the whole
+      # correction only while long-term trims sit at zero (reset by every
+      # flash; 0.00 throughout ZS44A-20260920). A learning LTFT moves part of
+      # a bank's correction out of STFT, so those samples are refused.
+      - {spec: obd:LONG_FUEL_TRIM_1, equals: 0.0, reason: ltft_adapting}
+      - {spec: obd:LONG_FUEL_TRIM_2, equals: 0.0, reason: ltft_adapting}
+    # A trim at its authority is clamped: it states a limit, not a balance.
+    clamp_abs: 25.0
+    policy:
+      schema: canary-change-detection/2
+      residual: stft_bank_balance
+      unit: percent
+      features: ["1", "1/obd:MAF"]
+      excitation:
+        condition: obd:MAF
+        unit: g/s
+        cells:
+          - {name: idle, lower: 0.0, upper: 6.0}
+          - {name: part_load, lower: 6.0, upper: 60.0}
+          - {name: high, lower: 60.0, upper: 400.0}
+        min_block_samples: 6
+      dependence:
+        # STFT is polled every ~3 s in default drives: ~20 samples a block.
+        block_seconds: 60.0
+        max_gap_seconds: 10.0
+        correction: ar1_variance_inflation
+        # Within-drive only (drive-demeaned residuals); the per-drive offset
+        # is the between-drive component, handled by drive_level. At 0.5 the
+        # AR(1) inflation is sqrt(3).
+        max_within_drive_lag1: 0.5
+      calibration:
+        miscoverage: 0.1
+        n_calibration_drives: 3
+        n_test_drives: 3
+        min_train_drives: 2
+        min_cell_blocks: 8
+        min_cell_drives: 2
+        # Half the shift of interest: CUSUM's reference value. A reference
+        # biased past it on its own calibration fold accumulates in control.
+        max_bias_fraction: 0.5
+      detectors:
+        # A three-point bank imbalance.
+        shift_of_interest: 3.0
+        cusum_h: 5.0
+        glr_window_blocks: 60
+        glr_h: 5.0
+      drive_level:
+        cusum_h: 4.0
+        glr_h: 5.0
+        window_drives: 10
+        # Three calibration drives cannot rule out a between-drive component
+        # near zero; half a point is the smallest one assumed.
+        between_drive_sd_floor: 0.5
+        min_drive_blocks: 3
+      persistence:
+        min_consecutive_blocks: 2
+        # CUSUM inputs are clipped 3 sigma beyond k, GLR inputs 3 sigma about
+        # zero: one block or drive adds at most 3 to a CUSUM (< 4, 5) and
+        # 3**2 / 2 = 4.5 to a GLR (< 5). Drive-level alarms also need two
+        # consecutive drives beyond k.
+        clip_sigma: 3.0
+      deduplication:
+        merge_seconds: 600.0
+        reset_at_drive_boundary: true
+      shifts:
+        - {name: bank1_lean_step_3pct, kind: step, magnitude: 3.0,
+           start_after_seconds: 300.0, ramp_seconds: 0.0, synthetic: true}
+        - {name: bank2_lean_step_3pct, kind: step, magnitude: -3.0,
+           start_after_seconds: 300.0, ramp_seconds: 0.0, synthetic: true}
+        - {name: bank1_developing_4pct_15min, kind: ramp, magnitude: 4.0,
+           start_after_seconds: 120.0, ramp_seconds: 900.0, synthetic: true}
+        - {name: bank1_drifting_0p4pct_per_drive, kind: drive_ramp, magnitude: 0.4,
+           start_after_seconds: 0.0, ramp_seconds: 0.0, synthetic: true}
+    tuning:
+      # Inner split of train + calibration: newest 1 tests, 2 calibrate.
+      n_calibration_drives: 2
+      n_test_drives: 1
+      candidates:
+        - name: merged_cells
+          overrides: {}
+        - name: four_cells
+          overrides:
+            excitation.cells:
+              - {name: idle, lower: 0.0, upper: 6.0}
+              - {name: light, lower: 6.0, upper: 20.0}
+              - {name: cruise, lower: 20.0, upper: 60.0}
+              - {name: high, lower: 60.0, upper: 400.0}
+            detectors.glr_h: 8.0
+            detectors.glr_window_blocks: 30
+        - name: long_blocks
+          overrides:
+            dependence.block_seconds: 120.0
+    candidate:
+      schema: canary-adaptive-candidate/2
+      name: stft_bank_balance_kalman
+      residual: stft_bank_balance
+      evidence_class: engine_response
+      features: ["1", "1/obd:MAF"]
+      # balance = proportional + unmetered / MAF: a per-bank flow-ratio
+      # difference is the same fraction at every airflow; a fixed unmetered
+      # airflow on one bank (a leak) is a larger fraction at low airflow.
+      parameters: [proportional_imbalance, unmetered_air_imbalance]
+      units: [percent, percent*g/s]
+      prior_sd: [2.0, 10.0]
+      random_walk_sd_per_hour: [0.05, 0.25]
+      observation_sd: 1.0
+      excitation_window_blocks: 10
+      # Smallest eigenvalue of mean(x x^T) over the window, x = [1, 1/MAF].
+      min_information_eigenvalue: 0.002
+      identified_sd: [0.5, 2.0]
+      accepted_dispositions: [accept]
+      # Candidate and reference predictions are compared at idle (4 g/s),
+      # part load (30 g/s) and high airflow (100 g/s).
+      divergence_probes:
+        - [1.0, 0.25]
+        - [1.0, 0.0333333]
+        - [1.0, 0.01]

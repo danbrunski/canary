@@ -151,6 +151,176 @@ computed on the Pi and render without a language model.
   `test_no_likelihood_without_evidence_that_resolves` (invented and
   retracted ids refused), language hypothesis unscored, schema refusals and
   the negative control `test_negative_control_a_sag_that_claims_no_flow_loss_is_inseparable`.
+
+- [~] **E03.3 — Detect change against a frozen reference.**
+  Evaluate CUSUM/GLR candidates and condition-specific conformal intervals
+  with the existing held-out-drive machinery. Declare excitation, residual
+  dependence, interval calibration, persistence and event deduplication.
+  A per-sample exceedance is not automatically an event or a false positive.
+  **Accept:** independent-drive reports give coverage, event counts and
+  detection latency for declared shifts, distinguish synthetic fault labels
+  from real observations, and preserve excluded/unevaluable counts. Candidate
+  adaptation cannot move the reference or widen its alarm limits.
+  *Re-done twice on 2026-10-04 after verification (second pass: drive-level
+  persistence, refreeze refusal, lag-1 bias correction). Laptop parts done;
+  the real-drive evaluation **refuses**; the Pi run through E04 remains.*
+  Residual `stft_bank_balance`: closed-loop STFT bank 1 minus bank 2, paired
+  one-to-one on acquisition time (≤ 1 s). Gates: `FUEL_STATUS == 2`,
+  coolant ≥ 70 °C, rpm ≥ 400, and `LONG_FUEL_TRIM_1/2 == 0` (`ltft_adapting`:
+  the balance is STFT alone only while LTFT sits at zero). Trims at ±25 % are
+  rejected as clamped. B06 delivery error was not used: ≤ 44 enrichment rows
+  per drive, all in excluded tuning captures.
+  Declarations: `data/nissan-xterra-2008/change_detection.yaml`
+  (`canary-change-residuals/2`; policy `canary-change-detection/2`). Every
+  section below is required.
+  - **Excitation.** MAF cells, intervals per cell.
+  - **Dependence.** Split in two. The within-drive lag-1 is measured on
+    drive-and-cell-demeaned block residuals and refused past 0.5 (the AR(1)
+    inflation is then √3). Demeaning biases it down by about (1 + 3ρ)/n
+    (Marriott & Pope), so the first-order correction is inverted with n the
+    mean blocks per calibration drive; below 8 blocks per drive the
+    correction is unreliable (at 5 it turns 0.09 into 0.73), so the
+    reference is refused. The raw and corrected values are both kept. A between-drive variance component per cell is
+    estimated by method of moments, floored at 0.5 points, and used by the
+    drive level only.
+  - **Calibration.** Refused when the calibration-fold mean bias in any cell
+    exceeds 0.5 × the shift of interest. A cell needs blocks from ≥ 2 drives
+    and ≥ 8 *effective* blocks. Intervals are marked
+    `coverage_guaranteed: false` when the conformal rank fails on the
+    effective count. Test coverage is reported per drive, with a t interval
+    over drives.
+  - **Persistence.**
+    - CUSUM inputs are clipped 3σ *beyond* k. (Clipping at 3σ absolute
+      blinds CUSUM whenever k ≥ 3.)
+    - GLR inputs are clipped 3σ about zero. One unit's GLR is therefore at
+      most 4.5, which is under both GLR limits (5); the validator enforces
+      this.
+    - A per-block alarm needs 2 consecutive blocks each beyond k while the
+      statistic is over h.
+    - A drive-level alarm (CUSUM or ramp GLR) needs this drive and the
+      previous one each beyond k toward the alarm. A drive ramp spans ≥ 2
+      drives.
+    - The verifier's probe showed offsets [0, 0, W, 0, 0] raising
+      `drive_glr` on d3. That is now a test:
+      `test_one_wild_drive_among_in_control_drives_raises_no_drive_level_alarm`
+      for W = 4, 8 and 20.
+  - **Deduplication.** As before.
+  - **`drive_level` (new).** Each drive becomes one standardized unit. Cell
+    means are combined with inverse within-variance weights; the between-drive
+    component is treated as shared across cells. That unit feeds a drive
+    CUSUM (h 4) and a ramp GLR (gradual drift of unknown start and slope,
+    h 5, last 10 drives) in `ChangeMonitor.close_drive`.
+
+  **Policy frozen before the test drives.**
+  - `prepare` selects among the declared `tuning.candidates` on an inner
+    split of train + calibration only, with synthetic shifts injected there
+    only. The candidates are `merged_cells`, `four_cells` (the
+    first-declared cells, GLR 8/30) and `long_blocks`.
+  - `freeze_policy` mints a `policy_frozen` evidence record (policy sha,
+    reference fingerprint, test-drive ids, tuning table).
+  - `evaluate` raises `PolicyNotFrozenError` without that record, or when
+    the record disagrees on policy, reference or test drives.
+  - `freeze_policy` raises `PolicyRefreezeError` when the ledger already
+    holds a current freeze naming any of the same test drives under a
+    different policy or reference. The identical freeze returns the existing
+    record.
+  - The tool freezes only on the vehicle's persistent ledger (`--config`,
+    which uses `memory_ledger_for`, or `--ledger`). With neither it refuses
+    to monitor test drives (exit 2).
+
+  **Honest provenance.** The previous version of this item chose four
+  settings after seeing a run that included the test drives: the merged
+  cells, the raised dependence limit, GLR 8 → 5 with a 60-block window, and
+  the 3σ clip. They are now tuning candidates or replaced by principled
+  limits. The test drives' earlier exposure cannot be undone.
+
+  **Real result (fixture regenerated with the LTFT gate; 1,883 eligible
+  samples, 36 sessions excluded with reasons):**
+  - Drives are named by their first eligible piece.
+  - Folds: train `2026-09-21T142126`, `2026-09-21T194247`; calibration
+    `2026-09-21T223515`, `2026-09-22T163415`, `2026-09-22T233855`; test
+    `2026-09-23T150658`, `2026-10-04T190056`, `2026-10-04T202737`.
+  - `2026-10-04T215234` is unevaluable (`uncovered`).
+  - **Every tuning candidate is refused on the inner split.** The
+    calibration drives hold 5–6 blocks each, below the 8 the dependence
+    estimate needs.
+  - **On the outer folds every candidate is refused too.**
+    - `merged_cells`: 7.4 effective idle and 5.8 part-load blocks, against
+      8 required.
+    - `four_cells`: lag-1 0.74, corrected from 0.39.
+    - `long_blocks`: 6.5 / 6.5 effective blocks.
+  - The bias gate is not reached. `calibration_fold_bias`, measured on its
+    own, puts the merged-cell calibration fold at +1.565 points at part
+    load, past the 1.5 limit, so it alone would refuse.
+  - So no reference is frozen, no test drive is monitored, and no latency
+    exists on real data.
+  - Cause: the balance drifts *inside* train and calibration. Per-cell drive
+    means of the balance itself, not residuals and not composition-mixed:
+
+    | Drive | Idle | Part load |
+    |---|---|---|
+    | `2026-09-21T142126` | −0.62 (3) | −1.37 (11) |
+    | `2026-09-21T194247` | −1.99 (11) | — |
+    | `2026-09-21T223515` | −0.09 (6) | — |
+    | `2026-09-22T163415` | −0.36 (2) | −1.29 (4) |
+    | `2026-09-22T233855` | −0.73 (10) | +1.32 (10) |
+    | `2026-09-23T150658` | +0.03 (14) | −0.05 (5) |
+    | `2026-10-04T190056` | +0.81 (4) | +0.28 (16) |
+    | `2026-10-04T202737` | +1.33 (7) | — |
+
+    Against the previous (unfrozen) reference, the verifier measured idle
+    −0.36 → +2.96 and part load +0.17 → +1.83.
+
+  **Synthetic pipeline (nine generated drives, labelled synthetic; pinned in
+  `SYNTHETIC_PINS`):**
+  - `merged_cells` is selected (tuning: 3/3 detected, mean 337 s, 0 events;
+    `long_blocks` 457 s).
+  - The reference calibrates with within-drive lag-1 0.041 and coverage
+    guaranteed in both cells.
+  - Test coverage per drive is 1.0 / 0.889 / 0.911, mean 0.933, t interval
+    0.787–1.0 (nominal 0.9).
+  - 0 observed events.
+  - ±3 steps detected on all 3 drives at 177 s; the +4/15-min ramp at 657,
+    777 and 657 s.
+  - The +0.4/drive drift is caught per block at drive 3. Over only three
+    drives the drive level does not alarm there.
+  - The ten-drive kernel case
+    `test_a_drift_between_drives_is_seen_at_drive_level_and_missed_per_block`
+    (+0.4/drive) alarms at drive level with no per-block event.
+
+  **Evidence:**
+  - `tests/test_change_detection.py` (29), including:
+    - `test_a_reference_biased_on_its_own_calibration_fold_is_refused`
+    - `test_a_per_drive_offset_is_between_drive_variance_not_within_drive_dependence`
+    - `test_effective_count_and_drive_count_gate_a_cell`
+    - `test_a_spike_on_an_accumulated_statistic_is_not_an_alarm`: the
+      statistic stays over h on the next block, so it is discriminating.
+    - `test_a_limit_one_block_or_drive_can_reach_is_refused`
+    - `test_verdicts_carry_the_reference_and_every_open_alarm`
+  - `tests/test_change_evaluation.py` (17):
+    - `test_a_test_drive_cannot_be_refrozen_under_another_policy`
+    - `test_the_tool_refuses_to_monitor_test_drives_without_a_persistent_ledger`
+    - `test_real_drives_refuse_a_reference_under_the_declared_policy` (pins
+      the real refusal)
+    - `test_test_drives_are_not_monitored_without_a_policy_freeze`
+    - `test_synthetic_pipeline_pins_detection_and_latency_per_drive`
+    - `test_a_drive_is_named_by_its_first_eligible_piece`
+
+  **Remaining:** a real reference needs all three conditions on one
+  calibration (the ZS44A-20261004 epoch began with the 23:02Z flash).
+  1. The inner calibration fold's drives must each hold ≥ 8 blocks (for the
+     dependence estimate) and give ≥ 8 *effective* idle blocks.
+  2. Part-load blocks must come from both of those inner calibration drives
+     (≥ 2 drives per calibrated cell).
+  3. The outer calibration fold must pass the bias gate: mean residual per
+     cell ≤ 1.5 points.
+
+  If the new epoch refuses on (3), that is itself the drift finding — the
+  balance moved by more than half the shift of interest between the
+  training and calibration drives. It is not a data shortage, and more
+  drives will not clear it. Then re-run the tool with `--config`.
+  - The Pi run through E04.
+
   *Toolbox spike (no install; PyPI metadata and docs read 2026-10-04):*
   `faultdiagnosistoolbox` 0.12.5, MIT, cp312 manylinux aarch64 and x86_64
   wheels (~100 KB), depends on sympy, numpy, scipy, matplotlib and
@@ -176,7 +346,65 @@ computed on the Pi and render without a language model.
   operator-owned capture. Repeated evidence is not counted twice and
   conflicting evidence changes the recorded ranking reproducibly.
 
-- [ ] **E03.5 — Learn a small candidate without absorbing a fault.**
+  *Re-done 2026-10-04; laptop parts done on synthetic drives (no real
+  reference can be frozen, see E03.3); the Pi run through E04 remains.*
+  `src/models/adaptive_candidate.py`: a random-walk Kalman filter.
+  - **Model:** `balance = proportional_imbalance + unmetered_air_imbalance /
+    MAF`.
+  - **Only from memory.** `candidate_from_ledger(ledger, spec, reference,
+    calibration, channels, now)` is the only constructor; a direct
+    `KalmanCandidate(...)` raises. It reads `unresolved_alarms` and
+    `invalidating_boundaries` (moved into the kernel) from the E01 ledger,
+    and gives the candidate its own `ChangeMonitor` holding those alarms.
+    The tool and `replay_candidate` use it.
+  - **Enforced freeze.**
+    - `learn(pending, verdict, …)` needs the one-shot prediction token *and*
+      the `BlockVerdict` the candidate's own monitor issued last, for the
+      same block under the same reference fingerprint. A stale, reused,
+      foreign or other-block verdict raises `PredictionOrderError`.
+    - Any unresolved alarm in the verdict (ledger, per-block, drive-level)
+      or held by the candidate makes the block `frozen`.
+    - A block the monitor could not evaluate is `unmonitored`, never
+      learned.
+  - **Divergence guard.** An update that would put the candidate's
+    prediction more than k (half the shift of interest, 1.5 points) away
+    from the reference at any declared probe (4, 30, 100 g/s) is not applied: the
+    outcome is `diverged`, a `divergence:` alarm is raised and the candidate
+    freezes.
+  - **Unchanged from the first version:** excitation (window reset per
+    drive), disposition, calibration/intervention boundaries, self-hashed
+    checkpoints with lineage, and twin refusals. The AST test now allows
+    `src.evidence.*` and `src.models.change_detection` only.
+
+  **Replays (synthetic):**
+  - `test_replay_a_fault_developing_between_drives_alarms_freezes_and_bounds_the_candidate`
+    (+0.4 points per drive from drive 3, 16 drives):
+    - (a) the drive level alarms;
+    - (b) every later drive starts frozen with 0 updates;
+    - (c) the maximum probe divergence stays ≤ 1.5 points (k);
+    - the reference is byte-identical afterwards, and the last drive's
+      residual against it is > 3 points.
+  - `test_replay_an_intra_drive_ramp_bounds_absorption_before_the_alarm`:
+    probe divergence at the alarm is < 2 points against a 4-point ramp.
+  - `test_the_candidate_cannot_drift_past_the_shift_of_interest`
+  - `test_learning_needs_a_fresh_prediction_and_the_monitors_verdict_for_that_block`
+  - `test_the_factory_reads_unresolved_alarms_from_memory`: an alarm on the
+    ledger freezes the candidate; a resolved investigation releases it.
+  - `test_the_candidate_cannot_adapt_across_a_recorded_intervention`
+
+  **Real data:** the three idle-only drives' least-squares airflow-term
+  standard error is > 5× the mixed drives'
+  (`test_real_idle_only_drives_fix_one_combination_not_each_parameter`).
+  No real replay is possible without a frozen reference.
+
+  **Evidence:** `tests/test_adaptive_candidate.py` (21),
+  `tests/test_change_evaluation.py`.
+
+  **Remaining:**
+  - A real-drive replay once E03.3 can freeze a reference.
+  - The Pi run through E04: per-tick cost, and checkpoint persistence under
+    `state_dir`.
+- [~] **E03.5 — Learn a small candidate without absorbing a fault.**
   Trial recursive least squares or a Kalman candidate over a few physically
   meaningful parameters. Predict before updating; gate on excitation,
   conditions and accepted data disposition. Freeze candidate updates for
