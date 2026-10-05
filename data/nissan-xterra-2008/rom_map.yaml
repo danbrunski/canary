@@ -405,10 +405,15 @@ tables:
       rpm. The
       +0x09C-0x0BF cells once listed as a separate "timing (probable)" span
       are those cells. A and B differ in 9 cells in every slot of the UpRev
-      base, and in 19 in Map 1 of k106 and 20260920. Which of A and B is
-      UpRev's Main and which is High Det is not established: the flag at
-      0xFFFF2842 that selects between them read a constant 4 all through the
-      2026-10-04 drive.
+      base, and in 19 in Map 1 of k106 and 20260920. Selection (verified in
+      the listing, 2026-10-05): FUN_0004e6d8 loads trim B (0xFFFFB160) by
+      default and switches to trim A (0xFFFFB060) only when 0xFFFF283F bit 6,
+      the knock controller's HI DET latch, is clear (tst #0x40 at 0x04E6FE).
+      So A is the normal table and B the high-detonation one: UpRev's Main
+      and High Det (role names inferred from the latch's knock behaviour).
+      0xFFFF2842 does not select the trim; its bit 2 gates the knock
+      controller's trim-difference branch (0x04A512). An earlier note here
+      said 2842 selected it; that was wrong.
   - id: timing_trim_a_maps_2_5
     kind: timing_trim_a
     name: Ignition timing trim A
@@ -452,9 +457,10 @@ tables:
     evidence: >-
       Read from its RAM copy 0xFFFFB160 (slot +0x120) by 0x04A18C at 0x04A506
       through the same wrapper and axes as trim A, straight after it; its last
-      byte is the one before Target AFR at +0x220. A flag bit at 0xFFFF2842
-      chooses between A and B. Its role (Main or High Det) is not
-      established.
+      byte is the one before Target AFR at +0x220. The ECM uses B while
+      0xFFFF283F bit 6 (HI DET latch) is set and A otherwise (FUN_0004e6d8,
+      0x04E6FE), so B is the high-detonation table (UpRev's High Det; role
+      name inferred). See timing_trim_a.
   - id: timing_trim_b_maps_2_5
     kind: timing_trim_b
     name: Ignition timing trim B
