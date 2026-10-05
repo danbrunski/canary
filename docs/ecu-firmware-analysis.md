@@ -386,35 +386,51 @@ knock-protection results so that CANary can watch them. Calibration internals
 and any way of changing knock control were out of scope and are not recorded
 here.
 
-**First finding: the ECM appears to be in its knock-sensor fault fallback.**
-UpRev's K-line stream reads three RAM addresses, decoded 2026-09-24
-(`docs/uprev-usb-kline-research.md`, `21 84` layout offsets 4–8 and 17):
+**Verdict (revised 2026-10-05, after a follow-up pass): knock control is
+active in this image.** A first reading said "fault fallback". It is retracted;
+the reasons are below.
 
-| Address | UpRev column | Has read since the 2026-07-26 flash |
-|---|---|---|
-| `0xFFFF13FE` | KNOCK STRENGTH, as 0x500 sign-flipped | `0xFB00` (−5.0°), constant |
-| `0xFFFF283F` | HI DET | bit 6 set, constant |
-| `0xFFFF28AA` | KNOCK EVENT is bit 2 | bit 2 never set |
-
-- These are the ECM's real knock variables. The earlier explanation, that
-  UpRev's definitions did not match ZS44A, is wrong.
-- In this program, `0xFFFF13FE` is held at `0xFB00` only while bit 7 of
-  `0xFFFF479D` is set, and that same bit forces the High Det latch.
-- Bit 7 means a knock-sensor diagnostic is stored: items `0xAA`/`0xAB`
-  (P0327/P0328, sensor 1) or `0xAC`/`0xAD` (P0332/P0333, sensor 2). The FSM
-  says these set no MIL.
-- **Contradicting evidence (operator, 2026-10-05):** no knock DTC has ever
-  appeared in any scan tool or code read. On 2026-08-01, unplugging a sensor
-  set the code and reconnecting it cleared it, so the codes are reportable.
-  Generic Mode 03/07 also showed nothing (07-28, 09-23). The 09-24 Nissan
-  read `17 FF 00` → `57 01` was only ever a guess at "one code".
-- **So the fallback state is real (UpRev's own stream), but its cause is
-  open.** Candidates:
-  - a latched or live fault judgement that the code reads do not report;
-  - another path to the same values that the first pass missed;
-  - a mode selected by the calibration.
-  A follow-up code pass is checking every writer. **Confirm before boost**
-  with the reads below.
+- **The 2026-08-01 drive's single retard event** (2,200 rpm, 89 % load,
+  timing 11° → 8° → recovering) can only come through the *active* branch. A
+  dip that recovers cannot happen with the fixed fallback engaged (verified
+  from code plus the drive log). The sensors were confirmed intact the same
+  day: unplugging one set the code, and reconnecting it cleared it.
+- **The fallback has one code origin.** `0xFFFF13FE` takes `0xFB00` only in
+  the branch where bit 7 of `0xFFFF479D` (the knock-sensor fault flag) is set.
+  The learned words never take that value (verified).
+- **HI DET is not a fault indicator.** The `0xFFFF283F` bit-6 latch is set by
+  *either* that fault flag *or* the accumulated-knock metric `0xFFFF1400`
+  crossing a threshold. The second is normal protection selecting the High
+  Det timing table (verified).
+- **UpRev's constant knock columns are not solid evidence either way.** The
+  binding of UpRev's stream offsets to `0xFFFF13FE`/`283F`/`28AA` is
+  inferred: the sniffer missed the frames where UpRev defines its stream.
+- **Knock-sensor faults are never reported by generic OBD (verified).**
+  - The Mode 03 and Mode 07 builders list an item only if bit `0x80` is set
+    in its config word (table at `0x10FBC`).
+  - The four knock-sensor items (`0xAA`–`0xAD`, P0327/P0328/P0332/P0333) have
+    config `0x0020`, with that bit clear. Every other item checked has it set.
+  - So a generic code read can never show a knock-sensor fault, which is why
+    none has appeared. A Nissan self-diagnosis read (service 0x17) may
+    (inferred).
+  - **Generic DTC polling therefore cannot monitor knock-sensor health.** The
+    RAM flags below can.
+- **Item status bytes** (three per item, from `0xFFFF657C + 3i`):
+  - `657D` bit 7 is "failing now" (live);
+  - `657E` bit 2 is the Mode 03 "confirmed" state and bit 3 the Mode 07
+    "pending" state;
+  - `657E` bit 0 is the early flag that `0xFFFF479D` bit 7 ORs, and it can be
+    set before a code is pending.
+  The `17 FF 00` → `57 01` reply's last byte (count or status) is unresolved.
+- **Settle it live, with reads only:**
+  - at key-on and warm idle: `0xFFFF479D` bit 7 (0 = normal), the item status
+    bytes `0xFFFF677A`–`6785`, and circuit levels `0xFFFF2CEF`/`2CF0` (band
+    50–199);
+  - during one light pull: `0xFFFF28AE` bit 5 (knock loop running, should be
+    1); `0xFFFF1254`/`26D2` (0 at rest, dipping only on an event); and
+    `0xFFFF1400` with `0xFFFF283F` bit 6.
+  If `283F` bit 6 is set while `479D` bit 7 is clear, HI DET is accumulated
+  knock, not a fault.
 
 **Where the observation values live.** All are RAM, reset at engine stop, and
 none is exposed by any Mode 01 PID, Mode 22 DID (both pointer tables
@@ -465,6 +481,78 @@ Proposed memory windows (`0xFFFF232E`/12, `0xFFFF124E`/8, `0xFFFF13FE`/2,
 `0xFFFF249A`/15, `0xFFFF2550`/24, the flag bytes, and a ≤ 1 Hz fault window)
 are in `~/ecu-re/NOTES.md`, session 5. They go into the catalog through the
 `data/dids.yaml` owner, with known-answer checks.
+
+### A/F sensor and λ chain: one sensor per bank, corrected for altitude only in PID 0x24
+
+Decompiler pass, 2026-10-05, checked on logged data. It answers whether the
+"+2–4 % lean at WOT" (2026-09-21..23) rested on three independent
+instruments. It did not: there is one A/F sensor per bank.
+
+- **Voltage words (verified).** DIDs `0x1225`/`0x1226` → `0xFFFF2C02`/`2C04`
+  on both the CAN table `0x24B84` and the K-line table `0x22938`.
+  - Bank 1 = AN8 − the 10-sample mean of AN11 (clamped 440–460) + 440,
+    unfiltered and unscaled. Bank 2 uses AN20/AN23.
+  - The banks are assigned from the code's own fault items (P0131/P0132 bank
+    1, P0151/P0152 bank 2).
+- **PID 0x24/0x28 λ (verified).**
+  - A,B = `(0xFFFF46C2 << 14) / 3675`, so λ = word/7350, with the word =
+    AFR × 500. `46C2` is last cycle's copy of `0xFFFF4722`.
+  - `0xFFFF4722` is computed at `0x3FAD0` from the DID `0x1225` word, in
+    order:
+    1. double it;
+    2. apply a **barometric gain** about stoich: `x' = 880 + (x − 880)·128/k`,
+       with k from table `0xD00F` on raw baro `0xFFFF4C30`. k = 128 at
+       99.5 kPa, 112 at 80 kPa, 94 at 63 kPa, so it is always active at this
+       truck's altitudes;
+    3. look up a 16-point AFR table (values `0xE644`, breakpoints `0xF12A`);
+    4. add a learned downstream-O2 offset `0xFFFF4CA4` (±1 AFR; "rear trim"
+       is inferred);
+    5. add a small rpm × load offset table `0xACF4` (≤ +0.07 AFR).
+  - No temperature or heater correction is applied.
+  - PID 0x24's voltage bytes C,D are raw AN8 × 0.0050024 V, not the DID
+    word: they read about 0.02–0.05 V higher.
+  - PID 0x28 is the same for bank 2 (`0xFFFF4724`, `46C4`).
+  - The 2.0 seen in fuel cut is the PID field saturating (word ≥ 14,700), not
+    an ECM clamp.
+- **The fuel loop controls this same value (verified).** The STFT controller
+  `0x5E368` measures `0xFFFF4722`/`4724` against target `0xFFFF46B2`
+  (default 7350 = 14.7). So PID 0x24 agreeing with stoich in closed loop
+  proves nothing about the sensor's accuracy.
+- **UpRev's AFR and CANary's voltage curve are the same uncorrected
+  calculation.**
+  - `afr_calibration.yaml`'s curve is the ECM's `0xE644` table *without* the
+    barometric gain (within 0.26 % over 10–13 AFR, 0.83 % at worst). UpRev's
+    lookup also skips the gain and both offsets.
+  - On same-reply pairs, a single gain makes the table reproduce PID λ within
+    0.3 % (λ 0.70–1.30). The fitted gain follows altitude as the code
+    predicts:
+
+    | Session | Baro | Fitted gain | Code predicts |
+    |---|---|---|---|
+    | 09-17 | ~76 kPa | 1.175 | 1.174–1.195 |
+    | 09-21 | 80–81 kPa | 1.120 | 1.130–1.139 |
+    | 10-04, both banks | 81–83 kPa | 1.105 | 1.109–1.130 |
+
+  - At about 81 kPa the uncorrected path reads, relative to PID 0x24:
+    +1.5 % leaner at λ 0.85–0.90, +2.5 % at 0.80–0.85, and +3.9 % at
+    0.70–0.80. This explains the 09-17 "voltage path +3.1 to +3.7 % leaner
+    at 12.1–12.3 AFR" observation.
+- **What this means for the WOT-lean finding.**
+  - Two of its three "instruments" are one uncorrected calculation. It is
+    biased lean at altitude by about the size of the finding.
+  - PID 0x24, the only corrected one, gave +2.9 % on 09-21, but −1.1 to
+    +0.7 % on the five held-out drives.
+  - So the lean is not established. An independent check needs an external
+    wideband with its own controller, logged with baro and pressure-corrected
+    per its maker. The AEM gauge measures fuel pressure, not λ: it can test
+    delivery sag, but not λ.
+- **Catalog consequences** (for the owners of those files):
+  - the voltage-path routes in `lambda_delivery.yaml` are derived from the
+    same sensor as PID 0x24/0x28, and are biased unless the gain is applied;
+  - `afr_calibration.yaml`'s curve provenance is "ECM table `0xE644`, gain 1";
+  - candidate memory channels: `0xFFFF4722`/`4724` (λ × 7350), `46B2`/`46B4`
+    (closed-loop target), `4CA4`/`4CA6` (learned rear offset), and
+    `0xFFFF36BB` (k, 128 = none).
 
 ## Open
 

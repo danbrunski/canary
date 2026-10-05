@@ -258,7 +258,7 @@ measured limit.
 | Throttle X/Y **map traces** | the ETC map's live axes (throttle % × RPM) |
 | `A/F ADJ` (long-term trim) | see below |
 
-> **Superseded 2026-10-05 — read this first.** The firmware shows the ECM *does* hold knock variables, and UpRev streams three of them: `0xFFFF13FE`, `0xFFFF283F` and `0xFFFF28AA`. Their constant values are the knock-sensor **fault fallback**, not a definition mismatch. In this program that state goes with a knock-sensor fault flag, yet no knock DTC has ever shown in a code read, so the cause is open (a latched judgement, another path, or a calibration mode). Unconfirmed live; see `docs/ecu-firmware-analysis.md`, "Knock monitoring (observation only)", for the verification. The text below is kept as the record of the earlier conclusion.
+> **Superseded 2026-10-05 — read this first.** The firmware shows the ECM *does* hold knock variables, and UpRev appears to stream three of them (`0xFFFF13FE`, `0xFFFF283F`, `0xFFFF28AA`; the binding is inferred). A follow-up pass (2026-10-05) found knock control **active** in this image (the 2026-08-01 retard event needs the active branch), and that knock-sensor faults are **never reported by generic Mode 03/07**, so generic DTC polling cannot monitor knock-sensor health. Watch the RAM fault flags instead. Unconfirmed live; see `docs/ecu-firmware-analysis.md`, "Knock monitoring (observation only)", for the verification. The text below is kept as the record of the earlier conclusion.
 
 **Knock is not streamed by this ECM — settled 2026-08-01 from the FSM, not
 inferred from failed searches.** `xterra_fsm/ec.pdf` EC-69's CONSULT-III
