@@ -1,0 +1,87 @@
+# Shared-register aliases and dependent observations (B08.1).
+#
+# Two channels that read the same ECU variable are ONE observation reached by
+# two requests, not two independent measurements. The artifact-lineage audit
+# (tools/audit_artifact_lineage.py) resolves every model input to its source
+# identity (Mode 01 PID, Mode 22 DID number, RAM address) and uses this file to
+# say which identities share a register, which quantity that register holds,
+# and which agreements prove only that a decode is right.
+#
+# Facts only from the firmware listing or a same-instant data check; each
+# entry names where it came from. The CAN and K-line DID tables are separate
+# (docs/ecu-firmware-analysis.md, "Mode 22 catalog corrections"): every DID
+# here is a CAN DID, and a K-line meaning never carries onto it.
+schema_version: 1
+
+# `quantity` is what decides qualification: an input that claims a fuel trim
+# (`trim_claims` below) qualifies only through a register holding exactly that
+# quantity -- same term (short/long) and same bank. The road-speed register is
+# the negative control: DID 0x1102 was catalogued as LTFT B1 until 2026-10-04,
+# and its bytes cannot qualify as trim whatever name it carried. The bank-swap
+# control is the same correction's other half: DID 0x1125 was catalogued as
+# LTFT *B2* and reads the bank-1 word.
+shared_registers:
+  - register: 0xFFFF11A8
+    quantity: road_speed
+    identities:
+      - {kind: mode01, pid: 0x0D}
+      - {kind: did, did: 0x1102}
+    source: >
+      Firmware, CAN Mode 22 pointer tables 0x024988/0x024B84/0x024D00 and the
+      CAN Mode 01 handler 0x0D3AFC (data/dids.yaml 0x1102 evidence, c897a62).
+  - register: 0xFFFF26B4
+    quantity: fuel_trim_short_b1
+    identities:
+      - {kind: mode01, pid: 0x06}
+      - {kind: did, did: 0x1123}
+    source: Firmware CAN DID pointer table and the PID 0x06 handler (data/dids.yaml 0x1123, c897a62).
+  - register: 0xFFFF26B6
+    quantity: fuel_trim_short_b2
+    identities:
+      - {kind: mode01, pid: 0x08}
+      - {kind: did, did: 0x1124}
+    source: Firmware CAN DID pointer table and the PID 0x08 handler (data/dids.yaml 0x1124, c897a62).
+  - register: 0xFFFF26DE
+    quantity: fuel_trim_long_b1
+    identities:
+      - {kind: mode01, pid: 0x07}
+      - {kind: did, did: 0x1125}
+    source: Firmware CAN DID pointer table and the PID 0x07 handler (data/dids.yaml 0x1125, c897a62).
+  - register: 0xFFFF26E0
+    quantity: fuel_trim_long_b2
+    identities:
+      - {kind: mode01, pid: 0x09}
+      - {kind: did, did: 0x1126}
+    source: Firmware CAN DID pointer table and the PID 0x09 handler (data/dids.yaml 0x1126, c897a62).
+
+# What each trim-named channel claims to be. Declared, not parsed from the
+# name: a claim is checked against the register its source identity reads,
+# at the catalog revision the artifact was built on. Every trim-named Mode 01
+# PID and CAN DID in the catalogs must appear here
+# (tests/test_artifact_lineage.py enforces it).
+trim_claims:
+  obd:SHORT_FUEL_TRIM_1: fuel_trim_short_b1
+  obd:SHORT_FUEL_TRIM_2: fuel_trim_short_b2
+  obd:LONG_FUEL_TRIM_1: fuel_trim_long_b1
+  obd:LONG_FUEL_TRIM_2: fuel_trim_long_b2
+  did:ECM_SHORT_FUEL_TRIM_B1: fuel_trim_short_b1
+  did:ECM_SHORT_FUEL_TRIM_B2: fuel_trim_short_b2
+  did:ECM_LONG_FUEL_TRIM_B1: fuel_trim_long_b1
+  did:ECM_LONG_FUEL_TRIM_B2: fuel_trim_long_b2
+
+# Relations that are not a shared register but make agreement uninformative
+# about anything beyond the decode. `agreement_counts_as` is one of
+# `decode_verification` or `dependent_evidence` (anything else is refused at
+# load); `decode_verification` means a matching pair verifies that both decodes read the ECU correctly; it
+# is never independent validation of the algorithm that produced the value.
+dependent_relations:
+  - identities:
+      - {kind: mode01, pid: 0x44}
+      - {kind: memory, address: 0xFFFF26BE}
+    agreement_counts_as: decode_verification
+    condition: >
+      PID 0x44 = 0xFFFF26BE x 0xFFFF46AC / 3675 (firmware 2026-10-05), so it
+      equals the target phi word only while the A/F feedback target
+      0xFFFF46AC is 7350 (14.7). Agreement checks the decode of one register
+      through two requests; it does not validate the target-phi algorithm.
+    source: data/dids.yaml mem:ECM_TARGET_EQUIV_RATIO and mem 0xFFFF46AC notes.

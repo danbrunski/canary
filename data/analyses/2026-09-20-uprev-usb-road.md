@@ -525,6 +525,9 @@ Four findings worth stating separately:
 - **`0x1125` was never unknown — it is bank-2 long fuel trim.** It held raw
   95-99 in the first K-line captures, which is a trim sitting near its
   neutral 100.
+  *Superseded on CAN 2026-10-05 (B08.1, [lineage audit](2026-10-05-b08-1-artifact-lineage.md)):
+  this table is the K-line one. The CAN catalog took 0x1102/0x1125 from it until
+  `c897a62`; on CAN, 0x1102 is road speed and 0x1125 is LTFT bank 1.*
 - **AFR WB-B1/B2 are NOT streamed.** ROM Editor derives them from the A/F
   sensor volts through a non-linear transfer (0.695 V -> 11.63, 1.21 V ->
   12.84). There is no ECM-computed AFR channel to find; our own

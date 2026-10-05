@@ -57,7 +57,7 @@ extra independent votes.
 
 ## Checklist
 
-- [ ] **B08.1 — Audit observation and artifact lineage.**
+- [~] **B08.1 — Audit observation and artifact lineage.**
   Trace recipe inputs, derived dependencies, historical decoders and stored
   artifacts for the corrected CAN DIDs and shared-register aliases. Check
   payload/source identity, not just channel names; a current catalog cannot
@@ -68,6 +68,99 @@ extra independent votes.
   the road-speed negative control cannot qualify as trim. PID 0x44 and
   target RAM agreement is counted as decode verification, not independent
   algorithm validation. No blanket retrain or silent feature replacement.
+  *Audit done 2026-10-05 (revision 2, after verification); superseding the
+  local LSTM copies and the unverifiable manifests awaits the operator.*
+  [Report](../../../data/analyses/2026-10-05-b08-1-artifact-lineage.md) and
+  [JSON](../../../data/analyses/2026-10-05-b08-1-artifact-lineage.json) come from
+  [`tools/audit_artifact_lineage.py`](../../../tools/audit_artifact_lineage.py)
+  over `src/analysis/artifact_lineage.py`.
+  - **How each input is resolved.** Every input resolves to its source
+    identity, in both the catalog committed before the artifact's build and
+    the current one, following `tools/channel_renames`. The identity is a
+    Mode 01 PID (via `obd_registry`), an OBD service, a DID number, a RAM
+    address, or a CAN id and byte slice.
+    - Derived dependencies are expanded from the **build-time** source,
+      parsed rather than imported.
+    - A derived definition that cannot be located there counts as
+      unverifiable.
+  - **As-recorded values.** RAM values are stored decoded at every build
+    date, and broadcast values were stored decoded before P02.8. Both must
+    have one committed decode across the recording window.
+  - **Trim qualification.** A trim input qualifies only through a register
+    whose term *and* bank match its declared claim
+    (`trim_claims` in
+    [`observation_aliases.yaml`](../../../data/nissan-xterra-2008/observation_aliases.yaml)).
+  - **83 artifacts: 7 affected, 65 unaffected, 11 unverifiable.**
+    - None consumed DID `0x1102` or `0x1123`–`0x1126` under any name.
+    - All 65 behavior models are unaffected: the served set, `_prior`,
+      `_candidates` and the review fixture.
+  - **Affected:**
+    - The laptop's 2026-09-20 LSTM and its `~/canary-data/models-0920a`
+      copy. `did:ECM_INJECTOR_PULSE_1/2` were trained as raw counts, and
+      `1156df0` pinned 0.01 ms after the build. This is a decode change, not
+      a DID identity error, and it is not the deployed model.
+    - Five research manifests in `_` directories. They consume the retired
+      `decoded:ECM_CALC_LOAD_B` and `ECM_AIRFLOW_PROXY_23D`.
+  - **Unverifiable:**
+    - The 11 manifests are the deployed IF (09-20) and LSTM (09-24 na-r2),
+      the six na/r2/r3 candidates, `_ablation-a03`, and the laptop's 09-20
+      IF with its copy.
+    - Each consumes derived channels with no literal build-time
+      declaration:
+      - `AFR_B1` and `AFR_CENSORED_B1`, in all 11;
+      - `FUEL_RATE_LPH` and `ESTIMATED_POWER_HP/TORQUE_NM`, in 10;
+      - `INSTANT_ECONOMY_*`, in 7.
+    - Every identity they could trace is unchanged.
+  - **Mode 01 total trim:**
+    - `TOTAL_TRIM_B1/B2` resolve to PIDs `0x06`+`0x07` and `0x08`+`0x09`,
+      from the build-time declaration.
+    - Each leaf qualifies for its declared claim, same term and bank.
+    - Stored payloads were re-decoded once per artifact file, over distinct
+      sessions. For the served set that is 75 sessions and 347,612 rows;
+      270,190 carry a payload, and all 270,190 match the stored value. The
+      other 77,422 rows are python-OBD era and have no payload.
+  - **RAM:**
+    - The deployed LSTM and the r2/r3 LSTMs consume
+      `mem:ECM_ENGINE_SPEED_RAM` and `mem:ECM_IGNITION_TIMING_RAM`.
+    - One decode was committed across each recording window.
+    - The stored rows (only 2 per channel in their sessions) reproduce under
+      the recording catalog and agree with the current one.
+  - **Payload identity beats session membership:** `air_charge` v2 fits on
+    both rom-trace captures, which hold 231 raw replies each of `0x1102` and
+    `0x1125`. Its own DIDs re-decode identically under the build-time and
+    current entries.
+  - **Negative controls:**
+    - DID `0x1102` against wheel speed through `compare_channels`: n 202,
+      slope 0.9950, r² 0.9994, `stable`. It is refused as LTFT B1, because
+      register `0xFFFF11A8` holds road_speed.
+    - DID `0x1125` claimed as LTFT B2 (its old label) is refused, because it
+      reads the bank-1 word.
+    - The old 2-byte entry decodes none of the 231 one-byte CAN replies.
+  - **PID 0x44 against target RAM** is recorded as `decode_verification`
+    only. The loader validates the enum.
+  - **Stale labels:** 8 rom-trace sidecar labels are reported.
+  - **Superseded findings:** two analyses carry a supersession note.
+    Nothing was deleted.
+  - No policy entry, retrain, feature change or catalog change was made.
+  - **Tests:** `tests/test_artifact_lineage.py` has 26 tests, including:
+    - `::test_a_name_that_moved_to_other_bytes_is_affected`
+    - `::test_road_speed_cannot_qualify_as_trim_under_any_name`
+    - `::test_a_bank_swap_cannot_qualify_either`
+    - `::test_a_ram_decode_that_changed_inside_the_recording_window_is_not_unaffected`
+    - `::test_stored_ram_windows_are_re_decoded_then_and_now`
+    - `::test_derived_inputs_come_from_the_build_time_definition`
+    - `::test_the_definition_parser_reads_every_historical_form`
+    - `::test_mode01_channels_resolve_through_the_registry`
+    - `::test_agreement_kinds_and_trim_claims_are_validated`
+    - `::test_every_trim_channel_in_the_catalogs_declares_its_claim`
+    - `::test_committed_history_reproduces_the_october_correction`
+  - **Remaining (operator):**
+    - Decide how to supersede the two 2026-09-20 LSTM copies. They are
+      local model state, outside git.
+    - Decide whether the unverifiable deployed manifests need their derived
+      definitions declared literally, so a future audit can trace them.
+    - B03 has no manifest-level mark, and producibility cannot see a decode
+      change on a column that is still producible.
 
 - [ ] **B08.2 — Add firmware-derived operating context.**
   Share a profile-backed provider with E02/E05/W08 for exact program/image,
