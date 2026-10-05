@@ -14,7 +14,7 @@ reports what the kernels did on drives they never saw:
   ``missing_input``, not empty.
 * :func:`assemble_drives` — sessions grouped into physical drives with the
   shared rule (``src.analysis.splits.group_drives``), the default-profile
-  exclusion (``src.models.evaluation.default_profile_exclusion``: tuning
+  exclusion (``src.storage.corpus_eligibility.default_profile_exclusion``: tuning
   captures never score detectors) and one calibration: a session recorded on
   another calibration is excluded with its revision named, never pooled.
 * :func:`prepare` — chronological fixed holdout (newest drives test, the
@@ -97,7 +97,6 @@ from src.models.change_detection import (
     blocks_of,
     fit_reference,
 )
-from src.models.evaluation import default_profile_exclusion
 from src.signals.pairing import (
     ComparisonRefusedError,
     PairingPolicy,
@@ -106,6 +105,7 @@ from src.signals.pairing import (
     to_seconds,
     weakest_basis,
 )
+from src.storage.corpus_eligibility import default_profile_exclusion
 from src.storage.session_files import session_footer_span
 from src.vehicle.tune_revisions import TuneRevisionRegistry, resolve_session_revision
 

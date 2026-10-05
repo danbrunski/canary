@@ -366,8 +366,9 @@ def recovery_report(
             "since": None if process_started_at is None else process_started_at.isoformat(),
             "detail": (
                 "transient ECU state (hysteresis, a map switch in progress) is not stored "
-                "and cannot be rebuilt after a restart; the streaming evaluator (E04.1) is "
-                "not integrated, so none is held"
+                "and cannot be rebuilt after a restart; the live twin's stream (E04.1) starts "
+                "empty, and samples whose lookback reaches before its first read are "
+                "unevaluable by name"
             ),
         },
         "memory": {

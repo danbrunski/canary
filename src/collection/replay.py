@@ -24,7 +24,10 @@ tune revision was flashed, P02.16) reads it off the record.
 ``acquired_at``, is shifted by the same offset as the row's timestamp so the
 replayed row stays internally consistent (presentation stamp and acquisition
 instant keep their original separation); ``generation`` / ``round_id`` are
-carried untouched, since they identify the *source* capture's rounds.
+carried untouched, since they identify the *source* capture's rounds. The
+unshifted ``acquired_at`` also rides along under
+:data:`src.telemetry.REPLAY_SOURCE_ACQUIRED_KEY`: each row's shift includes
+its own pacing jitter, so only the original instants pair as stored.
 
 **Only captured sources are re-emitted** (D02.9,
 ``data/analyses/2026-09-17-d029-replay-amplification.md``). The stored
@@ -71,6 +74,7 @@ from src.storage.session_files import PARQUET_PATTERN, count_session_rows, sessi
 from src.telemetry import (
     CAN_SOURCE,
     RE_DERIVED_SOURCES,
+    REPLAY_SOURCE_ACQUIRED_KEY,
     REPLAY_SOURCE_AT_KEY,
     MetadataValue,
     TelemetryRecord,
@@ -133,6 +137,38 @@ def _metadata(row: pd.Series) -> dict[str, MetadataValue]:
     except ValueError:
         return {}
     return dict(parsed) if isinstance(parsed, dict) else {}
+
+
+def _original_acquired(metadata: Any) -> dict[str, MetadataValue]:
+    """The recorded ``acquired_at``, unshifted, under its replay key (E04.2)."""
+    acquired = metadata.get("acquired_at") if isinstance(metadata, dict) else None
+    if not isinstance(acquired, (int, float)) or isinstance(acquired, bool):
+        return {}
+    return {REPLAY_SOURCE_ACQUIRED_KEY: float(acquired)}
+
+
+def replay_record(fields: dict[str, Any], orig_epoch: float, emitted_at: float) -> TelemetryRecord:
+    """One stored row as replay emits it at ``emitted_at``: stamped "now",
+    ``acquired_at`` shifted by the row's own offset, and the recorded
+    instants carried under their replay keys."""
+    return TelemetryRecord(
+        timestamp=datetime.fromtimestamp(emitted_at, tz=UTC),
+        source=cast(TelemetrySource, fields["source"]),
+        channel=str(fields["channel"]),
+        value=cast(TelemetryValue, fields["value"]),
+        unit=str(fields["unit"]),
+        payload=cast("bytes | None", fields["payload"]),
+        metadata={
+            **rebase_metadata(
+                cast("dict[str, MetadataValue]", fields["metadata"]),
+                emitted_at - orig_epoch,
+            ),
+            # P02.16: the recorded instant rides on the record, so the live
+            # source resolves the tune revision flashed *then*.
+            REPLAY_SOURCE_AT_KEY: orig_epoch,
+            **_original_acquired(fields["metadata"]),
+        },
+    )
 
 
 def rebase_metadata(metadata: dict[str, MetadataValue], shift_s: float) -> dict[str, MetadataValue]:
@@ -450,24 +486,7 @@ async def replay_session(
             delay = min(_MAX_GAP_SECONDS, max(0.0, target - time.monotonic()))
             if delay > 0 and await wait_for_stop_or_timeout(stop_event, delay):
                 return  # stop fired during the sleep
-            emitted_at = time.time()
-            record = TelemetryRecord(
-                timestamp=datetime.fromtimestamp(emitted_at, tz=UTC),
-                source=cast(TelemetrySource, fields["source"]),
-                channel=str(fields["channel"]),
-                value=cast(TelemetryValue, fields["value"]),
-                unit=str(fields["unit"]),
-                payload=cast("bytes | None", fields["payload"]),
-                metadata={
-                    **rebase_metadata(
-                        cast("dict[str, MetadataValue]", fields["metadata"]),
-                        emitted_at - orig_epoch,
-                    ),
-                    # P02.16: the recorded instant rides on the record, so the
-                    # live source resolves the tune revision flashed *then*.
-                    REPLAY_SOURCE_AT_KEY: orig_epoch,
-                },
-            )
+            record = replay_record(fields, orig_epoch, time.time())
             try:
                 queue.put_nowait(record)
                 emitted += 1

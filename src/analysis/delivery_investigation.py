@@ -287,6 +287,9 @@ class UnresolvedPair:
     measurements: tuple[str, ...]
     #: Whether each measurement is actionable (an evaluator exists; data alone).
     actionable: tuple[bool, ...]
+    #: The fault-model features each measurement would observe (E03.4 scores
+    #: a measurement by what those features can tell apart).
+    features: tuple[tuple[Feature, ...], ...] = ()
 
 
 def unresolved_pairs(
@@ -318,6 +321,7 @@ def unresolved_pairs(
             ):
                 continue
             found: dict[str, bool] = {}
+            observes: dict[str, list[Feature]] = {}
             for feature in model.features:
                 if feature in seen:
                     continue
@@ -331,6 +335,7 @@ def unresolved_pairs(
                 else:
                     text, actionable = exclusion.measurement, exclusion.actionable
                 found[text] = found.get(text, False) or actionable
+                observes.setdefault(text, []).append(feature)
             ordered = sorted(found.items(), key=lambda item: not item[1])
             pairs.append(
                 UnresolvedPair(
@@ -338,6 +343,7 @@ def unresolved_pairs(
                     b_name,
                     tuple(text for text, _ in ordered),
                     tuple(flag for _, flag in ordered),
+                    tuple(tuple(observes[text]) for text, _ in ordered),
                 )
             )
     return pairs
@@ -351,6 +357,8 @@ class MeasurementChoice:
     actionable: bool
     #: Unresolved pairs (by hypothesis name) this measurement could separate.
     separates: tuple[tuple[str, str], ...]
+    #: The fault-model features it would observe.
+    features: tuple[Feature, ...] = ()
 
 
 def select_measurement(pairs: Iterable[UnresolvedPair]) -> list[MeasurementChoice]:
@@ -363,16 +371,22 @@ def select_measurement(pairs: Iterable[UnresolvedPair]) -> list[MeasurementChoic
     """
     tally: dict[str, list[tuple[str, str]]] = {}
     actionable: dict[str, bool] = {}
+    observes: dict[str, dict[Feature, None]] = {}
     for pair in pairs:
-        for text, flag in zip(pair.measurements, pair.actionable, strict=True):
+        features = pair.features or tuple(() for _ in pair.measurements)
+        for text, flag, seen in zip(pair.measurements, pair.actionable, features, strict=True):
             tally.setdefault(text, []).append((pair.a, pair.b))
             actionable[text] = actionable.get(text, False) or flag
+            observes.setdefault(text, {}).update(dict.fromkeys(seen))
     order = list(tally)
     ranked = sorted(
         tally.items(),
         key=lambda item: (not actionable[item[0]], -len(item[1]), order.index(item[0])),
     )
-    return [MeasurementChoice(text, actionable[text], tuple(found)) for text, found in ranked]
+    return [
+        MeasurementChoice(text, actionable[text], tuple(found), tuple(observes[text]))
+        for text, found in ranked
+    ]
 
 
 @dataclass(frozen=True)

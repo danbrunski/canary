@@ -281,8 +281,12 @@ def _provenance() -> Provenance:
     )
 
 
-def _subject(session: Path, slot: int, tolerance_words: int) -> str:
-    return f"{TWIN_TOOL}:{session.name}:slot{slot}:tol{tolerance_words}"
+def _subject(session: Path, slot: int, tolerance_words: int, segment: str | None = None) -> str:
+    """One subject per session, slot and tolerance; a session that spans a
+    flash adds its identity segment (its calibration), so each segment's
+    evaluation is its own record."""
+    suffix = "" if segment is None else f":seg-{segment}"
+    return f"{TWIN_TOOL}:{session.name}:slot{slot}:tol{tolerance_words}{suffix}"
 
 
 def _mint_refusal(
@@ -297,6 +301,7 @@ def _mint_refusal(
     refusal: TwinRefusalError,
     inputs: dict[str, str],
     flags: tuple[str, ...],
+    segment: str | None = None,
 ) -> str:
     start, end = _session_window(session)
     record = Evidence(
@@ -305,7 +310,7 @@ def _mint_refusal(
         conditions=Conditions(regime=TWIN_REGIME, vehicle_state=None),
         valid_from=start,
         valid_to=end,
-        subject=_subject(session, slot, tolerance_words),
+        subject=_subject(session, slot, tolerance_words, segment),
         incident=TWIN_INCIDENT,
         sources=(
             SourceRef(
@@ -339,6 +344,7 @@ def _mint(
     tolerance_words: int,
     inputs: dict[str, str],
     flags: tuple[str, ...],
+    segment: str | None = None,
 ) -> str:
     stamps = [_aware(r["sample"]["acquired_at"]) for r in result["records"]]
     start, end = (min(stamps), max(stamps)) if stamps else _session_window(session)
@@ -349,7 +355,7 @@ def _mint(
         conditions=Conditions(regime=TWIN_REGIME, vehicle_state=None),
         valid_from=start,
         valid_to=end,
-        subject=_subject(session, table.slot, tolerance_words),
+        subject=_subject(session, table.slot, tolerance_words, segment),
         incident=TWIN_INCIDENT,
         sources=(
             SourceRef(
@@ -410,8 +416,14 @@ def evaluate_and_mint(
     table_for_slot: Callable[[int], ResolvedTable],
     dids_path: Path = DIDS_YAML,
     tolerance_words: int = 1,
+    window: tuple[float | None, float | None] | None = None,
+    segment: str | None = None,
 ) -> dict[str, Any]:
     """Evaluate a finished ``session`` per resolved slot and mint one record each.
+
+    ``window``/``segment``: one identity segment of a session that spans a
+    flash (``src.control.twin_identity``), evaluated on its own reads and
+    minted under its own subject.
 
     ``table_for_slot`` resolves the table the ECM reads in a slot (from the W08
     library image or the transcribed calibration) and raises
@@ -453,6 +465,7 @@ def evaluate_and_mint(
                 dids_path=dids_path,
                 session_complete=True,
                 tolerance_words=tolerance_words,
+                window=window,
             )
         except TwinRefusalError as refusal:
             evidence.append(
@@ -467,6 +480,7 @@ def evaluate_and_mint(
                     refusal=refusal,
                     inputs=inputs,
                     flags=flags,
+                    segment=segment,
                 )
             )
             refusals.append(
@@ -485,9 +499,12 @@ def evaluate_and_mint(
                 tolerance_words=tolerance_words,
                 inputs=inputs,
                 flags=flags,
+                segment=segment,
             )
         )
         summary = summarise_evaluation(result, slot=slot)
+        if segment is not None:
+            summary["segment"] = segment
         summary["evidence_id"] = evidence[-1]
         evaluations.append(summary)
         pending.extend(sorted(_slots_seen(result) - done))

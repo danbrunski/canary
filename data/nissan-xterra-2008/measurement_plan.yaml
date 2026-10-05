@@ -1,0 +1,106 @@
+# How each fault-model measurement is acquired, what it costs, and when the
+# brain may propose it (E03.4).
+#
+# Schema: src/analysis/measurement_plan.py (MeasurementPlan,
+# canary-measurement-plan/1). One entry per residual of fault_hypotheses.yaml;
+# load_measurement_plan refuses a missing or unknown residual, another fault
+# model version, or a region threshold that differs from its source.
+#
+# Costs are declared judgments in one unit (operator minutes: the operator's
+# time the measurement takes beyond an ordinary drive), the denominator of
+# information gain per cost. They are not measured; `cost_basis` says what
+# each assumes. Information gain itself is computed only where every open
+# hypothesis carries an evidence-backed likelihood (fault_model.score); today
+# none does, so measurements are ranked structurally and the missing
+# likelihoods are named.
+#
+# The brain only proposes. A capture is proposed while the drive is inside the
+# measurement's region on its own (every predicate true on values younger than
+# max_input_age_s), never while any capture is active, and only from a profile
+# that polls the residual's whole channel set within its declared bus budget.
+# Physical actions (fit an instrument, qualification work) go to the
+# after-drive review queue; nothing asks the driver to do anything mid-drive.
+schema: canary-measurement-plan/1
+version: 1
+fault_model_version: 2
+cost_unit: operator_minutes
+# Fuel status is polled at 1 Hz in the default profile and 4 Hz in tuning;
+# two seconds is one missed default read.
+max_input_age_s: 2.0
+
+regions:
+  low_airflow:
+    source: fault_hypotheses.yaml pressure policy (running_min_maf_gs, low_airflow_max_gs); closed loop is Mode 01 fuel status 2
+    all:
+      - {channel: 'obd:FUEL_STATUS', op: eq, value: 2}
+      - {channel: 'obd:MAF', op: ge, value: 2.0}
+      - {channel: 'obd:MAF', op: lt, value: 10.0}
+  high_airflow:
+    source: fault_hypotheses.yaml pressure policy (high_airflow_min_gs); closed loop is Mode 01 fuel status 2
+    all:
+      - {channel: 'obd:FUEL_STATUS', op: eq, value: 2}
+      - {channel: 'obd:MAF', op: ge, value: 60.0}
+  enrichment:
+    source: tuning_providers.yaml mode01_wot (load_floor_pct, rpm_floor), the floors B06's gate applies
+    all:
+      - {channel: 'obd:ENGINE_LOAD', op: ge, value: 85.0}
+      - {channel: 'obd:RPM', op: ge, value: 2500.0}
+
+measurements:
+  - residual: delivery_error
+    cost: 5
+    cost_basis: >-
+      The tuning capture open for an ordinary drive that happens to include a
+      full-throttle pull; the operator's time is arming and closing it.
+    acquisition:
+      kind: capture
+      profile: tuning
+
+  - residual: pressure_flow_loss
+    cost: 5
+    cost_basis: >-
+      As delivery_error, with the fuel-pressure sensor connected (fitted
+      2026-10-04, read through the USB ADC).
+    acquisition:
+      kind: capture
+      profile: tuning
+      instruments: ['sensor:FUEL_PRESSURE']
+
+  - residual: fuel_pressure_droop
+    cost: 1
+    cost_basis: >-
+      Normal collection polls MAF and fuel status; any drive with the sensor
+      connected that climbs at high airflow carries it.
+    acquisition:
+      kind: default
+      instruments: ['sensor:FUEL_PRESSURE']
+
+  - residual: closed_loop_trim
+    cost: 60
+    cost_basis: >-
+      Two same-calibration null runs and the floor analysis, at a desk.
+    acquisition:
+      kind: analysis
+      physical_action: >-
+        Measure a same-calibration null-run trim floor in each airflow region
+        before trims count as evidence.
+
+  - residual: throttle_fill_vs_maf
+    cost: 120
+    cost_basis: >-
+      B08's qualification of the throttle-fill path on independent drives.
+    acquisition:
+      kind: analysis
+      physical_action: >-
+        Qualify the throttle-fill path against MAF on independent drives
+        (B08) before it can separate airflow from delivery.
+
+  - residual: independent_lambda
+    cost: 240
+    cost_basis: >-
+      Buying and fitting a wideband in the same exhaust stream, then a drive.
+    acquisition:
+      kind: instrument
+      physical_action: >-
+        Fit an independent wideband lambda sensor beside the ECM sensor and
+        log both through a full-throttle pull.

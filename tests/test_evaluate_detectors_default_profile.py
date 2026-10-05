@@ -20,8 +20,8 @@ pytest.importorskip("sklearn")
 
 from scripts.evaluate_detectors import main  # noqa: E402
 from src.decode.dids import load_repo_did_map
-from src.models.evaluation import default_profile_exclusion  # noqa: E402
 from src.storage.capture_manifest import CAPTURE_MANIFEST_FILENAME  # noqa: E402
+from src.storage.corpus_eligibility import default_profile_exclusion  # noqa: E402
 from src.storage.parquet_writer import write_records_to_parquet  # noqa: E402
 from src.telemetry import TelemetryRecord  # noqa: E402
 from tests.configs import example_config

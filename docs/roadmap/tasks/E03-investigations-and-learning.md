@@ -18,14 +18,6 @@ computed on the Pi and render without a language model.
   → verify → remember on the Pi, and a later occurrence retrieves it.
   Missing commanded AFR and insufficient regime coverage produce different
   explicit outcomes; neither becomes a zero error or a resolved diagnosis.
-
-- [x] **E03.2 — Define detectable and distinguishable hypotheses.**
-  Express air/fuel relations and fault signatures as versioned artifacts.
-  Spike the proposed Fault Diagnosis Toolbox for structural analysis before
-  writing an alternative. Research may use a laptop, but deploy compact
-  residual/hypothesis artifacts that the Pi can evaluate independently.
-  Start with MAF transfer error, fuel-delivery sag and a fixed-quantity error
-  such as an idle air leak/injector dead time. Require evidence for numerical
   *Laptop loop done 2026-10-04 (revised after verification); the Pi run
   remains (E04).* **Real answer today: the WOT lean does not reproduce out
   of sample.** `_capture-tuning-2026-09-23T164007` (+3.30 %, 44 rows) is in
@@ -97,23 +89,20 @@ computed on the Pi and render without a language model.
   exercise the flow-loss residual on real data, but neither blocks the
   machinery; (3) B08.5's ECU-computation/historical residual evidence is
   not attached (B08's).
+
+- [x] **E03.2 — Define detectable and distinguishable hypotheses.**
+  Express air/fuel relations and fault signatures as versioned artifacts.
+  Spike the proposed Fault Diagnosis Toolbox for structural analysis before
+  writing an alternative. Research may use a laptop, but deploy compact
+  residual/hypothesis artifacts that the Pi can evaluate independently.
+  Start with MAF transfer error, fuel-delivery sag and a fixed-quantity error
+  such as an idle air leak/injector dead time. Require evidence for numerical
   likelihoods; do not invent probabilities for unsupported hypotheses.
   **Accept:** known-answer and labelled synthetic controls exercise each
   declared signature; the model explicitly reports indistinguishable pairs.
   With today's absent fuel-pressure measurement, MAF error versus delivery
   sag remains unresolved and the proposed separating measurement names fuel
   pressure. A language-generated hypothesis stays unscored until modelled.
-
-- [ ] **E03.3 — Detect change against a frozen reference.**
-  Evaluate CUSUM/GLR candidates and condition-specific conformal intervals
-  with the existing held-out-drive machinery. Declare excitation, residual
-  dependence, interval calibration, persistence and event deduplication.
-  A per-sample exceedance is not automatically an event or a false positive.
-  **Accept:** independent-drive reports give coverage, event counts and
-  detection latency for declared shifts, distinguish synthetic fault labels
-  from real observations, and preserve excluded/unevaluable counts. Candidate
-  adaptation cannot move the reference or widen its alarm limits.
-
   *Done on the laptop 2026-10-04 (v2 after verification); toolbox install
   left to the operator.* Artifact `data/nissan-xterra-2008/fault_hypotheses.yaml`
   (`canary-fault-hypotheses/1`, `version: 2`): regions `low_airflow` /
@@ -151,6 +140,17 @@ computed on the Pi and render without a language model.
   `test_no_likelihood_without_evidence_that_resolves` (invented and
   retracted ids refused), language hypothesis unscored, schema refusals and
   the negative control `test_negative_control_a_sag_that_claims_no_flow_loss_is_inseparable`.
+  *Toolbox spike (no install; PyPI metadata and docs read 2026-10-04):*
+  `faultdiagnosistoolbox` 0.12.5, MIT, cp312 manylinux aarch64 and x86_64
+  wheels (~100 KB), depends on sympy, numpy, scipy, matplotlib and
+  scikit-learn (sympy and matplotlib are new to the Pi). It analyses
+  equation-level DAE models (structural/Dulmage–Mendelsohn analysis, MSO
+  residual generation, isolability, sensor placement, code generation). Our
+  first artifact is a qualitative, region-indexed sign table with no
+  equations, which its model input does not express, so the minimal
+  set-signature analysis above was written instead. The toolbox becomes the
+  right tool once the air/fuel relations are written as equations (E03.4/E05
+  scale); installing it is an operator decision (not taken here).
 
 - [~] **E03.3 — Detect change against a frozen reference.**
   Evaluate CUSUM/GLR candidates and condition-specific conformal intervals
@@ -321,18 +321,7 @@ computed on the Pi and render without a language model.
   drives will not clear it. Then re-run the tool with `--config`.
   - The Pi run through E04.
 
-  *Toolbox spike (no install; PyPI metadata and docs read 2026-10-04):*
-  `faultdiagnosistoolbox` 0.12.5, MIT, cp312 manylinux aarch64 and x86_64
-  wheels (~100 KB), depends on sympy, numpy, scipy, matplotlib and
-  scikit-learn (sympy and matplotlib are new to the Pi). It analyses
-  equation-level DAE models (structural/Dulmage–Mendelsohn analysis, MSO
-  residual generation, isolability, sensor placement, code generation). Our
-  first artifact is a qualitative, region-indexed sign table with no
-  equations, which its model input does not express, so the minimal
-  set-signature analysis above was written instead. The toolbox becomes the
-  right tool once the air/fuel relations are written as equations (E03.4/E05
-  scale); installing it is an operator decision (not taken here).
-- [ ] **E03.4 — Track hypotheses and select the next measurement.**
+- [~] **E03.4 — Track hypotheses and select the next measurement.**
   Update a finite hypothesis set when new evidence arrives, preserving
   supporting and refuting evidence ids. Rank measurements by expected
   information gain divided by declared cost where probabilities support it;
@@ -345,7 +334,92 @@ computed on the Pi and render without a language model.
   indistinguishable explanations unresolved, and cannot displace an
   operator-owned capture. Repeated evidence is not counted twice and
   conflicting evidence changes the recorded ranking reproducibly.
+  *Laptop parts done 2026-10-04 on labelled synthetic drives; the live hook
+  (E04.1 streaming tick) and the Pi run remain.*
+  - **Tracking** (`src/analysis/hypothesis_tracking.py`,
+    `track_hypotheses`): the fault model's modelled hypotheses, each with
+    its supporting/refuting evidence ids and drive counts. Counted once: a
+    repeated id, a superseded id (counts as its current replacement), the
+    same content, and a second record of one feature on one drive (a session
+    in common); every skipped id is listed with why. Records of one feature
+    on one drive that disagree in sign are a named conflict, excluded.
+    Ranking: refuting drives, then supporting drives, then model order —
+    independent of input order.
+  - **Ranking measurements** (`rank_measurements`, extends
+    `delivery_investigation.select_measurement`; `UnresolvedPair` and
+    `MeasurementChoice` gained the `features` each measurement observes):
+    expected information gain ÷ declared cost only when every open
+    hypothesis has a likelihood whose cited evidence resolves
+    (`fault_model.score`) and every open hypothesis's outcome on the
+    measured features is a single sign; otherwise method `structural` with
+    each missing likelihood and `P(feature | hypothesis)` named. On the real
+    model today it is structural: no likelihood is declared, and MAF error's
+    pressure signature is `nonnegative`, so pressure's information gain is
+    undefined, not zero.
+  - **Recording** (`update_investigation`): supersedes the investigation
+    with hypotheses in ranked order and `next_measurements` in ranked order;
+    re-running with already-counted evidence returns the same record.
+  - **Plan artifact** `data/nissan-xterra-2008/measurement_plan.yaml`
+    (`canary-measurement-plan/1`, `src/analysis/measurement_plan.py`): per
+    residual a declared cost (operator minutes, with its basis) and
+    acquisition (`capture: tuning`, `default`, `analysis`, `instrument`;
+    `sensor:` channels are instruments); live region entry predicates.
+    `load_measurement_plan` refuses another fault-model version, a missing
+    residual/region, and thresholds that differ from their sources (the
+    pressure policy's 2/10/60 g/s; `tuning_providers.yaml` `mode01_wot`
+    85 % load / 2500 rpm).
+  - **Proposals** (`propose`, `replay_proposals`): a capture is proposed
+    only while every predicate of the measurement's region holds on values
+    younger than 2 s (missing/stale input → named `defer`), only with
+    `vehicle_state == engine_running`, never while any capture is active
+    (`Proposal` refuses `open_capture` with `during_capture` set; the
+    operator's own `tuning` capture reads `collecting`), and only from a
+    profile that polls the residual's whole channel set (one batch group if
+    declared) with declared demand within its bus budget
+    (`profile_shortfall`: `incomplete_tuple` / `capacity_undeclared` /
+    `over_capacity`; tuning 59 of 90 req/s passes). Instruments, analysis
+    and fitting are `review` delivered `after_drive`; no delivery reaches the
+    driver.
+  - **Evidence:** `tests/test_hypothesis_tracking.py` (15 passed after the
+    second pass, which added the session-overlap test; first pass 14 in 17.5 s
+    serial): `test_drive_a_ranks_open_hypotheses_and_names_fuel_pressure_first`,
+    `test_update_records_the_ranking_and_leaves_indistinguishable_pairs_open`
+    (first next measurement "Log fuel pressure through a full-throttle pull
+    (supercharger-build NA2)."; MAF error vs sensor bias unresolved, the
+    wideband non-actionable), `test_repeated_evidence_is_counted_once`,
+    `test_updating_with_counted_evidence_returns_the_same_record`,
+    `test_conflicting_evidence_changes_the_ranking_reproducibly` (drive C on
+    the command; five shuffles, one ranking; no hypothesis left open),
+    `test_within_one_drive_a_sign_conflict_is_excluded_and_named`,
+    `test_information_gain_per_cost_ranks_only_with_evidence_backed_likelihoods`
+    (labelled variant model, weights 0.5/0.3/0.2: pressure 0.8813 bits,
+    wideband 0.7219 bits; pricing pressure at 10,000 flips the order; an
+    unresolvable citation falls back to structural),
+    `test_replay_proposes_the_tuning_capture_only_inside_enrichment`,
+    `test_replay_cannot_displace_an_operator_capture`,
+    `test_replay_without_the_sensor_asks_for_it_after_the_drive`,
+    `test_no_proposal_unless_the_engine_runs_and_canary_transmits`,
+    `test_missing_or_stale_region_inputs_defer_with_a_named_reason`,
+    `test_the_plan_refuses_thresholds_that_differ_from_their_sources`,
+    `test_profile_capacity_and_complete_tuples`.
+  - **Remaining:** (1) call `propose` from the live tick (E04.1's streaming
+    evaluator, `src/daemon/twin_live.py`/`inference.py`, held by the E04
+    agent) with `/status` capture state and fresh readings, and surface
+    proposals on the Brain page (`BrainPage.tsx`, also E04's); (2) the Pi
+    run; (3) no evidence-backed likelihood exists, so real rankings stay
+    structural until one is earned.
 
+- [~] **E03.5 — Learn a small candidate without absorbing a fault.**
+  Trial recursive least squares or a Kalman candidate over a few physically
+  meaningful parameters. Predict before updating; gate on excitation,
+  conditions and accepted data disposition. Freeze candidate updates for
+  drives after an unresolved change alarm. Preserve checkpoints, valid time,
+  reference/candidate lineage and calibration boundaries.
+  **Accept:** replay proves prediction precedes learning, idle-only data
+  cannot identify unexcited parameters, and an injected developing fault is
+  still visible against the frozen reference. Candidates cannot train across
+  an invalidating hardware intervention. Learning cannot alter decoded ECU
+  arithmetic or its exact ROM constants to conceal a twin residual.
   *Re-done 2026-10-04; laptop parts done on synthetic drives (no real
   reference can be frozen, see E03.3); the Pi run through E04 remains.*
   `src/models/adaptive_candidate.py`: a random-walk Kalman filter.
@@ -404,19 +478,8 @@ computed on the Pi and render without a language model.
   - A real-drive replay once E03.3 can freeze a reference.
   - The Pi run through E04: per-tick cost, and checkpoint persistence under
     `state_dir`.
-- [~] **E03.5 — Learn a small candidate without absorbing a fault.**
-  Trial recursive least squares or a Kalman candidate over a few physically
-  meaningful parameters. Predict before updating; gate on excitation,
-  conditions and accepted data disposition. Freeze candidate updates for
-  drives after an unresolved change alarm. Preserve checkpoints, valid time,
-  reference/candidate lineage and calibration boundaries.
-  **Accept:** replay proves prediction precedes learning, idle-only data
-  cannot identify unexcited parameters, and an injected developing fault is
-  still visible against the frozen reference. Candidates cannot train across
-  an invalidating hardware intervention. Learning cannot alter decoded ECU
-  arithmetic or its exact ROM constants to conceal a twin residual.
 
-- [ ] **E03.6 — Evaluate interventions and promote after collection stops.**
+- [~] **E03.6 — Evaluate interventions and promote after collection stops.**
   Run bounded evaluation on the Pi through E04, using independent drives,
   known-answer cases, condition-matched comparisons and E01's pre-intervention
   prediction/noise-floor contract. Reuse B03/online-training promotion and
@@ -425,6 +488,110 @@ computed on the Pi and render without a language model.
   independent evidence stays pending. A qualified candidate can promote
   atomically on the Pi and the old reference remains recoverable. Replaying
   the same evidence does not create a second outcome or promotion.
+  *Laptop parts done 2026-10-04 on labelled synthetic drives; no real
+  reference exists (E03.3), so the real state is `pending:
+  no_frozen_reference`; the Pi run remains.*
+  - **Store** (`src/models/candidate_store.py`, `CandidateStore` at
+    `control/<slug>/brain/candidates/` under `state_dir`): references and
+    checkpoints written once under their self-checked fingerprints (an
+    edited file is refused), never deleted; `active.json` swapped by
+    `atomic_write_text` with compare-and-swap (`StaleActivationError`);
+    `history` and `restore`; content-keyed `decisions.jsonl`.
+  - **Promoted reference** (`change_detection.calibrate_promoted`;
+    `fit_reference` now shares `_calibrate_and_freeze`): the checkpoint's
+    parameters, calibrated on independent drives under the predecessor's
+    policy with every calibration gate; `FrozenReference.lineage`
+    `promoted_candidate` must name `promoted_from` and `previous_reference`.
+  - **Evaluation** (`src/analysis/candidate_promotion.py`,
+    `evaluate_candidate`; B03's gates, each fail-closed): (1) only
+    independent drives — not in the reference's folds, starting after the
+    checkpoint's learned data, before no invalidating intervention, on the
+    reference's calibration, and not before the prediction was recorded
+    (`post_hoc`); (2) contamination — lineage, calibration, `frozen_by`,
+    nothing learned, unidentified parameters and a retiring intervention
+    reject; an unresolved change alarm keeps it pending; (3) E01 prediction
+    (`register_prediction`: direction `increase` of the gain with the
+    floor `<residual>_drive_mean` from `noise_floor.yaml`) judged per test
+    drive on a paired comparison (same blocks, same calibrated cells, mean
+    absolute residual) minted as evidence + outcome; `confirmed` needed on 3
+    drives, one `contradicted` rejects, no floor leaves all `unresolvable`
+    and pending; (4) known answers — each declared non-ramp shift injected
+    into each test drive; the promoted reference must detect at least as
+    many and raise no more alarms on the recorded drives. Drives after the
+    3 test drives calibrate the promoted reference; too few → pending.
+  - **Promotion is separate and explicit** (`promote`; B03: never
+    automatic): only a `qualified` decision, against the reference still
+    active; supersedes the old reference's memory record; the old file and
+    record stay. Synthetic-origin decisions promote only on an isolated
+    (replay) ledger.
+  - **E04 jobs** (`src/control/brain_jobs.py`): kinds
+    `candidate_evaluation` (residual + checkpoint; reads independent
+    sessions in the child via `load_independent_drives`, E03.3's
+    `read_session_samples`/`assemble_drives`) and `candidate_promotion`
+    (residual + decision; refused 409 unless qualified). A pending decision
+    leaves the job `pending` (not `completed`); the precheck re-runs it only
+    when the count of sessions after the checkpoint changes.
+  - **Synthetic result** (reference fitted on the true relation; the engine
+    then sits +0.6 points off it; candidate learned 84 blocks over 4
+    drives; floor sd 0.05 → detectable 0.1): test drives e0–e2 gain 0.316,
+    0.417, 0.373 points (reference |residual| 0.57–0.64 → candidate
+    0.19–0.27), all `confirmed`; known answers 3/3 both; 0 observed events
+    both; promoted reference calibrated on e3–e4.
+  - **Evidence:** `tests/test_candidate_promotion.py` (16 passed after the
+    second pass; first pass 12 in 7.4 s serial):
+    `test_a_qualified_candidate_promotes_atomically_and_the_old_reference_stays`,
+    `test_replaying_the_same_evidence_creates_no_second_outcome_or_promotion`
+    (same decision key and outcome ids, ledger size unchanged, second
+    `promote` `changed=False`, one history entry, 3 outcomes),
+    `test_a_stale_decision_cannot_overwrite_a_newer_reference`,
+    `test_a_synthetic_decision_cannot_promote_in_live_memory`,
+    `test_a_better_recent_fit_alone_cannot_promote` (its own drives are all
+    `in_sample` → pending; independent drives without the drift →
+    `contradicted` → rejected, checkpoint kept),
+    `test_insufficient_independent_evidence_stays_pending`,
+    `test_without_a_noise_floor_every_outcome_is_unresolvable_and_pending`,
+    `test_a_promoted_reference_that_would_miss_known_faults_is_rejected`
+    (the detector stubbed to miss under the promoted reference),
+    `test_an_alarm_freezes_the_lineage_and_an_open_one_keeps_promotion_pending`,
+    `test_the_store_refuses_edited_files_and_a_second_installation`,
+    `test_a_promoted_reference_names_its_lineage`,
+    `test_the_vehicle_job_stays_pending_until_independent_evidence_exists`
+    (real profile: `pending: no_frozen_reference`, then `no_prediction` with
+    0 sessions seen, not re-run; promotion 409).
+  - **Verification fixes (2026-10-04, second pass):**
+    - The brain child no longer imports torch: `default_profile_exclusion`
+      moved from `src.models.evaluation` (which reaches the LSTM through
+      `false_positive_benchmark`) to the torch-free
+      `src/storage/corpus_eligibility.py`; `change_evaluation`,
+      `behavior_validation`, `scripts/evaluate_detectors.py` and its test
+      import it there. `test_the_brain_jobs_module_does_not_import_torch`
+      (fresh interpreter: `'torch' not in sys.modules`).
+    - `promote` re-checks the gates that can change after a decision:
+      an unresolved change alarm and an intervention retiring the replaced
+      reference raise `PromotionError` naming the gate
+      (`test_promotion_re_checks_an_alarm_raised_after_the_decision`,
+      `test_promotion_re_checks_an_intervention_recorded_after_the_decision`).
+    - Unset `promoted_from`/`previous_reference` are left out of the hash, so
+      a held-out fit's fingerprint is HEAD's (`3684479673d992f5` for the
+      test reference, computed by running HEAD's `change_detection.py`;
+      `test_a_held_out_fit_hashes_as_it_did_before_promotion_existed`).
+    - E03.4 occurrence grouping is by session overlap (union-find over
+      sessions), not the exact session set
+      (`test_a_record_pooling_the_drive_with_another_session_is_the_same_drive`).
+  - **Behaviour changes:** `POST /control/brain/jobs` accepts
+    `candidate_evaluation` and `candidate_promotion` (the route is generic
+    over `canonical_params`); a brain job can now end `pending` (not
+    `completed`) when its run finds too little independent evidence, and
+    re-runs only when the count of sessions after the checkpoint changes.
+  - **Remaining:** (1) a real reference (E03.3) and a real candidate;
+    nothing yet installs a frozen reference into the store or registers a
+    prediction for a live checkpoint (the E03.3 tool and E04.1 streaming
+    path); (2) `stft_bank_balance_drive_mean` has no measured floor, so a
+    real evaluation stays `unresolvable` until one is measured under a
+    declared regime; (3) the Pi run (job in a no_data window, a promotion
+    surviving `scripts/restart_canary.sh`); (4) the dashboard job-kind type
+    (`src/dashboard/static/src/types/brain.ts`, E04's) lists only the two
+    older kinds.
 
 - [ ] **E03.7 — Record the NA investigation and supercharger intervention.**
   Link to N01 and supercharger NA2. Resolve the WOT-lean investigation with

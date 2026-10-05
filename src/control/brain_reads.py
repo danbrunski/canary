@@ -264,14 +264,29 @@ def twin_session_evaluation(config: CanaryConfig, session_id: str) -> dict[str, 
     return payload
 
 
+#: ``live_twin`` when no daemon tick publishes one (a bare app, a test).
+LIVE_TWIN_ABSENT: dict[str, Any] = {
+    "enabled": False,
+    "result": "not_running",
+    "reason": "no live inference pipeline publishes the twin in this process",
+}
+
+
 def brain_status(
-    config: CanaryConfig, *, process_started_at: datetime | None = None
+    config: CanaryConfig,
+    *,
+    process_started_at: datetime | None = None,
+    live_twin: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Recovery standing (identity, invalidations, tables, transient state,
-    memory) plus job counts. Read-only: computing it never records a change."""
+    memory) plus job counts, and the live twin's current predictions,
+    residuals and applicability as the inference tick last published them
+    (``/status`` ``detectors.inference.twin``, the same block). Read-only:
+    computing it never records a change."""
     try:
         report = recovery_report(config, process_started_at=process_started_at, write=False)
     except UnscopedMemoryError as exc:
         raise BrainReadError(503, {"error": "unscoped", "message": str(exc)}) from exc
     report["jobs"] = brain_jobs(config)["counts"]
+    report["live_twin"] = dict(live_twin) if live_twin is not None else dict(LIVE_TWIN_ABSENT)
     return report

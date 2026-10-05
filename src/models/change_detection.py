@@ -99,6 +99,7 @@ __all__ = [
     "ReferenceRefusedError",
     "Sample",
     "blocks_of",
+    "calibrate_promoted",
     "calibration_fold_bias",
     "fit_reference",
     "reference_fingerprint",
@@ -485,8 +486,17 @@ class AlarmLimits(_Strict):
 _SEALING: dict[str, bool] = {"sealing": True}
 
 
+#: Promotion fields hashed only when set, so a held-out fit hashes exactly as
+#: it did before promotion existed (no stored fingerprint moves).
+_UNHASHED_WHEN_NONE = ("promoted_from", "previous_reference")
+
+
 def reference_fingerprint(payload: dict[str, Any]) -> str:
-    body = {k: v for k, v in payload.items() if k != "fingerprint"}
+    body = {
+        k: v
+        for k, v in payload.items()
+        if k != "fingerprint" and not (k in _UNHASHED_WHEN_NONE and v is None)
+    }
     text = json.dumps(body, sort_keys=True, separators=(",", ":"), default=str)
     return hashlib.sha256(text.encode()).hexdigest()
 
@@ -495,9 +505,16 @@ class FrozenReference(_Strict):
     """A validated reference and its alarm limits, immutable and self-hashed."""
 
     kind: Literal["frozen_reference"] = "frozen_reference"
-    #: Only a held-out fit exists; a candidate becomes a reference through
-    #: promotion (E03.6), never by being passed as one.
-    lineage: Literal["held_out_fit"] = "held_out_fit"
+    #: ``held_out_fit``: fitted on training drives, calibrated on others.
+    #: ``promoted_candidate``: an adaptive candidate's parameters, calibrated
+    #: on drives independent of everything it learned from
+    #: (:func:`calibrate_promoted`, E03.6). A candidate becomes a reference
+    #: only through promotion, never by being passed as one.
+    lineage: Literal["held_out_fit", "promoted_candidate"] = "held_out_fit"
+    #: For a promoted reference: the candidate checkpoint its parameters came
+    #: from, and the reference that candidate adapted from (kept, recoverable).
+    promoted_from: str | None = None
+    previous_reference: str | None = None
     name: str = Field(min_length=1)
     residual: str = Field(min_length=1)
     unit: str = Field(min_length=1)
@@ -526,6 +543,15 @@ class FrozenReference(_Strict):
     def _self_hashed(self, info: ValidationInfo) -> FrozenReference:
         if len(self.theta) != len(self.features):
             raise ValueError("theta and features differ in length")
+        promoted = self.promoted_from is not None and self.previous_reference is not None
+        if (self.lineage == "promoted_candidate") != promoted or (
+            self.lineage == "held_out_fit"
+            and (self.promoted_from is not None or self.previous_reference is not None)
+        ):
+            raise ValueError(
+                "a promoted reference names its candidate checkpoint and previous reference, "
+                "and only a promoted reference does"
+            )
         for stamp in (self.valid_from, self.valid_to):
             if stamp.tzinfo is None:
                 raise ValueError("reference times are timezone-aware")
@@ -606,6 +632,87 @@ def fit_reference(
             f"({list(policy.features)}): the fit is not identified"
         )
     theta, *_ = np.linalg.lstsq(design, y, rcond=None)
+    return _calibrate_and_freeze(
+        policy,
+        np.asarray(theta, dtype=np.float64),
+        calibration,
+        name=name,
+        calibration_revision=calibration_revision,
+        train_drives=train_drives,
+        span=[*train, *calibration],
+        lineage={"lineage": "held_out_fit"},
+    )
+
+
+def calibrate_promoted(
+    policy: ChangePolicy,
+    previous: FrozenReference,
+    theta: Sequence[float],
+    calibration: Sequence[Block],
+    *,
+    promoted_from: str,
+    learned_from: datetime,
+) -> FrozenReference:
+    """A reference from a candidate's parameters, calibrated on independent drives (E03.6).
+
+    ``theta`` comes from an adaptive-candidate checkpoint (``promoted_from``,
+    its fingerprint) that adapted from ``previous``; ``calibration`` blocks
+    must come from drives independent of everything that shaped either: none
+    of ``previous``'s train or calibration drives, and none starting before
+    the candidate's data ends (the caller's held-out selection). Every gate
+    :func:`fit_reference` applies to its calibration fold applies here
+    unchanged (dependence, effective size, bias), under the same policy as
+    ``previous``. ``learned_from`` is when the candidate's learned data began.
+    """
+    if policy.sha256() != previous.policy_sha256:
+        raise ReferenceRefusedError(
+            "the promoted reference must keep its predecessor's policy; a re-tuned policy "
+            "is a new held-out fit, not a promotion"
+        )
+    if len(theta) != len(previous.features):
+        raise ReferenceRefusedError("the candidate's parameters do not match the reference")
+    cal_drives = {b.drive for b in calibration}
+    reused = sorted(cal_drives & {*previous.train_drives, *previous.calibration_drives})
+    if reused:
+        raise ReferenceRefusedError(
+            f"drives {reused} fitted or calibrated the previous reference; a promoted "
+            "reference is calibrated on independent drives"
+        )
+    if len(cal_drives) < 2:
+        raise ReferenceRefusedError(
+            f"{len(cal_drives)} independent calibration drive(s) with blocks; need 2"
+        )
+    return _calibrate_and_freeze(
+        policy,
+        np.asarray(theta, dtype=np.float64),
+        calibration,
+        name=previous.name,
+        calibration_revision=previous.calibration,
+        train_drives=[f"candidate:{promoted_from}"],
+        span=list(calibration),
+        lineage={
+            "lineage": "promoted_candidate",
+            "promoted_from": promoted_from,
+            "previous_reference": previous.fingerprint,
+        },
+        valid_from=learned_from,
+    )
+
+
+def _calibrate_and_freeze(
+    policy: ChangePolicy,
+    theta: np.ndarray,
+    calibration: Sequence[Block],
+    *,
+    name: str,
+    calibration_revision: str | None,
+    train_drives: list[str],
+    span: Sequence[Block],
+    lineage: dict[str, str],
+    valid_from: datetime | None = None,
+) -> FrozenReference:
+    """Calibrate the limits of the relation ``theta`` on ``calibration`` and freeze."""
+    cal_drives = sorted({b.drive for b in calibration})
 
     def residual(b: Block) -> float:
         return float(b.y - np.dot(theta, b.x))
@@ -714,10 +821,14 @@ def fit_reference(
             f"{policy.unit} exceeds {policy.calibration.max_bias_fraction} x shift of interest "
             f"({limit:g}); CUSUM would accumulate on in-control data"
         )
-    every = [*train, *calibration]
+    start = (
+        valid_from
+        if valid_from is not None
+        else datetime.fromtimestamp(min(b.start for b in span), UTC)
+    )
     payload: dict[str, Any] = {
         "kind": "frozen_reference",
-        "lineage": "held_out_fit",
+        **lineage,
         "name": name,
         "residual": policy.residual,
         "unit": policy.unit,
@@ -746,8 +857,8 @@ def fit_reference(
         "train_drives": train_drives,
         "calibration_drives": cal_drives,
         "calibration": calibration_revision,
-        "valid_from": datetime.fromtimestamp(min(b.start for b in every), UTC).isoformat(),
-        "valid_to": datetime.fromtimestamp(max(b.end for b in every), UTC).isoformat(),
+        "valid_from": start.isoformat(),
+        "valid_to": datetime.fromtimestamp(max(b.end for b in span), UTC).isoformat(),
     }
     unsealed = FrozenReference.model_validate(
         {**payload, "fingerprint": "0" * 64}, context=_SEALING

@@ -49,8 +49,13 @@ def build_router(ctx: ControlContext) -> APIRouter:
     @router.get("/control/brain/status")
     async def get_brain_status() -> dict[str, Any]:
         """Identity, what a program/calibration change invalidated, selected
-        tables, RAM-address standing, transient state, memory and job counts."""
-        return await read(lambda: brain_reads.brain_status(config, process_started_at=_STARTED_AT))
+        tables, RAM-address standing, transient state, memory, job counts and
+        the live twin's predictions/residuals/applicability (E04.1)."""
+        recorder = ctx.inference_timing
+        live = recorder.twin() if recorder is not None else None
+        return await read(
+            lambda: brain_reads.brain_status(config, process_started_at=_STARTED_AT, live_twin=live)
+        )
 
     @router.get("/control/brain/memory")
     async def get_brain_memory(request: Request) -> dict[str, Any]:

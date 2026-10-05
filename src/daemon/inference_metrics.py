@@ -278,6 +278,9 @@ class InferenceTiming:
     #: result kind; a tuning readout that never alerts. ``None`` before the
     #: pipeline starts.
     lambda_delivery: Mapping[str, Any] | None = None
+    #: E04.1 — the live target-phi twin: decided command samples, accounting,
+    #: applicability, intake and cost; ``None`` before the pipeline starts.
+    twin: Mapping[str, Any] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -304,6 +307,7 @@ class InferenceTiming:
             "lambda_delivery": (
                 dict(self.lambda_delivery) if self.lambda_delivery is not None else None
             ),
+            "twin": dict(self.twin) if self.twin is not None else None,
         }
 
 
@@ -337,6 +341,7 @@ class InferenceTimingRecorder:
     _plausibility: Mapping[str, Any] | None = field(default=None, repr=False)
     _committees: Mapping[str, Any] | None = field(default=None, repr=False)
     _lambda_delivery: Mapping[str, Any] | None = field(default=None, repr=False)
+    _twin: Mapping[str, Any] | None = field(default=None, repr=False)
     _envelope: EnvelopeCoverageMeter = field(default_factory=EnvelopeCoverageMeter, repr=False)
 
     def __post_init__(self) -> None:
@@ -407,6 +412,14 @@ class InferenceTimingRecorder:
     def set_lambda_delivery(self, block: Mapping[str, Any] | None) -> None:
         """Publish the lambda delivery readout's live block (B06.4)."""
         self._lambda_delivery = dict(block) if block is not None else None
+
+    def set_twin(self, block: Mapping[str, Any] | None) -> None:
+        """Publish the live twin's block (E04.1)."""
+        self._twin = dict(block) if block is not None else None
+
+    def twin(self) -> Mapping[str, Any] | None:
+        """The live twin's last published block, for the brain routes."""
+        return self._twin
 
     def note_sequence_window(
         self,
@@ -483,6 +496,7 @@ class InferenceTimingRecorder:
             sequence_envelope=self._envelope.to_dict(),
             committees=self._committees,
             lambda_delivery=self._lambda_delivery,
+            twin=self._twin,
         )
 
 

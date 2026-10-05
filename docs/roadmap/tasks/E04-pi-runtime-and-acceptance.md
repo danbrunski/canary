@@ -7,7 +7,7 @@ are not finished until their applicable Pi acceptance passes here.
 
 ## Checklist
 
-- [ ] **E04.1 — Integrate bounded streaming evaluation.**
+- [~] **E04.1 — Integrate bounded streaming evaluation.**
   Feed acquisition-stamped arrived samples into a bounded consumer at the
   existing inference tick/scoring-child seam. Reuse the arrival/pairing
   patterns in `lambda_delivery_stream` and live-feature observers where
@@ -19,8 +19,60 @@ are not finished until their applicable Pi acceptance passes here.
   I/O or a language model; a stalled consumer cannot create an unbounded
   backlog. Missing/gapped state causes named unevaluability rather than
   inventing intermediate ECU state. Layering and state-dir checks pass.
+  - *Laptop code, 2026-10-04:* `src/analysis/target_phi_stream.py`
+    `TwinStream` decides each command sample with the stored evaluator's own
+    `_assess` (so `predict` and the shared lookup kernel) over a bounded
+    window, once every stream is read past its decision horizon (10.25 s for
+    the Xterra profile: identity max age + skew; plus 2 s settle). Inputs pair
+    by `match_ordered` against reads earlier batches left unused; a read at or
+    before a time a decided record could cite is counted `late` and dropped;
+    retained reads are evicted by data clock (lookback 10.25 s + 1 s) with a
+    counted 20,000-per-channel cap. `target_phi.py` gained the shared pieces
+    (`evaluated_specs`, `raw_specs`, `decision_horizon_s`, `lookback_s`,
+    `new_candidate`, `Qualification`, incremental `Accounting`,
+    `capture_requirement`; `_assess(captured=...)` so a gap in the window is
+    stale, never "not captured"); the E02.3 fixture still reproduces record
+    for record (`tests/test_target_phi.py` 76 pass). `src/daemon/twin_live.py`
+    `LiveTwin`: a `record_observers` hook appends to a bounded intake (8,192
+    reads; overflow counted `intake.dropped`); the 1 Hz tick hands the intake
+    to one dedicated worker thread and never waits (`busy_ticks` while it
+    runs); the worker loads the profile definition, resolves identity at the
+    session's identity segments and slot tables through the resolver the
+    stored brain job also uses (`src/control/twin_identity.py`
+    `TwinResolver`, below), routes each read to the segment its own time
+    falls in, flushes a segment when the data clock passes its end, and
+    flushes a session's streams on a session change (counted).
+    Published as `/status` `detectors.inference.twin` (result, applicability,
+    blockers, accounting, pending/late/dropped/busy, identity, transient,
+    latest prediction + 120 recent, `vehicle_state`, reached and finished
+    segments with per-slot accounting or refusal) with stages `twin_tick`,
+    `twin_eval` and `twin_identity` (identity resolution timed apart), and as `/control/brain/status` `live_twin` (MCP
+    `get_brain_status` passes it through) and the BrainPage status rows.
+    Writes nothing. Off by default: `twin_live.enabled` (config). Tests
+    `tests/test_twin_live.py` (60 pass): stalled worker -> 1 hand-off, 19 busy
+    ticks, intake held at capacity with drops counted, < 2 s for 2,000 reads;
+    a blocking preload leaves two ticks < 0.2 s; gaps are
+    `map_identity_unbracketed` with no prediction; status carries both stage
+    timings; off by default says why; `test_layering.py`/`test_state_dir.py`
+    pass. Laptop cost (worker thread, `.venv`, Oct 4 slice through the live
+    path, 1,510 ticks): eval p50 0.414 ms, p99 0.959 ms, max 1.796 ms;
+    observer 3.0 µs/record. Synthetic 8x read density (first 6 min): p99
+    1.754 ms, max 2.571 ms, 546 retained reads (load average ~7). Re-measured
+    after the E04.2 revision at load average 14-20: p50 1.3-1.7 ms, p99
+    3.7-4.8 ms (8x: p99 3.9-8.2 ms), identity check median 0.02 ms after the
+    first resolution. These two laptop runs differ by load, not code; neither
+    is a budget figure. In a desk daemon replaying at 10x (below), `twin_eval`
+    median 1.1-2.3 ms, p95 1.7-15.6 ms; `twin_identity` median 34-64 ms
+    before per-session dating was cached; loop-side `twin_tick` median
+    0.1 ms but p95 6-16 ms, max 32 ms.
+  - *Remaining:* E04.3's Pi measurement (laptop numbers do not close it), then
+    enabling `twin_live.enabled` on the Pi. The laptop p99 already exceeds
+    the proposed 1 ms, so E04.3 must measure the real `tuning`/`ram-study`
+    read rates. It should also say whether the loop-side `twin_tick` p95
+    (6-16 ms in the desk daemon) is GIL contention with the worker; that is
+    not established.
 
-- [ ] **E04.2 — Prove live/stored/replay parity and isolation.**
+- [~] **E04.2 — Prove live/stored/replay parity and isolation.**
   Use one evaluator with adapters for live samples and stored acquisition
   clocks. Include changed arrival order, late data, stream gaps, restarts,
   sentinel/mode transitions and program/calibration changes. Read
@@ -30,6 +82,88 @@ are not finished until their applicable Pi acceptance passes here.
   residuals, gates and counts on all paths. Replay does not mutate live
   evidence, learning state or references. Restart recovers memory while
   invalidating any transient ECU state that cannot be reconstructed.
+  - *Laptop, 2026-10-04 (revised after verification):* one evaluator
+    (`_assess`) and one identity/table resolver
+    (`src/control/twin_identity.py` `TwinResolver`), each with two adapters:
+    stored (`evaluate_session`, the brain job's `_run_twin`) and live
+    (`TwinStream`, `LiveTwin`).
+    - *Identity, one rule:* a capture manifest's revision wins (a
+      disagreeing history is flagged `conflict`). Otherwise the flash
+      history applies at the session's first stored sample
+      (`session_dated_at`), with a new segment at each flash instant inside
+      the data. The stored path bounds segments by the session's last
+      sample and evaluates each as a windowed `evaluate_session(window=)`
+      minted under its own subject (`:seg-<calibration>`; single-segment
+      subjects are unchanged).
+    - *Program and slots:* the program comes from the image, hashed once
+      per image. The table loader is the only refusal on both paths
+      (`wrong_program`/`program_unverified`). Every committed slot gets its
+      own table or named refusal. `brain_jobs._twin_tables` became
+      `twin_identity.twin_tables`.
+    - *Causal rule:* "captured" means a read at or before `t + horizon`, and
+      the coolant source is the highest-priority source with a read at or
+      before `t + max_age`. Both are per sample (`captured_by`,
+      `coolant_source`), so tick timing and future reads cannot change a
+      decision.
+    - *Replay:* `collection/replay.py` now carries each row's unshifted
+      `acquired_at` (`REPLAY_SOURCE_ACQUIRED_KEY`); its per-row rebase
+      includes pacing jitter. The twin dates, segments and pairs a replay on
+      its recorded instants.
+    - *Tests* (`tests/test_twin_live.py`, 60 pass):
+      - The October 4 slice through a real `LiveFeatureSource` observer
+        gives all 174 stored records field for field. Accounting, coverage,
+        capture requirement, blockers, provenance and per-input paired
+        counts are identical. This holds at 0.25/1/5 s ticks, with arrival
+        shuffled inside 1.5 s blocks, on all 28 named-state cases, and for
+        eligible, miss, sentinel, mode-transition and competing-sample
+        sessions.
+      - The slice run through `collection.replay`'s own `_iter_rows` +
+        `replay_record` (10-20x, jittered) into a twin on the real resolver
+        equals the stored brain job (`_run_twin` through the scheduler):
+        same identity (ZS44A-20260920 at the session's own time, not emit
+        time), segments, records, accounting and slot refusals, with no
+        late reads.
+      - Late reads are counted and equal stored-over-accepted. A gap is
+        named `map_identity_unbracketed`. A restart equals stored over the
+        reads after it, with `transient: unknown_before`.
+      - A flash at 38 s is two segments; each equals the stored windowed
+        evaluation on its own table. A flash recorded mid-session is picked
+        up at the default 60 s recheck, flushing the old segment.
+      - A refused program withholds its segment by name.
+      - A DID coolant appearing at 25 s gives the same per-sample source at
+        every tick rate, live and stored. An input first read mid-session is
+        `input_not_captured` on both paths.
+      - The real registry splits at the 23:02 flash only inside the span.
+      - Replay is scoped to `_replay-<id>` and writes no file. The live twin
+        mints no evidence.
+    - *Desk daemon, 2026-10-05 04:45-05:00Z (laptop clock):*
+      - Setup: `python -m src.main` on a scratch `state_dir`/storage
+        (`twin_live.enabled`, `--profile nissan-xterra-2008`). The inputs
+        were the slice as `2026-10-04T204557` (pre-flash) and a synthetic
+        copy re-dated +24 h as `2026-10-05T204557` (post-flash; no real
+        post-flash twin capture is on this laptop).
+      - `POST /control/replay` at speed 10 (`loop: false`); `/status`
+        `detectors.inference.twin` was read after stopping the replay.
+      - Pre-flash: ZS44A-20260920 / registry / `nissan-1ZS44A-uprev-osiris`.
+        Post-flash: ZS44A-20261004. Both: 174 candidates, all unevaluable
+        (`input_stale:load` 120, `input_stale:rpm` 18,
+        `map_identity_unbracketed` 15, `sentinel` 21), `duplicate_use` 0,
+        4,719 rows emitted, 0 dropped.
+      - The stored job (`_run_twin` in-process on the same config) gives
+        identical calibration, source, program and accounting for both.
+      - The daemon's own `POST /control/brain/jobs` first failed
+        `child_out_of_memory` (4096 MiB address-space ceiling). The cause was
+        a torch import reaching the brain child through candidate_promotion
+        (VmSize 4.9 GB before any work); E03.6 moved it out. Re-run with the
+        real `BrainScheduler`, the default spawn pool and the 4096 MiB cap,
+        the twin job completes: VmPeak 2.80 GB, VmHWM 250 MB, no heavy
+        modules loaded.
+      - No checkout file changed.
+  - *Behaviour change:* `EVALUATOR_VERSION` 2 → 3 (causal `captured_by` /
+    per-sample `coolant_source`, `coolant_sources` list, windowed segments),
+    so twin evidence minted before and after carries different versions.
+  - *Remaining:* the same replay comparison on the Pi (E04.3/E04.7). A truly
+    post-flash capture with the twin's channels, when one exists.
 
 - [ ] **E04.3 — Measure Pi cost before live enablement.**
   E02's proposed budget is **≤1 ms p99, ≤5 ms maximum additional computation

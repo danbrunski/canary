@@ -103,13 +103,13 @@ from src.behavior.surface_eval import bin_indices, containing_cell_indices, trus
 from src.columns import MODE_COLUMN, SESSION_COLUMN, TIMESTAMP_COLUMN, gap_column
 from src.config import CanaryConfig
 from src.dataframe_utils import numeric_values
-from src.models.evaluation import default_profile_exclusion
 from src.models.fusion import BandExcessAccumulator, PersistenceGate
 from src.preprocessing import drives as _drives
 from src.preprocessing.decode import decode_on_read, read_session_decoded_subset
 from src.preprocessing.features import compute_rate_of_change
 from src.session import SessionKind, session_kind
 from src.signals.pairing import to_seconds
+from src.storage.corpus_eligibility import default_profile_exclusion
 
 log = logging.getLogger(__name__)
 
@@ -387,7 +387,7 @@ def profile_exclusions(sessions: Sequence[Path]) -> dict[str, str]:
     The operator's standing rule (2026-09-24/25; R03.12(a)/(b)) is that
     tuning captures never train, evaluate or score the IF, the sequence model
     or the behavior deviations. The decision per directory is R04.6's
-    :func:`src.models.evaluation.default_profile_exclusion`, reused rather
+    :func:`src.storage.corpus_eligibility.default_profile_exclusion`, reused rather
     than restated: a ``_tuning-*`` session, or a capture whose own manifest
     says it is not corpus-eligible.
     """

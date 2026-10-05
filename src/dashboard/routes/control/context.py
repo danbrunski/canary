@@ -88,6 +88,9 @@ class ControlContext:
     health_monitor: HealthMonitor | None = None
     emitter: AnomalyEventEmitter | None = None
     live_source: Any = None
+    #: The inference scheduler's recorder (``/status`` ``detectors.inference``),
+    #: read by the brain routes for the live twin block; ``None`` without one.
+    inference_timing: Any = None
 
     def router(self) -> APIRouter:
         """A router whose every route requires the control token."""

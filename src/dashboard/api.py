@@ -255,6 +255,7 @@ def create_app(
         profile_capture=profile_capture,
         capture_autostart=capture_autostart,
         publish_control_event=publish_control_event,
+        inference_timing=inference_timing,
     )
     register_rom_routes(
         app, config=config, resolved_control_token=resolved_control_token, dids_path=dids_path

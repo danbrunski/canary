@@ -66,7 +66,8 @@ from src.preprocessing.drives import (
     recording_units,
 )
 from src.preprocessing.segmenter import DEFAULT_SIGNAL_COLUMNS
-from src.session import SessionKind, session_kind, session_sort_key
+from src.session import session_sort_key
+from src.storage.corpus_eligibility import default_profile_exclusion
 from src.storage.session_files import PARQUET_PATTERN
 from src.storage.sessions import session_started_at
 from src.vehicle.tune_revisions import TuneRevisionRegistry
@@ -810,33 +811,6 @@ def alert_episodes(
     if open_start is not None and last_alert is not None:
         episodes.append(Episode(open_start, last_alert))
     return episodes
-
-
-def default_profile_exclusion(session_dir: Path) -> str | None:
-    """Why a session's rows are kept out of detector evaluation, or ``None``.
-
-    A ``_tuning-*`` session, or a capture whose manifest says it is not
-    corpus-eligible, is excluded: it still bridges its drive (drive grouping
-    keeps a drive's default parts together, so held-out stays honest), but its
-    rows reach no scored row, fault injection or metric. A capture without a
-    readable manifest is treated as the replay guard treats it (R03.12):
-    eligible.
-    """
-    from src.storage.capture_manifest import read_capture_manifest
-
-    name = Path(session_dir).name
-    # Operator decision 2026-09-24: tuning logs do not represent the default
-    # profile, so the detectors are neither trained, calibrated, scored live
-    # (R03.12) nor evaluated on them. The name rule is src.session's.
-    if session_kind(name) is SessionKind.TUNING:
-        return "tuning session: not the default profile (operator decision 2026-09-24)"
-    manifest = read_capture_manifest(Path(session_dir))
-    if manifest is not None and not manifest.corpus_eligible:
-        return (
-            f"capture profile {manifest.profile!r} is not corpus-eligible "
-            "(operator decision 2026-09-24)"
-        )
-    return None
 
 
 class NonDefaultProfileTrainingError(ValueError):

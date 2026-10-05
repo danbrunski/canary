@@ -84,6 +84,12 @@ CanFrameKind = Literal["error", "remote"]
 #: (which calibration was flashed then), reads it from the record itself, so
 #: no replay entry point has to tell it a replay is running.
 REPLAY_SOURCE_AT_KEY: Final = "replay_source_at"
+#: The recorded ``acquired_at`` of a replayed read, unshifted (E04.2). Replay
+#: rebases ``acquired_at`` by each row's own emit offset, which changes the
+#: spacing between reads by the pacing jitter; a consumer that pairs reads on
+#: the acquisition clock (the live twin) reads the original instant here so a
+#: replay decides exactly what the stored session decides.
+REPLAY_SOURCE_ACQUIRED_KEY: Final = "replay_source_acquired_at"
 
 TelemetrySource = Literal[
     "obd", "can", "decoded", "gps", "derived", "imu", "uprev", "sensor", "kline"

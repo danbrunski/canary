@@ -1417,6 +1417,18 @@ class CommitteesConfig(_Strict):
     enabled: bool = True
 
 
+class TwinLiveConfig(_Strict):
+    """The target-phi twin on the live tick (E04.1).
+
+    Off by default: E04.3 measures its per-tick cost on the Pi against the
+    missed-tick and record-loss budget before live enablement. When on, the
+    vehicle's ``target_phi_twin.yaml`` is required -- without it ``/status``
+    says ``not_declared``. It never alerts and writes nothing.
+    """
+
+    enabled: bool = False
+
+
 class CanaryConfig(_Strict):
     vehicle: VehicleConfig
     hardware: HardwareConfig
@@ -1436,6 +1448,7 @@ class CanaryConfig(_Strict):
     llm_assist: LLMAssistConfig = LLMAssistConfig()
     plausibility: PlausibilityConfig = PlausibilityConfig()
     committees: CommitteesConfig = CommitteesConfig()
+    twin_live: TwinLiveConfig = TwinLiveConfig()
 
     #: The profile slug :func:`src.vehicle.profiles.scope_config` nested this config's
     #: vehicle paths under; ``None`` for a config as loaded. Private, so no YAML

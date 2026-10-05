@@ -50,6 +50,7 @@ from .inference_worker import (
     WorkerTick,
 )
 from .lambda_delivery_live import build_live_lambda_delivery
+from .twin_live import build_live_twin
 
 if TYPE_CHECKING:
     # Annotation only: loaded on demand when ``plausibility.enabled``.
@@ -485,6 +486,9 @@ class LiveInferencePipeline:
         #: B06.4 — lambda delivery error as a tuning readout: the offline
         #: engine's rows, decided per tick; never alerts, not profile-gated.
         self._lambda_delivery = build_live_lambda_delivery(components, source, recorder)
+        #: E04.1 — the target-phi twin: a bounded intake on the record path and
+        #: one worker thread; the tick hands reads over and never waits.
+        self._twin = build_live_twin(components, source, recorder)
         #: Tick period, for naming a compute that outran it (D02.3).
         self._interval_seconds = interval_seconds
         self._owns_executor = executor is None
@@ -759,6 +763,14 @@ class LiveInferencePipeline:
             if components.idle_shutdown.observe(state=vehicle_state.state, now=time.monotonic()):
                 components.idle_shutdown.trigger()
 
+        if self._twin is not None:
+            try:
+                self._twin.tick_live(
+                    components, None if vehicle_state is None else vehicle_state.state
+                )
+            except Exception:  # noqa: BLE001 — the twin is best-effort
+                log.exception("live twin tick failed")
+
         ctx = TickContext(
             now=now,
             operating_mode=operating_mode,
@@ -927,6 +939,8 @@ class LiveInferencePipeline:
         # Drop the queue first: joining the in-flight task would otherwise
         # dispatch it on the way out and leave a compute running past close.
         self._pending = None
+        if self._twin is not None:
+            self._twin.close()
         inflight = self._inflight
         if inflight is not None and not inflight.done():
             try:

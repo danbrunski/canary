@@ -49,39 +49,45 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Literal, TypeVar, cast
 
+from src.analysis.candidate_promotion import (
+    CandidateDrive,
+    PromotionRules,
+    evaluate_candidate,
+    load_independent_drives,
+    promote,
+)
+from src.analysis.change_evaluation import CHANGE_RESIDUALS_FILE, load_change_residuals
 from src.analysis.digest import digest_address_space_bytes, digest_row_budget
-from src.analysis.ecu_application import load_application_model
-from src.analysis.rom_trace import load_viewer_definition
 from src.analysis.target_phi import (
     TWIN_FILE,
-    ResolvedTable,
-    TwinRefusalError,
     load_twin_definition,
-    resolve_table,
-    table_from_calibration,
 )
 from src.analysis.twin_evidence import TwinSessionIdentity, evaluate_and_mint
 from src.atomic_write import atomic_write_text
 from src.collection import tuning_profile
 from src.config import CanaryConfig
 from src.control import child_pool
-from src.control.brain_state import brain_dir, image_program, reconcile_identity
-from src.control.rom_library import RomLibrary, RomNotFoundError
+from src.control.brain_state import brain_dir, reconcile_identity
 from src.control.trip_end import (
     DIGEST_TIMEOUT_SECONDS,
     any_digest_in_flight,
     limit_address_space,
 )
+from src.control.twin_identity import TwinResolver, session_last_read
 from src.control.workbench_jobs import any_workbench_job_in_flight
 from src.evidence.ledger import memory_ledger_for
-from src.evidence.records import recurrence_key
-from src.signals.afr import load_afr_calibration
+from src.evidence.records import VehicleIdentity, recurrence_key
+from src.models.candidate_store import CANDIDATES_DIRNAME, CandidateStore, CandidateStoreError
 from src.storage.capture_manifest import read_capture_manifest
 from src.storage.session_files import count_session_rows
 from src.storage.session_products import read_digest, read_digest_skipped
-from src.storage.sessions import latest_session, resolve_session
+from src.storage.sessions import (
+    latest_session,
+    recorded_sessions,
+    resolve_session,
+    session_started_at,
+)
 from src.vehicle.profiles import active_registry, profile_dir
-from src.vehicle.tune_revisions import resolve_session_revision
 from src.vehicle_state import (
     QUIET_STATES,
     ReplayStatusSource,
@@ -108,9 +114,19 @@ __all__ = [
     "run_brain_job",
 ]
 
-JobKind = Literal["twin_session_evaluation", "memory_consolidation"]
+JobKind = Literal[
+    "twin_session_evaluation",
+    "memory_consolidation",
+    "candidate_evaluation",
+    "candidate_promotion",
+]
 JobState = Literal["queued", "running", "deferred", "pending", "completed", "failed"]
-JOB_KINDS: tuple[str, ...] = ("twin_session_evaluation", "memory_consolidation")
+JOB_KINDS: tuple[str, ...] = (
+    "twin_session_evaluation",
+    "memory_consolidation",
+    "candidate_evaluation",
+    "candidate_promotion",
+)
 JOB_STATES: tuple[str, ...] = ("queued", "running", "deferred", "pending", "completed", "failed")
 #: States the scheduler picks work from, oldest first.
 _RUNNABLE = ("queued", "deferred", "pending")
@@ -382,6 +398,8 @@ def canonical_params(config: CanaryConfig, kind: str, params: dict[str, Any]) ->
     """Validate and canonicalise a submission; refuse by name."""
     if kind == "memory_consolidation":
         return {}
+    if kind in ("candidate_evaluation", "candidate_promotion"):
+        return _candidate_params(config, kind, params)
     if kind == "twin_session_evaluation":
         name = params.get("session")
         if not isinstance(name, str) or not name:
@@ -405,6 +423,161 @@ def canonical_params(config: CanaryConfig, kind: str, params: dict[str, Any]) ->
         return {"session": session.name}
     raise BrainJobRefusedError(
         400, {"error": "unknown_kind", "message": f"unknown brain job {kind!r}"}
+    )
+
+
+# -- candidate evaluation and promotion (E03.6) ----------------------------------
+
+
+def candidate_store(config: CanaryConfig) -> CandidateStore:
+    """The vehicle's references, candidate checkpoints and decisions (state_dir)."""
+    return CandidateStore(brain_dir(config) / CANDIDATES_DIRNAME)
+
+
+def _candidate_params(config: CanaryConfig, kind: str, params: dict[str, Any]) -> dict[str, Any]:
+    residual = params.get("residual")
+    if not isinstance(residual, str) or not residual:
+        raise BrainJobRefusedError(
+            400, {"error": "residual_required", "message": "name the change residual"}
+        )
+    path = profile_dir(config) / CHANGE_RESIDUALS_FILE
+    if not path.exists():
+        raise BrainJobRefusedError(
+            400,
+            {
+                "error": "no_change_residuals",
+                "message": f"this profile has no {CHANGE_RESIDUALS_FILE}",
+            },
+        )
+    try:
+        load_change_residuals(path)[0].residual(residual)
+    except KeyError as exc:
+        raise BrainJobRefusedError(404, {"error": "unknown_residual", "message": str(exc)}) from exc
+    store = candidate_store(config)
+    if kind == "candidate_evaluation":
+        checkpoint = params.get("checkpoint")
+        try:
+            store.checkpoint(residual, str(checkpoint))
+        except CandidateStoreError as exc:
+            raise BrainJobRefusedError(
+                404, {"error": "checkpoint_not_found", "message": str(exc)}
+            ) from exc
+        return {"residual": residual, "checkpoint": str(checkpoint)}
+    # Promotion is the explicit, separate step (B03: never automatic): it is
+    # accepted only for a decision the evaluation recorded as qualified.
+    key = params.get("decision")
+    found = [d for d in store.decisions(residual) if d["key"] == key]
+    if not found:
+        raise BrainJobRefusedError(
+            404, {"error": "decision_not_found", "message": f"no decision {key!r} for {residual}"}
+        )
+    if found[0]["status"] != "qualified":
+        raise BrainJobRefusedError(
+            409,
+            {
+                "error": "not_qualified",
+                "message": f"decision is {found[0]['status']}: {'; '.join(found[0]['reasons'])}",
+            },
+        )
+    return {"residual": residual, "decision": str(key)}
+
+
+def _candidate_context(
+    config: CanaryConfig, residual: str
+) -> tuple[CandidateStore, Any, VehicleIdentity]:
+    definition = load_change_residuals(profile_dir(config) / CHANGE_RESIDUALS_FILE)[0].residual(
+        residual
+    )
+    store = candidate_store(config)
+    reference = store.active(residual)
+    assert config.scoped_profile is not None  # brain_dir refused an unscoped config
+    vehicle = VehicleIdentity(
+        profile=config.scoped_profile,
+        vin=config.vehicle.vin or None,
+        program_id=None,
+        calibration=None if reference is None else reference.calibration,
+    )
+    return store, definition, vehicle
+
+
+def _run_candidate_evaluation(
+    config: CanaryConfig, params: dict[str, Any], job_id: str
+) -> dict[str, Any]:
+    residual = str(params["residual"])
+    store, definition, vehicle = _candidate_context(config, residual)
+    reference = store.active(residual)
+    checkpoint, _spec = store.checkpoint(residual, str(params["checkpoint"]))
+    excluded: dict[str, str] = {}
+    drives: list[CandidateDrive] = []
+    if reference is not None and checkpoint.valid_to is not None:
+        drives, excluded = load_independent_drives(
+            config.collection.storage_path,
+            definition,
+            store.policy(residual, reference.fingerprint),
+            registry=active_registry(config),
+            calibration=reference.calibration,
+            after=checkpoint.valid_to,
+        )
+    decision = evaluate_candidate(
+        memory_ledger_for(config),
+        store,
+        residual,
+        checkpoint.fingerprint,
+        drives,
+        channels=definition.channels,
+        vehicle=vehicle,
+        rules=PromotionRules(),
+    )
+    result: dict[str, Any] = {
+        "job_id": job_id,
+        "kind": "candidate_evaluation",
+        "computed_at": _now().isoformat(),
+        "decision": decision.as_dict(),
+        "decision_key": decision.key,
+        "excluded_sessions": excluded,
+        "evidence": [o["evidence"] for o in decision.outcomes.values()],
+        "sessions_seen": _sessions_after(config, checkpoint.valid_to),
+    }
+    if decision.status == "pending":
+        result["pending"] = {
+            "reason": decision.reasons[0].split(":")[0] if decision.reasons else "pending",
+            "detail": "; ".join(decision.reasons),
+        }
+    return result
+
+
+def _run_candidate_promotion(
+    config: CanaryConfig, params: dict[str, Any], job_id: str
+) -> dict[str, Any]:
+    residual = str(params["residual"])
+    store, definition, vehicle = _candidate_context(config, residual)
+    outcome = promote(
+        memory_ledger_for(config),
+        store,
+        residual,
+        str(params["decision"]),
+        vehicle=vehicle,
+        channels=definition.channels,
+    )
+    return {
+        "job_id": job_id,
+        "kind": "candidate_promotion",
+        "computed_at": _now().isoformat(),
+        "changed": outcome.changed,
+        "reference": outcome.reference,
+        "previous": outcome.previous,
+        "evidence": [outcome.record],
+    }
+
+
+def _sessions_after(config: CanaryConfig, after: datetime | None) -> int:
+    """Recorded sessions that started after ``after`` (names only: cheap)."""
+    if after is None:
+        return 0
+    return sum(
+        1
+        for s in recorded_sessions([config.collection.storage_path])
+        if (started := session_started_at(s)) is not None and started > after
     )
 
 
@@ -443,99 +616,49 @@ def enqueue_after_digest(config: CanaryConfig, session: Path) -> BrainJob | None
 # -- the child ------------------------------------------------------------------
 
 
-def _twin_tables(
-    config: CanaryConfig, *, revision: str | None, image_sha256: str | None
-) -> Callable[[int], ResolvedTable]:
-    pdir = profile_dir(config)
-    definition, _sha = load_twin_definition(pdir)
-    viewer = load_viewer_definition(pdir)
-    model = load_application_model(pdir)
-    library = RomLibrary(
-        config.daemon.rom_library_dir, profile_dir=pdir, registry=lambda: active_registry(config)
-    )
-
-    def table_for_slot(slot: int) -> ResolvedTable:
-        if revision is None:
-            raise TwinRefusalError(
-                "revision_unknown", "neither the capture manifest nor the flash history names it"
-            )
-        if image_sha256 is None:
-            raise TwinRefusalError(
-                "image_unknown", f"the flash history records no plain-image hash for {revision!r}"
-            )
-        try:
-            image = library.image(image_sha256)
-        except RomNotFoundError:
-            image = None
-        if image is not None:
-            return resolve_table(
-                image,
-                library.rom_map(),
-                definition,
-                viewer=viewer,
-                application_model=model,
-                expected_sha256=image_sha256,
-                slot=slot,
-            )
-        return table_from_calibration(
-            load_afr_calibration(config.daemon.afr_calibration),
-            definition,
-            viewer=viewer,
-            application_model=model,
-            revision=revision,
-            image_sha256=image_sha256,
-            slot=slot,
-        )
-
-    return table_for_slot
-
-
 def _run_twin(config: CanaryConfig, params: dict[str, Any], job_id: str) -> dict[str, Any]:
+    """Evaluate a session per identity segment (one, unless it spans a flash)
+    and per slot, resolved by the same :class:`TwinResolver` the live twin
+    uses, so the two paths read the same calibration, program and table."""
     session = resolve_session(config.collection.storage_path, str(params["session"]))
-    pdir = profile_dir(config)
-    definition, definition_sha = load_twin_definition(pdir)
-    model, _model_sha = load_application_model(pdir)
-    registry = active_registry(config)
-    revision, source, conflict = resolve_session_revision(session, registry)
-    entry = (
-        next((r for r in registry.revisions if r.revision == revision), None)
-        if registry is not None and revision is not None
-        else None
-    )
-    image_sha = entry.image_sha256 if entry is not None else None
-    # Known when the model lists the image or its program spans hash to the
-    # model's program (a new calibration); otherwise unknown, never assumed.
-    program_id = (
-        model.program.id
-        if image_sha is not None and image_program(config, model, image_sha)[0] == "known"
-        else None
-    )
+    resolver = TwinResolver(config)
+    segments = resolver.segments(session, first_read=None, until=session_last_read(session))
     ledger = memory_ledger_for(config)
     assert config.scoped_profile is not None  # brain_dir refused an unscoped config
-    out = evaluate_and_mint(
-        ledger,
-        session,
-        definition=definition,
-        definition_sha256=definition_sha,
-        identity=TwinSessionIdentity(
-            profile=config.scoped_profile,
-            vin=config.vehicle.vin or None,
-            calibration=revision,
-            calibration_source=source,
-            calibration_conflict=conflict,
-        ),
-        program_id=program_id,
-        table_for_slot=_twin_tables(config, revision=revision, image_sha256=image_sha),
-    )
+    out: dict[str, list[Any]] = {"evidence": [], "evaluations": [], "refusals": []}
+    for segment in segments:
+        identity = segment.identity
+        name = None if len(segments) == 1 else (identity.calibration or "unknown")
+        minted = evaluate_and_mint(
+            ledger,
+            session,
+            definition=resolver.definition,
+            definition_sha256=resolver.definition_sha256,
+            identity=TwinSessionIdentity(
+                profile=config.scoped_profile,
+                vin=config.vehicle.vin or None,
+                calibration=identity.calibration,
+                calibration_source=identity.source,
+                calibration_conflict=identity.conflict,
+            ),
+            program_id=identity.program_id,
+            table_for_slot=functools.partial(resolver.table, identity),
+            window=segment.window(),
+            segment=name,
+        )
+        for key in out:
+            out[key].extend(minted[key])
+    first = segments[0].identity
     return {
         "job_id": job_id,
         "kind": "twin_session_evaluation",
         "session": session.name,
-        "calibration": revision,
-        "calibration_source": source,
-        "calibration_conflict": conflict,
-        "image_sha256": image_sha,
-        "program_id": program_id,
+        "calibration": first.calibration,
+        "calibration_source": first.source,
+        "calibration_conflict": first.conflict,
+        "image_sha256": first.image_sha256,
+        "program_id": first.program_id,
+        "segments": [segment.to_dict() for segment in segments],
         "computed_at": _now().isoformat(),
         **out,
     }
@@ -588,15 +711,25 @@ def run_brain_job(
         result = _run_twin(config, params, job_id)
     elif kind == "memory_consolidation":
         result = _run_consolidation(config, job_id)
+    elif kind == "candidate_evaluation":
+        result = _run_candidate_evaluation(config, params, job_id)
+    elif kind == "candidate_promotion":
+        result = _run_candidate_promotion(config, params, job_id)
     else:
         raise ValueError(f"unknown brain job {kind!r}")
     path = Path(results_dir) / f"{job_id}.json"
     atomic_write_text(path, json.dumps(result, indent=1, sort_keys=True, default=str), mkdir=True)
-    return {
+    summary = {
         "result_file": path.name,
         "evidence": list(result.get("evidence", [])),
         "computed_at": result["computed_at"],
     }
+    if "pending" in result:
+        # Not enough independent evidence yet (E03.6): the job waits, it does
+        # not complete, and the precheck re-runs it only once new drives exist.
+        summary["pending"] = result["pending"]
+        summary["sessions_seen"] = result.get("sessions_seen")
+    return summary
 
 
 # -- scheduling ---------------------------------------------------------------
@@ -633,8 +766,39 @@ def _session_finished(config: CanaryConfig, session: Path) -> bool:
     return latest is not None and latest.resolve() != session.resolve()
 
 
+def _candidate_precheck(config: CanaryConfig, job: BrainJob) -> Precheck:
+    """Names and pointers only: never reads a session's rows."""
+    residual = str(job.params["residual"])
+    store = candidate_store(config)
+    if job.kind == "candidate_promotion":
+        return "run", None, None
+    if store.active_fingerprint(residual) is None:
+        return (
+            "pending",
+            "no_frozen_reference",
+            f"no reference is frozen for {residual} (E03.3): there is nothing to replace",
+        )
+    try:
+        checkpoint, _spec = store.checkpoint(residual, str(job.params["checkpoint"]))
+    except CandidateStoreError as exc:
+        return "failed", "checkpoint_not_found", str(exc)
+    latest = latest_session(config.collection.storage_path)
+    if latest is not None and not _session_finished(config, latest):
+        return "pending", "session_open", "the newest session is still open"
+    seen = _sessions_after(config, checkpoint.valid_to)
+    if job.state == "pending" and job.progress.get("sessions_seen") == seen:
+        return (
+            "pending",
+            job.reason or "held_out_insufficient",
+            job.detail,  # unchanged: re-run only once a new drive is recorded
+        )
+    return "run", None, None
+
+
 def precheck(config: CanaryConfig, job: BrainJob) -> Precheck:
     """Cheap, in-process: may the job run now, wait, or never?"""
+    if job.kind in ("candidate_evaluation", "candidate_promotion"):
+        return _candidate_precheck(config, job)
     if job.kind != "twin_session_evaluation":
         return "run", None, None
     try:
@@ -908,6 +1072,20 @@ class BrainScheduler:
                         self._failed, running, "error", f"{type(exc).__name__}: {exc}"
                     )
                 finished = True
+                if isinstance(result, dict) and "pending" in result:
+                    return await self._io(
+                        self.store.transition,
+                        running,
+                        "pending",
+                        reason=str(result["pending"].get("reason", "pending")),
+                        detail=str(result["pending"].get("detail", "")),
+                        result=result,
+                        progress={
+                            "stage": "pending",
+                            "attempt": running.attempts,
+                            "sessions_seen": result.get("sessions_seen"),
+                        },
+                    )
                 return await self._io(
                     self.store.transition,
                     running,

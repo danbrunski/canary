@@ -126,7 +126,6 @@ from src.models.evaluation import (
     alert_episodes,
     band_of,
     bootstrap_ratio_ci,
-    default_profile_exclusion,
     drives_of_sessions,
     engine_hours,
     engine_running,
@@ -179,6 +178,7 @@ from src.preprocessing.derived_store import DEFAULT_DERIVED_DIR, DerivedStore, o
 from src.preprocessing.drives import parent_session
 from src.preprocessing.resampler import resample_config_for
 from src.session import RECORDED_SESSION_KINDS, SessionKind, session_sort_key
+from src.storage.corpus_eligibility import default_profile_exclusion
 from src.storage.sessions import recorded_sessions, session_started_at
 from src.vehicle.profiles import active_registry, active_registry_sources
 from src.vehicle.tune_revisions import load_tune_revisions
@@ -205,7 +205,7 @@ DEFAULT_GRACE_SECONDS = 60.0
 #: Every recording under ``--sessions-root``, captures and legacy ``_tuning-*``
 #: included: they are kept for *drive grouping* only, a sibling recording
 #: bridging its neighbours into one physical drive. Whether their rows are
-#: scored is :func:`~src.models.evaluation.default_profile_exclusion`'s call
+#: scored is :func:`~src.storage.corpus_eligibility.default_profile_exclusion`'s call
 #: (R04.6): tuning captures are not. ``_archive`` (quarantine) and ``_replay-*``
 #: (re-emitted copies) are not drives.
 EVALUATION_SESSION_KINDS = RECORDED_SESSION_KINDS | {SessionKind.TUNING}

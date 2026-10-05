@@ -41,6 +41,35 @@ export interface BrainStatus {
   transient: { state: string; reason: string; detail: string };
   memory: { records: number; current: number };
   jobs: Partial<Record<BrainJobState, number>>;
+  /** The live twin as the inference tick last published it (E04.1; the same
+   *  block as `/status` `detectors.inference.twin`). */
+  live_twin?: LiveTwin;
+}
+
+export interface LiveTwinSample {
+  acquired_at: string;
+  observed_phi: number | null;
+  predicted_phi: number | null;
+  difference_phi: number | null;
+  qualified_residual_phi: number | null;
+  state: string;
+  reason: string | null;
+  branch: string | null;
+}
+
+export interface LiveTwin {
+  enabled: boolean;
+  result: string;
+  reason?: string | null;
+  detail?: string;
+  session?: string;
+  replay?: boolean;
+  vehicle_state?: string | null;
+  applicability?: { qualified: boolean; qualification_blockers: string[] };
+  accounting?: { candidates: number; states: Record<string, number> };
+  stream?: { pending: number; late_reads: Record<string, number> };
+  intake?: { dropped: number; busy_ticks: number };
+  latest_prediction?: LiveTwinSample | null;
 }
 
 export interface CardValue {

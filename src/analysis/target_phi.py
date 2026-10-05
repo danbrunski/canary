@@ -31,7 +31,7 @@ from __future__ import annotations
 import hashlib
 import math
 from collections import Counter
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal
@@ -66,7 +66,7 @@ from src.signals.pairing import PairingPolicy, match_ordered, to_seconds
 
 #: Bumped when the evaluator's states, reasons or record shape change.
 #: 2: provenance names the application model; blockers come from it (E05.1).
-EVALUATOR_VERSION = 2
+EVALUATOR_VERSION = 3
 
 TWIN_FILE = "target_phi_twin.yaml"
 
@@ -830,9 +830,118 @@ class _Candidate:
     prediction: Prediction | None = None
 
 
+def _within(series: _Series, start: float | None, end: float | None) -> _Series:
+    keep = np.ones(len(series.times), dtype=bool)
+    if start is not None:
+        keep &= series.times >= start
+    if end is not None:
+        keep &= series.times < end
+    index = np.flatnonzero(keep)
+    return _Series(series.times[index], series.values[index], [series.basis[i] for i in index])
+
+
 def _sorted(series: _Series) -> _Series:
     order = np.argsort(series.times, kind="stable")
     return _Series(series.times[order], series.values[order], [series.basis[i] for i in order])
+
+
+def evaluated_specs(definition: TwinDefinition) -> list[str]:
+    """Every channel the evaluator reads: reference and sentinel, the lookup
+    inputs, the map identity and each gate's source, in that order."""
+    gates = definition.gates
+    return list(
+        dict.fromkeys(
+            [
+                definition.reference.channel,
+                definition.reference.sentinel_channel,
+                *definition.inputs.channels().values(),
+                *definition.map_identity.channels(),
+                *gates.coolant.sources,
+                gates.mode.channel,
+                *(c.channel for c in gates.steadiness.channels),
+            ]
+        )
+    )
+
+
+def raw_specs(definition: TwinDefinition) -> list[str]:
+    """The channels read as raw counts (catalog decode undone)."""
+    return list(
+        dict.fromkeys(
+            [
+                *definition.inputs.channels().values(),
+                *definition.map_identity.channels(),
+                definition.reference.channel,
+            ]
+        )
+    )
+
+
+def decision_horizon_s(definition: TwinDefinition) -> float:
+    """How far past a command sample the reads deciding it can lie: the
+    lookup inputs' skew, the after-side identity read (and its partners'
+    skew), and the after-side mode and coolant reads. A sample is final once
+    every stream has been read this far past it."""
+    gates = definition.gates
+    skew = gates.max_acquisition_skew_s
+    return max(
+        skew,
+        definition.map_identity.max_age_s + skew,
+        gates.mode.max_age_s,
+        gates.coolant.max_age_s,
+    )
+
+
+def lookback_s(definition: TwinDefinition) -> float:
+    """How far before a command sample the reads deciding it can lie: the
+    steadiness dwell, the before-side identity, mode and coolant reads, and
+    the inputs' skew."""
+    gates = definition.gates
+    skew = gates.max_acquisition_skew_s
+    return max(
+        skew,
+        gates.steadiness.dwell_s,
+        definition.map_identity.max_age_s + skew,
+        gates.mode.max_age_s,
+        gates.coolant.max_age_s,
+    )
+
+
+def new_candidate(
+    definition: TwinDefinition,
+    *,
+    index: int,
+    time: float,
+    sentinel: bool,
+    row: int,
+    word: int | None,
+    basis: str,
+) -> _Candidate:
+    """One command sample (a value or a fuel-cut state) as an undecided
+    candidate. ``row`` is the sample's row in its own channel's series."""
+    reference = definition.reference
+    candidate = _Candidate(
+        index=index,
+        time=time,
+        sentinel=sentinel,
+        word=word,
+        record={
+            "sample": {
+                "spec": reference.sentinel_channel if sentinel else reference.channel,
+                "row": row,
+                "acquired_at": _iso(time),
+                "timestamp_basis": basis,
+                "observed_word": word,
+                "observed_phi": None if word is None else word / (1 << reference.q_bits),
+            }
+        },
+        reasons=[],
+    )
+    if basis != definition.gates.clock:
+        candidate.reasons.append(("unevaluable", "unsupported_clock"))
+    if sentinel:
+        candidate.reasons.append(("unevaluable", "sentinel"))
+    return candidate
 
 
 def evaluate_session(
@@ -844,9 +953,15 @@ def evaluate_session(
     dids_path: Path = DIDS_YAML,
     session_complete: bool = True,
     tolerance_words: int = 1,
+    window: tuple[float | None, float | None] | None = None,
 ) -> dict[str, Any]:
     """Every command sample in ``session``, predicted where the declared
     applicability allows and accounted for where it does not.
+
+    ``window`` (``[start, end)`` acquisition seconds, either side open) keeps
+    only the reads inside it: one identity segment of a session that spans a
+    flash, evaluated as on its own -- what a live stream rebuilt at the flash
+    instant decides.
 
     ``session_complete=False`` (a capture still recording, the streaming case)
     leaves a sample whose decision needs later reads ``pending``; a finished
@@ -857,38 +972,22 @@ def evaluate_session(
     gates = definition.gates
     skew = gates.max_acquisition_skew_s
     inputs = definition.inputs.channels()
-    identity = definition.map_identity
     reference = definition.reference
-    mode_gate = gates.mode
-    steady_specs = [c.channel for c in gates.steadiness.channels]
-    specs = list(
-        dict.fromkeys(
-            [
-                reference.channel,
-                reference.sentinel_channel,
-                *inputs.values(),
-                *identity.channels(),
-                *gates.coolant.sources,
-                mode_gate.channel,
-                *steady_specs,
-            ]
-        )
-    )
+    specs = evaluated_specs(definition)
     try:
         long = read_channels(session, specs, dids_path=dids_path, acquired_time=True)
     except (ChannelSpecError, KeyError) as exc:
         raise TwinRefusalError("gate_unreadable", str(exc)) from exc
 
     series = {spec: _sorted(_series(long, spec)) for spec in specs}
+    if window is not None:
+        series = {spec: _within(each, *window) for spec, each in series.items()}
     session_end = max(
         (float(s.times[-1]) for s in series.values() if len(s.times)), default=float("nan")
     )
     catalog = load_did_map(dids_path)
     check_windows(definition, catalog)
-    raw = {
-        spec: _raw(series[spec], spec, dids_path, catalog)
-        for spec in [*inputs.values(), *identity.channels(), reference.channel]
-    }
+    raw = {spec: _raw(series[spec], spec, dids_path, catalog) for spec in raw_specs(definition)}
 
     # One candidate per observed command sample: a value or a fuel-cut state.
     target = series[reference.channel]
@@ -896,33 +995,18 @@ def evaluate_session(
     stamps = [(float(t), False, i) for i, t in enumerate(target.times)]
     stamps += [(float(t), True, i) for i, t in enumerate(sentinel.times)]
     stamps.sort()
-    candidates: list[_Candidate] = []
-    for position, (t, is_sentinel, i) in enumerate(stamps):
-        word = None if is_sentinel else int(raw[reference.channel][i])
-        basis = (sentinel if is_sentinel else target).basis[i]
-        candidates.append(
-            _Candidate(
-                index=position,
-                time=t,
-                sentinel=is_sentinel,
-                word=word,
-                record={
-                    "sample": {
-                        "spec": reference.sentinel_channel if is_sentinel else reference.channel,
-                        "row": i,
-                        "acquired_at": _iso(t),
-                        "timestamp_basis": basis,
-                        "observed_word": word,
-                        "observed_phi": None if word is None else word / (1 << reference.q_bits),
-                    }
-                },
-                reasons=[],
-            )
+    candidates = [
+        new_candidate(
+            definition,
+            index=position,
+            time=t,
+            sentinel=is_sentinel,
+            row=i,
+            word=None if is_sentinel else int(raw[reference.channel][i]),
+            basis=(sentinel if is_sentinel else target).basis[i],
         )
-        if basis != gates.clock:
-            candidates[-1].reasons.append(("unevaluable", "unsupported_clock"))
-        if is_sentinel:
-            candidates[-1].reasons.append(("unevaluable", "sentinel"))
+        for position, (t, is_sentinel, i) in enumerate(stamps)
+    ]
 
     # Pair each lookup input one-to-one with the command samples.
     candidate_times = np.array([c.time for c in candidates], dtype=float)
@@ -932,7 +1016,7 @@ def evaluate_session(
         matched = match_ordered(candidate_times, series[spec].times, policy)
         pairs[name] = dict(zip(matched.index_a.tolist(), matched.index_b.tolist(), strict=True))
 
-    coolant_spec = next((spec for spec in gates.coolant.sources if len(series[spec].times)), None)
+    first_read = first_reads(series)
     for candidate in candidates:
         _assess(
             candidate,
@@ -941,7 +1025,7 @@ def evaluate_session(
             series=series,
             raw=raw,
             pairs=pairs,
-            coolant_spec=coolant_spec,
+            first_read=first_read,
             session_end=session_end,
             session_complete=session_complete,
             tolerance_words=tolerance_words,
@@ -953,7 +1037,6 @@ def evaluate_session(
         table=table,
         definition_sha256=definition_sha256,
         tolerance_words=tolerance_words,
-        coolant_spec=coolant_spec,
     )
     result["accounting"]["input_pairing"] = _input_pairing(candidates, inputs, series)
     return result
@@ -1056,11 +1139,16 @@ def _assess(
     series: dict[str, _Series],
     raw: dict[str, np.ndarray],
     pairs: dict[str, dict[int, int]],
-    coolant_spec: str | None,
+    first_read: Callable[[str], float],
     session_end: float,
     session_complete: bool,
     tolerance_words: int,
 ) -> None:
+    """Decide one candidate. ``first_read(spec)`` is the acquisition time of
+    the run's earliest read of ``spec`` (``inf`` when none): every "was it
+    captured" and "which coolant source" question is asked of it per sample
+    and causally (:func:`captured_by`, :func:`coolant_source`), so a stored
+    session and a stream deciding the same sample give the same answer."""
     gates = definition.gates
     skew = gates.max_acquisition_skew_s
     t = candidate.time
@@ -1090,7 +1178,7 @@ def _assess(
     for name, spec in inputs.items():
         if refs[name] is not None:
             continue
-        if not len(series[spec].times):
+        if not captured_by(definition, first_read, spec, t):
             reasons.append(("unevaluable", f"input_not_captured:{name}"))
         elif not session_complete and session_end - t < skew:
             reasons.append(("pending", f"awaiting_input:{name}"))
@@ -1130,7 +1218,7 @@ def _assess(
 
     # Gates: warmth, mode, steadiness — from inputs and mode, never the residual.
     record["gates"] = _gates(
-        candidate, definition, series, coolant_spec, session_end, session_complete
+        candidate, definition, series, first_read, session_end, session_complete
     )
     for state, reason in record["gates"].pop("_reasons"):
         reasons.append((state, reason))
@@ -1138,11 +1226,38 @@ def _assess(
     _finish(candidate, definition, tolerance_words)
 
 
+def first_reads(series: dict[str, _Series]) -> Callable[[str], float]:
+    """``first_read`` over whole sorted series (the stored adapter)."""
+    return lambda spec: float(series[spec].times[0]) if len(series[spec].times) else math.inf
+
+
+def captured_by(
+    definition: TwinDefinition, first_read: Callable[[str], float], spec: str, t: float
+) -> bool:
+    """Whether ``spec`` had been read by the time a sample at ``t`` is decided:
+    a read at or before ``t + decision_horizon_s``. Asked per sample, never of
+    the whole session, so a channel first read later in a session is *not
+    captured* for the samples before it on every path."""
+    return first_read(spec) <= t + decision_horizon_s(definition)
+
+
+def coolant_source(
+    definition: TwinDefinition, first_read: Callable[[str], float], t: float
+) -> str | None:
+    """The coolant source for a sample at ``t``: the highest-priority declared
+    source with a read at or before ``t``, or inside the gate's after-side
+    bracket (``t + max_age_s``). Per sample and causal, so a higher-priority
+    source that first appears mid-session is used from then on, on every
+    path."""
+    coolant = definition.gates.coolant
+    return next((s for s in coolant.sources if first_read(s) <= t + coolant.max_age_s), None)
+
+
 def _gates(
     candidate: _Candidate,
     definition: TwinDefinition,
     series: dict[str, _Series],
-    coolant_spec: str | None,
+    first_read: Callable[[str], float],
     session_end: float,
     session_complete: bool,
 ) -> dict[str, Any]:
@@ -1152,6 +1267,7 @@ def _gates(
     reasons: list[tuple[State, str]] = []
 
     coolant = gates.coolant
+    coolant_spec = coolant_source(definition, first_read, t)
     if coolant_spec is None:
         reasons.append(("unevaluable", "gate_missing:coolant"))
         out["coolant"] = None
@@ -1167,7 +1283,7 @@ def _gates(
 
     mode = gates.mode
     s = series[mode.channel]
-    if not len(s.times):
+    if not captured_by(definition, first_read, mode.channel, t):
         reasons.append(("unevaluable", "gate_missing:mode"))
         out["mode"] = None
     else:
@@ -1276,11 +1392,17 @@ def duplicate_use(records: Sequence[dict[str, Any]]) -> int:
     its contract."""
     used: Counter[tuple[str, int]] = Counter()
     for record in records:
-        used[(record["sample"]["spec"], record["sample"]["row"])] += 1
-        for ref in (record.get("inputs") or {}).values():
-            if ref is not None:
-                used[(ref["spec"], ref["row"])] += 1
+        used.update(_observations(record))
     return sum(1 for n in used.values() if n > 1)
+
+
+def _observations(record: dict[str, Any]) -> list[tuple[str, int]]:
+    """Every observation a record cites: its command sample and input reads."""
+    keys = [(record["sample"]["spec"], record["sample"]["row"])]
+    for ref in (record.get("inputs") or {}).values():
+        if ref is not None:
+            keys.append((ref["spec"], ref["row"]))
+    return keys
 
 
 def _input_pairing(
@@ -1310,97 +1432,167 @@ def _summarise(
     table: ResolvedTable,
     definition_sha256: str,
     tolerance_words: int,
-    coolant_spec: str | None,
 ) -> dict[str, Any]:
     records = [c.record for c in candidates]
-    # The application model's blockers (unresolved logic between the lookup
-    # and the final word, an unverified RAM copy), then this run's own.
-    blockers: list[str] = list(table.application.blockers)
-    if not table.final_command_constants_checked:
-        blockers.append("final_command_constants_unchecked")
-    provenance = {
-        **table.provenance(),
-        "program": definition.program.calibration_id,
-        "decoder": {"profile_file": TWIN_FILE, "sha256": definition_sha256},
-        "application_model": table.application.provenance(),
-        "evaluator_version": EVALUATOR_VERSION,
-        "kernel_version": KERNEL_VERSION,
-    }
+    qualification = Qualification.of(table, definition, definition_sha256)
+    accounting = Accounting()
     for record in records:
-        if record["state"] == "eligible" and not blockers:
+        qualification.apply(record)
+        accounting.add(record)
+    return {
+        "provenance": qualification.provenance,
+        "pairing": pairing_block(definition),
+        "tolerance_words": tolerance_words,
+        "qualification_blockers": list(qualification.blockers),
+        "coolant_sources": accounting.coolant_sources(definition),
+        "accounting": accounting.counts(),
+        "coverage": accounting.coverage(),
+        "capture_requirement": capture_requirement(accounting.eligible, definition),
+        "records": records,
+    }
+
+
+def pairing_block(definition: TwinDefinition) -> dict[str, Any]:
+    return {
+        "max_acquisition_skew_s": definition.gates.max_acquisition_skew_s,
+        "clock": definition.gates.clock,
+        "method": "match_ordered, one-to-one per input, command samples as reference",
+    }
+
+
+@dataclass(frozen=True)
+class Qualification:
+    """What may turn an eligible difference into a qualified residual: the
+    application model's blockers (unresolved logic between the lookup and the
+    final word, an unverified RAM copy), then the table's own. One per table,
+    applied to every record the table predicted -- stored or streamed."""
+
+    blockers: tuple[str, ...]
+    provenance: dict[str, Any]
+
+    @classmethod
+    def of(
+        cls, table: ResolvedTable, definition: TwinDefinition, definition_sha256: str
+    ) -> Qualification:
+        blockers: list[str] = list(table.application.blockers)
+        if not table.final_command_constants_checked:
+            blockers.append("final_command_constants_unchecked")
+        provenance = {
+            **table.provenance(),
+            "program": definition.program.calibration_id,
+            "decoder": {"profile_file": TWIN_FILE, "sha256": definition_sha256},
+            "application_model": table.application.provenance(),
+            "evaluator_version": EVALUATOR_VERSION,
+            "kernel_version": KERNEL_VERSION,
+        }
+        return cls(tuple(blockers), provenance)
+
+    def apply(self, record: dict[str, Any]) -> None:
+        if record["state"] == "eligible" and not self.blockers:
             record["qualified_residual_phi"] = record["difference_phi"]
         if record["predicted_word"] is not None:
-            record["provenance"] = provenance
+            record["provenance"] = self.provenance
 
-    states = Counter(r["state"] for r in records)
-    by_reason: dict[str, Counter[str]] = {}
-    for r in records:
-        if r["state"] != "eligible":
-            by_reason.setdefault(r["state"], Counter())[r["reason"]] += 1
-    eligible: dict[str, dict[str, int]] = {
-        "ordinary": {"pass": 0, "miss": 0},
-        "override": {"pass": 0, "miss": 0},
-    }
-    coverage: dict[str, dict[str, Any]] = {}
-    for r in records:
-        if r["state"] != "eligible" or r["branch"] is None:
-            continue
-        verdict = "pass" if r["within_tolerance"] else "miss"
-        eligible[r["branch"]][verdict] += 1
-        cover = coverage.setdefault(
-            r["branch"], {"cells": Counter(), "rpm_raw": [], "load_raw": []}
-        )
-        cover["cells"][(r["lookup"]["row"], r["lookup"]["column"])] += 1
-        cover["rpm_raw"].append(r["inputs"]["rpm"]["raw"])
-        cover["load_raw"].append(r["inputs"]["load"]["raw"])
-    transient: Counter[str] = Counter()
-    for r in records:
-        if "transient" in r["reasons"] and r["within_tolerance"] is not None:
-            transient["within_tolerance" if r["within_tolerance"] else "outside_tolerance"] += 1
-    capture = None
-    missing = [b for b in ("ordinary", "override") if not sum(eligible[b].values())]
-    if missing:
-        capture = {
-            "reason": "no_eligible_tuples",
-            "branches": missing,
-            "message": (
-                "No eligible steady tuple for "
-                + " and ".join(missing)
-                + ": capture the command word with the X trace, rpm word and pedal flag "
-                f"in one read cycle (all within {definition.gates.max_acquisition_skew_s * 1000:g}"
-                " ms), plus fuel status, coolant and steady rpm/MAF, at warm open-loop "
-                "points across the table's cells and through sustained pedal enrichment "
-                "(E02.7)."
-            ),
+
+class Accounting:
+    """The run's counts, folded one decided record at a time, so a stored
+    session and a stream that decides records in batches give the same
+    numbers. Bounded: per-cell counts and ranges, never the records."""
+
+    def __init__(self) -> None:
+        self.candidates = 0
+        self.states: Counter[str] = Counter()
+        self.by_reason: dict[str, Counter[str]] = {}
+        self.eligible: dict[str, dict[str, int]] = {
+            "ordinary": {"pass": 0, "miss": 0},
+            "override": {"pass": 0, "miss": 0},
         }
-    return {
-        "provenance": provenance,
-        "pairing": {
-            "max_acquisition_skew_s": definition.gates.max_acquisition_skew_s,
-            "clock": definition.gates.clock,
-            "method": "match_ordered, one-to-one per input, command samples as reference",
-        },
-        "tolerance_words": tolerance_words,
-        "qualification_blockers": blockers,
-        "coolant_source": coolant_spec,
-        "accounting": {
-            "candidates": len(records),
-            "states": {s: int(states.get(s, 0)) for s in _PRIORITY},
-            "reasons": {s: dict(sorted(c.items())) for s, c in sorted(by_reason.items())},
-            "eligible": eligible,
-            "transient_differences": dict(transient),
-            "duplicate_use": duplicate_use(records),
-        },
-        "coverage": {
+        self.transient: Counter[str] = Counter()
+        self._cells: dict[str, Counter[tuple[int, int]]] = {}
+        self._ranges: dict[str, dict[str, list[int]]] = {}
+        self._used: Counter[tuple[str, int]] = Counter()
+        self.duplicate_use = 0
+        self._coolant: set[str] = set()
+
+    def add(self, r: dict[str, Any]) -> None:
+        self.candidates += 1
+        coolant = (r.get("gates") or {}).get("coolant")
+        if coolant:
+            self._coolant.add(coolant["spec"])
+        self.states[r["state"]] += 1
+        if r["state"] != "eligible":
+            self.by_reason.setdefault(r["state"], Counter())[r["reason"]] += 1
+        elif r["branch"] is not None:
+            branch = r["branch"]
+            self.eligible[branch]["pass" if r["within_tolerance"] else "miss"] += 1
+            self._cells.setdefault(branch, Counter())[
+                (r["lookup"]["row"], r["lookup"]["column"])
+            ] += 1
+            ranges = self._ranges.setdefault(branch, {})
+            for name in ("rpm", "load"):
+                value = r["inputs"][name]["raw"]
+                bounds = ranges.setdefault(f"{name}_raw", [value, value])
+                bounds[0], bounds[1] = min(bounds[0], value), max(bounds[1], value)
+        if "transient" in r["reasons"] and r["within_tolerance"] is not None:
+            self.transient[
+                "within_tolerance" if r["within_tolerance"] else "outside_tolerance"
+            ] += 1
+        # duplicate_use, folded: an observation cited a second time counts once.
+        for key in _observations(r):
+            self._used[key] += 1
+            if self._used[key] == 2:
+                self.duplicate_use += 1
+
+    def forget_before(self, rows: dict[str, int]) -> None:
+        """Drop the citation memory of rows below ``rows[spec]``: a stream
+        that has evicted them can never cite them again."""
+        self._used = Counter(
+            {key: n for key, n in self._used.items() if key[1] >= rows.get(key[0], 0)}
+        )
+
+    def coolant_sources(self, definition: TwinDefinition) -> list[str]:
+        """The coolant sources the records used, in declared priority."""
+        return [s for s in definition.gates.coolant.sources if s in self._coolant]
+
+    def counts(self) -> dict[str, Any]:
+        return {
+            "candidates": self.candidates,
+            "states": {s: int(self.states.get(s, 0)) for s in _PRIORITY},
+            "reasons": {s: dict(sorted(c.items())) for s, c in sorted(self.by_reason.items())},
+            "eligible": {branch: dict(v) for branch, v in self.eligible.items()},
+            "transient_differences": dict(self.transient),
+            "duplicate_use": self.duplicate_use,
+        }
+
+    def coverage(self) -> dict[str, dict[str, Any]]:
+        return {
             branch: {
-                "cells": sorted([list(cell), n] for cell, n in data["cells"].items()),
-                "rpm_raw": [min(data["rpm_raw"]), max(data["rpm_raw"])],
-                "load_raw": [min(data["load_raw"]), max(data["load_raw"])],
+                "cells": sorted([list(cell), n] for cell, n in cells.items()),
+                **{name: list(bounds) for name, bounds in self._ranges[branch].items()},
             }
-            for branch, data in coverage.items()
-        },
-        "capture_requirement": capture,
-        "records": records,
+            for branch, cells in self._cells.items()
+        }
+
+
+def capture_requirement(
+    eligible: dict[str, dict[str, int]], definition: TwinDefinition
+) -> dict[str, Any] | None:
+    """The measurement that would supply a branch with no eligible tuple."""
+    missing = [b for b in ("ordinary", "override") if not sum(eligible[b].values())]
+    if not missing:
+        return None
+    return {
+        "reason": "no_eligible_tuples",
+        "branches": missing,
+        "message": (
+            "No eligible steady tuple for "
+            + " and ".join(missing)
+            + ": capture the command word with the X trace, rpm word and pedal flag "
+            f"in one read cycle (all within {definition.gates.max_acquisition_skew_s * 1000:g}"
+            " ms), plus fuel status, coolant and steady rpm/MAF, at warm open-loop "
+            "points across the table's cells and through sustained pedal enrichment "
+            "(E02.7)."
+        ),
     }
 
 
@@ -1468,18 +1660,30 @@ def records_digest(result: dict[str, Any], keys: Sequence[str]) -> list[dict[str
 __all__ = [
     "EVALUATOR_VERSION",
     "TWIN_FILE",
+    "Accounting",
     "Prediction",
+    "Qualification",
     "ResolvedTable",
     "SlotResolution",
     "TwinDefinition",
     "TwinRefusalError",
     "bind_application",
+    "capture_requirement",
+    "captured_by",
     "check_trace_mapping",
     "check_windows",
+    "decision_horizon_s",
     "duplicate_use",
     "evaluate_session",
+    "evaluated_specs",
+    "first_reads",
+    "coolant_source",
     "load_twin_definition",
+    "lookback_s",
+    "new_candidate",
+    "pairing_block",
     "predict",
+    "raw_specs",
     "records_digest",
     "resolve_slot",
     "resolve_table",

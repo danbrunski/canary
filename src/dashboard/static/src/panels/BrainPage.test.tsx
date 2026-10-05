@@ -232,4 +232,39 @@ describe("BrainPage", () => {
       session: "2026-10-04T204557",
     });
   });
+
+  it("shows the live twin's latest command, its counts and why it is not qualified", async () => {
+    vi.mocked(api.getBrainStatus).mockResolvedValue({
+      ...status,
+      live_twin: {
+        enabled: true,
+        result: "no_eligible_samples",
+        reason: null,
+        session: "_capture-x",
+        replay: false,
+        vehicle_state: "engine_running",
+        applicability: { qualified: false, qualification_blockers: ["ram_copy_unverified"] },
+        accounting: { candidates: 3, states: { unevaluable: 2, eligible: 1 } },
+        stream: { pending: 4, late_reads: { "mem:A": 1 } },
+        intake: { dropped: 0, busy_ticks: 0 },
+        latest_prediction: {
+          acquired_at: "2026-10-04T20:47:11Z",
+          observed_phi: 1.1640625,
+          predicted_phi: 1.1640625,
+          difference_phi: 0,
+          qualified_residual_phi: null,
+          state: "eligible",
+          reason: null,
+          branch: "override",
+        },
+      },
+    });
+    vi.mocked(api.getBrainJobs).mockResolvedValue({ jobs: [], counts: {} });
+    vi.mocked(api.queryMemory).mockResolvedValue({ vehicle: "v", count: 0, records: [] });
+    render(<BrainPage token="t" />);
+    expect(await screen.findByText(/vehicle engine_running/)).toBeTruthy();
+    expect(screen.getByText(/predicted φ 1.16406 .* residual not qualified/)).toBeTruthy();
+    expect(screen.getByText(/pending 4 · late 1 · dropped 0/)).toBeTruthy();
+    expect(screen.getByText("ram_copy_unverified")).toBeTruthy();
+  });
 });

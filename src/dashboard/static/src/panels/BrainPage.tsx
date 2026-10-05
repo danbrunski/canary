@@ -25,6 +25,7 @@ import {
 import type {
   BrainJob,
   BrainStatus,
+  LiveTwin,
   EvidenceView,
   InvestigationCardResponse,
   TwinEvaluation,
@@ -85,6 +86,58 @@ function Row({ term, value }: { term: string; value: string }) {
   );
 }
 
+function phi(value: number | null | undefined): string {
+  return value === null || value === undefined ? "—" : value.toFixed(5);
+}
+
+/** The live twin: what the ECM is commanding now against the decoded logic.
+ *  An ECU-computation readout — never fuel delivery, never a fault. */
+function LiveTwinView({ twin }: { twin: LiveTwin }) {
+  if (!twin.enabled) {
+    return (
+      <Row term="Live twin" value={`${twin.result}${twin.reason ? ` — ${twin.reason}` : ""}`} />
+    );
+  }
+  const latest = twin.latest_prediction;
+  const states = twin.accounting?.states ?? {};
+  const late = Object.values(twin.stream?.late_reads ?? {}).reduce((a, b) => a + b, 0);
+  return (
+    <>
+      <Row
+        term="Live twin"
+        value={`${twin.result}${twin.reason ? ` (${twin.reason})` : ""} · vehicle ${
+          twin.vehicle_state ?? "unknown"
+        }${twin.replay ? " · replay" : ""}`}
+      />
+      <Row
+        term="Latest command"
+        value={
+          latest
+            ? `observed φ ${phi(latest.observed_phi)} · predicted φ ${phi(
+                latest.predicted_phi,
+              )} · difference ${phi(latest.difference_phi)} · residual ${
+                latest.qualified_residual_phi === null
+                  ? "not qualified"
+                  : phi(latest.qualified_residual_phi)
+              } (${latest.state}${latest.reason ? `: ${latest.reason}` : ""})`
+            : "no prediction yet"
+        }
+      />
+      <Row
+        term="Live samples"
+        value={`${Object.entries(states)
+          .map(([state, n]) => `${state} ${n}`)
+          .join(" · ")} · pending ${twin.stream?.pending ?? 0} · late ${late} · dropped ${
+          twin.intake?.dropped ?? 0
+        }`}
+      />
+      {twin.applicability && !twin.applicability.qualified ? (
+        <Row term="Not qualified" value={twin.applicability.qualification_blockers.join(", ")} />
+      ) : null}
+    </>
+  );
+}
+
 function StatusView({ status }: { status: BrainStatus }) {
   const { identity } = status;
   return (
@@ -102,6 +155,7 @@ function StatusView({ status }: { status: BrainStatus }) {
         value={`${status.transient.state} (${status.transient.reason})`}
       />
       <Row term="Memory" value={`${status.memory.current} current of ${status.memory.records}`} />
+      {status.live_twin ? <LiveTwinView twin={status.live_twin} /> : null}
       <Row
         term="Jobs"
         value={

@@ -136,6 +136,8 @@ def register_control_routes(
     profile_capture: ProfileCaptureSession | None = None,
     capture_autostart: CaptureAutostart | None = None,
     publish_control_event: Callable[[str, str, dict[str, Any]], None],
+    #: ``/status``'s inference recorder, for the brain's live twin block.
+    inference_timing: Any = None,
 ) -> None:
     session = profile_capture or ProfileCaptureSession(
         storage_writer=storage_writer,
@@ -175,6 +177,7 @@ def register_control_routes(
         health_monitor=health_monitor,
         emitter=emitter,
         live_source=live_source,
+        inference_timing=inference_timing,
     )
     # `SessionDir` resolves against the app's context.
     app.state.control_context = ctx
