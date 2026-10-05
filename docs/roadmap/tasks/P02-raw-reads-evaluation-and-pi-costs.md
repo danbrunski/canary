@@ -878,7 +878,7 @@ recomputes the rolling frame over the whole buffered window every tick.
 
   Size **M**, Pi and operator.
 
-- [ ] **P02.9 Incremental rolling features on the live path.** Keep each
+- [~] **P02.9 Incremental rolling features on the live path.** Keep each
   channel's rolling mean/std/roc and gap state up to date incrementally, with
   constant work per new sample, instead of recomputing the buffered window
   every tick. The result must equal `compute_features` over the same window,
@@ -892,6 +892,132 @@ recomputes the rolling frame over the whole buffered window every tick.
   - Featurization time per tick is recorded on the Pi, before and after.
 
   Size **M–L**. Built at the desk; measured on the Pi.
+
+  *Desk half done 2026-10-05; the Pi timing is owed.*
+  - **What was built, and where it departs from the wording.** The live tick
+    now rolls only the row it keeps:
+    `src.preprocessing.features.compute_features_last_row`, reached through
+    `featurize_wide_frame(..., last_row_only=True)` from
+    `build_prepared_live_tick`. Offline callers are unchanged. The transform
+    (segment, derived channels, deviations) has one copy. At the kernel level
+    there are two:
+    - `__roc` and output assembly are one implementation.
+      `_rate_of_change_block` takes an explicit `n_rows`; the batch calls it
+      over the session and the last-row path over the one row pair.
+    - **Mean/std are a second kernel**: `_window_mean_std`, numpy over the
+      one window. It is kept for speed (verification decision, 2026-10-05)
+      and held to `LAST_ROW_RTOL`, not bit-for-bit.
+
+    The work is O(window) per tick, not O(1),
+    and it is stateless: no running sums carry between ticks. Running state
+    could not meet the parity line. The worker re-derives the buffer's
+    upstream columns every tick (segmenter lookback, deviation `__roc` over
+    the buffer), so sums accumulated from earlier ticks would integrate values
+    that the transform later revises. Stateless also means reset, replay and
+    session change need no invalidation. Gap state was already incremental
+    (`_gap_flags`).
+  - **Parity contract.** `__roc` and every passthrough column are
+    bit-identical. `__mean` and `__std` each have their own bound, checked by
+    `last_row_mismatches` (`_last_row_bound`). Here `peak` is max |x| over
+    the session's frame, `x` is the batch value, and eps64 is float64
+    machine epsilon.
+    - **`__mean`:** |Δ| ≤ 2⁻²³·|x| + 64·eps64·peak. pandas' rolling mean is
+      a compensated sum with removals; over 300 random histories (peaks
+      1e0–1e8) its residue measured ≤ 1.73·eps64·peak (verifier,
+      2026-10-05). The 2⁻²³·|x| term is one float32 ulp, for the narrowing.
+    - **`__std`, bounded in variance:** |x² − y²| ≤ 128·eps64·peak², plus
+      one float32 ulp of x, where y is the last-row value.
+      - pandas' Welford update with removals leaves its residue in the
+        variance, not the std, at order eps64·peak².
+      - |x − y| = |x² − y²|/(x + y) exactly, so the check is
+        |Δ| ≤ 2⁻²³·|x| + 128·eps64·peak²/(x + y).
+      - One form covers both regimes. With real spread it is about
+        residue/(2·std). As the true std → 0 it becomes
+        x ≤ √(128·eps64)·peak.
+      - Measured residues: ≤ 11.1·eps64·peak² over 300 random histories
+        (verifier), and **61·eps64·peak² on real data**:
+        `derived:STFT_BANK_BALANCE__std`, `2026-10-04T194342`, a window of
+        two equal values (−0.78125) among 28 NaN, peak 1.72, batch 1.99e-7
+        against an exact 0. 128 gives about 2× margin over the real figure.
+        `test_the_real_stft_residue_passes` is its regression, and also
+        refuses 4× that residue.
+
+    Mean/std cannot be bit-for-bit because pandas' sliding kernel carries
+    rounding from the frame's first row, so the batch value moves with where
+    the buffer starts. A real GPS heading held constant for 30 s gave a batch
+    std of 3.7e-6, inside its std bound. The batch gives 0 when the
+    frame starts 100 rows later, and the last-row form gives 0.
+    - **Why the frame's peak and not the window's.** A window-relative bound
+      refuses correct rows: the error belongs to the reference's history.
+      Example: a channel at 1e5 for 60 s, then a 30 s window near 1. The
+      batch std is 0.072299 against the exact 0.072290, which the last-row
+      form returns. That is 1.2e-4 relative to the window.
+    - **Why split by column.** One shared 2⁻²³·peak bound (1.2e-2 in that
+      example) let a 1 % mean error (1.0e-2) through. The mean bound there
+      is 1.2e-7 and refuses it.
+    - **ddof is unresolvable at a 1e5 offset.** A ddof=0 std there is off by
+      1.2e-3, a variance difference of 78·eps64·peak². That is close to the
+      61·eps64·peak² the reference's own residue reaches on real data, and the
+      bound must admit that residue with margin, so it cannot tell them apart;
+      the std bound there is 2.0e-3. On a 1e3 history the same error is 7.8e5·eps64·peak² and is
+      refused (`test_a_ddof0_std_is_refused_where_the_history_resolves_it`).
+  - **Tests.** `tests/test_features_last_row_parity.py` (66 tests) covers:
+    - NaN, inf and irregular gaps;
+    - right-closed endpoints at ±1 ns;
+    - multi-session frames and a NaN session;
+    - unsorted input;
+    - constant, single-sample and ±0 windows;
+    - every `FeatureConfig` switch and `value_columns`;
+    - re-featurized input, and empty and one-row frames;
+    - bit-identical `__roc` across dtypes;
+    - the frame-start residue;
+    - checks that the contract rejects a 1-ulp `__roc`, a raw value, a mean
+      +1, a NaN and a dtype;
+    - a column label appearing twice is skipped, as the batch always did;
+    - **fast tier, every push:** every tick of two spans of the committed
+      `tests/fixtures/ground_truth/drive-slice`, run through the real chain
+      (decode, resample, derived channels): ticks 0–11 (warmup) and 200–229
+      (driving). Each tick's last row comes from the frame as it stood at
+      that tick and is compared to the batch row. A 1e-6 relative drift
+      injected into the mean kernel fails both spans. The cost is ~1.0 s
+      including setup;
+    - (slow tier) every live tick against batch over its buffer through
+      eviction, and reset ≡ fresh source.
+
+    The named gates pass: `test_features_batched_parity`,
+    `test_reconcile_feature_frame_parity` and `test_preprocessing_live`, 263
+    passed together with the related files.
+  - **Replay parity, two real sessions** (`~/canary-data`, every live tick vs
+    batch over the same buffer): `2026-09-23T162918` (649 ticks) and
+    `2026-10-04T194342` (900 ticks).
+    - 0 contract failures.
+    - 893,496 non-rolling cells exact.
+    - 404 mean/std cells 1 float32 ulp off; 1,580 further off, all within
+      the contract.
+    - Re-run after the single-source `__roc` change gave identical counts.
+  - **Verdicts, full pipeline.** `tools/replay_event_diff.drive_session` ran
+    old vs new with the real IF + LSTM artifacts: 900 s of
+    `2026-09-23T162918` from +120 s, and of `2026-10-04T194342` from +300 s.
+    - Emitter counters were identical (17 and 23 evidence events).
+    - No string or bool field differed in any score message or event.
+    - Score numerics differed by at most 1.2e-7 relative. Event numerics
+      differed by at most 1.2e-7 absolute (LSTM float32 reconstructions).
+  - **Laptop per-tick feature stage** (`build_prepared_live_tick`, 400 ticks
+    of `2026-10-04T194342`, buffer 181 rows, HEAD vs HEAD+patch trees run
+    alternately): median 240 / 273 ms → 159 / 156 ms (−37 to −43 %). Rolling
+    alone, on a real 181×437 buffer: `compute_features` 74 ms vs last-row
+    22 → 19 ms. Two shared speed-ups contribute: `_with_feature_columns`
+    builds narrowed values and features as single float32 blocks, and
+    `_value_columns` reads dtypes once. The batched-parity test still passes
+    exactly.
+  - **Serve-time reconcile.** Found while measuring: every
+    `reconcile_feature_frame_to_spec` call resolved the default
+    `FeaturePolicy` and re-parsed `dids.yaml`, about 300 ms of ~400 ms, once
+    per detector per tick. `_did_map_at` now caches it by mtime and size, the
+    pattern `repo_bindings` uses. Reconcile goes ~400 → ~80 ms per detector
+    on a quiet laptop (457/481 → 120/117 ms under load), with the aligned
+    frame and report identical.
+  - **Owed:** the before/after per-tick time on the Pi.
 
 - [~] **P02.10 Store CAN frames on change; re-write an unchanged id once per
   stale timeout (operator decision).** On the 09-20 drive, 41 % of CAN frames

@@ -64,7 +64,12 @@ from src.preprocessing.derived import (
 )
 from src.preprocessing.derived_store import DecodeInputs, DerivedStore, active_store
 from src.preprocessing.drives import DRIVE_COLUMN, stamp_physical_drives
-from src.preprocessing.features import CONTEXT_COLUMN_PREFIX, FeatureConfig, compute_features
+from src.preprocessing.features import (
+    CONTEXT_COLUMN_PREFIX,
+    FeatureConfig,
+    compute_features,
+    compute_features_last_row,
+)
 from src.preprocessing.loader import (
     SESSION_PART_ROWS,
     read_session,
@@ -453,6 +458,32 @@ class FeaturePolicy:
         return None
 
 
+#: ``{path: ((mtime_ns, size), DidMap)}`` for :func:`_did_map_at`.
+_DID_MAP_CACHE: dict[Path, tuple[tuple[int, int], DidMap]] = {}
+
+
+def _did_map_at(path: Path) -> DidMap | None:
+    """The DID catalog at ``path``, re-read when its mtime or size changes;
+    ``None`` when absent. :func:`repo_bindings`' pattern for the other catalog.
+
+    :func:`reconcile_feature_frame_to_spec` resolves the default
+    :class:`FeaturePolicy` on every serve tick, once per detector, and
+    re-parsing ``dids.yaml`` there was ~300 ms of its ~400 ms on the laptop
+    (P02.9 measurement, 2026-10-05).
+    """
+    try:
+        stat = path.stat()
+    except FileNotFoundError:
+        return None
+    stamp = (stat.st_mtime_ns, stat.st_size)
+    cached = _DID_MAP_CACHE.get(path)
+    if cached is not None and cached[0] == stamp:
+        return cached[1]
+    did_map = load_did_map(path)
+    _DID_MAP_CACHE[path] = (stamp, did_map)
+    return did_map
+
+
 def resolve_feature_policy(
     config: CanaryConfig | None = None,
     *,
@@ -489,7 +520,7 @@ def resolve_feature_policy(
         catalog = (
             repo_bindings(bindings_path.resolve()) if bindings_path is not None else repo_bindings()
         )
-    did_map = load_did_map(dids_path) if dids_path.exists() else None
+    did_map = _did_map_at(dids_path)
     if config is None:
         return FeaturePolicy(
             bindings=catalog,
@@ -1262,6 +1293,7 @@ def featurize_wide_frame(
     feature_config: FeatureConfig | None = None,
     bindings: Bindings | None = None,
     flash_history: FlashHistory | None = None,
+    last_row_only: bool = False,
 ) -> FeaturizedFrame:
     """The single wide → model-ready feature transform (7.1 keystone).
 
@@ -1318,6 +1350,13 @@ def featurize_wide_frame(
     (:func:`~src.vehicle.profiles.active_flash_history`) at the row's stamp,
     right for every frame stamped when it was recorded. The live tick passes
     its source's, which reads a replayed row at its recorded instant.
+
+    P02.9 — ``last_row_only`` rolls only the row ``compute_features`` would
+    emit last (:func:`~src.preprocessing.features.compute_features_last_row`),
+    so ``features`` has at most one row; ``operating_frame`` is unchanged. The
+    live tick keeps one row of its ring buffer, and rolling the rest was about
+    two fifths of the tick. Same windows, same columns and dtypes; ``__roc``
+    bit-identical, mean/std within that function's declared tolerance.
     """
     require_profile_scoped(config, reader="featurize_wide_frame")
     framed, segmenter_fell_back = segment_or_constant(wide, config, bindings=bindings)
@@ -1327,7 +1366,8 @@ def featurize_wide_frame(
         framed = append_deviation_columns(
             framed, behavior_models, rate_window_seconds=cfg.window_seconds
         )
-    features = compute_features(_without_committee_columns(framed), config=cfg)
+    roll = compute_features_last_row if last_row_only else compute_features
+    features = roll(_without_committee_columns(framed), config=cfg)
     return FeaturizedFrame(
         features=features, operating_frame=framed, segmenter_fell_back=segmenter_fell_back
     )

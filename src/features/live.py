@@ -27,9 +27,11 @@ segmenter's recent-motion lookback: ``max(2 × window_seconds,
 idle_transient_lookback_seconds) × resample_hz`` (plus slack). The window
 term keeps ``compute_features`` full right after startup; the lookback term
 lets serve-time idle_transient vs idle see the preceding drive, matching
-training. At 1 Hz with a 30 s window and 180 s lookback that's ~181 rows —
-still trivial to recompute each tick. Higher resample rates scale linearly;
-revisit if it ever becomes the bottleneck (NFR-01 budget is <50% Pi 5 CPU).
+training. At 1 Hz with a 30 s window and 180 s lookback that's ~181 rows.
+The segmenter, derived channels and deviations still run over all of them
+each tick; the rolling features roll only the newest row (P02.9,
+``compute_features_last_row``) — rolling the whole buffer to keep one row
+was about two fifths of a laptop tick.
 
 Decode policy intentionally matches the offline path:
 ``decode_can_rows`` emits the *raw integer* (not scaled), because the
@@ -152,6 +154,8 @@ def build_prepared_live_tick(prepared: PreparedLiveTick) -> BuiltLiveTick:
         did_map=prepared.did_map,
         feature_config=prepared.feature_config,
         flash_history=prepared.flash_history,
+        # P02.9: only the newest row is kept, so only it is rolled.
+        last_row_only=True,
     )
     operating_point = {
         str(key): value for key, value in result.operating_frame.iloc[-1].to_dict().items()
