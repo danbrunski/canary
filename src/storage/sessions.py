@@ -6,7 +6,7 @@ import json
 import logging
 import shutil
 import zipfile
-from collections.abc import Collection, Sequence
+from collections.abc import Collection, Iterable, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -71,6 +71,38 @@ def latest_session(root: Path) -> Path | None:
         if has_telemetry(child)
     ]
     return dated[-1] if dated else None
+
+
+def last_heard(session: Path, sources: Iterable[str], *, max_chunks: int = 30) -> datetime | None:
+    """When ``session`` last stored a row from any of ``sources``, or ``None``.
+
+    Reads only the ``source`` and ``timestamp`` columns of the newest chunks,
+    newest first, and stops at the first chunk holding one: a session goes on
+    storing GPS and sensor rows after the bus falls asleep, so the newest
+    chunk need not hold one. ``max_chunks`` bounds the cost on a long tail.
+    """
+    import pyarrow.parquet as pq
+
+    wanted = set(sources)
+    chunks = sorted(session.glob(PARQUET_PATTERN), reverse=True)[:max_chunks]
+    for chunk in chunks:
+        try:
+            table = pq.read_table(chunk, columns=["source", "timestamp"])  # type: ignore[no-untyped-call, unused-ignore]
+        except (OSError, ValueError):
+            continue
+        stamps = [
+            ts
+            for src, ts in zip(
+                table.column("source").to_pylist(),
+                table.column("timestamp").to_pylist(),
+                strict=True,
+            )
+            if src in wanted and ts is not None
+        ]
+        if stamps:
+            newest: datetime = max(stamps)
+            return newest if newest.tzinfo else newest.replace(tzinfo=UTC)
+    return None
 
 
 def recorded_sessions(
@@ -325,6 +357,7 @@ def _started_at_iso(session_id: str) -> str | None:
 __all__ = [
     "SessionSummary",
     "delete_session",
+    "last_heard",
     "filter_sessions",
     "is_session_dir_name",
     "is_session_pinned",

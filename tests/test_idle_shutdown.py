@@ -174,7 +174,7 @@ class TestParkedVehicle:
 
 class TestStateSets:
     def test_idle_and_active_sets_are_disjoint_and_exclude_replay(self) -> None:
-        assert set(DEFAULT_IDLE_STATES) == {"engine_off", "no_data"}
+        assert set(DEFAULT_IDLE_STATES) == {"engine_off", "parked", "no_data"}
         assert set(DEFAULT_ACTIVE_STATES) == {"engine_running", "ignition_only"}
         assert not set(DEFAULT_IDLE_STATES) & set(DEFAULT_ACTIVE_STATES)
         for group in (DEFAULT_IDLE_STATES, DEFAULT_ACTIVE_STATES):

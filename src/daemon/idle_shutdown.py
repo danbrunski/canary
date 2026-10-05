@@ -93,7 +93,7 @@ log = logging.getLogger(__name__)
 #: Vehicle states that count as "parked / disconnected". Deliberately excludes
 #: ``ignition_only`` (KOEO is an operator at the wheel running diagnostics) and
 #: ``unknown`` (the classifier could not decide, so neither should we).
-DEFAULT_IDLE_STATES: tuple[str, ...] = ("engine_off", "no_data")
+DEFAULT_IDLE_STATES: tuple[str, ...] = ("engine_off", "parked", "no_data")
 
 #: States proving we are actually attached to a live vehicle. Observing one of
 #: these arms the countdown; until then the rig might be sitting on a bench.

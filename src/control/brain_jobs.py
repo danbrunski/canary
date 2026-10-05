@@ -82,7 +82,12 @@ from src.storage.session_products import read_digest, read_digest_skipped
 from src.storage.sessions import latest_session, resolve_session
 from src.vehicle.profiles import active_registry, profile_dir
 from src.vehicle.tune_revisions import resolve_session_revision
-from src.vehicle_state import ReplayStatusSource, derive_from_live_source, running_replay_id
+from src.vehicle_state import (
+    QUIET_STATES,
+    ReplayStatusSource,
+    derive_from_live_source,
+    running_replay_id,
+)
 
 log = logging.getLogger(__name__)
 
@@ -602,7 +607,8 @@ def collection_activity(
 ) -> str | None:
     """Why heavy work must wait now, or ``None`` when collection is inactive.
 
-    Only a ``no_data`` verdict (neither bus fresh) is inactive. ``engine_off``
+    Only a quiet verdict (``QUIET_STATES``: ``parked`` or ``no_data``, neither
+    bus fresh) is inactive. ``engine_off``
     (CAN fresh, key out), ``ignition_only``, ``passive`` and ``unknown`` are all
     still collecting: a parked vehicle whose bus talks is being recorded.
     """
@@ -613,7 +619,7 @@ def collection_activity(
     if live_source is None:
         return "collection_state_unknown"
     state = derive_from_live_source(live_source, replay_controller=replay_controller).state
-    return None if state == "no_data" else f"collecting:{state}"
+    return None if state in QUIET_STATES else f"collecting:{state}"
 
 
 Precheck = tuple[Literal["run", "pending", "failed"], str | None, str | None]

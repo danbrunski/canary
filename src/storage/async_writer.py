@@ -49,6 +49,15 @@ class AsyncParquetTelemetryWriter:
         of derived channels, e.g.) instead of one ``write`` call each."""
         return await self._call(self._writer.write_many, list(records))
 
+    @property
+    def last_accepted(self) -> list[TelemetryRecord]:
+        """The records the wrapped writer's last ``write_many`` recorded, not
+        withheld by the arming gate. Read right after awaiting
+        :meth:`write_many`; another caller's batch may land in between, but
+        every record listed was recorded, which is all a "first stored" mark
+        needs."""
+        return list(self._writer.last_accepted)
+
     async def flush(self) -> Path | None:
         return await self._call(self._writer.flush)
 

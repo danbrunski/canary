@@ -27,6 +27,7 @@ from src.paths import BINDINGS_YAML as DEFAULT_BINDINGS_PATH
 from src.storage.async_writer import AsyncParquetTelemetryWriter, ensure_async_writer
 from src.storage.capture_manifest import recover_interrupted_capture, write_capture_quality
 from src.storage.parquet_writer import ParquetTelemetryWriter
+from src.storage.sessions import last_heard, latest_session
 from src.telemetry import TelemetryRecord
 
 from .components import DaemonComponents, build_components
@@ -66,7 +67,14 @@ def build_live_feature_source(components: DaemonComponents) -> LiveFeatureSource
     """
     from .inference import build_live_feature_source as _build
 
-    return _build(components)
+    source = _build(components)
+    # A restart forgets when the bus last spoke; the newest session knows
+    # (``can_freshness_seconds`` then says "silent for 3 h", not null).
+    latest = latest_session(components.config.collection.storage_path)
+    heard = None if latest is None else last_heard(latest, ("can",))
+    if heard is not None:
+        source.seed_bus_last_heard(heard)
+    return source
 
 
 async def run_live_inference(

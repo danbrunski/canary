@@ -306,7 +306,7 @@ class _Replay:
         return _S()
 
 
-def test_only_no_data_counts_as_collection_inactive(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_only_quiet_states_count_as_collection_inactive(monkeypatch: pytest.MonkeyPatch) -> None:
     from src.collection import tuning_profile
 
     monkeypatch.setattr(tuning_profile, "is_active", lambda: False)
@@ -319,6 +319,16 @@ def test_only_no_data_counts_as_collection_inactive(monkeypatch: pytest.MonkeyPa
         "collecting:engine_off"
     )
     assert collection_activity(live_source=silent, replay_controller=None) is None
+    # Asleep on a live battery (2026-10-04): quiet, so inactive too.
+    asleep = _Live(
+        {
+            "can_freshness_seconds": 9000.0,
+            "obd_freshness_seconds": None,
+            "supply_voltage": 12.4,
+            "supply_freshness_seconds": 0.1,
+        }
+    )
+    assert collection_activity(live_source=asleep, replay_controller=None) is None
     assert (
         collection_activity(live_source=silent, replay_controller=_Replay(True)) == "replay_active"
     )

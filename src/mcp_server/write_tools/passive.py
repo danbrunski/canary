@@ -35,7 +35,7 @@ async def set_passive_mode(
     the old "stays armed until manually disarmed" behavior.
 
     Note that OBD channels go stale while armed, so ``vehicle_state`` will
-    read ``engine_off``/``no_data`` and behavior models will stop scoring. That
+    read ``engine_off``/``parked``/``no_data`` and behavior models will stop scoring. That
     is expected, not a fault; ``get_status`` reports ``passive.enabled`` (and
     ``passive.ttl_remaining_seconds`` when a TTL is set) so both are
     distinguishable from a real fault. Disarm when the other tool is

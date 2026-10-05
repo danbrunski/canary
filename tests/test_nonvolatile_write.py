@@ -33,6 +33,7 @@ ALL_STATES: tuple[VehicleStateName, ...] = (
     "engine_running",
     "ignition_only",
     "engine_off",
+    "parked",
     "no_data",
     "replay",
     "passive",

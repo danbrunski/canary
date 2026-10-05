@@ -442,7 +442,7 @@ class IdleShutdownConfig(_Strict):
     #: deliberately absent — KOEO is an operator at the wheel running
     #: diagnostics — and so is ``unknown``: if the classifier could not
     #: decide, neither should this.
-    idle_states: tuple[str, ...] = ("engine_off", "no_data")
+    idle_states: tuple[str, ...] = ("engine_off", "parked", "no_data")
     #: Continuous seconds in an idle state before powering off. Generous by
     #: default: the cost of waiting is a few minutes of idle draw, the cost
     #: of firing early is a shutdown mid-drive.

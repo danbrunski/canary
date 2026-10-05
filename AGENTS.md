@@ -97,8 +97,14 @@ derived classification of what the daemon is actually seeing right now:
 
 - `engine_running` — OBD fresh + RPM ≥ 400. Truck is in normal mode.
 - `ignition_only` — OBD fresh + RPM == 0. KOEO; ECM responds but engine off.
-- `engine_off` — CAN fresh, OBD stale. Plugged in, key out.
-- `no_data` — neither bus fresh. Pi probably disconnected.
+- `engine_off` — CAN fresh, OBD stale. Plugged in, key out, on a vehicle
+  whose bus stays awake. On the Xterra it lasts only seconds after key-off.
+- `parked` — neither bus fresh, but the HAT's 12 V sense reads a battery
+  (`supply_voltage`). The bus is asleep: key off, plugged in. A parked
+  Xterra spends its nights here.
+- `no_data` — neither bus fresh and no 12 V reading: unplugged, or no 12 V
+  sense configured. Before `parked` existed (2026-10-04) a parked truck read
+  `no_data` too.
 - `replay` — runtime replay is active; the "OBD"/"CAN" you see is
   re-emitted from a stored session.
 - `passive` — CANary is not transmitting (passive armed, or another tester

@@ -320,8 +320,11 @@ async def run_storage_sink(
                             flushes=len(files),
                         )
                         # S01.1: the writer has accepted these, so this, not
-                        # a collector, is when recording began.
-                        health_monitor.startup.note_stored(records)
+                        # a collector, is when recording began. Only what it
+                        # recorded: a parked Pi's arming gate withholds every
+                        # record, and counting those claimed recording had
+                        # begun while nothing was written (2026-10-04).
+                        health_monitor.startup.note_stored(async_writer.last_accepted)
             finally:
                 for _ in records:
                     queue.task_done()

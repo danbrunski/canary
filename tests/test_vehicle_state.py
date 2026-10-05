@@ -11,6 +11,8 @@ from __future__ import annotations
 from datetime import datetime
 from pathlib import Path
 
+import pytest
+
 from src.dashboard.status import classify_vehicle_state
 from src.telemetry import TelemetryRecord
 
@@ -32,6 +34,8 @@ def _common_telemetry(**overrides: object) -> dict[str, object]:
         "run_time": None,
         "obd_freshness_seconds": None,
         "can_freshness_seconds": None,
+        "supply_voltage": None,
+        "supply_freshness_seconds": None,
         "replay_id": None,
     }
     if "rpm" in overrides:
@@ -446,6 +450,76 @@ def test_fresh_obd_still_wins_over_the_broadcast(tmp_path: Path) -> None:
 # ---------------------------------------------------------------------------
 # R03.1 — the broadcast-RPM fallback lives in the classifier's signature
 # ---------------------------------------------------------------------------
+
+
+def test_parked_when_both_buses_sleep_on_a_live_battery() -> None:
+    """2026-10-04: the Xterra's bus sleeps at key-off. Hours parked read
+    ``no_data`` ("Pi probably disconnected") while the daemon answered; the
+    HAT's 12 V sense is the evidence that tells the two apart."""
+    state = classify_vehicle_state(
+        **_common_telemetry(
+            obd_freshness_seconds=9000.0,
+            can_freshness_seconds=9000.0,
+            supply_voltage=12.41,
+            supply_freshness_seconds=0.1,
+        )
+    )
+    assert state.state == "parked"
+    assert state.supply_voltage == 12.41
+    assert state.to_dict()["supply_voltage"] == 12.41
+
+
+def test_no_data_when_the_supply_is_stale_low_or_absent() -> None:
+    for supply, age in ((12.4, 60.0), (0.3, 0.1), (None, None)):
+        state = classify_vehicle_state(
+            **_common_telemetry(supply_voltage=supply, supply_freshness_seconds=age)
+        )
+        assert state.state == "no_data", (supply, age)
+        assert state.supply_voltage == (supply if age is not None and age <= 10 else None)
+
+
+def test_a_live_bus_outranks_the_supply() -> None:
+    state = classify_vehicle_state(
+        **_common_telemetry(
+            rpm=0.0,
+            obd_freshness_seconds=0.5,
+            supply_voltage=12.4,
+            supply_freshness_seconds=0.1,
+        )
+    )
+    assert state.state == "ignition_only"
+
+
+def test_parked_from_stored_rows() -> None:
+    from datetime import UTC
+
+    from src.vehicle_state import derive_from_latest_rows
+
+    now = datetime(2026, 10, 5, 3, 0, tzinfo=UTC)
+    rows = [
+        {
+            "source": "can",
+            "channel": "0x1F9",
+            "value": None,
+            "timestamp": "2026-10-05T00:02:17+00:00",
+        },
+        {
+            "source": "sensor",
+            "channel": "SUPPLY_VOLTAGE",
+            "value": 12.38,
+            "timestamp": "2026-10-05T02:59:59.9+00:00",
+        },
+    ]
+    state = derive_from_latest_rows(rows, replay_id=None, now=now, passive=False)
+    assert state.state == "parked"
+    assert state.can_freshness_seconds == pytest.approx(10663.0)
+
+
+def test_supply_voltage_is_a_required_argument() -> None:
+    kwargs = _common_telemetry()
+    del kwargs["supply_voltage"]
+    with pytest.raises(TypeError):
+        classify_vehicle_state(**kwargs)  # type: ignore[arg-type]
 
 
 def test_broadcast_rpm_is_a_required_argument() -> None:

@@ -138,9 +138,15 @@ class ParquetTelemetryWriter:
         #: against rows on disk plus the total.
         self.can_frames_suppressed = 0
         self.can_frames_suppressed_total = 0
+        #: The records the last :meth:`write_many` recorded (not withheld by
+        #: the arming gate).
+        self.last_accepted: list[TelemetryRecord] = []
 
     def write(self, record: TelemetryRecord) -> Path | None:
         """Append one record, flushing when row count or time threshold is reached.
+
+        :meth:`write_accepting` says, besides, whether the record was
+        recorded or withheld by the arming gate.
 
         Refuses a ``decoded`` record (P02.8, operator 2026-09-26): decoded rows
         are never stored, the readers decode the raw frames on read. The
@@ -152,6 +158,13 @@ class ParquetTelemetryWriter:
         counts towards the session's gap and run-time rotation and the arming
         gate, which see every record.
         """
+        return self.write_accepting(record)[1]
+
+    def write_accepting(self, record: TelemetryRecord) -> tuple[bool, Path | None]:
+        """:meth:`write`, and whether ``record`` was recorded: ``False`` when
+        the arming gate withheld it (a parked Pi, 2026-10-04). A CAN frame
+        the change-only filter drops still counts as recorded: the session
+        is recording that bus, it just keeps one row per change."""
         if record.source == DECODED_SOURCE:
             raise ValueError(
                 f"refusing to store decoded:{record.channel}: decoded rows are never stored "
@@ -160,23 +173,28 @@ class ParquetTelemetryWriter:
         self._rotate_if_record_gap(record)
         self._rotate_if_engine_run_time_reset(record)
         if self.arming_gate is not None and not self.arming_gate.observe(record):
-            return None
+            return False, None
         if self.can_storage.is_change_only and not self._can_filter.keep_record(record):
             self.can_frames_suppressed += 1
             self.can_frames_suppressed_total += 1
-            return self.flush() if self.flush_due() else None
+            return True, (self.flush() if self.flush_due() else None)
         self._buffer.append(record)
         self.rows_written += 1
         if len(self._buffer) >= self.max_rows or self.flush_due():
-            return self.flush()
-        return None
+            return True, self.flush()
+        return True, None
 
     def write_many(self, records: Iterable[TelemetryRecord]) -> list[Path]:
+        """Write each record; :attr:`last_accepted` is then the ones recorded."""
         files: list[Path] = []
+        accepted: list[TelemetryRecord] = []
         for record in records:
-            flushed = self.write(record)
+            recorded, flushed = self.write_accepting(record)
+            if recorded:
+                accepted.append(record)
             if flushed is not None:
                 files.append(flushed)
+        self.last_accepted = accepted
         return files
 
     def flush_due(self) -> bool:

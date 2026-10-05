@@ -791,6 +791,8 @@ def test_vehicle_state_inputs_empty_before_any_observation(config: CanaryConfig)
         "run_time": None,
         "obd_freshness_seconds": None,
         "can_freshness_seconds": None,
+        "supply_voltage": None,
+        "supply_freshness_seconds": None,
     }
 
 
@@ -823,6 +825,8 @@ def test_reset_clears_current_values_and_buffer(config: CanaryConfig) -> None:
         "run_time": None,
         "obd_freshness_seconds": None,
         "can_freshness_seconds": None,
+        "supply_voltage": None,
+        "supply_freshness_seconds": None,
     }
 
 

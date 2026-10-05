@@ -135,7 +135,12 @@ _VEHICLE_STATE: dict[str, tuple[bool | None, str, str | None]] = {
     "engine_running": (True, "engine running", None),
     "ignition_only": (None, "key on, engine off", "Start the engine to log driving data"),
     "engine_off": (False, "key off: the ECM is not answering", "Turn the key on"),
-    "no_data": (False, "no fresh CAN or OBD data", "Check the Pi's connection to the vehicle"),
+    "parked": (False, "parked: the vehicle's bus is asleep (key off)", "Turn the key on"),
+    "no_data": (
+        False,
+        "no fresh CAN, OBD or 12 V supply reading",
+        "Check the Pi's connection to the vehicle",
+    ),
     "replay": (None, "replay active: data is re-emitted", "Stop the replay for live data"),
     "unknown": (None, "vehicle state not classified", "Read the raw vehicle_state fields"),
 }

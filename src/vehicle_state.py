@@ -30,6 +30,10 @@ from datetime import UTC, datetime
 from typing import Any, Literal, Protocol
 
 from src.collection import tx_gate
+
+# The CANary-HAT's 12 V sense (``hardware.supply_voltage``): the vehicle's
+# battery as the OBD port delivers it, readable with every module asleep.
+from src.collection.supply_voltage_collector import CHANNEL as SUPPLY_VOLTAGE_CHANNEL
 from src.decode.engineering import physical_value
 from src.operating import ENGINE_RUNNING_MIN_RPM
 from src.timefmt import parse_iso_utc
@@ -38,6 +42,7 @@ VehicleStateName = Literal[
     "engine_running",
     "ignition_only",
     "engine_off",
+    "parked",
     "no_data",
     "replay",
     "passive",
@@ -52,6 +57,16 @@ FRESHNESS_THRESHOLD_SECONDS = 10.0
 #: Below this RPM (with OBD fresh) we call it "ignition_only / KOEO" rather
 #: than "engine running"; the one definition is ``src.operating`` (R01.7).
 RPM_RUNNING_THRESHOLD = ENGINE_RUNNING_MIN_RPM
+
+#: A supply this high is a battery on the OBD port; an unplugged HAT reads ~0.
+#: Well under a flat battery's ~11.5 V and a crank dip's ~9 V, so a parked
+#: truck with a tired battery is still ``parked``.
+PARKED_MIN_SUPPLY_VOLTS = 8.0
+
+#: Both buses silent: the vehicle is not being recorded, whatever the reason.
+#: ``parked`` is the case the evidence explains (asleep on a live battery),
+#: ``no_data`` the case it does not.
+QUIET_STATES: frozenset[str] = frozenset({"parked", "no_data"})
 
 #: The decoded broadcast channel carrying engine speed. Stored as raw counts
 #: (``decoded:`` rows are raw by design); scaled through the binding.
@@ -75,6 +90,8 @@ class VehicleState:
     run_time: float | None = None
     obd_freshness_seconds: float | None = None
     can_freshness_seconds: float | None = None
+    #: The HAT's 12 V sense, while fresh; ``None`` when absent or stale.
+    supply_voltage: float | None = None
     replay_id: str | None = None
     #: CANary's own diagnostic transmission is suppressed (the operator's
     #: passive switch, or another tester holds the ECM session). OBD
@@ -100,6 +117,7 @@ class VehicleState:
             "run_time": _round(self.run_time),
             "obd_freshness_seconds": _round(self.obd_freshness_seconds),
             "can_freshness_seconds": _round(self.can_freshness_seconds),
+            "supply_voltage": _round(self.supply_voltage),
             "replay_id": self.replay_id,
             "passive": self.passive,
             "derived_at": self.derived_at,
@@ -118,6 +136,8 @@ def classify_vehicle_state(
     run_time: float | None,
     obd_freshness_seconds: float | None,
     can_freshness_seconds: float | None,
+    supply_voltage: float | None,
+    supply_freshness_seconds: float | None,
     replay_id: str | None = None,
     passive: bool = False,
     freshness_threshold_seconds: float = FRESHNESS_THRESHOLD_SECONDS,
@@ -148,8 +168,15 @@ def classify_vehicle_state(
        OBD/CAN telemetry is also flowing — the replayed records ARE the
        OBD/CAN telemetry from the agent's perspective.
     2. If neither OBD nor CAN have refreshed within
-       ``freshness_threshold_seconds``, ``no_data`` (Pi probably
-       disconnected or daemon idle).
+       ``freshness_threshold_seconds``: ``parked`` when the HAT's 12 V sense
+       is fresh and reads a battery (``PARKED_MIN_SUPPLY_VOLTS``), else
+       ``no_data``. On the Xterra the bus sleeps at key-off, so a truck
+       parked for hours has both buses silent; before the supply was read
+       that was ``no_data``, described as "Pi probably disconnected", while
+       the daemon was answering (2026-10-04). ``no_data`` now means the
+       evidence is missing: unplugged, or no 12 V sense configured.
+       ``supply_voltage`` and ``supply_freshness_seconds`` are required, like
+       ``broadcast_rpm``; pass ``None`` when there is no 12 V sense.
     3. RPM at or above ``rpm_running_threshold``, from fresh OBD or a fresh
        broadcast → ``engine_running``.
     4. OBD fresh but RPM missing or 0 → ``ignition_only`` (key on, engine
@@ -173,6 +200,8 @@ def classify_vehicle_state(
     obd_fresh = _fresh(obd_freshness_seconds, freshness_threshold_seconds)
     can_fresh = _fresh(can_freshness_seconds, freshness_threshold_seconds)
 
+    supply_fresh = _fresh(supply_freshness_seconds, freshness_threshold_seconds)
+    supply = supply_voltage if supply_fresh else None
     rpm = obd_rpm
     rpm_from_broadcast = False
     if not (obd_fresh and obd_rpm is not None) and broadcast_rpm is not None and can_fresh:
@@ -187,6 +216,7 @@ def classify_vehicle_state(
             run_time=run_time,
             obd_freshness_seconds=obd_freshness_seconds,
             can_freshness_seconds=can_freshness_seconds,
+            supply_voltage=supply,
             replay_id=replay_id,
             passive=passive,
         )
@@ -194,7 +224,9 @@ def classify_vehicle_state(
     engine_evidence_fresh = obd_fresh or rpm_from_broadcast
 
     if not obd_fresh and not can_fresh:
-        state: VehicleStateName = "no_data"
+        state: VehicleStateName = (
+            "parked" if supply is not None and supply >= PARKED_MIN_SUPPLY_VOLTS else "no_data"
+        )
     elif engine_evidence_fresh and rpm is not None and rpm >= rpm_running_threshold:
         state = "engine_running"
     elif obd_fresh and (rpm is None or rpm == 0):
@@ -213,6 +245,7 @@ def classify_vehicle_state(
         run_time=run_time,
         obd_freshness_seconds=obd_freshness_seconds,
         can_freshness_seconds=can_freshness_seconds,
+        supply_voltage=supply,
         passive=passive,
     )
 
@@ -261,6 +294,8 @@ def derive_from_inputs(
             run_time=inputs.get("run_time"),
             obd_freshness_seconds=inputs.get("obd_freshness_seconds"),
             can_freshness_seconds=inputs.get("can_freshness_seconds"),
+            supply_voltage=inputs.get("supply_voltage"),
+            supply_freshness_seconds=inputs.get("supply_freshness_seconds"),
             replay_id=replay_id,
             passive=tx_gate.is_passive() if passive is None else passive,
         ),
@@ -323,6 +358,8 @@ def derive_from_latest_rows(
     run_time: float | None = None
     obd_latest_ts: datetime | None = None
     can_latest_ts: datetime | None = None
+    supply: float | None = None
+    supply_ts: datetime | None = None
 
     for row in rows:
         source = row.get("source")
@@ -339,6 +376,9 @@ def derive_from_latest_rows(
                     coolant = float(value)
                 elif channel == "RUN_TIME":
                     run_time = float(value)
+        elif source == "sensor" and channel == SUPPLY_VOLTAGE_CHANNEL:
+            if isinstance(value, (int, float)) and ts is not None:
+                supply, supply_ts = float(value), ts
         elif source in ("can", "decoded"):
             if ts is not None and (can_latest_ts is None or ts > can_latest_ts):
                 can_latest_ts = ts
@@ -351,6 +391,7 @@ def derive_from_latest_rows(
 
     obd_freshness = (now - obd_latest_ts).total_seconds() if obd_latest_ts is not None else None
     can_freshness = (now - can_latest_ts).total_seconds() if can_latest_ts is not None else None
+    supply_freshness = (now - supply_ts).total_seconds() if supply_ts is not None else None
     broadcast_rpm = (
         None
         if decoded_rpm is None
@@ -364,6 +405,8 @@ def derive_from_latest_rows(
             run_time=run_time,
             obd_freshness_seconds=obd_freshness,
             can_freshness_seconds=can_freshness,
+            supply_voltage=supply,
+            supply_freshness_seconds=supply_freshness,
             replay_id=replay_id,
             passive=tx_gate.is_passive() if passive is None else passive,
         ),

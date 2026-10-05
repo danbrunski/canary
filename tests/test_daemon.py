@@ -200,6 +200,10 @@ async def test_storage_sink_drains_backlog_in_bounded_batches() -> None:
         def __init__(self) -> None:
             self.calls: list[list[TelemetryRecord]] = []
 
+        @property
+        def last_accepted(self) -> list[TelemetryRecord]:
+            return self.calls[-1] if self.calls else []
+
         async def write_many(self, records: Any) -> list[Path]:
             self.calls.append(list(records))
             return []
@@ -241,6 +245,10 @@ async def test_storage_sink_coalesces_records_arriving_just_after_first() -> Non
     class _RecordingWriter(AsyncParquetTelemetryWriter):
         def __init__(self) -> None:
             self.calls: list[list[TelemetryRecord]] = []
+
+        @property
+        def last_accepted(self) -> list[TelemetryRecord]:
+            return self.calls[-1] if self.calls else []
 
         async def write_many(self, records: Any) -> list[Path]:
             self.calls.append(list(records))

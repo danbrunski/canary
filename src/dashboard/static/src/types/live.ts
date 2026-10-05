@@ -200,6 +200,7 @@ export interface VehicleState {
     | "engine_running"
     | "ignition_only"
     | "engine_off"
+    | "parked"
     | "no_data"
     | "replay"
     | "passive"
@@ -209,6 +210,9 @@ export interface VehicleState {
   run_time: number | null;
   obd_freshness_seconds: number | null;
   can_freshness_seconds: number | null;
+  /** The HAT's 12 V sense while fresh, else null. With both buses silent,
+   *  a battery here is `parked`, its absence `no_data`. */
+  supply_voltage?: number | null;
   replay_id: string | null;
   /** CANary is not transmitting (passive armed or another tester holds the
    *  ECM), so a stale OBD means "not asking" (D03.30). Absent from daemons

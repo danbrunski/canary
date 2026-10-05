@@ -292,7 +292,8 @@ export interface BackupPrecondition {
 const VEHICLE_FIX: Record<string, string> = {
   engine_running: "The engine is running. Switch it off and leave the key on.",
   engine_off: "The ECM is not answering. Turn the key to on, engine off.",
-  no_data: "Neither bus is fresh. Check the Pi is connected to the vehicle.",
+  parked: "The vehicle is asleep. Turn the key to on, engine off.",
+  no_data: "Neither bus is fresh and no 12 V is read. Check the Pi is connected to the vehicle.",
   replay: "A replay is running. Stop it first.",
   passive:
     "CANary is not transmitting, so the ECM state cannot be confirmed. Disarm passive mode first.",

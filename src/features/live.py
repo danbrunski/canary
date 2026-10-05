@@ -56,6 +56,7 @@ from src.behavior.session_context import (
 )
 from src.can_ids import parse_can_channel
 from src.coerce import finite_float
+from src.collection.supply_voltage_collector import CHANNEL as SUPPLY_VOLTAGE_CHANNEL
 from src.columns import arrived_column, gap_column
 from src.config import CanaryConfig, require_profile_scoped
 from src.decode.bindings import Bindings
@@ -88,6 +89,7 @@ from src.telemetry import (
     IMU_SOURCE,
     OBD_SOURCE,
     REPLAY_SOURCE_AT_KEY,
+    SENSOR_SOURCE,
     SOURCE_SEP,
     TelemetryRecord,
     channel_key,
@@ -865,6 +867,19 @@ class LiveFeatureSource:
             for channel, value in self._current_values.items()
         }
 
+    def seed_bus_last_heard(self, heard_at: datetime) -> None:
+        """When the bus was last heard before this process started.
+
+        Freshness only ever compares this against the 10 s threshold, so a
+        stored stamp cannot make a sleeping bus look alive; it makes a
+        restart report "silent for 3 h" instead of "never heard". A frame
+        seen since start always wins.
+        """
+        if self._last_broadcast_frame_at is None:
+            self._last_broadcast_frame_at = (
+                heard_at if heard_at.tzinfo is not None else heard_at.replace(tzinfo=UTC)
+            )
+
     def vehicle_state_inputs(self, now: datetime) -> dict[str, float | None]:
         """Cheap in-memory inputs for ``classify_vehicle_state`` (1.5).
 
@@ -895,6 +910,8 @@ class LiveFeatureSource:
             if self._last_broadcast_frame_at is not None
             else None
         )
+        supply_key = channel_key(SENSOR_SOURCE, SUPPLY_VOLTAGE_CHANNEL)
+        supply_at = self._last_observed_at.get(supply_key)
         can_ages = (
             age
             for age in (
@@ -916,6 +933,12 @@ class LiveFeatureSource:
             "run_time": self._current_values.get(channel_key(OBD_SOURCE, "RUN_TIME")),
             "obd_freshness_seconds": _freshest_age(f"{OBD_SOURCE}{SOURCE_SEP}"),
             "can_freshness_seconds": min(can_ages, default=None),
+            # The HAT's 12 V sense: a battery on the port while both buses
+            # sleep is ``parked``, not ``no_data`` (vehicle_state rule 2).
+            "supply_voltage": self._current_values.get(supply_key),
+            "supply_freshness_seconds": (
+                (now_utc - supply_at).total_seconds() if supply_at is not None else None
+            ),
         }
 
     def channel_age_seconds(self, channel: str, now: datetime) -> float | None:
