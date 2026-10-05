@@ -130,7 +130,8 @@ log = logging.getLogger(__name__)
 IMU_FRAME_ATTR = "imu_frame"
 #: Bump when the stream's output changes for an unchanged sidecar and rows
 #: (it is part of :meth:`ImuFramePlan.key`, which versions stored frames).
-IMU_STREAM_CODE_VERSION = 1
+#: 2 -- H04.4: the decimation adds the signed ``imu:ACCEL_LON_MEAN``.
+IMU_STREAM_CODE_VERSION = 2
 
 ImuFrameStatus = Literal["applied", "no_imu_rows", "unresolved", "refused", "stale"]
 

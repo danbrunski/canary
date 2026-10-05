@@ -31,12 +31,13 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Callable
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
 import yaml
 
 from src.signals.committees import (
+    IMU_ACCEL_LON_MEAN,
     CommitteeEvaluator,
     CommitteeFlag,
     physical_committee_point,
@@ -77,8 +78,13 @@ class LiveCommittees:
         bindings: Bindings | None,
         recorder: InferenceTimingRecorder | None,
         alert_sink: Callable[[CommitteeFlag], object] | None,
+        producer_status: Callable[[datetime], dict[str, str]] | None = None,
     ) -> None:
         self.evaluator = evaluator
+        #: What each producer says right now (H04.4): the live IMU frame's
+        #: step, so a missing IMU member names *why* in its verdict and in
+        #: ``/status`` (``producer_status``).
+        self._producer_status = producer_status
         self._bindings = bindings
         self._recorder = recorder
         self._alert_sink = alert_sink
@@ -104,6 +110,9 @@ class LiveCommittees:
             bindings=source.bindings,
             recorder=recorder,
             alert_sink=_alert_sink(components),
+            producer_status=lambda now: {
+                IMU_ACCEL_LON_MEAN: source.imu_frame.lon_mean_absence(now)
+            },
         )
         live.publish()
         return live
@@ -126,7 +135,12 @@ class LiveCommittees:
             # The row's own time, not the wall clock: an operating point left
             # over from a discarded tick carries its old stamp, and the
             # evaluator ignores a stamp it has already seen.
-            flags = self.evaluator.observe(physical, _point_time(point, now))
+            at = _point_time(point, now)
+            if self._producer_status is not None:
+                self.evaluator.producer_status = self._producer_status(
+                    datetime.fromtimestamp(at, tz=UTC)
+                )
+            flags = self.evaluator.observe(physical, at)
         for flag in flags:
             log.warning("sensor committee disagreement: %s", flag.text)
             if self._alert_sink is not None:

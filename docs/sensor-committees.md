@@ -125,7 +125,7 @@ Today: OBD/ECM + GPS. Planned: a **barometric sensor** and an **IMU**.
 | Committee | Members | Sources | Status |
 |---|---|---|---|
 | Speed | `obd:SPEED` / `decoded:WHEEL_SPEED_6F7_A` ↔ `gps:speed` (↔ IMU ∫aₓ) | OBD+GPS+IMU | **flags** (H04.3) |
-| Longitudinal accel | IMU aₓ ↔ d/dt(OBD speed) ↔ d/dt(GPS speed) | IMU+OBD+GPS | members computed (H04.4); relation awaits IMU (H02) |
+| Longitudinal accel | `imu:ACCEL_LON_MEAN` (signed per-tick IMU aₓ) ↔ d/dt(OBD speed) ↔ d/dt(GPS speed) | IMU+OBD+GPS | members delivered live and offline (H04.4); relation awaits the H02.6 drive |
 | Heading / yaw | GPS heading-rate ↔ IMU gyro-Z | GPS+IMU | future |
 | Stationary confirm | OBD≈0 & GPS≈0 & IMU still | OBD+GPS+IMU | future (also hardens `idle_transient`) |
 | Altitude | `gps:altitude` ↔ baro-altitude | GPS+baro | future |

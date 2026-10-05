@@ -151,7 +151,7 @@ def test_longitudinal_accel_committee_activates_once_members_appear() -> None:
     frame = pd.DataFrame(
         [
             {
-                "imu:ACCEL_LON": 0.30,
+                "imu:ACCEL_LON_MEAN": 0.30,
                 "derived:OBD_SPEED_ACCEL_G": 0.28,
                 "derived:GPS_SPEED_ACCEL_G": 0.05,
             }

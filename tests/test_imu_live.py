@@ -98,7 +98,8 @@ def test_live_frame_names_what_it_waits_for_then_splits_lon_and_lat() -> None:
     _feed_frame(frame, 10.0, 13.0)
     frame.take_tick()
     _feed_frame(frame, 13.0, 14.0)
-    assert frame.status == "resolving"
+    # Yaw resolved; one 4 s pull at 1 Hz speed is too few sign votes (H04.4).
+    assert frame.status == "sign_unresolved"
     values, observed_at = frame.take_tick()
     pull_g = 55.0 / 3.6 / 4.0 / STANDARD_GRAVITY
     assert values[LON_MAX] == pytest.approx(pull_g, abs=0.005)
@@ -147,7 +148,7 @@ def test_live_frame_steers_by_0x2d1_counts_without_obd_speed() -> None:
 def test_reset_is_a_session_boundary() -> None:
     frame = LiveImuFrame()
     _feed_frame(frame, 0.0, 14.0)
-    assert frame.status == "resolving"
+    assert frame.status == "sign_unresolved"
     frame.reset()
     assert frame.status == "no_imu_samples"
 
@@ -188,7 +189,7 @@ def test_live_auto_tag_hook_receives_the_decimated_channel(
     ]
     assert "hard_accel" in labels
     assert "cornering" in labels
-    assert source.imu_frame.status == "resolving"
+    assert source.imu_frame.status == "sign_unresolved"  # one pull: too few sign votes
 
     source.reset()
     assert source.imu_frame.status == "no_imu_samples"

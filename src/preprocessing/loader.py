@@ -35,6 +35,7 @@ from src.preprocessing.imu_decimation import (
     ACCEL_LAT_MAX_COLUMN,
     ACCEL_LON_COLUMN,
     ACCEL_LON_MAX_COLUMN,
+    ACCEL_LON_MEAN_COLUMN,
     ACCEL_LON_RMS_COLUMN,
     JERK_MAX_COLUMN,
     decimate_imu_wide,
@@ -595,6 +596,9 @@ def _decimate_imu_long(frame: pd.DataFrame, *, hz: float) -> pd.DataFrame:
             grouped.apply(lambda series: np.sqrt((series**2).mean())),
             ACCEL_LON_RMS_COLUMN,
         )
+        # The one signed aggregate (H04.4's committee member): NaN, never 0,
+        # for a tick without a finite sample.
+        append_metric(grouped.mean(), ACCEL_LON_MEAN_COLUMN)
         dt = lon["timestamp"].groupby(lon["_tick"]).diff().dt.total_seconds()
         jerk = (values.groupby(lon["_tick"]).diff() / dt.replace(0.0, np.nan)).abs()
         append_metric(jerk.groupby(lon["_tick"]).max(), JERK_MAX_COLUMN)

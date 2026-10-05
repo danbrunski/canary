@@ -186,10 +186,14 @@ members on rows where the gates hold, designed as an IF/LSTM feature
     accel condition. Tests: `test_committee_checks.py::test_speed_accel_g_recovers_a_known_constant_acceleration`,
     `::test_speed_accel_g_uses_real_elapsed_time_and_refuses_holes`,
     `::test_member_transforms_prefer_the_100hz_broadcast_speed`.
-    **Remaining:** the `imu:ACCEL_LON` member (H02.4) and the relation +
-    tolerance in `committees.yaml`, measured on the H02.6 known-answer drive;
-    until then `LON_ACCEL_SOURCE_DIVERGENCE` reports `not_configured`.
-  - [ ] **Found 2026-10-03 (desk): the IMU member can never reach the
+    **Remaining:** the relation + tolerance in `committees.yaml`, measured
+    on the H02.6 known-answer drive through the *live* path (see the
+    2026-10-05 measurement below: live and offline differ by p95 0.097 g on
+    real drive timing), and the first parity check on a real IMU recording
+    (no stored session has IMU rows yet); until then
+    `LON_ACCEL_SOURCE_DIVERGENCE` reports `not_configured`. The IMU member
+    itself is delivered (2026-10-05, next item).
+  - [x] **Found 2026-10-03 (desk): the IMU member can never reach the
     committee, on either path.** The committee names `imu:ACCEL_LON`, but
     nothing delivers that column to the committee seam in
     `featurize_wide_frame`:
@@ -209,6 +213,94 @@ members on rows where the gates hold, designed as an IF/LSTM feature
     member that no path produces cannot be declared silently. Desk work, but
     live sign resolution is a design change to H02.4's frame. Do it before
     the H02.6 drive, so that drive can set the tolerance.
+    - [x] 2026-10-05: **member `imu:ACCEL_LON_MEAN`**, the signed per-tick
+      mean of the resolved `imu:ACCEL_LON` (g, forward +), one aggregation
+      on both paths. Offline: `imu_decimation.decimate_imu_wide` and
+      `loader._decimate_imu_long` add it beside the magnitudes
+      (`IMU_TICK_COLUMNS`); the sign is the sidecar's (speed-derivative
+      votes); `IMU_STREAM_CODE_VERSION` 1 → 2 so stored IMU frames rebuild.
+      Orientation is never configured: tilt, yaw and sign are resolved from
+      the drive (H02 rule), so there is no profile field to add.
+      **Live sign, gated (revised after the verifier's repro: with the first
+      vote deciding, 18 of 40 seeds of cruise jitter signed a following
+      0.15 g pull backwards).** `LiveImuFrame` votes at the first IMU sample
+      after each new reading of the best fresh speed source, with the
+      speed change against the *mean* horizontal acceleration `h̄` over the
+      same interval. A vote counts only if `|Δv|` is ≥ 2 quantisation steps
+      (`SPEED_QUANTUM_KPH`: PID 1 km/h, GPS 0; a `decoded:` source's
+      binding scale), the rate ≥ 0.05 g and `|h̄|` ≥ 0.05 g. Votes accumulate
+      as `F = Σ sign(Δv)·h̄` and `S = Σ h̄h̄ᵀ`, and the sign resolves by a
+      test valid under continuous monitoring: the 2-D normal-mixture
+      supermartingale `sqrt(det ρI / det(S+ρI))·exp(½Fᵀ(S+ρI)⁻¹F)`
+      (ρ = 0.05 g²) reaching `1/α` (Ville's inequality), **α = 1e-3 per
+      drive** for pure-noise votes resolving at all
+      (`imu_live.sign_log_evidence`, `SIGN_ALPHA`). It replaced an
+      uncorrected 3σ look after every vote (a few percent per drive). The
+      sign is then `sign(u·F)`, held while `F` is > 60° off the current yaw
+      axis. Until then `sign_unresolved` and no mean
+      (magnitudes still flow). The live/offline divergence this creates
+      (offline votes every row unweighted over the whole session) is in the
+      `imu_live` docstring. Absent, never 0: no sample in a tick → NaN
+      offline / no value live; IMU silent → `stale`, then `member_missing`.
+      **Which kind of empty:** `CommitteeEvaluator.producer_status` carries
+      the producer's current status into the `*_missing` detail and the
+      snapshot (`/status` `detectors.inference.committees.producer_status`):
+      live from `LiveImuFrame.lon_mean_absence` (wired in
+      `LiveCommittees.build`), offline from the frame's
+      `attrs["imu_frame"]` (`offline_producer_status`, default in
+      `evaluate_committee_frame`). Mode 01 members' fallback text is neutral
+      ("no Mode 01 response this window: not polled, passive, or ECM
+      silent"). `imu:GYRO_Z` is `pending` until a frame-rotated yaw-rate
+      channel exists.
+      **Refusal:** `committees.CHANNEL_PRODUCERS` declares a producer for
+      every member and gate (`obd_pid`, `can_binding`, `gps_collector`,
+      `imu_collector`, `imu_tick`, `member_transform`, or `pending` naming
+      what will build it); `check_committee_producers` runs at import and in
+      `CommitteeEvaluator.__init__` and raises `CommitteeDeclarationError`
+      naming committee and channel; `CommitteeProfile` refuses a relation,
+      reference or condition on a pending/undeclared channel.
+      Tests: `tests/test_committee_producers.py` (13: undeclared member and
+      gate refused by name, profiles on pending `baro:altitude` and
+      `imu:GYRO_Z` refused, each delivered claim held to its producer — PID
+      table, bindings catalog, `gps_collector.reading_to_records`,
+      `IMU_TICK_COLUMNS` + a `LiveImuFrame` run, `MEMBER_TRANSFORMS` — live
+      and offline status in the detail, neutral Mode 01 text);
+      `test_committees_live.py::test_status_names_the_live_imu_frame_step`.
+      `tests/test_imu_lon_mean.py` (9):
+      `::test_cruise_jitter_never_signs_a_pull_backwards` (the verifier's
+      case, 40 seeds: 0 wrong-signed ticks, and 0 signed at all — one pull
+      is too little evidence, fail closed);
+      `::test_random_sign_votes_resolve_within_the_declared_rate` (10,000
+      simulated drives × 500 fair-coin votes through `sign_log_evidence`:
+      3 resolved, 3e-4 ≤ α; 1 of 10,000 at 1,000 votes);
+      `::test_consistent_votes_resolve_the_right_way` (75 % agreeing votes:
+      1,000 of 1,000 drives resolve, 0 wrong, median 91 votes); stop-and-go cycles signed right
+      with the board facing forward and backward (35° / 215°), nothing
+      signed through the first pull; speed silent → `sign_unresolved`;
+      wide/long decimation agree, NaN for an IMU-less tick; synthetic drive
+      (two laps of `test_imu_stream.DRIVE`) through `resample_and_segment` vs
+      `LiveFeatureSource`: 74 common seconds (live signs from 55 s), offline
+      within 1.6 mg of the injected acceleration, live 1.5 mg, each other
+      1.2 mg,
+      every live verdict `agree` under a test-only relation, then `stale` →
+      `member_missing` once the IMU goes silent; **real drive timing** (the
+      committed 08-03 ground-truth slice — real Mode 01 + GPS speed and
+      course — with a 50 Hz IMU synthesised from per-second GPS, because no
+      local session under `~/canary-data` holds IMU rows; the first
+      synthesis differentiated bursty GPS delivery into 7.9 g spikes and is
+      replaced): live signs from 179 s, 239 common seconds, sign right on
+      all 30 with |a| ≥ 0.1 g on both paths, |live − offline| median
+      0.032 g / p95 0.097 g / max 0.145 g, corr 0.81; vs injected 0.92 live,
+      0.78 offline. Without lateral acceleration the offline yaw lands on
+      the mount (−0.700 rad; −0.102 with the turns) yet p95 vs truth stays
+      86 mg offline / 59 mg live: the turns pull the session-wide yaw fit,
+      and the gravity low-pass absorbs slow acceleration on both paths. Operator
+      decision 2026-10-05: keep `ACCEL_LON_MEAN` as the member; the H02.6
+      drive sets the tolerance.
+      Gate: `test_committee*`, `test_imu_*`, `test_layering`,
+      `test_state_dir`, `test_trainability`, `test_derived_store`,
+      `test_preprocessing_{loader,live,segmenter}`, `test_autotag*`,
+      `test_inference_scheduling` with `-m ""`: 376 passed.
 
 ## Hardware
 

@@ -236,3 +236,20 @@ def test_committees_can_be_switched_off(tmp_path: Path) -> None:
     source = LiveFeatureSource(config=components.config)
     assert build_live_committees(components, source, recorder) is None
     assert recorder.snapshot().to_dict()["committees"] == {"enabled": False}
+
+
+def test_status_names_the_live_imu_frame_step(tmp_path: Path) -> None:
+    """H04.4: ``/status`` carries what the live IMU frame says about the IMU
+    member, so an absent ``imu:ACCEL_LON_MEAN`` reads as *which* step is
+    missing — here no IMU sample at all — not a static list of causes."""
+    from src.signals.committees import IMU_ACCEL_LON_MEAN
+
+    config = _config(tmp_path)
+    components = build_components(config)
+    recorder = InferenceTimingRecorder()
+    source = LiveFeatureSource(config=components.config)
+    live = build_live_committees(components, source, recorder)
+    assert live is not None
+    _drive(components, source, live, T0, 3, ecu_factor=1.0)
+    block = recorder.snapshot().to_dict()["committees"]
+    assert block["producer_status"] == {IMU_ACCEL_LON_MEAN: "live IMU frame no_imu_samples"}

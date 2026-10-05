@@ -13,7 +13,10 @@ still land in Parquet unchanged (the storage layer never sees this module);
 only the in-memory wide frame that feeds the resampler is decimated, and
 only for the specific longitudinal/lateral channels the auto-tagger and
 segmenter actually consume: ``imu:ACCEL_LON_MAX/RMS``, ``imu:JERK_MAX``,
-``imu:ACCEL_LAT_MAX``.
+``imu:ACCEL_LAT_MAX`` — plus the one *signed* aggregate,
+``imu:ACCEL_LON_MEAN``, the longitudinal-acceleration committee's IMU member
+(H04.4): every other aggregate is a magnitude, and a committee comparing
+``|a|`` against a speed derivative could not tell braking from accelerating.
 
 Why MAX/RMS instead of plain resampling: ``resample_wide`` uses
 ``.resample(interval).last()`` — appropriate for slow, roughly-continuous
@@ -50,8 +53,26 @@ ACCEL_LAT_COLUMN = channel_key(IMU_SOURCE, "ACCEL_LAT")
 #: Decimated output columns (Phase 2a.3's exact list from the roadmap doc).
 ACCEL_LON_MAX_COLUMN = channel_key(IMU_SOURCE, "ACCEL_LON_MAX")
 ACCEL_LON_RMS_COLUMN = channel_key(IMU_SOURCE, "ACCEL_LON_RMS")
+#: Signed per-tick mean of ``imu:ACCEL_LON`` (g, forward positive). Only as
+#: signed as the frame it averages: offline the session's resolved
+#: ``imu_frame.json`` fixes the sign from the speed derivative; live,
+#: ``imu_live.LiveImuFrame`` emits it only once its own sign evidence exists.
+ACCEL_LON_MEAN_COLUMN = channel_key(IMU_SOURCE, "ACCEL_LON_MEAN")
 ACCEL_LAT_MAX_COLUMN = channel_key(IMU_SOURCE, "ACCEL_LAT_MAX")
 JERK_MAX_COLUMN = channel_key(IMU_SOURCE, "JERK_MAX")
+
+#: Every per-tick column this decimation produces offline and
+#: ``imu_live.LiveImuFrame.take_tick`` produces live: the IMU-derived channels
+#: a reader of a resampled or live frame can find
+#: (``tests/test_committee_producers.py::test_each_delivered_producer_claim_holds``
+#: checks the live side emits each one).
+IMU_TICK_COLUMNS: tuple[str, ...] = (
+    ACCEL_LON_MAX_COLUMN,
+    ACCEL_LON_RMS_COLUMN,
+    ACCEL_LON_MEAN_COLUMN,
+    ACCEL_LAT_MAX_COLUMN,
+    JERK_MAX_COLUMN,
+)
 
 
 def decimate_imu_wide(wide: pd.DataFrame, *, hz: float) -> pd.DataFrame:
@@ -95,6 +116,8 @@ def decimate_imu_wide(wide: pd.DataFrame, *, hz: float) -> pd.DataFrame:
         grouped_lon = lon.groupby(group)
         out[ACCEL_LON_MAX_COLUMN] = grouped_lon.transform(lambda s: s.abs().max())
         out[ACCEL_LON_RMS_COLUMN] = grouped_lon.transform(lambda s: np.sqrt((s**2).mean()))
+        # Signed: NaN for a tick with no finite sample, never 0 (H04.4).
+        out[ACCEL_LON_MEAN_COLUMN] = grouped_lon.transform("mean")
         # Jerk = d(accel)/dt over consecutive raw samples *within* a tick
         # bucket — ``groupby(...).diff()`` resets at each group's first row
         # (NaN there), so it never differences across a bucket boundary.

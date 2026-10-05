@@ -40,6 +40,14 @@ Design rules (``docs/sensor-committees.md``):
   is precomputed as its own ``derived:`` column
   (:func:`append_committee_member_transforms`); a committee only ever compares
   columns that already exist.
+* **Every channel a committee reads has a declared producer**
+  (:data:`CHANNEL_PRODUCERS`, H04.4). A member nothing delivers would make its
+  relation compare nothing, silently — found 2026-10-03, when the IMU member
+  was named ``imu:ACCEL_LON``, a column the decimation drops before any
+  committee sees it. A committee naming an undeclared channel refuses at
+  import (:class:`CommitteeDeclarationError`); one whose member is declared
+  ``pending`` stays declared, but ``committees.yaml`` cannot configure a
+  relation, reference or condition on it.
 """
 
 from __future__ import annotations
@@ -149,6 +157,12 @@ SPEED_COMMITTEE = SensorCommittee(
 #: each a no-op, and until its relation is in the profile's
 #: ``committees.yaml`` the evaluator reports it ``not_configured``.
 
+#: The IMU's longitudinal-acceleration member: the signed per-tick mean of
+#: the resolved ``imu:ACCEL_LON`` (``imu_decimation.ACCEL_LON_MEAN_COLUMN``).
+#: Not ``imu:ACCEL_LON`` itself — that is a raw-rate column the decimation
+#: replaces before resampling, so no committee ever sees it (H04.4).
+IMU_ACCEL_LON_MEAN = "imu:ACCEL_LON_MEAN"
+
 #: IMU aₓ vs. the OBD/GPS speed derivatives — the doc's headline payoff
 #: (clean transient longitudinal events) triple-checked against two
 #: independent ground truths. The two derivatives are computed by
@@ -156,7 +170,7 @@ SPEED_COMMITTEE = SensorCommittee(
 LONGITUDINAL_ACCEL_COMMITTEE = SensorCommittee(
     name="LON_ACCEL_SOURCE_DIVERGENCE",
     quantity="longitudinal acceleration (g)",
-    members=("imu:ACCEL_LON", "derived:OBD_SPEED_ACCEL_G", "derived:GPS_SPEED_ACCEL_G"),
+    members=(IMU_ACCEL_LON_MEAN, "derived:OBD_SPEED_ACCEL_G", "derived:GPS_SPEED_ACCEL_G"),
 )
 
 #: GPS course-rate vs. IMU gyro-Z — corners out of the horizontal plane
@@ -325,6 +339,157 @@ def append_committee_member_transforms(wide: pd.DataFrame, *, copy: bool = True)
                 out[output] = speed_accel_g(speed, out["timestamp"])
                 break
     return out
+
+
+# ---------------------------------------------------------------------------
+# Producers (H04.4) — no committee names a channel nothing delivers
+# ---------------------------------------------------------------------------
+
+ProducerKind = Literal[
+    "obd_pid",
+    "can_binding",
+    "gps_collector",
+    "imu_collector",
+    "imu_tick",
+    "member_transform",
+    "pending",
+]
+
+
+@dataclass(frozen=True)
+class ChannelProducer:
+    """What delivers a committee channel to the tick, live and offline.
+
+    ``kind`` says which code path, so a test can hold each claim to its
+    producer (``tests/test_committee_producers.py``): a Mode 01 PID name in
+    ``pid_decoders.PID_DECODERS``, a ``data/bindings.yaml`` signal, a channel
+    the GPS or IMU collector records, a per-tick IMU aggregate in
+    ``imu_decimation.IMU_TICK_COLUMNS`` that ``imu_live.LiveImuFrame`` also
+    emits, or one of :data:`MEMBER_TRANSFORMS`. ``pending`` is the honest
+    answer for a member whose producer does not exist yet; ``by`` then names
+    what will build it, and the profile cannot configure a relation on it.
+    """
+
+    kind: ProducerKind
+    by: str
+    #: What an absent value means, appended to a ``member_missing`` verdict so
+    #: "no value" names its cause.
+    absent: str = ""
+
+    @property
+    def delivered(self) -> bool:
+        return self.kind != "pending"
+
+
+#: The caller did not say why: :class:`CommitteeEvaluator.producer_status`
+#: names the actual step (live ``LiveImuFrame``, offline the session's
+#: ``imu_frame`` status) when the caller passes it.
+_IMU_FRAME_ABSENT = "IMU frame status not reported by the caller"
+#: Neutral: a missing Mode 01 value does not say which of these it was.
+_NO_MODE01 = "no Mode 01 response this window: not polled, passive, or ECM silent"
+
+#: Every channel any declared committee reads — members and gates. Checked at
+#: import (:func:`check_committee_producers`).
+CHANNEL_PRODUCERS: dict[str, ChannelProducer] = {
+    "obd:SPEED": ChannelProducer("obd_pid", "Mode 01 PID 0x0D", _NO_MODE01),
+    "obd:BAROMETRIC_PRESSURE": ChannelProducer("obd_pid", "Mode 01 PID 0x33", _NO_MODE01),
+    "decoded:WHEEL_SPEED_6F7_A": ChannelProducer(
+        "can_binding", "0x6F7 ABS broadcast (data/bindings.yaml)", "no 0x6F7 frame"
+    ),
+    "gps:speed": ChannelProducer("gps_collector", "GNSS speed over ground", "no fix"),
+    "gps:altitude": ChannelProducer("gps_collector", "GNSS altitude", "no fix"),
+    "gps:num_satellites": ChannelProducer("gps_collector", "GNSS fix report", "no fix"),
+    "gps:hdop": ChannelProducer("gps_collector", "GNSS fix report", "no fix"),
+    # The raw body-frame Z rate is recorded, but it is not the vehicle's yaw
+    # rate until a frame rotates it (a tilted mount mixes roll and pitch rate
+    # in): pending, so no relation can treat it as one.
+    "imu:GYRO_Z": ChannelProducer(
+        "pending", "a frame-rotated yaw-rate channel (raw imu:GYRO_Z is body-frame)"
+    ),
+    IMU_ACCEL_LON_MEAN: ChannelProducer(
+        "imu_tick",
+        "imu_decimation (offline, value_number chain) and imu_live.LiveImuFrame (live)",
+        _IMU_FRAME_ABSENT,
+    ),
+    OBD_SPEED_ACCEL_G: ChannelProducer(
+        "member_transform",
+        "append_committee_member_transforms",
+        f"none of {', '.join(OBD_ACCEL_SPEED_SOURCES)} over the last {ACCEL_SPAN_SECONDS:g} s",
+    ),
+    GPS_SPEED_ACCEL_G: ChannelProducer(
+        "member_transform",
+        "append_committee_member_transforms",
+        f"no {GPS_ACCEL_SPEED_SOURCE} over the last {ACCEL_SPAN_SECONDS:g} s",
+    ),
+    "derived:GPS_COURSE_RATE": ChannelProducer(
+        "pending", "nothing yet (docs/sensor-committees.md roadmap: yaw-rate committee)"
+    ),
+    "derived:IMU_STILLNESS_SPEED_PROXY": ChannelProducer(
+        "pending", "nothing yet (docs/sensor-committees.md roadmap: stationary committee)"
+    ),
+    "baro:altitude": ChannelProducer("pending", "the HAT barometer (H03.6, part dead)"),
+    "baro:pressure": ChannelProducer("pending", "the HAT barometer (H03.6, part dead)"),
+    "derived:MAP_AT_IDLE_KPA": ChannelProducer(
+        "pending", "nothing yet (docs/sensor-committees.md roadmap: baro committee)"
+    ),
+    "derived:BARO_ALT_RATE": ChannelProducer(
+        "pending", "nothing yet; needs the HAT barometer (H03.6)"
+    ),
+    "derived:GPS_VERTICAL_SPEED": ChannelProducer(
+        "pending", "nothing yet (docs/sensor-committees.md roadmap: grade committee)"
+    ),
+    "derived:IMU_VERTICAL_ACCEL_INTEGRAL": ChannelProducer(
+        "pending", "nothing yet (docs/sensor-committees.md roadmap: grade committee)"
+    ),
+}
+
+
+class CommitteeDeclarationError(ValueError):
+    """A committee reads a channel with no declared producer."""
+
+
+def check_committee_producers(
+    committees: Sequence[SensorCommittee] = COMMITTEES,
+    producers: Mapping[str, ChannelProducer] = CHANNEL_PRODUCERS,
+) -> None:
+    """Refuse, by committee and channel, any member or gate without a producer.
+
+    Run at import on :data:`COMMITTEES` and by :class:`CommitteeEvaluator` on
+    the committees it is given, so a committee that names a channel nothing
+    delivers cannot load. A ``member_transform`` must be one this module
+    computes.
+    """
+    problems: list[str] = []
+    for committee in committees:
+        channels = [*committee.members, *(gate.channel for gate in committee.gates)]
+        for channel in channels:
+            producer = producers.get(channel)
+            if producer is None:
+                problems.append(
+                    f"{committee.name} reads {channel}, which has no declared producer "
+                    "(add it to committees.CHANNEL_PRODUCERS, or kind='pending' naming "
+                    "what will build it)"
+                )
+            elif producer.kind == "member_transform" and channel not in MEMBER_TRANSFORMS:
+                problems.append(
+                    f"{committee.name} reads {channel}, declared a member transform, but "
+                    "MEMBER_TRANSFORMS does not compute it"
+                )
+    if problems:
+        raise CommitteeDeclarationError("; ".join(problems))
+
+
+def undelivered_reason(channel: str) -> str | None:
+    """Why a profile may not configure ``channel``, or ``None`` when it may."""
+    producer = CHANNEL_PRODUCERS.get(channel)
+    if producer is None:
+        return f"{channel} has no declared producer (committees.CHANNEL_PRODUCERS)"
+    if not producer.delivered:
+        return f"{channel} is not delivered by anything yet ({producer.by})"
+    return None
+
+
+check_committee_producers()
 
 
 # ---------------------------------------------------------------------------
@@ -497,6 +662,12 @@ class CommitteeProfile(_Strict):
                 raise ValueError(f"{name}: {foreign} are not members of {committee.members}")
             if len(set(columns)) != len(columns):
                 raise ValueError(f"{name}: reference and relation members must be distinct")
+            # H04.4: a relation or condition on a channel nothing delivers
+            # would compare nothing, silently.
+            read = [*columns, *(c.channel for c in spec.tolerance.conditions)]
+            undelivered = [r for r in map(undelivered_reason, read) if r is not None]
+            if undelivered:
+                raise ValueError(f"{name}: {'; '.join(undelivered)}")
         return self
 
 
@@ -705,12 +876,19 @@ class CommitteeEvaluator:
         self.profile_path = profile_path
         self.session = session
         self.mode: str | None = None
+        check_committee_producers(committees)
         specs = profile.committees if profile is not None else {}
         self._runtimes = {
             c.name: _CommitteeRuntime(committee=c, spec=specs.get(c.name)) for c in committees
         }
         self._last_at: float | None = None
         self.ticks = 0
+        #: Per channel, what its producer currently says about an absent
+        #: value (live: ``LiveImuFrame.lon_mean_absence``; offline: the
+        #: session's IMU frame status). Read into a ``*_missing`` verdict's
+        #: detail and published in :meth:`snapshot`, so "no value" says which
+        #: kind of empty it is. Set by the caller before :meth:`observe`.
+        self.producer_status: dict[str, str] = {}
 
     def reset(self, session: str | None) -> None:
         """A new session (or replay start/stop): no run carries across."""
@@ -785,10 +963,10 @@ class CommitteeEvaluator:
 
         reference_value = _finite(point.get(reference))
         if reference_value is None:
-            return none("reference_missing", f"{reference} has no value")
+            return none("reference_missing", _no_value(reference, self.producer_status))
         member_value = _finite(point.get(member))
         if member_value is None:
-            return none("member_missing", f"{member} has no value")
+            return none("member_missing", _no_value(member, self.producer_status))
         for channel in (reference, member):
             if not _arrived(point, channel):
                 return none("stale", f"{channel} did not arrive this tick")
@@ -907,6 +1085,7 @@ class CommitteeEvaluator:
             "profile_path": self.profile_path,
             "session": self.session,
             "ticks": self.ticks,
+            "producer_status": dict(self.producer_status),
             "committees": committees,
         }
 
@@ -929,12 +1108,17 @@ def evaluate_committee_frame(
     bindings: Bindings | None = None,
     session: str | None = None,
     profile_path: str | None = None,
+    producer_status: Mapping[str, str] | None = None,
 ) -> CommitteeFrameResult:
     """Run :class:`CommitteeEvaluator` over a resampled wide frame, row by row.
 
     The offline twin of the live tick: the frame is the resampler's grid
     (``__arrived`` flags included), member transforms are appended if absent,
     and ``decoded:`` members are converted to engineering units first.
+    ``producer_status`` defaults to what the frame itself records: the
+    session's IMU frame outcome (``resample_and_segment``'s
+    ``attrs["imu_frame"]``), so an absent IMU member says *unresolved* /
+    *refused* / *no IMU rows* rather than only "no value".
     """
     work = frame.sort_values("timestamp", kind="stable").reset_index(drop=True)
     if not all(column in work.columns for column in MEMBER_TRANSFORMS):
@@ -942,6 +1126,9 @@ def evaluate_committee_frame(
     for column in _decoded_committee_columns(work.columns):
         work[column] = _physical(work[column], column, bindings)
     evaluator = CommitteeEvaluator(profile, profile_path=profile_path, session=session)
+    evaluator.producer_status = dict(
+        producer_status if producer_status is not None else offline_producer_status(frame, session)
+    )
     stamps = pd.to_datetime(work["timestamp"], utc=True)
     flags: list[CommitteeFlag] = []
     mode_column = "operating_mode" if "operating_mode" in work.columns else None
@@ -965,6 +1152,31 @@ def evaluate_committee_frame(
         flags.extend(evaluator.observe(row, stamps.iloc[index].timestamp()))
     counts = {name: dict(rt.counts) for name, rt in evaluator._runtimes.items()}
     return CommitteeFrameResult(flags=flags, counts=counts, rows=len(work))
+
+
+#: ``resample_and_segment``'s per-session IMU frame outcome key
+#: (``preprocessing.imu_stream.IMU_FRAME_ATTR``; equal by test — this layer
+#: cannot import it).
+IMU_FRAME_ATTR = "imu_frame"
+
+
+def offline_producer_status(frame: pd.DataFrame, session: str | None = None) -> dict[str, str]:
+    """What a resampled frame records about its producers: the IMU frame's
+    status for ``session`` (or the frame's only session)."""
+    outcomes = frame.attrs.get(IMU_FRAME_ATTR)
+    if not isinstance(outcomes, Mapping) or not outcomes:
+        return {}
+    if session is None and len(outcomes) == 1:
+        session = next(iter(outcomes))
+    outcome = outcomes.get(session) if session is not None else None
+    if not isinstance(outcome, Mapping):
+        return {}
+    status, reason = outcome.get("status"), outcome.get("reason")
+    if status == "applied":
+        text = "offline IMU frame applied; no IMU sample in this tick"
+    else:
+        text = f"offline IMU frame {status}: {reason}"
+    return {IMU_ACCEL_LON_MEAN: text}
 
 
 def committee_channels() -> frozenset[str]:
@@ -1011,6 +1223,15 @@ def _physical(values: pd.Series, column: str, bindings: Bindings | None = None) 
     from src.decode.engineering import physical_series
 
     return physical_series(values, column, bindings)
+
+
+def _no_value(channel: str, status: Mapping[str, str] | None = None) -> str:
+    """``"<channel> has no value"``, with why: the producer's reported status
+    when the caller passed one, else the declared ``absent`` text."""
+    reported = (status or {}).get(channel)
+    producer = CHANNEL_PRODUCERS.get(channel)
+    cause = reported or (producer.absent if producer is not None else "")
+    return f"{channel} has no value ({cause})" if cause else f"{channel} has no value"
 
 
 def _finite(value: Any) -> float | None:
@@ -1061,6 +1282,10 @@ __all__ = [
     "NO_VERDICT_REASONS",
     "OBD_SPEED_ACCEL_G",
     "SPEED_COMMITTEE",
+    "CHANNEL_PRODUCERS",
+    "IMU_ACCEL_LON_MEAN",
+    "ChannelProducer",
+    "CommitteeDeclarationError",
     "CommitteeEvaluator",
     "CommitteeFlag",
     "CommitteeFrameResult",
@@ -1069,12 +1294,15 @@ __all__ = [
     "SensorCommittee",
     "append_committee_member_transforms",
     "append_committee_residuals",
+    "check_committee_producers",
     "committee_channel_reason",
     "committees_path",
     "evaluate_committee_frame",
     "load_committee_profile",
     "non_trainable_committee_outputs",
+    "offline_producer_status",
     "physical_committee_point",
     "resolve_committee_profile",
     "speed_accel_g",
+    "undelivered_reason",
 ]
