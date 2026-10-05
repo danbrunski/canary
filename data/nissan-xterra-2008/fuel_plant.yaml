@@ -326,12 +326,15 @@ baseline:
       MAF reading low, injectors flowing less than new, ethanol content and the
       lambda sensor's gain are the same number here.
 
-# Held-out recordings already scored, and against which baseline. Written by
-# `tools.fuel_plant_check evaluate`. A recording here is never held-out
-# evidence for another baseline or plant_version: the profile refuses to load
-# with it in split.held_out then, and evaluate() refuses to score it.
+# Held-out recordings already scored, against which baseline, and the verdict
+# that scoring returned (E07.3: fail -- all four were scored together and the
+# plant missed sample |err| p90 and the region pass fraction). Written by
+# `tools.fuel_plant_check evaluate`; plant_qualification() reads the verdicts.
+# A recording here is never held-out evidence for another baseline or
+# plant_version: the profile refuses to load with it in split.held_out then,
+# and evaluate() refuses to score it.
 spent_held_out:
-  - {recording: _capture-ram-study-2026-10-04T204557, baseline_id: na-stock-2026-10-05.1, baseline_sha256: 6aec1db556989cc693dcf226a3017478c58a19c6c54abf251d9fe9a916e09220, plant_version: fuel-mv-1, scored_on: 2026-10-05}
-  - {recording: _capture-tuning-2026-09-22T170459, baseline_id: na-stock-2026-10-05.1, baseline_sha256: 6aec1db556989cc693dcf226a3017478c58a19c6c54abf251d9fe9a916e09220, plant_version: fuel-mv-1, scored_on: 2026-10-05}
-  - {recording: _capture-tuning-2026-09-22T235224, baseline_id: na-stock-2026-10-05.1, baseline_sha256: 6aec1db556989cc693dcf226a3017478c58a19c6c54abf251d9fe9a916e09220, plant_version: fuel-mv-1, scored_on: 2026-10-05}
-  - {recording: _capture-tuning-2026-09-23T142926, baseline_id: na-stock-2026-10-05.1, baseline_sha256: 6aec1db556989cc693dcf226a3017478c58a19c6c54abf251d9fe9a916e09220, plant_version: fuel-mv-1, scored_on: 2026-10-05}
+  - {recording: _capture-ram-study-2026-10-04T204557, baseline_id: na-stock-2026-10-05.1, baseline_sha256: 6aec1db556989cc693dcf226a3017478c58a19c6c54abf251d9fe9a916e09220, plant_version: fuel-mv-1, scored_on: 2026-10-05, verdict: fail}
+  - {recording: _capture-tuning-2026-09-22T170459, baseline_id: na-stock-2026-10-05.1, baseline_sha256: 6aec1db556989cc693dcf226a3017478c58a19c6c54abf251d9fe9a916e09220, plant_version: fuel-mv-1, scored_on: 2026-10-05, verdict: fail}
+  - {recording: _capture-tuning-2026-09-22T235224, baseline_id: na-stock-2026-10-05.1, baseline_sha256: 6aec1db556989cc693dcf226a3017478c58a19c6c54abf251d9fe9a916e09220, plant_version: fuel-mv-1, scored_on: 2026-10-05, verdict: fail}
+  - {recording: _capture-tuning-2026-09-23T142926, baseline_id: na-stock-2026-10-05.1, baseline_sha256: 6aec1db556989cc693dcf226a3017478c58a19c6c54abf251d9fe9a916e09220, plant_version: fuel-mv-1, scored_on: 2026-10-05, verdict: fail}

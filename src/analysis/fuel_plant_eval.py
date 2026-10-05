@@ -58,6 +58,7 @@ from src.analysis.injector_pulse import (
     vb_counts_from_volts,
 )
 from src.preprocessing.drives import physical_drives
+from src.session import is_synthetic_session
 from src.signals.pairing import PairingPolicy, match_ordered, to_seconds
 
 #: Every state a pulse read can be in, first failing check wins.
@@ -361,6 +362,26 @@ def _refuse_sessions(names: Iterable[str], refused: Iterable[str], reason: str, 
         raise FuelPlantRefusalError(reason, f"{bad}: {why}")
 
 
+def check_origin(sessions: Iterable[str], profile: FuelPlantProfile) -> None:
+    """Simulator output never identifies or scores a real plant, and a labelled
+    synthetic plant never claims a recording: ``synthetic_as_observed`` /
+    ``synthetic_plant_on_recording``."""
+    names = sorted(set(sessions))
+    synthetic = [n for n in names if is_synthetic_session(n)]
+    recorded = [n for n in names if not is_synthetic_session(n)]
+    if not profile.synthetic and synthetic:
+        raise FuelPlantRefusalError(
+            "synthetic_as_observed",
+            f"{synthetic} are simulator output: a synthetic trace is never plant evidence",
+        )
+    if profile.synthetic and recorded:
+        raise FuelPlantRefusalError(
+            "synthetic_plant_on_recording",
+            f"a labelled synthetic plant is identified and scored on _sim-* traces only, "
+            f"not {recorded}",
+        )
+
+
 def check_drive_independence(profile: FuelPlantProfile, sessions_root: Path) -> list[Any]:
     """Refuse a physical drive with recordings on both sides of the split.
 
@@ -397,6 +418,7 @@ def identify(
     """
     data = pd.concat([f for f in frames if len(f)], ignore_index=True)
     sessions = set(data["session"])
+    check_origin(sessions, profile)
     outside = sorted(sessions - set(profile.split.identification))
     if outside:
         raise FuelPlantRefusalError(
@@ -511,6 +533,7 @@ def evaluate(
         )
     data = pd.concat([f for f in frames if len(f)], ignore_index=True)
     sessions = set(data["session"])
+    check_origin(sessions, profile)
     outside = sorted(sessions - set(profile.split.held_out))
     if outside:
         raise FuelPlantRefusalError("not_held_out", f"{outside} are not declared held-out")
@@ -668,6 +691,7 @@ def evaluate(
                 "baseline_id": baseline.id,
                 "baseline_sha256": sha,
                 "plant_version": profile.plant_version,
+                "verdict": verdict,
             }
             for name in sorted(sessions)
         ],

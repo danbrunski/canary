@@ -72,7 +72,7 @@ from src.evidence.records import (
     recurrence_key,
 )
 from src.jsonl_store import JsonlStore
-from src.session import SessionKind, session_kind
+from src.session import SessionKind, is_synthetic_session, session_kind
 
 if TYPE_CHECKING:
     from src.config import CanaryConfig
@@ -89,6 +89,7 @@ __all__ = [
     "OutcomeRuleError",
     "PredictionOrder",
     "ReplayIsolationError",
+    "SyntheticIsolationError",
     "UnknownRecordError",
     "UnscopedMemoryError",
     "memory_ledger_for",
@@ -121,6 +122,10 @@ class UnscopedMemoryError(ValueError):
 
 class ReplayIsolationError(ValueError):
     """Replay output offered to live memory."""
+
+
+class SyntheticIsolationError(ValueError):
+    """Simulator output (a ``_sim-*`` trace) offered to memory as evidence (E07.6)."""
 
 
 class OutcomeRuleError(ValueError):
@@ -424,6 +429,14 @@ class MemoryLedger(JsonlStore[AnyRecord]):
                     f"evidence read from replay output {replayed} cannot enter live memory: "
                     "a replay re-emits rows, it is not this vehicle's recording. Use the "
                     "replay's own ledger (memory_ledger_for(config, replay_id=...))."
+                )
+        if isinstance(record, Evidence):
+            synthetic = [s.session for s in record.sources if is_synthetic_session(s.session)]
+            if synthetic:
+                raise SyntheticIsolationError(
+                    f"evidence read from simulator output {synthetic} cannot enter memory on "
+                    "any ledger: a simulated trace is a prediction, never an observation of "
+                    "this vehicle (E07.6)"
                 )
         if isinstance(record, Prediction) and record.noise_floor is not None:
             verify_floor(record.noise_floor)  # FloorVerificationError: relabelled/invented

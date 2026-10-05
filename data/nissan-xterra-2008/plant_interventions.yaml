@@ -1,0 +1,139 @@
+# E07.4 -- interventions the frozen fuel plant is tested across.
+#
+# Schema: src/analysis/plant_validation.py (InterventionFile); run with
+#   .venv/bin/python -m tools.plant_validation case
+# The flash time and both images are read from tune_revisions.yaml and must
+# agree with what is restated here (resolve_boundary refuses otherwise). The
+# prediction of record is preserved as first committed: its document's sha256
+# at that commit, the commit's own time, and its table rows verbatim
+# (verify_prediction_of_record re-reads the commit). Nothing here re-dates it.
+schema_version: 1
+cases:
+  - id: fuel-comp-restore-2026-10-04
+    base_revision: ZS44A-20260920
+    candidate_revision: ZS44A-20261004
+    base_image_sha256: a46baa248f16db8d5ed9854913e614dd7d77b7579bb6c36bddb792741531be50
+    candidate_image_sha256: 5587f7e1e6dbd0fcb9ffe0c857cc0cafebbe11bf306636c0f3265b903254d253
+    # The prediction's bands are in raw counts of the throttle-model fill byte.
+    load_input: 'mem:ECM_FUEL_COMP_X_INPUT'
+    load_input_pair_tolerance_s: 0.1
+    prediction_of_record:
+      document: data/analyses/2026-10-04-fuel-comp-restore-prediction.md
+      commit: d0fda0357b702c40e954d83eeca18e61cfafbfb8
+      # 2026-10-04T17:01:15-06:00: 78 s before the flash (23:02:33.18Z).
+      committed_at: 2026-10-04T23:01:15Z
+      text_sha256: 2b3a319be7336653a00901de28db276a89aecebba9043c7dded24566c2cea21d
+      bands:
+        - load_input: [0, 64]
+          fuel_change_pct: [-1.0, -1.0]
+          as_written: '| < 64 (45 % of samples) | any | about −1 % (leaner) |'
+        - load_input: [64, 144]
+          fuel_change_pct: [-0.5, -0.2]
+          as_written: '| 64–144 | any | −0.2 to −0.5 % |'
+        - load_input: [144, 256]
+          rpm: [4000, 5600]
+          fuel_change_pct: [3.0, 5.5]
+          as_written: '| ≥ 144 | 4,000–5,600 | **+3 to +5.5 %** (richer). Base 1.047–1.078 vs tune ~1.016–1.023. |'
+      ledger:
+        status: not_recorded
+        reason: >-
+          No memory ledger on the laptop holds it, and the Pi's ledger is not
+          read offline. The ledger mints recorded_at at append and refuses a
+          record that arrives with one, so an append now would be dated
+          2026-10-05 and order post_hoc against the flash: the recording
+          commit is the order evidence, and this file never re-dates it.
+          Operator decision 2026-10-05: kept in git only, no ledger append; a
+          commit-dated prediction import is a possible later E01 mechanism.
+    # The flash resets the learned trim (contract event ecu_reflash; LTFT read
+    # 0.00 after the 2026-09-20 flash and stayed 0.00 to 2026-09-23). A post-
+    # change read more than one OBD count (0.78 %) away is relearning: the
+    # declared state no longer holds there, so it is reported, not tested.
+    learned_state:
+      quantity: ltft_b1
+      reset_event: ecu_reflash
+      reset_value_pct: 0.0
+      relearn_tolerance_pct: 1.0
+      evidence: >-
+        engine_sim_contract.yaml event ecu_reflash; the prediction's own caveat
+        ("The flash resets LTFT. Compare STFT and lambda, not total trim, until
+        LTFT relearns."); relearning is not modelled. LTFT acts in open loop:
+        the decoded pulse formula adds STFT and LTFT into k_b with no
+        open-loop gate (docs/ecu-firmware-analysis.md:629). STFT neutral in
+        open loop is an assumption, not decoded.
+    matching:
+      rpm_rel: 0.05
+      load_input_abs: 4
+      baro_kpa_abs: 2.0
+      iat_c_abs: 10.0
+      evidence: >-
+        A post-change read is paired one-to-one with the nearest pre-change read
+        in the same regime within these: rpm within 5 % (the steady rule's
+        rpm span is 8 %), the fill byte within 4 counts (the bands are 64-144
+        wide; the WOT cases sit at 207-217), baro within 2 kPa (one PID 0x33
+        count is 1 kPa; trips reach 63 kPa), IAT within 10 C.
+    acceptance:
+      declared_on: 2026-10-05
+      min_pairs: 20
+      min_floor_pairs: 20
+      direction_agreement: 0.7
+      within_uncertainty: 0.8
+      floor_quantile: 0.9
+      evidence: >-
+        Declared before any post-change recording exists. The uncertainty is
+        the condition-matched noise floor: the p90 |change| over pre-vs-pre
+        pairs where no change happened, from two recordings or from one
+        recording at least floor.min_separation_s apart. 20 pairs is the E07.3
+        rule's minimum region count. A test passes only when both the
+        direction agreement and the within-uncertainty fraction are met, so a
+        band whose change sits inside the floor cannot pass on direction alone.
+    # Declared 2026-10-05, before any post-change recording exists (operator
+    # decision 2026-10-05). Only one pre-change recording logs the fill byte,
+    # so pairs across recordings cannot form; pairs inside one recording count
+    # when their reads are at least min_separation_s apart.
+    floor:
+      declared_on: 2026-10-05
+      min_separation_s: 30.0
+      evidence: >-
+        Chosen from physics, not from data: B06's lambda transport delay
+        bracket ends at 0.5 s; a warm port-injected wall-film time constant is
+        of order 0.1-1 s; the closed-loop short-term trim settles in a few
+        seconds; E07.3's steady window is 2 s and its region gap 2.5 s. 30 s
+        is 60x the delay bracket and 30x the longest film constant, so two
+        reads that far apart are not the same transient seen twice.
+        Limitation: reads within one drive share its slow states (fuel
+        temperature and blend, sensor drift), so this floor can be narrower
+        than one across drives; pairs across recordings are used too when
+        they exist.
+    split:
+      declared_on: 2026-10-05
+      # The plant's held-out drives on the base revision (scored, never fitted).
+      pre:
+        - _capture-tuning-2026-09-22T170459
+        - _capture-tuning-2026-09-22T235224
+        - _capture-tuning-2026-09-23T142926
+        - _capture-ram-study-2026-10-04T204557
+      # Reserved: the first drives on ZS44A-20261004, listed here before they
+      # are scored and never identification for any plant. None exist yet.
+      post: []
+      evidence: >-
+        Pre-change: the plant's four held-out recordings on the base revision
+        (pulse DID at 0.5-7 s; the live sessions poll it once a minute and
+        are not steady-scoreable). Only _capture-ram-study-2026-10-04T204557
+        logs the load input (192 reads; tools.plant_validation inventory), so
+        it alone can stand for a post-change read in a matched pair, and the
+        pre-vs-pre floor (pairs across different recordings) has no second
+        recording to pair with. Post-change: none on the laptop (newest local
+        session 2026-10-04T215234, before the flash).
+    # The scoring rules above (bands, learned state, matching, acceptance,
+    # floor), hashed by InterventionCase.rules_sha256 before any post-change
+    # recording was listed. Listing one requires this hash to still match and
+    # the recording to start after frozen_at: a rule changed afterwards cannot
+    # load.
+    frozen_rules:
+      sha256: f522ff5366b9c2ae903cf0ec0bfdbdd2237f7fae713bf57008dd0dcc79ae6ad9
+      frozen_at: 2026-10-05T09:19:40Z
+    evidence: >-
+      B08.6's October 4 Fuel Comp restore. Changes: the Fuel Comp load axis
+      0xCB29 and slot 1's Fuel Comp cells, plus checksums (rom_effects:
+      consumed fuel_comp_flow_axis and fuel_compensation slot 1). Both axis
+      and cells changed, so their separate physical effects are not isolated.

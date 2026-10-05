@@ -129,7 +129,7 @@ def record_spent(
         lines.append(
             f"  - {{recording: {rec['recording']}, baseline_id: {rec['baseline_id']}, "
             f"baseline_sha256: {rec['baseline_sha256']}, plant_version: "
-            f"{rec['plant_version']}, scored_on: {today}}}\n"
+            f"{rec['plant_version']}, scored_on: {today}, verdict: {rec['verdict']}}}\n"
         )
     if lines:
         text = path.read_text()

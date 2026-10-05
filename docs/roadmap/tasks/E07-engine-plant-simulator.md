@@ -401,7 +401,7 @@ supercharger is a hardware intervention with a new plant parameter set.
        DID (truck). No such drive exists yet.
     3. MAP, injector flow and injector latency still require measurement.
 
-- [ ] **E07.4 — Validate from telemetry and an actual intervention.**
+- [~] **E07.4 — Validate from telemetry and an actual intervention.**
   Inventory raw command, MAF/rpm, lambda, thermal/barometric, voltage and
   available pressure channels with acquisition clocks. Split physical drives
   and interventions before parameter fitting; reserve independent drives
@@ -414,6 +414,143 @@ supercharger is a hardware intervention with a new plant parameter set.
   direction/magnitude of an unseen intervention within declared uncertainty;
   fitting a separate plant to each ROM cannot count as this test. Absent
   evidence stays pending. A baseline fit alone cannot qualify tuning effects.
+  *Partial 2026-10-05: the machinery is built and tested; the verdict on the
+  real case is `pending`, by name, for two reasons that need the truck.*
+  - **Code.** `src/analysis/plant_validation.py` (layer 5);
+    `data/nissan-xterra-2008/plant_interventions.yaml` (the case);
+    `python -m tools.plant_validation inventory|case` reproduces the numbers
+    below offline. E07.3's `SpentRecord` now carries the `verdict` each
+    scoring returned (the four existing records: `fail`), and
+    `fuel_plant.plant_qualification` derives qualification from those
+    verdicts. It is never stated.
+  - **Channel inventory** (`inventory`, 158 recordings under
+    `~/canary-data/sessions/nissan-xterra-2008`). Each need's acquisition
+    clock is the median and p90 interval of per-read arrival times:
+    - Pulse DID: 0.50 s in the six tuning captures, 7.05 s in the 10-04
+      ram-study, about 61 s in every live session. So the live sessions are
+      not steady-scoreable.
+    - MAF/λ: about 0.25 s in the captures and 0.67–1.0 s live.
+    - AEM rail pressure: 0.01 s, in the seven 10-04 recordings only.
+    - The Fuel Comp load byte `mem:ECM_FUEL_COMP_X_INPUT`: in
+      `_capture-ram-study-2026-10-04T204557` only (192 reads).
+    - Battery voltage: absent from the six tuning captures.
+    - No recording starts after the flash.
+  - **The case.** The flash `2026-10-04T23:02:33.183902Z` (`exact`) and both
+    image hashes are read from `tune_revisions.yaml` (`resolve_boundary`), and
+    a mismatch is refused (`image_mismatch`).
+  - **The prediction of record is preserved, not re-dated.** It is commit
+    `d0fda03` at `2026-10-04T23:01:15Z`, 78 s before the flash, so the order
+    is `prior`. The record holds that commit's document sha256 `2b3a319b…`
+    and the three table rows verbatim. `verify_prediction_of_record` re-reads
+    the commit and returns `[]`.
+    - It is **not on any ledger**, by operator decision (2026-10-05): it stays
+      in git only, and commit `d0fda03`'s time is the order evidence. A ledger
+      append would be minted 2026-10-05 and order `post_hoc`. A commit-dated
+      prediction import is a possible later E01 mechanism.
+  - **The split is declared before scoring.** `pre` is the plant's four
+    held-out recordings; `post: []` is reserved. The split is by sample time
+    against the flash: `straddles_intervention`, `wrong_side` and
+    `undeclared_recording` are refused.
+  - **A separate plant per ROM cannot count.** There is one profile argument,
+    and `check_one_plant` refuses:
+    - `plant_fitted_on_candidate_rom`;
+    - `baseline_revision_mismatch`;
+    - `refit_across_intervention` (a fitted or identification recording that
+      the case reserves as post-change, or that starts after the flash);
+    - `baseline_not_frozen`.
+  - **Learned trim.** The flash resets LTFT to 0 % (contract event
+    `ecu_reflash`), and relearning is not modelled. A post-change read with
+    |LTFT| > 1 % is `ltft_relearning` and is excluded by name. A recorded
+    post-change trim is only ever the observation.
+  - **Effect tests.** Each is per matched pair: same regime, rpm ±5 %, fill
+    byte ±4, baro ±2 kPa, IAT ±10 C. Pairs are one-to-one and nearest first,
+    and a mirror pair is never counted twice. They are scored against a
+    condition-matched floor: p90 |residual| over pre-vs-pre pairs from two
+    recordings, or from one recording at least `floor.min_separation_s` =
+    30 s apart (operator decision 2026-10-05, declared that day before any
+    post-change drive). The 30 s comes from physics, not data: 60× B06's
+    0.5 s λ-delay bracket end, 30× a warm wall-film time constant (≤ 1 s),
+    and beyond STFT settling. Pairs within one drive share its slow states,
+    so this floor can be narrower than one across drives.
+  - **Rules frozen before the first post-change drive.** `frozen_rules` holds
+    `rules_sha256()` over bands, learned state, matching, acceptance, floor,
+    `split.pre`, `load_input` and its pairing tolerance (`f522ff53…`, frozen
+    2026-10-05T09:19:40Z, while `post` is empty). The case refuses to load on
+    `rules_changed` (any rule edited), `rules_not_frozen` (post listed without
+    it), `rules_frozen_after_post` (re-frozen after a listed post-change
+    recording started) and `recording_time_unknown` (a post-change name with
+    no parseable start time; `_sim-*` exempt). `check_one_plant` refuses a
+    fitted recording with no parseable start time the same way.
+  - **Trim assumptions, stated.** LTFT acts in open loop: the decoded pulse
+    formula adds STFT and LTFT into k_b with no open-loop gate
+    (`docs/ecu-firmware-analysis.md:629`). STFT neutral in open loop is an
+    assumption, not decoded. Both are in `learned_state.evidence` and the
+    effect test's docstring.
+  - **Sealed verdict.** `evaluate_intervention` returns
+    `report["verdict_record"]`, an `InterventionVerdict` sealed with an HMAC
+    under a process-private key. A typed or `dataclasses.replace`-edited
+    verdict fails `verify()`.
+    - Open loop: λ. The pre read's effective pulse × the predicted change ×
+      the declared trim state, through the frozen plant at the post read's
+      conditions.
+    - Closed loop: STFT. Total trim needed = (1 + total before) / (1 +
+      change) − 1, less the reset LTFT. The part due to the ROM alone is
+      reported separately.
+    - Bounds are predeclared: ≥ 20 pairs, ≥ 20 floor pairs, direction ≥ 0.7,
+      within uncertainty ≥ 0.8. `insufficient_evidence` is distinct from
+      `fail`.
+  - **Real result (`case`): `pending`.**
+    - `plant_not_qualified: baseline na-stock-2026-10-05.1 failed its
+      predeclared held-out bounds`.
+    - `no_post_change_data`.
+    - Baseline reproduction, frozen parameters, pre side: steady 845 reads in
+      137 regions, median +1.69 %, |err| p90 11.70 %, region pass 0.62
+      (`fail`, the same as E07.3).
+    - Transient (separately): 2,571 reads, median +4.77 %, |err| p90 38.4 %.
+    - Missing (separately): 16 `missing_input`, 190 `not_co_observed`.
+    - Observation-latency bracket: the median moves −0.02 % / −0.04 % at 0 s
+      / 0.5 s.
+  - **Tests.** `tests/test_plant_validation.py`, 12 pass. The real case:
+    - `test_the_case_is_the_registrys_flash_and_its_prediction_came_first`;
+    - `test_the_prediction_of_record_is_preserved_as_committed` (it skips when
+      the commit is absent, as in a shallow clone);
+    - `test_the_real_case_is_pending_because_the_plant_failed_its_bounds`
+      (on the committed held-out slice: 152 reads, 38 regions, +1.90 %, as in
+      E07.3);
+    - `test_qualification_is_read_from_the_recorded_verdicts`;
+    - `test_the_inventory_reports_acquisition_clocks_and_the_revision`;
+    - `test_the_scoring_rules_cannot_change_after_a_post_change_drive_is_listed`;
+    - `test_floor_pairs_inside_one_recording_keep_the_declared_separation`.
+    - `test_a_plant_fitted_per_rom_cannot_count` also covers
+      `baseline_revision_mismatch` and `recording_time_unknown`.
+
+    A **labelled synthetic plant** (`synthetic: true`, `_sim-*` traces only)
+    is identified, frozen and passes its own held-out bounds:
+    - `test_a_qualified_synthetic_plant_passes_a_correctly_predicted_change`:
+      WOT +4.25 % observed at median ≈ 4.25 %; floor 1.07 % on 48 pairs;
+      trim test passes; verdict `pass`.
+    - `test_a_reversed_change_fails_and_relearning_reads_are_not_tested`:
+      `fail`; with LTFT relearned, `insufficient_evidence`.
+    - `test_a_plant_fitted_per_rom_cannot_count`.
+    - `test_the_split_is_by_sample_time_and_declared_first`.
+    - `test_synthetic_and_recorded_never_mix`: `synthetic_mismatch`,
+      `synthetic_as_observed` and `synthetic_plant_on_recording`.
+  - **Remaining:**
+    1. A qualified plant: E07.3's remaining items 1–3, with never-scored
+       held-out drives (truck). Until then the verdict stays
+       `pending: plant_not_qualified`.
+    2. Post-change drives on ZS44A-20261004, listed in `split.post` before
+       scoring (truck). Log the fill byte with the pulse DID, λ, STFT/LTFT and
+       battery voltage, both at WOT above 4,000 rpm and at part-throttle
+       cruise.
+    3. Only the ram-study logs the fill byte before the flash, so the real
+       floor will come from within-recording pairs (the 30 s rule above);
+       a floor across drives needs no pre-change data that can still be made.
+    4. `compare_channels` is not used. The plant's prediction is not a stored
+       channel, and the pre/post pairs cross recordings, which
+       `compare_channels` does not do. Pairing uses `match_ordered` on the
+       acquisition clock (as in E07.3) and the one-to-one matched pairs
+       above; no aggregates are compared.
 
 - [ ] **E07.5 — Add dynamic air, torque and vehicle response in stages.**
   Add manifold mass/energy balance and cylinder breathing, then spark/lambda
@@ -431,7 +568,7 @@ supercharger is a hardware intervention with a new plant parameter set.
   predictions without relevant response data. Prescribed-rpm results are
   never presented as acceleration predictions.
 
-- [ ] **E07.6 — Run paired tuning scenarios without leaking observations.**
+- [~] **E07.6 — Run paired tuning scenarios without leaking observations.**
   Simulate baseline/candidate ROMs with the same hardware parameters, driver
   scenario, environment and declared initial states. In coupled rollout,
   recompute all downstream state: do not feed recorded post-change BFS,
@@ -445,6 +582,99 @@ supercharger is a hardware intervention with a new plant parameter set.
   be ranked as a reliable improvement. Optimizing against the simulator is
   deferred until these effect predictions qualify and still requires later
   physical verification.
+  *Partial 2026-10-05: the steady paired slice runs, and the negative
+  control and the refusals pass. "A known edit passes the held-out
+  intervention test" waits on E07.4.*
+  - **Code.** `src/analysis/paired_scenarios.py` (layer 5).
+  - **One scenario object, two ROMs.** A `PairedScenario` holds the plant
+    identity, the operating points and the declared learned state. Both ROMs
+    run from it, so nothing but the image can differ. Each point becomes a
+    contract `Scenario` and passes `check_scenario`: two ECU identities in a
+    ROM comparison, one per ROM in a rollout.
+  - **Per point and per ROM it computes:**
+    - X from a shared BFS, by the twin's `x_from_bfs` and the image's Load
+      Point Scaler;
+    - the Target AFR lookup (`target_phi.resolve_table`/`predict`);
+    - the pulse word (`injector_pulse.predict_pulse`, with each image's own
+      chain calibration);
+    - delivered λ and fuel per event from the frozen E07.3 plant (manifold
+      pressure is a stated boundary: `PlantInputs.map_kpa`).
+  - **Nothing recorded or computed is fed back.**
+    - Channels are refused (`recorded_value_refused`, from the contract).
+    - A stated value whose source names a recording is refused
+      (`recorded_value_refused`, here).
+    - BFS as a boundary is refused (`boundary_not_supplied_here`).
+    - A rollout that prescribes rpm, airflow or the trims is refused
+      (`boundary_not_supplied_here`). A rollout that passes the contract is
+      refused as `dynamic_plant_unbuilt` (E07.5).
+  - **BFS is a conditioning value, not a held one.** BFS formation is
+    unmodelled, so the comparison is conditional on a stated BFS shared by
+    both ROMs. That is allowed only where `compare_roms` shows the change does
+    not reach it. A Fuel Comp edit reaches it, and every output then reads
+    `conditioned_on_changed_path:base_fuel_schedule`, with no candidate value
+    and no delta.
+  - **Learned state.** Both runs start from the stated STFT/LTFT. A
+    `candidate_events` flash (`ecu_reflash`) resets what the contract resets
+    on it: `ltft_b1`, to 0 %. Relearning is not modelled, and an event that
+    resets an uncarried state is refused (`reset_unmodelled`).
+  - **What a result returns.** Per output per point: base, candidate, delta
+    and status (`supported`/`unsupported`) with its reasons:
+    - closed-loop or cold regime;
+    - `short_pulse_undecoded`;
+    - ROM gates.
+
+    For λ it also gives the lumped scale's parameter band and the relative
+    delta's range over every working-assumption bracket end. Every result
+    also has coverage per output, the affected ROM cells (`affected_cells`:
+    table, slot, row, column, old and new raw), the unresolved dependencies
+    (ROM reasons, plant effects, `plant_not_qualified`), the traced-only
+    outputs' ROM status, and stated assumptions (steady: the final φ equals
+    the gated lookup).
+  - **Synthetic stays synthetic.** Results are labelled `simulation`, and the
+    traces use a `_sim-<hash>` session:
+    - identification and evaluation refuse it (`synthetic_as_observed`);
+    - every memory ledger, replay ledgers included, refuses it as evidence
+      (`SyntheticIsolationError`, in `src/evidence/ledger.py`);
+    - `src.session.is_synthetic_session` is the one test.
+  - **Tests.** `tests/test_paired_scenarios.py`, 9 pass (7 below, 2 more after them):
+    - `test_the_negative_control_rom_reproduces_the_baseline_exactly`: an
+      identical image gives every output equal base/candidate, delta 0.0, and
+      a byte-identical repeat.
+    - `test_a_target_afr_edit_is_computed_through_the_pulse_and_the_plant`:
+      a +4-count edit to every slot-1 cell moves WOT φ by +0.03125, the pulse
+      by +0.41 ms and λ by −2.5 % (−2.52…−2.49 % over the assumptions). It is
+      still not rankable.
+    - `test_a_fuel_comp_edit_leaves_its_downstream_unresolved_and_unrankable`.
+    - `test_the_flash_resets_the_learned_trim_on_the_candidate_only`.
+    - `test_recorded_or_computed_values_cannot_be_fed_back`.
+    - `test_synthetic_traces_stay_out_of_evidence_and_baseline_data`.
+    - `test_optimisation_is_refused` (`optimisation_deferred`, always).
+
+    `rank_as_improvement(result, intervention=InterventionVerdict)` takes the
+    sealed E07.4 verdict, never a string. It refuses:
+    - an unsealed verdict, a non-`pass` one or a synthetic one;
+    - a verdict whose image hashes or plant baseline differ from the result;
+    - a synthetic plant (`synthetic_plant`) or an unqualified one;
+    - any unsupported output or point.
+
+    Plant outputs at a point whose regime the plant did not qualify in are
+    unsupported (`regime_not_qualified:<regime>`). `PairedResult.assumptions`
+    states the LTFT/STFT open-loop assumptions. Two more tests (9 pass):
+    - `test_ranking_needs_a_sealed_matching_verdict_and_a_recorded_qualified_plant`;
+    - `test_a_closed_loop_only_qualification_cannot_rank_wot_deltas`.
+
+    The paired tests also pass against HEAD `e19a1c1`'s manifest and rom_map
+    (E05.2 committed), in a scratch worktree.
+  - **Remaining:**
+    1. "A known edit passes the held-out intervention test": E07.4 must reach
+       `pass` (a qualified plant and post-change drives, both truck).
+    2. Coupled rollout: E07.5's dynamic plant.
+    3. BFS formation, Fuel Comp and the manifold filter are not modelled, so
+       Fuel Comp/K/axis edits stay unresolved. The short-pulse correction is
+       undecoded. The injector-chain bytes are not in the manifest, so a
+       change there reads `unknown`.
+    4. Closed-loop trim response is not modelled, so closed-loop points are
+       unsupported.
 
 - [ ] **E07.7 — Integrate the simulator on the Pi through E06/E04.**
   Trial pure Rust controller and plant libraries behind a small scheduler

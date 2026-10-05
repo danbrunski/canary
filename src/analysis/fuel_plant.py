@@ -371,14 +371,19 @@ class DelayReference(_Strict):
     source: str
 
 
+Verdict = Literal["pass", "pass_closed_loop_only", "fail"]
+
+
 class SpentRecord(_Strict):
-    """One held-out recording, scored once, against one frozen baseline."""
+    """One held-out recording, scored once, against one frozen baseline, and
+    the verdict that scoring returned (what :func:`plant_qualification` reads)."""
 
     recording: str
     baseline_id: str
     baseline_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
     plant_version: str
     scored_on: date
+    verdict: Verdict
 
 
 class CalibrationWord(_Strict):
@@ -418,6 +423,10 @@ class PulseChain(_Strict):
 class FuelPlantProfile(_Strict):
     schema_version: Literal[1]
     plant_version: str = Field(min_length=1)
+    #: A labelled synthetic plant (tests and demonstrations): it is identified
+    #: and scored only on ``_sim-*`` traces, and a real plant refuses them
+    #: (``fuel_plant_eval``'s ``synthetic_as_observed``).
+    synthetic: bool = False
     hardware_configuration: str
     geometry: Geometry
     specs: Specs
@@ -737,6 +746,9 @@ class PlantInputs:
     iat_c: FloatArray
     #: Measured rail gauge pressure, kPa; NaN where not logged.
     rail_kpa: FloatArray
+    #: Manifold pressure stated per sample, kPa (a scenario's prescribed
+    #: boundary, E07.6). ``None``: speed density at the working VE.
+    map_kpa: FloatArray | None = None
 
 
 @dataclass(frozen=True)
@@ -768,8 +780,12 @@ def predict(inputs: PlantInputs, params: ResolvedParameters, geometry: Geometry)
     air = air_per_event_g(inputs.maf_gps, inputs.rpm, geometry) * (
         v["bank_air_split"] * geometry.banks
     )
-    map_kpa = manifold_pressure_speed_density(
-        air, inputs.iat_c, inputs.baro_kpa, geometry, v["manifold_pressure"]
+    map_kpa = (
+        manifold_pressure_speed_density(
+            air, inputs.iat_c, inputs.baro_kpa, geometry, v["manifold_pressure"]
+        )
+        if inputs.map_kpa is None
+        else _f(inputs.map_kpa)
     )
     measured = np.isfinite(inputs.rail_kpa)
     rail = np.where(measured, inputs.rail_kpa, v["rail_pressure"])
@@ -790,6 +806,56 @@ def predict(inputs: PlantInputs, params: ResolvedParameters, geometry: Geometry)
         effects=params.effects,
         rail_effect=params.rail_effect,
     )
+
+
+@dataclass(frozen=True)
+class Qualification:
+    """Whether the frozen plant passed its own predeclared held-out test.
+
+    Derived from ``spent_held_out`` (the verdict each scoring recorded), never
+    stated: a tuning or intervention claim reads this and cannot be handed a
+    "qualified" flag. ``regimes`` is empty unless ``qualified``."""
+
+    qualified: bool
+    regimes: tuple[str, ...]
+    #: ``None`` when qualified; else ``plant_not_qualified: <why>``.
+    reason: str | None
+    baseline_sha256: str
+    plant_version: str
+    synthetic: bool
+
+
+def plant_qualification(profile: FuelPlantProfile) -> Qualification:
+    """The plant's standing for prediction: qualified only when every declared
+    held-out recording was scored under *this* frozen baseline and plant
+    version, and every one of those scorings passed."""
+    baseline = profile.baseline
+
+    def refused(why: str, sha: str = "") -> Qualification:
+        return Qualification(
+            False, (), f"plant_not_qualified: {why}", sha, profile.plant_version, profile.synthetic
+        )
+
+    if baseline is None or not baseline.frozen:
+        return refused("no frozen baseline")
+    sha = baseline.sha256()
+    mine = {
+        r.recording: r
+        for r in profile.spent_held_out
+        if (r.baseline_sha256, r.plant_version) == (sha, profile.plant_version)
+    }
+    unscored = sorted(set(profile.split.held_out) - set(mine))
+    if not mine:
+        return refused(f"baseline {baseline.id} was never scored held out", sha)
+    if unscored:
+        return refused(f"held-out recordings {unscored} were not scored", sha)
+    verdicts = {mine[name].verdict for name in profile.split.held_out}
+    if "fail" in verdicts:
+        return refused(f"baseline {baseline.id} failed its predeclared held-out bounds", sha)
+    regimes = (
+        ("closed_loop",) if "pass_closed_loop_only" in verdicts else ("closed_loop", "enrichment")
+    )
+    return Qualification(True, regimes, None, sha, profile.plant_version, profile.synthetic)
 
 
 def sensitivity_cases(profile: FuelPlantProfile, delay: B06Rules) -> dict[str, dict[str, float]]:

@@ -156,6 +156,18 @@ def session_kind(name: str) -> SessionKind | None:
     return None if parsed is None else parsed.kind
 
 
+#: Simulator output (E07): a name under this prefix is a synthetic scenario's
+#: trace, never a recording. The leading ``_`` keeps it out of training
+#: discovery; plant identification/evaluation and the live memory ledger refuse
+#: it by name (:func:`is_synthetic_session`).
+SYNTHETIC_SESSION_PREFIX = "_sim-"
+
+
+def is_synthetic_session(name: str) -> bool:
+    """Whether ``name`` labels simulator output rather than a recording."""
+    return name.startswith(SYNTHETIC_SESSION_PREFIX)
+
+
 _NEVER = datetime.min.replace(tzinfo=UTC)
 
 

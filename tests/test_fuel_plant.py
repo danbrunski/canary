@@ -296,6 +296,7 @@ def test_a_spent_held_out_drive_cannot_score_another_baseline(
             "baseline_id": profile.baseline.id,
             "baseline_sha256": profile.baseline.sha256(),
             "plant_version": "fuel-mv-1",
+            "verdict": "fail",
         }
     ]
     # A revised baseline cannot reuse them: refused at load...
