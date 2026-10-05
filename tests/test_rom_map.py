@@ -10,7 +10,12 @@ import pytest
 import yaml
 from pydantic import ValidationError
 
-from src.analysis.rom_map import RomMap, check_against_targets, load_rom_map
+from src.analysis.rom_map import (
+    RomMap,
+    check_against_targets,
+    check_program_constants,
+    load_rom_map,
+)
 from src.analysis.rom_targets import Definition
 from src.signals.afr import load_afr_calibration
 from tests.rom_fixtures import PROFILE
@@ -409,3 +414,73 @@ def test_editor_disagreement_fields_are_required(field: str) -> None:
     del record[field]
     _fuel_comp(data)["editor_disagreement"] = record
     _refuse(data, field)
+
+
+# -- N02.1: the Fuel Comp load byte's inputs, and program constants ------------------
+
+
+def test_shipped_map_places_the_load_byte_inputs_where_the_code_reads_them() -> None:
+    rom_map = load_rom_map(PROFILE)
+    expected = {
+        "throttle_area_axis": (0xEE6A, 1, 32, "be16"),
+        "throttle_area_curve": (0xDD94, 1, 32, "be16"),
+        "fill_curve_low": (0xEAEC, 1, 16, "be16"),
+        "fill_curve_high": (0xEACC, 1, 16, "be16"),
+        "fill_rpm_multiplier": (0x8D25, 1, 1, "u8"),
+        "idle_air_cap": (0x8ED2, 1, 1, "be16"),
+        "etc_limp_home_area": (0x90BE, 1, 1, "be16"),
+        "evap_purge_area_gain": (0x82FE, 1, 1, "u8"),
+    }
+    for table_id, (offset, rows, cols, dtype) in expected.items():
+        table = rom_map.table(table_id)
+        assert (table.offset, table.rows, table.cols, table.dtype) == (offset, rows, cols, dtype)
+        assert table.confidence == "verified", table_id
+    assert rom_map.table("throttle_area_curve").axes.cols == "throttle_area_axis"
+    constant = rom_map.program_constant("fill_reciprocal_numerator")
+    assert (constant.offset, constant.dtype, constant.value) == (0x3C5E8, "be32", 0x00DC1D00)
+    assert constant.loaded_at == [0x3C3F6]
+
+
+def _constant() -> dict[str, Any]:
+    return {
+        "id": "a_literal",
+        "name": "A literal",
+        "offset": 0x30000,
+        "dtype": "be32",
+        "value": 0x12345678,
+        "loaded_at": [0x30100],
+        "confidence": "verified",
+        "evidence": "synthetic",
+    }
+
+
+def test_a_program_constant_must_fit_its_dtype_and_carry_evidence() -> None:
+    data = _shipped()
+    data["program_constants"] = [{**_constant(), "dtype": "be16"}]
+    _refuse(data, "does not fit be16")
+    data["program_constants"] = [{**_constant(), "evidence": ""}]
+    _refuse(data, "evidence")
+    data["program_constants"] = [{**_constant(), "loaded_at": []}]
+    _refuse(data, "loaded_at")
+
+
+def test_a_program_constant_cannot_overlap_a_table_or_share_its_id() -> None:
+    data = _shipped()
+    data["program_constants"] = [{**_constant(), "offset": 0xDD94}]
+    _refuse(data, "overlapping tables or constants")
+    data = _shipped()
+    data["program_constants"] = [{**_constant(), "id": "k_constant"}]
+    _refuse(data, "unique across tables")
+    data = _shipped()
+    data["program_constants"] = [{**_constant(), "offset": 0x0FFFFE}]
+    _refuse(data, "beyond")
+
+
+def test_check_program_constants_names_a_different_program() -> None:
+    rom_map = load_rom_map(PROFILE)
+    image = bytearray(1 << 20)
+    image[0x3C5E8:0x3C5EC] = (0x00DC1D00).to_bytes(4, "big")
+    assert check_program_constants(bytes(image), rom_map) == []
+    image[0x3C5E8:0x3C5EC] = (0x00DC1D01).to_bytes(4, "big")
+    (problem,) = check_program_constants(bytes(image), rom_map)
+    assert "fill_reciprocal_numerator at 0x03C5E8 holds 0xDC1D01" in problem

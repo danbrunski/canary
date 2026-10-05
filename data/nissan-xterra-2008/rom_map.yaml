@@ -716,3 +716,141 @@ tables:
       1.0600 matches the registry's K 1.06 for k106, and UpRev wrote the K
       edit to every slot. Raw only: K is relative to an injector the ECM
       does not name, so no scale is declared.
+  # -- The Fuel Comp load input 0xFFFF118A (N02.1). Everything the sole writer
+  # FUN_0003c3a4 reads from the image, so the byte can be rebuilt from logged
+  # throttle and rpm (src/decode/fuel_comp_load.py; docs/ecu-firmware-analysis.md,
+  # "Fuel Comp load input 0xFFFF118A, and how BFS is formed"). Raw words only:
+  # the code pins no absolute unit for the area or the fill. Values are read
+  # from the image at run time, never transcribed here.
+  - id: throttle_area_axis
+    name: Throttle effective-area curve axis (4 x throttle counts above closed)
+    offset: 0xEE6A
+    rows: 1
+    cols: 32
+    dtype: be16
+    confidence: verified
+    evidence: >-
+      FUN_0003c4d0 passes r5 = GBR 0xEDCA + 0xA0 = 0xEE6A (0x03C592-0x03C596)
+      to 0x026D58, whose search 0x027154 compares these 32 words with
+      min(0xFFFF, 4 x w2CC8) (0x03C582 shll2), w2CC8 being throttle sensor A's
+      count above its learned closed position. 0..3,172, i.e. 0..793 counts,
+      0..96.9 % on PID 0x11. The ETC code (0x07248C) searches the same pair
+      the other way round to turn a target area into a position. Equal in the
+      UpRev base, k106, 20260920 and 20261004.
+  - id: throttle_area_curve
+    name: Throttle effective area
+    offset: 0xDD94
+    rows: 1
+    cols: 32
+    dtype: be16
+    axes: {cols: throttle_area_axis}
+    confidence: verified
+    evidence: >-
+      r4 = 0xDD94 at 0x03C590, read by 0x026D58 at the hit and the next entry
+      and interpolated by 0x026F10; the result is w4136, and w2C32 = clamp(it -
+      w63FC, 0, 0xFFFF) (0x03C5A4-0x03C5C8). Rising, 112..48,060, convex.
+      Relative area units: idle air, purge/4 and the ETC target area add and
+      subtract in the same unit, which the code never names. Reproduces the
+      logged 0xFFFF118A on the 2026-10-04 ram-study capture through the chain
+      (N02.2).
+  - id: fill_curve_low
+    name: Throttle-model fill curve, X below 0x3C00
+    offset: 0xEAEC
+    rows: 1
+    cols: 16
+    dtype: be16
+    confidence: verified
+    evidence: >-
+      FUN_0003c444: for X = 0xFFFF2136 below 0x3C00 (0x03C48E-0x03C496),
+      r4 = 0xEAEC (0x03C49E) and r5 = 4 x X (0x03C4A2), into 0x026C28 (index
+      x >> 12, fraction (x & 0xFFF) << 4, last entry from 0xF000); the result's
+      high byte is 0xFFFF118A (0x03C4B8-0x03C4BA). Its last entry equals
+      fill_curve_high's first, so the byte is continuous across the split.
+  - id: fill_curve_high
+    name: Throttle-model fill curve, X from 0x3C00
+    offset: 0xEACC
+    rows: 1
+    cols: 16
+    dtype: be16
+    confidence: verified
+    evidence: >-
+      FUN_0003c444: for X at or above 0x3C00, r4 = 0xEACC (0x03C4AA) and r5 =
+      X - 0x3C00 (0x03C4AC), into 0x026C28; the high byte is 0xFFFF118A. X is
+      at most 0xFFFF, so the index (X - 0x3C00) >> 12 never passes 12 and
+      entries 14 and 15 are never read. Entry 12's high byte, 224, is the
+      ceiling the byte reaches for X >= 0xFC00.
+  - id: fill_rpm_multiplier
+    name: Throttle-model fill rpm multiplier
+    offset: 0x8D25
+    rows: 1
+    cols: 1
+    dtype: u8
+    confidence: verified
+    evidence: >-
+      FUN_0003c3ba reads the byte at 0x8D25 (0x03C3BC-0x03C3BE) and multiplies
+      it by the engine-speed word 0xFFFF1210 (12.5 rpm per count, 0x03C3C4),
+      clamped to 0xFFFF (0x03C3CA-0x03C3D4), into w227C; FUN_0003c3e4 divides
+      the program literal 0x00DC1D00 by it to make w116A. 158 in every image
+      read so far. The same byte multiplies an rpm word at 0x03C546; 158 ~
+      3,954 cc / 25 is speculation.
+  - id: idle_air_cap
+    name: Idle air learning cap
+    offset: 0x8ED2
+    rows: 1
+    cols: 1
+    dtype: be16
+    confidence: verified
+    evidence: >-
+      FUN_00054e72 loads 0x8ED2 (0x054E96-0x054E9C, 1,185) and writes
+      w6560 = min(w1CC0, it) while cal 0x85D8 bit 2 is set (it is), w1CC0 being
+      the signed sum of the idle-speed feedback integrator w3CB2 and the
+      non-volatile learned w5EA6; w63FC is its snapshot, subtracted from the
+      throttle area. So the idle-air word can never exceed this.
+  - id: etc_limp_home_area
+    name: Electronic-throttle limp-home area
+    offset: 0x90BE
+    rows: 1
+    cols: 1
+    dtype: be16
+    confidence: verified
+    evidence: >-
+      FUN_0003c416: w1124 = w2C32 normally, or the word at 0x90BE (0x03C43C-
+      0x03C43E, 782) while bit 2 of 0xFFFF484E is set, a bit 0x08E58C sets
+      from the TPS1/TPS2/correlation diagnostic items (P0122/P0123/P0222/
+      P0223/P2135 by table order, inferred) and item 0x11C. About 55 counts,
+      6.7 % throttle, the ETC limp-home opening (inferred).
+  - id: evap_purge_area_gain
+    name: EVAP purge area gain
+    offset: 0x82FE
+    rows: 1
+    cols: 1
+    dtype: u8
+    confidence: verified
+    evidence: >-
+      FUN_0006a52c reads the byte at 0x82FE (0x06E2A8-0x06E2B0, 144) and
+      multiplies it by the purge step (purge command x 0x3333 >> 18, low
+      byte), then the helper 0x022584 shifts right by 7: w139E =
+      purge_raw x 144 >> 7, 1.125 area units per 0.5 % purge step. w139E
+      enters X as (w116A x w139E) >> 11, i.e. purge/4 in area units. The byte
+      PID 0x2E and DID 0x1110 report is purge_raw + 1 (0 while purge is off,
+      when w139E is 0 too: the zero-command branch at 0x06E224).
+# Literals in the program, not calibration (N02.1): a flash of this program
+# never changes them, another program may hold anything there. `value` is the
+# literal the decode was made on; a reader refuses an image that differs
+# (rom_map.check_program_constants).
+program_constants:
+  - id: fill_reciprocal_numerator
+    name: Throttle-model fill rpm reciprocal numerator
+    offset: 0x3C5E8
+    dtype: be32
+    value: 0x00DC1D00
+    loaded_at: [0x3C3F6]
+    confidence: verified
+    evidence: >-
+      FUN_0003c3e4 loads the literal-pool word at 0x03C5E8 (mov.l at 0x03C3F6)
+      and divides it by w227C = min(0xFFFF, 158 x rpm word) through 0x021D6C,
+      clamps the quotient to 0xFFFF and stores w116A (0x03C414); w227C = 0
+      gives 0. The only occurrence of the word 0x00DC1D00 in the image, and
+      the same in the UpRev base, k106, 20260920 and 20261004. With 158 and
+      12.5 rpm per count, 0xDC1D00 x 12.5 / (512 x 158) = 2,229.0, so X ~
+      2,229 x area / rpm. No clean physical breakdown of 0xDC1D00 is known.

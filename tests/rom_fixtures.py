@@ -32,6 +32,8 @@ OPERATOR_ROMS = {
     "base": UPREV / "ROM Store" / "ZS44A.OsirisROM",
     "k106": UPREV / "Tuned ROMs" / "ZS44A-Tuned.OsirisROM",
     "r20260920": UPREV / "Tuned ROMs" / "ZS44A-Tuned-20260920.OsirisROM",
+    # Fuel Comp load axis restored to 16..255 and slot-1 cells to base (N02.1).
+    "r20261004": UPREV / "Tuned ROMs" / "ZS44A-Tuned-20261004.OsirisROM",
     # k106 with one Fuel Compensation cell edited in UpRev, 103.13 -> 102.34 %
     # (docs/uprev-rom-container-research.md): a known answer for that table.
     "map1change": Path("/home/dan/Uprev/ROMs/ZS44A-Tuned-Map1Change.OsirisROM"),
@@ -96,6 +98,32 @@ def synthetic_image(
     if checksums:
         image = bytearray(with_checksums(bytes(image), rom_map))
     assert len(image) == IMAGE_SIZE
+    return bytes(image)
+
+
+def load_byte_image(
+    *,
+    literal: int = 0x00DC1D00,
+    calibration_id: bytes = b"1ZS44A00000",
+    fill_low: tuple[int, ...] | None = None,
+) -> bytes:
+    """:func:`synthetic_image` with invented, monotone Fuel Comp load-byte inputs.
+
+    Round numbers at the offsets ``rom_map.yaml`` declares (N02.1), never ROM
+    values; ``literal`` is the program constant the map declares, so a
+    different value models another program. ``fill_low`` replaces the low
+    fill curve (a falling one models an image whose curves are refused).
+    """
+    image = bytearray(synthetic_image(seed=11, calibration_id=calibration_id, checksums=False))
+    struct.pack_into(">32H", image, 0xEE6A, *(100 * i for i in range(32)))
+    struct.pack_into(">32H", image, 0xDD94, *(200 + 30 * i * i for i in range(32)))
+    struct.pack_into(">16H", image, 0xEAEC, *(fill_low or tuple(2000 * i for i in range(16))))
+    struct.pack_into(">16H", image, 0xEACC, *(30000 + 1000 * i for i in range(16)))
+    image[0x8D25] = 150
+    struct.pack_into(">H", image, 0x8ED2, 1000)
+    struct.pack_into(">H", image, 0x90BE, 700)
+    image[0x82FE] = 128
+    struct.pack_into(">I", image, 0x3C5E8, literal)
     return bytes(image)
 
 

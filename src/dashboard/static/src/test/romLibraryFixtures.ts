@@ -385,6 +385,91 @@ export const TABLES_WITH_FUEL_COMP: RomTablesResponse = {
   tables: [...TABLES.tables, fuelCompTable(1), fuelCompTable(2)],
 };
 
+/** N02.1's load-byte tables as the library serves them: absolute (no slot),
+ *  a 1 x 32 word curve on its own 1 x 32 word axis, and a word scalar.
+ *  Synthetic values, not the ROM's. */
+const AREA_AXIS = Array.from({ length: 32 }, (_, i) => 100 * i);
+const AREA_VALUES = Array.from({ length: 32 }, (_, i) => 200 + 30 * i * i);
+
+export const TABLES_WITH_CURVES: RomTablesResponse = {
+  ...TABLES,
+  tables: [
+    ...TABLES.tables,
+    {
+      id: "throttle_area_axis",
+      name: "Throttle effective-area curve axis",
+      label: "Throttle effective-area curve axis",
+      slot: null,
+      kind: null,
+      role: "axis",
+      decode: null,
+      offset: 0xee6a,
+      end: 0xeea9,
+      rows: 1,
+      cols: 32,
+      dtype: "be16",
+      unit: null,
+      raw: [AREA_AXIS],
+      decoded: null,
+      axes: { rows: null, cols: null },
+      confidence: "verified",
+      evidence: "Searched by 0x027154 against 4 x the throttle counts.",
+    },
+    {
+      id: "throttle_area_curve",
+      name: "Throttle effective area",
+      label: "Throttle effective area",
+      slot: null,
+      kind: null,
+      role: "table",
+      decode: null,
+      offset: 0xdd94,
+      end: 0xddd3,
+      rows: 1,
+      cols: 32,
+      dtype: "be16",
+      unit: null,
+      raw: [AREA_VALUES],
+      decoded: null,
+      axes: {
+        rows: null,
+        cols: {
+          id: "throttle_area_axis",
+          name: "Throttle effective-area curve axis",
+          offset: 0xee6a,
+          raw: AREA_AXIS,
+          decoded: null,
+          unit: null,
+          decode: null,
+          confidence: "verified",
+        },
+      },
+      confidence: "verified",
+      evidence: "Read by 0x026D58 with the axis at 0xEE6A.",
+    },
+    {
+      id: "idle_air_cap",
+      name: "Idle air learning cap",
+      label: "Idle air learning cap",
+      slot: null,
+      kind: null,
+      role: "table",
+      decode: null,
+      offset: 0x8ed2,
+      end: 0x8ed3,
+      rows: 1,
+      cols: 1,
+      dtype: "be16",
+      unit: null,
+      raw: [[1000]],
+      decoded: null,
+      axes: { rows: null, cols: null },
+      confidence: "verified",
+      evidence: "w6560 = min(w1CC0, this).",
+    },
+  ],
+};
+
 export function backupState(overrides: Partial<RomBackupState> = {}): RomBackupState {
   return {
     state: "idle",

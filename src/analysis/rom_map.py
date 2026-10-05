@@ -11,6 +11,13 @@ a finding: the schema refuses an entry without either.
 Read-only: nothing here edits an image. Editing stays behind the known-source
 hash guard in :class:`src.analysis.rom_targets.TargetEditor`.
 
+A **program constant** is a literal in the code, not a calibration value: it
+belongs to the ECU's program, so a calibration flash never moves or changes
+it, while another program may hold anything there (N02.1). Each one carries
+the value the decode was made against, so a reader of an image whose program
+differs is refused (:func:`check_program_constants`) instead of computing with
+a number nobody checked.
+
 Two files describe the same image for this vehicle: this one, and
 ``rom_targets.yaml`` (the Fuel Targets editor's definition). Every verified
 fact the editor relies on — the table offset and slot, both axes and the
@@ -34,9 +41,12 @@ ROM_MAP_FILE = "rom_map.yaml"
 Confidence = Literal["verified", "inferred", "unknown"]
 RegionKind = Literal["boot", "calibration", "application", "uprev", "erased", "unknown"]
 Dtype = Literal["u8", "be16"]
+#: A program literal may be a whole 32-bit word (a ``mov.l`` literal-pool
+#: entry); tables are bytes and words only.
+ConstantDtype = Literal["u8", "be16", "be32"]
 
 #: Bytes per cell for each dtype.
-DTYPE_BYTES: dict[str, int] = {"u8": 1, "be16": 2}
+DTYPE_BYTES: dict[str, int] = {"u8": 1, "be16": 2, "be32": 4}
 
 
 class _Strict(BaseModel):
@@ -266,6 +276,40 @@ class Table(_Strict):
         return self.rows == 1 or self.cols == 1
 
 
+class ProgramConstant(_Strict):
+    """A literal the ECU's code loads, at one absolute offset (N02.1).
+
+    Not a table: nothing edits it and no editor shows it. It is here so a
+    reconstruction that needs it reads it from the image *and* checks it is
+    the value the decode was made against (``value``), which is how a
+    different program is told apart from the decoded one.
+    """
+
+    #: Unique within the file, across tables too.
+    id: str = Field(pattern=r"^[a-z][a-z0-9_]*$")
+    name: str = Field(min_length=1)
+    offset: int = Field(ge=0)
+    dtype: ConstantDtype
+    #: The raw value at ``offset`` in the program the decode was made on.
+    value: int = Field(ge=0)
+    #: Code addresses that load it, so the claim can be re-checked.
+    loaded_at: list[int] = Field(min_length=1)
+    confidence: Confidence
+    evidence: str = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def _fits(self) -> ProgramConstant:
+        if self.value >= 1 << (8 * DTYPE_BYTES[self.dtype]):
+            raise ValueError(
+                f"program constant {self.id!r}: value 0x{self.value:X} does not fit {self.dtype}"
+            )
+        return self
+
+    @property
+    def size(self) -> int:
+        return DTYPE_BYTES[self.dtype]
+
+
 class RomMap(_Strict):
     """One vehicle's map of its flash image."""
 
@@ -284,6 +328,7 @@ class RomMap(_Strict):
     regions: list[Region] = Field(default_factory=list)
     map_slots: MapSlots | None = None
     tables: list[Table] = Field(default_factory=list)
+    program_constants: list[ProgramConstant] = Field(default_factory=list)
 
     @model_validator(mode="after")
     def _consistent(self) -> RomMap:
@@ -377,7 +422,23 @@ class RomMap(_Strict):
                         f"{axis.rows * axis.cols} entries for {length} {role}"
                     )
         _refuse_overlaps(spans, nesting=False, what="tables")
+        constant_ids = [constant.id for constant in self.program_constants]
+        clashes = sorted({i for i in constant_ids if constant_ids.count(i) > 1 or i in by_id})
+        if clashes:
+            raise ValueError(f"program constant ids must be unique across tables too: {clashes}")
+        constant_spans: list[tuple[str, int, int]] = []
+        for constant in self.program_constants:
+            end = constant.offset + constant.size - 1
+            inside(f"program constant {constant.id!r}", constant.offset, end)
+            constant_spans.append((constant.id, constant.offset, end))
+        _refuse_overlaps(spans + constant_spans, nesting=False, what="tables or constants")
         return self
+
+    def program_constant(self, constant_id: str) -> ProgramConstant:
+        for constant in self.program_constants:
+            if constant.id == constant_id:
+                return constant
+        raise KeyError(constant_id)
 
     def table(self, table_id: str) -> Table:
         for table in self.tables:
@@ -457,6 +518,32 @@ def _refuse_partial_overlap_with_slot_regions(table: Table, slots: MapSlots) -> 
         )
 
 
+def read_program_constant(image: bytes, constant: ProgramConstant) -> int:
+    """The raw value at ``constant``'s offset in ``image`` (big-endian)."""
+    end = constant.offset + constant.size
+    if end > len(image):
+        raise ValueError(f"program constant {constant.id!r} lies past the end of the image")
+    return int.from_bytes(image[constant.offset : end], "big")
+
+
+def check_program_constants(image: bytes, rom_map: RomMap) -> list[str]:
+    """Each program constant whose value in ``image`` is not the decoded one.
+
+    Empty when the image holds every declared literal; otherwise one line per
+    mismatch naming the constant, its offset and both values. A mismatch means
+    another program, whose memory map and arithmetic nobody has checked.
+    """
+    problems = []
+    for constant in rom_map.program_constants:
+        found = read_program_constant(image, constant)
+        if found != constant.value:
+            problems.append(
+                f"{constant.id} at 0x{constant.offset:06X} holds 0x{found:X}, not the decoded "
+                f"0x{constant.value:X}"
+            )
+    return problems
+
+
 def check_against_targets(rom_map: RomMap, targets: Definition) -> None:
     """Refuse a map that disagrees with the Fuel Targets editor's definition.
 
@@ -534,10 +621,12 @@ __all__ = [
     "ROM_MAP_FILE",
     "CalibrationIdLocation",
     "Confidence",
+    "ConstantDtype",
     "Decode",
     "EditorDisagreement",
     "EraseSector",
     "MapSlots",
+    "ProgramConstant",
     "RefusedFormat",
     "Region",
     "RegionKind",
@@ -546,5 +635,7 @@ __all__ = [
     "Table",
     "TableAxes",
     "check_against_targets",
+    "check_program_constants",
     "load_rom_map",
+    "read_program_constant",
 ]

@@ -11,6 +11,7 @@ import {
   SHA_K106,
   SHA_TUNED,
   TABLES,
+  TABLES_WITH_CURVES,
   TABLES_WITH_FUEL_COMP,
   backupState,
   readyStatus,
@@ -418,6 +419,34 @@ describe("ROM Library page — list, memory map, regions and tables", () => {
     expect(
       within(screen.getByRole("region", { name: "Fuel Targets slot 2" })).queryByRole("note"),
     ).not.toBeInTheDocument();
+  });
+
+  it("draws 1-row word curves on their axis and word scalars, outside any slot", async () => {
+    withEntries([ENTRY_TUNED], DESCRIPTION, {
+      [`GET /control/rom/library/${SHA_TUNED}/tables`]: TABLES_WITH_CURVES,
+    });
+    render(<RomLibraryPage token="t" status={null} />);
+    const curve = await screen.findByRole("region", { name: "Throttle effective area" });
+    expect(
+      within(curve).getByText("0x00DD94 · 1 × 32 · be16 · raw: decode unconfirmed"),
+    ).toBeInTheDocument();
+    const grid = within(curve).getByRole("table", { name: "Throttle effective area values" });
+    // One header of 32 axis labels over one row of 32 cells.
+    expect(within(grid).getAllByRole("columnheader")).toHaveLength(33);
+    expect(within(grid).getAllByRole("cell")).toHaveLength(32);
+    expect(within(grid).getByRole("columnheader", { name: "3,100" })).toBeInTheDocument();
+    expect(
+      within(curve).getByText(/Columns: Throttle effective-area curve axis/),
+    ).toBeInTheDocument();
+    const axis = screen.getByRole("region", { name: "Throttle effective-area curve axis" });
+    expect(within(within(axis).getByRole("table")).getAllByRole("cell")).toHaveLength(32);
+    const cap = screen.getByRole("region", { name: "Idle air learning cap" });
+    expect(within(cap).getByLabelText("Idle air learning cap value")).toHaveTextContent(
+      "1,000 raw",
+    );
+    // Absolute tables stay when the slot changes.
+    fireEvent.change(screen.getByLabelText("Table map slot"), { target: { value: "2" } });
+    expect(screen.getByRole("region", { name: "Throttle effective area" })).toBeVisible();
   });
 
   it("an image without a map definition keeps its blocks and names why it has no regions", async () => {

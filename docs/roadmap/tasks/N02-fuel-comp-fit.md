@@ -56,7 +56,7 @@ the model of how Fuel Comp acts is wrong and N02.5's factors must not be used.
 
 ## Checklist
 
-- [ ] **N02.1 — ROM definitions and a hash-checked image resolver.**
+- [x] **N02.1 — ROM definitions and a hash-checked image resolver.**
   Add new entries to `data/nissan-xterra-2008/rom_map.yaml` (new entries only;
   the file's other entries belong to another session):
   - throttle-area curve `0xDD94`: 32 u16, with its 32 u16 axis at `0xEE6A`;
@@ -76,8 +76,41 @@ the model of how Fuel Comp acts is wrong and N02.5's factors must not be used.
   `0xCB29` reads 16…144 on k106/20260920 and 16…255 on 20261004. A wrong
   hash, a missing file, or k105/osiris-initial refuses by name. Tests that
   need the private ROM skip with a stated reason; a missing ROM is not a pass.
+  **Done 2026-10-04.** `rom_map.yaml` gains (new entries only)
+  `throttle_area_axis` (0xEE6A) / `throttle_area_curve` (0xDD94, 1×32 be16),
+  `fill_curve_low` / `fill_curve_high` (0xEAEC / 0xEACC, 1×16 be16),
+  `fill_rpm_multiplier` (0x8D25), `idle_air_cap` (0x8ED2), `etc_limp_home_area`
+  (0x90BE), `evap_purge_area_gain` (0x82FE, the 144 in `w139E`; not in the list
+  above but read by the same chain), each with its code addresses; K is the
+  existing `k_constant`. The schema already expressed 1-D be16 curves and
+  scalars; it gains `program_constants` (`ProgramConstant`: offset, `be32`,
+  the decoded `value`, `loaded_at`, evidence) for the literal `0x00DC1D00` at
+  0x03C5E8 (loaded at 0x03C3F6, the only occurrence in all four images), and
+  `check_program_constants` refuses an image whose literal differs.
+  Resolver: `src/analysis/fuel_comp_rom.py` `RevisionImageResolver`
+  (directories from the caller or `CANARY_ROM_DIRS`; explicit image files
+  matched by hash), refusing by name: `revision_unknown`,
+  `no_surviving_image`, `image_not_found`, `image_hash_mismatch`,
+  `image_unreadable`, `wrong_program`, `table_missing`, `table_unverified`,
+  `curves_not_monotone` (an image whose curves would make the byte
+  non-monotone; a session then marks its samples
+  `input_missing:rom_image:curves_not_monotone` and carries on).
+  Real files: k106 / 20260920 / 20261004 resolve (plain sha256 e01cc0cb… /
+  a46baa24… / 5587f7e1…), `0xCB29` 16…144 / 16…144 / 16…255, K 28,715 in all
+  three; ZS44A-uprev-base resolves too (K 27,089); k105, osiris-initial and
+  ZS04C-stock refuse `no_surviving_image`. Tests: `tests/test_fuel_comp_rom.py`
+  (22: a synthetic image or map for each refusal -- revision_unknown,
+  no_surviving_image, image_not_found, image_hash_mismatch, image_unreadable,
+  wrong_program by literal and by calibration ID, table_missing for a table
+  id and for the Fuel Comp kind, table_unverified for a curve and for the load
+  axis, curves_not_monotone; the three revisions and three refusals on the
+  private files, skipping by file name when absent;
+  `tests/test_fuel_comp_samples.py` runs the real resolver over a falling
+  curve inside a session),
+  `tests/test_rom_map.py` (+4: placement, constant schema, overlap/id clash,
+  program-literal mismatch).
 
-- [ ] **N02.2 — Firmware-faithful reconstruction of `0xFFFF118A`.**
+- [x] **N02.2 — Firmware-faithful reconstruction of `0xFFFF118A`.**
   Pure functions at the decode layer, beside `ecm_lookup`, reproducing:
   - `0x26D58`/`0x27154`: the 32-point search, with interpolation through
     `interpolate_q16`'s semantics;
@@ -106,8 +139,66 @@ the model of how Fuel Comp acts is wrong and N02.5's factors must not be used.
     is flagged, not guessed.
   - canary-60's `chain.py` (copied to the orchestrator's scratchpad) is a
     reference only. Nothing depends on it.
+  **Done 2026-10-04.** `src/decode/ecm_lookup.py` gains `lookup_curve_q16`
+  (0x26D58/0x27154) and `lookup_shift12_q16` (0x26C28; `KERNEL_VERSION`
+  unchanged, no existing arithmetic moved); `src/decode/fuel_comp_load.py`
+  holds the chain (`rpm_reciprocal`, `throttle_area`, `effective_area`,
+  `load_x`, `load_byte`, `reconstruct`) and `reconstruct_interval`, exact
+  because `LoadInputCurves` refuses curves that would make the byte
+  non-monotone. Bit-identical to the reference chain on 200,000 random inputs
+  (checked once, offline; nothing imports it). Inputs
+  (`src/analysis/fuel_comp_inputs.py`, constants in `fuel_comp_fit.yaml`):
+  PID 0x11 → the count interval `ceil(321A/100)…ceil(321(A+1)/100)−1`
+  (truncating handler 0xD41E0; 3–4 counts, exhaustively tested); DID 0x120F
+  raw counts (catalog decode undone, whole-count checked) minus a per-session
+  closed position = mode of the warm-idle raw count minus the declared
+  warm-idle opening 23–32 counts (PID bytes 7–9); purge from PID 0x2E (exact
+  below its A = 255 clamp, bytes 200–255 at the clamp) or DID 0x1110, used only
+  when a read pairs within the route's separation (commands change by tens of %
+  between 15 s polls), else every value the code can produce (0–286); idle air
+  the declared
+  interval 70–250 (nominal 115). Known answer (`known_answer`, on the committed
+  slice `tests/fixtures/fuel_comp/_capture-ram-study-2026-10-04T204557`,
+  ZS44A-20260920 read from the private image): idle n = 38, median ratio
+  1.000, p10–p90 0.960–1.025, 38/38 inside the interval (median width 45);
+  off idle n = 22, median 1.026, p10–p90 0.870–1.148, 11/22 inside (median
+  width 14; the inputs are read up to 2.5 s from the byte: no PID 0x11 read is
+  within 250 ms of any of the 192 bytes, one rpm read is). Negative controls
+  all fail it (idle / off-idle median): rpm^0.5 1.019/0.664, rpm^1.5
+  0.980/1.576, 2.55 counts/byte 1.293/1.310, 4.0 counts/byte 0.794/0.784,
+  0x120F uncorrected (+96 counts) 0.267/0.559. **The known answer is a coarse
+  screen, not proof of exact arithmetic.** Its pass rule, |median − 1| ≤ 0.05
+  on at least 20 idle and 15 off-idle points, is what this capture can
+  resolve: 0.05 is the smallest whole percent holding the decoded chain's 95 %
+  bootstrap interval for both medians (idle 0.980–1.009, off idle
+  0.974–1.049), chosen after seeing the decoded result; an idle byte is about
+  50, so the idle median moves in 2 % steps. The 0xDC1D00 numerator scaled by
+  0.98–1.04 still passes (×0.97 and ×1.05 fail), and only 11 of 22 off-idle
+  bytes fall inside their interval. The exact arithmetic is established by the
+  disassembly line-check (each routine and constant cited by address in
+  `fuel_comp_load.py` and `rom_map.yaml`) and the bit-identical reference
+  comparison, not by this data. Both limits are pinned in
+  `test_the_known_answer_is_a_coarse_screen_not_proof_of_exact_arithmetic`,
+  and the tolerance's provenance is in `fuel_comp_fit.yaml`.
+  DID route: no session checked has PID 0x11 and DID 0x120F within 250 ms (0
+  pairs on six plain sessions with both, 2026-08-03…10-04), so it stays
+  unvalidated
+  (`validated: false`, carried on every sample and session); steady brackets
+  put w4C72 at 98–104 (2026-09-20T152758), 98–100 (2026-09-23T003917) and
+  93–100 (ram-study), the range the estimator itself gives on the tuning
+  captures (93–102 on `_capture-tuning-2026-09-23T142926`); no session has
+  enough warm-idle DID reads and PID brackets to compare the two on one key
+  cycle. Closing capture (declared): PID 0x11 and DID 0x120F back to back in
+  one cycle at warm idle and a slow sweep, or one memory window over
+  0xFFFF2B0C/2CCE/4C72. Ambiguity: each sample carries `cell_ambiguous` and
+  `idle_air_moves_cell` / `purge_moves_cell` / `throttle_moves_cell`. Tests:
+  `tests/test_fuel_comp_load.py` (24, synthetic tables: edges, clamps,
+  truncation, the 0x3C00 split, saturation, monotone-interval proof by
+  enumeration), `tests/test_fuel_comp_inputs.py` (22: declaration refusals,
+  input routes, the known answer, its coarseness, and 5 controls at their
+  re-run medians, private-ROM skip by name).
 
-- [ ] **N02.3 — Per-sample fuelling error, with every sample accounted for.**
+- [x] **N02.3 — Per-sample fuelling error, with every sample accounted for.**
   For each session on a resolvable revision, assemble acquisition-time pairs
   (`match_ordered`, declared separation, 250 ms to start) of rpm, throttle
   input, purge, coolant, baro, fuel status, commanded φ, λ (S1, plus S5 where
@@ -128,6 +219,68 @@ the model of how Fuel Comp acts is wrong and N02.5's factors must not be used.
   **Accept:** counts by state and gate per session. An empty result says which
   kind of empty it is ("never captured" vs "filtered"). Known answers: B06's
   delivery fixture still gives its committed numbers through this path.
+  **Done 2026-10-04.** `src/analysis/fuel_comp_samples.py` `session_samples`
+  (CLI `tools/fuel_comp_samples.py`): one row per candidate (closed loop: each
+  STFT B1 read; open loop: each `delivery_samples` row), columns per
+  `COLUMNS` (`SAMPLES_VERSION` 2: session, revision and image sha per sample,
+  rpm word, throttle route and its validation, throttle and purge intervals,
+  byte interval, Fuel Comp row and columns, ambiguity flags, coolant, baro,
+  fuel status, commanded φ, λ B1/B2, trims, total trims, error per bank and
+  bank mean, B06 state per bank, the pairing separation used), states
+  `eligible` / `gated:<gate>` / `unpaired:<input>` / `input_missing:<input>`,
+  revision resolved per sample (a refusal is `input_missing:rom_image:<reason>`).
+  Empty routes say which kind: `never_captured` (an input the session never
+  recorded), `unresolvable` (only the image or the closed position is
+  missing; more of the same recording will not help) or `filtered`.
+  Pairing per route, declared in `fuel_comp_fit.yaml`: closed loop 500 ms
+  (operator decision 2026-10-04, option b; default-profile trims sit a median
+  375 ms from rpm and throttle), open loop 250 ms (B06's batch; its redesign is
+  the next dispatch). rpm, throttle, trims, purge and λ pair by `match_ordered`;
+  the steadiness window runs from the dwell before the sample forward to its
+  latest paired read, so every read a sample is built from lies inside the
+  span judged steady. Coolant, baro and fuel status are state gates read as of
+  the sample within declared ages (10 s, 60 s, a 5 s bracket), as
+  `target_phi_twin.yaml` does. A clock that cannot carry the separation is
+  named in the reason. Gates (all in `fuel_comp_fit.yaml`): cold < 80 °C, baro
+  outside 76–84 kPa, post-fuel-cut (B06's closed-loop 15 s), not closed loop /
+  open loop within 10 s (closed route), not open loop (open route), steadiness
+  per route (2 s, 150 rpm, 8 counts; open loop 0.5 s, 100 rpm). Bank 2: PID
+  0x28 is now a declared measured source (`ecm_lambda_pid_0x28`), judged on the
+  same B06 rows; the open-loop error is the bank mean where both banks carry a
+  residual, else bank 1's. B06 fixture through this path: RAM route 1,078
+  rows, fuel_cut 151, measured_rail 19, measured_missing 1, post_fuel_cut 316,
+  target_transient 31, eligible 560 and the 8 enrichment residuals; PID 0x44
+  route eligible 229 (`tests/test_fuel_comp_samples.py`, 17 tests: each gate,
+  unpaired vs clock, the forward window, never-captured / unresolvable /
+  filtered, a flash splitting a session, a refused image mid-session, the
+  throttle-route split, the bank-2 mean, ambiguity flags). `summary.json`
+  (`eligible_summary`) splits every revision and route's eligible and
+  unambiguous counts by throttle route with its validation, so the DID-route
+  share cannot be averaged away. Corpus (112 sessions ≥ 2026-08-03, declared
+  pairing; no image refused, no session straddles a flash per sample,
+  2026-08-03T163440 is k106 throughout):
+
+  | Revision / route | Candidates | Eligible | Unambiguous cell | PID 0x11 (validated) | DID 0x120F (unvalidated) |
+  |---|---|---|---|---|---|
+  | 20260920 closed loop | 17,870 | 1,588 | 94 | 680 (54) | 908 (40) |
+  | 20260920 open loop | 35,334 | 86 | 80 | 0 | 86 (80) |
+  | k106 closed loop | 10,566 | 1,719 | 381 | 1,719 (381) | 0 |
+  | k106 open loop | 21,812 | 0 | 0 | 0 | 0 |
+
+  (At 250 ms with a backward-only window the same corpus gave closed loop
+  1,070 / 137 eligible, 939 / 131 DID / PID on 20260920, and open loop 0.)
+  Every eligible open-loop sample is from a September tuning capture's
+  unvalidated DID route. Top closed-loop removals: 20260920 post_fuel_cut
+  5,515, throttle_transient 2,597, not_closed_loop 1,486, unpaired PID 0x11
+  1,442, unpaired DID 1,141; k106 not_closed_loop 2,592, baro never captured
+  1,828, unpaired LTFT1 1,159, unpaired rpm 916. Of 2,180 B06-eligible
+  enrichment rows: DID unpaired 788, not open loop 650, coolant never captured
+  331, PID 0x11 unpaired 158, throttle never captured 101, baro never captured
+  33. Eligible closed-loop samples are mostly warm idle (median 762 rpm),
+  which is why so few sit on an unambiguous cell. Per session: closed loop 44
+  with eligible samples, 29 filtered, 38 never captured, 1 unresolvable
+  (`_capture-tuning-2026-09-23T022831`, no warm idle for the closed position);
+  open loop 5 / 68 / 38 / 1.
 
 - [ ] **N02.4 — Separate fuel-supply droop from the air-model error.**
   Model injector flow ∝ √(rail gauge pressure), relative to the drive's own

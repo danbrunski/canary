@@ -1,0 +1,302 @@
+# N02 -- Fuel Comp corrections from logged fuelling error, as data.
+#
+# Schema: src/analysis/fuel_comp_inputs.py (FuelCompDeclaration). The load
+# byte's arithmetic is src/decode/fuel_comp_load.py; the image is read and
+# hash-checked by src/analysis/fuel_comp_rom.py; the per-sample assembly is
+# src/analysis/fuel_comp_samples.py. Sources: docs/ecu-firmware-analysis.md
+# ("Fuel Comp load input 0xFFFF118A, and how BFS is formed"),
+# docs/roadmap/tasks/N02-fuel-comp-fit.md.
+#
+# Every number here is a declared constraint with its evidence. None is chosen
+# from the size of a fuelling residual. `status: proposed` marks a value set
+# from engine behaviour before any fit, frozen until a held-out judgement.
+schema_version: 1
+
+program:
+  calibration_id: 1ZS44A00000
+  # UpRev's committed map is 0xFFFFB008; it read 0 (slot 1 loaded at init, no
+  # switch committed) on 196/196 reads of 2026-10-04, and the map switch has
+  # never been used. History is assumed to be slot 1 throughout.
+  map_slot: 1
+  map_slot_evidence: >-
+    mem:ECM_ACTIVE_MAP 0 and mem:ECM_UPREV_MAP_SELECTOR 0 on every read of
+    _capture-ram-study-2026-10-04T204557 (target_phi_twin.yaml default_slot);
+    no map-switch input has been wired or used on this vehicle.
+
+rom:
+  fuel_comp_kind: fuel_compensation
+  rpm_axis_compare_multiplier: 4
+  k_table: k_constant
+  area_curve: throttle_area_curve
+  fill_low: fill_curve_low
+  fill_high: fill_curve_high
+  rpm_multiplier: fill_rpm_multiplier
+  idle_air_cap: idle_air_cap
+  limp_home_area: etc_limp_home_area
+  purge_gain: evap_purge_area_gain
+  reciprocal_numerator: fill_reciprocal_numerator
+  evidence: >-
+    rom_map.yaml ids; each entry carries its code evidence. The Fuel Comp
+    wrapper 0x026A24 searches the rpm axis with the word 0xFFFF1210 against
+    axis byte x 4 (0x027194) and the load axis byte for byte (0x027114).
+
+inputs:
+  rpm:
+    channel: 'obd:RPM'
+    rpm_per_count: 12.5
+    evidence: >-
+      PID 0x0C reads the engine-speed word 0xFFFF1210, 12.5 rpm per count, the
+      word the chain multiplies by 158 (0x03C3C4). Every stored PID 0x0C value
+      on the ram-study capture is a whole multiple of 12.5 (1,494/1,494), so
+      the word is recovered exactly.
+  throttle_pid:
+    channel: 'obd:THROTTLE_POS'
+    # A = clamp_u8(max(0, w2CCE) x 100 / 321), truncating (handler 0xD41E0).
+    numerator: 100
+    denominator: 321
+    full_scale: 255
+    # A 10-bit A/D count above closed cannot exceed this.
+    counts_max: 1023
+    evidence: >-
+      The PID 0x11 handler at 0xD41E0 divides max(0, w2CCE) x 100 by 321
+      (0x021C48) and clamps to a byte; percent = A x 100/255. A is recovered
+      exactly from the stored percent (round(percent x 2.55), never more than
+      1e-12 from a whole byte on the ram-study capture), and the counts are
+      the interval ceil(321 A/100) .. ceil(321 (A+1)/100) - 1: 3 or 4 counts,
+      never a single value. w2CC8 is w2CCE unless only sensor A has failed
+      (0xFFFF28B5 bits 7:6); no TPS code has been set on this vehicle.
+  throttle_did:
+    channel: 'did:0x120F'
+    counts_max: 1023
+    raw_counts_evidence: >-
+      DID 0x120F is the word 0xFFFF2B0C, throttle sensor A's 10-bit A/D count
+      before the learned closed position w4C72 is subtracted (CAN pointer
+      table 0x24B84 entry 15; data/dids.yaml). The catalog stores it as volts
+      at raw x scale; dividing the stored value by the catalog's own scale
+      and offset returns the payload integer exactly (refused when it does
+      not land on a whole count), whatever the volts per count really are.
+    closed_position:
+      method: warm_idle_mode_minus_idle_opening
+      # Warm idle: paired PID 0x0C rpm and coolant as of each DID read.
+      idle_rpm_min: 550.0
+      idle_rpm_max: 900.0
+      rpm_max_age_s: 0.6
+      min_coolant_c: 80.0
+      coolant_max_age_s: 10.0
+      min_samples: 20
+      # Counts above closed at warm idle, from PID 0x11 bytes 7-9 (23..32
+      # counts), which hold 3,308 of 3,354 warm-idle reads on
+      # 2026-09-20T152758, 134 of 141 on 2026-10-04T194342 and 266 of 279
+      # on the ram-study capture (rpm 550-900 and coolant >= 80 C as of each
+      # read, the ages above).
+      idle_opening_counts: [23, 32]
+      status: proposed
+      evidence: >-
+        Nissan's electronic throttle learns its closed position at key-on,
+        so w4C72 is a per-key-cycle value; it is never logged. On sessions
+        with both inputs, steady brackets (PID 0x11 reads before and after a
+        DID read, within 2.5 s, equal) put it at 98-104 counts on
+        2026-09-20T152758 (93 brackets, 74 inside 99-102), 98-100 on
+        2026-09-23T003917 (26 of 26) and 93-100 on the ram-study capture (46
+        of 51; the other 5 at transients). The mode of the DID count at warm
+        idle minus the warm-idle opening is the estimate; its interval is the
+        opening interval's width (on _capture-tuning-2026-09-23T142926: mode
+        125 over 423 warm-idle reads, 93..102).
+    # No session checked has PID 0x11 and DID 0x120F read within the pairing
+    # separation: the DID is polled in its own Mode 22 cycle (0 pairs within
+    # 250 ms on six plain sessions with both, 2026-08-03..10-04). So the DID
+    # route is not validated at acquisition time.
+    validated: false
+    closing_capture: >-
+      A capture that reads PID 0x11 and DID 0x120F back to back in one cycle
+      (within 250 ms) through warm idle and a slow throttle sweep, or a
+      memory window over 0xFFFF2B0C, 0xFFFF2CCE and 0xFFFF4C72 (the raw count,
+      the corrected count and the learned closed position in one read).
+  purge:
+    # First present source wins.
+    sources: ['obd:EVAPORATIVE_PURGE', 'did:0x1110']
+    # PID 0x2E reports A = min(255, byte x 1275 / 1000) (handler 0xD461C).
+    pid_numerator: 1275
+    pid_denominator: 1000
+    # w139E = purge_raw x gain >> 7 (helper 0x022584).
+    gain_shift: 7
+    evidence: >-
+      The purge byte 0xFFFF272E (a copy of 0xFFFF27BA) is purge_raw + 1, or 0
+      while purge is off, when w139E is 0 too (FUN_0006a52c, zero-command
+      branch at 0x06E224). PID 0x2E reports it scaled by 1275/1000 and DID
+      0x1110 as the byte itself (0.5 % per count), so both recover it
+      exactly. Purge commands change by tens of percent between 15 s polls
+      on the ram-study capture (0, 39, 52, 80, 70, 36 % ...), so a purge read
+      is used only when it pairs within the pairing separation; otherwise
+      purge is unknown and enters as every value the code can produce.
+  idle_air:
+    # w63FC, area units, subtracted from the throttle area. Never logged.
+    low: 70
+    high: 250
+    nominal: 115
+    conditions: >-
+      Warm engine, running. Pinned on the 38 warm-idle steady points of the
+      ram-study capture (2026-10-04, ZS44A-20260920, 79-83 kPa); off idle it
+      moves the byte little and the same points' median ratio does not move
+      it (canary-60's single-constant fit, 115, gave 1.027 off idle).
+    informed_by: ['_capture-ram-study-2026-10-04T204557']
+    status: proposed
+    evidence: >-
+      The firmware bounds it to -1,296..1,185 (w3CB2 -80..1,184 plus the
+      learned w5EA6 -1,216..1,024, capped by 0x8ED2). With purge unknown,
+      every one of the 38 warm-idle points is reproduced by an idle-air
+      value inside 110..175, and the union of the values that reproduce
+      each point is 70..250. The learned part (w5EA6) is relearned after a
+      flash or battery disconnect, so the interval is a measured constraint
+      of October 2026, applied to August-September history as an assumption;
+      a sample whose Fuel Comp column depends on it is flagged, not placed.
+
+pairing:
+  # Per route: a separation is a property of how the route's inputs are
+  # polled, and is sound only together with the steadiness gate, whose window
+  # runs from the dwell before the sample forward to its latest paired read
+  # (src/analysis/fuel_comp_samples.py): every read a sample is built from
+  # lies inside the span judged steady.
+  closed_loop:
+    max_separation_s: 0.5
+    evidence: >-
+      Operator decision 2026-10-04 (N02 fix-up, option b; the default profile
+      stays as it is). Default-profile rounds read Mode 01 PIDs one at a time
+      about 125 ms apart in a 1 s round, and the trims sit a median 375 ms
+      from rpm and throttle (2026-09-20T152758: 11 % of STFT B1 reads have an
+      rpm read within 250 ms, 13 % a throttle read). 500 ms admits the same
+      round's reads and no other round's. It is not a claim that the reads are
+      simultaneous: the closed-loop steadiness gate requires rpm within 150
+      and throttle within 8 counts across every read from 2 s before the
+      sample to the latest paired read, so a read up to 0.5 s away describes
+      the same operating point within those spans. A trim is an integrator
+      over seconds, which is why closed loop tolerates it.
+  open_loop:
+    max_separation_s: 0.25
+    evidence: >-
+      Mode 01 PIDs in one poll batch (PID 0x44, lambda, rpm, throttle) are
+      acquired within tens of milliseconds on stored acquisition clocks;
+      lambda_delivery.yaml's acquisition evidence measures target-to-lambda
+      separation at median 0.093-0.104 s, p95 0.130-0.142 s. 250 ms admits
+      one batch's skew and no more. Its redesign (the rpm row as an interval
+      over the B06 delay bracket) is pending.
+
+known_answer:
+  session: '_capture-ram-study-2026-10-04T204557'
+  byte_channel: 'mem:ECM_FUEL_COMP_X_INPUT'
+  # The byte is read in its own memory window, at least ~0.4 s from any
+  # Mode 01 read (0 of 192 bytes pair with PID 0x11 within 250 ms), so a
+  # steady point is a byte bracketed by a throttle read and an rpm read on
+  # each side, each within max_gap_s, that agree within the step limits.
+  # These are canary-60's listing-pass criteria, fixed before this code ran.
+  max_gap_s: 2.5
+  max_throttle_step_bytes: 2
+  max_rpm_step: 75.0
+  # Below this PID 0x11 byte (5.9 %) a point is idle (canary-60's split).
+  idle_max_pid_byte: 15
+  # The point estimate's purge: the latest purge read at or before the byte
+  # (canary-60's choice, kept so the numbers compare). The interval uses
+  # purge unknown.
+  nominal_purge: prior_read
+  # Pass: |median ratio - 1| within this, on at least min_points per subset.
+  # 0.05 is what this capture can resolve, not a claim about the chain: it is
+  # the smallest whole percent that holds the decoded chain's 95 % bootstrap
+  # interval for both medians (idle 0.980-1.009, off idle 0.974-1.049; 5,000
+  # resamples). An idle byte is about 50, so one count is 2 % and the idle
+  # median moves in 2 % steps. Chosen after seeing the decoded result, so it
+  # is a coarse screen: the 0xDC1D00 numerator scaled by 0.98-1.04 still
+  # passes (x0.97 and x1.05 fail), and only 11 of 22 off-idle bytes fall
+  # inside their interval. The exact arithmetic is established by the
+  # disassembly line-check (src/decode/fuel_comp_load.py names each address),
+  # not by this data.
+  median_ratio_tolerance: 0.05
+  min_points_idle: 20
+  min_points_off_idle: 15
+  evidence: >-
+    canary-60's listing pass on this capture: 60 steady points, median ratio
+    1.000 at idle (n = 38) and 1.027 off idle (n = 22); wrong x-scalings and
+    rpm powers missed by 17-202 %. Reproduced here at 1.000 and 1.026 with the
+    same 60 points.
+
+samples:
+  closed_loop:
+    trims:
+      stft_b1: 'obd:SHORT_FUEL_TRIM_1'
+      ltft_b1: 'obd:LONG_FUEL_TRIM_1'
+      stft_b2: 'obd:SHORT_FUEL_TRIM_2'
+      ltft_b2: 'obd:LONG_FUEL_TRIM_2'
+    # SAE J1979 PID 0x03 codes meaning healthy closed loop.
+    closed_loop_codes: [2]
+    # The bracketing status reads (one at or before, one after) must both be
+    # closed loop, each within this of the sample.
+    fuel_status_max_age_s: 5.0
+    # No non-closed-loop status read in this trailing window: an enrichment
+    # or cut the trims are still settling from.
+    open_loop_lookback_s: 10.0
+    # rpm and throttle reads in [t - dwell_s, t]: at least min_samples of
+    # each, spans within the limits (throttle in w2CCE counts, 8.19 per %, on
+    # each read's interval midpoint). Fewer reads than min_samples is
+    # `*_steadiness_unobserved`, not a transient.
+    steady:
+      dwell_s: 2.0
+      min_samples: 2
+      rpm_max_span: 150.0
+      throttle_max_span_counts: 8
+    status: proposed
+    evidence: >-
+      Steadiness: the same rpm span as target_phi_twin.yaml's gate; the
+      throttle span is about one PID 0x11 step either side of its 3.2-count
+      quantisation (1 %). A trim integrates over seconds, so the dwell is
+      seconds. The trims are the closed-loop error (positive = the ECM added fuel =
+      lean), summed STFT + LTFT per bank as derived:TOTAL_TRIM_B1/B2. The
+      post-fuel-cut holdoff is lambda_delivery.yaml's closed-loop rule (15 s,
+      the pooled p90 of measured settling), read from that file, not
+      restated. The lookback covers a settling STFT after an enrichment
+      event; the LTFT is slow by design and is not gated.
+  open_loop:
+    # lambda_delivery.yaml commanded sources, in preference order. Only
+    # enrichment rows count here, where PID 0x44 is valid and equals the RAM
+    # final target on every steady pair (7/7, 10/10, 3/3, lambda_delivery.yaml);
+    # it is polled about four times as often on the tuning captures.
+    commanded_preference: [mode01_pid_0x44, ram_final_target]
+    measured_source: ecm_lambda_pid_0x24
+    # Bank 2 (PID 0x28, declared in lambda_delivery.yaml 2026-10-04): judged
+    # against the same B06 target rows; the error is the bank mean where both
+    # banks carry a residual, else bank 1's. Logged only from 2026-10-04.
+    bank2_measured_source: ecm_lambda_pid_0x28
+    open_loop_codes: [4]
+    fuel_status_max_age_s: 5.0
+    # The dwell is the enrichment transport-delay bracket's upper end (0.5 s,
+    # lambda_delivery.yaml): within it rpm may move at most a quarter of Fuel
+    # Comp's 400 rpm row spacing, so the cell that set the fuel is the cell
+    # the sample is placed on whatever the true delay. A WOT pull climbs
+    # hundreds of rpm per second, so most of a pull fails this: placing a
+    # pull needs the rpm row as an interval over the delay bracket, which is
+    # not built.
+    steady:
+      dwell_s: 0.5
+      min_samples: 2
+      rpm_max_span: 100.0
+      throttle_max_span_counts: 8
+    status: proposed
+    evidence: >-
+      Open-loop error is B06's residual 100 x (lambda_measured /
+      lambda_target - 1) from delivery_samples, with its states, its
+      per-regime dwell, holdoff and frozen delay. Only enrichment rows count:
+      in closed loop the residual is near zero by construction, and the
+      trims carry the error.
+  gates:
+    coolant:
+      sources: ['obd:COOLANT_TEMP', 'did:ECM_COOLANT_TEMP']
+      min_c: 80.0
+      max_age_s: 10.0
+      status: proposed
+    baro:
+      channel: 'obd:BAROMETRIC_PRESSURE'
+      min_kpa: 76.0
+      max_kpa: 84.0
+      max_age_s: 60.0
+      evidence: >-
+        The load byte has no baro input, so the same cell at altitude is a
+        different air charge. Home is about 80 kPa; trips reach 63 kPa.
+        Baro is polled every 4-16 s and moves only with altitude.
