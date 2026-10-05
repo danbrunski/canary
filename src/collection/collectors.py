@@ -150,6 +150,7 @@ def default_collectors(
                 reconnect_policy=reconnect_policy,
                 on_scheduler_metrics=obd_scheduler_metrics_callback,
                 on_handoff_stats=obd_handoff_stats_callback,
+                sleeps_with_bus=config.collection.obd_sleeps_with_bus,
             )
 
         return [canable_obd, *aux_collectors]

@@ -101,7 +101,10 @@ derived classification of what the daemon is actually seeing right now:
   whose bus stays awake. On the Xterra it lasts only seconds after key-off.
 - `parked` — neither bus fresh, but the HAT's 12 V sense reads a battery
   (`supply_voltage`). The bus is asleep: key off, plugged in. A parked
-  Xterra spends its nights here.
+  Xterra spends its nights here. With `collection.obd_sleeps_with_bus` (on
+  for the Xterra) the OBD collector and the startup VIN probe do not
+  transmit while parked, so they cannot wake modules. Polling resumes when
+  any module talks.
 - `bench` — neither bus fresh and the 12 V sense reads nothing: the Pi runs
   from USB-C or the UPS with no vehicle connected, the normal desk setup.
   Not a fault. The OBD collector waits instead of transmitting into an empty

@@ -26,6 +26,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import threading
+import time
 from collections.abc import Callable
 
 import can
@@ -104,7 +105,7 @@ from src.collection.reconnect import (
     wait_for_stop_or_timeout,
 )
 from src.collection.recording import DiskWriteError, RecorderRun, RecordingResult
-from src.collection.vehicle_power import VEHICLE_POWER, VehiclePower
+from src.collection.vehicle_power import ASLEEP_SECONDS, VEHICLE_POWER, VehiclePower
 from src.config import CanBusConfig, VehicleConfig
 from src.session import SessionPaths
 from src.telemetry import TelemetryRecord
@@ -121,6 +122,53 @@ BENCH_RECHECK_SECONDS = 2.0
 
 #: How long a collector waits for a configured 12 V sense's first reading.
 FIRST_READING_TIMEOUT_SECONDS = 5.0
+
+
+#: A bus quiet this long when a transmit fails is going to sleep, not faulty.
+GOING_QUIET_SECONDS = 1.0
+
+
+def bus_going_quiet(power: VehiclePower) -> bool:
+    """A battery on the port and no module heard for GOING_QUIET_SECONDS."""
+    silent = power.bus_silent_for()
+    return power.connection() == "vehicle" and (silent is None or silent >= GOING_QUIET_SECONDS)
+
+
+async def wait_for_the_bus(
+    stop_event: asyncio.Event, power: VehiclePower, *, slept_at: float | None = None
+) -> None:
+    """Return once the vehicle's bus is awake (or ``stop_event`` is set).
+
+    ``slept_at``: polling just stopped because the bus went to sleep, so it
+    waits for a module heard after that moment, however short the silence so
+    far (a failed transmit can end polling before ``ASLEEP_SECONDS``).
+
+    A bus never heard yet gets :data:`ASLEEP_SECONDS` to speak first: at a
+    key-on start the sniffer hears its first frame within milliseconds, and
+    that is not worth announcing as a sleep."""
+    if power.bus_silent_for() is None:
+        deadline = asyncio.get_running_loop().time() + ASLEEP_SECONDS
+        while (
+            power.bus_silent_for() is None
+            and not stop_event.is_set()
+            and asyncio.get_running_loop().time() < deadline
+        ):
+            await wait_for_stop_or_timeout(stop_event, 0.1)
+
+    def sleeping() -> bool:
+        if slept_at is not None:
+            return not power.heard_since(slept_at)
+        return power.asleep()
+
+    if not sleeping():
+        return
+    log.info(
+        "vehicle parked: 12 V on the port and no module talking: OBD polling sleeps",
+    )
+    while sleeping() and not stop_event.is_set():
+        await wait_for_stop_or_timeout(stop_event, 0.5)
+    if not stop_event.is_set():
+        log.info("vehicle bus awake: OBD polling resumes")
 
 
 async def wait_off_the_bench(stop_event: asyncio.Event, power: VehiclePower) -> None:
@@ -158,8 +206,13 @@ async def collect_can_obd_from_config(
     on_scheduler_metrics: Callable[[ObdSchedulerMetrics], None] | None = None,
     on_handoff_stats: Callable[[CollectorHandoffStats], None] | None = None,
     power: VehiclePower = VEHICLE_POWER,
+    sleeps_with_bus: bool = False,
 ) -> None:
     """Daemon producer for the Canable-native path.
+
+    With ``sleeps_with_bus`` (``collection.obd_sleeps_with_bus``) it stops
+    polling while the vehicle is parked, a battery on the port and no module
+    talking, and starts again when one does (operator, 2026-10-05).
 
     On the bench (the HAT's 12 V sense reads no battery: USB-C or UPS power,
     no vehicle) it does not open the bus: nothing would answer, and every
@@ -202,15 +255,42 @@ async def collect_can_obd_from_config(
         )
 
     async def _attempt(capture: Callable[[can.BusABC], None]) -> None:
+        # One attempt spans every sleep and wake of a parked vehicle: waking
+        # is not a failure, so it must not cost a reconnect warning.
+        slept_at: float | None = None
+        while True:
+            await wait_off_the_bench(stop_event, power)
+            if sleeps_with_bus:
+                await wait_for_the_bus(stop_event, power, slept_at=slept_at)
+            if stop_event.is_set():
+                return
+            if not await _poll_until_stopped_or_asleep(capture):
+                return
+            slept_at = time.monotonic()
+
+    async def _poll_until_stopped_or_asleep(capture: Callable[[can.BusABC], None]) -> bool:
+        """Poll until ``stop_event`` (``False``) or, with ``sleeps_with_bus``,
+        until the vehicle's bus falls asleep (``True``: the bus is closed and
+        the caller waits for it to wake)."""
         nonlocal finished_handoffs, attempts
-        await wait_off_the_bench(stop_event, power)
-        if stop_event.is_set():
-            return
         thread_stop.clear()
         attempts += 1
+        asleep = False
         # One bounded, coalescing handoff per attempt (C07.4); closed once the
         # worker has returned so a late callback can never touch the queue.
         enqueue = threadsafe_enqueue(loop, queue, on_drop=drop_counter, name="canable-obd")
+        bus: can.BusABC | None = None
+
+        async def _watch_for_sleep() -> None:
+            nonlocal asleep
+            while not thread_stop.is_set():
+                if power.asleep():
+                    asleep = True
+                    thread_stop.set()
+                    return
+                await asyncio.sleep(0.5)
+
+        watcher = asyncio.create_task(_watch_for_sleep()) if sleeps_with_bus else None
         try:
             bus = factory(spec.can)
             capture(bus)
@@ -236,19 +316,33 @@ async def collect_can_obd_from_config(
                 def metrics_callback(metrics: ObdSchedulerMetrics) -> None:
                     loop.call_soon_threadsafe(_publish, metrics)
 
-            await asyncio.to_thread(
-                run_can_obd_loop,
-                bus,
-                spec,
-                on_frame=on_frame,
-                on_reading=on_reading,
-                stop_event=thread_stop,
-                on_scheduler_metrics=metrics_callback,
-            )
+            try:
+                await asyncio.to_thread(
+                    run_can_obd_loop,
+                    bus,
+                    spec,
+                    on_frame=on_frame,
+                    on_reading=on_reading,
+                    stop_event=thread_stop,
+                    on_scheduler_metrics=metrics_callback,
+                )
+            except can.CanOperationError:
+                # At key-off the modules stop answering and acknowledging
+                # before the silence has lasted ASLEEP_SECONDS; the transmit
+                # queue fills first (ENOBUFS). On a live battery with the bus
+                # already quiet that is the vehicle going to sleep.
+                if not (sleeps_with_bus and bus_going_quiet(power)):
+                    raise
+                asleep = True
         finally:
             thread_stop.set()
+            if watcher is not None:
+                watcher.cancel()
             enqueue.close()
             finished_handoffs = finished_handoffs + enqueue.stats()
+            if asleep and bus is not None:
+                bus.shutdown()
+        return asleep and not stop_event.is_set()
 
     try:
         await run_with_reconnect(

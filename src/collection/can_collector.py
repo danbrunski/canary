@@ -47,6 +47,7 @@ from src.collection.recording import (
     RecorderRun,
     RecordingResult,
 )
+from src.collection.vehicle_power import VEHICLE_POWER, is_tester_request
 from src.config import CanBusConfig, VehicleConfig
 from src.session import SessionPaths
 from src.telemetry import TelemetryRecord
@@ -138,6 +139,10 @@ class CanReader(threading.Thread):
                     # its id (the ECU backup's flash read); not telemetry.
                     continue
                 self.frames += 1
+                if not is_tester_request(msg.arbitration_id):
+                    # Another module talking: the bus is awake (the OBD
+                    # collector sleeps while it is not, vehicle_power).
+                    VEHICLE_POWER.note_bus_frame()
                 self._handoff.push(frame_to_record(msg))
         except Exception as exc:  # noqa: BLE001 — bus-level failure, owner decides
             self.error = exc

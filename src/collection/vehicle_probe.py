@@ -17,7 +17,9 @@ result type, :class:`~src.vehicle.profiles.VehicleInfoProbe`.
 from __future__ import annotations
 
 import logging
+import time
 from contextlib import suppress
+from typing import Any
 
 from src.config import CanaryConfig
 from src.vehicle.profiles import VehicleInfoProbe
@@ -43,6 +45,18 @@ def _normalize_vin(vin: str) -> str | None:
     return None
 
 
+def _hear_a_module(bus: Any, seconds: float) -> bool:
+    """Whether any module (not a tester request) sends a frame within ``seconds``."""
+    from src.collection.vehicle_power import is_tester_request
+
+    deadline = time.monotonic() + seconds
+    while (remaining := deadline - time.monotonic()) > 0:
+        msg = bus.recv(timeout=remaining)
+        if msg is not None and not is_tester_request(msg.arbitration_id):
+            return True
+    return False
+
+
 def probe_vehicle_info(config: CanaryConfig) -> VehicleInfoProbe:
     """One-shot Mode 09 read at startup: VIN (InfoType 0x02), calibration ID
     (0x04), and CVN (0x06) over the same bus connection (Task 3.4).
@@ -65,7 +79,7 @@ def probe_vehicle_info(config: CanaryConfig) -> VehicleInfoProbe:
     # every bench start (2026-10-05). The collectors are not running yet, so
     # read the HAT's 12 V sense once here.
     from src.collection.supply_voltage_collector import read_supply_once
-    from src.collection.vehicle_power import classify_supply
+    from src.collection.vehicle_power import ASLEEP_SECONDS, classify_supply
 
     supply = read_supply_once(config.hardware.supply_voltage)
     if classify_supply(supply) == "bench":
@@ -91,6 +105,22 @@ def probe_vehicle_info(config: CanaryConfig) -> VehicleInfoProbe:
         bus = bus_factory(config.hardware.can)
     except Exception:
         log.warning("vehicle info probe: failed to open CAN bus", exc_info=True)
+        return VehicleInfoProbe(vin=None, calibration_id=None, cvn=None)
+
+    # A parked vehicle (battery on the port, every module asleep): asking would
+    # only fill the transmit queue and may wake modules (operator, 2026-10-05).
+    # Listen first; any module talking means the ignition is on.
+    if (
+        coll.obd_sleeps_with_bus
+        and classify_supply(supply) == "vehicle"
+        and not _hear_a_module(bus, ASLEEP_SECONDS)
+    ):
+        bus.shutdown()
+        log.info(
+            "vehicle info probe skipped: the vehicle is parked (12 V on the port, "
+            "no module heard for %.0f s)",
+            ASLEEP_SECONDS,
+        )
         return VehicleInfoProbe(vin=None, calibration_id=None, cvn=None)
 
     vin: str | None = None

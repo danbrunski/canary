@@ -468,6 +468,15 @@ class IdleShutdownConfig(_Strict):
 
 class CollectionConfig(_Strict):
     obd_source: Literal["canable", "elm327", "disabled"] = "canable"
+    #: Hold OBD polling (and the startup VIN probe) while the vehicle is
+    #: parked: a battery on the port (``hardware.supply_voltage``) and no frame
+    #: from any module for ``vehicle_power.ASLEEP_SECONDS``. Polling a sleeping
+    #: bus only fills the transmit queue and may wake modules and drain the
+    #: battery (operator, 2026-10-05). It resumes when a module talks again.
+    #: Only for a vehicle whose OBD port carries broadcast traffic whenever
+    #: the ignition is on (the Xterra). A gatewayed port is silent until asked,
+    #: and this would never poll it, hence off by default.
+    obd_sleeps_with_bus: bool = False
     obd_pids: tuple[str, ...] = ("auto",)
     obd_dids: tuple[str, ...] = ()
     obd_did_request_id: int = 0x7E0

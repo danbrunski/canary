@@ -32,6 +32,10 @@ VEHICLE_MIN_VOLTS = 8.0
 BENCH_MAX_VOLTS = 2.0
 #: A reading older than this says nothing (the collector reads at 10 Hz).
 FRESH_SECONDS = 10.0
+#: No frame from another module for this long, on a live battery: the bus is
+#: asleep. The Xterra's modules broadcast tens of frames a second whenever
+#: the ignition is on, so a few seconds of silence is unambiguous there.
+ASLEEP_SECONDS = 3.0
 
 Connection = Literal["vehicle", "bench", "unknown"]
 
@@ -47,12 +51,20 @@ def classify_supply(volts: float | None) -> Connection:
     return "unknown"
 
 
+def is_tester_request(arbitration_id: int) -> bool:
+    """A diagnostic request a tester (CANary itself, or a scan tool) sends:
+    the functional 0x7DF and the physical 0x7E0-0x7E7. Hearing one says
+    nothing about whether the vehicle's modules are awake."""
+    return arbitration_id == 0x7DF or 0x7E0 <= arbitration_id <= 0x7E7
+
+
 class VehiclePower:
     def __init__(self) -> None:
         self._lock = threading.Lock()
         self._volts: float | None = None
         self._at: float | None = None
         self._expected = False
+        self._bus_at: float | None = None
 
     def expect_readings(self) -> None:
         """A 12 V sense is configured: its first reading is worth waiting for
@@ -83,11 +95,37 @@ class VehiclePower:
     def connection(self, *, now: float | None = None) -> Connection:
         return classify_supply(self.latest(now=now))
 
+    def note_bus_frame(self, *, at: float | None = None) -> None:
+        """A frame from another module was heard (the broadcast sniffer, per
+        frame: a plain store, no lock)."""
+        self._bus_at = time.monotonic() if at is None else at
+
+    def heard_since(self, moment: float) -> bool:
+        """Whether a module was heard after ``moment`` (``time.monotonic()``)."""
+        heard = self._bus_at
+        return heard is not None and heard > moment
+
+    def bus_silent_for(self, *, now: float | None = None) -> float | None:
+        """Seconds since another module was last heard; ``None`` if never."""
+        heard = self._bus_at
+        if heard is None:
+            return None
+        return (time.monotonic() if now is None else now) - heard
+
+    def asleep(self, *, now: float | None = None) -> bool:
+        """A battery on the port and nobody talking for :data:`ASLEEP_SECONDS`
+        (or ever): the vehicle is parked and its bus is asleep."""
+        if self.connection(now=now) != "vehicle":
+            return False
+        silent = self.bus_silent_for(now=now)
+        return silent is None or silent >= ASLEEP_SECONDS
+
     def reset(self) -> None:
         with self._lock:
             self._volts = None
             self._at = None
             self._expected = False
+            self._bus_at = None
 
 
 #: The daemon's one reading, shared by the supply collector, the OBD
@@ -96,6 +134,7 @@ VEHICLE_POWER = VehiclePower()
 
 
 __all__ = [
+    "ASLEEP_SECONDS",
     "BENCH_MAX_VOLTS",
     "FRESH_SECONDS",
     "VEHICLE_MIN_VOLTS",
@@ -103,4 +142,5 @@ __all__ = [
     "Connection",
     "VehiclePower",
     "classify_supply",
+    "is_tester_request",
 ]
