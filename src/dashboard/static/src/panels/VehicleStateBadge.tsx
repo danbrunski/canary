@@ -12,6 +12,7 @@ const LABEL: Record<VehicleState["state"], string> = {
   ignition_only: "ignition only",
   engine_off: "engine off",
   parked: "parked",
+  bench: "bench",
   no_data: "no data",
   replay: "replay",
   passive: "passive",
@@ -24,7 +25,8 @@ const LABEL: Record<VehicleState["state"], string> = {
  *  vs `engine_running` vs `replay` — so it gets equal header billing to the
  *  ML operating mode, not buried in capture metadata. `no_data`/`unknown`
  *  get the alert treatment: both mean "don't trust the silence". `parked`
- *  does not: the bus is asleep on a live battery, so silence is expected. */
+ *  and `bench` do not: the bus is asleep on a live battery, or there is no
+ *  vehicle on the port at all, so silence is expected. */
 export function VehicleStateBadge({ vehicleState }: VehicleStateBadgeProps) {
   const state = vehicleState?.state ?? null;
   return (
@@ -38,7 +40,7 @@ export function VehicleStateBadge({ vehicleState }: VehicleStateBadgeProps) {
           "text-base font-semibold uppercase tracking-[0.06em]",
           state === "engine_running" && "text-ok",
           state === "ignition_only" && "text-accent",
-          (state === "engine_off" || state === "parked") && "text-fg-dim",
+          (state === "engine_off" || state === "parked" || state === "bench") && "text-fg-dim",
           (state === "replay" || state === "passive") && "text-accent-2",
           (state === "no_data" || state === "unknown" || state === null) && "text-bad",
         )}

@@ -469,8 +469,17 @@ def test_parked_when_both_buses_sleep_on_a_live_battery() -> None:
     assert state.to_dict()["supply_voltage"] == 12.41
 
 
-def test_no_data_when_the_supply_is_stale_low_or_absent() -> None:
-    for supply, age in ((12.4, 60.0), (0.3, 0.1), (None, None)):
+def test_bench_when_no_vehicle_is_on_the_port() -> None:
+    """USB-C or UPS power with no vehicle (2026-10-05): the 12 V sense reads
+    ~0. That is the desk setup, not a fault."""
+    state = classify_vehicle_state(
+        **_common_telemetry(supply_voltage=0.01, supply_freshness_seconds=0.1)
+    )
+    assert state.state == "bench"
+
+
+def test_no_data_when_the_supply_is_stale_ambiguous_or_absent() -> None:
+    for supply, age in ((12.4, 60.0), (0.3, 60.0), (5.0, 0.1), (None, None)):
         state = classify_vehicle_state(
             **_common_telemetry(supply_voltage=supply, supply_freshness_seconds=age)
         )

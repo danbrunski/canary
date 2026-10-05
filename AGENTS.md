@@ -102,8 +102,12 @@ derived classification of what the daemon is actually seeing right now:
 - `parked` — neither bus fresh, but the HAT's 12 V sense reads a battery
   (`supply_voltage`). The bus is asleep: key off, plugged in. A parked
   Xterra spends its nights here.
-- `no_data` — neither bus fresh and no 12 V reading: unplugged, or no 12 V
-  sense configured. Before `parked` existed (2026-10-04) a parked truck read
+- `bench` — neither bus fresh and the 12 V sense reads nothing: the Pi runs
+  from USB-C or the UPS with no vehicle connected, the normal desk setup.
+  Not a fault. The OBD collector waits instead of transmitting into an empty
+  bus.
+- `no_data` — neither bus fresh and no usable 12 V reading: no 12 V sense
+  configured, or a reading that explains nothing. Before `parked` existed (2026-10-04) a parked truck read
   `no_data` too.
 - `replay` — runtime replay is active; the "OBD"/"CAN" you see is
   re-emitted from a stored session.

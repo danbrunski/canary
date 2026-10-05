@@ -37,6 +37,7 @@ from src.collection import (
 )
 from src.collection.kline.actions import KLINE_ACTIONS
 from src.collection.kline.sessions import MODULE_SESSIONS
+from src.collection.vehicle_power import VEHICLE_POWER
 
 #: Every collection module holding process-global state this function resets,
 #: as ``src/collection``-relative paths.
@@ -53,6 +54,7 @@ COVERED_MODULES: frozenset[str] = frozenset(
         "queueing.py",
         "tuning_profile.py",
         "tx_gate.py",
+        "vehicle_power.py",
     }
 )
 
@@ -73,6 +75,7 @@ COVERED_GLOBALS: frozenset[tuple[str, str]] = frozenset(
         ("tuning_profile.py", "_did_channels"),
         ("tuning_profile.py", "_profile"),
         ("tx_gate.py", "_claims"),
+        ("vehicle_power.py", "VEHICLE_POWER"),
     }
 )
 
@@ -96,6 +99,7 @@ def reset_process_state_for_tests() -> None:
     queueing._reset_for_tests()
     MODULE_SESSIONS.reset()
     KLINE_ACTIONS.reset()
+    VEHICLE_POWER.reset()
     capture_lifetime._reset_for_tests()
     capture_generation._reset_for_tests()
     capture_profiles._reset_for_tests()

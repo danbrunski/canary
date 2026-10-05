@@ -740,7 +740,7 @@ def collection_activity(
 ) -> str | None:
     """Why heavy work must wait now, or ``None`` when collection is inactive.
 
-    Only a quiet verdict (``QUIET_STATES``: ``parked`` or ``no_data``, neither
+    Only a quiet verdict (``QUIET_STATES``: ``parked``, ``bench`` or ``no_data``, neither
     bus fresh) is inactive. ``engine_off``
     (CAN fresh, key out), ``ignition_only``, ``passive`` and ``unknown`` are all
     still collecting: a parked vehicle whose bus talks is being recorded.

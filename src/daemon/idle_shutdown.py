@@ -93,6 +93,8 @@ log = logging.getLogger(__name__)
 #: Vehicle states that count as "parked / disconnected". Deliberately excludes
 #: ``ignition_only`` (KOEO is an operator at the wheel running diagnostics) and
 #: ``unknown`` (the classifier could not decide, so neither should we).
+#: Not ``bench``: idle shutdown saves a parked vehicle's battery, and a bench
+#: Pi draws from USB-C or the UPS, not the vehicle.
 DEFAULT_IDLE_STATES: tuple[str, ...] = ("engine_off", "parked", "no_data")
 
 #: States proving we are actually attached to a live vehicle. Observing one of

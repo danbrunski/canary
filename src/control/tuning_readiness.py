@@ -136,6 +136,7 @@ _VEHICLE_STATE: dict[str, tuple[bool | None, str, str | None]] = {
     "ignition_only": (None, "key on, engine off", "Start the engine to log driving data"),
     "engine_off": (False, "key off: the ECM is not answering", "Turn the key on"),
     "parked": (False, "parked: the vehicle's bus is asleep (key off)", "Turn the key on"),
+    "bench": (False, "on the bench: no vehicle on the OBD port", "Plug the Pi into the vehicle"),
     "no_data": (
         False,
         "no fresh CAN, OBD or 12 V supply reading",

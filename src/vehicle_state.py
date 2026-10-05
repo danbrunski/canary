@@ -34,6 +34,7 @@ from src.collection import tx_gate
 # The CANary-HAT's 12 V sense (``hardware.supply_voltage``): the vehicle's
 # battery as the OBD port delivers it, readable with every module asleep.
 from src.collection.supply_voltage_collector import CHANNEL as SUPPLY_VOLTAGE_CHANNEL
+from src.collection.vehicle_power import classify_supply
 from src.decode.engineering import physical_value
 from src.operating import ENGINE_RUNNING_MIN_RPM
 from src.timefmt import parse_iso_utc
@@ -43,6 +44,7 @@ VehicleStateName = Literal[
     "ignition_only",
     "engine_off",
     "parked",
+    "bench",
     "no_data",
     "replay",
     "passive",
@@ -58,15 +60,10 @@ FRESHNESS_THRESHOLD_SECONDS = 10.0
 #: than "engine running"; the one definition is ``src.operating`` (R01.7).
 RPM_RUNNING_THRESHOLD = ENGINE_RUNNING_MIN_RPM
 
-#: A supply this high is a battery on the OBD port; an unplugged HAT reads ~0.
-#: Well under a flat battery's ~11.5 V and a crank dip's ~9 V, so a parked
-#: truck with a tired battery is still ``parked``.
-PARKED_MIN_SUPPLY_VOLTS = 8.0
-
-#: Both buses silent: the vehicle is not being recorded, whatever the reason.
-#: ``parked`` is the case the evidence explains (asleep on a live battery),
-#: ``no_data`` the case it does not.
-QUIET_STATES: frozenset[str] = frozenset({"parked", "no_data"})
+#: Both buses silent: nothing is being recorded, whatever the reason.
+#: ``parked`` (asleep on a live battery) and ``bench`` (no vehicle on the port)
+#: are the cases the 12 V sense explains, ``no_data`` the case it does not.
+QUIET_STATES: frozenset[str] = frozenset({"parked", "bench", "no_data"})
 
 #: The decoded broadcast channel carrying engine speed. Stored as raw counts
 #: (``decoded:`` rows are raw by design); scaled through the binding.
@@ -168,13 +165,15 @@ def classify_vehicle_state(
        OBD/CAN telemetry is also flowing — the replayed records ARE the
        OBD/CAN telemetry from the agent's perspective.
     2. If neither OBD nor CAN have refreshed within
-       ``freshness_threshold_seconds``: ``parked`` when the HAT's 12 V sense
-       is fresh and reads a battery (``PARKED_MIN_SUPPLY_VOLTS``), else
-       ``no_data``. On the Xterra the bus sleeps at key-off, so a truck
-       parked for hours has both buses silent; before the supply was read
-       that was ``no_data``, described as "Pi probably disconnected", while
-       the daemon was answering (2026-10-04). ``no_data`` now means the
-       evidence is missing: unplugged, or no 12 V sense configured.
+       ``freshness_threshold_seconds``, the HAT's 12 V sense decides
+       (:mod:`src.collection.vehicle_power`): a battery on the port is
+       ``parked``; nothing on it (USB-C or UPS power, no vehicle) is
+       ``bench``; no fresh reading, or one between the two, is ``no_data``.
+       On the Xterra the bus sleeps at key-off, so a truck parked for hours
+       has both buses silent; before the supply was read that was
+       ``no_data``, described as "Pi probably disconnected", while the daemon
+       was answering (2026-10-04). ``no_data`` now means the evidence is
+       missing: no 12 V sense configured, or a reading that explains nothing.
        ``supply_voltage`` and ``supply_freshness_seconds`` are required, like
        ``broadcast_rpm``; pass ``None`` when there is no 12 V sense.
     3. RPM at or above ``rpm_running_threshold``, from fresh OBD or a fresh
@@ -224,8 +223,9 @@ def classify_vehicle_state(
     engine_evidence_fresh = obd_fresh or rpm_from_broadcast
 
     if not obd_fresh and not can_fresh:
+        port = classify_supply(supply)
         state: VehicleStateName = (
-            "parked" if supply is not None and supply >= PARKED_MIN_SUPPLY_VOLTS else "no_data"
+            "parked" if port == "vehicle" else "bench" if port == "bench" else "no_data"
         )
     elif engine_evidence_fresh and rpm is not None and rpm >= rpm_running_threshold:
         state = "engine_running"

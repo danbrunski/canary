@@ -201,6 +201,7 @@ export interface VehicleState {
     | "ignition_only"
     | "engine_off"
     | "parked"
+    | "bench"
     | "no_data"
     | "replay"
     | "passive"

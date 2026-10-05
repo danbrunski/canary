@@ -101,8 +101,10 @@ from src.collection.reconnect import (
     DEFAULT_RECONNECT_POLICY,
     ReconnectPolicy,
     run_with_reconnect,
+    wait_for_stop_or_timeout,
 )
 from src.collection.recording import DiskWriteError, RecorderRun, RecordingResult
+from src.collection.vehicle_power import VEHICLE_POWER, VehiclePower
 from src.config import CanBusConfig, VehicleConfig
 from src.session import SessionPaths
 from src.telemetry import TelemetryRecord
@@ -111,6 +113,24 @@ log = logging.getLogger(__name__)
 
 
 AUTO_BASELINE_PID_NAMES = tuple(name for _pid, (name, _decoder) in sorted(PID_DECODERS.items()))
+
+
+#: How often a collector waiting on the bench looks at the supply again.
+BENCH_RECHECK_SECONDS = 2.0
+
+
+async def wait_off_the_bench(stop_event: asyncio.Event, power: VehiclePower) -> None:
+    """Return once the port is not ``bench`` (or ``stop_event`` is set)."""
+    if power.connection() != "bench":
+        return
+    log.info(
+        "no vehicle on the OBD port (12 V sense reads %.2f V): OBD polling waits",
+        power.latest() or 0.0,
+    )
+    while power.connection() == "bench" and not stop_event.is_set():
+        await wait_for_stop_or_timeout(stop_event, BENCH_RECHECK_SECONDS)
+    if not stop_event.is_set():
+        log.info("vehicle power on the OBD port: OBD polling starts")
 
 
 async def collect_can_obd_from_config(
@@ -122,8 +142,15 @@ async def collect_can_obd_from_config(
     reconnect_policy: ReconnectPolicy | None = DEFAULT_RECONNECT_POLICY,
     on_scheduler_metrics: Callable[[ObdSchedulerMetrics], None] | None = None,
     on_handoff_stats: Callable[[CollectorHandoffStats], None] | None = None,
+    power: VehiclePower = VEHICLE_POWER,
 ) -> None:
     """Daemon producer for the Canable-native path.
+
+    On the bench (the HAT's 12 V sense reads no battery: USB-C or UPS power,
+    no vehicle) it does not open the bus: nothing would answer, and every
+    request only filled the transmit queue until ``ENOBUFS`` and a reconnect
+    warning, once a minute (2026-10-05). It waits, says so once, and starts
+    when a battery appears. Without a 12 V reading it runs as it always did.
 
     ``on_handoff_stats`` (C03.6) receives the collector's cumulative
     thread-handoff and ingest-queue drop counters each time scheduler metrics
@@ -161,6 +188,9 @@ async def collect_can_obd_from_config(
 
     async def _attempt(capture: Callable[[can.BusABC], None]) -> None:
         nonlocal finished_handoffs, attempts
+        await wait_off_the_bench(stop_event, power)
+        if stop_event.is_set():
+            return
         thread_stop.clear()
         attempts += 1
         # One bounded, coalescing handoff per attempt (C07.4); closed once the

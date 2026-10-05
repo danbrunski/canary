@@ -87,6 +87,11 @@ class Ads1015:
         deadline = started + CONVERSION_TIMEOUT_SECONDS
         while not int.from_bytes(self.bus.read(REG_CONFIG, 2), "big") & CONFIG_OS_START:
             if self._clock() > deadline:
+                # A starved thread can pass the deadline between two reads of
+                # a conversion that finished long ago (seen once at daemon
+                # start, 2026-10-05): look once more before giving up.
+                if int.from_bytes(self.bus.read(REG_CONFIG, 2), "big") & CONFIG_OS_START:
+                    break
                 raise Ads1015Error(f"conversion on AIN{input_channel} did not complete")
             self._sleep(0.0005)
         finished = self._clock()

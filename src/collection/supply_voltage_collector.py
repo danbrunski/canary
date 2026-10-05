@@ -25,6 +25,7 @@ from src.collection.reconnect import (
     run_with_reconnect,
     wait_for_stop_or_timeout,
 )
+from src.collection.vehicle_power import VEHICLE_POWER
 from src.config import SupplyVoltageConfig
 from src.telemetry import SENSOR_SOURCE, TelemetryRecord
 
@@ -62,7 +63,10 @@ async def collect_supply_voltage(
     period = 1.0 / config.rate_hz
     while not stop_event.is_set():
         stamp, volts = await asyncio.to_thread(adc.read_volts, config.input_channel)
-        put_nowait_or_drop(queue, supply_record(config, stamp, volts), on_drop=on_drop)
+        record = supply_record(config, stamp, volts)
+        if isinstance(record.value, float):
+            VEHICLE_POWER.note(record.value)
+        put_nowait_or_drop(queue, record, on_drop=on_drop)
         await wait_for_stop_or_timeout(stop_event, period)
 
 
