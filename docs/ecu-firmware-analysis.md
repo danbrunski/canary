@@ -256,10 +256,15 @@ load at 81 kPa and about 1.4 at idle and cruise.
 - An earlier version of this section said cal byte `0x8ACF` inverts the fault
   test, and that `w1124` is MAF airflow. Both were wrong.
 
+An example once quoted as contradicting the chain (byte 51 at 3,684 rpm
+and "18 % throttle") came from ±2.5 s window means. At its exact instant
+the throttle reads were 1.0 and 1.75 s away and rpm was falling. The chain
+predicts 107–112 there, so it was a transient and is not evidence either
+way. To test the whole chain on one instant, read
+`0xFFFF2CC8, 2C32, 63FC, 139E, 116A, 2136, 118A, 225A, 105C, 103A` in one
+memory window.
+
 **Open:**
-- one example (3,684 rpm, 18 % throttle, byte 51) computes to about 100 by
-  hand with idle air and purge at zero. Settle it with one memory window of
-  `0xFFFF2CC8, 2C32, 63FC, 139E, 116A, 2136, 118A, 225A, 105C, 103A`;
 - the absolute units of the area and of the byte;
 - `0xDC1D00`;
 - diagnostic item `0x11C`;
