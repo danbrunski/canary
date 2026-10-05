@@ -341,7 +341,17 @@ system starting beside it.
 
 ## Operator decision
 
-- [ ] **S01.7 Move the root filesystem off the SD card?** Every remaining
+- [~] **S01.7 Move the root filesystem off the SD card?** **Decided yes,
+  2026-10-04 (operator), in two steps.** *Now:* a USB 3 drive. Buying the final
+  2230/2242 NVMe drive in a USB enclosure means it later moves to the base with
+  its data intact, so the SD card is cloned only once. Set
+  `usb_max_current_enable=1` first: the X1202 feeds the Pi through pogo pins,
+  not USB-C PD, so the Pi assumes a 3 A supply and caps USB at 600 mA. *Later:*
+  an NVMe base under the Pi, in the slot the retired X1202 frees. The power side
+  moves to a supercapacitor power board on top
+  ([`CANary-PWR-Spec.md`](../../CANary-PWR-Spec.md),
+  `CANary-HAT-Revisions.md` §13.3.0). Still owed after each step: re-measure
+  with S01.1's method. The original question follows. Every remaining
   number above is dominated by cold random reads from the SD card: the same
   imports take 28.6 s cold and 3.8 s warm, and the IF artifact 34 s and 3.3 s.
   The Pi 5 has a PCIe slot. An NVMe drive (HAT and drive, plus cloning the
