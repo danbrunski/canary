@@ -683,6 +683,7 @@ async def run_daemon(
             replay_retention_days=config.collection.replay_retention_days,
             active_replay_dir=lambda: _active_replay_dir(components),
             catalog_db=config.daemon.catalog_db,
+            footer_ledger=config.daemon.retention_footer_ledger,
         )
     )
     online_training_task: asyncio.Task[Any] | None = None

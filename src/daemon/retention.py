@@ -33,6 +33,7 @@ async def run_retention_sweeper(
     replay_retention_days: int | None = None,
     active_replay_dir: Callable[[], Path | None] | None = None,
     catalog_db: Path | None = None,
+    footer_ledger: Path | None = None,
 ) -> None:
     """Periodically prune session dirs from the production daemon.
 
@@ -46,13 +47,23 @@ async def run_retention_sweeper(
     The active session is read through ``active_session_path`` on every tick,
     not captured once at startup, because ``ParquetTelemetryWriter`` rotates
     sessions when engine run time resets.
+
+    ``footer_ledger`` (``daemon.retention_footer_ledger``) persists the
+    sessions whose footers are verified, so the first tick after a start does
+    not read every footer in the corpus again (S01.5). ``None`` keeps the
+    ledger in memory only.
     """
     if interval_seconds <= 0:
         raise ValueError("interval_seconds must be positive")
 
-    # Across ticks: sessions whose footers were read once and have not changed
-    # since are not read again (S01.5).
-    footers = FooterLedger()
+    # Across ticks, and across restarts when ``footer_ledger`` is set: sessions
+    # whose footers were read once and have not changed since are not read
+    # again (S01.5). Loaded off the loop: a cold read off the SD card.
+    footers = (
+        FooterLedger()
+        if footer_ledger is None
+        else await asyncio.to_thread(FooterLedger.load, footer_ledger, storage_path)
+    )
     while not stop_event.is_set():
         # Read on the loop: both callables reach loop-owned state (the
         # writer's current session, the replay controller).
@@ -204,6 +215,7 @@ def _sweep_once(
 
     if footers is not None:
         footers.forget_missing(path for path in scans if path.exists())
+        footers.save(storage_path, exclude={active})
     log.info(
         "retention tick",
         extra={

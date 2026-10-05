@@ -138,3 +138,16 @@ def test_seeding_copies_the_tracked_artifact_once_and_never_overwrites(tmp_path:
     config.daemon.behavior_models.write_text("schema_version: 1\nmodels: []  # refit on the Pi\n")
     assert seed_machine_owned_files(config) == []
     assert "refit on the Pi" in config.daemon.behavior_models.read_text()
+
+
+def test_retention_footer_ledger_is_per_vehicle_state(tmp_path: Path) -> None:
+    """S01.5: the sweeper's verified-footer cache is written at runtime, so it
+    lives under ``state_dir``, per vehicle, never in the checkout."""
+    assert DAEMON_STATE_LAYOUT["retention_footer_ledger"] == Path("control/retention_footers.json")
+    config = scope_config(
+        _config(state_dir=str(tmp_path)),
+        VehicleProfile(slug="truck", vin="", name="Truck"),
+    )
+    assert config.daemon.retention_footer_ledger == (
+        tmp_path / "control/truck/retention_footers.json"
+    )

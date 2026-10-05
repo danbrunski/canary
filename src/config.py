@@ -1116,6 +1116,13 @@ class DaemonConfig(_Strict):
     #: (``src.evidence.ledger.MemoryLedger``). Per vehicle (``scope_config``);
     #: under ``state_dir`` on the Pi, gitignored ``data/control/`` on the laptop.
     memory_ledger: Path = CONTROL_DIR / "memory.jsonl"
+    #: Sessions whose parquet footers the retention sweeper has read and found
+    #: intact, each with a fingerprint of its chunks (S01.5). Persisted so a
+    #: restart does not re-read every footer in the corpus: 70.5 s on the
+    #: 2026-10-04 cold boot, inside a drive. A rebuildable cache, never a
+    #: source of truth: missing or unreadable means every footer is read again.
+    #: Per vehicle (``scope_config``).
+    retention_footer_ledger: Path = CONTROL_DIR / "retention_footers.json"
     #: Root for everything the daemon writes at runtime (S03). When set, every
     #: path in :data:`DAEMON_STATE_LAYOUT` that the YAML does not set itself
     #: resolves under it, so nothing the Pi writes lands in the git checkout
@@ -1199,6 +1206,7 @@ DAEMON_STATE_LAYOUT: dict[str, Path] = {
     "capture_profile_overrides": Path("control/capture_profile_overrides.yaml"),
     "rom_library_dir": Path("control/rom_library"),
     "memory_ledger": Path("control/memory.jsonl"),
+    "retention_footer_ledger": Path("control/retention_footers.json"),
 }
 #: :class:`DaemonConfig` paths that name version-controlled data the daemon
 #: only reads. Every ``Path`` field is in exactly one of these two tables or

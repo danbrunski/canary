@@ -2,15 +2,17 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 import logging
 import os
 import shutil
 from collections.abc import Callable, Iterable, Mapping
-from contextlib import suppress
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
+from src.atomic_write import atomic_write_text
 from src.session import (
     LIVE_SESSION_KINDS,
     SessionKind,
@@ -100,20 +102,37 @@ class SessionScan:
     total_bytes: int
     #: The top-level ``*.parquet`` chunks, by path, with their sizes.
     parquet_sizes: Mapping[Path, int]
-    #: ``(count, total bytes, newest mtime_ns)`` of those chunks. A closed
-    #: session's files never change, so an unchanged fingerprint means an
-    #: unchanged set of footers.
-    fingerprint: tuple[int, int, int]
+    #: :func:`chunk_fingerprint` of those chunks. A closed session's files
+    #: never change, so an unchanged fingerprint means an unchanged set of
+    #: footers.
+    fingerprint: str
     #: How many files were stat'ed to build this scan.
     files_stat: int
+    #: ``(size, mtime_ns, inode)`` of each top-level chunk, by path: what the
+    #: fingerprint is computed from.
+    parquet_stats: Mapping[Path, tuple[int, int, int]] = field(default_factory=dict)
+
+
+def chunk_fingerprint(stats: Mapping[Path, tuple[int, int, int]]) -> str:
+    """One digest over every chunk's name, size, mtime and inode.
+
+    The footer check reads each top-level chunk's last four bytes, which can
+    only change if the chunk is added, removed, renamed into place (a new
+    inode), appended to or rewritten (size, mtime). Any of those changes the
+    digest, so a session whose digest matches has the footers last verified.
+    """
+    digest = hashlib.sha256()
+    for path in sorted(stats, key=lambda chunk: chunk.name):
+        size, mtime_ns, inode = stats[path]
+        digest.update(f"{path.name}\0{size}\0{mtime_ns}\0{inode}\n".encode())
+    return digest.hexdigest()
 
 
 def scan_session(session: Path) -> SessionScan:
     """Walk ``session`` once, stat'ing each file once."""
     total = 0
     files = 0
-    parquet: dict[Path, int] = {}
-    newest = 0
+    parquet: dict[Path, tuple[int, int, int]] = {}
     pending = [(session, True)]
     while pending:
         directory, top_level = pending.pop()
@@ -134,14 +153,14 @@ def scan_session(session: Path) -> SessionScan:
             files += 1
             total += stat.st_size
             if top_level and entry.name.endswith(".parquet"):
-                parquet[Path(entry.path)] = stat.st_size
-                newest = max(newest, stat.st_mtime_ns)
+                parquet[Path(entry.path)] = (stat.st_size, stat.st_mtime_ns, stat.st_ino)
     return SessionScan(
         path=session,
         total_bytes=total,
-        parquet_sizes=parquet,
-        fingerprint=(len(parquet), sum(parquet.values()), newest),
+        parquet_sizes={path: stats[0] for path, stats in parquet.items()},
+        fingerprint=chunk_fingerprint(parquet),
         files_stat=files,
+        parquet_stats=parquet,
     )
 
 
@@ -160,6 +179,11 @@ def scan_sessions(sessions_root: Path) -> dict[Path, SessionScan]:
     }
 
 
+#: Bumped when the ledger's shape or :func:`chunk_fingerprint` changes: a file
+#: of another version is ignored, so every footer is read again.
+FOOTER_LEDGER_VERSION = 2
+
+
 @dataclass
 class FooterLedger:
     """Sessions whose parquet footers were all read and found intact.
@@ -168,21 +192,99 @@ class FooterLedger:
     session's :attr:`SessionScan.fingerprint` when it was verified: a session
     that gains, loses or rewrites a chunk no longer matches and is read again,
     so a truncated chunk that appears later is still caught.
+
+    With a ``path`` (:meth:`load`), the ledger also survives a restart: the
+    first tick after a start used to read every footer in the corpus (70.5 s
+    after the 2026-10-04 cold boot, during a drive). The file is a cache.
+    Missing, unreadable, of another version or written for another sessions
+    root, it is ignored and every footer is read again; it never fails a tick.
     """
 
-    _verified: dict[Path, tuple[int, int, int]] = field(default_factory=dict)
+    _verified: dict[Path, str] = field(default_factory=dict)
+    path: Path | None = None
+    _dirty: bool = False
+
+    @classmethod
+    def load(cls, path: Path, sessions_root: Path) -> FooterLedger:
+        """The ledger persisted at ``path`` for ``sessions_root``, or an empty one."""
+        ledger = cls(path=path)
+        try:
+            raw = json.loads(path.read_text())
+        except FileNotFoundError:
+            return ledger
+        except (OSError, ValueError) as exc:
+            log.warning(
+                "footer ledger unreadable; every footer will be read",
+                extra={"path": str(path), "error": str(exc)},
+            )
+            return ledger
+        sessions = raw.get("sessions") if isinstance(raw, dict) else None
+        if (
+            not isinstance(raw, dict)
+            or raw.get("version") != FOOTER_LEDGER_VERSION
+            or raw.get("sessions_root") != str(sessions_root)
+            or not isinstance(sessions, dict)
+        ):
+            log.warning(
+                "footer ledger is for another version or sessions root; every footer will be read",
+                extra={"path": str(path), "sessions_root": str(sessions_root)},
+            )
+            return ledger
+        for name, fingerprint in sessions.items():
+            # Only plain live session names: a key such as "../x" or "_archive"
+            # could otherwise name a path the sweep never verified.
+            if isinstance(name, str) and isinstance(fingerprint, str) and _is_session_name(name):
+                ledger._verified[sessions_root / name] = fingerprint
+        return ledger
 
     def is_verified(self, scan: SessionScan) -> bool:
         return self._verified.get(scan.path) == scan.fingerprint
 
-    def mark_verified(self, path: Path, fingerprint: tuple[int, int, int]) -> None:
-        self._verified[path] = fingerprint
+    def mark_verified(self, path: Path, fingerprint: str) -> None:
+        if self._verified.get(path) != fingerprint:
+            self._verified[path] = fingerprint
+            self._dirty = True
+
+    def forget(self, path: Path) -> None:
+        if self._verified.pop(path, None) is not None:
+            self._dirty = True
 
     def forget_missing(self, present: Iterable[Path]) -> None:
         """Drop sessions that no longer exist (deleted by this or another sweep)."""
         keep = set(present)
         for path in [path for path in self._verified if path not in keep]:
-            del self._verified[path]
+            self.forget(path)
+
+    def save(self, sessions_root: Path, *, exclude: Iterable[Path] = ()) -> bool:
+        """Persist to :attr:`path` if anything changed; ``True`` if written.
+
+        ``exclude`` (the session being recorded) is never written: an open
+        session is never trusted from a previous process's word. A failed
+        write is logged and leaves the next start to read every footer.
+        """
+        if self.path is None or not self._dirty:
+            return False
+        skip = {path.resolve() for path in exclude}
+        sessions = {
+            path.name: fingerprint
+            for path, fingerprint in sorted(self._verified.items())
+            if path.parent == sessions_root and path.resolve() not in skip
+        }
+        document = {
+            "version": FOOTER_LEDGER_VERSION,
+            "sessions_root": str(sessions_root),
+            "sessions": sessions,
+        }
+        try:
+            atomic_write_text(self.path, json.dumps(document, indent=0) + "\n", mkdir=True)
+        except OSError as exc:
+            log.warning(
+                "footer ledger not saved; the next start reads every footer",
+                extra={"path": str(self.path), "error": str(exc)},
+            )
+            return False
+        self._dirty = False
+        return True
 
 
 def delete_expired_sessions(
@@ -345,23 +447,20 @@ def delete_empty_sessions(
             shutil.rmtree(child)
             removed_sessions.append(child)
             continue
-        if footers is not None and all_read:
-            # Verified as the next tick will scan it: without the chunks removed.
-            kept = {
-                path: size for path, size in scan.parquet_sizes.items() if path not in removed_here
-            }
-            newest = _newest_mtime_ns(kept) if removed_here else scan.fingerprint[2]
-            footers.mark_verified(child, (len(kept), sum(kept.values()), newest))
+        if footers is not None:
+            if all_read:
+                # Verified as the next tick will scan it: without the chunks
+                # removed (removing a file changes no sibling's stat).
+                kept = {
+                    path: stats
+                    for path, stats in scan.parquet_stats.items()
+                    if path not in removed_here
+                }
+                footers.mark_verified(child, chunk_fingerprint(kept))
+            else:
+                footers.forget(child)
     _delete_catalog_rows(catalog_db, removed_sessions)
     return EmptySessionSweep(removed_sessions, removed_files, footers_read)
-
-
-def _newest_mtime_ns(paths: Iterable[Path]) -> int:
-    newest = 0
-    for path in paths:
-        with suppress(OSError):
-            newest = max(newest, path.stat().st_mtime_ns)
-    return newest
 
 
 def enforce_storage_cap(
@@ -464,7 +563,9 @@ def emergency_evict_for_free_space(
 __all__ = [
     "EmptySessionSweep",
     "FooterLedger",
+    "FOOTER_LEDGER_VERSION",
     "SessionScan",
+    "chunk_fingerprint",
     "delete_empty_sessions",
     "delete_expired_replays",
     "delete_expired_sessions",

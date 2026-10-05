@@ -939,6 +939,7 @@ async def test_run_daemon_wires_retention_sweeper_task(
         replay_retention_days: int | None = None,
         active_replay_dir: Callable[[], Path | None] | None = None,
         catalog_db: Path | None = None,
+        footer_ledger: Path | None = None,
     ) -> None:
         captured.update(
             storage_path=storage_path,
@@ -950,6 +951,7 @@ async def test_run_daemon_wires_retention_sweeper_task(
             replay_retention_days=replay_retention_days,
             active_replay_dir=active_replay_dir() if active_replay_dir else None,
             catalog_db=catalog_db,
+            footer_ledger=footer_ledger,
         )
         await stop_event.wait()
 
@@ -983,6 +985,7 @@ async def test_run_daemon_wires_retention_sweeper_task(
     assert captured["storage_warning_mb"] == 567
     assert captured["active_session_path"] == writer.paths.root
     assert captured["catalog_db"] == config.daemon.catalog_db
+    assert captured["footer_ledger"] == config.daemon.retention_footer_ledger
 
 
 # ---------------------------------------------------------------------------

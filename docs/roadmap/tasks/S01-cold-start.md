@@ -315,6 +315,46 @@ system starting beside it.
   steady-state kind: 1.18 s, 4 footers read (the day's new sessions), 47,165
   files statted. Still owed: a *steady-state* tick (0 footers) during a drive,
   which needs a drive running at least an hour past the daemon's last start.
+  *2026-10-05 (desk): the ledger survives a restart.* `FooterLedger` now
+  persists to `daemon.retention_footer_ledger` (`control/retention_footers.json`
+  under `state_dir`, per vehicle via `scope_config`; in `DAEMON_STATE_LAYOUT`,
+  so `tests/test_state_dir.py` classifies it; gitignored `data/control/` on the
+  laptop). Each closed session is keyed by name to a sha256 over every
+  top-level chunk's name, size, mtime_ns and inode (`chunk_fingerprint`: the
+  footer check reads only those chunks' last bytes, and adding, removing,
+  renaming into place, appending or rewriting one changes the digest). The
+  session being recorded is never written; a missing, corrupt, other-version or
+  other-root file is ignored with a warning (every footer read, never a
+  crash); a failed write is logged and the tick still completes; the file is
+  rewritten only when an entry changed; loaded off the loop. Tests
+  (`tests/test_retention_tick.py`, 24 total, 18 new):
+  `test_a_restart_reads_no_footer_of_a_verified_closed_session`,
+  `test_an_unusable_ledger_means_every_footer_is_read` (×4: corrupt, empty,
+  not-a-mapping, bad-sessions),
+  `test_a_ledger_for_another_version_or_root_is_not_trusted` (×2: a primed
+  ledger with every fingerprint still matching, only `version` or
+  `sessions_root` changed; each case fails with its guard line removed),
+  `test_a_session_changed_while_the_daemon_was_down_is_read_again` (×5:
+  rewritten same size, replaced same bytes/mtime/new inode, touched, added,
+  removed), `test_the_open_session_is_never_persisted`,
+  `test_a_ledger_that_cannot_be_written_never_fails_a_tick`,
+  `test_an_unchanged_tick_does_not_rewrite_the_ledger`,
+  `test_a_ledger_key_that_is_not_a_session_name_is_ignored`,
+  `test_cached_and_uncached_sweeps_take_the_same_actions` (×2, with and
+  without the byte cap: same log actions, same surviving files, after a
+  truncated chunk, a husk and a new chunk land in verified sessions);
+  `tests/test_state_dir.py::test_retention_footer_ledger_is_per_vehicle_state`.
+  *Laptop, first tick of a fresh process* (hard-linked copy of
+  `~/canary-data/sessions/nissan-xterra-2008`: 123 sessions, 30,043 files,
+  warm cache, host load 6–9, interleaved runs): without a ledger 1,584–2,390 ms
+  with 29,590 footers read; loading the ledger (11 KB, 5–13 ms) 829–1,768 ms
+  with **0 footers read**. The copy's file list was identical before and after
+  every run. The laptop cannot reproduce the cold-card cost the change targets
+  (no `drop_caches` here): the warm win is small because stats dominate;
+  on the Pi's cold boot footer opens were the 70.5 s. **Still owed (Pi):**
+  the first tick after a cold boot with the ledger in place (expect `footers_read`
+  = the sessions closed since the last tick), and the steady-state tick during a
+  drive above.
 
 ## Needs the truck
 

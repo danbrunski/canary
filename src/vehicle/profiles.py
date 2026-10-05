@@ -550,6 +550,7 @@ def scope_config(config: CanaryConfig, profile: VehicleProfile) -> CanaryConfig:
             "calibration_dir": _scope_dir(_calibration_base(config), slug),
             "rom_library_dir": _scope_dir(config.daemon.rom_library_dir, slug),
             "memory_ledger": _scope_file(config.daemon.memory_ledger, slug),
+            "retention_footer_ledger": _scope_file(config.daemon.retention_footer_ledger, slug),
         }
     )
     vehicle = config.vehicle.model_copy(
