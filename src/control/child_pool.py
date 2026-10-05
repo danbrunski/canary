@@ -15,16 +15,24 @@ daemon thread; the event loop never waits on a child.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import multiprocessing
 import threading
 from concurrent.futures import Executor, ProcessPoolExecutor
+from dataclasses import dataclass, field
 from typing import Any
 
 log = logging.getLogger(__name__)
 
 #: Seconds a terminated child gets to exit before it is killed.
 TERMINATE_GRACE_SECONDS = 5.0
+
+#: The second brain's idle-time child (``src.control.brain_jobs``).
+BRAIN_CHILD = "brain"
+#: Longest a yielded brain child can take to be gone: the reaper's SIGTERM
+#: grace, then SIGKILL and join. The digest waits at most this long for it.
+CHILD_EXIT_BOUND_SECONDS = TERMINATE_GRACE_SECONDS + 1.0
 
 
 def spawn_pool() -> ProcessPoolExecutor:
@@ -66,4 +74,111 @@ def _reap(proc: Any, grace: float) -> None:
         log.debug("pool child reap failed", exc_info=True)
 
 
-__all__ = ["TERMINATE_GRACE_SECONDS", "discard_pool", "spawn_pool"]
+# -- in-flight registry -------------------------------------------------------
+#
+# The digest and the workbench share one memory budget with the brain's
+# idle-time jobs: at most one analysis child at a time. They live in different
+# modules and layers above this one, so the registry is here, below all three.
+# A child counts as alive from claim until its *process* has exited — a
+# terminated child still holds its memory until the reaper has seen it go.
+
+
+@dataclass
+class _Slot:
+    running: bool = True
+    processes: list[Any] = field(default_factory=list)
+    yield_requested: bool = False
+
+
+_SLOTS: dict[str, _Slot] = {}
+_SLOTS_LOCK = threading.Lock()
+
+
+def claim_child(name: str) -> None:
+    """Mark ``name``'s child as starting (alive until released *and* exited)."""
+    with _SLOTS_LOCK:
+        _SLOTS[name] = _Slot()
+
+
+def attach_child(name: str, pool: Executor) -> None:
+    """Record the processes of ``pool`` (a spawn pool) under ``name``. Call
+    right after submitting: ``ProcessPoolExecutor`` spawns on submit."""
+    if not isinstance(pool, ProcessPoolExecutor):
+        return
+    with _SLOTS_LOCK:
+        slot = _SLOTS.get(name)
+        if slot is not None:
+            slot.processes.extend((pool._processes or {}).values())
+
+
+def release_child(name: str) -> None:
+    """The computation is over; the slot stays alive until its processes exit."""
+    with _SLOTS_LOCK:
+        slot = _SLOTS.get(name)
+        if slot is not None:
+            slot.running = False
+            slot.yield_requested = False
+
+
+def child_alive(name: str) -> bool:
+    """Whether ``name``'s child is computing or its process has not exited yet."""
+    with _SLOTS_LOCK:
+        slot = _SLOTS.get(name)
+        if slot is None:
+            return False
+        alive = []
+        for proc in slot.processes:
+            try:
+                if proc.is_alive():
+                    alive.append(proc)
+            except Exception:  # noqa: BLE001 - a reaped handle is gone
+                continue
+        slot.processes = alive
+        if not slot.running and not alive:
+            del _SLOTS[name]
+            return False
+        return True
+
+
+def request_yield(name: str) -> None:
+    """Ask ``name``'s child to stop for higher-priority work (it polls this)."""
+    with _SLOTS_LOCK:
+        slot = _SLOTS.get(name)
+        if slot is not None and slot.running:
+            slot.yield_requested = True
+
+
+def yield_requested(name: str) -> bool:
+    with _SLOTS_LOCK:
+        slot = _SLOTS.get(name)
+        return slot is not None and slot.yield_requested
+
+
+async def wait_for_child_exit(name: str, timeout: float = CHILD_EXIT_BOUND_SECONDS) -> bool:
+    """Ask ``name``'s child to yield and wait, without blocking the loop, until
+    its process is gone; ``False`` if it is still alive after ``timeout``."""
+    if not child_alive(name):
+        return True
+    request_yield(name)
+    deadline = asyncio.get_running_loop().time() + timeout
+    while child_alive(name):
+        if asyncio.get_running_loop().time() >= deadline:
+            return False
+        await asyncio.sleep(0.05)
+    return True
+
+
+__all__ = [
+    "BRAIN_CHILD",
+    "CHILD_EXIT_BOUND_SECONDS",
+    "TERMINATE_GRACE_SECONDS",
+    "attach_child",
+    "child_alive",
+    "claim_child",
+    "discard_pool",
+    "release_child",
+    "request_yield",
+    "spawn_pool",
+    "wait_for_child_exit",
+    "yield_requested",
+]

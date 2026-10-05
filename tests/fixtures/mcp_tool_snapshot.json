@@ -533,6 +533,42 @@
       "type": "object"
     }
   },
+  "get_brain_job": {
+    "description": "One brain job and its full result.",
+    "inputSchema": {
+      "properties": {
+        "job_id": {
+          "title": "Job Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "job_id"
+      ],
+      "title": "get_brain_jobArguments",
+      "type": "object"
+    },
+    "name": "get_brain_job",
+    "outputSchema": {
+      "additionalProperties": true,
+      "title": "get_brain_jobDictOutput",
+      "type": "object"
+    }
+  },
+  "get_brain_status": {
+    "description": "The second brain's standing on the Pi: the ECM program and calibration\n    in force, what a program or calibration change invalidated, which tables\n    the twin selects, whether RAM addresses need re-verification (only on a\n    program change), the transient ECU state it cannot know after a restart,\n    memory size and job counts.",
+    "inputSchema": {
+      "properties": {},
+      "title": "get_brain_statusArguments",
+      "type": "object"
+    },
+    "name": "get_brain_status",
+    "outputSchema": {
+      "additionalProperties": true,
+      "title": "get_brain_statusDictOutput",
+      "type": "object"
+    }
+  },
   "get_capture_quality": {
     "description": "The capture contract verdict: live for the active capture, or recomputed.\n\n    Without ``session_id`` this is the running capture scored on what has\n    been persisted so far (``scope: live``). With one, the daemon recomputes\n    coverage and tuple yield from that session's rows without rewriting it\n    and returns the stored sidecar beside the recomputation \u2014 a v1 sidecar\n    comes back as ``scope: trailing_snapshot`` with losses unknown, which is\n    what it was. Read ``failures[].clause`` for the constraint that bound\n    (unanswered_input, rate_shortfall, acquisition_gap, tuple_incomplete,\n    tuple_skew, persistence_loss, unknown_loss_counters); ``losses`` is\n    scoped to the capture or marked unknown, never assumed zero.\n    ",
     "inputSchema": {
@@ -683,6 +719,20 @@
       "type": "object"
     }
   },
+  "get_ecu_application_model": {
+    "description": "The ECM application twin's coverage (E05.1): which outputs are\n    qualified or conditional, what the twin implements, observes and assumes\n    on each path, the blockers, the logic still uncovered, and whether the\n    image recorded as running now is one the program was checked on. Read-only;\n    does not communicate with the ECU.",
+    "inputSchema": {
+      "properties": {},
+      "title": "get_ecu_application_modelArguments",
+      "type": "object"
+    },
+    "name": "get_ecu_application_model",
+    "outputSchema": {
+      "additionalProperties": true,
+      "title": "get_ecu_application_modelDictOutput",
+      "type": "object"
+    }
+  },
   "get_feedback": {
     "description": "All recorded operator feedback labels + summary counts.",
     "inputSchema": {
@@ -694,6 +744,40 @@
     "outputSchema": {
       "additionalProperties": true,
       "title": "get_feedbackDictOutput",
+      "type": "object"
+    }
+  },
+  "get_investigation_card": {
+    "description": "The deterministic investigation card: what happened, hypotheses with\n    evidence for and against, predictions and outcomes, unknowns and next\n    measurements, with its evidence split into ECU computation and measured\n    engine response. No language model is involved.",
+    "inputSchema": {
+      "properties": {
+        "as_of": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "As Of"
+        },
+        "investigation_id": {
+          "title": "Investigation Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "investigation_id"
+      ],
+      "title": "get_investigation_cardArguments",
+      "type": "object"
+    },
+    "name": "get_investigation_card",
+    "outputSchema": {
+      "additionalProperties": true,
+      "title": "get_investigation_cardDictOutput",
       "type": "object"
     }
   },
@@ -1109,6 +1193,42 @@
       "type": "object"
     }
   },
+  "get_twin_session_evaluation": {
+    "description": "The target-phi twin's evaluation of one stored session: per-slot sample\n    accounting, missing inputs, the capture that would make it evaluable, the\n    observed/predicted command trace and whether the result is still current\n    for the program in force. ``not_evaluated`` until a job has run.",
+    "inputSchema": {
+      "properties": {
+        "session_id": {
+          "title": "Session Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "session_id"
+      ],
+      "title": "get_twin_session_evaluationArguments",
+      "type": "object"
+    },
+    "name": "get_twin_session_evaluation",
+    "outputSchema": {
+      "additionalProperties": true,
+      "title": "get_twin_session_evaluationDictOutput",
+      "type": "object"
+    }
+  },
+  "list_brain_jobs": {
+    "description": "The brain's idle-time jobs (session evaluation, memory consolidation)\n    with state: queued, running, deferred (and why), pending (waiting for\n    inputs), completed or failed.",
+    "inputSchema": {
+      "properties": {},
+      "title": "list_brain_jobsArguments",
+      "type": "object"
+    },
+    "name": "list_brain_jobs",
+    "outputSchema": {
+      "additionalProperties": true,
+      "title": "list_brain_jobsDictOutput",
+      "type": "object"
+    }
+  },
   "list_capture_profiles": {
     "description": "List the active vehicle's saved collection profiles.",
     "inputSchema": {
@@ -1336,6 +1456,182 @@
     "outputSchema": {
       "additionalProperties": true,
       "title": "pin_sessionDictOutput",
+      "type": "object"
+    }
+  },
+  "query_memory": {
+    "description": "Query the vehicle's investigation memory (evidence, investigations,\n    predictions, interventions, outcomes, references, retractions).\n\n    ``kind`` is a comma list of record kinds; ``calibration``/``program_id``\n    take ``unknown`` for records that state them unknown; times are ISO with a\n    UTC offset; ``as_of`` answers \"what was believed then\"; ``history``\n    includes superseded and retracted records. Every set filter must hold.",
+    "inputSchema": {
+      "properties": {
+        "as_of": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "As Of"
+        },
+        "calibration": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Calibration"
+        },
+        "history": {
+          "default": false,
+          "title": "History",
+          "type": "boolean"
+        },
+        "incident": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Incident"
+        },
+        "kind": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Kind"
+        },
+        "limit": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Limit"
+        },
+        "program_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Program Id"
+        },
+        "regime": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Regime"
+        },
+        "session": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Session"
+        },
+        "subject": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Subject"
+        },
+        "text": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Text"
+        },
+        "valid_after": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Valid After"
+        },
+        "valid_at": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Valid At"
+        },
+        "valid_before": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Valid Before"
+        }
+      },
+      "title": "query_memoryArguments",
+      "type": "object"
+    },
+    "name": "query_memory",
+    "outputSchema": {
+      "additionalProperties": true,
+      "title": "query_memoryDictOutput",
       "type": "object"
     }
   },
@@ -1734,6 +2030,28 @@
     "outputSchema": {
       "additionalProperties": true,
       "title": "replay_windowDictOutput",
+      "type": "object"
+    }
+  },
+  "resolve_evidence": {
+    "description": "Resolve one evidence id: tool, version, conditions, sources, values,\n    result (or its named unevaluable reason), supersession, and whether it is\n    ECU computation (the twin) or measured engine response.",
+    "inputSchema": {
+      "properties": {
+        "evidence_id": {
+          "title": "Evidence Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "evidence_id"
+      ],
+      "title": "resolve_evidenceArguments",
+      "type": "object"
+    },
+    "name": "resolve_evidence",
+    "outputSchema": {
+      "additionalProperties": true,
+      "title": "resolve_evidenceDictOutput",
       "type": "object"
     }
   },

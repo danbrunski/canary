@@ -240,6 +240,18 @@ async def _in_digest_child(
     """Run ``call`` in a single-use ``spawn`` child (or ``executor``), bounded
     by ``timeout``. The digest and its tuning refresh share it, so both
     fail the same named ways (:class:`TripEndDigestUnavailableError`)."""
+    # One analysis child at a time: a running brain job yields to the digest,
+    # and its process must be gone before this one spawns (bounded by the
+    # reaper's grace; past it the digest goes ahead and says so).
+    if not await child_pool.wait_for_child_exit(
+        child_pool.BRAIN_CHILD, child_pool.CHILD_EXIT_BOUND_SECONDS
+    ):
+        log.warning(
+            "%s for %s starting while a brain child is still exiting after %.0fs",
+            what,
+            session_dir.name,
+            child_pool.CHILD_EXIT_BOUND_SECONDS,
+        )
     owned = executor is None
     pool: Executor = _spawn_pool() if executor is None else executor
     finished = False

@@ -26,6 +26,7 @@ import type {
 import { AlarmsPanel } from "./AlarmsPanel";
 import { AnomalyPanel } from "./AnomalyPanel";
 import { BehaviorModelsPanel } from "./BehaviorModelsPanel";
+import { BrainPage } from "./BrainPage";
 import { ChartsPanel } from "./ChartsPanel";
 import { CaptureProfileEditor } from "./CaptureProfileEditor";
 import { ControlPanel } from "./ControlPanel";
@@ -178,6 +179,8 @@ function renderItem(
       );
     case "diag-ledger":
       return <VehicleLedgerPage token={d.token} />;
+    case "diag-brain":
+      return <BrainPage token={d.token} />;
     case "models-overview":
       return <ModelPanel status={d.status} events={d.events} />;
     case "models-behavior":

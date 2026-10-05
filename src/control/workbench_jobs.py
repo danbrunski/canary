@@ -48,6 +48,7 @@ from src.analysis.workbench import (
 )
 from src.collection import tuning_profile
 from src.config import CanaryConfig
+from src.control import child_pool
 from src.control.trip_end import (
     DIGEST_TIMEOUT_SECONDS,
     _discard_pool,
@@ -360,6 +361,12 @@ def run_workbench_job(
 _IN_FLIGHT: dict[str, asyncio.Task[dict[str, Any]]] = {}
 
 
+def any_workbench_job_in_flight() -> bool:
+    """Whether a workbench analysis child is running on this loop. The brain's
+    idle-time jobs (:mod:`src.control.brain_jobs`) yield to it."""
+    return bool(_IN_FLIGHT)
+
+
 def _job_key(kind: str, params: dict[str, Any]) -> str:
     return kind + ":" + json.dumps(params, sort_keys=True, default=str)
 
@@ -391,6 +398,21 @@ async def run_off_loop(
     existing = _IN_FLIGHT.get(key)
     if existing is not None:
         return await asyncio.shield(existing)
+    if child_pool.child_alive(child_pool.BRAIN_CHILD):
+        # The brain's idle-time child yields to operator work; ask it to, and
+        # refuse this request until its process has gone (one child at a time).
+        child_pool.request_yield(child_pool.BRAIN_CHILD)
+        raise WorkbenchRefusedError(
+            409,
+            {
+                "error": "analysis_busy",
+                "reason": "brain_child_yielding",
+                "message": (
+                    "a second-brain job is yielding its child to this request; one "
+                    "analysis child runs at a time. Retry in a few seconds."
+                ),
+            },
+        )
     if _IN_FLIGHT or any_digest_in_flight():
         raise WorkbenchRefusedError(
             409,
@@ -494,6 +516,7 @@ __all__ = [
     "MAX_POOLED_SESSIONS",
     "Selection",
     "WorkbenchRefusedError",
+    "any_workbench_job_in_flight",
     "capture_deferral",
     "laptop_path",
     "run_off_loop",

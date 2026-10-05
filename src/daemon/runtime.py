@@ -152,18 +152,41 @@ def _run_trip_end_hook(
     made to wait on it either. ``handle_trip_end_off_loop`` never raises and
     records its own refusals, so nothing here has a result to inspect.
     """
-    task = asyncio.create_task(
-        handle_trip_end_off_loop(
-            session_dir,
-            config,
-            trip=trip,
-            emitter=components.emitter,
-            notifier=components.notifier,
-            catalog_db=config.daemon.catalog_db,
-        )
-    )
+    task = asyncio.create_task(_trip_end_then_brain(session_dir, config, components, trip))
     _TRIP_END_TASKS.add(task)
     task.add_done_callback(_TRIP_END_TASKS.discard)
+
+
+async def _trip_end_then_brain(
+    session_dir: Path,
+    config: CanaryConfig,
+    components: DaemonComponents,
+    trip: TripEnd | None,
+) -> None:
+    """The digest, then (E04.4) queue the twin's evaluation of the session if
+    its capture recorded the twin's command word. The queueing reads the
+    manifest and profile off the loop; it never runs the evaluation."""
+    await handle_trip_end_off_loop(
+        session_dir,
+        config,
+        trip=trip,
+        emitter=components.emitter,
+        notifier=components.notifier,
+        catalog_db=config.daemon.catalog_db,
+    )
+    if config.scoped_profile is None:
+        return
+    try:
+        await asyncio.to_thread(_enqueue_twin_evaluation, config, session_dir)
+    except Exception:  # noqa: BLE001 - the drive's digest already stands
+        log.exception("queueing the twin evaluation of %s failed", session_dir.name)
+
+
+def _enqueue_twin_evaluation(config: CanaryConfig, session_dir: Path) -> None:
+    """In a thread: import and call :func:`src.control.brain_jobs.enqueue_after_digest`."""
+    from src.control.brain_jobs import enqueue_after_digest
+
+    enqueue_after_digest(config, session_dir)
 
 
 def shutdown_trip_target(
@@ -679,6 +702,7 @@ async def run_daemon(
 
     behavior_models_task: asyncio.Task[Any] | None = None
     config_task: asyncio.Task[Any] | None = None
+    brain_task: asyncio.Task[Any] | None = None
     inference_tasks: list[asyncio.Task[Any]] = []
     # The stack enters the dashboard server last, so it exits after the
     # shutdown sequence in ``finally`` (HTTP answers while the daemon winds
@@ -716,6 +740,9 @@ async def run_daemon(
                 live_ingress=live_ingress,
                 settle_pipeline=pipeline_barrier.settle,
             )
+            # E04.4: the brain's idle-time jobs. Started after the live source
+            # and replay controller, which decide whether collection is active.
+            brain_task = _start_brain_scheduler(config, components, stop_event)
             if live_source is not None:
                 # Hot-reload the behavior-models YAML so refit deployments don't
                 # require a daemon restart (otherwise a ``label_sessions →
@@ -798,6 +825,7 @@ async def run_daemon(
                     online_training_task,
                     behavior_models_task,
                     config_task,
+                    brain_task,
                 )
             )
             for task in inference_tasks:
@@ -811,6 +839,32 @@ async def run_daemon(
                         await task
             components.event_logger.close()
     return components
+
+
+def _start_brain_scheduler(
+    config: CanaryConfig, components: DaemonComponents, stop_event: asyncio.Event
+) -> asyncio.Task[Any] | None:
+    """Run the second brain's idle-time jobs (E04.4) for a vehicle-scoped
+    daemon; ``None`` (no task) when the config names no vehicle, since brain
+    state is per vehicle."""
+    if config.scoped_profile is None:
+        return None
+    return asyncio.create_task(_run_brain_scheduler(config, components, stop_event))
+
+
+async def _run_brain_scheduler(
+    config: CanaryConfig, components: DaemonComponents, stop_event: asyncio.Event
+) -> None:
+    """Import the twin's modules in a thread (never on the loop at boot), then
+    run the scheduler."""
+    brain_jobs = await asyncio.to_thread(importlib.import_module, "src.control.brain_jobs")
+    scheduler = brain_jobs.BrainScheduler(
+        config,
+        activity=lambda: brain_jobs.collection_activity(
+            live_source=components.live_source, replay_controller=components.replay_controller
+        ),
+    )
+    await scheduler.run_forever(stop_event)
 
 
 __all__ = [

@@ -40,6 +40,7 @@ from src.storage.async_writer import AsyncParquetTelemetryWriter
 from src.vehicle.vehicle_ledger import VehicleLedgerStore
 
 from . import (
+    brain,
     bus,
     captures,
     classification,
@@ -91,6 +92,7 @@ _ROUTER_BUILDERS: tuple[Callable[[ControlContext], APIRouter], ...] = (
     tuning.build_router,
     custom_pids.build_router,
     tyres.build_router,
+    brain.build_router,
 )
 
 

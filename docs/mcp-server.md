@@ -48,6 +48,13 @@ Read tools:
 | `get_training_runs` | `GET /control/training-runs` |
 | `list_vehicle_events` | `GET /control/vehicle-ledger` — vehicle maintenance/intervention ledger (maintenance/mod/repair/observation/DTC), oldest-first, latest per id |
 | `list_jobs` / `get_job` / `get_job_logs` | `GET /control/jobs[...]` |
+| `get_brain_status` | `GET /control/brain/status` — second brain (E04): ECM program/calibration in force, what a program or calibration change invalidated, selected twin tables, RAM-address standing (re-verify only on a program change), transient ECU state (unknown after a restart), memory and job counts |
+| `query_memory` | `GET /control/brain/memory` — `MemoryQuery` over the vehicle's investigation memory (kind, incident, subject, session, regime, calibration/program, valid/as-of times, text, history) |
+| `resolve_evidence` | `GET /control/brain/evidence/{id}` — one evidence id resolved, with `part`: ECU computation (twin) or measured engine response |
+| `get_investigation_card` | `GET /control/brain/investigations/{id}/card` — the deterministic E01.5 card; `parts` splits its evidence into ECU computation and measured engine response |
+| `get_twin_session_evaluation` | `GET /control/brain/twin/sessions/{session}` — the target-phi twin's evaluation of a stored session: accounting, missing inputs, next capture, observed/predicted trace, currency for the program in force |
+| `get_ecu_application_model` | `GET /control/ecu/application-model` — the ECM application twin's coverage (E05.1): outputs qualified/conditional, implemented/observed/assumed nodes, blockers, uncovered logic, running image |
+| `list_brain_jobs` / `get_brain_job` | `GET /control/brain/jobs[/{id}]` — idle-time jobs (queued/running/deferred/pending/completed/failed, each with its reason). Queue one with `POST /control/brain/jobs` (HTTP only) |
 | `diff_did_snapshots` | Compare two completed `did_sweep` job results (see `start_job`'s `did_sweep` kind) — reads each `<job_id>.did_sweep.json` snapshot directly off disk (no HTTP round trip for the diff itself) and classifies every DID that answered in either run: `varying` (differs between runs — the candidates worth investigating), `constant` (same both times), `intermittent` (answered in only one run). Each entry carries the raw hex from each snapshot; most DIDs have no `data/dids.yaml` scale/offset pinned yet |
 | `get_tuning` / `get_feedback` | `GET /control/{tuning,feedback}` |
 | `tail_daemon_log` | `journalctl --unit canary -o json` (fallback file when no systemd) |

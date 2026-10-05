@@ -419,6 +419,72 @@
       "auth": "control",
       "body": false,
       "method": "GET",
+      "path": "/control/brain/evidence/{evidence_id}",
+      "query": [],
+      "status_code": null
+    },
+    {
+      "auth": "control",
+      "body": false,
+      "method": "GET",
+      "path": "/control/brain/investigations/{investigation_id}/card",
+      "query": [
+        "as_of"
+      ],
+      "status_code": null
+    },
+    {
+      "auth": "control",
+      "body": false,
+      "method": "GET",
+      "path": "/control/brain/jobs",
+      "query": [],
+      "status_code": null
+    },
+    {
+      "auth": "control",
+      "body": true,
+      "method": "POST",
+      "path": "/control/brain/jobs",
+      "query": [],
+      "status_code": 202
+    },
+    {
+      "auth": "control",
+      "body": false,
+      "method": "GET",
+      "path": "/control/brain/jobs/{job_id}",
+      "query": [],
+      "status_code": null
+    },
+    {
+      "auth": "control",
+      "body": false,
+      "method": "GET",
+      "path": "/control/brain/memory",
+      "query": [],
+      "status_code": null
+    },
+    {
+      "auth": "control",
+      "body": false,
+      "method": "GET",
+      "path": "/control/brain/status",
+      "query": [],
+      "status_code": null
+    },
+    {
+      "auth": "control",
+      "body": false,
+      "method": "GET",
+      "path": "/control/brain/twin/sessions/{session_id}",
+      "query": [],
+      "status_code": null
+    },
+    {
+      "auth": "control",
+      "body": false,
+      "method": "GET",
       "path": "/control/bus-budget",
       "query": [],
       "status_code": null

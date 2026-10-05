@@ -29,6 +29,7 @@ export type WorkbenchItem =
   | "diag-explore"
   | "diag-tpms"
   | "diag-ledger"
+  | "diag-brain"
   | "diag-llm-assist"
   | "models-overview"
   | "models-behavior"

@@ -44,6 +44,7 @@ from src.mcp_server.tools import (
 from src.mcp_server.tools import (
     binned_analysis as binned_analysis_tool,
 )
+from src.mcp_server.tools import brain as brain_tool
 from src.mcp_server.tools import capture_profiles as capture_profiles_tool
 from src.mcp_server.tools import (
     classification as classification_tool,
@@ -210,6 +211,14 @@ READ_DELEGATIONS: tuple[Delegation, ...] = (
     Delegation(did_sweep_tool.diff_did_snapshots),
     Delegation(tuning_tool.get_tuning),
     Delegation(tuning_tool.get_feedback),
+    Delegation(brain_tool.get_brain_status),
+    Delegation(brain_tool.query_memory),
+    Delegation(brain_tool.resolve_evidence),
+    Delegation(brain_tool.get_investigation_card),
+    Delegation(brain_tool.get_twin_session_evaluation),
+    Delegation(brain_tool.get_ecu_application_model),
+    Delegation(brain_tool.list_brain_jobs),
+    Delegation(brain_tool.get_brain_job),
 )
 
 #: Write-side tools that are pure delegations; ``needs_audit`` injects the audit logger.

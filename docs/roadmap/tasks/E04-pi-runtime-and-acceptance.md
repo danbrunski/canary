@@ -44,7 +44,7 @@ are not finished until their applicable Pi acceptance passes here.
   never normal. A laptop benchmark cannot close this item. A failing budget
   requires implementation/scope work before enablement. **Pi required.**
 
-- [ ] **E04.4 — Run heavier work locally when collection is inactive.**
+- [~] **E04.4 — Run heavier work locally when collection is inactive.**
   Route session evaluation, memory consolidation and candidate promotion
   through the existing bounded single-flight child/job mechanisms. Persist
   progress, expose queued/running/deferred/completed/failed state and yield
@@ -56,8 +56,38 @@ are not finished until their applicable Pi acceptance passes here.
   resumed capture preempts/defers heavy work without collector loss, and a
   shutdown/restart neither loses the job nor duplicates its evidence/outcome.
   Missing held-out data remains pending rather than forcing promotion.
+  - *Laptop code, 2026-10-04 (revised after verification):*
+    `src/control/brain_jobs.py` — `BrainJobStore` (append-only `jobs.jsonl`
+    under `control/<slug>/brain/`, read incrementally by offset; job id = kind
+    + canonical params; `running` reopens `deferred: interrupted_by_restart`)
+    and `BrainScheduler`, whose job log, precheck, identity reconcile and
+    transitions all run through `asyncio.to_thread` (only in-memory checks on
+    the loop). One analysis child at a time: `src/control/child_pool.py` holds
+    a brain child alive until its process has exited; `run_off_loop` answers
+    `analysis_busy: brain_child_yielding` and asks it to yield; the digest
+    waits off-loop, bounded by `CHILD_EXIT_BOUND_SECONDS` (reaper grace + 1 s),
+    before spawning; the scheduler refuses a tick not above that bound.
+    `collection_activity` treats only `no_data` with no capture/replay as idle.
+    Kinds: `twin_session_evaluation` (`src/analysis/twin_evidence.py`, one E01
+    record per resolved slot, content-deduped) and `memory_consolidation`.
+    After each trip-end digest the daemon queues the twin's evaluation, off
+    the loop, only when the session's capture manifest recorded the twin's
+    command word (operator decision: option (c)). An open session stays
+    `pending: session_open`. Tests `tests/test_brain_jobs.py` (15 pass) and
+    `tests/test_analysis_child_registry.py` (4 pass): completes without a
+    remote host (174 samples, `unvalidated`, blockers named); parked bus
+    defers; a capture or a workbench request mid-run yields; restart reuses
+    the same evidence ids; a 0.6 s precheck leaves the loop's heartbeat gap
+    < 0.2 s; a real spawn child stays registered until its process exits; the
+    digest starts only after the brain child exits; auto-enqueue skips plain
+    drives and captures without the command word.
+  - *Remaining:* (1) Pi demonstration: a job completing on the Pi in a no_data
+    window, a capture started mid-job with `/status` storage drops unchanged,
+    and `scripts/restart_canary.sh` mid-job; (2) candidate promotion has no
+    runner yet — E03 owns candidate learning; its held-out wait uses the same
+    `pending` state.
 
-- [ ] **E04.5 — Serve the brain through the Pi's existing interfaces.**
+- [~] **E04.5 — Serve the brain through the Pi's existing interfaces.**
   Add consistent HTTP/MCP access and dashboard views for current predictions,
   residuals, applicability, program/image/slot identity, investigations,
   evidence and job status. Present the ECU computation and measured engine
@@ -68,8 +98,27 @@ are not finished until their applicable Pi acceptance passes here.
   observed/predicted trace and evidence, retrieve a prior case, and display
   missing inputs/next measurement while internet and optional language
   hosts are unavailable. HTTP and MCP return the same computed facts.
+  - *Laptop code, 2026-10-04:* one function per fact in
+    `src/control/brain_reads.py`, served by `/control/brain/{status,memory,
+    evidence/{id},investigations/{id}/card,twin/sessions/{session},jobs,
+    jobs/{id}}` (`src/dashboard/routes/control/brain.py`, control token) and
+    passed through by MCP `get_brain_status`, `query_memory`,
+    `resolve_evidence`, `get_investigation_card`,
+    `get_twin_session_evaluation`, `list_brain_jobs`, `get_brain_job`, plus
+    `get_ecu_application_model` for E05.1's route. Cards split evidence into
+    `ecu_computation` (twin, `labels.computation: ecu_command`) and
+    `engine_response`. Dashboard *Diagnose → Investigations*
+    (`panels/BrainPage.tsx`): identity/recovery, jobs (queue/state/reason),
+    memory search, card with the two parts, unknowns and next measurement, twin
+    trace (observed sparkline, predicted table, missing inputs, capture
+    requirement). `tests/test_brain_routes.py::test_http_and_mcp_return_the_same_computed_facts`
+    asserts HTTP == shared function == MCP for all eight; `BrainPage.test.tsx`
+    (5 pass).
+  - *Remaining:* (1) live current predictions/residuals/applicability need the
+    streaming evaluator (E04.1); slot identity is per stored evaluation only;
+    (2) phone demonstration on the Pi with internet off.
 
-- [ ] **E04.6 — Persist and recover the standalone brain.**
+- [~] **E04.6 — Persist and recover the standalone brain.**
   Exercise per-vehicle stores and candidate checkpoints across daemon/Pi
   restarts, active-image changes and source outages. Use
   `scripts/restart_canary.sh` and preserve operator captures. Invalidate
@@ -80,6 +129,27 @@ are not finished until their applicable Pi acceptance passes here.
   current valid reference, reports unknown transient state honestly, and
   resumes eligible streaming work. All mutable artifacts remain outside the
   checkout; retention/replay cannot contaminate the training corpus.
+  - *Laptop code, 2026-10-04:* `src/control/brain_state.py` — `brain_dir`
+    beside the memory ledger (`control/<slug>/brain/` under `state_dir`,
+    `tests/test_brain_state.py::test_the_brain_directory_is_per_vehicle_state_under_state_dir`);
+    `reconcile_identity` persists the program/calibration last run under. An
+    image the model does not list is identified by hashing its W08 library
+    bytes over the model's program spans (`image_program`): the same program
+    hash is `calibration_changed` (predictions re-based, tables reselected,
+    RAM `unchanged`), a different hash is `program_changed` (status
+    `other_program`, program state invalid, RAM `reverify`), and only an image
+    nobody holds is `program_unknown` (RAM `unverified`, never "moved"); twin
+    evidence takes its `program_id` the same way. `recovery_report` reports
+    `transient: unknown (not_reconstructible)`. Tests (11 pass): the real
+    flash history (2026-10-04 23:02 is calibration-only); library images of
+    one program differing only in a calibration byte, and in a program byte;
+    an unheld image; a simulated restart reopens the same ledger records,
+    evidence ids and completed job.
+  - *Remaining:* (1) Pi: `scripts/restart_canary.sh` with a job and a capture
+    open, then `GET /control/brain/status` and the same evidence ids;
+    (2) candidate checkpoints (E03) and resuming streaming work (E04.1) do not
+    exist yet; (3) source outages are only the job's `pending`/`failed`
+    states, not exercised on hardware.
 
 - [ ] **E04.7 — Demonstrate the entire loop on the Pi and phone.**
   Run the committed known-answer cases on the Pi, then a qualified live
