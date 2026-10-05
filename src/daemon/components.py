@@ -170,7 +170,10 @@ def build_components(config: CanaryConfig, *, load_models: bool = True) -> Daemo
     audit_logger = ControlAuditLogger(config.daemon.audit_log)
     tuner = AlertTuner(load_tuning_config(config.daemon.tuning_config))
     notifier = Notifier(config.notifications)
-    role_gate = DetectorRoleGate(config.models.roles.by_source())
+    role_gate = DetectorRoleGate(
+        config.models.roles.by_source(),
+        forward_every_n_ticks=config.models.sequence_forward_every_n_ticks,
+    )
     emitter = _make_broadcasting_emitter(
         event_logger,
         anomalies_bus,

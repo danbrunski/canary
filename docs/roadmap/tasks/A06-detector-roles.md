@@ -448,7 +448,109 @@ training envelope". That is useful to know. It is not a diagnosis.
   alerting.** A novelty screen does not need 1 Hz. Measure it at a lower
   cadence, or post-drive, on the Pi, and return the time to the collector and
   the live second-brain loop (Pi item).
-  - *Remaining:* the whole item. It depends on A06.2 and needs a measurement
+  - *Desk half done 2026-10-05: the cadence route.* int8/ONNX was not taken:
+    ONNX Runtime is not installed, and the item's own text already names the
+    cheaper route, "append every tick, forward-pass every n".
+    - **Config:** `models.sequence_forward_every_n_ticks` (default 1), declared
+      in `canary.example.yaml` and `canary.pi.example.yaml`. `CanaryConfig`
+      refuses a cadence the persistence gate could never latch at:
+      `(min_consecutive_ticks − 1) × n` tick periods must be under
+      `persistence_window_seconds`. With the shipped 3-in-8 s gate at 1 Hz, n ≤ 3.
+    - **Engine:** `ForwardCadence` (`src/models/inference.py`). Every row is
+      appended. The first full window after a (re)fill is forward-passed,
+      then every n-th. A gap, a session change or a `reset()` restarts the
+      count. A full window between passes returns `SequenceCadenceSkip`
+      (`scored: false`). It has no score, threshold or verdict, so it is
+      never a carried-over score. It still carries the envelope check (A06.2).
+    - **Daemon:** the parent and the scoring child build the engine with
+      the same config cadence (`_build_sequence_engine`, `_WorkerState`).
+      `SequenceDetector.apply` publishes, gates, emits and fuses nothing for a
+      skip. The persistence gate is left as it is, the same as a missing
+      verdict. `/status` `detectors.inference.sequence_cadence` gives the
+      cadence and the `scored` and `cadence_skipped` counts. A01.7's
+      `sequence_windows` counts scored windows only. The envelope meter
+      still counts every window.
+    - **A02.3 budget level:** `score_budget_traces` scores the windows that
+      serving forward-passes, using the engine's own rule
+      (`SequenceScores.at_cadence` → `served_windows`). The level record
+      stores `forward_every_n_ticks`. `_build_sequence_engine` refuses to
+      serve an artifact whose level was chosen at a different cadence
+      (`require_budget_cadence`, logged once). A record without the key was
+      chosen on every window, which is cadence 1.
+    - **Graded as served, not only scored as served.** This closes the gap
+      the verifier found: the A02 harness and the A06.5 verdict still
+      graded every window.
+      - `DeployedStack.score_sequence` applies
+        `at_cadence(models.sequence_forward_every_n_ticks)`, so the
+        harness's `sequence`, `sequence_global` and `fused` are graded on the
+        served windows. `sequence_parity` stays at n = 1.
+      - `scripts/evaluate_detectors.py` records
+        `sequence_forward_every_n_ticks` in the report and the Markdown. The
+        P02.5 sequence score-cache identity names the cadence
+        (`sequence_identity`), so an n = 1 entry is never read at n = 3.
+      - `check_alert_budget(forward_every_n_ticks=)` fails `sequence`,
+        `sequence_global` and `fused` on a report scored at another cadence,
+        naming A06.6. A report without the key counts as n = 1.
+        `scripts/retrain.py` passes the publishing config's n.
+      - `verdict_record` stores the cadence. `DetectorRoleGate` and
+        `resolve_role` get the config's n from `build_components`. They
+        demote to `evidence`, naming A06.6, when the verdict was measured
+        at another cadence. This applies to the sequence source, and to any
+        verdict that graded the fused detector.
+      - The synthetic-fault harness builds its engine at the config cadence.
+        Its report records `sequence_forward_every_n_ticks`.
+      - A serving refusal (an A02.3 level chosen at another n) is on
+        `/status` as `health.sequence_cadence_refusal`, not only in the log.
+      - `benchmark_gate.incomparable_detectors` (A02.3's mechanism) names
+        `sequence`, `sequence_global` and `fused` incomparable, citing
+        A06.6, when two reports' `sequence_forward_every_n_ticks` differ. A
+        missing key reads as 1. The IF and the baselines are still diffed.
+      - Each of these ten guards was removed in turn, and in every case a
+        test in `tests/test_sequence_cadence.py` failed (scratch mutation
+        run). The suite is 41 tests, all passing.
+    - **Parity on a held-out real drive** (`2026-10-04T194342`, served r2 LSTM
+      `lstm_autoencoder_2026-09-24T035125`, engine level, every tick against
+      n = 3):
+      - 1,940 rows and 1,911 windows: 637 scored, 1,274 skipped.
+      - **0** scored results differ. `to_dict` is identical apart from
+        `latency_ms`, and the largest |Δ global_score| is 0.0.
+      - 0 skips fall on a tick with no window, and 0 skips carry a different
+        envelope verdict.
+      - The batched `at_cadence` schedule equals the engine's.
+    - **Tests:** `tests/test_sequence_cadence.py`, 41 passed (31 from the first pass). They cover:
+      - the rule, refill and reset;
+      - `at_cadence`;
+      - budget traces and the recorded cadence;
+      - the cadence refusal, including logged once;
+      - both build paths;
+      - a skip publishes nothing;
+      - the recorder;
+      - config acceptance and refusal;
+      - engine parity at n = 2, 3, 5 with a window-dependent stub model;
+      - *slow*: the committed drive slice through the installed artifact;
+      - *slow*: the live pipeline at n = 3, in the scoring child (pickled)
+        and in process.
+    - **Laptop cost, before/after:** the same held-out drive, the two engines
+      interleaved row by row. Load average ~16 on 12 cores, so the absolute
+      numbers are high. `observe` took a median of **12.18 ms** every tick
+      (total 24.2 s). At n = 3 it took a median of 2.42 ms over all ticks
+      (total 11.2 s, −54 %): 12.20 ms on a scored tick and 2.29 ms on a
+      skipped one (append and envelope check).
+    - **Laptop pipeline replay** (`tools/replay_event_diff.drive_session`,
+      240 s of the same drive, in process): `stages.sequence` median went
+      from 1,118 ms to 925 ms. The engine's share went from a median of
+      125 ms to 0.93 ms. `reconcile_feature_frame_to_spec`, which still runs
+      every tick, stayed at a median of 736 / 718 ms. On this laptop the
+      per-tick reconciliation, not the forward pass, is most of the stage.
+      The Pi measurement below decides how much the cadence actually returns.
+      `/status` read `sequence_cadence {n: 3, scored: 71, cadence_skipped: 141}`.
+  - *Remaining (Pi):*
+    - `stages.sequence` and missed ticks on the truck at n = 1 against n = 2
+      or 3, on the same drive conditions;
+    - the operator's choice of n (at most 3 under the shipped gate);
+    - any artifact that later carries an A02.3 level must have the level
+      chosen at that n.
+  - *Was:* the whole item. It depends on A06.2 and needs a measurement
     on the Pi. No lower-cadence option was added. The window is state
     advanced by every row (in-process and in the scoring child), so "score
     every n ticks" means "append every tick, forward-pass every n". That

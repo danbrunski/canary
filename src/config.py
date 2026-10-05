@@ -1002,6 +1002,17 @@ class ModelsConfig(_Strict):
     #: broadcast-latent reconstruction. TCN is documented as an NPU-export
     #: fallback, not an equal; no further bake-off gates this default.
     sequence_detector: Literal["lstm", "tcn"] = "lstm"
+    #: A06.6 — forward-pass the sequence detector on every n-th tick. The
+    #: window still advances every tick (it is state: an unappended row would
+    #: be a hole in it), and the envelope check of the novelty screen still runs
+    #: every tick; only the forward pass — the largest inference stage, a median
+    #: 344 ms per tick on the Pi (2026-09-24) — is skipped in between. A skipped
+    #: tick is a missing verdict, never a carried-over score. ``1`` is every
+    #: tick. The cadence must let ``alerts.min_consecutive_ticks`` forward passes
+    #: fit inside ``alerts.persistence_window_seconds`` (refused otherwise), and
+    #: an artifact whose A02.3 alert level was chosen at another cadence refuses
+    #: to serve.
+    sequence_forward_every_n_ticks: int = Field(default=1, ge=1)
     #: Score IF + sequence in a child process rather than a worker thread.
     #: C08 moved scoring off the event loop into a thread, which is not the
     #: same as off the CPU: measured on the Pi 2026-09-09, the daemon missed
@@ -1514,6 +1525,29 @@ class CanaryConfig(_Strict):
                 f"preprocessing.session_gap_seconds ({gap:g} s): an unchanged CAN id is "
                 "re-written only once per timeout (P02.10), so a longer one would split "
                 "quiet recordings into segments at the heartbeat gaps"
+            )
+        return self
+
+    @model_validator(mode="after")
+    def _sequence_cadence_can_latch(self) -> Self:
+        """A06.6: at a forward cadence of n, the persistence gate sees one
+        sequence verdict every n ticks. ``min_consecutive_ticks`` hits then span
+        ``(M - 1) * n`` tick periods; at or past ``persistence_window_seconds``
+        the oldest hit is evicted before the last arrives, and the detector can
+        never latch, whatever it scores."""
+        every_n = self.models.sequence_forward_every_n_ticks
+        window = self.alerts.persistence_window_seconds
+        if every_n == 1 or window is None:
+            return self
+        tick = 1.0 / max(self.preprocessing.resample_hz, 1.0)
+        span = (self.alerts.min_consecutive_ticks - 1) * every_n * tick
+        if span >= window:
+            raise ValueError(
+                f"models.sequence_forward_every_n_ticks ({every_n}) is too slow for the "
+                f"persistence gate: {self.alerts.min_consecutive_ticks} sequence verdicts "
+                f"span {span:g} s at one forward pass every {every_n * tick:g} s, which is "
+                f"not inside alerts.persistence_window_seconds ({window:g} s), so the "
+                "sequence detector could never latch (A06.6)"
             )
         return self
 

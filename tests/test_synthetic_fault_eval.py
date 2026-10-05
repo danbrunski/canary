@@ -130,6 +130,7 @@ def test_evaluate_detectors_grades_each_fault_kind_and_keeps_nominal_fp_low() ->
         "nominal_fp",
         "per_fault",
         "withheld",
+        "sequence_forward_every_n_ticks",
     }
     json.loads(json.dumps(report))
     for metric in report["per_fault"]:

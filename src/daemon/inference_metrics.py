@@ -270,6 +270,10 @@ class InferenceTiming:
     #: A06.2 — scored sequence windows against the served artifact's training
     #: envelope (:class:`EnvelopeCoverageMeter`).
     sequence_envelope: Mapping[str, Any] | None = None
+    #: A06.6 — the sequence forward cadence in force and its ticks: full
+    #: windows forward-passed (``scored``) and full windows the cadence skipped
+    #: (``cadence_skipped``, a missing verdict, never a carried score).
+    sequence_cadence: Mapping[str, Any] | None = None
     #: H04.2 — per-committee state (``agree`` / ``disagree`` / ``no_verdict``
     #: with its reason), events and the relation in force; ``None`` before the
     #: first tick.
@@ -302,6 +306,9 @@ class InferenceTiming:
             "plausibility": dict(self.plausibility) if self.plausibility is not None else None,
             "sequence_envelope": (
                 dict(self.sequence_envelope) if self.sequence_envelope is not None else None
+            ),
+            "sequence_cadence": (
+                dict(self.sequence_cadence) if self.sequence_cadence is not None else None
             ),
             "committees": dict(self.committees) if self.committees is not None else None,
             "lambda_delivery": (
@@ -343,6 +350,9 @@ class InferenceTimingRecorder:
     _lambda_delivery: Mapping[str, Any] | None = field(default=None, repr=False)
     _twin: Mapping[str, Any] | None = field(default=None, repr=False)
     _envelope: EnvelopeCoverageMeter = field(default_factory=EnvelopeCoverageMeter, repr=False)
+    _cadence_every_n: int | None = field(default=None, repr=False)
+    _cadence_scored: int = field(default=0, repr=False)
+    _cadence_skipped: int = field(default=0, repr=False)
 
     def __post_init__(self) -> None:
         if self.window < 1:
@@ -446,6 +456,25 @@ class InferenceTimingRecorder:
         if max_step_seconds is not None:
             self._window_max_steps.append(max_step_seconds)
 
+    def note_sequence_cadence(self, *, scored: bool, every_n: int | None) -> None:
+        """Count one full sequence window as forward-passed or skipped by the
+        forward cadence (A06.6). ``every_n`` is the configured cadence."""
+        if every_n is not None:
+            self._cadence_every_n = int(every_n)
+        if scored:
+            self._cadence_scored += 1
+        else:
+            self._cadence_skipped += 1
+
+    def _cadence_summary(self) -> dict[str, Any] | None:
+        if self._cadence_scored == 0 and self._cadence_skipped == 0:
+            return None
+        return {
+            "forward_every_n_ticks": self._cadence_every_n,
+            "scored": self._cadence_scored,
+            "cadence_skipped": self._cadence_skipped,
+        }
+
     def note_sequence_envelope(
         self, envelope: Mapping[str, Any] | None, *, model_version: str | None
     ) -> None:
@@ -494,6 +523,7 @@ class InferenceTimingRecorder:
             window=self.window,
             plausibility=self._plausibility,
             sequence_envelope=self._envelope.to_dict(),
+            sequence_cadence=self._cadence_summary(),
             committees=self._committees,
             lambda_delivery=self._lambda_delivery,
             twin=self._twin,

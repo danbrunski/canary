@@ -121,6 +121,136 @@ class SequenceInferenceResult:
         }
 
 
+#: A06.6 — the key, inside ``thresholds.alert_budget``, recording the forward
+#: cadence the A02.3 alert level was chosen at. A record without it predates
+#: the cadence and was chosen on every window (cadence 1).
+BUDGET_CADENCE_KEY = "forward_every_n_ticks"
+
+#: The measurement behind the cadence (A06.6), named by its refusals.
+CADENCE_INCIDENT = (
+    "A06.6: the sequence forward pass is the largest inference stage (median 344 ms "
+    "per tick on the Pi, 2026-09-24) and both detectors are evidence-role since "
+    "2026-09-23, so the novelty screen runs its forward pass every n ticks while the "
+    "window still advances every tick"
+)
+
+
+class SequenceCadenceMismatchError(ValueError):
+    """The artifact's alert level was chosen at another forward cadence."""
+
+
+@dataclass(frozen=True)
+class SequenceCadenceSkip:
+    """A06.6 — a tick whose full window advanced but was not forward-passed.
+
+    Not a score: it carries no reconstruction error, threshold or verdict, so
+    nothing downstream can read it as a fresh one. It is "the detector did not
+    look this tick" — the persistence gate's missing verdict — and says how far
+    the window is from its next forward pass. The novelty-screen envelope check
+    is cheap (39 µs per window, A06.2) and still runs on it.
+    """
+
+    model_version: str
+    timestamp: str
+    session: str
+    forward_every_n_ticks: int
+    #: Windows appended since the last forward pass, this one included
+    #: (``1 .. forward_every_n_ticks - 1``).
+    ticks_since_forward: int
+    envelope: Mapping[str, Any] | None = None
+    scored: bool = field(default=False, init=False)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "model_version": self.model_version,
+            "timestamp": self.timestamp,
+            "session": self.session,
+            "scored": self.scored,
+            "forward_every_n_ticks": self.forward_every_n_ticks,
+            "ticks_since_forward": self.ticks_since_forward,
+            "envelope": None if self.envelope is None else dict(self.envelope),
+        }
+
+
+class ForwardCadence:
+    """Which full windows get a forward pass at "every n ticks" (A06.6).
+
+    The window is state advanced by every row, so a lower cadence appends every
+    tick and forward-passes every n. The first full window after the buffer
+    (re)fills is always scored; then every ``every_n``-th full window. A tick
+    with no full window (refilling after a gap, a session change or a reset)
+    restarts the count. One rule for the live engine
+    (:meth:`SequenceInferenceEngine.observe`) and for every offline reader that
+    must see what serving sees (:func:`served_windows`), so the two cannot
+    drift.
+    """
+
+    def __init__(self, every_n: int = 1) -> None:
+        if int(every_n) < 1:
+            raise ValueError(f"forward cadence must be >= 1 tick, got {every_n!r}")
+        self.every_n = int(every_n)
+        self._since: int | None = None
+
+    @property
+    def ticks_since_forward(self) -> int | None:
+        """Full windows since the last forward pass; ``None`` before one."""
+        return self._since
+
+    def reset(self) -> None:
+        self._since = None
+
+    def step(self, window_ready: bool) -> bool:
+        """Advance by one tick; ``True`` when this tick's window is scored."""
+        if not window_ready:
+            self._since = None
+            return False
+        if self._since is None or self._since + 1 >= self.every_n:
+            self._since = 0
+            return True
+        self._since += 1
+        return False
+
+
+def served_windows(
+    has_window: Sequence[bool] | np.ndarray[Any, Any], every_n: int
+) -> np.ndarray[Any, np.dtype[np.bool_]]:
+    """Per row, whether serving at ``every_n`` forward-passes that row's window.
+
+    ``has_window`` is per row whether a full window ends there (the batched
+    scorer's non-``None`` verdicts). The same :class:`ForwardCadence` the live
+    engine steps, so an offline trace reproduces the served schedule exactly.
+    """
+    cadence = ForwardCadence(every_n)
+    return np.fromiter((cadence.step(bool(h)) for h in has_window), dtype=bool)
+
+
+def budget_cadence(alert_budget: Mapping[str, Any] | None) -> int | None:
+    """The forward cadence an applied A02.3 alert level was chosen at, or
+    ``None`` when no level was applied (nothing to keep consistent)."""
+    if not isinstance(alert_budget, Mapping) or not alert_budget.get("applied"):
+        return None
+    return int(alert_budget.get(BUDGET_CADENCE_KEY, 1))
+
+
+def require_budget_cadence(alert_budget: Mapping[str, Any] | None, every_n: int) -> None:
+    """Refuse to serve at a cadence other than the one the alert level was chosen at.
+
+    The A02.3 level is the lowest band scale whose persistence-gated episodes
+    meet the budget *on the windows serving scores*. Scoring every third window
+    changes which windows the gate sees, so a level chosen at one cadence says
+    nothing about the episode rate at another.
+    """
+    chosen_at = budget_cadence(alert_budget)
+    if chosen_at is None or chosen_at == int(every_n):
+        return
+    raise SequenceCadenceMismatchError(
+        f"the artifact's alert level was chosen forward-passing every {chosen_at} tick(s); "
+        f"models.sequence_forward_every_n_ticks is {every_n}. Re-set the level at this "
+        "cadence (set_artifact_budget_level with this config) or serve at the one it was "
+        f"chosen at. Refused because of {CADENCE_INCIDENT}."
+    )
+
+
 #: Manifest ``schema`` key recording the ``suppress_channels`` training ran
 #: with (A01.5): ``{"configured": [...], "excluded_columns": [...]}``.
 #: Training drops suppressed columns from the schema, so serving with a
@@ -615,10 +745,14 @@ class SequenceInferenceEngine:
         dtype: str = "float32",
         time_fn: Callable[[], float] = time.perf_counter,
         suppress_channels: Sequence[str] = (),
+        forward_every_n_ticks: int = 1,
     ) -> None:
         if trained.manifest.thresholds is None:
             raise ValueError("trained LSTM manifest has no calibrated thresholds")
         self.trained = trained
+        #: A06.6 — every tick appends; every ``n``-th full window is
+        #: forward-passed (:class:`ForwardCadence`). 1 scores every window.
+        self.cadence = ForwardCadence(forward_every_n_ticks)
         self.device = device
         self.dtype = dtype
         self.time_fn = time_fn
@@ -736,11 +870,34 @@ class SequenceInferenceEngine:
     def reset(self) -> None:
         """Drop the current window; scoring resumes once it refills."""
         self.buffer.clear()
+        self.cadence.reset()
 
-    def observe(self, row: Mapping[str, Any] | pd.Series) -> SequenceInferenceResult | None:
-        """Append one row and score the current window once enough rows exist."""
-        if not self.buffer.append(row):
-            return None
+    @property
+    def forward_every_n_ticks(self) -> int:
+        return self.cadence.every_n
+
+    def observe(
+        self, row: Mapping[str, Any] | pd.Series
+    ) -> SequenceInferenceResult | SequenceCadenceSkip | None:
+        """Append one row and score the current window once enough rows exist.
+
+        ``None`` while the window fills. At a forward cadence above 1
+        (A06.6), a full window between forward passes returns a
+        :class:`SequenceCadenceSkip` — explicitly not a score.
+        """
+        ready = self.buffer.append(row)
+        if not self.cadence.step(ready):
+            if not ready:
+                return None
+            _start, end_timestamp, session = self.buffer.metadata()
+            return SequenceCadenceSkip(
+                model_version=trained_version(self.trained),
+                timestamp=end_timestamp,
+                session=session,
+                forward_every_n_ticks=self.cadence.every_n,
+                ticks_since_forward=int(self.cadence.ticks_since_forward or 0),
+                envelope=self.envelope_check(self.buffer.last_mode),
+            )
         start_timestamp, end_timestamp, session = self.buffer.metadata()
         result = self.score_window(
             self.buffer.window_array(),

@@ -36,7 +36,17 @@ from pathlib import Path
 from typing import Any, cast
 
 from src.config import DetectorRole
-from src.models.alert_budget import ALERT_BUDGET_VERDICT_SCHEMA, file_sha256, verdict_path_for
+from src.models.alert_budget import (
+    ALERT_BUDGET_VERDICT_SCHEMA,
+    CADENCE_BOUND,
+    CADENCE_INCIDENT,
+    file_sha256,
+    recorded_cadence,
+    verdict_path_for,
+)
+
+#: The event source whose verdicts depend on the sequence cadence (A06.6).
+SEQUENCE_SOURCE = "lstm_autoencoder"
 
 log = logging.getLogger(__name__)
 
@@ -84,6 +94,7 @@ def _verdict_summary(record: Mapping[str, Any]) -> dict[str, Any]:
         "violations": record.get("violations"),
         "override_reason": record.get("override_reason"),
         "evaluation_drives": record.get("evaluation_drives"),
+        "sequence_forward_every_n_ticks": recorded_cadence(record),
     }
 
 
@@ -97,11 +108,15 @@ def resolve_role(
     *,
     artifact_path: Path | None,
     model_version: str | None = None,
+    forward_every_n_ticks: int = 1,
 ) -> RoleResolution:
     """The effective role of ``source`` serving the artifact at ``artifact_path``.
 
     Only a demotion is possible: ``evidence`` stays ``evidence``; ``alert``
-    needs a passing verdict naming this artifact's sha256.
+    needs a passing verdict naming this artifact's sha256. A06.6: for the
+    sequence source, and for any verdict that graded a sequence-bound detector
+    (the fused verdict), it must also have been measured at the served
+    ``forward_every_n_ticks``.
     """
     if configured != ALERT:
         return RoleResolution(source, configured, EVIDENCE, "configured evidence (models.roles)")
@@ -172,6 +187,20 @@ def resolve_role(
     if not record.get("passed"):
         reason = f"alert role refused: alert-budget verdict for {_short(digest)} is not passing"
         return RoleResolution(source, configured, EVIDENCE, reason, verdict=summary, **base)
+    graded = {
+        str(d.get("detector")) for d in record.get("detectors") or () if isinstance(d, Mapping)
+    }
+    scored_at = recorded_cadence(record)
+    if (source == SEQUENCE_SOURCE or graded & CADENCE_BOUND) and scored_at != int(
+        forward_every_n_ticks
+    ):
+        reason = (
+            f"alert role refused: the alert-budget verdict for {_short(digest)} measured the "
+            f"sequence detector every {scored_at} tick(s), but it serves every "
+            f"{forward_every_n_ticks} (models.sequence_forward_every_n_ticks); "
+            f"{CADENCE_INCIDENT}"
+        )
+        return RoleResolution(source, configured, EVIDENCE, reason, verdict=summary, **base)
     reason = (
         f"alert: passing alert-budget verdict for {_short(digest)} ({record.get('evaluated_at')})"
     )
@@ -196,8 +225,11 @@ class DetectorRoleGate(Mapping[str, DetectorRole]):
         *,
         loaded_for: LoadedLookup | None = None,
         on_change: Callable[[dict[str, Any]], None] | None = None,
+        forward_every_n_ticks: int = 1,
     ) -> None:
         self._configured = dict(configured)
+        #: A06.6 — the served sequence cadence a verdict must have been measured at.
+        self._forward_every_n_ticks = int(forward_every_n_ticks)
         self._loaded_for = loaded_for
         self._on_change = on_change
         self._lock = threading.Lock()
@@ -241,6 +273,7 @@ class DetectorRoleGate(Mapping[str, DetectorRole]):
             configured,
             artifact_path=None if artifact is None else Path(artifact),
             model_version=getattr(loaded, "serving_version", None),
+            forward_every_n_ticks=self._forward_every_n_ticks,
         )
         if artifact is not None and verdict_mtime is None:
             verdict_mtime = _mtime(verdict_path_for(Path(artifact)))

@@ -64,6 +64,26 @@ HARNESS_NAMES: dict[str, tuple[str, ...]] = {
 #: held to the budget whenever one is published.
 FUSED = "fused"
 
+#: A06.6 — the key, in the A02 report and in every verdict, recording the
+#: sequence forward cadence (``models.sequence_forward_every_n_ticks``) the
+#: sequence detector was scored at. A report or verdict without it predates the
+#: cadence and scored every window (cadence 1).
+CADENCE_KEY = "sequence_forward_every_n_ticks"
+#: The harness detectors whose verdicts depend on the sequence cadence.
+CADENCE_BOUND = frozenset({"sequence", "sequence_global", FUSED})
+#: What a cadence refusal names.
+CADENCE_INCIDENT = (
+    "A06.6: serving forward-passes the sequence detector every n-th tick, so a "
+    "persistence-gated alarm rate measured at one cadence says nothing about another"
+)
+
+
+def recorded_cadence(record: Mapping[str, Any] | None) -> int:
+    """The sequence cadence ``record`` (an A02 report or a verdict) was scored at;
+    1 for one written before the cadence existed (it scored every window)."""
+    value = (record or {}).get(CADENCE_KEY)
+    return 1 if value is None else int(value)
+
 
 def poisson_upper_rate(episodes: int, hours: float, *, alpha: float = ALERT_BUDGET_ALPHA) -> float:
     """Exact (Garwood) upper bound on a Poisson rate: the mean ``mu`` with
@@ -133,6 +153,9 @@ class AlertBudgetCheck:
     note: str = ""
     report: str | None = None
     extra: Mapping[str, Any] = field(default_factory=dict)
+    #: A06.6 — the publishing config's sequence cadence the check held the
+    #: report to; recorded in the verdict the daemon reads.
+    forward_every_n_ticks: int = 1
 
     @property
     def required(self) -> bool:
@@ -169,6 +192,7 @@ class AlertBudgetCheck:
             "incident": ALERT_BUDGET_INCIDENT,
             "note": self.note,
             "report": self.report,
+            CADENCE_KEY: self.forward_every_n_ticks,
             **dict(self.extra),
         }
 
@@ -191,6 +215,7 @@ def check_alert_budget(
     missing_report_reason: str | None = None,
     expected_artifacts: Mapping[str, str | None] | None = None,
     report_path: str | None = None,
+    forward_every_n_ticks: int = 1,
 ) -> AlertBudgetCheck:
     """Hold each alert-role published detector to ``budget`` on ``report``.
 
@@ -200,6 +225,9 @@ def check_alert_budget(
     unmeasured detector has not shown the budget. ``expected_artifacts`` maps
     the harness's artifact labels (``isolation_forest`` / ``sequence``) to the
     sha256 the publisher is about to serve; a report on other bytes fails.
+    ``forward_every_n_ticks`` is the publishing config's sequence cadence
+    (A06.6): the sequence and fused detectors fail on a report scored at
+    another one.
     """
     if override_reason is not None and not override_reason.strip():
         raise ValueError("an alert-budget override needs a stated reason")
@@ -218,6 +246,7 @@ def check_alert_budget(
             note="every published detector is evidence-role (models.roles): "
             "no alerts to hold to the budget",
             report=report_path,
+            forward_every_n_ticks=forward_every_n_ticks,
         )
     names = [name for source in alert for name in HARNESS_NAMES.get(source, (source,))]
     if report is not None and FUSED in (report.get("detectors") or ()):
@@ -233,15 +262,36 @@ def check_alert_budget(
             ),
             override_reason=override_reason,
             report=report_path,
+            forward_every_n_ticks=forward_every_n_ticks,
         )
     stale = _artifact_mismatches(report, expected_artifacts or {})
-    detectors = tuple(_detector_budget(report, name, budget=budget, stale=stale) for name in names)
+    scored_at = recorded_cadence(report)
+    detectors = tuple(
+        _cadence_refusal(name, scored_at, forward_every_n_ticks)
+        or _detector_budget(report, name, budget=budget, stale=stale)
+        for name in names
+    )
     return AlertBudgetCheck(
         budget=budget,
         alert_sources=alert,
         detectors=detectors,
         override_reason=override_reason,
         report=report_path,
+        forward_every_n_ticks=forward_every_n_ticks,
+    )
+
+
+def _cadence_refusal(name: str, scored_at: int, serving_at: int) -> DetectorBudget | None:
+    """A failed budget for a cadence-bound detector scored at another cadence."""
+    if name not in CADENCE_BOUND or scored_at == serving_at:
+        return None
+    return DetectorBudget(
+        name,
+        passed=False,
+        reason=f"the evaluation scored the sequence detector every {scored_at} tick(s); the "
+        f"publishing config serves it every {serving_at} (models.sequence_forward_every_n_"
+        f"ticks). Re-run the evaluation with the publishing config. Refused because of "
+        f"{CADENCE_INCIDENT}",
     )
 
 
@@ -398,6 +448,9 @@ __all__ = [
     "ALERT_BUDGET_ALPHA",
     "ALERT_BUDGET_VERDICT_SUFFIX",
     "ALERT_BUDGET_INCIDENT",
+    "CADENCE_BOUND",
+    "CADENCE_INCIDENT",
+    "CADENCE_KEY",
     "FUSED",
     "HARNESS_NAMES",
     "AlertBudgetCheck",
@@ -407,6 +460,7 @@ __all__ = [
     "evaluation_drives",
     "file_sha256",
     "poisson_upper_rate",
+    "recorded_cadence",
     "verdict_path_for",
     "verdict_record",
     "write_verdict",

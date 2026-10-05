@@ -270,10 +270,16 @@ def _sequence_results(
     """Tick ``featurized`` row by row through the real ``observe`` contract.
 
     ``engine`` is reset first so a previous run's tail never leaks into this
-    one. Rows before the window fills are ``None`` (no verdict yet).
+    one. Rows before the window fills are ``None`` (no verdict yet), and so is
+    a window the engine's forward cadence skipped (A06.6): the detector did not
+    look, which is what ``None`` means to the persistence gate.
     """
     engine.reset()
-    return [engine.observe(featurized.iloc[i]) for i in range(len(featurized))]
+    results: list[SequenceInferenceResult | None] = []
+    for i in range(len(featurized)):
+        result = engine.observe(featurized.iloc[i])
+        results.append(result if isinstance(result, SequenceInferenceResult) else None)
+    return results
 
 
 def _sequence_anomalous(engine: SequenceInferenceEngine, featurized: pd.DataFrame) -> pd.Series:
@@ -492,8 +498,13 @@ def evaluate_detectors(
     rng = np.random.default_rng(seed)
     fusion = FusionScorer(config.models.fusion, roles=config.models.roles.by_source())
     scales = dict(trained_if.score_scales)
+    # A06.6: graded as served — the engine forward-passes at the configured
+    # cadence, and a skipped window is a missing verdict (``_sequence_results``).
+    cadence = config.models.sequence_forward_every_n_ticks
     sequence_engine = (
-        SequenceInferenceEngine(trained_sequence) if trained_sequence is not None else None
+        SequenceInferenceEngine(trained_sequence, forward_every_n_ticks=cadence)
+        if trained_sequence is not None
+        else None
     )
     fusion_sources = ["isolation_forest", *(["sequence"] if sequence_engine else [])]
     withheld: dict[str, str] = {}
@@ -608,6 +619,7 @@ def evaluate_detectors(
         # A02.9: a detector that could not be graded is named with the reason,
         # never reported as a zero recall.
         "withheld": withheld,
+        "sequence_forward_every_n_ticks": cadence,
     }
 
 

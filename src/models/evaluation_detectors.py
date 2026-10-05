@@ -38,7 +38,7 @@ from src.columns import GAP_SUFFIX, MODE_COLUMN, SESSION_COLUMN, TIMESTAMP_COLUM
 from src.config import CanaryConfig
 from src.features.feature_pipeline import align_features_to_schema, expand_suppress_channels
 from src.models.fusion import FusionScorer
-from src.models.inference import SequenceInferenceEngine
+from src.models.inference import SequenceInferenceEngine, SequenceInferenceResult, served_windows
 from src.models.isolation_forest import (
     CALIBRATED_THRESHOLD_COLUMN,
     MISSING_FEATURES_COLUMN,
@@ -115,6 +115,35 @@ class SequenceScores:
     family_threshold: float | None
     is_anomaly: np.ndarray[Any, np.dtype[np.object_]]
     is_anomaly_global: np.ndarray[Any, np.dtype[np.object_]]
+
+    def at_cadence(self, every_n: int) -> SequenceScores:
+        """These scores as serving at a forward cadence of ``every_n`` sees
+        them (A06.6): a window the cadence does not forward-pass has no score
+        and no verdict (``NaN`` / ``None``), exactly as before a window fills.
+        The schedule is the live engine's own :class:`ForwardCadence`."""
+        if every_n == 1:
+            return self
+        keep = served_windows([v is not None for v in self.is_anomaly], every_n)
+        drop = ~keep
+
+        def _nan(values: np.ndarray[Any, np.dtype[np.float64]]) -> Any:
+            out = np.array(values, dtype=np.float64, copy=True)
+            out[drop] = np.nan
+            return out
+
+        def _none(values: np.ndarray[Any, np.dtype[np.object_]]) -> Any:
+            out = np.array(values, dtype=object, copy=True)
+            out[drop] = None
+            return out
+
+        return SequenceScores(
+            global_score=_nan(self.global_score),
+            global_threshold=_nan(self.global_threshold),
+            family_max=_nan(self.family_max),
+            family_threshold=self.family_threshold,
+            is_anomaly=_none(self.is_anomaly),
+            is_anomaly_global=_none(self.is_anomaly_global),
+        )
 
     def results(self) -> list[Any]:
         """``SequenceInferenceResult``-shaped rows for the fusion helper."""
@@ -361,7 +390,7 @@ def sequence_parity(
     worst = 0.0
     for index in range(len(head)):
         result = engine.observe(head.iloc[index])
-        if result is None:
+        if not isinstance(result, SequenceInferenceResult):
             if batched.is_anomaly[index] is not None:
                 mismatches += 1
             continue
@@ -401,6 +430,9 @@ class DeployedStack:
     ) -> None:
         self.config = config
         self.trained_if = trained_if
+        #: A06.6 — the sequence detector is graded on the windows serving
+        #: forward-passes at this cadence, never on every window.
+        self.forward_every_n_ticks = config.models.sequence_forward_every_n_ticks
         self.sequence = (
             BatchedSequenceScorer(
                 trained_sequence, suppress_channels=suppress_channels, batch_size=batch_size
@@ -461,9 +493,12 @@ class DeployedStack:
         )
 
     def score_sequence(self, features: pd.DataFrame) -> SequenceScores:
+        """The sequence detector as served: every window scored, then only the
+        windows the configured forward cadence forward-passes keep a verdict
+        (A06.6). :func:`sequence_parity` compares the scorer itself, at n = 1."""
         if self.sequence is None:
             raise ValueError("no sequence artifact in this stack")
-        return self.sequence.score(features)
+        return self.sequence.score(features).at_cadence(self.forward_every_n_ticks)
 
     def fuse(self, forest: IsolationForestScores, sequence: SequenceScores) -> DetectorOutput:
         """The fused verdict from the two sources' outputs; reads no features."""

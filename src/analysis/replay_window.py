@@ -298,7 +298,7 @@ def _build_lstm_block(
         }
 
     try:
-        from src.models.inference import SequenceInferenceEngine
+        from src.models.inference import SequenceInferenceEngine, SequenceInferenceResult
         from src.models.lstm_training import load_lstm_autoencoder_model
     except MissingLSTMAutoencoderDependencyError as exc:
         warnings.append(f"LSTM dependency missing: {exc}")
@@ -329,7 +329,7 @@ def _build_lstm_block(
         # The buffer needs SESSION/TIMESTAMP plus every feature column; the
         # feature frame already carries them post build_feature_frame.
         result = engine.observe(row)
-        if result is None:
+        if not isinstance(result, SequenceInferenceResult):
             continue
         windows.append(
             {

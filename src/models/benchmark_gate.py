@@ -30,6 +30,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from src.models.alert_budget import CADENCE_BOUND, CADENCE_INCIDENT, recorded_cadence
 from src.models.manifest import manifest_path_for
 from src.models.sequence_protocol import TrainedSequenceModel
 from src.models.sequence_registry import SEQUENCE_BACKENDS
@@ -263,9 +264,24 @@ def incomparable_detectors(
     aggregates of different drives. A detector the current report scored on
     *no* drive with none in-sample is not listed: that is ``missing``, which
     regresses.
+
+    A06.6: two reports that scored the sequence detector at different forward
+    cadences (``sequence_forward_every_n_ticks``; absent reads as 1) graded
+    different windows, so every cadence-bound detector (``sequence``,
+    ``sequence_global``, ``fused``) is incomparable between them. The IF and
+    the baselines do not depend on the cadence and are still diffed.
     """
     out: dict[str, str] = {}
+    base_cadence, cur_cadence = recorded_cadence(baseline), recorded_cadence(current)
+    if base_cadence != cur_cadence:
+        for detector in sorted(CADENCE_BOUND):
+            out[detector] = (
+                f"scored at different sequence forward cadences (every {base_cadence} vs "
+                f"every {cur_cadence} tick(s)); {CADENCE_INCIDENT}"
+            )
     for detector in SERVED_DETECTORS:
+        if detector in out:
+            continue
         base = detector_drives(baseline, detector)
         cur = detector_drives(current, detector)
         if base == cur:

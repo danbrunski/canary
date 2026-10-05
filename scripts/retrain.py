@@ -1667,7 +1667,11 @@ def _run_alert_budget_gate(
     override = args.accept_alert_budget
     if not alert_role_sources(roles, published):
         return check_alert_budget(
-            None, roles_by_source=roles, published_sources=published, override_reason=override
+            None,
+            roles_by_source=roles,
+            published_sources=published,
+            override_reason=override,
+            forward_every_n_ticks=config.models.sequence_forward_every_n_ticks,
         )
     if_model = run.train_dir(ISOLATION_FOREST_SOURCE) / "model.joblib"
     sequence_model: Path | None = None
@@ -1713,6 +1717,9 @@ def _run_alert_budget_gate(
         missing_report_reason=missing,
         expected_artifacts=expected,
         report_path=str(out) if report is not None else None,
+        # A06.6: the report must have scored the sequence detector at the
+        # cadence this config serves it at.
+        forward_every_n_ticks=config.models.sequence_forward_every_n_ticks,
     )
     extra: dict[str, Any] = {"evaluation_drives": evaluation_drives(report)}
     if SEQUENCE_SOURCE in published:

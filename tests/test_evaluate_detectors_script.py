@@ -187,6 +187,8 @@ def test_main_scores_only_unseen_drives_and_names_every_skip(tmp_path: Path) -> 
     assert "seen by 2026-05-12T000000 (isolation_forest training)" in skip["reason"]
     assert "min_agreement" in report["withheld_detectors"]["fused"]
     assert report["artifacts"]["isolation_forest"]["sha256"]
+    # A06.6: the cadence the sequence detector would be graded at.
+    assert report["sequence_forward_every_n_ticks"] == 1
     # The fixture has no fuel-trim channels, so the fault cannot be injected —
     # and the report says so rather than scoring a miss.
     assert report["injections"] == []

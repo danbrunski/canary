@@ -32,6 +32,7 @@ from src.models.fusion import (
     FusionScorer,
     FusionSource,
 )
+from src.models.inference import SequenceCadenceSkip
 from src.paths import BINDINGS_YAML as DEFAULT_BINDINGS_PATH
 from src.storage.async_writer import AsyncParquetTelemetryWriter
 from src.telemetry import TelemetryRecord, channel_of
@@ -139,6 +140,9 @@ from src.daemon.detectors.sequence import (
 )
 from src.daemon.detectors.sequence import (
     _engine_version as _engine_version,
+)
+from src.daemon.detectors.sequence import (
+    _forward_cadence_for as _forward_cadence_for,
 )
 from src.daemon.detectors.sequence import (
     _publish_sequence_suppression as _publish_sequence_suppression,
@@ -884,11 +888,19 @@ class LiveInferencePipeline:
             sources.extend(self._if.apply(result.if_computed, ctx))
         if result.sequence_result is not None:
             sequence_result = result.sequence_result
-            recorder.note_sequence_window(
-                rows=getattr(sequence_result, "window_rows", None),
-                span_seconds=getattr(sequence_result, "window_span_seconds", None),
-                max_step_seconds=getattr(sequence_result, "window_max_step_seconds", None),
+            # A06.6: a cadence-skipped window is counted as skipped, never as
+            # a scored one; its envelope check still feeds the novelty screen.
+            scored = not isinstance(sequence_result, SequenceCadenceSkip)
+            recorder.note_sequence_cadence(
+                scored=scored,
+                every_n=_forward_cadence_for(self._components),
             )
+            if scored:
+                recorder.note_sequence_window(
+                    rows=getattr(sequence_result, "window_rows", None),
+                    span_seconds=getattr(sequence_result, "window_span_seconds", None),
+                    max_step_seconds=getattr(sequence_result, "window_max_step_seconds", None),
+                )
             recorder.note_sequence_envelope(
                 getattr(sequence_result, "envelope", None),
                 model_version=getattr(sequence_result, "model_version", None),

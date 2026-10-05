@@ -277,6 +277,14 @@ models:
   # backend's own `enabled` flag below still gates whether it loads. Both
   # publish under the same anomaly source, so switching is a config change.
   sequence_detector: lstm
+  # A06.6: forward-pass the sequence detector on every n-th tick. The window
+  # still advances every tick and the novelty screen's envelope check still
+  # runs every tick; only the forward pass (the largest inference stage, a
+  # median 344 ms/tick on the Pi on 2026-09-24) waits. A skipped tick is a
+  # missing verdict, never a carried score. With the alerts gate below
+  # (3 hits inside 8 s at 1 Hz) at most 3 is accepted; an artifact whose
+  # A02.3 alert level was chosen at another cadence refuses to serve.
+  sequence_forward_every_n_ticks: 1
   # Score IF + sequence in a child process instead of a worker thread. C08
   # moved scoring off the event loop, which is not the same as off the CPU:
   # on the Pi (2026-09-09) the daemon missed 48% of its 1 Hz ticks with 2.5 of

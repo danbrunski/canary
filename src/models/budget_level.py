@@ -63,6 +63,7 @@ from src.models.evaluation_detectors import (
     suppressed_for,
 )
 from src.models.false_positive_benchmark import V1_ALERTS_PER_HOUR_BUDGET
+from src.models.inference import BUDGET_CADENCE_KEY
 from src.models.sequence_autoencoder_training import (
     TrainedSequenceAutoencoder,
     save_sequence_autoencoder_model,
@@ -129,6 +130,9 @@ class BudgetLevel:
     block_rows: int
     persistence: Mapping[str, Any]
     note: str
+    #: A06.6 — the forward cadence the traces were scored at: serving at any
+    #: other refuses (``require_budget_cadence``).
+    forward_every_n_ticks: int = 1
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -143,6 +147,7 @@ class BudgetLevel:
             "blocks": self.blocks,
             "block_rows": self.block_rows,
             "persistence": dict(self.persistence),
+            BUDGET_CADENCE_KEY: self.forward_every_n_ticks,
             "rule": "every verdict band (global, per-mode, family_max_score) x level; "
             "served verdict == served severity > level",
             "in_sample_to": "holdout_sessions: the achieved rate is measured on the drives "
@@ -187,7 +192,10 @@ def score_budget_traces(
     (a ``build_feature_frame`` output), with its engine-running rows.
 
     Scored with the serve-time channel suppression and the served rule
-    (``BatchedSequenceScorer``), keyed by the frame's own session column.
+    (``BatchedSequenceScorer``), keyed by the frame's own session column. Only
+    the windows serving forward-passes at ``models.sequence_forward_every_n_ticks``
+    carry a severity (A06.6); the rest have none, as live, so the persistence
+    gate and the episodes see the served schedule.
     """
     if frame.empty:
         return {}
@@ -202,7 +210,7 @@ def score_budget_traces(
     traces: dict[str, ScoreTrace] = {}
     for name, group in frame.groupby(SESSION_COLUMN, sort=False):
         rows = group.reset_index(drop=True)
-        scored = scorer.score(rows)
+        scored = scorer.score(rows).at_cadence(config.models.sequence_forward_every_n_ticks)
         traces[str(name)] = ScoreTrace(
             pd.to_datetime(rows[TIMESTAMP_COLUMN], utc=True).reset_index(drop=True),
             served_severity(scored),
@@ -218,6 +226,7 @@ def choose_budget_level(
     persistence: PersistenceSpec,
     block_rows: int,
     budget_per_engine_hour: float = V1_ALERTS_PER_HOUR_BUDGET,
+    forward_every_n_ticks: int = 1,
 ) -> BudgetLevel:
     """The lowest level whose alert episodes on ``traces`` meet the budget.
 
@@ -225,6 +234,8 @@ def choose_budget_level(
     returns them); every key is checked against ``manifest``'s training and
     calibration sessions first. Refuses an exposure that cannot resolve the
     budget, and one with no score at all, naming the hours and the sessions.
+    ``forward_every_n_ticks`` is the cadence ``traces`` were scored at
+    (:func:`score_budget_traces`); it is recorded with the level.
     """
     if budget_per_engine_hour <= 0:
         raise ValueError("the alert budget must be positive")
@@ -267,6 +278,7 @@ def choose_budget_level(
             "window_seconds": persistence.window_seconds,
         },
         note=result.note,
+        forward_every_n_ticks=int(forward_every_n_ticks),
     )
 
 
@@ -362,6 +374,7 @@ def set_artifact_budget_level(
         persistence=persistence,
         block_rows=int(trained.manifest.schema["sequence_length"]),
         budget_per_engine_hour=budget_per_engine_hour,
+        forward_every_n_ticks=config.models.sequence_forward_every_n_ticks,
     )
     _rewrite_thresholds(trained, artifact_path, apply_budget_level(calibration, level).to_dict())
     return level

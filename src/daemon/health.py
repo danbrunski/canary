@@ -344,6 +344,9 @@ class HealthMonitor:
         #: A01.5 — the serving sequence engine's suppress list against the one
         #: its artifact was trained with; ``None`` until an engine is built.
         self._sequence_suppression: dict[str, Any] | None = None
+        #: A06.6 — why the sequence detector is not served (its A02.3 level was
+        #: chosen at another forward cadence); ``None`` while it serves.
+        self._sequence_cadence_refusal: str | None = None
         self._detector_roles: dict[str, Any] | None = None
         self._obd_scheduler: dict[str, Any] | None = None
         self._telemetry_sinks: dict[str, dict[str, Any]] = {}
@@ -515,6 +518,12 @@ class HealthMonitor:
         lists (A01.5), so a difference is on ``/status`` and not only in the
         load-time log line. ``None`` clears it (no engine loaded)."""
         self._sequence_suppression = None if comparison is None else dict(comparison)
+
+    def observe_sequence_cadence_refusal(self, reason: str | None) -> None:
+        """Record why the sequence engine was refused for the configured
+        forward cadence (A06.6), so ``/status`` names it and not only the log.
+        ``None`` clears it."""
+        self._sequence_cadence_refusal = reason
 
     def observe_detector_roles(self, roles: Mapping[str, Any] | None) -> None:
         """Record each learned detector's configured and effective role and
@@ -808,6 +817,11 @@ class HealthMonitor:
             **(
                 {"sequence_suppression": dict(self._sequence_suppression)}
                 if self._sequence_suppression is not None
+                else {}
+            ),
+            **(
+                {"sequence_cadence_refusal": self._sequence_cadence_refusal}
+                if self._sequence_cadence_refusal is not None
                 else {}
             ),
             **(

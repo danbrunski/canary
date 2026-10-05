@@ -222,10 +222,15 @@ class _WorkerState:
     """
 
     def __init__(self, managers: Mapping[str, Any], config: Any) -> None:
-        from src.daemon.detectors.sequence import _build_sequence_engine, _suppress_channels_for
+        from src.daemon.detectors.sequence import (
+            _build_sequence_engine,
+            _forward_cadence_for,
+            _suppress_channels_for,
+        )
 
         self._build_engine = _build_sequence_engine
         self._suppress_for = _suppress_channels_for
+        self._cadence_for = _forward_cadence_for
         self.if_manager = managers.get("isolation_forest")
         sequence_type = next((name for name in managers if name != "isolation_forest"), None)
         self.sequence_manager = managers.get(sequence_type) if sequence_type else None
@@ -257,8 +262,12 @@ class _WorkerState:
         version = loaded.serving_version
         if self.engine_version == version and self.engine is not None:
             return
+        # A06.6: the same forward cadence as the parent, from the same config
+        # — the child's window is the one that advances every tick.
         self.engine = self._build_engine(
-            loaded, suppress_channels=self._suppress_for(self._config_holder, loaded)
+            loaded,
+            suppress_channels=self._suppress_for(self._config_holder, loaded),
+            forward_every_n_ticks=self._cadence_for(self._config_holder),
         )
         self.engine_version = version if self.engine is not None else None
 

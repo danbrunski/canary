@@ -166,6 +166,10 @@ models:
   # Active sequence-detector backbone ("lstm" = GRU-D today). The selected
   # backend's own `enabled` flag still gates loading.
   sequence_detector: lstm
+  # A06.6 forward-pass cadence (every n-th tick; the window advances every
+  # tick). 1 until the Pi's per-tick cost at a lower cadence is measured; see
+  # canary.example.yaml.
+  sequence_forward_every_n_ticks: 1
   isolation_forest:
     enabled: true
     # A04.10 (operator, 2026-09-23): 600 trees -- between 200 (seed-agreement

@@ -25,6 +25,7 @@ from src.models.fusion import (
     downgrade_unsustained,
     lstm_source,
 )
+from src.models.inference import SequenceCadenceSkip
 
 
 @dataclass(frozen=True)
@@ -82,11 +83,15 @@ class SequenceDetector(_PreparedDetector[_SequenceComputeJob, Any]):
         if loaded is None or row is None or not ctx.scoring_allowed:
             return None
         if self._engine_version != self.model_version:
+            cadence = _forward_cadence_for(self._components)
             self._engine = _build_sequence_engine(
-                loaded, suppress_channels=_suppress_channels_for(self._components, loaded)
+                loaded,
+                suppress_channels=_suppress_channels_for(self._components, loaded),
+                forward_every_n_ticks=cadence,
             )
             self._engine_version = self.model_version if self._engine is not None else None
             _publish_sequence_suppression(self._components, self._engine)
+            _publish_cadence_refusal(self._components, _cadence_refusal(loaded, cadence))
         if self._engine is None:
             return None
         reset = (
@@ -109,8 +114,14 @@ class SequenceDetector(_PreparedDetector[_SequenceComputeJob, Any]):
 
     def apply(self, result: Any, ctx: TickContext) -> list[FusionSource]:
         """Loop side: ``/ws/scores``, persistence, per-source emit, fusion
-        source. ``result`` is ``None`` until the window is full."""
-        if result is None:
+        source. ``result`` is ``None`` until the window is full.
+
+        A :class:`~src.models.inference.SequenceCadenceSkip` (A06.6) is a tick
+        the forward cadence did not score: nothing is published, the
+        persistence gate is not advanced (a missing verdict leaves it as it
+        is), nothing is emitted, and fusion gets no sequence source — the
+        previous score is never carried forward as this tick's."""
+        if result is None or isinstance(result, SequenceCadenceSkip):
             return []
         _publish_score(
             self._components.scores_broadcaster,
@@ -148,7 +159,12 @@ class SequenceDetector(_PreparedDetector[_SequenceComputeJob, Any]):
         ]
 
 
-def _build_sequence_engine(loaded: Any, *, suppress_channels: tuple[str, ...] = ()) -> Any:
+def _build_sequence_engine(
+    loaded: Any,
+    *,
+    suppress_channels: tuple[str, ...] = (),
+    forward_every_n_ticks: int = 1,
+) -> Any:
     """Build a ``SequenceInferenceEngine`` for a freshly-swapped model, or
     ``None`` on a bad checkpoint (retried next tick). Backbone-agnostic: the
     engine drives whichever sequence detector the manager loaded.
@@ -156,14 +172,52 @@ def _build_sequence_engine(loaded: Any, *, suppress_channels: tuple[str, ...] = 
     ``suppress_channels`` is forwarded so config-listed noise channels (fuel
     level, HVAC, etc.) get their mask zeroed at every window — keeps the
     runtime mask knob honoured from *every* engine-construction path.
+    ``forward_every_n_ticks`` is the A06.6 cadence, from the same config in
+    this process and the scoring child. An artifact whose A02.3 alert level was
+    chosen at another cadence is refused here, the one serve-side build path
+    (``None``, logged once per artifact and cadence).
     """
     try:
         from src.models.inference import SequenceInferenceEngine
 
-        return SequenceInferenceEngine(loaded.artifact, suppress_channels=suppress_channels)
+        refusal = _cadence_refusal(loaded, forward_every_n_ticks)
+        if refusal is not None:
+            key = (str(getattr(loaded, "serving_version", "")), forward_every_n_ticks)
+            if key not in _CADENCE_REFUSALS_LOGGED:
+                _CADENCE_REFUSALS_LOGGED.add(key)
+                log.error("sequence detector not served: %s", refusal)
+            return None
+        return SequenceInferenceEngine(
+            loaded.artifact,
+            suppress_channels=suppress_channels,
+            forward_every_n_ticks=forward_every_n_ticks,
+        )
     except Exception:  # noqa: BLE001 — bad checkpoint shouldn't kill the task
         log.exception("failed to build SequenceInferenceEngine; will retry next tick")
         return None
+
+
+def _cadence_refusal(loaded: Any, forward_every_n_ticks: int) -> str | None:
+    """Why ``loaded`` may not serve at ``forward_every_n_ticks`` (its A02.3
+    alert level was chosen at another cadence, A06.6), or ``None``."""
+    from src.models.inference import SequenceCadenceMismatchError, require_budget_cadence
+
+    artifact = getattr(loaded, "artifact", None)
+    thresholds = getattr(getattr(artifact, "manifest", None), "thresholds", None)
+    budget = thresholds.get("alert_budget") if isinstance(thresholds, dict) else None
+    try:
+        require_budget_cadence(budget, forward_every_n_ticks)
+    except SequenceCadenceMismatchError as exc:
+        return str(exc)
+    return None
+
+
+def _publish_cadence_refusal(components: Any, reason: str | None) -> None:
+    """Put a cadence refusal on ``/status`` (``health.sequence_cadence_refusal``)."""
+    health = getattr(components, "health_monitor", None)
+    observe = getattr(health, "observe_sequence_cadence_refusal", None)
+    if observe is not None:
+        observe(reason)
 
 
 def _publish_sequence_suppression(components: Any, engine: Any) -> None:
@@ -176,6 +230,17 @@ def _publish_sequence_suppression(components: Any, engine: Any) -> None:
         return
     comparison = getattr(engine, "suppression", None)
     health.observe_sequence_suppression(comparison.to_dict() if comparison is not None else None)
+
+
+#: ``(artifact version, cadence)`` pairs whose cadence refusal was logged; the
+#: build is retried every tick and the refusal would otherwise log at 1 Hz.
+_CADENCE_REFUSALS_LOGGED: set[tuple[str, int]] = set()
+
+
+def _forward_cadence_for(components: Any) -> int:
+    """The configured A06.6 forward cadence (``models.sequence_forward_every_n_ticks``)."""
+    models = getattr(getattr(components, "config", None), "models", None)
+    return int(getattr(models, "sequence_forward_every_n_ticks", 1))
 
 
 def _suppress_channels_for(components: Any, loaded: Any) -> tuple[str, ...]:

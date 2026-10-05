@@ -106,6 +106,7 @@ from src.features.feature_pipeline import (
     load_resampled_session,
 )
 from src.log import configure_logging
+from src.models.alert_budget import CADENCE_KEY
 from src.models.benchmark_gate import (
     DEFAULT_TOLERANCE,
     PROTOCOL_NAME,
@@ -1529,6 +1530,13 @@ class KeySources:
     harness_files: tuple[Path, ...]
 
 
+def sequence_identity(artifact_input: str | None, config: CanaryConfig) -> str:
+    """The sequence component's score-cache identity: the artifact (with its
+    manifest) and the forward cadence it is graded at (A06.6). A cache scored
+    at one cadence is never read back at another."""
+    return f"{artifact_input}|{CADENCE_KEY}={config.models.sequence_forward_every_n_ticks}"
+
+
 def _artifact_input(path: Path | None) -> str | None:
     if path is None or not path.exists():
         return None
@@ -1906,6 +1914,8 @@ def render_markdown(report: Mapping[str, Any]) -> str:
         f"- Alert budget: {report['budget_per_engine_hour']} per engine-hour "
         "(alert-role detectors only)",
         f"- Detector roles (`models.roles`): {report.get('roles')}",
+        f"- Sequence forward cadence: every {report.get(CADENCE_KEY, 1)} tick(s) "
+        "(`models.sequence_forward_every_n_ticks`, A06.6)",
         f"- Sequence batched-vs-served parity: {report.get('sequence_parity')}",
         f"- Baseline fit sessions: {report.get('baseline_fit_sessions')}"
         + (
@@ -2606,8 +2616,9 @@ def _evaluate(args: argparse.Namespace, cleanup: ExitStack, early: Mapping[str, 
         identities["isolation_forest"] = str(inputs["isolation_forest"])
     if trained_seq is not None:
         # The serve-time suppress list comes from the config, which is in
-        # every unit key (``feature_key``); the batch size is code.
-        identities["sequence"] = str(inputs["sequence"])
+        # every unit key (``feature_key``); the batch size is code. The
+        # forward cadence is named in the identity itself (A06.6).
+        identities["sequence"] = sequence_identity(inputs["sequence"], config)
     detectors: list[Detector] = [stack]
     baseline_thresholds: dict[str, Any] = {}
     baseline_specs: list[tuple[ScoreModel | None, float]] = []
@@ -2947,6 +2958,10 @@ def _evaluate(args: argparse.Namespace, cleanup: ExitStack, early: Mapping[str, 
             "window_seconds": persistence.window_seconds,
         },
         "budget_per_engine_hour": args.budget,
+        # A06.6: the sequence and fused verdicts were scored only on the
+        # windows serving forward-passes at this cadence; the alert-budget
+        # gate refuses a report scored at another one.
+        CADENCE_KEY: config.models.sequence_forward_every_n_ticks,
         "detectors": names,
         "withheld_detectors": withheld_detectors,
         # What the baselines actually rest on: a requested session that did
