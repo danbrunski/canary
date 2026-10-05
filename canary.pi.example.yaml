@@ -61,12 +61,11 @@ collection:
     # two were polled; both were already reverse-engineered in data/dids.yaml.
     - ECM_RPM                    # 0x1219 — co-sampled RPM for DID surfaces
     - ECM_THROTTLE_POS_SENSOR_2  # 0x1210 — TPS sensor 2, the redundant-pair partner
-    # Intake cam phasing (CVTCS). The only item on the tuner's parameter list
-    # that CANary had no channel for at all — the VQ40DE does have intake
-    # phasing, and 0x1110 was already reverse-engineered. Scale is still
-    # unpinned (only 0 at idle / 11 at 2500 rpm observed), so it lands as a
-    # raw count until a rev sweep calibrates it.
-    - ECM_INTAKE_VVT_SOLENOID_DUTY  # 0x1110 — intake cam phasing duty
+    # Commanded EVAP purge, 0.5 % per count: the same ECM byte Mode 01 PID
+    # 0x2E reports (firmware, 2026-10-04). It was polled here as intake VVT
+    # solenoid duty under the old name ECM_INTAKE_VVT_SOLENOID_DUTY, which
+    # still resolves as an alias; that identification was wrong.
+    - ECM_EVAP_PURGE_CMD  # 0x1110 — commanded EVAP purge
   # Batch up to N PIDs per Mode-01 request (SAE J1979 allows 6). Batched PIDs
   # share one request *and one timestamp*, so a capture reads as synchronous
   # rows instead of interleaved samples — and it roughly doubles throughput.

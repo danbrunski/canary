@@ -61,7 +61,7 @@ Nissan Mode 22 DID rows
 0x113A - Commanded intake-cam advance - raw times 0.5 minus 64 degCA - high confidence
 0x1135 - Measured intake-cam angle, one bank - raw times 0.5 minus 64 degCA - high confidence
 0x1163 - Measured intake-cam angle, other bank - raw times 0.5 minus 64 degCA - high confidence
-0x1110 - Intake VVT-solenoid duty - percentage scale not pinned - medium confidence
+0x1110 - Commanded EVAP purge, the PID 0x2E byte (formerly catalogued as intake VVT-solenoid duty, wrong) - raw times 0.5 percent - high confidence
 0x1206 - Intake/manifold-pressure candidate - raw 16-bit value, scale unknown - medium confidence
 0x1207 - Second intake/manifold-pressure candidate - raw 16-bit value, scale unknown - medium confidence
 0x1201 - Coarse duplicate engine speed - raw times 12.5 rpm - high confidence

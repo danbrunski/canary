@@ -383,11 +383,70 @@ def test_did_catalog_entries_are_pinned_to_the_firmware(pin: dict[str, Any]) -> 
             f"0x{pin['did']:04X} reads the PID 0x{pin['mode01_pid']:02X} word "
             f"({pid_name}) but is catalogued as {entry.name}"
         )
+    elif pid_name == "EVAPORATIVE_PURGE":
+        # 0x1110 was intake VVT solenoid duty until 2026-10-04.
+        assert "EVAP_PURGE" in entry.name and "VVT" not in entry.name
     else:
         assert pid_name == "SPEED"
         assert "SPEED" in entry.name
     # Every corrected entry rests on CAN evidence, never on K-line alone.
     assert "can" in {item.transport for item in entry.evidence}
+
+
+def _pid_from_ram(raw: int, arithmetic: dict[str, int]) -> int:
+    """PID byte A the ECM's CAN Mode 01 handler builds from the RAM byte."""
+    return min(arithmetic["max"], raw * arithmetic["multiply"] // arithmetic["divide"])
+
+
+_ARITHMETIC_PINS = [p for p in EXPECTATIONS["did_pins"] if "mode01_a" in p]
+
+
+@pytest.mark.parametrize(
+    "pin", _ARITHMETIC_PINS, ids=[f"0x{p['did']:04X}" for p in _ARITHMETIC_PINS]
+)
+def test_did_scale_reproduces_the_ecm_own_pid_conversion(pin: dict[str, Any]) -> None:
+    """A DID and a PID that read the same RAM byte must decode to the same value.
+
+    The ECM's own Mode 01 handler converts the byte to the PID's A byte
+    (``mode01_a``), and the PID's SAE decoder turns A into engineering units.
+    The catalog's decode of the raw byte has to land within one A step of that
+    for every raw value the PID does not clamp. This is a firmware known
+    answer: it needs no capture, so it holds even where Mode 01 and the DID
+    session cannot be read together. The rival 0x1110 scale, 100/255 % per
+    count, fails it, so it can tell the two apart (checked below).
+    """
+    from src.collection.pid_decoders import PID_DECODERS
+    from src.decode.dids import apply_scaling, decode_did_raw
+
+    entry = next(e for e in load_did_map(DIDS_PATH).dids if e.did == pin["did"])
+    pid_decoder = PID_DECODERS[pin["mode01_pid"]][1]
+    arithmetic = pin["mode01_a"]
+
+    def pid_value(a: int) -> float:
+        decoded = pid_decoder(bytes([a]))
+        assert decoded is not None
+        return decoded[0]
+
+    one_a_step = pid_value(1) - pid_value(0)
+
+    def disagreements(scale: float) -> list[int]:
+        bad = []
+        for raw in range(256):
+            a = _pid_from_ram(raw, arithmetic)
+            if a == arithmetic["max"]:
+                continue  # the PID clamps; the DID does not
+            assert decode_did_raw(entry, bytes([raw])) == raw
+            did_value = raw * scale + (entry.offset or 0.0)
+            if abs(did_value - pid_value(a)) > one_a_step:
+                bad.append(raw)
+        return bad
+
+    assert entry.scale is not None
+    assert disagreements(entry.scale) == []
+    if pin["did"] == 0x1110:
+        assert apply_scaling(entry, 100) == pytest.approx(50.0)
+        # The other candidate D04.7 could not rule out from saturation alone.
+        assert disagreements(100 / 255), "the 100/255 % reading should fail this check"
 
 
 @pytest.mark.parametrize(

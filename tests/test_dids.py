@@ -263,3 +263,24 @@ def test_the_2026_10_04_can_corrections_hold() -> None:
     for did in (0x1102, 0x1123, 0x1124, 0x1125, 0x1126):
         assert "can" in {item.transport for item in by_did[did].evidence}, f"0x{did:04X}"
         assert "kline" not in {item.transport for item in by_did[did].evidence}, f"0x{did:04X}"
+
+
+def test_0x1110_is_commanded_evap_purge_not_vvt_duty() -> None:
+    """2026-10-04: the CAN pointer table sends 0x1110 to 0xFFFF272E, the byte
+    the PID 0x2E (EVAP purge) handler reads, so it is commanded purge at 0.5 %
+    per count. It was catalogued as intake VVT solenoid duty from a zero at
+    idle that purge shows too. The exact decode is pinned against the PID
+    handler's arithmetic in the ground-truth suite."""
+    from src.collection.obd_scheduler import parse_did_token
+
+    entry = {e.did: e for e in load_did_map(DIDS_PATH).dids}[0x1110]
+    assert entry.name == "ECM_EVAP_PURGE_CMD"
+    assert entry.scale == 0.5
+    assert entry.unit == "percent"
+    assert "can" in {item.transport for item in entry.evidence}
+    # The refuted reading stays on record, tagged with the bus it came from.
+    assert any("VVT" in item.finding for item in entry.evidence_against)
+    assert all(item.transport for item in entry.evidence_against)
+    # Saved profiles and the Pi's obd_dids still name the old one; it must
+    # resolve to this DID rather than stop the daemon at start.
+    assert parse_did_token("ECM_INTAKE_VVT_SOLENOID_DUTY") == 0x1110

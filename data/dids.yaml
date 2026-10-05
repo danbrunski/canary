@@ -616,6 +616,30 @@ dids:
         finding: >
           x0.005: ~0.67 V warm idle -> 0.90 V at 2500 rpm (throttle
           opened); NT510 "TP sen 1-b1" = 0.65. Pairs with 0x1210.
+      - session: firmware-ZS44A-20260920
+        method: disassembly
+        transport: can
+        finding: >
+          CAN Mode 22 handler FUN_000d16b8 sends DID high byte 0x12 to pointer
+          table 0x24B84, indexed by the low byte; entry 15 (0x120F) is
+          0xFFFF2B0C. That word is the first single sample of throttle sensor
+          A, A/D channel 6 (0xFFFFF80C), stored at 0x3F6F2 in FUN_0003f692:
+          a 10-bit count, 0..1023. Mode 01 PID 0x11 reads w2CCE = w2B0C minus
+          the learned closed position w4C72 (handler 0xD41E0, A =
+          clamp_u8(max(0, w2CCE) x 100/321)), so 8.1855 counts per
+          throttle-%. The 2026-09-22 B05.7 control on 2026-09-18T213818
+          (obd:THROTTLE_POS -> this DID, r2=0.995, 70 pairs) gave 0.0408 V/%
+          at x0.005, i.e. 8.16 counts per %: the same counts, 0.3 % apart.
+          At a 5 V A/D reference one count is 5/1024 = 4.8828 mV, so x0.005
+          reads 2.4 % high; the reference voltage is inferred, not read from
+          code. NT510's 0.65 V at idle fits 4.8828 mV (raw ~134 -> 0.654 V)
+          better than x0.005 (0.67 V).
+    notes: >
+      Scale deliberately left at 0.005 V on 2026-10-04 although the firmware
+      says 5/1024 V per count (2.4 % lower): did:ECM_THROTTLE_POS_SENSOR_1 is a
+      served feature of the deployed sequence model, so a rescale is a
+      feature-spec change that needs a retrain decision first (D03.36). The
+      counts are exact; only the volts are 2.4 % high.
 
   - did: 0x1210
     name: ECM_THROTTLE_POS_SENSOR_2
@@ -632,22 +656,79 @@ dids:
       - session: 2026-05-16T223328
         method: four_state_plus_nt510_name
         finding: x0.005, tracks sensor 1 (~0.67 idle -> 0.90 rev); NT510 "TP sen 2-b1" = 0.65.
+      - session: firmware-ZS44A-20260920
+        method: disassembly
+        transport: can
+        finding: >
+          CAN pointer table 0x24B84 entry 16 (0x1210) is 0xFFFF2AF2, written
+          at 0x3F5CE as 0x400 - w3DBA, where w3DBA is throttle sensor B's A/D
+          channel 19 (0xFFFFF82E) >> 6 (0x29598). The DID therefore reports
+          1024 minus sensor B's count: sensor B already inverted into sensor
+          A's sense, which is why it tracks 0x120F instead of mirroring it.
+          Mode 01 PID 0x47 reads w2CD0 = w2AF2 minus the learned closed
+          position w4C74 (handler 0xD4B5A, same x100/321 scaling as PID 0x11).
+          Same A/D, so the same 5/1024 V per count (inferred) as 0x120F.
+    notes: >
+      The decoded value is NOT sensor 2's pin voltage. The ECM inverts the
+      count before this DID sees it, so raw x scale reads in sensor 1's sense
+      (~0.65 V at idle, as the NT510 shows "TP sen 2-b1"). The pin voltage is
+      about 5 V minus that, (1024 - raw) x 5/1024 V. Scale is held at 0.005 V
+      for the same served-feature reason as 0x120F (D03.36).
 
   - did: 0x1110
-    name: ECM_INTAKE_VVT_SOLENOID_DUTY
+    name: ECM_EVAP_PURGE_CMD
     byte_start: 0
     byte_length: 1
     response_length: 1
     response_length_source: '23 local sessions (41,578 stored Mode 22 response payloads) plus _capture-tuning-did-2026-09-11T003700 (15,750 payloads on the H8 drive), all 1 byte, no other width observed. Payload is the full post-header response (_decode_response stores response.payload unmodified). The same capture independently re-confirmed every width recorded in D02.4. D02.4 / H8, 2026-09-10.'
     byte_order: big
-    scale: null          # only 0 (idle) and 11 (rev) observed — scaling unpinned
-    offset: null
+    scale: 0.5           # % per count: the PID 0x2E byte (A = byte x 1275/1000, 100/255 % per A)
+    offset: 0.0
     unit: percent
-    confidence: medium
+    confidence: high
+    # Renamed 2026-10-04. The old name was a wrong identification; it stays
+    # only so saved capture profiles and the Pi's collection.obd_dids keep
+    # parsing (parse_did_token refuses an unknown name at daemon start).
+    aliases:
+      - ECM_INTAKE_VVT_SOLENOID_DUTY
     evidence:
+      - session: firmware-ZS44A-20260920
+        method: disassembly
+        transport: can
+        finding: >
+          CAN Mode 22 handler FUN_000d16b8 sends DID high byte 0x11 to pointer
+          table 0x24988, indexed by the low byte; entry 16 (0x1110) is
+          0xFFFF272E, returned as one byte. The CAN Mode 01 handler reads the
+          same byte for PID 0x2E, EVAP_PURGE (0xD461C: 0xFFFF2706 + 0x28) and
+          reports A = min(255, byte x 1275/1000). PID 0x2E is A x 100/255 %,
+          so a count is 0.5 %. 0xFFFF272E is a copy of 0xFFFF27BA, which the
+          EVAP purge control FUN_0006a52c writes as purge_raw + 1 (capped at
+          255), or 0 while purge is off.
+      - session: firmware-ZS44A-20260920
+        method: disassembly
+        transport: kline
+        finding: >
+          The K-line pointer table 0x22738 entry 16 is the same 0xFFFF272E, so
+          0x1110 is the purge byte on both transports.
+    evidence_against:
       - session: 2026-05-16T214006
         method: four_state_classification
-        finding: 0 at KOEO/cold/warm idle, 11 at 2500 rpm; NT510 "Int/V sol" = 0.00 % at idle.
+        transport: can
+        finding: >
+          The former identification, intake VVT solenoid duty
+          (ECM_INTAKE_VVT_SOLENOID_DUTY), withdrawn 2026-10-04. It rested on
+          0 at KOEO/cold/warm idle, 11 at 2500 rpm, and the NT510's
+          "Int/V sol" = 0.00 % at idle. Purge also reads 0 at idle and is on
+          at 2500 rpm, so none of that separates the two; the firmware reads
+          this DID from the purge byte.
+    notes: >
+      Commanded EVAP canister purge, in the units Mode 01 PID 0x2E reports.
+      0 means purge off. While purging, the byte is the purge command plus
+      one count. Raw above 200 would decode past 100 %, where PID 0x2E clamps
+      at 255 (100 %). No data relation is recorded: Mode 01 and session 0xC0
+      exclude each other, and the 2026-10-04 firmware pass found only about
+      11 DID/PID 0x2E pairs on old drives, each at least 1 s apart. That is
+      not contradictory, and too few and too skewed to count as evidence.
 
   - did: 0x1206
     name: ECM_INJECTOR_PULSE_1
@@ -901,9 +982,10 @@ dids:
   # --- Intake cam phasing family (2026-08-05 drive sweeps) ---------------
   # Scale/offset come from the ROM Cam Phasing decode (advance = (N-128)/2,
   # 0x80 = 0.0 deg), independently corroborated: every member reads exactly
-  # 0x80 with the engine off, spans 0-37 deg in motion against the ROM
-  # table's 0-35, and correlates +0.72..+0.74 with the known VVT solenoid
-  # duty 0x1110 in the causally correct direction.
+  # 0x80 with the engine off, and spans 0-37 deg in motion against the ROM
+  # table's 0-35. (A +0.72..+0.74 correlation with 0x1110, once read as the
+  # VVT solenoid duty, is not corroboration: 0x1110 is EVAP purge, 2026-10-04,
+  # and purge rises with load just as cam advance does.)
   #
   # Resolved 2026-08-05 against UpRev's INTK CAM TIM-B1/-B2 columns. The
   # discriminator is behaviour at the cam's mechanical stop, where the signal
@@ -1005,18 +1087,21 @@ dids:
     unit: percent
     confidence: low
     notes: >
-      Candidate sibling of 0x1110 for the other intake VVT solenoid. It is a
-      research candidate, not a confirmed bank-2 actuator mapping; retain it
-      only in the focused all-DID capture while tagged transition evidence is
-      collected.
+      Catalogued as the bank-2 sibling of 0x1110's intake VVT solenoid duty.
+      That premise is gone: 0x1110 is EVAP purge (firmware, 2026-10-04), so
+      nothing ties this register to cam control any more, and its identity is
+      open. The name is kept only because capture profiles reference it.
+      Retain it only in the focused all-DID capture while tagged transition
+      evidence is collected.
 
   # The OTHER bank's measured angle was NOT found in 0x1000-0x1400. A search
   # of all 158 responding DIDs turned up no second cam-like signal carrying a
-  # persistent ~1 deg offset with independent jitter. 0x1139 does look like
-  # the bank-2 VVT solenoid DUTY (sibling of the known 0x1110), so bank 2's
-  # actuator is exposed but its position is not -- extend the next sweep past
-  # 0x1400. Not blocking: the ROM Cam Phasing table is a single table, not
-  # per-bank, so commanded + one measured + both duties is a working set.
+  # persistent ~1 deg offset with independent jitter. (0x1139 was read as the
+  # bank-2 VVT solenoid duty, as the sibling of 0x1110; 0x1110 turned out to
+  # be EVAP purge on 2026-10-04, so no solenoid duty is identified on either
+  # bank.) Extend the next sweep past 0x1400. Not blocking: the ROM Cam
+  # Phasing table is a single table, not per-bank, so commanded + measured
+  # angles are a working set.
 
   # D03.8 — a CANDIDATE, not a binding. Catalogued so research captures
   # (`fuel-target-research`, `fuel-pw-research`) can poll it beside Mode 01 PID
@@ -1903,17 +1988,18 @@ memory:
         finding: >
           Written only by the slot copy at 0x0DE3E4, after clamping the selector
           to 1-5, alongside the 2 KiB copy into 0xFFFFB040.
-  # Fuel Compensation's x input ("Volumetric Flow Ratio"), read clamped by the
-  # BFS routine at 0x03C4D0 before the 16x16 lookup at slot +0x660.
       - session: _capture-ram-study-2026-10-04T204557
         method: live_drive_check
         finding: >
           0 on 196/196 reads, as predicted for a cold boot with no map switch; the selector stayed 0 too.
+  # Fuel Compensation's load input ("Volumetric Flow Ratio" in UpRev): an
+  # alpha-N (throttle-model) relative fill, 0..224. Decoded from code by two
+  # independent passes and reproduced on data, 2026-10-04.
   - name: ECM_FUEL_COMP_X_INPUT
     address: 0xFFFF118A
     length: 1
     byte_length: 1
-    confidence: hypothesized
+    confidence: high
     verified_tune_revision: ZS44A-20260920
     window: fuel_comp_x
     evidence:
@@ -1926,28 +2012,66 @@ memory:
       - session: firmware-ZS44A-20260920
         method: disassembly
         finding: >
-          Sole writer FUN_0003c444 (store at 0x03C4BA), decoded 2026-10-04:
-          X = w116A * (w1124/512 + w139E/2048), clamped to 0xFFFF, where
-          w116A = 0xDC1D00 / clamp16(158 [cal 0x8D25] * rpm word 0xFFFF1210)
-          (so proportional to 1/rpm), w1124 = 0xFFFF2C32 (curve 0xDD94, 32
-          rising points, of 4 x 0xFFFF2CC8, minus 0xFFFF63FC, floored at 0) or
-          the cal constant 782 (0x90BE) when status bit 0xFFFF484E.2 is set,
-          and w139E an extra flow term (written at 0x06E2C4; not identified,
-          plausibly idle bypass). 0xFFFF2CC8 is selected (0x03F670, flag
-          0xFFFF28B5) from 0xFFFF2CCE -- the word Mode 01 PID 0x11 throttle
-          position reads -- or 0xFFFF2CD0, so w1124 is a throttle-derived flow,
-          not MAF (an earlier version of this note said MAF; wrong).
-          The byte is then a two-segment 16-point curve of X (0xEAEC for X <
-          0x3C00 using X*4, else 0xEACC using X - 0x3C00), >> 8: 5 at X=0,
-          64, 109, 142, 162, 175, ... 205 at 0x3C00, saturating at 224. So it
-          is throttle flow per revolution through a saturating fill curve: an
-          alpha-N estimate of cylinder fill (linear while the throttle limits
-          flow, flat as manifold pressure nears ambient). On steady points of
-          the 2026-10-04 ram-study capture it tracks throttle/rpm (r=0.92)
-          and not MAF/rpm (r=0.36): at 3,684 rpm, 43 g/s and 18 % throttle it
-          read 51, the same as idle, where throttle/rpm is nearly equal. Its
-          rate of change is stored at 0xFFFF114A. Open: w139E, the units of
-          curve 0xDD94 and of 0xFFFF2CC8, hence any absolute scale.
+          Sole writer, decoded by a listing pass and a Ghidra pass that agree
+          (FUN_0003c3a4 after the Ghidra repair; X is formed at 0x3C444, and
+          the byte stored at 0x3C4BA):
+          X = min(0xFFFF, w116A x (w1124/512 + w139E/2048)), copy at
+          0xFFFF2136. w116A = 0xDC1D00 / min(0xFFFF, 158 [cal 0x8D25] x rpm
+          word 0xFFFF1210), about 1,141,245 / rpm; it pins at 220 above
+          5,187.5 rpm, where the product saturates. w1124 is the throttle
+          effective area minus idle air: table 0xDD94 (32 rising points,
+          112..48,060) on axis ROM 0xEE6A (0..3,172), input 4 x w2CC8, where
+          w2CC8 is throttle sensor A's count above its learned closed
+          position (w2CCE, the word Mode 01 PID 0x11 reads at 8.19 counts per
+          %; sensor B's w2CD0 only when sensor A alone has faulted), minus
+          w63FC = idle-speed feedback plus NV-learned idle air, capped at 1185
+          (cal 0x8ED2), floored at 0. w1124 becomes the constant 782 (cal
+          0x90BE) when bit 2 of 0xFFFF484E is set by the TPS1/TPS2/correlation
+          diagnostics (0x8E58C): the electronic-throttle limp-home area
+          (inferred, strongly suggested). w139E is the EVAP purge area, 1.125
+          x the purge byte (cal 0x82FE = 144, >> 7) written in FUN_0006a52c,
+          the same purge byte DID 0x1110 and PID 0x2E report. So w1124 is
+          throttle-derived, not MAF (an earlier version of this note said
+          MAF; wrong). The byte is curve(X) >> 8: table 0xEAEC on 4X below
+          X = 0x3C00, table 0xEACC on X - 0x3C00 above it, 16 points each.
+          It reads 4 at X = 0, then 63, 108, 141, 161, 174 ... 204 at 0x3C00,
+          saturating at 224. The 0x3C00 split is only a resolution change
+          (0xEAEC[15] = 0xEACC[0] = 52479), not a knee. There is no baro or
+          temperature input. At full throttle it reaches 224 only below about
+          1,660 rpm.
+      - session: firmware-ZS44A-20260920
+        method: disassembly
+        finding: >
+          Consumers. The Fuel Comp factor (0xFFFF225A, 128 = 1.0, read at
+          0x3D0F4) multiplies the MAF-derived charge before the
+          manifold-filling filter (w105C = Tp x FC / 128 at 0x3C7B4), so Fuel
+          Comp acts inside BFS (DID 0x1208). The byte also indexes the 8x8
+          manifold-filling time-constant tables 0x9B99/0x9BD9 (the tip-in and
+          tip-out lag), sets the transient flag (|change over 5 cycles| >= 11
+          sets 0xFFFF283C bit 2) and the near-WOT flag (0xFFFF289B bit 7, set
+          at >= 202, cleared below 200). Its rate of change is stored at
+          0xFFFF114A.
+      - session: _capture-ram-study-2026-10-04T204557
+        method: chain_reproduction
+        finding: >
+          The decoded chain, fed throttle % as counts ((A + 0.5) x 3.21), rpm
+          from Mode 01 and purge from PID 0x2E, with one free constant (w63FC
+          = 115), reproduces the logged byte at 60 steady points. Median
+          ratio is 1.000 at idle (n = 38, p10-p90 0.975-1.037) and 1.027 off
+          idle (n = 22, 0.886-1.148). Wrong variants miss off idle: x =
+          1/2/8 x w2CC8 give 3.02/1.71/0.57, 2.55 or 4.0 counts per % give
+          1.23/0.83, rpm^0.5 and rpm^1.5 give 0.67/1.70. Purge moves the
+          prediction by at most 2 counts.
+    notes: >
+      A relative fill in the ECM's own units, 0..224 raw; the code pins no
+      absolute unit for the byte or the area table, so no scale is recorded.
+      UpRev's "Volumetric Flow Ratio" % (raw x 100/256) is a display
+      convention; CANary's ROM viewer shows the Fuel Comp axis as % of the 224
+      ceiling (raw x 100/224). An example once quoted here as contradicting the chain
+      (byte 51 at 3,684 rpm and 18 % throttle) is withdrawn: it was a
+      transient, and the decoded chain predicts about 110 at that instant.
+      To test the whole chain on one instant, read 0xFFFF2CC8, 2C32, 63FC,
+      139E, 116A, 2136, 118A, 225A, 105C and 103A in one memory window.
   # Flag bytes: bit 0 of 0xFFFF2841 is the pedal-switch enrichment flag that
   # forces the Target AFR lookup to its last BFS column; a bit of 0xFFFF2842
   # selects between the two timing-trim tables (slot +0x020 / +0x120).

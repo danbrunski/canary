@@ -2382,6 +2382,83 @@ live here now, so the documents could be archived
     capture that alternates 0x1123–0x1126 with PIDs 0x06–0x09 once learned
     trim moves again. LTFT is slow enough to pair across the alternation;
     short-term trim may not be. Until then the trim scale stays `medium`.
+  - [x] **0x1110 is commanded EVAP purge, not intake VVT duty.** The
+    CAN Mode 22 handler (`FUN_000d16b8`) sends DID high byte 0x11 to table
+    0x24988. Entry 16 there is 0xFFFF272E (read back from the ROM image), and
+    the PID 0x2E handler (0xD461C) reads the same byte as A = min(255, byte ×
+    1275/1000), so a count is 0.5 %. The byte is a copy of 0xFFFF27BA, which
+    the purge control `FUN_0006a52c` writes. The K-line table 0x22738 entry 16
+    is the same address. Renamed `ECM_EVAP_PURGE_CMD`, scale 0.5, `percent`,
+    `high`, with `transport: can` evidence. The VVT reading moved to
+    `evidence_against` (`transport: can`): 0 at idle, 11 at 2500 rpm, and an
+    NT510 0.00 % at idle, which purge shows too. The old name is an `alias`
+    so saved profiles and the Pi's `collection.obd_dids` still parse.
+    **Known answer:** `did_pins` 0x1110 records the RAM byte, PID 0x2E and the
+    handler's arithmetic (`mode01_a`).
+    `test_did_scale_reproduces_the_ecm_own_pid_conversion` checks that the DID
+    decode lands within one PID step of what the ECM itself reports for every
+    raw value below the PID's clamp. It checks raw 100 → 50 % and shows that
+    the rival 100/255 % scale fails. `test_0x1110_is_commanded_evap_purge_not_vvt_duty`
+    pins the name, the evidence transports and the alias. No data relation:
+    about 11 DID/PID 0x2E pairs on old drives, each ≥ 1 s apart, too weak to
+    count.
+    **Callers:** `canary.pi.example.yaml` `obd_dids`, the `tuning-did` starter
+    in `data/capture_profiles.yaml`, `src/validation/scenarios.py`
+    `TUNING_DIDS`, `tests/test_default_profile_core_rate.py` `PI_DIDS` and
+    `docs/can-pids-dids.md`. The 0x1139 note and the two cam-family comments
+    in `data/dids.yaml` no longer lean on "the known VVT duty 0x1110". Left
+    alone: `capture_profiles.archive.yaml` (kept verbatim, loaded by nothing),
+    `data/analyses/**` (historical records), and the D03.10/D03.12/D04.7 text
+    about a 0x1110 duty scale. **Served features:** no change. In every
+    manifest (in-repo `models/**` and `_candidates`, `~/canary-data/models-0920a`;
+    `models-0920b` is empty, `~/canary-data/control` holds no manifests),
+    `did:ECM_INTAKE_VVT_SOLENOID_DUTY*` and `obd:DID_1110*` appear only in
+    `feature_health` dropped lists (constant, low coverage or all-NaN), never
+    in `feature_columns`. `obd:EVAPORATIVE_PURGE` is served and unchanged.
+  - [~] **0x120F/0x1210 scale: firmware says 5/1024 V; change held for a
+    served-feature decision.** Table 0x24B84 entry 15 (0x120F) is 0xFFFF2B0C,
+    throttle sensor A's raw 10-bit count (A/D channel 6). Entry 16 (0x1210) is
+    0xFFFF2AF2 = 0x400 − sensor B's count (channel 19, written at 0x3F5CE).
+    0x1210 therefore arrives already inverted into sensor A's sense, which is
+    why it tracks 0x120F. The catalog decodes it as raw × scale with no
+    inversion, so `did:ECM_THROTTLE_POS_SENSOR_2` is not the pin voltage; that
+    is now a note on the entry. PID 0x11 = w2CCE × 100/321 is 8.1855 counts
+    per %, against 8.16 from B05.7's control (0.0408 V/% at ×0.005): the same
+    counts. At a 5 V reference (inferred, not read from code) ×0.005 is 2.4 %
+    high, and NT510's 0.65 V at idle fits 4.8828 mV (0.654 V) better than
+    ×0.005 (0.67 V). Firmware evidence (`transport: can`) and notes were
+    added; **scale stays 0.005**. `did:ECM_THROTTLE_POS_SENSOR_1/2` (with
+    `__mean`/`__std`) are served `feature_columns` of the deployed LSTM
+    (`models/nissan-xterra-2008/lstm_autoencoder`, = `~/canary-data/models-0920a`)
+    and of the three `_candidates/2026-09-23-na*` LSTMs. Rescaling would shift
+    those inputs by −2.34 % (the D02.5 shape). It would also move the
+    `tps_sensor_1_vs_sensor_2_did` recipe's `sigma_floor=0.005`, the
+    `afr_voltage_vs_rpm_throttle_did` y axis, the recipe golden, and the
+    `wot_criterion` thresholds in `tuning_providers.yaml` (0.62/4.12/4.00 V,
+    measured at ×0.005). Remaining: the operator picks a rescale-with-retrain
+    or keeping 0.005.
+  - [x] **`mem:ECM_FUEL_COMP_X_INPUT` evidence rewritten to the merged
+    finding.** It is an alpha-N relative fill, 0..224. X = w116A × (w1124/512 +
+    w139E/2048), with w116A ≈ 1,141,245/rpm. w1124 is the throttle area
+    (0xDD94 on axis 0xEE6A, 4 × sensor-A counts) minus idle air w63FC (capped
+    at 1185); it becomes 782 on TPS faults. w139E is the purge area. The curve
+    is 0xEAEC/0xEACC: 4 at X = 0, 204 at the 0x3C00 split (only a resolution
+    change), 224 saturated. There is no baro or temperature input. Consumers:
+    Fuel Comp inside BFS, the 0x9B99/0x9BD9 lag tables, the transient flag and
+    the near-WOT flag. The 60-point reproduction is recorded (1.000 idle n =
+    38, 1.027 off idle n = 22). The curve values and the cal constants (782,
+    1185, 158, 144) were re-read from the ROM image. The old note's "5 … 205"
+    curve values were one high. The "byte 51 at 3,684 rpm" example is replaced
+    by a withdrawal note (a transient; the chain predicts ~110). Confidence
+    `hypothesized` → `high`. The ladder keeps `confirmed` for a scale checked
+    against ground truth, and this byte has no unit. Name, address and window
+    are unchanged.
+  - [x] **`~/ecu-re/out/ram_vars.yaml`** (outside the repo): PID 0x11 →
+    0xFFFF2CCE `verified`, with the handler-0xD41E0 scaling. Added PID 0x47 →
+    0xFFFF2CD0 (sensor B, handler 0xD4B5A, mask 0xFADC0000, `verified`;
+    0xFFFF2C00 + 0xD0 re-read from the listing), PID 0x2E → 0xFFFF272E, DID
+    0x1110 (correction), and DIDs 0x120F/0x1210 with their CAN and K-line
+    addresses. It had no earlier 0x1110 entry.
 
 ## Deferred by decision, not blocked
 

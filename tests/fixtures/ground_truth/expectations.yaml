@@ -337,6 +337,22 @@ did_pins:
     unit: percent
     ram: 0xFFFF26E0
     mode01_pid: 0x09
+  # Commanded EVAP purge, not intake VVT duty (catalogued as that until
+  # 2026-10-04). The CAN Mode 01 handler for PID 0x2E (0xD461C) turns the same
+  # byte into A = min(255, byte x 1275 / 1000); `mode01_a` records that
+  # arithmetic so the test can check the DID's scale against what the ECM
+  # itself reports, with no capture needed. About 11 DID/PID pairs exist on old
+  # drives, each at least 1 s apart: too few and too skewed for a data check.
+  - did: 0x1110
+    name: ECM_EVAP_PURGE_CMD
+    byte_start: 0
+    byte_length: 1
+    scale: 0.5
+    offset: 0.0
+    unit: percent
+    ram: 0xFFFF272E
+    mode01_pid: 0x2E
+    mode01_a: {multiply: 1275, divide: 1000, max: 255}
 
 # DID vs an independent road-speed reference, both in engineering units, on
 # same-instant pairs (POLICY, 250 ms; the DID-to-frame separation is 32 ms

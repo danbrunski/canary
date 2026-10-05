@@ -88,7 +88,7 @@ PI_DIDS = (
     "ECM_THROTTLE_POS_SENSOR_1",
     "ECM_RPM",
     "ECM_THROTTLE_POS_SENSOR_2",
-    "ECM_INTAKE_VVT_SOLENOID_DUTY",
+    "ECM_EVAP_PURGE_CMD",
 )
 #: Request-to-response latency. The truck sustained 116.8 req/s on
 #: 2026-09-10, under 8.6 ms a request loop included.
