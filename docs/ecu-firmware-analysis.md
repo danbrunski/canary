@@ -91,7 +91,14 @@ Read from the listing for E02.4 on 2026-10-04. The twin profile
 | After the lookup, while bit 6 of `0xFFFF283F` is set, the result's excess over 128 is scaled by the 8-entry curve at `0xD247` (÷ 128). That curve is all 128 in ZS44A-20260920, so the scaling is the identity there. | Verified (code and bytes); the curve's input `0xFFFF11CF` is not identified | `0x055E26`–`0x055E5A`. |
 | The result reaches `0xFFFF174B` only when it is ≥ 130 (cal `0x8B39`), or ≥ 129 while bit 3 of `0xFFFF2886` is already set (release cal `0x8B3D` = 129). Otherwise `0x80` (φ 1.0) is written. A lookup of 129 is therefore ambiguous unless that bit is captured. | Verified (code) | `0x055E5C`–`0x055EEC`. |
 | The commanded word `0xFFFF26BE` is written by `FUN_00055B5E`. It starts from min(0xFFFF, `w26F6` + `w27DC`) × `w26C0` >> 14. On most paths it then caps the word at `0xFE00` (cal `0x8B3B`) and limits the step against `w26CC`. It writes 0 while `0xFFFF26B8` = `0x3F` (fuel cut). | Verified (code); the meaning of the three words is unknown | `0x055B5E`–`0x055DA4`. |
-| How `0xFFFF174B` reaches `w26F6`, `w27DC` or `w26C0` | Not traced | Its readers are at `0x04CAF4`, `0x0566F8`, `0x056810`, `0x05682A` and `0x066028`. |
+| `w26C0` is the enrichment multiplier, and `0xFFFF174B` reaches the command through it. `FUN_00055DB2` writes it at `0x0568B4`, choosing by the state byte `0xFFFF14C4` among three values. One is `0x4000` (φ 1.0); in state 1, for example, or when a 0x8B3D-based test on `w26CE` fails. Another is a ramp against the previous `w26CE`. The third is `0xFFFF174B << 7`, the gated lookup, which also caps the word. | Verified (code); the meaning of each state value is unknown | Reads of `0xFFFF174B` at `0x0566F8`, `0x056810` and `0x05682A`, all in `FUN_00055DB2`. The other readers, `0x04CAF4` and `0x066028`, were not followed. |
+| `w26F6` = clamp(`0x4000` + the long at `0xFFFF175C` + `w26E8` + `w1736`), and `w27DC` is a curve term clamped to 0…3,768. Both are additive corrections around 1.0. | Location verified (code); the terms are not identified | `0x05591C`–`0x055958` and `0x0559FA`. |
+
+So the final word equals the lookup's word only under two conditions: the state
+byte selects `0xFFFF174B`, and `w175C + w26E8 + w1736 + w27DC` = 0. Neither is
+captured today. A 58-byte read from `0xFFFF26BE` covers the command word,
+`w26C0` and `w26F6` in one window, which would settle both conditions per
+sample. `w27DC` needs a second read.
 
 So the lookup's output is not yet known to be the final command. On the
 2026-10-04 drive, 149 of the 153 command reads were 16384 (φ 1.0), and the X

@@ -27,6 +27,20 @@ which are stored ``source='obd'`` under their ``DID_<hex>`` channel::
         --can-id 0x6F7 --keep-obd DID_1102 --keep-obd DID_121A --keep-obd DID_1125 \\
         --out tests/fixtures/ground_truth/did-speed-slice
 
+The target-phi twin slice (``target-phi-slice``, E02.3) keeps only the
+channels the twin reads that the ROM-trace slice
+(``tests/fixtures/rom_trace/_capture-ram-study-2026-10-04T204557``) does not
+already hold, over the whole capture; the test reads the two together::
+
+    .venv/bin/python tools/make_ground_truth_fixture.py --only \\
+        --session ~/canary-data/sessions/nissan-xterra-2008/_capture-ram-study-2026-10-04T204557 \\
+        --start 2026-10-04T20:45:56Z --seconds 1614 \\
+        --keep-obd mem:ECM_TARGET_EQUIV_RATIO --keep-obd mem:ECM_TARGET_EQUIV_RATIO_SENTINEL \\
+        --keep-obd mem:ECM_PEDAL_ENRICH_FLAGS --keep-obd mem:ECM_ACTIVE_MAP \\
+        --keep-obd mem:ECM_UPREV_MAGIC --keep-obd mem:ECM_UPREV_MAP_SELECTOR \\
+        --keep-obd FUEL_STATUS --keep-obd COOLANT_TEMP --keep-obd RPM --keep-obd MAF \\
+        --out tests/fixtures/ground_truth/target-phi-slice
+
 Keep the window short. This is a regression anchor, not a corpus — every byte
 of it lives in git forever.
 """
@@ -65,13 +79,16 @@ def extract(
     *,
     can_ids: tuple[str, ...] = KEEP_CAN_IDS,
     obd_channels: tuple[str, ...] = KEEP_OBD,
+    gps_channels: tuple[str, ...] = KEEP_GPS,
 ) -> pd.DataFrame:
     """Write the slice. Refuses a session that stores CAN frames change-only
     (P02.10): ``--can-stride`` keeps every Nth *frame* per id, which on
     change-only rows would keep every Nth payload change, and the slice is
     written without the source's storage footer, so it would read back as
-    stored every frame and its rows as the bus's frames."""
-    refuse_change_only(session, reader="ground-truth fixture slice")
+    stored every frame and its rows as the bus's frames. A slice that keeps
+    no broadcast id carries no frames to misread, so it is not refused."""
+    if can_ids:
+        refuse_change_only(session, reader="ground-truth fixture slice")
     end = start + pd.Timedelta(seconds=seconds)
     pattern = str(session / "telemetry-*.parquet")
     con = duckdb.connect()
@@ -82,11 +99,17 @@ def extract(
           AND (
                 (source = 'can' AND list_contains(?, channel))
              OR (source = 'obd' AND list_contains(?, channel))
-             OR (source = 'gps' AND channel IN {KEEP_GPS})
+             OR (source = 'gps' AND list_contains(?, channel))
           )
         ORDER BY timestamp
         """,
-        [start.to_pydatetime(), end.to_pydatetime(), list(can_ids), list(obd_channels)],
+        [
+            start.to_pydatetime(),
+            end.to_pydatetime(),
+            list(can_ids),
+            list(obd_channels),
+            list(gps_channels),
+        ],
     ).df()
     if can_stride > 1:
         # Keep every Nth frame per broadcast id. These are still real frames —
@@ -124,6 +147,11 @@ def main() -> int:
         help=f"broadcast id to keep (repeatable; default {', '.join(KEEP_CAN_IDS)})",
     )
     parser.add_argument(
+        "--only",
+        action="store_true",
+        help="keep only the --can-id/--keep-obd channels: no default ids, PIDs or GPS",
+    )
+    parser.add_argument(
         "--keep-obd",
         action="append",
         default=[],
@@ -138,8 +166,9 @@ def main() -> int:
             args.seconds,
             args.out,
             can_stride=args.can_stride,
-            can_ids=tuple(args.can_id) if args.can_id else KEEP_CAN_IDS,
-            obd_channels=KEEP_OBD + tuple(args.keep_obd),
+            can_ids=tuple(args.can_id or ()) if args.only or args.can_id else KEEP_CAN_IDS,
+            obd_channels=tuple(args.keep_obd) if args.only else KEEP_OBD + tuple(args.keep_obd),
+            gps_channels=() if args.only else KEEP_GPS,
         )
     except ChangeOnlyStorageError as exc:
         print(f"refused: {exc}", file=sys.stderr)

@@ -1,0 +1,308 @@
+# E02.3 — the October 4 known answers for the target-phi twin.
+#
+# Read by tests/test_target_phi.py. Every number below was minted by the real
+# evaluator (src/analysis/target_phi.py) over the committed telemetry, never
+# typed from prose; regenerate the `records` block with
+#   .venv/bin/python -m tests.test_target_phi
+# and review the diff. Private-ROM checks are separate
+# (tests/test_target_phi_private_rom.py): this file and its test need no ROM.
+source_session: _capture-ram-study-2026-10-04T204557
+# The whole capture: the first and last stored row of the session, so every
+# command sample, both enrichment observations and their neighbours, every
+# ordinary lookup vector and all 194 BFS/X pairs are retained.
+window: {start: '2026-10-04T20:45:56Z', end: '2026-10-04T21:12:50Z'}
+profile: ram-study
+# Two real slices, read together (both written by the production parquet
+# writer, rows unmodified). The ROM-trace slice already held the X trace, the
+# rpm word and the BFS word for the whole capture, so they are referenced, not
+# copied; the second adds the rest. Both are pinned by content hash.
+telemetry:
+  - path: tests/fixtures/rom_trace/_capture-ram-study-2026-10-04T204557/telemetry-00000.parquet
+    sha256: 127fcc1a3a8981df33ea8e086da1f99a7360da6cd2ed868dd69e6939818e7d10
+    channels:
+      mem:ECM_FUEL_TARGET_MAP_X_TRACE: 194
+      mem:ECM_ENGINE_SPEED_RAM: 180
+      mem:ECM_AIR_CHARGE_SLOT_103A: 194
+  - path: tests/fixtures/ground_truth/target-phi-slice/telemetry-00000.parquet
+    sha256: 338adde456b7a75ffec48bae3a01f30a9adce422ed33f412179b8392459a5c98
+    channels:
+      mem:ECM_TARGET_EQUIV_RATIO: 153
+      mem:ECM_TARGET_EQUIV_RATIO_SENTINEL: 21
+      mem:ECM_PEDAL_ENRICH_FLAGS: 191
+      mem:ECM_ACTIVE_MAP: 196
+      mem:ECM_UPREV_MAGIC: 196
+      mem:ECM_UPREV_MAP_SELECTOR: 196
+      FUEL_STATUS: 452
+      COOLANT_TEMP: 429
+      RPM: 1494
+      MAF: 823
+# The catalog decodes the stored values were written under (data/dids.yaml);
+# a raw count is the stored value with this decode undone. Pinned so a catalog
+# edit cannot silently change which raw counts the lookup sees.
+decode_pins:
+  mem:ECM_FUEL_TARGET_MAP_X_TRACE: {scale: 0.250859, offset: 0.0}
+  mem:ECM_ENGINE_SPEED_RAM: {scale: 12.5, offset: 0.0}
+  mem:ECM_TARGET_EQUIV_RATIO: {scale: 6.103515625e-05, offset: 0.0}
+  mem:ECM_AIR_CHARGE_SLOT_103A: {scale: 1.0, offset: 0.0}
+# Which bytes the ECM was reading: the registry's revision at the session's
+# start, its plain image, Map 1. The table is read from afr_calibration.yaml
+# here; the private-ROM test pins it equal to that image's slot 1.
+calibration:
+  revision: ZS44A-20260920
+  image_sha256: a46baa248f16db8d5ed9854913e614dd7d77b7579bb6c36bddb792741531be50
+  slot: 1
+  load_point_scaler: 44019
+# Frozen before scoring; the test refuses a profile whose limits drift.
+frozen_gates:
+  max_acquisition_skew_s: 0.25
+  clock: acquired
+  map_identity_max_age_s: 10.0
+  coolant_min_c: 80.0
+  coolant_max_age_s: 10.0
+  mode_eligible: [open_loop_driving]
+  mode_max_age_s: 5.0
+  steadiness_dwell_s: 2.0
+  tolerance_words: 1
+
+# Check 1, known override. Both enrichment commands read word 0x4A80, phi
+# exactly 1.1640625 = 0x95 / 128. The forced-last-column lookup at each
+# command's nearest rpm-word read gives cell 0x95, word 0x4A80, exactly. The
+# vectors are NOT 250-ms tuples (the rpm word was read 0.86-0.88 s earlier),
+# so both commands stay unevaluable in the accounting below; a live pass needs
+# E02.7's capture. The first command's nearest flag read (1.00 s earlier) is
+# set; the second's (1.00 s earlier, mid gear change at 11 % throttle) is
+# clear, so the flag was not observed set within a second of that command.
+known_override:
+  - command_at: '20:57:46.335025'
+    observed_word: 19072
+    rpm_raw: 236          # 2,950 rpm
+    rpm_read_s_before: 0.862
+    nearest_flag_raw: 1
+    flag_read_s_before: 1.002
+    predicted_cell: 149
+    predicted_word: 19072
+  - command_at: '20:57:53.390197'
+    observed_word: 19072
+    rpm_raw: 276          # 3,450 rpm
+    rpm_read_s_before: 0.877
+    nearest_flag_raw: 0
+    flag_read_s_before: 1.002
+    predicted_cell: 149
+    predicted_word: 19072
+
+# Check 2, the image-scaled X relation over every same-read BFS/X pair.
+x_relation:
+  n_pairs: 194
+  exact: 168
+  # raw X counts minus min(255, floor(BFS x 128 / 44019)); both signs.
+  differences: {-4: 1, -2: 1, -1: 6, 1: 16, 2: 2}
+  max_separation_s: 0.0
+
+# Check 3, every command sample accounted for. Minted by evaluate_session.
+# No candidate is eligible. Per lookup input (input_pairing, from the
+# evaluator): the X trace paired within 250 ms of 19 of the 174 command
+# samples, the rpm word of 9 and the pedal flag of none; their nearest reads
+# were a median 1.50 s, 0.88 s and 1.12 s away. The four windows were read
+# ~125 ms apart in sequence with other windows between, so no tuple fitted
+# (target_phi_twin.yaml `acquisition`). The reason counts below are PRIMARY
+# reasons only: each candidate is counted once, under its first failure. That
+# is a named capture requirement, not a pass.
+accounting:
+  candidates: 174
+  states: {unevaluable: 174, pending: 0, excluded: 0, eligible: 0}
+  reasons:
+    unevaluable:
+      input_stale:load: 120
+      input_stale:rpm: 18
+      map_identity_unbracketed: 15
+      sentinel: 21
+  eligible:
+    ordinary: {pass: 0, miss: 0}
+    override: {pass: 0, miss: 0}
+  duplicate_use: 0
+  input_pairing:
+    load: {spec: 'mem:ECM_FUEL_TARGET_MAP_X_TRACE', paired: 19, candidates: 174, median_nearest_read_s: 1.498}
+    rpm: {spec: 'mem:ECM_ENGINE_SPEED_RAM', paired: 9, candidates: 174, median_nearest_read_s: 0.878}
+    flag: {spec: 'mem:ECM_PEDAL_ENRICH_FLAGS', paired: 0, candidates: 174, median_nearest_read_s: 1.123}
+capture_requirement: no_eligible_tuples
+qualification_blockers:
+  - final_command_path_unverified
+  - ram_copy_unverified
+  - final_command_constants_unchecked
+# One line per candidate: acquired time (UTC), observed word ("cut" for the
+# fuel-cut sentinel), state, primary reason.
+records:
+    - '20:46:35.628938 16384 unevaluable input_stale:load'
+    - '20:46:43.666352 16384 unevaluable input_stale:load'
+    - '20:46:50.666189 16384 unevaluable input_stale:load'
+    - '20:46:57.801270 16384 unevaluable input_stale:load'
+    - '20:47:04.861554 16384 unevaluable input_stale:load'
+    - '20:47:11.959792 16384 unevaluable input_stale:load'
+    - '20:47:18.866484 16384 unevaluable input_stale:load'
+    - '20:47:25.160555 16384 unevaluable input_stale:load'
+    - '20:47:40.099559 16384 unevaluable input_stale:load'
+    - '20:47:47.184366 16384 unevaluable input_stale:load'
+    - '20:47:55.067231 16384 unevaluable input_stale:load'
+    - '20:48:01.943453 cut unevaluable sentinel'
+    - '20:48:15.044427 16384 unevaluable input_stale:load'
+    - '20:48:21.986914 16384 unevaluable input_stale:load'
+    - '20:48:28.930425 16384 unevaluable input_stale:load'
+    - '20:48:35.162109 16384 unevaluable input_stale:load'
+    - '20:48:52.140345 16384 unevaluable input_stale:load'
+    - '20:48:58.773658 16384 unevaluable input_stale:load'
+    - '20:49:05.844136 16384 unevaluable input_stale:load'
+    - '20:49:12.743448 16384 unevaluable map_identity_unbracketed'
+    - '20:49:27.869839 cut unevaluable sentinel'
+    - '20:49:34.885044 cut unevaluable sentinel'
+    - '20:49:41.385996 cut unevaluable sentinel'
+    - '20:49:49.595427 cut unevaluable sentinel'
+    - '20:50:02.513726 16384 unevaluable map_identity_unbracketed'
+    - '20:50:09.594339 16384 unevaluable input_stale:load'
+    - '20:50:16.593230 16384 unevaluable input_stale:load'
+    - '20:50:38.029100 16384 unevaluable input_stale:load'
+    - '20:50:44.949131 cut unevaluable sentinel'
+    - '20:50:51.200339 16384 unevaluable input_stale:load'
+    - '20:50:59.036823 16384 unevaluable input_stale:load'
+    - '20:51:06.277266 16384 unevaluable input_stale:load'
+    - '20:51:14.734890 16384 unevaluable input_stale:load'
+    - '20:51:21.012521 16384 unevaluable input_stale:load'
+    - '20:51:28.679153 16384 unevaluable input_stale:load'
+    - '20:51:35.617556 16384 unevaluable input_stale:load'
+    - '20:51:50.884460 16384 unevaluable input_stale:rpm'
+    - '20:51:58.265144 16384 unevaluable input_stale:load'
+    - '20:52:05.303003 19584 unevaluable input_stale:load'
+    - '20:52:10.732098 16384 unevaluable input_stale:load'
+    - '20:52:22.192080 16384 unevaluable input_stale:load'
+    - '20:52:29.145859 16384 unevaluable input_stale:load'
+    - '20:52:36.147735 16384 unevaluable input_stale:load'
+    - '20:52:43.078048 16384 unevaluable input_stale:load'
+    - '20:52:50.078828 16384 unevaluable map_identity_unbracketed'
+    - '20:53:02.545198 16384 unevaluable map_identity_unbracketed'
+    - '20:53:10.337632 16384 unevaluable input_stale:load'
+    - '20:53:16.359528 16384 unevaluable input_stale:load'
+    - '20:53:25.190810 cut unevaluable sentinel'
+    - '20:53:36.789442 16384 unevaluable map_identity_unbracketed'
+    - '20:53:45.215329 16384 unevaluable input_stale:load'
+    - '20:53:50.631538 16384 unevaluable input_stale:load'
+    - '20:53:59.050792 16384 unevaluable input_stale:load'
+    - '20:54:06.119552 16384 unevaluable input_stale:load'
+    - '20:54:13.076390 16384 unevaluable input_stale:load'
+    - '20:54:20.162230 16384 unevaluable input_stale:load'
+    - '20:54:25.551984 16384 unevaluable input_stale:load'
+    - '20:54:32.515032 16384 unevaluable input_stale:rpm'
+    - '20:54:40.946766 16384 unevaluable input_stale:load'
+    - '20:54:47.873909 16384 unevaluable input_stale:load'
+    - '20:54:54.764154 cut unevaluable sentinel'
+    - '20:55:00.949737 cut unevaluable sentinel'
+    - '20:55:08.590773 cut unevaluable sentinel'
+    - '20:55:15.493370 cut unevaluable sentinel'
+    - '20:55:27.743242 16384 unevaluable map_identity_unbracketed'
+    - '20:55:35.584396 16976 unevaluable input_stale:load'
+    - '20:55:41.709530 cut unevaluable sentinel'
+    - '20:55:51.235310 16384 unevaluable input_stale:load'
+    - '20:56:00.465140 16384 unevaluable input_stale:load'
+    - '20:56:05.880635 16384 unevaluable input_stale:load'
+    - '20:56:15.609807 16384 unevaluable input_stale:load'
+    - '20:56:20.990352 16384 unevaluable input_stale:load'
+    - '20:56:29.613725 16384 unevaluable map_identity_unbracketed'
+    - '20:56:42.698944 16384 unevaluable map_identity_unbracketed'
+    - '20:56:49.829705 16384 unevaluable input_stale:load'
+    - '20:57:05.034362 16384 unevaluable map_identity_unbracketed'
+    - '20:57:16.904631 16384 unevaluable map_identity_unbracketed'
+    - '20:57:25.446886 16384 unevaluable input_stale:load'
+    - '20:57:30.844946 16384 unevaluable input_stale:load'
+    - '20:57:39.295355 cut unevaluable sentinel'
+    - '20:57:46.335025 19072 unevaluable input_stale:load'
+    - '20:57:53.390197 19072 unevaluable input_stale:load'
+    - '20:58:00.325575 16384 unevaluable input_stale:load'
+    - '20:58:05.957973 16384 unevaluable input_stale:load'
+    - '20:58:14.454407 16384 unevaluable input_stale:load'
+    - '20:58:21.034006 16384 unevaluable input_stale:load'
+    - '20:58:35.999065 16384 unevaluable input_stale:load'
+    - '20:58:43.265975 16384 unevaluable input_stale:load'
+    - '20:58:50.812655 16384 unevaluable input_stale:load'
+    - '20:58:57.785948 cut unevaluable sentinel'
+    - '20:59:04.691619 16384 unevaluable input_stale:load'
+    - '20:59:10.988494 16384 unevaluable input_stale:load'
+    - '20:59:18.543963 16384 unevaluable input_stale:load'
+    - '20:59:25.835980 16384 unevaluable input_stale:load'
+    - '20:59:32.910886 16384 unevaluable map_identity_unbracketed'
+    - '20:59:46.848944 16384 unevaluable input_stale:load'
+    - '20:59:53.854966 cut unevaluable sentinel'
+    - '21:00:00.788039 cut unevaluable sentinel'
+    - '21:00:07.794183 cut unevaluable sentinel'
+    - '21:00:16.585631 cut unevaluable sentinel'
+    - '21:00:23.585695 16384 unevaluable input_stale:load'
+    - '21:00:37.954028 16384 unevaluable input_stale:load'
+    - '21:00:44.935459 16384 unevaluable map_identity_unbracketed'
+    - '21:00:57.963106 16384 unevaluable map_identity_unbracketed'
+    - '21:01:04.970311 16384 unevaluable input_stale:load'
+    - '21:01:11.740634 cut unevaluable sentinel'
+    - '21:01:19.494446 16384 unevaluable input_stale:load'
+    - '21:01:26.290489 16384 unevaluable input_stale:load'
+    - '21:01:35.852075 cut unevaluable sentinel'
+    - '21:01:42.877432 16384 unevaluable input_stale:load'
+    - '21:01:49.874380 16384 unevaluable input_stale:load'
+    - '21:02:11.570542 16384 unevaluable input_stale:load'
+    - '21:02:26.717615 16384 unevaluable input_stale:rpm'
+    - '21:02:33.858713 16384 unevaluable input_stale:load'
+    - '21:02:47.952254 16384 unevaluable input_stale:rpm'
+    - '21:02:55.799653 16384 unevaluable input_stale:load'
+    - '21:03:10.444722 16384 unevaluable input_stale:load'
+    - '21:03:25.449363 16384 unevaluable input_stale:load'
+    - '21:03:33.684445 16384 unevaluable input_stale:rpm'
+    - '21:03:40.621855 16384 unevaluable input_stale:load'
+    - '21:03:47.556174 16384 unevaluable input_stale:rpm'
+    - '21:03:57.401496 16384 unevaluable input_stale:load'
+    - '21:04:04.319865 16384 unevaluable input_stale:load'
+    - '21:04:11.709566 16384 unevaluable input_stale:load'
+    - '21:04:18.654147 16384 unevaluable input_stale:load'
+    - '21:04:25.535201 16384 unevaluable input_stale:load'
+    - '21:04:31.943939 16384 unevaluable input_stale:rpm'
+    - '21:04:41.343916 16384 unevaluable input_stale:load'
+    - '21:04:48.523457 16384 unevaluable input_stale:load'
+    - '21:04:55.414406 cut unevaluable sentinel'
+    - '21:05:00.934066 16384 unevaluable input_stale:load'
+    - '21:05:15.907251 16384 unevaluable input_stale:load'
+    - '21:05:22.800259 16384 unevaluable input_stale:load'
+    - '21:05:29.800139 16384 unevaluable input_stale:load'
+    - '21:05:36.438444 16384 unevaluable input_stale:load'
+    - '21:05:52.761271 16384 unevaluable input_stale:load'
+    - '21:06:06.855245 16384 unevaluable input_stale:rpm'
+    - '21:06:13.993423 16384 unevaluable input_stale:load'
+    - '21:06:28.397783 16384 unevaluable input_stale:rpm'
+    - '21:06:41.567911 16384 unevaluable map_identity_unbracketed'
+    - '21:06:49.314454 16384 unevaluable input_stale:load'
+    - '21:06:56.316365 16384 unevaluable input_stale:load'
+    - '21:07:03.315219 16384 unevaluable input_stale:load'
+    - '21:07:10.316918 16384 unevaluable input_stale:load'
+    - '21:07:16.234466 16384 unevaluable input_stale:rpm'
+    - '21:07:24.237122 16384 unevaluable input_stale:load'
+    - '21:07:31.234831 16384 unevaluable input_stale:load'
+    - '21:07:38.234716 16384 unevaluable input_stale:load'
+    - '21:07:46.280322 16384 unevaluable input_stale:load'
+    - '21:07:54.023869 16384 unevaluable input_stale:load'
+    - '21:08:01.091800 16384 unevaluable input_stale:load'
+    - '21:08:08.039036 16384 unevaluable input_stale:load'
+    - '21:08:21.878969 16384 unevaluable input_stale:rpm'
+    - '21:08:35.440344 16384 unevaluable input_stale:load'
+    - '21:08:41.071801 16384 unevaluable input_stale:rpm'
+    - '21:08:47.697798 16384 unevaluable input_stale:rpm'
+    - '21:08:56.777049 16384 unevaluable input_stale:load'
+    - '21:09:06.584496 16384 unevaluable input_stale:load'
+    - '21:09:13.584502 16384 unevaluable input_stale:load'
+    - '21:09:20.482303 16384 unevaluable input_stale:load'
+    - '21:09:26.356132 16384 unevaluable input_stale:rpm'
+    - '21:09:32.614318 16384 unevaluable input_stale:rpm'
+    - '21:09:48.285562 16384 unevaluable input_stale:load'
+    - '21:09:55.288531 16384 unevaluable input_stale:load'
+    - '21:10:01.617476 16384 unevaluable input_stale:rpm'
+    - '21:10:09.118296 16384 unevaluable input_stale:load'
+    - '21:10:16.277901 16384 unevaluable input_stale:load'
+    - '21:10:21.451505 16384 unevaluable input_stale:rpm'
+    - '21:10:30.527568 16384 unevaluable input_stale:load'
+    - '21:10:36.904685 16384 unevaluable input_stale:rpm'
+    - '21:10:44.527483 16384 unevaluable input_stale:load'
+    - '21:10:51.509781 16384 unevaluable input_stale:load'
+    - '21:10:58.435902 16384 unevaluable input_stale:load'
+    - '21:11:05.337457 16384 unevaluable map_identity_unbracketed'

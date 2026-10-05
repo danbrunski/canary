@@ -1054,6 +1054,10 @@ def test_the_ground_truth_fixture_tool_refuses_a_change_only_session(
     assert main() == 2
     assert "P02.10" in capsys.readouterr().err
     assert not out.exists()
+    # A slice keeping no broadcast id has no frames to misread (E02.3's
+    # memory-channel slice of a change-only capture), so it is cut.
+    polled = extract(changed, start, 20.0, tmp_path / "out-polled", can_ids=(), gps_channels=())
+    assert not (polled["source"] == "can").any()
 
 
 def test_a_broadcast_freshness_threshold_under_the_stale_timeout_is_disabled_by_name(

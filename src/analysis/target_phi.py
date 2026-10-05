@@ -1,0 +1,1420 @@
+"""The deterministic target-equivalence-ratio twin, first slice (E02).
+
+Given the exact calibration and the ECM's observed lookup inputs, what fuel
+command does its decoded Target AFR logic give, and does the commanded word
+agree? This predicts the ECM's *command*, never fuel delivery, and a zero
+difference says nothing about engine health.
+
+Three layers, each usable without the next:
+
+- :func:`predict` — one tuple of raw lookup inputs to one predicted command,
+  through the shared kernel :mod:`src.decode.ecm_lookup` (the same search the
+  ROM Maps ECM cell uses). Pure: the streaming adapter (E04) calls it per
+  complete tuple with a preloaded :class:`ResolvedTable`.
+- :func:`resolve_table` / :func:`table_from_calibration` and
+  :func:`resolve_slot` — which bytes the ECM is reading, from a W08 library
+  image (by plain-image hash, program, slot and verified table definition) or
+  from the transcribed table in ``afr_calibration.yaml``, refusing by name.
+- :func:`evaluate_session` — the stored-session adapter: every observed command
+  sample becomes exactly one candidate, paired on acquisition time with each
+  lookup input (``src.signals.pairing.match_ordered``, one-to-one), gated by the
+  profile's declared mode, warmth, steadiness, region and map identity, and
+  accounted for as ``pending``, ``unevaluable``, ``excluded`` or ``eligible``.
+
+Everything vehicle-specific — channels, units, gates, regions, where the table
+lives — is the profile's ``target_phi_twin.yaml`` (:class:`TwinDefinition`).
+A learned constraint is a field there, not a comment here.
+"""
+
+from __future__ import annotations
+
+import hashlib
+import math
+from collections import Counter
+from collections.abc import Sequence
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any, Literal
+
+import numpy as np
+import pandas as pd
+import yaml
+from pydantic import BaseModel, ConfigDict, Field, model_validator
+
+from src.analysis.channels import ChannelSpecError, read_channels
+from src.analysis.rom_image import read_calibration_id, sha256_hex, table_values
+from src.analysis.rom_map import RomMap
+from src.analysis.rom_trace import (
+    ViewerDefinition,
+    mapping_refusal,
+    raw_counts,
+    stored_decode,
+)
+from src.decode.dids import DidMap, load_did_map
+from src.decode.ecm_lookup import KERNEL_VERSION, LookupResult, lookup_2d
+from src.paths import DIDS_YAML
+from src.signals.pairing import PairingPolicy, match_ordered, to_seconds
+
+#: Bumped when the evaluator's states, reasons or record shape change.
+EVALUATOR_VERSION = 1
+
+TWIN_FILE = "target_phi_twin.yaml"
+
+State = Literal["pending", "unevaluable", "excluded", "eligible"]
+Branch = Literal["ordinary", "override"]
+
+
+class _Strict(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+
+_SPEC = r"^[a-z]+:[A-Za-z0-9_]+$"
+
+
+class VerifiedImage(_Strict):
+    sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    revision: str = Field(min_length=1)
+
+
+class Program(_Strict):
+    calibration_id: str = Field(min_length=1)
+    verified_images: list[VerifiedImage] = Field(min_length=1)
+    evidence: str = Field(min_length=1)
+
+
+class TableAxisRef(_Strict):
+    rom_map_axis: str = Field(min_length=1)
+    input: Literal["rpm", "load"]
+    compare_multiplier: int = Field(ge=1)
+
+
+class TableRef(_Strict):
+    rom_map_kind: str = Field(min_length=1)
+    rows: TableAxisRef
+    columns: TableAxisRef
+    cell_to_word_shift: int = Field(ge=0, le=16)
+    evidence: str = Field(min_length=1)
+
+
+class RawInput(_Strict):
+    """A lookup input. ``raw_counts`` is the only unit the kernel accepts: a
+    channel stored scaled is returned to whole counts through its own catalog
+    decode, never fed at its display scale."""
+
+    channel: str = Field(pattern=_SPEC)
+    units: Literal["raw_counts"]
+    bits: Literal[8, 16, 32]
+    evidence: str = Field(min_length=1)
+
+
+class FlagInput(RawInput):
+    bit: int = Field(ge=0, le=31)
+    forces: Literal["last_column"]
+
+
+class Inputs(_Strict):
+    load: RawInput
+    rpm: RawInput
+    forced_column_flag: FlagInput
+
+    def channels(self) -> dict[str, str]:
+        return {
+            "load": self.load.channel,
+            "rpm": self.rpm.channel,
+            "flag": self.forced_column_flag.channel,
+        }
+
+
+class MagicRule(_Strict):
+    channel: str = Field(pattern=_SPEC)
+    valid: int
+
+
+class ActiveMapRule(_Strict):
+    channel: str = Field(pattern=_SPEC)
+    committed_min: int = Field(ge=0)
+    committed_max: int = Field(ge=0)
+
+
+class SelectorRule(_Strict):
+    channel: str = Field(pattern=_SPEC)
+
+
+class DefaultSlot(_Strict):
+    active_map: int
+    selector: int
+    slot: int = Field(ge=1)
+    evidence: str = Field(min_length=1)
+
+
+class RamCopy(_Strict):
+    status: Literal["verified", "unverified"]
+    evidence: str = Field(min_length=1)
+
+
+class MapIdentity(_Strict):
+    magic: MagicRule
+    active_map: ActiveMapRule
+    selector: SelectorRule
+    default_slot: DefaultSlot
+    max_age_s: float = Field(gt=0)
+    ram_copy: RamCopy
+
+    def channels(self) -> list[str]:
+        return [self.magic.channel, self.active_map.channel, self.selector.channel]
+
+
+class Reference(_Strict):
+    channel: str = Field(pattern=_SPEC)
+    sentinel_channel: str = Field(pattern=_SPEC)
+    q_bits: int = Field(ge=1, le=16)
+
+
+class EnrichmentGate(_Strict):
+    floor_cell: int
+    threshold_cell: int
+    hysteresis_cells: int = Field(ge=0)
+    rom_threshold_offset: int = Field(ge=0)
+    rom_release_offset: int = Field(ge=0)
+
+
+class ScaleCurve(_Strict):
+    rom_offset: int = Field(ge=0)
+    entries: int = Field(ge=1)
+    identity_value: int
+
+
+class FinalCommand(_Strict):
+    status: Literal["verified", "unverified"]
+    enrichment_gate: EnrichmentGate
+    enrichment_scale_curve: ScaleCurve
+    evidence: str = Field(min_length=1)
+
+
+class CoolantGate(_Strict):
+    sources: list[str] = Field(min_length=1)
+    min_c: float
+    max_age_s: float = Field(gt=0)
+    status: Literal["proposed", "qualified"]
+
+
+class ModeGate(_Strict):
+    channel: str = Field(pattern=_SPEC)
+    states: dict[int, str] = Field(min_length=1)
+    eligible: list[str] = Field(min_length=1)
+    max_age_s: float = Field(gt=0)
+    status: Literal["proposed", "qualified"]
+
+    @model_validator(mode="after")
+    def _eligible_named(self) -> ModeGate:
+        unknown = set(self.eligible) - set(self.states.values())
+        if unknown:
+            raise ValueError(f"mode gate: eligible names no declared state: {sorted(unknown)}")
+        return self
+
+
+class SteadyChannel(_Strict):
+    channel: str = Field(pattern=_SPEC)
+    max_span: float | None = Field(default=None, gt=0)
+    max_relative_span: float | None = Field(default=None, gt=0)
+
+    @model_validator(mode="after")
+    def _one_limit(self) -> SteadyChannel:
+        if (self.max_span is None) == (self.max_relative_span is None):
+            raise ValueError(f"{self.channel}: give exactly one of max_span, max_relative_span")
+        return self
+
+
+class SteadinessGate(_Strict):
+    dwell_s: float = Field(gt=0)
+    min_samples: int = Field(ge=2)
+    channels: list[SteadyChannel] = Field(min_length=1)
+    status: Literal["proposed", "qualified"]
+
+
+class Gates(_Strict):
+    max_acquisition_skew_s: float = Field(gt=0)
+    clock: Literal["acquired"]
+    coolant: CoolantGate
+    mode: ModeGate
+    steadiness: SteadinessGate
+
+
+class Region(_Strict):
+    rpm_raw: tuple[int, int]
+    load_raw: tuple[int, int] | None = None
+    status: Literal["proposed", "qualified"]
+
+
+class Regions(_Strict):
+    ordinary: Region
+    override: Region
+
+    @model_validator(mode="after")
+    def _ordinary_bounds_load(self) -> Regions:
+        if self.ordinary.load_raw is None:
+            raise ValueError("the ordinary region needs load_raw bounds")
+        return self
+
+
+class XFormula(_Strict):
+    bfs_channel: str = Field(pattern=_SPEC)
+    scaler_rom_map_table: str = Field(min_length=1)
+    shift: int = Field(ge=0)
+    cap: int = Field(ge=1)
+
+
+class Acquisition(_Strict):
+    """Which memory windows the twin needs, and which must be read together.
+
+    A tuple is only as simultaneous as its reads: the command and its three
+    lookup inputs live in four windows, and on October 4 their nearest reads
+    sat a median 0.9-1.5 s from each command sample (the fixture's
+    ``accounting.input_pairing``), so no tuple fitted the skew. ``back_to_back`` names the
+    windows a capture must read consecutively, within ``max_span_s``."""
+
+    #: Window name (``data/dids.yaml`` ``window:``) -> the channels it carries.
+    windows: dict[str, list[str]] = Field(min_length=1)
+    back_to_back: list[str] = Field(min_length=2)
+    max_span_s: float = Field(gt=0)
+    evidence: str = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def _back_to_back_declared(self) -> Acquisition:
+        unknown = [w for w in self.back_to_back if w not in self.windows]
+        if unknown:
+            raise ValueError(f"acquisition.back_to_back names undeclared windows: {unknown}")
+        return self
+
+    def window_of(self, channel: str) -> str | None:
+        return next((w for w, specs in self.windows.items() if channel in specs), None)
+
+
+class TwinDefinition(_Strict):
+    schema_version: Literal[1]
+    name: Literal["target_equiv_ratio"]
+    program: Program
+    table: TableRef
+    inputs: Inputs
+    map_identity: MapIdentity
+    reference: Reference
+    final_command: FinalCommand
+    gates: Gates
+    regions: Regions
+    x_formula: XFormula
+    acquisition: Acquisition
+
+    @model_validator(mode="after")
+    def _windows_cover_the_tuple(self) -> TwinDefinition:
+        acquisition = self.acquisition
+        needed = [
+            *self.inputs.channels().values(),
+            self.reference.channel,
+            *self.map_identity.channels(),
+            self.x_formula.bfs_channel,
+        ]
+        undeclared = [c for c in needed if acquisition.window_of(c) is None]
+        if undeclared:
+            raise ValueError(f"acquisition.windows declares no window for {undeclared}")
+        tuple_windows = {
+            acquisition.window_of(c)
+            for c in [*self.inputs.channels().values(), self.reference.channel]
+        }
+        missing = sorted(
+            w for w in tuple_windows if w is not None and w not in acquisition.back_to_back
+        )
+        if missing:
+            raise ValueError(
+                f"acquisition.back_to_back must include every tuple window; missing {missing}"
+            )
+        if acquisition.max_span_s > self.gates.max_acquisition_skew_s:
+            raise ValueError(
+                "acquisition.max_span_s cannot exceed gates.max_acquisition_skew_s: a "
+                "back-to-back read slower than the skew can never yield a tuple"
+            )
+        return self
+
+    def verified_revision(self, image_sha256: str) -> str | None:
+        return next(
+            (v.revision for v in self.program.verified_images if v.sha256 == image_sha256), None
+        )
+
+
+def check_windows(definition: TwinDefinition, catalog: DidMap) -> None:
+    """Refuse (``window_mismatch``) unless every declared channel sits in the
+    declared window of the memory catalog the session is decoded with."""
+    by_name = {f"mem:{c.name}": c.window or c.name for c in catalog.memory}
+    wrong = []
+    for window, specs in definition.acquisition.windows.items():
+        for spec in specs:
+            actual = by_name.get(spec)
+            if actual != window:
+                wrong.append(f"{spec} (catalog window {actual!r}, declared {window!r})")
+    if wrong:
+        raise TwinRefusalError("window_mismatch", "; ".join(wrong))
+
+
+def load_twin_definition(profile_dir: Path) -> tuple[TwinDefinition, str]:
+    """The profile's twin definition and the sha256 of its file (the
+    decoder version every prediction carries). ``FileNotFoundError`` when the
+    vehicle declares none."""
+    path = profile_dir / TWIN_FILE
+    text = path.read_bytes()
+    return (
+        TwinDefinition.model_validate(yaml.safe_load(text)),
+        hashlib.sha256(text).hexdigest(),
+    )
+
+
+# -- refusals -----------------------------------------------------------------
+
+
+class TwinRefusalError(ValueError):
+    """The twin cannot run at all; ``reason`` names why."""
+
+    def __init__(self, reason: str, message: str) -> None:
+        super().__init__(f"{reason}: {message}")
+        self.reason = reason
+        self.message = message
+
+
+# -- the resolved table -------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class ResolvedTable:
+    """The exact bytes a prediction reads, and where they came from."""
+
+    cells: tuple[tuple[int, ...], ...]
+    #: Breakpoints in each input's comparison domain (axis byte x multiplier).
+    row_breakpoints: tuple[int, ...]
+    column_breakpoints: tuple[int, ...]
+    #: The axis bytes as stored, for the record.
+    row_axis_raw: tuple[int, ...]
+    column_axis_raw: tuple[int, ...]
+    image_sha256: str
+    revision: str | None
+    slot: int
+    table_id: str
+    row_axis_id: str
+    column_axis_id: str
+    #: ``rom_library`` (read from the image) or ``afr_calibration`` (the
+    #: transcribed table, pinned equal to the image by the private-ROM test).
+    source: Literal["rom_library", "afr_calibration"]
+    #: Load Point Scaler, when read from the image.
+    load_point_scaler: int | None
+    #: Whether the final-command constants were checked against the image.
+    final_command_constants_checked: bool
+
+    def provenance(self) -> dict[str, Any]:
+        return {
+            "image_sha256": self.image_sha256,
+            "revision": self.revision,
+            "slot": self.slot,
+            "table": self.table_id,
+            "axes": {"rows": self.row_axis_id, "columns": self.column_axis_id},
+            "table_source": self.source,
+        }
+
+
+def _check_final_command_constants(image: bytes, definition: TwinDefinition) -> None:
+    final = definition.final_command
+    gate = final.enrichment_gate
+    threshold = image[gate.rom_threshold_offset]
+    release = image[gate.rom_release_offset]
+    if threshold != gate.threshold_cell or threshold - release != gate.hysteresis_cells:
+        raise TwinRefusalError(
+            "unmodelled_logic",
+            f"this image's enrichment gate is {threshold} with release {release}; the twin "
+            f"models threshold {gate.threshold_cell}, hysteresis {gate.hysteresis_cells}",
+        )
+    curve = final.enrichment_scale_curve
+    values = list(image[curve.rom_offset : curve.rom_offset + curve.entries])
+    if any(value != curve.identity_value for value in values):
+        raise TwinRefusalError(
+            "unmodelled_logic",
+            f"enrichment scale curve at 0x{curve.rom_offset:X} is {values}, not the identity "
+            f"{curve.identity_value}; the twin does not model that scaling",
+        )
+
+
+def check_trace_mapping(viewer: ViewerDefinition, definition: TwinDefinition) -> None:
+    """Refuse unless W05's verified trace mapping for this table names the
+    twin's own inputs, compared the way the twin compares them.
+
+    ``rom_viewer.yaml`` is where the ECM coordinates' landing on the axes was
+    settled (W05.1); the twin consumes that verdict rather than restating it.
+    Refuses ``mapping_unverified`` (no trace, or an unverified axis) and
+    ``mapping_mismatch`` (another channel, or a mapping that is not the raw
+    bytes for the load axis and rpm for the rpm axis)."""
+    info = viewer.table(definition.table.rom_map_kind)
+    refusal = mapping_refusal(None if info is None else info.trace)
+    if refusal is not None:
+        raise TwinRefusalError("mapping_unverified", refusal["message"])
+    assert info is not None and info.trace is not None
+    trace = info.trace
+    inputs = definition.inputs
+    expected = {
+        "x": (inputs.load.channel, "raw", 1.0, 0.0),
+        "y": (inputs.rpm.channel, "display", 1.0, 0.0),
+    }
+    for name, axis in (("x", trace.x), ("y", trace.y)):
+        actual = (axis.channel, axis.axis_units, axis.scale, axis.offset)
+        if actual != expected[name]:
+            raise TwinRefusalError(
+                "mapping_mismatch",
+                f"rom_viewer.yaml maps the {name.upper()} trace as {actual}; the twin "
+                f"reads {expected[name]}",
+            )
+    if not trace.clamps:
+        raise TwinRefusalError(
+            "mapping_unverified", "rom_viewer.yaml declares no clamp past the axis ends"
+        )
+
+
+def resolve_table(
+    image: bytes,
+    rom_map: RomMap,
+    definition: TwinDefinition,
+    *,
+    viewer: ViewerDefinition,
+    expected_sha256: str,
+    slot: int,
+) -> ResolvedTable:
+    """The table the ECM reads, from a W08 library image. Refuses by name:
+    ``mapping_unverified``/``mapping_mismatch`` (W05's trace mapping),
+    ``image_hash_mismatch``, ``wrong_program``, ``table_missing``,
+    ``table_unverified``, ``axis_unverified``, ``unmodelled_logic``."""
+    check_trace_mapping(viewer, definition)
+    sha = sha256_hex(image)
+    if sha != expected_sha256:
+        raise TwinRefusalError(
+            "image_hash_mismatch",
+            f"the session ran plain image {expected_sha256}; this image is {sha}",
+        )
+    calibration_id = read_calibration_id(image, rom_map)
+    if calibration_id != definition.program.calibration_id:
+        raise TwinRefusalError(
+            "wrong_program",
+            f"image calibration ID {calibration_id!r} is not the decoded program "
+            f"{definition.program.calibration_id!r}",
+        )
+    ref = definition.table
+    entries = [t for t in table_values(image, rom_map) if t["kind"] == ref.rom_map_kind]
+    entry = next((t for t in entries if t["slot"] == slot), None)
+    if entry is None:
+        raise TwinRefusalError(
+            "table_missing",
+            f"rom_map.yaml places no {ref.rom_map_kind!r} table in slot {slot}",
+        )
+    if entry["confidence"] != "verified":
+        raise TwinRefusalError(
+            "table_unverified",
+            f"{entry['id']} in slot {slot} is {entry['confidence']}, not verified",
+        )
+    axes: dict[str, dict[str, Any]] = {}
+    for name, axis_ref, payload in (
+        ("rows", ref.rows, entry["axes"]["rows"]),
+        ("columns", ref.columns, entry["axes"]["cols"]),
+    ):
+        if payload is None or payload["id"] != axis_ref.rom_map_axis:
+            raise TwinRefusalError(
+                "table_missing",
+                f"{entry['id']} has no {name} axis {axis_ref.rom_map_axis!r}",
+            )
+        if payload["confidence"] != "verified":
+            raise TwinRefusalError(
+                "axis_unverified",
+                f"{axis_ref.rom_map_axis} is {payload['confidence']}, not verified",
+            )
+        axes[name] = payload
+    _check_final_command_constants(image, definition)
+    scaler = next(
+        (
+            t["raw"][0][0]
+            for t in table_values(image, rom_map)
+            if t["id"] == definition.x_formula.scaler_rom_map_table
+        ),
+        None,
+    )
+    return ResolvedTable(
+        cells=tuple(tuple(int(v) for v in row) for row in entry["raw"]),
+        row_breakpoints=tuple(v * ref.rows.compare_multiplier for v in axes["rows"]["raw"]),
+        column_breakpoints=tuple(
+            v * ref.columns.compare_multiplier for v in axes["columns"]["raw"]
+        ),
+        row_axis_raw=tuple(axes["rows"]["raw"]),
+        column_axis_raw=tuple(axes["columns"]["raw"]),
+        image_sha256=sha,
+        revision=definition.verified_revision(sha),
+        slot=slot,
+        table_id=entry["id"],
+        row_axis_id=ref.rows.rom_map_axis,
+        column_axis_id=ref.columns.rom_map_axis,
+        source="rom_library",
+        load_point_scaler=None if scaler is None else int(scaler),
+        final_command_constants_checked=True,
+    )
+
+
+def table_from_calibration(
+    calibration: Any,
+    definition: TwinDefinition,
+    *,
+    viewer: ViewerDefinition,
+    revision: str,
+    image_sha256: str,
+    slot: int,
+) -> ResolvedTable:
+    """The table transcribed for ``revision`` in ``afr_calibration.yaml``.
+
+    For checks that must run without the private ROM. The image hash still
+    names which bytes these are (the registry's ``image_sha256`` for the
+    revision); the private-ROM test pins them equal to that image's slot."""
+    check_trace_mapping(viewer, definition)
+    target = calibration.target_map(revision)
+    if target is None or target.raw_values is None:
+        raise TwinRefusalError("table_missing", f"no raw target table recorded for {revision!r}")
+    if target.raw_rpm_breakpoints is None or target.raw_load_breakpoints is None:
+        raise TwinRefusalError("table_missing", f"no raw axes recorded for {revision!r}")
+    provenance = getattr(target, "provenance", None)
+    recorded_slot = getattr(provenance, "map_slot", None)
+    if recorded_slot is not None and recorded_slot != slot:
+        raise TwinRefusalError(
+            "slot_unresolved", f"{revision!r} was transcribed from slot {recorded_slot}, not {slot}"
+        )
+    ref = definition.table
+    return ResolvedTable(
+        cells=tuple(tuple(int(v) for v in row) for row in target.raw_values),
+        row_breakpoints=tuple(v * ref.rows.compare_multiplier for v in target.raw_rpm_breakpoints),
+        column_breakpoints=tuple(
+            v * ref.columns.compare_multiplier for v in target.raw_load_breakpoints
+        ),
+        row_axis_raw=tuple(target.raw_rpm_breakpoints),
+        column_axis_raw=tuple(target.raw_load_breakpoints),
+        image_sha256=image_sha256,
+        revision=revision,
+        slot=slot,
+        table_id=ref.rom_map_kind,
+        row_axis_id=ref.rows.rom_map_axis,
+        column_axis_id=ref.columns.rom_map_axis,
+        source="afr_calibration",
+        load_point_scaler=None,
+        final_command_constants_checked=False,
+    )
+
+
+# -- map identity -------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class SlotResolution:
+    slot: int | None
+    reason: str | None
+    detail: str
+
+
+def resolve_slot(
+    definition: TwinDefinition, *, magic: int, active_map: int, selector: int
+) -> SlotResolution:
+    """The active slot from one identity read, or the named reason it is not
+    resolved: ``map_uninitialised`` (magic absent: UpRev's init has not run,
+    the RAM copy is unknown) or ``slot_ambiguous`` (a value the rules do not
+    cover, e.g. a selector stepped but not yet committed)."""
+    rules = definition.map_identity
+    if magic != rules.magic.valid:
+        return SlotResolution(None, "map_uninitialised", f"magic 0x{magic:08X}")
+    if rules.active_map.committed_min <= active_map <= rules.active_map.committed_max:
+        return SlotResolution(active_map, None, f"committed slot {active_map}")
+    default = rules.default_slot
+    if active_map == default.active_map and selector == default.selector:
+        return SlotResolution(default.slot, None, f"default slot {default.slot} (no commit)")
+    return SlotResolution(
+        None, "slot_ambiguous", f"active map {active_map} with selector {selector}"
+    )
+
+
+# -- the pure prediction ------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class Prediction:
+    branch: Branch
+    lookup: LookupResult
+    #: Lookup value (a table cell, or an interpolation of cells).
+    cell: int
+    #: ``None`` when the lookup lands in the enrichment gate's hysteresis band,
+    #: whose state is not captured.
+    word: int | None
+    phi: float | None
+    reason: str | None
+
+
+def predict(
+    table: ResolvedTable,
+    definition: TwinDefinition,
+    *,
+    load_raw: int,
+    rpm_raw: int,
+    flag_raw: int,
+) -> Prediction:
+    """One tuple of raw lookup inputs to the command the decoded logic gives.
+
+    The forced-column flag replaces the load input with the axis's last
+    column (the firmware's 0xFF, which clamps there). The enrichment gate is
+    applied as decoded; a lookup inside its hysteresis band is ambiguous and
+    carries a reason instead of a word."""
+    flag = definition.inputs.forced_column_flag
+    forced = bool((int(flag_raw) >> flag.bit) & 1)
+    load = (1 << definition.inputs.load.bits) - 1 if forced else int(load_raw)
+    result = lookup_2d(
+        table.cells, table.row_breakpoints, table.column_breakpoints, int(rpm_raw), load
+    )
+    branch: Branch = "override" if forced else "ordinary"
+    gate = definition.final_command.enrichment_gate
+    cell = result.value
+    if gate.threshold_cell - gate.hysteresis_cells <= cell < gate.threshold_cell:
+        return Prediction(branch, result, cell, None, None, "enrichment_gate_state_unknown")
+    gated = cell if cell >= gate.threshold_cell else gate.floor_cell
+    word = gated << definition.table.cell_to_word_shift
+    return Prediction(branch, result, cell, word, word / (1 << definition.reference.q_bits), None)
+
+
+def x_from_bfs(bfs: int, scaler: int, definition: TwinDefinition) -> int:
+    """The load input from the BFS word, as the ECM computes it."""
+    formula = definition.x_formula
+    return min(formula.cap, (int(bfs) << formula.shift) // int(scaler))
+
+
+# -- the stored-session adapter -------------------------------------------------
+
+
+@dataclass
+class _Series:
+    times: np.ndarray
+    values: np.ndarray
+    basis: list[str]
+
+
+def _series(long: pd.DataFrame, spec: str) -> _Series:
+    rows = long[long["spec"] == spec]
+    basis = (
+        rows["timestamp_basis"].astype(str).tolist()
+        if "timestamp_basis" in rows
+        else ["unknown"] * len(rows)
+    )
+    return _Series(
+        times=to_seconds(rows["timestamp"]),
+        values=pd.to_numeric(rows["value"], errors="coerce").to_numpy(dtype=float),
+        basis=basis,
+    )
+
+
+def _raw(series: _Series, spec: str, dids_path: Path, catalog: DidMap | None) -> np.ndarray:
+    """``series`` back in raw counts, or a ``wrong_units`` refusal."""
+    if not len(series.values):
+        return series.values
+    decode = stored_decode(spec, dids_path, catalog=catalog)
+    if decode is None:
+        raise TwinRefusalError(
+            "wrong_units", f"{spec} is not a catalog memory channel; its raw counts are unknown"
+        )
+    raw = raw_counts(series.values, decode)
+    if raw is None:
+        raise TwinRefusalError(
+            "wrong_units",
+            f"{spec} values do not return to whole raw counts under the catalog decode "
+            f"(scale {decode[0]}, offset {decode[1]}): stored under another decode",
+        )
+    return raw
+
+
+def _iso(seconds: float) -> str:
+    return pd.Timestamp(seconds, unit="s", tz="UTC").isoformat()
+
+
+def _as_of(series: _Series, t: float, max_age: float) -> tuple[int | None, int | None]:
+    """Indices of the latest reading at/before ``t`` and the next reading
+    after that one, each within ``max_age`` of ``t``.
+
+    The two are always distinct reads: a reading stamped exactly at ``t`` is
+    the prior, and the bracket still needs a later one. Returning the same
+    read on both sides would let a change between it and the next read (a
+    map switch, a mode change) pass as a stable bracket."""
+    if not len(series.times):
+        return None, None
+    before = int(np.searchsorted(series.times, t, side="right")) - 1
+    after = before + 1
+    prior = before if before >= 0 and t - series.times[before] <= max_age else None
+    nxt = after if after < len(series.times) and series.times[after] - t <= max_age else None
+    return prior, nxt
+
+
+@dataclass
+class _Candidate:
+    index: int
+    time: float
+    sentinel: bool
+    word: int | None
+    record: dict[str, Any]
+    reasons: list[tuple[State, str]]
+    prediction: Prediction | None = None
+
+
+def _sorted(series: _Series) -> _Series:
+    order = np.argsort(series.times, kind="stable")
+    return _Series(series.times[order], series.values[order], [series.basis[i] for i in order])
+
+
+def evaluate_session(
+    session: Path | pd.DataFrame,
+    definition: TwinDefinition,
+    table: ResolvedTable,
+    *,
+    definition_sha256: str,
+    dids_path: Path = DIDS_YAML,
+    session_complete: bool = True,
+    tolerance_words: int = 1,
+) -> dict[str, Any]:
+    """Every command sample in ``session``, predicted where the declared
+    applicability allows and accounted for where it does not.
+
+    ``session_complete=False`` (a capture still recording, the streaming case)
+    leaves a sample whose decision needs later reads ``pending``; a finished
+    session names what was missing instead. ``tolerance_words`` is the
+    acceptance target in reference counts (one Q14 count), never widened to
+    absorb a miss. Raises :class:`TwinRefusalError` only when the session as a
+    whole cannot be evaluated (a channel stored under another decode)."""
+    gates = definition.gates
+    skew = gates.max_acquisition_skew_s
+    inputs = definition.inputs.channels()
+    identity = definition.map_identity
+    reference = definition.reference
+    mode_gate = gates.mode
+    steady_specs = [c.channel for c in gates.steadiness.channels]
+    specs = list(
+        dict.fromkeys(
+            [
+                reference.channel,
+                reference.sentinel_channel,
+                *inputs.values(),
+                *identity.channels(),
+                *gates.coolant.sources,
+                mode_gate.channel,
+                *steady_specs,
+            ]
+        )
+    )
+    try:
+        long = read_channels(session, specs, dids_path=dids_path, acquired_time=True)
+    except (ChannelSpecError, KeyError) as exc:
+        raise TwinRefusalError("gate_unreadable", str(exc)) from exc
+
+    series = {spec: _sorted(_series(long, spec)) for spec in specs}
+    session_end = max(
+        (float(s.times[-1]) for s in series.values() if len(s.times)), default=float("nan")
+    )
+    catalog = load_did_map(dids_path)
+    check_windows(definition, catalog)
+    raw = {
+        spec: _raw(series[spec], spec, dids_path, catalog)
+        for spec in [*inputs.values(), *identity.channels(), reference.channel]
+    }
+
+    # One candidate per observed command sample: a value or a fuel-cut state.
+    target = series[reference.channel]
+    sentinel = series[reference.sentinel_channel]
+    stamps = [(float(t), False, i) for i, t in enumerate(target.times)]
+    stamps += [(float(t), True, i) for i, t in enumerate(sentinel.times)]
+    stamps.sort()
+    candidates: list[_Candidate] = []
+    for position, (t, is_sentinel, i) in enumerate(stamps):
+        word = None if is_sentinel else int(raw[reference.channel][i])
+        basis = (sentinel if is_sentinel else target).basis[i]
+        candidates.append(
+            _Candidate(
+                index=position,
+                time=t,
+                sentinel=is_sentinel,
+                word=word,
+                record={
+                    "sample": {
+                        "spec": reference.sentinel_channel if is_sentinel else reference.channel,
+                        "row": i,
+                        "acquired_at": _iso(t),
+                        "timestamp_basis": basis,
+                        "observed_word": word,
+                        "observed_phi": None if word is None else word / (1 << reference.q_bits),
+                    }
+                },
+                reasons=[],
+            )
+        )
+        if basis != gates.clock:
+            candidates[-1].reasons.append(("unevaluable", "unsupported_clock"))
+        if is_sentinel:
+            candidates[-1].reasons.append(("unevaluable", "sentinel"))
+
+    # Pair each lookup input one-to-one with the command samples.
+    candidate_times = np.array([c.time for c in candidates], dtype=float)
+    policy = PairingPolicy.within(pd.Timedelta(seconds=skew), reference="a")
+    pairs: dict[str, dict[int, int]] = {}
+    for name, spec in inputs.items():
+        matched = match_ordered(candidate_times, series[spec].times, policy)
+        pairs[name] = dict(zip(matched.index_a.tolist(), matched.index_b.tolist(), strict=True))
+
+    coolant_spec = next((spec for spec in gates.coolant.sources if len(series[spec].times)), None)
+    for candidate in candidates:
+        _assess(
+            candidate,
+            definition=definition,
+            table=table,
+            series=series,
+            raw=raw,
+            pairs=pairs,
+            coolant_spec=coolant_spec,
+            session_end=session_end,
+            session_complete=session_complete,
+            tolerance_words=tolerance_words,
+        )
+
+    result = _summarise(
+        candidates,
+        definition=definition,
+        table=table,
+        definition_sha256=definition_sha256,
+        tolerance_words=tolerance_words,
+        coolant_spec=coolant_spec,
+    )
+    result["accounting"]["input_pairing"] = _input_pairing(candidates, inputs, series)
+    return result
+
+
+def _input_refs(
+    candidate: _Candidate,
+    *,
+    inputs: dict[str, str],
+    series: dict[str, _Series],
+    raw: dict[str, np.ndarray],
+    pairs: dict[str, dict[int, int]],
+) -> dict[str, dict[str, Any] | None]:
+    refs: dict[str, dict[str, Any] | None] = {}
+    for name, spec in inputs.items():
+        j = pairs[name].get(candidate.index)
+        if j is None:
+            refs[name] = None
+            continue
+        t = float(series[spec].times[j])
+        refs[name] = {
+            "spec": spec,
+            "row": j,
+            "acquired_at": _iso(t),
+            "skew_s": round(t - candidate.time, 6),
+            # One window read stamps its channels together; the ECM may still
+            # have updated them in different loop iterations.
+            "same_read": t == candidate.time,
+            "raw": int(raw[spec][j]),
+        }
+    return refs
+
+
+def _identity(
+    candidate: _Candidate,
+    definition: TwinDefinition,
+    series: dict[str, _Series],
+    raw: dict[str, np.ndarray],
+    *,
+    session_end: float,
+    session_complete: bool,
+) -> tuple[SlotResolution | None, tuple[State, str] | None, dict[str, Any]]:
+    rules = definition.map_identity
+    magic, active, selector = (
+        series[rules.magic.channel],
+        series[rules.active_map.channel],
+        series[rules.selector.channel],
+    )
+    reads: list[SlotResolution] = []
+    detail: dict[str, Any] = {}
+    for side, pick in (("before", 0), ("after", 1)):
+        index = _as_of(magic, candidate.time, rules.max_age_s)[pick]
+        if index is None:
+            detail[side] = None
+            continue
+        t = float(magic.times[index])
+        others = []
+        for other in (active, selector):
+            k = int(np.argmin(np.abs(other.times - t))) if len(other.times) else None
+            others.append(
+                None
+                if k is None
+                or abs(float(other.times[k]) - t) > definition.gates.max_acquisition_skew_s
+                else k
+            )
+        if others[0] is None or others[1] is None:
+            detail[side] = None
+            continue
+        resolution = resolve_slot(
+            definition,
+            magic=int(raw[rules.magic.channel][index]),
+            active_map=int(raw[rules.active_map.channel][others[0]]),
+            selector=int(raw[rules.selector.channel][others[1]]),
+        )
+        detail[side] = {
+            "acquired_at": _iso(t),
+            "slot": resolution.slot,
+            "reason": resolution.reason,
+            "detail": resolution.detail,
+        }
+        reads.append(resolution)
+    if detail.get("after") is None and detail.get("before") is not None:
+        if not session_complete and session_end - candidate.time < rules.max_age_s:
+            return None, ("pending", "awaiting_identity_read"), detail
+    if len(reads) < 2:
+        return None, ("unevaluable", "map_identity_unbracketed"), detail
+    for resolution in reads:
+        if resolution.reason is not None:
+            return None, ("unevaluable", resolution.reason), detail
+    if reads[0].slot != reads[1].slot:
+        return None, ("unevaluable", "map_switching"), detail
+    return reads[0], None, detail
+
+
+def _assess(
+    candidate: _Candidate,
+    *,
+    definition: TwinDefinition,
+    table: ResolvedTable,
+    series: dict[str, _Series],
+    raw: dict[str, np.ndarray],
+    pairs: dict[str, dict[int, int]],
+    coolant_spec: str | None,
+    session_end: float,
+    session_complete: bool,
+    tolerance_words: int,
+) -> None:
+    gates = definition.gates
+    skew = gates.max_acquisition_skew_s
+    t = candidate.time
+    record = candidate.record
+    reasons = candidate.reasons
+    inputs = definition.inputs.channels()
+
+    # Map identity: bracketing reads that resolve to the table's slot.
+    slot, identity_reason, identity_detail = _identity(
+        candidate,
+        definition,
+        series,
+        raw,
+        session_end=session_end,
+        session_complete=session_complete,
+    )
+    record["map_identity"] = identity_detail
+    if identity_reason is not None:
+        reasons.append(identity_reason)
+    elif slot is not None and slot.slot != table.slot:
+        reasons.append(("unevaluable", "slot_unresolved"))
+
+    # Lookup inputs, each within the skew of the command and of each other.
+    refs = _input_refs(candidate, inputs=inputs, series=series, raw=raw, pairs=pairs)
+    record["inputs"] = refs
+    present = [ref for ref in refs.values() if ref is not None]
+    for name, spec in inputs.items():
+        if refs[name] is not None:
+            continue
+        if not len(series[spec].times):
+            reasons.append(("unevaluable", f"input_not_captured:{name}"))
+        elif not session_complete and session_end - t < skew:
+            reasons.append(("pending", f"awaiting_input:{name}"))
+        else:
+            reasons.append(("unevaluable", f"input_stale:{name}"))
+    tuple_times = [t, *(t + ref["skew_s"] for ref in present)]
+    spread = max(tuple_times) - min(tuple_times)
+    record["tuple_skew_s"] = round(spread, 6)
+    if len(present) == len(inputs) and spread > skew:
+        reasons.append(("unevaluable", "input_stale:tuple_spread"))
+    for ref in present:
+        if ref["spec"] and series[ref["spec"]].basis[ref["row"]] != gates.clock:
+            reasons.append(("unevaluable", "unsupported_clock"))
+
+    # The prediction itself, whenever its inputs exist (a diagnostic
+    # difference is kept for excluded and transient samples too).
+    if len(present) == len(inputs) and slot is not None and slot.slot == table.slot:
+        assert refs["load"] is not None and refs["rpm"] is not None and refs["flag"] is not None
+        prediction = predict(
+            table,
+            definition,
+            load_raw=refs["load"]["raw"],
+            rpm_raw=refs["rpm"]["raw"],
+            flag_raw=refs["flag"]["raw"],
+        )
+        candidate.prediction = prediction
+        if prediction.reason is not None:
+            reasons.append(("unevaluable", prediction.reason))
+        region = getattr(definition.regions, prediction.branch)
+        rpm_raw = refs["rpm"]["raw"]
+        load_raw = refs["load"]["raw"]
+        inside = region.rpm_raw[0] <= rpm_raw <= region.rpm_raw[1] and (
+            region.load_raw is None or region.load_raw[0] <= load_raw <= region.load_raw[1]
+        )
+        if not inside:
+            reasons.append(("unevaluable", "uncovered_region"))
+
+    # Gates: warmth, mode, steadiness — from inputs and mode, never the residual.
+    record["gates"] = _gates(
+        candidate, definition, series, coolant_spec, session_end, session_complete
+    )
+    for state, reason in record["gates"].pop("_reasons"):
+        reasons.append((state, reason))
+
+    _finish(candidate, definition, tolerance_words)
+
+
+def _gates(
+    candidate: _Candidate,
+    definition: TwinDefinition,
+    series: dict[str, _Series],
+    coolant_spec: str | None,
+    session_end: float,
+    session_complete: bool,
+) -> dict[str, Any]:
+    gates = definition.gates
+    t = candidate.time
+    out: dict[str, Any] = {}
+    reasons: list[tuple[State, str]] = []
+
+    coolant = gates.coolant
+    if coolant_spec is None:
+        reasons.append(("unevaluable", "gate_missing:coolant"))
+        out["coolant"] = None
+    else:
+        s = series[coolant_spec]
+        prior, nxt = _as_of(s, t, coolant.max_age_s)
+        values = [float(s.values[i]) for i in (prior, nxt) if i is not None]
+        out["coolant"] = {"spec": coolant_spec, "values": values}
+        if not values:
+            reasons.append(("unevaluable", "gate_stale:coolant"))
+        elif min(values) < coolant.min_c:
+            reasons.append(("excluded", "cold"))
+
+    mode = gates.mode
+    s = series[mode.channel]
+    if not len(s.times):
+        reasons.append(("unevaluable", "gate_missing:mode"))
+        out["mode"] = None
+    else:
+        prior, nxt = _as_of(s, t, mode.max_age_s)
+        names = [
+            mode.states.get(int(s.values[i]), f"unknown_{s.values[i]:g}")
+            for i in (prior, nxt)
+            if i is not None and math.isfinite(s.values[i])
+        ]
+        out["mode"] = {"spec": mode.channel, "states": names}
+        if prior is None or nxt is None:
+            if nxt is None and not session_complete and session_end - t < mode.max_age_s:
+                reasons.append(("pending", "awaiting_mode_read"))
+            else:
+                reasons.append(("unevaluable", "gate_stale:mode"))
+        elif len(names) < 2 or any(name.startswith("unknown_") for name in names):
+            reasons.append(("unevaluable", "mode_unknown"))
+        elif names[0] != names[1]:
+            reasons.append(("excluded", "mode_transition"))
+        elif names[0] not in mode.eligible:
+            reasons.append(("excluded", names[0]))
+
+    steady = gates.steadiness
+    steady_out: dict[str, dict[str, Any]] = {}
+    for channel in steady.channels:
+        s = series[channel.channel]
+        window = (s.times >= t - steady.dwell_s) & (s.times <= t)
+        dwell = s.values[window]
+        dwell = dwell[np.isfinite(dwell)]
+        if len(dwell) < steady.min_samples:
+            steady_out[channel.channel] = {"n": int(len(dwell)), "span": None}
+            reasons.append(("unevaluable", f"steadiness_unobserved:{channel.channel}"))
+            continue
+        span = float(dwell.max() - dwell.min())
+        steady_out[channel.channel] = {"n": int(len(dwell)), "span": round(span, 6)}
+        if channel.max_span is not None:
+            limit_exceeded = span > channel.max_span
+        else:
+            assert channel.max_relative_span is not None
+            mid = float(np.median(np.abs(dwell)))
+            limit_exceeded = mid == 0 or span / mid > channel.max_relative_span
+        if limit_exceeded:
+            reasons.append(("excluded", "transient"))
+    out["steadiness"] = steady_out
+    out["_reasons"] = reasons
+    return out
+
+
+_PRIORITY: dict[State, int] = {"unevaluable": 0, "pending": 1, "excluded": 2, "eligible": 3}
+
+
+def _finish(candidate: _Candidate, definition: TwinDefinition, tolerance_words: int) -> None:
+    record = candidate.record
+    reasons = list(dict.fromkeys(candidate.reasons))
+    # A pending decision outranks a stale one only while reads can still come;
+    # otherwise the worst state wins: unevaluable, pending, excluded, eligible.
+    state: State = "eligible"
+    if reasons:
+        state = min((s for s, _ in reasons), key=lambda s: _PRIORITY[s])
+    record["state"] = state
+    record["reasons"] = [reason for s, reason in reasons if s == state] + [
+        reason for s, reason in reasons if s != state
+    ]
+    record["reason"] = record["reasons"][0] if record["reasons"] else None
+    prediction = candidate.prediction
+    observed = candidate.word
+    if prediction is None:
+        record.update(branch=None, lookup=None, predicted_word=None, predicted_phi=None)
+    else:
+        lookup = prediction.lookup
+        record.update(
+            branch=prediction.branch,
+            lookup={
+                "row": lookup.row.index,
+                "row_fraction_q16": lookup.row_fraction,
+                "row_edge": lookup.row.edge,
+                "column": lookup.column.index,
+                "column_fraction_q16": lookup.column_fraction,
+                "column_edge": lookup.column.edge,
+                "cells": [list(cell) for cell in lookup.cells],
+                "cell_value": prediction.cell,
+            },
+            predicted_word=prediction.word,
+            predicted_phi=prediction.phi,
+        )
+    q = 1 << definition.reference.q_bits
+    if prediction is not None and prediction.word is not None and observed is not None:
+        difference = observed - prediction.word
+        record["difference_words"] = difference
+        record["difference_phi"] = difference / q
+        record["ratio"] = observed / prediction.word if prediction.word else None
+        record["within_tolerance"] = abs(difference) <= tolerance_words
+    else:
+        record["difference_words"] = None
+        record["difference_phi"] = None
+        record["ratio"] = None
+        record["within_tolerance"] = None
+    # Filled by _summarise once run-level qualification is known.
+    record["qualified_residual_phi"] = None
+
+
+def duplicate_use(records: Sequence[dict[str, Any]]) -> int:
+    """How many observations serve more than one candidate: a command sample
+    counted twice, or one input read placed in two tuples. Read back from
+    the records themselves, so it checks the pairing rather than restating
+    its contract."""
+    used: Counter[tuple[str, int]] = Counter()
+    for record in records:
+        used[(record["sample"]["spec"], record["sample"]["row"])] += 1
+        for ref in (record.get("inputs") or {}).values():
+            if ref is not None:
+                used[(ref["spec"], ref["row"])] += 1
+    return sum(1 for n in used.values() if n > 1)
+
+
+def _input_pairing(
+    candidates: list[_Candidate], inputs: dict[str, str], series: dict[str, _Series]
+) -> dict[str, dict[str, Any]]:
+    """Per lookup input: how many candidates it paired within the skew, and
+    how far away its nearest read was (median over candidates, seconds) --
+    the measurement that says why a capture yields no tuples."""
+    out: dict[str, dict[str, Any]] = {}
+    for name, spec in inputs.items():
+        times = series[spec].times
+        paired = sum(1 for c in candidates if c.record["inputs"].get(name) is not None)
+        nearest = [float(np.min(np.abs(times - c.time))) for c in candidates] if len(times) else []
+        out[name] = {
+            "spec": spec,
+            "paired": paired,
+            "candidates": len(candidates),
+            "median_nearest_read_s": round(float(np.median(nearest)), 3) if nearest else None,
+        }
+    return out
+
+
+def _summarise(
+    candidates: list[_Candidate],
+    *,
+    definition: TwinDefinition,
+    table: ResolvedTable,
+    definition_sha256: str,
+    tolerance_words: int,
+    coolant_spec: str | None,
+) -> dict[str, Any]:
+    records = [c.record for c in candidates]
+    blockers: list[str] = []
+    if definition.final_command.status != "verified":
+        blockers.append("final_command_path_unverified")
+    if definition.map_identity.ram_copy.status != "verified":
+        blockers.append("ram_copy_unverified")
+    if not table.final_command_constants_checked:
+        blockers.append("final_command_constants_unchecked")
+    provenance = {
+        **table.provenance(),
+        "program": definition.program.calibration_id,
+        "decoder": {"profile_file": TWIN_FILE, "sha256": definition_sha256},
+        "evaluator_version": EVALUATOR_VERSION,
+        "kernel_version": KERNEL_VERSION,
+    }
+    for record in records:
+        if record["state"] == "eligible" and not blockers:
+            record["qualified_residual_phi"] = record["difference_phi"]
+        if record["predicted_word"] is not None:
+            record["provenance"] = provenance
+
+    states = Counter(r["state"] for r in records)
+    by_reason: dict[str, Counter[str]] = {}
+    for r in records:
+        if r["state"] != "eligible":
+            by_reason.setdefault(r["state"], Counter())[r["reason"]] += 1
+    eligible: dict[str, dict[str, int]] = {
+        "ordinary": {"pass": 0, "miss": 0},
+        "override": {"pass": 0, "miss": 0},
+    }
+    coverage: dict[str, dict[str, Any]] = {}
+    for r in records:
+        if r["state"] != "eligible" or r["branch"] is None:
+            continue
+        verdict = "pass" if r["within_tolerance"] else "miss"
+        eligible[r["branch"]][verdict] += 1
+        cover = coverage.setdefault(
+            r["branch"], {"cells": Counter(), "rpm_raw": [], "load_raw": []}
+        )
+        cover["cells"][(r["lookup"]["row"], r["lookup"]["column"])] += 1
+        cover["rpm_raw"].append(r["inputs"]["rpm"]["raw"])
+        cover["load_raw"].append(r["inputs"]["load"]["raw"])
+    transient: Counter[str] = Counter()
+    for r in records:
+        if "transient" in r["reasons"] and r["within_tolerance"] is not None:
+            transient["within_tolerance" if r["within_tolerance"] else "outside_tolerance"] += 1
+    capture = None
+    missing = [b for b in ("ordinary", "override") if not sum(eligible[b].values())]
+    if missing:
+        capture = {
+            "reason": "no_eligible_tuples",
+            "branches": missing,
+            "message": (
+                "No eligible steady tuple for "
+                + " and ".join(missing)
+                + ": capture the command word with the X trace, rpm word and pedal flag "
+                f"in one read cycle (all within {definition.gates.max_acquisition_skew_s * 1000:g}"
+                " ms), plus fuel status, coolant and steady rpm/MAF, at warm open-loop "
+                "points across the table's cells and through sustained pedal enrichment "
+                "(E02.7)."
+            ),
+        }
+    return {
+        "provenance": provenance,
+        "pairing": {
+            "max_acquisition_skew_s": definition.gates.max_acquisition_skew_s,
+            "clock": definition.gates.clock,
+            "method": "match_ordered, one-to-one per input, command samples as reference",
+        },
+        "tolerance_words": tolerance_words,
+        "qualification_blockers": blockers,
+        "coolant_source": coolant_spec,
+        "accounting": {
+            "candidates": len(records),
+            "states": {s: int(states.get(s, 0)) for s in _PRIORITY},
+            "reasons": {s: dict(sorted(c.items())) for s, c in sorted(by_reason.items())},
+            "eligible": eligible,
+            "transient_differences": dict(transient),
+            "duplicate_use": duplicate_use(records),
+        },
+        "coverage": {
+            branch: {
+                "cells": sorted([list(cell), n] for cell, n in data["cells"].items()),
+                "rpm_raw": [min(data["rpm_raw"]), max(data["rpm_raw"])],
+                "load_raw": [min(data["load_raw"]), max(data["load_raw"])],
+            }
+            for branch, data in coverage.items()
+        },
+        "capture_requirement": capture,
+        "records": records,
+    }
+
+
+# -- the independent X-formula check ---------------------------------------------
+
+
+def x_formula_check(
+    session: Path | pd.DataFrame,
+    definition: TwinDefinition,
+    *,
+    scaler: int,
+    dids_path: Path = DIDS_YAML,
+) -> dict[str, Any]:
+    """Every same-instant X/BFS pair against ``X = min(cap, floor(BFS << shift
+    / scaler))``, with each pair's difference in raw X counts.
+
+    A regression check of the load input's formula, not a tolerance for the
+    lookup: misses are counted and kept, never absorbed."""
+    load_spec = definition.inputs.load.channel
+    bfs_spec = definition.x_formula.bfs_channel
+    long = read_channels(session, [load_spec, bfs_spec], dids_path=dids_path, acquired_time=True)
+    x = _series(long, load_spec)
+    bfs = _series(long, bfs_spec)
+    catalog = load_did_map(dids_path)
+    x_raw = _raw(x, load_spec, dids_path, catalog)
+    bfs_raw = _raw(bfs, bfs_spec, dids_path, catalog)
+    matched = match_ordered(
+        x.times,
+        bfs.times,
+        PairingPolicy.within(pd.Timedelta(seconds=definition.gates.max_acquisition_skew_s)),
+    )
+    pairs: list[dict[str, Any]] = []
+    differences: Counter[int] = Counter()
+    for a, b, separation in zip(
+        matched.index_a.tolist(), matched.index_b.tolist(), matched.separation_s, strict=True
+    ):
+        observed = int(x_raw[a])
+        expected = x_from_bfs(int(bfs_raw[b]), scaler, definition)
+        pairs.append(
+            {
+                "acquired_at": _iso(float(x.times[a])),
+                "separation_s": float(separation),
+                "bfs": int(bfs_raw[b]),
+                "x": observed,
+                "x_from_bfs": expected,
+                "difference": observed - expected,
+            }
+        )
+        differences[observed - expected] += 1
+    return {
+        "scaler": scaler,
+        "n_pairs": len(pairs),
+        "exact": differences.get(0, 0),
+        "differences": {k: v for k, v in sorted(differences.items()) if k != 0},
+        "unmatched": {"x": matched.unmatched_a, "bfs": matched.unmatched_b},
+        "pairs": pairs,
+    }
+
+
+def records_digest(result: dict[str, Any], keys: Sequence[str]) -> list[dict[str, Any]]:
+    """The listed fields of every record, for pinning minted expectations."""
+    return [{key: record.get(key) for key in keys} for record in result["records"]]
+
+
+__all__ = [
+    "EVALUATOR_VERSION",
+    "TWIN_FILE",
+    "Prediction",
+    "ResolvedTable",
+    "SlotResolution",
+    "TwinDefinition",
+    "TwinRefusalError",
+    "check_trace_mapping",
+    "check_windows",
+    "duplicate_use",
+    "evaluate_session",
+    "load_twin_definition",
+    "predict",
+    "records_digest",
+    "resolve_slot",
+    "resolve_table",
+    "table_from_calibration",
+    "x_formula_check",
+    "x_from_bfs",
+]

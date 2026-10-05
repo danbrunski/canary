@@ -41,7 +41,8 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from src.analysis.channels import ChannelSpecError, as_of_refusal, read_channels
 from src.analysis.rom_map import EditorDisagreement
-from src.decode.dids import MEMORY_SOURCE, load_did_map
+from src.decode.dids import MEMORY_SOURCE, DidMap, load_did_map
+from src.decode.ecm_lookup import AxisEdge, search_axis
 from src.decode.slices import linear_factors
 from src.signals.pairing import PairingPolicy, match_ordered, to_seconds
 
@@ -52,9 +53,6 @@ TableKind = Literal["fuel_targets", "fuel_compensation"]
 #: value. ``raw``: the axis bytes as the ROM stores them, mapped from the
 #: channel's raw counts (the stored value with its catalog decode undone).
 AxisUnits = Literal["display", "raw"]
-
-#: Which end of an axis a coordinate fell past.
-AxisEdge = Literal["below", "above"]
 
 #: How far a value undone by its catalog decode may sit from a whole count
 #: and still be that count: float round-off, never a measurement.
@@ -208,18 +206,23 @@ def request_channel(spec: str, dids_path: Path) -> str | None:
     return f"{MEMORY_SOURCE}:{channel.window or channel.name}"
 
 
-def stored_decode(spec: str, dids_path: Path) -> tuple[float, float] | None:
+def stored_decode(
+    spec: str, dids_path: Path, *, catalog: DidMap | None = None
+) -> tuple[float, float] | None:
     """``(scale, offset)`` a catalog ``mem:`` channel is stored under, so a
     ``raw`` mapping can undo it. An unscaled channel is stored as raw counts
     (``(1.0, 0.0)``). ``None`` when ``spec`` is not a catalog memory channel:
-    there is then no known decode to undo, and a raw mapping refuses."""
+    there is then no known decode to undo, and a raw mapping refuses.
+    ``catalog``: an already-loaded ``dids_path``, for a caller undoing several
+    channels at once."""
     source, _, name = spec.partition(":")
     if source != MEMORY_SOURCE:
         return None
-    try:
-        catalog = load_did_map(dids_path)
-    except (OSError, ValueError):
-        return None
+    if catalog is None:
+        try:
+            catalog = load_did_map(dids_path)
+        except (OSError, ValueError):
+            return None
     channel = next((c for c in catalog.memory if c.name == name), None)
     if channel is None:
         return None
@@ -291,19 +294,17 @@ def axis_position(
     breakpoint. A value equal to a breakpoint is exactly that index. Past an
     end it is that end's index and names the edge when ``clamp`` (the lookup
     reads the edge row or column), and ``None`` otherwise.
+
+    The search is the ECM's own (:func:`src.decode.ecm_lookup.search_axis`),
+    the one the target-phi twin interpolates with (E02.4): the ECM cell drawn
+    here and the cell the twin reads cannot disagree about a breakpoint.
     """
-    if not breakpoints or not math.isfinite(value):
+    hit = search_axis(breakpoints, value)
+    if hit is None:
         return None
-    if value < breakpoints[0]:
-        return (0.0, "below") if clamp else None
-    if value > breakpoints[-1]:
-        return (float(len(breakpoints) - 1), "above") if clamp else None
-    upper = next(i for i, point in enumerate(breakpoints) if point >= value)
-    if breakpoints[upper] == value:
-        return float(upper), None
-    lower = upper - 1
-    span = breakpoints[upper] - breakpoints[lower]
-    return lower + (value - breakpoints[lower]) / span, None
+    if hit.edge is not None and not clamp:
+        return None
+    return float(hit.position), hit.edge
 
 
 def nearest_cell_index(position: float) -> int:

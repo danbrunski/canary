@@ -19,7 +19,7 @@ regimes, boost and other ECU programs remain outside the first evidence.
 
 ## Checklist
 
-- [ ] **E02.1 — Declare applicability and typed inputs.**
+- [x] **E02.1 — Declare applicability and typed inputs.**
   Profile data declares raw/decoded units, required windows, warm and
   steady-region bounds, dwell, coverage, mode source, freshness and acquisition
   skew. Inputs are `mem:ECM_FUEL_TARGET_MAP_X_TRACE`,
@@ -35,8 +35,50 @@ regimes, boost and other ECU programs remain outside the first evidence.
   **Accept:** missing gates, wrong units/program, unsupported clocks,
   sentinel, stale input and uncovered region produce named unevaluable
   results. Negative controls expose an X-scale or rpm-decode mistake.
+  *Done 2026-10-04:* `data/nissan-xterra-2008/target_phi_twin.yaml`, validated by
+  `TwinDefinition` in `src/analysis/target_phi.py`. Inputs are typed
+  `units: raw_counts` with bit widths, and each stored value is returned to raw
+  counts through its own `data/dids.yaml` decode. A value that does not land on
+  whole counts refuses the session (`wrong_units`). The file also declares
+  identity rules, the reference word and sentinel, the X-formula BFS channel, a
+  coolant source list (`did:ECM_COOLANT_TEMP`, then `obd:COOLANT_TEMP`), and
+  `obd:FUEL_STATUS` states with eligibility. Steadiness is from `obd:RPM`/`obd:MAF`
+  over 2 s. Freshness is per gate, skew is 250 ms, and regions are raw-count
+  bounds. Gate thresholds are marked `proposed`.
+  Required windows are declared under `acquisition`: the memory window of every
+  channel, and `back_to_back: [fuel_target, fuel_axis, spark, flags_2841]`
+  within `max_span_s` 0.25. The schema refuses a channel with no window, a
+  tuple window missing from `back_to_back`, and a span wider than the skew.
+  At evaluation the declared windows are checked against `data/dids.yaml`
+  (`window_mismatch`). The schema also refuses a display unit, an undeclared
+  mode state, a round clock, a missing gate and a steadiness channel without
+  exactly one limit (`test_the_definition_refuses_an_undeclared_or_unsafe_contract`,
+  `test_a_missing_gate_section_is_refused`,
+  `test_a_window_the_catalog_disagrees_with_refuses_the_session`).
+  `test_each_unmet_condition_has_a_named_state_and_a_null_qualified_residual`
+  (28 cases) reaches every per-sample reason through `evaluate_session`, and
+  `test_every_reason_the_evaluator_names_is_reached_by_a_test` keeps that
+  list equal to the evaluator's vocabulary.
+  - Unevaluable: `sentinel`, `input_stale:load`/`:flag`/`:tuple_spread`,
+    `input_not_captured:load`, `unsupported_clock`, `map_uninitialised`,
+    `slot_ambiguous`, `slot_unresolved`, `map_switching`,
+    `map_identity_unbracketed`, `gate_missing:coolant`/`:mode`,
+    `gate_stale:coolant`/`:mode`, `mode_unknown`,
+    `steadiness_unobserved:obd:RPM`/`:obd:MAF`, `uncovered_region` (×2),
+    `enrichment_gate_state_unknown`.
+  - Excluded: `cold`, `closed_loop`, `mode_transition`, `transient`.
+  - Pending: `awaiting_input:load`, `awaiting_mode_read`,
+    `awaiting_identity_read`.
+  - Whole-session refusals: `wrong_units`, `gate_unreadable` and
+    `window_mismatch` (`test_a_load_byte_stored_under_another_decode_refuses_the_session`,
+    `test_an_unreadable_gate_source_refuses_the_session`). `wrong_program`
+    is in E02.2. Negative controls:
+  `test_the_override_known_answer_exposes_an_rpm_decode_mistake` (the rpm word
+  at 50 rpm/count lands in row 0, 0x92 ≠ 0x95) and
+  `test_the_x_relation_exposes_an_x_scale_mistake` (stored X fed as raw matches
+  <10/194, a 1.1× scaler <100/194).
 
-- [ ] **E02.2 — Resolve the exact ROM and active table.**
+- [~] **E02.2 — Resolve the exact ROM and active table.**
   Consume W08's library and W05's verified axis definitions. Every prediction
   names plain-image SHA-256, program/profile, active slot, table/axes,
   decoder and evaluator versions. The reference image is
@@ -48,8 +90,34 @@ regimes, boost and other ECU programs remain outside the first evidence.
   **Accept:** a wrong hash, missing table, unverified mapping or ambiguous
   slot refuses by name. A tool-produced RAM/ROM comparison establishes byte
   identity. **Vehicle required** for this read if no recorded evidence exists.
+  *Partial 2026-10-04 (resolution done; RAM/ROM byte identity remains):*
+  `resolve_table` (W08 image) and `table_from_calibration` (transcribed table)
+  both first consume W05's `rom_viewer.yaml` trace mapping through
+  `check_trace_mapping`. That refuses `mapping_unverified` or
+  `mapping_mismatch`. Then `image_hash_mismatch`, `wrong_program`,
+  `table_missing`, `table_unverified` (slots 2–5 are `inferred`),
+  `axis_unverified` and `unmodelled_logic` (the gate constants or the 0xD247
+  curve differ from the modelled ones). `resolve_slot` gives slot 1 for magic
+  0xAA5555AA with active map 0 and selector 0, and refuses `map_uninitialised`
+  or `slot_ambiguous`. The evaluator requires agreeing identity reads on both
+  sides of each sample (`map_identity_unbracketed`, `map_switching`). Every
+  prediction carries provenance: plain-image sha256, revision, slot, table
+  and axes, table source, calibration ID, profile-file sha256, and
+  `EVALUATOR_VERSION`/`KERNEL_VERSION`. Tests:
+  `test_resolution_refuses_by_name` (6), `test_slot_resolution_names_unresolved_state` (5),
+  `test_resolution_consumes_w05s_trace_mapping_and_refuses_by_name` (3), and
+  `tests/test_target_phi_private_rom.py` (4, separate, skips by name without
+  the image). That file stores the a46baa24… image in a temporary W08
+  `RomLibrary` and resolves through it. Slot 1 equals the committed table and
+  axes, the scaler is 44019, slot 2 refuses `table_unverified`, and the fixture
+  accounts identically. **Remaining (vehicle):** the RAM-vs-ROM comparison.
+  Read 0xFFFFB260 as two `0x23` reads (63 + 1 bytes), compare with slot 1, and
+  record it. Until then `map_identity.ram_copy.status: unverified` blocks every
+  qualified residual (`ram_copy_unverified`). The profile also says why the
+  default-slot rule alone is not proof: a battery-backed RAM copy can predate
+  a reflash.
 
-- [ ] **E02.3 — Preserve the October 4 known-answer fixture.**
+- [x] **E02.3 — Preserve the October 4 known-answer fixture.**
   Audit existing fixtures first and reuse any newly committed ROM-trace slice
   that satisfies this contract. Source:
   `_capture-ram-study-2026-10-04T204557`, 20:45:56–21:12:49Z. Commit raw
@@ -65,8 +133,37 @@ regimes, boost and other ECU programs remain outside the first evidence.
   `min(255, floor(BFS * 128 / 44019))` reproduces **168/194 exact** and
   **26/194 differing by 1–4 raw counts, both signs**. All retained samples
   have lineage. Absent eligible tuples produce a named capture requirement.
+  *Done 2026-10-04:* `tests/fixtures/ground_truth/target_phi.yaml` with a new
+  slice, `target-phi-slice/` (4,151 rows, 144 KiB). The slice has the command
+  word, sentinel, pedal flags, magic/active/selector, `FUEL_STATUS`, `COOLANT_TEMP`,
+  `RPM` and `MAF` over the whole capture. It was cut by
+  `tools/make_ground_truth_fixture.py --only`; that command is in the tool's
+  docstring. It references the existing ROM-trace slice for X, the rpm word and
+  BFS (194/180/194 rows, the whole capture) instead of copying them. Both files
+  are pinned by sha256, along with per-channel counts, the decode, revision,
+  image hash, slot and scaler, and the frozen gates (checked against the
+  profile). Every one of the 174 command samples is in `records`, minted by
+  `evaluate_session` (`python -m tests.test_target_phi`). Each record keeps its
+  row and acquisition time. The fixture reproduces the full local session
+  record for record. Measured:
+  - Both commands read word 0x4A80 = 0x95 << 7, φ exactly 1.1640625. The test
+    reads, out of the fixture with `read_channels`, the last rpm word and flag
+    byte before each command. It asserts they are the YAML's vector (rpm raw
+    236 / 276 at 0.862 / 0.877 s; flag 1 / 0 at 1.002 s). The forced-last-column
+    lookup at that rpm word then gives cell 0x95, word 0x4A80 exactly.
+  - The second command's nearest flag read (1.0 s earlier, mid gear change) is
+    clear. Neither vector is a 250 ms tuple, so both stay unevaluable.
+  - X relation: 194 same-read pairs (separation 0), **168 exact**. The 26 misses
+    are −4 ×1, −2 ×1, −1 ×6, +1 ×16, +2 ×2: both signs, 1–4 counts.
+  - `capture_requirement: no_eligible_tuples` for both branches.
 
-- [ ] **E02.4 — Implement and verify the firmware lookup arithmetic.**
+  Tests: `test_the_two_enrichment_commands_are_exactly_the_forced_last_column`,
+  `test_the_x_relation_reproduces_168_of_194_and_its_misses_both_signs`,
+  `test_every_october_4_command_sample_is_accounted_for`,
+  `test_the_fixture_pins_the_decodes_it_was_written_under`. The private-ROM
+  checks are in their own file, which skips by name.
+
+- [~] **E02.4 — Implement and verify the firmware lookup arithmetic.**
   Reproduce raw axis search, clamping, fixed-point bilinear interpolation
   and rounding. Use the measured pedal-enrichment flag's bit 0 to force the
   last load column; do not reconstruct its threshold/hysteresis yet. Trace
@@ -82,8 +179,57 @@ regimes, boost and other ECU programs remain outside the first evidence.
   must meet the proposed **one Q14 count (1/16384 φ)** target, with nonempty
   ordinary and override coverage. This accuracy is a requirement to verify,
   not a result already measured. Insufficient coverage stays partial.
+  *Partial 2026-10-04 (arithmetic done; final-command path and accuracy not
+  established):* `src/decode/ecm_lookup.py` (layer 0) implements the
+  arithmetic, read from the 2026-10-04 listing of `0x027114`, `0x027194`,
+  `0x027448`, `0x026F10` and `0x026F40`. It has the top-down raw axis search,
+  clamping with a zero fraction, the truncating Q16 fraction, interpolation that
+  truncates toward the first operand both ways, and row-major bilinear. The
+  same `search_axis` now serves `rom_trace.axis_position`; the old copy is
+  removed. `test_the_rom_maps_ecm_cell_uses_this_search` spies on it, and
+  `tests/test_rom_trace.py` stays 29/29. `target_phi.predict` is the pure
+  per-tuple entry point for stored and (E04) streaming use. It forces the last
+  column from flag bit 0 and applies the enrichment gate.
+  `tests/test_ecm_lookup.py` (15) holds hand-worked vectors on the
+  ZS44A-20260920 table: interior (four cells, 146), row-only and column-only
+  interpolation, truncation where nearest rounding differs (144 vs 145,
+  143/131), clamped edges and the corner, the forced column (0x95 at rpm words
+  128–288), and the refusal of fractional coordinates. The override branch is
+  covered here and in `test_the_pedal_flag_forces_the_last_column...`. E02.3
+  reproduces.
+  Final-command writers, partly traced (`docs/ecu-firmware-analysis.md`,
+  "Target AFR lookup to final command"):
+  - Results under 130 are replaced by 0x80, with hysteresis 1, so a lookup of
+    129 refuses `enrichment_gate_state_unknown`.
+  - A 0xD247 excess scaling is the identity in this image.
+  - `FUN_00055B5E` forms the word from (w26F6 + w27DC) × w26C0 >> 14, with a
+    cap, a slew limit and fuel-cut zero.
+  - `w26C0` is traced (2026-10-04, desk, from `~/ecu-re/out/full.asm`). It is
+    the enrichment multiplier: `FUN_00055DB2` writes it at `0x0568B4`,
+    choosing by the state byte `0xFFFF14C4` among 0x4000, a ramp, and
+    0xFFFF174B << 7.
+  - `w26F6` = clamp(0x4000 + L[0xFFFF175C] + w26E8 + w1736) and `w27DC` (a
+    curve term clamped to 0..3768) are additive corrections; neither is
+    identified.
 
-- [ ] **E02.5 — Pair predictions and account for every sample.**
+  So the final word equals the lookup only when the state byte selects
+  0xFFFF174B and those corrections sum to zero. `final_command.status` stays
+  `unverified` and no qualified residual is issued
+  (`final_command_path_unverified`). **Remaining:**
+  1. Desk: identify the `0xFFFF14C4` states and the four correction terms.
+     Not vehicle-blocked.
+  2. Vehicle, a cheaper closure: one 58-byte read from 0xFFFF26BE covers the
+     command word, `w26C0` and `w26F6`. A second read adds `w27DC`. Capturing
+     these settles, per sample, whether the command was the lookup.
+  3. Verify the one-Q14 target. October 4 has **0 eligible tuples in either
+     branch**. Per lookup input (`accounting.input_pairing`): X paired within
+     250 ms of 19/174 command samples, the rpm word 9/174, the flag 0/174.
+     Their nearest reads were a median 1.50 s, 0.88 s and 1.12 s away. (The
+     earlier 120/18 figures were primary-reason counts, not per input.) Next
+     measurement: E02.7's capture, reading the profile's `back_to_back`
+     windows consecutively.
+
+- [x] **E02.5 — Pair predictions and account for every sample.**
   Emit sample/time/input references, skew, applicability/reason, lookup
   cells/weights, predicted/observed φ and `observed_phi - predicted_phi`.
   Use acquisition-time pairing through the shared comparison machinery;
@@ -96,6 +242,47 @@ regimes, boost and other ECU programs remain outside the first evidence.
   passes/misses and transient differences/misses are reported separately.
   The 26 known X misses cannot disappear from accounting or justify a wider
   φ tolerance. Missing/skewed/sentinel samples have null qualified residuals.
+  *Done 2026-10-04:* `evaluate_session` in `src/analysis/target_phi.py` turns
+  each command sample (value or sentinel) into exactly one candidate. Each
+  lookup input is paired one-to-one with the samples by
+  `src.signals.pairing.match_ordered` (compare's pairing core) within 250 ms,
+  and the whole tuple's spread is also held to 250 ms. Nothing is carried
+  forward.
+  - Each record carries: sample row and acquisition time; input references
+    with skew and a `same_read` flag, kept apart from acquisition skew; the
+    tuple skew; identity reads and gate values; and the state, primary reason
+    and all reasons.
+  - It also carries: branch, lookup cells and Q16 weights, predicted and
+    observed word and φ, `difference_phi` (observed − predicted), ratio,
+    `within_tolerance`, and `qualified_residual_phi`. The qualified residual is
+    null unless the sample is eligible and no run-level blocker stands.
+  - The summary partitions candidates into pending, unevaluable, excluded and
+    eligible, with reason counts and `duplicate_target_use`. It reports steady
+    pass/miss per branch and transient differences separately, plus coverage
+    and the capture requirement.
+  - The X misses are counted in their own check and play no part in the φ
+    tolerance (1 word).
+
+  Tests: `test_a_complete_steady_open_loop_override_tuple_is_eligible_and_passes`,
+  `test_a_miss_is_counted_not_absorbed`,
+  `test_a_transient_keeps_its_diagnostic_difference_separately`,
+  `test_a_sample_still_waiting_for_reads_is_pending_while_the_session_records`,
+  the 28-case named-state test (all qualified residuals null), and
+  `test_every_october_4_command_sample_is_accounted_for`. `duplicate_use`
+  counts every observation, command sample or input read, cited by more than
+  one record, read back from the records.
+  `test_duplicate_use_counts_an_input_read_placed_in_two_tuples` shows it
+  failing on a duplicated record. It also shows two commands 0.1 s apart
+  sharing one X read: one pairs, the other goes stale.
+  Identity and mode brackets use two distinct reads. A read stamped at the
+  sample's own instant is only the prior
+  (`test_a_switch_right_after_an_identity_read_at_the_sample_is_caught`).
+  October 4: 174 candidates, all unevaluable. Primary reasons:
+  `input_stale:load` 120, `sentinel` 21, `input_stale:rpm` 18,
+  `map_identity_unbracketed` 15. `duplicate_use` 0. Per-input pairing is under
+  E02.4.
+  The eligible and transient paths are therefore exercised on synthetic
+  sessions only.
 
 - [ ] **E02.6 — Publish qualified evidence and command-change predictions.**
   Persist through E01; expose through E04. Explain positive φ residual as a
