@@ -12,7 +12,6 @@ from __future__ import annotations
 
 import asyncio
 import sys
-import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -21,7 +20,7 @@ import pytest
 
 from src.config import CanaryConfig
 from src.validation.harness import StubIsolationForest, StubModelManager
-from tools.replay_event_diff import compare_values, diff_runs, drive_session
+from tools.replay_event_diff import _TimeProxy, compare_values, diff_runs, drive_session
 
 DRIVE_SLICE = Path("tests/fixtures/ground_truth/drive-slice")
 #: RPM above which the stub scores anomalous: the slice's first minute holds
@@ -84,10 +83,12 @@ def test_the_same_session_replays_to_identical_events_and_scores(tmp_path: Path)
     stamps = [s["timestamp"] for s in first["scores"] if s.get("timestamp")]
     assert stamps and all(stamp.startswith("2026-08-03T23:") for stamp in stamps)
     # The session clock is handed back: no src module keeps the patched time.
+    # Look for the proxy itself, not "anything named time": a module may
+    # legitimately import ``datetime.time`` (src.evidence.records does).
     patched = [
         name
         for name, module in list(sys.modules.items())
-        if name.startswith("src.") and getattr(module, "time", time) is not time
+        if name.startswith("src.") and isinstance(getattr(module, "time", None), _TimeProxy)
     ]
     assert patched == []
 
