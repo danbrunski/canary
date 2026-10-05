@@ -203,6 +203,17 @@ class _JobIndex:
 _INDEXES: dict[Path, _JobIndex] = {}
 
 
+#: Abrupt child deaths (``BrokenProcessPool``) a job survives before it is
+#: ``failed``: the first is read as a signal from outside (a service stop, the
+#: cgroup's OOM killer), the second as the job itself killing its child.
+MAX_BREAKS = 2
+
+
+def _breaks(job: BrainJob) -> int:
+    value = job.progress.get("breaks", 0)
+    return int(value) if isinstance(value, int) else 0
+
+
 class BrainJobStore:
     """The vehicle's brain jobs: an append-only transition log, latest per id."""
 
@@ -323,9 +334,28 @@ class BrainJobStore:
         return self._append(updated)
 
     def recover(self, *, now: datetime | None = None) -> list[BrainJob]:
-        """Reopen after a restart: a job left ``running`` is deferred, named."""
+        """Reopen after a restart: a job left ``running`` is deferred, named.
+
+        So is a ``failed: child_failed`` job that has not had its one automatic
+        retry: a stop signals the whole cgroup, so the child can die (and be
+        recorded broken) before the scheduler sees the shutdown. Written before
+        that rule existed, such a record carries no break count."""
         recovered = []
         for job in self.ordered():
+            if job.state == "failed" and job.reason == "child_failed" and _breaks(job) < MAX_BREAKS:
+                recovered.append(
+                    self.transition(
+                        job,
+                        "deferred",
+                        reason="child_interrupted",
+                        detail="the child was killed abruptly (a stop or restart signals the "
+                        "whole service); it reruns once in the next idle window",
+                        progress={**job.progress, "breaks": _breaks(job) + 1},
+                        finished_at=None,
+                        now=now,
+                    )
+                )
+                continue
             if job.state == "running":
                 recovered.append(
                     self.transition(
@@ -650,6 +680,7 @@ class BrainScheduler:
         tick_seconds: float = 15.0,
         timeout: float = DIGEST_TIMEOUT_SECONDS,
         started_at: datetime | None = None,
+        stop_event: asyncio.Event | None = None,
     ) -> None:
         if tick_seconds <= MIN_TICK_SECONDS:
             raise ValueError(
@@ -666,6 +697,8 @@ class BrainScheduler:
         self.timeout = timeout
         self.started_at = started_at or _now()
         self.running: str | None = None
+        #: The daemon's stop signal; set, a dead child is a shutdown, not a failure.
+        self._stop_event = stop_event
 
     def blocked(self) -> str | None:
         """Why no brain child may run now. In-memory only: safe on the loop."""
@@ -759,7 +792,46 @@ class BrainScheduler:
             reason=None,
             detail=None,
             started_at=_now().isoformat(),
-            progress={"stage": "child_running", "attempt": job.attempts + 1},
+            progress={
+                "stage": "child_running",
+                "attempt": job.attempts + 1,
+                "breaks": _breaks(job),
+            },
+        )
+
+    def shutting_down(self) -> bool:
+        return self._stop_event is not None and self._stop_event.is_set()
+
+    def _broken(self, job: BrainJob, exc: BaseException) -> BrainJob:
+        """The child died abruptly. During shutdown that is the shutdown; the
+        first time otherwise it is an outside signal and the job reruns; only a
+        second break in a row is the job's own failure."""
+        detail = f"{type(exc).__name__}: {exc}"
+        if self.shutting_down():
+            return self.store.transition(
+                job,
+                "deferred",
+                reason="daemon_shutdown",
+                detail=f"the child died as the daemon stopped ({detail}); it reruns after restart",
+                progress={**job.progress, "stage": "interrupted"},
+            )
+        breaks = _breaks(job) + 1
+        if breaks < MAX_BREAKS:
+            return self.store.transition(
+                job,
+                "deferred",
+                reason="child_interrupted",
+                detail=f"the child was killed abruptly ({detail}); it reruns once in the next "
+                "idle window",
+                progress={**job.progress, "stage": "interrupted", "breaks": breaks},
+            )
+        return self.store.transition(
+            job,
+            "failed",
+            reason="child_failed",
+            detail=f"the child died abruptly twice in a row; last: {detail}",
+            finished_at=_now().isoformat(),
+            progress={**job.progress, "stage": "failed", "breaks": breaks},
         )
 
     async def _run(self, job: BrainJob) -> BrainJob:
@@ -816,9 +888,7 @@ class BrainScheduler:
                 try:
                     result = future.result()
                 except BrokenExecutor as exc:
-                    return await self._io(
-                        self._failed, running, "child_failed", f"{type(exc).__name__}: {exc}"
-                    )
+                    return await self._io(self._broken, running, exc)
                 except MemoryError:
                     ceiling = digest_address_space_bytes(self.config) // (1024 * 1024)
                     return await self._io(
@@ -870,6 +940,7 @@ class BrainScheduler:
 
     async def run_forever(self, stop_event: asyncio.Event) -> None:
         """Recover, then run work in each idle window until ``stop_event``."""
+        self._stop_event = stop_event
         await self._io(self.recover)
         while not stop_event.is_set():
             ran: BrainJob | None = None

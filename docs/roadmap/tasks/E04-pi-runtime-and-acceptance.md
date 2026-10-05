@@ -81,6 +81,17 @@ are not finished until their applicable Pi acceptance passes here.
     < 0.2 s; a real spawn child stays registered until its process exits; the
     digest starts only after the brain child exits; auto-enqueue skips plain
     drives and captures without the command word.
+  - *Pi finding 2026-10-05, fixed:* `scripts/restart_canary.sh` mid-job left
+    `failed: child_failed` (BrokenProcessPool): the stop signals the whole
+    cgroup, so the child died before the scheduler saw the shutdown. Now a
+    broken child is `deferred: daemon_shutdown` while stopping, otherwise
+    `deferred: child_interrupted` with one automatic retry (`MAX_BREAKS = 2`);
+    only a second consecutive break is `failed`. `recover()` gives a
+    pre-existing `failed: child_failed` record its retry. Tests
+    `test_a_restart_killing_the_child_defers_the_job_and_recover_reruns_it`,
+    `test_an_outside_kill_gets_one_retry_and_a_second_is_a_failure`,
+    `test_recover_reruns_a_child_failed_record_from_before_the_retry_rule`
+    (real spawn child sent SIGTERM mid-job). Re-run the Pi restart demo.
   - *Remaining:* (1) Pi demonstration: a job completing on the Pi in a no_data
     window, a capture started mid-job with `/status` storage drops unchanged,
     and `scripts/restart_canary.sh` mid-job; (2) candidate promotion has no

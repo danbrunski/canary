@@ -485,3 +485,92 @@ def test_twin_evaluation_is_queued_after_a_digest_only_for_sessions_with_its_com
     assert job.state == "queued"
     after_digest()  # the same drive again is the same job
     assert len(BrainJobStore.for_config(config).jobs()) == 1
+
+
+# -- a restart signals the whole service, child included ---------------------------
+
+
+def sleeping_runner(*_args: Any, **_kw: Any) -> dict[str, Any]:
+    """Runs in the real spawn child (module-level, so spawn can import it)."""
+    time.sleep(60)
+    return {}
+
+
+def _kill_the_child_mid_job(config: CanaryConfig, *, shutting_down: bool) -> Any:
+    """Start a job in a real spawn child, then SIGTERM the child as systemd's
+    stop does to every process in the service's cgroup. (The test's own
+    process group is pytest's, so the signal goes to the child's pid.)"""
+    import multiprocessing
+    import os
+    import signal
+
+    from src.control import child_pool
+
+    stop = asyncio.Event()
+    sched = BrainScheduler(
+        config, activity=lambda: None, runner=sleeping_runner, poll_seconds=0.05, stop_event=stop
+    )
+
+    async def scenario() -> Any:
+        task = asyncio.create_task(sched.step())
+        while not multiprocessing.active_children():
+            await asyncio.sleep(0.02)
+        await asyncio.sleep(0.2)
+        if shutting_down:
+            stop.set()  # the daemon got its SIGTERM too
+        for child in multiprocessing.active_children():
+            os.kill(child.pid, signal.SIGTERM)  # type: ignore[arg-type]
+        result = await task
+        await child_pool.wait_for_child_exit(child_pool.BRAIN_CHILD, 15)
+        return result
+
+    return asyncio.run(scenario())
+
+
+def test_a_restart_killing_the_child_defers_the_job_and_recover_reruns_it(
+    config: CanaryConfig,
+) -> None:
+    job, _ = BrainJobStore.for_config(config).submit("memory_consolidation", {})
+    ended = _kill_the_child_mid_job(config, shutting_down=True)
+    assert ended.state == "deferred" and ended.reason == "daemon_shutdown", ended
+    # After the restart the job is runnable, and it completes.
+    scheduler(config).recover()
+    reopened = BrainJobStore.for_config(config).get(job.job_id)
+    assert reopened is not None and reopened.state == "deferred"
+    done = asyncio.run(scheduler(config).step())
+    assert done is not None and done.state == "completed"
+
+
+def test_an_outside_kill_gets_one_retry_and_a_second_is_a_failure(config: CanaryConfig) -> None:
+    job, _ = BrainJobStore.for_config(config).submit("memory_consolidation", {})
+    first = _kill_the_child_mid_job(config, shutting_down=False)
+    assert first.state == "deferred" and first.reason == "child_interrupted"
+    assert first.progress["breaks"] == 1
+    second = _kill_the_child_mid_job(config, shutting_down=False)
+    assert second.state == "failed" and second.reason == "child_failed"
+    assert second.attempts == 2
+    # recover() does not resurrect a job that has used its retry.
+    scheduler(config).recover()
+    assert BrainJobStore.for_config(config).get(job.job_id).state == "failed"  # type: ignore[union-attr]
+
+
+def test_recover_reruns_a_child_failed_record_from_before_the_retry_rule(
+    config: CanaryConfig,
+) -> None:
+    """The record the Pi wrote on 2026-10-05: `failed: child_failed` from a
+    restart, with no break count."""
+    store = BrainJobStore.for_config(config)
+    job, _ = store.submit("memory_consolidation", {})
+    store.transition(
+        job,
+        "failed",
+        reason="child_failed",
+        detail="BrokenProcessPool: A process in the process pool was terminated abruptly",
+        progress={"stage": "child_running", "attempt": 1},
+        attempts=1,
+    )
+    (recovered,) = scheduler(config).recover()
+    assert recovered.state == "deferred" and recovered.reason == "child_interrupted"
+    assert recovered.progress["breaks"] == 1
+    done = asyncio.run(scheduler(config).step())
+    assert done is not None and done.state == "completed"
