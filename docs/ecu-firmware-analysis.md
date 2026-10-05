@@ -403,11 +403,18 @@ UpRev's K-line stream reads three RAM addresses, decoded 2026-09-24
 - Bit 7 means a knock-sensor diagnostic is stored: items `0xAA`/`0xAB`
   (P0327/P0328, sensor 1) or `0xAC`/`0xAD` (P0332/P0333, sensor 2). The FSM
   says these set no MIL.
-- Generic Mode 03/07 showed nothing (07-28, 09-23). But a scan tool's Nissan
-  DTC read on 09-24 logged `17 FF 00` → `57 01`, which looks like one code.
-- **Most likely state:** a fixed retard target with closed-loop knock retard
-  bypassed. **Not yet confirmed live. Confirm it before boost.** The
-  verification steps are below.
+- **Contradicting evidence (operator, 2026-10-05):** no knock DTC has ever
+  appeared in any scan tool or code read. On 2026-08-01, unplugging a sensor
+  set the code and reconnecting it cleared it, so the codes are reportable.
+  Generic Mode 03/07 also showed nothing (07-28, 09-23). The 09-24 Nissan
+  read `17 FF 00` → `57 01` was only ever a guess at "one code".
+- **So the fallback state is real (UpRev's own stream), but its cause is
+  open.** Candidates:
+  - a latched or live fault judgement that the code reads do not report;
+  - another path to the same values that the first pass missed;
+  - a mode selected by the calibration.
+  A follow-up code pass is checking every writer. **Confirm before boost**
+  with the reads below.
 
 **Where the observation values live.** All are RAM, reset at engine stop, and
 none is exposed by any Mode 01 PID, Mode 22 DID (both pointer tables

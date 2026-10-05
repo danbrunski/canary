@@ -87,8 +87,8 @@ one. Name them now, before data from the new engine arrives looking plausible:
   after the build fuel pressure matters more, not less.
 - **Knock control may be in fault fallback: confirm before boost (2026-10-05).** The firmware shows
   the knock variables UpRev logs have sat in the knock-sensor fault state since at least the
-  2026-07-26 flash: a fixed retard target, with closed-loop knock retard probably bypassed. A knock-sensor
-  DTC is very probably stored, silently, with no MIL. Confirm it with the reads in
+  2026-07-26 flash: a fixed retard target, with closed-loop knock retard possibly bypassed. No knock DTC has ever
+  shown in a code read, so the cause is open. Confirm the state with the reads in
   `docs/ecu-firmware-analysis.md` ("Knock monitoring"), then fix the cause, before the first boosted
   drive. The RAM addresses for live knock observation are now known; the paragraph below predates this.
 - **No knock stream.** Final ignition timing (`mem:ECM_IGNITION_TIMING_RAM`, PID
