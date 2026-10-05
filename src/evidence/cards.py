@@ -20,6 +20,9 @@ What the template makes impossible rather than documented:
   reason and detail and no value; a card whose evidence is all unevaluable, or
   absent, says so in :attr:`InvestigationCard.evidence_state`, which has no
   "normal" or "ok" value at all.
+* **A what-if is labelled where it is shown.** A computed command-change
+  prediction renders as a :class:`WhatIfView` under :data:`WHAT_IF_NOTICE`,
+  in the predictions section, never among the evidence (E02.6).
 * **Recurrence and retraction are visible.** Each evidence view carries its
   standing (current / superseded / retracted, with the retraction's reason)
   and how many occurrences of the same thing the ledger holds.
@@ -40,6 +43,7 @@ from src.evidence.records import (
     Prediction,
     Quantity,
     Retraction,
+    WhatIf,
     record_to_dict,
 )
 
@@ -52,6 +56,9 @@ __all__ = [
     "InvestigationCard",
     "OutcomeView",
     "PredictionView",
+    "WHAT_IF_NOTICE",
+    "WhatIfPointView",
+    "WhatIfView",
     "evidence_payload",
     "investigation_card",
     "render_text",
@@ -62,6 +69,12 @@ CARD_TEMPLATE: Literal["canary-investigation-card/1"] = "canary-investigation-ca
 NARRATIVE_NOTICE = (
     "Narrative: free prose recorded with the investigation. Not evidence; any "
     "number in it is not a finding until a tool mints a record for it."
+)
+
+WHAT_IF_NOTICE = (
+    "What-if: computed by reproducing the ECU's logic on two calibrations. Not a "
+    "measurement and not an outcome; nothing was read from the vehicle and no ECU "
+    "write was requested."
 )
 
 Standing = Literal["current", "superseded", "retracted"]
@@ -152,6 +165,99 @@ class OutcomeView(_Card):
     retraction_reason: str | None
 
 
+class WhatIfPointView(_Card):
+    key: str
+    inputs: tuple[CardValue, ...]
+    before: CardValue | None
+    after: CardValue | None
+    change: CardValue | None
+    reason: str | None
+
+
+class WhatIfView(_Card):
+    """A computed command-change prediction as the card shows it: labelled,
+    with every value naming the prediction record it was read from."""
+
+    label: Literal["what_if"] = "what_if"
+    notice: str = WHAT_IF_NOTICE
+    output: str
+    base_image_sha256: str
+    target_image_sha256: str | None
+    change_set_sha256: str | None
+    assumptions: tuple[str, ...]
+    blockers: tuple[str, ...]
+    not_reproduced: tuple[str, ...]
+    points: tuple[WhatIfPointView, ...]
+    #: The flash it is ordered against (``MemoryLedger.what_if_intervention``)
+    #: and the derived order, or ``None`` with ``order_note`` saying why.
+    ordered_against: str | None = None
+    order: str | None = None
+    order_note: str = ""
+
+    @classmethod
+    def of(
+        cls,
+        what_if: WhatIf,
+        record_id: str,
+        *,
+        ordered_against: str | None = None,
+        order: str | None = None,
+    ) -> WhatIfView:
+        points = []
+        for point in what_if.points:
+            change = point.change
+            unit = point.before.unit if point.before is not None else "1"
+            points.append(
+                WhatIfPointView(
+                    key=point.key,
+                    inputs=tuple(
+                        CardValue.of(name, quantity, record_id)
+                        for name, quantity in point.inputs.items()
+                    ),
+                    before=None
+                    if point.before is None
+                    else CardValue.of("before", point.before, record_id),
+                    after=None
+                    if point.after is None
+                    else CardValue.of("after", point.after, record_id),
+                    change=None
+                    if change is None
+                    else CardValue(
+                        name="after - before",
+                        value=change,
+                        unit=unit,
+                        uncertainty=None,
+                        record_id=record_id,
+                    ),
+                    reason=point.reason,
+                )
+            )
+        return cls(
+            output=what_if.output,
+            base_image_sha256=what_if.base_image_sha256,
+            target_image_sha256=what_if.target_image_sha256,
+            change_set_sha256=what_if.change_set_sha256,
+            assumptions=what_if.assumptions,
+            blockers=what_if.blockers,
+            not_reproduced=what_if.not_reproduced,
+            points=tuple(points),
+            ordered_against=ordered_against,
+            order=order,
+            order_note=_order_note(what_if, ordered_against, order),
+        )
+
+
+def _order_note(what_if: WhatIf, against: str | None, order: str | None) -> str:
+    if against is not None:
+        return f"ordered against flash {against}: {order}"
+    if what_if.target_image_sha256 is None:
+        return (
+            "not orderable: a cell edit set names no image, so it is ordered only against "
+            "a flash named when it was recorded"
+        )
+    return "no flash of the target image after this prediction is on record yet"
+
+
 class PredictionView(_Card):
     id: str
     quantity: str
@@ -166,6 +272,8 @@ class PredictionView(_Card):
     order: str | None
     recorded_at: datetime
     outcomes: tuple[OutcomeView, ...]
+    #: A computed command-change prediction's detail (E02.6), else ``None``.
+    what_if: WhatIfView | None
     #: A withdrawn prediction stays on the card, labelled, never dropped.
     standing: Standing
     superseded_by: tuple[str, ...]
@@ -342,6 +450,15 @@ class _Builder:
             prediction = entry.record
             assert isinstance(prediction, Prediction) and prediction.recorded_at is not None
             floor = prediction.noise_floor
+            against = prediction.intervention
+            order = self.ledger.prediction_order(prediction.id)
+            if prediction.what_if is not None:
+                against = self.ledger.what_if_intervention(prediction.id)
+                order = (
+                    None
+                    if against is None
+                    else self.ledger.prediction_order(prediction.id, intervention=against)
+                )
             outcome_views = []
             for outcome_entry in outcomes:
                 outcome = outcome_entry.record
@@ -389,10 +506,15 @@ class _Builder:
                         uncertainty=None,
                         record_id=prediction.id,
                     ),
-                    intervention=prediction.intervention,
-                    order=self.ledger.prediction_order(prediction.id),
+                    intervention=against,
+                    order=order,
                     recorded_at=prediction.recorded_at,
                     outcomes=tuple(outcome_views),
+                    what_if=None
+                    if prediction.what_if is None
+                    else WhatIfView.of(
+                        prediction.what_if, prediction.id, ordered_against=against, order=order
+                    ),
                     standing=_standing(entry),
                     superseded_by=entry.superseded_by,
                     retracted_by=entry.retracted_by,
@@ -623,6 +745,30 @@ def _evidence_lines(view: EvidenceView, indent: str) -> list[str]:
     return lines
 
 
+def _what_if_lines(view: WhatIfView) -> list[str]:
+    change = (
+        f"target image {view.target_image_sha256}"
+        if view.target_image_sha256 is not None
+        else f"cell edit set {view.change_set_sha256}"
+    )
+    lines = [
+        f"    WHAT-IF ({view.notice})",
+        f"      {view.output}: base image {view.base_image_sha256} -> {change}",
+    ]
+    lines.extend(f"      assumes: {item}" for item in view.assumptions)
+    lines.append(f"      blockers: {', '.join(view.blockers) or 'none'}")
+    lines.append(f"      not reproduced: {'; '.join(view.not_reproduced) or 'none'}")
+    lines.append(f"      order: {view.order_note}")
+    for point in view.points:
+        inputs = ", ".join(f"{v.name} {v.value:.6g} {v.unit}" for v in point.inputs)
+        lines.append(f"      {point.key} at {inputs}:")
+        if point.before is None or point.after is None or point.change is None:
+            lines.append(f"        no value ({point.reason})")
+        else:
+            lines.extend(f"        {_value(v)}" for v in (point.before, point.after, point.change))
+    return lines
+
+
 def render_text(card: InvestigationCard) -> str:
     """The card as fixed-format plain text (deterministic)."""
     unknown = "unknown"
@@ -689,6 +835,8 @@ def render_text(card: InvestigationCard) -> str:
                 lines.append(f"    {_value(value)}")
         if prediction.noise_floor is None:
             lines.append("    no condition-matched noise floor: a null cannot be told from noise")
+        if prediction.what_if is not None:
+            lines.extend(_what_if_lines(prediction.what_if))
         for outcome in prediction.outcomes:
             lines.append(
                 f"    outcome {outcome.id}: {outcome.disposition} -> {outcome.verdict.upper()} "

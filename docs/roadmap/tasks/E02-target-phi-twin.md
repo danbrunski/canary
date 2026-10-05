@@ -308,7 +308,7 @@ regimes, boost and other ECU programs remain outside the first evidence.
   The eligible and transient paths are therefore exercised on synthetic
   sessions only.
 
-- [ ] **E02.6 — Publish qualified evidence and command-change predictions.**
+- [x] **E02.6 — Publish qualified evidence and command-change predictions.**
   Persist through E01; expose through E04. Explain positive φ residual as a
   richer ECM command than the reproduced logic, with omitted logic, timing
   and provenance among possible causes. Link command residuals to the
@@ -319,6 +319,122 @@ regimes, boost and other ECU programs remain outside the first evidence.
   coverage remains unevaluable; a zero residual makes no engine-health claim.
   A what-if record cannot be mistaken for measured output or confirmed
   outcome, and creates no ECU write request.
+  *Done 2026-10-04 (laptop; no hardware acceptance):*
+  - **Evidence.** `src/analysis/twin_evidence.py` (`TWIN_TOOL_VERSION` 2, so
+    a re-run supersedes v1 records as a recompute). Every twin record,
+    refusals included, is labelled `evidence_class: ecu_command` and
+    `engine_health: not_assessed`. It names `image_sha256`, `slot` and
+    `table`, and the application model's `blockers`, `omitted_logic` (the
+    blocked nodes, new `Applicability.blocked_nodes`) and `uncovered_logic`.
+    A refusal resolved no table, so it labels all three `unknown`, never
+    `none`. A qualified run keeps the sign *beyond the twin's tolerance*:
+    `residual_sign` is positive/negative only past `tolerance_words` (one Q14
+    word), `zero` when every residual is within it (a +1-word pass agrees, it
+    is never "richer"), else mixed. Values: per-sign counts, `tolerance_phi`
+    and the raw max and min. **Behaviour change:** evaluated twin evidence now
+    carries `Result.residual`, the raw largest residual, unless signs are mixed.
+  - **Investigation.** `src/analysis/twin_investigation.py`
+    `investigate_command_residual` opens or updates one investigation per
+    direction (`twin:target_equiv_ratio:richer|leaner|mixed|agrees|unevaluable`).
+    A positive residual is titled "The ECM commanded richer than its
+    reproduced target logic". It has three open hypotheses: omitted logic,
+    acquisition timing and provenance. None is credited with the evidence,
+    which is the investigation's observation, so none is ranked. Each has a
+    next measurement.
+    Non-twin evidence is refused (`NotEcuCommandError`). The delivery loop
+    refuses twin evidence (`NotEngineResponseError`). A `related`
+    engine-response record is provenance only, never an observation.
+    Unevaluable evidence supports no hypothesis. Every twin investigation
+    carries the unknown that engine health and delivery are not assessed.
+    The brain's `twin_session_evaluation` job (`src/control/brain_jobs.py`)
+    links every record it mints and returns the ids as `investigations`. A
+    re-run re-states the same investigation, which the ledger deduplicates.
+  - **What-if.** `src/analysis/twin_command_change.py`. It takes an exact
+    base table and either a target image (`change_from_images`, with bytes
+    naming every changed range outside the reproduced table) or the Fuel
+    Targets editor's `Patch` (`change_from_cell_edits`). It runs
+    `target_phi.predict` (the shared kernel) before and after at each cell's
+    breakpoint inputs, per cell or per region. Refusals by name:
+    `no_change`, `table_mismatch`, `program_mismatch`, `axis_changed`,
+    `patch_source_mismatch`, `old_value_mismatch`, `no_op_edit`,
+    `duplicate_edit`, `cell_outside_table`, `mixed_direction`,
+    `no_evaluable_point`. `record_command_change` writes one E01
+    `Prediction` per region, carrying a new `WhatIf`. The quantity must be
+    `what_if:…` and only a what-if's may be. It states the base and target
+    hashes, assumptions, blockers, `not_reproduced` and every point. A
+    region's `magnitude` is set only when every evaluable change is equal,
+    zeros included.
+  - **Ordering.** At record time a what-if is linked only to the flash the
+    caller names (`intervention=`, refused `intervention_mismatch` unless it
+    installs the target image), or to a flash of the target image made
+    *after the base became current*. That second case is the change already
+    made, which the ledger derives as `post_hoc`. A flash of the same image
+    *before* the base (re-flashing a previous calibration, e.g. a restore)
+    is not this change, so the prediction stays unlinked.
+    `MemoryLedger.what_if_intervention` then picks the first matching flash
+    after the record time. `command_change_order` and the card use it, giving
+    prior, post-hoc or `None`. **Limit:** a cell edit set names no image, so
+    it can be ordered only against a flash named at record time; the card
+    says so.
+  - **Operator entry point.** `tools/record_command_change.py --base
+    <revision|sha|image file> (--target … | --patch editor.json) [--region
+    ordinary:R0-R1:C0-C1|override:R0-R1] [--investigation ID]
+    [--intervention ID]`. It is meant to run before a flash: it computes and
+    records on the scoped ledger and requests no ECU write. A held library
+    image is read through W08. Otherwise the transcribed table is used and
+    `not_reproduced` is `unknown`.
+  - **Cards.** The E01 card renders a what-if under `WHAT_IF_NOTICE` in the
+    predictions section (`WhatIfView`). Every value carries the prediction's
+    id. The card also shows its order (`order`, `ordered_against`,
+    `order_note`). **Behaviour change:** card JSON's `PredictionView` gains
+    `what_if`, which is `null` for every plain prediction. For a what-if,
+    `intervention`/`order` are the flash it is ordered against.
+  - **Exposure.** No new route. `/control/brain/memory?kind=prediction` and
+    `/control/brain/investigations/{id}/card` serve what-ifs, with MCP
+    `query_memory`/`get_investigation_card` byte-equal. `/control/brain/evidence/{id}`
+    refuses a what-if id (400). The dashboard's BrainPage does not render
+    card predictions yet; that is E04.5's surface.
+
+  Tests: `tests/test_twin_investigation.py` (9) has
+  `test_twin_evidence_names_its_class_image_and_the_logic_it_omits` (the image
+  resolves to the revision through `match_image`) and
+  `test_a_positive_residual_reads_as_the_ecm_commanding_richer`, where every
+  number on the card is from a record.
+  `test_a_zero_residual_makes_no_engine_health_claim`,
+  `test_unavailable_coverage_stays_unevaluable` and
+  `test_command_residuals_and_engine_response_never_cross`,
+  `test_a_pass_within_the_tolerance_agrees_and_never_reads_as_richer`,
+  `test_a_refusal_names_the_image_it_could_not_read` (logic `unknown`) and
+  `test_the_brain_twin_job_links_each_minted_record_to_its_investigation`
+  cover the other cases. `tests/test_twin_command_change.py` (23) checks the cell edit set
+  (`rom-targets-known-edit.json`): k106 r7c4 φ 0xA2/128 → 0xA3/128, +1/128,
+  which equals the 20260920 transcription and the image-pair path.
+  20260920 → 20261004 (Fuel Comp restore) gives `no_change` on both branches,
+  64 + 8 points. `test_a_what_if_cannot_stand_where_measurements_go`
+  refuses it as an outcome's evidence, as an investigation observation and in
+  `detect_discrepancy`/`resolve_evidence`, and refuses the label being dropped.
+  `test_computing_and_recording_a_what_if_requests_no_ecu_write` runs it in a
+  clean process. No `src.control`/`src.daemon`/`src.dashboard`/`src.mcp_server`,
+  python-can, serial or non-naming `src.collection` module gets loaded.
+  `test_the_brain_memory_and_card_routes_serve_a_what_if_unchanged` checks
+  HTTP equals MCP.
+  `test_re_flashing_a_previous_image_is_not_that_flash_again` covers the
+  restore case: 20261004 → 20260920 stays unlinked past the September flash,
+  then reads prior against the later flash, on the card too.
+  `test_a_named_intervention_must_install_the_target` and
+  `test_the_cli_records_a_what_if_from_an_image_pair_or_a_patch` cover the
+  rest.
+  `tests/test_twin_command_change_private_rom.py` (2) skips by name without the
+  images and passed here. On the real images, the 20260920 → 20261004 what-if
+  is `no_change`, and `not_reproduced` names the "Fuel Compensation load
+  axis" (0x00CB2A-0x00CB38) and "Fuel Compensation (Map 1)"
+  (0x0E0671-0x0E075F). k106 → 20260920 changes exactly r7c4, with nothing
+  else outside the table but checksums.
+  **Limits:** a what-if has no noise floor (the command is a word, not a
+  noisy measurement), so the ledger allows only an `unresolvable` outcome
+  against it. Every real twin record is still blocked (E02.2/E02.4), so
+  qualified residuals and the richer/leaner investigations run on synthetic
+  sessions only.
 
 - [ ] **E02.7 — Qualify missing regions with targeted measurements.**
   First close E02.2's RAM-copy check and E02.4's arithmetic/applicability

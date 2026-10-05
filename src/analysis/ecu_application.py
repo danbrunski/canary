@@ -558,6 +558,12 @@ class Applicability:
     program_id: str
     #: Blocker names in declared order; empty means the path is resolved.
     blockers: tuple[str, ...]
+    #: The unresolved nodes those blockers name, in declared order: the logic
+    #: between the reproduced computation and the output that the twin omits.
+    blocked_nodes: tuple[str, ...] = ()
+    #: The model's ``uncovered`` entries (logic the trace reached and did not
+    #: resolve, model-wide), by id.
+    uncovered: tuple[str, ...] = ()
 
     def provenance(self) -> dict[str, Any]:
         return {
@@ -577,6 +583,8 @@ def applicability(model: ApplicationModel, model_sha256: str, output_id: str) ->
         model_sha256=model_sha256,
         program_id=model.program.id,
         blockers=tuple(b.name for b in output.blockers),
+        blocked_nodes=tuple(dict.fromkeys(n for b in output.blockers for n in b.nodes)),
+        uncovered=tuple(u.id for u in model.uncovered),
     )
 
 

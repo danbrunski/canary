@@ -18,6 +18,21 @@ What the record can and cannot say is fixed here, not by the caller:
   counts stay as diagnostic values with no residual.
 * **No eligible tuple is ``uncovered``** with the twin's own capture
   requirement as the detail ("which kind of empty", AGENTS.md).
+* **Every record names what it read and what it omits** (E02.6):
+  ``labels["evidence_class"]`` is ``ecu_command`` (the delivery loop refuses
+  it), ``image_sha256``/``slot``/``table`` resolve the exact bytes, and
+  ``blockers``/``omitted_logic``/``uncovered_logic`` are the application
+  model's, so a residual's possible causes travel with it. A refusal, which
+  resolved no table, labels all three ``unknown``, never ``none``.
+  ``engine_health``
+  is always ``not_assessed``: a zero residual says the reproduction agreed,
+  not that the engine is healthy.
+* **A qualified residual keeps its sign, beyond the tolerance.**
+  ``residual_sign`` is ``positive`` (the ECM commanded richer than the
+  reproduced logic by more than the twin's tolerance), ``negative``, ``zero``
+  (every residual within the tolerance: a pass is agreement, never "richer")
+  or ``mixed``. The per-sign counts, the tolerance and the raw extremes are
+  values; the result's residual is the raw largest one unless signs are mixed.
 * **A refusal is evidence too.** A table, program or image the twin refuses
   becomes an unevaluable record naming the refusal, so "could not evaluate" is
   not re-asked as if nobody had tried.
@@ -68,6 +83,8 @@ from src.storage.session_files import session_files_fingerprint, session_footer_
 from src.storage.sessions import session_started_at
 
 __all__ = [
+    "ECU_COMMAND",
+    "ENGINE_HEALTH_NOT_ASSESSED",
     "TRACE_LIMIT",
     "TWIN_INCIDENT",
     "TWIN_REGIME",
@@ -76,12 +93,22 @@ __all__ = [
     "TwinSessionIdentity",
     "evaluate_and_mint",
     "refusal_reason",
+    "residual_sign",
     "summarise_evaluation",
+    "tolerance_phi",
 ]
 
 TWIN_TOOL = "target_phi_twin"
 #: Bump when the mapping from an evaluation to an evidence record changes.
-TWIN_TOOL_VERSION = "1"
+#: 2 (E02.6): evidence class, image/slot/table reference, omitted logic,
+#: qualified-residual sign and counts.
+TWIN_TOOL_VERSION = "2"
+#: ``labels["evidence_class"]``: ECU computation agreement, never engine
+#: response (B06 delivery error, ``src.analysis.delivery_evidence``).
+ECU_COMMAND = "ecu_command"
+#: ``labels["engine_health"]``: command agreement assesses the reproduction of
+#: the ECM's logic, never the engine, so a zero residual is no health claim.
+ENGINE_HEALTH_NOT_ASSESSED = "not_assessed"
 #: What the twin's evidence is about across sessions (its recurrence key).
 TWIN_INCIDENT = "twin:target_equiv_ratio"
 #: The only regime the tool can claim: it accounts for every command sample
@@ -128,6 +155,9 @@ class TwinSessionIdentity:
     calibration: str | None
     calibration_source: str
     calibration_conflict: bool = False
+    #: The plain image the flash history records for ``calibration`` (named on
+    #: a refusal, which has no resolved table to name it).
+    image_sha256: str | None = None
 
 
 def _aware(text: str) -> datetime:
@@ -220,7 +250,12 @@ def summarise_evaluation(result: dict[str, Any], *, slot: int) -> dict[str, Any]
     }
 
 
-def _counts(result: dict[str, Any]) -> dict[str, Quantity]:
+def tolerance_phi(result: dict[str, Any], definition: TwinDefinition) -> float:
+    """The evaluation's agreement tolerance in phi (``tolerance_words`` Q-words)."""
+    return float(result["tolerance_words"]) / (1 << definition.reference.q_bits)
+
+
+def _counts(result: dict[str, Any], tolerance: float) -> dict[str, Quantity]:
     accounting = result["accounting"]
     eligible = accounting["eligible"]
     values = {
@@ -237,10 +272,55 @@ def _counts(result: dict[str, Any]) -> dict[str, Quantity]:
     ]
     if differences:
         values["max_abs_difference_phi"] = Quantity(value=max(differences), unit="1")
+    residuals = _qualified(result)
+    if residuals:
+        values["qualified_residuals"] = Quantity(value=len(residuals), unit="count")
+        values["tolerance_phi"] = Quantity(value=tolerance, unit="1")
+        for sign, count in _signs(residuals, tolerance).items():
+            values[f"{sign}_qualified_residuals"] = Quantity(value=count, unit="count")
+        values["max_qualified_residual_phi"] = Quantity(value=max(residuals), unit="1")
+        values["min_qualified_residual_phi"] = Quantity(value=min(residuals), unit="1")
     return values
 
 
-def _result(result: dict[str, Any]) -> Result:
+def _qualified(result: dict[str, Any]) -> list[float]:
+    """Every per-sample qualified residual (observed - predicted phi)."""
+    return [
+        float(r["qualified_residual_phi"])
+        for r in result["records"]
+        if r.get("qualified_residual_phi") is not None
+    ]
+
+
+def _signs(residuals: list[float], tolerance: float) -> dict[str, int]:
+    """Counts by sign, where ``zero`` is *within the twin's tolerance*: a
+    difference the evaluation itself scores a pass is agreement, not a
+    direction."""
+    return {
+        "positive": sum(1 for r in residuals if r > tolerance),
+        "negative": sum(1 for r in residuals if r < -tolerance),
+        "zero": sum(1 for r in residuals if abs(r) <= tolerance),
+    }
+
+
+def residual_sign(residuals: list[float], tolerance: float) -> str:
+    """``positive`` (the ECM commanded richer than the reproduced logic beyond
+    ``tolerance``), ``negative`` (leaner), ``zero`` (every residual within the
+    tolerance: agreement) or ``mixed``; ``none`` without any. Residuals within
+    the tolerance never set a direction, so a passing sample cannot read as
+    "richer"."""
+    if not residuals:
+        return "none"
+    counts = _signs(residuals, tolerance)
+    directed = [sign for sign in ("positive", "negative") if counts[sign]]
+    if len(directed) == 2:
+        return "mixed"
+    if directed:
+        return directed[0]
+    return "zero"
+
+
+def _result(result: dict[str, Any], tolerance: float) -> Result:
     accounting = result["accounting"]
     blockers = result["qualification_blockers"]
     eligible = accounting["states"]["eligible"]
@@ -267,7 +347,49 @@ def _result(result: dict[str, Any]) -> Result:
             reason="uncovered",
             detail=requirement.get("message") or "no eligible tuple in the session",
         )
+    residuals = _qualified(result)
+    sign = residual_sign(residuals, tolerance)
+    if sign in ("positive", "negative", "zero"):
+        # The raw residual of largest magnitude. For a direction it has that
+        # direction's sign; for agreement it is within the tolerance.
+        extreme = max(residuals, key=abs)
+        return Result(status="evaluated", residual=Quantity(value=extreme, unit="1"))
+    # Mixed signs: no single residual stands for the session; the counts and
+    # extremes are in the values.
     return Result(status="evaluated")
+
+
+#: A refusal resolved no table, so the logic it would have omitted is unknown.
+UNKNOWN_LOGIC = "unknown"
+
+
+def _joined(items: tuple[str, ...] | list[str] | None) -> str:
+    if items is None:
+        return UNKNOWN_LOGIC
+    return ",".join(items) or "none"
+
+
+def _command_labels(
+    *,
+    image_sha256: str | None,
+    slot: int,
+    blockers: tuple[str, ...] | list[str] | None,
+    omitted: tuple[str, ...] | None,
+    uncovered: tuple[str, ...] | None,
+) -> dict[str, str]:
+    """Labels every twin record carries: what it is evidence *of* (the ECU's
+    computation, never engine response or a fault), the exact image and slot it
+    read, and the logic it omits (E02.6)."""
+    return {
+        "computation": "ecu_command",
+        "evidence_class": ECU_COMMAND,
+        "engine_health": ENGINE_HEALTH_NOT_ASSESSED,
+        "image_sha256": image_sha256 or "unknown",
+        "slot": str(slot),
+        "blockers": _joined(blockers),
+        "omitted_logic": _joined(omitted),
+        "uncovered_logic": _joined(uncovered),
+    }
 
 
 def _provenance() -> Provenance:
@@ -301,6 +423,7 @@ def _mint_refusal(
     refusal: TwinRefusalError,
     inputs: dict[str, str],
     flags: tuple[str, ...],
+    image_sha256: str | None,
     segment: str | None = None,
 ) -> str:
     start, end = _session_window(session)
@@ -323,7 +446,16 @@ def _mint_refusal(
         ),
         input_hashes={**inputs, "twin_definition": definition_sha256},
         policy={"tolerance_words": tolerance_words, "slot": slot},
-        labels={"computation": "ecu_command", "refusal": refusal.reason},
+        labels={
+            **_command_labels(
+                image_sha256=image_sha256,
+                slot=slot,
+                blockers=None,
+                omitted=None,
+                uncovered=None,
+            ),
+            "refusal": refusal.reason,
+        },
         quality=Quality(n_observations=0, timestamp_basis=None, flags=flags),
         result=Result(
             status="unevaluable", reason=refusal_reason(refusal.reason), detail=str(refusal)
@@ -378,20 +510,28 @@ def _mint(
             "slot": table.slot,
             "pairing": result["pairing"],
         },
-        values=_counts(result),
+        values=_counts(result, tolerance_phi(result, definition)),
         labels={
-            "computation": "ecu_command",
+            **_command_labels(
+                image_sha256=table.image_sha256,
+                slot=table.slot,
+                blockers=result["qualification_blockers"],
+                omitted=table.application.blocked_nodes,
+                uncovered=table.application.uncovered,
+            ),
+            "table": table.table_id,
             "table_source": table.source,
             "revision": table.revision or "unknown",
             "qualification": "blocked" if result["qualification_blockers"] else "qualified",
             "capture_requirement": (result["capture_requirement"] or {}).get("reason", "none"),
+            "residual_sign": residual_sign(_qualified(result), tolerance_phi(result, definition)),
         },
         quality=Quality(
             n_observations=len(stamps),
             timestamp_basis=definition.gates.clock,
             flags=flags + tuple(f"blocker:{b}" for b in result["qualification_blockers"]),
         ),
-        result=_result(result),
+        result=_result(result, tolerance_phi(result, definition)),
     )
     return ledger.append(record).id
 
@@ -480,6 +620,7 @@ def evaluate_and_mint(
                     refusal=refusal,
                     inputs=inputs,
                     flags=flags,
+                    image_sha256=identity.image_sha256,
                     segment=segment,
                 )
             )

@@ -269,7 +269,8 @@ def test_memory_consolidation_summarises_without_appending(config: CanaryConfig)
     assert done is not None and done.state == "completed"
     result = BrainJobStore.for_config(config).read_result(job.job_id)
     assert result is not None and result["records"] == before
-    assert result["by_kind"] == {"evidence": before}
+    # The twin job mints its evidence and links it to an investigation (E02.6).
+    assert result["by_kind"] == {"evidence": 1, "investigation": 1} and before == 2
     assert len(memory_ledger_for(config).entries()) == before
 
 

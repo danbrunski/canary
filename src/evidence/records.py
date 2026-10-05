@@ -43,6 +43,11 @@ What the envelope makes impossible rather than documented:
   been measured under the prediction's own regime (character for character,
   ``noise_floor.yaml``'s rule); a floor from another regime is refused, so
   "no effect" can always be told from "too small to see".
+* **A what-if is never a measurement.** A computed command-change
+  prediction (:class:`WhatIf`, E02.6) exists only on a :class:`Prediction`,
+  whose quantity must carry :data:`WHAT_IF_PREFIX`; every place that takes
+  measured output (an outcome's evidence, an investigation's observations) is
+  typed to evidence and refuses it.
 * **Unevaluable is not normal.** :class:`Result` separates a named
   unevaluable reason from an evaluated result, and an unevaluable result
   cannot carry a residual (E00 shared contract).
@@ -98,6 +103,9 @@ __all__ = [
     "SourceRef",
     "UnevaluableReason",
     "VehicleIdentity",
+    "WHAT_IF_PREFIX",
+    "WhatIf",
+    "WhatIfPoint",
     "content_key",
     "mint_id",
     "recurrence_key",
@@ -519,6 +527,89 @@ class NoiseFloorRef(_Strict):
         return self.sigma_threshold * self.sd.value
 
 
+#: Prefix every what-if prediction's ``quantity`` carries, and only those, so a
+#: listing, a query or a card cannot show one as a plain expectation.
+WHAT_IF_PREFIX = "what_if:"
+
+
+class WhatIfPoint(_Strict):
+    """One stated operating point of a what-if: its inputs and the value the
+    reproduced logic computes there under each calibration.
+
+    ``before``/``after`` are both stated, or neither is and ``reason`` names
+    why the logic gives no value there (an ambiguous state, an uncovered
+    region). A computed value is never a measurement of the engine.
+    """
+
+    key: str = Field(min_length=1)
+    inputs: dict[str, Quantity] = Field(min_length=1)
+    before: Quantity | None
+    after: Quantity | None
+    reason: str | None = None
+
+    @model_validator(mode="after")
+    def _both_or_reason(self) -> WhatIfPoint:
+        stated = (self.before is not None, self.after is not None)
+        if stated == (True, True):
+            if self.reason is not None:
+                raise ValueError("a point with both values has no unevaluable reason")
+            assert self.before is not None and self.after is not None
+            if self.before.unit != self.after.unit:
+                raise ValueError("before and after are compared in one unit")
+        elif not (self.reason or "").strip():
+            raise ValueError("a point without both values names its reason")
+        return self
+
+    @property
+    def change(self) -> float | None:
+        if self.before is None or self.after is None:
+            return None
+        return self.after.value - self.before.value
+
+
+class WhatIf(_Strict):
+    """What the reproduced ECU logic computes under a proposed calibration
+    change (E02.6): the exact base image, the exact target image or the cell
+    edit set that would make it, and each stated point before and after.
+
+    A what-if is a *computation over two calibrations*: no session was read and
+    nothing was measured. It lives only on a :class:`Prediction` (whose kind is
+    never evidence, so an outcome, an investigation's observations or a
+    delivery residual cannot cite it as measured output), its quantity carries
+    :data:`WHAT_IF_PREFIX`, and ``label`` is fixed. Logic the reproduction does
+    not cover is named, never assumed neutral: ``blockers`` (the application
+    model's unresolved path to the output) and ``not_reproduced`` (changed bytes
+    outside the reproduced tables, or why they are unknown).
+    """
+
+    label: Literal["what_if"] = "what_if"
+    #: The output the reproduced logic computes (an application-model output id).
+    output: str = Field(min_length=1)
+    base_image_sha256: Sha256
+    #: Exactly one of these names the change: the target plain image, or the
+    #: canonical hash of a cell edit set applied to the base.
+    target_image_sha256: Sha256 | None
+    change_set_sha256: Sha256 | None
+    #: Conditions the computed values hold under (e.g. equal lookup inputs).
+    assumptions: tuple[str, ...] = Field(min_length=1)
+    blockers: tuple[str, ...]
+    not_reproduced: tuple[str, ...]
+    points: tuple[WhatIfPoint, ...] = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def _one_change(self) -> WhatIf:
+        if (self.target_image_sha256 is None) == (self.change_set_sha256 is None):
+            raise ValueError(
+                "a what-if names its change exactly once: a target image hash or a cell "
+                "edit set hash"
+            )
+        if self.target_image_sha256 == self.base_image_sha256:
+            raise ValueError("the target image is the base image: nothing is changed")
+        if len({p.key for p in self.points}) != len(self.points):
+            raise ValueError("what-if point keys are unique")
+        return self
+
+
 class Prediction(_ConditionedRecord):
     """An expectation stated before the result (E01.4 enforces the order).
 
@@ -541,6 +632,27 @@ class Prediction(_ConditionedRecord):
     direction: Literal["increase", "decrease", "no_change"]
     magnitude: Quantity | None
     noise_floor: NoiseFloorRef | None
+    #: A computed command-change prediction's detail (E02.6), or ``None`` for
+    #: a plain expectation. Omitted from the stored form when ``None``.
+    what_if: WhatIf | None = None
+
+    @model_validator(mode="after")
+    def _what_if_is_labelled(self) -> Prediction:
+        labelled = self.quantity.startswith(WHAT_IF_PREFIX)
+        if (self.what_if is not None) != labelled:
+            raise ValueError(
+                f"a what-if prediction's quantity starts with {WHAT_IF_PREFIX!r} and only a "
+                "what-if's does: a computed change must not read as a plain expectation"
+            )
+        if self.what_if is not None:
+            if self.provenance.producer_kind != "tool":
+                raise ValueError("a what-if is computed by a tool, never stated by hand")
+            units = {
+                q.unit for p in self.what_if.points for q in (p.before, p.after) if q is not None
+            }
+            if self.magnitude is not None and units and self.magnitude.unit not in units:
+                raise ValueError("a what-if's magnitude is in the unit of its points")
+        return self
 
     @model_validator(mode="after")
     def _floor_matches(self) -> Prediction:
@@ -730,7 +842,12 @@ _ADAPTER: TypeAdapter[AnyRecord] = TypeAdapter(MemoryRecord)
 
 
 def record_to_dict(record: AnyRecord) -> dict[str, Any]:
-    return record.model_dump(mode="json", by_alias=True)
+    data = record.model_dump(mode="json", by_alias=True)
+    if isinstance(record, Prediction) and record.what_if is None:
+        # Added for E02.6: a plain prediction's stored form (and so its
+        # content key) stays what it was before the field existed.
+        data.pop("what_if", None)
+    return data
 
 
 def record_from_dict(data: dict[str, Any]) -> AnyRecord:

@@ -63,6 +63,7 @@ from src.analysis.target_phi import (
     load_twin_definition,
 )
 from src.analysis.twin_evidence import TwinSessionIdentity, evaluate_and_mint
+from src.analysis.twin_investigation import investigate_command_residual
 from src.atomic_write import atomic_write_text
 from src.collection import tuning_profile
 from src.config import CanaryConfig
@@ -640,6 +641,7 @@ def _run_twin(config: CanaryConfig, params: dict[str, Any], job_id: str) -> dict
                 calibration=identity.calibration,
                 calibration_source=identity.source,
                 calibration_conflict=identity.conflict,
+                image_sha256=identity.image_sha256,
             ),
             program_id=identity.program_id,
             table_for_slot=functools.partial(resolver.table, identity),
@@ -648,6 +650,12 @@ def _run_twin(config: CanaryConfig, params: dict[str, Any], job_id: str) -> dict
         )
         for key in out:
             out[key].extend(minted[key])
+    # E02.6: each minted record joins the investigation of its command
+    # direction (or of "could not compare"), as ECU-command evidence. Re-running
+    # the job re-states the same investigation, which the ledger deduplicates.
+    out["investigations"] = list(
+        dict.fromkeys(investigate_command_residual(ledger, ev) for ev in out["evidence"])
+    )
     first = segments[0].identity
     return {
         "job_id": job_id,

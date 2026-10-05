@@ -607,6 +607,38 @@ class MemoryLedger(JsonlStore[AnyRecord]):
             return "undetermined"
         return "prior" if prediction.recorded_at < change.valid_from else "post_hoc"
 
+    def what_if_intervention(self, prediction_id: str) -> str | None:
+        """The flash a what-if prediction (E02.6) is ordered against.
+
+        The intervention it names; else the first calibration intervention
+        installing its target image that took effect after the prediction was
+        recorded. An earlier flash of the same image (re-flashing a previous
+        calibration) is not its change. ``None`` while no such flash is on the
+        ledger, and always for an unlinked cell edit set, which names no image
+        to match a flash by. Refuses a prediction that is not a what-if.
+        """
+        prediction = self._typed(prediction_id, Prediction)
+        what_if = prediction.what_if
+        if what_if is None:
+            raise MemoryReferenceError(f"{prediction_id!r} is not a what-if prediction")
+        if prediction.intervention is not None:
+            return prediction.intervention
+        if what_if.target_image_sha256 is None:
+            return None
+        assert prediction.recorded_at is not None
+        after = sorted(
+            (
+                entry.record
+                for entry in self.query(MemoryQuery(kinds=("intervention",)))
+                if isinstance(entry.record, Intervention)
+                and entry.record.intervention_kind == "calibration"
+                and entry.record.image_sha256 == what_if.target_image_sha256
+                and entry.record.valid_from > prediction.recorded_at
+            ),
+            key=lambda record: record.valid_from,
+        )
+        return after[0].id if after else None
+
     def assess(self, outcome_id: str) -> OutcomeAssessment:
         """Does this outcome confirm its prediction? Derived; see :class:`OutcomeAssessment`."""
         outcome = self._typed(outcome_id, Outcome)
