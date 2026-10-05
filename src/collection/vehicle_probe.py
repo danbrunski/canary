@@ -60,6 +60,21 @@ def probe_vehicle_info(config: CanaryConfig) -> VehicleInfoProbe:
     if coll.obd_source != "canable" or config.hardware.can.interface == "virtual":
         return VehicleInfoProbe(vin=None, calibration_id=None, cvn=None)
 
+    # On the bench (no vehicle on the port) nothing would answer, and the
+    # request would sit in the transmit queue until ENOBUFS: one warning at
+    # every bench start (2026-10-05). The collectors are not running yet, so
+    # read the HAT's 12 V sense once here.
+    from src.collection.supply_voltage_collector import read_supply_once
+    from src.collection.vehicle_power import classify_supply
+
+    supply = read_supply_once(config.hardware.supply_voltage)
+    if classify_supply(supply) == "bench":
+        log.info(
+            "vehicle info probe skipped: no vehicle on the OBD port (12 V sense reads %.2f V)",
+            supply,
+        )
+        return VehicleInfoProbe(vin=None, calibration_id=None, cvn=None)
+
     # Imported lazily so this module (and config) stay importable without the
     # python-can collector deps present.
     import can

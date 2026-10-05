@@ -107,3 +107,52 @@ def test_a_starved_conversion_is_read_once_more_before_failing() -> None:
     clock = iter([0.0, 1.0, 1.0, 1.0])
     with pytest.raises(Ads1015Error):
         Ads1015(_Dead(), clock=lambda: next(clock), sleep=lambda _s: None).read_volts(0)  # type: ignore[arg-type]
+
+
+def test_one_shot_supply_read_notes_the_reading() -> None:
+    from src.collection.supply_voltage_collector import read_supply_once
+    from src.collection.vehicle_power import VEHICLE_POWER
+    from src.config import SupplyVoltageConfig
+    from tests.test_supply_voltage import FakeAdc
+
+    VEHICLE_POWER.reset()
+    adc = FakeAdc(1143)  # 12.68 V through the HAT's divider
+    volts = read_supply_once(
+        SupplyVoltageConfig(enabled=True),
+        bus_factory=lambda _c: adc,  # type: ignore[arg-type,return-value]
+    )
+    assert volts == pytest.approx(12.68, abs=0.01)
+    assert adc.closed
+    assert VEHICLE_POWER.connection() == "vehicle"
+    assert read_supply_once(SupplyVoltageConfig(enabled=False)) is None
+    VEHICLE_POWER.reset()
+
+
+def test_the_vin_probe_does_not_transmit_on_the_bench(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    from pathlib import Path
+
+    from src.collection import can_bus, supply_voltage_collector, vehicle_probe
+    from src.config import CanaryConfig
+
+    config = CanaryConfig.from_yaml(Path("canary.example.yaml"))
+    hardware = config.hardware.model_copy(
+        update={"can": config.hardware.can.model_copy(update={"interface": "socketcan"})}
+    )
+    config = config.model_copy(
+        update={
+            "hardware": hardware,
+            "collection": config.collection.model_copy(update={"obd_source": "canable"}),
+        }
+    )
+    monkeypatch.setattr(supply_voltage_collector, "read_supply_once", lambda _c: 0.01)
+
+    def _no_bus(_config: object) -> None:
+        raise AssertionError("opened the bus on the bench")
+
+    monkeypatch.setattr(can_bus, "bus_factory", _no_bus)
+    caplog.set_level(logging.INFO, logger="src.collection.vehicle_probe")
+    probe = vehicle_probe.probe_vehicle_info(config)
+    assert probe.vin is None
+    assert any("no vehicle on the OBD port" in r.getMessage() for r in caplog.records)

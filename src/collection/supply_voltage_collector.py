@@ -16,7 +16,7 @@ import asyncio
 import logging
 from collections.abc import Callable
 
-from src.collection.ads1015 import Ads1015
+from src.collection.ads1015 import Ads1015, Ads1015Error
 from src.collection.i2c_dev import LinuxI2cBus, RegisterBus
 from src.collection.queueing import QueueDropCounter, put_nowait_or_drop
 from src.collection.reconnect import (
@@ -49,6 +49,28 @@ def supply_record(config: SupplyVoltageConfig, stamp: float, pin_volts: float) -
         value=pin_volts * config.divider_ratio,
         unit=UNIT,
     )
+
+
+def read_supply_once(
+    config: SupplyVoltageConfig, *, bus_factory: BusFactory = linux_bus_factory
+) -> float | None:
+    """One reading, for a caller that runs before the collector does (the
+    startup VIN probe). Notes it in :data:`VEHICLE_POWER` too. ``None`` when
+    the sense is disabled or the read fails: the caller goes on as without it."""
+    if not config.enabled:
+        return None
+    try:
+        bus = bus_factory(config)
+        try:
+            _, pin_volts = Ads1015(bus).read_volts(config.input_channel)
+        finally:
+            bus.close()
+    except (OSError, Ads1015Error):
+        log.debug("one-shot supply read failed", exc_info=True)
+        return None
+    volts = pin_volts * config.divider_ratio
+    VEHICLE_POWER.note(volts)
+    return volts
 
 
 async def collect_supply_voltage(
