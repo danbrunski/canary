@@ -26,7 +26,7 @@ one. Figures measured on this truck override the manual's typical values for
 | Firing order | **1-2-3-4-5-6** (online "1-4-2-5-3-6" is wrong) | EC-34 |
 | Bank 1 | cylinders 1-3-5, **RH / passenger side**. The Bank 2 A/F connector is by the brake booster | EM-17, EC-25 |
 | Rating | 261 hp @ 5,600 rpm, 281 lb-ft @ 4,000 rpm (sea level) | Nissan 2008 press kit |
-| Upstream sensor | **A/F sensor 1**: planar, limiting-current, wide-range, heated ~800 °C, ahead of each manifold catalyst. Reported as λ on PIDs `0x24`/`0x28` (λ + voltage); `0x34`–`0x3B` are not supported | EC-141, EC-32, `pid-probe-2026-07-22.md` |
+| Upstream sensor | **A/F sensor 1**: planar, limiting-current, wide-range, heated ~800 °C, ahead of each manifold catalyst. Reported as λ on PIDs `0x24`/`0x28` (λ + voltage); `0x34`–`0x3B` are not supported. **One sensor per bank behind every λ number:** PID `0x24`/`0x28` λ is the ECM's own computation from the A/F voltage DIDs `0x1225`/`0x1226`. It applies a **barometric gain** (k table `0xD00F`: 112 at 80 kPa, 94 at 63 kPa) before the AFR table `0xE644`. UpRev's AFR and CANary's voltage curve skip the gain and read ~1.5–4.5 % lean on the rich side at this truck's altitudes (firmware, 2026-10-05) | EC-141, EC-32, `pid-probe-2026-07-22.md` |
 | Downstream sensor | narrowband heated O2 sensor 2, swings 0–0.3 ↔ 0.6–1.0 V | EC-431 |
 | Fuel system | **returnless** ("N50 models do not have fuel return system"), ≈ 350 kPa (51 psi), regulator in the in-tank module. The pressure is fixed against atmosphere, not manifold (inferred from the in-tank location) | EC-494, EC-499 |
 | Injectors | Bosch EV14 `0280158007` (Nissan 16600-7S000), ~296 cc/min at 3 bar (≈ 320 cc/min at 350 kPa), 11.1–14.5 Ω | EC-500; vendor data |
@@ -71,8 +71,12 @@ These are sea-level, stock-calibration figures:
   peg lean.
 - **MAF circuit fault fail-safe** (P0102/P0103): the ECM cuts fuel to hold the
   engine at or below 2,400 rpm (EC-463).
-- **CONSULT has no knock item** (EC-72–75). Knock is visible only through
-  UpRev's Knock Strength / High Det Flag (below).
+- **CONSULT has no knock item** (EC-72–75), and **generic Mode 03/07 never
+  report the knock-sensor DTCs** P0327/28/32/33: their report bit is clear in
+  this ECM's item config. The knock state lives in RAM and is readable with
+  service 0x23: fault flag `0xFFFF479D` bit 7, applied retard `0xFFFF1254`, knock
+  event `0xFFFF28AA` bit 2, HI DET `0xFFFF283F` bit 6 (firmware, 2026-10-05;
+  `docs/ecu-firmware-analysis.md`, "Knock monitoring").
 
 ## The fuel equation as this ECM implements it
 
@@ -96,6 +100,17 @@ Ti = (Tp + transient corr.) × target φ × (α + αm − 1) + Ts
   a percentage on a fixed voltage axis. **Only the product K × MAF matters.**
   UpRev notes that K × 1.2 with the MAF table × 0.8 runs identically, so
   compare the product between two tunes, never K alone.
+
+**As decoded from this ECM (firmware, 2026-10-05; data-checked, median 1.006 over 5,039 samples):**
+- **Trims add, they do not multiply:** `k = 1 + STFT + LTFT`.
+- **`Ts` is linear in battery voltage, not a table:** 0.47 ms at 14.0 V plus 0.090 ms per volt below that (`0x8C41`, `0x84F2`).
+- **A fuel-pressure factor** `≈ √(350/(350 + vacuum))` multiplies the pulse. The vacuum is *estimated* from load and rpm, never below about 0.2·baro, so the factor cannot see boost.
+- **Fuel Comp is applied inside BFS**, before the manifold filter, so a Fuel Comp edit also moves the Target AFR and timing load axes.
+- **An injector-flow scaler `0x9254`** multiplies every pulse after BFS without moving any load axis. K moves BFS and every load axis. Rescale injectors with `0x9254`.
+- **DIDs `0x1206`/`0x1207` include `Ts`.** That plus the pressure factor is why they are convex in air charge.
+- **PID `0x44` equals φ only while the A/F feedback target is 14.7:** `PID 0x44 = 0x26BE × 0x46AC / 3675`. This is why it dithers in closed loop and reads 0.871 at idle with φ = 1.0. Use `mem:ECM_TARGET_EQUIV_RATIO` for φ.
+- **Load axes saturate before the BFS ceiling:** Target AFR and timing top out at BFS 44,019 (`0x9416`). The ceiling `D8B3` is 65,280.
+- **Rev limiter:** 6,350 rpm cut, 6,150 resume.
 
 Sources: UpRev *Nissan Tuning Guide* (pp. 10–14, 26–27); Nissan patents
 US4967713 and US5615660; FSM EC "B/FUEL SCHDL", "A/F ALPHA". What that means on
@@ -216,7 +231,11 @@ this truck:
   **cannot be converted to degrees**. The only degree-valued outputs are
   `IGN TIMING` (PID `0x0E`) and `mem:ECM_IGNITION_TIMING_RAM`, so a timing
   change must be read from the log, not predicted from a trim edit.
-- **Knock is visible only through UpRev.** CONSULT has no knock item. Pre-2009
+- **Knock control is active on this ROM, and its state is readable from RAM** (see
+  above). The HI DET latch `0xFFFF283F` bit 6 also **selects the timing-trim
+  table**: B (`+0x120`) while it is set, A (`+0x020`) only when it is clear
+  (verified, `0x04E6FE`). Read it live before editing a trim table.
+  UpRev's columns: CONSULT has no knock item. Pre-2009
   ROMs expose a loggable *Knock Strength* counter: it jumps negative on each
   event, recovers slowly, and its step size varies by ROM. After too many
   events the *High Det Flag* goes 0 → 1 and the ECM **latches onto the High Det
@@ -255,7 +274,7 @@ this truck:
 
   | Offset | Table |
   |---|---|
-  | `+0x020` and `+0x120` | two 16 × 16 **timing trims** (rpm `0xCC93` × BFS-X `0xCC83`, cells masked `& 0x7F`; a flag at `0xFFFF2842` picks one, likely Main vs High Det) |
+  | `+0x020` and `+0x120` | two 16 × 16 **timing trims** (rpm `0xCC93` × BFS-X `0xCC83`, cells masked `& 0x7F`; the HI DET latch `0xFFFF283F` bit 6 picks one: B `+0x120` while set, A `+0x020` when clear, verified 2026-10-05. `0xFFFF2842` does not) |
   | `+0x220` | Target AFR, 8 × 8 |
   | `+0x260` | a heavily used 16-bit map whose identity is still unknown |
   | `+0x660` | **Fuel Comp**, 16 × 16 (rpm `0xCACD` × load `0xCB29`, the reverse of UpRev's labels, verified from code) |

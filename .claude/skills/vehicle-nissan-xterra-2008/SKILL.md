@@ -105,6 +105,11 @@ copying them. Paths are under `data/nissan-xterra-2008/` unless shown.
 - **PID `0x24` is λ and PID `0x44` is φ.** They are reciprocal conventions on
   one ECM, so neither can be inferred from the other. In closed loop `0x44`
   dithers 0.9796 / 1.0204, not a flat 1.000.
+  And `0x44` is φ only while the ECM's A/F feedback target is 14.7 (firmware):
+  it reads 0.871 at idle with φ = 1.0. Use `mem:ECM_TARGET_EQUIV_RATIO`.
+- **UpRev's AFR is not an independent instrument.** It is the A/F voltage
+  through the ECM's table *without* the ECM's barometric gain, so it reads lean
+  at altitude. PID `0x24`/`0x28` is the corrected value.
 - **No MAP sensor, and no boost, fuel pressure, or torque from the ECM.** PID
   `0x0B` is unsupported (the VQ40DE is MAF-metered), and so are `0x0A`, `0x22`,
   `0x23`, `0x59`, `0x43` and `0x61`–`0x63`. A "manifold pressure" label on any

@@ -34,6 +34,8 @@ prose here.
   commanded φ 1.16 the sensor read λ 0.866 (`afr_calibration.yaml` →
   `pid_0x24_is_lambda_verified_2026-08-07`). In closed loop `0x44` dithers
   0.9796 / 1.0204 rather than sitting at 1.000. Gate "enrichment" at φ > 1.05.
+  The dither is the A/F feedback target moving. PID `0x44` = φ × target/14.7
+  (`0x26BE × 0x46AC / 3675`), so it is φ only while the target is 14.7.
 - **Mode 01 does report the WOT target.** On a 5,762 rpm / 144 g/s pull, `0x44`
   read φ 1.195–1.242 while `0x24` measured within ~2 %. An older conclusion
   that the WOT target was unobtainable over Mode 01 came from never reaching
@@ -87,7 +89,9 @@ site.
     use it as a DFCO marker. At key-on, engine off it holds a frozen value.
   - `0x1206`/`0x1207` `ECM_INJECTOR_PULSE_1/2` are the injected pulse. They are
     convex in air charge (about +7 % from idle to cruise), so a straight line
-    fitted in one region does not extrapolate.
+    fitted in one region does not extrapolate. Firmware (2026-10-05): each is the
+    per-cylinder pulse **including dead time** and the vacuum-based pressure
+    factor, which is the convexity, in 10 µs units; in fuel cut it reads `Ts`.
   - `0x1134` is an open-loop rich target (raw/64 as φ), not the commanded φ: it
     holds 64 through closed loop.
   - **On CAN, `0x1102` is vehicle speed** (one byte, km/h = raw × 2), not
