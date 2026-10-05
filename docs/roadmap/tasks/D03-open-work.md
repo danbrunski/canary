@@ -2475,6 +2475,34 @@ live here now, so the documents could be archived
     0x1110 (correction), and DIDs 0x120F/0x1210 with their CAN and K-line
     addresses. It had no earlier 0x1110 entry.
 
+- [ ] **D03.37 Identify the intake cam (VTC) solenoid duties: DIDs 0x1138 and
+  0x1139.** *Found 2026-10-05 (operator question: "do we have a candidate for
+  the VVT solenoid at all?").* The CAN DID pointer table (0x24988) maps four
+  consecutive RAM bytes: 0x1138 → 0xFFFF278C, 0x1139 → 0xFFFF278D, and the
+  two measured cam angles 0x1135 → 0xFFFF278E and 0x1163 → 0xFFFF278F
+  (commanded angle 0x113A → 0xFFFF26FC).
+  - **0x1139 behaves as a solenoid duty** on 34,264 time-paired reads of
+    `_capture-tuning-did-2026-08-06T145004` and `-08-07T005351`: 0 whenever
+    the commanded angle is 0 (16,103 reads, mean 0.3); about 99 raw (IQR
+    90–102) whenever controlling, whatever the target (0.25–45°), i.e. a
+    holding duty; its departure from 99 tracks command − measured (r +0.79):
+    135 when the cam lags by > 3°, 71 when it overshoots by > 3°, 100 within
+    ±0.25°. Purge (r +0.64) and BFS (+0.63) correlate only through load.
+  - **0x1138 (uncatalogued) does the same** in all 13 snapshots of
+    `data/analyses/did-drive-sweeps-20260805/`: 0 when parked (8/8), 68–148
+    when controlling (5/5). The NT510 polls 0x1138 on a page with 0x1135
+    (`2026-09-24-scan-tool-bcm-ecm-session.md`).
+  - **Pairing:** 0x1138 ↔ 0x1135 (its cam lagged 3° → 148, overshot 3° → 68)
+    and 0x1139 ↔ 0x1163 (spearman +0.72 vs 0x1163's error, +0.64 vs
+    0x1135's). B1/B2 stays open, as it is for the measured angles.
+  - **Open:** the scale (holding ~99, max 224: ×0.5 % would exceed 100 %),
+    the writer and the PWM output, and the bank assignment. Queued with the
+    firmware session as a Ghidra trace (2026-10-05).
+  - **Then:** one catalog change. Rename 0x1139 (now `ECM_UNIDENTIFIED_1139`)
+    and add 0x1138 as the VTC solenoid duty pair, with bank and scale, plus
+    a `tools/channel_renames` migration. Add 0x1138 to the tuning-did profile.
+    Not before the trace, so the names change once.
+
 ## Deferred by decision, not blocked
 
 - [~] **D01.4 Get the feature build off the event loop — implemented; Pi
