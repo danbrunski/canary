@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import copy
 import hashlib
+import importlib
 import re
 from pathlib import Path
 from typing import Any
@@ -229,6 +230,111 @@ def test_the_model_refuses_an_incomplete_or_inconsistent_trace(edit: Any, match:
     _refuses(raw, match)
 
 
+# -- E05.3 / E05.4: reference models and the ignition intermediate -----------------------
+
+
+def _resolve(dotted: str) -> object:
+    module, _, attribute = dotted.rpartition(".")
+    return getattr(importlib.import_module(module), attribute)
+
+
+def test_reference_models_resolve_and_leave_the_target_phi_path_as_it_was() -> None:
+    """E05.3's state models are references: they name importable code and the
+    level they were checked at, and the nodes keep the role the output uses,
+    so target phi's blockers (and so its predictions) do not move."""
+    model, sha = _model()
+    references = {n.id: n for n in model.nodes if n.reference_model is not None}
+    assert {
+        "pedal_comparand",
+        "pedal_enrichment_flag",
+        "uprev_init",
+        "uprev_slot_state",
+        "enrichment_state_request",
+        "enrichment_state",
+    } <= set(references)
+    for node in references.values():
+        assert node.twin != "implemented"
+        assert node.reference_model is not None and callable(_resolve(node.reference_model))
+    for node in model.nodes:
+        if node.implemented_by is not None and node.implemented_by.startswith("src.analysis."):
+            assert callable(_resolve(node.implemented_by.split(" ")[0])), node.id
+    assert applicability(model, sha, OUTPUT).blockers == (
+        "final_command_path_unverified",
+        "ram_copy_unverified",
+    )
+    blocked = {n for b in model.output(OUTPUT).blockers for n in b.nodes}
+    assert {"enrichment_state_request", "enrichment_state"} <= blocked
+
+
+def test_the_trim_lookup_is_an_intermediate_of_ignition_timing_never_timing_itself() -> None:
+    model, sha = _model()
+    trim = model.output("ignition_trim_selected")
+    timing = model.output("ignition_timing")
+    assert (trim.role, trim.feeds, timing.role) == ("intermediate", "ignition_timing", "final")
+    assert trim.ram != timing.ram and trim.units != timing.units
+    assert trim.twin is not None and model.node(trim.twin.predicts).twin == "implemented"
+    # No channel reads 0xFFFF1777 yet: it cannot qualify even unblocked.
+    assert trim.observed_as == []
+    assert trim.model_copy(update={"blockers": []}).status == "unobserved"
+    report = {o["id"]: o for o in coverage_report(model, sha)["outputs"]}
+    assert report["ignition_trim_selected"]["role"] == "intermediate"
+    assert report["ignition_timing"]["status"] == "conditional"
+    assert [b.name for b in timing.blockers] == [
+        "trim_ram_copy_unverified",
+        "high_det_latch_unobserved",
+        "ignition_chain_unmodelled",
+    ]
+
+
+def _trim(raw: dict[str, Any]) -> dict[str, Any]:
+    found: dict[str, Any] = next(o for o in raw["outputs"] if o["id"] == "ignition_trim_selected")
+    return found
+
+
+@pytest.mark.parametrize(
+    ("edit", "match"),
+    [
+        (lambda r: _trim(r).pop("feeds"), "feeds is required"),
+        (lambda r: _trim(r).update(feeds="ignition_trim_selected"), "not a final output"),
+        (
+            lambda r: _trim(r).update(
+                ram=0xFFFF11FF,
+                written_by="timing_final_byte",
+                twin=None,
+                regions=[],
+                blockers=copy.deepcopy(r["outputs"][1]["blockers"]),
+            ),
+            "cannot be ignition_timing's word",
+        ),
+        (
+            lambda r: _trim(r).update(
+                ram=0xFFFF26C0,
+                written_by="alternate_multiplier_writer",
+                twin=None,
+                blockers=[],
+                regions=[],
+            ),
+            "not on ignition_timing's path",
+        ),
+        (lambda r: r["outputs"][0].update(observed_as=[]), "needs an observation channel"),
+        (lambda r: _node(r, "enrichment_state").pop("reference_validation"), "go together"),
+        (
+            lambda r: _node(r, "timing_trim_lookup").update(
+                reference_model="src.analysis.ecu_state_models.trim_lookup",
+                reference_validation=["synthetic"],
+            ),
+            "implemented_by, not a reference_model",
+        ),
+    ],
+)
+def test_the_model_refuses_an_intermediate_labelled_as_final_or_a_loose_reference(
+    edit: Any, match: str
+) -> None:
+    raw = copy.deepcopy(_raw())
+    edit(raw)
+    _refuses(raw, match)
+
+
 # -- identity: program plus full image, never the calibration ID ------------------------
 
 
@@ -275,6 +381,40 @@ def test_the_same_program_passes_and_each_mismatch_refuses_by_name() -> None:
         assert refused.value.reason == reason, reason
 
 
+def test_every_constant_a_reference_model_implements_is_checked_on_the_image() -> None:
+    """E05.3/E05.4: a threshold the Python reference hard-codes is a
+    calibration byte. Each one is a calibration condition, so an image that
+    edits it refuses ``unmodelled_logic`` instead of being modelled with the
+    wrong number."""
+    model, _ = _model()
+    nodes = [n for n in model.nodes if n.reference_model is not None]
+    nodes.append(model.node("timing_trim_lookup"))
+    for node in nodes:
+        pinned = {(c.offset, c.equals) for c in node.calibration_conditions if c.mask == 0xFF}
+        for rom in node.rom:
+            if rom.offset is not None and rom.width == 8:
+                assert (rom.offset, rom.value) in pinned, (node.id, hex(rom.offset))
+    image, same = _synthetic(model)
+    for offset, node_id in [
+        (0x8C98, "enrichment_state_request"),
+        (0x879C, "enrichment_state_request"),
+        (0x879B, "enrichment_state_request"),
+        (0x87A0, "enrichment_state_request"),
+        (0x879F, "enrichment_state_request"),
+        (0x879D, "enrichment_state_request"),
+        (0x8794, "enrichment_state"),
+        (0x8781, "enrichment_state"),
+        (0x8796, "enrichment_state"),
+        (0xCEDB + 7, "pedal_enrichment_flag"),
+    ]:
+        edited = bytearray(image)
+        edited[offset] ^= 0x01
+        with pytest.raises(ApplicationModelRefusalError) as refused:
+            check_image(bytes(edited), same)
+        assert refused.value.reason == "unmodelled_logic"
+        assert refused.value.message.startswith(f"{node_id}:"), hex(offset)
+
+
 def test_the_calibration_region_does_not_change_the_program() -> None:
     """A reflash rewrites 0x8000-0x1FFFF and the map slots: the program hash
     ignores them, so a new calibration is the same program, identified by its
@@ -314,8 +454,9 @@ def test_the_report_names_qualified_outputs_and_uncovered_logic() -> None:
         "revision": "ZS44A-20260920",
         "role": "decoded",
     }
-    (target,) = report["outputs"]
-    assert (target["id"], target["status"]) == (OUTPUT, "conditional")
+    outputs = {o["id"]: o for o in report["outputs"]}
+    target = outputs[OUTPUT]
+    assert (target["id"], target["status"], target["role"]) == (OUTPUT, "conditional", "final")
     assert [b["name"] for b in target["blockers"]] == list(
         applicability(model, sha, OUTPUT).blockers
     )

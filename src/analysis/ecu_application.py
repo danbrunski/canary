@@ -38,6 +38,9 @@ MODEL_FILE = "ecu_application_model.yaml"
 
 Confidence = Literal["observed", "code", "inferred", "unknown"]
 TwinRole = Literal["implemented", "observed", "assumed", "not_modelled", "calibration_dead"]
+#: ``synthetic``: vectors derived from the code; ``fixture``: a committed real
+#: capture where its inputs exist; ``vehicle``: a held-out drive.
+ReferenceValidation = Literal["synthetic", "fixture", "vehicle"]
 
 #: Twin roles that leave a node unresolved on an output's path.
 UNRESOLVED: frozenset[str] = frozenset({"assumed", "not_modelled"})
@@ -206,10 +209,22 @@ class Node(_Strict):
     implemented_by: str | None = None
     observed_as: list[Observation] = Field(default_factory=list)
     assumption: str | None = None
+    #: An executable reference of this node's decode (E05.3) that no output
+    #: consumes yet: the node keeps the twin role its outputs use until the
+    #: reference qualifies, so adding one never changes a prediction.
+    reference_model: str | None = None
+    #: What the reference has been checked against so far.
+    reference_validation: list[ReferenceValidation] = Field(default_factory=list)
     evidence: list[str] = Field(min_length=1)
 
     @model_validator(mode="after")
     def _role_fields(self) -> Node:
+        if (self.reference_model is None) != (not self.reference_validation):
+            raise ValueError(f"{self.id}: reference_model and reference_validation go together")
+        if self.reference_model is not None and self.twin == "implemented":
+            raise ValueError(
+                f"{self.id}: an implemented node names implemented_by, not a reference_model"
+            )
         if (self.twin == "implemented") != (self.implemented_by is not None):
             raise ValueError(
                 f"{self.id}: implemented_by is required for, and only for, twin: implemented"
@@ -274,11 +289,33 @@ class Output(_Strict):
     ram: int
     written_by: str
     units: str = Field(min_length=1)
-    observed_as: list[Observation] = Field(min_length=1)
+    #: ``intermediate``: a value on another output's path (E05.4: the trim
+    #: lookup is not ignition timing). It names the output it ``feeds``, and
+    #: may lack an observation channel, which keeps it from qualifying.
+    role: Literal["final", "intermediate"] = "final"
+    feeds: str | None = None
+    observed_as: list[Observation] = Field(default_factory=list)
     twin: OutputTwin | None = None
     equals_output_when: list[OutputCondition] = Field(default_factory=list)
     blockers: list[Blocker] = Field(default_factory=list)
     regions: list[Region] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def _role(self) -> Output:
+        if (self.role == "intermediate") != (self.feeds is not None):
+            raise ValueError(
+                f"output {self.id}: feeds is required for, and only for, an intermediate"
+            )
+        if self.role == "final" and not self.observed_as:
+            raise ValueError(f"output {self.id}: a final output needs an observation channel")
+        return self
+
+    @property
+    def status(self) -> str:
+        """``qualified`` only with no blockers and a channel to compare with."""
+        if self.blockers:
+            return "conditional"
+        return "qualified" if self.observed_as else "unobserved"
 
 
 class Uncovered(_Strict):
@@ -343,6 +380,7 @@ class ApplicationModel(_Strict):
             raise ValueError(f"schedule names undeclared nodes {unknown_scheduled}")
         for output in self.outputs:
             _check_output(output, by_id, addresses)
+        _check_intermediates(self.outputs, by_id)
         return self
 
     def node(self, node_id: str) -> Node:
@@ -411,6 +449,24 @@ def _check_output(output: Output, by_id: dict[str, Node], addresses: set[int]) -
         unknown = [n for n in region.nodes if n not in reachable]
         if unknown:
             raise ValueError(f"output {output.id} region {region.id}: {unknown} not on its path")
+
+
+def _check_intermediates(outputs: list[Output], by_id: dict[str, Node]) -> None:
+    """An intermediate is a value on the path of the final output it feeds,
+    at a different address: it can never be presented as that output."""
+    finals = {o.id: o for o in outputs if o.role == "final"}
+    for output in outputs:
+        if output.feeds is None:
+            continue
+        fed = finals.get(output.feeds)
+        if fed is None:
+            raise ValueError(
+                f"output {output.id}: feeds {output.feeds!r}, which is not a final output"
+            )
+        if output.ram == fed.ram:
+            raise ValueError(f"output {output.id}: an intermediate cannot be {fed.id}'s word")
+        if output.written_by not in _reachable(fed.written_by, by_id):
+            raise ValueError(f"output {output.id}: {output.written_by} is not on {fed.id}'s path")
 
 
 def _reachable(start: str, by_id: dict[str, Node]) -> set[str]:
@@ -571,6 +627,8 @@ def _node_summary(node: Node) -> dict[str, Any]:
         "implemented_by": node.implemented_by,
         "observed_as": [o.spec for o in node.observed_as],
         "assumption": node.assumption,
+        "reference_model": node.reference_model,
+        "reference_validation": list(node.reference_validation),
     }
 
 
@@ -596,7 +654,9 @@ def coverage_report(
                 "id": output.id,
                 "ram": _hex(output.ram, 8),
                 "units": output.units,
-                "status": "conditional" if output.blockers else "qualified",
+                "role": output.role,
+                "feeds": output.feeds,
+                "status": output.status,
                 "observed_as": [o.model_dump(exclude_none=True) for o in output.observed_as],
                 "twin": None if output.twin is None else output.twin.model_dump(),
                 "path": [_node_summary(n) for n in path],
