@@ -132,10 +132,18 @@ profiles:
 
 
     Mode 01 and Mode 22 alternate on this ECM, so each DID is read once per 0.5 s
-    cycle, which gives 2 Hz.'
+    cycle, which gives 2 Hz.
+
+
+    2026-10-04: adds throttle position (PID 0x11) at the commanded-phi rate. It is
+    read in the same Mode 01 round as PID 0x44 and lambda, so every pull gives
+    same-instant throttle for the Fuel Comp fit (N02): the ECM''s load byte
+    0xFFFF118A is reconstructed from it. Without it the fit''s open-loop route had
+    zero samples, because DID 0x120F is read on the Mode 22 cycle.'
   experimental: false
   mode01:
     RPM: 1.0
+    THROTTLE_POS: 1.0
     MAF: 1.0
     COMMANDED_EQUIV_RATIO: 1.0
     O2_WR_LAMBDA_S1: 1.0
