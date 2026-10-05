@@ -559,3 +559,15 @@ measurement in hand.
     check `dmesg` for the OOM killer first.
   - **Do:** confirm the cause, then cap the tier's workers or mark the
     bake-off serial.
+
+- [x] **T01.19 `tests/test_candidate_promotion.py::test_a_held_out_fit_hashes_as_it_did_before_promotion_existed`
+  pinned a digest of floats.**
+  - **Seen** 2026-10-05 in CI run 37269461354 (shard 3/4, on `798db53`):
+    the reference hashed `fc80c781…` where the laptop gives `36844796…`; the
+    next run passed. Not load or order: the reference is *fitted*, and its
+    floats differ in the last bits across machines/BLAS builds, so a literal
+    digest of them is not portable.
+  - **Fixed:** the test now pins the property it was written for — unset
+    promotion fields stay out of the hash — by recomputing the fingerprint
+    from the reference's own payload without those fields, and checks that a
+    set field does change it. No literal digest of fitted floats remains.

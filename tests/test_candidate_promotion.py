@@ -57,7 +57,12 @@ from src.evidence.records import (
 )
 from src.models.adaptive_candidate import CandidateCheckpoint, CandidateSpec
 from src.models.candidate_store import CandidateStore, CandidateStoreError, StaleActivationError
-from src.models.change_detection import ChangePolicy, FrozenReference, fit_reference
+from src.models.change_detection import (
+    ChangePolicy,
+    FrozenReference,
+    fit_reference,
+    reference_fingerprint,
+)
 from src.vehicle.profiles import profile_dir
 from tests.test_adaptive_candidate import (
     CHANNELS,
@@ -501,9 +506,22 @@ def test_promotion_re_checks_an_intervention_recorded_after_the_decision(tmp_pat
 
 
 def test_a_held_out_fit_hashes_as_it_did_before_promotion_existed():
-    """Unset promotion fields stay out of the hash: the test reference's
-    fingerprint is the one HEAD (6738aa0) gives."""
-    assert _reference().fingerprint.startswith("3684479673d992f5")
+    """Unset promotion fields stay out of the hash, so a held-out fit hashes
+    exactly as it did before promotion existed (6738aa0).
+
+    Not pinned to a literal digest: the reference is fitted, and its floats
+    differ in the last bits across machines (CI shard 3/4 on 798db53 gave
+    fc80c781... where the laptop gives 36844796...). The property is pinned
+    instead, on the reference's own payload."""
+    ref = _reference()
+    payload = ref.model_dump(mode="json")
+    assert payload["promoted_from"] is None and payload["previous_reference"] is None
+    pre_promotion = {
+        k: v for k, v in payload.items() if k not in ("promoted_from", "previous_reference")
+    }
+    assert ref.fingerprint == reference_fingerprint(pre_promotion)
+    # A set lineage field does enter the hash.
+    assert reference_fingerprint({**payload, "promoted_from": "ckpt-x"}) != ref.fingerprint
 
 
 def test_the_brain_jobs_module_does_not_import_torch():
