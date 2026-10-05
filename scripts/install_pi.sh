@@ -112,6 +112,13 @@ if [[ ! -f "${CANARY_CONFIG}" ]]; then
 else
   echo "Keeping existing ${CANARY_CONFIG}."
 fi
+# The daemon config is the canary user's, like everything else the
+# application touches: editing it, or migrating channel names in it
+# (tools/migrate_channel_names.py writes via temp file + rename, which needs
+# the directory), must not need root. Re-applied on every run, so an install
+# that predates this is fixed too. The secrets below stay root-owned and
+# group-readable: the daemon reads them, nothing in userspace rewrites them.
+chown "${CANARY_USER}:${CANARY_GROUP}" "${CANARY_CONFIG_DIR}" "${CANARY_CONFIG}"
 
 if [[ ! -f "${CANARY_CONTROL_TOKEN_FILE}" ]]; then
   "${CANARY_PYTHON}" -c 'import secrets; print(secrets.token_urlsafe(32))' \

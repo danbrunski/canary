@@ -213,6 +213,22 @@ def test_first_install_restarts_gpsd_chrony_and_journald(installer: Installer) -
         assert oct(path.stat().st_mode & 0o777) == "0o644", path
 
 
+def test_the_daemon_config_is_owned_by_canary_and_the_secrets_stay_root(
+    installer: Installer,
+) -> None:
+    """Editing or migrating canary.yaml must not need root (2026-10-04: the
+    channel-rename migration had to run under sudo for one config line). The
+    directory too, since rewrites go through temp file + rename. Re-applied on
+    every run, so an older install is fixed by the next one."""
+    for _ in range(2):
+        installer.run()
+        chowns = installer.calls("chown")
+        config = installer.root / "etc" / "canary"
+        assert f"chown canary:canary {config} {config / 'canary.yaml'}" in chowns, chowns
+        assert f"chown root:canary {config / 'canary.env'}" in chowns
+        assert not any("control.token" in c and "canary:canary" in c for c in chowns)
+
+
 def test_second_run_on_an_unchanged_system_restarts_nothing(installer: Installer) -> None:
     installer.run()
     result = installer.run()
