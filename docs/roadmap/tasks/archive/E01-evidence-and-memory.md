@@ -1,6 +1,6 @@
 # E01 — evidence, investigation memory and interventions
 
-Follow [E00](E00-second-brain-README.md). Implements capabilities 1, 2 and
+Follow [E00](../E00-second-brain-README.md). Implements capabilities 1, 2 and
 the record contracts for 5. All stores and required queries run on the Pi.
 Existing starting points include `src/analysis/llm_assist/cards.py` and
 `store.py`, `src/vehicle/tune_revisions.py`,

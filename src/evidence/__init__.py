@@ -1,5 +1,5 @@
 """Investigation memory: evidence, investigations, predictions, interventions
-and outcomes (E01, docs/roadmap/tasks/E01-evidence-and-memory.md).
+and outcomes (E01, docs/roadmap/tasks/archive/E01-evidence-and-memory.md).
 
 :mod:`.records` holds the contracts, :mod:`.ledger` the per-vehicle
 append-only store that mints ids, resolves and queries them (E01.3),

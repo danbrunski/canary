@@ -1086,7 +1086,7 @@ Detailed task truth and dependencies live in
 work; check one only when the linked tasks meet their acceptance, including
 required Pi measurements. All work below is planned, not implemented.
 
-- [ ] Build evidence and persistent memory ([E01](tasks/E01-evidence-and-memory.md)).
+- [ ] Build evidence and persistent memory ([E01](tasks/archive/E01-evidence-and-memory.md), archived 2026-10-04; its Pi restart demonstration is E04.6).
   **Accept:** tools mint resolvable evidence, records preserve conditions and
   both times, prediction ordering is enforced, and known-answer cases render
   and recur through template cards without a language model.

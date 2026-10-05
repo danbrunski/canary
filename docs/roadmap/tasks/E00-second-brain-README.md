@@ -24,7 +24,7 @@ predictions and residuals as evidence for investigations and learning.
 
 | File | Deliverable | Dependencies | Hardware acceptance |
 |---|---|---|---|
-| [E01 — evidence and memory](E01-evidence-and-memory.md) | Required records, evidence ids, intervention history and template cards | Existing state stores and card contracts | Persistence/restart demonstration in E04 |
+| [E01 — evidence and memory](archive/E01-evidence-and-memory.md) (done, archived) | Required records, evidence ids, intervention history and template cards | Existing state stores and card contracts | Persistence/restart demonstration in E04 |
 | [E02 — target-φ twin](E02-target-phi-twin.md) | ROM-bound command prediction with qualified residuals | W08 image/table data; E01 for persisted evidence | RAM-table identity, missing captures, Pi budget in E04 |
 | [E03 — investigations and learning](E03-investigations-and-learning.md) | Fuel-delivery investigation, hypothesis/measurement selection and isolated candidate learning | E01; existing B06 delivery analysis; qualified E02 output when available | Physical measurements and independent drives where missing |
 | [E04 — Pi runtime and acceptance](E04-pi-runtime-and-acceptance.md) | Streaming integration, idle-time jobs, HTTP/MCP/dashboard and standalone demonstration | E01 first; E02/E03 integrated incrementally | Required Pi measurements and Pi-plus-phone demonstration |

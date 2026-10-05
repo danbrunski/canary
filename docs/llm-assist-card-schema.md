@@ -2,7 +2,7 @@
 
 Companion to `docs/roadmap/llm-assist-and-compute-roadmap.md` — this is the
 schema deliverable for the checklist's S.1 item, revised for S.5 (evidence
-references resolve) under `docs/roadmap/tasks/E01-evidence-and-memory.md`.
+references resolve) under `docs/roadmap/tasks/archive/E01-evidence-and-memory.md`.
 **No producer exists.** This document (and the Pydantic models it's
 generated from, `src/analysis/llm_assist/cards.py`) is the seam a future
 LLM-assist producer fills in; nothing here calls a model.
