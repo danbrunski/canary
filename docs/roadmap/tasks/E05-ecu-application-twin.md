@@ -117,7 +117,7 @@ ECU replica.
   - **Remaining:** the dashboard view of this report is
     [E04.5](E04-pi-runtime-and-acceptance.md)'s job.
 
-- [ ] **E05.2 — Extend upstream through air charge and fuelling.**
+- [~] **E05.2 — Extend upstream through air charge and fuelling.**
   Trace `0x03C4D0`, K's read at `0x03C6E0` and Fuel Comp readers including
   `0x02D5F4`. Carry forward the verified axis roles: `0xCACD` rpm and
   `0xCB29` load against RAM `0xFFFF118A`, the reverse of UpRev's labels.
@@ -136,6 +136,233 @@ ECU replica.
   [B08.2/B08.3](B08-firmware-informed-behavior.md) can evaluate observed fill
   as behavior-model context before this entire upstream path is qualified;
   that evidence cannot be counted as reconstructing the fill computation.
+  *Partial 2026-10-05 (desk trace, kernel, the steady-state check and the
+  listing-settled desk items done; the dynamic chain, the intermediates and
+  the RAM copies need a capture):*
+  - **Traced.** `0x03C4D0` is now split: `0x03C62C` forms BFS. Its readers
+    and writers are manifest nodes in `ecu_application_model.yaml` (model
+    4), with spans, widths, branches and calibration conditions:
+    `airflow_qa`, `fill_mode_flags`, `air_charge_ram_copy`, `air_charge_tp`,
+    `fuel_comp_lookup`, `fill_coefficient`, `fuel_comp_product`,
+    `manifold_fill_filter`, `near_wot_flag`, `fill_transient`, `fill_blend`,
+    `base_fuel_schedule` and `air_charge_init` (`0x02D5F4`, which seeds Fuel
+    Comp and the filter at its fixed point at reset). The summary is in
+    [ECM firmware analysis](../../ecu-firmware-analysis.md), "BFS formation,
+    traced (E05.2)":
+    - *Tp and K.* K is read at `0x03C6E6` (pointer `0x03C6E0`). Tp is
+      `min(0x726F9, ⌊⌊K·Qa·226/256⌋/(3N)⌋) × 0x23CB >> 16`, computed as a
+      24.8 product and a two-step divide with a `0x727` short cut. The two
+      literals are now `rom_map.yaml` program constants.
+    - *Fuel Comp.* The product is `min(0xFFFF, Tp·FC >> 7)`, using the
+      verified axis roles.
+    - *Filter, transient, blend, ceiling.* The filter's unique fixed point is
+      `min(0xFFFF, 4·w105C)`; the transient term is
+      `clamp_s16((Δ·160) >> 6)`; the blend and the `D8B3` ceiling follow.
+    - *Load Point Scaler.* Both X divides load the word at `0x9416`; the slot
+      copy at `+0x760` is never read.
+    - *RAM copies.* K and Fuel Comp are read from the active-slot RAM
+      (`0xFFFFB7A2`, `0xFFFFB6A0`), not the ROM. Node `air_charge_ram_copy`
+      is `assumed`, under blocker `air_charge_ram_copy_unverified`.
+      - *Partial, K only.* The drive check scores the slot's K 28,715 at
+        median 0.9991, while the base K gives 1.0590, so the RAM K is within
+        about 1 % of the slot's.
+      - That does not identify the slot (all five hold 28,715) and says
+        nothing about the Fuel Comp cells.
+    - *Update order and periods.* BFS and the Fuel Comp lookup run in two
+      dispatch groups (tables `0x021874` and `0x02189C`). The ATU compare ISR
+      `0x02040C` paces them: it adds 320 per tick at φ′/32 and sets
+      `0xFFFF84B9` bits — BFS every 4 ticks; Fuel Comp, the fill
+      coefficient and the background main cycle `0x020EF2` every 10. At the
+      inferred Pφ of 20 MHz a tick is 1.024 ms, so BFS runs every 4.096 ms and
+      the others every 10.24 ms.
+  - **Desk items settled from the listing (2026-10-05):**
+    - *`w20E2` is 0 by calibration, not by code.* `0x03C2EC` computes
+      `(b216A − 0x7B) × cal 0x874D >> 5` or `b6424 × cal 0x874D >> 5`. It
+      skips the write while cal `0x86C8` bit 5 and `0x8ADE` bit 0 are both
+      set. Calibration conditions now pin `0x874D` = 0 and `0x86C8` bit 5
+      clear on `airflow_qa`, and the word `0x9066` = `0x0333` on
+      `fill_coefficient`.
+    - *Airflow pipeline.*
+      - The MAF low-pass `w20A8` uses gain cal `0x86D9` (26/256) and is
+        nudged one count when it stalls.
+      - Off the transient model, the average `L20AC` (cal `0x8A68`, 128) can
+        stall **one count below** a rising input. The twin's airflow interval
+        now allows it (`steady_airflow_interval`, `AIRFLOW_FILTER_STALL`;
+        `0x8A68` is pinned).
+      - On the transient model, the lead path is decoded: gain cal `0x82C2`
+        (45/8), pulsation cal `0x82BA`–`0x82BC`, carried residue `w20EC`.
+        It is exact at a fixed point.
+      - The hot-wire term decays to 0 after start. This one is read from the
+        decompile text; the listing was checked only for its stores.
+    - *`w1056` filter.* `0x022248` is a variable left shift, so with cal
+      `0x89B3` = 1 the filter is a two-point average,
+      `(w1054 + w273E + w20BA) / 2`, nudged when it stalls. It settles
+      exactly.
+    - *`w273E`* is the cycle-start copy of `w27CA`. The EVAP purge control
+      writes `w27CA` at `0x06E2E8` as `(w1046 − w8DC4) × w38AA / 0x19000`,
+      where `w1046` is the snapshot of `w1056`:
+      - `w8DC4` is last run's `w27CA` (through `w8ED2`, `0x06F356`; 0 at
+        init, `0x06F4AE`);
+      - `w38AA = 4 × min(0x3FE6, u × w902C >> 10)` (`0x06DE02`–`0x06DE22`),
+        where `u` is the controller's purge step and `w902C` a limit it
+        learns from the A/F feedback words (names inferred).
+
+      Its unit is the airflow word's: 149/25,600 g/s per count, from the SAE
+      PID 0x10 scale and cal `0x83E9`. That it is purge vapour flow is
+      inferred.
+    - *`0xFFFF283B` bit 6* has one writer, `0x03B994` (store `0x03BB02`). It
+      rises when all of these hold, and holds while `0xFFFF2834` bit 4 is
+      set:
+      - `0xFFFF283E` bit 6;
+      - fill-model state `0xFFFF4088` = 2;
+      - coolant at or above cal `0x872A`;
+      - `0xFFFF2834` bit 4;
+      - no MAF fault;
+      - `|4·w105C − BFS|` within cal `0x8A7B << 8`.
+    - *`0xFFFF2C91`* is written only by `0x03F048`: the median of the last
+      three `min(255, 0xA2C2 / w2648)` (signed divide `0x021C48`), or
+      `0xFFFF1206` while `0xFFFF28B1` bit 5 is set. That `w2648` is the
+      crank-segment period is inferred; the code uses the result × 8 as a
+      1.5625-rpm word.
+    - *`0xFFFF4786`.*
+      - Bit 7: `0x0398DE` sets it from I/O port `0xFFFFF75E` bit 4, and
+        `0x0394D6` sets or clears it from state `0xFFFF407C`.
+      - **Bit 6** is written at `0x039CF0` by `0x039904`: `and 0xBF`, then
+        `or 0x40` when r7 ≠ 0. r7 starts as the old bit 6 (`0x03991C`). It
+        is set when `0xFFFF28A5` bit 5 records the start conditions (bit 7,
+        `0xFFFF2C91` < 0x18). It is cleared when `0xFFFF28A5` bit 6 records
+        an end (bit 7 clear, `0xFFFF1206` > 0x4F, the battery-voltage and
+        coolant-timer terms).
+      - *Correction:* the previous round said bit 6 had no writer. My store
+        scan matched `@rN` only at the end of a line, so it skipped every
+        commented store. The fixed scan finds `0x039CF0`.
+    - *Absolute units.* At steady state BFS ≈ 44.18 × K × (FC/128) ×
+      MAF[g/s] / rpm, which is about 21,144 counts per g/rev at K 28,715.
+      This comes from the code's constants and the airflow-word unit, and is
+      only as good as the MAF curve. The fill byte and the area stay
+      relative: no physical constant multiplies them.
+    - *`w139E` / `w2CD0` / `w63FC` and the fallbacks* stand as traced
+      before: purge area; the sensor-B substitution through `0xFFFF28B5`
+      bits 7:6 from `0x072528`; limp-home on `0xFFFF484E` bit 2; idle air
+      capped at cal `0x8ED2`. Only their history values are missing
+      (`uncovered: fuel_comp_fill_terms`).
+  - **Kernel.** `src/decode/air_charge.py` (`AIR_CHARGE_KERNEL_VERSION` 1)
+    is pure: it imports only `ecm_lookup` and the standard library, and is
+    added to the E06 `KERNEL_MODULES` purity checks. It refuses
+    non-integers and out-of-domain words, and `maf_word_interval` refuses a
+    word the PID handler cannot report.
+    - *Contract gap.* The kernel is in `data/ecu_twin_contract.yaml` as
+      Python-only `inventory`, with blocker `air_charge_not_in_contract`. A
+      language-neutral form would need Rust symbols, vectors and a
+      `contract_version` bump.
+    - *Known answers.* Synthetic tests in `tests/test_air_charge.py`,
+      including
+      `test_the_two_step_24_8_divide_is_the_floor_formula_below_the_wrap`
+      (5,000 random tuples),
+      `test_the_filter_settles_on_one_fixed_point_from_either_side`,
+      `test_every_reported_maf_word_inverts_to_exactly_its_airflow_words`
+      (all 38,144 words),
+      `test_the_steady_airflow_interval_allows_the_averages_one_count_stall`
+      and `test_a_calibration_that_breaks_a_zero_or_a_constant_refuses_by_name`.
+      The last flips `0x874D`, `0x86C8` bit 5, `0x8A68`, `0x9066`, `0x9067`
+      and `0x8AE1` bit 5, and each refuses `unmodelled_logic`.
+  - **Twin (steady state, independent inputs).**
+    `src/analysis/air_charge_twin.py` predicts BFS from four inputs: the
+    reported MAF word (DID 0x1209 / PID 0x10, inverted through cal
+    `0x83E9`), the rpm word, K, and Fuel Comp. Fuel Comp comes from a logged
+    `0xFFFF118A` when there is one, otherwise the exact band for that rpm.
+    The result is an exact interval. Observed BFS/X are never inputs
+    (`test_observed_bfs_is_scored_never_used`).
+    - *Gates.* Frozen before scoring and pinned by
+      `test_the_gates_are_the_ones_declared_before_scoring`.
+    - *Pairing.* The evaluator pairs raw reads itself and counts every
+      excluded read by reason.
+    - *Regions assumed.* The cranking, MAF-fault and subtracting-form flags
+      have no channel. Every scored sample carries `regions_assumed`, and the
+      summary counts them: the score assumes those regions, it does not check
+      them.
+  - **Verified on drives** (`tests/test_air_charge_private_rom.py`, private
+    image plus local sessions; skips by name without them):
+    - *Data.* Seven ZS44A-20260920 captures, 14,843 DID 0x1208 reads; 458
+      steady reads scored, all 458 under the three assumed regions.
+    - *Result.* Observed/predicted median 0.9991, p10 0.9898, p90 1.0097,
+      98.5 % inside the interval. Acceptance was median within 0.98–1.02,
+      p10 ≥ 0.95, p90 ≤ 1.05, n ≥ 200.
+    - *Controls.* On the same samples, all four fail the median band:
+      - K from the neighbouring word `+0x760`: 0.65;
+      - the multiplier from neighbouring byte `0x89D3`: 1.53;
+      - the UpRev base K: 1.06;
+      - the report taken as airflow: 1.71.
+    - *Resolution.* Errors under ~1 % are not resolved: Fuel Comp held at 128
+      still gives 1.0014, and a one-word rpm shift gives 1.0128. So this
+      verifies the K·Qa/N structure and constants, not Fuel Comp's share.
+    - *October 4 fixture.* It cannot be scored: all 194 BFS reads have no
+      MAF read within 0.1 s
+      (`test_the_october_4_fixture_cannot_be_scored_and_says_why`).
+  - **Conditional, visibly.** New output `base_fuel_schedule_word`
+    (`0xFFFF103A`, observed as `mem:ECM_AIR_CHARGE_SLOT_103A`, DID 0x1208
+    alias) is `conditional`. Its blockers:
+    - `air_charge_ram_copy_unverified`: `air_charge_ram_copy`;
+    - `airflow_unmodelled`: `airflow_qa`;
+    - `fill_byte_not_computed`: `fuel_comp_load_byte`;
+    - `fill_dynamics_reference_only`: the five per-run references.
+
+    Regions `not_steady`, `cranking`, `maf_fault` and
+    `fill_subtracting_form` are unevaluable, and `fuel_comp_band` is
+    conditional. Target φ is unchanged: X stays observed, its blockers are
+    the same, and `tests/test_target_phi.py` plus the private-ROM file pass.
+  - **Behaviour changes** (E07's doc is left to its owner):
+    - *Fourth output.* Every `compare_roms` report and
+      `/control/ecu/application-model` (`coverage_report`) now have a fourth
+      output, `base_fuel_schedule_word`; model_version is 4.
+    - *Fuel Comp edits in `rom_effects`.* The changed node is
+      `fuel_comp_lookup`, and the reasons name
+      `unmodelled:manifold_fill_filter` (and the other per-run references)
+      instead of `unmodelled:base_fuel_schedule`. Tests updated.
+    - *`load_rom` coverage* on ZS44A-20260920 slot 1: consumed 1,185 → 1,347
+      and unknown 52,741 → 52,579 bytes. The fill time-constant maps and
+      axes, the Tp constants and the new calibration conditions are now
+      classed as read.
+    - *More refusals.* An image that differs at any newly pinned calibration
+      byte refuses `unmodelled_logic`.
+  - **Remaining (vehicle):**
+    - **(a) RAM copies.** Read `0xFFFFB6A0`–`0xFFFFB7A3` (260 bytes, five
+      0x23 windows) once at key-on and compare with the resolved slot. That
+      closes `air_charge_ram_copy_unverified`.
+    - **(b) Dynamic chain and the intermediates.** Capture, every round with
+      DID 0x1209 and rpm, through throttle steps and steady holds:
+      - 0x23 windows `0xFFFF1038`–`0xFFFF105D` (BFS, X, `w1054`, `w1056`,
+        `w105A`, `w105C`);
+      - `0xFFFF2100`–`0xFFFF2117` (airflow, Tp);
+      - `0xFFFF20A4`–`0xFFFF20C7` (filter, blend, previous values, holds);
+      - `0xFFFF20EC`–`0xFFFF20ED` (residue);
+      - `0xFFFF2254`–`0xFFFF225A` (weight, Fuel Comp);
+      - `0xFFFF1164`–`0xFFFF118A` (coefficient, weight, load byte);
+      - flags `0xFFFF283A`–`0xFFFF283C` and `0xFFFF2899`–`0xFFFF289C`.
+
+      This scores `air_charge_tp`, `fuel_comp_lookup` and
+      `fuel_comp_product` exactly, scores the per-run references, and
+      measures the group periods.
+    - **(c) Fuel Comp's contribution.** A drive with
+      `mem:ECM_FUEL_COMP_X_INPUT` read in every DID 0x1208/0x1209 round.
+      Exact FC per sample; it also closes `fill_byte_not_computed` for
+      those samples.
+    - **(d) Start branch.** Read `0xFFFF4786`, `0xFFFF2C91`, `0xFFFF4A2D`
+      and `0xFFFF283B` with BFS through key-on and crank (`cranking` region).
+  - **Not settleable from the listing:**
+    - *`0xFFFF289C` bit 5.* The fixed scan finds no store of any form and no
+      block copy through the six copy helpers, and RAM is cleared at reset.
+      A static listing cannot rule out a computed-pointer write; a live read
+      of `0xFFFF289C` can.
+    - *Pφ (so the 1.024 ms tick).* It is inferred from the SCI baud rates;
+      no clock constant is in the code. Confirm by timing a tick-paced
+      counter against acquisition time.
+    - *Per-drive state.* The airflow lead path, the hot-wire term and the
+      purge controller's learned limit behind `w273E` change per drive; only
+      live reads give their values.
+    - *Physical units of the fill byte and the throttle area.* They are
+      relative in the code; only a measured relation, such as B08 against
+      MAF, can give them one.
 
 - [~] **E05.3 — Reproduce state transitions and additional fuel regimes.**
   Decode and implement pedal enrichment hysteresis, map selection/init/copy,

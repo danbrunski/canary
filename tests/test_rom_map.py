@@ -479,7 +479,9 @@ def test_a_program_constant_cannot_overlap_a_table_or_share_its_id() -> None:
 def test_check_program_constants_names_a_different_program() -> None:
     rom_map = load_rom_map(PROFILE)
     image = bytearray(1 << 20)
-    image[0x3C5E8:0x3C5EC] = (0x00DC1D00).to_bytes(4, "big")
+    for constant in rom_map.program_constants:
+        end = constant.offset + constant.size
+        image[constant.offset : end] = constant.value.to_bytes(constant.size, "big")
     assert check_program_constants(bytes(image), rom_map) == []
     image[0x3C5E8:0x3C5EC] = (0x00DC1D01).to_bytes(4, "big")
     (problem,) = check_program_constants(bytes(image), rom_map)

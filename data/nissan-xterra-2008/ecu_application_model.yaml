@@ -24,7 +24,7 @@
 # refuses a blocker that names a resolved node and an unresolved node that no
 # blocker names). target_phi consumes these blockers; it does not restate them.
 schema_version: 1
-model_version: 3
+model_version: 4
 name: ecm_application_model
 
 program:
@@ -347,9 +347,10 @@ ram:
      meaning: 'Bit 5 offsets the timing byte by -30 (clamped 0..80).'}
   - {address: 0xFFFF11FF, width: 8, signed: false, name: timing_byte, units: raw_counts, confidence: observed,
      meaning: 'Ignition timing as 110 - degrees BTDC (Mode 01 PID 0x0E, DID 0x110A).'}
-  # -- BFS formation (E07.2): upstream of the observed X byte, traced so a ROM
-  # change to Fuel Comp, K or the fill tables reaches X, Target AFR and the
-  # timing trims. Not on any output's path while X is observed.
+  # -- BFS formation (E07.2, E05.2): upstream of the observed X byte, traced so
+  # a ROM change to Fuel Comp, K or the fill tables reaches X, Target AFR and
+  # the timing trims. Off target phi's path while X is observed; on the path of
+  # base_fuel_schedule_word.
   - {address: 0xFFFF118A, width: 8, signed: false, name: fuel_comp_load_byte, units: raw_counts, confidence: code,
      meaning: 'Throttle-model (alpha-N) fill byte, 0..224: the Fuel Comp load input (mem:ECM_FUEL_COMP_X_INPUT).'}
   - {address: 0xFFFF116A, width: 16, signed: false, name: fill_rpm_reciprocal, units: raw_counts, confidence: code,
@@ -377,11 +378,96 @@ ram:
   - {address: 0xFFFF20A6, width: 16, signed: false, name: manifold_filling_state, units: raw_counts, confidence: code,
      meaning: 'Manifold-filling filter of 4 x 0xFFFF105C.'}
   - {address: 0xFFFF20A4, width: 16, signed: false, name: manifold_filling_output, units: raw_counts, confidence: code,
-     meaning: 'Filtered base pulse the BFS ceiling is applied to.'}
-  - {address: 0xFFFF105A, width: 16, signed: false, name: bfs_transient_term, units: raw_counts, confidence: code,
-     meaning: 'Transient term added before the BFS ceiling.'}
+     meaning: 'Filtered base pulse the BFS ceiling is applied to: 0xFFFF20A6, or its blend with last run''s near full throttle.'}
+  - {address: 0xFFFF105A, width: 16, signed: true, name: bfs_transient_term, units: raw_counts, confidence: code,
+     meaning: 'Signed transient term added before the BFS ceiling: clamp_s16((0xFFFF20A6 - 0xFFFF20B6) x 160 >> 6) when active.'}
   - {address: 0xFFFF11C7, width: 8, signed: false, name: timing_byte_snapshot, units: raw_counts, confidence: observed,
      meaning: 'Cycle-start copy of 0xFFFF11FF (mem:ECM_IGNITION_TIMING_RAM).'}
+  # -- E05.2: the airflow pipeline and BFS formation (0x03BB40, 0x03C62C, 0x03CC3C)
+  - {address: 0xFFFF102C, width: 16, signed: false, name: maf_ad, units: raw_counts, confidence: inferred,
+     meaning: 'MAF sensor A/D word the hot-wire correction 0x03BEFC starts from (name inferred).'}
+  - {address: 0xFFFF1054, width: 16, signed: false, name: maf_curve_airflow, units: raw_counts, confidence: code,
+     meaning: 'Curve 0xE27E at the corrected MAF word: airflow before any filter.'}
+  - {address: 0xFFFF2104, width: 16, signed: false, name: maf_curve_airflow_copy, units: raw_counts, confidence: code,
+     meaning: 'Copy of 0xFFFF1054 (0x03BB78).'}
+  - {address: 0xFFFF20A8, width: 16, signed: false, name: maf_lowpass, units: raw_counts, confidence: code,
+     meaning: 'Airflow low-pass (26/256 new while 0xFFFF283B bit 6), 0x03BB98.'}
+  - {address: 0xFFFF20AC, width: 32, signed: false, name: airflow_24bit, units: raw_counts, confidence: code,
+     meaning: '24-bit airflow from 0xFFFF20A8 (average or lead path), 0x03BFC0.'}
+  - {address: 0xFFFF20E2, width: 16, signed: true, name: airflow_offset_20e2, units: raw_counts, confidence: code,
+     meaning: 'Added to the airflow long; 0 by calibration: 0x03C2EC writes (b216A - 0x7B) x cal 0x874D >> 5, or b6424 x cal 0x874D >> 5, or leaves it while cal 0x86C8 bit 5 and cal 0x8ADE bit 0 are both set; cal 0x874D = 0 and 0x86C8 bit 5 clear here (calibration conditions on airflow_qa).'}
+  - {address: 0xFFFF273E, width: 16, signed: false, name: airflow_extra_273e, units: raw_counts, confidence: code,
+     meaning: 'Cycle-start copy (0x0212C4, block 0xFFFF2792 -> 0xFFFF2706, +0x38) of w27CA, which the EVAP purge control writes at 0x06E2E8 as (w1046 - w8DC4) x w38AA / 0x19000 (0x021D6C); w1046 is the cycle-start copy of 0xFFFF1056. Purge vapour flow added to the metered air (purpose inferred); w8DC4 and w38AA not followed.'}
+  - {address: 0xFFFF2100, width: 32, signed: true, name: airflow_qa, units: raw_counts, confidence: code,
+     meaning: 'Airflow long Tp is formed from: max(0, 0xFFFF20AC + 0xFFFF20E2 + 0xFFFF273E).'}
+  - {address: 0xFFFF1056, width: 16, signed: false, name: airflow_word, units: raw_counts, confidence: code,
+     meaning: 'Filtered airflow word; PID 0x10 and DID 0x1209 report it x cal 0x83E9 >> 8 (100 counts per g/s).'}
+  - {address: 0xFFFF3F70, width: 16, signed: false, name: airflow_report, units: raw_counts, confidence: code,
+     meaning: 'min(0xFFFF, 0xFFFF1056 x 149 >> 8): the word DID 0x1209 reads (g/s x 100).'}
+  - {address: 0xFFFF283B, width: 8, signed: false, name: air_flags_283b, units: flags, confidence: code,
+     meaning: 'Bit 6 (sole writer 0x03B994, store 0x03BB02): airflow low-pass on, and Tp divides by 0xFFFF233C. Set from the state long 0xFFFF408C: rises when 0xFFFF283E bit 6, the fill-model state 0xFFFF4088 = 2, 0xFFFF28A2 bit 3 (coolant >= cal 0x872A), 0xFFFF2834 bit 4, no MAF fault (item 0x114) and |4 x w105C - BFS| within cal 0x8A7B << 8; held while 0xFFFF2834 bit 4. Other bits written at 0x03A0B2, 0x082AE8.., 0x0CC296.. (bits 7, 4, 0-3).'}
+  - {address: 0xFFFF283C, width: 8, signed: false, name: fill_flags_283c, units: flags, confidence: code,
+     meaning: 'Bit 3: transient fill model on. Bit 2: load-byte transient (|change over 5 runs| >= 11).'}
+  - {address: 0xFFFF2314, width: 8, signed: false, name: fill_model_state, units: enum, confidence: code,
+     meaning: 'State 0..2 behind 0xFFFF283C bit 3 (0x03CC3C).'}
+  - {address: 0xFFFF1148, width: 8, signed: false, name: load_byte_change, units: raw_counts, confidence: code,
+     meaning: '|0xFFFF118A - its value five runs earlier|.'}
+  - {address: 0xFFFF2824, width: 8, signed: false, name: maf_fault_flags, units: flags, confidence: code,
+     meaning: 'Bit 7: MAF fault (diagnostic item 0x114); BFS from table 0x95E5.'}
+  - {address: 0xFFFF4856, width: 8, signed: false, name: throttle_fault_flags, units: flags, confidence: code,
+     meaning: 'Bit 2: throttle-sensor diagnostic items faulted (source of 0xFFFF484E).'}
+  - {address: 0xFFFF2110, width: 32, signed: false, name: tp, units: raw_counts, confidence: code,
+     meaning: 'Tp: capped K x airflow x 226 / 256 / (3 x N), x 0x23CB >> 16 (<= 0xFFFF).'}
+  - {address: 0xFFFF2114, width: 16, signed: false, name: cranking_tp_curve, units: raw_counts, confidence: code,
+     meaning: 'Curve 0xEEBA at the coolant byte (cranking Tp x 4).'}
+  - {address: 0xFFFF4786, width: 8, signed: false, name: start_flags_4786, units: flags, confidence: code,
+     meaning: 'Bit 7: start input; 0x0398DE sets it when I/O port word 0xFFFFF75E bit 4 is set, 0x0394D6 sets it unless the state long 0xFFFF407C is 1 and clears it when that state is 1. Bit 6: start-phase latch, written at 0x039CF0 by 0x039904 (and 0xBF, or 0x40 when r7 is non-zero). r7 starts as the old bit 6 (0x03991C-0x039928), is set when 0xFFFF28A5 bit 5 (start conditions with bit 7 and 0xFFFF2C91 < 0x18) and cleared when 0xFFFF28A5 bit 6 (end conditions: bit 7 clear, 0xFFFF1206 > 0x4F, the battery/voltage and coolant-timer terms). Name inferred.'}
+  - {address: 0xFFFF2C91, width: 8, signed: false, name: start_count_2c91, units: raw_counts, confidence: code,
+     meaning: 'Written only by 0x03F048: the median of the last three min(255, 0xA2C2 / w2648) (signed divide 0x021C48; w2648 a crank-segment period, inferred), or 0xFFFF1206 while 0xFFFF28B1 bit 5 is set. Used x 8 as a 1.5625-rpm word, so it is an instantaneous engine speed at 12.5 rpm per count (inferred from that use). Zero selects cranking Tp.'}
+  - {address: 0xFFFF4A2D, width: 8, signed: false, name: start_hold_4a2d, units: raw_counts, confidence: code,
+     meaning: 'Reloaded from cal 0x8C25 while 0xFFFF4786 bit 7 is clear; non-zero with bit 7 keeps cranking Tp.'}
+  - {address: 0xFFFF233C, width: 16, signed: false, name: engine_speed_lowpass, units: raw_counts, confidence: code,
+     meaning: '(old + 255 x 0xFFFF1204) >> 8, plus one when it stalls below (0x03907A).'}
+  - {address: 0xFFFF1081, width: 8, signed: false, name: coolant_for_cranking, units: raw_counts, confidence: inferred,
+     meaning: 'Coolant byte the cranking curve 0xEEBA reads (inferred from the curve).'}
+  - {address: 0xFFFF2CB6, width: 8, signed: false, name: fuel_comp_alternative, units: raw_counts, confidence: unknown,
+     meaning: 'Fuel Comp factor source when cal 0x8AE1 bit 5 is clear (dead here).'}
+  - {address: 0xFFFF2205, width: 8, signed: false, name: fill_blend_weight, units: raw_counts, confidence: code,
+     meaning: 'max(0x1A, min(255, 0xFFFF1207 x cal 0x849B >> 5)).'}
+  - {address: 0xFFFF2126, width: 8, signed: false, name: fill_time_constant, units: raw_counts, confidence: code,
+     meaning: 'Lookup 0x9B99 / 0x9BD9 at (rpm, 0xFFFF118A).'}
+  - {address: 0xFFFF1164, width: 16, signed: false, name: fill_coefficient, units: raw_counts, confidence: code,
+     meaning: 'min(0x7FFF, (T x 58 x rpm word x 55) >> 16).'}
+  - {address: 0xFFFF21DA, width: 16, signed: false, name: fill_coefficient_copy, units: raw_counts, confidence: code,
+     meaning: 'Copy of 0xFFFF1164.'}
+  - {address: 0xFFFF1178, width: 16, signed: false, name: fill_weight_new, units: q15, confidence: code,
+     meaning: 'Filter weight of the new value: 0xFFFF1164, or cal 0x9066 while the transient model is off.'}
+  - {address: 0xFFFF2254, width: 16, signed: false, name: fill_weight_old, units: q15, confidence: code,
+     meaning: 'max(0, 0x8000 - 0xFFFF1178).'}
+  - {address: 0xFFFF2899, width: 8, signed: false, name: air_flags_2899, units: flags, confidence: code,
+     meaning: 'Bit 7: 4 x 0xFFFF105C below the filter (airflow falling): next lookup uses 0x9BD9.'}
+  - {address: 0xFFFF20B6, width: 16, signed: false, name: manifold_filling_previous, units: raw_counts, confidence: code,
+     meaning: 'Last run''s 0xFFFF20A6 (dispatcher copy 0x020BFC).'}
+  - {address: 0xFFFF20B4, width: 16, signed: false, name: manifold_filling_output_previous, units: raw_counts, confidence: code,
+     meaning: 'Last run''s 0xFFFF20A4.'}
+  - {address: 0xFFFF289C, width: 8, signed: false, name: air_flags_289c, units: flags, confidence: unknown,
+     meaning: 'Bit 5 selects the subtracting filter form (and changes the 0x03B994 test). No writer in the listing: no direct, register-relative, register+r0, GBR-relative or GBR bit-op store, and no block copy through 0x0225E4 / 0x022184 / 0x0220C4 / 0x022190 / 0x022120 / 0x0221E4 covers it; RAM is cleared at reset, so it reads 0 unless a computed-pointer write exists, which a static scan cannot exclude.'}
+  - {address: 0xFFFF289B, width: 8, signed: false, name: air_flags_289b, units: flags, confidence: code,
+     meaning: 'Bit 7: near full throttle (load byte >= 202 with the filter at or above 4 x 0xFFFF105C; cleared below 200).'}
+  - {address: 0xFFFF20C6, width: 8, signed: false, name: maf_fault_hold, units: raw_counts, confidence: code,
+     meaning: '4 while the MAF fault bit is set, then counts down.'}
+  - {address: 0xFFFF2117, width: 8, signed: false, name: throttle_fault_hold, units: raw_counts, confidence: code,
+     meaning: '4 while 0xFFFF4856 bit 2 is set, then counts down.'}
+  - {address: 0xFFFF2120, width: 8, signed: false, name: fault_hold_2120, units: raw_counts, confidence: code,
+     meaning: '4 while 0x0261D0 reports, then counts down.'}
+  - {address: 0xFFFF2829, width: 8, signed: false, name: air_flags_2829, units: flags, confidence: code,
+     meaning: 'Bit 7: any of the three fault holds non-zero.'}
+  - {address: 0xFFFF2116, width: 8, signed: false, name: bfs_ceiling_byte, units: raw_counts, confidence: code,
+     meaning: 'Curve 0xD8B3 at 0xFFFF1207; BFS cap = it << 8.'}
+  - {address: 0xFFFF1206, width: 8, signed: false, name: engine_speed_1206, units: raw_counts, confidence: unknown,
+     meaning: 'Byte the MAF-fault table 0x95E5 is banded by (0x40/0x80/0xC0).'}
+  - {address: 0xFFFF107F, width: 8, signed: false, name: unidentified_107f, units: raw_counts, confidence: unknown,
+     meaning: 'Second band of the MAF-fault table 0x95E5 (7/15/22).'}
 
 # The fuel-command task (FUN_000575EC): its calls in order, each once per
 # cycle, after the cycle-start copies of FUN_00020EF2. A node later in the
@@ -429,12 +515,14 @@ nodes:
   - id: engine_speed_word
     function: 0x03907A
     kind: computation
-    writes: [0xFFFF1210, 0xFFFF1204, 0xFFFF1202]
-    reads: [0xFFFF11BE]
+    writes: [0xFFFF1210, 0xFFFF1204, 0xFFFF1202, 0xFFFF1207, 0xFFFF233C]
+    reads: [0xFFFF11BE, 0xFFFF233C]
     arithmetic: >-
       0xFFFF1210 = 0xFFFF11BE >> 6 (12.5 rpm per count); 0xFFFF1204 =
       0xFFFF11BE >> 3; 0xFFFF1202 = min(255, 0xFFFF1204 >> 5) (50 rpm per
-      count). The lookup reads the cycle-start copy 0xFFFF11D8.
+      count). The lookup reads the cycle-start copy 0xFFFF11D8. 0x039048:
+      0xFFFF1207 = min(255, 0xFFFF1204 >> 4). 0xFFFF233C = (0xFFFF233C + 255
+      x 0xFFFF1204) >> 8, plus one when it stalls below 0xFFFF1204.
     rounding: truncating shifts
     saturation: '0xFFFF1202 min 255'
     outside_schedule: 'Speed processing, copied by the cycle snapshot.'
@@ -461,7 +549,9 @@ nodes:
       - {spec: 'mem:ECM_FUEL_TARGET_MAP_X_TRACE', address: 0xFFFF103E, relation: identity}
     rom:
       - {rom_map: load_point_scaler, role: divisor}
-    evidence: ['tests/fixtures/ground_truth/target_phi.yaml x_relation: 168/194 same-read pairs exact, 26 at 1-4 counts']
+    evidence:
+      - 'tests/fixtures/ground_truth/target_phi.yaml x_relation: 168/194 same-read pairs exact, 26 at 1-4 counts'
+      - 'E05.2: both divides read the calibration word 0x9416 (literal at 0x03CCD8, loaded at 0x03CBE4 and 0x03CC00), never the map-slot copy +0x760 (RAM 0xFFFFB7A0 has no reference); the dividend is the BFS just written (0x03CBE6, BFS << 7)'
 
   # E07.2: the BFS formation upstream of the observed X byte, traced so that a
   # ROM change to Fuel Comp, K or the fill tables reaches X and every reader of
@@ -498,42 +588,399 @@ nodes:
       - 'docs/ecu-firmware-analysis.md "Fuel Comp load input 0xFFFF118A, and how BFS is formed" (listing and decompiler passes agree)'
       - 'src/decode/fuel_comp_load.py rebuilds the byte from logged throttle and rpm (N02.1); not the twin'
 
-  - id: base_fuel_schedule
-    function: 0x03C62C
-    span: [0x03CAE4, 0x03CB46]
+  # E05.2: BFS formation, traced from the listing of a46baa24... (2026-10-05).
+  # Two dispatch groups of the tick dispatcher 0x020A3C: group 0x10 (0x02189C)
+  # runs 0x03C3A4 (entry 38, the load byte) then 0x03CC3C (entry 40: the fill
+  # time constant and coefficient, then the Fuel Comp lookup); group 0x20
+  # (table 0x021874) runs 0x03BB40 (entry 4, MAF to airflow) then 0x03C62C
+  # (entry 5: Tp, the Fuel Comp product, the filter, the transient, the blend,
+  # the ceiling and X), after which the dispatcher copies 0xFFFF20A4..20B3 to
+  # 0xFFFF20B4..20C3 (0x020BFC). Periods: the ATU compare ISR (vector 120,
+  # 0x02040C) adds 320 to its compare register per tick at phi'/32 (TCR
+  # 0xFFFFF4AC = 5) and sets 0xFFFF84B9 bits: 0x80 every tick, 0x40 every 2,
+  # 0x20 every 4 (group 0x20: BFS), 0x10 and 0x04 every 10 (group 0x10, and the
+  # background cycle 0x020EF2 that runs the fuel task), then runs the groups
+  # (0x0208D6 -> 0x020A3C). At the 20 MHz Pphi the SCI baud rates imply, a
+  # tick is 1.024 ms: BFS every 4.096 ms, Fuel Comp and the fill coefficient
+  # every 10.24 ms. Pphi itself is inferred (no crystal constant in the code).
+  - id: airflow_qa
+    function: 0x03BB40
     kind: computation
-    writes: [0xFFFF103A]
-    reads: [0xFFFF118A, 0xFFFFB6A0, 0xFFFFB7A2, 0xFFFF225A, 0xFFFF105C, 0xFFFF20A6, 0xFFFF20A4,
-            0xFFFF105A, 0xFFFF1210]
-    depends_on: [fuel_comp_load_byte, engine_speed_word]
+    writes: [0xFFFF1054, 0xFFFF2104, 0xFFFF20A8, 0xFFFF20AC, 0xFFFF20E2, 0xFFFF2100, 0xFFFF1056, 0xFFFF3F70]
+    reads: [0xFFFF102C, 0xFFFF2104, 0xFFFF20A8, 0xFFFF20AC, 0xFFFF273E, 0xFFFF283B, 0xFFFF283C, 0xFFFF2824]
     arithmetic: >-
-      Tp = K (0xFFFFB7A2) x airflow / rpm, or the cranking coolant curve
-      0xEEBA; 0xFFFF225A = Fuel Comp (0xFFFFB6A0) at rpm 0xFFFF1210 and
-      0xFFFF118A, 128 = 1.0 (read at 0x03D0F4); 0xFFFF105C = Tp x 0xFFFF225A /
-      128 (0x03C7B4); 0xFFFF20A6 = (4 x 0xFFFF105C x a + previous x (1 - a))
-      >> 15, the manifold-filling filter (time constants 0x9B99/0x9BD9 by rpm
-      and 0xFFFF118A); BFS 0xFFFF103A = min(0xFFFF20A4 + transient 0xFFFF105A,
-      ceiling 0xD8B3 at rpm).
-    rounding: truncating multiplies and shifts
-    saturation: 'BFS min the rpm ceiling 0xD8B3 (255 at all 16 points: 65,280 counts)'
+      0x03BEFC: corrected = 0xFFFF102C minus an after-start hot-wire term
+      (w4054 x 0x14F / (last corrected + 0x50)); w4054 starts at 0x180000,
+      decays by 0xFF3C / 0x10000 per run and is zeroed once warm (0x03BBF2), so
+      corrected = 0xFFFF102C in warm running. 0xFFFF1054 = the 16-bit curve
+      0xE27E at (corrected & 0xFFF) << 4, copied to 0xFFFF2104 (0x03BB78).
+      0x03BB98: 0xFFFF20A8 = (cal 0x86D9 x new + (256 - cal 0x86D9) x old)
+      >> 8, nudged one count toward the input when it stalls, while
+      0xFFFF283B bit 6 is set, else a copy. 0x03BFC0, with 0xFFFF283C bit 3
+      clear, a MAF fault (0xFFFF2824 bit 7), b283A bit 0 or the hold b4A9D
+      non-zero: 0xFFFF20AC =
+      ((L20BC x (256 - g)) >> 4 + (0xFFFF20A8 x g) >> 4) >> 4, g = cal 0x8A68,
+      L20BC last run's value; it stalls one count below a rising input. With
+      bit 3 set: a lead w20B0 = w20B8 + (0xFFFF20A8 - w20B8) x cal 0x82C2 / 8
+      (toward zero), a pulsation term w20C4 (cal 0x82BB, 0x82BC, 0x82BA) and a
+      carried signed residue (w20EC, sign in bit 0 of b289B), exact at a
+      fixed point. 0x03C20C: 0xFFFF2100 = max(0, 0xFFFF20AC + 0xFFFF20E2 +
+      0xFFFF273E); 0xFFFF20E2 is 0 by calibration (0x03C2EC: cal 0x874D = 0,
+      cal 0x86C8 bit 5 clear). 0x03C234, n = cal 0x89B3 (1): 0xFFFF1056 =
+      max(0, f - cal word 0x92DC (0)), f = min(0xFFFF, (0xFFFF2104 +
+      0xFFFF273E + (2^n - 1) x w20BA) / 2^n) (0x022248 is r0 << r1; divide
+      0x021D6C), plus one when f equals last run's w20BA and is below the
+      input: with n = 1 a two-point average that settles exactly. PID 0x10 and DID
+      0x1209 (0xFFFF3F70, 0x03D2B6) report min(0xFFFF, 0xFFFF1056 x cal 0x83E9
+      >> 8). At a fixed point 0xFFFF2100 = 0xFFFF1056, or one count below it
+      off the transient model.
+    rounding: truncating shifts; the 0x03BB98 and 0x03C234 filters add one count when they stall; the 0x03BFC0 average does not
+    saturation: '0xFFFF20AC 24-bit; 0xFFFF2100 floored at 0; 0xFFFF1056 and the report min 0xFFFF'
     branches:
-      - {when: 'cal 0x8AE1 bit 5 clear', then: 'an alternative path replaces the Fuel Comp multiply (dead in this calibration)'}
-      - {when: 'MAF fault (diagnostic item 0x114)', then: 'BFS from table 0x95E5'}
+      - {when: '0xFFFF283B bit 6 clear', then: '0xFFFF20A8 copies 0xFFFF2104 (no low-pass)'}
+      - {when: '0xFFFF283C bit 3 set, no MAF fault or hold', then: 'the lead path with residue (state words not catalogued)'}
+    rom:
+      - {offset: 0x83E9, width: 8, value: 149, role: 'PID 0x10 / DID 0x1209 report scale'}
+      - {offset: 0x89B3, width: 8, value: 1, role: '0xFFFF1056 filter setting'}
+      - {offset: 0x8A68, width: 8, value: 128, role: 'non-transient airflow average weight'}
+      - {offset: 0x874D, width: 8, value: 0, role: '0xFFFF20E2 gain (0: the term is 0)'}
+    calibration_conditions:
+      - {offset: 0x83E9, mask: 0xFF, equals: 149, why: 'the report scale the steady-state reference inverts (maf_word_interval) was validated with'}
+      - {offset: 0x89B3, mask: 0xFF, equals: 1, why: 'the 0xFFFF1056 filter setting under which 0xFFFF1056 = 0xFFFF2100 at steady state was checked'}
+      - {offset: 0x92DC, mask: 0xFF, equals: 0, count: 2, why: 'the cal word subtracted from 0xFFFF1056; zero makes it the same sum as 0xFFFF2100'}
+      - {offset: 0x8A68, mask: 0xFF, equals: 128, why: 'the average weight behind the one-count stall bound (AIRFLOW_FILTER_STALL)'}
+      - {offset: 0x874D, mask: 0xFF, equals: 0, why: '0xFFFF20E2 is 0 only because this gain is 0 (0x03C2EC)'}
+      - {offset: 0x86C8, mask: 0x20, equals: 0x00, why: 'with bit 5 set and cal 0x8ADE bit 0 set 0x03C2EC skips the write and 0xFFFF20E2 keeps an unknown value'}
+    outside_schedule: 'Group 0x20 (table 0x021874) entry 4, just before 0x03C62C.'
+    confidence: code
+    twin: not_modelled
+    reference_model: src.decode.air_charge.steady_airflow_interval
+    reference_validation: [vehicle]
+    evidence:
+      - 'listing 0x03BB40-0x03C2EA (0x03BB98 gain cal 0x86D9 at 0x03BBAE; 0x03BFC0 steady branch 0x03C18E-0x03C1D2, lead branch 0x03C010-0x03C18C; 0x03C20C writes 0xFFFF2100 at 0x03C22E; 0x03C2EC writes 0xFFFF20E2 at 0x03C366; 0x03C234 writes 0xFFFF1056 at 0x03C2DA; 0x03D2B6-0x03D2D8 and PID handler 0x0D41B0 scale by cal 0x83E9)'
+      - 'Hot-wire term 0x03BBF2/0x03BEFC: from the decompile text, spot-checked against the listing only for its store targets'
+      - 'Steady state only, as a reference: tests/test_air_charge_private_rom.py scores BFS from DID 0x1209 through this equality on seven 20260920 drives'
+      - 'w273E is in the same unit as 0xFFFF1056 (added to the same sum): 149 / 25600 g/s per count, from the SAE PID 0x10 scale (g/s x 100) and cal 0x83E9'
+      - 'Not modelled: the lead-path and hot-wire state; w273E''s purge-controller inputs (w8DC4 is last run''s w27CA via w8ED2, 0x06F356; w38AA = 4 x min(0x3FE6, u x w902C >> 10) at 0x06DE02-0x06DE22, u the controller''s purge step and w902C a limit it derives from the A/F feedback words through two divides of w907A, both names inferred) are learned per drive'
+
+  - id: fill_mode_flags
+    function: 0x03CC3C
+    span: [0x03CC3C, 0x03CE2E]
+    kind: state
+    writes: [0xFFFF283C, 0xFFFF2314, 0xFFFF1148]
+    reads: [0xFFFF2314, 0xFFFF2824, 0xFFFF4856, 0xFFFF118A]
+    arithmetic: >-
+      Bit 3 of 0xFFFF283C (the transient fill model) follows the state byte
+      0xFFFF2314 (0..2, stepped from start, idle and throttle conditions) and
+      is cleared while 0xFFFF2824 bit 7 or 0xFFFF4856 bit 2 is set. Bit 2 is
+      set when |0xFFFF118A - its value five runs earlier| (0xFFFF1148) reaches
+      11; below 11 it is cleared only once a hold byte set to 10 there has
+      reached 0 (its decrement was not traced).
+    rounding: none
+    saturation: none
+    outside_schedule: 'Group 0x10 (table 0x02189C) entry 40, before the fill coefficient in the same routine.'
+    confidence: code
+    twin: observed
+    observed_as:
+      - {spec: 'mem:ECM_FUEL_TRANSIENT_FLAGS', address: 0xFFFF283C, relation: identity}
+    evidence: ['listing 0x03CC3C-0x03CE2E; decompile FUN_0003cc3c (0xFFFF2314 state machine, 0x03CDFC transient flag)']
+
+  - id: air_charge_ram_copy
+    function: 0x0DE3E4
+    kind: copy
+    writes: [0xFFFFB6A0, 0xFFFFB7A2]
+    reads: [0xFFFFB003, 0xFFFFB004, 0xFFFFB008]
+    depends_on: [uprev_slot_state]
+    arithmetic: >-
+      Part of the 2 KiB slot copy (base B040): Fuel Comp at 0xFFFFB6A0
+      (+0x660, 256 bytes) and K at 0xFFFFB7A2 (+0x762). The twin reads both
+      from the resolved ROM slot and assumes the RAM holds those bytes.
+    rounding: none
+    saturation: none
+    outside_schedule: 'UpRev init and slot commit only.'
+    confidence: code
+    twin: assumed
+    assumption: >-
+      The RAM Fuel Comp table and K equal the image's resolved slot. A
+      battery-backed copy can predate a reflash, so the default-slot rule
+      alone does not prove it.
+    evidence:
+      - 'listing 0x0DE3E4-0x0DE428 (the same copy as target_afr_ram_copy)'
+      - 'Partial, K only: on seven 20260920 drives the steady-state BFS check scores K = 28,715 at median 0.9991 while the UpRev base K (27,089) gives 1.0590, so the RAM K is within about 1 % of the slot''s. All five slots hold 28,715, so this does not identify the slot, and it says nothing about the Fuel Comp cells (Fuel Comp held at 128 also passes).'
+
+  - id: air_charge_tp
+    function: 0x03C62C
+    span: [0x03C646, 0x03C7AA]
+    kind: computation
+    writes: [0xFFFF2110, 0xFFFF2114, 0xFFFF4A2D]
+    reads: [0xFFFF2100, 0xFFFFB7A2, 0xFFFF1204, 0xFFFF233C, 0xFFFF283B, 0xFFFF4786, 0xFFFF2C91, 0xFFFF4A2D, 0xFFFF1081]
+    depends_on: [airflow_qa, engine_speed_word, air_charge_ram_copy]
+    arithmetic: >-
+      Running branch: N = max(0x40, 0xFFFF2C91 << 3 while 0xFFFF4786 bit 6,
+      else 0xFFFF233C while 0xFFFF283B bit 6, else 0xFFFF1204); with
+      0xFFFF2100 > 0, the 24.8 number K x 0xFFFF2100 x m / 256 (K the word
+      0xFFFFB7A2, m cal 0x89D2) is formed from two 16 x 16 products and byte
+      halves, each a wrapping 32-bit mul.l; q = its integer part / (d x N)
+      (d cal 0x88AD, 0x021D6C), and if q < 0x727 the quotient is (q << 8) +
+      ((remainder << 8) + fraction byte) / (d x N) (0x021FCC, 0x021D6C),
+      capped at 0x726F9, else 0x726F9; 0xFFFF2110 = quotient x 0x23CB >> 16
+      (<= 0xFFFF). 0xFFFF2100 <= 0 gives 0. Cranking branch: 0xFFFF2114 =
+      curve 0xEEBA at 0xFFFF1081 << 8 and 0xFFFF2110 = it >> 2.
+    rounding: 'truncating unsigned divides (0x021D6C / 0x021FCC); below the wrap exactly min(0x726F9, floor(floor(K x airflow x m / 256) / (d x N)))'
+    saturation: 'quotient min 0x726F9 (so Tp <= 0xFFFF); N floored at 0x40'
+    branches:
+      - {when: '0xFFFF2C91 = 0, or 0xFFFF4786 bit 7 with 0xFFFF4A2D non-zero, or 0xFFFF4786 bit 6 with 0xFFFF2C91 < 0x20', then: 'cranking: Tp from the coolant curve 0xEEBA (not modelled)'}
+      - {when: '0xFFFF4786 bit 7 clear', then: '0xFFFF4A2D reloaded from cal 0x8C25 (3) first'}
+    rom:
+      - {rom_map: k_constant, role: 'K (via its RAM copy 0xFFFFB7A2)'}
+      - {offset: 0x89D2, width: 8, value: 226, role: 'airflow multiplier m (x m / 256)'}
+      - {offset: 0x88AD, width: 8, value: 3, role: 'divisor multiplier d'}
+      - {offset: 0x8C25, width: 8, value: 3, role: 'start hold reload'}
+    outside_schedule: 'Group 0x20 (table 0x021874) entry 5 (0x03C62C), after 0x03BB40.'
+    confidence: code
+    twin: implemented
+    implemented_by: src.decode.air_charge.air_charge_tp
+    evidence:
+      - 'listing 0x03C646-0x03C7AA (literals 0x726F9 at 0x03C888, 0x23CB at 0x03C78C, 0x727 at 0x03C78A); rom_map program_constants tp_quotient_cap, tp_scale'
+      - 'tests/test_air_charge.py: the two-step 24.8 divide equals the floor formula below the wrap, the 0x727 and 0x726F9 caps, N floor, non-positive airflow'
+      - 'Vehicle, steady state: with 0xFFFF2100 from DID 0x1209 and N from the rpm word, BFS within 0.990-1.010 (p10-p90) of the prediction on 458 reads; K from the neighbouring word (+0x760) or m from cal 0x89D3 misses by 0.65x / 1.53x (tests/test_air_charge_private_rom.py)'
+
+  - id: fuel_comp_lookup
+    function: 0x03CC3C
+    span: [0x03D06E, 0x03D100]
+    kind: computation
+    writes: [0xFFFF225A]
+    reads: [0xFFFFB6A0, 0xFFFF1210, 0xFFFF118A, 0xFFFF2CB6]
+    depends_on: [fuel_comp_load_byte, engine_speed_word, air_charge_ram_copy]
+    arithmetic: >-
+      0xFFFF225A = 0x026A24 on the table 0xFFFFB6A0 (16 x 16 bytes, rows rpm)
+      with the rpm word 0xFFFF1210 against axis byte << 2 at 0xCACD and the
+      load byte 0xFFFF118A against the bytes at 0xCB29: top-down searches,
+      Q16 truncating fraction, bilinear, truncating toward the first operand
+      (128 = 1.0). 0x02D5F4 runs the same call once at reset.
+    rounding: truncate toward the first operand
+    saturation: 'axes clamp past either end'
+    branches:
+      - {when: 'cal 0x8AE1 bit 5 clear', then: '0xFFFF225A from 0xFFFF2CB6 or cal 0x8516, clamped 64..192 (dead in every listed image)'}
     rom:
       - {rom_map: fuel_compensation, role: 'cells (via its RAM copy)'}
       - {rom_map: fuel_comp_engine_speed_axis, role: rows}
       - {rom_map: fuel_comp_flow_axis, role: columns}
-      - {rom_map: k_constant, role: 'K (via its RAM copy)'}
-      - {rom_map: bfs_ceiling, role: 'BFS ceiling by rpm'}
-      - {offset: 0x8AE1, width: 8, value: 0xE0, role: 'bit 5 set: the Fuel Comp multiply is live'}
-    outside_schedule: 'Air-charge task; the cycle snapshot copies BFS to 0xFFFF1038 and X to 0xFFFF103E.'
+      - {offset: 0x8AE1, width: 8, value: 0xE0, role: 'bit 5 set: the table is read'}
+    calibration_conditions:
+      - {offset: 0x8AE1, mask: 0x20, equals: 0x20, why: 'the Fuel Comp table drives 0xFFFF225A (the clear branch is not modelled)'}
+    outside_schedule: 'Group 0x10 (table 0x02189C) entry 40 (0x03CC3C), after 0x03C3A4 (entry 38).'
+    confidence: code
+    twin: implemented
+    implemented_by: src.decode.air_charge.rpm_load_lookup
+    evidence:
+      - 'listing 0x03D06E-0x03D100 (call 0x03D0F4, store 0x03D100); 0x02D5F4 at 0x02DC44'
+      - 'docs/ecu-firmware-analysis.md "Map-slot tables": the wrapper 0x026A24 is 0x0269AC apart from the size; UpRev''s grid equals the table row-major 256/256'
+
+  - id: fill_coefficient
+    function: 0x03CC3C
+    span: [0x03CE30, 0x03D06C]
+    kind: computation
+    writes: [0xFFFF2205, 0xFFFF2126, 0xFFFF1164, 0xFFFF21DA, 0xFFFF1178, 0xFFFF2254]
+    reads: [0xFFFF1207, 0xFFFF1210, 0xFFFF118A, 0xFFFF2899, 0xFFFF283C]
+    depends_on: [engine_speed_word, fuel_comp_load_byte, fill_mode_flags]
+    arithmetic: >-
+      0xFFFF2205 = max(0x1A, min(255, (0xFFFF1207 x cal 0x849B) >> 5)); T =
+      0xFFFF2126 = 0x0269AC on 0x9BD9 while 0xFFFF2899 bit 7 (set by last
+      run of 0x03C62C), else 0x9B99, at (0xFFFF1210 vs 0xC87C << 2,
+      0xFFFF118A vs 0xC884); 0xFFFF1164 = 0xFFFF21DA = min(0x7FFF, ((T x cal
+      0x8D26) x 0xFFFF1210 x 0x37) >> 16), each product a wrapping mul.l;
+      0xFFFF1178 = 0xFFFF1164 while 0xFFFF283C bit 3, else the word at cal
+      0x9066; 0xFFFF2254 = max(0, 0x8000 - 0xFFFF1178).
+    rounding: truncating shifts
+    saturation: '0xFFFF1164 min 0x7FFF; 0xFFFF2205 1A..FF; 0xFFFF2254 floored at 0'
+    rom:
+      - {rom_map: fill_time_constant_rising, role: 'T while airflow is rising or steady'}
+      - {rom_map: fill_time_constant_falling, role: 'T while airflow is falling'}
+      - {offset: 0x8D26, width: 8, value: 58, role: 'coefficient gain'}
+      - {offset: 0x9066, width: 16, value: 819, role: 'weight while the transient fill model is off'}
+      - {offset: 0x849B, width: 8, value: 255, role: 'blend weight gain'}
+    calibration_conditions:
+      - {offset: 0x8D28, mask: 0x10, equals: 0x10, why: 'the branch the coefficient and blend are decoded on (bit 4 clear takes 0xFFFF1154 / 0xFFFF2240 paths, not modelled)'}
+      - {offset: 0x8D26, mask: 0xFF, equals: 58, why: 'the coefficient gain the synthetic vectors use'}
+      - {offset: 0x849B, mask: 0xFF, equals: 255, why: 'the blend weight gain the synthetic vectors use'}
+      - {offset: 0x9066, mask: 0xFF, equals: 0x03, why: 'high byte of the word 0x0333 (819) the weight takes while the transient model is off'}
+      - {offset: 0x9067, mask: 0xFF, equals: 0x33, why: 'low byte of the word 0x0333 (819)'}
+    outside_schedule: 'Group 0x10 (table 0x02189C) entry 40 (0x03CC3C).'
     confidence: code
     twin: not_modelled
+    reference_model: src.decode.air_charge.fill_coefficient
+    reference_validation: [synthetic]
+    evidence: ['listing 0x03CE30-0x03CE58 (0xFFFF2205) and 0x03CF52-0x03D06C (call 0x03CF62, products 0x03CF8A-0x03CF9A, 0x9066 at 0x03D022)']
+
+  - id: fuel_comp_product
+    function: 0x03C62C
+    span: [0x03C7AC, 0x03C7D2]
+    kind: computation
+    writes: [0xFFFF105C]
+    reads: [0xFFFF2110, 0xFFFF225A]
+    depends_on: [air_charge_tp, fuel_comp_lookup]
+    arithmetic: '0xFFFF105C = min(0xFFFF, (0xFFFF2110 x 0xFFFF225A) >> 7), unconditional (the 0xFFFF225A that 0x03CC3C last wrote).'
+    rounding: truncating shift
+    saturation: 'min 0xFFFF'
+    outside_schedule: 'Group 0x20, inside 0x03C62C after Tp.'
+    confidence: code
+    twin: implemented
+    implemented_by: src.decode.air_charge.fuel_comp_product
+    evidence: ['listing 0x03C7AC-0x03C7D2 (0x03C7B4 reads 0xFFFF225A; shlr2 x3, shlr; cap at 0x03C7C4)']
+
+  - id: manifold_fill_filter
+    function: 0x03C62C
+    span: [0x03C7D4, 0x03C8B6]
+    kind: state
+    writes: [0xFFFF20A6]
+    reads: [0xFFFF105C, 0xFFFF1178, 0xFFFF2254, 0xFFFF20B6, 0xFFFF20A6, 0xFFFF289C]
+    depends_on: [fuel_comp_product, fill_coefficient]
+    arithmetic: >-
+      u = 4 x 0xFFFF105C x 0xFFFF1178 (all ones from 0xFFFF105C x 0xFFFF1178
+      >= 0x40000000); v = 0xFFFF20B6 x 0xFFFF2254. With 0xFFFF289C bit 5
+      clear: y = (u + v) >> 15 (all ones when the sum would wrap), min 0xFFFF;
+      y + 1 if y is below min(0xFFFF, 4 x 0xFFFF105C) and equals the
+      0xFFFF20A6 it replaces. With bit 5 set: y = min(0xFFFF, (v - u) >> 15),
+      0 when u > v. 0xFFFF20B6 is last run's 0xFFFF20A6 (dispatcher copy).
+      Unique fixed point (bit 5 clear, 1 <= a <= 0x8000): min(0xFFFF, 4 x
+      0xFFFF105C); 0x02D5F4 seeds it there at reset.
+    rounding: truncating shift; the +1 rule closes a stall below the target
+    saturation: 'min 0xFFFF'
+    branches:
+      - {when: '0xFFFF289C bit 5 set', then: 'the subtracting form (writer of the bit not traced)'}
+    outside_schedule: 'Group 0x20, inside 0x03C62C.'
+    confidence: code
+    twin: not_modelled
+    reference_model: src.decode.air_charge.fill_filter_step
+    reference_validation: [synthetic]
+    evidence: ['listing 0x03C7D4-0x03C8B6 (0x03C7E4 limit, 0x03C804 wrap test, 0x03C82E-0x03C83C +1 rule, 0x03C83E reverse form)']
+
+  - id: near_wot_flag
+    function: 0x03C62C
+    span: [0x03C8B8, 0x03C8E8]
+    kind: state
+    writes: [0xFFFF289B]
+    reads: [0xFFFF118A, 0xFFFF20B6, 0xFFFF105C, 0xFFFF289B]
+    depends_on: [fuel_comp_load_byte, fuel_comp_product]
+    arithmetic: >-
+      Bit 7 of 0xFFFF289B is set when 0xFFFF118A >= cal 0x8319 and
+      0xFFFF20B6 >= 4 x 0xFFFF105C; else cleared when 0xFFFF118A < cal
+      0x831A; else kept.
+    rounding: none
+    saturation: none
+    branches:
+      - {when: '0xFFFF118A in [cal 0x831A, cal 0x8319) or (>= cal 0x8319 with 0xFFFF20B6 < 4 x 0xFFFF105C)', then: 'keeps the previous bit'}
+    rom:
+      - {offset: 0x8319, width: 8, value: 202, role: 'set threshold'}
+      - {offset: 0x831A, width: 8, value: 200, role: 'clear threshold'}
+    calibration_conditions:
+      - {offset: 0x8319, mask: 0xFF, equals: 202, why: 'set threshold of the decoded latch'}
+      - {offset: 0x831A, mask: 0xFF, equals: 200, why: 'clear threshold of the decoded latch'}
+    outside_schedule: 'Group 0x20, inside 0x03C62C.'
+    confidence: code
+    twin: not_modelled
+    reference_model: src.decode.air_charge.near_wot_next
+    reference_validation: [synthetic]
+    evidence: ['listing 0x03C8B8-0x03C8E8']
+
+  - id: fill_transient
+    function: 0x03C62C
+    span: [0x03C8EA, 0x03CA0E]
+    kind: state
+    writes: [0xFFFF20C6, 0xFFFF2117, 0xFFFF2120, 0xFFFF2829, 0xFFFF105A]
+    reads: [0xFFFF2824, 0xFFFF4856, 0xFFFF20C6, 0xFFFF2117, 0xFFFF2120, 0xFFFF283C, 0xFFFF289B, 0xFFFF20A6, 0xFFFF20B6]
+    depends_on: [manifold_fill_filter, near_wot_flag, fill_mode_flags]
+    arithmetic: >-
+      0xFFFF20C6 = 4 while 0xFFFF2824 bit 7 (MAF fault), else counts down to
+      0; 0xFFFF2117 likewise on 0xFFFF4856 bit 2; 0xFFFF2120 on 0x0261D0, and
+      0xFFFF2829 bit 7 while any is non-zero. 0xFFFF105A = clamp_s16(((
+      0xFFFF20A6 - 0xFFFF20B6) x cal 0x8653) >> 6) (arithmetic shift,
+      0x022586) when 0xFFFF283C bits 3 and 2 are set, 0xFFFF289B bit 7 clear
+      and 0xFFFF20C6 = 0xFFFF2117 = 0; else 0.
+    rounding: arithmetic right shift (toward minus infinity)
+    saturation: '0xFFFF105A clamped -0x8000..0x7FFF'
+    rom:
+      - {offset: 0x8653, width: 8, value: 160, role: 'transient gain'}
+    calibration_conditions:
+      - {offset: 0x8653, mask: 0xFF, equals: 160, why: 'the transient gain the synthetic vectors use'}
+    outside_schedule: 'Group 0x20, inside 0x03C62C.'
+    confidence: code
+    twin: not_modelled
+    reference_model: src.decode.air_charge.fill_transient
+    reference_validation: [synthetic]
+    evidence: ['listing 0x03C8EA-0x03CA0E (gain literal 0x03CAB4 -> 0x8653, clamp 0x03C9D2-0x03CA00)']
+
+  - id: fill_blend
+    function: 0x03C62C
+    span: [0x03CA10, 0x03CA5A]
+    kind: computation
+    writes: [0xFFFF20A4]
+    reads: [0xFFFF20A6, 0xFFFF20B4, 0xFFFF2205, 0xFFFF283C, 0xFFFF289B]
+    depends_on: [manifold_fill_filter, near_wot_flag, fill_coefficient, fill_mode_flags]
+    arithmetic: >-
+      0xFFFF20A4 = (0xFFFF20A6 x 0xFFFF2205 + 0xFFFF20B4 x (256 -
+      0xFFFF2205)) >> 8 while 0xFFFF283C bit 3 is set, bit 2 clear and
+      0xFFFF289B bit 7 set; else 0xFFFF20A6. 0xFFFF20B4 is last run's
+      0xFFFF20A4.
+    rounding: truncating shift
+    saturation: none (a convex blend of two words)
+    calibration_conditions:
+      - {offset: 0x8D28, mask: 0x10, equals: 0x10, why: 'bit 4 clear leaves 0xFFFF20A4 unwritten and BFS from 0xFFFF20A6 (not modelled)'}
+    outside_schedule: 'Group 0x20, inside 0x03C62C.'
+    confidence: code
+    twin: not_modelled
+    reference_model: src.decode.air_charge.fill_blend
+    reference_validation: [synthetic]
+    evidence: ['listing 0x03CA10-0x03CA5A']
+
+  - id: base_fuel_schedule
+    function: 0x03C62C
+    span: [0x03CA5C, 0x03CBE2]
+    kind: computation
+    writes: [0xFFFF103A, 0xFFFF2116, 0xFFFF2899]
+    reads: [0xFFFF2824, 0xFFFF20A4, 0xFFFF105A, 0xFFFF1207, 0xFFFF1206, 0xFFFF107F, 0xFFFF105C, 0xFFFF20A6]
+    depends_on: [fill_blend, fill_transient, fuel_comp_product, manifold_fill_filter, engine_speed_word]
+    arithmetic: >-
+      Without a MAF fault: 0xFFFF2116 = curve 0xD8B3 (0x026BBC) at 0xFFFF1207;
+      BFS 0xFFFF103A = min(max(0, 0xFFFF20A4 + 0xFFFF105A), 0xFFFF2116 << 8).
+      Then 0xFFFF2899 bit 7 = (4 x 0xFFFF105C < 0xFFFF20A6). At a steady
+      state (filter at its fixed point, 0xFFFF105A = 0, blend operands equal)
+      BFS = min(0xFFFF, 4 x 0xFFFF105C, 0xFFFF2116 << 8).
+    rounding: none
+    saturation: 'BFS floored at 0 and capped at the rpm ceiling 0xD8B3 << 8 (255 at all 16 points: 65,280)'
+    branches:
+      - {when: '0xFFFF2824 bit 7 set (MAF fault, item 0x114)', then: 'BFS = table 0x95E5 byte << 8 by 0xFFFF1206 band and 0xFFFF107F band (not modelled)'}
+    rom:
+      - {rom_map: bfs_ceiling, role: 'BFS ceiling by rpm'}
+    outside_schedule: 'Group 0x20, inside 0x03C62C; the cycle snapshot copies BFS to 0xFFFF1038.'
+    confidence: code
+    twin: implemented
+    implemented_by: src.decode.air_charge.steady_state_bfs (per run src.decode.air_charge.bfs_word)
     evidence:
-      - 'docs/ecu-firmware-analysis.md "Fuel Comp load input 0xFFFF118A, and how BFS is formed" (decompiler, verified; listing reached the same multiply)'
-      - 'Function 0x03C62C after the split of FUN_0003c4d0 at 0x3c62c/0x3cc3c; BFS is written at 0x03CAE4 and 0x03CB46 (0x03C4D0 is now the throttle-area routine)'
-      - 'docs/ecu-firmware-analysis.md "Injector pulse chain, dead time and the BFS ceiling": D8B3 255 at all 16 rpm points in base and tune'
-      - 'cal 0x8AE1 = 0xE0 on the ZS44A-uprev-base, -k106, -20260920 and -20261004 images (read 2026-10-05)'
+      - 'listing 0x03CA5C-0x03CB46 (ceiling 0x03CAC8-0x03CAE4, BFS stores 0x03CAE4/0x03CB46) and 0x03CB9E-0x03CBE2'
+      - 'tests/test_air_charge.py: the fixed point is reached from above and below and is unique'
+      - 'tests/test_air_charge_private_rom.py: steady-state BFS from DID 0x1209, rpm, K and the Fuel Comp band: 458/14,843 reads of seven 20260920 drives pass the frozen gates; median ratio 0.9991, p10 0.9898, p90 1.0097, 98.5 % inside the interval'
+
+  - id: air_charge_init
+    function: 0x02D5F4
+    span: [0x02DC1A, 0x02DCF6]
+    kind: state
+    writes: [0xFFFF2114, 0xFFFF2110, 0xFFFF225A, 0xFFFF1178, 0xFFFF2254, 0xFFFF2205, 0xFFFF105C, 0xFFFF20A6, 0xFFFF20B6, 0xFFFF20A4]
+    reads: [0xFFFF1081, 0xFFFF118A, 0xFFFF1210]
+    arithmetic: >-
+      At reset: 0xFFFF2114 = curve 0xEEBA at 0xFFFF1081 << 8, 0xFFFF2110 =
+      it >> 2; 0xFFFF225A = the Fuel Comp lookup at (0xFFFF1210, 0xFFFF118A);
+      0xFFFF1178 = cal 0x9066, 0xFFFF2254 = 0x8000 - it, 0xFFFF2205 = 0x1A;
+      0xFFFF105C = min(0xFFFF, (0xFFFF2114 x 0xFFFF225A) >> 9);
+      0xFFFF20A6 = 0xFFFF20B6 = 0xFFFF20A4 = min(0xFFFF, 4 x 0xFFFF105C):
+      the filter starts at its fixed point.
+    rounding: arithmetic shift with the signed-rounding add of 511
+    saturation: 'min 0xFFFF'
+    outside_schedule: 'Application reset path (0x02D5F4), before the main loop.'
+    confidence: code
+    twin: not_modelled
+    evidence: ['listing 0x02DC1A-0x02DCF6']
 
   - id: uprev_init
     function: 0x0DE1A4
@@ -1435,6 +1882,72 @@ outputs:
         when: 'coolant byte above 110 with 0xFFFF283F bit 6 not read'
         nodes: [timing_trim_lookup, high_det_latch]
 
+  # E05.2: BFS itself, predicted at steady state from the reported MAF word,
+  # the rpm word, K and Fuel Comp (never from observed BFS or X). Conditional:
+  # the airflow pipeline and the dynamic fill terms are references only.
+  - id: base_fuel_schedule_word
+    ram: 0xFFFF103A
+    written_by: base_fuel_schedule
+    units: raw_counts
+    observed_as:
+      - {spec: 'mem:ECM_AIR_CHARGE_SLOT_103A', address: 0xFFFF103A, relation: identity}
+      - spec: 'did:ECM_AIR_CHARGE'
+        address: 0xFFFF103A
+        relation: alias
+        note: 'DID 0x1208 reads the same word; agreement verifies the mapping, not the chain.'
+    twin:
+      definition: src.analysis.air_charge_twin.predict_steady_bfs
+      predicts: base_fuel_schedule
+    blockers:
+      - name: air_charge_ram_copy_unverified
+        nodes: [air_charge_ram_copy]
+        closes_with: >-
+          Read 0xFFFFB6A0-0xFFFFB7A3 (260 bytes, five 0x23 windows) and
+          compare with the resolved slot's +0x660-+0x763 bytes.
+      - name: airflow_unmodelled
+        nodes: [airflow_qa]
+        closes_with: >-
+          The pipeline is decoded (airflow_qa) but stateful: read 0xFFFF2100 (4
+          bytes) in the BFS window per sample, or carry 0xFFFF20A8, 0xFFFF20AC
+          and the lead-path state with 0xFFFF273E. Until then BFS is predicted
+          only where the steady-state equality holds (SteadyGates).
+      - name: fill_byte_not_computed
+        nodes: [fuel_comp_load_byte]
+        closes_with: >-
+          Feed 0xFFFF118A from src.decode.fuel_comp_load with idle air and
+          purge known, or observe mem:ECM_FUEL_COMP_X_INPUT in the BFS window;
+          until then Fuel Comp is the rpm row band's range.
+      - name: fill_dynamics_reference_only
+        nodes: [fill_coefficient, manifold_fill_filter, near_wot_flag, fill_transient, fill_blend]
+        closes_with: >-
+          Score the per-run references (fill_coefficient, fill_filter_step,
+          near_wot_next, fill_transient, fill_blend, bfs_word) against one
+          0x23 window set holding 0xFFFF2100, 0xFFFF2110, 0xFFFF225A,
+          0xFFFF105C, 0xFFFF1178, 0xFFFF20A4..0xFFFF20A7, 0xFFFF20B4..0xFFFF20B7,
+          0xFFFF105A, 0xFFFF103A, 0xFFFF283C and 0xFFFF289B through throttle
+          steps.
+    regions:
+      - id: not_steady
+        status: unevaluable
+        when: 'inputs not held within SteadyGates (MAF word +-2 %, rpm word +-1 % over +-1 s): the filter, transient and airflow filter states are not observed'
+        nodes: [airflow_qa, manifold_fill_filter, fill_transient]
+      - id: cranking
+        status: unevaluable
+        when: '0xFFFF2C91 = 0, or 0xFFFF4786 bit 7 with 0xFFFF4A2D non-zero, or bit 6 with 0xFFFF2C91 < 0x20: Tp from the coolant curve 0xEEBA. No channel reads these flags: the steady-state evaluator assumes a sample is outside this region (and outside maf_fault and fill_subtracting_form) and counts each scored sample under regions_assumed'
+        nodes: [air_charge_tp]
+      - id: maf_fault
+        status: unevaluable
+        when: '0xFFFF2824 bit 7: BFS from table 0x95E5'
+        nodes: [base_fuel_schedule]
+      - id: fill_subtracting_form
+        status: unevaluable
+        when: '0xFFFF289C bit 5 set (writer not traced)'
+        nodes: [manifold_fill_filter]
+      - id: fuel_comp_band
+        status: conditional
+        when: '0xFFFF118A not read with the sample: Fuel Comp is the exact range over every load byte at that rpm (interval, not a point)'
+        nodes: [fuel_comp_lookup, fuel_comp_load_byte]
+
 # Logic the trace reached and did not resolve, model-wide.
 uncovered:
   - id: pedal_flag_inputs
@@ -1461,9 +1974,17 @@ uncovered:
     blocks: 'nothing in this output; other consumers of the gated lookup'
     next_evidence: 'Follow both readers.'
   - id: fuel_comp_fill_terms
-    where: '0x03C3A4 (w139E, w2CD0, w63FC), BFS 0x03C62C'
-    blocks: 'predicting X instead of observing it (E05.2)'
-    next_evidence: 'E05.2 / B08.'
+    where: 'History values of 0x03C3A4 inputs w63FC (idle air learning) and w139E (purge); the structure, the sensor-B substitution (0xFFFF28B5 bits 7:6 from 0x072528 on the TPS items) and the limp-home branch (0xFFFF484E bit 2) are traced'
+    blocks: 'computing 0xFFFF118A, hence Fuel Comp, without a read of it (base_fuel_schedule_word blocker fill_byte_not_computed)'
+    next_evidence: 'Read 0xFFFF63FC and 0xFFFF139E with 0xFFFF118A; N02.2 reconstructs the byte as an interval meanwhile. The absolute area units stay open (desk: no second program or calibration pins them).'
+  - id: airflow_pipeline
+    where: 'Decoded but stateful (airflow_qa): the lead-path state (w20B8, w20C0, w20C4, w20EC), the hot-wire term (w4054) and the purge controller''s learned vapour limit behind w273E'
+    blocks: 'predicting BFS off steady state (base_fuel_schedule_word blocker airflow_unmodelled)'
+    next_evidence: 'Not settleable at the desk: the state is per drive. Vehicle: read 0xFFFF2100, 0xFFFF1056, 0xFFFF20A8, 0xFFFF20AC and 0xFFFF273E in one window through throttle steps and purge on/off.'
+  - id: air_charge_branch_state
+    where: 'Settled: 0xFFFF283B bit 6 (0x03B994), 0xFFFF2C91 (0x03F048), 0xFFFF4786 bits 7 and 6 (0x0398DE, 0x0394D6, 0x039904), the dispatch periods (ISR 0x02040C). Open: 0xFFFF289C bit 5 (no writer found; absence of a computed-pointer write is not provable statically), and Pphi (inferred 20 MHz)'
+    blocks: 'evaluating BFS during start and in the subtracting filter form; the absolute tick'
+    next_evidence: 'Vehicle: read 0xFFFF289C, 0xFFFF4786, 0xFFFF2C91 and 0xFFFF283B..0xFFFF283C with BFS at key-on and crank, and time 0xFFFF84B9-paced counters against acquisition time to confirm the 1.024 ms tick.'
   - id: timing_final_chain
     where: >-
       Ignition terms the chain reads but no node identifies: 0xFFFF11CB,

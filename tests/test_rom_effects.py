@@ -34,7 +34,12 @@ from src.analysis.rom_map import RomMap
 from src.analysis.sim_contract import load_contract
 from tests.rom_fixtures import PROFILE, synthetic_image, xterra_map
 
-OUTPUTS = ("target_equiv_ratio", "ignition_timing", "ignition_trim_selected")
+OUTPUTS = (
+    "target_equiv_ratio",
+    "ignition_timing",
+    "ignition_trim_selected",
+    "base_fuel_schedule_word",
+)
 
 Setup = tuple[bytes, RomMap, ApplicationModel, str]
 
@@ -125,10 +130,11 @@ def test_every_modelled_table_constant_and_condition_resolves(setup: Setup) -> N
     cited = {(node.id, ref.rom_map) for node in model.nodes for ref in node.rom if ref.rom_map}
     resolved = {(key.split("|")[0], key.split("|")[1]) for key in loaded.reads}
     assert cited <= resolved
-    assert ("base_fuel_schedule", "fuel_compensation") in resolved
-    assert ("base_fuel_schedule", "fuel_comp_flow_axis") in resolved  # its column axis
+    assert ("fuel_comp_lookup", "fuel_compensation") in resolved
+    assert ("fuel_comp_lookup", "fuel_comp_flow_axis") in resolved  # its column axis
+    assert ("air_charge_tp", "k_constant") in resolved
     assert ("target_afr_lookup", "fuel_targets") in resolved
-    assert any(k.startswith("base_fuel_schedule|constant|") for k in loaded.reads)
+    assert any(k.startswith("fuel_comp_lookup|constant|") for k in loaded.reads)
     assert any(k.startswith("pedal_enrichment_flag|condition|") for k in loaded.reads)
     # The whole image is kept, unknown bytes and all, and every byte is classed.
     assert loaded.image == image
@@ -200,19 +206,22 @@ def test_an_unresolved_or_differing_slot_is_unevaluable_by_name(setup: Setup) ->
 def test_a_fuel_comp_edit_reaches_bfs_x_target_afr_and_the_timing_trims(setup: Setup) -> None:
     """Fuel Comp is inside BFS: the edit reaches the X byte, so Target AFR and
     the timing trims are read at a moved column, and no output can be
-    predicted while BFS is unmodelled and X is only observed."""
+    predicted while the fill dynamics are references only (E05.2) and X is
+    only observed."""
     image, rom_map, _, _ = setup
     candidate = _edit(setup, _bump(image, rom_map, "fuel_compensation", 1, 9, 12))
     report = _compare(setup, candidate)
-    assert report.changed_nodes == ("base_fuel_schedule",)
+    assert report.changed_nodes == ("fuel_comp_lookup",)
     consumed = [r for r in report.ranges if r.byte_class == "consumed"]
     assert [r.what for r in consumed] == [("fuel_compensation (slot 1)",)]
     assert {o.output for o in report.outputs if o.path} == set(OUTPUTS)
     for output in report.outputs:
         assert output.status == "unevaluable"
-        assert "unmodelled:base_fuel_schedule" in output.reasons
-        assert "observed_not_predicted:load_input_x" in output.reasons
-        assert {"base_fuel_schedule", "load_input_x"} <= set(output.path)
+        assert "unmodelled:manifold_fill_filter" in output.reasons
+        assert {"fuel_comp_product", "base_fuel_schedule"} <= set(output.path)
+        if output.output != "base_fuel_schedule_word":
+            assert "observed_not_predicted:load_input_x" in output.reasons
+            assert "load_input_x" in output.path
     moved = {m["node"]: m["tables"] for m in report.moved_lookups}
     assert "fuel_targets" in moved["target_afr_lookup"]
     assert "timing_trim_a" in moved["timing_trim_lookup"]
@@ -225,7 +234,7 @@ def test_a_fuel_comp_axis_edit_is_the_same_path(setup: Setup) -> None:
     image, rom_map, _, _ = setup
     candidate = _edit(setup, _bump(image, rom_map, "fuel_comp_flow_axis", None, 0, 7))
     report = _compare(setup, candidate)
-    assert report.changed_nodes == ("base_fuel_schedule",)
+    assert report.changed_nodes == ("fuel_comp_lookup",)
     assert [r.what for r in report.ranges] == [("fuel_comp_flow_axis",)]
     assert report.output("ignition_trim_selected").status == "unevaluable"
 
@@ -412,7 +421,7 @@ def test_loading_tracing_and_writing_candidates_requests_no_ecu_write(tmp_path: 
             image, candidate.image, rom_map, model, sha, base_slot=1, candidate_slot=1,
             slot_source="default_slot", contract=contract, mode="conditional_rom_comparison",
         )
-        assert report.changed_nodes == ("base_fuel_schedule",)
+        assert report.changed_nodes == ("fuel_comp_lookup",)
         write_candidate(
             candidate, Path({str(tmp_path)!r}) / "sim",
             rom_library_dir=Path({str(tmp_path)!r}) / "lib",

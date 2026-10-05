@@ -41,7 +41,12 @@ IMAGES = {
         "5587f7e1e6dbd0fcb9ffe0c857cc0cafebbe11bf306636c0f3265b903254d253",
     ),
 }
-OUTPUTS = {"target_equiv_ratio", "ignition_timing", "ignition_trim_selected"}
+OUTPUTS = {
+    "target_equiv_ratio",
+    "ignition_timing",
+    "ignition_trim_selected",
+    "base_fuel_schedule_word",
+}
 
 
 @pytest.fixture(scope="module")
@@ -109,7 +114,7 @@ def test_the_fuel_comp_restore_reaches_bfs_x_target_afr_and_timing(library: RomL
         contract=contract,
         mode="conditional_rom_comparison",
     )
-    assert report.changed_nodes == ("base_fuel_schedule",)
+    assert report.changed_nodes == ("fuel_comp_lookup",)
     by_class: dict[str, set[str]] = {}
     for r in report.ranges:
         by_class.setdefault(r.byte_class, set()).update(r.what)
@@ -119,8 +124,9 @@ def test_the_fuel_comp_restore_reaches_bfs_x_target_afr_and_timing(library: RomL
     assert {o.output for o in report.outputs if o.path} == OUTPUTS
     for output in report.outputs:
         assert output.status == "unevaluable", output.output
-        assert "unmodelled:base_fuel_schedule" in output.reasons
-        assert "observed_not_predicted:load_input_x" in output.reasons
+        assert "unmodelled:manifold_fill_filter" in output.reasons
+        if output.output != "base_fuel_schedule_word":
+            assert "observed_not_predicted:load_input_x" in output.reasons
         assert "unknown_bytes_changed" not in output.reasons
     moved = {m["node"] for m in report.moved_lookups}
     assert {"target_afr_lookup", "timing_trim_lookup"} <= moved

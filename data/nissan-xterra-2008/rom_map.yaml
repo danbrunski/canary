@@ -855,6 +855,56 @@ tables:
       = min(filtered pulse + transient, D8B3[rpm]); 255 at all 16 rpm points
       in the UpRev base and the tunes, a 65,280-count cap. The rpm breakpoints
       it is searched with are not identified, so no axis is declared.
+  # -- The manifold-filling filter's time constants (E05.2): 0x03CC3C reads
+  # one of two 8 x 8 byte maps by rpm and the Fuel Comp load byte, and turns it
+  # into the filter weight 0xFFFF1164 (src/decode/air_charge.py).
+  - id: fill_time_constant_rpm_axis
+    name: Fill time-constant rpm axis (x 50 rpm)
+    offset: 0xC87C
+    rows: 1
+    cols: 8
+    dtype: u8
+    confidence: verified
+    evidence: >-
+      0x03CC3C passes r5 = 0xC87C (literal at 0x03D150) to 0x0269AC with the
+      12.5-rpm word 0xFFFF1210 (0x03CF5A); the search 0x027194 compares each
+      byte << 2 with the word, so a byte is 50 rpm (16..128: 800..6,400 rpm).
+  - id: fill_time_constant_load_axis
+    name: Fill time-constant load axis (Fuel Comp load byte)
+    offset: 0xC884
+    rows: 1
+    cols: 8
+    dtype: u8
+    confidence: verified
+    evidence: >-
+      r6 = 0xC884 (literal at 0x03D154), compared byte for byte (0x027114)
+      with the Fuel Comp load byte 0xFFFF118A passed on the stack: 32..224,
+      the byte's whole reachable range.
+  - id: fill_time_constant_rising
+    name: Fill time constant (airflow rising or steady)
+    offset: 0x9B99
+    rows: 8
+    cols: 8
+    dtype: u8
+    axes: {rows: fill_time_constant_rpm_axis, cols: fill_time_constant_load_axis}
+    confidence: verified
+    evidence: >-
+      0x03CC3C reads it through 0x0269AC while 0xFFFF2899 bit 7 is clear
+      (0x03CF52 literal 0x9B99), into 0xFFFF2126; 0xFFFF1164 = min(0x7FFF,
+      (T x cal 0x8D26 x rpm word x 0x37) >> 16) becomes the filter's new-value
+      weight while 0xFFFF283C bit 3 is set. Values 86..122 on 20260920.
+  - id: fill_time_constant_falling
+    name: Fill time constant (airflow falling)
+    offset: 0x9BD9
+    rows: 8
+    cols: 8
+    dtype: u8
+    axes: {rows: fill_time_constant_rpm_axis, cols: fill_time_constant_load_axis}
+    confidence: verified
+    evidence: >-
+      The same call with 0x9BD9 while 0xFFFF2899 bit 7 is set, a flag 0x03C62C
+      sets when 4 x 0xFFFF105C is below the filter's value (airflow falling).
+      Values 97..117 on 20260920.
 # Literals in the program, not calibration (N02.1): a flash of this program
 # never changes them, another program may hold anything there. `value` is the
 # literal the decode was made on; a reader refuses an image that differs
@@ -875,3 +925,26 @@ program_constants:
       the same in the UpRev base, k106, 20260920 and 20261004. With 158 and
       12.5 rpm per count, 0xDC1D00 x 12.5 / (512 x 158) = 2,229.0, so X ~
       2,229 x area / rpm. No clean physical breakdown of 0xDC1D00 is known.
+  - id: tp_quotient_cap
+    name: Tp quotient cap
+    offset: 0x3C888
+    dtype: be32
+    value: 0x000726F9
+    loaded_at: [0x3C73A, 0x3C76C, 0x3C77A]
+    confidence: verified
+    evidence: >-
+      0x03C62C caps K x airflow x 226 / 256 / (3 x speed) at this literal
+      before multiplying by 0x23CB and shifting 16 (0x03C77C-0x03C782): 0x726F9
+      x 0x23CB >> 16 is 0xFFFF, so Tp 0xFFFF2110 always fits a word. A first
+      quotient of 0x727 or more takes it without the second divide (0x03C748).
+  - id: tp_scale
+    name: Tp scale
+    offset: 0x3C78C
+    dtype: be16
+    value: 0x23CB
+    loaded_at: [0x3C77C]
+    confidence: verified
+    evidence: >-
+      mov.w at 0x03C77C: Tp = capped quotient x 0x23CB >> 16 (0x03C77E-0x03C788),
+      stored to 0xFFFF2110. Together with cal 0x89D2 (226) and 0x88AD (3) it
+      is the 0.0105 x K x airflow / N of the injector-pulse section.

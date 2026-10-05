@@ -45,6 +45,7 @@ KERNEL_MODULES = (
     "src.decode.ecm_lookup",
     "src.decode.target_phi_command",
     "src.decode.fuel_comp_load",
+    "src.decode.air_charge",
 )
 
 #: Operations whose vectors live in the state file.

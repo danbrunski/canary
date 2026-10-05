@@ -366,6 +366,57 @@ inventory:
     standing: composition
     why_not_yet: E02.6 evaluates target_command on a base and a changed table; it adds no arithmetic of its own.
 
+  # E05.2: BFS formation (src.decode.air_charge, AIR_CHARGE_KERNEL_VERSION 1).
+  # Python-only: blocker air_charge_not_in_contract.
+  - python: src.decode.air_charge:air_charge_tp
+    firmware: ["0x03C646-0x03C7AA", "0x021D6C", "0x021FCC"]
+    standing: decoded
+    why_not_yet: >-
+      Tp from airflow, K and engine speed, exact (24.8 product, two-step divide,
+      0x727 short cut, 0x726F9 cap, x 0x23CB >> 16). Its airflow input
+      0xFFFF2100 is not computable (the MAF pipeline is undecoded), so only
+      steady-state use is validated.
+  - python: src.decode.air_charge:rpm_load_lookup
+    firmware: ["0x026A24", "0x0269AC", "0x03D0F4", "0x03CF62"]
+    standing: composition
+    why_not_yet: lookup_2d with raw axis bytes (rpm byte << 2); Fuel Comp and the fill time constants.
+  - python: src.decode.air_charge:fuel_comp_product
+    firmware: ["0x03C7AC-0x03C7D2"]
+    standing: decoded
+    why_not_yet: min(0xFFFF, Tp x FC >> 7); add with air_charge_tp.
+  - python: src.decode.air_charge:steady_state_bfs
+    firmware: ["0x03C7D4-0x03C8B6", "0x03CA5C-0x03CAE4"]
+    standing: composition
+    why_not_yet: The filter's unique fixed point capped by the ceiling; the reference the steady-state twin scores.
+  - python: src.decode.air_charge:maf_word_interval
+    firmware: ["0x03D2B6", "0x0D41B0"]
+    standing: decoded
+    why_not_yet: Inverse of the PID 0x10 / DID 0x1209 report (x cal 0x83E9 >> 8).
+  - python: src.decode.air_charge:steady_airflow_interval
+    firmware: ["0x03D2B6", "0x03C18E-0x03C1C0"]
+    standing: decoded
+    why_not_yet: maf_word_interval widened by the one-count stall of the non-transient airflow average (cal 0x8A68 = 128).
+  - python: src.decode.air_charge:fill_filter_step
+    firmware: ["0x03C7D4-0x03C8B6"]
+    standing: decoded
+    why_not_yet: Per-run reference; not scored against a capture of 0xFFFF20A6 / 0xFFFF20B6.
+  - python: src.decode.air_charge:fill_coefficient
+    firmware: ["0x03CF52-0x03D06C"]
+    standing: decoded
+    why_not_yet: Per-run reference (every 10.24 ms, group 0x10; BFS every 4.096 ms); its 0xFFFF2899 / 0xFFFF283C inputs are not captured.
+  - python: src.decode.air_charge:fill_transient
+    firmware: ["0x03C990-0x03CA0E", "0x022586"]
+    standing: decoded
+    why_not_yet: Per-run reference; not scored.
+  - python: src.decode.air_charge:fill_blend
+    firmware: ["0x03CA10-0x03CA5A"]
+    standing: decoded
+    why_not_yet: Per-run reference; not scored.
+  - python: src.decode.air_charge:bfs_word
+    firmware: ["0x03CA5C-0x03CAE4"]
+    standing: decoded
+    why_not_yet: Per-run reference (the MAF-fault table branch is not modelled).
+
 # Explicit state, with its initialisation, reset and snapshot rules.
 state:
   uprev_state:
@@ -424,3 +475,10 @@ blockers:
     affects: [selected_timing_trim (not in this contract version)]
     what: The coolant-weighted blend uses the signed divide 0x021C48, whose rounding is not established; the reference returns coolant_blend_band.
     needs: 0x021C48's rounding from the listing.
+  - id: air_charge_not_in_contract
+    affects: [air_charge_tp (not in this contract version), steady_state_bfs (not in this contract version)]
+    what: >-
+      The E05.2 kernels (src.decode.air_charge) are Python-only: no Rust
+      symbol in rust/ecu_twin_core and no language-neutral vectors in
+      tests/fixtures/ecu_twin. Their known answers are tests/test_air_charge.py.
+    needs: An E06.2 extension (Rust functions, generated vectors, a contract_version bump).
