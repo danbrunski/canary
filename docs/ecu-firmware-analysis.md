@@ -554,6 +554,89 @@ instruments. It did not: there is one A/F sensor per bank.
     (closed-loop target), `4CA4`/`4CA6` (learned rear offset), and
     `0xFFFF36BB` (k, 128 = none).
 
+### Injector pulse chain, dead time and the BFS ceiling
+
+Decompiler pass, 2026-10-05, checked on six tuning captures: the per-sample
+ratio of (DID − Ts) to the predicted pulse has median 1.006, p10–p90
+0.961–1.030, over 5,039 steady samples; at BFS above 28k it is 1.007, n = 594.
+46 fuel-cut reads equal the predicted Ts within ±2 counts.
+
+- **Order (verified).** A 10.24 ms task table (`0x21A30`) runs:
+  1. φ (`0x575EC`);
+  2. dead time Ts (`0x57144`);
+  3. the fuel-pressure correction (`0x53B8C`);
+  4. transients (`0x527CC`);
+  5. the per-cylinder stages.
+  Crank-segment code loads the ATU-II channel-8 one-shot counters (`0xFFFFF640 + 2c`).
+- **Formula (verified; u16 words, u32 intermediates):**
+
+      base_b = (BFS 0x1038 × φ 0x26BE) >> 17                 # BFS·φ/8, φ in Q14
+      G_b    = max(246, ((base_b·α_b/0x6400 + wallfilm 0x26DC) × w1800) >> 14)
+      k_b    = STFT 0x26B4/6 + LTFT 0x26DE/E0 + w2E8C − 0xC800   # trims ADD; 0x6400 = 1.0
+      Ti_b   = (G_b·k_b >> 16) + Ts                          # bank pulse 0x1B9A/1B9C
+      x_c    = (Ti_b + 0x141A[c] − 0x152E[c]) × D605[c] >> 7 # D605 = 128 for all six
+      P_c    = max(short-pulse(x_c), min pulse 0x2770)       # short-pulse cal 0x9120–0x9126
+
+  - α is the EVAP purge factor (`0x4698`/`469A`; name inferred). `w2E8C` is a
+    diagnostic perturbation, neutral in normal driving.
+  - Units: 10 µs per count. Inferred, but the timer clock and UpRev's ×0.01 ms
+    scale agree.
+- **Dead time is linear, not a table (verified).**
+  `Ts = max(0, 47 + ((175 − Vb)·92) >> 7)`, with `0x8C41` = 47, `0x84F2` = 92,
+  and Vb = PID 0x42 / 0.08 V. That is 0.47 ms at 14.0 V plus 0.090 ms per volt
+  below it.
+- **Fuel-pressure correction (verified structure).** `w1800 = b1772 × 10601
+  (0x9254) >> 8`, where `b1772` is a linearised `256·√(350/(350 + vacuum))`.
+  - 175 at `0x8A89` is read as 350 kPa (inferred).
+  - Vacuum is *estimated* from baro and the load and rpm curves `D627`/`D637`.
+    The estimate never falls below about 0.2·baro.
+  - Removing this term makes the data ratio drift from 0.97 to 0.91 with
+    vacuum.
+- **Coolant and after-start enrichment live inside φ** (the `0x26F6` terms and
+  the cold state), not as separate pulse factors. Start pulses and the min pulse
+  fade out after start; the steady min pulse is 50 µs.
+- **DIDs `0x1206`/`0x1207` (verified)** = `0xFFFF2710`/`2712`, the
+  cycle-start copies of `279C[0]`/`279C[1]`. That is the per-cylinder pulse for
+  injector index 0 (bank 1) and 1 (bank 2); that these are cylinders 1/2 is
+  inferred.
+  - The value **includes dead time**, trims, transients and the pressure
+    correction.
+  - It is taken **before** the short-pulse correction and the min-pulse floor.
+  - Unit 10 µs. In fuel cut both read Ts.
+- **PID `0x44` is not φ in general (verified).** `PID 0x44 = 0x26BE ×
+  0x46AC / 3675`, and `46AC` copies the A/F feedback target `46B2`. So it
+  equals φ only while that target is 7350 (14.7). 2,437 idle reads of 0.871
+  have pulses matching φ = 1.0. Use `mem:ECM_TARGET_EQUIV_RATIO` for φ.
+- **K and injector size (verified).**
+  `Tp = min(0x726F9, K·Qa·226/256 ÷ (3·N)) × 0x23CB >> 16`, about
+  0.0105·K·Qa/N (N = rpm/1.5625), and BFS ≈ 4·Tp·FC/128.
+  - K moves BFS one-for-one, and with it the Target AFR X byte, the timing-trim
+    load axis, the pressure model's load input, the wall film, and every BFS
+    threshold.
+  - **A separate injector-flow scaler, `0x9254` = 10601**, multiplies every
+    pulse after BFS (main, per-cylinder, async, start and min) without moving
+    any load axis.
+  - Injector-specific constants: Ts (`0x8C41`/`0x84F2`), short-pulse
+    (`0x9120`–`0x9126`), rail reference `0x8A89`, and the start/min curves.
+    All are identical in the UpRev base and this tune; only K differs.
+- **BFS ceiling (verified, data-checked).** `D8B3` is 255 at all 16 rpm points
+  in base and tune. The cap is 65,280 counts (32.0 ms at ÷2040), effectively
+  the 16-bit limit.
+  - WOT at about 81 kPa peaks at 37,562 (18.4 ms) at 4,000 rpm, 0.48–0.58 of
+    the cap across 1,500–5,500 rpm.
+  - +50 % air at home altitude stays under it (about 56k). At sea level with
+    today's K it would clip (about 70k).
+  - **The first limit is the load axes:** Target AFR and timing saturate at
+    BFS 44,019 (the Load Point Scaler), only 17 % above today's WOT peak.
+- **Fuel cut (verified).**
+  - Rev limiter (`0x4F768`, from map-slot words `0xFFFFB040`–`46`): cuts at
+    6,350 rpm and resumes below 6,150. With the unidentified flag
+    `0xFFFF2841` bit 1 set, it is 6,200 / 5,800.
+  - Stationary cut: speed 0, ≥ 3,600 rpm and BFS ≥ 36,864, after a delay.
+  - The BFS decel-cut curves are all zero.
+  - Limp cut at 2,800 rpm on diagnostic item `0x30`.
+  - No BFS- or airflow-based cut while moving.
+
 ## Open
 
 - **Catalog:** apply the Mode 22 corrections to `data/dids.yaml`, with the

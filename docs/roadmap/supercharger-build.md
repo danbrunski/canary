@@ -122,6 +122,37 @@ one. Name them now, before data from the new engine arrives looking plausible:
   ms, but ms → fuel mass changes with the 700 cc injectors. `ECM_AIR_CHARGE`
   (0x1208, air × K) changes scale with K.
 
+## What the ECM firmware says about the build (2026-10-05)
+
+From the injector-chain, λ and Fuel Comp passes; the detail is in
+`docs/ecu-firmware-analysis.md`.
+
+- **Injector rescale:** use the injector-flow scaler `0x9254` (pulse width
+  only, no load axis moves) in preference to K. K also moves the Target AFR
+  and timing load axes, the ECM's pressure model and every BFS threshold.
+  - The 700 cc injectors also need their own dead-time constants
+    (`0x8C41`/`0x84F2`; dead time is linear in battery voltage, not a table)
+    and short-pulse constants (`0x9120`–`0x9126`).
+- **The ECM's fuel-pressure model cannot see boost.** It estimates vacuum from
+  load and rpm, never below about 0.2·baro, so it always assumes at least
+  366 kPa across the injector.
+  - A rail held 350 kPa above atmosphere is about 300 kPa above the manifold
+    at 50 kPa boost, so roughly 10 % lean before any correction.
+  - A regulator that tracks boost 1:1 leaves about 2 %.
+  - Fuel Comp cannot absorb this: its load byte saturates near full throttle
+    and does not see boost. Target AFR via a rescaled Load Point Scaler can.
+- **Load axes saturate first:** Target AFR and timing index on BFS up to
+  44,019 (the Load Point Scaler), 17 % above today's WOT peak. Boosted
+  operation runs in the last column unless `0x9416` is rescaled.
+- **The BFS ceiling** (`D8B3`, 65,280 counts) does not clip at home altitude
+  even at +50 % air. It would at sea level with today's K.
+- **λ reference:** PID 0x24/0x28 are the ECM's altitude-corrected λ. UpRev's
+  AFR and CANary's voltage curve skip the altitude gain, reading lean at
+  altitude. An external wideband is the only independent check.
+- **Knock:** the knock state is readable from RAM (detection, applied retard,
+  fault flag). Generic Mode 03/07 never report knock-sensor faults. The HI DET
+  latch also selects the timing-trim table, so edit the table that is live.
+
 ## Boosted fuelling without a pressure input
 
 The ECM has no MAP input, and the fuel system is returnless. Injector ΔP =
