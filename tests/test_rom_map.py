@@ -293,14 +293,11 @@ def test_slot_table_axes_are_the_ones_the_lookup_wrappers_search() -> None:
         "verified",
     )
     assert (cols.offset, cols.confidence) == (0xCB29, "verified")
-    # The load byte at UpRev's VFR scale (0x80 = 50 %): a display convention.
+    # The throttle-model fill byte as % of the curve's 224 ceiling.
     assert cols.decode is not None
-    assert (cols.decode.scale, cols.decode.unit, cols.decode.confidence) == (
-        0.390625,
-        "%",
-        "inferred",
-    )
-    assert cols.decode.apply(0x80) == pytest.approx(50.0)
+    assert (cols.decode.unit, cols.decode.confidence) == ("%", "verified")
+    assert cols.decode.apply(224) == pytest.approx(100.0)
+    assert cols.decode.apply(112) == pytest.approx(50.0)
     assert fuel_comp.decode is not None
     assert fuel_comp.decode.apply(132) == pytest.approx(103.125)  # UpRev showed 103.13
     assert fuel_comp.decode.apply(131) == pytest.approx(102.34375)  # and 102.34
@@ -370,7 +367,9 @@ def test_shipped_map_flags_uprevs_swapped_fuel_comp_labels_on_every_copy_and_now
     assert "0xCB29" in record.editor_row_labels and "RPM" in record.editor_row_labels
     assert "0xCACD" in record.editor_col_labels
     assert "Volumetric Flow Ratio" in record.editor_col_labels
-    assert "x 128" in record.translation and "/ 128" in record.translation
+    # rpm of row i = column-i "VFR %" label x 128; our % of the 224 ceiling
+    # for column j = row-j "RPM" label / 112 (raw = label / 50).
+    assert "x 128" in record.translation and "/ 112" in record.translation
 
 
 def _fuel_comp(data: dict[str, Any]) -> dict[str, Any]:

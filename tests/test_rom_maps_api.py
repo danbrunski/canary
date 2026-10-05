@@ -104,10 +104,7 @@ def test_profile_driven_slots_and_unverified_tables(tmp_path, monkeypatch):
         record = table["editor_disagreement"]
         if table["kind"] == "fuel_compensation":
             assert record["editor"] == "UpRev" and record["positions_match"] is True
-            assert (
-                table["x_unit"] == "%"
-                and table["x_label"] == "Volumetric Flow Ratio (throttle-based)"
-            )
+            assert table["x_unit"] == "%" and table["x_label"] == "Throttle-model fill (alpha-N)"
         else:
             assert record is None
     with pytest.raises(ValueError, match="empty"):

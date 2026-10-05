@@ -48,8 +48,7 @@ const result: RomInspection = {
       title: kind === "fuel_targets" ? "Target AFR" : "Fuel Compensation",
       status: slot === 1 && kind === "fuel_targets" ? ("available" as const) : ("tbd" as const),
       reason: "TBD — complete table location and axes not verified.",
-      x_label:
-        kind === "fuel_targets" ? "Base Fuel Schedule" : "Volumetric Flow Ratio (throttle-based)",
+      x_label: kind === "fuel_targets" ? "Base Fuel Schedule" : "Throttle-model fill (alpha-N)",
       x_unit: kind === "fuel_targets" ? "ms" : "%",
       y_label: "Rotations Per Minute",
       y_unit: "rpm",
@@ -141,7 +140,7 @@ describe("ROM maps panel", () => {
       expect(note).toHaveTextContent(
         'columns = 0xCACD (the rpm axis) x 100 / 256, named "Volumetric',
       );
-      expect(card).toHaveTextContent("X: Volumetric Flow Ratio (throttle-based) (%) · Y:");
+      expect(card).toHaveTextContent("X: Throttle-model fill (alpha-N) (%) · Y:");
       expect(
         within(screen.getByRole("region", { name: `Map ${slot} Target AFR` })).queryByRole("note"),
       ).not.toBeInTheDocument();

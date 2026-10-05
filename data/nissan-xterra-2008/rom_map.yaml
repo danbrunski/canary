@@ -551,8 +551,8 @@ tables:
         "VFR" axis.
       translation: >-
         Real rpm of row i = UpRev's column-i "VFR %" label x 128; real load of
-        column j = UpRev's row-j "RPM" label / 128, which is the
-        Volumetric Flow Ratio % shown here.
+        column j = UpRev's row-j "RPM" label / 112, which is the throttle-model
+        fill % shown here (or / 50 for the raw byte, 0-224).
       evidence: >-
         Operator check 2026-10-04 (docs/ecu-firmware-analysis.md, "UpRev's
         Fuel Comp display, checked against memory"; d4fee9e): UpRev's Map 1
@@ -614,34 +614,37 @@ tables:
       swapped, so a cell's rpm and load read from UpRev's labels are wrong
       (the table's editor_disagreement). Not yet seen live on this table.
   - id: fuel_comp_flow_axis
-    name: Fuel Compensation load axis (Volumetric Flow Ratio, throttle-based)
+    name: Fuel Compensation load axis (throttle-model fill, alpha-N)
     offset: 0xCB29
     rows: 1
     cols: 16
     dtype: u8
     decode:
       kind: linear
-      quantity: volumetric flow ratio
+      quantity: throttle-model fill
       unit: '%'
-      scale: 0.390625
-      confidence: inferred
+      scale: 0.44642857142857145
+      confidence: verified
       evidence: >-
-        The axis is compared directly with the byte 0xFFFF118A, which
-        FUN_0003c444 computes as a saturating curve (0xEAEC/0xEACC, 5..224) of
-        a throttle-derived flow per revolution (curve 0xDD94 of the throttle
-        word 0xFFFF2CC8, plus a second flow term, x k/rpm): an alpha-N
-        estimate of cylinder fill, which is what UpRev's name "Volumetric Flow
-        Ratio" describes. It is not calculated load (it reads ~20 % at idle
-        like PID 0x04, but diverges in cruise). raw x 100/256 is
-        UpRev's own display convention for that quantity (0x80 = 50.00 %),
-        applied here to the axis that actually carries it; what 100 % means
-        physically is not established (the ECM never exceeds 224 = 87.5 %).
+        Percent of the model's ceiling: raw x 100/224. The axis is compared
+        directly with the byte 0xFFFF118A, which the firmware computes
+        (FUN_0003c444; listing and Ghidra passes agree, 2026-10-04) as
+        X = (1,141,245/rpm) x (throttle effective area - learned idle air +
+        EVAP purge area/4) / 512, through the saturating curve 0xEAEC/0xEACC,
+        whose maximum is 224 (reached for X >= 64512). So 100 % is the most
+        the model can say; reading it as "the throttle no longer restricts"
+        is inferred. It has no baro or temperature input, has no absolute
+        unit in code, and is not calculated load. Reproduced on 60 steady
+        points of the 2026-10-04 ram-study capture (median ratio 1.000 idle,
+        1.027 off idle). Stock breakpoints 240 and 255 (107 %, 114 %) are
+        unreachable. UpRev displays the same byte as raw x 100/256 under the
+        name Volumetric Flow Ratio, on the wrong axis (editor_disagreement).
     confidence: verified
     evidence: >-
       Role verified from the code (call site 0x02DC34-46, wrapper 0x026A24,
       0x027114: a direct byte compare with the stack byte loaded from
       0xFFFF118A, whose writer is decoded in data/dids.yaml
-      ECM_FUEL_COMP_X_INPUT); its % scale is a display convention (decode).
+      ECM_FUEL_COMP_X_INPUT); its % is of the model's 224 ceiling (decode).
       The code compares it byte for byte with 0xFFFF118A
       (mem:ECM_FUEL_COMP_X_INPUT, load-like, 0-218 on the 2026-10-04 drive),
       which makes it the column axis. UpRev's editor shows it as the rpm rows

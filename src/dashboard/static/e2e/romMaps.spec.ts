@@ -25,8 +25,7 @@ test("ROM picker, colored target table, live trace and five-slot TBD navigation"
         title: kind === "fuel_targets" ? "Target AFR" : "Fuel Compensation",
         status: slot === 1 && kind === "fuel_targets" ? ("available" as const) : ("tbd" as const),
         reason: "TBD — complete table location and axes not verified.",
-        x_label:
-          kind === "fuel_targets" ? "Base Fuel Schedule" : "Volumetric Flow Ratio (throttle-based)",
+        x_label: kind === "fuel_targets" ? "Base Fuel Schedule" : "Throttle-model fill (alpha-N)",
         x_unit: kind === "fuel_targets" ? "ms" : "%",
         y_label: "Rotations Per Minute",
         y_unit: "rpm",
