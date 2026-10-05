@@ -113,6 +113,7 @@ async def test_default_collectors_use_canable_obd_by_default(
         reconnect_policy,
         on_scheduler_metrics=None,
         on_handoff_stats=None,
+        sleeps_with_bus=False,
     ):
         captured["spec"] = spec
         captured["queue"] = queue
@@ -178,6 +179,7 @@ async def test_default_collectors_loads_custom_pids_when_present(
         reconnect_policy,
         on_scheduler_metrics=None,
         on_handoff_stats=None,
+        sleeps_with_bus=False,
     ):
         captured["spec"] = spec
         stop_event.set()
