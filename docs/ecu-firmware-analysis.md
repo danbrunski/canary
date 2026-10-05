@@ -334,6 +334,50 @@ memory window.
 - diagnostic item `0x11C`;
 - the purpose of `0xFFFF4C58`.
 
+### Intake cam timing (VTC): controller, duty scale and banks
+
+Decompiler pass, 2026-10-04. The catalog side is D03.37.
+
+- **The DID bytes are a snapshot.** Each cycle, `0x20EF2` copies `0x8C` bytes
+  from `0xFFFF2792` to `0xFFFF2706`, so CAN DIDs `0x1138`/`0x1139`/`0x1135`/`0x1163`
+  (`0xFFFF278C`–`278F`) mirror `0xFFFF2818`–`281B`. The K-line table reads
+  `0xFFFF281A` and `0xFFFF2700` directly.
+- **Controller, verified.** It is a PID per bank, run from task `0xC4D98`:
+  - error = target `0xFFFF2700` − measured angle, in 0.5° counts;
+  - P: Kp from an 8×8 rpm × coolant map (`0x9C59` bank 1, `0x9C99` bank 2),
+    active when |e| > 4;
+  - I: clamped ±128 and held in RAM, so nothing is learned across key cycles;
+  - D: none (the Kd tables are all zero);
+  - a ±12 kick when a settled cam drifts;
+  - feed-forward holding duty from coolant tables `0xDA2F`/`0xDA37`.
+  - Output (`0xC641A`): `duty = (hold + PID·128/68) × 150 / Vbatt byte`, capped
+    at 255.
+- **Duty scale, verified.** `0xC66C4` writes timer channel 7 compare
+  registers (`0xFFFFF592` bank 1, `0xFFFFF590` bank 2) as `raw·33·39/80`,
+  against a period of 4,125 counts. So **duty = raw × 0.39 %**: a warm hold
+  of about 99 is about 39 %. PWM is about 303 Hz, assuming a 20 MHz
+  peripheral clock.
+- **Banks, verified from the DTC item table at `0x102D0`.**
+  - Index 0 = Bank 1: P0011/P0075, cam input `0xFFFFF44E`, `0x1138` duty and
+    `0x1135` angle.
+  - Index 1 = Bank 2: P0021/P0081, `0xFFFFF44C`, `0x1139` and `0x1163`.
+  - Whether Nissan's Bank 1 is physically the cylinder 1/3/5 side is inferred.
+    To check it, unplug that side's solenoid at key-on engine-off; the circuit
+    test should then set P0075, not P0081.
+- **Angles, verified.** `raw × 0.5 − 64` °CA of advance from the learned
+  retard stop (128 = the stop). `0xFFFF26FC` is a copy of the target. The
+  warm target map `0xA579` tops out at +35°.
+- **Duty forced to 0 when any of these hold:**
+  - within 30 ticks of start;
+  - a crank or cam sensor fault, or P0011/P0021 this trip;
+  - the Vbatt byte outside 125–200;
+  - coolant above 120 °C, or below 56 °C on a cold start;
+  - rpm below 1,200 (off below 1,000);
+  - the target at the stop.
+  Above a 38° target it runs open loop at full duty for about 1 s.
+- **Open:** the task rate (needed to state the I gain per second), the Vbatt
+  byte scale, and a scope check of the PWM period.
+
 ## Open
 
 - **Catalog:** apply the Mode 22 corrections to `data/dids.yaml`, with the
