@@ -379,6 +379,86 @@ Decompiler pass, 2026-10-04. The catalog side is D03.37 (landed 2026-10-05:
 - **Open:** the task rate (needed to state the I gain per second), the Vbatt
   byte scale, and a scope check of the PWM period.
 
+### Knock monitoring (observation only)
+
+Decompiler pass, 2026-10-05. The goal was to *observe* the ECM's
+knock-protection results so that CANary can watch them. Calibration internals
+and any way of changing knock control were out of scope and are not recorded
+here.
+
+**First finding: the ECM appears to be in its knock-sensor fault fallback.**
+UpRev's K-line stream reads three RAM addresses, decoded 2026-09-24
+(`docs/uprev-usb-kline-research.md`, `21 84` layout offsets 4–8 and 17):
+
+| Address | UpRev column | Has read since the 2026-07-26 flash |
+|---|---|---|
+| `0xFFFF13FE` | KNOCK STRENGTH, as 0x500 sign-flipped | `0xFB00` (−5.0°), constant |
+| `0xFFFF283F` | HI DET | bit 6 set, constant |
+| `0xFFFF28AA` | KNOCK EVENT is bit 2 | bit 2 never set |
+
+- These are the ECM's real knock variables. The earlier explanation, that
+  UpRev's definitions did not match ZS44A, is wrong.
+- In this program, `0xFFFF13FE` is held at `0xFB00` only while bit 7 of
+  `0xFFFF479D` is set, and that same bit forces the High Det latch.
+- Bit 7 means a knock-sensor diagnostic is stored: items `0xAA`/`0xAB`
+  (P0327/P0328, sensor 1) or `0xAC`/`0xAD` (P0332/P0333, sensor 2). The FSM
+  says these set no MIL.
+- Generic Mode 03/07 showed nothing (07-28, 09-23). But a scan tool's Nissan
+  DTC read on 09-24 logged `17 FF 00` → `57 01`, which looks like one code.
+- **Most likely state:** a fixed retard target with closed-loop knock retard
+  bypassed. **Not yet confirmed live. Confirm it before boost.** The
+  verification steps are below.
+
+**Where the observation values live.** All are RAM, reset at engine stop, and
+none is exposed by any Mode 01 PID, Mode 22 DID (both pointer tables
+searched) or Mode 06 MID.
+
+- **Sensors:** two, odd firing index → sensor 1/bank 1, even → sensor 2/bank 2
+  (`0xFFFF11FC` is the 1–6 firing counter; that it equals the cylinder number
+  is inferred). Circuit levels are at `0xFFFF2CEF`/`2CF0`, with an in-range
+  window of 50–199.
+- **Detection per firing window:**
+  - `0xFFFF249B`: the cylinder just processed;
+  - `0xFFFF24A8`: per-cylinder knocked bits;
+  - `0xFFFF2550 + 4(c−1)`: s32 intensity, unitless;
+  - `0xFFFF249C + 2(c−1)`: the threshold in force;
+  - `0xFFFF28AA` bit 2: the last window knocked;
+  - `0xFFFF249A`: event count, cleared every 10.24 ms.
+- **Retard (global, not per cylinder):**
+  - `0xFFFF1254`: s16, 1/256°, ≤ 0;
+  - `0xFFFF26D2`: whole degrees;
+  - `0xFFFF26E6`: limit in force;
+  - `0xFFFF13FE`: target.
+  - Learned retard `0xFFFF124E`/`1250`/`1252` resets when the engine stops or
+    coolant is below 60 °C.
+- **Status:** `0xFFFF28AE` bit 5 = knock control active, `0xFFFF283F` bit 6 =
+  High Det, `0xFFFF479D` bit 7 = knock-sensor DTC stored. Item status bytes
+  are at `0xFFFF677A`–`6785`.
+- **Path to final timing (verified):** the applied retard combines into base
+  timing at `0xFFFF2338` and reaches the logged timing word through
+  `0xFFFF1346` → `0xFFFF232E` (rate-limited), where
+  `ECM_IGNITION_TIMING_RAM` = 110 − `0xFFFF232E`. So final timing minus base
+  timing shows the retard live.
+
+**Verification, reads only (no ECU writes):**
+1. **At key-on (engine off) and at idle**, read `0xFFFF479D`, `0xFFFF13FE`,
+   `0xFFFF677A`–`6785` and `0xFFFF2CEF`–`2CF0`, and repeat the scan tool's
+   `17 FF 00`. Bit 7 set with `0xFB00` confirms the fallback. The status bytes
+   name the item (sensor 1 or 2, low or high circuit), and the circuit level
+   shows whether it is in range now.
+2. **Simultaneous with UpRev** (CANary passive on the ECM session): the three
+   addresses should match UpRev's Knock Strength, HI DET and Knock Event.
+
+**Open:**
+- which item is stored, and whether it is a sensor, a harness, or a stale code;
+- whether the status survives a battery disconnect;
+- whether `0xFFFF11FC` order equals cylinder number.
+
+Proposed memory windows (`0xFFFF232E`/12, `0xFFFF124E`/8, `0xFFFF13FE`/2,
+`0xFFFF249A`/15, `0xFFFF2550`/24, the flag bytes, and a ≤ 1 Hz fault window)
+are in `~/ecu-re/NOTES.md`, session 5. They go into the catalog through the
+`data/dids.yaml` owner, with known-answer checks.
+
 ## Open
 
 - **Catalog:** apply the Mode 22 corrections to `data/dids.yaml`, with the

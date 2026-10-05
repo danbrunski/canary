@@ -85,6 +85,12 @@ one. Name them now, before data from the new engine arrives looking plausible:
   unsupported. The open question from 2026-09-21 — is WOT lean the MAF curve or
   delivery sagging? — could only ever be answered by an external gauge, and
   after the build fuel pressure matters more, not less.
+- **Knock control may be in fault fallback: confirm before boost (2026-10-05).** The firmware shows
+  the knock variables UpRev logs have sat in the knock-sensor fault state since at least the
+  2026-07-26 flash: a fixed retard target, with closed-loop knock retard probably bypassed. A knock-sensor
+  DTC is very probably stored, silently, with no MIL. Confirm it with the reads in
+  `docs/ecu-firmware-analysis.md` ("Knock monitoring"), then fix the cause, before the first boosted
+  drive. The RAM addresses for live knock observation are now known; the paragraph below predates this.
 - **No knock stream.** Final ignition timing (`mem:ECM_IGNITION_TIMING_RAM`, PID
   0x0E) is the only knock proxy. Under boost, timing pulled by knock control and
   timing mapped low look the same unless the map is known — so the ROM that is

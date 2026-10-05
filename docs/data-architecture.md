@@ -258,6 +258,8 @@ measured limit.
 | Throttle X/Y **map traces** | the ETC map's live axes (throttle % × RPM) |
 | `A/F ADJ` (long-term trim) | see below |
 
+> **Superseded 2026-10-05 — read this first.** The firmware shows the ECM *does* hold knock variables, and UpRev streams three of them: `0xFFFF13FE`, `0xFFFF283F` and `0xFFFF28AA`. Their constant values are the knock-sensor **fault fallback**, not a definition mismatch. They mean a knock-sensor DTC is stored, closed-loop knock retard is likely bypassed, and a fixed retard target is in force. Unconfirmed live; see `docs/ecu-firmware-analysis.md`, "Knock monitoring (observation only)", for the verification. The text below is kept as the record of the earlier conclusion.
+
 **Knock is not streamed by this ECM — settled 2026-08-01 from the FSM, not
 inferred from failed searches.** `xterra_fsm/ec.pdf` EC-69's CONSULT-III
 application table marks the knock sensor under *self-diagnostic results* only,

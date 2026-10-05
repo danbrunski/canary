@@ -179,6 +179,8 @@ volumetrically.
     matches `data/fsm/signals.json`: of 333 extracted DATA MONITOR
     parameters, **none is knock-related**.
 
+  > **Superseded 2026-10-05 — read this first.** The firmware shows the ECM *does* hold knock variables, and UpRev streams three of them: `0xFFFF13FE`, `0xFFFF283F` and `0xFFFF28AA`. Their constant values are the knock-sensor **fault fallback**, not a definition mismatch. They mean a knock-sensor DTC is stored, closed-loop knock retard is likely bypassed, and a fixed retard target is in force. Unconfirmed live; see `docs/ecu-firmware-analysis.md`, "Knock monitoring (observation only)", for the verification. The text below is kept as the record of the earlier conclusion.
+
   Conclusion: this ECU exposes knock through exactly one interface, a DTC.
   There is no knock telemetry to find — the earlier "unconfirmed, not ruled
   out" framing is superseded. UpRev's constant knock fields (`HI DET` = 1,
