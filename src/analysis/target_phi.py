@@ -42,6 +42,15 @@ import yaml
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from src.analysis.channels import ChannelSpecError, read_channels
+from src.analysis.ecu_application import (
+    Applicability,
+    ApplicationModel,
+    ApplicationModelRefusalError,
+    applicability,
+    check_image,
+    check_image_sha,
+    observed_specs,
+)
 from src.analysis.rom_image import read_calibration_id, sha256_hex, table_values
 from src.analysis.rom_map import RomMap
 from src.analysis.rom_trace import (
@@ -56,7 +65,8 @@ from src.paths import DIDS_YAML
 from src.signals.pairing import PairingPolicy, match_ordered, to_seconds
 
 #: Bumped when the evaluator's states, reasons or record shape change.
-EVALUATOR_VERSION = 1
+#: 2: provenance names the application model; blockers come from it (E05.1).
+EVALUATOR_VERSION = 2
 
 TWIN_FILE = "target_phi_twin.yaml"
 
@@ -147,18 +157,12 @@ class DefaultSlot(_Strict):
     evidence: str = Field(min_length=1)
 
 
-class RamCopy(_Strict):
-    status: Literal["verified", "unverified"]
-    evidence: str = Field(min_length=1)
-
-
 class MapIdentity(_Strict):
     magic: MagicRule
     active_map: ActiveMapRule
     selector: SelectorRule
     default_slot: DefaultSlot
     max_age_s: float = Field(gt=0)
-    ram_copy: RamCopy
 
     def channels(self) -> list[str]:
         return [self.magic.channel, self.active_map.channel, self.selector.channel]
@@ -185,7 +189,11 @@ class ScaleCurve(_Strict):
 
 
 class FinalCommand(_Strict):
-    status: Literal["verified", "unverified"]
+    """The decoded constants between the lookup and ``0xFFFF174B`` that the
+    twin implements. Whether the path on to the final word is resolved is the
+    application model's to say (``ecu_application_model.yaml``), not this
+    file's: a status here is refused."""
+
     enrichment_gate: EnrichmentGate
     enrichment_scale_curve: ScaleCurve
     evidence: str = Field(min_length=1)
@@ -293,6 +301,9 @@ class Acquisition(_Strict):
 class TwinDefinition(_Strict):
     schema_version: Literal[1]
     name: Literal["target_equiv_ratio"]
+    #: The application-model output this twin predicts (E05.1). Its blockers
+    #: decide whether any residual is qualified.
+    application_output: str = Field(min_length=1)
     program: Program
     table: TableRef
     inputs: Inputs
@@ -405,6 +416,9 @@ class ResolvedTable:
     load_point_scaler: int | None
     #: Whether the final-command constants were checked against the image.
     final_command_constants_checked: bool
+    #: The application model's standing for the twin's output: its blockers
+    #: decide qualification (E05.1).
+    application: Applicability
 
     def provenance(self) -> dict[str, Any]:
         return {
@@ -436,6 +450,41 @@ def _check_final_command_constants(image: bytes, definition: TwinDefinition) -> 
             f"enrichment scale curve at 0x{curve.rom_offset:X} is {values}, not the identity "
             f"{curve.identity_value}; the twin does not model that scaling",
         )
+
+
+def bind_application(
+    application_model: tuple[ApplicationModel, str], definition: TwinDefinition
+) -> Applicability:
+    """The application model's standing for this twin, after checking the two
+    describe the same thing: the output names this twin's file, the node it
+    predicts is implemented, and the observed inputs on that node's path are
+    exactly the channels the twin reads. Refuses ``application_model_mismatch``
+    (or ``output_undeclared``)."""
+    model, sha = application_model
+    try:
+        output = model.output(definition.application_output)
+    except ApplicationModelRefusalError as exc:
+        raise TwinRefusalError(exc.reason, exc.message) from exc
+    if output.twin is None or output.twin.definition != TWIN_FILE:
+        raise TwinRefusalError(
+            "application_model_mismatch",
+            f"output {output.id} does not name {TWIN_FILE} as its twin",
+        )
+    predicts = model.node(output.twin.predicts)
+    if predicts.twin != "implemented":
+        raise TwinRefusalError(
+            "application_model_mismatch",
+            f"the model says {predicts.id} is {predicts.twin}; the twin computes it",
+        )
+    needed = set(observed_specs(model, predicts.id))
+    reads = {*definition.inputs.channels().values(), *definition.map_identity.channels()}
+    if needed != reads:
+        raise TwinRefusalError(
+            "application_model_mismatch",
+            f"the model's observed inputs to {predicts.id} are {sorted(needed)}; the twin "
+            f"reads {sorted(reads)}",
+        )
+    return applicability(model, sha, output.id)
 
 
 def check_trace_mapping(viewer: ViewerDefinition, definition: TwinDefinition) -> None:
@@ -478,20 +527,29 @@ def resolve_table(
     definition: TwinDefinition,
     *,
     viewer: ViewerDefinition,
+    application_model: tuple[ApplicationModel, str],
     expected_sha256: str,
     slot: int,
 ) -> ResolvedTable:
     """The table the ECM reads, from a W08 library image. Refuses by name:
     ``mapping_unverified``/``mapping_mismatch`` (W05's trace mapping),
-    ``image_hash_mismatch``, ``wrong_program``, ``table_missing``,
-    ``table_unverified``, ``axis_unverified``, ``unmodelled_logic``."""
+    ``application_model_mismatch``, ``image_hash_mismatch``, ``wrong_program``
+    (the application model's program hash, then the calibration ID),
+    ``patch_missing``, ``table_missing``, ``table_unverified``,
+    ``axis_unverified``, ``unmodelled_logic`` (the twin's constants or the
+    model's calibration conditions)."""
     check_trace_mapping(viewer, definition)
+    applied = bind_application(application_model, definition)
     sha = sha256_hex(image)
     if sha != expected_sha256:
         raise TwinRefusalError(
             "image_hash_mismatch",
             f"the session ran plain image {expected_sha256}; this image is {sha}",
         )
+    try:
+        check_image(image, application_model[0])
+    except ApplicationModelRefusalError as exc:
+        raise TwinRefusalError(exc.reason, exc.message) from exc
     calibration_id = read_calibration_id(image, rom_map)
     if calibration_id != definition.program.calibration_id:
         raise TwinRefusalError(
@@ -554,6 +612,7 @@ def resolve_table(
         source="rom_library",
         load_point_scaler=None if scaler is None else int(scaler),
         final_command_constants_checked=True,
+        application=applied,
     )
 
 
@@ -562,6 +621,7 @@ def table_from_calibration(
     definition: TwinDefinition,
     *,
     viewer: ViewerDefinition,
+    application_model: tuple[ApplicationModel, str],
     revision: str,
     image_sha256: str,
     slot: int,
@@ -570,8 +630,16 @@ def table_from_calibration(
 
     For checks that must run without the private ROM. The image hash still
     names which bytes these are (the registry's ``image_sha256`` for the
-    revision); the private-ROM test pins them equal to that image's slot."""
+    revision); the private-ROM test pins them equal to that image's slot.
+    Without the bytes, the application model must list that exact image as
+    checked against its program (``program_unverified``), and the calibration
+    conditions stay unchecked (``final_command_constants_unchecked``)."""
     check_trace_mapping(viewer, definition)
+    applied = bind_application(application_model, definition)
+    try:
+        check_image_sha(image_sha256, application_model[0])
+    except ApplicationModelRefusalError as exc:
+        raise TwinRefusalError(exc.reason, exc.message) from exc
     target = calibration.target_map(revision)
     if target is None or target.raw_values is None:
         raise TwinRefusalError("table_missing", f"no raw target table recorded for {revision!r}")
@@ -601,6 +669,7 @@ def table_from_calibration(
         source="afr_calibration",
         load_point_scaler=None,
         final_command_constants_checked=False,
+        application=applied,
     )
 
 
@@ -1244,17 +1313,16 @@ def _summarise(
     coolant_spec: str | None,
 ) -> dict[str, Any]:
     records = [c.record for c in candidates]
-    blockers: list[str] = []
-    if definition.final_command.status != "verified":
-        blockers.append("final_command_path_unverified")
-    if definition.map_identity.ram_copy.status != "verified":
-        blockers.append("ram_copy_unverified")
+    # The application model's blockers (unresolved logic between the lookup
+    # and the final word, an unverified RAM copy), then this run's own.
+    blockers: list[str] = list(table.application.blockers)
     if not table.final_command_constants_checked:
         blockers.append("final_command_constants_unchecked")
     provenance = {
         **table.provenance(),
         "program": definition.program.calibration_id,
         "decoder": {"profile_file": TWIN_FILE, "sha256": definition_sha256},
+        "application_model": table.application.provenance(),
         "evaluator_version": EVALUATOR_VERSION,
         "kernel_version": KERNEL_VERSION,
     }
@@ -1405,6 +1473,7 @@ __all__ = [
     "SlotResolution",
     "TwinDefinition",
     "TwinRefusalError",
+    "bind_application",
     "check_trace_mapping",
     "check_windows",
     "duplicate_use",

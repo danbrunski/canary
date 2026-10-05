@@ -13,6 +13,13 @@
 schema_version: 1
 name: target_equiv_ratio
 
+# The output of the ECM application model (ecu_application_model.yaml, E05.1)
+# this twin predicts. That model traces the path from the lookup to the final
+# word and owns whether it is resolved: its blockers for this output
+# (final_command_path_unverified, ram_copy_unverified) are what keep every
+# residual unqualified. Nothing here restates them.
+application_output: target_equiv_ratio
+
 # Which ECM program this decode belongs to. A different calibration ID is a
 # different program and refuses (wrong_program); an image of this program
 # the decode was not checked on still resolves, by its own hash.
@@ -98,27 +105,24 @@ map_identity:
       slot copy 0x0DE3E4 writes it, after a selector step. 0/0 on 196/196
       reads of the 2026-10-04 drive.
   # Identity reads must bracket a sample, both within this age, and agree.
+  # Whether the live RAM table (0xFFFFB260, 64 bytes: two 0x23 reads, the ECM
+  # caps one at 63) equals the selected library slot is the application
+  # model's node target_afr_ram_copy (twin: assumed, blocker
+  # ram_copy_unverified) until E02.2 records the comparison.
   max_age_s: 10.0
-  # E02.2's byte comparison of the live RAM table (0xFFFFB260, 64 bytes: two
-  # 0x23 reads, the ECM caps one at 63) with the selected library slot.
-  # Until it is recorded, no residual is qualified.
-  ram_copy:
-    status: unverified
-    evidence: >-
-      Not yet read. A battery-backed RAM copy could predate a reflash, so the
-      default-slot rule alone does not prove the RAM table equals the
-      image's slot 1. Vehicle required (E02.2).
 
 reference:
   channel: 'mem:ECM_TARGET_EQUIV_RATIO'
   sentinel_channel: 'mem:ECM_TARGET_EQUIV_RATIO_SENTINEL'
   q_bits: 14
 
-# What lies between the lookup and the commanded word, from the code. A
-# prediction is of the lookup's command; until the path is verified it is not
-# a final-command prediction and no residual is qualified.
+# The decoded constants between the lookup and 0xFFFF174B that the twin
+# implements. The path on from 0xFFFF174B to the commanded word (multiplier
+# state machine, corrections, cap and slew) is traced in
+# ecu_application_model.yaml, which keeps it unresolved
+# (final_command_path_unverified): a prediction is of the gated lookup's word,
+# not yet of the final command, and no residual is qualified.
 final_command:
-  status: unverified
   # 0x055E5C..0x055E9C: the lookup result reaches 0xFFFF174B only when it is
   # >= threshold (threshold - hysteresis while 0xFFFF2886 bit 3 is already
   # set); otherwise 0x80 is written. That bit is not captured, so a lookup
@@ -139,17 +143,11 @@ final_command:
     identity_value: 128
   evidence: >-
     The final writer FUN_00055B5E forms the word from min(0xFFFF, w26F6 +
-    w27DC) x w26C0 >> 14, then (on most paths) caps it at 0xFE00 and limits
-    its step against w26CC, and writes 0 while 0xFFFF26B8 = 0x3F (fuel cut).
-    w26C0 is the enrichment multiplier: FUN_00055DB2 writes it at 0x0568B4,
-    choosing by the state byte 0xFFFF14C4 between 0x4000 (phi 1.0), a ramp
-    against w26CE, and 0xFFFF174B << 7 (the gated lookup), capped at the
-    latter. w26F6 = clamp(0x4000 + L[0xFFFF175C] + w26E8 + w1736) (0x05591C)
-    and w27DC = a curve term clamped to 0..3768 (0x0559FA) are additive
-    corrections that are not identified. So the final word equals the lookup
-    word only when the state byte selects 0xFFFF174B and those corrections
-    sum to zero; neither is captured, so the path stays unverified
-    (docs/ecu-firmware-analysis.md, "Target AFR lookup to final command").
+    w27DC) x w26C0 >> 14; FUN_00055DB2 chooses the multiplier w26C0 by the
+    enrichment state 0xFFFF14C4. The full trace (states, ramps, the three
+    corrections in w26F6, w27DC, cap and slew, calibration-dead paths) is
+    ecu_application_model.yaml; docs/ecu-firmware-analysis.md "Target AFR
+    lookup to final command".
 gates:
   # Acquisition-time pairing: every lookup input within this of the command
   # sample, and the whole tuple's spread within it too. Never carried forward.

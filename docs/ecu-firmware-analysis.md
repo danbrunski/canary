@@ -108,6 +108,31 @@ closed-loop holding from the table. Until that path is traced, the twin labels
 its value a lookup prediction and issues no qualified residual
 (`final_command_path_unverified`).
 
+### Final-command path, traced (E05.1)
+
+Read on 2026-10-04 from the listing and decompile text of the a46baa24… image
+(`~/ecu-re/out`), for E02.4's desk trace. Every item is recorded node by node,
+with widths, constants, branches and update order, in
+`data/nissan-xterra-2008/ecu_application_model.yaml`. That file is the
+source; this table is the summary.
+
+| What | Confidence | Evidence |
+|---|---|---|
+| The fuel-command task `0x0575EC` runs, once per cycle: `0x05535C`, `0x055DB2`, [`0x055A04`], `0x0556EC`, `0x055536`, `0x053400`, `0x055386`, `0x05591C`, `0x055AB8`, `0x055966`, `0x055B5E`. The multiplier is written before every reader of it in the same cycle. | Verified (code) | Listing `0x0575EC`–`0x057668`. |
+| The cycle-start copy `0x020EF2` makes `w26CC` the previous command and `w26CE` the previous `w26C0`. It also makes `0xFFFF1079` a copy of `0xFFFF1083` (the byte DID `0x1101` reports, coolant −50) and `0xFFFF11CA` a copy of `0xFFFF1202`, which is the rpm word `>> 2` (50 rpm per count). | Verified (code); coolant meaning inferred from the DID pointer table | Copy arguments at `0x020F14`–`0x020FCC`; `0x03907A`. |
+| `0xFFFF14C5` is a requested state. It is 8 when the coolant byte is < 115, i.e. 65 °C (+3 hysteresis); 1 when the gated lookup is `0x80`; otherwise 2/4/6 below 3,100 rpm / below 3,400 rpm / above (200 rpm hysteresis), or 3/5/7 with the pedal flag set. `0xFFFF14C4` commits it through four tick-stepped timers (`0xFFFF1742`–`48`) and takes values 1–6. | Verified (code) | `0x055EF0`–`0x0566BC`. |
+| `w26C0`: state 1 gives `0x4000`. States 4 and 5 (5 = cold) give the gated lookup `0xFFFF174B << 7` directly. States 2, 3 and 6 step from the previous value, up `+0x180` or down `−0x130` per tick (cal `0x8496`/`0x8495` × 8). Between 2,000 and 3,400 rpm, state 2 (and state 6 above `0x4500`) ramps down toward `0x4000`. Otherwise they start at `0x82 << 7` and ramp up, giving the lookup itself once `0xFFFF2867` bit 7 records that the ramp reached it. The result is always capped at the lookup, and forced to `0x4000` while `0xFFFF2947` ≠ 0 or `0xFFFF2BA9` < `0x20`. | Verified (code); `0xFFFF2947`'s decrement and `0xFFFF2BA9` not identified | `0x0566BE`–`0x0568B4`. |
+| In states 2, 3 and 6, a previous multiplier below `0x4000` with bit 7 clear leaves `w26C0` from an uninitialised stack word, so the firmware's own value is indeterminate there. It is reachable only through the alternate writer below. | Verified (code) | The stack slot `r15+0xC` is written only at `0x056822`. |
+| The alternate writer `0x055A04` (`w26C0` = clamp(`0xFFFF2BCE << 7`, `0x1000`..`0x6000`)) is not scheduled: its call needs cal `0x8AD3` bit 4 set. The floor `w1724` is 0 every cycle (cal `0x8D51` = 0). The extra cap at cal `0x93E2` is dead (cal `0x896E` bit 3 clear). All three conditions hold on every local ZS44A calibration. The model checks them on each image (`unmodelled_logic`). | Verified (code and bytes) | `0x057602`–`0x05762E`, `0x055AB8`–`0x055B4E`, `0x056892`. |
+| `w27DC` is 0 unless `w26C0` is exactly `0x4000` and flags `0xFFFF135F`/`0xFFFF26B9` bits 0–1 are set and `0xFFFF2A90` is clear. So it is 0 whenever the multiplier is enriching. When it applies, it is the 16-bit curve `0xED3A` on axis `0xDFD2` at max(`0xFFFF2D10`, `0xFFFF2D14`), capped at 3,768. | Verified (code); the inputs are not identified | `FUN_00055966`. |
+| In `w26F6`, three terms are added: `L175C` (signed, `0x053400`/`0x0537AE`), and `w26E8` and `w1736` (both non-negative, `0x055386` and `0x0556EC`). `L175C` and the second part of `w26E8` are zero under the same flag set: `0xFFFF26B9` bits, `0xFFFF2867` bit 6, or `0xFFFF1796` bits with `w26C0` > `0x4000`. `w1736` is gated by `0xFFFF2875` bit 6 and capped at `0x5E77 − w26C0`. | Verified (code); what each correction is for is not identified | Same functions. |
+| `0x055B5E` applies the `0xFE00` cap and the ±`0x3FC0` per-cycle slew (against `w26CC`) only while the pedal flag is clear, and only under further conditions. So during pedal enrichment the word is just min(`0xFFFF`, `w26F6` + `w27DC`) × `w26C0` >> 14. After fuel cut (previous word 0), the guarded path limits the first word to `0x3FC0`. While `0xFFFF4785` bit 6 is set, the word is instead scaled by cal `0x838A` / 64 (64 on every local image: the identity) and skips the floor, cap and slew. | Verified (code) | `0x055B5E`–`0x055DA4`. |
+| CAN DID `0x1134` reads `0xFFFF26C0`, so it is the multiplier's high byte, not the command's. That explains its catalog evidence: it matched the command on 5,000 reads with neutral corrections, and read 64 while PID `0x44` read 1.06 or 0.87. | Inferred: the pointer table is from code (`~/ecu-re/out/ram_vars.yaml`); not checked against a same-read `0xFFFF26C0` | `data/dids.yaml` 0x1134 evidence. |
+
+So the enrichment command equals the lookup word when three things hold: the state is 4 or 5, or the ramp has finished; `w26F6` = `0x4000`; and `0xFFFF2947` is 0. `w27DC` is then necessarily 0. None of these is captured, so the path stays `final_command_path_unverified`.
+
+The model's `equals_output_when` names each condition. The 58-byte read from `0xFFFF26BE` covers `w26C0`, `w26CC`, `w26CE` and `w26F6` in one read, which settles all three per sample.
+
 ### Diagnostic service handlers
 
 | What | Where | Confidence |

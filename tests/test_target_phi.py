@@ -12,6 +12,7 @@ Regenerate the fixture's ``records`` block with
 
 from __future__ import annotations
 
+import dataclasses
 import hashlib
 import json
 import struct
@@ -23,11 +24,17 @@ import pytest
 import yaml
 
 from src.analysis.channels import read_channels
+from src.analysis.ecu_application import (
+    ApplicationModel,
+    load_application_model,
+    program_sha256,
+)
 from src.analysis.rom_trace import AxisTrace, ViewerDefinition, load_viewer_definition
 from src.analysis.target_phi import (
     ResolvedTable,
     TwinDefinition,
     TwinRefusalError,
+    bind_application,
     duplicate_use,
     evaluate_session,
     load_twin_definition,
@@ -55,12 +62,17 @@ def _viewer() -> ViewerDefinition:
     return load_viewer_definition(PROFILE)
 
 
+def _model() -> tuple[ApplicationModel, str]:
+    return load_application_model(PROFILE)
+
+
 def _table(definition: TwinDefinition) -> ResolvedTable:
     calibration = load_afr_calibration(PROFILE / "afr_calibration.yaml")
     return table_from_calibration(
         calibration,
         definition,
         viewer=_viewer(),
+        application_model=_model(),
         revision=EXPECT["calibration"]["revision"],
         image_sha256=IMAGE_SHA,
         slot=EXPECT["calibration"]["slot"],
@@ -147,7 +159,10 @@ def _raw_definition() -> dict[str, Any]:
         (("gates", "clock"), "round", "acquired"),
         (("gates", "steadiness", "channels"), [{"channel": "obd:RPM"}], "exactly one"),
         (("regions", "ordinary", "load_raw"), None, "load_raw"),
-        (("map_identity", "ram_copy", "status"), "assumed", "verified"),
+        # Qualification status belongs to the application model (E05.1): the
+        # twin's own file cannot declare its path verified.
+        (("final_command", "status"), "verified", "Extra inputs"),
+        (("map_identity", "ram_copy"), {"status": "verified"}, "Extra inputs"),
     ],
 )
 def test_the_definition_refuses_an_undeclared_or_unsafe_contract(
@@ -211,12 +226,33 @@ def test_a_lookup_inside_the_gates_hysteresis_band_is_ambiguous() -> None:
 
 
 def _image_with_modelled_constants(**kwargs: Any) -> bytes:
+    """A synthetic image carrying what the twin and the application model
+    check: the gate and scale constants, UpRev's pointer redirect, and every
+    calibration condition the model's dead paths depend on."""
     image = bytearray(synthetic_image(**kwargs))
     image[0x8B39] = 130
     image[0x8B3D] = 129
     image[0xD247 : 0xD247 + 8] = bytes([128] * 8)
     struct.pack_into(">H", image, 0x9416, 44019)
+    model, _ = _model()
+    for marker in model.program.patch.markers:
+        raw = bytes.fromhex(marker.bytes)
+        image[marker.offset : marker.offset + len(raw)] = raw
+    for node in model.nodes:
+        for condition in node.calibration_conditions:
+            for k in range(condition.count):
+                at = condition.offset + k
+                image[at] = (image[at] & ~condition.mask & 0xFF) | condition.equals
     return bytes(image)
+
+
+def _synthetic_program(image: bytes) -> tuple[ApplicationModel, str]:
+    """The real application model, with its program identity re-pinned to a
+    synthetic image's program spans: the stand-in for "the same program"."""
+    model, sha = _model()
+    identity = model.program.identity.model_copy(update={"sha256": program_sha256(image, model)})
+    program = model.program.model_copy(update={"identity": identity})
+    return model.model_copy(update={"program": program}), sha
 
 
 def test_resolution_reads_the_slot_table_axes_and_scaler_from_the_image() -> None:
@@ -224,7 +260,13 @@ def test_resolution_reads_the_slot_table_axes_and_scaler_from_the_image() -> Non
     image = _image_with_modelled_constants()
     sha = hashlib.sha256(image).hexdigest()
     table = resolve_table(
-        image, xterra_map(), definition, viewer=_viewer(), expected_sha256=sha, slot=1
+        image,
+        xterra_map(),
+        definition,
+        viewer=_viewer(),
+        application_model=_synthetic_program(image),
+        expected_sha256=sha,
+        slot=1,
     )
     reference = _table(definition)
     assert table.cells == reference.cells
@@ -239,6 +281,9 @@ def test_resolution_reads_the_slot_table_axes_and_scaler_from_the_image() -> Non
     [
         ("hash", "image_hash_mismatch"),
         ("program", "wrong_program"),
+        ("program_hash", "wrong_program"),
+        ("patch", "patch_missing"),
+        ("dead_path", "unmodelled_logic"),
         ("slot", "table_unverified"),
         ("kind", "table_missing"),
         ("gate", "unmodelled_logic"),
@@ -246,6 +291,11 @@ def test_resolution_reads_the_slot_table_axes_and_scaler_from_the_image() -> Non
     ],
 )
 def test_resolution_refuses_by_name(change: str, reason: str) -> None:
+    """``program`` is the calibration ID; ``program_hash`` is a different
+    program under the same calibration ID (the application model's identity,
+    never the ID alone); ``patch`` loses UpRev's pointer redirect;
+    ``dead_path`` schedules the alternate multiplier writer the model treats
+    as calibration-dead."""
     definition, _ = _definition()
     kwargs: dict[str, Any] = {}
     if change == "program":
@@ -255,6 +305,11 @@ def test_resolution_refuses_by_name(change: str, reason: str) -> None:
         image[0x8B39] = 140
     if change == "curve":
         image[0xD247 + 3] = 140
+    if change == "patch":
+        image[0x055EC4 + 3] ^= 0xFF
+    if change == "dead_path":
+        image[0x8AD3] |= 0x10
+    application = _model() if change == "program_hash" else _synthetic_program(bytes(image))
     sha = hashlib.sha256(bytes(image)).hexdigest()
     slot = 2 if change == "slot" else 1
     if change == "hash":
@@ -267,7 +322,13 @@ def test_resolution_refuses_by_name(change: str, reason: str) -> None:
         )
     with pytest.raises(TwinRefusalError) as refused:
         resolve_table(
-            bytes(image), rom_map, definition, viewer=_viewer(), expected_sha256=sha, slot=slot
+            bytes(image),
+            rom_map,
+            definition,
+            viewer=_viewer(),
+            application_model=application,
+            expected_sha256=sha,
+            slot=slot,
         )
     assert refused.value.reason == reason
 
@@ -313,6 +374,7 @@ def test_resolution_consumes_w05s_trace_mapping_and_refuses_by_name(
             calibration,
             definition,
             viewer=viewer,
+            application_model=_model(),
             revision="ZS44A-20260920",
             image_sha256=IMAGE_SHA,
             slot=1,
@@ -325,6 +387,7 @@ def test_resolution_consumes_w05s_trace_mapping_and_refuses_by_name(
             xterra_map(),
             definition,
             viewer=viewer,
+            application_model=_synthetic_program(image),
             expected_sha256=hashlib.sha256(image).hexdigest(),
             slot=1,
         )
@@ -499,6 +562,60 @@ def test_a_complete_steady_open_loop_override_tuple_is_eligible_and_passes() -> 
     assert result["accounting"]["duplicate_use"] == 0
     assert record["provenance"]["image_sha256"] == IMAGE_SHA
     assert record["provenance"]["kernel_version"] >= 1
+    assert record["provenance"]["application_model"]["output"] == "target_equiv_ratio"
+
+
+def test_qualification_follows_the_application_models_blockers() -> None:
+    """The twin restates no qualification status: the blockers are the
+    application model's (E05.1). With none left and the constants checked on
+    an image, the same eligible pass issues its qualified residual; the
+    model's blockers alone withhold it."""
+    definition, _ = _definition()
+    base = _table(definition)
+    assert base.application.blockers == ("final_command_path_unverified", "ram_copy_unverified")
+    checked = ResolvedTable(**{**base.__dict__, "final_command_constants_checked": True})
+    record = _only(_evaluate(_session(), table=checked))
+    assert record["qualified_residual_phi"] is None
+    resolved = ResolvedTable(
+        **{
+            **checked.__dict__,
+            "application": dataclasses.replace(base.application, blockers=()),
+        }
+    )
+    result = _evaluate(_session(), table=resolved)
+    assert result["qualification_blockers"] == []
+    assert _only(result)["qualified_residual_phi"] == 0.0
+
+
+def test_the_twin_refuses_an_application_model_that_describes_other_inputs() -> None:
+    definition, _ = _definition()
+    model, sha = _model()
+    observed = model.node("pedal_enrichment_flag").observed_as[0]
+    moved = observed.model_copy(update={"spec": "mem:ECM_PEDAL_ENRICH_FLAGS_OTHER"})
+    nodes = [
+        n.model_copy(update={"observed_as": [moved]}) if n.id == "pedal_enrichment_flag" else n
+        for n in model.nodes
+    ]
+    with pytest.raises(TwinRefusalError) as refused:
+        bind_application((model.model_copy(update={"nodes": nodes}), sha), definition)
+    assert refused.value.reason == "application_model_mismatch"
+    with pytest.raises(TwinRefusalError) as refused:
+        bind_application(
+            (model, sha), definition.model_copy(update={"application_output": "ignition"})
+        )
+    assert refused.value.reason == "output_undeclared"
+    calibration = load_afr_calibration(PROFILE / "afr_calibration.yaml")
+    with pytest.raises(TwinRefusalError) as refused:
+        table_from_calibration(
+            calibration,
+            definition,
+            viewer=_viewer(),
+            application_model=(model, sha),
+            revision=EXPECT["calibration"]["revision"],
+            image_sha256="0" * 64,
+            slot=1,
+        )
+    assert refused.value.reason == "program_unverified"
 
 
 def test_a_miss_is_counted_not_absorbed() -> None:

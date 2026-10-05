@@ -670,6 +670,14 @@
       "auth": "control",
       "body": false,
       "method": "GET",
+      "path": "/control/ecu/application-model",
+      "query": [],
+      "status_code": null
+    },
+    {
+      "auth": "control",
+      "body": false,
+      "method": "GET",
       "path": "/control/feedback",
       "query": [],
       "status_code": null

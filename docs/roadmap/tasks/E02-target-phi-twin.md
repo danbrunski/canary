@@ -112,8 +112,9 @@ regimes, boost and other ECU programs remain outside the first evidence.
   axes, the scaler is 44019, slot 2 refuses `table_unverified`, and the fixture
   accounts identically. **Remaining (vehicle):** the RAM-vs-ROM comparison.
   Read 0xFFFFB260 as two `0x23` reads (63 + 1 bytes), compare with slot 1, and
-  record it. Until then `map_identity.ram_copy.status: unverified` blocks every
-  qualified residual (`ram_copy_unverified`). The profile also says why the
+  record it. Until then the application model's node `target_afr_ram_copy`
+  (twin `assumed`, E05.1) blocks every qualified residual
+  (`ram_copy_unverified`). The profile also says why the
   default-slot rule alone is not proof: a battery-backed RAM copy can predate
   a reflash.
 
@@ -213,11 +214,34 @@ regimes, boost and other ECU programs remain outside the first evidence.
     identified.
 
   So the final word equals the lookup only when the state byte selects
-  0xFFFF174B and those corrections sum to zero. `final_command.status` stays
-  `unverified` and no qualified residual is issued
-  (`final_command_path_unverified`). **Remaining:**
-  1. Desk: identify the `0xFFFF14C4` states and the four correction terms.
-     Not vehicle-blocked.
+  0xFFFF174B and those corrections sum to zero. No qualified residual is
+  issued (`final_command_path_unverified`). That blocker is now the E05.1
+  application model's (`data/nissan-xterra-2008/ecu_application_model.yaml`),
+  which the twin consumes; the twin's own `final_command.status` is gone.
+  **Remaining:**
+  1. ~~Desk: identify the `0xFFFF14C4` states and the four correction
+     terms.~~ *Traced 2026-10-04 (E05.1):* see
+     `docs/ecu-firmware-analysis.md`, "Final-command path, traced". The model
+     records it node by node.
+     - **States.** `0xFFFF14C5` is a request: 8 when cold (coolant byte < 115,
+       65 °C), 1 at lookup 0x80, and otherwise 2/4/6 by rpm band (3,100 /
+       3,400 rpm), or 3/5/7 with the pedal flag. `0xFFFF14C4` commits it
+       through tick-stepped timers. States 4 and 5 give the lookup word
+       directly. States 2, 3 and 6 ramp (+0x180 / −0x130 per tick), and give
+       the lookup once flag `0xFFFF2867` bit 7 records the ramp reached it.
+       State 1 gives 0x4000. A hold counter, `0xFFFF2947` (or
+       `0xFFFF2BA9` < 0x20), forces 0x4000.
+     - **Corrections.** `w27DC` is zero unless the multiplier is exactly
+       0x4000, so it is zero throughout enrichment. `L175C` and `w26E8`'s
+       second term are zeroed under shared flags. `w1736` is a gated, capped
+       enrichment. The floor `w1724` and the alternate multiplier writer
+       `0x055A04` are calibration-dead, and checked on each image. During
+       pedal enrichment there is no cap and no slew.
+     - **Confidence.** Read from code; not observed. The correction terms'
+       purposes and inputs, and `0xFFFF2947`'s decrement, remain unidentified
+       (the model's `uncovered`). Implementing the state machine would still
+       need those inputs, so the closure is item 2. Separately, inferred:
+       DID 0x1134 reads `0xFFFF26C0`, so it is the multiplier's high byte.
   2. Vehicle, a cheaper closure: one 58-byte read from 0xFFFF26BE covers the
      command word, `w26C0` and `w26F6`. A second read adds `w27DC`. Capturing
      these settles, per sample, whether the command was the lookup.

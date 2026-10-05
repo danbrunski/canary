@@ -19,6 +19,7 @@ from pathlib import Path
 
 import pytest
 
+from src.analysis.ecu_application import load_application_model
 from src.analysis.target_phi import (
     TwinRefusalError,
     evaluate_session,
@@ -68,7 +69,13 @@ def test_slot_1_from_the_image_equals_the_committed_table(library: RomLibrary) -
     definition, _ = load_twin_definition(PROFILE)
     image = library.image(IMAGE_SHA)
     table = resolve_table(
-        image, library.rom_map(), definition, viewer=_viewer(), expected_sha256=IMAGE_SHA, slot=1
+        image,
+        library.rom_map(),
+        definition,
+        viewer=_viewer(),
+        application_model=load_application_model(PROFILE),
+        expected_sha256=IMAGE_SHA,
+        slot=1,
     )
     committed = _table(definition)
     assert table.cells == committed.cells
@@ -89,13 +96,20 @@ def test_the_image_refuses_an_unverified_slot_and_another_hash(library: RomLibra
             library.rom_map(),
             definition,
             viewer=_viewer(),
+            application_model=load_application_model(PROFILE),
             expected_sha256=IMAGE_SHA,
             slot=2,
         )
     assert refused.value.reason == "table_unverified"
     with pytest.raises(TwinRefusalError) as refused:
         resolve_table(
-            image, library.rom_map(), definition, viewer=_viewer(), expected_sha256="0" * 64, slot=1
+            image,
+            library.rom_map(),
+            definition,
+            viewer=_viewer(),
+            application_model=load_application_model(PROFILE),
+            expected_sha256="0" * 64,
+            slot=1,
         )
     assert refused.value.reason == "image_hash_mismatch"
 
@@ -107,6 +121,7 @@ def test_the_fixture_accounts_identically_from_the_image(library: RomLibrary) ->
         library.rom_map(),
         definition,
         viewer=_viewer(),
+        application_model=load_application_model(PROFILE),
         expected_sha256=IMAGE_SHA,
         slot=1,
     )

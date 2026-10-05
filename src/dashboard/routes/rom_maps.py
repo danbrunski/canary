@@ -9,6 +9,7 @@ from typing import Any
 from fastapi import Depends, FastAPI, HTTPException, Request
 from starlette.concurrency import run_in_threadpool
 
+from src.analysis.ecu_application import coverage_report, load_application_model
 from src.analysis.rom_targets import TargetEditor, sha256
 from src.analysis.rom_trace import (
     load_viewer_definition,
@@ -91,6 +92,19 @@ def inspect_rom(
     }
 
 
+def application_model_report(
+    profile_dir: Path, *, revisions: TuneRevisionRegistry | None
+) -> dict[str, Any]:
+    """E05.1: the vehicle's ECM application model as the dashboard reads it --
+    which outputs are qualified or conditional, what the twin implements,
+    observes and assumes on each path, the blockers, and the logic still
+    uncovered -- against the image recorded as running now."""
+    model, model_sha = load_application_model(profile_dir)
+    current = revisions.at(datetime.now(UTC)) if revisions else None
+    image = current.image_sha256 if current else None
+    return coverage_report(model, model_sha, image_sha256=image)
+
+
 def register_rom_routes(
     app: FastAPI,
     *,
@@ -99,6 +113,16 @@ def register_rom_routes(
     dids_path: Path = DIDS_YAML,
 ) -> None:
     authorize = control_auth_dependency(resolved_control_token)
+
+    @app.get("/control/ecu/application-model", dependencies=[Depends(authorize)])
+    def get_application_model() -> dict[str, Any]:
+        """Read-only coverage of the ECM application twin (E05.1)."""
+        try:
+            return application_model_report(
+                vehicle_profile_dir(config), revisions=active_registry(config)
+            )
+        except FileNotFoundError as exc:
+            raise HTTPException(404, "No ECU application model for this vehicle") from exc
 
     @app.post("/control/rom/inspect", dependencies=[Depends(authorize)])
     async def post_rom_inspect(request: Request) -> dict[str, Any]:

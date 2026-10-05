@@ -32,7 +32,7 @@ ECU replica.
 
 ## Checklist
 
-- [ ] **E05.1 — Build a versioned application model and coverage manifest.**
+- [~] **E05.1 — Build a versioned application model and coverage manifest.**
   Trace each proposed output backwards through writers, callers, RAM state,
   flags and ROM tables. Record function/address references, integer widths,
   signedness, rounding/saturation, branch conditions, state/update order,
@@ -46,13 +46,84 @@ ECU replica.
   conditional or unevaluable. Wrong-program artifacts refuse by name.
   The dashboard can report qualified outputs and uncovered logic from this
   manifest. Backfill E02 with it without changing established predictions.
+  *Partial 2026-10-04 (manifest, loader, E02 backfill and read API done; the
+  dashboard view is E04.5's):*
+  - **Manifest.** `data/nissan-xterra-2008/ecu_application_model.yaml`
+    (`schema_version` 1, `model_version` 1) is validated by `ApplicationModel`
+    in `src/analysis/ecu_application.py` (layer 5; no new package). It covers
+    output `target_equiv_ratio` (0xFFFF26BE), traced through 20 nodes, each
+    with its function/span and the RAM it reads and writes. All 89 addresses
+    are declared once under `ram` with width and signedness (`unknown` where
+    the purpose is not identified). The schema refuses a duplicate
+    declaration and an observation at an undeclared address.
+    `test_every_address_a_node_describes_is_one_it_reads_writes_or_observes`
+    fails if a node's arithmetic or branch text cites a 0xFFFF____ address
+    outside its reads, writes or observations. Each node also
+    records its arithmetic, rounding, saturation, branches, ROM constants and
+    calibration conditions; whether it is `observed`, `code`, `inferred` or
+    `unknown`; its twin role; and evidence. The update order is the
+    `schedule` of task `0x0575EC`, after the cycle-start copy `0x020EF2`.
+  - **The graph resolves.**
+    `test_the_graph_resolves_to_the_twins_inputs_and_w08_tables` checks three
+    things. The observed inputs on the path of the predicted node
+    (`enrichment_gate`) are exactly the twin's six channels. Every cited table
+    is a `rom_map.yaml` id. Every `mem:` observation's address matches
+    `data/dids.yaml` (`check_observations`; a moved address is named).
+  - **Undecoded dependencies make the output conditional.** The schema
+    refuses an `assumed`/`not_modelled` node on an output's path that no
+    blocker names (`test_an_unresolved_dependency_cannot_be_dropped_silently`).
+    It also refuses a blocker naming a resolved node
+    (`test_a_blocker_cannot_outlive_its_cause`). Target φ is conditional on
+    `final_command_path_unverified` (10 nodes) and `ram_copy_unverified`.
+    `regions` mark the gate-band and stack-word cases unevaluable, and cold
+    state 5 and fuel-cut recovery conditional. `uncovered` lists 8 pieces of
+    unresolved logic.
+  - **Identity.** Compatibility is the sha256 of the program spans
+    (0x0–0x7FFF and 0x20000–0xDFFFF: what UpRev flashes never write). That
+    hash is equal on all six local ZS44A images, five calibrations. Added to
+    it: UpRev's patch marker (0x055EC4 = 0xFFFFB260), the calibration
+    conditions behind each dead path, and the full image hash. `check_image`
+    refuses `wrong_program`, `patch_missing` or `unmodelled_logic`. Without
+    bytes, `check_image_sha` refuses `program_unverified`. Tests:
+    `test_the_same_program_passes_and_each_mismatch_refuses_by_name`;
+    `test_the_calibration_region_does_not_change_the_program` (a changed
+    calibration ID or cell keeps the program hash);
+    `test_every_listed_local_image_is_this_program` (private, skips by name).
+    `program.images` holds only registry images
+    (`test_the_listed_images_are_the_registrys`). Map1Change (3dc1f3d9…)
+    passes `check_image` but is excluded: it is an unflashed research edit
+    that no session or registry entry names.
+  - **E02 backfill.** The twin's file lost `final_command.status` and
+    `map_identity.ram_copy`; a status there is now refused as an extra
+    field. `application_output: target_equiv_ratio` names the manifest
+    output. `resolve_table` and `table_from_calibration` require the model.
+    `bind_application` refuses `application_model_mismatch` /
+    `output_undeclared`, and `resolve_table` also runs `check_image`.
+    `qualification_blockers` come from the manifest
+    (`test_qualification_follows_the_application_models_blockers`).
+    Provenance names the model, and `EVALUATOR_VERSION` is 2. The fixture is
+    unchanged: `tests/test_target_phi.py` and the private-ROM file pass
+    80/80, including `test_every_october_4_command_sample_is_accounted_for`
+    (same 174 records and blockers) and the image-backed accounting.
+  - **Read API.** `coverage_report()` gives each output's status (`qualified`
+    only with no blockers) and its path by twin role (implemented / observed
+    / assumed / not modelled / calibration-dead), blockers, conditions,
+    regions and uncovered logic. It is served at
+    `GET /control/ecu/application-model` (control token; route snapshot
+    updated, documented in `docs/headless-api.md`); see
+    `test_the_route_serves_the_report_behind_the_control_token`.
+  - **Remaining:** the dashboard view of this report is
+    [E04.5](E04-pi-runtime-and-acceptance.md)'s job.
 
 - [ ] **E05.2 — Extend upstream through air charge and fuelling.**
   Trace `0x03C4D0`, K's read at `0x03C6E0` and Fuel Comp readers including
-  `0x02D5F4`. Resolve the exact Volumetric Flow Ratio input (code reading, 2026-10-04: probably
-  axis `0xCB29` against RAM `0xFFFF118A`, with `0xCACD` the rpm axis, the reverse of
-  UpRev's labels; inferred until a live check), accumulator units,
-  all corrections and which Load Point Scaler copy is consumed. Build the
+  `0x02D5F4`. Carry forward the verified axis roles: `0xCACD` rpm and
+  `0xCB29` load against RAM `0xFFFF118A`, the reverse of UpRev's labels.
+  Its writer `0x03C3A4` is now decoded as throttle-derived flow per revolution
+  through the `0xEAEC`/`0xEACC` saturating curves, not MAF airflow. Resolve
+  the remaining `w139E` flow term, alternate throttle source `w2CD0`,
+  correction `w63FC`, fallback conditions, absolute units, integer semantics
+  and which Load Point Scaler copy is consumed. Build the
   dependency chain toward BFS → X → target φ from independently observed
   sensor inputs, retaining intermediate RAM observations for verification.
   **Accept:** each new intermediate reproduces known vectors and eligible

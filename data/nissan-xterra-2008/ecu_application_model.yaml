@@ -1,0 +1,837 @@
+# E05.1 — the ECM application model and coverage manifest, as data.
+#
+# Schema: src/analysis/ecu_application.py (ApplicationModel). What each ECM
+# output is computed from, traced backwards through its writers, the RAM
+# state and flags they read, the ROM constants and tables, and the order the
+# firmware runs them in; and, for each piece, whether the twin implements it,
+# observes it, assumes it or does not model it yet.
+#
+# Behavioural contracts and citations only. The disassembly and decompiled
+# output stay local (~/ecu-re/out, never committed); `function` and `span`
+# below are addresses in the program identified under `program`, read from the
+# 2026-10-04 listing and decompile text of image a46baa24...be50.
+#
+# confidence: `observed` = read from the code and agreeing with an independent
+# observation; `code` = read from the code, not yet independently observed;
+# `inferred` = strong evidence, not read through; `unknown`.
+# twin: `implemented` (our code computes it), `observed` (a measured input:
+# nothing upstream of it is needed), `assumed` (taken as true without a
+# measurement), `not_modelled`, `calibration_dead` (unreachable while the
+# node's calibration_conditions hold; checked on every image).
+#
+# An output with any unresolved dependency is conditional. Its `blockers`
+# name every unresolved node on its path, and nothing else (the loader
+# refuses a blocker that names a resolved node and an unresolved node that no
+# blocker names). target_phi consumes these blockers; it does not restate them.
+schema_version: 1
+model_version: 1
+name: ecm_application_model
+
+program:
+  id: nissan-1ZS44A-uprev-osiris
+  # Informative only. The calibration ID lives in the reflashed calibration
+  # block (0x8204), so it names a calibration family, never the program.
+  calibration_id: 1ZS44A00000
+  identity:
+    # [start, end) spans hashed in order: boot and the application code.
+    # UpRev flashes erase and write only 0x8000-0x1FFFF and 0xE0000-0xFFFFF
+    # (flash capture uprev-flash-20261004, tune_revisions.yaml), so these
+    # spans are the program; the full image hash names the calibration.
+    regions:
+      - [0x000000, 0x008000]
+      - [0x020000, 0x0E0000]
+    sha256: 9f35654659e4917dee19ef61378591d82d6640170fc3dfb3cac881bf65b3c9fd
+    evidence: >-
+      Computed 2026-10-04 over six local images: the ECU read a46baa24...be50,
+      the decoded ZS44A-Tuned-20260920, -20261004 (5587f7e1...), k106
+      (e01cc0cb...), Map1Change and UpRev's ROM Store base (82012080...). All
+      six give this hash, so five distinct calibrations share one program.
+  patch:
+    name: uprev_map_switching
+    markers:
+      - offset: 0x055EC4
+        bytes: ffffb260
+        meaning: >-
+          Nissan's Target AFR table pointer, redirected by UpRev to the RAM copy
+          of the active map slot (0xFFFFB040 + 0x220). The calibration's own
+          table at 0x00A169 is no longer referenced.
+    evidence: >-
+      docs/ecu-firmware-analysis.md, "UpRev's map switching". The patch code
+      (0x0DE1A4, 0x0DE358, 0x0DE3E4) lies inside the hashed program spans.
+  # The images sessions can run under: every entry is a tune_revisions.yaml
+  # revision or reference image (a test pins this). Map1Change (3dc1f3d9...)
+  # also hashes to this program but is excluded: it is a one-cell UpRev edit
+  # made for the ROM-container research, never flashed and not in the
+  # registry, so no session or library entry names it.
+  images:
+    - sha256: a46baa248f16db8d5ed9854913e614dd7d77b7579bb6c36bddb792741531be50
+      revision: ZS44A-20260920
+      role: decoded
+    - sha256: 5587f7e1e6dbd0fcb9ffe0c857cc0cafebbe11bf306636c0f3265b903254d253
+      revision: ZS44A-20261004
+      role: program_checked
+    - sha256: e01cc0cb45d5beb879f82931be3054c79b7be3955220b3d93045deaabd23f18e
+      revision: ZS44A-k106
+      role: program_checked
+    - sha256: 8201208033e0926b4f5f5d758f0f4efdfa2cef39e069d0dffae2d950683bc203
+      revision: ZS44A-uprev-base
+      role: program_checked
+
+# Every RAM word or byte a node reads or writes, or an observation reads, with
+# its integer type. One entry per address (the loader refuses a duplicate),
+# and a node's arithmetic/branches text may cite only addresses in its own
+# reads, writes or observations (tests/test_ecu_application_model.py).
+# `confidence` is about the variable's meaning: `unknown` = traced as an
+# operand, purpose not identified.
+ram:
+  # -- the command word and its multiplier/corrections
+  - {address: 0xFFFF26BE, width: 16, signed: false, name: command_word, units: q14_phi, confidence: observed,
+     meaning: 'Final commanded equivalence ratio, phi x 16384. Same word as Mode 01 PID 0x44.'}
+  - {address: 0xFFFF1B2E, width: 16, signed: false, name: command_word_before_cut, units: q14_phi, confidence: code,
+     meaning: 'Copy of the word before the fuel-cut zero is applied.'}
+  - {address: 0xFFFF26C0, width: 16, signed: false, name: enrichment_multiplier, units: q14_phi, confidence: code,
+     meaning: 'Multiplier applied to the correction sum; 0x4000 is 1.0.'}
+  - {address: 0xFFFF26CC, width: 16, signed: false, name: previous_command_word, units: q14_phi, confidence: code,
+     meaning: 'Last cycle''s command word (cycle-start copy).'}
+  - {address: 0xFFFF26CE, width: 16, signed: false, name: previous_enrichment_multiplier, units: q14_phi, confidence: code,
+     meaning: 'Last cycle''s multiplier (cycle-start copy).'}
+  - {address: 0xFFFF26F6, width: 16, signed: false, name: correction_sum, units: q14_phi, confidence: code,
+     meaning: 'clamp(0x4000 + the three corrections, 0, 0xFFFF).'}
+  - {address: 0xFFFF27DC, width: 16, signed: false, name: curve_term, units: q14_phi, confidence: code,
+     meaning: 'Additive term, 0..3768; zero unless the multiplier is exactly 0x4000.'}
+  - {address: 0xFFFF175C, width: 32, signed: true, name: correction_175c, units: q14_phi, confidence: unknown,
+     meaning: 'Signed additive correction; purpose not identified.'}
+  - {address: 0xFFFF26E8, width: 16, signed: false, name: correction_26e8, units: q14_phi, confidence: unknown,
+     meaning: 'Non-negative additive correction; purpose not identified.'}
+  - {address: 0xFFFF1736, width: 16, signed: false, name: correction_1736, units: q14_phi, confidence: unknown,
+     meaning: 'Non-negative additive enrichment; purpose not identified.'}
+  - {address: 0xFFFF1724, width: 16, signed: false, name: command_floor, units: q14_phi, confidence: code,
+     meaning: 'Lower bound on the command; written 0 every cycle in this calibration.'}
+  - {address: 0xFFFF174B, width: 8, signed: false, name: gated_lookup_cell, units: phi_x128, confidence: code,
+     meaning: 'Target AFR lookup after the enrichment gate: the cell, or 0x80 below the gate.'}
+  - {address: 0xFFFF14C4, width: 8, signed: false, name: enrichment_state, units: enum, confidence: code,
+     meaning: 'Committed enrichment state, 1..6.'}
+  - {address: 0xFFFF14C5, width: 8, signed: false, name: enrichment_state_request, units: enum, confidence: code,
+     meaning: 'Requested enrichment state, 1..8.'}
+  - {address: 0xFFFF1742, width: 16, signed: false, name: enrichment_timer_1742, units: raw_counts, confidence: code,
+     meaning: 'Enrichment state timer (tick-stepped).'}
+  - {address: 0xFFFF1744, width: 16, signed: false, name: enrichment_timer_1744, units: raw_counts, confidence: code,
+     meaning: 'Enrichment state timer (tick-stepped).'}
+  - {address: 0xFFFF1746, width: 16, signed: false, name: enrichment_timer_1746, units: raw_counts, confidence: code,
+     meaning: 'Enrichment state timer (tick-stepped).'}
+  - {address: 0xFFFF1748, width: 16, signed: false, name: enrichment_timer_1748, units: raw_counts, confidence: code,
+     meaning: 'Enrichment state timer (tick-stepped).'}
+  - {address: 0xFFFF2947, width: 8, signed: false, name: multiplier_hold_counter, units: raw_counts, confidence: code,
+     meaning: 'Non-zero forces the multiplier to 0x4000; its decrement was not found.'}
+  - {address: 0xFFFF2BA9, width: 8, signed: false, name: unidentified_2ba9, units: raw_counts, confidence: unknown,
+     meaning: 'Below 0x20 forces the multiplier to 0x4000.'}
+  - {address: 0xFFFF2BCE, width: 8, signed: false, name: unidentified_2bce, units: raw_counts, confidence: unknown,
+     meaning: 'Input of the calibration-dead alternate multiplier writer.'}
+  - {address: 0xFFFF15F8, width: 8, signed: false, name: pedal_flag_threshold, units: raw_counts, confidence: code,
+     meaning: 'Curve 0xCEDB output the pedal flag compares against.'}
+  # -- lookup inputs and their sources
+  - {address: 0xFFFF103E, width: 8, signed: false, name: load_input_x, units: raw_counts, confidence: observed,
+     meaning: 'Target AFR load input; cycle-start copy of the X byte.'}
+  - {address: 0xFFFF104E, width: 8, signed: false, name: load_input_x_source, units: raw_counts, confidence: code,
+     meaning: 'X as written by the air-charge task, min(255, BFS x 128 / Load Point Scaler).'}
+  - {address: 0xFFFF103A, width: 16, signed: false, name: base_fuel_schedule, units: raw_counts, confidence: observed,
+     meaning: 'BFS word (DID 0x1208, mem:ECM_AIR_CHARGE_SLOT_103A).'}
+  - {address: 0xFFFF1038, width: 16, signed: false, name: previous_base_fuel_schedule, units: raw_counts, confidence: code,
+     meaning: 'Last cycle''s BFS word (cycle-start copy).'}
+  - {address: 0xFFFF11D8, width: 16, signed: false, name: engine_speed_word, units: raw_counts, confidence: observed,
+     meaning: 'Engine speed, 12.5 rpm per count; cycle-start copy of the PID 0x0C word.'}
+  - {address: 0xFFFF1210, width: 16, signed: false, name: engine_speed_source, units: raw_counts, confidence: observed,
+     meaning: 'Engine speed, 12.5 rpm per count (Mode 01 PID 0x0C).'}
+  - {address: 0xFFFF11BE, width: 16, signed: false, name: engine_speed_accumulator, units: raw_counts, confidence: code,
+     meaning: 'Speed word the rpm words are shifted from (rpm word = it >> 6).'}
+  - {address: 0xFFFF1204, width: 16, signed: false, name: engine_speed_eighth, units: raw_counts, confidence: code,
+     meaning: 'Accumulator >> 3.'}
+  - {address: 0xFFFF1202, width: 8, signed: false, name: engine_speed_coarse_source, units: raw_counts, confidence: code,
+     meaning: 'min(255, accumulator >> 8): 50 rpm per count.'}
+  - {address: 0xFFFF11CA, width: 8, signed: false, name: engine_speed_coarse, units: raw_counts, confidence: code,
+     meaning: 'Engine speed, 50 rpm per count; cycle-start copy.'}
+  - {address: 0xFFFF1207, width: 8, signed: false, name: unidentified_1207, units: raw_counts, confidence: unknown,
+     meaning: 'Source of the byte the cycle-start copy puts at 0xFFFF11CF.'}
+  - {address: 0xFFFF11CF, width: 8, signed: false, name: unidentified_11cf, units: raw_counts, confidence: unknown,
+     meaning: 'Curve input to the pedal flag, the excess scale and two corrections.'}
+  - {address: 0xFFFF1083, width: 8, signed: false, name: coolant_source, units: raw_counts, confidence: inferred,
+     meaning: 'The byte CAN DID 0x1101 reports (ECM_COOLANT_TEMP, degC = raw - 50).'}
+  - {address: 0xFFFF1079, width: 8, signed: false, name: coolant_snapshot, units: raw_counts, confidence: inferred,
+     meaning: 'Cycle-start copy of the coolant byte.'}
+  - {address: 0xFFFF1077, width: 8, signed: false, name: unidentified_1077, units: raw_counts, confidence: unknown,
+     meaning: 'Curve input to two corrections.'}
+  - {address: 0xFFFF3CDC, width: 8, signed: false, name: unidentified_3cdc, units: raw_counts, confidence: unknown,
+     meaning: 'Compared with the pedal flag threshold.'}
+  # -- flags
+  - {address: 0xFFFF2841, width: 8, signed: false, name: fuel_flags_2841, units: flags, confidence: observed,
+     meaning: 'Bit 0: pedal enrichment, forces the last load column.'}
+  - {address: 0xFFFF2845, width: 8, signed: false, name: fuel_flags_2845, units: flags, confidence: code,
+     meaning: 'Bit 0: the command was raised to the floor.'}
+  - {address: 0xFFFF2849, width: 8, signed: false, name: fuel_flags_2849, units: flags, confidence: unknown,
+     meaning: 'Bit 0 compared with 0xFFFF2845 bit 0 by the final writer.'}
+  - {address: 0xFFFF283F, width: 8, signed: false, name: fuel_flags_283f, units: flags, confidence: unknown,
+     meaning: 'Bit 6 enables the enrichment excess scaling.'}
+  - {address: 0xFFFF2886, width: 8, signed: false, name: fuel_flags_2886, units: flags, confidence: code,
+     meaning: 'Bit 3: enrichment gate latched. Bit 2: final-writer hold path.'}
+  - {address: 0xFFFF2867, width: 8, signed: false, name: fuel_flags_2867, units: flags, confidence: code,
+     meaning: 'Bit 7: multiplier reached the lookup. Bit 6: zeroes two corrections. Bit 1: coolant latched.'}
+  - {address: 0xFFFF2875, width: 8, signed: false, name: fuel_flags_2875, units: flags, confidence: code,
+     meaning: 'Bits 0-2: rpm-band latches. Bits 3, 5, 6, 7, 4: the 0xFFFF1736 gate and its state.'}
+  - {address: 0xFFFF2876, width: 8, signed: false, name: fuel_flags_2876, units: flags, confidence: code,
+     meaning: 'Bit 7: engine speed at or above about 2,000 rpm (latched).'}
+  - {address: 0xFFFF288A, width: 8, signed: false, name: fuel_flags_288a, units: flags, confidence: code,
+     meaning: 'Bit 6: coolant at or above the warm threshold (latched).'}
+  - {address: 0xFFFF288E, width: 8, signed: false, name: fuel_flags_288e, units: flags, confidence: code,
+     meaning: 'Bit 2: enables the command floor path; always cleared in this calibration.'}
+  - {address: 0xFFFF2866, width: 8, signed: false, name: fuel_flags_2866, units: flags, confidence: code,
+     meaning: 'Bit 0: pedal-enrichment commit. Bit 1: slew direction of 0xFFFF1736.'}
+  - {address: 0xFFFF2833, width: 8, signed: false, name: fuel_flags_2833, units: flags, confidence: unknown,
+     meaning: 'Bit 4 inhibits 0xFFFF1736 and gates the floor path.'}
+  - {address: 0xFFFF284E, width: 8, signed: false, name: fuel_flags_284e, units: flags, confidence: unknown,
+     meaning: 'Bit 7 gates the floor path.'}
+  - {address: 0xFFFF2915, width: 8, signed: false, name: unidentified_2915, units: raw_counts, confidence: unknown,
+     meaning: 'Floor-path state.'}
+  - {address: 0xFFFF111C, width: 8, signed: false, name: unidentified_111c, units: raw_counts, confidence: unknown,
+     meaning: 'Compared with cal 0x8D51 for 0xFFFF288E bit 2.'}
+  - {address: 0xFFFF26B9, width: 8, signed: false, name: fuel_flags_26b9, units: flags, confidence: unknown,
+     meaning: 'Bits 0 and 1 gate the corrections and the curve term.'}
+  - {address: 0xFFFF1796, width: 8, signed: false, name: fuel_flags_1796, units: flags, confidence: unknown,
+     meaning: 'Bits 0 and 1, with the multiplier above 0x4000, gate two corrections.'}
+  - {address: 0xFFFF135F, width: 8, signed: false, name: fuel_flags_135f, units: flags, confidence: unknown,
+     meaning: 'Bits 0 and 1 enable the curve term.'}
+  - {address: 0xFFFF2A90, width: 8, signed: false, name: unidentified_2a90, units: raw_counts, confidence: unknown,
+     meaning: 'Non-zero disables the curve term; cleared while 0xFFFF15B3 is non-zero.'}
+  - {address: 0xFFFF15B3, width: 8, signed: false, name: unidentified_15b3, units: raw_counts, confidence: unknown,
+     meaning: 'Clears 0xFFFF2A90.'}
+  - {address: 0xFFFF4785, width: 8, signed: false, name: fuel_flags_4785, units: flags, confidence: unknown,
+     meaning: 'Bit 6: scales the command by cal 0x838A/64, skips the floor and the cap/slew.'}
+  - {address: 0xFFFF4787, width: 8, signed: false, name: fuel_flags_4787, units: flags, confidence: unknown,
+     meaning: 'Bit 6 skips the cap/slew.'}
+  - {address: 0xFFFF4858, width: 8, signed: false, name: fuel_flags_4858, units: flags, confidence: unknown,
+     meaning: 'Bit 1 enables the (calibration-dead) extra multiplier cap.'}
+  - {address: 0xFFFF26C6, width: 8, signed: false, name: previous_fuel_cut_state, units: enum, confidence: code,
+     meaning: 'Last cycle''s fuel-cut state (cycle-start copy); 0x3F skips the cap/slew.'}
+  - {address: 0xFFFF125C, width: 16, signed: true, name: unidentified_125c, units: raw_counts, confidence: unknown,
+     meaning: 'Cap/slew applies only while it reads -0x8000 (0x8000).'}
+  - {address: 0xFFFF26B8, width: 8, signed: false, name: fuel_cut_state, units: enum, confidence: observed,
+     meaning: '0x3F during fuel cut: the final word is written 0 (the twin''s sentinel).'}
+  - {address: 0xFFFF84C3, width: 8, signed: false, name: task_tick_flags, units: flags, confidence: code,
+     meaning: 'Bit 7 gates every ramp and timer step.'}
+  - {address: 0xFFFF84C4, width: 8, signed: false, name: task_tick_flags_next, units: flags, confidence: code,
+     meaning: 'Pipeline stage between 0xFFFF84BB and 0xFFFF84C3.'}
+  - {address: 0xFFFF84BB, width: 8, signed: false, name: task_tick_flags_source, units: flags, confidence: code,
+     meaning: 'Source of the tick flags.'}
+  # -- correction operands
+  - {address: 0xFFFF1114, width: 8, signed: false, name: unidentified_1114, units: raw_counts, confidence: unknown,
+     meaning: 'Threshold input (0xA0/0xAA) to the 0xFFFF1736 gate.'}
+  - {address: 0xFFFF1738, width: 8, signed: false, name: correction_1736_cell, units: raw_counts, confidence: code,
+     meaning: 'Cell of table 0x9724 used for 0xFFFF1736.'}
+  - {address: 0xFFFF1739, width: 8, signed: false, name: correction_1736_scale, units: raw_counts, confidence: code,
+     meaning: 'Curve 0xD15F value used for 0xFFFF1736.'}
+  - {address: 0xFFFF1760, width: 16, signed: false, name: unidentified_1760, units: raw_counts, confidence: unknown,
+     meaning: 'Operand of 0xFFFF1762.'}
+  - {address: 0xFFFF1762, width: 16, signed: true, name: unidentified_1762, units: raw_counts, confidence: unknown,
+     meaning: 'Operand of 0xFFFF175C, from the previous BFS through curves.'}
+  - {address: 0xFFFF1726, width: 16, signed: false, name: unidentified_1726, units: raw_counts, confidence: unknown,
+     meaning: 'Operand of 0xFFFF175C, written by FUN_00055536.'}
+  - {address: 0xFFFF14DA, width: 16, signed: false, name: unidentified_14da, units: raw_counts, confidence: unknown,
+     meaning: 'Q14 factor of 0xFFFF175C; decays while 0xFFFF1796 bits 0 and 1 are set.'}
+  - {address: 0xFFFF1764, width: 8, signed: false, name: unidentified_1764, units: raw_counts, confidence: unknown,
+     meaning: 'Factor of the second 0xFFFF26E8 term; written where 0xFFFF175C is zeroed.'}
+  - {address: 0xFFFF10C6, width: 8, signed: false, name: unidentified_10c6, units: raw_counts, confidence: unknown,
+     meaning: 'Factor of the first 0xFFFF26E8 term.'}
+  - {address: 0xFFFF10C5, width: 8, signed: false, name: unidentified_10c5, units: raw_counts, confidence: unknown,
+     meaning: 'Compared with 0xFD for flag 0xFFFF2866 bit 0.'}
+  - {address: 0xFFFF1E55, width: 8, signed: false, name: unidentified_1e55, units: raw_counts, confidence: unknown,
+     meaning: 'Factor of the second 0xFFFF26E8 term.'}
+  - {address: 0xFFFF1770, width: 8, signed: false, name: coolant_ratio_1770, units: raw_counts, confidence: code,
+     meaning: 'Coolant byte relative to the value latched at 0xFFFF1794.'}
+  - {address: 0xFFFF1794, width: 8, signed: false, name: coolant_latch_1794, units: raw_counts, confidence: code,
+     meaning: 'Coolant byte latched when the second 0xFFFF26E8 term starts.'}
+  - {address: 0xFFFF2D10, width: 32, signed: true, name: unidentified_2d10, units: raw_counts, confidence: unknown,
+     meaning: 'Curve-term input (the larger of it and 0xFFFF2D14).'}
+  - {address: 0xFFFF2D14, width: 32, signed: true, name: unidentified_2d14, units: raw_counts, confidence: unknown,
+     meaning: 'Curve-term input.'}
+  # -- UpRev state and the table copy
+  - {address: 0xFFFFB260, width: 8, signed: false, count: 64, name: target_afr_ram_table, units: phi_x128, confidence: code,
+     meaning: 'Active slot''s Target AFR table: the slot copy + 0x220.'}
+  - {address: 0xFFFFB040, width: 8, signed: false, count: 2048, name: slot_ram_copy, units: raw_counts, confidence: code,
+     meaning: 'RAM copy of the active map slot.'}
+  - {address: 0xFFFFB002, width: 8, signed: false, name: uprev_debounce, units: raw_counts, confidence: code,
+     meaning: 'Selector-input debounce.'}
+  - {address: 0xFFFFB003, width: 8, signed: false, name: uprev_selector, units: raw_counts, confidence: code,
+     meaning: 'UpRev selector nibble (1-5).'}
+  - {address: 0xFFFFB004, width: 32, signed: false, name: uprev_magic, units: raw_counts, confidence: observed,
+     meaning: 'UpRev initialisation magic 0xAA5555AA.'}
+  - {address: 0xFFFFB008, width: 8, signed: false, name: uprev_active_map, units: raw_counts, confidence: code,
+     meaning: 'Last committed slot; 0 until the first commit after init.'}
+  - {address: 0xFFFF2EE0, width: 8, signed: false, name: discrete_inputs_2ee0, units: flags, confidence: code,
+     meaning: 'Switch inputs; bits 1 and 3 step the UpRev selector (DID 0x130D).'}
+
+# The fuel-command task (FUN_000575EC): its calls in order, each once per
+# cycle, after the cycle-start copies of FUN_00020EF2. A node later in the
+# list reads what an earlier one wrote in the same cycle.
+schedule:
+  function: 0x0575EC
+  cycle_start: 0x020EF2
+  calls:
+    - {function: 0x05535C, nodes: []}
+    - function: 0x055DB2
+      nodes: [pedal_enrichment_flag, target_afr_lookup, enrichment_excess_scale, enrichment_gate,
+              enrichment_state_request, enrichment_state, enrichment_multiplier]
+    - {function: 0x055A04, nodes: [alternate_multiplier_writer]}
+    - {function: 0x0556EC, nodes: [correction_1736]}
+    - {function: 0x055536, nodes: []}
+    - {function: 0x053400, nodes: [correction_175c]}
+    - {function: 0x055386, nodes: [correction_26e8]}
+    - {function: 0x05591C, nodes: [correction_sum]}
+    - {function: 0x055AB8, nodes: [command_floor]}
+    - {function: 0x055966, nodes: [curve_term]}
+    - {function: 0x055B5E, nodes: [final_command_word]}
+
+nodes:
+  - id: cycle_snapshot
+    function: 0x020EF2
+    kind: copy
+    writes: [0xFFFF26CC, 0xFFFF26CE, 0xFFFF26C6, 0xFFFF1079, 0xFFFF11CA, 0xFFFF11CF, 0xFFFF11D8,
+             0xFFFF103E, 0xFFFF1038, 0xFFFF84C3, 0xFFFF84C4]
+    reads: [0xFFFF26BE, 0xFFFF26C0, 0xFFFF26B8, 0xFFFF1083, 0xFFFF1202, 0xFFFF1207, 0xFFFF1210,
+            0xFFFF104E, 0xFFFF103A, 0xFFFF84C4, 0xFFFF84BB]
+    arithmetic: >-
+      Block copies at the start of each cycle, element by element as used
+      here: 0xFFFF26BE -> 0xFFFF26CC, 0xFFFF26C0 -> 0xFFFF26CE and
+      0xFFFF26B8 -> 0xFFFF26C6 (one 14-byte copy); 0xFFFF1083 -> 0xFFFF1079
+      (10 bytes); 0xFFFF1202 -> 0xFFFF11CA, 0xFFFF1207 -> 0xFFFF11CF and
+      0xFFFF1210 -> 0xFFFF11D8 (one 0x38-byte copy); 0xFFFF104E -> 0xFFFF103E;
+      0xFFFF103A -> 0xFFFF1038; 0xFFFF84BB -> 0xFFFF84C4 -> 0xFFFF84C3.
+    rounding: none
+    saturation: none
+    outside_schedule: 'Runs before the fuel-command task each cycle (the snapshot routine).'
+    confidence: code
+    twin: not_modelled
+    evidence: ['listing 0x020F14-0x020FCC: copy destination, source and length arguments']
+
+  - id: engine_speed_word
+    function: 0x03907A
+    kind: computation
+    writes: [0xFFFF1210, 0xFFFF1204, 0xFFFF1202]
+    reads: [0xFFFF11BE]
+    arithmetic: >-
+      0xFFFF1210 = 0xFFFF11BE >> 6 (12.5 rpm per count); 0xFFFF1204 =
+      0xFFFF11BE >> 3; 0xFFFF1202 = min(255, 0xFFFF1204 >> 5) (50 rpm per
+      count). The lookup reads the cycle-start copy 0xFFFF11D8.
+    rounding: truncating shifts
+    saturation: '0xFFFF1202 min 255'
+    outside_schedule: 'Speed processing, copied by the cycle snapshot.'
+    confidence: observed
+    twin: observed
+    observed_as:
+      - {spec: 'mem:ECM_ENGINE_SPEED_RAM', address: 0xFFFF11D8, relation: identity}
+    evidence: ['docs/ecu-firmware-analysis.md "Target AFR lookup, decoded"; decompile text FUN_0003907A']
+
+  - id: load_input_x
+    function: 0x03C4D0
+    span: [0x03CC22, 0x03CC22]
+    kind: computation
+    writes: [0xFFFF104E]
+    reads: [0xFFFF103A]
+    arithmetic: 'min(255, (0xFFFF103A << 7) / Load Point Scaler) to 0xFFFF104E; the lookup reads the cycle-start copy 0xFFFF103E.'
+    rounding: truncating unsigned divide
+    saturation: 'min 255'
+    outside_schedule: 'Air-charge task; copied by the cycle snapshot.'
+    confidence: observed
+    twin: observed
+    observed_as:
+      - {spec: 'mem:ECM_FUEL_TARGET_MAP_X_TRACE', address: 0xFFFF103E, relation: identity}
+    rom:
+      - {rom_map: load_point_scaler, role: divisor}
+    evidence: ['tests/fixtures/ground_truth/target_phi.yaml x_relation: 168/194 same-read pairs exact, 26 at 1-4 counts']
+
+  - id: uprev_slot_state
+    function: 0x0DE358
+    kind: state
+    writes: [0xFFFFB002, 0xFFFFB003, 0xFFFFB004, 0xFFFFB008]
+    reads: [0xFFFF2EE0, 0xFFFFB002, 0xFFFFB003, 0xFFFFB004]
+    arithmetic: >-
+      UpRev init 0x0DE1A4 writes the magic 0xFFFFB004 and copies slot 1;
+      0x0DE358 debounces bits 1 and 3 of 0xFFFF2EE0 through 0xFFFFB002 and
+      steps the selector 0xFFFFB003; the slot copy 0x0DE3E4 commits
+      0xFFFFB008.
+    rounding: none
+    saturation: 'selector clamped 1..5 before a commit'
+    outside_schedule: 'UpRev patch, periodic and at start-up.'
+    confidence: code
+    twin: observed
+    observed_as:
+      - {spec: 'mem:ECM_UPREV_MAGIC', address: 0xFFFFB004, relation: identity}
+      - {spec: 'mem:ECM_ACTIVE_MAP', address: 0xFFFFB008, relation: identity}
+      - {spec: 'mem:ECM_UPREV_MAP_SELECTOR', address: 0xFFFFB003, relation: identity}
+    evidence: ['docs/ecu-firmware-analysis.md "UpRev''s map selector"; target_phi_twin.yaml map_identity']
+
+  - id: target_afr_ram_copy
+    function: 0x0DE3E4
+    kind: copy
+    writes: [0xFFFFB040, 0xFFFFB260]
+    reads: [0xFFFFB003, 0xFFFFB004, 0xFFFFB008]
+    depends_on: [uprev_slot_state]
+    arithmetic: >-
+      2 KiB copy of slot n from flash 0x0E0000 + 0x800 x (n - 1) to
+      0xFFFFB040; the Target AFR table is 0xFFFFB260 (+0x220). The twin
+      assumes those RAM bytes equal the resolved library slot until a 0x23
+      read (63 + 1 bytes) compares them.
+    rounding: none
+    saturation: none
+    outside_schedule: 'UpRev init and slot commit only.'
+    confidence: code
+    twin: assumed
+    assumption: >-
+      The RAM table equals the image's slot. A battery-backed RAM copy can
+      predate a reflash, so the default-slot rule alone does not prove it.
+    evidence: ['E02.2: not yet read on the vehicle']
+
+  - id: pedal_enrichment_flag
+    function: 0x055DB2
+    span: [0x055DB2, 0x055E00]
+    kind: state
+    writes: [0xFFFF15F8, 0xFFFF2841]
+    reads: [0xFFFF11CF, 0xFFFF3CDC, 0xFFFF2841]
+    arithmetic: >-
+      0xFFFF15F8 = 16-entry curve 0xCEDB at 0xFFFF11CF. Bit 0 of 0xFFFF2841
+      is set when 0xFFFF3CDC (+8 while already set) reaches 0xFFFF15F8,
+      cleared otherwise.
+    rounding: none
+    saturation: none
+    branches:
+      - {when: 'bit 0 of 0xFFFF2841 set', then: 'the lookup''s load input is 0xFF (last column)'}
+    confidence: code
+    twin: observed
+    observed_as:
+      - {spec: 'mem:ECM_PEDAL_ENRICH_FLAGS', address: 0xFFFF2841, relation: bit_0}
+    evidence: ['docs/ecu-firmware-analysis.md "Target AFR lookup (Nissan''s code)"; inputs not identified (uncovered: pedal_flag_inputs)']
+
+  - id: target_afr_lookup
+    function: 0x055DB2
+    span: [0x055E00, 0x055E24]
+    kind: computation
+    writes: []
+    reads: [0xFFFFB260, 0xFFFF11D8, 0xFFFF103E, 0xFFFF2841]
+    depends_on: [target_afr_ram_copy, engine_speed_word, load_input_x, pedal_enrichment_flag]
+    arithmetic: >-
+      0x0269AC on the table 0xFFFFB260 with rpm 0xFFFF11D8 and load
+      0xFFFF103E (0xFF while 0xFFFF2841 bit 0): top-down raw axis searches
+      (rpm word against axis byte x 4 at 0xCAA5, load byte against axis byte
+      at 0xC894), Q16 truncating fraction, cell interpolation truncating
+      toward the first operand, row-major bilinear over 8 x 8; masked to a
+      byte.
+    rounding: truncate (both directions toward the first operand)
+    saturation: 'axes clamp past either end with fraction 0'
+    rom:
+      - {rom_map: fuel_targets, role: table (via its RAM copy)}
+      - {rom_map: fuel_targets_rpm_axis, role: rows}
+      - {rom_map: fuel_targets_bfs_axis, role: columns}
+    confidence: observed
+    twin: implemented
+    implemented_by: src.decode.ecm_lookup.lookup_2d
+    evidence:
+      - 'tests/test_ecm_lookup.py hand-worked vectors'
+      - 'tests/fixtures/ground_truth/target_phi.yaml known_override: both 2026-10-04 enrichment commands 0x4A80'
+
+  - id: enrichment_excess_scale
+    function: 0x055DB2
+    span: [0x055E26, 0x055E5A]
+    kind: computation
+    writes: []
+    reads: [0xFFFF283F, 0xFFFF11CF]
+    depends_on: [target_afr_lookup]
+    arithmetic: >-
+      While bit 6 of 0xFFFF283F is set, the lookup's excess over 128 is
+      scaled by the 8-entry curve 0xD247 at 0xFFFF11CF (/128), clamped 0..255.
+    rounding: truncate
+    saturation: '0..255'
+    calibration_conditions:
+      - {offset: 0xD247, mask: 0xFF, equals: 128, count: 8,
+         why: 'every entry 128 makes the scaling the identity; checked by target_phi as unmodelled_logic too'}
+    confidence: code
+    twin: implemented
+    implemented_by: src.analysis.target_phi.predict (identity, image-checked)
+    evidence: ['docs/ecu-firmware-analysis.md "Target AFR lookup to final command"']
+
+  - id: enrichment_gate
+    function: 0x055DB2
+    span: [0x055E5C, 0x055EEC]
+    kind: computation
+    writes: [0xFFFF174B, 0xFFFF2886]
+    reads: [0xFFFF2886]
+    depends_on: [enrichment_excess_scale]
+    arithmetic: >-
+      Bit 3 of 0xFFFF2886 latches: set when the result (+1 while latched)
+      is >= 130 (cal 0x8B39), cleared otherwise. Latched: 0xFFFF174B = the
+      result. Clear: 0xFFFF174B = 0x80.
+    rounding: none
+    saturation: none
+    branches:
+      - {when: 'result 129 with 0xFFFF2886 bit 3 unknown', then: 'ambiguous; the twin refuses enrichment_gate_state_unknown'}
+    rom:
+      - {offset: 0x8B39, width: 8, value: 130, role: gate threshold}
+      - {offset: 0x8B3D, width: 8, value: 129, role: release threshold}
+    confidence: code
+    twin: implemented
+    implemented_by: src.analysis.target_phi.predict
+    evidence: ['target_phi_twin.yaml final_command.enrichment_gate (image-checked)']
+
+  - id: enrichment_state_request
+    function: 0x055DB2
+    span: [0x055EF0, 0x056050]
+    kind: state
+    writes: [0xFFFF14C5, 0xFFFF288A, 0xFFFF2875, 0xFFFF2876, 0xFFFF2866]
+    reads: [0xFFFF1079, 0xFFFF11CA, 0xFFFF174B, 0xFFFF2841, 0xFFFF10C5, 0xFFFF288A, 0xFFFF2875,
+            0xFFFF2876, 0xFFFF2866]
+    depends_on: [cycle_snapshot, enrichment_gate, pedal_enrichment_flag]
+    arithmetic: >-
+      Latches with hysteresis: 0xFFFF288A bit 6 (warm) when 0xFFFF1079 (+3
+      while latched) >= 0x73 (115, 65 degC under DID 0x1101's -50);
+      0xFFFF2875 bits 2, 1, 0 and 0xFFFF2876 bit 7 on 0xFFFF11CA (+4 counts,
+      200 rpm, while latched) at 0x3E (3,100 rpm), 0x44 (3,400 rpm), 0x44 and
+      0x28 (2,000 rpm). The request 0xFFFF14C5 follows from them,
+      0xFFFF174B and 0xFFFF2841 bit 0.
+    rounding: none
+    saturation: none
+    branches:
+      - {when: 'not warm', then: 'request 8'}
+      - {when: 'warm, 0xFFFF174B = 0x80', then: 'request 1'}
+      - {when: 'warm, 0xFFFF174B above 0x80, pedal flag clear', then: 'request 2 / 4 / 6 below 3,100 / below 3,400 / above'}
+      - {when: 'warm, 0xFFFF174B above 0x80, pedal flag set', then: 'request 3 / 5 / 7 by the same bands; 0xFFFF2866 bit 0 set when 0xFFFF10C5 > 0xFD'}
+    confidence: code
+    twin: not_modelled
+    evidence: ['listing 0x055EF0-0x056050']
+
+  - id: enrichment_state
+    function: 0x055DB2
+    span: [0x056050, 0x0566BC]
+    kind: state
+    writes: [0xFFFF14C4, 0xFFFF1742, 0xFFFF1744, 0xFFFF1746, 0xFFFF1748]
+    reads: [0xFFFF14C5, 0xFFFF2866, 0xFFFF84C3, 0xFFFF1742, 0xFFFF1744, 0xFFFF1746, 0xFFFF1748]
+    depends_on: [enrichment_state_request, cycle_snapshot]
+    arithmetic: >-
+      0xFFFF14C5 to the committed 0xFFFF14C4 through timers 0xFFFF1742,
+      0xFFFF1744, 0xFFFF1746 and 0xFFFF1748, stepped only while 0xFFFF84C3
+      bit 7 is set (down 0x1A, floor 0; up 0x80, cap 0xFFFF). 1 -> 1;
+      2 -> 2 while 0xFFFF1742 >> 8 < 25 and 0xFFFF1748 >> 8 < 15, else 3;
+      3, 5, 7 -> 4 when 0xFFFF2866 bit 0 is set, else 3; 4 -> 2
+      (0xFFFF1742 >> 8 < 9) or 6 while 0xFFFF1742 >> 8 < 25, else 3; 6 -> 3;
+      8 -> 5.
+    rounding: none
+    saturation: 'timers clamp at 0 and 0xFFFF'
+    confidence: code
+    twin: not_modelled
+    evidence: ['listing 0x056050-0x0566BC']
+
+  - id: enrichment_multiplier
+    function: 0x055DB2
+    span: [0x0566BE, 0x0568B4]
+    kind: computation
+    writes: [0xFFFF26C0, 0xFFFF2867, 0xFFFF2947]
+    reads: [0xFFFF14C4, 0xFFFF174B, 0xFFFF26CE, 0xFFFF2867, 0xFFFF2875, 0xFFFF2876, 0xFFFF84C3,
+            0xFFFF2BA9, 0xFFFF2947, 0xFFFF4858]
+    depends_on: [enrichment_state, enrichment_gate, cycle_snapshot]
+    arithmetic: >-
+      Ramp values from last cycle's multiplier p = 0xFFFF26CE, stepped only
+      while 0xFFFF84C3 bit 7 is set: down = max(0x4000, p - 0x130), up =
+      min(0xFFFF174B << 7, p + 0x180) (cal 0x8495 = 38 and 0x8496 = 48, x 8).
+      The value chosen by 0xFFFF14C4 is capped at 0xFFFF174B << 7; bit 7 of
+      0xFFFF2867 is set when it equals that cap. Then 0xFFFF26C0 = 0x4000 if
+      0xFFFF2BA9 < 0x20 (which also sets 0xFFFF2947 = cal 0x879E) or
+      0xFFFF2947 != 0, else the chosen value. 0xFFFF4858 bit 1 is read for
+      the extra cap, which the calibration disables.
+    rounding: none
+    saturation: 'capped at the gated lookup word; ramp floor 0x4000'
+    branches:
+      - {when: 'state 1', then: '0x4000'}
+      - {when: 'state 2, 0xFFFF2875 bit 0 clear and 0xFFFF2876 bit 7 set', then: 'ramp down; below 0x4080 (cal 0x8B3D << 7) gives 0x4000'}
+      - {when: 'state 6, same rpm condition', then: 'p = 0x4000: 0x82 << 7 (cal 0x8B3A); p > 0x4500 (cal 0x91E2): ramp down; else ramp up'}
+      - {when: 'states 2, 3, 6 otherwise', then: '0xFFFF2867 bit 7 set: the lookup word; p = 0x4000: 0x82 << 7 (cal 0x8B39); p > 0x4000: ramp up; p < 0x4000: an uninitialised stack word (indeterminate)'}
+      - {when: 'states 4, 5', then: 'the lookup word 0xFFFF174B << 7'}
+    rom:
+      - {offset: 0x8495, width: 8, value: 38, role: 'ramp-down step / 8'}
+      - {offset: 0x8496, width: 8, value: 48, role: 'ramp-up step / 8'}
+      - {offset: 0x8B3A, width: 8, value: 130, role: 'state 6 ramp start'}
+      - {offset: 0x91E2, width: 16, value: 0x4500, role: 'state 6 ramp-down threshold'}
+      - {offset: 0x879E, width: 8, value: 2, role: 'hold counter preset'}
+    calibration_conditions:
+      - {offset: 0x896E, mask: 0x08, equals: 0,
+         why: 'bit 3 clear: the extra cap at cal 0x93E2 (applied when 0xFFFF4858 bit 1 is set) is unreachable'}
+    confidence: code
+    twin: not_modelled
+    observed_as:
+      - spec: 'did:ECM_ENRICHMENT_TARGET_EQUIV_RATIO_CANDIDATE'
+        address: 0xFFFF26C0
+        relation: high_byte
+        confidence: inferred
+        note: >-
+          The local CAN Mode 22 pointer table maps DID 0x1134 to 0xFFFF26C0, so
+          the DID is this multiplier's high byte, not the command's. That fits
+          its catalog evidence (raw = max(64, word >> 8) on 5,000 reads while
+          the corrections were neutral; 64 while PID 0x44 read 1.06 or 0.87).
+          Not yet checked against a same-read 0xFFFF26C0 read.
+    evidence: ['listing 0x0566BE-0x0568B4; stack slot r15+0xC is written only at 0x056822']
+
+  - id: alternate_multiplier_writer
+    function: 0x055A04
+    kind: computation
+    writes: [0xFFFF26C0]
+    reads: [0xFFFF2BCE]
+    arithmetic: '0xFFFF26C0 = clamp(0xFFFF2BCE << 7, 0x1000, 0x6000).'
+    rounding: none
+    saturation: '0x1000..0x6000'
+    calibration_conditions:
+      - {offset: 0x8AD3, mask: 0x10, equals: 0,
+         why: 'the task calls 0x055A04 only with cal 0x8AD3 bits 4 and 1 set (and 0x8AE1 bit 0 or 5); bit 4 clear leaves it unscheduled'}
+    confidence: code
+    twin: calibration_dead
+    evidence: ['listing 0x057602-0x05762E (FUN_000575EC)']
+
+  - id: correction_1736
+    function: 0x0556EC
+    kind: computation
+    writes: [0xFFFF1736, 0xFFFF1738, 0xFFFF1739, 0xFFFF2875, 0xFFFF2866]
+    reads: [0xFFFF11CF, 0xFFFF1114, 0xFFFF2833, 0xFFFF2875, 0xFFFF1077, 0xFFFF103E, 0xFFFF11CA,
+            0xFFFF1736, 0xFFFF26C0]
+    depends_on: [enrichment_multiplier, cycle_snapshot]
+    arithmetic: >-
+      0xFFFF2875 bit 7 latches 0xFFFF11CF >= 0x90 (+2 hysteresis); bits 3
+      and 5 latch 0xFFFF1114 >= 0xAA and >= 0xA0 (+3); bit 6 takes bit 5 when
+      bit 7 is set, else bit 3. 0xFFFF1736 is zero unless bit 6 is set and
+      0xFFFF2833 bit 4 is clear. Then 0xFFFF1738 = cell of the 4 x 4 table
+      0x9724 (0xFFFF103E band on axis 0xC8E8, 0xFFFF11CA band on axis
+      0xC8E4), 0xFFFF1739 = 8-entry curve 0xD15F of 0xFFFF1077 above 0xC0,
+      and the product, stepped at most 5 per cycle from the previous
+      0xFFFF1736 once active (direction in 0xFFFF2866 bit 1), capped at
+      0x5E77 - 0xFFFF26C0.
+    rounding: none
+    saturation: 'cap 0x5E77 - multiplier, floor 0'
+    confidence: code
+    twin: not_modelled
+    evidence: ['decompile text FUN_000556EC']
+
+  - id: correction_175c
+    function: 0x053400
+    kind: computation
+    writes: [0xFFFF175C, 0xFFFF1762, 0xFFFF14DA, 0xFFFF1764, 0xFFFF2867]
+    reads: [0xFFFF26B9, 0xFFFF2867, 0xFFFF1796, 0xFFFF26C0, 0xFFFF1760, 0xFFFF1762, 0xFFFF1726,
+            0xFFFF14DA, 0xFFFF1038, 0xFFFF1077]
+    depends_on: [enrichment_multiplier, cycle_snapshot]
+    arithmetic: >-
+      0xFFFF1762 = 0xFFFF1760 less a share set by curves 0xD34D/0xD345 of
+      the previous BFS 0xFFFF1038 and curve 0xC774 of 0xFFFF1077. Then
+      FUN_000537AE: 0xFFFF175C is zero while 0xFFFF26B9 bit 0 or 1 or
+      0xFFFF2867 bit 6 is set, or 0xFFFF1796 bit 0/1 with 0xFFFF26C0 above
+      0x4000 (that branch also writes 0xFFFF1764 once and sets 0xFFFF2867
+      bit 6). Otherwise the signed Q14 product (0xFFFF1762 + 0xFFFF1726) x
+      0xFFFF14DA >> 14; 0xFFFF14DA decays by 0x31 while 0xFFFF1796 bits 0
+      and 1 are both set.
+    rounding: 'signed shift, biased toward zero'
+    saturation: '0xFFFF14DA floor 0'
+    confidence: code
+    twin: not_modelled
+    evidence: ['decompile text FUN_00053400 / FUN_000537AE']
+
+  - id: correction_26e8
+    function: 0x055386
+    kind: computation
+    writes: [0xFFFF26E8, 0xFFFF1770, 0xFFFF1794, 0xFFFF2867]
+    reads: [0xFFFF10C6, 0xFFFF11CF, 0xFFFF1077, 0xFFFF103E, 0xFFFF11CA, 0xFFFF1079, 0xFFFF1794,
+            0xFFFF1764, 0xFFFF1E55, 0xFFFF26B9, 0xFFFF2867, 0xFFFF1796, 0xFFFF26C0]
+    depends_on: [enrichment_multiplier, correction_175c, cycle_snapshot]
+    arithmetic: >-
+      0xFFFF10C6 x (map 0xD27F at 0xFFFF11CF x (curve 0xD26F x curve 0xD25F
+      of 0xFFFF1077 >> 6) >> 6), plus, under the gates that zero correction_175c
+      (0xFFFF26B9 bits 0/1, 0xFFFF2867 bit 6, 0xFFFF1796 bits with
+      0xFFFF26C0 above 0x4000), a term: the 2-D map 0xA0D9 at 0xFFFF11CA and
+      2 x 0xFFFF103E, times 0xFFFF1770 (0xFFFF1079 relative to 0xFFFF1794,
+      latched when the term starts, which sets 0xFFFF2867 bit 1), times
+      0xFFFF1764 and 0xFFFF1E55.
+    rounding: truncate
+    saturation: 'min 0xFFFF; never negative'
+    confidence: code
+    twin: not_modelled
+    evidence: ['decompile text FUN_00055386']
+
+  - id: correction_sum
+    function: 0x05591C
+    kind: computation
+    writes: [0xFFFF26F6]
+    reads: [0xFFFF175C, 0xFFFF26E8, 0xFFFF1736]
+    depends_on: [correction_175c, correction_26e8, correction_1736]
+    arithmetic: '0xFFFF26F6 = 0x4000 + 0xFFFF175C (signed) + 0xFFFF26E8 + 0xFFFF1736, in 32 bits.'
+    rounding: none
+    saturation: 'clamped to 0..0xFFFF'
+    confidence: code
+    twin: not_modelled
+    evidence: ['listing 0x05591C-0x055958']
+
+  - id: command_floor
+    function: 0x055AB8
+    kind: computation
+    writes: [0xFFFF1724, 0xFFFF288E, 0xFFFF2915]
+    reads: [0xFFFF111C, 0xFFFF288E, 0xFFFF284E, 0xFFFF2915, 0xFFFF2833]
+    arithmetic: >-
+      0xFFFF288E bit 2 latches 0xFFFF111C (+2 while latched) >= cal 0x8D51;
+      0xFFFF2915 is reset when 0xFFFF284E bit 7 is clear. With 0xFFFF2915 0,
+      0xFFFF2833 bit 4 and 0xFFFF288E bit 2 set, 0xFFFF1724 comes from curve
+      0xD0EF; otherwise 0xFFFF1724 = 0.
+    rounding: none
+    saturation: 'min 0xFFFF'
+    calibration_conditions:
+      - {offset: 0x8D51, mask: 0xFF, equals: 0,
+         why: 'with 0x8D51 = 0 bit 2 of 0xFFFF288E is always cleared, so the floor stays 0'}
+    confidence: code
+    twin: calibration_dead
+    evidence: ['listing 0x055AB8-0x055B4E']
+
+  - id: curve_term
+    function: 0x055966
+    kind: computation
+    writes: [0xFFFF27DC, 0xFFFF2A90]
+    reads: [0xFFFF15B3, 0xFFFF135F, 0xFFFF26C0, 0xFFFF26B9, 0xFFFF2A90, 0xFFFF2D10, 0xFFFF2D14]
+    depends_on: [enrichment_multiplier]
+    arithmetic: >-
+      0xFFFF2A90 is cleared while 0xFFFF15B3 is non-zero. 0xFFFF27DC is zero
+      unless 0xFFFF135F bits 0 and 1 are set, 0xFFFF26C0 (this cycle's) is
+      exactly 0x4000, 0xFFFF26B9 bits 0 and 1 are set and 0xFFFF2A90 is 0.
+      Then the 16-bit curve 0xED3A on axis 0xDFD2 at max(0xFFFF2D10,
+      0xFFFF2D14) >> 8 (signed, biased by 0x8000, saturated).
+    rounding: truncate
+    saturation: 'capped at 0xEB8 (3,768)'
+    confidence: code
+    twin: not_modelled
+    evidence: ['decompile text FUN_00055966']
+
+  - id: final_command_word
+    function: 0x055B5E
+    kind: computation
+    writes: [0xFFFF26BE, 0xFFFF1B2E, 0xFFFF2845, 0xFFFF2886]
+    reads: [0xFFFF26F6, 0xFFFF27DC, 0xFFFF26C0, 0xFFFF4785, 0xFFFF1724, 0xFFFF2845, 0xFFFF26C6,
+            0xFFFF26B8, 0xFFFF4787, 0xFFFF2841, 0xFFFF125C, 0xFFFF2849, 0xFFFF2886, 0xFFFF26CC,
+            0xFFFF84C3]
+    depends_on: [correction_sum, curve_term, enrichment_multiplier, alternate_multiplier_writer,
+                 command_floor, cycle_snapshot]
+    arithmetic: >-
+      v = min(0xFFFF, 0xFFFF26F6 + 0xFFFF27DC) x 0xFFFF26C0 >> 14 (32-bit
+      unsigned product). With 0xFFFF4785 bit 6 set: v = min(0xFFFF, v x cal
+      0x838A >> 6). Clear: v < 0xFFFF1724 gives 0xFFFF1724 and sets
+      0xFFFF2845 bit 0, else min(0xFFFF, v) and clears it. Then, only while
+      0xFFFF26C6 and 0xFFFF26B8 are not 0x3F, 0xFFFF4787 and 0xFFFF4785
+      bit 6 are clear, 0xFFFF2841 bit 0 is clear and 0xFFFF125C = 0x8000:
+      cap at 0xFE00 (cal 0x8B3B); set 0xFFFF2886 bit 2 when 0xFFFF2849 bit 0
+      differs from 0xFFFF2845 bit 0; with 0xFFFF2886 bit 2 clear, slew-limit
+      to 0x3FC0 per cycle against 0xFFFF26CC, else hold toward 0xFFFF26CC by
+      0xFFFF84C3 bit 7 and 0xFFFF2845 bit 0, clearing 0xFFFF2886 bit 2 when
+      released. 0xFFFF1B2E keeps the result; 0xFFFF26BE is written 0 while
+      0xFFFF26B8 = 0x3F.
+    rounding: 'truncating shift'
+    saturation: 'min 0xFFFF; cap 0xFE00 and slew +-0x3FC0 on the guarded path only'
+    branches:
+      - {when: '0xFFFF2841 bit 0 set', then: 'no cap and no slew limit'}
+      - {when: '0xFFFF26CC = 0 (fuel cut) on the guarded path', then: 'the first word after cut is at most 0x3FC0'}
+    rom:
+      - {offset: 0x8B3B, width: 8, value: 254, role: 'cap high byte (0xFE00)'}
+      - {offset: 0x838A, width: 8, value: 64, role: 'scale /64 while 0xFFFF4785 bit 6'}
+    calibration_conditions:
+      - {offset: 0x838A, mask: 0xFF, equals: 64,
+         why: '64 makes the 0xFFFF4785 bit 6 scaling the identity'}
+    confidence: code
+    twin: not_modelled
+    evidence: ['listing 0x055B5E-0x055DA4']
+
+outputs:
+  - id: target_equiv_ratio
+    ram: 0xFFFF26BE
+    written_by: final_command_word
+    units: q14_phi
+    observed_as:
+      - {spec: 'mem:ECM_TARGET_EQUIV_RATIO', address: 0xFFFF26BE, relation: identity}
+      - spec: 'obd:COMMANDED_EQUIV_RATIO'
+        address: 0xFFFF26BE
+        relation: alias
+        note: 'PID 0x44 reads the same word; agreement verifies the mapping, not the algorithm.'
+    twin:
+      definition: target_phi_twin.yaml
+      # The node whose value the twin computes: the gated lookup, as a word.
+      predicts: enrichment_gate
+    # What must hold, per sample, for the gated lookup word to be the final
+    # command. None is captured today.
+    equals_output_when:
+      - id: multiplier_is_lookup
+        statement: '0xFFFF26C0 = 0xFFFF174B << 7 (states 4/5, or 2/3/6 after the ramp reached it; 0xFFFF2947 = 0)'
+        settled_by: '0xFFFF26C0 in the 58-byte read from 0xFFFF26BE'
+      - id: corrections_neutral
+        statement: '0xFFFF26F6 = 0x4000 and 0xFFFF27DC = 0 (0xFFFF27DC is 0 whenever the multiplier is not 0x4000)'
+        settled_by: '0xFFFF26F6 in the same read; 0xFFFF27DC in a second read'
+      - id: cap_and_slew_not_binding
+        statement: 'no cap at 0xFE00 and no 0x3FC0 slew step (both skipped while the pedal flag is set)'
+        settled_by: 'last cycle''s word 0xFFFF26CC in the same read'
+    blockers:
+      - name: final_command_path_unverified
+        nodes: [cycle_snapshot, enrichment_state_request, enrichment_state, enrichment_multiplier,
+                correction_1736, correction_175c, correction_26e8, correction_sum, curve_term,
+                final_command_word]
+        closes_with: >-
+          Implement the multiplier state machine and final writer, then verify
+          per sample against a same-read 0xFFFF26BE..0xFFFF26F7 window plus
+          0xFFFF27DC (E02.4 remaining 2), or observe those words directly and
+          restrict the claim to samples where equals_output_when holds.
+      - name: ram_copy_unverified
+        nodes: [target_afr_ram_copy]
+        closes_with: 'E02.2: read 0xFFFFB260 (63 + 1 bytes) and compare with the resolved slot.'
+    regions:
+      - id: enrichment_gate_band
+        status: unevaluable
+        when: 'gated lookup result 129 with the latch 0xFFFF2886 bit 3 not captured'
+        nodes: [enrichment_gate]
+      - id: multiplier_indeterminate
+        status: unevaluable
+        when: 'state 2, 3 or 6 with 0xFFFF2867 bit 7 clear and last multiplier below 0x4000 (the firmware reads an uninitialised stack word); unreachable while alternate_multiplier_writer is calibration-dead'
+        nodes: [enrichment_multiplier]
+      - id: cold_state_5
+        status: conditional
+        when: 'coolant byte below 115 (65 degC): state 5 takes the lookup word directly, but the corrections are not modelled'
+        nodes: [enrichment_state_request, correction_sum]
+      - id: fuel_cut_recovery
+        status: conditional
+        when: 'first cycles after fuel cut on the guarded path: slew-limited from 0 by 0x3FC0 per cycle'
+        nodes: [final_command_word]
+
+# Logic the trace reached and did not resolve, model-wide.
+uncovered:
+  - id: pedal_flag_inputs
+    where: '0x055DB2: 0xFFFF11CF (curve input, cycle-start copy of 0xFFFF1207) and 0xFFFF3CDC (comparand)'
+    blocks: 'predicting 0xFFFF2841 bit 0 instead of observing it (E05.3)'
+    next_evidence: 'Trace the writers of 0xFFFF1207 and 0xFFFF3CDC; capture pedal, flag and both bytes through threshold crossings.'
+  - id: multiplier_hold_counter
+    where: '0xFFFF2947 (set to 2 at init and while 0xFFFF2BA9 < 0x20); its decrement was not found'
+    blocks: 'knowing when the multiplier is forced to 0x4000'
+    next_evidence: 'Find the countdown (likely an indexed timer table); identify 0xFFFF2BA9.'
+  - id: enrichment_flags
+    where: '0xFFFF26B9 bits 0/1, 0xFFFF1796 bits 0/1, 0xFFFF135F bits 0/1, 0xFFFF2A90, 0xFFFF2833 bit 4, 0xFFFF10C5'
+    blocks: 'gating of the three corrections and the curve term'
+    next_evidence: 'Trace each writer; read them in the fuel window alongside the corrections.'
+  - id: correction_inputs
+    where: '0xFFFF1114, 0xFFFF1077, 0xFFFF10C6, 0xFFFF2D10/2D14, w1762/w1726/w14DA'
+    blocks: 'computing 0xFFFF26F6 and 0xFFFF27DC'
+    next_evidence: 'Trace writers; until then observe 0xFFFF26F6 and 0xFFFF27DC directly.'
+  - id: other_174b_readers
+    where: '0x04CAF4 and 0x066028 read 0xFFFF174B'
+    blocks: 'nothing in this output; other consumers of the gated lookup'
+    next_evidence: 'Follow both readers.'
+  - id: fuel_comp_fill_terms
+    where: '0x03C3A4 (w139E, w2CD0, w63FC), BFS 0x03C4D0'
+    blocks: 'predicting X instead of observing it (E05.2)'
+    next_evidence: 'E05.2 / B08.'
+  - id: timing_final_chain
+    where: 'timing-trim readers of slot +0x020/+0x120 to the final ignition command'
+    blocks: 'any ignition output (E05.4)'
+    next_evidence: 'E05.4.'
+  - id: slot_0x260_map
+    where: 'slot +0x260 (RAM 0xFFFFB2A0), >= 21 readers through 0x026B14'
+    blocks: 'any output it feeds; not identified'
+    next_evidence: 'Identify a reader and an independently observed quantity.'
