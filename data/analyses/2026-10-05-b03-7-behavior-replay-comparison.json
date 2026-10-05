@@ -1,0 +1,5603 @@
+[
+ {
+  "candidate": {
+   "artifact": "data/nissan-xterra-2008/behavior_models.yaml",
+   "artifact_sha256": "816c150bf4935139a35b0d72fb4cb5df5f11eb809d943c6e2a9734568d16e565",
+   "behavior_ticks": 475,
+   "counters": {
+    "emitted": 7,
+    "emitted_evidence": 0,
+    "skipped_capture_profile": 0,
+    "skipped_vehicle_state": 0,
+    "suppressed_dedupe": 21,
+    "suppressed_not_anomaly": 25,
+    "suppressed_persistence": 51,
+    "suppressed_tuning": 0
+   },
+   "dependent_manifests": [
+    {
+     "behavior_feature_conflicts": {},
+     "behavior_fingerprint_provenance": {},
+     "behavior_models_consumed": [],
+     "feature_count": 295,
+     "model_type": "isolation_forest",
+     "model_version": "isolation_forest_2026-09-20T054703.694923Z",
+     "path": "models/nissan-xterra-2008/isolation_forest/model.manifest.json"
+    },
+    {
+     "behavior_feature_conflicts": {},
+     "behavior_fingerprint_provenance": {},
+     "behavior_models_consumed": [],
+     "feature_count": 361,
+     "model_type": "lstm_autoencoder",
+     "model_version": "lstm_autoencoder_2026-09-20T064628.385918Z",
+     "path": "models/nissan-xterra-2008/lstm_autoencoder/model.manifest.json"
+    }
+   ],
+   "detectors": "behavior_only",
+   "events_total": 7,
+   "first_tick": "2026-09-22T23:39:00+00:00",
+   "fused_events": 1,
+   "governing_policy": "data/nissan-xterra-2008/behavior_policy.yaml",
+   "governing_policy_sha256": "fb72e9478113cf4f116a89a0e38806820dcdcd018dd76e3f0376d36923cc4b0e",
+   "last_tick": "2026-09-22T23:46:54+00:00",
+   "models": {
+    "air_charge_vs_rpm_throttle_did": {
+     "alerting_as_served": false,
+     "artifact": {
+      "fingerprint": "sha256:0027fad49ac52a67f2686652b53f42c8305c5e967ada7911b86c127010d653ee",
+      "fitted_at": "2026-09-24T01:56:22.183857+00:00",
+      "grid_version": 1,
+      "name": "air_charge_vs_rpm_throttle_did",
+      "schema_contract": true,
+      "training_data_hash": "sha256:8b2d5dbe871b3ffe",
+      "tune_revision": "ZS44A-20260920",
+      "version": 2
+     },
+     "band_ticks": {
+      "ok": 9
+     },
+     "calibration_context": "match",
+     "coverage": 0.018947368421052633,
+     "fused_events_contributed": 0,
+     "fusion_votes": 0,
+     "in_mode_ticks": 475,
+     "operating_mode": null,
+     "output": "did:ECM_AIR_CHARGE",
+     "persisted_events": 0,
+     "refusals": {
+      "input_missing:did:ECM_RPM": 61,
+      "input_stale:did:ECM_RPM": 404,
+      "input_stale:did:ECM_THROTTLE_POS_SENSOR_1": 1
+     },
+     "scored_ticks": 9,
+     "serving_status": {
+      "lifecycle": "unvalidated",
+      "permitted_uses": [
+       "display",
+       "learned_feature"
+      ],
+      "policy": null,
+      "reasons": [
+       "validation_failed:mae=1771>meaningful_deviation=1500.0",
+       "validation_failed:warning_half_width_median=8317>meaningful_deviation=1500.0",
+       "validation_failed:synthetic_negative_1500_60s_detection=0.17<0.8"
+      ],
+      "state": "diagnostic_only"
+     },
+     "ticks": 475
+    },
+    "air_mass_per_cycle_vs_rpm_load": {
+     "alerting_as_served": false,
+     "artifact": {
+      "fingerprint": "sha256:5445b097be5a870a809e570989ae79a7aa83faf1cdff12a97f2fac5ca36d356c",
+      "fitted_at": "2026-09-24T01:55:52.020107+00:00",
+      "grid_version": 1,
+      "name": "air_mass_per_cycle_vs_rpm_load",
+      "schema_contract": true,
+      "training_data_hash": "sha256:835ad6adcec74631",
+      "tune_revision": "ZS44A-20260920",
+      "version": 3
+     },
+     "band_ticks": {
+      "critical": 1,
+      "ok": 315,
+      "warning": 5
+     },
+     "calibration_context": "match",
+     "coverage": 0.6757894736842105,
+     "fused_events_contributed": 0,
+     "fusion_votes": 0,
+     "in_mode_ticks": 475,
+     "operating_mode": null,
+     "output": "derived:AIR_MASS_PER_CYCLE",
+     "persisted_events": 0,
+     "refusals": {
+      "actual_missing:derived:AIR_MASS_PER_CYCLE": 1,
+      "actual_stale:derived:AIR_MASS_PER_CYCLE": 1,
+      "engine_state_stale:obd:RPM": 110,
+      "input_stale:obd:ENGINE_LOAD": 23,
+      "off_map": 19
+     },
+     "scored_ticks": 321,
+     "serving_status": {
+      "lifecycle": "unvalidated",
+      "permitted_uses": [
+       "display",
+       "learned_feature"
+      ],
+      "policy": null,
+      "reasons": [
+       "validation_failed:mae=0.1251>meaningful_deviation=0.08",
+       "validation_failed:warning_half_width_median=0.2806>meaningful_deviation=0.08",
+       "validation_failed:synthetic_negative_0.08_60s_detection=0.25<0.8"
+      ],
+      "state": "diagnostic_only"
+     },
+     "ticks": 475
+    },
+    "cat_warmup": {
+     "alerting_as_served": false,
+     "artifact": {
+      "fingerprint": "sha256:f14450ab4c88df87047c9994136145d67141668b0813596370ac5a57c637f06a",
+      "fitted_at": "2026-05-25T15:17:44.374674+00:00",
+      "grid_version": null,
+      "name": "cat_warmup",
+      "schema_contract": false,
+      "training_data_hash": "sha256:977d2d5412d81e30",
+      "tune_revision": null,
+      "version": 4
+     },
+     "band_ticks": {
+      "ok": 14,
+      "warning": 8
+     },
+     "calibration_context": "model_revision_unknown",
+     "coverage": 0.13253012048192772,
+     "fused_events_contributed": 0,
+     "fusion_votes": 0,
+     "in_mode_ticks": 166,
+     "operating_mode": "warmup",
+     "output": "obd:CATALYST_TEMP_B1S1",
+     "persisted_events": 0,
+     "refusals": {
+      "actual_missing:obd:CATALYST_TEMP_B1S1": 9,
+      "actual_stale:obd:CATALYST_TEMP_B1S1": 134,
+      "input_missing:obd:RUN_TIME": 1,
+      "operating_mode_mismatch": 309
+     },
+     "scored_ticks": 22,
+     "serving_status": {
+      "lifecycle": "quarantined",
+      "permitted_uses": [
+       "display"
+      ],
+      "policy": {
+       "artifact_fingerprint": "sha256:f14450ab4c88df87047c9994136145d67141668b0813596370ac5a57c637f06a",
+       "decided": "2026-09-21 behavior-model review (B00 carried decision)",
+       "evidence": "data/analyses/2026-09-21-behavior-model-review.md (Model decisions); data/analyses/2026-09-21-behavior-validation-report.md \u00a74",
+       "lifecycle": "quarantined",
+       "lift_when": "a new cat_warmup fit passes B02 validation (B07); this artifact stays quarantined",
+       "model": "cat_warmup",
+       "permitted_uses": [
+        "display"
+       ],
+       "reason": "May 25 artifact (v4) with no held-out validation; on S18's genuine cold start n=34, R\u00b2 -0.737, MAE 55 deg C, 76.5 % exceedance; persisted bands 30/80 deg C predate the recipe's 45/115. Its May training sessions are absent locally, so it cannot be re-validated. Temperature trajectory alone does not establish catalyst efficiency; the raw channel and warmup analysis stay."
+      },
+      "reasons": [
+       "policy:quarantined",
+       "legacy_artifact:no_serving_eligibility_contract",
+       "unvalidated:no_held_out_evidence",
+       "contract_changed:recipe"
+      ],
+      "state": "diagnostic_only"
+     },
+     "ticks": 475
+    },
+    "fuel_trim_vs_rpm_load": {
+     "alerting_as_served": false,
+     "artifact": {
+      "fingerprint": "sha256:264b9ae497a8cdd369fc253de2f0acd3b8dbaef373857357064f2cce9660f506",
+      "fitted_at": "2026-09-24T01:55:48.123532+00:00",
+      "grid_version": 1,
+      "name": "fuel_trim_vs_rpm_load",
+      "schema_contract": true,
+      "training_data_hash": "sha256:ba3cc6721b09eb62",
+      "tune_revision": "ZS44A-20260920",
+      "version": 3
+     },
+     "band_ticks": {
+      "ok": 209
+     },
+     "calibration_context": "match",
+     "coverage": 0.44,
+     "fused_events_contributed": 0,
+     "fusion_votes": 0,
+     "in_mode_ticks": 475,
+     "operating_mode": null,
+     "output": "obd:SHORT_FUEL_TRIM_1",
+     "persisted_events": 0,
+     "refusals": {
+      "actual_stale:obd:SHORT_FUEL_TRIM_1": 126,
+      "engine_state_stale:obd:RPM": 110,
+      "input_stale:obd:ENGINE_LOAD": 23,
+      "off_map": 7
+     },
+     "scored_ticks": 209,
+     "serving_status": {
+      "lifecycle": "unvalidated",
+      "permitted_uses": [
+       "display",
+       "learned_feature"
+      ],
+      "policy": null,
+      "reasons": [
+       "validation_failed:skill_vs_baseline=-0.023<0.3",
+       "validation_failed:warning_half_width_median=17.15>meaningful_deviation=5.0",
+       "validation_failed:control_events_per_hour=2.42>2.0",
+       "validation_failed:synthetic_positive_5_120s_detection=0.18<0.8"
+      ],
+      "state": "diagnostic_only"
+     },
+     "ticks": 475
+    },
+    "stft_bank_balance_city": {
+     "alerting_as_served": false,
+     "artifact": {
+      "fingerprint": "sha256:c449694cf41e9a3286a22427514c098366eec8ca6b26fab900e3c81fb929a982",
+      "fitted_at": "2026-09-24T01:56:13.011086+00:00",
+      "grid_version": null,
+      "name": "stft_bank_balance_city",
+      "schema_contract": true,
+      "training_data_hash": "sha256:f00c7777c4ff7683",
+      "tune_revision": "ZS44A-20260920",
+      "version": 1
+     },
+     "band_ticks": {},
+     "calibration_context": "match",
+     "coverage": null,
+     "fused_events_contributed": 0,
+     "fusion_votes": 0,
+     "in_mode_ticks": 0,
+     "operating_mode": "city",
+     "output": "derived:STFT_BANK_BALANCE",
+     "persisted_events": 0,
+     "refusals": {
+      "operating_mode_mismatch": 475
+     },
+     "scored_ticks": 0,
+     "serving_status": {
+      "lifecycle": "unvalidated",
+      "permitted_uses": [
+       "display",
+       "learned_feature"
+      ],
+      "policy": null,
+      "reasons": [
+       "validation_failed:control_events_per_hour=2.86>2.0"
+      ],
+      "state": "diagnostic_only"
+     },
+     "ticks": 475
+    },
+    "stft_bank_balance_highway": {
+     "alerting_as_served": false,
+     "artifact": {
+      "fingerprint": "sha256:cb0b28a4722c2ca1a290bd4be718fbf79b46b5056624283896c3e25aa4c9b197",
+      "fitted_at": "2026-09-24T01:56:16.634156+00:00",
+      "grid_version": null,
+      "name": "stft_bank_balance_highway",
+      "schema_contract": true,
+      "training_data_hash": "sha256:101ce709630fc3cb",
+      "tune_revision": "ZS44A-20260920",
+      "version": 1
+     },
+     "band_ticks": {},
+     "calibration_context": "match",
+     "coverage": null,
+     "fused_events_contributed": 0,
+     "fusion_votes": 0,
+     "in_mode_ticks": 0,
+     "operating_mode": "highway",
+     "output": "derived:STFT_BANK_BALANCE",
+     "persisted_events": 0,
+     "refusals": {
+      "operating_mode_mismatch": 475
+     },
+     "scored_ticks": 0,
+     "serving_status": {
+      "lifecycle": "unvalidated",
+      "permitted_uses": [
+       "display",
+       "learned_feature"
+      ],
+      "policy": null,
+      "reasons": [
+       "validation_failed:control_events_per_hour=13.9>2.0"
+      ],
+      "state": "diagnostic_only"
+     },
+     "ticks": 475
+    },
+    "timing_advance_vs_rpm_iat": {
+     "alerting_as_served": false,
+     "artifact": {
+      "fingerprint": "sha256:1a2394e4ca01ebdcc81fb74c752d35a590ed65916e7a18fdfb974036f19384cb",
+      "fitted_at": "2026-07-27T06:09:06.923608+00:00",
+      "grid_version": 1,
+      "name": "timing_advance_vs_rpm_iat",
+      "schema_contract": false,
+      "training_data_hash": "sha256:931d6ff04cb414ed",
+      "tune_revision": null,
+      "version": 2
+     },
+     "band_ticks": {
+      "critical": 24,
+      "ok": 55,
+      "warning": 8
+     },
+     "calibration_context": "model_revision_unknown",
+     "coverage": 0.1831578947368421,
+     "fused_events_contributed": 1,
+     "fusion_votes": 21,
+     "in_mode_ticks": 475,
+     "operating_mode": null,
+     "output": "obd:TIMING_ADVANCE",
+     "persisted_events": 3,
+     "refusals": {
+      "actual_stale:obd:TIMING_ADVANCE": 7,
+      "input_missing:obd:INTAKE_TEMP": 2,
+      "input_stale:obd:RPM": 110,
+      "off_map": 269
+     },
+     "scored_ticks": 87,
+     "serving_status": {
+      "lifecycle": "demoted",
+      "permitted_uses": [
+       "display"
+      ],
+      "policy": {
+       "decided": "2026-09-21 behavior-model review (B00 carried decision)",
+       "evidence": "data/analyses/2026-09-21-behavior-model-review.md (Model decisions); data/analyses/2026-09-21-behavior-validation-report.md \u00a73",
+       "lifecycle": "demoted",
+       "lift_when": "never for standalone alerting; retire the recipe when B04 ships a load-aware timing model",
+       "model": "timing_advance_vs_rpm_iat",
+       "permitted_uses": [
+        "display"
+       ],
+       "reason": "RPM/IAT alone omits load: held-out J26 R\u00b2 -0.046, MAE 8.80 deg, median warning half-width 31.3 deg; zero evaluable rows on S17/S18 (IAT below the 29 deg C stored domain). Removed from standalone alerting; IAT stays a candidate context input for a load-aware timing model."
+      },
+      "reasons": [
+       "policy:demoted",
+       "legacy_artifact:no_serving_eligibility_contract",
+       "unvalidated:no_gate_evidence",
+       "contract_changed:recipe"
+      ],
+      "state": "diagnostic_only"
+     },
+     "ticks": 475
+    },
+    "timing_advance_vs_rpm_load": {
+     "alerting_as_served": false,
+     "artifact": {
+      "fingerprint": "sha256:6f46aa29b754acd2f50399bb3931d2c99c36198e5715a804b7295a96884abe76",
+      "fitted_at": "2026-09-24T01:55:32.078439+00:00",
+      "grid_version": 1,
+      "name": "timing_advance_vs_rpm_load",
+      "schema_contract": true,
+      "training_data_hash": "sha256:7992e6d59decfe81",
+      "tune_revision": "ZS44A-20260920",
+      "version": 3
+     },
+     "band_ticks": {
+      "critical": 1,
+      "ok": 322,
+      "warning": 8
+     },
+     "calibration_context": "match",
+     "coverage": 0.6968421052631579,
+     "fused_events_contributed": 0,
+     "fusion_votes": 0,
+     "in_mode_ticks": 475,
+     "operating_mode": null,
+     "output": "obd:TIMING_ADVANCE",
+     "persisted_events": 0,
+     "refusals": {
+      "actual_missing:obd:TIMING_ADVANCE": 1,
+      "engine_state_stale:obd:RPM": 110,
+      "input_stale:obd:ENGINE_LOAD": 23,
+      "off_map": 10
+     },
+     "scored_ticks": 331,
+     "serving_status": {
+      "lifecycle": "exploratory",
+      "permitted_uses": [
+       "display"
+      ],
+      "policy": {
+       "decided": "2026-09-21 behavior-model review (B00 carried decision)",
+       "evidence": "data/analyses/2026-09-21-behavior-model-review.md (Model decisions)",
+       "lifecycle": "exploratory",
+       "lift_when": "B04 qualifies a timing model under B02 criteria (remove this entry in that change)",
+       "model": "timing_advance_vs_rpm_load",
+       "permitted_uses": [
+        "display"
+       ],
+       "reason": "Retained as exploratory visualization: S17/S21 R\u00b2 0.33/0.28, MAE 4.8/6.7 deg, median warning half-width ~24 deg \u2014 too coarse for subtle timing/knock alerts, and an unexpected timing residual does not identify knock."
+      },
+      "reasons": [
+       "policy:exploratory",
+       "validation_failed:mae=4.846>meaningful_deviation=3.0",
+       "validation_failed:warning_half_width_median=13.19>meaningful_deviation=3.0",
+       "validation_failed:synthetic_negative_3_60s_detection=0.56<0.8",
+       "validation_failed:transient_negative_6_3s_detection=0.30>0.0",
+       "validation_failed:transient_negative_6_10s_detection=0.38>0.0"
+      ],
+      "state": "diagnostic_only"
+     },
+     "ticks": 475
+    },
+    "total_trim_vs_rpm_load_b1": {
+     "alerting_as_served": false,
+     "artifact": {
+      "fingerprint": "sha256:603c882e7154818e8b37f1c41399f7c0f6937fa95125a1fb708c5b5a43ad2b04",
+      "fitted_at": "2026-09-24T01:56:02.150689+00:00",
+      "grid_version": 1,
+      "name": "total_trim_vs_rpm_load_b1",
+      "schema_contract": true,
+      "training_data_hash": "sha256:0667554c8755b703",
+      "tune_revision": "ZS44A-20260920",
+      "version": 1
+     },
+     "band_ticks": {
+      "ok": 66
+     },
+     "calibration_context": "match",
+     "coverage": 0.13894736842105262,
+     "fused_events_contributed": 0,
+     "fusion_votes": 0,
+     "in_mode_ticks": 475,
+     "operating_mode": null,
+     "output": "derived:TOTAL_TRIM_B1",
+     "persisted_events": 0,
+     "refusals": {
+      "engine_state_stale:obd:RPM": 101,
+      "fuel_status_stale:obd:FUEL_STATUS": 91,
+      "off_map": 4,
+      "operating_mode_excluded:warmup": 166,
+      "rate_exceeded:obd:RPM": 42,
+      "rate_insufficient_history:obd:RPM": 5
+     },
+     "scored_ticks": 66,
+     "serving_status": {
+      "lifecycle": "unvalidated",
+      "permitted_uses": [
+       "display",
+       "learned_feature"
+      ],
+      "policy": null,
+      "reasons": [
+       "validation_failed:skill_vs_baseline=0.112<0.2",
+       "validation_failed:warning_half_width_median=12.07>meaningful_deviation=5.0",
+       "validation_failed:synthetic_positive_5_120s_detection=0.04<0.8"
+      ],
+      "state": "diagnostic_only"
+     },
+     "ticks": 475
+    },
+    "total_trim_vs_rpm_load_b2": {
+     "alerting_as_served": false,
+     "artifact": {
+      "fingerprint": "sha256:1a5a56ac1ddb9360e3cd6843d03463fe48e24f5f8743aef7deacdd600140fee6",
+      "fitted_at": "2026-09-24T01:56:06.726621+00:00",
+      "grid_version": 1,
+      "name": "total_trim_vs_rpm_load_b2",
+      "schema_contract": true,
+      "training_data_hash": "sha256:0e3fa20945b0ced9",
+      "tune_revision": "ZS44A-20260920",
+      "version": 1
+     },
+     "band_ticks": {
+      "ok": 56
+     },
+     "calibration_context": "match",
+     "coverage": 0.11789473684210526,
+     "fused_events_contributed": 0,
+     "fusion_votes": 0,
+     "in_mode_ticks": 475,
+     "operating_mode": null,
+     "output": "derived:TOTAL_TRIM_B2",
+     "persisted_events": 0,
+     "refusals": {
+      "actual_stale:derived:TOTAL_TRIM_B2": 1,
+      "engine_state_stale:obd:RPM": 101,
+      "fuel_status_stale:obd:FUEL_STATUS": 91,
+      "off_map": 13,
+      "operating_mode_excluded:warmup": 166,
+      "rate_exceeded:obd:RPM": 42,
+      "rate_insufficient_history:obd:RPM": 5
+     },
+     "scored_ticks": 56,
+     "serving_status": {
+      "lifecycle": "unvalidated",
+      "permitted_uses": [
+       "display",
+       "learned_feature"
+      ],
+      "policy": null,
+      "reasons": [
+       "validation_failed:skill_vs_baseline=-0.009<0.2",
+       "validation_failed:warning_half_width_median=10.66>meaningful_deviation=5.0",
+       "validation_failed:synthetic_positive_5_120s_detection=0.07<0.8"
+      ],
+      "state": "diagnostic_only"
+     },
+     "ticks": 475
+    },
+    "ve_vs_rpm_load": {
+     "alerting_as_served": false,
+     "artifact": {
+      "fingerprint": "sha256:feaad4bedbc2049b09c5d0bec58989f14f38f86dcbbfa228a7bd91f681685e3f",
+      "fitted_at": "2026-09-24T01:55:57.140820+00:00",
+      "grid_version": 1,
+      "name": "ve_vs_rpm_load",
+      "schema_contract": true,
+      "training_data_hash": "sha256:b770341e5ca0f7f6",
+      "tune_revision": "ZS44A-20260920",
+      "version": 3
+     },
+     "band_ticks": {
+      "ok": 310,
+      "warning": 4
+     },
+     "calibration_context": "match",
+     "coverage": 0.6610526315789473,
+     "fused_events_contributed": 0,
+     "fusion_votes": 0,
+     "in_mode_ticks": 475,
+     "operating_mode": null,
+     "output": "derived:VE_AMBIENT_PERCENT",
+     "persisted_events": 0,
+     "refusals": {
+      "actual_missing:derived:VE_AMBIENT_PERCENT": 8,
+      "actual_stale:derived:VE_AMBIENT_PERCENT": 1,
+      "engine_state_stale:obd:RPM": 110,
+      "input_stale:obd:ENGINE_LOAD": 23,
+      "off_map": 19
+     },
+     "scored_ticks": 314,
+     "serving_status": {
+      "lifecycle": "unvalidated",
+      "permitted_uses": [
+       "display",
+       "learned_feature"
+      ],
+      "policy": null,
+      "reasons": [
+       "validation_failed:mae=3.168>meaningful_deviation=3.0",
+       "validation_failed:warning_half_width_median=7.912>meaningful_deviation=3.0",
+       "validation_failed:synthetic_negative_3_60s_detection=0.38<0.8"
+      ],
+      "state": "diagnostic_only"
+     },
+     "ticks": 475
+    },
+    "warm_idle_rpm_baseline": {
+     "alerting_as_served": false,
+     "artifact": {
+      "fingerprint": "sha256:6cabd2e208f32c8787a6c789a85c8b808780ae96e73edef1f0aba7a36a3f2149",
+      "fitted_at": "2026-09-24T01:55:23.883180+00:00",
+      "grid_version": null,
+      "name": "warm_idle_rpm_baseline",
+      "schema_contract": true,
+      "training_data_hash": "sha256:60d52f9d474937a0",
+      "tune_revision": "ZS44A-20260920",
+      "version": 3
+     },
+     "band_ticks": {
+      "critical": 15,
+      "ok": 153,
+      "warning": 4
+     },
+     "calibration_context": "match",
+     "coverage": 0.6564885496183206,
+     "fused_events_contributed": 1,
+     "fusion_votes": 6,
+     "in_mode_ticks": 262,
+     "operating_mode": "idle",
+     "output": "obd:RPM",
+     "persisted_events": 3,
+     "refusals": {
+      "engine_state_stale:obd:RPM": 90,
+      "operating_mode_mismatch": 213
+     },
+     "scored_ticks": 172,
+     "serving_status": {
+      "lifecycle": "unvalidated",
+      "permitted_uses": [
+       "display",
+       "learned_feature"
+      ],
+      "policy": null,
+      "reasons": [
+       "validation_failed:control_events_per_hour=8.89>2.0"
+      ],
+      "state": "diagnostic_only"
+     },
+     "ticks": 475
+    }
+   },
+   "session_tune_conflict": false,
+   "session_tune_revision": "ZS44A-20260920",
+   "session_tune_source": "registry",
+   "shadow_alerting": true,
+   "side": "candidate",
+   "state_dir": "<scratch>/v2-shadow/_replay-77828b26-candidate",
+   "ticks": 475
+  },
+  "comparison_version": 2,
+  "dependent_manifest_conflicts": {
+   "candidate": [],
+   "served": []
+  },
+  "per_model": {
+   "air_charge_vs_rpm_throttle_did": {
+    "alerting": [
+     false,
+     false
+    ],
+    "calibration_context": [
+     "mismatch",
+     "match"
+    ],
+    "coverage": [
+     0.018947368421052633,
+     0.018947368421052633
+    ],
+    "coverage_delta": 0.0,
+    "fused_events_contributed": [
+     0,
+     0
+    ],
+    "fused_events_contributed_delta": 0.0,
+    "fusion_votes": [
+     0,
+     0
+    ],
+    "fusion_votes_delta": 0.0,
+    "lifecycle": [
+     "unvalidated",
+     "unvalidated"
+    ],
+    "paired": {
+     "abs_deviation_p95": [
+      1458.4125874125875,
+      1561.665523156089
+     ],
+     "abs_deviation_p95_delta": 103.25293574350144,
+     "bias": [
+      774.4920747006195,
+      805.6666825061008
+     ],
+     "bias_delta": 31.174607805481287,
+     "mae": [
+      774.4920747006195,
+      821.9361111678229
+     ],
+     "mae_delta": 47.44403646720343,
+     "n_pairs": 9,
+     "only_candidate_scored": {
+      "abs_deviation_p95": null,
+      "bias": null,
+      "mae": null,
+      "other_side_refusals": {},
+      "ticks": 0
+     },
+     "only_served_scored": {
+      "abs_deviation_p95": null,
+      "bias": null,
+      "mae": null,
+      "other_side_refusals": {},
+      "ticks": 0
+     }
+    },
+    "persisted_events": [
+     0,
+     0
+    ],
+    "persisted_events_delta": 0.0,
+    "presence": "both",
+    "refusals": {
+     "input_missing:did:ECM_RPM": [
+      61,
+      61
+     ],
+     "input_stale:did:ECM_RPM": [
+      404,
+      404
+     ],
+     "input_stale:did:ECM_THROTTLE_POS_SENSOR_1": [
+      1,
+      1
+     ]
+    },
+    "same_artifact": false,
+    "scored_ticks": [
+     9,
+     9
+    ],
+    "scored_ticks_delta": 0.0,
+    "version": [
+     1,
+     2
+    ]
+   },
+   "air_mass_per_cycle_vs_rpm_load": {
+    "alerting": [
+     false,
+     false
+    ],
+    "calibration_context": [
+     "model_revision_unknown",
+     "match"
+    ],
+    "coverage": [
+     0.42526315789473684,
+     0.6757894736842105
+    ],
+    "coverage_delta": 0.25052631578947365,
+    "fused_events_contributed": [
+     0,
+     0
+    ],
+    "fused_events_contributed_delta": 0.0,
+    "fusion_votes": [
+     0,
+     0
+    ],
+    "fusion_votes_delta": 0.0,
+    "lifecycle": [
+     "unvalidated",
+     "unvalidated"
+    ],
+    "paired": {
+     "abs_deviation_p95": [
+      0.16965485372332606,
+      0.12863881547507172
+     ],
+     "abs_deviation_p95_delta": -0.04101603824825434,
+     "bias": [
+      -0.026299164991135743,
+      0.017300897714034896
+     ],
+     "bias_delta": 0.04360006270517064,
+     "mae": [
+      0.05891247333944557,
+      0.049784644436111254
+     ],
+     "mae_delta": -0.009127828903334315,
+     "n_pairs": 202,
+     "only_candidate_scored": {
+      "abs_deviation_p95": 0.08563422250467312,
+      "bias": 0.0032090758272479616,
+      "mae": 0.028849430936920856,
+      "other_side_refusals": {
+       "off_map": 119
+      },
+      "ticks": 119
+     },
+     "only_served_scored": {
+      "abs_deviation_p95": null,
+      "bias": null,
+      "mae": null,
+      "other_side_refusals": {},
+      "ticks": 0
+     }
+    },
+    "persisted_events": [
+     0,
+     0
+    ],
+    "persisted_events_delta": 0.0,
+    "presence": "both",
+    "refusals": {
+     "actual_missing:derived:AIR_MASS_PER_CYCLE": [
+      1,
+      1
+     ],
+     "actual_stale:derived:AIR_MASS_PER_CYCLE": [
+      0,
+      1
+     ],
+     "engine_state_stale:obd:RPM": [
+      0,
+      110
+     ],
+     "input_stale:obd:ENGINE_LOAD": [
+      23,
+      23
+     ],
+     "input_stale:obd:RPM": [
+      110,
+      0
+     ],
+     "off_map": [
+      139,
+      19
+     ]
+    },
+    "same_artifact": false,
+    "scored_ticks": [
+     202,
+     321
+    ],
+    "scored_ticks_delta": 119.0,
+    "version": [
+     2,
+     3
+    ]
+   },
+   "cat_warmup": {
+    "alerting": [
+     false,
+     false
+    ],
+    "calibration_context": [
+     "model_revision_unknown",
+     "model_revision_unknown"
+    ],
+    "coverage": [
+     0.13253012048192772,
+     0.13253012048192772
+    ],
+    "coverage_delta": 0.0,
+    "fused_events_contributed": [
+     0,
+     0
+    ],
+    "fused_events_contributed_delta": 0.0,
+    "fusion_votes": [
+     0,
+     0
+    ],
+    "fusion_votes_delta": 0.0,
+    "lifecycle": [
+     "quarantined",
+     "quarantined"
+    ],
+    "paired": {
+     "abs_deviation_p95": [
+      55.101811651336604,
+      55.101811651336604
+     ],
+     "abs_deviation_p95_delta": 0.0,
+     "bias": [
+      22.876957238060637,
+      22.876957238060637
+     ],
+     "bias_delta": 0.0,
+     "mae": [
+      26.282437027771735,
+      26.282437027771735
+     ],
+     "mae_delta": 0.0,
+     "n_pairs": 22,
+     "only_candidate_scored": {
+      "abs_deviation_p95": null,
+      "bias": null,
+      "mae": null,
+      "other_side_refusals": {},
+      "ticks": 0
+     },
+     "only_served_scored": {
+      "abs_deviation_p95": null,
+      "bias": null,
+      "mae": null,
+      "other_side_refusals": {},
+      "ticks": 0
+     }
+    },
+    "persisted_events": [
+     0,
+     0
+    ],
+    "persisted_events_delta": 0.0,
+    "presence": "both",
+    "refusals": {
+     "actual_missing:obd:CATALYST_TEMP_B1S1": [
+      9,
+      9
+     ],
+     "actual_stale:obd:CATALYST_TEMP_B1S1": [
+      134,
+      134
+     ],
+     "input_missing:obd:RUN_TIME": [
+      1,
+      1
+     ],
+     "operating_mode_mismatch": [
+      309,
+      309
+     ]
+    },
+    "same_artifact": true,
+    "scored_ticks": [
+     22,
+     22
+    ],
+    "scored_ticks_delta": 0.0,
+    "version": [
+     4,
+     4
+    ]
+   },
+   "fuel_trim_vs_rpm_load": {
+    "alerting": [
+     false,
+     false
+    ],
+    "calibration_context": [
+     "model_revision_unknown",
+     "match"
+    ],
+    "coverage": [
+     0.4147368421052632,
+     0.44
+    ],
+    "coverage_delta": 0.02526315789473682,
+    "fused_events_contributed": [
+     0,
+     0
+    ],
+    "fused_events_contributed_delta": 0.0,
+    "fusion_votes": [
+     51,
+     0
+    ],
+    "fusion_votes_delta": -51.0,
+    "lifecycle": [
+     "unvalidated",
+     "unvalidated"
+    ],
+    "paired": {
+     "abs_deviation_p95": [
+      16.3419857385421,
+      8.71552997156255
+     ],
+     "abs_deviation_p95_delta": -7.62645576697955,
+     "bias": [
+      -11.51615541770225,
+      -4.574967437293253
+     ],
+     "bias_delta": 6.941187980408996,
+     "mae": [
+      11.51615541770225,
+      4.586664839419206
+     ],
+     "mae_delta": -6.929490578283043,
+     "n_pairs": 197,
+     "only_candidate_scored": {
+      "abs_deviation_p95": 11.63780674492054,
+      "bias": -5.497694987542002,
+      "mae": 5.972572438522394,
+      "other_side_refusals": {
+       "off_map": 12
+      },
+      "ticks": 12
+     },
+     "only_served_scored": {
+      "abs_deviation_p95": null,
+      "bias": null,
+      "mae": null,
+      "other_side_refusals": {},
+      "ticks": 0
+     }
+    },
+    "persisted_events": [
+     8,
+     0
+    ],
+    "persisted_events_delta": -8.0,
+    "presence": "both",
+    "refusals": {
+     "actual_stale:obd:SHORT_FUEL_TRIM_1": [
+      116,
+      126
+     ],
+     "engine_state_stale:obd:RPM": [
+      0,
+      110
+     ],
+     "input_stale:obd:ENGINE_LOAD": [
+      23,
+      23
+     ],
+     "input_stale:obd:RPM": [
+      110,
+      0
+     ],
+     "off_map": [
+      29,
+      7
+     ]
+    },
+    "same_artifact": false,
+    "scored_ticks": [
+     197,
+     209
+    ],
+    "scored_ticks_delta": 12.0,
+    "version": [
+     2,
+     3
+    ]
+   },
+   "stft_bank_balance_city": {
+    "presence": "candidate_only"
+   },
+   "stft_bank_balance_highway": {
+    "presence": "candidate_only"
+   },
+   "timing_advance_vs_rpm_iat": {
+    "alerting": [
+     false,
+     false
+    ],
+    "calibration_context": [
+     "model_revision_unknown",
+     "model_revision_unknown"
+    ],
+    "coverage": [
+     0.1831578947368421,
+     0.1831578947368421
+    ],
+    "coverage_delta": 0.0,
+    "fused_events_contributed": [
+     1,
+     1
+    ],
+    "fused_events_contributed_delta": 0.0,
+    "fusion_votes": [
+     21,
+     21
+    ],
+    "fusion_votes_delta": 0.0,
+    "lifecycle": [
+     "demoted",
+     "demoted"
+    ],
+    "paired": {
+     "abs_deviation_p95": [
+      22.82051282051282,
+      22.82051282051282
+     ],
+     "abs_deviation_p95_delta": 0.0,
+     "bias": [
+      4.967156980950085,
+      4.967156980950085
+     ],
+     "bias_delta": 0.0,
+     "mae": [
+      8.546440532647429,
+      8.546440532647429
+     ],
+     "mae_delta": 0.0,
+     "n_pairs": 87,
+     "only_candidate_scored": {
+      "abs_deviation_p95": null,
+      "bias": null,
+      "mae": null,
+      "other_side_refusals": {},
+      "ticks": 0
+     },
+     "only_served_scored": {
+      "abs_deviation_p95": null,
+      "bias": null,
+      "mae": null,
+      "other_side_refusals": {},
+      "ticks": 0
+     }
+    },
+    "persisted_events": [
+     3,
+     3
+    ],
+    "persisted_events_delta": 0.0,
+    "presence": "both",
+    "refusals": {
+     "actual_stale:obd:TIMING_ADVANCE": [
+      7,
+      7
+     ],
+     "input_missing:obd:INTAKE_TEMP": [
+      2,
+      2
+     ],
+     "input_stale:obd:RPM": [
+      110,
+      110
+     ],
+     "off_map": [
+      269,
+      269
+     ]
+    },
+    "same_artifact": true,
+    "scored_ticks": [
+     87,
+     87
+    ],
+    "scored_ticks_delta": 0.0,
+    "version": [
+     2,
+     2
+    ]
+   },
+   "timing_advance_vs_rpm_load": {
+    "alerting": [
+     false,
+     false
+    ],
+    "calibration_context": [
+     "model_revision_unknown",
+     "match"
+    ],
+    "coverage": [
+     0.6589473684210526,
+     0.6968421052631579
+    ],
+    "coverage_delta": 0.037894736842105314,
+    "fused_events_contributed": [
+     0,
+     0
+    ],
+    "fused_events_contributed_delta": 0.0,
+    "fusion_votes": [
+     0,
+     0
+    ],
+    "fusion_votes_delta": 0.0,
+    "lifecycle": [
+     "exploratory",
+     "exploratory"
+    ],
+    "paired": {
+     "abs_deviation_p95": [
+      10.784387489913403,
+      5.961762351807382
+     ],
+     "abs_deviation_p95_delta": -4.822625138106021,
+     "bias": [
+      0.6876042351019415,
+      0.1537080031930658
+     ],
+     "bias_delta": -0.5338962319088757,
+     "mae": [
+      1.3893539136067246,
+      1.0878499461726832
+     ],
+     "mae_delta": -0.3015039674340414,
+     "n_pairs": 311,
+     "only_candidate_scored": {
+      "abs_deviation_p95": 17.73898430233775,
+      "bias": 5.349548616944702,
+      "mae": 6.7305814904269585,
+      "other_side_refusals": {
+       "off_map": 20
+      },
+      "ticks": 20
+     },
+     "only_served_scored": {
+      "abs_deviation_p95": 20.985294117647058,
+      "bias": 20.985294117647058,
+      "mae": 20.985294117647058,
+      "other_side_refusals": {
+       "off_map": 2
+      },
+      "ticks": 2
+     }
+    },
+    "persisted_events": [
+     0,
+     0
+    ],
+    "persisted_events_delta": 0.0,
+    "presence": "both",
+    "refusals": {
+     "actual_missing:obd:TIMING_ADVANCE": [
+      1,
+      1
+     ],
+     "engine_state_stale:obd:RPM": [
+      0,
+      110
+     ],
+     "input_stale:obd:ENGINE_LOAD": [
+      23,
+      23
+     ],
+     "input_stale:obd:RPM": [
+      110,
+      0
+     ],
+     "off_map": [
+      28,
+      10
+     ]
+    },
+    "same_artifact": false,
+    "scored_ticks": [
+     313,
+     331
+    ],
+    "scored_ticks_delta": 18.0,
+    "version": [
+     2,
+     3
+    ]
+   },
+   "total_trim_vs_rpm_load_b1": {
+    "presence": "candidate_only"
+   },
+   "total_trim_vs_rpm_load_b2": {
+    "presence": "candidate_only"
+   },
+   "ve_vs_rpm_load": {
+    "alerting": [
+     false,
+     false
+    ],
+    "calibration_context": [
+     "model_revision_unknown",
+     "match"
+    ],
+    "coverage": [
+     0.4168421052631579,
+     0.6610526315789473
+    ],
+    "coverage_delta": 0.24421052631578943,
+    "fused_events_contributed": [
+     0,
+     0
+    ],
+    "fused_events_contributed_delta": 0.0,
+    "fusion_votes": [
+     0,
+     0
+    ],
+    "fusion_votes_delta": 0.0,
+    "lifecycle": [
+     "unvalidated",
+     "unvalidated"
+    ],
+    "paired": {
+     "abs_deviation_p95": [
+      6.000204716710106,
+      3.5124144184465043
+     ],
+     "abs_deviation_p95_delta": -2.4877902982636013,
+     "bias": [
+      -1.7426217421135053,
+      0.45704574944941617
+     ],
+     "bias_delta": 2.1996674915629213,
+     "mae": [
+      2.124820932946639,
+      1.1494109286587204
+     ],
+     "mae_delta": -0.9754100042879188,
+     "n_pairs": 198,
+     "only_candidate_scored": {
+      "abs_deviation_p95": 2.346811646855321,
+      "bias": 0.05451740141692876,
+      "mae": 0.821639025048881,
+      "other_side_refusals": {
+       "off_map": 116
+      },
+      "ticks": 116
+     },
+     "only_served_scored": {
+      "abs_deviation_p95": null,
+      "bias": null,
+      "mae": null,
+      "other_side_refusals": {},
+      "ticks": 0
+     }
+    },
+    "persisted_events": [
+     0,
+     0
+    ],
+    "persisted_events_delta": 0.0,
+    "presence": "both",
+    "refusals": {
+     "actual_missing:derived:VE_AMBIENT_PERCENT": [
+      0,
+      8
+     ],
+     "actual_missing:derived:VE_PERCENT": [
+      5,
+      0
+     ],
+     "actual_stale:derived:VE_AMBIENT_PERCENT": [
+      0,
+      1
+     ],
+     "engine_state_stale:obd:RPM": [
+      0,
+      110
+     ],
+     "input_stale:obd:ENGINE_LOAD": [
+      23,
+      23
+     ],
+     "input_stale:obd:RPM": [
+      110,
+      0
+     ],
+     "off_map": [
+      139,
+      19
+     ]
+    },
+    "same_artifact": false,
+    "scored_ticks": [
+     198,
+     314
+    ],
+    "scored_ticks_delta": 116.0,
+    "version": [
+     2,
+     3
+    ]
+   },
+   "warm_idle_rpm_baseline": {
+    "alerting": [
+     false,
+     false
+    ],
+    "calibration_context": [
+     "model_revision_unknown",
+     "match"
+    ],
+    "coverage": [
+     0.6564885496183206,
+     0.6564885496183206
+    ],
+    "coverage_delta": 0.0,
+    "fused_events_contributed": [
+     1,
+     1
+    ],
+    "fused_events_contributed_delta": 0.0,
+    "fusion_votes": [
+     5,
+     6
+    ],
+    "fusion_votes_delta": 1.0,
+    "lifecycle": [
+     "unvalidated",
+     "unvalidated"
+    ],
+    "paired": {
+     "abs_deviation_p95": [
+      475.0,
+      487.5
+     ],
+     "abs_deviation_p95_delta": 12.5,
+     "bias": [
+      52.616279069767444,
+      65.11627906976744
+     ],
+     "bias_delta": 12.5,
+     "mae": [
+      69.76744186046511,
+      70.78488372093024
+     ],
+     "mae_delta": 1.0174418604651265,
+     "n_pairs": 172,
+     "only_candidate_scored": {
+      "abs_deviation_p95": null,
+      "bias": null,
+      "mae": null,
+      "other_side_refusals": {},
+      "ticks": 0
+     },
+     "only_served_scored": {
+      "abs_deviation_p95": null,
+      "bias": null,
+      "mae": null,
+      "other_side_refusals": {},
+      "ticks": 0
+     }
+    },
+    "persisted_events": [
+     3,
+     3
+    ],
+    "persisted_events_delta": 0.0,
+    "presence": "both",
+    "refusals": {
+     "engine_state_stale:obd:RPM": [
+      0,
+      90
+     ],
+     "input_stale:obd:RPM": [
+      90,
+      0
+     ],
+     "operating_mode_mismatch": [
+      213,
+      213
+     ]
+    },
+    "same_artifact": false,
+    "scored_ticks": [
+     172,
+     172
+    ],
+    "scored_ticks_delta": 0.0,
+    "version": [
+     2,
+     3
+    ]
+   }
+  },
+  "run_id": "77828b26",
+  "same_ticks": true,
+  "served": {
+   "artifact": "data/nissan-xterra-2008/_prior/2026-09-24T024700/behavior_models.yaml",
+   "artifact_sha256": "9cd174ce0388d73f02e7994d67b4dbf94298df0dd5f53e3ce641a8ac540652aa",
+   "behavior_ticks": 475,
+   "counters": {
+    "emitted": 15,
+    "emitted_evidence": 0,
+    "skipped_capture_profile": 0,
+    "skipped_vehicle_state": 0,
+    "suppressed_dedupe": 63,
+    "suppressed_not_anomaly": 75,
+    "suppressed_persistence": 90,
+    "suppressed_tuning": 0
+   },
+   "dependent_manifests": [
+    {
+     "behavior_feature_conflicts": {},
+     "behavior_fingerprint_provenance": {},
+     "behavior_models_consumed": [],
+     "feature_count": 295,
+     "model_type": "isolation_forest",
+     "model_version": "isolation_forest_2026-09-20T054703.694923Z",
+     "path": "models/nissan-xterra-2008/isolation_forest/model.manifest.json"
+    },
+    {
+     "behavior_feature_conflicts": {},
+     "behavior_fingerprint_provenance": {},
+     "behavior_models_consumed": [],
+     "feature_count": 361,
+     "model_type": "lstm_autoencoder",
+     "model_version": "lstm_autoencoder_2026-09-20T064628.385918Z",
+     "path": "models/nissan-xterra-2008/lstm_autoencoder/model.manifest.json"
+    }
+   ],
+   "detectors": "behavior_only",
+   "events_total": 15,
+   "first_tick": "2026-09-22T23:39:00+00:00",
+   "fused_events": 1,
+   "governing_policy": "data/nissan-xterra-2008/behavior_policy.yaml",
+   "governing_policy_sha256": "fb72e9478113cf4f116a89a0e38806820dcdcd018dd76e3f0376d36923cc4b0e",
+   "last_tick": "2026-09-22T23:46:54+00:00",
+   "models": {
+    "air_charge_vs_rpm_throttle_did": {
+     "alerting_as_served": false,
+     "artifact": {
+      "fingerprint": "sha256:99babb6add5a1eaa10ef2a78e2a4fd0efd207f41a1610d770f93af47794df0ea",
+      "fitted_at": "2026-08-07T15:04:47.245437+00:00",
+      "grid_version": 1,
+      "name": "air_charge_vs_rpm_throttle_did",
+      "schema_contract": false,
+      "training_data_hash": "sha256:0f214145f2c116e0",
+      "tune_revision": "ZS44A-k106",
+      "version": 1
+     },
+     "band_ticks": {
+      "ok": 7,
+      "warning": 2
+     },
+     "calibration_context": "mismatch",
+     "coverage": 0.018947368421052633,
+     "fused_events_contributed": 0,
+     "fusion_votes": 0,
+     "in_mode_ticks": 475,
+     "operating_mode": null,
+     "output": "did:ECM_AIR_CHARGE",
+     "persisted_events": 0,
+     "refusals": {
+      "input_missing:did:ECM_RPM": 61,
+      "input_stale:did:ECM_RPM": 404,
+      "input_stale:did:ECM_THROTTLE_POS_SENSOR_1": 1
+     },
+     "scored_ticks": 9,
+     "serving_status": {
+      "lifecycle": "unvalidated",
+      "permitted_uses": [
+       "display",
+       "learned_feature"
+      ],
+      "policy": null,
+      "reasons": [
+       "legacy_artifact:no_serving_eligibility_contract",
+       "unvalidated:no_gate_evidence"
+      ],
+      "state": "diagnostic_only"
+     },
+     "ticks": 475
+    },
+    "air_mass_per_cycle_vs_rpm_load": {
+     "alerting_as_served": false,
+     "artifact": {
+      "fingerprint": "sha256:01f191ca5938593c5b348f661c5f6f2541ce5e6fba59a187a4692165525171b2",
+      "fitted_at": "2026-07-27T06:09:07.601569+00:00",
+      "grid_version": 1,
+      "name": "air_mass_per_cycle_vs_rpm_load",
+      "schema_contract": false,
+      "training_data_hash": "sha256:f26a65381ee88373",
+      "tune_revision": null,
+      "version": 2
+     },
+     "band_ticks": {
+      "critical": 1,
+      "ok": 194,
+      "warning": 7
+     },
+     "calibration_context": "model_revision_unknown",
+     "coverage": 0.42526315789473684,
+     "fused_events_contributed": 0,
+     "fusion_votes": 0,
+     "in_mode_ticks": 475,
+     "operating_mode": null,
+     "output": "derived:AIR_MASS_PER_CYCLE",
+     "persisted_events": 0,
+     "refusals": {
+      "actual_missing:derived:AIR_MASS_PER_CYCLE": 1,
+      "input_stale:obd:ENGINE_LOAD": 23,
+      "input_stale:obd:RPM": 110,
+      "off_map": 139
+     },
+     "scored_ticks": 202,
+     "serving_status": {
+      "lifecycle": "unvalidated",
+      "permitted_uses": [
+       "display",
+       "learned_feature"
+      ],
+      "policy": null,
+      "reasons": [
+       "legacy_artifact:no_serving_eligibility_contract",
+       "unvalidated:no_gate_evidence"
+      ],
+      "state": "diagnostic_only"
+     },
+     "ticks": 475
+    },
+    "cat_warmup": {
+     "alerting_as_served": false,
+     "artifact": {
+      "fingerprint": "sha256:f14450ab4c88df87047c9994136145d67141668b0813596370ac5a57c637f06a",
+      "fitted_at": "2026-05-25T15:17:44.374674+00:00",
+      "grid_version": null,
+      "name": "cat_warmup",
+      "schema_contract": false,
+      "training_data_hash": "sha256:977d2d5412d81e30",
+      "tune_revision": null,
+      "version": 4
+     },
+     "band_ticks": {
+      "ok": 14,
+      "warning": 8
+     },
+     "calibration_context": "model_revision_unknown",
+     "coverage": 0.13253012048192772,
+     "fused_events_contributed": 0,
+     "fusion_votes": 0,
+     "in_mode_ticks": 166,
+     "operating_mode": "warmup",
+     "output": "obd:CATALYST_TEMP_B1S1",
+     "persisted_events": 0,
+     "refusals": {
+      "actual_missing:obd:CATALYST_TEMP_B1S1": 9,
+      "actual_stale:obd:CATALYST_TEMP_B1S1": 134,
+      "input_missing:obd:RUN_TIME": 1,
+      "operating_mode_mismatch": 309
+     },
+     "scored_ticks": 22,
+     "serving_status": {
+      "lifecycle": "quarantined",
+      "permitted_uses": [
+       "display"
+      ],
+      "policy": {
+       "artifact_fingerprint": "sha256:f14450ab4c88df87047c9994136145d67141668b0813596370ac5a57c637f06a",
+       "decided": "2026-09-21 behavior-model review (B00 carried decision)",
+       "evidence": "data/analyses/2026-09-21-behavior-model-review.md (Model decisions); data/analyses/2026-09-21-behavior-validation-report.md \u00a74",
+       "lifecycle": "quarantined",
+       "lift_when": "a new cat_warmup fit passes B02 validation (B07); this artifact stays quarantined",
+       "model": "cat_warmup",
+       "permitted_uses": [
+        "display"
+       ],
+       "reason": "May 25 artifact (v4) with no held-out validation; on S18's genuine cold start n=34, R\u00b2 -0.737, MAE 55 deg C, 76.5 % exceedance; persisted bands 30/80 deg C predate the recipe's 45/115. Its May training sessions are absent locally, so it cannot be re-validated. Temperature trajectory alone does not establish catalyst efficiency; the raw channel and warmup analysis stay."
+      },
+      "reasons": [
+       "policy:quarantined",
+       "legacy_artifact:no_serving_eligibility_contract",
+       "unvalidated:no_held_out_evidence"
+      ],
+      "state": "diagnostic_only"
+     },
+     "ticks": 475
+    },
+    "fuel_trim_vs_rpm_load": {
+     "alerting_as_served": false,
+     "artifact": {
+      "fingerprint": "sha256:5cb890ebc7243657cfe7bcd56117df896b4d332fbc5fea65f054ed483b41e94b",
+      "fitted_at": "2026-07-27T06:09:07.220714+00:00",
+      "grid_version": 1,
+      "name": "fuel_trim_vs_rpm_load",
+      "schema_contract": false,
+      "training_data_hash": "sha256:252156011c4269f8",
+      "tune_revision": null,
+      "version": 2
+     },
+     "band_ticks": {
+      "critical": 47,
+      "ok": 113,
+      "warning": 37
+     },
+     "calibration_context": "model_revision_unknown",
+     "coverage": 0.4147368421052632,
+     "fused_events_contributed": 0,
+     "fusion_votes": 51,
+     "in_mode_ticks": 475,
+     "operating_mode": null,
+     "output": "obd:SHORT_FUEL_TRIM_1",
+     "persisted_events": 8,
+     "refusals": {
+      "actual_stale:obd:SHORT_FUEL_TRIM_1": 116,
+      "input_stale:obd:ENGINE_LOAD": 23,
+      "input_stale:obd:RPM": 110,
+      "off_map": 29
+     },
+     "scored_ticks": 197,
+     "serving_status": {
+      "lifecycle": "unvalidated",
+      "permitted_uses": [
+       "display",
+       "learned_feature"
+      ],
+      "policy": null,
+      "reasons": [
+       "legacy_artifact:no_serving_eligibility_contract",
+       "unvalidated:no_gate_evidence"
+      ],
+      "state": "diagnostic_only"
+     },
+     "ticks": 475
+    },
+    "timing_advance_vs_rpm_iat": {
+     "alerting_as_served": false,
+     "artifact": {
+      "fingerprint": "sha256:1a2394e4ca01ebdcc81fb74c752d35a590ed65916e7a18fdfb974036f19384cb",
+      "fitted_at": "2026-07-27T06:09:06.923608+00:00",
+      "grid_version": 1,
+      "name": "timing_advance_vs_rpm_iat",
+      "schema_contract": false,
+      "training_data_hash": "sha256:931d6ff04cb414ed",
+      "tune_revision": null,
+      "version": 2
+     },
+     "band_ticks": {
+      "critical": 24,
+      "ok": 55,
+      "warning": 8
+     },
+     "calibration_context": "model_revision_unknown",
+     "coverage": 0.1831578947368421,
+     "fused_events_contributed": 1,
+     "fusion_votes": 21,
+     "in_mode_ticks": 475,
+     "operating_mode": null,
+     "output": "obd:TIMING_ADVANCE",
+     "persisted_events": 3,
+     "refusals": {
+      "actual_stale:obd:TIMING_ADVANCE": 7,
+      "input_missing:obd:INTAKE_TEMP": 2,
+      "input_stale:obd:RPM": 110,
+      "off_map": 269
+     },
+     "scored_ticks": 87,
+     "serving_status": {
+      "lifecycle": "demoted",
+      "permitted_uses": [
+       "display"
+      ],
+      "policy": {
+       "decided": "2026-09-21 behavior-model review (B00 carried decision)",
+       "evidence": "data/analyses/2026-09-21-behavior-model-review.md (Model decisions); data/analyses/2026-09-21-behavior-validation-report.md \u00a73",
+       "lifecycle": "demoted",
+       "lift_when": "never for standalone alerting; retire the recipe when B04 ships a load-aware timing model",
+       "model": "timing_advance_vs_rpm_iat",
+       "permitted_uses": [
+        "display"
+       ],
+       "reason": "RPM/IAT alone omits load: held-out J26 R\u00b2 -0.046, MAE 8.80 deg, median warning half-width 31.3 deg; zero evaluable rows on S17/S18 (IAT below the 29 deg C stored domain). Removed from standalone alerting; IAT stays a candidate context input for a load-aware timing model."
+      },
+      "reasons": [
+       "policy:demoted",
+       "legacy_artifact:no_serving_eligibility_contract",
+       "unvalidated:no_gate_evidence"
+      ],
+      "state": "diagnostic_only"
+     },
+     "ticks": 475
+    },
+    "timing_advance_vs_rpm_load": {
+     "alerting_as_served": false,
+     "artifact": {
+      "fingerprint": "sha256:7432d67d4da46fa96b3d1bb95251e8a3a70013dec0e7ea05a08f697c23b26b9c",
+      "fitted_at": "2026-07-27T06:09:06.545712+00:00",
+      "grid_version": 1,
+      "name": "timing_advance_vs_rpm_load",
+      "schema_contract": false,
+      "training_data_hash": "sha256:70b14e0a382c1f72",
+      "tune_revision": null,
+      "version": 2
+     },
+     "band_ticks": {
+      "critical": 3,
+      "ok": 306,
+      "warning": 4
+     },
+     "calibration_context": "model_revision_unknown",
+     "coverage": 0.6589473684210526,
+     "fused_events_contributed": 0,
+     "fusion_votes": 0,
+     "in_mode_ticks": 475,
+     "operating_mode": null,
+     "output": "obd:TIMING_ADVANCE",
+     "persisted_events": 0,
+     "refusals": {
+      "actual_missing:obd:TIMING_ADVANCE": 1,
+      "input_stale:obd:ENGINE_LOAD": 23,
+      "input_stale:obd:RPM": 110,
+      "off_map": 28
+     },
+     "scored_ticks": 313,
+     "serving_status": {
+      "lifecycle": "exploratory",
+      "permitted_uses": [
+       "display"
+      ],
+      "policy": {
+       "decided": "2026-09-21 behavior-model review (B00 carried decision)",
+       "evidence": "data/analyses/2026-09-21-behavior-model-review.md (Model decisions)",
+       "lifecycle": "exploratory",
+       "lift_when": "B04 qualifies a timing model under B02 criteria (remove this entry in that change)",
+       "model": "timing_advance_vs_rpm_load",
+       "permitted_uses": [
+        "display"
+       ],
+       "reason": "Retained as exploratory visualization: S17/S21 R\u00b2 0.33/0.28, MAE 4.8/6.7 deg, median warning half-width ~24 deg \u2014 too coarse for subtle timing/knock alerts, and an unexpected timing residual does not identify knock."
+      },
+      "reasons": [
+       "policy:exploratory",
+       "legacy_artifact:no_serving_eligibility_contract",
+       "unvalidated:no_gate_evidence"
+      ],
+      "state": "diagnostic_only"
+     },
+     "ticks": 475
+    },
+    "ve_vs_rpm_load": {
+     "alerting_as_served": false,
+     "artifact": {
+      "fingerprint": "sha256:e7092d4a17b21668c8b159f05da727357afd6ed4e97837060cb292b15116eb62",
+      "fitted_at": "2026-07-27T06:09:08.015964+00:00",
+      "grid_version": 1,
+      "name": "ve_vs_rpm_load",
+      "schema_contract": false,
+      "training_data_hash": "sha256:ed0cfa48a8f2076c",
+      "tune_revision": null,
+      "version": 2
+     },
+     "band_ticks": {
+      "critical": 1,
+      "ok": 190,
+      "warning": 7
+     },
+     "calibration_context": "model_revision_unknown",
+     "coverage": 0.4168421052631579,
+     "fused_events_contributed": 0,
+     "fusion_votes": 0,
+     "in_mode_ticks": 475,
+     "operating_mode": null,
+     "output": "derived:VE_PERCENT",
+     "persisted_events": 0,
+     "refusals": {
+      "actual_missing:derived:VE_PERCENT": 5,
+      "input_stale:obd:ENGINE_LOAD": 23,
+      "input_stale:obd:RPM": 110,
+      "off_map": 139
+     },
+     "scored_ticks": 198,
+     "serving_status": {
+      "lifecycle": "unvalidated",
+      "permitted_uses": [
+       "display",
+       "learned_feature"
+      ],
+      "policy": null,
+      "reasons": [
+       "legacy_artifact:no_serving_eligibility_contract",
+       "unvalidated:no_gate_evidence"
+      ],
+      "state": "diagnostic_only"
+     },
+     "ticks": 475
+    },
+    "warm_idle_rpm_baseline": {
+     "alerting_as_served": false,
+     "artifact": {
+      "fingerprint": "sha256:6e1e827cb9cc10d04acc180b3858f1040ce2b16ae04244d7b4e3af40d2e52101",
+      "fitted_at": "2026-07-27T06:09:06.144540+00:00",
+      "grid_version": null,
+      "name": "warm_idle_rpm_baseline",
+      "schema_contract": false,
+      "training_data_hash": "sha256:6db79cbccb866817",
+      "tune_revision": null,
+      "version": 2
+     },
+     "band_ticks": {
+      "critical": 13,
+      "ok": 154,
+      "warning": 5
+     },
+     "calibration_context": "model_revision_unknown",
+     "coverage": 0.6564885496183206,
+     "fused_events_contributed": 1,
+     "fusion_votes": 5,
+     "in_mode_ticks": 262,
+     "operating_mode": "idle",
+     "output": "obd:RPM",
+     "persisted_events": 3,
+     "refusals": {
+      "input_stale:obd:RPM": 90,
+      "operating_mode_mismatch": 213
+     },
+     "scored_ticks": 172,
+     "serving_status": {
+      "lifecycle": "unvalidated",
+      "permitted_uses": [
+       "display",
+       "learned_feature"
+      ],
+      "policy": null,
+      "reasons": [
+       "legacy_artifact:no_serving_eligibility_contract",
+       "unvalidated:no_gate_evidence"
+      ],
+      "state": "diagnostic_only"
+     },
+     "ticks": 475
+    }
+   },
+   "session_tune_conflict": false,
+   "session_tune_revision": "ZS44A-20260920",
+   "session_tune_source": "registry",
+   "shadow_alerting": true,
+   "side": "served",
+   "state_dir": "<scratch>/v2-shadow/_replay-77828b26-served",
+   "ticks": 475
+  },
+  "session": "~/canary-data/sessions/nissan-xterra-2008/2026-09-22T233855",
+  "shadow_alerting": true
+ },
+ {
+  "candidate": {
+   "artifact": "data/nissan-xterra-2008/behavior_models.yaml",
+   "artifact_sha256": "816c150bf4935139a35b0d72fb4cb5df5f11eb809d943c6e2a9734568d16e565",
+   "behavior_ticks": 564,
+   "counters": {
+    "emitted": 0,
+    "emitted_evidence": 0,
+    "skipped_capture_profile": 0,
+    "skipped_vehicle_state": 0,
+    "suppressed_dedupe": 0,
+    "suppressed_not_anomaly": 0,
+    "suppressed_persistence": 32,
+    "suppressed_tuning": 0
+   },
+   "dependent_manifests": [
+    {
+     "behavior_feature_conflicts": {},
+     "behavior_fingerprint_provenance": {},
+     "behavior_models_consumed": [],
+     "feature_count": 295,
+     "model_type": "isolation_forest",
+     "model_version": "isolation_forest_2026-09-20T054703.694923Z",
+     "path": "models/nissan-xterra-2008/isolation_forest/model.manifest.json"
+    },
+    {
+     "behavior_feature_conflicts": {},
+     "behavior_fingerprint_provenance": {},
+     "behavior_models_consumed": [],
+     "feature_count": 361,
+     "model_type": "lstm_autoencoder",
+     "model_version": "lstm_autoencoder_2026-09-20T064628.385918Z",
+     "path": "models/nissan-xterra-2008/lstm_autoencoder/model.manifest.json"
+    }
+   ],
+   "detectors": "behavior_only",
+   "events_total": 0,
+   "first_tick": "2026-09-21T19:42:59+00:00",
+   "fused_events": 0,
+   "governing_policy": "data/nissan-xterra-2008/behavior_policy.yaml",
+   "governing_policy_sha256": "fb72e9478113cf4f116a89a0e38806820dcdcd018dd76e3f0376d36923cc4b0e",
+   "last_tick": "2026-09-21T19:52:22+00:00",
+   "models": {
+    "air_charge_vs_rpm_throttle_did": {
+     "alerting_as_served": false,
+     "artifact": {
+      "fingerprint": "sha256:0027fad49ac52a67f2686652b53f42c8305c5e967ada7911b86c127010d653ee",
+      "fitted_at": "2026-09-24T01:56:22.183857+00:00",
+      "grid_version": 1,
+      "name": "air_charge_vs_rpm_throttle_did",
+      "schema_contract": true,
+      "training_data_hash": "sha256:8b2d5dbe871b3ffe",
+      "tune_revision": "ZS44A-20260920",
+      "version": 2
+     },
+     "band_ticks": {
+      "ok": 11
+     },
+     "calibration_context": "match",
+     "coverage": 0.01950354609929078,
+     "fused_events_contributed": 0,
+     "fusion_votes": 0,
+     "in_mode_ticks": 564,
+     "operating_mode": null,
+     "output": "did:ECM_AIR_CHARGE",
+     "persisted_events": 0,
+     "refusals": {
+      "actual_stale:did:ECM_AIR_CHARGE": 5,
+      "input_missing:did:ECM_RPM": 61,
+      "input_stale:did:ECM_RPM": 485,
+      "input_stale:did:ECM_THROTTLE_POS_SENSOR_1": 2
+     },
+     "scored_ticks": 11,
+     "serving_status": {
+      "lifecycle": "unvalidated",
+      "permitted_uses": [
+       "display",
+       "learned_feature"
+      ],
+      "policy": null,
+      "reasons": [
+       "validation_failed:mae=1771>meaningful_deviation=1500.0",
+       "validation_failed:warning_half_width_median=8317>meaningful_deviation=1500.0",
+       "validation_failed:synthetic_negative_1500_60s_detection=0.17<0.8"
+      ],
+      "state": "diagnostic_only"
+     },
+     "ticks": 564
+    },
+    "air_mass_per_cycle_vs_rpm_load": {
+     "alerting_as_served": false,
+     "artifact": {
+      "fingerprint": "sha256:5445b097be5a870a809e570989ae79a7aa83faf1cdff12a97f2fac5ca36d356c",
+      "fitted_at": "2026-09-24T01:55:52.020107+00:00",
+      "grid_version": 1,
+      "name": "air_mass_per_cycle_vs_rpm_load",
+      "schema_contract": true,
+      "training_data_hash": "sha256:835ad6adcec74631",
+      "tune_revision": "ZS44A-20260920",
+      "version": 3
+     },
+     "band_ticks": {
+      "ok": 536,
+      "warning": 2
+     },
+     "calibration_context": "match",
+     "coverage": 0.9539007092198581,
+     "fused_events_contributed": 0,
+     "fusion_votes": 0,
+     "in_mode_ticks": 564,
+     "operating_mode": null,
+     "output": "derived:AIR_MASS_PER_CYCLE",
+     "persisted_events": 0,
+     "refusals": {
+      "engine_state_stale:obd:RPM": 1,
+      "engine_state_unknown:obd:RPM": 1,
+      "off_map": 24
+     },
+     "scored_ticks": 538,
+     "serving_status": {
+      "lifecycle": "unvalidated",
+      "permitted_uses": [
+       "display",
+       "learned_feature"
+      ],
+      "policy": null,
+      "reasons": [
+       "validation_failed:mae=0.1251>meaningful_deviation=0.08",
+       "validation_failed:warning_half_width_median=0.2806>meaningful_deviation=0.08",
+       "validation_failed:synthetic_negative_0.08_60s_detection=0.25<0.8"
+      ],
+      "state": "diagnostic_only"
+     },
+     "ticks": 564
+    },
+    "cat_warmup": {
+     "alerting_as_served": false,
+     "artifact": {
+      "fingerprint": "sha256:f14450ab4c88df87047c9994136145d67141668b0813596370ac5a57c637f06a",
+      "fitted_at": "2026-05-25T15:17:44.374674+00:00",
+      "grid_version": null,
+      "name": "cat_warmup",
+      "schema_contract": false,
+      "training_data_hash": "sha256:977d2d5412d81e30",
+      "tune_revision": null,
+      "version": 4
+     },
+     "band_ticks": {
+      "ok": 14,
+      "warning": 26
+     },
+     "calibration_context": "model_revision_unknown",
+     "coverage": 0.13245033112582782,
+     "fused_events_contributed": 0,
+     "fusion_votes": 0,
+     "in_mode_ticks": 302,
+     "operating_mode": "warmup",
+     "output": "obd:CATALYST_TEMP_B1S1",
+     "persisted_events": 0,
+     "refusals": {
+      "actual_missing:obd:CATALYST_TEMP_B1S1": 2,
+      "actual_stale:obd:CATALYST_TEMP_B1S1": 259,
+      "input_missing:obd:RUN_TIME": 1,
+      "operating_mode_mismatch": 262
+     },
+     "scored_ticks": 40,
+     "serving_status": {
+      "lifecycle": "quarantined",
+      "permitted_uses": [
+       "display"
+      ],
+      "policy": {
+       "artifact_fingerprint": "sha256:f14450ab4c88df87047c9994136145d67141668b0813596370ac5a57c637f06a",
+       "decided": "2026-09-21 behavior-model review (B00 carried decision)",
+       "evidence": "data/analyses/2026-09-21-behavior-model-review.md (Model decisions); data/analyses/2026-09-21-behavior-validation-report.md \u00a74",
+       "lifecycle": "quarantined",
+       "lift_when": "a new cat_warmup fit passes B02 validation (B07); this artifact stays quarantined",
+       "model": "cat_warmup",
+       "permitted_uses": [
+        "display"
+       ],
+       "reason": "May 25 artifact (v4) with no held-out validation; on S18's genuine cold start n=34, R\u00b2 -0.737, MAE 55 deg C, 76.5 % exceedance; persisted bands 30/80 deg C predate the recipe's 45/115. Its May training sessions are absent locally, so it cannot be re-validated. Temperature trajectory alone does not establish catalyst efficiency; the raw channel and warmup analysis stay."
+      },
+      "reasons": [
+       "policy:quarantined",
+       "legacy_artifact:no_serving_eligibility_contract",
+       "unvalidated:no_held_out_evidence",
+       "contract_changed:recipe"
+      ],
+      "state": "diagnostic_only"
+     },
+     "ticks": 564
+    },
+    "fuel_trim_vs_rpm_load": {
+     "alerting_as_served": false,
+     "artifact": {
+      "fingerprint": "sha256:264b9ae497a8cdd369fc253de2f0acd3b8dbaef373857357064f2cce9660f506",
+      "fitted_at": "2026-09-24T01:55:48.123532+00:00",
+      "grid_version": 1,
+      "name": "fuel_trim_vs_rpm_load",
+      "schema_contract": true,
+      "training_data_hash": "sha256:ba3cc6721b09eb62",
+      "tune_revision": "ZS44A-20260920",
+      "version": 3
+     },
+     "band_ticks": {
+      "ok": 374
+     },
+     "calibration_context": "match",
+     "coverage": 0.6631205673758865,
+     "fused_events_contributed": 0,
+     "fusion_votes": 0,
+     "in_mode_ticks": 564,
+     "operating_mode": null,
+     "output": "obd:SHORT_FUEL_TRIM_1",
+     "persisted_events": 0,
+     "refusals": {
+      "actual_stale:obd:SHORT_FUEL_TRIM_1": 188,
+      "engine_state_stale:obd:RPM": 1,
+      "engine_state_unknown:obd:RPM": 1
+     },
+     "scored_ticks": 374,
+     "serving_status": {
+      "lifecycle": "unvalidated",
+      "permitted_uses": [
+       "display",
+       "learned_feature"
+      ],
+      "policy": null,
+      "reasons": [
+       "validation_failed:skill_vs_baseline=-0.023<0.3",
+       "validation_failed:warning_half_width_median=17.15>meaningful_deviation=5.0",
+       "validation_failed:control_events_per_hour=2.42>2.0",
+       "validation_failed:synthetic_positive_5_120s_detection=0.18<0.8"
+      ],
+      "state": "diagnostic_only"
+     },
+     "ticks": 564
+    },
+    "stft_bank_balance_city": {
+     "alerting_as_served": false,
+     "artifact": {
+      "fingerprint": "sha256:c449694cf41e9a3286a22427514c098366eec8ca6b26fab900e3c81fb929a982",
+      "fitted_at": "2026-09-24T01:56:13.011086+00:00",
+      "grid_version": null,
+      "name": "stft_bank_balance_city",
+      "schema_contract": true,
+      "training_data_hash": "sha256:f00c7777c4ff7683",
+      "tune_revision": "ZS44A-20260920",
+      "version": 1
+     },
+     "band_ticks": {},
+     "calibration_context": "match",
+     "coverage": null,
+     "fused_events_contributed": 0,
+     "fusion_votes": 0,
+     "in_mode_ticks": 0,
+     "operating_mode": "city",
+     "output": "derived:STFT_BANK_BALANCE",
+     "persisted_events": 0,
+     "refusals": {
+      "operating_mode_mismatch": 564
+     },
+     "scored_ticks": 0,
+     "serving_status": {
+      "lifecycle": "unvalidated",
+      "permitted_uses": [
+       "display",
+       "learned_feature"
+      ],
+      "policy": null,
+      "reasons": [
+       "validation_failed:control_events_per_hour=2.86>2.0"
+      ],
+      "state": "diagnostic_only"
+     },
+     "ticks": 564
+    },
+    "stft_bank_balance_highway": {
+     "alerting_as_served": false,
+     "artifact": {
+      "fingerprint": "sha256:cb0b28a4722c2ca1a290bd4be718fbf79b46b5056624283896c3e25aa4c9b197",
+      "fitted_at": "2026-09-24T01:56:16.634156+00:00",
+      "grid_version": null,
+      "name": "stft_bank_balance_highway",
+      "schema_contract": true,
+      "training_data_hash": "sha256:101ce709630fc3cb",
+      "tune_revision": "ZS44A-20260920",
+      "version": 1
+     },
+     "band_ticks": {},
+     "calibration_context": "match",
+     "coverage": null,
+     "fused_events_contributed": 0,
+     "fusion_votes": 0,
+     "in_mode_ticks": 0,
+     "operating_mode": "highway",
+     "output": "derived:STFT_BANK_BALANCE",
+     "persisted_events": 0,
+     "refusals": {
+      "operating_mode_mismatch": 564
+     },
+     "scored_ticks": 0,
+     "serving_status": {
+      "lifecycle": "unvalidated",
+      "permitted_uses": [
+       "display",
+       "learned_feature"
+      ],
+      "policy": null,
+      "reasons": [
+       "validation_failed:control_events_per_hour=13.9>2.0"
+      ],
+      "state": "diagnostic_only"
+     },
+     "ticks": 564
+    },
+    "timing_advance_vs_rpm_iat": {
+     "alerting_as_served": false,
+     "artifact": {
+      "fingerprint": "sha256:1a2394e4ca01ebdcc81fb74c752d35a590ed65916e7a18fdfb974036f19384cb",
+      "fitted_at": "2026-07-27T06:09:06.923608+00:00",
+      "grid_version": 1,
+      "name": "timing_advance_vs_rpm_iat",
+      "schema_contract": false,
+      "training_data_hash": "sha256:931d6ff04cb414ed",
+      "tune_revision": null,
+      "version": 2
+     },
+     "band_ticks": {
+      "ok": 296
+     },
+     "calibration_context": "model_revision_unknown",
+     "coverage": 0.524822695035461,
+     "fused_events_contributed": 0,
+     "fusion_votes": 0,
+     "in_mode_ticks": 564,
+     "operating_mode": null,
+     "output": "obd:TIMING_ADVANCE",
+     "persisted_events": 0,
+     "refusals": {
+      "input_missing:obd:INTAKE_TEMP": 1,
+      "input_missing:obd:RPM": 1,
+      "input_stale:obd:RPM": 1,
+      "off_map": 265
+     },
+     "scored_ticks": 296,
+     "serving_status": {
+      "lifecycle": "demoted",
+      "permitted_uses": [
+       "display"
+      ],
+      "policy": {
+       "decided": "2026-09-21 behavior-model review (B00 carried decision)",
+       "evidence": "data/analyses/2026-09-21-behavior-model-review.md (Model decisions); data/analyses/2026-09-21-behavior-validation-report.md \u00a73",
+       "lifecycle": "demoted",
+       "lift_when": "never for standalone alerting; retire the recipe when B04 ships a load-aware timing model",
+       "model": "timing_advance_vs_rpm_iat",
+       "permitted_uses": [
+        "display"
+       ],
+       "reason": "RPM/IAT alone omits load: held-out J26 R\u00b2 -0.046, MAE 8.80 deg, median warning half-width 31.3 deg; zero evaluable rows on S17/S18 (IAT below the 29 deg C stored domain). Removed from standalone alerting; IAT stays a candidate context input for a load-aware timing model."
+      },
+      "reasons": [
+       "policy:demoted",
+       "legacy_artifact:no_serving_eligibility_contract",
+       "unvalidated:no_gate_evidence",
+       "contract_changed:recipe"
+      ],
+      "state": "diagnostic_only"
+     },
+     "ticks": 564
+    },
+    "timing_advance_vs_rpm_load": {
+     "alerting_as_served": false,
+     "artifact": {
+      "fingerprint": "sha256:6f46aa29b754acd2f50399bb3931d2c99c36198e5715a804b7295a96884abe76",
+      "fitted_at": "2026-09-24T01:55:32.078439+00:00",
+      "grid_version": 1,
+      "name": "timing_advance_vs_rpm_load",
+      "schema_contract": true,
+      "training_data_hash": "sha256:7992e6d59decfe81",
+      "tune_revision": "ZS44A-20260920",
+      "version": 3
+     },
+     "band_ticks": {
+      "ok": 554,
+      "warning": 2
+     },
+     "calibration_context": "match",
+     "coverage": 0.9858156028368794,
+     "fused_events_contributed": 0,
+     "fusion_votes": 0,
+     "in_mode_ticks": 564,
+     "operating_mode": null,
+     "output": "obd:TIMING_ADVANCE",
+     "persisted_events": 0,
+     "refusals": {
+      "actual_missing:obd:TIMING_ADVANCE": 1,
+      "engine_state_stale:obd:RPM": 1,
+      "engine_state_unknown:obd:RPM": 1,
+      "off_map": 5
+     },
+     "scored_ticks": 556,
+     "serving_status": {
+      "lifecycle": "exploratory",
+      "permitted_uses": [
+       "display"
+      ],
+      "policy": {
+       "decided": "2026-09-21 behavior-model review (B00 carried decision)",
+       "evidence": "data/analyses/2026-09-21-behavior-model-review.md (Model decisions)",
+       "lifecycle": "exploratory",
+       "lift_when": "B04 qualifies a timing model under B02 criteria (remove this entry in that change)",
+       "model": "timing_advance_vs_rpm_load",
+       "permitted_uses": [
+        "display"
+       ],
+       "reason": "Retained as exploratory visualization: S17/S21 R\u00b2 0.33/0.28, MAE 4.8/6.7 deg, median warning half-width ~24 deg \u2014 too coarse for subtle timing/knock alerts, and an unexpected timing residual does not identify knock."
+      },
+      "reasons": [
+       "policy:exploratory",
+       "validation_failed:mae=4.846>meaningful_deviation=3.0",
+       "validation_failed:warning_half_width_median=13.19>meaningful_deviation=3.0",
+       "validation_failed:synthetic_negative_3_60s_detection=0.56<0.8",
+       "validation_failed:transient_negative_6_3s_detection=0.30>0.0",
+       "validation_failed:transient_negative_6_10s_detection=0.38>0.0"
+      ],
+      "state": "diagnostic_only"
+     },
+     "ticks": 564
+    },
+    "total_trim_vs_rpm_load_b1": {
+     "alerting_as_served": false,
+     "artifact": {
+      "fingerprint": "sha256:603c882e7154818e8b37f1c41399f7c0f6937fa95125a1fb708c5b5a43ad2b04",
+      "fitted_at": "2026-09-24T01:56:02.150689+00:00",
+      "grid_version": 1,
+      "name": "total_trim_vs_rpm_load_b1",
+      "schema_contract": true,
+      "training_data_hash": "sha256:0667554c8755b703",
+      "tune_revision": "ZS44A-20260920",
+      "version": 1
+     },
+     "band_ticks": {
+      "ok": 172
+     },
+     "calibration_context": "match",
+     "coverage": 0.3049645390070922,
+     "fused_events_contributed": 0,
+     "fusion_votes": 0,
+     "in_mode_ticks": 564,
+     "operating_mode": null,
+     "output": "derived:TOTAL_TRIM_B1",
+     "persisted_events": 0,
+     "refusals": {
+      "engine_state_unknown:obd:RPM": 1,
+      "fuel_status_stale:obd:FUEL_STATUS": 88,
+      "operating_mode_excluded:warmup": 302,
+      "rate_insufficient_history:obd:RPM": 1
+     },
+     "scored_ticks": 172,
+     "serving_status": {
+      "lifecycle": "unvalidated",
+      "permitted_uses": [
+       "display",
+       "learned_feature"
+      ],
+      "policy": null,
+      "reasons": [
+       "validation_failed:skill_vs_baseline=0.112<0.2",
+       "validation_failed:warning_half_width_median=12.07>meaningful_deviation=5.0",
+       "validation_failed:synthetic_positive_5_120s_detection=0.04<0.8"
+      ],
+      "state": "diagnostic_only"
+     },
+     "ticks": 564
+    },
+    "total_trim_vs_rpm_load_b2": {
+     "alerting_as_served": false,
+     "artifact": {
+      "fingerprint": "sha256:1a5a56ac1ddb9360e3cd6843d03463fe48e24f5f8743aef7deacdd600140fee6",
+      "fitted_at": "2026-09-24T01:56:06.726621+00:00",
+      "grid_version": 1,
+      "name": "total_trim_vs_rpm_load_b2",
+      "schema_contract": true,
+      "training_data_hash": "sha256:0e3fa20945b0ced9",
+      "tune_revision": "ZS44A-20260920",
+      "version": 1
+     },
+     "band_ticks": {
+      "ok": 171
+     },
+     "calibration_context": "match",
+     "coverage": 0.30319148936170215,
+     "fused_events_contributed": 0,
+     "fusion_votes": 0,
+     "in_mode_ticks": 564,
+     "operating_mode": null,
+     "output": "derived:TOTAL_TRIM_B2",
+     "persisted_events": 0,
+     "refusals": {
+      "actual_stale:derived:TOTAL_TRIM_B2": 1,
+      "engine_state_unknown:obd:RPM": 1,
+      "fuel_status_stale:obd:FUEL_STATUS": 88,
+      "operating_mode_excluded:warmup": 302,
+      "rate_insufficient_history:obd:RPM": 1
+     },
+     "scored_ticks": 171,
+     "serving_status": {
+      "lifecycle": "unvalidated",
+      "permitted_uses": [
+       "display",
+       "learned_feature"
+      ],
+      "policy": null,
+      "reasons": [
+       "validation_failed:skill_vs_baseline=-0.009<0.2",
+       "validation_failed:warning_half_width_median=10.66>meaningful_deviation=5.0",
+       "validation_failed:synthetic_positive_5_120s_detection=0.07<0.8"
+      ],
+      "state": "diagnostic_only"
+     },
+     "ticks": 564
+    },
+    "ve_vs_rpm_load": {
+     "alerting_as_served": false,
+     "artifact": {
+      "fingerprint": "sha256:feaad4bedbc2049b09c5d0bec58989f14f38f86dcbbfa228a7bd91f681685e3f",
+      "fitted_at": "2026-09-24T01:55:57.140820+00:00",
+      "grid_version": 1,
+      "name": "ve_vs_rpm_load",
+      "schema_contract": true,
+      "training_data_hash": "sha256:b770341e5ca0f7f6",
+      "tune_revision": "ZS44A-20260920",
+      "version": 3
+     },
+     "band_ticks": {
+      "ok": 536,
+      "warning": 2
+     },
+     "calibration_context": "match",
+     "coverage": 0.9539007092198581,
+     "fused_events_contributed": 0,
+     "fusion_votes": 0,
+     "in_mode_ticks": 564,
+     "operating_mode": null,
+     "output": "derived:VE_AMBIENT_PERCENT",
+     "persisted_events": 0,
+     "refusals": {
+      "actual_missing:derived:VE_AMBIENT_PERCENT": 1,
+      "engine_state_stale:obd:RPM": 1,
+      "engine_state_unknown:obd:RPM": 1,
+      "off_map": 23
+     },
+     "scored_ticks": 538,
+     "serving_status": {
+      "lifecycle": "unvalidated",
+      "permitted_uses": [
+       "display",
+       "learned_feature"
+      ],
+      "policy": null,
+      "reasons": [
+       "validation_failed:mae=3.168>meaningful_deviation=3.0",
+       "validation_failed:warning_half_width_median=7.912>meaningful_deviation=3.0",
+       "validation_failed:synthetic_negative_3_60s_detection=0.38<0.8"
+      ],
+      "state": "diagnostic_only"
+     },
+     "ticks": 564
+    },
+    "warm_idle_rpm_baseline": {
+     "alerting_as_served": false,
+     "artifact": {
+      "fingerprint": "sha256:6cabd2e208f32c8787a6c789a85c8b808780ae96e73edef1f0aba7a36a3f2149",
+      "fitted_at": "2026-09-24T01:55:23.883180+00:00",
+      "grid_version": null,
+      "name": "warm_idle_rpm_baseline",
+      "schema_contract": true,
+      "training_data_hash": "sha256:60d52f9d474937a0",
+      "tune_revision": "ZS44A-20260920",
+      "version": 3
+     },
+     "band_ticks": {
+      "ok": 260
+     },
+     "calibration_context": "match",
+     "coverage": 1.0,
+     "fused_events_contributed": 0,
+     "fusion_votes": 0,
+     "in_mode_ticks": 260,
+     "operating_mode": "idle",
+     "output": "obd:RPM",
+     "persisted_events": 0,
+     "refusals": {
+      "operating_mode_mismatch": 304
+     },
+     "scored_ticks": 260,
+     "serving_status": {
+      "lifecycle": "unvalidated",
+      "permitted_uses": [
+       "display",
+       "learned_feature"
+      ],
+      "policy": null,
+      "reasons": [
+       "validation_failed:control_events_per_hour=8.89>2.0"
+      ],
+      "state": "diagnostic_only"
+     },
+     "ticks": 564
+    }
+   },
+   "session_tune_conflict": false,
+   "session_tune_revision": "ZS44A-20260920",
+   "session_tune_source": "registry",
+   "shadow_alerting": true,
+   "side": "candidate",
+   "state_dir": "<scratch>/v2-shadow/_replay-31afdbc6-candidate",
+   "ticks": 564
+  },
+  "comparison_version": 2,
+  "dependent_manifest_conflicts": {
+   "candidate": [],
+   "served": []
+  },
+  "per_model": {
+   "air_charge_vs_rpm_throttle_did": {
+    "alerting": [
+     false,
+     false
+    ],
+    "calibration_context": [
+     "mismatch",
+     "match"
+    ],
+    "coverage": [
+     0.01950354609929078,
+     0.01950354609929078
+    ],
+    "coverage_delta": 0.0,
+    "fused_events_contributed": [
+     0,
+     0
+    ],
+    "fused_events_contributed_delta": 0.0,
+    "fusion_votes": [
+     0,
+     0
+    ],
+    "fusion_votes_delta": 0.0,
+    "lifecycle": [
+     "unvalidated",
+     "unvalidated"
+    ],
+    "paired": {
+     "abs_deviation_p95": [
+      818.2250000000004,
+      856.3040005160974
+     ],
+     "abs_deviation_p95_delta": 38.07900051609704,
+     "bias": [
+      457.4485815373378,
+      493.65911428061264
+     ],
+     "bias_delta": 36.210532743274825,
+     "mae": [
+      457.4485815373378,
+      493.65911428061264
+     ],
+     "mae_delta": 36.210532743274825,
+     "n_pairs": 11,
+     "only_candidate_scored": {
+      "abs_deviation_p95": null,
+      "bias": null,
+      "mae": null,
+      "other_side_refusals": {},
+      "ticks": 0
+     },
+     "only_served_scored": {
+      "abs_deviation_p95": null,
+      "bias": null,
+      "mae": null,
+      "other_side_refusals": {},
+      "ticks": 0
+     }
+    },
+    "persisted_events": [
+     0,
+     0
+    ],
+    "persisted_events_delta": 0.0,
+    "presence": "both",
+    "refusals": {
+     "actual_stale:did:ECM_AIR_CHARGE": [
+      5,
+      5
+     ],
+     "input_missing:did:ECM_RPM": [
+      61,
+      61
+     ],
+     "input_stale:did:ECM_RPM": [
+      485,
+      485
+     ],
+     "input_stale:did:ECM_THROTTLE_POS_SENSOR_1": [
+      2,
+      2
+     ]
+    },
+    "same_artifact": false,
+    "scored_ticks": [
+     11,
+     11
+    ],
+    "scored_ticks_delta": 0.0,
+    "version": [
+     1,
+     2
+    ]
+   },
+   "air_mass_per_cycle_vs_rpm_load": {
+    "alerting": [
+     false,
+     false
+    ],
+    "calibration_context": [
+     "model_revision_unknown",
+     "match"
+    ],
+    "coverage": [
+     0.6418439716312057,
+     0.9539007092198581
+    ],
+    "coverage_delta": 0.3120567375886525,
+    "fused_events_contributed": [
+     0,
+     0
+    ],
+    "fused_events_contributed_delta": 0.0,
+    "fusion_votes": [
+     0,
+     0
+    ],
+    "fusion_votes_delta": 0.0,
+    "lifecycle": [
+     "unvalidated",
+     "unvalidated"
+    ],
+    "paired": {
+     "abs_deviation_p95": [
+      0.1056166860287413,
+      0.09131155527443599
+     ],
+     "abs_deviation_p95_delta": -0.014305130754305312,
+     "bias": [
+      -0.027839265865848478,
+      0.011235107982932164
+     ],
+     "bias_delta": 0.03907437384878064,
+     "mae": [
+      0.034134541715342206,
+      0.028044288163727133
+     ],
+     "mae_delta": -0.006090253551615073,
+     "n_pairs": 362,
+     "only_candidate_scored": {
+      "abs_deviation_p95": 0.017021757232695722,
+      "bias": 0.0018583264745435134,
+      "mae": 0.009974086664913905,
+      "other_side_refusals": {
+       "off_map": 176
+      },
+      "ticks": 176
+     },
+     "only_served_scored": {
+      "abs_deviation_p95": null,
+      "bias": null,
+      "mae": null,
+      "other_side_refusals": {},
+      "ticks": 0
+     }
+    },
+    "persisted_events": [
+     0,
+     0
+    ],
+    "persisted_events_delta": 0.0,
+    "presence": "both",
+    "refusals": {
+     "engine_state_stale:obd:RPM": [
+      0,
+      1
+     ],
+     "engine_state_unknown:obd:RPM": [
+      0,
+      1
+     ],
+     "input_missing:obd:RPM": [
+      1,
+      0
+     ],
+     "input_stale:obd:RPM": [
+      1,
+      0
+     ],
+     "off_map": [
+      200,
+      24
+     ]
+    },
+    "same_artifact": false,
+    "scored_ticks": [
+     362,
+     538
+    ],
+    "scored_ticks_delta": 176.0,
+    "version": [
+     2,
+     3
+    ]
+   },
+   "cat_warmup": {
+    "alerting": [
+     false,
+     false
+    ],
+    "calibration_context": [
+     "model_revision_unknown",
+     "model_revision_unknown"
+    ],
+    "coverage": [
+     0.13245033112582782,
+     0.13245033112582782
+    ],
+    "coverage_delta": 0.0,
+    "fused_events_contributed": [
+     0,
+     0
+    ],
+    "fused_events_contributed_delta": 0.0,
+    "fusion_votes": [
+     0,
+     0
+    ],
+    "fusion_votes_delta": 0.0,
+    "lifecycle": [
+     "quarantined",
+     "quarantined"
+    ],
+    "paired": {
+     "abs_deviation_p95": [
+      51.718896220755845,
+      51.718896220755845
+     ],
+     "abs_deviation_p95_delta": 0.0,
+     "bias": [
+      0.13485082405895402,
+      0.13485082405895402
+     ],
+     "bias_delta": 0.0,
+     "mae": [
+      34.93628053412097,
+      34.93628053412097
+     ],
+     "mae_delta": 0.0,
+     "n_pairs": 40,
+     "only_candidate_scored": {
+      "abs_deviation_p95": null,
+      "bias": null,
+      "mae": null,
+      "other_side_refusals": {},
+      "ticks": 0
+     },
+     "only_served_scored": {
+      "abs_deviation_p95": null,
+      "bias": null,
+      "mae": null,
+      "other_side_refusals": {},
+      "ticks": 0
+     }
+    },
+    "persisted_events": [
+     0,
+     0
+    ],
+    "persisted_events_delta": 0.0,
+    "presence": "both",
+    "refusals": {
+     "actual_missing:obd:CATALYST_TEMP_B1S1": [
+      2,
+      2
+     ],
+     "actual_stale:obd:CATALYST_TEMP_B1S1": [
+      259,
+      259
+     ],
+     "input_missing:obd:RUN_TIME": [
+      1,
+      1
+     ],
+     "operating_mode_mismatch": [
+      262,
+      262
+     ]
+    },
+    "same_artifact": true,
+    "scored_ticks": [
+     40,
+     40
+    ],
+    "scored_ticks_delta": 0.0,
+    "version": [
+     4,
+     4
+    ]
+   },
+   "fuel_trim_vs_rpm_load": {
+    "alerting": [
+     false,
+     false
+    ],
+    "calibration_context": [
+     "model_revision_unknown",
+     "match"
+    ],
+    "coverage": [
+     0.6631205673758865,
+     0.6631205673758865
+    ],
+    "coverage_delta": 0.0,
+    "fused_events_contributed": [
+     0,
+     0
+    ],
+    "fused_events_contributed_delta": 0.0,
+    "fusion_votes": [
+     98,
+     0
+    ],
+    "fusion_votes_delta": -98.0,
+    "lifecycle": [
+     "unvalidated",
+     "unvalidated"
+    ],
+    "paired": {
+     "abs_deviation_p95": [
+      14.322608701602165,
+      5.774434315632817
+     ],
+     "abs_deviation_p95_delta": -8.548174385969348,
+     "bias": [
+      -9.936120437699545,
+      -2.541032646407689
+     ],
+     "bias_delta": 7.395087791291855,
+     "mae": [
+      9.936120437699545,
+      2.6771004787587653
+     ],
+     "mae_delta": -7.25901995894078,
+     "n_pairs": 374,
+     "only_candidate_scored": {
+      "abs_deviation_p95": null,
+      "bias": null,
+      "mae": null,
+      "other_side_refusals": {},
+      "ticks": 0
+     },
+     "only_served_scored": {
+      "abs_deviation_p95": null,
+      "bias": null,
+      "mae": null,
+      "other_side_refusals": {},
+      "ticks": 0
+     }
+    },
+    "persisted_events": [
+     16,
+     0
+    ],
+    "persisted_events_delta": -16.0,
+    "presence": "both",
+    "refusals": {
+     "actual_stale:obd:SHORT_FUEL_TRIM_1": [
+      188,
+      188
+     ],
+     "engine_state_stale:obd:RPM": [
+      0,
+      1
+     ],
+     "engine_state_unknown:obd:RPM": [
+      0,
+      1
+     ],
+     "input_missing:obd:RPM": [
+      1,
+      0
+     ],
+     "input_stale:obd:RPM": [
+      1,
+      0
+     ]
+    },
+    "same_artifact": false,
+    "scored_ticks": [
+     374,
+     374
+    ],
+    "scored_ticks_delta": 0.0,
+    "version": [
+     2,
+     3
+    ]
+   },
+   "stft_bank_balance_city": {
+    "presence": "candidate_only"
+   },
+   "stft_bank_balance_highway": {
+    "presence": "candidate_only"
+   },
+   "timing_advance_vs_rpm_iat": {
+    "alerting": [
+     false,
+     false
+    ],
+    "calibration_context": [
+     "model_revision_unknown",
+     "model_revision_unknown"
+    ],
+    "coverage": [
+     0.524822695035461,
+     0.524822695035461
+    ],
+    "coverage_delta": 0.0,
+    "fused_events_contributed": [
+     0,
+     0
+    ],
+    "fused_events_contributed_delta": 0.0,
+    "fusion_votes": [
+     0,
+     0
+    ],
+    "fusion_votes_delta": 0.0,
+    "lifecycle": [
+     "demoted",
+     "demoted"
+    ],
+    "paired": {
+     "abs_deviation_p95": [
+      1.9030303030303024,
+      1.9030303030303024
+     ],
+     "abs_deviation_p95_delta": 0.0,
+     "bias": [
+      -0.4823528819430456,
+      -0.4823528819430456
+     ],
+     "bias_delta": 0.0,
+     "mae": [
+      0.4904200400102036,
+      0.4904200400102036
+     ],
+     "mae_delta": 0.0,
+     "n_pairs": 296,
+     "only_candidate_scored": {
+      "abs_deviation_p95": null,
+      "bias": null,
+      "mae": null,
+      "other_side_refusals": {},
+      "ticks": 0
+     },
+     "only_served_scored": {
+      "abs_deviation_p95": null,
+      "bias": null,
+      "mae": null,
+      "other_side_refusals": {},
+      "ticks": 0
+     }
+    },
+    "persisted_events": [
+     0,
+     0
+    ],
+    "persisted_events_delta": 0.0,
+    "presence": "both",
+    "refusals": {
+     "input_missing:obd:INTAKE_TEMP": [
+      1,
+      1
+     ],
+     "input_missing:obd:RPM": [
+      1,
+      1
+     ],
+     "input_stale:obd:RPM": [
+      1,
+      1
+     ],
+     "off_map": [
+      265,
+      265
+     ]
+    },
+    "same_artifact": true,
+    "scored_ticks": [
+     296,
+     296
+    ],
+    "scored_ticks_delta": 0.0,
+    "version": [
+     2,
+     2
+    ]
+   },
+   "timing_advance_vs_rpm_load": {
+    "alerting": [
+     false,
+     false
+    ],
+    "calibration_context": [
+     "model_revision_unknown",
+     "match"
+    ],
+    "coverage": [
+     0.9929078014184397,
+     0.9858156028368794
+    ],
+    "coverage_delta": -0.007092198581560294,
+    "fused_events_contributed": [
+     0,
+     0
+    ],
+    "fused_events_contributed_delta": 0.0,
+    "fusion_votes": [
+     0,
+     0
+    ],
+    "fusion_votes_delta": 0.0,
+    "lifecycle": [
+     "exploratory",
+     "exploratory"
+    ],
+    "paired": {
+     "abs_deviation_p95": [
+      1.0101010091267568,
+      1.5245901639344268
+     ],
+     "abs_deviation_p95_delta": 0.51448915480767,
+     "bias": [
+      0.048688856075898256,
+      -0.012130951470149013
+     ],
+     "bias_delta": -0.060819807546047266,
+     "mae": [
+      0.3802701464169989,
+      0.4579826310295734
+     ],
+     "mae_delta": 0.07771248461257446,
+     "n_pairs": 556,
+     "only_candidate_scored": {
+      "abs_deviation_p95": null,
+      "bias": null,
+      "mae": null,
+      "other_side_refusals": {},
+      "ticks": 0
+     },
+     "only_served_scored": {
+      "abs_deviation_p95": 3.8647058823529417,
+      "bias": -2.037621464996894,
+      "mae": 2.059301510980548,
+      "other_side_refusals": {
+       "off_map": 4
+      },
+      "ticks": 4
+     }
+    },
+    "persisted_events": [
+     0,
+     0
+    ],
+    "persisted_events_delta": 0.0,
+    "presence": "both",
+    "refusals": {
+     "actual_missing:obd:TIMING_ADVANCE": [
+      1,
+      1
+     ],
+     "engine_state_stale:obd:RPM": [
+      0,
+      1
+     ],
+     "engine_state_unknown:obd:RPM": [
+      0,
+      1
+     ],
+     "input_missing:obd:RPM": [
+      1,
+      0
+     ],
+     "input_stale:obd:RPM": [
+      1,
+      0
+     ],
+     "off_map": [
+      1,
+      5
+     ]
+    },
+    "same_artifact": false,
+    "scored_ticks": [
+     560,
+     556
+    ],
+    "scored_ticks_delta": -4.0,
+    "version": [
+     2,
+     3
+    ]
+   },
+   "total_trim_vs_rpm_load_b1": {
+    "presence": "candidate_only"
+   },
+   "total_trim_vs_rpm_load_b2": {
+    "presence": "candidate_only"
+   },
+   "ve_vs_rpm_load": {
+    "alerting": [
+     false,
+     false
+    ],
+    "calibration_context": [
+     "model_revision_unknown",
+     "match"
+    ],
+    "coverage": [
+     0.6418439716312057,
+     0.9539007092198581
+    ],
+    "coverage_delta": 0.3120567375886525,
+    "fused_events_contributed": [
+     0,
+     0
+    ],
+    "fused_events_contributed_delta": 0.0,
+    "fusion_votes": [
+     0,
+     0
+    ],
+    "fusion_votes_delta": 0.0,
+    "lifecycle": [
+     "unvalidated",
+     "unvalidated"
+    ],
+    "paired": {
+     "abs_deviation_p95": [
+      3.39929124081805,
+      2.279739191542026
+     ],
+     "abs_deviation_p95_delta": -1.1195520492760238,
+     "bias": [
+      -1.6066709251353746,
+      0.19063377114769545
+     ],
+     "bias_delta": 1.79730469628307,
+     "mae": [
+      1.6491157044235476,
+      0.5546772979004657
+     ],
+     "mae_delta": -1.0944384065230819,
+     "n_pairs": 362,
+     "only_candidate_scored": {
+      "abs_deviation_p95": 0.4248280491245495,
+      "bias": 0.07539160805388347,
+      "mae": 0.24746599389328036,
+      "other_side_refusals": {
+       "off_map": 176
+      },
+      "ticks": 176
+     },
+     "only_served_scored": {
+      "abs_deviation_p95": null,
+      "bias": null,
+      "mae": null,
+      "other_side_refusals": {},
+      "ticks": 0
+     }
+    },
+    "persisted_events": [
+     0,
+     0
+    ],
+    "persisted_events_delta": 0.0,
+    "presence": "both",
+    "refusals": {
+     "actual_missing:derived:VE_AMBIENT_PERCENT": [
+      0,
+      1
+     ],
+     "actual_missing:derived:VE_PERCENT": [
+      1,
+      0
+     ],
+     "engine_state_stale:obd:RPM": [
+      0,
+      1
+     ],
+     "engine_state_unknown:obd:RPM": [
+      0,
+      1
+     ],
+     "input_missing:obd:RPM": [
+      1,
+      0
+     ],
+     "input_stale:obd:RPM": [
+      1,
+      0
+     ],
+     "off_map": [
+      199,
+      23
+     ]
+    },
+    "same_artifact": false,
+    "scored_ticks": [
+     362,
+     538
+    ],
+    "scored_ticks_delta": 176.0,
+    "version": [
+     2,
+     3
+    ]
+   },
+   "warm_idle_rpm_baseline": {
+    "alerting": [
+     false,
+     false
+    ],
+    "calibration_context": [
+     "model_revision_unknown",
+     "match"
+    ],
+    "coverage": [
+     1.0,
+     1.0
+    ],
+    "coverage_delta": 0.0,
+    "fused_events_contributed": [
+     0,
+     0
+    ],
+    "fused_events_contributed_delta": 0.0,
+    "fusion_votes": [
+     0,
+     0
+    ],
+    "fusion_votes_delta": 0.0,
+    "lifecycle": [
+     "unvalidated",
+     "unvalidated"
+    ],
+    "paired": {
+     "abs_deviation_p95": [
+      25.0,
+      37.5
+     ],
+     "abs_deviation_p95_delta": 12.5,
+     "bias": [
+      -8.89423076923077,
+      3.605769230769231
+     ],
+     "bias_delta": 12.5,
+     "mae": [
+      15.048076923076923,
+      11.298076923076923
+     ],
+     "mae_delta": -3.75,
+     "n_pairs": 260,
+     "only_candidate_scored": {
+      "abs_deviation_p95": null,
+      "bias": null,
+      "mae": null,
+      "other_side_refusals": {},
+      "ticks": 0
+     },
+     "only_served_scored": {
+      "abs_deviation_p95": null,
+      "bias": null,
+      "mae": null,
+      "other_side_refusals": {},
+      "ticks": 0
+     }
+    },
+    "persisted_events": [
+     0,
+     0
+    ],
+    "persisted_events_delta": 0.0,
+    "presence": "both",
+    "refusals": {
+     "operating_mode_mismatch": [
+      304,
+      304
+     ]
+    },
+    "same_artifact": false,
+    "scored_ticks": [
+     260,
+     260
+    ],
+    "scored_ticks_delta": 0.0,
+    "version": [
+     2,
+     3
+    ]
+   }
+  },
+  "run_id": "31afdbc6",
+  "same_ticks": true,
+  "served": {
+   "artifact": "data/nissan-xterra-2008/_prior/2026-09-24T024700/behavior_models.yaml",
+   "artifact_sha256": "9cd174ce0388d73f02e7994d67b4dbf94298df0dd5f53e3ce641a8ac540652aa",
+   "behavior_ticks": 564,
+   "counters": {
+    "emitted": 16,
+    "emitted_evidence": 0,
+    "skipped_capture_profile": 0,
+    "skipped_vehicle_state": 0,
+    "suppressed_dedupe": 82,
+    "suppressed_not_anomaly": 98,
+    "suppressed_persistence": 109,
+    "suppressed_tuning": 0
+   },
+   "dependent_manifests": [
+    {
+     "behavior_feature_conflicts": {},
+     "behavior_fingerprint_provenance": {},
+     "behavior_models_consumed": [],
+     "feature_count": 295,
+     "model_type": "isolation_forest",
+     "model_version": "isolation_forest_2026-09-20T054703.694923Z",
+     "path": "models/nissan-xterra-2008/isolation_forest/model.manifest.json"
+    },
+    {
+     "behavior_feature_conflicts": {},
+     "behavior_fingerprint_provenance": {},
+     "behavior_models_consumed": [],
+     "feature_count": 361,
+     "model_type": "lstm_autoencoder",
+     "model_version": "lstm_autoencoder_2026-09-20T064628.385918Z",
+     "path": "models/nissan-xterra-2008/lstm_autoencoder/model.manifest.json"
+    }
+   ],
+   "detectors": "behavior_only",
+   "events_total": 16,
+   "first_tick": "2026-09-21T19:42:59+00:00",
+   "fused_events": 0,
+   "governing_policy": "data/nissan-xterra-2008/behavior_policy.yaml",
+   "governing_policy_sha256": "fb72e9478113cf4f116a89a0e38806820dcdcd018dd76e3f0376d36923cc4b0e",
+   "last_tick": "2026-09-21T19:52:22+00:00",
+   "models": {
+    "air_charge_vs_rpm_throttle_did": {
+     "alerting_as_served": false,
+     "artifact": {
+      "fingerprint": "sha256:99babb6add5a1eaa10ef2a78e2a4fd0efd207f41a1610d770f93af47794df0ea",
+      "fitted_at": "2026-08-07T15:04:47.245437+00:00",
+      "grid_version": 1,
+      "name": "air_charge_vs_rpm_throttle_did",
+      "schema_contract": false,
+      "training_data_hash": "sha256:0f214145f2c116e0",
+      "tune_revision": "ZS44A-k106",
+      "version": 1
+     },
+     "band_ticks": {
+      "ok": 11
+     },
+     "calibration_context": "mismatch",
+     "coverage": 0.01950354609929078,
+     "fused_events_contributed": 0,
+     "fusion_votes": 0,
+     "in_mode_ticks": 564,
+     "operating_mode": null,
+     "output": "did:ECM_AIR_CHARGE",
+     "persisted_events": 0,
+     "refusals": {
+      "actual_stale:did:ECM_AIR_CHARGE": 5,
+      "input_missing:did:ECM_RPM": 61,
+      "input_stale:did:ECM_RPM": 485,
+      "input_stale:did:ECM_THROTTLE_POS_SENSOR_1": 2
+     },
+     "scored_ticks": 11,
+     "serving_status": {
+      "lifecycle": "unvalidated",
+      "permitted_uses": [
+       "display",
+       "learned_feature"
+      ],
+      "policy": null,
+      "reasons": [
+       "legacy_artifact:no_serving_eligibility_contract",
+       "unvalidated:no_gate_evidence"
+      ],
+      "state": "diagnostic_only"
+     },
+     "ticks": 564
+    },
+    "air_mass_per_cycle_vs_rpm_load": {
+     "alerting_as_served": false,
+     "artifact": {
+      "fingerprint": "sha256:01f191ca5938593c5b348f661c5f6f2541ce5e6fba59a187a4692165525171b2",
+      "fitted_at": "2026-07-27T06:09:07.601569+00:00",
+      "grid_version": 1,
+      "name": "air_mass_per_cycle_vs_rpm_load",
+      "schema_contract": false,
+      "training_data_hash": "sha256:f26a65381ee88373",
+      "tune_revision": null,
+      "version": 2
+     },
+     "band_ticks": {
+      "critical": 5,
+      "ok": 355,
+      "warning": 2
+     },
+     "calibration_context": "model_revision_unknown",
+     "coverage": 0.6418439716312057,
+     "fused_events_contributed": 0,
+     "fusion_votes": 0,
+     "in_mode_ticks": 564,
+     "operating_mode": null,
+     "output": "derived:AIR_MASS_PER_CYCLE",
+     "persisted_events": 0,
+     "refusals": {
+      "input_missing:obd:RPM": 1,
+      "input_stale:obd:RPM": 1,
+      "off_map": 200
+     },
+     "scored_ticks": 362,
+     "serving_status": {
+      "lifecycle": "unvalidated",
+      "permitted_uses": [
+       "display",
+       "learned_feature"
+      ],
+      "policy": null,
+      "reasons": [
+       "legacy_artifact:no_serving_eligibility_contract",
+       "unvalidated:no_gate_evidence"
+      ],
+      "state": "diagnostic_only"
+     },
+     "ticks": 564
+    },
+    "cat_warmup": {
+     "alerting_as_served": false,
+     "artifact": {
+      "fingerprint": "sha256:f14450ab4c88df87047c9994136145d67141668b0813596370ac5a57c637f06a",
+      "fitted_at": "2026-05-25T15:17:44.374674+00:00",
+      "grid_version": null,
+      "name": "cat_warmup",
+      "schema_contract": false,
+      "training_data_hash": "sha256:977d2d5412d81e30",
+      "tune_revision": null,
+      "version": 4
+     },
+     "band_ticks": {
+      "ok": 14,
+      "warning": 26
+     },
+     "calibration_context": "model_revision_unknown",
+     "coverage": 0.13245033112582782,
+     "fused_events_contributed": 0,
+     "fusion_votes": 0,
+     "in_mode_ticks": 302,
+     "operating_mode": "warmup",
+     "output": "obd:CATALYST_TEMP_B1S1",
+     "persisted_events": 0,
+     "refusals": {
+      "actual_missing:obd:CATALYST_TEMP_B1S1": 2,
+      "actual_stale:obd:CATALYST_TEMP_B1S1": 259,
+      "input_missing:obd:RUN_TIME": 1,
+      "operating_mode_mismatch": 262
+     },
+     "scored_ticks": 40,
+     "serving_status": {
+      "lifecycle": "quarantined",
+      "permitted_uses": [
+       "display"
+      ],
+      "policy": {
+       "artifact_fingerprint": "sha256:f14450ab4c88df87047c9994136145d67141668b0813596370ac5a57c637f06a",
+       "decided": "2026-09-21 behavior-model review (B00 carried decision)",
+       "evidence": "data/analyses/2026-09-21-behavior-model-review.md (Model decisions); data/analyses/2026-09-21-behavior-validation-report.md \u00a74",
+       "lifecycle": "quarantined",
+       "lift_when": "a new cat_warmup fit passes B02 validation (B07); this artifact stays quarantined",
+       "model": "cat_warmup",
+       "permitted_uses": [
+        "display"
+       ],
+       "reason": "May 25 artifact (v4) with no held-out validation; on S18's genuine cold start n=34, R\u00b2 -0.737, MAE 55 deg C, 76.5 % exceedance; persisted bands 30/80 deg C predate the recipe's 45/115. Its May training sessions are absent locally, so it cannot be re-validated. Temperature trajectory alone does not establish catalyst efficiency; the raw channel and warmup analysis stay."
+      },
+      "reasons": [
+       "policy:quarantined",
+       "legacy_artifact:no_serving_eligibility_contract",
+       "unvalidated:no_held_out_evidence"
+      ],
+      "state": "diagnostic_only"
+     },
+     "ticks": 564
+    },
+    "fuel_trim_vs_rpm_load": {
+     "alerting_as_served": false,
+     "artifact": {
+      "fingerprint": "sha256:5cb890ebc7243657cfe7bcd56117df896b4d332fbc5fea65f054ed483b41e94b",
+      "fitted_at": "2026-07-27T06:09:07.220714+00:00",
+      "grid_version": 1,
+      "name": "fuel_trim_vs_rpm_load",
+      "schema_contract": false,
+      "training_data_hash": "sha256:252156011c4269f8",
+      "tune_revision": null,
+      "version": 2
+     },
+     "band_ticks": {
+      "critical": 25,
+      "ok": 212,
+      "warning": 137
+     },
+     "calibration_context": "model_revision_unknown",
+     "coverage": 0.6631205673758865,
+     "fused_events_contributed": 0,
+     "fusion_votes": 98,
+     "in_mode_ticks": 564,
+     "operating_mode": null,
+     "output": "obd:SHORT_FUEL_TRIM_1",
+     "persisted_events": 16,
+     "refusals": {
+      "actual_stale:obd:SHORT_FUEL_TRIM_1": 188,
+      "input_missing:obd:RPM": 1,
+      "input_stale:obd:RPM": 1
+     },
+     "scored_ticks": 374,
+     "serving_status": {
+      "lifecycle": "unvalidated",
+      "permitted_uses": [
+       "display",
+       "learned_feature"
+      ],
+      "policy": null,
+      "reasons": [
+       "legacy_artifact:no_serving_eligibility_contract",
+       "unvalidated:no_gate_evidence"
+      ],
+      "state": "diagnostic_only"
+     },
+     "ticks": 564
+    },
+    "timing_advance_vs_rpm_iat": {
+     "alerting_as_served": false,
+     "artifact": {
+      "fingerprint": "sha256:1a2394e4ca01ebdcc81fb74c752d35a590ed65916e7a18fdfb974036f19384cb",
+      "fitted_at": "2026-07-27T06:09:06.923608+00:00",
+      "grid_version": 1,
+      "name": "timing_advance_vs_rpm_iat",
+      "schema_contract": false,
+      "training_data_hash": "sha256:931d6ff04cb414ed",
+      "tune_revision": null,
+      "version": 2
+     },
+     "band_ticks": {
+      "ok": 296
+     },
+     "calibration_context": "model_revision_unknown",
+     "coverage": 0.524822695035461,
+     "fused_events_contributed": 0,
+     "fusion_votes": 0,
+     "in_mode_ticks": 564,
+     "operating_mode": null,
+     "output": "obd:TIMING_ADVANCE",
+     "persisted_events": 0,
+     "refusals": {
+      "input_missing:obd:INTAKE_TEMP": 1,
+      "input_missing:obd:RPM": 1,
+      "input_stale:obd:RPM": 1,
+      "off_map": 265
+     },
+     "scored_ticks": 296,
+     "serving_status": {
+      "lifecycle": "demoted",
+      "permitted_uses": [
+       "display"
+      ],
+      "policy": {
+       "decided": "2026-09-21 behavior-model review (B00 carried decision)",
+       "evidence": "data/analyses/2026-09-21-behavior-model-review.md (Model decisions); data/analyses/2026-09-21-behavior-validation-report.md \u00a73",
+       "lifecycle": "demoted",
+       "lift_when": "never for standalone alerting; retire the recipe when B04 ships a load-aware timing model",
+       "model": "timing_advance_vs_rpm_iat",
+       "permitted_uses": [
+        "display"
+       ],
+       "reason": "RPM/IAT alone omits load: held-out J26 R\u00b2 -0.046, MAE 8.80 deg, median warning half-width 31.3 deg; zero evaluable rows on S17/S18 (IAT below the 29 deg C stored domain). Removed from standalone alerting; IAT stays a candidate context input for a load-aware timing model."
+      },
+      "reasons": [
+       "policy:demoted",
+       "legacy_artifact:no_serving_eligibility_contract",
+       "unvalidated:no_gate_evidence"
+      ],
+      "state": "diagnostic_only"
+     },
+     "ticks": 564
+    },
+    "timing_advance_vs_rpm_load": {
+     "alerting_as_served": false,
+     "artifact": {
+      "fingerprint": "sha256:7432d67d4da46fa96b3d1bb95251e8a3a70013dec0e7ea05a08f697c23b26b9c",
+      "fitted_at": "2026-07-27T06:09:06.545712+00:00",
+      "grid_version": 1,
+      "name": "timing_advance_vs_rpm_load",
+      "schema_contract": false,
+      "training_data_hash": "sha256:70b14e0a382c1f72",
+      "tune_revision": null,
+      "version": 2
+     },
+     "band_ticks": {
+      "ok": 556,
+      "warning": 4
+     },
+     "calibration_context": "model_revision_unknown",
+     "coverage": 0.9929078014184397,
+     "fused_events_contributed": 0,
+     "fusion_votes": 0,
+     "in_mode_ticks": 564,
+     "operating_mode": null,
+     "output": "obd:TIMING_ADVANCE",
+     "persisted_events": 0,
+     "refusals": {
+      "actual_missing:obd:TIMING_ADVANCE": 1,
+      "input_missing:obd:RPM": 1,
+      "input_stale:obd:RPM": 1,
+      "off_map": 1
+     },
+     "scored_ticks": 560,
+     "serving_status": {
+      "lifecycle": "exploratory",
+      "permitted_uses": [
+       "display"
+      ],
+      "policy": {
+       "decided": "2026-09-21 behavior-model review (B00 carried decision)",
+       "evidence": "data/analyses/2026-09-21-behavior-model-review.md (Model decisions)",
+       "lifecycle": "exploratory",
+       "lift_when": "B04 qualifies a timing model under B02 criteria (remove this entry in that change)",
+       "model": "timing_advance_vs_rpm_load",
+       "permitted_uses": [
+        "display"
+       ],
+       "reason": "Retained as exploratory visualization: S17/S21 R\u00b2 0.33/0.28, MAE 4.8/6.7 deg, median warning half-width ~24 deg \u2014 too coarse for subtle timing/knock alerts, and an unexpected timing residual does not identify knock."
+      },
+      "reasons": [
+       "policy:exploratory",
+       "legacy_artifact:no_serving_eligibility_contract",
+       "unvalidated:no_gate_evidence"
+      ],
+      "state": "diagnostic_only"
+     },
+     "ticks": 564
+    },
+    "ve_vs_rpm_load": {
+     "alerting_as_served": false,
+     "artifact": {
+      "fingerprint": "sha256:e7092d4a17b21668c8b159f05da727357afd6ed4e97837060cb292b15116eb62",
+      "fitted_at": "2026-07-27T06:09:08.015964+00:00",
+      "grid_version": 1,
+      "name": "ve_vs_rpm_load",
+      "schema_contract": false,
+      "training_data_hash": "sha256:ed0cfa48a8f2076c",
+      "tune_revision": null,
+      "version": 2
+     },
+     "band_ticks": {
+      "ok": 354,
+      "warning": 8
+     },
+     "calibration_context": "model_revision_unknown",
+     "coverage": 0.6418439716312057,
+     "fused_events_contributed": 0,
+     "fusion_votes": 0,
+     "in_mode_ticks": 564,
+     "operating_mode": null,
+     "output": "derived:VE_PERCENT",
+     "persisted_events": 0,
+     "refusals": {
+      "actual_missing:derived:VE_PERCENT": 1,
+      "input_missing:obd:RPM": 1,
+      "input_stale:obd:RPM": 1,
+      "off_map": 199
+     },
+     "scored_ticks": 362,
+     "serving_status": {
+      "lifecycle": "unvalidated",
+      "permitted_uses": [
+       "display",
+       "learned_feature"
+      ],
+      "policy": null,
+      "reasons": [
+       "legacy_artifact:no_serving_eligibility_contract",
+       "unvalidated:no_gate_evidence"
+      ],
+      "state": "diagnostic_only"
+     },
+     "ticks": 564
+    },
+    "warm_idle_rpm_baseline": {
+     "alerting_as_served": false,
+     "artifact": {
+      "fingerprint": "sha256:6e1e827cb9cc10d04acc180b3858f1040ce2b16ae04244d7b4e3af40d2e52101",
+      "fitted_at": "2026-07-27T06:09:06.144540+00:00",
+      "grid_version": null,
+      "name": "warm_idle_rpm_baseline",
+      "schema_contract": false,
+      "training_data_hash": "sha256:6db79cbccb866817",
+      "tune_revision": null,
+      "version": 2
+     },
+     "band_ticks": {
+      "ok": 260
+     },
+     "calibration_context": "model_revision_unknown",
+     "coverage": 1.0,
+     "fused_events_contributed": 0,
+     "fusion_votes": 0,
+     "in_mode_ticks": 260,
+     "operating_mode": "idle",
+     "output": "obd:RPM",
+     "persisted_events": 0,
+     "refusals": {
+      "operating_mode_mismatch": 304
+     },
+     "scored_ticks": 260,
+     "serving_status": {
+      "lifecycle": "unvalidated",
+      "permitted_uses": [
+       "display",
+       "learned_feature"
+      ],
+      "policy": null,
+      "reasons": [
+       "legacy_artifact:no_serving_eligibility_contract",
+       "unvalidated:no_gate_evidence"
+      ],
+      "state": "diagnostic_only"
+     },
+     "ticks": 564
+    }
+   },
+   "session_tune_conflict": false,
+   "session_tune_revision": "ZS44A-20260920",
+   "session_tune_source": "registry",
+   "shadow_alerting": true,
+   "side": "served",
+   "state_dir": "<scratch>/v2-shadow/_replay-31afdbc6-served",
+   "ticks": 564
+  },
+  "session": "~/canary-data/sessions/nissan-xterra-2008/2026-09-21T194247",
+  "shadow_alerting": true
+ },
+ {
+  "candidate": {
+   "artifact": "data/nissan-xterra-2008/behavior_models.yaml",
+   "artifact_sha256": "816c150bf4935139a35b0d72fb4cb5df5f11eb809d943c6e2a9734568d16e565",
+   "behavior_ticks": 249,
+   "counters": {
+    "emitted": 0,
+    "emitted_evidence": 0,
+    "skipped_capture_profile": 0,
+    "skipped_vehicle_state": 0,
+    "suppressed_dedupe": 0,
+    "suppressed_not_anomaly": 0,
+    "suppressed_persistence": 10,
+    "suppressed_tuning": 0
+   },
+   "dependent_manifests": [
+    {
+     "behavior_feature_conflicts": {},
+     "behavior_fingerprint_provenance": {},
+     "behavior_models_consumed": [],
+     "feature_count": 295,
+     "model_type": "isolation_forest",
+     "model_version": "isolation_forest_2026-09-20T054703.694923Z",
+     "path": "models/nissan-xterra-2008/isolation_forest/model.manifest.json"
+    },
+    {
+     "behavior_feature_conflicts": {},
+     "behavior_fingerprint_provenance": {},
+     "behavior_models_consumed": [],
+     "feature_count": 361,
+     "model_type": "lstm_autoencoder",
+     "model_version": "lstm_autoencoder_2026-09-20T064628.385918Z",
+     "path": "models/nissan-xterra-2008/lstm_autoencoder/model.manifest.json"
+    }
+   ],
+   "detectors": "behavior_only",
+   "events_total": 0,
+   "first_tick": "2026-09-22T23:48:17+00:00",
+   "fused_events": 0,
+   "governing_policy": "data/nissan-xterra-2008/behavior_policy.yaml",
+   "governing_policy_sha256": "fb72e9478113cf4f116a89a0e38806820dcdcd018dd76e3f0376d36923cc4b0e",
+   "last_tick": "2026-09-22T23:52:25+00:00",
+   "models": {
+    "air_charge_vs_rpm_throttle_did": {
+     "alerting_as_served": false,
+     "artifact": {
+      "fingerprint": "sha256:0027fad49ac52a67f2686652b53f42c8305c5e967ada7911b86c127010d653ee",
+      "fitted_at": "2026-09-24T01:56:22.183857+00:00",
+      "grid_version": 1,
+      "name": "air_charge_vs_rpm_throttle_did",
+      "schema_contract": true,
+      "training_data_hash": "sha256:8b2d5dbe871b3ffe",
+      "tune_revision": "ZS44A-20260920",
+      "version": 2
+     },
+     "band_ticks": {
+      "ok": 5
+     },
+     "calibration_context": "match",
+     "coverage": 0.020080321285140562,
+     "fused_events_contributed": 0,
+     "fusion_votes": 0,
+     "in_mode_ticks": 249,
+     "operating_mode": null,
+     "output": "did:ECM_AIR_CHARGE",
+     "persisted_events": 0,
+     "refusals": {
+      "actual_stale:did:ECM_AIR_CHARGE": 3,
+      "input_missing:did:ECM_RPM": 61,
+      "input_stale:did:ECM_RPM": 180
+     },
+     "scored_ticks": 5,
+     "serving_status": {
+      "lifecycle": "unvalidated",
+      "permitted_uses": [
+       "display",
+       "learned_feature"
+      ],
+      "policy": null,
+      "reasons": [
+       "validation_failed:mae=1771>meaningful_deviation=1500.0",
+       "validation_failed:warning_half_width_median=8317>meaningful_deviation=1500.0",
+       "validation_failed:synthetic_negative_1500_60s_detection=0.17<0.8"
+      ],
+      "state": "diagnostic_only"
+     },
+     "ticks": 249
+    },
+    "air_mass_per_cycle_vs_rpm_load": {
+     "alerting_as_served": false,
+     "artifact": {
+      "fingerprint": "sha256:5445b097be5a870a809e570989ae79a7aa83faf1cdff12a97f2fac5ca36d356c",
+      "fitted_at": "2026-09-24T01:55:52.020107+00:00",
+      "grid_version": 1,
+      "name": "air_mass_per_cycle_vs_rpm_load",
+      "schema_contract": true,
+      "training_data_hash": "sha256:835ad6adcec74631",
+      "tune_revision": "ZS44A-20260920",
+      "version": 3
+     },
+     "band_ticks": {
+      "ok": 239,
+      "warning": 2
+     },
+     "calibration_context": "match",
+     "coverage": 0.9678714859437751,
+     "fused_events_contributed": 0,
+     "fusion_votes": 0,
+     "in_mode_ticks": 249,
+     "operating_mode": null,
+     "output": "derived:AIR_MASS_PER_CYCLE",
+     "persisted_events": 0,
+     "refusals": {
+      "actual_missing:derived:AIR_MASS_PER_CYCLE": 2,
+      "engine_state_unknown:obd:RPM": 1,
+      "input_stale:obd:ENGINE_LOAD": 2,
+      "off_map": 3
+     },
+     "scored_ticks": 241,
+     "serving_status": {
+      "lifecycle": "unvalidated",
+      "permitted_uses": [
+       "display",
+       "learned_feature"
+      ],
+      "policy": null,
+      "reasons": [
+       "validation_failed:mae=0.1251>meaningful_deviation=0.08",
+       "validation_failed:warning_half_width_median=0.2806>meaningful_deviation=0.08",
+       "validation_failed:synthetic_negative_0.08_60s_detection=0.25<0.8"
+      ],
+      "state": "diagnostic_only"
+     },
+     "ticks": 249
+    },
+    "cat_warmup": {
+     "alerting_as_served": false,
+     "artifact": {
+      "fingerprint": "sha256:f14450ab4c88df87047c9994136145d67141668b0813596370ac5a57c637f06a",
+      "fitted_at": "2026-05-25T15:17:44.374674+00:00",
+      "grid_version": null,
+      "name": "cat_warmup",
+      "schema_contract": false,
+      "training_data_hash": "sha256:977d2d5412d81e30",
+      "tune_revision": null,
+      "version": 4
+     },
+     "band_ticks": {},
+     "calibration_context": "model_revision_unknown",
+     "coverage": null,
+     "fused_events_contributed": 0,
+     "fusion_votes": 0,
+     "in_mode_ticks": 0,
+     "operating_mode": "warmup",
+     "output": "obd:CATALYST_TEMP_B1S1",
+     "persisted_events": 0,
+     "refusals": {
+      "operating_mode_mismatch": 249
+     },
+     "scored_ticks": 0,
+     "serving_status": {
+      "lifecycle": "quarantined",
+      "permitted_uses": [
+       "display"
+      ],
+      "policy": {
+       "artifact_fingerprint": "sha256:f14450ab4c88df87047c9994136145d67141668b0813596370ac5a57c637f06a",
+       "decided": "2026-09-21 behavior-model review (B00 carried decision)",
+       "evidence": "data/analyses/2026-09-21-behavior-model-review.md (Model decisions); data/analyses/2026-09-21-behavior-validation-report.md \u00a74",
+       "lifecycle": "quarantined",
+       "lift_when": "a new cat_warmup fit passes B02 validation (B07); this artifact stays quarantined",
+       "model": "cat_warmup",
+       "permitted_uses": [
+        "display"
+       ],
+       "reason": "May 25 artifact (v4) with no held-out validation; on S18's genuine cold start n=34, R\u00b2 -0.737, MAE 55 deg C, 76.5 % exceedance; persisted bands 30/80 deg C predate the recipe's 45/115. Its May training sessions are absent locally, so it cannot be re-validated. Temperature trajectory alone does not establish catalyst efficiency; the raw channel and warmup analysis stay."
+      },
+      "reasons": [
+       "policy:quarantined",
+       "legacy_artifact:no_serving_eligibility_contract",
+       "unvalidated:no_held_out_evidence",
+       "contract_changed:recipe"
+      ],
+      "state": "diagnostic_only"
+     },
+     "ticks": 249
+    },
+    "fuel_trim_vs_rpm_load": {
+     "alerting_as_served": false,
+     "artifact": {
+      "fingerprint": "sha256:264b9ae497a8cdd369fc253de2f0acd3b8dbaef373857357064f2cce9660f506",
+      "fitted_at": "2026-09-24T01:55:48.123532+00:00",
+      "grid_version": 1,
+      "name": "fuel_trim_vs_rpm_load",
+      "schema_contract": true,
+      "training_data_hash": "sha256:ba3cc6721b09eb62",
+      "tune_revision": "ZS44A-20260920",
+      "version": 3
+     },
+     "band_ticks": {
+      "ok": 155
+     },
+     "calibration_context": "match",
+     "coverage": 0.6224899598393574,
+     "fused_events_contributed": 0,
+     "fusion_votes": 0,
+     "in_mode_ticks": 249,
+     "operating_mode": null,
+     "output": "obd:SHORT_FUEL_TRIM_1",
+     "persisted_events": 0,
+     "refusals": {
+      "actual_stale:obd:SHORT_FUEL_TRIM_1": 91,
+      "engine_state_unknown:obd:RPM": 1,
+      "input_stale:obd:ENGINE_LOAD": 2
+     },
+     "scored_ticks": 155,
+     "serving_status": {
+      "lifecycle": "unvalidated",
+      "permitted_uses": [
+       "display",
+       "learned_feature"
+      ],
+      "policy": null,
+      "reasons": [
+       "validation_failed:skill_vs_baseline=-0.023<0.3",
+       "validation_failed:warning_half_width_median=17.15>meaningful_deviation=5.0",
+       "validation_failed:control_events_per_hour=2.42>2.0",
+       "validation_failed:synthetic_positive_5_120s_detection=0.18<0.8"
+      ],
+      "state": "diagnostic_only"
+     },
+     "ticks": 249
+    },
+    "stft_bank_balance_city": {
+     "alerting_as_served": false,
+     "artifact": {
+      "fingerprint": "sha256:c449694cf41e9a3286a22427514c098366eec8ca6b26fab900e3c81fb929a982",
+      "fitted_at": "2026-09-24T01:56:13.011086+00:00",
+      "grid_version": null,
+      "name": "stft_bank_balance_city",
+      "schema_contract": true,
+      "training_data_hash": "sha256:f00c7777c4ff7683",
+      "tune_revision": "ZS44A-20260920",
+      "version": 1
+     },
+     "band_ticks": {},
+     "calibration_context": "match",
+     "coverage": null,
+     "fused_events_contributed": 0,
+     "fusion_votes": 0,
+     "in_mode_ticks": 0,
+     "operating_mode": "city",
+     "output": "derived:STFT_BANK_BALANCE",
+     "persisted_events": 0,
+     "refusals": {
+      "operating_mode_mismatch": 249
+     },
+     "scored_ticks": 0,
+     "serving_status": {
+      "lifecycle": "unvalidated",
+      "permitted_uses": [
+       "display",
+       "learned_feature"
+      ],
+      "policy": null,
+      "reasons": [
+       "validation_failed:control_events_per_hour=2.86>2.0"
+      ],
+      "state": "diagnostic_only"
+     },
+     "ticks": 249
+    },
+    "stft_bank_balance_highway": {
+     "alerting_as_served": false,
+     "artifact": {
+      "fingerprint": "sha256:cb0b28a4722c2ca1a290bd4be718fbf79b46b5056624283896c3e25aa4c9b197",
+      "fitted_at": "2026-09-24T01:56:16.634156+00:00",
+      "grid_version": null,
+      "name": "stft_bank_balance_highway",
+      "schema_contract": true,
+      "training_data_hash": "sha256:101ce709630fc3cb",
+      "tune_revision": "ZS44A-20260920",
+      "version": 1
+     },
+     "band_ticks": {},
+     "calibration_context": "match",
+     "coverage": null,
+     "fused_events_contributed": 0,
+     "fusion_votes": 0,
+     "in_mode_ticks": 0,
+     "operating_mode": "highway",
+     "output": "derived:STFT_BANK_BALANCE",
+     "persisted_events": 0,
+     "refusals": {
+      "operating_mode_mismatch": 249
+     },
+     "scored_ticks": 0,
+     "serving_status": {
+      "lifecycle": "unvalidated",
+      "permitted_uses": [
+       "display",
+       "learned_feature"
+      ],
+      "policy": null,
+      "reasons": [
+       "validation_failed:control_events_per_hour=13.9>2.0"
+      ],
+      "state": "diagnostic_only"
+     },
+     "ticks": 249
+    },
+    "timing_advance_vs_rpm_iat": {
+     "alerting_as_served": false,
+     "artifact": {
+      "fingerprint": "sha256:1a2394e4ca01ebdcc81fb74c752d35a590ed65916e7a18fdfb974036f19384cb",
+      "fitted_at": "2026-07-27T06:09:06.923608+00:00",
+      "grid_version": 1,
+      "name": "timing_advance_vs_rpm_iat",
+      "schema_contract": false,
+      "training_data_hash": "sha256:931d6ff04cb414ed",
+      "tune_revision": null,
+      "version": 2
+     },
+     "band_ticks": {
+      "ok": 151
+     },
+     "calibration_context": "model_revision_unknown",
+     "coverage": 0.606425702811245,
+     "fused_events_contributed": 0,
+     "fusion_votes": 0,
+     "in_mode_ticks": 249,
+     "operating_mode": null,
+     "output": "obd:TIMING_ADVANCE",
+     "persisted_events": 0,
+     "refusals": {
+      "input_missing:obd:INTAKE_TEMP": 2,
+      "input_missing:obd:RPM": 1,
+      "off_map": 95
+     },
+     "scored_ticks": 151,
+     "serving_status": {
+      "lifecycle": "demoted",
+      "permitted_uses": [
+       "display"
+      ],
+      "policy": {
+       "decided": "2026-09-21 behavior-model review (B00 carried decision)",
+       "evidence": "data/analyses/2026-09-21-behavior-model-review.md (Model decisions); data/analyses/2026-09-21-behavior-validation-report.md \u00a73",
+       "lifecycle": "demoted",
+       "lift_when": "never for standalone alerting; retire the recipe when B04 ships a load-aware timing model",
+       "model": "timing_advance_vs_rpm_iat",
+       "permitted_uses": [
+        "display"
+       ],
+       "reason": "RPM/IAT alone omits load: held-out J26 R\u00b2 -0.046, MAE 8.80 deg, median warning half-width 31.3 deg; zero evaluable rows on S17/S18 (IAT below the 29 deg C stored domain). Removed from standalone alerting; IAT stays a candidate context input for a load-aware timing model."
+      },
+      "reasons": [
+       "policy:demoted",
+       "legacy_artifact:no_serving_eligibility_contract",
+       "unvalidated:no_gate_evidence",
+       "contract_changed:recipe"
+      ],
+      "state": "diagnostic_only"
+     },
+     "ticks": 249
+    },
+    "timing_advance_vs_rpm_load": {
+     "alerting_as_served": false,
+     "artifact": {
+      "fingerprint": "sha256:6f46aa29b754acd2f50399bb3931d2c99c36198e5715a804b7295a96884abe76",
+      "fitted_at": "2026-09-24T01:55:32.078439+00:00",
+      "grid_version": 1,
+      "name": "timing_advance_vs_rpm_load",
+      "schema_contract": true,
+      "training_data_hash": "sha256:7992e6d59decfe81",
+      "tune_revision": "ZS44A-20260920",
+      "version": 3
+     },
+     "band_ticks": {
+      "ok": 242,
+      "warning": 2
+     },
+     "calibration_context": "match",
+     "coverage": 0.9799196787148594,
+     "fused_events_contributed": 0,
+     "fusion_votes": 0,
+     "in_mode_ticks": 249,
+     "operating_mode": null,
+     "output": "obd:TIMING_ADVANCE",
+     "persisted_events": 0,
+     "refusals": {
+      "actual_missing:obd:TIMING_ADVANCE": 2,
+      "engine_state_unknown:obd:RPM": 1,
+      "input_stale:obd:ENGINE_LOAD": 2
+     },
+     "scored_ticks": 244,
+     "serving_status": {
+      "lifecycle": "exploratory",
+      "permitted_uses": [
+       "display"
+      ],
+      "policy": {
+       "decided": "2026-09-21 behavior-model review (B00 carried decision)",
+       "evidence": "data/analyses/2026-09-21-behavior-model-review.md (Model decisions)",
+       "lifecycle": "exploratory",
+       "lift_when": "B04 qualifies a timing model under B02 criteria (remove this entry in that change)",
+       "model": "timing_advance_vs_rpm_load",
+       "permitted_uses": [
+        "display"
+       ],
+       "reason": "Retained as exploratory visualization: S17/S21 R\u00b2 0.33/0.28, MAE 4.8/6.7 deg, median warning half-width ~24 deg \u2014 too coarse for subtle timing/knock alerts, and an unexpected timing residual does not identify knock."
+      },
+      "reasons": [
+       "policy:exploratory",
+       "validation_failed:mae=4.846>meaningful_deviation=3.0",
+       "validation_failed:warning_half_width_median=13.19>meaningful_deviation=3.0",
+       "validation_failed:synthetic_negative_3_60s_detection=0.56<0.8",
+       "validation_failed:transient_negative_6_3s_detection=0.30>0.0",
+       "validation_failed:transient_negative_6_10s_detection=0.38>0.0"
+      ],
+      "state": "diagnostic_only"
+     },
+     "ticks": 249
+    },
+    "total_trim_vs_rpm_load_b1": {
+     "alerting_as_served": false,
+     "artifact": {
+      "fingerprint": "sha256:603c882e7154818e8b37f1c41399f7c0f6937fa95125a1fb708c5b5a43ad2b04",
+      "fitted_at": "2026-09-24T01:56:02.150689+00:00",
+      "grid_version": 1,
+      "name": "total_trim_vs_rpm_load_b1",
+      "schema_contract": true,
+      "training_data_hash": "sha256:0667554c8755b703",
+      "tune_revision": "ZS44A-20260920",
+      "version": 1
+     },
+     "band_ticks": {
+      "ok": 137
+     },
+     "calibration_context": "match",
+     "coverage": 0.5502008032128514,
+     "fused_events_contributed": 0,
+     "fusion_votes": 0,
+     "in_mode_ticks": 249,
+     "operating_mode": null,
+     "output": "derived:TOTAL_TRIM_B1",
+     "persisted_events": 0,
+     "refusals": {
+      "engine_state_unknown:obd:RPM": 1,
+      "fuel_status_stale:obd:FUEL_STATUS": 93,
+      "off_map": 5,
+      "rate_insufficient_history:obd:ENGINE_LOAD": 1,
+      "rate_insufficient_history:obd:RPM": 12
+     },
+     "scored_ticks": 137,
+     "serving_status": {
+      "lifecycle": "unvalidated",
+      "permitted_uses": [
+       "display",
+       "learned_feature"
+      ],
+      "policy": null,
+      "reasons": [
+       "validation_failed:skill_vs_baseline=0.112<0.2",
+       "validation_failed:warning_half_width_median=12.07>meaningful_deviation=5.0",
+       "validation_failed:synthetic_positive_5_120s_detection=0.04<0.8"
+      ],
+      "state": "diagnostic_only"
+     },
+     "ticks": 249
+    },
+    "total_trim_vs_rpm_load_b2": {
+     "alerting_as_served": false,
+     "artifact": {
+      "fingerprint": "sha256:1a5a56ac1ddb9360e3cd6843d03463fe48e24f5f8743aef7deacdd600140fee6",
+      "fitted_at": "2026-09-24T01:56:06.726621+00:00",
+      "grid_version": 1,
+      "name": "total_trim_vs_rpm_load_b2",
+      "schema_contract": true,
+      "training_data_hash": "sha256:0e3fa20945b0ced9",
+      "tune_revision": "ZS44A-20260920",
+      "version": 1
+     },
+     "band_ticks": {
+      "ok": 106
+     },
+     "calibration_context": "match",
+     "coverage": 0.42570281124497994,
+     "fused_events_contributed": 0,
+     "fusion_votes": 0,
+     "in_mode_ticks": 249,
+     "operating_mode": null,
+     "output": "derived:TOTAL_TRIM_B2",
+     "persisted_events": 0,
+     "refusals": {
+      "actual_stale:derived:TOTAL_TRIM_B2": 29,
+      "engine_state_unknown:obd:RPM": 1,
+      "fuel_status_stale:obd:FUEL_STATUS": 93,
+      "off_map": 7,
+      "rate_insufficient_history:obd:ENGINE_LOAD": 1,
+      "rate_insufficient_history:obd:RPM": 12
+     },
+     "scored_ticks": 106,
+     "serving_status": {
+      "lifecycle": "unvalidated",
+      "permitted_uses": [
+       "display",
+       "learned_feature"
+      ],
+      "policy": null,
+      "reasons": [
+       "validation_failed:skill_vs_baseline=-0.009<0.2",
+       "validation_failed:warning_half_width_median=10.66>meaningful_deviation=5.0",
+       "validation_failed:synthetic_positive_5_120s_detection=0.07<0.8"
+      ],
+      "state": "diagnostic_only"
+     },
+     "ticks": 249
+    },
+    "ve_vs_rpm_load": {
+     "alerting_as_served": false,
+     "artifact": {
+      "fingerprint": "sha256:feaad4bedbc2049b09c5d0bec58989f14f38f86dcbbfa228a7bd91f681685e3f",
+      "fitted_at": "2026-09-24T01:55:57.140820+00:00",
+      "grid_version": 1,
+      "name": "ve_vs_rpm_load",
+      "schema_contract": true,
+      "training_data_hash": "sha256:b770341e5ca0f7f6",
+      "tune_revision": "ZS44A-20260920",
+      "version": 3
+     },
+     "band_ticks": {
+      "ok": 239,
+      "warning": 2
+     },
+     "calibration_context": "match",
+     "coverage": 0.9678714859437751,
+     "fused_events_contributed": 0,
+     "fusion_votes": 0,
+     "in_mode_ticks": 249,
+     "operating_mode": null,
+     "output": "derived:VE_AMBIENT_PERCENT",
+     "persisted_events": 0,
+     "refusals": {
+      "actual_missing:derived:VE_AMBIENT_PERCENT": 5,
+      "engine_state_unknown:obd:RPM": 1,
+      "input_stale:obd:ENGINE_LOAD": 2
+     },
+     "scored_ticks": 241,
+     "serving_status": {
+      "lifecycle": "unvalidated",
+      "permitted_uses": [
+       "display",
+       "learned_feature"
+      ],
+      "policy": null,
+      "reasons": [
+       "validation_failed:mae=3.168>meaningful_deviation=3.0",
+       "validation_failed:warning_half_width_median=7.912>meaningful_deviation=3.0",
+       "validation_failed:synthetic_negative_3_60s_detection=0.38<0.8"
+      ],
+      "state": "diagnostic_only"
+     },
+     "ticks": 249
+    },
+    "warm_idle_rpm_baseline": {
+     "alerting_as_served": false,
+     "artifact": {
+      "fingerprint": "sha256:6cabd2e208f32c8787a6c789a85c8b808780ae96e73edef1f0aba7a36a3f2149",
+      "fitted_at": "2026-09-24T01:55:23.883180+00:00",
+      "grid_version": null,
+      "name": "warm_idle_rpm_baseline",
+      "schema_contract": true,
+      "training_data_hash": "sha256:60d52f9d474937a0",
+      "tune_revision": "ZS44A-20260920",
+      "version": 3
+     },
+     "band_ticks": {
+      "ok": 242,
+      "warning": 4
+     },
+     "calibration_context": "match",
+     "coverage": 1.0,
+     "fused_events_contributed": 0,
+     "fusion_votes": 0,
+     "in_mode_ticks": 246,
+     "operating_mode": "idle",
+     "output": "obd:RPM",
+     "persisted_events": 0,
+     "refusals": {
+      "operating_mode_mismatch": 3
+     },
+     "scored_ticks": 246,
+     "serving_status": {
+      "lifecycle": "unvalidated",
+      "permitted_uses": [
+       "display",
+       "learned_feature"
+      ],
+      "policy": null,
+      "reasons": [
+       "validation_failed:control_events_per_hour=8.89>2.0"
+      ],
+      "state": "diagnostic_only"
+     },
+     "ticks": 249
+    }
+   },
+   "session_tune_conflict": false,
+   "session_tune_revision": "ZS44A-20260920",
+   "session_tune_source": "registry",
+   "shadow_alerting": true,
+   "side": "candidate",
+   "state_dir": "<scratch>/v2-shadow/_replay-51ac536a-candidate",
+   "ticks": 249
+  },
+  "comparison_version": 2,
+  "dependent_manifest_conflicts": {
+   "candidate": [],
+   "served": []
+  },
+  "per_model": {
+   "air_charge_vs_rpm_throttle_did": {
+    "alerting": [
+     false,
+     false
+    ],
+    "calibration_context": [
+     "mismatch",
+     "match"
+    ],
+    "coverage": [
+     0.020080321285140562,
+     0.020080321285140562
+    ],
+    "coverage_delta": 0.0,
+    "fused_events_contributed": [
+     0,
+     0
+    ],
+    "fused_events_contributed_delta": 0.0,
+    "fusion_votes": [
+     0,
+     0
+    ],
+    "fusion_votes_delta": 0.0,
+    "lifecycle": [
+     "unvalidated",
+     "unvalidated"
+    ],
+    "paired": {
+     "abs_deviation_p95": [
+      1278.4125874125875,
+      1381.665523156089
+     ],
+     "abs_deviation_p95_delta": 103.25293574350144,
+     "bias": [
+      672.8644655525935,
+      749.7294856097878
+     ],
+     "bias_delta": 76.86502005719433,
+     "mae": [
+      735.0994305875586,
+      770.6632763473523
+     ],
+     "mae_delta": 35.56384575979371,
+     "n_pairs": 5,
+     "only_candidate_scored": {
+      "abs_deviation_p95": null,
+      "bias": null,
+      "mae": null,
+      "other_side_refusals": {},
+      "ticks": 0
+     },
+     "only_served_scored": {
+      "abs_deviation_p95": null,
+      "bias": null,
+      "mae": null,
+      "other_side_refusals": {},
+      "ticks": 0
+     }
+    },
+    "persisted_events": [
+     0,
+     0
+    ],
+    "persisted_events_delta": 0.0,
+    "presence": "both",
+    "refusals": {
+     "actual_stale:did:ECM_AIR_CHARGE": [
+      3,
+      3
+     ],
+     "input_missing:did:ECM_RPM": [
+      61,
+      61
+     ],
+     "input_stale:did:ECM_RPM": [
+      180,
+      180
+     ]
+    },
+    "same_artifact": false,
+    "scored_ticks": [
+     5,
+     5
+    ],
+    "scored_ticks_delta": 0.0,
+    "version": [
+     1,
+     2
+    ]
+   },
+   "air_mass_per_cycle_vs_rpm_load": {
+    "alerting": [
+     false,
+     false
+    ],
+    "calibration_context": [
+     "model_revision_unknown",
+     "match"
+    ],
+    "coverage": [
+     0.9357429718875502,
+     0.9678714859437751
+    ],
+    "coverage_delta": 0.032128514056224966,
+    "fused_events_contributed": [
+     0,
+     0
+    ],
+    "fused_events_contributed_delta": 0.0,
+    "fusion_votes": [
+     0,
+     0
+    ],
+    "fusion_votes_delta": 0.0,
+    "lifecycle": [
+     "unvalidated",
+     "unvalidated"
+    ],
+    "paired": {
+     "abs_deviation_p95": [
+      0.06221875825256418,
+      0.08191525224921148
+     ],
+     "abs_deviation_p95_delta": 0.019696493996647302,
+     "bias": [
+      -0.021051448638623804,
+      0.016511672504998853
+     ],
+     "bias_delta": 0.03756312114362266,
+     "mae": [
+      0.02824325746424173,
+      0.024780055969466953
+     ],
+     "mae_delta": -0.003463201494774776,
+     "n_pairs": 233,
+     "only_candidate_scored": {
+      "abs_deviation_p95": 0.11256822841049813,
+      "bias": 0.019870797506961566,
+      "mae": 0.03588355537199665,
+      "other_side_refusals": {
+       "off_map": 8
+      },
+      "ticks": 8
+     },
+     "only_served_scored": {
+      "abs_deviation_p95": null,
+      "bias": null,
+      "mae": null,
+      "other_side_refusals": {},
+      "ticks": 0
+     }
+    },
+    "persisted_events": [
+     0,
+     0
+    ],
+    "persisted_events_delta": 0.0,
+    "presence": "both",
+    "refusals": {
+     "actual_missing:derived:AIR_MASS_PER_CYCLE": [
+      2,
+      2
+     ],
+     "engine_state_unknown:obd:RPM": [
+      0,
+      1
+     ],
+     "input_missing:obd:RPM": [
+      1,
+      0
+     ],
+     "input_stale:obd:ENGINE_LOAD": [
+      2,
+      2
+     ],
+     "off_map": [
+      11,
+      3
+     ]
+    },
+    "same_artifact": false,
+    "scored_ticks": [
+     233,
+     241
+    ],
+    "scored_ticks_delta": 8.0,
+    "version": [
+     2,
+     3
+    ]
+   },
+   "cat_warmup": {
+    "alerting": [
+     false,
+     false
+    ],
+    "calibration_context": [
+     "model_revision_unknown",
+     "model_revision_unknown"
+    ],
+    "coverage": [
+     null,
+     null
+    ],
+    "coverage_delta": null,
+    "fused_events_contributed": [
+     0,
+     0
+    ],
+    "fused_events_contributed_delta": 0.0,
+    "fusion_votes": [
+     0,
+     0
+    ],
+    "fusion_votes_delta": 0.0,
+    "lifecycle": [
+     "quarantined",
+     "quarantined"
+    ],
+    "paired": {
+     "abs_deviation_p95": [
+      null,
+      null
+     ],
+     "abs_deviation_p95_delta": null,
+     "bias": [
+      null,
+      null
+     ],
+     "bias_delta": null,
+     "mae": [
+      null,
+      null
+     ],
+     "mae_delta": null,
+     "n_pairs": 0,
+     "only_candidate_scored": {
+      "abs_deviation_p95": null,
+      "bias": null,
+      "mae": null,
+      "other_side_refusals": {},
+      "ticks": 0
+     },
+     "only_served_scored": {
+      "abs_deviation_p95": null,
+      "bias": null,
+      "mae": null,
+      "other_side_refusals": {},
+      "ticks": 0
+     }
+    },
+    "persisted_events": [
+     0,
+     0
+    ],
+    "persisted_events_delta": 0.0,
+    "presence": "both",
+    "refusals": {
+     "operating_mode_mismatch": [
+      249,
+      249
+     ]
+    },
+    "same_artifact": true,
+    "scored_ticks": [
+     0,
+     0
+    ],
+    "scored_ticks_delta": 0.0,
+    "version": [
+     4,
+     4
+    ]
+   },
+   "fuel_trim_vs_rpm_load": {
+    "alerting": [
+     false,
+     false
+    ],
+    "calibration_context": [
+     "model_revision_unknown",
+     "match"
+    ],
+    "coverage": [
+     0.6224899598393574,
+     0.6224899598393574
+    ],
+    "coverage_delta": 0.0,
+    "fused_events_contributed": [
+     0,
+     0
+    ],
+    "fused_events_contributed_delta": 0.0,
+    "fusion_votes": [
+     63,
+     0
+    ],
+    "fusion_votes_delta": -63.0,
+    "lifecycle": [
+     "unvalidated",
+     "unvalidated"
+    ],
+    "paired": {
+     "abs_deviation_p95": [
+      14.218043519302373,
+      5.702767972036401
+     ],
+     "abs_deviation_p95_delta": -8.515275547265972,
+     "bias": [
+      -10.081138322935248,
+      -2.377286244371025
+     ],
+     "bias_delta": 7.703852078564223,
+     "mae": [
+      10.081138322935248,
+      2.3806175684901807
+     ],
+     "mae_delta": -7.700520754445067,
+     "n_pairs": 155,
+     "only_candidate_scored": {
+      "abs_deviation_p95": null,
+      "bias": null,
+      "mae": null,
+      "other_side_refusals": {},
+      "ticks": 0
+     },
+     "only_served_scored": {
+      "abs_deviation_p95": null,
+      "bias": null,
+      "mae": null,
+      "other_side_refusals": {},
+      "ticks": 0
+     }
+    },
+    "persisted_events": [
+     7,
+     0
+    ],
+    "persisted_events_delta": -7.0,
+    "presence": "both",
+    "refusals": {
+     "actual_stale:obd:SHORT_FUEL_TRIM_1": [
+      90,
+      91
+     ],
+     "engine_state_unknown:obd:RPM": [
+      0,
+      1
+     ],
+     "input_missing:obd:RPM": [
+      1,
+      0
+     ],
+     "input_stale:obd:ENGINE_LOAD": [
+      2,
+      2
+     ],
+     "off_map": [
+      1,
+      0
+     ]
+    },
+    "same_artifact": false,
+    "scored_ticks": [
+     155,
+     155
+    ],
+    "scored_ticks_delta": 0.0,
+    "version": [
+     2,
+     3
+    ]
+   },
+   "stft_bank_balance_city": {
+    "presence": "candidate_only"
+   },
+   "stft_bank_balance_highway": {
+    "presence": "candidate_only"
+   },
+   "timing_advance_vs_rpm_iat": {
+    "alerting": [
+     false,
+     false
+    ],
+    "calibration_context": [
+     "model_revision_unknown",
+     "model_revision_unknown"
+    ],
+    "coverage": [
+     0.606425702811245,
+     0.606425702811245
+    ],
+    "coverage_delta": 0.0,
+    "fused_events_contributed": [
+     0,
+     0
+    ],
+    "fused_events_contributed_delta": 0.0,
+    "fusion_votes": [
+     0,
+     0
+    ],
+    "fusion_votes_delta": 0.0,
+    "lifecycle": [
+     "demoted",
+     "demoted"
+    ],
+    "paired": {
+     "abs_deviation_p95": [
+      0.03278688524590123,
+      0.03278688524590123
+     ],
+     "abs_deviation_p95_delta": 0.0,
+     "bias": [
+      -0.01899902290739318,
+      -0.01899902290739318
+     ],
+     "bias_delta": 0.0,
+     "mae": [
+      0.01899902290739318,
+      0.01899902290739318
+     ],
+     "mae_delta": 0.0,
+     "n_pairs": 151,
+     "only_candidate_scored": {
+      "abs_deviation_p95": null,
+      "bias": null,
+      "mae": null,
+      "other_side_refusals": {},
+      "ticks": 0
+     },
+     "only_served_scored": {
+      "abs_deviation_p95": null,
+      "bias": null,
+      "mae": null,
+      "other_side_refusals": {},
+      "ticks": 0
+     }
+    },
+    "persisted_events": [
+     0,
+     0
+    ],
+    "persisted_events_delta": 0.0,
+    "presence": "both",
+    "refusals": {
+     "input_missing:obd:INTAKE_TEMP": [
+      2,
+      2
+     ],
+     "input_missing:obd:RPM": [
+      1,
+      1
+     ],
+     "off_map": [
+      95,
+      95
+     ]
+    },
+    "same_artifact": true,
+    "scored_ticks": [
+     151,
+     151
+    ],
+    "scored_ticks_delta": 0.0,
+    "version": [
+     2,
+     2
+    ]
+   },
+   "timing_advance_vs_rpm_load": {
+    "alerting": [
+     false,
+     false
+    ],
+    "calibration_context": [
+     "model_revision_unknown",
+     "match"
+    ],
+    "coverage": [
+     0.9799196787148594,
+     0.9799196787148594
+    ],
+    "coverage_delta": 0.0,
+    "fused_events_contributed": [
+     0,
+     0
+    ],
+    "fused_events_contributed_delta": 0.0,
+    "fusion_votes": [
+     0,
+     0
+    ],
+    "fusion_votes_delta": 0.0,
+    "lifecycle": [
+     "exploratory",
+     "exploratory"
+    ],
+    "paired": {
+     "abs_deviation_p95": [
+      1.9917746080340113,
+      1.8467710368462236
+     ],
+     "abs_deviation_p95_delta": -0.14500357118778773,
+     "bias": [
+      0.06108017348522062,
+      0.02582870280973046
+     ],
+     "bias_delta": -0.035251470675490164,
+     "mae": [
+      0.4374206723053636,
+      0.435708386370822
+     ],
+     "mae_delta": -0.0017122859345415908,
+     "n_pairs": 244,
+     "only_candidate_scored": {
+      "abs_deviation_p95": null,
+      "bias": null,
+      "mae": null,
+      "other_side_refusals": {},
+      "ticks": 0
+     },
+     "only_served_scored": {
+      "abs_deviation_p95": null,
+      "bias": null,
+      "mae": null,
+      "other_side_refusals": {},
+      "ticks": 0
+     }
+    },
+    "persisted_events": [
+     0,
+     0
+    ],
+    "persisted_events_delta": 0.0,
+    "presence": "both",
+    "refusals": {
+     "actual_missing:obd:TIMING_ADVANCE": [
+      2,
+      2
+     ],
+     "engine_state_unknown:obd:RPM": [
+      0,
+      1
+     ],
+     "input_missing:obd:RPM": [
+      1,
+      0
+     ],
+     "input_stale:obd:ENGINE_LOAD": [
+      2,
+      2
+     ]
+    },
+    "same_artifact": false,
+    "scored_ticks": [
+     244,
+     244
+    ],
+    "scored_ticks_delta": 0.0,
+    "version": [
+     2,
+     3
+    ]
+   },
+   "total_trim_vs_rpm_load_b1": {
+    "presence": "candidate_only"
+   },
+   "total_trim_vs_rpm_load_b2": {
+    "presence": "candidate_only"
+   },
+   "ve_vs_rpm_load": {
+    "alerting": [
+     false,
+     false
+    ],
+    "calibration_context": [
+     "model_revision_unknown",
+     "match"
+    ],
+    "coverage": [
+     0.9357429718875502,
+     0.9678714859437751
+    ],
+    "coverage_delta": 0.032128514056224966,
+    "fused_events_contributed": [
+     0,
+     0
+    ],
+    "fused_events_contributed_delta": 0.0,
+    "fusion_votes": [
+     0,
+     0
+    ],
+    "fusion_votes_delta": 0.0,
+    "lifecycle": [
+     "unvalidated",
+     "unvalidated"
+    ],
+    "paired": {
+     "abs_deviation_p95": [
+      1.9757756526814019,
+      1.6643625075808632
+     ],
+     "abs_deviation_p95_delta": -0.31141314510053864,
+     "bias": [
+      -1.2335515538874213,
+      0.3988907559668631
+     ],
+     "bias_delta": 1.6324423098542844,
+     "mae": [
+      1.2845888171599689,
+      0.5321799587531976
+     ],
+     "mae_delta": -0.7524088584067713,
+     "n_pairs": 233,
+     "only_candidate_scored": {
+      "abs_deviation_p95": 3.145092364137117,
+      "bias": 0.6391944318786926,
+      "mae": 0.9932418702226959,
+      "other_side_refusals": {
+       "off_map": 8
+      },
+      "ticks": 8
+     },
+     "only_served_scored": {
+      "abs_deviation_p95": null,
+      "bias": null,
+      "mae": null,
+      "other_side_refusals": {},
+      "ticks": 0
+     }
+    },
+    "persisted_events": [
+     0,
+     0
+    ],
+    "persisted_events_delta": 0.0,
+    "presence": "both",
+    "refusals": {
+     "actual_missing:derived:VE_AMBIENT_PERCENT": [
+      0,
+      5
+     ],
+     "actual_missing:derived:VE_PERCENT": [
+      5,
+      0
+     ],
+     "engine_state_unknown:obd:RPM": [
+      0,
+      1
+     ],
+     "input_missing:obd:RPM": [
+      1,
+      0
+     ],
+     "input_stale:obd:ENGINE_LOAD": [
+      2,
+      2
+     ],
+     "off_map": [
+      8,
+      0
+     ]
+    },
+    "same_artifact": false,
+    "scored_ticks": [
+     233,
+     241
+    ],
+    "scored_ticks_delta": 8.0,
+    "version": [
+     2,
+     3
+    ]
+   },
+   "warm_idle_rpm_baseline": {
+    "alerting": [
+     false,
+     false
+    ],
+    "calibration_context": [
+     "model_revision_unknown",
+     "match"
+    ],
+    "coverage": [
+     1.0,
+     1.0
+    ],
+    "coverage_delta": 0.0,
+    "fused_events_contributed": [
+     0,
+     0
+    ],
+    "fused_events_contributed_delta": 0.0,
+    "fusion_votes": [
+     0,
+     0
+    ],
+    "fusion_votes_delta": 0.0,
+    "lifecycle": [
+     "unvalidated",
+     "unvalidated"
+    ],
+    "paired": {
+     "abs_deviation_p95": [
+      37.5,
+      50.0
+     ],
+     "abs_deviation_p95_delta": 12.5,
+     "bias": [
+      -5.894308943089431,
+      6.605691056910569
+     ],
+     "bias_delta": 12.5,
+     "mae": [
+      16.565040650406505,
+      13.71951219512195
+     ],
+     "mae_delta": -2.845528455284555,
+     "n_pairs": 246,
+     "only_candidate_scored": {
+      "abs_deviation_p95": null,
+      "bias": null,
+      "mae": null,
+      "other_side_refusals": {},
+      "ticks": 0
+     },
+     "only_served_scored": {
+      "abs_deviation_p95": null,
+      "bias": null,
+      "mae": null,
+      "other_side_refusals": {},
+      "ticks": 0
+     }
+    },
+    "persisted_events": [
+     0,
+     0
+    ],
+    "persisted_events_delta": 0.0,
+    "presence": "both",
+    "refusals": {
+     "operating_mode_mismatch": [
+      3,
+      3
+     ]
+    },
+    "same_artifact": false,
+    "scored_ticks": [
+     246,
+     246
+    ],
+    "scored_ticks_delta": 0.0,
+    "version": [
+     2,
+     3
+    ]
+   }
+  },
+  "run_id": "51ac536a",
+  "same_ticks": true,
+  "served": {
+   "artifact": "data/nissan-xterra-2008/_prior/2026-09-24T024700/behavior_models.yaml",
+   "artifact_sha256": "9cd174ce0388d73f02e7994d67b4dbf94298df0dd5f53e3ce641a8ac540652aa",
+   "behavior_ticks": 249,
+   "counters": {
+    "emitted": 7,
+    "emitted_evidence": 0,
+    "skipped_capture_profile": 0,
+    "skipped_vehicle_state": 0,
+    "suppressed_dedupe": 56,
+    "suppressed_not_anomaly": 63,
+    "suppressed_persistence": 39,
+    "suppressed_tuning": 0
+   },
+   "dependent_manifests": [
+    {
+     "behavior_feature_conflicts": {},
+     "behavior_fingerprint_provenance": {},
+     "behavior_models_consumed": [],
+     "feature_count": 295,
+     "model_type": "isolation_forest",
+     "model_version": "isolation_forest_2026-09-20T054703.694923Z",
+     "path": "models/nissan-xterra-2008/isolation_forest/model.manifest.json"
+    },
+    {
+     "behavior_feature_conflicts": {},
+     "behavior_fingerprint_provenance": {},
+     "behavior_models_consumed": [],
+     "feature_count": 361,
+     "model_type": "lstm_autoencoder",
+     "model_version": "lstm_autoencoder_2026-09-20T064628.385918Z",
+     "path": "models/nissan-xterra-2008/lstm_autoencoder/model.manifest.json"
+    }
+   ],
+   "detectors": "behavior_only",
+   "events_total": 7,
+   "first_tick": "2026-09-22T23:48:17+00:00",
+   "fused_events": 0,
+   "governing_policy": "data/nissan-xterra-2008/behavior_policy.yaml",
+   "governing_policy_sha256": "fb72e9478113cf4f116a89a0e38806820dcdcd018dd76e3f0376d36923cc4b0e",
+   "last_tick": "2026-09-22T23:52:25+00:00",
+   "models": {
+    "air_charge_vs_rpm_throttle_did": {
+     "alerting_as_served": false,
+     "artifact": {
+      "fingerprint": "sha256:99babb6add5a1eaa10ef2a78e2a4fd0efd207f41a1610d770f93af47794df0ea",
+      "fitted_at": "2026-08-07T15:04:47.245437+00:00",
+      "grid_version": 1,
+      "name": "air_charge_vs_rpm_throttle_did",
+      "schema_contract": false,
+      "training_data_hash": "sha256:0f214145f2c116e0",
+      "tune_revision": "ZS44A-k106",
+      "version": 1
+     },
+     "band_ticks": {
+      "ok": 3,
+      "warning": 2
+     },
+     "calibration_context": "mismatch",
+     "coverage": 0.020080321285140562,
+     "fused_events_contributed": 0,
+     "fusion_votes": 0,
+     "in_mode_ticks": 249,
+     "operating_mode": null,
+     "output": "did:ECM_AIR_CHARGE",
+     "persisted_events": 0,
+     "refusals": {
+      "actual_stale:did:ECM_AIR_CHARGE": 3,
+      "input_missing:did:ECM_RPM": 61,
+      "input_stale:did:ECM_RPM": 180
+     },
+     "scored_ticks": 5,
+     "serving_status": {
+      "lifecycle": "unvalidated",
+      "permitted_uses": [
+       "display",
+       "learned_feature"
+      ],
+      "policy": null,
+      "reasons": [
+       "legacy_artifact:no_serving_eligibility_contract",
+       "unvalidated:no_gate_evidence"
+      ],
+      "state": "diagnostic_only"
+     },
+     "ticks": 249
+    },
+    "air_mass_per_cycle_vs_rpm_load": {
+     "alerting_as_served": false,
+     "artifact": {
+      "fingerprint": "sha256:01f191ca5938593c5b348f661c5f6f2541ce5e6fba59a187a4692165525171b2",
+      "fitted_at": "2026-07-27T06:09:07.601569+00:00",
+      "grid_version": 1,
+      "name": "air_mass_per_cycle_vs_rpm_load",
+      "schema_contract": false,
+      "training_data_hash": "sha256:f26a65381ee88373",
+      "tune_revision": null,
+      "version": 2
+     },
+     "band_ticks": {
+      "critical": 3,
+      "ok": 227,
+      "warning": 3
+     },
+     "calibration_context": "model_revision_unknown",
+     "coverage": 0.9357429718875502,
+     "fused_events_contributed": 0,
+     "fusion_votes": 0,
+     "in_mode_ticks": 249,
+     "operating_mode": null,
+     "output": "derived:AIR_MASS_PER_CYCLE",
+     "persisted_events": 0,
+     "refusals": {
+      "actual_missing:derived:AIR_MASS_PER_CYCLE": 2,
+      "input_missing:obd:RPM": 1,
+      "input_stale:obd:ENGINE_LOAD": 2,
+      "off_map": 11
+     },
+     "scored_ticks": 233,
+     "serving_status": {
+      "lifecycle": "unvalidated",
+      "permitted_uses": [
+       "display",
+       "learned_feature"
+      ],
+      "policy": null,
+      "reasons": [
+       "legacy_artifact:no_serving_eligibility_contract",
+       "unvalidated:no_gate_evidence"
+      ],
+      "state": "diagnostic_only"
+     },
+     "ticks": 249
+    },
+    "cat_warmup": {
+     "alerting_as_served": false,
+     "artifact": {
+      "fingerprint": "sha256:f14450ab4c88df87047c9994136145d67141668b0813596370ac5a57c637f06a",
+      "fitted_at": "2026-05-25T15:17:44.374674+00:00",
+      "grid_version": null,
+      "name": "cat_warmup",
+      "schema_contract": false,
+      "training_data_hash": "sha256:977d2d5412d81e30",
+      "tune_revision": null,
+      "version": 4
+     },
+     "band_ticks": {},
+     "calibration_context": "model_revision_unknown",
+     "coverage": null,
+     "fused_events_contributed": 0,
+     "fusion_votes": 0,
+     "in_mode_ticks": 0,
+     "operating_mode": "warmup",
+     "output": "obd:CATALYST_TEMP_B1S1",
+     "persisted_events": 0,
+     "refusals": {
+      "operating_mode_mismatch": 249
+     },
+     "scored_ticks": 0,
+     "serving_status": {
+      "lifecycle": "quarantined",
+      "permitted_uses": [
+       "display"
+      ],
+      "policy": {
+       "artifact_fingerprint": "sha256:f14450ab4c88df87047c9994136145d67141668b0813596370ac5a57c637f06a",
+       "decided": "2026-09-21 behavior-model review (B00 carried decision)",
+       "evidence": "data/analyses/2026-09-21-behavior-model-review.md (Model decisions); data/analyses/2026-09-21-behavior-validation-report.md \u00a74",
+       "lifecycle": "quarantined",
+       "lift_when": "a new cat_warmup fit passes B02 validation (B07); this artifact stays quarantined",
+       "model": "cat_warmup",
+       "permitted_uses": [
+        "display"
+       ],
+       "reason": "May 25 artifact (v4) with no held-out validation; on S18's genuine cold start n=34, R\u00b2 -0.737, MAE 55 deg C, 76.5 % exceedance; persisted bands 30/80 deg C predate the recipe's 45/115. Its May training sessions are absent locally, so it cannot be re-validated. Temperature trajectory alone does not establish catalyst efficiency; the raw channel and warmup analysis stay."
+      },
+      "reasons": [
+       "policy:quarantined",
+       "legacy_artifact:no_serving_eligibility_contract",
+       "unvalidated:no_held_out_evidence"
+      ],
+      "state": "diagnostic_only"
+     },
+     "ticks": 249
+    },
+    "fuel_trim_vs_rpm_load": {
+     "alerting_as_served": false,
+     "artifact": {
+      "fingerprint": "sha256:5cb890ebc7243657cfe7bcd56117df896b4d332fbc5fea65f054ed483b41e94b",
+      "fitted_at": "2026-07-27T06:09:07.220714+00:00",
+      "grid_version": 1,
+      "name": "fuel_trim_vs_rpm_load",
+      "schema_contract": false,
+      "training_data_hash": "sha256:252156011c4269f8",
+      "tune_revision": null,
+      "version": 2
+     },
+     "band_ticks": {
+      "critical": 14,
+      "ok": 66,
+      "warning": 75
+     },
+     "calibration_context": "model_revision_unknown",
+     "coverage": 0.6224899598393574,
+     "fused_events_contributed": 0,
+     "fusion_votes": 63,
+     "in_mode_ticks": 249,
+     "operating_mode": null,
+     "output": "obd:SHORT_FUEL_TRIM_1",
+     "persisted_events": 7,
+     "refusals": {
+      "actual_stale:obd:SHORT_FUEL_TRIM_1": 90,
+      "input_missing:obd:RPM": 1,
+      "input_stale:obd:ENGINE_LOAD": 2,
+      "off_map": 1
+     },
+     "scored_ticks": 155,
+     "serving_status": {
+      "lifecycle": "unvalidated",
+      "permitted_uses": [
+       "display",
+       "learned_feature"
+      ],
+      "policy": null,
+      "reasons": [
+       "legacy_artifact:no_serving_eligibility_contract",
+       "unvalidated:no_gate_evidence"
+      ],
+      "state": "diagnostic_only"
+     },
+     "ticks": 249
+    },
+    "timing_advance_vs_rpm_iat": {
+     "alerting_as_served": false,
+     "artifact": {
+      "fingerprint": "sha256:1a2394e4ca01ebdcc81fb74c752d35a590ed65916e7a18fdfb974036f19384cb",
+      "fitted_at": "2026-07-27T06:09:06.923608+00:00",
+      "grid_version": 1,
+      "name": "timing_advance_vs_rpm_iat",
+      "schema_contract": false,
+      "training_data_hash": "sha256:931d6ff04cb414ed",
+      "tune_revision": null,
+      "version": 2
+     },
+     "band_ticks": {
+      "ok": 151
+     },
+     "calibration_context": "model_revision_unknown",
+     "coverage": 0.606425702811245,
+     "fused_events_contributed": 0,
+     "fusion_votes": 0,
+     "in_mode_ticks": 249,
+     "operating_mode": null,
+     "output": "obd:TIMING_ADVANCE",
+     "persisted_events": 0,
+     "refusals": {
+      "input_missing:obd:INTAKE_TEMP": 2,
+      "input_missing:obd:RPM": 1,
+      "off_map": 95
+     },
+     "scored_ticks": 151,
+     "serving_status": {
+      "lifecycle": "demoted",
+      "permitted_uses": [
+       "display"
+      ],
+      "policy": {
+       "decided": "2026-09-21 behavior-model review (B00 carried decision)",
+       "evidence": "data/analyses/2026-09-21-behavior-model-review.md (Model decisions); data/analyses/2026-09-21-behavior-validation-report.md \u00a73",
+       "lifecycle": "demoted",
+       "lift_when": "never for standalone alerting; retire the recipe when B04 ships a load-aware timing model",
+       "model": "timing_advance_vs_rpm_iat",
+       "permitted_uses": [
+        "display"
+       ],
+       "reason": "RPM/IAT alone omits load: held-out J26 R\u00b2 -0.046, MAE 8.80 deg, median warning half-width 31.3 deg; zero evaluable rows on S17/S18 (IAT below the 29 deg C stored domain). Removed from standalone alerting; IAT stays a candidate context input for a load-aware timing model."
+      },
+      "reasons": [
+       "policy:demoted",
+       "legacy_artifact:no_serving_eligibility_contract",
+       "unvalidated:no_gate_evidence"
+      ],
+      "state": "diagnostic_only"
+     },
+     "ticks": 249
+    },
+    "timing_advance_vs_rpm_load": {
+     "alerting_as_served": false,
+     "artifact": {
+      "fingerprint": "sha256:7432d67d4da46fa96b3d1bb95251e8a3a70013dec0e7ea05a08f697c23b26b9c",
+      "fitted_at": "2026-07-27T06:09:06.545712+00:00",
+      "grid_version": 1,
+      "name": "timing_advance_vs_rpm_load",
+      "schema_contract": false,
+      "training_data_hash": "sha256:70b14e0a382c1f72",
+      "tune_revision": null,
+      "version": 2
+     },
+     "band_ticks": {
+      "critical": 2,
+      "ok": 242
+     },
+     "calibration_context": "model_revision_unknown",
+     "coverage": 0.9799196787148594,
+     "fused_events_contributed": 0,
+     "fusion_votes": 0,
+     "in_mode_ticks": 249,
+     "operating_mode": null,
+     "output": "obd:TIMING_ADVANCE",
+     "persisted_events": 0,
+     "refusals": {
+      "actual_missing:obd:TIMING_ADVANCE": 2,
+      "input_missing:obd:RPM": 1,
+      "input_stale:obd:ENGINE_LOAD": 2
+     },
+     "scored_ticks": 244,
+     "serving_status": {
+      "lifecycle": "exploratory",
+      "permitted_uses": [
+       "display"
+      ],
+      "policy": {
+       "decided": "2026-09-21 behavior-model review (B00 carried decision)",
+       "evidence": "data/analyses/2026-09-21-behavior-model-review.md (Model decisions)",
+       "lifecycle": "exploratory",
+       "lift_when": "B04 qualifies a timing model under B02 criteria (remove this entry in that change)",
+       "model": "timing_advance_vs_rpm_load",
+       "permitted_uses": [
+        "display"
+       ],
+       "reason": "Retained as exploratory visualization: S17/S21 R\u00b2 0.33/0.28, MAE 4.8/6.7 deg, median warning half-width ~24 deg \u2014 too coarse for subtle timing/knock alerts, and an unexpected timing residual does not identify knock."
+      },
+      "reasons": [
+       "policy:exploratory",
+       "legacy_artifact:no_serving_eligibility_contract",
+       "unvalidated:no_gate_evidence"
+      ],
+      "state": "diagnostic_only"
+     },
+     "ticks": 249
+    },
+    "ve_vs_rpm_load": {
+     "alerting_as_served": false,
+     "artifact": {
+      "fingerprint": "sha256:e7092d4a17b21668c8b159f05da727357afd6ed4e97837060cb292b15116eb62",
+      "fitted_at": "2026-07-27T06:09:08.015964+00:00",
+      "grid_version": 1,
+      "name": "ve_vs_rpm_load",
+      "schema_contract": false,
+      "training_data_hash": "sha256:ed0cfa48a8f2076c",
+      "tune_revision": null,
+      "version": 2
+     },
+     "band_ticks": {
+      "ok": 230,
+      "warning": 3
+     },
+     "calibration_context": "model_revision_unknown",
+     "coverage": 0.9357429718875502,
+     "fused_events_contributed": 0,
+     "fusion_votes": 0,
+     "in_mode_ticks": 249,
+     "operating_mode": null,
+     "output": "derived:VE_PERCENT",
+     "persisted_events": 0,
+     "refusals": {
+      "actual_missing:derived:VE_PERCENT": 5,
+      "input_missing:obd:RPM": 1,
+      "input_stale:obd:ENGINE_LOAD": 2,
+      "off_map": 8
+     },
+     "scored_ticks": 233,
+     "serving_status": {
+      "lifecycle": "unvalidated",
+      "permitted_uses": [
+       "display",
+       "learned_feature"
+      ],
+      "policy": null,
+      "reasons": [
+       "legacy_artifact:no_serving_eligibility_contract",
+       "unvalidated:no_gate_evidence"
+      ],
+      "state": "diagnostic_only"
+     },
+     "ticks": 249
+    },
+    "warm_idle_rpm_baseline": {
+     "alerting_as_served": false,
+     "artifact": {
+      "fingerprint": "sha256:6e1e827cb9cc10d04acc180b3858f1040ce2b16ae04244d7b4e3af40d2e52101",
+      "fitted_at": "2026-07-27T06:09:06.144540+00:00",
+      "grid_version": null,
+      "name": "warm_idle_rpm_baseline",
+      "schema_contract": false,
+      "training_data_hash": "sha256:6db79cbccb866817",
+      "tune_revision": null,
+      "version": 2
+     },
+     "band_ticks": {
+      "ok": 246
+     },
+     "calibration_context": "model_revision_unknown",
+     "coverage": 1.0,
+     "fused_events_contributed": 0,
+     "fusion_votes": 0,
+     "in_mode_ticks": 246,
+     "operating_mode": "idle",
+     "output": "obd:RPM",
+     "persisted_events": 0,
+     "refusals": {
+      "operating_mode_mismatch": 3
+     },
+     "scored_ticks": 246,
+     "serving_status": {
+      "lifecycle": "unvalidated",
+      "permitted_uses": [
+       "display",
+       "learned_feature"
+      ],
+      "policy": null,
+      "reasons": [
+       "legacy_artifact:no_serving_eligibility_contract",
+       "unvalidated:no_gate_evidence"
+      ],
+      "state": "diagnostic_only"
+     },
+     "ticks": 249
+    }
+   },
+   "session_tune_conflict": false,
+   "session_tune_revision": "ZS44A-20260920",
+   "session_tune_source": "registry",
+   "shadow_alerting": true,
+   "side": "served",
+   "state_dir": "<scratch>/v2-shadow/_replay-51ac536a-served",
+   "ticks": 249
+  },
+  "session": "~/canary-data/sessions/nissan-xterra-2008/2026-09-22T234813",
+  "shadow_alerting": true
+ }
+]

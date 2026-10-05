@@ -134,3 +134,67 @@ def test_an_extra_record_is_reported_once_not_as_a_shift() -> None:
     assert len(report.differences) == 1
     assert report.differing_by_source == {}
     assert report.compared_by_source == {"isolation_forest": 5}
+
+
+def _tuning_capture(tmp_path: Path) -> Path:
+    """A copy of the drive slice recorded, per its manifest, under ``tuning``."""
+    import json
+    import shutil
+
+    from src.storage.capture_manifest import CAPTURE_MANIFEST_FILENAME
+
+    session = tmp_path / "_capture-tuning-2026-08-03T230000"
+    shutil.copytree(DRIVE_SLICE, session)
+    (session / CAPTURE_MANIFEST_FILENAME).write_text(
+        json.dumps(
+            {
+                "profile": "tuning",
+                "started_at": "2026-08-03T23:00:00Z",
+                "profile_snapshot": {"corpus_eligible": False},
+            }
+        )
+    )
+    return session
+
+
+def test_the_capture_profile_gate_reads_the_replayed_sessions_manifest(tmp_path: Path) -> None:
+    """B03.7: without a replay controller the gate read the process's live
+    profile, so a replayed tuning capture scored as default collection."""
+    from types import SimpleNamespace
+
+    from src.daemon.inference import capture_profile_gate
+    from tools.replay_event_diff import _SessionReplay
+
+    tuning = capture_profile_gate(
+        SimpleNamespace(replay_controller=_SessionReplay(_tuning_capture(tmp_path)))
+    )
+    plain = capture_profile_gate(SimpleNamespace(replay_controller=_SessionReplay(DRIVE_SLICE)))
+
+    assert (tuning.scoring_allowed, tuning.profile, tuning.source) == (
+        False,
+        "tuning",
+        "replay_manifest",
+    )
+    assert (plain.scoring_allowed, plain.profile, plain.source) == (True, None, "replay_manifest")
+
+
+@pytest.mark.slow
+def test_a_replayed_tuning_capture_is_not_scored(tmp_path: Path) -> None:
+    run = asyncio.run(
+        drive_session(
+            _tuning_capture(tmp_path),
+            scratch=tmp_path / "scratch",
+            models_dir=tmp_path / "scratch" / "models",
+            seconds=30.0,
+            configure=_if_only,
+            prepare_components=_install_stub,
+        )
+    )
+
+    assert run["meta"]["capture_profile_gate"] == {
+        "profile": "tuning",
+        "scoring_allowed": False,
+        "source": "replay_manifest",
+    }
+    # The same 30 s emit IF events as default collection (the test above).
+    assert not [e for e in run["events"] if e["source"] == "isolation_forest"]

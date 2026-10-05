@@ -156,7 +156,7 @@ Follow [B00](B00-behavior-models-README.md).
   this calibration, `min_sessions` 3), cam (commanded cam never polled),
   TPS (244 rows < 300), manifold VE (no MAP), LTFT balance (LTFT
   constantly 0.0).
-- [~] **B03.7 — Replay before promotion.** Compare baseline and candidate
+- [x] **B03.7 — Replay before promotion.** Compare baseline and candidate
   on the same known recordings, with isolated `_replay-*` outputs. Record
   coverage, refusal reasons, residuals, persisted events and fusion contribution,
   including no-data and calibration/context mismatches. Verify IF/sequence
@@ -178,9 +178,88 @@ Follow [B00](B00-behavior-models-README.md).
 
   IF/sequence: no tracked or concurrently retrained
   (`models/_candidates/2026-09-23-na`) manifest consumes a `deviation:*`
-  column. **Remaining:** runtime replay through the daemon with `_replay-*`
-  outputs. It needs a running daemon, and `scripts/replay.py` has no
-  behavior-event path. With an empty qualified set it gates nothing yet.
+  column. *Was remaining:* runtime replay with `_replay-*` outputs, since
+  `scripts/replay.py` had no behavior-event path.
+
+  *Runtime replay done 2026-10-05; no truck or Pi needed.*
+  [Report](../../../data/analyses/2026-10-05-b03-7-behavior-replay-comparison.md)
+  and [JSON](../../../data/analyses/2026-10-05-b03-7-behavior-replay-comparison.json).
+  [`tools/replay_behavior_compare.py`](../../../tools/replay_behavior_compare.py)
+  runs one `tools/replay_event_diff.drive_session` pass per side. It is not a
+  second replay engine: the stored rows go through the daemon's own
+  `LiveInferencePipeline` on the session clock, so `BehaviorDetector` grades,
+  persistence-gates, dedupes, emits and fuses exactly as served. A new
+  `observe_pipeline` hook records every residual between `prepare` and `apply`,
+  keyed by session-clock tick. Wall-clock `start_replay` is not used, because
+  its A/B results differ by timing alone (R03.9).
+  - **Isolation:** each side writes only under `<out>/_replay-<run>-<side>/`,
+    with the artifact staged at `models/<slug>/`.
+  - **Replay fidelity:** `drive_session` now presents a running replay to the
+    pipeline, as the daemon does. The capture-profile gate reads the replayed
+    session's `capture_profile.json` (`source: replay_manifest`), so a tuning
+    capture stays unscored. Before this it read the process's live profile.
+  - **Governance, fixed at the source:** `governing_profile_file` resolves an
+    artifact nested in `_`-prefixed directories under `data/<slug>/`
+    (`_candidates/<run>/`, `_prior/<stamp>/`) to `data/<slug>/`'s policy and
+    validation document. Before this, a candidate loaded in place took the
+    absent "beside" policy and silently shed every demotion. A copy beside
+    the artifact that differs from the tracked file is refused
+    (`GoverningFileConflictError`); an identical copy is ignored. Callers
+    swept: refit `--out`, evaluate, inventory, validation, daemon hot reload,
+    dashboard reader.
+  - **Residuals are compared on paired ticks only.** MAE, bias and p95 are
+    computed on the ticks both sides scored (`n_pairs`). Ticks scored by only
+    one side are reported apart, with the other side's refusal reason.
+    `same_ticks` compares the tick timestamps, and two runs over different
+    ticks are refused.
+  - **What else it records per model:**
+    - coverage and every refusal reason;
+    - persisted events from the side's isolated anomaly log;
+    - fusion votes and fused-event contributions;
+    - calibration context (`match` / `mismatch` / `model_revision_unknown`);
+    - IF/sequence compatibility, via `dependent_manifest_block` (shared with
+      B03.1).
+  - **`--shadow-alerting`** lets the daemon's own gate run on diagnostic-only
+    models. Its output is labelled `shadow`, and it says nothing about
+    vehicle health.
+
+  *Demonstrated:* replaced set `9cd174ce` against promoted set `816c150b` on
+  three `ready` sessions. They are all ZS44A-20260920 and behavior-only, with
+  identical tick timestamps per side: `2026-09-22T233855` (475 ticks),
+  `2026-09-21T194247` (564) and `2026-09-22T234813` (249).
+  - **As served:** 0 events and 0 fused on both sides (234813), since every
+    model is diagnostic-only.
+  - **Shadow, fuel trim, paired:**
+    - MAE 11.52→4.59 (n=197), 9.94→2.68 (n=374) and 10.08→2.38 (n=155);
+    - persisted events 8→0, 16→0 and 7→0; fusion votes 51→0, 98→0 and 63→0.
+  - **Shadow, VE, paired:** MAE 2.12→1.15 (n=198), 1.65→0.55 (n=362) and
+    1.28→0.53 (n=233). The candidate-only ticks (116, 176 and 8) are the
+    replaced map's `off_map` refusals, reported apart.
+  - **Shadow, timing vs rpm/load, paired:** 1.39→1.09, 0.38→0.46 (worse) and
+    0.44→0.44.
+  - **Shadow, warm idle, paired:** 69.8→70.8, 15.0→11.3 and 16.6→13.7 rpm.
+  - **Unchanged artifacts:** the demoted iat timing model and the quarantined
+    `cat_warmup` replay identically on both sides.
+  - **No-data labels differ:** the same stale-RPM ticks read
+    `input_stale:obd:RPM` from the replaced set and
+    `engine_state_stale:obd:RPM` from the refits.
+  - **Calibration context:** the replaced set's models are
+    `model_revision_unknown`, and `air_charge` is a `mismatch` (k106). The
+    refits `match`.
+  - **IF/sequence:** no conflicts on either side.
+  - **Tests:**
+    - `tests/test_replay_behavior_compare.py`: 10 fast tests, including
+      `::test_residuals_compare_only_on_ticks_both_sides_scored` and
+      `::test_sides_that_graded_different_ticks_are_not_compared`. One slow
+      test, `::test_the_same_artifact_on_both_sides_replays_identically`.
+    - `tests/test_replay_event_diff.py::test_the_capture_profile_gate_reads_the_replayed_sessions_manifest`,
+      plus slow `::test_a_replayed_tuning_capture_is_not_scored`.
+    - `tests/test_behavior_lifecycle.py::test_a_candidate_loaded_in_place_keeps_the_profile_demotions`,
+      `::test_a_stale_policy_copy_beside_a_candidate_is_refused`,
+      `::test_a_nested_copy_resolves_to_the_tracked_profile_files` and
+      `::test_a_machine_copy_with_a_stale_policy_beside_it_is_refused`.
+
+  With an empty qualified set this still gates no promotion.
 
 ## Rollout and observability
 

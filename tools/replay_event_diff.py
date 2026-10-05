@@ -19,6 +19,11 @@ diff meaningless. This tool removes every wall-clock input:
 - ``time.monotonic`` as seen by ``src.*`` (the persistence gate, the
   vehicle-state cache) reads the same session clock.
 
+The pipeline sees a running replay, as it does under ``start_replay``:
+vehicle state ``replay``, and the capture-profile gate driven by the replayed
+session's ``capture_profile.json`` (``source: replay_manifest``), never by the
+process's live profile — a tuning capture stays unscored (R03.12).
+
 Everything the pipeline emits is recorded: the anomaly events the emitter
 wrote (``anomalies_dir/**/*.jsonl``) and every ``/ws/scores`` message.
 
@@ -151,6 +156,48 @@ def _rows(session: Path, *, until_epoch: float | None) -> Iterator[tuple[float, 
         )
 
 
+@dataclass(frozen=True)
+class _SessionReplayState:
+    """What ``ReplayController.status()`` reports while ``session`` replays.
+
+    Only the fields the inference path reads during a replay: ``running`` and
+    ``replay_id`` (vehicle state ``replay``, the generation token) and the
+    replayed session's capture profile, which drives the capture-profile gate.
+    """
+
+    running: bool
+    replay_id: str
+    source_session_id: str
+    source_capture_profile: str | None
+    source_corpus_eligible: bool
+
+
+class _SessionReplay:
+    """Stands in for the daemon's replay controller for one stored session.
+
+    Without it ``capture_profile_gate`` read the process's live capture
+    profile, so a replayed tuning capture was scored and emitted as if it were
+    default collection. The daemon judges a replay by the replayed session's
+    ``capture_profile.json`` (R03.12); so does this, read once, the way
+    ``ReplayController.start`` reads it.
+    """
+
+    def __init__(self, session: Path) -> None:
+        from src.storage.capture_manifest import read_capture_manifest
+
+        manifest = read_capture_manifest(session)
+        self._state = _SessionReplayState(
+            running=True,
+            replay_id=f"drive-session-{session.name}",
+            source_session_id=session.name,
+            source_capture_profile=None if manifest is None else manifest.profile,
+            source_corpus_eligible=True if manifest is None else manifest.corpus_eligible,
+        )
+
+    def status(self) -> _SessionReplayState:
+        return self._state
+
+
 def _session_start(session: Path) -> float:
     import pandas as pd
 
@@ -185,12 +232,16 @@ async def drive_session(
     seconds: float | None = None,
     configure: Callable[[Any], Any] | None = None,
     prepare_components: Callable[[Any], None] | None = None,
+    observe_pipeline: Callable[[Any], None] | None = None,
 ) -> dict[str, Any]:
     """Tick ``session`` through ``LiveInferencePipeline`` in session time.
 
     Returns the run's events, per-tick score messages and emitter counters.
     ``configure`` may replace the loaded config and ``prepare_components``
     may swap model managers before the first tick (tests).
+    ``observe_pipeline`` receives the constructed pipeline before the first
+    tick, so a caller can record what its detectors see each tick (B03.7:
+    ``tools/replay_behavior_compare.py`` records every behavior residual).
     """
     from src.daemon.components import build_components
     from src.daemon.inference import LiveInferencePipeline, build_live_feature_source
@@ -211,6 +262,8 @@ async def drive_session(
     patched: list[types.ModuleType] = []
 
     components = build_components(config)
+    replay = _SessionReplay(session)
+    components.replay_controller = replay  # type: ignore[assignment]
     if prepare_components is not None:
         prepare_components(components)
     loaded = {
@@ -233,6 +286,8 @@ async def drive_session(
         recorder=components.inference_timing,
         wall_clock=lambda: clock.now,
     )
+    if observe_pipeline is not None:
+        observe_pipeline(pipeline)
 
     rows = _rows(session, until_epoch=until)
     pending = next(rows, None)
@@ -281,6 +336,11 @@ async def drive_session(
             "first_tick": clock_iso(first_tick),
             "last_tick": clock_iso(first_tick + (index - 1) * interval),
             "loaded_models": loaded,
+            "capture_profile_gate": {
+                "profile": replay.status().source_capture_profile,
+                "scoring_allowed": replay.status().source_corpus_eligible,
+                "source": "replay_manifest",
+            },
         },
         "counters": _jsonable(
             counters.to_dict() if hasattr(counters, "to_dict") else vars(counters)

@@ -65,7 +65,13 @@ def _models_block(models: BehaviorModels) -> list[dict[str, Any]]:
     ]
 
 
-def _manifest_block(path: Path, models: BehaviorModels | None) -> dict[str, Any]:
+def dependent_manifest_block(path: Path, models: BehaviorModels | None) -> dict[str, Any]:
+    """One IF/sequence manifest against a behavior set: the ``deviation:*``
+    columns it consumes, conflicts and fingerprint provenance (B03.4).
+
+    Shared by the inventory and the B03.7 replay comparison, which asks it of
+    the served and the candidate set alike.
+    """
     try:
         manifest = json.loads(path.read_text())
         columns = manifest_feature_columns(manifest)
@@ -183,7 +189,7 @@ def build_inventory(
             }
             for override in baselines.overrides
         ],
-        "dependent_manifests": [_manifest_block(path, models) for path in manifests],
+        "dependent_manifests": [dependent_manifest_block(path, models) for path in manifests],
         "deployed": compare_deployed(models, deployed_snapshot),
     }
 

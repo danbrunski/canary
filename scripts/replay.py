@@ -9,6 +9,10 @@ This is the no-hardware path for exercising the model pipeline:
 The script intentionally reports intermediate row/column counts. CAN-only
 captures currently produce payload rows but no useful numeric value channels;
 that should show up clearly in the report rather than failing mysteriously.
+
+Behavior *events* (what the daemon's behavior detector would persist, emit
+and fuse, served set vs a candidate) are not this script's job: use
+``tools/replay_behavior_compare.py`` (B03.7), which ticks the live pipeline.
 """
 
 from __future__ import annotations

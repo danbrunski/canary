@@ -1472,25 +1472,61 @@ def diagnostic_only_models(models: BehaviorModels) -> dict[str, list[str]]:
     return out
 
 
+class GoverningFileConflictError(ValueError):
+    """A copy of a profile file beside an artifact disagrees with the tracked one."""
+
+
+def _governing_profile_dir(artifact_dir: Path) -> Path | None:
+    """The tracked profile directory that governs an artifact in ``artifact_dir``.
+
+    Inside the checkout's ``data/`` it is the directory above the first
+    ``_``-prefixed component: ``data/<slug>/_candidates/<run>/`` and
+    ``data/<slug>/_prior/<stamp>/`` are governed by ``data/<slug>/``, exactly
+    as the published artifact is (B03.7: a candidate loaded in place used to
+    get the nonexistent policy beside it and silently shed every demotion and
+    quarantine). Elsewhere it is the tracked profile named like the artifact
+    directory (a machine copy, S03.3), or ``None`` (a scratch artifact).
+    """
+    if artifact_dir.is_relative_to(DATA_DIR):
+        parts = artifact_dir.relative_to(DATA_DIR).parts
+        for index, part in enumerate(parts):
+            if part.startswith("_"):
+                return DATA_DIR.joinpath(*parts[:index]) if index else None
+        return artifact_dir
+    tracked = DATA_DIR / artifact_dir.name
+    return tracked if tracked.is_dir() else None
+
+
 def governing_profile_file(behavior_models_path: Path, filename: str) -> Path:
     """The tracked profile file (policy, validation document) that governs the
     artifact at ``behavior_models_path``.
 
-    Beside the artifact when one is there, or when the artifact is itself in
-    the checkout's ``data/``. An artifact elsewhere is a machine's own copy:
-    on the Pi it lives under ``state_dir/models/<slug>/`` (S03.3, operator
-    decision 2026-10-04: trained artifacts are Pi-owned). The files that govern
-    it are laptop-authored facts, still in the checkout, so they are read from
-    the tracked profile directory ``data/<slug>/``. The slug is the artifact
-    directory's name, as everywhere ``scope_config`` nests a path; when no
-    tracked profile directory has that name, the artifact has no tracked
-    profile and the file beside it is the answer (a scratch or test artifact).
+    The tracked profile's file whenever the artifact has a tracked profile
+    (:func:`_governing_profile_dir`): the published artifact in ``data/<slug>/``,
+    a candidate or prior copy nested under it in ``_``-prefixed directories,
+    or a machine copy under ``state_dir/models/<slug>/`` (S03.3, operator
+    decision 2026-10-04: trained artifacts are Pi-owned, and the files that
+    govern them are laptop-authored facts in the checkout). A copy of the file
+    beside such an artifact is never preferred: identical, it is ignored;
+    different, it is refused (:class:`GoverningFileConflictError`), because a
+    stale copy would silently re-grant what the profile has since withdrawn.
+    An artifact with no tracked profile (a scratch or test artifact) is
+    governed by the file beside it.
     """
-    beside = behavior_models_path.parent / filename
-    if beside.exists() or behavior_models_path.parent.is_relative_to(DATA_DIR):
+    artifact_dir = behavior_models_path.parent
+    beside = artifact_dir / filename
+    profile = _governing_profile_dir(artifact_dir)
+    if profile is None:
         return beside
-    tracked_profile = DATA_DIR / behavior_models_path.parent.name
-    return tracked_profile / filename if tracked_profile.is_dir() else beside
+    tracked = profile / filename
+    if beside != tracked and beside.exists():
+        if not tracked.exists() or beside.read_bytes() != tracked.read_bytes():
+            raise GoverningFileConflictError(
+                f"{beside} differs from the tracked profile's {tracked}, which governs "
+                f"{behavior_models_path}; delete the copy (or update the tracked file) "
+                "so one file decides the artifact's permitted uses"
+            )
+    return tracked
 
 
 def behavior_policy_path(behavior_models_path: Path) -> Path:

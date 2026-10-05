@@ -600,3 +600,77 @@ def test_refit_preserves_the_prior_artifact_and_its_report(tmp_path: Path) -> No
     assert [artifact_fingerprint(m) for m in restored.models] == [
         artifact_fingerprint(m) for m in load_behavior_models(SHIPPED).models
     ]
+
+
+# --- B03.7: nested candidate and prior copies are governed by the profile ---
+
+
+def test_a_nested_copy_resolves_to_the_tracked_profile_files() -> None:
+    from src.analysis.behavior_validation import validation_document_path
+    from src.behavior.behavior_models import behavior_policy_path
+
+    for nested in ("_candidates/2026-09-23", "_prior/2026-09-24T024700", "_candidates/a/b"):
+        artifact = PROFILE_DIR / nested / "behavior_models.yaml"
+        assert behavior_policy_path(artifact) == PROFILE_DIR / "behavior_policy.yaml"
+        assert validation_document_path(artifact) == PROFILE_DIR / "behavior_validation.yaml"
+
+
+def _fake_data_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """A ``data/`` holding the real profile policy, so copies can be written."""
+    import src.behavior.behavior_models as behavior_models_module
+
+    data = tmp_path / "data"
+    profile = data / PROFILE_DIR.name
+    profile.mkdir(parents=True)
+    shutil.copy2(PROFILE_DIR / "behavior_policy.yaml", profile / "behavior_policy.yaml")
+    monkeypatch.setattr(behavior_models_module, "DATA_DIR", data)
+    return profile
+
+
+def test_a_candidate_loaded_in_place_keeps_the_profile_demotions(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    profile = _fake_data_dir(tmp_path, monkeypatch)
+    candidate = profile / "_candidates" / "x" / "behavior_models.yaml"
+    candidate.parent.mkdir(parents=True)
+    shutil.copy2(PROFILE_DIR / "behavior_models.yaml", candidate)
+
+    lifecycles = {
+        m.name: serving_status(m).lifecycle for m in load_behavior_models(candidate).models
+    }
+
+    # Before B03.7 this copy was governed by the absent _candidates/x/ policy.
+    assert lifecycles["timing_advance_vs_rpm_iat"] == "demoted"
+    assert lifecycles["timing_advance_vs_rpm_load"] == "exploratory"
+
+    # An identical copy beside it is harmless ...
+    shutil.copy2(profile / "behavior_policy.yaml", candidate.parent / "behavior_policy.yaml")
+    assert {
+        m.name: serving_status(m).lifecycle for m in load_behavior_models(candidate).models
+    } == lifecycles
+
+
+def test_a_stale_policy_copy_beside_a_candidate_is_refused(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from src.behavior.behavior_models import GoverningFileConflictError
+
+    profile = _fake_data_dir(tmp_path, monkeypatch)
+    candidate = profile / "_candidates" / "x" / "behavior_models.yaml"
+    candidate.parent.mkdir(parents=True)
+    shutil.copy2(PROFILE_DIR / "behavior_models.yaml", candidate)
+    (candidate.parent / "behavior_policy.yaml").write_text("schema_version: 1\nentries: []\n")
+
+    with pytest.raises(GoverningFileConflictError, match="differs from the tracked"):
+        load_behavior_models(candidate)
+
+
+def test_a_machine_copy_with_a_stale_policy_beside_it_is_refused(tmp_path: Path) -> None:
+    from src.behavior.behavior_models import GoverningFileConflictError, behavior_policy_path
+
+    machine = tmp_path / "models" / PROFILE_DIR.name / "behavior_models.yaml"
+    machine.parent.mkdir(parents=True)
+    (machine.parent / "behavior_policy.yaml").write_text("schema_version: 1\nentries: []\n")
+
+    with pytest.raises(GoverningFileConflictError):
+        behavior_policy_path(machine)
