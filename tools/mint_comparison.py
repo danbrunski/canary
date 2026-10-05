@@ -55,6 +55,11 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--program-id", default=None, help="ECU program identity, when known (else unknown)."
     )
+    parser.add_argument(
+        "--incident",
+        default=None,
+        help="Recurring phenomenon this comparison is an occurrence of (groups recurrences).",
+    )
     parser.add_argument("--json", action="store_true", help="Print the stored record as JSON.")
     return parser.parse_args(argv)
 
@@ -83,6 +88,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         program_id=args.program_id,
         tune_registry=active_registry(config),
         min_pairs=args.min_pairs if args.min_pairs is not None else MIN_PAIRS,
+        incident=args.incident,
     )
     record = ledger.resolve_evidence(evidence_id).record
     assert isinstance(record, Evidence)

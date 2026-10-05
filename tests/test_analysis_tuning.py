@@ -75,11 +75,12 @@ def _rows(
     samples: list[tuple[float, float, float, float, float]],
     *,
     name: str = "2026-08-05T120000",
+    start: datetime = T0,
 ) -> Path:
     """Build a session from (rpm, load, fuel_status, equiv_ratio, lambda) rows."""
     records: list[TelemetryRecord] = []
     for i, (rpm, load, fs, ratio, lam) in enumerate(samples):
-        ts = T0 + timedelta(seconds=i)
+        ts = start + timedelta(seconds=i)
         records += [
             TelemetryRecord(timestamp=ts, source="obd", channel="RPM", value=rpm),
             TelemetryRecord(timestamp=ts, source="obd", channel="ENGINE_LOAD", value=load),
@@ -552,13 +553,40 @@ def test_tune_revision_resolution_matches_the_campaign_timeline() -> None:
     expected = {
         "2026-07-19T202721": "ZS04C-stock",
         "2026-07-27T152444": "ZS44A-osiris-initial",
-        "2026-08-03T163440": "ZS44A-k105",
         # Capture sessions are `_`-prefixed; they must still resolve.
         "_tuning-2026-08-05T142720": "ZS44A-k106",
     }
     for session, revision in expected.items():
         found = registry.for_session(session)
         assert found is not None and found.revision == revision
+
+
+def test_a_session_is_dated_by_its_first_sample_not_its_name(tmp_path: Path) -> None:
+    """2026-08-03T163440 is named 16:34:40Z but its first stored sample is
+    23:11:54Z (the clock stepped after the directory was made). The k106
+    flash was at 18:45:21Z, so by its name it ran k105 and by its data k106 —
+    and the data is right (tune_revisions.yaml; E01.6 known-answer case)."""
+    from src.vehicle.tune_revisions import load_tune_revisions, resolve_session_revision
+
+    registry = load_tune_revisions(Path("data/nissan-xterra-2008/tune_revisions.yaml"))
+    assert registry is not None
+    samples = [(2000.0, 50.0, 4.0, 1.2, 0.83)] * 3
+    drive = _rows(
+        tmp_path,
+        samples,
+        name="2026-08-03T163440",
+        start=datetime(2026, 8, 3, 23, 11, 54, tzinfo=UTC),
+    )
+    found = registry.for_session(drive)
+    assert found is not None and found.revision == "ZS44A-k106"
+    assert resolve_session_revision(drive, registry) == ("ZS44A-k106", "registry", False)
+    # The name alone (no telemetry to read) is all a bare name can be dated by.
+    by_name = registry.for_session(drive.name)
+    assert by_name is not None and by_name.revision == "ZS44A-k105"
+    empty = tmp_path / "empty" / "2026-08-03T163440"
+    empty.mkdir(parents=True)
+    by_empty = registry.for_session(empty)
+    assert by_empty is not None and by_empty.revision == "ZS44A-k105"
 
 
 def test_sessions_before_the_first_flash_have_no_revision() -> None:
@@ -599,8 +627,19 @@ def test_comparison_flags_whether_both_sides_share_a_revision(tmp_path: Path) ->
 
     registry = load_tune_revisions(Path("data/nissan-xterra-2008/tune_revisions.yaml"))
     samples = [(2000 + 100 * i, 50, 4, 1.2, 0.83) for i in range(30)]
-    a = _rows(tmp_path / "a", samples, name="2026-08-03T163440")
-    b = _rows(tmp_path / "b", samples, name="2026-08-05T142720")
+    # Data times agree with the names: a session is dated by its first sample.
+    a = _rows(
+        tmp_path / "a",
+        samples,
+        name="2026-08-02T120000",
+        start=datetime(2026, 8, 2, 12, 0, 0, tzinfo=UTC),
+    )
+    b = _rows(
+        tmp_path / "b",
+        samples,
+        name="2026-08-05T142720",
+        start=datetime(2026, 8, 5, 14, 27, 20, tzinfo=UTC),
+    )
     result = compare_sessions(
         a,
         b,

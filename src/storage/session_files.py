@@ -94,6 +94,45 @@ def session_footer_span(session_dir: Path) -> SessionFooterSpan:
     return SessionFooterSpan(first=lo, last=hi, rows=rows if seen else None)
 
 
+def session_first_sample(session_dir: Path) -> pd.Timestamp | None:
+    """The first stored sample's time (UTC), from the first chunk that has one.
+
+    When a session's *data* starts, as opposed to when its directory name says
+    it did. The two differ when the clock steps after the directory is
+    created: ``2026-08-03T163440`` is named 6 h 37 min before its first sample
+    (23:11:54Z), which put a drive on the wrong side of a flash (E01.6). Reads
+    footers only, and only of the earliest non-empty chunk with timestamp
+    statistics, so it is cheap enough to call per session in a loop. ``None``
+    when no chunk carries a readable timestamp.
+    """
+    try:
+        import pyarrow.parquet as pq
+    except ImportError:  # pragma: no cover - pyarrow is a hard dependency elsewhere
+        return None
+    for chunk in sorted(session_dir.glob(PARQUET_PATTERN)):
+        try:
+            if chunk.stat().st_size == 0:
+                continue
+            meta = pq.ParquetFile(chunk).metadata  # type: ignore[no-untyped-call, unused-ignore]
+        except Exception:  # noqa: BLE001 - a corrupt/truncated chunk just doesn't count
+            continue
+        names = list(meta.schema.names)
+        if "timestamp" not in names:
+            continue
+        column = names.index("timestamp")
+        lows = []
+        for group in range(meta.num_row_groups):
+            stats = meta.row_group(group).column(column).statistics
+            if stats is None or not stats.has_min_max:
+                continue
+            low = footer_utc(stats.min)
+            if low is not None:
+                lows.append(low)
+        if lows:
+            return min(lows)
+    return None
+
+
 def footer_utc(value: Any) -> pd.Timestamp | None:
     """A footer statistic as a UTC timestamp (naive statistics are UTC)."""
     try:

@@ -40,8 +40,11 @@ revisions:
     calibration_id: 1ZS44A00000
     # Exact flash time was not recorded. The operator confirmed this was
     # edited and flashed on 2026-08-03; use the ROM file's 12:45:21 MDT mtime
-    # as the earliest defensible boundary. The next stored session is hours
-    # later, so this approximation does not straddle known session data.
+    # as the earliest defensible boundary. The next stored session,
+    # 2026-08-03T163440, is NAMED 16:34:40Z -- before this boundary -- because
+    # the clock stepped after its directory was made; its first stored sample
+    # is 23:11:54Z, hours after. Sessions are dated by first sample (E01.6),
+    # so it resolves to this revision; by name it fell to k105.
     flashed_at: 2026-08-03T18:45:21Z
     flashed_at_precision: approximate
     k: 1.06

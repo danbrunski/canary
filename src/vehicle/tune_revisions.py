@@ -156,8 +156,14 @@ class TuneRevisionRegistry(_Strict):
         return pd.Series(values, index=timestamps.index, dtype=object)
 
     def for_session(self, session: str | Path) -> TuneRevision | None:
-        """The revision in force when a session (by directory name) started."""
-        started = session_started_at(session)
+        """The revision in force when a session started (:func:`session_dated_at`).
+
+        Pass the session *directory*: its first stored sample dates it. A bare
+        name (a ``str``, or a path with no telemetry) can only be dated by the
+        name, which is wrong whenever the clock stepped after the directory was
+        created.
+        """
+        started = session_dated_at(session)
         return None if started is None else self.at(started)
 
 
@@ -178,6 +184,26 @@ def resolve_session_revision(
     if inferred is not None:
         return inferred, "registry", False
     return None, "unknown", False
+
+
+def session_dated_at(session: str | Path) -> datetime | None:
+    """When a session started, for deciding which calibration it ran on.
+
+    The first stored sample when ``session`` is a directory holding telemetry
+    (``src.storage.session_files.session_first_sample``), else the time its
+    directory name states. The name is when the directory was created by a
+    clock that may not have been set yet: ``2026-08-03T163440`` is named
+    16:34:40Z and holds data from 23:11:54Z, after the k106 flash at
+    18:45:21Z, and resolved by name to the previous revision (E01.6). Dating
+    by data is the shared rule, so no caller has to remember it.
+    """
+    if isinstance(session, Path):
+        from src.storage.session_files import session_first_sample
+
+        first = session_first_sample(session) if session.is_dir() else None
+        if first is not None:
+            return first.to_pydatetime()
+    return session_started_at(session)
 
 
 def session_started_at(session: str | Path) -> datetime | None:
@@ -320,5 +346,6 @@ __all__ = [
     "load_tune_revisions",
     "merge_tune_registries",
     "resolve_session_revision",
+    "session_dated_at",
     "session_started_at",
 ]

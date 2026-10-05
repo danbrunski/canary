@@ -320,7 +320,9 @@ def _flash_crossings(
     spans: dict[str, tuple[datetime, datetime]] = {}
     for piece, (first, last) in frame_ranges.items():
         parent = piece.split("#segment-", 1)[0]
-        start = session_started_at(parent) or first
+        # Data time first: a directory name can predate a clock step by hours
+        # (2026-08-03T163440, E01.6); the name only dates a piece with no rows.
+        start = first or session_started_at(parent)
         end = last or start
         if start is None or end is None:
             continue

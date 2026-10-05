@@ -1,0 +1,573 @@
+# E01.6 — known-answer investigation cases.
+#
+# Read by tests/test_investigation_cases.py through src/analysis/known_cases.py.
+# Each case replays the real chain — compare_channels over a committed slice
+# of a real drive -> evidence minted into a MemoryLedger -> interventions from
+# the tracked tune_revisions.yaml -> investigation_card — and must reproduce
+# what the project already established. Order of this file is deliberate:
+#
+#   1. drives     — the recorded drives, each with the facts counted over its
+#                   FULL session (a slice keeps only what a check needs, so
+#                   absence in a slice proves nothing; the loader refuses a
+#                   "never captured" result the full-session count does not back)
+#   2. incidents  — what happened, as narrative with links. No disposition
+#                   field exists: narrative is not a label. An incident
+#                   without a case says in `gaps` why it is narrative only.
+#   3. defects    — known answers the chain does not yet reproduce
+#   4. cases      — one per incident at most (one event is one case, never two
+#                   confirmations); `known` checks read tool output only and
+#                   name their source
+#   5. negative_controls — a real case with one input mutated (synthetic: true);
+#                   the named checks must fail
+#
+# Tool-generated expectations (everything the chain says, not only the known
+# answers) live in investigation_cases.expected.yaml; regenerate with
+#   .venv/bin/python tools/make_investigation_cases.py --write
+# and review the diff. `--verify-sources ~/canary-data/sessions/nissan-xterra-2008`
+# re-counts the full_session facts below from the operator's local pull.
+schema: canary-investigation-cases/1
+vehicle: nissan-xterra-2008
+tune_revisions: data/nissan-xterra-2008/tune_revisions.yaml
+
+drives:
+  d1-2026-08-03:
+    session: 2026-08-03T163440
+    fixture: drive-slice
+    window: 2026-08-03T17:19:00-06:00 +420 s (expectations.yaml `window`); broadcast frames decimated 10:1
+    full_session:
+      checked: 2026-10-04
+      chunks: 363
+      first_sample: 2026-08-03T23:11:54.375019Z
+      last_sample: 2026-08-03T23:43:17.883686Z
+      capture_profile: null      # a plain (default-profile) session, no capture manifest
+      mode01_enabled: null
+      mode01_rows: 13937
+      channel_rows:
+        obd:COMMANDED_EQUIV_RATIO: 283   # present in the session, dropped by the slice
+        obd:O2_WR_LAMBDA_S1: 562
+    calibration:
+      revision: ZS44A-k106
+      basis: >
+        tune_revisions.yaml: k106 flashed 2026-08-03, boundary 18:45:21Z
+        (approximate: the ROM file's mtime, the earliest defensible time).
+        This session's first stored sample is 23:11:54Z, hours after it. Its
+        NAME parses as 16:34:40Z, before the flash (the clock stepped after the
+        directory was made); sessions are dated by first sample (fixed
+        2026-10-04; it was the known defect session-name-precedes-data).
+  d2-2026-09-21-rom-trace:
+    session: _capture-rom-trace-2026-09-21T142926
+    fixture: did-speed-slice
+    window: 2026-09-21T08:29:26-06:00 +212 s (expectations.yaml `did_window`); 0x6F7 decimated 10:1
+    full_session:
+      checked: 2026-10-04
+      chunks: 57
+      first_sample: 2026-09-21T14:29:26.545164Z
+      last_sample: 2026-09-21T14:32:56.911745Z
+      capture_profile: rom-trace
+      mode01_enabled: false
+      mode01_rows: 0
+      channel_rows:
+        obd:COMMANDED_EQUIV_RATIO: 0
+        obd:O2_WR_LAMBDA_S1: 0
+    calibration:
+      revision: ZS44A-20260920
+      basis: >
+        tune_revisions.yaml: ZS44A-20260920 flashed 2026-09-21T03:08:45.954035Z
+        (exact: capture frame 42353); capture started 14:29:26Z the same day,
+        capture manifest tune_revision null.
+  d2b-2026-09-21-rom-trace:
+    session: _capture-rom-trace-2026-09-21T195647
+    fixture: rom-trace-absent-slice
+    window: the whole capture, 2026-09-21T19:56:47Z +93 s; only mem:ECM_TARGET_EQUIV_RATIO kept (224 rows, 19 KiB)
+    full_session:
+      checked: 2026-10-04
+      chunks: 24
+      first_sample: 2026-09-21T19:56:47.218092Z
+      last_sample: 2026-09-21T19:58:19.251365Z
+      capture_profile: rom-trace
+      mode01_enabled: false
+      mode01_rows: 1             # one MONITOR_RESULTS row with no value at 19:56:47Z
+      channel_rows:
+        obd:COMMANDED_EQUIV_RATIO: 0
+        obd:O2_WR_LAMBDA_S1: 0
+        mem:ECM_TARGET_EQUIV_RATIO: 224
+    calibration:
+      revision: ZS44A-20260920
+      basis: tune_revisions.yaml, as for d2; capture manifest tune_revision null.
+  d3-2026-10-04-ram-study:
+    session: _capture-ram-study-2026-10-04T204557
+    fixture: target-phi-slice
+    window: the whole capture, 2026-10-04T20:45:56Z..21:12:50Z (target_phi.yaml); twin channels only
+    full_session:
+      checked: 2026-10-04
+      chunks: 316
+      first_sample: 2026-10-04T20:45:57.258091Z
+      last_sample: 2026-10-04T21:12:49.199125Z
+      capture_profile: ram-study
+      mode01_enabled: true
+      mode01_rows: 14281
+      channel_rows:
+        obd:COMMANDED_EQUIV_RATIO: 329   # present; target-phi-slice did not keep it
+        obd:O2_WR_LAMBDA_S1: 582
+    calibration:
+      revision: ZS44A-20260920
+      basis: >
+        tune_revisions.yaml (ZS44A-20261004 was flashed at 23:02:33Z, after the
+        capture); target_phi.yaml records the same revision independently.
+
+incidents:
+  commanded-afr-absent-on-all-did-captures:
+    title: Delivery error unanswerable on an all-DID capture
+    date: 2026-08-06
+    narrative: >
+      A clean 25.7-minute all-DID drive (11 channels at 14.93 Hz, 18k samples
+      each) could not answer the fuel question at all, and three places
+      reported success: delivery_error returned `started: 0`, indistinguishable
+      from "the gates rejected every sample". Mode 01 and Mode 22 are mutually
+      exclusive on this ECM, so an all-DID profile sets mode01_enabled false and
+      commanded AFR (Mode 01 PID 0x44) is absent by construction. Fixed to refuse
+      and name the cause; AGENTS.md "An empty result must say which kind of
+      empty it is".
+    links:
+      - 'commit bcd35e6 (fix: make an unanswerable analysis say so)'
+      - AGENTS.md#make-it-impossible-not-documented
+      - src/analysis/tuning.py delivery_error
+    gaps:
+      - >
+        The original 2026-08-06 all-DID capture is not in the local pull
+        (~/canary-data/sessions*: the three 2026-08-06 sessions there are
+        default-profile drives with Mode 01). The case reproduces the same
+        construction on two later rom-trace captures (mode01_enabled false).
+      - >
+        delivery_error does not mint evidence (E01.2 remaining work), so the
+        case evaluates its Mode 01 route's inputs (PID 0x44 against the
+        wide-band lambda PID) through compare_channels' refusal, which does.
+  ecm-calc-load-b-binding:
+    title: ECM_CALC_LOAD_B bound as a load duplicate on matching means
+    date: 2026-08-05
+    narrative: >
+      0x23D byte 3 was catalogued as ECM_CALC_LOAD_B, "a cross-broadcast
+      duplicate of ECM_CALC_LOAD_A (0x233:4)", because the two bytes' mean
+      values were identical in every window of 2026-05-11T152858. Byte 3 is the
+      low byte of the 16-bit ECM_RPM_23D counter, so its mean sits near
+      mid-scale whatever the engine does. Retracted by the byte sweep in
+      b374ba4; the two retracted columns later blinded the IF at serve.
+    links:
+      - commit b374ba4 (byte-sweep discovery for broadcast bindings)
+      - data/bindings.yaml ECM_RPM_23D notes ("This supersedes ECM_CALC_LOAD_B")
+      - data/bindings.yaml ECM_CALC_LOAD_A evidence (2026-08-08 UpRev ground truth)
+      - AGENTS.md#make-it-impossible-not-documented (first retraction listed)
+      - data/analyses/2026-09-10-drive-h1-h7-h9.md
+      - tests/fixtures/ground_truth/ecm-calc-load-b-bindings.yaml
+    reproducible_evidence:
+      - tests/test_analysis_compare.py::test_a_constant_channel_is_refused_not_fitted
+    gaps:
+      - >
+        The original session 2026-05-11T152858 is not in the local pull; the
+        case reads drive-slice (2026-08-03), which carries both frames.
+      - >
+        The per-window-mean comparison that produced the binding is not
+        re-minted: no sanctioned tool computes it, by design. The case
+        evaluates the same two bytes on same-instant pairs instead.
+  flash-zs44a-20260920:
+    title: The 2026-09-20 Fuel Targets flash
+    date: 2026-09-21
+    narrative: >
+      Single Fuel Targets Map 1 edit at 5200 rpm / BFS 18.20 (raw A2 -> A3),
+      K and every other calibration byte unchanged. Boundary pinned to capture
+      frame 42353. Learned trims reset with it. The broadcast wheel-speed
+      binding (0x6F7) is not calibration data and stayed 1:1 with the ECM's
+      road speed on both sides.
+    links:
+      - data/nissan-xterra-2008/tune_revisions.yaml ZS44A-20260920
+      - docs/skunkworks/uprev-flash-20260920.md
+      - tests/fixtures/ground_truth/expectations.yaml unit_agreement and did_agreement
+    gaps:
+      - >
+        No committed drive from the same evening before the flash: the
+        pre-flash side is d1, seven weeks earlier (three revisions back), so the
+        case shows attribution across the boundary, not a same-day null run.
+  wheel-speed-6f7-agrees-with-ecm-road-speed:
+    title: Broadcast wheel speed 0x6F7 agrees with the ECM's road speed
+    date: 2026-08-06
+    narrative: >
+      WHEEL_SPEED_6F7_A (0x6F7 bytes 0-1, 1/16 km/h per count) was found on
+      2026-08-06 and confirmed 1:1 against Mode 01 PID 0x0D on the 2026-08-03
+      drive, then against DID 0x121A on the 2026-09-21 all-DID capture. A
+      broadcast decode is not calibration data, so it recurs on both sides of
+      every flash.
+    links:
+      - tests/fixtures/ground_truth/expectations.yaml unit_agreement can:WHEEL_SPEED_6F7_A
+      - tests/fixtures/ground_truth/expectations.yaml did_agreement did:ECM_VEHICLE_SPEED
+      - data/bindings.yaml WHEEL_SPEED_6F7_A
+    reproducible_evidence:
+      - tests/test_analysis_ground_truth.py::test_binding_agrees_with_its_independent_reference
+    gaps:
+      - >
+        No case of its own: its two occurrences are the evidence of case
+        flash-20260920, and a second case over the same records would count
+        one confirmation twice.
+      - >
+        Only two drives are committed; the binding has not been re-checked on
+        a slice after the 2026-10-04 flash.
+  achieved-hz-wall-clock:
+    title: achieved_hz_capture reported count over wall-clock
+    date: 2026-08-06
+    narrative: >
+      A capture polling at a solid 14.93 Hz read as 11.25 Hz because the window
+      opened late, and a 97.7 Hz broadcast read as 52.9 Hz because the engine
+      was off for half the session.
+    links:
+      - src/analysis/compare.py module docstring
+      - commit bcd35e6 (AGENTS.md rule added)
+    gaps:
+      - >
+        A rate statistic, not a two-channel comparison or an investigation
+        record: no minting tool produces it, and the capture behind the two
+        numbers is not identified in the record.
+  mode22-session-cycling:
+    title: Mode 22 "session cycling" read from cumulative counters
+    date: 2026-08-06
+    narrative: >
+      The diagnosis read daemon counters that are cumulative over the daemon's
+      life as if they were scoped to the capture. Nothing was cycling.
+    links:
+      - src/analysis/compare.py module docstring
+      - docs/capture-quality.md
+    gaps:
+      - >
+        The inputs were /status counter snapshots, never stored session
+        telemetry; nothing remains to replay.
+  k-responds-one-to-one:
+    title: '"K responds 1:1" fuel result'
+    date: 2026-08-04
+    narrative: >
+      Delivery error was averaged across rpm bands whose composition differed
+      between the two sides of the comparison.
+    links:
+      - commit 0ee0876
+      - docs/roadmap/archive/tuning-analysis-toolkit.md (retraction table)
+      - docs/roadmap/tasks/R05-analysis-and-decode.md
+    gaps:
+      - >
+        Needs the two 2026-08-03/04 sessions on both sides of the K edit and a
+        minting delivery-error tool; neither slice nor tool exists yet.
+  ram-word-ratio-drift:
+    title: RAM word 0xFFFF27E4 passed [stable] while its ratio drifted
+    date: 2026-09-20
+    narrative: >
+      0xFFFF27E4 fit air charge 0x1208 at r2 0.9966 with a [stable] verdict
+      while the per-sample ratio moved +-14 %; a large fitted offset absorbed
+      it. The next day a genuine mirror (0xFFFF103A) was reported [drifting]
+      while its ratio sat at 1.0000.
+    links:
+      - data/analyses/2026-09-20-uprev-usb-road.md (windows and multi-field sections)
+      - AGENTS.md#make-it-impossible-not-documented
+    gaps:
+      - >
+        The memory-window sweep sessions are not committed and the comparison
+        tool does not mint a per-sample ratio yet, which is the statistic the
+        known answer rests on.
+  did-1102-kline-table:
+    title: DID 0x1102 catalogued from the K-line table
+    date: 2026-10-04
+    narrative: >
+      0x1102 was catalogued as LTFT bank 1 from UpRev's K-line stream; on CAN it
+      is the PID 0x0D road-speed byte (separate K-line and CAN pointer tables).
+    links:
+      - commit c897a62
+      - docs/ecu-firmware-analysis.md "Mode 22 catalog corrections (CAN)"
+    reproducible_evidence:
+      - tests/test_analysis_ground_truth.py::test_did_agreement_can_fail
+      - tests/test_analysis_ground_truth.py::test_did_catalog_matches_the_firmware
+    gaps:
+      - >
+        Already reproduced by the ground-truth suite on did-speed-slice; the old
+        catalog decodes nothing from the CAN reply, so there is no misleading
+        evidence record to retract — a catalog correction, not a finding.
+
+# No open defects. session-name-precedes-data (the calibration resolver dated
+# a session by its directory name, putting d1 on k105) was fixed at the shared
+# resolver on 2026-10-04: sessions are dated by their first stored sample.
+defects: {}
+
+cases:
+  absent-commanded-afr:
+    title: Commanded AFR absent by construction, twice
+    incident: commanded-afr-absent-on-all-did-captures
+    drives: [d2-2026-09-21-rom-trace, d2b-2026-09-21-rom-trace]
+    categories: [absent_channel, recurrence]
+    synthetic: false
+    steps:
+      - step: mint
+        name: commanded_d2
+        drive: d2-2026-09-21-rom-trace
+        a: obd:COMMANDED_EQUIV_RATIO
+        b: obd:O2_WR_LAMBDA_S1
+        tolerance: 250ms
+        incident: commanded-afr-absent-on-all-did-captures
+      - step: mint
+        name: commanded_d2b
+        drive: d2b-2026-09-21-rom-trace
+        a: obd:COMMANDED_EQUIV_RATIO
+        b: obd:O2_WR_LAMBDA_S1
+        tolerance: 250ms
+        incident: commanded-afr-absent-on-all-did-captures
+      - step: investigation
+        name: delivery
+        title: Can delivery error be measured on the all-DID captures?
+        question: Were the commanded target and the measured lambda captured on these drives?
+        status: resolved
+        incident: commanded-afr-absent-on-all-did-captures
+        observations: [commanded_d2, commanded_d2b]
+        narrative: >
+          Both captures ran the rom-trace profile with Mode 01 disabled; PID
+          0x44 cannot exist in them. The RAM commanded target
+          (mem:ECM_TARGET_EQUIV_RATIO) was read instead.
+    cards:
+      - {name: now, investigation: delivery}
+    known:
+      - {path: evidence.commanded_d2.status, op: eq, value: unevaluable,
+         source: bcd35e6 — inputs never captured is not an answer}
+      - {path: evidence.commanded_d2.reason, op: eq, value: missing_input,
+         source: "AGENTS.md: an empty result says which kind of empty (never captured, not gated out)"}
+      - {path: evidence.commanded_d2.detail, op: contains, value: obd:COMMANDED_EQUIV_RATIO,
+         source: the refusal names the absent input}
+      - {path: evidence.commanded_d2b.reason, op: eq, value: missing_input,
+         source: 'same construction (rom-trace, mode01_enabled false)'}
+      - {path: evidence.commanded_d2.occurrences, op: eq, value: 2,
+         source: 'two captures, one phenomenon — a recurrence, not a supersession'}
+      - {path: evidence.commanded_d2.calibration, op: eq, value: ZS44A-20260920,
+         source: tune_revisions.yaml (flashed 03:08:45Z; capture 14:29:26Z)}
+      - {path: evidence.commanded_d2b.calibration, op: eq, value: ZS44A-20260920,
+         source: tune_revisions.yaml}
+      - {path: cards.now.evidence_state, op: eq, value: unevaluable,
+         source: "E00: unevaluable is not normal"}
+      - {path: cards.now.next_measurements, op: contains, value: never captured,
+         source: 'the next step for a missing input is to capture it, not to drive more'}
+  ecm-calc-load-b:
+    title: Two unidentified bytes agree; neither is load
+    incident: ecm-calc-load-b-binding
+    drives: [d1-2026-08-03]
+    categories: [misleading_correlation, retraction]
+    synthetic: false
+    steps:
+      - step: mint
+        name: a_vs_b
+        drive: d1-2026-08-03
+        a: can:ECM_CALC_LOAD_A
+        b: can:ECM_CALC_LOAD_B
+        tolerance: 250ms
+        catalog: ecm-calc-load-b-bindings.yaml
+      - step: investigation
+        name: belief_then
+        title: Is ECM_CALC_LOAD_B a second copy of calculated load?
+        question: Does the byte at 0x23D offset three carry calculated engine load?
+        status: open
+        incident: ecm-calc-load-b-binding
+        observations: [a_vs_b]
+        hypotheses:
+          - label: ECM_CALC_LOAD_B duplicates ECM_CALC_LOAD_A as calculated load
+            status: supported
+            supporting: [a_vs_b]
+        narrative: >
+          As catalogued before b374ba4: identical per-window means to 0x233:4 in
+          every window of 2026-05-11T152858; direction "high cranking, mid idle,
+          low at sustained throttle".
+      - step: reference
+        name: binding
+        reference: ECM_CALC_LOAD_B load-duplicate binding
+        channels: [can:ECM_CALC_LOAD_B]
+        source_ref: data/bindings.yaml@2e47b64:ECM_CALC_LOAD_B
+        evidence: [a_vs_b]
+        investigation: belief_then
+      - step: mint
+        name: load_vs_b
+        drive: d1-2026-08-03
+        a: obd:ENGINE_LOAD
+        b: can:ECM_CALC_LOAD_B
+        tolerance: 250ms
+        catalog: ecm-calc-load-b-bindings.yaml
+      - step: mint
+        name: rpm_word
+        drive: d1-2026-08-03
+        a: obd:RPM
+        b: can:ECM_RPM_23D
+        tolerance: 250ms
+      - step: investigation
+        name: belief_now
+        title: Is ECM_CALC_LOAD_B a second copy of calculated load?
+        question: Does the byte at 0x23D offset three carry calculated engine load?
+        status: resolved
+        incident: ecm-calc-load-b-binding
+        observations: [a_vs_b]
+        hypotheses:
+          - label: ECM_CALC_LOAD_B duplicates ECM_CALC_LOAD_A as calculated load
+            status: refuted
+            refuting: [load_vs_b]
+          - label: ECM_CALC_LOAD_B is the low byte of the ECM_RPM_23D counter
+            status: supported
+            supporting: [rpm_word]
+        supersedes: belief_then
+        supersession_reason: >
+          Same-instant pairs against the calculated-load PID show no relation;
+          the little-endian word holding the byte is engine speed, one to one
+          with the rpm PID.
+        narrative: >
+          The two bytes do co-vary sample for sample: agreement between two
+          unidentified bytes says they share a source, not what it measures.
+      - step: retract
+        name: retract_binding
+        retracts: [binding]
+        reason: >
+          b374ba4: byte three of 0x23D is the low byte of the ECM_RPM_23D
+          counter; matching means between two bytes was never evidence of load.
+    cards:
+      - {name: then, investigation: belief_then, as_of: binding}
+      - {name: then_now, investigation: belief_then}
+      - {name: now, investigation: belief_now}
+    references:
+      - {name: binding_then, reference: binding, as_of: rpm_word}
+      - {name: binding_now, reference: binding}
+    known:
+      - {path: evidence.a_vs_b.status, op: eq, value: evaluated,
+         source: the trap is real — both bytes publish on the bus in this drive}
+      - {path: evidence.a_vs_b.values.r_squared, op: gt, value: 0.5,
+         source: "premise, not a historical figure: the 2026-05-11 finding was identical per-window MEANS of 0x233:4 and 0x23D:3; the 0.5 floor on same-instant-pair r2 is the implementer's threshold (E01.6) for 'the bytes do co-vary'"}
+      - {path: evidence.load_vs_b.values.r_squared, op: lt, value: 0.1,
+         source: "the 0.1 ceiling is the implementer's threshold (E01.6) for 'no linear relation', not a historical figure. History: b374ba4 retracted the byte; the only recorded number, best |r| 0.155 against UpRev CAL/LD on 2026-08-08, is for the sibling byte ECM_CALC_LOAD_A (0x233:4), not for 0x23D:3"}
+      - {path: evidence.rpm_word.values.r_squared, op: gt, value: 0.98,
+         source: expectations.yaml unit_agreement can:ECM_RPM_23D min_r_squared}
+      - {path: evidence.rpm_word.values.slope, op: between, value: [0.985, 1.015],
+         source: expectations.yaml unit_agreement can:ECM_RPM_23D max_scale_error_pct 1.5}
+      - {path: evidence.rpm_word.values.difference_bias, op: between, value: [-8.5, 8.5],
+         source: expectations.yaml unit_agreement can:ECM_RPM_23D max_residual_bias}
+      - {path: cards.then.standing, op: eq, value: current,
+         source: what we believed before the retraction (as_of)}
+      - {path: cards.then.hypotheses.0.status, op: eq, value: supported,
+         source: data/bindings.yaml at 2e47b64 (confidence medium)}
+      - {path: cards.then_now.standing, op: eq, value: superseded,
+         source: 'the old belief is kept, superseded, never rewritten'}
+      - {path: cards.now.hypotheses.0.status, op: eq, value: refuted, source: b374ba4}
+      - {path: cards.now.hypotheses.1.status, op: eq, value: supported,
+         source: data/bindings.yaml ECM_RPM_23D notes}
+      - {path: cards.now.conflicts, op: eq, value: 0,
+         source: the refutation rests on current evaluated evidence}
+      - {path: cards.now.evidence_state, op: eq, value: evaluated, source: every comparison evaluated}
+      - {path: references.binding_then.standing, op: eq, value: current,
+         source: the binding stood until the retraction}
+      - {path: references.binding_now.standing, op: eq, value: retracted, source: b374ba4}
+      - {path: references.binding_now.retracted_by, op: eq, value: retract_binding, source: b374ba4}
+  flash-20260920:
+    title: The wheel-speed binding across the fuel-target flash
+    incident: flash-zs44a-20260920
+    drives: [d1-2026-08-03, d2-2026-09-21-rom-trace]
+    categories: [calibration_change, recurrence]
+    synthetic: false
+    steps:
+      - step: mint
+        name: ws_d1
+        drive: d1-2026-08-03
+        a: obd:SPEED
+        b: can:WHEEL_SPEED_6F7_A
+        tolerance: 250ms
+        incident: wheel-speed-6f7-agrees-with-ecm-road-speed
+      - step: reference
+        name: ws_binding
+        reference: WHEEL_SPEED_6F7_A binding
+        channels: [can:WHEEL_SPEED_6F7_A]
+        source_ref: data/bindings.yaml:WHEEL_SPEED_6F7_A
+        evidence: [ws_d1]
+      - step: intervention
+        name: flash
+        revision: ZS44A-20260920
+        # The flash edited one Fuel Targets Map 1 cell: the commanded target is
+        # what it can change. Stated here because a flash names no channels.
+        affects: [mem:ECM_TARGET_EQUIV_RATIO, obd:COMMANDED_EQUIV_RATIO]
+      - step: mint
+        name: ws_d2
+        drive: d2-2026-09-21-rom-trace
+        a: did:ECM_VEHICLE_SPEED
+        b: can:WHEEL_SPEED_6F7_A
+        tolerance: 250ms
+        incident: wheel-speed-6f7-agrees-with-ecm-road-speed
+      - step: investigation
+        name: across_flash
+        title: Does the broadcast wheel-speed binding hold across the fuel-target flash?
+        question: Is WHEEL_SPEED_6F7_A still one to one with the ECM road speed after the flash?
+        status: resolved
+        incident: wheel-speed-6f7-agrees-with-ecm-road-speed
+        observations: [ws_d1, ws_d2]
+        hypotheses:
+          - label: WHEEL_SPEED_6F7_A stays one to one with the ECM road speed after the flash
+            status: supported
+            supporting: [ws_d1, ws_d2]
+    cards:
+      - {name: now, investigation: across_flash}
+    references:
+      - {name: ws_binding, reference: ws_binding}
+    queries:
+      - {name: preceded_flash, incident: wheel-speed-6f7-agrees-with-ecm-road-speed, valid_before: flash}
+      - {name: followed_flash, incident: wheel-speed-6f7-agrees-with-ecm-road-speed, valid_after: flash}
+      - {name: on_20260920, incident: wheel-speed-6f7-agrees-with-ecm-road-speed, calibration: ZS44A-20260920}
+      - {name: on_k106, incident: wheel-speed-6f7-agrees-with-ecm-road-speed, calibration: ZS44A-k106}
+    known:
+      - {path: interventions.flash.valid_from, op: eq, value: '2026-09-21T03:08:45.954035+00:00',
+         source: tune_revisions.yaml ZS44A-20260920 flashed_at (capture frame 42353)}
+      - {path: interventions.flash.effective_precision, op: eq, value: instant,
+         source: tune_revisions.yaml flashed_at_precision exact}
+      - {path: interventions.flash.image_sha256, op: eq,
+         value: a46baa248f16db8d5ed9854913e614dd7d77b7579bb6c36bddb792741531be50,
+         source: tune_revisions.yaml (equal to the 2026-10-04 ECU read)}
+      - {path: queries.preceded_flash, op: eq, value: [ws_d1], source: d1 is seven weeks before the flash}
+      - {path: queries.followed_flash, op: eq, value: [ws_d2], source: d2 started eleven hours after it}
+      - {path: queries.on_20260920, op: eq, value: [ws_d2], source: tune_revisions.yaml}
+      - {path: evidence.ws_d2.calibration, op: eq, value: ZS44A-20260920, source: tune_revisions.yaml}
+      - {path: evidence.ws_d1.calibration, op: eq, value: ZS44A-k106,
+         source: "tune_revisions.yaml k106 note and d1's first stored sample (23:11:54Z); the name (16:34:40Z) would say k105"}
+      - {path: queries.on_k106, op: eq, value: [ws_d1], source: as above}
+      - {path: evidence.ws_d1.values.difference_bias, op: between, value: [-0.55, 0.55],
+         source: expectations.yaml unit_agreement can:WHEEL_SPEED_6F7_A max_residual_bias}
+      - {path: evidence.ws_d1.values.slope, op: between, value: [0.979, 1.021],
+         source: expectations.yaml unit_agreement max_scale_error_pct 2.1}
+      - {path: evidence.ws_d2.values.difference_bias, op: between, value: [-0.65, 0.65],
+         source: expectations.yaml did_agreement did:ECM_VEHICLE_SPEED max_residual_bias}
+      - {path: evidence.ws_d1.occurrences, op: eq, value: 2,
+         source: 'one binding, confirmed on two drives — a recurrence'}
+      - {path: references.ws_binding.retired_by, op: eq, value: null,
+         source: a fuel-target flash does not change a broadcast wheel-speed decode}
+      - {path: references.ws_binding.standing, op: eq, value: current, source: as above}
+      - {path: cards.now.evidence_state, op: eq, value: evaluated, source: both comparisons evaluated}
+      - {path: cards.now.conflicts, op: eq, value: 0, source: as above}
+
+negative_controls:
+  wheel-speed-scale-plus-four-percent:
+    case: flash-20260920
+    synthetic: true
+    why: >
+      The +4 % scale error expectations.yaml measured slipping past a 3 % slope
+      bound (0.0625 -> 0.065 km/h per count). The known residual bounds must
+      catch it on both drives.
+    mutation: {kind: binding_scale, signal: WHEEL_SPEED_6F7_A, scale: 0.065}
+    must_fail:
+      - evidence.ws_d1.values.difference_bias
+      - evidence.ws_d2.values.difference_bias
+  flash-record-missing:
+    case: absent-commanded-afr
+    synthetic: true
+    why: >
+      With ZS44A-20260920 dropped from the flash history the tool must not
+      land on the right calibration by luck: both captures fall back to k106.
+    mutation: {kind: drop_revision, revision: ZS44A-20260920}
+    must_fail:
+      - evidence.commanded_d2.calibration
+      - evidence.commanded_d2b.calibration
+  slice-absence-is-not-session-absence:
+    case: absent-commanded-afr
+    synthetic: true
+    why: >
+      target-phi-slice lacks PID 0x44 only because the slice kept the twin's
+      channels; the ram-study capture recorded it. "Never captured" there is a
+      claim about the fixture, and the runner must refuse it.
+    mutation: {kind: redirect_drive, from_drive: d2b-2026-09-21-rom-trace, to_drive: d3-2026-10-04-ram-study}
+    raises: SliceAbsenceError

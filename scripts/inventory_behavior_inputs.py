@@ -135,7 +135,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             continue
         ranges.merge(piece_time_ranges(frame))
         frame = with_contract_context(frame, recipes)
-        revision = registry.for_session(session.name) if registry is not None else None
+        revision = registry.for_session(session) if registry is not None else None
         per_session.append(
             {
                 "session": session.name,

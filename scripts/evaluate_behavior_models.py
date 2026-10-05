@@ -457,9 +457,28 @@ def _corrected(
     return out
 
 
-def _revision_of(registry: TuneRevisionRegistry, piece: str) -> str | None:
-    found = registry.for_session(parent_session(piece))
+def _revision_of(
+    registry: TuneRevisionRegistry, piece: str, starts: dict[str, datetime]
+) -> str | None:
+    """The revision in force when ``piece``'s session started, dated by the
+    session's first row in the frame (its data), the name only as a fallback:
+    a name can predate a clock step by hours (2026-08-03T163440, E01.6)."""
+    parent = parent_session(piece)
+    started = starts.get(parent)
+    found = registry.at(started) if started is not None else registry.for_session(parent)
     return None if found is None else found.revision
+
+
+def _session_starts(
+    ranges: dict[str, tuple[datetime | None, datetime | None]],
+) -> dict[str, datetime]:
+    starts: dict[str, datetime] = {}
+    for piece, (first, _last) in ranges.items():
+        if first is None:
+            continue
+        parent = parent_session(piece)
+        starts[parent] = min(starts.get(parent, first), first)
+    return starts
 
 
 def _input_resolution(
@@ -523,13 +542,15 @@ def evaluate(
 ) -> tuple[dict[str, Any], list[dict[str, Any]]]:
     catalog = {recipe.name: recipe for recipe in default_recipes(profile)}
     join_gap = document.drive_join_gap_seconds if document is not None else 600.0
-    drives = group_drives(piece_time_ranges(frame), join_gap_seconds=join_gap)
+    ranges = piece_time_ranges(frame)
+    starts = _session_starts(ranges)
+    drives = group_drives(ranges, join_gap_seconds=join_gap)
     drive_of_piece = {piece: d.drive_id for d in drives for piece in d.pieces}
     regimes = regime_labels(
         frame,
         document.report_regimes if document is not None else None,
         revision_of_piece=(
-            None if revisions is None else lambda piece: _revision_of(revisions, piece)
+            None if revisions is None else lambda piece: _revision_of(revisions, piece, starts)
         ),
     )
     results: dict[str, Any] = {}

@@ -176,13 +176,17 @@ def mint_channel_comparison(
     min_pairs: int = MIN_PAIRS,
     bindings_path: Path = BINDINGS_YAML,
     dids_path: Path = DIDS_YAML,
+    incident: str | None = None,
 ) -> str:
     """Compare ``a`` and ``b`` in ``session``, persist the evidence, return its id.
 
     ``vin`` and ``program_id`` are stated (``None`` = unknown);
     ``tune_registry`` is the vehicle's flash history the calibration is
     resolved from (``None``: no registry, so the calibration is unknown unless
-    the capture manifest names it).
+    the capture manifest names it). ``incident`` names the recurring
+    phenomenon this comparison is an occurrence of (E01.3): the same incident
+    measured on another drive, even through other channel specs, is a
+    recurrence (``MemoryLedger.recurrences``), never a supersession.
     """
     vehicle, calibration_conflict = comparison_identity(
         ledger.vehicle,
@@ -239,6 +243,7 @@ def mint_channel_comparison(
             valid_from=start,
             valid_to=end,
             subject=subject,
+            incident=incident,
             sources=(
                 SourceRef(
                     session=session.name,
@@ -267,6 +272,7 @@ def mint_channel_comparison(
         valid_from=start,
         valid_to=end,
         subject=subject,
+        incident=incident,
         sources=(
             SourceRef(
                 session=session.name,

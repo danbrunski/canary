@@ -277,7 +277,7 @@ primitives. Audit these before introducing a schema or store.
   superseded records. Test:
   `test_a_retracted_prediction_and_outcome_stay_on_the_card_labelled`.
 
-- [ ] **E01.6 — Commit known-answer investigation cases.**
+- [x] **E01.6 — Commit known-answer investigation cases.**
   Preserve compact real evidence inputs plus tool-generated expectations for
   absent channels, misleading correlation, calibration change, recurrence
   and retraction. Include the project retractions as narratives with links
@@ -286,3 +286,58 @@ primitives. Audit these before introducing a schema or store.
   **Accept:** the real analysis-to-store-to-card path reproduces each known
   disposition and reference; a negative control fails. Missing original
   inputs are named gaps, and synthetic cases are labelled as such.
+  *Done 2026-10-04:* `tests/fixtures/ground_truth/investigation_cases.yaml`
+  (`canary-investigation-cases/1`, loaded by `src/analysis/known_cases.py`)
+  declares drives, then incidents, then cases. **Drives** (4) are each a
+  committed slice plus `full_session` facts counted over every chunk of the
+  original local session (`tools/make_investigation_cases.py
+  --verify-sources` re-counts them; all four matched): `drive-slice`
+  (2026-08-03T163440), `did-speed-slice` (rom-trace 09-21T142926), new
+  `rom-trace-absent-slice` (rom-trace 09-21T195647, 19 KiB, made with
+  `tools/make_ground_truth_fixture.py`), `target-phi-slice` (ram-study
+  10-04). **Incidents** (9) carry narrative, links and `gaps`; the schema has
+  no disposition field, every incident a step names must be declared, and an
+  incident with no case must name its gap (the 0x6F7 wheel-speed agreement,
+  whose occurrences are the flash case's evidence; achieved-Hz wall-clock, Mode 22 "session cycling", "K responds 1:1",
+  RAM word ±14 % ratio drift, 0x1102 K-line table → linked to
+  `test_did_agreement_can_fail`). **Cases** (3 real, one per incident; an
+  incident cannot have two; recurrence occurrences must be on different
+  drives): `absent-commanded-afr` (absent_channel + recurrence: PID 0x44 on
+  two rom-trace captures → `unevaluable`/`missing_input`, 2 occurrences,
+  card `unevaluable` with a capture next-measurement, calibration
+  ZS44A-20260920), `ecm-calc-load-b` (misleading_correlation + retraction:
+  the pre-b374ba4 catalog excerpt `ecm-calc-load-b-bindings.yaml` gives
+  0x233:4~0x23D:3 r² 0.926 on same-instant pairs, against obd:ENGINE_LOAD
+  r² 0.025, while ECM_RPM_23D vs obd:RPM is slope 0.9998 / r² 0.9987; the
+  as-of card shows the old belief current and supported, today superseded,
+  the binding reference retracted), `flash-20260920` (calibration_change +
+  recurrence: the tracked flash recorded as an instant intervention with its
+  image hash; "what preceded the flash" = the 08-03 wheel-speed evidence,
+  after = the 09-21 one; the wheel-speed reference is not retired by a
+  fuel-target flash; both drives 1:1 within the expectations.yaml bounds).
+  `known` checks read tool output only and name their source; the
+  tool-generated snapshot `investigation_cases.expected.yaml` (`--write`;
+  refuses to write over a failing known answer) holds everything else the
+  chain says. **Negative controls** (synthetic): WHEEL_SPEED_6F7_A scale
+  +4 % fails both residual bounds; dropping ZS44A-20260920 from the flash
+  history fails both calibrations; pointing the absent case at
+  `target-phi-slice` raises `SliceAbsenceError` (PID 0x44 has 329 rows in
+  the full ram-study session — the slice dropped it). `mint_channel_comparison`
+  (and `tools/mint_comparison.py --incident`) gained an optional `incident`.
+  Evidence: `tests/test_investigation_cases.py` (15 passed, ~5 s serial
+  `-n0` on the laptop, 2026-10-04).
+  **Defect found and fixed at the shared layer:** the calibration resolver
+  dated a session by its directory name; 2026-08-03T163440 is named
+  6 h 37 min before its first sample (23:11:54Z, clock stepped after boot),
+  so the k106 drive resolved to ZS44A-k105. `TuneRevisionRegistry.for_session`
+  / `resolve_session_revision` now date a session directory by its first
+  stored sample (`src.storage.session_files.session_first_sample`, footers of
+  the earliest chunk only) via `session_dated_at`, falling back to the name
+  only with no telemetry; every `resolve_session_revision` caller inherits it,
+  `scripts/evaluate_behavior_models.py` dates pieces by their parent's first
+  frame row, `scripts/refit_behavior_models.py`'s flash-span check uses data
+  time first, `scripts/inventory_behavior_inputs.py` passes the directory.
+  `tests/test_analysis_tuning.py` asserted the wrong k105 answer and now pins
+  the data-dated one (`test_a_session_is_dated_by_its_first_sample_not_its_name`);
+  the two strict-defect checks are ordinary checks; the k106 note in
+  `tune_revisions.yaml` is corrected.

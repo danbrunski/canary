@@ -1,0 +1,61 @@
+# The broadcast catalog as it stood before the ECM_CALC_LOAD_B retraction —
+# an excerpt, for the known-answer investigation case `ecm-calc-load-b`
+# (investigation_cases.yaml). Not a catalog anyone should decode with.
+#
+# Recovered verbatim (signal fields only; evidence/notes trimmed to the
+# claim) from data/bindings.yaml at 2e47b64 (= b374ba4^, git blob
+# fc085afd0b3ba4e5f34afd9a64eddf59565d728f):
+#   git show b374ba4^:data/bindings.yaml
+# b374ba4 retracted ECM_CALC_LOAD_B: byte 3 of 0x23D is the low byte of the
+# 16-bit ECM_RPM_23D counter (bytes 3-4, little-endian), so its per-window
+# mean sits near mid-scale whatever the engine does and matched the other
+# byte's mean "in every window". ECM_CALC_LOAD_A (0x233:4) is still in the
+# live catalog, demoted to `low` on 2026-08-08 (neither load nor pulse width).
+schema_version: 1
+
+vehicle:
+  make: Nissan
+  model: Xterra
+  year: 2008
+  engine: VQ40DE
+  transmission: manual_6speed
+
+bus:
+  bitrate: 500000
+  channels:
+    - name: vehicle_can
+      ids_observed: 29  # in session 2026-05-11T152858
+
+signals:
+  - name: ECM_CALC_LOAD_A
+    module: ECM
+    can_id: 0x233
+    byte_start: 4
+    byte_length: 1
+    byte_order: big
+    scale: null
+    offset: null
+    unit: unknown
+    confidence: medium
+    evidence:
+      - session: 2026-05-11T152858
+        method: cross_broadcast_pairing
+        finding: >
+          Mean values are IDENTICAL to 0x23D:3 in every window, indicating
+          the ECM publishes this value on two CAN IDs simultaneously.
+
+  - name: ECM_CALC_LOAD_B
+    module: ECM
+    can_id: 0x23D
+    byte_start: 3
+    byte_length: 1
+    byte_order: big
+    scale: null
+    offset: null
+    unit: unknown
+    confidence: medium
+    evidence:
+      - session: 2026-05-11T152858
+        method: cross_broadcast_pairing
+        finding: Identical means to ECM_CALC_LOAD_A (0x233:4) in every window.
+    notes: Cross-broadcast duplicate of ECM_CALC_LOAD_A.
