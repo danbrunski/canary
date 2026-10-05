@@ -68,7 +68,7 @@ The lookup at `0x0269AC` calls three helpers:
 | The load byte at `0xFFFF103E` is compared **directly** with the raw BFS axis bytes (`0x34…0x80` at `0xC894`), with no scale or offset. | Verified | The search at `0x027114`. |
 | The rpm word at `0xFFFF11D8` counts 12.5 rpm per unit and is compared with `axis byte << 2`, so an axis byte × 4 × 12.5 = axis × 50 rpm. | Verified | The search at `0x027194`, which agrees with the rpm axis decode (raw × 50). |
 | Interpolation is bilinear over 8 rpm rows × 8 BFS columns, row by row. Past either end it **clamps** to the first or last row and column. | Verified | `0x026F40`. The clamp is the edge behaviour P02.15 found from UpRev logs. |
-| `0xFFFF103E = min(255, BFS × 128 / 44019)`, where BFS is the word at `0xFFFF103A` (the variable DID `0x1208` reports). One X count is 343.9 BFS counts, which is **0.1685 ms**. | Verified | The code, plus a capture: X equals floor(BFS × 128 / 44019) on 1,564 of 1,564 same-read rows, while control divisors fail. It matches P02.14's fitted 0.1695 ms per count. |
+| `0xFFFF103E = min(255, BFS × 128 / 44019)`, where BFS is the word at `0xFFFF103A` (the variable DID `0x1208` reports; it includes the Fuel Comp multiplier, see "how BFS is formed" below). One X count is 343.9 BFS counts, which is **0.1685 ms**. | Verified | The code, plus a capture: X equals floor(BFS × 128 / 44019) on 1,564 of 1,564 same-read rows, while control divisors fail. It matches P02.14's fitted 0.1695 ms per count. |
 | **44019 is UpRev's "Load Point Scaler".** It sits at `0x9416` in the calibration block, and a copy sits in each map slot at `+0x760`, just before K. | Verified (value at both addresses); which copy the code reads is inferred to be `0x9416` | The bytes. Editing it moves every operating point along the Target AFR and timing load axes, which is the edit UpRev warns against doing by hand. |
 
 ### Diagnostic service handlers
@@ -176,42 +176,94 @@ every 5 s, about 190 samples of each). Pairing used acquisition time.
 | Pedal-switch flag: bit 0 of `0xFFFF2841` sets near full pedal and forces Target AFR's last load column | Set on 2 samples, at broadcast pedal 4.285 V and 4.582 V (full scale 4.58 V). Never set at or below 3.795 V, the highest pedal seen while it was clear. While set, the commanded φ RAM word read **exactly 1.1640625** (`0x95/128`, the last-column value) while the X trace sat mid-table (~100 counts). | **Confirmed live.** The threshold lies between 3.80 and 4.29 V, which fits the 2026-09-18 data figure of ≥ ~227/255. |
 | Timing-trim select flag at `0xFFFF2842` | Constant 4 (bit 2) all drive | Steady; which value selects which trim is still unconfirmed |
 | `X = floor(BFS × 128 / 44019)` | 168 of 194 same-read pairs exact. The rest are within ±1–4 counts, **both signs**, at transients. | Formula **confirmed**. The misses fit the two words being updated at different points in the ECM's loop, not a wrong formula. (P02.14's 1,564 of 1,564 came from a capture with steadier conditions.) |
-| Fuel Comp x input at `0xFFFF118A` is a load-like quantity | Tracks BFS (r = 0.98 against DID `0x1208`, 0.89 against the RAM word). It is not a fixed scaling: the per-sample ratio to BFS/256 spreads from 1.43 to 2.85, and a straight-line fit has a +28 intercept. | **Not air: a throttle-based (alpha-N) fill estimate.** Its writer has been decoded (below). Throttle flow per rev, passed through a saturating curve, is why its ratio to BFS is not fixed. On steady points it tracks throttle/rpm (r = 0.92), not MAF/rpm (r = 0.36). |
+| Fuel Comp x input at `0xFFFF118A` is a load-like quantity | Tracks BFS (r = 0.98 against DID `0x1208`, 0.89 against the RAM word). It is not a fixed scaling: the per-sample ratio to BFS/256 spreads from 1.43 to 2.85, and a straight-line fit has a +28 intercept. | **Not air: a throttle-model (alpha-N) relative fill** (decoded below). Throttle area over rpm, through a saturating curve, which is why its ratio to BFS is not fixed. On steady points it tracks throttle/rpm (r = 0.92), not MAF/rpm (r = 0.36). Fuel Comp, indexed on it, is applied *inside* BFS. |
 
-### Fuel Comp load input `0xFFFF118A`: its writer
+### Fuel Comp load input `0xFFFF118A`, and how BFS is formed
 
-Decoded from `out/full.asm` by another session (2026-10-04); Ghidra was not
-opened. `FUN_0003c3a4` is the only writer, and it runs five steps in order:
+Two independent passes on 2026-10-04, reconciled:
+- a listing-only trace of `out/full.asm` (canary-60), with a steady-point data check;
+- a Ghidra decompiler pass on the same image.
 
-| Step | Computes |
-|---|---|
-| `0x3c3ba` | `w227C = clamp16(cal byte 0x8D25 (158) × rpm word 0xFFFF1210)` |
-| `0x3c3e4` | `w116A = clamp16(0xDC1D00 / w227C)` through divide helper `0x21d6c`, so `w116A ∝ 1/rpm` |
-| `0x3c416` | `w1124 = w2C32`, or cal constant `0x90BE` = 782 when bit 2 of `0xFFFF484E` is set (probably a sensor-fault fallback; cal byte `0x8ACF` bit `0x40` inverts the test). `w2C32` is written at `0x3c5c8`: curve `0xDD94` (32 rising points, via `0x26D58`) of `4 × w2CC8`, minus `w63FC`, floored at 0. `w2CC8` comes from `w2CCE` (the word Mode 01 PID 0x11 throttle position reads) or `w2CD0`, chosen by flag `0xFFFF28B5` (`0x3f670`). So `w1124` is a **throttle-derived flow, not MAF**. |
-| `0x3c444` | `X = w116A × (w1124/512 + w139E/2048)`, clamped to `0xFFFF`, also stored at `0xFFFF2136`. Below `0x3C00`, lookup `0x26C28` on table `0xEAEC` with `X × 4`; otherwise on `0xEACC` with `X − 0x3C00`. Each table is 16 u16 entries indexed by `x >> 12`, interpolated. The result `>> 8` is stored at `0xFFFF118A`; `0xFFFF114A` holds new − old. |
-| `0x3c4d0` | (runs next; part of the E05.2 trace) |
+They agree except where marked. Before decompiling, the project was repaired:
+- the flash block had been marked writable, so literal pools were not being
+  propagated, and 37,629 instructions sat outside any function;
+- after the repair there are 2,532 functions, and the routine called
+  `FUN_0003c4d0` is split at `0x3c62c` and `0x3cc3c`.
 
-The curve gives 5, 64, 109, 142, 162, 175, 183, 189 … 205 at `0x3C00`, then
-rises slowly to a cap of 224. So `0xFFFF118A` is throttle flow per revolution
-through a saturating fill curve: an **alpha-N estimate of cylinder fill**. It
-is linear while the throttle limits flow and flattens as manifold pressure
-nears ambient. It is not Qa/Ne from the MAF. Steady points of the
-ram-study capture agree: r = 0.92 against throttle/rpm and 0.36 against
-MAF/rpm. At 3,684 rpm, 43 g/s and 18 % throttle it read 51, the same as
-idle, where throttle/rpm is nearly equal. UpRev's name for the axis,
-"Volumetric Flow Ratio", is a fair description; only UpRev's axis labels
-are swapped. So Fuel Comp corrects fuel by **throttle fill × rpm**, while
-BFS and Target AFR's X come from the MAF. A Fuel Comp cell is addressed by
-throttle angle at a given rpm, not by airflow.
+**MCU:** SH7058 family, high confidence. The A/D helper `0x2EDBC` uses ADCSR/ADCR at
+`0xFFFFF818/38/58` with 10-bit results, and the flash is 1 MiB.
 
-An earlier version of this decode read `w1124` as MAF airflow. That was
-wrong, and `b25c130`'s commit message still says so.
+**The load byte.** `FUN_0003c3a4` is its only writer:
 
-Still open: what `w139E` is (an extra flow term, written at `0x6e2c4` from a
-32-bit accumulator `>> 18`, × cal `0x82FE` (144) `>> 7`; plausibly idle
-bypass), what `w2CD0` is, and the units of curve `0xDD94` and `w2CC8`, hence
-any absolute scale. The decode is also recorded in
-`data/dids.yaml` (`ECM_FUEL_COMP_X_INPUT` evidence).
+    X = w116A × (w1124/512 + w139E/2048)       (0x3c444, clamped to 0xFFFF; copy at 0xFFFF2136)
+      = 2229 × (A + purge/4) / rpm             (rpm in rpm; 0xDC1D00 × 12.5 / (512 × 158) = 2229.0)
+    0xFFFF118A = curve(X) >> 8                 (u16 tables 0xEAEC below X = 0x3C00, 0xEACC above)
+
+| Term | What it is | Confidence |
+|---|---|---|
+| `w116A = 0xDC1D00 / clamp16(158 × rpm word)` | 1/rpm. The product saturates at about 5,185 rpm; above that X stops falling with rpm. 158 always multiplies an rpm word; 158 ≈ 3,954 cc / 25 is speculation, and `0xDC1D00` has no clean breakdown. | Verified (arithmetic); meaning open |
+| `A = w2C32 = 0xDD94[4 × w2CC8] − w63FC`, floored at 0 | **Effective throttle opening area.** Table `0xDD94` has 32 rising u16 breakpoints at ROM `0xEE6A` (GBR `0xEDCA` + `0xA0`), input 4 × counts above closed (0–3,172, which is 0–97 %), output 112 → 48,060, convex. The electronic-throttle code (`0x7248c`, `0x706de`) runs the same pair in reverse to turn a target area into a target position. Relative units only. | Verified |
+| `w2CC8` | **Throttle sensor A**: A/D channel 6 → `w2B0C` (DID `0x120F`) minus the learned closed position `w4C72` → `w2CCE`. Mode 01 PID `0x11` = `w2CCE × 100/321` (8.19 counts per %). Sensor B (channel 19, inverted, minus `w4C74` → `w2CD0`, DID `0x1210`, PID `0x47`) replaces it only when sensor A's fault items are set and B is healthy (`0xFFFF28B5` bits 7:6, set by `0x72528`). | Verified |
+| `w63FC = min(w3CB2 + w5EA6, 1185)` | Idle-speed feedback integrator plus a non-volatile learned value (with an inverted backup copy): idle air learning, in area units. The air model subtracts it; the throttle target adds it. | Structure verified; name inferred |
+| `w139E` | **EVAP purge**, from `0x6a52c`: 1.125 × the purge byte that PID `0x2E` reports (`0xFFFF272E`), 0.5 % steps. It is added in X as purge/4 and subtracted from the throttle target area. | Verified |
+| `w1124 = 782` (cal `0x90BE`) | Electronic-throttle limp-home area, used when bit 2 of `0xFFFF484E` is set. That bit is set by `0x8e58c` from the TPS1, TPS2 and correlation diagnostic items (`0xDF`–`0xE3`, plus unidentified item `0x11C`). Not a MAF fault. Those items most likely map to P0122/P0123/P0222/P0223/P2135, since the order matches the table at `0x10D40`. | Bit and items verified; DTC names inferred |
+
+So `0xFFFF118A` is a **throttle-model ("alpha-N") relative fill**: throttle
+effective area, minus learned idle air, plus purge area, over roughly
+displacement × rpm, through a saturating curve. It reads 0–224 in relative
+units, and has no MAF, barometric or temperature input. At full throttle it
+reaches 224 only below about 1,660 rpm. The 0x3C00 split is a resolution
+change, not a knee. UpRev's "Volumetric Flow Ratio" % (raw × 100/256) is a
+display convention.
+
+**Where Fuel Comp acts, and how BFS is formed** (decompiler, verified; the
+listing pass reached the same multiply):
+
+    Tp     = K (0xFFFFB7A2) × Qa / rpm         or the cranking coolant curve 0xEEBA
+    FC     = Fuel Comp[rpm, 0xFFFF118A] → 0xFFFF225A (128 = 1.0)     read at 0x3d0f4
+    w105C  = Tp × FC / 128                     (0x3c7b4, unconditional; enabled by cal 0x8AE1 bit 5)
+    w20A6  = (4·w105C·a + previous·(1 − a)) >> 15                    manifold-filling filter
+    BFS    = 0xFFFF103A = min(w20A4 + transient w105A, D8B3[rpm])    DID 0x1208
+
+- **Fuel Comp is inside BFS.** Editing it moves BFS (DID `0x1208`). It also
+  moves the Target AFR X byte (`0xFFFF103E`) and the timing-trim BFS-X axis,
+  exactly as K does. A Fuel Comp edit is not confined to fuel quantity.
+- **BFS has an rpm-dependent ceiling**, table `D8B3`.
+- **A MAF fault** (item `0x114`) switches BFS to table `0x95E5`.
+- The `0xFFFF2CB6` path is the alternative behind cal `0x8AE1` bit 5. It is
+  dead in this calibration. `0x2d5f4` only seeds these values at init.
+
+**Other readers of `0xFFFF118A`:**
+- the 8×8 manifold-filling time-constant tables `0x9B99`/`0x9BD9` (rpm × load byte);
+- a transient flag (`|Δ over 5 cycles| ≥ 11` sets `0xFFFF283C` bit 2);
+- a near-full-throttle flag (set at ≥ 202, cleared below 200) that gates the BFS blend;
+- a learning loop at `0x39e40` stepping `0xFFFF4C58` by the sign of `BFS × 51/8192 − 0xFFFF118A` (purpose unknown);
+- curve `0xCEB3`;
+- EVAP purge scheduling, through a copy at `0xFFFF10FE`.
+
+`0xFFFF2136`, `0xFFFF114A` and `0xFFFF2C30` have no code readers.
+
+**Data check (listing pass):** the reimplemented chain reproduces the logged
+byte at steady points of the ram-study capture. The median ratio is 1.000 at
+idle (n = 38) and 1.027 off idle (n = 22), and wrong x-scalings and rpm
+powers miss. Against BFS, `byte / (BFS × 51/8192)` is about 1.02 near full
+load at 81 kPa and about 1.4 at idle and cruise.
+
+**Catalog consequences** (owned by the data files):
+- DID `0x1110` is commanded EVAP purge, the same byte as PID `0x2E`, not intake cam duty.
+- DIDs `0x120F`/`0x1210` are 4.883 mV per count, so a 0.005 V scale is 2.4 % high.
+- PID `0x11` → `0xFFFF2CCE` is verified, and PID `0x47` is sensor B.
+- An earlier version of this section said cal byte `0x8ACF` inverts the fault
+  test, and that `w1124` is MAF airflow. Both were wrong.
+
+**Open:**
+- one example (3,684 rpm, 18 % throttle, byte 51) computes to about 100 by
+  hand with idle air and purge at zero. Settle it with one memory window of
+  `0xFFFF2CC8, 2C32, 63FC, 139E, 116A, 2136, 118A, 225A, 105C, 103A`;
+- the absolute units of the area and of the byte;
+- `0xDC1D00`;
+- diagnostic item `0x11C`;
+- the purpose of `0xFFFF4C58`.
 
 ## Open
 

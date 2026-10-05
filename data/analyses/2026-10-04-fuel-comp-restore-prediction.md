@@ -62,3 +62,37 @@ Caveats:
 3. The next drives: WOT pulls across rpm plus steady cruise, logging the
    load byte, rpm, BFS, injector pulse, commanded φ, both A/F paths and STFT.
    Compare against the 2026-10-04 and 09-21..23 baselines.
+
+## Addendum, after the flash (2026-10-04 evening)
+
+Added after the flash and the read-back, and before any drive on
+ZS44A-20261004. **Everything above is unchanged** and remains the
+prediction of record. This section records a mechanism learned afterwards
+that changes how the result must be read. Source: the decompiler and listing
+passes in `docs/ecu-firmware-analysis.md` ("how BFS is formed").
+
+- **Fuel Comp is applied inside BFS**, before the manifold filter:
+  `BFS = min(filter(K·Qa/rpm × FC/128) + transient, D8B3[rpm])`. "Nothing
+  else: Target AFR, timing and K are untouched" is true of the tables, not
+  of their lookups. Where Fuel Comp changed, these move by the same factor:
+  - BFS (DID `0x1208`);
+  - the Target AFR X byte (`0xFFFF103E`, `floor(BFS·128/44019)`);
+  - the timing-trim BFS-X axis.
+  Commanded φ can therefore also change at high load, wherever the shifted X
+  crosses a Target AFR breakpoint. At X ≥ the last breakpoint (BFS ≥
+  21.57 ms) the column is clamped and it cannot.
+- **Reading the refutation criteria:** a shift in BFS, the X trace or the
+  timing cell, in the load-byte bands where Fuel Comp changed, is part of
+  the predicted effect. It is not "a change anywhere Fuel Comp didn't
+  change". Outside those bands the criterion stands.
+- **The fuel-change table stands** for steady state: injected fuel scales
+  with BFS, so by the Fuel Comp ratio. Add any commanded-φ step from the
+  point above.
+- **The load byte is now decoded:** a throttle-model relative fill (throttle
+  area over rpm), not airflow. The bands (< 64, 64–144, ≥ 144) are in its raw
+  counts as before. The full-throttle cases above 4,000 rpm sit at about
+  207–217.
+- **Behavior models:** the shipped air-charge surface models DID `0x1208`.
+  It was fitted on 20260920, and BFS now includes a different Fuel Comp at
+  high load. Refit it on 20261004 drives before trusting its high-load
+  residuals.
