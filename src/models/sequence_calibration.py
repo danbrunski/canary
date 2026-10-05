@@ -170,6 +170,11 @@ class SequenceThresholdCalibration:
     #: Independent blocks behind ``global_error`` (its ``count``); the
     #: finest quantile these thresholds can resolve is about ``1 - 10/n``.
     effective_window_count: int | None = None
+    #: A02.3 — the alert level chosen from the alert budget on held-out
+    #: drives (:mod:`src.models.budget_level`): the budget, the drives, the
+    #: level every verdict band was scaled by, and the rate it achieved there.
+    #: ``None`` when no level was set (older manifests, standalone trainers).
+    alert_budget: Mapping[str, Any] | None = None
 
     def threshold_for_mode(self, mode: str | None) -> float:
         """The global-score band for a window whose last row is in ``mode``.
@@ -217,6 +222,8 @@ class SequenceThresholdCalibration:
             out["block_rows"] = self.block_rows
         if self.effective_window_count is not None:
             out["effective_window_count"] = self.effective_window_count
+        if self.alert_budget is not None:
+            out["alert_budget"] = dict(self.alert_budget)
         return out
 
     @classmethod
@@ -266,6 +273,7 @@ class SequenceThresholdCalibration:
                 if data.get("effective_window_count") is None
                 else int(data["effective_window_count"])
             ),
+            alert_budget=(None if data.get("alert_budget") is None else dict(data["alert_budget"])),
         )
 
 

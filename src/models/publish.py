@@ -41,6 +41,9 @@ SEQUENCE_SOURCE = "lstm_autoencoder"
 #: served one. ``_``-prefixed, so neither the ModelManager nor training
 #: discovery reads it.
 REFUSED_PREFIX = "_refused-alert-budget-"
+#: Prefix of the directory a sequence artifact is set aside in when no alert
+#: level could be set from the evaluation holdout (A02.3, ``budget_level``).
+UNBUDGETED_PREFIX = "_refused-unbudgeted-"
 
 
 def staging_dir(served: Path) -> Path:
@@ -98,10 +101,13 @@ def publish_staged(staged: Path, served: Path) -> None:
     staged.rmdir()
 
 
-def set_aside_refused(staged: Path, served: Path) -> Path:
-    """Keep a refused artifact for inspection, out of every served path."""
+def set_aside_refused(staged: Path, served: Path, *, prefix: str = REFUSED_PREFIX) -> Path:
+    """Keep a refused artifact for inspection, out of every served path.
+    ``prefix`` names the refusal and must start with ``_`` so nothing reads it."""
+    if not prefix.startswith("_"):
+        raise ValueError(f"a set-aside prefix must start with '_': {prefix!r}")
     stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
-    target = served.parent / f"{REFUSED_PREFIX}{stamp}-{served.name}"
+    target = served.parent / f"{prefix}{stamp}-{served.name}"
     staged.replace(target)
     return target
 
@@ -110,6 +116,7 @@ __all__ = [
     "ISOLATION_FOREST_SOURCE",
     "REFUSED_PREFIX",
     "SEQUENCE_SOURCE",
+    "UNBUDGETED_PREFIX",
     "artifact_name",
     "publish_staged",
     "sequence_artifact_name",

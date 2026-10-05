@@ -106,10 +106,19 @@ from src.models.benchmark_gate import (
     diff_reports,
     regression_summary,
 )
+from src.models.budget_level import (
+    BUDGET_LEVEL_INCIDENT,
+    BudgetHoldoutError,
+    BudgetHoldoutTooSmallError,
+    set_artifact_budget_level,
+    stamp_unbudgeted,
+    unbudgeted_record,
+)
 from src.models.evaluation import (
     MIN_CALIBRATION_HOLDOUT_SESSIONS,
     HoldoutSplit,
     NonDefaultProfileTrainingError,
+    PersistenceSpec,
     holdout_by_drive,
     pick_calibration_holdouts,
     pick_evaluation_holdouts,
@@ -121,10 +130,11 @@ from src.models.golden_baselines import (
     golden_baselines_path,
     read_golden_baselines,
 )
-from src.models.manifest import ManifestValidationError
+from src.models.manifest import ManifestValidationError, manifest_path_for
 from src.models.publish import (
     ISOLATION_FOREST_SOURCE,
     SEQUENCE_SOURCE,
+    UNBUDGETED_PREFIX,
     artifact_name,
     publish_staged,
     sequence_artifact_name,
@@ -191,9 +201,14 @@ class RetrainRun:
     holdout_split: HoldoutSplit | None = None
     #: Trainer name → ``ok`` / ``failed: …`` / ``skipped …`` / ``refused: …``.
     results: dict[str, str] = field(default_factory=dict)
-    #: Where each alert-role source trains before the budget gate (A06.5). A
-    #: source absent here trains straight into its served directory.
+    #: Where each source trains before it is published: an alert-role source
+    #: waits for the budget gate (A06.5), the sequence artifact always waits
+    #: for its alert level (A02.3). A source absent here trains straight into
+    #: its served directory.
     staging: dict[str, Path] = field(default_factory=dict)
+    #: Sources whose staged artifact is set aside, never published, and why
+    #: (A02.3: no alert level could be set from the evaluation holdout).
+    set_aside: dict[str, str] = field(default_factory=dict)
 
     @property
     def sequence_backend(self) -> SequenceTrainingBackend:
@@ -332,6 +347,15 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         "channel never observed), or an IF mode whose threshold rests on fewer than "
         "min_calibration_drives_per_mode drives (A04.4). Refused without this (A02.2); "
         "the reason and the violations are stamped into the manifest.",
+    )
+    add_override_reason_arg(
+        parser,
+        "--accept-unbudgeted-thresholds",
+        help="Publish a sequence model whose alert level could not be set from the "
+        "alert budget on the evaluation holdout (A02.3: no evaluation drives, or too "
+        "little engine time on them to resolve 1 alert per engine-hour). Refused "
+        "without this, and the artifact is set aside beside the served one; the reason "
+        "and the refusal are stamped into the manifest's thresholds.alert_budget.",
     )
     parser.add_argument(
         "--no-calibration-holdout",
@@ -573,6 +597,9 @@ def _main(args: argparse.Namespace) -> int:
     # ingestion waits for the benchmark gate so each record can link the report
     # the gate produced against that artifact.
     ledger_pending = _run_trainers(run, inputs)
+    # A02.3: the sequence artifact's alert level comes from the alert budget on
+    # the evaluation holdout, before either gate scores it.
+    _set_sequence_budget_level(run)
 
     benchmark_report_path: Path | None = None
     benchmark_diff: dict[str, Any] | None = None
@@ -965,7 +992,12 @@ def _stage_alert_role_outputs(run: RetrainRun) -> set[str]:
     """A06.5: an alert-role artifact trains into a staging directory and
     reaches the served one only through the alert-budget gate, so the daemon's
     ModelManager can never hot-swap an artifact the gate then refuses. Returns
-    the gated sources."""
+    the gated sources.
+
+    A02.3: the sequence artifact is staged whatever its role. Its alert level
+    is set after training, from the evaluation holdout, and an artifact with
+    no level is refused; the daemon must never hot-swap the pre-level
+    thresholds in between, nor one the level then refuses."""
     gated = set(
         alert_role_sources(
             run.config.models.roles.by_source(),
@@ -979,7 +1011,10 @@ def _stage_alert_role_outputs(run: RetrainRun) -> set[str]:
             ],
         )
     )
-    for source in sorted(gated):
+    staged = set(gated)
+    if not run.skip_sequence:
+        staged.add(SEQUENCE_SOURCE)
+    for source in sorted(staged):
         run.staging[source] = staging_dir(run.served_dir(source))
     return gated
 
@@ -1044,6 +1079,75 @@ def _run_trainers(run: RetrainRun, inputs: TrainingInputs) -> list[Path]:
     return produced
 
 
+def _set_sequence_budget_level(run: RetrainRun) -> None:
+    """A02.3: set the fresh sequence artifact's alert level from the alert
+    budget on the evaluation holdout (``src.models.budget_level``).
+
+    The level scales every verdict band so the served verdict meets
+    ``V1_ALERTS_PER_HOUR_BUDGET`` on the evaluation drives, and the manifest
+    records the budget, the drives and the achieved rate. No evaluation
+    holdout, or too little engine time on it to resolve the budget, refuses
+    the artifact: it is set aside (``_refused-unbudgeted-*``), never served,
+    unless ``--accept-unbudgeted-thresholds`` states a reason, which is
+    stamped instead. A session the artifact trained or calibrated on is
+    refused by the artifact's own manifest, whatever this run passes.
+    """
+    args, config = run.args, run.config
+    name = run.seq_model_type
+    if run.skip_sequence or run.results.get(name) != "ok":
+        return
+    artifact = run.train_dir(SEQUENCE_SOURCE) / sequence_artifact_name(config, name)
+    if not artifact.exists():
+        log.warning("no sequence artifact at %s to set an alert level on", artifact)
+        return
+    override = args.accept_unbudgeted_thresholds
+    try:
+        if not run.evaluation_sessions:
+            raise BudgetHoldoutTooSmallError(
+                "no evaluation holdout to set the alert level from (a corpus too small "
+                "to spare one after calibration, or --no-calibration-holdout); "
+                f"refused because of {BUDGET_LEVEL_INCIDENT}"
+            )
+        frame = build_feature_frame(
+            run.evaluation_sessions,
+            config,
+            bindings_path=args.bindings,
+            cache_dir=args.feature_cache,
+            force_rebuild=args.rebuild_feature_cache,
+        )
+        level = set_artifact_budget_level(
+            artifact, frame, config, persistence=PersistenceSpec.from_config(config)
+        )
+    except BudgetHoldoutError as exc:
+        if override is not None:
+            log.warning(
+                "sequence alert level not set; published under the "
+                "unbudgeted-thresholds override %r: %s",
+                override,
+                exc,
+            )
+            stamp_unbudgeted(artifact, unbudgeted_record(reason=str(exc), override_reason=override))
+            return
+        log.error("sequence alert level refused: %s", exc)
+        run.results[name] = f"failed: alert level refused: {exc}"
+        run.set_aside[SEQUENCE_SOURCE] = str(exc)
+        return
+    except Exception as exc:  # noqa: BLE001 - like a trainer failure: surface, keep the IF
+        log.exception("sequence alert level failed", extra={"error": str(exc)})
+        run.results[name] = f"failed: alert level: {exc}"
+        run.set_aside[SEQUENCE_SOURCE] = str(exc)
+        return
+    log.info(
+        "sequence alert level set from the alert budget",
+        extra={
+            "level": level.level,
+            "achieved_per_engine_hour": level.achieved_per_engine_hour,
+            "engine_hours": level.engine_hours,
+            "holdout_sessions": list(level.sessions),
+        },
+    )
+
+
 def _publish_or_refuse(
     run: RetrainRun,
     budget_check: AlertBudgetCheck,
@@ -1059,13 +1163,23 @@ def _publish_or_refuse(
     sha256 (src/models/role_gate.py).
     """
     refused_dirs: dict[Path, Path] = {}
-    for source in sorted(gated):
+    for source in sorted(run.staging):
         staged = run.train_dir(source)
         served = run.served_dir(source)
+        if source in run.set_aside:
+            # A02.3: no alert level; kept for inspection, never served.
+            if staged.exists():
+                refused_dirs[served] = set_aside_refused(staged, served, prefix=UNBUDGETED_PREFIX)
+            continue
         if source not in published:
             # The trainer failed: nothing to publish or keep.
             if staged.exists():
                 shutil.rmtree(staged)
+            continue
+        if not staged.exists():
+            continue
+        if source not in gated:
+            publish_staged(staged, served)
             continue
         write_artifact_verdict(
             budget_check, source, staged / artifact_name(run.config, source, run.seq_model_type)
@@ -1365,8 +1479,13 @@ def _run_benchmark_gate(
     # produced a benchmark with no LSTM coverage at all. A sequence detector
     # disabled in config is not scored, as before.
     written = run.train_dir(SEQUENCE_SOURCE) / sequence_artifact_name(config, run.seq_model_type)
+    # A refused sequence artifact (A02.3, no alert level) is not this run's to score.
     sequence_path = (
-        written if resolve_sequence_backend(config) is not None and written.exists() else None
+        written
+        if resolve_sequence_backend(config) is not None
+        and written.exists()
+        and SEQUENCE_SOURCE not in run.set_aside
+        else None
     )
     try:
         # Listed before this run writes its own report into the same directory.
@@ -1392,6 +1511,11 @@ def _run_benchmark_gate(
             if split is not None
             else {"calibration": [], "evaluation": [s.name for s in evaluation_sessions]}
         )
+        # A02.3: the sequence level was chosen on these same drives, so its
+        # false-alarm rate here is in-sample to the level; say so in the report.
+        level = _sequence_alert_level(sequence_path)
+        if level is not None:
+            report["sequence_alert_level"] = level
 
         diff: dict[str, Any] | None = None
         first_reason: str | None = None
@@ -1423,6 +1547,9 @@ def _run_benchmark_gate(
             }
         if diff is not None:
             report["regressions"] = diff
+            for detector, why in sorted((diff.get("incomparable_detectors") or {}).items()):
+                # A02.3: e.g. the sequence detector, in-sample on its level's drives.
+                log.warning("benchmark gate: %s not compared: %s", detector, why)
             for line in regression_summary(diff) if diff["regressed"] else ():
                 log.error("benchmark gate: %s", line)
 
@@ -1431,6 +1558,18 @@ def _run_benchmark_gate(
     except Exception as exc:  # noqa: BLE001 — the gate is best-effort, not a retrain crash
         log.exception("benchmark gate failed", extra={"error": str(exc)})
         return None, None
+
+
+def _sequence_alert_level(artifact: Path | None) -> dict[str, Any] | None:
+    """The ``thresholds.alert_budget`` record in ``artifact``'s manifest."""
+    if artifact is None:
+        return None
+    try:
+        manifest = json.loads(manifest_path_for(artifact).read_text())
+    except (OSError, json.JSONDecodeError):
+        return None
+    record = (manifest.get("thresholds") or {}).get("alert_budget")
+    return dict(record) if isinstance(record, dict) else None
 
 
 def run_evaluate_detectors(argv: Sequence[str]) -> int:
@@ -1575,7 +1714,16 @@ def _run_alert_budget_gate(
         expected_artifacts=expected,
         report_path=str(out) if report is not None else None,
     )
-    check = dataclasses.replace(check, extra={"evaluation_drives": evaluation_drives(report)})
+    extra: dict[str, Any] = {"evaluation_drives": evaluation_drives(report)}
+    if SEQUENCE_SOURCE in published:
+        # A02.3: the sequence level was chosen on these drives; a sequence
+        # verdict here is in-sample to that level, and the record says so.
+        level = _sequence_alert_level(
+            run.train_dir(SEQUENCE_SOURCE) / sequence_artifact_name(config, run.seq_model_type)
+        )
+        if level is not None:
+            extra["sequence_alert_level"] = level
+    check = dataclasses.replace(check, extra=extra)
     verdict_path = out.with_name(f"{out.stem}-verdict.json")
     try:
         args.analyses_dir.mkdir(parents=True, exist_ok=True)

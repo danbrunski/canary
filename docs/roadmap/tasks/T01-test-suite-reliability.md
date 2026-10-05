@@ -632,3 +632,19 @@ measurement in hand.
     promotion fields stay out of the hash — by recomputing the fingerprint
     from the reference's own payload without those fields, and checks that a
     set field does change it. No literal digest of fitted floats remains.
+
+- [ ] **T01.20 `tests/test_retrain_script.py::test_run_benchmark_gate_runs_the_evaluation_protocol_and_discovers_prior_baseline`
+  failed under parallel load.**
+  - **Seen** 2026-10-05, twice during the A02.3 work (no fix landed between):
+    - in a `-n 4 -k benchmark_gate` run of `tests/test_retrain_script.py`
+      (1 failed, 5 passed). It passed alone with `-n0` (73 s) and in the next
+      134-test `-n 4` run.
+    - by the verifier under `-n auto`: an Isolation Forest score-cache
+      `.pkl` got a new inode mid-test. It passes alone.
+  - **Suspected shape:** the test, or the harness it runs, reads a cache
+    file that another worker or another phase of the same test rewrites in
+    place, and asserts on the file's identity (inode) rather than on its
+    content. Not confirmed; the first failure's output was not kept.
+  - **Do:** reproduce under `-n auto` with `--count`/a loop, find which cache
+    path is shared (test `tmp_path` vs a module- or repo-level cache dir), and
+    either give each test its own cache root or assert on content, not inode.

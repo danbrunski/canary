@@ -4579,6 +4579,18 @@
         "required": false,
         "type": "override_reason"
       },
+      "--accept-unbudgeted-thresholds": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": null,
+        "dest": "accept_unbudgeted_thresholds",
+        "nargs": null,
+        "option_strings": [
+          "--accept-unbudgeted-thresholds"
+        ],
+        "required": false,
+        "type": "override_reason"
+      },
       "--all": {
         "action": "_StoreTrueAction",
         "choices": null,

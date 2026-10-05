@@ -229,6 +229,58 @@ def incomparable_reason(baseline: Mapping[str, Any], current: Mapping[str, Any])
     return None
 
 
+def detector_drives(report: Mapping[str, Any], detector: str) -> tuple[str, ...]:
+    """The in-era drives ``detector`` was scored on in ``report``."""
+    return tuple(
+        sorted(
+            str(d.get("drive"))
+            for d in report.get("drives", [])
+            if not d.get("cross_era") and detector in (d.get("detectors") or {})
+        )
+    )
+
+
+def _in_sample_drives(report: Mapping[str, Any], detector: str) -> tuple[str, ...]:
+    return tuple(
+        sorted(
+            str(d.get("drive"))
+            for d in report.get("drives", [])
+            if detector in (d.get("in_sample") or {})
+        )
+    )
+
+
+def incomparable_detectors(
+    baseline: Mapping[str, Any], current: Mapping[str, Any]
+) -> dict[str, str]:
+    """Served detectors two otherwise comparable reports scored on different
+    drives, and why (A02.3).
+
+    A drive that chose the sequence artifact's alert level is in-sample for
+    the sequence detectors and scored for the rest, so one report can grade
+    the IF on drives where it does not grade the sequence detector. Its
+    numbers are then over another population, and diffing them would compare
+    aggregates of different drives. A detector the current report scored on
+    *no* drive with none in-sample is not listed: that is ``missing``, which
+    regresses.
+    """
+    out: dict[str, str] = {}
+    for detector in SERVED_DETECTORS:
+        base = detector_drives(baseline, detector)
+        cur = detector_drives(current, detector)
+        if base == cur:
+            continue
+        in_sample = sorted(
+            set(_in_sample_drives(baseline, detector)) | set(_in_sample_drives(current, detector))
+        )
+        if not in_sample and (not base or not cur):
+            continue
+        out[detector] = f"scored on different drives ({list(base)} vs {list(cur)})" + (
+            f"; in-sample on {in_sample}" if in_sample else ""
+        )
+    return out
+
+
 def _worse(direction: str, base: float, cur: float, tolerance: float) -> bool:
     if direction == "down":
         return cur < base * (1 - tolerance)
@@ -281,8 +333,24 @@ def diff_reports(
 
     cells: list[dict[str, Any]] = []
     any_regressed = False
+    # A02.3: a detector graded on different drives is not diffed; it is named,
+    # cell by cell, and the rest of the report is still compared.
+    excluded = incomparable_detectors(baseline, current)
     for key in sorted(set(base_cells) | set(cur_cells), key=lambda k: (k[0], k[1], k[2] or 0.0)):
         detector, kind, severity = key
+        if detector in excluded:
+            cells.append(
+                {
+                    "detector": detector,
+                    "fault_kind": kind,
+                    "severity": severity,
+                    "status": "incomparable",
+                    "regressed": False,
+                    "reason": excluded[detector],
+                    "metrics": {},
+                }
+            )
+            continue
         metrics_of = (
             ("per_hour",) if kind == "false_alarms" else ("recall", "median_time_to_detect_seconds")
         )
@@ -317,14 +385,23 @@ def diff_reports(
             {**head, "status": "compared", "regressed": cell_regressed, "metrics": metrics}
         )
         any_regressed = any_regressed or cell_regressed
-    return {"tolerance": tolerance, "regressed": any_regressed, "comparable": True, "cells": cells}
+    return {
+        "tolerance": tolerance,
+        "regressed": any_regressed,
+        "comparable": True,
+        "incomparable_detectors": excluded,
+        "cells": cells,
+    }
 
 
 def regression_summary(diff: Mapping[str, Any]) -> list[str]:
     """One line per regressed cell, for logs and the CLI."""
     if not diff.get("comparable", True):
         return [f"incomparable: {diff.get('reason')}"]
-    lines: list[str] = []
+    lines: list[str] = [
+        f"{detector}: not compared, {reason}"
+        for detector, reason in sorted((diff.get("incomparable_detectors") or {}).items())
+    ]
     for cell in diff.get("cells", []):
         if not cell.get("regressed"):
             continue
@@ -377,7 +454,9 @@ __all__ = [
     "SERVED_DETECTORS",
     "GateView",
     "RetiredProtocolError",
+    "detector_drives",
     "diff_reports",
+    "incomparable_detectors",
     "gate_view",
     "incomparable_reason",
     "load_sequence_artifact",

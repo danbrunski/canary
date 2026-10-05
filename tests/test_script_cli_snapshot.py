@@ -387,7 +387,7 @@ def _load_tool(path: Path, monkeypatch: pytest.MonkeyPatch) -> ModuleType:
 
 
 # ---------------------------------------------------------------------------
-# --accept-* flags: every one is a stated reason (A02.2 / A04.4 / A06.5)
+# --accept-* flags: every one is a stated reason (A02.2 / A02.3 / A04.4 / A06.5)
 # ---------------------------------------------------------------------------
 
 #: Every ``--accept-*`` flag across scripts/, and a minimal argv that satisfies
@@ -395,6 +395,7 @@ def _load_tool(path: Path, monkeypatch: pytest.MonkeyPatch) -> ModuleType:
 ACCEPT_FLAGS: dict[tuple[str, str], list[str]] = {
     ("retrain.py", "--accept-thin-calibration"): [],
     ("retrain.py", "--accept-alert-budget"): [],
+    ("retrain.py", "--accept-unbudgeted-thresholds"): [],
     ("train_sequence.py", "--accept-thin-calibration"): [],
     ("sequence_bakeoff.py", "--accept-thin-calibration"): ["--evaluate", "eval-session"],
 }

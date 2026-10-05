@@ -114,6 +114,7 @@ from src.models.benchmark_gate import (
     load_sequence_artifact,
     regression_summary,
 )
+from src.models.budget_level import budget_level_sessions
 from src.models.evaluation import (
     AMBIENT_BANDS_C,
     AMBIENT_CHANNEL,
@@ -373,7 +374,8 @@ def load_raw_streams(
 
 
 def record_seen(seen: dict[str, dict[str, str]], label: str, manifest: Any) -> None:
-    """Note every recording ``manifest`` trained or calibrated on, by directory.
+    """Note every recording ``manifest`` trained or calibrated on, or chose
+    its alert level on (A02.3), by directory.
 
     Manifests name the pieces they used, and a recording split at a data gap
     is named ``<dir>#segment-00N``; drives list directories. Recording the
@@ -383,6 +385,71 @@ def record_seen(seen: dict[str, dict[str, str]], label: str, manifest: Any) -> N
     for role in ("training_sessions", "calibration_sessions"):
         for name in getattr(manifest, role, ()) or ():
             seen.setdefault(parent_session(str(name)), {})[label] = role.removesuffix("_sessions")
+    # A02.3 (operator decision 2026-10-05, option b): the drives a sequence
+    # artifact's alert level was chosen on are seen too. A false-alarm rate
+    # there is in-sample to the level, so neither the A06.5 gate nor the
+    # benchmark may count it as held out.
+    for name in budget_level_sessions(manifest):
+        seen.setdefault(parent_session(name), {})[label] = "budget_level"
+
+
+#: A02.3: the harness detectors whose verdicts rest on each artifact. A drive
+#: one artifact chose its alert level on is in-sample for these, and only these.
+DETECTORS_OF_ARTIFACT: dict[str, tuple[str, ...]] = {
+    "isolation_forest": ("isolation_forest", "fused"),
+    "sequence": ("sequence", "sequence_global", "fused"),
+}
+
+#: The seen roles that keep a drive in the evaluation for the other detectors.
+PER_DETECTOR_SEEN_ROLES = frozenset({"budget_level"})
+
+
+def in_sample_detectors(seen_by: Mapping[str, Mapping[str, str]]) -> dict[str, str] | None:
+    """For a drive whose sessions some artifact saw (``seen_by``: session ->
+    {artifact label: role}), the detectors in-sample there and why, or
+    ``None`` when the drive must be skipped for every detector.
+
+    Training and calibration skip the whole drive (the baselines fit and
+    threshold on those sessions too). A budget level (A02.3, operator decision
+    2026-10-05) makes only that artifact's detectors in-sample: the IF and the
+    baselines are still scored on the drive.
+    """
+    out: dict[str, str] = {}
+    for session, roles in sorted(seen_by.items()):
+        for label, role in roles.items():
+            if role not in PER_DETECTOR_SEEN_ROLES:
+                return None
+            for detector in DETECTORS_OF_ARTIFACT.get(label, (label,)):
+                out.setdefault(detector, f"{label} {role} on {session}")
+    return out
+
+
+def drop_in_sample(
+    in_sample: Mapping[str, str],
+    *,
+    sessions: Sequence[str],
+    scores: dict[str, dict[str, SessionScore]],
+    record: DriveRecord,
+    outcomes: list[dict[str, Any]],
+    slices: list[dict[str, Any]],
+    shift: dict[str, Any] | None,
+) -> None:
+    """Remove the in-sample detectors' results on one drive, everywhere a
+    summary would read them (clean scores, the drive record, injections,
+    VUS slices, the known-answer shift), and record why on the drive."""
+    if not in_sample:
+        return
+    for session in sessions:
+        for name in in_sample:
+            scores.get(session, {}).pop(name, None)
+    for name in in_sample:
+        record.detectors.pop(name, None)
+    record.in_sample = dict(in_sample)
+    outcomes[:] = [o for o in outcomes if o.get("detector") not in in_sample]
+    slices[:] = [s for s in slices if s.get("detector") not in in_sample]
+    if shift is not None:
+        for name in in_sample:
+            (shift.get("detectors") or {}).pop(name, None)
 
 
 #: R01.6: the one definition is ``src.artifact_hash.sha256_file_or_none``.
@@ -441,10 +508,16 @@ class DriveRecord:
     #: Sessions of the drive kept out of every metric, and why (R04.6: tuning
     #: captures bridge the drive but are not the default profile).
     excluded_sessions: dict[str, str] = field(default_factory=dict)
+    #: A02.3: detectors whose results on this drive are in-sample (the drive
+    #: chose the sequence artifact's alert level), and why. They are left out
+    #: of ``detectors``, the injections and every summary for this drive; the
+    #: other detectors are scored here as usual.
+    in_sample: dict[str, str] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "drive": self.drive.drive_id,
+            "in_sample": dict(sorted(self.in_sample.items())),
             "cross_era": self.cross_era,
             "sessions": self.sessions,
             # Sessions of this drive that could not be loaded: the drive was
@@ -2373,6 +2446,7 @@ def _evaluate(args: argparse.Namespace, cleanup: ExitStack, early: Mapping[str, 
         for name in no_span
     ]
     evaluation: list[Drive] = []
+    in_sample_by_drive: dict[str, dict[str, str]] = {}
     drives = [
         d
         for d in drives
@@ -2389,13 +2463,14 @@ def _evaluate(args: argparse.Namespace, cleanup: ExitStack, early: Mapping[str, 
     }
     for drive in drives:
         seen_by = {name: seen[name] for name in drive.session_names if name in seen}
+        in_sample = in_sample_detectors(seen_by) if seen_by else {}
         if all(name in excluded for name in drive.session_names):
             reason = (
                 "skipped: no default-profile rows ("
                 + "; ".join(f"{name}: {excluded[name]}" for name in drive.session_names)
                 + ")"
             )
-        elif seen_by:
+        elif in_sample is None:
             reason = "skipped: seen by " + "; ".join(
                 f"{session} ({', '.join(f'{d} {r}' for d, r in roles.items())})"
                 for session, roles in sorted(seen_by.items())
@@ -2404,6 +2479,8 @@ def _evaluate(args: argparse.Namespace, cleanup: ExitStack, early: Mapping[str, 
             reason = f"skipped: {drive.straddles}"
         else:
             evaluation.append(drive)
+            if in_sample:
+                in_sample_by_drive[drive.drive_id] = in_sample
             continue
         skipped.append(
             {"drive": drive.drive_id, "sessions": list(drive.session_names), "reason": reason}
@@ -2787,6 +2864,17 @@ def _evaluate(args: argparse.Namespace, cleanup: ExitStack, early: Mapping[str, 
         record = clean_drive_record(drive, present, scores, names, registry.events)
         record.excluded_sessions = {n: excluded[n] for n in drive.session_names if n in excluded}
         record.cross_era = bool(training_eras) and drive.era not in training_eras
+        drive_outcomes = list(result.outcomes)
+        drive_slices = list(result.slices)
+        drop_in_sample(
+            in_sample_by_drive.get(drive.drive_id, {}),
+            sessions=list(present),
+            scores=scores,
+            record=record,
+            outcomes=drive_outcomes,
+            slices=drive_slices,
+            shift=result.shift,
+        )
         records.append(record)
         if result.shift is not None:
             shift_runs.append(result.shift)
@@ -2799,9 +2887,9 @@ def _evaluate(args: argparse.Namespace, cleanup: ExitStack, early: Mapping[str, 
                 }
             )
             continue
-        outcomes.extend(result.outcomes)
+        outcomes.extend(drive_outcomes)
         skipped_injections.extend(result.skipped)
-        slices.extend(result.slices)
+        slices.extend(drive_slices)
     log.info(
         "stream reads per session %s; peak RSS of a scoring process %.0f MB",
         stream_reads,

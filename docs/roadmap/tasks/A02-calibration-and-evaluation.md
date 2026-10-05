@@ -253,10 +253,135 @@ This checklist builds the yardstick.
     `evidence` detector's episodes are reported, not counted. Test:
     `test_evidence_role_detectors_are_not_held_to_the_alert_budget`.
 
+  *Retrain wiring done 2026-10-05 (takes effect at the deferred retrain;
+  nothing deployed changes, no model was retrained).*
+  `src/models/budget_level.py` sets the sequence artifact's alert *level*:
+  - **One knob for the served rule.** The served verdict (global score over
+    its mode band, OR the worst family over the family band) is exactly
+    `served_severity > 1`. `choose_budget_level` runs
+    `evaluation.alert_budget_threshold` on that severity over the evaluation
+    holdout: per-block maxima, the production persistence gate, episodes per
+    engine-hour. `apply_budget_level` multiplies every verdict band (global,
+    per-mode, `family_max_score`) by the level, so the served verdict becomes
+    `severity > level`. Serving code is unchanged, and so are the evidence
+    normalizers (channel and family bands).
+  - **Recorded in the manifest.** `thresholds.alert_budget` holds the budget,
+    `holdout_sessions`, the level, engine-hours, episodes,
+    `achieved_per_engine_hour`, blocks, the persistence spec, and the bands
+    before the level. It is written into both the binary and the sidecar.
+    The record says it is in-sample to its own drives, and the harness
+    treats those drives as in-sample for the sequence detectors (below).
+  - **Refusals.** A session the artifact trained or calibrated on is refused
+    (`BudgetHoldoutSeenError`). Sessions come from the scored frame and are
+    checked against the artifact's own manifest, segment pieces included, so
+    a caller cannot label them away. A holdout under `1/budget` engine-hours,
+    with no engine time, or with no evaluation drives at all is refused
+    (`BudgetHoldoutTooSmallError`); the message names the hours, the hours
+    needed and the sessions. A level applied twice would compound, so it is
+    refused too.
+  - **`scripts/retrain.py`.** `_set_sequence_budget_level` runs after the
+    trainers and before both gates. The sequence artifact now always trains
+    into `_staging-<dir>`, so the daemon never hot-swaps pre-level
+    thresholds. A refused artifact is set aside as `_refused-unbudgeted-*`
+    and never served. The served directory keeps what it had, and the run is
+    a partial success when the IF lands. `--accept-unbudgeted-thresholds
+    REASON` publishes anyway and stamps `applied: false` with the reason and
+    the refusal. The benchmark report and the A06.5 verdict carry
+    `sequence_alert_level`.
+  - Tests (`tests/test_budget_level.py`, 17 passed with those below):
+    - `test_scaled_bands_make_the_served_verdict_exactly_severity_over_the_level`:
+      the known answer, through the real `SequenceScoringRule`, window for
+      window, with and without the family path.
+    - `test_the_chosen_level_meets_the_budget_on_the_holdout_and_no_lower_level_does`.
+    - `test_a_session_the_artifact_trained_or_calibrated_on_is_refused`
+      (training, and a calibration `#segment` piece).
+    - `test_a_holdout_too_short_to_resolve_the_budget_is_refused_and_named`.
+    - `test_the_served_engine_meets_the_budget_on_the_holdout_after_the_level`:
+      torch, `importorskip`. A real tiny LSTM is saved and levelled. The
+      reloaded artifact's batched served verdict gives the recorded episode
+      count, within the budget on the holdout (run at 4/h on 0.3 engine-h to
+      keep it short; same rule as the declared 1/h). A seen or
+      short holdout leaves the artifact byte-identical.
+    - Three retrain-flow tests: levelled from the evaluation drive only, then
+      published; set aside without a holdout; set aside when too small, and
+      published only with a stated reason.
+  - Gate: `tests/test_retrain_script.py`, `test_alert_budget.py`,
+    `test_role_gate.py`, `test_sequence_calibration.py`,
+    `test_evaluation_harness.py`, `test_evaluation_detectors.py` and
+    `test_layering.py` pass (134 with the new file). So does
+    `-m ml_training` over `test_lstm_training.py`, `test_train_lstm.py`,
+    `test_sequence_autoencoder_training.py`, `test_lstm_inference.py` and
+    `test_tcn_training.py` (69). `test_script_cli_snapshot.py` passes (91) with
+    the new flag in `ACCEPT_FLAGS` and the snapshot regenerated.
+
+  *Operator decisions 2026-10-05:*
+  - **The level's drives are in-sample for the sequence detector only
+    (option b).** Otherwise the level and the gates would share the
+    evaluation drives, and a gate's sequence false-alarm rate would be
+    in-sample to the level.
+    - **Recording.** The harness's `record_seen`
+      (`scripts/evaluate_detectors.py`) records
+      `thresholds.alert_budget.holdout_sessions` as role `budget_level`
+      (`budget_level.budget_level_sessions`). An override stamp
+      (`applied: false`) names no drives and adds nothing.
+    - **The skip is per detector.** Training and calibration still skip the
+      whole drive. A drive seen *only* through a budget level stays in the
+      evaluation (`in_sample_detectors`). There, the artifact's own detectors
+      (`sequence`, `sequence_global`, `fused`; `DETECTORS_OF_ARTIFACT`) are
+      in-sample. `drop_in_sample` removes their clean scores, their drive
+      entry, their injections, their VUS slices and their known-answer shift
+      for that drive. The drive's `in_sample` field names them and why. The
+      IF and the baselines are scored there as usual.
+    - **Effect on the gates.** After a levelled retrain the A02.1 benchmark
+      still grades the IF, the baselines and the fault injections on the
+      evaluation drives. The A06.5 gate finds no held-out engine time for an
+      alert-role sequence detector and refuses it unless
+      `--accept-alert-budget` is given.
+    - **Comparability.** `benchmark_gate.incomparable_detectors` names every
+      served detector graded on different drives in two otherwise
+      comparable reports. That covers the sequence detector before and after
+      its level, and any detector with an in-sample drive on either side.
+      `diff_reports` lists that detector's cells as `incomparable`, with the
+      reason and not regressed, plus a top-level `incomparable_detectors`.
+      Every other detector is still diffed. `regression_summary` and the
+      retrain log name each detector not compared. A detector the current
+      report graded on no drive, with none in-sample, is still `missing`,
+      and that regresses.
+    - Tests:
+      - `test_the_drives_a_level_was_chosen_on_are_recorded_as_seen`;
+      - `test_only_a_budget_level_keeps_a_seen_drive_and_only_for_its_detectors`;
+      - `test_in_sample_results_leave_every_summary_of_their_drive`;
+      - `test_reports_with_different_per_detector_drives_never_diff_that_detector`:
+        the sequence cells are incomparable, the IF's regression is still
+        caught, and a vanished detector is still `missing`;
+      - `test_the_levels_drives_still_score_the_if_and_refuse_an_alert_role_sequence_gate`
+        (torch). It runs the real harness with an IF and a levelled tiny LSTM
+        under alert roles. The levelled drive is evaluated, with the IF
+        scored and the sequence detectors marked in-sample. The benchmark
+        view grades the IF on 1 drive and the sequence detector on 0. A06.5
+        refuses the sequence detector with "not measured: no held-out engine
+        time" and passes it only with an override. The IF on the same report
+        is measured, with engine-hours > 0.
+  - **The Isolation Forest stays out of scope.** It keeps its A04.11
+    thresholds, episode-calibrated per mode on the calibration holdout. A
+    budget level for it needs an additive offset, because IF scores are not
+    ratio-scaled and serve flags infinite scores whatever the threshold. That
+    design belongs to A04.
+  - **Standalone trainers publish without a level.** `scripts/train_sequence.py`
+    and `scripts/sequence_bakeoff.py` still write sequence artifacts without
+    a level; their manifests lack `thresholds.alert_budget`. The daemon
+    deliberately does not refuse an unlevelled model: the deployed model has
+    none, and refusing would break it before the retrain.
+
   *Remaining:*
-  - Wire the budget-chosen level into the sequence artifact at retrain, so
-    `retrain.py` sets the threshold from its evaluation holdout. This waits
-    for the retrain the operator deferred.
+  - **The real-model effect is at the deferred retrain.** It is the first run
+    whose sequence manifest carries `thresholds.alert_budget`. Read its
+    `holdout_sessions`, engine-hours and achieved rate there.
+  - **The three-way split (follow-up, when the corpus supports it).** Split
+    the holdout into calibration drives, budget-level drives and gate drives,
+    so the A06.5 gate again has unseen drives for a levelled alert-role
+    sequence detector. The current ≤3-drive evaluation holdout cannot spare a
+    third side.
   - Per-mode family bands versus removing the family path. The ablation is
     `sequence` vs `sequence_global` in A02.11's table. Either change lands in
     `src/models/inference.py` (the A01 agent's file) and in the calibration.
