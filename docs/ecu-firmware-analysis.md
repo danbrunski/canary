@@ -434,8 +434,38 @@ knock-protection results so that CANary can watch them. Calibration internals
 and any way of changing knock control were out of scope and are not recorded
 here.
 
-**Verdict (revised 2026-10-05, after a follow-up pass): knock control is
-active in this image.** A first reading said "fault fallback". It is retracted;
+**Update 2026-10-05, later: knock sensor 1 is flagged on every logged drive since 2026-08-05.**
+The DID audit found that Mode 22 DID `0x120B` (CAN handler `0xD178E`) returns
+the DTC word of the first diagnostic item whose status bit 0 (`0x657E + 3i`)
+is set. Reproduced from the raw logs:
+- `0000` at key-on, engine off (2026-08-04 baseline);
+- `0328` (**P0328, knock sensor 1 circuit high**, item `0xAB`) in all 13
+  engine-running sweeps on 2026-08-05;
+- `0328` on 2,678 of 2,683 reads on 2026-09-17. The five `0000` reads are at
+  or just after start.
+
+Sources: `data/analyses/did-drive-sweeps-20260805/`,
+`~/canary-data/did_log/did_log-2026-09-17-*.jsonl`. That bit is exactly what
+`0xFFFF479D` bit 7 ORs, and bit 7 forces the fixed `0xFB00` retard target.
+So **knock control is very probably in its fixed-retard fallback whenever the
+engine runs**. Generic Mode 03/07 never show it, which is why no scan tool did.
+
+Still to reconcile:
+- The 2026-08-01 retard event predates the first `0328` read and may come
+  before the fault.
+- The 08-01 unplug/reconnect test is a candidate cause: a connector not fully
+  re-seated.
+- The status bit is the early flag, not a confirmed code.
+
+**Confirm live** (reads only): key-on engine-off, then idle. Read `0xFFFF479D`
+bit 7, `0xFFFF677D`–`677F` (item `0xAB`), the KS1 level `0xFFFF2CEF` (normal
+50–199) and `0xFFFF13FE` under light load. Then check knock sensor 1's
+connector and harness (bank 1, in the V).
+
+The earlier verdicts follow as the record of how this was reached.
+
+**Verdict (revised 2026-10-05, after a follow-up pass; now in doubt, see
+above): knock control is active in this image.** A first reading said "fault fallback". It is retracted;
 the reasons are below.
 
 - **The 2026-08-01 drive's single retard event** (2,200 rpm, 89 % load,
