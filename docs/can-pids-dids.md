@@ -50,7 +50,7 @@ Nissan Mode 22 DID rows
 
 0x1101 - Engine coolant temperature - raw minus 50 degC - high confidence
 0x1219 - Engine speed - approximately raw rpm - high confidence
-0x1208 - Bank 1 injector effective pulse width/quantity - millisecond scale not pinned - high confidence
+0x1208 - Base fuel schedule (BFS: air charge times tune K), not injector pulse or fuel - raw times 0.00049 ms, stored as raw counts - confirmed
 0x1209 - Mass airflow - raw times 0.01 g/s - high confidence
 0x1117 - Calculated engine load - raw times 100/256 percent - high confidence
 0x1107 - A/F sensor heater duty - raw times 0.5 percent - high confidence
@@ -63,8 +63,8 @@ Nissan Mode 22 DID rows
 0x1163 - Measured intake-cam angle, bank 2 - raw times 0.5 minus 64 degCA - high confidence
 0x1138 - Intake-cam (VTC) solenoid duty, bank 1 - raw times 0.39 percent - high confidence
 0x1110 - Commanded EVAP purge, the PID 0x2E byte (formerly catalogued as intake VVT-solenoid duty, wrong) - raw times 0.5 percent - high confidence
-0x1206 - Intake/manifold-pressure candidate - raw 16-bit value, scale unknown - medium confidence
-0x1207 - Second intake/manifold-pressure candidate - raw 16-bit value, scale unknown - medium confidence
+0x1206 - Injector pulse, bank 1 (injector index 0), including dead time - raw times 0.01 ms - high confidence
+0x1207 - Injector pulse, bank 2 (injector index 1), including dead time - raw times 0.01 ms - high confidence
 0x1201 - Coarse duplicate engine speed - raw times 12.5 rpm - high confidence
 0x121A - ECM-indicated vehicle speed - raw times 0.1 km/h - high confidence
 0x122A - Internal vehicle speed with an approximately 30 km/h floor - raw times 0.05625 km/h - high confidence
@@ -76,6 +76,8 @@ Notes
 A Mode 01 PID request is 01 followed by the PID byte.
 A Mode 22 DID request is 22 followed by the two-byte DID after entering Nissan diagnostic session 10 C0.
 Mode 01 PID 0x0F is the valid intake-air-temperature source; DID 0x123F is not.
+Mode 01 PID 0x44 is the commanded equivalence ratio as phi (fuel/air), but only while the ECM's A/F feedback target is 14.7. The firmware computes it as the RAM phi word times the previous-cycle feedback target divided by 3675, so idle reads of 0.871 occurred with phi 1.0. Use the RAM channel mem:ECM_TARGET_EQUIV_RATIO for phi (data/dids.yaml).
+DIDs 0x1206 and 0x1207 are per-injector pulses that include the injector dead time (0.47 ms at 14.0 V), taken before the short-pulse correction and minimum-pulse floor. In fuel cut they read the dead time. Injector index 0 is bank 1 and index 1 is bank 2, from the firmware; that they are cylinders 1 and 2 is inferred. See docs/ecu-firmware-analysis.md, "Injector pulse chain".
 The intake-cam banks come from the ECM firmware's DTC table (P0011/P0075 bank 1, P0021/P0081 bank 2). That bank 1 is the cylinder 1/3/5 side is inferred, not measured.
 DIDs 0x1108 through 0x110A and 0x113C have been observed mirroring the 0x1107 heater-duty value but are not separate catalogue entries.
 

@@ -36,8 +36,9 @@ one. Figures measured on this truck override the manual's typical values for
 | EVAP purge | volume-control solenoid is **normally closed** (open with 12 V); vent valve normally open | EC-243, EC-74 |
 | Throttle | electronic, coolant-heated body. Stock bore ~70 mm (medium confidence) | EM-25 |
 
-Redline and fuel-cut rpm were not found in an authoritative source; UpRev can
-change them anyway. Read them from the running ROM.
+Redline was not found in an authoritative source. The fuel-cut rpm is read
+from this ROM's code (rev limiter, under "The fuel equation" below); UpRev can
+change it, so read it from the running ROM.
 
 ## Factory reference values (data monitor)
 
@@ -110,7 +111,7 @@ Ti = (Tp + transient corr.) × target φ × (α + αm − 1) + Ts
 - **DIDs `0x1206`/`0x1207` include `Ts`.** That plus the pressure factor is why they are convex in air charge.
 - **PID `0x44` equals φ only while the A/F feedback target is 14.7:** `PID 0x44 = 0x26BE × 0x46AC / 3675`. This is why it dithers in closed loop and reads 0.871 at idle with φ = 1.0. Use `mem:ECM_TARGET_EQUIV_RATIO` for φ.
 - **Load axes saturate before the BFS ceiling:** Target AFR and timing top out at BFS 44,019 (`0x9416`). The ceiling `D8B3` is 65,280.
-- **Rev limiter:** 6,350 rpm cut, 6,150 resume.
+- **Rev limiter:** 6,350 rpm cut, 6,150 resume. While RAM `0xFFFF2841` bit 1 is set it is 6,200 / 5,800, and what sets that bit is unidentified. It was clear on every 2026-10-04 read (`mem:ECM_PEDAL_ENRICH_FLAGS`, the same byte as the pedal-enrichment bit 0). The limiter reads its thresholds from the map-slot words `0xFFFFB040`–`46`, which are the same in every slot and in the base (`docs/ecu-firmware-analysis.md`, "Injector pulse chain" → "Fuel cut").
 
 Sources: UpRev *Nissan Tuning Guide* (pp. 10–14, 26–27); Nissan patents
 US4967713 and US5615660; FSM EC "B/FUEL SCHDL", "A/F ALPHA". What that means on

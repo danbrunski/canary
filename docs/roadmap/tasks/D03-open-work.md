@@ -2614,6 +2614,32 @@ live here now, so the documents could be archived
     width, sign, scale and window span and the collector's signed decode;
     `tests/test_verify_memory_channels.py` adds the offset relation passing on
     negative timing and failing one degree off.
+  - [~] **Injector chain: catalogued 2026-10-05, live read owed.** From
+    "Injector pulse chain, dead time and the BFS ceiling" (code-verified;
+    data-checked through DIDs 0x1206/0x1207, median 1.006 over 5,039 steady
+    samples). Seven more `hypothesized` channels on `firmware-ZS44A-20260920`,
+    all unsigned u16 and in no profile: `injector_dead_time` 0xFFFF280C/2 (Ts,
+    ×0.01 ms), `injector_bank_pulse` 0xFFFF1B9A/4 (bank pulses B1/B2 before the
+    per-cylinder stage, ×0.01 ms), `injector_pressure_factor` 0xFFFF1800/2 (Q14,
+    including the 0x9254 flow scaler), `purge_fuel_factor` 0xFFFF4698/4
+    (÷25600, 0x6400 = 1.0; name inferred), and `lambda_target` widened to
+    0xFFFF46AC/10 for `ECM_AF_FEEDBACK_TARGET_PREV_B1`, the target copy that
+    makes PID 0x44 = φ × copy/7350. DIDs 0x1206/0x1207 gain `transport: can`
+    disassembly evidence (0xFFFF2710/2712, injector index 0/1 = bank 1/2, Ts
+    included); their ×0.01 ms scale and names are unchanged. The PID 0x44
+    caveat is on `mem:ECM_TARGET_EQUIV_RATIO`, 0x1134 and 0x46B2. The rev-limiter
+    meaning of 0x2841 bit 1 is on `ECM_PEDAL_ENRICH_FLAGS`. Pinned by
+    `tests/test_memory_catalog_injector.py`.
+    **Owed: a live read** with the key-on read below. Check by hand; the verifier
+    expresses none of these. Ts = max(0, 47 + ((175 − Vb)·92) >> 7) with
+    Vb = PID 0x42/0.08 (across a session exit). DID 0x1206 = Ts ±2 in fuel cut
+    only. Fuelled steady state: DID 0x1206 ≈ 0x1B9A within a few counts, and
+    0x1207 ≈ 0x1B9C. Measure the agreement before declaring a `linear_did`.
+    0x4698/469A = 0x6400 while DID 0x1110 = 0, a mapping that is inferred.
+    0x46AC = 0x46B2 on the same reply except on a change. 0x1800 ≤ 10559
+    while 0x9254 = 10601. At warm idle, read 0x46AC/46B2 too. If the 0.871 idle
+    PID 0x44 reads are the target factor, they sit near 6,400 there and not at
+    the 7350 the closed-loop check above expects (inferred).
   - [ ] **Key-on read (operator; reads only).** KOEO, warm idle and one light
     pull, then `python -m tools.verify_memory_channels` for
     `ECM_IGNITION_TIMING_FINAL` (the only one with a DID relation). Check by
@@ -2644,6 +2670,20 @@ live here now, so the documents could be archived
     memory read rides one poll tier and a profile cannot weight memory
     channels. `ECM_TIMING_TRIM_SELECT_FLAGS` is misnamed; renaming it is a
     `tools/channel_renames` change for the orchestrator.
+
+- [ ] **D03.39 Resume the parked λ-chain transfer/baro-gain rework (canary-18,
+  unfinished).** *Parked 2026-10-05 by operator decision.* The firmware session
+  ended with an uncommitted, half-migrated change that kept every session's
+  pre-commit hook red. The exact diff (against 022614a-era HEAD) is saved at
+  `~/canary-wip/2026-10-05-canary18-lambda-chain-transfer-baro-gain.patch`,
+  with a README beside it. Scope: `src/signals/afr.py` models the A/F voltage
+  transfer from the ECM's own table with provenance, plus the A/F sensor baro
+  gain (k at 0xFFFF36BB; firmware doc, λ chain); `lambda_delivery.py`;
+  `afr_calibration.yaml`. **To finish:** `git apply --3way` the patch; migrate
+  the `voltage_to_afr(voltage, baro, AfrCalibration)` callers
+  (`tuning_frame.py`, `tuning_digest.py`, `lambda_delivery.py`); give the
+  `test_voltage_transfer_censoring_is_a_named_state` fixture a provenance;
+  drop the unused `BaroSamples` import; then run the lambda/tuning tests.
 
 ## Deferred by decision, not blocked
 

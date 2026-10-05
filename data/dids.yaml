@@ -820,13 +820,54 @@ dids:
           133,653 f^2 fits both sessions), so no straight-line constant holds
           across operating regions. Screen:
           data/analyses/2026-09-18-injected-fuel-did-screen.md.
-    notes: >
+      - session: firmware-ZS44A-20260920
+        method: disassembly
+        transport: can
+        finding: >
+          The CAN Mode 22 pointer for 0x1206 is the RAM word 0xFFFF2710 (2
+          bytes), the cycle-start copy of the per-cylinder pulse
+          0xFFFF279C[0], injector index 0. The per-cylinder stage builds index
+          0 from the bank-1 pulse 0xFFFF1B9A (even indexes take bank 1, odd
+          bank 2) plus the per-cylinder transient terms; the bank pulse
+          already holds the dead time Ts, the trims (STFT + LTFT add), the
+          purge factor and the fuel-pressure factor. The copy is taken BEFORE
+          the short-pulse linearisation and the minimum-pulse floor, and a
+          cylinder in fuel cut gets Ts. 10 us per count (inferred from the
+          injector timer setup; UpRev's x0.01 ms agrees). The K-line table
+          reads 0xFFFF279C live rather than the copy.
+          docs/ecu-firmware-analysis.md, "Injector pulse chain".
+      - session: 6 tuning captures 2026-09-21..09-23 (_capture-tuning-*) + _capture-ram-study-2026-10-04T204557 (~/ecu-re/scripts/inj_pulse_check.py)
+        method: firmware_pulse_prediction_per_sample
+        transport: can
+        finding: >
+          The decoded chain predicts the DID per sample (the check covers
+          0x1206 and 0x1207). Fuelled steady points (|d rpm| < 50, BFS within
+          3 % over 0.5 s; LTFT 0 on those drives, purge unlogged and taken as
+          1.0): (DID - Ts) / predicted pulse median 1.006, p10-p90
+          0.961-1.030, n = 5,039; BFS > 28,000: 1.007, n = 594; phi > 1.02:
+          1.000, n = 149. Flat across the estimated vacuum; without the
+          fuel-pressure factor it falls 0.97 -> 0.91 with vacuum. Fuel cut, the
+          2026-10-04 capture: 46 reads of 49-53 counts against Ts 49-54
+          predicted from PID 0x42, every one within +-2 counts.
+    notes: |
       Injected pulse, renamed 2026-09-18 from ECM_INTAKE_PRESSURE_1206 (that
       reading was wrong; this engine has no MAP sensor). UpRev's directly
-      captured operator-selected definition now confirms this is Bank 1.
-      The compatibility name still uses "_1" because trained artifacts and
-      stored telemetry already depend on it. The 0.01 ms/count scale is now
-      directly pinned; injector dead time remains unverified.
+      captured operator-selected definition confirms this is Bank 1, and the
+      firmware agrees (2026-10-05): the DID reads injector index 0, which is
+      built from the bank-1 pulse (index 0 = bank 1, index 1 = bank 2). The
+      compatibility name still uses "_1" because trained artifacts and stored
+      telemetry already depend on it; that index 0 is cylinder 1 is inferred.
+
+      What the value is (firmware, data-checked): one injector's pulse
+      INCLUDING the dead time Ts (mem:ECM_INJECTOR_DEAD_TIME), the trims, the
+      purge and fuel-pressure factors and the per-cylinder transients, taken
+      BEFORE the short-pulse correction and the minimum-pulse floor. 10 us
+      per count, so the 0.01 ms scale stands. The fuel metered follows
+      (raw - Ts), not raw: Ts is 0.47 ms at 14.0 V plus 0.090 ms per volt
+      below it, which with the pressure factor is why this DID is convex in
+      air charge. In fuel cut it reads Ts, so the ~52-58 count "DFCO floor"
+      above is the dead time at the running battery voltage, not a fuel
+      quantity.
 
   - did: 0x1207
     name: ECM_INJECTOR_PULSE_2
@@ -869,12 +910,25 @@ dids:
         finding: >
           Twin of 0x1206: same DFCO floor (~56 counts), closed-loop and rich
           residuals within ~1 % of 0x1206's.
+      - session: firmware-ZS44A-20260920
+        method: disassembly
+        transport: can
+        finding: >
+          The CAN Mode 22 pointer for 0x1207 is the RAM word 0xFFFF2712 (2
+          bytes), the cycle-start copy of 0xFFFF279C[1], injector index 1,
+          built from the bank-2 pulse 0xFFFF1B9C. Same chain, units and fuel-cut
+          behaviour as 0x1206 (Ts included; before the short-pulse
+          linearisation and the minimum-pulse floor). The K-line table reads
+          0xFFFF279E live. docs/ecu-firmware-analysis.md, "Injector pulse
+          chain"; the per-sample chain check under 0x1206 covers this DID too.
     notes: >
       Injected pulse, renamed 2026-09-18 from ECM_INTAKE_PRESSURE_1207 (that
       reading was wrong). UpRev's directly captured operator-selected
-      definition confirms this is Bank 2. The compatibility name remains
-      "_2". The 0.01 ms/count scale is directly pinned; injector dead time
-      remains open. See 0x1206.
+      definition confirms this is Bank 2, and the firmware agrees: injector
+      index 1, built from the bank-2 pulse. The compatibility name remains
+      "_2"; that index 1 is cylinder 2 is inferred. The 0.01 ms/count scale
+      stands (10 us per count in the firmware). The value includes the dead
+      time Ts and reads Ts in fuel cut; see 0x1206 for the chain.
 
   - did: 0x1201
     name: ECM_RPM_COARSE
@@ -1387,8 +1441,14 @@ dids:
     notes: >
       Renamed 2026-09-18 from ECM_TARGET_EQUIV_RATIO_CANDIDATE. A rich-side
       (power-enrichment) target in phi = raw / 64, not the final commanded
-      equivalence ratio — use Mode 01 PID 0x44 or the UpRev RAM target for
-      that. Its scale is now pinned directly as the low byte-resolution view
+      equivalence ratio — use the RAM target mem:ECM_TARGET_EQUIV_RATIO for
+      that. Mode 01 PID 0x44 is phi only while the A/F feedback target is 7350
+      (firmware 2026-10-05: PID 0x44 = 0xFFFF26BE x 0xFFFF46AC / 3675; see
+      mem:ECM_TARGET_EQUIV_RATIO), so the "0x44 = 0.87 while this read 64"
+      pairs above may be that factor rather than a lean command: 0.871 is the
+      value the firmware pass traced to it on 2,437 idle reads whose pulses
+      matched phi = 1.0 (those 293 pairs were not re-checked against it).
+      Its scale is now pinned directly as the low byte-resolution view
       of Q14 phi, but its rich-side table role remains deliberately named as a
       candidate. Single-DID transport (`obd_did_batch_max_dids: 1`) on this
       ECM's CAN diagnostic path.
@@ -1797,6 +1857,19 @@ memory:
       same quantity and holds at raw 64 during fuel cut, so it cannot tell
       fuel cut from stoich. Use 0x1134 only when this channel was not
       polled, and never present it as the final target.
+
+      Mode 01 PID 0x44 is NOT this word in general (firmware 2026-10-05,
+      verified from code, data-checked). PID 0x44 = this word x 0xFFFF46AC /
+      3675 (A,B; / 32768 for the ratio), where 0xFFFF46AC
+      (mem:ECM_AF_FEEDBACK_TARGET_PREV_B1) is the previous-cycle copy of the
+      A/F feedback target 0xFFFF46B2 (mem:ECM_AF_FEEDBACK_TARGET_B1, AFR x
+      500). It equals phi = word / 16384 only while that target is 7350
+      (14.7). 2,437 logged idle reads of PID 0x44 = 0.871 (STFT +9..+15 %)
+      had injector pulses matching this word = 0x4000 (phi 1.0). PID 0x44
+      agreeing with this word at WOT (1.1640625 above) implies the target
+      was 7350 there, not that the PID is phi everywhere. Use this channel for
+      phi; afr_calibration.yaml's `commanded_equiv_ratio_convention: phi`
+      describes the PID's encoding, not this caveat.
 
       The address is specific to this ROM/calibration. Do not copy it into
       shared code or assume another ECU exposes the same map.
@@ -2339,6 +2412,16 @@ memory:
         method: live_drive_check
         finding: >
           Bit 0 set only at broadcast pedal 4.29-4.58 V (never <= 3.80 V); while set, mem:ECM_TARGET_EQUIV_RATIO read exactly 1.1640625, the last-column value.
+    notes: |
+      Bit 1 selects the rev limiter's thresholds (firmware 2026-10-05,
+      verified from code; docs/ecu-firmware-analysis.md, "Injector pulse
+      chain" -> "Fuel cut"). Clear: fuel cut at 6,350 rpm, resume below 6,150.
+      Set: cut at 6,200, resume below 5,800. The limiter (0x4F768) reads its
+      thresholds from the map-slot words 0xFFFFB040-46, the same in every
+      slot and in the base. What sets bit 1 is unidentified. It was clear on
+      all 191 reads of the 2026-10-04 drive (_capture-ram-study-2026-10-04T204557:
+      the byte read only 0 and 1, about one read per 8 s), so that drive ran
+      the 6,350 / 6,150 limiter whenever it was read.
   - name: ECM_TIMING_TRIM_SELECT_FLAGS
     address: 0xFFFF2842
     length: 1
@@ -3186,6 +3269,45 @@ memory:
     notes: >
       Known answer (not expressible, as for bank 1): equals Mode 01 PID 0x28
       A,B / 32768.
+  # The previous-cycle copy of the bank-1 feedback target, the factor that
+  # makes Mode 01 PID 0x44 differ from phi (injector-chain pass, 2026-10-05).
+  # It joins lambda_target so one 10-byte read 0xFFFF46AC-46B5 returns the copy
+  # and the live target together; a read is planned from the selected members,
+  # so selecting only 46B2/46B4 still reads 4 bytes.
+  - name: ECM_AF_FEEDBACK_TARGET_PREV_B1
+    address: 0xFFFF46AC
+    length: 2
+    byte_length: 2
+    scale: 0.002   # raw / 500 (AFR x 500; lambda = raw / 7350)
+    offset: 0.0
+    unit: afr
+    confidence: hypothesized
+    verified_tune_revision: ZS44A-20260920
+    window: lambda_target
+    evidence:
+      - session: firmware-ZS44A-20260920
+        method: disassembly
+        finding: >
+          u16, AFR x 500: the previous-cycle copy of
+          mem:ECM_AF_FEEDBACK_TARGET_B1 (0xFFFF46B2), made by the cycle-start
+          copy at 0x212CC. The Mode 01 PID 0x44 handler forms A,B =
+          0xFFFF26BE x this word / 3675, so PID 0x44 = phi x (this / 7350):
+          phi only while this word is 7350.
+      - session: firmware session 7 logged reads (~/ecu-re/NOTES.md, "PID 0x44 caveat")
+        method: pid_0x44_vs_injector_pulse
+        finding: >
+          2,437 logged idle reads of PID 0x44 = 0.871 (STFT +9..+15 %) had
+          injector pulses matching phi = 1.0 (0xFFFF26BE = 0x4000). By the
+          relation that puts this word near 6,400 (0.871 x 7350) at idle:
+          inferred, never read. Checks the PID relation, not this address.
+    notes: >
+      Known answers (not expressible; `MemoryKnownAnswer` checks a word
+      against a Mode 22 DID): equals mem:ECM_AF_FEEDBACK_TARGET_B1 on every
+      same-reply read except the cycle the target changes; and Mode 01 PID
+      0x44 A,B = mem:ECM_TARGET_EQUIV_RATIO raw x this raw / 3675, a relation
+      across a session exit (Mode 01 is silent in 0xC0) and two memory reads
+      (0xFFFF26BE is 0x1FEE bytes away). Whether 0xFFFF46AE copies the
+      bank-2 target the same way is not in the hand-off.
   - name: ECM_AF_FEEDBACK_TARGET_B1
     address: 0xFFFF46B2
     length: 2
@@ -3209,6 +3331,10 @@ memory:
       feedback setpoint, not the final commanded target
       (mem:ECM_TARGET_EQUIV_RATIO). Known answer (memory relation, not
       expressible): 0xFFFF2D5A = this - mem:ECM_AF_LAMBDA_B1.
+
+      Its previous-cycle copy (mem:ECM_AF_FEEDBACK_TARGET_PREV_B1) scales Mode
+      01 PID 0x44: PID 0x44 = phi x copy / 7350, so whenever this target
+      leaves 7350 the PID stops being phi (the 0.871 idle reads).
   - name: ECM_AF_FEEDBACK_TARGET_B2
     address: 0xFFFF46B4
     length: 2
@@ -3289,3 +3415,204 @@ memory:
       Raw k, unscaled on purpose: the gain is 128 / k, a reciprocal that a
       scale/offset pair cannot express. Known answer (not expressible): k
       follows Mode 01 PID 0x33 baro through table 0xD00F.
+
+  # --- Injector pulse chain, from the firmware (2026-10-05) ----------------
+  # docs/ecu-firmware-analysis.md "Injector pulse chain, dead time and the BFS
+  # ceiling". Per bank, every 10.24 ms: BFS x phi / 8, times the purge factor
+  # (0xFFFF4698/469A), plus the wall film, times the fuel-pressure factor
+  # (0xFFFF1800), times (1 + STFT + LTFT) (the trims ADD), plus the dead time
+  # Ts (0xFFFF280C) = the bank pulse (0xFFFF1B9A/1B9C). The per-cylinder stage
+  # adds the per-cylinder transients; DIDs 0x1206/0x1207 read the cycle-start
+  # copies (0xFFFF2710/2712) of injector indexes 0 and 1, before the
+  # short-pulse correction and the minimum-pulse floor. 10 us per count
+  # (inferred: the injector timer setup and UpRev's x0.01 ms agree). Verified
+  # from code and checked on logged data through those DIDs (median 1.006 over
+  # 5,039 steady samples), NOT yet read through service 0x23: hypothesized
+  # until a key-on read passes; in no capture profile until then. The four
+  # groups are too far apart to share a window.
+  - name: ECM_INJECTOR_DEAD_TIME
+    address: 0xFFFF280C
+    length: 2
+    byte_length: 2
+    scale: 0.01   # 10 us per count
+    offset: 0.0
+    unit: ms
+    confidence: hypothesized
+    verified_tune_revision: ZS44A-20260920
+    window: injector_dead_time
+    evidence:
+      - session: firmware-ZS44A-20260920
+        method: disassembly
+        finding: >
+          u16, 10 us per count: the injector dead time Ts, written every
+          10.24 ms by 0x57144 as max(0, 47 + ((175 - Vb) x 92) >> 7)
+          (arithmetic shift, clamped to 0..0xFFFF), with 47 at cal 0x8C41, 92
+          at cal 0x84F2 and Vb the battery-voltage byte (0xFFFF1115, the
+          snapshot of 0xFFFF11A1, 0.08 V per count; the Mode 01 PID 0x42
+          handler reports that byte x 80 mV). Linear in Vb, no latency table:
+          0.47 ms at 14.0 V plus 0.090 ms per volt below it. Added to each
+          bank pulse; a cylinder in fuel cut is given Ts alone. 0xFFFF2780 is
+          its cycle-start copy.
+      - session: _capture-ram-study-2026-10-04T204557
+        method: dfco_did_vs_predicted_dead_time
+        finding: >
+          46 fuel-cut reads of DID 0x1206 read 49-53 counts against Ts 49-54
+          predicted from PID 0x42 by the formula above, every one within +-2
+          counts. Checks the formula, not this address.
+    notes: |
+      Known answers, neither expressible (`MemoryKnownAnswer` checks a word
+      against a Mode 22 DID, with no formula and no state gate):
+      - raw = max(0, 47 + ((175 - Vb) x 92) >> 7), arithmetic shift, with
+        Vb = Mode 01 PID 0x42 / 0.08 V (the battery byte). A PID relation,
+        so it is read across a session exit (Mode 01 is silent in 0xC0).
+      - DID 0x1206 (and 0x1207) raw = this raw within +-2 counts, but only
+        while that cylinder is in fuel cut. Fuelled, the DID is several
+        times Ts, so a tolerance relation over every read would fail a
+        correct address; it needs a fuel-cut gate the verifier does not have.
+      47 and 92 are injector latency calibration, identical in the UpRev base
+      and this tune; re-check them after an injector change.
+  - name: ECM_INJECTOR_BANK_PULSE_B1
+    address: 0xFFFF1B9A
+    length: 2
+    byte_length: 2
+    scale: 0.01   # 10 us per count
+    offset: 0.0
+    unit: ms
+    confidence: hypothesized
+    verified_tune_revision: ZS44A-20260920
+    window: injector_bank_pulse
+    evidence:
+      - session: firmware-ZS44A-20260920
+        method: disassembly
+        finding: >
+          u16, 10 us per count, clamped to 0xFFFF: the bank-1 pulse
+          Ti = (G x k >> 16) + Ts, written by 0x4F16E in the 10.24 ms task.
+          G = max(246, ((BFS x phi / 8) x purge factor + wall film) x
+          pressure factor >> 14); k = STFT + LTFT + a diagnostic perturbation
+          word (neutral in normal driving) - 0xC800, each 0x6400 = 1.0, so
+          the trims add; Ts = mem:ECM_INJECTOR_DEAD_TIME. The per-cylinder
+          stage takes this word for the even injector indexes and adds that
+          cylinder's transient terms (s16 0xFFFF141A[c] - s16 0xFFFF152E[c],
+          times a per-cylinder factor of 1.0 for all six); index 0 is what
+          DID 0x1206 reads.
+      - session: 6 tuning captures 2026-09-21..09-23 (_capture-tuning-*; ~/ecu-re/scripts/inj_pulse_check.py)
+        method: firmware_pulse_prediction_per_sample
+        finding: >
+          The same chain predicts DID 0x1206/0x1207 per sample (median 1.006
+          over 5,039 steady points; DID 0x1206's evidence). Checks the chain
+          as far as the per-cylinder copy, not this address.
+    notes: >
+      Before the per-cylinder stage, so no per-cylinder transient is in it.
+      Known answer (not expressible exactly): while fuelled, DID 0x1206 raw =
+      this raw + s16 0xFFFF141A - s16 0xFFFF152E (index 0's transient terms),
+      so at steady state the two should agree within a few counts; in fuel
+      cut the DID reads Ts and this word need not. A linear_did against
+      0x1206 needs a tolerance and min_agreement measured on a live read, and
+      the DID is a cycle-start copy, so it can lag this word by a cycle.
+  - name: ECM_INJECTOR_BANK_PULSE_B2
+    address: 0xFFFF1B9C
+    length: 2
+    byte_length: 2
+    scale: 0.01   # 10 us per count
+    offset: 0.0
+    unit: ms
+    confidence: hypothesized
+    verified_tune_revision: ZS44A-20260920
+    window: injector_bank_pulse
+    evidence:
+      - session: firmware-ZS44A-20260920
+        method: disassembly
+        finding: >
+          u16, 10 us per count, clamped to 0xFFFF: the bank-2 pulse, the same
+          formula with the bank-2 purge factor, STFT and LTFT. The
+          per-cylinder stage takes it for the odd injector indexes; index 1 is
+          what DID 0x1207 reads.
+    notes: >
+      Known answer (not expressible exactly, as for bank 1): while fuelled,
+      DID 0x1207 raw = this raw + index 1's transient terms.
+  - name: ECM_INJECTOR_PRESSURE_FACTOR
+    address: 0xFFFF1800
+    length: 2
+    byte_length: 2
+    scale: 6.103515625e-05   # Q14: raw / 16384
+    offset: 0.0
+    unit: ratio
+    confidence: hypothesized
+    verified_tune_revision: ZS44A-20260920
+    window: injector_pressure_factor
+    evidence:
+      - session: firmware-ZS44A-20260920
+        method: disassembly
+        finding: >
+          u16, Q14 (the bank stage multiplies by it and shifts right 14),
+          written on every second 10.24 ms call (0x53B8C) as
+          (b1772 x 10601) >> 8. b1772 = min(255, (b1A15 x 5259 + 0x128500) /
+          10000) is a linearised square root of b1A15 = min(255, (175 << 18) /
+          ((175 << 10) + vac512)) = 256 x 350 / (350 + vacuum kPa), with 175
+          at cal 0x8A89 read as 350 kPa (inferred). So the word is
+          0.647 x sqrt(350 / (350 + vacuum)): a flow correction for a
+          returnless rail referenced to atmosphere, times the injector-flow
+          scaler 10601 / 16384 (cal 0x9254). The vacuum (0xFFFF3954) is
+          estimated from baro, a load curve on baro- and IAT-corrected BFS and
+          an rpm curve, never measured; it never falls below about 0.2 x baro,
+          so the term cannot represent boost.
+      - session: 6 tuning captures 2026-09-21..09-23 (_capture-tuning-*; ~/ecu-re/scripts/inj_pulse_check.py)
+        method: firmware_pulse_prediction_per_sample
+        finding: >
+          With this term the per-sample pulse ratio is flat across the vacuum
+          estimate (0.99-1.01); without it the ratio falls 0.97 -> 0.91 as
+          vacuum rises. Checks the term, not this address.
+    notes: >
+      Includes the injector-flow scaler 0x9254, the pulse-only injector-size
+      knob. With 10601 the word cannot exceed (255 x 10601) >> 8 = 10559
+      (0.6445), but an injector change rescales 0x9254 and with it this
+      word, so no plausible bound is set. Known answer (not expressible): the
+      formula above, from the byte 0xFFFF1772 and the vacuum estimate
+      0xFFFF3954, neither catalogued.
+  - name: ECM_PURGE_FUEL_FACTOR_B1
+    address: 0xFFFF4698
+    length: 2
+    byte_length: 2
+    scale: 3.90625e-05   # raw / 25600 (0x6400 = 1.0)
+    offset: 0.0
+    unit: ratio
+    confidence: hypothesized
+    verified_tune_revision: ZS44A-20260920
+    window: purge_fuel_factor
+    evidence:
+      - session: firmware-ZS44A-20260920
+        method: disassembly
+        finding: >
+          u16, 0x6400 = 1.0: the bank-1 multiplier on BFS x phi / 8 in the
+          pulse chain (u32(base x this) / 0x6400), formed as
+          (0x8000 - vapour) x 25 / 32 and 0x6400 when purge is off. The
+          structure is verified; that it is the EVAP purge vapour correction
+          is inferred (hence the name).
+    notes: >
+      1.0 (raw 25600) with purge off, moving off it while purge runs. Known
+      answer (cross-read, not expressible, and the mapping is inferred):
+      raw = 25600 whenever DID 0x1110 (ECM_EVAP_PURGE_CMD) reads 0, purge
+      off. The code's purge-off condition has not been tied to that DID, so
+      check it on a key-on read before relying on it. The 2026-09-21..23
+      chain check (DID 0x1206's evidence) took this factor as 1.0 because it
+      was not logged.
+  - name: ECM_PURGE_FUEL_FACTOR_B2
+    address: 0xFFFF469A
+    length: 2
+    byte_length: 2
+    scale: 3.90625e-05   # raw / 25600 (0x6400 = 1.0)
+    offset: 0.0
+    unit: ratio
+    confidence: hypothesized
+    verified_tune_revision: ZS44A-20260920
+    window: purge_fuel_factor
+    evidence:
+      - session: firmware-ZS44A-20260920
+        method: disassembly
+        finding: >
+          u16, 0x6400 = 1.0: the bank-2 counterpart of
+          mem:ECM_PURGE_FUEL_FACTOR_B1, by the per-bank layout of the chain.
+          Name inferred, as for bank 1.
+    notes: >
+      Known answer (cross-read, not expressible, inferred mapping, as for
+      bank 1): raw = 25600 whenever DID 0x1110 reads 0, purge off.

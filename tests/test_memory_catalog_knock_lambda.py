@@ -109,7 +109,8 @@ WINDOWS = {
     "knock_fault_flag": (0xFFFF479D, 1),
     "knock_fault_levels": (0xFFFF2CEF, 2),
     "lambda_word": (0xFFFF4722, 4),
-    "lambda_target": (0xFFFF46B2, 4),
+    # widened down to 46AC, the PID 0x44 target copy (injector pass, 2026-10-05)
+    "lambda_target": (0xFFFF46AC, 10),
     "lambda_learned_offset": (0xFFFF4CA4, 4),
     "lambda_baro_gain": (0xFFFF36BB, 1),
 }

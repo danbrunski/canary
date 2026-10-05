@@ -184,6 +184,14 @@ def decode_commanded_lambda(data: bytes) -> tuple[float, str] | None:
     under enrichment. Any consumer converting this to AFR on a vehicle whose
     convention has not been checked at WOT is guessing.
 
+    The convention is not the whole story either. That ECM's firmware
+    (2026-10-05) computes the PID as φ × (A/F feedback target ÷ 14.7), so it
+    is φ only while the feedback target is 14.7: idle reads of 0.871 had
+    injector pulses matching φ = 1.0. Where a vehicle exposes the φ word
+    itself, read that instead (on the 2008 Xterra,
+    ``mem:ECM_TARGET_EQUIV_RATIO``; its notes in ``data/dids.yaml`` give the
+    relation).
+
     Left as the raw ratio deliberately: flipping it here would silently change
     the meaning of every stored `COMMANDED_EQUIV_RATIO` row and break
     comparability with the existing corpus. Convert at the point of use, and
