@@ -281,6 +281,11 @@ def test_0x1110_is_commanded_evap_purge_not_vvt_duty() -> None:
     # The refuted reading stays on record, tagged with the bus it came from.
     assert any("VVT" in item.finding for item in entry.evidence_against)
     assert all(item.transport for item in entry.evidence_against)
-    # Saved profiles and the Pi's obd_dids still name the old one; it must
-    # resolve to this DID rather than stop the daemon at start.
-    assert parse_did_token("ECM_INTAKE_VVT_SOLENOID_DUTY") == 0x1110
+    # No alias (2026-09-18 policy): the wrong names are migrated, not kept,
+    # so a config still naming them fails loudly at daemon start instead of
+    # silently polling a DID under a meaning it does not have.
+    with pytest.raises(ValueError):
+        parse_did_token("ECM_INTAKE_VVT_SOLENOID_DUTY")
+    with pytest.raises(ValueError):
+        parse_did_token("ECM_INTAKE_VVT_SOLENOID_DUTY_CANDIDATE_B2")
+    assert parse_did_token("ECM_UNIDENTIFIED_1139") == 0x1139

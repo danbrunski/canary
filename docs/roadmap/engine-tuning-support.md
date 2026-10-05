@@ -636,12 +636,11 @@ Other facts worth not re-deriving:
   Worth checking whether the **Load Point Scaler** is sized for an engine that
   flows more than this one does — that is the correct fix, not axis editing.
 - **No cam feedback channel exists.** The UpRev log's 17 channels contain no cam
-  angle or VVT position; CANary's only candidate is
-  `ECM_INTAKE_VVT_SOLENOID_DUTY` (DID `0x1110`, `data/dids.yaml`) which is
-  medium-confidence with **scaling unpinned** (only 0 at idle and 11 at 2500 rpm
-  ever observed) — and is a solenoid *command*, not a measured position.
-  Pinning it is a prerequisite for evaluating any cam edit directly rather than
-  through downstream airflow.
+  angle or VVT position, and neither does CANary: the one candidate, DID
+  `0x1110`, turned out to be the commanded EVAP purge byte (firmware,
+  2026-10-04; now `ECM_EVAP_PURGE_CMD`), not intake VVT solenoid duty. Finding
+  a cam command or position channel is a prerequisite for evaluating any cam
+  edit directly rather than through downstream airflow.
 
 ## Phase 2 — Correction-surface analysis (software; needs G.2 for the trim half)
 

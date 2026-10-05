@@ -178,7 +178,8 @@ the analysis UX.
 - [ ] **2.4 — Schedule the identified DIDs.** Add the unscheduled
   identified DIDs to the Pi window config
   (`canary.pi.example.yaml:33-37` currently polls 4 of 13):
-  at minimum `ECM_INTAKE_VVT_SOLENOID_DUTY` (0x1110),
+  at minimum `ECM_EVAP_PURGE_CMD` (0x1110; commanded EVAP purge, renamed
+  2026-10-04 from a wrong "intake VVT solenoid duty" identification),
   `ECM_INJECTOR_PULSE_1/2` pair (0x1206/0x1207 — injected pulse; once
   mislabelled intake pressure),
   `ECM_THROTTLE_POS_SENSOR_2` (0x1210), `ECM_AF_SENSOR_HEATER_DUTY`

@@ -63,8 +63,8 @@ collection:
     - ECM_THROTTLE_POS_SENSOR_2  # 0x1210 — TPS sensor 2, the redundant-pair partner
     # Commanded EVAP purge, 0.5 % per count: the same ECM byte Mode 01 PID
     # 0x2E reports (firmware, 2026-10-04). It was polled here as intake VVT
-    # solenoid duty under the old name ECM_INTAKE_VVT_SOLENOID_DUTY, which
-    # still resolves as an alias; that identification was wrong.
+    # solenoid duty, a wrong identification; the old name is gone (no alias)
+    # and tools/channel_renames/2026-10-04-evap-purge.yaml migrates configs.
     - ECM_EVAP_PURGE_CMD  # 0x1110 — commanded EVAP purge
   # Batch up to N PIDs per Mode-01 request (SAE J1979 allows 6). Batched PIDs
   # share one request *and one timestamp*, so a capture reads as synchronous

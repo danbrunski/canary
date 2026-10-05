@@ -891,7 +891,9 @@ promote unverified bindings or to change a tune.
   evidence and distinguish that result from the new logger comparison. Bank 2
   still lacks an independent λ reference; do not extend bank-1 conclusions to
   it. VVT duty can also arbitrate 0x1110's ×0.5 versus ×100/255 scale only if
-  the matching raw register is observed in the same window.
+  the matching raw register is observed in the same window. *(2026-10-04:
+  moot. 0x1110 is commanded EVAP purge, ×0.5 % from the ECM's own PID 0x2E
+  arithmetic, D03.36; it is not VVT duty.)*
 
 - [~] **D03.11 Verify the evening fixes through a real drive and stop.**
   **Before departure:** record the Pi checkout SHA and running build; ensure it
@@ -962,6 +964,9 @@ promote unverified bindings or to change a tune.
     and changing electrical load. ×0.028 V is a hypothesis, not a calibration.
     A near-constant charging voltage is an unresolvable scale result.
   - **0x1110/0x1139:** external duty-scale verification is deferred with D03.10.
+    *(2026-10-04: no longer a duty question. 0x1110 is commanded EVAP purge,
+    ×0.5 % from firmware; 0x1139 is `ECM_UNIDENTIFIED_1139`, identity open.
+    D03.36.)*
     Today's paired
     result rejects a simple mirror; raw range and shared zero fractions do not
     identify bank 2 or settle either scale.
@@ -2415,6 +2420,16 @@ live here now, so the documents could be archived
     `did:ECM_INTAKE_VVT_SOLENOID_DUTY*` and `obd:DID_1110*` appear only in
     `feature_health` dropped lists (constant, low coverage or all-NaN), never
     in `feature_columns`. `obd:EVAPORATIVE_PURGE` is served and unchanged.
+    *No alias, 2026-10-04 (operator: "names reflect reality"):* the 2026-09-18
+    policy applied. `ECM_INTAKE_VVT_SOLENOID_DUTY` is gone from the catalog, and
+    0x1139 (`..._DUTY_CANDIDATE_B2`, named on the same wrong premise) is now
+    `ECM_UNIDENTIFIED_1139` (CAN pointer table → RAM 0xFFFF278D, beside the
+    purge block; identity open). `tools/channel_renames/2026-10-04-evap-purge.yaml`
+    drove `tools/migrate_channel_names.py`: laptop 74 names in 9 files (five
+    tuning-did capture_profile.json snapshots, the IF manifest and joblib in
+    models/ and models-0920a), no session Parquet (stored channels are DID_<hex>);
+    the deployed-manifest test fixture too. `test_0x1110_is_commanded_evap_purge_not_vvt_duty`
+    now asserts both old names are refused at parse.
   - [~] **0x120F/0x1210 scale: firmware says 5/1024 V; change held for a
     served-feature decision.** Table 0x24B84 entry 15 (0x120F) is 0xFFFF2B0C,
     throttle sensor A's raw 10-bit count (A/D channel 6). Entry 16 (0x1210) is

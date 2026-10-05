@@ -50,7 +50,7 @@ TUNING_DIDS: tuple[str, ...] = (
     "ECM_INTAKE_CAM_ANGLE_COMMANDED",
     "ECM_INTAKE_CAM_ANGLE_MEASURED_B",
     "ECM_EVAP_PURGE_CMD",
-    "ECM_INTAKE_VVT_SOLENOID_DUTY_CANDIDATE_B2",
+    "ECM_UNIDENTIFIED_1139",
     "ECM_THROTTLE_POS_SENSOR_1",
     "ECM_COOLANT_TEMP",
 )
@@ -137,7 +137,7 @@ TUNING_DID_PROFILE = _capture(
     mode01={},
     mode01_enabled=False,
     mode22=TUNING_DIDS,
-    mode22_rate_weights={"ECM_COOLANT_TEMP": 0.2, "ECM_INTAKE_VVT_SOLENOID_DUTY_CANDIDATE_B2": 0.5},
+    mode22_rate_weights={"ECM_COOLANT_TEMP": 0.2, "ECM_UNIDENTIFIED_1139": 0.5},
     target_rate_hz=15.0,
     did_continuous=True,
     bus_budget_override=180.0,

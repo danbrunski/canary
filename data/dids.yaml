@@ -686,11 +686,9 @@ dids:
     offset: 0.0
     unit: percent
     confidence: high
-    # Renamed 2026-10-04. The old name was a wrong identification; it stays
-    # only so saved capture profiles and the Pi's collection.obd_dids keep
-    # parsing (parse_did_token refuses an unknown name at daemon start).
-    aliases:
-      - ECM_INTAKE_VVT_SOLENOID_DUTY
+    # Renamed 2026-10-04 from ECM_INTAKE_VVT_SOLENOID_DUTY, a wrong
+    # identification. No alias, as in the 2026-09-18 relabel: stored artifacts
+    # and configs were migrated (tools/channel_renames/2026-10-04-evap-purge.yaml).
     evidence:
       - session: firmware-ZS44A-20260920
         method: disassembly
@@ -1076,7 +1074,7 @@ dids:
       figure). A persistent offset while nothing moves is two sensors.
 
   - did: 0x1139
-    name: ECM_INTAKE_VVT_SOLENOID_DUTY_CANDIDATE_B2
+    name: ECM_UNIDENTIFIED_1139
     byte_start: 0
     byte_length: 1
     response_length: 1
@@ -1084,22 +1082,27 @@ dids:
     byte_order: big
     scale: null
     offset: null
-    unit: percent
+    unit: unknown
     confidence: low
     notes: >
-      Catalogued as the bank-2 sibling of 0x1110's intake VVT solenoid duty.
-      That premise is gone: 0x1110 is EVAP purge (firmware, 2026-10-04), so
-      nothing ties this register to cam control any more, and its identity is
-      open. The name is kept only because capture profiles reference it.
-      Retain it only in the focused all-DID capture while tagged transition
-      evidence is collected.
+      Identity unknown. Renamed 2026-10-04 from
+      ECM_INTAKE_VVT_SOLENOID_DUTY_CANDIDATE_B2: it was catalogued as the
+      bank-2 sibling of 0x1110's "intake VVT solenoid duty", and 0x1110 is
+      EVAP purge (firmware), so nothing ties this register to cam control.
+      The CAN DID pointer table (0x24988, index 0x39) points it at RAM byte
+      0xFFFF278D, 5 bytes below the purge-control block based at 0xFFFF2792
+      (whose +0x28 is the purge byte 0xFFFF27BA). The listing shows one
+      reader (0x0C673C) and no direct writer, so it is written through a
+      pointer or a different base; meaning not established. Retain it only
+      in the focused all-DID capture while tagged transition evidence is
+      collected.
 
   # The OTHER bank's measured angle was NOT found in 0x1000-0x1400. A search
   # of all 158 responding DIDs turned up no second cam-like signal carrying a
-  # persistent ~1 deg offset with independent jitter. (0x1139 was read as the
-  # bank-2 VVT solenoid duty, as the sibling of 0x1110; 0x1110 turned out to
-  # be EVAP purge on 2026-10-04, so no solenoid duty is identified on either
-  # bank.) Extend the next sweep past 0x1400. Not blocking: the ROM Cam
+  # persistent ~1 deg offset with independent jitter. (0x1139, now
+  # ECM_UNIDENTIFIED_1139, was read as the bank-2 VVT solenoid duty, as the
+  # sibling of 0x1110; 0x1110 turned out to be EVAP purge on 2026-10-04, so
+  # no solenoid duty is identified on either bank.) Extend the next sweep past 0x1400. Not blocking: the ROM Cam
   # Phasing table is a single table, not per-bank, so commanded + measured
   # angles are a working set.
 

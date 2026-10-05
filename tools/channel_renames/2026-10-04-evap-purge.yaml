@@ -1,0 +1,14 @@
+# Rename map for tools/migrate_channel_names.py -- the 2026-10-04 EVAP purge relabel.
+#
+# Firmware (CAN DID pointer table 0x24988 and the PID 0x2E handler) shows DID
+# 0x1110 is the commanded EVAP purge byte, not intake VVT solenoid duty; DID
+# 0x1139 had been catalogued as its bank-2 sibling on that premise and its
+# identity is now open. Same policy as 2026-09-18: no aliases, migrate every
+# stored artifact (evidence in data/dids.yaml, roadmap D03.36).
+#
+# `channels` are bare DID names; each also covers its `did:` column form and
+# derived feature columns (`did:<NAME>__mean`, ...). Old names are matched
+# as whole tokens, longest first, so the 0x1110 name never clips 0x1139's.
+channels:
+  ECM_INTAKE_VVT_SOLENOID_DUTY: ECM_EVAP_PURGE_CMD                         # 0x1110
+  ECM_INTAKE_VVT_SOLENOID_DUTY_CANDIDATE_B2: ECM_UNIDENTIFIED_1139         # 0x1139

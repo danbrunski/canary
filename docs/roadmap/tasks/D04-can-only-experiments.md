@@ -347,6 +347,10 @@ opportunistic on any sustained climb.
   still needs D03.10's external reference; this decides what it can *not* be.
   **Done 2026-09-22 (desk, every `did_log` window on disk: 3a, 3b, 5,
   paced47 — [evidence](../../../data/analyses/2026-09-22-d03-d04-desk-pass.md)).**
+  - *Superseded 2026-10-04 by firmware (D03.36):* 0x1110 is commanded EVAP
+    purge, **×0.5 %** (the PID 0x2E handler's own arithmetic, which
+    saturates above raw 200), not VVT duty. 0x1139 is `ECM_UNIDENTIFIED_1139`, identity open, so the
+    "shared unit" premise below does not hold.
   - **0x1110: max 130 / 149 / 190 / 153 — never ≥ 200, no plateau** (one
     sample at each window's max). Saturation gives it **no bound**: ×0.5 and
     ×100/255 both survive.
