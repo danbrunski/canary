@@ -71,6 +71,36 @@ The lookup at `0x0269AC` calls three helpers:
 | `0xFFFF103E = min(255, BFS × 128 / 44019)`, where BFS is the word at `0xFFFF103A` (the variable DID `0x1208` reports; it includes the Fuel Comp multiplier, see "how BFS is formed" below). One X count is 343.9 BFS counts, which is **0.1685 ms**. | Verified | The code, plus a capture: X equals floor(BFS × 128 / 44019) on 1,564 of 1,564 same-read rows, while control divisors fail. It matches P02.14's fitted 0.1695 ms per count. |
 | **44019 is UpRev's "Load Point Scaler".** It sits at `0x9416` in the calibration block, and a copy sits in each map slot at `+0x760`, just before K. | Verified (value at both addresses); which copy the code reads is inferred to be `0x9416` | The bytes. Editing it moves every operating point along the Target AFR and timing load axes, which is the edit UpRev warns against doing by hand. |
 
+Exact arithmetic (E02.4; read from the listing, implemented once in
+`src/decode/ecm_lookup.py`): each search scans from the top breakpoint down for
+the largest index with axis ≤ value. An equal value, a value past the top and
+a value below the first breakpoint all give a fraction of 0. Otherwise the
+fraction is `((value − axis[i]) << 16) / (axis[i+1] − axis[i])`, an unsigned
+truncating divide. `0x026F10` computes `a + ((b − a) × frac >> 16)`, or
+`a − ((a − b) × frac >> 16)` when b < a, so it truncates toward `a` in both
+directions. `0x026F40` interpolates along the columns of row i and of row
+i + 1, then between the two rows.
+
+### Target AFR lookup to final command
+
+Read from the listing for E02.4 on 2026-10-04. The twin profile
+(`data/nissan-xterra-2008/target_phi_twin.yaml`) declares each item.
+
+| What | Confidence | Evidence |
+|---|---|---|
+| After the lookup, while bit 6 of `0xFFFF283F` is set, the result's excess over 128 is scaled by the 8-entry curve at `0xD247` (÷ 128). That curve is all 128 in ZS44A-20260920, so the scaling is the identity there. | Verified (code and bytes); the curve's input `0xFFFF11CF` is not identified | `0x055E26`–`0x055E5A`. |
+| The result reaches `0xFFFF174B` only when it is ≥ 130 (cal `0x8B39`), or ≥ 129 while bit 3 of `0xFFFF2886` is already set (release cal `0x8B3D` = 129). Otherwise `0x80` (φ 1.0) is written. A lookup of 129 is therefore ambiguous unless that bit is captured. | Verified (code) | `0x055E5C`–`0x055EEC`. |
+| The commanded word `0xFFFF26BE` is written by `FUN_00055B5E`. It starts from min(0xFFFF, `w26F6` + `w27DC`) × `w26C0` >> 14. On most paths it then caps the word at `0xFE00` (cal `0x8B3B`) and limits the step against `w26CC`. It writes 0 while `0xFFFF26B8` = `0x3F` (fuel cut). | Verified (code); the meaning of the three words is unknown | `0x055B5E`–`0x055DA4`. |
+| How `0xFFFF174B` reaches `w26F6`, `w27DC` or `w26C0` | Not traced | Its readers are at `0x04CAF4`, `0x0566F8`, `0x056810`, `0x05682A` and `0x066028`. |
+
+So the lookup's output is not yet known to be the final command. On the
+2026-10-04 drive, 149 of the 153 command reads were 16384 (φ 1.0), and the X
+trace stayed at or below 100 counts. Most reads were below the first BFS column
+(52), where the table itself reads 128. The drive therefore cannot tell
+closed-loop holding from the table. Until that path is traced, the twin labels
+its value a lookup prediction and issues no qualified residual
+(`final_command_path_unverified`).
+
 ### Diagnostic service handlers
 
 | What | Where | Confidence |
@@ -214,7 +244,9 @@ displacement × rpm, through a saturating curve. It reads 0–224 in relative
 units, and has no MAF, barometric or temperature input. At full throttle it
 reaches 224 only below about 1,660 rpm. The 0x3C00 split is a resolution
 change, not a knee. UpRev's "Volumetric Flow Ratio" % (raw × 100/256) is a
-display convention.
+display convention. CANary shows the axis as "Throttle-model fill (alpha-N)",
+% of the 224 ceiling (raw × 100/224; `d7802d5`). From UpRev's editor, divide
+the swapped "RPM" label by 112 to get that %, or by 50 to get raw counts.
 
 **Where Fuel Comp acts, and how BFS is formed** (decompiler, verified; the
 listing pass reached the same multiply):
