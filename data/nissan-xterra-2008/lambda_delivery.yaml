@@ -89,6 +89,24 @@ measured_sources:
       2026-08-07T210613: under decel fuel cut it pegs at 2.000 (lean), where
       phi would fall toward zero; at a phi=1.16 command (lambda 0.862) it read
       0.866 (afr_calibration.yaml provenance).
+  # Bank 2's wide-band lambda (Mode 01 PID 0x28, the second equivalence-ratio
+  # PID this ECM reports). Operator decision 2026-10-04 (N02.3): declared so
+  # bank-2 delivery error is a residual, not an unjudged value.
+  - name: ecm_lambda_pid_0x28
+    spec: 'obd:O2_WR_LAMBDA_S5'
+    quantity: lambda
+    rail_high: 1.999
+    convention_evidence: >-
+      lambda, the same SAE J1979 equivalence-ratio encoding as PID 0x24 and
+      the same convention behaviour. On 2026-10-04T194342 it equals bank 1's
+      PID 0x24 read in the same Mode 01 batch: S5/S1 median 1.0002 over 1,576
+      acquisition-time pairs (1,518 off the rail; p10-p90 0.990-1.020; 172
+      rich pairs below 0.95 at median 1.0045). Under decel fuel cut it pegs at
+      its 2.000 lean rail exactly as PID 0x24 does (3 of 3 PID 0x44 = 0 reads
+      on 194342, both sensors; 7 of 9 on _capture-ram-study-2026-10-04T204557,
+      where PID 0x24 is at the rail on 9 of 12 -- the sensor lagging the cut,
+      as on bank 1), where phi would fall toward zero. Logged only from
+      2026-10-04.
   - name: af_voltage_b1
     spec: 'did:ECM_AF_SENSOR_V_B1'
     quantity: afr

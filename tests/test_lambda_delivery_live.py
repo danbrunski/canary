@@ -36,7 +36,7 @@ from src.analysis.lambda_delivery import (
 )
 from src.analysis.lambda_delivery_stream import DeliveryStream
 from src.analysis.noise_floor import load_noise_floor
-from src.analysis.tuning import DeliveryRoute, read_delivery_inputs
+from src.analysis.tuning import DeliveryRoute, InputsNotCapturedError, read_delivery_inputs
 from src.analysis.tuning_context import TuningContext
 from src.collection import tuning_profile
 from src.collection.capture_profiles import CaptureProfile
@@ -207,10 +207,26 @@ def _assert_live_matches_offline(
     routes = {(r["target_source"], r["measured_source"]): r for r in result["block"]["routes"]}
     eligible: dict[tuple[str, str], int] = {}
     for key in _routes(declaration):
-        offline, _inputs = _offline(session, declaration, calibration, *key)
+        published = routes[key]
+        try:
+            offline, _inputs = _offline(session, declaration, calibration, *key)
+        except InputsNotCapturedError as exc:
+            # A declared route this capture never polled (e.g. bank 2's PID
+            # 0x28 before 2026-10-04): the offline engine refuses it, and the
+            # live route must say the same thing rather than publish rows.
+            # The live route still decides its target rows (as unpaired), but
+            # none may carry a pairing or a residual.
+            assert published["result"] == "inputs_not_observed"
+            assert published["missing_inputs"] == list(exc.missing)
+            assert published["paired"] == 0
+            assert published["states"]["eligible"] == 0
+            if key in rows:
+                decided = _concat(rows[key])
+                assert (decided.paired < 0).all()
+                assert np.isnan(decided.residual_pct).all()
+            continue
         live = _concat(rows[key]).to_frame()
         _same_rows(live, offline)
-        published = routes[key]
         assert published["late_reads"] == {"target": 0, "sentinel": 0, "measured": 0}
         assert published["undecided_rows"] == 0
         counts = offline["state"].value_counts().to_dict()
