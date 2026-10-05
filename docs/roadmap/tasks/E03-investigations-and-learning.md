@@ -7,7 +7,7 @@ computed on the Pi and render without a language model.
 
 ## Checklist
 
-- [ ] **E03.1 — Complete the fuel-delivery evidence/memory loop.**
+- [~] **E03.1 — Complete the fuel-delivery evidence/memory loop.**
   Use B06's existing command-versus-measured analysis to detect a qualified
   discrepancy, create an investigation, attach alternative explanations,
   select a measurement, record a prediction and evaluate/preserve its outcome.
@@ -19,13 +19,84 @@ computed on the Pi and render without a language model.
   Missing commanded AFR and insufficient regime coverage produce different
   explicit outcomes; neither becomes a zero error or a resolved diagnosis.
 
-- [ ] **E03.2 — Define detectable and distinguishable hypotheses.**
+- [x] **E03.2 — Define detectable and distinguishable hypotheses.**
   Express air/fuel relations and fault signatures as versioned artifacts.
   Spike the proposed Fault Diagnosis Toolbox for structural analysis before
   writing an alternative. Research may use a laptop, but deploy compact
   residual/hypothesis artifacts that the Pi can evaluate independently.
   Start with MAF transfer error, fuel-delivery sag and a fixed-quantity error
   such as an idle air leak/injector dead time. Require evidence for numerical
+  *Laptop loop done 2026-10-04 (revised after verification); the Pi run
+  remains (E04).* **Real answer today: the WOT lean does not reproduce out
+  of sample.** `_capture-tuning-2026-09-23T164007` (+3.30 %, 44 rows) is in
+  B06's enrichment `informed_by`, so it is in-sample: the mint writes no
+  sign (`sign_refused`, flag `informed_constants`) and `detect_discrepancy`
+  returns `unqualified`/`in_sample` — qualified needs an explicit
+  `session_informed_constants: false`, so an in-sample discrepancy cannot be
+  represented. The five held-out drives are minted in the case, all within
+  the 2.50 % detectable (sign `0`, `within_floor`, nothing opened):
+  `_capture-tuning-2026-09-23T142926` −1.14 % (24 rows),
+  `…09-22T170459` +0.17 % (22), `…09-22T235224` +0.74 % (21),
+  `_capture-tuning-hybrid-research-2026-09-17T191712` −0.46 % (67) and
+  `…T201000` −0.66 % (46) — the last two on calibration ZS44A-k106. Each
+  committed slice (`tests/fixtures/delivery_investigation/`, 8 slices,
+  ~1.8 MiB, cut with `tools/make_ground_truth_fixture.py`, which gained
+  `--keep-sensor`/`--sensor-stride`) reproduces its full session's n and
+  band-averaged residual exactly. **Producers**
+  (`src/analysis/delivery_evidence.py`): `mint_delivery_error` calls
+  `tuning.delivery_error` unchanged (Mode 01 route, WOT floors, B06
+  eligibility/lag); kinds of empty are distinct reasons with no residual
+  (`missing_input` / `stale_input` / `uncovered` / `unknown_context`).
+  `mint_fuel_pressure_droop(region=…)`: `high_airflow` = closed-loop
+  (Mode 01 fuel status 2, bracketed by agreeing status reads within 5 s) MAF
+  ≥ 60 g/s against closed-loop MAF 2–10 g/s, signed only fell/rose beyond
+  2 SE + low-airflow drift (never "steady"); `enrichment` = pressure at the
+  rows B06's `gate_delivery_samples` admits, as injector flow loss
+  (√ law), signed against the delivery floor's 2.50 % detectable with the
+  same margin, no sign for an in-sample drive. Every record lists the fault
+  model channels its session holds. **Loop**
+  (`src/analysis/delivery_investigation.py`): `detect_discrepancy`;
+  `investigate` (opens only on a qualified discrepancy, else retrieves and
+  supersedes the open one; single-fault refutation; structural analysis per
+  drive on that drive's own channels and coverage); `unresolved_pairs` /
+  `select_measurement` (actionable measurements first, then pairs
+  separated); `predict_recurrence` and `predict_pressure_flow_loss` (both
+  under the verified WOT delivery floor; flow-loss magnitude = the observed
+  lean); `evaluate_outcome` (refuses the prediction's own or an earlier
+  drive with `NotNextDriveError`; in-sample or unqualified-sign records →
+  `unresolvable`/`refused`; another region → `uncovered`); `retrieve`. CLI
+  `tools/investigate_delivery.py`. **Labelled synthetic loop** (generated in
+  the test, `_synthetic-…`): drive A, 4 % lean, no pressure → opens, MAF /
+  sag / sensor bias open, first measurement "Log fuel pressure through a
+  full-throttle pull"; predictions recorded; outcome on the in-sample
+  164007 → `unresolvable` `refused`; on held-out 142926 → `no_effect`,
+  `contradicted`; drive B, later, 4 % lean with pressure holding → recurrence
+  `confirmed`, flow-loss prediction `contradicted` (loss sign `0`), sag
+  refuted, MAF/sag pair resolved, MAF vs sensor bias still open (wideband
+  named), investigation retrieved and superseded. `2026-10-04T194342`:
+  delivery `uncovered`, closed-loop droop +1.99 % (sign `+`, refutes
+  nothing), enrichment pressure `uncovered`;
+  `_capture-rom-trace-2026-09-21T195647`: `missing_input` for delivery and
+  pressure. Evidence: `tests/test_delivery_investigation.py` (12 passed;
+  serial ~10–20 s, of which the real-drive module fixture is ~7–12 s and the
+  synthetic one ~2–6 s, so the first test of each belongs in the measured
+  slow tier — `tests/slow_tests.txt` is generated and was not edited):
+  `test_the_in_sample_wot_lean_drive_opens_nothing`,
+  `test_the_held_out_drives_show_no_qualified_discrepancy`,
+  `test_missing_command_and_uncovered_regime_are_different_explicit_results`,
+  `test_closed_loop_droop_is_minted_and_enrichment_pressure_is_uncovered`,
+  `test_synthetic_a_qualified_discrepancy_opens_an_investigation`,
+  `test_synthetic_predictions_carry_the_condition_matched_floor`,
+  `test_outcomes_need_the_next_independent_drive`,
+  `test_synthetic_loop_verifies_and_resolves_the_maf_sag_pair`,
+  `test_ecu_computation_evidence_cannot_feed_the_delivery_loop`, plus B06
+  equivalence, card and re-mint tests. **Remaining:** (1) the Pi run of the
+  loop through E04 (job/route wiring, persistence across a restart); (2) a
+  real qualified discrepancy does not exist yet — a further held-out
+  full-throttle drive is welcome evidence, and one with fuel pressure would
+  exercise the flow-loss residual on real data, but neither blocks the
+  machinery; (3) B08.5's ECU-computation/historical residual evidence is
+  not attached (B08's).
   likelihoods; do not invent probabilities for unsupported hypotheses.
   **Accept:** known-answer and labelled synthetic controls exercise each
   declared signature; the model explicitly reports indistinguishable pairs.
@@ -43,6 +114,54 @@ computed on the Pi and render without a language model.
   from real observations, and preserve excluded/unevaluable counts. Candidate
   adaptation cannot move the reference or widen its alarm limits.
 
+  *Done on the laptop 2026-10-04 (v2 after verification); toolbox install
+  left to the operator.* Artifact `data/nissan-xterra-2008/fault_hypotheses.yaml`
+  (`canary-fault-hypotheses/1`, `version: 2`): regions `low_airflow` /
+  `high_airflow` (both closed loop by Mode 01 fuel status) / `enrichment`
+  (B06 gates); residuals `delivery_error` (floor-qualified),
+  `pressure_flow_loss@enrichment` (√-law flow loss at B06-eligible rows,
+  qualified against the delivery floor), `fuel_pressure_droop@high_airflow`
+  (within-drive), `closed_loop_trim` (unqualified: no trim floor, LTFT
+  reset), `throttle_fill_vs_maf` (B08; unqualified — unresolved terms and
+  scale, not an independent airflow sensor), `independent_lambda` (proposed
+  instrument, no invented channel); hypotheses `no_fault`,
+  `maf_transfer_error`, `fuel_delivery_sag`, `fixed_quantity_error`,
+  `lambda_sensor_bias`. Because whether the calibration absorbs droop is
+  unknown, no hypothesis but sag constrains pressure beyond `nonnegative`;
+  sag alone requires a positive flow loss. Evaluator
+  `src/analysis/fault_model.py`: `structural_analysis` (separators are
+  features whose sign sets differ, `guaranteed` when disjoint; a pair is
+  `distinguishable` only on a usable guaranteed separator, else `possibly` /
+  `indistinguishable`; measurements listed actionable first),
+  `evaluate_observations` (single fault; conflicting signs refused),
+  `score(model, ledger)` (a likelihood counts only if every cited evidence id
+  resolves current on the vehicle's ledger; none is declared). Results:
+  without fuel pressure MAF error vs sag is `possibly` and its first
+  measurement is "Log fuel pressure through a full-throttle pull"; with
+  pressure it stays `possibly` — a flow loss too small to explain the lean
+  refutes sag, a large one refutes neither (a MAF error with an absorbed
+  droop); MAF error vs sensor bias stays `indistinguishable` (needs an
+  independent wideband); closed-loop droop refutes nothing. Evidence:
+  `tests/test_fault_model.py` (24 passed): known answer, labelled synthetic
+  controls for all five signatures and
+  `test_synthetic_control_pressure_at_a_pull_refutes_sag_only_when_flow_holds`,
+  `test_no_hypothesis_but_sag_claims_anything_about_pressure`,
+  `test_with_pressure_the_pair_is_only_possibly_separable`,
+  `test_closed_loop_droop_refutes_nothing`,
+  `test_no_likelihood_without_evidence_that_resolves` (invented and
+  retracted ids refused), language hypothesis unscored, schema refusals and
+  the negative control `test_negative_control_a_sag_that_claims_no_flow_loss_is_inseparable`.
+  *Toolbox spike (no install; PyPI metadata and docs read 2026-10-04):*
+  `faultdiagnosistoolbox` 0.12.5, MIT, cp312 manylinux aarch64 and x86_64
+  wheels (~100 KB), depends on sympy, numpy, scipy, matplotlib and
+  scikit-learn (sympy and matplotlib are new to the Pi). It analyses
+  equation-level DAE models (structural/Dulmage–Mendelsohn analysis, MSO
+  residual generation, isolability, sensor placement, code generation). Our
+  first artifact is a qualitative, region-indexed sign table with no
+  equations, which its model input does not express, so the minimal
+  set-signature analysis above was written instead. The toolbox becomes the
+  right tool once the air/fuel relations are written as equations (E03.4/E05
+  scale); installing it is an operator decision (not taken here).
 - [ ] **E03.4 — Track hypotheses and select the next measurement.**
   Update a finite hypothesis set when new evidence arrives, preserving
   supporting and refuting evidence ids. Rank measurements by expected

@@ -41,6 +41,18 @@ already hold, over the whole capture; the test reads the two together::
         --keep-obd FUEL_STATUS --keep-obd COOLANT_TEMP --keep-obd RPM --keep-obd MAF \\
         --out tests/fixtures/ground_truth/target-phi-slice
 
+The delivery-investigation drive with fuel pressure (E03.1/E03.2) keeps the
+Mode 01 delivery channels plus ``sensor:FUEL_PRESSURE`` at every 10th row (real
+100 Hz rows, fewer of them; the analysis averages pressure over 0.5 s)::
+
+    .venv/bin/python tools/make_ground_truth_fixture.py --only \\
+        --session ~/canary-data/sessions/nissan-xterra-2008/2026-10-04T194342 \\
+        --start 2026-10-04T19:58:00Z --seconds 1080 \\
+        --keep-obd COMMANDED_EQUIV_RATIO --keep-obd O2_WR_LAMBDA_S1 --keep-obd RPM \\
+        --keep-obd FUEL_STATUS --keep-obd ENGINE_LOAD --keep-obd MAF \\
+        --keep-sensor FUEL_PRESSURE --sensor-stride 10 \\
+        --out tests/fixtures/delivery_investigation/2026-10-04T194342
+
 Keep the window short. This is a regression anchor, not a corpus — every byte
 of it lives in git forever.
 """
@@ -80,6 +92,8 @@ def extract(
     can_ids: tuple[str, ...] = KEEP_CAN_IDS,
     obd_channels: tuple[str, ...] = KEEP_OBD,
     gps_channels: tuple[str, ...] = KEEP_GPS,
+    sensor_channels: tuple[str, ...] = (),
+    sensor_stride: int = 1,
 ) -> pd.DataFrame:
     """Write the slice. Refuses a session that stores CAN frames change-only
     (P02.10): ``--can-stride`` keeps every Nth *frame* per id, which on
@@ -100,6 +114,7 @@ def extract(
                 (source = 'can' AND list_contains(?, channel))
              OR (source = 'obd' AND list_contains(?, channel))
              OR (source = 'gps' AND list_contains(?, channel))
+             OR (source = 'sensor' AND list_contains(?, channel))
           )
         ORDER BY timestamp
         """,
@@ -109,6 +124,7 @@ def extract(
             list(can_ids),
             list(obd_channels),
             list(gps_channels),
+            list(sensor_channels),
         ],
     ).df()
     if can_stride > 1:
@@ -120,6 +136,12 @@ def extract(
         can = frame[frame["source"] == "can"]
         kept = can[can.groupby("channel").cumcount() % can_stride == 0]
         frame = pd.concat([frame[frame["source"] != "can"], kept]).sort_values("timestamp")
+        frame = frame.reset_index(drop=True)
+    if sensor_stride > 1:
+        # Every Nth row per sensor channel: real rows, just fewer of them.
+        sensor = frame[frame["source"] == "sensor"]
+        kept = sensor[sensor.groupby("channel").cumcount() % sensor_stride == 0]
+        frame = pd.concat([frame[frame["source"] != "sensor"], kept]).sort_values("timestamp")
         frame = frame.reset_index(drop=True)
     out.mkdir(parents=True, exist_ok=True)
     for stale in out.glob("telemetry-*.parquet"):
@@ -157,6 +179,18 @@ def main() -> int:
         default=[],
         help="extra source='obd' channel to keep, e.g. DID_1102 (repeatable)",
     )
+    parser.add_argument(
+        "--keep-sensor",
+        action="append",
+        default=[],
+        help="source='sensor' channel to keep, e.g. FUEL_PRESSURE (repeatable)",
+    )
+    parser.add_argument(
+        "--sensor-stride",
+        type=int,
+        default=1,
+        help="keep every Nth sensor row per channel (real rows, just fewer)",
+    )
     args = parser.parse_args()
 
     try:
@@ -169,6 +203,8 @@ def main() -> int:
             can_ids=tuple(args.can_id or ()) if args.only or args.can_id else KEEP_CAN_IDS,
             obd_channels=tuple(args.keep_obd) if args.only else KEEP_OBD + tuple(args.keep_obd),
             gps_channels=() if args.only else KEEP_GPS,
+            sensor_channels=tuple(args.keep_sensor),
+            sensor_stride=args.sensor_stride,
         )
     except ChangeOnlyStorageError as exc:
         print(f"refused: {exc}", file=sys.stderr)

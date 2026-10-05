@@ -1,0 +1,257 @@
+# Fuel-mixture fault hypotheses and their residual signatures (E03.2).
+#
+# Schema: src/analysis/fault_model.py (FaultModel, canary-fault-hypotheses/1).
+# A versioned artifact the Pi evaluates on its own: the structural analysis
+# (which hypotheses the available, qualified residuals can detect and tell
+# apart, and which measurement would separate the rest) and the consistency
+# check of observed residual signs against each signature are pure functions
+# of this file plus the channel set and observations. Bump `version` whenever
+# a signature, residual or region changes meaning; evidence records cite it.
+#
+# Signatures are relations over residuals across operating regions: for every
+# declared residual and each region it is defined in, the set of signs the
+# hypothesis allows (single-fault reasoning):
+#   "+" / "-" / "0"           exactly that sign
+#   nonzero                   + or -, sign not known
+#   nonnegative / nonpositive 0 or +, 0 or -
+#   any                       not constrained (the fault may or may not show)
+# A modelled hypothesis states every residual x region pair, so "unconstrained"
+# is said, never implied. Two hypotheses are told apart by a residual only
+# where their sets are disjoint.
+#
+# Sources for the signatures (physics, not this vehicle's data):
+#   .claude/skills/engine-management/SKILL.md, "Fuel: read the shape" --
+#     a fixed-quantity error is large at idle and negligible at WOT; a scaling
+#     error is the same percentage everywhere; every mixture error is an
+#     air-measurement or a fuel-delivery error.
+#   docs/roadmap/ecu-second-brain.md, capability 4 and the first vertical
+#     slice -- MAF transfer error and fuel-delivery sag leave one signature on
+#     the channels the ECM reports, because it reports no fuel pressure.
+#   lambda_delivery.yaml source_disagreements -- the measured-mixture source
+#     itself is unresolved at rich mixtures (ecm_lambda_pid_0x24 vs the
+#     UpRev-derived voltage transfer), so instrument bias is an alternative.
+schema: canary-fault-hypotheses/1
+# v2 (2026-10-04, after verification): fuel pressure split into a closed-loop
+# droop residual and an enrichment flow-loss residual gated by B06 enrichment
+# eligibility; no hypothesis asserts zero droop (whether the calibration
+# absorbs droop is unknown), so pressure can refute sag but never MAF error.
+version: 2
+
+assumptions:
+  - >-
+    Single fault: a hypothesis is consistent with the observations only if
+    every evaluated residual sign is in its signature. Two faults acting at
+    once are not modelled; a refuted single fault may still contribute.
+  - >-
+    Fuel pressure is referenced to the regulated pressure at low airflow in
+    the same drive. The ECM has no fuel-pressure input, so a fall from it
+    reduces delivered fuel unless the calibration already absorbs it, and
+    whether it does is not known.
+
+regions:
+  - name: low_airflow
+    description: >-
+      Engine running at low airflow (idle and light cruise): Mode 01 fuel
+      status closed loop and MAF below the residual's low-airflow limit.
+  - name: high_airflow
+    description: >-
+      Engine running at high airflow outside power enrichment (part-throttle
+      climbs and hard cruise): Mode 01 fuel status closed loop and MAF at or
+      above the residual's high-airflow limit.
+  - name: enrichment
+    description: >-
+      Power enrichment as B06 gates it (lambda_delivery.yaml enrichment
+      eligibility, open loop, the profile's mode01_wot load floor and rpm
+      bands): full-throttle pulls.
+
+residuals:
+  # Order matters only for reading: measurements are listed in this order.
+  - name: delivery_error
+    description: >-
+      Commanded versus measured lambda (B06): measured over commanded, minus
+      one, in percent; positive is lean of the command. Engine response, not
+      ECU computation (E02/E05 own the command itself).
+    unit: percent
+    positive: measured mixture leaner than commanded
+    regions: [enrichment]
+    channel_sets:
+      - ['obd:COMMANDED_EQUIV_RATIO', 'obd:O2_WR_LAMBDA_S1', 'obd:RPM', 'obd:FUEL_STATUS', 'obd:ENGINE_LOAD']
+    availability: installed
+    qualification: noise_floor
+    producer: lambda_delivery_error
+    measurement: >-
+      Log commanded and measured lambda through a full-throttle pull on a
+      capture that polls the commanded equivalence ratio.
+
+  - name: pressure_flow_loss
+    description: >-
+      Injector flow lost to fuel-pressure droop at B06-eligible enrichment
+      rows, from the square-root law: one minus the square root of pressure
+      there over its closed-loop low-airflow level, in percent; positive is
+      less fuel. Its sign is qualified against the delivery error's
+      condition-matched detectable change: positive when the loss alone could
+      produce a lean the delivery residual detects, zero when it could not.
+      Whether the calibration already absorbs droop is unknown, so a positive
+      sign does not establish an uncorrected loss.
+    unit: percent
+    positive: less injector flow than at the low-airflow pressure
+    regions: [enrichment]
+    channel_sets:
+      - ['sensor:FUEL_PRESSURE', 'obd:MAF', 'obd:COMMANDED_EQUIV_RATIO', 'obd:O2_WR_LAMBDA_S1', 'obd:RPM', 'obd:FUEL_STATUS', 'obd:ENGINE_LOAD']
+    availability: installed
+    qualification: noise_floor
+    producer: fuel_pressure_droop
+    measurement: >-
+      Log fuel pressure through a full-throttle pull (supercharger-build
+      NA2).
+    policy: &pressure_policy
+      # Each paired read takes the mean pressure within +-window_s of it (the
+      # 100 Hz trace aliases injector pulsation; the half-second mean is what
+      # the 2026-10-04 analysis showed is stable).
+      window_s: 0.25
+      min_samples_per_window: 3
+      running_min_maf_gs: 2.0
+      low_airflow_max_gs: 10.0
+      high_airflow_min_gs: 60.0
+      min_pairs_low_airflow: 30
+      min_pairs_high_airflow: 30
+      min_pairs_enrichment: 10
+      # Fuel status is polled every few seconds; a MAF read takes the status
+      # only when the reads either side of it agree and lie within this.
+      fuel_status_bracket_s: 5.0
+      # Margin: this many standard errors of the difference of medians plus
+      # the drift of the low-airflow level between the drive's two halves.
+      sigma: 2.0
+
+  - name: fuel_pressure_droop
+    description: >-
+      Fall of fuel pressure at closed-loop high airflow from its closed-loop
+      low-airflow level, in percent of that level; positive is lower
+      pressure. No healthy-droop floor exists, so its sign says only that
+      pressure fell or rose beyond the drive's own uncertainty, never that it
+      held steady.
+    unit: percent
+    positive: pressure below its low-airflow level
+    regions: [high_airflow]
+    channel_sets:
+      - ['sensor:FUEL_PRESSURE', 'obd:MAF', 'obd:FUEL_STATUS']
+    availability: installed
+    qualification: within_drive
+    producer: fuel_pressure_droop
+    measurement: >-
+      Log fuel pressure through closed-loop high-airflow driving.
+    policy: *pressure_policy
+
+  - name: closed_loop_trim
+    description: >-
+      Short plus long term fuel trim, bank one; positive is the ECM adding
+      fuel (the engine ran lean of what the airflow predicted).
+    unit: percent
+    positive: ECM adding fuel
+    regions: [low_airflow, high_airflow]
+    channel_sets:
+      - ['obd:SHORT_FUEL_TRIM_1', 'obd:LONG_FUEL_TRIM_1']
+    availability: installed
+    qualification: none
+    unqualified_reason: >-
+      No condition-matched trim noise floor has been measured, ordinary
+      healthy trims sit several percent from zero, and the long-term trim was
+      reset by the September and October flashes. A trim sign is not
+      evidence until a floor for each region exists.
+    producer: none
+    measurement: >-
+      Measure a same-calibration null-run trim floor in each airflow region.
+
+  - name: throttle_fill_vs_maf
+    description: >-
+      B08 throttle-derived fill (mem:ECM_FUEL_COMP_X_INPUT, the alpha-N fill
+      Fuel Comp reads) against MAF-derived air per revolution.
+    unit: percent
+    positive: MAF path reads more air than the throttle path
+    regions: [low_airflow, high_airflow, enrichment]
+    channel_sets:
+      - ['mem:ECM_FUEL_COMP_X_INPUT', 'obd:MAF', 'obd:RPM']
+    availability: installed
+    qualification: none
+    unqualified_reason: >-
+      B08: the throttle path's remaining flow and correction terms and its
+      absolute scale are unresolved, so it is not an independent airflow
+      sensor and cannot yet separate a MAF transfer error from delivery sag.
+    producer: none
+    measurement: >-
+      Qualify the throttle-fill path against MAF on independent drives (B08).
+
+  - name: independent_lambda
+    description: >-
+      The ECM's measured lambda against an independent wideband in the same
+      exhaust stream; positive is the ECM sensor reading leaner.
+    unit: percent
+    positive: ECM sensor leaner than the independent wideband
+    regions: [enrichment]
+    channel_sets: []
+    availability: proposed
+    qualification: noise_floor
+    producer: none
+    measurement: >-
+      Fit an independent wideband lambda sensor and log it beside the ECM
+      sensor through a full-throttle pull.
+
+# Pressure: no hypothesis but sag constrains it beyond "pressure does not
+# rise with flow" (nonnegative), because a healthy system may droop and the
+# calibration may absorb it (assumptions). Sag is the claim that uncorrected
+# droop explains the lean, so it alone requires a positive flow loss.
+hypotheses:
+  - name: no_fault
+    label: No fault; the engine receives the mixture it commands
+    origin: modelled
+    signature:
+      delivery_error: {enrichment: '0'}
+      pressure_flow_loss: {enrichment: nonnegative}
+      fuel_pressure_droop: {high_airflow: nonnegative}
+      closed_loop_trim: {low_airflow: '0', high_airflow: '0'}
+      throttle_fill_vs_maf: {low_airflow: '0', high_airflow: '0', enrichment: '0'}
+      independent_lambda: {enrichment: '0'}
+
+  - name: maf_transfer_error
+    label: MAF transfer error; metered airflow wrong in an airflow-dependent way
+    origin: modelled
+    signature:
+      delivery_error: {enrichment: nonzero}
+      pressure_flow_loss: {enrichment: nonnegative}
+      fuel_pressure_droop: {high_airflow: nonnegative}
+      closed_loop_trim: {low_airflow: any, high_airflow: any}
+      throttle_fill_vs_maf: {low_airflow: any, high_airflow: any, enrichment: nonzero}
+      independent_lambda: {enrichment: '0'}
+
+  - name: fuel_delivery_sag
+    label: Fuel-delivery sag; uncorrected supply pressure falls as fuel flow rises
+    origin: modelled
+    signature:
+      delivery_error: {enrichment: '+'}
+      pressure_flow_loss: {enrichment: '+'}
+      fuel_pressure_droop: {high_airflow: nonnegative}
+      closed_loop_trim: {low_airflow: '0', high_airflow: nonnegative}
+      throttle_fill_vs_maf: {low_airflow: '0', high_airflow: '0', enrichment: '0'}
+      independent_lambda: {enrichment: '0'}
+
+  - name: fixed_quantity_error
+    label: Fixed-quantity error such as an idle air leak or injector dead time
+    origin: modelled
+    signature:
+      delivery_error: {enrichment: '0'}
+      pressure_flow_loss: {enrichment: nonnegative}
+      fuel_pressure_droop: {high_airflow: nonnegative}
+      closed_loop_trim: {low_airflow: nonzero, high_airflow: any}
+      throttle_fill_vs_maf: {low_airflow: any, high_airflow: any, enrichment: '0'}
+      independent_lambda: {enrichment: '0'}
+
+  - name: lambda_sensor_bias
+    label: Measured-mixture sensor bias at rich mixtures; no real delivery error
+    origin: modelled
+    signature:
+      delivery_error: {enrichment: nonzero}
+      pressure_flow_loss: {enrichment: nonnegative}
+      fuel_pressure_droop: {high_airflow: nonnegative}
+      closed_loop_trim: {low_airflow: '0', high_airflow: '0'}
+      throttle_fill_vs_maf: {low_airflow: '0', high_airflow: '0', enrichment: '0'}
+      independent_lambda: {enrichment: nonzero}
