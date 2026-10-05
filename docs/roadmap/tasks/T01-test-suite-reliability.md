@@ -648,3 +648,14 @@ measurement in hand.
   - **Do:** reproduce under `-n auto` with `--count`/a loop, find which cache
     path is shared (test `tmp_path` vs a module- or repo-level cache dir), and
     either give each test its own cache root or assert on content, not inode.
+
+- [x] **T01.21 `tests/test_replay.py::test_rows_already_due_yield_the_loop_every_few_milliseconds`
+  judged the per-row yield by wall time.**
+  - **Seen** 2026-10-05 in the push gate for `cb2eda9` (an unrelated B03.7
+    commit), parallel and serial at load average ~31: longest heartbeat gap
+    0.107 s against a 0.04 s bound, with the yield working (most gaps were
+    the expected ~5 ms; a few were preemption).
+  - **Fixed:** the test now counts the rows emitted between consecutive
+    heartbeat turns -- more than 10 turns, none carrying 20,000 of the
+    60,000 rows -- so load cannot decide it. With `_MAX_HOLD_SECONDS = 1e9`
+    it fails (`assert 1 > 10`: the whole chunk in one turn).

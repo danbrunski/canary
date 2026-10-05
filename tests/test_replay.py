@@ -304,12 +304,11 @@ def test_rows_already_due_yield_the_loop_every_few_milliseconds(tmp_path: Path) 
     without ``_MAX_HOLD_SECONDS`` the emit phase is one unbroken stretch
     (hundreds of ms), with it the heartbeat never waits much past 5 ms.
 
-    Only gaps in the emit phase are judged: the worker thread's pandas calls
-    hold the GIL for tens of ms while the chunk loads, which is not the emit
-    loop. A gap counts if emission had begun when it started, or if more
-    than 10,000 rows (a sixth of the chunk) went out during it."""
-    import gc
-    import time as _time
+    Judged in rows, not wall time, so machine load cannot decide it: the
+    rows emitted between two heartbeat turns. Without the yield the whole
+    60,000-row chunk goes out in one turn; with it each turn sees a few ms of
+    emission. (A wall-clock bound of 40 ms failed at load average 30 on
+    2026-10-05 while the yield was working: T01.21.)"""
 
     base = datetime(2026, 5, 18, 12, tzinfo=UTC)
     sdir = tmp_path / "2026-05-18T120000"
@@ -330,18 +329,18 @@ def test_rows_already_due_yield_the_loop_every_few_milliseconds(tmp_path: Path) 
     assert len(list(sdir.glob("*.parquet"))) == 1
     stats = ReplayEmissionStats()
 
-    async def run() -> list[float]:
+    async def run() -> list[int]:
         done = asyncio.Event()
-        gaps: list[float] = []
+        bursts: list[int] = []
 
         async def heartbeat() -> None:
-            last, rows_then = _time.monotonic(), stats.rows_emitted
+            rows_then = stats.rows_emitted
             while not done.is_set():
                 await asyncio.sleep(0)
-                now, rows_now = _time.monotonic(), stats.rows_emitted
-                if rows_then > 0 or rows_now - rows_then > 10_000:
-                    gaps.append(now - last)
-                last, rows_then = now, rows_now
+                rows_now = stats.rows_emitted
+                if rows_now > rows_then:
+                    bursts.append(rows_now - rows_then)
+                rows_then = rows_now
 
         beat = asyncio.create_task(heartbeat())
         await asyncio.sleep(0)
@@ -357,17 +356,14 @@ def test_rows_already_due_yield_the_loop_every_few_milliseconds(tmp_path: Path) 
         )
         done.set()
         await beat
-        return gaps
+        return bursts
 
-    gc.collect()
-    gc.disable()  # a gen-2 collection pauses every thread; not what is measured
-    try:
-        gaps = asyncio.run(run())
-    finally:
-        gc.enable()
+    bursts = asyncio.run(run())
     assert stats.rows_emitted == 60_000
-    assert max(gaps) < 0.04, max(gaps)
-    assert len(gaps) > 10
+    # Emission is broken into many turns, none carrying a large share of the
+    # chunk; unyielded, one turn carries all 60,000 rows.
+    assert len(bursts) > 10, bursts
+    assert max(bursts) < 20_000, max(bursts)
 
 
 def test_on_finish_has_no_default() -> None:
