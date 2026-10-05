@@ -95,6 +95,13 @@ def synthetic_image(
         struct.pack_into(">H", image, base + 0x762, k)
     other = target_raw(other_targets)
     image[0xA169 : 0xA169 + 64] = bytes(v for row in other for v in row)
+    # The decoded program's literals, every one the map declares: random bytes
+    # there would model another program. Callers that want another program
+    # overwrite one afterwards (load_byte_image's ``literal``).
+    for constant in rom_map.program_constants:
+        image[constant.offset : constant.offset + constant.size] = constant.value.to_bytes(
+            constant.size, "big"
+        )
     if checksums:
         image = bytearray(with_checksums(bytes(image), rom_map))
     assert len(image) == IMAGE_SIZE
