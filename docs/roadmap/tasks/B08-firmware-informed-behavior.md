@@ -162,7 +162,7 @@ extra independent votes.
     - B03 has no manifest-level mark, and producibility cannot see a decode
       change on a column that is still producible.
 
-- [ ] **B08.2 — Add firmware-derived operating context.**
+- [x] **B08.2 — Add firmware-derived operating context.**
   Share a profile-backed provider with E02/E05/W08 for exact program/image,
   active slot, Fuel Comp rpm/fill coordinates, lookup value, clamp state,
   timing coordinate/select flag, pedal-enrichment flag and fuel-cut state.
@@ -178,6 +178,109 @@ extra independent votes.
   refuses by name, with no five-second forward-fill presented as a fresh
   observation. Both calibration images resolve through W08; existing
   recipes retain their identity until a new candidate is qualified.
+  *Done 2026-10-05 (desk; freshness and skew limits are `proposed`).* The
+  provider is [`src/analysis/operating_context.py`](../../../src/analysis/operating_context.py),
+  declared in [`operating_context.yaml`](../../../data/nissan-xterra-2008/operating_context.yaml).
+  - **Shared, not parallel.**
+    - W08: tables, axes, fill curves and decodes are read by `rom_map.yaml` id
+      through `table_values`.
+    - E02: the slot comes from the twin's `map_identity` (`resolve_slot`, no
+      restated channels), and lookups use `ecm_lookup.lookup_2d`.
+    - E05: `check_image` decides program identity. Timing uses
+      `selected_timing_trim`. Each lookup's applicability is computed from its
+      application-model node.
+  - **Observed coordinates only.** Every input names its RAM and relation
+    (`identity`, `cycle_copy` or `state`). There is no `reconstructed`.
+    - A dependency is cut when the context observes the RAM it writes. Fuel
+      Comp's `fuel_comp_load_byte` is cut this way.
+    - Fuel Comp stays `conditional` on `air_charge_ram_copy`, and the trim on
+      `timing_trim_ram_copy`. The trim output is marked `intermediate`, never
+      final timing.
+  - **Known vectors and controls**
+    (`tests/test_operating_context.py`, synthetic image):
+    - `::test_fuel_comp_reads_rpm_rows_on_0xcacd_and_fill_columns_on_0xcb29`
+      covers 4 hand-worked vectors (on-breakpoint, Q16 interpolated, both
+      clamps, top breakpoint). Each one also equals E05's `rpm_load_lookup`.
+    - `::test_timing_trim_reads_rpm_0xcc93_bfs_x_0xcc83_masked_and_selected_by_hi_det`
+      covers 5 vectors: HI DET bit 6 set selects B and clear selects A; the
+      flag is kept on a bit-7 cell; the pedal flag forces column 15; a cold
+      engine reads A.
+    - Controls:
+      - `::test_transposed_and_axis_swapped_reads_fail_the_known_vectors`;
+      - `::test_timing_trim_transpose_and_unmasked_controls_fail` (unmasked
+        reads 128 counts high);
+      - `::test_a_declared_axis_swap_is_refused_by_name` (`axis_mismatch`);
+      - `::test_a_w08_map_with_the_axes_the_editor_shows_is_refused`;
+      - `::test_an_application_model_reading_other_axes_is_refused`
+        (`application_model_mismatch`).
+  - **Refusals by name.**
+    - Per item: `not_captured`, `missing`, `stale`, `clock_unacquired`,
+      `wrong_units` (each `:<input>`), `skew:<lookup>`,
+      `slot_unresolved:<reason>`, `coolant_blend_band`,
+      `not_catalogued:<state>`.
+    - At resolution: `image_hash_mismatch`, `wrong_program` (also a changed
+      program literal), `table_unverified` (slots 2–5),
+      `curves_not_monotone`.
+    - `::test_a_five_second_old_window_read_is_stale_not_fresh`: a read held
+      5 s is `stale:<input>`, never fresh.
+    - `::test_a_resampled_grid_is_refused`: a wide frame with `__arrived`
+      columns is refused `not_acquisition_timed`.
+    - Fuel cut is decided by the newest read of the command or its sentinel,
+      and refuses with that read's reason when it is unusable
+      (`::test_a_refused_newer_command_read_is_not_covered_by_an_older_sentinel`).
+    - A query earlier than a held read is refused `query_before_reads`
+      (`::test_a_query_before_a_held_read_is_refused`). Fit and serve agree at
+      that instant (`::test_fit_and_serve_agree_at_an_instant_before_later_reads`).
+      `evaluate_frame` returns records in the caller's order
+      (`::test_evaluate_frame_returns_records_in_the_callers_order`).
+    - Known observation gaps are named applicability limits in the contract:
+      `high_det_read_previous_cycle` (the trim lookup reads last cycle's
+      latch) and `rpm_word_is_cycle_copy`
+      (`::test_known_observation_gaps_are_named_applicability_limits`).
+    - On the committed 2026-10-04 ram-study slice (174 command reads):
+      - Fuel Comp is `stale:engine_speed_word` 153 times,
+        `not_captured:fuel_comp_fill` 12 and `stale:map_magic` 9.
+      - Timing never resolves.
+      - Fuel cut reads 21 active / 153 not, matching the 21 sentinel reads.
+      - At +4.9 s, all 174 are stale, each named for the newest read
+        (`stale:command_word` 153, `stale:command_word_sentinel` 21).
+  - **Both images through W08.**
+    - `tests/test_operating_context_private_rom.py` (4 tests, real ROMs, skip
+      when absent; ran here) stores both images in a `RomLibrary` and
+      resolves them by sha256:
+      - `a46baa…` (ZS44A-20260920) has load axis 16..144;
+      - `5587f7…` (ZS44A-20261004) has 16..255.
+      - Both have rpm axis 8..128, identical trims, different slot-1 cells.
+    - Synthetic: `::test_both_calibration_layouts_resolve_through_the_w08_library`.
+  - **Two saturations, reported separately.**
+    - `fill_at_ceiling` is the fill curve at X = 0xFFFF.
+    - `rpm_reciprocal_saturated` means `k × rpm word` has reached 0xFFFF.
+    - On both real images: ceiling 224, k 158, saturation word 415
+      (5,187.5 rpm).
+    - `::test_fill_ceiling_and_rpm_saturation_are_reported_separately`.
+    - `::test_the_fill_ceiling_and_the_reciprocal_rpm_saturation_come_from_the_image`
+      cross-checks against the N02 `load_byte` / `rpm_reciprocal`.
+  - **Fit and serve contracts.**
+    - One `contract()` gives both. They differ only in `role` and share a
+      fingerprint.
+    - Per input: RAM, relation, `raw_units`, catalog stored decode,
+      engineering unit, `max_age_s` and clock.
+    - Per lookup: skew, layout and applicability.
+    - The stored path replays reads through the live `ContextStream`
+      (`::test_the_stored_path_replays_through_the_live_stream`;
+      `::test_fit_and_serve_contracts_carry_skew_freshness_units_and_applicability`).
+  - **History:** `coverage()` names inputs a capture lacks. The committed
+    ram-study slice lacks the fill byte, HI DET, coolant DID and purge DID
+    (`::test_the_october_4_ram_study_slice_names_what_it_lacks`).
+  - **Recipes unchanged:** no recipe consumes the context, and
+    `tests/test_recipe_catalog_golden.py` passes.
+  - **Not done (outside this accept):**
+    - Idle-air `0xFFFF63FC` and throttle fallback `0xFFFF484E`/`28B5` have
+      no memory channel. They report `not_catalogued`; adding them needs
+      `data/dids.yaml`.
+    - No committed capture yields a fresh Fuel Comp tuple. B08.3 needs a
+      capture that reads `spark`, `fuel_comp_x` and `flags_2841` back to
+      back.
 
 - [ ] **B08.3 — Evaluate throttle-fill and fuel-context candidates.**
   Extend existing B04 air-charge and B05 trim recipes rather than adding a

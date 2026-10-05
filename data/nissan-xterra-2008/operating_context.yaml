@@ -1,0 +1,245 @@
+# B08.2 — firmware-derived operating context, as data.
+#
+# Schema: src/analysis/operating_context.py (ContextDefinition). Which ECM
+# coordinates and states a behavior model may be conditioned on, read from
+# the ECM's own RAM (data/dids.yaml `memory:`) and placed on the exact
+# calibration's tables (rom_map.yaml, W08) with the shared lookup kernel
+# (src/decode/ecm_lookup.py, E02). Nothing here restates what another profile
+# file owns:
+#
+# - which slot the ECM is reading is the target-phi twin's map identity rules
+#   (target_phi_twin.yaml `map_identity`, E02);
+# - which program and image the decode belongs to, and what is still assumed
+#   between the image and the RAM the lookup reads, is the application model
+#   (ecu_application_model.yaml, E05): every lookup names the node that
+#   performs it, and its unresolved dependencies become the contract's
+#   applicability;
+# - offsets, axis roles and cell decodes are rom_map.yaml's, checked against
+#   it (and against the application model's rom refs) on every resolution.
+#
+# These are relative ECM model coordinates, not volumetric efficiency and not
+# an absolute airflow: the fill byte has no MAF, baro or temperature input.
+#
+# Observed, never reconstructed: every coordinate is the RAM the lookup reads
+# (or its cycle-start copy). Reconstructing a writer is E05.2's to qualify.
+#
+# Freshness and skew are `proposed` (set before any scoring) and are two
+# different limits: max_age_s is how old a read may be at the query time (a
+# behavior sample's time, or now), max_acquisition_skew_s how far apart the
+# reads of one lookup tuple may sit (the twin's 250 ms). A read older than its
+# max_age_s is stale, so a memory window polled every 5 s and forward-filled on
+# a resampled grid can never pass as fresh.
+schema_version: 1
+name: firmware_operating_context
+context_version: 1
+interpretation: relative_model_coordinates
+map_identity_from: target_phi_twin.yaml
+
+inputs:
+  engine_speed_word:
+    channel: 'mem:ECM_ENGINE_SPEED_RAM'
+    ram: 0xFFFF11D8
+    # The Fuel Comp search (0x03D0F4) reads the live word 0xFFFF1210; the
+    # timing-trim search reads its cycle-start copy 0xFFFF11D8 (cycle_snapshot
+    # in the application model). The channel reads the copy, so for Fuel Comp
+    # it is up to one fuel-task cycle old by construction.
+    feeds: [0xFFFF11D8, 0xFFFF1210]
+    relation: cycle_copy
+    bits: 16
+    max_age_s: 0.5
+    status: proposed
+    evidence: >-
+      12.5 rpm per count, stored as rpm (catalog scale 12.5), so the catalog
+      decode is undone to the word the axis searches compare with axis byte
+      x 4 (0x027194).
+  fuel_comp_fill:
+    channel: 'mem:ECM_FUEL_COMP_X_INPUT'
+    ram: 0xFFFF118A
+    feeds: [0xFFFF118A]
+    relation: identity
+    bits: 8
+    max_age_s: 0.5
+    status: proposed
+    evidence: >-
+      The byte the Fuel Comp load search 0x027114 compares directly with the
+      0xCB29 axis bytes (call site 0x02DC34-46). Throttle-model (alpha-N)
+      relative fill, 0..224 in this calibration; stored as raw counts.
+  bfs_x:
+    channel: 'mem:ECM_FUEL_TARGET_MAP_X_TRACE'
+    ram: 0xFFFF103E
+    feeds: [0xFFFF103E]
+    relation: identity
+    bits: 8
+    max_age_s: 0.5
+    status: proposed
+    evidence: >-
+      The X byte the timing-trim load search compares directly with the 0xCC83
+      axis (0x026A64); stored as raw x 0.250859, undone before any lookup.
+  pedal_flags:
+    channel: 'mem:ECM_PEDAL_ENRICH_FLAGS'
+    ram: 0xFFFF2841
+    feeds: [0xFFFF2841]
+    relation: identity
+    bits: 8
+    bit: 0
+    max_age_s: 0.5
+    status: proposed
+    evidence: >-
+      Bit 0 forces the last load column of Target AFR and of both timing trims
+      (cal 0x8ADC bit 1, an application-model calibration condition).
+  high_det_flags:
+    channel: 'mem:ECM_HIGH_DET_FLAGS'
+    ram: 0xFFFF283F
+    feeds: [0xFFFF283F]
+    relation: identity
+    bits: 8
+    bit: 6
+    max_age_s: 0.5
+    status: proposed
+    evidence: >-
+      Bit 6, the HI DET latch, selects the timing trim (FUN_0004e6d8, tst
+      #0x40 at 0x04E6FE): set -> trim B (+0x120), clear -> trim A (+0x020).
+      Not 0xFFFF2842, whose bit 2 gates the knock trim-difference branch.
+  coolant_byte:
+    channel: 'did:ECM_COOLANT_TEMP'
+    ram: 0xFFFF1083
+    feeds: [0xFFFF1079]
+    relation: cycle_copy
+    bits: 8
+    max_age_s: 10.0
+    status: proposed
+    evidence: >-
+      The timing-trim selection compares the cycle copy 0xFFFF1079 with cal
+      0x8CCD (106) and 0x8CCC (110); the application model observes the
+      source byte 0xFFFF1083 as this DID (raw = degC + 50). Coolant moves on
+      tens of seconds, so its age limit is the twin's coolant gate.
+  command_word:
+    channel: 'mem:ECM_TARGET_EQUIV_RATIO'
+    ram: 0xFFFF26BE
+    feeds: [0xFFFF26BE]
+    relation: identity
+    bits: 16
+    max_age_s: 0.5
+    status: proposed
+    evidence: >-
+      The final commanded phi word; zero during fuel cut, which the catalog
+      decodes to the sentinel channel below rather than to a number.
+  command_word_sentinel:
+    channel: 'mem:ECM_TARGET_EQUIV_RATIO_SENTINEL'
+    ram: 0xFFFF26BE
+    feeds: [0xFFFF26BE]
+    relation: state
+    bits: 16
+    max_age_s: 0.5
+    status: proposed
+    evidence: >-
+      The same read as command_word when its word is the sentinel 0: fuel
+      cut is a state, not a number.
+  purge_command:
+    channel: 'did:ECM_EVAP_PURGE_CMD'
+    ram: 0xFFFF272E
+    feeds: [0xFFFF272E]
+    relation: identity
+    bits: 8
+    max_age_s: 1.0
+    status: proposed
+    evidence: >-
+      DID 0x1110, the purge byte b (raw command + 1 while purging, 0 off);
+      w139E = ((b - 1) x 144) >> 7 enters the fill as purge/4. Retained as
+      raw state, not converted to an area.
+
+fuel_comp:
+  application_node: fuel_comp_lookup
+  rom_map_kind: fuel_compensation
+  rows:
+    rom_map_axis: fuel_comp_engine_speed_axis
+    input: engine_speed_word
+    compare_multiplier: 4
+  columns:
+    rom_map_axis: fuel_comp_flow_axis
+    input: fuel_comp_fill
+    compare_multiplier: 1
+  max_acquisition_skew_s: 0.25
+  limits:
+    - id: rpm_word_is_cycle_copy
+      statement: >-
+        The lookup reads the live rpm word 0xFFFF1210; the context observes its
+        cycle-start copy 0xFFFF11D8, up to one fuel-task cycle older.
+      closes_with: 'A memory channel for 0xFFFF1210 read in the fuel_comp_x window.'
+  evidence: >-
+    Corrected axes (2026-10-04, from code): rpm on 0xCACD, load/fill on 0xCB29,
+    row-major 16 x 16 (UpRev labels the two breakpoint lists the other way
+    round; its grid positions match memory 256/256, transposed only 60/256).
+
+timing_trim:
+  application_node: timing_trim_lookup
+  application_output: ignition_trim_selected
+  # The latch input and which table each state of its bit reads.
+  select_input: high_det_flags
+  rom_map_kind_when_clear: timing_trim_a
+  rom_map_kind_when_set: timing_trim_b
+  pedal_input: pedal_flags
+  coolant_input: coolant_byte
+  rows:
+    rom_map_axis: timing_trim_rpm_axis
+    input: engine_speed_word
+    compare_multiplier: 4
+  columns:
+    rom_map_axis: timing_trim_load_axis
+    input: bfs_x
+    compare_multiplier: 1
+  max_acquisition_skew_s: 0.25
+  limits:
+    - id: high_det_read_previous_cycle
+      statement: >-
+        The trim lookup (task 66) runs before knock control (task 67) sets or
+        clears 0xFFFF283F bit 6, so it reads last cycle's latch; the context
+        uses the latch as read, which on the cycle the latch changes selects
+        the other table from the one the ECM read.
+      closes_with: >-
+        Same-window reads of 0xFFFF283F and 0xFFFF1777 across a latch change,
+        or modelling the one-cycle lag from 0xFFFF2840 (the cycle snapshot).
+  evidence: >-
+    rpm 0xCC93 x BFS-X 0xCC83, cells read masked & 0x7F with bit 7 of the
+    lower-left cell ORed back (0x026F9C); a trim lookup, never final ignition
+    timing (the application model marks the output intermediate).
+
+# The two saturations of the fill coordinate, from the image (W08 ids). They
+# are different things: the fill byte's ceiling is the top of the fill curve
+# (224 counts on this calibration), reached at high throttle area per rpm;
+# the reciprocal-rpm term w116A = numerator / min(0xFFFF, k x rpm word) stops
+# falling once k x word reaches 0xFFFF (k = 158: word 415, 5,187.5 rpm), above
+# which the fill no longer falls with rpm.
+saturation:
+  fill_curve_low: fill_curve_low
+  fill_curve_high: fill_curve_high
+  rpm_multiplier: fill_rpm_multiplier
+  reciprocal_numerator: fill_reciprocal_numerator
+
+fuel_cut:
+  command_input: command_word
+  sentinel_input: command_word_sentinel
+
+pedal_enrichment:
+  input: pedal_flags
+
+# State the fill computation reads that the context keeps when it is captured.
+# Uncatalogued state is named, never assumed: a context that needs it refuses
+# not_catalogued:<name> until a memory channel exists.
+retained:
+  purge:
+    input: purge_command
+    ram: 0xFFFF272E
+    evidence: 'EVAP purge byte; enters X as w139E/2048 x w116A.'
+  idle_air_correction:
+    ram: 0xFFFF63FC
+    closes_with: >-
+      A memory channel for the signed word 0xFFFF63FC (idle-speed feedback
+      plus NV-learned idle air, min(w3CB2 + w5EA6, 1185)).
+    evidence: 'Subtracted from the throttle effective area before X (0x03C578-0x03C5C8).'
+  throttle_fallback:
+    ram: 0xFFFF484E
+    closes_with: >-
+      A memory channel for 0xFFFF484E (bit 2: limp-home area 782 replaces the
+      throttle area) and 0xFFFF28B5 bits 7:6 (sensor B replaces sensor A).
+    evidence: 'Set by the TPS1/TPS2/correlation diagnostics (0x8E58C).'
