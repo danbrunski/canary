@@ -3,7 +3,10 @@
 Planned work beyond the rev 1.0 reference design described in
 [`CANary-HAT-Spec.md`](CANary-HAT-Spec.md): the **rev 2.0 change list** that
 will actually be fabricated, the bring-up measurements it now has to carry, and
-the rev 3.0 supervisor MCU.
+rev 3.0. **Rev 3.0 was re-scoped on 2026-10-04** (§13.3.0): the always-on
+supervisor moves to a separate power board,
+[`CANary-PWR-Spec.md`](CANary-PWR-Spec.md). Rev 3.0 keeps the data
+coprocessor, which runs only while the Pi is powered.
 
 > **Part of the CANary-HAT board documentation**, split across four files.
 > Section numbers are **stable across the split** — a bare `§3.7.5` means the
@@ -76,10 +79,12 @@ rev-2.0 decisions had to be taken blind — see §13.2.
 | 8 | **Thermals on D4 and R5** with the engine running. | D4 now passes only the HAT's load, and R5 is the 0.2W-rated part — both should be cool. Confirm rather than assume. |
 | 9 | **BMP384 RMS noise** at the intended ODR against a grade budget. | Whether the footprint-compatible BMP390 swap is needed (§3.5). |
 | 10 | **TLIN1027 at the real CONSULT baud.** | The 20 kbps *transmit* ceiling vs what the Xterra actually needs (§3.3.1). |
-| 11 | **X1202 quiescent draw** once it has cut its own output. | Feeds the rev-3.0 supervisor architecture (§13.3). |
+| 11 | ~~**X1202 quiescent draw** once it has cut its own output.~~ | ~~Feeds the rev-3.0 supervisor architecture (§13.3).~~ **Moot from 2026-10-04:** the X1202 is retired in favour of CANary-PWR (§13.3.0). |
 | 12 | **Power-apply to first recorded frame** — wall-clock from 12V return to `canary.service` writing row 1. | Sizes the rev-3.0 boot-gap buffer (§13.3.3) and quantifies what every cold start currently loses. The journal in `docs/time-sync.md` shows 12 s from *kernel handoff*, which is a floor, not the number. |
 | 13 | **Does the K-line RXD break reach the host as SysRq?** Boot with the console left enabled on `uart0` and the HAT fitted. | Confirms the §11 step-1 hazard is real and worth designing out in rev 3.0 (§13.3.4), rather than a theoretical reading of Table 8-1. |
 | 14 | **Y1 start-up margin and drive level.** Does the 40 MHz oscillator start reliably, including cold? Probe OSC2 (≤ 1 pF) for amplitude. On paper \|R_neg\| ≈ gm/(ω²·C1·C2) is only 34–50 Ω against the ABLS2's 40 Ω ESR max at CL = 18 pF (§13.5.4, *Clock*, 2026-09-14). | Confirms or retires the paper concern for rev 2.0. Rev 2.1 sidesteps it with a single oscillator (§13.5.4, *Clock*); this measurement decides whether the two-crystal fallback there is ever viable. |
+| 15 | **Pi 5 3V3 rail rise after 5V is applied** — scope pin 1 against pin 2 from a cold power-apply, and again from a `gpio-poweroff` halt followed by the 5V being restored. | Whether rev 3.0's coprocessor, powered only from the Pi, is awake soon enough to capture the boot gap (§13.3.0). The plan assumes milliseconds. If 3V3 instead waits for the bootloader, the boot-gap buffer needs always-on power and the split has to be revisited. |
+| 16 | **Crank dip profile at OBD pin 16** — minimum voltage, time below 9V and 6V, and recovery slope, cold and warm. The rev 2.1 ADC's `V12_SENSE` channel or a scope will do. | Sizes CANary-PWR's supercap stack and the buck's minimum input voltage (`CANary-PWR-Spec.md` §P4). |
 
 **Measurement 1 does not have to wait for rev 2.0 — and waiting is now more
 expensive.** Withdrawing rev 1.0 pushed the first physical board out by however
@@ -616,6 +621,7 @@ speculative.
 
 | | |
 |---|---|
+| **§13.3.0** | **Re-scope, 2026-10-04: the supervisor moves to CANary-PWR. Read this first** |
 | §13.3.1 | Sleep, wake, and why the Pi must be genuinely off |
 | §13.3.2 | The power-domain question — settle this before drawing anything |
 | §13.3.3 | Capabilities the Pi cannot provide |
@@ -626,7 +632,75 @@ speculative.
 | §13.3.8 | Rejected: PCIe as the data transport |
 | §13.3.9 | Rev 2.1 deltas rev 3.0 inherits |
 
+#### 13.3.0 Re-scope, 2026-10-04: the supervisor moves to a power board
+
+**Operator decision, 2026-10-04.** The X1202 is retired. A separate power
+board, **CANary-PWR** ([`CANary-PWR-Spec.md`](CANary-PWR-Spec.md)), sits on
+top of the CANary HAT and owns every power function:
+- vehicle 12V input and its protection;
+- supercapacitor hold-up instead of Li-ion cells;
+- the 5V supply to the Pi;
+- the always-on supervisor: wake, load switch, watchdog, power-fail signalling.
+
+An NVMe base goes under the Pi, in the slot the X1202 leaves (S01.7). The stack
+is **NVMe base / Pi 5 / CANary HAT / CANary-PWR**.
+
+**Why this changes rev 3.0 and not just the power path.** The MCU this section
+plans has two jobs whose failure requirements are opposite: a boring,
+bulletproof supervisor and a complex data coprocessor. §13.3.3(e) says so, and
+rejects a second MCU only because "area is tight." A second board removes that
+objection, so the two jobs split along the power domains:
+
+| | CANary-PWR MCU (always-on) | Rev 3.0 coprocessor (powered by the Pi) |
+|---|---|---|
+| Jobs | wake (§13.3.1), the Pi's 5V switch, watchdog with power-cycle authority (§13.3.3e), battery voltage and wake events while parked (§13.3.3d), power-fail line | boot-gap CAN buffer (§13.3.3a), kHz ADC and crank capture (§13.3.3b), PPS-locked time base (§13.3.3c), K-line (§13.3.4), IMU/baro FIFO, bulk dump to the Pi |
+| Firmware | small, rarely changed | the complex code, changed often |
+| If it fails | the Pi stays powered: §13.3.3(e)'s fail-safe rule, now on CANary-PWR | the extras are lost and the rig behaves like rev 2.1 |
+
+**The HAT becomes a single power domain again.** The rev 3.0 coprocessor runs
+from the Pi's 3V3, as every other part on the HAT does. **§13.3.2's
+cross-domain problem therefore leaves this board.** §3.7.5's single-rail
+argument for HAT+ STANDBY compliance holds unchanged, and the only boundary
+between the always-on and Pi domains is CANary-PWR's connection to the Pi and the
+HAT. §13.3.2's decision (series resistance, hardware safe-state pulls and a
+rail-sense check, all three on every crossing net) moves there with it.
+
+**What this rests on: measurement 15.** The boot gap is the time Linux takes to
+boot, not the time the rails take to come up. When CANary-PWR switches the Pi's 5V
+on at wake, the Pi's 3V3 should follow within milliseconds. The TCAN1042 and the
+coprocessor are then both live before the first frame arrives, and §13.3.3(a)
+still works. If measurement 15 shows 3V3 waiting for the bootloader, this
+split needs revisiting for the boot-gap buffer alone.
+
+**Disposition of the rest of §13.3**, so later readers can tell what still
+binds the HAT:
+
+| Section | Status on rev 3.0 |
+|---|---|
+| §13.3.1 sleep/wake | **Moved to CANary-PWR.** Wake-on-CAN uses a receive-only transceiver on the power board, so the HAT's TCAN1042 never needs standby power. The J3 load-switch architecture and the X1202 handshake are superseded. The `vehicle_state` → shutdown software (§3.7.6) is still required, unchanged. |
+| §13.3.2 power domains | **Dissolved on the HAT; applies to CANary-PWR's crossings.** |
+| §13.3.3(a) boot-gap buffer | Stays, on the coprocessor, subject to measurement 15. |
+| §13.3.3(b) electrical diagnostics | Crank, ripple and kHz sampling stay on the coprocessor: the Pi is powered by the time the engine cranks. **The parked parasitic-draw trend moves to CANary-PWR.** |
+| §13.3.3(c) one time base | Stays, **but weaker.** The coprocessor no longer keeps time across a Pi power cycle, so `docs/time-sync.md`'s cold-boot problem is not dissolved, only narrowed to what PPS re-locks at each boot. |
+| §13.3.3(d) parked monitoring | **Moved to CANary-PWR.** Battery voltage and wake events only. **Motion-while-parked through INT2 is lost**: the IMU is dark when the Pi is off. If wanted, it is a cheap accelerometer on CANary-PWR. |
+| §13.3.3(e) watchdog | **Moved to CANary-PWR**, fail-safe toward Pi-on kept. |
+| §13.3.4 GNSS | The always-on rail that was V_BCKP's missing OR leg now comes from CANary-PWR as a **backup supply net**. V_BCKP is meant to be live while the module is off, so this is not a hazardous crossing. It also retires BT1. Keeping the receiver *tracking* while the Pi is off is lost. Hot-start ephemeris via V_BCKP is kept. |
+| §13.3.4 "do not put the MCU on I2C1" | The X1202 fuel gauge it protected is gone. CANary-PWR talks to the Pi as an **I2C target** on I2C1, behind a buffer powered from the Pi side. The Pi stays the only master, so the multi-master hazard behind that rule does not arise. The rule still holds for the coprocessor, which keeps its private sensor bus. |
+| §13.3.6 net list | Item 1 (always-on 3.3V) and item 3 (load switch) **leave the HAT**. Item 6 (Pi 3V3 sense) moves to CANary-PWR. Items 4, 5 and 14 are **no longer crossings**: both ends are in the Pi domain, so §13.3.2's pulls are no longer required. Keep the series resistors as cheap ESD/fault margin. Item 10 (INT2 motion wake) loses its purpose. **Added:** the CANary-PWR connector (`CANary-PWR-Spec.md` §P6). |
+| §13.3.10 MCU selection | The coprocessor no longer needs low standby current, and the "regulator Iq decides" argument moves to CANary-PWR. Part choice is RAM, FDCAN and ADC alone, as that section already concluded. |
+| §13.3.12 USB | "Powered from `+12V_RAW`, self-powered device" becomes powered from the Pi. The rule against drawing from or back-feeding VBUS still holds. |
+| §13.3.13 placement | The stack is NVMe base / Pi / HAT / PWR, not X1202 / Pi / HAT. **J3, Q1, D1, C2 and the always-on buck leave the HAT**, freeing J3's ~10 mm on J2's edge, which §13.3.9 item 5 calls the only slack there. The HAT's bottom-face height budget is unchanged. Its top face now looks at CANary-PWR, so top-side height (terminal blocks, the GNSS connector) sets the gap between the two boards. |
+
+**Rev 2.1 is not held for any of this.** It carries the supercharger
+instrumentation and the rev 2.0 fixes. CANary-PWR rev 1.0 is designed to run
+with a rev 2.x HAT (`CANary-PWR-Spec.md` §P8), so the power board and the
+rev 3.0 coprocessor are independent projects.
+
 #### 13.3.1 Sleep, wake, and why the Pi must be genuinely off
+
+> **Superseded 2026-10-04 (§13.3.0):** sleep, wake and the load switch move to
+> CANary-PWR. Kept for the battery-drain arithmetic and the wake-source
+> reasoning, which CANary-PWR inherits.
 
 **One net change unlocks most of the HAT side.** The TCAN1042V's STB pin is
 currently hardwired to GND, which permanently forbids standby. Per its §9.4.3
@@ -739,6 +813,10 @@ whether its auto-boot is reliable enough to be the only wake mechanism.
 of this regardless of which wake source is chosen.
 
 #### 13.3.2 The power-domain question — settle this before drawing anything
+
+> **Re-scoped 2026-10-04 (§13.3.0):** the rev 3.0 HAT is a single Pi-powered
+> domain again. This analysis and its decision now govern CANary-PWR's
+> crossings into the Pi and the HAT.
 
 An always-on 3.3V rail is what every item below depends on, and it reintroduces
 exactly what §3.7.5 designed out. That section's argument was never about current
@@ -1046,6 +1124,10 @@ and TXD left on the Pi — which keeps the echo-stripping and break hazards and
 earns none of the §13.3.4 table's guarantees.
 
 #### 13.3.6 Nets the board must carry
+
+> **Revised 2026-10-04 (§13.3.0):** items 1 and 3 leave the HAT, item 6 moves
+> to CANary-PWR, and items 4, 5 and 14 are no longer crossings. See the
+> disposition table there.
 
 Fix this list before layout: a missing net is a re-spin, unused firmware is free.
 
@@ -1575,6 +1657,9 @@ rev 2.1 already **deletes Y1 and C5/C6** for a single oscillator (§13.3.9 item
 (§13.3.11), double-sided assembly is a cost line rather than a skill question.
 
 ##### The stack, and the height budget it leaves
+
+> **Superseded 2026-10-04 (§13.3.0):** the stack is NVMe base / Pi 5 /
+> CANary HAT / CANary-PWR. The HAT's bottom-face budget below is unchanged.
 
 **Settled by the operator, 2026-10-01**, which closes what §13.1.1 left open
 ("X1202 coexistence — not tested, UPS not stacked"):
