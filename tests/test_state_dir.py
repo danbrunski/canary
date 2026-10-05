@@ -69,6 +69,19 @@ def test_scoped_state_paths_never_name_the_checkout(tmp_path: Path) -> None:
     assert config.daemon.behavior_models == tmp_path / "models/truck/behavior_models.yaml"
 
 
+def test_investigation_memory_is_per_vehicle_state(tmp_path: Path) -> None:
+    """E01: the memory ledger is runtime state, under ``state_dir``, per vehicle."""
+    from src.evidence import memory_ledger_for
+
+    assert DAEMON_STATE_LAYOUT["memory_ledger"] == Path("control/memory.jsonl")
+    config = scope_config(
+        _config(state_dir=str(tmp_path)),
+        VehicleProfile(slug="truck", vin="", name="Truck"),
+    )
+    assert config.daemon.memory_ledger == tmp_path / "control/truck/memory.jsonl"
+    assert memory_ledger_for(config).path == config.daemon.memory_ledger
+
+
 def test_without_state_dir_the_laptop_defaults_are_unchanged() -> None:
     config = _config()
     assert config.daemon.state_dir is None

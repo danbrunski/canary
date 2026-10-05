@@ -408,13 +408,18 @@ dashboard cards degrade cleanly when the tier is absent.
 Same discipline as S.1–S.4: import-isolated, feature-flagged, no daemon
 dependency when disabled.
 
-- [ ] **S.5 — Evidence references resolve.** `EvidenceReference` is a
+- [x] **S.5 — Evidence references resolve.** `EvidenceReference` is a
   free-text description with optional session/channel/timestamp fields,
   so a producer can cite a session or value no tool returned and the card
   still validates. Replace it with evidence ids minted by analysis tools
   ([ECU second brain](ecu-second-brain.md), capability 2). The validator
   rejects an id no tool produced, and numbers are rendered from the
   evidence record, not typed by the producer.
+  *Landed 2026-10-04 with E01.2:* cards cite `EvidenceCitation` ids on the
+  vehicle's `src.evidence` memory ledger; `resolve_card` rejects invented,
+  other-vehicle and misquoted ids, card prose refuses standalone numbers,
+  and the endpoint/panel render values from the resolved records
+  (`tests/test_llm_assist_cards.py`, `LlmAssistPanel.test.ts`).
 - [ ] **S.6 — Structured clarifying answers.** `clarifying_answer` is free
   text. Add optional condition tags beside it (road surface, weather, fuel
   fill, towing/load) so an answer can join the retraining ledger as a

@@ -7,7 +7,7 @@ from fastapi import FastAPI, HTTPException, Query
 
 from src.alerts.emitter import AnomalyEventEmitter
 from src.analysis.gps_tracker import GpsTracker
-from src.analysis.llm_assist import LlmAssistCardStore, card_to_dict
+from src.analysis.llm_assist import LlmAssistCardStore, resolve_card
 from src.behavior.accepted_baselines import DEFAULT_ACCEPTED_BASELINES_PATH
 from src.collection.imu_collector import ImuHealth
 from src.config import CanaryConfig
@@ -35,6 +35,7 @@ from src.dashboard.status import (
     compact_status,
     gather_status_sources,
 )
+from src.evidence import MemoryLedger, UnscopedMemoryError, memory_ledger_for
 from src.models.feedback import FeedbackStore, annotate_events_with_feedback
 
 if TYPE_CHECKING:  # decode.dids is imported lazily inside the route bodies
@@ -375,10 +376,24 @@ def register_public_routes(
         # no producer exists yet, Task S.1) is an explicit, expected state,
         # not an error: the response just omits `cards` so the renderer's
         # absent-state branch is a plain `enabled` check, no error handling.
+        #
+        # Each card is resolved against the vehicle's memory ledger (S.5,
+        # E01.2): its numbers are rendered from the cited evidence records, a
+        # card whose citations do not resolve is marked ``rejected`` with the
+        # problems named, and a card from before evidence ids is marked
+        # ``unverified_historical``. An unscoped config has no ledger, so its
+        # evidence cards are rejected rather than shown unresolved.
         if not config.llm_assist.enabled:
             return {"enabled": False}
         store = LlmAssistCardStore(config.llm_assist.cards_path)
-        return {"enabled": True, "cards": [card_to_dict(card) for card in store.cards()]}
+        try:
+            ledger: MemoryLedger | None = memory_ledger_for(config)
+        except UnscopedMemoryError:
+            ledger = None
+        return {
+            "enabled": True,
+            "cards": [resolve_card(card, ledger).to_dict() for card in store.cards()],
+        }
 
     @app.get("/sessions/{session_id}/trip-summary")
     def get_session_trip_summary(session_id: str) -> dict[str, Any]:

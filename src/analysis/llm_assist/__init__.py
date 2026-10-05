@@ -7,7 +7,8 @@ reservation, no daemon dependency when disabled**, and dashboard cards
 degrade cleanly when the tier is not present. Concretely:
 
 * Everything importable from this package today (:mod:`.cards`,
-  :mod:`.store`) is schema/storage only — pydantic + stdlib, nothing heavy.
+  :mod:`.store`) is schema/storage only — pydantic + stdlib, nothing heavy
+  (cards resolve evidence through :mod:`src.evidence`, also pydantic-only).
   Importing ``src.analysis.llm_assist`` (or anything under it) never touches
   torch or an LLM runtime, regardless of ``config.llm_assist.enabled``.
 * ``config.llm_assist.enabled`` (``src.config.LLMAssistConfig``, default
@@ -34,28 +35,44 @@ entrypoint with the tier disabled never loads ``torch`` into the process.
 from __future__ import annotations
 
 from src.analysis.llm_assist.cards import (
+    CARD_SCHEMA,
+    HISTORICAL_NARRATIVE_NOTICE,
     HYPOTHESES_NOT_VERDICTS_FRAMING,
+    CardResolution,
     DiagnosticHypothesis,
     DifferentialCard,
-    EvidenceReference,
+    EvidenceCitation,
+    EvidenceResolutionError,
     LlmAssistCard,
     NarrativeCard,
     NarrativeSection,
+    StoredCard,
+    UnverifiedHistoricalCard,
     card_from_dict,
     card_to_dict,
+    require_resolved,
+    resolve_card,
 )
 from src.analysis.llm_assist.store import DEFAULT_LLM_ASSIST_CARDS_PATH, LlmAssistCardStore
 
 __all__ = [
+    "CARD_SCHEMA",
     "DEFAULT_LLM_ASSIST_CARDS_PATH",
+    "HISTORICAL_NARRATIVE_NOTICE",
     "HYPOTHESES_NOT_VERDICTS_FRAMING",
+    "CardResolution",
     "DiagnosticHypothesis",
     "DifferentialCard",
-    "EvidenceReference",
+    "EvidenceCitation",
+    "EvidenceResolutionError",
     "LlmAssistCard",
     "LlmAssistCardStore",
     "NarrativeCard",
     "NarrativeSection",
+    "StoredCard",
+    "UnverifiedHistoricalCard",
     "card_from_dict",
     "card_to_dict",
+    "require_resolved",
+    "resolve_card",
 ]

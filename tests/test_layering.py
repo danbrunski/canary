@@ -58,6 +58,7 @@ LAYERS: dict[str, int] = {
     # 1 persistence
     "storage": 1,
     "vehicle": 1,
+    "evidence": 1,
     # 2 acquisition
     "collection": 2,
     # 3 pipeline

@@ -1111,6 +1111,11 @@ class DaemonConfig(_Strict):
     #: the Pi, gitignored ``data/control/`` on the laptop, and per vehicle
     #: (``scope_config``).
     rom_library_dir: Path = CONTROL_DIR / "rom_library"
+    #: Investigation memory (E01): evidence minted by analysis tools,
+    #: investigations, predictions, interventions and outcomes, append-only
+    #: (``src.evidence.ledger.MemoryLedger``). Per vehicle (``scope_config``);
+    #: under ``state_dir`` on the Pi, gitignored ``data/control/`` on the laptop.
+    memory_ledger: Path = CONTROL_DIR / "memory.jsonl"
     #: Root for everything the daemon writes at runtime (S03). When set, every
     #: path in :data:`DAEMON_STATE_LAYOUT` that the YAML does not set itself
     #: resolves under it, so nothing the Pi writes lands in the git checkout
@@ -1193,6 +1198,7 @@ DAEMON_STATE_LAYOUT: dict[str, Path] = {
     "custom_pids": Path("control/custom_pids.yaml"),
     "capture_profile_overrides": Path("control/capture_profile_overrides.yaml"),
     "rom_library_dir": Path("control/rom_library"),
+    "memory_ledger": Path("control/memory.jsonl"),
 }
 #: :class:`DaemonConfig` paths that name version-controlled data the daemon
 #: only reads. Every ``Path`` field is in exactly one of these two tables or

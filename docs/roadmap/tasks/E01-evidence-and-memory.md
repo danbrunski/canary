@@ -9,7 +9,7 @@ primitives. Audit these before introducing a schema or store.
 
 ## Checklist
 
-- [ ] **E01.1 — Define shared state and record contracts.**
+- [x] **E01.1 — Define shared state and record contracts.**
   Inventory existing consumers and extend investigation, evidence,
   prediction, intervention and outcome records with vehicle/program identity,
   applicability, units, quality, valid time and record time. Supersession
@@ -18,8 +18,35 @@ primitives. Audit these before introducing a schema or store.
   **Accept:** schema tests reject missing conditions/provenance, an
   unevaluable result with a qualified residual, and cross-vehicle references;
   a replay round-trip preserves both times and supersession history.
+  *Done 2026-10-04:* audit — `llm_assist` cards/store (free-text
+  `EvidenceReference`, no producer), `vehicle/tune_revisions.py` (flashes),
+  `vehicle/vehicle_ledger.py` (physical changes, operator-editable),
+  `behavior/accepted_baselines.py` and `plausibility`'s own
+  `EvidenceRecord` — none held investigations/predictions/outcomes, so the
+  contracts are a new layer-1 package `src/evidence/` (`records.py`,
+  `ledger.py`) on the shared `JsonlStore` primitive; interventions point at
+  the existing tune-revision / vehicle-ledger record (`source`/`source_ref`)
+  rather than copying it. Six kinds (evidence, investigation, prediction,
+  intervention, outcome, retraction) share `VehicleIdentity` (profile, plus
+  required-but-nullable `vin`/`program_id`/`calibration`), required
+  `Conditions.regime` (noise-floor matching rule), `Provenance`,
+  `valid_from`/`valid_to` and ledger-minted `id`/`recorded_at`; `Quantity`
+  carries units, `Quality` the observation count and clock basis, and
+  `Result` the shared status (`evaluated` | `unevaluable` with one of seven
+  named reasons; an unevaluable result with a residual is refused).
+  Supersession appends a record naming what it `supersedes` (or a
+  `Retraction`); the ledger derives `superseded_at`/`superseded_by`/
+  `retracted_by` and never rewrites a line. Runtime path
+  `daemon.memory_ledger` = `control/<slug>/memory.jsonl` under `state_dir`
+  (`DAEMON_STATE_LAYOUT`, `scope_config`). Evidence:
+  `tests/test_evidence_memory.py` (21 tests: missing
+  conditions/provenance/identity/valid time, unevaluable+residual,
+  cross-vehicle append/reference/resolve, kind-checked references,
+  `test_replaying_the_log_preserves_both_times_and_supersession_history`),
+  `tests/test_state_dir.py::test_investigation_memory_is_per_vehicle_state`,
+  `tests/test_layering.py` (`evidence: 1`).
 
-- [ ] **E01.2 — Mint and resolve evidence at the producing tool.**
+- [x] **E01.2 — Mint and resolve evidence at the producing tool.**
   Evidence records contain tool/code version, source session/window/sample
   references, input and artifact hashes, conditions, computed values and
   evaluation policy. Have tools persist the record and return its id.
@@ -30,6 +57,45 @@ primitives. Audit these before introducing a schema or store.
   record is rejected; existing legitimate producers still round-trip. A
   recomputed result links to its inputs and supersedes rather than silently
   overwriting old evidence. This supplies LLM-assist S.5's shared contract.
+  *Done 2026-10-04 (revised after verification):* `Evidence` records carry
+  tool, tool version and `code_version` (hash of the producing modules'
+  source including the minting module, `src/evidence/provenance.py`),
+  `SourceRef` session/window/channels/sample counts, input and artifact
+  sha256s, conditions, `policy`, values with units, labels, quality and
+  result. `MemoryLedger.append` mints the id (over the whole stored record,
+  record time and supersession links included) and record time, refusing
+  producer-supplied ones; identical content returns the existing record only
+  while that record is *current* — content re-stated after it was superseded
+  (A→B→A) or retracted is a new record superseding whatever is current. A
+  schema-invalid stored line is reported as a corrupt record, not an unminted
+  id. Minting tool: `src/analysis/compare_evidence.py`
+  `mint_channel_comparison` (hashes the pairs, session chunk list and
+  catalogs; refusal → `unevaluable` `missing_input`/`refused`). It states
+  its own regime (`all conditions … unfiltered`; no caller `conditions`
+  argument exists) and resolves the calibration from the capture manifest or
+  `tune_revisions.yaml` for the session (unknown otherwise). Operator entry
+  point: `tools/mint_comparison.py` (scoped config → ledger → id). Cards
+  (`llm-assist-card/2`) cite `EvidenceCitation` ids; prose refuses any
+  digit-bearing token that is not an identifier (`3000rpm`, `80kPa`, `1e3`,
+  `x3` refused; `obd:SHORT_FUEL_TRIM_1`, `0x1206`, `B1` allowed);
+  `resolve_card` rejects invented ids, other-vehicle ids/cards, quoted values
+  differing from the record and claimed sessions no cited evidence read, and
+  returns `retracted` (not `verified`) for a card citing retracted evidence;
+  `LlmAssistCardStore.append(card, ledger=…)` refuses anything not
+  `verified`. Swept producers/readers: no card producer exists; readers
+  `GET /analysis/llm-assist/cards` and `LlmAssistPanel.tsx` (numbers from the
+  records, rejected/retracted/historical states shown); first-contract cards
+  load as `UnverifiedHistoricalCard`. Evidence:
+  `tests/test_llm_assist_cards.py` (36), `tests/test_compare_evidence.py` (5,
+  incl. `test_a_recompute_on_changed_data_supersedes_and_links_its_inputs`,
+  `test_the_tool_states_its_own_conditions_and_calibration`,
+  `test_the_cli_mints_into_the_scoped_ledger`),
+  `tests/test_evidence_memory.py` (24, incl. A→B→A, re-mint after
+  retraction, corrupt line), `LlmAssistPanel.test.ts` (9). Remaining
+  outside this item: no MCP/HTTP route mints evidence yet (E04 owns the
+  HTTP/MCP integration); `lambda_delivery`, noise-floor significance and the
+  plausibility evaluator's own `EvidenceRecord` do not mint yet — each
+  adopts `src.evidence` where its E02/E03 consumer needs it.
 
 - [ ] **E01.3 — Persist and retrieve memory on the Pi.**
   Extend existing stores under per-vehicle `state_dir`. Add exact queries by

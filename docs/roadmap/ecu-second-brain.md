@@ -117,12 +117,15 @@ that produces evidence writes an evidence record: id, tool and code
 version, inputs, session and window, conditions, and the values it
 computed. Investigations and cards cite evidence ids. A validator rejects
 an id that no tool produced, and numbers shown with a claim are rendered
-from the record. The current card contract does not do this:
-`EvidenceReference` in `src/analysis/llm_assist/cards.py` is a free-text
-description with optional session, channel, and timestamp fields, so a
-producer can cite a session or a value no tool returned and the card still
-validates. This is the "make it impossible, not documented" rule applied
-where a language model is most likely to break it.
+from the record. The first card contract did not do this: its free-text
+`EvidenceReference` let a producer cite a session or a value no tool returned
+and the card still validated. Since E01.2 (2026-10-04) cards cite evidence
+ids minted on the vehicle's `src.evidence` memory ledger (first tool:
+`tools/mint_comparison.py`), card prose cannot state numbers, and resolution
+rejects invented, other-vehicle and misquoted ids; older cards remain as
+explicitly unverified historical narrative. This is the "make it impossible,
+not documented" rule applied where a language model is most likely to break
+it.
 
 **Every record carries two times.** One is when the thing happened (valid
 time); the other is when CANary recorded or believed it (record time).

@@ -228,6 +228,10 @@ class AlignedPairs:
     unmatched_a: int
     unmatched_b: int
     n_held: int = 0
+    #: Engineering unit each side arrived in (the long frame's ``unit``),
+    #: ``""`` when the source declared none.
+    unit_a: str = ""
+    unit_b: str = ""
 
     @property
     def n_pairs(self) -> int:
@@ -521,7 +525,18 @@ def align_pairs(
         unmatched_a=unmatched_a,
         unmatched_b=unmatched_b,
         n_held=n_held,
+        unit_a=_side_unit(side_a),
+        unit_b=_side_unit(side_b),
     )
+
+
+def _side_unit(side: pd.DataFrame) -> str:
+    """The unit a side's rows declare (the most common non-empty one)."""
+    if "unit" not in side.columns:
+        return ""
+    units = side["unit"].astype("string").fillna("")
+    units = units[units != ""]
+    return "" if units.empty else str(units.mode().iloc[0])
 
 
 def _reference_for_held(
@@ -618,6 +633,37 @@ def compare_channels(
 ) -> ChannelComparison:
     """Compare two channels at the same instants. Refuses when it cannot.
 
+    See :func:`compare_channels_with_pairs`, which also returns the pairs.
+    """
+    return compare_channels_with_pairs(
+        session,
+        a,
+        b,
+        policy=policy,
+        min_pairs=min_pairs,
+        bindings_path=bindings_path,
+        dids_path=dids_path,
+        grid=grid,
+    )[0]
+
+
+def compare_channels_with_pairs(
+    session: Path | pd.DataFrame,
+    a: str,
+    b: str,
+    *,
+    policy: PairingPolicy,
+    min_pairs: int = MIN_PAIRS,
+    bindings_path: Path = BINDINGS_YAML,
+    dids_path: Path = DIDS_YAML,
+    grid: object = None,
+) -> tuple[ChannelComparison, AlignedPairs]:
+    """:func:`compare_channels`, returning the :class:`AlignedPairs` it rested on.
+
+    For a caller that records what the comparison consumed (the evidence
+    minting tool hashes the pairs); the session still goes in, never a
+    pre-paired frame.
+
     ``a`` and ``b`` are :mod:`src.analysis.channels` specs, so both arrive in
     engineering units and ``slope``/``offset`` are directly the mapping
     between them. ``policy`` states how far apart two "simultaneous"
@@ -655,7 +701,7 @@ def compare_channels(
     residual = y - (x * fit.slope + fit.offset)
     difference = y - x
     median_s, p95_s, max_s = _separation_stats(aligned.pairs["separation_s"].to_numpy())
-    return ChannelComparison(
+    comparison = ChannelComparison(
         a=a,
         b=b,
         n_pairs=aligned.n_pairs,
@@ -679,6 +725,7 @@ def compare_channels(
         difference_spread=float(np.std(difference)),
         n_held_pairs=aligned.n_held,
     )
+    return comparison, aligned
 
 
 __all__ = [
@@ -697,6 +744,7 @@ __all__ = [
     "align_pairs",
     "binned_summary",
     "compare_channels",
+    "compare_channels_with_pairs",
     "regress",
     "scale_stability",
 ]
