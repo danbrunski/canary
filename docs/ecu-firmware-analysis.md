@@ -561,12 +561,18 @@ ratio of (DID − Ts) to the predicted pulse has median 1.006, p10–p90
 0.961–1.030, over 5,039 steady samples; at BFS above 28k it is 1.007, n = 594.
 46 fuel-cut reads equal the predicted Ts within ±2 counts.
 
-- **Order (verified).** A 10.24 ms task table (`0x21A30`) runs:
-  1. φ (`0x575EC`);
-  2. dead time Ts (`0x57144`);
-  3. the fuel-pressure correction (`0x53B8C`);
-  4. transients (`0x527CC`);
+- **Order (verified).** The task table `0x0219D0` that the main loop
+  `0x020EF2` walks (134 entries, `full.asm` `0x2129C`–`0x212A6`) runs, as these
+  entries:
+  1. φ (`0x575EC`), entry 37;
+  2. dead time Ts (`0x57144`), entry 41;
+  3. the fuel-pressure correction (`0x53B8C`), entry 42;
+  4. transients (`0x527CC`), entry 44;
   5. the per-cylinder stages.
+
+  `0x21A30`, quoted here earlier as a separate table, is the address of entry
+  24. The 10.24 ms period once given for it is not verified: the loop's
+  period is still undecoded (application model, `enrichment_tick_rate`).
   Crank-segment code loads the ATU-II channel-8 one-shot counters (`0xFFFFF640 + 2c`).
 - **Formula (verified; u16 words, u32 intermediates):**
 

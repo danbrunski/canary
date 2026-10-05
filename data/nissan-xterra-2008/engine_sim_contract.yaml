@@ -1,0 +1,799 @@
+# E07.1 — the controller / plant / scenario contract for this vehicle.
+#
+# Schema: src/analysis/sim_contract.py (SimContract). What the engine
+# simulator's ECU twin and plant exchange, on which clocks, with which units,
+# limits, sampling and delays, and -- per simulation mode -- who owns every
+# quantity: a measured input, a prescribed boundary, an inferred state or a
+# predicted output. The loader refuses a hidden same-step cycle, a computed
+# quantity whose observation channel feeds the same mode (predicted-as-
+# measured), an undeclared input, an ECU quantity reading the plant except
+# through a sensor, and a measured input to a ROM comparison or a rollout.
+#
+# Specification only: no plant is built (E07.3) and no mode is implemented
+# yet. Vehicle facts (RAM words, channels, task order, actuator limits) live
+# here; src/analysis/sim_contract.py is generic. Where a fact is not decoded
+# or measured it says so (`delay_s` absent, a parameter `requires_measurement`),
+# never a guess.
+schema_version: 1
+contract_version: 1
+name: engine_sim_contract
+# The plant implementation a scenario's results come from. No plant exists
+# yet; E07.3 replaces this with the first fuel-response plant's version.
+plant_version: unbuilt-0
+
+units:
+  - {id: rpm, dimension: angular_speed, meaning: 'revolutions per minute'}
+  - {id: g_per_s, dimension: mass_flow, meaning: 'grams per second'}
+  - {id: kPa, dimension: pressure, meaning: 'kilopascal, absolute unless the quantity says gauge'}
+  - {id: degC, dimension: temperature, meaning: 'degrees Celsius'}
+  - {id: V, dimension: voltage, meaning: 'volt'}
+  - {id: lambda, dimension: ratio, meaning: 'air-fuel equivalence (stoichiometric = 1)'}
+  - {id: ms, dimension: time, meaning: 'millisecond'}
+  - {id: s, dimension: time, meaning: 'second'}
+  - {id: percent, dimension: ratio, meaning: 'percent of full scale'}
+  - {id: N_m, dimension: torque, meaning: 'newton metre'}
+  - {id: L, dimension: volume, meaning: 'litre'}
+  - {id: raw_counts, dimension: ecu_integer, meaning: 'the ECU word as stored; scale on the quantity'}
+  - {id: q14_phi, dimension: ecu_integer, meaning: 'equivalence ratio x 16384'}
+  - {id: flags, dimension: ecu_integer, meaning: 'bit field'}
+
+clocks:
+  - id: ecu_task_10ms
+    kind: ecu_time_task
+    period_s: 0.01024
+    period_status: unverified
+    evidence: >-
+      The order is verified (docs/ecu-firmware-analysis.md "Injector pulse
+      chain": phi, dead time, the fuel-pressure correction and transients are
+      entries 37, 41, 42 and 44 of the task table 0x0219D0 that 0x020EF2
+      walks, 134 entries, full.asm 0x2129C-0x212A6). The 10.24 ms period is a
+      stated figure no decode or measurement has confirmed: the application
+      model lists the 0x020EF2 cycle period as undecoded (uncovered:
+      enrichment_tick_rate). Results timed on this clock inherit that.
+  - id: ecu_crank_segment
+    kind: ecu_crank_event
+    evidence: >-
+      The ignition chain (0x04E6AE per-segment chain, timing rate limit per
+      segment) and the injector one-shots run on crank segments, not on a
+      fixed period (ecu_application_model.yaml timing nodes).
+  - id: solver_1280us
+    kind: solver
+    period_s: 0.00128
+    period_status: chosen
+    evidence: >-
+      Eight plant steps per ECU tick, so values cross only at ECU task
+      boundaries. A starting choice: E07.5's step-refinement test decides it.
+  - id: obd_acquisition
+    kind: acquisition
+    evidence: >-
+      Logged channels arrive at their own irregular acquisition times; pair on
+      acquisition time (compare_channels), never on a resampled grid.
+
+ecu_schedule:
+  clock: ecu_task_10ms
+  task_table: 0x0219D0
+  tasks:
+    - {entry: 37, function: 0x0575EC, name: 'phi (the fuel-command task)'}
+    - {entry: 41, function: 0x057144, name: 'dead time Ts'}
+    - {entry: 42, function: 0x053B8C, name: 'fuel-pressure correction'}
+    - {entry: 44, function: 0x0527CC, name: 'transients'}
+  application_model_task: 0x0575EC
+  cycle_start: 0x020EF2
+  event_clock: ecu_crank_segment
+  evidence: >-
+    Entries of the table 0x0219D0 that the main loop 0x020EF2 walks (134
+    entries; 0x21A30, quoted earlier as a separate table, is the address of
+    its entry 24). The per-cylinder stages follow and are not indexed here
+    yet. The internal call order of 0x0575EC is the application model's
+    `schedule`, after the cycle-start copy 0x020EF2, and is checked against
+    it (check_against_application_model). The tick period is unverified (the
+    clock says so), so tick-counted enrichment timing stays in ticks.
+
+solver:
+  clock: solver_1280us
+  method: fixed_step_euler
+  exchange: ecu_task_boundary
+  evidence: >-
+    ECU integer arithmetic runs on the ECU clock with the decoded widths; the
+    plant integrates on the solver clock. A sample-and-hold sensor value
+    reaches the ECU at a tick; an actuator command holds until the next tick.
+
+events:
+  - id: ecu_power_on
+    meaning: 'ECU reset: volatile RAM (closed-loop trim, filters) restarts; UpRev init runs.'
+    evidence: 'ecu_application_model.yaml uprev_init; E05.3 state models'
+  - id: ecu_reflash
+    meaning: 'A calibration flash: the learned long-term trim is reset.'
+    evidence: 'LTFT read 0.00 after the 2026-09-20 flash until relearned (project notes; tune_revisions.yaml)'
+  - id: battery_disconnect
+    meaning: 'Non-volatile learned values (idle air, throttle closed position) may be lost.'
+    evidence: 'Learned idle air has an inverted backup copy (docs/ecu-firmware-analysis.md); the loss condition is not decoded.'
+
+hardware_configurations:
+  - id: na_stock_injectors_2026_10
+    meaning: 'Naturally aspirated VQ40DE, stock injectors and pump, returnless regulator as delivered; AEM rail pressure gauge fitted 2026-10-04.'
+    parameters:
+      - {id: displacement, units: L, status: known,
+         evidence: 'VQ40DE 3.954 L (vehicle profile fact)'}
+      - {id: injector_static_flow, units: g_per_s, status: requires_measurement,
+         evidence: 'The ROM gives K and the 0x9254 scaler, which are the ECU''s belief, not the injector; a flow bench or an independent fuel measurement is needed. MAF bias must not be absorbed into it.'}
+      - {id: injector_dead_time, units: ms, status: requires_measurement,
+         evidence: 'The ECU''s Ts = max(0, 47 + ((175 - Vb) x 92) >> 7) is its compensation, not the injector''s measured latency.'}
+      - {id: rail_pressure_behaviour, units: kPa, status: identifiable,
+         evidence: 'sensor:FUEL_PRESSURE at 100 Hz since 2026-10-04 (anti-alias firmware 2026-10-04 21:52:33Z); droops with airflow.'}
+      - {id: maf_transfer_bias, units: percent, status: requires_measurement,
+         evidence: 'No independent airflow reference; a MAF error and an injector-flow error are not separable from lambda alone.'}
+      - {id: lambda_observation_delay, units: s, status: requires_measurement,
+         evidence: 'B06.3: transport delay not estimated (status not_estimated); never fitted on a test pull.'}
+
+quantities:
+  # -- environment and driver
+  - {id: barometric_pressure, kind: environment, units: kPa, meaning: 'Ambient pressure.'}
+  - {id: intake_air_temperature, kind: environment, units: degC, meaning: 'Intake air temperature.'}
+  - {id: battery_voltage, kind: environment, units: V, meaning: 'System voltage at the ECU.'}
+  - {id: road_load, kind: environment, units: N_m, meaning: 'Load torque at the crank from road, grade and driveline.'}
+  - {id: pedal_demand, kind: driver, units: percent, meaning: 'Accelerator pedal position the driver applies.'}
+
+  # -- plant (continuous)
+  - id: engine_speed
+    kind: plant
+    units: rpm
+    meaning: 'Crankshaft speed.'
+    depends_on:
+      - {quantity: engine_speed, timing: previous_step}
+      - {quantity: engine_torque, timing: previous_step}
+      - {quantity: road_load, timing: previous_step}
+  - id: coolant_temperature
+    kind: plant
+    units: degC
+    meaning: 'Engine coolant temperature.'
+    depends_on:
+      - {quantity: coolant_temperature, timing: previous_step}
+  - id: manifold_pressure
+    kind: plant
+    units: kPa
+    meaning: 'Intake manifold absolute pressure (no MAP sensor on this engine).'
+    depends_on:
+      - {quantity: manifold_pressure, timing: previous_step}
+      - {quantity: mass_air_flow, timing: previous_step}
+      - {quantity: engine_speed, timing: same_step}
+      - {quantity: barometric_pressure, timing: same_step}
+  - id: mass_air_flow
+    kind: plant
+    units: g_per_s
+    meaning: 'Air mass flow into the engine.'
+    depends_on:
+      - {quantity: throttle_position_actual, timing: same_step}
+      - {quantity: engine_speed, timing: same_step}
+      - {quantity: manifold_pressure, timing: previous_step}
+      - {quantity: barometric_pressure, timing: same_step}
+      - {quantity: intake_air_temperature, timing: same_step}
+  - id: fuel_rail_pressure
+    kind: plant
+    units: kPa
+    meaning: 'Fuel rail gauge pressure.'
+    observed_as: ['sensor:FUEL_PRESSURE']
+    depends_on:
+      - {quantity: fuel_mass_flow, timing: previous_step}
+      - {quantity: manifold_pressure, timing: same_step}
+  - id: fuel_mass_flow
+    kind: plant
+    units: g_per_s
+    meaning: 'Fuel mass delivered by the injectors.'
+    depends_on:
+      - {quantity: injector_open_time_b1, timing: same_step}
+      - {quantity: engine_speed, timing: same_step}
+      - {quantity: fuel_rail_pressure, timing: same_step}
+      - {quantity: manifold_pressure, timing: same_step}
+  - id: delivered_lambda
+    kind: plant
+    units: lambda
+    meaning: 'Delivered mixture from air and fuel mass: never the target copied.'
+    depends_on:
+      - {quantity: mass_air_flow, timing: same_step}
+      - {quantity: fuel_mass_flow, timing: same_step}
+  - id: engine_torque
+    kind: plant
+    units: N_m
+    meaning: 'Brake torque at the crank.'
+    depends_on:
+      - {quantity: mass_air_flow, timing: same_step}
+      - {quantity: delivered_lambda, timing: same_step}
+      - {quantity: engine_speed, timing: same_step}
+
+  # -- actuators (ECU command -> physical actuation)
+  - id: injector_open_time_b1
+    kind: actuator
+    units: ms
+    meaning: 'Effective injector open time for the index-0 (bank 1) pulse.'
+    depends_on:
+      - {quantity: injector_pulse_index0, timing: same_step}
+      - {quantity: battery_voltage, timing: same_step}
+    actuator:
+      commanded_by: injector_pulse_index0
+      minimum: 0.0
+      maximum: 655.35
+      evidence: >-
+        The pulse is a u16 at 10 us per count (0..655.35 ms); the min-pulse
+        floor 0x2770 and short-pulse correction (cal 0x9120-0x9126) act after
+        the observed word. The injection window per cycle is the physical
+        bound and is not declared yet.
+  - id: throttle_position_actual
+    kind: actuator
+    units: percent
+    meaning: 'Throttle plate opening.'
+    depends_on:
+      - {quantity: requested_throttle_position, timing: same_step}
+      - {quantity: throttle_position_actual, timing: previous_step}
+    actuator:
+      commanded_by: requested_throttle_position
+      minimum: 0.0
+      maximum: 100.0
+      evidence: >-
+        0xFFFF2D28 is 0..819 counts above closed (819 = 100 %); the plate's
+        response rate is not measured, so no rate limit is declared.
+
+  # -- sensors (physical quantity -> ECU integer)
+  - id: rpm_word
+    kind: sensor
+    units: raw_counts
+    meaning: 'Engine speed word, cycle-start copy.'
+    integer: {width: 16, signed: false, ram: 0xFFFF11D8, scale: '12.5 rpm', confidence: observed}
+    observed_as: ['mem:ECM_ENGINE_SPEED_RAM']
+    # PID 0x0C reads the source word 0xFFFF1210, one cycle ahead of this copy.
+    leak_aliases: ['obd:RPM']
+    depends_on: [{quantity: engine_speed, timing: same_step}]
+    sensor:
+      measures: engine_speed
+      sample_clock: ecu_task_10ms
+      quantization: 12.5
+      evidence: 'Copied at cycle start from 0xFFFF1210 (PID 0x0C); the crank-measurement latency is not decoded.'
+  - id: maf_reading
+    kind: sensor
+    units: raw_counts
+    meaning: 'The ECU''s airflow reading.'
+    integer: {width: 16, signed: false, scale: 'not decoded (PID 0x10 reports 0.01 g/s)', confidence: inferred}
+    observed_as: ['obd:MAF']
+    depends_on: [{quantity: mass_air_flow, timing: same_step}]
+    sensor:
+      measures: mass_air_flow
+      sample_clock: ecu_task_10ms
+      evidence: 'Sensor response and the ECU''s filtering are not measured.'
+  - id: throttle_sensor_a
+    kind: sensor
+    units: raw_counts
+    meaning: 'Throttle sensor A, raw A/D.'
+    integer: {width: 16, signed: false, scale: '4.883 mV', confidence: code}
+    observed_as: ['did:ECM_THROTTLE_POS_SENSOR_1']
+    depends_on: [{quantity: throttle_position_actual, timing: same_step}]
+    sensor:
+      measures: throttle_position_actual
+      sample_clock: ecu_task_10ms
+      quantization: 0.1221
+      evidence: 'A/D channel 6 (10-bit), DID 0x120F; 819 counts span 0..100 % above closed. Sensor B substitutes on a sensor-A fault (not modelled).'
+  - id: pedal_sensor
+    kind: sensor
+    units: raw_counts
+    meaning: 'Accelerator pedal sensor.'
+    integer: {width: 16, signed: false, scale: 'not decoded', confidence: inferred}
+    depends_on: [{quantity: pedal_demand, timing: same_step}]
+    sensor:
+      measures: pedal_demand
+      sample_clock: ecu_task_10ms
+      evidence: 'Pedal channel, word and scale not decoded (pedal_flag_inputs, application model uncovered).'
+  - id: coolant_byte
+    kind: sensor
+    units: raw_counts
+    meaning: 'Coolant temperature byte (degC = raw - 50).'
+    integer: {width: 8, signed: false, ram: 0xFFFF1083, scale: '1 degC, offset -50', confidence: inferred}
+    observed_as: ['did:ECM_COOLANT_TEMP']
+    # PID 0x05's source byte is not traced.
+    leak_aliases: ['obd:COOLANT_TEMP']
+    depends_on: [{quantity: coolant_temperature, timing: same_step}]
+    sensor:
+      measures: coolant_temperature
+      sample_clock: ecu_task_10ms
+      quantization: 1.0
+      evidence: 'CAN DID 0x1101 reads it (inferred, application model coolant_source); sensor lag not measured.'
+  - id: battery_voltage_counts
+    kind: sensor
+    units: raw_counts
+    meaning: 'Battery voltage Vb as the dead-time formula reads it.'
+    integer: {width: 8, signed: false, scale: '0.08 V', confidence: code}
+    observed_as: ['obd:CONTROL_MODULE_VOLTAGE']
+    depends_on: [{quantity: battery_voltage, timing: same_step}]
+    sensor:
+      measures: battery_voltage
+      sample_clock: ecu_task_10ms
+      quantization: 0.08
+      evidence: 'Vb = PID 0x42 / 0.08 V (docs/ecu-firmware-analysis.md, dead time).'
+  - id: barometric_counts
+    kind: sensor
+    units: raw_counts
+    meaning: 'Barometric pressure as the vacuum estimate reads it.'
+    integer: {width: 8, signed: false, scale: 'not decoded (PID 0x33 reports 1 kPa)', confidence: inferred}
+    observed_as: ['obd:BAROMETRIC_PRESSURE']
+    depends_on: [{quantity: barometric_pressure, timing: same_step}]
+    sensor:
+      measures: barometric_pressure
+      sample_clock: ecu_task_10ms
+      evidence: 'The internal word is not decoded; read per session, never assumed.'
+  - id: lambda_sensor_b1
+    kind: sensor
+    units: raw_counts
+    meaning: 'Bank 1 wideband reading.'
+    integer: {width: 16, signed: false, scale: 'not decoded (PID 0x24 reports lambda x 32768)', confidence: inferred}
+    observed_as: ['obd:O2_WR_LAMBDA_S1']
+    depends_on: [{quantity: delivered_lambda, timing: same_step}]
+    sensor:
+      measures: delivered_lambda
+      sample_clock: ecu_task_10ms
+      evidence: 'Exhaust transport and sensor delay not estimated (B06.3); declared absent rather than fitted.'
+
+  # -- ECU (integer, decoded widths)
+  - id: throttle_closed_learned
+    kind: ecu
+    units: raw_counts
+    meaning: 'Learned closed throttle position (non-volatile).'
+    integer: {width: 16, signed: false, ram: 0xFFFF4C72, scale: '4.883 mV', confidence: code}
+    depends_on:
+      - {quantity: throttle_closed_learned, timing: previous_step}
+      - {quantity: throttle_sensor_a, timing: previous_step}
+  - id: throttle_counts_above_closed
+    kind: ecu
+    units: raw_counts
+    meaning: 'Throttle sensor A minus its learned closed position.'
+    integer: {width: 16, signed: false, ram: 0xFFFF2CC8, scale: '819 counts = 100 %', confidence: code}
+    depends_on:
+      - {quantity: throttle_sensor_a, timing: same_step}
+      - {quantity: throttle_closed_learned, timing: same_step}
+  - id: idle_air_learned
+    kind: ecu
+    units: raw_counts
+    meaning: 'Idle-speed integrator plus non-volatile learned idle air.'
+    integer: {width: 16, signed: false, ram: 0xFFFF63FC, scale: 'relative area units', confidence: inferred}
+    depends_on:
+      - {quantity: idle_air_learned, timing: previous_step}
+      - {quantity: rpm_word, timing: previous_step}
+  - id: evap_purge_area
+    kind: ecu
+    units: raw_counts
+    meaning: 'EVAP purge term added to the fill.'
+    integer: {width: 16, signed: false, ram: 0xFFFF139E, scale: 'relative area units', confidence: code}
+  - id: fuel_comp_load_byte
+    kind: ecu
+    units: raw_counts
+    meaning: 'Throttle-model (alpha-N) fill byte, the Fuel Comp load input.'
+    integer: {width: 8, signed: false, ram: 0xFFFF118A, scale: 'relative fill, 0..224', confidence: code}
+    manifest_node: fuel_comp_load_byte
+    observed_as: ['mem:ECM_FUEL_COMP_X_INPUT']
+    depends_on:
+      - {quantity: throttle_counts_above_closed, timing: same_step}
+      - {quantity: idle_air_learned, timing: same_step}
+      - {quantity: evap_purge_area, timing: same_step}
+      - {quantity: rpm_word, timing: same_step}
+  - id: base_fuel_schedule
+    kind: ecu
+    units: raw_counts
+    meaning: 'BFS: K x airflow / rpm, through Fuel Comp, the filling filter, transients and the ceiling.'
+    integer: {width: 16, signed: false, ram: 0xFFFF103A, scale: '1/2040 ms of base pulse', confidence: observed}
+    manifest_node: base_fuel_schedule
+    observed_as: ['mem:ECM_AIR_CHARGE_SLOT_103A', 'did:ECM_AIR_CHARGE']
+    depends_on:
+      - {quantity: base_fuel_schedule, timing: previous_step}
+      - {quantity: fuel_comp_load_byte, timing: same_step}
+      - {quantity: maf_reading, timing: same_step}
+      - {quantity: rpm_word, timing: same_step}
+      - {quantity: coolant_byte, timing: same_step}
+  - id: target_afr_x
+    kind: ecu
+    units: raw_counts
+    meaning: 'Load input X = min(255, BFS x 128 / Load Point Scaler), the Target AFR and timing-trim column input.'
+    integer:
+      width: 8
+      signed: false
+      ram: 0xFFFF104E
+      scale: 'BFS / Load Point Scaler x 128'
+      confidence: observed
+      note: 'Observed through the cycle-start copy 0xFFFF103E, one cycle after the write.'
+    manifest_node: load_input_x
+    observed_as: ['mem:ECM_FUEL_TARGET_MAP_X_TRACE']
+    depends_on: [{quantity: base_fuel_schedule, timing: same_step}]
+  - id: throttle_target_area
+    kind: ecu
+    units: raw_counts
+    meaning: 'Target throttle area (driver demand, inferred); writer not traced.'
+    integer: {width: 16, signed: false, ram: 0xFFFF1A64, scale: 'relative area units', confidence: inferred}
+    depends_on:
+      - {quantity: pedal_sensor, timing: same_step}
+      - {quantity: idle_air_learned, timing: same_step}
+      - {quantity: evap_purge_area, timing: same_step}
+  - id: requested_throttle_position
+    kind: ecu
+    units: raw_counts
+    meaning: 'Throttle position for the target area, through the inverted area curve.'
+    integer: {width: 16, signed: false, ram: 0xFFFF2D28, scale: '819 counts = 100 %', confidence: code}
+    manifest_node: requested_throttle_position
+    depends_on: [{quantity: throttle_target_area, timing: same_step}]
+  - id: pedal_flag
+    kind: ecu
+    units: flags
+    meaning: 'Pedal enrichment flag byte (bit 0 forces the last load column).'
+    integer: {width: 8, signed: false, ram: 0xFFFF2841, scale: 'bit field', confidence: observed}
+    manifest_node: pedal_enrichment_flag
+    observed_as: ['mem:ECM_PEDAL_ENRICH_FLAGS']
+    depends_on:
+      - {quantity: requested_throttle_position, timing: same_step}
+      - {quantity: rpm_word, timing: same_step}
+  - id: target_phi_word
+    kind: ecu
+    units: q14_phi
+    meaning: 'Final commanded equivalence ratio, a controller objective.'
+    integer: {width: 16, signed: false, ram: 0xFFFF26BE, scale: 'phi x 16384', confidence: observed}
+    manifest_node: final_command_word
+    observed_as: ['mem:ECM_TARGET_EQUIV_RATIO']
+    # PID 0x44 = 0x26BE x 0x46AC / 3675: phi only while the A/F feedback
+    # target is 14.7. Never scored against; never fed to a mode computing phi.
+    leak_aliases: ['obd:COMMANDED_EQUIV_RATIO']
+    depends_on:
+      - {quantity: target_phi_word, timing: previous_step}
+      - {quantity: target_afr_x, timing: previous_step}
+      - {quantity: rpm_word, timing: same_step}
+      - {quantity: pedal_flag, timing: same_step}
+      - {quantity: coolant_byte, timing: same_step}
+  - id: dead_time
+    kind: ecu
+    units: raw_counts
+    meaning: 'Ts = max(0, 47 + ((175 - Vb) x 92) >> 7), 10 us per count.'
+    integer: {width: 16, signed: false, scale: '10 us (inferred)', confidence: inferred}
+    depends_on: [{quantity: battery_voltage_counts, timing: same_step}]
+  - id: fuel_pressure_correction
+    kind: ecu
+    units: raw_counts
+    meaning: 'w1800 = b1772 x 10601 (0x9254) >> 8, on estimated vacuum.'
+    integer: {width: 16, signed: false, ram: 0xFFFF1800, scale: '0x4000 = 1.0', confidence: code}
+    depends_on:
+      - {quantity: barometric_counts, timing: same_step}
+      - {quantity: rpm_word, timing: same_step}
+      - {quantity: base_fuel_schedule, timing: previous_step}
+  - id: stft_b1
+    kind: ecu
+    units: raw_counts
+    meaning: 'Short-term trim, bank 1 (0x6400 = 1.0; trims add).'
+    integer: {width: 16, signed: false, ram: 0xFFFF26B4, scale: '0x6400 = 1.0', confidence: code}
+    observed_as: ['obd:SHORT_FUEL_TRIM_1']
+    depends_on:
+      - {quantity: stft_b1, timing: previous_step}
+      - {quantity: lambda_sensor_b1, timing: previous_step}
+  - id: ltft_b1
+    kind: ecu
+    units: raw_counts
+    meaning: 'Long-term (learned) trim, bank 1.'
+    integer: {width: 16, signed: false, ram: 0xFFFF26DE, scale: '0x6400 = 1.0', confidence: code}
+    observed_as: ['obd:LONG_FUEL_TRIM_1']
+    depends_on:
+      - {quantity: ltft_b1, timing: previous_step}
+      - {quantity: stft_b1, timing: previous_step}
+  - id: injector_pulse_index0
+    kind: ecu
+    units: raw_counts
+    meaning: 'Per-cylinder pulse, injector index 0 (bank 1), before the short-pulse correction and min-pulse floor.'
+    integer:
+      width: 16
+      signed: false
+      ram: 0xFFFF279C
+      scale: '10 us (inferred: timer clock and UpRev''s x0.01 ms agree)'
+      confidence: inferred
+      note: >-
+        0xFFFF279C[0]. DID 0x1206 reads 0xFFFF2710, its cycle-start copy, so
+        the observation lags the computed word by one cycle. That index 0 is
+        bank 1 (cylinder 1) is inferred; the 10 us scale is inferred.
+    observed_as: ['did:ECM_INJECTOR_PULSE_1']
+    depends_on:
+      - {quantity: base_fuel_schedule, timing: previous_step}
+      - {quantity: target_phi_word, timing: same_step}
+      - {quantity: dead_time, timing: same_step}
+      - {quantity: fuel_pressure_correction, timing: same_step}
+      - {quantity: stft_b1, timing: same_step}
+      - {quantity: ltft_b1, timing: same_step}
+
+modes:
+  # ---------------------------------------------------------------- ECU replay
+  - id: ecu_replay
+    kind: ecu_replay
+    claim: >-
+      Reproduction of decoded controller logic: recorded sensor readings and
+      declared state checkpoints in, ECU intermediates and commands out,
+      scored against their own RAM/DID observations. BFS is fed observed (its
+      upstream is E05.2), so this mode cannot claim to predict BFS.
+    roles:
+      barometric_pressure: {role: unused}
+      intake_air_temperature: {role: unused}
+      battery_voltage: {role: unused}
+      road_load: {role: unused}
+      pedal_demand: {role: unused}
+      engine_speed: {role: unused}
+      coolant_temperature: {role: unused}
+      manifold_pressure: {role: unused}
+      mass_air_flow: {role: unused}
+      fuel_rail_pressure: {role: unused}
+      fuel_mass_flow: {role: unused}
+      delivered_lambda: {role: unused}
+      engine_torque: {role: unused}
+      injector_open_time_b1: {role: unused}
+      throttle_position_actual: {role: unused}
+      rpm_word: {role: measured_input, source: 'mem:ECM_ENGINE_SPEED_RAM'}
+      maf_reading: {role: measured_input, source: 'obd:MAF'}
+      throttle_sensor_a: {role: measured_input, source: 'did:ECM_THROTTLE_POS_SENSOR_1'}
+      pedal_sensor: {role: unused}
+      coolant_byte: {role: measured_input, source: 'did:ECM_COOLANT_TEMP'}
+      battery_voltage_counts: {role: measured_input, source: 'obd:CONTROL_MODULE_VOLTAGE'}
+      barometric_counts: {role: measured_input, source: 'obd:BAROMETRIC_PRESSURE'}
+      lambda_sensor_b1: {role: unused}
+      throttle_closed_learned:
+        role: prescribed_boundary
+        source: scenario
+        assumption: 'Read from a key-on checkpoint; it relearns only at closed throttle and is held for the replay.'
+      throttle_counts_above_closed: {role: predicted_output}
+      idle_air_learned:
+        role: prescribed_boundary
+        source: scenario
+        assumption: 'Stated or read in the same window; not captured on 2026-10-04, so the fill byte stays unscored until it is.'
+      evap_purge_area: {role: measured_input, source: 'obd:EVAPORATIVE_PURGE'}
+      fuel_comp_load_byte: {role: predicted_output}
+      base_fuel_schedule: {role: measured_input, source: 'mem:ECM_AIR_CHARGE_SLOT_103A'}
+      target_afr_x:
+        role: predicted_output
+        init: {method: observed_checkpoint, note: 'The first same-read X observation; the command reads last tick''s X.'}
+      throttle_target_area: {role: unused}
+      requested_throttle_position: {role: unused}
+      pedal_flag: {role: measured_input, source: 'mem:ECM_PEDAL_ENRICH_FLAGS'}
+      target_phi_word:
+        role: predicted_output
+        init: {method: observed_checkpoint, reset_on: [ecu_power_on], note: 'Last tick''s command for the slew and cap.'}
+      dead_time: {role: predicted_output}
+      fuel_pressure_correction: {role: predicted_output}
+      stft_b1: {role: measured_input, source: 'obd:SHORT_FUEL_TRIM_1'}
+      ltft_b1: {role: measured_input, source: 'obd:LONG_FUEL_TRIM_1'}
+      injector_pulse_index0: {role: predicted_output}
+
+  # -------------------------------------------------------------- plant replay
+  - id: plant_replay
+    kind: plant_replay
+    claim: >-
+      Plant fidelity under the observed command history: the recorded
+      injector command, rail pressure and environment in, delivered fuel,
+      lambda and the lambda observation out. Prescribed rpm and airflow are
+      boundaries, never predictions of acceleration.
+    roles:
+      barometric_pressure: {role: prescribed_boundary, source: 'obd:BAROMETRIC_PRESSURE'}
+      intake_air_temperature: {role: prescribed_boundary, source: 'obd:INTAKE_TEMP'}
+      battery_voltage: {role: prescribed_boundary, source: 'obd:CONTROL_MODULE_VOLTAGE'}
+      road_load: {role: unused}
+      pedal_demand: {role: unused}
+      engine_speed:
+        role: prescribed_boundary
+        source: 'obd:RPM'
+        assumption: 'Imposed rpm: the slice predicts mixture at the recorded speed, not speed.'
+      coolant_temperature:
+        role: prescribed_boundary
+        source: 'obd:COOLANT_TEMP'
+        assumption: 'Warm engine; cold-start and wall-wetting states are excluded until modelled.'
+      manifold_pressure:
+        role: prescribed_boundary
+        source: scenario
+        assumption: 'No MAP sensor on this engine; stated per operating point, which bounds the pressure-dependent part of the claim.'
+      mass_air_flow:
+        role: prescribed_boundary
+        source: 'obd:MAF'
+        assumption: 'Recorded airflow is the air boundary; its bias stays in the boundary and is never absorbed into injector flow.'
+      fuel_rail_pressure: {role: measured_input, source: 'sensor:FUEL_PRESSURE'}
+      fuel_mass_flow: {role: predicted_output}
+      delivered_lambda: {role: predicted_output}
+      engine_torque: {role: unused}
+      injector_open_time_b1: {role: predicted_output}
+      throttle_position_actual: {role: unused}
+      rpm_word: {role: unused}
+      maf_reading: {role: unused}
+      throttle_sensor_a: {role: unused}
+      pedal_sensor: {role: unused}
+      coolant_byte: {role: unused}
+      battery_voltage_counts: {role: unused}
+      barometric_counts: {role: unused}
+      lambda_sensor_b1: {role: predicted_output}
+      throttle_closed_learned: {role: unused}
+      throttle_counts_above_closed: {role: unused}
+      idle_air_learned: {role: unused}
+      evap_purge_area: {role: unused}
+      fuel_comp_load_byte: {role: unused}
+      base_fuel_schedule: {role: unused}
+      target_afr_x: {role: unused}
+      throttle_target_area: {role: unused}
+      requested_throttle_position: {role: unused}
+      pedal_flag: {role: unused}
+      target_phi_word: {role: unused}
+      dead_time: {role: unused}
+      fuel_pressure_correction: {role: unused}
+      stft_b1: {role: unused}
+      ltft_b1: {role: unused}
+      injector_pulse_index0: {role: measured_input, source: 'did:ECM_INJECTOR_PULSE_1'}
+
+  # ------------------------------------------- conditional ROM comparison (first slice)
+  - id: conditional_rom_comparison
+    kind: conditional_rom_comparison
+    claim: >-
+      Tuning effect conditional on fixed operating conditions: the same
+      prescribed rpm, airflow, throttle, thermal state and initial state for
+      each ROM; the qualified ECU command chain, delivered fuel and steady
+      lambda out. Nothing recorded under one calibration feeds either side.
+      Holds only for warm, steady, open-loop operation in the NA hardware.
+    roles:
+      barometric_pressure: {role: prescribed_boundary, source: scenario}
+      intake_air_temperature: {role: prescribed_boundary, source: scenario}
+      battery_voltage: {role: prescribed_boundary, source: scenario}
+      road_load: {role: unused}
+      pedal_demand: {role: unused}
+      engine_speed:
+        role: prescribed_boundary
+        source: scenario
+        assumption: 'Imposed rpm, equal for both ROMs; not a prediction of speed or acceleration.'
+      coolant_temperature:
+        role: prescribed_boundary
+        source: scenario
+        assumption: 'Warm, equal for both ROMs.'
+      manifold_pressure:
+        role: prescribed_boundary
+        source: scenario
+        assumption: 'Equal for both ROMs at the prescribed airflow (no MAP sensor).'
+      mass_air_flow:
+        role: prescribed_boundary
+        source: scenario
+        assumption: 'Imposed airflow, equal for both ROMs: a ROM change does not move airflow in this slice.'
+      fuel_rail_pressure:
+        role: prescribed_boundary
+        source: scenario
+        assumption: 'Rail pressure at its measured baseline for this airflow, equal for both ROMs.'
+      fuel_mass_flow: {role: predicted_output}
+      delivered_lambda: {role: predicted_output}
+      engine_torque: {role: unused}
+      injector_open_time_b1: {role: predicted_output}
+      throttle_position_actual:
+        role: prescribed_boundary
+        source: scenario
+        assumption: 'Same plate opening for both ROMs: the alpha-N fill input is held, so a Fuel Comp edit is evaluated at equal throttle.'
+      rpm_word: {role: predicted_output}
+      maf_reading: {role: predicted_output}
+      throttle_sensor_a: {role: predicted_output}
+      pedal_sensor: {role: unused}
+      coolant_byte: {role: predicted_output}
+      battery_voltage_counts: {role: predicted_output}
+      barometric_counts: {role: predicted_output}
+      lambda_sensor_b1: {role: predicted_output}
+      throttle_closed_learned:
+        role: prescribed_boundary
+        source: scenario
+        assumption: 'Same learned closed position under both ROMs.'
+      throttle_counts_above_closed: {role: predicted_output}
+      idle_air_learned:
+        role: prescribed_boundary
+        source: scenario
+        assumption: 'Same learned idle air under both ROMs; a flash or battery disconnect that resets it is a separate, declared state.'
+      evap_purge_area:
+        role: prescribed_boundary
+        source: scenario
+        assumption: 'Purge off: purge scheduling is not modelled.'
+      fuel_comp_load_byte: {role: predicted_output}
+      base_fuel_schedule:
+        role: predicted_output
+        init: {method: steady_state, note: 'Steady operating point: the manifold-filling filter has settled.'}
+      target_afr_x:
+        role: predicted_output
+        init: {method: steady_state, note: 'Steady operating point.'}
+      throttle_target_area: {role: unused}
+      requested_throttle_position: {role: unused}
+      pedal_flag:
+        role: prescribed_boundary
+        source: scenario
+        assumption: 'Stated for the operating point; its inputs are not traced (application model uncovered: pedal_flag_inputs).'
+      target_phi_word:
+        role: predicted_output
+        init: {method: steady_state, note: 'Steady: the slew and cap are not binding.'}
+      dead_time: {role: predicted_output}
+      fuel_pressure_correction: {role: predicted_output}
+      stft_b1:
+        role: prescribed_boundary
+        source: scenario
+        assumption: 'Open loop: the slice is warm steady open-loop fuel, where the short-term trim is neutral.'
+      ltft_b1:
+        role: prescribed_boundary
+        source: scenario
+        assumption: 'Stated per ROM run; a flash resets it (ecu_reflash) and relearning is not modelled.'
+      injector_pulse_index0: {role: predicted_output}
+
+  # --------------------------------------------------------- coupled rollout (later)
+  - id: coupled_rollout
+    kind: coupled_rollout
+    claim: >-
+      Dynamic tuning effects within the validated envelope: driver demand,
+      environment, road load and declared initial states in; ECU commands and
+      the evolving engine and sensor state out. No recorded BFS, trim,
+      airflow or rpm is fed back. Needs E07.5's dynamic plant before any claim.
+    roles:
+      barometric_pressure: {role: prescribed_boundary, source: scenario}
+      intake_air_temperature: {role: prescribed_boundary, source: scenario}
+      battery_voltage: {role: prescribed_boundary, source: scenario}
+      road_load: {role: prescribed_boundary, source: scenario}
+      pedal_demand: {role: prescribed_boundary, source: scenario}
+      engine_speed:
+        role: predicted_output
+        init: {method: observed_checkpoint, note: 'Speed at the start of the scenario.'}
+      coolant_temperature:
+        role: predicted_output
+        init: {method: observed_checkpoint, note: 'Coolant at the start of the scenario.'}
+      manifold_pressure:
+        role: predicted_output
+        init: {method: steady_state, note: 'Settled at the initial operating point.'}
+      mass_air_flow:
+        role: predicted_output
+        init: {method: steady_state, note: 'Read last step by the manifold model.'}
+      fuel_rail_pressure:
+        role: predicted_output
+        init: {method: steady_state, note: 'Settled at the initial operating point.'}
+      fuel_mass_flow:
+        role: predicted_output
+        init: {method: steady_state, note: 'Settled at the initial operating point (read last step by the rail model).'}
+      delivered_lambda: {role: predicted_output}
+      engine_torque:
+        role: predicted_output
+        init: {method: steady_state, note: 'Settled at the initial operating point.'}
+      injector_open_time_b1: {role: predicted_output}
+      throttle_position_actual:
+        role: predicted_output
+        init: {method: observed_checkpoint, note: 'Plate position at the start.'}
+      rpm_word:
+        role: predicted_output
+        init: {method: steady_state, note: 'Read last tick by the idle-air integrator.'}
+      maf_reading: {role: predicted_output}
+      throttle_sensor_a:
+        role: predicted_output
+        init: {method: steady_state, note: 'Read last tick by the closed-position learning.'}
+      pedal_sensor: {role: predicted_output}
+      coolant_byte: {role: predicted_output}
+      battery_voltage_counts: {role: predicted_output}
+      barometric_counts: {role: predicted_output}
+      lambda_sensor_b1:
+        role: predicted_output
+        init: {method: steady_state, note: 'Read last tick by the short-term trim.'}
+      throttle_closed_learned:
+        role: inferred_state
+        init: {method: observed_checkpoint, reset_on: [battery_disconnect], note: 'Non-volatile; read at key-on.'}
+      throttle_counts_above_closed: {role: predicted_output}
+      idle_air_learned:
+        role: inferred_state
+        init: {method: observed_checkpoint, reset_on: [battery_disconnect], note: 'Non-volatile learned part plus the integrator.'}
+      evap_purge_area:
+        role: prescribed_boundary
+        source: scenario
+        assumption: 'Purge off: purge scheduling is not modelled.'
+      fuel_comp_load_byte: {role: predicted_output}
+      base_fuel_schedule:
+        role: predicted_output
+        init: {method: steady_state, note: 'Filter settled at the initial point.'}
+      target_afr_x:
+        role: predicted_output
+        init: {method: steady_state, note: 'Settled at the initial point.'}
+      throttle_target_area: {role: predicted_output}
+      requested_throttle_position: {role: predicted_output}
+      pedal_flag: {role: predicted_output}
+      target_phi_word:
+        role: predicted_output
+        init: {method: steady_state, reset_on: [ecu_power_on], note: 'Settled at the initial point.'}
+      dead_time: {role: predicted_output}
+      fuel_pressure_correction: {role: predicted_output}
+      stft_b1:
+        role: inferred_state
+        init: {method: observed_checkpoint, reset_on: [ecu_power_on], note: 'Closed-loop trim at the start; volatile.'}
+      ltft_b1:
+        role: inferred_state
+        init: {method: observed_checkpoint, reset_on: [ecu_reflash], note: 'Learned trim at the start; a flash resets it and relearning is part of the rollout.'}
+      injector_pulse_index0: {role: predicted_output}

@@ -840,6 +840,21 @@ tables:
       enters X as (w116A x w139E) >> 11, i.e. purge/4 in area units. The byte
       PID 0x2E and DID 0x1110 report is purge_raw + 1 (0 while purge is off,
       when w139E is 0 too: the zero-command branch at 0x06E224).
+  # -- The BFS ceiling (E07.2), so a change to it traces to BFS instead of
+  # reading as unmapped bytes.
+  - id: bfs_ceiling
+    name: BFS ceiling by engine speed
+    offset: 0xD8B3
+    rows: 1
+    cols: 16
+    dtype: u8
+    confidence: verified
+    evidence: >-
+      docs/ecu-firmware-analysis.md, "Injector pulse chain, dead time and the
+      BFS ceiling" (decompiler pass 2026-10-05, data-checked): BFS 0xFFFF103A
+      = min(filtered pulse + transient, D8B3[rpm]); 255 at all 16 rpm points
+      in the UpRev base and the tunes, a 65,280-count cap. The rpm breakpoints
+      it is searched with are not identified, so no axis is declared.
 # Literals in the program, not calibration (N02.1): a flash of this program
 # never changes them, another program may hold anything there. `value` is the
 # literal the decode was made on; a reader refuses an image that differs

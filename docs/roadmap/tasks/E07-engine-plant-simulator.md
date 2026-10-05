@@ -70,7 +70,7 @@ supercharger is a hardware intervention with a new plant parameter set.
 
 ## Checklist
 
-- [ ] **E07.1 — Specify controller/plant/scenario contracts.**
+- [x] **E07.1 — Specify controller/plant/scenario contracts.**
   Define typed units, clocks, solver step, ECU update schedule, actuator
   limits, sensor sampling/quantization/delay and state initialization/reset.
   Declare each quantity as measured input, prescribed boundary, inferred
@@ -80,8 +80,82 @@ supercharger is a hardware intervention with a new plant parameter set.
   no circular same-step dependency is hidden. Predicted outputs cannot also
   enter as measured inputs except for an explicitly labelled state-estimation
   mode whose scores are separate from open-loop prediction.
+  *Done 2026-10-05 (specification; nothing simulates yet):*
+  - **Schema and data.** `src/analysis/sim_contract.py` (layer 5, generic) and
+    `data/nissan-xterra-2008/engine_sim_contract.yaml` (`contract_version` 1,
+    `plant_version: unbuilt-0`). It declares units and the clocks: the ECU
+    tick (stated 10.24 ms, `period_status: unverified`), a crank-segment event
+    clock, a 1.28 ms solver step (`chosen`) that must divide the ECU tick, and
+    irregular acquisition. The ECU task order φ → dead time → pressure
+    correction → transients is given as entries 37/41/42/44 of the table
+    `0x0219D0` that `0x020EF2` walks. It also holds 3
+    reset events, one hardware configuration with 6 parameters (each
+    `known`/`identifiable`/`requires_measurement` with evidence) and 39
+    quantities.
+  - **Quantity types.** Each quantity is `ecu`/`sensor` (integer width,
+    signedness, RAM word, scale, a `confidence` and an optional `note`) or
+    `plant`/`actuator`/`environment`/`driver` (continuous). Scored channels
+    (`observed_as`) are kept apart from leak-only aliases (`leak_aliases`:
+    PID 0x44 for φ, PID 0x0C for the rpm copy). A sensor states its sample
+    clock, quantisation and delay; an undecoded quantisation or an unmeasured
+    delay is left absent, never guessed. An
+    actuator states its command and limits. Dependencies are `same_step` or
+    `previous_step`.
+  - **Modes.** All four modes assign every quantity exactly one role. The
+    refusals are listed under Accept below.
+  - **Manifest cross-check.** `check_against_application_model` checks the
+    task and cycle start against E05's `schedule`. It checks each RAM word's
+    width and signedness and each `manifest_node`'s write. Result: empty.
+  - **Scenario.** `Scenario` carries the ECU program, image and slot (with
+    its source), the plant version, the hardware configuration and parameter
+    evidence. `scenario_hash()` is computed from the canonical form, never
+    supplied. `check_scenario` refuses by name: `contract_mismatch`,
+    `ecu_identity_count`, `active_slot_unresolved`, `program_mismatch`,
+    `plant_identity_missing`, `boundary_missing`, `initial_state_missing`
+    (missing history never defaults to cold or steady), and others.
+  - **Accept (tests/test_sim_contract.py, 37 pass).**
+    - Ownership: `test_all_four_modes_own_every_quantity_exactly_once`.
+    - Cycles: `test_a_hidden_same_step_cycle_is_refused`. Making the trim
+      read this tick's lambda closes injector → fuel → λ → sensor → trim, and
+      the rollout is refused naming the cycle.
+    - Initial values: `test_a_previous_step_read_needs_an_initial_value`.
+    - Predicted-as-measured, aliases included:
+      `test_a_predicted_output_cannot_enter_as_a_measured_input` (PID 0x44
+      feeding ECU replay) and
+      `test_a_supplied_value_cannot_be_read_from_the_ecus_own_reading_of_it`.
+      A sensor's channels count for the quantity it measures:
+      `test_a_sensor_carries_what_it_measures_even_when_the_mode_ignores_it`.
+      `test_pid_0x44_is_a_leak_only_alias_of_phi`.
+    - A comparison or rollout takes stated values only. The contract refuses a
+      recorded channel relabelled as a prescribed boundary
+      (`test_a_relabelled_recording_cannot_feed_a_comparison_or_rollout`).
+      `check_scenario` refuses `recorded_value_refused`
+      (`test_a_comparison_scenario_takes_stated_values_only`) and, in a
+      replay, `predicted_as_measured`
+      (`test_a_replay_boundary_cannot_be_read_from_a_computed_quantitys_channel`).
+    - State estimation: `test_a_state_estimation_mode_may_assimilate_and_scores_separately`
+      and `test_an_open_loop_mode_cannot_assimilate`.
+    - Mode rules: `test_a_comparison_or_rollout_takes_no_measured_input`,
+      `test_replay_modes_stay_on_their_side`,
+      `test_the_ecu_reads_the_plant_only_through_a_sensor`,
+      `test_a_held_fixed_internal_quantity_states_its_assumption` and
+      `test_missing_history_never_defaults_to_a_state`.
+  - **Open, recorded in the data (not acceptance):**
+    - The ECU tick period is `unverified`. The manifest still lists the
+      `0x020EF2` loop period as undecoded (`enrichment_tick_rate`), so
+      enrichment timing stays in ticks
+      (`test_the_ecu_tick_is_indexed_in_the_main_loop_table_and_its_period_unverified`).
+      The firmware doc's "10.24 ms task table (`0x21A30`)" was corrected:
+      `0x21A30` is the address of entry 24 of `0x0219D0`.
+    - The injector pulse's 10 µs scale and its index-0 = bank-1 mapping are
+      inferred. It is observed through the cycle-start copy `0xFFFF2710`,
+      one cycle late
+      (`test_undecoded_facts_are_absent_or_labelled_inferred`).
+    - Sensor delays (λ from B06.3, MAF, coolant, rpm) are unmeasured.
+    - The pedal channel is not decoded.
+    - Injector flow, dead time and MAF bias `requires_measurement`.
 
-- [ ] **E07.2 — Load complete ROMs with effect coverage.**
+- [x] **E07.2 — Load complete ROMs with effect coverage.**
   Reuse W08 and E05's application manifest for all modelled fuel, timing,
   target-AFR, axes, constants and branch settings. Diff baseline/candidate
   images and trace changed bytes to affected computations and outputs.
@@ -92,6 +166,90 @@ supercharger is a hardware intervention with a new plant parameter set.
   Changed unknown dependencies, unsupported program or unresolved active
   slot produce named partial/unevaluable outcomes. Images stay outside Git;
   no simulator path sends an ECU programming request.
+  *Done 2026-10-05 (effect coverage; the simulator outputs themselves are
+  E07.3/E07.6's):*
+  - **Load.** `src/analysis/rom_effects.py` (layer 5). `load_rom` takes the
+    whole image and checks size, the calibration ID against W08's map, and
+    E05's `check_image`. It then resolves every table, axis, constant and
+    calibration condition each manifest node reads on the active slot. A slot
+    table's other-slot copies are classed `inactive_for_scenario`.
+    `outside_decode` lists constants or conditions off their decode. The
+    image is kept whole. `coverage` counts the calibration bytes as consumed
+    1,185, inactive 3,336, mapped-unmodelled 74, checksum 8, unknown 52,741
+    and erased-unknown 172,032 (ZS44A-20260920, slot 1).
+  - **Manifest and map additions (BFS consequences).** Two nodes were added
+    to `ecu_application_model.yaml`, now `model_version` 3:
+    `fuel_comp_load_byte` (`0x03C3A4`, the fill tables) and
+    `base_fuel_schedule` (`0x03C62C`, BFS written at `0x03CAE4`/`0x03CB46`:
+    Fuel Comp, its axes, K, the BFS ceiling and cal `0x8AE1`). The existing
+    `load_input_x` node, whose span `0x03CC22` lies in the same function, was
+    moved from `0x03C4D0` to `0x03C62C`: after the split, `0x03C4D0` is the
+    throttle-area routine. Both are `not_modelled`. 15 RAM words were
+    declared for them, and `load_input_x` now depends on
+    `base_fuel_schedule`. X stays observed, so no output's path or blockers
+    change: the E05/E02 tests pass. `rom_map.yaml` gained `bfs_ceiling`
+    (`0xD8B3`, 16 × u8).
+  - **Diff.** `compare_roms` classes every changed byte as `consumed`,
+    `inactive_for_scenario`, `checksum`, `mapped_unmodelled` or `unknown`. It
+    traces changed nodes forward through `depends_on` to each output,
+    including through observed nodes. Each output is `unchanged`, `changed`,
+    `unevaluable` (with reasons) or `unknown`:
+    - `unmodelled:<node>`;
+    - `observed_not_predicted:<node>`;
+    - `held_fixed:<quantity>`, when an E07.1 mode supplies it;
+    - `outside_decode:<node>`;
+    - `unknown_bytes_changed`.
+
+    `moved_lookups` names the tables read at a moved operating point. The
+    twin's node reports `evaluable_at_equal_inputs`, which is false when a
+    node on its changed path is off its decode. A change to a condition byte
+    is consumed only if it touches the condition's mask. A change to any
+    other bit of that byte is `unknown`, never inert. A wrong program,
+    missing patch, unresolved or mismatched slot, or wrong size returns
+    `unevaluable` with the reason.
+  - **Candidates.** `make_candidate` edits mapped table cells only. It
+    refuses `table_unknown`, `slot_invalid`, `cell_outside_table`,
+    `value_out_of_range`, `duplicate_edit` and `no_op_edit`. It leaves the
+    checksum words stale on purpose and records provenance
+    (`flashable: false`). `write_candidate` writes `<root>/<sha>/image.sim` and
+    `provenance.json`. It refuses `inside_checkout` and `inside_rom_library`.
+  - **Accept.** The synthetic tests are `tests/test_rom_effects.py`, 25 pass:
+    - `test_identical_roms_and_states_give_identical_results`;
+    - `test_a_fuel_comp_edit_reaches_bfs_x_target_afr_and_the_timing_trims`;
+    - `test_a_fuel_comp_axis_edit_is_the_same_path`;
+    - `test_a_target_afr_cell_edit_reaches_only_the_command`;
+    - `test_another_slots_copy_is_inactive_unless_it_is_the_active_slot`;
+    - `test_unknown_bytes_are_never_assumed_to_have_no_effect`;
+    - `test_a_mapped_table_no_node_reads_is_unmodelled_not_inert` (the Load
+      Point Scaler slot copy);
+    - `test_a_branch_setting_off_its_decode_makes_its_outputs_unevaluable`;
+    - `test_a_twin_node_off_its_decode_is_not_evaluable_at_equal_inputs`
+      (flips at 0x8B39, 0xD247, 0x8CCD);
+    - `test_a_bit_outside_a_conditions_mask_is_unknown_not_inert`
+      (0x8ADC bit 0);
+    - `test_a_mode_that_holds_a_changed_node_fixed_is_named`;
+    - `test_an_unsupported_program_is_unevaluable_by_name` and
+      `test_an_unresolved_or_differing_slot_is_unevaluable_by_name`;
+    - `test_candidates_are_written_apart_from_git_and_the_rom_library`;
+    - `test_loading_tracing_and_writing_candidates_requests_no_ecu_write`
+      (clean process, no `src.control`/daemon/dashboard/MCP/`can`/`serial`).
+
+    The private-ROM tests are `tests/test_rom_effects_private_rom.py`; they
+    skip by name without the images. Here 3 pass:
+    - *20260920 → 20261004.* Only `fuel_comp_flow_axis` and
+      `fuel_compensation (slot 1)` are consumed, plus the checksum words.
+      `changed_nodes` is `base_fuel_schedule`. All three outputs are reached
+      and are unevaluable on `unmodelled:base_fuel_schedule` and
+      `observed_not_predicted:load_input_x`. The moved lookups are
+      `target_afr_lookup` and `timing_trim_lookup`.
+    - *k106 → 20260920.* One consumed byte, at `target_afr_lookup`. Ignition
+      is unchanged, and the twin node is evaluable at equal inputs.
+  - **Limits.** The injector chain is not yet in the manifest: dead time,
+    `0x9254`, the pressure correction and short/min pulse. Neither are the
+    manifold-filling tables (`0x9B99`/`0x9BD9`). A change to any of them
+    therefore reads `unknown`, never no-effect. The candidate root is
+    caller-supplied: no `daemon.*` path is declared until E07.7 runs it as a
+    Pi job.
 
 - [ ] **E07.3 — Build and identify the first fuel-response plant.**
   Implement air/fuel mass accounting, injector command-to-fuel conversion

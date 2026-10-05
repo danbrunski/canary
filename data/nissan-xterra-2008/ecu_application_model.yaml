@@ -24,7 +24,7 @@
 # refuses a blocker that names a resolved node and an unresolved node that no
 # blocker names). target_phi consumes these blockers; it does not restate them.
 schema_version: 1
-model_version: 2
+model_version: 3
 name: ecm_application_model
 
 program:
@@ -347,6 +347,39 @@ ram:
      meaning: 'Bit 5 offsets the timing byte by -30 (clamped 0..80).'}
   - {address: 0xFFFF11FF, width: 8, signed: false, name: timing_byte, units: raw_counts, confidence: observed,
      meaning: 'Ignition timing as 110 - degrees BTDC (Mode 01 PID 0x0E, DID 0x110A).'}
+  # -- BFS formation (E07.2): upstream of the observed X byte, traced so a ROM
+  # change to Fuel Comp, K or the fill tables reaches X, Target AFR and the
+  # timing trims. Not on any output's path while X is observed.
+  - {address: 0xFFFF118A, width: 8, signed: false, name: fuel_comp_load_byte, units: raw_counts, confidence: code,
+     meaning: 'Throttle-model (alpha-N) fill byte, 0..224: the Fuel Comp load input (mem:ECM_FUEL_COMP_X_INPUT).'}
+  - {address: 0xFFFF116A, width: 16, signed: false, name: fill_rpm_reciprocal, units: raw_counts, confidence: code,
+     meaning: '0xDC1D00 / clamp16(158 x rpm word): 1/rpm in the fill formula.'}
+  - {address: 0xFFFF1124, width: 16, signed: false, name: fill_area, units: raw_counts, confidence: code,
+     meaning: 'Effective throttle area used by the fill: 0xFFFF2C32, or the limp-home area while 0xFFFF484E bit 2 is set.'}
+  - {address: 0xFFFF2C32, width: 16, signed: false, name: effective_throttle_area, units: raw_counts, confidence: code,
+     meaning: 'Area curve at 4 x throttle counts, minus learned idle air, floored at 0 (relative units).'}
+  - {address: 0xFFFF2CC8, width: 16, signed: false, name: throttle_counts_above_closed, units: raw_counts, confidence: observed,
+     meaning: 'Throttle sensor A minus its learned closed position (sensor B substitutes on a sensor-A fault).'}
+  - {address: 0xFFFF63FC, width: 16, signed: false, name: idle_air_learned, units: raw_counts, confidence: inferred,
+     meaning: 'Idle-speed integrator plus a non-volatile learned value, capped at cal 0x8ED2 (name inferred).'}
+  - {address: 0xFFFF139E, width: 16, signed: false, name: evap_purge_area, units: raw_counts, confidence: code,
+     meaning: 'EVAP purge term, ((purge byte - 1) x cal 0x82FE) >> 7; added to the fill as purge / 4.'}
+  - {address: 0xFFFF484E, width: 8, signed: false, name: etc_fault_flags, units: flags, confidence: code,
+     meaning: 'Bit 2: electronic-throttle limp-home (TPS diagnostic items); the fill takes the limp-home area.'}
+  - {address: 0xFFFFB6A0, width: 8, signed: false, count: 256, name: fuel_comp_ram, units: raw_counts, confidence: code,
+     meaning: 'Active slot + 0x660: Fuel Compensation, 16 x 16 (rpm rows, fill-byte columns), 128 = 1.0.'}
+  - {address: 0xFFFFB7A2, width: 16, signed: false, name: k_ram, units: raw_counts, confidence: code,
+     meaning: 'Active slot + 0x762: K, the injector constant.'}
+  - {address: 0xFFFF225A, width: 8, signed: false, name: fuel_comp_factor, units: raw_counts, confidence: code,
+     meaning: 'Fuel Comp lookup at (rpm, 0xFFFF118A), 128 = 1.0.'}
+  - {address: 0xFFFF105C, width: 16, signed: false, name: compensated_base_pulse, units: raw_counts, confidence: code,
+     meaning: 'Tp x Fuel Comp / 128.'}
+  - {address: 0xFFFF20A6, width: 16, signed: false, name: manifold_filling_state, units: raw_counts, confidence: code,
+     meaning: 'Manifold-filling filter of 4 x 0xFFFF105C.'}
+  - {address: 0xFFFF20A4, width: 16, signed: false, name: manifold_filling_output, units: raw_counts, confidence: code,
+     meaning: 'Filtered base pulse the BFS ceiling is applied to.'}
+  - {address: 0xFFFF105A, width: 16, signed: false, name: bfs_transient_term, units: raw_counts, confidence: code,
+     meaning: 'Transient term added before the BFS ceiling.'}
   - {address: 0xFFFF11C7, width: 8, signed: false, name: timing_byte_snapshot, units: raw_counts, confidence: observed,
      meaning: 'Cycle-start copy of 0xFFFF11FF (mem:ECM_IGNITION_TIMING_RAM).'}
 
@@ -412,11 +445,12 @@ nodes:
     evidence: ['docs/ecu-firmware-analysis.md "Target AFR lookup, decoded"; decompile text FUN_0003907A']
 
   - id: load_input_x
-    function: 0x03C4D0
+    function: 0x03C62C
     span: [0x03CC22, 0x03CC22]
     kind: computation
     writes: [0xFFFF104E]
     reads: [0xFFFF103A]
+    depends_on: [base_fuel_schedule]
     arithmetic: 'min(255, (0xFFFF103A << 7) / Load Point Scaler) to 0xFFFF104E; the lookup reads the cycle-start copy 0xFFFF103E.'
     rounding: truncating unsigned divide
     saturation: 'min 255'
@@ -428,6 +462,78 @@ nodes:
     rom:
       - {rom_map: load_point_scaler, role: divisor}
     evidence: ['tests/fixtures/ground_truth/target_phi.yaml x_relation: 168/194 same-read pairs exact, 26 at 1-4 counts']
+
+  # E07.2: the BFS formation upstream of the observed X byte, traced so that a
+  # ROM change to Fuel Comp, K or the fill tables reaches X and every reader of
+  # it (Target AFR, the timing trims). Not modelled; off every output's path
+  # while X is observed, so no blocker changes.
+  - id: fuel_comp_load_byte
+    function: 0x03C3A4
+    kind: computation
+    writes: [0xFFFF118A]
+    reads: [0xFFFF116A, 0xFFFF1124, 0xFFFF2C32, 0xFFFF2CC8, 0xFFFF63FC, 0xFFFF139E, 0xFFFF484E]
+    arithmetic: >-
+      0xFFFF2C32 = max(0, area curve 0xDD94 at 4 x 0xFFFF2CC8 - 0xFFFF63FC);
+      0xFFFF1124 = 0xFFFF2C32, or the limp-home area (cal 0x90BE) while
+      0xFFFF484E bit 2 is set; X = 0xFFFF116A x (0xFFFF1124 / 512 +
+      0xFFFF139E / 2048) clamped to 0xFFFF; 0xFFFF118A = curve(X) >> 8,
+      curve 0xEAEC below X = 0x3C00 and 0xEACC from it.
+    rounding: truncating shifts and divides
+    saturation: 'X min 0xFFFF; area floored at 0; idle air capped at cal 0x8ED2'
+    branches:
+      - {when: '0xFFFF484E bit 2 set', then: 'the limp-home area replaces the throttle area'}
+    rom:
+      - {rom_map: throttle_area_axis, role: 'area curve breakpoints (4 x counts)'}
+      - {rom_map: throttle_area_curve, role: 'effective area'}
+      - {rom_map: fill_curve_low, role: 'fill curve below X = 0x3C00'}
+      - {rom_map: fill_curve_high, role: 'fill curve from X = 0x3C00'}
+      - {rom_map: fill_rpm_multiplier, role: 'rpm multiplier of the reciprocal (158)'}
+      - {rom_map: idle_air_cap, role: 'idle air learning cap'}
+      - {rom_map: etc_limp_home_area, role: 'limp-home area'}
+      - {rom_map: evap_purge_area_gain, role: 'purge area gain'}
+    outside_schedule: 'Air-charge task, before 0x03C62C reads the byte.'
+    confidence: code
+    twin: not_modelled
+    evidence:
+      - 'docs/ecu-firmware-analysis.md "Fuel Comp load input 0xFFFF118A, and how BFS is formed" (listing and decompiler passes agree)'
+      - 'src/decode/fuel_comp_load.py rebuilds the byte from logged throttle and rpm (N02.1); not the twin'
+
+  - id: base_fuel_schedule
+    function: 0x03C62C
+    span: [0x03CAE4, 0x03CB46]
+    kind: computation
+    writes: [0xFFFF103A]
+    reads: [0xFFFF118A, 0xFFFFB6A0, 0xFFFFB7A2, 0xFFFF225A, 0xFFFF105C, 0xFFFF20A6, 0xFFFF20A4,
+            0xFFFF105A, 0xFFFF1210]
+    depends_on: [fuel_comp_load_byte, engine_speed_word]
+    arithmetic: >-
+      Tp = K (0xFFFFB7A2) x airflow / rpm, or the cranking coolant curve
+      0xEEBA; 0xFFFF225A = Fuel Comp (0xFFFFB6A0) at rpm 0xFFFF1210 and
+      0xFFFF118A, 128 = 1.0 (read at 0x03D0F4); 0xFFFF105C = Tp x 0xFFFF225A /
+      128 (0x03C7B4); 0xFFFF20A6 = (4 x 0xFFFF105C x a + previous x (1 - a))
+      >> 15, the manifold-filling filter (time constants 0x9B99/0x9BD9 by rpm
+      and 0xFFFF118A); BFS 0xFFFF103A = min(0xFFFF20A4 + transient 0xFFFF105A,
+      ceiling 0xD8B3 at rpm).
+    rounding: truncating multiplies and shifts
+    saturation: 'BFS min the rpm ceiling 0xD8B3 (255 at all 16 points: 65,280 counts)'
+    branches:
+      - {when: 'cal 0x8AE1 bit 5 clear', then: 'an alternative path replaces the Fuel Comp multiply (dead in this calibration)'}
+      - {when: 'MAF fault (diagnostic item 0x114)', then: 'BFS from table 0x95E5'}
+    rom:
+      - {rom_map: fuel_compensation, role: 'cells (via its RAM copy)'}
+      - {rom_map: fuel_comp_engine_speed_axis, role: rows}
+      - {rom_map: fuel_comp_flow_axis, role: columns}
+      - {rom_map: k_constant, role: 'K (via its RAM copy)'}
+      - {rom_map: bfs_ceiling, role: 'BFS ceiling by rpm'}
+      - {offset: 0x8AE1, width: 8, value: 0xE0, role: 'bit 5 set: the Fuel Comp multiply is live'}
+    outside_schedule: 'Air-charge task; the cycle snapshot copies BFS to 0xFFFF1038 and X to 0xFFFF103E.'
+    confidence: code
+    twin: not_modelled
+    evidence:
+      - 'docs/ecu-firmware-analysis.md "Fuel Comp load input 0xFFFF118A, and how BFS is formed" (decompiler, verified; listing reached the same multiply)'
+      - 'Function 0x03C62C after the split of FUN_0003c4d0 at 0x3c62c/0x3cc3c; BFS is written at 0x03CAE4 and 0x03CB46 (0x03C4D0 is now the throttle-area routine)'
+      - 'docs/ecu-firmware-analysis.md "Injector pulse chain, dead time and the BFS ceiling": D8B3 255 at all 16 rpm points in base and tune'
+      - 'cal 0x8AE1 = 0xE0 on the ZS44A-uprev-base, -k106, -20260920 and -20261004 images (read 2026-10-05)'
 
   - id: uprev_init
     function: 0x0DE1A4
@@ -1355,7 +1461,7 @@ uncovered:
     blocks: 'nothing in this output; other consumers of the gated lookup'
     next_evidence: 'Follow both readers.'
   - id: fuel_comp_fill_terms
-    where: '0x03C3A4 (w139E, w2CD0, w63FC), BFS 0x03C4D0'
+    where: '0x03C3A4 (w139E, w2CD0, w63FC), BFS 0x03C62C'
     blocks: 'predicting X instead of observing it (E05.2)'
     next_evidence: 'E05.2 / B08.'
   - id: timing_final_chain
