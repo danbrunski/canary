@@ -52,6 +52,19 @@ class VehiclePower:
         self._lock = threading.Lock()
         self._volts: float | None = None
         self._at: float | None = None
+        self._expected = False
+
+    def expect_readings(self) -> None:
+        """A 12 V sense is configured: its first reading is worth waiting for
+        (the OBD collector started 30 ms before it on 2026-10-05 and hit the
+        empty bus once per restart)."""
+        with self._lock:
+            self._expected = True
+
+    @property
+    def expected(self) -> bool:
+        with self._lock:
+            return self._expected
 
     def note(self, volts: float, *, at: float | None = None) -> None:
         """The supply collector's latest reading (``at``: ``time.monotonic()``)."""
@@ -74,6 +87,7 @@ class VehiclePower:
         with self._lock:
             self._volts = None
             self._at = None
+            self._expected = False
 
 
 #: The daemon's one reading, shared by the supply collector, the OBD

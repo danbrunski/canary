@@ -52,6 +52,22 @@ async def test_obd_waits_on_the_bench_and_starts_when_a_battery_appears(
     assert any("OBD polling starts" in m for m in messages)
 
 
+async def test_a_configured_sense_is_waited_for_before_the_first_attempt() -> None:
+    """2026-10-05: the OBD collector started 30 ms before the supply's first
+    reading and hit the empty bench bus once per restart."""
+    power = VehiclePower()
+    power.expect_readings()
+    stop = asyncio.Event()
+    waiting = asyncio.create_task(wait_off_the_bench(stop, power))
+    await asyncio.sleep(0.05)
+    assert not waiting.done()  # no reading yet: it does not guess
+    power.note(0.0)  # the first reading says bench: still waiting
+    await asyncio.sleep(0.2)
+    assert not waiting.done()
+    stop.set()
+    await asyncio.wait_for(waiting, timeout=5)
+
+
 async def test_without_a_reading_obd_runs_as_before() -> None:
     await asyncio.wait_for(wait_off_the_bench(asyncio.Event(), VehiclePower()), timeout=1)
 

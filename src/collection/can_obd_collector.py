@@ -119,8 +119,23 @@ AUTO_BASELINE_PID_NAMES = tuple(name for _pid, (name, _decoder) in sorted(PID_DE
 BENCH_RECHECK_SECONDS = 2.0
 
 
+#: How long a collector waits for a configured 12 V sense's first reading.
+FIRST_READING_TIMEOUT_SECONDS = 5.0
+
+
 async def wait_off_the_bench(stop_event: asyncio.Event, power: VehiclePower) -> None:
-    """Return once the port is not ``bench`` (or ``stop_event`` is set)."""
+    """Return once the port is not ``bench`` (or ``stop_event`` is set).
+
+    With a 12 V sense configured but no reading yet, waits up to
+    :data:`FIRST_READING_TIMEOUT_SECONDS` for one first."""
+    if power.expected and power.latest() is None:
+        deadline = asyncio.get_running_loop().time() + FIRST_READING_TIMEOUT_SECONDS
+        while (
+            power.latest() is None
+            and not stop_event.is_set()
+            and asyncio.get_running_loop().time() < deadline
+        ):
+            await wait_for_stop_or_timeout(stop_event, 0.1)
     if power.connection() != "bench":
         return
     log.info(

@@ -44,6 +44,7 @@ from src.collection.reconnect import ReconnectPolicy
 from src.collection.sensor_can_collector import collect_sensor_can_from_config
 from src.collection.supply_voltage_collector import collect_supply_voltage_from_config
 from src.collection.usb_adc_collector import collect_usb_adc_from_config
+from src.collection.vehicle_power import VEHICLE_POWER
 from src.config import CanaryConfig
 from src.decode.analog_sensors import load_analog_sensor_catalog
 from src.decode.sensor_can import load_sensor_can_catalog
@@ -304,6 +305,9 @@ def _supply_voltage_collectors(
     supply = config.hardware.supply_voltage
     if not supply.enabled:
         return []
+    # Before any collector starts, so the OBD collector knows to wait for
+    # the first reading rather than transmit into an unknown port.
+    VEHICLE_POWER.expect_readings()
 
     async def supply_voltage_collector(
         queue: asyncio.Queue[TelemetryRecord], stop: asyncio.Event
