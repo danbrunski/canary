@@ -1,0 +1,17 @@
+[package]
+name = "ecu_twin_py"
+description = "Thin optional PyO3 binding of ecu_twin_core (E06.2/E06.3 trial); not part of the default gate"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[lib]
+name = "canary_ecu_twin"
+crate-type = ["cdylib"]
+
+[dependencies]
+ecu_twin_core = { path = "../ecu_twin_core" }
+# abi3 for CPython >= 3.12 (the project's requires-python): one wheel per
+# platform (x86_64 laptop, aarch64 Pi), not one per interpreter.
+pyo3 = { version = "0.27", features = ["extension-module", "abi3-py312"] }

@@ -183,11 +183,18 @@ def lookup_2d(
     Breakpoints are in the comparison domain of their input (an rpm axis the
     firmware compares as ``byte x 4`` is passed multiplied by 4). Every value
     must be a whole count: a fractional coordinate is not something the ECM
-    ever sees, so it is refused rather than truncated.
+    ever sees, so it is refused rather than truncated. Both searches compare a
+    16-bit word at most, so a coordinate outside ``0..0xFFFF`` is refused too
+    (E06.1 contract, ``lookup_2d``); breakpoints and cells are the caller's to
+    validate once, per table.
     """
     for name, value in (("row", row_value), ("column", column_value)):
         if int(value) != value:
             raise ValueError(f"{name} coordinate {value!r} is not a whole raw count")
+        if not 0 <= value <= WORD_MAX:
+            raise ValueError(
+                f"{name} coordinate {value!r} is outside a 16-bit word (0..{WORD_MAX})"
+            )
     row = search_axis(row_breakpoints, row_value)
     column = search_axis(column_breakpoints, column_value)
     if row is None or column is None:

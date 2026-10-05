@@ -60,7 +60,9 @@ from src.analysis.rom_trace import (
     stored_decode,
 )
 from src.decode.dids import DidMap, load_did_map
-from src.decode.ecm_lookup import KERNEL_VERSION, LookupResult, lookup_2d
+from src.decode.ecm_lookup import KERNEL_VERSION, LookupResult
+from src.decode.target_phi_command import Branch, GateConstants, target_command
+from src.decode.target_phi_command import x_from_bfs as _x_from_bfs
 from src.paths import DIDS_YAML
 from src.signals.pairing import PairingPolicy, match_ordered, to_seconds
 
@@ -71,7 +73,6 @@ EVALUATOR_VERSION = 3
 TWIN_FILE = "target_phi_twin.yaml"
 
 State = Literal["pending", "unevaluable", "excluded", "eligible"]
-Branch = Literal["ordinary", "override"]
 
 
 class _Strict(BaseModel):
@@ -732,27 +733,33 @@ def predict(
     The forced-column flag replaces the load input with the axis's last
     column (the firmware's 0xFF, which clamps there). The enrichment gate is
     applied as decoded; a lookup inside its hysteresis band is ambiguous and
-    carries a reason instead of a word."""
-    flag = definition.inputs.forced_column_flag
-    forced = bool((int(flag_raw) >> flag.bit) & 1)
-    load = (1 << definition.inputs.load.bits) - 1 if forced else int(load_raw)
-    result = lookup_2d(
-        table.cells, table.row_breakpoints, table.column_breakpoints, int(rpm_raw), load
-    )
-    branch: Branch = "override" if forced else "ordinary"
+    carries a reason instead of a word.
+
+    The arithmetic is :func:`src.decode.target_phi_command.target_command`
+    (the E06.1 contract's ``target_command``); this unpacks the definition
+    into its values and adds the display ratio."""
     gate = definition.final_command.enrichment_gate
-    cell = result.value
-    if gate.threshold_cell - gate.hysteresis_cells <= cell < gate.threshold_cell:
-        return Prediction(branch, result, cell, None, None, "enrichment_gate_state_unknown")
-    gated = cell if cell >= gate.threshold_cell else gate.floor_cell
-    word = gated << definition.table.cell_to_word_shift
-    return Prediction(branch, result, cell, word, word / (1 << definition.reference.q_bits), None)
+    command = target_command(
+        table.cells,
+        table.row_breakpoints,
+        table.column_breakpoints,
+        rpm_raw=rpm_raw,
+        load_raw=load_raw,
+        flag_raw=flag_raw,
+        flag_bit=definition.inputs.forced_column_flag.bit,
+        load_bits=definition.inputs.load.bits,
+        gate=GateConstants(gate.floor_cell, gate.threshold_cell, gate.hysteresis_cells),
+        cell_to_word_shift=definition.table.cell_to_word_shift,
+    )
+    word = command.word
+    phi = None if word is None else word / (1 << definition.reference.q_bits)
+    return Prediction(command.branch, command.lookup, command.cell, word, phi, command.reason)
 
 
 def x_from_bfs(bfs: int, scaler: int, definition: TwinDefinition) -> int:
     """The load input from the BFS word, as the ECM computes it."""
     formula = definition.x_formula
-    return min(formula.cap, (int(bfs) << formula.shift) // int(scaler))
+    return _x_from_bfs(bfs, scaler, shift=formula.shift, cap=formula.cap)
 
 
 # -- the stored-session adapter -------------------------------------------------

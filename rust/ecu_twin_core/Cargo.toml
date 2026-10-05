@@ -1,0 +1,13 @@
+[package]
+name = "ecu_twin_core"
+description = "ECU twin computation core: the E06.1 contract's integer kernels, no I/O"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[dependencies]
+
+[dev-dependencies]
+# Reads the language-neutral vectors under tests/fixtures/ecu_twin/; tests only.
+serde_json = "1"

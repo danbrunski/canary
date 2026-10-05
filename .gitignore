@@ -142,3 +142,7 @@ data/_validation/
 # Behavior refits keep the replaced artifact here (B03.10); local recovery copies.
 data/*/_prior/
 data/*/_candidates/
+
+# E06.2 Rust trial (rust/): cargo build output and maturin wheels
+rust/target/
+rust/**/*.whl

@@ -217,11 +217,13 @@ def effective_area(area: int, idle_air: int, curves: LoadInputCurves) -> int:
 
 
 def load_x(w1124: int, purge_area: int, w116a: int) -> int:
-    """``FUN_0003c444`` up to ``0xFFFF2136``."""
+    """``FUN_0003c444`` up to ``0xFFFF2136``. Every input is checked as a
+    word whichever branch is taken (the purge term is skipped, not its input)."""
+    purge = _word("purge area", purge_area)
     first = (_word("w1124", w1124) * _word("w116A", w116a)) >> AREA_TERM_SHIFT
     if first >= WORD_MAX:
         return WORD_MAX
-    second = (_word("purge area", purge_area) * w116a) >> PURGE_TERM_SHIFT
+    second = (purge * w116a) >> PURGE_TERM_SHIFT
     return min(WORD_MAX, first + second)
 
 

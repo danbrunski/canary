@@ -1,0 +1,15 @@
+# Build (never installed by the default gate; see docs/ecu-twin-computation-contract.md):
+#   maturin build --release -m rust/ecu_twin_py/Cargo.toml -o <dir>
+[build-system]
+requires = ["maturin>=1.3,<2"]
+build-backend = "maturin"
+
+[project]
+name = "canary-ecu-twin"
+version = "0.1.0"
+description = "Optional native backend for the CANary ECU twin kernels (E06 trial)"
+requires-python = ">=3.12"
+
+[tool.maturin]
+module-name = "canary_ecu_twin"
+features = ["pyo3/extension-module"]

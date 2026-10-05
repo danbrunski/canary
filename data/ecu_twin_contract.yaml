@@ -1,0 +1,396 @@
+# The ECU twin's computation contract (E06.1), machine-checked.
+#
+# Language-independent: what each decoded operation computes, at which
+# widths, with which casts, shifts, divisions, saturations and refusals, and
+# what state it carries. The prose companion is
+# docs/ecu-twin-computation-contract.md. Checked by
+# tests/test_ecu_twin_contract.py (schema, every Python reference resolves,
+# every Rust symbol exists, versions agree, every operation has vectors, every
+# vector names a declared operation).
+#
+# The Python modules named under `python` are the executable reference. The
+# vectors (tests/fixtures/ecu_twin/*.json) are what any implementation must
+# reproduce bit for bit; the Rust trial (rust/ecu_twin_core, E06.2) is one.
+#
+# Bump `contract_version` when any operation's inputs, outputs, widths,
+# rounding, refusals or state change; the Rust crate's CONTRACT_VERSION and
+# both vector files must follow, or the contract test fails.
+
+contract_version: 1
+# src.decode.ecm_lookup.KERNEL_VERSION and src.analysis.ecu_state_models.MODEL_VERSION.
+kernel_version: 1
+state_model_version: 1
+program:
+  calibration_id: 1ZS44A00000
+  application_model: nissan-1ZS44A-uprev-osiris
+  evidence: >-
+    docs/ecu-firmware-analysis.md, "Target AFR lookup, decoded", "Fuel Comp
+    load input 0xFFFF118A"; the addresses below are that program's. Nothing
+    vehicle-specific is a constant here: tables, axes, multipliers and gate
+    constants are inputs.
+
+# Conventions every operation follows.
+conventions:
+  integers: >-
+    Every value is an unsigned integer of the declared width unless declared
+    signed (i64 for idle air). Intermediates are widened explicitly before a
+    multiply or shift (u16 x u16 -> u32; u8 x u16 -> u32); no operation relies
+    on wrap-around unless it says `truncate`.
+  division: Unsigned, truncating toward zero. A zero divisor is refused or proven impossible.
+  shift_right: Logical (unsigned), i.e. floor division by a power of two.
+  saturation: >-
+    `min(limit, v)` computed in the wider intermediate before narrowing; a
+    narrowing cast is only ever applied to a value already proven in range.
+  rounding: Never round to nearest. Interpolation truncates toward its first operand.
+  refusal_vs_reason: >-
+    A refusal (ValueError / Rust Refusal) means the input is outside the
+    contract's domain: no answer exists. A reason (string) means the input is
+    valid but the answer depends on state the capture did not carry: the
+    result is unevaluable, never defaulted.
+  refusal_order: >-
+    A refusal vector carries exactly one defect. With several defects the
+    refusal named may differ between implementations (the reference checks
+    some table properties before coordinates; a typed implementation converts
+    coordinates at its boundary first).
+  state: >-
+    State is explicit and nullable. `null` is unobserved, never a default; an
+    initial state is supplied by the caller (an observed checkpoint) or set by
+    a decoded reset (`uprev_power_on`). Nothing is carried between calls
+    implicitly.
+
+# Refusal kinds, and how the Python reference spells each (a regex over the
+# ValueError message; ZeroDivisionError for division_by_zero).
+refusals:
+  out_of_domain: "outside a 16-bit word|is not a whole 16-bit count|is not a 16-bit word|is not a byte|outside a 32-bit flag word|must be a positive 32-bit literal"
+  not_whole_count: "not a whole raw count"
+  empty_axis: "non-empty axes"
+  shape_mismatch: "table shape does not match its axes"
+  curve_shape: "one entry per breakpoint"
+  table_length: "-entry table|the ECM reads"
+  axis_not_rising: "must rise strictly"
+  non_monotone: "falls somewhere|is not monotone in X"
+  idle_air_out_of_range: "outside what the ECM can hold"
+  division_by_zero: "ZeroDivisionError"
+  retained_magic_unknown: "power-on needs the retained magic"
+
+operations:
+  - id: search_axis
+    firmware: ["0x027114", "0x027194", "0x027154"]
+    python: src.decode.ecm_lookup:search_axis
+    rust: lookup::search_axis
+    inputs:
+      breakpoints: "u16[n], n >= 0, any order (comparison domain: an axis byte times its multiplier)"
+      value: u16
+    outputs:
+      hit: "null for an empty axis"
+      index: "usize, the largest i with breakpoints[i] <= value scanning from the top; 0 below the first"
+      numerator: "u16, value - breakpoints[index] (0 on a breakpoint or a clamp)"
+      span: "u16, breakpoints[index+1] - breakpoints[index] (1 on a breakpoint or a clamp)"
+      edge: "below | above | null"
+      fraction_q16: "u16 = (u32(numerator) << 16) / span, truncating (0x027448, an unsigned div0u divide)"
+    state: none
+    invariants:
+      - "the axis compares are unsigned (cmp/hi in 0x027114 / 0x027194 / 0x027154)"
+      - "0 < numerator < span whenever numerator != 0, for any breakpoint order (the top-down scan has seen value < breakpoints[index+1]); so span is never 0 and fraction_q16 < 65536"
+    invalid_inputs:
+      - "empty axis -> hit null (the caller refuses)"
+      - "The Python reference also takes float axes (ROM Maps display positions); that form is outside this contract and never feeds integer arithmetic (fraction_q16 refuses non-integers)."
+    status: decoded
+
+  - id: interpolate_q16
+    firmware: ["0x026F10"]
+    python: src.decode.ecm_lookup:interpolate_q16
+    rust: lookup::interpolate_q16
+    inputs: {a: u16, b: u16, fraction: "u16 (Q16, 0..65535)"}
+    outputs: {value: "u16"}
+    arithmetic:
+      - "b >= a: a + ((u32(b - a) * fraction) >> 16)"
+      - "b < a:  a - ((u32(a - b) * fraction) >> 16)"
+      - "product <= 0xFFFF * 0xFFFF < 2^32; result lies between a and b (truncated toward a)"
+      - "the b >= a compare is unsigned: 0x026F10 uses cmp/hs, and every caller zero-extends its operands (extu.w / extu.b), so a word at or above 0x8000 is a large positive value"
+    state: none
+    status: decoded
+
+  - id: lookup_2d
+    firmware: ["0x0269AC", "0x026F40", "0x027114", "0x027194"]
+    python: src.decode.ecm_lookup:lookup_2d
+    rust: lookup::lookup_2d
+    inputs:
+      table: "u16 cells, row-major, rows = len(row_breakpoints), columns = len(column_breakpoints)"
+      row_breakpoints: "u16[n >= 1]"
+      column_breakpoints: "u16[m >= 1]"
+      row_value: u16
+      column_value: u16
+    outputs:
+      value: u16
+      row: search_axis output
+      column: search_axis output
+      row_fraction: u16
+      column_fraction: u16
+      cells: "[(row, column)] read, in read order: 1, 2 or 4 cells (the branch trace)"
+    arithmetic:
+      - "column fraction != 0: upper = interp(cell[r][c], cell[r][c+1], cf); row fraction == 0 -> upper; else lower = interp(cell[r+1][c], cell[r+1][c+1], cf); value = interp(upper, lower, rf)"
+      - "column fraction == 0: row fraction == 0 -> cell[r][c]; else interp(cell[r][c], cell[r+1][c], rf)"
+      - "a cell past the last row/column is never read: a fraction is 0 at the top index"
+    state: none
+    invalid_inputs:
+      - "row/column value fractional -> not_whole_count"
+      - "row/column value outside 0..0xFFFF -> out_of_domain"
+      - "an empty axis -> empty_axis"
+      - "table shape differs from the axes -> shape_mismatch"
+      - "cells and breakpoints are words by contract; the Python reference leaves them to its caller (validated once per table), a typed implementation enforces them by type"
+    status: decoded
+
+  - id: lookup_curve_q16
+    firmware: ["0x026D58", "0x027154"]
+    python: src.decode.ecm_lookup:lookup_curve_q16
+    rust: lookup::lookup_curve_q16
+    inputs: {values: "u16[n >= 1]", breakpoints: "u16[n]", value: u16}
+    outputs: {value: u16}
+    arithmetic:
+      - "hit = search_axis(breakpoints, value); fraction 0 -> values[index]; else interpolate_q16(values[index], values[index+1], fraction)"
+    invalid_inputs:
+      - "len(values) != len(breakpoints) or empty -> curve_shape"
+      - "value fractional -> not_whole_count (Python: out_of_domain wording 'not a whole raw count')"
+      - "value outside 0..0xFFFF -> out_of_domain"
+    state: none
+    status: decoded
+
+  - id: lookup_shift12_q16
+    firmware: ["0x026C28", "0x027234"]
+    python: src.decode.ecm_lookup:lookup_shift12_q16
+    rust: lookup::lookup_shift12_q16
+    inputs: {table: "u16[16]", value: u16}
+    outputs: {value: u16}
+    arithmetic:
+      - "value >= 0xF000 -> table[15] outright"
+      - "else index = value >> 12, fraction = (value & 0xFFF) << 4 (<= 0xFFF0), interpolate_q16(table[index], table[index+1], fraction)"
+    invalid_inputs:
+      - "len(table) != 16 -> table_length"
+      - "value outside 0..0xFFFF -> out_of_domain"
+    state: none
+    status: decoded
+
+  - id: target_command
+    firmware: ["0x0269AC", "0x055E5C-0x055EEC"]
+    python: src.decode.target_phi_command:target_command
+    rust: target_phi::target_command
+    inputs:
+      table: lookup_2d table (rows = rpm, columns = load), breakpoints in comparison domain
+      rpm_raw: u16
+      load_raw: u16
+      flag_raw: u32
+      flag_bit: "u8, 0..31"
+      load_bits: "8 | 16 (the forced load is the all-ones value of that width)"
+      floor_cell: u16
+      threshold_cell: u16
+      hysteresis_cells: u16
+      cell_to_word_shift: "u8, 0..16"
+    outputs:
+      branch: "override when bit flag_bit of flag_raw is set (load := 2^load_bits - 1), else ordinary"
+      lookup: lookup_2d output
+      cell: "u16, lookup value"
+      word: "u32 = gated << cell_to_word_shift, or null inside the hysteresis band"
+      reason: "enrichment_gate_state_unknown | null"
+    arithmetic:
+      - "band: i32(threshold) - i32(hysteresis) <= cell < threshold -> word null, reason enrichment_gate_state_unknown (latch 0xFFFF2886 bit 3 not captured)"
+      - "gated = cell if cell >= threshold else floor"
+      - "phi = word / 2^q_bits is a presentation value the Python adapter adds; it is not part of this contract"
+    invalid_inputs:
+      - "flag_bit > 31 -> out_of_domain"
+      - "load_bits not 8 or 16 -> out_of_domain"
+      - "cell_to_word_shift > 16 -> out_of_domain"
+      - "rpm_raw / load_raw / flag_raw fractional -> not_whole_count (never truncated); rpm/load outside 0..0xFFFF or flag outside 0..0xFFFFFFFF -> out_of_domain"
+      - "lookup_2d refusals"
+    state: none
+    status: decoded_partial
+    open: [final_command_path, enrichment_gate_latch, ram_copy_identity]
+
+  - id: x_from_bfs
+    firmware: ["0xFFFF103E writer (Load Point Scaler 0x9416)"]
+    python: src.decode.target_phi_command:x_from_bfs
+    rust: target_phi::x_from_bfs
+    inputs: {bfs: u16, scaler: u16, shift: "u8, 0..16", cap: u16}
+    outputs: {value: "u16 = min(cap, (u32(bfs) << shift) / scaler)"}
+    invalid_inputs:
+      - "shift > 16 -> out_of_domain"
+      - "bfs or scaler fractional -> not_whole_count (never truncated); bfs negative or scaler outside a word -> out_of_domain"
+      - "scaler 0 -> division_by_zero"
+      - "The Python reference accepts bfs above 0xFFFF (counterfactual callers model a BFS the ECM has not produced); the contract's domain is the firmware word"
+    state: none
+    status: decoded
+    open: [bfs_saturation]
+
+  - id: load_input_curves
+    firmware: ["FUN_0003c3a4 calibration reads: 0xEE6A, 0xDD94, 0xEAEC, 0xEACC, 0x8D25, 0x03C5E8, 0x8ED2, 0x90BE"]
+    python: src.decode.fuel_comp_load:LoadInputCurves
+    rust: fuel_comp_load::LoadInputCurves::new
+    inputs:
+      area_breakpoints: "u16[32], strictly rising"
+      area_values: "u16[32], non-decreasing"
+      fill_low: "u16[16], non-decreasing"
+      fill_high: "u16[16], non-decreasing"
+      rpm_multiplier: u8
+      reciprocal_numerator: "u32, > 0"
+      idle_air_cap: u16
+      limp_home_area: u16
+    outputs: {valid: "true, or a refusal"}
+    invalid_inputs:
+      - "a length other than declared -> table_length"
+      - "an entry outside a word -> out_of_domain"
+      - "reciprocal_numerator 0 -> out_of_domain"
+      - "area_breakpoints not strictly rising -> axis_not_rising"
+      - "a curve falling, or fill_low just below the split above fill_high[0] -> non_monotone"
+    state: none
+    status: decoded
+
+  - id: fuel_comp_load
+    firmware: ["FUN_0003c3ba", "FUN_0003c3e4", "FUN_0003c4d0", "FUN_0003c416", "FUN_0003c444"]
+    python: src.decode.fuel_comp_load:reconstruct
+    rust: fuel_comp_load::reconstruct
+    inputs:
+      curves: load_input_curves
+      throttle_counts: u16
+      rpm_word: u16
+      idle_air: "i64 holding a signed word: -0x8000 .. idle_air_cap"
+      purge_area: u16
+      limp_home: bool
+    outputs:
+      w116a: "u16 = 0 if p == 0 else min(0xFFFF, numerator / p), p = min(0xFFFF, u32(k) * rpm_word)"
+      area: "u16 = lookup_curve_q16(area_values, area_breakpoints, min(0xFFFF, 4 * u32(throttle_counts)))"
+      w1124: "u16 = limp_home_area if limp_home else clamp(i64(area) - idle_air, 0, 0xFFFF)"
+      x: "u16: first = (u32(w1124) * w116a) >> 9; first >= 0xFFFF -> 0xFFFF; else min(0xFFFF, first + ((u32(purge_area) * w116a) >> 11))"
+      byte: "u8 = (x < 0x3C00 ? shift12(fill_low, 4x) : shift12(fill_high, x - 0x3C00)) >> 8"
+    invalid_inputs:
+      - "idle_air outside -0x8000..idle_air_cap -> idle_air_out_of_range (checked only when not limp_home: the limp-home branch never reads it)"
+      - "a word input outside 0..0xFFFF -> out_of_domain (purge_area is checked whichever branch reads it)"
+    state: none
+    status: decoded
+
+  - id: uprev_power_on
+    firmware: ["0x0DE1A4"]
+    python: src.analysis.ecu_state_models:uprev_power_on
+    rust: uprev::uprev_power_on
+    inputs: {retained: uprev_state}
+    outputs: {state: uprev_state, copied: "u8 slot copied, or null"}
+    arithmetic:
+      - "magic == 0xAA5555AA -> retained state, copied null"
+      - "magic other -> {countdown 0, debounce 0, selector 0, magic 0xAA5555AA, active_map 0, history 0}, copied 1"
+    invalid_inputs: ["magic null -> retained_magic_unknown (unknown RAM is not a cold boot)"]
+    state: uprev_state
+    status: decoded
+
+  - id: uprev_step
+    firmware: ["0x0DE358", "0x0DE3E4"]
+    python: src.analysis.ecu_state_models:uprev_step
+    rust: uprev::uprev_step
+    inputs: {state: uprev_state, inputs_2ee0: u8}
+    outputs: {state: uprev_state, copied: "u8 or null", indicator: "bool or null", reason: "string when unevaluable"}
+    arithmetic:
+      - "inputs = inputs_2ee0 & 0x0A"
+      - "countdown null -> reason uprev_countdown_unknown; debounce null -> reason uprev_debounce_unknown (in that order)"
+      - "countdown != 0: countdown -= 1; indicator = bit 5 of the new countdown"
+      - "debounce == 0: selector = 0"
+      - "debounce == 8 and inputs & 2: selector = (selector + 1) wrapping in a byte (null selector -> reason uprev_selector_unknown)"
+      - "debounce == 8 and inputs == 0: countdown = selector << 6 (<= 0x3FC0); slot = selector & 15; history = truncate_u32(history << 4 | slot) (null stays null); 1 <= slot <= 5 -> active_map = slot, copied = slot (null selector -> reason uprev_selector_unknown)"
+      - "debounce := inputs; magic carried"
+    state: uprev_state
+    status: decoded
+    open: [uprev_indicator_meaning]
+
+  - id: loaded_slot
+    firmware: ["0xFFFFB004", "0xFFFFB008"]
+    python: src.analysis.ecu_state_models:loaded_slot
+    rust: uprev::loaded_slot
+    inputs: {magic: "u32 or null", active_map: "u8 or null"}
+    outputs: {slot: "u8", source: "committed | init_default", reason: "uprev_state_unobserved | uprev_not_initialised | uprev_active_map_invalid"}
+    state: none
+    status: decoded
+    open: [ram_copy_identity]
+
+# The rest of the E02/E05 numerical kernels, and why each is not an operation
+# of this contract version. Python-only until listed under `operations`.
+inventory:
+  - python: src.analysis.ecu_state_models:byte_curve16
+    firmware: ["0x026BBC", "0x027254"]
+    standing: decoded
+    why_not_yet: Same arithmetic family as lookup_shift12_q16 (index value >> 4, fraction (value & 15) << 12); next to add with E05.3's pedal flag.
+  - python: src.analysis.ecu_state_models:pedal_flag_next
+    firmware: ["0x055DB2 at 0x055DE0-0x055DFA", "0x05535C"]
+    standing: decoded
+    why_not_yet: A latch with a hysteresis-band reason; its threshold curve 0xCEDB input (pedal_curve_input) is decoded. Candidate second stateful path.
+  - python: src.analysis.ecu_state_models:enrichment_step
+    firmware: ["0x055EF0-0x0566BC"]
+    standing: blocked
+    why_not_yet: enrichment_tick_and_cycle (no time base for its timers).
+  - python: src.analysis.ecu_state_models:trim_lookup
+    firmware: ["0x026A64", "0x026F9C"]
+    standing: decoded
+    why_not_yet: lookup_2d on cells masked & 0x7F with bit 7 of the lower-left cell ORed back; add with selected_timing_trim.
+  - python: src.analysis.ecu_state_models:selected_timing_trim
+    firmware: ["0x04E6D8"]
+    standing: decoded_partial
+    why_not_yet: coolant_blend_divide (the blend band is unevaluable); Main/High Det identity inferred.
+  - python: src.analysis.twin_command_change
+    firmware: []
+    standing: composition
+    why_not_yet: E02.6 evaluates target_command on a base and a changed table; it adds no arithmetic of its own.
+
+# Explicit state, with its initialisation, reset and snapshot rules.
+state:
+  uprev_state:
+    snapshot_version: 1
+    fields:
+      countdown: "u16 | null  (0xFFFFB000)"
+      debounce: "u8 | null   (0xFFFFB002, last cycle's masked input)"
+      selector: "u8 | null   (0xFFFFB003)"
+      magic: "u32 | null  (0xFFFFB004)"
+      active_map: "u8 | null   (0xFFFFB008)"
+      history: "u32 | null  (0xFFFFB00C)"
+    init: "All null. A field becomes known only from an observed read (with its source and acquisition time) or from a step whose inputs determine it."
+    reset: "uprev_power_on (0x0DE1A4) with the retained magic; a missing history (a gap in per-cycle inputs) returns the state to all-null rather than bridging it."
+    snapshot: "The six fields as above, plus snapshot_version; restoring a snapshot of another version is refused."
+
+# What the contract cannot yet say. Each is a named blocker, never a language
+# default: an implementation does not pick an answer for these.
+# Resolved from the listing (2026-10-05): interpolation_compare_signedness --
+# 0x026F10 compares with cmp/hs (unsigned), callers zero-extend with extu.w /
+# extu.b, the axis searches use cmp/hi and 0x027448 divides with div0u. Pinned
+# by the "hand:listing 0x026F10" vectors (operands at and above 0x8000).
+blockers:
+  - id: final_command_path
+    affects: [target_command]
+    what: >-
+      The word predicted is the gated lookup's (0xFFFF174B << 7). The path on to
+      the commanded word 0xFFFF26BE (state byte 0xFFFF14C4 selection, w26F6 /
+      w27DC corrections, cap 0xFE00, slew) is traced but not captured; see the
+      application model's final_command_path_unverified.
+    needs: E02.7 capture of the 0xFFFF26BE window; E05 state 0xFFFF14C4.
+  - id: enrichment_gate_latch
+    affects: [target_command]
+    what: Inside [threshold - hysteresis, threshold) the result depends on 0xFFFF2886 bit 3, not captured.
+    needs: A capture carrying 0xFFFF2886.
+  - id: ram_copy_identity
+    affects: [target_command, loaded_slot]
+    what: Which image's bytes the last init copied into RAM is not established by the UpRev block (ram_copy_unverified).
+    needs: E02/W08 RAM-table identity check.
+  - id: bfs_saturation
+    affects: [x_from_bfs]
+    what: Where the ECM saturates a BFS above 0xFFFF is not decoded; the contract's domain is the word.
+    needs: The BFS writer's cap, from the listing.
+  - id: uprev_indicator_meaning
+    affects: [uprev_step]
+    what: 0xFFFF4858 bit 0 as bit 5 of the countdown is inferred (the map number blinked), not verified.
+    needs: An observed indicator read during a selection.
+  - id: enrichment_tick_and_cycle
+    affects: [enrichment_step (not in this contract version)]
+    what: >-
+      The 0xFFFF84C3 bit 7 tick rate and the 0x020EF2 cycle period are not
+      decoded (src.analysis.ecu_state_models.TIMING_REQUIREMENT), so the
+      enrichment request/commit state machine has no time base. It stays a
+      Python-only model, out of this contract version.
+    needs: The measurement TIMING_REQUIREMENT names.
+  - id: coolant_blend_divide
+    affects: [selected_timing_trim (not in this contract version)]
+    what: The coolant-weighted blend uses the signed divide 0x021C48, whose rounding is not established; the reference returns coolant_blend_band.
+    needs: 0x021C48's rounding from the listing.

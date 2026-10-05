@@ -1,0 +1,23 @@
+# E06.2: the Rust trial of the ECU twin's computation core.
+#
+# `ecu_twin_core` is the core (no_std + alloc, no I/O, no Python). It is the
+# only default member, so `cargo test` / `cargo test --release` here build and
+# test it without a Python toolchain. `ecu_twin_py` is the optional PyO3
+# binding, built explicitly (`maturin build -m rust/ecu_twin_py/Cargo.toml`).
+[workspace]
+resolver = "2"
+members = ["ecu_twin_core", "ecu_twin_py"]
+default-members = ["ecu_twin_core"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.75"
+publish = false
+
+# No profile overrides: release keeps Rust's default (overflow checks off),
+# debug keeps them on. The core never relies on either: every operation that
+# could leave its width is an explicit widening, checked, saturating or
+# truncating one, and the vectors run in both profiles (`cargo test` and
+# `cargo test --release`), so an implicit overflow panics in debug and a
+# release-only wrap would show as a vector mismatch.
