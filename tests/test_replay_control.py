@@ -28,6 +28,7 @@ from src.control.replay_control import (
     ReplayController,
     ReplayNotFoundError,
     ReplayNotRunningError,
+    ReplayStatus,
 )
 from src.features.live import LiveFeatureSource
 from src.models.fusion import PersistenceGate
@@ -289,6 +290,8 @@ async def test_stop_returns_to_idle(tmp_path: Path) -> None:
     await controller.start("2026-05-18T120000", loop=False)
     status = await controller.stop()
     assert status.running is False
+    assert status.ended == "stopped"
+    assert status.source_session_id == "2026-05-18T120000"
 
 
 async def test_status_reports_what_the_replay_actually_emitted(tmp_path: Path) -> None:
@@ -327,12 +330,11 @@ async def test_status_reports_what_the_replay_actually_emitted(tmp_path: Path) -
     )
 
     await controller.start("2026-05-18T120000", speed=10_000.0, loop=False)
-    for _ in range(200):
-        if controller.status().rows_emitted == 2:
-            break
-        await asyncio.sleep(0.01)
+    status = await _wait_until_idle(controller)
 
-    status = controller.status()
+    # The pass ran out and the replay ended itself, keeping its counters.
+    assert status.running is False
+    assert status.ended == "completed"
     assert status.source_rows_total == 4
     assert status.rows_emitted == 2
     assert status.rows_skipped == 2
@@ -344,9 +346,11 @@ async def test_status_reports_what_the_replay_actually_emitted(tmp_path: Path) -
     assert isinstance(payload["rederivable_reason"], str)
 
     # The counters survive the end of the replay — "how many rows did that
-    # replay emit" must be answerable after it stops, not only during.
+    # replay emit" must be answerable after it ends, not only during. A stop
+    # after natural completion returns that final status instead of raising.
     final = await controller.stop()
     assert final.running is False
+    assert final.ended == "completed"
     assert final.rows_emitted == 2 and final.rows_skipped == 2
 
 
@@ -354,10 +358,12 @@ async def test_status_reports_effective_speed_and_source_time_progress(tmp_path:
     """D02.9 — ``GET /control/replay`` says how fast the recording is really
     being covered, not only the requested ``speed``.
 
-    A 600 s recorded pause is clamped to 0.5 s of wall time, so at
+    Each 600 s recorded pause is clamped to 0.5 s of wall time, so at
     ``speed=1.0`` the effective speed is in the hundreds and the status must
     say so, alongside the fraction of the source span covered and whether the
-    completed pass reconciles every source row.
+    completed pass reconciles every source row. Three pauses keep the pass
+    over the one wall second ``effective_speed`` needs, because a
+    non-looping replay ends itself and its final status is frozen there.
     """
     storage_root = tmp_path / "sessions"
     storage_root.mkdir()
@@ -372,31 +378,27 @@ async def test_status_reports_effective_speed_and_source_time_progress(tmp_path:
     base = datetime(2026, 5, 18, 12, tzinfo=UTC)
     write_records_to_parquet(
         [
-            TelemetryRecord(timestamp=base, source="obd", channel="RPM", value=800.0, unit="rpm"),
             TelemetryRecord(
-                timestamp=base + timedelta(seconds=600),
+                timestamp=base + timedelta(seconds=600 * i),
                 source="obd",
                 channel="RPM",
-                value=810.0,
+                value=800.0 + i,
                 unit="rpm",
-            ),
+            )
+            for i in range(4)
         ],
         storage_root / "2026-05-18T120000",
     )
 
     await controller.start("2026-05-18T120000", speed=1.0, loop=False)
-    for _ in range(300):
-        if controller.status().passes == 1:
-            break
-        await asyncio.sleep(0.01)
-    await asyncio.sleep(1.05)  # effective_speed is withheld under one wall second
+    status = await _wait_until_idle(controller, timeout_s=5.0)
 
-    status = controller.status()
+    assert status.running is False and status.ended == "completed"
     assert status.speed == 1.0
-    assert status.source_span_s == pytest.approx(600.0, abs=0.01)
-    assert status.source_time_emitted_s == pytest.approx(600.0, abs=0.01)
+    assert status.source_span_s == pytest.approx(1800.0, abs=0.01)
+    assert status.source_time_emitted_s == pytest.approx(1800.0, abs=0.01)
     assert status.source_time_progress == pytest.approx(1.0)
-    assert status.wall_elapsed_s is not None and status.wall_elapsed_s < 3.0
+    assert status.wall_elapsed_s is not None and 1.0 <= status.wall_elapsed_s < 4.0
     assert status.effective_speed is not None and status.effective_speed > 100.0
     assert status.pass_reconciled is True
     payload = status.to_dict()
@@ -411,9 +413,17 @@ async def test_status_reports_effective_speed_and_source_time_progress(tmp_path:
         assert key in payload
 
     final = await controller.stop()
-    assert final.running is False
-    assert final.pass_reconciled is True
-    assert final.source_time_emitted_s == pytest.approx(600.0, abs=0.01)
+    assert final == status
+
+
+async def _wait_until_idle(controller: ReplayController, timeout_s: float = 2.0) -> ReplayStatus:
+    """Poll until the replay has reaped itself (running False)."""
+    for _ in range(int(timeout_s / 0.01)):
+        status = controller.status()
+        if not status.running:
+            return status
+        await asyncio.sleep(0.01)
+    raise AssertionError(f"replay still running after {timeout_s} s: {controller.status()}")
 
 
 async def test_stop_without_running_raises(tmp_path: Path) -> None:
@@ -723,3 +733,198 @@ async def test_two_replays_started_in_one_second_get_two_ids(
     assert (first.replay_id, second.replay_id) == ("2026-09-25T233019", "2026-09-25T233020")
     assert first.output_session_dir != second.output_session_dir
     assert first.output_anomalies_path != second.output_anomalies_path
+
+
+# --------------------------------------------------------------------------- #
+# 2026-10-05 — a non-looping replay ends on its own
+# --------------------------------------------------------------------------- #
+
+
+def _two_row_session(storage_root: Path, name: str = "2026-05-18T120000") -> Path:
+    base = datetime(2026, 5, 18, 12, tzinfo=UTC)
+    session = storage_root / name
+    write_records_to_parquet(
+        [
+            TelemetryRecord(
+                timestamp=base + timedelta(seconds=0.01 * i),
+                source="obd",
+                channel="RPM",
+                value=800.0 + i,
+                unit="rpm",
+            )
+            for i in range(2)
+        ],
+        session,
+    )
+    return session
+
+
+async def test_a_non_looping_replay_ends_exits_replay_mode_and_reopens_live_input(
+    tmp_path: Path,
+) -> None:
+    """On the Pi a 27-minute ``loop: false`` replay logged its last pass and
+    then stayed ``running: true`` for 37 minutes, writer in replay mode and
+    live input withheld, until someone called stop. It must reap itself."""
+    journal = _Journal()
+    controller, storage_root, ingress = _journalled_controller(tmp_path, journal)
+    _two_row_session(storage_root)
+
+    started = await controller.start("2026-05-18T120000", speed=10_000.0, loop=False)
+    assert started.running is True
+    journal.steps.clear()
+
+    final = await _wait_until_idle(controller)
+    # The exit boundary ran in order without anyone calling stop.
+    assert journal.steps == ["settle", "writer.exit_replay_mode", "ingress.open"]
+    assert ingress.closed_reason is None  # type: ignore[attr-defined]
+    assert not controller._writer.paths.root.name.startswith("_")
+    # Identity and final counters retained on the idle status.
+    assert final.running is False
+    assert final.ended == "completed"
+    assert final.replay_id == started.replay_id
+    assert final.source_session_id == "2026-05-18T120000"
+    assert final.output_session_dir == started.output_session_dir
+    assert final.rows_emitted == 2 and final.passes == 1
+    assert final.source_rows_total == 2 and final.pass_reconciled is True
+    assert final.source_time_progress == pytest.approx(1.0)
+    assert final.exit_settled is True
+    assert final.to_dict()["ended"] == "completed"
+
+    # Live rows reach the queue again (2 replayed rows already sit there).
+    before = controller._queue.qsize()
+    ingress.put_nowait(_record())  # type: ignore[attr-defined]
+    assert controller._queue.qsize() == before + 1
+
+    # stop after natural completion: the final status, no error, no second exit.
+    journal.steps.clear()
+    assert await controller.stop() == final
+    assert journal.steps == []
+
+
+async def test_a_looping_replay_keeps_running_after_a_pass(tmp_path: Path) -> None:
+    controller, storage_root = _make_controller(tmp_path)
+    _two_row_session(storage_root)
+
+    # 10_000x: every row is due at once and none sleeps. This hung the poller
+    # while a pass never awaited; each pass now awaits its chunk reads (in a
+    # thread) and yields at its end. The per-row yield (_MAX_HOLD_SECONDS) is
+    # guarded in test_replay.py, not here: two rows never reach 5 ms.
+    await controller.start("2026-05-18T120000", speed=10_000.0, loop=True)
+    for _ in range(300):
+        if (controller.status().passes or 0) >= 2:
+            break
+        await asyncio.sleep(0.01)
+    status = controller.status()
+    assert status.running is True and status.ended is None
+    assert (status.passes or 0) >= 2
+
+    final = await controller.stop()
+    assert final.running is False and final.ended == "stopped"
+
+
+async def test_a_new_replay_can_start_right_after_one_ends(tmp_path: Path) -> None:
+    """The finished replay's exit boundary completes before the next one
+    enters, so its reaper cannot switch the new replay's writer back."""
+    controller, storage_root = _make_controller(tmp_path)
+    _two_row_session(storage_root)
+
+    await controller.start("2026-05-18T120000", speed=10_000.0, loop=False)
+    await _wait_until_idle(controller)
+    second = await controller.start("2026-05-18T120000", speed=10_000.0, loop=True)
+    assert second.running is True and second.ended is None
+    await asyncio.sleep(0.05)
+    assert controller.status().running is True
+    assert controller._writer.paths.root.name.startswith("_replay-")
+    await controller.stop()
+
+
+async def test_a_start_during_a_slow_exit_waits_for_the_previous_reap(tmp_path: Path) -> None:
+    """Verifier repro, 2026-10-05: ``stop`` from the coroutine that first sees
+    the task done used to reap inline. It cleared ``_task`` and then waited on
+    the exit settle; a ``start`` in that window saw nothing to wait for and
+    entered replay mode, and the inline reap then switched the new replay's
+    writer back to live and marked it idle while it kept emitting."""
+    storage_root = tmp_path / "sessions"
+    storage_root.mkdir()
+    settles = 0
+
+    async def _settle(timeout: float) -> bool:
+        nonlocal settles
+        settles += 1
+        await asyncio.sleep(0.3 if settles == 2 else 0.0)  # the first exit is slow
+        return True
+
+    writer = ParquetTelemetryWriter(storage_root)
+    controller = ReplayController(
+        queue=asyncio.Queue(),
+        writer=writer,
+        anomaly_logger=AnomalyEventLogger(tmp_path / "anomalies"),
+        storage_root=storage_root,
+        broadcast_stale_timeout_seconds=10.0,
+        settle_pipeline=_settle,
+    )
+    _two_row_session(storage_root)
+    await controller.start("2026-05-18T120000", speed=10_000.0, loop=False)
+    task = controller._task
+    assert task is not None
+    while not task.done():
+        await asyncio.sleep(0)  # first to see it done: no callback has run yet
+
+    async def start_again() -> ReplayStatus:
+        await asyncio.sleep(0.01)  # inside the first replay's 0.3 s exit settle
+        return await controller.start("2026-05-18T120000", speed=1.0, loop=True)
+
+    second_start = asyncio.create_task(start_again())
+    first = await controller.stop()
+    second = await second_start
+    await asyncio.sleep(0.4)  # past any reaper still in flight
+
+    assert first.ended == "completed" and first.running is False
+    status = controller.status()
+    assert second.running is True
+    assert status.running is True and status.ended is None
+    assert status.replay_id == second.replay_id != first.replay_id
+    assert writer.paths.root == Path(str(second.output_session_dir))
+    assert writer.paths.root.name.startswith("_replay-")
+    assert controller._task is not None and not controller._task.done()
+    final = await controller.stop()
+    assert final.ended == "stopped" and final.replay_id == second.replay_id
+
+
+async def test_two_concurrent_starts_give_one_replay_and_one_conflict(tmp_path: Path) -> None:
+    """``start`` awaits (reap, entry settle, writer switch) between its
+    conflict check and setting ``_task``, so two gathered starts both passed
+    the check and entered replay mode twice. The lifecycle lock serializes
+    them: one replay runs, the other start is refused by name."""
+    storage_root = tmp_path / "sessions"
+    storage_root.mkdir()
+
+    async def _settle(timeout: float) -> bool:
+        await asyncio.sleep(0.05)  # widen the window between check and effect
+        return True
+
+    writer = ParquetTelemetryWriter(storage_root)
+    controller = ReplayController(
+        queue=asyncio.Queue(),
+        writer=writer,
+        anomaly_logger=AnomalyEventLogger(tmp_path / "anomalies"),
+        storage_root=storage_root,
+        broadcast_stale_timeout_seconds=10.0,
+        settle_pipeline=_settle,
+    )
+    _two_row_session(storage_root)
+
+    results = await asyncio.gather(
+        controller.start("2026-05-18T120000", speed=1.0, loop=True),
+        controller.start("2026-05-18T120000", speed=1.0, loop=True),
+        return_exceptions=True,
+    )
+    started = [r for r in results if isinstance(r, ReplayStatus)]
+    refused = [r for r in results if isinstance(r, ReplayConflictError)]
+    assert len(started) == 1 and len(refused) == 1, results
+    status = controller.status()
+    assert status.running is True and status.replay_id == started[0].replay_id
+    assert writer.paths.root == Path(str(started[0].output_session_dir))
+    final = await controller.stop()
+    assert final.ended == "stopped"
+    assert not writer.paths.root.name.startswith("_")

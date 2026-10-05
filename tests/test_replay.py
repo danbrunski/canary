@@ -63,6 +63,7 @@ async def _drain(
             loop=loop,
             stats=stats if stats is not None else ReplayEmissionStats(),
             broadcast_stale_timeout_seconds=10.0,
+            on_finish="idle",
         )
     )
     got: list[TelemetryRecord] = []
@@ -101,6 +102,7 @@ def test_replay_missing_session_idles_then_stops(tmp_path: Path) -> None:
                 loop=False,
                 stats=ReplayEmissionStats(),
                 broadcast_stale_timeout_seconds=10.0,
+                on_finish="idle",
             )
         )
         await asyncio.sleep(0.05)
@@ -109,6 +111,272 @@ def test_replay_missing_session_idles_then_stops(tmp_path: Path) -> None:
         await asyncio.wait_for(task, timeout=2.0)
 
     asyncio.run(run())
+
+
+def test_on_finish_return_ends_a_non_looping_replay_without_a_stop(tmp_path: Path) -> None:
+    """2026-10-05: a non-looping control-plane replay never ended, because the
+    pass idled on ``stop_event`` like a collector. ``on_finish="return"``
+    returns once the pass is done, with no stop ever set."""
+    sdir = _session(tmp_path)
+    stats = ReplayEmissionStats()
+
+    async def run() -> asyncio.Event:
+        queue: asyncio.Queue[TelemetryRecord] = asyncio.Queue()
+        stop = asyncio.Event()
+        await asyncio.wait_for(
+            replay_session(
+                queue,
+                sdir,
+                stop,
+                speed=10_000.0,
+                loop=False,
+                stats=stats,
+                broadcast_stale_timeout_seconds=10.0,
+                on_finish="return",
+            ),
+            timeout=2.0,
+        )
+        assert queue.qsize() == 3
+        return stop
+
+    stop = asyncio.run(run())
+    assert not stop.is_set()
+    assert stats.passes == 1 and stats.rows_emitted == 3
+    assert stats.pass_reconciled() is True
+
+
+def test_on_finish_idle_waits_for_stop_after_a_non_looping_pass(tmp_path: Path) -> None:
+    """The collector path keeps idling: a returning collector looks dead."""
+    sdir = _session(tmp_path)
+
+    async def run() -> None:
+        queue: asyncio.Queue[TelemetryRecord] = asyncio.Queue()
+        stop = asyncio.Event()
+        stats = ReplayEmissionStats()
+        task = asyncio.create_task(
+            replay_session(
+                queue,
+                sdir,
+                stop,
+                speed=10_000.0,
+                loop=False,
+                stats=stats,
+                broadcast_stale_timeout_seconds=10.0,
+                on_finish="idle",
+            )
+        )
+        for _ in range(200):
+            if stats.passes == 1:
+                break
+            await asyncio.sleep(0.01)
+        assert stats.passes == 1
+        await asyncio.sleep(0.05)
+        assert not task.done()
+        stop.set()
+        await asyncio.wait_for(task, timeout=2.0)
+
+    asyncio.run(run())
+
+
+def test_on_finish_return_on_a_missing_session_returns_at_once(tmp_path: Path) -> None:
+    async def run() -> None:
+        await asyncio.wait_for(
+            replay_session(
+                asyncio.Queue(),
+                tmp_path / "nope",
+                asyncio.Event(),
+                loop=False,
+                stats=ReplayEmissionStats(),
+                broadcast_stale_timeout_seconds=10.0,
+                on_finish="return",
+            ),
+            timeout=2.0,
+        )
+
+    asyncio.run(run())
+
+
+def _large_session(tmp_path: Path, rows: int = 20_000) -> Path:
+    base = datetime(2026, 5, 18, 12, tzinfo=UTC)
+    sdir = tmp_path / "2026-05-18T120000"
+    write_records_to_parquet(
+        [
+            TelemetryRecord(
+                timestamp=base + timedelta(milliseconds=i),
+                source="obd",
+                channel="RPM",
+                value=float(i),
+                unit="rpm",
+            )
+            for i in range(rows)
+        ],
+        sdir,
+    )
+    return sdir
+
+
+@pytest.mark.parametrize("slow_read_s", [0.0, 0.3])
+def test_a_fast_pass_never_holds_the_event_loop(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, slow_read_s: float
+) -> None:
+    """At 10,000x every row is past due, so none sleeps; without an explicit
+    yield the pass held the event loop for its whole length and a looping
+    replay starved every other coroutine. The source probes and each chunk's
+    read/sort/convert also ran on the loop (~0.25 s and ~0.2 s per 10k-row
+    chunk); they now run in a thread, so even a 0.3 s chunk read leaves no
+    gap of that size. A heartbeat must keep beating, and the rows must come
+    out exactly as the synchronous reader yields them."""
+    import time as _time
+
+    from src.collection import replay as replay_mod
+    from src.collection.replay import _iter_rows
+
+    sdir = _large_session(tmp_path)
+    chunks = len(list(sdir.glob("*.parquet")))
+    assert chunks >= 2  # the prefetch path is exercised
+    expected = [(epoch, f["value"]) for epoch, f in _iter_rows(sdir, skip_sources=frozenset())]
+    real_read = replay_mod._read_chunk
+
+    def slow_read(chunk: Path, skip: frozenset[str]) -> object:
+        _time.sleep(slow_read_s)
+        return real_read(chunk, skip)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(replay_mod, "_read_chunk", slow_read)
+    stats = ReplayEmissionStats()
+
+    async def run() -> tuple[float, list[float], list[TelemetryRecord]]:
+        done = asyncio.Event()
+        gaps: list[float] = []
+
+        async def heartbeat() -> None:
+            last = _time.monotonic()
+            while not done.is_set():
+                await asyncio.sleep(0)
+                now = _time.monotonic()
+                gaps.append(now - last)
+                last = now
+
+        beat = asyncio.create_task(heartbeat())
+        await asyncio.sleep(0)  # the heartbeat is running before the replay
+        queue: asyncio.Queue[TelemetryRecord] = asyncio.Queue()
+        started = _time.monotonic()
+        await replay_session(
+            queue,
+            sdir,
+            asyncio.Event(),
+            speed=10_000.0,
+            loop=False,
+            stats=stats,
+            broadcast_stale_timeout_seconds=10.0,
+            on_finish="return",
+        )
+        wall = _time.monotonic() - started
+        done.set()
+        await beat
+        return wall, gaps, [queue.get_nowait() for _ in range(queue.qsize())]
+
+    # Collector pauses are not replay blocking: a gen-2 collection stops every
+    # thread, and under a full pytest heap took 0.16-0.25 s (54 ms standalone),
+    # which is the same size as what this test looks for. Measure without it.
+    import gc
+
+    gc.collect()
+    gc.disable()
+    try:
+        wall, gaps, got = asyncio.run(run())
+    finally:
+        gc.enable()
+    assert stats.rows_emitted == 20_000 and stats.passes == 1
+    assert stats.pass_reconciled() is True
+    assert [r.value for r in got] == [value for _, value in expected]
+    # The pass is long enough that holding the loop throughout would show.
+    assert wall > 0.5, wall
+    # Before the fix the whole pass was one gap, plus one per chunk read and
+    # one for the probes. Now no gap comes near the 0.3 s read.
+    assert max(gaps) < min(0.15, wall / 3), (max(gaps), wall)
+    assert len(gaps) > 50
+
+
+def test_rows_already_due_yield_the_loop_every_few_milliseconds(tmp_path: Path) -> None:
+    """The per-row yield on its own terms: one 60,000-row chunk, so the read
+    and conversion are a single threaded call and almost all event-loop time
+    is the emit phase. At 10,000x every row is past due and none sleeps;
+    without ``_MAX_HOLD_SECONDS`` the emit phase is one unbroken stretch
+    (hundreds of ms), with it the heartbeat never waits much past 5 ms.
+
+    Only gaps in the emit phase are judged: the worker thread's pandas calls
+    hold the GIL for tens of ms while the chunk loads, which is not the emit
+    loop. A gap counts if emission had begun when it started, or if more
+    than 10,000 rows (a sixth of the chunk) went out during it."""
+    import gc
+    import time as _time
+
+    base = datetime(2026, 5, 18, 12, tzinfo=UTC)
+    sdir = tmp_path / "2026-05-18T120000"
+    write_records_to_parquet(
+        [
+            TelemetryRecord(
+                timestamp=base + timedelta(milliseconds=i),
+                source="obd",
+                channel="RPM",
+                value=float(i),
+                unit="rpm",
+            )
+            for i in range(60_000)
+        ],
+        sdir,
+        max_rows=60_000,
+    )
+    assert len(list(sdir.glob("*.parquet"))) == 1
+    stats = ReplayEmissionStats()
+
+    async def run() -> list[float]:
+        done = asyncio.Event()
+        gaps: list[float] = []
+
+        async def heartbeat() -> None:
+            last, rows_then = _time.monotonic(), stats.rows_emitted
+            while not done.is_set():
+                await asyncio.sleep(0)
+                now, rows_now = _time.monotonic(), stats.rows_emitted
+                if rows_then > 0 or rows_now - rows_then > 10_000:
+                    gaps.append(now - last)
+                last, rows_then = now, rows_now
+
+        beat = asyncio.create_task(heartbeat())
+        await asyncio.sleep(0)
+        await replay_session(
+            asyncio.Queue(),
+            sdir,
+            asyncio.Event(),
+            speed=10_000.0,
+            loop=False,
+            stats=stats,
+            broadcast_stale_timeout_seconds=10.0,
+            on_finish="return",
+        )
+        done.set()
+        await beat
+        return gaps
+
+    gc.collect()
+    gc.disable()  # a gen-2 collection pauses every thread; not what is measured
+    try:
+        gaps = asyncio.run(run())
+    finally:
+        gc.enable()
+    assert stats.rows_emitted == 60_000
+    assert max(gaps) < 0.04, max(gaps)
+    assert len(gaps) > 10
+
+
+def test_on_finish_has_no_default() -> None:
+    """Required, so no caller can inherit the wrong end-of-pass behaviour."""
+    import inspect
+
+    param = inspect.signature(replay_session).parameters["on_finish"]
+    assert param.default is inspect.Parameter.empty
+    assert param.kind is inspect.Parameter.KEYWORD_ONLY
 
 
 def test_make_replay_collector_matches_starter_signature(tmp_path: Path) -> None:
@@ -330,6 +598,7 @@ def test_a_clamped_gap_is_reported_as_effective_speed_not_hidden_behind_speed(
                 loop=False,
                 stats=stats,
                 broadcast_stale_timeout_seconds=10.0,
+                on_finish="idle",
             )
         )
         got: list[TelemetryRecord] = []

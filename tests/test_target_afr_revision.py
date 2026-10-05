@@ -386,6 +386,7 @@ def _replay_into(source: LiveFeatureSource, session: Path) -> datetime:
                 loop=False,
                 stats=ReplayEmissionStats(),
                 broadcast_stale_timeout_seconds=10.0,
+                on_finish="idle",
             )
         )
         got: list[TelemetryRecord] = []

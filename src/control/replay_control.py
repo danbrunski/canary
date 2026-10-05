@@ -47,7 +47,7 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Protocol
+from typing import TYPE_CHECKING, Literal, Protocol
 
 from src.alerts.emitter import AnomalyEventEmitter
 from src.alerts.event_logger import AnomalyEventLogger
@@ -108,7 +108,12 @@ class ReplayRefusedError(ReplayError):
 
 
 class ReplayNotRunningError(ReplayError):
-    """``stop`` was called with no replay in flight."""
+    """``stop`` was called with no replay in flight and none ever run."""
+
+
+#: How a replay ended: it ran out of source (a non-looping pass completed, or
+#: a pass emitted nothing), ``stop`` ended it, or its task raised.
+ReplayEnd = Literal["completed", "stopped", "failed"]
 
 
 @dataclass(frozen=True)
@@ -129,6 +134,11 @@ class ReplayStatus:
     (D02.9). ``effective_speed`` is the measured ratio, ``source_time_progress``
     the fraction of the recording covered, and ``pass_reconciled`` whether a
     completed pass accounts for every source row as emitted, skipped or dropped.
+
+    Once a replay ends — on its own or by ``stop`` — the idle status
+    (``running: False``) keeps that replay's identity and final counters, and
+    ``ended`` says how it ended. Every consumer that acts on a replay reads
+    ``running`` first; the retained fields are a record, not a live replay.
     """
 
     running: bool
@@ -170,6 +180,8 @@ class ReplayStatus:
     #: and a few records may sit on the wrong side of it.
     entry_settled: bool | None = None
     exit_settled: bool | None = None
+    #: ``None`` while running or before any replay; otherwise how it ended.
+    ended: ReplayEnd | None = None
 
     def to_dict(self) -> dict[str, object]:
         return {
@@ -202,6 +214,7 @@ class ReplayStatus:
             ),
             "entry_settled": self.entry_settled,
             "exit_settled": self.exit_settled,
+            "ended": self.ended,
         }
 
 
@@ -256,8 +269,16 @@ class ReplayController:
         self._task: asyncio.Task[None] | None = None
         self._cleanup_task: asyncio.Task[None] | None = None
         self._stop_event: asyncio.Event | None = None
+        #: Set by ``stop`` so the reaper can tell "stopped" from "completed".
+        self._stop_requested = False
         self._stats: ReplayEmissionStats | None = None
         self._status: ReplayStatus = ReplayStatus(running=False)
+        #: Serializes ``start`` and ``stop`` end to end. Both await (settle,
+        #: writer switch, reap) between their checks and their effects, so two
+        #: concurrent starts could each pass the conflict check and enter
+        #: replay mode twice. Held only for the transitions, never while a
+        #: replay runs; the reaper task does not take it.
+        self._lifecycle_lock = asyncio.Lock()
 
     def _reset_in_memory_state(self) -> None:
         """Clear/segregate live in-memory state at a replay boundary (7.1).
@@ -338,9 +359,26 @@ class ReplayController:
         live session (timestamp form, no leading ``_``) under the
         configured storage root. Replays of other replay sessions are
         rejected to keep the isolation contract one-way.
+
+        Serialized with ``stop`` and other starts (``_lifecycle_lock``): a
+        second concurrent start waits, then gets :class:`ReplayConflictError`.
         """
+        async with self._lifecycle_lock:
+            return await self._start_locked(source_session_id, speed=speed, loop=loop)
+
+    async def _start_locked(
+        self,
+        source_session_id: str,
+        *,
+        speed: float,
+        loop: bool,
+    ) -> ReplayStatus:
         if self._task is not None and not self._task.done():
             raise ReplayConflictError(f"replay {self._status.replay_id!r} already running")
+        # A replay that just ran out may still be crossing its exit boundary;
+        # starting over it would let that reaper switch the new replay's
+        # writer back to live.
+        await self._finish_reaping()
 
         if not _is_live_session_name(source_session_id):
             raise ReplayNotFoundError(
@@ -403,11 +441,17 @@ class ReplayController:
                 loop=loop,
                 stats=stats,
                 broadcast_stale_timeout_seconds=self._broadcast_stale_timeout_seconds,
+                # The task's completion is the end of the replay: the done
+                # callback reaps it (exit replay mode, reopen live input). An
+                # idling task left a finished replay "running" for 37 minutes
+                # on the Pi, 2026-10-05.
+                on_finish="return",
             ),
             name=f"replay-{replay_id}",
         )
         self._task = task
         self._stop_event = stop_event
+        self._stop_requested = False
         self._stats = stats
         task.add_done_callback(self._schedule_cleanup)
         # Live polling and the replayed rows must never share a round (C02.8).
@@ -438,33 +482,72 @@ class ReplayController:
         return self.status()
 
     async def stop(self) -> ReplayStatus:
-        """Cancel the in-flight replay and roll the writer/logger back live."""
-        if self._task is None or self._task.done():
-            await self._reap_finished_task()
-            if not self._status.running:
-                raise ReplayNotRunningError("no replay in flight")
+        """End the in-flight replay and roll the writer/logger back live.
 
-        assert self._task is not None
-        assert self._stop_event is not None
-        self._stop_event.set()
-        try:
-            await asyncio.wait_for(self._task, timeout=5.0)
-        except TimeoutError:
-            log.warning(
-                "replay task didn't stop in 5s; cancelling",
-                extra={"replay_id": self._status.replay_id},
-            )
-            self._task.cancel()
+        A replay that already ended on its own (a non-looping replay that ran
+        out of source) is not an error: ``stop`` finishes any cleanup still in
+        progress and returns that replay's final idle status, ``ended``
+        included. :class:`ReplayNotRunningError` is raised only when no replay
+        has run since the daemon started.
+
+        Latency: the replay sees the stop at its next row or pacing sleep. If
+        it is awaiting a chunk read or its source probes (both in a worker
+        thread), that is after the read finishes — up to one chunk load, about
+        0.2 s for 10k rows on the laptop. Past 5 s the task is cancelled.
+
+        Serialized with ``start`` (``_lifecycle_lock``).
+        """
+        async with self._lifecycle_lock:
+            return await self._stop_locked()
+
+    async def _stop_locked(self) -> ReplayStatus:
+        task = self._task
+        if task is not None and not task.done():
+            assert self._stop_event is not None
+            self._stop_requested = True
+            self._stop_event.set()
             try:
-                await self._task
-            except (asyncio.CancelledError, Exception):
-                pass
+                await asyncio.wait_for(task, timeout=5.0)
+            except TimeoutError:
+                log.warning(
+                    "replay task didn't stop in 5s; cancelling",
+                    extra={"replay_id": self._status.replay_id},
+                )
+                task.cancel()
+                try:
+                    await task
+                except (asyncio.CancelledError, Exception):
+                    pass
+            except Exception:
+                pass  # the reaper logs it and records ``ended: failed``
 
-        if self._cleanup_task is not None:
-            await self._cleanup_task
-        else:
-            await self._reap_finished_task()
+        await self._finish_reaping()
+        if self._status.running or self._status.replay_id is None:
+            raise ReplayNotRunningError("no replay in flight")
         return self._status
+
+    async def _finish_reaping(self) -> None:
+        """Complete the exit boundary of a replay whose task has ended.
+
+        Every reap runs as the one ``_cleanup_task``, never inline. The done
+        callback normally schedules it, but a caller can see ``task.done()``
+        before that callback has run; reaping inline there set ``_task`` to
+        ``None`` and then waited on the exit settle, so a concurrent ``start``
+        saw no replay and no pending cleanup, entered replay mode, and the
+        inline reap then switched the *new* replay's writer back to live and
+        marked it idle while it kept emitting. Creating the task here (when
+        none is pending) gives ``start`` and ``stop`` one thing to wait on.
+        Shielded so a cancelled caller cannot cancel a half-done exit.
+        """
+        task = self._task
+        if (
+            task is not None
+            and task.done()
+            and (self._cleanup_task is None or self._cleanup_task.done())
+        ):
+            self._cleanup_task = asyncio.create_task(self._reap_finished_task())
+        if self._cleanup_task is not None and not self._cleanup_task.done():
+            await asyncio.shield(self._cleanup_task)
 
     def _schedule_cleanup(self, _task: asyncio.Task[None]) -> None:
         if self._cleanup_task is None or self._cleanup_task.done():
@@ -478,10 +561,19 @@ class ReplayController:
         self._task = None
         self._stop_event = None
         capture_generation.bump("replay-stop")
+        ended: ReplayEnd
         try:
             exc = task.exception()
         except asyncio.CancelledError:
             exc = None
+            ended = "stopped"
+        else:
+            if exc is not None:
+                ended = "failed"
+            elif self._stop_requested:
+                ended = "stopped"
+            else:
+                ended = "completed"
         if exc is not None:
             log.error(
                 "replay task raised",
@@ -535,14 +627,19 @@ class ReplayController:
                     "live_rows_withheld": withheld,
                     "entry_settled": self._status.entry_settled,
                     "exit_settled": exit_settled,
+                    "ended": ended,
                 },
             )
+        # Keep the finished replay's identity alongside its counters: "which
+        # replay was that, and did it finish or get stopped" is answerable
+        # from the idle status. Consumers gate on ``running``.
         self._status = self._with_stats(
-            ReplayStatus(
+            replace(
+                self._status,
                 running=False,
                 live_rows_withheld=withheld,
-                entry_settled=self._status.entry_settled,
                 exit_settled=exit_settled,
+                ended=ended,
             )
         )
         self._stats = None
@@ -554,6 +651,7 @@ __all__ = [
     "PipelineSettle",
     "ReplayController",
     "ReplayStatus",
+    "ReplayEnd",
     "ReplayError",
     "ReplayConflictError",
     "ReplayNotFoundError",

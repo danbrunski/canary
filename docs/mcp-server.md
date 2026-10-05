@@ -304,11 +304,26 @@ feeds light up live.
   `collection.replay_retention_days` (default 7) so the disk doesn't
   silently fill.
 
-**Caveat:** real CAN/OBD collectors keep running during a replay (the
-daemon doesn't stop them). On a Pi sitting on the bench this is fine;
-if you ever start a replay while live data is genuinely flowing, the
-two streams interleave into `_replay-<id>/`. Stop the live capture
-first if you care about clean replay output.
+**Live input is withheld for the whole replay** (D02.9): the collectors
+keep running, but their rows stop at a closed ingress and are counted per
+source in `live_rows_withheld` instead of interleaving into
+`_replay-<id>/`. Start refuses outright on `engine_running`.
+
+**Lifecycle.** A `loop: false` replay ends on its own when its pass runs
+out of source: the daemon leaves replay mode, reopens live input, and
+`get_replay_status` reads `running: false` with `ended: "completed"` and
+that replay's final counters and identity (`rows_emitted`, `passes`,
+`source_time_progress`, `effective_speed`, `pass_reconciled`, `replay_id`,
+`output_session_dir`, ...). `loop: true` runs until `stop_replay`, which
+records `ended: "stopped"`; a replay whose task raised reads
+`ended: "failed"`. `stop_replay` after a replay already ended returns that
+final status rather than an error, and publishes a second `replay.stop`
+control event (outcome `ok`) for a replay that had already exited; only "no
+replay since the daemon started" is a 409. A stop that arrives while the
+replay is awaiting a chunk read (or its source probes, before the first
+row) takes effect once that read returns — up to one chunk load. Before 2026-10-05 a non-looping replay idled at the end
+of its pass and stayed `running: true` — with live input withheld — until
+someone called stop.
 
 ---
 

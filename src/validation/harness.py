@@ -862,6 +862,8 @@ async def _start_collector(
             loop=False,
             stats=replay_stats,
             broadcast_stale_timeout_seconds=config.collection.broadcast_stale_timeout_seconds,
+            # Stands in for a collector: _finish sets collector_stop, then awaits it.
+            on_finish="idle",
         ),
         name="c10-replay",
     )

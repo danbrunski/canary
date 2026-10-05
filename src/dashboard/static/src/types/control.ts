@@ -677,6 +677,11 @@ export interface ReplayStatus {
   loop: boolean | null;
   output_session_dir: string | null;
   output_anomalies_path: string | null;
+  /** How the replay shown ended; null while running or before any replay.
+   *  An idle status (`running: false`) keeps the last replay's id and final
+   *  counters, so gate on `running`, never on `replay_id`. Absent from
+   *  daemons older than 2026-10-05. */
+  ended?: "completed" | "stopped" | "failed" | null;
 }
 
 export interface ReplayStatusResponse {

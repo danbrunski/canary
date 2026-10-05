@@ -58,11 +58,12 @@ import asyncio
 import json
 import logging
 import time
-from collections.abc import Iterator
+from collections.abc import AsyncGenerator, Iterator
+from contextlib import aclosing
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, cast
+from typing import Any, Literal, cast
 
 import pandas as pd
 
@@ -87,6 +88,14 @@ log = logging.getLogger(__name__)
 #: Don't sleep longer than this between rows even if the recording paused
 #: (USB drop, ignition-off gap) — keeps the replayed dashboard moving.
 _MAX_GAP_SECONDS = 0.5
+
+#: Longest the emit loop may run without yielding the event loop. A row whose
+#: pacing delay is already past due never sleeps, so a fast pass (high
+#: ``speed``, or catching up after a stall) would otherwise hold the loop for
+#: the whole pass — a 10,000x looping replay starved every other coroutine
+#: outright. The yield is an ``asyncio.sleep(0)``: free when nothing else is
+#: ready, and taken at most ~200 times a second.
+_MAX_HOLD_SECONDS = 0.005
 
 #: Leading chunks sampled by :func:`probe_rederivability`. A chunk holds tens
 #: of thousands of rows, so one is already decisive for any session with CAN
@@ -363,39 +372,55 @@ class ReplayEmissionStats:
         )
 
 
-def _iter_rows(
-    session_dir: Path,
-    *,
-    skip_sources: frozenset[TelemetrySource],
-    stats: ReplayEmissionStats | None = None,
-) -> Iterator[tuple[float, dict[str, object]]]:
-    """Yield ``(original_epoch, record-fields)`` in timestamp order, chunk by
-    chunk (bounded memory). The record is built at emit time so its
-    timestamp is wall-clock-fresh.
+#: What :func:`replay_session` does once it has nothing more to emit (a
+#: non-looping pass finished, a pass emitted nothing, or the source is
+#: missing). Required, with no default, because the two callers need opposite
+#: answers and the wrong one is silent:
+#:
+#: * ``"idle"`` — wait for ``stop_event``, then return. For a collector
+#:   (:func:`make_replay_collector`): a collector that returns looks dead to
+#:   the daemon, so a finished replay must sit idle instead.
+#: * ``"return"`` — return at once. For a task whose completion *is* the end
+#:   of the replay (:class:`src.control.replay_control.ReplayController`,
+#:   whose done-callback exits replay mode and reopens live input). With
+#:   ``"idle"`` there, a non-looping replay of a 27-minute session reported
+#:   ``running: true`` for 37 minutes after its last row and withheld live
+#:   input the whole time (Pi, 2026-10-05).
+ReplayFinish = Literal["idle", "return"]
 
-    ``skip_sources`` is required (and normally comes from
-    :attr:`Rederivability.skip_sources`) so a caller cannot re-emit rows the
-    pipeline re-derives without having decided that it is safe to.
+
+#: One row ready to emit: ``(original_epoch, record-fields)``.
+_Row = tuple[float, dict[str, object]]
+
+
+def _read_chunk(chunk: Path, skip_sources: frozenset[TelemetrySource]) -> tuple[list[_Row], int]:
+    """Read, filter, sort and convert one Parquet chunk: ``(rows, skipped)``.
+
+    Blocking (Parquet read, sort, ``to_datetime``, row conversion), so
+    :func:`replay_session` runs it in a thread. ``skipped`` counts rows
+    filtered by ``skip_sources``; an unreadable or empty chunk is
+    ``([], 0)``.
     """
-    for chunk in sorted(session_dir.glob(PARQUET_PATTERN)):
-        try:
-            df = pd.read_parquet(chunk)
-        except (OSError, ValueError):
-            continue
+    try:
+        df = pd.read_parquet(chunk)
+    except (OSError, ValueError):
+        return [], 0
+    if df.empty:
+        return [], 0
+    skipped = 0
+    if skip_sources:
+        keep = ~df["source"].astype(str).isin(skip_sources)
+        skipped = int((~keep).sum())
+        df = df[keep]
         if df.empty:
-            continue
-        if skip_sources:
-            keep = ~df["source"].astype(str).isin(skip_sources)
-            if stats is not None:
-                stats.rows_skipped += int((~keep).sum())
-            df = df[keep]
-            if df.empty:
-                continue
-        df = df.sort_values("timestamp", kind="stable")
-        ts = pd.to_datetime(df["timestamp"], utc=True)
-        for (_, row), t in zip(df.iterrows(), ts, strict=True):
-            unit = row.get("unit")
-            yield (
+            return [], skipped
+    df = df.sort_values("timestamp", kind="stable")
+    ts = pd.to_datetime(df["timestamp"], utc=True)
+    rows: list[_Row] = []
+    for (_, row), t in zip(df.iterrows(), ts, strict=True):
+        unit = row.get("unit")
+        rows.append(
+            (
                 float(t.timestamp()),
                 {
                     "source": str(row["source"]),
@@ -406,6 +431,101 @@ def _iter_rows(
                     "metadata": _metadata(row),
                 },
             )
+        )
+    return rows, skipped
+
+
+def _chunks(session_dir: Path) -> list[Path]:
+    return sorted(session_dir.glob(PARQUET_PATTERN))
+
+
+def _iter_rows(
+    session_dir: Path,
+    *,
+    skip_sources: frozenset[TelemetrySource],
+    stats: ReplayEmissionStats | None = None,
+) -> Iterator[_Row]:
+    """Yield ``(original_epoch, record-fields)`` in timestamp order, chunk by
+    chunk (bounded memory). The record is built at emit time so its
+    timestamp is wall-clock-fresh.
+
+    ``skip_sources`` is required (and normally comes from
+    :attr:`Rederivability.skip_sources`) so a caller cannot re-emit rows the
+    pipeline re-derives without having decided that it is safe to.
+
+    Synchronous, for offline tools; :func:`replay_session` uses
+    :func:`_aiter_rows`, the same rows read off the event loop.
+    """
+    for chunk in _chunks(session_dir):
+        rows, skipped = _read_chunk(chunk, skip_sources)
+        if stats is not None:
+            stats.rows_skipped += skipped
+        yield from rows
+
+
+async def _aiter_rows(
+    session_dir: Path,
+    *,
+    skip_sources: frozenset[TelemetrySource],
+    stats: ReplayEmissionStats,
+) -> AsyncGenerator[_Row]:
+    """:func:`_iter_rows` with every chunk read in a worker thread.
+
+    Reading, sorting and converting a chunk took ~0.2 s on the event loop for
+    10k rows, stalling everything else in the daemon once per chunk. The next
+    chunk is read while the current one emits — exactly one ahead, so memory
+    stays bounded at two chunks. ``rows_skipped`` is counted when a chunk
+    starts emitting, as before, so the counters read the same at every row.
+
+    Stop latency: a stop set while a read is awaited is seen after that read
+    returns — up to one chunk load (or the source probes, before the first
+    row). The thread cannot be interrupted; before, the read blocked the
+    whole event loop for the same time.
+    """
+    chunks = await asyncio.to_thread(_chunks, session_dir)
+    pending: asyncio.Task[tuple[list[_Row], int]] | None = None
+    try:
+        for index, chunk in enumerate(chunks):
+            current = pending or asyncio.create_task(
+                asyncio.to_thread(_read_chunk, chunk, skip_sources)
+            )
+            pending = None
+            rows, skipped = await current
+            if index + 1 < len(chunks):
+                pending = asyncio.create_task(
+                    asyncio.to_thread(_read_chunk, chunks[index + 1], skip_sources)
+                )
+            stats.rows_skipped += skipped
+            for row in rows:
+                yield row
+    finally:
+        if pending is not None:
+            # Stopped mid-pass: drop the prefetch. The thread finishes its
+            # read and the result (or error) is discarded, not left unretrieved.
+            pending.cancel()
+            pending.add_done_callback(_discard_result)
+
+
+def _discard_result(task: asyncio.Task[tuple[list[_Row], int]]) -> None:
+    if not task.cancelled():
+        task.exception()
+
+
+def _probe_source(
+    session_dir: Path, speed: float, stale_timeout_seconds: float
+) -> tuple[Rederivability, int | None, float | None]:
+    """Everything :func:`replay_session` decides before the first row, in one
+    blocking call (Parquet footers and a payload probe), run in a thread.
+
+    P02.10: slower than real time, or recorded with a longer stale timeout
+    than the daemon's, a change-only session's re-writes arrive past the
+    timeout the live pipeline holds a value for — raised before a row.
+    Rederivability is decided once: per-row guessing is what would let a
+    pre-2026-07-29 session silently lose its only copy of decoded signals.
+    """
+    refuse_unfaithful_replay(session_dir, speed, stale_timeout_seconds=stale_timeout_seconds)
+    probe = probe_rederivability(session_dir)
+    return probe, count_session_rows(session_dir), session_time_span_seconds(session_dir)
 
 
 async def replay_session(
@@ -417,11 +537,19 @@ async def replay_session(
     loop: bool = True,
     stats: ReplayEmissionStats,
     broadcast_stale_timeout_seconds: float,
+    on_finish: ReplayFinish,
 ) -> None:
-    """Replay ``session_dir`` onto ``queue`` until ``stop_event`` is set.
+    """Replay ``session_dir`` onto ``queue`` until ``stop_event`` is set or
+    the replay has nothing more to emit.
 
-    Best-effort: a missing/empty session logs and idles rather than
-    crashing the daemon (the rest of the dashboard still works).
+    Best-effort: a missing/empty session logs rather than crashing the daemon
+    (the rest of the dashboard still works).
+
+    ``on_finish`` is required and says what happens when the replay runs out
+    — a non-looping pass completes, a pass emits nothing, or the source is
+    missing: ``"idle"`` waits for ``stop_event`` (a collector must not look
+    dead), ``"return"`` returns at once (a task whose completion ends the
+    replay). See :data:`ReplayFinish`.
 
     ``stats`` is required and mutated in place: every replay reports how many
     rows it read, emitted, skipped and dropped (D02.9).
@@ -435,24 +563,19 @@ async def replay_session(
     """
     if not session_dir.exists():
         log.warning("replay session not found: %s", session_dir)
-        await stop_event.wait()
+        if on_finish == "idle":
+            await stop_event.wait()
         return
     speed = speed if speed > 0 else 1.0
-    # P02.10: slower than real time, or recorded with a longer stale timeout
-    # than the daemon's, a change-only session's re-writes arrive past the
-    # timeout the live pipeline holds a value for. Raised before a row.
-    refuse_unfaithful_replay(
-        session_dir, speed, stale_timeout_seconds=broadcast_stale_timeout_seconds
+    # Footer and chunk reads, so off the event loop (~0.25 s on the laptop).
+    probe, source_rows, source_span = await asyncio.to_thread(
+        _probe_source, session_dir, speed, broadcast_stale_timeout_seconds
     )
-
-    # Decide once, before the first row: per-row guessing is what would let a
-    # pre-2026-07-29 session silently lose its only copy of decoded signals.
-    probe = probe_rederivability(session_dir)
     stats.rederivable = probe.rederivable
     stats.rederivable_reason = probe.reason
     stats.skipped_sources = tuple(sorted(probe.skip_sources))
-    stats.source_rows_total = count_session_rows(session_dir)
-    stats.source_span_s = session_time_span_seconds(session_dir)
+    stats.source_rows_total = source_rows
+    stats.source_span_s = source_span
     log.info(
         "replay source probed",
         extra={
@@ -471,32 +594,44 @@ async def replay_session(
         wall_start = time.monotonic()
         stats.pass_started_monotonic = wall_start
         stats.source_time_emitted_s = 0.0
-        for orig_epoch, fields in _iter_rows(
-            session_dir, skip_sources=probe.skip_sources, stats=stats
-        ):
-            if stop_event.is_set():
-                return
-            if first_orig is None:
-                first_orig = orig_epoch
-            stats.source_time_emitted_s = max(0.0, orig_epoch - first_orig)
-            # Drift-corrected pacing: the i-th row is due at
-            # wall_start + (recording-elapsed / speed), clamped per-row so a
-            # capture pause can't stall the stream.
-            target = wall_start + (orig_epoch - first_orig) / speed
-            delay = min(_MAX_GAP_SECONDS, max(0.0, target - time.monotonic()))
-            if delay > 0 and await wait_for_stop_or_timeout(stop_event, delay):
-                return  # stop fired during the sleep
-            record = replay_record(fields, orig_epoch, time.time())
-            try:
-                queue.put_nowait(record)
-                emitted += 1
-                stats.rows_emitted += 1
-            except asyncio.QueueFull:
-                # Drain is behind; drop rather than block the replay clock —
-                # same "freshest wins" policy the broadcaster uses. Counted,
-                # so "fewer rows out than in" is never a mystery.
-                stats.rows_dropped += 1
+        last_yield = wall_start
+        async with aclosing(
+            _aiter_rows(session_dir, skip_sources=probe.skip_sources, stats=stats)
+        ) as rows:
+            async for orig_epoch, fields in rows:
+                if stop_event.is_set():
+                    return
+                if first_orig is None:
+                    first_orig = orig_epoch
+                stats.source_time_emitted_s = max(0.0, orig_epoch - first_orig)
+                # Drift-corrected pacing: the i-th row is due at
+                # wall_start + (recording-elapsed / speed), clamped per-row so a
+                # capture pause can't stall the stream.
+                target = wall_start + (orig_epoch - first_orig) / speed
+                now = time.monotonic()
+                delay = min(_MAX_GAP_SECONDS, max(0.0, target - now))
+                if delay > 0:
+                    if await wait_for_stop_or_timeout(stop_event, delay):
+                        return  # stop fired during the sleep
+                    last_yield = time.monotonic()
+                elif now - last_yield >= _MAX_HOLD_SECONDS:
+                    await asyncio.sleep(0)  # never hold the loop for a whole pass
+                    last_yield = time.monotonic()
+                    if stop_event.is_set():
+                        return
+                record = replay_record(fields, orig_epoch, time.time())
+                try:
+                    queue.put_nowait(record)
+                    emitted += 1
+                    stats.rows_emitted += 1
+                except asyncio.QueueFull:
+                    # Drain is behind; drop rather than block the replay clock —
+                    # same "freshest wins" policy the broadcaster uses. Counted,
+                    # so "fewer rows out than in" is never a mystery.
+                    stats.rows_dropped += 1
         stats.passes += 1
+        # A looping pass that never slept must still yield between passes.
+        await asyncio.sleep(0)
         log.info(
             "replay pass complete",
             extra={
@@ -514,7 +649,8 @@ async def replay_session(
             },
         )
         if not loop or emitted == 0:
-            await stop_event.wait()
+            if on_finish == "idle":
+                await stop_event.wait()
             return
 
 
@@ -542,6 +678,8 @@ def make_replay_collector(config: CanaryConfig) -> CollectorStarter:
                 loop=looping,
                 stats=ReplayEmissionStats(),
                 broadcast_stale_timeout_seconds=stale_timeout,
+                # A collector that returns looks dead: a finished replay idles.
+                on_finish="idle",
             )
         except UnfaithfulReplayError:
             # Refused by name, like a missing session: log and idle.
@@ -553,6 +691,7 @@ def make_replay_collector(config: CanaryConfig) -> CollectorStarter:
 
 __all__ = [
     "ReplayEmissionStats",
+    "ReplayFinish",
     "Rederivability",
     "make_replay_collector",
     "probe_rederivability",

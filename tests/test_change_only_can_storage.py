@@ -673,6 +673,7 @@ async def test_a_change_only_session_is_not_replayed_slower_than_real_time(
             speed=0.5,
             stats=ReplayEmissionStats(),
             broadcast_stale_timeout_seconds=10.0,
+            on_finish="idle",
         )
     assert queue.empty()
     controller = ReplayController(
@@ -735,6 +736,7 @@ async def test_a_session_stored_with_a_longer_timeout_than_the_daemons_is_not_re
             speed=4.0,
             stats=ReplayEmissionStats(),
             broadcast_stale_timeout_seconds=10.0,
+            on_finish="idle",
         )
     assert queue.empty()
 
