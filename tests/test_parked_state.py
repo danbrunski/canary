@@ -66,11 +66,13 @@ def test_last_heard_finds_the_bus_behind_later_sensor_rows(tmp_path: Path) -> No
     writer.write(
         TelemetryRecord(timestamp=T0, source="can", channel="0x1F9", payload=bytes(8), value=None)
     )
-    for k in range(6):  # the bus sleeps; the Pi goes on writing sensor rows
+    # The bus sleeps; the Pi goes on writing sensor rows for many chunks
+    # (2026-10-04T233938: minutes of 100 Hz fuel pressure after the last frame).
+    for k in range(120):
         writer.write(_supply(T0 + timedelta(seconds=10 + k), 12.4))
     writer.close()
     session = writer.paths.root
-    assert len(list(session.glob("*.parquet"))) >= 3
+    assert len(list(session.glob("*.parquet"))) > 50
     assert last_heard(session, ("can",)) == T0
     assert last_heard(session, ("obd",)) is None
 

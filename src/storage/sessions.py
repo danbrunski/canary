@@ -73,13 +73,17 @@ def latest_session(root: Path) -> Path | None:
     return dated[-1] if dated else None
 
 
-def last_heard(session: Path, sources: Iterable[str], *, max_chunks: int = 30) -> datetime | None:
+def last_heard(session: Path, sources: Iterable[str], *, max_chunks: int = 5000) -> datetime | None:
     """When ``session`` last stored a row from any of ``sources``, or ``None``.
 
-    Reads only the ``source`` and ``timestamp`` columns of the newest chunks,
-    newest first, and stops at the first chunk holding one: a session goes on
-    storing GPS and sensor rows after the bus falls asleep, so the newest
-    chunk need not hold one. ``max_chunks`` bounds the cost on a long tail.
+    Walks the chunks newest first and stops at the first holding one. A
+    session goes on storing GPS and sensor rows after the bus falls asleep:
+    2026-10-04T233938 kept writing 100 Hz fuel pressure for minutes, so its
+    newest few hundred chunks hold no CAN row at all. Each chunk's footer
+    statistics (``source`` min/max per row group) rule most of them out
+    without reading any data; only a chunk that may hold a wanted source has
+    its ``source`` and ``timestamp`` columns read. ``max_chunks`` bounds the
+    walk on a pathological session.
     """
     import pyarrow.parquet as pq
 
@@ -87,7 +91,10 @@ def last_heard(session: Path, sources: Iterable[str], *, max_chunks: int = 30) -
     chunks = sorted(session.glob(PARQUET_PATTERN), reverse=True)[:max_chunks]
     for chunk in chunks:
         try:
-            table = pq.read_table(chunk, columns=["source", "timestamp"])  # type: ignore[no-untyped-call, unused-ignore]
+            parquet = pq.ParquetFile(chunk)  # type: ignore[no-untyped-call, unused-ignore]
+            if not _may_hold(parquet.metadata, wanted):
+                continue
+            table = parquet.read(columns=["source", "timestamp"])  # type: ignore[no-untyped-call, unused-ignore]
         except (OSError, ValueError):
             continue
         stamps = [
@@ -103,6 +110,25 @@ def last_heard(session: Path, sources: Iterable[str], *, max_chunks: int = 30) -
             newest: datetime = max(stamps)
             return newest if newest.tzinfo else newest.replace(tzinfo=UTC)
     return None
+
+
+def _may_hold(metadata: Any, wanted: set[str]) -> bool:
+    """Whether a chunk's ``source`` statistics leave room for a wanted source.
+    No statistics: it may (read it)."""
+    try:
+        index = metadata.schema.names.index("source")
+    except ValueError:
+        return False
+    for group in range(metadata.num_row_groups):
+        stats = metadata.row_group(group).column(index).statistics
+        if stats is None or not stats.has_min_max:
+            return True
+        low, high = stats.min, stats.max
+        if isinstance(low, bytes):
+            low, high = low.decode(), high.decode()
+        if any(low <= source <= high for source in wanted):
+            return True
+    return False
 
 
 def recorded_sessions(
