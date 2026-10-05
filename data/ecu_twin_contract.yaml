@@ -331,6 +331,36 @@ inventory:
     firmware: ["0x04E6D8"]
     standing: decoded_partial
     why_not_yet: coolant_blend_divide (the blend band is unevaluable); Main/High Det identity inferred.
+  - python: src.analysis.injector_pulse:dead_time_counts
+    firmware: ["0x057144", "0x8C41", "0x84F2"]
+    standing: decoded
+    why_not_yet: >-
+      E07.3, Python-only. Ts = max(0, base + (((vref - Vb) * slope) >> 7)):
+      Vb u8 (0.08 V counts), base/slope u8 calibration, vref 175 code
+      immediate, product signed with an arithmetic shift (floors below zero),
+      result u16 in 10 us counts. Checked on fuel-cut reads (+-2 counts), not
+      by vectors yet.
+  - python: src.analysis.injector_pulse:pressure_correction_word
+    firmware: ["0x053B8C", "0x8A89", "0x9254"]
+    standing: decoded
+    why_not_yet: >-
+      E07.3, Python-only. b1A15 = min(255, (ref << 18) // ((ref << 10) +
+      vac512)) (vac512 u16, 1/512 kPa; ref u8 0x8A89), b1772 = min(255,
+      (b1A15 * 5259 + 0x128500) // 10000), w1800 = (b1772 * 0x9254 u16) >> 8,
+      u32 intermediates, u16 result (0x4000 = 1.0). Its vacuum input
+      (vacuum_estimate_512) uses byte_curve16 on D627/D637; the baro and IAT
+      words are rebuilt from Mode 01 values (inferred).
+  - python: src.analysis.injector_pulse:predict_pulse
+    firmware: ["0x0575EC", "0x057144", "0x053B8C", "0x0527CC"]
+    standing: decoded_partial
+    why_not_yet: >-
+      E07.3, Python-only. base = (BFS u16 * phi u16 Q14) >> 17; G = max(246,
+      min(0xFFFF, ((base * alpha / 0x6400 + wallfilm) * w1800) >> 14)); k =
+      STFT + LTFT + w2E8C - 0xC800 (u16 words, 0x6400 = 1.0); Ti = ((G * k) >>
+      16) + Ts, u32 intermediates, u16 pulse in 10 us counts, before the
+      short-pulse correction (0x9120-0x9126, not decoded) and min pulse.
+      Purge alpha and wall film are taken neutral (steady state); per-sample
+      known answer median 1.0084 (E07.3), no vectors.
   - python: src.analysis.twin_command_change
     firmware: []
     standing: composition

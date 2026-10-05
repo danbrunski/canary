@@ -17,9 +17,10 @@
 schema_version: 1
 contract_version: 1
 name: engine_sim_contract
-# The plant implementation a scenario's results come from. No plant exists
-# yet; E07.3 replaces this with the first fuel-response plant's version.
-plant_version: unbuilt-0
+# The plant implementation a scenario's results come from: E07.3's mean-value
+# fuel plant (src/analysis/fuel_plant.py, fuel_plant.yaml plant_version; the
+# two are cross-checked by check_against_contract).
+plant_version: fuel-mv-1
 
 units:
   - {id: rpm, dimension: angular_speed, meaning: 'revolutions per minute'}

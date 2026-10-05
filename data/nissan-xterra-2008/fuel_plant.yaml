@@ -1,0 +1,337 @@
+# E07.3 -- the first fuel-response plant for this vehicle (mean-value fuel and
+# mixture), its parameter registry, the drive split, the predeclared held-out
+# bounds and the frozen baseline hardware parameter set.
+#
+# Schema: src/analysis/fuel_plant.py (FuelPlantProfile); evaluation:
+# src/analysis/fuel_plant_eval.py; reproduce with
+#   .venv/bin/python -m tools.fuel_plant_check --rom <plain image>
+# Physics is generic; every number below is this truck's.
+#
+# Contract: data/nissan-xterra-2008/engine_sim_contract.yaml (E07.1). Its
+# hardware configuration's parameters must appear here with the same status
+# (check_against_contract); this registry declares more.
+schema_version: 1
+plant_version: fuel-mv-1
+hardware_configuration: na_stock_injectors_2026_10
+
+geometry:
+  cylinders: 6
+  displacement_l: 3.954      # VQ40DE, EM-134
+  strokes: 4
+  banks: 2
+
+specs:
+  pulse: 'did:ECM_INJECTOR_PULSE_1'          # injector index 0 = bank 1, Ts included
+  rpm: 'obd:RPM'
+  maf: 'obd:MAF'
+  lambda_observed: 'obd:O2_WR_LAMBDA_S1'     # bank 1 A/F sensor, ECM's altitude-corrected lambda
+  baro: 'obd:BAROMETRIC_PRESSURE'
+  intake_temp: 'obd:INTAKE_TEMP'
+  coolant: 'obd:COOLANT_TEMP'
+  battery_voltage: 'obd:CONTROL_MODULE_VOLTAGE'
+  rail_pressure: 'sensor:FUEL_PRESSURE'      # AEM gauge, kPa gauge, from 2026-10-04
+  bfs: 'did:ECM_AIR_CHARGE'
+  stft: 'obd:SHORT_FUEL_TRIM_1'
+  ltft: 'obd:LONG_FUEL_TRIM_1'
+  reference_phi: 'mem:ECM_TARGET_EQUIV_RATIO'
+  fuel_cut_reference: 'obd:COMMANDED_EQUIV_RATIO'
+
+# ECU command channels. Refused as plant inputs and as the observation: the
+# plant computes delivered lambda from air and fuel and is never handed the
+# target. reference_phi only labels the regime.
+command_specs:
+  - 'mem:ECM_TARGET_EQUIV_RATIO'
+  - 'obd:COMMANDED_EQUIV_RATIO'
+  - 'obd:COMMANDED_AFR'
+
+# B06's declaration, validated with its own Eligibility schema: the lambda
+# delay (read where it was frozen, never refitted), the closed-loop band and
+# the post-fuel-cut holdoffs. Every recording in either regime's informed_by
+# is refused as held-out evidence. The delay is the ENRICHMENT RAM-target
+# route's 0.10 s; the plant applies it to closed-loop reads and to pulse-DID
+# anchors too -- an extrapolation B06 did not measure (its closed-loop delay
+# is not_estimated), reported as a sensitivity over the 0-0.5 s bracket.
+delay:
+  file: lambda_delivery.yaml
+  regime: enrichment
+  source: ram_final_target
+
+pulse_chain:
+  dead_time_base: {address: 0x8C41, width: 1, value: 47}
+  dead_time_slope: {address: 0x84F2, width: 1, value: 92}
+  rail_reference: {address: 0x8A89, width: 1, value: 175}
+  flow_scaler: {address: 0x9254, width: 2, value: 10601}
+  vacuum_load_curve: 0xD627
+  vacuum_rpm_curve: 0xD637
+  dead_time_vref: 175
+  minimum_g: 246
+  check_bfs_lag_s: 0.5
+  check_bfs_span: 0.03
+  evidence: >-
+    docs/ecu-firmware-analysis.md "Injector pulse chain, dead time and the BFS
+    ceiling" (decompiler, 2026-10-05); the same in the UpRev base and every
+    tune. Values checked against ZS44A-20260920 by calibration_from_image.
+
+registry:
+  parameters:
+    # ---- the contract's six (same ids, same status)
+    - id: displacement
+      units: L
+      status: known
+      source: profile_fact
+      value: 3.954
+      evidence: 'VQ40DE 3,954 cc (EM-134).'
+    - id: injector_static_flow
+      units: g_per_s
+      status: requires_measurement
+      evidence: >-
+        Bosch EV14 0280158007, ~296 cc/min at 3 bar (vendor data, EC-500 part
+        number) is a datasheet prior for a new injector, not this truck's
+        injectors. Only its product with the MAF gain, fuel stoichiometry and
+        lambda gain is identifiable from logs (stoich_air_per_open_ms). Needs a
+        flow bench or an independent fuel-mass measurement.
+    - id: injector_dead_time
+      units: ms
+      status: requires_measurement
+      working_assumption:
+        value: 0.0
+        bracket: [-0.1, 0.1]
+        effect: injector_latency_unmeasured
+        basis: >-
+          Run as the ECM's own compensation Ts = max(0, 47 + ((175 - Vb) x 92)
+          >> 7) x 10 us plus this offset (0 = the injector opens as the ECM
+          believes). The bracket is a declared +-0.1 ms, not a measurement; it
+          matters most at idle (Te ~2 ms -> ~5 %), least at WOT (~1 %).
+      evidence: 'The ECM''s Ts is its compensation, not the injector''s measured latency.'
+    - id: rail_pressure_behaviour
+      units: kPa
+      status: identifiable
+      source: measurement
+      evidence: >-
+        sensor:FUEL_PRESSURE at 100 Hz since 2026-10-04 (the plant reads it per
+        sample as rail_pressure; anti-alias firmware from 21:52:33Z, so earlier
+        reads are window-median filtered).
+    - id: maf_transfer_bias
+      units: percent
+      status: requires_measurement
+      evidence: >-
+        No independent airflow reference. A MAF error and an injector-flow error
+        are the same number to lambda; it stays inside the airflow boundary and
+        inside stoich_air_per_open_ms, never assigned to the injector.
+    - id: lambda_observation_delay
+      units: s
+      status: requires_measurement
+      working_assumption:
+        value: 0.1
+        bracket: [0.0, 0.5]
+        effect: lambda_delay_weakly_supported
+        basis: >-
+          B06's frozen enrichment delay (lambda_delivery.yaml, RAM-target route,
+          sign test p = 0.11), restated here and checked equal at load; steady
+          regions dwell 2 s, so the plant's steady score barely moves across the
+          bracket (reported as a sensitivity).
+      evidence: 'B06.3/R05.16: weakly supported; never fitted on a test pull.'
+
+    # ---- what the plant also reads
+    - id: stoich_air_per_open_ms
+      units: g_per_ms
+      status: identifiable
+      source: log_fit
+      components: [injector_static_flow, fuel_stoich_afr, maf_transfer_bias, lambda_sensor_gain]
+      # 296 cc/min at 300 kPa -> 319.7 at 350 kPa (orifice law) x 0.745 g/cc
+      # / 60000 ms/min x 14.1 (E10) = 0.0560 g air per ms.
+      prior: 0.0560
+      evidence: >-
+        Grams of stoichiometric air per ms of effective open time at the
+        reference differential pressure, as MAF, the pulse and PID 0x24 see it.
+        Fitted on identification drives only (median of steady-region medians
+        of lambda_pred(s=1)/lambda_obs). It is a product: none of its
+        components is identified by it.
+    - id: fuel_stoich_afr
+      units: ratio
+      status: requires_measurement
+      working_assumption:
+        value: 14.1
+        bracket: [14.0, 14.7]
+        effect: fuel_blend_unmeasured
+        basis: 'Pump gasoline, E10 assumed (E0 14.7). Moves fuel grams only, never lambda.'
+      evidence: 'Ethanol content of the tank is not measured.'
+    - id: lambda_sensor_gain
+      units: ratio
+      status: requires_measurement
+      evidence: >-
+        PID 0x24 is the ECM's own lambda from the one bank-1 A/F sensor (with
+        its altitude gain); no external wideband has been logged, so its gain
+        stays inside stoich_air_per_open_ms.
+    - id: reference_delta_p
+      units: kPa
+      status: known
+      source: datasheet
+      value: 350.0
+      evidence: 'Returnless rail ~350 kPa (EC-494/EC-499); the lumped scale is defined at this dP.'
+    - id: injector_flow_exponent
+      units: ratio
+      status: known
+      source: physics
+      value: 0.5
+      evidence: >-
+        Incompressible orifice: flow ~ sqrt(dP). The ECM's own correction is the
+        same law (b1772 = 256 sqrt(350/(350 + vacuum)), linearised).
+    - id: rail_pressure
+      units: kPa
+      status: identifiable
+      source: measurement
+      working_assumption:
+        value: 350.0
+        bracket: [305.0, 371.0]
+        effect: rail_pressure_unmeasured
+        basis: >-
+          Used only for samples with no sensor:FUEL_PRESSURE (every drive before
+          2026-10-04). Value: the FSM's 350 kPa; bracket: the range the gauge
+          read on _capture-ram-study-2026-10-04T204557 (305-371 kPa).
+      evidence: 'sensor:FUEL_PRESSURE, window median over +-0.5 s, where logged.'
+    - id: manifold_pressure
+      units: volumetric_efficiency
+      status: requires_measurement
+      working_assumption:
+        value: 0.7
+        bracket: [0.4, 1.0]
+        effect: manifold_pressure_unmeasured
+        basis: >-
+          No MAP sensor on this engine. MAP is stated per sample by speed
+          density from the paired air charge and IAT at this volumetric
+          efficiency (capped at baro); the bracket spans idle-like to full
+          breathing and is a declared range, not a fit.
+      evidence: 'The contract states manifold pressure per operating point (plant_replay source: scenario).'
+    - id: bank_air_split
+      units: ratio
+      status: requires_measurement
+      working_assumption:
+        value: 0.5
+        bracket: [0.48, 0.52]
+        effect: bank_air_split_unmeasured
+        basis: 'Equal air per bank assumed; one MAF for both banks, no per-bank airflow measurement.'
+      evidence: 'Bank imbalance would show as a constant per-bank lambda offset; not separable from a per-bank injector offset.'
+
+# Which pulse reads are steady enough to score a mean-value plant on.
+steady:
+  window_s: 2.0
+  rpm_span: 0.08
+  maf_span: 0.15
+  pulse_span: 0.15
+  min_rpm_reads: 3
+  min_maf_reads: 3
+  min_pulse_reads: 2
+  min_coolant_c: 70.0
+  # The short-pulse correction (cal 0x9120-0x9126) acts after the DID and is
+  # not decoded; pulses with < 1 ms effective open time are excluded.
+  min_effective_pulse_ms: 1.0
+  lambda_rail: 1.9
+  fuel_cut_margin_counts: 2
+  region_gap_s: 2.5
+  pair_tolerance_s: 0.3
+  ecu_pair_tolerance_s: 0.1
+  reference_phi_max_age_s: 1.2
+  slow_max_age_s: 120.0
+  battery_max_age_s: 10.0
+  rail_window_s: 0.5
+  evidence: >-
+    A 2 s window covers B06's whole delay bracket (0-0.5 s) four times over,
+    and its 3-poll steady-target logic at ~1.5 Hz pulse reads; spans are the
+    pulse-chain check's steadiness (rpm, BFS within a few percent) widened
+    for MAF's own noise. The post-fuel-cut holdoffs (15 s closed loop, 6 s
+    enrichment) and the closed-loop phi band are read from B06's own schema
+    (load_b06), never copied here.
+
+# Declared before any held-out recording was scored (2026-10-05).
+# Recordings are whole drives; physical_drives() groups none of the held-out
+# ones with an identification one. B06's delay was fitted on the 09-21 pair,
+# so they identify and never test.
+split:
+  declared_on: 2026-10-05
+  identification:
+    - _capture-tuning-2026-09-21T223734
+    - _capture-tuning-2026-09-21T232153
+    - _capture-tuning-2026-09-23T164007
+  held_out:
+    - _capture-tuning-2026-09-22T170459
+    - _capture-tuning-2026-09-22T235224
+    - _capture-tuning-2026-09-23T142926
+    - _capture-ram-study-2026-10-04T204557
+  evidence: >-
+    All six 2026-09-21..23 tuning captures and the one 2026-10-04 capture with
+    rail pressure and a pulse DID at rate. Identification takes the drives B06
+    already used (its delay and eligibility constants), so the held-out drives
+    are untouched by any constant the plant reads; the 10-04 capture is the
+    only one with measured rail pressure and is held out whole.
+
+acceptance:
+  declared_on: 2026-10-05
+  pooled_median_abs_pct: 2.0
+  sample_abs_p90_pct: 8.0
+  region_abs_pct: 4.0
+  region_pass_fraction: 0.85
+  enrichment_median_abs_pct: 3.0
+  min_regions: 20
+  min_enrichment_regions: 3
+  bootstrap_resamples: 2000
+  bootstrap_level: 0.9
+  seed: 20261005
+  evidence: >-
+    Set from the identification drives only: there the per-sample spread of the
+    fitted scale is about p10/p90 -6/+8 %, B06's closed-loop residual is
+    about +-4 % p05/p95, and the pulse chain's own per-sample scatter is
+    p10/p90 0.96/1.03. Fuel error is the same information inverted
+    (100 (lambda_obs/lambda_pred - 1)) and is held to the same bounds, not
+    counted as a second test.
+
+# The baseline hardware parameter set, frozen 2026-10-05 -- sha256 (computed by
+# BaselineParameterSet.sha256, never supplied):
+#   6aec1db556989cc693dcf226a3017478c58a19c6c54abf251d9fe9a916e09220 from
+# `tools.fuel_plant_check identify` on split.identification (calibration
+# ZS44A-20260920 on all three), before any held-out recording was scored and
+# before any other ROM is compared. Change the hardware (injectors, pump,
+# supercharger) -> a new hardware_configuration and a new set, never an edit.
+baseline:
+  id: na-stock-2026-10-05.1
+  frozen: true
+  frozen_on: 2026-10-05
+  plant_version: fuel-mv-1
+  hardware_configuration: na_stock_injectors_2026_10
+  fitted_on:
+    - _capture-tuning-2026-09-21T223734
+    - _capture-tuning-2026-09-21T232153
+    - _capture-tuning-2026-09-23T164007
+  revisions: [ZS44A-20260920]
+  values:
+    stoich_air_per_open_ms: 0.051063
+  intervals:
+    stoich_air_per_open_ms: [0.050591, 0.051501]
+  method: >-
+    Median over 89 steady regions of the region median of
+    lambda_pred(s = 1) / lambda_obs (766 pulse reads); 90 % interval from 2000
+    bootstrap resamples of regions (seed 20261005). Working assumptions at
+    their central values (dead-time offset 0, rail 350 kPa, VE 0.7, equal
+    banks, delay 0.10 s).
+  fit_summary:
+    n_samples: 766
+    n_regions: 89
+    sample_p10: 0.047481
+    sample_p90: 0.055408
+    session_median_min: 0.049479
+    session_median_max: 0.052351
+    fit_over_datasheet_prior: 0.9118
+    note: >-
+      9 % below the EV14 datasheet x E10 stoich prior (0.0560). Unassigned: a
+      MAF reading low, injectors flowing less than new, ethanol content and the
+      lambda sensor's gain are the same number here.
+
+# Held-out recordings already scored, and against which baseline. Written by
+# `tools.fuel_plant_check evaluate`. A recording here is never held-out
+# evidence for another baseline or plant_version: the profile refuses to load
+# with it in split.held_out then, and evaluate() refuses to score it.
+spent_held_out:
+  - {recording: _capture-ram-study-2026-10-04T204557, baseline_id: na-stock-2026-10-05.1, baseline_sha256: 6aec1db556989cc693dcf226a3017478c58a19c6c54abf251d9fe9a916e09220, plant_version: fuel-mv-1, scored_on: 2026-10-05}
+  - {recording: _capture-tuning-2026-09-22T170459, baseline_id: na-stock-2026-10-05.1, baseline_sha256: 6aec1db556989cc693dcf226a3017478c58a19c6c54abf251d9fe9a916e09220, plant_version: fuel-mv-1, scored_on: 2026-10-05}
+  - {recording: _capture-tuning-2026-09-22T235224, baseline_id: na-stock-2026-10-05.1, baseline_sha256: 6aec1db556989cc693dcf226a3017478c58a19c6c54abf251d9fe9a916e09220, plant_version: fuel-mv-1, scored_on: 2026-10-05}
+  - {recording: _capture-tuning-2026-09-23T142926, baseline_id: na-stock-2026-10-05.1, baseline_sha256: 6aec1db556989cc693dcf226a3017478c58a19c6c54abf251d9fe9a916e09220, plant_version: fuel-mv-1, scored_on: 2026-10-05}

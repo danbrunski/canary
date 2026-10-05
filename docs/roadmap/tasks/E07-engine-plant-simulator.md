@@ -251,7 +251,7 @@ supercharger is a hardware intervention with a new plant parameter set.
     caller-supplied: no `daemon.*` path is declared until E07.7 runs it as a
     Pi job.
 
-- [ ] **E07.3 — Build and identify the first fuel-response plant.**
+- [~] **E07.3 — Build and identify the first fuel-response plant.**
   Implement air/fuel mass accounting, injector command-to-fuel conversion
   including dead time and supported differential-pressure dependence, and
   the observation model for measured lambda. Reuse B06's acquisition and
@@ -265,6 +265,141 @@ supercharger is a hardware intervention with a new plant parameter set.
   report uncertainty and coverage. Missing pressure/injector evidence makes
   the corresponding effect unresolved. Target AFR is never copied into
   measured lambda to manufacture agreement.
+  *Partial 2026-10-05: plant built and identified, baseline frozen. It fails
+  its own bounds in-sample as well as held out, so the plant's structure is
+  wrong; this is not a generalisation gap.*
+  - **Code.**
+    - The physics is `src/analysis/fuel_plant.py`, generic and in layer 5:
+      air per cylinder event, injector dP = rail gauge + baro − MAP, a √dP
+      orifice law, Te = Ti − Td, λ = air / (s·f(dP)·Te), and fuel grams =
+      stoich-air equivalent / AFRₛ.
+    - The ECM's own integer pulse chain is `src/analysis/injector_pulse.py`.
+      Its 16-point curve goes through `ecu_state_models.byte_curve16`.
+      `dead_time_counts`, `pressure_correction_word` and `predict_pulse` are
+      listed, with their widths, in the `data/ecu_twin_contract.yaml`
+      inventory as Python-only kernels.
+    - Samples, identification and evaluation are
+      `src/analysis/fuel_plant_eval.py`.
+    - The Xterra profile is `data/nissan-xterra-2008/fuel_plant.yaml`
+      (`plant_version: fuel-mv-1`; the contract now names it).
+    - `python -m tools.fuel_plant_check chain|identify|evaluate` reproduces
+      every number below offline.
+  - **Registry.** The contract's six parameters keep the same ids and
+    statuses (`check_against_contract` returns nothing), and nine more are
+    declared.
+    - Only the lumped `stoich_air_per_open_ms` is identifiable. It is the
+      product of injector flow, AFRₛ, λ gain and 1/MAF gain.
+    - The registry refuses a component that claims to be log-fitted while any
+      other component is not independently known. So MAF bias cannot be
+      absorbed into injector flow and both called measured.
+    - A parameter that `requires_measurement` carries no value. It runs under
+      a bracketed `working_assumption` that names an unresolved effect:
+      dead-time offset vs the ECM's Ts ±0.1 ms; rail 350 kPa [305, 371] where
+      it is not logged; MAP by speed density at VE 0.7 [0.4, 1.0]; bank
+      split; AFRₛ; and the λ delay.
+  - **B06, through its own schema.** `load_b06` validates the `eligibility`
+    block with B06's `Eligibility` schema. It takes three things from it:
+    - **The frozen delay:** 0.10 s, bracket 0–0.5. A delay that is not frozen
+      is refused, and so is one that differs from B06.
+    - **The closed-loop band:** 0.01.
+    - **The post-fuel-cut holdoffs:** 15 s closed loop, 6 s enrichment.
+
+    Every recording in either regime's `informed_by` is refused as held-out
+    evidence (`leaked_b06`). B06's whole-file `load_lambda_delivery` cannot
+    load the committed `lambda_delivery.yaml` against the working tree's
+    uncommitted `lambda_delivery.py` (required `sensor` / `relation` fields),
+    so it is not used.
+
+    **Extrapolation:** 0.10 s was fitted on enrichment RAM-target reads. The
+    plant applies it to closed-loop reads and to injector-pulse anchors as
+    well, where B06 estimated no delay. Over the bracket the steady score
+    moves by less than 0.05 %.
+  - **Ground truth (ECM chain).** The check is (DID 0x1206 − Ts) / predicted
+    pulse, per sample, on the six tuning captures. φ comes from
+    `mem:ECM_TARGET_EQUIV_RATIO` (bracketed reads), with BFS steady within
+    3 % over 0.5 s.
+    - Result: n = 2,361, median **1.0084**, p10–p90 0.958–1.025. The firmware
+      session had 1.006 and 0.961–1.030.
+    - Negative control, with the ECM's pressure correction removed: median
+      **0.936**, p10–p90 0.891–0.968. That is outside [0.98, 1.04].
+    - Tests: `test_the_decoded_chain_reproduces_the_logged_pulse_per_sample`
+      and `test_removing_the_pressure_correction_fails_the_known_answer` in
+      `tests/test_injector_pulse.py`. Both skip without the private image.
+    - **This does not verify Ts.** Ts is the session's own fuel-cut pulse
+      word (there is no PID 0x42 on these captures). It is subtracted from the
+      measured side, and the prediction excludes it. The check covers G·k
+      only. The Ts formula is checked only on 46 fuel-cut reads (±2 counts).
+      The injector's physical latency is not checked at all.
+  - **Split.** Declared before anything was scored.
+    - Enforced: `check_drive_independence` groups the split with
+      `physical_drives` and refuses a drive that has recordings on both sides
+      (`leaked_drive`). The split is seven separate drives.
+    - Identification: the 09-21 pair and 09-23T164007.
+    - Held out: 09-22T170459, 09-22T235224, 09-23T142926 and the 10-04
+      ram-study.
+    - Bounds, also declared before scoring: |pooled median| ≤ 2 %, sample
+      |err| p90 ≤ 8 %, ≥ 85 % of regions within ±4 %, and enrichment
+      |median| ≤ 3 % (at least 3 regions).
+  - **Frozen baseline `na-stock-2026-10-05.1`** (sha256 `6aec1db5…09220`).
+    - s = **0.051063 g air/ms**, 90 % interval 0.050591–0.051501, from 89
+      regions and 766 reads.
+    - That is 0.912 × the datasheet/E10 prior. The 9 % is not assigned to
+      any component.
+    - The baseline, split, bounds and spent ledger are committed with this
+      result.
+  - **In-sample, on the identification drives (`identify`):** fails its own
+    bounds.
+    - Sample |err| p90 is 12.17 %, against a bound of 8 %.
+    - Region pass fraction is 0.584, against 0.85.
+    - The null model λ ≡ 1 does better, with |err| p90 3.35 %.
+  - **Held-out (`evaluate`, 845 reads, 137 regions): FAIL.**
+    - Passed: pooled median +1.69 %, and region median-of-medians +1.32 %
+      (CI 0.64–1.95). Enrichment is −1.54 % (4 regions, 10 reads).
+    - Failed: sample |err| p90 is 11.7 %, and the region pass fraction is
+      0.62.
+    - The null model λ ≡ 1 has |err| p90 2.33 %.
+    - Per drive, the median error is +4.96 %, +0.69 % and +1.79 %.
+    - Median error by MAF band (`median_error_by_maf_band_pct`):
+
+      | MAF band | Median error | Reads |
+      |---|---|---|
+      | under 5 g/s | +1.70 % | 614 |
+      | 5–10 g/s | +1.04 % | 24 |
+      | 10–20 g/s | +22.2 % | 14 |
+      | 20–40 g/s | +7.0 % | 25 |
+      | 40–80 g/s | +0.85 % | 157 |
+      | over 80 g/s | −0.55 % | 11 |
+
+    - Sensitivity of the median: dead-time ±0.1 ms gives −4.4/+5.4 %; rail
+      bracket +6.4/−2.6 %; VE +1.5/−1.2 %; bank split ±4.1 %.
+    - Coverage is 15 % of fuelled warm reads.
+    - The 10-04 ram-study contributed nothing: 188 reads are
+      `not_co_observed` (Mode 22 and Mode 01 polled apart) and 5 are
+      `missing_input`.
+  - **Spent drives.** `evaluate` returns the recordings it scored. The CLI
+    appends them to `spent_held_out`; all four held-out recordings are now
+    there against `6aec1db5…`. The profile refuses to load with a spent
+    recording held out under any other baseline or plant_version, and
+    `evaluate` refuses to score one (`spent_held_out`).
+  - **Accept items met:**
+    - conservation, units and limiting cases (`tests/test_fuel_plant.py`,
+      23 pass);
+    - every read has a named state;
+    - the target is refused as an input;
+    - missing rail or MAP data names `rail_pressure_unmeasured` /
+      `manifold_pressure_unmeasured`;
+    - an unfrozen baseline and leaked drives, B06 recordings or spent drives
+      are refused.
+  - **Remaining:**
+    1. A revised plant structure, with a new `plant_version`, a new baseline
+       and newly declared bounds. The in-sample failure points at the
+       idle/short-pulse region and the 10–40 g/s tail. It must then pass
+       on **never-scored held-out drives** (truck). The four above are spent.
+       Log PID 0x42 with the pulse DIDs on those drives, so that Ts is not
+       taken from fuel-cut reads.
+    2. A tuning-profile drive that logs the AEM rail pressure with the pulse
+       DID (truck). No such drive exists yet.
+    3. MAP, injector flow and injector latency still require measurement.
 
 - [ ] **E07.4 — Validate from telemetry and an actual intervention.**
   Inventory raw command, MAF/rpm, lambda, thermal/barometric, voltage and
