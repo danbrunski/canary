@@ -372,7 +372,7 @@ def test_an_in_place_rewrite_on_the_same_inode_is_reread(tmp_path: Path) -> None
 _RACER = """
 import sys, time
 from pathlib import Path
-sys.path.insert(0, {root!r})
+# `python -c` run with cwd=REPO_ROOT already has the checkout on its path.
 from src.evidence import MemoryLedger, ledger as lm
 from tests.test_evidence_memory import _evidence
 ledger = MemoryLedger(Path({path!r}), vehicle="truck")
@@ -395,7 +395,7 @@ def test_two_processes_recomputing_at_once_leave_one_current_record(tmp_path: Pa
     ledger = _ledger(tmp_path)
     base = ledger.append(_evidence())
     assert isinstance(base, Evidence)
-    code = _RACER.format(root=str(REPO_ROOT), path=str(ledger.path))
+    code = _RACER.format(path=str(ledger.path))
     racers = [
         subprocess.Popen(
             [sys.executable, "-c", code, char],
