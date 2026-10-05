@@ -573,6 +573,29 @@ dids:
           decoder: UpRev's K-line "A/F WB-B1 (V)" spanned 0.57–5.065 V over a
           drive where this DID at x0.005 spanned 0.97–5.07 V. Scaling was
           previously resting on a single NT510 comparison.
+      - session: firmware-ZS44A-20260920
+        method: disassembly
+        transport: can
+        finding: >
+          The CAN Mode 22 handler sends DID high byte 0x12 to pointer table
+          0x24B84; entry 0x25 is the RAM word 0xFFFF2C02 (2 bytes). The
+          K-line table 0x22938 gives the same word. 0xFFFF2C02 = AN8 - the
+          10-sample mean of AN11 (clamped 440..460) + 440: 10-bit counts
+          re-referenced to a nominal 440 (2.2 V), unfiltered and unscaled, so
+          x0.005 V is the ECM's own 5 mV-per-count convention. Bank 1 by the
+          code's own fault items: this sensor index reports P0131/P0132.
+    notes: |
+      The raw A/F sensor voltage word, before any correction. The ECM's
+      lambda (mem:ECM_AF_LAMBDA_B1, which Mode 01 PID 0x24 A,B reports a
+      cycle later) is computed from 2 x this word through a barometric gain
+      (k, mem:ECM_AF_BARO_GAIN_K), the AFR table 0xE644, a learned offset
+      (mem:ECM_AF_LEARNED_OFFSET_B1) and a small rpm x load offset. Converting
+      this word through a fixed voltage curve skips the gain, so at this
+      truck's altitudes it reads lean of PID 0x24 (+1.5 % at lambda 0.85-0.90,
+      +3.9 % at 0.70-0.80, at ~81 kPa).
+
+      PID 0x24's voltage bytes C,D are raw AN8 x 0.0050024 V, not this word:
+      they read about 0.02-0.05 V higher (the re-reference).
 
   - did: 0x1226
     name: ECM_AF_SENSOR_V_B2
@@ -598,6 +621,20 @@ dids:
       - session: 2026-05-16T223328
         method: four_state_plus_nt510_name
         finding: x0.005 ≈ 2.15 V; NT510 "A/F sen1 b2" = 2.15. Pairs with 0x1225 (≈ equal banks).
+      - session: firmware-ZS44A-20260920
+        method: disassembly
+        transport: can
+        finding: >
+          CAN pointer table 0x24B84 entry 0x26 is the RAM word 0xFFFF2C04 (2
+          bytes), as is the K-line table 0x22938's. 0xFFFF2C04 = AN20 - the
+          10-sample mean of AN23 (clamped 440..460) + 440, the same form as
+          bank 1's word. Bank 2 by the code's own fault items: this sensor
+          index reports P0151/P0152.
+    notes: >
+      The raw bank-2 A/F voltage word. The corrected lambda is
+      mem:ECM_AF_LAMBDA_B2 (Mode 01 PID 0x28 A,B a cycle later); see 0x1225's
+      notes for the chain and the altitude bias of a fixed voltage curve.
+      PID 0x28's C,D bytes are raw AN20, not this word.
 
   - did: 0x120F
     name: ECM_THROTTLE_POS_SENSOR_1
@@ -1387,9 +1424,11 @@ dids:
 
       Nissan computes MBT internally and the ROM exposes only a trim, so this
       is the FINAL commanded timing after trim and any knock feedback -- it is
-      the mapped-vs-logged comparison the tuning work needs, and the only
-      knock proxy this ECM offers (it does not stream knock; see
-      docs/roadmap/engine-tuning-support.md).
+      the mapped-vs-logged comparison the tuning work needs. It was once
+      called the only knock proxy this ECM offers; superseded 2026-10-05: the
+      knock retard and detection state are RAM, catalogued under memory (the
+      knock_* windows, hypothesized until a key-on read passes; D03.38), and
+      the firmware writes this register as 110 - mem:ECM_IGNITION_TIMING_FINAL.
 
   # ---- CAN DID table corrections, 2026-10-04 ------------------------------
   # 0x1102 and 0x1123-0x1126 were named from UpRev's K-LINE stream definition
@@ -2124,15 +2163,20 @@ memory:
     plausible_min: 0
     plausible_max: 5
     notes: >
-      Committed UpRev map 1-5. 0 after a cold boot means slot 1 loaded by
-      default and not yet re-selected (the init copies slot 1 without
-      writing this byte).
+      Committed UpRev map 1-5. 0 after a cold boot because the init zeroes
+      this byte before it copies slot 1, and it stays 0 (not 1) until a map is
+      selected: 0 means "slot 1, loaded by the init, not yet re-selected".
     evidence:
       - session: firmware-ZS44A-20260920
         method: disassembly
         finding: >
-          Written only by the slot copy at 0x0DE3E4, after clamping the selector
-          to 1-5, alongside the 2 KiB copy into 0xFFFFB040.
+          Written by the slot copy at 0x0DE3E4, after clamping the selector
+          to 1-5, alongside the 2 KiB copy into 0xFFFFB040. Also zeroed by
+          UpRev's init (0x0DE1BC-0x0DE1CE): when the magic at 0xFFFFB004 is
+          not 0xAA5555AA (a cold init) it writes the magic, zeroes the longs
+          at 0xFFFFB000, 0xFFFFB008 and 0xFFFFB00C, then copies slot 1 from
+          0xE0000. (Corrected 2026-10-05: an earlier version said the slot
+          copy was the only writer and the init left this byte alone.)
       - session: _capture-ram-study-2026-10-04T204557
         method: live_drive_check
         finding: >
@@ -2217,9 +2261,66 @@ memory:
       transient, and the decoded chain predicts about 110 at that instant.
       To test the whole chain on one instant, read 0xFFFF2CC8, 2C32, 63FC,
       139E, 116A, 2136, 118A, 225A, 105C and 103A in one memory window.
-  # Flag bytes: bit 0 of 0xFFFF2841 is the pedal-switch enrichment flag that
-  # forces the Target AFR lookup to its last BFS column; a bit of 0xFFFF2842
-  # selects between the two timing-trim tables (slot +0x020 / +0x120).
+  # Flag bytes, one 7-byte read 0xFFFF283C-2842 (window name kept from when it
+  # held only 2841/2842: capture profiles select channels by name and a read
+  # is planned from the selected members only, so widening it changes no saved
+  # profile's request). 283C bit 2 is the Fuel Comp load-input transient flag;
+  # 283F bit 6 is the HI DET latch, which also selects the timing-trim table
+  # (set -> trim B +0x120, clear -> trim A +0x020); bit 0 of 2841 is the
+  # pedal-switch enrichment flag that forces the Target AFR lookup to its last
+  # BFS column; 2842 bit 2 gates the knock controller's trim-difference branch.
+  # (Corrected 2026-10-05: 2842 was recorded here as the trim selector.)
+  - name: ECM_FUEL_TRANSIENT_FLAGS
+    address: 0xFFFF283C
+    length: 1
+    byte_length: 1
+    confidence: hypothesized
+    verified_tune_revision: ZS44A-20260920
+    window: flags_2841
+    evidence:
+      - session: firmware-ZS44A-20260920
+        method: disassembly
+        finding: >
+          Bit 2 is the Fuel Comp load-input transient flag: set when
+          mem:ECM_FUEL_COMP_X_INPUT (0xFFFF118A) has changed by >= 11 over its
+          5-sample history (0x3CDFC). Bit 3 selects the manifold-filling
+          filter coefficient (alpha): the 8x8 tables 0x9B99/0x9BD9 when set,
+          the constant cal 0x9066 (0x333) when clear. Neither has been read
+          live.
+  - name: ECM_HIGH_DET_FLAGS
+    address: 0xFFFF283F
+    length: 1
+    byte_length: 1
+    confidence: hypothesized
+    verified_tune_revision: ZS44A-20260920
+    window: flags_2841
+    evidence:
+      - session: firmware-ZS44A-20260920
+        method: disassembly
+        finding: >
+          Bit 6 is the High Det latch (UpRev's "HI DET"). It latches from
+          EITHER the knock-sensor fault flag (mem:ECM_KS_FAULT_FLAGS bit 7)
+          OR the accumulated-knock metric (mem:ECM_KNOCK_HIGHDET_METRIC)
+          crossing +8192, so a set bit is not by itself a fault: it is normal
+          protection when the fault flag is clear. 0xFFFF2840 is the previous
+          cycle's copy.
+      - session: firmware-ZS44A-20260920
+        method: disassembly
+        finding: >
+          The same bit selects the timing-trim table. The trim lookup (task
+          66, FUN_0004e6d8) loads trim B (0xFFFFB160, slot +0x120) by default,
+          reads this byte, and `tst #0x40` at 0x04E6FE skips the switch to
+          trim A (0xFFFFB060, slot +0x020) at 0x04E702 when bit 6 is set. So
+          set -> trim B (the High Det table), clear -> trim A. Checked by the
+          orchestrator and in this edit against the listing, 2026-10-05.
+    notes: |
+      Doubly worth logging: bit 6 is both the knock HI DET latch and the
+      timing-trim selector. Read it before any timing-trim edit (N01.2) to
+      know which table is running.
+
+      Known answer (not expressible as a DID relation): if bit 6 is set
+      while mem:ECM_KS_FAULT_FLAGS bit 7 is clear, HI DET came from
+      accumulated knock (mem:ECM_KNOCK_HIGHDET_METRIC >= 8192), not a fault.
   - name: ECM_PEDAL_ENRICH_FLAGS
     address: 0xFFFF2841
     length: 1
@@ -2249,8 +2350,41 @@ memory:
       - session: firmware-ZS44A-20260920
         method: disassembly
         finding: >
-          A bit here gates which of the two 16x16 timing-trim tables (slot
-          +0x020 or +0x120) is read; probably Main vs High Det.
+          Bit 2 gates the knock controller's trim-difference branch (task 67;
+          0x04A512 reads this byte, `tst #4`, and a set bit branches past
+          it to 0x04A8B6). The branch runs only with this bit CLEAR and
+          0xFFFF2840 bit 6 SET (`tst #0x40` at 0x04A51E, `bf` into it), and
+          then sets the knock retard 0xFFFF1254 to 0xFFFF13FE + ((trim A -
+          trim B) << 8). The same task then copies 0xFFFF2840 bit 6 into this
+          bit (0x04A5D2-0x04A5FE), so the branch fires on the one cycle
+          2840 bit 6 rises. 0xFFFF2840 is the cycle snapshot of 0xFFFF283F
+          (written at 0x021220 from a 283F read), i.e. the HI DET latch one
+          cycle late. Checked against the listing, 2026-10-05.
+      - session: _capture-ram-study-2026-10-04T204557
+        method: live_drive_check
+        finding: >
+          0x04 (bit 2 set) on every read of the 2026-10-04 drive, so the
+          trim-difference branch was bypassed all drive.
+    evidence_against:
+      - session: firmware-ZS44A-20260920
+        method: disassembly
+        finding: >
+          Recorded until 2026-10-05 as "a bit here gates which of the two
+          16x16 timing-trim tables (slot +0x020 or +0x120) is read". Wrong:
+          the trim lookup FUN_0004e6d8 selects the table on 0xFFFF283F bit 6
+          (mem:ECM_HIGH_DET_FLAGS) and never reads this byte for it.
+    notes: |
+      The name is historical and now wrong: this byte does not select the
+      timing-trim table, 0xFFFF283F bit 6 does (mem:ECM_HIGH_DET_FLAGS).
+      Renaming it is a channel rename (tools/channel_renames), left to its own
+      change so saved profiles migrate with it.
+
+      Inference, not yet checked: bit 2 is the knock task's lagged copy of
+      the HI DET latch, so 0x04 on every 2026-10-04 read suggests HI DET was
+      set, and timing trim B (the High Det table) selected, for the whole
+      drive. Other routines also write this byte, and nobody has shown they
+      leave bit 2 alone, so read 0xFFFF283F directly (mem:ECM_HIGH_DET_FLAGS)
+      before relying on it.
   # The discrete input the UpRev map switch watches (bits 1 and 3).
   - name: ECM_MAP_SELECT_INPUT
     address: 0xFFFF2EE0
@@ -2265,3 +2399,893 @@ memory:
         finding: >
           0x0DE358 reads this byte & 0x0A, debounces through 0xFFFFB002 and steps
           the selector on a transition.
+
+  # --- Knock monitoring, from the firmware (2026-10-05) --------------------
+  # docs/ecu-firmware-analysis.md "Knock monitoring (observation only)".
+  # Knock control is ACTIVE in this image. The four knock-sensor fault items
+  # (0xAA-0xAD, P0327/P0328/P0332/P0333) are never listed by generic Mode
+  # 03/07 (their config word lacks bit 0x80), so these RAM flags are the only
+  # knock-sensor health monitor CANary has. Every value here is RAM, reset at
+  # engine stop, and exposed by no Mode 01 PID, Mode 22 DID or Mode 06 MID.
+  #
+  # Code-verified, NOT yet read live: `confidence: hypothesized` until a
+  # key-on read (KOEO, warm idle, one light pull) shows each behaving as the
+  # code says. Not in any capture profile until that read passes. Most of
+  # the known answers are relations between RAM words, which
+  # `MemoryKnownAnswer` cannot express (it checks a word against a DID);
+  # each is stated exactly in the channel's notes, and
+  # tools/verify_memory_channels reports those channels as unverifiable.
+  # Cylinder indexes are the firmware's 1-6 firing counter (0xFFFF11FC):
+  # odd -> knock sensor 1 / bank 1, even -> sensor 2 / bank 2 (verified);
+  # that the index equals the cylinder number is inferred, hence `_IDX<n>`.
+  #
+  # knock_chain: retard -> final timing, one 14-byte read 0xFFFF232E-233B.
+  - name: ECM_IGNITION_TIMING_FINAL
+    address: 0xFFFF232E
+    length: 1
+    byte_length: 1
+    signed: true
+    scale: 1.0
+    offset: 0.0
+    unit: degBTDC
+    confidence: hypothesized
+    # The rate limiter clamps it to -7..50 before the store.
+    plausible_min: -7.0
+    plausible_max: 50.0
+    verified_tune_revision: ZS44A-20260920
+    window: knock_chain
+    known_answer:
+      did: 0x110A
+      relation: linear_did
+      word_scale: 1.0
+      did_scale: -1.0
+      did_offset: 110.0
+      tolerance: 0.0
+      min_agreement: 0.90
+      notes: >
+        final timing = 110 - DID 0x110A raw. DID 0x110A is 0xFFFF11FF, which
+        the per-segment chain writes as 110 - this byte on its normal path.
+        0.90 for the same acquisition skew as mem:ECM_IGNITION_TIMING_RAM
+        (two requests ~1.5 ms apart while timing moves); the writer also has
+        special-mode branches (a forced value, a 120 base) that break the
+        relation by design.
+    evidence:
+      - session: firmware-ZS44A-20260920
+        method: disassembly
+        finding: >
+          s8 degrees BTDC: the rate-limited final timing (task chain per
+          120 degCA segment). The applied retard combines into base timing
+          at 0xFFFF2338, saturates into 0xFFFF1346, and reaches this byte
+          rate-limited (in normal running +4 / -15 degrees per segment),
+          capped at 50 and floored at -7.
+          0xFFFF11FF = 110 - this byte is what DID 0x110A and
+          mem:ECM_IGNITION_TIMING_RAM (its copy at 0xFFFF11C7) read.
+    notes: >
+      Final timing in degrees, same instant as the applied knock retard and
+      the base+retard sum in this window. Final timing minus base timing
+      shows the retard live. For timing on its own, DID 0x110A is the
+      calibration-independent route.
+  - name: ECM_KNOCK_RETARD_APPLIED
+    address: 0xFFFF2332
+    length: 2
+    byte_length: 2
+    signed: true
+    scale: 1.0
+    offset: 0.0
+    unit: deg
+    confidence: hypothesized
+    plausible_max: 0.0
+    verified_tune_revision: ZS44A-20260920
+    window: knock_chain
+    evidence:
+      - session: firmware-ZS44A-20260920
+        method: disassembly
+        finding: >
+          s16 whole degrees, <= 0. While knock control is active (0xFFFF28AD
+          bit 5 or 0xFFFF28B3 bit 1) it is min(mem:ECM_KNOCK_RETARD_DEG,
+          -0xFFFF1215); otherwise -0xFFFF1215, where 0xFFFF1215 is a
+          separate non-knock retard (u8 degrees).
+  - name: ECM_TIMING_SUBTRACT_TERM
+    address: 0xFFFF2334
+    length: 2
+    byte_length: 2
+    scale: 1.0
+    offset: 0.0
+    unit: deg
+    confidence: hypothesized
+    verified_tune_revision: ZS44A-20260920
+    window: knock_chain
+    evidence:
+      - session: firmware-ZS44A-20260920
+        method: disassembly
+        finding: >
+          u16 degrees, subtracted in the pre-limit sum: 0xFFFF1346 =
+          sat_s8(0xFFFF2338 + 0xFFFF272A - this word). Its own inputs are not
+          decoded.
+  - name: ECM_TIMING_BASE_PLUS_RETARD
+    address: 0xFFFF2338
+    length: 4
+    byte_length: 4
+    signed: true
+    scale: 1.0
+    offset: 0.0
+    unit: deg
+    confidence: hypothesized
+    verified_tune_revision: ZS44A-20260920
+    window: knock_chain
+    evidence:
+      - session: firmware-ZS44A-20260920
+        method: disassembly
+        finding: >
+          s32 degrees (read and written with 32-bit moves): base timing plus
+          the applied retard, 0xFFFF274E + mem:ECM_KNOCK_RETARD_APPLIED.
+    notes: >
+      Known answer (memory relation, not expressible): this word minus
+      mem:ECM_KNOCK_RETARD_APPLIED = 0xFFFF274E, the base-timing snapshot
+      (s8 degrees). 274E is 0x420 bytes away, so it needs its own read and is
+      not catalogued; across two reads the check is subject to skew. The sum
+      is only refreshed on the normal path, so it can hold a stale value
+      while another branch drives the pre-limit timing.
+  # knock_retard: learned and live retard, one 8-byte read 0xFFFF124E-1255.
+  - name: ECM_KNOCK_LEARN_LO_RPM
+    address: 0xFFFF124E
+    length: 2
+    byte_length: 2
+    signed: true
+    scale: 0.00390625   # raw / 256
+    offset: 0.0
+    unit: deg
+    confidence: hypothesized
+    verified_tune_revision: ZS44A-20260920
+    window: knock_retard
+    evidence:
+      - session: firmware-ZS44A-20260920
+        method: disassembly
+        finding: >
+          s16, 1/256 degree: learned knock retard below 3,000 rpm, updated at
+          <= 1 Hz, reset to 0 when the engine stops or loses sync or coolant
+          is below 60 degC. RAM only.
+  - name: ECM_KNOCK_LEARN_HI_RPM
+    address: 0xFFFF1250
+    length: 2
+    byte_length: 2
+    signed: true
+    scale: 0.00390625   # raw / 256
+    offset: 0.0
+    unit: deg
+    confidence: hypothesized
+    verified_tune_revision: ZS44A-20260920
+    window: knock_retard
+    evidence:
+      - session: firmware-ZS44A-20260920
+        method: disassembly
+        finding: >
+          s16, 1/256 degree: learned knock retard at or above 3,000 rpm; same
+          update rate and reset conditions as mem:ECM_KNOCK_LEARN_LO_RPM.
+  - name: ECM_KNOCK_LEARN
+    address: 0xFFFF1252
+    length: 2
+    byte_length: 2
+    signed: true
+    scale: 0.00390625   # raw / 256
+    offset: 0.0
+    unit: deg
+    confidence: hypothesized
+    verified_tune_revision: ZS44A-20260920
+    window: knock_retard
+    evidence:
+      - session: firmware-ZS44A-20260920
+        method: disassembly
+        finding: >
+          s16, 1/256 degree: the combined learned retard,
+          trunc(0xFFFF124E / 2) + trunc(0xFFFF1250 / 2).
+    notes: >
+      Known answer (same-reply memory relation, not expressible): raw =
+      trunc(LO_RPM raw / 2) + trunc(HI_RPM raw / 2) EXACTLY on every reply,
+      with trunc rounding toward zero. All three words are in this window,
+      so there is no acquisition skew to excuse a miss.
+  - name: ECM_KNOCK_RETARD
+    address: 0xFFFF1254
+    length: 2
+    byte_length: 2
+    signed: true
+    scale: 0.00390625   # raw / 256
+    offset: 0.0
+    unit: deg
+    confidence: hypothesized
+    plausible_max: 0.0
+    verified_tune_revision: ZS44A-20260920
+    window: knock_retard
+    evidence:
+      - session: firmware-ZS44A-20260920
+        method: disassembly
+        finding: >
+          s16, 1/256 degree, <= 0: the knock retard, one global value (there
+          is no per-cylinder retard on the path to the coil), written every
+          10.24 ms by the retard-control task. 0 at rest, dipping negative
+          only on a knock event.
+    notes: >
+      Known answers: <= 0 always (the plausible_max). mem:ECM_KNOCK_RETARD_DEG
+      = trunc(this raw / 256), but that byte is in the fuel_target window, so
+      the check crosses two reads and needs this word to hold still between
+      them.
+  # knock_target: the retard target and the accumulated-knock metric beside
+  # it, one 4-byte read 0xFFFF13FE-1401. A read is planned from the members a
+  # profile selects, so selecting only one of them still reads 2 bytes.
+  - name: ECM_KNOCK_RETARD_TARGET
+    address: 0xFFFF13FE
+    length: 2
+    byte_length: 2
+    signed: true
+    scale: 0.00390625   # raw / 256
+    offset: 0.0
+    unit: deg
+    confidence: hypothesized
+    verified_tune_revision: ZS44A-20260920
+    window: knock_target
+    evidence:
+      - session: firmware-ZS44A-20260920
+        method: disassembly
+        finding: >
+          s16, 1/256 degree: the retard target, every 10.24 ms. UpRev's
+          "Knock Strength" is inferred to read this word (its stream
+          definition frames were never captured). It takes 0xFB00 (-1280 =
+          -5.00 degrees) only in the branch where mem:ECM_KS_FAULT_FLAGS bit 7
+          is set: the knock-sensor fault fallback. The learned words are
+          never written 0xFB00, and the active branch's floor is -256 x
+          mem:ECM_KNOCK_RETARD_LIMIT.
+    notes: >
+      Known answer (cross-read flag relation, not expressible): raw == -1280
+      (0xFB00) if and only if mem:ECM_KS_FAULT_FLAGS bit 7 is set. -5.00
+      degrees is still the target in force during the fallback, so it decodes
+      as a value, not a sentinel; read the fault flag for the state.
+  - name: ECM_KNOCK_HIGHDET_METRIC
+    address: 0xFFFF1400
+    length: 2
+    byte_length: 2
+    signed: true
+    confidence: hypothesized
+    verified_tune_revision: ZS44A-20260920
+    window: knock_target
+    evidence:
+      - session: firmware-ZS44A-20260920
+        method: disassembly
+        finding: >
+          s16, unitless: the accumulated-knock metric. Crossing +8192 (with
+          hysteresis) latches the HI DET bit, mem:ECM_HIGH_DET_FLAGS bit 6,
+          which also switches the timing trim to the High Det table.
+    notes: >
+      One of the knock-fault reads (poll it slowly, about 1 Hz). Placed in
+      the knock_target window because it is the next word: when both are
+      selected one 4-byte read returns them together, at no extra bus cost.
+      Known answer (not expressible): HI DET set with mem:ECM_KS_FAULT_FLAGS
+      bit 7 clear means this metric crossed 8192.
+  # The whole-degree retard and its limit ride the existing fuel_target
+  # window, which becomes one 57-byte read 0xFFFF26AE-26E6 when they are
+  # selected with it (63-byte ceiling). Stamped ZS44A-k106 to match that
+  # window's members, with the carry stated: see revision_carried_reason.
+  - name: ECM_KNOCK_RETARD_DEG
+    address: 0xFFFF26D2
+    length: 1
+    byte_length: 1
+    signed: true
+    scale: 1.0
+    offset: 0.0
+    unit: deg
+    confidence: hypothesized
+    plausible_max: 0.0
+    verified_tune_revision: ZS44A-k106
+    revision_carried_reason: "Located in code on the ZS44A-20260920 image. Stamped ZS44A-k106 only because the fuel_target window, whose other members were verified on k106, may not mix calibrations. The two images differ only in Target AFR cell r7c4 and checksums (E02.6 image diff), so the program bytes this address was read from are identical. Not checked against a known answer."
+    window: fuel_target
+    evidence:
+      - session: firmware-ZS44A-20260920
+        method: disassembly
+        finding: >
+          s8 whole degrees: trunc(mem:ECM_KNOCK_RETARD raw / 256), every
+          10.24 ms. The value the per-segment chain combines into timing
+          (mem:ECM_KNOCK_RETARD_APPLIED).
+    notes: >
+      Known answers (memory relations, not expressible): this = trunc(0xFFFF1254
+      / 256) (cross-read, see mem:ECM_KNOCK_RETARD), and -this <=
+      mem:ECM_KNOCK_RETARD_LIMIT (same reply, exact).
+  - name: ECM_KNOCK_RETARD_LIMIT
+    address: 0xFFFF26E6
+    length: 1
+    byte_length: 1
+    scale: 1.0
+    offset: 0.0
+    unit: deg
+    confidence: hypothesized
+    plausible_min: 0.0
+    verified_tune_revision: ZS44A-k106
+    revision_carried_reason: "Located in code on the ZS44A-20260920 image. Stamped ZS44A-k106 only because the fuel_target window, whose other members were verified on k106, may not mix calibrations. The two images differ only in Target AFR cell r7c4 and checksums (E02.6 image diff), so the program bytes this address was read from are identical. Not checked against a known answer."
+    window: fuel_target
+    evidence:
+      - session: firmware-ZS44A-20260920
+        method: disassembly
+        finding: >
+          u8 degrees: the retard limit in force. On this calibration it takes
+          0, 6 or 9.
+    notes: >
+      Known answer (same-reply memory relation, not expressible):
+      -mem:ECM_KNOCK_RETARD_DEG <= this, on every reply.
+  # knock_detect: per-window detection, one 15-byte read 0xFFFF249A-24A8.
+  - name: ECM_KNOCK_EVENT_COUNT
+    address: 0xFFFF249A
+    length: 1
+    byte_length: 1
+    confidence: hypothesized
+    verified_tune_revision: ZS44A-20260920
+    window: knock_detect
+    evidence:
+      - session: firmware-ZS44A-20260920
+        method: disassembly
+        finding: >
+          u8: knock events since the retard task last ran; incremented per
+          detection window and cleared every 10.24 ms.
+  - name: ECM_KNOCK_WINDOW_INDEX
+    address: 0xFFFF249B
+    length: 1
+    byte_length: 1
+    confidence: hypothesized
+    plausible_min: 1
+    plausible_max: 6
+    verified_tune_revision: ZS44A-20260920
+    window: knock_detect
+    sentinel_raw: 0
+    sentinel_meaning: >
+      No crank sync: no knock window has been processed. A state, not
+      cylinder index 0.
+    evidence:
+      - session: firmware-ZS44A-20260920
+        method: disassembly
+        finding: >
+          u8: the 1-6 firing index of the knock window just processed (0 =
+          no sync). Odd -> knock sensor 1 / bank 1, even -> sensor 2 / bank 2.
+    notes: >
+      Known answer: raw in 0..6 on every read (0 is the sentinel, 1..6 the
+      plausible range); anything else means the address moved.
+  - name: ECM_KNOCK_THRESHOLD_IDX1
+    address: 0xFFFF249C
+    length: 2
+    byte_length: 2
+    confidence: hypothesized
+    verified_tune_revision: ZS44A-20260920
+    window: knock_detect
+    evidence:
+      - session: firmware-ZS44A-20260920
+        method: disassembly
+        finding: >
+          u16, unitless: the detection threshold in force for firing index
+          1 (0xFFFF249C + 2(c-1)), in the units of
+          mem:ECM_KNOCK_INTENSITY_IDX1.
+  - name: ECM_KNOCK_THRESHOLD_IDX2
+    address: 0xFFFF249E
+    length: 2
+    byte_length: 2
+    confidence: hypothesized
+    verified_tune_revision: ZS44A-20260920
+    window: knock_detect
+    evidence:
+      - session: firmware-ZS44A-20260920
+        method: disassembly
+        finding: >
+          u16, unitless: the detection threshold in force for firing index
+          2 (0xFFFF249C + 2(c-1)), in the units of
+          mem:ECM_KNOCK_INTENSITY_IDX2.
+  - name: ECM_KNOCK_THRESHOLD_IDX3
+    address: 0xFFFF24A0
+    length: 2
+    byte_length: 2
+    confidence: hypothesized
+    verified_tune_revision: ZS44A-20260920
+    window: knock_detect
+    evidence:
+      - session: firmware-ZS44A-20260920
+        method: disassembly
+        finding: >
+          u16, unitless: the detection threshold in force for firing index
+          3 (0xFFFF249C + 2(c-1)), in the units of
+          mem:ECM_KNOCK_INTENSITY_IDX3.
+  - name: ECM_KNOCK_THRESHOLD_IDX4
+    address: 0xFFFF24A2
+    length: 2
+    byte_length: 2
+    confidence: hypothesized
+    verified_tune_revision: ZS44A-20260920
+    window: knock_detect
+    evidence:
+      - session: firmware-ZS44A-20260920
+        method: disassembly
+        finding: >
+          u16, unitless: the detection threshold in force for firing index
+          4 (0xFFFF249C + 2(c-1)), in the units of
+          mem:ECM_KNOCK_INTENSITY_IDX4.
+  - name: ECM_KNOCK_THRESHOLD_IDX5
+    address: 0xFFFF24A4
+    length: 2
+    byte_length: 2
+    confidence: hypothesized
+    verified_tune_revision: ZS44A-20260920
+    window: knock_detect
+    evidence:
+      - session: firmware-ZS44A-20260920
+        method: disassembly
+        finding: >
+          u16, unitless: the detection threshold in force for firing index
+          5 (0xFFFF249C + 2(c-1)), in the units of
+          mem:ECM_KNOCK_INTENSITY_IDX5.
+  - name: ECM_KNOCK_THRESHOLD_IDX6
+    address: 0xFFFF24A6
+    length: 2
+    byte_length: 2
+    confidence: hypothesized
+    verified_tune_revision: ZS44A-20260920
+    window: knock_detect
+    evidence:
+      - session: firmware-ZS44A-20260920
+        method: disassembly
+        finding: >
+          u16, unitless: the detection threshold in force for firing index
+          6 (0xFFFF249C + 2(c-1)), in the units of
+          mem:ECM_KNOCK_INTENSITY_IDX6.
+  - name: ECM_KNOCK_FLAGS_BY_INDEX
+    address: 0xFFFF24A8
+    length: 1
+    byte_length: 1
+    confidence: hypothesized
+    # Bits 6 and 7 are never set: raw <= 63 is the known answer below.
+    plausible_min: 0
+    plausible_max: 63
+    verified_tune_revision: ZS44A-20260920
+    window: knock_detect
+    evidence:
+      - session: firmware-ZS44A-20260920
+        method: disassembly
+        finding: >
+          u8: bit (c-1) set = firing index c knocked in its most recent
+          window.
+    notes: >
+      Known answers: raw & 0xC0 == 0 on every read (the plausible bounds).
+      Bit (c-1) set if and only if mem:ECM_KNOCK_INTENSITY_IDX<c> >
+      mem:ECM_KNOCK_THRESHOLD_IDX<c> for that window; the intensities are in
+      the separate knock_intensity read (0xFFFF2550 is 0xA8 bytes away), so
+      that check crosses two reads and holds only where neither window was
+      re-run in between.
+  # knock_intensity: six s32 intensities, one 24-byte read 0xFFFF2550-2567.
+  - name: ECM_KNOCK_INTENSITY_IDX1
+    address: 0xFFFF2550
+    length: 4
+    byte_length: 4
+    signed: true
+    confidence: hypothesized
+    verified_tune_revision: ZS44A-20260920
+    window: knock_intensity
+    evidence:
+      - session: firmware-ZS44A-20260920
+        method: disassembly
+        finding: >
+          s32, unitless: the knock intensity of firing index 1's most
+          recent window (0xFFFF2550 + 4(c-1)); knock is declared when it
+          exceeds mem:ECM_KNOCK_THRESHOLD_IDX1.
+  - name: ECM_KNOCK_INTENSITY_IDX2
+    address: 0xFFFF2554
+    length: 4
+    byte_length: 4
+    signed: true
+    confidence: hypothesized
+    verified_tune_revision: ZS44A-20260920
+    window: knock_intensity
+    evidence:
+      - session: firmware-ZS44A-20260920
+        method: disassembly
+        finding: >
+          s32, unitless: the knock intensity of firing index 2's most
+          recent window (0xFFFF2550 + 4(c-1)); knock is declared when it
+          exceeds mem:ECM_KNOCK_THRESHOLD_IDX2.
+  - name: ECM_KNOCK_INTENSITY_IDX3
+    address: 0xFFFF2558
+    length: 4
+    byte_length: 4
+    signed: true
+    confidence: hypothesized
+    verified_tune_revision: ZS44A-20260920
+    window: knock_intensity
+    evidence:
+      - session: firmware-ZS44A-20260920
+        method: disassembly
+        finding: >
+          s32, unitless: the knock intensity of firing index 3's most
+          recent window (0xFFFF2550 + 4(c-1)); knock is declared when it
+          exceeds mem:ECM_KNOCK_THRESHOLD_IDX3.
+  - name: ECM_KNOCK_INTENSITY_IDX4
+    address: 0xFFFF255C
+    length: 4
+    byte_length: 4
+    signed: true
+    confidence: hypothesized
+    verified_tune_revision: ZS44A-20260920
+    window: knock_intensity
+    evidence:
+      - session: firmware-ZS44A-20260920
+        method: disassembly
+        finding: >
+          s32, unitless: the knock intensity of firing index 4's most
+          recent window (0xFFFF2550 + 4(c-1)); knock is declared when it
+          exceeds mem:ECM_KNOCK_THRESHOLD_IDX4.
+  - name: ECM_KNOCK_INTENSITY_IDX5
+    address: 0xFFFF2560
+    length: 4
+    byte_length: 4
+    signed: true
+    confidence: hypothesized
+    verified_tune_revision: ZS44A-20260920
+    window: knock_intensity
+    evidence:
+      - session: firmware-ZS44A-20260920
+        method: disassembly
+        finding: >
+          s32, unitless: the knock intensity of firing index 5's most
+          recent window (0xFFFF2550 + 4(c-1)); knock is declared when it
+          exceeds mem:ECM_KNOCK_THRESHOLD_IDX5.
+  - name: ECM_KNOCK_INTENSITY_IDX6
+    address: 0xFFFF2564
+    length: 4
+    byte_length: 4
+    signed: true
+    confidence: hypothesized
+    verified_tune_revision: ZS44A-20260920
+    window: knock_intensity
+    evidence:
+      - session: firmware-ZS44A-20260920
+        method: disassembly
+        finding: >
+          s32, unitless: the knock intensity of firing index 6's most
+          recent window (0xFFFF2550 + 4(c-1)); knock is declared when it
+          exceeds mem:ECM_KNOCK_THRESHOLD_IDX6.
+  # knock_flags: one 5-byte read 0xFFFF28AA-28AE. (The proposed 63-byte span
+  # from 0xFFFF2876 was sized to reach the HI DET byte, which sits 0x37 bytes
+  # BELOW it; HI DET is in flags_2841 instead, so the span is the members'.)
+  - name: ECM_KNOCK_EVENT_FLAGS
+    address: 0xFFFF28AA
+    length: 1
+    byte_length: 1
+    confidence: hypothesized
+    verified_tune_revision: ZS44A-20260920
+    window: knock_flags
+    evidence:
+      - session: firmware-ZS44A-20260920
+        method: disassembly
+        finding: >
+          Bit 2 = the last knock window detected knock (UpRev's "Knock
+          Event", binding inferred), per window. It read 0 across the
+          2026-09-24 K-line sniff, consistent with no knock rather than a dead
+          monitor.
+  - name: ECM_KNOCK_CONTROL_FLAGS
+    address: 0xFFFF28AE
+    length: 1
+    byte_length: 1
+    confidence: hypothesized
+    verified_tune_revision: ZS44A-20260920
+    window: knock_flags
+    evidence:
+      - session: firmware-ZS44A-20260920
+        method: disassembly
+        finding: >
+          Bit 5 = knock control active this 10.24 ms cycle (0xFFFF28AD and
+          0xFFFF28AF hold the previous cycle's copy). Expected 1 under light
+          load: it proves the loop runs.
+  # --- Knock-sensor fault state: poll slowly (about 1 Hz). Three reads:
+  # knock_fault_items, knock_fault_flag and knock_fault_levels (the
+  # accumulated-knock metric 0xFFFF1400 rides knock_target, above).
+  # Item status: three bytes per diagnostic item at 0xFFFF657C + 3 x item;
+  # items 0xAA-0xAD give one 12-byte read 0xFFFF677A-6785. Each channel
+  # decodes bytes 1-2 of its item as one big-endian u16 (byte 0 is read but
+  # its meaning is not decoded): bit 15 = byte 1 bit 7, failing now; bit 0 =
+  # byte 2 bit 0, the early "stored" flag that mem:ECM_KS_FAULT_FLAGS bit 7
+  # ORs and that can set before any code is pending; bit 2 = byte 2 bit 2,
+  # the Mode 03 confirmed state; bit 3 = byte 2 bit 3, the Mode 07 pending
+  # state. Generic Mode 03/07 never list these four items whatever the bits
+  # say.
+  - name: ECM_KS_P0327_STATUS
+    address: 0xFFFF677A
+    length: 3
+    byte_start: 1
+    byte_length: 2
+    confidence: hypothesized
+    verified_tune_revision: ZS44A-20260920
+    window: knock_fault_items
+    evidence:
+      - session: firmware-ZS44A-20260920
+        method: disassembly
+        finding: >
+          Status bytes of diagnostic item 0xAA, P0327 (knock sensor 1 (bank 1) circuit low), in
+          the item table 0x102D0. Its config word is 0x0020, bit 0x80 clear,
+          so the Mode 03/07 builders skip it.
+  - name: ECM_KS_P0328_STATUS
+    address: 0xFFFF677D
+    length: 3
+    byte_start: 1
+    byte_length: 2
+    confidence: hypothesized
+    verified_tune_revision: ZS44A-20260920
+    window: knock_fault_items
+    evidence:
+      - session: firmware-ZS44A-20260920
+        method: disassembly
+        finding: >
+          Status bytes of diagnostic item 0xAB, P0328 (knock sensor 1 (bank 1) circuit high), in
+          the item table 0x102D0. Its config word is 0x0020, bit 0x80 clear,
+          so the Mode 03/07 builders skip it.
+  - name: ECM_KS_P0332_STATUS
+    address: 0xFFFF6780
+    length: 3
+    byte_start: 1
+    byte_length: 2
+    confidence: hypothesized
+    verified_tune_revision: ZS44A-20260920
+    window: knock_fault_items
+    evidence:
+      - session: firmware-ZS44A-20260920
+        method: disassembly
+        finding: >
+          Status bytes of diagnostic item 0xAC, P0332 (knock sensor 2 (bank 2) circuit low), in
+          the item table 0x102D0. Its config word is 0x0020, bit 0x80 clear,
+          so the Mode 03/07 builders skip it.
+  - name: ECM_KS_P0333_STATUS
+    address: 0xFFFF6783
+    length: 3
+    byte_start: 1
+    byte_length: 2
+    confidence: hypothesized
+    verified_tune_revision: ZS44A-20260920
+    window: knock_fault_items
+    evidence:
+      - session: firmware-ZS44A-20260920
+        method: disassembly
+        finding: >
+          Status bytes of diagnostic item 0xAD, P0333 (knock sensor 2 (bank 2) circuit high), in
+          the item table 0x102D0. Its config word is 0x0020, bit 0x80 clear,
+          so the Mode 03/07 builders skip it.
+  - name: ECM_KS_FAULT_FLAGS
+    address: 0xFFFF479D
+    length: 1
+    byte_length: 1
+    confidence: hypothesized
+    verified_tune_revision: ZS44A-20260920
+    window: knock_fault_flag
+    evidence:
+      - session: firmware-ZS44A-20260920
+        method: disassembly
+        finding: >
+          Bit 7 = a knock-sensor item is in the stored state: the OR of byte 2
+          bit 0 of items 0xAA-0xAD. While set, the retard target is the fixed
+          fallback (mem:ECM_KNOCK_RETARD_TARGET = 0xFB00, -5 degrees) and the
+          HI DET latch sets. 0 = knock control normal.
+    notes: >
+      Known answers (cross-read, not expressible): bit 7 == OR over the four
+      mem:ECM_KS_P03xx_STATUS bit 0; bit 7 set if and only if
+      mem:ECM_KNOCK_RETARD_TARGET reads -1280. Both are slow states, so the
+      skew between the reads does not matter.
+  - name: ECM_KS1_LEVEL
+    address: 0xFFFF2CEF
+    length: 1
+    byte_length: 1
+    confidence: hypothesized
+    verified_tune_revision: ZS44A-20260920
+    window: knock_fault_levels
+    evidence:
+      - session: firmware-ZS44A-20260920
+        method: disassembly
+        finding: >
+          u8: knock sensor 1's DC level, the high byte of A/D group 2 ADDR26
+          (copied from 0xFFFF2CFF). The circuit diagnostic's in-range band is
+          50..199.
+    notes: >
+      50..199 is the diagnostic's band, not a plausibility bound: a reading
+      outside it is a real circuit fault (by the DTC names P0327 low and
+      P0328 high; which item each side sets is not traced), which is exactly
+      what this channel exists to show.
+  - name: ECM_KS2_LEVEL
+    address: 0xFFFF2CF0
+    length: 1
+    byte_length: 1
+    confidence: hypothesized
+    verified_tune_revision: ZS44A-20260920
+    window: knock_fault_levels
+    evidence:
+      - session: firmware-ZS44A-20260920
+        method: disassembly
+        finding: >
+          u8: knock sensor 2's DC level, the high byte of A/D group 2 ADDR27
+          (copied from 0xFFFF2D00). In-range band 50..199, as for sensor 1.
+    notes: >
+      50..199 is the diagnostic's band, not a plausibility bound: outside it
+      is a circuit fault (P0332 low / P0333 high by name).
+
+  # --- A/F sensor -> lambda chain, from the firmware (2026-10-05) ----------
+  # docs/ecu-firmware-analysis.md "A/F sensor and lambda chain". One A/F
+  # sensor per bank. DID 0x1225/0x1226 are the raw voltage words 0xFFFF2C02 /
+  # 2C04; the ECM turns 2 x that word into lambda through a barometric gain
+  # (k, 0xFFFF36BB), the AFR table 0xE644, a learned offset (0xFFFF4CA4/4CA6)
+  # and a small rpm x load offset, into 0xFFFF4722/4724, which Mode 01 PID
+  # 0x24/0x28 A,B report (from last cycle's copy, 0xFFFF46C2/46C4) and the
+  # fuel feedback loop controls against the target 0xFFFF46B2/46B4. Mode 01
+  # is silent inside the 0xC0 session, so these reads are the only way to get
+  # the ECM's corrected lambda inside a DID capture. Verified from code and
+  # checked on logged data (a single baro gain reproduces PID lambda to 0.3 %
+  # from the voltage word), NOT yet read through service 0x23: hypothesized
+  # until a key-on read passes; in no capture profile until then.
+  - name: ECM_AF_LAMBDA_B1
+    address: 0xFFFF4722
+    length: 2
+    byte_length: 2
+    scale: 0.00013605442176870748   # raw / 7350 (the word is AFR x 500)
+    offset: 0.0
+    unit: lambda
+    confidence: hypothesized
+    verified_tune_revision: ZS44A-20260920
+    window: lambda_word
+    evidence:
+      - session: firmware-ZS44A-20260920
+        method: disassembly
+        finding: >
+          u16, lambda x 7350 (= AFR x 500), computed at 0x3FAD0 from twice
+          the DID 0x1225 word (0xFFFF2C02, via its cycle snapshot 0xFFFF2B1A):
+          x' = 880 + (x - 880) x 128 / k with k at 0xFFFF36BB (applied at
+          every altitude this truck sees; skipped near sea level, 99.5-111.7
+          kPa, and when the raw baro word is out of range),
+          then the 16-point AFR table 0xE644 (axis 0xF12A), plus the learned
+          offset 0xFFFF4CA4, plus the rpm x BFS offset table 0xACF4 (<= +0.074
+          AFR), clamped to 0..0xFFFF. No temperature or heater correction.
+      - session: firmware-ZS44A-20260920
+        method: disassembly
+        finding: >
+          Mode 01 PID 0x24 A,B = min(0xFFFF, (0xFFFF46C2 << 14) / 3675), and
+          0xFFFF46C2 is last cycle's copy of this word, so PID lambda = AB /
+          32768 = word / 7350 exactly; the PID field pegs at 1.99997 for a
+          word >= 14,700 (the "2.0 in fuel cut"), which this word does not.
+          The STFT controller (0x5E368) measures this word against
+          mem:ECM_AF_FEEDBACK_TARGET_B1.
+      - session: 2026-09-17T191712, 2026-09-21T223734, 2026-10-04T194342 (~/ecu-re/scripts/lambda_pid_check.py)
+        method: same_reply_pid_vs_voltage_check
+        finding: >
+          On same-reply PID 0x24 pairs one fitted gain makes table 0xE644
+          reproduce PID lambda within 0.3 % over lambda 0.70-1.30; the fitted
+          gain follows baro as the code predicts (1.175 at ~76 kPa, 1.120 at
+          80-81, 1.105 at 81-83). Checks the chain, not this address.
+    notes: |
+      The ECM's corrected lambda for bank 1, the same quantity PID 0x24 A,B
+      reports one cycle later. In closed loop it sits at the target by
+      construction, so agreement with stoich proves nothing about the sensor.
+
+      Known answer (not expressible): equals Mode 01 PID 0x24 A,B / 32768 (or
+      0xFFFF46C2 / 7350 exactly, one cycle later). `MemoryKnownAnswer` checks
+      a word against a Mode 22 DID only, and Mode 01 does not answer inside
+      the 0xC0 session these reads need, so the check needs a PID relation
+      that reads across a session exit, and lambda moves fast enough that
+      the pairing has to be per sample, through compare_channels.
+  - name: ECM_AF_LAMBDA_B2
+    address: 0xFFFF4724
+    length: 2
+    byte_length: 2
+    scale: 0.00013605442176870748   # raw / 7350 (the word is AFR x 500)
+    offset: 0.0
+    unit: lambda
+    confidence: hypothesized
+    verified_tune_revision: ZS44A-20260920
+    window: lambda_word
+    evidence:
+      - session: firmware-ZS44A-20260920
+        method: disassembly
+        finding: >
+          The bank-2 word: computed from DID 0x1226 (0xFFFF2C04, snapshot
+          0xFFFF2B1C) the same way, with the learned offset 0xFFFF4CA6 and the
+          bank-2 rpm x BFS table 0xAD74. Mode 01 PID 0x28 A,B reads its
+          previous-cycle copy 0xFFFF46C4 at the same scaling.
+    notes: >
+      Known answer (not expressible, as for bank 1): equals Mode 01 PID 0x28
+      A,B / 32768.
+  - name: ECM_AF_FEEDBACK_TARGET_B1
+    address: 0xFFFF46B2
+    length: 2
+    byte_length: 2
+    scale: 0.002   # raw / 500 (AFR x 500; lambda = raw / 7350)
+    offset: 0.0
+    unit: afr
+    confidence: hypothesized
+    verified_tune_revision: ZS44A-20260920
+    window: lambda_target
+    evidence:
+      - session: firmware-ZS44A-20260920
+        method: disassembly
+        finding: >
+          u16, AFR x 500: the closed-loop fuel feedback target the STFT
+          controller (0x5E368) compares mem:ECM_AF_LAMBDA_B1 against; default
+          7350 = 14.7 AFR (lambda 1). 0x59044 also forms 0xFFFF2D5A = this -
+          0xFFFF4722 for a diagnostic.
+    notes: >
+      Expected 7350 (14.7) in stoichiometric closed loop. This is the
+      feedback setpoint, not the final commanded target
+      (mem:ECM_TARGET_EQUIV_RATIO). Known answer (memory relation, not
+      expressible): 0xFFFF2D5A = this - mem:ECM_AF_LAMBDA_B1.
+  - name: ECM_AF_FEEDBACK_TARGET_B2
+    address: 0xFFFF46B4
+    length: 2
+    byte_length: 2
+    scale: 0.002   # raw / 500 (AFR x 500; lambda = raw / 7350)
+    offset: 0.0
+    unit: afr
+    confidence: hypothesized
+    verified_tune_revision: ZS44A-20260920
+    window: lambda_target
+    evidence:
+      - session: firmware-ZS44A-20260920
+        method: disassembly
+        finding: >
+          u16, AFR x 500: the bank-2 feedback target beside
+          mem:ECM_AF_FEEDBACK_TARGET_B1, by the per-bank layout of the
+          firmware hand-off (the controller's bank-2 read of it is not cited
+          separately). Default 7350.
+  - name: ECM_AF_LEARNED_OFFSET_B1
+    address: 0xFFFF4CA4
+    length: 2
+    byte_length: 2
+    signed: true
+    scale: 0.002   # raw / 500, AFR
+    offset: 0.0
+    unit: afr
+    confidence: hypothesized
+    # Clamped to +-500 raw (+-1.0 AFR) by its integrator.
+    plausible_min: -1.0
+    plausible_max: 1.0
+    verified_tune_revision: ZS44A-20260920
+    window: lambda_learned_offset
+    evidence:
+      - session: firmware-ZS44A-20260920
+        method: disassembly
+        finding: >
+          s16, AFR x 500, clamped +-500: added to the bank-1 lambda word
+          after the table. Integrated at 0xA265C from tables 0xE454/0xE464 of a
+          filtered signal that shares its source with the PID 0x15 byte, so a
+          downstream-O2 ("rear") trim of the front sensor; the chain is
+          verified, the name inferred. Likely backup RAM (the 0x4Cxx block also
+          holds the learned TPS closed positions), inferred.
+  - name: ECM_AF_LEARNED_OFFSET_B2
+    address: 0xFFFF4CA6
+    length: 2
+    byte_length: 2
+    signed: true
+    scale: 0.002   # raw / 500, AFR
+    offset: 0.0
+    unit: afr
+    confidence: hypothesized
+    plausible_min: -1.0
+    plausible_max: 1.0
+    verified_tune_revision: ZS44A-20260920
+    window: lambda_learned_offset
+    evidence:
+      - session: firmware-ZS44A-20260920
+        method: disassembly
+        finding: >
+          s16, AFR x 500, clamped +-500: the bank-2 counterpart of
+          mem:ECM_AF_LEARNED_OFFSET_B1, added to 0xFFFF4724.
+  - name: ECM_AF_BARO_GAIN_K
+    address: 0xFFFF36BB
+    length: 1
+    byte_length: 1
+    confidence: hypothesized
+    verified_tune_revision: ZS44A-20260920
+    window: lambda_baro_gain
+    evidence:
+      - session: firmware-ZS44A-20260920
+        method: disassembly
+        finding: >
+          u8 k, stored by the baro-gain step (0x3FC8A) from table 0xD00F on
+          raw baro 0xFFFF4C30 >> 8. The voltage deviation about stoich is
+          scaled by 128 / k: 128 = no correction (99.5 kPa), 112.4 at 80 kPa
+          (gain 1.139), 94 at 63 kPa (1.363).
+    notes: >
+      Raw k, unscaled on purpose: the gain is 128 / k, a reciprocal that a
+      scale/offset pair cannot express. Known answer (not expressible): k
+      follows Mode 01 PID 0x33 baro through table 0xD00F.

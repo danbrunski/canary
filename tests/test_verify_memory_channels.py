@@ -124,6 +124,54 @@ def test_refused_session_fails_rather_than_reporting_agreement() -> None:
     assert "refused" in verdict.reason
 
 
+class _TimingEcu:
+    """0x23 answers one s8 timing byte; 0x22 answers DID 0x110A (110 - t)."""
+
+    def __init__(self, timings: list[int], did_for) -> None:
+        self._timings = list(timings)
+        self._did_for = did_for
+        self.last = 0
+
+    def enter_diagnostic_session(self, subfunction: int, *, request_id: int | None = None) -> bool:
+        return True
+
+    def query_raw(self, service: int, body: bytes, *, request_id: int | None = None) -> _Reply:
+        assert service == 0x23 and body[-2:] == (1).to_bytes(2, "big")
+        self.last = self._timings.pop(0) if self._timings else self.last
+        return _Reply(self.last.to_bytes(1, "big", signed=True))
+
+    def query_mode_22(self, did: int, *, request_id: int | None = None) -> _Reply:
+        assert did == 0x110A
+        return _Reply(bytes([self._did_for(self.last)]))
+
+
+def _final_timing() -> MemoryChannel:
+    memory = load_did_map(Path("data/dids.yaml")).memory
+    return next(c for c in memory if c.name == "ECM_IGNITION_TIMING_FINAL")
+
+
+def test_final_timing_passes_against_the_110_minus_did_encoding() -> None:
+    """linear_did with did_offset: degrees = -1 x DID raw + 110, including
+    the negative timing a signed byte exists for (-5 deg is 0xFB on the wire,
+    DID raw 115)."""
+    ecu = _TimingEcu([20, 35, -5], lambda t: 110 - t)
+
+    verdict = verify_channel(ecu, _final_timing(), samples=3, request_id=0x7E0, session=0xC0)
+
+    assert verdict.passed is True
+    assert verdict.agreements == 3
+
+
+def test_final_timing_fails_when_the_byte_is_not_the_timing() -> None:
+    """A byte off by one degree everywhere (a neighbouring register) fails,
+    so the relation can fail."""
+    ecu = _TimingEcu([20, 35, -5], lambda t: 110 - t + 1)
+
+    verdict = verify_channel(ecu, _final_timing(), samples=3, request_id=0x7E0, session=0xC0)
+
+    assert verdict.outcome == "fail"
+
+
 _CATALOG = Path("data/dids.yaml")
 
 
@@ -144,7 +192,11 @@ def test_a_window_is_stamped_whole_or_not_at_all() -> None:
     assert "ECM_AIR_CHARGE_SLOT_103A" not in stamps
     assert "ECM_FUEL_TARGET_MAP_X_TRACE" not in stamps
     assert any("fuel_axis" in note and "cannot mix calibrations" in note for note in notes)
-    # spark and fuel_target are fully checkable, so they go through whole.
+    # fuel_target now also carries the knock retard bytes (2026-10-05), which
+    # have no DID to check against, so it too needs an explicit carry reason.
+    assert "ECM_TARGET_EQUIV_RATIO" not in stamps
+    assert any("fuel_target" in note and "ECM_KNOCK_RETARD_DEG" in note for note in notes)
+    # spark is fully checkable, so it goes through whole.
     assert {"ECM_IGNITION_TIMING_RAM", "ECM_ENGINE_SPEED_RAM", "ECM_CAM_MAP_RPM_TRACE"} <= set(
         stamps
     )
@@ -193,13 +245,26 @@ def test_restamping_the_real_catalog_keeps_every_comment_and_still_loads(
 
     changed = restamp(copy, stamps, "ZS44A-20260920")
 
-    assert changed == len(channels)
+    # A block changes unless it already carries this revision and keeps no
+    # carry reason (a checked channel located on this image, e.g. the
+    # knock_chain's final-timing byte).
+    unchanged = {
+        c.name
+        for c in channels
+        if c.verified_tune_revision == "ZS44A-20260920"
+        and c.revision_carried_reason is None
+        and stamps[c.name] is None
+    }
+    assert unchanged == {"ECM_IGNITION_TIMING_FINAL"}
+    assert changed == len(channels) - len(unchanged)
     after = load_did_map(copy)  # must still load: no mixed windows
     assert {c.verified_tune_revision for c in after.memory} == {"ZS44A-20260920"}
     carried = {c.name for c in after.memory if c.revision_carried_reason}
-    # Carried = no known answer to re-check: the two trace channels, plus the
-    # firmware-located ones added 2026-10-04 (hypothesized until a drive).
-    assert carried == {
+    # Carried = no known answer to re-check: the two trace channels, the
+    # firmware-located ones added 2026-10-04, and the knock / lambda-chain
+    # channels added 2026-10-05 (all hypothesized until a key-on read).
+    assert carried == {c.name for c in channels if c.known_answer is None}
+    assert {
         "ECM_FUEL_TARGET_MAP_X_TRACE",
         "ECM_THROTTLE_MAP_X_TRACE",
         "ECM_UPREV_MAP_SELECTOR",
@@ -209,7 +274,10 @@ def test_restamping_the_real_catalog_keeps_every_comment_and_still_loads(
         "ECM_PEDAL_ENRICH_FLAGS",
         "ECM_TIMING_TRIM_SELECT_FLAGS",
         "ECM_MAP_SELECT_INPUT",
-    }
+        "ECM_KNOCK_RETARD_DEG",
+        "ECM_AF_LAMBDA_B1",
+    } <= carried
+    assert "ECM_IGNITION_TIMING_FINAL" not in carried  # it has a DID check
     assert sum(1 for line in copy.read_text().splitlines() if "#" in line) == comments_before
     # and only the memory section moved: every DID entry is byte-identical
     assert copy.read_text().split("\nmemory:")[0] == _CATALOG.read_text().split("\nmemory:")[0]

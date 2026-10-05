@@ -237,11 +237,13 @@ class MemoryKnownAnswer(_Strict):
     * ``equals_did`` — the RAM word and the DID are the same register. This
       is the relation for an address found by sweeping against a DID that
       already carries the quantity.
-    * ``linear_did`` — ``word * word_scale`` and ``did_raw * did_scale`` are
-      the same quantity in engineering units, within ``tolerance`` (absolute)
-      or ``relative_tolerance``. For a RAM value that is a differently-scaled
-      or quantized view of a DID — a map-axis rpm trace in 50-rpm steps
-      against a 12.5-rpm DID.
+    * ``linear_did`` — ``word * word_scale`` and ``did_raw * did_scale +
+      did_offset`` are the same quantity in engineering units, within
+      ``tolerance`` (absolute) or ``relative_tolerance``. For a RAM value that
+      is a differently-scaled or quantized view of a DID — a map-axis rpm
+      trace in 50-rpm steps against a 12.5-rpm DID, or final ignition timing
+      in degrees against DID 0x110A's ``110 - degrees`` encoding
+      (``did_scale: -1``, ``did_offset: 110``).
     * ``reciprocal_did`` — ``constant / word`` equals ``did_raw`` within
       ``tolerance`` counts. For a period counter checked against a speed.
 
@@ -260,6 +262,9 @@ class MemoryKnownAnswer(_Strict):
     #: ``linear_did``: engineering units per RAM count / per DID count.
     word_scale: float | None = None
     did_scale: float | None = None
+    #: ``linear_did``: engineering units added to ``did_raw * did_scale``, for
+    #: a DID whose encoding carries an offset (``110 - timing``).
+    did_offset: float | None = None
     #: ``reciprocal_did``: the numerator, in DID counts x RAM counts.
     constant: float | None = None
     #: Allowed disagreement — absolute (engineering units for ``linear_did``,
@@ -283,6 +288,10 @@ class MemoryKnownAnswer(_Strict):
         if self.relation == "reciprocal_did":
             if self.constant is None or self.tolerance is None:
                 raise ValueError("reciprocal_did requires constant and tolerance")
+        if self.did_offset is not None and self.relation != "linear_did":
+            # Every other relation ignores it, so it would read as a check
+            # the verifier never makes.
+            raise ValueError(f"did_offset applies only to linear_did, not {self.relation}")
         return self
 
 
@@ -319,6 +328,11 @@ class MemoryChannel(ByteSlice, LinearScale, PlausibleRange, _Strict):
     byte_start: int = Field(default=0, ge=0, le=63)
     byte_length: int = Field(ge=1, le=8)
     byte_order: Literal["big", "little"] = "big"
+    #: Two's-complement slice. The firmware keeps retard, learned offsets and
+    #: final timing as s8/s16/s32: read unsigned, a 1-degree retard (s16
+    #: 0xFF00) decodes as +255 degrees and every mean and comparison after it
+    #: is wrong. ``sentinel_raw`` is then stated in the signed range.
+    signed: bool = False
     scale: float | None = None
     offset: float | None = None
     unit: str = "unknown"
@@ -364,12 +378,22 @@ class MemoryChannel(ByteSlice, LinearScale, PlausibleRange, _Strict):
                 f"[{self.byte_start}:{self.byte_start + self.byte_length}] "
                 f"does not fit in the {self.length}-byte read"
             )
-        if (self.sentinel_raw is None) != (self.sentinel_meaning is None):
-            raise ValueError(
-                f"{self.name}: sentinel_raw and sentinel_meaning must be set together "
-                "-- a sentinel without a stated meaning decodes as a measurement"
-            )
+        # Paired, and representable in the slice's own signedness: an s16
+        # sentinel spelled 0xFB00 instead of -1280 could never match.
+        slices.check_sentinel(
+            self.name,
+            self.sentinel_raw,
+            self.sentinel_meaning,
+            byte_length=self.byte_length,
+            signed=self.signed,
+        )
         return self
+
+    def raw_from(self, data: bytes) -> int | None:
+        """The slice's integer, two's-complement when ``signed``."""
+        return slices.slice_raw(
+            data, self.byte_start, self.byte_length, self.byte_order, signed=self.signed
+        )
 
 
 def decode_memory_raw(channel: MemoryChannel, payload: bytes) -> int | None:
@@ -453,9 +477,7 @@ def plan_memory_reads(channels: Sequence[MemoryChannel]) -> list[MemoryRead]:
 
 def decode_memory_window(channel: MemoryChannel, payload: bytes, offset: int) -> int | None:
     """Raw integer for `channel` from a window reply starting `offset` earlier."""
-    return slices.slice_raw(
-        payload, offset + channel.byte_start, channel.byte_length, channel.byte_order
-    )
+    return channel.raw_from(payload[offset:])
 
 
 def check_known_answer(channel: MemoryChannel, word: int, did_raw: int) -> bool:
@@ -473,7 +495,7 @@ def check_known_answer(channel: MemoryChannel, word: int, did_raw: int) -> bool:
         return did_raw == word
     if known.relation == "linear_did":
         assert known.word_scale is not None and known.did_scale is not None
-        reference = did_raw * known.did_scale
+        reference = did_raw * known.did_scale + (known.did_offset or 0.0)
         allowed = max(known.tolerance or 0.0, (known.relative_tolerance or 0.0) * abs(reference))
         return abs(word * known.word_scale - reference) <= allowed
     if known.relation == "reciprocal_did":

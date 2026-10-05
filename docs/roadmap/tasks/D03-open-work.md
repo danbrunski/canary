@@ -2574,6 +2574,77 @@ live here now, so the documents could be archived
     (`/data/canary`, before the daemon restarts on this catalog), and the
     deployed-manifest fixture with it.
 
+- [~] **D03.38 RAM knock and lambda-chain channels: catalogued from code
+  2026-10-05, live verification owed.** Knock control is active in this image,
+  and the four knock-sensor items (0xAA–0xAD, P0327/P0328/P0332/P0333) are
+  never listed by generic Mode 03/07, so RAM flags are the only knock-sensor
+  health monitor
+  ([`ecu-firmware-analysis.md`](../../ecu-firmware-analysis.md), "Knock
+  monitoring" and "A/F sensor and λ chain").
+  - [x] **Catalog.** `data/dids.yaml` `memory:` gains 45 channels, all
+    `confidence: hypothesized` with `disassembly` evidence on
+    `firmware-ZS44A-20260920`. Windows (read length with every member
+    selected; ceiling 63): `knock_chain` 0xFFFF232E/14 (final timing s8 °BTDC,
+    applied retard s16 °, subtract term u16 °, base+retard **s32** °: the s32
+    at 0x2338 makes it 14 bytes, not the proposed 12), `knock_retard`
+    0xFFFF124E/8 (learned lo/hi/combined and retard, s16 /256 °),
+    `knock_target` 0xFFFF13FE/4 (target s16 /256 °, plus the accumulated-knock
+    metric 0x1400 s16, the next word), `fuel_target` widened to 0xFFFF26AE/57
+    (+0x26D2 s8 °, +0x26E6 u8 °), `knock_detect` 0xFFFF249A/15,
+    `knock_intensity` 0xFFFF2550/24 (6 × s32), `knock_flags` 0xFFFF28AA/5
+    (0x28AA bit 2, 0x28AE bit 5; the proposed 0x2876/63 span was sized for
+    0x283F, which lies below it), `flags_2841` widened to 0xFFFF283C/7 (0x283C
+    transient/α flags, 0x283F bit 6 HI DET, which also selects the timing trim),
+    `knock_fault_items` 0xFFFF677A/12, `knock_fault_flag` 0xFFFF479D/1,
+    `knock_fault_levels` 0xFFFF2CEF/2, `lambda_word` 0xFFFF4722/4 (u16 /7350
+    = λ), `lambda_target` 0xFFFF46B2/4 and `lambda_learned_offset` 0xFFFF4CA4/4
+    (AFR × 500; the offset s16, clamped ±1 AFR), `lambda_baro_gain`
+    0xFFFF36BB/1 (k, 128 = none). DIDs 0x1225/0x1226 gained their RAM words
+    (0xFFFF2C02/2C04) and bank items as `transport: can` evidence. Widened
+    windows keep their names, and a read is planned from the selected members
+    only, so no saved profile's request changes
+    (`test_selecting_the_old_members_still_sends_the_old_requests`).
+    Corrected in passing: 0xFFFF2842 does not select the timing trim (0x283F
+    bit 6 does; old reading moved to `evidence_against`), and the UpRev init
+    zeroes 0xFFFFB008.
+  - [x] **Schema.** `MemoryChannel.signed` (two's-complement slices; a signed
+    sentinel must be stated in the signed range) and `linear_did` `did_offset`,
+    which expresses final timing = 110 − DID 0x110A raw.
+    `tests/test_memory_catalog_knock_lambda.py` (60) pins every address,
+    width, sign, scale and window span and the collector's signed decode;
+    `tests/test_verify_memory_channels.py` adds the offset relation passing on
+    negative timing and failing one degree off.
+  - [ ] **Key-on read (operator; reads only).** KOEO, warm idle and one light
+    pull, then `python -m tools.verify_memory_channels` for
+    `ECM_IGNITION_TIMING_FINAL` (the only one with a DID relation). Check by
+    hand, none of which the verifier can express: 0x1252 = trunc(0x124E/2) +
+    trunc(0x1250/2) exactly (same reply); 0x1254 ≤ 0 and 0x26D2 =
+    trunc(0x1254/256) (cross-read); −0x26D2 ≤ 0x26E6 (same reply); 0x2338 −
+    0x2332 = 0x274E (0x274E is uncatalogued); 0x13FE = 0xFB00 ⇔ 0x479D bit 7;
+    0x479D bit 7 = OR of item bytes 2 bit 0; 0x249B ∈ 0..6; 0x24A8 & 0xC0 = 0;
+    intensity > threshold ⇔ that index's 0x24A8 bit (cross-read); 0x28AE bit
+    5 = 1 under light load; 0x2CEF/0x2CF0 in 50..199; 0x283F bit 6 with 0x479D
+    bit 7 clear ⇒ 0x1400 ≥ 8192; 0x4722/4724 = PID 0x24/0x28 A,B (Mode 01 is
+    silent in session 0xC0, so across a session exit, per sample); 0x46B2 =
+    7350 in closed loop; 0x4CA4/4CA6 within ±500. A channel's confidence rises
+    only after its check passes. Read 0x283F early: 0x2842 bit 2 is the knock
+    task's lagged copy of HI DET, and it read 0x04 on every 2026-10-04 read,
+    which suggests timing trim B (High Det) ran the whole drive (inferred;
+    other routines also write 0x2842). **Capture profile only after a key-on read
+    passes:** none of these is in any profile
+    (`test_new_channels_are_code_verified_and_not_yet_in_any_profile`).
+  - [ ] **Verifier relations not built** (`MemoryKnownAnswer` checks one word
+    against one DID): a same-reply memory-to-memory relation (sum of halves,
+    trunc-divide, ordering), a cross-read flag equivalence, a bit-mask
+    invariant, and a Mode 01 PID relation read across a session exit. Until
+    then those windows report unverifiable, and restamping `fuel_target`
+    (which now carries two unverifiable knock bytes) needs
+    `--carry-unverifiable`.
+  - [ ] **Open.** Per-read cadence: the fault reads want about 1 Hz, but every
+    memory read rides one poll tier and a profile cannot weight memory
+    channels. `ECM_TIMING_TRIM_SELECT_FLAGS` is misnamed; renaming it is a
+    `tools/channel_renames` change for the orchestrator.
+
 ## Deferred by decision, not blocked
 
 - [~] **D01.4 Get the feature build off the event loop — implemented; Pi
