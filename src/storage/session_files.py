@@ -133,6 +133,69 @@ def session_first_sample(session_dir: Path) -> pd.Timestamp | None:
     return None
 
 
+#: (path, size, mtime_ns) -> the chunk's footer timestamp range. A written
+#: chunk is never rewritten in place, so its footer answer is fixed; the key
+#: still carries size and mtime so a replaced file is read again.
+_CHUNK_RANGES: dict[tuple[str, int, int], tuple[pd.Timestamp, pd.Timestamp] | None] = {}
+
+
+def chunk_time_range(chunk: Path) -> tuple[pd.Timestamp, pd.Timestamp] | None:
+    """The chunk's ``timestamp`` range from its footer, or ``None`` when unknown.
+
+    ``None`` (no statistics, unreadable, 0 bytes) means "cannot rule it out";
+    a reader pruning by time must then read the chunk.
+    """
+    try:
+        stat = chunk.stat()
+    except OSError:
+        return None
+    key = (str(chunk), stat.st_size, stat.st_mtime_ns)
+    if key in _CHUNK_RANGES:
+        return _CHUNK_RANGES[key]
+    found: tuple[pd.Timestamp, pd.Timestamp] | None = None
+    try:
+        import pyarrow.parquet as pq
+
+        if stat.st_size > 0:
+            meta = pq.ParquetFile(chunk).metadata  # type: ignore[no-untyped-call, unused-ignore]
+            names = list(meta.schema.names)
+            if "timestamp" in names and meta.num_row_groups:
+                column = names.index("timestamp")
+                lows: list[pd.Timestamp] = []
+                highs: list[pd.Timestamp] = []
+                complete = True
+                for group in range(meta.num_row_groups):
+                    stats = meta.row_group(group).column(column).statistics
+                    low = None if stats is None or not stats.has_min_max else footer_utc(stats.min)
+                    high = None if stats is None or not stats.has_min_max else footer_utc(stats.max)
+                    if low is None or high is None:
+                        complete = False
+                        break
+                    lows.append(low)
+                    highs.append(high)
+                if complete:
+                    found = (min(lows), max(highs))
+    except Exception:  # noqa: BLE001 - unknown range: the reader keeps the chunk
+        found = None
+    _CHUNK_RANGES[key] = found
+    return found
+
+
+def chunks_overlapping(chunks: list[Path], lo: pd.Timestamp, hi: pd.Timestamp) -> list[Path]:
+    """``chunks`` that may hold a ``timestamp`` in ``[lo, hi]``, by footer.
+
+    Exact for a row filter on the same column: a chunk whose footer range is
+    disjoint from the window contributes no row. A chunk without a readable
+    range is kept.
+    """
+    kept: list[Path] = []
+    for chunk in chunks:
+        span = chunk_time_range(chunk)
+        if span is None or (span[1] >= lo and span[0] <= hi):
+            kept.append(chunk)
+    return kept
+
+
 def footer_utc(value: Any) -> pd.Timestamp | None:
     """A footer statistic as a UTC timestamp (naive statistics are UTC)."""
     try:

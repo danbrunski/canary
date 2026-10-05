@@ -43,7 +43,12 @@ from src.preprocessing.imu_decimation import (
 from src.preprocessing.resampler import resample_config_for, resample_wide
 from src.preprocessing.segmenter import segment_operating_modes
 from src.storage.broadcast_storage import FRAME_ATTR, frame_attrs, session_can_storage
-from src.storage.session_files import PARQUET_PATTERN, footer_utc, has_telemetry
+from src.storage.session_files import (
+    PARQUET_PATTERN,
+    chunks_overlapping,
+    footer_utc,
+    has_telemetry,
+)
 from src.telemetry import CAN_SOURCE, DECODED_SOURCE, SOURCE_SEP
 from src.telemetry import channel_key as channel_key
 
@@ -74,7 +79,11 @@ def discover_sessions(root: Path) -> list[Path]:
 
 
 def read_session(
-    session_dir: Path, *, filters: Any = None, decoded: DecodedRows = "on_read"
+    session_dir: Path,
+    *,
+    filters: Any = None,
+    decoded: DecodedRows = "on_read",
+    time_range: tuple[pd.Timestamp, pd.Timestamp] | None = None,
 ) -> pd.DataFrame:
     """Read one telemetry session directory into a long-format DataFrame.
 
@@ -86,11 +95,20 @@ def read_session(
     are decoded on read, and ``filters`` applies to them exactly as it applied
     to stored ones (the frames they come from are read for the decode even
     when ``filters`` excludes them, and dropped after it).
+
+    ``time_range`` (UTC ``lo``, ``hi``) skips every chunk whose footer
+    ``timestamp`` range lies outside it, before opening its data (H07.9: a
+    20 s window used to open all ~1,200 chunks of a drive). It prunes chunks
+    only; pair it with a row filter on ``timestamp`` for the exact window.
+    A window no chunk reaches returns an empty frame.
     """
     candidates = sorted(session_dir.glob(PARQUET_PATTERN))
     if not candidates:
         raise FileNotFoundError(f"no {PARQUET_PATTERN} files in {session_dir}")
-    frames, skipped = _read_chunk_files(candidates, _ReadPlan.of(filters, decoded))
+    reading = candidates if time_range is None else chunks_overlapping(candidates, *time_range)
+    if not reading:
+        return _with_can_storage(_empty_long_frame(), session_dir, candidates)
+    frames, skipped = _read_chunk_files(reading, _ReadPlan.of(filters, decoded))
     _warn_skipped_chunks(session_dir, skipped)
     if not frames:
         raise FileNotFoundError(f"no readable {PARQUET_PATTERN} files in {session_dir}")

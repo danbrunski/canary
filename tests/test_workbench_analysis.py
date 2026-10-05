@@ -26,6 +26,7 @@ from src.analysis.tuning import GateError
 from src.analysis.tuning_frame import load_provider_registry
 from src.analysis.workbench import (
     WorkbenchInputs,
+    conditions_block,
     pooled_delivery_error,
     pull_comparison,
     revision_boundaries,
@@ -36,7 +37,7 @@ from src.analysis.workbench import (
 )
 from src.config import CanaryConfig
 from src.control import workbench_jobs
-from src.control.logs import list_logs
+from src.control.logs import list_logs, summarize_log
 from src.dashboard.routes import workbench as workbench_routes
 from src.signals.afr import AfrCalibration
 from src.storage.capture_manifest import CAPTURE_MANIFEST_FILENAME, CAPTURE_QUALITY_FILENAME
@@ -196,10 +197,52 @@ def test_frame_carries_tags_and_revision_boundary(tmp_path: Path) -> None:
     assert [b["revision"] for b in frame["revision_boundaries"]] == ["B"]
 
 
-def test_revision_boundary_excludes_flashes_outside_the_span() -> None:
+def test_revision_boundary_excludes_flashes_outside_the_span(tmp_path: Path) -> None:
     registry = TuneRevisionRegistry(revisions=[TuneRevision(revision="A", flashed_at=T0)])
-    assert revision_boundaries(registry, T0, T0 + timedelta(hours=1)) == []
-    assert revision_boundaries(registry, T0 - timedelta(seconds=1), T0)[0]["revision"] == "A"
+    # Data starts at T0, so a flash at T0 is not inside (start, end].
+    at_t0 = _write(tmp_path, "2026-09-18T120000", [_closed()] * 3)
+    assert revision_boundaries(registry, at_t0, T0 + timedelta(hours=1)) == []
+    later = TuneRevisionRegistry(
+        revisions=[TuneRevision(revision="A", flashed_at=T0 + timedelta(seconds=1))]
+    )
+    assert revision_boundaries(later, at_t0, T0 + timedelta(seconds=1))[0]["revision"] == "A"
+
+
+def test_a_session_named_before_its_data_is_bounded_by_its_data(tmp_path: Path) -> None:
+    """P02.17: ``2026-08-03T163440`` is named 6 h 37 min before its first row,
+    with the k106 flash in between. The label already followed the data
+    (382dfa0); the boundary marker still started at the name, so the same
+    session read as k106 *and* as crossing the k106 flash. Every caller that
+    computes boundaries — the frame, the conditions block, the capture
+    browser — now dates the session as the label does."""
+    flash = T0 - timedelta(hours=2)
+    registry = TuneRevisionRegistry(
+        revisions=[
+            TuneRevision(revision="k105", flashed_at=T0 - timedelta(days=3)),
+            TuneRevision(revision="k106", flashed_at=flash),
+        ]
+    )
+    # Named 4 h before its data (T0): the flash falls between name and data.
+    named = (T0 - timedelta(hours=4)).strftime("%Y-%m-%dT%H%M%S")
+    storage = tmp_path / "storage"
+    storage.mkdir()
+    session = _write(storage, named, [_closed()] * 10)
+    inputs = WorkbenchInputs(
+        bindings_path=BINDINGS, dids_path=DIDS, registry=registry, afr_stoich=14.7
+    )
+
+    frame = session_frame(session, ["obd:RPM"], inputs=inputs)
+    assert frame["revision"]["revision"] == "k106"
+    assert frame["revision_boundaries"] == []
+
+    block = conditions_block([session], inputs)
+    assert block["revisions"] == {"k106": [named]}
+    assert block["revision_boundaries"] == {}
+    assert block["mixed_revisions"] is False
+
+    (log,) = [summarize_log(session, registry)]
+    assert log["revision"]["revision"] == "k106"
+    assert log["revision_boundaries"] == []
 
 
 def test_session_span_reads_footers(tmp_path: Path) -> None:

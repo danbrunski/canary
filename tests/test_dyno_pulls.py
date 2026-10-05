@@ -207,3 +207,67 @@ def test_a_session_with_no_rpm_has_no_pulls_and_a_vehicle_without_rpm_is_refused
             driveline=DRIVELINE,
             demand_channel=None,
         )
+
+
+def test_a_part_throttle_rise_is_refused_before_its_motion_is_read(
+    tmp_path: Path, inputs_by_window: list[Any]
+) -> None:
+    """H07.9: each motion read opens every chunk of the session, and most rpm
+    rises in a drive are part throttle. With a WOT threshold, a window whose
+    demand never reaches it is refused ``not_wot`` unread; one without any
+    demand reading is refused ``inputs_missing``; a WOT window is read."""
+    records = []
+    for offset, course in ((0.0, 10.0), (60.0, 190.0), (120.0, 10.0)):
+        records += [TelemetryRecord.obd(t, "RPM", rpm, "rpm") for t, rpm in _pull_rpm(T0 + offset)]
+        records += [
+            TelemetryRecord.gps(T0 + offset + s, "heading", course, "deg") for s in range(30)
+        ]
+    for offset, level in ((0.0, 3.5), (60.0, 4.1)):  # the third pull has no demand rows
+        records += [
+            TelemetryRecord.obd(T0 + offset + i / 10.0, "THROTTLE_POS", level, "V")
+            for i in range(300)
+        ]
+    session = tmp_path / "2026-10-03T120000"
+    write_records_to_parquet(records, session, max_rows=100_000)
+    inputs_by_window.append(_inputs_in_gear(3))  # only the WOT window asks
+
+    found = find_power_pulls(
+        session,
+        sources=SOURCES,
+        driveline=DRIVELINE,
+        demand_channel="obd:THROTTLE_POS",
+        wot_threshold=4.0,
+    )
+
+    assert [None if f.refusal is None else f.refusal.kind for f in found] == [
+        "not_wot",
+        None,
+        "inputs_missing",
+    ]
+    assert "peaks at 3.5" in found[0].refusal.reason  # type: ignore[union-attr]
+    assert inputs_by_window == []
+
+
+def test_a_caller_that_read_the_session_passes_it_and_nothing_reads_it_again(
+    tmp_path: Path, inputs_by_window: list[Any], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """H07.9: the workbench reads each session once; ``channels`` carries that
+    read, and the detector does not read the whole session itself."""
+    from src.analysis.channels import read_channels
+
+    session = _session(tmp_path, [(0.0, 10.0, False)])
+    channels = read_channels(session, dyno_pulls.session_reads(SOURCES, None), acquired_time=True)
+
+    def forbidden(*args: Any, **kwargs: Any) -> Any:
+        raise AssertionError("read the session again")
+
+    monkeypatch.setattr(dyno_pulls, "read_channels", forbidden)
+    inputs_by_window.append(_inputs_in_gear(3))
+    (found,) = find_power_pulls(
+        session,
+        sources=SOURCES,
+        driveline=DRIVELINE,
+        demand_channel=None,
+        channels=channels,
+    )
+    assert found.refusal is None and round(found.course_deg or 0) == 10

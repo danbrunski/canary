@@ -552,11 +552,152 @@ under GPS. Defects a dyno would inherit:
   refuses duplicate regimes. Tests: `tests/test_dyno.py::test_floor_*`,
   `::test_compare_*`, `::test_profile_floor_*`,
   `::test_committed_xterra_dyno_file_*`.
-- [ ] **H07.9 A workbench page.** **Do:** a `dyno` workbench job kind, an
+- [x] **H07.9 A workbench page.** **Do:** a `dyno` workbench job kind, an
   `/analysis/dyno` route through the single-flight child, and a tab on the
   Analysis page: power and torque against rpm per pull pair, overlay of runs,
   the conditions block, the refusals, and export. **Accept:** route and
   component tests; the page's empty state names its cause.
+  **Evidence (2026-10-05):** built at the desk; the Xterra's curves wait on
+  H07.12, and the page says so rather than drawing one.
+  - **Job.** `src/analysis/dyno_workbench.py` `dyno_runs(sessions, inputs,
+    vehicle, request)` runs `find_power_pulls` → `label_headings` →
+    `estimate_pitch_offset` → `compute_power` per session and gear.
+    `"dyno"` is a `workbench_jobs.JOB_KINDS` kind, so it inherits the
+    bounded single-flight child, capture deferral, the row budget and
+    `analysis_busy` while a brain child runs.
+  - **Route.** `GET /analysis/dyno?sessions=&revision=&road=&payload_kg=&induction=&ambient_temp_c=&allow_single_direction=`,
+    control auth, in `src/dashboard/routes/workbench.py`. The route table
+    snapshot is regenerated (one row added). There is no MCP tool, matching
+    the other `/analysis/*` workbench routes.
+  - **No invented coefficients.** Every answer carries `prerequisites`.
+    Each fact is `recorded`, `stated`, `estimated`, `pending` or `missing`,
+    and names what owes it. On the committed Xterra profile, road load
+    (H07.5) and squat (H07.4) are `pending`, owed by H07.12. Every run is
+    therefore refused `coefficients_pending`, naming both, and no curve is
+    drawn. Inertia is `estimated` (H07.6). The mass is `stated` and quotes
+    its "not a scale ticket" evidence.
+  - **Two kinds of blocked, kept apart** (revised after verification).
+    `coefficients_pending` is used only when every blocking fact is
+    `pending`, a measurement the truck owes. Missing configuration is
+    `prerequisites_missing`, a profile to fix, even when a pending
+    coefficient sits beside it. Three cases count as missing:
+    - no WOT criterion;
+    - a mass with no `mass_evidence` (it may be the code's 1,900 kg
+      default);
+    - an `operator_demand` provider with a transform. The reason names the
+      transform.
+  - **The pitch offset** belongs to one session's IMU frame. Each run
+    estimates it from its own pulls' direction pair, with the recorded squat
+    removed, and labels its source. Squat is therefore required, not
+    optional. **Operator decision 2026-10-05** (made by the orchestrator on
+    the implementer's recommendation): keep the pulls' own pair. Cruise legs
+    in the H07.12 protocol are the check on it. On the synthetic graded road
+    the pull-derived offset lands within 0.1° of the true 0.3°, and engine
+    torque within 3 % (H07.7 gets 2 % with a cruise-pair offset).
+  - **Conditions** come from the session: tune revision, and the medians of
+    baro, IAT and ambient (`obd:AMBIANT_AIR_TEMP`) over the pulls. The
+    operator states road, payload and induction; ambient is stated only if
+    unrecorded. A missing condition refuses the run `inputs_missing`, naming
+    each one.
+  - **Uncertainty.** Each run carries `noise_floor_for` per quantity: the
+    floor's bands, or its `no_floor` refusal. It also carries the per-rpm
+    half-difference between the two headings, labelled "not a noise floor".
+  - **Coverage.** Every rpm rise found is listed per session, with its gear,
+    heading or refusal.
+  - **Empty kinds:** `not_configured`, `prerequisites_missing`,
+    `over_budget`, `no_pull_found`, `every_pull_refused`,
+    `coefficients_pending` and `every_run_refused`.
+  - **Pre-gate in `find_power_pulls`.** New `wot_threshold`: a window whose
+    operator demand never reaches the threshold is refused `not_wot` before
+    its motion is read, and one with no demand reading is refused
+    `inputs_missing`.
+  - **Cost** (revised after verification failed the first version on
+    performance). The first version read each session whole at least four
+    times: rpm, course, demand, and baro for the conditions block, plus baro,
+    IAT and ambient per run. Each window's motion read also opened every
+    chunk: 4,776+ `read_parquet` calls on `2026-09-20T175050`, and 24.8 s
+    per window. Now:
+    - **One whole-session read.** `_session_read` reads rpm, course, demand,
+      baro, IAT and ambient in one `read_channels`. `find_power_pulls(...,
+      channels=)`, the run conditions and `conditions_block(...,
+      baro_reads=)` all use that read.
+    - **Footer-pruned windows.** `read_session(..., time_range=(lo, hi))`
+      skips every chunk whose footer `timestamp` range is disjoint from the
+      window. This is exact under the same column's row filter. The chunk
+      ranges come from `session_files.chunk_time_range`, cached by path,
+      size and mtime. `read_motion_inputs` passes the range.
+    - **Measured** (laptop, load average ~20, `dyno_runs` on the committed
+      profile):
+
+      | session | rows | chunks | `read_parquet` | time |
+      |---|---|---|---|---|
+      | `2026-09-20T175050` | 11.3 M | 1,194 | 1,194 (was ≥4,776) | 42.3 s (was 105 s) |
+      | `_capture-tuning-2026-09-22T235224` | 2.84 M | 305 | 313 | 16.5 s (was 43 s) |
+
+      One window's motion read went from 24.8 s to 2.9 s cold and 0.8 s
+      warm (1,194-chunk session).
+    - **Pi extrapolation**, at the measured ~3.2× (D03,
+      `read_acquisition_frame`): about 53 k rows/s from 170 k on the laptop.
+      `2026-09-20T175050` would take ~210 s on the Pi, the capture ~55 s,
+      and a window ~3 s warm.
+    - **Up-front cap.** `dyno_preflight` refuses a selection whose total
+      stored rows exceed `dyno_row_budget(900 s)` = **23.9 M rows**: half
+      the child timeout at the Pi rate, leaving the other half for ~150 WOT
+      windows. It answers 409 `dyno_over_budget`, naming the row count, the
+      estimated Pi seconds and the laptop path, before any child is spawned.
+      The per-session `digest_row_budget` (5.4 M on the Pi) still applies
+      first. A 40-session pool is therefore refused up front, not left to
+      time out.
+  - **Page.** A "Dyno" tab on the Analysis page (`DynoView.tsx`):
+    - inputs for road, payload, induction, ambient and allow-single;
+    - the prerequisites list;
+    - an SVG overlay of every computed run (solid line: the pair; dashed:
+      each heading; shaded: the ±sd floor band), with a power/torque toggle;
+    - a runs table with peak, conditions, flags and uncertainty, plus the
+      refused runs;
+    - the windows found, per session;
+    - CSV and JSON export, and the shared conditions block;
+    - a named empty sentence per kind.
+  - **Tests:**
+    - `tests/test_dyno_workbench.py` (16). They pin:
+      - the committed profile's pending facts;
+      - the mass-evidence block;
+      - `coefficients_pending`, with the windows still listed;
+      - recorded coefficients giving a curve. Engine-torque error is under
+        3 % with the offset taken from the pulls, and the conditions, flags,
+        `no_floor` and heading spread are all present;
+      - missing conditions named;
+      - the kinds of empty;
+      - no WOT criterion, a missing `mass_evidence` and a transformed demand
+        provider, each `prerequisites_missing` (not pending);
+      - one whole-session read per session, using the real
+        `find_power_pulls`; a second read raises;
+      - the budget formula, and the route's 409 `dyno_over_budget` before
+        any spawn;
+      - the route through the child, auth, capture deferral, and the 422 on
+        a bad induction.
+    - `tests/test_dyno_pulls.py::test_a_part_throttle_rise_is_refused_before_its_motion_is_read`
+      and `::test_a_caller_that_read_the_session_passes_it_and_nothing_reads_it_again`.
+    - `tests/test_session_time_prune.py` (3):
+      - footer ranges, boundary windows, and a chunk with an unknown range
+        kept;
+      - a windowed read opens one of three chunks and returns the same rows;
+      - a window no chunk reaches returns an empty frame.
+    - `DynoView.test.tsx` (5): the request URL, the pending empty state with
+      prerequisites and coverage, the overlay with floor band, flags and
+      export, the empty sentences (including `prerequisites_missing`, which
+      never reads "pending"), and the Analysis tab.
+  - **Real smoke** (laptop, `dyno_runs` on the committed profile):
+    - `2026-09-20T175050`: 23 windows (17 `lift_or_shift`, 6
+      `inputs_missing`: the default profile does not poll the throttle DID).
+      Unchanged after the read rework.
+    - `_capture-tuning-2026-09-22T235224`: 27 windows (22 `lift_or_shift`,
+      4 `not_wot`, 1 `speed_scale_mismatch`). Unchanged after the read
+      rework.
+    - Both returned `every_pull_refused`, with road load and squat
+      `pending`. No session on the laptop has an `imu_frame.json`, so no
+      real window has reached `compute_power`.
+  - `docs/headless-api.md` has the route's row.
 
 ## Truck
 
@@ -612,6 +753,10 @@ under GPS. Defects a dyno would inherit:
   - **Still owed (truck):** 1st, which has 2 steady pairs on disk.
 - [ ] **H07.12 NA baseline.** On one flat, straight road: coast-downs both
   directions for H07.5, flat-ground accelerations for H07.4, then three pull
-  pairs in 3rd from ≤ 2,500 rpm to the limiter (supercharger NA1/NA5).
+  pairs in 3rd from ≤ 2,500 rpm to the limiter (supercharger NA1/NA5). Add a
+  steady cruise leg each way over the same stretch, in the same session.
+  That cruise-pair pitch offset is the check on the offset H07.9 estimates
+  from the pulls' own pair (operator decision 2026-10-05): the two should
+  agree within their spread.
   **Accept:** road load, squat coefficient, noise floor and the NA power
   curve recorded, with conditions, before the supercharger goes on.

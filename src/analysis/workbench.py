@@ -59,8 +59,11 @@ from src.paths import BINDINGS_YAML, DIDS_YAML
 from src.session import TAGS_FILENAME, load_tags
 from src.storage.capture_manifest import read_capture_manifest
 from src.storage.session_files import session_footer_span
-from src.storage.sessions import session_started_at
-from src.vehicle.tune_revisions import TuneRevisionRegistry, resolve_session_revision
+from src.vehicle.tune_revisions import (
+    TuneRevisionRegistry,
+    resolve_session_revision,
+    session_dated_at,
+)
 
 Regime = Literal["all", "closed_loop", "enrichment", "fuel_cut", "idle"]
 REGIMES: tuple[Regime, ...] = ("all", "closed_loop", "enrichment", "fuel_cut", "idle")
@@ -175,15 +178,23 @@ def _column(series: pd.Series) -> list[Any]:
 
 def revision_boundaries(
     registry: TuneRevisionRegistry | None,
-    start: datetime | None,
+    session: Path,
     end: datetime | None,
 ) -> list[dict[str, Any]]:
-    """Flashes that fall strictly inside ``(start, end]``.
+    """Flashes that fall strictly inside ``(start, end]`` of ``session``.
 
     The registry assigns a revision by session *start*, so a log spanning a
     flash carries one label and two calibrations. Every figure computed across
     such a boundary mixes them; the page draws the marker and says so.
+
+    ``start`` is :func:`~src.vehicle.tune_revisions.session_dated_at`, the
+    same date :meth:`TuneRevisionRegistry.for_session` labels the session by:
+    its first stored sample, the name only without data. Taking the session
+    rather than a time makes the name-dated start unwritable here (P02.17):
+    ``2026-08-03T163440`` is named 6 h 37 min before its data, so a name start
+    reported the k106 flash as *inside* a session the label already put on k106.
     """
+    start = session_dated_at(session)
     if registry is None or start is None or end is None:
         return []
     out: list[dict[str, Any]] = []
@@ -470,7 +481,6 @@ def session_frame(
     capped = total > start + cap
 
     timestamps = pd.to_datetime(page["timestamp"], utc=True) if not page.empty else pd.Series([])
-    started = session_started_at(session_dir)
     first_ts = pd.to_datetime(aligned["timestamp"], utc=True).min() if len(aligned) else None
     last_ts = pd.to_datetime(aligned["timestamp"], utc=True).max() if len(aligned) else None
     manifest = read_capture_manifest(session_dir)
@@ -483,9 +493,7 @@ def session_frame(
     ]
     boundaries = revision_boundaries(
         inputs.registry,
-        started
-        if started is not None
-        else (None if first_ts is None else first_ts.to_pydatetime()),
+        session_dir,
         None if last_ts is None or pd.isna(last_ts) else last_ts.to_pydatetime(),
     )
     return {
@@ -524,12 +532,19 @@ def session_frame(
 # Conditions (W04.12)
 
 
-def _baro_range(sessions: list[Path], inputs: WorkbenchInputs) -> dict[str, Any]:
+def _baro_range(
+    sessions: list[Path],
+    inputs: WorkbenchInputs,
+    reads: dict[str, pd.DataFrame] | None = None,
+) -> dict[str, Any]:
     lows: list[float] = []
     highs: list[float] = []
     without: list[str] = []
     for session in sessions:
-        frame, _ = _read_optional(session, [BARO_SPEC], inputs)
+        if reads is not None and session.name in reads:
+            frame = reads[session.name]
+        else:
+            frame, _ = _read_optional(session, [BARO_SPEC], inputs)
         values = pd.to_numeric(frame["value"], errors="coerce").dropna()
         if values.empty:
             without.append(session.name)
@@ -550,11 +565,14 @@ def conditions_block(
     *,
     gates: dict[str, Any] | None = None,
     extra: dict[str, Any] | None = None,
+    baro_reads: dict[str, pd.DataFrame] | None = None,
 ) -> dict[str, Any]:
     """Sessions pooled, revision(s), barometric range, gates and rows removed.
 
     A number without these is how this project got six retractions; every
-    Analysis figure carries one.
+    Analysis figure carries one. ``baro_reads`` (session name → its
+    :data:`BARO_SPEC` rows) lets a job that already read the session pass
+    them, rather than read it again.
     """
     revisions: dict[str, list[str]] = {}
     boundaries: dict[str, list[dict[str, Any]]] = {}
@@ -562,8 +580,8 @@ def conditions_block(
         identity = session_revision(session, inputs.registry)
         key = identity["revision"] or "unknown"
         revisions.setdefault(key, []).append(session.name)
-        first, last, _rows = session_span(session)
-        crossed = revision_boundaries(inputs.registry, session_started_at(session) or first, last)
+        _first, last, _rows = session_span(session)
+        crossed = revision_boundaries(inputs.registry, session, last)
         if crossed:
             boundaries[session.name] = crossed
     return {
@@ -572,7 +590,7 @@ def conditions_block(
         "revisions": revisions,
         "mixed_revisions": len(revisions) > 1 or bool(boundaries),
         "revision_boundaries": boundaries,
-        "baro": _baro_range(sessions, inputs),
+        "baro": _baro_range(sessions, inputs, baro_reads),
         "gates": gates,
         **(extra or {}),
     }

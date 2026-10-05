@@ -14,11 +14,12 @@ request the gates refuse outright.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import Depends, FastAPI, HTTPException, Query
 
 from src.analysis.channels import ChannelSpecError
+from src.analysis.dyno_workbench import DynoRequest
 from src.analysis.rom_trace import load_viewer_definition, mapping_refusal
 from src.analysis.tuning import GateError
 from src.analysis.workbench import (
@@ -36,6 +37,7 @@ from src.control.workbench_jobs import (
     Selection,
     WorkbenchRefusedError,
     capture_deferral,
+    dyno_preflight,
     run_off_loop,
     select_sessions,
 )
@@ -239,6 +241,37 @@ def register_workbench_routes(
             pooled(sessions, revision),
             {"timing": timing, "rpm": rpm, "airflow": airflow, "min_n": min_n},
         )
+
+    @app.get("/analysis/dyno", dependencies=[Depends(authorize)])
+    async def get_dyno(
+        sessions: str | None = None,
+        revision: str | None = None,
+        road: str | None = None,
+        payload_kg: float | None = Query(default=None, ge=0.0),
+        induction: Literal["na", "boosted"] | None = None,
+        ambient_temp_c: float | None = None,
+        allow_single_direction: bool = False,
+    ) -> dict[str, Any]:
+        """Wheel power and torque against rpm per session and gear (H07.9).
+
+        Every rpm rise found comes back as a pull or its refusal; a run whose
+        road load or squat is still owed is refused ``coefficients_pending``
+        rather than computed from a default. ``road``, ``payload_kg`` and
+        ``induction`` are run conditions the operator states; a run without
+        them is refused naming each."""
+        request = DynoRequest(
+            road=(road or "").strip() or None,
+            payload_kg=payload_kg,
+            induction=induction,
+            ambient_temp_c=ambient_temp_c,
+            allow_single_direction=allow_single_direction,
+        )
+        selection = pooled(sessions, revision)
+        try:
+            dyno_preflight(config, selection)
+        except WorkbenchRefusedError as exc:
+            raise HTTPException(exc.status, exc.detail) from exc
+        return await run_pooled("dyno", selection, {"request": request.as_dict()})
 
     @app.get("/analysis/pull-comparison", dependencies=[Depends(authorize)])
     async def get_pull_comparison(

@@ -35,6 +35,7 @@ from src.analysis.digest import (
     digest_row_budget,
     digest_span_budget_seconds,
 )
+from src.analysis.dyno_workbench import DynoRequest, dyno_over_budget, dyno_runs
 from src.analysis.rom_trace import cell_residency, load_viewer_definition
 from src.analysis.tuning_context import context_fields
 from src.analysis.workbench import (
@@ -73,6 +74,8 @@ JOB_KINDS = (
     "timing",
     "pull_comparison",
     "cell_residency",
+    # H07.9: the driving dyno, pulls -> power per session and gear.
+    "dyno",
     # R03.2: POST /control/sessions/{id}/classification. The only kind that
     # writes (the classification + fingerprint sidecars); it needs neither
     # the bindings nor the DID catalog.
@@ -243,6 +246,30 @@ def select_sessions(
     return Selection(usable=usable, over_budget=over, omitted=omitted)
 
 
+def dyno_preflight(
+    config: CanaryConfig, selection: Selection, timeout: float = DIGEST_TIMEOUT_SECONDS
+) -> None:
+    """Refuse a dyno request whose sessions cannot be read within ``timeout``.
+
+    Every other job's budget is per session; the dyno's cost is the pool's
+    rows (each session read once), so it is checked on the whole selection,
+    before a child is spawned (H07.9).
+    """
+    reason = dyno_over_budget(
+        {session.name: count_session_rows(session) for session in selection.usable}, timeout
+    )
+    if reason is not None:
+        raise WorkbenchRefusedError(
+            409,
+            {
+                "error": "analysis_refused",
+                "reason": "dyno_over_budget",
+                "message": reason,
+                "laptop_path": laptop_path(config, [p.name for p in selection.usable]),
+            },
+        )
+
+
 def _over_budget(
     session: Path, config: CanaryConfig, reads: Literal["raw", "value_number"]
 ) -> str | None:
@@ -354,6 +381,14 @@ def run_workbench_job(
             calibration=inputs.calibration,
             bindings_path=bindings_path,
             dids_path=dids_path,
+        )
+    if kind == "dyno":
+        return dyno_runs(
+            sessions,
+            inputs=inputs,
+            vehicle=config.vehicle.parameters,
+            request=DynoRequest(**params["request"]),
+            unavailable=skipped,
         )
     raise ValueError(f"unknown workbench job {kind!r}")
 
@@ -518,6 +553,7 @@ __all__ = [
     "WorkbenchRefusedError",
     "any_workbench_job_in_flight",
     "capture_deferral",
+    "dyno_preflight",
     "laptop_path",
     "run_off_loop",
     "run_workbench_job",

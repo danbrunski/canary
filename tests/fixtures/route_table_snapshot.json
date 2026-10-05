@@ -325,6 +325,22 @@
       "status_code": null
     },
     {
+      "auth": "control",
+      "body": false,
+      "method": "GET",
+      "path": "/analysis/dyno",
+      "query": [
+        "allow_single_direction",
+        "ambient_temp_c",
+        "induction",
+        "payload_kg",
+        "revision",
+        "road",
+        "sessions"
+      ],
+      "status_code": null
+    },
+    {
       "auth": null,
       "body": false,
       "method": "GET",

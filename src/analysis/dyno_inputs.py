@@ -732,7 +732,10 @@ def read_motion_inputs(
     lo = pd.Timestamp(start) - margin - pd.Timedelta(seconds=timeout or 0.0)
     hi = pd.Timestamp(end) + margin
     long = read_session(
-        Path(session_dir), filters=_filters(stored, can_ids, lo, hi), decoded="as_recorded"
+        Path(session_dir),
+        filters=_filters(stored, can_ids, lo, hi),
+        decoded="as_recorded",
+        time_range=(lo, hi),
     )
     long = keep_can_ids(long, can_ids)
     if subset is not None:

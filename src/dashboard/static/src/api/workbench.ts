@@ -6,6 +6,8 @@ import type {
   CalibrationResponse,
   CellResidency,
   DeliveryErrorResponse,
+  DynoRequest,
+  DynoResponse,
   FlashRecordRequest,
   FrameResponse,
   LogsResponse,
@@ -106,6 +108,29 @@ export function getPullComparison(
       revision_a: revisionA,
       revision_b: revisionB,
       floor_channel: floorChannel,
+    })}`,
+    token,
+    { signal },
+  );
+}
+
+/** `GET /analysis/dyno` — wheel power and torque per session and gear (H07.9).
+ *  `request` is what the operator states about the runs; nothing in it is
+ *  defaulted, and a run missing any of it is refused by name. */
+export function getDyno(
+  token: string,
+  choice: SessionChoice,
+  request: DynoRequest,
+  signal?: AbortSignal,
+) {
+  return controlJson<DynoResponse>(
+    `/analysis/dyno${queryString({
+      ...choiceParams(choice),
+      road: request.road,
+      payload_kg: request.payload_kg,
+      induction: request.induction,
+      ambient_temp_c: request.ambient_temp_c,
+      allow_single_direction: request.allow_single_direction || null,
     })}`,
     token,
     { signal },

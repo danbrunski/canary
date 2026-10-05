@@ -480,3 +480,164 @@ export type CellResidency =
       message: string;
       missing?: string[];
     };
+
+// ---------------------------------------------------------------- dyno (H07.9)
+
+/** Which kind of empty a dyno answer is — never merged into one "no result". */
+export type DynoUnavailableKind =
+  | "not_configured"
+  | "over_budget"
+  | "no_pull_found"
+  | "every_pull_refused"
+  | "coefficients_pending"
+  | "every_run_refused"
+  | "prerequisites_missing"
+  | null;
+
+/** One fact the power computation rests on, and whether it is measured. */
+export interface DynoPrerequisite {
+  fact: string;
+  status: "recorded" | "stated" | "estimated" | "pending" | "missing";
+  detail: string;
+  owed_by: string | null;
+  blocks_power: boolean;
+}
+
+export interface DynoRefusal {
+  available: false;
+  estimator: string;
+  kind: string;
+  reason: string;
+}
+
+/** One sustained rpm rise found in a session: a pull (gear, heading) or why not. */
+export interface DynoWindow {
+  start: string;
+  end: string;
+  rpm_start: number | null;
+  rpm_end: number | null;
+  course_deg: number | null;
+  gear: number | null;
+  heading: string | null;
+  refusal: DynoRefusal | null;
+}
+
+export interface DynoSession {
+  session_id: string;
+  revision: string | null;
+  revision_source: string;
+  windows: DynoWindow[];
+  n_windows: number;
+  n_pulls: number;
+}
+
+export type DynoQuantity = "wheel_power_kw" | "wheel_torque_nm";
+
+export interface DynoCurve {
+  rpm: Array<number | null>;
+  wheel_force_n: Array<number | null>;
+  wheel_power_kw: Array<number | null>;
+  wheel_torque_nm: Array<number | null>;
+  engine_power_kw_estimate: Array<number | null>;
+  engine_torque_nm_estimate: Array<number | null>;
+}
+
+/** The conditions every dyno result carries (H07 rules); all required. */
+export interface DynoRunConditions {
+  gear: number;
+  direction: "pair" | "single";
+  tune_revision: string;
+  induction: "na" | "boosted";
+  baro_kpa: number;
+  intake_temp_c: number;
+  ambient_temp_c: number;
+  road: string;
+  date: string;
+  payload_kg: number;
+  sessions: string[];
+}
+
+export interface DynoFloorBand {
+  rpm_min: number;
+  rpm_max: number;
+  sd: number;
+  n_points: number;
+}
+
+export type DynoFloor =
+  | {
+      available: true;
+      unit: string;
+      n_pull_pairs: number;
+      conditions: Record<string, unknown>;
+      bands: DynoFloorBand[];
+    }
+  | DynoRefusal;
+
+export interface DynoRunOk {
+  available: true;
+  session_id: string;
+  gear: number;
+  direction: "pair" | "single";
+  n_pulls: number;
+  curve: DynoCurve;
+  per_heading: Record<string, DynoCurve>;
+  conditions: DynoRunConditions;
+  flags: {
+    inertia: "estimated" | "measured_engine";
+    squat_corrected: boolean;
+    imu_pitch_offset_deg: number;
+    imu_pitch_offset_source: string;
+    imu_reference_id: string | null;
+    correction: "none" | "sae_j1349";
+    engine_estimate: string;
+    wheel_torque_convention: string;
+  };
+  test_mass_kg: number;
+  effective_mass_kg: number;
+  driveline_efficiency: number;
+  uncertainty: {
+    noise_floor: Record<DynoQuantity, DynoFloor>;
+    heading_spread: {
+      meaning: string;
+      wheel_power_kw: Array<number | null>;
+      wheel_torque_nm: Array<number | null>;
+    } | null;
+  };
+}
+
+export interface DynoRunRefused {
+  available: false;
+  session_id: string;
+  gear: number;
+  estimator: string;
+  kind: string;
+  reason: string;
+  n_pulls?: number;
+  headings?: string[];
+}
+
+export type DynoRun = DynoRunOk | DynoRunRefused;
+
+export interface DynoRequest {
+  road: string | null;
+  payload_kg: number | null;
+  induction: "na" | "boosted" | null;
+  ambient_temp_c: number | null;
+  allow_single_direction: boolean;
+}
+
+/** `GET /analysis/dyno` (H07.9). */
+export interface DynoResponse {
+  available: boolean;
+  unavailable_kind: DynoUnavailableKind;
+  reason: string | null;
+  request: DynoRequest;
+  prerequisites: DynoPrerequisite[];
+  demand: { spec: string | null; reason: string | null };
+  unavailable: UnavailableSession[];
+  sessions: DynoSession[];
+  runs: DynoRun[];
+  conditions: Conditions;
+  selection?: Selection;
+}

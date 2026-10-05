@@ -2270,10 +2270,47 @@ recomputes the rolling frame over the whole buffered window every tick.
   - Verified by an independent verifier (round 2): all acceptance holds,
     and HEAD plus these files alone pass mypy and 926 targeted tests.
 
-- [ ] **P02.17 Session-name time and first-row time disagree on some
+- [x] **P02.17 Session-name time and first-row time disagree on some
   sessions.** Low priority. Found by the P02.16 verifier, 2026-10-03.
-  - 7 of 150 sessions have a first row more than 2 minutes after their
-    directory name:
+  **Evidence (2026-10-05):** the label was fixed by `382dfa0` (E01.6).
+  `TuneRevisionRegistry.for_session` dates a session by
+  `session_dated_at`: its first stored sample, from footers, and the name
+  only without data. One reader still dated by the name, and it is fixed
+  here.
+  - **Checked on all 159 local sessions** (`~/canary-data/sessions/nissan-xterra-2008`,
+    `data/nissan-xterra-2008/tune_revisions.yaml`). The seven listed below
+    still have the same gaps (+978 … +23,834 s).
+    `resolve_session_revision` now puts `2026-08-03T163440` on
+    **ZS44A-k106**, while its name alone would give k105. The other six
+    resolve the same either way. One session not listed has a gap over
+    2 min, `2026-10-04T190056` at +2,369 s, and it crosses no flash.
+  - **Remaining defect, fixed.** `workbench.revision_boundaries` took a
+    start time, and all three callers passed the name's time:
+    - `session_frame`;
+    - `conditions_block`;
+    - `control/logs.summarize_log`, the capture browser.
+
+    So `2026-08-03T163440` was labelled k106 *and* reported the k106 flash
+    as falling inside it. The page drew "Flash inside" and
+    `mixed_revisions: true`.
+  - **The fix is at the shared function.** `revision_boundaries(registry,
+    session, end)` now takes the session directory and dates it with
+    `session_dated_at`, the same rule the label uses, so a name-dated start
+    cannot be passed. All three callers are swept.
+  - **After the fix, over all 159 sessions,** exactly one reports a flash
+    inside: `2026-07-26T214348`. Its data starts before the
+    `ZS44A-osiris-initial` flash at 22:31Z and runs past it, so the
+    crossing is real.
+  - **Tests** (`tests/test_workbench_analysis.py`):
+    - `test_a_session_named_before_its_data_is_bounded_by_its_data` names a
+      session 4 h before its data, with a flash in between. The frame, the
+      conditions block and the capture-browser row all say the new revision
+      with no boundary.
+    - `test_revision_boundary_excludes_flashes_outside_the_span` is updated
+      to the new signature.
+  - *Original finding, 2026-10-03, superseded by the evidence above.* Seven
+    of 150 sessions had a first row more than 2 minutes after their
+    directory name. The gaps are unchanged; what they caused is fixed.
 
     | session | first row after name |
     |---|---|
@@ -2284,12 +2321,6 @@ recomputes the rolling frame over the whole buffered window every tick.
     | 07-29T205841 | +11,413 s |
     | 08-03T163440 | +23,834 s |
     | 08-06T002019 | +434 s |
-  - Only `2026-08-03T163440` crosses a flash. `resolve_session_revision`, by
-    name, says k105, while P02.16's per-row lookup says k106. The two maps
-    differ (k105 carries the UpRev base map), so the tuning tools and
-    `TARGET_AFR` disagree about this session.
-  - Proposed: resolve a session by its first row, or flag the disagreement
-    where they differ. Not implemented.
 
 ## Tracked elsewhere
 

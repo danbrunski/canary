@@ -33,6 +33,7 @@ import {
   RefusalNotice,
   UnavailableList,
 } from "./WorkbenchNotices";
+import { DynoView } from "./DynoView";
 
 /** The measured-AFR sources, named — never a silent default. The ECM's own λ
  *  and the A/F-voltage path disagree by ~3.8 %, so the page makes the
@@ -43,11 +44,12 @@ export const MEASURED_SOURCES: ReadonlyArray<{ id: string; label: string }> = [
   { id: "semantic:measured_afr_b2", label: "A/F sensor voltage, bank 2, calibrated transfer" },
 ];
 
-type View = "delivery" | "trim" | "timing";
+type View = "delivery" | "trim" | "timing" | "dyno";
 const VIEWS: ReadonlyArray<SegmentOption<View>> = [
   { id: "delivery", label: "Delivery error" },
   { id: "trim", label: "Trim surface" },
   { id: "timing", label: "Timing" },
+  { id: "dyno", label: "Dyno" },
 ];
 
 type TimingMode = "cells" | "compare";
@@ -680,6 +682,7 @@ export function AnalysisPage({
       {view === "delivery" && <DeliveryView token={token} choice={choice} />}
       {view === "trim" && <TrimView token={token} choice={choice} />}
       {view === "timing" && <TimingView token={token} choice={choice} />}
+      {view === "dyno" && <DynoView token={token} choice={choice} />}
     </div>
   );
 }

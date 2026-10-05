@@ -59,7 +59,7 @@ def summarize_log(session: Path, registry: TuneRevisionRegistry | None) -> dict[
         ),
         "row_count": rows,
         "revision": session_revision(session, registry),
-        "revision_boundaries": revision_boundaries(registry, begin, last or ended),
+        "revision_boundaries": revision_boundaries(registry, session, last or ended),
         "quality": (
             None
             if quality is None
