@@ -28,6 +28,7 @@ from src.collection.reconnect import ReconnectPolicy
 from src.config import CanaryConfig, KlineConfig
 from src.dashboard.api import create_app
 from src.telemetry import TelemetryRecord
+from tests.waits import HANG_GUARD_SECONDS
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 DIDS = REPO_ROOT / "data/dids.yaml"
@@ -109,7 +110,7 @@ async def _run_one(
     await asyncio.sleep(0)
     future = actions.submit(action)
     try:
-        return await asyncio.wait_for(asyncio.wrap_future(future), timeout=5)
+        return await asyncio.wait_for(asyncio.wrap_future(future), timeout=HANG_GUARD_SECONDS)
     finally:
         stop.set()
         await task
@@ -141,6 +142,16 @@ async def test_passive_mode_refuses_without_touching_the_line() -> None:
     result = await _run_one(actions, _collector(actions, transports), _clear())
     assert not result.ok and "passive" in result.detail
     assert transports == []
+
+
+def test_finishing_a_cancelled_action_does_not_raise() -> None:
+    """A waiter that gave up cancels the future; the collector finishing the
+    action afterwards must not crash its loop (InvalidStateError, seen under
+    load in the push gate 2026-10-05)."""
+    action = _clear()
+    action.future.cancel()
+    action.finish(ok=True, started=0.0, reply=b"\x54", detail="positive response")
+    assert action.future.cancelled()
 
 
 def test_one_function_at_a_time_and_none_without_a_collector() -> None:

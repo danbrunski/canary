@@ -68,6 +68,10 @@ class KlineAction:
     future: Future[KlineActionResult] = field(default_factory=Future)
 
     def finish(self, *, ok: bool, detail: str, started: float, reply: bytes | None = None) -> None:
+        if self.future.done():
+            # The caller stopped waiting and cancelled it. The function ran
+            # (or was refused) all the same; the collector's log says which.
+            return
         self.future.set_result(
             KlineActionResult(
                 kind=self.kind,
