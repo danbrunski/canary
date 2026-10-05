@@ -504,7 +504,7 @@ measurement in hand.
   copies (two rounds of five concurrent `pytest -n0`) beside 12 burners, load
   average 9.4. The whole file passed 29 of 29 under the same load.
 
-- [ ] **T01.15 `tests/test_control_can_activity.py::test_can_activity_reports_frame_rate_and_changed_bytes`
+- [x] **T01.15 `tests/test_control_can_activity.py::test_can_activity_reports_frame_rate_and_changed_bytes`
   failed once under load and passes alone.**
   - **Seen** 2026-10-03 in an inner-loop run (`-m "not integration and not
     ml_training and not slow"`, 12 workers) while two replay processes ran
@@ -523,6 +523,23 @@ measurement in hand.
   - **Do:** capture the failing assertion first. The gate now keeps failed
     logs in `.git/ci-gate/failed-logs/` (T01.13), so the next occurrence will
     have it. Then fix the test.
+  - *Fixed 2026-10-05, test only, without the failing assertion* (no kept log
+    has caught it since). The suspected shape is the only way this test can
+    go wrong: everything it asserts depends on a wall-clock sender thread
+    getting scheduled inside the window. The window now runs on a clock that
+    moves 0.05 s per `recv` (`can_activity.time` patched). The route still opens
+    the real virtual-bus handle through `bus_factory`; four frames are queued
+    on it as soon as it opens, so six polls fill the 0.3 s window. The window
+    keeps its number, and the asserts got stricter: exactly 4 frames,
+    `hz == 13.333`, `duration_seconds == 0.3`, first/last hex, and 0x123 as
+    the only id, plus the old `changed_byte_indices == [0]`.
+  - *Loaded runs.* The test was repeated with a scratch `pytest_generate_tests`
+    plugin (pytest-repeat is not installed). Before the fix: 40 of 40 at
+    `-n 8` beside 12 burners, and 120 of 120 at `-n 12` beside 24 burners
+    (load 33–37). Like the entry above, I could not reproduce it. After: 80 of
+    80 at `-n 8` beside 12 burners (load 15–20), then the whole file, 60
+    copies of each of its 4 tests, at `-n 12` beside 24 burners (load 42):
+    240 of 240.
 
 - [x] **T01.16 `tests/test_multi_did_batching.py::test_known_answer_decode_matches_single_and_batched_scheduler_paths`
   read no DID on a slow CI runner.**
@@ -537,7 +554,7 @@ measurement in hand.
     deadline. The file passed 3 of 3 runs, and the test passed 20 of 20 copies
     (four rounds of five concurrent `pytest -n0`) beside 12 CPU burners.
 
-- [ ] **T01.17 `tests/test_inference_scheduling.py::test_run_live_inference_records_timing_and_shuts_down`
+- [x] **T01.17 `tests/test_inference_scheduling.py::test_run_live_inference_records_timing_and_shuts_down`
   failed again under load after T01.12.**
   - **Seen** 2026-10-04 in the push gate for `12a2351` (USB ADC v2, which
     touched no inference code), parallel run; it passed on the serial
@@ -549,8 +566,21 @@ measurement in hand.
     finished before `stop`, so no compute stage was ever timed.
   - **Do:** wait for `ticks_completed >= 1` (a computed tick), not only
     `ticks_scheduled >= 3`, before setting `stop`, with the same 10 s bound.
+  - *Fixed 2026-10-05, test only.* The test now uses `tests.waits.wait_until`
+    (the hang guard, not a 10 s pass/fail number) to wait for exactly what it
+    asserts before it sets `stop`: `ticks_scheduled >= 3`, `ticks_completed >= 1`,
+    and all five timed stages. `ticks_completed` alone is not enough, because a
+    tick with nothing to score is applied inline and records no `compute`. The
+    join is now `settle(task)`, where it was `wait_for(task, 2.0)`. A compute
+    still running at `stop` can outlive `close`'s 1 s bounded join by design:
+    the executor is released and the release is logged. So the no-worker-thread
+    check now waits for the thread to exit, where it used to check once.
+  - *Loaded runs* (`-n 8`, 12 burners, the test repeated by a scratch plugin):
+    before, 31 of 40 passed. All nine failures were `ticks_completed == 0` with
+    `ticks_scheduled` at 3–4, the shape seen in the gate. After, 80 of 80 at
+    load 15–20, then 60 of 60 at `-n 12` beside 24 burners (load 42).
 
-- [ ] **T01.18 `tests/test_sequence_bakeoff.py::test_main_writes_json` crashed
+- [x] **T01.18 `tests/test_sequence_bakeoff.py::test_main_writes_json` crashed
   its xdist worker in the `ml_training` tier.**
   - **Seen** 2026-10-04 in the push gate for `12a2351`: "worker 'gw8'
     crashed", 1 failed, 121 passed in 433 s. Passes alone (`-n0`, 79 s).
@@ -559,6 +589,37 @@ measurement in hand.
     check `dmesg` for the OOM killer first.
   - **Do:** confirm the cause, then cap the tier's workers or mark the
     bake-off serial.
+  - **Cause confirmed: the global OOM killer.** The kernel journal
+    (`journalctl -k`, no sudo needed) shows it during the `12a2351` gate
+    (stamped 21:31:21Z, 1002 s). At 15:25:33 MDT the box had `Free swap = 0kB`
+    of 8 GB. About 37 `python3` processes were up: twelve torch-sized ones
+    (~42 GB virtual) from one xdist run, plus another session's pytest workers.
+    The killer took pids 2091713 (anon-rss 988 MB) and 2091694 (1.09 GB, at
+    15:26:14), both torch workers from that 12-process group. It also killed
+    user `systemd`, `dbus-daemon` and others. The same journal has 13 more
+    `python3` OOM kills between 21:17 and 22:05 MDT that day.
+  - **Measured.** `test_main_writes_json` alone (`-n0`, `/usr/bin/time -v`)
+    peaks at **1.76 GB RSS**. Over the whole tier at 4 workers, the largest
+    single worker reached **2.03 GB**, and `MemAvailable` fell from ~13 GB to
+    7.8 GB. Twelve workers at ~2 GB each is ~24 GB on a 15 GB laptop with
+    8 GB of swap that other sessions also use.
+  - *Fixed 2026-10-05: workers capped, the bake-off left parallel.* The repo
+    had no serial-marker or `xdist_group` mechanism. Every tier picks up
+    `-n auto` from `addopts`, so the cap goes where `auto` is resolved.
+    `tests/conftest.py` implements xdist's `pytest_xdist_auto_num_workers`.
+    When `-m` keeps `ml_training` tests and drops unmarked ones
+    (`selects_ml_training_tier`: `-m ml_training`, `-m "ml_training or slow"`),
+    `auto` becomes `min(4, cores)` (`ML_TRAINING_MAX_WORKERS`). Every other
+    selection keeps every core. An explicit `-n N` or
+    `PYTEST_XDIST_AUTO_NUM_WORKERS` still overrides it. `ci_gate.sh` runs
+    bare `pytest -m ml_training`, so it gets the cap with no edit, and so does
+    a hand run. `tests/test_ml_tier_workers.py` pins the selection rule (9
+    cases). Verified: `pytest -m ml_training` gives `created: 4/4 workers`, and
+    a default-tier run still gives `12/12`. The full tier at 4 workers passed
+    122 tests (1 skipped) in 183 s. Its only errors were 3 collection errors
+    per worker, from another session's uncommitted λ-chain edits
+    (`test_analysis_tuning.py`, `test_bank_balance_persistence.py`,
+    `test_workbench_analysis.py`).
 
 - [x] **T01.19 `tests/test_candidate_promotion.py::test_a_held_out_fit_hashes_as_it_did_before_promotion_existed`
   pinned a digest of floats.**

@@ -56,6 +56,7 @@ from src.models.manager import LoadedModel
 from src.models.manifest import ModelManifestCommon
 from src.telemetry import TelemetryRecord
 from tests.configs import isolated_config
+from tests.waits import settle, wait_until
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -723,24 +724,37 @@ async def test_run_live_inference_records_timing_and_shuts_down(config: CanaryCo
     source.observe(TelemetryRecord.obd(datetime.now(UTC).timestamp(), "RPM", 700.0, "rpm"))
     stop = asyncio.Event()
     task = asyncio.create_task(run_live_inference(source, components, stop, tick_seconds=0.05))
-    # Wait for the ticks, not a wall-clock window: startup (executor, first
-    # feature build) shares the window, and under CI load a fixed 0.4 s held
-    # only 2 ticks (T01.12).
-    deadline = time.monotonic() + 10.0
-    while components.inference_timing.snapshot().ticks_scheduled < 3:
-        assert time.monotonic() < deadline, "fewer than 3 ticks scheduled in 10 s"
+    timed = {"feature", "isolation_forest", "compute", "apply", "total"}
+
+    def scored_and_ticking() -> bool:
         assert not task.done(), task
-        await asyncio.sleep(0.01)
+        snap = components.inference_timing.snapshot()
+        return snap.ticks_scheduled >= 3 and snap.ticks_completed >= 1 and timed <= set(snap.stages)
+
+    # Wait for what is asserted below, not a wall-clock window. Three
+    # *scheduled* ticks were not enough (T01.12): under load every compute
+    # could still be in flight at `stop`, so no compute stage was ever timed
+    # (T01.17, 9 of 40 under 12 burners). A computed, applied tick is.
+    await wait_until(scored_and_ticking, what="3 ticks scheduled and one computed tick applied")
     stop.set()
-    await asyncio.wait_for(task, timeout=2.0)
+    await settle(task)
     snap = components.inference_timing.snapshot()
     assert snap.interval_seconds == 0.05
     assert snap.ticks_scheduled >= 3
     assert snap.ticks_completed <= snap.ticks_scheduled
     assert snap.ticks_completed >= 1
     assert snap.lateness.count == snap.ticks_scheduled
-    assert {"feature", "isolation_forest", "compute", "apply", "total"} <= set(snap.stages)
-    assert not any(t.name.startswith(INFERENCE_WORKER_THREAD_PREFIX) for t in threading.enumerate())
+    assert timed <= set(snap.stages)
+    # A compute still running at `stop` outlives `close`'s bounded join by
+    # design (the executor is released, logged); its thread must still end.
+    await wait_until(
+        lambda: (
+            not any(
+                t.name.startswith(INFERENCE_WORKER_THREAD_PREFIX) for t in threading.enumerate()
+            )
+        ),
+        what="the inference worker thread to exit after shutdown",
+    )
 
 
 # ---------------------------------------------------------------------------

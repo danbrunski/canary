@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from _pytest.mark.expression import Expression
 
 from src.config import CanaryConfig
 from tests import repo_guard
@@ -70,6 +71,46 @@ def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item
         if dropped:
             config.hook.pytest_deselected(items=dropped)
         items[:] = keep
+
+
+#: ``-n auto`` for a run that selects the ``ml_training`` tier spawns at most
+#: this many workers (T01.18). One bake-off test alone peaks at 1.76 GB RSS
+#: (``test_sequence_bakeoff.py::test_main_writes_json``, ``/usr/bin/time -v``,
+#: 2026-10-05), so twelve torch workers on this 15 GB laptop exhausted RAM and
+#: all 8 GB of swap beside another session's suite on 2026-10-04: the kernel's
+#: OOM killer took two ~1 GB torch workers (journal, 15:25:33 and 15:26:14
+#: MDT) and xdist reported "worker 'gw8' crashed". Four is what the tier has
+#: been run at by hand (R07: 122 passed at ``-n 4``). An explicit ``-n N`` or
+#: ``PYTEST_XDIST_AUTO_NUM_WORKERS`` still wins.
+ML_TRAINING_MAX_WORKERS = 4
+
+
+def selects_ml_training_tier(markexpr: str) -> bool:
+    """True when ``-m`` keeps ``ml_training`` tests but drops unmarked ones.
+
+    That is the torch tier run on its own (``-m ml_training``, ``-m "ml_training
+    or slow"``), where every worker trains. A run that keeps everything
+    (``-m ""``) spreads the few torch tests among thousands of light ones.
+    """
+    if not markexpr.strip():
+        return False
+
+    def only_ml_training(name: str, /, **_: str | int | bool | None) -> bool:
+        return name == "ml_training"
+
+    def unmarked(name: str, /, **_: str | int | bool | None) -> bool:
+        return False
+
+    expression = Expression.compile(markexpr)
+    return expression.evaluate(only_ml_training) and not expression.evaluate(unmarked)
+
+
+def pytest_xdist_auto_num_workers(config: pytest.Config) -> int | None:
+    if os.environ.get("PYTEST_XDIST_AUTO_NUM_WORKERS"):
+        return None
+    if not selects_ml_training_tier(config.option.markexpr):
+        return None
+    return min(ML_TRAINING_MAX_WORKERS, len(os.sched_getaffinity(0)))
 
 
 _REPO_BASELINE = pytest.StashKey[repo_guard.RunBaseline]()
