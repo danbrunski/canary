@@ -1,6 +1,6 @@
 """Record contracts for investigation memory (E01.1, docs/roadmap/tasks/E01).
 
-Six record kinds share one envelope (:class:`MemoryRecord`):
+Seven record kinds share one envelope (:class:`MemoryRecord`):
 
 * :class:`Evidence` — what an analysis tool computed, minted by that tool
   (E01.2): tool and code version, the session/window/sample references it
@@ -16,6 +16,10 @@ Six record kinds share one envelope (:class:`MemoryRecord`):
   change) rather than restating it.
 * :class:`Outcome` — what was measured after an intervention, against a
   prediction.
+* :class:`Reference` — a validated reference (an accepted baseline, a
+  behavior model) and the investigation that justified it (E01.4). An
+  intervention whose ``affects`` names its channels retires it as historical
+  without deleting it.
 * :class:`Retraction` — withdraws records without replacing them.
 
 What the envelope makes impossible rather than documented:
@@ -35,6 +39,10 @@ What the envelope makes impossible rather than documented:
 * **Supersession keeps history.** A record names what it ``supersedes``; the
   old record stays on disk and the ledger derives its ``superseded_at`` from
   the superseding record's ``recorded_at``. Nothing is overwritten.
+* **Predictions bound themselves.** A prediction's noise floor must have
+  been measured under the prediction's own regime (character for character,
+  ``noise_floor.yaml``'s rule); a floor from another regime is refused, so
+  "no effect" can always be told from "too small to see".
 * **Unevaluable is not normal.** :class:`Result` separates a named
   unevaluable reason from an evaluated result, and an unevaluable result
   cannot carry a residual (E00 shared contract).
@@ -49,7 +57,7 @@ from __future__ import annotations
 import hashlib
 import json
 import math
-from datetime import datetime
+from datetime import UTC, datetime, time
 from typing import Annotated, Any, Literal
 
 from pydantic import (
@@ -61,7 +69,13 @@ from pydantic import (
     model_validator,
 )
 
+from src.evidence.text import no_numerals
+
 __all__ = [
+    "AFFECTS_ALL",
+    "DETECTABLE_SIGMA",
+    "ORDERABLE_PRECISIONS",
+    "EffectivePrecision",
     "MEMORY_SCHEMA",
     "RECORD_KINDS",
     "UNEVALUABLE_REASONS",
@@ -75,8 +89,10 @@ __all__ = [
     "Prediction",
     "Provenance",
     "Quality",
+    "NoiseFloorRef",
     "Quantity",
     "RecordKind",
+    "Reference",
     "Result",
     "Retraction",
     "SourceRef",
@@ -84,6 +100,7 @@ __all__ = [
     "VehicleIdentity",
     "content_key",
     "mint_id",
+    "recurrence_key",
     "record_from_dict",
     "record_to_dict",
 ]
@@ -91,7 +108,13 @@ __all__ = [
 MEMORY_SCHEMA: Literal["canary-memory/1"] = "canary-memory/1"
 
 RecordKind = Literal[
-    "evidence", "investigation", "prediction", "intervention", "outcome", "retraction"
+    "evidence",
+    "investigation",
+    "prediction",
+    "intervention",
+    "outcome",
+    "retraction",
+    "reference",
 ]
 RECORD_KINDS: tuple[str, ...] = (
     "evidence",
@@ -100,6 +123,7 @@ RECORD_KINDS: tuple[str, ...] = (
     "intervention",
     "outcome",
     "retraction",
+    "reference",
 )
 
 #: Id prefix per kind, so an id names what it points at.
@@ -110,6 +134,7 @@ ID_PREFIX: dict[str, str] = {
     "intervention": "intv",
     "outcome": "out",
     "retraction": "ret",
+    "reference": "ref",
 }
 
 #: Why a result could not be evaluated. Each is a different answer and
@@ -363,12 +388,20 @@ class Evidence(_ConditionedRecord):
     """What a tool computed — minted by the tool, never typed by a model.
 
     ``subject`` is the tool's key for *what* was evaluated (e.g.
-    ``compare_channels:<session>:<a>:<b>``); re-minting the same subject with
-    different inputs, code or values supersedes the earlier record.
+    ``compare_channels:<session>:<a>:<b>``); re-minting the same subject over
+    the same data (a source session in common, overlapping windows) with
+    different inputs, code or values supersedes the earlier record (a
+    recompute). The same subject over *other* data is another occurrence — a
+    recurrence — and supersedes nothing (E01.3).
+
+    ``incident`` optionally names the recurring phenomenon (e.g.
+    ``plausibility:MAF_vs_RPM``) when it spans subjects; occurrences group by
+    :func:`recurrence_key`.
     """
 
     kind: Literal["evidence"] = "evidence"
     subject: str = Field(min_length=1)
+    incident: str | None = None
     sources: tuple[SourceRef, ...] = Field(min_length=1)
     input_hashes: dict[str, Sha256] = Field(min_length=1)
     artifact_hashes: dict[str, Sha256] = Field(default_factory=dict)
@@ -396,18 +429,49 @@ class Hypothesis(_Strict):
     supporting: tuple[RecordId, ...] = ()
     refuting: tuple[RecordId, ...] = ()
 
+    @field_validator("label")
+    @classmethod
+    def _label(cls, value: str) -> str:
+        return no_numerals(value, what="hypothesis label")
+
 
 class Investigation(_ConditionedRecord):
+    """An observation, its hypotheses and the evidence for and against each.
+
+    The structured prose (title, question, hypothesis labels, unknowns, next
+    measurements) is rendered on cards as claims, so it cannot state numbers
+    (:func:`src.evidence.text.numeral_in`): a number reaches the operator
+    only rendered from an evidence record. ``narrative`` is free prose and is
+    shown labelled as narrative, never as a finding.
+    """
+
     kind: Literal["investigation"] = "investigation"
     title: str = Field(min_length=1)
     question: str = Field(min_length=1)
     status: Literal["open", "resolved", "abandoned"] = "open"
+    #: The recurring phenomenon this investigation is about (E01.3); its
+    #: evidence occurrences group under the same key.
+    incident: str | None = None
     #: Evidence ids of the observation that opened it.
     observations: tuple[RecordId, ...] = ()
     hypotheses: tuple[Hypothesis, ...] = ()
     unknowns: tuple[str, ...] = ()
+    #: Measurements proposed next, in words (E03 selects them; E01.5 shows them).
+    next_measurements: tuple[str, ...] = ()
     #: Free prose. Narrative, not evidence: numbers belong in evidence records.
     narrative: str = ""
+
+    @field_validator("title", "question")
+    @classmethod
+    def _prose(cls, value: str) -> str:
+        return no_numerals(value, what="investigation text")
+
+    @field_validator("unknowns", "next_measurements")
+    @classmethod
+    def _prose_items(cls, value: tuple[str, ...]) -> tuple[str, ...]:
+        for item in value:
+            no_numerals(item, what="investigation text")
+        return value
 
     def typed_references(self) -> tuple[tuple[str, str | None], ...]:
         evidence = [*self.observations]
@@ -417,13 +481,57 @@ class Investigation(_ConditionedRecord):
         return super().typed_references() + tuple((ref, "evidence") for ref in evidence)
 
 
+#: How many standard deviations of the null-run floor a change must reach to
+#: be distinguishable. ``src.analysis.noise_floor.SIGMA_THRESHOLD`` is this
+#: value; a prediction may demand more, never less.
+DETECTABLE_SIGMA = 2.0
+
+
+class NoiseFloorRef(_Strict):
+    """The detectable-effect bound a prediction states (E01.4).
+
+    Copied from a measured floor (``noise_floor.yaml`` through
+    ``src.analysis.noise_floor.floor_reference``) with the regime it was
+    measured under. :class:`Prediction` refuses one whose ``conditions`` are
+    not its own regime, character for character: the WOT spark floor quoted
+    against an idle comparison understates noise ~16x. Because a copy can be
+    relabelled or invented, the ledger also re-reads ``source`` at append
+    time and refuses the reference unless the file hashes to
+    ``source_sha256`` and states this sd, unit and regime
+    (:func:`src.evidence.floors.verify_floor`).
+    """
+
+    #: The floor's own key (``timing_advance_deg``, ``delivery_error_pct``).
+    quantity: str = Field(min_length=1)
+    #: Per-cell standard deviation of the null-run delta, in its unit.
+    sd: Quantity
+    #: The regime the floor was measured under.
+    conditions: str = Field(min_length=1)
+    #: How many ``sd`` a change must reach to be distinguishable.
+    sigma_threshold: float = Field(ge=DETECTABLE_SIGMA)
+    #: The floor file (repo-relative inside the checkout) and its bytes' hash.
+    source: str = Field(min_length=1)
+    source_sha256: Sha256
+
+    @property
+    def detectable(self) -> float:
+        """The smallest absolute change this floor can distinguish."""
+        return self.sigma_threshold * self.sd.value
+
+
 class Prediction(_ConditionedRecord):
     """An expectation stated before the result (E01.4 enforces the order).
 
-    ``magnitude`` and ``noise_floor`` are required keys that may be ``None``:
-    a prediction without a supported magnitude says so, and one without a
-    condition-matched floor cannot later distinguish "no effect" from "too
-    small to see".
+    ``conditions`` is the affected regime; ``magnitude`` and ``noise_floor``
+    are required keys that may be ``None``: a prediction without a supported
+    magnitude says so, and one without a condition-matched floor cannot later
+    distinguish "no effect" from "too small to see" (its null outcome can
+    only be ``unresolvable``).
+
+    Whether it was made *before* the intervention is not the producer's to
+    say: the ledger derives it (``MemoryLedger.prediction_order``) from this
+    record's minted ``recorded_at`` against the intervention's ``valid_from``.
+    A post-hoc prediction is stored, never counted as confirmed.
     """
 
     kind: Literal["prediction"] = "prediction"
@@ -432,18 +540,23 @@ class Prediction(_ConditionedRecord):
     quantity: str = Field(min_length=1)
     direction: Literal["increase", "decrease", "no_change"]
     magnitude: Quantity | None
-    noise_floor: Quantity | None
+    noise_floor: NoiseFloorRef | None
 
     @model_validator(mode="after")
-    def _units_agree(self) -> Prediction:
-        if (
-            self.magnitude is not None
-            and self.noise_floor is not None
-            and self.magnitude.unit != self.noise_floor.unit
-        ):
+    def _floor_matches(self) -> Prediction:
+        floor = self.noise_floor
+        if floor is None:
+            return self
+        if floor.conditions != self.conditions.regime:
+            raise ValueError(
+                f"the noise floor for {floor.quantity} was measured under "
+                f"{floor.conditions!r}; this prediction is for {self.conditions.regime!r}. "
+                "A floor is only valid for its own regime."
+            )
+        if self.magnitude is not None and self.magnitude.unit != floor.sd.unit:
             raise ValueError(
                 f"magnitude is in {self.magnitude.unit!r} but the noise floor in "
-                f"{self.noise_floor.unit!r}; compare like with like"
+                f"{floor.sd.unit!r}; compare like with like"
             )
         return self
 
@@ -456,12 +569,43 @@ class Prediction(_ConditionedRecord):
         return super().typed_references() + tuple(refs)
 
 
+#: ``Intervention.affects`` entry meaning "every reference" (a supercharger).
+AFFECTS_ALL = "*"
+
+#: How well an intervention's ``valid_from`` is known. ``instant``: pinned
+#: (a flash capture). ``day``: a vehicle-ledger date, ``valid_from`` at that
+#: day's UTC midnight. ``approximate``: a recollection or a file mtime.
+#: ``floor``: a placeholder earlier than anything it must cover, not a time.
+#: ``unknown``: nobody said. Only ``instant`` and ``day`` can order a
+#: prediction before the change (``ORDERABLE_PRECISIONS``).
+EffectivePrecision = Literal["instant", "day", "approximate", "floor", "unknown"]
+ORDERABLE_PRECISIONS: frozenset[str] = frozenset({"instant", "day"})
+
+
 class Intervention(_ConditionedRecord):
     """A change to the vehicle or its instruments.
 
     ``source``/``source_ref`` point at the record that already holds the fact
     — a ``tune_revisions.yaml`` revision name, or a vehicle-ledger event id —
-    so memory does not keep a second, divergent copy of it.
+    so memory does not keep a second, divergent copy of it;
+    ``source_digest`` is the hash of that entry as it read when recorded, so a
+    later edit of the source is detectable (``src.evidence.interventions``).
+
+    ``valid_from`` is when the change took effect. ``effective_precision``
+    (required: see :data:`EffectivePrecision`) says how well that is known:
+    ``day`` (a vehicle-ledger date) puts ``valid_from`` at the start of that
+    UTC day — the earliest it can have been, so a prediction must precede the
+    whole day to count as prior; ``approximate``/``floor``/``unknown`` times
+    cannot order a prediction at all.
+
+    ``affects`` names the channels (or behavior-model targets) the change is
+    expected to alter, or :data:`AFFECTS_ALL`. Every current
+    :class:`Reference` on an affected channel established before the change
+    is retired by it (derived by the ledger; nothing is deleted).
+
+    A calibration intervention states ``image_sha256`` explicitly: the exact
+    plain-image hash, or ``None`` when the flash history never recorded one
+    (unknown stays unknown; a container hash is not an image hash).
     """
 
     kind: Literal["intervention"] = "intervention"
@@ -469,15 +613,74 @@ class Intervention(_ConditionedRecord):
     title: str = Field(min_length=1)
     source: Literal["tune_revision", "vehicle_ledger", "none"]
     source_ref: str | None
+    #: Required whenever ``source`` names a record: without it a later edit of
+    #: the source cannot be detected.
+    source_digest: Sha256 | None = None
+    affects: tuple[str, ...] = Field(min_length=1)
+    effective_precision: EffectivePrecision
     image_sha256: Sha256 | None = None
 
     @model_validator(mode="after")
     def _source_rules(self) -> Intervention:
         if (self.source == "none") != (self.source_ref is None):
             raise ValueError("source_ref names the source record exactly when source is not 'none'")
+        if self.source != "none" and self.source_digest is None:
+            raise ValueError(
+                "an intervention pointing at a source record carries that record's "
+                "source_digest, so a later edit of it is detectable"
+            )
         if self.source == "tune_revision" and self.intervention_kind != "calibration":
             raise ValueError("a tune revision is a calibration intervention")
+        if self.intervention_kind == "calibration":
+            if "image_sha256" not in self.model_fields_set:
+                raise ValueError(
+                    "a calibration intervention states its exact image_sha256 "
+                    "(None only when the flash history never recorded one)"
+                )
+        elif self.image_sha256 is not None:
+            raise ValueError("only a calibration intervention carries an image hash")
+        if self.effective_precision == "day" and (
+            self.valid_from.astimezone(UTC).timetz() != time(0, tzinfo=UTC)
+        ):
+            raise ValueError(
+                "a day-precision intervention starts at that day's UTC midnight, the "
+                "earliest it can have taken effect"
+            )
+        if any(not item.strip() for item in self.affects):
+            raise ValueError("affects names channels; a blank entry names nothing")
         return self
+
+    def retires(self, channels: tuple[str, ...]) -> bool:
+        """Whether this change invalidates a reference on ``channels``."""
+        return AFFECTS_ALL in self.affects or bool(set(self.affects) & set(channels))
+
+
+class Reference(_ConditionedRecord):
+    """A validated reference: established behavior under stated conditions.
+
+    ``source``/``source_ref`` name where it lives (an accepted-baseline
+    override, a behavior model); ``investigation`` the investigation that
+    justified it, or ``None`` when no such record exists (a historical
+    acceptance stays unlinked rather than being linked by guess).
+    ``channels`` are what it is a reference *for*; an intervention affecting
+    any of them retires it (``LedgerEntry.retired_by``).
+    """
+
+    kind: Literal["reference"] = "reference"
+    reference_kind: Literal["accepted_baseline", "behavior_model", "evidence"]
+    name: str = Field(min_length=1)
+    channels: tuple[str, ...] = Field(min_length=1)
+    source: Literal["accepted_baselines", "behavior_models", "memory"]
+    source_ref: str = Field(min_length=1)
+    investigation: RecordId | None
+    evidence: tuple[RecordId, ...] = ()
+
+    def typed_references(self) -> tuple[tuple[str, str | None], ...]:
+        refs: list[tuple[str, str | None]] = []
+        if self.investigation is not None:
+            refs.append((self.investigation, "investigation"))
+        refs.extend((ref, "evidence") for ref in self.evidence)
+        return super().typed_references() + tuple(refs)
 
 
 class Outcome(_ConditionedRecord):
@@ -521,15 +724,9 @@ class Retraction(_RecordBase):
         return super().typed_references() + tuple((ref, None) for ref in self.retracts)
 
 
-MemoryRecord = Annotated[
-    Evidence | Investigation | Prediction | Intervention | Outcome | Retraction,
-    Field(discriminator="kind"),
-]
-_ADAPTER: TypeAdapter[
-    Evidence | Investigation | Prediction | Intervention | Outcome | Retraction
-] = TypeAdapter(MemoryRecord)
-
-AnyRecord = Evidence | Investigation | Prediction | Intervention | Outcome | Retraction
+AnyRecord = Evidence | Investigation | Prediction | Intervention | Outcome | Retraction | Reference
+MemoryRecord = Annotated[AnyRecord, Field(discriminator="kind")]
+_ADAPTER: TypeAdapter[AnyRecord] = TypeAdapter(MemoryRecord)
 
 
 def record_to_dict(record: AnyRecord) -> dict[str, Any]:
@@ -569,3 +766,17 @@ def mint_id(record: AnyRecord, salt: int = 0) -> str:
     if salt:
         payload["_salt"] = salt
     return f"{ID_PREFIX[record.kind]}-{_digest(payload)[:24]}"
+
+
+def recurrence_key(record: AnyRecord) -> str | None:
+    """What makes records occurrences of one recurring thing (E01.3).
+
+    An investigation's or evidence record's ``incident`` when it names one;
+    otherwise an evidence record's ``subject`` (the same evaluation over other
+    data is another occurrence). ``None`` for the other kinds.
+    """
+    if isinstance(record, Evidence | Investigation) and record.incident:
+        return f"incident:{record.incident}"
+    if isinstance(record, Evidence):
+        return f"subject:{record.subject}"
+    return None

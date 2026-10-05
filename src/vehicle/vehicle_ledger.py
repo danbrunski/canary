@@ -46,7 +46,9 @@ log = logging.getLogger(__name__)
 
 __all__ = [
     "DEFAULT_VEHICLE_LEDGER_PATH",
+    "PHYSICAL_INTERVENTION_KINDS",
     "VEHICLE_EVENT_KINDS",
+    "PhysicalInterventionKind",
     "TyreAction",
     "TyreRecord",
     "VehicleEvent",
@@ -64,6 +66,12 @@ VEHICLE_EVENT_KINDS: frozenset[str] = frozenset(
 
 
 TyreAction = Literal["tread_measured", "rotated", "replaced", "pressure_changed"]
+
+#: What kind of intervention a physical event is (E01.4). Flashes are not
+#: here: they live in ``tune_revisions.yaml`` (``src.vehicle.interventions``
+#: joins the two into one history).
+PhysicalInterventionKind = Literal["hardware", "fuel", "instrumentation"]
+PHYSICAL_INTERVENTION_KINDS: frozenset[str] = frozenset({"hardware", "fuel", "instrumentation"})
 
 
 class TyreRecord(BaseModel):
@@ -115,6 +123,12 @@ class VehicleEvent(BaseModel):
     corpus_boundary: bool = False
     #: A tyre fact the tyre-wear trend reads, or ``None``.
     tyres: TyreRecord | None = None
+    #: The intervention this event is, when it changed the vehicle or its
+    #: instruments (E01.4): a hardware change, a fuel change, an
+    #: instrumentation change. ``None`` is "not classified" — an event written
+    #: before this field existed stays unclassified rather than being guessed
+    #: into a kind from its ``kind``/title.
+    intervention: PhysicalInterventionKind | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return self.model_dump(mode="json")
@@ -203,6 +217,7 @@ class VehicleLedgerStore(JsonlStore[VehicleEvent]):
         corpus_boundary: bool = False,
         event_id: str | None = None,
         tyres: TyreRecord | None = None,
+        intervention: PhysicalInterventionKind | None = None,
     ) -> VehicleEvent:
         """Build and store a :class:`VehicleEvent`: appended when new, or in
         place of the existing entry when ``event_id`` names one."""
@@ -215,6 +230,7 @@ class VehicleLedgerStore(JsonlStore[VehicleEvent]):
             "affected_channels": affected_channels or [],
             "corpus_boundary": corpus_boundary,
             "tyres": tyres,
+            "intervention": intervention,
         }
         if event_id is not None:
             kwargs["id"] = event_id

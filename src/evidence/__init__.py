@@ -2,24 +2,36 @@
 and outcomes (E01, docs/roadmap/tasks/E01-evidence-and-memory.md).
 
 :mod:`.records` holds the contracts, :mod:`.ledger` the per-vehicle
-append-only store that mints ids and resolves them. Pydantic + stdlib only:
+append-only store that mints ids, resolves and queries them (E01.3),
+:mod:`.interventions` the bridge from the flash history and vehicle ledger
+(E01.4), and :mod:`.cards` the deterministic investigation cards (E01.5). Pydantic + stdlib only:
 layer 1 (``tests/test_layering.py``), so the live tick and stored-data
 analyses share one implementation.
 """
 
 from __future__ import annotations
 
+from src.evidence.cards import InvestigationCard, investigation_card, render_text
+from src.evidence.floors import FloorVerificationError, verify_floor
 from src.evidence.ledger import (
+    ANY,
     CorruptRecordError,
     CrossVehicleReferenceError,
     LedgerEntry,
     MemoryLedger,
+    MemoryQuery,
     MemoryReferenceError,
+    OutcomeAssessment,
+    OutcomeRuleError,
+    PredictionOrder,
+    ReplayIsolationError,
     UnknownRecordError,
     UnscopedMemoryError,
     memory_ledger_for,
+    replay_memory_path,
 )
 from src.evidence.records import (
+    AFFECTS_ALL,
     MEMORY_SCHEMA,
     UNEVALUABLE_REASONS,
     AnyRecord,
@@ -28,11 +40,13 @@ from src.evidence.records import (
     Hypothesis,
     Intervention,
     Investigation,
+    NoiseFloorRef,
     Outcome,
     Prediction,
     Provenance,
     Quality,
     Quantity,
+    Reference,
     Result,
     Retraction,
     SourceRef,
@@ -41,9 +55,12 @@ from src.evidence.records import (
     mint_id,
     record_from_dict,
     record_to_dict,
+    recurrence_key,
 )
 
 __all__ = [
+    "AFFECTS_ALL",
+    "ANY",
     "MEMORY_SCHEMA",
     "UNEVALUABLE_REASONS",
     "AnyRecord",
@@ -51,17 +68,26 @@ __all__ = [
     "CorruptRecordError",
     "CrossVehicleReferenceError",
     "Evidence",
+    "FloorVerificationError",
     "Hypothesis",
     "Intervention",
     "Investigation",
+    "InvestigationCard",
     "LedgerEntry",
     "MemoryLedger",
+    "MemoryQuery",
     "MemoryReferenceError",
+    "NoiseFloorRef",
     "Outcome",
+    "OutcomeAssessment",
+    "OutcomeRuleError",
+    "PredictionOrder",
     "Prediction",
     "Provenance",
     "Quality",
     "Quantity",
+    "Reference",
+    "ReplayIsolationError",
     "Result",
     "Retraction",
     "SourceRef",
@@ -69,8 +95,13 @@ __all__ = [
     "UnscopedMemoryError",
     "VehicleIdentity",
     "content_key",
+    "investigation_card",
     "mint_id",
     "memory_ledger_for",
     "record_from_dict",
     "record_to_dict",
+    "recurrence_key",
+    "render_text",
+    "verify_floor",
+    "replay_memory_path",
 ]

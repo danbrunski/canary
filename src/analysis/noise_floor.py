@@ -20,6 +20,7 @@ A missing floor degrades to ``unavailable`` — never to an invented one.
 
 from __future__ import annotations
 
+import hashlib
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Literal
@@ -29,6 +30,8 @@ import yaml
 from pydantic import BaseModel, ConfigDict, Field
 
 from src.atomic_write import atomic_write_text
+from src.evidence.floors import floor_source_ref
+from src.evidence.records import DETECTABLE_SIGMA, NoiseFloorRef, Quantity
 
 
 class _Strict(BaseModel):
@@ -37,7 +40,7 @@ class _Strict(BaseModel):
 
 #: Below this many sigma a delta is "not distinguishable from changing
 #: nothing" — the phrasing the retracted 2026-08 claims were missing.
-SIGMA_THRESHOLD = 2.0
+SIGMA_THRESHOLD = DETECTABLE_SIGMA  # 2.0; investigation memory uses the same bar
 
 
 @dataclass(frozen=True)
@@ -243,14 +246,72 @@ def record_null_run(
     )
 
 
+class FloorRefusedError(ValueError):
+    """No floor can bound this prediction; carries the :class:`FloorRefusal`."""
+
+    def __init__(self, refusal: FloorRefusal) -> None:
+        super().__init__(refusal.reason)
+        self.refusal = refusal
+
+
+def floor_reference(
+    source_path: Path,
+    channel: str,
+    *,
+    conditions: str,
+    sigma_threshold: float = SIGMA_THRESHOLD,
+) -> NoiseFloorRef:
+    """The floor a prediction under ``conditions`` states (E01.4), or a refusal.
+
+    Reads the floor file once: its bytes' sha256 and its entry for
+    ``channel`` go into the reference together, so the reference is exactly
+    what the file measured. The same matching rule as
+    :meth:`NoiseFloor.significance`: the floor's regime must equal
+    ``conditions`` character for character. Raises :class:`FloorRefusedError`
+    naming both regimes, or the absent file or channel.
+
+    This is a convenience, not the guard. The guard is the memory ledger,
+    which re-reads ``source`` when a prediction is appended
+    (``src.evidence.floors.verify_floor``) and refuses a reference whose hash,
+    sd, unit or regime differs from the file — so a reference relabelled to
+    another regime or built by hand is refused there whatever built it.
+    """
+    if not source_path.is_file():
+        raise FloorRefusedError(
+            FloorRefusal(
+                channel=channel,
+                kind="no_floor",
+                reason=f"no noise floor has been measured for this vehicle ({source_path})",
+                requested_conditions=conditions,
+            )
+        )
+    raw = source_path.read_bytes()
+    floor = NoiseFloor.model_validate(yaml.safe_load(raw))
+    entry = floor.channels.get(channel)
+    if entry is None or entry.conditions != conditions:
+        refusal = floor.significance(channel, pd.Series(dtype=float), conditions=conditions)
+        assert isinstance(refusal, FloorRefusal)
+        raise FloorRefusedError(refusal)
+    return NoiseFloorRef(
+        quantity=channel,
+        sd=Quantity(value=entry.sd, unit=entry.unit),
+        conditions=entry.conditions,
+        sigma_threshold=sigma_threshold,
+        source=floor_source_ref(source_path),
+        source_sha256=hashlib.sha256(raw).hexdigest(),
+    )
+
+
 __all__ = [
     "SIGMA_THRESHOLD",
     "ChannelFloor",
     "FloorRefusal",
+    "FloorRefusedError",
     "NoiseFloor",
     "Significance",
     "load_noise_floor",
     "record_null_run",
     "save_noise_floor",
+    "floor_reference",
     "significance",
 ]

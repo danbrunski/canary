@@ -80,6 +80,9 @@ def test_investigation_memory_is_per_vehicle_state(tmp_path: Path) -> None:
     )
     assert config.daemon.memory_ledger == tmp_path / "control/truck/memory.jsonl"
     assert memory_ledger_for(config).path == config.daemon.memory_ledger
+    # E01.3: a replay's memory is derived beside it, isolated under ``_replay/``.
+    replay = memory_ledger_for(config, replay_id="2026-10-04T120000").path
+    assert replay == tmp_path / "control/truck/_replay/2026-10-04T120000.memory.jsonl"
 
 
 def test_without_state_dir_the_laptop_defaults_are_unchanged() -> None:

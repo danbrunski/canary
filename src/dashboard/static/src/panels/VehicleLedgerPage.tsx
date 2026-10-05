@@ -12,6 +12,7 @@ import {
   selectClass,
 } from "../styles";
 import type {
+  PhysicalInterventionKind,
   VehicleEventKind,
   VehicleLedgerDraft,
   VehicleLedgerEvent,
@@ -36,6 +37,8 @@ export interface LedgerForm {
   corpusBoundary: boolean;
   tyres: VehicleLedgerTyres | null;
   tyreValue: string;
+  /** E01.4 classification, carried through an edit (no form control yet). */
+  intervention?: PhysicalInterventionKind | null;
 }
 
 export function emptyForm(today: string): LedgerForm {
@@ -71,6 +74,7 @@ export function formFromEvent(event: VehicleLedgerEvent): LedgerForm {
     corpusBoundary: event.corpus_boundary,
     tyres,
     tyreValue,
+    intervention: event.intervention ?? null,
   };
 }
 
@@ -106,6 +110,7 @@ export function draftFromForm(form: LedgerForm): VehicleLedgerDraft | string {
       .filter(Boolean),
     corpus_boundary: form.corpusBoundary,
     tyres,
+    ...(form.intervention ? { intervention: form.intervention } : {}),
   };
 }
 

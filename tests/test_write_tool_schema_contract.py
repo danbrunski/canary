@@ -122,6 +122,7 @@ CASES: list[tuple[str, Any, type]] = [
             affected_channels=["SHORT_FUEL_TRIM_1"],
             corpus_boundary=True,
             event_id="abc123",
+            intervention="fuel",
         ),
         schemas.VehicleEventRequest,
     ),

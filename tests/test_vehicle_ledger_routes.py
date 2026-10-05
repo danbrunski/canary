@@ -154,3 +154,28 @@ def test_vehicle_ledger_503_when_not_configured(tmp_path: Path) -> None:
     client = TestClient(app)
     resp = client.get("/control/vehicle-ledger", headers=_auth())
     assert resp.status_code == 503
+
+
+def test_an_event_is_classified_as_an_intervention(tmp_path: Path) -> None:
+    """E01.4: the intervention kind round-trips; an unknown kind is refused."""
+    client, store = _client(tmp_path)
+    resp = client.post(
+        "/control/vehicle-ledger",
+        headers=_auth(),
+        json={
+            "occurred_at": "2026-10-02",
+            "kind": "mod",
+            "title": "Aeromotive 340 pump",
+            "affected_channels": ["adc:FUEL_PRESSURE"],
+            "intervention": "fuel",
+        },
+    )
+    assert resp.status_code == 201
+    event = store.get(resp.json()["event"]["id"])
+    assert event is not None and event.intervention == "fuel"
+    refused = client.post(
+        "/control/vehicle-ledger",
+        headers=_auth(),
+        json={"occurred_at": "2026-10-02", "kind": "mod", "title": "x", "intervention": "magic"},
+    )
+    assert refused.status_code == 422

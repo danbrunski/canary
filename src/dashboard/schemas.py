@@ -8,7 +8,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 from src.collection.capture_profiles import MAX_TARGET_RATE_HZ, CaptureProfile
-from src.vehicle.vehicle_ledger import TyreRecord
+from src.vehicle.vehicle_ledger import PhysicalInterventionKind, TyreRecord
 
 
 class _ControlRequest(BaseModel):
@@ -145,6 +145,9 @@ class VehicleEventRequest(_ControlRequest):
     #: A tyre fact (gauge tread depth, rotation, replacement, pressure) the
     #: tyre-wear trend reads; validated by ``TyreRecord``.
     tyres: TyreRecord | None = None
+    #: The intervention this event is (E01.4): ``hardware``, ``fuel`` or
+    #: ``instrumentation``; omitted leaves the event unclassified.
+    intervention: PhysicalInterventionKind | None = None
 
 
 class ProfileNameUpdateRequest(_ControlRequest):

@@ -10,6 +10,7 @@ revisions:
   - revision: ZS04C-stock
     calibration_id: 1ZS04C00000
     flashed_at: 2000-01-01T00:00:00Z
+    flashed_at_precision: floor
     rom_file: 1ZS04C
     notes: >
       Factory calibration. The flashed_at is a floor, not a measurement -- it
@@ -28,6 +29,7 @@ revisions:
   - revision: ZS44A-k105
     calibration_id: 1ZS44A00000
     flashed_at: 2026-07-31T00:00:00Z
+    flashed_at_precision: approximate
     k: 1.05
     notes: >
       K reduced to 1.05, fuel-comp rpm axis rescaled 800-12750 -> 800-7200,
@@ -41,6 +43,7 @@ revisions:
     # as the earliest defensible boundary. The next stored session is hours
     # later, so this approximation does not straddle known session data.
     flashed_at: 2026-08-03T18:45:21Z
+    flashed_at_precision: approximate
     k: 1.06
     rom_file: ZS44A-Tuned.OsirisROM
     rom_sha256: c5325776b08c3084edd49d8f68587dad4668e02b0e77c7686f7548fb6f7c8fa9
@@ -55,6 +58,7 @@ revisions:
   - revision: ZS44A-20260920
     calibration_id: 1ZS44A00000
     flashed_at: 2026-09-21T03:08:45.954035Z
+    flashed_at_precision: exact
     k: 1.06
     rom_file: ZS44A-Tuned-20260920.OsirisROM
     rom_sha256: 03d00051a59b86251ac0d5d9cf2ac9651682cfcba978edce81f07371f1c128a2
@@ -73,6 +77,7 @@ revisions:
   - revision: ZS44A-20261004
     calibration_id: 1ZS44A00000
     flashed_at: 2026-10-04T23:02:33.183902Z
+    flashed_at_precision: exact
     k: 1.06
     rom_file: ZS44A-Tuned-20261004.OsirisROM
     rom_sha256: 33d5d7a5e33ccddc4747821984973716e8902bd0d5c5f26f79c109cfbe26b858

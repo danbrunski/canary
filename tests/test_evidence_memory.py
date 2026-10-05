@@ -20,6 +20,7 @@ from src.evidence import (
     Investigation,
     MemoryLedger,
     MemoryReferenceError,
+    NoiseFloorRef,
     Outcome,
     Prediction,
     Provenance,
@@ -187,7 +188,14 @@ def test_prediction_states_magnitude_and_floor_in_one_unit() -> None:
             quantity="delivery_error_pct",
             direction="decrease",
             magnitude=Quantity(value=3.0, unit="%"),
-            noise_floor=Quantity(value=1.25, unit="percent"),
+            noise_floor=NoiseFloorRef(
+                quantity="delivery_error_pct",
+                sd=Quantity(value=1.25, unit="percent"),
+                conditions=_conditions().regime,
+                sigma_threshold=2.0,
+                source="noise_floor.yaml",
+                source_sha256=HASH,
+            ),
         )
 
 
@@ -202,6 +210,9 @@ def test_an_intervention_points_at_the_existing_record() -> None:
             title="flash",
             source="tune_revision",
             source_ref="ZS44A-20261004",
+            source_digest=HASH,
+            affects=("obd:SHORT_FUEL_TRIM_1",),
+            effective_precision="instant",
         )
     with pytest.raises(ValidationError, match="source_ref"):
         Intervention(
@@ -213,6 +224,8 @@ def test_an_intervention_points_at_the_existing_record() -> None:
             title="pump",
             source="vehicle_ledger",
             source_ref=None,
+            affects=("obd:SHORT_FUEL_TRIM_1",),
+            effective_precision="instant",
         )
 
 

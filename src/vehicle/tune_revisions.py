@@ -40,6 +40,12 @@ class TuneRevision(_Strict):
     #: When it was flashed. Everything recorded from here until the next
     #: revision belongs to this one.
     flashed_at: datetime
+    #: How well ``flashed_at`` is known (E01.4): ``exact`` (pinned by a flash
+    #: capture), ``approximate`` (a recollection or a file mtime), ``floor``
+    #: (a placeholder earlier than anything it must cover, not a time). Unset
+    #: is unknown: never read as exact, so a prediction cannot be proved to
+    #: precede a flash whose time nobody pinned.
+    flashed_at_precision: Literal["exact", "approximate", "floor"] | None = None
     #: Injector scaling constant in force, when known — the knob the fuel
     #: campaign moves, so worth carrying alongside the results it explains.
     k: float | None = None
@@ -283,6 +289,10 @@ def merge_tune_registries(
         update: dict[str, object] = {}
         if own.notes != item.notes:
             update["notes"] = item.notes
+        # Precision is a hand-recorded judgement about the time, kept in the
+        # tracked file like the notes it comes from.
+        if item.flashed_at_precision not in (None, own.flashed_at_precision):
+            update["flashed_at_precision"] = item.flashed_at_precision
         if own.image_sha256 is None and item.image_sha256 is not None:
             update["image_sha256"] = item.image_sha256
         if update:

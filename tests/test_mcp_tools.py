@@ -427,6 +427,29 @@ async def test_record_vehicle_event_audit_carries_kind_and_title(tmp_path: Path)
     assert entry["payload"]["title"] == "Oil change"
 
 
+async def test_record_vehicle_event_correction_keeps_the_intervention(tmp_path: Path) -> None:
+    """E01.4: a correction replaces the whole entry, so the classification must ride along."""
+    seen: list[dict[str, object]] = []
+
+    def respond(request: httpx.Request) -> httpx.Response:
+        seen.append(json.loads(request.content))
+        return httpx.Response(201, json={"event": {"id": "e1"}})
+
+    client = await _fake_daemon({"POST /control/vehicle-ledger": respond})
+    audit = MCPAuditLogger(tmp_path / "audit.jsonl")
+    await vehicle_ledger_write_tool.record_vehicle_event(
+        client,
+        audit,
+        occurred_at="2026-10-02",
+        kind="mod",
+        title="Aeromotive 340 pump",
+        event_id="e1",
+        intervention="fuel",
+    )
+    await client.aclose()
+    assert seen[0]["intervention"] == "fuel" and seen[0]["event_id"] == "e1"
+
+
 async def test_record_vehicle_event_audits_failure(tmp_path: Path) -> None:
     def respond(request: httpx.Request) -> httpx.Response:
         return httpx.Response(503, json={"detail": "vehicle ledger API is not available"})

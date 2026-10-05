@@ -60,6 +60,12 @@ describe("ledger form", () => {
     expect(draft).toMatchObject({ affected_channels: ["obd:MAF", "obd:INTAKE_TEMP"] });
   });
 
+  it("an edit keeps the event's intervention classification (E01.4)", () => {
+    const pump: VehicleLedgerEvent = { ...gauge, kind: "mod", tyres: null, intervention: "fuel" };
+    expect(draftFromForm(formFromEvent(pump))).toMatchObject({ intervention: "fuel" });
+    expect(draftFromForm(formFromEvent(gauge))).not.toHaveProperty("intervention");
+  });
+
   it("names tyre facts", () => {
     expect(tyreFact(gauge.tyres)).toBe("tread 15.04 mm");
     expect(tyreFact(null)).toBeNull();

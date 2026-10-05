@@ -14,6 +14,8 @@ from src.mcp_server.client import DaemonClient
 from src.mcp_server.write_tools._shared import audited_post
 
 VehicleEventKind = Literal["maintenance", "mod", "repair", "observation", "dtc"]
+#: What kind of intervention the event is (E01.4); ``None`` leaves it unclassified.
+InterventionKind = Literal["hardware", "fuel", "instrumentation"]
 
 
 async def record_vehicle_event(
@@ -29,6 +31,7 @@ async def record_vehicle_event(
     corpus_boundary: bool = False,
     event_id: str | None = None,
     tyres: dict[str, Any] | None = None,
+    intervention: InterventionKind | None = None,
 ) -> dict[str, Any]:
     """Append one entry to the vehicle ledger.
 
@@ -60,6 +63,11 @@ async def record_vehicle_event(
         "tread_depth_mm": 9.5}`` (a gauge reading on the driven axle, the
         baseline), or ``{"action": "rotated" | "replaced" | "pressure_changed",
         "pressure_psi": ...}``.
+    intervention:
+        ``"hardware"``, ``"fuel"`` or ``"instrumentation"`` when the event
+        changed the vehicle or its instruments (E01.4: investigation memory
+        records it as an intervention). A correction (``event_id``) replaces
+        the whole entry, so re-state it there or the classification is lost.
     """
     body: dict[str, Any] = {
         "occurred_at": occurred_at,
@@ -74,9 +82,11 @@ async def record_vehicle_event(
         body["event_id"] = event_id
     if tyres is not None:
         body["tyres"] = tyres
+    if intervention is not None:
+        body["intervention"] = intervention
     return await audited_post(
         client, audit, tool="record_vehicle_event", path="/control/vehicle-ledger", body=body
     )
 
 
-__all__ = ["record_vehicle_event", "VehicleEventKind"]
+__all__ = ["InterventionKind", "record_vehicle_event", "VehicleEventKind"]

@@ -241,6 +241,7 @@ normal drive sessions only.
 | `GET /control/tuning-mode` / `POST /control/tuning-mode` | inspect / arm the focused high-rate tuning poll profile (narrows Mode 01 to a tuning channel set, suspends DID windows) |
 | `GET /control/feedback` / `POST /control/feedback` | read / record anomaly-feedback verdicts |
 | `GET /control/training-runs` | training-run ledger |
+| `GET /control/vehicle-ledger` / `POST /control/vehicle-ledger` / `DELETE /control/vehicle-ledger/{id}` | vehicle maintenance/intervention ledger. POST body `{occurred_at, kind, title, details?, odometer_km?, affected_channels?, corpus_boundary?, event_id?, tyres?, intervention?}`; `intervention` is `hardware` \| `fuel` \| `instrumentation` (E01.4: the change is recorded into investigation memory as an intervention; omitted = unclassified). `event_id` replaces that entry whole, so a correction re-states `intervention` or erases it |
 | `GET /control/datasets/health` | corpus readiness + per-mode counts |
 | `GET /control/tuning` / `POST /control/tuning` / `POST /control/tuning/estimate` / `POST /control/tuning/revert` | inspect / set / estimate / revert alert-tuning overrides |
 

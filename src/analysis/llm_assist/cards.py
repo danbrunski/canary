@@ -36,7 +36,6 @@ unverified historical narrative, never presented as resolved evidence.
 from __future__ import annotations
 
 import math
-import re
 from dataclasses import dataclass, field
 from typing import Any, Literal
 
@@ -44,11 +43,11 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 
 from src.evidence import (
     Evidence,
-    LedgerEntry,
     MemoryLedger,
     MemoryReferenceError,
-    record_to_dict,
 )
+from src.evidence.cards import evidence_payload
+from src.evidence.text import IDENTIFIER, numeral_in
 
 __all__ = [
     "CARD_SCHEMA",
@@ -90,32 +89,8 @@ HISTORICAL_NARRATIVE_NOTICE = (
     "prose, not as a finding."
 )
 
-#: Card prose is split into tokens on whitespace and punctuation; any token
-#: holding a digit is a number unless it has an identifier's form. A number
-#: with its unit attached (``3000rpm``, ``5psi``, ``80kPa``, ``3.5x``,
-#: ``1e3``, ``+8%``) is still a number. Identifier forms: ``0x`` hex
-#: (``0x1206``), a namespaced or underscored name (``obd:SHORT_FUEL_TRIM_1``,
-#: ``mem:ECM_FUEL_COMP_X_INPUT``), or an upper-case-led name (``B1``,
-#: ``P0171``). Numbers are rendered from evidence records.
-_TOKEN_SPLIT = re.compile(r"[\s,;()\[\]{}\"'!?/=<>|*\-\u2013\u2014]+")
-IDENTIFIER = re.compile(
-    r"(?:[a-z][a-z0-9_]*:)?"
-    r"(?:0x[0-9A-Fa-f]+"
-    r"|[A-Z][A-Z0-9]*(?:_[A-Za-z0-9]+)+"
-    r"|[A-Z][A-Za-z]*[0-9][A-Za-z0-9]*)"
-)
-
-
-def numeral_in(value: str) -> str | None:
-    """The first token of ``value`` that states a number, or ``None``."""
-    for raw in _TOKEN_SPLIT.split(value):
-        token = raw.strip(".:+~\u2248%")
-        if not any(ch.isdigit() for ch in raw):
-            continue
-        if token and IDENTIFIER.fullmatch(token):
-            continue
-        return raw
-    return None
+#: The prose tokenizer is shared with the investigation records and template
+#: cards (:mod:`src.evidence.text`): one definition of "a number in prose".
 
 
 def _no_numerals(value: str, *, what: str) -> str:
@@ -369,35 +344,6 @@ class CardResolution:
             else self.card.to_dict(),
             "evidence": self.evidence,
         }
-
-
-def _iso(value: Any) -> str | None:
-    return None if value is None else value.isoformat()
-
-
-def evidence_payload(entry: LedgerEntry) -> dict[str, Any]:
-    """What a renderer needs from one resolved evidence record."""
-    record = entry.record
-    assert isinstance(record, Evidence)
-    full = record_to_dict(record)
-    return {
-        "id": record.id,
-        "tool": record.provenance.producer,
-        "tool_version": record.provenance.version,
-        "subject": record.subject,
-        "conditions": full["conditions"],
-        "valid_from": full["valid_from"],
-        "valid_to": full["valid_to"],
-        "recorded_at": full["recorded_at"],
-        "sources": full["sources"],
-        "values": full["values"],
-        "labels": full["labels"],
-        "quality": full["quality"],
-        "result": full["result"],
-        "superseded_at": _iso(entry.superseded_at),
-        "superseded_by": list(entry.superseded_by),
-        "retracted_by": entry.retracted_by,
-    }
 
 
 def _quoted_matches(quoted: float, recorded: float) -> bool:

@@ -33,7 +33,8 @@ dynamically-applied overrides alike.
 
 from __future__ import annotations
 
-from datetime import date
+from dataclasses import dataclass
+from datetime import date, datetime
 from pathlib import Path
 from typing import Literal
 
@@ -41,6 +42,14 @@ import yaml
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from src.behavior.behavior_models import DeviationConfig
+from src.evidence import (
+    Conditions,
+    MemoryLedger,
+    MemoryReferenceError,
+    Reference,
+    VehicleIdentity,
+)
+from src.evidence import Provenance as MemoryProvenance
 from src.paths import DATA_DIR
 
 #: Default (unscoped) location — always resolve the real path through
@@ -121,6 +130,12 @@ class AcceptedBaselineOverride(_Strict):
     accepted_center: float | None = None
     band: DirectionalBand
     provenance: Provenance
+    #: The memory-ledger investigation that justified this acceptance (E01.4):
+    #: an ``inv-…`` id on the vehicle's memory ledger, checked by
+    #: :func:`investigation_links`. ``None`` means none is recorded — an
+    #: acceptance made before investigation memory existed stays unlinked
+    #: rather than being linked to an investigation by guess.
+    investigation: str | None = None
 
     @model_validator(mode="after")
     def _check_target(self) -> AcceptedBaselineOverride:
@@ -195,6 +210,93 @@ class AcceptedBaselines(_Strict):
         return None
 
 
+@dataclass(frozen=True)
+class InvestigationLink:
+    """One override's link to its investigation, resolved against memory."""
+
+    target: str
+    operating_mode: str | None
+    investigation: str | None
+    #: ``linked`` | ``unlinked`` (no id recorded) | ``unresolved`` (the id is
+    #: not a current investigation on this vehicle's ledger; ``problem`` says why).
+    state: Literal["linked", "unlinked", "unresolved"]
+    problem: str | None = None
+
+
+def investigation_links(
+    baselines: AcceptedBaselines, ledger: MemoryLedger
+) -> list[InvestigationLink]:
+    """Each override's investigation, resolved on the vehicle's memory ledger.
+
+    An id that was never minted, belongs to another vehicle or is not an
+    investigation is ``unresolved`` with the ledger's own refusal as the
+    problem; one whose investigation was retracted says so.
+    """
+    links: list[InvestigationLink] = []
+    for override in baselines.overrides:
+        target, mode = override.target, override.operating_mode
+        if override.investigation is None:
+            links.append(
+                InvestigationLink(
+                    target=target, operating_mode=mode, investigation=None, state="unlinked"
+                )
+            )
+            continue
+        problem: str | None = None
+        try:
+            entry = ledger.entry(override.investigation)
+        except MemoryReferenceError as error:
+            problem = str(error)
+        else:
+            if entry.record.kind != "investigation":
+                problem = f"{override.investigation!r} is a {entry.record.kind} record"
+            elif entry.retracted_by is not None:
+                problem = f"its investigation was retracted by {entry.retracted_by}"
+        links.append(
+            InvestigationLink(
+                target=target,
+                operating_mode=mode,
+                investigation=override.investigation,
+                state="unresolved" if problem else "linked",
+                problem=problem,
+            )
+        )
+    return links
+
+
+def override_reference(
+    override: AcceptedBaselineOverride,
+    *,
+    vehicle: VehicleIdentity,
+    conditions: Conditions,
+    provenance: MemoryProvenance,
+    valid_from: datetime,
+) -> Reference:
+    """The memory :class:`~src.evidence.records.Reference` for one override.
+
+    Its ``channels`` are the override's target (a raw channel, or
+    ``behavior:<model>`` for a behavior-model override), so an intervention
+    whose ``affects`` names that target retires it; its ``investigation`` is
+    the override's own link (``None`` stays ``None``).
+    """
+    target = (
+        override.channel if override.channel is not None else f"behavior:{override.behavior_model}"
+    )
+    mode = f"@{override.operating_mode}" if override.operating_mode else ""
+    return Reference(
+        vehicle=vehicle,
+        provenance=provenance,
+        conditions=conditions,
+        valid_from=valid_from,
+        reference_kind="accepted_baseline",
+        name=f"accepted baseline {override.target}{mode}",
+        channels=(target,),
+        source="accepted_baselines",
+        source_ref=f"{override.target}{mode}",
+        investigation=override.investigation,
+    )
+
+
 def load_accepted_baselines(path: Path) -> AcceptedBaselines:
     """Load and validate an ``accepted_baselines.yaml`` file.
 
@@ -224,7 +326,10 @@ __all__ = [
     "AcceptedBaselineOverride",
     "AcceptedBaselines",
     "DirectionalBand",
+    "InvestigationLink",
     "Provenance",
     "dump_accepted_baselines",
+    "investigation_links",
     "load_accepted_baselines",
+    "override_reference",
 ]
