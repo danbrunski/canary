@@ -165,7 +165,7 @@ are not finished until their applicable Pi acceptance passes here.
   - *Remaining:* the same replay comparison on the Pi (E04.3/E04.7). A truly
     post-flash capture with the twin's channels, when one exists.
 
-- [ ] **E04.3 — Measure Pi cost before live enablement.**
+- [~] **E04.3 — Measure Pi cost before live enablement.**
   E02's proposed budget is **≤1 ms p99, ≤5 ms maximum additional computation
   per 1 Hz inference tick, ≤1 MiB incremental resident table/state**. Measure
   it on the Pi, including worst supported sample batches and transition
@@ -177,6 +177,28 @@ are not finished until their applicable Pi acceptance passes here.
   added missed ticks or collector record loss. Skipped evaluation is visible,
   never normal. A laptop benchmark cannot close this item. A failing budget
   requires implementation/scope work before enablement. **Pi required.**
+  - *Replay measurement on the Pi, 2026-10-05 05:44–06:11Z (partial):* main at
+    `a03095a`, `twin_live.enabled: true` set temporarily in
+    `/etc/canary/canary.yaml` (restored from backup afterwards), Pi on the
+    bench (`no_data`, no truck), `POST /control/replay` of a plain-named copy
+    of `_capture-ram-study-2026-10-04T204557` at 1x (copy and `_replay-*`
+    output removed afterwards). From `/status` sampled each minute:
+    `twin_eval` (worker thread) p95 0.536 ms, max 0.61 ms over 300 evaluations;
+    `twin_tick` (event loop) p95 0.046 ms, max 0.056 ms; `twin_identity`
+    (worker) p95 77 ms, max 174 ms over 26 resolutions; 1 missed tick in the
+    run (`overrun`); intake 4,525 reads observed, 0 dropped, 0 busy ticks;
+    daemon RSS 575–690 MiB across the run. Live accounting 172 decided + 2
+    pending vs the stored job's 174 (same reasons), one segment
+    (ZS44A-20260920, program known). The replay pass reconciled (1,805,381
+    rows, 0 dropped) but the controller kept `running: true` with
+    `loop: false` until stopped by hand — a replay-controller end-of-pass
+    defect, not the twin's.
+  - *Remaining:* this was replay on an idle bench, with no baseline run and no
+    collection load, so it cannot close the item. Still owed: a matched-load
+    pair (twin off / on) during real collection on the truck, with collector
+    record loss and queue depths, and RSS delta against a twin-off baseline;
+    `twin_identity`'s 77–174 ms is off-loop but should be re-timed once
+    identity caching is warm on the Pi.
 
 - [~] **E04.4 — Run heavier work locally when collection is inactive.**
   Route session evaluation, memory consolidation and candidate promotion
@@ -226,9 +248,20 @@ are not finished until their applicable Pi acceptance passes here.
     `test_an_outside_kill_gets_one_retry_and_a_second_is_a_failure`,
     `test_recover_reruns_a_child_failed_record_from_before_the_retry_rule`
     (real spawn child sent SIGTERM mid-job). Re-run the Pi restart demo.
-  - *Remaining:* (1) Pi demonstration: a job completing on the Pi in a no_data
-    window, a capture started mid-job with `/status` storage drops unchanged,
-    and `scripts/restart_canary.sh` mid-job; (2) candidate promotion has no
+  - *Pi, 2026-10-05 (b76a7da, then 418f367), bench, `no_data`:* job
+    `bj-7a44ac1145f5107427e8` (twin evaluation of
+    `_capture-ram-study-2026-10-04T204557`) queued 02:55:12Z and completed in
+    ~4 s in the analysis child, evidence `ev-b96e0fe65f239a556a7f814b`, with
+    accounting identical to the committed fixture. The first restart mid-job
+    (02:57:40Z) exposed `failed: child_failed`, fixed in `418f367`; after the
+    fix `recover()` re-ran that job to completion (attempt 2), and a second
+    restart mid-job (03:32:15Z, `bj-610604b74f5e606fde51`) resumed and
+    completed (attempt 2, `ev-49be9278e9dc5469b34f9fae`). A default-profile
+    labelled window (`POST /control/captures`) does not make the brain yield,
+    consistent with the workbench and digest, which defer only on an active
+    capture profile.
+  - *Remaining:* (1) Pi demonstration of a capture *profile* started mid-job
+    with `/status` storage drops unchanged (needs the truck connected); (2) candidate promotion has no
     runner yet — E03 owns candidate learning; its held-out wait uses the same
     `pending` state.
 
@@ -290,8 +323,12 @@ are not finished until their applicable Pi acceptance passes here.
     one program differing only in a calibration byte, and in a program byte;
     an unheld image; a simulated restart reopens the same ledger records,
     evidence ids and completed job.
-  - *Remaining:* (1) Pi: `scripts/restart_canary.sh` with a job and a capture
-    open, then `GET /control/brain/status` and the same evidence ids;
+  - *Pi, 2026-10-05:* after `scripts/restart_canary.sh` the evidence
+    `ev-b96e0fe65f239a556a7f814b` resolved over HTTP, the ledger held the same
+    single record before and after, a resubmitted job returned the same
+    completed job, `/control/brain/status` showed identity `unchanged` and
+    `transient: unknown`.
+  - *Remaining:* (1) Pi: the same with a capture *profile* open (truck);
     (2) candidate checkpoints (E03) and resuming streaming work (E04.1) do not
     exist yet; (3) source outages are only the job's `pending`/`failed`
     states, not exercised on hardware.
