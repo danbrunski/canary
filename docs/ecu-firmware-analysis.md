@@ -336,7 +336,8 @@ memory window.
 
 ### Intake cam timing (VTC): controller, duty scale and banks
 
-Decompiler pass, 2026-10-04. The catalog side is D03.37.
+Decompiler pass, 2026-10-04. The catalog side is D03.37 (landed 2026-10-05:
+`ECM_INTAKE_CAM_ANGLE_B1`/`_B2`, `ECM_INTAKE_VTC_SOLENOID_DUTY_B1`/`_B2`).
 
 - **The DID bytes are a snapshot.** Each cycle, `0x20EF2` copies `0x8C` bytes
   from `0xFFFF2792` to `0xFFFF2706`, so CAN DIDs `0x1138`/`0x1139`/`0x1135`/`0x1163`

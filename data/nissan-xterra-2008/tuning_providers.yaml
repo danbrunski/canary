@@ -52,14 +52,14 @@ providers:
       (2026-09-20): UpRev's own stream definition puts B-FUEL SCHDL at DID
       0x1208 and raw x 0.00049 reproduces its displayed ms on 405/405 rows.
       raw/2048 reproduces only 360/405 and is refuted.
-  # The 2026-08-05 all-DID capture confirms a command plus two distinct
-  # measured positions. Their exact physical bank mapping remains unknown, and
-  # the 2026-08-06 drive weakened the evidence that had suggested one: the
-  # A-vs-B offset was +0.16 degCA under load against +0.514 degCA measured
-  # static, both stable fits. Treat the mapping as open.
+  # One commanded angle for both banks and two measured positions. The banks
+  # are the firmware's (DTC item table, D03.37, 2026-10-04): 0x1135 is bank 1
+  # (P0011), 0x1163 bank 2 (P0021). The 2026-08-06 offset comparison that once
+  # argued a mapping could not decide it: each bank is measured from its own
+  # learned retard stop. Which cylinder side is bank 1 is inferred.
   - {role: cam_command, spec: 'did:ECM_INTAKE_CAM_ANGLE_COMMANDED'}
-  - {role: cam_measured, spec: 'did:ECM_INTAKE_CAM_ANGLE_MEASURED'}
-  - {role: cam_measured_b, spec: 'did:ECM_INTAKE_CAM_ANGLE_MEASURED_B'}
+  - {role: cam_measured, spec: 'did:ECM_INTAKE_CAM_ANGLE_B1'}
+  - {role: cam_measured_b, spec: 'did:ECM_INTAKE_CAM_ANGLE_B2'}
   # Commanded AFR was the single biggest gap in the all-DID workflow, and it
   # is closed. It never had a Mode 22 provider because it is not a DID at all:
   # the ECM's FINAL commanded equivalence ratio is a Q14 word at RAM address

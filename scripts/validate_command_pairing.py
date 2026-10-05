@@ -25,8 +25,8 @@ Usage:
 
     .venv/bin/python scripts/validate_command_pairing.py \\
         --command did:ECM_INTAKE_CAM_ANGLE_COMMANDED \\
-        --measured did:ECM_INTAKE_CAM_ANGLE_MEASURED \\
-        --measured did:ECM_INTAKE_CAM_ANGLE_MEASURED_B \\
+        --measured did:ECM_INTAKE_CAM_ANGLE_B1 \\
+        --measured did:ECM_INTAKE_CAM_ANGLE_B2 \\
         --known-answer obd:RPM,did:ECM_RPM \\
         --rpm-spec did:ECM_RPM --tolerance 50ms \\
         --out /tmp/cam.json ~/canary-data/sessions-0917/_capture-*

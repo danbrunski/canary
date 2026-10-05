@@ -288,4 +288,58 @@ def test_0x1110_is_commanded_evap_purge_not_vvt_duty() -> None:
         parse_did_token("ECM_INTAKE_VVT_SOLENOID_DUTY")
     with pytest.raises(ValueError):
         parse_did_token("ECM_INTAKE_VVT_SOLENOID_DUTY_CANDIDATE_B2")
-    assert parse_did_token("ECM_UNIDENTIFIED_1139") == 0x1139
+    # 0x1139 was ECM_UNIDENTIFIED_1139 for a day; it is the bank-2 VTC
+    # solenoid duty (D03.37, test below).
+    assert parse_did_token("ECM_INTAKE_VTC_SOLENOID_DUTY_B2") == 0x1139
+
+
+#: D03.37 (firmware VTC pass 2026-10-04): bank -> (measured angle, solenoid
+#: duty, the DTCs that controller index reports). Index 0 is bank 1.
+_VTC_BANKS = {
+    1: (0x1135, 0x1138, ("P0011", "P0075")),
+    2: (0x1163, 0x1139, ("P0021", "P0081")),
+}
+
+
+def test_intake_vtc_dids_carry_the_firmware_banks_and_duty_scale() -> None:
+    """2026-10-05: the ECM's DTC item table puts 0x1135 (angle) and 0x1138
+    (duty) on the controller that reports P0011/P0075, bank 1, and 0x1163 /
+    0x1139 on P0021/P0081, bank 2. The catalog had called 0x1135 "probably
+    bank 2" from UpRev parked snapshots; a swap back fails here. Timer channel
+    7 makes the duty raw x 0.39 %. Exact decode and RAM addresses are pinned
+    in the ground-truth suite (`did_bank_pins`)."""
+    from src.collection.obd_scheduler import parse_did_token
+
+    by_did = {e.did: e for e in load_did_map(DIDS_PATH).dids}
+    for bank, (angle_did, duty_did, (perf_dtc, circuit_dtc)) in _VTC_BANKS.items():
+        other_perf, other_circuit = _VTC_BANKS[3 - bank][2]
+        angle, duty = by_did[angle_did], by_did[duty_did]
+        assert angle.name == f"ECM_INTAKE_CAM_ANGLE_B{bank}"
+        assert (angle.scale, angle.offset, angle.unit) == (0.5, -64.0, "degCA")
+        assert duty.name == f"ECM_INTAKE_VTC_SOLENOID_DUTY_B{bank}"
+        assert (duty.scale, duty.offset or 0.0, duty.unit) == (0.39, 0.0, "percent")
+        assert duty.confidence == "high"
+        assert apply_scaling(duty, 255) == pytest.approx(99.45)
+        # The scale is a conditioned constant, not a bare number.
+        constants = [item for item in duty.evidence if item.constant is not None]
+        assert [item.constant for item in constants] == [0.39]
+        assert constants[0].conditions and constants[0].transport == "can"
+        # The bank rests on CAN firmware evidence naming that bank's DTC, and
+        # never the other bank's: renaming without moving the case fails.
+        angle_can = " ".join(i.finding for i in angle.evidence if i.transport == "can")
+        duty_can = " ".join(i.finding for i in duty.evidence if i.transport == "can")
+        assert perf_dtc in angle_can and other_perf not in angle_can
+        assert circuit_dtc in duty_can and other_circuit not in duty_can
+        assert parse_did_token(angle.name) == angle_did
+        assert parse_did_token(duty.name) == duty_did
+    assert by_did[0x113A].name == "ECM_INTAKE_CAM_ANGLE_COMMANDED"  # one target, both banks
+    # No alias (2026-09-18 policy): the old names were migrated
+    # (tools/channel_renames/2026-10-05-vtc.yaml), so a config still naming
+    # one fails at daemon start instead of polling a bank it does not mean.
+    for old in (
+        "ECM_INTAKE_CAM_ANGLE_MEASURED",
+        "ECM_INTAKE_CAM_ANGLE_MEASURED_B",
+        "ECM_UNIDENTIFIED_1139",
+    ):
+        with pytest.raises(ValueError):
+            parse_did_token(old)

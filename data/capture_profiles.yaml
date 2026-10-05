@@ -134,7 +134,10 @@ profiles:
 
 
     Both measured cam channels are polled because they are two banks: the first capture
-    using this profile found a +0.51 deg offset with the cam static (p=2.3e-29).
+    using this profile found a +0.51 deg offset with the cam static (p=2.3e-29). The
+    firmware names them (D03.37): bank 1 is 0x1135 with solenoid duty 0x1138, bank
+    2 is 0x1163 with duty 0x1139, so each bank''s command, response and actuator effort
+    are in one round.
 
 
     Coolant and IAT run at weight 1/15 (1 Hz), because they are context. Coolant changes
@@ -155,11 +158,12 @@ profiles:
   - ECM_AIR_CHARGE
   - ECM_INJECTOR_PULSE_1
   - ECM_INJECTOR_PULSE_2
-  - ECM_INTAKE_CAM_ANGLE_MEASURED
+  - ECM_INTAKE_CAM_ANGLE_B1
   - ECM_INTAKE_CAM_ANGLE_COMMANDED
-  - ECM_INTAKE_CAM_ANGLE_MEASURED_B
+  - ECM_INTAKE_CAM_ANGLE_B2
   - ECM_EVAP_PURGE_CMD
-  - ECM_UNIDENTIFIED_1139
+  - ECM_INTAKE_VTC_SOLENOID_DUTY_B1
+  - ECM_INTAKE_VTC_SOLENOID_DUTY_B2
   - ECM_THROTTLE_POS_SENSOR_1
   - ECM_COOLANT_TEMP
   - ECM_INTAKE_AIR_TEMP_1106
@@ -174,15 +178,16 @@ profiles:
   round_timestamps: true
   target_rate_hz: 15.0
   did_continuous: true
-  bus_budget_override: 184.0
+  bus_budget_override: 199.0
   priority_channels: null
-  expected_total_demand_hz: 182.0
-  capacity_evidence: '2026-08-04 bench: 658 DID reads/s. 12 DIDs x 15 Hz + ECM_COOLANT_TEMP
-    and ECM_INTAKE_AIR_TEMP_1106 x 1 Hz = 182 reads/s. The 2026-09-10 H8 drive sustained
+  expected_total_demand_hz: 197.0
+  capacity_evidence: '2026-08-04 bench: 658 DID reads/s. 13 DIDs x 15 Hz + ECM_COOLANT_TEMP
+    and ECM_INTAKE_AIR_TEMP_1106 x 1 Hz = 197 reads/s. The 2026-09-10 H8 drive sustained
     116.8 req/s with 11 DIDs at 10.4 Hz each, 41 timeouts in 167,885 requests and
     0 bus errors, so the ECM is not the binding constraint; coolant''s 15 Hz share
     was simply wasted (0.2 % of its samples changed while it took 1/11 of the budget).
-    The 184 req/s budget leaves two slots/s for session refresh and jitter.'
+    The 199 req/s budget leaves two slots/s for session refresh and jitter. The bank-1
+    VTC solenoid duty (0x1138) joined on 2026-10-05 (D03.37), +15 reads/s.'
   required_tuple: []
   min_achieved_rate_hz: 12.0
   max_tuple_skew_s: null

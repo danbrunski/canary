@@ -278,6 +278,7 @@ TUNING_DID_PROFILE_DIDS = (
     0x1139,
     0x120F,
     0x1101,
+    0x1138,  # joined 2026-10-05 (D03.37); width from the 2026-09-17 did_log sweeps
 )
 
 #: Measured from stored response payloads, D02.4. The first three were already
@@ -287,6 +288,7 @@ PINNED_WIDTHS = {
     0x1101: 1,
     0x1110: 1,
     0x1135: 1,
+    0x1138: 1,
     0x1139: 1,
     0x113A: 1,
     0x1163: 1,

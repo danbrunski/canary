@@ -449,6 +449,103 @@ def test_did_scale_reproduces_the_ecm_own_pid_conversion(pin: dict[str, Any]) ->
         assert disagreements(100 / 255), "the 100/255 % reading should fail this check"
 
 
+_BANK_PINS = EXPECTATIONS["did_bank_pins"]
+
+
+def _bank_of_dtc(code: str) -> int:
+    """The bank a DTC's SAE meaning names, e.g. P0011 -> 1."""
+    import re
+
+    from src.decode.dtc_catalog import describe_dtc
+
+    description = describe_dtc(code)
+    match = re.search(r"\(Bank (\d)\)", description.description)
+    assert description.curated and match, f"{code} has no curated bank: {description}"
+    return int(match.group(1))
+
+
+@pytest.mark.parametrize("pin", _BANK_PINS, ids=[f"0x{p['did']:04X}" for p in _BANK_PINS])
+def test_vtc_did_banks_are_pinned_to_the_firmware(pin: dict[str, Any]) -> None:
+    """The intake VTC DIDs, exactly, and named for the bank their DTC reports.
+
+    D03.37: the firmware's DTC item table puts controller index 0 on P0011 /
+    P0075 and index 1 on P0021 / P0081. The expected bank suffix is derived
+    from the DTC's own SAE meaning rather than copied, so the pre-2026-10-05
+    reading ("0x1135 probably bank 2") or any swap fails here. The entry's CAN
+    evidence must cite the pointer-table target and the RAM byte it copies,
+    which ties the recorded addresses to the catalog's own case.
+    """
+    entry = next(e for e in load_did_map(DIDS_PATH).dids if e.did == pin["did"])
+    assert entry.name == pin["name"]
+    assert entry.byte_start == pin["byte_start"]
+    assert entry.byte_length == pin["byte_length"]
+    assert entry.response_length == pin["byte_length"]
+    assert entry.scale == pytest.approx(pin["scale"])
+    assert (entry.offset or 0.0) == pytest.approx(pin["offset"])
+    assert entry.unit == pin["unit"]
+
+    bank = _bank_of_dtc(pin["bank_dtc"])
+    assert entry.name.endswith(f"_B{bank}"), (
+        f"0x{pin['did']:04X} belongs to the controller that reports {pin['bank_dtc']} "
+        f"(bank {bank}) but is catalogued as {entry.name}"
+    )
+    can_findings = [item.finding for item in entry.evidence if item.transport == "can"]
+    for address in (pin["ram"], pin["snapshot_of"]):
+        assert any(f"0x{address:08X}" in finding for finding in can_findings), (
+            f"0x{pin['did']:04X}: no CAN evidence cites 0x{address:08X}"
+        )
+
+
+def test_vtc_controller_indexes_are_one_bank_each() -> None:
+    """Angle and duty of one controller index share a bank, and the two
+    indexes are the two banks, so a half-applied swap fails too."""
+    banks: dict[int, set[int]] = {}
+    for pin in _BANK_PINS:
+        banks.setdefault(pin["vtc_index"], set()).add(_bank_of_dtc(pin["bank_dtc"]))
+    assert banks == {0: {1}, 1: {2}}
+
+
+def _timer_duty_pct(raw: int, pwm: dict[str, int]) -> float:
+    """On-time the ECM loads into timer channel 7 for one duty byte."""
+    compare = raw * pwm["compare_multiply"] // pwm["compare_divide"]
+    return 100.0 * compare / pwm["period"]
+
+
+_PWM_PINS = [p for p in _BANK_PINS if "pwm" in p]
+
+
+@pytest.mark.parametrize("pin", _PWM_PINS, ids=[f"0x{p['did']:04X}" for p in _PWM_PINS])
+def test_vtc_duty_scale_reproduces_the_timer_compare(pin: dict[str, Any]) -> None:
+    """The duty DID's decode is the PWM on-time the output stage produces.
+
+    0xC66C4 loads the timer compare with raw x 33 x 39 / 80 against a 4,125-
+    count period. The catalog's decode has to land within one timer count of
+    that for every byte value. A firmware known answer, no capture needed. The
+    rival readings fail it: x0.5 % (the 0x1110 convention, impossible here as
+    raw reaches 255) and x100/255 % (a byte read as a plain percentage).
+    """
+    from src.decode.dids import decode_did_raw
+
+    entry = next(e for e in load_did_map(DIDS_PATH).dids if e.did == pin["did"])
+    pwm = pin["pwm"]
+    one_timer_count = 100.0 / pwm["period"]
+
+    def disagreements(scale: float) -> list[int]:
+        bad = []
+        for raw in range(256):
+            assert decode_did_raw(entry, bytes([raw])) == raw
+            did_value = raw * scale + (entry.offset or 0.0)
+            if abs(did_value - _timer_duty_pct(raw, pwm)) > one_timer_count:
+                bad.append(raw)
+        return bad
+
+    assert entry.scale is not None
+    assert disagreements(entry.scale) == []
+    assert _timer_duty_pct(255, pwm) == pytest.approx(99.44, abs=0.01)
+    assert disagreements(0.5), "the x0.5 % reading should fail this check"
+    assert disagreements(100 / 255), "the 100/255 % reading should fail this check"
+
+
 @pytest.mark.parametrize(
     "case", EXPECTATIONS["did_agreement"], ids=_did_ids(EXPECTATIONS["did_agreement"])
 )

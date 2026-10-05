@@ -1,0 +1,26 @@
+# Rename map for tools/migrate_channel_names.py -- the 2026-10-05 intake VTC relabel.
+#
+# Firmware (decompiler pass 2026-10-04, docs/ecu-firmware-analysis.md "Intake
+# cam timing (VTC)") names the bank of each intake-cam DID from the ECM's own
+# DTC item table: controller index 0 reports P0011/P0075 and is bank 1
+# (0x1135 angle, 0x1138 duty), index 1 reports P0021/P0081 and is bank 2
+# (0x1163 angle, 0x1139 duty). 0x1139 is the bank-2 solenoid duty at 0.39 %
+# per count (timer channel 7 compare). Same policy as 2026-09-18: no
+# aliases, migrate every stored artifact (evidence in data/dids.yaml,
+# roadmap D03.37).
+#
+# `channels` are bare DID names; each also covers its `did:` column form and
+# derived feature columns (`did:<NAME>__mean`, ...). Old names are matched
+# as whole tokens, longest first, so ECM_INTAKE_CAM_ANGLE_MEASURED never
+# clips ECM_INTAKE_CAM_ANGLE_MEASURED_B.
+#
+# The last two entries repeat 2026-10-04-evap-purge.yaml with this map's
+# targets. That map can no longer run against the catalog (its 0x1139
+# target, ECM_UNIDENTIFIED_1139, is renamed here), so a store that never got
+# it is migrated by this map alone; on a store that did, they match nothing.
+channels:
+  ECM_INTAKE_CAM_ANGLE_MEASURED: ECM_INTAKE_CAM_ANGLE_B1                   # 0x1135
+  ECM_INTAKE_CAM_ANGLE_MEASURED_B: ECM_INTAKE_CAM_ANGLE_B2                 # 0x1163
+  ECM_UNIDENTIFIED_1139: ECM_INTAKE_VTC_SOLENOID_DUTY_B2                   # 0x1139
+  ECM_INTAKE_VVT_SOLENOID_DUTY_CANDIDATE_B2: ECM_INTAKE_VTC_SOLENOID_DUTY_B2  # 0x1139, pre-2026-10-04
+  ECM_INTAKE_VVT_SOLENOID_DUTY: ECM_EVAP_PURGE_CMD                         # 0x1110, pre-2026-10-04

@@ -966,7 +966,8 @@ promote unverified bindings or to change a tune.
   - **0x1110/0x1139:** external duty-scale verification is deferred with D03.10.
     *(2026-10-04: no longer a duty question. 0x1110 is commanded EVAP purge,
     ×0.5 % from firmware; 0x1139 is `ECM_UNIDENTIFIED_1139`, identity open.
-    D03.36.)*
+    D03.36.)* *(2026-10-05: 0x1139 is the bank-2 VTC solenoid duty,
+    ×0.39 % from firmware, D03.37.)*
     Today's paired
     result rejects a simple mirror; raw range and shared zero fractions do not
     identify bank 2 or settle either scale.
@@ -2475,16 +2476,19 @@ live here now, so the documents could be archived
     0x1110 (correction), and DIDs 0x120F/0x1210 with their CAN and K-line
     addresses. It had no earlier 0x1110 entry.
 
-- [ ] **D03.37 Identify the intake cam (VTC) solenoid duties: DIDs 0x1138 and
-  0x1139.** *Found 2026-10-05 (operator question: "do we have a candidate for
-  the VVT solenoid at all?").* The CAN DID pointer table (0x24988) maps four
+- [~] **D03.37 Identify the intake cam (VTC) solenoid duties: DIDs 0x1138 and
+  0x1139 — catalogued from the firmware trace 2026-10-05; the physical side of
+  bank 1, the Vbatt byte scale and the task rate remain.** *Found 2026-10-05
+  (operator question: "do we have a candidate for the VVT solenoid at all?").*
+  The CAN DID pointer table (0x24988) maps four
   consecutive RAM bytes: 0x1138 → 0xFFFF278C, 0x1139 → 0xFFFF278D, and the
   two measured cam angles 0x1135 → 0xFFFF278E and 0x1163 → 0xFFFF278F
   (commanded angle 0x113A → 0xFFFF26FC).
   - **0x1139 behaves as a solenoid duty** on 34,264 time-paired reads of
     `_capture-tuning-did-2026-08-06T145004` and `-08-07T005351`: 0 whenever
     the commanded angle is 0 (16,103 reads, mean 0.3); about 99 raw (IQR
-    90–102) whenever controlling, whatever the target (0.25–45°), i.e. a
+    90–102) whenever controlling, whatever the target (0.25–35°; 0x113A
+    never exceeds raw 198 = +35.0° in those 36,907 reads), i.e. a
     holding duty; its departure from 99 tracks command − measured (r +0.79):
     135 when the cam lags by > 3°, 71 when it overshoots by > 3°, 100 within
     ±0.25°. Purge (r +0.64) and BFS (+0.63) correlate only through load.
@@ -2494,14 +2498,81 @@ live here now, so the documents could be archived
     (`2026-09-24-scan-tool-bcm-ecm-session.md`).
   - **Pairing:** 0x1138 ↔ 0x1135 (its cam lagged 3° → 148, overshot 3° → 68)
     and 0x1139 ↔ 0x1163 (spearman +0.72 vs 0x1163's error, +0.64 vs
-    0x1135's). B1/B2 stays open, as it is for the measured angles.
-  - **Open:** the scale (holding ~99, max 224: ×0.5 % would exceed 100 %),
-    the writer and the PWM output, and the bank assignment. Queued with the
-    firmware session as a Ghidra trace (2026-10-05).
-  - **Then:** one catalog change. Rename 0x1139 (now `ECM_UNIDENTIFIED_1139`)
-    and add 0x1138 as the VTC solenoid duty pair, with bank and scale, plus
-    a `tools/channel_renames` migration. Add 0x1138 to the tuning-did profile.
-    Not before the trace, so the names change once.
+    0x1135's). The firmware confirms it: both pairs are one controller
+    index each (below).
+  - **Firmware trace** (decompiler pass 2026-10-04,
+    `docs/ecu-firmware-analysis.md` "Intake cam timing (VTC)"). The DID bytes
+    are a per-cycle snapshot (0x20EF2 copies 0x8C bytes 0xFFFF2792 →
+    0xFFFF2706), so 278C/D/E/F mirror the controller's 2818/9/A/B and 26FC
+    mirrors the target 2700. A PID per bank from task 0xC4D98 (P from 8×8
+    rpm × coolant maps, I clamped ±128 and RAM-only, no D, a ±12 kick, a
+    coolant feed-forward hold), output `duty = (hold + PID·128/68) ×
+    150 / Vbatt byte`, capped at 255.
+    - [x] **Scale:** duty % = raw × 0.39. 0xC66C4 loads timer channel 7
+      compare (BFR7B ← 278C, BFR7A ← 278D) with raw·33·39/80 against a period
+      of 4,125 counts, so 255 = 99.4 %. Battery-compensated commanded duty.
+      The data agree: hold ~99 = ~39 %, which is the warm feed-forward
+      125·150/Vbatt at a Vbatt byte near 189; 0x1139's three-sample plateau at
+      255 (D04.7) is the cap. ×0.5 % is impossible (255 would be 127 %).
+    - [x] **Writer and PWM output:** 0xC641A writes 2818/2819 (0 unless VTC
+      is enabled; 0xFF in the key-on circuit test; open loop at 0xFF then
+      0xF2 above a +38° target); 0xC66C4 drives TO7B (bank 1) and TO7A
+      (bank 2).
+    - [x] **Banks:** from the firmware's own DTC item table (0x102D0). Index
+      0 reports P0011 / P0075 and reads cam input GR1F: **0x1135 + 0x1138 =
+      bank 1**. Index 1 reports P0021 / P0081, GR1E: **0x1163 + 0x1139 =
+      bank 2**. This reverses the catalog's "0x1135 probably bank 2" (UpRev
+      parked snapshots): each bank is measured from its own learned retard
+      stop, so a parked offset between them could never name a bank.
+    - [ ] **Physical side of bank 1** (inferred: cylinders 1/3/5). Truck, key
+      on engine off: unplug the 1/3/5-side solenoid; the circuit test should
+      set P0075, not P0081.
+    - [ ] **The Vbatt byte scale** (0.08 V/count inferred, so the 125–200
+      enable window would be 10–16 V), **the task rate** (needed to state
+      the I gain per second) and **a scope check of the PWM period** (~303 Hz
+      rests on an inferred 20 MHz peripheral clock; the duty fraction does
+      not).
+  - [x] **The catalog change, done 2026-10-05 (names change once).**
+    `data/dids.yaml`: 0x1135 `ECM_INTAKE_CAM_ANGLE_MEASURED` →
+    `ECM_INTAKE_CAM_ANGLE_B1`, 0x1163 `ECM_INTAKE_CAM_ANGLE_MEASURED_B` →
+    `ECM_INTAKE_CAM_ANGLE_B2`, 0x1139 `ECM_UNIDENTIFIED_1139` →
+    `ECM_INTAKE_VTC_SOLENOID_DUTY_B2` (×0.39 %, percent, high), and a new
+    0x1138 `ECM_INTAKE_VTC_SOLENOID_DUTY_B1` (1 byte: 2,683 replies across
+    the four 2026-09-17 `did_log` sweeps). Firmware evidence (`transport:
+    can`) on all five cam entries; the duty scale is a conditioned
+    `constant`; 0x113A's notes now say one target for both banks (maps
+    0xA679 / 0xA579, max +35°). No aliases (2026-09-18 policy):
+    `tools/channel_renames/2026-10-05-vtc.yaml`, which also carries the
+    2026-10-04 evap-purge entries, because that map's 0x1139 target no
+    longer exists and the tool now refuses it. Callers swept: the `tuning-did`
+    starter (0x1138 added beside 0x1139: 13 DIDs × 15 Hz + 2 × 1 Hz = 197
+    reads/s, budget 199), `tuning_providers.yaml` cam roles, the two cam
+    behavior recipes (outputs renamed, a deliberate contract change; golden
+    regenerated; recipe names kept), `src/validation/scenarios.py`,
+    `scripts/validate_command_pairing.py`, `docs/can-pids-dids.md`, the
+    D03/D04/abs-wheel-speed doc rows. Left alone as records:
+    `data/analyses/**`, `capture_profiles.archive.yaml`, the
+    `delivery_investigation` session fixtures, the 2026-10-04 map.
+    **Tests:** `test_intake_vtc_dids_carry_the_firmware_banks_and_duty_scale`
+    (names, 0.39 %, bank DTCs in the CAN evidence, old names refused by
+    `parse_did_token`); ground truth `did_bank_pins` with
+    `test_vtc_did_banks_are_pinned_to_the_firmware` (bank derived from the
+    DTC's SAE meaning; P0075/P0081 added to `dtc_catalog`; RAM and snapshot
+    addresses cited by the evidence), `test_vtc_controller_indexes_are_one_bank_each`
+    and `test_vtc_duty_scale_reproduces_the_timer_compare` (×0.5 and ×100/255
+    fail it). **Served features: none.** In both IF artifacts that carry the
+    old names (`models/nissan-xterra-2008/isolation_forest` and
+    `~/canary-data/models-0920a/...`, manifest and joblib) they sit only in
+    `schema.feature_health` dropped lists (all-NaN, constant, low coverage);
+    never in `feature_columns` or the scaler. **Dry run** (laptop:
+    `models`, `models-0920a`, `models-0920b`, every `~/canary-data/sessions*`):
+    178 names in 27 of 92,112 files, 0 failures: 23 session sidecars
+    (capture_profile / capture_quality / digest JSON) plus the IF manifest and
+    joblib in two model dirs, 24 names each; no Parquet (stored channels are
+    `DID_<hex>`). The deployed-manifest test fixture would take 24.
+    **Owed (orchestrator):** `--apply` on the laptop and on the Pi
+    (`/data/canary`, before the daemon restarts on this catalog), and the
+    deployed-manifest fixture with it.
 
 ## Deferred by decision, not blocked
 

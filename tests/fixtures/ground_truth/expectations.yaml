@@ -354,6 +354,64 @@ did_pins:
     mode01_pid: 0x2E
     mode01_a: {multiply: 1275, divide: 1000, max: 255}
 
+# Intake VTC (D03.37, firmware pass 2026-10-04). No Mode 01 PID shares these
+# bytes, so the firmware fact the identification rests on is the bank: the
+# DTC that controller index reports, from the ECM's own item table (0x102D0).
+# The test derives the expected `_B<n>` suffix from that DTC's SAE meaning
+# (src.decode.dtc_catalog: P0011/P0021 intake cam timing, P0075/P0081 intake
+# valve control solenoid circuit, each "(Bank n)"), so swapping the banks back
+# in data/dids.yaml fails here. `ram` is the CAN pointer-table target, a
+# per-cycle snapshot of `snapshot_of`; the entry's own CAN evidence must cite
+# both. `pwm` records the duty's output stage: timer channel 7 compare =
+# raw x 33 x 39 / 80 (integer) against a 4,125-count period.
+did_bank_pins:
+  - did: 0x1135
+    name: ECM_INTAKE_CAM_ANGLE_B1
+    byte_start: 0
+    byte_length: 1
+    scale: 0.5
+    offset: -64.0
+    unit: degCA
+    ram: 0xFFFF278E
+    snapshot_of: 0xFFFF281A
+    vtc_index: 0
+    bank_dtc: P0011
+  - did: 0x1163
+    name: ECM_INTAKE_CAM_ANGLE_B2
+    byte_start: 0
+    byte_length: 1
+    scale: 0.5
+    offset: -64.0
+    unit: degCA
+    ram: 0xFFFF278F
+    snapshot_of: 0xFFFF281B
+    vtc_index: 1
+    bank_dtc: P0021
+  - did: 0x1138
+    name: ECM_INTAKE_VTC_SOLENOID_DUTY_B1
+    byte_start: 0
+    byte_length: 1
+    scale: 0.39
+    offset: 0.0
+    unit: percent
+    ram: 0xFFFF278C
+    snapshot_of: 0xFFFF2818
+    vtc_index: 0
+    bank_dtc: P0075
+    pwm: {compare_multiply: 1287, compare_divide: 80, period: 4125}
+  - did: 0x1139
+    name: ECM_INTAKE_VTC_SOLENOID_DUTY_B2
+    byte_start: 0
+    byte_length: 1
+    scale: 0.39
+    offset: 0.0
+    unit: percent
+    ram: 0xFFFF278D
+    snapshot_of: 0xFFFF2819
+    vtc_index: 1
+    bank_dtc: P0081
+    pwm: {compare_multiply: 1287, compare_divide: 80, period: 4125}
+
 # DID vs an independent road-speed reference, both in engineering units, on
 # same-instant pairs (POLICY, 250 ms; the DID-to-frame separation is 32 ms
 # median, 51 ms max on this slice). Same columns as `unit_agreement`, plus the

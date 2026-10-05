@@ -351,6 +351,10 @@ opportunistic on any sustained climb.
     purge, **×0.5 %** (the PID 0x2E handler's own arithmetic, which
     saturates above raw 200), not VVT duty. 0x1139 is `ECM_UNIDENTIFIED_1139`, identity open, so the
     "shared unit" premise below does not hold.
+  - *2026-10-05 (D03.37):* 0x1139 is the bank-2 VTC solenoid duty,
+    `ECM_INTAKE_VTC_SOLENOID_DUTY_B2`, at **×0.39 %** from the timer compare.
+    The 255 plateau below is the controller's cap (99.4 %), and ×0.5 is ruled
+    out as this bullet concluded.
   - **0x1110: max 130 / 149 / 190 / 153 — never ≥ 200, no plateau** (one
     sample at each window's max). Saturation gives it **no bound**: ×0.5 and
     ×100/255 both survive.

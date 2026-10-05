@@ -34,6 +34,8 @@ _GENERIC: dict[str, str] = {
     "P0021": "Intake Camshaft Position Timing Over-Advanced (Bank 2)",
     "P0031": "HO2S Heater Control Circuit Low (Bank 1 Sensor 1)",
     "P0037": "HO2S Heater Control Circuit Low (Bank 1 Sensor 2)",
+    "P0075": "Intake Valve Control Solenoid Circuit (Bank 1)",
+    "P0081": "Intake Valve Control Solenoid Circuit (Bank 2)",
     "P0101": "Mass or Volume Air Flow Circuit Range/Performance",
     "P0102": "Mass or Volume Air Flow Circuit Low Input",
     "P0103": "Mass or Volume Air Flow Circuit High Input",

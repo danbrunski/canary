@@ -8,6 +8,8 @@ Pi sees no ``contract_changed:recipe``. ``afr_bank_balance_robust`` is here
 too: its input is the AF-sensor-voltage DID pair (B05.8 moved it from the
 voltage difference ``derived:AFR_BANK_BALANCE`` to the λ difference
 ``derived:LAMBDA_BANK_BALANCE_AF_VOLTAGE``, a deliberate contract change).
+The two cam surfaces' outputs were renamed when the firmware named the banks
+(D03.37, 2026-10-05: ``ECM_INTAKE_CAM_ANGLE_B1``/``_B2``), also deliberate.
 """
 
 from __future__ import annotations
@@ -40,8 +42,14 @@ AFR_BANK_BALANCE_PERSISTENCE = BandExcessPersistence(
 )
 
 
-def _cam_tracking_2d(role: Literal["primary", "secondary"], *, output: str) -> Surface2DRecipe:
-    """Measured cam angle against its command and DID rpm, steady state only."""
+def _cam_tracking_2d(
+    role: Literal["primary", "secondary"], *, bank: Literal[1, 2], output: str
+) -> Surface2DRecipe:
+    """Measured cam angle against its command and DID rpm, steady state only.
+
+    ``role`` survives in the recipe name, which fitted artifacts and capture
+    profiles reference; the bank is the firmware's (D03.37).
+    """
     return _surface_2d(
         name=f"cam_{role}_vs_command_rpm_did",
         output=output,
@@ -60,13 +68,15 @@ def _cam_tracking_2d(role: Literal["primary", "secondary"], *, output: str) -> S
         },
         deviation=_sigma(0.5),
         notes=(
-            f"Neutral {role} measured-cam tracking surface; physical bank "
-            "assignment remains intentionally unspecified. Evaluates only "
-            "while commanded angle and RPM satisfy the persisted steady-state gates."
+            f"Bank {bank} measured-cam tracking surface ({role} in the name, which "
+            "predates the firmware bank assignment). Which cylinder side is bank 1 "
+            "is inferred. Evaluates only while commanded angle and RPM satisfy the "
+            "persisted steady-state gates."
         ),
         diagnostic_capabilities=("cam command/position relationship drift",),
         diagnostic_limitations=(
-            "does not identify the physical bank and does not evaluate command transitions",
+            "does not evaluate command transitions; the bank's physical cylinder "
+            "side is inferred, not measured",
         ),
     )
 
@@ -100,8 +110,8 @@ def recipes() -> list[Recipe]:
                 "or cam-phasing change; not a fuelling surface",
             ),
         ),
-        _cam_tracking_2d("primary", output="did:ECM_INTAKE_CAM_ANGLE_MEASURED"),
-        _cam_tracking_2d("secondary", output="did:ECM_INTAKE_CAM_ANGLE_MEASURED_B"),
+        _cam_tracking_2d("primary", bank=1, output="did:ECM_INTAKE_CAM_ANGLE_B1"),
+        _cam_tracking_2d("secondary", bank=2, output="did:ECM_INTAKE_CAM_ANGLE_B2"),
         # B05.8 — a λ residual, not volts: each bank's A/F sensor voltage goes
         # through the verified transfer before the difference. Graded only in
         # healthy closed loop (J1979 0x02), outside warmup and at steady

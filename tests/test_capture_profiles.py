@@ -75,7 +75,8 @@ def test_strict_schema_and_seed_mirrors_collection(tmp_path: Path) -> None:
     assert "RPM" in fuel_map.mode01
     assert tuning_did is not None
     assert {"ECM_INJECTOR_PULSE_1", "ECM_INJECTOR_PULSE_2"} <= set(tuning_did.mode22)
-    assert tuning_did.expected_total_demand_hz == pytest.approx(182.0)  # + IAT context at 1 Hz
+    # 13 DIDs at 15 Hz (0x1138 joined 2026-10-05, D03.37) + coolant and IAT context at 1 Hz.
+    assert tuning_did.expected_total_demand_hz == pytest.approx(197.0)
 
     with pytest.raises(ValidationError, match="Extra inputs"):
         CaptureProfile.model_validate(

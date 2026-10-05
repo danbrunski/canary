@@ -977,30 +977,41 @@ dids:
       never be used as actual low-speed telemetry because it reports about 30
       km/h at rest.
 
-  # --- Intake cam phasing family (2026-08-05 drive sweeps) ---------------
-  # Scale/offset come from the ROM Cam Phasing decode (advance = (N-128)/2,
-  # 0x80 = 0.0 deg), independently corroborated: every member reads exactly
-  # 0x80 with the engine off, and spans 0-37 deg in motion against the ROM
-  # table's 0-35. (A +0.72..+0.74 correlation with 0x1110, once read as the
-  # VVT solenoid duty, is not corroboration: 0x1110 is EVAP purge, 2026-10-04,
-  # and purge rises with load just as cam advance does.)
+  # --- Intake cam timing (VTC) family ---------------------------------------
+  # Five one-byte CAN DIDs, all read from one firmware block (decompiler pass
+  # 2026-10-04: docs/ecu-firmware-analysis.md "Intake cam timing (VTC)", D03.37).
+  # CAN pointer table 0x24988 sends them to RAM 0xFFFF278C-278F and 0xFFFF26FC.
+  # Those bytes are a per-cycle snapshot: after the task loop, 0x20EF2 copies
+  # 0x8C bytes from 0xFFFF2792 to 0xFFFF2706, so 278C-278F mirror the
+  # controller's 2818-281B, and a 4-byte copy makes 26FC the target 2700.
   #
-  # Resolved 2026-08-05 against UpRev's INTK CAM TIM-B1/-B2 columns. The
-  # discriminator is behaviour at the cam's mechanical stop, where the signal
-  # is not moving so sequential-read skew contributes nothing:
-  #   UpRev B1 parked: mean -1.10 deg, sd 1.34   (a real sensor, jitters)
-  #   UpRev B2 parked: mean +0.25 deg, sd 0.70   (a real sensor, jitters)
-  #   0x113A  parked: mean  0.00 deg, sd 0.00   (8/8 sweeps exactly zero)
-  # A position sensor jitters; a setpoint does not. 0x113A is therefore the
-  # COMMANDED angle, not a bank -- which also explains why it deviates from
-  # the skew prediction during motion (command leads response).
+  #   DID     RAM (copy of)   quantity                          bank
+  #   0x113A  26FC (2700)     commanded angle, one for both     -
+  #   0x1135  278E (281A)     measured angle                    1
+  #   0x1163  278F (281B)     measured angle                    2
+  #   0x1138  278C (2818)     solenoid duty                     1
+  #   0x1139  278D (2819)     solenoid duty                     2
   #
-  # 0x1135 and 0x1163 are statistically identical at the stop
-  # (-0.12 +/- 0.15 deg) and differ during motion exactly as 46 DIDs of read
-  # skew predicts, so they are ONE measured signal mirrored across two
-  # registers -- a pattern this ECM already shows (heater duty appears on
-  # four DIDs). They are NOT a B1/B2 pair; a real pair would carry UpRev's
-  # ~1.0-1.35 deg separation.
+  # Banks come from the firmware's own DTC item table (0x102D0). Controller
+  # index 0 reports P0011 (performance) and P0075 (solenoid circuit), reads
+  # cam input GR1F and drives timer output TO7B; index 1 reports P0021/P0081,
+  # GR1E and TO7A. That Nissan's bank 1 is the cylinder 1/3/5 side is
+  # inferred, not read. To check it, unplug the 1/3/5-side solenoid at key-on
+  # engine-off; the circuit test should set P0075, not P0081.
+  #
+  # Angles: raw = learned retard-stop reference - cam edge + 128, in 1/20 of a
+  # 10 degCA crank tooth, so 0.5 degCA per count and 128 = 0 deg at the
+  # learned stop. That is the ROM Cam Phasing decode ((N-128)/2) the entries
+  # already used, and every member reads 0x80 with the engine off.
+  #
+  # Superseded 2026-10-04: bank assignment argued from UpRev INTK CAM TIM-B1/B2
+  # parked snapshots ("0x1135 probably bank 2", from a static 0x1135 - 0x1163
+  # offset of +0.51 deg with UpRev's sign). Each bank is measured from its own
+  # learned stop, so a parked offset between them reflects the two learned
+  # references and could not name a bank; the firmware says 0x1135 is bank 1.
+  # The 2026-08-05 argument that 0x113A is the command (8/8 parked sweeps
+  # exactly 0.00 deg while both measured angles jitter) stands, and the
+  # firmware agrees.
   - did: 0x113A
     name: ECM_INTAKE_CAM_ANGLE_COMMANDED
     byte_start: 0
@@ -1014,20 +1025,35 @@ dids:
     confidence: high
     plausible_min: -10.0
     plausible_max: 45.0
+    evidence:
+      - session: firmware-ZS44A-20260920
+        method: disassembly
+        transport: can
+        finding: >
+          CAN pointer table 0x24988 entry 0x3A (0x113A) is 0xFFFF26FC, which
+          the per-cycle snapshot in 0x20EF2 copies from 0xFFFF2700, the VTC
+          target. Both bank controllers subtract their own measured angle
+          from that one byte (error = target - measured, 0.5 degCA counts),
+          so there is a single target for both banks. The target comes from
+          a cold map 0xA679 (8x8, max raw 148 = +10 deg) and a warm map
+          0xA579 (16x16, max raw 198 = +35 deg), blended over warm-up; it is
+          0x80 (0 deg, at the stop) whenever VTC is not enabled.
+      - session: _capture-tuning-did-2026-08-06T145004 + _capture-tuning-did-2026-08-07T005351
+        method: raw_range_census
+        transport: can
+        finding: >
+          36,907 reads span raw 128-198 (0 to +35.0 deg); 198 is the warm
+          map's maximum, reached on both drives and never exceeded.
     notes: >
-      Commanded/target intake cam advance, not a measured bank. Zero variance
-      at the stop across 8 sweeps while both real banks jitter. Useful as the
-      command half of a command-vs-response pair for cam work.
+      Commanded intake cam advance, one target for both banks: the setpoint
+      half of the command-vs-response pair for cam work. 0 deg means the
+      target is at the retard stop, which is also when both solenoid duties
+      (0x1138, 0x1139) read 0.
 
-  # Measured angle. Bank assignment is a MODERATE-CONFIDENCE inference, not a
-  # measurement: at the stop this reads mean +0.44 deg / sd 0.75, which sits
-  # 0.7 SE from UpRev's B2 (+0.25 / 0.70) and 5.9 SE from B1 (-1.10 / 1.34).
-  # Sign, magnitude and noise level all agree, and nothing points at B1 -- but
-  # it rests on 8 parked snapshots taken on a different day from the UpRev
-  # reference. Names stay bank-neutral until a simultaneous UpRev log settles
-  # it; do not let downstream code assume the bank.
+  # Measured angle, bank 1 (firmware index 0). Named bank-neutral
+  # (ECM_INTAKE_CAM_ANGLE_MEASURED) until 2026-10-05.
   - did: 0x1135
-    name: ECM_INTAKE_CAM_ANGLE_MEASURED
+    name: ECM_INTAKE_CAM_ANGLE_B1
     byte_start: 0
     byte_length: 1
     response_length: 1
@@ -1039,13 +1065,29 @@ dids:
     confidence: high
     plausible_min: -10.0
     plausible_max: 45.0
+    evidence:
+      - session: firmware-ZS44A-20260920
+        method: disassembly
+        transport: can
+        finding: >
+          CAN pointer table 0x24988 entry 0x35 (0x1135) is 0xFFFF278E, the
+          per-cycle snapshot of 0xFFFF281A: the VTC measured angle for
+          controller index 0, clamp(learned stop[0] - cam edge[0] + 128,
+          0, 255), or 128 while cam sync is invalid. Index 0 is bank 1: its
+          performance monitor (|target - 0xFFFF281A| outside +-13 deg for too
+          long) reports DTC item 0xC9 = P0011, and its cam input capture GR1F
+          reports P0340 when silent.
     notes: >
-      One of the two measured banks; 0x1163 is the other. Probably bank 2 --
-      MEASURED minus 0x1163 is +0.51 deg with the cam static, the same sign as
-      UpRev's B2-B1 (+1.35 parked), though only ~40% of its magnitude and
-      measured on a different day. Do not let downstream code assume the bank.
+      Measured intake cam advance, bank 1, in degCA from the bank's learned
+      retard stop. Bank 2 is 0x1163; the bank-1 solenoid duty is 0x1138.
+      Until 2026-10-04 this entry said "probably bank 2" (UpRev parked
+      snapshots, see the family comment); the firmware's DTC table says
+      bank 1.
+
+  # Measured angle, bank 2 (firmware index 1). Named
+  # ECM_INTAKE_CAM_ANGLE_MEASURED_B until 2026-10-05.
   - did: 0x1163
-    name: ECM_INTAKE_CAM_ANGLE_MEASURED_B
+    name: ECM_INTAKE_CAM_ANGLE_B2
     byte_start: 0
     byte_length: 1
     response_length: 1
@@ -1057,54 +1099,154 @@ dids:
     confidence: high
     plausible_min: -10.0
     plausible_max: 45.0
+    evidence:
+      - session: firmware-ZS44A-20260920
+        method: disassembly
+        transport: can
+        finding: >
+          CAN pointer table 0x24988 entry 0x63 (0x1163) is 0xFFFF278F, the
+          per-cycle snapshot of 0xFFFF281B: the VTC measured angle for
+          controller index 1, from its own cam input (GR1E) and its own
+          learned stop. Index 1 is bank 2: its performance monitor reports
+          DTC item 0xCA = P0021, and a silent GR1E reports P0345.
+      - session: _capture-tuning-did-2026-08-06T003148
+        method: static_offset_vs_0x1135
+        transport: can
+        finding: >
+          Not a mirror of 0x1135 (corrected 2026-08-06). Over 1011 aligned
+          rows the two differ by +0.46 deg on average and only 22 % of
+          samples are identical; with the cam static (< 1 deg/s, n=313) the
+          offset is +0.514 deg, t=12.5, and it does not grow while the cam
+          slews. Read skew vanishes at rest, so this is two sensors. The
+          firmware's separate cam input per bank is why.
     notes: >
-      The second measured bank -- NOT a mirror of 0x1135, corrected 2026-08-06.
+      Measured intake cam advance, bank 2, in degCA from the bank's learned
+      retard stop. Bank 1 is 0x1135; the bank-2 solenoid duty is 0x1139.
+      The 2026-08-05 call that this was a mirror of 0x1135 rested on 8
+      underpowered parked snapshots and was reversed by the first all-DID
+      capture (evidence above).
 
-      The mirror call came from 8 parked sweep snapshots that showed the pair
-      "statistically identical at rest (-0.12 +/- 0.15)". That sample was
-      underpowered and the uncertainty was stated at the time, then treated as
-      settled anyway. The first all-DID capture reads both in the same rotation
-      for 12 minutes and separates them decisively: over 1011 aligned rows they
-      differ by +0.46 deg on average, and only 22% of samples are identical.
+  # Solenoid duty, bank 1 (firmware index 0). Catalogued 2026-10-05 (D03.37).
+  - did: 0x1138
+    name: ECM_INTAKE_VTC_SOLENOID_DUTY_B1
+    byte_start: 0
+    byte_length: 1
+    response_length: 1
+    response_length_source: 'did_log-2026-09-17 discovery sweeps (CAN, 0x7E0, session 0xC0, tools/did_log.py): width 1 in all four headers and 2,683 single-DID replies, all 1 byte (paced47 299, roadload-1 474, roadload-2 364, roadload-3 1,546). The 13 data/analyses/did-drive-sweeps-20260805 snapshots and data/analyses/did-sweep-20260804-koeo-baseline.json are 1 byte as well.'
+    byte_order: big
+    scale: 0.39
+    offset: 0.0
+    unit: percent
+    confidence: high
+    plausible_min: 0.0
+    plausible_max: 100.0
+    evidence:
+      - session: firmware-ZS44A-20260920
+        method: disassembly
+        transport: can
+        finding: >
+          CAN pointer table 0x24988 entry 0x38 (0x1138) is 0xFFFF278C, the
+          per-cycle snapshot of 0xFFFF2818, the VTC solenoid duty byte for
+          controller index 0. 0xC641A writes it as round(duty request x 150
+          / Vbatt byte), capped at 255, where the request is a coolant
+          feed-forward hold (table 0xDA2F) plus the PID output x 128/68. It is
+          forced to 0 unless VTC is enabled (30 ticks after start, no crank
+          or cam fault, no P0011/P0021, Vbatt byte 125-200, coolant in range,
+          rpm >= 1200 on / < 1000 off, target above the stop), and to 0xFF
+          during the key-on circuit test. A target above +38 deg runs open
+          loop at 0xFF for ~1 s, then 0xF2 (the warm map tops out at +35
+          deg, so not in normal driving). 0xC66C4 loads timer channel 7
+          compare register BFR7B (0xFFFFF592) with raw x 33 x 39 / 80 against
+          a period of 4,125 counts, so the on-time is raw x 0.39 % (255 =
+          99.4 %). Index 0 is bank 1: the circuit monitor on 0xFFFF2818
+          reports DTC item 0x31 = P0075, the performance monitor P0011, and
+          the output pin is TO7B.
+        constant: 0.39
+        constant_unit: percent duty per count
+        conditions: >
+          Commanded, battery-compensated PWM duty as loaded into the timer,
+          for every raw value 0-255 (integer compare rounding is under one
+          timer count, 0.024 %). Not a measured solenoid current. The ~303 Hz
+          PWM frequency rests on an inferred 20 MHz peripheral clock; the
+          duty fraction does not depend on it.
+      - session: data/analyses/did-drive-sweeps-20260805
+        method: snapshot_census_and_cam_error_sign
+        transport: can
+        finding: >
+          0 in all 8 snapshots with the target at the stop (0x113A = 0x80),
+          68-148 in all 5 with the cam under control. It moves with bank 1's
+          error: target +22.5 deg with 0x1135 lagging 3 deg -> 148 (57.7 %);
+          target +34 deg with 0x1135 3 deg past it -> 68 (26.5 %). The
+          2026-09-17 did_log reads it 0 in all 77 decel samples and 70-116
+          at high load. The NT510 polls 0x1138 on a page with 0x1135
+          (data/analyses/2026-09-24-scan-tool-bcm-ecm-session.md).
+    notes: >
+      Commanded intake cam (VTC) solenoid duty, bank 1, in percent. 0 means
+      VTC is disabled and the cam sits on its retard stop; while controlling
+      it holds near the coolant feed-forward (~39 % warm) and moves with the
+      cam's error. Battery-compensated: the same request reads lower at a
+      higher Vbatt byte. Its measured angle is 0x1135; bank 2 is 0x1139.
 
-      Read skew cannot explain it. Skew scales with how fast the signal is
-      moving and vanishes at rest, but with the cam STATIC (<1 deg/s, n=313)
-      the offset is +0.514 deg, t=12.5, p=2.3e-29 -- and it does not grow when
-      the cam is slewing (+0.658 deg at >20 deg/s, within noise of the static
-      figure). A persistent offset while nothing moves is two sensors.
-
+  # Solenoid duty, bank 2 (firmware index 1). Named
+  # ECM_INTAKE_VVT_SOLENOID_DUTY_CANDIDATE_B2 until 2026-10-04 and
+  # ECM_UNIDENTIFIED_1139 until 2026-10-05.
   - did: 0x1139
-    name: ECM_UNIDENTIFIED_1139
+    name: ECM_INTAKE_VTC_SOLENOID_DUTY_B2
     byte_start: 0
     byte_length: 1
     response_length: 1
     response_length_source: '6 local sessions (40,979 stored Mode 22 response payloads) plus _capture-tuning-did-2026-09-11T003700 (15,779 payloads on the H8 drive), all 1 byte, no other width observed. Payload is the full post-header response (_decode_response stores response.payload unmodified). The same capture independently re-confirmed every width recorded in D02.4. D02.4 / H8, 2026-09-10.'
     byte_order: big
-    scale: null
-    offset: null
-    unit: unknown
-    confidence: low
+    scale: 0.39
+    offset: 0.0
+    unit: percent
+    confidence: high
+    plausible_min: 0.0
+    plausible_max: 100.0
+    evidence:
+      - session: firmware-ZS44A-20260920
+        method: disassembly
+        transport: can
+        finding: >
+          CAN pointer table 0x24988 entry 0x39 (0x1139) is 0xFFFF278D, the
+          per-cycle snapshot of 0xFFFF2819, the VTC solenoid duty byte for
+          controller index 1. That copy is why the listing showed a reader
+          and no direct writer. 0xC641A writes it exactly as bank 1's
+          0xFFFF2818 (hold table 0xDA37, identical to bank 1's), and 0xC66C4
+          loads timer channel 7 compare register BFR7A (0xFFFFF590) with raw
+          x 33 x 39 / 80 against a period of 4,125 counts, so the on-time is
+          raw x 0.39 % (255 = 99.4 %). Index 1 is bank 2: the circuit monitor
+          on 0xFFFF2819 reports DTC item 0x32 = P0081, the performance monitor
+          P0021, and the output pin is TO7A.
+        constant: 0.39
+        constant_unit: percent duty per count
+        conditions: >
+          Commanded, battery-compensated PWM duty as loaded into the timer,
+          for every raw value 0-255 (integer compare rounding is under one
+          timer count, 0.024 %). Not a measured solenoid current. The ~303 Hz
+          PWM frequency rests on an inferred 20 MHz peripheral clock; the
+          duty fraction does not depend on it.
+      - session: _capture-tuning-did-2026-08-06T145004 + _capture-tuning-did-2026-08-07T005351
+        method: time_paired_vs_cam_error
+        transport: can
+        finding: >
+          34,264 time-paired reads. 0 whenever the commanded angle is 0
+          (16,103 reads, mean 0.3). About 99 raw (IQR 90-102) whenever
+          controlling, whatever the target: a holding duty, ~39 % at 0.39 %,
+          which fits the firmware's warm hold 125 x 150 / Vbatt byte at a
+          Vbatt byte near 189. Its departure from 99 tracks command - measured
+          (r +0.79): 135 when the cam lags by > 3 deg, 71 when it overshoots
+          by > 3 deg, 100 within +-0.25 deg. Spearman +0.72 against 0x1163's
+          error, +0.64 against 0x1135's. Raw maxima 213 and 224 here;
+          did_log-2026-09-17-roadload-2 held 255 for three consecutive
+          samples (D04.7), the controller's cap.
     notes: >
-      Identity unknown. Renamed 2026-10-04 from
-      ECM_INTAKE_VVT_SOLENOID_DUTY_CANDIDATE_B2: it was catalogued as the
-      bank-2 sibling of 0x1110's "intake VVT solenoid duty", and 0x1110 is
-      EVAP purge (firmware), so nothing ties this register to cam control.
-      The CAN DID pointer table (0x24988, index 0x39) points it at RAM byte
-      0xFFFF278D, 5 bytes below the purge-control block based at 0xFFFF2792
-      (whose +0x28 is the purge byte 0xFFFF27BA). The listing shows one
-      reader (0x0C673C) and no direct writer, so it is written through a
-      pointer or a different base; meaning not established. Retain it only
-      in the focused all-DID capture while tagged transition evidence is
-      collected.
-
-  # The OTHER bank's measured angle was NOT found in 0x1000-0x1400. A search
-  # of all 158 responding DIDs turned up no second cam-like signal carrying a
-  # persistent ~1 deg offset with independent jitter. (0x1139, now
-  # ECM_UNIDENTIFIED_1139, was read as the bank-2 VVT solenoid duty, as the
-  # sibling of 0x1110; 0x1110 turned out to be EVAP purge on 2026-10-04, so
-  # no solenoid duty is identified on either bank.) Extend the next sweep past 0x1400. Not blocking: the ROM Cam
-  # Phasing table is a single table, not per-bank, so commanded + measured
-  # angles are a working set.
+      Commanded intake cam (VTC) solenoid duty, bank 2, in percent; read it
+      as 0x1138 for the other bank. Its measured angle is 0x1163. History:
+      catalogued as the bank-2 sibling of 0x1110's "intake VVT solenoid
+      duty", which made it unidentified when 0x1110 proved to be EVAP purge
+      (2026-10-04); the firmware VTC pass then identified it directly. The
+      x0.5 % reading is impossible (raw reaches 255, which would be 127 %).
 
   # D03.8 — a CANDIDATE, not a binding. Catalogued so research captures
   # (`fuel-target-research`, `fuel-pw-research`) can poll it beside Mode 01 PID

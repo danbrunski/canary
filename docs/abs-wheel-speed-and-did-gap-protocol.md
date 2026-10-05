@@ -546,7 +546,7 @@ engineering value.
 | `0x1208` | `ECM_AIR_CHARGE` | **Re-identified 2026-09-18 as air charge per intake event, not injected fuel** (it ignores enrichment and does not drop in DFCO; `data/dids.yaml`). The 2026-08-07 closed-loop fit is ~62,240 counts per g air; no engineering unit is pinned. |
 | `0x1209` | `ECM_BASE_FUEL_SCHEDULE_CANDIDATE` | The `fuel-did-research` profile exists for exactly this. Still a candidate, not a provider. |
 | `0x1110` | `ECM_EVAP_PURGE_CMD` | Settled 2026-10-04 from firmware: commanded EVAP purge, 0.5 % per count, the byte PID 0x2E reports. (It was catalogued as intake VVT solenoid duty; that was wrong.) |
-| `0x1139` | `ECM_UNIDENTIFIED_1139` | Identity open (was the "bank-2 VVT duty" candidate on 0x1110's wrong premise). RAM 0xFFFF278D, beside the purge-control block. |
+| `0x1139` | `ECM_INTAKE_VTC_SOLENOID_DUTY_B2` | Settled 2026-10-05 from firmware (D03.37): bank-2 intake cam solenoid duty, 0.39 % per count (the timer channel 7 compare). Bank 1 is `0x1138`. (It was `ECM_UNIDENTIFIED_1139` for a day, after the "bank-2 VVT duty" candidate lost 0x1110's premise.) |
 | `0x1206` | `ECM_INJECTOR_PULSE_1` | Injected pulse (matched-air-charge test PASS 2026-09-18; this engine has no MAP sensor). Pin the bank mapping and the ms scale, plus injector dead time from an idle electrical-load step with module voltage. |
 | `0x1207` | `ECM_INJECTOR_PULSE_2` | As above; its twin register (bank unverified). |
 

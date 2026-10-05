@@ -59,15 +59,16 @@ Nissan Mode 22 DID rows
 0x120F - Throttle-position sensor 1 voltage - raw times 0.005 V - high confidence
 0x1210 - Throttle-position sensor 2 voltage - raw times 0.005 V - high confidence
 0x113A - Commanded intake-cam advance - raw times 0.5 minus 64 degCA - high confidence
-0x1135 - Measured intake-cam angle, one bank - raw times 0.5 minus 64 degCA - high confidence
-0x1163 - Measured intake-cam angle, other bank - raw times 0.5 minus 64 degCA - high confidence
+0x1135 - Measured intake-cam angle, bank 1 - raw times 0.5 minus 64 degCA - high confidence
+0x1163 - Measured intake-cam angle, bank 2 - raw times 0.5 minus 64 degCA - high confidence
+0x1138 - Intake-cam (VTC) solenoid duty, bank 1 - raw times 0.39 percent - high confidence
 0x1110 - Commanded EVAP purge, the PID 0x2E byte (formerly catalogued as intake VVT-solenoid duty, wrong) - raw times 0.5 percent - high confidence
 0x1206 - Intake/manifold-pressure candidate - raw 16-bit value, scale unknown - medium confidence
 0x1207 - Second intake/manifold-pressure candidate - raw 16-bit value, scale unknown - medium confidence
 0x1201 - Coarse duplicate engine speed - raw times 12.5 rpm - high confidence
 0x121A - ECM-indicated vehicle speed - raw times 0.1 km/h - high confidence
 0x122A - Internal vehicle speed with an approximately 30 km/h floor - raw times 0.05625 km/h - high confidence
-0x1139 - Candidate bank-2 intake VVT-solenoid duty - scale and identity unconfirmed - low confidence
+0x1139 - Intake-cam (VTC) solenoid duty, bank 2 - raw times 0.39 percent - high confidence
 0x123F - Static or unrelated register previously called intake-air temperature - binding disproved, do not use
 
 Notes
@@ -75,7 +76,7 @@ Notes
 A Mode 01 PID request is 01 followed by the PID byte.
 A Mode 22 DID request is 22 followed by the two-byte DID after entering Nissan diagnostic session 10 C0.
 Mode 01 PID 0x0F is the valid intake-air-temperature source; DID 0x123F is not.
-The bank assignment of DIDs 0x1135 and 0x1163 has not been pinned.
+The intake-cam banks come from the ECM firmware's DTC table (P0011/P0075 bank 1, P0021/P0081 bank 2). That bank 1 is the cylinder 1/3/5 side is inferred, not measured.
 DIDs 0x1108 through 0x110A and 0x113C have been observed mirroring the 0x1107 heater-duty value but are not separate catalogue entries.
 
 Passive broadcast CAN signal rows
