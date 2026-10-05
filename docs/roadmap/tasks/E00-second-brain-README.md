@@ -29,6 +29,8 @@ predictions and residuals as evidence for investigations and learning.
 | [E03 — investigations and learning](E03-investigations-and-learning.md) | Fuel-delivery investigation, hypothesis/measurement selection and isolated candidate learning | E01; existing B06 delivery analysis; qualified E02 output when available | Physical measurements and independent drives where missing |
 | [E04 — Pi runtime and acceptance](E04-pi-runtime-and-acceptance.md) | Streaming integration, idle-time jobs, HTTP/MCP/dashboard and standalone demonstration | E01 first; E02/E03 integrated incrementally | Required Pi measurements and Pi-plus-phone demonstration |
 | [E05 — ECU application twin](E05-ecu-application-twin.md) | Application dependency model, upstream fuelling, state transitions and later outputs | Firmware findings, W08 and E02; E04 for each deployed increment | Missing regimes, map switches and per-output verification |
+| [E06 — Rust core trial](E06-rust-twin-core-trial.md) | Language boundary, Python/reference parity, native-core experiment and adoption decision | Existing E02/E05 kernels and known answers; optional trial | Complete Python-to-Rust Pi benchmark and packaging check if adopted |
+| [E07 — engine plant simulator](E07-engine-plant-simulator.md) | Coupled ECU/engine model, whole-ROM effect coverage and logged-data validation of tuning scenarios | E05 controller, W08 images, B08 intervention evidence; E06 language trial | Plant parameter identification, independent intervention/torque evidence and Pi job benchmark |
 
 Start E01's contracts and E02's fixture/ROM audit. Establish the E04 runtime
 and persistence seams early, then integrate the twin and E03's first
@@ -39,6 +41,18 @@ learning do not block shipping a qualified command readout.
 E05.1's application inventory can start alongside E02; its wider executable
 paths follow the first qualified slice. Each added path repeats E04's Pi
 validation instead of assuming the first slice's budget covers the expansion.
+
+E06 establishes a pure computation boundary and preserves the Python
+reference. A Rust execution core is a measured option for growing arithmetic
+and state workloads; it does not block E02–E05 or move evidence, behavior
+tooling and the dashboard out of Python. Adoption needs exact parity and a
+Pi benchmark including boundary/conversion costs, not just a faster lookup.
+
+E07 adds the physical engine model needed to predict a changed command's
+effect. Begin with conditional steady fuel/lambda predictions under declared
+rpm/airflow boundaries, then qualify dynamic air and torque/driveline models.
+Loading a complete ROM preserves its identity and unknown bytes; only covered
+code paths and independently validated plant responses support tuning claims.
 
 Each numbered checkbox below these linked documents is task-level truth.
 The parent roadmap's Part A is a summary: check a summary only when all its
@@ -85,6 +99,7 @@ acceptance.
 |---|---|
 | [W08 ROM Library](W08-rom-library.md), [W05 trace coverage](W05-rom-maps-trace-coverage.md) | Consume exact images, table definitions and verified axis mappings; close a remaining prerequisite there with linked evidence. Do not build another ROM store. |
 | [B06 delivery error](B06-lambda-delivery-error.md) | Consume its command-versus-measured residual and eligibility; the twin predicts the command itself. A twin residual cannot replace a delivery residual. |
+| [B08 firmware-informed behavior](B08-firmware-informed-behavior.md) | Consume qualified models using actual Fuel Comp/timing context and the throttle-fill/MAF comparison. Keep ECU-computation, engine-response and historical residuals distinct; B08 owns candidate evaluation, E05 owns decoded calculations. |
 | [B03 lifecycle](B03-behavior-lifecycle-and-refit.md), [online training](../online-training-strategy.md) | Reuse disposition, held-out validation, reference retirement and promotion. E03 adds the investigation/candidate connections. |
 | [A05 plausibility](A05-plausibility-checks.md) | Consume qualified existing checks; E-series does not rebuild or declare them completed. |
 | [LLM-assist S.5](../llm-assist-and-compute-roadmap.md#implementation-checklist--seams-only-sequencing-step-1) | E01 owns the shared resolvable-evidence implementation; update S.5 only when its own acceptance passes. |

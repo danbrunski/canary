@@ -5,6 +5,12 @@ These recipes already exist in `default_recipes`; inspect and extend them
 rather than building a second model system. Follow
 [B00](B00-behavior-models-README.md).
 
+**2026-10-04 follow-on:** [B08](B08-firmware-informed-behavior.md) owns
+testing actual Fuel Comp coordinates as trim-model context and auditing
+artifacts affected by corrected CAN DID identities. The Mode 01 inputs used
+by current total-trim definitions are checked explicitly before declaring
+any artifact affected. B08.6 evaluates the recorded Fuel Comp intervention.
+
 ## Fuel trim and bank balance
 
 - [x] **B05.1 — Inventory viable inputs per recipe.** Report fresh, paired

@@ -1,5 +1,28 @@
 # Implementation task index
 
+**Status 2026-10-04: E07, coupled engine/ECU simulator.**
+[`E07-engine-plant-simulator.md`](E07-engine-plant-simulator.md) plans an
+engine physics model connected to the ROM-backed ECU twin, validated with
+logged observations and held-out tuning interventions. It separates whole-ROM
+loading from effect coverage, starts with conditional fuel/lambda response,
+and adds dynamic air/torque only as measurements qualify them. Coupled runs
+and parameter fitting use bounded Pi jobs after collection stops.
+
+**Status 2026-10-04: E06, optional Rust twin-core trial.**
+[`E06-rust-twin-core-trial.md`](E06-rust-twin-core-trial.md) defines the
+computation boundary, preserves the Python reference, and requires exact
+numerical/state parity plus a complete Python-to-Rust benchmark on the Pi.
+Adoption includes packaging and maintenance costs; the required second-brain
+milestones can proceed in Python while the trial is evaluated.
+
+**Status 2026-10-04: B08, firmware-informed behavior models.**
+[`B08-firmware-informed-behavior.md`](B08-firmware-informed-behavior.md)
+connects the decoded throttle-fill path, corrected Fuel Comp/timing axes and
+ECU state to behavior-model candidates and the E-series second brain. It
+adds artifact-lineage checks, independent-drive comparisons, the October 4
+Fuel Comp intervention evaluation and Pi publication criteria. Findings are
+recorded; model improvements and intervention outcomes remain to be measured.
+
 **Status 2026-10-04: E01–E05, second brain and ECU digital twin.**
 [`E00-second-brain-README.md`](E00-second-brain-README.md) indexes the
 implementation checklists for evidence/memory, the first target-φ twin,

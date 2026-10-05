@@ -4,6 +4,12 @@
 Addresses the behavior-model part of D03.20. Follow
 [B00](B00-behavior-models-README.md).
 
+**2026-10-04 follow-on:** [B08.3/B08.4](B08-firmware-informed-behavior.md)
+evaluate the newly decoded throttle-fill path and actual timing lookup
+coordinates/selection state against the baselines below. B08 owns those new
+candidate comparisons; the existing measurements and model statuses remain
+historical evidence, not proof that the new candidates work.
+
 ## Timing
 
 - [x] **B04.1 — Reproduce the timing baseline.** Record held-out errors,

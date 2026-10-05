@@ -183,6 +183,8 @@ infer an improvement from aggregate means with different drive composition.
 The [deterministic ECM twin](#first-ecm-twin-slice-target-equivalence-ratio)
 below is a concrete model for this capability: reproduce one decoded ECM
 calculation, then qualify its disagreement with the observed command.
+The [firmware-informed behavior work](#using-firmware-findings-to-improve-behavior-models)
+connects those calculations to learned relationships and investigation evidence.
 
 ### 4. An investigator that selects the next measurement
 
@@ -890,6 +892,160 @@ but do not provide independent confirmations of the algorithm. Computed
 residuals feed the brain's investigations; learning cannot change the decoded
 code semantics or ROM constants to hide disagreement.
 
+### Coupled engine physics model and whole-ROM experiments
+
+**Requested 2026-10-04:** connect the ECU digital twin to an engine physics
+model, validate against logged telemetry, and compare tuning configurations
+by loading whole ROM images. [E07](tasks/E07-engine-plant-simulator.md) owns
+the implementation and validation checklist.
+
+```mermaid
+flowchart LR
+    ROM[Exact ROM image] --> ECU[ECU application twin]
+    Scenario[Driver demand and environment] --> ECU
+    ECU -->|Injector, spark, throttle and cam commands| Plant[Engine physics model]
+    Plant -->|Simulated sensors| ECU
+    Plant --> Result[Mixture, torque and response predictions]
+    Logs[Held-out real telemetry] --> Check[Validation and evidence]
+    Result --> Check
+```
+
+The controller computes commands; the plant computes the physical response.
+Begin with a mean-value engine model: air/fuel mass accounting and bounded
+state, then manifold filling, breathing, combustion efficiency, friction and
+driveline response as evidence supports them. ROM tables govern controller
+behavior; physical parameters such as injector delivery, fuel pressure and
+spark-to-torque response also require hardware facts or measurements. A
+target AFR is not a measured AFR to copy into the plant output.
+
+W08 loads the complete image, including fuel, timing, target-AFR maps and
+other bytes. E05 resolves decoded paths and E07 reports consumption/effect
+coverage. Loading a ROM does not automatically model its unknown functions.
+Changed bytes affecting an unresolved dependency make the corresponding
+prediction partial or unevaluable. Whole-program instruction/peripheral
+emulation remains a separate implementation question.
+
+The latest [BFS decode](../ecu-firmware-analysis.md#fuel-comp-load-input-0xffff118a-and-how-bfs-is-formed)
+shows why coupling matters: Fuel Comp acts inside BFS, upstream of Target AFR
+and timing coordinates. Its edit can change both commands despite unchanged
+target/timing table bytes. The simulator must propagate that dependency and
+later the physical feedback; it cannot hold recorded downstream state fixed
+and call the result a fully coupled tuning prediction.
+
+Validate in stages: ECU replay from recorded sensor inputs; plant replay
+from recorded actuator commands; conditional ROM comparisons under explicitly
+prescribed rpm/airflow; then coupled rollout from driver/load/environment and
+initial state. Start with warm steady open-loop fuel/lambda response, with
+injector/pressure assumptions supported by data. That slice cannot predict
+new airflow or acceleration. Add torque and timing effects only when suitable
+torque references and control variation identify them; ordinary driving logs
+may leave those effects unresolved. Knock and boosted operation require
+additional models and evidence.
+
+Fit on separate drives, freeze parameters, and test independent drives and
+an unseen intervention, starting with the recorded October 4 Fuel Comp case
+where coverage permits. Keep uncertainty, region coverage and transient
+misses visible. Re-fitting a plant to each tune cannot establish that it
+predicted the tuning effect. A new hardware configuration needs a versioned
+plant parameter set and renewed validation.
+
+Rust is a candidate for both numerical kernels and their scheduler under
+E06; Python retains fitting/evaluation, ROM loading and evidence/interfaces.
+ECU integer parity and continuous-solver convergence have different tests.
+The simulator runs on the Pi as a bounded job after collection stops;
+scenario sweeps never compete with collection. A future live observer needs
+its own measured budget. Simulation results are labelled predictions, kept
+separate from observed training data, and create no ECU write requests.
+
+### Rust core option and Python boundary
+
+**Architecture option, 2026-10-04:** evaluate Rust for the ECU computation
+core as the twin grows into connected arithmetic and state transitions.
+Explicit integer types/operations and bounded state make it a plausible fit
+for fixed-point firmware semantics; native execution may also improve Pi
+headroom and replay throughput. Those benefits are candidates to measure,
+not established results or a decision to port the first slice for speed.
+
+| Candidate Rust core | Python integration |
+|---|---|
+| Fixed-width arithmetic, table lookup, interpolation and clamping | ROM Library/profile loading and calibration identity |
+| Decoded branches, ECU state transitions and intermediate predictions | Acquisition-time pairing, session analysis and overall applicability |
+| Typed results, next state and computation refusal reasons | Residual/evidence records, investigations, behavior models, APIs and dashboard |
+
+Establish the computation boundary now and preserve the Python implementation
+as a reference. Trial a small Rust library through a thin PyO3 binding, with
+complete tuples or bounded batches crossing the boundary. Supply immutable
+resolved tables and explicit state; keep vehicle facts in profile/ROM data.
+Use explicit integer overflow, saturation, casts and rounding semantics
+matching the decoded code: [Rust's defaults do not establish firmware parity](https://doc.rust-lang.org/reference/behavior-not-considered-unsafe.html).
+Require bit-exact integer outputs and matching state/reason/branch traces
+against Python and independent known-answer vectors in debug and release.
+
+For work detached from Python, [PyO3 can release the interpreter](https://pyo3.rs/main/performance.html),
+but collection still needs the bounded worker handoff. Releasing the GIL
+does not make a synchronous call nonblocking. Benchmark the complete call
+on the Pi, including conversion, copying and return handling, alongside
+latency tails, memory, startup, replay throughput and collector effects.
+The existing E04 budget applies; a Rust microbenchmark alone is insufficient.
+
+[E06](tasks/E06-rust-twin-core-trial.md) owns the trial and an evidence-backed
+adopt/defer/reject decision, including ARM64 packaging, pinned toolchain,
+parity gates and explicit backend provenance if adopted. E02–E05 can proceed
+in Python while this is evaluated. Missing logic, capture coverage and
+observation timing remain qualification constraints in either language.
+
+### Using firmware findings to improve behavior models
+
+**2026-10-04 findings:** Fuel Comp's `mem:ECM_FUEL_COMP_X_INPUT` is an
+alpha-N fill estimate derived from throttle flow per revolution through
+saturating curves; BFS and Target AFR's X follow the MAF path. This supplies
+a differently derived view of load to compare with the existing air-charge
+model. Purge, sensor-B fallback and the learned idle-air correction structure
+are now traced. The fill scale is relative (0–224), with no MAF, barometric
+or temperature input; it is not a measured airflow or manifold pressure.
+Absolute physical units and full-chain live qualification remain open.
+See the [decoded writer](../ecu-firmware-analysis.md#fuel-comp-load-input-0xffff118a-and-how-bfs-is-formed).
+
+The firmware also establishes Fuel Comp's actual axes (`0xCACD` rpm,
+`0xCB29` fill, opposite UpRev's breakpoint labels), timing-trim axes
+(`0xCC93` rpm, `0xCC83` BFS-X), and branch/slot state that generic OBD-load
+surfaces omit. [B08](tasks/B08-firmware-informed-behavior.md) owns candidate
+evaluation using that context; E02/E05 own reconstructed ECU calculations.
+
+| Candidate improvement | What it lets the brain investigate |
+|---|---|
+| Air charge versus rpm/throttle-derived fill, with justified density context | Disagreement between throttle and MAF paths; whether a new observation can separate currently ambiguous hypotheses. |
+| Trim/delivery conditioned on actual Fuel Comp coordinates, table value and active image/slot | Whether a discrepancy follows the calibration region actually used by the ECU. |
+| Timing conditioned on actual BFS/rpm coordinate and selection state | Expected branch/table changes versus unexplained timing changes; the final command chain and Main/High Det interpretation still need qualification. |
+| Separate twin-command and command/response residuals | Whether the supported disagreement begins in our reproduction of ECU computation or in observed engine response. |
+| Source-specific audit of corrected CAN DIDs and artifact lineage | Which historical findings actually consumed a wrong signal; current Mode 01 total-trim inputs must not be presumed contaminated. |
+
+Preserve three distinct results: **ECU computation agreement**, **physical
+response to the observed command**, and **change from a validated historical
+relationship**. For example, a matching φ prediction with lean measured
+mixture supports investigating delivery, instrumentation and physical-model
+assumptions. A mismatching φ prediction calls for checking missing ECU logic,
+state, ROM identity and timing. Neither identifies a component failure alone.
+Learned corrections remain separately versioned; they cannot conceal the
+original twin residual or alter decoded constants. Shared-register aliases
+and common-input models do not become independent evidence votes.
+
+The `ZS44A-20261004` Fuel Comp restoration provides a concrete learning-loop
+case: the [prediction was recorded before the flash](../../data/analyses/2026-10-04-fuel-comp-restore-prediction.md).
+B08.6 evaluates it against exact old/new image hashes and matched operating
+conditions, preserving LTFT reset/relearning and the joint axis/cell change
+as limitations. Unchanged Target AFR/timing bytes do not ensure unchanged
+operating coordinates or final commands. The earlier RAM-study fixture
+remains evidence for the pre-flash image. Model improvements and physical
+intervention outcomes still require measurement; historical predictions
+must not be rewritten after seeing the result.
+
+Start with input lineage and Fuel Comp/throttle-fill context, then timing.
+Compare candidates on identical eligible observations and independent drives
+through B02/B03; promote only demonstrated improvements. Live models and
+their evidence run on the Pi within E04's budget, while required heavier
+evaluation waits until collection stops. A laptop remains optional.
+
 ## First ECM twin slice: target equivalence ratio
 
 ### Purpose and boundary
@@ -992,15 +1148,18 @@ and investigations render those records rather than typing new evidence.
 ### Acceptance: preserve a known answer first
 
 The source is **`_capture-ram-study-2026-10-04T204557`**,
-20:45:56–21:12:49Z. The committed ground-truth fixture currently covers an
-August drive, **not this capture**. First extract and commit a compact raw
-telemetry slice under `tests/fixtures/ground_truth/`, with its own manifest
-and expectations: source/session hash, exact retained times, channel/decode
-versions, image hash, pairing policy and region gates. Retain both enrichment
-observations and their neighbours, ordinary lookup coverage, and the full
-194-pair BFS/X check. Do not commit the ROM image or manufacture missing
-channels. If the capture cannot supply eligible tuples, record the gap and
-obtain the targeted capture below before qualifying that branch.
+20:45:56–21:12:49Z. [E02.3](tasks/E02-target-phi-twin.md) now records the
+committed [manifest and expectations](../../tests/fixtures/ground_truth/target_phi.yaml),
+which reference the existing ROM-trace slice and the new `target-phi-slice/`.
+They pin telemetry hashes, acquisition times, decodes, image identity,
+pairing and region gates; preserve both enrichment observations and their
+neighbours; and retain all 194 BFS/X pairs. ROM images stay outside Git.
+
+**Measured limitation:** neither branch has an eligible final-command tuple
+within the 250 ms pairing limit. The two enrichment commands reproduce the
+forced-column lookup vectors, but their input reads are too far apart to
+qualify live-command agreement. Reuse this regression fixture and obtain
+E02.7's targeted back-to-back capture before qualifying either branch.
 
 Acceptance has three distinct checks:
 
@@ -1019,8 +1178,9 @@ Acceptance has three distinct checks:
 3. **New final-command acceptance target:** every eligible steady pair in
    the committed slice must agree within **one Q14 count (1/16384 φ)**.
    This is a proposed requirement, **not an accuracy already measured**.
-   Pin firmware interpolation/rounding before claiming it passes; do not
-   enlarge the tolerance to absorb unexplained misses. Require nonempty
+   E02.4 records the implemented firmware interpolation/rounding; final-path
+   applicability and eligible capture coverage remain gates. Do not enlarge
+   the tolerance to absorb unexplained misses. Require nonempty
    ordinary-lookup and override coverage and record exact per-branch counts,
    rpm/load bounds and visited cells. Constant-region checks use exact
    values, not a regression that would fail the moving-signal gate.
@@ -1070,11 +1230,11 @@ hashes only after the required pre-intervention prediction has been recorded.
 
 | Open item and effect on the first slice | Work needed to close it |
 |---|---|
-| Exact fixed-point interpolation/rounding and final-command applicability: prerequisites to qualifying the first slice | Trace the remaining arithmetic and command writers; capture warm steady open-loop points across cells and edges with all required windows. Match the Q14 target before qualifying ordinary lookup. |
+| Final-command applicability and observed state/corrections: prerequisites to qualifying the first slice | E02.4 implements lookup arithmetic and records the traced final-command state machine. Remaining correction meanings/inputs and a hold-counter update are unresolved. Capture warm steady open-loop cells/edges with back-to-back windows, plus command/multiplier/correction words (58 bytes from `0xFFFF26BE`, then `w27DC`); verify when the lookup reaches the final word and meet the Q14 target. |
 | Cold/warm-up, closed-loop overrides, transient enrichment, DFCO entry/recovery and protection logic | Identify their flags/inputs and writers, then capture cold-to-warm operation, mode transitions, tip-in/lift-off and fuel-cut recovery at sufficient rate. Qualify each regime separately. |
 | Pedal threshold input and hysteresis timing | Trace the `0xCEDB` curve's input and capture pedal/flag/target through repeated threshold crossings; the two October 4 set samples establish the override, not its full transition model. |
 | RAM-copy identity is a prerequisite; map-switch transitions remain out of scope | Read the live Target AFR table and compare bytes with the library slot. Then observe an operator-selected switch with `ECM_MAP_SELECT_INPUT`, selector, magic and active-map channels, and repeat the comparison. The reference drive never switched. |
-| Full BFS computation, Fuel Comp's x-coordinate and which Load Point Scaler copy is read | Trace callers and capture MAF, rpm, BFS, `ECM_FUEL_COMP_X_INPUT` and X across steady load/rpm points and transients. Test per-sample ratios and neighbouring-byte controls; correlation alone cannot identify the formula. |
+| Full BFS qualification, throttle-fill units and Load Point Scaler source | Fuel Comp X, purge, sensor fallback and idle-air correction structure are traced; Fuel Comp acts inside BFS before its filter, transient terms and ceiling. Validate their exact arithmetic/update order against paired MAF, rpm, fill, correction, filter-state and BFS observations; capture steady load/rpm and transition coverage. Resolve physical units and remaining constant/diagnostic/learning-loop meanings separately. E05 owns reconstruction and B08 owns behavior-model evaluation. |
 | Timing trims, the unidentified slot `+0x260` map, and unnamed 1-D/2-D maps | Trace each reader to an output and identify its inputs before designing a capture. For timing, capture select flags, timing and both lookup coordinates through a flag change. Cam/throttle candidates need independent commanded/measured channels before naming the map. These outputs are later slices. |
 
 ## Future implementation checklist
@@ -1084,7 +1244,13 @@ hashes only after the required pre-intervention prediction has been recorded.
 Detailed task truth and dependencies live in
 [E00–E05](tasks/E00-second-brain-README.md). These five boxes summarize that
 work; check one only when the linked tasks meet their acceptance, including
-required Pi measurements. All work below is planned, not implemented.
+required Pi measurements. Implementation progress and remaining qualification
+gates are recorded in those task documents; these summary boxes are not yet
+complete.
+
+The optional [E06 Rust-core trial](tasks/E06-rust-twin-core-trial.md) records
+its own parity, Pi benchmark and adoption decision; adopting Rust is not a
+completion requirement for these functional milestones.
 
 - [ ] Build evidence and persistent memory ([E01](tasks/archive/E01-evidence-and-memory.md), archived 2026-10-04; its Pi restart demonstration is E04.6).
   **Accept:** tools mint resolvable evidence, records preserve conditions and

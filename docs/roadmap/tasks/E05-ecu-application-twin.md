@@ -23,8 +23,10 @@ ECU replica.
 | Nissan's Target AFR pointer is redirected to RAM `0xFFFFB260`, slot `+0x220` | Use the UpRev active RAM copy's matching ROM slot; the old calibration table at `0x00A169` does not drive this patched path. |
 | UpRev init/copy/selector routines `0x0DE1A4`, `0x0DE3E4`, `0x0DE358` | Model default slot 1, magic, selector debounce and committed slot separately; active-map 0 after cold boot is meaningful state. |
 | Pedal flag at `0xFFFF2841` bit 0 forces X=`0xFF`; curve `0xCEDB` and +8-count hysteresis govern it | First consume the observed flag; later predict its transitions after identifying its input and update order. |
-| X derives from BFS using Load Point Scaler; Fuel Comp is slot `+0x660`, K is `+0x762` | Extend upstream from observed X into computed BFS/air charge only after tracing the full arithmetic and resolving Fuel Comp X and scaler source. |
-| Timing-trim tables at `+0x020`/`+0x120`, cells masked `& 0x7F`, selected by a flag at `0xFFFF2842` | Table locations are verified; Main/High Det meaning and the final timing chain still need evidence. |
+| X derives from BFS using Load Point Scaler; Fuel Comp is slot `+0x660`, K is `+0x762` | Extend upstream from observed X into computed BFS/air charge only after tracing the exact arithmetic/update order and scaler source against observations. Fuel Comp acts inside BFS, before the filter, transient terms and rpm-dependent ceiling. |
+| Fuel Comp axes are rpm `0xCACD` and load `0xCB29`, opposite UpRev's labels; cells remain row-major | Use the code's axis roles and exact image. The October 4 restoration changed load breakpoints and slot-1 cells; preserve separate calibration cohorts. |
+| Fuel Comp's `0xFFFF118A` writer `0x03C3A4` uses throttle-derived flow per revolution and saturating curves | Model this alpha-N fill path separately from MAF-derived BFS. Purge `w139E`, sensor-B fallback `w2CD0` and idle-air correction structure `w63FC` are traced. Relative units and full-chain/branch validation still limit physical interpretation and qualification. B08 evaluates its use as behavior-model context. |
+| Timing-trim tables at `+0x020`/`+0x120`, cells masked `& 0x7F`, selected by a flag at `0xFFFF2842`; rpm axis `0xCC93`, BFS-X axis `0xCC83` | Preserve the corrected axis roles. Table locations are verified; Main/High Det meaning and the final timing chain still need evidence. |
 | Slot `+0x260`, many 1-D curves and flash-resident maps remain unidentified | Track unknown functions and the measurement needed to identify them; do not guess cam/throttle/torque semantics from shape. |
 | CAN and K-line Mode 22 dispatch to different RAM pointer tables | Observation mappings must include transport. Apply catalog corrections at their owner; stale trim labels cannot validate the twin. |
 | PID 0x44 and target RAM read the same `0xFFFF26BE` word | Their agreement verifies observation mapping, not two independent confirmations of the command algorithm. |
@@ -131,6 +133,9 @@ ECU replica.
   controls using wrong neighbouring bytes/scales fail. Feeding observed BFS
   may validate downstream logic but cannot count as predicting BFS. Unknown
   upstream dependencies remain visibly conditional. **Capture likely needed.**
+  [B08.2/B08.3](B08-firmware-informed-behavior.md) can evaluate observed fill
+  as behavior-model context before this entire upstream path is qualified;
+  that evidence cannot be counted as reconstructing the fill computation.
 
 - [ ] **E05.3 — Reproduce state transitions and additional fuel regimes.**
   Decode and implement pedal enrichment hysteresis, map selection/init/copy,

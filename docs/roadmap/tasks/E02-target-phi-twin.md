@@ -342,7 +342,7 @@ broaden E02's applicability until their corresponding paths qualify:
 | Transient enrichment and DFCO entry/recovery | Faster paired target/input/flag capture through tip-in, lift-off and recovery; preserve internal-update and acquisition uncertainty. |
 | Pedal threshold and hysteresis | Trace the input of curve `0xCEDB`; repeat threshold crossings while observing pedal, flag and command. |
 | Map switching | Observe an operator-selected switch with `ECM_MAP_SELECT_INPUT`, selector and active map; compare RAM table with library slot before/after. |
-| Full BFS, Fuel Comp X and Load Point Scaler source | Trace callers and capture MAF/rpm/BFS, `ECM_FUEL_COMP_X_INPUT` and X; use same-instant ratios and neighbouring-byte controls. |
+| Full BFS qualification, throttle-fill units and Load Point Scaler source | Fuel Comp X, purge, sensor fallback and idle-air correction structure are traced; Fuel Comp acts inside BFS before its filter, transient terms and ceiling. Capture MAF/rpm/BFS, fill, corrections and filter state with acquisition pairing to verify exact arithmetic/update order across steady and transient regions; retain neighbouring-byte controls. Physical units and remaining constant/diagnostic/learning-loop meanings stay open. E05 owns reconstruction; B08 evaluates behavior context. |
 | Timing trims, slot `+0x260`, unnamed curves/maps | Identify each reader/output first; capture timing flags and independent timing/cam/throttle references appropriate to the candidate. |
 
 Findings and confidence belong in profile data and

@@ -15,6 +15,14 @@ use `[~]` when code is complete but named validation or deployment remains.
 | [B05](B05-trim-cam-and-tps.md) | Activate existing trim, bank-balance, cam and TPS recipes | B01/B02; B03 artifact policy | Missing captures and final live check |
 | [B06](B06-lambda-delivery-error.md) | Target-versus-measured lambda residual | B01/B02; B03 artifact policy | Steady enrichment/lag evidence if absent |
 | [B07](B07-warmup-and-idle.md) | Validate warmup and retain useful idle baseline | B01/B02; B03 artifact policy | Independent cold starts/accessory states |
+| [B08](B08-firmware-informed-behavior.md) | Firmware-derived context, throttle-fill/MAF comparison, timing and Fuel Comp intervention | B03–B06; E02/E05 computations; E01/E04 evidence and Pi runtime | Independent post-intervention drives and Pi verification |
+
+**2026-10-04 update:** decoded application logic supplies a throttle-derived
+fill coordinate distinct from the MAF path, corrected Fuel Comp/timing axes
+and explicit ECU branch/slot state. B08 records their proposed use in the
+existing recipes and second brain, with acceptance before changing model
+status. The October 4 Fuel Comp restoration supplies a pre-recorded
+intervention prediction; its outcome remains to be evaluated.
 
 ## Implementation order and decisions
 
