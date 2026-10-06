@@ -396,7 +396,12 @@ supercharger is a hardware intervention with a new plant parameter set.
        idle/short-pulse region and the 10–40 g/s tail. It must then pass
        on **never-scored held-out drives** (truck). The four above are spent.
        Log PID 0x42 with the pulse DIDs on those drives, so that Ts is not
-       taken from fuel-cut reads.
+       taken from fuel-cut reads. Owed by that `plant_version` too (E07.5):
+       read manifold pressure from the `manifold_breathing` stage instead of
+       fuel-mv-1's own steady speed density, which caps MAP at baro where the
+       stage refuses (declared as `fuel_delivery.internal_models` in the
+       contract), and revisit the VE working value (0.7), which the corpus
+       charge fraction exceeds on 10.6 % of warm reads (peak VE ≥ ~0.9).
     2. A tuning-profile drive that logs the AEM rail pressure with the pulse
        DID (truck). No such drive exists yet.
     3. MAP, injector flow and injector latency still require measurement.
@@ -552,7 +557,7 @@ supercharger is a hardware intervention with a new plant parameter set.
        acquisition clock (as in E07.3) and the one-to-one matched pairs
        above; no aggregates are compared.
 
-- [ ] **E07.5 — Add dynamic air, torque and vehicle response in stages.**
+- [~] **E07.5 — Add dynamic air, torque and vehicle response in stages.**
   Add manifold mass/energy balance and cylinder breathing, then spark/lambda
   efficiency, friction, rotational inertia and road/driveline load. Separate
   physical actuator response from ECU commands, including cam/throttle
@@ -567,6 +572,205 @@ supercharger is a hardware intervention with a new plant parameter set.
   numerical convergence. Spark edits cannot produce qualified power/knock
   predictions without relevant response data. Prescribed-rpm results are
   never presented as acceleration predictions.
+  *Partial 2026-10-05: stage 1 (manifold mass/energy balance and cylinder
+  breathing) is built, numerically converged and conserving, and bounded; it
+  is **not validated**, because no independent measurement of manifold
+  pressure or cylinder charge exists on this truck. Every other stage is
+  declared, unbuilt, with the measurements it needs named. The claim
+  refusals are declared and tested as a library gate; no producer calls it
+  yet.*
+  - **Code.** `src/analysis/engine_dynamics.py` (layer 5, generic);
+    `data/nissan-xterra-2008/manifold_plant.yaml` (`plant_version:
+    manifold-mv-1`); `python -m tools.manifold_check study|breathing-bound|
+    standing` reproduces every number below offline.
+  - **Contract (`contract_version` 2).** `SimContract.subsystems`: each stage
+    declares what it computes, its status, a built stage's module, bounded
+    `applicability` (hardware, quantity bounds, invariants, time resolution)
+    and, when it integrates a state, `numerical` checks; every stage names its
+    validation `references` and `required_measurements` (with the controls
+    each one `excites`). The schema refuses a plant/actuator quantity owned by
+    no stage or by two, a built stage without an envelope, a stateful one
+    without numerics, and a stage that names neither an available reference
+    nor a missing measurement. Eight stages: `fuel_delivery` (E07.3, built),
+    `fuel_rail`, `manifold_breathing` (built), `throttle_flow`,
+    `actuator_response` (throttle plate and cam phaser, separate from the ECU
+    command), `torque_production` (spark/lambda efficiency, friction,
+    pumping), `rotational_dynamics` (inertia, driveline, road load),
+    `engine_thermal`. Two plant quantities were added, `manifold_temperature`
+    and `cylinder_air_flow`; manifold pressure now depends on them (mass and
+    energy balance), `engine_torque` reads the cylinder charge rather than the
+    throttle flow, and in plant replay manifold pressure is a predicted
+    output owned by `manifold_breathing` instead of a stated boundary.
+    `manifold_pressure.observed_as` names `sensor:MANIFOLD_PRESSURE`, the
+    channel a fitted MAP sensor would record.
+  - **Two MAP models in plant replay, declared.** fuel-mv-1 is E07.3's
+    frozen baseline, so its numerics were not changed: `fuel_plant.predict`
+    still computes its own steady speed-density MAP at VE 0.7, capped at baro.
+    The stage returns NaN and refuses (`manifold_above_ambient`) where that
+    model caps, and has filling lag where it has none. The contract declares
+    this as `fuel_delivery.internal_models` (owner `manifold_breathing`,
+    mode `plant_replay`, where they differ, owed by the next fuel-plant
+    `plant_version`, E07.3 remaining 1). `fuel_plant.COMPUTES_INTERNALLY`
+    lists the same quantity, and `check_internal_models` refuses either list
+    without the other; the schema refuses an internal model whose named owner
+    is not the contract's owner
+    (`test_the_fuel_plants_own_map_is_a_declared_exception`).
+  - **Stage 1 physics.** States `m` and `E = cv·m·T` (adiabatic) or `m` at
+    the intake temperature (isothermal). Inflow is the MAF boundary in replay;
+    the cylinders draw `VE·(m/V)·Vd·rpm/120`. The VE is fuel_plant.yaml's
+    `manifold_pressure` working assumption (0.7, bracket 0.4–1.0), read from
+    there, never restated; the manifold volume is a `requires_measurement`
+    working assumption (4.0 L, bracket 2–8 L); the energy-balance form is a
+    declared choice whose alternative every sensitivity runs
+    (`manifold_heat_transfer_unmodelled`). Test
+    `test_the_steady_manifold_is_the_fuel_plants_speed_density_at_the_same_ve`:
+    the settled manifold equals `fuel_plant.manifold_pressure_speed_density`
+    to 1e-12, cylinder flow equals MAF, `T_m` equals IAT. Limiting case
+    (`test_limiting_cases_no_inflow_empties_at_tau_and_isothermal_holds_temperature`):
+    no inflow empties at the exact `exp(−t/τ)` within 1e-7 g, and an
+    emptying adiabatic manifold cools by more than 10 K.
+  - **Step-size refinement.** Declared before the study ran: ladder 1, 2, 4,
+    8 of the contract step; at most 1 % of a 0.3→0.9 tip-in's amplitude at
+    the step; observed order the method's own ±0.15. 18 cases: rpm 500 and 6500 × volume and VE bracket ends × both energy
+    balances, plus the working case. Cylinder flow is checked against the
+    exact solution (the mass ODE is linear); pressure and temperature against
+    a Richardson extrapolation.
+    - **Fixed-step Euler at 1.28 ms (E07.1's starting choice) FAILED** in 8
+      of 18 cases, all at 6500 rpm: worst 6.6 % of the tip-in in cylinder
+      flow, 3.9 % in pressure and 11.8 % of the temperature excursion (2 L,
+      VE 1.0, τ 9.3 ms). Its order was 1.00–1.07: converging, too coarse.
+    - **The contract's solver is now `rk4` at the same 1.28 ms** (the solver
+      clock's evidence said "E07.5's step-refinement test decides it"):
+      passes all 18; worst 2.9e-6 (flow), 4.9e-6 (pressure), 3.2e-5
+      (temperature); observed order 4.03–4.08 where measurable (13 cases
+      reach rounding first); state residual ≤ 1.6e-16 and breathing excess
+      0.50 of its bound (consistency check below, added after the first
+      study).
+    - Tests: `test_the_contract_solver_converges_at_every_applicability_corner`
+      and `test_the_refinement_study_can_fail_euler_at_the_same_step` (which
+      also shows `subsystem_standing` reporting `numerics_unconverged`).
+  - **Mass/energy consistency.** `consistency` checks a trace with code of
+    its own (the first version was a ledger the integrator closed by
+    construction, and a mutated integrator still closed it; replaced
+    2026-10-05). Every stored `(m, E)` must follow from the previous one by
+    one step of the declared method under the declared mass and energy
+    equations, re-stepped independently (bound 1e-9, rounding). The reported
+    cylinder flow must be the breathing law `VE·m/V·Vd·rpm/120` over each step
+    on the stored states: the start value for Euler, the trapezoid within its
+    error bound `2·(h/τ)²/12·|law − inflow|` for rk4. Non-finite or
+    non-positive states are named `state_nonphysical`, and the residuals are
+    taken over the physical steps only, so one bad sample cannot switch the
+    check off for the rest (1.3× the law plus a negative mass at step 3 is
+    still refused, `test_a_nonphysical_sample_does_not_hide_an_inconsistent_replay`).
+    `test_consistency_holds_a_correct_trace_and_fails_a_mutated_integrator`:
+    a correct tip-in has residual < 1e-12 under both methods. An integrator
+    that draws 1.7× the law fails both checks (residual > 1e-3, excess > 10).
+    One that books 0.6× the energy rate fails the state check (> 1e-6).
+    Reporting MAF as the cylinder charge fails the breathing check.
+  - **The replay runs only on verified numerics.** `replay_manifold` takes
+    the step and method from the contract (no caller step). It refuses a
+    study of another step, method or check (`numerics_unverified`), a failing
+    or empty one (`numerics_unconverged`), and a trace that departs from the
+    equations (`integration_inconsistent`). It names non-finite or negative
+    state per sample (`state_nonphysical`) next to `manifold_above_ambient`.
+    The verifier's repro (2 L, VE 1.0, 6500 rpm, MAF 40→120 g/s gave
+    −3.9e6 kPa at a caller-chosen 20 ms step) is refused through every route,
+    and is finite and positive on the contract step. A contract whose solver
+    step is one whole ECU tick fails its own study and its replay is refused
+    (`test_a_coarse_step_or_an_unverified_study_is_refused`). Replay and
+    `subsystem_standing` both ask one helper, `numerics_refusal`, so a passing
+    study of another step or method leaves the stage `numerically_verified`
+    False (`test_standing_reads_a_report_only_for_the_contracts_own_step`).
+  - **Bounded applicability** (contract): NA hardware only
+    (`na_stock_injectors_2026_10`), rpm 500–6500, MAF 0.5–300 g/s, baro
+    60–105 kPa, IAT −30–70 °C; outside is refused by name
+    (`outside_applicability`), and another hardware configuration is refused as
+    a new plant. Invariant `manifold_at_or_below_ambient`: a sample above baro
+    is NaN with `manifold_above_ambient`, never clipped. Time resolution: one
+    engine cycle (τ is only ~1–4 cycles at every rpm), reported per step as
+    `resolved_period_s`. Test
+    `test_replay_refuses_outside_its_envelope_and_never_clips_above_ambient`.
+  - **Validation: none possible from the corpus, and refused as such.**
+    The catalogs have no MAP (PID 0x0B unsupported; the `bindings.yaml` "MAP"
+    byte retracted 2026-08-08). BFS (0x1208) is K × MAF / rpm through the
+    ECU's own filling filter, so it is the ECU's model of the same filling
+    from the same MAF; `derived:VE_AMBIENT_PERCENT` is MAF over the ambient
+    fill. `check_reference` derives each reference's lineage from the
+    contract graph, the derived-channel registry and its declared inputs, and
+    refuses both (`reference_not_independent`, naming `mass_air_flow` and
+    `engine_speed`): `test_bfs_and_the_ambient_ve_cannot_validate_a_manifold_driven_by_maf`.
+    The independent reference (`sensor:MANIFOLD_PRESSURE`) is
+    `requires_measurement: map_sensor`. Standing is derived, never stated:
+    `manifold_breathing` is built, numerically verified, **not validated**
+    (`test_the_manifold_is_built_and_converged_but_not_validated`), and only a
+    recorded `pass` against an available, independent reference validates a
+    stage (`test_only_a_pass_against_an_available_independent_reference_validates`:
+    a pass against BFS does not). No stage is validated today; the fuel stage
+    reads its own E07.3 verdict (`plant_not_qualified`).
+  - **What the corpus does bound** (`breathing-bound`, the seven fuel-plant
+    split recordings, 24,282 warm in-envelope MAF reads with rpm paired
+    one-to-one): the charge fraction MAF / ambient fill, which equals
+    VE × p_m / p_baro and is the one breathing quantity MAF identifies. It
+    exceeds the shared working VE of 0.7 on **2,575 reads (10.6 %)**: median
+    0.876 at 4000–5000 rpm, 0.839 at 5000–6500, p99 0.88–0.92 above
+    3000 rpm, max 0.94. There the steady manifold at VE 0.7 would sit above
+    ambient. So peak VE is at least ~0.9 and the 0.7 working value is
+    contradicted at high load; fuel-mv-1 caps its MAP at baro there (owed by
+    its next `plant_version`, above). 30 reads exceed 1.0; the ones inspected are
+    single 0.25 s MAF reads 33–81 g/s above the previous read at 760 to
+    2300 rpm: tip-in filling, where MAF is not the cylinder charge.
+    Test `test_the_breathing_bound_counts_where_the_shared_ve_is_contradicted`
+    (synthetic).
+  - **Claims, refused** (`claim_refusals` / `require_claim`, read from the
+    mode's roles and the derived standings):
+    - `prescribed_rpm_not_acceleration` from plant replay and the ROM
+      comparison, even with every stage validated
+      (`test_prescribed_rpm_is_never_an_acceleration_prediction`); a rollout
+      may claim acceleration only when every stage on its path is validated.
+    - Spark: declared and tested as a library gate; no producer exists yet.
+      A power/torque claim with `changed_controls=["spark"]` is
+      `spark_response_unmeasured` (needs `controlled_spark_sweep`) even with
+      every stage validated; knock is always `knock_unmodelled`
+      (`test_spark_edits_cannot_produce_qualified_power_or_knock`). The first
+      producer must derive `changed_controls` from the ROM diff
+      (`compare_roms`) and call `require_claim`; that derivation is owed.
+    - Torque: `derived:ESTIMATED_TORQUE_NM` is refused as a torque reference
+      (`reference_not_independent`: `mass_air_flow`, `delivered_lambda`,
+      `throttle_position_actual`) even if marked available; H07's
+      road-dyno torque shares only the declared rpm index and is independent
+      but `not_validated` (H07.12/H07.8 owed)
+      (`test_torque_is_never_calibrated_against_the_fuel_energy_estimate`).
+  - **Tests.** `tests/test_engine_dynamics.py`, 19 pass (the two that run
+    the real study are in `tests/slow_tests.txt`; the standing and replay
+    tests use a stub report). With the E07.1–E07.6 suites (`test_sim_contract`,
+    `test_fuel_plant`, `test_paired_scenarios`, `test_rom_effects`,
+    `test_rom_effects_private_rom`, `test_plant_validation`) and
+    `test_layering`: 137 pass.
+  - **Remaining, by stage, and what each needs:**
+    1. *Stage 1 validation* (truck + hardware): a MAP sensor teed into a
+       manifold vacuum port on a spare USB ADC input at ≥ 100 Hz, logged with
+       MAF and rpm over idle, cruise, tip-ins/outs and WOT; and the manifold
+       volume (water fill or CAD). Then a held-out scoring recorded in the
+       contract's `validations`. Until then the subsystem stays unvalidated.
+    2. *Throttle flow* (unbuilt): the throttle effective area needs MAP
+       outside choked flow.
+    3. *Actuator response* (unbuilt): requested throttle word 0xFFFF2D28 with
+       sensor A at ≥ 50 Hz; VTC commanded/actual cam channels (not
+       catalogued).
+    4. *Torque production* (unbuilt): a validated H07 torque reference
+       (H07.12 NA baseline, H07.8 repeatability, H07.10 mass), controlled
+       spark, lambda and cam sweeps on it, and MAP for pumping.
+    5. *Rotational dynamics* (unbuilt): H07.5 road load, H07.6 inertia and
+       H07.10 mass on the truck.
+    6. *Fuel rail* and *engine thermal* (unbuilt): rail-pressure drives
+       across the load range; cold-start warm-ups.
+    7. E07.6's coupled rollout stays refused (`dynamic_plant_unbuilt`) until
+       these exist; `rollout_blockers` lists all eight stages today.
+    8. A producer of claims: derive `changed_controls` from the
+       `compare_roms` diff (a timing-table edit means spark) and call
+       `require_claim`. The refusals are a library gate until then.
+    9. The fuel plant's own MAP (declared internal model) and the VE finding:
+       owed by the next fuel-plant `plant_version` (E07.3 remaining 1).
 
 - [~] **E07.6 — Run paired tuning scenarios without leaking observations.**
   Simulate baseline/candidate ROMs with the same hardware parameters, driver

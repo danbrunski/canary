@@ -1,0 +1,76 @@
+# E07.5 stage 1 -- the intake manifold mass/energy balance and cylinder
+# breathing for this vehicle (contract subsystem `manifold_breathing`).
+#
+# Schema: src/analysis/engine_dynamics.py (ManifoldPlantProfile); reproduce
+# every number in the E07.5 evidence with
+#   .venv/bin/python -m tools.manifold_check study
+#   .venv/bin/python -m tools.manifold_check breathing-bound
+# Physics is generic; every number below is this truck's.
+#
+# What it does NOT have: an independent measurement. The VQ40DE has no MAP
+# sensor (PID 0x0B unsupported; data/bindings.yaml retraction 2026-08-08), so
+# manifold pressure, the breathing efficiency and the filling time constant
+# are not identifiable from any logged channel. The contract names the
+# measurement (`map_sensor`) and engine_dynamics refuses to call the
+# subsystem validated until a scoring against it passes.
+#
+# Volumetric efficiency is NOT declared here: it is fuel_plant.yaml's
+# `manifold_pressure` working assumption (VE 0.7, bracket 0.4-1.0), read from
+# there, so the steady manifold and fuel-mv-1's speed-density MAP are one
+# assumption, never two that can drift apart.
+schema_version: 1
+plant_version: manifold-mv-1
+hardware_configuration: na_stock_injectors_2026_10
+
+# The energy balance form. `adiabatic`: no heat exchange with the manifold
+# walls (inflow enthalpy at the intake air temperature, outflow at the bulk
+# manifold temperature). `isothermal`: the walls hold the air at the intake
+# temperature. A real manifold lies between the two (Hendricks' mean-value
+# engine models); which one is closer is not measured, so every result is
+# also run under the other and reports the difference as the effect
+# `manifold_heat_transfer_unmodelled`.
+energy_balance: adiabatic
+
+parameters:
+  - id: manifold_volume
+    units: L
+    status: requires_measurement
+    working_assumption:
+      value: 4.0
+      bracket: [2.0, 8.0]
+      effect: manifold_volume_unmeasured
+      basis: >-
+        Plenum (collector) plus runners plus the duct between the MAF and the
+        throttle, lumped. Not measured: about one displacement (3.954 L) is a
+        common NA sizing, and the bracket spans half to twice that. It sets
+        only the filling time constant tau = 120 V / (VE Vd rpm), never a
+        steady value.
+    evidence: >-
+      No CAD volume or fill measurement on file. Identifiable from a logged MAP
+      step response (tau) together with MAF and rpm; not from MAF alone.
+  - id: heat_capacity_ratio
+    units: ratio
+    status: known
+    source: physics
+    value: 1.4
+    evidence: 'Dry air, 250-350 K (cp/cv); humidity moves it by < 0.5 %.'
+
+# The test case the step-size refinement runs at every applicability corner
+# (rpm bounds x the volume and VE bracket ends x both energy balances). A step
+# in throttle inflow from `from_gps` to `to_gps` at t = 0 from a settled
+# manifold, held for `tau_multiples` of the slowest time constant. The airflow
+# values are chosen per corner as fractions of the flow that would put the
+# steady manifold at ambient pressure, so every case stays inside the
+# naturally aspirated invariant.
+study:
+  from_fraction_of_ambient_flow: 0.3
+  to_fraction_of_ambient_flow: 0.9
+  tau_multiples: 6.0
+  iat_c: 25.0
+  baro_kpa: 80.0
+  evidence: >-
+    A 0.3 -> 0.9 tip-in is the largest manifold transient the NA engine can
+    make short of closing or opening the throttle fully; 6 time constants
+    leave 0.25 % of the step unresolved. 80 kPa is the operator's home
+    altitude (memory: project_operating_altitude_80kpa); baro scales the
+    state, not the time constant.

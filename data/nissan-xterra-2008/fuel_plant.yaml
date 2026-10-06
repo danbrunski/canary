@@ -202,7 +202,14 @@ registry:
           density from the paired air charge and IAT at this volumetric
           efficiency (capped at baro); the bracket spans idle-like to full
           breathing and is a declared range, not a fit.
-      evidence: 'The contract states manifold pressure per operating point (plant_replay source: scenario).'
+      evidence: >-
+        fuel-mv-1 computes its own MAP in plant replay (this frozen steady
+        speed density, capped at baro). Since engine_sim_contract v2 the
+        manifold_breathing stage owns manifold_pressure and returns NaN
+        (manifold_above_ambient) where this model caps; the contract declares
+        this model as fuel_delivery.internal_models, owed reconciliation by
+        the next fuel-plant plant_version (E07.3 remaining 1), together with
+        the corpus finding that VE 0.7 is exceeded at high load (E07.5).
     - id: bank_air_split
       units: ratio
       status: requires_measurement

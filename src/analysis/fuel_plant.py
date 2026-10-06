@@ -88,6 +88,13 @@ PLANT_READS: tuple[str, ...] = (
 
 FloatArray = NDArray[np.float64]
 
+#: Quantities another plant stage owns (E07.5's contract) that this plant
+#: computes for itself: MAP by frozen steady speed density, capped at baro
+#: (:func:`manifold_pressure_speed_density`). The contract declares it as
+#: ``fuel_delivery.internal_models``; ``engine_dynamics.check_internal_models``
+#: holds the two lists equal. Reconciling it is owed by the next plant_version.
+COMPUTES_INTERNALLY: tuple[str, ...] = ("manifold_pressure",)
+
 
 class _Strict(BaseModel):
     model_config = ConfigDict(extra="forbid")

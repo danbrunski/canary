@@ -9,13 +9,16 @@
 # measured), an undeclared input, an ECU quantity reading the plant except
 # through a sensor, and a measured input to a ROM comparison or a rollout.
 #
-# Specification only: no plant is built (E07.3) and no mode is implemented
-# yet. Vehicle facts (RAM words, channels, task order, actuator limits) live
-# here; src/analysis/sim_contract.py is generic. Where a fact is not decoded
+# E07.5 adds `subsystems`: the plant's stages, each with what it computes, its
+# bounded applicability, its numerical checks and the independent measurement
+# that could validate it (src/analysis/engine_dynamics.py derives each
+# subsystem's standing; nothing here states that one is validated). Vehicle
+# facts (RAM words, channels, task order, actuator limits) live here;
+# src/analysis/sim_contract.py is generic. Where a fact is not decoded
 # or measured it says so (`delay_s` absent, a parameter `requires_measurement`),
 # never a guess.
 schema_version: 1
-contract_version: 1
+contract_version: 2
 name: engine_sim_contract
 # The plant implementation a scenario's results come from: E07.3's mean-value
 # fuel plant (src/analysis/fuel_plant.py, fuel_plant.yaml plant_version; the
@@ -63,7 +66,11 @@ clocks:
     period_status: chosen
     evidence: >-
       Eight plant steps per ECU tick, so values cross only at ECU task
-      boundaries. A starting choice: E07.5's step-refinement test decides it.
+      boundaries. Kept by E07.5's step-refinement study
+      (engine_dynamics.convergence_study, tools.manifold_check study): with
+      rk4 every applicability corner converges at fourth order and the
+      worst case (6500 rpm, 2 L, VE 1.0, tau 9.3 ms) is 2.9e-6 of a tip-in in
+      cylinder flow, 3.2e-5 of the temperature excursion.
   - id: obd_acquisition
     kind: acquisition
     evidence: >-
@@ -92,12 +99,19 @@ ecu_schedule:
 
 solver:
   clock: solver_1280us
-  method: fixed_step_euler
+  method: rk4
   exchange: ecu_task_boundary
   evidence: >-
     ECU integer arithmetic runs on the ECU clock with the decoded widths; the
     plant integrates on the solver clock. A sample-and-hold sensor value
-    reaches the ECU at a tick; an actuator command holds until the next tick.
+    reaches the ECU at a tick; an actuator command holds until the next tick,
+    and every boundary is held constant inside a solver step (all four rk4
+    stages see the same input). Changed from fixed_step_euler by E07.5
+    (2026-10-05): at 1.28 ms Euler failed the declared 1 % bound in 8 of 18
+    corners (worst: 6.6 % of the tip-in in cylinder flow, 11.8 % of the
+    temperature excursion at 6500 rpm, 2 L, VE 1.0); its observed order was
+    1.00-1.07, so it was converging, just too coarse. Halving the step four
+    times would cost 16x; rk4 costs 4x and passes everywhere.
 
 events:
   - id: ecu_power_on
@@ -154,11 +168,37 @@ quantities:
     kind: plant
     units: kPa
     meaning: 'Intake manifold absolute pressure (no MAP sensor on this engine).'
+    # Not logged on this truck (PID 0x0B is unsupported, data/bindings.yaml):
+    # the channel a fitted MAP sensor would record, named so it is scored
+    # against and can never feed a mode that computes manifold pressure.
+    observed_as: ['sensor:MANIFOLD_PRESSURE']
+    # E07.5 mass and energy balance: the manifold's air mass and temperature
+    # change by what entered past the throttle minus what the cylinders drew
+    # last step.
     depends_on:
       - {quantity: manifold_pressure, timing: previous_step}
+      - {quantity: manifold_temperature, timing: previous_step}
       - {quantity: mass_air_flow, timing: previous_step}
+      - {quantity: cylinder_air_flow, timing: previous_step}
+      - {quantity: intake_air_temperature, timing: same_step}
+  - id: manifold_temperature
+    kind: plant
+    units: degC
+    meaning: 'Bulk manifold air temperature (energy balance; no sensor downstream of the throttle).'
+    depends_on:
+      - {quantity: manifold_temperature, timing: previous_step}
+      - {quantity: manifold_pressure, timing: previous_step}
+      - {quantity: mass_air_flow, timing: previous_step}
+      - {quantity: cylinder_air_flow, timing: previous_step}
+      - {quantity: intake_air_temperature, timing: same_step}
+  - id: cylinder_air_flow
+    kind: plant
+    units: g_per_s
+    meaning: 'Air mass the cylinders draw from the manifold (breathing); equals mass_air_flow only when the manifold is steady.'
+    depends_on:
+      - {quantity: manifold_pressure, timing: same_step}
+      - {quantity: manifold_temperature, timing: same_step}
       - {quantity: engine_speed, timing: same_step}
-      - {quantity: barometric_pressure, timing: same_step}
   - id: mass_air_flow
     kind: plant
     units: g_per_s
@@ -197,10 +237,14 @@ quantities:
     kind: plant
     units: N_m
     meaning: 'Brake torque at the crank.'
+    # From the charge the cylinders drew (not the throttle flow), the mixture,
+    # speed and manifold pressure (pumping); spark is the ECU's and has no
+    # actuator quantity yet, which is why a spark claim is refused (E07.5).
     depends_on:
-      - {quantity: mass_air_flow, timing: same_step}
+      - {quantity: cylinder_air_flow, timing: same_step}
       - {quantity: delivered_lambda, timing: same_step}
       - {quantity: engine_speed, timing: same_step}
+      - {quantity: manifold_pressure, timing: same_step}
 
   # -- actuators (ECU command -> physical actuation)
   - id: injector_open_time_b1
@@ -516,6 +560,8 @@ modes:
       engine_speed: {role: unused}
       coolant_temperature: {role: unused}
       manifold_pressure: {role: unused}
+      manifold_temperature: {role: unused}
+      cylinder_air_flow: {role: unused}
       mass_air_flow: {role: unused}
       fuel_rail_pressure: {role: unused}
       fuel_mass_flow: {role: unused}
@@ -581,9 +627,14 @@ modes:
         source: 'obd:COOLANT_TEMP'
         assumption: 'Warm engine; cold-start and wall-wetting states are excluded until modelled.'
       manifold_pressure:
-        role: prescribed_boundary
-        source: scenario
-        assumption: 'No MAP sensor on this engine; stated per operating point, which bounds the pressure-dependent part of the claim.'
+        role: predicted_output
+        init: {method: steady_state, note: 'Settled at the first boundary values (E07.5 manifold_breathing). fuel-mv-1 reads its steady value: speed density at the working VE.'}
+      manifold_temperature:
+        role: predicted_output
+        init: {method: steady_state, note: 'Settled: equal to the intake air temperature.'}
+      cylinder_air_flow:
+        role: predicted_output
+        init: {method: steady_state, note: 'Settled: equal to the first airflow read.'}
       mass_air_flow:
         role: prescribed_boundary
         source: 'obd:MAF'
@@ -646,6 +697,8 @@ modes:
         role: prescribed_boundary
         source: scenario
         assumption: 'Equal for both ROMs at the prescribed airflow (no MAP sensor).'
+      manifold_temperature: {role: unused}
+      cylinder_air_flow: {role: unused}
       mass_air_flow:
         role: prescribed_boundary
         source: scenario
@@ -734,6 +787,12 @@ modes:
       manifold_pressure:
         role: predicted_output
         init: {method: steady_state, note: 'Settled at the initial operating point.'}
+      manifold_temperature:
+        role: predicted_output
+        init: {method: steady_state, note: 'Settled at the initial operating point.'}
+      cylinder_air_flow:
+        role: predicted_output
+        init: {method: steady_state, note: 'Settled at the initial operating point (read last step by the manifold).'}
       mass_air_flow:
         role: predicted_output
         init: {method: steady_state, note: 'Read last step by the manifold model.'}
@@ -798,3 +857,349 @@ modes:
         role: inferred_state
         init: {method: observed_checkpoint, reset_on: [ecu_reflash], note: 'Learned trim at the start; a flash resets it and relearning is part of the rollout.'}
       injector_pulse_index0: {role: predicted_output}
+
+# ------------------------------------------------------------------ subsystems (E07.5)
+# The plant's stages. Every plant and actuator quantity belongs to exactly one.
+# A built stage declares its module, its bounded applicability and (when it
+# integrates a state) its numerical checks; every stage names the independent
+# reference that could validate it and the measurements still missing.
+# Standing (built / numerically verified / validated) is DERIVED by
+# src/analysis/engine_dynamics.py: subsystem_standing runs the convergence
+# study, refuses a reference computed from the stage's own inputs
+# (reference_not_independent) and counts only a recorded passing scoring.
+subsystems:
+  - id: fuel_delivery
+    stage: 0
+    meaning: 'Injector command to delivered fuel and mixture: the E07.3 mean-value fuel plant.'
+    computes: [injector_open_time_b1, fuel_mass_flow, delivered_lambda]
+    status: built
+    implementation: {module: src.analysis.fuel_plant, profile_file: fuel_plant.yaml, plant_version: fuel-mv-1}
+    # fuel-mv-1 is E07.3's frozen baseline: its numerics are not changed to
+    # read the manifold stage, so in plant replay it keeps its own MAP.
+    internal_models:
+      - quantity: manifold_pressure
+        owner: manifold_breathing
+        modes: [plant_replay]
+        model: >-
+          fuel_plant.manifold_pressure_speed_density: steady speed density from
+          MAF, rpm and IAT at fuel_plant.yaml's working VE (0.7, bracket
+          0.4-1.0), capped at baro, per sample with no filling dynamics.
+        differs: >-
+          Where the steady manifold at that VE would exceed ambient, this model
+          caps MAP at baro; manifold_breathing returns NaN and refuses the
+          sample (manifold_above_ambient). The corpus has that on 10.6 % of
+          warm in-envelope reads (charge fraction > 0.7, mostly above 3000
+          rpm). In transients this model has no filling lag; the stage does.
+        owed_by: >-
+          The next fuel-plant plant_version (E07.3 remaining 1): read MAP from
+          manifold_breathing, and revisit the VE working value against the
+          charge-fraction bound (peak VE at least ~0.9).
+    applicability:
+      hardware_configurations: [na_stock_injectors_2026_10]
+      bounds:
+        - {quantity: coolant_temperature, minimum: 70.0, maximum: 130.0,
+           evidence: 'fuel_plant.yaml steady.min_coolant_c: warm only, wall wetting and cold enrichment are not modelled.'}
+      time_resolution: engine_cycle
+      evidence: >-
+        Warm, steady, naturally aspirated, effective pulse >= 1 ms (the
+        short-pulse correction is undecoded); scored by fuel_plant_eval, whose
+        held-out verdicts are this stage's validation record.
+    references:
+      - id: lambda_pid
+        channel: 'obd:O2_WR_LAMBDA_S1'
+        measures: delivered_lambda
+        kind: instrument
+        status: available
+        evidence: 'The bank-1 A/F sensor as the ECM reports it (B06); never the target.'
+    required_measurements:
+      - id: rail_pressure_drive
+        what: 'A tuning-profile drive logging sensor:FUEL_PRESSURE with the pulse DID and PID 0x42.'
+        identifies: [rail_pressure, injector_dead_time]
+        status: partial
+        evidence: 'AEM gauge logged since 2026-10-04 (ram-study only, pulse DID at 7 s); E07.3 remaining 2.'
+      - id: injector_flow
+        what: 'A flow bench, or an independent fuel-mass measurement, of the fitted injectors.'
+        identifies: [injector_static_flow, injector_dead_time]
+        status: missing
+        evidence: 'E07.3: only the lumped stoich_air_per_open_ms is identifiable.'
+      - id: map_sensor
+        what: 'Manifold absolute pressure logged with the pulse (see manifold_breathing).'
+        identifies: [manifold_pressure]
+        status: missing
+        evidence: 'The injector differential pressure needs MAP; fuel-mv-1 runs it at speed density (VE 0.7 [0.4, 1.0]).'
+
+  - id: fuel_rail
+    stage: 0
+    meaning: 'Rail pressure response to fuel demand (returnless; droops with airflow).'
+    computes: [fuel_rail_pressure]
+    status: unbuilt
+    references:
+      - id: aem_rail
+        channel: 'sensor:FUEL_PRESSURE'
+        measures: fuel_rail_pressure
+        kind: instrument
+        status: available
+        evidence: 'AEM 30-0301 at 100 Hz (anti-alias firmware from 2026-10-04 21:52:33Z); +1.8 psi offset vs the face unresolved.'
+    required_measurements:
+      - id: rail_pressure_drive
+        what: 'Drives logging the rail with MAF, rpm and the pulse DID across the load range.'
+        identifies: [rail_pressure_behaviour]
+        status: partial
+        evidence: 'One recording (ram-study 2026-10-04) has the rail; it is spent held-out evidence for fuel-mv-1.'
+
+  - id: manifold_breathing
+    stage: 1
+    meaning: >-
+      One lumped intake manifold: mass and energy balance between the air
+      entering past the throttle and the air the cylinders draw, with
+      four-stroke speed-density breathing at a volumetric efficiency.
+    computes: [manifold_pressure, manifold_temperature, cylinder_air_flow]
+    components: [manifold_mass_balance, manifold_energy_balance, cylinder_breathing]
+    status: built
+    implementation: {module: src.analysis.engine_dynamics, profile_file: manifold_plant.yaml, plant_version: manifold-mv-1}
+    applicability:
+      hardware_configurations: [na_stock_injectors_2026_10]
+      bounds:
+        - {quantity: engine_speed, minimum: 500.0, maximum: 6500.0,
+           evidence: 'Below 500 rpm the engine is cranking or stalling (no steady breathing); 6500 rpm is the VQ40DE redline (tuning_providers.yaml).'}
+        - {quantity: mass_air_flow, minimum: 0.5, maximum: 300.0,
+           evidence: 'Positive inflow (idle reads ~2-4 g/s); 300 g/s is above what 3.954 L can breathe at sea level and 6500 rpm (~210 g/s at VE 1), so the bound never binds before the ambient invariant does.'}
+        - {quantity: barometric_pressure, minimum: 60.0, maximum: 105.0,
+           evidence: 'Sessions read 63-101 kPa (home ~80 kPa, trips to 63); ideal gas throughout.'}
+        - {quantity: intake_air_temperature, minimum: -30.0, maximum: 70.0,
+           evidence: 'Inflow enthalpy is taken at the IAT reading (upstream of the throttle); ideal-gas air, cp and cv constant within 0.5 % over this range.'}
+      invariants: [manifold_at_or_below_ambient]
+      time_resolution: engine_cycle
+      evidence: >-
+        Mean-value: tau / cycle = V / (VE Vd), about one to four cycles at
+        every rpm, so structure finer than one engine cycle (120/rpm s) is
+        solver output, not a prediction. Naturally aspirated only: a manifold
+        above ambient is refused per sample (the supercharger is a new hardware
+        configuration and a new plant). One manifold for both banks; no
+        runner wave dynamics, no EGR, purge flow inside MAF.
+    numerical:
+      refinement: [1, 2, 4, 8]
+      order_tolerance: 0.15
+      max_relative_error: 0.01
+      equation_residual_relative: 1.0e-9
+      evidence: >-
+        The ladder, the 1 % bound and the order tolerance were declared
+        before the study ran (2026-10-05), when the method was E07.1's
+        starting choice, fixed-step explicit Euler (first order). 1 % of a
+        tip-in's amplitude is a quarter of the fuel plant's 4 % region bound,
+        so solver error cannot be what decides a fuel result. Euler failed 8
+        of 18 corners at 1.28 ms; the study moved the solver to rk4 (see
+        `solver`), whose observed order is checked against 4. The
+        equation-residual check (engine_dynamics.consistency) re-steps every
+        stored state with independent code under the declared equations and
+        holds the reported cylinder flow to the breathing law at the method's
+        quadrature bound; it is not a ledger the integrator closes by
+        construction. The residual bound was added with that check on
+        2026-10-05, after the first study, and is rounding (1e-9).
+    references:
+      - id: map_sensor
+        channel: 'sensor:MANIFOLD_PRESSURE'
+        measures: manifold_pressure
+        kind: instrument
+        status: requires_measurement
+        requires: map_sensor
+        evidence: 'No MAP sensor on this engine; PID 0x0B is unsupported (data/bindings.yaml, retraction 2026-08-08).'
+      - id: bfs_air_charge
+        channel: 'mem:ECM_AIR_CHARGE_SLOT_103A'
+        measures: cylinder_air_flow
+        kind: ecu_computed
+        status: available
+        evidence: >-
+          BFS (0x1208/0xFFFF103A) is K x MAF / rpm through Fuel Comp, the
+          ECU's own manifold-filling filter (0x9B99/0x9BD9) and the rpm
+          ceiling: the ECU's model of the same filling, computed from the same
+          MAF and rpm. Declared so the refusal is on record, never to score.
+      - id: ve_ambient
+        channel: 'derived:VE_AMBIENT_PERCENT'
+        measures: cylinder_air_flow
+        kind: derived
+        status: available
+        evidence: 'MAF over the ambient fill (B04.5): the charge fraction, from the same MAF, baro and IAT.'
+    required_measurements:
+      - id: map_sensor
+        what: >-
+          A manifold absolute pressure sensor teed into a manifold vacuum
+          port, logged at >= 100 Hz with MAF and rpm (a spare input of the USB
+          ADC that already logs the AEM rail gauge, data/usb_adc_sensors.yaml),
+          over idle, cruise, tip-ins and tip-outs and WOT pulls.
+        identifies: [manifold_pressure, volumetric_efficiency, manifold_volume]
+        excites: [throttle]
+        status: missing
+        evidence: >-
+          VE and MAP enter steady breathing only as their product (the charge
+          fraction MAF identifies); the filling time constant needs a
+          pressure step response. 100 Hz resolves a 5-cycle tau at 6500 rpm.
+      - id: manifold_volume_measurement
+        what: 'The plenum, runner and MAF-to-throttle duct volume (water fill or CAD).'
+        identifies: [manifold_volume]
+        status: missing
+        evidence: 'manifold_plant.yaml runs 4.0 L, bracket 2-8 L.'
+
+  - id: throttle_flow
+    stage: 1
+    meaning: 'Air flow past the throttle plate (compressible orifice), for a rollout that computes airflow.'
+    computes: [mass_air_flow]
+    status: unbuilt
+    references:
+      - id: maf
+        channel: 'obd:MAF'
+        measures: mass_air_flow
+        kind: instrument
+        status: available
+        evidence: 'The hot-wire meter upstream of the throttle; its own bias (maf_transfer_bias) is unmeasured.'
+    required_measurements:
+      - id: map_sensor
+        what: 'MAP with MAF and both throttle sensors at rate: the throttle effective area needs the pressure ratio across the plate outside choked flow.'
+        identifies: [throttle_effective_area]
+        excites: [throttle]
+        status: missing
+        evidence: 'Below a 0.528 pressure ratio flow is choked and independent of MAP; above it the area is not identifiable without MAP.'
+
+  - id: actuator_response
+    stage: 1
+    meaning: 'Physical throttle plate (and later cam phaser) response to the ECU command, separate from the command.'
+    computes: [throttle_position_actual]
+    components: [throttle_plate, cam_phaser]
+    status: unbuilt
+    references:
+      - id: throttle_sensor_a
+        channel: 'did:ECM_THROTTLE_POS_SENSOR_1'
+        measures: throttle_position_actual
+        kind: instrument
+        status: available
+        evidence: 'A/D channel 6 (DID 0x120F), polled; the commanded word 0xFFFF2D28 is not in the memory catalog.'
+    required_measurements:
+      - id: throttle_command_vs_actual
+        what: 'The requested throttle word 0xFFFF2D28 and throttle sensor A logged together at >= 50 Hz through tip-ins.'
+        identifies: [throttle_rate_limit, throttle_delay]
+        excites: [throttle]
+        status: missing
+        evidence: 'The contract declares no throttle rate limit because none is measured.'
+      - id: cam_command_vs_actual
+        what: 'Intake valve timing commanded and actual (VTC) logged together; the channels are not catalogued.'
+        identifies: [cam_phase_response]
+        excites: [cam]
+        status: missing
+        evidence: 'No cam quantity exists in the contract yet.'
+
+  - id: torque_production
+    stage: 2
+    meaning: 'Brake torque from the cylinder charge, mixture, spark and speed, less friction and pumping.'
+    computes: [engine_torque]
+    components: [spark_efficiency, lambda_efficiency, friction, pumping]
+    status: unbuilt
+    shared_inputs:
+      - quantity: engine_speed
+        justification: >-
+          The operating-point index: a road-dyno reference is reported against
+          rpm, which is checked against GPS through the measured gearing
+          (H07.1, H07.11); sharing it does not make torque agree with itself.
+    references:
+      - id: h07_wheel_torque
+        channel: 'dyno:WHEEL_TORQUE'
+        measures: engine_torque
+        kind: external
+        derived_from: ['decoded:VEHICLE_SPEED_2D1', 'imu:SF_LON', 'gps:altitude', 'obd:RPM', road_load]
+        status: not_validated
+        requires: h07_na_baseline
+        evidence: >-
+          H07's road-load power: F = m f + (m_eff - m) a + F_rl(v), from
+          speed, specific force and coast-down road load; engine torque only
+          as wheel / stated driveline efficiency. Not validated: H07.12 (NA
+          baseline) and H07.8 (repeatability) are owed, inertia is estimated.
+      - id: fuel_energy_torque
+        channel: 'derived:ESTIMATED_TORQUE_NM'
+        measures: engine_torque
+        kind: derived
+        status: available
+        evidence: >-
+          A fuel-energy estimate (fuel rate x LHV x an assumed efficiency /
+          omega) built from MAF, lambda and rpm: the same signals the torque
+          stage reads. Declared so calibrating against it is refused by name.
+    required_measurements:
+      - id: h07_na_baseline
+        what: 'H07.12: coast-downs both ways and WOT pulls in two gears on one flat road, plus H07.8 repeatability and H07.10 weighing.'
+        identifies: [engine_torque, friction, rotational_inertia]
+        status: missing
+        evidence: 'H07.5/H07.6/H07.7 are desk-done only; no real road-load coefficients, inertia or noise floor exist.'
+      - id: controlled_spark_sweep
+        what: >-
+          Steady pulls or cruise holds at fixed rpm and load with stepped
+          ignition offsets (a calibration edit per run), on the validated
+          torque reference, with the knock flags (RAM 479D b7, 1254, 28AA b2)
+          logged.
+        identifies: [spark_efficiency]
+        excites: [spark]
+        status: missing
+        evidence: 'Natural closed-loop driving never varies spark at fixed conditions.'
+      - id: lambda_sweep
+        what: 'Steady holds at fixed rpm and load with stepped commanded lambda on the torque reference.'
+        identifies: [lambda_efficiency]
+        excites: [lambda]
+        status: missing
+        evidence: 'Enrichment only occurs where load changes too; it does not separate lambda from load.'
+      - id: cam_sweep
+        what: 'Controlled intake cam phase variation at fixed rpm and load on the torque reference.'
+        identifies: [cam_effect_on_breathing_and_torque]
+        excites: [cam]
+        status: missing
+        evidence: 'VTC is scheduled by the ECU with rpm and load; never varied independently.'
+      - id: map_sensor
+        what: 'Manifold pressure for the pumping loss.'
+        identifies: [pumping]
+        status: missing
+        evidence: 'See manifold_breathing.'
+
+  - id: rotational_dynamics
+    stage: 3
+    meaning: 'Crank speed from torque, rotating inertia, driveline and road load: the only stage that predicts acceleration.'
+    computes: [engine_speed]
+    components: [rotational_inertia, driveline, road_load]
+    status: unbuilt
+    references:
+      - id: rpm
+        channel: 'obd:RPM'
+        measures: engine_speed
+        kind: instrument
+        status: available
+        evidence: 'PID 0x0C, agreeing with GPS through the gearing (H07.1).'
+    required_measurements:
+      - id: h07_road_load
+        what: 'H07.5 coast-down coefficients on the truck (both directions).'
+        identifies: [road_load]
+        status: missing
+        evidence: 'Desk-done; real coefficients owed by H07.12.'
+      - id: h07_inertia
+        what: 'H07.6 two-gear pulls over one rpm band.'
+        identifies: [rotational_inertia]
+        status: missing
+        evidence: 'dyno.yaml inertia values are labelled estimates.'
+      - id: vehicle_mass
+        what: 'H07.10: a public-scale weight with driver and fuel recorded.'
+        identifies: [vehicle_mass]
+        status: missing
+        evidence: 'H07.10 is partial.'
+
+  - id: engine_thermal
+    stage: 4
+    meaning: 'Coolant temperature from heat rejection and the thermostat.'
+    computes: [coolant_temperature]
+    status: unbuilt
+    references:
+      - id: coolant
+        channel: 'did:ECM_COOLANT_TEMP'
+        measures: coolant_temperature
+        kind: instrument
+        status: available
+        evidence: 'CAN DID 0x1101, 1 degC steps; sensor lag unmeasured.'
+    required_measurements:
+      - id: warmup_runs
+        what: 'Cold-start warm-ups at stated ambient and load, logged from key-on.'
+        identifies: [heat_rejection, thermostat_opening]
+        status: missing
+        evidence: 'Every plant result so far is warm-only.'

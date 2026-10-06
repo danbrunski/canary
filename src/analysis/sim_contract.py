@@ -36,6 +36,13 @@ what would make a result meaningless rather than documenting it:
   a plant quantity reads no ECU integer except through an actuator. ECU integer
   arithmetic and the plant's continuous equations cannot be mixed silently.
 
+``subsystems`` (E07.5) declare the plant's stages: every plant and actuator
+quantity belongs to exactly one, and a built stage states its bounded
+applicability and, when it integrates a state, its step-size refinement and
+conservation checks. Every stage names the reference that could validate it
+and the measurements still missing; :mod:`src.analysis.engine_dynamics`
+derives each stage's standing (nothing here can state that one is validated).
+
 :class:`Scenario` carries the provenance of one run (ECU program, image and
 active slot; plant version; hardware configuration; parameter evidence) and
 :meth:`Scenario.scenario_hash` is computed from its canonical form, never
@@ -320,6 +327,224 @@ class HardwareConfiguration(_Strict):
     parameters: list[HardwareParameter] = Field(min_length=1)
 
 
+# -- plant subsystems (E07.5) ---------------------------------------------------------
+
+#: What a subsystem result may be checked for at every step. Each is
+#: implemented by the subsystem's module, which refuses a sample that breaks it.
+Invariant = Literal["manifold_at_or_below_ambient"]
+#: The shortest time scale a result resolves. ``engine_cycle``: a mean-value
+#: model averages over a cycle, so structure finer than one cycle (120/rpm s)
+#: is solver output, not a prediction.
+TimeResolution = Literal["engine_cycle", "solver_step"]
+
+
+class ApplicabilityBound(_Strict):
+    """A boundary quantity's range inside which the subsystem's equations are
+    claimed to hold. Outside it a result is refused by name, never clipped."""
+
+    quantity: str
+    minimum: float
+    maximum: float
+    evidence: str = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def _range(self) -> ApplicabilityBound:
+        if not self.minimum < self.maximum:
+            raise ValueError(f"bound on {self.quantity}: {self.minimum}..{self.maximum} is empty")
+        return self
+
+
+class Applicability(_Strict):
+    hardware_configurations: list[str] = Field(min_length=1)
+    bounds: list[ApplicabilityBound] = Field(min_length=1)
+    invariants: list[Invariant] = Field(default_factory=list)
+    time_resolution: TimeResolution
+    evidence: str = Field(min_length=1)
+
+
+class NumericalCheck(_Strict):
+    """How a built subsystem shows its numbers are converged and conserving.
+
+    ``refinement`` divides the contract's solver step (1 = the step itself);
+    the observed order of convergence must be the solver method's theoretical
+    order within ``order_tolerance``, the error at the solver step at most
+    ``max_relative_error``, and every stored state must follow from the one
+    before under the declared equations and method, re-stepped by independent
+    code, within ``equation_residual_relative`` (rounding). The subsystem's
+    module runs the study; nothing
+    here states that it passed."""
+
+    refinement: list[int] = Field(min_length=3)
+    order_tolerance: float = Field(gt=0)
+    max_relative_error: float = Field(gt=0, lt=1)
+    equation_residual_relative: float = Field(gt=0, lt=1)
+    evidence: str = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def _ladder(self) -> NumericalCheck:
+        r = self.refinement
+        if r[0] != 1 or any(b <= a for a, b in zip(r, r[1:], strict=False)):
+            raise ValueError("refinement starts at 1 (the solver step) and strictly increases")
+        return self
+
+
+class RequiredMeasurement(_Strict):
+    """A measurement a subsystem needs before a parameter is identifiable or a
+    result can be validated, named before anything is claimed."""
+
+    id: str = Field(pattern=_ID)
+    what: str = Field(min_length=1)
+    #: Parameters or quantities it would identify or validate.
+    identifies: list[str] = Field(min_length=1)
+    #: Controls it varies on purpose (``spark``, ``cam``, ``lambda``). A claim
+    #: about changing a control needs an available measurement that excites
+    #: it: natural closed-loop logs do not.
+    excites: list[Literal["spark", "cam", "lambda", "throttle"]] = Field(default_factory=list)
+    status: Literal["missing", "partial", "available"]
+    evidence: str = Field(min_length=1)
+
+
+ReferenceKind = Literal["instrument", "derived", "ecu_computed", "external"]
+
+
+class ValidationReference(_Strict):
+    """A channel a subsystem's output could be checked against.
+
+    Its lineage -- what it is computed from -- is not stated alone: the
+    simulator adds the contract's own dependency graph (an ECU word is computed
+    from the sensors it reads) and the derived-channel registry (a ``derived:``
+    channel from its inputs). ``derived_from`` adds what neither knows (an
+    external instrument's inputs)."""
+
+    id: str = Field(pattern=_ID)
+    channel: str = Field(pattern=_CHANNEL)
+    measures: str
+    kind: ReferenceKind
+    derived_from: list[str] = Field(default_factory=list)
+    #: ``available``: logged and usable now; ``requires_measurement``: the
+    #: instrument or capture does not exist yet (``requires`` names it);
+    #: ``not_validated``: it exists but its own validation is owed.
+    status: Literal["available", "requires_measurement", "not_validated"]
+    requires: str | None = None
+    evidence: str = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def _requires(self) -> ValidationReference:
+        if (self.status == "available") == (self.requires is not None):
+            raise ValueError(
+                f"reference {self.id}: an unavailable reference names the measurement it "
+                "requires (and an available one names none)"
+            )
+        for item in self.derived_from:
+            if not (_matches(_CHANNEL, item) or _matches(_ID, item)):
+                raise ValueError(f"reference {self.id}: {item!r} is neither a channel nor an id")
+        return self
+
+
+class SharedInput(_Strict):
+    """An input a reference may share with the subsystem, and why sharing it
+    does not make the comparison circular (rpm as the operating-point index)."""
+
+    quantity: str
+    justification: str = Field(min_length=1)
+
+
+class ValidationRecord(_Strict):
+    """One scoring of a subsystem against a reference, as the scoring wrote it."""
+
+    reference: str
+    recordings: list[str] = Field(min_length=1)
+    verdict: Literal["pass", "fail"]
+    scored_on: str = Field(pattern=r"^\d{4}-\d{2}-\d{2}$")
+    evidence: str = Field(min_length=1)
+
+
+class InternalModel(_Strict):
+    """A quantity another stage owns that this stage's implementation computes
+    for itself instead of reading from the owner. Declared, never silent: the
+    two can disagree, so where they differ and who reconciles them is stated.
+    The implementation module must list the same quantities in its
+    ``COMPUTES_INTERNALLY`` (``engine_dynamics.check_internal_models``)."""
+
+    quantity: str
+    #: The subsystem that owns ``quantity`` in the contract.
+    owner: str
+    modes: list[str] = Field(min_length=1)
+    model: str = Field(min_length=1)
+    #: Where this model and the owner's give different answers.
+    differs: str = Field(min_length=1)
+    #: What reconciles them (a plant_version, a task item).
+    owed_by: str = Field(min_length=1)
+
+
+class SubsystemImplementation(_Strict):
+    module: str = Field(pattern=r"^src\.analysis\.[a-z_]+$")
+    profile_file: str = Field(pattern=r"^[a-z_]+\.yaml$")
+    plant_version: str = Field(min_length=1)
+
+
+class Subsystem(_Strict):
+    """One stage of the plant: what it computes, where its equations hold, how
+    its numerics are checked, and what independent measurement could validate
+    it. Every plant and actuator quantity belongs to exactly one subsystem, so a
+    quantity cannot be computed by an undeclared stage."""
+
+    id: str = Field(pattern=_ID)
+    stage: int = Field(ge=0)
+    meaning: str = Field(min_length=1)
+    computes: list[str] = Field(min_length=1)
+    #: Named parts a single quantity hides (spark efficiency, friction).
+    components: list[str] = Field(default_factory=list)
+    status: Literal["unbuilt", "built"]
+    implementation: SubsystemImplementation | None = None
+    applicability: Applicability | None = None
+    numerical: NumericalCheck | None = None
+    references: list[ValidationReference] = Field(default_factory=list)
+    shared_inputs: list[SharedInput] = Field(default_factory=list)
+    required_measurements: list[RequiredMeasurement] = Field(default_factory=list)
+    validations: list[ValidationRecord] = Field(default_factory=list)
+    internal_models: list[InternalModel] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def _declared(self) -> Subsystem:
+        built = self.status == "built"
+        for name, value in (
+            ("implementation", self.implementation),
+            ("applicability", self.applicability),
+        ):
+            if built != (value is not None):
+                raise ValueError(
+                    f"subsystem {self.id}: {name} is required for, and only for, a built "
+                    "subsystem (bounded applicability comes with code)"
+                )
+        if not built and self.numerical is not None:
+            raise ValueError(f"subsystem {self.id}: an unbuilt subsystem has no numerics")
+        if not built and self.validations:
+            raise ValueError(f"subsystem {self.id}: an unbuilt subsystem has nothing to score")
+        _unique(f"{self.id} reference", [r.id for r in self.references])
+        _unique(f"{self.id} measurement", [m.id for m in self.required_measurements])
+        measurements = {m.id for m in self.required_measurements}
+        for ref in self.references:
+            if ref.requires is not None and ref.requires not in measurements:
+                raise ValueError(
+                    f"subsystem {self.id}: reference {ref.id} requires {ref.requires!r}, "
+                    "which is not one of its required_measurements"
+                )
+        refs = {r.id for r in self.references}
+        for record in self.validations:
+            if record.reference not in refs:
+                raise ValueError(
+                    f"subsystem {self.id}: a validation scored against undeclared "
+                    f"{record.reference!r}"
+                )
+        if not any(r.status == "available" for r in self.references) and not measurements:
+            raise ValueError(
+                f"subsystem {self.id}: no available reference and no required measurement; name "
+                "what would validate it before anything is claimed"
+            )
+        return self
+
+
 # -- modes ----------------------------------------------------------------------------
 
 
@@ -405,6 +630,9 @@ class SimContract(_Strict):
     hardware_configurations: list[HardwareConfiguration] = Field(min_length=1)
     quantities: list[Quantity] = Field(min_length=1)
     modes: list[Mode] = Field(min_length=1)
+    #: E07.5: the plant's stages. When declared, every plant and actuator
+    #: quantity belongs to exactly one.
+    subsystems: list[Subsystem] = Field(default_factory=list)
 
     @model_validator(mode="after")
     def _consistent(self) -> SimContract:
@@ -434,7 +662,21 @@ class SimContract(_Strict):
             )
         for mode in self.modes:
             _check_mode(mode, by_id, events)
+        _check_subsystems(self, by_id)
         return self
+
+    def subsystem(self, subsystem_id: str) -> Subsystem:
+        found = next((s for s in self.subsystems if s.id == subsystem_id), None)
+        if found is None:
+            raise SimulationRefusalError(
+                "subsystem_undeclared", f"the contract declares no subsystem {subsystem_id!r}"
+            )
+        return found
+
+    def subsystem_of(self, quantity_id: str) -> Subsystem | None:
+        """The subsystem that computes ``quantity_id`` (``None`` for an ECU,
+        sensor, environment or driver quantity)."""
+        return next((s for s in self.subsystems if quantity_id in s.computes), None)
 
     def quantity(self, quantity_id: str) -> Quantity:
         found = next((q for q in self.quantities if q.id == quantity_id), None)
@@ -557,6 +799,62 @@ def _check_mode(mode: Mode, by_id: dict[str, Quantity], events: set[str]) -> Non
     _check_cycles(mode, by_id, computed)
     _check_leaks(mode, by_id, computed)
     _check_mode_kind(mode, by_id, computed)
+
+
+def _check_subsystems(contract: SimContract, by_id: dict[str, Quantity]) -> None:
+    subsystems = contract.subsystems
+    if not subsystems:
+        return
+    _unique("subsystem", [s.id for s in subsystems])
+    hardware = {h.id for h in contract.hardware_configurations}
+    owner: dict[str, str] = {}
+    for sub in subsystems:
+        for q_id in sub.computes:
+            q = by_id.get(q_id)
+            if q is None or q.kind not in ("plant", "actuator"):
+                raise ValueError(
+                    f"subsystem {sub.id}: computes {q_id!r}, which is not a declared plant or "
+                    "actuator quantity (ECU arithmetic is the twin's, not a plant stage's)"
+                )
+            if q_id in owner:
+                raise ValueError(f"{q_id} is computed by both {owner[q_id]} and {sub.id}")
+            owner[q_id] = sub.id
+        stateful = any(by_id[q].is_state for q in sub.computes if q in by_id)
+        if sub.status == "built" and stateful != (sub.numerical is not None):
+            raise ValueError(
+                f"subsystem {sub.id}: a built subsystem that integrates a state declares its "
+                "step-size refinement and conservation checks (numerical), and only such a one"
+            )
+        named = [r.measures for r in sub.references] + [s.quantity for s in sub.shared_inputs]
+        if sub.applicability is not None:
+            named += [b.quantity for b in sub.applicability.bounds]
+            stray_hw = sorted(set(sub.applicability.hardware_configurations) - hardware)
+            if stray_hw:
+                raise ValueError(f"subsystem {sub.id}: undeclared hardware {stray_hw}")
+        stray = sorted({n for n in named if n not in by_id})
+        if stray:
+            raise ValueError(f"subsystem {sub.id}: names undeclared quantities {stray}")
+    orphans = sorted(
+        q.id for q in contract.quantities if q.kind in ("plant", "actuator") and q.id not in owner
+    )
+    if orphans:
+        raise ValueError(
+            f"plant/actuator quantities {orphans} belong to no subsystem: a quantity cannot be "
+            "computed by an undeclared stage"
+        )
+    for sub in subsystems:
+        modes = {m.id for m in contract.modes}
+        for im in sub.internal_models:
+            owner_id = next((s.id for s in subsystems if im.quantity in s.computes), None)
+            if owner_id is None or owner_id == sub.id or owner_id != im.owner:
+                raise ValueError(
+                    f"subsystem {sub.id}: internal model of {im.quantity!r} names owner "
+                    f"{im.owner!r}, but the contract's owner is {owner_id!r} (an internal model "
+                    "is of another stage's quantity)"
+                )
+            stray_modes = sorted(set(im.modes) - modes)
+            if stray_modes:
+                raise ValueError(f"subsystem {sub.id}: internal model in undeclared {stray_modes}")
 
 
 def _check_cycles(mode: Mode, by_id: dict[str, Quantity], computed: set[str]) -> None:
@@ -894,6 +1192,8 @@ __all__ = [
     "SCENARIO_ONLY_MODES",
     "SimulationRefusalError",
     "SuppliedValue",
+    "Subsystem",
+    "ValidationReference",
     "check_against_application_model",
     "check_scenario",
     "leak_channels",
