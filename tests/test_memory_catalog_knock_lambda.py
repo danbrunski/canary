@@ -157,9 +157,41 @@ def test_selecting_the_old_members_still_sends_the_old_requests() -> None:
     reads = {r.name: r for r in plan_memory_reads([BY_NAME[n] for n in selected])}
     assert (reads["fuel_target"].address, reads["fuel_target"].length) == (0xFFFF26AE, 18)
 
-    flags = [BY_NAME["ECM_PEDAL_ENRICH_FLAGS"], BY_NAME["ECM_TIMING_TRIM_SELECT_FLAGS"]]
+    flags = [BY_NAME["ECM_PEDAL_ENRICH_FLAGS"], BY_NAME["ECM_KNOCK_TRIM_DIFF_FLAGS"]]
     (read,) = plan_memory_reads(flags)
     assert (read.name, read.address, read.length) == ("flags_2841", 0xFFFF2841, 2)
+
+
+def test_the_2842_byte_is_named_for_the_knock_gate_and_the_old_name_is_refused() -> None:
+    """0xFFFF2842 does not select the timing-trim table (0xFFFF283F bit 6
+    does); its bit 2 is the knock task's lagged copy of HI DET, gating the
+    trim-difference branch. Renamed 2026-10-05 with no alias (2026-09-18
+    policy): the old name is gone from the catalog, and a saved profile still
+    naming it is refused instead of running with the byte silently unpolled.
+    The Pi's ``ram-study`` override is migrated by
+    tools/channel_renames/2026-10-05-knock-trim-diff-flags.yaml."""
+    from src.collection.capture_profiles import CaptureProfile
+    from src.collection.obd_scheduler import profile_memory_union
+    from src.decode.dids import select_memory_channels
+
+    old = "ECM_TIMING_TRIM_SELECT_FLAGS"
+    channel = BY_NAME["ECM_KNOCK_TRIM_DIFF_FLAGS"]
+    assert (channel.address, channel.byte_length, channel.window) == (0xFFFF2842, 1, "flags_2841")
+    assert channel.verified_tune_revision == "ZS44A-20260920"
+    assert old not in BY_NAME
+    assert all(old != e.name and old not in e.aliases for e in CATALOG.dids)
+    # The wrong reading stays on record as evidence against, not as the role.
+    assert any(old in item.finding for item in channel.evidence_against)
+
+    with pytest.raises(ValueError, match=old):
+        select_memory_channels([old])
+    ram_study = CaptureProfile(
+        name="ram-study",
+        memory=("ECM_PEDAL_ENRICH_FLAGS", old),
+        storage_prefix="_capture-ram-study",
+    )
+    with pytest.raises(ValueError, match=rf"'ram-study'.*{old}"):
+        profile_memory_union([ram_study])
 
 
 def test_new_channels_are_code_verified_and_not_yet_in_any_profile() -> None:

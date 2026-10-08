@@ -1,4 +1,5 @@
-"""tools/migrate_channel_names.py — one-time DID rename migration (2026-09-18)."""
+"""tools/migrate_channel_names.py — one-time DID (2026-09-18) and memory-channel
+(2026-10-05) rename migration."""
 
 from __future__ import annotations
 
@@ -9,11 +10,13 @@ from pathlib import Path
 import pyarrow as pa
 import pyarrow.parquet as pq
 import pytest
+import yaml
 
 from src.storage.parquet_writer import TELEMETRY_SCHEMA
 from tools import migrate_channel_names as tool
 
-DIDS = Path("data/dids.yaml")
+REPO = Path(__file__).resolve().parents[1]
+DIDS = REPO / "data" / "dids.yaml"
 #: The real /proc scan, captured before the autouse fixture stubs it out.
 _RUNNING_DAEMONS = tool.running_daemons
 
@@ -289,3 +292,241 @@ def test_torch_checkpoint_manifest_is_rewritten_and_weights_kept(tmp_path: Path)
     loaded = torch.load(artifact, map_location="cpu", weights_only=False)
     assert loaded["manifest"]["thresholds"]["channel_errors"] == {"did:ECM_AIR_CHARGE": 0.3}
     assert torch.equal(loaded["state_dict"]["encoder.weight"], weights["encoder.weight"])
+
+
+# --- memory channels (2026-10-05: 0xFFFF2842) ----------------------------------
+
+KNOCK_MAP = REPO / "tools/channel_renames/2026-10-05-knock-trim-diff-flags.yaml"
+OLD_MEM = "ECM_TIMING_TRIM_SELECT_FLAGS"
+NEW_MEM = "ECM_KNOCK_TRIM_DIFF_FLAGS"
+
+#: (source, channel before, channel after). Memory names are stored as the
+#: reading, its sentinel state, and on K-line with and without a module.
+_MEM_ROWS = [
+    ("obd", f"mem:{OLD_MEM}", f"mem:{NEW_MEM}"),
+    ("obd", f"mem:{OLD_MEM}_SENTINEL", f"mem:{NEW_MEM}_SENTINEL"),
+    ("obd", "mem:ECM_PEDAL_ENRICH_FLAGS", "mem:ECM_PEDAL_ENRICH_FLAGS"),
+    ("obd", "mem:flags_2841", "mem:flags_2841"),  # a window request, not a channel
+    ("obd", f"mem:{OLD_MEM}X", f"mem:{OLD_MEM}X"),  # whole names only
+    ("obd", f"mem:X{OLD_MEM}", f"mem:X{OLD_MEM}"),
+    ("obd", f"mem:{OLD_MEM}_SENTINELS", f"mem:{OLD_MEM}_SENTINELS"),
+    ("kline", f"ECM:MEM_{OLD_MEM}", f"ECM:MEM_{NEW_MEM}"),
+    ("kline", f"MEM_{OLD_MEM}", f"MEM_{NEW_MEM}"),  # pre-K01.1, no module
+    ("did", f"did:{OLD_MEM}", f"did:{OLD_MEM}"),  # a memory name is never a DID column
+]
+
+
+def _write_chunk(path: Path, channels: list[tuple[str, str]]) -> Path:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    t0 = datetime(2026, 10, 4, 20, 45, 57, tzinfo=UTC)
+    table = pa.Table.from_pylist(
+        [
+            {
+                "timestamp": t0.replace(microsecond=i),
+                "source": source,
+                "channel": channel,
+                "value_number": 4.0,
+                "value_text": None,
+                "value_bool": None,
+                "unit": "counts",
+                "payload": b"\x00\x04",
+                "metadata_json": None,
+            }
+            for i, (source, channel) in enumerate(channels)
+        ],
+        schema=TELEMETRY_SCHEMA,
+    )
+    pq.write_table(table, path, compression="snappy")
+    return path
+
+
+def _knock(*extra: str) -> list[str]:
+    return ["--map", str(KNOCK_MAP), *extra]
+
+
+def test_the_knock_trim_diff_map_agrees_with_the_memory_catalog() -> None:
+    """The target is a memory channel and the old name resolves nowhere: no alias."""
+    rename_map = tool.load_rename_map(KNOCK_MAP)
+    assert rename_map.memory == {OLD_MEM: NEW_MEM}
+    assert rename_map.channels == {} and rename_map.identifiers == {}
+    assert tool.check_against_catalog(rename_map, DIDS) == []
+
+
+def test_memory_readings_in_parquet_are_renamed_exactly(tmp_path: Path) -> None:
+    sessions = tmp_path / "sessions"
+    chunk = _write_chunk(
+        sessions / "_capture-ram-study-2026-10-04T204557" / "telemetry-00000.parquet",
+        [(source, before) for source, before, _ in _MEM_ROWS],
+    )
+    before = pq.read_table(chunk)
+
+    assert tool.main(_knock("--sessions-root", str(sessions))) == tool.EXIT_OK
+    assert pq.read_table(chunk).equals(before)  # dry run
+
+    assert tool.main(_knock("--sessions-root", str(sessions), "--apply", "--daemon-stopped")) == 0
+    after = pq.read_table(chunk)
+    assert after.column("channel").to_pylist() == [expected for *_, expected in _MEM_ROWS]
+    assert after.schema == before.schema
+    for name in before.schema.names:
+        if name != "channel":
+            assert after.column(name).equals(before.column(name)), name
+
+
+def test_a_saved_profile_memory_list_is_rewritten_and_then_accepted(tmp_path: Path) -> None:
+    """The Pi's ``ram-study`` override lists the old name; once migrated, the
+    daemon's resolver accepts it (before, it refuses the whole profile)."""
+    from src.collection.capture_profiles import CaptureProfileOverrides
+    from src.collection.obd_scheduler import profile_memory_union
+
+    overrides = tmp_path / "capture_profile_overrides.yaml"
+    overrides.write_text(
+        "schema_version: 1\n"
+        "profiles:\n"
+        "- name: ram-study\n"
+        f"  # 2842 ({OLD_MEM}); not {OLD_MEM}X, X{OLD_MEM} or {OLD_MEM}_SENTINELS\n"
+        "  storage_prefix: _capture-ram-study\n"
+        "  corpus_eligible: false\n"
+        "  memory:\n"
+        "  - ECM_PEDAL_ENRICH_FLAGS\n"
+        f"  - {OLD_MEM}\n"
+        "  - ECM_TARGET_EQUIV_RATIO\n"
+        "deleted: []\n"
+    )
+    stale = CaptureProfileOverrides.model_validate(yaml.safe_load(overrides.read_text()))
+    with pytest.raises(ValueError, match=OLD_MEM):
+        profile_memory_union(stale.profiles)
+
+    rc = tool.main(_knock("--file", str(overrides), "--apply", "--daemon-stopped"))
+    assert rc == tool.EXIT_OK
+
+    text = overrides.read_text()
+    assert f"  - {NEW_MEM}\n" in text
+    assert f"  # 2842 ({NEW_MEM}); not {OLD_MEM}X, X{OLD_MEM} or {OLD_MEM}_SENTINELS\n" in text
+    migrated = CaptureProfileOverrides.model_validate(yaml.safe_load(text))
+    assert migrated.profiles[0].memory == (
+        "ECM_PEDAL_ENRICH_FLAGS",
+        NEW_MEM,
+        "ECM_TARGET_EQUIV_RATIO",
+    )
+    assert [c.name for c in profile_memory_union(migrated.profiles)] == [
+        "ECM_TARGET_EQUIV_RATIO",
+        "ECM_PEDAL_ENRICH_FLAGS",
+        NEW_MEM,
+    ]
+
+
+def test_yaml_specs_naming_a_memory_reading_or_its_sentinel_are_rewritten(
+    tmp_path: Path,
+) -> None:
+    providers = tmp_path / "tuning_providers.yaml"
+    providers.write_text(
+        f"spec: 'mem:{OLD_MEM}'\n"
+        f"sentinel_spec: 'mem:{OLD_MEM}_SENTINEL'\n"
+        f"feature: obd:mem:{OLD_MEM}__mean\n"
+        f"other: mem:{OLD_MEM}_B\n"
+    )
+    assert tool.main(_knock("--file", str(providers), "--apply", "--daemon-stopped")) == 0
+    assert providers.read_text() == (
+        f"spec: 'mem:{NEW_MEM}'\n"
+        f"sentinel_spec: 'mem:{NEW_MEM}_SENTINEL'\n"
+        f"feature: obd:mem:{NEW_MEM}__mean\n"
+        f"other: mem:{OLD_MEM}_B\n"
+    )
+
+
+def test_json_sidecars_rename_exact_memory_names_only(tmp_path: Path) -> None:
+    sessions = tmp_path / "sessions"
+    session = sessions / "_capture-ram-study-2026-10-04T204557"
+    session.mkdir(parents=True)
+    (session / "capture_profile.json").write_text(
+        json.dumps(
+            {
+                "profile": "ram-study",
+                "profile_snapshot": {
+                    "memory": ["ECM_PEDAL_ENRICH_FLAGS", OLD_MEM],
+                    "kline": [OLD_MEM],
+                    "description": f"reads {OLD_MEM}",  # prose: untouched
+                },
+            },
+            indent=2,
+        )
+        + "\n"
+    )
+    (session / "capture_quality.json").write_text(
+        json.dumps(
+            {
+                "channels": [
+                    {"channel": f"mem:{OLD_MEM}", "profile_channel": OLD_MEM},
+                    {"channel": f"kline:{OLD_MEM}"},
+                    {"channel": f"mem:{OLD_MEM}X"},
+                ],
+                "achieved_hz": {f"mem:{OLD_MEM}": 0.12, f"mem:X{OLD_MEM}": 1.0},
+            },
+            indent=2,
+        )
+        + "\n"
+    )
+    (session / "digest.json").write_text(
+        json.dumps({"columns": [f"obd:mem:{OLD_MEM}", f"obd:mem:{OLD_MEM}__std"]})
+    )
+
+    assert tool.main(_knock("--sessions-root", str(sessions), "--apply", "--daemon-stopped")) == 0
+
+    profile = json.loads((session / "capture_profile.json").read_text())
+    snapshot = profile["profile_snapshot"]
+    assert snapshot["memory"] == ["ECM_PEDAL_ENRICH_FLAGS", NEW_MEM]
+    assert snapshot["kline"] == [NEW_MEM]
+    assert snapshot["description"] == f"reads {OLD_MEM}"
+    quality = json.loads((session / "capture_quality.json").read_text())
+    assert quality["channels"] == [
+        {"channel": f"mem:{NEW_MEM}", "profile_channel": NEW_MEM},
+        {"channel": f"kline:{NEW_MEM}"},
+        {"channel": f"mem:{OLD_MEM}X"},
+    ]
+    assert quality["achieved_hz"] == {f"mem:{NEW_MEM}": 0.12, f"mem:X{OLD_MEM}": 1.0}
+    digest = json.loads((session / "digest.json").read_text())
+    assert digest["columns"] == [f"obd:mem:{NEW_MEM}", f"obd:mem:{NEW_MEM}__std"]
+
+    once = _snapshot(sessions)
+    assert tool.main(_knock("--sessions-root", str(sessions), "--apply", "--daemon-stopped")) == 0
+    assert _snapshot(sessions) == once  # idempotent
+
+
+@pytest.mark.parametrize(
+    ("entry", "problem"),
+    [
+        # the source is still a memory channel: the rename would strand it
+        ("ECM_PEDAL_ENRICH_FLAGS: ECM_KNOCK_TRIM_DIFF_FLAGS", "memory source"),
+        # ... or still a DID: memory and DID names share one namespace
+        ("ECM_AIR_CHARGE: ECM_KNOCK_TRIM_DIFF_FLAGS", "memory source"),
+        # the target is not catalogued at all
+        (f"{OLD_MEM}: ECM_NOT_A_MEMORY_CHANNEL", "memory target"),
+        # the target is a DID, not a memory channel
+        (f"{OLD_MEM}: ECM_AIR_CHARGE", "memory target"),
+    ],
+)
+def test_a_memory_map_disagreeing_with_the_catalog_is_refused(
+    tmp_path: Path, entry: str, problem: str, capsys: pytest.CaptureFixture[str]
+) -> None:
+    bad = tmp_path / "map.yaml"
+    bad.write_text(f"memory_channels:\n  {entry}\n")
+    target = tmp_path / "profiles.yaml"
+    target.write_text(f"memory:\n- {OLD_MEM}\n- ECM_PEDAL_ENRICH_FLAGS\n")
+    before = target.read_bytes()
+
+    rc = tool.main(["--map", str(bad), "--file", str(target), "--apply", "--daemon-stopped"])
+
+    assert rc == tool.EXIT_REFUSED
+    assert target.read_bytes() == before
+    assert problem in capsys.readouterr().err
+
+
+def test_a_name_in_two_sections_or_a_chain_is_refused(tmp_path: Path) -> None:
+    both = tmp_path / "both.yaml"
+    both.write_text(f"channels:\n  {OLD_MEM}: ECM_AIR_CHARGE\nmemory_channels:\n  {OLD_MEM}: B\n")
+    with pytest.raises(tool.MapError, match="more than one section"):
+        tool.load_rename_map(both)
+    chain = tmp_path / "chain.yaml"
+    chain.write_text(f"channels:\n  A: {OLD_MEM}\nmemory_channels:\n  {OLD_MEM}: B\n")
+    with pytest.raises(tool.MapError, match="both renamed and rename targets"):
+        tool.load_rename_map(chain)

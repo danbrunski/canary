@@ -18,10 +18,20 @@ from src.analysis.channels import parse_spec, read_channels
 from src.analysis.tuning_frame import Provider, build_tuning_frame
 from src.collection.can_obd_client import ObdResponse
 from src.collection.can_obd_collector import _decode_response
+from src.collection.capture_profiles import (
+    CaptureProfile,
+    CaptureProfileSources,
+    CaptureProfileStore,
+)
 from src.collection.isotp import build_memory_read_payload
-from src.collection.obd_scheduler import CanObdSpec, _PollRequest, build_poll_requests
+from src.collection.obd_scheduler import (
+    CanObdSpec,
+    _PollRequest,
+    build_poll_requests,
+    profile_memory_union,
+)
 from src.collection.request_eligibility import SESSION_PHASES, evaluate
-from src.config import CanBusConfig
+from src.config import CanaryConfig, CanBusConfig, CollectionConfig
 from src.decode.dids import (
     DidMap,
     MemoryChannel,
@@ -29,6 +39,7 @@ from src.decode.dids import (
     decode_memory_raw,
     is_memory_sentinel,
     plan_memory_reads,
+    select_memory_channels,
 )
 
 _TARGET = MemoryChannel(
@@ -481,3 +492,70 @@ def test_a_capture_payload_reports_the_running_revision_without_gating() -> None
     finally:
         tuning_profile.set_active(False)
         tuning_profile.configure_running_tune_revision(None)
+
+
+# --------------------------------------------------------------------------
+# Profile selection: a memory name the catalog does not hold is refused.
+# --------------------------------------------------------------------------
+
+_REPO = Path(__file__).resolve().parents[1]
+
+
+def _profile(*memory: str, name: str = "research") -> CaptureProfile:
+    return CaptureProfile(name=name, memory=memory, storage_prefix=f"_capture-{name}")
+
+
+def _collection() -> CollectionConfig:
+    return CanaryConfig.from_yaml(_REPO / "canary.example.yaml").collection
+
+
+def _store(tmp_path: Path) -> CaptureProfileStore:
+    return CaptureProfileStore(
+        CaptureProfileSources(tmp_path / "profiles.yaml", tmp_path / "overrides.yaml"),
+        _collection(),
+        tmp_path / "bm.yaml",
+    )
+
+
+def test_selection_is_in_catalog_order_and_names_every_unknown() -> None:
+    chosen = select_memory_channels(
+        ["ECM_ENGINE_PERIOD", " ECM_TARGET_EQUIV_RATIO", "ECM_ENGINE_PERIOD"]
+    )
+    assert [c.name for c in chosen] == ["ECM_TARGET_EQUIV_RATIO", "ECM_ENGINE_PERIOD"]
+    with pytest.raises(ValueError, match="ECM_NOT_A_CHANNEL, ECM_NOR_THIS") as caught:
+        select_memory_channels(["ECM_TARGET_EQUIV_RATIO", "ECM_NOT_A_CHANNEL", "ECM_NOR_THIS"])
+    assert "migrate_channel_names" in str(caught.value)
+
+
+def test_a_saved_profile_with_an_unknown_memory_name_refuses_the_plan() -> None:
+    """The plan the daemon builds at start from every saved profile used to
+    filter the catalog by the selection, so a stale name was dropped without a
+    word and the capture ran with that channel never polled."""
+    can = CanBusConfig(interface="virtual", channel="test", bitrate=500000)
+    good = _profile("ECM_TARGET_EQUIV_RATIO", name="good")
+    spec = CanObdSpec.from_config(_collection(), can, catalog=(good,))
+    assert [c.name for c in spec.memory] == ["ECM_TARGET_EQUIV_RATIO"]
+
+    stale = _profile("ECM_ENGINE_PERIOD", "ECM_NOT_A_CHANNEL", name="stale")
+    with pytest.raises(ValueError, match=r"capture profile 'stale': .*ECM_NOT_A_CHANNEL"):
+        CanObdSpec.from_config(_collection(), can, catalog=(good, stale))
+    with pytest.raises(ValueError, match="ECM_NOT_A_CHANNEL"):
+        profile_memory_union([stale])
+
+
+def test_the_preview_and_capture_start_refuse_an_unknown_memory_name(tmp_path: Path) -> None:
+    """Capture start resolves the plan through the same preview."""
+    with pytest.raises(ValueError, match="ECM_NOT_A_CHANNEL"):
+        _store(tmp_path).resolved_plan(_profile("ECM_NOT_A_CHANNEL"))
+
+
+def test_saving_a_profile_with_an_unknown_memory_name_is_refused(tmp_path: Path) -> None:
+    """Saved, it would keep the next daemon start from building its plan."""
+    store = _store(tmp_path)
+    with pytest.raises(ValueError, match=r"memory: .*ECM_NOT_A_CHANNEL"):
+        store.save(_profile("ECM_TARGET_EQUIV_RATIO", "ECM_NOT_A_CHANNEL"))
+    assert not (tmp_path / "overrides.yaml").exists()
+
+    store.save(_profile("ECM_TARGET_EQUIV_RATIO"))
+    saved = store.load().by_name("research")
+    assert saved is not None and saved.memory == ("ECM_TARGET_EQUIV_RATIO",)

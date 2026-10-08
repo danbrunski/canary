@@ -2422,7 +2422,7 @@ memory:
       all 191 reads of the 2026-10-04 drive (_capture-ram-study-2026-10-04T204557:
       the byte read only 0 and 1, about one read per 8 s), so that drive ran
       the 6,350 / 6,150 limiter whenever it was read.
-  - name: ECM_TIMING_TRIM_SELECT_FLAGS
+  - name: ECM_KNOCK_TRIM_DIFF_FLAGS
     address: 0xFFFF2842
     length: 1
     byte_length: 1
@@ -2433,41 +2433,57 @@ memory:
       - session: firmware-ZS44A-20260920
         method: disassembly
         finding: >
-          Bit 2 gates the knock controller's trim-difference branch (task 67;
-          0x04A512 reads this byte, `tst #4`, and a set bit branches past
-          it to 0x04A8B6). The branch runs only with this bit CLEAR and
-          0xFFFF2840 bit 6 SET (`tst #0x40` at 0x04A51E, `bf` into it), and
-          then sets the knock retard 0xFFFF1254 to 0xFFFF13FE + ((trim A -
-          trim B) << 8). The same task then copies 0xFFFF2840 bit 6 into this
-          bit (0x04A5D2-0x04A5FE), so the branch fires on the one cycle
-          2840 bit 6 rises. 0xFFFF2840 is the cycle snapshot of 0xFFFF283F
-          (written at 0x021220 from a 283F read), i.e. the HI DET latch one
-          cycle late. Checked against the listing, 2026-10-05.
+          Bit 2 is the knock task's copy of 0xFFFF2840 bit 6 (task 67,
+          0x04A5D2-0x04A5FE: read 2840, `tst #0x40`; set -> `or #4` via
+          0x04A90E, clear -> `and #0xFB`; stored back at 0x04A5FE).
+          0xFFFF2840 is the cycle snapshot of 0xFFFF283F (stored at 0x021220
+          from a 283F read), so bit 2 mirrors the HI DET latch
+          (mem:ECM_HIGH_DET_FLAGS bit 6), lagged. Checked against the
+          listing, 2026-10-05.
+      - session: firmware-ZS44A-20260920
+        method: disassembly
+        finding: >
+          Bit 2 gates the knock controller's trim-difference branch: 0x04A512
+          reads this byte (`mov.b @(0x12,gbr)`), `tst #4`, and a set bit
+          branches past it to 0x04A8B6. The branch runs only with this bit
+          CLEAR and 0xFFFF2840 bit 6 SET (`tst #0x40` at 0x04A51E, `bf` into
+          it), and then sets the knock retard 0xFFFF1254 to 0xFFFF13FE +
+          ((trim A - trim B) << 8). Because the same task then copies 2840
+          bit 6 into bit 2, the branch fires on the one cycle 2840 bit 6
+          rises. Checked against the listing, 2026-10-05.
       - session: _capture-ram-study-2026-10-04T204557
         method: live_drive_check
         finding: >
-          0x04 (bit 2 set) on every read of the 2026-10-04 drive, so the
-          trim-difference branch was bypassed all drive.
+          0x04 (bit 2 set) on all 191 reads of the 2026-10-04 drive, so the
+          trim-difference branch was bypassed all drive. 0xFFFF283F was not
+          read on that drive (not yet in the window or the profile).
     evidence_against:
       - session: firmware-ZS44A-20260920
         method: disassembly
         finding: >
-          Recorded until 2026-10-05 as "a bit here gates which of the two
-          16x16 timing-trim tables (slot +0x020 or +0x120) is read". Wrong:
-          the trim lookup FUN_0004e6d8 selects the table on 0xFFFF283F bit 6
-          (mem:ECM_HIGH_DET_FLAGS) and never reads this byte for it.
+          Catalogued until 2026-10-05 as ECM_TIMING_TRIM_SELECT_FLAGS, "a bit
+          here gates which of the two 16x16 timing-trim tables (slot +0x020
+          or +0x120) is read". Wrong: the trim lookup FUN_0004e6d8 selects
+          the table on 0xFFFF283F bit 6 (mem:ECM_HIGH_DET_FLAGS, `tst #0x40`
+          at 0x04E6FE) and never reads this byte for it.
     notes: |
-      The name is historical and now wrong: this byte does not select the
-      timing-trim table, 0xFFFF283F bit 6 does (mem:ECM_HIGH_DET_FLAGS).
-      Renaming it is a channel rename (tools/channel_renames), left to its own
-      change so saved profiles migrate with it.
+      Renamed 2026-10-05 from ECM_TIMING_TRIM_SELECT_FLAGS, with no alias
+      (2026-09-18 policy). Stored artifacts and saved profiles are migrated
+      by tools/channel_renames/2026-10-05-knock-trim-diff-flags.yaml, and a
+      profile still naming the old channel is refused. The name says what
+      bit 2 does: it is the knock controller's trim-difference gate, a lagged
+      copy of HI DET. It does not select the timing-trim table; 0xFFFF283F
+      bit 6 does (mem:ECM_HIGH_DET_FLAGS).
 
-      Inference, not yet checked: bit 2 is the knock task's lagged copy of
-      the HI DET latch, so 0x04 on every 2026-10-04 read suggests HI DET was
-      set, and timing trim B (the High Det table) selected, for the whole
-      drive. Other routines also write this byte, and nobody has shown they
-      leave bit 2 alone, so read 0xFFFF283F directly (mem:ECM_HIGH_DET_FLAGS)
-      before relying on it.
+      Inference, not confirmed: 0x04 on every 2026-10-04 read suggests HI DET
+      stayed latched, and timing trim B (the High Det table) selected, for
+      the whole drive. Other routines also write this byte: 0x045320 and
+      0x045324 (bit 7), 0x063652 and 0x0637B0 (bit 4), 0x064242 (bit 3). Each
+      is a read-modify-write or a single-bit `or.b`/`and.b` of another bit,
+      so none of the writes the listing annotates touches bit 2 (checked
+      2026-10-05). A write it does not annotate (a computed pointer, a RAM
+      clear at init) is not ruled out, and 0xFFFF283F was never read beside
+      it, so read mem:ECM_HIGH_DET_FLAGS directly before relying on it.
   # The discrete input the UpRev map switch watches (bits 1 and 3).
   - name: ECM_MAP_SELECT_INPUT
     address: 0xFFFF2EE0

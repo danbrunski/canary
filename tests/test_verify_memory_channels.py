@@ -272,7 +272,7 @@ def test_restamping_the_real_catalog_keeps_every_comment_and_still_loads(
         "ECM_ACTIVE_MAP",
         "ECM_FUEL_COMP_X_INPUT",
         "ECM_PEDAL_ENRICH_FLAGS",
-        "ECM_TIMING_TRIM_SELECT_FLAGS",
+        "ECM_KNOCK_TRIM_DIFF_FLAGS",
         "ECM_MAP_SELECT_INPUT",
         "ECM_KNOCK_RETARD_DEG",
         "ECM_AF_LAMBDA_B1",

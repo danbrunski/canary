@@ -113,6 +113,7 @@ from src.collection.obd_scheduler.spec import (
     parse_did_token,
     parse_pid_token,
     profile_did_union,
+    profile_memory_union,
     resolve_did_session_spec,
 )
 from src.decode.dids import (
@@ -216,6 +217,7 @@ __all__ = [
     "preview_discovery_active",
     "preview_polling_plan",
     "profile_did_union",
+    "profile_memory_union",
     "rearm_on_engine_start",
     "replan_for_generation",
     "resolve_did_session_spec",

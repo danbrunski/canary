@@ -1,0 +1,20 @@
+# Rename map for tools/migrate_channel_names.py -- the 2026-10-05 0xFFFF2842 relabel.
+#
+# Firmware (ZS44A listing, checked 2026-10-05) shows the RAM byte 0xFFFF2842
+# does not select the timing-trim table: 0xFFFF283F bit 6 does (FUN_0004e6d8,
+# `tst #0x40` at 0x04E6FE; mem:ECM_HIGH_DET_FLAGS). Bit 2 of 0x2842 is the
+# knock task's copy of 0xFFFF2840 bit 6 (written at 0x04A5D2-0x04A5FE), the
+# cycle snapshot of the HI DET latch, and it gates the knock controller's
+# trim-difference branch (0x04A512, `tst #4`). Same policy as 2026-09-18: no
+# alias, migrate every stored artifact (evidence in data/dids.yaml, roadmap
+# D03.38).
+#
+# `memory_channels` are bare names from the data/dids.yaml `memory:` catalog.
+# Each also covers the reading `mem:<NAME>` (and `mem:<NAME>_SENTINEL`), the
+# wide column `obd:mem:<NAME>` (and `__<suffix>` feature columns), and the
+# K-line forms `<module>:MEM_<NAME>`, `MEM_<NAME>` and `kline:<NAME>`. The
+# Pi's saved `ram-study` capture profile override lists the old name; the
+# daemon now refuses a profile naming a memory channel the catalog lacks, so
+# migrate the overrides file (`--config`) before the Pi restarts on this code.
+memory_channels:
+  ECM_TIMING_TRIM_SELECT_FLAGS: ECM_KNOCK_TRIM_DIFF_FLAGS   # 0xFFFF2842, window flags_2841

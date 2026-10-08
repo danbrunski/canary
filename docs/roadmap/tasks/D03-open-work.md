@@ -2668,8 +2668,42 @@ live here now, so the documents could be archived
     `--carry-unverifiable`.
   - [ ] **Open.** Per-read cadence: the fault reads want about 1 Hz, but every
     memory read rides one poll tier and a profile cannot weight memory
-    channels. `ECM_TIMING_TRIM_SELECT_FLAGS` is misnamed; renaming it is a
-    `tools/channel_renames` change for the orchestrator.
+    channels.
+  - [~] **0xFFFF2842 renamed `ECM_TIMING_TRIM_SELECT_FLAGS` →
+    `ECM_KNOCK_TRIM_DIFF_FLAGS` (2026-10-05; operator: "fix
+    ECM_TIMING_TRIM_SELECT_FLAGS to be correct"). Code done, store migration
+    owed.** Bit 2 is the knock task's copy of 0x2840 bit 6 (0x04A5D2–0x04A5FE;
+    0x2840 is the cycle snapshot of 0x283F, stored at 0x021220), so it mirrors
+    HI DET and gates the trim-difference branch (0x04A512, `tst #4`); the trim
+    table is chosen by 0x283F bit 6 (0x04E6FE). No alias (2026-09-18 policy).
+    `data/dids.yaml`: entry renamed, address/window/length/revision kept,
+    evidence and notes rewritten (the 191 constant-0x04 reads of 2026-10-04 and
+    the unconfirmed "HI DET stayed latched, trim B" inference kept; the other
+    writes the listing annotates, 0x045320/0x045324, 0x063652, 0x0637B0 and
+    0x064242, touch bits 7, 4 and 3 only). `tools/migrate_channel_names.py`
+    gained a `memory_channels` map section, checked against the catalog's
+    `memory:` (target present, source gone from memory and DIDs), covering
+    `mem:<NAME>`, `mem:<NAME>_SENTINEL`, `obd:mem:<NAME>[__suffix]`, bare names,
+    and the K-line `<module>:MEM_<NAME>`, `MEM_<NAME>` and `kline:<NAME>` forms.
+    Map: `tools/channel_renames/2026-10-05-knock-trim-diff-flags.yaml`. A saved
+    profile naming a memory channel the catalog lacks used to be dropped without
+    a word (`CanObdSpec.from_config` filtered the catalog); it is now refused
+    by name at daemon start, in the preview and at capture start
+    (`profile_memory_union`) and at save (`CaptureProfileStore._check_memory`).
+    Dry runs (no `--apply`): `models/`, `models-0920a`, `models-0920b` 0;
+    `sessions-0917`…`0921c` 0; `~/canary-data/sessions` 192 names in 192 files
+    (191 Parquet rows, one per chunk, and the `capture_profile.json` of
+    `_capture-ram-study-2026-10-04T204557`); a copy of the Pi's `ram-study`
+    override 1 name. Tests: `test_migrate_channel_names.py` (memory map: Parquet,
+    profile YAML, specs, JSON sidecars, catalog refusals, whole-token boundary),
+    `test_memory_channels.py` (unknown name refused at plan, preview and save),
+    `test_the_2842_byte_is_named_for_the_knock_gate_and_the_old_name_is_refused`.
+    **Owed:** `--apply --daemon-stopped` on `~/canary-data/sessions` and on the
+    Pi (`--config /etc/canary/canary.yaml`, which takes in the overrides file).
+    The Pi's `ram-study` override must be migrated **before** the Pi restarts on
+    this code, or the daemon refuses to start. Left as records:
+    `data/analyses/**` and the `tests/fixtures/fuel_comp/_capture-ram-study-…`
+    session snapshot.
 
 - [ ] **D03.39 Resume the parked λ-chain transfer/baro-gain rework (canary-18,
   unfinished).** *Parked 2026-10-05 by operator decision.* The firmware session

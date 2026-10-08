@@ -30,6 +30,7 @@ from src.decode.dids import (
     did_response_widths,
     known_did_names,
     memory_channels,
+    select_memory_channels,
 )
 
 if TYPE_CHECKING:
@@ -461,10 +462,7 @@ class CanObdSpec:
             # flashes made on this vehicle do not change (operator,
             # 2026-09-21), so channels are not gated on the running tune
             # revision; the known-answer verify is the moved-address check.
-            selected_memory = tuple(
-                dict.fromkeys(name for profile in profiles for name in profile.memory)
-            )
-            memory = tuple(c for c in memory_channels() if c.name in selected_memory)
+            memory = profile_memory_union(profiles)
         widths, width_sources = did_response_widths()
         custom: tuple[CustomPid, ...] = ()
         if custom_pids_path is not None:
@@ -525,6 +523,25 @@ def profile_did_union(
             ]
         )
     )
+
+
+def profile_memory_union(profiles: Sequence[CaptureProfile]) -> tuple[MemoryChannel, ...]:
+    """Every catalog memory channel a saved profile selects, in catalog order.
+
+    Refuses a profile naming a channel the catalog does not hold, the way
+    ``parse_did_token`` refuses an unknown DID, so the daemon start, the
+    capture-profile preview and capture start all fail on it by name. This
+    used to filter the catalog by the selection, which dropped a stale name
+    without a word: the profile ran with that channel never polled.
+    """
+    selected: set[str] = set()
+    for profile in profiles:
+        try:
+            chosen = select_memory_channels(profile.memory)
+        except ValueError as exc:
+            raise ValueError(f"capture profile {profile.name!r}: {exc}") from exc
+        selected.update(channel.name for channel in chosen)
+    return tuple(channel for channel in memory_channels() if channel.name in selected)
 
 
 def did_alias_table(tokens: Iterable[str]) -> dict[str, str]:

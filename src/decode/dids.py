@@ -17,7 +17,7 @@ Strict pydantic schema so typos in the YAML fail loudly, not silently.
 from __future__ import annotations
 
 import logging
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
@@ -655,10 +655,34 @@ def did_access() -> DidAccess | None:
 def memory_channels() -> tuple[MemoryChannel, ...]:
     """Every service-0x23 channel in the catalog, unfiltered.
 
-    Selecting the ones a capture profile names is the caller's job.
+    Selecting the ones a capture profile names is :func:`select_memory_channels`'s job.
     """
     did_map = load_repo_did_map()
     return () if did_map is None else tuple(did_map.memory)
+
+
+def select_memory_channels(names: Iterable[str]) -> tuple[MemoryChannel, ...]:
+    """The catalog's memory channels ``names`` selects, in catalog order.
+
+    Raises ``ValueError`` naming every name the catalog does not hold, as
+    ``parse_did_token`` does for a DID. Selecting by filtering the catalog
+    instead dropped an unknown name without a word: a profile still naming a
+    renamed channel ran with that channel silently unpolled. Renames keep no
+    alias (2026-09-18 policy), so a stale name is migrated with
+    ``tools/migrate_channel_names.py``, never resolved here.
+    """
+    wanted = tuple(dict.fromkeys(name.strip() for name in names))
+    catalog = memory_channels()
+    known = {channel.name for channel in catalog}
+    unknown = [name for name in wanted if name not in known]
+    if unknown:
+        raise ValueError(
+            f"memory channel(s) not in the data/dids.yaml memory catalog: {', '.join(unknown)}"
+            " (a renamed channel keeps no alias; migrate saved profiles with"
+            " tools/migrate_channel_names.py)"
+        )
+    selected = set(wanted)
+    return tuple(channel for channel in catalog if channel.name in selected)
 
 
 def did_response_widths() -> tuple[dict[int, int], dict[int, str]]:

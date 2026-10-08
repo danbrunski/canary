@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""One-time migration of renamed DID channel names in stored artifacts.
+"""One-time migration of renamed DID and memory channel names in stored artifacts.
 
 The 2026-09-18 fuel relabel renamed three wrongly-identified DIDs (0x1208 is
 air charge, 0x1206/0x1207 are the injected pulse, 0x1134 is an enrichment
@@ -13,7 +13,13 @@ The rename map is an input (``--map``, default
 ``tools/channel_renames/2026-09-18-fuel-relabel.yaml``): ``channels`` maps bare
 DID names, which also covers their ``did:<NAME>`` column form and the derived
 feature columns ``did:<NAME>__<suffix>``; ``identifiers`` maps exact
-non-channel names (the behavior-model recipe fitted on 0x1208).
+non-channel names (the behavior-model recipe fitted on 0x1208);
+``memory_channels`` maps service-0x23 RAM channel names from the
+``data/dids.yaml`` ``memory:`` catalog. A memory name is stored bare (a capture
+profile's ``memory:`` and ``kline:`` lists), as the reading ``mem:<NAME>`` (its
+fuel-cut state ``mem:<NAME>_SENTINEL``), as the wide column ``obd:mem:<NAME>``
+(and ``obd:mem:<NAME>__<suffix>``), and on K-line as ``<module>:MEM_<NAME>``,
+pre-K01.1 ``MEM_<NAME>`` and the capture key ``kline:<NAME>``; all are covered.
 
 What gets rewritten, and how:
 
@@ -74,6 +80,17 @@ EXIT_INCOMPLETE = 1
 EXIT_REFUSED = 2
 
 
+#: What precedes a memory channel's name in its stored forms: the
+#: service-0x23 reading ``mem:<NAME>`` (source ``obd``) and its wide column
+#: ``obd:mem:<NAME>``; on K-line (``src.collection.kline.names``) the capture
+#: key ``kline:<NAME>``, the value row ``<module>:MEM_<NAME>`` (wide column
+#: ``kline:<module>:MEM_<NAME>``) and the pre-K01.1 row ``MEM_<NAME>``.
+_MEMORY_HEAD = re.compile(r"(?:obd:)?mem:|kline:(?:[A-Za-z0-9]+:MEM_)?|(?:[A-Za-z0-9]+:)?MEM_")
+#: Suffix of the state channel a memory sentinel decodes to
+#: (``src.decode.slices.SENTINEL_SUFFIX``): ``mem:<NAME>_SENTINEL``.
+SENTINEL_SUFFIX = "_SENTINEL"
+
+
 class MapError(ValueError):
     """The rename map is malformed or disagrees with the DID catalog."""
 
@@ -82,6 +99,8 @@ class MapError(ValueError):
 class RenameMap:
     channels: dict[str, str]
     identifiers: dict[str, str] = field(default_factory=dict)
+    #: Service-0x23 RAM channel names (the ``data/dids.yaml`` ``memory:`` catalog).
+    memory: dict[str, str] = field(default_factory=dict)
 
     def rename(self, value: str) -> str:
         """The migrated form of one exact name, or ``value`` unchanged."""
@@ -89,26 +108,56 @@ class RenameMap:
             return self.channels[value]
         if value in self.identifiers:
             return self.identifiers[value]
+        if value in self.memory:
+            return self.memory[value]
         if value.startswith(DID_PREFIX):
             base, sep, suffix = value[len(DID_PREFIX) :].partition(FEATURE_SEP)
             new = self.channels.get(base)
             if new is not None:
                 return f"{DID_PREFIX}{new}{sep}{suffix}"
+        if self.memory:
+            head = _MEMORY_HEAD.match(value)
+            if head is not None:
+                renamed = self._rename_memory_rest(value[head.end() :])
+                if renamed is not None:
+                    return f"{head.group(0)}{renamed}"
         return value
+
+    def _rename_memory_rest(self, rest: str) -> str | None:
+        """``<OLD>[_SENTINEL][__suffix]`` with the new name, else ``None``."""
+        base, sep, suffix = rest.partition(FEATURE_SEP)
+        tail = ""
+        if base not in self.memory and base.endswith(SENTINEL_SUFFIX):
+            base, tail = base[: -len(SENTINEL_SUFFIX)], SENTINEL_SUFFIX
+        new = self.memory.get(base)
+        return None if new is None else f"{new}{tail}{sep}{suffix}"
 
     def token_pattern(self) -> re.Pattern[str]:
         """Old names as whole tokens in free text (YAML).
 
         A token may be followed by a ``__suffix`` (derived feature) but not by
         any other identifier character, so ``ECM_INJECTOR_PW_B1X`` is not
-        ``ECM_INJECTOR_PW_B1``.
+        ``ECM_INJECTOR_PW_B1``. A memory name may also be followed by
+        ``_SENTINEL`` (``mem:<NAME>_SENTINEL`` in a spec); a DID name may not.
         """
+        alternatives: list[str] = []
         names = sorted({*self.channels, *self.identifiers}, key=len, reverse=True)
-        alternation = "|".join(re.escape(name) for name in names)
-        return re.compile(rf"(?<![A-Za-z0-9_])({alternation})(?=__|[^A-Za-z0-9_]|$)")
+        if names:
+            alternation = "|".join(re.escape(name) for name in names)
+            alternatives.append(rf"(?:{alternation})(?=__|[^A-Za-z0-9_]|$)")
+        memory = sorted(self.memory, key=len, reverse=True)
+        if memory:
+            alternation = "|".join(re.escape(name) for name in memory)
+            alternatives.append(
+                rf"(?:{alternation})"
+                rf"(?=__|{SENTINEL_SUFFIX}(?![A-Za-z0-9])|[^A-Za-z0-9_]|$)"
+            )
+        if not alternatives:
+            return re.compile(r"(?!)")  # an empty map renames nothing
+        return re.compile(rf"(?<![A-Za-z0-9_])(?:{'|'.join(alternatives)})")
 
     def replacement(self, token: str) -> str:
-        return self.channels.get(token) or self.identifiers[token]
+        return self.channels.get(token) or self.identifiers.get(token) or self.memory[token]
 
 
 def _str_map(raw: Any, key: str) -> dict[str, str]:
@@ -121,24 +170,29 @@ def _str_map(raw: Any, key: str) -> dict[str, str]:
     return dict(raw)
 
 
+#: The sections a rename map may carry.
+MAP_SECTIONS = ("channels", "identifiers", "memory_channels")
+
+
 def load_rename_map(path: Path) -> RenameMap:
     raw = yaml.safe_load(path.read_text())
-    if not isinstance(raw, dict) or set(raw) - {"channels", "identifiers"}:
-        raise MapError(f"{path}: expected only 'channels' and 'identifiers'")
+    if not isinstance(raw, dict) or set(raw) - set(MAP_SECTIONS):
+        raise MapError(f"{path}: expected only {', '.join(repr(s) for s in MAP_SECTIONS)}")
     channels = _str_map(raw.get("channels"), "channels")
     identifiers = _str_map(raw.get("identifiers"), "identifiers")
-    if not channels and not identifiers:
+    memory = _str_map(raw.get("memory_channels"), "memory_channels")
+    if not channels and not identifiers and not memory:
         raise MapError(f"{path}: empty rename map")
-    olds = [*channels, *identifiers]
+    olds = [*channels, *identifiers, *memory]
     if len(set(olds)) != len(olds):
-        raise MapError(f"{path}: a name appears in both channels and identifiers")
-    news = {*channels.values(), *identifiers.values()}
+        raise MapError(f"{path}: a name appears in more than one section")
+    news = {*channels.values(), *identifiers.values(), *memory.values()}
     unchanged = sorted(k for k in olds if k in news)
     if unchanged:
         # A chain (A->B, B->C) or a no-op would make the result depend on
         # order and break idempotence.
         raise MapError(f"{path}: names are both renamed and rename targets: {unchanged}")
-    return RenameMap(channels=channels, identifiers=identifiers)
+    return RenameMap(channels=channels, identifiers=identifiers, memory=memory)
 
 
 def check_against_catalog(rename_map: RenameMap, dids_path: Path) -> list[str]:
@@ -146,7 +200,10 @@ def check_against_catalog(rename_map: RenameMap, dids_path: Path) -> list[str]:
 
     Every target must be a current DID name, and no source may still resolve
     (as a name or alias) — otherwise the migration would write names the
-    daemon cannot poll, or strand ones it still emits.
+    daemon cannot poll, or strand ones it still emits. ``memory_channels`` is
+    held to the same rule against the catalog's ``memory:`` section: the target
+    is a memory channel, and the source no longer names any channel (memory
+    and DID names share one namespace, ``DidMap._unique_channel_names``).
     """
     raw = yaml.safe_load(dids_path.read_text())
     current: set[str] = set()
@@ -154,6 +211,7 @@ def check_against_catalog(rename_map: RenameMap, dids_path: Path) -> list[str]:
     for entry in raw.get("dids", []):
         current.add(str(entry["name"]))
         former.update(str(alias) for alias in entry.get("aliases", []) or [])
+    memory = {str(entry["name"]) for entry in raw.get("memory", []) or []}
     problems = [
         f"target {new!r} is not a DID name in {dids_path}"
         for new in rename_map.channels.values()
@@ -163,6 +221,16 @@ def check_against_catalog(rename_map: RenameMap, dids_path: Path) -> list[str]:
         f"source {old!r} still resolves in {dids_path}"
         for old in rename_map.channels
         if old in current or old in former
+    ]
+    problems += [
+        f"memory target {new!r} is not a memory channel in {dids_path}"
+        for new in rename_map.memory.values()
+        if new not in memory
+    ]
+    problems += [
+        f"memory source {old!r} still resolves in {dids_path}"
+        for old in rename_map.memory
+        if old in memory or old in current or old in former
     ]
     return problems
 
@@ -207,10 +275,10 @@ def rewrite_structure(obj: Any, rename_map: RenameMap) -> tuple[Any, int]:
 
 def rewrite_text(text: str, rename_map: RenameMap) -> tuple[str, int]:
     pattern = rename_map.token_pattern()
-    count = len(pattern.findall(text))
+    count = sum(1 for _ in pattern.finditer(text))
     if not count:
         return text, 0
-    return pattern.sub(lambda m: rename_map.replacement(m.group(1)), text), count
+    return pattern.sub(lambda m: rename_map.replacement(m.group(0)), text), count
 
 
 def _replace_atomically(path: Path, write_tmp: Callable[[Path], None]) -> None:

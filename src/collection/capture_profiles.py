@@ -25,6 +25,7 @@ from src.collection.bus_budget import (
     MIN_BUDGET_REQUESTS_PER_SECOND,
 )
 from src.config import CollectionConfig, DaemonConfig
+from src.decode.dids import select_memory_channels
 from src.signals.derived import DERIVED_CHANNEL_INPUTS
 
 if TYPE_CHECKING:
@@ -1029,6 +1030,7 @@ class CaptureProfileStore:
             raise ValueError("the default profile cannot be renamed")
         if any(item.name == profile.name for item in profiles):
             raise ValueError(f"capture profile already exists: {profile.name}")
+        self._check_memory(profile)
         self._check_kline(profile)
         # Only this machine's layer is written (S03.4); the tracked catalog never is.
         path = self._overrides_path()
@@ -1053,6 +1055,18 @@ class CaptureProfileStore:
                 base_digests=digests,
             ),
         )
+
+    def _check_memory(self, profile: CaptureProfile) -> None:
+        """Refuse a ``memory:`` entry the catalog does not hold.
+
+        The daemon start refuses the same name (``profile_memory_union``), so
+        an override saved with it would keep the next start from collecting
+        at all; refusing here keeps it out of the overrides file.
+        """
+        try:
+            select_memory_channels(profile.memory)
+        except ValueError as exc:
+            raise ValueError(f"memory: {exc}") from exc
 
     def _check_kline(self, profile: CaptureProfile) -> None:
         """Resolve ``profile.kline`` exactly as the K-line collector will
