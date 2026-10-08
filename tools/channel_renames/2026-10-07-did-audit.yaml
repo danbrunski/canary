@@ -1,0 +1,24 @@
+# Rename map for tools/migrate_channel_names.py -- the 2026-10-07 Mode 22 DID audit.
+#
+# The firmware session audited both Mode 22 pointer tables against
+# data/dids.yaml (~/ecu-re/out/did_audit.yaml, NOTES.md session 8, 2026-10-05;
+# roadmap D03.40). Two DIDs were catalogued under wrong identities:
+#
+#   0x1107 is the final ignition timing byte 0xFFFF11FF (the PID 0x0E and DID
+#          0x110A byte, 110 - raw deg BTDC), not A/F sensor heater duty. The
+#          heater duties are the new 0x114E/0x114F.
+#   0x123F is an increment-only OBD monitor run counter (u16 0xFFFF5268), not
+#          intake air temperature. IAT is 0x1106 (ECM_INTAKE_AIR_TEMP_1106).
+#
+# Operator decision 2026-10-07 ("all, one migration"), same policy as
+# 2026-09-18: no aliases, migrate every stored artifact. Stored session Parquet
+# carries the raw `DID_<hex>` channel, so it does not change; capture-profile
+# snapshots, saved profile overrides, configs and model manifests that name a
+# channel do.
+#
+# `channels` are bare DID names; each also covers its `did:` column form and
+# derived feature columns (`did:<NAME>__mean`, ...). Old names are matched as
+# whole tokens, so ECM_INTAKE_AIR_TEMP never clips ECM_INTAKE_AIR_TEMP_1106.
+channels:
+  ECM_AF_SENSOR_HEATER_DUTY: ECM_IGNITION_TIMING_1107        # 0x1107
+  ECM_INTAKE_AIR_TEMP: ECM_MONITOR_RUN_COUNTER_123F          # 0x123F

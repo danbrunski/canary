@@ -263,10 +263,11 @@ segmenter_fallback:
 # Mode 22 DIDs on CAN (2026-10-04).
 #
 # The catalog named DID 0x1102 ECM_LONG_FUEL_TRIM_B1 and 0x1125 LTFT bank 2,
-# both taken from UpRev's K-LINE stream definition. The ECM keeps separate
-# K-line and CAN DID -> RAM pointer tables (docs/ecu-firmware-analysis.md,
-# "Mode 22 catalog corrections (CAN)"); on CAN 0x1102 is the PID 0x0D speed
-# byte and 0x1125 is LTFT bank 1. These checks run on their own slice, because
+# both taken from UpRev's K-line stream labels. 0x1102 is the PID 0x0D speed
+# byte and 0x1125 is LTFT bank 1 on both transports: the ECM's K-line and CAN
+# DID -> RAM pointer tables agree except 0x1247, 0x1248 and 0x1315 (firmware
+# audit 2026-10-05, docs/ecu-firmware-analysis.md "Mode 22 catalog
+# corrections"), so the labels were UpRev's. These checks run on their own slice, because
 # the 2026-08-03 drive above polls no Mode 22 at all.
 did_fixture: did-speed-slice
 did_source_session: _capture-rom-trace-2026-09-21T142926
@@ -353,6 +354,70 @@ did_pins:
     ram: 0xFFFF272E
     mode01_pid: 0x2E
     mode01_a: {multiply: 1275, divide: 1000, max: 255}
+  # Firmware DID audit (2026-10-05, applied 2026-10-07, D03.40). Each DID
+  # reads the RAM byte the CAN Mode 01 handler sends for `mode01_pid`.
+  # 0x1107 was A/F heater duty (x0.5 %) until 2026-10-07; it is the final
+  # timing byte 0xFFFF11FF, the same byte as 0x110A and PID 0x0E (110 - raw
+  # deg BTDC), so the two DIDs must decode every raw value identically
+  # (test_dids_sharing_a_ram_byte_decode_identically). The PID 0x0E A-byte
+  # arithmetic is not in the audit, so there is no `mode01_a` for them.
+  - did: 0x1107
+    name: ECM_IGNITION_TIMING_1107
+    byte_start: 0
+    byte_length: 1
+    scale: -1.0
+    offset: 110.0
+    unit: degBTDC
+    ram: 0xFFFF11FF
+    mode01_pid: 0x0E
+  - did: 0x110A
+    name: ECM_IGNITION_TIMING
+    byte_start: 0
+    byte_length: 1
+    scale: -1.0
+    offset: 110.0
+    unit: degBTDC
+    ram: 0xFFFF11FF
+    mode01_pid: 0x0E
+  # PID 0x04 sends this byte unchanged as A (multiply = divide = 1), so the DID
+  # must equal the PID's A x 100/255 exactly, not within one A step: the
+  # catalog's old 100/256 is within one step everywhere and fails only the
+  # exact check.
+  - did: 0x1117
+    name: ECM_CALC_LOAD_PCT
+    byte_start: 0
+    byte_length: 1
+    scale: 0.39215686274509803
+    offset: 0.0
+    unit: percent
+    ram: 0xFFFF46E0
+    mode01_pid: 0x04
+    mode01_a: {multiply: 1, divide: 1, max: 255}
+  # Intake air temperature. The PID 0x0F byte 0xFFFF2CB7 is written as this
+  # byte - 10 (`add: -10`), and PID 0x0F decodes A - 40, so raw - 50 is the
+  # ECM's own conversion. 0x123F, catalogued as IAT until 2026-10-07, is a
+  # monitor run counter (tests/test_dids.py).
+  - did: 0x1106
+    name: ECM_INTAKE_AIR_TEMP_1106
+    byte_start: 0
+    byte_length: 1
+    scale: 1.0
+    offset: -50.0
+    unit: degC
+    ram: 0xFFFF2CB8
+    mode01_pid: 0x0F
+    mode01_a: {multiply: 1, divide: 1, add: -10, max: 255}
+  # Relative throttle position: the PID 0x45 byte, sent unchanged.
+  - did: 0x111E
+    name: ECM_RELATIVE_THROTTLE_POS
+    byte_start: 0
+    byte_length: 1
+    scale: 0.39215686274509803
+    offset: 0.0
+    unit: percent
+    ram: 0xFFFF107F
+    mode01_pid: 0x45
+    mode01_a: {multiply: 1, divide: 1, max: 255}
 
 # Intake VTC (D03.37, firmware pass 2026-10-04). No Mode 01 PID shares these
 # bytes, so the firmware fact the identification rests on is the bank: the

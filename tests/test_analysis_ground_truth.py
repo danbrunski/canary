@@ -322,8 +322,9 @@ def test_segmenter_fallback_reproduces_mode01_labels() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Mode 22 DIDs on CAN (2026-10-04): 0x1102 is road speed, 0x1123-0x1126 are
-# the trims, and none of their meanings may come from the K-line DID table.
+# Mode 22 DIDs on CAN (2026-10-04, audited 2026-10-05): 0x1102 is road speed,
+# 0x1123-0x1126 are the trims, and none of their meanings may come from a
+# third-party tool's label (UpRev's K-line names were the 0x1102 error).
 # ---------------------------------------------------------------------------
 
 DIDS_PATH = Path("data/dids.yaml")
@@ -386,16 +387,32 @@ def test_did_catalog_entries_are_pinned_to_the_firmware(pin: dict[str, Any]) -> 
     elif pid_name == "EVAPORATIVE_PURGE":
         # 0x1110 was intake VVT solenoid duty until 2026-10-04.
         assert "EVAP_PURGE" in entry.name and "VVT" not in entry.name
+    elif pid_name == "TIMING_ADVANCE":
+        # 0x1107 was A/F sensor heater duty until 2026-10-07.
+        assert "IGNITION_TIMING" in entry.name and "HEATER" not in entry.name
+    elif pid_name == "INTAKE_TEMP":
+        # 0x123F held the IAT name until 2026-10-07; only 0x1106 may.
+        assert "INTAKE_AIR_TEMP" in entry.name and entry.did == 0x1106
     else:
-        assert pid_name == "SPEED"
-        assert "SPEED" in entry.name
+        expected = {"SPEED": "SPEED", "ENGINE_LOAD": "LOAD", "RELATIVE_THROTTLE_POS": "THROTTLE"}
+        assert pid_name in expected, f"no name rule for PID {pid_name}"
+        assert expected[pid_name] in entry.name
     # Every corrected entry rests on CAN evidence, never on K-line alone.
     assert "can" in {item.transport for item in entry.evidence}
 
 
-def _pid_from_ram(raw: int, arithmetic: dict[str, int]) -> int:
-    """PID byte A the ECM's CAN Mode 01 handler builds from the RAM byte."""
-    return min(arithmetic["max"], raw * arithmetic["multiply"] // arithmetic["divide"])
+def _pid_from_ram(raw: int, arithmetic: dict[str, int]) -> int | None:
+    """PID byte A the ECM's CAN Mode 01 handler builds from the RAM byte.
+
+    ``add`` is a constant the handler (or the code that writes the PID's own
+    byte) adds after scaling: the PID 0x0F byte is the IAT byte - 10. ``None``
+    where the result leaves 0..max, i.e. where the PID clamps and the DID
+    does not.
+    """
+    a = raw * arithmetic["multiply"] // arithmetic["divide"] + arithmetic.get("add", 0)
+    if a < 0 or a > arithmetic["max"]:
+        return None
+    return a
 
 
 _ARITHMETIC_PINS = [p for p in EXPECTATIONS["did_pins"] if "mode01_a" in p]
@@ -414,6 +431,10 @@ def test_did_scale_reproduces_the_ecm_own_pid_conversion(pin: dict[str, Any]) ->
     answer: it needs no capture, so it holds even where Mode 01 and the DID
     session cannot be read together. The rival 0x1110 scale, 100/255 % per
     count, fails it, so it can tell the two apart (checked below).
+
+    Where the handler sends the byte unchanged (``multiply == divide``), the
+    two must agree exactly, not within a step: 0x1117's old 100/256 lies
+    within one PID 0x04 step of 100/255 everywhere and fails only that.
     """
     from src.collection.pid_decoders import PID_DECODERS
     from src.decode.dids import apply_scaling, decode_did_raw
@@ -428,16 +449,18 @@ def test_did_scale_reproduces_the_ecm_own_pid_conversion(pin: dict[str, Any]) ->
         return decoded[0]
 
     one_a_step = pid_value(1) - pid_value(0)
+    copied = arithmetic["multiply"] == arithmetic["divide"]
+    allowed = 1e-9 if copied else one_a_step
 
     def disagreements(scale: float) -> list[int]:
         bad = []
         for raw in range(256):
             a = _pid_from_ram(raw, arithmetic)
-            if a == arithmetic["max"]:
+            if a is None or a == arithmetic["max"]:
                 continue  # the PID clamps; the DID does not
             assert decode_did_raw(entry, bytes([raw])) == raw
             did_value = raw * scale + (entry.offset or 0.0)
-            if abs(did_value - pid_value(a)) > one_a_step:
+            if abs(did_value - pid_value(a)) > allowed:
                 bad.append(raw)
         return bad
 
@@ -447,6 +470,39 @@ def test_did_scale_reproduces_the_ecm_own_pid_conversion(pin: dict[str, Any]) ->
         assert apply_scaling(entry, 100) == pytest.approx(50.0)
         # The other candidate D04.7 could not rule out from saturation alone.
         assert disagreements(100 / 255), "the 100/255 % reading should fail this check"
+    if pin["did"] == 0x1117:
+        # The pre-2026-10-07 catalog scale.
+        assert disagreements(100 / 256), "the 100/256 % reading should fail this check"
+    if pin["did"] == 0x1106:
+        # The -40 OBD convention 0x123F carried as "IAT" until 2026-10-07.
+        assert entry.offset == -50.0
+        assert disagreements(1.0) == []
+
+
+def test_dids_sharing_a_ram_byte_decode_identically() -> None:
+    """Two DIDs the firmware sends to one RAM byte are one quantity.
+
+    0x1107 and 0x110A both read the final timing byte 0xFFFF11FF (DID audit
+    2026-10-05), so a catalog that decodes them differently is wrong about at
+    least one of them; 0x1107 decoded as heater duty x0.5 % until 2026-10-07.
+    """
+    from src.decode.dids import apply_scaling
+
+    by_did = {e.did: e for e in load_did_map(DIDS_PATH).dids}
+    by_ram: dict[int, list[int]] = {}
+    for pin in EXPECTATIONS["did_pins"]:
+        by_ram.setdefault(pin["ram"], []).append(pin["did"])
+    shared = {ram: dids for ram, dids in by_ram.items() if len(dids) > 1}
+    assert 0xFFFF11FF in shared, "the timing byte's two DIDs are no longer both pinned"
+    for ram, dids in shared.items():
+        first, *rest = (by_did[did] for did in dids)
+        for other in rest:
+            for raw in range(1 << (8 * first.byte_length)):
+                assert apply_scaling(first, raw) == apply_scaling(other, raw), (
+                    f"0x{first.did:04X} and 0x{other.did:04X} both read 0x{ram:08X} "
+                    f"but decode raw {raw} differently"
+                )
+                assert first.unit == other.unit
 
 
 _BANK_PINS = EXPECTATIONS["did_bank_pins"]

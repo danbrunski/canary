@@ -194,22 +194,27 @@ class DidEntry(ByteSlice, LinearScale, PlausibleRange, _Strict):
     def _kline_evidence_cannot_name_a_can_did(self) -> DidEntry:
         """Refuse an entry whose only support was observed on K-line.
 
-        This catalog is polled over CAN (``access.ecu_request_id``), and the
-        ECM resolves Mode 22 DIDs through separate K-line and CAN pointer
-        tables. Until 2026-10-04 DID 0x1102 was catalogued as long-term fuel
-        trim B1 from UpRev's K-line stream; on CAN it is road speed, and the
-        catalog's 0x1125 was bank-swapped the same way. K-line evidence may
-        corroborate an entry or sit in ``evidence_against``; it cannot be the
-        whole case for one.
+        This catalog is polled over CAN (``access.ecu_request_id``). Until
+        2026-10-04 DID 0x1102 was catalogued as long-term fuel trim B1 and
+        0x1125 as LTFT B2, both from UpRev's K-line stream labels. The labels
+        were UpRev's, not the ECM's: the firmware audit of 2026-10-05 found the
+        ECM's K-line and CAN pointer tables send every DID they share to the
+        same variable (except 0x1247, 0x1248 and 0x1315), so K-line 0x1102 is
+        the speed byte too. K-line support for this catalog has in practice
+        been a third-party tool's naming, and a CAN entry needs evidence read
+        on CAN or from the firmware. K-line evidence may corroborate an entry
+        or sit in ``evidence_against``; it cannot be the whole case for one.
         """
         transports = {item.transport for item in self.evidence}
         if "kline" in transports and "can" not in transports:
             raise ValueError(
                 f"DID 0x{self.did:04X} ({self.name}): every supporting evidence entry "
-                "that names a transport says `kline`, but this is the CAN catalog. The "
-                "ECM's K-line and CAN DID tables differ (0x1102 is long-term trim on "
-                "K-line and road speed on CAN, 2026-10-04). Add CAN evidence "
-                "(`transport: can`) or move the K-line finding to `evidence_against`."
+                "that names a transport says `kline`, but this is the CAN catalog. "
+                "K-line support has meant a third-party tool's labels, not the ECM's: "
+                "UpRev named 0x1102 long-term trim B1, and the firmware sends 0x1102 "
+                "to the speed byte on both transports (2026-10-04/05). Add CAN or "
+                "firmware evidence (`transport: can`) or move the K-line finding to "
+                "`evidence_against`."
             )
         return self
 

@@ -94,17 +94,24 @@ site.
     factor, which is the convexity, in 10 µs units; in fuel cut it reads `Ts`.
   - `0x1134` is an open-loop rich target (raw/64 as φ), not the commanded φ: it
     holds 64 through closed loop.
-  - **On CAN, `0x1102` is vehicle speed** (one byte, km/h = raw × 2), not
-    `ECM_LONG_FUEL_TRIM_B1` as catalogued. The catalog took that meaning from
-    UpRev's K-line stream, and the firmware's K-line and CAN DID tables
-    differ.
-  - **Learned trim on CAN:** `0x1125` is LTFT **B1** (the catalog says B2) and
+  - **`0x1102` is vehicle speed** (one byte, km/h = raw × 2), on CAN and on
+    K-line. It was catalogued as `ECM_LONG_FUEL_TRIM_B1` until 2026-10-04,
+    from UpRev's K-line label. The firmware's K-line and CAN DID tables point
+    at the same variables except 0x1247, 0x1248 and 0x1315 (audit
+    2026-10-05); the labels were UpRev's.
+  - **Learned trim:** `0x1125` is LTFT **B1** (UpRev labels it B2) and
     `0x1126` is LTFT B2. They are the same RAM words as PIDs `0x07`/`0x09`.
   - **Short-term trim on CAN:** `0x1123`/`0x1124` are STFT B1/B2.
   - Firmware evidence is in `docs/ecu-firmware-analysis.md`. Applied to
     `data/dids.yaml` on 2026-10-04 (D03.36): `ECM_VEHICLE_SPEED_COARSE`,
     `ECM_SHORT_FUEL_TRIM_B1/B2`, `ECM_LONG_FUEL_TRIM_B1/B2`. Evidence entries
     carry `transport`, and an entry backed only by `kline` is refused.
+  - **DID audit (2026-10-05, applied 2026-10-07, D03.40):** `0x1107` is
+    ignition timing (110 − raw, the `0x110A` byte), not A/F heater duty; the
+    heater duties are `0x114E`/`0x114F` (0.4 %). `0x123F` is a monitor run
+    counter, not IAT; IAT is `0x1106` (raw − 50). `0x1117` is ×100/255.
+    `0x1129` is baro inside a Mode 22 session. `0x120B` returns the first
+    flagged DTC and reads P0328 while driving.
   - The firmware's DID → RAM pointer tables are at `0x024988`, `0x024B84` and
     `0x024D00` for CAN, and at `0x022738`, `0x022938` and `0x022AB4` for
     K-line.

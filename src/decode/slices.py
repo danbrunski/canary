@@ -269,11 +269,13 @@ class Evidence(BaseModel):
     #: it must not be quoted.
     conditions: str | None = None
     #: Which bus the identifier was read or defined on. The 2008 Xterra ECM
-    #: keeps separate Mode 22 DID tables for K-line and CAN, so DID 0x1102 is
-    #: long-term trim on K-line and road speed on CAN; a K-line observation
-    #: says nothing about the CAN DID of the same number. ``None`` is legacy
-    #: evidence recorded before the field existed. The DID catalog refuses an
-    #: entry whose only support is ``kline`` (:class:`src.decode.dids.DidEntry`).
+    #: has separate Mode 22 pointer tables for K-line and CAN that agree on
+    #: every shared DID but 0x1247, 0x1248 and 0x1315 (firmware audit,
+    #: 2026-10-05); what K-line evidence got wrong was a tool's label (UpRev
+    #: called 0x1102 long-term trim; it is road speed on both buses).
+    #: ``None`` is legacy evidence recorded before the field existed. The DID
+    #: catalog refuses an entry whose only support is ``kline``
+    #: (:class:`src.decode.dids.DidEntry`).
     transport: Literal["can", "kline"] | None = None
 
     @model_validator(mode="after")

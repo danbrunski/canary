@@ -60,7 +60,7 @@ FUEL_DIDS: tuple[str, ...] = (
     "ECM_AF_SENSOR_V_B2",
     "ECM_AIR_CHARGE",
     "ECM_THROTTLE_POS_SENSOR_1",
-    "ECM_INTAKE_AIR_TEMP",
+    "ECM_INTAKE_AIR_TEMP_1106",
     "ECM_MAF_GPS",
 )
 HYBRID_DIDS: tuple[str, ...] = (
@@ -151,7 +151,7 @@ FUEL_DID_PROFILE = _capture(
     target_rate_hz=20.0,
     did_continuous=True,
     bus_budget_override=160.0,
-    required_tuple=("ECM_RPM", "ECM_MAF_GPS", "ECM_INTAKE_AIR_TEMP", "ECM_AIR_CHARGE"),
+    required_tuple=("ECM_RPM", "ECM_MAF_GPS", "ECM_INTAKE_AIR_TEMP_1106", "ECM_AIR_CHARGE"),
     min_achieved_rate_hz=15.0,
 )
 HYBRID_PROFILE = _capture(

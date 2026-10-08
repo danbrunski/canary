@@ -132,43 +132,44 @@ def test_the_poll_reply_expands_to_all_three_chained_sets() -> None:
     assert len(ram) == 17
 
 
-def test_unknown_catalog_widths_are_refused_not_guessed() -> None:
-    """The real reply cannot be split with today's catalog: four of UpRev's
-    DIDs have no recorded width. Refusing is the right answer."""
+def test_a_did_without_a_catalog_width_is_refused_not_guessed() -> None:
+    """A reply cannot be split around a DID of unknown width. Refusing is the
+    right answer. Since 2026-10-07 the catalog knows every DID UpRev streams
+    here, so the check takes one width away."""
     widths, _ = did_response_widths()
     values = kp.expand_local_id(0x83, _definitions())
+    del widths[0x1117]
     with pytest.raises(KlineProtocolError, match="0x1117"):
         kp.value_widths(values, widths)
 
 
-def test_the_reply_pins_the_unknown_widths_total() -> None:
-    """Everything the catalog knows plus 17 RAM bytes is 43; the ECM sent 50,
-    so the four DIDs without a width take exactly 7 bytes between them.
+def test_the_catalog_widths_alone_split_the_reply() -> None:
+    """Everything the catalog knows plus 17 RAM bytes is 50, what the ECM sent.
 
-    Five until 2026-10-04, when the CAN catalog gained 0x1126 (1 byte) and
-    corrected 0x1102 from 2 bytes to 1. The total is unchanged, and the
-    K-line layout in docs/uprev-usb-kline-research.md (1102 at 1 byte, 1204
-    at bytes 46-47) is the split used below. These widths come from the CAN
-    catalog; they agree with that K-line layout for every DID used here."""
+    Until 2026-10-07 four of UpRev's DIDs (0x1117, 0x1204, 0x1209, 0x122B)
+    had no catalog width and took 7 bytes between them; the firmware DID audit
+    gave them 1 + 2 + 2 + 2, from the CAN sweeps' widths. The CAN catalog's
+    widths apply here because the ECM's K-line and CAN tables point at the
+    same variables for every shared DID but 0x1247, 0x1248 and 0x1315 (audit
+    2026-10-05), and they agree with the K-line layout in
+    docs/uprev-usb-kline-research.md (1102 at 1 byte, 1204 at bytes 46-47).
+    A wrong width is still refused by the reply's own length."""
     widths, _ = did_response_widths()
     values = kp.expand_local_id(0x83, _definitions())
     params = kp.expect_positive(0x21, kp.decode_length_frame(FRAMES["poll_83_reply"]))
-    known = sum(
-        1 if isinstance(v, MemoryByteDescriptor) else widths[v.did]
-        for v in values
-        if isinstance(v, MemoryByteDescriptor) or v.did in widths
-    )
     unknown = sorted(
         {v.did for v in values if isinstance(v, DidDescriptor) and v.did not in widths}
     )
-    assert unknown == [0x1117, 0x1204, 0x1209, 0x122B]
-    assert len(params) - 1 - known == 7
-
-    # Any assignment summing to 7 splits cleanly; a wrong total is refused.
-    hypothesis = {**widths, 0x1117: 1, 0x1204: 2, 0x1209: 2, 0x122B: 2}
-    split = kp.split_local_id_reply(0x83, params, kp.value_widths(values, hypothesis))
+    assert unknown == []
+    assert {did: widths[did] for did in (0x1117, 0x1204, 0x1209, 0x122B)} == {
+        0x1117: 1,
+        0x1204: 2,
+        0x1209: 2,
+        0x122B: 2,
+    }
+    split = kp.split_local_id_reply(0x83, params, kp.value_widths(values, widths))
     assert len(split) == 38
-    wrong = {**hypothesis, 0x1209: 1}
+    wrong = {**widths, 0x1209: 1}
     with pytest.raises(KlineProtocolError, match="carried 50 bytes"):
         kp.split_local_id_reply(0x83, params, kp.value_widths(values, wrong))
 

@@ -182,8 +182,9 @@ the analysis UX.
   2026-10-04 from a wrong "intake VVT solenoid duty" identification),
   `ECM_INJECTOR_PULSE_1/2` pair (0x1206/0x1207 — injected pulse; once
   mislabelled intake pressure),
-  `ECM_THROTTLE_POS_SENSOR_2` (0x1210), `ECM_AF_SENSOR_HEATER_DUTY`
-  (0x1107). Watch Mode 01 blackout cost (window knobs at
+  `ECM_THROTTLE_POS_SENSOR_2` (0x1210), `ECM_AF_SENSOR_HEATER_DUTY_B1/B2`
+  (0x114E/0x114F; 0x1107 was catalogued as heater duty until 2026-10-07 and
+  is ignition timing, D03.40). Watch Mode 01 blackout cost (window knobs at
   `src/config.py:108-121`); tier the additions medium.
 - [ ] **2.5 — Pin the injector-PW scale (task 4.E.4).** *Retargeted
   2026-09-18: 0x1208 is air charge (`did:ECM_AIR_CHARGE`), not injector PW;

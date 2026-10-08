@@ -530,3 +530,60 @@ def test_a_name_in_two_sections_or_a_chain_is_refused(tmp_path: Path) -> None:
     chain.write_text(f"channels:\n  A: {OLD_MEM}\nmemory_channels:\n  {OLD_MEM}: B\n")
     with pytest.raises(tool.MapError, match="both renamed and rename targets"):
         tool.load_rename_map(chain)
+
+
+# --- the 2026-10-07 Mode 22 DID audit (0x1107, 0x123F) -------------------------
+
+AUDIT_MAP = REPO / "tools/channel_renames/2026-10-07-did-audit.yaml"
+
+
+def test_the_did_audit_map_agrees_with_the_catalog() -> None:
+    """Both targets are current DID names and neither old name resolves: no alias."""
+    rename_map = tool.load_rename_map(AUDIT_MAP)
+    assert rename_map.channels == {
+        "ECM_AF_SENSOR_HEATER_DUTY": "ECM_IGNITION_TIMING_1107",
+        "ECM_INTAKE_AIR_TEMP": "ECM_MONITOR_RUN_COUNTER_123F",
+    }
+    assert tool.check_against_catalog(rename_map, DIDS) == []
+
+
+def test_a_saved_profile_naming_the_audit_dids_is_rewritten_and_then_parses(
+    tmp_path: Path,
+) -> None:
+    """The old 0x123F name must not clip ECM_INTAKE_AIR_TEMP_1106, the real IAT,
+    which shares its prefix; after migration every Mode 22 name parses."""
+    from src.collection.obd_scheduler import parse_did_token
+
+    overrides = tmp_path / "capture_profile_overrides.yaml"
+    overrides.write_text(
+        "schema_version: 1\n"
+        "profiles:\n"
+        "- name: fuel-did-research\n"
+        "  mode22:\n"
+        "  - ECM_INTAKE_AIR_TEMP\n"
+        "  - ECM_INTAKE_AIR_TEMP_1106\n"
+        "  - ECM_AF_SENSOR_HEATER_DUTY\n"
+        "  mode22_rate_weights:\n"
+        "    ECM_INTAKE_AIR_TEMP_1106: 0.05\n"
+        "  required_tuple: [ECM_RPM, ECM_INTAKE_AIR_TEMP]\n"
+        "  feature: did:ECM_AF_SENSOR_HEATER_DUTY__mean\n"
+    )
+    with pytest.raises(ValueError):
+        parse_did_token("ECM_INTAKE_AIR_TEMP")
+
+    rc = tool.main(
+        ["--map", str(AUDIT_MAP), "--file", str(overrides), "--apply", "--daemon-stopped"]
+    )
+    assert rc == tool.EXIT_OK
+
+    doc = yaml.safe_load(overrides.read_text())
+    profile = doc["profiles"][0]
+    assert profile["mode22"] == [
+        "ECM_MONITOR_RUN_COUNTER_123F",
+        "ECM_INTAKE_AIR_TEMP_1106",
+        "ECM_IGNITION_TIMING_1107",
+    ]
+    assert profile["mode22_rate_weights"] == {"ECM_INTAKE_AIR_TEMP_1106": 0.05}
+    assert profile["required_tuple"] == ["ECM_RPM", "ECM_MONITOR_RUN_COUNTER_123F"]
+    assert profile["feature"] == "did:ECM_IGNITION_TIMING_1107__mean"
+    assert [parse_did_token(name) for name in profile["mode22"]] == [0x123F, 0x1106, 0x1107]

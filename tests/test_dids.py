@@ -234,13 +234,17 @@ def test_the_shipped_catalog_states_conditions_for_every_constant() -> None:
 
 def test_kline_evidence_alone_cannot_establish_a_can_did() -> None:
     """2026-10-04: 0x1102 was catalogued as long-term trim B1 from UpRev's K-line
-    stream; on CAN it is road speed, because the ECM keeps separate K-line and
-    CAN DID tables. A K-line finding may corroborate or refute, never stand alone.
+    stream; it is road speed. The 2026-10-05 firmware audit showed the ECM's
+    K-line table sends 0x1102 to the same speed byte, so the error was trusting
+    a third-party tool's label, not a transport difference, and the refusal says
+    so. A K-line finding may corroborate or refute, never stand alone.
     """
     kline = {"session": "s", "method": "uprev_stream", "finding": "f", "transport": "kline"}
     can = {"session": "s", "method": "firmware", "finding": "f", "transport": "can"}
-    with pytest.raises(ValidationError, match="K-line and CAN DID tables differ"):
+    with pytest.raises(ValidationError, match="third-party tool's labels") as refused:
         _entry(evidence=[kline])
+    # The refusal must not repeat the disproved "the tables differ" claim.
+    assert "differ" not in str(refused.value)
     assert _entry(evidence=[kline, can]).evidence[1].transport == "can"
     assert _entry(evidence=[can], evidence_against=[kline]).evidence_against[0].transport == "kline"
     # Legacy evidence (no transport recorded) is not judged.
@@ -263,6 +267,71 @@ def test_the_2026_10_04_can_corrections_hold() -> None:
     for did in (0x1102, 0x1123, 0x1124, 0x1125, 0x1126):
         assert "can" in {item.transport for item in by_did[did].evidence}, f"0x{did:04X}"
         assert "kline" not in {item.transport for item in by_did[did].evidence}, f"0x{did:04X}"
+
+
+def test_the_2026_10_07_did_audit_corrections_hold() -> None:
+    """Firmware DID audit (2026-10-05, applied 2026-10-07, D03.40).
+
+    0x1107 is the final timing byte (the 0x110A / PID 0x0E byte, 110 - raw),
+    not A/F heater duty; the heater duties are 0x114E/0x114F at 0.4 %. 0x123F
+    is a monitor run counter, not intake air temperature; IAT is 0x1106 at
+    raw - 50. 0x1117 is the PID 0x04 byte at 100/255 %. Exact decodes and RAM
+    bytes are pinned in the ground-truth suite (`did_pins`). The wrong names
+    are refused, not aliased (tools/channel_renames/2026-10-07-did-audit.yaml).
+    """
+    from src.collection.obd_scheduler import parse_did_token
+
+    by_did = {e.did: e for e in load_did_map(DIDS_PATH).dids}
+    timing = by_did[0x1107]
+    assert timing.name == "ECM_IGNITION_TIMING_1107"
+    assert (timing.scale, timing.offset, timing.unit) == (-1.0, 110.0, "degBTDC")
+    assert apply_scaling(timing, 93) == pytest.approx(17.0)  # the warm-idle raw
+    assert any("HEATER" in item.finding.upper() for item in timing.evidence_against)
+    for did, bank in ((0x114E, 1), (0x114F, 2)):
+        heater = by_did[did]
+        assert heater.name == f"ECM_AF_SENSOR_HEATER_DUTY_B{bank}"
+        assert (heater.scale, heater.unit) == (0.4, "percent")
+
+    counter = by_did[0x123F]
+    assert counter.name == "ECM_MONITOR_RUN_COUNTER_123F"
+    assert counter.unit == "count" and "TEMP" not in counter.name
+    assert (counter.scale, counter.offset) == (1.0, 0.0)
+    iat = [e for e in by_did.values() if "INTAKE_AIR_TEMP" in e.name]
+    assert [e.did for e in iat] == [0x1106], "only 0x1106 may present as intake air temperature"
+    assert (iat[0].scale, iat[0].offset, iat[0].unit) == (1.0, -50.0, "degC")
+
+    load = by_did[0x1117]
+    assert load.scale == pytest.approx(100 / 255)
+    assert apply_scaling(load, 255) == pytest.approx(100.0)
+
+    enrichment = by_did[0x1134]
+    assert (enrichment.scale, enrichment.unit) == (1 / 64, "phi")
+    assert any("0xFFFF26C0" in item.finding for item in enrichment.evidence)
+
+    for name in ("ECM_IGNITION_TIMING_1107", "ECM_MONITOR_RUN_COUNTER_123F"):
+        assert parse_did_token(name) in (0x1107, 0x123F)
+    for old in ("ECM_AF_SENSOR_HEATER_DUTY", "ECM_INTAKE_AIR_TEMP"):
+        with pytest.raises(ValueError):
+            parse_did_token(old)
+    # Every corrected or added entry rests on CAN (firmware) evidence.
+    for did in (0x1106, 0x1107, 0x110A, 0x1117, 0x1134, 0x123F, 0x114E, 0x114F):
+        assert "can" in {item.transport for item in by_did[did].evidence}, f"0x{did:04X}"
+
+
+def test_signed_audit_dids_are_not_given_an_unsigned_scale() -> None:
+    """The DID schema decodes unsigned. A signed word given a scale would turn a
+    small negative value into a huge positive one (0x122C raw 65482 is -54), so
+    the s16 DIDs the audit found stay raw, and 0x1249/0x124A are not duplicated:
+    mem:ECM_AF_LEARNED_OFFSET_B1/B2 read the same words and decode them signed.
+    """
+    by_did = {e.did: e for e in load_did_map(DIDS_PATH).dids}
+    assert by_did[0x122C].scale is None
+    assert 0x1249 not in by_did and 0x124A not in by_did
+    memory = {m.name: m for m in load_did_map(DIDS_PATH).memory}
+    for bank, did in ((1, "0x1249"), (2, "0x124A")):
+        channel = memory[f"ECM_AF_LEARNED_OFFSET_B{bank}"]
+        assert channel.signed
+        assert any(did in item.finding for item in channel.evidence)
 
 
 def test_0x1110_is_commanded_evap_purge_not_vvt_duty() -> None:

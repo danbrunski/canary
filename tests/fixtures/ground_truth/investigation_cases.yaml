@@ -272,8 +272,11 @@ incidents:
     title: DID 0x1102 catalogued from the K-line table
     date: 2026-10-04
     narrative: >
-      0x1102 was catalogued as LTFT bank 1 from UpRev's K-line stream; on CAN it
-      is the PID 0x0D road-speed byte (separate K-line and CAN pointer tables).
+      0x1102 was catalogued as LTFT bank 1 from UpRev's K-line stream label; it
+      is the PID 0x0D road-speed byte. The 2026-10-04 explanation (separate
+      K-line and CAN tables with different meanings) was itself wrong: the
+      2026-10-05 audit found both tables send 0x1102 to the speed byte. The
+      label was UpRev's, not the ECM's.
     links:
       - commit c897a62
       - docs/ecu-firmware-analysis.md "Mode 22 catalog corrections (CAN)"

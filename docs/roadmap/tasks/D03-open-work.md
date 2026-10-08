@@ -2350,7 +2350,11 @@ live here now, so the documents could be archived
   catalog corrections (CAN)") found separate K-line and CAN DID → RAM pointer
   tables. `data/dids.yaml` had named 0x1102 `ECM_LONG_FUEL_TRIM_B1` and 0x1125
   LTFT bank 2 from UpRev's K-line stream. On CAN, 0x1102 is the PID 0x0D speed
-  byte and 0x1125 is LTFT bank 1.
+  byte and 0x1125 is LTFT bank 1. *Corrected 2026-10-07 (D03.40): the two
+  tables point at the same variables except 0x1247, 0x1248 and 0x1315, so
+  K-line 0x1102 is the speed byte too; "separate tables, different meanings"
+  was wrong, and the LTFT names were UpRev's labels, not the ECM's. The
+  K-line refusal stays, reworded to that cause.*
   - [x] **Catalog.** 0x1102 → `ECM_VEHICLE_SPEED_COARSE` (1 byte, km/h = raw ×
     2, `confirmed`). 0x1123/0x1124 → `ECM_SHORT_FUEL_TRIM_B1/B2`, 0x1125/0x1126
     → `ECM_LONG_FUEL_TRIM_B1/B2` (1 byte, raw − 100 = trim %, the Mode 01 sign
@@ -2723,6 +2727,117 @@ live here now, so the documents could be archived
   (`tuning_frame.py`, `tuning_digest.py`, `lambda_delivery.py`); give the
   `test_voltage_transfer_censoring_is_a_named_state` fixture a provenance;
   drop the unused `BaroSamples` import; then run the lambda/tuning tests.
+
+- [~] **D03.40 Apply the firmware Mode 22 DID audit to `data/dids.yaml`
+  (2026-10-07).** The firmware session checked all 172 CAN DIDs against both
+  pointer tables and the 2026-09-17 did_log sweeps (`~/ecu-re/out/did_audit.yaml`,
+  `~/ecu-re/NOTES.md` session 8, 2026-10-05; summary in
+  [`ecu-firmware-analysis.md`](../../ecu-firmware-analysis.md), "Mode 22 DID
+  audit"). Operator: "all, one migration". The catalog side is done; the
+  measurements below are open.
+  - [x] **Two wrong identities, renamed with no alias.** 0x1107 is the final
+    timing byte 0xFFFF11FF (the PID 0x0E / 0x110A byte), not A/F heater duty:
+    `ECM_AF_SENSOR_HEATER_DUTY` → `ECM_IGNITION_TIMING_1107`, decode ×0.5 % →
+    110 − raw °BTDC. 0x123F is an increment-only monitor run counter (u16
+    0xFFFF5268), not intake air temperature: `ECM_INTAKE_AIR_TEMP` →
+    `ECM_MONITOR_RUN_COUNTER_123F`, offset −40 °C → raw count. Map:
+    `tools/channel_renames/2026-10-07-did-audit.yaml`. Old evidence moved to
+    `evidence_against`; the 2026-08-08 timing reading that had been rejected
+    moved to `evidence`.
+  - [x] **0x1117 rescaled 100/256 → 100/255 %** (the PID 0x04 byte, sent
+    unchanged).
+  - [x] **0x1106 is the IAT, `confirmed`** (raw − 50; the PID 0x0F byte is this
+    byte − 10). Conflict note replaced. It keeps the `_1106` suffix so a config
+    naming the old IAT name fails at parse instead of switching DIDs.
+  - [x] **0x1134 updated, not renamed.** Firmware evidence (high byte of Q14
+    0xFFFF26C0, the Target-AFR-map enrichment request; φ = raw/64; 64 below
+    cell ~0x82; an rpm table under HI DET), `hypothesized` → `high`. The
+    `mem:ECM_TARGET_EQUIV_RATIO` known answer (0x1134 = max(64, word >> 8))
+    now says it holds only while the map request sets the final word, never
+    in after-start or coolant enrichment. `lambda_delivery.yaml`'s refusal
+    reason was corrected the same way.
+  - [x] **Confirmed and tightened, with CAN firmware evidence:** 0x1123–0x1126
+    (1 %/count, truncated high byte; `medium` → `high`), 0x1209 (the PID 0x10
+    word; `high` → `confirmed`, response width 2 recorded), 0x1219 (1 rpm per
+    count in 3.125-rpm steps), 0x122A (the ASCD speed), 0x110A (pointer-table
+    evidence added).
+  - [x] **Added (catalogued only; no profile polls them, no model reads
+    them):** 0x1103 `ECM_BATTERY_VOLTAGE`, 0x1104 `ECM_FUEL_TANK_TEMP`
+    (inferred), 0x1115/0x1116 `ECM_EVAP_PRESSURE_SLOW`/`ECM_EVAP_PRESSURE`,
+    0x1129 `ECM_BARO_PRESSURE`, 0x111A/0x111B `ECM_REAR_O2_V_B1/B2`, 0x111E
+    `ECM_RELATIVE_THROTTLE_POS`, 0x114E/0x114F `ECM_AF_SENSOR_HEATER_DUTY_B1/B2`,
+    0x1204 `ECM_MAF_SENSOR_V`, 0x120B `ECM_FIRST_FLAGGED_DTC`, 0x120E
+    `ECM_ACCEL_PEDAL_POS_2`, 0x122B/0x122C `ECM_ASCD_SET_SPEED` /
+    `ECM_ASCD_SPEED_DEVIATION`, 0x1246 `ECM_BATTERY_CURRENT_SENSOR_COUNT`.
+    Signed words (0x122C) carry no scale: the DID schema decodes unsigned.
+    0x1249/0x124A were not duplicated: they are the words
+    `mem:ECM_AF_LEARNED_OFFSET_B1/B2` already decode signed, and those
+    entries now cite the DIDs.
+  - [x] **The transport-split claim corrected.** Both pointer tables send every
+    shared DID to the same variable except 0x1247, 0x1248 and 0x1315, so
+    K-line 0x1102 is speed too; the LTFT names were UpRev's labels. Fixed in
+    the catalog comments and 0x1102/0x1123/0x1125 notes, `Evidence.transport`'s
+    docstring, `ecu-firmware-analysis.md`, `can-pids-dids.md`,
+    `observation_aliases.yaml`, the ground-truth expectations and
+    investigation case, the vehicle skill (SKILL.md, diagnostic-access.md) and
+    D03.36. **The refusal stays** (`DidEntry._kline_evidence_cannot_name_a_can_did`):
+    the real failure was trusting a third-party tool's label, which a K-line-only
+    entry still is. Its docstring and message now say that and no longer claim
+    the tables differ (`test_kline_evidence_alone_cannot_establish_a_can_did`
+    asserts "differ" is absent).
+  - [x] **Known answers.** `did_pins` gained 0x1107 and 0x110A (same RAM byte;
+    `test_dids_sharing_a_ram_byte_decode_identically`), 0x1117 (PID 0x04 byte;
+    exact agreement, which 100/256 fails), 0x1106 (PID 0x0F = byte − 10) and
+    0x111E (PID 0x45). `test_the_2026_10_07_did_audit_corrections_hold` pins
+    names, decodes and that both old names are refused;
+    `test_signed_audit_dids_are_not_given_an_unsigned_scale`;
+    `test_the_did_audit_map_agrees_with_the_catalog` and a saved-profile
+    rewrite test (the 0x123F name must not clip `ECM_INTAKE_AIR_TEMP_1106`).
+  - [x] **K-line widths.** 0x1117, 0x1204, 0x1209 and 0x122B now have catalog
+    widths (1/2/2/2), so UpRev's K-line poll reply splits from the catalog
+    alone; the K-line protocol/sniff tests changed from "refused" to "splits",
+    and the "no width" refusal tests use uncatalogued 0x1108.
+  - [x] **Served features and callers.** No manifest (repo `models/**` incl.
+    `_candidates`, `~/canary-data/models-0920a/b`, the deployed-manifest
+    fixture) names 0x1107, 0x123F, 0x1117 or 0x1106 in any form; 0x1134
+    appears only in IF `feature_health.dropped_constant_columns`. So no
+    served feature is renamed or rescaled. Callers: `src/validation/scenarios.py`
+    (`FUEL_DIDS`, fuel-did-research `required_tuple` → the 0x1106 IAT),
+    `tests/test_capture_profiles.py`, `docs/roadmap/engine-analysis-and-mapping.md`.
+    Left as records: `capture_profiles.archive.yaml` (loaded by nothing; 2
+    names) and `data/analyses/**`. Dry run of the map: repo `models`,
+    `models-0920a/b` 0 names in 33 files; every `~/canary-data/sessions*`
+    root 0 in 92,079 files; repo profiles, configs and test fixtures 2 names
+    in 1 file (the archive).
+  - [ ] **Owed: `--apply --daemon-stopped` on the Pi** (`--config
+    /etc/canary/canary.yaml`, which includes the capture-profile overrides)
+    before it restarts on this code. Its `obd_dids` names none of the old
+    names, but a saved override (a fuel-did-research copy, for one) could;
+    the daemon refuses an unknown DID name.
+  - [ ] **Operator: rename 0x1134?** Its role is now verified and the
+    `_CANDIDATE` suffix is stale, but the 2026-09-18 map targets that name and
+    `test_the_shipped_map_agrees_with_the_catalog` holds it, so a rename means
+    a new map that also repeats the 09-18 entry (the VTC precedent).
+  - [ ] **0x120D/0x120F/0x1210 volts per count.** Counts are code-exact;
+    5/1024 V assumes a 5.000 V A/D reference, while the ECM's own PID 0x24
+    voltage uses 5.0024 mV per count (×0.005). Settle: a DMM on the TPS1
+    signal pin (or AVref) at a fixed throttle while reading 0x120F. This also
+    decides D03.36's held TPS rescale, which assumed 5/1024.
+  - [ ] **0x110D** (state byte 0xFFFF26BD, 61 on warm reads). Settle: read it
+    through a cold start and see what it tracks.
+  - [ ] **0x1159 / 0x115A** (mux AN15 slot 3 / AN3 slot 8). Settle: unplug
+    candidate sensors at key-on, engine off and watch which moves.
+  - [ ] **0x117B** (likely alternator duty, 91 typical). Settle: run the ALT
+    DUTY active test, or load the electrics (headlights + blower) at idle.
+  - [ ] **0x1218 / 0x1223** (idle air demand / AN3 slot 5, refrigerant
+    pressure candidates). Settle: A/C on and off at warm idle.
+  - [ ] **0x120B reads P0328 while driving: is the knock fallback engaged?**
+    Bit 0 of the KS items is what `mem:ECM_KS_FAULT_FLAGS` bit 7 ORs, and that
+    bit forces the fixed −5° fallback, so it is likely engaged on every drive
+    since at least 2026-08-05 (reopens the D03.38 verdict). Settle, no writes:
+    at KOEO and engine running read 0xFFFF479D bit 7, 0xFFFF677D–677F (item
+    0xAB status), 0xFFFF2CEF (KS1 DC level, band 50–199), and 0xFFFF13FE under
+    light load.
 
 ## Deferred by decision, not blocked
 

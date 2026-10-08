@@ -49,11 +49,11 @@ Mode 01 PID rows
 Nissan Mode 22 DID rows
 
 0x1101 - Engine coolant temperature - raw minus 50 degC - high confidence
-0x1219 - Engine speed - approximately raw rpm - high confidence
+0x1219 - Engine speed - raw rpm (1 rpm per count, 3.125 rpm steps, firmware) - high confidence
 0x1208 - Base fuel schedule (BFS: air charge times tune K), not injector pulse or fuel - raw times 0.00049 ms, stored as raw counts - confirmed
-0x1209 - Mass airflow - raw times 0.01 g/s - high confidence
-0x1117 - Calculated engine load - raw times 100/256 percent - high confidence
-0x1107 - A/F sensor heater duty - raw times 0.5 percent - high confidence
+0x1209 - Mass airflow, the PID 0x10 word - raw times 0.01 g/s - confirmed
+0x1117 - Calculated engine load, the PID 0x04 byte - raw times 100/255 percent - high confidence
+0x1107 - Final ignition timing, the same byte as 0x110A and PID 0x0E (formerly catalogued as A/F heater duty, wrong) - 110 minus raw degrees BTDC - high confidence
 0x1225 - Bank 1 A/F sensor voltage - raw times 0.005 V - high confidence
 0x1226 - Bank 2 A/F sensor voltage - raw times 0.005 V - high confidence
 0x120F - Throttle-position sensor 1 voltage - raw times 0.005 V - high confidence
@@ -69,17 +69,30 @@ Nissan Mode 22 DID rows
 0x121A - ECM-indicated vehicle speed - raw times 0.1 km/h - high confidence
 0x122A - Internal vehicle speed with an approximately 30 km/h floor - raw times 0.05625 km/h - high confidence
 0x1139 - Intake-cam (VTC) solenoid duty, bank 2 - raw times 0.39 percent - high confidence
-0x123F - Static or unrelated register previously called intake-air temperature - binding disproved, do not use
+0x123F - OBD monitor run counter, increment-only (formerly catalogued as intake-air temperature, wrong) - raw count - high confidence
+0x1106 - Intake-air temperature - raw minus 50 degC (the PID 0x0F byte is this byte minus 10) - confirmed
+0x1103 - ECM supply voltage, the PID 0x42 byte - raw times 0.08 V - high confidence
+0x1104 - Fuel tank temperature (inferred) - raw minus 50 degC - hypothesized
+0x1115 / 0x1116 - EVAP system pressure, slow / fast filter - raw times 0.2266 plus 54.15 kPa - high confidence
+0x1129 - Learned barometric pressure, the PID 0x33 source - raw times 0.2266 plus 54.15 kPa - high confidence
+0x111A / 0x111B - Rear O2 voltage, bank 1 / 2 (PID 0x15 / 0x19) - raw times 0.01 V - high confidence
+0x111E - Relative throttle position, the PID 0x45 byte - raw times 100/255 percent - high confidence
+0x114E / 0x114F - A/F sensor heater duty, bank 1 / 2 - raw times 0.4 percent - high confidence
+0x1204 - MAF sensor voltage - raw times 5/1024 V (nominal) - medium confidence
+0x120B - DTC of the first flagged diagnostic item (reads P0328 while driving) - DTC word - high confidence
+0x120E - Accelerator pedal sensor 2, twice its A/D count - raw counts - high confidence
+0x122B / 0x122C - Cruise set speed / speed deviation (inferred; 0x122C is signed) - raw times 0.05625 km/h - hypothesized
+0x1246 - Battery current sensor A/D count - raw counts - high confidence
 
 Notes
 
 A Mode 01 PID request is 01 followed by the PID byte.
 A Mode 22 DID request is 22 followed by the two-byte DID after entering Nissan diagnostic session 10 C0.
-Mode 01 PID 0x0F is the valid intake-air-temperature source; DID 0x123F is not.
+Intake-air temperature is Mode 01 PID 0x0F or DID 0x1106; DID 0x123F is a monitor run counter.
 Mode 01 PID 0x44 is the commanded equivalence ratio as phi (fuel/air), but only while the ECM's A/F feedback target is 14.7. The firmware computes it as the RAM phi word times the previous-cycle feedback target divided by 3675, so idle reads of 0.871 occurred with phi 1.0. Use the RAM channel mem:ECM_TARGET_EQUIV_RATIO for phi (data/dids.yaml).
 DIDs 0x1206 and 0x1207 are per-injector pulses that include the injector dead time (0.47 ms at 14.0 V), taken before the short-pulse correction and minimum-pulse floor. In fuel cut they read the dead time. Injector index 0 is bank 1 and index 1 is bank 2, from the firmware; that they are cylinders 1 and 2 is inferred. See docs/ecu-firmware-analysis.md, "Injector pulse chain".
 The intake-cam banks come from the ECM firmware's DTC table (P0011/P0075 bank 1, P0021/P0081 bank 2). That bank 1 is the cylinder 1/3/5 side is inferred, not measured.
-DIDs 0x1108 through 0x110A and 0x113C have been observed mirroring the 0x1107 heater-duty value but are not separate catalogue entries.
+DIDs 0x1107, 0x1108, 0x1109, 0x110A and 0x113C all read the final ignition timing byte (firmware DID audit, 2026-10-05); only 0x110A and 0x1107 are catalogued. The A/F heater duties are 0x114E/0x114F. The CAN and K-line DID tables point at the same variables except 0x1247, 0x1248 and 0x1315.
 
 Passive broadcast CAN signal rows
 

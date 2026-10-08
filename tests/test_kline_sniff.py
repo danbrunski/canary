@@ -101,7 +101,9 @@ def test_requests_pair_with_their_replies() -> None:
 
 def test_definitions_are_tracked_and_unknown_widths_refused_by_name() -> None:
     _, frames = _decode(STREAM)
-    tracker = DefinitionTracker(did_response_widths()[0])
+    widths = did_response_widths()[0]
+    del widths[0x1117]  # since 2026-10-07 the catalog knows every DID streamed here
+    tracker = DefinitionTracker(widths)
     results = [r for pair in exchanges(frames) if (r := tracker.observe(pair)) is not None]
     assert sorted(tracker.definitions) == [0x81, 0x82, 0x83]
     assert len(results) == 590
@@ -109,13 +111,12 @@ def test_definitions_are_tracked_and_unknown_widths_refused_by_name() -> None:
     assert all(r.raw for r in results)  # raw kept for a later re-decode
 
 
-def test_with_the_missing_widths_every_reply_lays_out_into_38_values() -> None:
-    # 0x1204 at 2 bytes and 0x1102 at 1, as the K-line layout in
-    # docs/uprev-usb-kline-research.md places them (0x1102 corrected to 1 byte
-    # in the catalog 2026-10-04).
-    widths = {**did_response_widths()[0], 0x1117: 1, 0x1204: 2, 0x1209: 2, 0x122B: 2}
+def test_with_the_catalog_widths_every_reply_lays_out_into_38_values() -> None:
+    # The firmware DID audit (2026-10-07) gave 0x1117, 0x1204, 0x1209 and
+    # 0x122B catalog widths (1, 2, 2, 2): the K-line layout in
+    # docs/uprev-usb-kline-research.md places them the same way.
     _, frames = _decode(STREAM)
-    tracker = DefinitionTracker(widths)
+    tracker = DefinitionTracker(did_response_widths()[0])
     results = [r for pair in exchanges(frames) if (r := tracker.observe(pair)) is not None]
     assert all(r.unresolved is None and len(r.values) == 38 for r in results)
 

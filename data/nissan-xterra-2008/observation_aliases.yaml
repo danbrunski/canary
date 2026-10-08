@@ -8,9 +8,10 @@
 # and which agreements prove only that a decode is right.
 #
 # Facts only from the firmware listing or a same-instant data check; each
-# entry names where it came from. The CAN and K-line DID tables are separate
-# (docs/ecu-firmware-analysis.md, "Mode 22 catalog corrections"): every DID
-# here is a CAN DID, and a K-line meaning never carries onto it.
+# entry names where it came from. Every DID here is a CAN DID. The CAN and
+# K-line DID tables point at the same variables except 0x1247, 0x1248 and
+# 0x1315 (firmware audit 2026-10-05, docs/ecu-firmware-analysis.md "Mode 22
+# catalog corrections"); a third-party tool's label never names one.
 schema_version: 1
 
 # `quantity` is what decides qualification: an input that claims a fuel trim

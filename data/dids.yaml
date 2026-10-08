@@ -187,57 +187,89 @@ dids:
     plausible_min: 0.0
     plausible_max: 7000.0
     evidence:
+      - session: firmware-ZS44A-20260920 (Mode 22 DID audit, 2026-10-05)
+        method: firmware_can_did_pointer_table
+        transport: can
+        finding: >
+          The CAN pointer table 0x24B84 entry 0x19 is the RAM word 0xFFFF1172,
+          written as w120A x 50 / 16 where w120A is engine speed in 3.125-rpm
+          counts. So raw is rpm at 1 rpm per count, in 3.125-rpm steps: the
+          scale is exact. The K-line table gives the same word.
+      - session: did_log-2026-09-17-roadload-1..3 + paced47
+        method: same_pass_ratio_vs_did_0x1201
+        transport: can
+        finding: >
+          Same poll pass against 0x1201 x 12.5 (the PID 0x0C rpm word): median
+          ratio 1.002, n = 2,339.
       - session: 2026-05-16T214006
         method: four_state_classification
         finding: >
           0 at KOEO; cold fast-idle 1190; warm idle 756 (parallel Mode 01
           = 762); ~2500-rpm hold = 2418. NT510 "ENG speed" = 775. raw ≈
           rpm directly.
-    notes: scale ≈ 1.0; exact constant not finely pinned (idle 756 vs 762).
+    notes: >
+      1 rpm per count in 3.125-rpm steps (firmware, 2026-10-05). The 756 vs
+      762 idle difference in 2026-05 was the DID and the PID read at
+      different instants, not a scale error.
 
   - did: 0x123F
-    name: ECM_INTAKE_AIR_TEMP
+    name: ECM_MONITOR_RUN_COUNTER_123F
     byte_start: 0
     byte_length: 2          # payload is 2 bytes BE (0x0050 = 80); 1-byte read hit the sentinel
+    response_length: 2
+    response_length_source: 'did_log-2026-09-17 discovery sweeps (CAN, 0x7E0, session 0xC0, tools/did_log.py): width 2 in all four headers; the CAN pointer table 0x24B84 returns a 2-byte word for every 0x12xx DID.'
     byte_order: big
+    # A count, not a temperature: scale 1, no offset. Renamed 2026-10-07 from
+    # ECM_INTAKE_AIR_TEMP (firmware DID audit, D03.40). No alias: the old name
+    # is migrated (tools/channel_renames/2026-10-07-did-audit.yaml), and a
+    # config still naming it is refused at parse.
     scale: 1.0
-    offset: -40.0
-    unit: degC
-    #: RETRACTED to `low` 2026-08-10 — see the disproving evidence below. Do
-    #: NOT use this DID as an intake-air-temperature provider. Mode 01 PID 0x0F
-    #: is the supported reference; UpRev's `INTAKE AIR TMP` is the other.
-    confidence: low
-    plausible_min: -40.0
-    plausible_max: 90.0
+    offset: 0.0
+    unit: count
+    confidence: high
     evidence:
+      - session: firmware-ZS44A-20260920 (Mode 22 DID audit, 2026-10-05)
+        method: firmware_can_did_pointer_table
+        transport: can
+        finding: >
+          The CAN Mode 22 handler (0x0D16B8) sends DID high byte 0x12 to
+          pointer table 0x24B84; entry 0x3F is the RAM word 0xFFFF5268. Its
+          only writer adds 1 to it once per run of one OBD monitor (the
+          0xA0000-0xBD000 monitor code, diagnostic item 0x136). Nothing
+          decrements or rescales it, so it is an increment-only run counter,
+          not a temperature. The K-line table resolves 0x123F to the same word.
       - session: _capture-fuel-did-research-2026-08-11T002443
         method: full_drive_constancy_check
+        transport: can
         conditions: >
           36-minute drive, DID-continuous at 14.7 Hz, rpm 0-4790 and airflow
           1.18-122.19 g/s — a full warm-up and load range, not a parked hold.
         finding: >
-          DISPROVES the binding. Raw payload was 0x0006 on ALL 31,199 samples,
-          decoding to a constant -34 degC. Intake air temperature cannot be
-          constant across a 36-minute drive spanning idle to 4790 rpm, and
-          -34 degC is not a plausible reading at any point of it. The value
-          also differs from the 0x0050 recorded in 2026-05, so this is not an
-          offset error on a live signal: 0x123F is a static or unrelated
-          register.
-
-          Why the original evidence could not catch this: it was taken parked,
-          and its own note says "intake air barely moves parked". A constant
-          and a correct reading are indistinguishable under that condition, so
-          `confidence: high` rested on a test the binding could not fail.
-          Rule this generalises to: never promote a binding on evidence taken
-          where the quantity cannot move.
+          Raw payload 0x0006 on ALL 31,199 samples. This disproved the old
+          intake-air-temperature reading (evidence_against below) and is what
+          a monitor run counter does inside one drive: a monitor that has
+          already run this trip does not run again. The 2026-09-17 did_log
+          sweeps read 6 and 7 (2,680 reads). 0x0050 in 2026-05 is the same
+          counter before the 2026-07-27 reflash, which restarts RAM.
+    evidence_against:
       - session: 2026-05-16T214006
         method: four_state_classification
+        transport: can
         finding: >
-          2-byte payload 0x0050 = 80; A-40 → flat ~40 degC across all four
-          states (intake air barely moves parked); NT510 "INT/A temp" = 42.
-          (byte_length corrected 1→2 — caught by tools/decode_dids.py.)
-          RETAINED for the byte-width correction only; the identification it
-          supports is disproved above.
+          REJECTED: intake air temperature (the former name
+          ECM_INTAKE_AIR_TEMP, offset -40). 2-byte payload 0x0050 = 80; A-40
+          gave a flat ~40 degC across all four states, and the NT510 read "INT/A
+          temp" = 42. It was taken parked, where intake air barely moves, so a
+          constant and a correct reading could not be told apart: the binding
+          rested on a test it could not fail. The 2026-08-11 drive disproved it
+          (constant 0x0006 for 36 minutes), and the firmware names the register
+          (evidence above). The byte_length correction (1 -> 2, caught by
+          tools/decode_dids.py) stands. Intake air temperature is DID 0x1106.
+    notes: |
+      An increment-only monitor run counter (u16). It has no engineering use
+      in telemetry beyond "has that monitor run since the last ECU reset".
+      Never use it as intake air temperature: that is DID 0x1106
+      (ECM_INTAKE_AIR_TEMP_1106) or Mode 01 PID 0x0F.
 
   - did: 0x1208
     name: ECM_AIR_CHARGE
@@ -382,14 +414,27 @@ dids:
     name: ECM_MAF_GPS
     byte_start: 0
     byte_length: 2
+    response_length: 2
+    response_length_source: 'did_log-2026-09-17 discovery sweeps (CAN, 0x7E0, session 0xC0, tools/did_log.py): width 2 in all four headers; the CAN pointer table 0x24B84 returns a 2-byte word for every 0x12xx DID.'
     byte_order: big
     scale: 0.01
     offset: 0.0
     unit: "g/s"
-    confidence: high  # was hypothesized ECM_BASE_FUEL_SCHEDULE_CANDIDATE
+    # confirmed 2026-10-07: the firmware computes this word with the PID 0x10
+    # expression, and the skew-gated ratio to PID 0x10 is 1.000 in every band.
+    confidence: confirmed  # was hypothesized ECM_BASE_FUEL_SCHEDULE_CANDIDATE
     aliases:
       - ECM_BASE_FUEL_SCHEDULE_CANDIDATE   # renamed 2026-08-08; saved profiles still use it
     evidence:
+      - session: firmware-ZS44A-20260920 (Mode 22 DID audit, 2026-10-05)
+        method: firmware_can_did_pointer_table
+        transport: can
+        finding: >
+          The CAN pointer table 0x24B84 entry 0x09 is the RAM word 0xFFFF3F70.
+          Its writer stores the mass-airflow word scaled by 149/256, exactly
+          the expression the CAN Mode 01 handler sends as PID 0x10 (g/s x
+          100). So this DID is the PID 0x10 word: 0.01 g/s per count is exact,
+          not fitted. The K-line table resolves 0x1209 to the same word.
       - session: _capture-tuning-hybrid-research-2026-09-17T184821 + T191712 + T201000 (blocks 6/7/9)
         method: skew_gated_same_instant_ratio_vs_mode01_maf
         constant: 0.01
@@ -444,9 +489,8 @@ dids:
       Renamed 2026-08-08: ECM_BASE_FUEL_SCHEDULE_CANDIDATE -> ECM_MAF_GPS.
       The BFS reading came from "changes with cold enrichment and load", which
       airflow does too — a signature broad enough to fit either. Base Fuel
-      Schedule is still unlocated; do NOT reuse this DID for a fuel-target map
-      lookup. UpRev's "B-FUEL SCHDL" moved 2.92 / 2.65 / 2.88 / 3.98 ms across
-      the same four rungs and no DID matched that shape, so BFS remains open.
+      Schedule was located later at 0x1208 (P02.14); do NOT reuse this DID
+      for a fuel-target map lookup.
 
       Why this matters operationally: Mode 01 and Mode 22 are mutually
       exclusive in a capture, so a tuning-DID profile loses PID 0x10 (MAF).
@@ -456,12 +500,27 @@ dids:
     name: ECM_CALC_LOAD_PCT
     byte_start: 0
     byte_length: 1
+    response_length: 1
+    response_length_source: 'did_log-2026-09-17 discovery sweeps (CAN, 0x7E0, session 0xC0, tools/did_log.py): width 1 in all four headers; the CAN pointer table 0x24988 returns one byte for every 0x11xx DID.'
     byte_order: big
-    scale: 0.390625   # 100/256 — the SAE J1979 calculated-load scaling
+    # 100/255: the SAE J1979 PID 0x04 scaling. The ECM sends this DID's byte
+    # unchanged as PID 0x04 A (firmware DID audit 2026-10-05). It was
+    # 0.390625 (100/256) until 2026-10-07, 0.4 % low.
+    scale: 0.39215686274509803
     offset: 0.0
     unit: percent
     confidence: high
     evidence:
+      - session: firmware-ZS44A-20260920 (Mode 22 DID audit, 2026-10-05)
+        method: firmware_can_did_pointer_table
+        transport: can
+        finding: >
+          The CAN pointer table 0x24988 entry 0x17 is 0xFFFF46E0, the cycle
+          snapshot of 0xFFFF4740 (the K-line table reads 0xFFFF4740 itself:
+          the same variable). The CAN Mode 01 handler sends the same byte
+          unchanged as PID 0x04 A, which J1979 decodes as A x 100/255 %. So
+          this DID is A, and 100/255 % per count is exact; the catalog's
+          earlier 100/256 read 0.4 % low at the top of the range.
       - session: 2026-08-08T214218 (rungs idle / 2000 / 3000 / idle+AC)
         method: uprev_kline_steady_state_rungs
         finding: >
@@ -477,7 +536,12 @@ dids:
           idle (800 rpm) and idle+A/C (809 rpm) rungs, +31 %. Calculated load
           must move for a load step at constant rpm, and it does.
     notes: >
-      Not previously catalogued. This is the same quantity as Mode 01 PID 0x04,
+      The rung evidence above called 100/256 the J1979 scaling; J1979 PID
+      0x04 is A x 100/255, and the firmware sends this byte as A (2026-10-05).
+      The two differ by at most 0.39 points, under the rungs' own spread, so
+      those four points could not separate them. Scale corrected 2026-10-07.
+
+      This is the same quantity as Mode 01 PID 0x04,
       which matters because Mode 01 and Mode 22 are mutually exclusive within a
       capture — a tuning-DID profile loses PID 0x04, and this DID restores it.
 
@@ -493,56 +557,72 @@ dids:
       channel — see data/bindings.yaml.
 
   - did: 0x1107
-    name: ECM_AF_SENSOR_HEATER_DUTY
+    name: ECM_IGNITION_TIMING_1107
     byte_start: 0
     byte_length: 1
+    response_length: 1
+    response_length_source: 'did_log-2026-09-17 discovery sweeps (CAN, 0x7E0, session 0xC0, tools/did_log.py): width 1 in all four headers; the CAN pointer table 0x24988 returns one byte for every 0x11xx DID.'
     byte_order: big
-    scale: 0.5
-    offset: 0.0
-    unit: percent
+    # The 0x110A encoding: degrees BTDC = 110 - raw. Renamed and rescaled
+    # 2026-10-07 from ECM_AF_SENSOR_HEATER_DUTY (x0.5 %), a wrong
+    # identification (firmware DID audit, D03.40). No alias: the old name is
+    # migrated (tools/channel_renames/2026-10-07-did-audit.yaml). The heater
+    # duties are 0x114E/0x114F.
+    scale: -1.0
+    offset: 110.0
+    unit: degBTDC
     confidence: high
-    plausible_min: 0.0
-    plausible_max: 100.0
+    plausible_min: -20.0
+    plausible_max: 60.0
     evidence:
-      - session: 2026-05-16T223328
-        method: four_state_plus_nt510_name
+      - session: firmware-ZS44A-20260920 (Mode 22 DID audit, 2026-10-05)
+        method: firmware_can_did_pointer_table
+        transport: can
         finding: >
-          raw x0.5: 0 % engine-off, ~46.5 % warm idle, 35 % at rev;
-          NT510 "A/F S1 HTR b1" = 48 %.
-    evidence_against:
+          The CAN pointer table 0x24988 entry 0x07 is 0xFFFF11FF, the final
+          ignition timing byte: the firmware writes it as 110 minus the
+          rate-limited timing word, and the CAN Mode 01 handler reports PID
+          0x0E from the same byte (110 - raw degrees). DIDs 0x110A, 0x1108,
+          0x1109 and 0x113C point at the same byte. The K-line table is
+          identical for this entry.
+      - session: did_log-2026-09-17-roadload-1..3 + paced47
+        method: same_pass_equality_vs_did_0x110A
+        transport: can
+        finding: >
+          Same poll pass, 2,683 reads: equal to 0x110A on 84.6 % of passes and
+          within one count on 96.6 % at a 24 ms median read separation; for
+          0x1109, read 7.5 ms apart, 93 % and 98.6 %. The residual is timing
+          moving between two requests, not a different register. Idle median
+          17.0 deg BTDC.
       - session: 2026-08-08T214218 (rungs idle / 2000 / 3000 / idle+AC)
         method: uprev_kline_steady_state_rungs
+        transport: kline
         finding: >
-          REJECTED: an ignition-timing reading of this DID. Recorded because it
-          is seductive and someone will re-derive it. Across four steady rungs
-          this block fits UpRev "IGN TIMING (BTDC)" at |r| = 0.9997 with a
-          strikingly clean advance = 110 - raw (residuals <= 0.42 deg over a
-          15-42 deg span). It is still wrong:
-
-          (1) Spark is ALREADY available on this vehicle via Mode 01 PID 0x0E
-          (TIMING_ADVANCE) — it is in the capture profiles and the
-          timing_advance_vs_rpm_load behavior model is fit on captured values.
-          So there is no "spark has nowhere else to live" pressure making this
-          match necessary; it only felt that way because the broadcast sweep
-          had just ruled spark off the BROADCAST bus, which is a different
-          claim. (2) Heater duty and spark
-          advance are BOTH monotone in rpm/load, and four steady points where
-          rpm and load move together cannot separate two such quantities —
-          the standing collinearity trap. (3) The block holds four near-identical
-          DIDs (0x1107-0x110A), matching this engine's four O2/AF sensors, not
-          its six cylinders; genuine per-cylinder spark would come in sixes.
-          (4) Decisive: the NT510 above independently NAMES this channel
-          "A/F S1 HTR b1" at 48 % against raw x0.5 = 46.5 %. The spark reading
-          has no comparable independent confirmation.
-
-          To overturn this you would need a fast-transient test, not more
-          steady points: spark advance moves within one combustion event, while
-          heater duty is thermal and lags seconds. Poll 0x1107-0x110A at high
-          rate through a throttle snap (batched, 2 requests) and see which
-          timescale the value follows.
+          Across four steady rungs this DID fits UpRev "IGN TIMING (BTDC)" at
+          |r| = 0.9997 with advance = 110 - raw (residuals <= 0.42 deg over a
+          15-42 deg span). Rejected at the time (evidence_against below) and
+          right all along: the firmware reads this DID from the timing byte.
+    evidence_against:
+      - session: 2026-05-16T223328
+        method: four_state_plus_nt510_name
+        transport: can
+        finding: >
+          REJECTED 2026-10-07: A/F sensor heater duty at raw x 0.5 % (the
+          former name ECM_AF_SENSOR_HEATER_DUTY). It rested on 0 % engine-off,
+          ~46.5 % warm idle, 35 % at rev, and the NT510's "A/F S1 HTR b1" =
+          48 %. The NT510 match was a coincidence: warm-idle raw 93 is 46.5 %
+          at x0.5 and also 17 deg BTDC. 2026-08-08 rejected the timing reading
+          on four arguments; (2) and (4) were the collinearity trap and that
+          coincidence, and (3), "four sensors, not six cylinders", was a guess.
+          The firmware pointer table settled it without the throttle-snap test
+          that note proposed. The heater duty is DID 0x114E (bank 1), 0.4 %
+          per count: warm idle 48.8 %, the NT510's 48 %.
     notes: >
-      DIDs 0x1108, 0x1109, 0x110A and 0x113C mirror this exact value
-      (per-sensor / redundant heater-duty registers).
+      Final ignition timing: the same byte as DID 0x110A (ECM_IGNITION_TIMING)
+      and Mode 01 PID 0x0E, so it carries no information 0x110A does not.
+      Poll 0x110A; this entry exists so a capture that polled 0x1107 decodes
+      correctly and nobody reads it as heater duty again. 0x1108, 0x1109 and
+      0x113C are further copies of the same byte and are not catalogued.
 
   - did: 0x1225
     name: ECM_AF_SENSOR_V_B1
@@ -672,11 +752,15 @@ dids:
           code. NT510's 0.65 V at idle fits 4.8828 mV (raw ~134 -> 0.654 V)
           better than x0.005 (0.67 V).
     notes: >
-      Scale deliberately left at 0.005 V on 2026-10-04 although the firmware
-      says 5/1024 V per count (2.4 % lower): did:ECM_THROTTLE_POS_SENSOR_1 is a
-      served feature of the deployed sequence model, so a rescale is a
+      Scale deliberately left at 0.005 V on 2026-10-04: did:ECM_THROTTLE_POS_SENSOR_1
+      is a served feature of the deployed sequence model, so a rescale is a
       feature-spec change that needs a retrain decision first (D03.36). The
-      counts are exact; only the volts are 2.4 % high.
+      counts are exact. The volts per count are NOT settled by code (DID
+      audit 2026-10-05): 5/1024 V assumes the A/D reference is exactly
+      5.000 V, while the ECM's own PID 0x24 C,D voltage converts its A/D at
+      5.0024 mV per count, i.e. x0.005 is the firmware's own convention. A
+      DMM on the TPS1 signal pin at a fixed throttle, read beside this DID,
+      settles it (D03.40).
 
   - did: 0x1210
     name: ECM_THROTTLE_POS_SENSOR_2
@@ -710,7 +794,8 @@ dids:
       count before this DID sees it, so raw x scale reads in sensor 1's sense
       (~0.65 V at idle, as the NT510 shows "TP sen 2-b1"). The pin voltage is
       about 5 V minus that, (1024 - raw) x 5/1024 V. Scale is held at 0.005 V
-      for the same served-feature reason as 0x120F (D03.36).
+      for the same served-feature reason as 0x120F (D03.36), and the same
+      open volts-per-count question (a DMM reading settles it; D03.40).
 
   - did: 0x1110
     name: ECM_EVAP_PURGE_CMD
@@ -1040,6 +1125,15 @@ dids:
     plausible_min: 29.9
     plausible_max: 250.0
     evidence:
+      - session: firmware-ZS44A-20260920 (Mode 22 DID audit, 2026-10-05)
+        method: firmware_can_did_pointer_table
+        transport: can
+        finding: >
+          The CAN pointer table 0x24B84 entry 0x2A is 0xFFFF3CF4, the high word
+          of the s32 0xFFFF476C that the ASCD (cruise control) function writes,
+          floored at 30 km/h. So this is the cruise controller's own speed
+          coordinate. Same poll pass against 0x121A above 40 km/h
+          (did_log-2026-09-17): median ratio 1.0008, n = 1,690.
       - session: _uprev-usb-2026-09-20-road
         method: same_reply_transform_vs_vehicle_speed
         finding: >
@@ -1063,10 +1157,11 @@ dids:
           200-reply live-idle stream reproduced 0x121A=0 and 0x122A=533 in
           every reply with the engine running at 725-762.5 rpm.
     notes: >
-      A floor-clamped internal vehicle-speed coordinate. It is useful for
-      identifying tables/logic whose speed axis bottoms at 30 km/h, but must
-      never be used as actual low-speed telemetry because it reports about 30
-      km/h at rest.
+      The ASCD (cruise control) vehicle speed: a floor-clamped internal
+      speed coordinate (firmware, 2026-10-05). Its set speed and deviation
+      are 0x122B/0x122C. It is useful for identifying tables/logic whose speed
+      axis bottoms at 30 km/h, but must never be used as actual low-speed
+      telemetry because it reports about 30 km/h at rest.
 
   # --- Intake cam timing (VTC) family ---------------------------------------
   # Five one-byte CAN DIDs, all read from one firmware block (decompiler pass
@@ -1339,10 +1434,11 @@ dids:
       (2026-10-04); the firmware VTC pass then identified it directly. The
       x0.5 % reading is impossible (raw reaches 255, which would be 127 %).
 
-  # D03.8 — a CANDIDATE, not a binding. Catalogued so research captures
-  # (`fuel-target-research`, `fuel-pw-research`) can poll it beside Mode 01 PID
-  # 0x44. No corpus-eligible profile selects it, so default collection and
-  # every trained feature spec are unchanged by this entry.
+  # D03.8, identified from firmware 2026-10-05 (D03.40): the Target-AFR-map
+  # enrichment request, the high byte of 0xFFFF26C0. The name keeps its
+  # `_CANDIDATE` suffix only because the 2026-09-18 rename map targets it and a
+  # rename is a migration (an operator call, D03.40). No corpus-eligible profile
+  # selects it and no model serves it (it is only in dropped-column lists).
   - did: 0x1134
     name: ECM_ENRICHMENT_TARGET_EQUIV_RATIO_CANDIDATE
     byte_start: 0
@@ -1356,8 +1452,24 @@ dids:
     scale: 0.015625
     offset: 0.0
     unit: phi
-    confidence: hypothesized
+    confidence: high
     evidence:
+      - session: firmware-ZS44A-20260920 (Mode 22 DID audit, 2026-10-05)
+        method: firmware_can_did_pointer_table
+        transport: can
+        finding: >
+          The CAN pointer table 0x24988 entry 0x34 is 0xFFFF26C0, the high byte
+          of a Q14 word (0x4000 = phi 1.0), so phi = raw / 64 exactly. The
+          writer at 0x55DB2 makes the word the Target-AFR-map enrichment
+          request: min(ramp, cell << 7), where cell is the Target AFR lookup
+          (0xFFFFB260), replaced by the 1-D rpm table 0xD247 (rpm / 25) while
+          HI DET (0xFFFF283F bit 6) is set. It is forced to 0x4000 (raw 64)
+          when the cell is below about 0x82 (with hysteresis) or 0xFFFF2BA9 is
+          below 0x20. It is not zeroed in fuel cut (the final target 0xFFFF26BE
+          is), and after-start and coolant enrichment live in 0xFFFF26BE, not
+          here. That explains every observation below: 64 in closed loop, in
+          fuel cut and through after-start enrichment, and the map's last
+          column on pedal enrichment. The K-line table gives the same byte.
       - session: _uprev-usb-2026-09-20-target-vs-1134-long
         method: same_reply_piecewise_transform_vs_final_ram_target
         finding: >
@@ -1439,18 +1551,22 @@ dids:
           (unresolved, two levels). Recorded so the commanded-phi reading is
           not re-derived.
     notes: >
-      Renamed 2026-09-18 from ECM_TARGET_EQUIV_RATIO_CANDIDATE. A rich-side
-      (power-enrichment) target in phi = raw / 64, not the final commanded
-      equivalence ratio — use the RAM target mem:ECM_TARGET_EQUIV_RATIO for
-      that. Mode 01 PID 0x44 is phi only while the A/F feedback target is 7350
+      The Target-AFR-map enrichment request (firmware, 2026-10-05): the high
+      byte of the Q14 word 0xFFFF26C0, phi = raw / 64. It reads 64 whenever the
+      map cell is below about 0x82, and under HI DET an rpm table replaces the
+      map. Renamed 2026-09-18 from ECM_TARGET_EQUIV_RATIO_CANDIDATE. Not the
+      final commanded equivalence ratio — use the RAM target
+      mem:ECM_TARGET_EQUIV_RATIO (0xFFFF26BE) for that. The 5,000/5,000
+      same-reply identity with 0xFFFF26BE held because the map request was
+      the active source in every state of that capture; during after-start or
+      coolant enrichment 0xFFFF26BE rises while this byte stays 64. Mode 01 PID 0x44 is phi only while the A/F feedback target is 7350
       (firmware 2026-10-05: PID 0x44 = 0xFFFF26BE x 0xFFFF46AC / 3675; see
       mem:ECM_TARGET_EQUIV_RATIO), so the "0x44 = 0.87 while this read 64"
       pairs above may be that factor rather than a lean command: 0.871 is the
       value the firmware pass traced to it on 2,437 idle reads whose pulses
       matched phi = 1.0 (those 293 pairs were not re-checked against it).
-      Its scale is now pinned directly as the low byte-resolution view
-      of Q14 phi, but its rich-side table role remains deliberately named as a
-      candidate. Single-DID transport (`obd_did_batch_max_dids: 1`) on this
+      Its scale and role are pinned by the firmware; only the name still says
+      candidate (see the comment above the entry). Single-DID transport (`obd_did_batch_max_dids: 1`) on this
       ECM's CAN diagnostic path.
 
   - did: 0x110A
@@ -1467,6 +1583,14 @@ dids:
     plausible_min: -20.0
     plausible_max: 60.0
     evidence:
+      - session: firmware-ZS44A-20260920 (Mode 22 DID audit, 2026-10-05)
+        method: firmware_can_did_pointer_table
+        transport: can
+        finding: >
+          The CAN pointer table 0x24988 entry 0x0A is 0xFFFF11FF, which the
+          firmware writes as 110 minus the rate-limited final timing word and
+          the CAN Mode 01 handler reports as PID 0x0E. DIDs 0x1107, 0x1108,
+          0x1109 and 0x113C point at the same byte; the K-line table agrees.
       - session: uprev-detailed_scheme + UpRev_Log9-20-2026_6-53-59_PM
         method: uprev_stream_definition_vs_displayed_csv
         finding: >
@@ -1491,14 +1615,19 @@ dids:
       the firmware writes this register as 110 - mem:ECM_IGNITION_TIMING_FINAL.
 
   # ---- CAN DID table corrections, 2026-10-04 ------------------------------
-  # 0x1102 and 0x1123-0x1126 were named from UpRev's K-LINE stream definition
-  # until 2026-10-04. The ECM keeps separate Mode 22 DID -> RAM pointer tables
-  # for K-line (0x022738 / 0x022938 / 0x022AB4) and CAN (0x024988 / 0x024B84 /
-  # 0x024D00), so one DID number can name different variables on the two
-  # transports (docs/ecu-firmware-analysis.md, "Mode 22 catalog corrections").
-  # This catalog is the CAN one. Evidence entries carry `transport`, and an
-  # entry whose only support is `transport: kline` is refused at load
-  # (src/decode/dids.py DidEntry).
+  # 0x1102 and 0x1125 were named from UpRev's K-line stream labels until
+  # 2026-10-04: UpRev labelled 0x1102 "LT Fuel Trim B1" and 0x1125 "LT Fuel
+  # Trim B2". The labels were UpRev's, not the ECM's. The ECM has separate
+  # Mode 22 DID -> RAM pointer tables for K-line (0x022738 / 0x022938 /
+  # 0x022AB4) and CAN (0x024988 / 0x024B84 / 0x024D00), but the full audit of
+  # both (2026-10-05, D03.40) found every DID they share points at the same
+  # variable (K-line the live copy, CAN the per-cycle snapshot, reversed for
+  # 0x120D-0x1210), except 0x1247, 0x1248 and 0x1315. So K-line 0x1102 is the
+  # speed byte too. The 2026-10-04 reading "the tables give different meanings"
+  # was wrong (docs/ecu-firmware-analysis.md, "Mode 22 catalog corrections").
+  # Evidence entries still carry `transport`, and an entry whose only support
+  # is `transport: kline` is refused at load (src/decode/dids.py DidEntry):
+  # K-line support here has meant a third-party tool's labels.
   - did: 0x1102
     name: ECM_VEHICLE_SPEED_COARSE
     byte_start: 0
@@ -1543,11 +1672,14 @@ dids:
         method: uprev_stream_definition_vs_displayed_csv
         transport: kline
         finding: >
-          REJECTED ON CAN: long-term fuel trim bank 1. UpRev's K-line stream
+          REJECTED: long-term fuel trim bank 1. UpRev's K-line stream
           displays `LT Fuel Trim B1 (%)` from its DID 0x1102 1:1 on 405/405
           rows, which is what this entry was named from until 2026-10-04. That
-          is a fact about the K-line DID table. On CAN, 0x1102 is road speed
-          (above), and LTFT bank 1 is 0x1125.
+          is a fact about UpRev's label and display formula, not about the
+          ECM: the K-line pointer table 0x22738, and the dynamic-define
+          service 0xAC that UpRev streams through, also resolve 0x1102 to the
+          speed byte 0xFFFF11A8 (firmware DID audit 2026-10-05). LTFT bank 1
+          is 0x1125.
     notes: |
       Road speed at 2 km/h resolution: the same byte PID 0x0D reports. For
       speed inside an all-DID capture prefer ECM_VEHICLE_SPEED (0x121A, 0.1
@@ -1555,8 +1687,9 @@ dids:
       and so nobody re-reads it as trim. Any trim analysis that read
       DID 0x1102 as learned trim before 2026-10-04 was reading road speed.
 
-      K-line is different: there, 0x1102 is UpRev's LTFT B1. Never carry a
-      K-line meaning back onto this CAN catalog.
+      K-line 0x1102 is the same speed byte (firmware, 2026-10-05). UpRev
+      labels it LTFT B1, and that label is UpRev's; never take a DID's meaning
+      from a third-party tool's label.
 
   - did: 0x1123
     name: ECM_SHORT_FUEL_TRIM_B1
@@ -1568,10 +1701,19 @@ dids:
     scale: 1.0
     offset: -100.0
     unit: percent
-    confidence: medium
+    confidence: high
     plausible_min: -50.0
     plausible_max: 50.0
     evidence:
+      - session: firmware-ZS44A-20260920 (Mode 22 DID audit, 2026-10-05)
+        method: firmware_trim_word_high_byte
+        transport: can
+        finding: >
+          The scale, from code: the DID is the high byte of the trim word
+          0xFFFF26B4, in which 0x6400 = 1.0 (no correction). So raw 100 is
+          0 %, one count is exactly 1 %, and the low byte is dropped: the
+          DID truncates toward the next lower percent where the PID reports
+          the full word. The clamp 125 (+25 %) matches the trim controller's 0x4B00..0x7D00 limits.
       - session: ZS44A-20260920 flash image (docs/ecu-firmware-analysis.md)
         method: firmware_can_did_pointer_table
         transport: can
@@ -1597,12 +1739,14 @@ dids:
       convention as Mode 01 PIDs 0x06-0x09, so a correct decode compares 1:1
       with SHORT_FUEL_TRIM_1. That comparison has not been made: Mode 01 and
       session 0xC0 are mutually exclusive on this ECM, so no capture holds
-      both at the same instant. The scale stays `medium` until a capture
-      that alternates this DID with PID 0x06 settles it (expectations in
+      both at the same instant. The firmware pins the scale (1 % per count,
+      truncated; 2026-10-05), so the entry is `high`; `confirmed` waits for a
+      capture that alternates this DID with PID 0x06 (expectations in
       tests/fixtures/ground_truth/expectations.yaml `did_pins`).
 
-      On K-line, UpRev's 0x1123 is also `A/F CORR-B1`, but that agreement is
-      not evidence for this entry; the tables are separate.
+      On K-line, UpRev labels 0x1123 `A/F CORR-B1`. That agrees, and the
+      K-line table points at the same word, but a tool's label is not evidence
+      for this entry (0x1102 and 0x1125 are where such labels were wrong).
 
   - did: 0x1124
     name: ECM_SHORT_FUEL_TRIM_B2
@@ -1614,10 +1758,19 @@ dids:
     scale: 1.0
     offset: -100.0
     unit: percent
-    confidence: medium
+    confidence: high
     plausible_min: -50.0
     plausible_max: 50.0
     evidence:
+      - session: firmware-ZS44A-20260920 (Mode 22 DID audit, 2026-10-05)
+        method: firmware_trim_word_high_byte
+        transport: can
+        finding: >
+          The scale, from code: the DID is the high byte of the trim word
+          0xFFFF26B6, in which 0x6400 = 1.0 (no correction). So raw 100 is
+          0 %, one count is exactly 1 %, and the low byte is dropped: the
+          DID truncates toward the next lower percent where the PID reports
+          the full word.
       - session: ZS44A-20260920 flash image (docs/ecu-firmware-analysis.md)
         method: firmware_can_did_pointer_table
         transport: can
@@ -1639,10 +1792,19 @@ dids:
     scale: 1.0
     offset: -100.0
     unit: percent
-    confidence: medium
+    confidence: high
     plausible_min: -50.0
     plausible_max: 50.0
     evidence:
+      - session: firmware-ZS44A-20260920 (Mode 22 DID audit, 2026-10-05)
+        method: firmware_trim_word_high_byte
+        transport: can
+        finding: >
+          The scale, from code: the DID is the high byte of the trim word
+          0xFFFF26DE, in which 0x6400 = 1.0 (no correction). So raw 100 is
+          0 %, one count is exactly 1 %, and the low byte is dropped: the
+          DID truncates toward the next lower percent where the PID reports
+          the full word.
       - session: ZS44A-20260920 flash image (docs/ecu-firmware-analysis.md)
         method: firmware_can_did_pointer_table
         transport: can
@@ -1667,11 +1829,12 @@ dids:
           REJECTED ON CAN: long-term fuel trim BANK 2. UpRev's K-line stream
           displays `LT Fuel Trim B2 (%)` from its DID 0x1125 1:1 on 405/405
           rows, and this entry was named ECM_LONG_FUEL_TRIM_B2 from that until
-          2026-10-04. On CAN the firmware points 0x1125 at the bank-1 word;
+          2026-10-04. The firmware points 0x1125 at the bank-1 word on both
+          transports (DID audit 2026-10-05), so the bank-2 label is UpRev's;
           bank 2 is 0x1126.
     notes: |
       Bank 1. The name ECM_LONG_FUEL_TRIM_B1 belonged to 0x1102 until
-      2026-10-04 (a K-line meaning); a saved capture profile that asks for
+      2026-10-04 (UpRev's label); a saved capture profile that asks for
       ECM_LONG_FUEL_TRIM_B1 now polls this DID, which is the trim it meant.
 
       LTFT has read 0.00 % since the 2026-09-20 flash (still 0.00 on
@@ -1691,10 +1854,19 @@ dids:
     scale: 1.0
     offset: -100.0
     unit: percent
-    confidence: medium
+    confidence: high
     plausible_min: -50.0
     plausible_max: 50.0
     evidence:
+      - session: firmware-ZS44A-20260920 (Mode 22 DID audit, 2026-10-05)
+        method: firmware_trim_word_high_byte
+        transport: can
+        finding: >
+          The scale, from code: the DID is the high byte of the trim word
+          0xFFFF26E0, in which 0x6400 = 1.0 (no correction). So raw 100 is
+          0 %, one count is exactly 1 %, and the low byte is dropped: the
+          DID truncates toward the next lower percent where the PID reports
+          the full word.
       - session: ZS44A-20260920 flash image (docs/ecu-firmware-analysis.md)
         method: firmware_can_did_pointer_table
         transport: can
@@ -1717,25 +1889,38 @@ dids:
     scale: 1.0
     offset: -50.0
     unit: degC
-    confidence: high
+    # confirmed 2026-10-07: the firmware's own PID 0x0F arithmetic and
+    # UpRev's display both reproduce raw - 50 exactly.
+    confidence: confirmed
     plausible_min: -40.0
     plausible_max: 130.0
     evidence:
+      - session: firmware-ZS44A-20260920 (Mode 22 DID audit, 2026-10-05)
+        method: firmware_can_did_pointer_table
+        transport: can
+        finding: >
+          The CAN pointer table 0x24988 entry 0x06 is 0xFFFF2CB8, which the
+          intake-air-temperature task writes from the IAT A/D through the
+          thermistor curve 0xD9CF as degC + 50. The PID 0x0F byte 0xFFFF2CB7 is
+          written as 0xFFFF2CB8 - 10, and PID 0x0F decodes A - 40, so the PID
+          reads this byte - 50 degC: raw - 50 is the ECM's own conversion. The
+          K-line table gives the same byte.
       - session: uprev-detailed_scheme + UpRev_Log9-20-2026_6-53-59_PM
         method: uprev_stream_definition_vs_displayed_csv
+        transport: kline
         finding: >
           `INTAKE AIR TMP` displays 1.8*raw - 58 on 405/405 rows (within the
           CSV's whole-degree rounding), which is (raw - 50) degC rendered in
           Fahrenheit -- the SAME -50 offset as coolant 0x1101 on this ECM,
           not the -40 OBD convention.
     notes: |
-      CONFLICT, left for the operator to resolve rather than renamed here.
-      0x123F already carries the name ECM_INTAKE_AIR_TEMP at `confidence:
-      low` with offset -40. That entry predates this evidence and uses the
-      generic OBD offset; this one matches the vehicle's own coolant
-      convention and reproduces UpRev's display exactly. Renaming 0x123F
-      would move a name that stored artifacts may reference, so the suffixed
-      name stands until someone runs tools/migrate_channel_names.py.
+      Intake air temperature, the same quantity as Mode 01 PID 0x0F (the PID
+      byte is this byte - 10). The 0x1106/0x123F conflict is resolved
+      (firmware DID audit 2026-10-05): 0x123F is a monitor run counter,
+      renamed ECM_MONITOR_RUN_COUNTER_123F on 2026-10-07. The name keeps its
+      `_1106` suffix: the old ECM_INTAKE_AIR_TEMP is refused rather than
+      moved, so a config that named it fails at parse instead of silently
+      switching DIDs.
 
   - did: 0x120D
     name: ECM_ACCEL_PEDAL_POS_1
@@ -1764,6 +1949,437 @@ dids:
 
       Pedal is the DRIVER's request; throttle (0x120F) is the plate. On a
       drive-by-wire engine they diverge, which is the point of having both.
+
+      Firmware (DID audit 2026-10-05): the raw value is accelerator pedal
+      sensor 1's A/D count (AN5), exact. Volts per count carry the same open
+      question as 0x120F (5/1024 at a 5.000 V reference, or the ECM's own
+      0.005); a DMM on the sensor pin settles it (D03.40). Pedal sensor 2 is
+      0x120E, twice the AN17 count.
+
+  # ---- Added from the firmware DID audit, 2026-10-05 (D03.40) --------------
+  # Live on CAN and uncatalogued until 2026-10-07. Catalogued only: no capture
+  # profile polls them and no model reads them, so default collection and every
+  # feature spec are unchanged. Identification and scale come from the CAN
+  # pointer table (0x24988 for 0x11xx, one-byte replies; 0x24B84 for 0x12xx,
+  # two-byte replies) and the code that writes each RAM address, in
+  # ~/ecu-re/out/did_audit.yaml. Census ranges are the 2026-09-17 did_log
+  # road-load sweeps (CAN, session 0xC0, 2,679-2,683 reads each). Widths are
+  # the sweep headers' and agree with the table's reply size. Two items the
+  # audit listed are already catalogued under other names and are not
+  # duplicated: 0x1249/0x124A read the same words as
+  # mem:ECM_AF_LEARNED_OFFSET_B1/B2 (0xFFFF4CA4/4CA6), which decode them as
+  # signed; the DID schema reads unsigned only.
+  - did: 0x1103
+    name: ECM_BATTERY_VOLTAGE
+    byte_start: 0
+    byte_length: 1
+    response_length: 1
+    response_length_source: 'did_log-2026-09-17 discovery sweeps (CAN, 0x7E0, session 0xC0, tools/did_log.py): width 1 in all four headers.'
+    byte_order: big
+    scale: 0.08
+    offset: 0.0
+    unit: V
+    confidence: high
+    plausible_min: 0.0
+    plausible_max: 20.4
+    evidence:
+      - session: firmware-ZS44A-20260920 (Mode 22 DID audit, 2026-10-05)
+        method: firmware_can_did_pointer_table
+        transport: can
+        finding: >
+          CAN table entry 0x03 is 0xFFFF11A1, the ECM supply-voltage byte. The
+          PID 0x42 (control module voltage) handler sends this byte x 80 mV, so
+          0.08 V per count is the ECM's own conversion. Census 157-174 =
+          12.6-13.9 V through a drive.
+    notes: >
+      ECM supply voltage, the same byte as Mode 01 PID 0x42. Lets an all-DID
+      capture see the charging system without leaving session 0xC0.
+
+  - did: 0x1104
+    name: ECM_FUEL_TANK_TEMP
+    byte_start: 0
+    byte_length: 1
+    response_length: 1
+    response_length_source: 'did_log-2026-09-17 discovery sweeps (CAN, 0x7E0, session 0xC0, tools/did_log.py): width 1 in all four headers.'
+    byte_order: big
+    scale: 1.0
+    offset: -50.0
+    unit: degC
+    confidence: hypothesized
+    plausible_min: -40.0
+    plausible_max: 100.0
+    evidence:
+      - session: firmware-ZS44A-20260920 (Mode 22 DID audit, 2026-10-05)
+        method: firmware_can_did_pointer_table
+        transport: can
+        finding: >
+          CAN table entry 0x04 is 0xFFFF107E: a thermistor on the AN3 mux
+          (slot 3) through the same curve 0xD9CF as intake air (degC + 50),
+          rate-limited to 2 counts per step. Fuel tank temperature is
+          inferred: it is the only thermistor in the diagnostic item table
+          that fits (P0181-P0183), but the item link was not traced. KOEO
+          2026-08-04 read 33 degC with coolant at 93 and IAT at 66; it holds
+          29-31 degC through a drive.
+    notes: >
+      Identity inferred, scale from the shared thermistor curve. Unplugging
+      the fuel tank temperature sensor at key-on, engine off (P0183 expected)
+      would confirm it.
+
+  - did: 0x1115
+    name: ECM_EVAP_PRESSURE_SLOW
+    byte_start: 0
+    byte_length: 1
+    response_length: 1
+    response_length_source: 'did_log-2026-09-17 discovery sweeps (CAN, 0x7E0, session 0xC0, tools/did_log.py): width 1 in all four headers.'
+    byte_order: big
+    # kPa = raw x 58/256 + 27724/512, from the PID 0x33 conversion applied to
+    # the high byte of the word (raw x 256).
+    scale: 0.2265625
+    offset: 54.1484375
+    unit: kPa
+    confidence: high
+    evidence:
+      - session: firmware-ZS44A-20260920 (Mode 22 DID audit, 2026-10-05)
+        method: firmware_can_did_pointer_table
+        transport: can
+        finding: >
+          CAN table entry 0x15 is the high byte of 0xFFFF115E, a slow (1/16)
+          IIR of the EVAP system pressure sensor (AN3 mux slot 7; calibration
+          0x88F0 bit 7 selects the EVAP sensor there). PID 0x32 is the learned
+          baro word minus this word x 0.879 Pa, and PID 0x33 converts the same
+          word family as kPa x 512 = word x 58/128 + 27724, so a high byte is
+          raw x 0.2266 + 54.15 kPa (0.885 Pa per word count). KOEO 0x74 =
+          80.4 kPa, the home altitude's baro. Census 57-135.
+    notes: >
+      EVAP system pressure, absolute, slow-filtered. 0x1116 is the same sensor
+      through the faster filter; 0x1129 is the learned barometric pressure.
+
+  - did: 0x1116
+    name: ECM_EVAP_PRESSURE
+    byte_start: 0
+    byte_length: 1
+    response_length: 1
+    response_length_source: 'did_log-2026-09-17 discovery sweeps (CAN, 0x7E0, session 0xC0, tools/did_log.py): width 1 in all four headers.'
+    byte_order: big
+    scale: 0.2265625
+    offset: 54.1484375
+    unit: kPa
+    confidence: high
+    evidence:
+      - session: firmware-ZS44A-20260920 (Mode 22 DID audit, 2026-10-05)
+        method: firmware_can_did_pointer_table
+        transport: can
+        finding: >
+          CAN table entry 0x16 is the high byte of 0xFFFF11A2, the filtered
+          word of the same EVAP pressure sample as 0x1115, same scale. Same
+          poll pass 0x1116 / 0x1115: median 1.000. Census 57-136.
+    notes: >
+      EVAP system pressure, absolute. See 0x1115.
+
+  - did: 0x111A
+    name: ECM_REAR_O2_V_B1
+    byte_start: 0
+    byte_length: 1
+    response_length: 1
+    response_length_source: 'did_log-2026-09-17 discovery sweeps (CAN, 0x7E0, session 0xC0, tools/did_log.py): width 1 in all four headers.'
+    byte_order: big
+    scale: 0.01
+    offset: 0.0
+    unit: V
+    confidence: high
+    plausible_min: 0.0
+    plausible_max: 1.275
+    evidence:
+      - session: firmware-ZS44A-20260920 (Mode 22 DID audit, 2026-10-05)
+        method: firmware_can_did_pointer_table
+        transport: can
+        finding: >
+          CAN table entry 0x1A is 0xFFFF11A4, the rear (downstream) O2 sensor
+          sample, bank 1. The PID 0x15 handler sends this byte x 2 in 5 mV
+          units, so one count is 0.01 V. Census 0-96 = 0-0.96 V.
+    notes: >
+      Rear O2 (HO2S2) voltage, bank 1: the PID 0x15 voltage.
+
+  - did: 0x111B
+    name: ECM_REAR_O2_V_B2
+    byte_start: 0
+    byte_length: 1
+    response_length: 1
+    response_length_source: 'did_log-2026-09-17 discovery sweeps (CAN, 0x7E0, session 0xC0, tools/did_log.py): width 1 in all four headers.'
+    byte_order: big
+    scale: 0.01
+    offset: 0.0
+    unit: V
+    confidence: high
+    plausible_min: 0.0
+    plausible_max: 1.275
+    evidence:
+      - session: firmware-ZS44A-20260920 (Mode 22 DID audit, 2026-10-05)
+        method: firmware_can_did_pointer_table
+        transport: can
+        finding: >
+          CAN table entry 0x1B is 0xFFFF11A5; the PID 0x19 handler sends this
+          byte x 2 in 5 mV units. Census 0-96.
+    notes: >
+      Rear O2 (HO2S2) voltage, bank 2: the PID 0x19 voltage.
+
+  - did: 0x111E
+    name: ECM_RELATIVE_THROTTLE_POS
+    byte_start: 0
+    byte_length: 1
+    response_length: 1
+    response_length_source: 'did_log-2026-09-17 discovery sweeps (CAN, 0x7E0, session 0xC0, tools/did_log.py): width 1 in all four headers.'
+    byte_order: big
+    scale: 0.39215686274509803   # 100/255, the PID 0x45 scaling
+    offset: 0.0
+    unit: percent
+    confidence: high
+    plausible_min: 0.0
+    plausible_max: 100.0
+    evidence:
+      - session: firmware-ZS44A-20260920 (Mode 22 DID audit, 2026-10-05)
+        method: firmware_can_did_pointer_table
+        transport: can
+        finding: >
+          CAN table entry 0x1E is 0xFFFF107F, which the PID 0x45 (relative
+          throttle position) handler sends unchanged as A; J1979 decodes A x
+          100/255 %. Census 2-210; same poll pass against 0x120F, r = 0.957.
+    notes: >
+      Relative throttle position, the same byte as Mode 01 PID 0x45.
+
+  - did: 0x1129
+    name: ECM_BARO_PRESSURE
+    byte_start: 0
+    byte_length: 1
+    response_length: 1
+    response_length_source: 'did_log-2026-09-17 discovery sweeps (CAN, 0x7E0, session 0xC0, tools/did_log.py): width 1 in all four headers.'
+    byte_order: big
+    scale: 0.2265625
+    offset: 54.1484375
+    unit: kPa
+    confidence: high
+    plausible_min: 54.0
+    plausible_max: 112.0
+    evidence:
+      - session: firmware-ZS44A-20260920 (Mode 22 DID audit, 2026-10-05)
+        method: firmware_can_did_pointer_table
+        transport: can
+        finding: >
+          CAN table entry 0x29 is the high byte of 0xFFFF4C60, the learned
+          barometric-pressure word; PID 0x33 is computed from its copy
+          0xFFFF4C30 as kPa x 512 = word x 58/128 + 27724. So a count is
+          0.2266 kPa and raw 0 is 54.15 kPa. Census 57-135 (67-85 kPa)
+          through a drive that changed altitude.
+    notes: >
+      Barometric pressure inside a Mode 22 session, where PID 0x33 is silent
+      (session 0xC0 and Mode 01 exclude each other). A learned value: it
+      updates when the ECM's learning conditions allow, not continuously.
+      Resolution 0.23 kPa (the high byte of the PID 0x33 word).
+
+  - did: 0x114E
+    name: ECM_AF_SENSOR_HEATER_DUTY_B1
+    byte_start: 0
+    byte_length: 1
+    response_length: 1
+    response_length_source: 'did_log-2026-09-17 discovery sweeps (CAN, 0x7E0, session 0xC0, tools/did_log.py): width 1 in all four headers.'
+    byte_order: big
+    scale: 0.4
+    offset: 0.0
+    unit: percent
+    confidence: high
+    plausible_min: 0.0
+    plausible_max: 102.0
+    evidence:
+      - session: firmware-ZS44A-20260920 (Mode 22 DID audit, 2026-10-05)
+        method: firmware_can_did_pointer_table
+        transport: can
+        finding: >
+          CAN table entry 0x4E is 0xFFFF40F0, which the A/F heater control
+          writes as the duty in per mille >> 2 (the duty word 0xFFFF2C06), so a
+          count is 0.4 %. Warm-idle median 48.8 % on 2026-09-17, against the
+          NT510's "A/F S1 HTR b1" = 48 %. Census 39-250.
+    notes: >
+      A/F sensor heater duty, bank 1: the quantity DID 0x1107 was wrongly
+      catalogued as until 2026-10-07 (0x1107 is ignition timing).
+
+  - did: 0x114F
+    name: ECM_AF_SENSOR_HEATER_DUTY_B2
+    byte_start: 0
+    byte_length: 1
+    response_length: 1
+    response_length_source: 'did_log-2026-09-17 discovery sweeps (CAN, 0x7E0, session 0xC0, tools/did_log.py): width 1 in all four headers.'
+    byte_order: big
+    scale: 0.4
+    offset: 0.0
+    unit: percent
+    confidence: high
+    plausible_min: 0.0
+    plausible_max: 102.0
+    evidence:
+      - session: firmware-ZS44A-20260920 (Mode 22 DID audit, 2026-10-05)
+        method: firmware_can_did_pointer_table
+        transport: can
+        finding: >
+          CAN table entry 0x4F is 0xFFFF40F1, index 1 of the same heater duty
+          store as 0x114E. Census 53-250.
+    notes: >
+      A/F sensor heater duty, bank 2.
+
+  - did: 0x1204
+    name: ECM_MAF_SENSOR_V
+    byte_start: 0
+    byte_length: 2
+    response_length: 2
+    response_length_source: 'did_log-2026-09-17 discovery sweeps (CAN, 0x7E0, session 0xC0, tools/did_log.py): width 2 in all four headers.'
+    byte_order: big
+    # Nominal 5/1024 V per count. The A/D reference is not read from code;
+    # see 0x120F and D03.40 for the same open question.
+    scale: 0.0048828125
+    offset: 0.0
+    unit: V
+    confidence: medium
+    plausible_min: 0.0
+    plausible_max: 5.0
+    evidence:
+      - session: firmware-ZS44A-20260920 (Mode 22 DID audit, 2026-10-05)
+        method: firmware_can_did_pointer_table
+        transport: can
+        finding: >
+          CAN table 0x24B84 entry 0x04 is 0xFFFF102C: the MAF sensor's 10-bit
+          A/D count (AN4) times the A/D gain correction 0x52DA, written by the
+          same function that computes the MAF word behind 0x1209 (MAF fault
+          item 0x114). Same poll pass against 0x1209: 0.97 V at 2-4 g/s, 1.27
+          at 4-8, 1.56 at 8-16, 2.04 at 16-32, 2.50 at 32-64, 2.93 at 64-110.
+          Census 74-677.
+    notes: >
+      The MAF transfer function's input voltage, before the ECM's MAF table.
+      Worth having before the supercharger's MAF work. Volts per count is
+      nominal (5/1024 at a 5.000 V reference), hence `medium`.
+
+  - did: 0x120B
+    name: ECM_FIRST_FLAGGED_DTC
+    byte_start: 0
+    byte_length: 2
+    response_length: 2
+    response_length_source: 'did_log-2026-09-17 discovery sweeps (CAN, 0x7E0, session 0xC0, tools/did_log.py): width 2 in all four headers.'
+    byte_order: big
+    # A DTC code word (0x0328 = P0328), not a quantity: no scale.
+    confidence: high
+    evidence:
+      - session: firmware-ZS44A-20260920 (Mode 22 DID audit, 2026-10-05)
+        method: firmware_can_did_handler
+        transport: can
+        finding: >
+          Not a table entry: the CAN Mode 22 handler special-cases 0x120B
+          (loop at 0xD178E). It scans diagnostic items 0..0x113 for status
+          bit 0 (0xFFFF657E + 3i) and returns the DTC word of the first item
+          with it set (table 0x102D2 + 12i), else 0.
+      - session: did-sweep-20260804-koeo-baseline + did-drive-sweeps-20260805 + did_log-2026-09-17
+        method: census
+        transport: can
+        finding: >
+          0x0000 at KOEO on 2026-08-04; 0x0328 (P0328, knock sensor 1 circuit
+          high, item 0xAB) in all 13 engine-running sweeps on 2026-08-05 and on
+          2,678 of 2,683 reads on 2026-09-17 (0 only in the first ~4 s after
+          start). Generic Mode 03/07 never report it.
+    notes: >
+      The first flagged diagnostic item's DTC, as a code word. Its P0328
+      reading matters: bit 0 of the knock-sensor items is what
+      mem:ECM_KS_FAULT_FLAGS (0xFFFF479D) bit 7 ORs, and that bit forces the fixed
+      -5 deg knock fallback. So the fallback is very likely engaged on every
+      drive since at least 2026-08-05 (reopens the 2026-10-05 knock verdict;
+      the live read that settles it is in D03.40). Decode the word as a DTC,
+      never as a number.
+
+  - did: 0x120E
+    name: ECM_ACCEL_PEDAL_POS_2
+    byte_start: 0
+    byte_length: 2
+    response_length: 2
+    response_length_source: 'did_log-2026-09-17 discovery sweeps (CAN, 0x7E0, session 0xC0, tools/did_log.py): width 2 in all four headers.'
+    byte_order: big
+    # Counts: 2 x the AN17 count, i.e. in sensor 1's sense. Volts per count
+    # carry the 0x120F reference question (D03.40), so no scale yet.
+    confidence: high
+    evidence:
+      - session: firmware-ZS44A-20260920 (Mode 22 DID audit, 2026-10-05)
+        method: firmware_can_did_pointer_table
+        transport: can
+        finding: >
+          CAN table 0x24B84 entry 0x0E is 0xFFFF2C26 = 2 x the AN17 count:
+          pedal sensor 2 is a half-output sensor, rescaled into sensor 1's
+          sense. Same poll pass 0x120E / 0x120D: median 0.968. PID 0x4A is
+          (this word - its learned closed value) x 100/321 %.
+    notes: >
+      Accelerator pedal sensor 2, as 2 x its A/D count. The pin voltage is
+      raw / 2 counts, with the same open volts-per-count question as 0x120D.
+
+  - did: 0x122B
+    name: ECM_ASCD_SET_SPEED
+    byte_start: 0
+    byte_length: 2
+    response_length: 2
+    response_length_source: 'did_log-2026-09-17 discovery sweeps (CAN, 0x7E0, session 0xC0, tools/did_log.py): width 2 in all four headers.'
+    byte_order: big
+    scale: 0.05625
+    offset: 0.0
+    unit: km/h
+    confidence: hypothesized
+    evidence:
+      - session: firmware-ZS44A-20260920 (Mode 22 DID audit, 2026-10-05)
+        method: firmware_can_did_pointer_table
+        transport: can
+        finding: >
+          CAN table 0x24B84 entry 0x2B is 0xFFFF3D04, the high word of the s32
+          0xFFFF4774 that the ASCD (cruise) function writes beside 0x122A's
+          speed. The units are inferred to be 0x122A's (0.05625 km/h). Census:
+          0, 1525 (85.8 km/h) and 1861 (104.7 km/h) only.
+    notes: >
+      Cruise control set speed (inferred). A drive that sets cruise at a known
+      speed confirms the scale.
+
+  - did: 0x122C
+    name: ECM_ASCD_SPEED_DEVIATION
+    byte_start: 0
+    byte_length: 2
+    response_length: 2
+    response_length_source: 'did_log-2026-09-17 discovery sweeps (CAN, 0x7E0, session 0xC0, tools/did_log.py): width 2 in all four headers.'
+    byte_order: big
+    # Signed (s16). The DID schema decodes unsigned, so no scale: a scale here
+    # would turn -54 (raw 65482) into +3,683 km/h.
+    confidence: hypothesized
+    evidence:
+      - session: firmware-ZS44A-20260920 (Mode 22 DID audit, 2026-10-05)
+        method: firmware_can_did_pointer_table
+        transport: can
+        finding: >
+          CAN table 0x24B84 entry 0x2C is the s16 0xFFFF2DC8, written by the
+          ASCD function. Census wraps to 65482 = -54, so it is signed; 0.05625
+          km/h per count is inferred from 0x122A.
+    notes: >
+      Cruise control speed deviation (inferred), s16. Read raw; convert as
+      s16(raw) x 0.05625 km/h if the units are confirmed.
+
+  - did: 0x1246
+    name: ECM_BATTERY_CURRENT_SENSOR_COUNT
+    byte_start: 0
+    byte_length: 2
+    response_length: 2
+    response_length_source: 'did_log-2026-09-17 discovery sweeps (CAN, 0x7E0, session 0xC0, tools/did_log.py): width 2 in all four headers.'
+    byte_order: big
+    # A/D counts (nominal 5/1024 V); the sensor's amps-per-volt is not known.
+    confidence: high
+    evidence:
+      - session: firmware-ZS44A-20260920 (Mode 22 DID audit, 2026-10-05)
+        method: firmware_can_did_pointer_table
+        transport: can
+        finding: >
+          CAN table 0x24B84 entry 0x46 is 0xFFFF1140, the battery current
+          sensor's raw A/D count (AN3 mux slot 4 -> 0xFFFF1FF2 -> 0xFFFF1140);
+          its diagnostic items 0x109-0x10D report P1554-P1550. Census 460-571.
+    notes: >
+      Battery current sensor, raw A/D count. Amps need the sensor's transfer
+      curve, which is not in the audit.
 
 # ---------------------------------------------------------------------------
 # Service 0x23 (ReadMemoryByAddress) channels.
@@ -1804,17 +2420,23 @@ memory:
       Fuel cut -- no AFR target commanded. NOT a phi of zero: scaling it
       would decode to 0.0 and then divide into a target AFR of infinity.
     # Proves the address still holds this quantity after a reflash. DID
-    # 0x1134 is the floored high byte of this word, which held across
-    # 5,000/5,000 same-reply observations with no exceptions. A moved
-    # address will not keep satisfying that, where a plausibility bound
-    # alone would happily accept whatever now lives here.
+    # 0x1134 read as the floored high byte of this word across 5,000/5,000
+    # same-reply observations with no exceptions. A moved address will not
+    # keep satisfying that, where a plausibility bound alone would happily
+    # accept whatever now lives here. Firmware (DID audit 2026-10-05): 0x1134
+    # is really the high byte of 0xFFFF26C0, the map enrichment request this
+    # word follows when the map is the active source. During after-start or
+    # coolant enrichment this word rises and 0x1134 stays 64, so run the check
+    # warm, never in the first minutes after a start.
     known_answer:
       did: 0x1134
       relation: clamped_high_byte
       floor: 64
       notes: >
         The floor is why 0x1134 cannot distinguish fuel cut from stoich:
-        word 0 and word 0x4000 both map to raw 64.
+        word 0 and word 0x4000 both map to raw 64. Holds only while the map
+        request (0xFFFF26C0, DID 0x1134's real source) is what sets this word:
+        not during after-start or coolant enrichment (firmware, 2026-10-05).
     evidence:
       - session: _uprev-usb-2026-09-20-target-afr
         method: uprev_operator_selected_memory_descriptor
@@ -1853,9 +2475,10 @@ memory:
       The ECU's FINAL commanded equivalence ratio, after every enrichment
       and cut. target_AFR = stoich_AFR / phi for a non-sentinel word.
 
-      DID 0x1134 is the low-resolution, floor-clamped rich-side view of this
-      same quantity and holds at raw 64 during fuel cut, so it cannot tell
-      fuel cut from stoich. Use 0x1134 only when this channel was not
+      DID 0x1134 is the high byte of the map enrichment request 0xFFFF26C0
+      (firmware, 2026-10-05), which this word equals while the map is the
+      active source; it holds at raw 64 during fuel cut and after-start
+      enrichment, so it cannot tell fuel cut from stoich. Use 0x1134 only when this channel was not
       polled, and never present it as the final target.
 
       Mode 01 PID 0x44 is NOT this word in general (firmware 2026-10-05,
@@ -3393,6 +4016,15 @@ memory:
           downstream-O2 ("rear") trim of the front sensor; the chain is
           verified, the name inferred. Likely backup RAM (the 0x4Cxx block also
           holds the learned TPS closed positions), inferred.
+      - session: firmware-ZS44A-20260920 (Mode 22 DID audit, 2026-10-05)
+        method: firmware_can_did_pointer_table
+        transport: can
+        finding: >
+          CAN Mode 22 DID 0x1249 (table 0x24B84 entry 0x49) is this word, 2
+          bytes. Census on 2026-09-17: 11 distinct values spanning 0 and 65535
+          (-1), i.e. small signed offsets. The DID is not catalogued separately:
+          this channel is the one entry for the quantity and decodes it signed,
+          which the DID schema cannot.
   - name: ECM_AF_LEARNED_OFFSET_B2
     address: 0xFFFF4CA6
     length: 2
@@ -3412,6 +4044,13 @@ memory:
         finding: >
           s16, AFR x 500, clamped +-500: the bank-2 counterpart of
           mem:ECM_AF_LEARNED_OFFSET_B1, added to 0xFFFF4724.
+      - session: firmware-ZS44A-20260920 (Mode 22 DID audit, 2026-10-05)
+        method: firmware_can_did_pointer_table
+        transport: can
+        finding: >
+          CAN Mode 22 DID 0x124A (table 0x24B84 entry 0x4A) is this word, 2
+          bytes. Census on 2026-09-17: 65524-65526 = -12..-10, -0.02 AFR. Not
+          catalogued separately (see bank 1).
   - name: ECM_AF_BARO_GAIN_K
     address: 0xFFFF36BB
     length: 1

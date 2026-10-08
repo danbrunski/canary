@@ -163,7 +163,7 @@ async def test_a_failed_start_is_retried_and_ownership_released_between() -> Non
 async def test_an_unreadable_plan_is_refused_once_and_never_transmits(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    entries = [("0x1117",)]  # no catalog width
+    entries = [("0x1108",)]  # no catalog width (a timing-byte copy, uncatalogued)
     collector = _collector(entries)
     stop = asyncio.Event()
     task = asyncio.create_task(collector.run(asyncio.Queue(), stop))
@@ -173,7 +173,7 @@ async def test_an_unreadable_plan_is_refused_once_and_never_transmits(
     assert FakeTransport.instances == []
     assert tx_gate.ecm_session_owner() == "can_diagnostics"
     refusals = [r for r in caplog.records if "cannot run" in r.getMessage()]
-    assert len(refusals) == 1 and "0x1117" in refusals[0].getMessage()
+    assert len(refusals) == 1 and "0x1108" in refusals[0].getMessage()
 
 
 async def test_a_vehicle_without_kline_facts_never_transmits(tmp_path: Path) -> None:

@@ -70,7 +70,7 @@ def test_an_abs_plan_reads_each_did_once_with_its_recorded_width() -> None:
         (("33:1202",), "module 33 has no reader"),
         (("ABS:1307",), "0x1307 has no recorded width"),
         (("ABS:YAW_RATE",), "no DID or binding named 'YAW_RATE'"),
-        (("0x1117",), "0x1117"),
+        (("0x1108",), "0x1108"),  # uncatalogued: no recorded width
         ((), "at least one channel"),
     ],
 )

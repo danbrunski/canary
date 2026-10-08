@@ -74,10 +74,13 @@ commanded_sources:
 refused_commanded:
   - spec: 'did:ECM_ENRICHMENT_TARGET_EQUIV_RATIO_CANDIDATE'
     reason: >-
-      DID 0x1134 is the floor-clamped high byte of the RAM target (raw =
-      max(64, floor(word/256)) on 5,000/5,000 same-reply observations): it
-      holds raw 64 at both stoich and fuel cut, so it cannot tell cut from
-      stoich, and its 1/64 resolution is 1.6 % of phi.
+      DID 0x1134 is the high byte of 0xFFFF26C0, the Target-AFR-map
+      enrichment request, not the final target 0xFFFF26BE (firmware DID
+      audit 2026-10-05; it matched max(64, floor(final/256)) on 5,000/5,000
+      same-reply observations only because the map was the active source):
+      it holds raw 64 at stoich, in fuel cut and through after-start
+      enrichment, so it cannot tell cut from stoich, and its 1/64 resolution
+      is 1.6 % of phi.
 
 # B06.7 (2026-10-05): `sensor` names the physical sensor each route reads.
 # There is one A/F sensor per bank: PID 0x24 is the ECM's lambda computed from

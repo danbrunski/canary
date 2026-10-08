@@ -139,7 +139,7 @@ The model's `equals_output_when` names each condition. The 58-byte read from `0x
 |---|---|---|
 | Service dispatcher. It keeps the request's service byte at RAM `0xFFFF8003` and the response byte (service + 0x40) at `0xFFFF810A`; transmit is at `0x02FB7C` and negative responses at `0x034F34`. | `0x030714` | Verified |
 | Mode 01 handler. Its support mask at `0xC85C` equals the 41 PIDs the 2026-07-22 probe found. Handlers exist for PID `0x0B` (MAP) and `0x43` (absolute load), but the mask leaves them off, so they never answer. | `0x0D3AFC` | Verified |
-| Mode 22 DID → RAM pointer tables, **separate for K-line and CAN**. The same DID number can point at different variables on each transport. | K-line `0x022738`, `0x022938`, `0x022AB4`; CAN `0x024988`, `0x024B84`, `0x024D00` | Verified |
+| Mode 22 DID → RAM pointer tables, separate for K-line and CAN but **pointing at the same variables** for every DID they share (K-line the live copy, CAN the per-cycle snapshot; reversed for 0x120D–0x1210), except 0x1247, 0x1248 and 0x1315 (DID audit, 2026-10-05). An earlier reading, "the same DID number can point at different variables on each transport", was wrong. K-line adds 0x14xx and 0x16xx (99 K-line-only DIDs). | K-line `0x022738`, `0x022938`, `0x022AB4`; CAN `0x024988`, `0x024B84`, `0x024D00` | Verified |
 
 RAM anchors, each tied to a Mode 01 PID or a CANary channel:
 
@@ -157,7 +157,7 @@ The full list is in `~/ecu-re/out/ram_vars.yaml`.
 
 ### Mode 22 catalog corrections (CAN)
 
-The `data/dids.yaml` entries below came from UpRev's **K-line** stream definition, applied to the CAN DIDs. The firmware shows the transports have separate tables.
+The `data/dids.yaml` entries below came from UpRev's **K-line** stream labels. The 2026-10-04 explanation was that the transports have separate tables with different meanings. The full audit of both tables on 2026-10-05 showed that is wrong: K-line 0x1102 is the speed byte too, and K-line 0x1125 is LTFT B1 too. The labels were UpRev's, not the ECM's.
 
 | DID | Catalog says | It actually is | Confidence |
 |---|---|---|---|
@@ -168,7 +168,20 @@ The `data/dids.yaml` entries below came from UpRev's **K-line** stream definitio
 
 Any earlier trim analysis that read DID `0x1102` as learned trim was reading road speed.
 
-Applied to `data/dids.yaml` on 2026-10-04 (roadmap D03.36): `ECM_VEHICLE_SPEED_COARSE`, `ECM_SHORT_FUEL_TRIM_B1/B2`, `ECM_LONG_FUEL_TRIM_B1/B2`. The 0x1102 decode is pinned against wheel speed in the ground-truth suite. Evidence entries now carry `transport`, and the catalog refuses an entry whose only support is K-line.
+Applied to `data/dids.yaml` on 2026-10-04 (roadmap D03.36): `ECM_VEHICLE_SPEED_COARSE`, `ECM_SHORT_FUEL_TRIM_B1/B2`, `ECM_LONG_FUEL_TRIM_B1/B2`. The 0x1102 decode is pinned against wheel speed in the ground-truth suite. Evidence entries now carry `transport`, and the catalog refuses an entry whose only support is K-line: K-line support has meant a third-party tool's labels.
+
+#### Mode 22 DID audit (2026-10-05)
+
+The firmware session checked all 172 CAN DIDs against both pointer tables and against the 2026-09-17 did_log sweeps (`~/ecu-re/out/did_audit.yaml`). Applied to `data/dids.yaml` on 2026-10-07 (roadmap D03.40):
+
+| DID | Catalog said | It is | Confidence |
+|---|---|---|---|
+| `0x1107` | A/F heater duty, ×0.5 % | **Final ignition timing**, byte `0xFFFF11FF` (the PID 0x0E and DID 0x110A byte), 110 − raw °BTDC. Renamed `ECM_IGNITION_TIMING_1107`. The heater duties are `0x114E`/`0x114F`, 0.4 % per count (warm idle 48.8 %, the NT510's 48 %). | Verified (pointer; same-pass equality with 0x110A rises to 93 % at 7.5 ms skew) |
+| `0x123F` | intake air temperature | **Monitor run counter**, u16 `0xFFFF5268`, increment-only. Renamed `ECM_MONITOR_RUN_COUNTER_123F`. IAT is `0x1106` (`0xFFFF2CB8`, °C + 50; PID 0x0F = that byte − 10). | Verified |
+| `0x1117` | ×100/256 % | ×**100/255** %: the PID 0x04 byte, sent unchanged. | Verified |
+| `0x1134` | rich-side target candidate | **Target-AFR-map enrichment request**, high byte of Q14 `0xFFFF26C0`, φ = raw/64; 64 when the cell is below ~0x82; an rpm table replaces the map under HI DET. | Verified |
+
+Confirmed exact: `0x1123`–`0x1126` (high byte of a 0x6400 = 1.0 word, 1 % per count, truncated), `0x1209` (the PID 0x10 word), `0x1219` (1 rpm per count, 3.125 rpm steps), `0x122A` (the ASCD speed). Not settled by code: volts per count of `0x120D`/`0x120F`/`0x1210` (5/1024 assumes a 5.000 V reference; the ECM's own PID 0x24 voltage uses 5.0024 mV per count). Added to the catalog: battery voltage, fuel tank temperature (inferred), EVAP pressure ×2, baro, rear O2 ×2, relative TPS, heater duty ×2, MAF sensor volts, first flagged DTC, pedal sensor 2, cruise set speed and deviation, battery current count. `0x1249`/`0x124A` are the RAM words `mem:ECM_AF_LEARNED_OFFSET_B1/B2` already catalogues. `0x120B` reads P0328 while driving, which reopens the knock verdict below (D03.40).
 
 ### Map-slot tables, confirmed from the code that reads the RAM copy
 
@@ -723,8 +736,9 @@ ratio of (DID − Ts) to the predicted pulse has median 1.006, p10–p90
 
 ## Open
 
-- **Catalog:** apply the Mode 22 corrections to `data/dids.yaml`, with the
-  known answers.
+- **Catalog:** the Mode 22 corrections and the 2026-10-05 audit are applied
+  (D03.36, D03.40). Open: the measurements D03.40 lists for the unresolved
+  DIDs.
 - **Active map:** `mem:ECM_ACTIVE_MAP` is catalogued and read 0 all drive
   (2026-10-04). Still to see it change: the selector stepping when the map
   switch is used, which is the operator's call. Also to check: the live

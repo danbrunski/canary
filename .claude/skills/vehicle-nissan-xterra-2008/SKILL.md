@@ -133,12 +133,13 @@ copying them. Paths are under `data/nissan-xterra-2008/` unless shown.
   `(1+STFT)(1+LTFT)−1`. Over Mode 22 on CAN, learned trim is DID `0x1125`
   (B1) and `0x1126` (B2), and short-term trim is `0x1123`/`0x1124`. These are
   the same RAM words PIDs `0x06`–`0x09` read (firmware, 2026-10-04).
-- **DID `0x1102` is vehicle speed on CAN, not learned trim.** The catalog
-  named it `ECM_LONG_FUEL_TRIM_B1` from UpRev's *K-line* stream definition.
-  The firmware has separate K-line and CAN DID tables, and on CAN `0x1102` is
-  the speed byte (one byte, km/h = raw × 2). It tracks wheel speed with
-  correlation 0.9997. The catalog's `0x1125` is bank-swapped as well. **Never
-  carry a DID's meaning across transports.** See
+- **DID `0x1102` is vehicle speed, not learned trim.** The catalog named it
+  `ECM_LONG_FUEL_TRIM_B1` from UpRev's *K-line* stream labels. It is the speed
+  byte (one byte, km/h = raw × 2) on both transports: the firmware's K-line
+  and CAN DID tables point at the same variables except 0x1247, 0x1248 and
+  0x1315 (audit 2026-10-05). It tracks wheel speed with correlation 0.9997.
+  The catalog's `0x1125` was bank-swapped the same way. **Never take a DID's
+  meaning from a third-party tool's label.** See
   `docs/ecu-firmware-analysis.md` → "Mode 22 catalog corrections"; applied
   to `data/dids.yaml` on 2026-10-04 (0x1102 is `ECM_VEHICLE_SPEED_COARSE`;
   D03.36), and the catalog now refuses a DID backed only by K-line evidence.

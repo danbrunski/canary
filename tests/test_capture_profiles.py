@@ -1436,7 +1436,9 @@ def test_shipped_catalog_rationale_survives_a_write_back(path: Path, tmp_path: P
     assert {p.name: p.notes for p in reloaded.profiles if p.notes} == documented
 
 
-_IAT_DIDS = {"ECM_INTAKE_AIR_TEMP_1106", "ECM_INTAKE_AIR_TEMP"}
+#: 0x1106 is the only IAT DID. 0x123F, once ECM_INTAKE_AIR_TEMP, is a monitor run
+#: counter (firmware DID audit, renamed 2026-10-07).
+_IAT_DIDS = {"ECM_INTAKE_AIR_TEMP_1106"}
 
 
 @pytest.mark.parametrize("path", _SHIPPED_CATALOGS, ids=lambda p: p.parent.name)
@@ -1450,9 +1452,10 @@ def test_every_capture_profile_carries_air_density_and_thermal_context(path: Pat
     profile on the Xterra was missing at least one.
 
     A profile that holds the Mode-22 session continuously cannot poll Mode 01,
-    so it carries the IAT and coolant DIDs instead. Baro has no known DID on
-    this ECM; those captures take it from the adjacent default session, and
-    this test says so rather than pretending otherwise.
+    so it carries the IAT and coolant DIDs instead. Baro now has a catalogued
+    DID (0x1129, ECM_BARO_PRESSURE, firmware audit 2026-10-07) that no profile
+    polls yet; until one does, those captures take baro from the adjacent
+    default session, and this test says so rather than pretending otherwise.
     """
     catalog = CaptureProfileCatalog.model_validate(yaml.safe_load(path.read_text()))
     missing: dict[str, list[str]] = {}
@@ -1682,7 +1685,7 @@ def test_a_readable_kline_list_saves(tmp_path: Path) -> None:
     ("entries", "named"),
     [
         (("NOT_A_CHANNEL",), "neither a DID nor a memory channel"),
-        (("0x1117",), "0x1117"),  # a DID with no recorded width
+        (("0x1108",), "0x1108"),  # a DID with no recorded width (uncatalogued)
         (("ABS:1202", "0x1201"), "one wire"),
         (("TCM:1202",), "no K-line module named 'TCM'"),
     ],
