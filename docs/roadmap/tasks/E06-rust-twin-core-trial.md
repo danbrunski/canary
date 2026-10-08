@@ -131,7 +131,7 @@ does no bus, disk or network I/O, and has no dependency on Python objects.
   The state path's vectors and tests read E05.3's `ecu_state_models.py`
   (committed in `0beea7c`, MODEL_VERSION 1).
 
-- [ ] **E06.3 — Measure the full Python-to-Rust path on the Pi.**
+- [~] **E06.3 — Measure the full Python-to-Rust path on the Pi.**
   Trial a thin PyO3 binding with one call per complete tuple or bounded
   batch, instead of crossing languages for every arithmetic operation.
   Rust-only work can detach from the interpreter where beneficial. Preserve
@@ -147,6 +147,136 @@ does no bus, disk or network I/O, and has no dependency on Python objects.
   (≤1 ms p99, ≤5 ms max per tick, ≤1 MiB table/state) where applicable,
   reporting extension/runtime overhead separately and total impact as well.
   Laptop microbenchmarks or Rust-only timings cannot close this item.
+  - *Harness, 2026-10-08 (laptop; uncommitted at writing).* The binding
+    gained five probes, so that each part of a crossing is timed alone:
+    `bench_noop` (bare call), `bench_detach` (detach/reattach with no work),
+    `TargetPhiTable.bench_convert` (extract and narrow a bounded batch, no
+    compute), `bench_compute_ns` (Rust-only compute, timed inside Rust with the
+    interpreter detached) and `bench_return_words` (return a list shaped like
+    `word_batch`'s). `word_batch` now shares its conversion with the probes,
+    and its behaviour is unchanged. `tools/bench_ecu_twin.py` runs the paired
+    Python/Rust run and writes one JSON:
+    - parity: all 4,160 + 1,242 vectors, the real lookup inputs of the
+      October 4 capture, and seeded random tuples over the real ZS44A-20260920
+      table. Each side's outputs are hashed with sha256 over canonical JSON,
+      covering the full trace, `word` and `word_batch`.
+    - latency: p50/p95/p99/max for one-tuple calls, batches of 1/16/256/4096,
+      and the four parts.
+    - throughput.
+    - fresh-interpreter import time and incremental RSS.
+    - the E04.3 verdict.
+
+    `scripts/e06_pi_bench.sh` is the Pi run. It refuses the daemon's
+    checkout as its working copy. It refuses any `vehicle_state` other than
+    `parked`/`bench`/`engine_off`, and an active capture, before the run; it
+    reads them again afterwards and exits 3, marking the run invalid, if the
+    state left idle. It builds clean under `nice -n 19` and records
+    rustc/cargo/maturin/PyO3/Python, flags, build seconds and wheel size. It
+    unpacks the wheel into its own `bench-venv`, which sees the daemon venv
+    read-only through a `.pth`, so it never installs into the daemon venv.
+    `tests/test_bench_ecu_twin.py` has 4 tests that always run and 2 that skip
+    by name without the extension. `tests/test_ecu_twin_core_rust.py` now uses
+    the tool's `ext_run`, so the gate and the Pi run share one runner.
+  - *Real tuples, measured:* the October 4 capture holds 563 real
+    `(rpm, load, flag)` raw tuples, one per input read with the latest read of
+    the other two: 291 distinct, 6 on the override branch, 1 in the gate band.
+    The full stored session
+    (`~/canary-data/.../_capture-ram-study-2026-10-04T204557`) gives the same
+    563, with the same digest as the committed fixture. **The stored twin
+    hands its kernel none of them** (a spy on `target_command` counted
+    `twin_kernel_calls: 0`): all 174 candidates are unevaluable
+    (`input_stale:load` 120, `sentinel` 21, `input_stale:rpm` 18,
+    `map_identity_unbracketed` 15). E04.3's Pi replay measured `twin_eval`
+    p95 0.536 ms on this capture. By E06.1's spy test (the live path makes the
+    stored path's kernel calls), that time was all spent outside the kernel
+    boundary Rust would replace. This is an inference, not measured in the
+    daemon.
+  - *Laptop dry run, 2026-10-08* (x86_64 WSL2, Python 3.12.3,
+    rustc/cargo 1.93.1, maturin 1.3.2, PyO3 0.27.2, release, no RUSTFLAGS,
+    abi3-py312). This does not close the item. The script ran end to end
+    against a stub `/status` (`bench`):
+    - Build: clean in 28.3 s; wheel 305,010 B; `.so` 747,936 B.
+    - Parity: identical. Lookup 4,160 and state 1,242 vectors with 0
+      mismatches (sha256 `8f0145d1…`, `f2c0c111…` on both sides); real 563
+      (`d575ec11…`); random 20,000 (`52ac1d1c…`).
+
+    Latency in µs (p50 / p99 / max):
+
+    | Call | p50 | p99 | max |
+    |---|---|---|---|
+    | Python `target_command` | 13.8 | 50.7 | 8,034 |
+    | Python `predict` | 18.1 | 105.8 | 1,693 |
+    | Rust `word` | 0.77 | 2.18 | 129 |
+    | Rust `command` (dict trace) | 3.5 | 26.5 | 258 |
+    | `uprev_step`, Python | 6.9 | 55.6 | 220 |
+    | `uprev_step`, Rust | 1.6 | 6.2 | 218 |
+    | `word_batch(4096)` total | 703 | 2,224 | 2,292 |
+    | `word_batch(4096)`: convert | 285 | – | – |
+    | `word_batch(4096)`: detach | 0.2 | – | – |
+    | `word_batch(4096)`: compute | 270 | – | – |
+    | `word_batch(4096)`: return | 157 | – | – |
+    | Python loop of 4096 | 70,067 | 83,000 | 83,000 |
+
+    The four `word_batch(4096)` parts sum to 712 at p50. At 4096 tuples,
+    conversion plus return cost about as much as the compute.
+
+    Other laptop figures:
+    - Throughput in tuples/s: Python 61,950; Rust `word` 3.2 M; `command`
+      335 k; `word_batch` 6.4 M.
+    - Import adds 3.6 ms in a fresh interpreter. The Python reference
+      (`src.decode.target_phi_command`, with the `src` package) adds 47.7 ms.
+    - RSS: import plus table +384 KiB. The table's own footprint is 160 B.
+      1,000 batches of 4,096 add 0 KiB after the first 500.
+    - Against E04.3: one-tuple calls are far inside ≤1 ms p99 / ≤5 ms max on
+      both backends. The 4,096-tuple worst batch misses p99 in Rust (2.2 ms)
+      and both limits in Python (83 ms).
+  - *Not done by the implementer:* the Pi run. The implementer role is
+    offline-only, so it does not ssh. The orchestrator or operator runs:
+    `git archive <commit with this work> rust src tests tools scripts data pyproject.toml | ssh canary@canary.local 'mkdir -p ~/e06-work && tar -xf - -C ~/e06-work'`,
+    then `ssh canary@canary.local 'bash ~/e06-work/scripts/e06_pi_bench.sh'`
+    (about 1 minute on the laptop, several on the Pi). The results land in
+    `~/e06-work/results/{build,pi}-<stamp>.json`. `cargo fetch` needs the
+    Pi's Wi-Fi uplink, or vendor the crates from the laptop.
+    `E06_SESSION` names a stored capture; the default is the Pi's copy of
+    the October 4 ram-study capture, used when present.
+  - *Owed under load (protocol):* missed ticks and collector loss under
+    representative collection load. Two things gate it:
+    - **The twin must actually call its kernel.** It needs a capture whose
+      profile reads all four `back_to_back` windows of
+      `target_phi_twin.yaml` (`fuel_target`, `fuel_axis`, `spark`,
+      `flags_2841`) within `max_span_s` 0.25 s. The repo `tuning` profile
+      lacks the X trace and the pedal flags, and the October 4 ram-study
+      reads were over a second apart. A run without them measures a Rust arm
+      that never runs.
+    - **The extension must be importable in the daemon, behind an explicit
+      backend switch.** That switch is code owed in `src/daemon/twin_live.py`.
+      Placing the wheel into the daemon venv is an operator decision.
+
+    Then, on the truck, engine running, stationary or on a repeatable loop,
+    with that capture active:
+    1. Run the arms A (twin off), B (twin on, Python), C (twin on, Rust) and
+       A again, each ≥ 10 min (≥ 600 ticks). Switch only with the capture
+       stopped and `scripts/restart_canary.sh`, then restart the capture.
+       Drop each arm's first 60 s.
+    2. Every 20 s, log from `/status`:
+       - `vehicle_state`;
+       - the inference missed-tick counter;
+       - storage dropped records and the maximum `queue_depth`;
+       - can0 `rx_over_errors`;
+       - achieved reads/s;
+       - `twin_eval`/`twin_tick` p50/p95/max and the twin's decided/kernel
+         counts;
+       - cgroup `memory.current`;
+       - daemon CPU from `/proc/<pid>/stat`.
+    3. Accept only if all of these hold:
+       - B and C each add 0 missed ticks and 0 dropped records over the
+         bracketing A arms. A nonzero delta is diagnosed, never averaged away.
+       - `twin_eval` p99 ≤ 1 ms and max ≤ 5 ms.
+       - C's RSS over A ≤ 1 MiB, reported beside B's.
+       - The kernel count is above zero in B and C.
+    4. Replay throughput: replay the same capture with each backend through
+       E04.3's replay procedure. Report decisions/s and `twin_eval` per
+       backend.
 
 - [ ] **E06.4 — Record the adoption decision and deployment implications.**
   Compare the measured headroom, arithmetic clarity and replay benefit with

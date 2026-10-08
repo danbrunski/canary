@@ -28,6 +28,7 @@ from src.analysis import ecu_state_models as sm
 from src.decode import ecm_lookup, fuel_comp_load
 from src.decode.target_phi_command import GateConstants, target_command
 from tests import ecu_twin_vectors as vectors
+from tools.bench_ecu_twin import ext_run
 
 ext = pytest.importorskip(
     "canary_ecu_twin",
@@ -37,87 +38,10 @@ ext = pytest.importorskip(
 Json = dict[str, Any]
 
 
-def _refusal(error: Exception) -> str:
-    if isinstance(error, TypeError):
-        return "not_whole_count"  # a float where the binding takes an int
-    if isinstance(error, OverflowError):
-        return "out_of_domain"  # wider than i64
-    return str(error).split(":", 1)[0]
-
-
 def _ext_run(vector: Json, named: Json) -> Json:
-    op, i = vector["op"], vector["in"]
-    try:
-        if op == "search_axis":
-            axis = named["axes"][i["axis"]] if "axis" in i else i["breakpoints"]
-            out: Json = {"hit": ext.search_axis(axis, i["value"])}
-        elif op == "interpolate_q16":
-            out = {"value": ext.interpolate_q16(i["a"], i["b"], i["fraction"])}
-        elif op == "lookup_2d":
-            t = named["tables"][i["table"]]
-            out = ext.lookup_2d(
-                t["cells"],
-                t["row_breakpoints"],
-                t["column_breakpoints"],
-                i["row_value"],
-                i["column_value"],
-            )
-        elif op == "lookup_curve_q16":
-            c = named["curves"][i["curve"]]
-            out = {"value": ext.lookup_curve_q16(c["values"], c["breakpoints"], i["value"])}
-        elif op == "lookup_shift12_q16":
-            out = {"value": ext.lookup_shift12_q16(named["tables16"][i["table16"]], i["value"])}
-        elif op == "target_command":
-            t, k = named["tables"][i["table"]], named["constants"][i["constants"]]
-            table = ext.TargetPhiTable(
-                t["cells"],
-                t["row_breakpoints"],
-                t["column_breakpoints"],
-                k["flag_bit"],
-                k["load_bits"],
-                k["floor_cell"],
-                k["threshold_cell"],
-                k["hysteresis_cells"],
-                k["cell_to_word_shift"],
-            )
-            out = table.command(i["rpm_raw"], i["load_raw"], i["flag_raw"])
-        elif op == "x_from_bfs":
-            out = {"value": ext.x_from_bfs(i["bfs"], i["scaler"], i["shift"], i["cap"])}
-        elif op in ("load_input_curves", "fuel_comp_load"):
-            c = named["load_curves"][i["curves"]]
-            curves = ext.LoadCurves(
-                c["area_breakpoints"],
-                c["area_values"],
-                c["fill_low"],
-                c["fill_high"],
-                c["rpm_multiplier"],
-                c["reciprocal_numerator"],
-                c["idle_air_cap"],
-                c["limp_home_area"],
-            )
-            if op == "load_input_curves":
-                out = {"valid": True}
-            else:
-                out = curves.reconstruct(
-                    i["throttle_counts"],
-                    i["rpm_word"],
-                    i["idle_air"],
-                    i["purge_area"],
-                    i["limp_home"],
-                )
-        elif op == "uprev_power_on":
-            out = ext.uprev_power_on(tuple(i["retained"]))
-        elif op == "uprev_step":
-            out = ext.uprev_step(tuple(i["state"]), i["inputs_2ee0"])
-        elif op == "uprev_sequence":
-            out = {"steps": ext.uprev_sequence(tuple(i["state"]), i["inputs"])}
-        elif op == "loaded_slot":
-            out = ext.loaded_slot(i["magic"], i["active_map"])
-        else:  # pragma: no cover - a new op must be wired here
-            raise AssertionError(f"unwired op {op}")
-    except (ValueError, TypeError, OverflowError) as error:
-        return {"refuse": _refusal(error)}
-    return {"out": out}
+    """The extension in the vectors' shape: the same runner E06.3's Pi
+    benchmark (``tools/bench_ecu_twin.py``) uses for its paired runs."""
+    return ext_run(ext, vector, named)
 
 
 def test_the_extension_implements_this_contract_version() -> None:

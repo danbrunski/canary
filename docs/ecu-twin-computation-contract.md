@@ -99,6 +99,13 @@ maturin build --release -m rust/ecu_twin_py/Cargo.toml -o <dir>
 PYTHONPATH=<unpacked wheel> .venv/bin/python -m pytest tests/test_ecu_twin_core_rust.py
 ```
 
+E06.3's paired run and boundary benchmark is `tools/bench_ecu_twin.py`. It
+uses the same vector runner as the test and the binding's `bench_*` probes,
+which time conversion, detach, compute and return separately. On the Pi it
+runs through `scripts/e06_pi_bench.sh`, which refuses unless the truck is
+parked/bench/engine_off with no capture, and never installs into the daemon's
+venv.
+
 The Python gate never builds or installs the extension.
 `tests/test_ecu_twin_core_rust.py` skips by name without it, and CI has no
 Rust toolchain.

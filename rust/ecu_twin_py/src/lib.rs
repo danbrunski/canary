@@ -7,7 +7,12 @@
 //! `ValueError("<contract kind>: ...")`. Tables and curves are converted and
 //! validated once, into owned immutable objects (`TargetPhiTable`,
 //! `LoadCurves`), so a per-tuple call crosses the boundary with three
-//! integers; `command_batch` crosses once per bounded batch.
+//! integers; `word_batch` crosses once per bounded batch.
+//!
+//! The `bench_*` entry points exist for E06.3's Pi measurement: each isolates
+//! one part of a crossing (argument conversion, interpreter detach/attach,
+//! Rust-only computation, return handling) so they can be timed separately
+//! and together. They compute nothing the contract does not.
 
 use ecu_twin_core::fuel_comp_load::{reconstruct, LoadInputCurves};
 use ecu_twin_core::lookup::{self, AxisHit, LookupResult, Table2d};
@@ -17,6 +22,8 @@ use ecu_twin_core::{byte, word, Refusal};
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyList};
+use std::hint::black_box;
+use std::time::Instant;
 
 /// Largest batch one call accepts (E04's bounded handoff, not a stream).
 const MAX_BATCH: usize = 4096;
@@ -39,6 +46,20 @@ fn l(v: i64) -> PyResult<u32> {
 
 fn words(v: &[i64]) -> PyResult<Vec<u16>> {
     v.iter().map(|&x| w(x)).collect()
+}
+
+/// A bounded batch narrowed to the contract's widths (refuses past MAX_BATCH).
+fn narrow_batch(tuples: &[(i64, i64, i64)]) -> PyResult<Vec<(u16, u16, u32)>> {
+    if tuples.len() > MAX_BATCH {
+        return Err(PyValueError::new_err(format!(
+            "batch of {} exceeds {MAX_BATCH}",
+            tuples.len()
+        )));
+    }
+    tuples
+        .iter()
+        .map(|&(r, ld, f)| Ok((w(r)?, w(ld)?, l(f)?)))
+        .collect()
 }
 
 fn hit<'py>(py: Python<'py>, h: AxisHit) -> PyResult<Bound<'py, PyDict>> {
@@ -201,21 +222,32 @@ impl TargetPhiTable {
         py: Python<'_>,
         tuples: Vec<(i64, i64, i64)>,
     ) -> PyResult<Vec<Option<u32>>> {
-        if tuples.len() > MAX_BATCH {
-            return Err(PyValueError::new_err(format!(
-                "batch of {} exceeds {MAX_BATCH}",
-                tuples.len()
-            )));
-        }
-        let inputs: Vec<(u16, u16, u32)> = tuples
-            .iter()
-            .map(|&(r, ld, f)| Ok((w(r)?, w(ld)?, l(f)?)))
-            .collect::<PyResult<_>>()?;
+        let inputs = narrow_batch(&tuples)?;
+        Ok(py.detach(|| self.words_of(&inputs)))
+    }
+
+    /// E06.3 probe: argument conversion only. Extracts and narrows a bounded
+    /// batch exactly as `word_batch` does, computes nothing, returns its length.
+    fn bench_convert(&self, tuples: Vec<(i64, i64, i64)>) -> PyResult<usize> {
+        Ok(black_box(narrow_batch(&tuples)?).len())
+    }
+
+    /// E06.3 probe: Rust-only computation. Converts the batch once, then
+    /// computes it `repeats` times with the interpreter detached, timing each
+    /// pass with a monotonic clock inside Rust; returns nanoseconds per pass.
+    fn bench_compute_ns(
+        &self,
+        py: Python<'_>,
+        tuples: Vec<(i64, i64, i64)>,
+        repeats: usize,
+    ) -> PyResult<Vec<u64>> {
+        let inputs = narrow_batch(&tuples)?;
         Ok(py.detach(|| {
-            inputs
-                .iter()
-                .map(|&(r, ld, f)| {
-                    target_phi::target_command(&self.table, &self.constants, r, ld, f).word
+            (0..repeats)
+                .map(|_| {
+                    let start = Instant::now();
+                    black_box(self.words_of(black_box(&inputs)));
+                    u64::try_from(start.elapsed().as_nanos()).unwrap_or(u64::MAX)
                 })
                 .collect()
         }))
@@ -226,6 +258,42 @@ impl TargetPhiTable {
     fn footprint_bytes(&self) -> usize {
         self.table.footprint_bytes()
     }
+}
+
+impl TargetPhiTable {
+    fn words_of(&self, inputs: &[(u16, u16, u32)]) -> Vec<Option<u32>> {
+        inputs
+            .iter()
+            .map(|&(r, ld, f)| {
+                target_phi::target_command(&self.table, &self.constants, r, ld, f).word
+            })
+            .collect()
+    }
+}
+
+/// E06.3 probe: one call that does nothing (the bare crossing).
+#[pyfunction]
+fn bench_noop() {}
+
+/// E06.3 probe: one call that detaches from the interpreter and reattaches,
+/// doing no work in between.
+#[pyfunction]
+fn bench_detach(py: Python<'_>) {
+    py.detach(|| black_box(()));
+}
+
+/// E06.3 probe: return handling only. Hands back a bounded list of `n` words
+/// shaped like `word_batch`'s (every eighth `None`, the gate band).
+#[pyfunction]
+fn bench_return_words(n: usize) -> PyResult<Vec<Option<u32>>> {
+    if n > MAX_BATCH {
+        return Err(PyValueError::new_err(format!(
+            "batch of {n} exceeds {MAX_BATCH}"
+        )));
+    }
+    Ok((0..n)
+        .map(|i| if i % 8 == 7 { None } else { Some(0x4A80) })
+        .collect())
 }
 
 /// The `0xFFFF118A` chain's calibration, validated once.
@@ -410,6 +478,9 @@ fn canary_ecu_twin(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(uprev_step, m)?)?;
     m.add_function(wrap_pyfunction!(uprev_sequence, m)?)?;
     m.add_function(wrap_pyfunction!(loaded_slot, m)?)?;
+    m.add_function(wrap_pyfunction!(bench_noop, m)?)?;
+    m.add_function(wrap_pyfunction!(bench_detach, m)?)?;
+    m.add_function(wrap_pyfunction!(bench_return_words, m)?)?;
     m.add_class::<TargetPhiTable>()?;
     m.add_class::<LoadCurves>()?;
     Ok(())
