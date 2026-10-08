@@ -44,6 +44,7 @@ from __future__ import annotations
 import math
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
+from datetime import date
 from pathlib import Path
 from typing import Any, Literal
 
@@ -56,7 +57,13 @@ from src.analysis.channels import refuse_as_of
 from src.analysis.compare import align_pairs
 from src.analysis.noise_floor import NoiseFloor
 from src.paths import BINDINGS_YAML, DIDS_YAML
-from src.signals.afr import AfrCalibration, voltage_to_afr
+from src.signals.afr import (
+    BARO_MISSING,
+    BARO_STALE,
+    AfrCalibration,
+    BaroSamples,
+    voltage_to_afr,
+)
 from src.signals.pairing import PairingPolicy, match_ordered, to_seconds
 
 Quantity = Literal["phi", "lambda", "afr"]
@@ -68,6 +75,8 @@ IneligibleState = Literal[
     "convention_unverified",
     "calibration_unknown",
     "measured_missing",
+    "baro_missing",
+    "baro_stale",
     "measured_rail",
     "measured_censored",
     "target_transient",
@@ -83,6 +92,11 @@ STATES: tuple[str, ...] = (
     "convention_unverified",
     "calibration_unknown",
     "measured_missing",
+    # B06.7: a voltage-route read with no barometric pressure as of it (or one
+    # older than the calibration's max age) has no measured lambda: the ECM's
+    # gain cannot be applied, and gain 1 is sea level.
+    BARO_MISSING,
+    BARO_STALE,
     "measured_rail",
     "measured_censored",
     "post_fuel_cut",
@@ -154,14 +168,20 @@ class RefusedSource(_Strict):
 
 
 class MeasuredSource(_Strict):
-    """One measured-mixture instrument."""
+    """One measured-mixture route."""
 
     name: str
     spec: str
     quantity: Literal["lambda", "afr"]
     #: ``voltage_afr`` applies the calibration's voltage transfer (the raw
-    #: reading is a sensor voltage) and its censoring bounds.
+    #: reading is a sensor voltage) at the ECM's barometric gain, from the baro
+    #: read as of each read, and its censoring bounds (B06.7).
     transform: Literal["identity", "voltage_afr"] = "identity"
+    #: B06.7 — the physical sensor this route reads, required. Two routes
+    #: through one sensor (PID 0x24 and the A/F voltage DID are both bank 1's
+    #: A/F sensor, computed from one ECM word) are one instrument: their
+    #: agreement is not corroboration, and nothing may count them as two.
+    sensor: str = Field(min_length=1)
     convention_evidence: str = Field(min_length=1)
     #: Readings at or beyond a rail are the sensor's limit, not a mixture
     #: (PID 0x24 pegs at 2.000 under fuel cut). Source quantity.
@@ -169,14 +189,62 @@ class MeasuredSource(_Strict):
     rail_high: float | None = None
 
 
+#: Largest remainder (percent) a disagreement may leave and still be filed
+#: ``explained``: the WOT delivery noise floor on record (1.49 %, rounded down).
+EXPLAINED_REMAINDER_PCT = 1.0
+
+
+class DisagreementExplanation(_Strict):
+    """Why a disagreement between two routes has the direction and size it has."""
+
+    mechanism: str = Field(min_length=1)
+    #: The size the mechanism predicts at the disagreement's conditions,
+    #: percent, signed like ``value_pct``.
+    predicted_pct: float
+    #: ``value_pct - predicted_pct``: what the mechanism leaves unexplained.
+    #: Checked, so a partial explanation cannot be filed as a whole one.
+    unexplained_pct: float
+    explained_on: date
+    evidence: str = Field(min_length=1)
+
+
 class SourceDisagreement(_Strict):
-    """A measured disagreement between two instruments, kept visible."""
+    """A measured disagreement between two routes, kept visible.
+
+    ``relation`` states whether the two read one sensor or two; the
+    declaration refuses a pair that claims ``independent_sensors`` while
+    sharing a sensor (B06.7). ``explanation`` may be attached to an
+    ``unresolved`` entry as a partial mechanism. ``explained`` requires it and
+    an unexplained remainder within ``EXPLAINED_REMAINDER_PCT``; ``resolved``
+    means the original condition was re-measured with the mechanism removed.
+    The original numbers stay as they were measured.
+    """
 
     between: tuple[str, str]
+    relation: Literal["same_sensor", "independent_sensors"]
     value_pct: float
     conditions: str = Field(min_length=1)
-    status: Literal["unresolved", "resolved"]
+    status: Literal["unresolved", "explained", "resolved"]
     evidence: str = Field(min_length=1)
+    explanation: DisagreementExplanation | None = None
+
+    @model_validator(mode="after")
+    def _explained(self) -> SourceDisagreement:
+        where = f"disagreement {list(self.between)}"
+        if self.status != "unresolved" and self.explanation is None:
+            raise ValueError(f"{where}: status {self.status!r} needs an explanation")
+        if self.explanation is not None:
+            remainder = self.value_pct - self.explanation.predicted_pct
+            if abs(remainder - self.explanation.unexplained_pct) > 0.01:
+                raise ValueError(
+                    f"{where}: unexplained_pct must be value_pct - predicted_pct ({remainder:.2f})"
+                )
+            if self.status == "explained" and abs(remainder) > EXPLAINED_REMAINDER_PCT:
+                raise ValueError(
+                    f"{where}: {remainder:+.2f} % is unexplained, more than "
+                    f"{EXPLAINED_REMAINDER_PCT} %; keep it unresolved with the partial mechanism"
+                )
+        return self
 
 
 class RegimeDelay(_Strict):
@@ -338,12 +406,37 @@ class LambdaDeliveryDeclaration(_Strict):
         clash = sorted(refused & {s.spec for s in self.commanded_sources})
         if clash:
             raise ValueError(f"refused commanded sources also declared usable: {clash}")
-        measured = {s.name for s in self.measured_sources}
+        sensors = {s.name: s.sensor for s in self.measured_sources}
         for item in self.source_disagreements:
-            unknown = [name for name in item.between if name not in measured]
+            unknown = [name for name in item.between if name not in sensors]
             if unknown:
                 raise ValueError(f"source_disagreements names unknown sources: {unknown}")
+            shared = sensors[item.between[0]] == sensors[item.between[1]]
+            if shared and item.relation != "same_sensor":
+                raise ValueError(
+                    f"source_disagreements {list(item.between)} claims independent_sensors, "
+                    f"but both read {sensors[item.between[0]]!r}: one sensor computed two ways "
+                    "is one instrument (B06.7 -- PID 0x24 and the A/F voltage DID are both "
+                    "bank 1's sensor, so their agreement was never corroboration)"
+                )
+            if not shared and item.relation == "same_sensor":
+                raise ValueError(
+                    f"source_disagreements {list(item.between)} claims same_sensor, but they "
+                    f"read {sensors[item.between[0]]!r} and {sensors[item.between[1]]!r}"
+                )
         return self
+
+    def sensor_of(self, name: str) -> str:
+        """The physical sensor measured source ``name`` reads."""
+        return self.measured(name).sensor
+
+    def independent_sensors(self, names: Sequence[str]) -> list[str]:
+        """The distinct sensors behind measured sources ``names``, first-seen order.
+
+        The number of independent instruments a set of agreeing routes is: two
+        routes through one sensor count once (B06.7).
+        """
+        return list(dict.fromkeys(self.sensor_of(name) for name in names))
 
     def commanded(self, name: str | None = None) -> CommandedSource:
         if name is None:
@@ -591,6 +684,7 @@ class DeliverySamples:
         return {
             "target_source": self.target_source,
             "measured_source": self.measured_source,
+            "measured_sensor": declaration.sensor_of(self.measured_source),
             "residual": declaration.residual.definition,
             "transport_delay_s": dict(self.delays_s),
             "acquisition": {
@@ -736,6 +830,10 @@ class _MeasuredSide:
     railed: np.ndarray
     censored: np.ndarray
     calibration_missing: bool
+    #: B06.7 — per read, the voltage route's barometric refusals (all False
+    #: on a route that needs no baro).
+    baro_missing: np.ndarray
+    baro_stale: np.ndarray
 
 
 def measured_side_from_arrays(
@@ -745,19 +843,39 @@ def measured_side_from_arrays(
     instrument: MeasuredSource,
     calibration: AfrCalibration | None,
     afr_stoich: float,
+    baro_times: np.ndarray | None = None,
+    baro_kpa: np.ndarray | None = None,
 ) -> _MeasuredSide:
-    """Measured reads (float seconds, time-ordered; source quantity) as lambda."""
+    """Measured reads (float seconds, time-ordered; source quantity) as lambda.
+
+    ``baro_times``/``baro_kpa`` are the barometric reads (same clock) a
+    ``voltage_afr`` route converts with (B06.7): each measured read takes the
+    newest one at or before it. None given is ``baro_missing`` on every read
+    of such a route, never a gain-1 value.
+    """
     m_times = np.asarray(m_times, dtype=float)
     m_raw = np.asarray(m_raw, dtype=float)
     calibration_missing = False
     censored = np.zeros(len(m_raw), dtype=bool)
+    baro_missing = np.zeros(len(m_raw), dtype=bool)
+    baro_stale = np.zeros(len(m_raw), dtype=bool)
     if instrument.transform == "voltage_afr":
         transfer = None if calibration is None else calibration.voltage_transfer
-        if transfer is None:
+        if transfer is None or calibration is None:
             calibration_missing = True
             m_value = np.full(len(m_raw), np.nan)
         else:
-            m_value = voltage_to_afr(pd.Series(m_raw), transfer).to_numpy(dtype=float)
+            baro: BaroSamples | None = None
+            if calibration.baro_gain is not None:
+                baro = (
+                    BaroSamples.unobserved(len(m_times))
+                    if baro_times is None or baro_kpa is None
+                    else BaroSamples.as_of(m_times, baro_times, baro_kpa)
+                )
+            converted = voltage_to_afr(pd.Series(m_raw), calibration, baro=baro)
+            m_value = converted.afr.to_numpy(dtype=float)
+            baro_missing = converted.baro_missing.to_numpy(dtype=bool)
+            baro_stale = converted.baro_stale.to_numpy(dtype=bool)
             censored = (
                 ~np.isfinite(m_value)
                 | (m_value <= transfer.censored_floor_afr)
@@ -771,7 +889,9 @@ def measured_side_from_arrays(
     if instrument.rail_low is not None:
         railed |= m_raw <= instrument.rail_low
     m_lambda = to_lambda(m_value, instrument.quantity, afr_stoich=afr_stoich)
-    return _MeasuredSide(m_times, m_lambda, railed, censored, calibration_missing)
+    return _MeasuredSide(
+        m_times, m_lambda, railed, censored, calibration_missing, baro_missing, baro_stale
+    )
 
 
 def _measured_side(
@@ -780,11 +900,19 @@ def _measured_side(
     instrument: MeasuredSource,
     calibration: AfrCalibration | None,
     afr_stoich: float,
+    baro: pd.DataFrame | None = None,
 ) -> _MeasuredSide:
-    """:func:`measured_side_from_arrays` over a long frame."""
+    """:func:`measured_side_from_arrays` over long frames."""
     m_times, m_raw = _long_values(measured)
+    b_times, b_kpa = _long_values(baro) if baro is not None and len(baro) else (None, None)
     return measured_side_from_arrays(
-        m_times, m_raw, instrument=instrument, calibration=calibration, afr_stoich=afr_stoich
+        m_times,
+        m_raw,
+        instrument=instrument,
+        calibration=calibration,
+        afr_stoich=afr_stoich,
+        baro_times=b_times,
+        baro_kpa=b_kpa,
     )
 
 
@@ -1022,11 +1150,15 @@ def judge_target_rows(
     measured_lambda = np.full(k, np.nan)
     pair_railed = np.zeros(k, dtype=bool)
     pair_censored = np.zeros(k, dtype=bool)
+    pair_baro_missing = np.zeros(k, dtype=bool)
+    pair_baro_stale = np.zeros(k, dtype=bool)
     if has_pair.any():
         at = paired[has_pair]
         measured_lambda[has_pair] = measured_side.lam[at]
         pair_railed[has_pair] = measured_side.railed[at]
         pair_censored[has_pair] = measured_side.censored[at]
+        pair_baro_missing[has_pair] = measured_side.baro_missing[at]
+        pair_baro_stale[has_pair] = measured_side.baro_stale[at]
 
     def steady_under(rule: RegimeEligibility) -> np.ndarray:
         return _steady_target_mask(
@@ -1055,6 +1187,8 @@ def judge_target_rows(
             ("convention_unverified", np.full(k, quantity is None)),
             ("calibration_unknown", np.full(k, measured_side.calibration_missing)),
             ("measured_missing", ~has_pair),
+            (BARO_MISSING, pair_baro_missing),
+            (BARO_STALE, pair_baro_stale),
             ("measured_rail", pair_railed),
             ("measured_censored", pair_censored | (has_pair & ~np.isfinite(measured_lambda))),
             ("post_fuel_cut", since_cut[rows] < holdoff[rows]),
@@ -1110,6 +1244,7 @@ def delivery_samples(
     drive_id: str | None = None,
     evaluation: bool = False,
     regime_delays_s: Mapping[str, float] | None = None,
+    baro: pd.DataFrame | None = None,
 ) -> DeliverySamples:
     """Pair each target observation with one measured observation and name its state.
 
@@ -1117,6 +1252,9 @@ def delivery_samples(
     ``value``) on the acquisition clock, as :func:`src.analysis.channels.
     read_channels` returns them with ``acquired_time=True``. ``measured`` is
     in the measured source's own quantity (a voltage for ``voltage_afr``).
+    ``baro`` is the long frame of barometric reads a ``voltage_afr`` source is
+    converted with (B06.7, ``AfrCalibration.baro_gain.baro_channel``); without
+    it every paired row of such a source is ``baro_missing``.
 
     One row per target observation *and* per fuel-cut observation, so a cut
     is counted as ``fuel_cut`` instead of disappearing. ``residual_pct`` is
@@ -1145,7 +1283,11 @@ def delivery_samples(
         target, sentinel, commanded=commanded, quantity=quantity, afr_stoich=afr_stoich
     )
     measured_side = _measured_side(
-        measured, instrument=instrument, calibration=calibration, afr_stoich=afr_stoich
+        measured,
+        instrument=instrument,
+        calibration=calibration,
+        afr_stoich=afr_stoich,
+        baro=baro,
     )
     delays_s = declared_delays_s(
         declaration, commanded.name, delay=delay, regime_delays_s=regime_delays_s
@@ -1175,6 +1317,8 @@ class DriveInputs:
     target: pd.DataFrame
     measured: pd.DataFrame
     sentinel: pd.DataFrame | None = None
+    #: B06.7 — barometric reads for a ``voltage_afr`` measured source.
+    baro: pd.DataFrame | None = None
 
 
 def estimate_transport_delay(
@@ -1231,6 +1375,7 @@ def estimate_transport_delay(
                 afr_stoich=afr_stoich,
                 delay=frozen,
                 drive_id="__training__",
+                baro=inputs.baro,
             ).frame
             if regimes is None:
                 rows = samples[samples["state"].isin([ELIGIBLE, "target_transient"])]
@@ -1357,6 +1502,7 @@ def per_pair_delay_support(
                 afr_stoich=afr_stoich,
                 delay=frozen,
                 drive_id="__training__",
+                baro=inputs.baro,
             ).frame
             ok = frame["state"].isin(scored_states) & frame["regime"].isin(list(regimes))
             value = np.abs(

@@ -239,6 +239,8 @@ class _Route:
     target_spec: str
     sentinel_spec: str | None
     measured_spec: str
+    #: B06.7 — the barometric channel a ``voltage_afr`` route converts with.
+    baro_spec: str | None = None
     counts: Counter[str] = field(default_factory=Counter)
     paired: int = 0
     residuals: dict[str, list[float]] = field(
@@ -344,6 +346,15 @@ class LambdaDeliveryReadout:
                 specs = [commanded.spec, measured.spec]
                 if commanded.sentinel_spec is not None:
                     specs.append(commanded.sentinel_spec)
+                baro_spec = (
+                    calibration.baro_gain.baro_channel
+                    if measured.transform == "voltage_afr"
+                    and calibration is not None
+                    and calibration.baro_gain is not None
+                    else None
+                )
+                if baro_spec is not None:
+                    specs.append(baro_spec)
                 try:
                     readers = [spec_reader(spec, did_map) for spec in specs]
                 except UnsupportedSpecError as exc:
@@ -371,6 +382,7 @@ class LambdaDeliveryReadout:
                         target_spec=commanded.spec,
                         sentinel_spec=commanded.sentinel_spec,
                         measured_spec=measured.spec,
+                        baro_spec=baro_spec,
                     )
                 )
         # Exact channel names for mem:/DID_ reads, case-folded for obd PIDs
@@ -436,6 +448,7 @@ class LambdaDeliveryReadout:
                 target=taken[route.target_spec],
                 sentinel=None if route.sentinel_spec is None else taken[route.sentinel_spec][0],
                 measured=taken[route.measured_spec],
+                baro=None if route.baro_spec is None else taken[route.baro_spec],
             )
             if self._clock_unsupported(route):
                 continue
@@ -458,11 +471,12 @@ class LambdaDeliveryReadout:
 
     def _route_result(self, route: _Route) -> tuple[Result, str, list[str]]:
         seen = route.stream.reads_seen
-        missing = [
-            spec
-            for spec, kind in ((route.target_spec, "target"), (route.measured_spec, "measured"))
-            if not seen[kind]
-        ]
+        sides = [(route.target_spec, "target"), (route.measured_spec, "measured")]
+        if route.baro_spec is not None:
+            # B06.7: without baro the voltage route has no AFR to give, which
+            # is a fact about the polling, not a delivery result.
+            sides.append((route.baro_spec, "baro"))
+        missing = [spec for spec, kind in sides if not seen[kind]]
         round_specs = self._clock_unsupported(route)
         total = int(route.counts.get("total", 0))
         if round_specs:
@@ -524,6 +538,8 @@ class LambdaDeliveryReadout:
             "target_spec": route.target_spec,
             "measured_source": stream.instrument.name,
             "measured_spec": route.measured_spec,
+            "measured_sensor": stream.instrument.sensor,
+            "baro_spec": route.baro_spec,
             "result": result,
             "reason": reason,
             "missing_inputs": missing,

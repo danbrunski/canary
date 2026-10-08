@@ -30,7 +30,8 @@ from src.analysis.lambda_delivery import (
 )
 from src.analysis.noise_floor import ChannelFloor, NoiseFloor
 from src.analysis.tuning import DeliveryInputs, gate_delivery_samples, mode01_route
-from src.signals.afr import AfrCalibration, VoltageAfrPoint, VoltageAfrTransfer
+from src.signals.afr import AfrCalibration
+from tests.afr_voltage_chain import SEA_LEVEL_KPA, voltage_chain
 
 T0 = datetime(2026, 9, 21, 12, 0, tzinfo=UTC)
 PROFILE = Path("data/nissan-xterra-2008")
@@ -300,9 +301,9 @@ def test_voltage_measured_source_without_a_transfer_is_named_not_dropped() -> No
 
 
 def test_voltage_transfer_censoring_is_a_named_state() -> None:
-    calibration = AfrCalibration(
-        voltage_transfer=VoltageAfrTransfer(
-            points=[VoltageAfrPoint(voltage=1.0, afr=11.0), VoltageAfrPoint(voltage=3.0, afr=17.0)],
+    calibration = AfrCalibration.model_validate(
+        voltage_chain(
+            [{"voltage": 1.0, "afr": 11.0}, {"voltage": 3.0, "afr": 17.0}],
             censored_floor_afr=11.5,
             censored_ceiling_afr=16.0,
         )
@@ -315,8 +316,58 @@ def test_voltage_transfer_censoring_is_a_named_state() -> None:
         measured_source="af_voltage_b1",
         calibration=calibration,
         afr_stoich=14.7,
+        baro=_long([SEA_LEVEL_KPA], start=-1.0),
     )
     assert samples.counts["measured_censored"] == 6
+
+
+def test_a_voltage_route_without_baro_is_a_named_state_not_a_gain_1_value() -> None:
+    """B06.7: no baro read at or before a voltage read, or one past the
+    calibration's max age, leaves the row without a measured lambda."""
+    calibration = AfrCalibration.model_validate(
+        voltage_chain([{"voltage": 1.0, "afr": 11.0}, {"voltage": 3.0, "afr": 17.0}])
+    )
+    common: dict[str, Any] = {
+        "target": _long([1.0] * 6),
+        "measured": _long([2.2] * 6, start=0.05),
+        "declaration": declaration(),
+        "target_source": "ram_final_target",
+        "measured_source": "af_voltage_b1",
+        "calibration": calibration,
+        "afr_stoich": 14.7,
+    }
+    assert delivery_samples(**common).counts["baro_missing"] == 6
+    stale = delivery_samples(**common, baro=_long([80.0], start=-120.0))
+    assert stale.counts["baro_stale"] == 6
+    fresh = delivery_samples(**common, baro=_long([80.0], start=-1.0))
+    assert fresh.counts["baro_missing"] == fresh.counts["baro_stale"] == 0
+
+
+def test_two_routes_through_one_sensor_cannot_claim_independence() -> None:
+    """B06.7: PID 0x24 and the A/F voltage DID are bank 1's one A/F sensor."""
+    doc = yaml.safe_load(DECLARATION_PATH.read_text())
+    disagreements = [
+        dict(item, relation="independent_sensors") for item in doc["source_disagreements"]
+    ]
+    with pytest.raises(ValueError, match="claims independent_sensors"):
+        declaration(source_disagreements=disagreements)
+    measured = [{k: v for k, v in s.items() if k != "sensor"} for s in doc["measured_sources"]]
+    with pytest.raises(ValueError, match="sensor"):
+        declaration(measured_sources=measured)
+    decl = declaration()
+    assert decl.independent_sensors(
+        ["ecm_lambda_pid_0x24", "af_voltage_b1", "ecm_lambda_pid_0x28", "af_voltage_b2"]
+    ) == ["af_sensor_b1", "af_sensor_b2"]
+    item = decl.disagreements_for("af_voltage_b1")[0]
+    # Partly explained: the missing gain predicts -2.36 %, -1.48 % is not.
+    assert item.status == "unresolved" and item.value_pct == -3.84
+    assert item.explanation is not None
+    assert item.explanation.predicted_pct == -2.36
+    assert item.explanation.unexplained_pct == -1.48
+    doc = yaml.safe_load(DECLARATION_PATH.read_text())
+    overclaimed = [dict(doc["source_disagreements"][0], status="explained")]
+    with pytest.raises(ValueError, match="keep it unresolved"):
+        declaration(source_disagreements=overclaimed)
 
 
 # ---------------------------------------------------------------------------

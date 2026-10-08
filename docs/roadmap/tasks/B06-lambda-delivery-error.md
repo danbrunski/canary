@@ -180,6 +180,90 @@ a residual alone.
   delivery mismatch does not identify pressure, injector calibration or sensor
   bias without additional evidence. Run B03's compatibility/replay/rollout
   checks and retain the calibration-specific report.
+- [~] **B06.7 — Apply the ECM's barometric gain to the voltage route; declare
+  same-sensor provenance.** The firmware (docs/ecu-firmware-analysis.md, "A/F
+  sensor and λ chain") computes PID 0x24/0x28 from the DID 0x1225/0x1226 word:
+  x2 = 2 × word, `x2' = 880 + (x2 − 880)·128/k` with k on raw baro (table
+  `0xD00F`), table `0xE644`, then a learned rear-O2 offset and an rpm × BFS
+  offset. The fitted `voltage_transfer` was that table at gain 1 (within
+  0.26 % over 10–13 AFR, 0.84 % worst), so the voltage route read lean of PID
+  0x24 rich of stoich at altitude. Supersedes D03.39 (the parked patch).
+  *Done 2026-10-05, revised 2026-10-07 after verification.*
+  - **Transfer = ECM table 0xE644** (operator decision 2026-10-07):
+    `voltage_transfer.points` are the table at V = x2 × 0.0025 (the 880-count
+    stoich knot is 2.200 V = DID word 440, the ECM's re-reference), with
+    `provenance.method: rom_table`, the raw table, image `a46baa24…be50`; the
+    load check refuses points that differ from it. The fitted UpRev curve is
+    recorded as superseded. Every voltage-route value moved by the curve's old
+    reproduction error (≤ 0.26 % rich of 13 AFR, ≤ 0.84 % near 15.1 AFR).
+  - **Per vehicle, not Xterra-only:** `provenance`, `baro_gain` and
+    `voltage_residual_sources` are optional. A vehicle declares the gain by
+    `excludes: [baro_gain]`; only then is `baro_gain` required (and allowed),
+    and any other excluded term must be a declared residual source. Generic
+    vocabularies (`rom_table | log_cross_reference | datasheet`;
+    `rom_decompile | datasheet | measured`; residual `observable:
+    memory_read | operating_point | not_observable`). The example calibration
+    loads again, with no gain (`tests/test_afr.py::
+    test_the_example_calibration_loads_without_a_baro_gain`).
+  - **Transform:** `voltage_to_afr(voltage, calibration, *, baro)`, keyword-
+    required: with a declared gain `baro=None` raises and a sample without a
+    PID 0x33 read within 60 s is `baro_missing` / `baro_stale`, never gain 1;
+    without one, `baro` must be `None`. Callers swept: `append_afr_channels`
+    and the voltage λ bank balance, the `lambda_delivery` measured side
+    (`delivery_samples(baro=…)`, states `baro_missing`/`baro_stale`),
+    `tuning.read_delivery_inputs` (baro a required input of a gain-applying
+    voltage route), `tuning_frame`, `tuning_digest`, the live
+    `DeliveryStream`/readout, `scripts/lambda_delivery_evidence.py`,
+    `DERIVED_CHANNEL_INPUTS`. `max_age_s` 60 s rests on the measured cadence:
+    PID 0x33 every 15.0 s (median, p90 16 s) on 37 default drives, 1.0 s on
+    tuning captures; gaps of 76–1,225 s exist, and inside them 0–12 % of a
+    drive's A/F reads are `baro_stale` (40 % on 09-21T225511). The digest
+    reports `baro_stale_fraction` per bank and refuses an all-stale bank by
+    name with its counts.
+  - **Contract change, refit owed:** the voltage λ bank balance changes value
+    (×~1.13 away from stoich at 80 kPa, NaN without fresh baro, table swap),
+    so it is renamed `derived:LAMBDA_BANK_BALANCE_AF_VOLTAGE_BARO`. The
+    `afr_bank_balance_robust` recipe's contract fingerprint changed
+    (`1f28c0…` → `858a5b…`, golden regenerated), so the Pi flags the deployed
+    fit `contract_changed:recipe`. **A refit of `afr_bank_balance_robust` on
+    the gain-applied channel is owed.**
+  - **Same sensor:** measured sources carry a required `sensor:` (PID 0x24 +
+    `af_voltage_b1` = `af_sensor_b1`; PID 0x28 + `af_voltage_b2` =
+    `af_sensor_b2`); a disagreement calling two same-sensor routes independent
+    is refused; `independent_sensors()` counts them once. The −3.84 % PID 0x24
+    / UpRev entry stays **unresolved** with a partial mechanism: the missing
+    gain predicts −2.36 % at 12.6 AFR / 80 kPa; **−1.48 % is unexplained** (the
+    rear-O2 offset where measured, −0.002 / −0.056 AFR, is too small; the
+    rpm × BFS offset acts the other way). The schema checks `unexplained_pct`
+    and refuses `explained` with more than 1 % left.
+  - **Known answer** (`tests/test_af_baro_gain.py`, committed slice + its PID
+    0x33 rows in `tests/fixtures/af_baro_gain/`, 80–81 kPa): steady
+    same-instant pairs (`align_pairs` within 0.25 s, bracketing PID reads
+    within 0.6 s / 0.01 λ).
+    - Differenced (band median of AFR_route − AFR_PID minus the stoich-band
+      median, 434 pairs; removes the rear-O2 offset at the gain's fixed point):
+      λ 0.85–0.90 (n 139) +0.002 AFR within ±0.138, gain 1 +0.206 (predicted
+      +0.202); λ 0.80–0.85 (n 8) −0.003 within ±0.214, gain 1 +0.303
+      (predicted +0.295). Tolerance = rpm × BFS spread 0.088 + k resolution
+      (PID floor ± 0.5 kPa + 1 count) + 99 % bootstrap.
+    - Per-sample ratio medians (route/PID − 1): gain applied +0.04 % / +0.01 %
+      (0.85–0.90 / 0.80–0.85) within [−0.73, +0.25] / [−1.29, +0.78] %; half
+      the gain +0.98 / +1.31 %; gain 1 +1.75 / +2.63 %.
+    - **What it catches:** a missing gain (both tests), a half-size gain (the
+      ratio test only: half the gain moves Δ by ~0.10 AFR, inside the 0.14
+      tolerance, but its ratio median clears the +0.25 % bound), a wrong-sign
+      gain, a table regression (pinned numbers). **What it cannot catch:** a
+      gain error under ~0.5 of the correction, a wrong baro axis away from
+      79–82 kPa (one altitude), bank 2, or the rear-O2/rpm × BFS terms
+      themselves (bounded, not measured).
+    - Held-out `_capture-tuning-2026-09-23T142926` (rear offset −0.056 AFR)
+      passes the differenced test and negative control (slow, local data).
+  - **Remaining:** the gain across baro and bank 2 have no local data: every
+    session with steady rich DID/PID pairs is at 79–82 kPa, 09-17 (~76 kPa)
+    logged no PID 0x33, the 09-18 75–79 kPa drives have no steady pair, and
+    PID 0x28 exists only on 10-04 captures that poll DID 0x1226 0.5–1.5 s
+    away. Needs a tuning-profile capture (Mode 01 + A/F DIDs + PID 0x33 +
+    PID 0x28) at ≤ 77 kPa. Plus the `afr_bank_balance_robust` refit.
 
 **Done when:** analysis and live evaluation agree on eligible observations,
 normal target transitions are correctly handled, and held-out evidence shows

@@ -51,8 +51,19 @@ from src.analysis.tuning_frame import (
 from src.collection.capture_profiles import FUEL_DELIVERY_TUPLE
 from src.config import CanaryConfig
 from src.session import load_tags
-from src.signals.afr import AfrCalibration, TargetAfrMap, voltage_to_afr
-from src.signals.pairing import ComparisonRefusedError, InputNotCapturedError, PairingPolicy
+from src.signals.afr import (
+    AfrCalibration,
+    BaroSamples,
+    TargetAfrMap,
+    voltage_route_refusal,
+    voltage_to_afr,
+)
+from src.signals.pairing import (
+    ComparisonRefusedError,
+    InputNotCapturedError,
+    PairingPolicy,
+    to_seconds,
+)
 from src.storage.capture_manifest import read_capture_manifest, read_capture_quality
 from src.vehicle.tune_revisions import resolve_session_revision, session_started_at
 
@@ -428,10 +439,23 @@ def _measured_afr_summary(
     role_capabilities: dict[str, Any],
 ) -> dict[str, Any]:
     """Report transformed factory A/F readings without presenting them as independent WB data."""
-    transfer = None if calibration is None else calibration.voltage_transfer
-    if transfer is None:
-        return {"available": False, "reason": "voltage-to-AFR transfer is unavailable", "banks": []}
-    assert calibration is not None
+    refusal = voltage_route_refusal(calibration)
+    if refusal is not None:
+        return {"available": False, "reason": refusal, "banks": []}
+    assert calibration is not None and calibration.voltage_transfer is not None
+    transfer = calibration.voltage_transfer
+    gain = calibration.baro_gain
+    # B06.7: where the ECM applies a barometric gain, every sample is converted
+    # at it from the baro read as of it; a session that never read baro has no
+    # voltage AFR, and a sample whose baro is stale has none.
+    baro_long: pd.DataFrame | None = None
+    if gain is not None:
+        try:
+            baro_long = read_channels(session_dir, [gain.baro_channel], acquired_time=True)
+        except MemoryError:
+            raise
+        except Exception:  # noqa: BLE001 — an unresolvable spec is an absent channel here
+            baro_long = None
 
     banks: list[dict[str, Any]] = []
     for bank in (1, 2):
@@ -453,8 +477,43 @@ def _measured_afr_summary(
         if change_only is not None:
             banks.append({"bank": bank, "provider": provider, "refused": change_only})
             continue
-        afr = voltage_to_afr(samples["value"], transfer).dropna()
+        baro: BaroSamples | None = None
+        if gain is not None:
+            if baro_long is None or baro_long.empty:
+                banks.append(
+                    {
+                        "bank": bank,
+                        "provider": provider,
+                        "refused": (
+                            f"baro_missing: {gain.baro_channel} was never read in this "
+                            "session; the voltage route needs it for the ECM's barometric "
+                            "gain (B06.7)"
+                        ),
+                    }
+                )
+                continue
+            baro = BaroSamples.from_long(to_seconds(samples["timestamp"]), baro_long)
+        converted = voltage_to_afr(samples["value"].reset_index(drop=True), calibration, baro=baro)
+        refusals = converted.refusals()
+        total = int(len(converted.afr))
+        stale_fraction = round(refusals["baro_stale"] / total, 4) if total else None
+        afr = converted.afr.dropna()
         if afr.empty:
+            # Every sample refused (or outside the transfer): say so with the
+            # counts, never drop the bank silently.
+            banks.append(
+                {
+                    "bank": bank,
+                    "provider": provider,
+                    "refused": (
+                        f"no convertible sample: {total} read, {refusals['baro_missing']} "
+                        f"baro_missing, {refusals['baro_stale']} baro_stale"
+                        + (f" (older than {gain.max_age_s:g} s)" if gain is not None else "")
+                    ),
+                    "baro_refused_samples": refusals,
+                    "baro_stale_fraction": stale_fraction,
+                }
+            )
             continue
         floor = int(afr.le(transfer.censored_floor_afr).sum())
         ceiling = int(afr.ge(transfer.censored_ceiling_afr).sum())
@@ -468,6 +527,10 @@ def _measured_afr_summary(
                 "censored_ceiling_samples": ceiling,
                 "afr_range": [round(float(afr.min()), 3), round(float(afr.max()), 3)],
                 "afr_median": round(float(afr.median()), 3),
+                "baro_refused_samples": refusals,
+                # B06.7: real drives poll PID 0x33 ~15 s apart with multi-minute
+                # gaps, so a large share of a drive can be stale; say how much.
+                "baro_stale_fraction": stale_fraction,
             }
         )
     provenance = calibration.provenance
@@ -476,7 +539,8 @@ def _measured_afr_summary(
         "instrument": "factory A/F voltage transformed to AFR",
         "independence_caveat": (
             "This is a calibrated transform of the ECU A/F voltage, not an independent wideband "
-            "measurement; use the recorded external-reference provenance below."
+            "measurement: it is the same sensor as the ECU's lambda PID (B06.7), converted at "
+            "the ECU's barometric gain. Use the recorded external-reference provenance below."
         ),
         "transfer_provenance": {
             key: provenance[key]

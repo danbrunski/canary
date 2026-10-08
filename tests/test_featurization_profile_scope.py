@@ -28,7 +28,7 @@ from src.features.feature_pipeline import (
 )
 from src.features.live import LiveFeatureSource
 from src.models.sequence_feature_set import sequence_roles_path
-from src.signals.afr import load_afr_calibration, voltage_to_afr
+from src.signals.afr import BaroSamples, load_afr_calibration, voltage_to_afr
 from src.vehicle.profiles import resolve_profile_for_tooling, scope_config
 from tests.configs import EXAMPLE_YAML, profiles_disabled
 
@@ -191,13 +191,22 @@ def test_the_calibration_reaches_offline_featurization_for_a_calibrated_profile(
     known answer is ``tests/test_base_fuel_schedule.py``)."""
     scoped = _scoped()
     assert scoped.daemon.afr_calibration.is_file()
-    wide = _wide().assign(**{"did:ECM_AF_SENSOR_V_B1": np.linspace(1.0, 2.5, 40)})
+    # B06.7: the voltage route applies the ECM's barometric gain, from the
+    # baro read as of each row; 80 kPa is a real, non-unity gain.
+    wide = _wide().assign(
+        **{
+            "did:ECM_AF_SENSOR_V_B1": np.linspace(1.0, 2.5, 40),
+            "obd:BAROMETRIC_PRESSURE": 80.0,
+            "obd:BAROMETRIC_PRESSURE__arrived": True,
+        }
+    )
     operating = featurize_wide_frame(
         wide, scoped, behavior_models=None, did_map=load_repo_did_map()
     ).operating_frame
     calibration = load_afr_calibration(scoped.daemon.afr_calibration)
     assert calibration.voltage_transfer is not None
-    expected = voltage_to_afr(wide["did:ECM_AF_SENSOR_V_B1"], calibration.voltage_transfer)
+    baro = BaroSamples(np.full(len(wide), 80.0), np.zeros(len(wide)))
+    expected = voltage_to_afr(wide["did:ECM_AF_SENSOR_V_B1"], calibration, baro=baro).afr
     assert expected.notna().all(), "the fixture voltages sit inside the transfer"
     pd.testing.assert_series_equal(
         operating["derived:AFR_B1"].reset_index(drop=True),

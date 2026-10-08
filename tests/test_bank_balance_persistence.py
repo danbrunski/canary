@@ -54,10 +54,10 @@ from src.signals.afr import (
     LAMBDA_BANK_BALANCE_WIDEBAND,
     AfrCalibration,
     NoFlashHistory,
-    VoltageAfrTransfer,
     WidebandPairVerification,
     append_afr_channels,
 )
+from tests.afr_voltage_chain import baro_columns, voltage_chain
 
 T0 = datetime(2026, 9, 1, 12, 0, tzinfo=UTC)
 BALANCE = "derived:STFT_BANK_BALANCE"
@@ -386,28 +386,32 @@ def test_live_detector_sustains_exactly_where_the_evaluator_does(
 
 #: These calibrations record no target map, so no row's revision is read.
 NO_HISTORY = NoFlashHistory("test: the target AFR lookup is not exercised")
-_TRANSFER = VoltageAfrTransfer(
-    points=[
-        {"voltage": 1.93, "afr": 14.25},  # type: ignore[list-item]
-        {"voltage": 2.17, "afr": 14.72},  # type: ignore[list-item]
-        {"voltage": 2.41, "afr": 15.65},  # type: ignore[list-item]
-        {"voltage": 3.35, "afr": 21.86},  # type: ignore[list-item]
+#: The voltage route with the profile's barometric gain (B06.7); the frames
+#: below read baro inside the ECM's skip window, so the gain is exactly 1.
+_CHAIN = voltage_chain(
+    [
+        {"voltage": 1.93, "afr": 14.25},
+        {"voltage": 2.17, "afr": 14.72},
+        {"voltage": 2.41, "afr": 15.65},
+        {"voltage": 3.35, "afr": 21.86},
     ]
 )
 
 
 def _voltage_frame() -> pd.DataFrame:
-    return pd.DataFrame(
+    frame = pd.DataFrame(
         {
+            "timestamp": pd.date_range("2026-10-01", periods=5, freq="s", tz="UTC"),
             "did:ECM_AF_SENSOR_V_B1": [2.17, 2.41, 2.17, 3.30, np.nan],
             "did:ECM_AF_SENSOR_V_B2": [2.17, 2.17, 1.93, 2.17, 2.17],
         }
     )
+    return baro_columns(frame)
 
 
 def test_lambda_balance_is_taken_in_lambda_after_each_banks_own_transfer() -> None:
     vehicle = VehicleParameters()
-    calibration = AfrCalibration(voltage_transfer=_TRANSFER)
+    calibration = AfrCalibration.model_validate(_CHAIN)
     out = append_afr_channels(
         _voltage_frame(), vehicle, calibration, channel_units=None, flash_history=NO_HISTORY
     )
@@ -438,22 +442,23 @@ def test_the_wideband_pair_is_no_channel_until_the_bank_2_pid_is_verified() -> N
     unverified = append_afr_channels(
         frame,
         vehicle,
-        AfrCalibration(voltage_transfer=_TRANSFER),
+        AfrCalibration.model_validate(_CHAIN),
         channel_units=None,
         flash_history=NO_HISTORY,
     )
     assert LAMBDA_BANK_BALANCE_WIDEBAND not in unverified
-    verified = AfrCalibration(
-        voltage_transfer=_TRANSFER,
-        wideband_bank_balance=WidebandPairVerification(
-            session="2026-10-01T120000",
-            comparison="compare_channels obd:O2_WR_LAMBDA_S5 -> did:ECM_AF_SENSOR_V_B2",
-            n_pairs=120,
-            ratio_median=1.001,
-            ratio_spread=0.004,
-            verified_on="2026-10-01",  # type: ignore[arg-type]
-            basis="test",
-        ),
+    verified = AfrCalibration.model_validate(_CHAIN).model_copy(
+        update={
+            "wideband_bank_balance": WidebandPairVerification(
+                session="2026-10-01T120000",
+                comparison="compare_channels obd:O2_WR_LAMBDA_S5 -> did:ECM_AF_SENSOR_V_B2",
+                n_pairs=120,
+                ratio_median=1.001,
+                ratio_spread=0.004,
+                verified_on="2026-10-01",  # type: ignore[arg-type]
+                basis="test",
+            )
+        }
     )
     out = append_afr_channels(
         frame, vehicle, verified, channel_units=None, flash_history=NO_HISTORY

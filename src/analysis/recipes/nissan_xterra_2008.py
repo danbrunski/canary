@@ -7,7 +7,10 @@ fingerprints are pinned by ``tests/test_recipe_catalog_golden.py``, so the
 Pi sees no ``contract_changed:recipe``. ``afr_bank_balance_robust`` is here
 too: its input is the AF-sensor-voltage DID pair (B05.8 moved it from the
 voltage difference ``derived:AFR_BANK_BALANCE`` to the λ difference
-``derived:LAMBDA_BANK_BALANCE_AF_VOLTAGE``, a deliberate contract change).
+``derived:LAMBDA_BANK_BALANCE_AF_VOLTAGE``, a deliberate contract change; B06.7
+renamed it ``..._AF_VOLTAGE_BARO`` when each bank's conversion gained the ECM's
+barometric gain and became table 0xE644 itself, a second deliberate change: the
+deployed fit is flagged ``contract_changed:recipe`` and needs a refit).
 The two cam surfaces' outputs were renamed when the firmware named the banks
 (D03.37, 2026-10-05: ``ECM_INTAKE_CAM_ANGLE_B1``/``_B2``), also deliberate.
 """

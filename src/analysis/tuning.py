@@ -315,6 +315,9 @@ class DeliveryInputs:
     rpm: pd.DataFrame
     fuel_status: pd.DataFrame | None
     load: pd.DataFrame | None
+    #: B06.7 — the barometric reads a ``voltage_afr`` measured source is
+    #: converted with; ``None`` for a source that needs none.
+    baro: pd.DataFrame | None = None
 
 
 _EMPTY_LONG = ["timestamp", "spec", "value", "unit"]
@@ -408,7 +411,11 @@ def read_delivery_inputs(
     """Read ``route``'s channels once, on the acquisition clock.
 
     Raises :class:`InputsNotCapturedError` naming every required channel the
-    session holds no reading of (an unresolvable spec counts as absent).
+    session holds no reading of (an unresolvable spec counts as absent). A
+    ``voltage_afr`` measured source needs the calibration's barometric channel
+    too (B06.7): its AFR is the ECM's gain applied per read, so a session
+    without baro cannot answer through it -- e.g. a capture with Mode 01
+    disabled, on an ECM with no baro DID.
     """
     target = declaration.commanded(route.target_source)
     measured = declaration.measured(route.measured_source)
@@ -423,6 +430,9 @@ def read_delivery_inputs(
         wanted["fuel_status"] = route.fuel_status_spec
     if route.load_spec is not None:
         wanted["load"] = route.load_spec
+    if measured.transform == "voltage_afr" and calibration is not None:
+        if calibration.baro_gain is not None:
+            wanted["baro"] = calibration.baro_gain.baro_channel
     rows = _session_rows(
         session, list(wanted.values()), bindings_path=bindings_path, dids_path=dids_path
     )
@@ -460,6 +470,7 @@ def read_delivery_inputs(
         rpm=frames["rpm"],
         fuel_status=frames.get("fuel_status"),
         load=frames.get("load"),
+        baro=frames.get("baro"),
     )
 
 
@@ -664,6 +675,7 @@ def gate_delivery_samples(
         calibration=calibration,
         afr_stoich=afr_stoich,
         regime_delays_s=None if enrichment_delay_s is None else {"enrichment": enrichment_delay_s},
+        baro=inputs.baro,
     )
     frame = samples.frame
     # At a bracket end (an override) no pair is an answer about that delay,

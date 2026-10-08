@@ -1,5 +1,11 @@
 schema_version: 1
 provenance:
+  superseded_2026-10-07: >-
+    The method, session, validation and do-not-replace notes below describe
+    the UpRev-fitted voltage curve, which the operator replaced on 2026-10-07
+    with ECM table 0xE644 itself (voltage_transfer.provenance, B06.7). The
+    "do not replace this table with a fitted curve" rule still stands: the
+    table is the ECM's, not a fit.
   method: synchronous UpRev K-line voltage/AFR cross-reference
   session: data/sessions/_uprev/2026-07-29T172029
   source_log: UpRev_Log7-29-2026_11-20-29_AM.csv
@@ -82,29 +88,190 @@ wideband_bank_balance:
     multi-PID Mode 01 response on 517 of 542 reads.
 voltage_transfer:
   censored_floor_afr: 10.0
+  # B06.7 (operator decision 2026-10-07): the transfer IS the ECM's A/F table
+  # 0xE644 (breakpoints 0xF12A), read from the image, not a fit. The voltage
+  # axis is the DID word (0x1225/0x1226) at 0.005 V per count and the ECM's
+  # table input x2 is twice that word, so V = x2 x 0.0025: the stoich knot
+  # x2 = 880 is 2.200 V, DID word 440 -- the nominal reference the ECM
+  # re-references the sensor's AN8 sample to (word = AN8 - mean(AN11, clamped
+  # 440-460) + 440). It is the ECM's word read through the ECM's table, at
+  # barometric gain 1: baro_gain below is applied before it, per sample. The
+  # load check refuses points that differ from the table.
+  #
+  # Replaced: the UpRev-fitted 22-point curve (2026-07-29 K-line log, held-out
+  # MAE 0.0049 AFR in 10-13 AFR; provenance notes above). It reproduced this
+  # table to 0.26 % over 10-13 AFR (always rich of it there) and 0.84 % at
+  # worst, at the 924-count (2.31 V) knot, lean of stoich. Voltage-route values
+  # moved by those amounts with the swap.
+  provenance:
+    method: rom_table
+    source: ZS44A-20260920 ECU read (2026-10-04), ~/ecu-re out/lambda_tables.yaml, NOTES.md session 6
+    table:
+      address: '0xE644'
+      axis_address: '0xF12A'
+      axis_counts: [0, 502, 643, 808, 844, 880, 902, 924, 1011, 1089, 1156, 1274, 1620, 1791, 1838, 1960]
+      values: [5000, 6480, 6782, 7222, 7304, 7387, 7474, 7568, 8105, 8638, 9122, 10000, 15000, 20000, 22000, 30000]
+      afr_scale_inverse: 500
+    volts_per_count: 0.0025
+    # The ECM adds all three before PID 0x24/0x28; the table alone (and UpRev's
+    # AFR column) has none. baro_gain is applied per sample (below); the two
+    # offsets are voltage_residual_sources with their bounds.
+    excludes: [baro_gain, learned_rear_o2_offset, rpm_bfs_offset]
+    image_sha256: a46baa248f16db8d5ed9854913e614dd7d77b7579bb6c36bddb792741531be50
+    verified_on: 2026-10-05
+    notes: >-
+      ECM table 0xE644, gain 1. UpRev's AFR lookup skips the gain and both
+      offsets too, so UpRev's AFR and the gain-1 table are one uncorrected
+      calculation, not two instruments. The ECM's lookup clamps both ends
+      (10.0 AFR below x2 0, 60.0 above 1960 = 4.900 V), and so does the route.
   points:
-    - {voltage: 0.000, afr: 10.000}
-    - {voltage: 0.240, afr: 10.560}
-    - {voltage: 0.470, afr: 11.100}
-    - {voltage: 0.725, afr: 11.700}
-    - {voltage: 0.965, afr: 12.270}
-    - {voltage: 1.205, afr: 12.830}
-    - {voltage: 1.445, afr: 13.290}
-    - {voltage: 1.690, afr: 13.750}
-    - {voltage: 1.930, afr: 14.250}
-    - {voltage: 2.170, afr: 14.720}
-    - {voltage: 2.410, afr: 15.650}
-    - {voltage: 2.675, afr: 17.000}
-    - {voltage: 2.875, afr: 18.150}
-    - {voltage: 3.135, afr: 19.680}
-    - {voltage: 3.350, afr: 21.860}
-    - {voltage: 3.610, afr: 24.880}
-    - {voltage: 3.820, afr: 27.330}
-    - {voltage: 4.070, afr: 30.470}
-    - {voltage: 4.300, afr: 35.810}
-    - {voltage: 4.535, afr: 42.000}
-    - {voltage: 4.860, afr: 57.940}
-    - {voltage: 5.065, afr: 60.000}
+    - {voltage: 0.0000, afr: 10.000}
+    - {voltage: 1.2550, afr: 12.960}
+    - {voltage: 1.6075, afr: 13.564}
+    - {voltage: 2.0200, afr: 14.444}
+    - {voltage: 2.1100, afr: 14.608}
+    - {voltage: 2.2000, afr: 14.774}
+    - {voltage: 2.2550, afr: 14.948}
+    - {voltage: 2.3100, afr: 15.136}
+    - {voltage: 2.5275, afr: 16.210}
+    - {voltage: 2.7225, afr: 17.276}
+    - {voltage: 2.8900, afr: 18.244}
+    - {voltage: 3.1850, afr: 20.000}
+    - {voltage: 4.0500, afr: 30.000}
+    - {voltage: 4.4775, afr: 40.000}
+    - {voltage: 4.5950, afr: 44.000}
+    - {voltage: 4.9000, afr: 60.000}
+# B06.7 (2026-10-05) -- the ECM's barometric gain on the A/F voltage word,
+# applied by src/signals/afr.py voltage_to_afr to every voltage-route sample.
+# Before table 0xE644 the ECM computes x2 = 2 x DID word and rescales it about
+# stoich: x2' = 880 + (x2 - 880) x 128 / k, k looked up on its raw baro word
+# 0xFFFF4C30 (high byte). k = 128 (gain 1) at sea level, ~113 (gain 1.13) at
+# this truck's ~80 kPa, so the curve above without it reads lean of PID 0x24
+# rich of stoich: +1.5 % at lambda 0.85-0.90, +2.5 % at 0.80-0.85, +3.9 % at
+# 0.70-0.80 at ~81 kPa. A sample with no baro read within max_age_s is refused
+# (baro_missing / baro_stale), never converted at gain 1.
+baro_gain:
+  baro_channel: 'obd:BAROMETRIC_PRESSURE'
+  max_age_s: 60.0
+  max_age_basis: >-
+    Measured cadence, 2026-10-07: PID 0x33 is read every 15.0 s (median; p90
+    16 s) on default drives (37 local drives 09-18..10-04) and every 1.0 s on
+    the 09-21..23 tuning captures. 60 s is four default polls, so one or two
+    dropped reads do not refuse a sample. Gaps longer than 60 s do occur (max
+    76-197 s on several 09-18 drives, 626 s on 10-04T194342, 1225 s on
+    09-21T225511), and samples inside them are baro_stale: on those drives 0-12
+    % of the A/F DID reads (40 % on 09-21T225511, 100 % on the 2-read
+    09-23T001344), reported per bank as baro_stale_fraction. Measured as span
+    instead of samples it is larger (a drive's baro reads can cover a quarter
+    of its rpm span on partially pulled sessions). Why not longer: baro moves
+    only with altitude, and a 6 % grade at 25 m/s climbs 90 m in 60 s, ~0.9
+    kPa at 80 kPa, under one count of k (< 0.2 % lambda at 0.85) -- the PID's
+    own 1 kPa resolution; a 120 s window doubles that. The same window as
+    fuel_comp_fit.yaml's baro gate.
+  # PID 0x33 = (kPa x 512) >> 9: floored. The gain is looked up at the middle
+  # of the 1 kPa interval the read stands for.
+  pid_resolution_kpa: 1.0
+  pid_rounding: floor
+  stoich_x2_counts: 880
+  stoich_address: '0x8F3A'
+  k_unity: 128
+  # k is a byte (RAM 0xFFFF36BB); the lookup's rounding is not decoded.
+  k_resolution: 1
+  table_address: '0xD00F'
+  axis_address: '0xC90C'
+  # Raw baro word >> 8, and the same breakpoints in kPa through word_scale.
+  # The ROM pads the axis with 255s; the lookup clamps there.
+  axis_raw: [0, 5, 6, 25, 50, 75, 100, 125, 150, 175, 200, 225, 255, 255, 255, 255]
+  axis_kpa: [54.15, 55.28, 55.51, 59.81, 65.48, 71.14, 76.80, 82.47, 88.13, 93.80, 99.46, 105.12, 111.92, 111.92, 111.92, 111.92]
+  k: [83, 84, 85, 90, 97, 103, 109, 115, 120, 124, 128, 131, 136, 136, 136, 136]
+  word_scale:
+    scale: 0.000885009765625
+    offset: 54.1484375
+    basis: >-
+      kPa = (word x 58 / 128 + 27724) / 512, calibration words 0x89AA = 58 and
+      0x92D4 = 27724 (Baro_kPa512 0x53B8C): the arithmetic PID 0x33 reports,
+      so the table axis and the PID read one scale.
+  skip:
+    word_min: 0xC840
+    word_max: 0xFE00
+    basis: >-
+      AF_baro_gain_correct (0x3FC8A) leaves x2 uncorrected while the raw word
+      lies in 0xC840-0xFE00 (99.52-111.70 kPa, where k is 128-136 anyway), and
+      while the raw sensor word 0xFFFF1116 is outside (0x15E6, 0xFF00): a
+      sensor-range fault, which also sends PID 0x33 to its 101.3 kPa default,
+      inside this window.
+  provenance:
+    method: rom_decompile
+    revision: ZS44A-20260920
+    image_sha256: a46baa248f16db8d5ed9854913e614dd7d77b7579bb6c36bddb792741531be50
+    code:
+      - 'AF_lambda_compute 0x3FAD0: x2 = 2 x 0xFFFF2B1A (snapshot of DID 0x1225 word 0xFFFF2C02)'
+      - 'AF_baro_gain_correct 0x3FC8A: x2'' = max(0, 880 + (x2 - 880) x 128 / k), sdiv'
+      - 'Lookup1D_u8_16pt 0x26CD4 on 0xFFFF4C30 >> 8: k (RAM 0xFFFF36BB)'
+      - 'Lookup1D_u16_16pt 0x26D2C: table 0xE644 on axis 0xF12A -> AFR x 500'
+      - 'Mode01_CAN_handler 0xD3AFC: PID 0x24 A,B = (0xFFFF46C2 << 14) / 3675, lambda = word / 7350'
+    verified_on: 2026-10-05
+    checked_on_data: >-
+      One gain fitted on same-reply PID 0x24 pairs makes table 0xE644
+      reproduce PID lambda within 0.3 % over lambda 0.70-1.30, and it follows
+      baro as this table predicts: 09-17T191712/T201000 (baro unlogged, GPS
+      2290-2430 m, ~75-77 kPa) 1.175 against 1.174-1.195; 09-21T223734 (80-81
+      kPa) 1.120 against 1.130-1.139; 10-04T194342 (81-83 kPa) 1.105 on bank
+      1 and on bank 2 / PID 0x28, against 1.109-1.130. The fit sits ~1 % under
+      the prediction, the direction of the rpm x BFS offset PID 0x24 adds at
+      high load (voltage_residual_sources).
+
+# B06.7 -- what PID 0x24/0x28 carry that the voltage route still does not: the
+# terms the transfer excludes besides the gain. Bounds are PID minus route, in
+# AFR, per bank. tests/test_af_baro_gain.py builds its tolerance from them.
+voltage_residual_sources:
+  - name: learned_rear_o2_offset
+    description: >-
+      A learned offset added after the table: s16 in AFR x 500, clamped to
+      +/-500 (+/-1.0 AFR), integrated by 0xA265C from the downstream O2
+      sensor's filtered signal (a rear-O2 "sub-feedback" trim of the front
+      sensor; the name is inferred, the chain is verified). Likely backup RAM.
+    addresses: {1: '0xFFFF4CA4', 2: '0xFFFF4CA6'}
+    bounds_afr: {1: [-1.0, 1.0], 2: [-1.0, 1.0]}
+    observable: memory_read
+    basis: >-
+      Readable only with service 0x23; not in the memory catalog. Constant
+      across lambda over a drive, and the gain is identity at stoich (x2 =
+      880), so its value shows as the stoich-dwell difference between the
+      gain-applied route and PID 0x24: -0.002 AFR on 09-21T223734, -0.056 AFR
+      on 09-23T142926. Its +/-1 AFR clamp is 2-3x the gain's own effect, so a
+      known answer differences it out at stoich rather than bounding by it.
+  - name: rpm_bfs_offset
+    description: >-
+      Lookup2D_u16_8x8 (0x26AA4) on rpm (0xFFFF11D8; axis 0xE18E, 600-3600
+      rpm) by base fuel schedule (0xFFFF1038, the previous cycle's DID 0x1208
+      word; axis 0xE1AE, 3.01-15.05 ms), value - 0x8000 added in AFR x 500.
+    addresses: {1: '0xACF4', 2: '0xAD74'}
+    bounds_afr: {1: [-0.014, 0.074], 2: [-0.01, 0.044]}
+    observable: operating_point
+    basis: >-
+      The bounds are the tables' own range (checked on load). Largest at the
+      3600 rpm row and the 2000 rpm / high-BFS cells (+30 to +37 bank 1), so
+      PID 0x24 reads up to ~0.07 AFR leaner than the route under load.
+    table_afr_x500:
+      1:
+        - [-7, 0, -1, 3, 3, 3, 3, 3]
+        - [2, 5, 2, 0, 2, 4, 4, 4]
+        - [12, 11, 0, -1, 6, 5, 5, 5]
+        - [29, 28, 26, 33, 20, 19, 33, 37]
+        - [23, 12, 12, 11, 14, 12, 13, 21]
+        - [22, 18, 13, 13, 12, 14, 14, 19]
+        - [-6, 0, -1, 3, 15, 18, 19, 21]
+        - [13, 26, 19, 30, 30, 30, 30, 30]
+      2:
+        - [0, 9, -1, 1, 0, -1, -1, -1]
+        - [5, 6, -5, -5, -2, -2, -2, -2]
+        - [10, 4, 7, 2, 1, -1, -1, -1]
+        - [22, 17, 12, 11, 10, 7, 9, 9]
+        - [14, 6, 10, 10, 10, 7, 3, 6]
+        - [10, 7, 9, 10, 13, 13, 13, 7]
+        - [0, 9, -1, 2, 10, 12, 13, 11]
+        - [13, 21, 14, 16, 16, 16, 16, 16]
 target_maps:
   - &targets_k106
     revision: ZS44A-k106

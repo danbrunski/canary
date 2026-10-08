@@ -159,9 +159,14 @@ def test_all_did_digest_carries_afr_lineage_rom_identity_and_polling_gaps(
         records.extend(
             [
                 TelemetryRecord(timestamp=ts, source="obd", channel="DID_1219", value="0bb8"),
-                # 2.170 V -> 14.72 AFR; 1.690 V -> 13.75 AFR via the vehicle table.
+                # 2.170 V -> 14.719 AFR; 1.690 V -> 13.74 AFR via ECM table 0xE644.
                 TelemetryRecord(timestamp=ts, source="obd", channel="DID_1225", value="01b2"),
                 TelemetryRecord(timestamp=ts, source="obd", channel="DID_1226", value="0152"),
+                # B06.7: the voltage route needs baro as of each read; 101 kPa
+                # is inside the ECM's skip window, so the gain is 1.
+                TelemetryRecord(
+                    timestamp=ts, source="obd", channel="BAROMETRIC_PRESSURE", value=101.0
+                ),
             ]
         )
     write_records_to_parquet(records, session)
@@ -191,7 +196,7 @@ def test_all_did_digest_carries_afr_lineage_rom_identity_and_polling_gaps(
     assert digest.measured_afr["available"] is True
     assert digest.measured_afr["instrument"] == "factory A/F voltage transformed to AFR"
     assert digest.measured_afr["banks"][0]["samples"] == 4
-    assert digest.measured_afr["banks"][0]["afr_median"] == pytest.approx(14.72)
+    assert digest.measured_afr["banks"][0]["afr_median"] == pytest.approx(14.719)
     assert digest.pull_inventory == {
         "available": True,
         "method": "physical pull tags + semantic providers",
@@ -335,7 +340,12 @@ def test_untagged_all_did_capture_infers_wot_from_the_throttle_stop(
     assert digest is not None
     assert digest.wot.source == "inferred"
     assert digest.wot.seconds == 3
-    assert digest.wot.with_measured_afr == 3
+    # B06.7: the measured AFR here is the A/F voltage route, which needs the
+    # ECM's baro (Mode 01 PID 0x33; this ECM has no baro DID). The profile
+    # disables Mode 01, so there is none -- refused by name, not at gain 1.
+    assert digest.wot.with_measured_afr == 0
+    assert digest.measured_afr["available"] is False
+    assert all("baro_missing" in bank["refused"] for bank in digest.measured_afr["banks"])
     # A commanded target needs Mode 01, which this profile disables.
     assert digest.wot.with_afr_pair == 0
     assert digest.wot.criterion is not None
@@ -601,3 +611,40 @@ def test_a_capture_with_no_resolvable_revision_names_it_and_gets_no_map(
     assert digest.target_map["available"] is False
     assert digest.target_map["revision"] is None
     assert digest.target_map["reason"].startswith("revision_unknown")
+
+
+def test_a_bank_whose_every_sample_has_stale_baro_is_refused_with_counts(
+    tmp_path: Path,
+) -> None:
+    """B06.7: never drop a bank silently. Every A/F read here is more than the
+    calibration's 60 s after the one baro read, so the bank is refused by
+    name, with its counts and stale fraction."""
+    from src.analysis.tuning_digest import _measured_afr_summary
+    from src.signals.afr import load_afr_calibration
+
+    session = tmp_path / "_tuning-2026-08-05T142720"
+    records = [
+        TelemetryRecord(
+            timestamp=T0 - timedelta(seconds=200),
+            source="obd",
+            channel="BAROMETRIC_PRESSURE",
+            value=80.0,
+        )
+    ]
+    for second in range(4):
+        ts = T0 + timedelta(seconds=second)
+        records.append(
+            TelemetryRecord(timestamp=ts, source="obd", channel="DID_1225", value="01b2")
+        )
+    write_records_to_parquet(records, session)
+    summary = _measured_afr_summary(
+        session,
+        calibration=load_afr_calibration(Path("data/nissan-xterra-2008/afr_calibration.yaml")),
+        role_capabilities={
+            "measured_afr_b1": {"available": True, "provider": "did:ECM_AF_SENSOR_V_B1"}
+        },
+    )
+    assert summary["available"] is False
+    [bank] = summary["banks"]
+    assert bank["refused"].startswith("no convertible sample: 4 read, 0 baro_missing, 4 baro_stale")
+    assert bank["baro_stale_fraction"] == 1.0

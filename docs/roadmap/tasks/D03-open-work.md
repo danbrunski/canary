@@ -2705,8 +2705,13 @@ live here now, so the documents could be archived
     `data/analyses/**` and the `tests/fixtures/fuel_comp/_capture-ram-study-…`
     session snapshot.
 
-- [ ] **D03.39 Resume the parked λ-chain transfer/baro-gain rework (canary-18,
-  unfinished).** *Parked 2026-10-05 by operator decision.* The firmware session
+- [x] **D03.39 Resume the parked λ-chain transfer/baro-gain rework (canary-18,
+  unfinished).** *Closed 2026-10-07: superseded by
+  [B06.7](B06-lambda-delivery-error.md), which rebuilt the work on current HEAD
+  instead of applying the old patch (do not `git apply` it). The voltage
+  transfer is ECM table 0xE644 with provenance, the A/F baro gain is applied
+  per sample, and every caller is migrated; see B06.7 for evidence and what
+  remains.* *Parked 2026-10-05 by operator decision.* The firmware session
   ended with an uncommitted, half-migrated change that kept every session's
   pre-commit hook red. The exact diff (against 022614a-era HEAD) is saved at
   `~/canary-wip/2026-10-05-canary18-lambda-chain-transfer-baro-gain.patch`,

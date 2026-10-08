@@ -67,7 +67,22 @@ HELD_OUT = (
     / "nissan-xterra-2008"
     / "_capture-tuning-2026-09-22T235224"
 )
+#: B06.7: the same capture's PID 0x33 rows, a companion slice, so the voltage
+#: routes convert at the ECM's barometric gain (the slice above has no baro).
+BARO_SLICE = REPO / "tests" / "fixtures" / "af_baro_gain" / "_capture-tuning-2026-09-21T223734"
 STOICH = 14.7
+
+
+def _slice() -> pd.DataFrame:
+    """The committed capture with its baro rows, in stored order."""
+    rows = pd.concat(
+        [
+            read_session(SLICE, filters=[("source", "==", "obd")]),
+            read_session(BARO_SLICE, filters=[("source", "==", "obd")]),
+        ],
+        ignore_index=True,
+    )
+    return rows.sort_values("timestamp", kind="stable").reset_index(drop=True)
 
 
 @pytest.fixture(scope="module")
@@ -109,6 +124,7 @@ def _offline(
         measured_source=measured,
         calibration=calibration,
         afr_stoich=STOICH,
+        baro=inputs.baro,
     )
     return samples.frame.reset_index(drop=True), inputs
 
@@ -227,7 +243,7 @@ def _assert_live_matches_offline(
             continue
         live = _concat(rows[key]).to_frame()
         _same_rows(live, offline)
-        assert published["late_reads"] == {"target": 0, "sentinel": 0, "measured": 0}
+        assert set(published["late_reads"].values()) == {0}
         assert published["undecided_rows"] == 0
         counts = offline["state"].value_counts().to_dict()
         assert published["states"] == {
@@ -260,7 +276,7 @@ def test_live_readout_gives_the_offline_rows_on_a_committed_tuning_capture(
     The slice is the whole 2026-09-21T223734 capture's polled delivery
     channels (1,078 RAM-target and 4,035 PID 0x44 rows).
     """
-    session = read_session(SLICE, filters=[("source", "==", "obd")])
+    session = _slice()
     eligible = _assert_live_matches_offline(tmp_path, session, declaration, calibration)
     # A parity test over empty results would prove nothing.
     assert eligible[("ram_final_target", "ecm_lambda_pid_0x24")] == 560
@@ -284,7 +300,7 @@ def test_the_stream_decides_the_same_rows_whatever_the_tick_cadence(
     seed: int, declaration: LambdaDeliveryDeclaration, calibration: AfrCalibration
 ) -> None:
     """Irregular ticks (0.2-6 s apart) decide exactly the whole-drive rows."""
-    session = read_session(SLICE, filters=[("source", "==", "obd")])
+    session = _slice()
     rng = np.random.default_rng(seed)
     for target, measured in [
         ("mode01_pid_0x44", "ecm_lambda_pid_0x24"),
@@ -294,6 +310,7 @@ def test_the_stream_decides_the_same_rows_whatever_the_tick_cadence(
         tt, tv = _long_values(inputs.target)
         st, _ = _long_values(inputs.sentinel)
         mt, mv = _long_values(inputs.measured)
+        bt, bv = _long_values(inputs.baro) if inputs.baro is not None else (mt[:0], mv[:0])
         stream = DeliveryStream(
             declaration,
             target_source=target,
@@ -310,12 +327,13 @@ def test_the_stream_decides_the_same_rows_whatever_the_tick_cadence(
                 target=(tt[(tt > lo) & (tt <= hi)], tv[(tt > lo) & (tt <= hi)]),
                 sentinel=st[(st > lo) & (st <= hi)],
                 measured=(mt[(mt > lo) & (mt <= hi)], mv[(mt > lo) & (mt <= hi)]),
+                baro=(bt[(bt > lo) & (bt <= hi)], bv[(bt > lo) & (bt <= hi)]),
             )
             frames.append(stream.advance().to_frame())
             lo, edge = hi, hi + float(rng.uniform(0.2, 6.0))
         frames.append(stream.flush().to_frame())
         _same_rows(pd.concat(frames, ignore_index=True), offline)
-        assert stream.late_reads == {"target": 0, "sentinel": 0, "measured": 0}
+        assert set(stream.late_reads.values()) == {0}
 
 
 # ---------------------------------------------------------------------------

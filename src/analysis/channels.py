@@ -15,10 +15,11 @@ least once during the 2026-08 tuning campaign:
 * ``can:`` — raw frame bytes in ``payload``, needing a binding to slice.
 * ``uprev:`` — imported UpRev K-line logs (``tools/import_uprev_log.py``),
   stored numeric and already in engineering units like ``obd:``. Kept as its
-  own namespace because it is a *different instrument* reading the same
-  vehicle: the 3.8 % measured-AFR disagreement between UpRev's conversion and
-  the ECM's own λ is exactly the kind of thing that must not be blurred by
-  filing both under one name.
+  own namespace because it is a *different reader and conversion* (another
+  logger, another clock), not necessarily a different sensor: UpRev's AFR and
+  the ECM's own λ (PID 0x24) are one A/F sensor converted two ways -- UpRev
+  skips the ECM's barometric gain (B06.7) -- and their 3.8 % disagreement is
+  exactly what must not be blurred by filing both under one name.
 * ``mem:`` — service-0x23 (ReadMemoryByAddress) channels, numeric and
   already in engineering units. Its own namespace rather than ``obd:``
   because the trust differs: a DID number is a contract the ECU keeps across

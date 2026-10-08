@@ -1024,7 +1024,8 @@ def test_row_pairing_and_counting_callers_refuse_a_change_only_decoded_provider(
     assert counts["available"] is True and counts["operator_demand_samples"] is None
     assert "P02.10" in counts["refused_counts"]["operator_demand_samples"]
     transfer = SimpleNamespace(censored_floor_afr=10.0, censored_ceiling_afr=20.0)
-    afr_calibration = SimpleNamespace(voltage_transfer=transfer, provenance={})
+    baro_gain = SimpleNamespace(baro_channel="obd:BAROMETRIC_PRESSURE")
+    afr_calibration = SimpleNamespace(voltage_transfer=transfer, baro_gain=baro_gain, provenance={})
     bank = {"measured_afr_b1": {"available": True, "provider": rpm}}
     summary = _measured_afr_summary(
         changed,

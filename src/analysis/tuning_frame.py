@@ -13,7 +13,8 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from src.analysis.channels import ChannelSpecError, as_of_refusal, read_channels
 from src.paths import DIDS_YAML
-from src.signals.afr import AfrCalibration, voltage_to_afr
+from src.signals.afr import AfrCalibration, BaroSamples, voltage_route_refusal, voltage_to_afr
+from src.signals.pairing import to_seconds
 from src.storage.capture_manifest import read_capture_manifest
 
 Role = Literal[
@@ -259,20 +260,46 @@ def build_tuning_frame(
             continue
         values = series.loc[:, ["timestamp", "value"]].rename(columns={"value": role})
         if provider.transform == "voltage_afr":
-            transfer = None if calibration is None else calibration.voltage_transfer
-            if transfer is None:
+            refusal = voltage_route_refusal(calibration)
+            if refusal is not None:
                 capability[role] = {
                     "available": False,
                     "provider": provider.spec,
-                    "reason": "voltage-to-AFR transfer is unavailable",
+                    "reason": refusal,
                 }
                 continue
+            assert calibration is not None and calibration.voltage_transfer is not None
+            transfer = calibration.voltage_transfer
+            # B06.7: where the vehicle's ECM applies a barometric gain, it is
+            # applied from the baro read as of each sample. A session that never
+            # read baro has no voltage AFR, by name; a stale sample has none.
+            baro: BaroSamples | None = None
+            if calibration.baro_gain is not None:
+                baro_spec = calibration.baro_gain.baro_channel
+                try:
+                    baro_long = read_channels(session_dir, [baro_spec], acquired_time=True)
+                except ChannelSpecError:
+                    baro_long = pd.DataFrame(columns=["timestamp", "value"])
+                if baro_long.empty:
+                    capability[role] = {
+                        "available": False,
+                        "provider": provider.spec,
+                        "reason": (
+                            f"baro_missing: {baro_spec} was never read in this session, and "
+                            "the voltage route needs it for the ECM's barometric gain (B06.7)"
+                        ),
+                    }
+                    continue
+                baro = BaroSamples.from_long(to_seconds(values["timestamp"]), baro_long)
             # Preserve the instrument reading and make censoring a first-class
             # column. Replacing volts with AFR alone made it impossible for a
             # report to distinguish a real rich/lean sample from the transfer
             # boundary (or to audit the conversion later).
+            converted = voltage_to_afr(values[role], calibration, baro=baro)
             values[f"{role}_raw_voltage"] = values[role]
-            values[role] = voltage_to_afr(values[role], transfer)
+            values[role] = converted.afr
+            values[f"{role}_baro_gain"] = converted.gain
+            values[f"{role}_baro_refused"] = converted.refused
             values[f"{role}_censored"] = values[role].le(transfer.censored_floor_afr) | values[
                 role
             ].ge(transfer.censored_ceiling_afr)

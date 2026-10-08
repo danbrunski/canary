@@ -15,10 +15,13 @@ import pandas as pd
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from src.columns import SESSION_COLUMN, arrived_column
 from src.config import VehicleParameters
 from src.signals.derived import _append_dependency_gap, _selected_input, fuel_properties
+from src.signals.pairing import to_seconds
 from src.signals.vehicle_signals import (
     LoadAxisChannel,
+    af_sensor_baro_columns,
     af_sensor_voltage_columns,
     load_axis_channels,
     wideband_lambda_columns,
@@ -45,6 +48,73 @@ class VoltageAfrPoint(_Strict):
     afr: float = Field(gt=0)
 
 
+#: B06.7 — the name of the barometric-gain term in a transfer's ``excludes``.
+#: A transfer that names it gets :func:`voltage_to_afr`'s per-sample gain from
+#: ``AfrCalibration.baro_gain``; every other excluded term is a declared
+#: residual source (``AfrCalibration.voltage_residual_sources``) of that name.
+BARO_GAIN_TERM = "baro_gain"
+
+#: A hex address as firmware notes write it (``0xE644``, ``0xFFFF4CA4``).
+_HEX_ADDRESS = r"^0x[0-9A-Fa-f]+$"
+
+
+class EcmTable1D(_Strict):
+    """A 1-D ECM lookup as read from the image: raw breakpoints and values."""
+
+    address: str = Field(pattern=_HEX_ADDRESS)
+    axis_address: str = Field(pattern=_HEX_ADDRESS)
+    #: Breakpoints in the ECM's input counts.
+    axis_counts: list[int] = Field(min_length=2)
+    #: Values in AFR x ``afr_scale_inverse`` (500 on the Xterra: lambda x 7350).
+    values: list[int] = Field(min_length=2)
+    afr_scale_inverse: int = Field(gt=0)
+
+    @model_validator(mode="after")
+    def _shape(self) -> EcmTable1D:
+        if len(self.axis_counts) != len(self.values):
+            raise ValueError("ECM table axis and values must be the same length")
+        axis = self.axis_counts
+        if any(left >= right for left, right in zip(axis, axis[1:], strict=False)):
+            raise ValueError("ECM table axis must be strictly increasing")
+        return self
+
+
+class VoltageTransferProvenance(_Strict):
+    """Where a vehicle's voltage transfer came from, and what it leaves out.
+
+    Optional and per vehicle. A ``rom_table`` transfer *is* an ECM table: its
+    points must equal ``table`` at ``volts_per_count`` exactly, so the curve
+    and its stated source cannot drift apart. ``excludes`` names the terms of
+    the ECM's own chain the curve leaves out (B06.7): :data:`BARO_GAIN_TERM`
+    needs ``AfrCalibration.baro_gain``; any other name needs a residual source.
+    """
+
+    method: Literal["rom_table", "log_cross_reference", "datasheet"]
+    #: The image, log or document it was taken from.
+    source: str = Field(min_length=1)
+    table: EcmTable1D | None = None
+    #: The curve's voltage per ECM input count (Xterra: 0.0025 V; the DID
+    #: decodes at 0.005 V and the table input is twice the DID word).
+    volts_per_count: float | None = Field(default=None, gt=0)
+    excludes: list[str] = Field(default_factory=list)
+    image_sha256: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
+    verified_on: date
+    notes: str = ""
+
+    @model_validator(mode="after")
+    def _consistent(self) -> VoltageTransferProvenance:
+        if len(set(self.excludes)) != len(self.excludes):
+            raise ValueError("voltage transfer excludes lists a term twice")
+        if self.method == "rom_table" and (self.table is None or self.volts_per_count is None):
+            raise ValueError("a rom_table transfer needs its table and volts_per_count")
+        if BARO_GAIN_TERM in self.excludes and self.volts_per_count is None:
+            raise ValueError(
+                "a transfer that excludes the barometric gain needs volts_per_count: the "
+                "gain is applied in the ECM's input counts"
+            )
+        return self
+
+
 class VoltageAfrTransfer(_Strict):
     points: list[VoltageAfrPoint] = Field(min_length=2)
     censored_floor_afr: float = Field(default=10.0, gt=0)
@@ -53,6 +123,9 @@ class VoltageAfrTransfer(_Strict):
     #: error surface — a cell holding sustained overrun would otherwise read as
     #: a large lean error and invite exactly the wrong correction.
     censored_ceiling_afr: float = Field(default=18.0, gt=0)
+    #: B06.7 — optional; required by a vehicle whose ECM applies terms the
+    #: curve leaves out (it names them in ``excludes``).
+    provenance: VoltageTransferProvenance | None = None
 
     @model_validator(mode="after")
     def _floor_below_ceiling(self) -> VoltageAfrTransfer:
@@ -65,6 +138,233 @@ class VoltageAfrTransfer(_Strict):
         volts = [point.voltage for point in self.points]
         if any(left >= right for left, right in zip(volts, volts[1:], strict=False)):
             raise ValueError("voltage transfer points must be strictly increasing")
+        return self
+
+    @model_validator(mode="after")
+    def _is_its_table(self) -> VoltageAfrTransfer:
+        """A ``rom_table`` transfer's points are the table, exactly."""
+        provenance = self.provenance
+        if provenance is None or provenance.method != "rom_table":
+            return self
+        table, per_count = provenance.table, provenance.volts_per_count
+        assert table is not None and per_count is not None
+        expected = [
+            (count * per_count, value / table.afr_scale_inverse)
+            for count, value in zip(table.axis_counts, table.values, strict=True)
+        ]
+        actual = [(point.voltage, point.afr) for point in self.points]
+        if len(actual) != len(expected) or any(
+            abs(av - ev) > 1e-9 or abs(aa - ea) > 1e-9
+            for (av, aa), (ev, ea) in zip(actual, expected, strict=True)
+        ):
+            raise ValueError(
+                f"a rom_table transfer must equal ECM table {table.address} at "
+                f"{per_count} V per count exactly; its points differ"
+            )
+        return self
+
+    def curve_afr(self, voltage: np.ndarray) -> np.ndarray:
+        """The curve at ``voltage``, clamped to its end points (an ECM's table
+        lookup clamps both ends)."""
+        volts = np.asarray([point.voltage for point in self.points], dtype=float)
+        afr = np.asarray([point.afr for point in self.points], dtype=float)
+        return np.asarray(np.interp(np.asarray(voltage, dtype=float), volts, afr), dtype=float)
+
+    @property
+    def excludes(self) -> list[str]:
+        return [] if self.provenance is None else list(self.provenance.excludes)
+
+    @property
+    def volts_per_count(self) -> float | None:
+        return None if self.provenance is None else self.provenance.volts_per_count
+
+
+class BaroWordScale(_Strict):
+    """``kPa = word * scale + offset`` for the ECM's raw baro word ``0xFFFF4C30``.
+
+    The arithmetic Mode 01 PID 0x33 reports (``(word * 58 / 128 + 27724) /
+    512``), so a table axis in raw counts and the PID read one scale.
+    """
+
+    scale: float = Field(gt=0)
+    offset: float
+    basis: str = Field(min_length=1)
+
+    def kpa(self, word: float) -> float:
+        return word * self.scale + self.offset
+
+
+class BaroGainSkip(_Strict):
+    """The raw baro window inside which the ECM leaves the word uncorrected."""
+
+    word_min: int = Field(ge=0, le=0xFFFF)
+    word_max: int = Field(ge=0, le=0xFFFF)
+    basis: str = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def _ordered(self) -> BaroGainSkip:
+        if self.word_min > self.word_max:
+            raise ValueError("skip word_min must not exceed word_max")
+        return self
+
+
+class BaroGainProvenance(_Strict):
+    method: Literal["rom_decompile", "datasheet", "measured"]
+    revision: str = Field(min_length=1)
+    image_sha256: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
+    #: Routines and words the arithmetic was read from.
+    code: list[str] = Field(min_length=1)
+    verified_on: date
+    #: The check on logged data: the gain a fit selects against PID 0x24,
+    #: beside the gain this table predicts from the session's baro.
+    checked_on_data: str = Field(min_length=1)
+
+
+class AfSensorBaroGain(_Strict):
+    """The ECM's barometric gain on the A/F sensor word (B06.7).
+
+    Before its AFR table the ECM rescales the doubled voltage word about
+    stoich: ``x2' = stoich + (x2 - stoich) * k_unity / k``, with ``k`` looked
+    up on its raw barometric pressure. PID 0x24/0x28 carry the result; a
+    transfer recorded without it reads lean of them on the rich side at
+    altitude (+1.5 % at lambda 0.85-0.90 at ~81 kPa, +3.9 % at 0.70-0.80).
+    :func:`voltage_to_afr` applies it per sample, from the barometric
+    pressure as of that sample, and refuses a sample with none rather than
+    assume sea level.
+    """
+
+    #: The channel reporting the ECM's own barometric pressure.
+    baro_channel: str = Field(min_length=1)
+    #: A sample takes the newest baro read at or before it, no older than
+    #: this; older is ``baro_stale``, none is ``baro_missing``.
+    max_age_s: float = Field(gt=0)
+    max_age_basis: str = Field(min_length=1)
+    #: The channel's resolution and how the ECM rounds to it (PID 0x33 is
+    #: floored, so a read is the bottom of a 1 kPa interval and the gain is
+    #: looked up at its middle).
+    pid_resolution_kpa: float = Field(gt=0)
+    pid_rounding: Literal["floor", "nearest"]
+    stoich_x2_counts: int = Field(gt=0)
+    stoich_address: str = Field(pattern=_HEX_ADDRESS)
+    #: ``k`` at which the gain is 1.
+    k_unity: int = Field(gt=0)
+    #: ``k`` is a byte in the ECM: whole counts, rounding not decoded.
+    k_resolution: int = Field(ge=0)
+    table_address: str = Field(pattern=_HEX_ADDRESS)
+    axis_address: str = Field(pattern=_HEX_ADDRESS)
+    #: The lookup's axis: the raw baro word's high byte (``word >> 8``) ...
+    axis_raw: list[int] = Field(min_length=2)
+    #: ... and the same breakpoints in kPa (checked against ``word_scale``).
+    axis_kpa: list[float] = Field(min_length=2)
+    k: list[int] = Field(min_length=2)
+    word_scale: BaroWordScale
+    skip: BaroGainSkip
+    provenance: BaroGainProvenance
+
+    @model_validator(mode="after")
+    def _table(self) -> AfSensorBaroGain:
+        if not len(self.axis_raw) == len(self.axis_kpa) == len(self.k):
+            raise ValueError("baro gain axis_raw, axis_kpa and k must be the same length")
+        if any(left > right for left, right in zip(self.axis_raw, self.axis_raw[1:], strict=False)):
+            raise ValueError("baro gain axis_raw must be non-decreasing")
+        if any(value <= 0 for value in self.k):
+            raise ValueError("baro gain k must be positive (the ECM divides by it)")
+        for raw, kpa in zip(self.axis_raw, self.axis_kpa, strict=True):
+            expected = self.word_scale.kpa(raw * 256)
+            if abs(expected - kpa) > 0.01:
+                raise ValueError(
+                    f"baro gain axis_kpa {kpa} disagrees with raw {raw} through word_scale "
+                    f"({expected:.2f} kPa)"
+                )
+        if len(self._strict_axis()[0]) < 2:
+            raise ValueError("baro gain axis needs two distinct breakpoints")
+        if self.baro_channel not in af_sensor_baro_columns():
+            raise ValueError(
+                f"baro gain channel {self.baro_channel!r} is not declared as any vehicle's "
+                "A/F sensor baro input (src.signals.vehicle_signals AF_SENSOR_BARO), so the "
+                "derived-channel registry would not name it as an input of the voltage route"
+            )
+        return self
+
+    def _strict_axis(self) -> tuple[np.ndarray, np.ndarray]:
+        """The axis without the ROM's repeated end padding (``255, 255, ...``)."""
+        keep = [0]
+        for index in range(1, len(self.axis_raw)):
+            if self.axis_raw[index] > self.axis_raw[keep[-1]]:
+                keep.append(index)
+        return (
+            np.asarray([self.axis_kpa[i] for i in keep], dtype=float),
+            np.asarray([self.k[i] for i in keep], dtype=float),
+        )
+
+    @property
+    def skip_kpa(self) -> tuple[float, float]:
+        return (self.word_scale.kpa(self.skip.word_min), self.word_scale.kpa(self.skip.word_max))
+
+    def estimated_kpa(self, reported_kpa: np.ndarray) -> np.ndarray:
+        """The ECM's baro from the channel's reading: the middle of the
+        interval a floor-rounded reading stands for."""
+        reported = np.asarray(reported_kpa, dtype=float)
+        if self.pid_rounding == "floor":
+            return reported + self.pid_resolution_kpa / 2.0
+        return reported
+
+    def k_at(self, reported_kpa: np.ndarray) -> np.ndarray:
+        """The table's ``k`` at each reading (continuous; clamped at the axis ends)."""
+        axis, k = self._strict_axis()
+        return np.asarray(np.interp(self.estimated_kpa(reported_kpa), axis, k), dtype=float)
+
+    def gain(self, reported_kpa: np.ndarray) -> np.ndarray:
+        """``k_unity / k`` per reading, 1 inside the ECM's skip window."""
+        kpa = self.estimated_kpa(reported_kpa)
+        low, high = self.skip_kpa
+        return np.where((kpa >= low) & (kpa <= high), 1.0, self.k_unity / self.k_at(reported_kpa))
+
+
+class VoltageResidualSource(_Strict):
+    """A term PID 0x24/0x28 carry and the voltage route does not (B06.7).
+
+    Neither is modelled: one needs a memory read, the other the ECM's rpm and
+    base fuel schedule at the same instant. Each is declared with its bounds
+    per bank, in AFR, as *PID minus route*, so a residual between the two can
+    say what it may contain and a tolerance can be built from the bounds.
+    """
+
+    name: str = Field(min_length=1)
+    description: str = Field(min_length=1)
+    #: Where the term lives, per bank (RAM word or calibration table).
+    addresses: dict[int, str]
+    #: ``[low, high]`` AFR per bank.
+    bounds_afr: dict[int, tuple[float, float]]
+    #: How the term could be read: a memory read, from the operating point it
+    #: is looked up on, or not at all.
+    observable: Literal["memory_read", "operating_point", "not_observable"]
+    basis: str = Field(min_length=1)
+    #: For a table-driven term: the table per bank (rows x columns) in AFR x
+    #: ``table_afr_scale_inverse``. Its bounds must be the table's range.
+    table_afr_x500: dict[int, list[list[int]]] | None = None
+    table_afr_scale_inverse: int = Field(default=500, gt=0)
+
+    @model_validator(mode="after")
+    def _bounds(self) -> VoltageResidualSource:
+        if set(self.addresses) != set(self.bounds_afr):
+            raise ValueError(f"{self.name}: addresses and bounds_afr must name the same banks")
+        for bank, (low, high) in self.bounds_afr.items():
+            if low > high:
+                raise ValueError(f"{self.name}: bank {bank} bound low exceeds high")
+        if self.table_afr_x500 is not None:
+            for bank, rows in self.table_afr_x500.items():
+                values = [value for row in rows for value in row]
+                scale = float(self.table_afr_scale_inverse)
+                expected = (min(values) / scale, max(values) / scale)
+                declared = self.bounds_afr.get(bank)
+                if declared is None or any(
+                    abs(a - b) > 1e-9 for a, b in zip(declared, expected, strict=True)
+                ):
+                    raise ValueError(
+                        f"{self.name}: bank {bank} bounds {declared} are not its table's "
+                        f"range {expected}"
+                    )
         return self
 
 
@@ -228,7 +528,13 @@ EquivRatioConvention = Literal["phi", "lambda", "unverified"]
 #: A voltage difference is not a mixture difference -- the transfer is
 #: non-linear (about 2 AFR/V rich of stoich, 3.9 AFR/V lean) -- so the
 #: balance is taken in λ, after each bank's own conversion.
-LAMBDA_BANK_BALANCE_AF_VOLTAGE = "derived:LAMBDA_BANK_BALANCE_AF_VOLTAGE"
+#: B06.7 renamed it (was ``derived:LAMBDA_BANK_BALANCE_AF_VOLTAGE``) when each
+#: bank's conversion gained the ECM's barometric gain: away from stoich the
+#: balance scales by ~1.13 at 80 kPa and a row without fresh baro has none, so
+#: a model fitted on the gain-1 values must not be served these. The new name
+#: changes the ``afr_bank_balance_robust`` recipe's contract fingerprint, which
+#: flags the deployed fit ``contract_changed:recipe`` until it is refitted.
+LAMBDA_BANK_BALANCE_AF_VOLTAGE = "derived:LAMBDA_BANK_BALANCE_AF_VOLTAGE_BARO"
 #: The same balance from the vehicle's two wide-range lambda PIDs. Produced
 #: only once ``AfrCalibration.wideband_bank_balance`` records that the bank-2
 #: PID agrees with the A/F voltage path (D03.34): an unverified PID pairing
@@ -267,10 +573,58 @@ class AfrCalibration(_Strict):
     #: Per-vehicle, because it is an ECM behaviour rather than a standard.
     commanded_equiv_ratio_convention: EquivRatioConvention = "unverified"
     voltage_transfer: VoltageAfrTransfer | None = None
+    #: B06.7 — the ECM's barometric gain on the A/F voltage word, declared by
+    #: a vehicle whose ECM applies one (its transfer ``excludes: [baro_gain]``):
+    #: :func:`voltage_to_afr` then applies it and refuses a sample without baro.
+    baro_gain: AfSensorBaroGain | None = None
+    #: B06.7 — every other term of the ECM's chain the transfer excludes, with
+    #: its bounds: what a voltage-route residual against PID 0x24 may contain.
+    voltage_residual_sources: list[VoltageResidualSource] = Field(default_factory=list)
     target_maps: list[TargetAfrMap] = Field(default_factory=list)
     #: B05.8 — ``None`` until the bank-2 wide-range PID is verified; until
     #: then ``LAMBDA_BANK_BALANCE_WIDEBAND`` is never produced.
     wideband_bank_balance: WidebandPairVerification | None = None
+
+    @model_validator(mode="after")
+    def _voltage_chain_accounted(self) -> AfrCalibration:
+        """Every term the transfer leaves out is applied or declared (B06.7)."""
+        transfer = self.voltage_transfer
+        declared = [source.name for source in self.voltage_residual_sources]
+        if len(set(declared)) != len(declared):
+            raise ValueError("voltage_residual_sources names a term twice")
+        if transfer is None:
+            if self.baro_gain is not None or declared:
+                raise ValueError(
+                    "baro_gain and voltage_residual_sources describe a voltage transfer, "
+                    "and this calibration has none"
+                )
+            return self
+        excluded = set(transfer.excludes)
+        if BARO_GAIN_TERM in excluded and self.baro_gain is None:
+            raise ValueError(
+                "the voltage transfer excludes the ECM's barometric gain, so baro_gain is "
+                "required: without it every voltage-route AFR is the gain-1 reading (on the "
+                "Xterra lean of PID 0x24 by ~1.5-3.9 % rich of stoich at 81 kPa; B06.7)"
+            )
+        if BARO_GAIN_TERM not in excluded and self.baro_gain is not None:
+            raise ValueError(
+                "baro_gain is declared, but the voltage transfer does not name baro_gain in "
+                "its provenance excludes: say what the curve leaves out"
+            )
+        missing = sorted(excluded - {BARO_GAIN_TERM} - set(declared))
+        extra = sorted(set(declared) - excluded)
+        if missing or extra:
+            raise ValueError(
+                "voltage_residual_sources must declare exactly the terms the transfer "
+                f"excludes besides baro_gain: missing {missing}, not excluded {extra}"
+            )
+        return self
+
+    def residual_source(self, name: str) -> VoltageResidualSource:
+        for source in self.voltage_residual_sources:
+            if source.name == name:
+                return source
+        raise KeyError(f"no voltage residual source named {name!r}")
 
     def commanded_afr(self, value: float, *, afr_stoich: float) -> float:
         """Convert a raw PID 0x44 reading to commanded AFR.
@@ -338,16 +692,189 @@ def _load_afr_calibration_cached(path: Path, mtime_ns: int) -> AfrCalibration:
     return AfrCalibration.model_validate(yaml.safe_load(path.read_text()))
 
 
-def voltage_to_afr(voltage: pd.Series, transfer: VoltageAfrTransfer) -> pd.Series:
-    points = transfer.points
-    values = np.interp(
-        pd.to_numeric(voltage, errors="coerce"),
-        [point.voltage for point in points],
-        [point.afr for point in points],
-        left=np.nan,
-        right=np.nan,
+#: B06.7 — the voltage route's two barometric refusals, as row states and as
+#: the stable prefixes of their reasons. ``baro_missing``: no barometric read at
+#: or before the sample. ``baro_stale``: the newest one is older than the
+#: declared ``baro_gain.max_age_s`` (or its age cannot be shown). Neither
+#: falls back to gain 1: that is sea level, and the truck lives at ~80 kPa.
+BARO_MISSING = "baro_missing"
+BARO_STALE = "baro_stale"
+
+
+@dataclass(frozen=True)
+class BaroSamples:
+    """Barometric pressure as of each voltage sample: the newest read at or
+    before it, and how old that read is (B06.7).
+
+    Built by its constructors, which never look ahead: ``kpa`` is the
+    channel's reading as reported (the conversion applies its rounding),
+    ``NaN`` where nothing was read at or before the sample; ``age_s`` is
+    ``NaN`` where the age cannot be shown.
+    """
+
+    kpa: np.ndarray
+    age_s: np.ndarray
+
+    def __post_init__(self) -> None:
+        if len(self.kpa) != len(self.age_s):
+            raise ValueError("BaroSamples kpa and age_s must be the same length")
+
+    def __len__(self) -> int:
+        return len(self.kpa)
+
+    @classmethod
+    def unobserved(cls, n: int) -> BaroSamples:
+        """No barometric read at all: every sample is ``baro_missing``."""
+        return cls(np.full(n, np.nan), np.full(n, np.nan))
+
+    @classmethod
+    def as_of(
+        cls, sample_times_s: np.ndarray, baro_times_s: np.ndarray, baro_kpa: np.ndarray
+    ) -> BaroSamples:
+        """Each sample's newest baro read at or before it (float seconds, one clock)."""
+        samples = np.asarray(sample_times_s, dtype=float)
+        times = np.asarray(baro_times_s, dtype=float)
+        values = np.asarray(baro_kpa, dtype=float)
+        keep = np.isfinite(times) & np.isfinite(values)
+        times, values = times[keep], values[keep]
+        if not len(times):
+            return cls.unobserved(len(samples))
+        order = np.argsort(times, kind="stable")
+        times, values = times[order], values[order]
+        index = np.searchsorted(times, samples, side="right") - 1
+        found = (index >= 0) & np.isfinite(samples)
+        kpa = np.full(len(samples), np.nan)
+        age = np.full(len(samples), np.nan)
+        kpa[found] = values[index[found]]
+        age[found] = samples[found] - times[index[found]]
+        return cls(kpa, age)
+
+    @classmethod
+    def from_long(cls, sample_times_s: np.ndarray, baro: pd.DataFrame | None) -> BaroSamples:
+        """:meth:`as_of` from a long frame (``timestamp``, ``value``)."""
+        if baro is None or baro.empty:
+            return cls.unobserved(len(sample_times_s))
+        times = to_seconds(pd.to_datetime(baro["timestamp"], utc=True))
+        values = pd.to_numeric(baro["value"], errors="coerce").to_numpy(dtype=float)
+        return cls.as_of(sample_times_s, times, values)
+
+    @classmethod
+    def from_wide(cls, frame: pd.DataFrame, column: str) -> BaroSamples:
+        """Per row of a wide (resampled or live) frame.
+
+        The cell holds the bounded forward-fill; its age is the time since the
+        row on which a read last *arrived* (``<column>__arrived``, A03.1), per
+        session. A cell with no arrival before it in the frame, or a frame
+        without the flag, has no provable age: ``baro_stale``, not a guess.
+        """
+        n = len(frame)
+        if column not in frame or "timestamp" not in frame:
+            return cls.unobserved(n)
+        kpa = pd.to_numeric(frame[column], errors="coerce").to_numpy(dtype=float)
+        flag = arrived_column(column)
+        if flag not in frame:
+            return cls(kpa, np.full(n, np.nan))
+        times = to_seconds(pd.to_datetime(frame["timestamp"], utc=True))
+        arrived = frame[flag].fillna(False).astype(bool).to_numpy() & np.isfinite(kpa)
+        arrival = pd.Series(np.where(arrived, times, np.nan), index=frame.index)
+        if SESSION_COLUMN in frame:
+            last = arrival.groupby(frame[SESSION_COLUMN], sort=False).ffill()
+        else:
+            last = arrival.ffill()
+        return cls(kpa, times - last.to_numpy(dtype=float))
+
+
+@dataclass(frozen=True)
+class VoltageAfr:
+    """The voltage route's AFR per sample, and why a sample has none (B06.7)."""
+
+    #: AFR with the ECM's barometric gain applied; ``NaN`` on a refused sample
+    #: and on a voltage outside the transfer's domain.
+    afr: pd.Series
+    #: The gain applied (1.0 inside the ECM's skip window); ``NaN`` where refused.
+    gain: pd.Series
+    baro_missing: pd.Series
+    baro_stale: pd.Series
+
+    @property
+    def refused(self) -> pd.Series:
+        return self.baro_missing | self.baro_stale
+
+    def refusals(self) -> dict[str, int]:
+        """Rows per barometric refusal (zeros included)."""
+        return {
+            BARO_MISSING: int(self.baro_missing.sum()),
+            BARO_STALE: int(self.baro_stale.sum()),
+        }
+
+
+def voltage_to_afr(
+    voltage: pd.Series, calibration: AfrCalibration, *, baro: BaroSamples | None
+) -> VoltageAfr:
+    """A/F sensor voltage to AFR through the vehicle's declared chain (B06.7).
+
+    Where the vehicle declares an ECM barometric gain (``calibration.baro_gain``,
+    its transfer ``excludes: [baro_gain]``): ``x = voltage / volts_per_count``,
+    the gain about stoich from ``baro`` as of each sample, then the transfer
+    curve. ``baro`` is keyword-required: with a declared gain, ``None`` raises,
+    and a sample whose baro is missing or older than ``baro_gain.max_age_s``
+    gets no AFR and is counted under its refusal, never converted at gain 1.
+    Without a declared gain the curve applies directly and ``baro`` must be
+    ``None``. The curve clamps at its end points, as an ECM's table lookup does.
+
+    What the ECM's own lambda still carries and this does not is
+    ``calibration.voltage_residual_sources``.
+    """
+    transfer = calibration.voltage_transfer
+    if transfer is None:
+        raise ValueError("voltage_to_afr needs the calibration's voltage_transfer")
+    gain_table = calibration.baro_gain
+    volts = pd.to_numeric(voltage, errors="coerce").to_numpy(dtype=float)
+    index = voltage.index
+    valid = np.isfinite(volts) & (volts >= 0.0)
+    if gain_table is None:
+        if baro is not None:
+            raise ValueError("this vehicle declares no barometric gain; pass baro=None")
+        afr = np.where(valid, transfer.curve_afr(np.nan_to_num(volts)), np.nan)
+        none = pd.Series(False, index=index, dtype=bool)
+        return VoltageAfr(
+            afr=pd.Series(afr, index=index, dtype=float),
+            gain=pd.Series(np.where(valid, 1.0, np.nan), index=index, dtype=float),
+            baro_missing=none,
+            baro_stale=none.copy(),
+        )
+    if baro is None:
+        raise ValueError(
+            "this vehicle's ECM applies a barometric gain to the A/F voltage; "
+            "voltage_to_afr needs baro (BaroSamples) for every sample"
+        )
+    if len(baro) != len(voltage):
+        raise ValueError(f"baro has {len(baro)} samples for {len(voltage)} voltage samples")
+    missing = ~np.isfinite(baro.kpa)
+    with np.errstate(invalid="ignore"):
+        fresh = baro.age_s <= gain_table.max_age_s
+    stale = ~missing & ~fresh
+    usable = ~missing & ~stale
+    gain = np.full(len(volts), np.nan)
+    gain[usable] = gain_table.gain(baro.kpa[usable])
+    per_count = transfer.volts_per_count
+    assert per_count is not None  # the provenance validator requires it with the gain
+    stoich = float(gain_table.stoich_x2_counts)
+    corrected = np.maximum(0.0, stoich + (volts / per_count - stoich) * gain) * per_count
+    afr = np.where(usable & valid, transfer.curve_afr(np.nan_to_num(corrected)), np.nan)
+    return VoltageAfr(
+        afr=pd.Series(afr, index=index, dtype=float),
+        gain=pd.Series(gain, index=index, dtype=float),
+        baro_missing=pd.Series(missing, index=index, dtype=bool),
+        baro_stale=pd.Series(stale, index=index, dtype=bool),
     )
-    return pd.Series(values, index=voltage.index, dtype=float)
+
+
+def voltage_route_refusal(calibration: AfrCalibration | None) -> str | None:
+    """Why no voltage-route AFR can be produced for this calibration, or ``None``."""
+    if calibration is None or calibration.voltage_transfer is None:
+        return "voltage-to-AFR transfer is unavailable"
+    return None
 
 
 class LoadAxisUnavailableError(ValueError):
@@ -727,12 +1254,24 @@ def append_afr_channels(
     ``active_revision`` applied to every session gave pre-flash sessions the
     wrong map. Rows whose revision has no map stay NaN, and the reason is
     logged once per process; the channels are absent when no row resolves one.
+
+    B06.7 — where measured AFR falls back to the A/F sensor voltage, each row
+    is converted at the ECM's barometric gain from the baro read as of that
+    row (:meth:`BaroSamples.from_wide`). A row with no fresh baro has no AFR
+    (logged once per process by refusal), never the gain-1 value.
     """
     out = frame.copy()
     stoich = fuel_properties(vehicle).afr_stoich
     transfer = calibration.voltage_transfer if calibration else None
     floor = transfer.censored_floor_afr if transfer else 10.0
     ceiling = transfer.censored_ceiling_afr if transfer else 18.0
+    # B06.7: the voltage route converts each row at the ECM's barometric gain,
+    # from the baro read as of that row; rows without one are refused.
+    baro = (
+        BaroSamples.from_wide(out, calibration.baro_gain.baro_channel)
+        if calibration is not None and calibration.baro_gain is not None
+        else None
+    )
     for bank in (1, 2):
         measured: pd.Series | None = None
         # The bank's upstream wide-range lambda PID, which only the vehicle
@@ -749,15 +1288,19 @@ def append_afr_channels(
         # The vehicle's A/F sensor voltage channel (R05.4: named by the
         # vehicle in src.signals.vehicle_signals, never here).
         for voltage_column in af_sensor_voltage_columns(bank):
-            if measured is not None or not transfer or voltage_column not in out:
+            if measured is not None or transfer is None or voltage_column not in out:
                 continue
-            candidate = voltage_to_afr(out[voltage_column], transfer)
-            measured = candidate if candidate.notna().any() else None
+            assert calibration is not None
+            converted = voltage_to_afr(out[voltage_column], calibration, baro=baro)
+            _log_baro_refusals(f"derived:AFR_B{bank}", converted, calibration)
+            measured = converted.afr if converted.afr.notna().any() else None
         if measured is not None:
             out[f"derived:AFR_B{bank}"] = measured
             out[f"derived:AFR_CENSORED_B{bank}"] = measured.le(floor) | measured.ge(ceiling)
 
-    _append_lambda_bank_balances(out, calibration, stoich=stoich, floor=floor, ceiling=ceiling)
+    _append_lambda_bank_balances(
+        out, calibration, baro, stoich=stoich, floor=floor, ceiling=ceiling
+    )
 
     if calibration is None or not calibration.target_maps or "obd:RPM" not in out:
         return out
@@ -791,9 +1334,26 @@ def append_afr_channels(
     return out
 
 
+def _log_baro_refusals(output: str, converted: VoltageAfr, calibration: AfrCalibration) -> None:
+    """Log once per process that a voltage-route channel lost rows to baro (B06.7)."""
+    if calibration.baro_gain is None:
+        return
+    for state, rows in converted.refusals().items():
+        if not rows:
+            continue
+        reason = (
+            f"{state}: {output} needs {calibration.baro_gain.baro_channel} as of each row "
+            f"(within {calibration.baro_gain.max_age_s:g} s) for the ECM's barometric gain"
+        )
+        if reason not in _logged_refusals:
+            _logged_refusals.add(reason)
+            log.warning("%s withheld on %d rows: %s", output, rows, reason)
+
+
 def _append_lambda_bank_balances(
     out: pd.DataFrame,
     calibration: AfrCalibration | None,
+    baro: BaroSamples | None,
     *,
     stoich: float,
     floor: float,
@@ -804,36 +1364,42 @@ def _append_lambda_bank_balances(
     Each bank's reading becomes λ on its own before the difference, and a
     censored reading (at the transfer's floor or the fuel-cut ceiling) is no
     measurement, so the balance is missing there rather than a rail-to-value
-    difference. Both inputs' freshness feeds the output's ``__gap``.
+    difference. Every input's freshness feeds the output's ``__gap``: for the
+    A/F voltage pair that includes the barometric pressure both banks are
+    corrected with (B06.7); without a baro column there is no balance.
     """
-    transfer = calibration.voltage_transfer if calibration else None
-    pairs: list[tuple[str, tuple[str, ...], tuple[str, ...]]] = []
-    if transfer is not None:
+    pairs: list[tuple[str, tuple[tuple[str, ...], ...]]] = []
+    if calibration is not None and calibration.voltage_transfer is not None:
+        baro_group = (
+            ((calibration.baro_gain.baro_channel,),) if calibration.baro_gain is not None else ()
+        )
         pairs.append(
             (
                 LAMBDA_BANK_BALANCE_AF_VOLTAGE,
-                af_sensor_voltage_columns(1),
-                af_sensor_voltage_columns(2),
+                (af_sensor_voltage_columns(1), af_sensor_voltage_columns(2), *baro_group),
             )
         )
     if calibration is not None and calibration.wideband_bank_balance is not None:
         pairs.append(
-            (LAMBDA_BANK_BALANCE_WIDEBAND, wideband_lambda_columns(1), wideband_lambda_columns(2))
+            (LAMBDA_BANK_BALANCE_WIDEBAND, (wideband_lambda_columns(1), wideband_lambda_columns(2)))
         )
-    for output, bank_1, bank_2 in pairs:
-        columns = (_selected_input(out, bank_1), _selected_input(out, bank_2))
-        if columns[0] is None or columns[1] is None:
+    for output, groups in pairs:
+        selected = [_selected_input(out, group) for group in groups]
+        if any(column is None for column in selected):
             continue
+        columns = [str(column) for column in selected[:2]]
         lambdas = []
         for column in columns:
             if output == LAMBDA_BANK_BALANCE_AF_VOLTAGE:
-                assert transfer is not None
-                afr = voltage_to_afr(out[column], transfer)
+                assert calibration is not None
+                converted = voltage_to_afr(out[column], calibration, baro=baro)
+                _log_baro_refusals(output, converted, calibration)
+                afr = converted.afr
             else:
                 afr = pd.to_numeric(out[column], errors="coerce") * stoich
             lambdas.append((afr / stoich).where((afr > floor) & (afr < ceiling)))
         out[output] = (lambdas[0] - lambdas[1]).astype(float)
-        _append_dependency_gap(out, output, bank_1, bank_2)
+        _append_dependency_gap(out, output, *groups)
 
 
 def afr_error_surface(
@@ -899,6 +1465,8 @@ def afr_error_surface(
 
 __all__ = [
     "AFR_ERROR_CHANNELS",
+    "BARO_MISSING",
+    "BARO_STALE",
     "COMMANDED_EQUIV_RATIO_COLUMN",
     "DEFAULT_TARGET_LOAD_AXIS",
     "DEFAULT_TARGET_LOAD_AXIS_UNIT",
@@ -909,10 +1477,14 @@ __all__ = [
     "TARGET_AFR_CHANNELS",
     "TARGET_MAP_UNRECORDED",
     "TUNE_REVISION_UNKNOWN",
+    "BARO_GAIN_TERM",
+    "AfSensorBaroGain",
     "AfrCalibration",
     "AxisEdgeClamp",
     "AxisOutOfRange",
+    "BaroSamples",
     "ChannelUnits",
+    "EcmTable1D",
     "FlashHistory",
     "LoadAxisUnavailableError",
     "NoFlashHistory",
@@ -921,7 +1493,10 @@ __all__ = [
     "TargetAfrMap",
     "TargetMapProvenance",
     "TargetRevisionRefusal",
+    "VoltageAfr",
     "VoltageAfrTransfer",
+    "VoltageResidualSource",
+    "VoltageTransferProvenance",
     "WidebandPairVerification",
     "append_afr_channels",
     "afr_error_surface",
@@ -933,5 +1508,6 @@ __all__ = [
     "target_afr_refusal",
     "target_load_axis",
     "target_map_refusal",
+    "voltage_route_refusal",
     "voltage_to_afr",
 ]

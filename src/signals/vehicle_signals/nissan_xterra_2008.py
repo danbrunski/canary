@@ -23,6 +23,12 @@ SIGNAL_INPUTS: Mapping[str, InputGroups] = {
 #: through the profile's ``afr_calibration.yaml`` transfer.
 AF_SENSOR_VOLTAGE: Mapping[int, str] = {1: "did:ECM_AF_SENSOR_V_B1", 2: "did:ECM_AF_SENSOR_V_B2"}
 
+#: The ECM rescales that voltage about stoich by a gain looked up on its raw
+#: barometric pressure before its AFR table (B06.7; afr_calibration.yaml
+#: ``baro_gain``). PID 0x33 reports the same raw word, floored to 1 kPa. This
+#: ECM answers no baro DID, so a capture without Mode 01 has no voltage AFR.
+AF_SENSOR_BARO = "obd:BAROMETRIC_PRESSURE"
+
 #: Upstream wide-range lambda per bank. This ECM reports the PID 0x13 sensor
 #: layout (its 0x15 answers as B1S2 and 0x19 as B2S2), so bank 2 sensor 1 is
 #: J1979 sensor 5, PID 0x28 (D03.34, 2026-09-26).

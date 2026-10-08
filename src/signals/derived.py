@@ -171,6 +171,13 @@ DERIVED_CHANNEL_OPTIONAL_INPUTS: dict[str, tuple[str, ...]] = {
     # P02.15: the target map has no value while the ECM commands fuel cut
     # (commanded equivalence ratio exactly 0, src.signals.afr.fuel_cut_rows).
     "derived:TARGET_AFR": ("obd:COMMANDED_EQUIV_RATIO",),
+    # B06.7: measured AFR from the A/F voltage needs the baro the ECM's gain is
+    # looked up on; from the lambda PID it does not, so it is optional here.
+    **{
+        f"derived:AFR_{kind}B{bank}": vehicle_signals.af_sensor_baro_columns()
+        for bank in (1, 2)
+        for kind in ("", "CENSORED_")
+    },
 }
 
 #: B04.5 — manifold-referenced VE: measured air mass over the ideal-gas fill
@@ -982,9 +989,19 @@ DERIVED_CHANNEL_INPUTS: dict[str, tuple[tuple[str, ...], ...]] = {
     # B05.8 — per-instrument-pair λ bank balances (afr.LAMBDA_BANK_BALANCE_*):
     # the A/F voltage DIDs through the transfer, and the wide-range lambda
     # PIDs (produced only once afr_calibration.yaml verifies the bank-2 PID).
-    "derived:LAMBDA_BANK_BALANCE_AF_VOLTAGE": (
+    # B06.7: both banks are converted at the ECM's barometric gain, so the
+    # vehicle's baro channel is a required input of the voltage pair.
+    # B06.7 renamed it from derived:LAMBDA_BANK_BALANCE_AF_VOLTAGE (the gain-1
+    # values; a deliberate contract change). The baro group is required where
+    # any vehicle declares an A/F baro channel, and absent otherwise.
+    "derived:LAMBDA_BANK_BALANCE_AF_VOLTAGE_BARO": (
         vehicle_signals.af_sensor_voltage_columns(1),
         vehicle_signals.af_sensor_voltage_columns(2),
+        *(
+            (vehicle_signals.af_sensor_baro_columns(),)
+            if vehicle_signals.af_sensor_baro_columns()
+            else ()
+        ),
     ),
     "derived:LAMBDA_BANK_BALANCE_WIDEBAND": (
         vehicle_signals.wideband_lambda_columns(1),

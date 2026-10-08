@@ -3,9 +3,12 @@ from __future__ import annotations
 import inspect
 import types
 from datetime import UTC, datetime
+from pathlib import Path
 
+import numpy as np
 import pandas as pd
 import pytest
+import yaml
 
 from src.config import VehicleParameters
 from src.decode.dids import load_repo_did_map
@@ -13,18 +16,24 @@ from src.preprocessing.channel_units import catalog_channel_unit, channel_units_
 from src.signals import vehicle_signals
 from src.signals.afr import (
     AFR_ERROR_CHANNELS,
+    BARO_MISSING,
+    BARO_STALE,
     LOAD_AXIS_UNVERIFIED,
     TARGET_AFR,
     AfrCalibration,
+    BaroSamples,
     LoadAxisUnavailableError,
     TargetAfrMap,
     VoltageAfrTransfer,
     afr_error_surface,
     append_afr_channels,
+    load_afr_calibration,
     target_afr,
+    voltage_to_afr,
 )
 from src.signals.vehicle_signals import LoadAxisChannel
 from src.vehicle.tune_revisions import TuneRevision, TuneRevisionRegistry
+from tests.afr_voltage_chain import baro_columns, transfer, voltage_chain
 
 #: A synthetic vehicle's verified channel for the target map's load axis. The
 #: real vehicle modules declare none (P02.13), so every test that needs the
@@ -84,14 +93,14 @@ def _calibration() -> AfrCalibration:
     return AfrCalibration.model_validate(
         {
             "active_revision": "r1",
-            "voltage_transfer": {
-                "censored_floor_afr": 10.0,
-                "points": [
+            **voltage_chain(
+                [
                     {"voltage": 0.5, "afr": 10.0},
                     {"voltage": 2.0, "afr": 14.0},
                     {"voltage": 5.0, "afr": 20.0},
                 ],
-            },
+                censored_floor_afr=10.0,
+            ),
             "target_maps": [
                 {
                     "revision": "r1",
@@ -142,7 +151,7 @@ def test_lambda_to_afr_target_error_and_censoring(monkeypatch: pytest.MonkeyPatc
 
 
 def test_voltage_transfer_is_used_when_lambda_is_absent() -> None:
-    frame = pd.DataFrame({"did:ECM_AF_SENSOR_V_B1": [2.0]})
+    frame = baro_columns(pd.DataFrame({"did:ECM_AF_SENSOR_V_B1": [2.0]}))
     out = append_afr_channels(
         _stamped(frame),
         VehicleParameters(),
@@ -181,12 +190,7 @@ def test_afr_error_surface_excludes_censored_samples(monkeypatch: pytest.MonkeyP
     assert rows[0]["sparse"] is True
     with pytest.raises(ValueError, match="strictly increasing"):
         VoltageAfrTransfer.model_validate(
-            {
-                "points": [
-                    {"voltage": 2, "afr": 14},
-                    {"voltage": 1, "afr": 13},
-                ]
-            }
+            transfer([{"voltage": 2, "afr": 14}, {"voltage": 1, "afr": 13}])
         )
 
 
@@ -233,6 +237,7 @@ def test_bank_falls_back_to_voltage_when_lambda_column_is_empty() -> None:
             "did:ECM_AF_SENSOR_V_B2": [2.0, 2.0],
         }
     )
+    frame = baro_columns(frame)
     out = append_afr_channels(
         _stamped(frame),
         VehicleParameters(),
@@ -247,11 +252,11 @@ def test_bank_falls_back_to_voltage_when_lambda_column_is_empty() -> None:
 def test_transfer_rejects_a_floor_above_its_ceiling() -> None:
     with pytest.raises(ValueError, match="below censored_ceiling_afr"):
         VoltageAfrTransfer.model_validate(
-            {
-                "points": [{"voltage": 0.5, "afr": 10.0}, {"voltage": 2.0, "afr": 14.0}],
-                "censored_floor_afr": 20.0,
-                "censored_ceiling_afr": 18.0,
-            }
+            transfer(
+                [{"voltage": 0.5, "afr": 10.0}, {"voltage": 2.0, "afr": 14.0}],
+                censored_floor_afr=20.0,
+                censored_ceiling_afr=18.0,
+            )
         )
 
 
@@ -269,6 +274,7 @@ def test_bank_2_lambda_is_the_vehicle_declared_sensor_not_sensor_2() -> None:
             "did:ECM_AF_SENSOR_V_B2": [2.0, 2.0],
         }
     )
+    frame = baro_columns(frame)
     out = append_afr_channels(
         _stamped(frame),
         VehicleParameters(),
@@ -455,3 +461,133 @@ def test_an_axis_declaration_must_name_its_evidence() -> None:
         LoadAxisChannel(axis="base_fuel_schedule", channel=AXIS, evidence=" ")
     with pytest.raises(ValueError, match="source namespace"):
         LoadAxisChannel(axis="base_fuel_schedule", channel="BFS", evidence="x")
+
+
+# ---------------------------------------------------------------------------
+# B06.7: the voltage route applies the ECM's barometric gain, or refuses
+# ---------------------------------------------------------------------------
+
+
+def _profile_calibration() -> AfrCalibration:
+    return load_afr_calibration(Path("data/nissan-xterra-2008/afr_calibration.yaml"))
+
+
+def test_voltage_to_afr_requires_baro_and_applies_the_ecm_gain_about_stoich() -> None:
+    """x2' = 880 + (x2 - 880) x 128 / k: stoich (2.2 V) is the fixed point,
+    a rich voltage moves richer at 80 kPa, and sea level is gain 1."""
+    calibration = _profile_calibration()
+    assert "baro" in inspect.signature(voltage_to_afr).parameters
+    assert inspect.signature(voltage_to_afr).parameters["baro"].default is inspect.Parameter.empty
+    volts = pd.Series([2.2, 1.4])
+    sea = voltage_to_afr(volts, calibration, baro=BaroSamples(np.full(2, 101.0), np.zeros(2)))
+    alt = voltage_to_afr(volts, calibration, baro=BaroSamples(np.full(2, 80.0), np.zeros(2)))
+    assert sea.gain.tolist() == [1.0, 1.0]
+    # k at 80.5 kPa (the middle of PID 0x33's floored 80) on the 0xD00F table.
+    k = 109 + (80.5 - 76.80) / (82.47 - 76.80) * (115 - 109)
+    assert alt.gain.iloc[0] == pytest.approx(128 / k, rel=1e-3)
+    assert alt.afr.iloc[0] == pytest.approx(sea.afr.iloc[0])
+    expected_x2 = 880 + (1.4 / 0.0025 - 880) * 128 / k
+    curve = calibration.voltage_transfer
+    assert curve is not None
+    assert alt.afr.iloc[1] == pytest.approx(
+        float(curve.curve_afr(np.array([expected_x2 * 0.0025]))[0])
+    )
+    assert alt.afr.iloc[1] < sea.afr.iloc[1]
+
+
+def test_missing_or_stale_baro_is_a_named_refusal_never_gain_1() -> None:
+    calibration = _profile_calibration()
+    volts = pd.Series([1.4, 1.4, 1.4])
+    baro = BaroSamples.as_of(np.array([0.0, 100.0, 200.0]), np.array([90.0]), np.array([80.0]))
+    out = voltage_to_afr(volts, calibration, baro=baro)
+    assert out.refusals() == {BARO_MISSING: 1, BARO_STALE: 1}
+    assert out.baro_missing.tolist() == [True, False, False]
+    assert out.baro_stale.tolist() == [False, False, True]
+    assert out.afr.isna().tolist() == [True, False, True]
+
+
+def test_a_wide_frame_without_baro_has_no_voltage_afr() -> None:
+    frame = pd.DataFrame({"did:ECM_AF_SENSOR_V_B1": [2.0, 2.0]})
+    out = append_afr_channels(
+        _stamped(frame),
+        VehicleParameters(),
+        _calibration(),
+        channel_units=UNITS,
+        flash_history=HISTORY,
+    )
+    assert "derived:AFR_B1" not in out
+
+
+def test_a_wide_baro_cell_with_no_arrival_in_the_frame_is_stale() -> None:
+    frame = _stamped(pd.DataFrame({"obd:BAROMETRIC_PRESSURE": [80.0, 80.0, 80.0]}))
+    frame["obd:BAROMETRIC_PRESSURE__arrived"] = [False, True, False]
+    baro = BaroSamples.from_wide(frame, "obd:BAROMETRIC_PRESSURE")
+    assert np.isnan(baro.age_s[0])
+    assert baro.age_s[1:].tolist() == [0.0, 1.0]
+
+
+def test_a_transfer_without_the_gain_or_its_residual_sources_is_refused() -> None:
+    raw = yaml.safe_load(Path("data/nissan-xterra-2008/afr_calibration.yaml").read_text())
+    without_gain = {k: v for k, v in raw.items() if k != "baro_gain"}
+    with pytest.raises(ValueError, match="baro_gain is required"):
+        AfrCalibration.model_validate(without_gain)
+    without_offset = dict(raw, voltage_residual_sources=raw["voltage_residual_sources"][:1])
+    with pytest.raises(ValueError, match="missing \\['rpm_bfs_offset'\\]"):
+        AfrCalibration.model_validate(without_offset)
+    edited = dict(raw)
+    edited["voltage_transfer"] = dict(raw["voltage_transfer"])
+    edited["voltage_transfer"]["points"] = [
+        dict(p, afr=p["afr"] * 1.01) for p in raw["voltage_transfer"]["points"]
+    ]
+    with pytest.raises(ValueError, match="must equal ECM table 0xE644"):
+        AfrCalibration.model_validate(edited)
+
+
+def test_the_profile_curve_is_ecm_table_0xe644_at_gain_1() -> None:
+    """Operator decision 2026-10-07: the transfer IS table 0xE644. The voltage
+    axis is the DID word at 0.005 V; x2 = 2 x word; the 880 knot is 2.2 V."""
+    calibration = _profile_calibration()
+    transfer_ = calibration.voltage_transfer
+    gain = calibration.baro_gain
+    assert transfer_ is not None and gain is not None
+    provenance = transfer_.provenance
+    assert provenance is not None and provenance.table is not None
+    assert provenance.method == "rom_table"
+    assert provenance.table.address == "0xE644"
+    assert provenance.volts_per_count == 0.0025
+    assert gain.stoich_x2_counts * provenance.volts_per_count == pytest.approx(2.2)
+    assert [(p.voltage, p.afr) for p in transfer_.points][5] == pytest.approx((2.2, 14.774))
+    assert set(provenance.excludes) == {"baro_gain", "learned_rear_o2_offset", "rpm_bfs_offset"}
+    assert calibration.residual_source("rpm_bfs_offset").bounds_afr[1] == (-0.014, 0.074)
+    assert gain.skip_kpa == pytest.approx((99.52, 111.70), abs=0.01)
+
+
+def test_the_example_calibration_loads_without_a_baro_gain() -> None:
+    """B06.7 is per vehicle: a vehicle that declares no ECM gain needs no
+    provenance and no baro, and its voltage route is the curve alone."""
+    calibration = load_afr_calibration(Path("data/afr_calibration.example.yaml"))
+    assert calibration.voltage_transfer is not None
+    assert calibration.baro_gain is None and calibration.voltage_residual_sources == []
+    out = voltage_to_afr(pd.Series([2.15]), calibration, baro=None)
+    assert out.afr.iloc[0] == pytest.approx(14.7)
+    assert out.refusals() == {BARO_MISSING: 0, BARO_STALE: 0}
+    with pytest.raises(ValueError, match="no barometric gain"):
+        voltage_to_afr(pd.Series([2.15]), calibration, baro=BaroSamples.unobserved(1))
+    frame = _stamped(pd.DataFrame({"did:ECM_AF_SENSOR_V_B1": [2.15]}))
+    appended = append_afr_channels(
+        frame, VehicleParameters(), calibration, channel_units=UNITS, flash_history=HISTORY
+    )
+    assert appended["derived:AFR_B1"].iloc[0] == pytest.approx(14.7)
+
+
+def test_a_declared_gain_needs_baro_and_a_gain_needs_its_term_declared() -> None:
+    calibration = _profile_calibration()
+    with pytest.raises(ValueError, match="needs baro"):
+        voltage_to_afr(pd.Series([2.0]), calibration, baro=None)
+    raw = yaml.safe_load(Path("data/nissan-xterra-2008/afr_calibration.yaml").read_text())
+    transfer_ = dict(raw["voltage_transfer"])
+    transfer_["provenance"] = dict(transfer_["provenance"], excludes=[])
+    with pytest.raises(ValueError, match="does not name baro_gain"):
+        AfrCalibration.model_validate(
+            dict(raw, voltage_transfer=transfer_, voltage_residual_sources=[])
+        )

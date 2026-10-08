@@ -15,6 +15,9 @@ A module defines either or both of:
 * ``AF_SENSOR_VOLTAGE: Mapping[int, str]`` -- the wideband A/F sensor voltage
   channel per bank, the measured-AFR fallback when the lambda PID is absent
   (:func:`src.signals.afr.append_afr_channels`).
+* ``AF_SENSOR_BARO: str`` -- the channel carrying the barometric pressure the
+  ECM corrects that voltage with before its AFR table (B06.7). The voltage
+  route cannot convert a sample without it.
 * ``WIDEBAND_LAMBDA: Mapping[int, str]`` -- the upstream wide-range O2 lambda
   PID channel per bank. Which J1979 sensor number is bank 2 depends on the
   ECM's O2 sensor layout (PID 0x13: sensor 5; PID 0x1D: sensor 3), so only
@@ -102,6 +105,22 @@ def af_sensor_voltage_columns(bank: int) -> tuple[str, ...]:
         channels: Mapping[int, str] = getattr(module, "AF_SENSOR_VOLTAGE", {})
         if bank in channels:
             columns[channels[bank]] = None
+    return tuple(columns)
+
+
+def af_sensor_baro_columns() -> tuple[str, ...]:
+    """Every vehicle's channel for the barometric pressure its ECM corrects the
+    A/F sensor voltage with (B06.7), in module order.
+
+    The voltage route reads it per sample (``afr_calibration.yaml`` ``baro_gain.
+    baro_channel`` must be one of these), so the derived-channel registry names
+    it as an input of every channel built on that route.
+    """
+    columns: dict[str, None] = {}
+    for module in vehicle_modules():
+        channel: str | None = getattr(module, "AF_SENSOR_BARO", None)
+        if channel is not None:
+            columns[channel] = None
     return tuple(columns)
 
 
@@ -233,6 +252,7 @@ __all__ = [
     "DidView",
     "InputGroups",
     "LoadAxisChannel",
+    "af_sensor_baro_columns",
     "af_sensor_voltage_columns",
     "did_views",
     "load_axis_channels",

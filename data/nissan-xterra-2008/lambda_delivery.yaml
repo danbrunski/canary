@@ -79,10 +79,19 @@ refused_commanded:
       holds raw 64 at both stoich and fuel cut, so it cannot tell cut from
       stoich, and its 1/64 resolution is 1.6 % of phi.
 
+# B06.7 (2026-10-05): `sensor` names the physical sensor each route reads.
+# There is one A/F sensor per bank: PID 0x24 is the ECM's lambda computed from
+# the same word DID 0x1225 reports (x2 = 2 x word, barometric gain, table
+# 0xE644, learned rear-O2 offset, rpm x BFS offset; docs/ecu-firmware-analysis.md
+# "A/F sensor and λ chain"), so PID 0x24 and af_voltage_b1 are one instrument
+# (af_sensor_b1), and PID 0x28 and af_voltage_b2 another (af_sensor_b2). The
+# declaration refuses a disagreement that calls two same-sensor routes
+# independent, and LambdaDeliveryDeclaration.independent_sensors counts them once.
 measured_sources:
   - name: ecm_lambda_pid_0x24
     spec: 'obd:O2_WR_LAMBDA_S1'
     quantity: lambda
+    sensor: af_sensor_b1
     rail_high: 1.999
     convention_evidence: >-
       lambda, verified 2026-08-07 on _capture-tuning-hybrid-research-
@@ -95,6 +104,7 @@ measured_sources:
   - name: ecm_lambda_pid_0x28
     spec: 'obd:O2_WR_LAMBDA_S5'
     quantity: lambda
+    sensor: af_sensor_b2
     rail_high: 1.999
     convention_evidence: >-
       lambda, the same SAE J1979 equivalence-ratio encoding as PID 0x24 and
@@ -111,20 +121,29 @@ measured_sources:
     spec: 'did:ECM_AF_SENSOR_V_B1'
     quantity: afr
     transform: voltage_afr
+    sensor: af_sensor_b1
     convention_evidence: >-
       Calibrated voltage-to-AFR transfer, afr_calibration.yaml
-      voltage_transfer (UpRev held-out MAE 0.0049 AFR in the 10-13 band);
-      censored outside censored_floor_afr/censored_ceiling_afr.
+      voltage_transfer (ECM table 0xE644 at gain 1; UpRev held-out MAE 0.0049
+      AFR in the 10-13 band), converted at the ECM's barometric gain from
+      obd:BAROMETRIC_PRESSURE as of each read (B06.7; a read with none is
+      baro_missing / baro_stale); censored outside
+      censored_floor_afr/censored_ceiling_afr. Same sensor as PID 0x24: it
+      lacks only the learned rear-O2 offset and the rpm x BFS offset
+      (afr_calibration.yaml voltage_residual_sources).
   - name: af_voltage_b2
     spec: 'did:ECM_AF_SENSOR_V_B2'
     quantity: afr
     transform: voltage_afr
+    sensor: af_sensor_b2
     convention_evidence: >-
-      Same transfer as bank 1; the two banks agree independently (MAE
-      0.0294 / 0.0283 AFR against UpRev, afr_calibration.yaml).
+      Same transfer and barometric gain as bank 1; the two banks agree
+      (MAE 0.0294 / 0.0283 AFR against UpRev, afr_calibration.yaml). Same
+      sensor as PID 0x28.
 
 source_disagreements:
   - between: [ecm_lambda_pid_0x24, af_voltage_b1]
+    relation: same_sensor
     value_pct: -3.84
     conditions: >-
       WOT enrichment near 12.6 AFR, UpRev K-line conversion vs the Pi's
@@ -137,6 +156,30 @@ source_disagreements:
       because no drive has sustained deep enrichment on that profile
       (afr_calibration.yaml cross_check_2026-08-07). Neither source may be
       silently preferred: every result names its measured source.
+    # B06.7 (2026-10-05, revised 2026-10-07): a partial mechanism. It gives
+    # the direction and about 60 % of the size; the rest is not explained.
+    explanation:
+      mechanism: >-
+        One sensor, two calculations. PID 0x24 is the ECM's lambda from the
+        DID 0x1225 word after its barometric gain (x2' = 880 + (x2 - 880) x
+        128 / k); UpRev's AFR is the same table 0xE644 without the gain, so it
+        reads lean of PID 0x24 rich of stoich at altitude
+        (afr_calibration.yaml baro_gain).
+      predicted_pct: -2.36
+      unexplained_pct: -1.48
+      explained_on: 2026-10-07
+      evidence: >-
+        At 12.6 AFR the gain-1 table reads 12.90 AFR at 80 kPa (the 2026-08
+        drives' baro): PID/voltage -2.36 % (-2.95 % at 76 kPa). The remaining
+        -1.48 % is not accounted for. The learned rear-O2 offset could cover it
+        by its +/-1 AFR clamp, but where it was measured (the stoich-dwell
+        difference, 2026-09-21: -0.002 AFR; 2026-09-23: -0.056 AFR) it is
+        0.02-0.45 %, too small; the rpm x BFS offset acts the other way (up to
+        +0.07 AFR, PID leaner). Candidates not checked: the 2026-08-05 pairing
+        (UpRev's K-line clock against the Pi's Mode 01) and a different rear
+        offset on that drive. With the gain applied, the bank-1 route agrees
+        with PID 0x24 on steady enrichment of 09-21T223734 within its declared
+        tolerance (tests/test_af_baro_gain.py); 12.6 AFR WOT was not re-measured.
 
 eligibility:
   # Target-defined regime: the RAM word reads exactly 1.0 whenever it is not

@@ -138,6 +138,18 @@ class DeliveryStream:
             )
             + HISTORY_MARGIN_S
         )
+        #: B06.7 — a ``voltage_afr`` route converts each measured read at the
+        #: ECM's barometric gain, from the newest baro read at or before it.
+        self.needs_baro = (
+            self.instrument.transform == "voltage_afr"
+            and calibration is not None
+            and calibration.baro_gain is not None
+        )
+        self.baro_max_age_s = (
+            calibration.baro_gain.max_age_s
+            if calibration is not None and calibration.baro_gain is not None
+            else 0.0
+        )
         self._max_shift = max(self.delays_s.values())
         self._min_shift = min(self.delays_s.values())
         self.reset()
@@ -147,10 +159,12 @@ class DeliveryStream:
         self._target = _Reads()
         self._sentinel = _Reads()
         self._measured = _Reads()
+        self._baro = _Reads()
         self.horizon_s = -math.inf
         self.clock_s = -math.inf
-        self.late_reads: dict[str, int] = {"target": 0, "sentinel": 0, "measured": 0}
-        self.reads_seen: dict[str, int] = {"target": 0, "sentinel": 0, "measured": 0}
+        kinds = ("target", "sentinel", "measured", *(("baro",) if self.needs_baro else ()))
+        self.late_reads: dict[str, int] = dict.fromkeys(kinds, 0)
+        self.reads_seen: dict[str, int] = dict.fromkeys(kinds, 0)
 
     # -- input -----------------------------------------------------------
 
@@ -166,9 +180,11 @@ class DeliveryStream:
         target: tuple[np.ndarray, np.ndarray] | None = None,
         sentinel: np.ndarray | None = None,
         measured: tuple[np.ndarray, np.ndarray] | None = None,
+        baro: tuple[np.ndarray, np.ndarray] | None = None,
     ) -> None:
         """Add reads. A read at or before a time an already-decided row
-        depended on is *late*: counted, and folded in on a best-effort basis."""
+        depended on is *late*: counted, and folded in on a best-effort basis.
+        ``baro`` (B06.7) is kept only by a route that converts with it."""
         # A decided row's own time is at most horizon - tolerance - min shift,
         # and it looked back from there; its measured partner lay at most at
         # the horizon.
@@ -185,6 +201,10 @@ class DeliveryStream:
             times, values = (np.asarray(a, dtype=float) for a in measured)
             self._note("measured", times, self.horizon_s)
             self._measured.extend(times, values)
+        if baro is not None and self.needs_baro:
+            times, values = (np.asarray(a, dtype=float) for a in baro)
+            self._note("baro", times, self.horizon_s)
+            self._baro.extend(times, values)
 
     # -- decisions ---------------------------------------------------------
 
@@ -219,6 +239,8 @@ class DeliveryStream:
             instrument=self.instrument,
             calibration=self.calibration,
             afr_stoich=self.afr_stoich,
+            baro_times=self._baro.times if self.needs_baro else None,
+            baro_kpa=self._baro.values if self.needs_baro else None,
         )
         judged = judge_target_rows(
             side,
@@ -250,6 +272,7 @@ class DeliveryStream:
                 self._target.keep(~self._target.flag)
                 self._sentinel.keep(~self._sentinel.flag)
                 self._measured.keep(~self._measured.flag)
+                self._baro.keep(self._baro.times >= self._baro.times.max(initial=-math.inf))
             return
         # Undecided rows start after horizon - tolerance - max shift; keep the
         # full backward look before that, and every undecided row regardless.
@@ -259,6 +282,13 @@ class DeliveryStream:
         # An undecided row's partner lies after horizon - 2 x tolerance.
         measured_from = self.horizon_s - 2.0 * self.tolerance_s - HISTORY_MARGIN_S
         self._measured.keep(self._measured.times >= measured_from)
+        # A retained measured read looks back at most the baro max age; keep
+        # those baro reads and the newest one before them.
+        if len(self._baro.times):
+            older = self._baro.times < measured_from - self.baro_max_age_s
+            if older.any():
+                older[np.flatnonzero(older)[-1]] = False
+            self._baro.keep(~older)
 
 
 __all__ = ["DEFAULT_SETTLE_S", "HISTORY_MARGIN_S", "DeliveryStream"]

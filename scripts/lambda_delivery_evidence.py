@@ -251,6 +251,12 @@ def state_counts(
             out[target.name] = {"available": False, "reason": f"{target.spec} not captured"}
             continue
         per: dict[str, Any] = {}
+        # B06.7: a voltage route converts at the ECM's barometric gain.
+        baro = (
+            _long(session, calibration.baro_gain.baro_channel)
+            if calibration is not None and calibration.baro_gain is not None
+            else None
+        )
         for instrument in declaration.measured_sources:
             measured = _long(session, instrument.spec)
             if measured.empty:
@@ -268,6 +274,7 @@ def state_counts(
                 measured_source=instrument.name,
                 calibration=calibration,
                 afr_stoich=afr_stoich,
+                baro=baro if instrument.transform == "voltage_afr" else None,
             )
             per[instrument.name] = samples.summary(floor, declaration)
         out[target.name] = per

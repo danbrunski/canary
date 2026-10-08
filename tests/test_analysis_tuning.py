@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 import pandas as pd
@@ -213,11 +214,26 @@ def test_a_target_and_measurement_further_apart_than_declared_do_not_pair(
     assert caught.value.kind == "not_co_observed"
 
 
-def _all_did_session(tmp_path: Path, voltages: list[str]) -> Path:
-    """RAM target + sentinel, DID rpm and DID A/F voltage, one read per second."""
+def _all_did_session(
+    tmp_path: Path, voltages: list[str], *, baro_kpa: float | None = 101.0
+) -> Path:
+    """RAM target + sentinel, DID rpm and DID A/F voltage, one read per second.
+
+    ``baro_kpa``: a PID 0x33 read at each second (B06.7: the voltage route
+    needs it). 101 kPa is inside the ECM's skip window, gain 1; ``None``
+    writes none."""
     records: list[TelemetryRecord] = []
     for i, volts in enumerate(voltages):
         ts = T0 + timedelta(seconds=i)
+        if baro_kpa is not None:
+            records.append(
+                TelemetryRecord(
+                    timestamp=ts - timedelta(milliseconds=10),
+                    source="obd",
+                    channel="BAROMETRIC_PRESSURE",
+                    value=baro_kpa,
+                )
+            )
         records += [
             TelemetryRecord(timestamp=ts, source="obd", channel="DID_1219", value="0bb8"),
             TelemetryRecord(
@@ -237,7 +253,7 @@ def test_the_semantic_route_converts_voltage_and_names_censored_samples(tmp_path
 
     calibration = load_afr_calibration(Path("data/nissan-xterra-2008/afr_calibration.yaml"))
     providers = load_provider_registry(Path("data/nissan-xterra-2008/tuning_providers.yaml"))
-    # 0x0152 = 1.690 V -> 13.75 AFR; 0x0000 is below the transfer's censoring floor.
+    # 0x0152 = 1.690 V -> 13.74 AFR; 0x0000 is below the transfer's censoring floor.
     session = _all_did_session(tmp_path, ["0152"] * 6 + ["0000"] + ["0152"])
     result = delivery_error(
         session,
@@ -268,6 +284,40 @@ def test_the_semantic_route_converts_voltage_and_names_censored_samples(tmp_path
     assert sensitivity["at"][2]["n"] == 0
     assert sensitivity["stable"] is False
     assert "exists at some delays" in sensitivity["reason"]
+
+
+def test_the_voltage_route_applies_the_baro_gain_or_refuses_without_baro(
+    tmp_path: Path,
+) -> None:
+    """B06.7: at 80 kPa the same 1.69 V reads richer than at sea level (the
+    ECM's gain about stoich), and a session with no baro cannot answer
+    through the voltage route at all -- by name, not at gain 1."""
+    from src.analysis.tuning import InputsNotCapturedError
+    from src.signals.afr import load_afr_calibration
+
+    calibration = load_afr_calibration(Path("data/nissan-xterra-2008/afr_calibration.yaml"))
+    providers = load_provider_registry(Path("data/nissan-xterra-2008/tuning_providers.yaml"))
+    route = semantic_route(DECLARATION, providers, measured_role="measured_afr_b1")
+    common: dict[str, Any] = {
+        "declaration": DECLARATION,
+        "route": route,
+        "calibration": calibration,
+        "bindings_path": BINDINGS,
+        "dids_path": DIDS,
+        "afr_stoich": 14.7,
+        "rpm_bands": RPM_BANDS,
+        "min_load": None,
+    }
+    sea = delivery_error(_all_did_session(tmp_path / "sea", ["0152"] * 8), **common)
+    alt = delivery_error(_all_did_session(tmp_path / "alt", ["0152"] * 8, baro_kpa=80.0), **common)
+    assert sea.n == alt.n > 0
+    # 1.69 V is x2 676; at 80 kPa (k 112.9) x2' = 880 - 204 x 1.134 = 648.7, 1.622 V:
+    # 13.59 AFR on table 0xE644 against the gain-1 13.74, ~1 % less lean of 12.56.
+    target = 14.7 / 1.17
+    assert sea.pooled_pct == pytest.approx(100 * (13.74 / target - 1), abs=0.01)
+    assert alt.pooled_pct == pytest.approx(100 * (13.5947 / target - 1), abs=0.01)
+    with pytest.raises(InputsNotCapturedError, match="obd:BAROMETRIC_PRESSURE"):
+        delivery_error(_all_did_session(tmp_path / "none", ["0152"] * 8, baro_kpa=None), **common)
 
 
 def test_the_semantic_route_refuses_a_load_floor(tmp_path: Path) -> None:

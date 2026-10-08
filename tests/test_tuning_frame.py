@@ -25,6 +25,11 @@ def test_all_did_frame_uses_confirmed_semantic_roles(tmp_path: Path) -> None:
         [
             TelemetryRecord(timestamp=timestamp, source="obd", channel="DID_1219", value="09c4"),
             TelemetryRecord(timestamp=timestamp, source="obd", channel="DID_1225", value="01b8"),
+            # B06.7: the voltage route needs baro as of the read. 2.2 V is the
+            # gain's fixed point (x2 = 880), so 80 kPa leaves it unchanged.
+            TelemetryRecord(
+                timestamp=timestamp, source="obd", channel="BAROMETRIC_PRESSURE", value=80.0
+            ),
             TelemetryRecord(timestamp=timestamp, source="obd", channel="DID_113A", value="80"),
             TelemetryRecord(timestamp=timestamp, source="obd", channel="DID_1135", value="81"),
             TelemetryRecord(timestamp=timestamp, source="obd", channel="DID_1163", value="82"),
@@ -54,8 +59,11 @@ def test_all_did_frame_uses_confirmed_semantic_roles(tmp_path: Path) -> None:
     assert frame.capability["rpm"]["available"] is True
     assert frame.values["rpm"].iloc[0] == pytest.approx(2500.0)
     assert frame.values["measured_afr_b1_raw_voltage"].iloc[0] == pytest.approx(2.2)
-    assert frame.values["measured_afr_b1"].iloc[0] == pytest.approx(14.83625)
+    # ECM table 0xE644 at its 880-count knot (2.2 V); 14.83625 on the fitted
+    # curve the table replaced (2026-10-07).
+    assert frame.values["measured_afr_b1"].iloc[0] == pytest.approx(14.774)
     assert bool(frame.values["measured_afr_b1_censored"].iloc[0]) is False
+    assert frame.values["measured_afr_b1_baro_gain"].iloc[0] == pytest.approx(1.1336, abs=1e-4)
     assert frame.capability["cam_command"]["available"] is True
     assert frame.capability["cam_measured"]["available"] is True
     assert frame.capability["cam_measured_b"]["available"] is True
@@ -98,7 +106,9 @@ def test_round_stamped_rows_are_placed_on_their_acquisition_clock(tmp_path: Path
     shared by two readings does not put them on one instant."""
     session = tmp_path / "_capture-tuning-did-2026-09-07T000000"
     stamp = datetime(2026, 9, 7, 0, 0, tzinfo=UTC)
-    rows = []
+    rows = [
+        TelemetryRecord(timestamp=stamp, source="obd", channel="BAROMETRIC_PRESSURE", value=101.0)
+    ]
     for k in range(3):
         round_stamp = stamp + timedelta(seconds=0.25 * k)
         for channel, value, offset in (("DID_1219", "09c4", 0.004), ("DID_1225", "01b8", 0.041)):
@@ -260,3 +270,28 @@ def test_bfs_now_resolves_without_opting_into_candidates(tmp_path: Path) -> None
     assert list(got["base_fuel_schedule"]) == pytest.approx(
         [6000 * 0.00049, 20400 * 0.00049, 40800 * 0.00049], rel=1e-6
     )
+
+
+def test_the_voltage_role_is_unavailable_by_name_without_baro(tmp_path: Path) -> None:
+    """B06.7: an all-DID capture on an ECM with no baro DID has no voltage AFR.
+
+    The capability names ``baro_missing`` rather than converting at gain 1."""
+    session = tmp_path / "_capture-tuning-did-2026-08-05T120000"
+    timestamp = datetime(2026, 8, 5, 12, 0, tzinfo=UTC)
+    write_records_to_parquet(
+        [
+            TelemetryRecord(timestamp=timestamp, source="obd", channel="DID_1219", value="09c4"),
+            TelemetryRecord(timestamp=timestamp, source="obd", channel="DID_1225", value="0152"),
+        ],
+        session,
+    )
+    frame = build_tuning_frame(
+        session,
+        providers_path=Path("data/nissan-xterra-2008/tuning_providers.yaml"),
+        calibration=load_afr_calibration(Path("data/nissan-xterra-2008/afr_calibration.yaml")),
+        afr_stoich=14.7,
+    )
+    capability = frame.capability["measured_afr_b1"]
+    assert capability["available"] is False
+    assert str(capability["reason"]).startswith("baro_missing")
+    assert "measured_afr_b1" not in frame.values
