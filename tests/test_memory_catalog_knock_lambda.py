@@ -2,10 +2,11 @@
 
 Addresses, widths, signedness and scales come from the ZS44A firmware hand-off
 (docs/ecu-firmware-analysis.md, "Knock monitoring" and "A/F sensor and lambda
-chain"). They are code-verified and not yet read live, so they are pinned here
-exactly as handed off: a later edit that shifts an address, drops a sign or
-pushes a window past the ECM's 63-byte service-0x23 ceiling fails here rather
-than on the truck, where an oversized window loses every channel in it.
+chain"). They are code-verified, and the knock-fault bytes were read live on
+2026-10-08; all are pinned here exactly as handed off: a later edit that
+shifts an address, drops a sign or pushes a window past the ECM's 63-byte
+service-0x23 ceiling fails here rather than on the truck, where an oversized
+window loses every channel in it.
 """
 
 from __future__ import annotations
@@ -194,15 +195,87 @@ def test_the_2842_byte_is_named_for_the_knock_gate_and_the_old_name_is_refused()
         profile_memory_union([ram_study])
 
 
-def test_new_channels_are_code_verified_and_not_yet_in_any_profile() -> None:
-    """Hypothesized until a key-on read passes, and only then in a profile."""
+#: Evidence methods that are reads of the address on the running ECM, as
+#: opposed to firmware analysis. ``live_read`` is the method from 2026-10-08
+#: on; the rest are the earlier, differently named live reads that the
+#: channels already in profiles carry (each checked against its finding:
+#: every one reads the RAM address through service 0x23 on the truck).
+LIVE_READ_METHODS = frozenset(
+    {
+        "live_read",
+        "live_drive_check",
+        "ram_sweep_against_confirmed_did",
+        "independent_reproduction",
+        "duplicate_register_survey",
+        "same_reply_transform_vs_did_1201",
+        "same_reply_piecewise_identity_vs_did_0x1134",
+        "can_transport_parity",
+        "fuel_cut_coincidence",
+    }
+)
+
+#: Profile catalogs something loads. The archive is a verbatim record of
+#: retired profiles that nothing may load (test_capture_profiles.py), so it
+#: polls nothing and is not rewritten to fit a later rule.
+LOADED_PROFILE_FILES = sorted(
+    p for p in (REPO / "data").rglob("capture_profiles*.yaml") if ".archive." not in p.name
+)
+
+
+def _profiles_breaking_the_live_read_rule(
+    profiles: list[dict[str, object]],
+) -> list[tuple[str, str]]:
+    """(profile, channel) for every memory channel a profile polls that is
+    still hypothesized or carries no live-read evidence."""
+    broken = []
+    for profile in profiles:
+        for name in profile.get("memory") or ():  # type: ignore[attr-defined]
+            channel = BY_NAME[name]
+            live = any(e.method in LIVE_READ_METHODS for e in channel.evidence)
+            if channel.confidence == "hypothesized" or not live:
+                broken.append((str(profile["name"]), name))
+    return broken
+
+
+def test_new_channels_carry_disassembly_evidence() -> None:
+    """Every channel catalogued from the firmware says so, whatever a later
+    live read added."""
     for name in NEW:
-        channel = BY_NAME[name]
-        assert channel.confidence == "hypothesized", name
-        assert any(e.method == "disassembly" for e in channel.evidence), name
-    for path in (REPO / "data").rglob("capture_profiles*.yaml"):
-        for profile in yaml.safe_load(path.read_text()).get("profiles", []):
-            assert not NEW & set(profile.get("memory") or ()), (path, profile["name"])
+        assert any(e.method == "disassembly" for e in BY_NAME[name].evidence), name
+
+
+@pytest.mark.parametrize("path", LOADED_PROFILE_FILES, ids=lambda p: p.name)
+def test_a_profile_polls_only_live_read_channels(path: Path) -> None:
+    """A memory channel enters a capture profile only once it is no longer
+    hypothesized AND carries live-read evidence. Code-verified is not enough:
+    on 2026-10-08 the knock_chain, knock_detect and knock_intensity windows
+    were added to `tuning` before any read covered them."""
+    profiles = yaml.safe_load(path.read_text()).get("profiles", [])
+    assert _profiles_breaking_the_live_read_rule(profiles) == []
+
+
+def test_the_live_read_rule_refuses_an_unread_knock_channel() -> None:
+    """The rule can fail: an unread intensity word inserted into `tuning`
+    breaks it."""
+    path = REPO / "data/nissan-xterra-2008/capture_profiles.yaml"
+    tuning = next(p for p in yaml.safe_load(path.read_text())["profiles"] if p["name"] == "tuning")
+    mutated = {**tuning, "memory": [*tuning["memory"], "ECM_KNOCK_INTENSITY_IDX1"]}
+    assert _profiles_breaking_the_live_read_rule([tuning]) == []
+    assert _profiles_breaking_the_live_read_rule([mutated]) == [
+        ("tuning", "ECM_KNOCK_INTENSITY_IDX1")
+    ]
+
+
+@pytest.mark.parametrize(
+    "name",
+    ["ECM_KNOCK_INTENSITY_IDX1", "ECM_KNOCK_THRESHOLD_IDX1", "ECM_IGNITION_TIMING_FINAL"],
+)
+def test_windows_no_read_covered_stay_hypothesized(name: str) -> None:
+    """knock_intensity, knock_detect and knock_chain were not read on
+    2026-10-08; nothing promoted them."""
+    channel = BY_NAME[name]
+    assert channel.confidence == "hypothesized"
+    assert not any(e.method in LIVE_READ_METHODS for e in channel.evidence)
 
 
 @pytest.mark.parametrize(

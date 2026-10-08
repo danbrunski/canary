@@ -3072,13 +3072,34 @@ live here now, so the documents could be archived
     DUTY active test, or load the electrics (headlights + blower) at idle.
   - [ ] **0x1218 / 0x1223** (idle air demand / AN3 slot 5, refrigerant
     pressure candidates). Settle: A/C on and off at warm idle.
-  - [ ] **0x120B reads P0328 while driving: is the knock fallback engaged?**
+  - [x] **0x120B reads P0328 while driving: is the knock fallback engaged?**
     Bit 0 of the KS items is what `mem:ECM_KS_FAULT_FLAGS` bit 7 ORs, and that
     bit forces the fixed −5° fallback, so it is likely engaged on every drive
     since at least 2026-08-05 (reopens the D03.38 verdict). Settle, no writes:
     at KOEO and engine running read 0xFFFF479D bit 7, 0xFFFF677D–677F (item
     0xAB status), 0xFFFF2CEF (KS1 DC level, band 50–199), and 0xFFFF13FE under
     light load.
+    *Closed 2026-10-08 by a live read: yes, engaged.* CAN 0x7E0, session
+    0xC0, service 0x23, CANary passive-armed. KOEO (~17:05Z): every knock
+    byte 0 (479D 00, 677A–6785 12×00, 2CEF/2CF0 0000, 13FE 0000, 1400 0000,
+    283F 00, 28AE 00, 1254 0000), DID 0x120B 0000, 2876 0x60, 4782 0x10.
+    **Idle, engine running (~17:10Z), two reads — KS1 fault confirmed live:**
+    DID 0x120B = 0328 (P0328); 479D = 0x80 (bit 7 set); item 0xAB (677D–677F)
+    = 00 C0 4B, i.e. byte 1 bit 7 failing now and byte 2 0x4B early flag set,
+    pending, not confirmed (items 0xAA/0xAC/0xAD 00 00 00); 2CEF = 0xFF (KS1
+    pegged high, outside 50–199); 2CF0 = 0x7F then 0x80 (KS2 mid-scale,
+    healthy); 13FE = 0xFB00 (the fixed −5° retard target); 1400 = 0; 283F =
+    0x40 (HI DET set, so timing-trim table B); 28AE = 0x00 (knock loop not
+    active); 1254 = 0; 2876 = 0x60, 4782 = 0x10 (the HI DET gate on). All of
+    it matches the firmware: 479D bit 7 forces 13FE = 0xFB00 and the HI DET
+    latch. **Upshot:** timing runs in the knock-sensor fallback (fixed −5°
+    target, trim B, no knock loop) on every running drive, so timing work is
+    meaningless until the KS1 circuit is fixed; the sensors and harness are
+    being replaced in the supercharger build. The read raised the channels it
+    covered to `medium` with `live_read` evidence in `data/dids.yaml`, and
+    `tuning` now polls those windows (the knock_chain, knock_detect and
+    knock_intensity windows, the learned words 0x124E–1252 and 0x28AA stay
+    hypothesized and out of every profile).
 
 ## Deferred by decision, not blocked
 

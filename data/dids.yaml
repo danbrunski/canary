@@ -2990,7 +2990,7 @@ memory:
     address: 0xFFFF283F
     length: 1
     byte_length: 1
-    confidence: hypothesized
+    confidence: medium  # live read 2026-10-08; was hypothesized
     verified_tune_revision: ZS44A-20260920
     window: flags_2841
     evidence:
@@ -3026,6 +3026,21 @@ memory:
           trim A (0xFFFFB060, slot +0x020) at 0x04E702 when bit 6 is set. So
           set -> trim B (the High Det table), clear -> trim A. Checked by the
           orchestrator and in this edit against the listing, 2026-10-05.
+      - session: live-read-2026-10-08 (CAN 0x7E0, session 0xC0, service 0x23, CANary passive-armed)
+        method: live_read
+        transport: can
+        finding: >
+          This byte read 00 at KOEO and 0x40 (bit 6, HI DET, set) at idle. The
+          set latch is what the firmware predicts with 479D bit 7 set: the knock
+          task's gate was on (2876=0x60, bit 6 set; 4782=0x10, bit 5 clear), so
+          the 479D.7 path sets the latch every pass, and timing trim B is the
+          table in force. Full read: KOEO ~17:05Z: every knock RAM read was 0
+          (479D=00, 677A-6785=12x00, 2CEF/2CF0=0000, 13FE=0000, 1400=0000,
+          283F=00, 28AE=00, 1254=0000), DID 0x120B=0000, 2876=0x60, 4782=0x10.
+          Idle ~17:10Z, two reads: DID 0x120B=0328 (P0328), 479D=0x80, 677A-6785
+          = 00 00 00 | 00 C0 4B | 00 00 00 | 00 00 00, 2CEF=0xFF, 2CF0=0x7F then
+          0x80, 13FE=0xFB00, 1400=0, 283F=0x40, 28AE=0x00, 1254=0, 2876=0x60,
+          4782=0x10.
     notes: |
       Doubly worth logging: bit 6 is both the knock HI DET latch and the
       timing-trim selector. Read it before any timing-trim edit (N01.2) to
@@ -3151,9 +3166,13 @@ memory:
   # knock-sensor health monitor CANary has. Every value here is RAM, reset at
   # engine stop, and exposed by no Mode 01 PID, Mode 22 DID or Mode 06 MID.
   #
-  # Code-verified, NOT yet read live: `confidence: hypothesized` until a
-  # key-on read (KOEO, warm idle, one light pull) shows each behaving as the
-  # code says. Not in any capture profile until that read passes. Most of
+  # Code-verified; `confidence: hypothesized` until a live read shows each
+  # behaving as the code says, and in no capture profile until then. The
+  # 2026-10-08 KOEO + idle read (method `live_read`) raised the bytes it
+  # actually read to `medium`: the fault flag, items, levels, retard target,
+  # HI DET metric and latch, 0x28AE and 0x1254. knock_chain, knock_detect,
+  # knock_intensity, the learned words 0x124E-1252 and 0x28AA were not read
+  # and stay hypothesized (their windows were not, or only partly, read). Most of
   # the known answers are relations between RAM words, which
   # `MemoryKnownAnswer` cannot express (it checks a word against a DID);
   # each is stated exactly in the channel's notes, and
@@ -3346,7 +3365,7 @@ memory:
     scale: 0.00390625   # raw / 256
     offset: 0.0
     unit: deg
-    confidence: hypothesized
+    confidence: medium  # live read 2026-10-08; was hypothesized
     plausible_max: 0.0
     verified_tune_revision: ZS44A-20260920
     window: knock_retard
@@ -3366,6 +3385,20 @@ memory:
           is no per-cylinder retard on the path to the coil), written every
           10.24 ms by the retard-control task. 0 at rest, dipping negative
           only on a knock event.
+      - session: live-read-2026-10-08 (CAN 0x7E0, session 0xC0, service 0x23, CANary passive-armed)
+        method: live_read
+        transport: can
+        finding: >
+          This word read 0000 at KOEO and 0 at idle, satisfying the <= 0
+          invariant; no retard while the loop is not active (28AE bit 5 clear).
+          Only this word of the knock_retard window was read; the learned words
+          0x124E-1252 were not. Full read: KOEO ~17:05Z: every knock RAM read
+          was 0 (479D=00, 677A-6785=12x00, 2CEF/2CF0=0000, 13FE=0000, 1400=0000,
+          283F=00, 28AE=00, 1254=0000), DID 0x120B=0000, 2876=0x60, 4782=0x10.
+          Idle ~17:10Z, two reads: DID 0x120B=0328 (P0328), 479D=0x80, 677A-6785
+          = 00 00 00 | 00 C0 4B | 00 00 00 | 00 00 00, 2CEF=0xFF, 2CF0=0x7F then
+          0x80, 13FE=0xFB00, 1400=0, 283F=0x40, 28AE=0x00, 1254=0, 2876=0x60,
+          4782=0x10.
     notes: >
       Known answers: <= 0 always (the invariant above and the plausible_max).
       mem:ECM_KNOCK_RETARD_DEG = trunc(this raw / 256), declared there as a
@@ -3381,7 +3414,7 @@ memory:
     scale: 0.00390625   # raw / 256
     offset: 0.0
     unit: deg
-    confidence: hypothesized
+    confidence: medium  # live read 2026-10-08; was hypothesized
     verified_tune_revision: ZS44A-20260920
     window: knock_target
     relations:
@@ -3409,6 +3442,19 @@ memory:
           is set: the knock-sensor fault fallback. The learned words are
           never written 0xFB00, and the active branch's floor is -256 x
           mem:ECM_KNOCK_RETARD_LIMIT.
+      - session: live-read-2026-10-08 (CAN 0x7E0, session 0xC0, service 0x23, CANary passive-armed)
+        method: live_read
+        transport: can
+        finding: >
+          This word read 0000 at KOEO and 0xFB00 (-5.00 deg) at idle while 479D
+          bit 7 was set: the fixed knock-sensor-fault fallback, exactly as the
+          flag_equivalence relation declares. Full read: KOEO ~17:05Z: every
+          knock RAM read was 0 (479D=00, 677A-6785=12x00, 2CEF/2CF0=0000,
+          13FE=0000, 1400=0000, 283F=00, 28AE=00, 1254=0000), DID 0x120B=0000,
+          2876=0x60, 4782=0x10. Idle ~17:10Z, two reads: DID 0x120B=0328
+          (P0328), 479D=0x80, 677A-6785 = 00 00 00 | 00 C0 4B | 00 00 00 | 00 00
+          00, 2CEF=0xFF, 2CF0=0x7F then 0x80, 13FE=0xFB00, 1400=0, 283F=0x40,
+          28AE=0x00, 1254=0, 2876=0x60, 4782=0x10.
     notes: >
       Known answer: the flag_equivalence relation above (raw == -1280,
       0xFB00, if and only if mem:ECM_KS_FAULT_FLAGS bit 7 is set). -5.00
@@ -3419,7 +3465,7 @@ memory:
     length: 2
     byte_length: 2
     signed: true
-    confidence: hypothesized
+    confidence: medium  # live read 2026-10-08; was hypothesized
     verified_tune_revision: ZS44A-20260920
     window: knock_target
     evidence:
@@ -3431,6 +3477,20 @@ memory:
           6, which also switches the timing trim to the High Det table; rising
           above +8192 ([0x8E92]) clears it (corrected 2026-10-08, see
           ECM_HIGH_DET_FLAGS).
+      - session: live-read-2026-10-08 (CAN 0x7E0, session 0xC0, service 0x23, CANary passive-armed)
+        method: live_read
+        transport: can
+        finding: >
+          This word read 0000 at KOEO and 0 on both idle reads. Weak on its own
+          (zero beside zero), but consistent with the firmware: the HI DET latch
+          was set by the 479D.7 path, not by this metric reaching -8192. Full
+          read: KOEO ~17:05Z: every knock RAM read was 0 (479D=00,
+          677A-6785=12x00, 2CEF/2CF0=0000, 13FE=0000, 1400=0000, 283F=00,
+          28AE=00, 1254=0000), DID 0x120B=0000, 2876=0x60, 4782=0x10. Idle
+          ~17:10Z, two reads: DID 0x120B=0328 (P0328), 479D=0x80, 677A-6785 = 00
+          00 00 | 00 C0 4B | 00 00 00 | 00 00 00, 2CEF=0xFF, 2CF0=0x7F then
+          0x80, 13FE=0xFB00, 1400=0, 283F=0x40, 28AE=0x00, 1254=0, 2876=0x60,
+          4782=0x10.
     notes: >
       One of the knock-fault reads (poll it slowly, about 1 Hz). Placed in
       the knock_target window because it is the next word: when both are
@@ -3787,7 +3847,7 @@ memory:
     address: 0xFFFF28AE
     length: 1
     byte_length: 1
-    confidence: hypothesized
+    confidence: medium  # live read 2026-10-08; was hypothesized
     verified_tune_revision: ZS44A-20260920
     window: knock_flags
     evidence:
@@ -3797,6 +3857,20 @@ memory:
           Bit 5 = knock control active this 10.24 ms cycle (0xFFFF28AD and
           0xFFFF28AF hold the previous cycle's copy). Expected 1 under light
           load: it proves the loop runs.
+      - session: live-read-2026-10-08 (CAN 0x7E0, session 0xC0, service 0x23, CANary passive-armed)
+        method: live_read
+        transport: can
+        finding: >
+          This byte read 00 at KOEO and 0x00 at idle: bit 5 (knock control
+          active) clear, as expected while the KS-fault fallback (479D bit 7,
+          13FE=0xFB00) replaces the knock loop. Weak on its own (zero beside
+          zero). Full read: KOEO ~17:05Z: every knock RAM read was 0 (479D=00,
+          677A-6785=12x00, 2CEF/2CF0=0000, 13FE=0000, 1400=0000, 283F=00,
+          28AE=00, 1254=0000), DID 0x120B=0000, 2876=0x60, 4782=0x10. Idle
+          ~17:10Z, two reads: DID 0x120B=0328 (P0328), 479D=0x80, 677A-6785 = 00
+          00 00 | 00 C0 4B | 00 00 00 | 00 00 00, 2CEF=0xFF, 2CF0=0x7F then
+          0x80, 13FE=0xFB00, 1400=0, 283F=0x40, 28AE=0x00, 1254=0, 2876=0x60,
+          4782=0x10.
   # --- Knock-sensor fault state: poll slowly (about 1 Hz). Three reads:
   # knock_fault_items, knock_fault_flag and knock_fault_levels (the
   # accumulated-knock metric 0xFFFF1400 rides knock_target, above).
@@ -3814,7 +3888,7 @@ memory:
     length: 3
     byte_start: 1
     byte_length: 2
-    confidence: hypothesized
+    confidence: medium  # live read 2026-10-08; was hypothesized
     verified_tune_revision: ZS44A-20260920
     window: knock_fault_items
     evidence:
@@ -3824,12 +3898,26 @@ memory:
           Status bytes of diagnostic item 0xAA, P0327 (knock sensor 1 (bank 1) circuit low), in
           the item table 0x102D0. Its config word is 0x0020, bit 0x80 clear,
           so the Mode 03/07 builders skip it.
+      - session: live-read-2026-10-08 (CAN 0x7E0, session 0xC0, service 0x23, CANary passive-armed)
+        method: live_read
+        transport: can
+        finding: >
+          Item 0xAA's three bytes (677A-677C) read 00 00 00 at KOEO and at idle:
+          not failing, not stored. Read in the same 12-byte reply as P0328's set
+          item, so the window is right; zero on its own does not discriminate.
+          Full read: KOEO ~17:05Z: every knock RAM read was 0 (479D=00,
+          677A-6785=12x00, 2CEF/2CF0=0000, 13FE=0000, 1400=0000, 283F=00,
+          28AE=00, 1254=0000), DID 0x120B=0000, 2876=0x60, 4782=0x10. Idle
+          ~17:10Z, two reads: DID 0x120B=0328 (P0328), 479D=0x80, 677A-6785 = 00
+          00 00 | 00 C0 4B | 00 00 00 | 00 00 00, 2CEF=0xFF, 2CF0=0x7F then
+          0x80, 13FE=0xFB00, 1400=0, 283F=0x40, 28AE=0x00, 1254=0, 2876=0x60,
+          4782=0x10.
   - name: ECM_KS_P0328_STATUS
     address: 0xFFFF677D
     length: 3
     byte_start: 1
     byte_length: 2
-    confidence: hypothesized
+    confidence: medium  # live read 2026-10-08; was hypothesized
     verified_tune_revision: ZS44A-20260920
     window: knock_fault_items
     evidence:
@@ -3839,12 +3927,28 @@ memory:
           Status bytes of diagnostic item 0xAB, P0328 (knock sensor 1 (bank 1) circuit high), in
           the item table 0x102D0. Its config word is 0x0020, bit 0x80 clear,
           so the Mode 03/07 builders skip it.
+      - session: live-read-2026-10-08 (CAN 0x7E0, session 0xC0, service 0x23, CANary passive-armed)
+        method: live_read
+        transport: can
+        finding: >
+          Item 0xAB's bytes (677D-677F) read 00 00 00 at KOEO and 00 C0 4B at
+          idle: byte 1 bit 7 set (failing now) and byte 2 = 0x4B (bit 0
+          early/stored flag set, bit 3 pending set, bit 2 confirmed clear). DID
+          0x120B read 0x0328 in the same state, which the CAN handler derives
+          from this item's byte 2 bit 0. Matches KS1's level pegged at 0xFF
+          (circuit high). Full read: KOEO ~17:05Z: every knock RAM read was 0
+          (479D=00, 677A-6785=12x00, 2CEF/2CF0=0000, 13FE=0000, 1400=0000,
+          283F=00, 28AE=00, 1254=0000), DID 0x120B=0000, 2876=0x60, 4782=0x10.
+          Idle ~17:10Z, two reads: DID 0x120B=0328 (P0328), 479D=0x80, 677A-6785
+          = 00 00 00 | 00 C0 4B | 00 00 00 | 00 00 00, 2CEF=0xFF, 2CF0=0x7F then
+          0x80, 13FE=0xFB00, 1400=0, 283F=0x40, 28AE=0x00, 1254=0, 2876=0x60,
+          4782=0x10.
   - name: ECM_KS_P0332_STATUS
     address: 0xFFFF6780
     length: 3
     byte_start: 1
     byte_length: 2
-    confidence: hypothesized
+    confidence: medium  # live read 2026-10-08; was hypothesized
     verified_tune_revision: ZS44A-20260920
     window: knock_fault_items
     evidence:
@@ -3854,12 +3958,26 @@ memory:
           Status bytes of diagnostic item 0xAC, P0332 (knock sensor 2 (bank 2) circuit low), in
           the item table 0x102D0. Its config word is 0x0020, bit 0x80 clear,
           so the Mode 03/07 builders skip it.
+      - session: live-read-2026-10-08 (CAN 0x7E0, session 0xC0, service 0x23, CANary passive-armed)
+        method: live_read
+        transport: can
+        finding: >
+          Item 0xAC's three bytes (6780-6782) read 00 00 00 at KOEO and at idle:
+          not failing, not stored, consistent with KS2 reading mid-scale. Read
+          in the same reply as P0328's set item; zero on its own does not
+          discriminate. Full read: KOEO ~17:05Z: every knock RAM read was 0
+          (479D=00, 677A-6785=12x00, 2CEF/2CF0=0000, 13FE=0000, 1400=0000,
+          283F=00, 28AE=00, 1254=0000), DID 0x120B=0000, 2876=0x60, 4782=0x10.
+          Idle ~17:10Z, two reads: DID 0x120B=0328 (P0328), 479D=0x80, 677A-6785
+          = 00 00 00 | 00 C0 4B | 00 00 00 | 00 00 00, 2CEF=0xFF, 2CF0=0x7F then
+          0x80, 13FE=0xFB00, 1400=0, 283F=0x40, 28AE=0x00, 1254=0, 2876=0x60,
+          4782=0x10.
   - name: ECM_KS_P0333_STATUS
     address: 0xFFFF6783
     length: 3
     byte_start: 1
     byte_length: 2
-    confidence: hypothesized
+    confidence: medium  # live read 2026-10-08; was hypothesized
     verified_tune_revision: ZS44A-20260920
     window: knock_fault_items
     evidence:
@@ -3869,11 +3987,25 @@ memory:
           Status bytes of diagnostic item 0xAD, P0333 (knock sensor 2 (bank 2) circuit high), in
           the item table 0x102D0. Its config word is 0x0020, bit 0x80 clear,
           so the Mode 03/07 builders skip it.
+      - session: live-read-2026-10-08 (CAN 0x7E0, session 0xC0, service 0x23, CANary passive-armed)
+        method: live_read
+        transport: can
+        finding: >
+          Item 0xAD's three bytes (6783-6785) read 00 00 00 at KOEO and at idle:
+          not failing, not stored, consistent with KS2 reading mid-scale. Read
+          in the same reply as P0328's set item; zero on its own does not
+          discriminate. Full read: KOEO ~17:05Z: every knock RAM read was 0
+          (479D=00, 677A-6785=12x00, 2CEF/2CF0=0000, 13FE=0000, 1400=0000,
+          283F=00, 28AE=00, 1254=0000), DID 0x120B=0000, 2876=0x60, 4782=0x10.
+          Idle ~17:10Z, two reads: DID 0x120B=0328 (P0328), 479D=0x80, 677A-6785
+          = 00 00 00 | 00 C0 4B | 00 00 00 | 00 00 00, 2CEF=0xFF, 2CF0=0x7F then
+          0x80, 13FE=0xFB00, 1400=0, 283F=0x40, 28AE=0x00, 1254=0, 2876=0x60,
+          4782=0x10.
   - name: ECM_KS_FAULT_FLAGS
     address: 0xFFFF479D
     length: 1
     byte_length: 1
-    confidence: hypothesized
+    confidence: medium  # live read 2026-10-08; was hypothesized
     verified_tune_revision: ZS44A-20260920
     window: knock_fault_flag
     relations:
@@ -3903,6 +4035,21 @@ memory:
           bit 0 of items 0xAA-0xAD. While set, the retard target is the fixed
           fallback (mem:ECM_KNOCK_RETARD_TARGET = 0xFB00, -5 degrees) and the
           HI DET latch sets. 0 = knock control normal.
+      - session: live-read-2026-10-08 (CAN 0x7E0, session 0xC0, service 0x23, CANary passive-armed)
+        method: live_read
+        transport: can
+        finding: >
+          This byte read 00 at KOEO and 0x80 (bit 7 set) at idle, matching the
+          OR relation: P0328's item byte 2 read 0x4B (bit 0 set) and DID 0x120B,
+          which returns the first item with that bit set, read 0x0328. With it
+          set, 13FE read 0xFB00 and 283F bit 6 was set, as the firmware says.
+          Full read: KOEO ~17:05Z: every knock RAM read was 0 (479D=00,
+          677A-6785=12x00, 2CEF/2CF0=0000, 13FE=0000, 1400=0000, 283F=00,
+          28AE=00, 1254=0000), DID 0x120B=0000, 2876=0x60, 4782=0x10. Idle
+          ~17:10Z, two reads: DID 0x120B=0328 (P0328), 479D=0x80, 677A-6785 = 00
+          00 00 | 00 C0 4B | 00 00 00 | 00 00 00, 2CEF=0xFF, 2CF0=0x7F then
+          0x80, 13FE=0xFB00, 1400=0, 283F=0x40, 28AE=0x00, 1254=0, 2876=0x60,
+          4782=0x10.
     notes: >
       Known answers, both declared as flag_equivalence relations: bit 7 ==
       OR over the four mem:ECM_KS_P03xx_STATUS bit 0 (above), and bit 7 set
@@ -3913,7 +4060,7 @@ memory:
     address: 0xFFFF2CEF
     length: 1
     byte_length: 1
-    confidence: hypothesized
+    confidence: medium  # live read 2026-10-08; was hypothesized
     verified_tune_revision: ZS44A-20260920
     window: knock_fault_levels
     evidence:
@@ -3923,6 +4070,19 @@ memory:
           u8: knock sensor 1's DC level, the high byte of A/D group 2 ADDR26
           (copied from 0xFFFF2CFF). The circuit diagnostic's in-range band is
           50..199.
+      - session: live-read-2026-10-08 (CAN 0x7E0, session 0xC0, service 0x23, CANary passive-armed)
+        method: live_read
+        transport: can
+        finding: >
+          This byte read 00 at KOEO and 0xFF at idle: knock sensor 1 pegged
+          high, outside the 50..199 band, in the same state as P0328 (circuit
+          high) failing now. KS1's circuit fault is confirmed live. Full read:
+          KOEO ~17:05Z: every knock RAM read was 0 (479D=00, 677A-6785=12x00,
+          2CEF/2CF0=0000, 13FE=0000, 1400=0000, 283F=00, 28AE=00, 1254=0000),
+          DID 0x120B=0000, 2876=0x60, 4782=0x10. Idle ~17:10Z, two reads: DID
+          0x120B=0328 (P0328), 479D=0x80, 677A-6785 = 00 00 00 | 00 C0 4B | 00
+          00 00 | 00 00 00, 2CEF=0xFF, 2CF0=0x7F then 0x80, 13FE=0xFB00, 1400=0,
+          283F=0x40, 28AE=0x00, 1254=0, 2876=0x60, 4782=0x10.
     notes: >
       50..199 is the diagnostic's band, not a plausibility bound: a reading
       outside it is a real circuit fault (by the DTC names P0327 low and
@@ -3934,7 +4094,7 @@ memory:
     address: 0xFFFF2CF0
     length: 1
     byte_length: 1
-    confidence: hypothesized
+    confidence: medium  # live read 2026-10-08; was hypothesized
     verified_tune_revision: ZS44A-20260920
     window: knock_fault_levels
     evidence:
@@ -3943,6 +4103,19 @@ memory:
         finding: >
           u8: knock sensor 2's DC level, the high byte of A/D group 2 ADDR27
           (copied from 0xFFFF2D00). In-range band 50..199, as for sensor 1.
+      - session: live-read-2026-10-08 (CAN 0x7E0, session 0xC0, service 0x23, CANary passive-armed)
+        method: live_read
+        transport: can
+        finding: >
+          This byte read 00 at KOEO and 0x7F then 0x80 at idle: mid-scale,
+          inside the 50..199 band, a healthy sensor 2 beside sensor 1's pegged
+          0xFF. Full read: KOEO ~17:05Z: every knock RAM read was 0 (479D=00,
+          677A-6785=12x00, 2CEF/2CF0=0000, 13FE=0000, 1400=0000, 283F=00,
+          28AE=00, 1254=0000), DID 0x120B=0000, 2876=0x60, 4782=0x10. Idle
+          ~17:10Z, two reads: DID 0x120B=0328 (P0328), 479D=0x80, 677A-6785 = 00
+          00 00 | 00 C0 4B | 00 00 00 | 00 00 00, 2CEF=0xFF, 2CF0=0x7F then
+          0x80, 13FE=0xFB00, 1400=0, 283F=0x40, 28AE=0x00, 1254=0, 2876=0x60,
+          4782=0x10.
     notes: >
       50..199 is the diagnostic's band, not a plausibility bound: outside it
       is a circuit fault (P0332 low / P0333 high by name). Not declared as an

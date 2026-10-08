@@ -139,7 +139,25 @@ profiles:
     read in the same Mode 01 round as PID 0x44 and lambda, so every pull gives
     same-instant throttle for the Fuel Comp fit (N02): the ECM''s load byte
     0xFFFF118A is reconstructed from it. Without it the fit''s open-loop route had
-    zero samples, because DID 0x120F is read on the Mode 22 cycle.'
+    zero samples, because DID 0x120F is read on the Mode 22 cycle.
+
+
+    2026-10-08: adds the knock observation windows (docs/ecu-firmware-analysis.md,
+    "Knock monitoring"). A live idle read that day confirmed knock sensor 1''s
+    circuit pegged high (P0328 active, fixed -5 deg fallback, HI DET latched). The
+    sensors and harness are replaced in the supercharger build, so until then every
+    tuning drive records how the fault behaves across rpm and load: KS1/KS2 levels,
+    fault flags and item status (weight 0.125), and retard, target, HI DET metric,
+    HI DET latch and knock-control flags (weight 0.5). Reads only.
+
+
+    Only channels read live on 2026-10-08 (KOEO ~17:05Z, idle ~17:10Z) are polled:
+    the windows knock_fault_flag, knock_fault_items, knock_fault_levels, knock_target,
+    flags_2841 (HI DET byte), knock_flags (0x28AE only) and knock_retard (0x1254
+    only). knock_chain, knock_detect and knock_intensity are held out, and so are the
+    learned-retard words 0x124E-1252 and 0x28AA, until a read covers their own bytes:
+    a channel enters a profile only once it is no longer hypothesized and carries
+    live-read evidence (tests/test_memory_catalog_knock_lambda.py).'
   experimental: false
   mode01:
     RPM: 1.0
@@ -181,6 +199,31 @@ profiles:
   - ECM_ENGINE_PERIOD
   - ECM_IGNITION_TIMING_RAM
   - ECM_ENGINE_SPEED_RAM
+  - ECM_HIGH_DET_FLAGS
+  - ECM_KNOCK_RETARD
+  - ECM_KNOCK_RETARD_TARGET
+  - ECM_KNOCK_HIGHDET_METRIC
+  - ECM_KNOCK_CONTROL_FLAGS
+  - ECM_KS_P0327_STATUS
+  - ECM_KS_P0328_STATUS
+  - ECM_KS_P0332_STATUS
+  - ECM_KS_P0333_STATUS
+  - ECM_KS_FAULT_FLAGS
+  - ECM_KS1_LEVEL
+  - ECM_KS2_LEVEL
+  memory_rate_weights:
+    ECM_HIGH_DET_FLAGS: 0.5
+    ECM_KNOCK_RETARD: 0.5
+    ECM_KNOCK_RETARD_TARGET: 0.5
+    ECM_KNOCK_HIGHDET_METRIC: 0.5
+    ECM_KNOCK_CONTROL_FLAGS: 0.5
+    ECM_KS_P0327_STATUS: 0.125
+    ECM_KS_P0328_STATUS: 0.125
+    ECM_KS_P0332_STATUS: 0.125
+    ECM_KS_P0333_STATUS: 0.125
+    ECM_KS_FAULT_FLAGS: 0.125
+    ECM_KS1_LEVEL: 0.125
+    ECM_KS2_LEVEL: 0.125
   mode01_enabled: true
   mode22_enabled: true
   did_interval_seconds: null

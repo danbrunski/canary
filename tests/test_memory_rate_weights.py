@@ -309,13 +309,15 @@ def _pre_d0338_digest(profile: CaptureProfile) -> str:
 
 
 def test_tracked_xterra_profiles_keep_their_digests_and_memory_rates() -> None:
-    """Every tracked Xterra profile loads, digests as it did, and its memory
-    reads run at the rate they ran at before: `tuning` reads its two windows
-    at its 4 Hz target capped to one per 0.5 s cycle, i.e. 2 Hz."""
+    """Every tracked Xterra profile loads, an unweighted one digests as it
+    did, and memory reads run at the rate they ran at before: `tuning` reads
+    its two original windows at its 4 Hz target capped to one per 0.5 s
+    cycle, i.e. 2 Hz. The knock windows it gained on 2026-10-08 are weighted:
+    0.5 still hits the 2 Hz cap, 0.125 runs at 0.5 Hz."""
     catalog = CaptureProfileCatalog.model_validate(yaml.safe_load(XTERRA_CATALOG.read_text()))
     for profile in catalog.profiles:
-        assert profile.memory_rate_weights == {}
-        assert profile_digest(profile) == _pre_d0338_digest(profile)
+        if not profile.memory_rate_weights:
+            assert profile_digest(profile) == _pre_d0338_digest(profile)
     tuning = catalog.by_name("tuning")
     assert tuning is not None and tuning.memory
     spec = CanObdSpec.from_config(
@@ -329,7 +331,18 @@ def test_tracked_xterra_profiles_keep_their_digests_and_memory_rates() -> None:
         for request in build_poll_requests(None, spec)
         if request.kind == "memory" and view.request_eligible(request)
     }
-    assert rates == {f"{MEMORY_SOURCE}:fuel_target": 2.0, f"{MEMORY_SOURCE}:spark": 2.0}
+    assert rates == {
+        f"{MEMORY_SOURCE}:fuel_target": 2.0,
+        f"{MEMORY_SOURCE}:spark": 2.0,
+        **{
+            f"{MEMORY_SOURCE}:{window}": 2.0
+            for window in ("flags_2841", "knock_retard", "knock_target", "knock_flags")
+        },
+        **{
+            f"{MEMORY_SOURCE}:{window}": 0.5
+            for window in ("knock_fault_items", "knock_fault_flag", "knock_fault_levels")
+        },
+    }
 
 
 def test_a_pi_override_saved_before_the_field_loads_and_is_not_reported_shadowed(
@@ -339,8 +352,11 @@ def test_a_pi_override_saved_before_the_field_loads_and_is_not_reported_shadowed
     key anywhere, ``base_digests`` from the old digest -- loads, wins by name,
     and does not trigger the "repo's version has changed" warning."""
     tracked = CaptureProfileCatalog.model_validate(yaml.safe_load(XTERRA_CATALOG.read_text()))
-    base = tracked.by_name("tuning")
-    assert base is not None
+    # A profile the repo has not given weights since: `tuning` gained
+    # weighted knock windows on 2026-10-08, so an override of it saved before
+    # then is correctly reported as shadowing a changed repo version.
+    base = next(p for p in tracked.profiles if not p.memory_rate_weights)
+    name = base.name
     saved = base.model_dump(mode="json")
     saved.pop("memory_rate_weights")
     saved["description"] = "edited in the Pi dashboard"
@@ -351,7 +367,7 @@ def test_a_pi_override_saved_before_the_field_loads_and_is_not_reported_shadowed
                 "schema_version": 1,
                 "profiles": [saved],
                 "deleted": [],
-                "base_digests": {"tuning": _pre_d0338_digest(base)},
+                "base_digests": {name: _pre_d0338_digest(base)},
             },
             sort_keys=False,
         )
@@ -361,7 +377,7 @@ def test_a_pi_override_saved_before_the_field_loads_and_is_not_reported_shadowed
         effective = load_capture_profiles(
             CaptureProfileSources(XTERRA_CATALOG, overrides_path), EXAMPLE
         )
-    layered = effective.by_name("tuning")
+    layered = effective.by_name(name)
     assert layered is not None
     assert layered.description == "edited in the Pi dashboard"
     assert layered.memory == base.memory
@@ -369,8 +385,8 @@ def test_a_pi_override_saved_before_the_field_loads_and_is_not_reported_shadowed
     assert not [r for r in caplog.records if "overridden on this machine" in r.getMessage()]
     # The same comparison layer_catalog makes, stated directly.
     overrides = CaptureProfileOverrides.model_validate(yaml.safe_load(overrides_path.read_text()))
-    assert overrides.base_digests["tuning"] == profile_digest(base)
-    assert layer_catalog(tracked, overrides).by_name("tuning") == layered
+    assert overrides.base_digests[name] == profile_digest(base)
+    assert layer_catalog(tracked, overrides).by_name(name) == layered
 
 
 def test_a_weight_changes_the_digest() -> None:
