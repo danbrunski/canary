@@ -855,7 +855,7 @@ def test_run_benchmark_gate_skips_cleanly_with_missing_if_artifact(
 
 
 def test_run_benchmark_gate_runs_the_evaluation_protocol_and_discovers_prior_baseline(
-    tmp_path: Path,
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """End-to-end (R06.5): a fixture session + a real trained IF artifact +
     prior benchmark-*.json reports on disk. The gate runs A02's harness
@@ -865,6 +865,16 @@ def test_run_benchmark_gate_runs_the_evaluation_protocol_and_discovers_prior_bas
     from src.features.feature_pipeline import featurize_wide_frame
     from src.models.benchmark_gate import PROTOCOL_NAME
     from src.models.isolation_forest import default_manifest_path, fit_isolation_forest
+    from tests.pinned_checkout_harness import CHECKOUT_KEY_INPUTS, PIN_ENV, PINNED_HARNESS
+
+    # T01.20: the read-back asserted below is keyed on the whole working tree
+    # (src/, data/, the config), which other sessions edit during this
+    # minute-long test; an edit made the cache rekey or discard, correctly,
+    # and failed the test. The harness runs as itself, with those inputs held
+    # at the first run's values; the artifact and frames are still keyed live.
+    pins = tmp_path / "key-pins.json"
+    monkeypatch.setattr(retrain, "EVALUATE_DETECTORS_SCRIPT", PINNED_HARNESS)
+    monkeypatch.setenv(PIN_ENV, str(pins))
 
     config = example_config(EXAMPLE_YAML)
     # A sequence detector disabled in config is not scored (the gate would
@@ -982,6 +992,8 @@ def test_run_benchmark_gate_runs_the_evaluation_protocol_and_discovers_prior_bas
     assert diff["baseline"].endswith(report_path.name)
     (missing,) = [c for c in diff["cells"] if c["status"] == "missing"]
     assert (missing["detector"], missing["fault_kind"]) == ("isolation_forest", "maf_gain")
+    # Every gate above ran through the pinned harness.
+    assert set(json.loads(pins.read_text())) == set(CHECKOUT_KEY_INPUTS)
 
 
 def test_retrain_auto_holds_out_most_recent_session_for_calibration(

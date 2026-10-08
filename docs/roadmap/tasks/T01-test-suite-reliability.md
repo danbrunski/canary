@@ -633,7 +633,7 @@ measurement in hand.
     from the reference's own payload without those fields, and checks that a
     set field does change it. No literal digest of fitted floats remains.
 
-- [ ] **T01.20 `tests/test_retrain_script.py::test_run_benchmark_gate_runs_the_evaluation_protocol_and_discovers_prior_baseline`
+- [x] **T01.20 `tests/test_retrain_script.py::test_run_benchmark_gate_runs_the_evaluation_protocol_and_discovers_prior_baseline`
   failed under parallel load.**
   - **Seen** 2026-10-05, twice during the A02.3 work (no fix landed between):
     - in a `-n 4 -k benchmark_gate` run of `tests/test_retrain_script.py`
@@ -648,6 +648,52 @@ measurement in hand.
   - **Do:** reproduce under `-n auto` with `--count`/a loop, find which cache
     path is shared (test `tmp_path` vs a module- or repo-level cache dir), and
     either give each test its own cache root or assert on content, not inode.
+  - **Not a shared cache path.** The score cache root is the test's own
+    `tmp_path/cache/evaluation_frames/scores` (every failing path below sits
+    under `/tmp/pytest-of-dan/pytest-*/test_run_benchmark_gate_runs_t0/`).
+    xdist alone does not reproduce it: 24 copies at `-n auto` (12 workers,
+    load 9–14, scratch `pytest_generate_tests` plugin) passed 24 of 24 on
+    `83188bc`.
+  - **Cause: the cache keys on the shared working tree.** The harness's
+    key inputs (`scripts/evaluate_detectors.py::key_inputs`) include `code`
+    (`code_version`: every `src/**/*.py`), the config file, the bindings, the
+    behavior models and `data` (`data/*.yaml`, the DBCs, the profile's
+    files), all read from the live checkout, and the component key carries
+    `code`. The test runs the gate three times over about a minute while
+    other sessions edit `src/` and `data/` (28 such files modified within
+    the four hours before this run). An edit between the first and second
+    gate makes the second run key under a new `isolation_forest-<code>`
+    directory, so `written()` grows a path (pytest prints
+    `{PosixPath('/...kl'): 2175381} == {PosixPath('/...kl'): 2171381}`, which
+    reads as "a `.pkl` got a new inode"); an edit during the first gate makes
+    it discard its entries ("score cache: nothing kept; key inputs changed
+    during the run: code"), so `assert kept` fails. The cache is right both
+    times; the test was deciding on whether anyone saved a file.
+  - **Reproduced deterministically.** A scratch plugin ran the harness child
+    with `evaluation_cache.code_version` salted, i.e. the edit another
+    session makes. Before the fix, 12 copies at `-n auto` per shape: edit
+    between gates 12 of 12 failed (`assert written() == kept`), edit inside
+    the first gate 12 of 12 failed (`assert kept` → `{}`).
+  - *Fixed 2026-10-07, test only (no production change).* The gate now runs
+    the harness through `tests/pinned_checkout_harness.py`
+    (`retrain.EVALUATE_DETECTORS_SCRIPT` patched, so `run_evaluate_detectors`
+    still launches it as its own process). That script runs the real
+    `evaluate_detectors.main` with the five checkout key inputs (`code`,
+    `config_file`, `bindings`, `behavior_models`, `data`) held at the values
+    the test's first harness run hashed, recorded in a `tmp_path` JSON file
+    (`CANARY_TEST_SCORE_KEY_PINS`); spawned scoring workers load it as
+    `__mp_main__` and re-check against the same pins. What the test owns, the
+    IF artifact and the sessions' frames, is still keyed live, and the inode
+    assertion stands. The test now also asserts that all five pins were
+    recorded, so a gate that bypassed the pinned harness fails. After, the
+    same probe loops: 12 of 12 passed per shape (the salt verified applied:
+    `T01-PROBE` lines in the child's stderr), and the unprobed loop, 24 copies
+    at `-n auto` (load 12–15), passed 24 of 24.
+  - **Left exposed:** an edit that changes the parsed config
+    (`canary.example.yaml`, the profile's config files: `feature_key` hashes
+    `config.model_dump`) or the decoded value of the fixture's own channels
+    between gates still rekeys the second run. Both are real inputs to the
+    scores, not hashes of the tree.
 
 - [x] **T01.21 `tests/test_replay.py::test_rows_already_due_yield_the_loop_every_few_milliseconds`
   judged the per-row yield by wall time.**
