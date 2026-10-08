@@ -74,6 +74,9 @@ tests/test_change_only_can_storage.py::test_the_one_hz_grid_is_identical_for_ful
 tests/test_channels_raw_read.py::test_a_filtered_read_returns_exactly_the_whole_session_read[False-drive] 3.9
 tests/test_channels_raw_read.py::test_a_filtered_read_returns_exactly_the_whole_session_read[True-capture] 3.5
 tests/test_channels_raw_read.py::test_a_filtered_read_returns_exactly_the_whole_session_read[True-drive] 4.5
+tests/test_channels_raw_read.py::test_a_frame_read_spec_by_spec_is_exactly_the_whole_frame_read[False-drive] 2.5
+tests/test_channels_raw_read.py::test_a_frame_read_spec_by_spec_is_exactly_the_whole_frame_read[True-capture] 2.1
+tests/test_channels_raw_read.py::test_a_frame_read_spec_by_spec_is_exactly_the_whole_frame_read[True-drive] 3.1
 tests/test_channels_raw_read.py::test_a_shared_read_serves_every_spec_exactly_from_one_read[drive] 2.0
 tests/test_cold_start_imports.py::test_recording_path_does_not_import[pint] 3.3
 tests/test_cold_start_imports.py::test_recording_path_does_not_import_torch 3.2

@@ -48,7 +48,7 @@ See ``docs/roadmap/archive/tuning-analysis-toolkit.md`` Phase 1.
 from __future__ import annotations
 
 import json
-from collections.abc import Iterable, Iterator, Sequence
+from collections.abc import Callable, Iterable, Iterator, Sequence
 from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass
@@ -359,13 +359,112 @@ def _long_frame(
     acquired_time: bool = False,
     filters: Any = None,
     columns: Sequence[str] | None = None,
+    narrow: _Narrowing | None = None,
 ) -> pd.DataFrame:
+    """The stored rows a reader takes its specs from, on the clock it asked for.
+
+    ``narrow`` (P02.19) keeps only the rows its specs' readers can select
+    *before* the acquisition clock is put on them. The clock is row-local, so
+    the kept rows are exactly what the whole frame would give them, and a
+    call costs the rows it reads: a caller that hands one frame to
+    :func:`read_channels` spec by spec parses each spec's ``metadata_json``,
+    never the whole frame's once per spec.
+    """
     shared = _SHARED_READ.get()
     if shared is not None and shared.serves(session, filters, columns):
+        # Already parsed once for the whole shared read.
         return shared.rows(filters, acquired_time=acquired_time)
-    return _long_frame_with_metadata(
-        session, acquired_time=acquired_time, filters=filters, columns=columns
-    )[0]
+    if isinstance(session, pd.DataFrame):
+        frame = session if narrow is None else narrow(session)
+        if frame is session:
+            # Never the caller's frame itself: the clock rewrites ``timestamp``.
+            frame = session.copy()
+    else:
+        frame = read_session(Path(session), filters=filters, columns=columns)
+        if narrow is not None:
+            frame = narrow(frame)
+    if not acquired_time:
+        return frame
+    return _on_acquisition_clock(frame, session)[0]
+
+
+#: Keeps a stored frame's rows that some spec's reader can select (P02.19).
+_Narrowing = Callable[[pd.DataFrame], pd.DataFrame]
+
+
+class _RowKeys:
+    """A frame's ``source`` and ``channel`` for :func:`_spec_rows`, with the
+    case-folded and upper-cased channel built once, on first use, rather than
+    once per spec."""
+
+    def __init__(self, frame: pd.DataFrame) -> None:
+        self.source = frame["source"]
+        self.channel = frame["channel"].astype("string")
+        self._folded: pd.Series | None = None
+        self._upper: pd.Series | None = None
+
+    @property
+    def folded(self) -> pd.Series:
+        if self._folded is None:
+            self._folded = self.channel.str.casefold()
+        return self._folded
+
+    @property
+    def upper(self) -> pd.Series:
+        if self._upper is None:
+            self._upper = self.channel.str.upper()
+        return self._upper
+
+
+def _spec_rows(keys: _RowKeys, spec: ChannelSpec, catalogs: _Catalogs) -> pd.Series:
+    """Every row that ``spec``'s reader can select (P02.19).
+
+    Never fewer than the reader's own selection, compared the way the reader
+    compares it, so a frame narrowed to these rows reads exactly the same:
+    ``_numeric_series``/``_kline_series`` casefold the channel, ``_can_series``
+    upper-cases it, and ``_did_series`` takes the hex name from any source (it
+    must see a K-line module's rows to say that is the only kind it found).
+    ``tests/test_channels_raw_read.py`` holds every source kind to that.
+    """
+    source, channel = keys.source, keys.channel
+    if spec.source == "obd" and spec.name.upper() == "COMMANDED_AFR":
+        keep = (source == "obd") & (channel == _EQUIV_RATIO_CHANNEL)
+    elif spec.source == "mem":
+        keep = (source == "obd") & (channel == f"mem:{spec.name}")
+    elif spec.source == "did":
+        keep = channel == f"DID_{catalogs.did(spec.name).did:04X}"
+    elif spec.source == "decoded":
+        keep = (source == DECODED_SOURCE) & (channel == catalogs.signal(spec.name).name)
+    elif spec.source == "can":
+        keep = (source == "can") & (
+            keys.upper == f"0x{catalogs.signal(spec.name).can_id:03X}".upper()
+        )
+    elif spec.source in _CASE_FOLDED_SOURCES:
+        keep = (source == spec.source) & (keys.folded == spec.name.casefold())
+    else:  # pragma: no cover - parse_spec admits no other source
+        raise ChannelSpecError(f"no row selection for {spec.text!r}")
+    return keep.fillna(False).astype(bool)
+
+
+def _narrowing(parsed: Sequence[ChannelSpec], catalogs: _Catalogs) -> _Narrowing:
+    """:data:`_Narrowing` for ``parsed``: the union of their :func:`_spec_rows`,
+    in the frame's order and index, with its ``attrs`` (the change-only
+    storage mode :func:`_as_of_validity` reads). The frame itself when every
+    row is kept, so a read that is already exactly its specs' rows is not
+    copied again."""
+
+    def narrow(frame: pd.DataFrame) -> pd.DataFrame:
+        keys = _RowKeys(frame)
+        keep = np.zeros(len(frame), dtype=bool)
+        for spec in parsed:
+            keep |= _spec_rows(keys, spec, catalogs).to_numpy(dtype=bool)
+        if keep.all():
+            return frame
+        out = frame.loc[keep].copy()
+        out.attrs = dict(frame.attrs)
+        return out
+
+    return narrow
 
 
 #: The stored columns every :func:`read_channels` reader takes its rows from
@@ -622,7 +721,8 @@ def _long_frame_with_metadata(
     filters: Any = None,
     columns: Sequence[str] | None = None,
 ) -> tuple[pd.DataFrame, _MetadataFields | None]:
-    """:func:`_long_frame` plus the metadata columns it had to parse.
+    """A session (path or frame) as a long frame on the clock asked for, plus
+    the metadata columns it had to parse.
 
     Handed back rather than recomputed so :func:`read_acquisition_frame` reuses
     the one parse. ``None`` covers both "nothing was parsed" cases: without
@@ -950,6 +1050,7 @@ def read_channels(
         acquired_time=acquired_time,
         filters=_raw_read_filters(parsed, catalogs) if parsed else None,
         columns=_read_columns(parsed, acquired_time=acquired_time),
+        narrow=_narrowing(parsed, catalogs) if parsed else None,
     )
 
     readers = {

@@ -58,11 +58,17 @@ def _specs(session: Path) -> list[str]:
 def _unfiltered(
     monkeypatch: pytest.MonkeyPatch, session: Path, specs: list[str], **kwargs: bool
 ) -> pd.DataFrame:
-    """Today's reference: the whole session, every row and every column."""
+    """Today's reference: the whole session, every row and every column, with
+    the clock put on all of it (no P02.19 narrowing)."""
     with monkeypatch.context() as patch:
         patch.setattr(channels, "_raw_read_filters", lambda parsed, catalogs: None)
         patch.setattr(channels, "_read_columns", lambda parsed, acquired_time: None)
+        patch.setattr(channels, "_narrowing", _no_narrowing)
         return read_channels(session, specs, **kwargs)
+
+
+def _no_narrowing(parsed: object, catalogs: object) -> channels._Narrowing:
+    return lambda frame: frame.copy()
 
 
 @pytest.mark.parametrize("session", [DRIVE, CAPTURE], ids=["drive", "capture"])
@@ -329,3 +335,51 @@ def test_a_can_only_read_counts_its_frames_and_nothing_else() -> None:
         filters=[_rpm_frames(), [("source", "==", "decoded"), ("channel", "==", "ECM_RPM")]],
     )
     assert both["source"].value_counts().to_dict() == {"can": 3825, "decoded": 3825}
+
+
+@pytest.mark.parametrize("session", [DRIVE, CAPTURE], ids=["drive", "capture"])
+@pytest.mark.parametrize("acquired_time", [False, True])
+def test_a_frame_read_spec_by_spec_is_exactly_the_whole_frame_read(
+    monkeypatch: pytest.MonkeyPatch, session: Path, acquired_time: bool
+) -> None:
+    """P02.19: a frame handed to ``read_channels`` is narrowed to the rows its
+    specs' readers select before the clock goes on. Every spec, every source,
+    reads what the whole frame read, ``attrs`` included."""
+    frame = read_session(session)
+    for spec in _specs(session):
+        with monkeypatch.context() as patch:
+            patch.setattr(channels, "_narrowing", _no_narrowing)
+            expected = read_channels(frame, [spec], acquired_time=acquired_time)
+        got = read_channels(frame, [spec], acquired_time=acquired_time)
+        assert not expected.empty, spec
+        pd.testing.assert_frame_equal(got, expected, check_exact=True)
+        assert got.attrs == expected.attrs, spec
+    # The caller's frame is never the one the clock rewrote.
+    pd.testing.assert_frame_equal(frame, read_session(session), check_exact=True)
+
+
+def test_reading_one_frame_spec_by_spec_parses_each_row_once_at_most(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """P02.19: ``read_delivery_inputs`` and ``lambda_delivery_evidence`` read a
+    session once and ask its frame for one channel at a time. Each call put
+    the whole frame on the acquisition clock -- 39 ``metadata_json`` parses
+    of every polled row per session in the evidence script, 87 % of its time.
+    Now N single-spec calls parse no more rows, in total, than the frame
+    holds."""
+    rows = read_session(CAPTURE, filters=[("source", "==", "obd")])
+    specs = [spec for spec in _specs(CAPTURE) if not spec.startswith(("decoded:", "can:"))]
+    assert len(specs) >= 10
+    parsed: list[int] = []
+    clock = channels._on_acquisition_clock
+
+    def counting(frame: pd.DataFrame, session: object) -> object:
+        parsed.append(len(frame))
+        return clock(frame, session)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(channels, "_on_acquisition_clock", counting)
+    for spec in specs:
+        assert not read_channels(rows, [spec], acquired_time=True).empty, spec
+    assert len(parsed) == len(specs)
+    assert max(parsed) < len(rows)
+    assert sum(parsed) <= len(rows)

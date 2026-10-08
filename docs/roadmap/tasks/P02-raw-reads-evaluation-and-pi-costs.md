@@ -621,7 +621,7 @@ recomputes the rolling frame over the whole buffered window every tick.
     - `scripts/lambda_delivery_evidence.py` has the same shape: 39 parses
       per session, 87 % of its wall time.
 
-    Parsing once per frame would remove the cost without a store, and it
+    Parsing once per frame (done as P02.19) would remove the cost without a store, and it
     helps the Pi's digest too. Estimated from the measured parts: digest
     4.6 -> 3.2 s and 6.8 -> 4.5 s; the evidence script 32.7 -> about 5 s.
     The rest of a drive read is the source: 4.3 s of the 7.0 s Mode 01 read
@@ -2786,6 +2786,110 @@ recomputes the rolling frame over the whole buffered window every tick.
     | `read_channels obd:RPM` (6,697 rows) | 5.3-5.6 s, 286-295 MB | 5.4-5.7 s, 289-290 MB |
     | `read_channels can:ECM_RPM` | 8.7-9.4 s, 804-816 MB | 8.0-10.5 s, 452-463 MB |
     | `read_session` 0x1F9 can-only | 1,435,558 rows, 8.4-9.0 s, 988-1,009 MB | 717,779 rows, 7.7-8.1 s, 579-593 MB |
+
+- [x] **P02.19 Parse the acquisition clock once, not once per call.** Found
+  while measuring P02.3 (2026-10-08). A frame handed to
+  `read_channels(frame, ..., acquired_time=True)` goes through
+  `_on_acquisition_clock` whole on every call: a copy of every row, then a
+  parse of every row's `metadata_json`. A caller that reads a session once
+  and asks for its channels one at a time pays that parse once per channel.
+  - **Where it costs** (P02.3's measurement):
+    - `tuning.read_delivery_inputs` calls `read_channels(rows, [spec])` once
+      per role. That is 5 of the 6 parses in the 09-21 capture's digest and
+      10 of the 11 in the 09-23 one: 1.5 s of 4.6 s and 2.2 s of 6.8 s.
+    - `scripts/lambda_delivery_evidence.py` makes 39 parses per session:
+      28.4 s of a 32.7 s run over two captures.
+  - **The fix is in `read_channels`, not in its callers.** Before the clock,
+    the frame is narrowed to the rows the asked-for specs' readers can
+    select. Each spec gets its source and its channel, compared the way its
+    reader compares it. The clock is row-local (`_on_acquisition_clock`), so
+    those rows come out exactly as they would from the whole frame. A call
+    then costs the rows it reads, so no caller can be written that
+    re-parses a whole frame per spec.
+    - **Memoising the clock per frame object was rejected.** A frame is
+      mutable and unhashable, and `id()` is reused after collection.
+    - **Routing these two callers through `shared_session_read` was
+      rejected.** It would fix two callers and leave the next one slow.
+
+  **Accept:**
+  - `read_channels` output is identical to HEAD's (`check_exact`, including
+    `timestamp_basis` and `attrs`):
+    - on the 09-21 and 09-23 tuning captures and on `2026-09-20T152758`;
+    - for every reader that goes through it here: `build_tuning_frame`,
+      `read_delivery_inputs` and `compare_channels`.
+  - Digest JSON is byte-identical on both captures.
+  - `lambda_delivery_evidence.py --fit-enrichment-delay` output is
+    byte-identical.
+  - A test on the committed fixtures proves that N single-spec calls on one
+    frame parse only those specs' rows, never the whole frame N times.
+  - Before and after timings are recorded for the digest, the tuning frame
+    and the evidence script.
+
+  Size **S**.
+
+  **Done 2026-10-08.**
+  - **What changed.** `read_channels` hands `_long_frame` a narrowing built
+    from its specs: `_narrowing` and `_spec_rows` in
+    `src/analysis/channels.py`.
+    - A path read is narrowed after the parquet read; a frame is narrowed
+      instead of copied whole. The clock then goes on only the kept rows.
+    - A frame whose rows all pass is used as it is, so a read that is
+      already exactly its specs' rows is not copied twice.
+    - The shared read (P02.2) is unchanged: it already parses once per
+      session.
+    - No signature changed, and every caller gets the fix. The output
+      contract is unchanged, so no caller needed editing; this covers
+      `read_delivery_inputs`, the evidence script, `lambda_delivery`, the
+      workbench and `compare`.
+  - **Parity.** Two trees, `git archive HEAD` and HEAD plus this
+    `channels.py`, ran the same script against the same data, in fresh
+    processes.
+    - Sessions: the 09-21 and 09-23 tuning captures and `2026-09-20T152758`.
+    - Coverage per session:
+      - `read_channels` from a path and from a frame, on both clocks;
+      - every source kind: Mode 01 including a lower-case `obd:rpm`,
+        `did:`, `mem:` and `_SENTINEL`, `obd:COMMANDED_AFR`, `decoded:`,
+        `can:`, and `gps:` in both cases;
+      - one call per spec and one call for all specs;
+      - the polled-only frame the evidence script uses, and a whole-session
+        frame;
+      - `build_tuning_frame` values and capability;
+      - `compare_channels_with_pairs` result and pairs.
+    - Result: 127 + 127 + 99 frames (14.0 M rows) identical under
+      `check_exact`, `attrs` equal. Refusals are identical apart from the
+      tree path in the message (6 + 6 + 7). Digest JSON is identical on both
+      captures. `compare` repr is identical, including the drive's
+      `did:ECM_RPM` refusal.
+    - `lambda_delivery_evidence.py --fit-enrichment-delay` over its 12
+      declared captures: `--out` JSON byte-identical (sha256 `315c9da9599dabd4…`),
+      stdout identical.
+  - **Cost, before -> after.** Same harness as P02.3, back to back,
+    alternating trees, load 1.1-1.5:
+
+    | | before | after |
+    |---|---|---|
+    | `compute_tuning_digest`, 09-21 capture | 5.77 s (clock 6 parses, 2.30 s) | 3.61 s (6 parses, 0.50 s) |
+    | same, 09-23 capture | 6.71 s (11 parses, 2.77 s) | 4.78 s (11 parses, 0.72 s) |
+    | `build_tuning_frame`, 09-21 / 09-23 | 2.12 / 2.71 s | 2.25 / 2.89 s (unchanged: one shared parse already) |
+    | `lambda_delivery_evidence.py`, 09-21 + 09-23 | 39.99 s (78 parses, 35.22 s) | 8.09 s (78 parses, 2.16 s) |
+    | same, `--fit-enrichment-delay` over 12 captures | 149.3 s, 466 MB | 54.1 s, 455 MB |
+    | `compare_channels` `decoded:ECM_RPM`/`obd:RPM`, drive (earlier pair, load ~2) | 18.5 s, clock 1.47 s | 18.7 s, clock 0.62 s |
+
+    The call count is unchanged; each call now parses only its own rows.
+  - **Tests** (`tests/test_channels_raw_read.py`):
+    - `test_a_frame_read_spec_by_spec_is_exactly_the_whole_frame_read`, 4
+      cases: drive and capture slices, both clocks, every spec `_specs`
+      builds, against an un-narrowed read, `attrs` included. It also checks
+      that the caller's frame is untouched.
+    - `test_reading_one_frame_spec_by_spec_parses_each_row_once_at_most`:
+      N single-spec calls on the capture slice's polled frame parse at most
+      the frame's rows in total. At HEAD it fails: every call parsed all
+      23,308 rows.
+    - `_unfiltered`, the P02.2 reference, now also disables the narrowing,
+      so the filtered-equals-whole test checks path reads against an
+      un-narrowed whole read.
+    - `tests/slow_tests.txt`: added the three new cases over 1.5 s (2.1-3.1 s
+      serially).
 
 ## Tracked elsewhere
 
