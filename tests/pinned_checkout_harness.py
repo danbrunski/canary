@@ -30,8 +30,6 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
-_REPO = Path(__file__).resolve().parents[1]
-
 #: The JSON file holding the pinned values (first-seen wins).
 PIN_ENV = "CANARY_TEST_SCORE_KEY_PINS"
 
@@ -59,8 +57,6 @@ def install() -> Any:
     """Patch the harness in *this* process (the script's own, or a scoring
     worker's); never called on import, so a test process importing the
     constants above leaves the harness module alone. Returns the module."""
-    if str(_REPO) not in sys.path:
-        sys.path.insert(0, str(_REPO))
     import scripts.evaluate_detectors as harness
 
     real_key_inputs = harness.key_inputs

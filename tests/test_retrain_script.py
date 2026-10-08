@@ -875,6 +875,9 @@ def test_run_benchmark_gate_runs_the_evaluation_protocol_and_discovers_prior_bas
     pins = tmp_path / "key-pins.json"
     monkeypatch.setattr(retrain, "EVALUATE_DETECTORS_SCRIPT", PINNED_HARNESS)
     monkeypatch.setenv(PIN_ENV, str(pins))
+    # The helper runs from tests/, so `scripts.evaluate_detectors` (not an
+    # installed package) needs the repo on the child's path; no sys.path edit.
+    monkeypatch.setenv("PYTHONPATH", str(PINNED_HARNESS.resolve().parents[1]))
 
     config = example_config(EXAMPLE_YAML)
     # A sequence detector disabled in config is not scored (the gate would
