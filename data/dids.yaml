@@ -2997,12 +2997,26 @@ memory:
       - session: firmware-ZS44A-20260920
         method: disassembly
         finding: >
-          Bit 6 is the High Det latch (UpRev's "HI DET"). It latches from
+          Bit 6 is the High Det latch (UpRev's "HI DET"). It sets from
           EITHER the knock-sensor fault flag (mem:ECM_KS_FAULT_FLAGS bit 7)
           OR the accumulated-knock metric (mem:ECM_KNOCK_HIGHDET_METRIC)
-          crossing +8192, so a set bit is not by itself a fault: it is normal
-          protection when the fault flag is clear. 0xFFFF2840 is the previous
-          cycle's copy.
+          falling to [0x8E94] or below, so a set bit is not by itself a fault:
+          it is normal protection when the fault flag is clear. 0xFFFF2840 is
+          the previous cycle's copy.
+      - session: firmware-ZS44A-20261004
+        method: disassembly
+        finding: >
+          Corrected 2026-10-08 (firmware session, ~/ecu-re/NOTES.md "0xFFFF283F
+          bit 6"; the earlier "+8192 crossing" had the set side reversed). In
+          the knock task FUN_0004a2e8, gated on 0xFFFF2876 bit 6 set and
+          0xFFFF4782 bit 5 clear (neither identified): while 479D bit 7 is set
+          the latch sets every pass (0x4A990); otherwise a set latch clears
+          when 0x1400 > [0x8E92] = +8192 (0x4A986/98A) and a clear one sets
+          when 0x1400 <= [0x8E94] = -8192 (0x4A950/954). Outside the gate, and
+          at init (FUN_0002d5f4, 0x2DC0C), bit 6 is written from [0x86DE]
+          bit 7, which is clear in ZS44A-20260920/20261004, so the latch
+          clears. The 479D.7 path holds until 0x1400 > +8192, the gate drops
+          or init; not to a key cycle as such.
       - session: firmware-ZS44A-20260920
         method: disassembly
         finding: >
@@ -3017,10 +3031,13 @@ memory:
       timing-trim selector. Read it before any timing-trim edit (N01.2) to
       know which table is running.
 
-      Known answer, not declared as a relation: if bit 6 is set while
-      mem:ECM_KS_FAULT_FLAGS bit 7 is clear, HI DET came from accumulated
-      knock (mem:ECM_KNOCK_HIGHDET_METRIC crossed 8192), not a fault. The
-      latch may outlive the metric; see that channel's notes.
+      Deliberately no relation (2026-10-08). With 479D bit 7 clear and the
+      gate on, the code implies "bit 6 clear => 0x1400 > -8192" and "bit 6
+      set => 0x1400 <= +8192" within one pass. But the gate bits (2876.6,
+      4782.5) are unidentified, and 0x1400 cannot share a window with 0x283F,
+      so the two reads are never same-instant and a skewed pair near either
+      threshold would fail a correct address. Revisit if the gate bits are
+      identified and a margin-refusing relation kind exists.
   - name: ECM_PEDAL_ENRICH_FLAGS
     address: 0xFFFF2841
     length: 1
@@ -3409,19 +3426,18 @@ memory:
       - session: firmware-ZS44A-20260920
         method: disassembly
         finding: >
-          s16, unitless: the accumulated-knock metric. Crossing +8192 (with
-          hysteresis) latches the HI DET bit, mem:ECM_HIGH_DET_FLAGS bit 6,
-          which also switches the timing trim to the High Det table.
+          s16, unitless: the accumulated-knock metric. Falling to -8192
+          ([0x8E94]) or below sets the HI DET bit, mem:ECM_HIGH_DET_FLAGS bit
+          6, which also switches the timing trim to the High Det table; rising
+          above +8192 ([0x8E92]) clears it (corrected 2026-10-08, see
+          ECM_HIGH_DET_FLAGS).
     notes: >
       One of the knock-fault reads (poll it slowly, about 1 Hz). Placed in
       the knock_target window because it is the next word: when both are
       selected one 4-byte read returns them together, at no extra bus cost.
-      Known answer, not declared as a relation: HI DET set with
-      mem:ECM_KS_FAULT_FLAGS bit 7 clear means this metric crossed 8192.
-      "Crossed" is the point. Bit 6 is a latch, and whether it outlives the
-      metric falling back under 8192 is not traced, so a relation on the
-      current value ("=> >= 8192 now") could fail a correct address. Settle
-      that first, at the key-on read.
+      No relation declared against HI DET (2026-10-08): the latch has
+      +-8192 hysteresis under two unidentified gate bits, and this word and
+      0x283F are never read in one window; see ECM_HIGH_DET_FLAGS.
   # The whole-degree retard and its limit ride the existing fuel_target
   # window, which becomes one 57-byte read 0xFFFF26AE-26E6 when they are
   # selected with it (63-byte ceiling). Stamped ZS44A-k106 to match that

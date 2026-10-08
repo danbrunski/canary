@@ -2746,9 +2746,11 @@ live here now, so the documents could be archived
       *Operator decision 2026-10-08: keep the provisional λ tolerance (3 %,
       min_agreement 0.70) and `ECM_KNOCK_RETARD_DEG`'s cross-read 0.90, and
       adjust them from the key-on read.* The 0x283F bit 6 ⇒ 0x1400 relation
-      stays undeclared until the firmware session names the writer that
-      clears the latch and the hysteresis constant [0x8E94] (asked
-      2026-10-08).
+      is not declared: the firmware session (2026-10-08) found the latch sets
+      at 0x1400 <= -8192 and clears above +8192 only while two unidentified
+      gate bits (2876.6, 4782.5) allow it, and 0x1400 and 0x283F cannot be
+      read in one window, so a hard relation would fail correct addresses
+      near the thresholds (catalog notes on `ECM_HIGH_DET_FLAGS`).
     - `ECM_AF_LEARNED_OFFSET_B1`/`B2`: ±500.
 
     Every `fuel_target` member is now checkable, so a passing read restamps
