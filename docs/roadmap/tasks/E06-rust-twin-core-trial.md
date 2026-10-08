@@ -230,15 +230,38 @@ does no bus, disk or network I/O, and has no dependency on Python objects.
     - Against E04.3: one-tuple calls are far inside ≤1 ms p99 / ≤5 ms max on
       both backends. The 4,096-tuple worst batch misses p99 in Rust (2.2 ms)
       and both limits in Python (83 ms).
-  - *Not done by the implementer:* the Pi run. The implementer role is
-    offline-only, so it does not ssh. The orchestrator or operator runs:
-    `git archive <commit with this work> rust src tests tools scripts data pyproject.toml | ssh canary@canary.local 'mkdir -p ~/e06-work && tar -xf - -C ~/e06-work'`,
-    then `ssh canary@canary.local 'bash ~/e06-work/scripts/e06_pi_bench.sh'`
-    (about 1 minute on the laptop, several on the Pi). The results land in
-    `~/e06-work/results/{build,pi}-<stamp>.json`. `cargo fetch` needs the
-    Pi's Wi-Fi uplink, or vendor the crates from the laptop.
-    `E06_SESSION` names a stored capture; the default is the Pi's copy of
-    the October 4 ram-study capture, used when present.
+  - **Pi run, done 2026-10-08** (Pi 5, Debian 13 aarch64, parked, no
+    capture, state re-read after the run: still parked). Ran from a
+    `git archive 870870a` copy in `~/e06-work`, never the daemon checkout or
+    venv. Raw results: `data/analyses/2026-10-08-e06-3-pi-bench.json` and
+    `…-pi-build.json`.
+    - Toolchain (operator approved the install 2026-10-08): rustup, rustc
+      and cargo 1.93.1 (same as the laptop) in `~canary/.cargo`; maturin
+      1.15.0 in `~/e06-build-venv`; PyO3 0.27.2 (abi3-py312); daemon
+      Python 3.13.5. `nice -n 19` clean release build 21.3 s; wheel
+      `canary_ecu_twin-0.1.0-cp312-abi3-manylinux_2_34_aarch64.whl`
+      306,479 B, `.so` 761,920 B; no RUSTFLAGS, workspace release defaults.
+    - Parity on the Pi: identical on every set (contract vectors, the
+      committed real fixture, the stored Oct 4 session, 20,000 random tuples
+      over the real table); 0 mismatches.
+    - Latency (µs, p50 / p99 / max): Rust `word` 1 tuple p99 0.61, max 17.9;
+      Rust `command` (full trace) p99 3.5, max 19.5; Python `predict` (today's
+      path) p99 13.1, max 82.6. Batches of 4,096: Rust `word_batch` 581 /
+      604 / 613 (convert 253, compute 210, return 110 at p50); a Python loop
+      35,227 / 36,172 / 36,172.
+    - Throughput (tuples/s): Python `target_command` 117 k; Rust `word`
+      4.8 M, `command` 334 k, `word_batch` 7.1 M.
+    - Startup and memory: the extension adds 2.8 ms to a fresh interpreter
+      (the Python reference path adds 34.6 ms). RSS: import plus table
+      +576 KiB; table footprint 160 B; 0 KiB growth from 500 to 1,000
+      batches of 4,096.
+    - Against E04.3: every Rust case, including the worst supported batch,
+      is inside ≤1 ms p99 and ≤5 ms max; state is far under 1 MiB. Python
+      single-tuple calls also pass; the Python 4,096 loop fails both.
+    - This does not close E06.3: the under-load arms below are still owed,
+      and the stored twin path hands the kernel no tuple today (all 174 Oct
+      4 candidates unevaluable), so these timings bound a kernel the live
+      twin does not yet reach.
   - *Owed under load (protocol):* missed ticks and collector loss under
     representative collection load. Two things gate it:
     - **The twin must actually call its kernel.** It needs a capture whose

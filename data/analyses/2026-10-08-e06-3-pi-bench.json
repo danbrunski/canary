@@ -1,0 +1,472 @@
+{
+  "budget_e04_3": {
+    "python loop (4096)": {
+      "max_ok": false,
+      "max_us": 36172.375,
+      "p99_ok": false,
+      "p99_us": 36172.375
+    },
+    "python_predict (1 tuple, today's path)": {
+      "max_ok": true,
+      "max_us": 82.574,
+      "p99_ok": true,
+      "p99_us": 13.148
+    },
+    "rust_command (1 tuple, full trace)": {
+      "max_ok": true,
+      "max_us": 19.499,
+      "p99_ok": true,
+      "p99_us": 3.537
+    },
+    "rust_word (1 tuple)": {
+      "max_ok": true,
+      "max_us": 17.852,
+      "p99_ok": true,
+      "p99_us": 0.612
+    },
+    "rust_word_batch (4096, worst supported)": {
+      "max_ok": true,
+      "max_us": 613.072,
+      "p99_ok": true,
+      "p99_us": 604.313
+    },
+    "state_bytes": {
+      "rss_import_plus_table_bytes": 589824,
+      "rss_ok": true,
+      "rss_steady_growth_bytes": 0,
+      "table_footprint_bytes": 160,
+      "table_ok": true
+    }
+  },
+  "build": {
+    "build_seconds": 21.3,
+    "cargo": "cargo 1.93.1 (083ac5135 2025-12-15)",
+    "command": "nice -n 19 maturin build --release -m rust/ecu_twin_py/Cargo.toml (clean target dir)",
+    "daemon_python": "Python 3.13.5 (main, Aug 10 2026, 12:06:59) [GCC 14.2.0]",
+    "flags": {
+      "RUSTFLAGS": null,
+      "profile": "release (workspace defaults: opt-level 3, no LTO, codegen-units 16, overflow-checks off, debug-assertions off)",
+      "pyo3_features": [
+        "extension-module",
+        "abi3-py312"
+      ]
+    },
+    "maturin": "maturin 1.15.0",
+    "pyo3": "0.27.2",
+    "rustc": "rustc 1.93.1 (01f6ddf75 2026-02-11)\nbinary: rustc\ncommit-hash: 01f6ddf7588f42ae2d7eb0a2f21d44e8e96674cf\ncommit-date: 2026-02-11\nhost: aarch64-unknown-linux-gnu\nrelease: 1.93.1\nLLVM version: 21.1.8",
+    "unpacked_so_bytes": 761920,
+    "wheel": "canary_ecu_twin-0.1.0-cp312-abi3-manylinux_2_34_aarch64.whl",
+    "wheel_bytes": 306479
+  },
+  "environment": {
+    "board": "Raspberry Pi 5 Model B Rev 1.1",
+    "cpus": 4,
+    "extension": {
+      "BACKEND": "rust",
+      "BUILD_PROFILE": "release",
+      "CONTRACT_VERSION": 1,
+      "CRATE_VERSION": "0.1.0",
+      "KERNEL_VERSION": 1,
+      "MAX_BATCH": 4096,
+      "STATE_MODEL_VERSION": 1
+    },
+    "extension_path": "/home/canary/e06-work/bench-venv/lib/python3.13/site-packages/canary_ecu_twin/__init__.py",
+    "host": "canary",
+    "machine": "aarch64",
+    "platform": "Linux-6.18.50+rpt-rpi-2712-aarch64-with-glibc2.41",
+    "python": "3.13.5",
+    "python_implementation": "CPython"
+  },
+  "latency_us": {
+    "batch": {
+      "1": {
+        "per_tuple_p50": {
+          "python_target_command_loop": 8.704,
+          "rust_word_batch": 0.704
+        },
+        "python_target_command_loop": {
+          "max": 25.018,
+          "mean": 8.76507205,
+          "n": 20000,
+          "p50": 8.704,
+          "p95": 8.815,
+          "p99": 9.092
+        },
+        "rust_compute": {
+          "max": 5.278,
+          "mean": 0.10457685,
+          "n": 20000,
+          "p50": 0.111,
+          "p95": 0.129,
+          "p99": 0.13
+        },
+        "rust_convert": {
+          "max": 16.908,
+          "mean": 0.3912689,
+          "n": 20000,
+          "p50": 0.389,
+          "p95": 0.407,
+          "p99": 0.408
+        },
+        "rust_return": {
+          "max": 15.87,
+          "mean": 0.26777195,
+          "n": 20000,
+          "p50": 0.26,
+          "p95": 0.278,
+          "p99": 0.278
+        },
+        "rust_word_batch": {
+          "max": 14.834,
+          "mean": 0.70936925,
+          "n": 20000,
+          "p50": 0.704,
+          "p95": 0.723,
+          "p99": 0.723
+        },
+        "sum_of_parts_p50": 0.927
+      },
+      "16": {
+        "per_tuple_p50": {
+          "python_target_command_loop": 8.6585625,
+          "rust_word_batch": 0.179375
+        },
+        "python_target_command_loop": {
+          "max": 200.203,
+          "mean": 139.74687659999998,
+          "n": 20000,
+          "p50": 138.537,
+          "p95": 151.222,
+          "p99": 168.074
+        },
+        "rust_compute": {
+          "max": 15.962,
+          "mean": 0.7652993,
+          "n": 20000,
+          "p50": 0.759,
+          "p95": 0.778,
+          "p99": 0.796
+        },
+        "rust_convert": {
+          "max": 16.74,
+          "mean": 1.47393155,
+          "n": 20000,
+          "p50": 1.463,
+          "p95": 1.5,
+          "p99": 1.5
+        },
+        "rust_return": {
+          "max": 17.315,
+          "mean": 0.67096345,
+          "n": 20000,
+          "p50": 0.667,
+          "p95": 0.686,
+          "p99": 0.741
+        },
+        "rust_word_batch": {
+          "max": 19.26,
+          "mean": 2.89201175,
+          "n": 20000,
+          "p50": 2.87,
+          "p95": 2.963,
+          "p99": 3.037
+        },
+        "sum_of_parts_p50": 3.056
+      },
+      "256": {
+        "per_tuple_p50": {
+          "python_target_command_loop": 8.61809375,
+          "rust_word_batch": 0.14141796875
+        },
+        "python_target_command_loop": {
+          "max": 2442.823,
+          "mean": 2214.4525256410257,
+          "n": 312,
+          "p50": 2206.232,
+          "p95": 2283.417,
+          "p99": 2290.454
+        },
+        "rust_compute": {
+          "max": 25.463,
+          "mean": 12.2826808,
+          "n": 1250,
+          "p50": 12.223,
+          "p95": 12.278,
+          "p99": 12.351
+        },
+        "rust_convert": {
+          "max": 30.574,
+          "mean": 16.848851999999997,
+          "n": 1250,
+          "p50": 16.759,
+          "p95": 17.056,
+          "p99": 17.463
+        },
+        "rust_return": {
+          "max": 21.277,
+          "mean": 7.1079784,
+          "n": 1250,
+          "p50": 7.0,
+          "p95": 7.685,
+          "p99": 7.759
+        },
+        "rust_word_batch": {
+          "max": 52.685,
+          "mean": 36.4576768,
+          "n": 1250,
+          "p50": 36.203,
+          "p95": 36.667,
+          "p99": 48.685
+        },
+        "sum_of_parts_p50": 36.149
+      },
+      "4096": {
+        "per_tuple_p50": {
+          "python_target_command_loop": 8.600312255859375,
+          "rust_word_batch": 0.141894775390625
+        },
+        "python_target_command_loop": {
+          "max": 36172.375,
+          "mean": 35316.719280000005,
+          "n": 50,
+          "p50": 35226.879,
+          "p95": 36148.727,
+          "p99": 36172.375
+        },
+        "rust_compute": {
+          "max": 224.259,
+          "mean": 211.170375,
+          "n": 200,
+          "p50": 210.259,
+          "p95": 222.258,
+          "p99": 223.832
+        },
+        "rust_convert": {
+          "max": 273.962,
+          "mean": 254.848425,
+          "n": 200,
+          "p50": 253.147,
+          "p95": 266.054,
+          "p99": 271.277
+        },
+        "rust_return": {
+          "max": 125.796,
+          "mean": 110.36217500000001,
+          "n": 200,
+          "p50": 109.833,
+          "p95": 112.555,
+          "p99": 124.018
+        },
+        "rust_word_batch": {
+          "max": 613.072,
+          "mean": 583.4417900000001,
+          "n": 200,
+          "p50": 581.201,
+          "p95": 597.479,
+          "p99": 604.313
+        },
+        "sum_of_parts_p50": 573.406
+      }
+    },
+    "parts": {
+      "detach_attach_call": {
+        "max": 15.851,
+        "mean": 0.28742805,
+        "n": 20000,
+        "p50": 0.278,
+        "p95": 0.315,
+        "p99": 0.315
+      },
+      "noop_call": {
+        "max": 16.629,
+        "mean": 0.11804465,
+        "n": 20000,
+        "p50": 0.111,
+        "p95": 0.13,
+        "p99": 0.13
+      }
+    },
+    "single": {
+      "python_predict": {
+        "max": 82.574,
+        "mean": 11.2060841,
+        "n": 20000,
+        "p50": 11.037,
+        "p95": 11.87,
+        "p99": 13.148
+      },
+      "python_target_command": {
+        "max": 49.425,
+        "mean": 9.111780699999999,
+        "n": 20000,
+        "p50": 8.871,
+        "p95": 9.648,
+        "p99": 11.889
+      },
+      "python_uprev_step": {
+        "max": 47.204,
+        "mean": 4.4921466,
+        "n": 20000,
+        "p50": 4.463,
+        "p95": 4.518,
+        "p99": 4.593
+      },
+      "rust_command": {
+        "max": 19.499,
+        "mean": 3.2674369000000003,
+        "n": 20000,
+        "p50": 3.223,
+        "p95": 3.426,
+        "p99": 3.537
+      },
+      "rust_uprev_step": {
+        "max": 21.203,
+        "mean": 1.45906325,
+        "n": 20000,
+        "p50": 1.444,
+        "p95": 1.482,
+        "p99": 1.574
+      },
+      "rust_word": {
+        "max": 17.852,
+        "mean": 0.5434557999999999,
+        "n": 20000,
+        "p50": 0.537,
+        "p95": 0.592,
+        "p99": 0.612
+      },
+      "rust_word_batch_1": {
+        "max": 20.204,
+        "mean": 0.9677331,
+        "n": 20000,
+        "p50": 0.963,
+        "p95": 1.019,
+        "p99": 1.075
+      }
+    }
+  },
+  "parity": {
+    "identical": true,
+    "random_over_real_table": {
+      "branches": {
+        "ordinary": 10032,
+        "override": 9968
+      },
+      "distinct": 19996,
+      "gate_band": 1,
+      "mismatches": 0,
+      "python_sha256": "52ac1d1c405340bf66d7137cae2a0f1e664273165454e8b4d500ea548ff9bd71",
+      "rust_sha256": "52ac1d1c405340bf66d7137cae2a0f1e664273165454e8b4d500ea548ff9bd71",
+      "tuples": 20000
+    },
+    "real_ground_truth_fixture": {
+      "branches": {
+        "ordinary": 557,
+        "override": 6
+      },
+      "distinct": 291,
+      "gate_band": 1,
+      "mismatches": 0,
+      "python_sha256": "d575ec11b1e315c4a8e42d139496e99e483aa887ece0c32a770da061a8558787",
+      "rust_sha256": "d575ec11b1e315c4a8e42d139496e99e483aa887ece0c32a770da061a8558787",
+      "tuples": 563,
+      "twin_kernel_calls": 0
+    },
+    "real_session": {
+      "branches": {
+        "ordinary": 557,
+        "override": 6
+      },
+      "distinct": 291,
+      "gate_band": 1,
+      "mismatches": 0,
+      "python_sha256": "d575ec11b1e315c4a8e42d139496e99e483aa887ece0c32a770da061a8558787",
+      "rust_sha256": "d575ec11b1e315c4a8e42d139496e99e483aa887ece0c32a770da061a8558787",
+      "session": "_capture-ram-study-2026-10-04T204557",
+      "tuples": 563,
+      "twin_kernel_calls": 0
+    },
+    "vectors": {
+      "lookup": {
+        "first_mismatches": [],
+        "mismatches": 0,
+        "python_differs_from_committed": 0,
+        "python_sha256": "8f0145d10762b24ee0c8cf9d2c611e3f7429a67bb2c5f2a28171884034c7da2b",
+        "rust_sha256": "8f0145d10762b24ee0c8cf9d2c611e3f7429a67bb2c5f2a28171884034c7da2b",
+        "vectors": 4160
+      },
+      "state": {
+        "first_mismatches": [],
+        "mismatches": 0,
+        "python_differs_from_committed": 0,
+        "python_sha256": "f2c0c111d93856699961a5c65d6acba290427aa8ab5899d596c440bcd118c566",
+        "rust_sha256": "f2c0c111d93856699961a5c65d6acba290427aa8ab5899d596c440bcd118c566",
+        "vectors": 1242
+      }
+    }
+  },
+  "startup_and_memory": {
+    "import_added_ms_median": {
+      "ext": 2.8190809998704935,
+      "python_reference": 34.58406599929731
+    },
+    "interpreter_wall_ms": {
+      "bare": {
+        "max": 15.582123000058345,
+        "median": 14.067371000237472,
+        "runs": 15
+      },
+      "ext": {
+        "max": 21.695303000342392,
+        "median": 16.886452000107965,
+        "runs": 15
+      },
+      "python_reference": {
+        "max": 54.09367500033113,
+        "median": 48.65143699953478,
+        "runs": 15
+      }
+    },
+    "probes": {
+      "ext": {
+        "footprint_bytes": 160,
+        "import_s": 0.0006709790004606475,
+        "kind": "ext",
+        "rss_kib": {
+          "after_1000_max_batches": 20960,
+          "after_500_max_batches": 20960,
+          "after_import": 20448,
+          "after_table": 20464,
+          "start": 19888
+        }
+      },
+      "none": {
+        "footprint_bytes": null,
+        "import_s": 0.0,
+        "kind": "none",
+        "rss_kib": {
+          "start": 19904
+        }
+      },
+      "python": {
+        "footprint_bytes": null,
+        "import_s": 0.01472036700033641,
+        "kind": "python",
+        "rss_kib": {
+          "after_4096_calls": 21696,
+          "after_8192_calls": 21712,
+          "after_import": 21376,
+          "after_table": 21376,
+          "start": 19904
+        }
+      }
+    }
+  },
+  "throughput_tuples_per_s": {
+    "python_target_command": 117365,
+    "rust_command": 333734,
+    "rust_word": 4790846,
+    "rust_word_batch_max": 7110465,
+    "tuples": 100000
+  }
+}
