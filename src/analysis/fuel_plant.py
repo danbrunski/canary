@@ -45,6 +45,7 @@ Vehicle facts live in the profile's ``fuel_plant.yaml``; this module is generic.
 
 from __future__ import annotations
 
+import functools
 import hashlib
 import json
 import math
@@ -52,7 +53,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import date
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 
 import numpy as np
 import yaml
@@ -89,11 +90,32 @@ PLANT_READS: tuple[str, ...] = (
 FloatArray = NDArray[np.float64]
 
 #: Quantities another plant stage owns (E07.5's contract) that this plant
-#: computes for itself: MAP by frozen steady speed density, capped at baro
-#: (:func:`manifold_pressure_speed_density`). The contract declares it as
-#: ``fuel_delivery.internal_models``; ``engine_dynamics.check_internal_models``
-#: holds the two lists equal. Reconciling it is owed by the next plant_version.
+#: computes for itself: MAP by steady speed density, in every plant version.
+#: The contract declares it as ``fuel_delivery.internal_models`` (one entry
+#: per model form, naming its plant versions); ``engine_dynamics.
+#: check_internal_models`` holds the two lists equal and checks each version's
+#: profile against the invariants its entry declares (:data:`MANIFOLD_MODELS`).
 COMPUTES_INTERNALLY: tuple[str, ...] = ("manifold_pressure",)
+
+#: How a plant version computes MAP, and the owner's invariants each form holds.
+#:
+#: * ``speed_density_capped`` (fuel-mv-1, frozen): one working VE, MAP capped
+#:   at baro where the steady manifold would exceed it -- silently, so it holds
+#:   no invariant of the ``manifold_breathing`` stage.
+#: * ``speed_density_refusing`` (E07.5 reconciliation): VE(rpm) from the
+#:   baseline's fitted curve, and a sample whose steady MAP would exceed baro is
+#:   NaN with ``manifold_above_ambient`` -- the stage's own refusal, never a cap.
+ManifoldModel = Literal["speed_density_capped", "speed_density_refusing"]
+MANIFOLD_MODELS: dict[str, tuple[str, ...]] = {
+    "speed_density_capped": (),
+    "speed_density_refusing": ("manifold_at_or_below_ambient",),
+}
+#: Per-sample MAP refusals of ``speed_density_refusing``, by name.
+MAP_ABOVE_AMBIENT = "manifold_above_ambient"
+MAP_OUTSIDE_VE_FIT = "outside_ve_fit"
+#: Relative rounding allowed in MAP <= baro: the fitted envelope's own read
+#: reproduces baro only to floating-point rounding.
+AMBIENT_ROUNDING = 1e-9
 
 
 class _Strict(BaseModel):
@@ -232,6 +254,82 @@ class ParameterRegistry(_Strict):
         raise KeyError(parameter_id)
 
 
+class VeCurve(_Strict):
+    """VE by rpm band, as fitted (``fuel_plant_eval.identify_ve``) and frozen
+    in a baseline.
+
+    ``envelope`` is the largest steady warm charge fraction (MAF over the
+    ambient fill) any identification read reached in the band: on a naturally
+    aspirated engine ``VE >= charge fraction`` on every read, so the envelope
+    is the smallest VE the identification drives allow, and equals VE where
+    they reached full breathing. ``None``: fewer reads than the rule's
+    ``min_reads``. Run at ``max(envelope, floor)``, the floor being the
+    registry's working VE, so a band the drives never filled runs at the
+    declared assumption, not at a part-throttle read.
+    """
+
+    rpm_edges: list[float] = Field(min_length=2)
+    envelope: list[float | None]
+    n_reads: list[int]
+    #: The baro and intake-temperature ranges of the reads the fit used. The
+    #: curve is not extrapolated: a read outside either is ``outside_ve_fit``.
+    #: Baro, because the intake's pressure losses (inside a VE referenced to
+    #: ambient) scale with the pressure ratio and the corpus spans 63-101 kPa.
+    #: IAT, because on this kind of intake the sensor tracks airflow (it is
+    #: stagnation-heated, not the charge temperature), so the ideal-gas fill
+    #: does not divide the charge density out and the fit holds only where
+    #: its reads were.
+    baro_kpa: tuple[float, float]
+    iat_c: tuple[float, float]
+
+    @model_validator(mode="after")
+    def _bands(self) -> VeCurve:
+        e = self.rpm_edges
+        if any(b <= a for a, b in zip(e, e[1:], strict=False)) or e[0] <= 0:
+            raise ValueError("rpm_edges are positive and strictly increasing")
+        if not len(self.envelope) == len(self.n_reads) == len(e) - 1:
+            raise ValueError("one envelope value and one read count per rpm band")
+        for lo, hi in (self.baro_kpa, self.iat_c):
+            if not lo <= hi:
+                raise ValueError(f"empty range [{lo}, {hi}]")
+        for v in self.envelope:
+            if v is not None and not 0.0 < v <= 1.0:
+                raise ValueError(
+                    f"envelope {v} is not a naturally aspirated VE: a steady charge fraction "
+                    "above 1 says the airflow boundary is wrong, not that VE is"
+                )
+        return self
+
+    def bounds(self) -> dict[str, tuple[float, float]]:
+        """Where the fit holds, keyed by contract quantity (what the contract's
+        ``parameter_fits`` must declare, checked by
+        ``engine_dynamics.check_internal_models``)."""
+        return {
+            "engine_speed": (self.rpm_edges[0], self.rpm_edges[-1]),
+            "barometric_pressure": (float(self.baro_kpa[0]), float(self.baro_kpa[1])),
+            "intake_air_temperature": (float(self.iat_c[0]), float(self.iat_c[1])),
+        }
+
+    def ve(self, rpm: ArrayLike, floor: float) -> FloatArray:
+        """VE per sample; NaN outside the fitted rpm range (never extrapolated)."""
+        r = _f(rpm)
+        edges = np.asarray(self.rpm_edges, dtype=float)
+        band = np.clip(np.searchsorted(edges, r, side="right") - 1, 0, len(edges) - 2)
+        per_band = np.array([floor if v is None else max(v, floor) for v in self.envelope])
+        inside = (r >= edges[0]) & (r <= edges[-1])
+        return np.where(inside, per_band[band], np.nan)
+
+
+class VeFitRule(_Strict):
+    """How a ``speed_density_refusing`` plant fits VE(rpm), declared before the fit."""
+
+    form: Literal["rpm_envelope"]
+    rpm_edges: list[float] = Field(min_length=2)
+    #: Steady warm reads a band needs before its envelope counts.
+    min_reads: int = Field(ge=1)
+    evidence: str = Field(min_length=1)
+
+
 class BaselineParameterSet(_Strict):
     """The identified hardware values, frozen before evaluation.
 
@@ -252,6 +350,9 @@ class BaselineParameterSet(_Strict):
     method: str = Field(min_length=1)
     #: What the fit reported, for the record (counts, spreads).
     fit_summary: dict[str, float | int | str] = Field(default_factory=dict)
+    #: The fitted VE(rpm) of a ``speed_density_refusing`` plant. Absent (and
+    #: left out of the hash) for every other plant, so fuel-mv-1's sha holds.
+    ve_curve: VeCurve | None = None
 
     @model_validator(mode="after")
     def _intervals(self) -> BaselineParameterSet:
@@ -263,7 +364,10 @@ class BaselineParameterSet(_Strict):
         return self
 
     def sha256(self) -> str:
-        canonical = json.dumps(self.model_dump(mode="json"), sort_keys=True)
+        data = self.model_dump(mode="json")
+        if self.ve_curve is None:
+            del data["ve_curve"]
+        canonical = json.dumps(data, sort_keys=True)
         return hashlib.sha256(canonical.encode()).hexdigest()
 
 
@@ -334,15 +438,24 @@ class Split(_Strict):
     """Recordings for identification and held-out evaluation, declared first."""
 
     identification: list[str] = Field(min_length=1)
-    held_out: list[str] = Field(min_length=1)
+    held_out: list[str] = Field(default_factory=list)
     declared_on: date
     evidence: str = Field(min_length=1)
+    #: Why no held-out recording is declared yet (every candidate is spent, say).
+    #: Required exactly when ``held_out`` is empty; such a plant is never
+    #: qualified (:func:`plant_qualification`).
+    held_out_pending: str | None = None
 
     @model_validator(mode="after")
     def _disjoint(self) -> Split:
         both = sorted(set(self.identification) & set(self.held_out))
         if both:
             raise ValueError(f"recordings in both identification and held-out: {both}")
+        if (not self.held_out) != (self.held_out_pending is not None):
+            raise ValueError(
+                "held_out_pending names why no held-out recording is declared, and is "
+                "given only then"
+            )
         return self
 
 
@@ -430,6 +543,10 @@ class PulseChain(_Strict):
 class FuelPlantProfile(_Strict):
     schema_version: Literal[1]
     plant_version: str = Field(min_length=1)
+    #: How this version computes MAP (:data:`MANIFOLD_MODELS`).
+    manifold_model: ManifoldModel = "speed_density_capped"
+    #: The VE(rpm) fit rule; required by, and only by, ``speed_density_refusing``.
+    volumetric_efficiency: VeFitRule | None = None
     #: A labelled synthetic plant (tests and demonstrations): it is identified
     #: and scored only on ``_sim-*`` traces, and a real plant refuses them
     #: (``fuel_plant_eval``'s ``synthetic_as_observed``).
@@ -472,7 +589,25 @@ class FuelPlantProfile(_Strict):
             )
         if self.specs.reference_phi not in commands:
             raise ValueError("reference_phi must be one of the declared command_specs")
+        refusing = self.manifold_model == "speed_density_refusing"
+        if refusing != (self.volumetric_efficiency is not None):
+            raise ValueError(
+                "volumetric_efficiency (the VE fit rule) is declared by, and only by, a "
+                "speed_density_refusing plant"
+            )
         if self.baseline is not None:
+            curve = self.baseline.ve_curve
+            if refusing and (
+                curve is None
+                or self.volumetric_efficiency is None
+                or curve.rpm_edges != self.volumetric_efficiency.rpm_edges
+            ):
+                raise ValueError(
+                    "a speed_density_refusing baseline freezes its ve_curve on the declared "
+                    "rpm_edges"
+                )
+            if not refusing and curve is not None:
+                raise ValueError(f"{self.manifold_model} runs one working VE; no ve_curve")
             if self.baseline.plant_version != self.plant_version:
                 raise ValueError("baseline was identified on another plant_version")
             if self.baseline.hardware_configuration != self.hardware_configuration:
@@ -506,16 +641,137 @@ class FuelPlantProfile(_Strict):
                 f"spent_held_out: {spent_elsewhere} were already scored under another baseline "
                 "or plant_version; a revised plant needs never-scored held-out drives"
             )
+        # This baseline's own scorings are of its declared held-out drives only:
+        # a verdict recorded on anything else cannot stand in for them.
+        stray = sorted(
+            r.recording
+            for r in self.spent_held_out
+            if (r.baseline_sha256, r.plant_version) == current
+            and r.recording not in self.split.held_out
+        )
+        if stray:
+            raise ValueError(
+                f"spent_held_out: {stray} are recorded against this baseline but are not in "
+                "split.held_out"
+            )
         return self
 
     def spent(self) -> dict[str, SpentRecord]:
         return {r.recording: r for r in self.spent_held_out}
 
 
-def load_fuel_plant(profile_dir: Path) -> tuple[FuelPlantProfile, str]:
-    """The profile's plant declaration and the sha256 of its file."""
-    text = (profile_dir / PLANT_FILE).read_bytes()
-    return FuelPlantProfile.model_validate(yaml.safe_load(text)), hashlib.sha256(text).hexdigest()
+@functools.lru_cache(maxsize=32)
+def _parsed(text: bytes) -> Any:
+    """One parse per distinct file content (every load reads its siblings'
+    ledgers too). Read-only: callers validate, never mutate."""
+    return yaml.safe_load(text)
+
+
+def plant_files(profile_dir: Path) -> dict[str, Path]:
+    """Every fuel-plant declaration in the profile (``fuel_plant*.yaml``), by
+    the ``plant_version`` it declares. Two files declaring one version are
+    refused: a version is one frozen thing."""
+    out: dict[str, Path] = {}
+    for path in sorted(profile_dir.glob("fuel_plant*.yaml")):
+        raw = _parsed(path.read_bytes())
+        version = raw.get("plant_version") if isinstance(raw, dict) else None
+        if not isinstance(version, str):
+            continue
+        if version in out:
+            raise FuelPlantRefusalError(
+                "plant_version_twice", f"{out[version].name} and {path.name} both declare {version}"
+            )
+        out[version] = path
+    return out
+
+
+def load_fuel_plant(
+    profile_dir: Path, plant_version: str | None = None
+) -> tuple[FuelPlantProfile, str]:
+    """A plant declaration and the sha256 of its file.
+
+    ``None`` reads ``fuel_plant.yaml``, the version the contract runs; a named
+    version is found among :func:`plant_files` and must declare that version."""
+    if plant_version is None:
+        path = profile_dir / PLANT_FILE
+    else:
+        files = plant_files(profile_dir)
+        if plant_version not in files:
+            raise FuelPlantRefusalError(
+                "plant_version_undeclared",
+                f"{profile_dir} declares no fuel plant {plant_version!r} (has {sorted(files)})",
+            )
+        path = files[plant_version]
+    text = path.read_bytes()
+    profile = FuelPlantProfile.model_validate(_parsed(text))
+    if plant_version is not None and profile.plant_version != plant_version:
+        raise FuelPlantRefusalError("plant_version_mismatch", f"{path.name} is not {plant_version}")
+    refuse_spent_elsewhere(profile_dir, profile, profile.split.held_out)
+    return profile, hashlib.sha256(text).hexdigest()
+
+
+def refuse_spent_elsewhere(
+    profile_dir: Path, profile: FuelPlantProfile, recordings: Sequence[str]
+) -> None:
+    """Refuse any of ``recordings`` that *any* plant declaration in the
+    profile has spent under another baseline or plant version.
+
+    Each file's validator sees only its own ledger, so every ledger on disk is
+    read here; :func:`load_fuel_plant` calls it on the split, and
+    ``fuel_plant_eval.evaluate`` on what it is about to score, so a profile
+    built in memory cannot score a sibling's spent drive either. A real
+    (non-synthetic) plant must be declared in ``profile_dir``, so an empty
+    directory cannot stand in for the profile."""
+    files = plant_files(profile_dir)
+    if not profile.synthetic and profile.plant_version not in files:
+        raise FuelPlantRefusalError(
+            "plant_version_undeclared",
+            f"{profile_dir} declares no fuel plant {profile.plant_version!r}: its spent "
+            "ledgers cannot be checked there",
+        )
+    names = set(recordings)
+    if not names:
+        return
+    current = (
+        (profile.baseline.sha256(), profile.plant_version) if profile.baseline is not None else None
+    )
+    for path in files.values():
+        raw = _parsed(path.read_bytes())
+        records = raw.get("spent_held_out", []) if isinstance(raw, dict) else []
+        spent = sorted(
+            r.recording
+            for r in (SpentRecord.model_validate(x) for x in records or [])
+            if r.recording in names and (r.baseline_sha256, r.plant_version) != current
+        )
+        if spent:
+            raise FuelPlantRefusalError(
+                "spent_held_out",
+                f"{spent} were scored by {path.name}; a revised plant needs never-scored "
+                "held-out drives",
+            )
+
+
+def internal_model_invariants(profile_dir: Path, plant_version: str) -> dict[str, tuple[str, ...]]:
+    """The owner invariants each internally computed quantity holds in one
+    plant version (what ``engine_dynamics.check_internal_models`` reads)."""
+    profile, _ = load_fuel_plant(profile_dir, plant_version)
+    return {"manifold_pressure": MANIFOLD_MODELS[profile.manifold_model]}
+
+
+#: The parameter a ``speed_density_refusing`` plant fits from logs, as the
+#: contract's ``parameter_fits`` names it (the registry carries its floor as
+#: ``manifold_pressure``'s working VE).
+VE_FIT_PARAMETER = "volumetric_efficiency"
+
+
+def parameter_fit_bounds(
+    profile_dir: Path, plant_version: str
+) -> dict[str, dict[str, tuple[float, float]]]:
+    """Each log-fitted parameter of one plant version and the bounds its
+    frozen fit holds in (empty for a plant that fits none)."""
+    profile, _ = load_fuel_plant(profile_dir, plant_version)
+    curve = profile.baseline.ve_curve if profile.baseline is not None else None
+    return {} if curve is None else {VE_FIT_PARAMETER: curve.bounds()}
 
 
 @dataclass(frozen=True)
@@ -621,12 +877,50 @@ def manifold_pressure_speed_density(
     """MAP that would hold ``air_g`` per cylinder at ``volumetric_efficiency``, kPa.
 
     Capped at baro: a naturally aspirated manifold cannot exceed ambient.
+    fuel-mv-1's form (``speed_density_capped``), frozen; a revised plant uses
+    :func:`manifold_pressure_ve_curve`, which refuses instead of capping.
     """
     if not volumetric_efficiency > 0:
         raise FuelPlantRefusalError("ve_nonpositive", "volumetric efficiency must be > 0")
     v_m3 = geometry.cylinder_volume_l / 1000.0
     p_pa = _f(air_g) / 1000.0 * R_AIR * (_f(iat_c) + KELVIN) / (volumetric_efficiency * v_m3)
     return np.minimum(p_pa / 1000.0, _f(baro_kpa))
+
+
+def manifold_pressure_ve_curve(
+    air_g: ArrayLike,
+    rpm: ArrayLike,
+    iat_c: ArrayLike,
+    baro_kpa: ArrayLike,
+    geometry: Geometry,
+    curve: VeCurve,
+    floor: float,
+) -> tuple[FloatArray, NDArray[np.str_]]:
+    """Steady speed-density MAP at VE(rpm), kPa, and a per-sample refusal.
+
+    Never capped: where the steady manifold at the fitted VE would exceed
+    ambient the sample is NaN with :data:`MAP_ABOVE_AMBIENT`, as
+    ``manifold_breathing`` refuses it; an rpm, baro or intake temperature
+    outside the fit's range is NaN with :data:`MAP_OUTSIDE_VE_FIT`. ``""`` is
+    a sample with a MAP."""
+    if not floor > 0:
+        raise FuelPlantRefusalError("ve_nonpositive", "volumetric efficiency must be > 0")
+    ve = curve.ve(rpm, floor)
+    v_m3 = geometry.cylinder_volume_l / 1000.0
+    with np.errstate(invalid="ignore"):
+        p_kpa = _f(air_g) / 1000.0 * R_AIR * (_f(iat_c) + KELVIN) / (ve * v_m3) / 1000.0
+    baro = _f(baro_kpa)
+    iat = _f(iat_c)
+    outside = (
+        ~np.isfinite(ve)
+        | ~((baro >= curve.baro_kpa[0]) & (baro <= curve.baro_kpa[1]))
+        | ~((iat >= curve.iat_c[0]) & (iat <= curve.iat_c[1]))
+    )
+    above = ~outside & (p_kpa > baro * (1.0 + AMBIENT_ROUNDING))
+    reason = np.full(p_kpa.shape, "", dtype="<U32")
+    reason[above] = MAP_ABOVE_AMBIENT
+    reason[outside] = MAP_OUTSIDE_VE_FIT
+    return np.where(above | outside, np.nan, p_kpa), reason
 
 
 def injector_delta_p_kpa(
@@ -668,6 +962,10 @@ class ResolvedParameters:
     #: The effect named when the per-sample rail pressure is not measured.
     rail_effect: str
     baseline_sha256: str
+    manifold_model: ManifoldModel = "speed_density_capped"
+    #: The frozen VE(rpm) of a ``speed_density_refusing`` plant; its floor is
+    #: ``values["manifold_pressure"]`` (the registry's working VE).
+    ve_curve: VeCurve | None = None
 
 
 def resolve_parameters(
@@ -676,6 +974,7 @@ def resolve_parameters(
     *,
     overrides: Mapping[str, float] | None = None,
     for_identification: bool = False,
+    ve_curve: VeCurve | None = None,
 ) -> ResolvedParameters:
     """Every number :func:`predict` reads, from a *frozen* baseline.
 
@@ -683,7 +982,9 @@ def resolve_parameters(
     an override outside it, or of a known/identified value, is refused.
     ``for_identification`` runs without a baseline, with every identifiable
     value at 1.0 so the fit can read its per-sample ratio; nothing it returns
-    is a prediction.
+    is a prediction. A ``speed_density_refusing`` plant reads its VE(rpm) from
+    the frozen baseline; only identification may hand one in (``ve_curve``,
+    fitted on the identification drives first).
     """
     baseline = profile.baseline
     if not for_identification and (baseline is None or not baseline.frozen):
@@ -737,7 +1038,22 @@ def resolve_parameters(
             "unknown_override", f"not plant parameters: {sorted(overrides)}"
         )
     sha = "" if for_identification or baseline is None else baseline.sha256()
-    return ResolvedParameters(values, tuple(effects), rail_effect, sha)
+    curve: VeCurve | None = None
+    if profile.manifold_model == "speed_density_refusing":
+        if ve_curve is not None and not for_identification:
+            raise FuelPlantRefusalError(
+                "ve_curve_not_frozen", "outside identification VE(rpm) comes from the baseline"
+            )
+        curve = ve_curve if ve_curve is not None else (baseline.ve_curve if baseline else None)
+        if curve is None:
+            raise FuelPlantRefusalError(
+                "ve_curve_missing", "a speed_density_refusing plant runs on a fitted VE(rpm)"
+            )
+    elif ve_curve is not None:
+        raise FuelPlantRefusalError("ve_curve_unused", f"{profile.manifold_model} has no VE curve")
+    return ResolvedParameters(
+        values, tuple(effects), rail_effect, sha, profile.manifold_model, curve
+    )
 
 
 @dataclass(frozen=True)
@@ -773,6 +1089,8 @@ class PlantOutput:
     effects: tuple[str, ...]
     rail_effect: str = ""
     extra: dict[str, FloatArray] = field(default_factory=dict)
+    #: Per-sample MAP refusal (``""`` = none); only a refusing plant sets one.
+    manifold_refusal: NDArray[np.str_] | None = None
 
 
 def predict(inputs: PlantInputs, params: ResolvedParameters, geometry: Geometry) -> PlantOutput:
@@ -787,13 +1105,24 @@ def predict(inputs: PlantInputs, params: ResolvedParameters, geometry: Geometry)
     air = air_per_event_g(inputs.maf_gps, inputs.rpm, geometry) * (
         v["bank_air_split"] * geometry.banks
     )
-    map_kpa = (
-        manifold_pressure_speed_density(
+    refusal: NDArray[np.str_] | None = None
+    if inputs.map_kpa is not None:
+        map_kpa = _f(inputs.map_kpa)
+    elif params.manifold_model == "speed_density_refusing":
+        assert params.ve_curve is not None
+        map_kpa, refusal = manifold_pressure_ve_curve(
+            air,
+            inputs.rpm,
+            inputs.iat_c,
+            inputs.baro_kpa,
+            geometry,
+            params.ve_curve,
+            v["manifold_pressure"],
+        )
+    else:
+        map_kpa = manifold_pressure_speed_density(
             air, inputs.iat_c, inputs.baro_kpa, geometry, v["manifold_pressure"]
         )
-        if inputs.map_kpa is None
-        else _f(inputs.map_kpa)
-    )
     measured = np.isfinite(inputs.rail_kpa)
     rail = np.where(measured, inputs.rail_kpa, v["rail_pressure"])
     dp = injector_delta_p_kpa(rail, inputs.baro_kpa, map_kpa)
@@ -812,6 +1141,7 @@ def predict(inputs: PlantInputs, params: ResolvedParameters, geometry: Geometry)
         rail_measured=measured,
         effects=params.effects,
         rail_effect=params.rail_effect,
+        manifold_refusal=refusal,
     )
 
 
@@ -846,6 +1176,8 @@ def plant_qualification(profile: FuelPlantProfile) -> Qualification:
     if baseline is None or not baseline.frozen:
         return refused("no frozen baseline")
     sha = baseline.sha256()
+    if not profile.split.held_out:
+        return refused(f"baseline {baseline.id} has no held-out recording (held_out_pending)", sha)
     mine = {
         r.recording: r
         for r in profile.spent_held_out
@@ -856,7 +1188,10 @@ def plant_qualification(profile: FuelPlantProfile) -> Qualification:
         return refused(f"baseline {baseline.id} was never scored held out", sha)
     if unscored:
         return refused(f"held-out recordings {unscored} were not scored", sha)
-    verdicts = {mine[name].verdict for name in profile.split.held_out}
+    stray = sorted(set(mine) - set(profile.split.held_out))
+    if stray:
+        return refused(f"verdicts recorded on undeclared recordings {stray}", sha)
+    verdicts = {r.verdict for r in mine.values()}
     if "fail" in verdicts:
         return refused(f"baseline {baseline.id} failed its predeclared held-out bounds", sha)
     regimes = (

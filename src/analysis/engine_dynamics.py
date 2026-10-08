@@ -1098,13 +1098,21 @@ def _is_stateful(contract: SimContract, sub: Subsystem) -> bool:
     return any(contract.quantity(q).is_state for q in sub.computes)
 
 
-def check_internal_models(contract: SimContract) -> list[str]:
+def check_internal_models(contract: SimContract, profile_dir: Path | None = None) -> list[str]:
     """Where a built stage's code and the contract disagree about which owned
     quantities it computes for itself; empty when they agree.
 
     Each implementation module lists them in ``COMPUTES_INTERNALLY`` (none:
     empty); the contract's ``internal_models`` must name exactly those, so a
-    second live model of a quantity cannot exist undeclared."""
+    second live model of a quantity cannot exist undeclared. Every plant
+    version the implementation declares must be covered by exactly one entry
+    per quantity.
+
+    With ``profile_dir``, each entry is also checked against the plant version
+    it names (the module's ``internal_model_invariants`` and
+    ``parameter_fit_bounds``): an entry declaring an invariant the version's
+    code does not enforce, or fit bounds other than the frozen fit's, is a
+    problem -- a reconciliation or a bound cannot be stated, only held."""
     problems: list[str] = []
     for sub in contract.subsystems:
         if sub.implementation is None:
@@ -1118,6 +1126,40 @@ def check_internal_models(contract: SimContract) -> list[str]:
             problems.append(f"{sub.id}: {sub.implementation.module} computes {q} undeclared")
         for q in sorted(declared - in_code):
             problems.append(f"{sub.id}: declares an internal {q} its module does not compute")
+        for q in sorted(in_code & declared):
+            entries = [im for im in sub.internal_models if im.quantity == q]
+            covered = [v for im in entries for v in im.plant_versions]
+            for v in sub.implementation.plant_versions:
+                if covered.count(v) != 1:
+                    problems.append(
+                        f"{sub.id}: {v} has {covered.count(v)} internal-model entries for {q} "
+                        "(exactly one)"
+                    )
+        if profile_dir is None:
+            continue
+        invariants_of = getattr(module, "internal_model_invariants", None)
+        fits_of = getattr(module, "parameter_fit_bounds", None)
+        for im in sub.internal_models:
+            for version in im.plant_versions:
+                if invariants_of is not None:
+                    held = set(invariants_of(profile_dir, version).get(im.quantity, ()))
+                    for inv in sorted(set(im.invariants) - held):
+                        problems.append(
+                            f"{sub.id}: {version}'s {im.quantity} does not enforce {inv}"
+                        )
+                if fits_of is None:
+                    continue
+                frozen = fits_of(profile_dir, version)
+                stated = {
+                    fit.parameter: {b.quantity: (b.minimum, b.maximum) for b in fit.bounds}
+                    for fit in im.parameter_fits
+                }
+                for name in sorted(set(frozen) | set(stated)):
+                    if frozen.get(name) != stated.get(name):
+                        problems.append(
+                            f"{sub.id}: {version} fit of {name}: contract bounds "
+                            f"{stated.get(name)}, frozen fit {frozen.get(name)}"
+                        )
     return problems
 
 
@@ -1127,11 +1169,16 @@ def subsystem_standing(
     *,
     profile_dir: Path,
     convergence: ConvergenceReport | None = None,
+    plant_version: str | None = None,
 ) -> SubsystemStanding:
     """A subsystem's standing, derived: built, its numerics verified by running
     the study (or the given report), and validated only by a recorded passing
     scoring against an available, independent reference -- for the fuel stage,
-    its own profile's held-out verdicts (:func:`plant_qualification`)."""
+    its own profile's held-out verdicts (:func:`plant_qualification`).
+
+    ``plant_version`` asks about one of the implementation's declared versions
+    (default: the one the contract runs); only internal models of that version
+    are owed by it."""
     reasons: list[str] = []
     missing = [m.id for m in sub.required_measurements if m.status != "available"]
     if sub.status == "unbuilt":
@@ -1139,6 +1186,12 @@ def subsystem_standing(
         reasons += [f"requires_measurement:{m}" for m in missing]
         return SubsystemStanding(sub.id, False, None, False, tuple(reasons))
     assert sub.implementation is not None
+    version = plant_version or sub.implementation.plant_version
+    if version not in sub.implementation.plant_versions:
+        raise SimulationRefusalError(
+            "plant_version_undeclared",
+            f"{sub.id} declares {sub.implementation.plant_versions}, not {version!r}",
+        )
     numerics: bool | None = None
     if _is_stateful(contract, sub):
         if sub.id != MANIFOLD_SUBSYSTEM:
@@ -1154,13 +1207,15 @@ def subsystem_standing(
         if refusal is not None:
             reasons.append(f"{refusal[0]}:{sub.id}")
     reasons += [
-        f"internal_model:{im.quantity}:owed_by_next_plant_version" for im in sub.internal_models
+        f"internal_model:{im.quantity}:owed_by_next_plant_version"
+        for im in sub.internal_models
+        if im.owed_by is not None and version in im.plant_versions
     ]
     usable = [r for r in sub.references if not check_reference(contract, sub, r)]
     for ref in sub.references:
         reasons += check_reference(contract, sub, ref)
     if sub.implementation.profile_file == "fuel_plant.yaml":
-        fuel, _ = load_fuel_plant(profile_dir)
+        fuel, _ = load_fuel_plant(profile_dir, version)
         q = plant_qualification(fuel)
         if not q.qualified:
             reasons.append(str(q.reason))
@@ -1180,10 +1235,26 @@ def subsystem_standing(
 
 
 def standings(
-    contract: SimContract, profile_dir: Path, *, convergence: ConvergenceReport | None = None
+    contract: SimContract,
+    profile_dir: Path,
+    *,
+    convergence: ConvergenceReport | None = None,
+    versions: Mapping[str, str] | None = None,
 ) -> dict[str, SubsystemStanding]:
+    """Every subsystem's standing; ``versions`` maps a subsystem id to the
+    declared plant version to ask about (default: the one the contract runs)."""
+    versions = dict(versions or {})
+    stray = sorted(set(versions) - {s.id for s in contract.subsystems})
+    if stray:
+        raise SimulationRefusalError("subsystem_undeclared", f"no subsystems {stray}")
     return {
-        s.id: subsystem_standing(contract, s, profile_dir=profile_dir, convergence=convergence)
+        s.id: subsystem_standing(
+            contract,
+            s,
+            profile_dir=profile_dir,
+            convergence=convergence,
+            plant_version=versions.get(s.id),
+        )
         for s in contract.subsystems
     }
 

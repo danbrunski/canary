@@ -388,6 +388,20 @@ class NumericalCheck(_Strict):
         return self
 
 
+class MeasurementPlan(_Strict):
+    """When a missing measurement is expected, as an operator decided it. Not
+    an availability: the measurement stays unusable until it is logged."""
+
+    decided_on: str = Field(pattern=r"^\d{4}-\d{2}-\d{2}$")
+    decided_by: Literal["operator"]
+    #: The vehicle change or event it arrives with.
+    arrives_with: str = Field(min_length=1)
+    #: Where the plan is written down (a roadmap document).
+    recorded_in: str = Field(min_length=1)
+    #: What it can and cannot validate once it arrives.
+    consequence: str = Field(min_length=1)
+
+
 class RequiredMeasurement(_Strict):
     """A measurement a subsystem needs before a parameter is identifiable or a
     result can be validated, named before anything is claimed."""
@@ -400,8 +414,20 @@ class RequiredMeasurement(_Strict):
     #: about changing a control needs an available measurement that excites
     #: it: natural closed-loop logs do not.
     excites: list[Literal["spark", "cam", "lambda", "throttle"]] = Field(default_factory=list)
-    status: Literal["missing", "partial", "available"]
+    #: ``planned``: not available, and an operator decision says when it will
+    #: be (``plan``); still unavailable for every standing and claim.
+    status: Literal["missing", "planned", "partial", "available"]
+    plan: MeasurementPlan | None = None
     evidence: str = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def _plan(self) -> RequiredMeasurement:
+        if (self.status == "planned") != (self.plan is not None):
+            raise ValueError(
+                f"measurement {self.id}: a planned measurement names its plan (the decision, "
+                "and the change it comes with), and only a planned one does"
+            )
+        return self
 
 
 ReferenceKind = Literal["instrument", "derived", "ecu_computed", "external"]
@@ -459,6 +485,28 @@ class ValidationRecord(_Strict):
     evidence: str = Field(min_length=1)
 
 
+class ParameterFit(_Strict):
+    """A parameter an internal model identifies from logs: where the fit holds
+    and which unresolved errors it carries. Never a measurement of the
+    parameter (``kind`` is ``log_fit`` only): a fit from MAF inherits MAF's
+    error, and ``inherits`` must name it."""
+
+    parameter: str = Field(pattern=_ID)
+    kind: Literal["log_fit"]
+    form: str = Field(min_length=1)
+    #: The contract quantities the fit reads.
+    identified_from: list[str] = Field(min_length=1)
+    #: Unresolved hardware parameters (not ``known``) whose error passes into
+    #: the fit; each must be declared by the hardware configurations below.
+    inherits: list[str] = Field(min_length=1)
+    hardware_configurations: list[str] = Field(min_length=1)
+    #: Where the fit holds; a sample outside is refused by name.
+    bounds: list[ApplicabilityBound] = Field(min_length=1)
+    #: The recordings it was fitted on (identification drives only).
+    fitted_on: list[str] = Field(min_length=1)
+    evidence: str = Field(min_length=1)
+
+
 class InternalModel(_Strict):
     """A quantity another stage owns that this stage's implementation computes
     for itself instead of reading from the owner. Declared, never silent: the
@@ -469,18 +517,48 @@ class InternalModel(_Strict):
     quantity: str
     #: The subsystem that owns ``quantity`` in the contract.
     owner: str
+    #: The implementation's plant versions that compute it this way (each the
+    #: implementation's own version or one of its ``other_plant_versions``).
+    plant_versions: list[str] = Field(min_length=1)
     modes: list[str] = Field(min_length=1)
     model: str = Field(min_length=1)
     #: Where this model and the owner's give different answers.
     differs: str = Field(min_length=1)
-    #: What reconciles them (a plant_version, a task item).
-    owed_by: str = Field(min_length=1)
+    #: What reconciles them (a plant_version, a task item). Exactly one of
+    #: ``owed_by`` / ``reconciled_by``.
+    owed_by: str | None = None
+    #: How the versions above reconciled it. A reconciled model holds every
+    #: invariant of its owner's applicability (declared here, and checked
+    #: against the code by ``engine_dynamics.check_internal_models``).
+    reconciled_by: str | None = None
+    #: Owner invariants this model enforces on every sample.
+    invariants: list[Invariant] = Field(default_factory=list)
+    #: Parameters this model fits from logs, with their bounds.
+    parameter_fits: list[ParameterFit] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def _standing(self) -> InternalModel:
+        if (self.owed_by is None) == (self.reconciled_by is None):
+            raise ValueError(
+                f"internal model of {self.quantity}: exactly one of owed_by (still owed) or "
+                "reconciled_by (how a plant version reconciled it)"
+            )
+        _unique(f"{self.quantity} internal-model version", self.plant_versions)
+        return self
 
 
 class SubsystemImplementation(_Strict):
     module: str = Field(pattern=r"^src\.analysis\.[a-z_]+$")
     profile_file: str = Field(pattern=r"^[a-z_]+\.yaml$")
+    #: The version scenarios run (the contract's ``plant_version`` for the fuel stage).
     plant_version: str = Field(min_length=1)
+    #: Further versions of the same module declared beside it (a revised plant
+    #: awaiting its own held-out drives); their standing is derived on request.
+    other_plant_versions: list[str] = Field(default_factory=list)
+
+    @property
+    def plant_versions(self) -> list[str]:
+        return [self.plant_version, *self.other_plant_versions]
 
 
 class Subsystem(_Strict):
@@ -855,6 +933,47 @@ def _check_subsystems(contract: SimContract, by_id: dict[str, Quantity]) -> None
             stray_modes = sorted(set(im.modes) - modes)
             if stray_modes:
                 raise ValueError(f"subsystem {sub.id}: internal model in undeclared {stray_modes}")
+            _check_internal_model(contract, sub, im, by_id)
+
+
+def _check_internal_model(
+    contract: SimContract, sub: Subsystem, im: InternalModel, by_id: dict[str, Quantity]
+) -> None:
+    """Versions, invariants and parameter fits of one internal model."""
+    declared = sub.implementation.plant_versions if sub.implementation is not None else []
+    stray_versions = sorted(set(im.plant_versions) - set(declared))
+    if stray_versions:
+        raise ValueError(
+            f"subsystem {sub.id}: internal model of {im.quantity} names plant versions "
+            f"{stray_versions} its implementation does not declare"
+        )
+    owner = contract.subsystem(im.owner)
+    owner_invariants = set(owner.applicability.invariants) if owner.applicability else set()
+    if im.reconciled_by is not None and not owner_invariants <= set(im.invariants):
+        raise ValueError(
+            f"subsystem {sub.id}: internal model of {im.quantity} is declared reconciled but "
+            f"does not hold its owner's invariants {sorted(owner_invariants - set(im.invariants))}"
+        )
+    hardware = {h.id: h for h in contract.hardware_configurations}
+    for fit in im.parameter_fits:
+        names = [*fit.identified_from, *(b.quantity for b in fit.bounds)]
+        stray = sorted({n for n in names if n not in by_id})
+        if stray:
+            raise ValueError(f"fit of {fit.parameter}: names undeclared quantities {stray}")
+        for hw_id in fit.hardware_configurations:
+            if hw_id not in hardware:
+                raise ValueError(f"fit of {fit.parameter}: undeclared hardware {hw_id!r}")
+            params = {p.id: p for p in hardware[hw_id].parameters}
+            for name in fit.inherits:
+                if name not in params:
+                    raise ValueError(
+                        f"fit of {fit.parameter}: inherits {name!r}, which {hw_id} does not declare"
+                    )
+                if params[name].status == "known":
+                    raise ValueError(
+                        f"fit of {fit.parameter}: inherits {name!r}, a known parameter; name the "
+                        "unresolved errors the fit carries"
+                    )
 
 
 def _check_cycles(mode: Mode, by_id: dict[str, Quantity], computed: set[str]) -> None:

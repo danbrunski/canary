@@ -390,18 +390,122 @@ supercharger is a hardware intervention with a new plant parameter set.
       `manifold_pressure_unmeasured`;
     - an unfrozen baseline and leaked drives, B06 recordings or spent drives
       are refused.
+  - **fuel-mv-2 (2026-10-08, operator-approved E07.5 recommendation).**
+    VE depends on rpm, and MAP refuses instead of capping. fuel-mv-1 is
+    untouched: `fuel_plant.yaml` is byte-identical, and its baseline sha
+    `6aec1db5…` and spent records still load
+    (`test_fuel_mv_1_stays_frozen_and_fuel_mv_2_is_declared_beside_it`).
+    - **Where it lives.** `data/nissan-xterra-2008/fuel_plant_mv2.yaml`,
+      beside fuel-mv-1. `load_fuel_plant(dir, plant_version)` finds a version
+      among `fuel_plant*.yaml` (`plant_files`; a version declared twice is
+      refused); with no version it reads `fuel_plant.yaml`, which is still the
+      version the contract and E07.4/E07.6 run.
+    - **VE model (`manifold_model: speed_density_refusing`,
+      `volumetric_efficiency: rpm_envelope`).** Per band of 500/1000/2000/
+      3000/4000/5000/6500 rpm, the largest steady warm charge fraction on the
+      identification drives (`fuel_plant_eval.identify_ve`; steady is the
+      plant's own 2 s rpm/MAF-span rule on MAF reads; min 5 reads a band). On
+      an NA engine charge fraction = VE × MAP/baro ≤ VE on every read, so the
+      envelope is the smallest VE the drives allow, and is VE where they
+      reached full breathing. It runs at max(envelope, 0.7), so a band the
+      drives never filled keeps the old working value. Frozen envelope
+      0.217/0.677/**0.888/0.895/0.906/0.873** (n 1875/72/805/286/24/5), so VE
+      runs 0.7, 0.7, 0.888, 0.895, 0.906, 0.873. Load dependence is not
+      modelled (only VE × MAP is identified without a MAP sensor). The fit
+      inherits MAF's transfer error and is not a VE measurement (contract
+      `parameter_fits`, E07.5).
+    - **MAP.** `manifold_pressure_ve_curve` is steady speed density at VE(rpm).
+      Above baro the read is NaN and `manifold_above_ambient` (the stage's own
+      refusal, never a cap). It is `outside_ve_fit` outside the fit's bounds:
+      500–6500 rpm, baro 79–82 kPa, and IAT 23–50 °C. IAT is bounded because
+      on this truck INTAKE_TEMP tracks airflow, so the ideal-gas fill does not
+      divide the charge density out. `apply_manifold_refusals` names those
+      reads as states, so they are never scored. A capping plant is left
+      bit-identical
+      (`test_the_revised_map_refuses_above_ambient_where_fuel_mv_1_caps`).
+    - **Baseline `na-stock-2026-10-08.mv2`** (sha256 `0180c207…21576`; the
+      VE bounds, IAT included, are part of the hash). It comes from
+      `tools.fuel_plant_check identify --plant-version fuel-mv-2` on the same
+      three identification drives, before any comparison was run:
+      s = **0.050792 g/ms**, 90 % interval 0.050357–0.051198, 89 regions,
+      764 reads (2 more refused as `manifold_above_ambient`). That is 0.53 %
+      below fuel-mv-1's s.
+    - **Held out: none possible.** Every steady-scoreable recording is either
+      identification or spent by fuel-mv-1, and no other recording has pulse
+      reads co-observed with MAF and λ. So `split.held_out: []` with a named
+      `held_out_pending`.
+      - `plant_qualification` refuses a plant with no held-out recording, and
+        the profile refuses a recording this baseline spent outside its
+        `held_out` (`test_a_plant_without_held_out_drives_never_qualifies`).
+      - `evaluate` refuses fuel-mv-2 by name (`held_out_pending`). It reads
+        every plant file's spent ledger itself (required `profile_dir`;
+        `fuel_plant.refuse_spent_elsewhere`), so a profile built in memory
+        cannot score a sibling's spent drive
+        (`test_fuel_mv_2_cannot_hold_out_a_drive_fuel_mv_1_spent`).
+    - **Against fuel-mv-1, per sample on identical reads: a diagnostic, not a
+      verdict.** `fuel_plant_eval.compare_versions` / `tools.fuel_plant_check
+      compare --plant-version fuel-mv-1 fuel-mv-2` builds the samples once,
+      drops reads either version refuses, and reports the per-sample |err|
+      change overall and per MAF band. It returns no verdict, spends nothing,
+      and refuses a recording that is neither in-sample nor already spent
+      (`test_versions_are_compared_per_sample_on_spent_drives_only`).
+      - **In-sample (the same 764 reads):** |err| p90 12.01 → **11.61 %**,
+        region pass 0.573 → 0.618. Per sample, 48 % of reads are better and
+        52 % worse (median change +0.21 pp). It still fails its own bounds
+        in-sample.
+      - **The four spent fuel-mv-1 held-out drives (726 common reads, 101
+        regions).** fuel-mv-2 refuses 121 reads: 117 `outside_ve_fit`, all
+        IAT 20–22 °C on 09-23T142926, and 4 `manifold_above_ambient`.
+        |err| p90 11.74 → 12.21 %; region pass 0.564 → 0.554. Per sample,
+        36 % of reads are better and 64 % worse (median change +0.54 pp).
+      - **Per MAF band** (share better/worse; median change in |err|):
+
+        | MAF band | Reads | Better / worse | Median change |
+        |---|---|---|---|
+        | under 5 g/s | 575 | 31 / 69 % | +0.54 pp |
+        | 5–10 g/s | 21 | 19 / 81 % | +0.54 pp |
+        | 10–20 g/s | 14 | 7 / 93 % | +0.12 pp |
+        | 20–40 g/s | 18 | 100 / 0 % | −0.86 pp |
+        | 40–80 g/s | 93 | 62 / 38 % | −0.97 pp |
+        | over 80 g/s | 5 | 40 / 60 % | +0.25 pp |
+
+        Below 20 g/s, idle runs at the same 0.7 VE, so only the 0.53 % lower
+        s moves it.
+        Before the IAT bound (841 reads, with the morning drive), 40–80 g/s
+        was 48.7 % better / 51.3 % worse (median +0.07 pp). Only 20–40 g/s
+        (n 23) improved there, at 82.6 %. So the 40–80 g/s gain rests on
+        which drives the bound keeps, and is not robust.
+      - **Reading.** VE(rpm) helps in 20–40 g/s. In 40–80 g/s whether it
+        helps depends on the drive set. It makes idle, which is most reads,
+        slightly worse, and it does not touch the idle/short-pulse and
+        10–20 g/s tails that fail the bounds. fuel-mv-2 is not a
+        better-qualified plant.
+    - **Known limitation: idle VE (owed a load-dependent VE).**
+      - Steady warm idle has charge fraction p50 0.151 (1,875 reads, 762 rpm,
+        3.46 g/s, baro 81 kPa). At the 0.7 floor that is MAP 17.5 kPa.
+      - A warm NA idle normally sits at ~28–35 kPa, which implies an idle VE
+        of ~0.35–0.45.
+      - So the floor, and "part-load VE = full-breathing VE", understate
+        part-load MAP. That overstates injector dP by ~3 % at idle (~1.5 %
+        flow), on 614 of the 841 spent-drive reads.
+      - Recorded in the contract's `parameter_fits` evidence and in
+        `fuel_plant_mv2.yaml`.
   - **Remaining:**
     1. A revised plant structure, with a new `plant_version`, a new baseline
        and newly declared bounds. The in-sample failure points at the
        idle/short-pulse region and the 10–40 g/s tail. It must then pass
        on **never-scored held-out drives** (truck). The four above are spent.
        Log PID 0x42 with the pulse DIDs on those drives, so that Ts is not
-       taken from fuel-cut reads. Owed by that `plant_version` too (E07.5):
-       read manifold pressure from the `manifold_breathing` stage instead of
-       fuel-mv-1's own steady speed density, which caps MAP at baro where the
-       stage refuses (declared as `fuel_delivery.internal_models` in the
-       contract), and revisit the VE working value (0.7), which the corpus
-       charge fraction exceeds on 10.6 % of warm reads (peak VE ≥ ~0.9).
+       taken from fuel-cut reads. *VE and MAP done in fuel-mv-2 (above,
+       2026-10-08):* VE(rpm) replaces 0.7 and MAP refuses above ambient as the
+       `manifold_breathing` stage does (the contract's fuel-mv-2 internal
+       model is `reconciled_by`). fuel-mv-2 still fails in-sample and has no
+       held-out drive. Still owed:
+       - the idle/short-pulse and 10–40 g/s structure;
+       - the never-scored drives;
+       - a load-dependent VE. The 0.7 floor at idle gives MAP ~17.5 kPa
+         against a normal ~28–35 kPa, which overstates idle injector dP by
+         ~3 % ("Known limitation" above).
     2. A tuning-profile drive that logs the AEM rail pressure with the pulse
        DID (truck). No such drive exists yet.
     3. MAP, injector flow and injector latency still require measurement.
@@ -746,12 +850,65 @@ supercharger is a hardware intervention with a new plant parameter set.
     `test_fuel_plant`, `test_paired_scenarios`, `test_rom_effects`,
     `test_rom_effects_private_rom`, `test_plant_validation`) and
     `test_layering`: 137 pass.
+  - **Fuel-plant MAP reconciled (2026-10-08).** The contract's
+    `fuel_delivery.internal_models` has one entry per form, each naming its
+    `plant_versions`. The fuel-mv-1 entry is `owed_by` (capped).
+    The fuel-mv-2 entry is `reconciled_by`, and declares the stage's invariant
+    `manifold_at_or_below_ambient`. It also has a `parameter_fits` entry for
+    VE: a `log_fit` from `mass_air_flow`, `engine_speed`,
+    `barometric_pressure` and `intake_air_temperature`, which `inherits:
+    [maf_transfer_bias]`, with bounds engine speed 500–6500 rpm, baro
+    79–82 kPa and IAT 23–50 °C. Its evidence records the idle-VE
+    limitation.
+    - The fuel stage's `implementation` lists fuel-mv-2 as
+      `other_plant_versions`. `COMPUTES_INTERNALLY` stays
+      `("manifold_pressure",)`: both versions compute MAP themselves. The
+      new `MANIFOLD_MODELS` maps each form to the invariants it enforces.
+    - The schema refuses:
+      - a reconciled entry without its owner's invariants;
+      - a version the implementation does not declare;
+      - a fit that inherits no unresolved error, or inherits a known
+        parameter.
+    - `check_internal_models(contract, profile_dir)` needs exactly one entry
+      per declared version and quantity. It also checks each entry against
+      that version's code: an invariant the code does not enforce, or fit
+      bounds that differ from the frozen fit's, is a problem
+      (`test_a_reconciliation_is_held_by_the_plant_not_stated`,
+      `test_the_ve_fit_names_the_maf_error_it_carries`).
+    - `standings(..., versions={"fuel_delivery": "fuel-mv-2"})` (CLI:
+      `tools.manifold_check standing --fuel-plant-version fuel-mv-2`) drops
+      `internal_model:manifold_pressure:owed_by_next_plant_version`. fuel-mv-1
+      keeps it. fuel-mv-2 is still unvalidated:
+      `plant_not_qualified: … has no held-out recording (held_out_pending)`.
+    - Reading the stage's integrated trace was not chosen. In steady regions
+      it equals speed density at the same VE, and the stage still runs the
+      fuel plant's constant 0.7 (load_kit loads fuel-mv-1).
   - **Remaining, by stage, and what each needs:**
-    1. *Stage 1 validation* (truck + hardware): a MAP sensor teed into a
-       manifold vacuum port on a spare USB ADC input at ≥ 100 Hz, logged with
+    1. *Stage 1 validation* (hardware): a MAP sensor logged at ≥ 100 Hz with
        MAF and rpm over idle, cruise, tip-ins/outs and WOT; and the manifold
        volume (water fill or CAD). Then a held-out scoring recorded in the
        contract's `validations`. Until then the subsystem stays unvalidated.
+       **Operator decision 2026-10-08:** no MAP sensor can be installed before
+       the supercharger build. The sensor comes with that build: the kit's
+       Bosch TMAP behind the intercooler, read through a Pi ADC
+       (`docs/roadmap/supercharger-build.md`, Phase 2 P2).
+       **Operator decision 2026-10-08:** no MAP on the NA intake, ever. The
+       kit's TMAP mounts after the intercooler, and no temporary NA port will
+       be fitted. The NA manifold/breathing stage stays a best-effort fit
+       (MAF/rpm/baro/IAT) and is never validated against measured MAP. Only
+       the boosted plant gets MAP validation. The contract's `map_sensor`
+       plan `consequence` says so.
+       - In the contract every `map_sensor` required measurement
+         (`fuel_delivery`, `manifold_breathing`, `throttle_flow`,
+         `torque_production`) is `status: planned`, with a `plan` (decided
+         on and by, arrives with, recorded in, consequence). The schema
+         requires a plan exactly when the status is `planned`.
+       - Planned is not available. The `map_sensor` reference stays
+         `requires_measurement`, and `requires_measurement:map_sensor` stays
+         in every standing
+         (`test_the_map_sensor_is_planned_with_the_supercharger_and_still_unavailable`).
+       - The supercharged engine is a new hardware configuration, so the
+         sensor validates only the boosted plant (decision above).
     2. *Throttle flow* (unbuilt): the throttle effective area needs MAP
        outside choked flow.
     3. *Actuator response* (unbuilt): requested throttle word 0xFFFF2D28 with
@@ -769,8 +926,10 @@ supercharger is a hardware intervention with a new plant parameter set.
     8. A producer of claims: derive `changed_controls` from the
        `compare_roms` diff (a timing-table edit means spark) and call
        `require_claim`. The refusals are a library gate until then.
-    9. The fuel plant's own MAP (declared internal model) and the VE finding:
-       owed by the next fuel-plant `plant_version` (E07.3 remaining 1).
+    9. *Done for fuel-mv-2, 2026-10-08:* the fuel plant's own MAP and the VE
+       finding. fuel-mv-2 fits VE(rpm) and refuses MAP above ambient (E07.3,
+       "fuel-mv-2"). fuel-mv-1 is frozen and stays owed, by name, for itself
+       only.
 
 - [~] **E07.6 — Run paired tuning scenarios without leaking observations.**
   Simulate baseline/candidate ROMs with the same hardware parameters, driver

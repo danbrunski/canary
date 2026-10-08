@@ -22,13 +22,17 @@ import yaml
 from pydantic import ValidationError
 
 from src.analysis.fuel_plant import (
+    MAP_ABOVE_AMBIENT,
+    MAP_OUTSIDE_VE_FIT,
     PLANT_FILE,
+    R_AIR,
     B06Rules,
     FuelPlantProfile,
     FuelPlantRefusalError,
     Geometry,
     ParameterRegistry,
     PlantInputs,
+    SpentRecord,
     air_per_event_g,
     bootstrap_median,
     check_against_contract,
@@ -40,14 +44,18 @@ from src.analysis.fuel_plant import (
     load_fuel_plant,
     manifold_pressure_speed_density,
     mass_balance_residual,
+    plant_files,
+    plant_qualification,
     predict,
     resolve_parameters,
 )
 from src.analysis.fuel_plant_eval import (
     build_samples,
     check_drive_independence,
+    compare_versions,
     evaluate,
     identify,
+    identify_ve,
     plant_inputs,
 )
 from src.analysis.sim_contract import COMPUTED, leak_channels, load_contract
@@ -204,7 +212,7 @@ def test_nothing_evaluates_without_a_frozen_baseline(
         resolve_parameters(unfrozen, delay)
     assert err.value.reason == "baseline_not_frozen"
     with pytest.raises(FuelPlantRefusalError) as err:
-        evaluate([fixture_samples], unfrozen, delay, sessions_root=ROOT)
+        evaluate([fixture_samples], unfrozen, delay, sessions_root=ROOT, profile_dir=PROFILE)
     assert err.value.reason == "baseline_not_frozen"
 
 
@@ -217,7 +225,7 @@ def test_identification_and_evaluation_stay_on_their_own_drives(
     assert err.value.reason == "not_identification"
     fitted = fixture_samples.assign(session=profile.split.identification[0])
     with pytest.raises(FuelPlantRefusalError) as err:
-        evaluate([fitted], profile, delay, sessions_root=ROOT)
+        evaluate([fitted], profile, delay, sessions_root=ROOT, profile_dir=PROFILE)
     assert err.value.reason == "not_held_out"
     raw = _raw()
     raw["split"]["held_out"].append(raw["baseline"]["fitted_on"][0])
@@ -234,7 +242,7 @@ def test_a_recording_that_informed_b06_is_not_evidence(
     assert set(b06.fitted_on) < set(b06.informed_by)
     leaky = replace(b06, informed_by=(*b06.informed_by, FIXTURE.name))
     with pytest.raises(FuelPlantRefusalError) as err:
-        evaluate([fixture_samples], profile, leaky, sessions_root=ROOT)
+        evaluate([fixture_samples], profile, leaky, sessions_root=ROOT, profile_dir=PROFILE)
     assert err.value.reason == "leaked_b06"
 
 
@@ -267,7 +275,7 @@ def test_a_drive_on_both_sides_of_the_split_is_refused(
     )
     leaky = profile.model_copy(update={"split": split})
     with pytest.raises(FuelPlantRefusalError) as err:
-        evaluate([fixture_samples], leaky, b06, sessions_root=tmp_path)
+        evaluate([fixture_samples], leaky, b06, sessions_root=tmp_path, profile_dir=PROFILE)
     assert err.value.reason == "leaked_drive"
     with pytest.raises(FuelPlantRefusalError) as err:
         check_drive_independence(leaky, tmp_path)
@@ -289,7 +297,7 @@ def test_a_spent_held_out_drive_cannot_score_another_baseline(
     assert profile.baseline is not None
     assert profile.baseline.sha256() == spent[FIXTURE.name].baseline_sha256
     # Scoring again under the same baseline is allowed, and names what to record.
-    result = evaluate([fixture_samples], profile, b06, sessions_root=ROOT)
+    result = evaluate([fixture_samples], profile, b06, sessions_root=ROOT, profile_dir=PROFILE)
     assert result["spent_records"] == [
         {
             "recording": FIXTURE.name,
@@ -314,7 +322,7 @@ def test_a_spent_held_out_drive_cannot_score_another_baseline(
         update={"baseline": profile.baseline.model_copy(update={"id": "na-stock-revised"})}
     )
     with pytest.raises(FuelPlantRefusalError) as err:
-        evaluate([fixture_samples], revised, b06, sessions_root=ROOT)
+        evaluate([fixture_samples], revised, b06, sessions_root=ROOT, profile_dir=PROFILE)
     assert err.value.reason == "spent_held_out"
 
 
@@ -483,7 +491,7 @@ def test_the_held_out_slice_is_scored_against_the_predeclared_bounds(
     it does on the full held-out drives (sample |error| p90 and region pass
     fraction, both from short idle pulses; see the E07.3 notes)."""
     profile, delay = plant
-    result = evaluate([fixture_samples], profile, delay, sessions_root=ROOT)
+    result = evaluate([fixture_samples], profile, delay, sessions_root=ROOT, profile_dir=PROFILE)
     lam = result["lambda"]
     assert (lam["n_samples"], lam["n_regions"]) == (152, 38)
     assert lam["median_pct"] == pytest.approx(1.90, abs=0.01)
@@ -513,3 +521,275 @@ def test_the_held_out_slice_is_scored_against_the_predeclared_bounds(
         "rail_pressure=lo",
         "injector_dead_time=hi",
     }
+
+
+# -- fuel-mv-2: VE(rpm) and a MAP that refuses instead of capping (2026-10-08) --------
+
+MV2 = "fuel-mv-2"
+MV2_FILE = "fuel_plant_mv2.yaml"
+
+
+@pytest.fixture(scope="module")
+def plant_mv2() -> FuelPlantProfile:
+    profile, _ = load_fuel_plant(PROFILE, MV2)
+    return profile
+
+
+def _maf_at_charge_fraction(cf: float, rpm: float, baro: float = 81.0, iat: float = 25.0) -> float:
+    """The MAF that fills the displacement to ``cf`` of the ambient fill."""
+    return cf * baro * 1000 / (R_AIR * (iat + 273.15)) * 3.954 * rpm / 120
+
+
+def test_fuel_mv_1_stays_frozen_and_fuel_mv_2_is_declared_beside_it(
+    plant: tuple[FuelPlantProfile, B06Rules], plant_mv2: FuelPlantProfile
+) -> None:
+    mv1, _ = plant
+    assert {v: f.name for v, f in plant_files(PROFILE).items()} == {
+        "fuel-mv-1": PLANT_FILE,
+        MV2: MV2_FILE,
+    }
+    # fuel-mv-1: the same baseline hash its spent records were scored under.
+    assert mv1.plant_version == "fuel-mv-1" and mv1.manifold_model == "speed_density_capped"
+    assert mv1.volumetric_efficiency is None and mv1.baseline is not None
+    assert mv1.baseline.ve_curve is None
+    assert mv1.baseline.sha256() == (
+        "6aec1db556989cc693dcf226a3017478c58a19c6c54abf251d9fe9a916e09220"
+    )
+    # fuel-mv-2: its own frozen baseline (hash pinned: a re-fit is a new
+    # baseline, never an edit), identified on the same drives.
+    mv2 = plant_mv2
+    assert mv2.manifold_model == "speed_density_refusing" and mv2.volumetric_efficiency
+    assert mv2.baseline is not None and mv2.baseline.frozen and mv2.baseline.ve_curve
+    assert mv2.baseline.sha256() == (
+        "0180c207492beed438df3b7dbe25e6061eeb9490d3d4e38741829033acf21576"
+    )
+    assert mv2.baseline.fitted_on == mv1.baseline.fitted_on == mv2.split.identification
+    assert mv2.baseline.ve_curve.rpm_edges == mv2.volumetric_efficiency.rpm_edges
+    # No never-scored drive exists: none held out, so it is never qualified.
+    assert mv2.split.held_out == [] and mv2.split.held_out_pending
+    q = plant_qualification(mv2)
+    assert not q.qualified and q.reason is not None and "no held-out recording" in q.reason
+    with pytest.raises(FuelPlantRefusalError) as err:
+        load_fuel_plant(PROFILE, "fuel-mv-9")
+    assert err.value.reason == "plant_version_undeclared"
+
+
+def test_the_revised_map_refuses_above_ambient_where_fuel_mv_1_caps(
+    plant: tuple[FuelPlantProfile, B06Rules], plant_mv2: FuelPlantProfile
+) -> None:
+    mv1, delay = plant
+    p1 = resolve_parameters(mv1, delay)
+    p2 = resolve_parameters(plant_mv2, delay)
+    curve = plant_mv2.baseline.ve_curve if plant_mv2.baseline else None
+    assert curve is not None
+    ve_4500 = float(curve.ve([4500.0], 0.7)[0])
+    assert ve_4500 == pytest.approx(0.905535, abs=1e-6)
+    # Charge fraction 0.8 at 4500 rpm: above VE 0.7, below VE(4500).
+    part = _inputs(rpm=4500.0, maf_gps=_maf_at_charge_fraction(0.8, 4500.0))
+    capped = predict(part, p1, GEOM)
+    assert capped.map_kpa[0] == 81.0  # fuel-mv-1 caps, silently
+    revised = predict(part, p2, GEOM)
+    assert revised.manifold_refusal is not None and revised.manifold_refusal[0] == ""
+    assert revised.map_kpa[0] == pytest.approx(81.0 * 0.8 / ve_4500, rel=1e-9)
+    assert np.isfinite(revised.lambda_delivered[0])
+    # Charge fraction 0.95: above VE(4500) too. Refused and named, never baro.
+    over = _inputs(rpm=4500.0, maf_gps=_maf_at_charge_fraction(0.95, 4500.0))
+    assert predict(over, p1, GEOM).map_kpa[0] == 81.0
+    refused = predict(over, p2, GEOM)
+    assert np.isnan(refused.map_kpa[0]) and np.isnan(refused.lambda_delivered[0])
+    assert refused.manifold_refusal is not None
+    assert refused.manifold_refusal[0] == MAP_ABOVE_AMBIENT
+    # Outside the fit (rpm beyond the bands, or an altitude it never saw).
+    for case in (
+        _inputs(rpm=7000.0, maf_gps=50.0),
+        _inputs(rpm=3000.0, maf_gps=30.0, baro_kpa=65.0),
+        _inputs(rpm=3000.0, maf_gps=30.0, iat_c=21.0),  # a cold morning: IAT is bounded too
+    ):
+        out = predict(case, p2, GEOM)
+        assert out.manifold_refusal is not None
+        assert out.manifold_refusal[0] == MAP_OUTSIDE_VE_FIT and np.isnan(out.map_kpa[0])
+    # Idle (a band the drives never filled above 0.7) runs at the 0.7 floor:
+    # fuel-mv-1's MAP, to rounding.
+    idle = _inputs(rpm=700.0, maf_gps=_maf_at_charge_fraction(0.15, 700.0), pulse_ms=2.5)
+    assert predict(idle, p2, GEOM).map_kpa[0] == pytest.approx(
+        predict(idle, p1, GEOM).map_kpa[0], rel=1e-12
+    )
+
+
+def test_ve_is_fitted_on_identification_drives_only_as_a_lower_envelope(
+    plant_mv2: FuelPlantProfile,
+) -> None:
+    """VE >= charge fraction on every naturally aspirated read: the fit is the
+    largest steady warm charge fraction per band; cold, unsteady and sparse
+    bands do not count, and a held-out drive cannot be fitted on."""
+    ident = plant_mv2.split.identification[0]
+    rows = []
+    for rpm, cf, steady, coolant in [
+        (2500.0, 0.85, True, 90.0),
+        (2600.0, 0.88, True, 90.0),
+        (2700.0, 0.97, False, 90.0),  # a tip-in: MAF filling the manifold
+        (2800.0, 0.95, True, 40.0),  # cold
+        *[(4500.0, 0.90, True, 90.0)] * 2,  # too few reads for the band
+        *[(800.0, 0.2, True, 90.0)] * 5,
+        *[(2400.0, 0.5, True, 90.0)] * 3,
+    ]:
+        rows.append(
+            dict(
+                session=ident,
+                rpm=rpm,
+                charge_fraction=cf,
+                steady=steady,
+                coolant_c=coolant,
+                baro_kpa=81.0,
+                iat_c=25.0,
+            )
+        )
+    samples = pd.DataFrame(rows)
+    out = identify_ve(samples, plant_mv2)
+    curve = out["ve_curve"]
+    assert curve.envelope[2] == pytest.approx(0.88)  # 2000-3000: the steady warm max
+    assert curve.envelope[0] == pytest.approx(0.2)
+    assert curve.envelope[4] is None  # 2 reads < min_reads
+    assert float(curve.ve([2500.0], 0.7)[0]) == pytest.approx(0.88)
+    assert float(curve.ve([800.0], 0.7)[0]) == 0.7  # never filled: the floor
+    assert float(curve.ve([4500.0], 0.7)[0]) == 0.7
+    assert curve.baro_kpa == (81.0, 81.0)
+    held = samples.assign(session="_capture-tuning-2026-09-22T170459")
+    with pytest.raises(FuelPlantRefusalError) as err:
+        identify_ve(held, plant_mv2)
+    assert err.value.reason == "not_identification"
+    broken = pd.concat([samples, samples.iloc[:1].assign(charge_fraction=1.2)])
+    with pytest.raises(FuelPlantRefusalError) as err:
+        identify_ve(broken, plant_mv2)
+    assert err.value.reason == "charge_fraction_above_one"
+
+
+def test_the_ve_curve_belongs_to_a_refusing_plant_only() -> None:
+    raw: dict[str, Any] = yaml.safe_load((PROFILE / MV2_FILE).read_text())
+    capped = copy.deepcopy(raw)
+    capped["manifold_model"] = "speed_density_capped"
+    with pytest.raises(ValidationError, match="volumetric_efficiency"):
+        FuelPlantProfile.model_validate(capped)
+    no_curve = copy.deepcopy(raw)
+    del no_curve["baseline"]["ve_curve"]
+    with pytest.raises(ValidationError, match="freezes its ve_curve"):
+        FuelPlantProfile.model_validate(no_curve)
+    mv1 = _raw()
+    mv1["baseline"]["ve_curve"] = raw["baseline"]["ve_curve"]
+    with pytest.raises(ValidationError, match="no ve_curve"):
+        FuelPlantProfile.model_validate(mv1)
+    unpending = copy.deepcopy(raw)
+    del unpending["split"]["held_out_pending"]
+    with pytest.raises(ValidationError, match="held_out_pending"):
+        FuelPlantProfile.model_validate(unpending)
+
+
+def test_fuel_mv_2_cannot_hold_out_a_drive_fuel_mv_1_spent(
+    plant_mv2: FuelPlantProfile,
+    plant: tuple[FuelPlantProfile, B06Rules],
+    fixture_samples: pd.DataFrame,
+    tmp_path: Path,
+) -> None:
+    _, delay = plant
+    # Its own ledger is empty, so the sibling's is read at load.
+    raw: dict[str, Any] = yaml.safe_load((PROFILE / MV2_FILE).read_text())
+    raw["split"]["held_out"] = [FIXTURE.name]
+    del raw["split"]["held_out_pending"]
+    FuelPlantProfile.model_validate(raw)  # the file alone cannot see it...
+    shutil.copy(PROFILE / PLANT_FILE, tmp_path / PLANT_FILE)
+    (tmp_path / MV2_FILE).write_text(yaml.safe_dump(raw))
+    with pytest.raises(FuelPlantRefusalError) as err:  # ...the profile can
+        load_fuel_plant(tmp_path, MV2)
+    assert err.value.reason == "spent_held_out"
+    # As declared, evaluate refuses by name rather than failing on no frames.
+    with pytest.raises(FuelPlantRefusalError) as err:
+        evaluate([fixture_samples], plant_mv2, delay, sessions_root=ROOT, profile_dir=PROFILE)
+    assert err.value.reason == "held_out_pending"
+    with pytest.raises(FuelPlantRefusalError) as err:
+        evaluate([], plant_mv2, delay, sessions_root=ROOT, profile_dir=PROFILE)
+    assert err.value.reason == "held_out_pending"
+    # A profile built in memory, past every loader, is still refused by
+    # evaluate itself: it reads every plant file's ledger.
+    in_memory = FuelPlantProfile.model_validate(raw)
+    with pytest.raises(FuelPlantRefusalError) as err:
+        evaluate([fixture_samples], in_memory, delay, sessions_root=ROOT, profile_dir=PROFILE)
+    assert err.value.reason == "spent_held_out"
+    # ...and cannot dodge it with a directory that does not declare it.
+    with pytest.raises(FuelPlantRefusalError) as err:
+        evaluate(
+            [fixture_samples], in_memory, delay, sessions_root=ROOT, profile_dir=tmp_path / "x"
+        )
+    assert err.value.reason == "plant_version_undeclared"
+
+
+def test_a_plant_without_held_out_drives_never_qualifies(plant_mv2: FuelPlantProfile) -> None:
+    """A verdict recorded on a recording outside held_out cannot qualify a
+    plant whose held_out is empty (or stand in for its held-out drives)."""
+    assert plant_mv2.baseline is not None
+    record = {
+        "recording": "_capture-tuning-2026-09-21T223734",
+        "baseline_id": plant_mv2.baseline.id,
+        "baseline_sha256": plant_mv2.baseline.sha256(),
+        "plant_version": MV2,
+        "scored_on": "2026-10-08",
+        "verdict": "pass",
+    }
+    raw: dict[str, Any] = yaml.safe_load((PROFILE / MV2_FILE).read_text())
+    raw["spent_held_out"] = [record]
+    with pytest.raises(ValidationError, match="not in split.held_out"):
+        FuelPlantProfile.model_validate(raw)
+    # Built past the validator, qualification still refuses.
+    smuggled = plant_mv2.model_copy(update={"spent_held_out": [SpentRecord.model_validate(record)]})
+    q = plant_qualification(smuggled)
+    assert not q.qualified and q.reason is not None and "no held-out recording" in q.reason
+    failed = plant_mv2.model_copy(
+        update={"spent_held_out": [SpentRecord.model_validate(dict(record, verdict="fail"))]}
+    )
+    assert not plant_qualification(failed).qualified
+    # With a held-out drive declared and passed, a stray verdict still refuses.
+    declared = smuggled.model_copy(
+        update={
+            "split": smuggled.split.model_copy(
+                update={"held_out": ["_capture-x-2026-11-01T000000"], "held_out_pending": None}
+            ),
+            "spent_held_out": [
+                SpentRecord.model_validate(dict(record, recording="_capture-x-2026-11-01T000000")),
+                SpentRecord.model_validate(dict(record, verdict="fail")),
+            ],
+        }
+    )
+    q = plant_qualification(declared)
+    assert not q.qualified and q.reason is not None and "undeclared recordings" in q.reason
+
+
+def test_versions_are_compared_per_sample_on_spent_drives_only(
+    plant: tuple[FuelPlantProfile, B06Rules],
+    plant_mv2: FuelPlantProfile,
+    fixture_samples: pd.DataFrame,
+) -> None:
+    mv1, delay = plant
+    out = compare_versions([fixture_samples], [mv1, plant_mv2], delay)
+    assert "verdict" not in out and "spent_records" not in out
+    assert out["sessions"] == {FIXTURE.name: "spent_held_out"}
+    block = out["spent_held_out"]
+    n1 = block["versions"]["fuel-mv-1"]["n_samples"]
+    assert n1 == block["versions"][MV2]["n_samples"] == out["common_samples"]
+    # The slice's 152 eligible reads, less what fuel-mv-2 refuses by name.
+    refused = sum(out["refused_by_version"][MV2].values())
+    assert out["refused_by_version"]["fuel-mv-1"] == {}
+    assert n1 + refused == 152
+    change = block[f"abs_error_change_{MV2}_minus_fuel-mv-1_pct"]
+    assert change["n"] == n1
+    # Per MAF band the change is still per sample; no band medians side by side.
+    by_band = block[f"abs_error_change_{MV2}_minus_fuel-mv-1_pct_by_maf_band"]
+    assert sum(b["n"] for b in by_band.values()) == n1
+    assert "median_error_by_maf_band_pct" not in block
+    assert change["fraction_better"] + change["fraction_worse"] <= 1.0
+    # A never-scored recording is not looked at.
+    fresh = fixture_samples.assign(session="_capture-tuning-2026-10-09T120000")
+    with pytest.raises(FuelPlantRefusalError) as err:
+        compare_versions([fresh], [mv1, plant_mv2], delay)
+    assert err.value.reason == "unspent_recording"
+    with pytest.raises(FuelPlantRefusalError) as err:
+        compare_versions([fixture_samples], [mv1], delay)
+    assert err.value.reason == "one_version"

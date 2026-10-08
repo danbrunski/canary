@@ -286,6 +286,18 @@ uses the `tuning` profile, so the baseline and the new engine share a schema.
     voltage→kPa transfer from its datasheet, and a sanity check that it reads
     baro with the engine off — the NA-era check that MAP must equal baro at
     KOEO), recorded as a first-class channel.
+  - *The engine simulator's MAP measurement (operator, 2026-10-08)* — this
+    TMAP is the `map_sensor` that `engine_sim_contract.yaml` names. That
+    contract needs it to validate the `manifold_breathing` stage, the throttle
+    flow and the pumping loss (E07.5 remaining 1). No MAP sensor can be
+    fitted before this build. The contract marks the measurement `planned`
+    with this build, and it stays unavailable until it is logged. Record it as
+    `sensor:MANIFOLD_PRESSURE`, the channel the contract's `manifold_pressure`
+    is `observed_as`. **No MAP on the NA intake, ever** (operator,
+    2026-10-08): the TMAP mounts after the intercooler, and no temporary NA
+    port will be fitted. The NA manifold stage stays a best-effort fit and
+    is never validated against measured MAP. Only the boosted plant (a new
+    hardware configuration) gets MAP validation.
   - Both must share the capture clock (monotonic receive time, like the OBD
     path), or boosted fuelling analysis stays blind to the quantities that
     define it. Keep transports symmetric: a second CAN channel is a CAN source

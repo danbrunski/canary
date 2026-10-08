@@ -1,0 +1,409 @@
+# E07.3 remaining 1 / E07.5 -- fuel-mv-2, the revised fuel-response plant
+# (operator-approved 2026-10-08). Declared beside fuel-mv-1 (fuel_plant.yaml),
+# which stays frozen with its baseline and spent drives untouched.
+#
+# What changed from fuel-mv-1, and nothing else:
+#   * VE depends on rpm (volumetric_efficiency; the fitted curve is frozen in
+#     baseline.ve_curve). E07.5 found the shared working VE 0.7 contradicted at
+#     high load: the steady charge fraction exceeds it on 10.6 % of warm reads.
+#   * MAP refuses instead of capping (manifold_model: speed_density_refusing):
+#     a read whose steady MAP at VE(rpm) would exceed baro is NaN and named
+#     manifold_above_ambient, as the manifold_breathing stage refuses it.
+#   * The lumped scale is re-identified with that MAP, on the same
+#     identification drives, into a new frozen baseline.
+#
+# Schema: src/analysis/fuel_plant.py (FuelPlantProfile); evaluation:
+# src/analysis/fuel_plant_eval.py; reproduce with
+#   .venv/bin/python -m tools.fuel_plant_check identify --plant-version fuel-mv-2
+#   .venv/bin/python -m tools.fuel_plant_check compare --plant-version fuel-mv-1 fuel-mv-2
+# Physics is generic; every number below is this truck's.
+#
+# Contract: data/nissan-xterra-2008/engine_sim_contract.yaml names this version
+# under fuel_delivery.implementation.other_plant_versions and declares its MAP
+# as a reconciled internal model with the VE fit's bounds. The contract still
+# runs fuel-mv-1.
+schema_version: 1
+plant_version: fuel-mv-2
+hardware_configuration: na_stock_injectors_2026_10
+manifold_model: speed_density_refusing
+
+# VE(rpm), declared before the fit (2026-10-08). Per band, the largest steady
+# warm charge fraction (MAF over the ideal-gas fill of the displacement at
+# baro and IAT) on the identification drives: on a naturally aspirated engine
+# charge fraction = VE x MAP / baro <= VE on every read, so that envelope is
+# the smallest VE the drives allow, and VE itself where they reached full
+# breathing. A band the drives never filled above the registry's working VE
+# runs at that working VE (the floor). Load dependence is not modelled: with
+# no MAP sensor only VE x MAP is identified, so VE at part load is assumed equal
+# to VE at full breathing for the same rpm.
+#
+# Known limitation (2026-10-08), owed a load-dependent VE: steady warm idle
+# has charge fraction p50 0.151 (1,875 reads, 762 rpm, 3.46 g/s, baro 81 kPa).
+# At the 0.7 floor that is MAP 17.5 kPa; a warm NA idle normally sits at
+# ~28-35 kPa, i.e. idle VE ~0.35-0.45. So the floor, and "part-load VE =
+# full-breathing VE", understate part-load MAP and overstate injector dP by
+# ~3 % at idle (~1.5 % flow) -- on 614 of the 841 spent-drive reads.
+volumetric_efficiency:
+  form: rpm_envelope
+  rpm_edges: [500.0, 1000.0, 2000.0, 3000.0, 4000.0, 5000.0, 6500.0]
+  min_reads: 5
+  evidence: >-
+    Bands are engine_dynamics.RPM_BANDS, the bands the E07.5 breathing bound
+    was reported in (500 rpm to the 6500 rpm redline, the manifold stage's
+    applicability). Steady is this file's steady rule applied to MAF reads
+    (rpm and MAF spans over the preceding 2 s, at least 3 reads each): it
+    removes the tip-in reads where MAF fills the manifold and is not the
+    cylinder charge (E07.5: the reads above 1.0 were single 0.25 s tip-in
+    reads). min_reads 5 keeps a band from resting on one or two reads.
+
+geometry:
+  cylinders: 6
+  displacement_l: 3.954      # VQ40DE, EM-134
+  strokes: 4
+  banks: 2
+
+specs:
+  pulse: 'did:ECM_INJECTOR_PULSE_1'          # injector index 0 = bank 1, Ts included
+  rpm: 'obd:RPM'
+  maf: 'obd:MAF'
+  lambda_observed: 'obd:O2_WR_LAMBDA_S1'     # bank 1 A/F sensor, ECM's altitude-corrected lambda
+  baro: 'obd:BAROMETRIC_PRESSURE'
+  intake_temp: 'obd:INTAKE_TEMP'
+  coolant: 'obd:COOLANT_TEMP'
+  battery_voltage: 'obd:CONTROL_MODULE_VOLTAGE'
+  rail_pressure: 'sensor:FUEL_PRESSURE'      # AEM gauge, kPa gauge, from 2026-10-04
+  bfs: 'did:ECM_AIR_CHARGE'
+  stft: 'obd:SHORT_FUEL_TRIM_1'
+  ltft: 'obd:LONG_FUEL_TRIM_1'
+  reference_phi: 'mem:ECM_TARGET_EQUIV_RATIO'
+  fuel_cut_reference: 'obd:COMMANDED_EQUIV_RATIO'
+
+# ECU command channels. Refused as plant inputs and as the observation: the
+# plant computes delivered lambda from air and fuel and is never handed the
+# target. reference_phi only labels the regime.
+command_specs:
+  - 'mem:ECM_TARGET_EQUIV_RATIO'
+  - 'obd:COMMANDED_EQUIV_RATIO'
+  - 'obd:COMMANDED_AFR'
+
+# B06's declaration, validated with its own Eligibility schema: the lambda
+# delay (read where it was frozen, never refitted), the closed-loop band and
+# the post-fuel-cut holdoffs. Every recording in either regime's informed_by
+# is refused as held-out evidence. The delay is the ENRICHMENT RAM-target
+# route's 0.10 s; the plant applies it to closed-loop reads and to pulse-DID
+# anchors too -- an extrapolation B06 did not measure (its closed-loop delay
+# is not_estimated), reported as a sensitivity over the 0-0.5 s bracket.
+delay:
+  file: lambda_delivery.yaml
+  regime: enrichment
+  source: ram_final_target
+
+pulse_chain:
+  dead_time_base: {address: 0x8C41, width: 1, value: 47}
+  dead_time_slope: {address: 0x84F2, width: 1, value: 92}
+  rail_reference: {address: 0x8A89, width: 1, value: 175}
+  flow_scaler: {address: 0x9254, width: 2, value: 10601}
+  vacuum_load_curve: 0xD627
+  vacuum_rpm_curve: 0xD637
+  dead_time_vref: 175
+  minimum_g: 246
+  check_bfs_lag_s: 0.5
+  check_bfs_span: 0.03
+  evidence: >-
+    docs/ecu-firmware-analysis.md "Injector pulse chain, dead time and the BFS
+    ceiling" (decompiler, 2026-10-05); the same in the UpRev base and every
+    tune. Values checked against ZS44A-20260920 by calibration_from_image.
+
+registry:
+  parameters:
+    # ---- the contract's six (same ids, same status)
+    - id: displacement
+      units: L
+      status: known
+      source: profile_fact
+      value: 3.954
+      evidence: 'VQ40DE 3,954 cc (EM-134).'
+    - id: injector_static_flow
+      units: g_per_s
+      status: requires_measurement
+      evidence: >-
+        Bosch EV14 0280158007, ~296 cc/min at 3 bar (vendor data, EC-500 part
+        number) is a datasheet prior for a new injector, not this truck's
+        injectors. Only its product with the MAF gain, fuel stoichiometry and
+        lambda gain is identifiable from logs (stoich_air_per_open_ms). Needs a
+        flow bench or an independent fuel-mass measurement.
+    - id: injector_dead_time
+      units: ms
+      status: requires_measurement
+      working_assumption:
+        value: 0.0
+        bracket: [-0.1, 0.1]
+        effect: injector_latency_unmeasured
+        basis: >-
+          Run as the ECM's own compensation Ts = max(0, 47 + ((175 - Vb) x 92)
+          >> 7) x 10 us plus this offset (0 = the injector opens as the ECM
+          believes). The bracket is a declared +-0.1 ms, not a measurement; it
+          matters most at idle (Te ~2 ms -> ~5 %), least at WOT (~1 %).
+      evidence: 'The ECM''s Ts is its compensation, not the injector''s measured latency.'
+    - id: rail_pressure_behaviour
+      units: kPa
+      status: identifiable
+      source: measurement
+      evidence: >-
+        sensor:FUEL_PRESSURE at 100 Hz since 2026-10-04 (the plant reads it per
+        sample as rail_pressure; anti-alias firmware from 21:52:33Z, so earlier
+        reads are window-median filtered).
+    - id: maf_transfer_bias
+      units: percent
+      status: requires_measurement
+      evidence: >-
+        No independent airflow reference. A MAF error and an injector-flow error
+        are the same number to lambda; it stays inside the airflow boundary and
+        inside stoich_air_per_open_ms, never assigned to the injector.
+    - id: lambda_observation_delay
+      units: s
+      status: requires_measurement
+      working_assumption:
+        value: 0.1
+        bracket: [0.0, 0.5]
+        effect: lambda_delay_weakly_supported
+        basis: >-
+          B06's frozen enrichment delay (lambda_delivery.yaml, RAM-target route,
+          sign test p = 0.11), restated here and checked equal at load; steady
+          regions dwell 2 s, so the plant's steady score barely moves across the
+          bracket (reported as a sensitivity).
+      evidence: 'B06.3/R05.16: weakly supported; never fitted on a test pull.'
+
+    # ---- what the plant also reads
+    - id: stoich_air_per_open_ms
+      units: g_per_ms
+      status: identifiable
+      source: log_fit
+      components: [injector_static_flow, fuel_stoich_afr, maf_transfer_bias, lambda_sensor_gain]
+      # 296 cc/min at 300 kPa -> 319.7 at 350 kPa (orifice law) x 0.745 g/cc
+      # / 60000 ms/min x 14.1 (E10) = 0.0560 g air per ms.
+      prior: 0.0560
+      evidence: >-
+        Grams of stoichiometric air per ms of effective open time at the
+        reference differential pressure, as MAF, the pulse and PID 0x24 see it.
+        Fitted on identification drives only (median of steady-region medians
+        of lambda_pred(s=1)/lambda_obs). It is a product: none of its
+        components is identified by it.
+    - id: fuel_stoich_afr
+      units: ratio
+      status: requires_measurement
+      working_assumption:
+        value: 14.1
+        bracket: [14.0, 14.7]
+        effect: fuel_blend_unmeasured
+        basis: 'Pump gasoline, E10 assumed (E0 14.7). Moves fuel grams only, never lambda.'
+      evidence: 'Ethanol content of the tank is not measured.'
+    - id: lambda_sensor_gain
+      units: ratio
+      status: requires_measurement
+      evidence: >-
+        PID 0x24 is the ECM's own lambda from the one bank-1 A/F sensor (with
+        its altitude gain); no external wideband has been logged, so its gain
+        stays inside stoich_air_per_open_ms.
+    - id: reference_delta_p
+      units: kPa
+      status: known
+      source: datasheet
+      value: 350.0
+      evidence: 'Returnless rail ~350 kPa (EC-494/EC-499); the lumped scale is defined at this dP.'
+    - id: injector_flow_exponent
+      units: ratio
+      status: known
+      source: physics
+      value: 0.5
+      evidence: >-
+        Incompressible orifice: flow ~ sqrt(dP). The ECM's own correction is the
+        same law (b1772 = 256 sqrt(350/(350 + vacuum)), linearised).
+    - id: rail_pressure
+      units: kPa
+      status: identifiable
+      source: measurement
+      working_assumption:
+        value: 350.0
+        bracket: [305.0, 371.0]
+        effect: rail_pressure_unmeasured
+        basis: >-
+          Used only for samples with no sensor:FUEL_PRESSURE (every drive before
+          2026-10-04). Value: the FSM's 350 kPa; bracket: the range the gauge
+          read on _capture-ram-study-2026-10-04T204557 (305-371 kPa).
+      evidence: 'sensor:FUEL_PRESSURE, window median over +-0.5 s, where logged.'
+    - id: manifold_pressure
+      units: volumetric_efficiency
+      status: requires_measurement
+      working_assumption:
+        value: 0.7
+        bracket: [0.4, 1.0]
+        effect: manifold_pressure_unmeasured
+        basis: >-
+          The floor of VE(rpm): a band whose steady identification reads never
+          exceeded 0.7 runs at 0.7 (fuel-mv-1's working value; the bracket spans
+          idle-like to full breathing and is a declared range, not a fit). A
+          band that did exceed it runs at its fitted envelope (baseline.ve_curve).
+          MAP is steady speed density from the paired air charge and IAT at
+          that VE; above baro it is refused per sample, never capped.
+      evidence: >-
+        No MAP sensor on this engine (PID 0x0B unsupported). VE(rpm) is
+        identified from MAF, rpm, baro and IAT only: it inherits MAF's transfer
+        error (a MAF reading 5 % high is a VE 5 % high), it is not an
+        independent VE measurement, and only VE x MAP/baro is identified, so
+        part-load VE is the full-breathing value by assumption. Known
+        limitation: idle charge fraction ~0.15 at the 0.7 floor gives MAP
+        ~17.5 kPa where a warm NA idle is ~28-35 kPa (idle VE ~0.35-0.45), so
+        part-load MAP is understated and injector dP overstated (~3 % at idle,
+        ~1.5 % flow); a load-dependent VE is owed. A MAP sensor is
+        planned with the supercharger build (operator, 2026-10-08), which is a
+        new hardware configuration.
+    - id: bank_air_split
+      units: ratio
+      status: requires_measurement
+      working_assumption:
+        value: 0.5
+        bracket: [0.48, 0.52]
+        effect: bank_air_split_unmeasured
+        basis: 'Equal air per bank assumed; one MAF for both banks, no per-bank airflow measurement.'
+      evidence: 'Bank imbalance would show as a constant per-bank lambda offset; not separable from a per-bank injector offset.'
+
+# Which pulse reads are steady enough to score a mean-value plant on.
+steady:
+  window_s: 2.0
+  rpm_span: 0.08
+  maf_span: 0.15
+  pulse_span: 0.15
+  min_rpm_reads: 3
+  min_maf_reads: 3
+  min_pulse_reads: 2
+  min_coolant_c: 70.0
+  # The short-pulse correction (cal 0x9120-0x9126) acts after the DID and is
+  # not decoded; pulses with < 1 ms effective open time are excluded.
+  min_effective_pulse_ms: 1.0
+  lambda_rail: 1.9
+  fuel_cut_margin_counts: 2
+  region_gap_s: 2.5
+  pair_tolerance_s: 0.3
+  ecu_pair_tolerance_s: 0.1
+  reference_phi_max_age_s: 1.2
+  slow_max_age_s: 120.0
+  battery_max_age_s: 10.0
+  rail_window_s: 0.5
+  evidence: >-
+    A 2 s window covers B06's whole delay bracket (0-0.5 s) four times over,
+    and its 3-poll steady-target logic at ~1.5 Hz pulse reads; spans are the
+    pulse-chain check's steadiness (rpm, BFS within a few percent) widened
+    for MAF's own noise. The post-fuel-cut holdoffs (15 s closed loop, 6 s
+    enrichment) and the closed-loop phi band are read from B06's own schema
+    (load_b06), never copied here.
+
+# Declared 2026-10-08, before the fit. The same identification drives as
+# fuel-mv-1 (B06's and E07.3's), so VE(rpm) and the scale see nothing new.
+# Every recording that could be held out is spent: the four fuel-mv-1 held-out
+# drives were scored against its baseline, and no other recording has pulse
+# reads co-observed with MAF and lambda (E07.4 inventory). fuel-mv-2 therefore
+# has no held-out drive and is never qualified until never-scored drives are
+# declared here (truck; E07.3 remaining 1).
+split:
+  declared_on: 2026-10-08
+  identification:
+    - _capture-tuning-2026-09-21T223734
+    - _capture-tuning-2026-09-21T232153
+    - _capture-tuning-2026-09-23T164007
+  held_out: []
+  held_out_pending: >-
+    Every steady-scoreable recording is either identification or spent by
+    fuel-mv-1 (4 drives, 2026-10-05). Never-scored tuning-profile drives with
+    the pulse DID, PID 0x42 and the AEM rail are owed (E07.3 remaining 1-2).
+  evidence: >-
+    Identification is fuel-mv-1's three drives (B06 already used the 09-21
+    pair). Comparison with fuel-mv-1 on its spent drives is a per-sample
+    diagnostic (fuel_plant_eval.compare_versions), never a verdict.
+
+# Re-declared for fuel-mv-2 on 2026-10-08, before its fit, unchanged from
+# fuel-mv-1's: the plant is held to the same bounds.
+acceptance:
+  declared_on: 2026-10-08
+  pooled_median_abs_pct: 2.0
+  sample_abs_p90_pct: 8.0
+  region_abs_pct: 4.0
+  region_pass_fraction: 0.85
+  enrichment_median_abs_pct: 3.0
+  min_regions: 20
+  min_enrichment_regions: 3
+  bootstrap_resamples: 2000
+  bootstrap_level: 0.9
+  seed: 20261005
+  evidence: >-
+    Set from the identification drives only: there the per-sample spread of the
+    fitted scale is about p10/p90 -6/+8 %, B06's closed-loop residual is
+    about +-4 % p05/p95, and the pulse chain's own per-sample scatter is
+    p10/p90 0.96/1.03. Fuel error is the same information inverted
+    (100 (lambda_obs/lambda_pred - 1)) and is held to the same bounds, not
+    counted as a second test.
+
+# fuel-mv-2's baseline hardware parameter set, frozen 2026-10-08 -- sha256
+# (computed by BaselineParameterSet.sha256, never supplied):
+#   0180c207492beed438df3b7dbe25e6061eeb9490d3d4e38741829033acf21576 from
+# `tools.fuel_plant_check identify --plant-version fuel-mv-2` on
+# split.identification, before any comparison with fuel-mv-1 was run.
+baseline:
+  id: na-stock-2026-10-08.mv2
+  frozen: true
+  frozen_on: 2026-10-08
+  plant_version: fuel-mv-2
+  hardware_configuration: na_stock_injectors_2026_10
+  fitted_on:
+    - _capture-tuning-2026-09-21T223734
+    - _capture-tuning-2026-09-21T232153
+    - _capture-tuning-2026-09-23T164007
+  revisions: [ZS44A-20260920]
+  values:
+    stoich_air_per_open_ms: 0.050792
+  intervals:
+    stoich_air_per_open_ms: [0.050357, 0.051198]
+  method: >-
+    VE(rpm) first: per band of volumetric_efficiency.rpm_edges, the largest
+    steady warm charge fraction over the identification drives (3,067 of
+    12,647 MAF reads steady, warm and in range), rounded up at 1e-6 so the
+    envelope's own read is not refused. Then the scale: median over 89
+    steady regions of the region median of lambda_pred(s = 1) / lambda_obs
+    (764 pulse reads; 2 more refused as manifold_above_ambient: steady by the
+    pulse-anchored rule, not by the MAF-anchored one), with MAP at VE(rpm);
+    90 % interval from 2000 bootstrap resamples of regions (seed 20261005).
+    Other working assumptions at their central values (dead-time offset 0,
+    rail 350 kPa, equal banks, delay 0.10 s).
+  fit_summary:
+    n_samples: 764
+    n_regions: 89
+    sample_p10: 0.047434
+    sample_p90: 0.055241
+    session_median_min: 0.049407
+    session_median_max: 0.05234
+    fit_over_datasheet_prior: 0.907
+    ve_reads_used: 3067
+    ve_bands_above_floor: 4
+    note: >-
+      0.53 % below fuel-mv-1's 0.051063 (its MAP at VE 0.7 overstated MAP
+      above 2000 rpm, so it understated injector dP and flow). In-sample,
+      paired on the same 764 reads (compare_versions): |err| p90 11.61 %
+      (fuel-mv-1 12.01 %), region pass fraction 0.618 (0.573); per sample
+      48 % of reads better, 52 % worse. The plant still fails its own bounds
+      in-sample, so VE alone is not the structural miss.
+  ve_curve:
+    rpm_edges: [500.0, 1000.0, 2000.0, 3000.0, 4000.0, 5000.0, 6500.0]
+    # Runs at max(envelope, 0.7): 0.7, 0.7, 0.888395, 0.894657, 0.905535, 0.872824.
+    envelope: [0.217445, 0.67674, 0.888395, 0.894657, 0.905535, 0.872824]
+    n_reads: [1875, 72, 805, 286, 24, 5]
+    # The baro and IAT ranges of the 3,067 reads the fit used; outside either a
+    # read is outside_ve_fit. IAT is bounded because on this truck INTAKE_TEMP
+    # tracks airflow (stagnation, not the charge temperature), so the ideal-gas
+    # fill does not divide the charge density out.
+    baro_kpa: [79.0, 82.0]
+    iat_c: [23.0, 50.0]
+
+# Held-out recordings scored against this plant's baseline (none yet). A
+# recording spent by any version in this profile (fuel-mv-1's four) is refused as
+# held-out evidence here too (load_fuel_plant reads every sibling's ledger).
+spent_held_out: []

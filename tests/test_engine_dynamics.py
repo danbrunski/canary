@@ -8,7 +8,9 @@ shown on them, and the refusals by mutating the contract in memory.
 
 from __future__ import annotations
 
+import copy
 import dataclasses
+import functools
 from pathlib import Path
 from typing import Any
 
@@ -81,9 +83,15 @@ def _passing_stub(contract: SimContract, *, passed: bool = True) -> ConvergenceR
     )
 
 
+@functools.cache
+def _parsed_contract() -> dict[str, Any]:
+    parsed: dict[str, Any] = yaml.safe_load((PROFILE / CONTRACT_FILE).read_text())
+    return parsed
+
+
 def _raw() -> dict[str, Any]:
-    raw: dict[str, Any] = yaml.safe_load((PROFILE / CONTRACT_FILE).read_text())
-    return raw
+    """A fresh, mutable copy of the profile's contract (parsed once)."""
+    return copy.deepcopy(_parsed_contract())
 
 
 def _sub(raw: dict[str, Any], sub_id: str) -> dict[str, Any]:
@@ -432,17 +440,28 @@ def test_a_coarse_step_or_an_unverified_study_is_refused(kit: Any) -> None:
 
 
 def test_the_fuel_plants_own_map_is_a_declared_exception(kit: Any) -> None:
-    """fuel-mv-1 (frozen) computes MAP itself in plant replay; the contract
-    says so, where the two differ, and who owes the reconciliation."""
+    """fuel-mv-1 (frozen) computes MAP itself in plant replay, capped; the
+    contract says so, where the two differ, and who owes the reconciliation.
+    fuel-mv-2 computes it too, but refuses above ambient as the stage does:
+    its entry is reconciled, and the owed reason is fuel-mv-1's alone."""
     contract, _, _ = kit
     assert check_internal_models(contract) == []
-    (im,) = contract.subsystem("fuel_delivery").internal_models
-    assert (im.quantity, im.owner, im.modes) == (
-        "manifold_pressure",
-        "manifold_breathing",
-        ["plant_replay"],
-    )
-    assert "caps MAP at baro" in im.differs and "plant_version" in im.owed_by
+    assert check_internal_models(contract, PROFILE) == []
+    entries = {
+        tuple(im.plant_versions): im for im in contract.subsystem("fuel_delivery").internal_models
+    }
+    assert set(entries) == {("fuel-mv-1",), ("fuel-mv-2",)}
+    owed, reconciled = entries[("fuel-mv-1",)], entries[("fuel-mv-2",)]
+    for im in (owed, reconciled):
+        assert (im.quantity, im.owner, im.modes) == (
+            "manifold_pressure",
+            "manifold_breathing",
+            ["plant_replay"],
+        )
+    assert "caps MAP at baro" in owed.differs and owed.owed_by and "plant_version" in owed.owed_by
+    assert owed.reconciled_by is None and owed.invariants == []
+    assert reconciled.owed_by is None and reconciled.reconciled_by
+    assert reconciled.invariants == ["manifold_at_or_below_ambient"]
     raw = _raw()
     _sub(raw, "fuel_delivery")["internal_models"] = []
     assert check_internal_models(SimContract.model_validate(raw)) == [
@@ -453,9 +472,139 @@ def test_the_fuel_plants_own_map_is_a_declared_exception(kit: Any) -> None:
     with pytest.raises(ValidationError, match="internal model of 'manifold_pressure'"):
         SimContract.model_validate(raw)
     st = standings(contract, PROFILE, convergence=_passing_stub(contract))
+    owed_reason = "internal_model:manifold_pressure:owed_by_next_plant_version"
+    assert owed_reason in st["fuel_delivery"].reasons
+    mv2 = standings(
+        contract,
+        PROFILE,
+        convergence=_passing_stub(contract),
+        versions={"fuel_delivery": "fuel-mv-2"},
+    )["fuel_delivery"]
+    assert owed_reason not in mv2.reasons
+    # Not validated either: it has never been scored held out.
+    assert not mv2.validated
     assert (
-        "internal_model:manifold_pressure:owed_by_next_plant_version" in st["fuel_delivery"].reasons
+        "plant_not_qualified: baseline na-stock-2026-10-08.mv2 has no held-out recording "
+        "(held_out_pending)"
+    ) in mv2.reasons
+    with pytest.raises(SimulationRefusalError) as err:
+        subsystem_standing(
+            contract,
+            contract.subsystem("fuel_delivery"),
+            profile_dir=PROFILE,
+            plant_version="fuel-mv-9",
+        )
+    assert err.value.reason == "plant_version_undeclared"
+
+
+def test_a_reconciliation_is_held_by_the_plant_not_stated(kit: Any) -> None:
+    """The contract cannot call a version's MAP reconciled unless that version
+    enforces the owner's invariant, nor declare fit bounds other than the
+    frozen fit's; every declared version has exactly one entry."""
+    raw = _raw()
+    mv1 = _sub(raw, "fuel_delivery")["internal_models"][0]
+    mv1.update(owed_by=None, reconciled_by="stated", invariants=["manifold_at_or_below_ambient"])
+    assert check_internal_models(SimContract.model_validate(raw), PROFILE) == [
+        "fuel_delivery: fuel-mv-1's manifold_pressure does not enforce manifold_at_or_below_ambient"
+    ]
+    raw = _raw()
+    _sub(raw, "fuel_delivery")["internal_models"][1]["invariants"] = []
+    with pytest.raises(ValidationError, match="does not hold its owner's invariants"):
+        SimContract.model_validate(raw)
+    raw = _raw()
+    _sub(raw, "fuel_delivery")["internal_models"][1]["owed_by"] = "both"
+    with pytest.raises(ValidationError, match="exactly one of owed_by"):
+        SimContract.model_validate(raw)
+    raw = _raw()
+    del _sub(raw, "fuel_delivery")["internal_models"][1]
+    assert check_internal_models(SimContract.model_validate(raw)) == [
+        "fuel_delivery: fuel-mv-2 has 0 internal-model entries for manifold_pressure (exactly one)"
+    ]
+    raw = _raw()
+    _sub(raw, "fuel_delivery")["internal_models"][1]["plant_versions"] = ["fuel-mv-3"]
+    with pytest.raises(ValidationError, match="does not declare"):
+        SimContract.model_validate(raw)
+    raw = _raw()
+    fit = _sub(raw, "fuel_delivery")["internal_models"][1]["parameter_fits"][0]
+    fit["bounds"][1]["minimum"] = 63.0
+    assert check_internal_models(SimContract.model_validate(raw), PROFILE) == [
+        "fuel_delivery: fuel-mv-2 fit of volumetric_efficiency: contract bounds "
+        "{'engine_speed': (500.0, 6500.0), 'barometric_pressure': (63.0, 82.0), "
+        "'intake_air_temperature': (23.0, 50.0)}, frozen fit "
+        "{'engine_speed': (500.0, 6500.0), 'barometric_pressure': (79.0, 82.0), "
+        "'intake_air_temperature': (23.0, 50.0)}"
+    ]
+    # Dropping the IAT bound from the contract is a mismatch too.
+    raw = _raw()
+    fit = _sub(raw, "fuel_delivery")["internal_models"][1]["parameter_fits"][0]
+    fit["bounds"] = [b for b in fit["bounds"] if b["quantity"] != "intake_air_temperature"]
+    assert len(check_internal_models(SimContract.model_validate(raw), PROFILE)) == 1
+
+
+def test_the_ve_fit_names_the_maf_error_it_carries(kit: Any) -> None:
+    """A VE fitted from MAF is a log fit that inherits MAF's transfer error;
+    it cannot be declared without naming an unresolved error it carries, nor
+    as anything but a log fit."""
+    contract, _, _ = kit
+    (fit,) = contract.subsystem("fuel_delivery").internal_models[1].parameter_fits
+    assert fit.kind == "log_fit" and fit.inherits == ["maf_transfer_bias"]
+    assert "mass_air_flow" in fit.identified_from
+    assert "Not an independent VE measurement" in fit.evidence
+    raw = _raw()
+    _sub(raw, "fuel_delivery")["internal_models"][1]["parameter_fits"][0]["inherits"] = []
+    with pytest.raises(ValidationError, match="inherits"):
+        SimContract.model_validate(raw)
+    raw = _raw()
+    _sub(raw, "fuel_delivery")["internal_models"][1]["parameter_fits"][0]["inherits"] = [
+        "displacement"
+    ]
+    with pytest.raises(ValidationError, match="a known parameter"):
+        SimContract.model_validate(raw)
+    raw = _raw()
+    _sub(raw, "fuel_delivery")["internal_models"][1]["parameter_fits"][0]["kind"] = "measurement"
+    with pytest.raises(ValidationError):
+        SimContract.model_validate(raw)
+
+
+def test_the_map_sensor_is_planned_with_the_supercharger_and_still_unavailable(
+    kit: Any,
+) -> None:
+    """Operator decision 2026-10-08: no MAP sensor before the supercharger
+    build. Planned is not available: every stage that needs it still says so."""
+    contract, _, _ = kit
+    needing = [
+        (s.id, m)
+        for s in contract.subsystems
+        for m in s.required_measurements
+        if m.id == "map_sensor"
+    ]
+    assert {sid for sid, _ in needing} == {
+        "fuel_delivery",
+        "manifold_breathing",
+        "throttle_flow",
+        "torque_production",
+    }
+    for _, m in needing:
+        assert m.status == "planned" and m.plan is not None
+        assert (m.plan.decided_on, m.plan.decided_by) == ("2026-10-08", "operator")
+        assert "supercharger" in m.plan.arrives_with
+    (ref,) = [
+        r for r in contract.subsystem("manifold_breathing").references if r.id == "map_sensor"
+    ]
+    assert ref.status == "requires_measurement"
+    st = standings(contract, PROFILE, convergence=_passing_stub(contract))
+    assert "requires_measurement:map_sensor" in st["manifold_breathing"].reasons
+    assert not st["manifold_breathing"].validated
+    raw = _raw()
+    _sub(raw, "throttle_flow")["required_measurements"][0]["plan"] = None
+    with pytest.raises(ValidationError, match="planned measurement names its plan"):
+        SimContract.model_validate(raw)
+    raw = _raw()
+    _sub(raw, "manifold_breathing")["required_measurements"][1]["plan"] = dict(
+        _sub(raw, "throttle_flow")["required_measurements"][0]["plan"]
     )
+    with pytest.raises(ValidationError, match="planned measurement names its plan"):
+        SimContract.model_validate(raw)
 
 
 # -- validation: independent references only ----------------------------------------------
@@ -542,6 +691,7 @@ def test_only_a_pass_against_an_available_independent_reference_validates() -> N
             ref["status"], ref["requires"] = "available", None
     for m in sub["required_measurements"]:
         m["status"] = "available"
+        m.pop("plan", None)
     sub["validations"][0]["reference"] = "map_sensor"
     contract = SimContract.model_validate(raw)
     st = subsystem_standing(

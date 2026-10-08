@@ -337,6 +337,7 @@ def synthetic(tmp_path_factory: pytest.TempPathFactory) -> dict[str, Any]:
         profile,
         delay,
         sessions_root=root,
+        profile_dir=PROFILE,
     )
     assert held["verdict"] == "pass"
     spent = [
@@ -541,11 +542,13 @@ def test_synthetic_and_recorded_never_mix(
         identify([sim], profile, delay, sessions_root=syn["root"])
     assert err.value.reason == "synthetic_as_observed"
     with pytest.raises(FuelPlantRefusalError) as err:
-        evaluate([sim], profile, delay, sessions_root=syn["root"])
+        evaluate([sim], profile, delay, sessions_root=syn["root"], profile_dir=PROFILE)
     assert err.value.reason == "synthetic_as_observed"
     recorded = syn["pre"][0].assign(session=HELD[0].replace("_sim-", "_capture-x-"))
     with pytest.raises(FuelPlantRefusalError) as err:
-        evaluate([recorded], syn["profile"], syn["delay"], sessions_root=syn["root"])
+        evaluate(
+            [recorded], syn["profile"], syn["delay"], sessions_root=syn["root"], profile_dir=PROFILE
+        )
     assert err.value.reason == "synthetic_plant_on_recording"
 
 

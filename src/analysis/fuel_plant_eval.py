@@ -23,6 +23,17 @@ documents:
   its kind: ``missing_input`` is not ``transient``.
 * **Regions are the unit of uncertainty.** Samples inside one steady stretch
   are correlated, so bootstrap intervals resample regions.
+* **A revised plant's MAP refuses, never caps.** For a
+  ``speed_density_refusing`` plant, a read whose steady MAP at the fitted
+  VE(rpm) would exceed ambient is ``manifold_above_ambient`` (outside the
+  fitted rpm range: ``outside_ve_fit``), named and not scored
+  (:func:`apply_manifold_refusals`). VE(rpm) itself is fitted on
+  identification drives only (:func:`identify_ve`).
+* **Two versions are compared per sample, never by their aggregates, and
+  never on fresh evidence.** :func:`compare_versions` scores every frozen
+  version on the identical samples and reports the paired per-sample change;
+  it returns no verdict, spends nothing, and refuses a recording that is
+  neither in-sample nor already spent (looking would spend it).
 """
 
 from __future__ import annotations
@@ -37,15 +48,21 @@ import numpy as np
 import pandas as pd
 
 from src.analysis.channels import read_channels
+from src.analysis.engine_dynamics import breathing_samples
 from src.analysis.fuel_plant import (
+    MAP_ABOVE_AMBIENT,
+    MAP_OUTSIDE_VE_FIT,
     B06Rules,
     FloatArray,
     FuelPlantProfile,
     FuelPlantRefusalError,
     PlantInputs,
     PulseChain,
+    ResolvedParameters,
+    VeCurve,
     bootstrap_median,
     predict,
+    refuse_spent_elsewhere,
     resolve_parameters,
     sensitivity_cases,
 )
@@ -71,6 +88,10 @@ STATES: tuple[str, ...] = (
     "post_fuel_cut",
     "transient",
     "short_pulse",
+    # Set after the prediction, on otherwise eligible reads, by a plant whose
+    # MAP refuses (apply_manifold_refusals); a capping plant never sets them.
+    MAP_OUTSIDE_VE_FIT,
+    MAP_ABOVE_AMBIENT,
     "eligible",
 )
 #: MAF bands for coverage, g/s.
@@ -403,18 +424,150 @@ def check_drive_independence(profile: FuelPlantProfile, sessions_root: Path) -> 
     return drives
 
 
+def apply_manifold_refusals(
+    frame: pd.DataFrame, profile: FuelPlantProfile, params: ResolvedParameters
+) -> pd.DataFrame:
+    """Name the eligible reads a refusing plant's MAP refuses.
+
+    A ``speed_density_capped`` plant returns the frame unchanged (its MAP
+    never refuses), so fuel-mv-1's samples are bit-identical. Otherwise each
+    eligible read whose MAP is refused takes the refusal as its state; regions
+    keep their ids (a refused read drops out of its region)."""
+    if params.manifold_model != "speed_density_refusing" or not len(frame):
+        return frame
+    eligible = (frame["state"] == "eligible").to_numpy()
+    if not eligible.any():
+        return frame
+    out = predict(plant_inputs(frame[eligible]), params, profile.geometry)
+    assert out.manifold_refusal is not None
+    state = frame["state"].to_numpy(dtype=object).copy()
+    idx = np.flatnonzero(eligible)
+    refused = out.manifold_refusal != ""
+    state[idx[refused]] = out.manifold_refusal[refused]
+    frame = frame.copy()
+    frame["state"] = state
+    return frame
+
+
+def ve_samples(session: Path, profile: FuelPlantProfile) -> pd.DataFrame:
+    """Per MAF read, the charge fraction (``engine_dynamics.breathing_samples``:
+    rpm paired one-to-one on the acquisition clock, baro and IAT as-of) and
+    whether the read is steady under the plant's own rule (rpm and MAF spans
+    over the preceding ``window_s``, with the minimum read counts)."""
+    out = breathing_samples(session, profile)
+    rule = profile.steady
+    t = out["t"].to_numpy(dtype=float)
+    rpm = out["rpm"].to_numpy(dtype=float)
+    ok = np.isfinite(rpm)
+    rmin, rmax, rn = _window(_Series(t[ok], rpm[ok]), t, rule.window_s, 0.0)
+    maf = _Series(t, out["maf_gps"].to_numpy(dtype=float))
+    mmin, mmax, mn = _window(maf, t, rule.window_s, 0.0)
+    with np.errstate(divide="ignore", invalid="ignore"):
+        steady = (
+            ((rmax - rmin) / rpm <= rule.rpm_span)
+            & ((mmax - mmin) / maf.values <= rule.maf_span)
+            & (rn >= rule.min_rpm_reads)
+            & (mn >= rule.min_maf_reads)
+        )
+    out["steady"] = steady
+    return out
+
+
+def identify_ve(samples: pd.DataFrame, profile: FuelPlantProfile) -> dict[str, Any]:
+    """Fit VE(rpm) on identification drives: per declared rpm band, the
+    largest steady warm charge fraction (:class:`~src.analysis.fuel_plant.VeCurve`).
+
+    On a naturally aspirated engine ``charge fraction = VE x p_m / p_ambient
+    <= VE`` on every read, so the envelope is the smallest VE consistent with
+    the identification drives, and VE itself where they reached full
+    breathing. It is identified from MAF, rpm, baro and IAT alone: a MAF bias
+    is a VE bias here, and nothing measures VE independently. Refuses any
+    recording outside ``split.identification``, and a band whose steady
+    charge fraction exceeds 1 (the airflow boundary is wrong there).
+    """
+    rule = profile.volumetric_efficiency
+    if rule is None:
+        raise FuelPlantRefusalError(
+            "no_ve_fit", f"{profile.plant_version} runs one working VE; nothing to fit"
+        )
+    sessions = set(samples["session"])
+    check_origin(sessions, profile)
+    outside = sorted(sessions - set(profile.split.identification))
+    if outside:
+        raise FuelPlantRefusalError(
+            "not_identification", f"{outside} are not declared identification recordings"
+        )
+    floor = profile.registry.get("manifold_pressure").working_assumption
+    assert floor is not None
+    edges = np.asarray(rule.rpm_edges, dtype=float)
+    rpm = samples["rpm"].to_numpy(dtype=float)
+    cf = samples["charge_fraction"].to_numpy(dtype=float)
+    used = (
+        samples["steady"].to_numpy(dtype=bool)
+        & np.isfinite(cf)
+        & (samples["coolant_c"].to_numpy(dtype=float) >= profile.steady.min_coolant_c)
+        & (rpm >= edges[0])
+        & (rpm <= edges[-1])
+    )
+    band = np.clip(np.searchsorted(edges, rpm, side="right") - 1, 0, len(edges) - 2)
+    envelope: list[float | None] = []
+    n_reads: list[int] = []
+    bands: dict[str, dict[str, Any]] = {}
+    for k in range(len(edges) - 1):
+        values = cf[used & (band == k)]
+        n_reads.append(len(values))
+        top = float(values.max()) if len(values) else math.nan
+        if len(values) and top > 1.0:
+            raise FuelPlantRefusalError(
+                "charge_fraction_above_one",
+                f"rpm {edges[k]:g}-{edges[k + 1]:g}: {int((values > 1.0).sum())} steady reads "
+                "fill more than the displacement at ambient; the airflow boundary is wrong there",
+            )
+        fitted = len(values) >= rule.min_reads
+        envelope.append(top if fitted else None)
+        bands[f"{edges[k]:g}-{edges[k + 1]:g}"] = {
+            "n": len(values),
+            "envelope": top if fitted else None,
+            "p99": float(np.quantile(values, 0.99)) if len(values) else None,
+            "above_floor": int((values > floor.value).sum()),
+            "runs_at": max(top, floor.value) if fitted else floor.value,
+        }
+    if not used.any():
+        raise FuelPlantRefusalError("no_ve_reads", "no steady warm read to fit VE on")
+    baro = samples["baro_kpa"].to_numpy(dtype=float)[used]
+    iat = samples["iat_c"].to_numpy(dtype=float)[used]
+    curve = VeCurve(
+        rpm_edges=list(rule.rpm_edges),
+        envelope=envelope,
+        n_reads=n_reads,
+        baro_kpa=(float(baro.min()), float(baro.max())),
+        iat_c=(float(iat.min()), float(iat.max())),
+    )
+    return {
+        "ve_curve": curve,
+        "floor": floor.value,
+        "bands": bands,
+        "reads_used": int(used.sum()),
+        "reads": len(samples),
+        "sessions": sorted(sessions),
+    }
+
+
 def identify(
     frames: Sequence[pd.DataFrame],
     profile: FuelPlantProfile,
     delay: B06Rules,
     *,
     sessions_root: Path,
+    ve_curve: VeCurve | None = None,
 ) -> dict[str, Any]:
     """Fit the lumped stoichiometric-air-per-open-ms scale on identification drives.
 
     Per sample the ratio ``lambda_pred(s=1) / lambda_obs`` *is* that sample's
     ``s``; the fit is the median of region medians, with a bootstrap over
-    regions. Refuses any recording outside ``split.identification``.
+    regions. Refuses any recording outside ``split.identification``. A
+    ``speed_density_refusing`` plant is handed the VE(rpm) :func:`identify_ve`
+    fitted on the same drives, and its MAP refusals are named first.
     """
     data = pd.concat([f for f in frames if len(f)], ignore_index=True)
     sessions = set(data["session"])
@@ -425,7 +578,8 @@ def identify(
             "not_identification", f"{outside} are not declared identification recordings"
         )
     check_drive_independence(profile, sessions_root)
-    params = resolve_parameters(profile, delay, for_identification=True)
+    params = resolve_parameters(profile, delay, for_identification=True, ve_curve=ve_curve)
+    data = apply_manifold_refusals(data, profile, params)
     eligible = data[data["state"] == "eligible"]
     out = predict(plant_inputs(eligible), params, profile.geometry)
     ratio = out.lambda_delivered / eligible["lambda_obs"].to_numpy(dtype=float)
@@ -519,8 +673,15 @@ def evaluate(
     delay: B06Rules,
     *,
     sessions_root: Path,
+    profile_dir: Path,
 ) -> dict[str, Any]:
     """Score the frozen plant on held-out steady regions against predeclared bounds.
+
+    ``profile_dir`` is where the plant is declared: every plant version's
+    spent ledger there is read (``fuel_plant.refuse_spent_elsewhere``), so a
+    drive a sibling version spent is refused even for a profile built in
+    memory. A plant with no declared held-out recording is refused by name
+    (``held_out_pending``).
 
     Returns ``spent_records``: every recording scored, to be added to the
     profile's ``spent_held_out`` (the CLI does it). From then on the profile
@@ -531,7 +692,16 @@ def evaluate(
         raise FuelPlantRefusalError(
             "baseline_not_frozen", "freeze the hardware parameter set before held-out evaluation"
         )
-    data = pd.concat([f for f in frames if len(f)], ignore_index=True)
+    if not profile.split.held_out:
+        raise FuelPlantRefusalError(
+            "held_out_pending",
+            f"{profile.plant_version} declares no held-out recording: "
+            f"{profile.split.held_out_pending}",
+        )
+    present = [f for f in frames if len(f)]
+    if not present:
+        raise FuelPlantRefusalError("no_samples", "no pulse read in any frame to score")
+    data = pd.concat(present, ignore_index=True)
     sessions = set(data["session"])
     check_origin(sessions, profile)
     outside = sorted(sessions - set(profile.split.held_out))
@@ -541,6 +711,7 @@ def evaluate(
     _refuse_sessions(
         sessions, delay.informed_by, "leaked_b06", "they informed B06's delay or regime rules"
     )
+    refuse_spent_elsewhere(profile_dir, profile, sorted(sessions))
     sha = baseline.sha256()
     spent_elsewhere = sorted(
         name
@@ -556,6 +727,7 @@ def evaluate(
     check_drive_independence(profile, sessions_root)
 
     params = resolve_parameters(profile, delay)
+    data = apply_manifold_refusals(data, profile, params)
     eligible = data[data["state"] == "eligible"].reset_index(drop=True)
     out = predict(plant_inputs(eligible), params, profile.geometry)
     lam_obs = eligible["lambda_obs"].to_numpy(dtype=float)
@@ -587,6 +759,9 @@ def evaluate(
             e = _errors(eligible[ok], profile, delay, lambda_column=col)
         else:
             e = _errors(eligible, profile, delay, overrides=case)
+        # A refusing plant at a bracket end can refuse a read the working case
+        # scored (its MAP crosses ambient there): the shift is over the rest.
+        e = e[np.isfinite(e)]
         sensitivity[name] = float(np.median(e)) - pooled["median_pct"] if len(e) else math.nan
 
     fuelled = data[~data["state"].isin(["fuel_cut", "cold", "missing_input", "not_co_observed"])]
@@ -696,6 +871,130 @@ def evaluate(
             for name in sorted(sessions)
         ],
     }
+
+
+# -- comparing plant versions ---------------------------------------------------------
+
+
+def compare_versions(
+    frames: Sequence[pd.DataFrame], profiles: Sequence[FuelPlantProfile], delay: B06Rules
+) -> dict[str, Any]:
+    """Every frozen version's lambda error on the identical samples, per sample.
+
+    A diagnostic, never a verdict: it returns no ``verdict`` and no spent
+    records, so nothing here can qualify a plant. It refuses a recording that
+    is neither in-sample for every version (in every baseline's ``fitted_on``)
+    nor already spent by one of them: a never-scored drive is held-out
+    evidence, and looking at it would spend it. Samples are built once (the
+    versions must share their sample rules); a read any version refuses is
+    counted by version and scored by none. The comparison is the per-sample
+    change ``|err_b| - |err_a|`` against the first version, never two
+    aggregates side by side.
+    """
+    if len(profiles) < 2:
+        raise FuelPlantRefusalError("one_version", "a comparison needs two plant versions")
+    first = profiles[0]
+    for other in profiles[1:]:
+        for name in ("geometry", "specs", "steady", "pulse_chain", "delay", "command_specs"):
+            if getattr(other, name) != getattr(first, name):
+                raise FuelPlantRefusalError(
+                    "sample_rules_differ",
+                    f"{other.plant_version} and {first.plant_version} differ in {name}: their "
+                    "samples are not the same samples",
+                )
+        if other.hardware_configuration != first.hardware_configuration:
+            raise FuelPlantRefusalError("hardware_mismatch", "one hardware configuration only")
+    for p in profiles:
+        if p.baseline is None or not p.baseline.frozen:
+            raise FuelPlantRefusalError(
+                "baseline_not_frozen", f"{p.plant_version}: freeze before comparing"
+            )
+    data = pd.concat([f for f in frames if len(f)], ignore_index=True)
+    sessions = sorted(set(data["session"]))
+    for p in profiles:
+        check_origin(sessions, p)
+    label: dict[str, str] = {}
+    for name in sessions:
+        fitted = [name in (p.baseline.fitted_on if p.baseline else ()) for p in profiles]
+        if all(fitted):
+            label[name] = "in_sample"
+        elif not any(fitted) and any(name in p.spent() for p in profiles):
+            label[name] = "spent_held_out"
+        else:
+            raise FuelPlantRefusalError(
+                "unspent_recording",
+                f"{name} is neither in-sample for every version nor already spent: a "
+                "comparison on it would spend held-out evidence",
+            )
+
+    versions = [p.plant_version for p in profiles]
+    states: dict[str, np.ndarray] = {}
+    for p in profiles:
+        params = resolve_parameters(p, delay)
+        states[p.plant_version] = apply_manifold_refusals(data, p, params)["state"].to_numpy()
+    base_eligible = (data["state"] == "eligible").to_numpy()
+    common = base_eligible.copy()
+    for st in states.values():
+        common &= st == "eligible"
+    refused = {
+        v: {
+            str(k): int(c)
+            for k, c in pd.Series(st[base_eligible & (st != "eligible")]).value_counts().items()
+        }
+        for v, st in states.items()
+    }
+    rows = data[common].reset_index(drop=True)
+    lam_obs = rows["lambda_obs"].to_numpy(dtype=float)
+    errors: dict[str, np.ndarray] = {}
+    for p in profiles:
+        out = predict(plant_inputs(rows), resolve_parameters(p, delay), p.geometry)
+        errors[p.plant_version] = 100.0 * (out.lambda_delivered / lam_obs - 1.0)
+    regions = rows["region_id"].to_numpy()
+    groups = rows["session"].map(label).to_numpy()
+    maf_band = pd.cut(rows["maf_gps"], list(MAF_BANDS), right=False).astype(str).to_numpy()
+
+    def change_summary(change: np.ndarray) -> dict[str, Any]:
+        return {
+            "n": len(change),
+            "median": float(np.median(change)) if len(change) else math.nan,
+            "p10": float(np.quantile(change, 0.1)) if len(change) else math.nan,
+            "p90": float(np.quantile(change, 0.9)) if len(change) else math.nan,
+            "fraction_better": float(np.mean(change < 0)) if len(change) else math.nan,
+            "fraction_worse": float(np.mean(change > 0)) if len(change) else math.nan,
+        }
+
+    def paired(mask: np.ndarray) -> dict[str, Any]:
+        out: dict[str, Any] = {
+            "versions": {v: _stats(errors[v][mask], regions[mask], first) for v in versions}
+        }
+        base = np.abs(errors[versions[0]][mask])
+        bands = maf_band[mask]
+        for v in versions[1:]:
+            change = np.abs(errors[v][mask]) - base
+            key = f"abs_error_change_{v}_minus_{versions[0]}_pct"
+            out[key] = change_summary(change)
+            # Per MAF band, still per sample: never two band medians side by side.
+            out[f"{key}_by_maf_band"] = {
+                str(b): change_summary(change[bands == b]) for b in sorted(set(bands))
+            }
+        return out
+
+    result: dict[str, Any] = {
+        "diagnostic": "not held-out evidence: no verdict, nothing spent",
+        "versions": versions,
+        "baselines": {
+            p.plant_version: p.baseline.sha256() for p in profiles if p.baseline is not None
+        },
+        "sessions": label,
+        "refused_by_version": refused,
+        "common_samples": int(common.sum()),
+    }
+    for group in ("in_sample", "spent_held_out"):
+        mask = groups == group
+        if not mask.any():
+            continue
+        result[group] = paired(mask)
+    return result
 
 
 # -- the ECM's pulse chain: ground truth -------------------------------------------

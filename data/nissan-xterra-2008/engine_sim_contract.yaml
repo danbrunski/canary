@@ -873,12 +873,20 @@ subsystems:
     meaning: 'Injector command to delivered fuel and mixture: the E07.3 mean-value fuel plant.'
     computes: [injector_open_time_b1, fuel_mass_flow, delivered_lambda]
     status: built
-    implementation: {module: src.analysis.fuel_plant, profile_file: fuel_plant.yaml, plant_version: fuel-mv-1}
+    # Scenarios run fuel-mv-1 (fuel_plant.yaml). fuel-mv-2 (fuel_plant_mv2.yaml,
+    # E07.3 remaining 1 / E07.5, 2026-10-08) is declared beside it; its standing
+    # is derived on request (engine_dynamics.standings(versions=...)).
+    implementation:
+      module: src.analysis.fuel_plant
+      profile_file: fuel_plant.yaml
+      plant_version: fuel-mv-1
+      other_plant_versions: [fuel-mv-2]
     # fuel-mv-1 is E07.3's frozen baseline: its numerics are not changed to
     # read the manifold stage, so in plant replay it keeps its own MAP.
     internal_models:
       - quantity: manifold_pressure
         owner: manifold_breathing
+        plant_versions: [fuel-mv-1]
         modes: [plant_replay]
         model: >-
           fuel_plant.manifold_pressure_speed_density: steady speed density from
@@ -893,7 +901,75 @@ subsystems:
         owed_by: >-
           The next fuel-plant plant_version (E07.3 remaining 1): read MAP from
           manifold_breathing, and revisit the VE working value against the
-          charge-fraction bound (peak VE at least ~0.9).
+          charge-fraction bound (peak VE at least ~0.9). fuel-mv-1 itself is
+          frozen and stays owed; fuel-mv-2 (below) is that version.
+      - quantity: manifold_pressure
+        owner: manifold_breathing
+        plant_versions: [fuel-mv-2]
+        modes: [plant_replay]
+        model: >-
+          fuel_plant.manifold_pressure_ve_curve: steady speed density from MAF,
+          rpm and IAT at VE(rpm), the frozen baseline's ve_curve run at
+          max(envelope, 0.7) per band; a read whose MAP would exceed baro is
+          NaN and named manifold_above_ambient, a read outside the fit's rpm,
+          baro or IAT range outside_ve_fit. Never capped.
+        differs: >-
+          Steady only: no filling lag, so it is scored on the fuel plant's steady
+          regions (2 s rpm/MAF/pulse spans), where the stage's settled manifold
+          and speed density agree at the same VE (E07.5,
+          test_the_steady_manifold_is_the_fuel_plants_speed_density_at_the_same_ve).
+          Its VE is VE(rpm); the stage (manifold-mv-1) still runs the shared
+          constant working VE of the fuel plant it is loaded with (load_kit:
+          fuel-mv-1, 0.7).
+        reconciled_by: >-
+          fuel-mv-2 (2026-10-08, operator-approved): MAP above ambient is refused
+          per sample as manifold_breathing refuses it (the invariant below,
+          checked against the plant's code by check_internal_models), and VE
+          depends on rpm instead of the 0.7 the corpus contradicts at high load.
+          Reading the stage's integrated trace was not chosen: in steady regions
+          it equals this model at the same VE, and its replay needs the convergence
+          study and a 1.28 ms grid the 2 s-steady scoring does not use.
+        invariants: [manifold_at_or_below_ambient]
+        parameter_fits:
+          - parameter: volumetric_efficiency
+            kind: log_fit
+            form: >-
+              VE(rpm), per band of 500/1000/2000/3000/4000/5000/6500 rpm: the
+              largest steady warm charge fraction (MAF over the ideal-gas fill of
+              the displacement at baro and IAT) on the identification drives, run
+              at max(that, 0.7). Load-independent: part-load VE is assumed equal
+              to full-breathing VE at the same rpm.
+            identified_from: [mass_air_flow, engine_speed, barometric_pressure, intake_air_temperature]
+            inherits: [maf_transfer_bias]
+            hardware_configurations: [na_stock_injectors_2026_10]
+            bounds:
+              - {quantity: engine_speed, minimum: 500.0, maximum: 6500.0,
+                 evidence: 'The fitted bands. Reads reached 5163 rpm; the top band (5000-6500) rests on 5 steady reads. Outside: outside_ve_fit.'}
+              - {quantity: barometric_pressure, minimum: 79.0, maximum: 82.0,
+                 evidence: 'The baro range of the 3,067 reads the fit used (home altitude). VE referenced to ambient includes intake pressure losses, which scale with the pressure ratio; trips reach 63 kPa, which this fit has not seen. Outside: outside_ve_fit.'}
+              - {quantity: intake_air_temperature, minimum: 23.0, maximum: 50.0,
+                 evidence: 'The IAT range of the reads the fit used. Bounded like baro: on this truck INTAKE_TEMP tracks airflow (stagnation, not the charge temperature), so the ideal-gas fill does not divide the charge density out. Outside: outside_ve_fit (117 reads of the 20-22 C morning drive 09-23T142926).'}
+            fitted_on:
+              - _capture-tuning-2026-09-21T223734
+              - _capture-tuning-2026-09-21T232153
+              - _capture-tuning-2026-09-23T164007
+            evidence: >-
+              Not an independent VE measurement. The truck has no MAP sensor, so
+              VE is identified from MAF, rpm, baro and IAT: charge fraction = VE x
+              MAP / baro <= VE on every read of a naturally aspirated engine, and
+              the envelope equals VE only where the drives reached full breathing
+              (above 2000 rpm: 0.888-0.906, peak 4000-5000 rpm; below 2000 rpm the
+              drives never exceeded 0.7, so those bands run at the 0.7 floor). A
+              MAF transfer error is a VE error of the same size (inherits
+              maf_transfer_bias). Coolant >= 70 C (the steady rule).
+              Known limitation, owed a load-dependent VE: steady warm idle has
+              charge fraction p50 0.151 (1,875 reads, 762 rpm, 3.46 g/s, baro
+              81 kPa), so the 0.7 floor gives MAP 17.5 kPa where a warm NA idle
+              is ~28-35 kPa (idle VE ~0.35-0.45). The floor and the
+              load-independence assumption understate part-load MAP and
+              overstate injector dP by ~3 % at idle (~1.5 % flow), on 614 of the
+              841 spent-drive reads.
+              Frozen in fuel_plant_mv2.yaml baseline na-stock-2026-10-08.mv2.
     applicability:
       hardware_configurations: [na_stock_injectors_2026_10]
       bounds:
@@ -925,8 +1001,29 @@ subsystems:
       - id: map_sensor
         what: 'Manifold absolute pressure logged with the pulse (see manifold_breathing).'
         identifies: [manifold_pressure]
-        status: missing
-        evidence: 'The injector differential pressure needs MAP; fuel-mv-1 runs it at speed density (VE 0.7 [0.4, 1.0]).'
+        status: planned
+        # Operator decision 2026-10-08 (E07.5 remaining 1): no MAP sensor can be
+        # fitted until the supercharger build, whose kit brings one.
+        plan: &map_sensor_plan
+          decided_on: '2026-10-08'
+          decided_by: operator
+          arrives_with: >-
+            The supercharger build: the kit's Bosch 0 261 230 416 TMAP behind
+            the intercooler, read through a Pi ADC
+            (docs/roadmap/supercharger-build.md, Phase 2 P2). No MAP sensor can
+            be installed before it.
+          recorded_in: docs/roadmap/tasks/E07-engine-plant-simulator.md (E07.5 remaining 1)
+          consequence: >-
+            No MAP on the NA intake, ever (operator, 2026-10-08): the kit's TMAP
+            mounts after the intercooler and no temporary NA port will be
+            fitted. The NA manifold_breathing stage (na_stock_injectors_2026_10)
+            stays a best-effort fit from MAF, rpm, baro and IAT and is never
+            validated against measured MAP; every MAP-dependent NA quantity stays
+            unmeasured. Only the boosted plant (a new hardware configuration)
+            gets MAP validation.
+        evidence: >-
+          The injector differential pressure needs MAP; fuel-mv-1 runs it at
+          speed density (VE 0.7 [0.4, 1.0]), fuel-mv-2 at VE(rpm) fitted from MAF.
 
   - id: fuel_rail
     stage: 0
@@ -1029,7 +1126,8 @@ subsystems:
           over idle, cruise, tip-ins and tip-outs and WOT pulls.
         identifies: [manifold_pressure, volumetric_efficiency, manifold_volume]
         excites: [throttle]
-        status: missing
+        status: planned
+        plan: *map_sensor_plan
         evidence: >-
           VE and MAP enter steady breathing only as their product (the charge
           fraction MAF identifies); the filling time constant needs a
@@ -1057,7 +1155,8 @@ subsystems:
         what: 'MAP with MAF and both throttle sensors at rate: the throttle effective area needs the pressure ratio across the plate outside choked flow.'
         identifies: [throttle_effective_area]
         excites: [throttle]
-        status: missing
+        status: planned
+        plan: *map_sensor_plan
         evidence: 'Below a 0.528 pressure ratio flow is choked and independent of MAP; above it the area is not identifiable without MAP.'
 
   - id: actuator_response
@@ -1152,7 +1251,8 @@ subsystems:
       - id: map_sensor
         what: 'Manifold pressure for the pumping loss.'
         identifies: [pumping]
-        status: missing
+        status: planned
+        plan: *map_sensor_plan
         evidence: 'See manifold_breathing.'
 
   - id: rotational_dynamics

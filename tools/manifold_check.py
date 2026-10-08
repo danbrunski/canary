@@ -6,7 +6,7 @@ Offline only: reads the profile and stored sessions, prints JSON, writes nothing
 
     .venv/bin/python -m tools.manifold_check study [--method fixed_step_euler|rk4]
     .venv/bin/python -m tools.manifold_check breathing-bound [--sessions NAME ...]
-    .venv/bin/python -m tools.manifold_check standing
+    .venv/bin/python -m tools.manifold_check standing [--fuel-plant-version fuel-mv-2]
 
 ``study`` runs the contract's step-size refinement ladder at every
 applicability corner (``--method`` shows another method against the same
@@ -66,7 +66,12 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     bound = sub.add_parser("breathing-bound")
     bound.add_argument("--sessions-root", type=Path, default=DEFAULT_SESSIONS)
     bound.add_argument("--sessions", nargs="*", default=None)
-    sub.add_parser("standing")
+    standing = sub.add_parser("standing")
+    standing.add_argument(
+        "--fuel-plant-version",
+        default=None,
+        help="ask fuel_delivery's standing for another declared version (e.g. fuel-mv-2)",
+    )
     return ap.parse_args(argv)
 
 
@@ -92,7 +97,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         out = breathing_bound(pd.concat(frames, ignore_index=True), fuel)
         out["missing_sessions"] = missing
     else:
-        st = standings(contract, args.profile)
+        versions = {"fuel_delivery": args.fuel_plant_version} if args.fuel_plant_version else None
+        st = standings(contract, args.profile, versions=versions)
         out = {
             "standings": {
                 k: {
