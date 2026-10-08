@@ -750,6 +750,14 @@
     },
     {
       "auth": "control",
+      "body": true,
+      "method": "POST",
+      "path": "/control/diagnostics/read_codes",
+      "query": [],
+      "status_code": null
+    },
+    {
+      "auth": "control",
       "body": false,
       "method": "GET",
       "path": "/control/ecu/application-model",

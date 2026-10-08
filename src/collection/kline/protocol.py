@@ -22,8 +22,9 @@ later value. Duplicate descriptors are legal on the wire (UpRev defines RAM
 ``0xFFFF13FE`` twice); only the builders for *our* requests refuse them.
 
 **What this client may ask for.** Reads, session control, volatile
-definitions and ClearDiagnosticInformation (:data:`ALLOWED_SERVICES`; clearing
-codes is routine diagnostic work on any module, AGENTS.md). Every other service id is refused
+definitions, reading stored codes and ClearDiagnosticInformation
+(:data:`ALLOWED_SERVICES`; reading and clearing codes are routine diagnostic
+work on any module, AGENTS.md). Every other service id is refused
 here, by id, with the reason — there is no raw-request escape hatch. Writing
 an ECU's non-volatile memory needs the operator's explicit permission per
 operation and a parked, engine-off vehicle (AGENTS.md), and nothing in this
@@ -41,6 +42,12 @@ SID_START_DIAGNOSTIC_SESSION = 0x10
 #: module's scan-tool clear (``KlineModule.clear_codes``).
 SID_CLEAR_DIAGNOSTIC_INFORMATION = 0x14
 SID_READ_ECU_IDENTIFICATION = 0x1A
+#: Reads a module's stored codes: ``A2 <group>`` answered ``E2 <n> [hi lo]×n``.
+#: A manufacturer-range service, seen from a scan tool reading the Xterra's
+#: airbag module on 2026-10-08 (``data/analyses/2026-10-08-srs-kline-code-read.md``).
+#: Sent only as a vehicle profile records a module's code read
+#: (``KlineModule.read_codes``).
+SID_READ_STORED_CODES = 0xA2
 SID_READ_DATA_BY_LOCAL_ID = 0x21
 SID_READ_DATA_BY_COMMON_ID = 0x22
 SID_READ_MEMORY_BY_ADDRESS = 0x23
@@ -61,6 +68,7 @@ ALLOWED_SERVICES: frozenset[int] = frozenset(
         SID_START_DIAGNOSTIC_SESSION,
         SID_CLEAR_DIAGNOSTIC_INFORMATION,
         SID_READ_ECU_IDENTIFICATION,
+        SID_READ_STORED_CODES,
         SID_READ_DATA_BY_LOCAL_ID,
         SID_READ_DATA_BY_COMMON_ID,
         SID_READ_MEMORY_BY_ADDRESS,
@@ -70,6 +78,10 @@ ALLOWED_SERVICES: frozenset[int] = frozenset(
         SID_DEFINE_LOCAL_ID,
     }
 )
+#: Services a profile's ``read_codes`` recipe may name: each one's reply is
+#: laid out as :func:`split_code_reply` reads it. A new code-read service needs
+#: its reply layout seen on the wire first, and an entry here.
+CODE_READ_SERVICES: frozenset[int] = frozenset({SID_READ_STORED_CODES})
 #: Allowed services with sub-functions that are still refused: the
 #: programming session exists only to flash, and nothing here flashes.
 REFUSED_SUBFUNCTIONS: Mapping[int, frozenset[int]] = {
@@ -110,6 +122,7 @@ SERVICE_NAMES: Mapping[int, str] = {
     SID_START_COMMUNICATION: "StartCommunication",
     SID_STOP_COMMUNICATION: "StopCommunication",
     0x83: "AccessTimingParameters",
+    SID_READ_STORED_CODES: "ReadStoredCodes",
     SID_DEFINE_LOCAL_ID: "DynamicallyDefineLocalIdentifier",
 }
 
@@ -438,8 +451,44 @@ def split_did_reply(did: int, params: bytes) -> bytes:
     return bytes(params[2:])
 
 
+# --------------------------------------------------------------------------- codes
+
+#: The letter an SAE J2012 code word's top two bits give.
+CODE_LETTERS = "PCBU"
+
+
+def decode_code_word(word: int) -> str:
+    """A two-byte code word as its SAE J2012 code: the top two bits are the
+    letter (``00`` P, ``01`` C, ``10`` B, ``11`` U), the remaining fourteen
+    bits four hex digits. ``0x9023`` is ``B1023``."""
+    if not 0 <= word <= 0xFFFF:
+        raise KlineProtocolError(f"code word 0x{word:x} is not two bytes")
+    return f"{CODE_LETTERS[word >> 14]}{(word >> 12) & 0x3:X}{word & 0x0FFF:03X}"
+
+
+def split_code_reply(params: bytes) -> tuple[int, ...]:
+    """The code words of a positive code-read reply, after its service byte:
+    ``<n> [hi lo]×n``. An empty tuple is a module that read and holds none.
+
+    A reply whose length does not match its own count is refused: one missing
+    byte would shift every later code into a different, plausible-looking one.
+    """
+    if not params:
+        raise KlineProtocolError("code reply without a count byte")
+    count = params[0]
+    words = params[1:]
+    if len(words) != 2 * count:
+        raise KlineProtocolError(
+            f"code reply says {count} code(s) ({2 * count} bytes) but carries "
+            f"{len(words)}: {params.hex(' ')}"
+        )
+    return tuple(int.from_bytes(words[i : i + 2], "big") for i in range(0, len(words), 2))
+
+
 __all__ = [
     "ALLOWED_SERVICES",
+    "CODE_LETTERS",
+    "CODE_READ_SERVICES",
     "SERVICE_NAMES",
     "AddressedFrame",
     "Descriptor",
@@ -454,6 +503,7 @@ __all__ = [
     "check_request",
     "checksum",
     "decode_addressed",
+    "decode_code_word",
     "decode_descriptors",
     "decode_length_frame",
     "define_local_id",
@@ -467,6 +517,7 @@ __all__ = [
     "parse_start_communication_reply",
     "read_did",
     "read_local_id",
+    "split_code_reply",
     "split_did_reply",
     "split_local_id_reply",
     "start_communication",

@@ -235,6 +235,13 @@ class ClearCodesRequest(_ControlRequest):
     module: str = Field(min_length=1)
 
 
+class ReadCodesRequest(_ControlRequest):
+    """``POST /control/diagnostics/read_codes``: read one module's stored
+    codes, by its name in the vehicle's K-line profile (``SRS``)."""
+
+    module: str = Field(min_length=1)
+
+
 class PassiveModeRequest(_ControlRequest):
     """Arm/disarm the CAN transmit gate (passive, receive-only mode).
 

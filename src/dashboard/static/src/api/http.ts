@@ -62,7 +62,11 @@ import type {
   VehicleProfilesResponse,
   VersionResponse,
 } from "../types";
-import type { ClearCodesResult, DiagnosticFunctionsResponse } from "../types/diagnostics";
+import type {
+  ClearCodesResult,
+  DiagnosticFunctionsResponse,
+  ReadCodesResult,
+} from "../types/diagnostics";
 import { controlBlob, controlJson, fetchJson, jsonBody, queryString } from "./core";
 
 export { HttpError, NetworkError } from "./core";
@@ -799,13 +803,26 @@ export function importCustomPidsCsv(
 }
 
 /** `/control/diagnostics/functions`: the diagnostic functions this vehicle's
- *  profile records (today, clearing a K-line module's codes). */
+ *  profile records (today, reading and clearing a K-line module's codes). */
 export function getDiagnosticFunctions(
   token: string,
   signal?: AbortSignal,
 ): Promise<DiagnosticFunctionsResponse> {
   return controlJson<DiagnosticFunctionsResponse>("/control/diagnostics/functions", token, {
     signal,
+  });
+}
+
+/** Read one module's stored codes. Resolves after the module answered (or
+ *  refused); `ok: true` with `codes: []` is a read that found none, while a
+ *  failure is `ok: false`, `codes: null` and the reason in `detail`. */
+export function readModuleCodes(
+  token: string,
+  module: string,
+): Promise<{ read_codes: ReadCodesResult }> {
+  return controlJson("/control/diagnostics/read_codes", token, {
+    method: "POST",
+    body: jsonBody({ module }),
   });
 }
 

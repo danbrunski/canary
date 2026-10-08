@@ -237,6 +237,43 @@ modules:
       19:48:54.56Z, the tool sent 02 10 C0 on CAN 0x752 and nothing answered,
       so this module is K-line only (data/analyses/2026-10-04-srs-kline-scan-tool.md).
       No reader: CANary does not poll it.
+    # How the scan tool read the stored codes, sniffed KOEO on 2026-10-08
+    # (session 2026-10-08T172943; data/analyses/2026-10-08-srs-kline-code-read.md).
+    # Model: ReadCodes in src/collection/kline/profile.py.
+    read_codes:
+      requests:
+        - request: [0xA2, 0x00]
+          status: current
+          status_confidence: inferred
+          evidence: >-
+            Session 2026-10-08T172943, 17:57:22.871Z: A2 00 -> E2 00 (no codes)
+            while the scan tool showed B1023 PAST, and A2 01 held the code. One
+            observation: "current" is read off that split, not off a code seen
+            here while the fault was present.
+        - request: [0xA2, 0x01]
+          status: past
+          status_confidence: inferred
+          evidence: >-
+            Session 2026-10-08T172943, 17:57:22.996Z: A2 01 -> E2 01 90 23
+            (B1023) while the scan tool showed B1023 PAST; after the clear
+            (17:58:37Z, 17:58:51Z) it answered E2 00 and the tool showed "System
+            pass, no fault found". One observation.
+      # E2 <n> [hi lo]xn: a count, then n two-byte code words.
+      reply_format: count_then_words
+      # Top two bits the letter (00 P, 01 C, 10 B, 11 U), then four hex digits.
+      code_word: sae_j2012
+      known_answer:
+        reply: "E2 01 90 23"
+        codes: [B1023]
+        evidence: >-
+          The scan tool displayed B1023 PAST for this reply, session
+          2026-10-08T172943 17:57:23.012Z (frame 04 E2 01 90 23 9A).
+      evidence: >-
+        The operator's scan tool on the airbag code screen, KOEO, session
+        2026-10-08T172943: StartCommunication 81 58 FC 81 56 -> 83 FC 58 C1 6D
+        8F 94 at 17:57:22.162Z, then A2 00 -> E2 00 and A2 01 -> E2 01 90 23
+        (B1023, displayed PAST); after the clear at 17:58:20Z both answered
+        E2 00 at 17:58:37Z and 17:58:51Z ("System pass, no fault found").
     clear_codes:
       request: [0x14]
       evidence: >-
@@ -246,7 +283,9 @@ modules:
       - did: 0x1100
         width: 4
         evidence: one reply 62 11 00 80 41 FF FF, 2026-10-04T194342 19:49:01.4Z, before the clear
-        note: Unread meaning; read on the scan tool's code screen, so possibly a DTC record.
+        note: >-
+          Unread meaning. Not the code read: that is A2 00 / A2 01 (read_codes,
+          2026-10-08); the 22 reads come when the module screen opens.
       - did: 0x1120
         width: 4
         evidence: one reply 62 11 20 FF FF FF F9, 2026-10-04T194342 19:49:01.6Z, before the clear

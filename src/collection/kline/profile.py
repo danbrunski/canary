@@ -18,6 +18,8 @@ from typing import Literal
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from src.collection.kline import protocol as kp
+
 
 class _Strict(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
@@ -220,6 +222,96 @@ class ClearCodes(_Strict):
         return value
 
 
+CodeStatus = Literal["current", "past"]
+
+
+class CodeRead(_Strict):
+    """One request of a module's code read and which codes its reply holds."""
+
+    #: The whole request, service byte first (``[0xA2, 0x01]``).
+    request: tuple[int, ...] = Field(min_length=1)
+    #: Which codes the reply lists: present now, or stored from before.
+    status: CodeStatus
+    #: ``confirmed``: a known answer showed it; ``inferred``: read off what a
+    #: scan tool displayed beside one observation, and said so to the operator.
+    status_confidence: Literal["confirmed", "inferred"]
+    evidence: str = Field(min_length=1)
+
+    @field_validator("request")
+    @classmethod
+    def _is_a_code_read(cls, value: tuple[int, ...]) -> tuple[int, ...]:
+        if any(not 0 <= b <= 0xFF for b in value):
+            raise ValueError("read_codes request bytes must be 0x00-0xFF")
+        if value[0] not in kp.CODE_READ_SERVICES:
+            known = ", ".join(f"0x{s:02x}" for s in sorted(kp.CODE_READ_SERVICES))
+            raise ValueError(
+                f"read_codes request starts 0x{value[0]:02x}; the code-read services whose "
+                f"reply layout is known are {known}"
+            )
+        return value
+
+    def request_bytes(self) -> bytes:
+        return bytes(self.request)
+
+
+class CodeReadKnownAnswer(_Strict):
+    """A reply seen on the wire and the codes a scan tool displayed for it:
+    the decode is checked against it when the profile loads."""
+
+    #: The reply payload, service byte first (``"E2 01 90 23"``).
+    reply: str
+    codes: tuple[str, ...]
+    evidence: str = Field(min_length=1)
+
+    @field_validator("reply")
+    @classmethod
+    def _hex(cls, value: str) -> str:
+        bytes.fromhex(value)
+        return value
+
+
+class ReadCodes(_Strict):
+    """How a module's stored codes are read: the requests a scan tool was seen
+    to send it, in order. Absent: CANary never reads that module's codes."""
+
+    requests: tuple[CodeRead, ...] = Field(min_length=1)
+    #: ``count_then_words``: ``<n> [hi lo]×n`` after the service byte.
+    reply_format: Literal["count_then_words"]
+    #: ``sae_j2012``: top two bits the letter (P C B U), then four hex digits.
+    code_word: Literal["sae_j2012"]
+    known_answer: CodeReadKnownAnswer
+    evidence: str = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def _consistent(self) -> ReadCodes:
+        requests = [r.request for r in self.requests]
+        if len(set(requests)) != len(requests):
+            raise ValueError("read_codes lists a request twice")
+        statuses = [r.status for r in self.requests]
+        if len(set(statuses)) != len(statuses):
+            raise ValueError("read_codes gives two requests the same status")
+        reply = bytes.fromhex(self.known_answer.reply)
+        services = {r.request[0] for r in self.requests}
+        if not reply or reply[0] - kp.POSITIVE_OFFSET not in services:
+            raise ValueError(
+                f"read_codes known answer {self.known_answer.reply!r} does not answer "
+                "any of its requests"
+            )
+        decoded = decode_codes(reply[1:])
+        if tuple(code for code, _word in decoded) != self.known_answer.codes:
+            raise ValueError(
+                f"read_codes known answer decodes to {[c for c, _ in decoded]}, "
+                f"not {list(self.known_answer.codes)}"
+            )
+        return self
+
+
+def decode_codes(params: bytes) -> tuple[tuple[str, int], ...]:
+    """``(code, word)`` for each code word in a ``count_then_words`` reply's
+    parameters (after its service byte), SAE J2012 letters."""
+    return tuple((kp.decode_code_word(word), word) for word in kp.split_code_reply(params))
+
+
 class KlineModule(_Strict):
     """One module on this vehicle's K-line, by its KWP2000 address."""
 
@@ -228,6 +320,7 @@ class KlineModule(_Strict):
     #: The key bytes its StartCommunication reply carried.
     key_bytes: tuple[int, int] | None = None
     reader: ModuleReader | None = None
+    read_codes: ReadCodes | None = None
     clear_codes: ClearCodes | None = None
     dids: tuple[ModuleDid, ...] = ()
 
@@ -350,6 +443,9 @@ def load_kline_profile(path: Path) -> KlineProfile:
 __all__ = [
     "UNKNOWN_MODULE",
     "ClearCodes",
+    "CodeRead",
+    "CodeReadKnownAnswer",
+    "CodeStatus",
     "Flag",
     "KlineModule",
     "KlineNotConfiguredError",
@@ -357,7 +453,9 @@ __all__ = [
     "KnownAnswer",
     "ModuleDid",
     "ModuleReader",
+    "ReadCodes",
     "Timing",
     "Wakeup",
+    "decode_codes",
     "load_kline_profile",
 ]

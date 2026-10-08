@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 
 import pytest
 import yaml
@@ -133,4 +134,49 @@ def test_a_local_id_reader_needs_its_reply_limit() -> None:
     raw = yaml.safe_load(XTERRA.read_text())
     del raw["modules"][0x10]["reader"]["max_local_id_reply_bytes"]
     with pytest.raises(ValueError, match="max_local_id_reply_bytes"):
+        KlineProfile.model_validate(raw)
+
+
+def test_the_airbag_module_records_its_code_read() -> None:
+    read = load_kline_profile(XTERRA).modules[0x58].read_codes
+    assert read is not None
+    assert [(r.request, r.status, r.status_confidence) for r in read.requests] == [
+        ((0xA2, 0x00), "current", "inferred"),
+        ((0xA2, 0x01), "past", "inferred"),
+    ]
+    assert read.known_answer.codes == ("B1023",)
+    assert "2026-10-08T172943" in read.evidence
+
+
+def _srs_read() -> dict[str, Any]:
+    raw: dict[str, Any] = yaml.safe_load(XTERRA.read_text())
+    return raw
+
+
+def test_a_code_read_whose_known_answer_does_not_decode_is_refused() -> None:
+    raw = _srs_read()
+    raw["modules"][0x58]["read_codes"]["known_answer"]["codes"] = ["B9023"]
+    with pytest.raises(ValueError, match="decodes to \\['B1023'\\]"):
+        KlineProfile.model_validate(raw)
+
+
+def test_a_code_read_on_an_unknown_service_is_refused() -> None:
+    raw = _srs_read()
+    raw["modules"][0x58]["read_codes"]["requests"][0]["request"] = [0x18, 0x00]
+    with pytest.raises(ValueError, match="reply layout is known"):
+        KlineProfile.model_validate(raw)
+
+
+@pytest.mark.parametrize("field", ["status_confidence", "evidence", "status"])
+def test_a_code_read_request_needs_every_field(field: str) -> None:
+    raw = _srs_read()
+    del raw["modules"][0x58]["read_codes"]["requests"][1][field]
+    with pytest.raises(ValueError, match=field):
+        KlineProfile.model_validate(raw)
+
+
+def test_two_code_reads_with_one_status_are_refused() -> None:
+    raw = _srs_read()
+    raw["modules"][0x58]["read_codes"]["requests"][0]["status"] = "past"
+    with pytest.raises(ValueError, match="same status"):
         KlineProfile.model_validate(raw)

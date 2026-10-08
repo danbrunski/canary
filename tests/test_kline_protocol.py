@@ -238,3 +238,51 @@ def test_naming_a_service_is_not_permission_to_send_it() -> None:
     with pytest.raises(kp.ServiceRefusedError):
         kp.check_request(bytes([kp.SID_IO_CONTROL_BY_LOCAL_ID, 0x01]))
     assert set(kp.ALLOWED_SERVICES) <= set(kp.SERVICE_NAMES)
+
+
+# --------------------------------------------------------------------------- stored codes
+# Known answer: the airbag module's code read, sniffed KOEO 2026-10-08
+# (session 2026-10-08T172943), the scan tool showing B1023 PAST.
+SRS_PAST_REPLY = bytes.fromhex("04 e2 01 90 23 9a")  # 17:57:23.012Z, to A2 01
+SRS_EMPTY_REPLY = bytes.fromhex("02 e2 00 e4")  # 17:57:22.882Z, to A2 00
+
+
+def test_the_code_read_requests_are_the_sniffed_frames() -> None:
+    assert kp.encode_length_frame(b"\xa2\x00") == bytes.fromhex("02 a2 00 a4")
+    assert kp.encode_length_frame(b"\xa2\x01") == bytes.fromhex("02 a2 01 a5")
+    kp.check_request(b"\xa2\x01")  # reading codes is routine on any module
+
+
+def test_the_sniffed_reply_decodes_to_b1023() -> None:
+    params = kp.expect_positive(kp.SID_READ_STORED_CODES, kp.decode_length_frame(SRS_PAST_REPLY))
+    assert kp.split_code_reply(params) == (0x9023,)
+    assert kp.decode_code_word(0x9023) == "B1023"
+
+
+def test_an_empty_reply_is_no_codes() -> None:
+    params = kp.expect_positive(kp.SID_READ_STORED_CODES, kp.decode_length_frame(SRS_EMPTY_REPLY))
+    assert kp.split_code_reply(params) == ()
+
+
+def test_a_code_reply_with_a_bad_checksum_is_refused() -> None:
+    corrupt = SRS_PAST_REPLY[:-1] + bytes([SRS_PAST_REPLY[-1] ^ 0x01])
+    with pytest.raises(KlineProtocolError, match="bad checksum"):
+        kp.decode_length_frame(corrupt)
+
+
+@pytest.mark.parametrize(
+    "params",
+    [b"", b"\x02\x90\x23", b"\x01\x90", b"\x00\x90\x23"],
+    ids=["no-count", "count-too-high", "half-a-word", "extra-bytes"],
+)
+def test_a_malformed_code_reply_is_a_named_error(params: bytes) -> None:
+    with pytest.raises(KlineProtocolError, match="code reply"):
+        kp.split_code_reply(params)
+
+
+@pytest.mark.parametrize(
+    ("word", "code"),
+    [(0x0300, "P0300"), (0x4123, "C0123"), (0x9023, "B1023"), (0xC100, "U0100"), (0xFFFF, "U3FFF")],
+)
+def test_the_code_word_letter_is_its_top_two_bits(word: int, code: str) -> None:
+    assert kp.decode_code_word(word) == code

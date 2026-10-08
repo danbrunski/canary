@@ -55,12 +55,19 @@ import logging
 import threading
 import time
 from collections.abc import Callable, Iterable, Mapping
+from dataclasses import dataclass
 from pathlib import Path
 from queue import Empty, SimpleQueue
 
 from src.collection import capture_lifetime, tuning_profile, tx_gate
 from src.collection.kline import protocol as kp
-from src.collection.kline.actions import KLINE_ACTIONS, KlineAction, KlineActions
+from src.collection.kline.actions import (
+    KLINE_ACTIONS,
+    ActionExchange,
+    KlineAction,
+    KlineActions,
+    StoredCode,
+)
 from src.collection.kline.names import FRAME_CHANNEL, capture_key, did_channel, ram_channel
 from src.collection.kline.plan import (
     KlineCatalog,
@@ -72,6 +79,7 @@ from src.collection.kline.plan import (
 from src.collection.kline.profile import (
     KlineNotConfiguredError,
     KlineProfile,
+    decode_codes,
     load_kline_profile,
 )
 from src.collection.kline.sessions import MODULE_SESSIONS
@@ -105,6 +113,19 @@ IDLE_CHECK_SECONDS = 0.5
 SNIFF_DRAIN_SECONDS = 0.05
 
 TransportFactory = Callable[[KlineProfile, Mode], KlineTransport]
+
+
+@dataclass(frozen=True)
+class _Outcome:
+    """What a diagnostic function's requests came to, before StopCommunication."""
+
+    ok: bool
+    detail: str
+    reply: bytes | None = None
+    codes: tuple[StoredCode, ...] | None = None
+    raw: tuple[ActionExchange, ...] = ()
+
+
 EntriesSource = Callable[[], tuple[str, ...]]
 
 
@@ -469,7 +490,8 @@ class KlineCollector:
 
     async def _run_action(self, action: KlineAction) -> None:
         """One diagnostic function in a session of its own: StartCommunication,
-        the request, StopCommunication. Always finishes ``action``'s future."""
+        the function's requests in order, StopCommunication. Always finishes
+        ``action``'s future."""
         started = time.time()
         if self._line_is_theirs():
             action.finish(
@@ -500,7 +522,7 @@ class KlineCollector:
             await asyncio.to_thread(transport.open)
             try:
                 await asyncio.to_thread(transport.start_communication, action.address)
-                params = await asyncio.to_thread(transport.request, action.request)
+                outcome = await self._perform(transport, action)
                 try:
                     await asyncio.to_thread(transport.stop_communication)
                 except (KlineTransportError, kp.KlineProtocolError, kp.NegativeResponseError):
@@ -512,9 +534,16 @@ class KlineCollector:
         except (KlineTransportError, kp.KlineProtocolError) as exc:
             action.finish(ok=False, started=started, detail=f"K-line failed: {exc}")
         else:
-            self.actions_run += 1
-            reply = bytes([action.request[0] + kp.POSITIVE_OFFSET]) + params
-            action.finish(ok=True, started=started, reply=reply, detail="positive response")
+            if outcome.ok:
+                self.actions_run += 1
+            action.finish(
+                ok=outcome.ok,
+                started=started,
+                reply=outcome.reply,
+                detail=outcome.detail,
+                codes=outcome.codes,
+                raw=outcome.raw,
+            )
         finally:
             MODULE_SESSIONS.release(action.address, "kline")
             if is_ecm:
@@ -526,6 +555,55 @@ class KlineCollector:
             action.module,
             result.detail,
             extra={"kline_action": result.to_dict()},
+        )
+
+    async def _perform(self, transport: KlineTransport, action: KlineAction) -> _Outcome:
+        """Send ``action``'s requests inside an open session. A module's
+        refusal or a malformed reply ends the function as a named failure
+        (StopCommunication still follows); a transport failure propagates."""
+        raw: list[ActionExchange] = []
+        replies: list[bytes] = []
+        for request in action.requests():
+            try:
+                params = await asyncio.to_thread(transport.request, request)
+            except kp.NegativeResponseError as exc:
+                refusal = bytes([kp.SID_NEGATIVE_RESPONSE, exc.service, exc.code])
+                raw.append(ActionExchange(request, refusal))
+                return _Outcome(
+                    ok=False,
+                    detail=f"{action.module} refused {request.hex(' ')}: {exc}",
+                    raw=tuple(raw),
+                )
+            reply = bytes([request[0] + kp.POSITIVE_OFFSET]) + params
+            raw.append(ActionExchange(request, reply))
+            replies.append(reply)
+        if action.read_codes is None:
+            return _Outcome(ok=True, detail="positive response", reply=replies[-1], raw=tuple(raw))
+        codes: list[StoredCode] = []
+        for read, reply in zip(action.read_codes.requests, replies, strict=True):
+            try:
+                decoded = decode_codes(reply[1:])
+            except kp.KlineProtocolError as exc:
+                return _Outcome(
+                    ok=False,
+                    detail=(
+                        f"{action.module} sent a malformed code reply to "
+                        f"{read.request_bytes().hex(' ')}: {exc}"
+                    ),
+                    raw=tuple(raw),
+                )
+            codes.extend(
+                StoredCode(code, word, read.status, read.status_confidence)
+                for code, word in decoded
+            )
+        statuses = ", ".join(read.status for read in action.read_codes.requests)
+        detail = (
+            f"read {statuses}: {len(codes)} code(s) stored"
+            if codes
+            else f"read {statuses}: no codes stored"
+        )
+        return _Outcome(
+            ok=True, detail=detail, reply=replies[-1], codes=tuple(codes), raw=tuple(raw)
         )
 
     async def _poll_local_id(

@@ -1,6 +1,7 @@
-"""K-line diagnostic functions: the collector runs a queued code clear in a
-session of its own, and the control routes offer it only for modules whose
-profile records how (the airbag module, sniffed from a scan tool 2026-10-04)."""
+"""K-line diagnostic functions: the collector runs a queued code read or clear
+in a session of its own, and the control routes offer each only for modules
+whose profile records how (the airbag module, sniffed from a scan tool on
+2026-10-04 for the clear and 2026-10-08 for the read)."""
 
 from __future__ import annotations
 
@@ -21,13 +22,15 @@ from src.collection.kline.actions import (
     KlineActionResult,
     KlineActions,
 )
-from src.collection.kline.profile import KlineProfile
+from src.collection.kline.profile import KlineProfile, load_kline_profile
 from src.collection.kline.sessions import MODULE_SESSIONS
+from src.collection.kline.transport import KlineTransport, Mode
 from src.collection.kline_collector import KlineCollector
 from src.collection.reconnect import ReconnectPolicy
 from src.config import CanaryConfig, KlineConfig
 from src.dashboard.api import create_app
 from src.telemetry import TelemetryRecord
+from tests.test_kline_transport import FakeLines, FakePort, World
 from tests.waits import HANG_GUARD_SECONDS
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -195,8 +198,9 @@ def test_functions_lists_only_modules_with_a_recorded_clear(tmp_path: Path) -> N
     assert client.get("/control/diagnostics/functions").status_code == 401
     body = client.get("/control/diagnostics/functions", headers=AUTH).json()
     functions = body["diagnostic_functions"]["functions"]
-    assert [(f["module"], f["address"], f["request_hex"]) for f in functions] == [
-        ("SRS", "0x58", "14")
+    assert [(f["kind"], f["module"], f["address"], f["request_hex"]) for f in functions] == [
+        ("read_codes", "SRS", "0x58", "a2 00, a2 01"),
+        ("clear_codes", "SRS", "0x58", "14"),
     ]
 
 
@@ -291,3 +295,198 @@ async def test_an_ecm_function_is_refused_while_the_ram_verifier_holds_it() -> N
     assert result.detail == "refused: the RAM verifier holds the ECM session"
     assert transports == []
     assert tx_gate.snapshot()["ecm_session_claims"].keys() == {"memory_verify"}
+
+
+# --------------------------------------------------------------------------- read codes
+# The airbag module's code read, frame for frame as the scan tool's was
+# sniffed KOEO on 2026-10-08 (session 2026-10-08T172943), the tool showing
+# B1023 PAST. The real transport runs over a fake serial port.
+
+SRS_START = bytes.fromhex("81 58 fc 81 56")
+SRS_START_REPLY = bytes.fromhex("83 fc 58 c1 6d 8f 94")
+READ_CURRENT = bytes.fromhex("02 a2 00 a4")
+READ_PAST = bytes.fromhex("02 a2 01 a5")
+NO_CODES = bytes.fromhex("02 e2 00 e4")
+B1023 = bytes.fromhex("04 e2 01 90 23 9a")
+STOP = kp.encode_length_frame(b"\x82")
+PENDING = kp.encode_length_frame(bytes([0x7F, 0xA2, 0x78]))
+
+
+def _srs(past: bytes, *, pending: bool = False) -> dict[bytes, bytes]:
+    return {
+        SRS_START: SRS_START_REPLY,
+        READ_CURRENT: NO_CODES,
+        READ_PAST: (PENDING if pending else b"") + past,
+        STOP: kp.encode_length_frame(b"\xc2"),
+    }
+
+
+def _wire_collector(
+    actions: KlineActions, replies: dict[bytes, bytes], world: World
+) -> KlineCollector:
+    def factory(profile: KlineProfile, mode: Mode) -> KlineTransport:
+        port = FakePort(world, replies.get)
+        return KlineTransport(
+            profile,
+            mode=mode,
+            open_port=lambda: port,
+            open_lines=lambda: FakeLines(world),
+            clock=world.clock,
+            sleep=world.sleep,
+        )
+
+    return KlineCollector(
+        KlineConfig(enabled=True, poll_interval_seconds=0.01, sniff=False),
+        PROFILE,
+        DIDS,
+        entries=lambda: (),
+        transport_factory=factory,
+        reconnect_policy=FAST,
+        actions=actions,
+    )
+
+
+def _read() -> KlineAction:
+    recipe = load_kline_profile(PROFILE).modules[SRS].read_codes
+    return KlineAction(kind="read_codes", module="SRS", address=SRS, read_codes=recipe)
+
+
+def _writes(world: World) -> list[bytes]:
+    return [e[1] for e in world.log if e[0] == "write" and isinstance(e[1], bytes)]
+
+
+async def test_the_sniffed_read_returns_b1023_past() -> None:
+    actions, world = KlineActions(), World()
+    collector = _wire_collector(actions, _srs(B1023, pending=True), world)
+    result = await _run_one(actions, collector, _read())
+    assert result.ok, result.detail
+    body = result.to_dict()
+    assert body["codes"] == [
+        {"code": "B1023", "word": "0x9023", "status": "past", "status_confidence": "inferred"}
+    ]
+    assert body["raw"] == [
+        {"request_hex": "a2 00", "reply_hex": "e2 00"},
+        {"request_hex": "a2 01", "reply_hex": "e2 01 90 23"},  # after responsePending
+    ]
+    assert body["detail"] == "read current, past: 1 code(s) stored"
+    assert _writes(world)[-4:] == [SRS_START, READ_CURRENT, READ_PAST, STOP]
+    assert MODULE_SESSIONS.owner(SRS) == "none"
+
+
+async def test_a_read_that_finds_nothing_says_so_and_is_not_a_failure() -> None:
+    """After the clear (17:58:37Z) both reads answered E2 00."""
+    actions, world = KlineActions(), World()
+    result = await _run_one(actions, _wire_collector(actions, _srs(NO_CODES), world), _read())
+    assert result.ok and result.codes == ()
+    assert result.to_dict()["codes"] == []
+    assert result.detail == "read current, past: no codes stored"
+
+
+async def test_a_refused_read_is_a_named_failure_and_the_session_still_ends() -> None:
+    actions, world = KlineActions(), World()
+    refusal = kp.encode_length_frame(bytes([0x7F, 0xA2, 0x12]))
+    result = await _run_one(actions, _wire_collector(actions, _srs(refusal), world), _read())
+    assert not result.ok and result.codes is None
+    assert result.to_dict()["codes"] is None  # a failure, not "no codes"
+    assert result.detail.startswith("SRS refused a2 01: ")
+    assert "subFunctionNotSupported" in result.detail
+    assert result.raw[-1].to_dict() == {"request_hex": "a2 01", "reply_hex": "7f a2 12"}
+    assert _writes(world)[-1] == STOP
+
+
+async def test_a_malformed_code_reply_is_a_named_failure() -> None:
+    actions, world = KlineActions(), World()
+    short = kp.encode_length_frame(bytes.fromhex("e2 02 90 23"))  # says 2 codes, carries 1
+    result = await _run_one(actions, _wire_collector(actions, _srs(short), world), _read())
+    assert not result.ok and result.codes is None
+    assert "malformed code reply to a2 01" in result.detail
+    assert _writes(world)[-1] == STOP
+
+
+async def test_passive_mode_refuses_a_read_without_touching_the_line() -> None:
+    tx_gate.set_passive(True, source="test")
+    actions, world = KlineActions(), World()
+    result = await _run_one(actions, _wire_collector(actions, _srs(B1023), world), _read())
+    assert not result.ok and "passive" in result.detail
+    assert world.log == []
+
+
+def test_a_read_action_needs_its_recipe() -> None:
+    with pytest.raises(ValueError, match="read_codes recipe"):
+        KlineAction(kind="read_codes", module="SRS", address=SRS)
+
+
+def test_functions_lists_the_read_beside_the_clear(tmp_path: Path) -> None:
+    body = _api(tmp_path).get("/control/diagnostics/functions", headers=AUTH).json()
+    read = body["diagnostic_functions"]["functions"][0]
+    assert (read["kind"], read["module"], read["request_hex"]) == (
+        "read_codes",
+        "SRS",
+        "a2 00, a2 01",
+    )
+    assert [(r["status"], r["status_confidence"]) for r in read["requests"]] == [
+        ("current", "inferred"),
+        ("past", "inferred"),
+    ]
+
+
+def test_read_refuses_what_it_cannot_do(tmp_path: Path) -> None:
+    client = _api(tmp_path)
+
+    def post(module: str) -> httpx.Response:
+        return client.post("/control/diagnostics/read_codes", json={"module": module}, headers=AUTH)
+
+    assert post("TCM").status_code == 404
+    ecm = post("ECM")
+    assert ecm.status_code == 409 and "no read_codes" in ecm.json()["detail"]
+    assert post("SRS").status_code == 503  # no collector in a bare app
+    tx_gate.set_passive(True, source="test")
+    KLINE_ACTIONS.attach()
+    try:
+        armed = post("SRS")
+        assert armed.status_code == 409 and "passive" in armed.json()["detail"]
+    finally:
+        KLINE_ACTIONS.detach()
+
+
+def test_read_returns_the_collectors_result(tmp_path: Path) -> None:
+    from src.collection.kline.actions import ActionExchange, StoredCode
+
+    client = _api(tmp_path)
+    KLINE_ACTIONS.attach()
+    done = threading.Event()
+
+    def collector() -> None:
+        while not done.is_set():
+            action = KLINE_ACTIONS.take()
+            if action is not None:
+                assert action.kind == "read_codes" and action.requests() == (
+                    b"\xa2\x00",
+                    b"\xa2\x01",
+                )
+                action.finish(
+                    ok=True,
+                    started=0.0,
+                    reply=bytes.fromhex("e2 01 90 23"),
+                    detail="read current, past: 1 code(s) stored",
+                    codes=(StoredCode("B1023", 0x9023, "past", "inferred"),),
+                    raw=(ActionExchange(b"\xa2\x01", bytes.fromhex("e2 01 90 23")),),
+                )
+                KLINE_ACTIONS.done(action)
+                return
+            done.wait(0.01)
+
+    worker = threading.Thread(target=collector)
+    worker.start()
+    try:
+        response = client.post(
+            "/control/diagnostics/read_codes", json={"module": "srs"}, headers=AUTH
+        )
+    finally:
+        done.set()
+        worker.join()
+        KLINE_ACTIONS.detach()
+    assert response.status_code == 200
+    body = response.json()["read_codes"]
+    assert (body["module"], body["address"], body["ok"]) == ("SRS", "0x58", True)
+    assert [c["code"] for c in body["codes"]] == ["B1023"]

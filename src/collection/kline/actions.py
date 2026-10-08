@@ -10,8 +10,9 @@ function in a session of its own, and resumes.
 One function at a time: a second request while one is queued or running is
 refused, not queued behind it.
 
-Today there is one function, clearing a module's stored codes, and only for a
-module whose vehicle profile records how (``KlineModule.clear_codes``).
+Two functions, each only for a module whose vehicle profile records how:
+reading a module's stored codes (``KlineModule.read_codes``) and clearing them
+(``KlineModule.clear_codes``).
 """
 
 from __future__ import annotations
@@ -22,7 +23,9 @@ from concurrent.futures import Future
 from dataclasses import dataclass, field
 from typing import Any, Literal
 
-ActionKind = Literal["clear_codes"]
+from src.collection.kline.profile import CodeStatus, ReadCodes
+
+ActionKind = Literal["read_codes", "clear_codes"]
 
 
 class KlineActionBusyError(RuntimeError):
@@ -34,19 +37,57 @@ class KlineActionUnavailableError(RuntimeError):
 
 
 @dataclass(frozen=True)
+class StoredCode:
+    """One code a module's code read returned."""
+
+    code: str  # "B1023"
+    word: int  # 0x9023
+    status: CodeStatus
+    status_confidence: str
+
+    def to_dict(self) -> dict[str, str]:
+        return {
+            "code": self.code,
+            "word": f"0x{self.word:04X}",
+            "status": self.status,
+            "status_confidence": self.status_confidence,
+        }
+
+
+@dataclass(frozen=True)
+class ActionExchange:
+    """One request and what answered it, as sent and received (payloads,
+    service byte first; responsePending frames are the transport's)."""
+
+    request: bytes
+    reply: bytes | None
+
+    def to_dict(self) -> dict[str, str | None]:
+        return {
+            "request_hex": self.request.hex(" "),
+            "reply_hex": self.reply.hex(" ") if self.reply is not None else None,
+        }
+
+
+@dataclass(frozen=True)
 class KlineActionResult:
     kind: ActionKind
     module: str
     address: int
     ok: bool
-    #: The positive reply's service byte and parameters (``54`` for a clear).
+    #: The last positive reply's service byte and parameters (``54`` for a clear).
     reply_hex: str | None
     detail: str
     started_at: float
     finished_at: float
+    #: A code read's codes: empty when the module read and holds none, ``None``
+    #: when the read failed (and for a clear, which reads nothing).
+    codes: tuple[StoredCode, ...] | None = None
+    #: Every request sent after StartCommunication and its reply, in order.
+    raw: tuple[ActionExchange, ...] = ()
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        out: dict[str, Any] = {
             "kind": self.kind,
             "module": self.module,
             "address": f"0x{self.address:02X}",
@@ -56,7 +97,11 @@ class KlineActionResult:
             "started_at": self.started_at,
             "finished_at": self.finished_at,
             "duration_s": round(self.finished_at - self.started_at, 3),
+            "raw": [exchange.to_dict() for exchange in self.raw],
         }
+        if self.kind == "read_codes":
+            out["codes"] = None if self.codes is None else [code.to_dict() for code in self.codes]
+        return out
 
 
 @dataclass
@@ -64,10 +109,34 @@ class KlineAction:
     kind: ActionKind
     module: str
     address: int
-    request: bytes
+    #: A clear's one request (``KlineModule.clear_codes``).
+    request: bytes = b""
+    #: A code read's recipe (``KlineModule.read_codes``).
+    read_codes: ReadCodes | None = None
     future: Future[KlineActionResult] = field(default_factory=Future)
 
-    def finish(self, *, ok: bool, detail: str, started: float, reply: bytes | None = None) -> None:
+    def __post_init__(self) -> None:
+        if self.kind == "clear_codes" and not self.request:
+            raise ValueError("a clear_codes action needs its request")
+        if self.kind == "read_codes" and self.read_codes is None:
+            raise ValueError("a read_codes action needs the module's read_codes recipe")
+
+    def requests(self) -> tuple[bytes, ...]:
+        """What the collector sends after StartCommunication, in order."""
+        if self.read_codes is not None:
+            return tuple(read.request_bytes() for read in self.read_codes.requests)
+        return (self.request,)
+
+    def finish(
+        self,
+        *,
+        ok: bool,
+        detail: str,
+        started: float,
+        reply: bytes | None = None,
+        codes: tuple[StoredCode, ...] | None = None,
+        raw: tuple[ActionExchange, ...] = (),
+    ) -> None:
         if self.future.done():
             # The caller stopped waiting and cancelled it. The function ran
             # (or was refused) all the same; the collector's log says which.
@@ -82,6 +151,8 @@ class KlineAction:
                 detail=detail,
                 started_at=started,
                 finished_at=time.time(),
+                codes=codes,
+                raw=raw,
             )
         )
 
@@ -165,9 +236,11 @@ KLINE_ACTIONS = KlineActions()
 __all__ = [
     "KLINE_ACTIONS",
     "ActionKind",
+    "ActionExchange",
     "KlineAction",
     "KlineActionBusyError",
     "KlineActionResult",
     "KlineActionUnavailableError",
     "KlineActions",
+    "StoredCode",
 ]
