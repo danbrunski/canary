@@ -75,10 +75,12 @@ except ImportError:  # loaded as `scripts.evaluate_behavior_models`: repo root o
 
 from src.analysis.behavior_validation import (
     EVALUATOR_VERSION,
+    AxisPairingRefusedError,
     BehaviorValidationDocument,
     EventPolicy,
     RowEvaluation,
     apply_criteria,
+    axis_separation_summary,
     breakdown,
     breakdown_by_labels,
     build_evaluation_frame,
@@ -89,9 +91,11 @@ from src.analysis.behavior_validation import (
     group_drives,
     load_validation_document,
     parent_session,
+    per_read_frame,
     piece_time_ranges,
     profile_exclusions,
     qualifying_drive_count,
+    read_model_reads,
     regime_labels,
     session_content_identity,
     synthetic_sensitivity,
@@ -145,6 +149,10 @@ SELECTION_RULES = {
         "baseline: the artifact's recorded training baseline, else fitted on supplied "
         "training sessions' eligible rows; never on evaluation drives",
         "events: the daemon's persistence gate then emitter dedupe (event_policy), per drive",
+        "axis pairing (B04.9): a model whose criteria declare axis_pairing is graded one row "
+        "per output read, each axis read paired once on the acquisition clock within its "
+        "declared bound (unpaired reads refused as unpaired:<axis>); every other column is "
+        "the grid row of the second the read was acquired in. Other models: the 1 Hz grid",
         "synthetic faults: declared step offsets on the actual output; synthetic "
         "sensitivity, not fault recall",
         "per-row band exceedance and events on unlabelled drives are not false positives",
@@ -365,7 +373,11 @@ def _corrected(
     drive_of_piece: dict[str, str],
     taxonomy_problems: list[str],
     regimes: dict[str, np.ndarray] | None = None,
+    baseline_frame: pd.DataFrame | None = None,
 ) -> dict[str, Any]:
+    """``baseline_frame`` (default ``frame``) fits the simple baseline: a
+    per-mode median of the output reads no axis, so a per-read ``frame``
+    takes its baseline from the grid's training rows."""
     fit = model.fit
     leaks = training_leaks(drives, [*fit.sessions, *fit.calibration_sessions])
     independent = [d for d in drives if d.drive_id not in leaks]
@@ -373,7 +385,8 @@ def _corrected(
     mask = np.asarray(frame[SESSION_COLUMN].astype(str).isin(pieces), dtype=bool)
     criteria = document.recipes.get(model.name) if document is not None else None
     kind = criteria.baseline if criteria is not None else "training_mode_median"
-    baseline, baseline_source = _baseline(model, frame, spec=spec, kind=kind, policy=policy)
+    baseline_rows = frame if baseline_frame is None else baseline_frame
+    baseline, baseline_source = _baseline(model, baseline_rows, spec=spec, kind=kind, policy=policy)
     out: dict[str, Any] = {
         "excluded_training_drives": leaks,
         "independent_drives": [d.drive_id for d in independent],
@@ -454,6 +467,12 @@ def _corrected(
         failures=failures,
         input_ranges=_input_ranges(model, ev),
     )
+    if criteria is not None and criteria.axis_pairing is not None:
+        out["axis_pairing"] = {
+            "max_separation_s": dict(criteria.axis_pairing.max_separation_s),
+            "basis": criteria.axis_pairing.basis,
+            "graded_separation_s": axis_separation_summary(sub, ev, model),
+        }
     return out
 
 
@@ -539,7 +558,13 @@ def evaluate(
     taxonomy_problems: list[str],
     profile: str | None,
     revisions: TuneRevisionRegistry | None = None,
+    sessions: Sequence[Path] = (),
+    bindings_path: Path | None = None,
+    dids_path: Path | None = None,
 ) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+    """``sessions`` are the directories ``frame`` was built from; a corrected
+    model whose criteria declare ``axis_pairing`` (B04.9) is graded per read
+    from them and refused (:class:`AxisPairingRefusedError`) without them."""
     catalog = {recipe.name: recipe for recipe in default_recipes(profile)}
     join_gap = document.drive_join_gap_seconds if document is not None else 600.0
     ranges = piece_time_ranges(frame)
@@ -576,16 +601,43 @@ def evaluate(
                 model, frame, spec=spec, policy=policy, drive_of_piece=drive_of_piece
             )
         else:
+            criteria = document.recipes.get(model.name) if document is not None else None
+            model_frame, model_regimes = frame, regimes
+            if criteria is not None and criteria.axis_pairing is not None:
+                if not sessions:
+                    raise AxisPairingRefusedError(
+                        "axis_pairing_no_reads",
+                        f"{model.name} is graded per read; name the session directories",
+                    )
+                model_frame = per_read_frame(
+                    model,
+                    frame,
+                    read_model_reads(
+                        model, sessions, bindings_path=bindings_path, dids_path=dids_path
+                    ),
+                    criteria.axis_pairing,
+                    interval_seconds=policy.interval_seconds,
+                )
+                model_regimes = regime_labels(
+                    model_frame,
+                    document.report_regimes if document is not None else None,
+                    revision_of_piece=(
+                        None
+                        if revisions is None
+                        else lambda piece: _revision_of(revisions, piece, starts)
+                    ),
+                )
             entry["corrected"] = _corrected(
                 model,
-                frame,
+                model_frame,
                 spec=spec,
                 document=document,
                 policy=policy,
                 drives=drives,
                 drive_of_piece=drive_of_piece,
                 taxonomy_problems=taxonomy_problems,
-                regimes=regimes,
+                regimes=model_regimes,
+                baseline_frame=frame,
             )
         results[model.name] = entry
     return results, [d.record().model_dump(mode="json") for d in drives]
@@ -733,6 +785,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         taxonomy_problems=taxonomy_problems,
         profile=args.profile,
         revisions=revisions,
+        sessions=sessions,
+        bindings_path=args.bindings,
+        dids_path=args.dids,
     )
     report = {
         "report": "behavior-validation",

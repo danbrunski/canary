@@ -190,7 +190,7 @@ historical evidence, not proof that the new candidates work.
 
   [Report](../../../data/analyses/2026-09-23-behavior-refit-validation-report.md) §4.
 
-- [ ] **B04.9 — Pair timing with its axes per read, or bound the skew.**
+- [x] **B04.9 — Pair timing with its axes per read, or bound the skew.**
   The evaluator that produced B04.1–B04.4 reads a frame resampled onto a 1 Hz
   grid. Each channel is put on that grid by `.resample().last()` and then
   forward-filled (`src/preprocessing/resampler.py`, `_resample_one_session`).
@@ -210,6 +210,137 @@ historical evidence, not proof that the new candidates work.
       justified by the measured timing noise.
   - Restate the affected B04 numbers under the chosen rule, or record why
     they stand.
+
+  *Done 2026-10-08: timing is graded per read.*
+  - **Measured.** B04.1's manifest, the published (pre-`2971d79`) RPM/load
+    surface, evaluator at HEAD. For each graded grid row, the separation
+    between the acquisition times of the timing read and the rpm/load reads
+    the grid put beside it, per row (resampler semantics re-run on read ids):
+    - RPM: 24,682 rows; p50 0, p90 0, p95 0.13 s, p99 1.25 s, max 2.65 s;
+      992 beyond 0.25 s, 338 beyond 1 s.
+    - Load: p95 0.25 s, p99 0.75 s, max 2.65 s; 1,126 beyond 0.25 s.
+    - Either axis beyond 0.25 s: 1,282 rows (5.2 %); beyond 1 s, 353.
+    - The tail sits in a few sessions. `2026-09-18T134345`: rpm p50 1.25 s,
+      253 of 261 rows beyond 0.25 s. `2026-09-18T213818`: 449 rpm and 671 load
+      rows beyond 0.25 s. Elsewhere, ≤ 57 rows per session.
+    - IAT (RPM/IAT surface, slow tier): p50 0.75 s, p95 2.6 s, max 47.6 s.
+  - **The population has no gap at any bound.** For each of the 27,366
+    acquired timing reads in B04.1's non-capture sessions, the nearest read
+    of each axis:
+
+    | nearest read | 0 s | 0.10–0.15 | 0.20–0.25 | 0.25–0.30 | 0.30–0.40 | 0.40–0.50 | 0.50–0.75 | 0.75–1.0 | 1.0–1.5 | > 1.5 s |
+    |---|---|---|---|---|---|---|---|---|---|---|
+    | RPM | 24,374 | 1,975 | 283 | 198 | 331 | 140 | 32 | 0 | 0 | 18 |
+    | load | 25,520 | 62 | 658 | 352 | 350 | 204 | 108 | 65 | 26 | 9 |
+
+    Bins with fewer than 10 reads in both rows are omitted. Reads continue
+    smoothly across 0.25 s, so no bound falls in a gap.
+  - **What a substituted axis read does (the bound's basis).** Each
+    same-response (timing, rpm, load) tuple is an anchor. One axis is
+    replaced by each read of it 0.25–1.5 s away, the other is held, and the
+    change in the published surface's expected timing is measured per
+    substitution. The noise floor is the 2.2° measured noise.
+
+    | axis, separation | substitutions | axis change p90 / p95 | expected shift p95 | share > 2.2° |
+    |---|---|---|---|---|
+    | RPM, 0.25–0.5 s | 157 | 17.5 / 27.5 rpm | 0.06° | 0.7 % |
+    | RPM, 0.5–1.0 s | 25,777 | 87.5 / 150 rpm | 0.47° | 1.9 % |
+    | RPM, 1.0–1.5 s | 21,784 | 87.5 / 150 rpm | 0.48° | 1.9 % |
+    | load, 0.25–0.5 s | 267 | 3.1 / 7.5 % | 0.61° | 1.3 % |
+    | load, 0.5–1.0 s | 25,638 | 14.1 / 25.5 % | 5.1° | 11.2 % |
+    | load, 1.0–1.5 s | 21,749 | 14.5 / 26.7 % | 5.2° | 11.2 % |
+
+    Timing itself moves p90 2° / p95 6° over 0.25–0.5 s (7 % beyond 2.2°)
+    and p90 11° / p95 18–19° over 0.5–1.5 s (26 %). IAT changes by at most
+    1 °C (one LSB) at p99 up to 4 s apart.
+  - **Bound: 0.5 s for RPM and load.** It is the widest bound whose
+    substitutions keep the expected timing inside the measured noise. From
+    0.5 s, load substitutions push 11 % beyond it. The 0.25–0.5 s sample is
+    small (157 and 267 substitutions), because most reads land in the same
+    response or a whole round away. 0.5 s is wider than the timing lookup's
+    0.25 s `max_acquisition_skew_s` (B08.4); that figure is a proposed
+    lookup-tuple limit, not this measurement. An earlier draft of this item
+    adopted 0.25 s and claimed it kept "the same response and the adjacent
+    read". That described the rows the bound kept, not the population.
+  - **Rule.** `behavior_validation.yaml` declares `axis_pairing`
+    (`ValidationCriteria.axis_pairing`) on both timing recipes, with the
+    measured basis above: RPM and load 0.5 s, IAT 4.0 s.
+    `scripts/evaluate_behavior_models.py` (corrected mode) grades such a
+    model one row per output read
+    (`behavior_validation.per_read_frame`). Each axis read is paired once,
+    on the acquisition clock, by `match_ordered` (output as reference),
+    within its bound. The other columns come from the grid row of the
+    second the read was acquired in.
+    - Refusals, by name: `unpaired:<axis>`, `not_captured:<axis>`,
+      `clock_unsupported:<spec>` (round or unknown stamps),
+      `no_grid_context`.
+    - `evaluate_rows` refuses a frame paired for another output or other
+      axes, and a frame that does not state its policy.
+    - It also refuses a frame mixing policies, including any row with no
+      policy (`axis_pairing_mixed`). A grid row concatenated onto a
+      per-read frame would otherwise be graded as paired.
+    - `FoldMetrics.axis_pairing_s` records the bound. `apply_criteria` fails
+      grid-graded metrics (`axis_pairing=grid`) and looser bounds whenever the
+      criteria declare pairing, so a grid-joined timing verdict cannot pass.
+      This applies in the refit too.
+    - Historical mode stays on the grid, because it reproduces persisted
+      numbers.
+  - **B04.1 restated** (same manifest, same artifact, HEAD evaluator;
+    grid → per read at 0.5 s; per read at 0.25 s in brackets):
+    - RPM/load:
+      - eligible 27,892 → 26,918 (26,188); evaluated 24,712 → 23,818
+        (23,208); coverage 0.886 → 0.885.
+      - MAE 5.62 → 5.62° (5.60°); bias +1.24 → +1.23°; p95 18.4 → 18.4°;
+        R² 0.318 → 0.316.
+      - Median warning half-width 23.49 → 23.49°; skill 0.217 → 0.216.
+      - Events 16 → 14 (1.87 → 1.66/h).
+      - Drives 5 → 5 (4 at 0.25 s). July `2026-07-22T170353` polls PIDs
+        unbatched: it had 24 grid rows at MAE 0.05°; per read it keeps 2
+        rows at 0.5 s and none at 0.25 s.
+      - Graded separations: p95 0.13 s rpm, p99 0.37 s, max 0.50 s.
+      - Synthetic −3°/60 s 0.32 → 0.31 (delay 2.0 s); transients
+        0.24/0.27 → 0.24/0.27.
+      - Load strata move ≤ 0.07° (< 20 % load 15.70 → 15.69°); steady
+        3.99 → 4.04°, transient 7.82 → 7.81°. Thinner strata move more:
+        IAT [10,20) °C 6.66 → 6.94°, coolant [60,80) °C 0.61 → 0.25°, baro
+        [70,76) kPa 6.78 → 6.97°.
+    - RPM/IAT: evaluated 4,581 → 1,485, MAE 5.20 → 5.14°, events/h
+      27.5 → 13.0. Its IAT is read a third as often as timing, and
+      once-only pairing leaves 18,135 reads `unpaired:obd:INTAKE_TEMP`.
+      Every timing read on these drives has an IAT read within 4 s.
+      This is a cost of the matcher, not of the data.
+    - These HEAD figures differ from B04.1's own (36,169 evaluated, MAE
+      5.86°). Evaluator versions 3 and 4 refuse tuning captures; pairing
+      does not explain the difference.
+  - **B04.4 restated** on the same frame (candidate's 30 held-out sessions,
+    `2026-09-22T154716`/`155624` read from `_archive/`, default-profile
+    rows; grid → per read at 0.5 s; 0.25 s in brackets):
+    - Published v2: MAE 4.63 → 4.60° (4.60°), width 14.32 → 14.32°,
+      events 3 → 3.
+    - Candidate v3: MAE 4.34 → 4.35° (4.35°), width 8.05 → 8.05°, events
+      3 → 4.
+    - B04.4's recorded 7,976-row figures included tuning captures, which
+      R03.12 now refuses. Its conclusion stands: v3 is better than v2, and
+      neither resolves 3°.
+  - **B04.2/B04.3 stand.** B04.2's strata were measured on v3's held-out
+    drives and were not recomputed. On B04.1's drives the stratum its
+    conclusion rests on (< 20 % load) moves 0.01°. B04.3's synthetic and
+    transient detection fractions move ≤ 0.02.
+  - **Refit side effect.** The criteria now include `axis_pairing`, so the
+    next refit flags each carried-over timing prior `criteria_changed`
+    (`carry_over_flags`) and bumps its version. A grid-graded refit verdict
+    also fails `axis_pairing=grid`. Both timing models are already
+    diagnostic_only, so their status does not change.
+  - Tests: `tests/test_behavior_axis_pairing.py` (11). They include:
+    - the known answer: a grid row 10° off the surface from reads 0.8 s
+      apart is 0° per read;
+    - a grid row concatenated onto a per-read frame is refused.
+
+    Scratch evidence is not committed.
+  - **Not changed:** fitting and serving still use the 1 Hz grid. Whether
+    the timing fit should pair per read too is an open operator decision.
+    So is whether a slow context axis (IAT) may reuse one read for several
+    output reads.
 
 **Done when:** timing has either demonstrated useful resolution or remains
 explicitly exploratory, and airflow retention/removal is supported by an

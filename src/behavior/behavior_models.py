@@ -699,6 +699,37 @@ class ResolutionSpec(_Strict):
         return self
 
 
+class AxisPairing(_Strict):
+    """Grade each output read against axis reads acquired near it (B04.9).
+
+    The evaluation frame is a 1 Hz grid: each channel's last read in a second,
+    forward-filled up to ``max_gap``. One grid row can therefore put a timing
+    read beside an rpm read 2.6 s away (measured on B04.1's drives,
+    2026-10-08), while timing itself moves a median 2–3° over 1.5–2.7 s
+    against 2.2° measured noise. A model whose criteria declare this is graded
+    one row per output read, each axis read paired once on the acquisition
+    clock within its bound (:func:`src.signals.pairing.match_ordered`); a read
+    with no partner inside the bound is refused as ``unpaired:<axis>``.
+    :func:`src.analysis.behavior_validation.apply_criteria` fails metrics
+    graded any other way, so a grid-joined verdict cannot pass.
+    """
+
+    #: Axis channel -> the largest acquisition separation, seconds, an axis
+    #: read may have from the output read it describes. Every axis of the
+    #: model must be named (the evaluator refuses a partial declaration).
+    max_separation_s: dict[str, float] = Field(min_length=1)
+    #: What justifies each bound: the measured change of the quantities over
+    #: that separation, not convenience.
+    basis: str = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def _check_bounds(self) -> AxisPairing:
+        bad = {axis: s for axis, s in self.max_separation_s.items() if not s > 0}
+        if bad:
+            raise ValueError(f"axis_pairing bounds must be positive seconds: {bad}")
+        return self
+
+
 class ValidationCriteria(_Strict):
     """Per-recipe acceptance criteria, declared in profile data before testing.
 
@@ -748,6 +779,9 @@ class ValidationCriteria(_Strict):
     #: B04.3 — the model's declared useful resolution (optional; when present
     #: its delay and transient controls become criteria).
     resolution: ResolutionSpec | None = None
+    #: B04.9 — grade per output read with axes paired within these bounds;
+    #: absent, the model is graded on the resampled grid's rows.
+    axis_pairing: AxisPairing | None = None
     notes: str | None = None
 
     @model_validator(mode="after")
@@ -818,6 +852,10 @@ class FoldMetrics(_Strict):
     drive_mae_min: float | None = None
     drive_mae_max: float | None = None
     mae_drive_bootstrap_90: list[float] | None = None
+    #: B04.9 — the per-axis acquisition bound the rows were paired under, one
+    #: row per output read; ``None``: rows of the resampled grid, whose
+    #: forward-filled join leaves the separation unbounded below ``max_gap``.
+    axis_pairing_s: dict[str, float] | None = None
 
 
 class SyntheticSensitivity(_Strict):

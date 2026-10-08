@@ -44,6 +44,7 @@ The pieces, each used by both ``src.analysis.refit`` (publication) and
 from __future__ import annotations
 
 import hashlib
+import json
 import logging
 from collections import Counter
 from collections.abc import Callable, Iterable, Mapping, Sequence
@@ -57,6 +58,7 @@ import pandas as pd
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from src.analysis.channels import ChannelSpecError, parse_spec, read_channels
 from src.analysis.splits import (
     DEFAULT_JOIN_GAP_SECONDS,
     Drive,
@@ -80,6 +82,7 @@ from src.behavior.behavior_eligibility import (
     serving_spec,
 )
 from src.behavior.behavior_models import (
+    AxisPairing,
     BandExcessPersistence,
     BehaviorModel1D,
     BehaviorModel2D,
@@ -104,11 +107,12 @@ from src.columns import MODE_COLUMN, SESSION_COLUMN, TIMESTAMP_COLUMN, gap_colum
 from src.config import CanaryConfig
 from src.dataframe_utils import numeric_values
 from src.models.fusion import BandExcessAccumulator, PersistenceGate
+from src.paths import BINDINGS_YAML, DIDS_YAML
 from src.preprocessing import drives as _drives
 from src.preprocessing.decode import decode_on_read, read_session_decoded_subset
 from src.preprocessing.features import compute_rate_of_change
 from src.session import SessionKind, session_kind
-from src.signals.pairing import to_seconds
+from src.signals.pairing import PairingPolicy, match_ordered, to_seconds
 from src.storage.corpus_eligibility import default_profile_exclusion
 
 log = logging.getLogger(__name__)
@@ -129,7 +133,12 @@ log = logging.getLogger(__name__)
 #: stamped as not default-profile evidence (tuning captures, R03.12) are
 #: refused as ``profile_excluded:*``, and evidence refuses an unstamped
 #: capture piece.
-EVALUATOR_VERSION = 4
+#: 5 (2026-10-08, B04.9): a frame built by :func:`per_read_frame` is graded
+#: one row per output read with its axes paired on the acquisition clock;
+#: metrics record the bound (``FoldMetrics.axis_pairing_s``), and criteria
+#: declaring ``axis_pairing`` fail grid-joined metrics. Grid frames are
+#: graded exactly as in 4.
+EVALUATOR_VERSION = 5
 
 #: Drives needed before a drive-resampled bootstrap interval is reported.
 MIN_BOOTSTRAP_DRIVES = 3
@@ -453,6 +462,301 @@ def profile_refusals(frame: pd.DataFrame) -> np.ndarray:
     return np.full(len(frame), None, dtype=object)
 
 
+# ---------------------------------------------------------------------------
+# Per-read axis pairing (B04.9)
+# ---------------------------------------------------------------------------
+
+#: Per-row refusal from the per-read pairing (``None``: every axis paired).
+AXIS_PAIRING_COLUMN = "context:axis_pairing"
+#: The pairing a per-read frame was built under, on every row, as JSON
+#: ``{"output": spec, "axes": {axis: bound_s}}``. A column rather than
+#: ``attrs`` so it survives slicing and concatenation; :func:`evaluate_rows`
+#: refuses a frame paired for another model's output or axes.
+AXIS_PAIRING_POLICY_COLUMN = "context:axis_pairing_policy"
+#: Prefix of the per-axis ``|acquisition separation|`` columns, seconds.
+AXIS_SEPARATION_PREFIX = "context:axis_separation_s:"
+#: Clocks with no floor under a sub-second tolerance
+#: (:func:`src.signals.pairing.basis_floor_s`); a ``round`` or ``unknown``
+#: stamp cannot say which read came first inside a round.
+_PAIRABLE_BASES = frozenset({"acquired", "stored"})
+
+
+class AxisPairingRefusedError(ValueError):
+    """A per-read pairing that cannot be built or graded; ``reason`` names why."""
+
+    def __init__(self, reason: str, message: str) -> None:
+        super().__init__(f"{reason}: {message}")
+        self.reason = reason
+
+
+def axis_separation_column(axis: str) -> str:
+    return f"{AXIS_SEPARATION_PREFIX}{axis}"
+
+
+def _model_axes(model: BehaviorModel1D | BehaviorModel2D) -> list[str]:
+    if isinstance(model, BehaviorModel1D):
+        return [model.axis.channel]
+    return [axis.channel for axis in model.axes]
+
+
+def require_axis_pairing_covers(
+    model: BehaviorModel1D | BehaviorModel2D, pairing: AxisPairing
+) -> None:
+    """Refuse a declaration that leaves an axis on the grid's join, or names
+    a channel the model does not read."""
+    axes = set(_model_axes(model))
+    declared = set(pairing.max_separation_s)
+    missing = sorted(axes - declared)
+    if missing:
+        raise AxisPairingRefusedError(
+            f"axis_pairing_incomplete:{missing[0]}",
+            f"{model.name} reads {sorted(axes)}; axis_pairing bounds only {sorted(declared)}",
+        )
+    unknown = sorted(declared - axes)
+    if unknown:
+        raise AxisPairingRefusedError(
+            f"axis_pairing_unknown_axis:{unknown[0]}",
+            f"{model.name} has no axis {unknown[0]} (axes {sorted(axes)})",
+        )
+
+
+def axis_pairing_bounds(
+    frame: pd.DataFrame, model: BehaviorModel1D | BehaviorModel2D
+) -> dict[str, float] | None:
+    """The per-axis bound ``frame`` was paired under for ``model``, or
+    ``None`` for a frame of resampled grid rows."""
+    if AXIS_PAIRING_POLICY_COLUMN not in frame.columns:
+        if AXIS_PAIRING_COLUMN in frame.columns:
+            raise AxisPairingRefusedError(
+                "axis_pairing_unstated", "per-read refusals without the policy they came from"
+            )
+        return None
+    column = frame[AXIS_PAIRING_POLICY_COLUMN]
+    if column.empty:
+        return None
+    unstated = int(column.isna().sum())
+    if unstated:
+        # A grid row concatenated onto a per-read frame has no policy; read
+        # past, it would be graded as if its axes had been paired.
+        raise AxisPairingRefusedError(
+            "axis_pairing_mixed",
+            f"{unstated} of {len(column)} rows state no pairing policy (grid rows mixed in)",
+        )
+    stated = {str(v) for v in column.unique()}
+    if len(stated) > 1:
+        raise AxisPairingRefusedError(
+            "axis_pairing_mixed", f"one frame paired under {len(stated)} policies"
+        )
+    policy = json.loads(stated.pop())
+    if policy["output"] != model.output:
+        raise AxisPairingRefusedError(
+            "axis_pairing_other_output",
+            f"frame was paired on {policy['output']} reads; {model.name} grades {model.output}",
+        )
+    bounds = {str(axis): float(s) for axis, s in policy["axes"].items()}
+    if set(bounds) != set(_model_axes(model)):
+        raise AxisPairingRefusedError(
+            "axis_pairing_other_axes",
+            f"frame was paired on {sorted(bounds)}; {model.name} reads {_model_axes(model)}",
+        )
+    return bounds
+
+
+def read_model_reads(
+    model: BehaviorModel1D | BehaviorModel2D,
+    sessions: Sequence[Path],
+    *,
+    bindings_path: Path | None = None,
+    dids_path: Path | None = None,
+) -> dict[str, pd.DataFrame]:
+    """Each session's reads of ``model``'s output and axes on the acquisition
+    clock (:func:`src.analysis.channels.read_channels`), by directory name.
+    Refuses a derived output or axis: it is computed on the grid, not read."""
+    specs = [model.output, *_model_axes(model)]
+    for spec in specs:
+        try:
+            parse_spec(spec)
+        except ChannelSpecError as exc:
+            raise AxisPairingRefusedError(
+                f"axis_pairing_not_a_read:{spec}",
+                f"{spec} is not read from the bus, so it has no acquisition time ({exc})",
+            ) from exc
+    return {
+        Path(session).name: read_channels(
+            Path(session),
+            specs,
+            acquired_time=True,
+            bindings_path=BINDINGS_YAML if bindings_path is None else bindings_path,
+            dids_path=DIDS_YAML if dids_path is None else dids_path,
+        )
+        for session in sessions
+    }
+
+
+def per_read_frame(
+    model: BehaviorModel1D | BehaviorModel2D,
+    grid: pd.DataFrame,
+    reads: Mapping[str, pd.DataFrame],
+    pairing: AxisPairing,
+    *,
+    interval_seconds: float,
+) -> pd.DataFrame:
+    """One row per read of ``model``'s output, its axes paired per read.
+
+    ``grid`` is the resampled evaluation frame (:func:`build_evaluation_frame`)
+    and ``reads`` each session's :func:`read_model_reads`. Each axis read is
+    paired at most once with an output read (:func:`match_ordered`, output as
+    the reference side) within that axis's bound. Every other column — mode,
+    the contract's gates, start context, profile verdict, rates — is the grid
+    row of the second the output read was acquired in. The row's timestamp is
+    the read's acquisition time.
+
+    Every read gets a row; one that cannot be graded keeps why in
+    :data:`AXIS_PAIRING_COLUMN`: ``clock_unsupported:<spec>`` (a round or
+    unknown stamp), ``not_captured:<axis>``, ``unpaired:<axis>`` (no partner
+    within the bound) or ``no_grid_context`` (the grid has no row for that
+    second). A session with no grid row at all contributes nothing.
+    """
+    require_axis_pairing_covers(model, pairing)
+    output = model.output
+    axes = _model_axes(model)
+    bounds = {axis: float(pairing.max_separation_s[axis]) for axis in axes}
+    policy_json = json.dumps({"output": output, "axes": bounds}, sort_keys=True)
+    grid_parents = grid[SESSION_COLUMN].astype(str).map(parent_session).to_numpy()
+    grid_seconds = to_seconds(grid[TIMESTAMP_COLUMN])
+    parts: list[pd.DataFrame] = []
+    for parent, long in reads.items():
+        positions = np.flatnonzero(grid_parents == parent)
+        if not positions.size:
+            continue
+        positions = positions[np.argsort(grid_seconds[positions], kind="stable")]
+        part = _pair_session_reads(
+            grid,
+            positions,
+            grid_seconds[positions],
+            long,
+            output=output,
+            bounds=bounds,
+            interval_seconds=interval_seconds,
+            policy_json=policy_json,
+        )
+        if part is not None:
+            parts.append(part)
+    if not parts:
+        empty = grid.iloc[0:0].copy()
+        for axis in axes:
+            empty[axis_separation_column(axis)] = pd.Series(dtype=float)
+        empty[AXIS_PAIRING_COLUMN] = pd.Series(dtype=object)
+        empty[AXIS_PAIRING_POLICY_COLUMN] = pd.Series(dtype=object)
+        return empty
+    out = pd.concat(parts, ignore_index=True)
+    return out.sort_values([SESSION_COLUMN, TIMESTAMP_COLUMN], kind="stable").reset_index(drop=True)
+
+
+def _pair_session_reads(
+    grid: pd.DataFrame,
+    positions: np.ndarray,
+    seconds: np.ndarray,
+    long: pd.DataFrame,
+    *,
+    output: str,
+    bounds: Mapping[str, float],
+    interval_seconds: float,
+    policy_json: str,
+) -> pd.DataFrame | None:
+    spec_of = long["spec"].astype(str).to_numpy()
+    target = long[spec_of == output]
+    if target.empty:
+        return None
+    t = to_seconds(target["timestamp"])
+    order = np.argsort(t, kind="stable")
+    t = t[order]
+    stamps = pd.to_datetime(target["timestamp"], utc=True).iloc[order].reset_index(drop=True)
+    values = pd.to_numeric(target["value"], errors="coerce").to_numpy(dtype=float)[order]
+    pairable = target["timestamp_basis"].astype(str).isin(_PAIRABLE_BASES).to_numpy()[order]
+    reason = np.full(len(t), None, dtype=object)
+    reason[~pairable] = f"clock_unsupported:{output}"
+
+    def refuse(mask: np.ndarray, why: str) -> None:
+        free = np.asarray([r is None for r in reason], dtype=bool)
+        reason[mask & free] = why
+
+    paired: dict[str, np.ndarray] = {}
+    separation: dict[str, np.ndarray] = {}
+    pairable_rows = np.flatnonzero(pairable)
+    for axis, bound in bounds.items():
+        captured = long[spec_of == axis]
+        side = captured[captured["timestamp_basis"].astype(str).isin(_PAIRABLE_BASES)]
+        vals = np.full(len(t), np.nan)
+        sep = np.full(len(t), np.nan)
+        if side.empty:
+            why = f"not_captured:{axis}" if captured.empty else f"clock_unsupported:{axis}"
+            refuse(np.ones(len(t), dtype=bool), why)
+        else:
+            matched = match_ordered(
+                t[pairable_rows],
+                to_seconds(side["timestamp"]),
+                PairingPolicy(
+                    max_separation=pd.Timedelta(seconds=bound), reference="a", tie_break="earlier"
+                ),
+            )
+            rows = pairable_rows[matched.index_a]
+            side_values = pd.to_numeric(side["value"], errors="coerce").to_numpy(dtype=float)
+            vals[rows] = side_values[matched.index_b]
+            sep[rows] = matched.separation_s
+            refuse(~np.isfinite(sep), f"unpaired:{axis}")
+        paired[axis] = vals
+        separation[axis] = sep
+    # The grid row of the second each read was acquired in: the resampler
+    # files a read under the floor of its second.
+    second = np.floor(t / interval_seconds) * interval_seconds
+    k = np.searchsorted(seconds, second + 1e-6, side="right") - 1
+    k_ctx = np.clip(k, 0, len(seconds) - 1)
+    has_context = (k >= 0) & (np.abs(seconds[k_ctx] - second) < 1e-6)
+    # A read with no row of its own borrows a neighbour's piece and profile
+    # verdict (both per session) so it is counted, but it is refused.
+    refuse(~has_context, "no_grid_context")
+    context = grid.iloc[positions[k_ctx]].reset_index(drop=True)
+    updates: dict[str, Any] = {TIMESTAMP_COLUMN: stamps, output: values}
+    for channel, fresh in [(output, np.ones(len(t), dtype=bool))] + [
+        (axis, np.isfinite(separation[axis])) for axis in bounds
+    ]:
+        if channel != output:
+            updates[channel] = paired[channel]
+        if gap_column(channel) in context.columns:
+            updates[gap_column(channel)] = ~fresh
+    for axis in bounds:
+        updates[axis_separation_column(axis)] = separation[axis]
+    updates[AXIS_PAIRING_COLUMN] = reason
+    updates[AXIS_PAIRING_POLICY_COLUMN] = np.full(len(t), policy_json, dtype=object)
+    # One concat, not a column at a time: the grid is hundreds of columns wide.
+    kept = context.drop(columns=[c for c in updates if c in context.columns])
+    return pd.concat([kept, pd.DataFrame(updates, index=kept.index)], axis=1)
+
+
+def axis_separation_summary(
+    frame: pd.DataFrame, ev: RowEvaluation, model: BehaviorModel1D | BehaviorModel2D
+) -> dict[str, dict[str, float | int | None]]:
+    """Per axis, the acquisition separation of the graded rows' pairs:
+    percentiles of per-row values, never of aggregates."""
+    out: dict[str, dict[str, float | int | None]] = {}
+    for axis in _model_axes(model):
+        column = axis_separation_column(axis)
+        if column not in frame.columns:
+            continue
+        sep = numeric_values(frame, column)[ev.evaluated]
+        sep = sep[np.isfinite(sep)]
+        out[axis] = {
+            "graded": int(sep.size),
+            **{
+                f"p{q}": (float(np.percentile(sep, q)) if sep.size else None)
+                for q in (50, 90, 95, 99)
+            },
+            "max": float(sep.max()) if sep.size else None,
+        }
+    return out
+
+
 @dataclass(frozen=True)
 class RowEvaluation:
     """Per-row outcome arrays for one model over one frame."""
@@ -470,6 +774,9 @@ class RowEvaluation:
     critical_half_width: np.ndarray
     x: np.ndarray
     y: np.ndarray
+    #: B04.9 — per-axis bound the rows were paired under (one row per output
+    #: read), or ``None`` for rows of the resampled grid.
+    axis_pairing_s: Mapping[str, float] | None = None
 
     @property
     def evaluated(self) -> np.ndarray:
@@ -486,7 +793,12 @@ class RowEvaluation:
 
     def subset(self, mask: np.ndarray) -> RowEvaluation:
         return RowEvaluation(
-            **{name: getattr(self, name)[mask] for name in self.__dataclass_fields__}
+            **{
+                name: getattr(self, name)[mask]
+                for name in self.__dataclass_fields__
+                if name != "axis_pairing_s"
+            },
+            axis_pairing_s=self.axis_pairing_s,
         )
 
 
@@ -562,6 +874,13 @@ def evaluate_rows(
     contract_reasons = eligibility_reasons(work, spec, include_actual=True)
     expected, model_reasons = explain_expected_column(work, model)
     reasons = np.where(pd.isna(contract_reasons), model_reasons, contract_reasons).astype(object)
+    # B04.9 — a read whose axes had no partner within the bound is refused as
+    # that, not as the missing value the absent partner leaves behind.
+    pairing_s = axis_pairing_bounds(work, model)
+    if pairing_s is not None:
+        unpaired = work[AXIS_PAIRING_COLUMN].to_numpy(dtype=object)
+        unpaired = np.asarray([None if pd.isna(v) else str(v) for v in unpaired], dtype=object)
+        reasons = np.where(pd.isna(unpaired), reasons, unpaired).astype(object)
     if profile_scope == "default_profile":
         # B05.3 — a stamped non-default-profile row is refused by name first.
         profile = profile_refusals(work)
@@ -613,6 +932,7 @@ def evaluate_rows(
         critical_half_width=crit,
         x=axis_values[0],
         y=axis_values[1] if len(axis_values) > 1 else np.full(len(work), np.nan),
+        axis_pairing_s=pairing_s,
     )
 
 
@@ -948,6 +1268,7 @@ def fold_metrics(
             break_seconds=policy.exposure_break_seconds,
         ),
         "envelope_coverage": envelope_coverage(model, ev),
+        "axis_pairing_s": None if ev.axis_pairing_s is None else dict(ev.axis_pairing_s),
     }
     if n:
         metrics.update(
@@ -1399,6 +1720,21 @@ def apply_criteria(
                     f"{label}_detection={result.detection_fraction:.2f}>"
                     f"{resolution.max_transient_detection}"
                 )
+    pairing = criteria.axis_pairing
+    if pairing is not None:
+        # B04.9 — a verdict on grid-joined rows answers a different question:
+        # the axes may describe an instant seconds from the graded read.
+        graded = test.axis_pairing_s
+        if graded is None:
+            failed.append(
+                "axis_pairing=grid (criteria require each output read paired with its axes "
+                f"within {pairing.max_separation_s} s)"
+            )
+        else:
+            for axis, bound in sorted(pairing.max_separation_s.items()):
+                got = graded.get(axis)
+                if got is None or got > bound:
+                    failed.append(f"axis_pairing:{axis}={got}s>{bound}s")
     if failed:
         return "failed", failed + [f"insufficient:{item}" for item in insufficient]
     if insufficient:
@@ -1724,6 +2060,16 @@ def session_content_identity(session: Path) -> dict[str, Any]:
 
 
 __all__ = [
+    "AXIS_PAIRING_COLUMN",
+    "AXIS_PAIRING_POLICY_COLUMN",
+    "AXIS_SEPARATION_PREFIX",
+    "AxisPairingRefusedError",
+    "axis_pairing_bounds",
+    "axis_separation_column",
+    "axis_separation_summary",
+    "per_read_frame",
+    "read_model_reads",
+    "require_axis_pairing_covers",
     "DEFAULT_JOIN_GAP_SECONDS",
     "EVALUATOR_VERSION",
     "PROFILE_EXCLUDED",
