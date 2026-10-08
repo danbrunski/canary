@@ -47,6 +47,9 @@ channels:
     # set this to minus whatever the analog output reads there.
     offset: 0.0
     notes: >-
+      Plumbed at the fuel feed on the driver side, bank 2 (cyl 2-4-6); the rail
+      loops round to bank 1, so injector pulsation reads mostly bank 2's
+      (order 1.5 dominant, data/analyses/2026-10-08-fuel-pulsation-capture.md).
       Electrical chain checked 2026-10-03 without a calibration run: DMM at
       the ADC pins 382.5 mV vs 381.8 mV from counts; gauge output 0.574 V vs
       0.573 V from counts; WHITE-to-gauge-ground 2.58 V vs 2.582 V from counts

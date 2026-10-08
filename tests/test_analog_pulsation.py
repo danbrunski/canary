@@ -150,3 +150,58 @@ def test_the_tool_reads_its_columns_and_reports_the_same(
     monkeypatch.setattr(tool, "read_session", lambda path, **kw: real(path, filters=kw["filters"]))
     assert tool.main([str(session)]) == 0
     assert narrowed and "rpm from obd:RPM" in narrowed and narrowed == capsys.readouterr().out
+
+
+def test_switch_over_rows_at_the_edges_are_skipped_and_counted() -> None:
+    """2026-10-08: the first capture began with 13 rows stored as means
+    (adc_samples) before the full-rate ones; that refused the whole session."""
+    pressure, rpm = _capture([2000], seconds_each=4.0)
+    head = pressure.iloc[:13].assign(
+        metadata_json=json.dumps({"adc_seq": 0, "adc_samples": 5}),
+        timestamp=pressure["timestamp"].iloc[0] - pd.Timedelta(seconds=1),
+    )
+    series = full_rate_series(pd.concat([head, pressure]))
+    assert series.attrs["skipped_rows"] == 13
+    assert len(series) == len(pressure)
+
+
+def test_rows_at_another_rate_mid_capture_are_refused() -> None:
+    pressure, _ = _capture([2000], seconds_each=4.0)
+    middle = pressure.copy()
+    middle.iloc[500, middle.columns.get_loc("metadata_json")] = json.dumps(
+        {"adc_seq": 500, "adc_samples": 5}
+    )
+    with pytest.raises(PulsationRefusedError, match="mid-capture"):
+        full_rate_series(middle)
+
+
+def test_lines_above_the_staircase_limit_are_labelled_images() -> None:
+    """Under an output held at 150 Hz the rail is resolved below 75 Hz only;
+    order 3 at 2850 rpm (142.5 Hz) is folded, and the lines above 75 Hz are
+    images of real lines below it, never engine orders."""
+    from scipy import signal  # type: ignore[import-untyped]
+
+    pressure, rpm = _capture([1150, 1950, 2850], update_hz=150.0)
+    b, a = signal.butter(6, 180, fs=FS)
+    pressure["value"] = signal.lfilter(b, a, pressure["value"] - 350) + 350
+    report = analyse(full_rate_series(pressure), rpm)
+    assert report.step_lines[0][0] == pytest.approx(150.0, abs=1.5)
+    above = [p for band in report.bands for p in band.pressure_peaks if p.hz > 75.0]
+    assert above and all(p.beyond_gauge for p in above)
+    assert any(p.image_of is not None for p in above)
+    assert not any(
+        p.beyond_gauge for band in report.bands for p in band.pressure_peaks if p.hz < 75.0
+    )
+
+
+def test_a_constant_pressure_tone_is_not_called_steps() -> None:
+    """A pump's constant ripple at 88 Hz puts a fixed change-energy line at
+    176 Hz, exactly as a 176 Hz staircase would, but adds no images. The
+    verdict names the tone instead."""
+    pressure, rpm = _capture([1150, 1950, 2850])
+    t = np.arange(len(pressure)) / FS
+    pressure["value"] = pressure["value"] + 1.5 * np.sin(2 * np.pi * 88.0 * t)
+    report = analyse(full_rate_series(pressure), rpm)
+    assert report.step_lines == []
+    assert report.step_verdict.startswith("no steps: the change-energy line at")
+    assert "88" in report.step_verdict

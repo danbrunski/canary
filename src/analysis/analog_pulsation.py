@@ -61,6 +61,13 @@ class Peak:
     order: float
     #: Root-mean-square amplitude of the line, in the channel's unit.
     rms: float
+    #: When the gauge's output steps at ``step_hz``, a real line at ``f``
+    #: shows an image at ``step_hz - f``; this is that ``f`` (2026-10-08: the
+    #: images of order 1.5 under a 176.4 Hz staircase read as "order 3").
+    image_of: float | None = None
+    #: Above half the gauge's update rate: not a line of the rail at this
+    #: frequency (an image when ``image_of`` names its source).
+    beyond_gauge: bool = False
 
 
 @dataclass
@@ -80,36 +87,55 @@ class PulsationReport:
     #: in rpm, with the rpm of every band they were seen in.
     step_lines: list[tuple[float, list[float]]]
     step_verdict: str
+    #: Rows dropped at the capture's edges (stored at another rate).
+    skipped_rows: int = 0
 
 
 def full_rate_series(frame: pd.DataFrame, channel: str = "FUEL_PRESSURE") -> pd.DataFrame:
-    """``seq``, ``value`` and ``timestamp`` of every stored sample, by sequence.
+    """``seq``, ``value`` and ``timestamp`` of every full-rate sample, by sequence.
 
-    Refuses a session stored as means (``adc_samples``) or by v1 firmware (no
-    ``adc_seq``): neither has the samples this needs."""
+    A capture's switch-over leaves a few rows stored the normal way (means of
+    several samples, ``adc_samples``) at its start or end: 13 rows in the
+    first 120 ms of the first fuel-pulsation capture (2026-10-08), which
+    refused the whole session until this skipped them. They are dropped and
+    counted (``attrs["skipped_rows"]``). Refused: a session with no full-rate
+    rows (stored as means, or by v1 firmware without ``adc_seq``), and one
+    whose other rows sit *between* full-rate ones, where the stored rate
+    changed mid-capture and the index time base is broken."""
     rows = frame[(frame["source"] == "sensor") & (frame["channel"] == channel)]
     if rows.empty:
         raise PulsationRefusedError(f"no sensor:{channel} rows in this session")
+    rows = rows.sort_values("timestamp")
     meta = [json.loads(m) if isinstance(m, str) else {} for m in rows["metadata_json"]]
-    if any("adc_samples" in m for m in meta):
-        raise PulsationRefusedError(
-            f"sensor:{channel} was stored as means of several samples; record the capture "
-            "with the fuel-pulsation profile (analog_full_rate) to keep every sample"
-        )
-    seqs = [m.get("adc_seq") for m in meta]
-    if any(s is None for s in seqs):
+    full = np.array(["adc_seq" in m and "adc_samples" not in m for m in meta])
+    if not full.any():
+        if any("adc_samples" in m for m in meta):
+            raise PulsationRefusedError(
+                f"sensor:{channel} was stored as means of several samples; record the capture "
+                "with the fuel-pulsation profile (analog_full_rate) to keep every sample"
+            )
         raise PulsationRefusedError(
             f"sensor:{channel} has no adc_seq: recorded with the v1 firmware (100 Hz), "
             "whose samples cannot be placed by index"
         )
+    first, last = int(np.argmax(full)), len(full) - 1 - int(np.argmax(full[::-1]))
+    inside = int((~full[first : last + 1]).sum())
+    if inside:
+        raise PulsationRefusedError(
+            f"sensor:{channel} has {inside} rows not at the full rate between its first and "
+            "last full-rate sample: the stored rate changed mid-capture"
+        )
+    kept = rows.iloc[first : last + 1]
     out = pd.DataFrame(
         {
-            "seq": np.asarray(seqs, dtype=np.int64),
-            "value": rows["value"].astype(float).to_numpy(),
-            "timestamp": rows["timestamp"].to_numpy(),
+            "seq": np.asarray([meta[k]["adc_seq"] for k in range(first, last + 1)], dtype=np.int64),
+            "value": kept["value"].astype(float).to_numpy(),
+            "timestamp": kept["timestamp"].to_numpy(),
         }
     )
-    return out.sort_values("seq").drop_duplicates("seq").reset_index(drop=True)
+    out = out.sort_values("seq").drop_duplicates("seq").reset_index(drop=True)
+    out.attrs["skipped_rows"] = int(len(full) - (last + 1 - first))
+    return out
 
 
 def measured_rate_hz(series: pd.DataFrame) -> float:
@@ -207,9 +233,73 @@ def analyse(series: pd.DataFrame, rpm: pd.DataFrame) -> PulsationReport:
             )
         )
     step_lines, verdict = _step_verdict(bands)
+    if step_lines:
+        tone = _fixed_pressure_tone(bands, step_lines[0][0] / 2.0)
+        if tone is not None:
+            # A tone's change energy sits at twice its frequency: a constant
+            # pressure tone (a pump) makes the same fixed line a staircase
+            # does, but adds no images.
+            verdict = (
+                f"no steps: the change-energy line at {step_lines[0][0]:g} Hz is twice a "
+                f"constant {tone:g} Hz tone in the pressure itself (a pump?), not an output "
+                "staircase"
+            )
+            step_lines = []
+        else:
+            _mark_images(bands, step_lines[0][0])
     return PulsationReport(
-        rate_hz=fs, samples=len(series), bands=bands, step_lines=step_lines, step_verdict=verdict
+        rate_hz=fs,
+        samples=len(series),
+        bands=bands,
+        step_lines=step_lines,
+        step_verdict=verdict,
+        skipped_rows=int(series.attrs.get("skipped_rows", 0)),
     )
+
+
+def _fixed_pressure_tone(bands: list[Band], hz: float) -> float | None:
+    """A pressure line at ``hz`` (fixed, not an engine order) in bands far apart."""
+    seen = [
+        band.rpm
+        for band in bands
+        for peak in band.pressure_peaks
+        if abs(peak.hz - hz) <= FIXED_LINE_TOLERANCE_HZ and not _on_engine_order(peak)
+    ]
+    if len(seen) >= 2 and max(seen) - min(seen) >= MIN_RPM_SEPARATION:
+        return round(hz, 1)
+    return None
+
+
+def _mark_images(bands: list[Band], step_hz: float) -> None:
+    """Label what a staircase output updated at ``step_hz`` makes of the rail.
+
+    It delivers real content only below ``step_hz / 2``. A line above that is
+    an artefact: either the image ``step_hz - f`` of a real line ``f`` below
+    it, always weaker than its source for a held output, or, failing a match,
+    content above the gauge's limit. (2026-10-08: the images of order 1.5
+    under a 176.4 Hz staircase read as "order 3".)"""
+    limit = step_hz / 2.0
+    for band in bands:
+        below = [p for p in band.pressure_peaks if p.hz < limit]
+        for i, peak in enumerate(band.pressure_peaks):
+            if peak.hz <= limit:
+                continue
+            source = next(
+                (
+                    q
+                    for q in sorted(below, key=lambda q: -q.rms)
+                    if abs(peak.hz - (step_hz - q.hz)) <= FIXED_LINE_TOLERANCE_HZ
+                    and q.rms > peak.rms
+                ),
+                None,
+            )
+            band.pressure_peaks[i] = Peak(
+                hz=peak.hz,
+                order=peak.order,
+                rms=peak.rms,
+                image_of=None if source is None else source.hz,
+                beyond_gauge=True,
+            )
 
 
 #: A four-stroke's events fall on half-orders; a change-energy line within
@@ -277,14 +367,32 @@ def _step_verdict(bands: list[Band]) -> tuple[list[tuple[float, list[float]]], s
 
 def format_report(report: PulsationReport) -> str:
     lines = [
-        f"{report.samples} samples at {report.rate_hz:.3f} Hz (measured)",
+        f"{report.samples} samples at {report.rate_hz:.3f} Hz (measured)"
+        + (
+            f"; {report.skipped_rows} rows at another rate skipped at the capture's edges"
+            if report.skipped_rows
+            else ""
+        ),
         f"step check: {report.step_verdict}",
     ]
+    if report.step_lines:
+        nyquist = report.step_lines[0][0] / 2.0
+        lines.append(
+            f"the gauge's output resolves pulsation below ~{nyquist:.0f} Hz only: a line "
+            "above that is folded by the gauge before the ADC sees it"
+        )
     for band in report.bands:
         lines.append(f"\n{band.rpm:.0f} rpm ({band.windows} windows)")
         for peak in band.pressure_peaks:
+            image = (
+                f"  image of {peak.image_of:.1f} Hz"
+                if peak.image_of is not None
+                else "  above the gauge's limit"
+                if peak.beyond_gauge
+                else ""
+            )
             lines.append(
-                f"  pressure {peak.hz:7.1f} Hz  order {peak.order:5.2f}  {peak.rms:.3f} rms"
+                f"  pressure {peak.hz:7.1f} Hz  order {peak.order:5.2f}  {peak.rms:.3f} rms{image}"
             )
         for peak in band.change_peaks:
             lines.append(f"  change   {peak.hz:7.1f} Hz  order {peak.order:5.2f}")
