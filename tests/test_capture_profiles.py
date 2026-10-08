@@ -113,7 +113,7 @@ def test_vehicle_tuning_profile_is_the_one_research_capture() -> None:
     for pid in ("COMMANDED_EQUIV_RATIO", "O2_WR_LAMBDA_S1", "TIMING_ADVANCE", "LONG_FUEL_TRIM_2"):
         assert pid in tuning.mode01
     # 0x1134 is not commanded phi; the RAM target replaced it.
-    assert "ECM_ENRICHMENT_TARGET_EQUIV_RATIO_CANDIDATE" not in tuning.mode22
+    assert "ECM_ENRICHMENT_PHI_REQUEST" not in tuning.mode22
     assert "ECM_TARGET_EQUIV_RATIO" in tuning.memory
     assert "ECM_IGNITION_TIMING_RAM" in tuning.memory
 

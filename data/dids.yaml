@@ -1435,12 +1435,13 @@ dids:
       x0.5 % reading is impossible (raw reaches 255, which would be 127 %).
 
   # D03.8, identified from firmware 2026-10-05 (D03.40): the Target-AFR-map
-  # enrichment request, the high byte of 0xFFFF26C0. The name keeps its
-  # `_CANDIDATE` suffix only because the 2026-09-18 rename map targets it and a
-  # rename is a migration (an operator call, D03.40). No corpus-eligible profile
-  # selects it and no model serves it (it is only in dropped-column lists).
+  # enrichment request, the high byte of 0xFFFF26C0. Renamed 2026-10-08
+  # (operator, D03.40) from ECM_ENRICHMENT_TARGET_EQUIV_RATIO_CANDIDATE, no
+  # alias: tools/channel_renames/2026-10-08-enrichment-phi.yaml. No
+  # corpus-eligible profile selects it and no model serves it (it is only in
+  # dropped-column lists).
   - did: 0x1134
-    name: ECM_ENRICHMENT_TARGET_EQUIV_RATIO_CANDIDATE
+    name: ECM_ENRICHMENT_PHI_REQUEST
     byte_start: 0
     byte_length: 1
     response_length: 1
@@ -1554,7 +1555,10 @@ dids:
       The Target-AFR-map enrichment request (firmware, 2026-10-05): the high
       byte of the Q14 word 0xFFFF26C0, phi = raw / 64. It reads 64 whenever the
       map cell is below about 0x82, and under HI DET an rpm table replaces the
-      map. Renamed 2026-09-18 from ECM_TARGET_EQUIV_RATIO_CANDIDATE. Not the
+      map. Renamed 2026-09-18 from ECM_TARGET_EQUIV_RATIO_CANDIDATE to
+      ECM_ENRICHMENT_TARGET_EQUIV_RATIO_CANDIDATE, and 2026-10-08 to
+      ECM_ENRICHMENT_PHI_REQUEST once the firmware fixed its role (no alias;
+      tools/channel_renames/2026-10-08-enrichment-phi.yaml). Not the
       final commanded equivalence ratio — use the RAM target
       mem:ECM_TARGET_EQUIV_RATIO (0xFFFF26BE) for that. The 5,000/5,000
       same-reply identity with 0xFFFF26BE held because the map request was
@@ -1565,8 +1569,7 @@ dids:
       pairs above may be that factor rather than a lean command: 0.871 is the
       value the firmware pass traced to it on 2,437 idle reads whose pulses
       matched phi = 1.0 (those 293 pairs were not re-checked against it).
-      Its scale and role are pinned by the firmware; only the name still says
-      candidate (see the comment above the entry). Single-DID transport (`obd_did_batch_max_dids: 1`) on this
+      Its scale and role are pinned by the firmware. Single-DID transport (`obd_did_batch_max_dids: 1`) on this
       ECM's CAN diagnostic path.
 
   - did: 0x110A

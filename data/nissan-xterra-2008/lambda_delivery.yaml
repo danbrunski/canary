@@ -72,7 +72,7 @@ commanded_sources:
         it are refused as source_not_valid_in_regime.
 
 refused_commanded:
-  - spec: 'did:ECM_ENRICHMENT_TARGET_EQUIV_RATIO_CANDIDATE'
+  - spec: 'did:ECM_ENRICHMENT_PHI_REQUEST'
     reason: >-
       DID 0x1134 is the high byte of 0xFFFF26C0, the Target-AFR-map
       enrichment request, not the final target 0xFFFF26BE (firmware DID

@@ -1335,16 +1335,18 @@ nodes:
     confidence: code
     twin: not_modelled
     observed_as:
-      - spec: 'did:ECM_ENRICHMENT_TARGET_EQUIV_RATIO_CANDIDATE'
+      - spec: 'did:ECM_ENRICHMENT_PHI_REQUEST'
         address: 0xFFFF26C0
         relation: high_byte
-        confidence: inferred
+        confidence: code
         note: >-
-          The local CAN Mode 22 pointer table maps DID 0x1134 to 0xFFFF26C0, so
+          The CAN Mode 22 pointer table 0x24988 maps DID 0x1134 to 0xFFFF26C0
+          (firmware DID audit 2026-10-05, D03.40; both pointer tables agree), so
           the DID is this multiplier's high byte, not the command's. That fits
           its catalog evidence (raw = max(64, word >> 8) on 5,000 reads while
           the corrections were neutral; 64 while PID 0x44 read 1.06 or 0.87).
-          Not yet checked against a same-read 0xFFFF26C0 read.
+          `code`, not `observed`: not yet checked against a same-read
+          0xFFFF26C0 read.
     evidence: ['listing 0x0566BE-0x0568B4; stack slot r15+0xC is written only at 0x056822']
 
   - id: alternate_multiplier_writer

@@ -752,7 +752,8 @@ promote unverified bindings or to change a tune.
   after-start enrichment (FUEL_STATUS 1), a different source. Mid-rpm φ 1.1641
   is a **pedal switch at ≥ ~227/255** into the fuel map's last load column
   (20 errors in 27,415 rows; residual 0.000 % on 439 rows). Renamed in
-  `b9356bd` to `ECM_ENRICHMENT_TARGET_EQUIV_RATIO_CANDIDATE`; the evidence
+  `b9356bd` to `ECM_ENRICHMENT_TARGET_EQUIV_RATIO_CANDIDATE` (and on
+  2026-10-08, D03.40, to `ECM_ENRICHMENT_PHI_REQUEST`); the evidence
   block should gain this finding at the desk.
   **Closed 2026-09-22 (desk).** The 0x1134 entry in `data/dids.yaml` now
   carries the trigger finding as an evidence item
@@ -2940,10 +2941,30 @@ live here now, so the documents could be archived
     before it restarts on this code. Its `obd_dids` names none of the old
     names, but a saved override (a fuel-did-research copy, for one) could;
     the daemon refuses an unknown DID name.
-  - [ ] **Operator: rename 0x1134?** Its role is now verified and the
-    `_CANDIDATE` suffix is stale, but the 2026-09-18 map targets that name and
-    `test_the_shipped_map_agrees_with_the_catalog` holds it, so a rename means
-    a new map that also repeats the 09-18 entry (the VTC precedent).
+  - [x] **Operator: rename 0x1134?** Yes (operator, 2026-10-08), no alias:
+    `ECM_ENRICHMENT_TARGET_EQUIV_RATIO_CANDIDATE` → `ECM_ENRICHMENT_PHI_REQUEST`.
+    Map `tools/channel_renames/2026-10-08-enrichment-phi.yaml` also carries
+    the pre-09-18 `ECM_TARGET_EQUIV_RATIO_CANDIDATE` (VTC precedent), and the
+    09-18 map's 0x1134 entry was re-pointed at the new name so it stays
+    runnable. Callers: `lambda_delivery.yaml` (refused_commanded),
+    `ecu_application_model.yaml` (0x1134 → 0xFFFF26C0 `observed_as` promoted
+    `inferred` → `code`: the pointer table is read from the code; no same-read
+    0xFFFF26C0 check yet), `test_dids.py`, `test_capture_profiles.py`,
+    `test_migrate_channel_names.py`; the rom-trace capture-profile fixture (3
+    names) and the deployed IF manifest fixture (8) migrated with the tool.
+    Served: 0x1134 appears only in IF `feature_health` dropped lists (repo
+    `models/**`, `models-0920a`; `models-0920b` is empty), manifest and joblib
+    payload alike. Dry run of the new map: repo `models` 16 names in 2 of 29
+    files, `models-0920a` 16 in 2 of 4; sessions: `sessions` 52 in 22 of
+    78,057 files, `sessions-0918` 32 in 12 of 7,950, `sessions-0921` 4 in 2 of
+    292, `-0917`/`-0920`/`-0921b`/`-0921c` 0. Tests:
+    `test_the_2026_10_08_enrichment_phi_rename_holds` (old name refused),
+    `test_the_enrichment_phi_map_agrees_with_the_catalog`,
+    `test_the_enrichment_phi_map_renames_both_earlier_names_whole`, and
+    `test_the_shipped_map_agrees_with_the_catalog` on the re-pointed 09-18 map.
+    **Owed:** the same `--apply --daemon-stopped` on the Pi (models dir,
+    sessions root, `--config /etc/canary/canary.yaml`) before it restarts on
+    this code, and on the laptop stores above when the operator wants them.
   - [ ] **0x120D/0x120F/0x1210 volts per count.** Counts are code-exact;
     5/1024 V assumes a 5.000 V A/D reference, while the ECM's own PID 0x24
     voltage uses 5.0024 mV per count (×0.005). Settle: a DMM on the TPS1

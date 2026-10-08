@@ -129,7 +129,7 @@ def test_the_2026_09_18_wrong_names_are_gone_not_aliased() -> None:
     by_did = {e.did: e for e in load_did_map(DIDS_PATH).dids}
     assert by_did[0x1206].name == "ECM_INJECTOR_PULSE_1"
     assert by_did[0x1207].name == "ECM_INJECTOR_PULSE_2"
-    assert by_did[0x1134].name == "ECM_ENRICHMENT_TARGET_EQUIV_RATIO_CANDIDATE"
+    assert by_did[0x1134].name == "ECM_ENRICHMENT_PHI_REQUEST"
     for old in (
         "ECM_INJECTOR_PW_B1",
         "ECM_INTAKE_PRESSURE_1206",
@@ -138,6 +138,19 @@ def test_the_2026_09_18_wrong_names_are_gone_not_aliased() -> None:
     ):
         with pytest.raises(ValueError):
             parse_did_token(old)
+
+
+def test_the_2026_10_08_enrichment_phi_rename_holds() -> None:
+    """Operator decision 2026-10-08 (D03.40): once the firmware fixed 0x1134 as
+    the Target-AFR-map enrichment request (high byte of Q14 0xFFFF26C0, phi =
+    raw / 64), its stale ``_CANDIDATE`` name was replaced with no alias. Stored
+    artifacts migrate via tools/channel_renames/2026-10-08-enrichment-phi.yaml.
+    """
+    from src.collection.obd_scheduler import parse_did_token
+
+    assert parse_did_token("ECM_ENRICHMENT_PHI_REQUEST") == 0x1134
+    with pytest.raises(ValueError):
+        parse_did_token("ECM_ENRICHMENT_TARGET_EQUIV_RATIO_CANDIDATE")
 
 
 def test_0x1209_is_airflow_not_base_fuel_schedule() -> None:

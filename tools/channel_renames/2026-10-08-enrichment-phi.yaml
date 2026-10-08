@@ -1,0 +1,21 @@
+# Rename map for tools/migrate_channel_names.py -- the 2026-10-08 0x1134 rename.
+#
+# The firmware DID audit (2026-10-05, roadmap D03.40; commit 2e957fa) fixed
+# DID 0x1134's role: the CAN pointer table 0x24988 entry 0x34 is 0xFFFF26C0,
+# the high byte of the Q14 Target-AFR-map enrichment request, so phi = raw / 64
+# (evidence in data/dids.yaml). Its `_CANDIDATE` name was stale. Operator
+# decision 2026-10-08, same policy as 2026-09-18: no alias, migrate every
+# stored artifact. Stored session Parquet carries the raw `DID_1134` channel,
+# so it does not change; capture-profile snapshots, saved profile overrides,
+# configs and model manifests that name the channel do.
+#
+# `channels` are bare DID names; each also covers its `did:` column form and
+# derived feature columns (`did:<NAME>__mean`, ...).
+#
+# The second entry repeats 2026-09-18-fuel-relabel.yaml's 0x1134 entry with
+# this map's target (the 2026-10-05 VTC precedent), so a store that never got
+# the 09-18 map is migrated by this map alone; on a store that did, it matches
+# nothing.
+channels:
+  ECM_ENRICHMENT_TARGET_EQUIV_RATIO_CANDIDATE: ECM_ENRICHMENT_PHI_REQUEST  # 0x1134
+  ECM_TARGET_EQUIV_RATIO_CANDIDATE: ECM_ENRICHMENT_PHI_REQUEST             # 0x1134, pre-2026-09-18

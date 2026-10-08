@@ -174,7 +174,7 @@ def test_apply_rewrites_only_mapped_names(tree: dict[str, Path]) -> None:
         "RPM",
         "did:ECM_INJECTOR_PULSE_1__mean",
         "ECM_INJECTOR_PW_B1X",
-        "ECM_ENRICHMENT_TARGET_EQUIV_RATIO_CANDIDATE",
+        "ECM_ENRICHMENT_PHI_REQUEST",
     ]
     for name in before.schema.names:
         if name != "channel":
@@ -182,7 +182,7 @@ def test_apply_rewrites_only_mapped_names(tree: dict[str, Path]) -> None:
 
     quality = json.loads((tree["session"] / "capture_quality.json").read_text())
     assert [c["channel"] for c in quality["channels"]] == ["ECM_AIR_CHARGE", "ECM_RPM"]
-    assert quality["evidence"] == {"ECM_ENRICHMENT_TARGET_EQUIV_RATIO_CANDIDATE": 3}
+    assert quality["evidence"] == {"ECM_ENRICHMENT_PHI_REQUEST": 3}
     assert quality["note"] == "ECM_INJECTOR_PW_B1 was polled"
 
     tags = [json.loads(line) for line in (tree["session"] / "tags.jsonl").read_text().splitlines()]
@@ -587,3 +587,39 @@ def test_a_saved_profile_naming_the_audit_dids_is_rewritten_and_then_parses(
     assert profile["required_tuple"] == ["ECM_RPM", "ECM_MONITOR_RUN_COUNTER_123F"]
     assert profile["feature"] == "did:ECM_IGNITION_TIMING_1107__mean"
     assert [parse_did_token(name) for name in profile["mode22"]] == [0x123F, 0x1106, 0x1107]
+
+
+# --- the 2026-10-08 0x1134 rename -----------------------------------------------
+
+ENRICHMENT_MAP = REPO / "tools/channel_renames/2026-10-08-enrichment-phi.yaml"
+
+
+def test_the_enrichment_phi_map_agrees_with_the_catalog() -> None:
+    """The target is the current 0x1134 name and neither the 2026-09-18 name nor
+    the one before it resolves: no alias (operator, 2026-10-08)."""
+    rename_map = tool.load_rename_map(ENRICHMENT_MAP)
+    assert rename_map.channels == {
+        "ECM_ENRICHMENT_TARGET_EQUIV_RATIO_CANDIDATE": "ECM_ENRICHMENT_PHI_REQUEST",
+        "ECM_TARGET_EQUIV_RATIO_CANDIDATE": "ECM_ENRICHMENT_PHI_REQUEST",
+    }
+    assert tool.check_against_catalog(rename_map, DIDS) == []
+
+
+def test_the_enrichment_phi_map_renames_both_earlier_names_whole(tmp_path: Path) -> None:
+    """The pre-09-18 name is a suffix of the 09-18 one; whole-token matching must
+    rename each to the new name, never splice the old suffix inside it."""
+    profiles = tmp_path / "capture_profiles.yaml"
+    profiles.write_text(
+        "profiles:\n"
+        "- name: fuel-target-research\n"
+        "  mode22:\n"
+        "  - ECM_ENRICHMENT_TARGET_EQUIV_RATIO_CANDIDATE\n"
+        "  - ECM_TARGET_EQUIV_RATIO_CANDIDATE\n"
+        "  mode22_rate_weights:\n"
+        "    ECM_ENRICHMENT_TARGET_EQUIV_RATIO_CANDIDATE: 0.5\n"
+    )
+    args = ["--map", str(ENRICHMENT_MAP), "--file", str(profiles), "--apply", "--daemon-stopped"]
+    assert tool.main(args) == tool.EXIT_OK
+    loaded = yaml.safe_load(profiles.read_text())["profiles"][0]
+    assert loaded["mode22"] == ["ECM_ENRICHMENT_PHI_REQUEST", "ECM_ENRICHMENT_PHI_REQUEST"]
+    assert loaded["mode22_rate_weights"] == {"ECM_ENRICHMENT_PHI_REQUEST": 0.5}

@@ -12,7 +12,12 @@ channels:
   ECM_INJECTOR_PW_B1: ECM_AIR_CHARGE                  # 0x1208: air charge per intake event
   ECM_INTAKE_PRESSURE_1206: ECM_INJECTOR_PULSE_1      # 0x1206: injected pulse (bank unverified)
   ECM_INTAKE_PRESSURE_1207: ECM_INJECTOR_PULSE_2      # 0x1207: injected pulse (bank unverified)
-  ECM_TARGET_EQUIV_RATIO_CANDIDATE: ECM_ENRICHMENT_TARGET_EQUIV_RATIO_CANDIDATE  # 0x1134
+  # 0x1134. Shipped targeting ECM_ENRICHMENT_TARGET_EQUIV_RATIO_CANDIDATE; that
+  # name was itself renamed 2026-10-08 (2026-10-08-enrichment-phi.yaml), so the
+  # entry points at the current name to keep this map runnable against the
+  # catalog. A store that already got the intermediate name is migrated by the
+  # 2026-10-08 map.
+  ECM_TARGET_EQUIV_RATIO_CANDIDATE: ECM_ENRICHMENT_PHI_REQUEST
 
 # Exact identifiers that are not channels: the behavior-model recipe fitted on
 # 0x1208, named in behavior_models.yaml and in capture profiles'
