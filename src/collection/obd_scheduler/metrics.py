@@ -41,6 +41,7 @@ from src.collection.obd_scheduler.spec import (
 )
 from src.collection.polling_plan import PlanMember, ResolvedPollingPlan
 from src.config import CanBusConfig, CollectionConfig
+from src.decode.dids import MEMORY_SOURCE
 
 if TYPE_CHECKING:
     from src.collection.capture_profiles import CaptureProfile
@@ -540,6 +541,23 @@ def _resolved_polling_plan(
             selected_dids = True
         if request.kind == "did":
             width = spec.did_response_widths.get(request.identifier)
+        identifier = request.identifier
+        decoded: tuple[str, ...] = ()
+        if request.memory_read is not None:
+            # A 0x23 request has no identifier byte (it is 0 on every memory
+            # request), so the plan's (service, request id, identifier) key
+            # folded every selected window into one member and the preview
+            # charged the bus for one read where it would send several
+            # (D03.38). The address is what distinguishes two reads, and the
+            # read length is the reply's data width.
+            identifier = request.memory_read.address
+            width = request.memory_read.length
+            selected = {name.strip().upper() for name in view.profile.memory}
+            decoded = tuple(
+                f"{MEMORY_SOURCE}:{channel.name}"
+                for channel in request.memory_read.channels
+                if channel.name.upper() in selected
+            )
         # `_request_rate_hz` already caps a windowed member at one read per
         # window, so the plan does not re-apply it.
         rate_hz = _request_rate_hz(request, spec, view)
@@ -549,7 +567,7 @@ def _resolved_polling_plan(
                 kind=request.kind,
                 service=request.service,
                 request_id=request.request_id,
-                identifier=request.identifier,
+                identifier=identifier,
                 channel=request.channel,
                 profile_channel=profile_channel,
                 rate_hz=rate_hz,
@@ -559,6 +577,7 @@ def _resolved_polling_plan(
                 decoded_rows_per_read=(
                     2 if request.kind == "pid" and request.identifier == 0x01 else 1
                 ),
+                decoded_channels=decoded,
             )
         )
 

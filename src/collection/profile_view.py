@@ -234,12 +234,42 @@ class ProfileView:
             target = self.profile.target_rate_hz
             if target is None:
                 return None
-            selected = {name.upper() for name in self.profile.memory}
-            names = request_channel_names(request)
-            if any(name.split(":", 1)[-1].upper() in selected for name in names):
-                return target
-            return None
+            weight = self.memory_window_weight(request)
+            return None if weight is None else target * weight
         return self.absolute_rate_hz(str(getattr(request, "channel", "")))
+
+    def memory_window_weight(self, request: PollRequest) -> float | None:
+        """The rate weight of one memory read: its fastest selected member's.
+
+        ``None`` when this profile selects no member of the read. A member
+        without a ``memory_rate_weights`` entry weighs 1.0, so a profile with
+        no memory weights reads every window exactly as before D03.38. One
+        reply carries every member, so the read cannot honour two weights; the
+        largest is the one that keeps every member's promise
+        (``CaptureProfile.memory_rate_weights``).
+        """
+        selected = {name.strip().upper() for name in self.profile.memory}
+        weights = {name.upper(): w for name, w in self.profile.memory_rate_weights.items()}
+        members = [
+            name.split(":", 1)[-1].upper()
+            for name in request_channel_names(request)
+            if name.split(":", 1)[-1].upper() in selected
+        ]
+        if not members:
+            return None
+        return max(weights.get(name, 1.0) for name in members)
+
+    def session_rate_weight(self, request: PollRequest) -> float:
+        """Relative cadence of one session-window request (a DID or a memory read).
+
+        A memory read is weighted by :meth:`memory_window_weight`; its channel
+        names the window, which no DID lookup can match. A DID resolves
+        through :meth:`did_rate_weight`.
+        """
+        if str(getattr(request, "kind", "")) == "memory":
+            weight = self.memory_window_weight(request)
+            return 1.0 if weight is None else weight
+        return self.did_rate_weight(str(getattr(request, "channel", "")))
 
     def rate_policy(self, channel: str) -> tuple[float, bool]:
         """``(rate_weight, uniform_cadence)`` for one Mode 01 channel."""

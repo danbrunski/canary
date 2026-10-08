@@ -306,6 +306,19 @@ def mode22() -> frozenset[str]:
         return frozenset(_profile.mode22) if _profile.mode22_enabled else frozenset()
 
 
+def owns_session() -> bool:
+    """Whether the active profile polls anything inside the diagnostic session.
+
+    DIDs *or* memory channels: a service-0x23 read is gated by the same
+    session as Mode 22 on this ECM. Asking :func:`mode22` alone left a
+    memory-only profile without a session controller, so every read went out
+    in the default session, was refused, and backed off (D03.38;
+    ``classify_profile`` had already been fixed for the same omission).
+    """
+    with _lock:
+        return bool(_profile.mode22 or _profile.memory) and _profile.mode22_enabled
+
+
 def set_paused(value: bool) -> bool:
     """Suspend/resume polling without ending the capture. Returns the previous state."""
     global _paused
@@ -587,6 +600,7 @@ __all__ = [
     "is_configured",
     "is_paused",
     "mode22",
+    "owns_session",
     "mode01_batch_compatible",
     "absolute_rate_hz",
     "classify_profile",

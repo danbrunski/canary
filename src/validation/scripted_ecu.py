@@ -172,7 +172,10 @@ class ScriptedEcu:
     ``session_pending_frames`` sends that many ``7F 10 78`` (responsePending)
     before each session-control reply. ``did_values`` answers Mode 22 per DID
     (``12 34`` otherwise), and ``dtc_responses`` answers Mode 03/07/0A with
-    ``<0x40|service> <body>`` (silent when absent).
+    ``<0x40|service> <body>`` (silent when absent). Service 0x23 (memory
+    reads) is gated like Mode 22 and answered with a deterministic image,
+    each read logged in ``memory_reads``; ``silent_memory`` addresses never
+    answer.
 
     Frame stamps: ``stamp_frames=False`` hands out ``timestamp=0.0`` (an
     adapter with no clock); ``stamp_skew`` offsets the bus-driver stamp from
@@ -221,6 +224,7 @@ class ScriptedEcu:
         did_values: Mapping[int, bytes] | None = None,
         dtc_responses: Mapping[int, bytes] | None = None,
         session_pending_frames: int = 0,
+        silent_memory: Iterable[int] = (),
     ) -> None:
         self.clock = clock
         self.latency = latency
@@ -256,6 +260,7 @@ class ScriptedEcu:
         self.did_values = dict(did_values or {})
         self.dtc_responses = dict(dtc_responses or {})
         self.session_pending_frames = session_pending_frames
+        self.silent_memory = frozenset(silent_memory)
         self.broadcast_seq = 0
         self.mode01_answered = 0
         self.support_probes: list[tuple[float, int, int]] = []
@@ -265,6 +270,8 @@ class ScriptedEcu:
         self.recv_calls: list[float] = []
         self.batch_requests = 0
         self.single_requests = 0
+        #: ``(time, address, length)`` of every answered service-0x23 read.
+        self.memory_reads: list[tuple[float, int, int]] = []
         self.session_requests = 0
         #: ``(time, sub-function)`` of every accepted session change.
         self.session_changes: list[tuple[float, int]] = []
@@ -369,6 +376,23 @@ class ScriptedEcu:
                 return
             value = self.did_values.get(did_id, b"\x12\x34")
             self._queue(isotp_frames(bytes([0x62, *did]) + value), now)
+            return
+        if service == 0x23 and length == 7:
+            # ReadMemoryByAddress, KWP32 form (``isotp.build_memory_read_payload``):
+            # gated by the same session as Mode 22, answered ``63 <data>``.
+            self.single_requests += 1
+            if self.session_gated and self._session is None:
+                nrc = NRC_SERVICE_NOT_SUPPORTED_IN_SESSION
+                self._queue([bytes([0x03, 0x7F, 0x23, nrc, 0, 0, 0, 0])], now)
+                return
+            self._last_diag_at = now
+            address = int.from_bytes(data[2:6], "big")
+            size = int.from_bytes(data[6:8], "big")
+            if address in self.silent_memory:
+                return
+            self.memory_reads.append((now, address, size))
+            image = bytes((address + offset) & 0xFF or 1 for offset in range(size))
+            self._queue(isotp_frames(bytes([0x63]) + image), now)
             return
         if service != 0x01:
             return

@@ -2797,9 +2797,95 @@ live here now, so the documents could be archived
     (260 passed). `CalibrationPage.test.tsx` passed 9; it names a relation
     "via" its owner. The tolerances and the pass rates on the truck remain
     the key-on read's job.
-  - [ ] **Open.** Per-read cadence: the fault reads want about 1 Hz, but every
-    memory read rides one poll tier and a profile cannot weight memory
-    channels.
+  - [~] **Per-read cadence: desk work done 2026-10-08, truck rate owed.** The
+    fault reads want about 1 Hz, but every memory read rode one rate and a
+    profile could not weight memory channels.
+    - `CaptureProfile.memory_rate_weights` (channel → weight, missing = 1.0)
+      has the same meaning as `mode22_rate_weights`. In a windowed profile it
+      picks which session windows the read is due in (1.0 = every window,
+      never two per window). In a continuous profile it scales the rate. Under
+      `target_rate_hz` it multiplies the target.
+    - **Window mapping: the fastest selected member's weight.** One 0x23 read
+      serves every member, so it cannot run at two rates. The fastest
+      member's demand must be met, and slower members get extra samples at no
+      bus cost. Keyed by channel rather than window because a window is
+      catalog layout: it is widened or regrouped without its channels being
+      renamed, and a profile names channels everywhere else.
+      `ProfileView.memory_window_weight` is used by the scheduler, the preview
+      and `request_absolute_rate_hz`.
+    - **Refusals, by name:**
+      - a weight on a channel `memory:` does not select;
+      - a key naming a window: "is a memory window, not a channel", listing
+        its members;
+      - a weight that is not positive or not finite.
+
+      An unknown channel fails the existing catalog check (b986365) at save
+      and at daemon start.
+    - **Three defects found and fixed on the way:**
+      - `_controller_engaged` asked `tuning_profile.mode22()` only, so a
+        memory-only profile never opened the session. Every read went out in
+        the default session, was refused and backed off. It now asks
+        `tuning_profile.owns_session()`.
+      - The preview keyed plan members by (service, request id, identifier),
+        and every 0x23 request carries identifier 0. All selected windows
+        therefore folded into one member, and three windows previewed as one
+        read. Members are now keyed by address, with the read length as the
+        reply width.
+      - The capture-quality verdict scored a memory member under its window
+        name (`mem:fuel_target`). The ledger and the rows count readings
+        (`mem:<NAME>`), so the window was always `missing` and landed in
+        `unanswered_input`, even when every read was answered (verifier
+        repro, `tuning` on the fake clock).
+        - A plan member now carries `decoded_channels`: the profile's
+          selected members of the read.
+        - `capture_quality._build_channels` scores one row per decoded
+          channel, under its catalog name. It falls back to the
+          `mem:<NAME>_SENTINEL` row for a read that only returned the
+          sentinel.
+        - `profile_requests` lists memory channels, so a verdict rebuilt from
+          rows counts them.
+        - A plan written before this has one member at identifier 0 and no
+          `decoded_channels`. It expands to the profile's whole `memory:`
+          selection at that member's rate, which is exact for those plans:
+          every memory read then ran at one rate.
+        - Stored `_capture-ram-study-2026-10-04T204557`, recomputed read-only:
+          its sidecar had `mem:fuel_target missing` (requested 0.2 Hz). It
+          now scores 12 rows at 0.14 Hz each, `shortfall`, in line with that
+          capture's other DIDs, and no memory row in `unanswered_input`.
+    - **Budget:** memory demand is charged per window in the preview, which
+      shows `fallback_feasible`/`best_case_feasible` the same way it does for
+      DIDs.
+    - **Backward compatibility:**
+      - Every tracked Xterra profile has `{}` weights.
+      - Its digest is unchanged: an empty field is left out of
+        `profile_digest`, so pre-field `base_digests` still match.
+      - `tuning`'s two windows still read at 2.0 Hz.
+      - A Pi-style overrides file without the key loads and wins by name, and
+        it raises no "repo changed" warning.
+    - **Dashboard:** the editor gets memory weights in the advanced weights
+      picker, and deselecting a channel drops its weight.
+    - **Evidence:** `tests/test_memory_rate_weights.py` (23). It runs the fake
+      clock against the `ScriptedEcu`, which now answers 0x23. The fault
+      window ran at 1.00 Hz and another window at 0.20 Hz. Both rates are
+      medians of consecutive-reading gaps over 60 s, ≥55 and ≥10 pairs. The
+      session entries stayed on the 0.25 s grid, and unweighted reads ran
+      every window at 4 Hz.
+      - Live and stop verdicts: no memory row is `missing` when the reads were
+        answered, and a silent window is still reported missing. The stop
+        verdict runs `recompute_capture_quality` over a new plan and over a
+        pre-change plan (identifier 0).
+      - `test_capture_profile_preview_parity.py` gains `memory-weighted`.
+      - The dashboard scheduler fixture was regenerated (only
+        `decoded_channels` was added).
+      - The `CaptureProfileEditor` vitest shows that deselecting a memory
+        channel drops its weight.
+      - 758 passed across the scheduler, capture-profile, parity, memory,
+        layering, tuning-profile, hybrid, capture-quality, capture-coverage,
+        capture-finalize and polling-plan files. Vitest passed 586, then 38
+        on re-run of the scheduler, editor and runner files.
+    - **Owed (truck):** arm a profile weighting the knock-fault windows to
+      about 1 Hz. Read the achieved rate from the session's own rows as
+      consecutive pairs, not `achieved_hz_capture` count ÷ wall-clock.
   - [~] **0xFFFF2842 renamed `ECM_TIMING_TRIM_SELECT_FLAGS` →
     `ECM_KNOCK_TRIM_DIFF_FLAGS` (2026-10-05; operator: "fix
     ECM_TIMING_TRIM_SELECT_FLAGS to be correct"). Code done, store migration

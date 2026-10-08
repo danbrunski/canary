@@ -1156,14 +1156,15 @@ def run_can_obd_loop(
 def _controller_engaged(controller: DidWindowController, profile_gated: bool) -> bool:
     """Whether this tick must drive the session controller.
 
-    Always when no profile gates requests. Under a profile: when it owns
-    DIDs, or when the controller is mid-transition — a held window, a lapse
-    or an owed exit — so no stale phase is ever polled through (C04.7).
+    Always when no profile gates requests. Under a profile: when it polls
+    inside the session (DIDs or memory reads), or when the controller is
+    mid-transition — a held window, a lapse or an owed exit — so no stale
+    phase is ever polled through (C04.7).
     """
     if not profile_gated:
         return True
     return (
-        bool(tuning_profile.mode22())
+        tuning_profile.owns_session()
         or controller.phase != "mode01"
         or controller.session_exit_due()
     )

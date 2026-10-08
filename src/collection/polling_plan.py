@@ -27,6 +27,11 @@ class PlanMember:
     required: bool = False
     response_payload_bytes: int | None = None
     decoded_rows_per_read: int = 1
+    #: For a memory read: the ``mem:<NAME>`` channels it decodes that the
+    #: profile selected. The member is named after its window, which no
+    #: reading carries, so a consumer scoring what was *received* needs these
+    #: (``capture_quality``; D03.38). Empty for every other kind.
+    decoded_channels: tuple[str, ...] = ()
 
     @property
     def key(self) -> tuple[int, int, int]:
@@ -46,6 +51,7 @@ class PlanMember:
             "required": self.required,
             "response_payload_bytes": self.response_payload_bytes,
             "decoded_rows_per_read": self.decoded_rows_per_read,
+            "decoded_channels": list(self.decoded_channels),
             "capture_selected": True,
         }
 

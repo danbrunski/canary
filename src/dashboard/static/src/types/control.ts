@@ -115,6 +115,11 @@ export interface CaptureProfile {
   mode01_batch_groups?: string[][];
   /** Selected DID name -> relative cadence weight; absent members use 1. */
   mode22_rate_weights: Record<string, number>;
+  /**
+   * Selected memory channel -> relative cadence weight; absent members use 1.
+   * One read serves a whole window, so it runs at its members' largest weight.
+   */
+  memory_rate_weights?: Record<string, number>;
   mode01_enabled: boolean;
   mode22_enabled: boolean;
   did_interval_seconds: number | null;
@@ -169,6 +174,7 @@ export interface CaptureProfileState {
   mode22: string[];
   memory?: string[];
   mode22_rate_weights: Record<string, number>;
+  memory_rate_weights?: Record<string, number>;
   mode01_enabled: boolean;
   mode22_enabled: boolean;
   did_interval_seconds: number | null;
@@ -487,6 +493,9 @@ export interface ResolvedPlanMember {
   required: boolean;
   response_payload_bytes: number | null;
   decoded_rows_per_read: number;
+  /** Memory reads only: the `mem:<NAME>` channels the read decodes for this
+   *  profile. The member itself is named after its window. */
+  decoded_channels?: string[];
   capture_selected: boolean;
 }
 

@@ -173,6 +173,30 @@ describe("CaptureProfileEditor — System → Capture profiles (capture-profiles
     });
   });
 
+  it("drops a memory channel's weight when the channel is deselected", async () => {
+    // The daemon refuses a weight on a channel `memory:` does not select
+    // (D03.38), so a stale weight would turn the next Save into an error.
+    renderPanel();
+    fireEvent.change(await screen.findByRole("combobox"), { target: { value: "fuel-map" } });
+    fireEvent.click(screen.getByLabelText(/per-channel rate weights/));
+    fireEvent.click(screen.getByRole("checkbox", { name: "ECM_TARGET_EQUIV_RATIO" }));
+    fireEvent.click(screen.getByRole("checkbox", { name: "ECM_ENGINE_PERIOD" }));
+    fireEvent.change(screen.getByLabelText("ECM_TARGET_EQUIV_RATIO rate weight"), {
+      target: { value: "0.25" },
+    });
+    fireEvent.change(screen.getByLabelText("ECM_ENGINE_PERIOD rate weight"), {
+      target: { value: "0.5" },
+    });
+    // A selected row's name now includes its weight input's value.
+    fireEvent.click(screen.getByRole("checkbox", { name: /^ECM_TARGET_EQUIV_RATIO\b/ }));
+    fireEvent.click(screen.getByRole("button", { name: /^Save$/ }));
+
+    await waitFor(() => expect(mocks.saveCaptureProfile).toHaveBeenCalled());
+    const saved = mocks.saveCaptureProfile.mock.calls.at(-1)?.[1];
+    expect(saved.memory).toEqual(["ECM_ENGINE_PERIOD"]);
+    expect(saved.memory_rate_weights).toEqual({ ECM_ENGINE_PERIOD: 0.5 });
+  });
+
   it("says whether the editor is on a saved profile or an unsaved new one", async () => {
     // "New" gave no clue whether it was required before every capture. The
     // editor now states which profile it is editing, and the button says what

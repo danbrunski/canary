@@ -51,6 +51,7 @@ from typing import Any
 from src.collection.capture_lifetime import LONG_GAP_SECONDS, subtract_windows
 from src.collection.kline.names import capture_key
 from src.collection.obd_scheduler import BATCHING_COUNTERS, MODE22_BATCHING_COUNTERS
+from src.decode.dids import MEMORY_SOURCE
 from src.storage.capture_losses import (
     CONTROLLER,
     RECORDING,
@@ -85,6 +86,11 @@ MIN_STALL_SECONDS = 2.0
 #: the contract's first live run. They are diagnostics, not capture channels.
 EXCLUDED_KINDS = frozenset({"dtc"})
 EXCLUDED_TIERS = frozenset({"dtc", "on_demand"})
+
+#: Prefix of a decoded memory reading's channel: ``mem:<NAME>``.
+MEMORY_READING_PREFIX = f"{MEMORY_SOURCE}:"
+#: Suffix of the state channel a memory sentinel decodes to instead of a value.
+MEMORY_SENTINEL_SUFFIX = "_SENTINEL"
 
 #: Minimum verification interval. Below this the sample is too short to
 #: separate a slow channel from an unlucky one, and a "pass" would be noise.
@@ -465,6 +471,20 @@ def profile_requests(
                     "capture_selected": True,
                 }
             )
+        # Memory reads share the Mode 22 session and its enable flag. One row
+        # per selected channel, keyed as the rows store it (``mem:<NAME>``),
+        # so a verdict rebuilt from rows counts what the reads decoded.
+        for name in profile.get("memory") or ():
+            channel = f"{MEMORY_READING_PREFIX}{name}"
+            rows.append(
+                {
+                    "channel": channel,
+                    "profile_channel": str(name),
+                    "kind": "memory",
+                    "decoded_channels": [channel],
+                    "capture_selected": True,
+                }
+            )
     return rows
 
 
@@ -679,6 +699,41 @@ def _interval(lifetime: Mapping[str, Any] | None) -> tuple[dict[str, Any], float
     )
 
 
+def _scored_channels(
+    request: Mapping[str, Any], memory_selection: tuple[str, ...]
+) -> list[tuple[str, str]]:
+    """``(lifetime channel, profile name)`` pairs one plan member is scored as.
+
+    One for most kinds. A memory member is a *read* named after its window
+    (``mem:fuel_target``), while the ledger counts what the read decoded,
+    keyed ``mem:<NAME>``; a window name matches no row, so scoring the read
+    under it reported every window ``missing`` although every channel in it
+    was answered (D03.38). It is scored once per decoded channel instead: the
+    member's ``decoded_channels`` (plans written since D03.38), else the
+    profile's whole ``memory:`` selection. Old plans carried one memory member
+    at identifier 0 standing for every window, so the selection is the right
+    expansion for them too.
+    """
+    channel = str(request.get("channel") or "")
+    if request.get("kind") != "memory":
+        return [(channel, str(request.get("profile_channel") or channel))]
+    decoded = [str(name) for name in request.get("decoded_channels") or ()]
+    if not decoded:
+        decoded = [f"{MEMORY_READING_PREFIX}{name}" for name in memory_selection]
+    return [(name, name.removeprefix(MEMORY_READING_PREFIX)) for name in decoded]
+
+
+def _lifetime_row(
+    lifetime_channels: Mapping[str, Mapping[str, Any]], channel: str, kind: Any
+) -> Mapping[str, Any]:
+    row = lifetime_channels.get(channel) or lifetime_channels.get(channel.upper())
+    if not row and kind == "memory":
+        # A sentinel is an answer ("the ECU commands nothing"), stored on its
+        # own state channel; a read that only ever returned it was answered.
+        row = lifetime_channels.get(f"{channel}{MEMORY_SENTINEL_SUFFIX}")
+    return row or {}
+
+
 def _build_channels(  # noqa: PLR0913
     requests: list[Mapping[str, Any]],
     *,
@@ -691,6 +746,7 @@ def _build_channels(  # noqa: PLR0913
     windows: Windows,
     trailing_hz: Mapping[str, Any],
     kline_windows: Windows | None = None,
+    memory_selection: tuple[str, ...] = (),
 ) -> list[ChannelQuality]:
     channels: list[ChannelQuality] = []
     seen: set[str] = set()
@@ -701,41 +757,40 @@ def _build_channels(  # noqa: PLR0913
             continue
         if request.get("kind") in EXCLUDED_KINDS or request.get("poll_tier") in EXCLUDED_TIERS:
             continue
-        channel = str(request.get("channel") or "")
-        # Two requests can resolve to one DID (a catalogue alias and the
-        # profile's own name both map to 0x1209), which listed it twice.
-        if channel.upper() in seen:
-            continue
-        seen.add(channel.upper())
-        profile_channel = str(request.get("profile_channel") or channel)
-        upper = profile_channel.upper()
-        requested = _requested_hz(request, upper, weights, target)
-        row = lifetime_channels.get(channel) or lifetime_channels.get(channel.upper()) or {}
-        cadence = cadence_from_lifetime(row)
-        is_kline = request.get("kind") == KLINE_KIND
-        coverage = coverage_from_lifetime(
-            row,
-            elapsed_s=elapsed,
-            eligible_s=kline_active if is_kline else active,
-            pause_windows=kline_paused if is_kline else windows,
-            threshold_s=gap_threshold_s(requested, cadence.get("median_interarrival_s")),
-        )
-        channels.append(
-            ChannelQuality(
-                # Reported under the profile's name, not the transport's:
-                # "ECM_AIR_CHARGE" is what the operator selected,
-                # "DID_1208" is what they then have to look up.
-                channel=profile_channel,
-                transport_channel=channel,
-                kind=request.get("kind"),
-                requested_hz=requested,
-                status=_channel_status(requested, cadence, coverage),
-                cadence=cadence,
-                coverage=coverage,
-                in_required_tuple=upper in required,
-                trailing_hz=trailing_hz.get(channel),
+        for channel, profile_channel in _scored_channels(request, memory_selection):
+            # Two requests can resolve to one DID (a catalogue alias and the
+            # profile's own name both map to 0x1209), which listed it twice.
+            if channel.upper() in seen:
+                continue
+            seen.add(channel.upper())
+            upper = profile_channel.upper()
+            requested = _requested_hz(request, upper, weights, target)
+            row = _lifetime_row(lifetime_channels, channel, request.get("kind"))
+            cadence = cadence_from_lifetime(row)
+            is_kline = request.get("kind") == KLINE_KIND
+            coverage = coverage_from_lifetime(
+                row,
+                elapsed_s=elapsed,
+                eligible_s=kline_active if is_kline else active,
+                pause_windows=kline_paused if is_kline else windows,
+                threshold_s=gap_threshold_s(requested, cadence.get("median_interarrival_s")),
             )
-        )
+            channels.append(
+                ChannelQuality(
+                    # Reported under the profile's name, not the transport's:
+                    # "ECM_AIR_CHARGE" is what the operator selected,
+                    # "DID_1208" is what they then have to look up.
+                    channel=profile_channel,
+                    transport_channel=channel,
+                    kind=request.get("kind"),
+                    requested_hz=requested,
+                    status=_channel_status(requested, cadence, coverage),
+                    cadence=cadence,
+                    coverage=coverage,
+                    in_required_tuple=upper in required,
+                    trailing_hz=trailing_hz.get(channel),
+                )
+            )
     return channels
 
 
@@ -1134,6 +1189,7 @@ def evaluate_capture_quality(  # noqa: PLR0913
         windows=windows,
         trailing_hz=trailing_hz,
         kline_windows=kline_pause_windows(lifetime, elapsed),
+        memory_selection=tuple(str(name) for name in profile.get("memory") or ()),
     )
     cadence_by_profile = {
         row.channel.upper(): (None if row.status == "missing" else row.cadence.get("hz"))

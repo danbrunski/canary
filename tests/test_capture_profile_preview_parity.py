@@ -81,6 +81,21 @@ def _extra_profiles() -> list[CaptureProfile]:
             did_cycle_seconds=0.5,
             storage_prefix="_capture-memory-window",
         ),
+        # D03.38: weighted memory windows, one with two selected members (the
+        # read runs at the larger weight) and one alone, under a target rate.
+        CaptureProfile(
+            name="memory-weighted",
+            mode01={"RPM": 1.0},
+            memory=("ECM_KS_FAULT_FLAGS", "ECM_KS1_LEVEL", "ECM_KS2_LEVEL"),
+            memory_rate_weights={
+                "ECM_KS_FAULT_FLAGS": 0.25,
+                "ECM_KS1_LEVEL": 0.05,
+                "ECM_KS2_LEVEL": 0.1,
+            },
+            did_cycle_seconds=0.25,
+            target_rate_hz=4.0,
+            storage_prefix="_capture-memory-weighted",
+        ),
     ]
 
 
@@ -167,6 +182,7 @@ def test_the_matrix_exercises_what_drifted() -> None:
     assert any(p.round_timestamps for p in profiles.values())
     assert profiles["windowed-interval"].did_interval_seconds is not None
     assert profiles["memory-window"].memory
+    assert profiles["memory-weighted"].memory_rate_weights
 
 
 def test_one_window_period_precedence() -> None:

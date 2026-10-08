@@ -40,6 +40,7 @@ export const blankProfile = (): CaptureProfile => {
     mode22: [],
     memory: [],
     mode22_rate_weights: {},
+    memory_rate_weights: {},
     mode01_enabled: true,
     mode22_enabled: true,
     did_interval_seconds: null,
@@ -119,11 +120,16 @@ export function CaptureProfileEditor({
     });
   };
   const toggleMemory = (name: string) => {
+    const selected = memorySet.has(name);
+    // The server refuses a weight on a channel `memory` does not select.
+    const weights = { ...(draft.memory_rate_weights ?? {}) };
+    if (selected) delete weights[name];
     setDraft({
       ...draft,
-      memory: memorySet.has(name)
+      memory: selected
         ? (draft.memory ?? []).filter((item) => item !== name)
         : [...(draft.memory ?? []), name],
+      memory_rate_weights: weights,
     });
   };
 
@@ -415,6 +421,7 @@ export function CaptureProfileEditor({
                   ...draft,
                   mode01: Object.fromEntries(Object.keys(draft.mode01).map((key) => [key, 1])),
                   mode22_rate_weights: {},
+                  memory_rate_weights: {},
                 });
               }
             }}
@@ -472,10 +479,18 @@ export function CaptureProfileEditor({
         />
         <ChannelPicker
           title="ECU RAM (service 0x23)"
-          hint="ReadMemoryByAddress channels from this vehicle's memory map; uses the Mode 22 diagnostic session."
+          hint="ReadMemoryByAddress channels from this vehicle's memory map; uses the Mode 22 diagnostic session. Channels sharing a window are one read, which runs at the largest weight among them."
+          showWeights={showWeights}
           items={catalog?.memory ?? []}
           selected={memorySet}
           onToggle={toggleMemory}
+          weights={draft.memory_rate_weights ?? {}}
+          onWeight={(channel, weight) =>
+            setDraft({
+              ...draft,
+              memory_rate_weights: { ...(draft.memory_rate_weights ?? {}), [channel]: weight },
+            })
+          }
           enabled={draft.mode22_enabled}
         />
       </div>

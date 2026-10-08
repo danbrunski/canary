@@ -296,7 +296,7 @@ def _request_rate_hz(
         # this returns None and DID cadence stays the window controller's
         # business, as before.
         absolute = view.request_absolute_rate_hz(request)
-        weight = view.did_rate_weight(request.channel)
+        weight = view.session_rate_weight(request)
         if spec.did_session is not None and not view.profile.did_continuous:
             # A window is the only opportunity to sample this DID. Weight 1
             # therefore means every window (not the ordinary medium tier),

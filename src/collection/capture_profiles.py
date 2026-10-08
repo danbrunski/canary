@@ -25,7 +25,7 @@ from src.collection.bus_budget import (
     MIN_BUDGET_REQUESTS_PER_SECOND,
 )
 from src.config import CollectionConfig, DaemonConfig
-from src.decode.dids import select_memory_channels
+from src.decode.dids import memory_channels, select_memory_channels
 from src.signals.derived import DERIVED_CHANNEL_INPUTS
 
 if TYPE_CHECKING:
@@ -107,6 +107,15 @@ FUEL_DELIVERY_TUPLE: tuple[str, ...] = (
 CAPTURE_CONTEXT_MODE01: tuple[str, ...] = ("BAROMETRIC_PRESSURE", "INTAKE_TEMP", "COOLANT_TEMP")
 
 
+def _memory_window_members() -> dict[str, tuple[str, ...]]:
+    """Catalog memory window name -> its member channel names, in catalog order."""
+    windows: dict[str, list[str]] = {}
+    for channel in memory_channels():
+        if channel.window:
+            windows.setdefault(channel.window, []).append(channel.name)
+    return {name: tuple(members) for name, members in windows.items()}
+
+
 class _Strict(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -161,6 +170,26 @@ class CaptureProfile(_Strict):
     #: its ``known_answer``). Gated by ``mode22_enabled`` -- they need the
     #: same diagnostic session.
     memory: tuple[str, ...] = ()
+    #: Relative cadence for selected memory channels (D03.38), keyed by the
+    #: channel name ``memory:`` lists. Missing entries are 1.0, so every
+    #: profile saved before the field existed polls exactly as it did.
+    #:
+    #: The unit polled is the *window*: one service-0x23 read returns every
+    #: channel that shares a catalog ``window``, so a window cannot be read at
+    #: two rates. It runs at the **largest** weight among this profile's
+    #: selected members. The fastest member's demand has to be met, and a
+    #: slower neighbour then gets extra samples at no extra bus cost: the same
+    #: bytes arrive in the same reply. Keyed by channel rather than by window
+    #: because a window is catalog layout (widened, split or regrouped without
+    #: renaming its channels), while a profile names channels everywhere
+    #: else. A key naming a window is refused with its members.
+    #:
+    #: Same meaning as ``mode22_rate_weights``: in a windowed profile the
+    #: weight chooses which session windows the read is due in (1.0 = every
+    #: window; it cannot add a second read to one window), in a continuous
+    #: one it scales the scheduler rate, and under ``target_rate_hz`` it
+    #: multiplies the target.
+    memory_rate_weights: dict[str, float] = Field(default_factory=dict)
     #: Channels to read over **K-line** through the CANary-HAT
     #: (``src.collection.kline_collector``), all from one module: bare entries
     #: (catalog name or DID hex) are the ECM's; ``<MODULE>:<token>``
@@ -315,6 +344,51 @@ class CaptureProfile(_Strict):
                 raise ValueError(f"Mode-22 rate weight for {name} must be finite and positive")
             cleaned[name] = float(weight)
         return cleaned
+
+    @field_validator("memory_rate_weights")
+    @classmethod
+    def _valid_memory_weights(cls, value: dict[str, float]) -> dict[str, float]:
+        cleaned: dict[str, float] = {}
+        for channel, weight in value.items():
+            name = channel.strip()
+            if not name:
+                raise ValueError("memory rate-weight keys must not be blank")
+            if not math.isfinite(weight) or weight <= 0:
+                raise ValueError(f"memory rate weight for {name} must be finite and positive")
+            if name in cleaned:
+                raise ValueError(f"memory rate weight for {name} is given twice")
+            cleaned[name] = float(weight)
+        return cleaned
+
+    @model_validator(mode="after")
+    def _memory_weights_are_selected(self) -> CaptureProfile:
+        """A memory weight must name a channel ``memory:`` selects.
+
+        A window name is refused by name: weighting it would read as a
+        per-window rate, but the rate a window runs at is derived from its
+        members (see ``memory_rate_weights``), so the key would do nothing.
+        Catalog membership itself is checked where ``memory:`` is (the store's
+        save and the daemon start, ``select_memory_channels``).
+        """
+        selected = {item.strip().upper() for item in self.memory}
+        unknown = sorted(name for name in self.memory_rate_weights if name.upper() not in selected)
+        if not unknown:
+            return self
+        windows = _memory_window_members()
+        hints = [
+            f"{name} is a memory window, not a channel; weight its member channels "
+            f"({', '.join(windows[name])}): a window runs at its fastest selected member's weight"
+            for name in unknown
+            if name in windows
+        ]
+        plain = [name for name in unknown if name not in windows]
+        parts = []
+        if plain:
+            parts.append(
+                "memory_rate_weights names channels not selected by memory: " + ", ".join(plain)
+            )
+        parts.extend(hints)
+        raise ValueError("; ".join(parts))
 
     @field_validator("mode22")
     @classmethod
@@ -729,9 +803,21 @@ class CaptureProfileOverrides(_Strict):
         return self
 
 
+#: Fields added after overrides started recording ``base_digests``, left out
+#: of the digest while at their default. An override saved before the field
+#: existed recorded a digest without it, so including an empty value would
+#: report every overridden profile as "changed in the repo" although nothing
+#: about it changed.
+_DIGEST_OMIT_WHEN_EMPTY = ("memory_rate_weights",)
+
+
 def profile_digest(profile: CaptureProfile) -> str:
     """A stable fingerprint of a profile's content."""
-    payload = json.dumps(profile.model_dump(mode="json"), sort_keys=True)
+    dumped = profile.model_dump(mode="json")
+    for key in _DIGEST_OMIT_WHEN_EMPTY:
+        if not dumped.get(key):
+            dumped.pop(key, None)
+    payload = json.dumps(dumped, sort_keys=True)
     return hashlib.sha256(payload.encode()).hexdigest()
 
 
