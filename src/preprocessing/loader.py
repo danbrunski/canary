@@ -175,7 +175,10 @@ class _ReadPlan:
     ``read_filters`` is ``filters`` widened, when a decoded row could pass
     ``filters``, by the frames of the on-read catalog's ids; ``refilter``
     then applies ``filters`` again after the decode, to the decoded rows and
-    to the widening's frames.
+    to the widening's frames. When no decoded row can pass ``filters``,
+    ``catalog`` is ``None``: the read decodes nothing (stored ``decoded`` rows
+    are still dropped), so a filtered read returns only rows that pass its
+    filters (P02.18).
 
     ``columns`` is what the caller gets (``None``: all); ``read_columns`` adds
     ``payload`` when a catalog frame could pass ``read_filters``, because the
@@ -201,7 +204,12 @@ class _ReadPlan:
         if decoded != "on_read":
             raise ValueError(f"decoded must be 'on_read' or 'as_recorded', not {decoded!r}")
         catalog = on_read_catalog()
-        if filters is None or catalog is None or not _admits_decoded(filters, catalog):
+        if catalog is not None and filters is not None and not _admits_decoded(filters, catalog):
+            # No decoded row can pass ``filters``: decode none (P02.18; a
+            # can-only read used to come back with a decoded row per frame).
+            # Stored decoded rows that pass are still dropped by the decode.
+            catalog = None
+        if filters is None or catalog is None:
             read_filters, refilter = filters, False
         else:
             frames = [

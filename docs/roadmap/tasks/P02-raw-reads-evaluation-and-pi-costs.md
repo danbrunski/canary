@@ -2607,7 +2607,7 @@ recomputes the rolling frame over the whole buffered window every tick.
     | 08-03T163440 | +23,834 s |
     | 08-06T002019 | +434 s |
 
-- [ ] **P02.18 A decode on read returns decoded rows its filter excludes.**
+- [x] **P02.18 A decode on read returns decoded rows its filter excludes.**
   Found by the P02.2 verifier (2026-10-07); the bug predates P02.2. It comes
   from P02.8's `_ReadPlan`. When `filters` cannot pass a `decoded` row
   (`_admits_decoded` is false) but can pass a catalog CAN frame, the plan has
@@ -2644,6 +2644,74 @@ recomputes the rolling frame over the whole buffered window every tick.
   (`tests/test_channels_raw_read.py`) still pass.
 
   Size **S**.
+
+  *Done 2026-10-08.*
+  - **What changed.** `_ReadPlan.of` (`src/preprocessing/loader.py`): when
+    `filters` is given and `_admits_decoded` is false, the plan's decode
+    catalog is `None`. The read decodes nothing and does not widen to
+    `payload`. Stored `decoded` rows that pass the filter are still dropped:
+    `decode_on_read(frame, None)` drops them, as before. The change is in the
+    plan, so `read_session` and `iter_session_parts` are both fixed and no
+    caller changed. A filter that admits decoded rows keeps the widen,
+    decode and refilter path unchanged.
+  - **Repros** on the drive slice: the 0x1F9 can-only filter now returns
+    `{"can": 3825}`, and `source != "decoded"` returns
+    `{"can": 19122, "gps": 1682, "obd": 953}`. Control: `source == "decoded"`
+    still returns 26,909.
+  - **Tests** (`tests/test_channels_raw_read.py`):
+    - `test_a_filtered_read_returns_only_rows_its_filter_passes` has four
+      cases: both repros, plus two controls that admit decoded rows (the
+      0x1F9 frames with `decoded:ECM_RPM`, and `source != "obd"`). Each case
+      asserts the filtered read `check_exact` equals
+      `filter_rows(read_session(DRIVE), filters)`, and that
+      `iter_session_parts` concatenates to the same frame.
+    - `test_a_can_only_read_counts_its_frames_and_nothing_else` checks the
+      counts: `{"can": 3825}` without decoded rows, and
+      `{"can": 3825, "decoded": 3825}` when the filter admits them.
+    - Mutation: restoring the old condition fails the 3 repro cases and
+      passes the 2 controls.
+    - Targeted run (`test_channels_raw_read`, `test_preprocessing_loader`,
+      `test_change_only_can_storage`, `test_analysis_ground_truth`,
+      `test_tuning_digest`, `test_layering`, `test_decoded_rows_never_stored`):
+      178 passed. Read-path neighbours (`test_analysis_channels`,
+      `test_bounded_session_resample`, `test_preprocessing_decode`,
+      `test_gps_export`, `test_fuel_comp_samples`, `test_lambda_delivery_*`,
+      `test_evidence_*`, `test_trip_speed_sources`,
+      `test_session_time_prune`, `test_af_baro_gain`,
+      `test_sustained_validation`): 247 passed, 2 skipped.
+  - **Caller sweep** (`read_session(`, `iter_session_parts(`,
+    `read_session_decoded_subset(` in `src`, `scripts` and `tools`). No
+    caller's output changes:
+    - `read_channels` / `read_spec_rows` / `shared_session_read`, when the
+      specs include a `can:` spec and no `decoded:` spec, are the only
+      callers the fix reaches. They no longer build decoded rows. Every
+      reader selects by source afterwards, and `filter_rows` refilters a
+      shared read, which only ever covers a sub-filter.
+    - These callers' filters pass no catalog frame and no decoded row, so the
+      fix does not reach them: `gps_export`, the two `scripts/lambda_delivery_evidence`
+      reads (obd), `tools/analyze_analog_pulsation` (sensor, obd).
+    - These callers' filters admit decoded rows, so they take the unchanged
+      refilter path: `tools/analyze_uprev_kline_capture` (exact pairs) and
+      `read_session_decoded_subset` (`source != "can"`, used by
+      `behavior_validation` and `plausibility.offline`).
+    - These callers read `as_recorded`, which this change does not touch:
+      `dyno_inputs`, `imu_session`, `plausibility.offline`'s parts,
+      `session_decode`, `feature_pipeline`, `decode.py`'s training read.
+    - These callers read unfiltered, which is unchanged: `datasets.health`,
+      `datasets.export`, `read_sessions`, `train_anomaly_model`,
+      `validate_command_pairing`, `kline_exchange_report`.
+    - No caller relied on getting decoded rows from a can-only filter.
+  - **Cost.** Measured on `2026-09-20T152758` (17.9 M rows). HEAD's loader
+    and this one ran back to back in fresh processes, 3 rounds each, laptop
+    quiet (load 1-2). Output hashes are identical for every `read_channels`
+    spec.
+
+    | read | before | after |
+    |---|---|---|
+    | `read_channels decoded:ECM_RPM` (717,779 rows) | 10.3-10.8 s, 491-502 MB | 10.3-10.9 s, 483-507 MB |
+    | `read_channels obd:RPM` (6,697 rows) | 5.3-5.6 s, 286-295 MB | 5.4-5.7 s, 289-290 MB |
+    | `read_channels can:ECM_RPM` | 8.7-9.4 s, 804-816 MB | 8.0-10.5 s, 452-463 MB |
+    | `read_session` 0x1F9 can-only | 1,435,558 rows, 8.4-9.0 s, 988-1,009 MB | 717,779 rows, 7.7-8.1 s, 579-593 MB |
 
 ## Tracked elsewhere
 

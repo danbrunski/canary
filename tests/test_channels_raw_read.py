@@ -276,3 +276,56 @@ def test_a_shared_read_still_says_which_kind_of_empty(tmp_path: Path) -> None:
         assert read_channels(session, [specs[1]]).empty
         assert shared.disk_reads == 1
     assert str(shared_error.value) == str(on_disk.value)
+
+
+def _rpm_frames() -> list[tuple[str, str, object]]:
+    from src.decode.on_read import can_channel_spellings
+
+    return [("source", "==", "can"), ("channel", "in", can_channel_spellings([0x1F9]))]
+
+
+@pytest.mark.parametrize(
+    ("filters", "admits_decoded"),
+    [
+        pytest.param([_rpm_frames()], False, id="can-only-0x1F9"),
+        pytest.param([("source", "!=", "decoded")], False, id="not-decoded"),
+        pytest.param(
+            [_rpm_frames(), [("source", "==", "decoded"), ("channel", "==", "ECM_RPM")]],
+            True,
+            id="control-frames-and-their-decode",
+        ),
+        pytest.param([("source", "!=", "obd")], True, id="control-not-obd"),
+    ],
+)
+def test_a_filtered_read_returns_only_rows_its_filter_passes(
+    filters: list[object], admits_decoded: bool
+) -> None:
+    """P02.18: a decode on read used to add a ``decoded`` row for every catalog
+    frame a filter passed, even when the filter excluded ``decoded`` rows
+    (``{"can": 3825, "decoded": 3825}`` for the 0x1F9 frames; 26,909 decoded
+    rows under ``source != "decoded"``). A filtered read is the whole read's
+    rows that pass the filter, exactly, and a filter that admits decoded rows
+    still gets them."""
+    filtered = read_session(DRIVE, filters=filters)
+    whole = loader.filter_rows(read_session(DRIVE), filters)
+    pd.testing.assert_frame_equal(filtered, whole, check_exact=True)
+    sources = filtered["source"].value_counts().to_dict()
+    assert sources.get("can", 0) > 0
+    if admits_decoded:
+        assert sources.get("decoded", 0) > 0
+    else:
+        assert "decoded" not in sources
+    parts = pd.concat(list(loader.iter_session_parts(DRIVE, filters=filters)), ignore_index=True)
+    pd.testing.assert_frame_equal(parts, filtered, check_exact=True)
+
+
+def test_a_can_only_read_counts_its_frames_and_nothing_else() -> None:
+    """The verifier's repro, by count: the 0x1F9 frames alone, and the decode
+    of them only when ``decoded`` rows are asked for."""
+    frames = read_session(DRIVE, filters=[_rpm_frames()])
+    assert frames["source"].value_counts().to_dict() == {"can": 3825}
+    both = read_session(
+        DRIVE,
+        filters=[_rpm_frames(), [("source", "==", "decoded"), ("channel", "==", "ECM_RPM")]],
+    )
+    assert both["source"].value_counts().to_dict() == {"can": 3825, "decoded": 3825}
