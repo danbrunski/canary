@@ -1,9 +1,11 @@
-"""P02.2 — ``read_channels`` reads only the rows its specs select.
+"""P02.2 — ``read_channels`` reads only the rows and columns its specs use,
+and a report asking one session for many channels reads it once.
 
-The filtered read must return exactly what the whole-session read returned,
-for every source a spec can name. Two committed slices cover them all: the
-ground-truth drive (raw CAN frames, decoded broadcast, GPS, Mode 01) and a
-tuning capture (Mode 01, DIDs, memory channels).
+The filtered, narrowed and shared reads must return exactly what the
+whole-session read returned, for every source a spec can name. Two committed
+slices cover them all: the ground-truth drive (raw CAN frames, decoded
+broadcast, GPS, Mode 01) and a tuning capture (Mode 01, DIDs, memory
+channels).
 """
 
 from __future__ import annotations
@@ -14,9 +16,17 @@ import pandas as pd
 import pytest
 
 import src.analysis.channels as channels
-from src.analysis.channels import raw_read_filters, read_channels
+import src.preprocessing.loader as loader
+from src.analysis.channels import (
+    raw_read_filters,
+    read_channels,
+    read_spec_rows,
+    shared_session_read,
+)
 from src.paths import DIDS_YAML
-from src.preprocessing.loader import read_session
+from src.preprocessing.loader import STORED_COLUMNS, read_session
+from src.storage.parquet_writer import write_records_to_parquet
+from src.telemetry import TelemetryRecord
 
 FIXTURES = Path(__file__).parent / "fixtures"
 DRIVE = FIXTURES / "ground_truth" / "drive-slice"
@@ -48,8 +58,10 @@ def _specs(session: Path) -> list[str]:
 def _unfiltered(
     monkeypatch: pytest.MonkeyPatch, session: Path, specs: list[str], **kwargs: bool
 ) -> pd.DataFrame:
+    """Today's reference: the whole session, every row and every column."""
     with monkeypatch.context() as patch:
         patch.setattr(channels, "_raw_read_filters", lambda parsed, catalogs: None)
+        patch.setattr(channels, "_read_columns", lambda parsed, acquired_time: None)
         return read_channels(session, specs, **kwargs)
 
 
@@ -93,3 +105,174 @@ def test_an_unresolvable_spec_adds_no_rows_and_still_fails_on_its_own() -> None:
     assert raw_read_filters(["did:NOT_A_DID", "obd:RPM"]) == [[("source", "==", "obd")]]
     with pytest.raises(channels.ChannelSpecError):
         read_channels(CAPTURE, ["did:NOT_A_DID"])
+
+
+# --- Columns (P02.2 remainder, 2026-10-07) ---------------------------------
+
+
+def _recording_reads(monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, tuple[str, ...] | None]]:
+    """Every chunk read's (session, columns), as parquet was asked for them."""
+    reads: list[tuple[str, tuple[str, ...] | None]] = []
+    real = pd.read_parquet
+
+    def recording(path: object, *args: object, **kwargs: object) -> pd.DataFrame:
+        columns = kwargs.get("columns")
+        reads.append((Path(str(path)).parent.name, None if columns is None else tuple(columns)))  # type: ignore[arg-type]
+        return real(path, *args, **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(loader.pd, "read_parquet", recording)
+    return reads
+
+
+@pytest.mark.parametrize(
+    ("filters", "decoded"),
+    [
+        (None, "on_read"),
+        ([("source", "==", "obd")], "on_read"),
+        ([[("source", "==", "decoded"), ("channel", "==", "ECM_RPM")]], "on_read"),
+        ([("source", "in", ["can", "gps"])], "on_read"),
+        (None, "as_recorded"),
+    ],
+    ids=["whole", "polled", "decoded", "frames", "as-recorded"],
+)
+def test_a_narrowed_read_is_the_whole_read_restricted_to_its_columns(
+    filters: object, decoded: loader.DecodedRows
+) -> None:
+    """Same rows, same order, same dtypes; only the columns differ. The decode
+    on read still sees ``payload`` when a ``decoded:`` row is asked for."""
+    columns = ["timestamp", "source", "channel", "value_number", "unit"]
+    whole = read_session(DRIVE, filters=filters, decoded=decoded)
+    narrowed = read_session(DRIVE, filters=filters, decoded=decoded, columns=columns)
+    assert not narrowed.empty
+    assert "payload" not in narrowed.columns and "value" not in narrowed.columns
+    pd.testing.assert_frame_equal(narrowed, whole.loc[:, list(narrowed.columns)], check_exact=True)
+    assert narrowed.attrs == whole.attrs
+
+
+def test_read_session_refuses_a_column_it_does_not_store() -> None:
+    with pytest.raises(ValueError, match="stored columns"):
+        read_session(DRIVE, columns=["timestamp", "acquired_at"])
+    assert "payload" in STORED_COLUMNS
+
+
+def test_read_channels_reads_payload_only_for_a_spec_that_decodes_it(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A polled read never asks parquet for ``payload`` (a fifth of a session's
+    bytes); ``can:`` and ``decoded:`` do, and the acquisition clock adds only
+    ``metadata_json``."""
+    reads = _recording_reads(monkeypatch)
+    read_channels(DRIVE, ["obd:RPM", "gps:speed"])
+    assert reads and all(
+        columns is not None and "payload" not in columns and "metadata_json" not in columns
+        for _, columns in reads
+    )
+    reads.clear()
+    read_channels(DRIVE, ["obd:RPM"], acquired_time=True)
+    assert all(columns is not None and "metadata_json" in columns for _, columns in reads)
+    assert all("payload" not in columns for _, columns in reads if columns is not None)
+    reads.clear()
+    decoded = read_channels(DRIVE, ["decoded:ECM_RPM"])
+    assert not decoded.empty
+    assert all(columns is not None and "payload" in columns for _, columns in reads)
+
+
+# --- One read for many calls ------------------------------------------------
+
+
+@pytest.mark.parametrize("session", [DRIVE, CAPTURE], ids=["drive", "capture"])
+def test_a_shared_read_serves_every_spec_exactly_from_one_read(
+    monkeypatch: pytest.MonkeyPatch, session: Path
+) -> None:
+    """The tuning digest's shape: many calls, one spec each, both clocks.
+    Each answer equals today's whole-session answer, and the disk is read
+    once."""
+    # One spec per source (every filter branch); every spec of three real
+    # captures was checked the same way when this landed (P02.2 evidence).
+    by_source: dict[str, str] = {}
+    for spec in _specs(session):
+        by_source.setdefault(spec.split(":", 1)[0], spec)
+    specs = sorted(by_source.values())
+    expected = {
+        (spec, clock): _unfiltered(monkeypatch, session, [spec], acquired_time=clock)
+        for spec in specs
+        for clock in (False, True)
+    }
+    calls: list[Path] = []
+    real = channels.read_session
+
+    def counting(path: Path, **kwargs: object) -> pd.DataFrame:
+        calls.append(path)
+        return real(path, **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(channels, "read_session", counting)
+    with shared_session_read(session, specs) as shared:
+        for (spec, clock), want in expected.items():
+            got = read_channels(session, [spec], acquired_time=clock)
+            pd.testing.assert_frame_equal(got, want, check_exact=True)
+            assert got.attrs == want.attrs, spec
+        rows = read_spec_rows(session, specs[:2], acquired_time=True)
+    assert calls == [session]
+    assert shared.disk_reads == 1 and shared.served == len(expected) + 1
+    assert set(read_channels(rows, specs[:2], acquired_time=True)["spec"]) == set(specs[:2])
+
+
+def test_a_spec_the_shared_read_does_not_hold_is_read_from_disk_not_dropped(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Missing a spec from the shared set costs a read, never a row; a
+    nested block over rows already held reuses the outer read."""
+    calls: list[Path] = []
+    real = channels.read_session
+
+    def counting(path: Path, **kwargs: object) -> pd.DataFrame:
+        calls.append(path)
+        return real(path, **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(channels, "read_session", counting)
+    with shared_session_read(DRIVE, ["obd:RPM", "decoded:ECM_RPM"]) as outer:
+        with shared_session_read(DRIVE, ["obd:SPEED"]) as inner:
+            assert inner is outer
+            assert not read_channels(DRIVE, ["obd:SPEED"]).empty
+        assert outer.disk_reads == 1
+        gps = read_channels(DRIVE, ["gps:speed"])
+        assert not gps.empty and len(calls) == 2  # the shared read, then gps from disk
+        frames = read_channels(DRIVE, ["can:ECM_RPM"])  # payload is not held either
+        assert not frames.empty and len(calls) == 3
+        other = read_channels(CAPTURE, ["obd:RPM"])  # another session
+        assert not other.empty and len(calls) == 4
+    monkeypatch.setattr(channels, "read_session", real)
+    pd.testing.assert_frame_equal(gps, read_channels(DRIVE, ["gps:speed"]), check_exact=True)
+
+
+def test_a_shared_read_still_says_which_kind_of_empty(tmp_path: Path) -> None:
+    """A DID whose only rows are a pre-K01.1 K-line module's is refused by name,
+    not returned empty, whether the rows come from the disk or the shared read;
+    a DID never read is an empty answer, the same both ways."""
+    import yaml
+
+    entries = yaml.safe_load(DIDS_YAML.read_text())["dids"]
+    foreign, absent = entries[0], entries[1]
+    t0 = pd.Timestamp("2026-08-05T12:00:00Z").to_pydatetime()
+    session = tmp_path / "_capture-2026-08-05T120000"
+    write_records_to_parquet(
+        [
+            TelemetryRecord(
+                timestamp=t0,
+                source="kline",
+                channel=f"DID_{int(foreign['did']):04X}",
+                value="00f5",
+            ),
+            TelemetryRecord(timestamp=t0, source="obd", channel="RPM", value=800.0),
+        ],
+        session,
+    )
+    specs = [f"did:{foreign['name']}", f"did:{absent['name']}", "obd:RPM"]
+    with pytest.raises(channels.ChannelSpecError, match="pre-K01.1 K-line") as on_disk:
+        read_channels(session, [specs[0]])
+    with shared_session_read(session, specs) as shared:
+        with pytest.raises(channels.ChannelSpecError, match="pre-K01.1 K-line") as shared_error:
+            read_channels(session, [specs[0]], acquired_time=True)
+        assert read_channels(session, [specs[1]]).empty
+        assert shared.disk_reads == 1
+    assert str(shared_error.value) == str(on_disk.value)

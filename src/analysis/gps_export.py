@@ -40,7 +40,12 @@ def read_gps_track(session_dir: Path) -> list[TrackPoint]:
     ``None`` otherwise (never fabricated as ``0``).
     """
     # Only the GPS rows are read (P02.2): the rest is ~100k CAN frames a minute.
-    gps = read_session(session_dir, filters=[("source", "==", GPS_SOURCE)])
+    # And only the columns the pivot uses: ``value`` is built from the three.
+    gps = read_session(
+        session_dir,
+        filters=[("source", "==", GPS_SOURCE)],
+        columns=["value_number", "value_text", "value_bool"],
+    )
     if gps.empty:
         return []
     pivoted = gps.pivot_table(

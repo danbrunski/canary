@@ -24,9 +24,9 @@ async def get_session_digest(client: DaemonClient, *, session_id: str) -> dict[s
     * **409** — the digest was *refused*, and the body's ``digest_skipped``
       block says why (D03.6, P02.1): a longer recorded span than
       ``daemon.digest_span_budget_seconds``, a capture with more rows than
-      ``daemon.digest_row_budget`` (its tuning section reads it whole), a
-      directory that is not a session (``_replay-*``), or a child that hit
-      its address-space ceiling. That is a fact about the session, not a
+      ``daemon.digest_row_budget`` (its tuning section reads raw rows, not
+      part by part), a directory that is not a session (``_replay-*``), or a
+      child that hit its address-space ceiling. That is a fact about the session, not a
       missing sidecar — do not retry it expecting a different answer.
 
     Authenticated (auth-consistency follow-up to Task 5.6): the digest

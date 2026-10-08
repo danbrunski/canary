@@ -37,7 +37,7 @@ import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from src.analysis.channels import read_channels  # noqa: E402
+from src.analysis.channels import channel_read_columns, read_channels  # noqa: E402
 from src.analysis.lambda_delivery import (  # noqa: E402
     DriveInputs,
     LambdaDeliveryDeclaration,
@@ -57,6 +57,10 @@ from src.preprocessing.loader import read_session  # noqa: E402
 from src.signals.afr import AfrCalibration, load_afr_calibration  # noqa: E402
 from src.signals.derived import FUEL_PROPERTIES  # noqa: E402
 from src.signals.pairing import PairingPolicy, match_ordered, to_seconds  # noqa: E402
+
+#: What every check below reads from the polled rows: only ``read_channels``
+#: and the pairing built on it see the frame (P02.2).
+_POLLED_COLUMNS = channel_read_columns(acquired_time=True)
 
 
 def _long(session: Path | pd.DataFrame, spec: str, **kw: Any) -> pd.DataFrame:
@@ -318,7 +322,9 @@ def enrichment_delay_scan(
             )
         drives: dict[str, DriveInputs] = {}
         for name in names:
-            rows = read_session(by_name[name], filters=[("source", "==", "obd")])
+            rows = read_session(
+                by_name[name], filters=[("source", "==", "obd")], columns=_POLLED_COLUMNS
+            )
             target = _long(rows, source.spec)
             if target.empty:
                 continue
@@ -397,7 +403,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     for session_dir in args.sessions:
         # Read once, polled rows only: every check below re-reads channels,
         # and a whole-session read carries ~100k raw CAN frames per minute.
-        session = read_session(session_dir, filters=[("source", "==", "obd")])
+        session = read_session(
+            session_dir, filters=[("source", "==", "obd")], columns=_POLLED_COLUMNS
+        )
         entry: dict[str, Any] = {}
         if _long(session, ram.spec).empty:
             # A Mode 01-only drive (it can still inform the PID 0x44 route's

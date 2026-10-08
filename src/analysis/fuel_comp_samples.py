@@ -65,8 +65,8 @@ import pandas as pd
 from src.analysis.channels import (
     TIMESTAMP_BASIS_COLUMN,
     ChannelSpecError,
-    raw_read_filters,
     read_channels,
+    read_spec_rows,
 )
 from src.analysis.fuel_comp_inputs import (
     ClosedPositionEstimate,
@@ -98,7 +98,6 @@ from src.decode.dids import DidMap, load_did_map
 from src.decode.ecm_lookup import search_axis
 from src.decode.fuel_comp_load import Interval, spans_one_cell
 from src.paths import BINDINGS_YAML, DIDS_YAML
-from src.preprocessing.loader import read_session
 from src.signals.afr import AfrCalibration
 from src.signals.pairing import (
     PairingPolicy,
@@ -294,8 +293,14 @@ def _read_long(
     absent spec is an empty frame (never captured)."""
     rows: Path | pd.DataFrame = session
     if isinstance(session, Path):
-        filters = raw_read_filters(list(specs), bindings_path=bindings_path, dids_path=dids_path)
-        rows = read_session(session, filters=filters or None)
+        # Only the rows and columns these specs read (P02.2).
+        rows = read_spec_rows(
+            session,
+            list(specs),
+            acquired_time=True,
+            bindings_path=bindings_path,
+            dids_path=dids_path,
+        )
     empty = pd.DataFrame(columns=["timestamp", "spec", "value", "unit"])
 
     def read(wanted: list[str]) -> pd.DataFrame:

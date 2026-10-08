@@ -30,6 +30,7 @@ from src.analysis.channels import (
     as_of_validity,
     read_aligned,
     read_channels,
+    shared_session_read,
 )
 from src.analysis.compare import align_pairs, compare_channels
 from src.analysis.noise_floor import FloorRefusal, Significance
@@ -201,9 +202,10 @@ def has_tuning_section(session_dir: Path) -> bool:
     """Whether a digest of ``session_dir`` computes this section: it is a
     capture (a manifest names its profile, or its directory is ``_``-prefixed).
 
-    The section reads the whole session raw (``read_channels``), unlike the
-    rest of the digest, so the digest's pre-flight budgets such a session by
-    its rows (``digest_preflight``); both ask here, so they cannot disagree.
+    The section reads its channels' raw rows in one read (``read_channels``,
+    P02.2), not part by part like the rest of the digest, so the digest's
+    pre-flight budgets such a session by its rows (``digest_preflight``); both
+    ask here, so they cannot disagree.
     """
     return _capture_profile_name(session_dir) is not None or session_dir.name.startswith("_")
 
@@ -1146,11 +1148,7 @@ class _DigestInputs:
         return dict(sections.get(name, {}))
 
 
-def _digest_inputs(session_dir: Path, config: CanaryConfig, profile: str | None) -> _DigestInputs:
-    # R05.1: one resolution of the vehicle's tuning facts — the *active* flash
-    # registry (a flash recorded from the dashboard lives in the operational
-    # copy), the profile's noise floor, and stoichiometry from the fuel.
-    context = TuningContext.from_config(config)
+def _digest_inputs(session_dir: Path, context: TuningContext, profile: str | None) -> _DigestInputs:
     capabilities: dict[str, Any] = {}
     semantic = None
     if context.providers_path is not None:
@@ -1451,6 +1449,41 @@ def _cam(inputs: _DigestInputs) -> dict[str, Any] | None:
     return _cam_tracking(inputs.session_dir, command_spec=command_spec, measured_spec=measured_spec)
 
 
+def _digest_specs(session_dir: Path, context: TuningContext) -> list[str]:
+    """Every channel the sections below may read from ``session_dir``: the
+    rows of :func:`compute_tuning_digest`'s one read (P02.2).
+
+    A spec missed here is still read correctly, from disk, by its own call
+    (:func:`src.analysis.channels.shared_session_read`); it only costs that
+    read. Every Mode 01 spec shares one ``obd`` term, so the hard-coded ones
+    (the Mode 01 delivery route, the rate fallback) cost nothing extra.
+    """
+    specs = {
+        "obd:RPM",
+        "obd:FUEL_STATUS",
+        "obd:ENGINE_LOAD",
+        "obd:O2_WR_LAMBDA_S1",
+        "obd:TIMING_ADVANCE",
+    }
+    specs |= {f"obd:{name.upper()}" for name in _profile_mode01_channels(session_dir)}
+    required, _source = _resolve_required_tuple(session_dir)
+    specs |= {name if ":" in name else f"obd:{name}" for name in required}
+    if context.providers is not None:
+        for provider in context.providers.providers:
+            specs.add(provider.spec)
+            if provider.spec.startswith("mem:"):
+                specs.add(f"{provider.spec}_SENTINEL")
+    if context.calibration is not None and context.calibration.baro_gain is not None:
+        specs.add(context.calibration.baro_gain.baro_channel)
+    if context.lambda_delivery is not None:
+        for commanded in context.lambda_delivery.commanded_sources:
+            specs.add(commanded.spec)
+            if commanded.sentinel_spec is not None:
+                specs.add(commanded.sentinel_spec)
+        specs |= {measured.spec for measured in context.lambda_delivery.measured_sources}
+    return sorted(specs)
+
+
 def compute_tuning_digest(
     session_dir: Path,
     config: CanaryConfig,
@@ -1462,12 +1495,25 @@ def compute_tuning_digest(
     nothing to say. Each section below returns its payload and its notes; the
     notes are assembled in a fixed order so the digest reads the same way
     whichever sections had something to say.
+
+    The session is read once (P02.2, :func:`_digest_specs`): every section's
+    ``read_channels`` takes its rows from that read. They were ~19 reads of
+    every chunk, which on the 2026-08-05 reference capture was nearly all of
+    the section's time.
     """
     if not has_tuning_section(session_dir):
         return None
     profile = _capture_profile_name(session_dir)
+    # R05.1: one resolution of the vehicle's tuning facts — the *active* flash
+    # registry (a flash recorded from the dashboard lives in the operational
+    # copy), the profile's noise floor, and stoichiometry from the fuel.
+    context = TuningContext.from_config(config)
+    with shared_session_read(session_dir, _digest_specs(session_dir, context)):
+        return _tuning_digest(session_dir, context, profile)
 
-    inputs = _digest_inputs(session_dir, config, profile)
+
+def _tuning_digest(session_dir: Path, context: TuningContext, profile: str | None) -> TuningDigest:
+    inputs = _digest_inputs(session_dir, context, profile)
     calibration = inputs.context.calibration
     load_wot = inputs.context.mode01_wot
     notes: list[str] = []

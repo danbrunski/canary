@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from src.analysis.gps_export import read_gps_track, to_gpx, to_kml
 from src.storage.parquet_writer import write_records_to_parquet
 from src.telemetry import TelemetryRecord
@@ -32,6 +34,21 @@ def test_read_gps_track_returns_ordered_fixes(tmp_path: Path) -> None:
     assert track[-1].latitude == 34.004
     assert track[0].altitude == 100.0
     assert track == sorted(track, key=lambda p: p.timestamp)
+
+
+def test_read_gps_track_reads_its_columns_and_finds_the_same_fixes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """P02.2: three value columns, not every column; the same fixes."""
+    from src.analysis import gps_export
+
+    session = _write_session(tmp_path)
+    narrowed = read_gps_track(session)
+    real = gps_export.read_session
+    monkeypatch.setattr(
+        gps_export, "read_session", lambda path, **kw: real(path, filters=kw["filters"])
+    )
+    assert len(narrowed) == 5 and narrowed == read_gps_track(session)
 
 
 def test_read_gps_track_without_altitude_leaves_it_none(tmp_path: Path) -> None:

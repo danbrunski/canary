@@ -300,7 +300,7 @@ recomputes the rolling frame over the whole buffered window every tick.
         `child_out_of_memory`. Named and safe; it waits for P02.2 (operator
         default recommended).
 
-- [~] **P02.2 Push channel selection into the raw read.**
+- [x] **P02.2 Push channel selection into the raw read.**
   - `read_channels`, and every other `read_session(...)` followed by a channel
     filter (grep for them), passes the rows it needs down as `filters` and
     reads only the columns the result uses.
@@ -322,8 +322,9 @@ recomputes the rolling frame over the whole buffered window every tick.
 
   Size **M**.
 
-  *Row filters done 2026-10-03; columns not narrowed, digest still reads per
-  spec.*
+  *Row filters done 2026-10-03; columns and the digest's one read done
+  2026-10-07 (below). The Pi re-measure of the capture row budget is P02.1's
+  remaining item.*
   - **What changed.** `read_channels` builds a pyarrow DNF from its specs
     (`_raw_read_filters`) and hands it to `read_session`, which already
     widens a `decoded:` filter to that signal's frames for the on-read decode
@@ -377,7 +378,7 @@ recomputes the rolling frame over the whole buffered window every tick.
 
     Mutation: removing the dtype pin fails the unit test. The inner-loop tier
     passes: 6,392.
-  - **Not done:**
+  - **Not done on 2026-10-03** (both done 2026-10-07, below):
     - **Columns.** `read_session` still reads every column; `payload` is
       the costly one, and a decoded read needs it anyway.
     - **One read for the tuning digest.** It still calls `read_channels`
@@ -387,6 +388,164 @@ recomputes the rolling frame over the whole buffered window every tick.
 
     P02.1's row budget question changes with these numbers: the reference
     digest's peak fell 10x. Re-measure on the Pi before choosing a budget.
+
+  **Columns and one read, 2026-10-07.**
+  - **Columns.** `read_session(columns=...)` reads only the named stored
+    columns (`STORED_COLUMNS`; an unknown name is refused). The sort key is
+    always read; `value` is built only when all three value columns are read.
+    The decode on read still reads `payload` whenever a catalog frame can pass
+    the read's filter (`_admits_catalog_frames`), then drops it. Without that,
+    `decode_on_read` silently adds no rows. So a narrowed read returns the
+    whole read's rows, restricted to its columns. A chunk without a requested
+    column (an older schema) is read whole and projected, not skipped.
+    - `read_channels` asks for `_read_columns`: timestamp, source, channel,
+      value_number, value_text and unit, plus `payload` for a `can:` spec and
+      `metadata_json` on the acquisition clock.
+    - `tuning._session_rows` now goes through `read_spec_rows`, the same rows
+      and columns. `gps_export.read_gps_track` reads the three value columns.
+  - **One read for the tuning digest.** `shared_session_read(session, specs)`
+    (`src/analysis/channels.py`) reads the rows of `specs` once, lazily, with
+    the columns their readers use on either clock. Inside the block, each
+    `read_channels` / `read_spec_rows` call on that session gets
+    `loader.filter_rows(shared, its own filters)`: the rows its own filtered
+    read would have returned, so the readers select exactly as before. The
+    acquisition clock is computed once over the shared rows; it is row-local
+    (`_on_acquisition_clock`). The read is served only when:
+    - every conjunction of the call's filter contains every predicate of one
+      of the shared conjunctions, on `source`/`channel` only;
+    - its columns are held.
+    Anything else reads the disk as before: another session, an uncovered
+    spec, `payload` when it is not held, or a frame argument. A missed spec
+    costs one read, never a row. A nested block whose rows are already held
+    reuses the outer read.
+    - `compute_tuning_digest` wraps every section in one block over
+      `_digest_specs` (the providers and their `mem:` sentinels, baro, the
+      lambda declaration's sources, the required tuple, the profile's Mode 01
+      channels and the Mode 01 route). `build_tuning_frame` wraps its own
+      providers too, which also gives MCP `_capability_payload` one read.
+      `_previous` still reads the earlier capture, a different session.
+    - Reads of the session, `2026-08-05T142720` reference capture: 19 -> 1.
+  - **An empty read still says which kind.** A `did:` spec whose only rows
+    are pre-K01.1 K-line rows raises the same refusal through the shared
+    read as from disk. A DID never read is empty both ways.
+  - **Exact** (fresh process per side; before = this tree's `src` copied
+    before the edit, same data files):
+    - `read_channels`, every spec one at a time and then all together, both
+      clocks, `check_exact` plus attrs:
+      - `_capture-tuning-2026-09-21T223734`: 96 reads, 4,452,920 rows;
+      - `_capture-tuning-2026-09-24T161137`: 38 reads, 54,848 rows;
+      - `_capture-tuning-hybrid-research-2026-09-17T191712`: 82 reads,
+        5,904,320 rows.
+    - `2026-09-20T152758` (17.9 M rows): `obd:RPM`+`obd:MAF`+`gps:speed` and
+      `decoded:ECM_RPM`+`obd:RPM`, both clocks: identical (1,509,774 rows).
+    - `build_tuning_frame` values (`check_exact`) and capability, on the 09-21
+      (15,123 x 21) and 09-17 (16,141 x 8) captures: identical.
+    - `compute_tuning_digest` JSON byte-identical on `_tuning-2026-08-05T142720`,
+      the 09-21 and 09-17 tuning captures, and
+      `_capture-fuel-target-research-2026-09-21T195844`.
+  - **Cost, before -> after** (fresh process each, back to back, quiet laptop,
+    load < 2):
+
+    | | before | after |
+    |---|---|---|
+    | `compute_tuning_digest`, `_tuning-2026-08-05T142720` (= the reference test) | 34.3 s, 358 MB | 3.8 s, 316 MB |
+    | `build_tuning_frame` (= MCP `_capability_payload`), 09-21 capture | 14.6 s, 362 MB | 2.0 s, 303 MB |
+    | same, 09-17 hybrid capture | 19.8 s, 371 MB | 2.5 s, 340 MB |
+    | `compute_tuning_digest`, 09-21 capture | 27.0 s, 339 MB | 4.9 s, 335 MB |
+    | same, 09-17 hybrid capture | 37.7 s, 402 MB | 7.4 s, 406 MB |
+    | same, fuel-target capture (2.87 M rows) | 30.9 s, 371 MB | 5.4 s, 380 MB |
+    | `read_channels` polled specs, `2026-09-20T152758` | 7.9 s, 510 MB | 9.0 s, 462 MB |
+    | `read_channels` decoded spec, same drive | 15.6 s, 947 MB | 13.0 s, 894 MB |
+    | 96 single-spec `read_channels`, 09-21 capture | 123.3 s | 133.4 s |
+
+    `test_digest_reproduces_the_reference_capture`: 4.6 s (it was 37.5 s
+    after the row filters, 240 s in `tests/slow_tests.txt`).
+  - **What the columns bought.** Little. Under load (load average 15) the
+    reference digest was 134.2 -> 14.9 s, and the 96 single-spec reads
+    268 -> 158 s. Quiet, the single-spec reads did not move (123 -> 133 s,
+    within run-to-run spread). Parquet's own time on the 09-21 capture's 259
+    chunks fell only 5-10 % (0.89 -> 0.78 s for a `source == obd` read). Per
+    call, the cost is opening ~260-2,000 files and the work after the read,
+    not the bytes. The one read is what pays: every digest section shared
+    one, so the speed-up is 5-9x.
+  - **Tests.**
+    - `tests/test_channels_raw_read.py`: the existing filtered-equals-whole
+      test now compares against a whole read with every column, as well as
+      every row. Added:
+      - `test_a_narrowed_read_is_the_whole_read_restricted_to_its_columns`
+        (whole, polled, decoded, frames, as-recorded);
+      - `test_read_session_refuses_a_column_it_does_not_store`;
+      - `test_read_channels_reads_payload_only_for_a_spec_that_decodes_it`;
+      - `test_a_shared_read_serves_every_spec_exactly_from_one_read`
+        (drive-slice and the 09-21 capture slice; one disk read);
+      - `test_a_spec_the_shared_read_does_not_hold_is_read_from_disk_not_dropped`;
+      - `test_a_shared_read_still_says_which_kind_of_empty`.
+    - `tests/test_tuning_digest.py`:
+      `test_the_digest_reads_its_capture_once_and_says_the_same` (one read of
+      the committed capture slice; JSON equal to one read per call, which made
+      more than 10 reads).
+    - `tests/test_gps_export.py`:
+      `test_read_gps_track_reads_its_columns_and_finds_the_same_fixes`.
+  - **Caller sweep** (every `read_session(` in `src`, `scripts` and
+    `tools`, re-grepped 2026-10-08).
+    - **Narrowed:**
+      - `read_channels`, `read_spec_rows`, `shared_session_read`
+        (`src/analysis/channels.py`);
+      - `tuning._session_rows`, `fuel_comp_samples._read_long` and
+        `fuel_comp_droop.read_pressure_session`, all through `read_spec_rows`;
+      - `gps_export.read_gps_track`;
+      - `scripts/lambda_delivery_evidence.py`, both reads. They use
+        `channel_read_columns(acquired_time=True)`, because every check reads
+        the frame through `read_channels`;
+      - `tools/analyze_analog_pulsation.py`, which reads the value columns
+        and `metadata_json` (`adc_seq`).
+    - **Deliberately not narrowed:**
+      - Whole-session readers that use every column:
+        `feature_pipeline` (both), `datasets/health.py`, `datasets/export.py`,
+        `loader.load_sessions`, `scripts/train_anomaly_model.py`,
+        `scripts/validate_command_pairing.py` and
+        `tools/kline_exchange_report.py`. They are not a channel filter.
+      - Readers that decode CAN themselves and so need `payload`:
+        `dyno_inputs`, `imu_session` and `decode.py` (both reads). The
+        columns they could drop are `unit` and `metadata_json`, a few
+        percent of the bytes.
+      - `tools/analyze_uprev_kline_capture.py`. It hands the frame to
+        `compare_channels`, so it could take `channel_read_columns`. But no
+        UpRev probe JSONL exists on this laptop to check a narrowed read
+        against, and it is a rarely run, laptop-only tool.
+  - **The sweep's parity** (fresh process, HEAD's `src`/`scripts`/`tools`
+    from `git archive` against this tree, same data files):
+    - `fuel_comp_samples._read_long` (every wanted spec) and
+      `read_pressure_session`: identical (`check_exact`, arrays equal) on
+      `2026-10-04T190056`, `2026-10-04T215234` and
+      `_capture-tuning-2026-09-21T223734` (185,996 values).
+    - `lambda_delivery_evidence.py --fit-enrichment-delay` over its 12
+      declared captures: JSON byte-identical (148.1 s / 495 MB -> 142.1 s /
+      473 MB).
+    - `analyze_analog_pulsation.py` on the seven 2026-10-04 sessions: output
+      identical. All seven are refusals: v1 firmware or stored means, and no
+      full-rate capture is on the laptop. The full-rate path is pinned by
+      `tests/test_analog_pulsation.py::test_the_tool_reads_its_columns_and_reports_the_same`.
+  - **Slow tier** (`tests/slow_tests.txt`, measured serially, quiet laptop,
+    2026-10-08):
+    - added `test_a_filtered_read_returns_exactly_the_whole_session_read`
+      `[True-drive]` 4.5, `[False-drive]` 3.9 and `[True-capture]` 3.5;
+    - added `test_a_shared_read_serves_every_spec_exactly_from_one_read[drive]`
+      2.0 and `test_the_digest_reads_its_capture_once_and_says_the_same` 3.8;
+    - `test_digest_reproduces_the_reference_capture` 240.3 -> 3.3.
+
+    The other `test_tuning_digest.py` entries (1.6-7.4 s listed) now measure
+    0.35-0.6 s. A `scripts/mark_slow_tests.py` run would drop them; that is
+    not done here.
+  - **Stale text fixed.** `digest_preflight`'s docstring, the row-budget skip
+    reason (`src/analysis/digest.py`) and the MCP `get_digest` doc no longer
+    say that the tuning section reads the session whole. The MCP snapshot is
+    regenerated (`CANARY_UPDATE_MCP_SNAPSHOT=1`). The budget is unchanged.
+  - **Still owed (P02.1):** the Pi measurement and the capture row budget.
+    On the laptop the tuning section of the 2.87 M-row fuel-target capture
+    now peaks at about 380 MB of process RSS (the original session; P02.1
+    used stripped copies). P02.1 measured 1,408-1,595 B
+    per stored row before the row filters.
 
 - [ ] **P02.3 A per-sample channel layer for acquisition-time readers.**
   - **Why.** P01.2 left the workbench on raw samples: it pairs channels
@@ -2447,6 +2606,44 @@ recomputes the rolling frame over the whole buffered window every tick.
     | 07-29T205841 | +11,413 s |
     | 08-03T163440 | +23,834 s |
     | 08-06T002019 | +434 s |
+
+- [ ] **P02.18 A decode on read returns decoded rows its filter excludes.**
+  Found by the P02.2 verifier (2026-10-07); the bug predates P02.2. It comes
+  from P02.8's `_ReadPlan`. When `filters` cannot pass a `decoded` row
+  (`_admits_decoded` is false) but can pass a catalog CAN frame, the plan has
+  `refilter=False`. `decode_on_read` then adds a decoded row for every such
+  frame, and nothing drops it.
+  - **Repro** on `tests/fixtures/ground_truth/drive-slice`:
+    - `read_session(DRIVE, filters=[[("source", "==", "can"), ("channel",
+      "in", can_channel_spellings([0x1F9]))]])` returns `{"can": 3825,
+      "decoded": 3825}`, the decoded rows all `ECM_RPM`;
+    - `filters=[("source", "!=", "decoded")]` still returns 26,909 decoded
+      rows.
+  - **Blast radius** (callers with `decoded="on_read"`, the default, and a
+    filter that admits catalog frames but not decoded rows):
+    - `read_channels` for a `can:` spec, and `read_spec_rows` /
+      `shared_session_read` frames holding a `can:` spec (`tuning`,
+      `fuel_comp_*`). Every reader selects exactly by source afterwards, and
+      `loader.filter_rows` refilters a shared read, so no result changes. The
+      cost is the decoded rows built and then dropped.
+    - Not reached:
+      - `gps_export`, `analyze_analog_pulsation` and
+        `lambda_delivery_evidence`, whose filters pass no CAN frame;
+      - `dyno_inputs`, `imu_session`, `plausibility.offline` and
+        `session_decode`, which read `as_recorded`;
+      - `read_session_decoded_subset`, whose filter admits decoded rows, so
+        it refilters.
+    - No caller observes a wrong frame today. The next caller that counts
+      rows or groups by `source` after a `can`-only filter would.
+  - **Fix:** when `filters` excludes decoded rows, refilter after the decode
+    (or skip the decode when no decoded row can pass). Keep the
+    `read_session` contract that a filtered read returns only rows that pass
+    `filters`.
+
+  **Accept:** both repros return no `decoded` row. The P02.2 parity tests
+  (`tests/test_channels_raw_read.py`) still pass.
+
+  Size **S**.
 
 ## Tracked elsewhere
 

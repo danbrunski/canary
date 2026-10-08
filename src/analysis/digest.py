@@ -415,9 +415,10 @@ def digest_preflight(
       P02.1 the ``value_number`` chain reads the session part by part, so its
       peak follows the span (and channel count), not the rows: ~290 MB plus
       ~28 KB per second, measured (:data:`DIGEST_CHAIN_BYTES_PER_SECOND`);
-    * it is a capture, whose tuning section still reads it whole, with more
-      rows than ``daemon.digest_row_budget``. Before P02.1 every digest was
-      budgeted this way: the whole-session pivot peaked at 5,483 MB for
+    * it is a capture, whose tuning section still reads raw rows in one read
+      (P02.2: only its channels' rows and columns), with more rows than
+      ``daemon.digest_row_budget``. Before P02.1 every digest was budgeted
+      this way: the whole-session pivot peaked at 5,483 MB for
       2,622,370 rows, and the 8 GB Pi's cliff was bracketed between ~4.5 M
       rows (completed) and ~5.9 M rows (OOM-killed).
     """
@@ -454,7 +455,7 @@ def digest_preflight(
             session_dir,
             REASON_OVER_ROW_BUDGET,
             f"{rows:,} rows over the {row_budget:,}-row digest budget (a capture's "
-            "tuning section reads the whole session)",
+            "tuning section reads its channels' raw rows, not part by part)",
             budgets=budgets,
             now=now,
         )

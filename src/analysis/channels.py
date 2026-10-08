@@ -48,7 +48,9 @@ See ``docs/roadmap/archive/tuning-analysis-toolkit.md`` Phase 1.
 from __future__ import annotations
 
 import json
-from collections.abc import Iterable, Sequence
+from collections.abc import Iterable, Iterator, Sequence
+from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal, get_args
@@ -61,7 +63,7 @@ from src.decode import bindings as bindings_decode
 from src.decode import dids as dids_decode
 from src.decode.on_read import can_channel_spellings
 from src.paths import BINDINGS_YAML, DIDS_YAML
-from src.preprocessing.loader import DecodedRows, read_session
+from src.preprocessing.loader import DecodedRows, filter_rows, read_session
 from src.signals.afr import AfrCalibration
 from src.storage.broadcast_storage import (
     FRAME_ATTR,
@@ -352,9 +354,37 @@ def _timestamp_basis(
 
 
 def _long_frame(
-    session: Path | pd.DataFrame, *, acquired_time: bool = False, filters: Any = None
+    session: Path | pd.DataFrame,
+    *,
+    acquired_time: bool = False,
+    filters: Any = None,
+    columns: Sequence[str] | None = None,
 ) -> pd.DataFrame:
-    return _long_frame_with_metadata(session, acquired_time=acquired_time, filters=filters)[0]
+    shared = _SHARED_READ.get()
+    if shared is not None and shared.serves(session, filters, columns):
+        return shared.rows(filters, acquired_time=acquired_time)
+    return _long_frame_with_metadata(
+        session, acquired_time=acquired_time, filters=filters, columns=columns
+    )[0]
+
+
+#: The stored columns every :func:`read_channels` reader takes its rows from
+#: (P02.2): the sort key, the three value fields a reader selects on, and the
+#: unit. ``payload`` is added for a ``can:`` spec (the loader reads it for a
+#: ``decoded:`` one itself) and ``metadata_json`` for the acquisition clock.
+_SPEC_COLUMNS = ("timestamp", "source", "channel", "value_number", "value_text", "unit")
+
+
+def _read_columns(parsed: Sequence[ChannelSpec], *, acquired_time: bool) -> list[str]:
+    """The stored columns ``parsed`` read: what the readers below use, and no
+    more (``payload`` is a fifth of a session's bytes, and only ``can:`` reads
+    it)."""
+    columns = list(_SPEC_COLUMNS)
+    if any(spec.source == "can" for spec in parsed):
+        columns.append("payload")
+    if acquired_time:
+        columns.append("metadata_json")
+    return columns
 
 
 #: Sources whose readers match the channel case-insensitively (see
@@ -423,12 +453,174 @@ def raw_read_filters(
     return terms
 
 
+def channel_read_columns(specs: Iterable[str] = (), *, acquired_time: bool) -> list[str]:
+    """The stored columns :func:`read_channels` reads for ``specs`` (P02.2):
+    for a caller that reads a session itself and hands the frame to
+    :func:`read_channels` or a pairing built on it. Without ``specs`` it is the
+    set for any spec but ``can:``, which also needs ``payload``."""
+    return _read_columns(_parsed_specs(specs), acquired_time=acquired_time)
+
+
+def _parsed_specs(specs: Iterable[str]) -> list[ChannelSpec]:
+    """The specs of ``specs`` that parse; a bad one is left to its own read."""
+    parsed: list[ChannelSpec] = []
+    for text in specs:
+        try:
+            parsed.append(parse_spec(text))
+        except ChannelSpecError:
+            continue
+    return parsed
+
+
+def read_spec_rows(
+    session: Path,
+    specs: Sequence[str],
+    *,
+    acquired_time: bool,
+    bindings_path: Path = BINDINGS_YAML,
+    dids_path: Path = DIDS_YAML,
+) -> pd.DataFrame:
+    """The session's raw rows that ``specs`` read, read once, for a caller
+    that then hands the frame to :func:`read_channels` spec by spec.
+
+    Only the rows (:func:`raw_read_filters`) and the stored columns those
+    specs' readers use with ``acquired_time`` are read (P02.2). Inside
+    :func:`shared_session_read` the rows come from its one read. Specs that
+    resolve to no rows at all read the whole session, as an unfiltered read
+    would: each one's own :func:`read_channels` call then refuses it.
+    """
+    filters = raw_read_filters(specs, bindings_path=bindings_path, dids_path=dids_path) or None
+    columns = _read_columns(_parsed_specs(specs), acquired_time=acquired_time)
+    shared = _SHARED_READ.get()
+    if shared is not None and shared.serves(session, filters, columns):
+        return shared.rows(filters, acquired_time=False)
+    return read_session(session, filters=filters, columns=columns)
+
+
+def _predicate_key(predicate: Sequence[Any]) -> tuple[Any, ...]:
+    column, op, operand = predicate
+    if isinstance(operand, (list, tuple, set, frozenset)):
+        operand = (
+            tuple(sorted(operand)) if isinstance(operand, (set, frozenset)) else tuple(operand)
+        )
+    return (column, op, operand)
+
+
+def _covers(shared: Sequence[Sequence[Any]], filters: Any) -> bool:
+    """Is every row ``filters`` passes in a read with ``shared``'s filters?
+
+    Decided syntactically, so it can say no needlessly but never yes wrongly:
+    each of ``filters``' conjunctions must contain every predicate of one of
+    ``shared``'s. Only ``source`` and ``channel`` predicates are served, the
+    only columns :func:`raw_read_filters` filters on (a ``timestamp`` one would
+    be judged against the acquisition clock of a shared acquired frame).
+    """
+    if filters is None:
+        return False
+    conjunctions = (
+        [list(c) for c in filters] if filters and isinstance(filters[0], list) else [list(filters)]
+    )
+    held = [{_predicate_key(p) for p in conjunction} for conjunction in shared]
+    for conjunction in conjunctions:
+        if any(predicate[0] not in ("source", "channel") for predicate in conjunction):
+            return False
+        keys = {_predicate_key(p) for p in conjunction}
+        if not any(conj <= keys for conj in held):
+            return False
+    return True
+
+
+class SharedSessionRead:
+    """One session's rows for every :func:`read_channels` call that asks for
+    a subset of them (P02.2), read once on first use.
+
+    Each served call gets exactly the rows its own filtered read would have
+    returned (``loader.filter_rows`` over this read's rows, which contain
+    them), on the stored or the acquisition clock. A call this read cannot
+    serve -- another session, rows or columns it does not hold, a frame
+    rather than a path -- reads the disk as it always did, so a spec missed
+    from the shared set costs a read, never a row. ``disk_reads`` and
+    ``served`` count what happened, so a caller can prove the one read.
+    """
+
+    def __init__(self, session_dir: Path, filters: list[list[Any]], columns: Sequence[str]) -> None:
+        self.session_dir = session_dir
+        self.filters = filters
+        self.columns = tuple(columns)
+        self.disk_reads = 0
+        self.served = 0
+        self._stored: pd.DataFrame | None = None
+        self._acquired: pd.DataFrame | None = None
+
+    def serves(
+        self, session: Path | pd.DataFrame, filters: Any, columns: Sequence[str] | None
+    ) -> bool:
+        if not isinstance(session, Path) or Path(session) != self.session_dir:
+            return False
+        if columns is None or not set(columns) <= set(self.columns):
+            return False
+        return bool(self.filters) and _covers(self.filters, filters)
+
+    def rows(self, filters: Any, *, acquired_time: bool) -> pd.DataFrame:
+        if self._stored is None:
+            self._stored = read_session(
+                self.session_dir, filters=self.filters, columns=self.columns
+            )
+            self.disk_reads += 1
+        frame = self._stored
+        if acquired_time:
+            if self._acquired is None:
+                self._acquired = _on_acquisition_clock(self._stored.copy(), self.session_dir)[0]
+            frame = self._acquired
+        self.served += 1
+        return filter_rows(frame, filters)
+
+
+_SHARED_READ: ContextVar[SharedSessionRead | None] = ContextVar("_SHARED_READ", default=None)
+
+
+@contextmanager
+def shared_session_read(
+    session_dir: Path,
+    specs: Iterable[str],
+    *,
+    bindings_path: Path = BINDINGS_YAML,
+    dids_path: Path = DIDS_YAML,
+) -> Iterator[SharedSessionRead]:
+    """Serve every :func:`read_channels` of ``session_dir`` inside the block
+    whose rows ``specs`` cover from one read (P02.2).
+
+    For a report that asks a session for many channels in many calls (the
+    tuning digest): each call used to re-open every chunk. The read holds the
+    rows of ``specs`` (:func:`raw_read_filters`) and the columns their readers
+    use on either clock, so it costs what one call for all of them would.
+    Inside an outer block that already holds those rows, the outer read is
+    used.
+    """
+    wanted = list(specs)
+    filters = raw_read_filters(wanted, bindings_path=bindings_path, dids_path=dids_path)
+    columns = _read_columns(_parsed_specs(wanted), acquired_time=True)
+    outer = _SHARED_READ.get()
+    if outer is not None and all(outer.serves(session_dir, [term], columns) for term in filters):
+        # Nested inside a read that already holds these rows (the tuning
+        # frame inside the digest): keep using it rather than read again.
+        yield outer
+        return
+    shared = SharedSessionRead(session_dir, filters, columns)
+    token = _SHARED_READ.set(shared)
+    try:
+        yield shared
+    finally:
+        _SHARED_READ.reset(token)
+
+
 def _long_frame_with_metadata(
     session: Path | pd.DataFrame,
     *,
     acquired_time: bool = False,
     decoded: DecodedRows = "on_read",
     filters: Any = None,
+    columns: Sequence[str] | None = None,
 ) -> tuple[pd.DataFrame, _MetadataFields | None]:
     """:func:`_long_frame` plus the metadata columns it had to parse.
 
@@ -440,15 +632,26 @@ def _long_frame_with_metadata(
     A session directory is read with its ``decoded:`` rows decoded on read
     (P02.8, ``loader.read_session``), so ``decoded:`` specs read the same rows
     from a session recorded before 2026-09-26 and from one recorded after,
-    which stores none. ``decoded`` is the loader's mode.
+    which stores none. ``decoded`` is the loader's mode, and ``columns`` the
+    stored columns to read (``loader.read_session``).
     """
     frame = (
         session.copy()
         if isinstance(session, pd.DataFrame)
-        else read_session(Path(session), decoded=decoded, filters=filters)
+        else read_session(Path(session), decoded=decoded, filters=filters, columns=columns)
     )
     if not acquired_time:
         return frame, None
+    return _on_acquisition_clock(frame, session)
+
+
+def _on_acquisition_clock(
+    frame: pd.DataFrame, session: Path | pd.DataFrame
+) -> tuple[pd.DataFrame, _MetadataFields | None]:
+    """``frame`` (modified in place) on the acquisition clock, with its
+    ``timestamp_basis``, and the metadata columns parsed for it. Row by row:
+    a row's clock and basis depend on that row and its session alone, so a
+    subset of the result is the result for that subset."""
     fields = _metadata_fields(frame)
     frame[TIMESTAMP_BASIS_COLUMN] = _timestamp_basis(frame, session, fields)
     if fields is None:
@@ -746,6 +949,7 @@ def read_channels(
         session,
         acquired_time=acquired_time,
         filters=_raw_read_filters(parsed, catalogs) if parsed else None,
+        columns=_read_columns(parsed, acquired_time=acquired_time),
     )
 
     readers = {

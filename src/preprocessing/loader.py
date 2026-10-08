@@ -84,6 +84,7 @@ def read_session(
     filters: Any = None,
     decoded: DecodedRows = "on_read",
     time_range: tuple[pd.Timestamp, pd.Timestamp] | None = None,
+    columns: Sequence[str] | None = None,
 ) -> pd.DataFrame:
     """Read one telemetry session directory into a long-format DataFrame.
 
@@ -101,14 +102,25 @@ def read_session(
     20 s window used to open all ~1,200 chunks of a drive). It prunes chunks
     only; pair it with a row filter on ``timestamp`` for the exact window.
     A window no chunk reaches returns an empty frame.
+
+    ``columns`` names the stored columns (:data:`STORED_COLUMNS`) the caller
+    uses; the others are never read (P02.2: ``payload`` is a fifth of a
+    session's bytes, and a polled-channel read never looks at it). The sort
+    key (:data:`KEY_COLUMNS`) is always read, ``session``, ``session_path``
+    and ``source_channel`` are always added, and ``value`` only when all
+    three value columns are read. A decode on read still reads ``payload``
+    for the frames it decodes and drops it afterwards unless it was asked
+    for, so a narrowed read is the whole read's rows, restricted to its
+    columns -- never fewer rows. A name outside the stored schema is refused.
     """
     candidates = sorted(session_dir.glob(PARQUET_PATTERN))
     if not candidates:
         raise FileNotFoundError(f"no {PARQUET_PATTERN} files in {session_dir}")
+    plan = _ReadPlan.of(filters, decoded, columns)
     reading = candidates if time_range is None else chunks_overlapping(candidates, *time_range)
     if not reading:
-        return _with_can_storage(_empty_long_frame(), session_dir, candidates)
-    frames, skipped = _read_chunk_files(reading, _ReadPlan.of(filters, decoded))
+        return _with_can_storage(_empty_long_frame(plan.columns), session_dir, candidates)
+    frames, skipped = _read_chunk_files(reading, plan)
     _warn_skipped_chunks(session_dir, skipped)
     if not frames:
         raise FileNotFoundError(f"no readable {PARQUET_PATTERN} files in {session_dir}")
@@ -125,6 +137,37 @@ def _with_can_storage(
     return frame
 
 
+#: The stored columns of a telemetry chunk (``ParquetWriter``'s schema), the
+#: names :func:`read_session`'s ``columns`` may ask for.
+STORED_COLUMNS = (
+    "timestamp",
+    "source",
+    "channel",
+    "value_number",
+    "value_text",
+    "value_bool",
+    "unit",
+    "payload",
+    "metadata_json",
+)
+#: Read by every :func:`read_session`, whatever ``columns`` asks: the sort key.
+KEY_COLUMNS = ("timestamp", "source", "channel")
+_VALUE_COLUMNS = ("value_number", "value_text", "value_bool")
+
+
+def _stored_columns(columns: Sequence[str] | None) -> tuple[str, ...] | None:
+    """``columns`` plus the sort key, in schema order; ``None`` reads all."""
+    if columns is None:
+        return None
+    unknown = sorted(set(columns) - set(STORED_COLUMNS))
+    if unknown:
+        raise ValueError(
+            f"read_session columns must be stored columns {STORED_COLUMNS}; not {unknown}"
+        )
+    wanted = set(columns) | set(KEY_COLUMNS)
+    return tuple(name for name in STORED_COLUMNS if name in wanted)
+
+
 @dataclass(frozen=True)
 class _ReadPlan:
     """What one session read asks parquet for, and what it does after.
@@ -133,6 +176,11 @@ class _ReadPlan:
     ``filters``, by the frames of the on-read catalog's ids; ``refilter``
     then applies ``filters`` again after the decode, to the decoded rows and
     to the widening's frames.
+
+    ``columns`` is what the caller gets (``None``: all); ``read_columns`` adds
+    ``payload`` when a catalog frame could pass ``read_filters``, because the
+    decode on read needs it (without it the decode silently adds no rows), and
+    ``apply`` drops it again after the decode.
     """
 
     filters: Any
@@ -140,22 +188,36 @@ class _ReadPlan:
     catalog: Bindings | None
     on_read: bool
     refilter: bool
+    columns: tuple[str, ...] | None = None
+    read_columns: tuple[str, ...] | None = None
 
     @classmethod
-    def of(cls, filters: Any, decoded: DecodedRows) -> _ReadPlan:
+    def of(
+        cls, filters: Any, decoded: DecodedRows, columns: Sequence[str] | None = None
+    ) -> _ReadPlan:
+        wanted = _stored_columns(columns)
         if decoded == "as_recorded":
-            return cls(filters, filters, None, on_read=False, refilter=False)
+            return cls(filters, filters, None, False, False, wanted, wanted)
         if decoded != "on_read":
             raise ValueError(f"decoded must be 'on_read' or 'as_recorded', not {decoded!r}")
         catalog = on_read_catalog()
         if filters is None or catalog is None or not _admits_decoded(filters, catalog):
-            return cls(filters, filters, catalog, on_read=True, refilter=False)
-        frames = [
-            ("source", "==", CAN_SOURCE),
-            ("channel", "in", can_channel_spellings(on_read_can_ids(catalog))),
-        ]
-        widened = [*_disjunction(filters), frames]
-        return cls(filters, widened, catalog, on_read=True, refilter=True)
+            read_filters, refilter = filters, False
+        else:
+            frames = [
+                ("source", "==", CAN_SOURCE),
+                ("channel", "in", can_channel_spellings(on_read_can_ids(catalog))),
+            ]
+            read_filters, refilter = [*_disjunction(filters), frames], True
+        read_columns = wanted
+        if (
+            wanted is not None
+            and "payload" not in wanted
+            and catalog is not None
+            and _admits_catalog_frames(read_filters, catalog)
+        ):
+            read_columns = _stored_columns([*wanted, "payload"])
+        return cls(filters, read_filters, catalog, True, refilter, wanted, read_columns)
 
     def apply(self, frame: pd.DataFrame) -> pd.DataFrame:
         """Decode ``frame`` on read (a batch of whole chunks) and refilter."""
@@ -164,6 +226,8 @@ class _ReadPlan:
         frame = decode_on_read(frame, self.catalog)
         if self.refilter and not frame.empty:
             frame = frame.loc[_dnf_mask(frame, self.filters)]
+        if self.columns is not None and self.read_columns != self.columns:
+            frame = frame.loc[:, [c for c in frame.columns if c in self.columns]]
         return frame
 
 
@@ -236,6 +300,37 @@ def _admits_decoded(filters: Any, catalog: Bindings) -> bool:
     return False
 
 
+def _admits_catalog_frames(filters: Any, catalog: Bindings) -> bool:
+    """Could a raw CAN frame that ``catalog`` decodes pass ``filters``?
+
+    As :func:`_admits_decoded`, decided on ``source`` and ``channel`` only and
+    never wrongly no: a predicate on any other column counts as passable.
+    """
+    if filters is None:
+        return True
+    spellings = can_channel_spellings(on_read_can_ids(catalog))
+    for conjunction in _disjunction(filters):
+        passable = True
+        for column, op, operand in conjunction:
+            if column == "source":
+                passable &= _scalar_predicate(CAN_SOURCE, op, operand)
+            elif column == "channel":
+                passable &= any(_scalar_predicate(name, op, operand) for name in spellings)
+        if passable:
+            return True
+    return False
+
+
+def filter_rows(frame: pd.DataFrame, filters: Any) -> pd.DataFrame:
+    """The rows of a :func:`read_session` frame that pass pyarrow DNF
+    ``filters``, in order, with :func:`read_session`'s fresh index -- what a
+    read with those ``filters`` would have returned, for a reader that has
+    already read a superset (``analysis.channels.shared_session_read``)."""
+    out = frame.loc[_dnf_mask(frame, filters)].reset_index(drop=True)
+    out.attrs = dict(frame.attrs)
+    return out
+
+
 def _read_chunk_files(
     paths: Sequence[Path], plan: _ReadPlan | None = None
 ) -> tuple[list[pd.DataFrame], list[str]]:
@@ -267,7 +362,7 @@ def _read_chunk_files(
             skipped.append(path.name)
             continue
         try:
-            frame = pd.read_parquet(path, filters=plan.read_filters)
+            frame = _read_chunk(path, plan)
         except (OSError, ValueError, pd.errors.ParserError):
             skipped.append(path.name)
             continue
@@ -282,6 +377,23 @@ def _read_chunk_files(
     if plan.on_read:
         _return_decode_memory()
     return frames, skipped
+
+
+def _read_chunk(path: Path, plan: _ReadPlan) -> pd.DataFrame:
+    """One chunk's rows under ``plan``'s filters and columns.
+
+    A chunk written before a column existed has no such column, and pyarrow
+    refuses a projection that names it; such a chunk is read whole and
+    projected, as the whole-session read would have used it (its rows, with
+    the column missing), rather than skipped as unreadable.
+    """
+    if plan.read_columns is None:
+        return pd.read_parquet(path, filters=plan.read_filters)
+    try:
+        return pd.read_parquet(path, filters=plan.read_filters, columns=list(plan.read_columns))
+    except ValueError:
+        frame = pd.read_parquet(path, filters=plan.read_filters)
+        return frame.loc[:, [c for c in plan.read_columns if c in frame.columns]]
 
 
 def _return_decode_memory() -> None:
@@ -318,7 +430,8 @@ def _finish_long_frame(frames: Sequence[pd.DataFrame], session_dir: Path) -> pd.
     frame["source_channel"] = (
         frame["source"].astype(str) + SOURCE_SEP + frame["channel"].astype(str)
     )
-    frame["value"] = _coalesce_value_columns(frame)
+    if all(column in frame.columns for column in _VALUE_COLUMNS):
+        frame["value"] = _coalesce_value_columns(frame)
     frame = frame.sort_values(["timestamp", "source", "channel"], kind="stable")
     return frame.reset_index(drop=True)
 
@@ -857,20 +970,12 @@ def _coalesce_value_columns(frame: pd.DataFrame) -> pd.Series:
     return value
 
 
-def _empty_long_frame() -> pd.DataFrame:
-    columns: list[str] = [
-        "timestamp",
-        "source",
-        "channel",
-        "value_number",
-        "value_text",
-        "value_bool",
-        "unit",
-        "payload",
-        "metadata_json",
-        "session",
-        "session_path",
-        "source_channel",
-        "value",
-    ]
+def _empty_long_frame(stored: Sequence[str] | None = None) -> pd.DataFrame:
+    """:func:`read_session`'s columns with no rows; ``stored`` narrows the
+    stored ones as its ``columns`` does (``value`` only with all three value
+    columns)."""
+    names = list(STORED_COLUMNS if stored is None else stored)
+    columns: list[str] = [*names, "session", "session_path", "source_channel"]
+    if all(column in names for column in _VALUE_COLUMNS):
+        columns.append("value")
     return pd.DataFrame(columns=columns)

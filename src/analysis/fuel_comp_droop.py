@@ -43,10 +43,9 @@ import numpy as np
 import pandas as pd
 import pyarrow.parquet as pq
 
-from src.analysis.channels import ChannelSpecError, parse_spec, raw_read_filters, read_channels
+from src.analysis.channels import ChannelSpecError, parse_spec, read_channels, read_spec_rows
 from src.analysis.fuel_comp_inputs import DroopRules
 from src.paths import BINDINGS_YAML, DIDS_YAML
-from src.preprocessing.loader import read_session
 from src.signals.pairing import to_seconds
 from src.storage.session_files import PARQUET_PATTERN
 
@@ -116,8 +115,11 @@ def read_pressure_session(
     specs = [rules.pressure_channel, rules.fault_channel, rules.maf_channel, rules.rpm_channel]
     rows: pd.DataFrame
     if isinstance(session, Path):
-        filters = raw_read_filters(specs, bindings_path=bindings_path, dids_path=dids_path)
-        rows = read_session(session, filters=filters or None)
+        # Only the rows and columns these specs read (P02.2); the fault rows'
+        # source, channel and timestamp are always among them.
+        rows = read_spec_rows(
+            session, specs, acquired_time=True, bindings_path=bindings_path, dids_path=dids_path
+        )
     else:
         rows = session
     numeric = [rules.pressure_channel, rules.maf_channel, rules.rpm_channel]

@@ -39,9 +39,9 @@ import pandas as pd
 
 from src.analysis.channels import (
     TIMESTAMP_BASIS_COLUMN,
-    raw_read_filters,
     read_aligned,
     read_channels,
+    read_spec_rows,
     refuse_as_of,
 )
 from src.analysis.lambda_delivery import (
@@ -57,7 +57,6 @@ from src.analysis.noise_floor import FloorRefusal, NoiseFloor
 from src.analysis.tuning_frame import ProviderRegistry
 from src.behavior.surface_eval import bin_indices
 from src.paths import BINDINGS_YAML, DIDS_YAML
-from src.preprocessing.loader import read_session
 from src.signals.afr import AfrCalibration
 from src.signals.pairing import (
     PairingPolicy,
@@ -330,17 +329,18 @@ def _session_rows(
     bindings_path: Path,
     dids_path: Path,
 ) -> Path | pd.DataFrame:
-    """The session read once, only the rows ``specs`` read (P02.2).
+    """The session read once, only the rows and columns ``specs`` read (P02.2).
 
     A whole-session read carries ~100k raw CAN frames per minute. This used to
     narrow to ``obd`` rows only when every spec was a polled one, and read the
-    whole session otherwise; :func:`raw_read_filters` narrows every source.
+    whole session otherwise; :func:`read_spec_rows` narrows every source, and
+    inside the tuning digest's :func:`shared_session_read` reads nothing.
     """
     if not isinstance(session, Path):
         return session
-
-    filters = raw_read_filters(specs, bindings_path=bindings_path, dids_path=dids_path)
-    return read_session(session, filters=filters or None)
+    return read_spec_rows(
+        session, specs, acquired_time=True, bindings_path=bindings_path, dids_path=dids_path
+    )
 
 
 def _refuse_not_captured(

@@ -71,6 +71,10 @@ tests/test_change_only_can_storage.py::test_row_pairing_and_counting_callers_ref
 tests/test_change_only_can_storage.py::test_rows_of_a_change_only_spec_are_never_a_rate_or_a_bin_count 2.2
 tests/test_change_only_can_storage.py::test_the_aligned_frame_holds_change_only_cells_and_refuses_a_mean 1.9
 tests/test_change_only_can_storage.py::test_the_one_hz_grid_is_identical_for_full_rate_and_change_only 1.6
+tests/test_channels_raw_read.py::test_a_filtered_read_returns_exactly_the_whole_session_read[False-drive] 3.9
+tests/test_channels_raw_read.py::test_a_filtered_read_returns_exactly_the_whole_session_read[True-capture] 3.5
+tests/test_channels_raw_read.py::test_a_filtered_read_returns_exactly_the_whole_session_read[True-drive] 4.5
+tests/test_channels_raw_read.py::test_a_shared_read_serves_every_spec_exactly_from_one_read[drive] 2.0
 tests/test_cold_start_imports.py::test_recording_path_does_not_import[pint] 3.3
 tests/test_cold_start_imports.py::test_recording_path_does_not_import_torch 3.2
 tests/test_cold_start_imports.py::test_sequence_inference_module_does_not_import_torch 1.8
@@ -348,8 +352,9 @@ tests/test_tuning_digest.py::test_all_did_digest_carries_afr_lineage_rom_identit
 tests/test_tuning_digest.py::test_all_did_digest_carries_afr_lineage_rom_identity_and_polling_gaps[logging-page-before-h07-2] 6.8
 tests/test_tuning_digest.py::test_capture_reports_wot_inventory_and_the_pair_count 4.7
 tests/test_tuning_digest.py::test_capture_resolves_its_tune_revision 4.5
-tests/test_tuning_digest.py::test_digest_reproduces_the_reference_capture 240.3
+tests/test_tuning_digest.py::test_digest_reproduces_the_reference_capture 3.3
 tests/test_tuning_digest.py::test_tags_beat_the_inferred_criterion 1.9
+tests/test_tuning_digest.py::test_the_digest_reads_its_capture_once_and_says_the_same 3.8
 tests/test_tuning_digest.py::test_untagged_all_did_capture_infers_wot_from_the_throttle_stop 2.0
 tests/test_tuning_digest.py::test_wot_source_travels_with_the_counts_in_the_serialised_digest 1.6
 tests/test_tuning_frame.py::test_all_did_frame_uses_confirmed_semantic_roles 4.0

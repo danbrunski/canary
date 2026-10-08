@@ -40,7 +40,13 @@ def main(argv: list[str] | None = None) -> int:
     )
     args = parser.parse_args(argv)
 
-    frame = read_session(args.session, filters=[("source", "in", ["sensor", "obd"])])
+    # The pulsation reads ``value`` and each sample's ``metadata_json``
+    # (``adc_seq``); nothing reads ``payload`` or ``unit`` (P02.2).
+    frame = read_session(
+        args.session,
+        filters=[("source", "in", ["sensor", "obd"])],
+        columns=["value_number", "value_text", "value_bool", "metadata_json"],
+    )
     try:
         series = full_rate_series(frame, args.channel)
     except PulsationRefusedError as exc:

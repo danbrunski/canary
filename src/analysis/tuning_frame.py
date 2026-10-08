@@ -11,7 +11,12 @@ import pandas as pd
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from src.analysis.channels import ChannelSpecError, as_of_refusal, read_channels
+from src.analysis.channels import (
+    ChannelSpecError,
+    as_of_refusal,
+    read_channels,
+    shared_session_read,
+)
 from src.paths import DIDS_YAML
 from src.signals.afr import AfrCalibration, BaroSamples, voltage_route_refusal, voltage_to_afr
 from src.signals.pairing import to_seconds
@@ -209,8 +214,35 @@ def build_tuning_frame(
     candidate's stated envelope, and the capability entry then carries the
     provider's ``confidence``, ``conditions`` and ``evidence`` so the result
     cannot travel without them.
+
+    Every provider, its sentinel and the barometric channel come from one
+    read of the session (P02.2), not one read each.
     """
     registry = load_provider_registry(providers_path)
+    specs = [provider.spec for provider in registry.providers]
+    specs += [f"{spec}_SENTINEL" for spec in specs if spec.startswith("mem:")]
+    if calibration is not None and calibration.baro_gain is not None:
+        specs.append(calibration.baro_gain.baro_channel)
+    with shared_session_read(session_dir, specs, dids_path=dids_path):
+        return _build_tuning_frame(
+            session_dir,
+            registry,
+            calibration=calibration,
+            allow_candidates=allow_candidates,
+            afr_stoich=afr_stoich,
+            dids_path=dids_path,
+        )
+
+
+def _build_tuning_frame(
+    session_dir: Path,
+    registry: ProviderRegistry,
+    *,
+    calibration: AfrCalibration | None,
+    allow_candidates: bool,
+    afr_stoich: float,
+    dids_path: Path,
+) -> TuningFrame:
     manifest = read_capture_manifest(session_dir)
     parts: list[pd.DataFrame] = []
     capability: dict[str, dict[str, str | bool | None]] = {}

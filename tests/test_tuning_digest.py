@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -648,3 +649,42 @@ def test_a_bank_whose_every_sample_has_stale_baro_is_refused_with_counts(
     [bank] = summary["banks"]
     assert bank["refused"].startswith("no convertible sample: 4 read, 0 baro_missing, 4 baro_stale")
     assert bank["baro_stale_fraction"] == 1.0
+
+
+def test_the_digest_reads_its_capture_once_and_says_the_same(
+    config: CanaryConfig, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """P02.2: one filtered read for every section, and the same digest as one
+    read per call (what it did before), byte for byte."""
+    from contextlib import contextmanager
+
+    import src.analysis.channels as channels
+    import src.analysis.tuning_digest as tuning_digest
+    import src.analysis.tuning_frame as tuning_frame
+
+    capture = Path("tests/fixtures/lambda_delivery/_capture-tuning-2026-09-21T223734")
+    calls: list[Path] = []
+    real = channels.read_session
+
+    def counting(path: Path, **kwargs: Any) -> Any:
+        calls.append(Path(path))
+        return real(path, **kwargs)
+
+    monkeypatch.setattr(channels, "read_session", counting)
+    shared = compute_tuning_digest(capture, config)
+    assert shared is not None
+    assert calls.count(capture) == 1, calls
+
+    @contextmanager
+    def per_call(*args: Any, **kwargs: Any) -> Any:
+        yield None
+
+    monkeypatch.setattr(tuning_digest, "shared_session_read", per_call)
+    monkeypatch.setattr(tuning_frame, "shared_session_read", per_call)
+    calls.clear()
+    per_call_digest = compute_tuning_digest(capture, config)
+    assert per_call_digest is not None
+    assert calls.count(capture) > 10
+    assert json.dumps(shared.to_dict(), sort_keys=True, default=str) == json.dumps(
+        per_call_digest.to_dict(), sort_keys=True, default=str
+    )

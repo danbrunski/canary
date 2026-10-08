@@ -7,6 +7,8 @@ say which kind of empty they are."""
 from __future__ import annotations
 
 import json
+from pathlib import Path
+from typing import Any
 
 import numpy as np
 import pandas as pd
@@ -18,6 +20,8 @@ from src.analysis.analog_pulsation import (
     analyse,
     full_rate_series,
 )
+from src.storage.parquet_writer import write_records_to_parquet
+from src.telemetry import TelemetryRecord
 
 FS = NOMINAL_RATE_HZ
 T0 = pd.Timestamp("2026-10-04T20:00:00Z")
@@ -112,3 +116,37 @@ def test_means_and_v1_sessions_are_refused_with_the_reason() -> None:
     v1 = pressure.assign(metadata_json=json.dumps({"adc_counts": 2114}))
     with pytest.raises(PulsationRefusedError, match="v1 firmware"):
         full_rate_series(v1)
+
+
+def test_the_tool_reads_its_columns_and_reports_the_same(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """P02.2: ``tools/analyze_analog_pulsation.py`` reads four value columns,
+    not every column, and prints the same report as a whole read."""
+    from tools import analyze_analog_pulsation as tool
+
+    pressure, rpm = _capture([2000, 3000], seconds_each=12.0)
+
+    def record(source: str, channel: str, at: pd.Timestamp, value: float, **meta: int) -> Any:
+        return TelemetryRecord(
+            timestamp=at.floor("us").to_pydatetime(),
+            source=source,  # type: ignore[arg-type]
+            channel=channel,
+            value=value,
+            metadata=dict(meta),
+        )
+
+    records = [
+        record("sensor", "FUEL_PRESSURE", r.timestamp, r.value, **json.loads(r.metadata_json))
+        for r in pressure.itertuples(index=False)
+    ]
+    records += [record("obd", "RPM", r.timestamp, float(r.value)) for r in rpm.itertuples()]
+    records.append(record("gps", "speed", T0, 0.0))
+    session = tmp_path / "2026-10-04T200000"
+    write_records_to_parquet(records, session)
+    assert tool.main([str(session)]) == 0
+    narrowed = capsys.readouterr().out
+    real = tool.read_session
+    monkeypatch.setattr(tool, "read_session", lambda path, **kw: real(path, filters=kw["filters"]))
+    assert tool.main([str(session)]) == 0
+    assert narrowed and "rpm from obd:RPM" in narrowed and narrowed == capsys.readouterr().out
