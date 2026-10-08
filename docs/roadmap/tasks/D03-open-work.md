@@ -2743,6 +2743,12 @@ live here now, so the documents could be archived
     - `ECM_KNOCK_FLAGS_BY_INDEX`: `& 0xC0 == 0`.
     - `ECM_AF_LAMBDA_B1`/`B2`: PID 0x24/0x28 A,B = word·16384/3675, 3 %,
       0.70 (both provisional).
+      *Operator decision 2026-10-08: keep the provisional λ tolerance (3 %,
+      min_agreement 0.70) and `ECM_KNOCK_RETARD_DEG`'s cross-read 0.90, and
+      adjust them from the key-on read.* The 0x283F bit 6 ⇒ 0x1400 relation
+      stays undeclared until the firmware session names the writer that
+      clears the latch and the hysteresis constant [0x8E94] (asked
+      2026-10-08).
     - `ECM_AF_LEARNED_OFFSET_B1`/`B2`: ±500.
 
     Every `fuel_target` member is now checkable, so a passing read restamps

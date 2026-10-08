@@ -265,6 +265,10 @@ recomputes the rolling frame over the whole buffered window every tick.
     dies. Tightening it to ~3,000 B/row (~1.4 M rows, ~14 min) also tightens
     the workbench jobs that share it. Not changed here; P02.2 removes the row
     term.
+    *Operator decision 2026-10-08: keep 800 B/row until P02.1's Pi
+    measurement, then re-derive the capture budget from it* (with P02.2 the
+    2.87 M-row fuel-target capture's digest peaks at ~380 MB on the laptop,
+    so 800 B/row is now conservative for captures).
   - Stale text fixed: `trip_end` module docstring, the budget constants,
     `DaemonConfig`, `canary.example.yaml`, the MCP digest tool doc (snapshot
     regenerated), `classify_and_write`, and `.claude/commands/drive.md`
