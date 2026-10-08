@@ -186,6 +186,18 @@ class RevisionImageResolver:
             raise cached
         return cached
 
+    def image(self, name: str) -> bytes:
+        """The named revision's plain image, after :meth:`resolve` has
+        hash-checked it, for readers of other tables (N02.6's Target AFR and
+        timing axes). Read-only: nothing here writes an image."""
+        calibration = self.resolve(name)
+        loaded = self._load(calibration.source_path)
+        if loaded is None or loaded[0] != calibration.image_sha256:
+            raise FuelCompRomRefusalError(
+                "image_unreadable", f"{calibration.source_path} changed since it was resolved"
+            )
+        return loaded[1]
+
     def _expected(self, name: str) -> tuple[str, str | None]:
         """``(image_sha256, rom_file)`` the registry records for ``name``."""
         revision = next((r for r in self._registry.revisions if r.revision == name), None)

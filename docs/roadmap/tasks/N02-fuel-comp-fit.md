@@ -267,6 +267,13 @@ the model of how Fuel Comp acts is wrong and N02.5's factors must not be used.
   | k106 closed loop | 10,566 | 1,719 | 381 | 1,719 (381) | 0 |
   | k106 open loop | 21,812 | 0 | 0 | 0 | 0 |
 
+  **SAMPLES_VERSION 3 (N02.5, 2026-10-07; open loop as an interval over the
+  delay bracket, RAM phi target preferred over PID 0x44):** closed loop
+  unchanged (20260920 17,870 / 1,588 / 94, PID 680 (54), DID 908 (40); k106
+  10,566 / 1,719 / 381, all PID); open loop 20260920 13,479 candidates / 42
+  eligible / 28 unambiguous, all DID route, all RAM target; k106 open loop
+  18,762 / 0 / 0. The v2 table above is kept as the record of that version.
+
   (At 250 ms with a backward-only window the same corpus gave closed loop
   1,070 / 137 eligible, 939 / 131 DID / PID on 20260920, and open loop 0.)
   Every eligible open-loop sample is from a September tuning capture's
@@ -282,7 +289,7 @@ the model of how Fuel Comp acts is wrong and N02.5's factors must not be used.
   (`_capture-tuning-2026-09-23T022831`, no warm idle for the closed position);
   open loop 5 / 68 / 38 / 1.
 
-- [ ] **N02.4 — Separate fuel-supply droop from the air-model error.**
+- [x] **N02.4 — Separate fuel-supply droop from the air-model error.**
   Model injector flow ∝ √(rail gauge pressure), relative to the drive's own
   low-flow reference.
   - **Measured:** on drives that logged `FUEL_PRESSURE`, apply the measured
@@ -297,8 +304,43 @@ the model of how Fuel Comp acts is wrong and N02.5's factors must not be used.
   - The 10-04 drive reproduces the recorded −1.9 psi at about 107 g/s.
   - The fuel pump is being replaced (supercharger build), so the remainder is
     the part a Fuel Comp edit should own.
+  **Done 2026-10-05.** `src/analysis/fuel_comp_droop.py` (declaration
+  `droop:` in `fuel_comp_fit.yaml`, schema `DroopRules`): pressure is the mean
+  of `sensor:FUEL_PRESSURE` reads within +-0.25 s of the sample (>= 30 reads,
+  no `FUEL_PRESSURE_FAULT` row, which is read as a state from the stored rows),
+  against each drive's own reference (median window pressure over
+  engine-running MAF reads < 5 g/s, >= 30 reads, pooled over the drive as
+  `fit.drive_unit` defines it). Flow factor
+  `sqrt(P/P_ref)`; droop error `sqrt(P_ref/P) - 1`; remainder
+  `(1+error)/(1+droop) - 1`. Elsewhere `droop_psi = a maf + b maf^2` fitted on
+  every engine-running MAF read of the drives with pressure and a reference
+  (>= 200 pairs, >= 2 drives), applied from 0 to the top of its fitted MAF
+  range (zero at zero flow by construction; the report shows fitted and
+  applied ranges), labelled
+  `modelled (<why not measured>)`; else `none` with the reason. Each sample
+  carries `droop_kind`, `droop_basis`, pressure, reference, droop psi, flow
+  factor, droop error and remainder. Rail-to-manifold dP, the +1.8 psi
+  analog offset and the Oct-4-only pump history are required `limitations`
+  printed in the report. Known answer (real session, through this path):
+  2026-10-04T194342, 100-118 g/s, **median -1.925 psi at median 106.4 g/s,
+  n = 7** (p10-p90 -1.96..-1.71; flow -1.91 %), recorded -1.9 (8 pairs):
+  passes the declared +-0.25 psi. With the drive unit (2026-10-07 fix-up)
+  190056 and 194342 are one drive (1.2 min apart) and share its reference
+  (50.79 psi). Corpus model (run5): a = -0.00716 psi/(g/s), b = -8.08e-5,
+  n = 3,162 pairs from two drives (190056..194342 and 202737..ram-study),
+  fitted on MAF 3.3-142.9 g/s, applied 0-142.9, pooled reference 50.62 psi,
+  residual RMS 0.22 psi. 215234 is KOEO (rpm 0) and forms no reference.
+  Eligible samples: 143 measured, 3,201 modelled, 5 none. The model is
+  fitted once, not per held-out fold; disclosed in the report: 0 modelled
+  samples sit on a pressure drive, so nothing the model saw is predicted by
+  it in the validation. Tests:
+  `tests/test_fuel_comp_droop.py` (9: reference, measured decomposition
+  multiplicative to 1e-12, modelled fit and labels, fault fallback, one drive
+  refused, no-reference kinds, known-answer empties, fault rows as states,
+  and the real-session reproduction, `slow`, skipping by name when absent;
+  +1 for sessions of one drive sharing a pooled reference).
 
-- [ ] **N02.5 — Per-cell proposal on the current (20261004) axes.**
+- [x] **N02.5 — Per-cell proposal on the current (20261004) axes.**
   For each eligible sample:
   - FC_applied is the bilinear value from the table and axes in force when it
     was logged.
@@ -320,8 +362,104 @@ the model of how Fuel Comp acts is wrong and N02.5's factors must not be used.
   **Accept:** each of the 256 cells is proposed (with factor and CI),
   insufficient (with n and drives), or not covered. Synthetic tests recover a
   known injected cell pattern and refuse sparse cells.
+  **Done 2026-10-05.** `src/analysis/fuel_comp_fit.py`. FC_applied is
+  `ecm_lookup.lookup_2d` on the logged revision's table and axes at the
+  nominal word and byte (throttle/purge interval lower-middle, idle air
+  nominal, byte rebuilt on that revision's curves; the corner range is
+  carried); required = `FC_applied x (1 + remainder) x K_logged / K_now`; the
+  design is `(sample, cell, weight)` bilinear triplets on the 20261004 axes
+  (byte rebuilt on the target's curves). Least squares on cells passing the
+  declared refusals (>= 10 weighted pairs, >= 2 drives each with >= 1 weighted
+  pair), others held at current, ridge of 1 pair toward current; 500-resample
+  drive bootstrap (seed declared). Sample refusals by name: droop none,
+  `cell_ambiguous: <idle_air|purge|throttle|rpm>` on the logged axes,
+  `target_cell_ambiguous`, inputs missing. DID route excluded by the declared
+  switch; `fit_both_ways` reports both, with each cell's DID-route weight
+  share. Validation: leave-one-drive-out, current table vs fitted cells vs
+  MAF-bin multipliers on the same held-out samples; verdict
+  `rms_and_drive_majority`; diagnostic says "the error is MAF-shaped; Fuel
+  Comp is the wrong table" when bins remove as much MSE. **Open-loop redesign
+  (orchestrator-approved):** no steadiness gate; rpm and throttle are the
+  hull of reads bounding the B06 enrichment delay bracket
+  (`ram_final_target`, 0.0-0.5 s, read from lambda_delivery.yaml), consecutive
+  reads <= 0.6 s apart (declared from the 0.25 s / 0.5 s cadence), `rpm_moves_cell`
+  when rows span more than a pair; a stopped engine inside the span is
+  `gated:engine_stopped_in_delay_bracket` (SAMPLES_VERSION 3, also `maf_gs`,
+  `bfs_raw`, rpm word/row intervals). RAM phi target now preferred over PID
+  0x44, whose caveat (46B2 feedback target) is a required `source_caveats`
+  entry. Tests: `tests/test_fuel_comp_fit.py` (injected 5-cell pattern
+  recovered within 0.5 raw with resolved CIs; sparse cells refused naming
+  `min_weighted_pairs` / `min_drives`; DID route flagged; cell-shaped error ->
+  improvement; MAF-shaped error -> MAF-shaped; no pattern -> no improvement;
+  required factor and every refusal through `prepare_fit_samples`),
+  `tests/test_fuel_comp_samples.py` (+6: bracket interval, pull placed not
+  gated, unbounded bracket named, stopped engine, MAF/BFS ride along, RAM
+  preference and caveat).
 
-- [ ] **N02.6 — Knock-on prediction and report.**
+  **Fix-up 2026-10-07 (verifier).** The first record called the error
+  "MAF-shaped; Fuel Comp is the wrong table". **That is retracted**: it
+  compared bare RMS with `>=`, never asked whether a single global factor did
+  as well, and counted back-to-back sessions of one outing as independent
+  drives. Now:
+  - `fit.drive_unit`: sessions closer than 5 min are one drive (the corpus
+    gaps are <= 2.7 min or >= 11.6 min, nothing between; evidence in the
+    YAML). Used by the cell refusals, the bootstrap, the folds, and droop's
+    references. `tests/test_fuel_comp_fit.py`
+    `test_sessions_of_one_drive_count_once`,
+    `test_drives_merge_sessions_closer_than_the_declared_gap`.
+  - `validate` scores four models on the same samples and folds (current
+    table, one global factor, MAF bins, fitted cells), each with held-out
+    RMS, mean signed residual, per-drive better/worse/same, and parameters
+    per fold (active bins, free cells). Models are told apart by a paired
+    drive bootstrap of pooled MSE (`fit.model_comparison`, 2,000 resamples,
+    95 %); a tie is never a win. MAF-shaped only when the bins beat the global
+    factor; cell-shaped only when the cells do; "uniform offset (K / MAF
+    scale)" when the global factor beats the current table and neither does.
+    `test_a_uniform_offset_is_not_called_maf_shaped` (synthetic -1.7 %
+    everywhere: uniform offset, not MAF-shaped).
+  - Disclosed: the fit and validation solve on real-valued bilinear weights,
+    which differ from the firmware's truncating lookup by -1.42..+1.81 raw
+    (median +0.42) on the current table at the 414 usable samples; the
+    knock-on uses the firmware lookup. Every profile file read is recorded
+    with its sha256 and whether it differs from HEAD; `lambda_delivery.yaml`
+    (27a86461...) and `afr_calibration.yaml` (f9632bcb...) were pinned copies
+    of another session's uncommitted B06.7 working files, `dids.yaml`
+    (a597b079...) equal to HEAD.
+
+  **Corpus (run5, scratchpad n02fit/run5; 112 sessions >= 2026-08-03 form
+  24 drives under the drive unit (18 of them merged from 106 sessions)).** DID route excluded (declared): **8
+  proposed, 33 insufficient, 215 not covered** (366 samples, 7 drives, all
+  closed loop). Included: 11 / 43 / 202 (414 samples, 9 drives; 24 of the 42
+  eligible open-loop samples are usable, all RAM target and DID route; the
+  other 18 are refused: cell_ambiguous rpm 9, throttle+rpm 3, throttle 2,
+  target_cell_ambiguous 3, droop none (MAF 146.1 g/s above the model's range)
+  1; PID 0x44 contributed 0). The earlier "28 placeable" was the count
+  unambiguous on the logged axes: of those 28, 24 are usable, 3 are ambiguous
+  on the 20261004 axes and 1 has no droop separation.
+  - Held-out, excluded (7 folds, 364 samples): RMS current 2.755 %, global
+    factor 2.744 %, MAF bins 2.289 %, cells 2.613 %; mean signed residual
+    -1.70 / +1.19 / +0.19 / -1.55 %; drives better/worse vs current: global
+    5/2, bins 6/1, cells 4/2 (1 same); bins 2-3 active per fold, cells 0-8
+    free. Bootstrap: cells < current 0.975, global < current 0.552, bins <
+    global 0.906, cells < global 0.650. **Verdict: improvement** (cells beat
+    the current table, 4 vs 2 drives). **Diagnostic: neither a global factor,
+    MAF bins nor Fuel Comp cells explain held-out error** beyond the current
+    table at 95 % (the bins come closest, 0.906 against the global factor).
+  - Included (9 folds, 412 samples): current 2.693 %, global 2.313 %, bins
+    2.330 %, cells 2.510 %; global < current 1.000, bins < global 0.302,
+    cells < global 0.000. **Verdict: no improvement** (cells < current only
+    0.869). **Diagnostic: uniform offset (K / MAF scale)**.
+  - Largest proposed (excluded), factor and drive-bootstrap CI: (2800, 144)
+    -6.4 % [0.921-1.020], 4 drives; (2400, 128) -3.7 % [0.930-0.989], 2
+    drives; (2400, 160) -3.1 % [0.979-1.018], 2 drives; (2400, 176) -2.3 %
+    [0.996-1.015], 2 drives. With 2 drives a drive bootstrap has 3 distinct
+    resamples, so those intervals understate the uncertainty (said in the
+    report).
+  The honest reading: the evidence does not separate a Fuel Comp shape from a
+  uniform offset or from MAF shape; no cell change is supported by more than
+  four independent drives.
+
+- [x] **N02.6 — Knock-on prediction and report.**
   For each proposed change, predict at the logged samples:
   - the BFS change (the Fuel Comp ratio);
   - the Target AFR X-byte shift, and whether it crosses a Target AFR
@@ -334,6 +472,33 @@ the model of how Fuel Comp acts is wrong and N02.5's factors must not be used.
   and pairing, and the reconstruction's known-answer result. No code path
   writes or exports a ROM. A proposal cannot be mistaken for a measured
   outcome.
+  **Done 2026-10-05.** `src/analysis/fuel_comp_knock_on.py`: at every usable
+  sample a changed (rounded) cell touches, FC now/proposed by `lookup_2d` on
+  the 20261004 axes, BFS ratio, X before/after via `target_phi.x_from_bfs`
+  (Load Point Scaler 44,019 from the image), Target AFR breakpoint crossing,
+  phi before/after via `target_phi.predict` (Target AFR from the 20261004 image
+  through `resolve_table`; the twin's blockers final_command_path_unverified /
+  ram_copy_unverified are printed), and the timing column on
+  `timing_trim_load_axis` (0xCC83, existing rom_map entry). BFS is DID 0x1208
+  where paired, else `c x K x FC/128 x MAF/rpm` with c the median per-sample
+  ratio (corpus c = 43.93, n = 948, p10-p90 43.26-44.53), labelled; pedal flag
+  assumed clear; D8B3 ceiling, filter/transient, HI DET trim selection listed
+  as limitations. `src/analysis/fuel_comp_report.py` + `tools/fuel_comp_fit.py`
+  write `fit.json`, `report.md` (proposal header, inputs with every revision's
+  image sha256, gates and pairing, all state/refusal counts, open-loop counts
+  per target route with caveat, both known answers, droop, 16x16 coverage and
+  proposal grids both ways, CIs, validation, knock-on table) and Parquet only;
+  `write_outputs` refuses any other suffix before writing. Tests: knock-on
+  (X 98 -> 102 crosses Target AFR 100, phi equals `predict`, unpaired BFS says
+  why), report is a proposal and outputs are JSON/MD/Parquet, other names
+  refused, AST check that no N02 module imports `rom_targets`/`osiris` or calls
+  write_bytes/serialize/transform/open(..., "wb"), tool writes only via
+  `write_outputs`. Corpus (run5, declared configuration): 302 samples, BFS
+  modelled 300 / not predicted 2, 21 cross a Target AFR breakpoint, 52 a
+  timing column. `c` = 43.93 (n 948) comes mostly from idle DID-route samples
+  (idle <= 1,000 rpm 43.93, n 833; DID route 942 of 948); off-idle check 44.01
+  (n 115), stated in the report. Load-byte known answer in the report: idle 1.000
+  (n 38), off idle 1.026 (n 22), passed.
 
 - [ ] **N02.7 — Run on the corpus; re-run after the 20261004 drive.**
   Orchestrator. Record the result in `data/analyses/` with session names, n per

@@ -488,19 +488,18 @@ def _enrichment(**overrides: Any) -> pd.DataFrame:
     """Steady open-loop enrichment at 4 Hz: PID 0x44 phi 1.15 (lambda 0.8696),
     bank 1 reading 2 % lean of it and bank 2 1 % lean."""
     target = 1 / 1.15
-    return _session(
-        seconds=40,
-        step=0.25,
-        RPM=3000.0,
-        FUEL_STATUS=4.0,
-        COMMANDED_EQUIV_RATIO=1.15,
-        O2_WR_LAMBDA_S1=target * 1.02,
-        SHORT_FUEL_TRIM_1=None,
-        LONG_FUEL_TRIM_1=None,
-        SHORT_FUEL_TRIM_2=None,
-        LONG_FUEL_TRIM_2=None,
-        **{"O2_WR_LAMBDA_S5": target * 1.01, **overrides},
-    )
+    channels: dict[str, Any] = {
+        "RPM": 3000.0,
+        "FUEL_STATUS": 4.0,
+        "COMMANDED_EQUIV_RATIO": 1.15,
+        "O2_WR_LAMBDA_S1": target * 1.02,
+        "SHORT_FUEL_TRIM_1": None,
+        "LONG_FUEL_TRIM_1": None,
+        "SHORT_FUEL_TRIM_2": None,
+        "LONG_FUEL_TRIM_2": None,
+        "O2_WR_LAMBDA_S5": target * 1.01,
+    }
+    return _session(seconds=40, step=0.25, **{**channels, **overrides})
 
 
 def test_bank_2_is_judged_by_its_declared_source_and_the_error_is_the_bank_mean(
@@ -521,3 +520,118 @@ def test_bank_2_is_judged_by_its_declared_source_and_the_error_is_the_bank_mean(
     eligible = rows[rows["state"] == ELIGIBLE]
     assert len(eligible) > 50 and set(eligible["error_banks"]) == {"b1"}
     assert eligible["error_pct"].astype(float).to_numpy() == pytest.approx(2.0, abs=1e-9)
+
+
+# -- the open-loop route as an interval over the delay bracket (N02.5) ------------------
+
+
+def _open(result) -> pd.DataFrame:  # type: ignore[no-untyped-def]
+    return result.frame[result.frame["route"] == "open_loop"].reset_index(drop=True)
+
+
+def test_a_steady_enrichment_reads_one_rpm_word_across_the_delay_bracket(
+    declaration, delivery, afr
+) -> None:  # type: ignore[no-untyped-def]
+    rows = _open(_run(_enrichment(THROTTLE_POS=200 * 100 / 255), declaration, delivery, afr))
+    eligible = rows[rows["state"] == ELIGIBLE]
+    assert len(eligible) > 50
+    assert set(eligible["rpm_word_lo"]) == set(eligible["rpm_word_hi"]) == {240}
+    assert not eligible["rpm_moves_cell"].astype(bool).any()
+    # The bracket is lambda_delivery.yaml's, never restated.
+    bracket = delivery.eligibility.regimes.enrichment.transport_delays[
+        declaration.samples.open_loop.delay_bracket.delay_source
+    ].bracket_s
+    assert bracket == (0.0, 0.5)
+
+
+def test_a_pull_is_placed_as_an_interval_not_gated_as_a_transient(
+    declaration, delivery, afr
+) -> None:  # type: ignore[no-untyped-def]
+    """rpm climbs 2,000 rpm per second: the old 0.5 s / 100 rpm gate refused
+    every row; now each row carries the bracket's rpm words and is marked
+    ambiguous because they read more than one pair of Fuel Comp rows."""
+    result = _run(
+        _enrichment(RPM=lambda s: 2000.0 + 2000.0 * (s % 2.0), THROTTLE_POS=200 * 100 / 255),
+        declaration,
+        delivery,
+        afr,
+    )
+    _accounted(result)
+    rows = _open(result)
+    # B06's own target dwell still applies; no rpm or throttle steadiness gate does.
+    assert not {"rpm_transient", "throttle_transient"} & set(rows["reason"].dropna())
+    assert not any("steadiness" in str(r) for r in rows["reason"])
+    eligible = rows[rows["state"] == ELIGIBLE]
+    assert len(eligible) > 20
+    span = eligible["rpm_word_hi"].astype(int) - eligible["rpm_word_lo"].astype(int)
+    assert (span >= 40).all()  # at least 500 rpm inside the 0.5 s bracket
+    wide = eligible[
+        eligible["rpm_row_last"].astype(int) - eligible["rpm_row_first"].astype(int) > 1
+    ]
+    assert len(wide) and wide["rpm_moves_cell"].astype(bool).all()
+    assert wide["cell_ambiguous"].astype(bool).all()
+
+
+def test_a_bracket_without_a_bounding_read_is_unpaired_and_says_so(
+    declaration, delivery, afr
+) -> None:  # type: ignore[no-untyped-def]
+    """A 0.75 s hole in the rpm reads: the read at the target instant pairs,
+    but nothing bounds the start of the delay bracket within 0.25 s."""
+    result = _run(
+        _enrichment(RPM=lambda s: None if (s % 2.0) in (1.0, 1.25) else 3000.0),
+        declaration,
+        delivery,
+        afr,
+    )
+    _accounted(result)
+    reasons = set(_open(result)["reason"].dropna())
+    assert "obd:RPM (delay bracket)" in reasons
+
+
+def test_maf_and_bfs_ride_along_without_gating(declaration, delivery, afr) -> None:  # type: ignore[no-untyped-def]
+    result = _run(_session(MAF=55.0, DID_1208=20000), declaration, delivery, afr)
+    _accounted(result)
+    eligible = _closed(result)
+    eligible = eligible[eligible["state"] == ELIGIBLE]
+    assert len(eligible) > 100
+    assert set(eligible["maf_gs"].astype(float)) == {55.0}
+    assert set(eligible["bfs_raw"].astype(float)) == {20000.0}
+    # Not captured is NaN, never a gate.
+    plain = _closed(_run(_session(), declaration, delivery, afr))
+    assert plain["maf_gs"].astype(float).isna().all()
+    assert (plain["state"] == ELIGIBLE).sum() == len(eligible)
+
+
+def test_a_bracket_that_holds_a_stopped_engine_is_gated_not_placed(
+    declaration, delivery, afr
+) -> None:  # type: ignore[no-untyped-def]
+    """rpm 0 inside the span: the chain's divide guard (w116A = 0 at word 0)
+    breaks the byte's monotonicity in rpm, so no interval exists
+    (_capture-tuning-2026-09-22T235224 raised on it before this gate)."""
+    result = _run(
+        _enrichment(RPM=lambda s: 0.0 if 10.0 <= s < 10.5 else 3000.0),
+        declaration,
+        delivery,
+        afr,
+    )
+    _accounted(result)
+    reasons = set(_open(result)["reason"].dropna())
+    assert "engine_stopped_in_delay_bracket" in reasons
+
+
+def test_the_ram_target_is_preferred_and_pid_0x44_carries_its_caveat(
+    declaration, delivery, afr
+) -> None:  # type: ignore[no-untyped-def]
+    """PID 0x44 is the phi word times the A/F feedback target / 3675
+    (firmware, 2026-10-05): phi only while that target is 14.7, which history
+    never logged. So the RAM word leads, and PID 0x44 must declare why it is
+    weaker wherever it is still used."""
+    rules = declaration.samples.open_loop
+    assert rules.commanded_preference[0] == "ram_final_target"
+    assert "mode01_pid_0x44" in rules.source_caveats
+    assert "46B2" in rules.source_caveats["mode01_pid_0x44"]
+    # A PID-0x44-only session still uses it, labelled.
+    rows = _open(_run(_enrichment(), declaration, delivery, afr))
+    assert set(rows["commanded_source"].dropna()) == {"mode01_pid_0x44"}
+    with pytest.raises(ValueError, match="source_caveats"):
+        type(rules).model_validate({**rules.model_dump(), "source_caveats": {"nope": "x"}})

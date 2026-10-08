@@ -16,13 +16,25 @@ One row per *candidate*, two routes:
   is near zero by construction.
 
 Every candidate is paired on acquisition time with rpm and the throttle input
-(:func:`src.signals.pairing.match_ordered`, the route's declared separation;
-the steadiness window then runs forward to the latest paired read), gets the
-context it is gated on as of its instant (coolant, baro, fuel status, each
-within a declared age), and the Fuel Comp load byte reconstructed as an
+(:func:`src.signals.pairing.match_ordered`, the route's declared separation),
+gets the context it is gated on as of its instant (coolant, baro, fuel status,
+each within a declared age), and the Fuel Comp load byte reconstructed as an
 interval (:mod:`src.analysis.fuel_comp_inputs`) on the revision in force *at
-that sample* (per-sample, so a session straddling a flash splits). It ends in
-exactly one state:
+that sample* (per-sample, so a session straddling a flash splits). Where it
+sits on the table is judged per route:
+
+- closed loop: a steadiness gate over the dwell before the sample, running
+  forward to its latest paired read, so every read it is built from lies in
+  the span judged steady; rpm is one word;
+- open loop (N02.5 redesign): no steadiness gate. The lambda read measures
+  fuel set somewhere in the B06 enrichment transport-delay bracket before
+  it, so rpm and throttle are the hull of the reads bounding that span (rpm
+  words ``rpm_word_lo..rpm_word_hi``), and the cell is ambiguous when they
+  read more than one pair of rows (``rpm_moves_cell``) or columns.
+
+MAF and the BFS word ride along per sample (``maf_gs``, ``bfs_raw``) for the
+droop, diagnostic and knock-on stages; they are never gated on. Each sample
+ends in exactly one state:
 
 - ``eligible``;
 - ``gated`` with the gate's name (``reason``);
@@ -77,6 +89,7 @@ from src.analysis.fuel_comp_rom import (
 from src.analysis.lambda_delivery import (
     ELIGIBLE,
     LambdaDeliveryDeclaration,
+    declared_delays_s,
     delivery_samples,
     resolve_quantity,
     target_side_from_arrays,
@@ -97,7 +110,9 @@ from src.signals.pairing import (
 from src.vehicle.tune_revisions import TuneRevisionRegistry
 
 #: Bumped whenever a state, gate, pairing or column changes meaning.
-SAMPLES_VERSION = 2
+#: 3: open loop placed as an interval over the B06 delay bracket (no
+#: steadiness gate); rpm word and row intervals; MAF and BFS carried.
+SAMPLES_VERSION = 3
 
 ROUTES = ("closed_loop", "open_loop")
 STATES = ("eligible", "gated", "unpaired", "input_missing")
@@ -118,6 +133,8 @@ COLUMNS = (
     "reason",
     "rpm",
     "rpm_word",
+    "rpm_word_lo",
+    "rpm_word_hi",
     "throttle_route",
     "throttle_validated",
     "throttle_counts_lo",
@@ -133,14 +150,19 @@ COLUMNS = (
     "x_hi",
     "rpm_index",
     "rpm_fraction_q16",
+    "rpm_row_first",
+    "rpm_row_last",
     "load_col_first",
     "load_col_last",
     "cell_ambiguous",
     "idle_air_moves_cell",
     "purge_moves_cell",
     "throttle_moves_cell",
+    "rpm_moves_cell",
     "coolant_c",
     "baro_kpa",
+    "maf_gs",
+    "bfs_raw",
     "fuel_status_prior",
     "fuel_status_next",
     "commanded_source",
@@ -245,6 +267,8 @@ def _wanted_specs(
         FUEL_STATUS_SPEC,
         *rules.gates.coolant.sources,
         rules.gates.baro.channel,
+        rules.context.maf,
+        rules.context.bfs,
         delivery.measured(rules.open_loop.measured_source).spec,
     ]
     if rules.open_loop.bank2_measured_source:
@@ -475,37 +499,52 @@ def _throttle_input(
 # -- the reconstruction per candidate ---------------------------------------------
 
 
+def _rows_read(breakpoints: Sequence[int], words: Interval) -> tuple[int, int]:
+    """``(first, last)`` Fuel Comp row the rpm search reads across a word
+    interval: monotone in the word, so the low end's row to the high end's
+    upper row (one row on a breakpoint or past an end, two between)."""
+    first = search_axis(breakpoints, words.lo)
+    last = search_axis(breakpoints, words.hi)
+    assert first is not None and last is not None
+    return first.index, last.index + (1 if last.fraction_q16 else 0)
+
+
 def _reconstruct(
     calibration: FuelCompCalibration,
     *,
     throttle: Interval,
     word: int,
+    words: Interval,
     idle_air: Interval,
     idle_nominal: int,
     purge: Interval,
 ) -> dict[str, Any]:
-    """The byte interval over every input, the Fuel Comp row and columns it
-    reads, and which input moves it across columns.
+    """The byte interval over every input, the Fuel Comp rows and columns it
+    reads, and which input moves it across cells.
 
-    ``cell_ambiguous``: the whole interval reads more than one adjacent pair
-    of load columns, so no single cell can be named. The ``*_moves_cell``
-    flags name the culprit: the same test with only that input spanning its
-    interval, the others held at a representative value (throttle and purge
-    at their interval's lower middle, idle air at its declared nominal).
+    ``words`` is the rpm word interval (one word in closed loop; the delay
+    bracket's hull in open loop), ``word`` the nominal one the row columns
+    describe. ``cell_ambiguous``: the whole interval reads more than one
+    adjacent pair of load columns, or the words more than one adjacent pair
+    of rows, so no single cell can be named. The ``*_moves_cell`` flags name
+    the culprit: the same test with only that input spanning its interval,
+    the others held at a representative value (throttle and purge at their
+    interval's lower middle, idle air at its declared nominal, rpm at the
+    nominal word).
     """
     full = load_interval(
         throttle_counts=throttle,
-        rpm_words=[word],
+        rpm_words=[words.lo, words.hi],
         idle_air=idle_air,
         purge=purge,
         calibration=calibration,
     )
     axis = calibration.load_axis_raw
 
-    def moves(throttle_: Interval, idle_: Interval, purge_: Interval) -> bool:
+    def moves(throttle_: Interval, idle_: Interval, purge_: Interval, words_: Interval) -> bool:
         part = load_interval(
             throttle_counts=throttle_,
-            rpm_words=[word],
+            rpm_words=[words_.lo, words_.hi],
             idle_air=idle_,
             purge=purge_,
             calibration=calibration,
@@ -513,9 +552,11 @@ def _reconstruct(
         return not spans_one_cell(axis, part.byte)
 
     t_mid, p_mid = Interval.exactly(throttle.mid), Interval.exactly(purge.mid)
-    i_nom = Interval.exactly(idle_nominal)
+    i_nom, w_nom = Interval.exactly(idle_nominal), Interval.exactly(word)
     rpm_hit = search_axis(calibration.rpm_breakpoints, word)
     assert rpm_hit is not None
+    row_first, row_last = _rows_read(calibration.rpm_breakpoints, words)
+    rows_ambiguous = row_last - row_first > 1
     first = search_axis(axis, full.low.byte)
     last = search_axis(axis, full.high.byte)
     assert first is not None and last is not None
@@ -526,12 +567,15 @@ def _reconstruct(
         "x_hi": full.high.x,
         "rpm_index": rpm_hit.index,
         "rpm_fraction_q16": rpm_hit.fraction_q16,
+        "rpm_row_first": row_first,
+        "rpm_row_last": row_last,
         "load_col_first": first.index,
         "load_col_last": last.index + (1 if last.fraction_q16 else 0),
-        "cell_ambiguous": not spans_one_cell(axis, full.byte),
-        "idle_air_moves_cell": moves(t_mid, idle_air, p_mid),
-        "purge_moves_cell": moves(t_mid, i_nom, purge),
-        "throttle_moves_cell": moves(throttle, i_nom, p_mid),
+        "cell_ambiguous": rows_ambiguous or not spans_one_cell(axis, full.byte),
+        "idle_air_moves_cell": moves(t_mid, idle_air, p_mid, w_nom),
+        "purge_moves_cell": moves(t_mid, i_nom, purge, w_nom),
+        "throttle_moves_cell": moves(throttle, i_nom, p_mid, w_nom),
+        "rpm_moves_cell": rows_ambiguous or moves(t_mid, i_nom, p_mid, words),
     }
 
 
@@ -582,6 +626,11 @@ class _Session:
     purge: _Series
     purge_bytes: list[Interval]
     throttle: _Throttle
+    maf: _Series
+    bfs: _Series
+    #: Open loop: the B06 enrichment transport-delay bracket ``(lo, hi)`` s,
+    #: and the commanded source's own pairing shift, the measured instant.
+    delay_bracket_s: tuple[float, float]
     cuts: np.ndarray
     cut_source_captured: bool
     registry: TuneRevisionRegistry
@@ -689,6 +738,9 @@ def _open_loop_rows(
             measured_source=measured_source,
             calibration=afr_calibration,
             afr_stoich=afr_stoich,
+            # The declared measured sources are PID-only and carry no baro
+            # gain (B06.7), so none is passed.
+            baro=None,
         ).frame
 
     bank2 = None
@@ -758,7 +810,13 @@ def _error_columns(
         columns["error_b2_pct"] = total_b2
         columns["error_pct"] = (total_b1 + total_b2) / 2.0
         columns["error_banks"] = np.full(n, "mean", dtype=object)
-        ram = ctx.delivery.commanded(rules.open_loop.commanded_preference[-1])
+        # The commanded word in closed loop: the first preferred source that
+        # is valid in that regime (PID 0x44 is not, lambda_delivery.yaml).
+        ram = next(
+            source
+            for source in (ctx.delivery.commanded(n) for n in rules.open_loop.commanded_preference)
+            if "closed_loop" in source.valid_regimes
+        )
         ram_series = ctx.series(ram.spec)
         _, columns["commanded_phi"] = _paired_values(times, ram_series, policy)
         columns["commanded_source"] = np.full(
@@ -806,6 +864,97 @@ def _error_columns(
     return paired_times
 
 
+@dataclass(frozen=True)
+class _Bracket:
+    """Open loop, per candidate: rpm words and throttle counts over the span
+    the measured fuel was set in (:class:`src.analysis.fuel_comp_inputs.
+    DelayBracket`), or ``False`` where the span cannot be bounded."""
+
+    rpm_ok: np.ndarray
+    words: list[Interval | None]
+    throttle_ok: np.ndarray
+    counts: list[Interval | None]
+    #: A zero rpm read inside the span: the engine was not turning for part
+    #: of it, and the chain's divide guard (``w116A = 0`` at word 0) breaks
+    #: the byte's monotonicity in rpm, so no interval can be formed.
+    rpm_zero: np.ndarray
+
+
+def _hull(
+    times: np.ndarray,
+    lows: np.ndarray,
+    highs: np.ndarray,
+    start: np.ndarray,
+    end: np.ndarray,
+    max_gap: float,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """``(ok, lo, hi)`` over every read from the last at or before ``start``
+    to the first at or after ``end``; not ok when either end has no read, two
+    consecutive reads in the hull are more than ``max_gap`` apart, or a read
+    in it has no value."""
+    n = len(start)
+    ok = np.zeros(n, dtype=bool)
+    lo = np.full(n, np.nan)
+    hi = np.full(n, np.nan)
+    if not len(times) or not n:
+        return ok, lo, hi
+    first = np.searchsorted(times, start, side="right") - 1
+    last = np.searchsorted(times, end, side="left")
+    for i in range(n):
+        a, b = int(first[i]), int(last[i])
+        if a < 0 or b >= len(times):
+            continue
+        if b > a and float(np.max(np.diff(times[a : b + 1]))) > max_gap:
+            continue
+        seg_lo, seg_hi = lows[a : b + 1], highs[a : b + 1]
+        if not (np.isfinite(seg_lo).all() and np.isfinite(seg_hi).all()):
+            continue
+        ok[i] = True
+        lo[i] = float(seg_lo.min())
+        hi[i] = float(seg_hi.max())
+    return ok, lo, hi
+
+
+def _delay_bracket(
+    ctx: _Session, times: np.ndarray, shift_s: float, policy: PairingPolicy
+) -> _Bracket:
+    """rpm and throttle over ``[t + shift - hi, t + shift - lo]`` for each
+    open-loop candidate: the hull of the reads bounding that span, no two
+    consecutive reads in it further apart than the declared gap (the clock
+    must still carry the route's pairing separation)."""
+    lo_s, hi_s = ctx.delay_bracket_s
+    measured_at = times + shift_s
+    start, end = measured_at - hi_s, measured_at - lo_s
+    gap = ctx.declaration.samples.open_loop.delay_bracket.max_read_gap_s
+    n = len(times)
+    rpm, throttle = ctx.rpm, ctx.throttle
+    words: list[Interval | None] = [None] * n
+    rpm_ok = np.zeros(n, dtype=bool)
+    rpm_zero = np.zeros(n, dtype=bool)
+    if rpm.captured and rpm.clock_refusal(policy) is None:
+        ok, low, high = _hull(rpm.times, rpm.values, rpm.values, start, end, gap)
+        rpm_zero = ok & (low <= 0)
+        for i in np.flatnonzero(ok & ~rpm_zero):
+            try:
+                words[i] = Interval(
+                    rpm_word(low[i], ctx.declaration), rpm_word(high[i], ctx.declaration)
+                )
+            except FuelCompInputError:
+                continue
+            rpm_ok[i] = True
+    counts: list[Interval | None] = [None] * n
+    throttle_ok = np.zeros(n, dtype=bool)
+    series = throttle.series
+    if series.captured and series.clock_refusal(policy) is None:
+        lows = np.array([np.nan if c is None else c.lo for c in throttle.counts], dtype=float)
+        highs = np.array([np.nan if c is None else c.hi for c in throttle.counts], dtype=float)
+        ok, low, high = _hull(series.times, lows, highs, start, end, gap)
+        for i in np.flatnonzero(ok):
+            counts[i] = Interval(int(low[i]), int(high[i]))
+        throttle_ok = ok
+    return _Bracket(rpm_ok, words, throttle_ok, counts, rpm_zero)
+
+
 def _route_frame(
     ctx: _Session, route: str, times: np.ndarray, open_loop: _OpenLoop
 ) -> pd.DataFrame:
@@ -824,6 +973,11 @@ def _route_frame(
     rpm_index = _pair(times, ctx.rpm, policy)
     throttle_index = _pair(times, throttle.series, policy)
     purge_index = _pair(times, ctx.purge, policy)
+    bracket = None
+    if route == "open_loop":
+        source = open_loop.commanded or rules.open_loop.commanded_preference[0]
+        shift = declared_delays_s(ctx.delivery, source)["enrichment"]
+        bracket = _delay_bracket(ctx, times, shift, policy)
     coolant_now = _as_of(ctx.coolant, times, gates.coolant.max_age_s)
     baro_now = _as_of(ctx.baro, times, gates.baro.max_age_s)
     route_rules = rules.closed_loop if route == "closed_loop" else rules.open_loop
@@ -844,6 +998,8 @@ def _route_frame(
         fuel_status_next=fs_next,
         idle_air_lo=np.full(n, inputs.idle_air.low, dtype=object),
         idle_air_hi=np.full(n, inputs.idle_air.high, dtype=object),
+        maf_gs=_paired_values(times, ctx.maf, policy)[1],
+        bfs_raw=_paired_values(times, ctx.bfs, policy)[1],
         pairing_max_separation_s=np.full(n, policy.max_separation_s, dtype=object),
     )
     states = _States(n)
@@ -895,8 +1051,17 @@ def _route_frame(
         ~np.isfinite(fs_prior) | ~np.isfinite(fs_next), "unpaired", f"{FUEL_STATUS_SPEC} (stale)"
     )
     _assign_gates(ctx, route, times, window_end, states, coolant_now, baro_now, fs_prior, fs_next)
+    if bracket is not None:
+        rpm_label = ctx.rpm.label(inputs.rpm.channel, policy)
+        states.assign(bracket.rpm_zero, "gated", "engine_stopped_in_delay_bracket")
+        states.assign(~bracket.rpm_ok, "unpaired", f"{rpm_label} (delay bracket)")
+        states.assign(
+            ~bracket.throttle_ok,
+            "unpaired",
+            f"{throttle.series.label(throttle.route or 'throttle', policy)} (delay bracket)",
+        )
     states.finish()
-    _fill_reconstruction(ctx, columns, revisions, rpm_index, throttle_index, purge_index)
+    _fill_reconstruction(ctx, columns, revisions, rpm_index, throttle_index, purge_index, bracket)
     columns["state"] = states.state
     columns["reason"] = states.reason
     return pd.DataFrame({name: columns[name] for name in COLUMNS})
@@ -913,9 +1078,10 @@ def _assign_gates(
     fs_prior: np.ndarray,
     fs_next: np.ndarray,
 ) -> None:
-    """The declared gates, in order. Steadiness is judged over
-    ``[t - dwell_s, window_end]``: the dwell before the sample and forward to
-    its latest paired read."""
+    """The declared gates, in order. Closed loop only: steadiness is judged
+    over ``[t - dwell_s, window_end]``, the dwell before the sample and
+    forward to its latest paired read. Open loop has no steadiness gate; its
+    rpm and throttle are intervals over the delay bracket (:func:`_delay_bracket`)."""
     rules = ctx.declaration.samples
     gates = rules.gates
     if route == "closed_loop":
@@ -942,7 +1108,10 @@ def _assign_gates(
         "gated",
         "baro_outside_band",
     )
-    steady = (rules.closed_loop if route == "closed_loop" else rules.open_loop).steady
+    if route != "closed_loop":
+        # Open loop is placed as an interval over the delay bracket instead.
+        return
+    steady = rules.closed_loop.steady
     start = times - steady.dwell_s
     rpm_n, rpm_span = _window_span(ctx.rpm, start, window_end)
     states.assign(rpm_n < steady.min_samples, "gated", "rpm_steadiness_unobserved")
@@ -966,8 +1135,11 @@ def _fill_reconstruction(
     rpm_index: np.ndarray,
     throttle_index: np.ndarray,
     purge_index: np.ndarray,
+    bracket: _Bracket | None = None,
 ) -> None:
-    """Inputs and the load byte interval wherever rpm, throttle and an image exist."""
+    """Inputs and the load byte interval wherever rpm, throttle and an image
+    exist. Open loop (``bracket``): rpm words and throttle counts are the
+    delay bracket's intervals where it could be bounded."""
     declaration = ctx.declaration
     idle_air = declaration.inputs.idle_air
     shift = declaration.inputs.purge.gain_shift
@@ -985,9 +1157,20 @@ def _fill_reconstruction(
         except FuelCompInputError:
             continue
         columns["rpm_word"][i] = word
+        words = Interval.exactly(word)
+        if bracket is not None and bracket.rpm_ok[i]:
+            hull = bracket.words[i]
+            assert hull is not None
+            # The span the fuel was set in, alone: the read paired at the
+            # target instant may lie after it.
+            words = hull
+        columns["rpm_word_lo"][i] = words.lo
+        columns["rpm_word_hi"][i] = words.hi
         if throttle_index[i] < 0:
             continue
         counts = ctx.throttle.counts[throttle_index[i]]
+        if bracket is not None and bracket.throttle_ok[i]:
+            counts = bracket.counts[i]
         if counts is None:
             continue
         columns["throttle_counts_lo"][i] = counts.lo
@@ -1007,13 +1190,30 @@ def _fill_reconstruction(
         built = _reconstruct(
             calibration,
             throttle=counts,
-            word=word,
+            word=word if words.exact else (words.lo + words.hi) // 2,
+            words=words,
             idle_air=idle_air.interval,
             idle_nominal=idle_air.nominal,
             purge=area,
         )
         for key, value in built.items():
             columns[key][i] = value
+
+
+def _bracket_seconds(
+    declaration: FuelCompDeclaration, delivery: LambdaDeliveryDeclaration
+) -> tuple[float, float]:
+    """The declared delay source's frozen enrichment bracket, read from
+    ``lambda_delivery.yaml``; refused when that source has none."""
+    source = declaration.samples.open_loop.delay_bracket.delay_source
+    delays = delivery.eligibility.regimes.enrichment.transport_delays
+    if source not in delays or delays[source].bracket_s is None:
+        raise FuelCompInputError(
+            f"samples.open_loop.delay_bracket names {source!r}, which has no frozen "
+            "enrichment transport-delay bracket in lambda_delivery.yaml"
+        )
+    lo, hi = delays[source].bracket_s or (0.0, 0.0)
+    return float(lo), float(hi)
 
 
 def session_samples(
@@ -1072,6 +1272,9 @@ def session_samples(
         purge=purge,
         purge_bytes=purge_command_bytes(purge.values, purge_spec, declaration, catalog),
         throttle=_throttle_input(long, declaration, catalog, coolant),
+        maf=_series(long.get(rules.context.maf)),
+        bfs=_series(long.get(rules.context.bfs)),
+        delay_bracket_s=_bracket_seconds(declaration, delivery),
         cuts=cuts,
         cut_source_captured=cut_captured,
         registry=registry,

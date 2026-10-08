@@ -31,7 +31,7 @@ Everything vehicle-specific is the profile's ``fuel_comp_fit.yaml``
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Literal
@@ -227,16 +227,59 @@ class ClosedLoopRoute(_Strict):
         return self
 
 
+class DelayBracket(_Strict):
+    """Where an open-loop sample sits on Fuel Comp, as an interval (N02.5).
+
+    The lambda read at ``t`` measures fuel set at some instant in ``[t - hi,
+    t - lo]``, ``[lo, hi]`` the B06 enrichment transport-delay bracket of the
+    named commanded source (``lambda_delivery.yaml``, read, never restated).
+    rpm and throttle over that span are the hull of every read from the last
+    one at or before ``t - hi`` to the first at or after ``t - lo``, so the
+    sample's rpm words and throttle counts are intervals and its cell is
+    ambiguous when they read more than one pair of rows or columns. The hull
+    holds every value in the span only if each input moves monotonically
+    between consecutive reads, so no two consecutive reads in it may be more
+    than ``max_read_gap_s`` apart. This replaces a steadiness gate: nothing
+    is tightened or relaxed to admit a pull.
+    """
+
+    #: The commanded source whose frozen enrichment delay supplies the bracket.
+    delay_source: str = Field(min_length=1)
+    #: Longest gap between consecutive reads inside a hull: a property of the
+    #: polling cadence the monotone assumption is made over.
+    max_read_gap_s: float = Field(gt=0)
+    #: The hull is exact only if each input moves monotonically between two
+    #: consecutive reads; a stated assumption, not a measurement.
+    assumption: str = Field(min_length=1)
+    status: Literal["proposed", "frozen"]
+    evidence: str = Field(min_length=1)
+
+
 class OpenLoopRoute(_Strict):
+    #: A session uses the first of these it captured.
     commanded_preference: list[str] = Field(min_length=1)
+    #: Per preferred source that is not the commanded phi word itself, what
+    #: its target means instead. Required (possibly empty): the report prints
+    #: each caveat beside the samples that rest on it.
+    source_caveats: dict[str, str]
     measured_source: str
     #: Bank 2's declared measured source, judged by the same B06 rows.
     bank2_measured_source: str | None = None
     open_loop_codes: list[int] = Field(min_length=1)
     fuel_status_max_age_s: float = Field(gt=0)
-    steady: SteadyGate
+    delay_bracket: DelayBracket
     status: Literal["proposed", "frozen"]
     evidence: str = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def _caveats_name_preferred_sources(self) -> OpenLoopRoute:
+        stray = sorted(set(self.source_caveats) - set(self.commanded_preference))
+        if stray:
+            raise ValueError(f"source_caveats names sources not in commanded_preference: {stray}")
+        empty = sorted(k for k, v in self.source_caveats.items() if not v.strip())
+        if empty:
+            raise ValueError(f"source_caveats must say what the caveat is: {empty}")
+        return self
 
 
 class CoolantGate(_Strict):
@@ -265,10 +308,232 @@ class Gates(_Strict):
     baro: BaroGate
 
 
+class SampleContext(_Strict):
+    """Reads carried per sample for later stages, never gated on: paired like
+    rpm (one-to-one, the route's separation), NaN when unpaired."""
+
+    #: Airflow, for the droop model (N02.4) and the MAF-bin diagnostic (N02.5).
+    maf: str
+    #: The BFS word, raw counts, for the knock-on prediction (N02.6).
+    bfs: str
+    evidence: str = Field(min_length=1)
+
+
 class SampleRules(_Strict):
     closed_loop: ClosedLoopRoute
     open_loop: OpenLoopRoute
     gates: Gates
+    context: SampleContext
+
+
+# -- N02.4: fuel-supply droop ------------------------------------------------------
+
+
+class DroopReference(_Strict):
+    """Each drive's own low-flow rail pressure, that droop is measured from."""
+
+    method: Literal["drive_low_flow_median"]
+    #: MAF reads below this (engine running) form the reference.
+    maf_max_gs: float = Field(gt=0)
+    min_reads: int = Field(ge=1)
+    #: One reference per drive, the fit's declared drive unit (``fit.drive_unit``).
+    evidence: str = Field(min_length=1)
+
+
+class DroopModelRule(_Strict):
+    """The droop-versus-MAF relation fitted on drives that logged pressure."""
+
+    #: ``droop_psi = a x maf + b x maf^2``: zero at zero flow, as a pressure
+    #: measured from a low-flow reference must be, and free to steepen.
+    form: Literal["quadratic_through_origin"]
+    min_pairs: int = Field(ge=1)
+    min_drives: int = Field(ge=1)
+    evidence: str = Field(min_length=1)
+
+
+class DroopKnownAnswer(_Strict):
+    """A recorded droop figure the measured path must reproduce."""
+
+    sessions: list[str] = Field(min_length=1)
+    maf_band_gs: tuple[float, float]
+    expected_psi: float
+    tolerance_psi: float = Field(gt=0)
+    #: Fewer reads in the band than this is "filtered", not a result.
+    min_pairs: int = Field(ge=1)
+    source: str = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def _band(self) -> DroopKnownAnswer:
+        lo, hi = self.maf_band_gs
+        if not 0 <= lo < hi:
+            raise ValueError("droop known_answer maf_band_gs must be 0 <= lo < hi")
+        return self
+
+
+class DroopRules(_Strict):
+    """N02.4: injector flow follows the square root of rail gauge pressure,
+    relative to the drive's own low-flow reference.
+
+    Measured where the session logged rail pressure (a window mean around the
+    sample, paired by acquisition time), modelled against MAF elsewhere, and
+    labelled which. ``limitations`` must name what is not modelled: required,
+    so the report cannot omit it.
+    """
+
+    pressure_channel: str
+    fault_channel: str
+    #: Every MAF read of a pressure session, for the reference and the model.
+    maf_channel: str
+    rpm_channel: str
+    #: The engine is running at or above this rpm (as of the read).
+    running_rpm_min: float = Field(gt=0)
+    rpm_max_age_s: float = Field(gt=0)
+    #: Mean of the pressure reads within +- this of the instant.
+    window_half_width_s: float = Field(gt=0)
+    min_window_reads: int = Field(ge=1)
+    #: kPa per psi, for reporting in the gauge's unit.
+    kpa_per_psi: float = Field(gt=0)
+    flow_law: Literal["sqrt_gauge_pressure"]
+    reference: DroopReference
+    model: DroopModelRule
+    known_answer: DroopKnownAnswer
+    limitations: list[str] = Field(min_length=1)
+    status: Literal["proposed", "frozen"]
+    evidence: str = Field(min_length=1)
+
+
+# -- N02.5: the per-cell fit ---------------------------------------------------------
+
+
+class BootstrapRule(_Strict):
+    resamples: int = Field(ge=10)
+    seed: int
+    #: Percentiles of the resampled cell values.
+    interval_pct: tuple[float, float]
+
+    @model_validator(mode="after")
+    def _ordered(self) -> BootstrapRule:
+        lo, hi = self.interval_pct
+        if not 0 <= lo < hi <= 100:
+            raise ValueError("bootstrap interval_pct must be 0 <= lo < hi <= 100")
+        return self
+
+
+class DriveUnit(_Strict):
+    """What one independent drive is. Sessions split an outing (a Pi reboot,
+    a capture starting or stopping), so sessions whose spans are closer than
+    ``max_gap_minutes`` are one drive."""
+
+    method: Literal["session_gap"]
+    max_gap_minutes: float = Field(gt=0)
+    evidence: str = Field(min_length=1)
+
+
+class ModelComparison(_Strict):
+    """How two held-out models are told apart: a paired bootstrap over the
+    held-out drives of the difference in their per-drive mean squared
+    residual. One model beats another only when that difference is below
+    zero in at least ``confidence`` of the resamples; otherwise they tie."""
+
+    method: Literal["paired_drive_bootstrap"]
+    resamples: int = Field(ge=100)
+    confidence: float = Field(gt=0.5, lt=1)
+    seed: int
+    evidence: str = Field(min_length=1)
+
+
+def assign_drives(spans: Mapping[str, tuple[float, float]], unit: DriveUnit) -> dict[str, str]:
+    """Session -> drive id under ``unit``: sessions in start order join the
+    current drive when they start less than the gap after its latest end. The
+    id is the first session's name, ``"<first>..<last>"`` when merged."""
+    gap = unit.max_gap_minutes * 60.0
+    groups: list[list[str]] = []
+    end = -np.inf
+    for name, (start, stop) in sorted(spans.items(), key=lambda kv: (kv[1][0], kv[0])):
+        if groups and start - end < gap:
+            groups[-1].append(name)
+            end = max(end, stop)
+        else:
+            groups.append([name])
+            end = stop
+    out: dict[str, str] = {}
+    for group in groups:
+        label = group[0] if len(group) == 1 else f"{group[0]}..{group[-1]}"
+        out.update({name: label for name in group})
+    return out
+
+
+class FitRules(_Strict):
+    """N02.5: the 20261004 table's cells from every placed sample.
+
+    Each refusal is a declared constant, never one chosen from the size of a
+    residual; a cell that fails one is ``insufficient`` and names it.
+    """
+
+    #: The revision whose table and axes the proposal is written on.
+    target_revision: str = Field(min_length=1)
+    #: Samples whose throttle came from the unvalidated DID route: excluded
+    #: by default; the report shows the cell outcome both ways regardless.
+    include_unvalidated_throttle_route: bool
+    #: A cell needs this much summed bilinear weight over its samples ...
+    min_weighted_pairs: float = Field(gt=0)
+    #: ... from at least this many drives ...
+    min_drives: int = Field(ge=2)
+    #: ... each contributing at least this much weight to count as one.
+    min_drive_weight: float = Field(gt=0)
+    #: Each fitted cell is held toward its current value as if this many
+    #: weighted pairs sat on it asking for no change (a ridge), so a cell two
+    #: samples always share is still determined.
+    prior_pairs: float = Field(ge=0)
+    bootstrap: BootstrapRule
+    validation_folds: Literal["leave_one_drive_out"]
+    #: Held-out improvement: lower RMS than the current table, and more held
+    #: out drives improved than worsened.
+    verdict_rule: Literal["rms_and_drive_majority"]
+    #: Edges of the MAF bins the diagnostic fits instead of cells.
+    maf_bins_gs: list[float] = Field(min_length=3)
+    drive_unit: DriveUnit
+    model_comparison: ModelComparison
+    status: Literal["proposed", "frozen"]
+    evidence: str = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def _bins_rise(self) -> FitRules:
+        edges = self.maf_bins_gs
+        if any(b <= a for a, b in zip(edges, edges[1:], strict=False)):
+            raise ValueError("maf_bins_gs must rise strictly")
+        return self
+
+
+# -- N02.6: knock-on ------------------------------------------------------------------
+
+
+class BfsModelRule(_Strict):
+    """BFS where it was not read at the sample: ``BFS = c x K x FC/128 x
+    MAF/rpm`` (Tp = K Qa / Ne, steady state), ``c`` the median per-sample
+    ratio on samples where it was read."""
+
+    method: Literal["per_sample_ratio_median"]
+    min_pairs: int = Field(ge=1)
+    #: The ratio is also reported split at this rpm (idle / off idle) and by
+    #: throttle route, so a constant set by idle samples is seen to hold
+    #: where the knock-on is predicted.
+    idle_rpm_max: float = Field(gt=0)
+    evidence: str = Field(min_length=1)
+
+
+class KnockOnRules(_Strict):
+    """N02.6: what a proposed Fuel Comp change moves besides fuel."""
+
+    #: ``rom_map.yaml`` ids of the timing-trim axes (BFS-X columns, rpm rows).
+    timing_trim_load_axis: str = Field(min_length=1)
+    timing_trim_rpm_axis: str = Field(min_length=1)
+    #: The pedal-enrichment flag is never logged in history; it is taken as
+    #: clear (a set flag reads Target AFR's last column whatever X is).
+    pedal_flag_assumed: Literal[0]
+    bfs_model: BfsModelRule
+    limitations: list[str] = Field(min_length=1)
+    evidence: str = Field(min_length=1)
 
 
 class FuelCompDeclaration(_Strict):
@@ -281,6 +546,9 @@ class FuelCompDeclaration(_Strict):
     pairing: Pairing
     known_answer: KnownAnswerRule
     samples: SampleRules
+    droop: DroopRules
+    fit: FitRules
+    knock_on: KnockOnRules
 
     @model_validator(mode="after")
     def _specs_parse(self) -> FuelCompDeclaration:
@@ -293,6 +561,12 @@ class FuelCompDeclaration(_Strict):
             *self.samples.closed_loop.trims.values(),
             *self.samples.gates.coolant.sources,
             self.samples.gates.baro.channel,
+            self.samples.context.maf,
+            self.samples.context.bfs,
+            self.droop.pressure_channel,
+            self.droop.fault_channel,
+            self.droop.maf_channel,
+            self.droop.rpm_channel,
         ]
         for spec in specs:
             parse_spec(spec)
@@ -790,13 +1064,26 @@ def load_catalog(dids_path: Path = DIDS_YAML) -> DidMap:
 
 __all__ = [
     "FUEL_COMP_FILE",
+    "BfsModelRule",
+    "BootstrapRule",
     "ClosedPositionEstimate",
+    "DelayBracket",
+    "DroopKnownAnswer",
+    "DroopModelRule",
+    "DroopReference",
+    "DriveUnit",
+    "DroopRules",
+    "FitRules",
     "FuelCompDeclaration",
     "FuelCompInputError",
+    "KnockOnRules",
     "KnownAnswerResult",
     "KnownAnswerVariant",
+    "ModelComparison",
     "Pairing",
     "RoutePairing",
+    "SampleContext",
+    "assign_drives",
     "did_raw_counts",
     "estimate_closed_position",
     "known_answer",

@@ -178,8 +178,9 @@ pairing:
       acquired within tens of milliseconds on stored acquisition clocks;
       lambda_delivery.yaml's acquisition evidence measures target-to-lambda
       separation at median 0.093-0.104 s, p95 0.130-0.142 s. 250 ms admits
-      one batch's skew and no more. Its redesign (the rpm row as an interval
-      over the B06 delay bracket) is pending.
+      one batch's skew and no more. rpm and throttle are placed as intervals
+      over the B06 delay bracket (samples.open_loop.delay_bracket), whose
+      bounding reads use this separation.
 
 known_answer:
   session: '_capture-ram-study-2026-10-04T204557'
@@ -254,11 +255,24 @@ samples:
       restated. The lookback covers a settling STFT after an enrichment
       event; the LTFT is slow by design and is not gated.
   open_loop:
-    # lambda_delivery.yaml commanded sources, in preference order. Only
-    # enrichment rows count here, where PID 0x44 is valid and equals the RAM
-    # final target on every steady pair (7/7, 10/10, 3/3, lambda_delivery.yaml);
-    # it is polled about four times as often on the tuning captures.
-    commanded_preference: [mode01_pid_0x44, ram_final_target]
+    # lambda_delivery.yaml commanded sources, in preference order; a session
+    # uses the first one it captured. The RAM final target first (orchestrator,
+    # 2026-10-05): it is the commanded phi word itself. PID 0x44 is that word
+    # scaled by the A/F feedback target (below), and is used only where the
+    # session has no RAM target, with its caveat carried into the report.
+    commanded_preference: [ram_final_target, mode01_pid_0x44]
+    # Required for every preferred source that is not the commanded word
+    # itself; the report prints each beside its sample count.
+    source_caveats:
+      mode01_pid_0x44: >-
+        PID 0x44 = phi word 0xFFFF26BE x 0xFFFF46AC / 3675, where 46AC copies
+        the A/F feedback target 0xFFFF46B2 (orchestrator firmware finding,
+        2026-10-05). It equals the commanded phi only while 46B2 = 7350 (14.7
+        AFR); 46B2 is not logged in history, so a PID 0x44 sample's target is
+        phi only under that assumption. On logged data 2,437 idle reads of
+        PID 0x44 = 0.871 have injector pulses that match phi = 1.0. The earlier
+        equality with the RAM target (7/7, 10/10, 3/3 steady enrichment pairs,
+        lambda_delivery.yaml) may hold only where 46B2 = 7350.
     measured_source: ecm_lambda_pid_0x24
     # Bank 2 (PID 0x28, declared in lambda_delivery.yaml 2026-10-04): judged
     # against the same B06 target rows; the error is the bank mean where both
@@ -266,18 +280,45 @@ samples:
     bank2_measured_source: ecm_lambda_pid_0x28
     open_loop_codes: [4]
     fuel_status_max_age_s: 5.0
-    # The dwell is the enrichment transport-delay bracket's upper end (0.5 s,
-    # lambda_delivery.yaml): within it rpm may move at most a quarter of Fuel
-    # Comp's 400 rpm row spacing, so the cell that set the fuel is the cell
-    # the sample is placed on whatever the true delay. A WOT pull climbs
-    # hundreds of rpm per second, so most of a pull fails this: placing a
-    # pull needs the rpm row as an interval over the delay bracket, which is
-    # not built.
-    steady:
-      dwell_s: 0.5
-      min_samples: 2
-      rpm_max_span: 100.0
-      throttle_max_span_counts: 8
+    # N02.5 redesign (orchestrator-approved 2026-10-05): no steadiness gate.
+    # The fuel a lambda read measures was set somewhere in the B06 enrichment
+    # transport-delay bracket before it, so rpm and throttle are intervals
+    # over that span and the cell is ambiguous when they read more than one
+    # pair of rows or columns (src/analysis/fuel_comp_samples.py). The old
+    # 0.5 s / 100 rpm gate rejected most of every WOT pull, which climbs
+    # hundreds of rpm per second; the interval places what it can and marks
+    # the rest ambiguous instead of tightening or relaxing a threshold.
+    delay_bracket:
+      # lambda_delivery.yaml enrichment transport_delays[ram_final_target]:
+      # frozen 0.10 s, bracket 0.0-0.5 s (per-pair sign test). The PID 0x44
+      # route pairs at 0 s (its batch shares PID 0x24), but exhaust transport
+      # is the same physics whichever target is read, so its bracket bounds
+      # when the fuel was set.
+      delay_source: ram_final_target
+      # One DID 0x120F poll period plus its jitter: on the tuning captures
+      # PID 0x0C is read every 0.25 s (p10-p90 0.23-0.28) and DID 0x120F
+      # every 0.5 s (p10-p90 0.48-0.53 and 0.48-0.59; 2026-09-21T223734,
+      # 2026-09-23T142926). Set from the cadence, not from any residual.
+      max_read_gap_s: 0.6
+      assumption: >-
+        rpm and throttle move monotonically between two consecutive reads
+        at most 0.6 s apart, so the hull of the reads from the last one at
+        or before the bracket's start to the first at or after its end holds
+        every value inside it. A lift and re-apply inside one poll gap would
+        escape it; B06's fuel-cut and target-transient states catch a lift
+        that cuts fuel or moves the target.
+      status: proposed
+      evidence: >-
+        The lambda read at t measures fuel injected d before it, d in the
+        bracket [0.0, 0.5] s no candidate inside which the data can tell
+        apart (lambda_delivery.yaml note). A hull with a longer gap, or with
+        no read on one side of the span, is unpaired, named "(delay
+        bracket)". The first version bounded the span with reads within the
+        0.25 s pairing separation of each end instead; at a 0.25 s and 0.5 s
+        cadence a bracket end falls between reads, so the nearest read is up
+        to one poll gap away, and that rule refused, by construction and
+        whatever their steadiness, all 78 of the enrichment samples the old
+        steadiness gate had placed on the four tuning captures it was run on.
     status: proposed
     evidence: >-
       Open-loop error is B06's residual 100 x (lambda_measured /
@@ -300,3 +341,206 @@ samples:
         The load byte has no baro input, so the same cell at altitude is a
         different air charge. Home is about 80 kPa; trips reach 63 kPa.
         Baro is polled every 4-16 s and moves only with altitude.
+  # Carried per sample for N02.4-N02.6, never gated on: paired one-to-one like
+  # rpm within the route's separation, NaN when no read is that close.
+  context:
+    maf: 'obd:MAF'
+    # BFS, raw counts (DID 0x1208 = 0xFFFF103A, ECM_AIR_CHARGE in the catalog).
+    bfs: 'did:0x1208'
+    evidence: >-
+      PID 0x10 is the ECM's MAF airflow in g/s, the quantity the droop model
+      (N02.4) is fitted against and the MAF-bin diagnostic (N02.5) bins on.
+      DID 0x1208 is the BFS word (data/dids.yaml, P02.14), which a Fuel Comp
+      edit scales (docs/ecu-firmware-analysis.md, "how BFS is formed"); the
+      knock-on prediction (N02.6) starts from it.
+
+# N02.4 -- fuel-supply droop, separated from the air-model error.
+droop:
+  pressure_channel: 'sensor:FUEL_PRESSURE'
+  fault_channel: 'sensor:FUEL_PRESSURE_FAULT'
+  maf_channel: 'obd:MAF'
+  rpm_channel: 'obd:RPM'
+  running_rpm_min: 400.0
+  rpm_max_age_s: 0.6
+  # The 100 Hz trace carries aliased rail pulsation (0.12-0.38 psi rms
+  # running), so a per-sample pressure is a mean over >= 0.5 s: +-0.25 s with
+  # at least 30 of the ~50 reads, and no FUEL_PRESSURE_FAULT row inside it,
+  # centred on the sample's acquisition time. Sensor rows carry the stored
+  # clock (wall clock at arrival, millisecond-order latency; no floor in
+  # src/signals/pairing.py), which a 0.5 s window does not resolve.
+  window_half_width_s: 0.25
+  min_window_reads: 30
+  kpa_per_psi: 6.894757
+  flow_law: sqrt_gauge_pressure
+  reference:
+    method: drive_low_flow_median
+    maf_max_gs: 5.0
+    min_reads: 30
+    # One reference per drive, drives as fit.drive_unit declares them.
+    evidence: >-
+      The first-drive analysis's low-flow band (MAF 0-5 g/s, engine running):
+      pressure there moved only 51.0 -> 50.7 psi cold to warm over a drive,
+      so each drive is its own reference and a pump or gauge offset between
+      drives cancels. The drive is fit.drive_unit's: a Pi reboot split the
+      first pressure drive into 2026-10-04T190056 (no low-flow read of its
+      own) and 194342, 1.2 min apart, and the pooled drive gives both one
+      reference.
+  model:
+    form: quadratic_through_origin
+    min_pairs: 200
+    min_drives: 2
+    evidence: >-
+      The first drive's droop steepens with airflow (-0.015 psi per g/s
+      overall, about -0.022 above 50 g/s), so a straight line would
+      understate it at high flow; the quadratic is the smallest form that can
+      steepen and is zero at the reference by construction. Fitted on every
+      engine-running MAF read of every drive that logged pressure and formed
+      a reference, one pair per read; applied only inside the MAF range it
+      was fitted on (outside it the droop is none, named).
+  known_answer:
+    sessions: ['2026-10-04T190056', '2026-10-04T194342']
+    maf_band_gs: [100.0, 118.0]
+    expected_psi: -1.9
+    # About three standard errors of a median of 7-8 window means at the
+    # 0.15-0.18 psi per-window residual the first-drive analysis measured.
+    tolerance_psi: 0.25
+    # The recorded figure rests on 8 reads in the band; fewer than 5 is not a
+    # reproduction.
+    min_pairs: 5
+    source: >-
+      data/analyses/2026-10-04-fuel-pressure-first-drive.md, finding 1:
+      median 48.87 psi at 100-118 g/s (8 pairs) against 50.79 psi at 0-5 g/s,
+      -1.9 psi "at 107 g/s".
+  limitations:
+    - >-
+      Rail-to-manifold pressure difference is not modelled. Injector flow
+      follows the square root of the pressure across the injector, which is
+      rail minus manifold; this vehicle has no MAP sensor, so the droop is
+      computed on rail gauge pressure alone. Manifold vacuum raises the
+      pressure across the injector at idle and cruise and falls toward zero
+      at full throttle; whatever part of that the ECM does not compensate is
+      left in the remainder.
+    - >-
+      The analog output reads a constant +1.8 psi above the gauge face, which
+      of the two is right is unresolved (usb_adc_sensors.yaml offset 0). On a
+      ratio of two readings 51 psi apart from zero it moves the flow factor
+      by under 0.1 % at the drops seen.
+    - >-
+      Rail pressure was logged only from 2026-10-04 (six sessions and the
+      ram-study capture, all ZS44A-20260920). Every earlier sample's droop is
+      modelled from those drives: it assumes the pump of August and
+      September drooped as it did on October 4.
+  status: proposed
+  evidence: >-
+    The fuel pump is being replaced (supercharger build), so the part of the
+    fuelling error that a falling rail explains belongs to the pump, and the
+    remainder is what a Fuel Comp edit should own. Decomposition is
+    multiplicative: (1 + error) = (1 + droop error) x (1 + remainder), with
+    droop error = sqrt(P_ref / P) - 1 (positive = lean, as the error is).
+
+# N02.5 -- per-cell proposal on the target revision's table and axes.
+fit:
+  target_revision: ZS44A-20261004
+  include_unvalidated_throttle_route: false
+  min_weighted_pairs: 10.0
+  min_drives: 2
+  min_drive_weight: 1.0
+  prior_pairs: 1.0
+  bootstrap:
+    resamples: 500
+    seed: 20261005
+    interval_pct: [2.5, 97.5]
+  validation_folds: leave_one_drive_out
+  verdict_rule: rms_and_drive_majority
+  maf_bins_gs: [0.0, 5.0, 10.0, 15.0, 20.0, 30.0, 40.0, 60.0, 80.0, 100.0, 130.0, 250.0]
+  # Used by the cell refusals (min_drives, min_drive_weight), the bootstrap
+  # and the held-out folds alike, and by droop's per-drive reference.
+  drive_unit:
+    method: session_gap
+    max_gap_minutes: 5.0
+    evidence: >-
+      Sessions split one outing whenever a capture starts or stops or the Pi
+      reboots. Over the 112 sessions from 2026-08-03 (spans from the parquet
+      footers' timestamp statistics, 2026-10-07) the gaps between consecutive
+      sessions are <= 2.7 min (Pi reboots 1.2 and 1.7 min; capture splits 0
+      to 0.6 min, often overlapping) or >= 11.6 min (11.6, 12.3, 13.2, 39.8,
+      55.1 min, then hours), with nothing between. 5 min sits in that empty
+      band, so a cell's "two drives" are never two halves of one outing (the
+      first fit counted 2026-09-20T223745, 225007 and 225927 as three).
+  # Every model pair in the held-out comparison (current table, global
+  # factor, MAF bins, cells) is judged this way; a difference the drives
+  # cannot resolve is a tie, and a tie is never awarded to either side.
+  model_comparison:
+    method: paired_drive_bootstrap
+    resamples: 2000
+    confidence: 0.95
+    seed: 20261007
+    evidence: >-
+      The held-out residuals are correlated within a drive (one trim read per
+      second of one outing), so the unit of evidence is the drive: resample
+      held-out drives with replacement and recompute each model's pooled
+      held-out MSE; one model beats another only when it is lower in at least
+      95 % of resamples. The first diagnostic compared bare RMS with ">=",
+      which awarded ties and a 0.15-point difference to the MAF bins without
+      asking whether the drives resolved it, and never asked whether a single
+      global factor did as well (it did better).
+  status: proposed
+  evidence: >-
+    Set before any fit was run. A closed-loop sample is one trim read per
+    second, so 10 weighted pairs is about ten seconds of steady operation on
+    a cell, and two drives is the least that can show a cell's correction is
+    not one drive's condition; a drive counts toward a cell only with at
+    least one whole weighted pair on it. The prior of one weighted pair at
+    the current value keeps a cell that two samples always share determined
+    and is about a tenth of the minimum evidence. The MAF bins are the
+    first-drive analysis's bands, extended to the corpus's range. Required
+    factor per sample: FC_applied x (1 + remainder) x K_logged / K_now, with
+    FC_applied the firmware lookup (src/decode/ecm_lookup.py) on the table
+    and axes in force when it was logged.
+
+# N02.6 -- what a proposed change moves besides fuel. Target AFR is read
+# through target_phi_twin.yaml and the shared kernel; nothing here restates it.
+knock_on:
+  timing_trim_load_axis: timing_trim_load_axis
+  timing_trim_rpm_axis: timing_trim_rpm_axis
+  pedal_flag_assumed: 0
+  bfs_model:
+    method: per_sample_ratio_median
+    min_pairs: 20
+    # Warm idle on this engine is 700-800 rpm; the eligible pairs are mostly
+    # idle DID-route samples, so the split shows whether c holds off idle.
+    idle_rpm_max: 1000.0
+    evidence: >-
+      Tp = K x Qa / Ne and BFS = Tp x FC / 128 at steady state (firmware doc,
+      "how BFS is formed"), so BFS / (K x FC/128 x MAF/rpm) is one constant
+      wherever the sample is steady. It is estimated as the median of that
+      per-sample ratio over every eligible sample where DID 0x1208 was read
+      (never a ratio of aggregates; FC at the sample's nominal byte, so a
+      sample refused from the cell fit still counts) and reported with its
+      spread; BFS read at the sample is always preferred, and every
+      prediction says which it used.
+  limitations:
+    - >-
+      BFS's rpm ceiling (table D8B3) is not read: a sample near it would gain
+      less BFS than the Fuel Comp ratio says.
+    - >-
+      Steady state only: the manifold-filling filter and the transient term
+      w105A are ignored, as the gates intend.
+    - >-
+      Target AFR's rpm input is the word 0xFFFF11D8 and timing's is too; the
+      prediction uses PID 0x0C's 0xFFFF1210 (both engine speed at 12.5 rpm
+      per count), which agree at steady rpm.
+    - >-
+      Timing trim A and B share their axes, so the column shift is the same
+      for both; B is in force while the HI DET latch (0xFFFF283F bit 6) is
+      set and A otherwise (rom_map.yaml timing_trim_a), and that latch is not
+      logged in history, so which table's cells the shift moves between is
+      not predicted.
+    - >-
+      The pedal-enrichment flag is taken as clear: with it set, Target AFR
+      reads its last column whatever X is, and no X shift moves the command.
+  evidence: >-
+    Fuel Comp is inside BFS, so a cell change moves BFS by the Fuel Comp
+    ratio, the Target AFR X byte (X = min(255, BFS x 128 / Load Point
+    Scaler)), and the timing-trim BFS-X column (axis 0xCC83), exactly as K
+    does (docs/ecu-firmware-analysis.md; restore prediction addendum).
