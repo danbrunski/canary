@@ -56,7 +56,10 @@ A foreign claim outranks our own; claims may carry a TTL, and
 is listen-only and never affected. A third holder, ``rom_backup`` (W08.7), is
 CANary's own flash read: it claims the session so the poll loop pauses, and
 transmits as that holder (``send(..., holder="rom_backup")``) only while its
-claim is the only one.
+claim is the only one. ``memory_verify`` (D03.38) does the same for the RAM
+known-answer verifier: its reads enter 0xC0 and, for a Mode 01 relation, exit
+to 0x81 every sample, which would cut across the poll loop's own session
+cycling if both transmitted at once.
 
 **An armed passive survives a daemon restart (D03.30).** On 2026-09-24 the
 operator had a scan tool connected with passive armed (TTL 1800 s); a deploy
@@ -143,8 +146,8 @@ def passive_state_path(config: CanaryConfig) -> Path:
     return config.daemon.trip_state.parent / PASSIVE_STATE_FILENAME
 
 
-EcmSessionHolder = Literal["kline", "foreign", "rom_backup"]
-EcmSessionOwner = Literal["can_diagnostics", "kline", "foreign", "rom_backup"]
+EcmSessionHolder = Literal["kline", "foreign", "rom_backup", "memory_verify"]
+EcmSessionOwner = Literal["can_diagnostics", "kline", "foreign", "rom_backup", "memory_verify"]
 #: Holder -> ``time.monotonic()`` expiry, or ``None`` for "until released".
 _claims: dict[str, float | None] = {}
 
@@ -192,6 +195,8 @@ def _owner_locked() -> EcmSessionOwner:
         return "kline"
     if "rom_backup" in _claims:
         return "rom_backup"
+    if "memory_verify" in _claims:
+        return "memory_verify"
     return "can_diagnostics"
 
 
@@ -299,7 +304,7 @@ def reset_ecm_session_claims(*, now: float | None = None) -> None:
     """Drop every claim and the last foreign tester heard (test and
     validation-harness setup)."""
     global _foreign_tester
-    for holder in ("foreign", "kline", "rom_backup"):
+    for holder in ("foreign", "kline", "rom_backup", "memory_verify"):
         release_ecm_session(holder, now=now)
     with _lock:
         _foreign_tester = None

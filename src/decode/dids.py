@@ -28,6 +28,11 @@ import yaml
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from src.decode import slices
+from src.decode.memory_relations import (
+    FlagEquivalenceRelation,
+    MemoryArithmeticRelation,
+    MemoryRelation,
+)
 from src.decode.slices import ByteSlice, LinearScale, PlausibleRange
 from src.paths import DIDS_YAML
 
@@ -353,6 +358,12 @@ class MemoryChannel(ByteSlice, LinearScale, PlausibleRange, _Strict):
     sentinel_meaning: str | None = None
     #: How to prove this address still holds this quantity after a reflash.
     known_answer: MemoryKnownAnswer | None = None
+    #: Relations to other RAM, to a bit pattern, or to a Mode 01 PID
+    #: (:mod:`src.decode.memory_relations`) -- for the channels no DID
+    #: mirrors. A relation re-verifies every channel it reads, so a channel
+    #: can be checkable through a relation declared on another one; ask
+    #: :func:`memory_checks` rather than reading this list.
+    relations: list[MemoryRelation] = Field(default_factory=list)
     #: Set when ``verified_tune_revision`` was stamped WITHOUT a known-answer
     #: check, with the operator's reason. "Verified" and "carried across a
     #: flash on an argument" are different facts, and a stamp that hides the
@@ -392,6 +403,20 @@ class MemoryChannel(ByteSlice, LinearScale, PlausibleRange, _Strict):
             byte_length=self.byte_length,
             signed=self.signed,
         )
+        for relation in self.relations:
+            if isinstance(relation, MemoryArithmeticRelation) and self.name in relation.operands:
+                raise ValueError(
+                    f"{self.name}: relation {relation.label} names its own channel as an "
+                    "operand; a word compared with itself always agrees"
+                )
+            if (
+                isinstance(relation, FlagEquivalenceRelation)
+                and self.name not in relation.channels()
+            ):
+                raise ValueError(
+                    f"{self.name}: relation {relation.label} never reads {self.name}, so "
+                    "it cannot vouch for this address; declare it on a channel it tests"
+                )
         return self
 
     def raw_from(self, data: bytes) -> int | None:
@@ -509,6 +534,68 @@ def check_known_answer(channel: MemoryChannel, word: int, did_raw: int) -> bool:
     raise ValueError(f"unhandled known-answer relation {known.relation!r}")
 
 
+def relation_channel_names(owner: MemoryChannel, relation: MemoryRelation) -> tuple[str, ...]:
+    """Every memory channel `relation` (declared on `owner`) reads, owner first."""
+    return tuple(dict.fromkeys((owner.name, *relation.channels())))
+
+
+def memory_checks(
+    channel: MemoryChannel, catalog: Sequence[MemoryChannel]
+) -> list[tuple[MemoryChannel, MemoryRelation]]:
+    """Every declared relation in `catalog` that reads `channel`.
+
+    A relation verifies each channel it reads, not only the one it is
+    declared on: ``0x1252 = trunc(0x124E/2) + trunc(0x1250/2)`` would fail if
+    any of the three moved. So whether a channel is checkable is a question
+    about the catalog, never about the channel's own entry.
+    """
+    return [
+        (owner, relation)
+        for owner in catalog
+        for relation in owner.relations
+        if channel.name in relation_channel_names(owner, relation)
+    ]
+
+
+def is_memory_checkable(channel: MemoryChannel, catalog: Sequence[MemoryChannel]) -> bool:
+    """Whether anything can re-verify `channel`: a DID known answer or a relation."""
+    return channel.known_answer is not None or bool(memory_checks(channel, catalog))
+
+
+def _window_key(channel: MemoryChannel) -> str:
+    return channel.window or f"\x00{channel.name}"
+
+
+def relation_reads(
+    subject: MemoryChannel,
+    owner: MemoryChannel,
+    relation: MemoryRelation,
+    by_name: Mapping[str, MemoryChannel],
+) -> list[tuple[int, int]]:
+    """The service-0x23 reads (address, length) one sample of a check takes.
+
+    Channels sharing a window come back in one reply, as the collector reads
+    them. The read holding `subject` is widened by the subject's width on
+    both sides, so the same reply also carries the neighbouring bytes the
+    relation must fail on. The subject's read comes first.
+    """
+    groups: dict[str, list[MemoryChannel]] = {}
+    for name in relation_channel_names(owner, relation):
+        channel = by_name[name]
+        groups.setdefault(_window_key(channel), []).append(channel)
+    reads: list[tuple[int, int]] = []
+    subject_key = _window_key(subject)
+    for key in [subject_key, *(k for k in groups if k != subject_key)]:
+        members = groups[key]
+        start = min(c.address for c in members)
+        end = max(c.address + c.length for c in members)
+        if key == subject_key:
+            start = min(start, subject.address - subject.byte_length)
+            end = max(end, subject.address + subject.length + subject.byte_length)
+        reads.append((start, end - start))
+    return reads
+
+
 class DidMap(_Strict):
     """Top-level dids.yaml document."""
 
@@ -560,7 +647,65 @@ class DidMap(_Strict):
                 f"memory channel names collide with existing channels: {sorted(set(clashes))}"
             )
         self._check_windows()
+        self._check_relations()
         return self
+
+    def _check_relations(self) -> None:
+        """A relation must resolve, be readable, and say how much skew it allows.
+
+        Each refusal names the channel and relation. An unknown operand would
+        make the verifier skip the check (or crash on the truck); a
+        ``same_reply`` relation across windows would compare values read
+        milliseconds apart as if simultaneous; an over-wide read comes back
+        NRC 0x12 and loses the sample.
+        """
+        by_name = {c.name: c for c in self.memory}
+        ceiling = self.access.max_memory_read_length
+        for owner in self.memory:
+            for relation in owner.relations:
+                where = f"memory channel {owner.name}: relation {relation.label}"
+                names = relation_channel_names(owner, relation)
+                unknown = [name for name in names if name not in by_name]
+                if unknown:
+                    raise ValueError(f"{where} names unknown memory channel(s) {unknown}")
+                windows = {_window_key(by_name[name]) for name in names}
+                if isinstance(relation, MemoryArithmeticRelation):
+                    shared = owner.window is not None and all(
+                        by_name[name].window == owner.window for name in relation.operands
+                    )
+                    if relation.read == "same_reply" and not shared:
+                        raise ValueError(
+                            f"{where} is declared same_reply, but its operands are not all "
+                            f"in {owner.name}'s window ({owner.window!r}), so they come back "
+                            "in different replies; declare cross_read with a min_agreement"
+                        )
+                    if relation.read == "cross_read" and shared:
+                        raise ValueError(
+                            f"{where} is declared cross_read, but every operand shares the "
+                            f"{owner.window!r} window and comes back in one reply; declare "
+                            "same_reply"
+                        )
+                elif (
+                    isinstance(relation, FlagEquivalenceRelation)
+                    and len(windows) > 1
+                    and "min_agreement" not in relation.model_fields_set
+                ):
+                    raise ValueError(
+                        f"{where} reads {len(windows)} separate windows, so it must state "
+                        "min_agreement: the flags are read in different requests"
+                    )
+                if ceiling is None:
+                    raise ValueError(
+                        f"{where} needs access.max_memory_read_length recorded to plan its reads"
+                    )
+                for name in names:
+                    for address, length in relation_reads(by_name[name], owner, relation, by_name):
+                        if length > ceiling:
+                            raise ValueError(
+                                f"{where}: verifying {name} reads {length} bytes at "
+                                f"0x{address:08X} (neighbours included), over this ECM's "
+                                f"{ceiling}-byte service-0x23 ceiling"
+                            )
 
     def _check_windows(self) -> None:
         """A declared window must be readable, and must mean one thing.

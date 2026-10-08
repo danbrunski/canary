@@ -114,6 +114,35 @@ describe("CalibrationPage", () => {
     expect(screen.getByText("verified")).toHaveClass("text-ok");
   });
 
+  it("names the memory relations a channel without a DID check is verified by", async () => {
+    route({
+      "GET /control/memory-channels": {
+        ...MEMORY,
+        count: 2,
+        channels: [
+          {
+            ...MEMORY.channels[1],
+            name: "KNOCK_LEARN",
+            known_answer: null,
+            relations: [{ owner: "KNOCK_LEARN", kind: "memory" }],
+            state: "checked earlier",
+          },
+          {
+            ...MEMORY.channels[1],
+            name: "KNOCK_LEARN_LO",
+            known_answer: null,
+            relations: [{ owner: "KNOCK_LEARN", kind: "memory" }],
+            state: "checked earlier",
+          },
+        ],
+      },
+    });
+    render(<CalibrationPage token="t" status={STATUS} />);
+    expect(await screen.findByText("memory (via KNOCK_LEARN)")).toBeInTheDocument();
+    expect(screen.getByText("memory")).toBeInTheDocument();
+    expect(screen.queryByText("No known-answer relation")).not.toBeInTheDocument();
+  });
+
   it("re-verifies without recording, then shows each verdict", async () => {
     route();
     render(<CalibrationPage token="t" status={STATUS} />);

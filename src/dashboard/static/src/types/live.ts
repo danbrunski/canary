@@ -178,7 +178,7 @@ export interface PassiveGateStatus {
   suppressed_frames: number;
   ttl_remaining_seconds: number | null;
   /** Who holds the ECM's diagnostic session right now. */
-  ecm_session_owner: "can_diagnostics" | "kline" | "foreign" | "rom_backup";
+  ecm_session_owner: "can_diagnostics" | "kline" | "foreign" | "rom_backup" | "memory_verify";
   /** Holder → seconds left on its claim (null: no expiry). */
   ecm_session_claims: Record<string, number | null>;
   tx_suppressed: boolean;

@@ -13,7 +13,13 @@ import yaml
 from src.atomic_write import atomic_write_text
 from src.collection import tuning_profile
 from src.config import CanaryConfig
-from src.decode.dids import DidMap, MemoryChannel, load_did_map
+from src.decode.dids import (
+    DidMap,
+    MemoryChannel,
+    is_memory_checkable,
+    load_did_map,
+    memory_checks,
+)
 from src.vehicle.profiles import (
     active_registry,
     active_registry_path,
@@ -111,10 +117,14 @@ def calibration_payload(config: CanaryConfig) -> dict[str, Any]:
     }
 
 
-def memory_channel_state(channel: MemoryChannel, running_revision: str | None) -> str:
+def memory_channel_state(
+    channel: MemoryChannel, running_revision: str | None, *, checkable: bool
+) -> str:
+    """``checkable`` is :func:`is_memory_checkable` against the whole catalog:
+    a relation declared on another channel can be this one's only check."""
     if channel.revision_carried_reason:
         return "carried"
-    if channel.known_answer is None:
+    if not checkable:
         return "unverifiable"
     if running_revision is not None and channel.verified_tune_revision == running_revision:
         return "verified"
@@ -143,7 +153,14 @@ def memory_channels_payload(config: CanaryConfig, source: Path) -> dict[str, Any
                 "known_answer": None
                 if channel.known_answer is None
                 else channel.known_answer.model_dump(mode="json"),
-                "state": memory_channel_state(channel, revision),
+                # Every relation that reads this channel, wherever declared.
+                "relations": [
+                    {"owner": owner.name, **relation.model_dump(mode="json")}
+                    for owner, relation in memory_checks(channel, did_map.memory)
+                ],
+                "state": memory_channel_state(
+                    channel, revision, checkable=is_memory_checkable(channel, did_map.memory)
+                ),
             }
         )
     return {"running_revision": revision, "channels": channels, "count": len(channels)}
@@ -208,9 +225,11 @@ def _read_verify_results(config: CanaryConfig) -> dict[str, dict[str, str]]:
 def memory_verify_summary(config: CanaryConfig, source: Path) -> dict[str, int]:
     """Catalogued channels by their last known-answer verify: passed/failed/never ran.
 
-    ``unverifiable`` channels declare no check; they count as neither passed
-    nor failed, and are reported on their own so "never ran" means exactly
-    that.
+    ``unverifiable`` channels either have no check (no DID known answer and
+    no relation reads them) or last verified ``unverifiable`` (a relation
+    held without discriminating, or the bus refused the read). They count as
+    neither passed nor failed, and are reported on their own so "never ran"
+    means exactly that.
     """
     did_map = load_did_map(active_memory_path(config, source))
     results = _read_verify_results(config)
@@ -222,7 +241,7 @@ def memory_verify_summary(config: CanaryConfig, source: Path) -> dict[str, int]:
             counts["passed"] += 1
         elif outcome == "fail":
             counts["failed"] += 1
-        elif outcome == "unverifiable" or channel.known_answer is None:
+        elif outcome == "unverifiable" or not is_memory_checkable(channel, did_map.memory):
             counts["unverifiable"] += 1
         else:
             counts["never_ran"] += 1

@@ -317,7 +317,16 @@ export interface MemoryChannel {
   verified_tune_revision: string;
   revision_carried_reason: string | null;
   known_answer: { relation: string; did: number; notes?: string | null } | null;
+  /** Memory relations that read this channel (D03.38), wherever declared. */
+  relations?: MemoryRelation[];
   state: MemoryState;
+}
+
+/** A declared memory relation; `owner` is the channel it is declared on. */
+export interface MemoryRelation {
+  owner: string;
+  kind: "memory" | "flag_equivalence" | "invariant" | "mode01_pid";
+  notes?: string | null;
 }
 
 export interface FlashRecord {

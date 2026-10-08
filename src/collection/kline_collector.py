@@ -183,6 +183,21 @@ def _observe_for_capture(
             capture_lifetime.observe(capture_key(entry), now)
 
 
+#: CANary's own holders that take the ECM's diagnostic session outright
+#: (``tx_gate``): the ECU flash read (W08.7) and the RAM known-answer verifier
+#: (D03.38). The K-line reader yields the ECM to either.
+_ECM_EXCLUSIVE_HOLDERS: tuple[tx_gate.EcmSessionHolder, ...] = ("rom_backup", "memory_verify")
+
+
+def _holder_words(holder: str) -> str:
+    return "the RAM verifier" if holder == "memory_verify" else "the ECU backup"
+
+
+def _ecm_exclusive_holder() -> tx_gate.EcmSessionHolder | None:
+    """Which of :data:`_ECM_EXCLUSIVE_HOLDERS` holds the ECM, if any."""
+    return next((h for h in _ECM_EXCLUSIVE_HOLDERS if tx_gate.claim_held(h)), None)
+
+
 class KlineCollector:
     def __init__(
         self,
@@ -250,17 +265,19 @@ class KlineCollector:
             )
             return None
         self._said.discard("foreign-wait")
-        if tx_gate.claim_held("rom_backup") and self._targets_ecm(entries):
+        holder = _ecm_exclusive_holder()
+        if holder is not None and self._targets_ecm(entries):
             # W08.7: the ECM's one diagnostic session is shared by CAN and
-            # K-line, and the flash read holds it. Other modules (ABS, SRS) do
-            # not share it and are not held up.
+            # K-line, and the flash read (or the RAM verifier, D03.38) holds
+            # it. Other modules (ABS, SRS) do not share it and are not held up.
             self._say_once(
-                "rom-backup-wait",
-                "K-line requested by the capture profile; the ECU backup holds the ECM "
-                "session, so it waits",
+                f"{holder}-wait",
+                f"K-line requested by the capture profile; {_holder_words(holder)} holds "
+                "the ECM session, so it waits",
             )
             return None
-        self._said.discard("rom-backup-wait")
+        for name in _ECM_EXCLUSIVE_HOLDERS:
+            self._said.discard(f"{name}-wait")
         return entries
 
     def _targets_ecm(self, entries: tuple[str, ...]) -> bool:
@@ -283,9 +300,10 @@ class KlineCollector:
 
     @staticmethod
     def _ecm_held_by_backup(address: int | None, profile: KlineProfile) -> bool:
-        """W08.7: ``address`` is the ECM and the ECU backup holds its session.
-        Only the ECM: its diagnostic session is the one CAN and K-line share."""
-        return address == profile.ecm_address and tx_gate.claim_held("rom_backup")
+        """W08.7: ``address`` is the ECM and the ECU backup (or the RAM
+        verifier, D03.38) holds its session. Only the ECM: its diagnostic
+        session is the one CAN and K-line share."""
+        return address == profile.ecm_address and _ecm_exclusive_holder() is not None
 
     @staticmethod
     def _line_is_theirs() -> bool:
@@ -467,10 +485,11 @@ class KlineCollector:
             return
         is_ecm = action.address == profile.ecm_address
         if self._ecm_held_by_backup(action.address, profile):
+            holder = _ecm_exclusive_holder() or "rom_backup"
             action.finish(
                 ok=False,
                 started=started,
-                detail="refused: the ECU backup holds the ECM session",
+                detail=f"refused: {_holder_words(holder)} holds the ECM session",
             )
             return
         MODULE_SESSIONS.claim(action.address, "kline")

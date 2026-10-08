@@ -1,5 +1,11 @@
 #!/usr/bin/env python3
-"""Re-verify catalogued RAM addresses against known-answer DID relations."""
+"""Re-verify catalogued RAM addresses against their known answers.
+
+A known answer is a Mode 22 DID relation (``known_answer``) or a declared
+memory relation (``relations``: other RAM, a bit pattern, or a Mode 01 PID
+read across a session exit). A relation counts only where it fails on the
+neighbouring bytes; see :mod:`src.decode.memory_relations`.
+"""
 
 from __future__ import annotations
 
@@ -68,15 +74,19 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(str(exc), file=sys.stderr)
         return PASSIVE_REFUSED_EXIT
     verdicts: list[ChannelVerdict] = []
+    access = did_map.access
     with open_client(args, passive) as client:
         for channel in channels:
             verdicts.append(
                 verify_channel(
                     client,
                     channel,
+                    catalog=did_map.memory,
                     samples=args.samples,
                     request_id=request_id,
                     session=session,
+                    exit_session=access.exit_session,
+                    exit_grace_seconds=access.exit_grace_seconds,
                 )
             )
     for verdict in verdicts:

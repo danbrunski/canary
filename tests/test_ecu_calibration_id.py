@@ -39,7 +39,7 @@ from src.control.tuning_readiness import (
     vehicle_state_entry,
 )
 from src.dashboard.status import build_status
-from src.decode.dids import DidAccess, load_did_map
+from src.decode.dids import DidAccess, is_memory_checkable, load_did_map
 from tests.capture_round_fakes import FakeClock, ScriptedEcu, install_clock, isotp_frames
 
 REPO = Path(__file__).resolve().parents[1]
@@ -450,7 +450,8 @@ def test_memory_channel_counts_come_from_the_last_verify(tmp_path: Path) -> None
     config = _config(tmp_path, None)
     dids = REPO / "data" / "dids.yaml"
     catalog = load_did_map(dids).memory
-    checkable = [c.name for c in catalog if c.known_answer is not None]
+    # A DID known answer or a declared relation (D03.38), wherever declared.
+    checkable = [c.name for c in catalog if is_memory_checkable(c, catalog)]
     assert len(checkable) >= 2, "fixture assumes the catalog has verifiable channels"
 
     before = memory_verify_summary(config, dids)

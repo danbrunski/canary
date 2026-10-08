@@ -277,3 +277,17 @@ async def test_an_ecm_function_is_refused_while_the_ecu_backup_holds_it() -> Non
     assert result.detail == "refused: the ECU backup holds the ECM session"
     assert transports == []  # not one byte, not even the transceiver
     assert tx_gate.snapshot()["ecm_session_claims"].keys() == {"rom_backup"}
+
+
+async def test_an_ecm_function_is_refused_while_the_ram_verifier_holds_it() -> None:
+    """D03.38: the RAM verifier holds the ECM's session the way the backup
+    does, so a K-line ECM function waits it out, named."""
+    tx_gate.claim_ecm_session("memory_verify", ttl_seconds=60.0)
+    actions = KlineActions()
+    transports: list[ClearingModule] = []
+    ecm = KlineAction(kind="clear_codes", module="ECM", address=0x10, request=b"\x14")
+    result = await _run_one(actions, _collector(actions, transports), ecm)
+    assert not result.ok
+    assert result.detail == "refused: the RAM verifier holds the ECM session"
+    assert transports == []
+    assert tx_gate.snapshot()["ecm_session_claims"].keys() == {"memory_verify"}

@@ -75,7 +75,8 @@ def memory_channels_entry(summary: dict[str, int] | None) -> dict[str, Any]:
     never = summary.get("never_ran", 0)
     detail = (
         f"{passed} passed, {failed} failed, {never} never verified, "
-        f"{summary.get('unverifiable', 0)} declare no check, of {total}"
+        f"{summary.get('unverifiable', 0)} unverifiable (no check, or one that "
+        f"could not discriminate), of {total}"
     )
     if total == 0:
         return readiness_entry(None, summary, "no memory channels catalogued")

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from src.decode.dids import MemoryChannel, MemoryKnownAnswer, load_did_map
+from src.decode.dids import MemoryChannel, MemoryKnownAnswer, is_memory_checkable, load_did_map
 from tools.verify_memory_channels import (
     ChannelVerdict,
     plan_restamp,
@@ -67,7 +67,7 @@ def _truthful(word: int) -> int:
 def test_address_that_still_holds_the_quantity_passes() -> None:
     ecu = _FakeEcu([0x4000, 0x4A80, 0x4380], _truthful)
 
-    verdict = verify_channel(ecu, _channel(), samples=3, request_id=0x7E0, session=0xC0)
+    verdict = verify_channel(ecu, _channel(), catalog=(), samples=3, request_id=0x7E0, session=0xC0)
 
     assert verdict.passed is True
     assert verdict.agreements == 3
@@ -78,7 +78,7 @@ def test_fuel_cut_still_satisfies_the_relation() -> None:
     """Word 0 and word 0x4000 both map to DID raw 64 — that is the clamp."""
     ecu = _FakeEcu([0x0000, 0x4000], _truthful)
 
-    verdict = verify_channel(ecu, _channel(), samples=2, request_id=0x7E0, session=0xC0)
+    verdict = verify_channel(ecu, _channel(), catalog=(), samples=2, request_id=0x7E0, session=0xC0)
 
     assert verdict.passed is True
     assert verdict.sentinels == 1
@@ -93,7 +93,7 @@ def test_moved_address_is_caught_even_while_decoding_plausibly() -> None:
     """
     ecu = _FakeEcu([0x4100, 0x4100], lambda _word: 70)
 
-    verdict = verify_channel(ecu, _channel(), samples=2, request_id=0x7E0, session=0xC0)
+    verdict = verify_channel(ecu, _channel(), catalog=(), samples=2, request_id=0x7E0, session=0xC0)
 
     assert verdict.outcome == "fail"
     assert "probably moved" in verdict.reason
@@ -104,6 +104,7 @@ def test_channel_without_a_declared_check_is_skipped_not_failed() -> None:
     verdict = verify_channel(
         _FakeEcu([0x4000], _truthful),
         _channel(known_answer=None),
+        catalog=(),
         samples=1,
         request_id=0x7E0,
         session=0xC0,
@@ -114,14 +115,29 @@ def test_channel_without_a_declared_check_is_skipped_not_failed() -> None:
     assert "plausibility alone" in verdict.reason
 
 
-def test_refused_session_fails_rather_than_reporting_agreement() -> None:
+def test_refused_session_is_unverifiable_not_agreement_and_not_a_fail() -> None:
+    """A refused session is the bus, not the address: it never reports
+    agreement, and never records the channel as moved (D03.38 review)."""
     ecu = _FakeEcu([0x4000], _truthful)
     ecu.enter_diagnostic_session = lambda subfunction, *, request_id=None: False  # type: ignore[method-assign]
 
-    verdict = verify_channel(ecu, _channel(), samples=1, request_id=0x7E0, session=0xC0)
+    verdict = verify_channel(ecu, _channel(), catalog=(), samples=1, request_id=0x7E0, session=0xC0)
 
     assert verdict.passed is False
-    assert "refused" in verdict.reason
+    assert verdict.outcome == "unverifiable"
+    assert "session_entry_refused" in verdict.reason
+
+
+def test_unanswered_reads_are_unverifiable_not_a_fail() -> None:
+    """The gate suppressing our frames (another tester took the ECM) leaves
+    every read empty: reads_unanswered, never "the address has moved"."""
+    ecu = _FakeEcu([0x4000], _truthful)
+    ecu.query_raw = lambda service, body, *, request_id=None: _Reply(b"")  # type: ignore[method-assign]
+
+    verdict = verify_channel(ecu, _channel(), catalog=(), samples=3, request_id=0x7E0, session=0xC0)
+
+    assert verdict.outcome == "unverifiable"
+    assert "reads_unanswered" in verdict.reason
 
 
 class _TimingEcu:
@@ -145,9 +161,11 @@ class _TimingEcu:
         return _Reply(bytes([self._did_for(self.last)]))
 
 
+_CATALOG_MEMORY = load_did_map(Path("data/dids.yaml")).memory
+
+
 def _final_timing() -> MemoryChannel:
-    memory = load_did_map(Path("data/dids.yaml")).memory
-    return next(c for c in memory if c.name == "ECM_IGNITION_TIMING_FINAL")
+    return next(c for c in _CATALOG_MEMORY if c.name == "ECM_IGNITION_TIMING_FINAL")
 
 
 def test_final_timing_passes_against_the_110_minus_did_encoding() -> None:
@@ -156,7 +174,9 @@ def test_final_timing_passes_against_the_110_minus_did_encoding() -> None:
     DID raw 115)."""
     ecu = _TimingEcu([20, 35, -5], lambda t: 110 - t)
 
-    verdict = verify_channel(ecu, _final_timing(), samples=3, request_id=0x7E0, session=0xC0)
+    verdict = verify_channel(
+        ecu, _final_timing(), catalog=_CATALOG_MEMORY, samples=3, request_id=0x7E0, session=0xC0
+    )
 
     assert verdict.passed is True
     assert verdict.agreements == 3
@@ -167,7 +187,9 @@ def test_final_timing_fails_when_the_byte_is_not_the_timing() -> None:
     so the relation can fail."""
     ecu = _TimingEcu([20, 35, -5], lambda t: 110 - t + 1)
 
-    verdict = verify_channel(ecu, _final_timing(), samples=3, request_id=0x7E0, session=0xC0)
+    verdict = verify_channel(
+        ecu, _final_timing(), catalog=_CATALOG_MEMORY, samples=3, request_id=0x7E0, session=0xC0
+    )
 
     assert verdict.outcome == "fail"
 
@@ -179,12 +201,20 @@ def _verdict(name: str, outcome: str) -> ChannelVerdict:
     return ChannelVerdict(name, outcome, "test")  # type: ignore[arg-type]
 
 
+def _synthetic_verdicts(channels: list[MemoryChannel]) -> list[ChannelVerdict]:
+    """Every checkable channel passes, the rest declare no check."""
+    return [
+        _verdict(c.name, "pass" if is_memory_checkable(c, channels) else "unverifiable")
+        for c in channels
+    ]
+
+
 def test_a_window_is_stamped_whole_or_not_at_all() -> None:
     """The first version stamped only members that passed, which wrote a
     mixed-calibration window the loader rejects — a catalog the daemon could
     not load, produced by the tool meant to keep the catalog honest."""
     channels = load_did_map(_CATALOG).memory
-    verdicts = [_verdict(c.name, "pass" if c.known_answer else "unverifiable") for c in channels]
+    verdicts = _synthetic_verdicts(channels)
 
     stamps, notes = plan_restamp(channels, verdicts, carry_reason=None)
 
@@ -192,10 +222,16 @@ def test_a_window_is_stamped_whole_or_not_at_all() -> None:
     assert "ECM_AIR_CHARGE_SLOT_103A" not in stamps
     assert "ECM_FUEL_TARGET_MAP_X_TRACE" not in stamps
     assert any("fuel_axis" in note and "cannot mix calibrations" in note for note in notes)
-    # fuel_target now also carries the knock retard bytes (2026-10-05), which
-    # have no DID to check against, so it too needs an explicit carry reason.
-    assert "ECM_TARGET_EQUIV_RATIO" not in stamps
-    assert any("fuel_target" in note and "ECM_KNOCK_RETARD_DEG" in note for note in notes)
+    # fuel_target's knock bytes have no DID, but since D03.38's relations
+    # (trunc_divide on 0x26D2, ordering on 0x26E6) every member has a check,
+    # so a passing read restamps the window without --carry-unverifiable.
+    assert {
+        "ECM_TARGET_EQUIV_RATIO",
+        "ECM_ENGINE_PERIOD",
+        "ECM_KNOCK_RETARD_DEG",
+        "ECM_KNOCK_RETARD_LIMIT",
+    } <= set(stamps)
+    assert not any("fuel_target" in note for note in notes)
     # spark is fully checkable, so it goes through whole.
     assert {"ECM_IGNITION_TIMING_RAM", "ECM_ENGINE_SPEED_RAM", "ECM_CAM_MAP_RPM_TRACE"} <= set(
         stamps
@@ -205,7 +241,7 @@ def test_a_window_is_stamped_whole_or_not_at_all() -> None:
 
 def test_carrying_an_unverifiable_channel_is_recorded_as_such() -> None:
     channels = load_did_map(_CATALOG).memory
-    verdicts = [_verdict(c.name, "pass" if c.known_answer else "unverifiable") for c in channels]
+    verdicts = _synthetic_verdicts(channels)
 
     stamps, _notes = plan_restamp(channels, verdicts, carry_reason="table-byte-only flash")
 
@@ -218,8 +254,8 @@ def test_a_failed_member_blocks_its_whole_window() -> None:
     verdicts = [
         _verdict(c.name, "fail" if c.name == "ECM_ENGINE_SPEED_RAM" else "pass")
         for c in channels
-        if c.known_answer
-    ] + [_verdict(c.name, "unverifiable") for c in channels if not c.known_answer]
+        if is_memory_checkable(c, channels)
+    ] + [_verdict(c.name, "unverifiable") for c in channels if not is_memory_checkable(c, channels)]
 
     stamps, notes = plan_restamp(channels, verdicts, carry_reason="x")
 
@@ -240,7 +276,7 @@ def test_restamping_the_real_catalog_keeps_every_comment_and_still_loads(
     copy.write_text(_CATALOG.read_text())
     comments_before = sum(1 for line in copy.read_text().splitlines() if "#" in line)
     channels = load_did_map(copy).memory
-    verdicts = [_verdict(c.name, "pass" if c.known_answer else "unverifiable") for c in channels]
+    verdicts = _synthetic_verdicts(channels)
     stamps, _notes = plan_restamp(channels, verdicts, carry_reason="table-byte-only flash")
 
     changed = restamp(copy, stamps, "ZS44A-20260920")
@@ -255,15 +291,25 @@ def test_restamping_the_real_catalog_keeps_every_comment_and_still_loads(
         and c.revision_carried_reason is None
         and stamps[c.name] is None
     }
-    assert unchanged == {"ECM_IGNITION_TIMING_FINAL"}
+    # Since D03.38's relations that is every checkable channel catalogued on
+    # this image: final timing (DID) and the relation-checked knock/lambda ones.
+    assert unchanged == {
+        c.name
+        for c in channels
+        if c.verified_tune_revision == "ZS44A-20260920"
+        and c.revision_carried_reason is None
+        and is_memory_checkable(c, channels)
+    }
+    assert {"ECM_IGNITION_TIMING_FINAL", "ECM_KNOCK_LEARN", "ECM_AF_LAMBDA_B1"} <= unchanged
     assert changed == len(channels) - len(unchanged)
     after = load_did_map(copy)  # must still load: no mixed windows
     assert {c.verified_tune_revision for c in after.memory} == {"ZS44A-20260920"}
     carried = {c.name for c in after.memory if c.revision_carried_reason}
     # Carried = no known answer to re-check: the two trace channels, the
     # firmware-located ones added 2026-10-04, and the knock / lambda-chain
-    # channels added 2026-10-05 (all hypothesized until a key-on read).
-    assert carried == {c.name for c in channels if c.known_answer is None}
+    # channels added 2026-10-05 that no relation reads (all hypothesized
+    # until a key-on read).
+    assert carried == {c.name for c in channels if not is_memory_checkable(c, channels)}
     assert {
         "ECM_FUEL_TARGET_MAP_X_TRACE",
         "ECM_THROTTLE_MAP_X_TRACE",
@@ -274,10 +320,13 @@ def test_restamping_the_real_catalog_keeps_every_comment_and_still_loads(
         "ECM_PEDAL_ENRICH_FLAGS",
         "ECM_KNOCK_TRIM_DIFF_FLAGS",
         "ECM_MAP_SELECT_INPUT",
-        "ECM_KNOCK_RETARD_DEG",
-        "ECM_AF_LAMBDA_B1",
+        "ECM_KNOCK_HIGHDET_METRIC",
+        "ECM_KS1_LEVEL",
+        "ECM_AF_FEEDBACK_TARGET_B1",
     } <= carried
     assert "ECM_IGNITION_TIMING_FINAL" not in carried  # it has a DID check
+    # D03.38's relations make these checkable without a DID.
+    assert not {"ECM_KNOCK_RETARD_DEG", "ECM_AF_LAMBDA_B1", "ECM_KS_FAULT_FLAGS"} & carried
     assert sum(1 for line in copy.read_text().splitlines() if "#" in line) == comments_before
     # and only the memory section moved: every DID entry is byte-identical
     assert copy.read_text().split("\nmemory:")[0] == _CATALOG.read_text().split("\nmemory:")[0]

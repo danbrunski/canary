@@ -173,7 +173,15 @@ export function CalibrationPage({
                       <td>
                         {channel.known_answer
                           ? `${channel.known_answer.relation} vs 0x${channel.known_answer.did.toString(16).toUpperCase()}`
-                          : "No known-answer relation"}
+                          : channel.relations?.length
+                            ? channel.relations
+                                .map((relation) =>
+                                  relation.owner === channel.name
+                                    ? relation.kind
+                                    : `${relation.kind} (via ${relation.owner})`,
+                                )
+                                .join(", ")
+                            : "No known-answer relation"}
                       </td>
                       <td
                         className={stateClass[channel.state]}

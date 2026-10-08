@@ -2645,31 +2645,157 @@ live here now, so the documents could be archived
     PID 0x44 reads are the target factor, they sit near 6,400 there and not at
     the 7350 the closed-loop check above expects (inferred).
   - [ ] **Key-on read (operator; reads only).** KOEO, warm idle and one light
-    pull, then `python -m tools.verify_memory_channels` for
-    `ECM_IGNITION_TIMING_FINAL` (the only one with a DID relation). Check by
-    hand, none of which the verifier can express: 0x1252 = trunc(0x124E/2) +
-    trunc(0x1250/2) exactly (same reply); 0x1254 ≤ 0 and 0x26D2 =
-    trunc(0x1254/256) (cross-read); −0x26D2 ≤ 0x26E6 (same reply); 0x2338 −
-    0x2332 = 0x274E (0x274E is uncatalogued); 0x13FE = 0xFB00 ⇔ 0x479D bit 7;
-    0x479D bit 7 = OR of item bytes 2 bit 0; 0x249B ∈ 0..6; 0x24A8 & 0xC0 = 0;
-    intensity > threshold ⇔ that index's 0x24A8 bit (cross-read); 0x28AE bit
-    5 = 1 under light load; 0x2CEF/0x2CF0 in 50..199; 0x283F bit 6 with 0x479D
-    bit 7 clear ⇒ 0x1400 ≥ 8192; 0x4722/4724 = PID 0x24/0x28 A,B (Mode 01 is
-    silent in session 0xC0, so across a session exit, per sample); 0x46B2 =
-    7350 in closed loop; 0x4CA4/4CA6 within ±500. A channel's confidence rises
+    pull, then `python -m tools.verify_memory_channels` over the knock and
+    lambda channels. It runs `ECM_IGNITION_TIMING_FINAL`'s DID relation and
+    every relation declared in the sub-item below (2026-10-08):
+    - sum of halves, 0x1252;
+    - trunc(0x1254/256) = 0x26D2, and 0x1254 ≤ 0;
+    - −0x26D2 ≤ 0x26E6;
+    - 0xFB00 ⇔ 0x479D bit 7, and bit 7 ⇔ the OR of the item bits;
+    - 0x249B in 0..6, and 0x24A8 & 0xC0 = 0;
+    - 0x4722/4724 against PID 0x24/0x28 across a session exit;
+    - 0x4CA4/4CA6 within ±500.
+
+    Its `unverifiable` verdicts name why: unexercised, held beside the
+    address, or the bus refused. The fallback flags need a read where they
+    change state before they can verify. Check by hand only what the verifier
+    cannot express:
+    - 0x2338 − 0x2332 = 0x274E (0x274E is uncatalogued);
+    - intensity > threshold ⇔ that index's 0x24A8 bit (cross-read);
+    - 0x28AE bit 5 = 1 under light load;
+    - 0x2CEF/0x2CF0 in 50..199;
+    - 0x283F bit 6 with 0x479D bit 7 clear ⇒ 0x1400 ≥ 8192. Note whether
+      bit 6 stays latched after 0x1400 falls;
+    - 0x46B2 = 7350 in closed loop, and 0x46AC = 0x46B2.
+
+    Also read the measured λ agreement and the 0x26D2 cross-read agreement,
+    to set the provisional tolerances. A channel's confidence rises
     only after its check passes. Read 0x283F early: 0x2842 bit 2 is the knock
     task's lagged copy of HI DET, and it read 0x04 on every 2026-10-04 read,
     which suggests timing trim B (High Det) ran the whole drive (inferred;
     other routines also write 0x2842). **Capture profile only after a key-on read
     passes:** none of these is in any profile
     (`test_new_channels_are_code_verified_and_not_yet_in_any_profile`).
-  - [ ] **Verifier relations not built** (`MemoryKnownAnswer` checks one word
-    against one DID): a same-reply memory-to-memory relation (sum of halves,
-    trunc-divide, ordering), a cross-read flag equivalence, a bit-mask
-    invariant, and a Mode 01 PID relation read across a session exit. Until
-    then those windows report unverifiable, and restamping `fuel_target`
-    (which now carries two unverifiable knock bytes) needs
-    `--carry-unverifiable`.
+  - [x] **Verifier relations built (2026-10-08).** Before this,
+    `MemoryKnownAnswer` checked one word against one DID only. A
+    `MemoryChannel` now carries `relations:`, a discriminated union in
+    `src/decode/memory_relations.py`. The relation kinds:
+    - `memory`: `sum_of_halves` / `trunc_divide` / `ordering`, with
+      `read: same_reply | cross_read`. `trunc` rounds toward zero.
+    - `flag_equivalence`: `when` ⇔/⇒ `then`, `then_combine: any|all`.
+    - `invariant`: a bit-mask `mask`/`equals`, or a range `min`/`max`.
+    - `mode01_pid`: a per-sample ratio `linear|reciprocal`, with
+      `pid_saturation`, `relative_tolerance` and `min_agreement` all required.
+
+    `verify_channel` (now `catalog=` required, plus `exit_session`/grace)
+    reads each relation's channels one window per reply. A Mode 01 relation
+    exits the session (0x81), waits the access block's grace, reads the PID
+    and re-enters 0xC0. A relation verifies **every channel it reads**
+    (`memory_checks`, `is_memory_checkable`). It counts as a pass only if
+    three things hold:
+    - it agrees on at least `min_agreement` of the samples;
+    - it **falls below that on both neighbouring slices**, which the widened
+      read carries;
+    - it was **exercised**, which depends on the kind:
+      - value kinds: the compared value (the result for sum and divide, the
+        bound for ordering) was non-zero on an agreeing sample;
+      - invariants: at least 2 distinct raw values. I chose this stricter
+        rule; it is satisfiable on real data where the byte moves, such as
+        0x249B and an active retard;
+      - `iff`: the condition was seen true and false;
+      - `implies`: the condition was seen true.
+
+    Otherwise the verdict is `unverifiable`, never `pass`. A `fail` means
+    bytes were read and disagreed. Bus silence is `unverifiable` with a
+    name: `session_entry_refused`, `reads_unanswered`,
+    `session_exit_refused`, `pid_unanswered`, `session_reentry_refused`.
+
+    The dashboard route claims the ECM session as `memory_verify` (`tx_gate`,
+    the ROM-backup pattern), which pauses the poll loop's Mode 01/22/RAM
+    polling. The K-line reader yields the ECM to it as it does to the backup.
+    The route works as follows:
+    - it lets in-flight traffic settle for 0.5 s;
+    - it enters 0xC0 with one retry, else 503 `session_entry_refused`;
+    - it renews the claim before every sample;
+    - it stops with a 409 naming the claimant as soon as `memory_verify` is
+      not the only claim, recording nothing;
+    - it refuses by name while passive is armed, another holder owns the
+      session, or another verify runs (a non-blocking lock plus
+      `claim_held`).
+
+    The `DidMap` loader refuses, naming the channel and relation:
+    - an unknown operand;
+    - `same_reply` across windows, or `cross_read` within one window;
+    - a cross-window relation with no stated `min_agreement`;
+    - a read over the 63-byte ceiling, neighbours included;
+    - a self-operand;
+    - a flag relation that never reads its own channel.
+
+    Declared in `data/dids.yaml` (D03.38 hand checks):
+    - `ECM_KNOCK_LEARN`: sum of halves.
+    - `ECM_KNOCK_RETARD`: ≤ 0.
+    - `ECM_KNOCK_RETARD_DEG`: `trunc(0x1254/256)`, cross-read, 0.90.
+    - `ECM_KNOCK_RETARD_LIMIT`: ≥ −0x26D2.
+    - `ECM_KNOCK_RETARD_TARGET`: = −1280 ⇔ 0x479D bit 7.
+    - `ECM_KS_FAULT_FLAGS`: bit 7 ⇔ OR of item byte 2 bit 0.
+    - `ECM_KNOCK_WINDOW_INDEX`: 0..6.
+    - `ECM_KNOCK_FLAGS_BY_INDEX`: `& 0xC0 == 0`.
+    - `ECM_AF_LAMBDA_B1`/`B2`: PID 0x24/0x28 A,B = word·16384/3675, 3 %,
+      0.70 (both provisional).
+    - `ECM_AF_LEARNED_OFFSET_B1`/`B2`: ±500.
+
+    Every `fuel_target` member is now checkable, so a passing read restamps
+    it without `--carry-unverifiable`
+    (`test_every_fuel_target_member_is_checkable_so_a_restamp_needs_no_carry`,
+    `test_a_window_is_stamped_whole_or_not_at_all`). Whether they *pass* is
+    data: the knock bytes discriminate only while a retard is applied (the
+    −5° fallback counts). At rest they read `unverifiable`, zero matching
+    zero.
+
+    **Still without a relation, with the reason recorded in each entry's
+    notes:**
+    - 0x2338 − 0x2332 = 0x274E: 0x274E is uncatalogued.
+    - intensity > threshold ⇔ 0x24A8 bit: windows 0xA8 apart, both
+      rewritten every firing window.
+    - 0x28AE bit 5 under light load: needs an operating-point gate.
+    - 0x2CEF/2CF0 50..199: a real fault would read as a moved address.
+    - 0x283F bit 6 ∧ ¬0x479D bit 7 ⇒ 0x1400 ≥ 8192: the latch may outlive
+      the metric.
+    - 0x46B2 = 7350: a constant, and 0x46B4 beside it is 7350 too.
+    - 0x46AC = 0x46B2: constant against constant.
+
+    So these channels stay uncheckable:
+    - `knock_chain`'s other three;
+    - `ECM_KNOCK_HIGHDET_METRIC`, `ECM_HIGH_DET_FLAGS`;
+    - `ECM_KNOCK_EVENT_COUNT`, thresholds, intensities;
+    - `knock_flags`, `ECM_KS1/2_LEVEL`;
+    - the `lambda_target` trio, `ECM_AF_BARO_GAIN_K`;
+    - the injector channels.
+
+    **Fail-on-neighbour evidence** is in `tests/test_memory_relations.py`
+    (65, including the 2026-10-08 adversarial reviews' cases: constant
+    subject, truncate-to-zero, never-set flag, bus refusal, route claim,
+    foreign claim mid-verify, per-sample renewal, entry retry, concurrent
+    verify). `test_kline_collector.py`/`test_kline_actions.py` show the
+    K-line yield. Each kind passes on a synthetic RAM image, its neighbours'
+    agreements are below the samples, and a moved or floored word fails.
+    The weak cases come back `unverifiable`: ordering with no retard,
+    flag-clear ⇔, banks moving together, a range beside a small counter,
+    and zero = trunc(0/256). Stored 2026-10-04 ram-study slices (committed
+    fixtures):
+    - same-reply `trunc(0x11D8/4)` = 0x11CA held 180/180, and 0/180 at
+      0x11C9, 0x11CB and 0x11D6;
+    - 0x26AE against Mode 01 rpm across the session exits, as a 5 % ratio:
+      154/174 pairs, 0/174 at 0x26B0, and a 0.5 % tolerance fails. 0x26AC
+      was never stored, so that check reads honestly as `unverifiable`.
+
+    Tests: `test_verify_memory_channels.py`, `test_memory_channels.py`,
+    `test_memory_catalog_knock_lambda.py`, `test_memory_catalog_injector.py`,
+    `test_memory_relations.py`, `test_layering.py`, `test_ecu_calibration_id.py`,
+    `test_operational_calibration_scope.py`, `test_tune_registry_merge.py`
+    (260 passed). `CalibrationPage.test.tsx` passed 9; it names a relation
+    "via" its owner. The tolerances and the pass rates on the truck remain
+    the key-on read's job.
   - [ ] **Open.** Per-read cadence: the fault reads want about 1 Hz, but every
     memory read rides one poll tier and a profile cannot weight memory
     channels.
