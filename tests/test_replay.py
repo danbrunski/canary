@@ -236,24 +236,29 @@ def test_a_fast_pass_never_holds_the_event_loop(
     assert chunks >= 2  # the prefetch path is exercised
     expected = [(epoch, f["value"]) for epoch, f in _iter_rows(sdir, skip_sources=frozenset())]
     real_read = replay_mod._read_chunk
+    import threading
+
+    loop_thread = threading.get_ident()
+    read_threads: list[int] = []
 
     def slow_read(chunk: Path, skip: frozenset[str]) -> object:
+        read_threads.append(threading.get_ident())
         _time.sleep(slow_read_s)
         return real_read(chunk, skip)  # type: ignore[arg-type]
 
     monkeypatch.setattr(replay_mod, "_read_chunk", slow_read)
     stats = ReplayEmissionStats()
 
-    async def run() -> tuple[float, list[float], list[TelemetryRecord]]:
+    async def run() -> tuple[float, list[int], list[TelemetryRecord]]:
         done = asyncio.Event()
-        gaps: list[float] = []
+        per_turn: list[int] = []
 
         async def heartbeat() -> None:
-            last = _time.monotonic()
+            last = stats.rows_emitted
             while not done.is_set():
                 await asyncio.sleep(0)
-                now = _time.monotonic()
-                gaps.append(now - last)
+                now = stats.rows_emitted
+                per_turn.append(now - last)
                 last = now
 
         beat = asyncio.create_task(heartbeat())
@@ -273,28 +278,22 @@ def test_a_fast_pass_never_holds_the_event_loop(
         wall = _time.monotonic() - started
         done.set()
         await beat
-        return wall, gaps, [queue.get_nowait() for _ in range(queue.qsize())]
+        return wall, per_turn, [queue.get_nowait() for _ in range(queue.qsize())]
 
-    # Collector pauses are not replay blocking: a gen-2 collection stops every
-    # thread, and under a full pytest heap took 0.16-0.25 s (54 ms standalone),
-    # which is the same size as what this test looks for. Measure without it.
-    import gc
-
-    gc.collect()
-    gc.disable()
-    try:
-        wall, gaps, got = asyncio.run(run())
-    finally:
-        gc.enable()
+    wall, per_turn, got = asyncio.run(run())
     assert stats.rows_emitted == 20_000 and stats.passes == 1
     assert stats.pass_reconciled() is True
     assert [r.value for r in got] == [value for _, value in expected]
     # The pass is long enough that holding the loop throughout would show.
     assert wall > 0.5, wall
-    # Before the fix the whole pass was one gap, plus one per chunk read and
-    # one for the probes. Now no gap comes near the 0.3 s read.
-    assert max(gaps) < min(0.15, wall / 3), (max(gaps), wall)
-    assert len(gaps) > 50
+    # Judged by rows per heartbeat turn, not wall time, so machine load cannot
+    # decide it (T01.22: a 0.23 s preemption gap failed a 0.15 s bound at load
+    # average 13). Before the fix the whole pass was one turn.
+    assert len(per_turn) > 50
+    assert max(per_turn) < 20_000 // 10, max(per_turn)
+    # The chunk reads run off the event loop's thread, so even a slow read
+    # cannot stall it.
+    assert read_threads and loop_thread not in read_threads
 
 
 def test_rows_already_due_yield_the_loop_every_few_milliseconds(tmp_path: Path) -> None:

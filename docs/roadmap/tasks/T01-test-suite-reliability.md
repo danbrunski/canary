@@ -705,3 +705,16 @@ measurement in hand.
     heartbeat turns -- more than 10 turns, none carrying 20,000 of the
     60,000 rows -- so load cannot decide it. With `_MAX_HOLD_SECONDS = 1e9`
     it fails (`assert 1 > 10`: the whole chunk in one turn).
+
+- [x] **T01.22 `tests/test_replay.py::test_a_fast_pass_never_holds_the_event_loop[0.0]`
+  judged the replay's yield by wall time.**
+  - **Seen** 2026-10-08 in the push gate for `2eefc0d` (the 0x1134 rename),
+    parallel run at load average ~13: longest heartbeat gap 0.229 s against a
+    0.15 s bound. Passed serially (FLAKY UNDER LOAD).
+  - **Fixed** the T01.21 way: the heartbeat records rows emitted per loop
+    turn. More than 50 turns are required, none carrying 2,000 of the 20,000
+    rows. The off-loop read is checked by thread identity: every `_read_chunk`
+    call runs off the event loop's thread. The gc-disable workaround is gone,
+    because nothing is timed any more. Mutations: with `_MAX_HOLD_SECONDS =
+    1e9` it fails (`10000 < 2000`); with `asyncio.to_thread` run inline on the
+    loop it fails (`38 > 50`).
