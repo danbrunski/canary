@@ -36,6 +36,12 @@ A module defines either or both of:
   trained on them; the view's scale and unit are one evidence record of the
   DID's ``dids.yaml`` entry, resolved by
   :func:`src.preprocessing.channel_units.did_view_scale`.
+* ``DERIVED_CHANNEL_INPUTS`` / ``DERIVED_CHANNEL_OPTIONAL_INPUTS`` -- the
+  registry entries the declarations above produce for this vehicle, written
+  out as literals (B08.1). :mod:`src.signals.derived` refuses to import unless
+  they equal the entries it builds (:func:`literal_derived_inputs`), and the
+  artifact-lineage audit parses them at a build's revision without importing.
+  ``SIGNAL_INPUTS`` is already literal, so it is not repeated there.
 
 The derived-channel registry is module-level (trainability and capture-profile
 validation read it without a config in hand), so it is built from **every**
@@ -96,6 +102,31 @@ def signal_inputs(known_outputs: tuple[str, ...]) -> dict[str, InputGroups]:
     return {
         output: _merge(output, declared[output]) for output in known_outputs if output in declared
     }
+
+
+def literal_derived_inputs() -> dict[str, InputGroups]:
+    """Every vehicle's literal ``DERIVED_CHANNEL_INPUTS``, merged like
+    :func:`signal_inputs`: each group the union of the vehicles' alternatives,
+    in module-name order (B08.1)."""
+    declared: dict[str, list[InputGroups]] = {}
+    for module in vehicle_modules():
+        inputs: Mapping[str, InputGroups] = getattr(module, "DERIVED_CHANNEL_INPUTS", {})
+        for output, groups in inputs.items():
+            declared.setdefault(output, []).append(groups)
+    return {output: _merge(output, declarations) for output, declarations in declared.items()}
+
+
+def literal_derived_optional_inputs() -> dict[str, tuple[str, ...]]:
+    """Every vehicle's literal ``DERIVED_CHANNEL_OPTIONAL_INPUTS``, each the
+    union of the vehicles' columns in module-name order (B08.1)."""
+    merged: dict[str, dict[str, None]] = {}
+    for module in vehicle_modules():
+        inputs: Mapping[str, tuple[str, ...]] = getattr(
+            module, "DERIVED_CHANNEL_OPTIONAL_INPUTS", {}
+        )
+        for output, columns in inputs.items():
+            merged.setdefault(output, {}).update(dict.fromkeys(columns))
+    return {output: tuple(columns) for output, columns in merged.items()}
 
 
 def af_sensor_voltage_columns(bank: int) -> tuple[str, ...]:
@@ -256,6 +287,8 @@ __all__ = [
     "af_sensor_voltage_columns",
     "did_views",
     "load_axis_channels",
+    "literal_derived_inputs",
+    "literal_derived_optional_inputs",
     "load_axis_columns",
     "signal_inputs",
     "vehicle_modules",

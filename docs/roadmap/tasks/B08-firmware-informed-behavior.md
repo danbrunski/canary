@@ -157,8 +157,106 @@ extra independent votes.
   - **Remaining (operator):**
     - Decide how to supersede the two 2026-09-20 LSTM copies. They are
       local model state, outside git.
-    - Decide whether the unverifiable deployed manifests need their derived
-      definitions declared literally, so a future audit can trace them.
+    - [x] ~~Decide whether the unverifiable deployed manifests need their derived
+      definitions declared literally, so a future audit can trace them.~~
+      **Option (a) approved by the operator 2026-10-08, implemented 2026-10-08.**
+      - **Declared literally.** Every `DERIVED_CHANNEL_INPUTS` and
+        `DERIVED_CHANNEL_OPTIONAL_INPUTS` entry is now a literal: in
+        `src/signals/derived.py` (AFR error, trip/performance channels,
+        the seven committees and the two committee member transforms), in
+        `DerivedSignal(...)`, or in the vehicle module's `SIGNAL_INPUTS` and
+        new `DERIVED_CHANNEL_INPUTS` / `DERIVED_CHANNEL_OPTIONAL_INPUTS`
+        tables (`vehicle_signals/nissan_xterra_2008.py`: AFR_B1/B2,
+        AFR_CENSORED_B1/B2, both λ bank balances, BASE_FUEL_SCHEDULE,
+        TARGET_AFR; vehicle DIDs stay out of shared code, R05.4).
+        `derived.py` refuses to import (`DerivedDeclarationError`) when a
+        vehicle table or the committee entries differ from what the code
+        builds. `AFR_ERROR_B*` gained the `AFR_CENSORED_B*` group it reads.
+      - **Parser.** `parse_derived_sources` reads the derived module plus
+        `vehicle_signals/*.py` at the build revision (merged like
+        `vehicle_signals._merge`), and optional inputs too. The audit now
+        expands optional inputs as leaves and counts a changed optional set as
+        `definition_changed`.
+      - **Drift test** (`tests/test_derived_inputs_declared.py`, 43 tests).
+        - **What it runs.** The pipeline's derivation chain, on frames built
+          from each declaration: minimal group choices, optional inputs added
+          one at a time, and each required input removed.
+        - **What fails it.** A declared column that never changes the value. A
+          value that moves when the undeclared columns are added. Those
+          columns are every column a catalog or collector can produce: the
+          Mode 01 registry, `dids.yaml` DIDs and RAM channels, the bindings,
+          GPS, IMU, baro and the analog sensor. Each sweeps its catalogued
+          plausible or encoding range where one is stated, so rpm covers
+          0–7,000.
+        - **Parser check.** It must locate every registry entry on the
+          working tree, with the imported value.
+        - **Can-fail proofs:**
+          - `::test_an_undeclared_input_is_caught`: the S2 lambda dropped from
+            the fuel rate's optional inputs.
+          - `::test_a_declared_input_the_computation_ignores_is_caught`.
+          - `::test_a_missing_alternative_is_caught`: the A/F voltage fallback
+            dropped from AFR_B1.
+          - `::test_an_undeclared_read_of_any_catalogued_column_is_caught`:
+            the fuel rate made to read `obd:FUEL_LEVEL`. The verifier's
+            `obd:FUEL_TANK_LEVEL` is in no catalog, so no frame can carry it.
+          - `::test_an_undeclared_read_at_high_rpm_only_is_caught`: a read
+            gated on rpm > 5,000.
+        - **Tier.** Six of these measured ≥ 1.5 s serially (1.6–4.7 s on a
+          loaded box) and are listed in `tests/slow_tests.txt`: the three meta
+          tests above that plant a read, and the economy, fuel-rate and
+          power/torque families.
+        - **Blind spots. It does not prove every read is caught.**
+          - A read gated on a *joint* condition the independently swept
+            columns never meet together.
+          - Shaped channels (A/F voltage, base fuel schedule, narrowband O2,
+            PID 0x44, baro, GPS gates) do not sweep their full range.
+          - A read of a column no catalog names.
+          - Leaf comparison: a derived group whose leaves are already
+            declared, such as AFR error's censor flag, looks the same as no
+            group.
+          - Producibility: a channel passes if *any* frame produces it. That
+            is why D03.41 (AFR's voltage route needs baro) passes.
+      - **Behaviour changes** (none alters an existing channel's value or any
+        shipped profile's satisfaction):
+        - **Two new registry entries,** `derived:OBD_SPEED_ACCEL_G` and
+          `derived:GPS_SPEED_ACCEL_G`, absent at HEAD. Both are committee
+          member transforms. `committee_channel_reason` still refuses them as
+          features, and LON_ACCEL's declared leaves now include the speed
+          sources they are differentiated from.
+        - **Optional inputs are now expanded,** by both the lineage audit and
+          `residual_chain.dependency_resolver`. Dependency sets grow:
+          `derived:AFR_B1` resolves to the lambda PID, the A/F voltage DID
+          *and* `obd:BAROMETRIC_PRESSURE`, and `derived:TARGET_AFR` adds
+          `obd:COMMANDED_EQUIV_RATIO` (PID 0x44). A changed optional set at
+          build is now `definition_changed`. `tests/test_residual_chain.py`
+          passes unchanged.
+        - **`AFR_ERROR_B*` gained the `AFR_CENSORED_B*` group,** so
+          `resolved_dependencies(frame, "derived:AFR_ERROR_B*")` returns 3
+          entries instead of 2. Its only consumer is
+          `scripts/evaluate_behavior_models.py` `_input_resolution`, which
+          writes the list into the report's `derived_input_resolution`. A model
+          whose output is `AFR_ERROR_B*` would get a three-entry list per
+          session, the middle one naming the censor-flag column or `None`.
+          No served, prior or candidate behavior model targets `AFR_ERROR_B*`
+          today, and nothing parses the list, so no report changes now.
+      - **Audit re-run 2026-10-08** (same arguments, written outside the
+        repo): **84 artifacts, 7 affected / 65 unaffected / 12 unverifiable**
+        (was 83: 7 / 65 / 11). No common artifact changed verdict. The
+        artifact set itself changed: the 09-20 LSTM copies now sit at
+        `_superseded` paths (still affected), and a local copy of the deployed
+        09-24 LSTM at `models/nissan-xterra-2008/lstm_autoencoder` is the
+        twelfth unverifiable artifact.
+      - **The deployed builds stay unverifiable at their build revision.**
+        The literal declarations did not exist when they were built, so
+        `AFR_B1`, `AFR_CENSORED_B1`, `FUEL_RATE_LPH` and
+        `ESTIMATED_POWER_HP/TORQUE_NM` (and `INSTANT_ECONOMY_*` for the 09-24
+        builds) remain `definition_unlocated` there. That is correct.
+      - **Future builds are traceable.** All 11 earlier-unverifiable manifests
+        were audited counterfactually, with the working-tree parse as the
+        build-time definition. Every input resolved, and every one came out
+        `unaffected`. This shows the audit can trace a build made from this
+        tree. It does not verify the deployed models, which were computed with
+        their own build-time code.
     - B03 has no manifest-level mark, and producibility cannot see a decode
       change on a column that is still producible.
 

@@ -35,7 +35,7 @@ from src.columns import SESSION_COLUMN, TIMESTAMP_COLUMN, arrived_column, gap_co
 from src.config import VehicleParameters
 from src.decode.engineering import UnscaledDecodedChannelError, physical_series
 from src.signals import vehicle_signals
-from src.signals.committees import COMMITTEES
+from src.signals.committees import COMMITTEES, MEMBER_TRANSFORMS, committee_channel_reason
 
 if TYPE_CHECKING:
     # `src.signals.afr` imports `fuel_properties` from this module, so the
@@ -55,6 +55,7 @@ __all__ = [
     "MAX_INTEGRATION_DT_S",
     "VE_AMBIENT_CHANNEL",
     "VE_MANIFOLD_CHANNEL",
+    "DerivedDeclarationError",
     "FuelProperties",
     "TripSummary",
     "compute_anomaly_signals",
@@ -155,11 +156,55 @@ def _append_dependency_gap(
         frame[arrived_column(output)] = arrived & ~stale
 
 
+class DerivedDeclarationError(ValueError):
+    """A derived channel's literal input declaration disagrees with the inputs
+    its computation is built from (B08.1)."""
+
+
+def _require_literal(
+    what: str, built: Mapping[str, object], literal: Mapping[str, object], where: str
+) -> None:
+    """Refuse to import when ``literal`` (parsed by the lineage audit) is not
+    exactly ``built`` (what the computation uses), naming every difference."""
+    if dict(built) == dict(literal):
+        return
+    differences = [
+        f"{name}: built {built.get(name)!r}, declared {literal.get(name)!r}"
+        for name in sorted(set(built) | set(literal))
+        if built.get(name) != literal.get(name)
+    ]
+    raise DerivedDeclarationError(
+        f"{what} disagree with the literal declarations in {where} (B08.1: the "
+        "artifact-lineage audit parses the literal ones, so they must be exact): "
+        + "; ".join(differences)
+    )
+
+
+#: Measured AFR's optional input, built from the vehicle's declaration: B06.7,
+#: measured AFR from the A/F voltage needs the baro the ECM's gain is looked up
+#: on; from the lambda PID it does not, so it is optional.
+_VEHICLE_OPTIONAL_INPUTS: dict[str, tuple[str, ...]] = {
+    f"derived:AFR_{kind}B{bank}": vehicle_signals.af_sensor_baro_columns()
+    for bank in (1, 2)
+    for kind in ("", "CENSORED_")
+    if vehicle_signals.af_sensor_baro_columns()
+}
+_require_literal(
+    "the vehicle-built optional derived inputs",
+    _VEHICLE_OPTIONAL_INPUTS,
+    vehicle_signals.literal_derived_optional_inputs(),
+    "src.signals.vehicle_signals DERIVED_CHANNEL_OPTIONAL_INPUTS",
+)
+
 #: Columns a derived channel reads *when present* but does not need: the
 #: fuel-rate lambda / commanded-equivalence-ratio refinement of the MAF method
 #: and the speed-density IAT (25 degC when absent). Not part of the dependency
 #: groups (their absence never makes the channel unproducible), but they are
 #: inputs all the same, so :mod:`src.trainability` checks them too.
+#:
+#: B08.1 — every entry is a literal, here or in a vehicle module, so the
+#: artifact-lineage audit can parse it at a build's revision;
+#: ``tests/test_derived_inputs_declared.py`` proves each one is read.
 DERIVED_CHANNEL_OPTIONAL_INPUTS: dict[str, tuple[str, ...]] = {
     "derived:FUEL_RATE_LPH": (
         "obd:O2_WR_LAMBDA_S1",
@@ -171,13 +216,7 @@ DERIVED_CHANNEL_OPTIONAL_INPUTS: dict[str, tuple[str, ...]] = {
     # P02.15: the target map has no value while the ECM commands fuel cut
     # (commanded equivalence ratio exactly 0, src.signals.afr.fuel_cut_rows).
     "derived:TARGET_AFR": ("obd:COMMANDED_EQUIV_RATIO",),
-    # B06.7: measured AFR from the A/F voltage needs the baro the ECM's gain is
-    # looked up on; from the lambda PID it does not, so it is optional here.
-    **{
-        f"derived:AFR_{kind}B{bank}": vehicle_signals.af_sensor_baro_columns()
-        for bank in (1, 2)
-        for kind in ("", "CENSORED_")
-    },
+    **_VEHICLE_OPTIONAL_INPUTS,
 }
 
 #: B04.5 — manifold-referenced VE: measured air mass over the ideal-gas fill
@@ -955,24 +994,11 @@ ANOMALY_SIGNALS: tuple[DerivedSignal, ...] = (
 )
 
 
-#: Inputs each derived channel needs, as the ordered fallback groups
-#: :func:`_append_dependency_gap` consumes (one group = "any one of these").
-#: Declared here so callers that must reason about a derived channel without
-#: computing it — capture-profile validation resolving a `derived:` model
-#: input down to pollable channels — share one source of truth with the
-#: computation itself.
-#:
-#: H01.1 — it covers **every** ``derived:`` channel the feature pipeline and
-#: the live tick can emit (``tests/test_trainability.py`` featurizes a frame
-#: carrying every input and fails on an undeclared output), because it is
-#: also what makes a derived channel trainable: :mod:`src.trainability`
-#: admits one only when every input named here (and in
-#: :data:`DERIVED_CHANNEL_OPTIONAL_INPUTS`) is itself trainable, and treats an
-#: undeclared derived channel as not trainable. Declaring inputs is how a new
-#: derived channel becomes a feature.
-DERIVED_CHANNEL_INPUTS: dict[str, tuple[tuple[str, ...], ...]] = {
-    # --- compute_anomaly_signals: declared once, in ANOMALY_SIGNALS (R05.4) --
-    **{signal.name: signal.input_groups for signal in ANOMALY_SIGNALS},
+#: The registry entries whose inputs a vehicle names, built from its
+#: declarations in :mod:`src.signals.vehicle_signals` (R05.4: no manufacturer
+#: identifier sits in this module). Each vehicle module also writes them out
+#: literally, and the import refuses unless the two are equal (B08.1).
+_VEHICLE_INPUTS: dict[str, tuple[tuple[str, ...], ...]] = {
     # --- src.signals.afr.append_afr_channels ------------------------------
     # Measured AFR: the bank's wideband lambda PID, else the AF-sensor voltage
     # DID through the profile's transfer (only when a calibration is loaded).
@@ -1020,10 +1046,55 @@ DERIVED_CHANNEL_INPUTS: dict[str, tuple[tuple[str, ...], ...]] = {
         ("obd:RPM",),
         vehicle_signals.load_axis_columns("base_fuel_schedule"),
     ),
-    **{
-        f"derived:AFR_ERROR_B{bank}": ((f"derived:AFR_B{bank}",), ("derived:TARGET_AFR",))
-        for bank in (1, 2)
-    },
+}
+_require_literal(
+    "the vehicle-built derived inputs",
+    _VEHICLE_INPUTS,
+    vehicle_signals.literal_derived_inputs(),
+    "src.signals.vehicle_signals DERIVED_CHANNEL_INPUTS",
+)
+
+#: Inputs each derived channel needs, as the ordered fallback groups
+#: :func:`_append_dependency_gap` consumes (one group = "any one of these").
+#: Declared here so callers that must reason about a derived channel without
+#: computing it — capture-profile validation resolving a `derived:` model
+#: input down to pollable channels — share one source of truth with the
+#: computation itself.
+#:
+#: H01.1 — it covers **every** ``derived:`` channel the feature pipeline and
+#: the live tick can emit (``tests/test_trainability.py`` featurizes a frame
+#: carrying every input and fails on an undeclared output), because it is
+#: also what makes a derived channel trainable: :mod:`src.trainability`
+#: admits one only when every input named here (and in
+#: :data:`DERIVED_CHANNEL_OPTIONAL_INPUTS`) is itself trainable, and treats an
+#: undeclared derived channel as not trainable. Declaring inputs is how a new
+#: derived channel becomes a feature.
+#:
+#: B08.1 — every entry is **literal**, so the artifact-lineage audit can parse
+#: it at a build's git revision without importing that revision: a ``"..."``
+#: entry below, a ``DerivedSignal("...", ((...),), ...)`` in
+#: :data:`SHARED_ANOMALY_SIGNALS`, or a vehicle module's ``SIGNAL_INPUTS`` /
+#: ``DERIVED_CHANNEL_INPUTS``. Entries that restate a structure the code
+#: computes from (committees, vehicle declarations) are checked against it at
+#: import. ``tests/test_derived_inputs_declared.py`` runs every derivation with
+#: inputs removed and proves each declared input is read and nothing else is.
+DERIVED_CHANNEL_INPUTS: dict[str, tuple[tuple[str, ...], ...]] = {
+    # --- compute_anomaly_signals: declared once, in ANOMALY_SIGNALS (R05.4) --
+    **{signal.name: signal.input_groups for signal in ANOMALY_SIGNALS},
+    # --- vehicle-named inputs (afr.append_afr_channels, DID views) ----------
+    **_VEHICLE_INPUTS,
+    # AFR error is measured minus target, withheld where the measurement is
+    # censored (src.signals.afr.append_afr_channels reads the censor flag).
+    "derived:AFR_ERROR_B1": (
+        ("derived:AFR_B1",),
+        ("derived:AFR_CENSORED_B1",),
+        ("derived:TARGET_AFR",),
+    ),
+    "derived:AFR_ERROR_B2": (
+        ("derived:AFR_B2",),
+        ("derived:AFR_CENSORED_B2",),
+        ("derived:TARGET_AFR",),
+    ),
     # --- compute_instantaneous_channels: performance channels ----------------
     # Fuel rate has three alternative methods (fuel-rate PID; MAF; speed-density
     # from RPM and MAP), so its groups are the conjunctive form of "any one
@@ -1071,15 +1142,57 @@ DERIVED_CHANNEL_INPUTS: dict[str, tuple[tuple[str, ...], ...]] = {
     "derived:AVG_ECONOMY_L_PER_100KM": (("derived:FUEL_USED_L",), ("derived:TRIP_DISTANCE_KM",)),
     "derived:IDLE_TIME_S": (("obd:RPM", "decoded:ECM_RPM"), ("obd:SPEED",)),
     # --- src.signals.committees: divergence residuals -----------------------
-    # Any ``min_members`` of the members, on rows where every gate holds.
-    **{
-        committee.output: (
-            committee.members,
-            *((gate.channel,) for gate in committee.gates),
-        )
-        for committee in COMMITTEES
-    },
+    # Any ``min_members`` of the members, on rows where every gate holds
+    # (checked against COMMITTEES below).
+    "derived:SPEED_SOURCE_DIVERGENCE": (
+        ("obd:SPEED", "decoded:WHEEL_SPEED_6F7_A", "gps:speed"),
+        ("gps:num_satellites",),
+        ("gps:hdop",),
+    ),
+    "derived:LON_ACCEL_SOURCE_DIVERGENCE": (
+        ("imu:ACCEL_LON_MEAN", "derived:OBD_SPEED_ACCEL_G", "derived:GPS_SPEED_ACCEL_G"),
+    ),
+    "derived:HEADING_RATE_DIVERGENCE": (("derived:GPS_COURSE_RATE", "imu:GYRO_Z"),),
+    "derived:STATIONARY_CONFIRM_DIVERGENCE": (
+        ("obd:SPEED", "gps:speed", "derived:IMU_STILLNESS_SPEED_PROXY"),
+    ),
+    "derived:ALTITUDE_SOURCE_DIVERGENCE": (("gps:altitude", "baro:altitude"),),
+    "derived:BARO_PRESSURE_DIVERGENCE": (
+        ("baro:pressure", "obd:BAROMETRIC_PRESSURE", "derived:MAP_AT_IDLE_KPA"),
+    ),
+    "derived:VERTICAL_SPEED_DIVERGENCE": (
+        (
+            "derived:BARO_ALT_RATE",
+            "derived:GPS_VERTICAL_SPEED",
+            "derived:IMU_VERTICAL_ACCEL_INTEGRAL",
+        ),
+    ),
+    # Committee member transforms (append_committee_member_transforms): the
+    # first speed source with a value, differentiated (checked below).
+    "derived:OBD_SPEED_ACCEL_G": (
+        ("decoded:VEHICLE_SPEED_2D1", "decoded:WHEEL_SPEED_6F7_A", "obd:SPEED"),
+    ),
+    "derived:GPS_SPEED_ACCEL_G": (("gps:speed",),),
 }
+_require_literal(
+    "the sensor committees' members and gates",
+    {
+        **{
+            committee.output: (
+                committee.members,
+                *((gate.channel,) for gate in committee.gates),
+            )
+            for committee in COMMITTEES
+        },
+        **{output: (sources,) for output, sources in MEMBER_TRANSFORMS.items()},
+    },
+    {
+        name: groups
+        for name, groups in DERIVED_CHANNEL_INPUTS.items()
+        if committee_channel_reason(name) is not None
+    },
+    "src.signals.derived DERIVED_CHANNEL_INPUTS",
+)
 
 
 def compute_anomaly_signals(

@@ -798,6 +798,9 @@ class LineageContext:
     aliases: ObservationAliases
     #: The derived-channel inputs the code declares now (required groups).
     derived_inputs: Mapping[str, tuple[tuple[str, ...], ...]]
+    #: The inputs read when present (``DERIVED_CHANNEL_OPTIONAL_INPUTS``) now.
+    #: They change the value, so they are expanded and compared like groups.
+    derived_optional_inputs: Mapping[str, tuple[str, ...]]
     #: Build instant -> the derived definitions committed then (``None`` if
     #: no derived module existed). Expansion uses these, never today's.
     derived_at: Callable[[datetime], DerivedDefinitions | None]
@@ -836,6 +839,8 @@ def resolve_input(
             ]
         out: list[InputLineage] = []
         now = ctx.derived_inputs.get(channel)
+        optional = definitions.optional.get(channel, ()) if definitions is not None else ()
+        optional_now = tuple(ctx.derived_optional_inputs.get(channel, ()))
         if now is None:
             out.append(
                 InputLineage(
@@ -846,18 +851,21 @@ def resolve_input(
                     notes=(f"declared in {where}; no longer declared now",),
                 )
             )
-        elif tuple(map(tuple, now)) != groups:
+        elif tuple(map(tuple, now)) != groups or optional_now != optional:
             out.append(
                 InputLineage(
                     channel,
                     via,
                     "derived",
                     "definition_changed",
-                    notes=(f"inputs at build ({where}): {groups}; now: {now}",),
+                    notes=(
+                        f"inputs at build ({where}): {groups}, optional {optional}; "
+                        f"now: {now}, optional {optional_now}",
+                    ),
                 )
             )
-        for group in groups:
-            for member in group:
+        for members in (*groups, optional):
+            for member in members:
                 out.extend(
                     resolve_input(
                         member,
@@ -1621,6 +1629,9 @@ class DerivedDefinitions:
 
     source: str
     inputs: Mapping[str, tuple[tuple[str, ...], ...]]
+    #: Columns read when present (``DERIVED_CHANNEL_OPTIONAL_INPUTS``); a
+    #: channel with none declared reads none.
+    optional: Mapping[str, tuple[str, ...]]
 
 
 def _string_of(node: ast.AST, constants: Mapping[str, str]) -> str | None:
@@ -1654,18 +1665,7 @@ def _call_name(node: ast.Call) -> str:
     return ""
 
 
-def parse_derived_definitions(source: str) -> dict[str, tuple[tuple[str, ...], ...]]:
-    """Literal derived-channel input declarations in one revision of the source.
-
-    Three forms have existed, in order of authority: the
-    ``DERIVED_CHANNEL_INPUTS`` dict's literal entries, ``DerivedSignal(name,
-    groups, ...)`` registry entries (R05.4) and the older
-    ``_append_dependency_gap(out, name, *groups)`` calls. A channel declared
-    any other way (a comprehension, a vehicle module, local variables) is
-    absent from the result: *not located*, which callers must not read as
-    "no inputs".
-    """
-    tree = ast.parse(source)
+def _module_constants(tree: ast.Module) -> dict[str, str]:
     constants: dict[str, str] = {}
     for statement in tree.body:
         targets: list[ast.expr] = []
@@ -1679,25 +1679,72 @@ def parse_derived_definitions(source: str) -> dict[str, tuple[tuple[str, ...], .
             for target in targets:
                 if isinstance(target, ast.Name):
                     constants[target.id] = value.value
-    declared: dict[str, tuple[tuple[str, ...], ...]] = {}
-    registry: dict[str, tuple[tuple[str, ...], ...]] = {}
-    gaps: dict[str, tuple[tuple[str, ...], ...]] = {}
+    return constants
+
+
+def _literal_dicts(tree: ast.Module, name: str) -> Iterator[ast.Dict]:
+    """Every ``name = {...}`` / ``name: T = {...}`` dict assignment in ``tree``."""
     for node in ast.walk(tree):
         if isinstance(node, ast.Assign | ast.AnnAssign):
             target = node.targets[0] if isinstance(node, ast.Assign) else node.target
             if (
                 isinstance(target, ast.Name)
-                and target.id == "DERIVED_CHANNEL_INPUTS"
+                and target.id == name
                 and isinstance(node.value, ast.Dict)
             ):
-                for key, value in zip(node.value.keys, node.value.values, strict=True):
-                    name = None if key is None else _string_of(key, constants)
-                    if name is None or not isinstance(value, ast.Tuple):
-                        continue
-                    groups = _groups_of(value.elts, constants)
-                    if groups is not None:
-                        declared[name] = groups
-        elif isinstance(node, ast.Call):
+                yield node.value
+
+
+def _literal_groups(
+    tree: ast.Module, name: str, constants: Mapping[str, str]
+) -> dict[str, tuple[tuple[str, ...], ...]]:
+    """The literal ``{"derived:X": ((...), ...)}`` entries of dict ``name``."""
+    declared: dict[str, tuple[tuple[str, ...], ...]] = {}
+    for literal in _literal_dicts(tree, name):
+        for key, value in zip(literal.keys, literal.values, strict=True):
+            channel = None if key is None else _string_of(key, constants)
+            if channel is None or not isinstance(value, ast.Tuple):
+                continue
+            groups = _groups_of(value.elts, constants)
+            if groups is not None:
+                declared[channel] = groups
+    return declared
+
+
+def _literal_columns(
+    tree: ast.Module, name: str, constants: Mapping[str, str]
+) -> dict[str, tuple[str, ...]]:
+    """The literal ``{"derived:X": ("col", ...)}`` entries of dict ``name``."""
+    declared: dict[str, tuple[str, ...]] = {}
+    for literal in _literal_dicts(tree, name):
+        for key, value in zip(literal.keys, literal.values, strict=True):
+            channel = None if key is None else _string_of(key, constants)
+            if channel is None or not isinstance(value, ast.Tuple):
+                continue
+            columns = [_string_of(element, constants) for element in value.elts]
+            if columns and all(column is not None for column in columns):
+                declared[channel] = tuple(c for c in columns if c is not None)
+    return declared
+
+
+def parse_derived_definitions(source: str) -> dict[str, tuple[tuple[str, ...], ...]]:
+    """Literal derived-channel input declarations in one revision of the source.
+
+    Three forms have existed, in order of authority: the
+    ``DERIVED_CHANNEL_INPUTS`` dict's literal entries, ``DerivedSignal(name,
+    groups, ...)`` registry entries (R05.4) and the older
+    ``_append_dependency_gap(out, name, *groups)`` calls. A channel declared
+    any other way (a comprehension, a vehicle module, local variables) is
+    absent from the result: *not located*, which callers must not read as
+    "no inputs". :func:`parse_derived_sources` adds the vehicle modules.
+    """
+    tree = ast.parse(source)
+    constants = _module_constants(tree)
+    declared = _literal_groups(tree, "DERIVED_CHANNEL_INPUTS", constants)
+    registry: dict[str, tuple[tuple[str, ...], ...]] = {}
+    gaps: dict[str, tuple[tuple[str, ...], ...]] = {}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Call):
             called = _call_name(node)
             if called == "DerivedSignal" and len(node.args) >= 2:
                 name = _string_of(node.args[0], constants)
@@ -1711,6 +1758,71 @@ def parse_derived_definitions(source: str) -> dict[str, tuple[tuple[str, ...], .
                 if name is not None and groups is not None:
                     gaps.setdefault(name, groups)
     return {**gaps, **registry, **declared}
+
+
+def _merge_vehicle_groups(
+    declarations: Sequence[tuple[tuple[str, ...], ...]],
+) -> tuple[tuple[str, ...], ...] | None:
+    """``src.signals.vehicle_signals._merge``: per group, the union of every
+    vehicle's alternatives in module order. ``None`` (not located) when the
+    vehicles disagree on the number of groups, which that function refuses."""
+    if len({len(groups) for groups in declarations}) != 1:
+        return None
+    return tuple(
+        tuple(dict.fromkeys(column for groups in declarations for column in groups[index]))
+        for index in range(len(declarations[0]))
+    )
+
+
+def parse_derived_sources(
+    derived_source: str, vehicle_sources: Sequence[str] = ()
+) -> DerivedDefinitions:
+    """Every literal derived declaration in one revision: the derived module and
+    its vehicle modules (``vehicle_signals/<profile>.py``, in module-name order).
+
+    A vehicle module's ``SIGNAL_INPUTS`` and ``DERIVED_CHANNEL_INPUTS`` /
+    ``DERIVED_CHANNEL_OPTIONAL_INPUTS`` are merged across vehicles the way
+    ``src.signals.vehicle_signals`` merges them at import. The derived module's
+    own literal forms take precedence (B08.1 made the import refuse a vehicle
+    literal that disagrees with what the code builds).
+    """
+    tree = ast.parse(derived_source)
+    constants = _module_constants(tree)
+    vehicle_groups: dict[str, list[tuple[tuple[str, ...], ...]]] = {}
+    vehicle_optional: dict[str, dict[str, None]] = {}
+    for text in vehicle_sources:
+        vehicle_tree = ast.parse(text)
+        vehicle_constants = _module_constants(vehicle_tree)
+        for name in ("SIGNAL_INPUTS", "DERIVED_CHANNEL_INPUTS"):
+            for channel, groups in _literal_groups(vehicle_tree, name, vehicle_constants).items():
+                vehicle_groups.setdefault(channel, []).append(groups)
+        optional = _literal_columns(
+            vehicle_tree, "DERIVED_CHANNEL_OPTIONAL_INPUTS", vehicle_constants
+        )
+        for channel, columns in optional.items():
+            vehicle_optional.setdefault(channel, {}).update(dict.fromkeys(columns))
+    merged = {
+        channel: merged_groups
+        for channel, declarations in vehicle_groups.items()
+        if (merged_groups := _merge_vehicle_groups(declarations)) is not None
+    }
+    inputs = {**merged, **parse_derived_definitions(derived_source)}
+    optional = {
+        **{channel: tuple(columns) for channel, columns in vehicle_optional.items()},
+        **_literal_columns(tree, "DERIVED_CHANNEL_OPTIONAL_INPUTS", constants),
+    }
+    return DerivedDefinitions("", inputs, optional)
+
+
+def _vehicle_module_paths(repo: Path, rev: str, derived_path: str) -> list[str]:
+    """The vehicle modules beside ``derived_path`` at ``rev``, in name order."""
+    directory = f"{derived_path.rsplit('/', 1)[0]}/vehicle_signals/"
+    listing = _git(repo, "ls-tree", "--name-only", rev, directory)
+    return sorted(
+        path
+        for path in listing.splitlines()
+        if path.endswith(".py") and not path.endswith("/__init__.py")
+    )
 
 
 def derived_definitions_loader(
@@ -1728,7 +1840,13 @@ def derived_definitions_loader(
             for path in DERIVED_MODULE_PATHS:
                 text = _git_show(repo, rev, path)
                 if text is not None:
-                    found = DerivedDefinitions(f"{rev[:7]}:{path}", parse_derived_definitions(text))
+                    vehicles = [
+                        source
+                        for vehicle_path in _vehicle_module_paths(repo, rev, path)
+                        if (source := _git_show(repo, rev, vehicle_path)) is not None
+                    ]
+                    parsed = parse_derived_sources(text, vehicles)
+                    found = DerivedDefinitions(f"{rev[:7]}:{path}", parsed.inputs, parsed.optional)
                     break
             cache[rev] = found
         return cache[rev]

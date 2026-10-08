@@ -69,3 +69,38 @@ LOAD_AXIS_CHANNELS: tuple[LoadAxisChannel, ...] = (
         ),
     ),
 )
+
+#: B08.1 — the registry entries this vehicle's declarations above produce, written
+#: out literally. :mod:`src.signals.derived` builds those entries from the
+#: constants above and refuses to import unless they equal this table (merged
+#: across vehicles), so the two cannot drift. This table is what the
+#: artifact-lineage audit parses at a build's revision
+#: (:mod:`src.analysis.artifact_lineage`, never importing the module). Before it
+#: existed the deployed IF and LSTM read ``derived:AFR_B1`` from a comprehension
+#: the audit could not trace, so both were unverifiable.
+DERIVED_CHANNEL_INPUTS: Mapping[str, InputGroups] = {
+    # Measured AFR: the bank's wide-range lambda PID, else its A/F sensor
+    # voltage through the transfer (src.signals.afr.append_afr_channels).
+    "derived:AFR_B1": (("obd:O2_WR_LAMBDA_S1", "did:ECM_AF_SENSOR_V_B1"),),
+    "derived:AFR_CENSORED_B1": (("obd:O2_WR_LAMBDA_S1", "did:ECM_AF_SENSOR_V_B1"),),
+    "derived:AFR_B2": (("obd:O2_WR_LAMBDA_S5", "did:ECM_AF_SENSOR_V_B2"),),
+    "derived:AFR_CENSORED_B2": (("obd:O2_WR_LAMBDA_S5", "did:ECM_AF_SENSOR_V_B2"),),
+    "derived:LAMBDA_BANK_BALANCE_AF_VOLTAGE_BARO": (
+        ("did:ECM_AF_SENSOR_V_B1",),
+        ("did:ECM_AF_SENSOR_V_B2",),
+        ("obd:BAROMETRIC_PRESSURE",),
+    ),
+    "derived:LAMBDA_BANK_BALANCE_WIDEBAND": (("obd:O2_WR_LAMBDA_S1",), ("obd:O2_WR_LAMBDA_S5",)),
+    "derived:BASE_FUEL_SCHEDULE": (("did:ECM_AIR_CHARGE",),),
+    "derived:TARGET_AFR": (("obd:RPM",), ("derived:BASE_FUEL_SCHEDULE",)),
+}
+
+#: Inputs read only when present, literally, as above: the voltage route
+#: converts each row at the ECM's barometric gain (B06.7); the lambda route
+#: needs no baro.
+DERIVED_CHANNEL_OPTIONAL_INPUTS: Mapping[str, tuple[str, ...]] = {
+    "derived:AFR_B1": ("obd:BAROMETRIC_PRESSURE",),
+    "derived:AFR_CENSORED_B1": ("obd:BAROMETRIC_PRESSURE",),
+    "derived:AFR_B2": ("obd:BAROMETRIC_PRESSURE",),
+    "derived:AFR_CENSORED_B2": ("obd:BAROMETRIC_PRESSURE",),
+}

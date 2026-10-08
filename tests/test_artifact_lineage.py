@@ -29,10 +29,12 @@ from src.analysis.artifact_lineage import (
     audit_artifact,
     behavior_artifacts,
     correction_ledger,
+    derived_definitions_loader,
     load_catalog_history,
     load_observation_aliases,
     normalise_channel,
     parse_derived_definitions,
+    parse_derived_sources,
     recheck_memory,
     recheck_mode01,
     redecode_raw_dids,
@@ -41,7 +43,7 @@ from src.analysis.artifact_lineage import (
     trim_qualification,
 )
 from src.analysis.compare import PairingPolicy, compare_channels
-from src.signals.derived import DERIVED_CHANNEL_INPUTS
+from src.signals.derived import DERIVED_CHANNEL_INPUTS, DERIVED_CHANNEL_OPTIONAL_INPUTS
 
 REPO = Path(__file__).resolve().parents[1]
 ALIASES = load_observation_aliases(REPO / "data/nissan-xterra-2008/observation_aliases.yaml")
@@ -90,6 +92,7 @@ def _snapshot(
 
 #: The derived inputs declared now, standing in for the build-time source.
 NOW_DERIVED = {name: tuple(map(tuple, groups)) for name, groups in DERIVED_CHANNEL_INPUTS.items()}
+NOW_OPTIONAL = {name: tuple(c) for name, c in DERIVED_CHANNEL_OPTIONAL_INPUTS.items()}
 
 
 def _ctx(
@@ -98,15 +101,19 @@ def _ctx(
     *,
     aliases: ObservationAliases = ALIASES,
     derived_at_build: dict[str, tuple[tuple[str, ...], ...]] | None = None,
+    optional_at_build: dict[str, tuple[str, ...]] | None = None,
 ) -> LineageContext:
     build_defs = DerivedDefinitions(
-        "test", NOW_DERIVED if derived_at_build is None else derived_at_build
+        "test",
+        NOW_DERIVED if derived_at_build is None else derived_at_build,
+        NOW_OPTIONAL if optional_at_build is None else optional_at_build,
     )
     return LineageContext(
         history=CatalogHistory(tuple(snapshots), current),
         renames=(Rename("did", "ECM_INJECTOR_PW_B1", "ECM_AIR_CHARGE", "2026-09-18.yaml"),),
         aliases=aliases,
         derived_inputs=NOW_DERIVED,
+        derived_optional_inputs=NOW_OPTIONAL,
         derived_at=lambda _when: build_defs,
     )
 
@@ -421,6 +428,71 @@ def compute(out):
     current = parse_derived_definitions((REPO / "src/signals/derived.py").read_text())
     assert current["derived:TOTAL_TRIM_B1"] == NOW_DERIVED["derived:TOTAL_TRIM_B1"]
     assert all(NOW_DERIVED[name] == groups for name, groups in current.items())
+
+
+def test_vehicle_module_literals_are_parsed_and_merged_at_the_build_revision(
+    tmp_path: Path,
+) -> None:
+    """B08.1: a vehicle-named channel is located from its vehicle module's
+    literal table at the build's commit, merged across vehicles in name order;
+    optional inputs are located too."""
+    derived_source = """
+DERIVED_CHANNEL_OPTIONAL_INPUTS = {"derived:FUEL_RATE_LPH": ("obd:INTAKE_TEMP",)}
+DERIVED_CHANNEL_INPUTS = {"derived:FUEL_RATE_LPH": (("obd:MAF",),)}
+"""
+    vehicle_a = """
+SIGNAL_INPUTS = {"derived:AFR_BANK_BALANCE": (("did:A_V1",), ("did:A_V2",))}
+DERIVED_CHANNEL_INPUTS = {"derived:AFR_B1": (("obd:O2_WR_LAMBDA_S1", "did:A_V1"),)}
+DERIVED_CHANNEL_OPTIONAL_INPUTS = {"derived:AFR_B1": ("obd:BAROMETRIC_PRESSURE",)}
+"""
+    vehicle_b = """
+DERIVED_CHANNEL_INPUTS = {"derived:AFR_B1": (("obd:O2_WR_LAMBDA_S1", "did:B_V1"),)}
+"""
+    expected_inputs = {
+        "derived:FUEL_RATE_LPH": (("obd:MAF",),),
+        "derived:AFR_BANK_BALANCE": (("did:A_V1",), ("did:A_V2",)),
+        "derived:AFR_B1": (("obd:O2_WR_LAMBDA_S1", "did:A_V1", "did:B_V1"),),
+    }
+    expected_optional = {
+        "derived:FUEL_RATE_LPH": ("obd:INTAKE_TEMP",),
+        "derived:AFR_B1": ("obd:BAROMETRIC_PRESSURE",),
+    }
+    parsed = parse_derived_sources(derived_source, [vehicle_a, vehicle_b])
+    assert dict(parsed.inputs) == expected_inputs
+    assert dict(parsed.optional) == expected_optional
+
+    # The same through git, at a revision, without importing anything.
+    package = tmp_path / "src/signals/vehicle_signals"
+    package.mkdir(parents=True)
+    (tmp_path / "src/signals/derived.py").write_text(derived_source)
+    (package / "__init__.py").write_text("DERIVED_CHANNEL_INPUTS = {}\n")
+    (package / "vehicle_b.py").write_text(vehicle_b)
+    (package / "vehicle_a.py").write_text(vehicle_a)
+    git = ["git", "-C", str(tmp_path), "-c", "user.name=t", "-c", "user.email=t@t"]
+    subprocess.run([*git, "init", "-q"], check=True)
+    subprocess.run([*git, "add", "-A"], check=True)
+    subprocess.run([*git, "commit", "-qm", "build"], check=True)
+    definitions = derived_definitions_loader(tmp_path)(datetime.now(UTC))
+    assert definitions is not None
+    assert dict(definitions.inputs) == expected_inputs
+    assert dict(definitions.optional) == expected_optional
+
+
+def test_optional_inputs_are_expanded_and_compared() -> None:
+    """An optional input is an input: its leaf is resolved, and a different
+    optional set at build is a changed definition."""
+    channel = "derived:FUEL_RATE_LPH"
+    lineage = audit_artifact(_artifact((channel,), BEFORE), CTX)
+    leaves = {leaf.channel for leaf in lineage.leaves}
+    assert set(DERIVED_CHANNEL_OPTIONAL_INPUTS[channel]) <= leaves
+    assert lineage.verdict != "affected"
+
+    then = {**NOW_OPTIONAL, channel: ("obd:INTAKE_TEMP",)}
+    changed = audit_artifact(
+        _artifact((channel,), BEFORE), _ctx([OLD, NEW], CURRENT, optional_at_build=then)
+    )
+    assert _only(changed, channel).status == "definition_changed"
+    assert changed.verdict == "affected"
 
 
 def test_mode01_channels_resolve_through_the_registry() -> None:

@@ -106,10 +106,17 @@ def discover(repo: Path, slug: str, extra_models: Sequence[Path]) -> list[Any]:
 
 
 def _derived_inputs() -> dict[str, tuple[tuple[str, ...], ...]]:
-    """Required input groups declared now (optional inputs are not compared)."""
+    """Required input groups declared now."""
     from src.signals.derived import DERIVED_CHANNEL_INPUTS
 
     return {name: tuple(map(tuple, groups)) for name, groups in DERIVED_CHANNEL_INPUTS.items()}
+
+
+def _derived_optional_inputs() -> dict[str, tuple[str, ...]]:
+    """Inputs read when present, declared now (compared and expanded like groups)."""
+    from src.signals.derived import DERIVED_CHANNEL_OPTIONAL_INPUTS
+
+    return {name: tuple(columns) for name, columns in DERIVED_CHANNEL_OPTIONAL_INPUTS.items()}
 
 
 def _memory_names(lineage: Any, ctx: Any) -> dict[str, list[str]]:
@@ -341,6 +348,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         renames=load_renames(repo / "tools" / "channel_renames"),
         aliases=load_observation_aliases(repo / "data" / args.profile / "observation_aliases.yaml"),
         derived_inputs=_derived_inputs(),
+        derived_optional_inputs=_derived_optional_inputs(),
         derived_at=derived_definitions_loader(repo),
     )
     roots = [root.expanduser() for root in args.sessions_root]

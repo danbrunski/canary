@@ -3101,6 +3101,44 @@ live here now, so the documents could be archived
     knock_intensity windows, the learned words 0x124E–1252 and 0x28AA stay
     hypothesized and out of every profile).
 
+- [ ] **D03.41 Measured AFR's declaration claims the A/F voltage suffices
+  without baro (found 2026-10-08, B08.1 follow-up).** `derived:AFR_B1/B2`
+  and `AFR_CENSORED_B1/B2` declare one group, `(wideband lambda PID, A/F
+  voltage DID)`, with baro only *optional*
+  (`vehicle_signals/nissan_xterra_2008.py` `DERIVED_CHANNEL_INPUTS` /
+  `DERIVED_CHANNEL_OPTIONAL_INPUTS`). `AFR_ERROR_B1/B2` inherits that through
+  its `derived:AFR_B*` group. But since B06.7 the voltage route converts each
+  row at the ECM's barometric gain, and `append_afr_channels` withholds every
+  row with no fresh baro (`baro_missing`/`baro_stale`). The voltage DID alone
+  therefore never produces AFR.
+  - **Repro:** `channel_satisfied` accepts a profile that can never produce
+    AFR, for example a tuning-style profile with `mode01={'RPM'}` and
+    `mode22=[ECM_AF_SENSOR_V_B1, ECM_AF_SENSOR_V_B2, ECM_AIR_CHARGE]`:
+    ```python
+    p = CaptureProfile(name="repro", storage_prefix="_capture-repro",
+                       mode01={"RPM": 1.0},
+                       mode22=["ECM_AF_SENSOR_V_B1", "ECM_AF_SENSOR_V_B2", "ECM_AIR_CHARGE"])
+    channel_satisfied("derived:AFR_B1", p, frozenset())  # True; should be False
+    ```
+    This also returns True for `AFR_CENSORED_B1` and `AFR_ERROR_B1`.
+    `LAMBDA_BANK_BALANCE_AF_VOLTAGE_BARO`, which already lists baro as a
+    required group, correctly returns False. Neither real profile is affected
+    today, because both poll Mode 01 baro or the lambda PID.
+  - **Fix (conjunctive form, like `FUEL_RATE_LPH`):** `(("obd:O2_WR_LAMBDA_S1",
+    "did:ECM_AF_SENSOR_V_B1"), ("obd:O2_WR_LAMBDA_S1", "obd:BAROMETRIC_PRESSURE"))`,
+    with S5 / `_B2` for bank 2, and baro dropped from the optional table.
+    `src.signals.derived._VEHICLE_INPUTS` builds the entry from the vehicle
+    declarations, and the import check requires the literal to match it, so
+    both change together. Check the capture-profile and serving
+    (`_unserved_group`) consumers, because the change makes them stricter on
+    purpose.
+  - **Why the B08.1 drift test cannot see it:**
+    `tests/test_derived_inputs_declared.py::declaration_problems` passes a
+    channel when *any* frame produces it (`produced = any(...)`). It does not
+    check producibility. Add a per-context assertion that every minimal frame
+    of the declaration produces the channel. That would have failed here on
+    the frame `{did:ECM_AF_SENSOR_V_B1}`.
+
 ## Deferred by decision, not blocked
 
 - [~] **D01.4 Get the feature build off the event loop — implemented; Pi

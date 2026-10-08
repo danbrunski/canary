@@ -104,7 +104,7 @@ from src.evidence.records import (
     Reference,
 )
 from src.paths import BINDINGS_YAML, DIDS_YAML
-from src.signals.derived import DERIVED_CHANNEL_INPUTS
+from src.signals.derived import DERIVED_CHANNEL_INPUTS, DERIVED_CHANNEL_OPTIONAL_INPUTS
 
 __all__ = [
     "CHAIN_TOOL",
@@ -273,12 +273,14 @@ def dependency_resolver(
         _load_yaml(bindings_path.read_text()),
     )
     derived = {name: tuple(map(tuple, groups)) for name, groups in DERIVED_CHANNEL_INPUTS.items()}
-    definitions = DerivedDefinitions("src.signals.derived (current)", derived)
+    optional = {name: tuple(c) for name, c in DERIVED_CHANNEL_OPTIONAL_INPUTS.items()}
+    definitions = DerivedDefinitions("src.signals.derived (current)", derived, optional)
     ctx = LineageContext(
         history=CatalogHistory(snapshots=(), current=current),
         renames=(),
         aliases=load_observation_aliases(profile_dir / OBSERVATION_ALIASES_FILE),
         derived_inputs=derived,
+        derived_optional_inputs=optional,
         derived_at=lambda _when: definitions,
     )
     return DependencyResolver(ctx, current)
