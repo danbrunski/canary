@@ -718,3 +718,46 @@ measurement in hand.
     because nothing is timed any more. Mutations: with `_MAX_HOLD_SECONDS =
     1e9` it fails (`10000 < 2000`); with `asyncio.to_thread` run inline on the
     loop it fails (`38 > 50`).
+
+- [x] **T01.23 `tests/test_evaluate_detectors_script.py::test_workers_and_the_score_cache_leave_the_report_unchanged`
+  decided on whether anyone saved a file under `src/` or `data/`.**
+  - **Seen** 2026-10-08 on `398165a`: failed once in a plain `-n0` run (the
+    assertion's output was not kept) while a concurrent D03.38 session was
+    editing `src/collection/`; passed in the next run. The T01.20 sibling its
+    commit recorded (same exposure, in-process).
+  - **Cause:** T01.20's. The test calls `main` four times in its own process
+    and keys the score cache on the live working tree (`code`, `config_file`,
+    `bindings`, `behavior_models`, `data`). An edit between the parallel run
+    and the re-run rekeys the re-run, which featurizes (`AssertionError: an
+    unchanged re-run featurized rows`, before `hits == lookups` is reached).
+    An edit inside a run makes the spawned scoring workers, which re-hash the
+    tree in `_init_scoring_worker`, refuse ("key inputs changed since the run
+    started: code"); the pool breaks and the drives are scored in the test's
+    process, so `os.getpid() in scored_by`.
+  - **Reproduced deterministically** with a scratch probe: a `sitecustomize`
+    on `PYTHONPATH` salting `evaluation_cache.code_version` with a per-xdist-
+    worker file in every process (pytest, xdist workers, spawned scoring
+    workers), a plugin bumping the salt on each `main` call (shape *between*:
+    in `parse_args`; shape *inside*: in `_evaluate`, after `main`'s early
+    hash), and 12 copies at `-n auto`. Before: *between* 12 of 12 failed
+    (featurized), *inside* 12 of 12 failed (pid assertion).
+  - *Fixed 2026-10-08, test only (no production change),* by reusing
+    `tests/pinned_checkout_harness.py`: new `pin_in_process(monkeypatch,
+    pins)` sets `CANARY_TEST_SCORE_KEY_PINS` and monkeypatches the harness's
+    `key_inputs` and `_evaluate` with the same pinning `install()` applies (now
+    shared through `_pinned`). The pool's workers are spawned with the test
+    runner as `__main__`, not the pinned script, so they cannot get the pins
+    through `__mp_main__`. The pool initializer `_init_scoring_worker` is
+    therefore replaced by `init_scoring_worker`, a module-level function
+    picklable by name, which calls `install()` in the worker and then the real
+    initializer. Its re-check then compares pins to pins. No `sys.path` edit:
+    spawn hands the parent's `sys.path` to the worker. The test asserts that
+    all five pins were recorded. The new-IF-artifact leg still rescores the IF
+    alone (artifacts and frames keyed live).
+  - **After:** the same loops, *between* 12 of 12 passed and *inside* 12 of
+    12 passed. The salt reached 4 in every copy's file, and the probe's stderr
+    shows the workers hashing salt 2 against a parent pinned at salt 1.
+    Mutation: without the initializer swap, *inside* fails 3 of 3 on the pid
+    assertion.
+  - **Left exposed:** what T01.20 leaves (an edit to the parsed config or to
+    the fixture channels' decode).

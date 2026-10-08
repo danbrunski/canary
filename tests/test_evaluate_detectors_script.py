@@ -541,6 +541,16 @@ def test_workers_and_the_score_cache_leave_the_report_unchanged(
     from the cache without featurizing anything, and a new IF artifact is
     rescored for the IF alone (the plausibility scores are reused)."""
     import scripts.evaluate_detectors as harness
+    from tests.pinned_checkout_harness import CHECKOUT_KEY_INPUTS, pin_in_process
+
+    # T01.23: the score cache keys on the working tree (src/, data/, the
+    # config), which other sessions edit during this test. An edit made the
+    # re-run rekey (it featurized) or the pool workers refuse (scored here):
+    # correct cache behaviour, wrong verdict. The checkout inputs are held at
+    # the first run's values, in this process and in the spawned workers; the
+    # artifact and frames are still keyed live, so the new IF still rescores.
+    pins = tmp_path / "key-pins.json"
+    pin_in_process(monkeypatch, pins)
 
     training = _write_session(tmp_path / "train", "2026-05-12T000000", start=1_778_544_000.0)
     root = tmp_path / "sessions"
@@ -597,6 +607,8 @@ def test_workers_and_the_score_cache_leave_the_report_unchanged(
         report["artifacts"]["isolation_forest"]["sha256"]
         != json.loads(serial.read_text())["artifacts"]["isolation_forest"]["sha256"]
     )
+    # Every run above went through the pins.
+    assert set(json.loads(pins.read_text())) == set(CHECKOUT_KEY_INPUTS)
 
 
 def test_score_cache_keys_follow_content_and_entries_round_trip_exactly(
