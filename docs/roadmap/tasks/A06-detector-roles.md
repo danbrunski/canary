@@ -226,6 +226,64 @@ training envelope". That is useful to know. It is not a diagnosis.
     The IF replay diff is done (D03.25, 2026-10-03). On D6 the candidate scores
     422 of 782 ticks and none on highway, against the deployed IF's 748.
     Events are identical, and neither IF crosses its threshold.
+  - [~] **LSTM retrain without memory features (operator-approved
+    2026-10-08; B08.4's owed retrain).** *Trained and evaluated 2026-10-08;
+    not deployed; the feature-set acceptance failed (below).* Candidate
+    `models/_candidates/2026-10-08-na-r2-nomem/` (gitignored), set aside by
+    the A02.3 gate as `_refused-unbudgeted-20261008T210426Z-lstm_autoencoder/`
+    (`model.pt` sha256 `7a0d4833…3903`, manifest `c3270b0f…8353`,
+    `lstm_autoencoder_2026-10-08T210004.303855Z`). Commands, logs, every
+    evaluation JSON and the feature diff are in its `evaluation/`.
+    - **Recipe.** r2's: same 26 sessions, same split (training D1/D2/D4,
+      calibration 10 sessions of D3/D5, evaluation D6), same
+      `--accept-thin-calibration` reason, `canary.example.yaml`, LSTM
+      hyperparameters identical, CUDA, `--skip-if --skip-benchmark`. Input
+      rows 11,084, as r2. Two deviations the current code makes mandatory:
+      - the r3 parked-row filter (operator, 2026-09-24): 6,869 rows dropped,
+        600/158 windows (r2 1,479/671), tail-block validation, best epoch 31
+        of 41;
+      - A02.3 refused the alert level: D6 holds 0.40 engine-h, 1 needed. The
+        artifact is set aside, not served, until a stated
+        `--accept-unbudgeted-thresholds` reason.
+    - **Feature diff vs r2: fails the "only the four memory features"
+      acceptance.** 254 → 184 columns; 74 removed, 4 added, the kept 180 in
+      the same order. Removed: the 4 `obd:mem:*` (`memory_channel`, 32aa13b;
+      they held 4 non-null rows of 11,084, so D03.34's floor would have
+      dropped them anyway); 28 Mode 01 columns of 7 PIDs (ABSOLUTE_LOAD,
+      ABS_THROTTLE_POS_B, ACCEL_PEDAL_POS_D/E, COMMANDED_THROTTLE_ACTUATOR,
+      EVAP_VAPOR_PRESSURE, RELATIVE_THROTTLE_POS: "not polled by the serving
+      (default) capture profile"); 4 `gps:speed` (H00 decision 1, external
+      sensor); 38 `sparse_for_grid` (D03.34: 8 DIDs ×3, AFR_BANK_BALANCE,
+      TPS_VOLTAGE_PER_PCT, CATALYST_TEMP_B1S1/B2S1). Added:
+      `derived:AFR_CENSORED_B2` ×4. Architecture/hyperparameters otherwise
+      equal.
+    - **Held out, D6 live (3 sessions, 2,396 rows, 0.397 engine-h), deployed
+      IF beside each LSTM, same rows and the same 96 injection windows;
+      batched/served parity 0 of 171 windows for all three:**
+
+      | path | r2 (deployed) | r3 | no-mem candidate |
+      |---|---|---|---|
+      | per-channel episodes (FA/eh [Poisson 95 %]); flagged / 2,269 | 8 (20.2 [8.7, 39.7]); 131 | 16 (40.3 [23.0, 65.5]); 152 | **19 (47.9 [28.8, 74.7]); 167** |
+      | global episodes; flagged rows | 0; 3 | 1 (2.5); 8 | **0; 0** |
+      | `fp_benchmark` per-window FPR (family / global exceedances) | 5.77 % / 1 | 6.70 % / 1 | **7.36 % / 0** |
+      | global recall, thermostat 10 / 15 °C | 1/6, 2/6 | 0/6, 1/6 | **0/6, 1/6** |
+      | VUS-PR bank / lazy_o2 / maf / thermostat | 0.66 / 0.52 / 0.60 / 0.52 | 0.65 / 0.51 / 0.58 / 0.49 | **0.69 / 0.56 / 0.61 / 0.52** |
+      | A04.1 shift, per-channel / global | fail (coolant) / fail (5) | fail (coolant) / fail (5) | fail (coolant) / fail (6, + af_sensor_b1) |
+
+      Per-channel paths are masked on every other graded window for all
+      three. The candidate sits with r3 (same recipe with memory), not
+      clearly apart from r2 (intervals overlap); r2's 8 episodes reproduce
+      the 2026-09-24 report. One drive: no bootstrap.
+    - **Cost.** Retrain 8 min 21 s wall at nice 19 (training + calibration
+      frames 3.3 min, LSTM fit + calibration 1.9 min on CUDA, the refused
+      A02.3 level 2.7 min), peak RSS 2.2 GB; `fp_benchmark` ~65 s per model;
+      `evaluate_detectors` ~4.9 min per model.
+    - **Remaining:** the operator's choice of feature set and A02.3 reason
+      (not the four-feature change this item asked for); then deploy, refresh
+      `tests/fixtures/deployed_manifests`, delete the now-stale
+      `manifest_unproducible_allowlist.yaml` entry, and rework
+      `test_default_profile_b08_context.py::test_the_deployed_lstm_carries_the_spark_window_so_the_guard_can_fail`,
+      which asserts the deployed LSTM learned the memory channels.
 
   The retrain was owed
   for three reasons: the binding retraction, the mode labels, and the new
