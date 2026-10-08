@@ -475,6 +475,82 @@ extra independent votes.
        must pass on untouched drives. That candidate also needs a serving
        contract that can condition on the latch, which B08.7 owns.
     3. A deterministic timing reference waits on E05.4.
+  - **Operator decision 2026-10-08: recommendation (a), implementation
+    stopped at the budget check.** The decision: add the `spark`,
+    `fuel_axis`, `fuel_comp_x`, `flags_2841` (HI DET + pedal) and
+    `uprev_state` (map identity) windows and coolant DID `0x1101` to the
+    Xterra `default` (`data/nissan-xterra-2008/capture_profiles.yaml`, where
+    `default` is data and may carry `memory:`). **`default` is unchanged.**
+    Two findings stop it, and the profile data cannot fix either:
+    - **Budget.** Measured with `preview_polling_plan`, the dashboard's and
+      `/control`'s path, under `canary.pi.example.yaml`:
+      - best-case requests 3.91 → 4.01 req/s, against the 8 req/s budget that
+        `obd_poll_rate_hz: 1` derives;
+      - memory adds 5 reads at 1/60 Hz, coolant adds 1 DID;
+      - decoded rows 19.84 → 19.94 rows/s, about +0.004 % of the ~2,355
+        rows/s a default drive stores. Storage and the digest are unaffected.
+
+      The rate is fixed by the profile's 60 s DID windows. A memory read can
+      only ride a window, so it gets one tuple a minute.
+    - **Tuple skew fails at the serving budget.** The rpm word, BFS-X and HI
+      DET are three service-0x23 reads, more than 63 bytes apart
+      (`::test_the_coordinate_tuple_needs_three_separate_memory_reads`).
+      `default` paces every request at 8 req/s, including inside a window.
+      Mode 01 is silent from session entry to exit. The fake-clock loop
+      measured nine windows in 600 s, with the Pi's collection settings and
+      acquisition times paired per window:
+
+      | budget | coordinate (rpm, BFS-X, HI DET) | with Mode 01 rpm/load/timing |
+      |---|---|---|
+      | 8 req/s (serving) | 0.500 s | 0.750–1.312 s |
+      | 16 req/s | 0.250 s | 0.375–0.812 s |
+      | 25 req/s | 0.160 s | 0.260–0.500 s |
+      | 40 req/s | 0.100 s | 0.185 s |
+
+      At the serving budget no tuple meets 0.25 s. Dropping `uprev_state`
+      only reaches 0.375 s / 0.625–0.812 s.
+      `default`'s budget is not profile data: `bus_budget_override` is armed
+      only by the capture route. Pinned by
+      `tests/test_default_profile_b08_context.py::test_the_b08_additions_miss_the_lookup_skew_at_the_serving_budget`
+      (slow).
+    - **The deployed LSTM learned the spark window.** The Pi's
+      `lstm_autoencoder_2026-09-24T035125`
+      (`tests/fixtures/deployed_manifests`) carries
+      `obd:mem:ECM_ENGINE_SPEED_RAM` and `obd:mem:ECM_IGNITION_TIMING_RAM`
+      (+`__mean`). They were scaled on one idle count: 775 rpm, std 12.5, and
+      16 °, std 1. Those features are NaN at serve today. Polled by `default`,
+      a 2,500 rpm read would reach that model at about 140 σ, once a minute.
+      - `::test_default_polls_no_memory_channel_a_deployed_detector_learned`
+        now refuses it. Its control is
+        `::test_the_deployed_lstm_carries_the_spark_window_so_the_guard_can_fail`.
+      - The leak's cause was a gate gap. `obd:mem:*` passes the source gate
+        (its source is `obd`), and no serving gate covers it, because it is
+        neither a PID nor a DID.
+      - `FeaturePolicy.exclusion_reason` now refuses every memory channel as
+        `memory_channel` (`feature_pipeline.MEMORY_CHANNEL_EXCLUSION`), and so
+        does a derived channel that needs one. Behavior recipes still read
+        them.
+      - Tests: `tests/test_feature_policy.py::test_a_memory_channel_is_never_a_detector_feature_however_it_is_served`
+        and `::test_a_derived_channel_whose_only_input_is_a_memory_channel_is_not_served`.
+    - **Checked for when it does ship:**
+      - `default` stays corpus-eligible: `_storage_policy` refuses otherwise,
+        and R04.6 keys on the name.
+      - A saved Pi override of `default` would shadow the change entirely.
+        `layer_catalog` keeps the override and logs one WARNING per process.
+        The API lists it only as `overridden`, with no "repo changed" flag.
+      - `did:ECM_COOLANT_TEMP` would become a serving DID, and so a detector
+        candidate at the next retrain: a feature-set change.
+      - `ECM_HIGH_DET_FLAGS` is `hypothesized`.
+        `test_memory_catalog_knock_lambda.py::test_new_channels_are_code_verified_and_not_yet_in_any_profile`
+        refuses it in any profile until the D03.38 key-on read passes.
+    - **Owed:** an operator choice among
+      - raising the serving request pace (a code or config change);
+      - narrowing B08.4's tuple to the memory-only target
+        `mem:ECM_IGNITION_TIMING_RAM`;
+      - a capture.
+
+      Also owed: an LSTM retrain without memory features, and the fixture
+      refresh, before `default` reads the spark window.
 
 - [~] **B08.5 — Connect distinct residuals to investigation evidence.**
   Feed B08 context and qualified behavior results into E03 while keeping

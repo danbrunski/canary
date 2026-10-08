@@ -37,6 +37,7 @@ from src.decode.bindings import (
 from src.decode.dids import load_repo_did_map
 from src.features.feature_pipeline import (
     _SEGMENTER_SIGNAL_COLUMNS,
+    MEMORY_CHANNEL_EXCLUSION,
     FeaturePolicy,
     build_feature_spec,
     candidate_feature_columns,
@@ -45,6 +46,7 @@ from src.features.feature_pipeline import (
     resolve_feature_policy,
     sequence_feature_columns,
 )
+from src.models.isolation_forest import feature_policy_violations
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 REPO_BINDINGS = REPO_ROOT / "data" / "bindings.yaml"
@@ -385,6 +387,67 @@ def test_the_xterra_serving_profile_gates_its_dropped_pids() -> None:
     assert feature_policy_exclusions(frame, policy) == {
         "obd:ACCEL_PEDAL_POS_D": "not polled by the serving (default) capture profile"
     }
+
+
+# ---------------------------------------------------------------------------
+# 4c. memory (service 0x23) channels are never detector features (B08.4)
+# ---------------------------------------------------------------------------
+
+
+def test_a_memory_channel_is_never_a_detector_feature_however_it_is_served() -> None:
+    """``obd:mem:*`` passed the source gate (source ``obd``) and no serving gate
+    covered it, being neither a Mode 01 PID nor a DID. The 2026-09-24 sequence
+    artifact learned two such channels from drives that polled them; putting
+    the B08 windows in the ``default`` profile must not make them features."""
+    policy = FeaturePolicy(
+        bindings=None,
+        serving_mode01=EVERY_PID,
+        serving_dids=frozenset({"ECM_AIR_CHARGE"}),
+        did_map=load_repo_did_map(),
+    )
+    frame = _frame(
+        "obd:RPM",
+        "did:ECM_AIR_CHARGE",
+        "obd:mem:ECM_ENGINE_SPEED_RAM",
+        "obd:mem:ECM_IGNITION_TIMING_RAM",
+    )
+    assert set(candidate_feature_columns(frame, policy=policy)) == _family("obd:RPM") | _family(
+        "did:ECM_AIR_CHARGE"
+    )
+    assert feature_policy_exclusions(frame, policy) == {
+        "obd:mem:ECM_ENGINE_SPEED_RAM": MEMORY_CHANNEL_EXCLUSION,
+        "obd:mem:ECM_IGNITION_TIMING_RAM": MEMORY_CHANNEL_EXCLUSION,
+    }
+    # A deployed artifact that already carries one is named at load (A04.6),
+    # rolling expansions included.
+    assert feature_policy_violations(["obd:RPM", "obd:mem:ECM_ENGINE_SPEED_RAM__mean"], policy) == {
+        "obd:mem:ECM_ENGINE_SPEED_RAM__mean": MEMORY_CHANNEL_EXCLUSION
+    }
+
+
+def test_a_derived_channel_whose_only_input_is_a_memory_channel_is_not_served(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The refusal holds through a ``derived:`` channel computed from RAM, and a
+    memory alternative inside a group does not starve a served input."""
+    from src.signals import derived
+
+    monkeypatch.setitem(
+        derived.DERIVED_CHANNEL_INPUTS,
+        "derived:FROM_RAM_ONLY",
+        (("obd:mem:ECM_ENGINE_SPEED_RAM",),),
+    )
+    monkeypatch.setitem(
+        derived.DERIVED_CHANNEL_INPUTS,
+        "derived:FROM_RAM_OR_PID",
+        (("obd:mem:ECM_ENGINE_SPEED_RAM", "obd:RPM"),),
+    )
+    policy = FeaturePolicy(
+        bindings=None, serving_dids=frozenset(), serving_mode01=EVERY_PID, did_map=None
+    )
+    reason = policy.exclusion_reason("derived:FROM_RAM_ONLY")
+    assert reason is not None and "obd:mem:ECM_ENGINE_SPEED_RAM" in reason
+    assert policy.exclusion_reason("derived:FROM_RAM_OR_PID") is None
 
 
 def _write_catalog(path: Path, *, mode22: list[str], enabled: bool = True) -> None:

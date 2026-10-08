@@ -45,7 +45,7 @@ from src.columns import (
 from src.config import CanaryConfig, require_profile_scoped
 from src.decode.bindings import Bindings, Signal, is_trainable_binding, load_bindings
 from src.decode.dbc import DEFAULT_DBC_DIR, load_dbc_dir
-from src.decode.dids import DidMap, load_did_map
+from src.decode.dids import MEMORY_SOURCE, DidMap, load_did_map
 from src.decode.engineering import DECODED_PREFIX, repo_bindings
 from src.features.feature_cache import (
     FEATURE_FRAME_CACHE_VERSION as FEATURE_FRAME_CACHE_VERSION,
@@ -270,6 +270,24 @@ DBC_PREFIX = "dbc:"
 OBD_PREFIX = "obd:"
 DERIVED_PREFIX = "derived:"
 
+#: Wide-column prefix of a service-0x23 memory channel: the poller emits
+#: ``mem:<NAME>`` readings under source ``obd``.
+MEMORY_FEATURE_PREFIX = f"{OBD_PREFIX}{MEMORY_SOURCE}:"
+
+#: Why a memory channel is never a detector feature (B08.4, 2026-10-08). The
+#: source gate passes it (its source is ``obd``) and no serving gate covered
+#: it, because it is neither a Mode 01 PID nor a DID: the 2026-09-24 sequence
+#: artifact learned ``obd:mem:ECM_ENGINE_SPEED_RAM`` and
+#: ``obd:mem:ECM_IGNITION_TIMING_RAM`` from two drives that polled them,
+#: scaled on one idle count (775 rpm, std 12.5), and the serving profile never
+#: polled them. RAM channels are firmware-context evidence for the behavior and
+#: twin work; behavior recipes still read them (``src.trainability`` passes
+#: them), only the IF and sequence detectors do not.
+MEMORY_CHANNEL_EXCLUSION = (
+    "memory_channel: a service-0x23 RAM read is firmware-context evidence for "
+    "behavior and twin work, not an IF/sequence detector feature (B08.4, 2026-10-08)"
+)
+
 #: Mode 01 PID channel names, the ones a capture profile's ``mode01`` selects.
 _MODE01_CHANNELS = frozenset(d.channel.upper() for d in MODE01_REGISTRY.values())
 
@@ -360,6 +378,8 @@ class FeaturePolicy:
         source_reason = source_exclusion_reason(base)
         if source_reason is not None:
             return source_reason
+        if base.startswith(MEMORY_FEATURE_PREFIX):
+            return MEMORY_CHANNEL_EXCLUSION
         if base.startswith(DECODED_PREFIX) or base.startswith(DBC_PREFIX):
             signal = self._signals_by_name.get(base.split(":", 1)[1])
             if signal is None:
@@ -430,7 +450,11 @@ class FeaturePolicy:
 
     def _served(self, column: str, seen: frozenset[str]) -> bool:
         """Will the serving profile supply ``column``? Namespaces other than
-        polled Mode 01, Mode 22 and derived ones are not this gate's to judge."""
+        polled Mode 01, Mode 22 and derived ones are not this gate's to judge,
+        except a memory channel: never a detector input, so a derived channel
+        needing one is never served to a detector either."""
+        if column.startswith(MEMORY_FEATURE_PREFIX):
+            return False
         if column.startswith(OBD_PREFIX) and _is_mode01_channel(column):
             if self.serving_mode01 is None:
                 return False
