@@ -297,7 +297,7 @@ extra independent votes.
   Improvements unsupported by excitation or pressure coverage stay
   exploratory. Name the targeted capture when RAM tuples are insufficient.
 
-- [ ] **B08.4 — Evaluate timing with actual lookup context.**
+- [~] **B08.4 — Evaluate timing with actual lookup context.**
   Extend B04.2 with the verified rpm/BFS coordinate mapping and observed
   timing-selection state; preserve thermal and mode context supported by
   data. Compare against the existing timing surface on identical samples.
@@ -307,6 +307,174 @@ extra independent votes.
   tests pass on independent drives before publication. A constant flag on
   one drive cannot validate both branches, and an isolated trim table cannot
   be labelled final timing or knock retard. Missing coverage remains named.
+  *Desk part done 2026-10-08 (laptop, stored sessions). No stored drive can
+  support the evaluation: the identical-sample comparison is empty, and the
+  reason is named. Nothing was fitted or published.*
+  - **Code.**
+    - The B08.2 provider now emits `timing_coordinate`
+      ([`operating_context.py`](../../../src/analysis/operating_context.py),
+      `CONTEXT_EVALUATOR_VERSION` 3).
+      - It holds the rpm word × BFS-X tuple under the trim lookup's own age
+        and 0.25 s skew limits, plus the HI DET latch as read or its refusal.
+      - It needs no image, slot or coolant, so it stays visible where
+        `timing_trim` refuses.
+    - [`timing_lookup.py`](../../../src/analysis/timing_lookup.py) fits
+      nothing:
+      - `identical_samples` takes one read of the existing surface's output.
+        It pairs each of that surface's axes on the acquisition clock
+        (`match_ordered`, each read used once, under a caller-stated policy).
+        A policy looser than the lookup's 0.25 s skew is refused
+        `pairing_exceeds_lookup_skew`, and the tool's `--pairing-ms` is held
+        to the same limit. The coordinate's reads must lie within 0.25 s of
+        the target read. Every unpaired read is counted under its reason; an
+        axis read only on a logical clock is `clock_unacquired:<spec>`, not
+        `not_captured`.
+      - `score_identical_samples` grades those samples with B02's
+        `evaluate_rows` on a frame stamped by `stamp_profile_exclusions`. A
+        capture or tuning sample is therefore refused by name (R03.12), as it
+        is at refit. It refuses a model whose output is not a declared
+        final-timing channel (`not_final_timing:<spec>`), and samples read
+        from another target (`target_mismatch`).
+      - `trim_cell_coverage` places the coordinate on the image's two trim
+        tables. The values are labelled `trim_*_intermediate`.
+    - [`tools/timing_lookup_coverage.py`](../../../tools/timing_lookup_coverage.py)
+      runs all of this per session.
+    - A candidate surface would go through B04's recipe and fitter.
+      It was not attempted:
+      - all coordinate data are in non-eligible captures, which the fitter
+        refuses;
+      - there are no identical samples.
+  - **Refusals (learned constraints).**
+    - *Target.* `operating_context.yaml` declares the channels that observe
+      final timing: `timing_trim.final_timing_channels` (required) is
+      `obd:TIMING_ADVANCE`, `did:ECM_IGNITION_TIMING` and
+      `mem:ECM_IGNITION_TIMING_RAM`. Any other target is refused
+      `not_final_timing:<spec>`, so a trim or a coordinate can never be the
+      graded quantity. This is separate from the existing no-knock-retard
+      claim check in `test_behavior_resolution.py`.
+    - *Branches.* `require_branch_validation` refuses in three cases:
+      - `selection_unobserved`: no latch was read;
+      - `branch_unobserved:<set|clear>`: a constant flag, which validates
+        neither branch;
+      - `branch_too_few_drives:<state>`: fewer independent drives than
+        `min_drives`, the recipe's `min_validation_drives` and never below 2
+        (`MIN_BRANCH_DRIVES`).
+      - `branch_evidence` builds the drives itself with `group_drives`, so
+        one drive split into two sessions (60 s apart) counts once.
+  - **Run.** It covered all 14 sessions that hold any timing-coordinate
+    channel, against the existing surface `timing_advance_vs_rpm_load` v3.
+    Command:
+
+    ```
+    .venv/bin/python -m tools.timing_lookup_coverage \
+      --session _capture-rom-trace-2026-09-21T142926 \
+      --session _capture-rom-trace-2026-09-21T195647 \
+      --session _capture-ram-study-2026-10-04T204557 \
+      --session _capture-fuel-target-research-2026-09-21T013326 \
+      --session _capture-fuel-target-research-2026-09-21T195844 \
+      --session _capture-tuning-2026-09-21T223734 \
+      --session _capture-tuning-2026-09-21T232153 \
+      --session _capture-tuning-2026-09-22T170459 \
+      --session _capture-tuning-2026-09-22T235224 \
+      --session _capture-tuning-2026-09-23T022831 \
+      --session _capture-tuning-2026-09-23T142926 \
+      --session _capture-tuning-2026-09-23T164007 \
+      --session 2026-09-21T201836 \
+      --session 2026-09-22T171544 \
+      --image "/mnt/c/Users/thebo/Desktop/Uprev/Tuned ROMs/ZS44A-Tuned-20260920.OsirisROM" \
+      --image "/mnt/c/Users/thebo/Desktop/Uprev/Tuned ROMs/ZS44A-Tuned-20261004.OsirisROM" \
+      --pairing-ms 250 --out <scratch>/timing_lookup.json
+    ```
+
+    Sessions are read from `~/canary-data/sessions/nissan-xterra-2008` (the
+    default `--sessions-root`). The JSON is not committed.
+    - `_capture-fuel-target-research-2026-09-21T013326` ran ZS44A-k106, whose
+      image was not supplied. Its trim placement is refused
+      `image_not_supplied:e01cc0cb45d5beb879f82931be3054c79b7be3955220b3d93045deaabd23f18e`.
+      It has no BFS-X anyway, so no coordinate would place.
+    - **Selection state.** HI DET (`0xFFFF283F`) was never captured, in any
+      session. The branch verdict is `selection_unobserved`, with 1,756
+      samples `not_captured:high_det_flags`.
+      - The only indirect witness is `0xFFFF2842` bit 2, a lagged copy of
+        the latch, on the 10-04 drive. It read 0x04 on all 191 reads: a
+        constant flag on one drive, and an inference, not an observation.
+      - Neither branch is validated.
+    - **Coordinate observed** (rpm word × BFS-X, ≤ 0.25 s): only on the two
+      `rom-trace` captures of 09-21, 1,534 / 1,547 and 222 / 224 reads.
+      - `_capture-ram-study-2026-10-04T204557`: 0 / 180. The two memory
+        windows are polled seconds apart: 142 `stale:bfs_x`, 37
+        `skew:timing_coordinate`, 1 `missing:bfs_x`. The committed slice gives
+        the same counts.
+      - The other 11 sessions (fuel-target-research, tuning, two default
+        drives) have the rpm word but no BFS-X: `not_captured:bfs_x`.
+    - **Identical samples with the existing surface: 0, in every session.**
+      - `rom-trace` polls no Mode 01, so there is no `obd:TIMING_ADVANCE`,
+        rpm or load.
+      - On the 10-04 drive, 1,131 timing reads: 605
+        `stale:engine_speed_word`, 470 `unpaired:obd:RPM`, 54
+        `unpaired:obd:ENGINE_LOAD` and 2 `stale:bfs_x`.
+      - Had any paired, the B02 evaluator would still refuse them: all
+        three coordinate captures declare `corpus_eligible: false` (R03.12).
+      - No residual exists, so none is compared.
+    - **Where the branch could show at all.** ZS44A-20260920 slot 1, slot
+      assumed on `rom-trace`, which reads no map identity.
+      - Trim A and trim B differ in 19 cells: rows 5–9 × columns 10–15, which
+        is 2,000–3,600 rpm at BFS-X raw ≥ 88. With interpolation the lookup
+        touches them between 1,600 and 4,000 rpm at raw > 80.
+      - Of the 1,534 coordinates on 09-21T142926, 128 read a cell where the
+        tables differ. There A − B is +1 count on 109, +2 on 13 and +3 on 6.
+        Those are trim counts, which have no degrees, and are not final
+        timing.
+      - 09-21T195647 never reaches that region: 0 of 222.
+      - Neither drive clamped on either axis. The 09-21 drives span 85 and
+        15 lower-left cells.
+    - **Thermal, mode and air-density context.**
+      - Barometric pressure is only 79–83 kPa wherever it was read; `rom-trace`
+        reads no baro. **No drive is below 76 kPa.**
+      - Coolant ran 86–94 °C on the 10-04 drive; `rom-trace` reads none.
+        Coolant DID `0x1101`, which the cold rule reads, was captured in no
+        coordinate session. The pedal flags were read only on 10-04.
+      - The resolution and transient-control tests (B04.3) were not run:
+        there are no graded samples.
+  - **Tests:** `tests/test_timing_lookup.py` has 27 tests, including:
+    - `::test_the_coordinate_is_observed_without_identity_coolant_or_latch`
+    - `::test_a_stale_or_skewed_coordinate_is_refused_by_name`
+    - `::test_a_definition_without_final_timing_channels_is_refused`
+    - `::test_a_trim_or_coordinate_cannot_be_the_timing_target`
+    - `::test_each_target_read_is_paired_once_and_every_unpaired_read_is_named`
+    - `::test_the_existing_surface_grades_identical_samples_and_refuses_a_tuning_capture`
+      (residual = read − cell, per sample)
+    - `::test_a_branch_is_validated_only_where_it_was_observed_on_independent_drives`
+      (4 cases, including 500 set reads on one drive giving
+      `branch_unobserved:clear`)
+    - `::test_identical_tables_leave_no_branch_distinguishable`
+    - `::test_the_october_4_slice_resolves_no_coordinate_and_observes_no_latch`
+    - `::test_an_axis_pairing_looser_than_the_lookup_skew_is_refused` (a 5 s
+      policy over reads 4 s apart) and
+      `::test_the_tool_refuses_a_pairing_looser_than_the_lookup_skew`
+    - `::test_an_axis_read_on_a_logical_clock_is_named_clock_unacquired`
+    - `::test_scoring_refuses_a_model_that_does_not_grade_final_timing`
+      (`derived:TIMING_TRIM`, and `target_mismatch`)
+    - `::test_one_drive_split_into_two_sessions_validates_no_branch` and
+      `::test_min_drives_cannot_fall_below_two`
+  - **Remaining (closes the item):**
+    1. Drives that are corpus-eligible, under R03.12 the default profile,
+       and that read all of these in one tuple within 0.25 s:
+       - the `spark` window (`0xFFFF11D8` with final timing `0xFFFF11C7`);
+       - the `fuel_axis` window (BFS-X `0xFFFF103E`);
+       - the `flags_2841` window (HI DET `0xFFFF283F`, pedal `0xFFFF2841`);
+       - the map identity and coolant DID `0x1101`;
+       - Mode 01 rpm, load and timing.
+
+       Each latch state must be observed on ≥ 2 independent drives, and part
+       of the driving must reach BFS-X raw > 80 between 1,600 and 4,000 rpm,
+       the only region where the two tables read differently. Whether the
+       clear state can be produced on demand is unknown. A drive below 76 kPa is also needed.
+    2. Then a branch-conditioned candidate goes through B04's recipe and
+       fitter. B04.3's resolution and transient controls and B02's gates
+       must pass on untouched drives. That candidate also needs a serving
+       contract that can condition on the latch, which B08.7 owns.
+    3. A deterministic timing reference waits on E05.4.
 
 - [~] **B08.5 — Connect distinct residuals to investigation evidence.**
   Feed B08 context and qualified behavior results into E03 while keeping

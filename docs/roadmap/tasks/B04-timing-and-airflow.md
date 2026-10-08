@@ -190,6 +190,27 @@ historical evidence, not proof that the new candidates work.
 
   [Report](../../../data/analyses/2026-09-23-behavior-refit-validation-report.md) §4.
 
+- [ ] **B04.9 — Pair timing with its axes per read, or bound the skew.**
+  The evaluator that produced B04.1–B04.4 reads a frame resampled onto a 1 Hz
+  grid. Each channel is put on that grid by `.resample().last()` and then
+  forward-filled (`src/preprocessing/resampler.py`, `_resample_one_session`).
+  A fast channel's fill is bounded at `max_gap`, 2 s on the 1 Hz grid. One
+  row can therefore pair a `TIMING_ADVANCE` read with an rpm or load read up
+  to about 2 s away, so every residual and warning width above mixes reads
+  from different instants.
+  B08.4 measured this on `_capture-ram-study-2026-10-04T204557` (2026-10-08):
+  470 of 1,131 timing reads had no `obd:RPM` read within 250 ms.
+  **Accept:**
+  - Measure the timing-to-rpm and timing-to-load separation distribution
+    that the grid actually produces on B04.1's evaluation drives.
+  - Then do one of two things:
+    - grade timing on per-read pairs under a stated `PairingPolicy`
+      (`src.analysis.timing_lookup.identical_samples` does this for B08.4);
+    - or bound the separation in the evaluation contract, with the bound
+      justified by the measured timing noise.
+  - Restate the affected B04 numbers under the chosen rule, or record why
+    they stand.
+
 **Done when:** timing has either demonstrated useful resolution or remains
 explicitly exploratory, and airflow retention/removal is supported by an
 independent-drive, same-observation ablation. Fewer alerts alone is not success.

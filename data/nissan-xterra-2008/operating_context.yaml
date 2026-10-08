@@ -199,6 +199,16 @@ timing_trim:
       closes_with: >-
         Same-window reads of 0xFFFF283F and 0xFFFF1777 across a latch change,
         or modelling the one-cycle lag from 0xFFFF2840 (the cycle snapshot).
+  # B08.4 — the channels that observe FINAL ignition timing, after the trim
+  # and every later correction. A timing evaluation's target must be one of
+  # these (src/analysis/timing_lookup.py refuses anything else by name): the
+  # trim lookup above is an intermediate, and none of these is knock retard.
+  # mem 0xFFFF11C7 is declared equals_did 0x110A in data/dids.yaml, and 0x110A
+  # is the same byte as PID 0x0E (dids.yaml, 0x1107's note).
+  final_timing_channels:
+    - 'obd:TIMING_ADVANCE'
+    - 'did:ECM_IGNITION_TIMING'
+    - 'mem:ECM_IGNITION_TIMING_RAM'
   evidence: >-
     rpm 0xCC93 x BFS-X 0xCC83, cells read masked & 0x7F with bit 7 of the
     lower-left cell ORed back (0x026F9C); a trim lookup, never final ignition

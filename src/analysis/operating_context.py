@@ -5,7 +5,9 @@ and active map slot, the Fuel Comp rpm/fill coordinates and the cell value
 they read, whether either axis clamped, the timing-trim coordinate and the
 table the HI DET latch selects, the pedal-enrichment flag, fuel cut, and the
 retained purge / idle-air / throttle-fallback state — from the ECM's own RAM,
-placed on the exact calibration's tables.
+placed on the exact calibration's tables. ``timing_coordinate`` (B08.4) is the
+timing lookup's rpm word x BFS-X tuple and HI DET latch as observed, kept
+without the image so it stays visible where the trim itself cannot resolve.
 
 One provider, shared rather than restated:
 
@@ -54,7 +56,7 @@ import math
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
 import numpy as np
 import pandas as pd
@@ -91,7 +93,9 @@ from src.paths import DIDS_YAML
 from src.signals.pairing import to_seconds
 
 #: Bumped when the evaluator's record shape, reasons or contract change.
-CONTEXT_EVALUATOR_VERSION = 2
+#: 3 (B08.4): records carry ``timing_coordinate``, the image-free rpm word x
+#: BFS-X tuple and HI DET latch as observed.
+CONTEXT_EVALUATOR_VERSION = 3
 
 CONTEXT_FILE = "operating_context.yaml"
 
@@ -186,6 +190,10 @@ class TimingTrimDecl(_Strict):
     columns: AxisDecl
     max_acquisition_skew_s: float = Field(gt=0)
     limits: list[LimitDecl] = Field(default_factory=list)
+    #: B08.4 — channels that observe final ignition timing. Required, so a
+    #: timing evaluation cannot take the trim lookup (an intermediate) as its
+    #: target.
+    final_timing_channels: list[Annotated[str, Field(pattern=_SPEC)]] = Field(min_length=1)
     evidence: str = Field(min_length=1)
 
 
@@ -773,6 +781,7 @@ def contract(
                 "layout": "row_major",
                 "cell_mask": f"0x{TRIM_VALUE_MASK:02X}",
                 "max_acquisition_skew_s": trim.max_acquisition_skew_s,
+                "final_timing_channels": list(trim.final_timing_channels),
                 "applicability": {
                     **lookup_applicability(model, model_sha, trim.application_node, observed),
                     "output": trim_output.output,
@@ -1164,6 +1173,39 @@ class ContextStream:
             "acquisition": acquisition,
         }
 
+    def _timing_coordinate(self, t: float) -> dict[str, Any]:
+        """B08.4 — the coordinate the timing-trim lookup searches (rpm word x
+        BFS-X) and the HI DET latch as observed, without the image.
+
+        The coordinate is RAM, so it needs no table, slot or coolant: it stays
+        observable where :meth:`_timing` cannot resolve a trim (no map
+        identity, no coolant byte, no latch). The latch is reported as read or
+        by its refusal (``high_det_refused``), never assumed; when it is fresh
+        its read counts toward the tuple skew, as in :meth:`_timing`. Not a
+        trim and not final timing."""
+        decl = self.provider.definition.timing_trim
+        reads: dict[str, _Fresh] = {}
+        for name in (decl.rows.input, decl.columns.input):
+            fresh = self._input(name, t)
+            if isinstance(fresh, str):
+                return _refused(fresh)
+            reads[name] = fresh
+        select = self._input(decl.select_input, t)
+        if not isinstance(select, str):
+            reads[decl.select_input] = select
+        acquisition = self._acquisition(reads)
+        if acquisition["tuple_skew_s"] > decl.max_acquisition_skew_s:
+            return _refused("skew:timing_coordinate", acquisition=acquisition)
+        rpm, x = reads[decl.rows.input].raw, reads[decl.columns.input].raw
+        return {
+            "rpm_word": rpm,
+            "rpm": self._engineering(decl.rows.input, rpm),
+            "load_raw": x,
+            "high_det": None if isinstance(select, str) else self._flag(decl.select_input, select),
+            "high_det_refused": select if isinstance(select, str) else None,
+            "acquisition": acquisition,
+        }
+
     def _pedal(self, t: float) -> dict[str, Any]:
         name = self.provider.definition.pedal_enrichment.input
         fresh = self._input(name, t)
@@ -1235,6 +1277,7 @@ class ContextStream:
             record["identity"] = identity.provenance()
             record["fuel_comp"] = self._fuel_comp(identity, t)
             record["timing_trim"] = self._timing(identity, t)
+        record["timing_coordinate"] = self._timing_coordinate(t)
         record["pedal_enrichment"] = self._pedal(t)
         record["fuel_cut"] = self._fuel_cut(t)
         record["retained"] = self._retained(t)
