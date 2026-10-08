@@ -12,6 +12,7 @@ wheels/
 develop-eggs/
 
 # Virtual environments
+.venv
 .venv/
 venv/
 env/
