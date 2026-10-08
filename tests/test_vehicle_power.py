@@ -9,6 +9,7 @@ import logging
 import threading
 import time
 
+import can
 import pytest
 
 from src.collection.ads1015 import Ads1015, Ads1015Error
@@ -182,78 +183,162 @@ def test_asleep_needs_a_battery_and_a_silent_bus() -> None:
     assert not is_tester_request(0x7E8) and not is_tester_request(0x1F9)
 
 
-async def test_obd_sleeps_while_parked_and_resumes_when_a_module_talks(
+class _ListenBus:
+    """A socket that hands out queued frames, then nothing: the test pushes
+    frames in as the modules would."""
+
+    def __init__(self) -> None:
+        self.frames: list[can.Message] = []
+        self.lock = threading.Lock()
+        self.shutdowns = 0
+
+    def push(self, arbitration_id: int, *, at: float | None = None) -> None:
+        msg = can.Message(
+            arbitration_id=arbitration_id, timestamp=time.time() if at is None else at
+        )
+        with self.lock:
+            self.frames.append(msg)
+
+    def recv(self, timeout: float) -> can.Message | None:
+        with self.lock:
+            if self.frames:
+                return self.frames.pop(0)
+        time.sleep(min(timeout, 0.02))
+        return None
+
+    def shutdown(self) -> None:
+        self.shutdowns += 1
+
+
+async def test_asleep_it_listens_records_frames_and_wakes_on_a_module(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    from src.collection.can_obd_collector import wait_for_the_bus
+    from src.collection.can_obd_collector import listen_until_awake
 
     power = VehiclePower()
     power.note(12.4)
-    power.note_bus_frame(at=0.0)  # last heard long ago
-    stop = asyncio.Event()
+    bus = _ListenBus()
+    seen: list[int] = []
+    stop = threading.Event()
+    slept_at = time.time()
+    bus.push(0x1F9, at=slept_at - 1)  # queued from before the sleep: not a wake
     caplog.set_level(logging.INFO, logger="src.collection.can_obd_collector")
-    waiting = asyncio.create_task(wait_for_the_bus(stop, power))
-    await asyncio.sleep(0.1)
+
+    def on_frame(msg: can.Message) -> None:
+        seen.append(msg.arbitration_id)
+
+    waiting = asyncio.create_task(listen_until_awake(bus, on_frame, stop, power, slept_at))  # type: ignore[arg-type]
+    await asyncio.sleep(0.2)
     assert not waiting.done()
-    power.note_bus_frame()  # key on: the modules talk
-    await asyncio.wait_for(waiting, timeout=5)
+    bus.push(0x7DF)  # a tester's request is not a module waking
+    await asyncio.sleep(0.2)
+    assert not waiting.done()
+    bus.push(0x1F9)  # key on: the ECM broadcasts
+    assert await asyncio.wait_for(waiting, timeout=5)
+    assert seen == [0x1F9, 0x7DF, 0x1F9]  # every frame recorded while asleep
     messages = [r.getMessage() for r in caplog.records]
     assert any("OBD polling sleeps" in m for m in messages)
     assert any("OBD polling resumes" in m for m in messages)
 
 
-async def test_a_failed_transmit_at_key_off_is_sleep_not_a_failure(
-    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
-) -> None:
-    """At key-off the transmit queue fills (ENOBUFS) before the silence lasts
-    ASLEEP_SECONDS. With a battery on the port and the bus already quiet, the
-    collector sleeps quietly and polls again when the bus wakes."""
-    import can
-
+def _collector_task(
+    monkeypatch: pytest.MonkeyPatch,
+    power: VehiclePower,
+    bus: _ListenBus,
+    fake_loop: object,
+    stop: asyncio.Event,
+) -> asyncio.Task[None]:
     from src.collection import can_obd_collector
     from src.config import CanBusConfig
-
-    power = VehiclePower()
-    power.note(12.4)
-    power.note_bus_frame()
-    calls: list[str] = []
-    stop = asyncio.Event()
-
-    class _Bus:
-        def shutdown(self) -> None:
-            calls.append("shutdown")
-
-    def fake_loop(bus: object, spec: object, *, stop_event: threading.Event, **_: object) -> None:
-        calls.append("poll")
-        if calls.count("poll") == 1:
-            power._bus_at = time.monotonic() - 2.0  # the modules just went quiet
-            raise can.CanOperationError("Failed to transmit: No buffer space available")
-        stop_event.wait(5)
 
     monkeypatch.setattr(can_obd_collector, "run_can_obd_loop", fake_loop)
 
     class _Spec:
         can = CanBusConfig(interface="socketcan", channel="can0", bitrate=500000)
 
-    caplog.set_level(logging.INFO, logger="src.collection.can_obd_collector")
-    task = asyncio.create_task(
+    return asyncio.create_task(
         can_obd_collector.collect_can_obd_from_config(
             _Spec(),  # type: ignore[arg-type]
             asyncio.Queue(),
             stop,
-            factory=lambda _c: _Bus(),  # type: ignore[arg-type,return-value]
+            factory=lambda _c: bus,  # type: ignore[arg-type,return-value]
             power=power,
             sleeps_with_bus=True,
         )
     )
-    await asyncio.sleep(0.3)
-    assert calls == ["poll", "shutdown"]  # asleep: the bus is closed, nothing polls
-    power.note_bus_frame()  # key on
+
+
+async def test_a_running_engine_heard_on_the_polling_socket_never_sleeps(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """2026-10-08 regression: with obd_source canable the polling socket is
+    the only one hearing the broadcast bus. Its own frames must count as the
+    bus talking, or the collector sleeps 3 s after waking with the engine
+    running (it read ``parked`` with 13.9 V and the bus healthy)."""
+    from src.collection.vehicle_power import ASLEEP_SECONDS
+
+    power = VehiclePower()
+    power.note(13.9)
+    bus = _ListenBus()
+    bus.push(0x1F9)  # the engine is running at start
+    polls: list[int] = []
+    stop = asyncio.Event()
+
+    def fake_loop(
+        bus: _ListenBus,
+        spec: object,
+        *,
+        on_frame: object,
+        stop_event: threading.Event,
+        **_: object,
+    ) -> None:
+        polls.append(1)
+        while not stop_event.wait(0.1):
+            on_frame(can.Message(arbitration_id=0x1F9, timestamp=time.time()))  # type: ignore[operator]
+            power.note(13.9)  # the 12 V sense keeps reading
+
+    caplog.set_level(logging.INFO, logger="src.collection.can_obd_collector")
+    task = _collector_task(monkeypatch, power, bus, fake_loop, stop)
+    await asyncio.sleep(ASLEEP_SECONDS + 1.5)
+    assert polls == [1]  # still the first poll: never put to sleep
+    stop.set()
+    await asyncio.wait_for(task, timeout=10)
+    assert not any("sleeps" in r.getMessage() for r in caplog.records)
+
+
+async def test_a_failed_transmit_at_key_off_sleeps_listening_on_the_same_socket(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """At key-off the transmit queue fills (ENOBUFS) before the silence lasts
+    ASLEEP_SECONDS. The collector sleeps without a reconnect warning, keeps
+    the socket open and read, and polls again when a module talks."""
+    power = VehiclePower()
+    power.note(12.4)
+    bus = _ListenBus()
+    bus.push(0x1F9)
+    polls: list[int] = []
+    stop = asyncio.Event()
+
+    def fake_loop(
+        bus: _ListenBus, spec: object, *, stop_event: threading.Event, **_: object
+    ) -> None:
+        polls.append(1)
+        if len(polls) == 1:
+            power._bus_at = time.monotonic() - 2.0  # the modules just went quiet
+            raise can.CanOperationError("Failed to transmit: No buffer space available")
+        stop_event.wait(5)
+
+    caplog.set_level(logging.INFO, logger="src.collection.can_obd_collector")
+    task = _collector_task(monkeypatch, power, bus, fake_loop, stop)
+    await asyncio.sleep(0.5)
+    assert polls == [1]  # asleep: nothing polls
+    assert bus.shutdowns == 0  # and the socket stays open to hear the wake
+    bus.push(0x1F9)  # key on
     for _ in range(50):
-        if calls.count("poll") == 2:
+        if len(polls) == 2:
             break
         await asyncio.sleep(0.1)
-    assert calls.count("poll") == 2
+    assert len(polls) == 2
     stop.set()
     await asyncio.wait_for(task, timeout=10)
     assert not any("reconnecting" in r.getMessage() for r in caplog.records)
