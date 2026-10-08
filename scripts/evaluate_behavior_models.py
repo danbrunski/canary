@@ -75,10 +75,10 @@ except ImportError:  # loaded as `scripts.evaluate_behavior_models`: repo root o
 
 from src.analysis.behavior_validation import (
     EVALUATOR_VERSION,
-    AxisPairingRefusedError,
     BehaviorValidationDocument,
     EventPolicy,
     RowEvaluation,
+    SessionReads,
     apply_criteria,
     axis_separation_summary,
     breakdown,
@@ -88,14 +88,13 @@ from src.analysis.behavior_validation import (
     file_identity,
     fit_baseline,
     fold_metrics,
+    graded_frame,
     group_drives,
     load_validation_document,
     parent_session,
-    per_read_frame,
     piece_time_ranges,
     profile_exclusions,
     qualifying_drive_count,
-    read_model_reads,
     regime_labels,
     session_content_identity,
     synthetic_sensitivity,
@@ -564,7 +563,7 @@ def evaluate(
 ) -> tuple[dict[str, Any], list[dict[str, Any]]]:
     """``sessions`` are the directories ``frame`` was built from; a corrected
     model whose criteria declare ``axis_pairing`` (B04.9) is graded per read
-    from them and refused (:class:`AxisPairingRefusedError`) without them."""
+    from them and refused (``AxisPairingRefusedError``) without them."""
     catalog = {recipe.name: recipe for recipe in default_recipes(profile)}
     join_gap = document.drive_join_gap_seconds if document is not None else 600.0
     ranges = piece_time_ranges(frame)
@@ -604,18 +603,12 @@ def evaluate(
             criteria = document.recipes.get(model.name) if document is not None else None
             model_frame, model_regimes = frame, regimes
             if criteria is not None and criteria.axis_pairing is not None:
-                if not sessions:
-                    raise AxisPairingRefusedError(
-                        "axis_pairing_no_reads",
-                        f"{model.name} is graded per read; name the session directories",
-                    )
-                model_frame = per_read_frame(
+                # The refit's evidence grades through the same function.
+                model_frame = graded_frame(
                     model,
                     frame,
-                    read_model_reads(
-                        model, sessions, bindings_path=bindings_path, dids_path=dids_path
-                    ),
                     criteria.axis_pairing,
+                    SessionReads(tuple(sessions), bindings_path=bindings_path, dids_path=dids_path),
                     interval_seconds=policy.interval_seconds,
                 )
                 model_regimes = regime_labels(

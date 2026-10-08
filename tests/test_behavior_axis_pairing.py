@@ -10,6 +10,7 @@ grid-joined verdict from passing.
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 from pathlib import Path
 
 import numpy as np
@@ -17,22 +18,26 @@ import pandas as pd
 import pytest
 
 import scripts.evaluate_behavior_models as eval_cli
+from src.analysis import behavior_validation
 from src.analysis.behavior_validation import (
     AXIS_PAIRING_COLUMN,
     AXIS_PAIRING_POLICY_COLUMN,
     AxisPairingRefusedError,
     EventPolicy,
+    SessionReads,
+    ValidationContext,
     apply_criteria,
     axis_separation_column,
     axis_separation_summary,
     evaluate_rows,
     fold_metrics,
+    graded_frame,
     load_validation_document,
     per_read_frame,
     read_model_reads,
     require_axis_pairing_covers,
 )
-from src.analysis.refit import default_recipes
+from src.analysis.refit import RecipeResult, default_recipes, fit_recipe
 from src.analysis.surface_2d import fit_grid_binned_mean
 from src.behavior.behavior_models import (
     AxisPairing,
@@ -41,8 +46,13 @@ from src.behavior.behavior_models import (
     NoiseFloor,
     SyntheticFault,
     ValidationCriteria,
+    ValidationEvidence,
 )
 from src.columns import MODE_COLUMN, SESSION_COLUMN, TIMESTAMP_COLUMN, gap_column
+from src.signals.pairing import to_seconds
+from src.storage.parquet_writer import write_records_to_parquet
+from src.telemetry import TelemetryRecord
+from tests.builders import behavior_corpus, behavior_criteria, behavior_recipe
 
 SESSION = "2026-10-01T120000"
 T0 = 1_790_000_000.0
@@ -322,3 +332,133 @@ def test_the_profile_pairs_every_timing_recipe_on_all_its_axes() -> None:
         axes = {recipe.x_column, recipe.y_column}  # type: ignore[attr-defined]
         assert set(criteria.axis_pairing.max_separation_s) == axes, recipe.name
         assert criteria.axis_pairing.max_separation_s[RPM] <= 0.5
+
+
+# ---------------------------------------------------------------------------
+# The refit's evidence path (B04.9 follow-up, operator decision 2026-10-08)
+# ---------------------------------------------------------------------------
+
+REFIT_PAIRING = AxisPairing(max_separation_s={RPM: 0.5, LOAD: 0.5}, basis="test: measured")
+
+
+def _write_corpus_reads(root: Path, corpus: pd.DataFrame) -> list[Path]:
+    """Each grid row's three values as reads acquired 0.1 s into its second:
+    the grid's join and the per-read pairing see the same instants."""
+    sessions: list[Path] = []
+    for name, rows in corpus.groupby(SESSION_COLUMN, sort=False):
+        t = to_seconds(rows[TIMESTAMP_COLUMN]) + 0.1
+        records = [
+            TelemetryRecord.obd(float(ti), spec.split(":", 1)[1], float(value), "")
+            for spec in (TIMING, RPM, LOAD)
+            for ti, value in zip(t, rows[spec].to_numpy(), strict=True)
+        ]
+        session = root / str(name)
+        write_records_to_parquet(records, session)
+        sessions.append(session)
+    return sessions
+
+
+def _evidence(result: RecipeResult) -> tuple[BehaviorModel2D, ValidationEvidence]:
+    model = result.model or result.candidate
+    assert isinstance(model, BehaviorModel2D), result.reason
+    assert model.evidence is not None
+    return model, model.evidence
+
+
+def test_a_timing_refit_grades_its_evidence_per_read(tmp_path: Path) -> None:
+    """The refit grades a recipe declaring ``axis_pairing`` one row per
+    output read, as the evaluator does; fitting still reads the grid. With
+    reads that coincide with the grid's, the numbers are the grid's numbers
+    and only the ``axis_pairing=grid`` failure is gone."""
+    corpus = behavior_corpus()
+    sessions = _write_corpus_reads(tmp_path, corpus)
+    reads = SessionReads(tuple(sessions))
+    paired = fit_recipe(
+        behavior_recipe(behavior_criteria(axis_pairing=REFIT_PAIRING, calibration_drives=1)),
+        corpus,
+        validation_context=ValidationContext(reads=reads),
+    )
+    model, evidence = _evidence(paired)
+    assert evidence.test is not None
+    assert evidence.test.axis_pairing_s == {RPM: 0.5, LOAD: 0.5}
+    assert evidence.calibration is not None
+    assert evidence.calibration.axis_pairing_s == {RPM: 0.5, LOAD: 0.5}
+    assert not any(failure.startswith("axis_pairing") for failure in evidence.failures)
+
+    grid_model, grid_evidence = _evidence(
+        fit_recipe(behavior_recipe(behavior_criteria(calibration_drives=1)), corpus)
+    )
+    assert grid_evidence.test is not None and grid_evidence.test.axis_pairing_s is None
+    assert model.fit.cells == grid_model.fit.cells  # fitting stays on the grid
+    assert evidence.split == grid_evidence.split
+    assert evidence.test.evaluated == grid_evidence.test.evaluated > 0
+    assert evidence.test.mae == pytest.approx(grid_evidence.test.mae)
+    assert evidence.test.warning_half_width_median == pytest.approx(
+        grid_evidence.test.warning_half_width_median
+    )
+
+    # The refit's per-read numbers are the evaluator's for the same rows.
+    test_pieces = {piece for drive in evidence.split.test for piece in drive.pieces}
+    grid_test = corpus[corpus[SESSION_COLUMN].isin(test_pieces)]
+    frame = graded_frame(model, grid_test, REFIT_PAIRING, reads, interval_seconds=1.0)
+    ev = evaluate_rows(model, frame, spec=None)
+    assert int(ev.evaluated.sum()) == evidence.test.evaluated
+    assert float(np.mean(np.abs(ev.residual[ev.evaluated]))) == pytest.approx(evidence.test.mae)
+
+
+def test_a_timing_refit_without_its_session_paths_refuses_by_name(tmp_path: Path) -> None:
+    """No session directories: never graded on the grid instead. The fit is
+    kept as a candidate with no evidence, and the reason names the refusal."""
+    corpus = behavior_corpus()
+    recipe = behavior_recipe(behavior_criteria(axis_pairing=REFIT_PAIRING))
+    result = fit_recipe(recipe, corpus)
+    assert result.skipped
+    assert result.reason is not None and result.reason.startswith("axis_pairing_no_reads")
+    assert result.candidate is not None and result.candidate.evidence is None
+
+    # A held-out session with no directory is named, not silently dropped.
+    sessions = _write_corpus_reads(tmp_path, corpus)
+    model, evidence = _evidence(
+        fit_recipe(
+            recipe,
+            corpus,
+            validation_context=ValidationContext(reads=SessionReads(tuple(sessions))),
+        )
+    )
+    held_out = sorted(piece for drive in evidence.split.test for piece in drive.pieces)
+    partial = SessionReads(tuple(s for s in sessions if s.name != held_out[0]))
+    result = fit_recipe(recipe, corpus, validation_context=ValidationContext(reads=partial))
+    assert result.skipped
+    assert result.reason is not None
+    assert result.reason.startswith("axis_pairing_no_reads") and held_out[0] in result.reason
+
+
+def test_a_recipe_without_axis_pairing_is_graded_on_the_grid_unchanged(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A non-timing recipe declares no pairing: its evidence is the grid's
+    whether or not session directories are supplied, and nothing is read."""
+    stft = "obd:SHORT_FUEL_TRIM_1"
+    corpus = behavior_corpus().rename(columns={TIMING: stft})
+    recipe = replace(behavior_recipe(behavior_criteria()), name="stft_test", output=stft)
+    bare = fit_recipe(recipe, corpus)
+
+    def no_reads(*_args: object, **_kwargs: object) -> None:
+        raise AssertionError("a grid-graded recipe read its sessions")
+
+    monkeypatch.setattr(behavior_validation, "read_model_reads", no_reads)
+    reads = SessionReads((tmp_path / "2026-08-01T120000",))
+    supplied = fit_recipe(recipe, corpus, validation_context=ValidationContext(reads=reads))
+    _, bare_evidence = _evidence(bare)
+    _, supplied_evidence = _evidence(supplied)
+    assert bare_evidence.test is not None and bare_evidence.test.axis_pairing_s is None
+    assert bare_evidence.model_dump(exclude={"evaluated_at"}) == supplied_evidence.model_dump(
+        exclude={"evaluated_at"}
+    )
+    # The profile's own catalog: only timing declares pairing.
+    document = load_validation_document(PROFILE_YAML)
+    assert document is not None
+    for candidate in default_recipes("nissan-xterra-2008"):
+        criteria = document.recipes.get(candidate.name)
+        if candidate.output != TIMING and criteria is not None:
+            assert criteria.axis_pairing is None, candidate.name

@@ -734,6 +734,66 @@ def _pair_session_reads(
     return pd.concat([kept, pd.DataFrame(updates, index=kept.index)], axis=1)
 
 
+@dataclass(frozen=True)
+class SessionReads:
+    """Where a grid frame's reads come from (B04.9): the session directories
+    it was built from and the catalogs that decode them. A model graded per
+    read re-reads its output and axes from these on the acquisition clock."""
+
+    sessions: tuple[Path, ...] = ()
+    bindings_path: Path | None = None
+    dids_path: Path | None = None
+
+
+def graded_frame(
+    model: BehaviorModel1D | BehaviorModel2D,
+    grid: pd.DataFrame,
+    pairing: AxisPairing | None,
+    reads: SessionReads,
+    *,
+    interval_seconds: float,
+) -> pd.DataFrame:
+    """The frame ``model`` is graded on, for the evaluator and the refit alike.
+
+    Without a declared ``pairing``: ``grid`` itself. With one:
+    :func:`per_read_frame` over the reads of every session ``grid``'s pieces
+    came from. Refuses (``axis_pairing_no_reads``) when no session directory
+    is named, or when one of ``grid``'s sessions has none: graded on what is
+    left, the missing drive would silently vanish from the evidence.
+    """
+    if pairing is None:
+        return grid
+    if not reads.sessions:
+        raise AxisPairingRefusedError(
+            "axis_pairing_no_reads",
+            f"{model.name} is graded per read; name the session directories",
+        )
+    if SESSION_COLUMN not in grid.columns:
+        raise AxisPairingRefusedError(
+            "axis_pairing_no_reads", f"{model.name}: the frame names no sessions to read"
+        )
+    by_name = {Path(session).name: Path(session) for session in reads.sessions}
+    parents = sorted({parent_session(p) for p in grid[SESSION_COLUMN].astype(str).unique()})
+    missing = [parent for parent in parents if parent not in by_name]
+    if missing:
+        raise AxisPairingRefusedError(
+            "axis_pairing_no_reads",
+            f"{model.name} is graded per read; no session directory for {', '.join(missing)}",
+        )
+    return per_read_frame(
+        model,
+        grid,
+        read_model_reads(
+            model,
+            [by_name[parent] for parent in parents],
+            bindings_path=reads.bindings_path,
+            dids_path=reads.dids_path,
+        ),
+        pairing,
+        interval_seconds=interval_seconds,
+    )
+
+
 def axis_separation_summary(
     frame: pd.DataFrame, ev: RowEvaluation, model: BehaviorModel1D | BehaviorModel2D
 ) -> dict[str, dict[str, float | int | None]]:
@@ -1762,6 +1822,10 @@ class ValidationContext:
     #: entry keeps the evidence from passing: it was not gathered under the
     #: operator-approved segmentation.
     taxonomy_problems: tuple[str, ...] = ()
+    #: B04.9 — the session directories the frame was built from. A model
+    #: whose criteria declare ``axis_pairing`` is graded per read from them,
+    #: and refused (``axis_pairing_no_reads``) without them.
+    reads: SessionReads = field(default_factory=SessionReads)
 
     @classmethod
     def for_run(
@@ -1772,6 +1836,7 @@ class ValidationContext:
         decoder: Mapping[str, str],
         criteria_source: str | None,
         provenance: Mapping[str, Sequence[str]] | None = None,
+        reads: SessionReads | None = None,
     ) -> ValidationContext:
         modes = tuple(config.preprocessing.operating_modes)
         return cls(
@@ -1786,6 +1851,7 @@ class ValidationContext:
             ),
             provenance=dict(provenance or {}),
             taxonomy_problems=tuple(document.taxonomy_problems(modes)) if document else (),
+            reads=reads if reads is not None else SessionReads(),
         )
 
 
@@ -1814,11 +1880,30 @@ def build_evidence(
     Refuses (:class:`UnverifiedProfileError`) a test or calibration frame
     holding capture/tuning pieces without a profile verdict: evidence is
     counted on default-profile rows only.
+
+    ``test_frame`` and ``calibration_frame`` are grid frames. A model whose
+    ``criteria`` declare ``axis_pairing`` (B04.9) is graded on
+    :func:`graded_frame` instead, one row per output read re-read from
+    ``context.reads`` — the evaluator's rule — and refused
+    (:class:`AxisPairingRefusedError`, ``axis_pairing_no_reads``) where a
+    fold's session directory is missing. ``baseline`` is fitted by the caller.
     """
     profile_refusals(test_frame)
     if calibration_frame is not None:
         profile_refusals(calibration_frame)
     policy = context.policy
+    pairing = criteria.axis_pairing if criteria is not None else None
+    test_frame = graded_frame(
+        model, test_frame, pairing, context.reads, interval_seconds=policy.interval_seconds
+    )
+    if calibration_frame is not None and not calibration_frame.empty:
+        calibration_frame = graded_frame(
+            model,
+            calibration_frame,
+            pairing,
+            context.reads,
+            interval_seconds=policy.interval_seconds,
+        )
     drive_of_piece = {
         piece: drive.drive_id
         for drive in (*split.train, *split.calibration, *split.test)
@@ -2067,8 +2152,10 @@ __all__ = [
     "axis_pairing_bounds",
     "axis_separation_column",
     "axis_separation_summary",
+    "graded_frame",
     "per_read_frame",
     "read_model_reads",
+    "SessionReads",
     "require_axis_pairing_covers",
     "DEFAULT_JOIN_GAP_SECONDS",
     "EVALUATOR_VERSION",

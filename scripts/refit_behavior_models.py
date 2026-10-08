@@ -57,6 +57,7 @@ except ImportError:  # loaded as `scripts.refit_behavior_models` — repo root o
 
 from src.analysis.behavior_validation import (
     BehaviorValidationDocument,
+    SessionReads,
     ValidationContext,
     decoder_identity,
     file_identity,
@@ -554,6 +555,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         ),
         criteria_source=file_identity(validation_path),
         provenance=provenance,
+        # B04.9 — recipes whose criteria pair axes per read are graded from
+        # the session directories themselves, not from the grid.
+        reads=SessionReads(
+            tuple(sessions), bindings_path=args.bindings, dids_path=DEFAULT_DIDS_PATH
+        ),
     )
     if context.taxonomy_problems:
         log.warning(

@@ -14,6 +14,7 @@ import scripts.refit_behavior_models as refit_cli
 
 # Importable as a module so we can call main() and patch its dependencies.
 from scripts import _cli
+from src.analysis.behavior_validation import ValidationContext
 
 
 def _frame(session_name: str = "2026-05-13T120000", seed: int = 0) -> pd.DataFrame:
@@ -624,3 +625,39 @@ def test_main_names_explicit_tuning_paths_and_never_trains_on_them(
         entry.startswith("_tuning-2026-05-12T121000: tuning session")
         for entry in model.evidence.provenance["profile_exclusions"]
     )
+
+
+def test_main_hands_the_session_directories_to_per_read_grading(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """B04.9 — a recipe whose criteria declare ``axis_pairing`` is graded per
+    read from the session directories, so the CLI threads every one of them
+    (and the catalogs that decode them) into the evidence context."""
+    _patch_pipeline(monkeypatch, tmp_path)
+    seen: list[ValidationContext] = []
+    real_refit_all = refit_cli.refit_all
+
+    def spy(*args: object, **kwargs: object) -> object:
+        context = kwargs["validation_context"]
+        assert isinstance(context, ValidationContext)
+        seen.append(context)
+        return real_refit_all(*args, **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(refit_cli, "refit_all", spy)
+    sessions = [tmp_path / "sessions" / f"2026-05-1{day}T120000" for day in range(3)]
+    rc = refit_cli.main(
+        [
+            "--config",
+            "canary.example.yaml",
+            "--out",
+            str(tmp_path / "behavior_models.yaml"),
+            "--recipe",
+            "coolant_warmup",
+            "--dry-run",
+            *(str(s) for s in sessions),
+        ]
+    )
+    assert rc == 0
+    (context,) = seen
+    assert sorted(context.reads.sessions) == sorted(sessions)
+    assert context.reads.bindings_path is not None and context.reads.dids_path is not None

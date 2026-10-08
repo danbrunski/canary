@@ -330,7 +330,8 @@ historical evidence, not proof that the new candidates work.
     next refit flags each carried-over timing prior `criteria_changed`
     (`carry_over_flags`) and bumps its version. A grid-graded refit verdict
     also fails `axis_pairing=grid`. Both timing models are already
-    diagnostic_only, so their status does not change.
+    diagnostic_only, so their status does not change. (Superseded by the
+    follow-up below: the refit now grades per read.)
   - Tests: `tests/test_behavior_axis_pairing.py` (11). They include:
     - the known answer: a grid row 10° off the surface from reads 0.8 s
       apart is 0° per read;
@@ -341,6 +342,74 @@ historical evidence, not proof that the new candidates work.
     the timing fit should pair per read too is an open operator decision.
     So is whether a slow context axis (IAT) may reuse one read for several
     output reads.
+
+  *Follow-up 2026-10-08 (operator decision 2026-10-08: the refit's evidence
+  path grades per read; fitting stays on the grid unless a candidate's
+  cells move).*
+  - **Rule.** `build_evidence` grades a model whose criteria declare
+    `axis_pairing` on `graded_frame`, for the test and calibration folds.
+    `graded_frame` is the evaluator's own path:
+    `scripts/evaluate_behavior_models.py` now calls it too.
+    - The session directories reach it as `ValidationContext.reads`
+      (`SessionReads`: directories, bindings and DID catalogs).
+      `scripts/refit_behavior_models.py` passes every session it built
+      the frame from.
+    - A fold session with no directory, or no directories at all, is
+      refused as `axis_pairing_no_reads`, naming the session. The refit
+      turns that into a skipped recipe, kept as a candidate with no
+      evidence. It never falls back to the grid.
+    - A recipe without `axis_pairing` is graded on the grid as before and
+      reads nothing.
+    - Fitting, event-persistence fitting and the baseline still read the
+      grid, and so does serving.
+  - **Refit run.** B04.1's manifest mixes four calibrations, so the refit
+    CLI refuses it as a whole ("mixed tune revisions"). The run used
+    its 28 ZS44A-k106 sessions: every evaluation session except the three
+    ZS44A-20260920 tuning captures, which are profile-refused anyway.
+    - Command: `--config canary.pi.example.yaml --profile nissan-xterra-2008
+      --recipe timing_advance_vs_rpm_load --recipe timing_advance_vs_rpm_iat`.
+      Output went to a scratch `--out` seeded with a copy of the published
+      artifact. 61 min, peak RSS 1.6 GB.
+    - Split: 17 training pieces (09-17/09-18); test drives
+      `2026-09-20T152758` and `2026-09-20T225927`; no calibration fold.
+    - The same process re-fitted each timing recipe with `axis_pairing`
+      stripped from its criteria (grid-graded) for comparison.
+  - **Cells did not move.** The per-read and grid fits have identical cells
+    and an identical split for both recipes. Grading happens after the
+    fit, so this is by construction, and the run confirms it. No fitting
+    decision is triggered.
+  - **Verdicts did not move.** Both recipes fail either way. RPM/load
+    publishes v4 (diagnostic-only), and RPM/IAT is skipped on held-out
+    coverage (26.6 % per read, 26.5 % grid). The failure lists differ only
+    in the pairing failure and one transient control:
+    - The grid verdict also fails `axis_pairing=grid` under the declared
+      criteria. The per-read verdict does not.
+    - RPM/load, per read vs grid: evaluated 5,098 vs 5,217, MAE 2.254 vs
+      2.258°, bias −1.81 vs −1.84°, R² 0.281 vs 0.266, warning half-width
+      1.5 vs 1.5°, skill 0.247 vs 0.248, events 3 vs 3. Synthetic −3°/60 s
+      detection 0.74 vs 0.75, transients 6°/3 s 0.68 vs 0.67, 6°/10 s 0.80
+      vs 0.77. Refusals: 4 `unpaired:obd:RPM`.
+    - RPM/IAT, per read vs grid: evaluated 458 vs 1,402 (3,461
+      `unpaired:obd:INTAKE_TEMP`), MAE 4.64 vs 4.61°, skill −0.589 vs
+      −0.592, warning half-width 3.13 vs 3.31°, synthetic 0.45 vs 0.50.
+      Transient 6°/3 s 0.00 vs 0.47, so that failure drops out per read.
+  - **The refit's numbers are the evaluator's.** The candidates were
+    evaluated with `scripts/evaluate_behavior_models.py --mode corrected`
+    on the two test sessions. `fit.calibration_sessions` was cleared on a
+    copy, because the refit records the test pieces there and the
+    evaluator would exclude them as leaks. On both models, all 28
+    `FoldMetrics` fields match exactly: evaluated counts, MAE, R², widths,
+    events, `axis_pairing_s` and refusals. So do the verdicts, failure
+    lists, synthetic and transient fractions and per-drive MAE.
+    Graded separations: RPM p95 0.12 s, max 0.48 s; IAT p50 3.5 s, max
+    4.0 s.
+  - Tests:
+    - `tests/test_behavior_axis_pairing.py`:
+      `test_a_timing_refit_grades_its_evidence_per_read`,
+      `test_a_timing_refit_without_its_session_paths_refuses_by_name`,
+      `test_a_recipe_without_axis_pairing_is_graded_on_the_grid_unchanged`.
+    - `tests/test_refit_behavior_models_script.py`:
+      `test_main_hands_the_session_directories_to_per_read_grading`.
 
 **Done when:** timing has either demonstrated useful resolution or remains
 explicitly exploratory, and airflow retention/removal is supported by an

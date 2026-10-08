@@ -32,6 +32,7 @@ import numpy as np
 import pandas as pd
 
 from src.analysis.behavior_validation import (
+    AxisPairingRefusedError,
     BehaviorValidationDocument,
     DriveSplit,
     UnorderedSessionsError,
@@ -1287,7 +1288,10 @@ def fit_recipe(
     names), the model is fitted on train only, and the untouched test drives
     produce the :class:`ValidationEvidence` that ``serving_status`` reads.
     ``validation_context`` carries the event policy, decoder identity, mode
-    taxonomy and provenance recorded with that evidence.
+    taxonomy and provenance recorded with that evidence, and the session
+    directories (``reads``) a recipe whose criteria declare ``axis_pairing``
+    is graded from per read (B04.9); without them that recipe is skipped as
+    ``axis_pairing_no_reads``. Fitting reads the grid either way.
     """
     version = (next_version_for or {}).get(recipe.name, 1)
     validation = validation_context or ValidationContext()
@@ -1757,6 +1761,10 @@ def _validate_held_out(
     The recipe's publish checks (coverage, per-row warning/critical rate)
     read the calibration fold when one exists, so the final test drives never
     decide anything but the recorded verdict.
+
+    B04.9 — a recipe whose criteria declare ``axis_pairing`` is graded per
+    read (:func:`build_evidence`); the baseline below stays a grid fit, as
+    in the evaluator. Missing session directories skip the recipe by name.
     """
     criteria = recipe.validation
     baseline_kind = criteria.baseline if criteria is not None else "training_mode_median"
@@ -1770,17 +1778,23 @@ def _validate_held_out(
         modes,
         baseline_kind,
     )
-    evidence, test_ev = build_evidence(
-        model,
-        split=split,
-        test_frame=test_rows,
-        calibration_frame=calibration_rows,
-        criteria=criteria,
-        baseline=baseline,
-        context=context,
-        tune_revision=tune_revision,
-        spec=spec,
-    )
+    try:
+        evidence, test_ev = build_evidence(
+            model,
+            split=split,
+            test_frame=test_rows,
+            calibration_frame=calibration_rows,
+            criteria=criteria,
+            baseline=baseline,
+            context=context,
+            tune_revision=tune_revision,
+            spec=spec,
+        )
+    except AxisPairingRefusedError as exc:
+        # B04.9 — criteria that pair axes per read grade only from the
+        # session directories (``context.reads``); the grid is never graded
+        # in their place. The fit stays a candidate with no evidence.
+        raise _RecipeSkipError(str(exc), candidate=model) from exc
     test = evidence.test
     assert test is not None
     residuals = test_ev.residual[test_ev.evaluated]
