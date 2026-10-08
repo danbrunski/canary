@@ -15,6 +15,7 @@ from src.evidence import (
     CorruptRecordError,
     CrossVehicleReferenceError,
     Evidence,
+    ForeignSupersessionError,
     Hypothesis,
     Intervention,
     Investigation,
@@ -335,6 +336,66 @@ def test_a_retraction_withdraws_without_deleting(tmp_path: Path) -> None:
     assert entry.retracted_by == retraction.id
     assert entry.superseded_at == T0 + timedelta(days=1)
     assert entry.record == finding
+
+
+def test_only_the_producer_supersedes_its_evidence_and_only_the_operator_retracts_it(
+    tmp_path: Path,
+) -> None:
+    """B08.5: a learned correction cannot remove or renormalize another tool's
+    residual. A tool may supersede only its own evidence (by subject or by
+    name) and retract only its own; the operator may retract anything."""
+    ledger = _ledger(tmp_path)
+    finding = ledger.append(_evidence(), now=T0)
+    learner = Provenance(producer="learner", producer_kind="tool", version="1", code_version="c")
+    zeroed = {
+        "values": {"difference_bias": Quantity(value=0.0, unit="rpm")},
+        "result": Result(status="evaluated", residual=Quantity(value=0.0, unit="rpm")),
+    }
+    # A cross-producer re-mint of the same subject over the same data.
+    with pytest.raises(ForeignSupersessionError, match="'learner' cannot supersede"):
+        ledger.append(_evidence(provenance=learner, **zeroed), now=T0 + timedelta(hours=1))
+    # An explicit supersedes under another subject.
+    with pytest.raises(ForeignSupersessionError, match="compare_channels"):
+        ledger.append(
+            _evidence(
+                provenance=learner,
+                subject="learner:offset",
+                supersedes=(finding.id,),
+                supersession_reason="absorbed by the learned offset",
+                **zeroed,
+            ),
+            now=T0 + timedelta(hours=1),
+        )
+    # A tool retraction of another producer's evidence.
+    with pytest.raises(ForeignSupersessionError, match="retract"):
+        ledger.append(
+            Retraction(
+                vehicle=_vehicle(),
+                provenance=learner,
+                valid_from=T0,
+                retracts=(finding.id,),
+                reason="absorbed by the learned offset",
+            ),
+            now=T0 + timedelta(hours=1),
+        )
+    assert ledger.entry(finding.id).current and len(ledger.entries()) == 1
+    # The same producer's recompute supersedes, as before.
+    recompute = ledger.append(
+        _evidence(input_hashes={"pairs": "b" * 64}, **zeroed), now=T0 + timedelta(hours=2)
+    )
+    assert recompute.supersedes == (finding.id,)
+    # The operator may retract any producer's evidence.
+    retraction = ledger.append(
+        Retraction(
+            vehicle=_vehicle(),
+            provenance=_operator(),
+            valid_from=T0,
+            retracts=(recompute.id,),
+            reason="window included a fuel cut",
+        ),
+        now=T0 + timedelta(hours=3),
+    )
+    assert ledger.entry(recompute.id).retracted_by == retraction.id
 
 
 def test_record_time_never_moves_backwards(tmp_path: Path) -> None:

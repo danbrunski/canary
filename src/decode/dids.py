@@ -590,9 +590,21 @@ class DidMap(_Strict):
 
 
 def load_did_map(path: Path) -> DidMap:
-    """Load and validate dids.yaml. Raises ValidationError on schema mismatch."""
-    raw = yaml.safe_load(path.read_text())
+    """Load and validate dids.yaml. Raises ValidationError on schema mismatch.
+
+    The YAML parse (libyaml when available) is cached by the file's
+    identity and stat, so an edited file is re-read; validation (~2 ms) runs
+    every call, so each caller gets its own model to mutate.
+    """
+    stat = path.stat()
+    raw = _parsed_yaml(str(path.resolve()), stat.st_mtime_ns, stat.st_size)
     return DidMap.model_validate(raw)
+
+
+@lru_cache(maxsize=8)
+def _parsed_yaml(path: str, mtime_ns: int, size: int) -> Any:
+    del mtime_ns, size  # cache key only
+    return yaml.load(Path(path).read_text(), Loader=getattr(yaml, "CSafeLoader", yaml.SafeLoader))
 
 
 # The repo catalog accessors (R01.2): the one cached loader of the checked-in

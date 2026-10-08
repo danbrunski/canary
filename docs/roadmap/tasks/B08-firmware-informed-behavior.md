@@ -308,7 +308,7 @@ extra independent votes.
   one drive cannot validate both branches, and an isolated trim table cannot
   be labelled final timing or knock retard. Missing coverage remains named.
 
-- [ ] **B08.5 — Connect distinct residuals to investigation evidence.**
+- [~] **B08.5 — Connect distinct residuals to investigation evidence.**
   Feed B08 context and qualified behavior results into E03 while keeping
   ECU-computation, command/response and historical residuals separately
   identifiable. Reuse B06's units, fuel-state and transport-delay contracts.
@@ -318,6 +318,203 @@ extra independent votes.
   Investigation cards name the earliest supported disagreement without
   declaring a unique cause. Learner updates cannot remove or renormalize the
   original twin discrepancy, and alias/common-input evidence is not doubled.
+  *Plumbing done 2026-10-06, revised 2026-10-07 after verification (laptop,
+  labelled synthetic known cases). No B08 residual is qualified yet, so
+  every one is diagnostic-only.*
+  - **Minter:** [`src/analysis/behavior_residual_evidence.py`](../../../src/analysis/behavior_residual_evidence.py),
+    `mint_behavior_residual`.
+    - It is the only producer of `behavior_relationship` evidence, and its
+      class is fixed to `historical`.
+    - Every record names the exact model: name, version and artifact sha256.
+    - Every record names the exact ROM: image sha256, program, revision,
+      slot, and the B08.2 context-contract fingerprint. `RomIdentity.from_context`
+      takes these from `operating_context.ResolvedContext`.
+    - `fuel_state` must be one of B06's `Regime` values, `fuel_cut` or
+      `not_fuel_conditioned`. There is no default.
+    - `residual_inputs` (the channels the residual is computed from) is
+      required.
+    - **Diagnostic-only is enforced.** Without a `qualification` the result is
+      unevaluable `unvalidated` with no residual; the number survives only as
+      the `diagnostic_residual` value.
+    - **A qualification must be real.** It has to resolve to a current,
+      unretired `behavior_model` `Reference` whose `source_ref` is exactly
+      `<name>@<version>`, on the same program and calibration. Otherwise
+      `QualificationError`; nothing is silently downgraded.
+    - Without a resolved ROM the result is `unknown_context`.
+  - **Chain:** [`src/analysis/residual_chain.py`](../../../src/analysis/residual_chain.py).
+    - **Stages come from the producer, never from a label.** The ECU
+      computation stage holds `target_phi_twin` only; command/response holds
+      B06 `lambda_delivery_error` only; historical holds `change_detection`
+      and `b08_behavior_residual`.
+    - Refused with `NotAResidualError`: any other producer, a mislabelled
+      evidence class, and a synthetic detector run (`data_origin: synthetic`).
+    - **`fuel_pressure_droop` stands in no stage** (`EXCLUDED_PRODUCERS`, a
+      named refusal). Droop is pressure against airflow inside the delivery
+      path, not commanded against measured mixture. In a stage, a pressure
+      fall would read as a stage disagreement. Its job is to separate the
+      command/response hypotheses, which E03.1/E03.2 already do with it.
+    - **B06's contracts are checked, not restated.** A command/response record
+      needs `ResidualDefinition.unit` and a `Regime` region
+      (`ContractMismatchError`). A sign is read the way E03.1 reads it
+      (`delivery_investigation.observation_of`): B06's floor, stable across
+      the delay bracket, out of sample (`INFORMED_REFUSAL`). An unsigned
+      result is `diagnostic_only`, with a reason starting `sign_refused`.
+    - **Change detection counts only while its frozen reference stands.** The
+      record's `change_reference:<fingerprint>` reference must be on the
+      ledger, current and unretired. Otherwise it is `diagnostic_only`
+      (`reference_lapsed`). This is the same re-check a B08 qualification
+      gets.
+    - `drive_residuals(ledger, session)` applies `build_chain`'s own tests:
+      a stage producer, that producer's evidence class (so E03.3
+      `policy_frozen` records are excluded), not synthetic, and sessions
+      split on commas the way `_sessions` splits them.
+    - **Each stage gets one state:** `agrees`, `disagrees`, `diagnostic_only`,
+      `unevaluable` (each record's reason kept) or `absent`.
+    - **The outcome** is `disagreement`, `agreement` (every stage present
+      agrees) or `not_established`.
+    - `earliest_disagreement` is the first disagreeing stage in causal order.
+      `upstream_unestablished` names any earlier stage that does not agree.
+    - **One drive per chain** (`MixedDrivesError`).
+    - **Dependency groups.** Inputs resolve through B08.1's `resolve_input`
+      against the current catalog. Derived channels expand to their leaves.
+      Leaves then group by the profile's `observation_aliases.yaml`: a shared
+      register, a dependent relation, or else the identity itself.
+      - Within a stage, a record that shares a group with a counted record is
+        `dependent_on` it and is not counted.
+      - Groups shared *across* stages are reported. The twin and B06 share
+        PID `0x44`/RAM `0xFFFF26BE`.
+    - **The ledger refuses rewrites.** `MemoryLedger.append`
+      (`src/evidence/ledger.py`) raises `ForeignSupersessionError` when a tool
+      tries to invalidate evidence another producer minted. That covers a
+      re-mint of its subject, an explicit `supersedes` and a `Retraction`.
+      The operator may still retract anything.
+      - The chain keeps `DiscrepancyRewriteError` as a read-time check, for
+        ledgers written before this rule.
+      - An investigation update keeps every earlier observation. A
+        same-producer recompute is followed to its current record.
+      - An operator-retracted observation is dropped from the update. It is
+        named in the unknowns and the narrative, and does not block the
+        update.
+    - **The investigation** (`investigate_residual_chain`, E01 card):
+      - The title names the earliest supported disagreement.
+      - The stage's alternatives are all open and none is credited.
+      - For command/response, the alternatives are E03.2's own result:
+        `observation_of` for every record in the stage, then
+        `fault_model.evaluate_observations(...).consistent`, plus a
+        transport-delay pairing alternative. Opposite signs in the stage raise
+        `FaultModelError`.
+      - Unknowns name the unestablished stages, the dependent records and the
+        shared observations. Engine health is always `not assessed`.
+  - **Known cases** (`tests/test_residual_chain.py`, 24 passed, none in the
+    slow tier):
+    - **Drives.** Labelled synthetic drives each hold a twin tuple
+      (`tests/test_target_phi._session`, command at 10 s, reads to 20 s) and
+      one cruise-then-WOT pull (5 s idle, 5 s cruise, 6 s WOT, 5 s idle, at
+      4 Hz). That is the least each producer needs to reach the verdict each
+      test asserts; the tests assert verdicts, not row counts.
+    - **Built lazily.** Each drive spec is built and minted on first use and
+      kept for the module, so an xdist worker builds only the drives its tests
+      use. B06 runs once per session and every test copies its drive's
+      ledger. The application model is parsed once, with libyaml
+      (`::test_the_cached_application_model_is_the_loaders`). The dependency
+      resolver reuses B08.1's libyaml loader.
+    - **Timing.** The first drive test in a worker carries the worker's
+      one-time costs.
+      - Serial, quiet box: about 1.3 s.
+      - `-n 4 -m "not slow"` on a loaded box (load average 5–8), three runs:
+        1.8–3.0 s each for the four tests that came first in their workers.
+      - Deselecting those four moved 2.9–3.3 s onto the next first tests
+        (measured), so none was added to `tests/slow_tests.txt`.
+    - **Minting.** Residuals are minted by the real `evaluate_and_mint` and
+      `mint_delivery_error`.
+    - **Twin table.** The twin uses E02.6's labelled blocker-lifted table.
+    - **Cases:**
+      - `::test_a_wrong_rom_is_an_ecu_computation_residual` reads another
+        image's table: ECU `disagrees`/`leaner`, delivery `agrees`, earliest
+        `ecu_computation`. The wrong image sha is shown.
+      - `::test_a_wrong_branch_is_an_ecu_computation_residual` reads the
+        pedal flag clear on an override word: earliest `ecu_computation`.
+      - `::test_a_delivery_deviation_with_a_correct_command_is_a_command_response_residual`
+        (4 % lean, twin `zero`): earliest `command_response`/`lean`. The card
+        lists MAF error, sag and sensor bias, plus pairing. No-fault and the
+        fixed-quantity error are absent. Both older loops still refuse the
+        other's evidence.
+      - `::test_missing_target_data_is_named_empty_never_a_pass`: both stages
+        `unevaluable` `missing_input`, outcome `not_established`, no
+        residual, no hypothesis.
+      - `::test_shipped_blockers_leave_the_upstream_stage_unestablished`: with
+        the real blockers the twin is `unvalidated`, so the lean delivery is
+        earliest with `upstream_unestablished = (ecu_computation,)`.
+      - `::test_an_unqualified_delivery_sign_is_diagnostic_only` (no
+        condition-matched floor): the stage is `diagnostic_only`, the reason
+        starts `sign_refused`, and the outcome is `not_established`, not
+        agreement.
+      - `::test_opposite_signs_in_the_command_response_stage_are_refused_by_the_fault_model`.
+    - **Stored session tried:** `_capture-ram-study-2026-10-04T204557`, from
+      `~/canary-data`. It is uncovered, so it is not a known case.
+      - Twin with the shipped table: unevaluable `unvalidated`, with 0
+        eligible tuples.
+      - Twin with the blockers lifted: unevaluable `uncovered`, because there
+        is no eligible steady tuple.
+      - Delivery: unevaluable `uncovered` at enrichment. The gates removed:
+        fuel_cut 33, measured_missing 209, measured_rail 1, post_fuel_cut 13,
+        target_transient 72, source_not_valid_in_regime 1.
+      - Chain: `not_established`.
+  - **Learner and rewrite:**
+    - The ledger rule's own fast test is
+      `tests/test_evidence_memory.py::test_only_the_producer_supersedes_its_evidence_and_only_the_operator_retracts_it`.
+      It covers a cross-producer subject re-mint, an explicit `supersedes` and
+      a tool retraction, all refused, plus a same-producer recompute and an
+      operator retraction, both allowed. With the check disabled, it fails.
+    - `::test_a_learned_correction_cannot_absorb_the_twin_discrepancy`: a
+      qualified learned offset beside the twin record reads `agrees`. The ECU
+      stage still counts the original record with its own residual, and the
+      update keeps every observation. The ledger refuses the learner's append:
+      a re-mint of the twin's subject, and an explicit `supersedes` of the
+      twin record (`ForeignSupersessionError`). The ledger size is unchanged.
+    - `::test_only_the_operator_retracts_another_producers_evidence`:
+      - A tool's retraction of the twin record is refused by the ledger.
+      - The operator's retraction of the delivery record is accepted.
+      - The next update drops the retracted record, names it in the unknowns
+        and narrative, and the stage reads `absent`.
+  - **Alias and common input** (`::test_alias_and_common_input_evidence_is_counted_once`):
+    - Counted once: Mode 01 LTFT B1 with DID `0x1125`, and
+      `derived:AIR_MASS_PER_CYCLE` with `obd:MAF`.
+    - Controls, both counted: STFT vs LTFT, and DID `0x1102` (road speed) vs
+      LTFT.
+    - Also `::test_dependency_groups_resolve_through_the_profiles_aliases`.
+  - **Diagnostic and qualification:**
+    - `::test_an_unqualified_b08_residual_is_diagnostic_only` (exact ROM and
+      model labels asserted).
+    - `::test_a_qualified_b08_residual_counts_until_its_reference_is_retired`
+      (a hardware intervention returns it to `diagnostic_only`, outcome
+      `not_established`).
+    - `::test_a_qualification_must_name_this_model_version_and_rom`,
+      `::test_without_a_rom_a_b08_residual_is_unknown_context`,
+      `::test_the_rom_identity_comes_from_the_operating_context`,
+      `::test_records_outside_the_chain_or_from_another_drive_are_refused`
+      (mixed drives, a foreign producer, a relabelled class, an off-regime
+      region and a non-percent unit).
+  - **Historical stage:**
+    - `::test_drive_residuals_returns_only_what_the_chain_accepts`:
+      - A comma-pooled change record is found.
+      - `policy_frozen` and synthetic records are excluded.
+      - `build_chain` refuses both of those.
+    - `::test_a_change_alarm_counts_only_while_its_reference_stands`:
+      - With no reference record the alarm is diagnostic.
+      - With the reference recorded it gives earliest `historical`/`up`.
+      - Once a hardware intervention retires the reference it is
+        diagnostic again.
+    - `::test_fuel_pressure_droop_stands_in_no_stage`.
+  - **Remaining (closes the item):**
+    1. A qualified B08 residual on a real drive. That needs B08.3/B08.4
+       results from a fresh Fuel Comp tuple capture (`spark`, `fuel_comp_x`
+       and `flags_2841` read back to back), and a `behavior_model`
+       qualification `Reference` published through B03/B08.7.
+    2. A real drive that carries the twin tuple and a WOT delivery residual
+       together. No committed fixture does.
+    3. The Pi run through E04: job wiring, and persistence across a restart.
+    - Not wired: no job, route or MCP tool calls the chain yet.
 
 - [ ] **B08.6 — Evaluate the October 4 Fuel Comp intervention.**
   Preserve the original pre-flash prediction as written, including its

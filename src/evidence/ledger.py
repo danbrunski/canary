@@ -81,6 +81,7 @@ __all__ = [
     "ANY",
     "CorruptRecordError",
     "CrossVehicleReferenceError",
+    "ForeignSupersessionError",
     "LedgerEntry",
     "MemoryLedger",
     "MemoryQuery",
@@ -114,6 +115,16 @@ class CorruptRecordError(MemoryReferenceError):
 
 class CrossVehicleReferenceError(MemoryReferenceError):
     """The id (or record) belongs to another vehicle."""
+
+
+class ForeignSupersessionError(MemoryReferenceError):
+    """A tool superseding or retracting evidence another producer minted.
+
+    Evidence is recomputed only by the tool that produced it: a learned
+    correction re-minting the twin's subject would otherwise supersede the
+    original discrepancy it explains (B08.5). The operator may still retract
+    anything.
+    """
 
 
 class UnscopedMemoryError(ValueError):
@@ -466,6 +477,9 @@ class MemoryLedger(JsonlStore[AnyRecord]):
                     "superseded. To withdraw it, append the withdrawn finding again "
                     "(a new record, current from its own record time)"
                 )
+        if record.provenance.producer_kind == "tool":
+            for ref in invalidates:
+                self._check_same_producer(index, record, ref)
         if isinstance(record, Outcome):
             self._check_outcome(index, record)
         update: dict[str, object] = {}
@@ -477,6 +491,8 @@ class MemoryLedger(JsonlStore[AnyRecord]):
                 and index.records[rid].vehicle.profile == self.vehicle
                 and _overlaps(record.sources, self._evidence(index, rid).sources)
             ]
+            for rid in stale:
+                self._check_same_producer(index, record, rid)
             if stale:
                 update["supersedes"] = tuple(dict.fromkeys((*record.supersedes, *stale)))
                 update["supersession_reason"] = record.supersession_reason or (
@@ -979,6 +995,19 @@ class MemoryLedger(JsonlStore[AnyRecord]):
         if outcome.disposition == "no_effect" and beyond:
             raise OutcomeRuleError(
                 "the residual clears the noise floor: that is a 'measured_change'"
+            )
+
+    @staticmethod
+    def _check_same_producer(index: _Index, record: AnyRecord, ref: str) -> None:
+        """Refuse a tool invalidating evidence another producer minted."""
+        prior = index.records[ref]
+        if not isinstance(prior, Evidence):
+            return
+        if prior.provenance.producer != record.provenance.producer:
+            raise ForeignSupersessionError(
+                f"{record.provenance.producer!r} cannot supersede or retract {ref} "
+                f"({prior.kind} by {prior.provenance.producer!r}): evidence is recomputed "
+                "only by its own producer, and only the operator retracts another's"
             )
 
     def _check_reference(self, index: _Index, ref: str, kind: str | None) -> None:
