@@ -547,7 +547,9 @@ recomputes the rolling frame over the whole buffered window every tick.
     used stripped copies). P02.1 measured 1,408-1,595 B
     per stored row before the row filters.
 
-- [ ] **P02.3 A per-sample channel layer for acquisition-time readers.**
+- [~] **P02.3 A per-sample channel layer for acquisition-time readers.**
+  Not built (2026-10-08): measured after P02.2, it does not pay for itself
+  yet. Build it when the condition at the end of the measurement below holds.
   - **Why.** P01.2 left the workbench on raw samples: it pairs channels
     sample by sample, and a 1 Hz frame would bring back the aggregate
     comparison AGENTS.md forbids. P01.2 records that exclusion, and this
@@ -568,6 +570,78 @@ recomputes the rolling frame over the whole buffered window every tick.
 
   Size **M–L**. P02.2 first: it uses the same spec-to-raw translation, and
   after it this item may not pay for itself. Measure before starting.
+
+  - **Measured after P02.2** (2026-10-08, HEAD `4ef05c1`, laptop, load
+    average under 2, one fresh process per row). Stage times are wall clock
+    from wrappers around the stage functions, not cProfile, which inflated
+    the Python-heavy metadata parse about 2x. Scripts were kept in the
+    session scratchpad.
+
+    | reader, session | wall, peak RSS | `read_session` | acquisition-clock parse | per-spec select + decode |
+    |---|---|---|---|---|
+    | `build_tuning_frame`, `_capture-tuning-2026-09-21T223734` | 1.84 s, 343 MB | 1.21 s (1 read) | 0.32 s (1) | 0.11 s |
+    | same, `_capture-tuning-2026-09-23T142926` | 2.70 s, 372 MB | 1.86 s (1) | 0.50 s (1) | 0.13 s |
+    | `compute_tuning_digest`, 09-21 capture | 4.64 s, 342 MB | 1.20 s (1) | **1.79 s (6)** | 0.92 s |
+    | same, 09-23 capture | 6.76 s, 438 MB | 1.76 s (2) | **2.73 s (11)** | 1.33 s |
+    | `read_channels`, 6 Mode 01 specs, drive `2026-09-20T152758` (1,980 chunks) | 7.04 s, 448 MB | 6.17 s | 0.69 s | 0.15 s |
+    | `read_channels` `decoded:ECM_RPM`, same drive (717,779 rows) | 12.40 s, 584 MB | 11.82 s | 0.36 s | 0.02 s |
+    | `compare_channels` `decoded:ECM_RPM` vs `obd:RPM` at 50 ms, same drive | 14.42 s, 884 MB | 12.19 s | 1.08 s | 0.27 s |
+    | `scripts/lambda_delivery_evidence.py`, the 09-21 and 09-23 captures | 32.68 s | 2.18 s (2) | **28.37 s (78)** | 0.99 s |
+
+  - **What the layer would replace.** The layer was simulated by writing each
+    spec's `read_channels(..., acquired_time=True)` rows to its own parquet
+    file and reading them back. The round trip equals `read_channels`
+    on all five cases: `assert_frame_equal(check_exact=True)`, with
+    `timestamp_basis` included. The comparison was run with
+    `check_dtype=False`. A separate one-file round trip of three specs kept
+    every column's dtype.
+
+    | session, specs | `read_channels` | layer read | layer size |
+    |---|---|---|---|
+    | 09-21 capture, the 16 tuning-frame specs (24,298 rows) | 1.64 s | 0.042 s | 0.31 MB |
+    | 09-23 capture, the same 16 specs (36,746 rows) | 2.52 s | 0.048 s | 0.45 MB |
+    | drive, 6 Mode 01 specs (32,704 rows) | 7.00 s | 0.022 s | 0.33 MB |
+    | drive, `decoded:ECM_RPM` | 11.88 s | 0.128 s | 5.26 MB |
+    | drive, `decoded:ECM_RPM` + `obd:RPM` | 14.36 s | 0.187 s | 5.32 MB |
+
+    So a repeat read of the same specs would save 1.6-2.5 s on a tuning
+    capture and 7-14 s on a 2 h drive. It saves nothing on the first read,
+    nothing for a spec not read before, and nothing on the Pi, where the
+    digest runs. Within one process, P02.2 already shares the read.
+
+  - **Where the time goes instead.** The largest remaining cost is not the
+    read. It is re-parsing `metadata_json` for the acquisition clock, once
+    per spec, over a frame handed to `read_channels` as a `DataFrame`.
+    - `tuning.read_delivery_inputs` reads its rows once through
+      `_session_rows` on the stored clock. It then calls
+      `read_channels(rows, [spec], acquired_time=True)` once per role, and
+      each call parses every row again. That is 5 of the 6 parses in the
+      09-21 digest and 10 of the 11 in the 09-23 digest: 1.5 s and 2.2 s of
+      4.6 s and 6.8 s.
+    - `scripts/lambda_delivery_evidence.py` has the same shape: 39 parses
+      per session, 87 % of its wall time.
+
+    Parsing once per frame would remove the cost without a store, and it
+    helps the Pi's digest too. Estimated from the measured parts: digest
+    4.6 -> 3.2 s and 6.8 -> 4.5 s; the evidence script 32.7 -> about 5 s.
+    The rest of a drive read is the source: 4.3 s of the 7.0 s Mode 01 read
+    is opening 1,980 chunks for 127,293 rows (P02.7, P02.10). A
+    `decoded:` read of this pre-2026-09-26 drive takes 5.7 s as recorded
+    and 11.9 s decoded on read (P02.8).
+  - **Decision.** Don't build the layer now. Its only gain is a repeat read
+    in a new process, and no recurring laptop job makes one:
+    - the digest runs on the Pi;
+    - MCP `_capability_payload` costs 1.8-2.7 s;
+    - each comparison in a compare sweep names new specs.
+
+    It costs an M-L store with per-binding versioning. Its cache keys would
+    also have to carry the AFR calibration (`obd:COMMANDED_AFR`), the capture
+    profile (`round` basis), per-spec refusals and the P02.10 `as_of` attrs.
+  - **Build it when** a recurring laptop job, after the clock is parsed once
+    per frame, spends at least half its wall time and 30 s per run in
+    `read_session` for specs an earlier run already read. One example would
+    be workbench or `compare_channels` sweeps served from the laptop over
+    pulled long drives, at 7-14 s a read.
 
 - [x] **P02.4 Featurize an injection incrementally.** `injection_sweep`
   recomputes only the columns an injected channel can reach, and reuses the
