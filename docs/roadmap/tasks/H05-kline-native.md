@@ -277,3 +277,32 @@ What exists in `src/` is coupled to the USB cable:
   (commanded AFR, ignition timing, BFS), with its own null-run noise floor
   (all-did-tuning-hardening 3.8, 7.5; `instrument: kline` kept separate from
   `uprev`). **Accept:** a same-ROM null run recorded with `conditions`.
+- [~] **H05.13 Measure the scan tool's airbag wake-up.** CANary's own wake-up
+  is ignored by the SRS (`0x58`). On 2026-10-08 five variants were tried on the
+  truck with the same `81 58 FC 81 56` StartCommunication the scan tool sends,
+  and none got a reply: long-low 518.9/18.1 ms, fast 25/25, 25/20, 25/15 and
+  25/10 ms (low/high). The scan tool is answered on the first try every time,
+  and CANary's bytes echo correctly, so the difference is the pulse. **Do:**
+  record wake-ups as `kline:BREAK` rows (sniffed: PARMRK break markers;
+  CANary's: host-measured low/high), show them before each StartCommunication
+  in the exchange report, then measure the scan tool's SRS wake-up on the next
+  scan-tool session. No new wake-up goes into `kline.yaml` until that
+  measurement. **Accept:** the scan tool's low + high (and its bounds) beside
+  CANary's in one session's report, in `data/analyses/`.
+  **Evidence (2026-10-09, recording):** `transport.mark_breaks` sets
+  `PARMRK | INPCK` and clears `IGNBRK`, `BRKINT`, `IGNPAR`, `ISTRIP` inside
+  `KlineTransport.open` for every sniff port, reads the flags back and refuses
+  to sniff without them (`test_the_real_sniff_port_reads_marked_bytes_and_says_so`
+  on a pty; `test_pyserial_alone_does_not_mark_breaks_so_the_transport_must`).
+  `FrameDecoder` un-escapes `FF FF` / `FF 00 00` / `FF 00 xx` across reads; UpRev's
+  whole fixture session re-encoded as a marked port would deliver it decodes
+  to the same frames byte for byte
+  (`test_uprevs_session_marked_decodes_byte_for_byte_as_unmarked`). Known
+  answer: `FF 00 00` at t0 then the SRS StartCommunication at t0 + 50 ms gives
+  one wake-up, span 50.0 ms, target SRS, answered
+  (`test_one_break_before_the_srs_start_spans_fifty_ms`). CANary's pulses are
+  stored with `origin: canary`
+  (`test_canarys_own_wake_up_is_stored_with_its_measured_low_and_high`).
+  **Remaining (truck):** the scan-tool session itself. Not measurable here:
+  how a sniffed low splits into low and high (the UART never reports the
+  release), and how late the pin follows CANary's break ioctls.

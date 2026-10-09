@@ -43,6 +43,29 @@ seen before any StartCommunication (the capture attached mid-session) has
 ``22 12 10`` (yaw) and UpRev's ECM ``22 12 10`` (TPS2) were otherwise the same
 row.
 
+**Wake-ups (H05.9).** A sniffing port is in mark-parity mode
+(:func:`~src.collection.kline.transport.mark_breaks`), so a break arrives as
+``FF 00 00``, a framing or parity error as ``FF 00 <byte>`` and a literal
+``0xFF`` as ``FF FF``; :class:`FrameDecoder` un-escapes them before framing, so
+a frame's bytes are exactly what they were before marking (a byte with a
+framing error is still fed as data, as an unmarked port delivered it). Each
+break becomes a :class:`SniffedBreak`. What it can and cannot say:
+
+- The UART reports a break once the line has been low for a whole character
+  (~1 ms at 10400 baud): ``detected`` is that report, so the falling edge was
+  about one character time earlier. The release is **not** reported.
+- The next byte's arrival bounds the release: low + high (falling edge to the
+  next start bit) is ``span_s = next_byte - detected``, the two stamped the
+  same way. How the span splits into low and high is not observable here;
+  the low is only bounded, ``[char_s, span max]``.
+- Both stamps carry the read-time bounds of :class:`RxChunk` and the UART's
+  receive timeout (32 bit times, :data:`UART_RX_TIMEOUT_CHARS`), which can hold
+  a lone character before the host sees it; ``timing_uncertainty_s`` adds them.
+
+In an unmarked stream (every capture before H05.9) a ``0x00`` between frames is
+still read as a wake-up, as before, but no break is reported: an unmarked zero
+cannot be told from data, so it is not presented as a measurement.
+
 **Definitions.** :class:`DefinitionTracker` remembers each acknowledged
 ``AC`` definition, so later ``21`` replies can be laid out into values —
 using catalog widths, refusing a reply it cannot place rather than guessing.
@@ -53,13 +76,20 @@ reason.
 from __future__ import annotations
 
 from collections.abc import Iterator, Mapping, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Literal
 
 from src.collection.kline import protocol as kp
 from src.collection.kline.transport import RxChunk
 
 INTER_BYTE_GAP_S = 0.025
+#: A break with no byte after it for this long is reported without one: the
+#: tester gave up, or what follows is not its StartCommunication. ISO 14230's
+#: slowest wake-up (5-baud) has its sync byte within W1 = 300 ms.
+BREAK_FOLLOW_S = 1.0
+#: The PL011's receive timeout, in characters (32 bit times): a lone character
+#: can sit in the FIFO this long before the host can read it.
+UART_RX_TIMEOUT_CHARS = 3.2
 
 Direction = Literal["tester", "ecu"]
 
@@ -88,6 +118,104 @@ class SniffedFrame:
 
 
 @dataclass(frozen=True)
+class SniffedBreak:
+    """A wake-up low (a UART break) on the line, with what bounds its timing.
+
+    Times are the host clock of the reads (monotonic). See the module
+    docstring for what is and is not measurable.
+    """
+
+    #: Latest and earliest the UART can have reported the break.
+    detected: float
+    detected_earliest: float
+    char_s: float
+    #: The latest bound of the last byte or break before it; ``None`` if none.
+    prev_activity: float | None
+    #: The next byte's latest and earliest arrival; ``None`` if none came
+    #: within :data:`BREAK_FOLLOW_S` (or another break came first).
+    next_byte: float | None = None
+    next_byte_earliest: float | None = None
+    #: When another break followed before any byte (a 5-baud address byte
+    #: is a run of breaks).
+    next_break: float | None = None
+
+    @property
+    def span_s(self) -> float | None:
+        """Falling edge to the next byte's start bit: low + high."""
+        return None if self.next_byte is None else self.next_byte - self.detected
+
+    @property
+    def span_bounds_s(self) -> tuple[float, float] | None:
+        if self.next_byte is None or self.next_byte_earliest is None:
+            return None
+        slack = UART_RX_TIMEOUT_CHARS * self.char_s
+        return (
+            max(self.char_s, self.next_byte_earliest - self.detected - slack),
+            self.next_byte - self.detected_earliest + slack,
+        )
+
+    @property
+    def low_bounds_s(self) -> tuple[float, float | None]:
+        """The low is at least one character; at most the whole span."""
+        bounds = self.span_bounds_s
+        return (self.char_s, bounds[1] if bounds is not None else None)
+
+    @property
+    def idle_before_s(self) -> float | None:
+        """Last activity to the falling edge (about one character before
+        ``detected``)."""
+        if self.prev_activity is None:
+            return None
+        return max(0.0, self.detected - self.char_s - self.prev_activity)
+
+    @property
+    def timing_uncertainty_s(self) -> float:
+        """How far the span (or, with no next byte, the falling edge) can be
+        from its estimate."""
+        bounds = self.span_bounds_s
+        span = self.span_s
+        if bounds is None or span is None:
+            return (
+                self.detected - self.detected_earliest + (1.0 + UART_RX_TIMEOUT_CHARS) * self.char_s
+            )
+        return max(span - bounds[0], bounds[1] - span)
+
+
+class _Unmarker:
+    """PARMRK un-escaping across reads: ``FF FF`` -> byte ``FF``, ``FF 00 00``
+    -> break, ``FF 00 xx`` -> byte ``xx`` with a framing/parity error."""
+
+    def __init__(self) -> None:
+        self._pending = bytearray()
+        self.malformed = 0
+
+    def feed(self, data: bytes) -> list[tuple[Literal["byte", "break", "error"], int]]:
+        out: list[tuple[Literal["byte", "break", "error"], int]] = []
+        for b in data:
+            pending = self._pending
+            if not pending:
+                if b == 0xFF:
+                    pending.append(b)
+                else:
+                    out.append(("byte", b))
+            elif len(pending) == 1:
+                if b == 0xFF:
+                    out.append(("byte", 0xFF))
+                    pending.clear()
+                elif b == 0x00:
+                    pending.append(b)
+                else:
+                    # Not a sequence PARMRK produces: keep the bytes as data.
+                    self.malformed += 1
+                    out += [("byte", 0xFF), ("byte", b)]
+                    pending.clear()
+            else:
+                out.append(("break", 0) if b == 0x00 else ("error", b))
+                pending.clear()
+        return out
+
+
+@dataclass(frozen=True)
 class Exchange:
     """A request and, when one came, its reply."""
 
@@ -101,6 +229,10 @@ class SniffStats:
     wakeups: int = 0
     checksum_resyncs: int = 0
     abandoned: int = 0
+    #: Marked streams only: breaks reported, and bytes with a framing or
+    #: parity error (still decoded as data).
+    breaks: int = 0
+    framing_errors: int = 0
 
 
 class FrameDecoder:
@@ -113,35 +245,100 @@ class FrameDecoder:
         self._module: int | None = None
         self._tester: int | None = None
         self._uncertainty = 0.0
+        self._unmarker = _Unmarker()
+        self._last_activity: float | None = None
+        self._break: SniffedBreak | None = None
         self.stats = SniffStats()
 
     def feed_chunk(self, chunk: RxChunk) -> list[SniffedFrame]:
-        """One read's bytes. Only the silence observed before the read can
-        separate them from what came before; within a read, none is known."""
-        out: list[SniffedFrame] = []
-        for k, ((earliest, latest), byte) in enumerate(
-            zip(chunk.byte_bounds(), chunk.data, strict=True)
+        """One read's frames (breaks are dropped; :meth:`feed_chunk_events`
+        keeps them)."""
+        return [e for e in self.feed_chunk_events(chunk) if isinstance(e, SniffedFrame)]
+
+    def feed_chunk_events(self, chunk: RxChunk) -> list[SniffedFrame | SniffedBreak]:
+        """One read's frames and completed breaks, in line order. Only the
+        silence observed before the read can separate its bytes from what
+        came before; within a read, none is known."""
+        events: list[tuple[Literal["byte", "break", "error"], int]]
+        if chunk.marked:
+            events = self._unmarker.feed(chunk.data)
+        else:
+            events = [("byte", b) for b in chunk.data]
+        out: list[SniffedFrame | SniffedBreak] = []
+        for k, ((earliest, latest), (kind, byte)) in enumerate(
+            zip(chunk.char_bounds(len(events)), events, strict=True)
         ):
+            if kind == "break":
+                out += self._on_break(earliest, latest, chunk.char_s)
+                continue
+            if kind == "error":
+                self.stats.framing_errors += 1
+            if self._break is not None:
+                out.append(replace(self._break, next_byte=latest, next_byte_earliest=earliest))
+                self._break = None
             out += self.feed(
                 latest,
                 byte,
                 quiet_s=chunk.quiet_s if k == 0 else 0.0,
                 uncertainty_s=latest - earliest,
+                zero_is_wakeup=not chunk.marked,
             )
+            self._last_activity = latest
         return out
 
+    def _on_break(self, earliest: float, latest: float, char_s: float) -> list[SniffedBreak]:
+        out: list[SniffedBreak] = []
+        if self._break is not None:
+            out.append(replace(self._break, next_break=latest))
+        self.stats.breaks += 1
+        self._wakeup()
+        self._break = SniffedBreak(
+            detected=latest,
+            detected_earliest=earliest,
+            char_s=char_s,
+            prev_activity=self._last_activity,
+        )
+        self._last_activity = latest
+        return out
+
+    def flush_breaks(self, now: float, *, force: bool = False) -> list[SniffedBreak]:
+        """A break that no byte has followed for :data:`BREAK_FOLLOW_S` (or any,
+        with ``force``, when sniffing ends), reported without a next byte."""
+        pending = self._break
+        if pending is None or not (force or now - pending.detected > BREAK_FOLLOW_S):
+            return []
+        self._break = None
+        return [pending]
+
+    def _wakeup(self) -> None:
+        """A wake-up ends the frame in flight and the session."""
+        if self._buf:
+            self.stats.abandoned += 1
+            self._buf.clear()
+        self.stats.wakeups += 1
+        self._in_session = False
+        self._module = None
+        self._tester = None
+
     def feed(
-        self, at: float, byte: int, *, quiet_s: float, uncertainty_s: float = 0.0
+        self,
+        at: float,
+        byte: int,
+        *,
+        quiet_s: float,
+        uncertainty_s: float = 0.0,
+        zero_is_wakeup: bool = True,
     ) -> list[SniffedFrame]:
         """One byte that arrived by ``at``, after the line was seen idle for
-        ``quiet_s``."""
+        ``quiet_s``. ``zero_is_wakeup``: an unmarked stream, whose breaks read
+        as ``0x00``; in a marked one a zero is data and breaks come separately."""
         out: list[SniffedFrame] = []
         if self._buf and quiet_s > INTER_BYTE_GAP_S:
             self.stats.abandoned += 1
             self._buf.clear()
         self._uncertainty = uncertainty_s
         if not self._buf:
-            if byte == 0x00:
+            if byte == 0x00 and zero_is_wakeup:
                 self.stats.wakeups += 1
                 self._in_session = False
                 self._module = None
@@ -287,7 +484,10 @@ class DefinitionTracker:
 
 
 __all__ = [
+    "BREAK_FOLLOW_S",
     "INTER_BYTE_GAP_S",
+    "UART_RX_TIMEOUT_CHARS",
+    "SniffedBreak",
     "DefinitionTracker",
     "Exchange",
     "FrameDecoder",

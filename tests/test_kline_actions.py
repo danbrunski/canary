@@ -24,7 +24,7 @@ from src.collection.kline.actions import (
 )
 from src.collection.kline.profile import KlineProfile, load_kline_profile
 from src.collection.kline.sessions import MODULE_SESSIONS
-from src.collection.kline.transport import KlineTransport, Mode
+from src.collection.kline.transport import KlineTransport, Mode, WakePulse
 from src.collection.kline_collector import KlineCollector
 from src.collection.reconnect import ReconnectPolicy
 from src.config import CanaryConfig, KlineConfig
@@ -79,6 +79,9 @@ class ClearingModule:
 
     def stop_communication(self) -> None:
         self.calls.append("stop")
+
+    def take_wake_pulses(self) -> list[WakePulse]:
+        return []
 
 
 def _collector(

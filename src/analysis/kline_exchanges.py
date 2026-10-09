@@ -24,6 +24,13 @@ any session can be re-read. Four pieces (K01.1-K01.3):
   :func:`~src.analysis.compare.compare_channels` and reports the per-sample
   ratio — never an aggregate.
 
+Wake-ups (H05.9): :func:`wake_ups` reads every ``kline:BREAK`` row — CANary's
+own (``origin: canary``, host-measured low and high) and the ones the sniffer
+heard (``origin: foreign``, low only bounded, low + high from the break's
+report to the next byte) — and attaches each to the StartCommunication that
+followed it, so the report shows who woke which module, how, and whether it
+answered.
+
 A rate here is always the median interval between consecutive reads of one
 DID, never a count over a wall-clock span (``achieved_hz_capture`` read a
 14.93 Hz capture as 11.25 Hz that way).
@@ -43,7 +50,12 @@ import pandas as pd
 
 from src.analysis.compare import ChannelComparison, align_pairs, compare_channels
 from src.collection.kline import protocol as kp
-from src.collection.kline.names import FRAME_CHANNEL, LEGACY_DID_PREFIX, is_legacy
+from src.collection.kline.names import (
+    BREAK_CHANNEL,
+    FRAME_CHANNEL,
+    LEGACY_DID_PREFIX,
+    is_legacy,
+)
 from src.collection.kline.profile import KlineProfile
 from src.signals.pairing import PairingPolicy
 
@@ -319,6 +331,37 @@ class TimingSummary:
 
 
 @dataclass
+class WakeUp:
+    """One stored wake-up, and the StartCommunication it led to.
+
+    ``span_ms`` is the falling edge to the first byte after it (low + high).
+    A sniffed (``foreign``) wake-up's low is only bounded
+    (``low_ms_min``..``low_ms_max``) and its high is unknown: the UART reports
+    a break's start, never its release. CANary's own are host-measured.
+    """
+
+    at: str
+    origin: str
+    low_ms: float | None
+    low_ms_min: float | None
+    low_ms_max: float | None
+    high_ms: float | None
+    span_ms: float | None
+    span_ms_min: float | None
+    span_ms_max: float | None
+    idle_before_ms: float | None
+    timing_uncertainty_s: float | None
+    #: The wake-up's name in the profile (CANary's only).
+    wakeup: str | None
+    #: The module the following StartCommunication addressed, by label.
+    target: str | None
+    #: The StartCommunication request bytes seen after it (sniffed only).
+    start_communication: str | None
+    #: Whether the target answered StartCommunication; ``None``: not known.
+    answered: bool | None
+
+
+@dataclass
 class ExchangeReport:
     session: str
     first_at: str | None
@@ -329,6 +372,9 @@ class ExchangeReport:
     direction_corrections: int
     timing: TimingSummary
     notes: list[str] = field(default_factory=list)
+    wake_ups: list[WakeUp] = field(default_factory=list)
+    #: Sniffed StartCommunication requests with no stored break before them.
+    starts_without_break: int = 0
 
     def as_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -372,10 +418,11 @@ def exchange_report(
             "running (hardware.kline.enabled off, or no HAT), not a quiet line"
         )
     frames = wire_frames(frame)
-    if not frames:
+    wakes, starts_without_break = wake_ups(frame, profile, frames)
+    if not frames and not wakes:
         raise KlineReportError(
-            f"{session or 'session'}: kline rows but no FRAME rows — only values were "
-            "stored, so there is no wire traffic to report"
+            f"{session or 'session'}: kline rows but no FRAME or BREAK rows — only values "
+            "were stored, so there is no wire traffic to report"
         )
     exchanges, orphans = pair_exchanges(frames, profile)
     corrections = sum(1 for wf in frames if wf.stored_direction is not None)
@@ -403,20 +450,123 @@ def exchange_report(
             "predates K01.1). Wake-ups are not stored, so a StartCommunication the sniffer "
             "missed would carry the previous module forward."
         )
+    if starts_without_break and not any(w.origin == "foreign" for w in wakes):
+        notes.append(
+            f"{starts_without_break} sniffed StartCommunication requests and no sniffed "
+            "BREAK rows: this session predates break recording (H05.9), so how the tester "
+            "woke each module was not measured."
+        )
+    times = [wf.at for wf in frames] + [pd.Timestamp(w.at) for w in wakes]
     return ExchangeReport(
         session=session,
-        first_at=_iso(frames[0].at),
-        last_at=_iso(frames[-1].at),
+        first_at=_iso(min(times)),
+        last_at=_iso(max(times)),
         frames=len(frames),
         modules=modules,
         orphan_replies=len(orphans),
         direction_corrections=corrections,
         timing=_timing(frames),
         notes=notes,
+        wake_ups=wakes,
+        starts_without_break=starts_without_break,
     )
 
 
+def _float(value: object) -> float | None:
+    if value is None or isinstance(value, bool):
+        return None
+    try:
+        out = float(value)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return None
+    return None if np.isnan(out) else out
+
+
+def _is_start_request(wf: WireFrame) -> bool:
+    return (
+        wf.kind == "addressed"
+        and wf.direction == "tester"
+        and wf.payload[:1] == bytes([kp.SID_START_COMMUNICATION])
+    )
+
+
+def wake_ups(
+    frame: pd.DataFrame,
+    profile: KlineProfile,
+    frames: Sequence[WireFrame] | None = None,
+) -> tuple[list[WakeUp], int]:
+    """Every stored ``kline:BREAK``, attached to the StartCommunication that
+    came next with no other break or frame between; and how many sniffed
+    StartCommunication requests had no break before them."""
+    if frames is None:
+        frames = wire_frames(frame)
+    rows = _kline_rows(frame) if "source" in frame.columns else frame.iloc[0:0]
+    rows = rows[rows["channel"] == BREAK_CHANNEL]
+    breaks = [
+        (pd.Timestamp(ts), _metadata(meta))
+        for ts, meta in zip(rows["timestamp"], rows["metadata_json"], strict=True)
+    ]
+    events: list[tuple[pd.Timestamp, int, int]] = [(t, 0, i) for i, (t, _) in enumerate(breaks)]
+    events += [(wf.at, 1, i) for i, wf in enumerate(frames)]
+    events.sort()
+    following: dict[int, int] = {}  # break index -> the frame index right after it
+    preceded: set[int] = set()  # frames with a break right before them
+    for (_, kind, index), (_, next_kind, next_index) in zip(events, events[1:], strict=False):
+        if kind == 0 and next_kind == 1:
+            following[index] = next_index
+            preceded.add(next_index)
+    starts_without_break = sum(
+        1 for i, wf in enumerate(frames) if _is_start_request(wf) and i not in preceded
+    )
+    out: list[WakeUp] = []
+    for i, (at, meta) in enumerate(breaks):
+        origin = str(meta.get("origin", "unknown"))
+        target: str | None = None
+        start: str | None = None
+        answered: bool | None = None
+        if origin == "canary":
+            label = meta.get("module")
+            target = str(label) if label is not None else None
+            stored = meta.get("answered")
+            answered = stored if isinstance(stored, bool) else None
+        nxt = following.get(i)
+        if nxt is not None and _is_start_request(frames[nxt]):
+            request = frames[nxt]
+            target = profile.module_label(request.module)
+            start = request.raw.hex(" ")
+            reply = frames[nxt + 1] if nxt + 1 < len(frames) else None
+            answered = (
+                reply is not None
+                and reply.direction == "ecu"
+                and reply.payload[:1] == bytes([kp.SID_START_COMMUNICATION + kp.POSITIVE_OFFSET])
+                and reply.module == request.module
+            )
+        wakeup = meta.get("wakeup")
+        out.append(
+            WakeUp(
+                at=_iso(at),
+                origin=origin,
+                low_ms=_float(meta.get("low_ms")),
+                low_ms_min=_float(meta.get("low_ms_min")),
+                low_ms_max=_float(meta.get("low_ms_max")),
+                high_ms=_float(meta.get("high_ms")),
+                span_ms=_float(meta.get("span_ms")),
+                span_ms_min=_float(meta.get("span_ms_min")),
+                span_ms_max=_float(meta.get("span_ms_max")),
+                idle_before_ms=_float(meta.get("idle_before_ms")),
+                timing_uncertainty_s=_float(meta.get("timing_uncertainty_s")),
+                wakeup=str(wakeup) if wakeup is not None else None,
+                target=target,
+                start_communication=start,
+                answered=answered,
+            )
+        )
+    return out, starts_without_break
+
+
 def _timing(frames: Sequence[WireFrame]) -> TimingSummary:
+    if not frames:
+        return TimingSummary(0, 0, None, None, note="no frames stored")
     recorded = [wf.timing_uncertainty_s for wf in frames if wf.timing_uncertainty_s is not None]
     if not recorded:
         return TimingSummary(
@@ -532,6 +682,52 @@ def _fmt_s(value: float | None, digits: int = 3) -> str:
     return "—" if value is None else f"{value:.{digits}f}"
 
 
+def _range(low: float | None, high: float | None) -> str:
+    if low is None and high is None:
+        return "—"
+    return f"{_fmt_s(low, 1)}..{_fmt_s(high, 1)}"
+
+
+def _wake_up_lines(report: ExchangeReport) -> list[str]:
+    if not report.wake_ups:
+        return []
+    lines = [
+        "## Wake-ups",
+        "",
+        "Who woke the line before each StartCommunication. *low + high* runs from the "
+        "falling edge to the first byte after it. A sniffed wake-up's low is only "
+        "bounded (the UART reports a break's start, never its release), so its high is "
+        "unknown; CANary's own are host-clock readings around the break ioctls.",
+        "",
+        "| time | origin | wake-up | low ms | high ms | low + high ms (bounds) | ± ms | "
+        "idle before ms | StartCommunication | target | answered |",
+        "|---|---|---|---|---|---|---|---|---|---|---|",
+    ]
+    for w in report.wake_ups:
+        low = _fmt_s(w.low_ms, 1) if w.low_ms is not None else _range(w.low_ms_min, w.low_ms_max)
+        bounds = _range(w.span_ms_min, w.span_ms_max)
+        uncertainty = (
+            _fmt_s(w.timing_uncertainty_s * 1000.0, 1)
+            if w.timing_uncertainty_s is not None
+            else "unmeasured"
+        )
+        answered = "—" if w.answered is None else ("yes" if w.answered else "no")
+        lines.append(
+            f"| {w.at} | {w.origin} | {w.wakeup or '—'} | {low} | {_fmt_s(w.high_ms, 1)} | "
+            f"{_fmt_s(w.span_ms, 1)} ({bounds}) | {uncertainty} | "
+            f"{_fmt_s(w.idle_before_ms, 1)} | "
+            f"{'`' + w.start_communication + '`' if w.start_communication else '—'} | "
+            f"{w.target or '—'} | {answered} |"
+        )
+    if report.starts_without_break:
+        lines.append("")
+        lines.append(
+            f"{report.starts_without_break} sniffed StartCommunication requests had no "
+            "break stored before them."
+        )
+    return [*lines, ""]
+
+
 def render_markdown(report: ExchangeReport) -> str:
     lines = [
         f"# K-line exchanges: {report.session}",
@@ -555,6 +751,7 @@ def render_markdown(report: ExchangeReport) -> str:
     for note in report.notes:
         lines.append(f"> {note}")
         lines.append("")
+    lines += _wake_up_lines(report)
     for module in report.modules:
         lines += [
             f"## Module {module.module}" + (f" ({module.address})" if module.address else ""),

@@ -8,6 +8,8 @@ so wake-up and P3 timing are exact and the tests are instant.
 from __future__ import annotations
 
 import json
+import os
+import time
 from collections.abc import Callable, Mapping
 from pathlib import Path
 
@@ -24,8 +26,12 @@ from src.collection.kline.transport import (
     KlineTransportError,
     Mode,
     NoEchoError,
+    RxChunk,
     TransmitRefusedError,
     WakeupTimingError,
+    _open_serial,
+    break_marking_faults,
+    mark_breaks,
 )
 
 PROFILE = load_kline_profile(Path("data/nissan-xterra-2008/kline.yaml"))
@@ -134,6 +140,10 @@ def make(
 ) -> KlineTransport:
     the_port = port or FakePort(world, ecu)
 
+    def mark_port(port: object) -> bool:
+        world.log.append(("mark_breaks",))
+        return True
+
     def open_port() -> FakePort:
         world.log.append(("port_open",))
         return the_port
@@ -145,6 +155,7 @@ def make(
         open_lines=lambda: FakeLines(world),
         clock=world.clock,
         sleep=world.sleep,
+        mark_port=mark_port,
     )
 
 
@@ -389,3 +400,139 @@ def test_armed_passive_refuses_every_byte_by_name() -> None:
             with pytest.raises(PassiveArmedError, match="passive mode is armed"):
                 send()
         assert len([e for e in world.log if e[0] in ("write", "break")]) == written
+
+
+# --------------------------------------------------------------------------- breaks (H05.9)
+
+
+def test_sniff_mode_marks_breaks_before_en_rises_and_command_mode_does_not() -> None:
+    world = World()
+    with make(world, mode=Mode.SNIFF):
+        pass
+    assert world.log[:3] == [("port_open",), ("mark_breaks",), ("lines_claimed_low",)]
+    world = World()
+    with make(world):
+        pass
+    assert ("mark_breaks",) not in world.log
+
+
+def test_a_sniff_chunk_says_its_bytes_are_marked() -> None:
+    world = World()
+    port = FakePort(world)
+    chunks: list[RxChunk] = []
+    with make(world, mode=Mode.SNIFF, port=port) as transport:
+        port.rx += b"\xff\x00\x00"  # after open, which discards the mode change
+        transport.listen(lambda: bool(chunks) or world.t > 1.0, chunks.append)
+    assert chunks[0].marked and chunks[0].data == b"\xff\x00\x00"
+
+
+def _pty() -> tuple[int, int, str]:
+    master, slave = os.openpty()
+    return master, slave, os.ttyname(slave)
+
+
+def test_the_real_sniff_port_reads_marked_bytes_and_says_so() -> None:
+    """End to end on a pseudo-terminal: the default ``mark_breaks`` sets the
+    flags through termios, they read back, and a literal 0xFF arrives doubled."""
+    serial = pytest.importorskip("serial")
+    termios = pytest.importorskip("termios")
+    master, slave, name = _pty()
+    try:
+        port = serial.Serial(name, 10400, timeout=0)
+        world = World()
+        transport = KlineTransport(
+            PROFILE,
+            mode=Mode.SNIFF,
+            open_port=lambda: port,
+            open_lines=lambda: FakeLines(world),
+        )
+        with transport:
+            iflag = termios.tcgetattr(port.fileno())[0]
+            assert break_marking_faults(iflag) == []
+            os.write(master, b"\xff\x81")
+            chunks: list[RxChunk] = []
+            deadline = time.monotonic() + 2.0
+            transport.listen(
+                lambda: sum(len(c.data) for c in chunks) >= 3 or time.monotonic() > deadline,
+                chunks.append,
+            )
+        assert b"".join(c.data for c in chunks) == b"\xff\xff\x81"
+        assert all(c.marked for c in chunks)
+    finally:
+        os.close(master)
+        os.close(slave)
+
+
+def test_pyserial_alone_does_not_mark_breaks_so_the_transport_must() -> None:
+    """Why marking lives in ``KlineTransport.open``: a port pyserial opened has
+    PARMRK clear, so a sniffer that skipped the step would see breaks as data."""
+    termios = pytest.importorskip("termios")
+    pytest.importorskip("serial")
+    master, slave, name = _pty()
+    try:
+        port = _open_serial(name, 10400)
+        try:
+            iflag = termios.tcgetattr(port.fileno())[0]  # type: ignore[attr-defined]
+            assert "PARMRK clear" in break_marking_faults(iflag)
+        finally:
+            port.close()
+    finally:
+        os.close(master)
+        os.close(slave)
+
+
+def test_mark_breaks_refuses_a_port_it_cannot_mark(monkeypatch: pytest.MonkeyPatch) -> None:
+    termios = pytest.importorskip("termios")
+    serial = pytest.importorskip("serial")
+    with pytest.raises(KlineTransportError, match="no file descriptor"):
+        mark_breaks(FakePort(World()))
+    master, slave, name = _pty()
+    try:
+        port = serial.Serial(name, 10400, timeout=0)
+        monkeypatch.setattr(termios, "tcsetattr", lambda *_args: None)
+        with pytest.raises(KlineTransportError, match="PARMRK clear"):
+            mark_breaks(port)
+        port.close()
+    finally:
+        os.close(master)
+        os.close(slave)
+
+
+class _BreakEchoPort(FakePort):
+    """Reads its own wake-up back as an unmarked port does: one 0x00."""
+
+    @property
+    def break_condition(self) -> bool:
+        return self._break
+
+    @break_condition.setter
+    def break_condition(self, value: bool) -> None:
+        if self._break and not value:
+            self.rx += b"\x00"
+        self._break = value
+        self.world.log.append(("break", value))
+
+
+def test_every_wake_up_canary_sends_is_kept_with_its_measured_low_and_high() -> None:
+    world = World()
+    port = _BreakEchoPort(world, xterra(answer_wakeup=1))
+    with make(world, port=port) as transport:
+        transport.start_communication(0x10)
+        first, second = transport.take_wake_pulses()
+        assert transport.take_wake_pulses() == []
+    long_low, fast = PROFILE.wakeups[0], PROFILE.wakeups[1]
+    assert (first.name, first.target, first.answered) == (long_low.name, 0x10, False)
+    assert (second.name, second.target, second.answered) == (fast.name, 0x10, True)
+    assert second.low_ms == pytest.approx(fast.low_ms)
+    assert second.high_ms == pytest.approx(fast.high_ms)
+    assert first.readback == b"\x00" and first.refused is None
+
+
+def test_a_refused_wake_up_is_still_kept() -> None:
+    world = World()
+    world.overshoot = 0.05
+    with make(world, ecu=xterra()) as transport:
+        with pytest.raises(WakeupTimingError):
+            transport.wake(PROFILE.wakeups[0])
+        (pulse,) = transport.take_wake_pulses()
+    assert pulse.refused == "host timing" and pulse.low_ms > PROFILE.wakeups[0].low_ms

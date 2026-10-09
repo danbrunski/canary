@@ -19,6 +19,21 @@ done out of order by a caller:
 ``sniff`` mode listens with the pull-up off and cannot transmit at all; that
 is the mode for watching UpRev or a scan tool (H06). ``command`` mode is the
 tester: pull-up on, wake-ups, requests.
+
+**Sniffing sees wake-ups (H05.9).** A wake-up pulse reaches the UART as a
+break, which a tty in its default mode delivers as a bare ``0x00`` — the same
+byte as a data zero — or drops. :meth:`KlineTransport.open` therefore puts a
+sniffing port in mark-parity mode (:func:`mark_breaks`: ``PARMRK | INPCK`` on,
+``IGNBRK``, ``BRKINT``, ``IGNPAR``, ``ISTRIP`` off) and reads the flags back,
+refusing to sniff if they did not stick; every :class:`RxChunk` says whether
+its bytes are marked. The kernel then reports a break as ``FF 00 00``, a
+framing or parity error as ``FF 00 <byte>`` and a literal ``0xFF`` as
+``FF FF``; :class:`~src.collection.kline.sniff.FrameDecoder` un-escapes them.
+Command mode is unchanged (its echo checks compare raw bytes).
+
+Every wake-up CANary sends is kept as a :class:`WakePulse` (host-measured low
+and high, what the port read back, whether the module answered), so the
+collector can store it beside a tester's sniffed wake-ups.
 """
 
 from __future__ import annotations
@@ -100,11 +115,20 @@ class RxChunk:
     quiet_s: float
     after: float
     char_s: float
+    #: The port was in mark-parity mode (:func:`mark_breaks`): ``data`` holds
+    #: ``FF 00 00`` for a break, ``FF 00 xx`` for a framing/parity error and
+    #: ``FF FF`` for a literal ``0xFF``. ``False``: raw bytes, as every
+    #: capture before H05.9 was read.
+    marked: bool = False
 
     def byte_bounds(self) -> list[tuple[float, float]]:
         """``(earliest, latest)`` arrival of each byte: bytes take ``char_s``
         each on the wire, the last arrived by ``at``, the first after ``after``."""
-        n = len(self.data)
+        return self.char_bounds(len(self.data))
+
+    def char_bounds(self, n: int) -> list[tuple[float, float]]:
+        """:meth:`byte_bounds` for ``n`` wire characters: a marked chunk holds
+        fewer characters than bytes (``FF 00 00`` is one break)."""
         return [
             (
                 min(self.after + (k + 1) * self.char_s, self.at - (n - 1 - k) * self.char_s),
@@ -158,6 +182,87 @@ def _open_serial(tty: str, baud: int) -> SerialPort:
     return port
 
 
+#: Input flags a sniffing port must have set, and must have clear, for a break
+#: to reach the reader as ``FF 00 00`` (termios(3), "PARMRK").
+MARK_SET_FLAGS = ("PARMRK", "INPCK")
+MARK_CLEAR_FLAGS = ("IGNBRK", "BRKINT", "IGNPAR", "ISTRIP")
+
+
+def mark_breaks(port: SerialPort) -> bool:
+    """Put ``port`` in mark-parity mode and prove it took; returns ``True``.
+
+    Raises :class:`KlineTransportError` if the port has no file descriptor or
+    the flags read back wrong: a sniffer whose breaks arrive as bare zeros
+    cannot tell a tester's wake-up from data, which is how the SRS wake-up
+    went unmeasured until 2026-10-08. pyserial clears ``PARMRK`` whenever it
+    reconfigures a port, so this runs after the port is opened and nothing
+    reconfigures it afterwards.
+    """
+    import termios
+
+    fileno = getattr(port, "fileno", None)
+    if fileno is None:
+        raise KlineTransportError("the sniff port has no file descriptor to put in PARMRK mode")
+    fd = int(fileno())
+    attrs = termios.tcgetattr(fd)
+    for name in MARK_SET_FLAGS:
+        attrs[0] |= getattr(termios, name)
+    for name in MARK_CLEAR_FLAGS:
+        attrs[0] &= ~getattr(termios, name)
+    termios.tcsetattr(fd, termios.TCSANOW, attrs)
+    missing = break_marking_faults(termios.tcgetattr(fd)[0])
+    if missing:
+        raise KlineTransportError(
+            "the sniff port refused mark-parity mode (" + ", ".join(missing) + "): breaks "
+            "would read as data zeros and wake-ups would go unrecorded"
+        )
+    return True
+
+
+def break_marking_faults(iflag: int) -> list[str]:
+    """What is wrong with ``iflag`` for break marking (empty: nothing)."""
+    import termios
+
+    faults = [f"{n} clear" for n in MARK_SET_FLAGS if not iflag & getattr(termios, n)]
+    faults += [f"{n} set" for n in MARK_CLEAR_FLAGS if iflag & getattr(termios, n)]
+    return faults
+
+
+@dataclass
+class WakePulse:
+    """One wake-up CANary drove, timed on the host clock.
+
+    ``fall`` is read just before the break is asserted and ``release`` just
+    after it is lifted, so ``low_ms`` includes the two ioctls (tens of µs);
+    ``end`` is when the high wait ended — the first byte after it went out no
+    earlier. ``readback`` is what the port returned for the pulse before the
+    input was discarded (an unmarked command port reads a break as ``00``).
+    """
+
+    name: str
+    wanted_low_ms: float
+    wanted_high_ms: float
+    fall: float
+    release: float
+    end: float
+    readback: bytes
+    char_s: float
+    #: Set by :meth:`KlineTransport.start_communication`: the module it was
+    #: for, and whether that module answered.
+    target: int | None = None
+    answered: bool | None = None
+    #: Why the pulse was not used (a host timing refusal), when it was not.
+    refused: str | None = None
+
+    @property
+    def low_ms(self) -> float:
+        return (self.release - self.fall) * 1000.0
+
+    @property
+    def high_ms(self) -> float:
+        return (self.end - self.release) * 1000.0
+
+
 def _open_lines(pins: HatPins) -> OutputLines:
     from src.collection.gpio_lines import GpioOutputs
 
@@ -177,6 +282,7 @@ class KlineTransport:
         open_lines: Callable[[], OutputLines] | None = None,
         clock: Callable[[], float] = time.monotonic,
         sleep: Callable[[float], None] = time.sleep,
+        mark_port: Callable[[SerialPort], bool] = mark_breaks,
     ) -> None:
         self.profile = profile
         self.mode = mode
@@ -188,8 +294,11 @@ class KlineTransport:
         self._sleep = sleep
         self._port: SerialPort | None = None
         self._lines: OutputLines | None = None
+        self._mark_port = mark_port
+        self._marked = False
         self._last_rx = float("-inf")
         self.char_s = 10.0 / profile.baud  # 8N1: ten bit times per byte
+        self._pulses: list[WakePulse] = []
 
     # ------------------------------------------------------------------ lifecycle
 
@@ -205,6 +314,9 @@ class KlineTransport:
             raise KlineTransportError("transport already open")
         port = self._open_port()  # 1. the tty first
         try:
+            # A sniffer that cannot see breaks cannot see wake-ups: marking is
+            # part of opening the port, not a step a caller may skip.
+            self._marked = self._mark_port(port) if self.mode is Mode.SNIFF else False
             lines = self._open_lines()  # claimed low
             try:
                 lines.set({self.pins.enable: True, self.pins.pullup: self.mode is Mode.COMMAND})
@@ -292,6 +404,7 @@ class KlineTransport:
                     quiet_s=max(0.0, seen_idle - last_data),
                     after=seen_idle,
                     char_s=self.char_s,
+                    marked=self._marked,
                 )
             )
             last_data = seen_idle = now
@@ -332,23 +445,45 @@ class KlineTransport:
     # ------------------------------------------------------------------ protocol
 
     def wake(self, wakeup: Wakeup) -> float:
-        """Hold the line low then release it; returns the measured low (ms)."""
+        """Hold the line low then release it; returns the measured low (ms).
+        Every pulse that reached the wire is kept (:meth:`take_wake_pulses`),
+        a refused one included."""
         self._require_command()
         self._idle_for(IDLE_BEFORE_WAKEUP_S)
         start = self._clock()
         self.port.break_condition = True
         self._sleep(wakeup.low_ms / 1000.0)
         self.port.break_condition = False
-        measured_ms = (self._clock() - start) * 1000.0
+        release = self._clock()
+        measured_ms = (release - start) * 1000.0
         self._sleep(wakeup.high_ms / 1000.0)
+        end = self._clock()
+        readback = self.port.read(4096)  # kept: what the HAT heard of its own pulse
         self.port.reset_input_buffer()  # the low reads back as a break
+        pulse = WakePulse(
+            name=wakeup.name,
+            wanted_low_ms=float(wakeup.low_ms),
+            wanted_high_ms=float(wakeup.high_ms),
+            fall=start,
+            release=release,
+            end=end,
+            readback=bytes(readback),
+            char_s=self.char_s,
+        )
+        self._pulses.append(pulse)
         tolerance = max(WAKEUP_TOLERANCE_MS, wakeup.low_ms * WAKEUP_TOLERANCE_FRACTION)
         if abs(measured_ms - wakeup.low_ms) > tolerance:  # 3.
+            pulse.refused = "host timing"
             raise WakeupTimingError(
                 f"{wakeup.name}: held low {measured_ms:.1f} ms, wanted {wakeup.low_ms} "
                 f"± {tolerance:.1f}"
             )
         return measured_ms
+
+    def take_wake_pulses(self) -> list[WakePulse]:
+        """The wake-ups sent since the last call, oldest first."""
+        pulses, self._pulses = self._pulses, []
+        return pulses
 
     def start_communication(self, target: int | None = None) -> kp.StartCommunicationReply:
         """Try each wake-up in profile order until ``target`` (default: the
@@ -357,13 +492,16 @@ class KlineTransport:
         address = self.profile.ecm_address if target is None else target
         request = kp.start_communication(address, self.profile.tester_address)
         for wakeup in self.profile.wakeups:
+            sent = len(self._pulses)
             try:
                 self.wake(wakeup)
                 self.send_frame(request)
                 raw = self.read_frame("addressed", self.profile.timing.p2_max_ms / 1000.0)
             except (KlineTimeoutError, WakeupTimingError) as exc:
                 failures.append(f"{wakeup.name}: {exc}")
+                self._note_pulse(sent, address, answered=False)
                 continue
+            self._note_pulse(sent, address, answered=True)
             reply = kp.parse_start_communication_reply(raw)
             if reply.target != self.profile.tester_address:
                 raise KlineTransportError(
@@ -376,6 +514,11 @@ class KlineTransport:
                 )
             return reply
         raise KlineTimeoutError("no StartCommunication reply: " + "; ".join(failures))
+
+    def _note_pulse(self, sent: int, target: int, *, answered: bool) -> None:
+        if len(self._pulses) > sent:
+            self._pulses[-1].target = target
+            self._pulses[-1].answered = answered
 
     def request(self, payload: bytes) -> bytes:
         """Send one request after StartCommunication; return the positive
@@ -412,6 +555,8 @@ __all__ = [
     "KlineTimeoutError",
     "KlineTransport",
     "KlineTransportError",
+    "MARK_CLEAR_FLAGS",
+    "MARK_SET_FLAGS",
     "Mode",
     "NoEchoError",
     "OutputLines",
@@ -419,5 +564,8 @@ __all__ = [
     "SerialPort",
     "PassiveArmedError",
     "TransmitRefusedError",
+    "WakePulse",
     "WakeupTimingError",
+    "break_marking_faults",
+    "mark_breaks",
 ]

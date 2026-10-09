@@ -727,6 +727,27 @@ another tester is on the K-line, or while another function is running, and
 503 when no K-line collector is running. 504 if the collector did not finish
 in 20 s.
 
+### Wake-ups (`kline:BREAK`)
+
+Every K-line wake-up is stored as a `kline:BREAK` row (H05.13), value low +
+high in ms when known, so a scan tool's wake-up and CANary's can be compared in
+one session (`tools/kline_exchange_report.py` lists them under **Wake-ups**,
+each with the StartCommunication it led to and whether the module answered).
+
+- `origin: foreign`: a break the sniffer heard. The sniff port runs in
+  mark-parity mode (`PARMRK`, set and read back by `KlineTransport.open`), so
+  the kernel reports a break as `FF 00 00`. The UART reports a break about one
+  character (~1 ms at 10400 baud) after the line falls and never reports its
+  release, so `low_ms` and `high_ms` are `null`; `low_ms_min`/`low_ms_max`
+  bound the low, and `span_ms` (the value) runs from the falling edge to the
+  next byte's start bit, within `timing_uncertainty_s` (read-time bounds plus
+  the UART's 32-bit receive timeout). `detected_ns`, `prev_activity_ns` and
+  `next_byte_ns` are the host's monotonic clock.
+- `origin: canary`: a wake-up CANary drove. `low_ms` and `high_ms` are
+  host-clock readings around the break ioctls (pin latency unmeasured, so
+  `timing_uncertainty_s` is `null`), with `wakeup` (the profile's name),
+  `module`, `answered` and `readback` (what the port read of its own pulse).
+
 ## DID sweep + diff
 
 The interactive `tools/scan_constant_dids.py` (multi-pass, pauses between

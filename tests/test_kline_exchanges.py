@@ -32,8 +32,9 @@ from src.analysis.kline_exchanges import (
     wire_frames,
 )
 from src.collection.kline.profile import load_kline_profile
-from src.collection.kline.sniff import FrameDecoder
-from src.collection.kline_collector import SniffRecorder
+from src.collection.kline.sniff import FrameDecoder, SniffedBreak
+from src.collection.kline.transport import RxChunk, WakePulse
+from src.collection.kline_collector import SniffRecorder, break_record, wake_record
 from src.preprocessing.loader import read_session
 from src.signals.pairing import PairingPolicy
 from src.storage.parquet_writer import write_records_to_parquet
@@ -202,7 +203,7 @@ def test_a_session_without_kline_says_which_kind_of_empty(tmp_path: Path) -> Non
     with pytest.raises(KlineReportError, match="collector was not running"):
         exchange_report(_session(tmp_path, [rpm], "a"), PROFILE)
     value = TelemetryRecord.from_epoch(EPOCH, source="kline", channel="ECM:1201", value="02c8")
-    with pytest.raises(KlineReportError, match="no FRAME rows"):
+    with pytest.raises(KlineReportError, match="no FRAME or BREAK rows"):
         exchange_report(_session(tmp_path, [value], "b"), PROFILE)
 
 
@@ -255,3 +256,94 @@ def test_pairing_refuses_rather_than_matching_aggregates(tmp_path: Path) -> None
     too_far = _pairing_session(tmp_path / "far", [232 + k for k in range(24)])
     with pytest.raises(ComparisonRefusedError, match="aligned pairs"):
         pair_value(too_far, "kline:ABS:1202", "decoded:ECM_RPM", policy=PairingPolicy.within("5ms"))
+
+
+# --------------------------------------------------------------------------- wake-ups (H05.9)
+
+SRS_START = bytes.fromhex("81 58 fc 81 56")
+SRS_START_REPLY = bytes.fromhex("83 fc 58 c1 6d 8f 94")
+
+
+def _wake_session(tmp_path: Path, *, canary_answered: bool | None = None) -> pd.DataFrame:
+    """Known answer, through the sniffer's own recording path: ``FF 00 00`` at
+    t0, then ``81 58 FC 81 56`` at t0 + 50 ms, then the SRS's reply. With
+    ``canary_answered``, CANary's own 25/25 wake-up of the SRS a second later."""
+    decoder, recorder = FrameDecoder(), SniffRecorder(PROFILE, {})
+    t0 = 500.0
+    to_epoch = EPOCH - t0
+    chunks = [
+        (t0, b"\xff\x00\x00", 0.5),
+        (t0 + 0.050, SRS_START, 0.049),
+        (t0 + 0.080, SRS_START_REPLY, 0.029),
+    ]
+    records: list[TelemetryRecord] = []
+    for at, data, quiet in chunks:
+        chunk = RxChunk(at=at, data=data, quiet_s=quiet, after=at - quiet, char_s=0.0, marked=True)
+        for event in decoder.feed_chunk_events(chunk):
+            if isinstance(event, SniffedBreak):
+                records.append(break_record(event, to_epoch))
+            else:
+                records += recorder.observe(event, event.finished + to_epoch)
+    if canary_answered is not None:
+        pulse = WakePulse(
+            name="iso14230-fast",
+            wanted_low_ms=25.0,
+            wanted_high_ms=25.0,
+            fall=t0 + 1.0,
+            release=t0 + 1.025,
+            end=t0 + 1.050,
+            readback=b"\x00",
+            char_s=10 / 10400,
+            target=0x58,
+            answered=canary_answered,
+        )
+        records.append(wake_record(pulse, to_epoch, PROFILE.module_label(0x58)))
+    return _session(tmp_path, records, "2026-10-08T120000")
+
+
+def test_one_break_before_the_srs_start_spans_fifty_ms(tmp_path: Path) -> None:
+    report = exchange_report(_wake_session(tmp_path), PROFILE)
+    (wake,) = report.wake_ups
+    assert wake.origin == "foreign"
+    assert wake.target == "SRS"
+    assert wake.start_communication == "81 58 fc 81 56"
+    assert wake.answered is True
+    assert wake.span_ms == pytest.approx(50.0, abs=0.01)
+    # The UART never reports the release: the low is only bounded.
+    assert wake.low_ms is None and wake.high_ms is None
+    assert wake.low_ms_max is not None and wake.span_ms is not None
+    assert wake.low_ms_max >= wake.span_ms
+    assert report.starts_without_break == 0
+
+
+def test_canarys_wake_up_sits_beside_the_testers(tmp_path: Path) -> None:
+    report = exchange_report(_wake_session(tmp_path, canary_answered=False), PROFILE)
+    tester, canary = report.wake_ups
+    assert (tester.origin, canary.origin) == ("foreign", "canary")
+    assert canary.low_ms == pytest.approx(25.0) and canary.high_ms == pytest.approx(25.0)
+    assert (canary.target, canary.answered, canary.wakeup) == ("SRS", False, "iso14230-fast")
+    markdown = render_markdown(report)
+    assert "## Wake-ups" in markdown
+    assert "| canary | iso14230-fast | 25.0 | 25.0 | 50.0" in markdown
+    assert "| foreign | — |" in markdown
+    json.dumps(report.as_dict(), default=str)
+
+
+def test_a_session_before_break_recording_says_its_wake_ups_were_not_measured(
+    tmp_path: Path,
+) -> None:
+    stream = kline_wire(abs_scan_tool_frames(cycles=2, brake_cycles=()))
+    report = exchange_report(_session(tmp_path, _records(stream), "x"), PROFILE)
+    assert report.wake_ups == [] and report.starts_without_break >= 1
+    assert any("predates break recording" in note for note in report.notes)
+
+
+def test_only_canarys_wake_ups_still_report(tmp_path: Path) -> None:
+    pulse = WakePulse(
+        "long-low", 518.9, 18.1, 10.0, 10.519, 10.537, b"\x00", 10 / 10400, 0x58, False
+    )
+    record = wake_record(pulse, EPOCH - 10.0, "SRS")
+    report = exchange_report(_session(tmp_path, [record], "y"), PROFILE)
+    (wake,) = report.wake_ups
+    assert wake.origin == "canary" and wake.answered is False
+    assert wake.low_ms == pytest.approx(519.0) and report.modules == []

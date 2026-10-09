@@ -12,9 +12,12 @@ import pytest
 from src.collection.kline import protocol as kp
 from src.collection.kline.profile import load_kline_profile
 from src.collection.kline.sniff import (
+    BREAK_FOLLOW_S,
     INTER_BYTE_GAP_S,
+    UART_RX_TIMEOUT_CHARS,
     DefinitionTracker,
     FrameDecoder,
+    SniffedBreak,
     SniffedFrame,
     exchanges,
 )
@@ -232,6 +235,8 @@ def _listen(stall_s: float) -> list[RxChunk]:
         open_lines=lambda: host,
         clock=host.clock,
         sleep=host.sleep,
+        # The fixture was read unmarked (2026-09-23): its bytes are raw.
+        mark_port=lambda port: False,
     )
     chunks: list[RxChunk] = []
     with transport:
@@ -319,3 +324,149 @@ def test_a_reply_whose_request_was_missed_still_reads_as_a_reply() -> None:
     previous, orphan = frames[at - 1], frames[at]
     assert previous.payload == b"\x7e"  # nothing pending when it arrived
     assert orphan.direction == "ecu"
+
+
+# --------------------------------------------------------------------------- breaks (H05.9)
+
+SRS_START = bytes.fromhex("81 58 fc 81 56")
+SRS_START_REPLY = bytes.fromhex("83 fc 58 c1 6d 8f 94")
+BREAK = b"\xff\x00\x00"
+
+
+def _marked(data: bytes) -> bytes:
+    """``data`` as a PARMRK port delivers it: every literal 0xFF doubled."""
+    return data.replace(b"\xff", b"\xff\xff")
+
+
+def _chunk(at: float, data: bytes, *, quiet_s: float = 0.1, char_s: float = 0.0) -> RxChunk:
+    return RxChunk(
+        at=at, data=data, quiet_s=quiet_s, after=at - quiet_s, char_s=char_s, marked=True
+    )
+
+
+def test_a_break_then_the_srs_start_gives_one_wake_up_spanning_fifty_ms() -> None:
+    """Known answer: ``FF 00 00`` at t0, ``81 58 FC 81 56`` at t0 + 50 ms."""
+    decoder = FrameDecoder()
+    t0 = 100.0
+    events = decoder.feed_chunk_events(_chunk(t0, BREAK))
+    assert events == []  # the break waits for its next byte
+    events = decoder.feed_chunk_events(_chunk(t0 + 0.050, SRS_START, quiet_s=0.049))
+    breaks = [e for e in events if isinstance(e, SniffedBreak)]
+    frames = [e for e in events if isinstance(e, SniffedFrame)]
+    assert len(breaks) == 1 and events.index(breaks[0]) < events.index(frames[0])
+    assert [f.raw for f in frames] == [SRS_START]
+    brk = breaks[0]
+    assert brk.span_s == pytest.approx(0.050, abs=1e-9)
+    assert brk.detected == t0 and brk.next_byte == t0 + 0.050
+    assert decoder.stats.breaks == 1 and decoder.stats.wakeups == 1
+
+
+def test_at_ten_k_four_hundred_baud_the_span_carries_its_honest_bounds() -> None:
+    """Real character time: the span estimate sits inside its bounds, and the
+    uncertainty covers the read model plus the UART's receive timeout."""
+    char_s = 10 / 10400
+    decoder = FrameDecoder()
+    t0 = 100.0
+    decoder.feed_chunk_events(_chunk(t0, BREAK, char_s=char_s))
+    events = decoder.feed_chunk_events(_chunk(t0 + 0.050, SRS_START, quiet_s=0.045, char_s=char_s))
+    brk = next(e for e in events if isinstance(e, SniffedBreak))
+    span = brk.span_s
+    bounds = brk.span_bounds_s
+    assert span is not None and bounds is not None
+    # The first byte of the frame arrived four characters before the read.
+    assert span == pytest.approx(0.050 - 4 * char_s)
+    assert bounds[0] <= span <= bounds[1]
+    assert brk.timing_uncertainty_s >= UART_RX_TIMEOUT_CHARS * char_s
+    low_min, low_max = brk.low_bounds_s
+    assert low_min == char_s and low_max == bounds[1]
+
+
+def test_escaped_ff_is_one_literal_byte_even_split_across_reads() -> None:
+    reply = kp.encode_length_frame(b"\x61\xff\x01")  # a value byte of 0xFF
+    assert b"\xff" in reply
+    decoder = FrameDecoder()
+    got = decoder.feed_chunk(_chunk(1.0, _marked(SRS_START)))
+    got += decoder.feed_chunk(_chunk(1.03, SRS_START_REPLY, quiet_s=0.029))
+    marked = _marked(reply)
+    cut = marked.index(b"\xff") + 1  # between the two FFs
+    got += decoder.feed_chunk(_chunk(1.06, marked[:cut], quiet_s=0.029))
+    got += decoder.feed_chunk(_chunk(1.061, marked[cut:], quiet_s=0.0))
+    assert [f.raw for f in got] == [SRS_START, SRS_START_REPLY, reply]
+    assert got[-1].module == 0x58
+    assert decoder.stats.breaks == 0
+
+
+def test_a_framing_error_byte_is_counted_and_still_decoded_as_data() -> None:
+    raw = bytearray(SRS_START)
+    marked = raw[:2] + b"\xff\x00" + raw[2:3] + raw[3:]  # FF 00 FC: FC with a framing error
+    decoder = FrameDecoder()
+    frames = decoder.feed_chunk(_chunk(1.0, bytes(marked)))
+    assert [f.raw for f in frames] == [SRS_START]
+    assert decoder.stats.framing_errors == 1 and decoder.stats.breaks == 0
+
+
+def test_in_a_marked_stream_a_bare_zero_is_data_not_a_wake_up() -> None:
+    decoder = FrameDecoder()
+    decoder.feed_chunk(_chunk(1.0, SRS_START + SRS_START_REPLY))
+    decoder.feed_chunk(_chunk(1.5, b"\x00", quiet_s=0.4))
+    assert decoder.stats.wakeups == 0
+    # Still in the SRS session: the next length frame keeps its module.
+    frames = decoder.feed_chunk(_chunk(2.0, kp.encode_length_frame(b"\x3e"), quiet_s=0.4))
+    assert frames[0].module == 0x58
+
+
+def test_a_break_mid_frame_abandons_it_and_ends_the_session() -> None:
+    decoder = FrameDecoder()
+    decoder.feed_chunk(_chunk(1.0, SRS_START + SRS_START_REPLY))
+    decoder.feed_chunk(_chunk(1.5, b"\x03\x21", quiet_s=0.4))
+    decoder.feed_chunk(_chunk(1.501, BREAK, quiet_s=0.0))
+    assert decoder.stats.abandoned == 1 and decoder.stats.wakeups == 1
+    frames = decoder.feed_chunk(_chunk(1.6, kp.encode_length_frame(b"\x3e"), quiet_s=0.09))
+    # The session ended with the wake-up: the frame belongs to no known module.
+    assert [f.module for f in frames] == [None]
+
+
+def test_a_break_nothing_follows_is_reported_without_a_next_byte() -> None:
+    decoder = FrameDecoder()
+    decoder.feed_chunk_events(_chunk(5.0, BREAK))
+    assert decoder.flush_breaks(5.0 + BREAK_FOLLOW_S / 2) == []
+    (brk,) = decoder.flush_breaks(5.0 + BREAK_FOLLOW_S * 2)
+    assert brk.next_byte is None and brk.span_s is None and brk.span_bounds_s is None
+    assert brk.timing_uncertainty_s > 0
+    assert decoder.flush_breaks(100.0, force=True) == []
+
+
+def test_a_break_followed_by_another_names_it() -> None:
+    decoder = FrameDecoder()
+    decoder.feed_chunk_events(_chunk(5.0, BREAK))
+    (first,) = decoder.feed_chunk_events(_chunk(5.2, BREAK, quiet_s=0.19))
+    assert isinstance(first, SniffedBreak)
+    assert first.next_break == 5.2 and first.next_byte is None
+    assert decoder.stats.breaks == 2
+
+
+def test_uprevs_session_marked_decodes_byte_for_byte_as_unmarked() -> None:
+    """The whole UpRev session as a PARMRK port would deliver it: FFs doubled,
+    each wake-up zero as ``FF 00 00``. Same frames, and one break per wake-up."""
+    plain = FrameDecoder()
+    plain_frames: list[SniffedFrame] = []
+    marked_bytes = bytearray()
+    last = STREAM[0][0]
+    for at, byte in STREAM:
+        before = plain.stats.wakeups
+        plain_frames += plain.feed(at, byte, quiet_s=at - last)
+        last = at
+        if plain.stats.wakeups > before:
+            marked_bytes += BREAK
+        else:
+            marked_bytes += _marked(bytes([byte]))
+    assert plain.stats.wakeups >= 1
+    # Feed the marked stream in 7-byte reads, splitting escapes anywhere.
+    decoder = FrameDecoder()
+    marked_frames: list[SniffedFrame] = []
+    for k in range(0, len(marked_bytes), 7):
+        piece = bytes(marked_bytes[k : k + 7])
+        marked_frames += decoder.feed_chunk(_chunk(1.0 + k, piece, quiet_s=0.0))
+    assert [f.raw for f in marked_frames] == [f.raw for f in plain_frames]
+    assert [f.module for f in marked_frames] == [f.module for f in plain_frames]
+    assert decoder.stats.breaks == plain.stats.wakeups

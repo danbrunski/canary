@@ -17,7 +17,12 @@ from src.collection.kline import protocol as kp
 from src.collection.kline.plan import resolve_plan
 from src.collection.kline.profile import KlineProfile
 from src.collection.kline.sessions import MODULE_SESSIONS
-from src.collection.kline.transport import EchoMismatchError, KlineTimeoutError, RxChunk
+from src.collection.kline.transport import (
+    EchoMismatchError,
+    KlineTimeoutError,
+    RxChunk,
+    WakePulse,
+)
 from src.collection.kline_collector import LOCAL_ID, KlineCollector, plan_records
 from src.collection.reconnect import ReconnectPolicy
 from src.config import KlineConfig
@@ -77,6 +82,9 @@ class FakeTransport:
 
     def stop_communication(self) -> None:
         self.calls.append("stop")
+
+    def take_wake_pulses(self) -> list[WakePulse]:
+        return []
 
 
 def _collector(entries: list[tuple[str, ...]], **kwargs: object) -> KlineCollector:
@@ -862,3 +870,143 @@ async def test_a_verifier_claim_after_the_plan_resolves_still_wins() -> None:
     await task
     assert FakeTransport.instances == []
     assert tx_gate.snapshot()["ecm_session_claims"].keys() == {"memory_verify"}
+
+
+# --------------------------------------------------------------------------- breaks (H05.9)
+
+SRS_START = bytes.fromhex("81 58 fc 81 56")
+SRS_START_REPLY = bytes.fromhex("83 fc 58 c1 6d 8f 94")
+
+
+class MarkedSniffTransport(FakeSniffTransport):
+    """A scan tool waking the SRS, read through a PARMRK port: a break, then
+    StartCommunication 50 ms later, then the module's reply."""
+
+    def __init__(self, mode: object) -> None:
+        super().__init__([], mode)
+        t0 = time.monotonic()
+        self.chunks = deque(
+            [
+                RxChunk(
+                    at=t0,
+                    data=b"\xff\x00\x00",
+                    quiet_s=0.5,
+                    after=t0 - 0.5,
+                    char_s=0.0,
+                    marked=True,
+                ),
+                RxChunk(
+                    at=t0 + 0.05,
+                    data=SRS_START,
+                    quiet_s=0.049,
+                    after=t0 + 0.001,
+                    char_s=0.0,
+                    marked=True,
+                ),
+                RxChunk(
+                    at=t0 + 0.08,
+                    data=SRS_START_REPLY,
+                    quiet_s=0.029,
+                    after=t0 + 0.051,
+                    char_s=0.0,
+                    marked=True,
+                ),
+            ]
+        )
+        self.stream = self.chunks  # type: ignore[assignment]  # drained when empty
+
+    def listen(self, until: Callable[[], bool], sink: Callable[[RxChunk], None]) -> None:
+        while self.chunks and not until():
+            sink(self.chunks.popleft())
+        while not until():
+            time.sleep(0.001)
+
+
+async def test_a_sniffed_wake_up_is_stored_before_the_start_it_led_to() -> None:
+    FakeSniffTransport.instances.clear()
+    collector = KlineCollector(
+        KlineConfig(enabled=True),
+        PROFILE,
+        DIDS,
+        entries=lambda: (),
+        transport_factory=lambda profile, mode: MarkedSniffTransport(mode),  # type: ignore[arg-type,return-value]
+        reconnect_policy=FAST,
+    )
+    records = await _sniff_until_drained(collector, asyncio.Queue())
+    kinds = [r.channel for r in records]
+    assert kinds == ["BREAK", "FRAME", "FRAME"]
+    brk = records[0]
+    assert brk.metadata["origin"] == "foreign"
+    assert brk.value == pytest.approx(50.0)
+    assert brk.unit == "ms"
+    assert brk.metadata["low_ms"] is None and brk.metadata["high_ms"] is None
+    assert brk.metadata["next_byte_ns"] - brk.metadata["detected_ns"] == pytest.approx(  # type: ignore[operator]
+        50_000_000, abs=10
+    )
+    assert brk.timestamp <= records[1].timestamp
+
+
+class WakingTransport(FakeTransport):
+    """Records one wake-up per StartCommunication, as the real transport does."""
+
+    def __init__(self, profile: KlineProfile) -> None:
+        super().__init__(profile)
+        self.pulses: list[WakePulse] = []
+
+    def start_communication(self, target: int | None = None) -> kp.StartCommunicationReply:
+        now = time.monotonic()
+        self.pulses.append(
+            WakePulse(
+                name="iso14230-fast",
+                wanted_low_ms=25.0,
+                wanted_high_ms=25.0,
+                fall=now - 0.05,
+                release=now - 0.025,
+                end=now,
+                readback=b"\x00",
+                char_s=10 / 10400,
+                target=0x10,
+                answered=True,
+            )
+        )
+        return super().start_communication(target)
+
+    def take_wake_pulses(self) -> list[WakePulse]:
+        pulses, self.pulses = self.pulses, []
+        return pulses
+
+
+async def test_canarys_own_wake_up_is_stored_with_its_measured_low_and_high() -> None:
+    entries: list[tuple[str, ...]] = [ENTRIES]
+    FakeTransport.instances.clear()
+    collector = KlineCollector(
+        KlineConfig(enabled=True, poll_interval_seconds=0.01, sniff=False),
+        PROFILE,
+        DIDS,
+        entries=lambda: entries[0],
+        transport_factory=lambda profile, mode: WakingTransport(profile),  # type: ignore[arg-type,return-value]
+        reconnect_policy=FAST,
+    )
+    queue: asyncio.Queue[TelemetryRecord] = asyncio.Queue()
+    stop = asyncio.Event()
+    task = asyncio.create_task(collector.run(queue, stop))
+    await asyncio.wait_for(queue.get(), timeout=5)
+    entries[0] = ()  # the session ends; its wake-ups are recorded
+    breaks: list[TelemetryRecord] = []
+    for _ in range(300):
+        while not queue.empty():
+            record = queue.get_nowait()
+            if record.channel == "BREAK":
+                breaks.append(record)
+        if breaks:
+            break
+        await asyncio.sleep(0.01)
+    stop.set()
+    await task
+    (brk,) = breaks
+    meta = brk.metadata
+    assert meta["origin"] == "canary" and meta["module"] == "ECM" and meta["answered"] is True
+    assert meta["low_ms"] == pytest.approx(25.0) and meta["high_ms"] == pytest.approx(25.0)
+    assert brk.value == pytest.approx(50.0)
+    assert meta["readback"] == "00" and meta["wakeup"] == "iso14230-fast"
+    assert meta["timing_uncertainty_s"] is None and "unmeasured" in str(meta["timing_basis"])

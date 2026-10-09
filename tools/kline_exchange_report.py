@@ -4,7 +4,9 @@
 Reads one session's stored ``kline`` rows and writes a Markdown and a JSON
 report: request/response pairs by module, services, DIDs, NRCs by name,
 per-DID poll intervals, the DID cycle a scan-tool screen repeats versus the
-one-off reads at screen load, and how well each frame's time is known
+one-off reads at screen load, how well each frame's time is known, and the
+wake-ups (``kline:BREAK``, H05.9) before each StartCommunication: who woke the
+line, the low and high, and the gap to the first byte
 (``src/analysis/kline_exchanges.py`` does the work; this is its command).
 
 Optional, for binding work:

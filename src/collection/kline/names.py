@@ -34,6 +34,10 @@ LEGACY_PREFIXES = (LEGACY_DID_PREFIX, LEGACY_RAM_PREFIX, LEGACY_MEM_PREFIX)
 
 #: The raw-frame channel; it carries its module in metadata, not in the name.
 FRAME_CHANNEL = "FRAME"
+#: A wake-up low (UART break) on the line, CANary's own (``origin: canary``)
+#: or another tester's (``origin: foreign``); H05.9. Value: low + high in ms,
+#: when known.
+BREAK_CHANNEL = "BREAK"
 RAM_PREFIX = "RAM_"
 MEM_PREFIX = "MEM_"
 
@@ -89,8 +93,8 @@ class KlineChannel:
 
 
 def parse_channel(channel: str) -> KlineChannel | None:
-    """``ABS:1303`` -> module ``ABS``, item ``1303``; ``None`` for ``FRAME``
-    and for the legacy form (see :func:`is_legacy`)."""
+    """``ABS:1303`` -> module ``ABS``, item ``1303``; ``None`` for ``FRAME``,
+    ``BREAK`` and for the legacy form (see :func:`is_legacy`)."""
     module, sep, item = channel.partition(":")
     if not sep or not module or not item:
         return None
@@ -98,6 +102,7 @@ def parse_channel(channel: str) -> KlineChannel | None:
 
 
 __all__ = [
+    "BREAK_CHANNEL",
     "CAPTURE_KEY_PREFIX",
     "FRAME_CHANNEL",
     "LEGACY_DID_PREFIX",

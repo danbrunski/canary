@@ -46,6 +46,13 @@ each of its frames and held ``foreign_hold_seconds`` after the last). When
 that module is the ECM, or unknown, the ECM's CAN session is theirs too
 (``tx_gate`` owner ``foreign``) and CAN diagnostics step aside; a scan tool
 on the ABS leaves CAN polling alone.
+
+**Wake-ups are recorded** (H05.9) as ``kline:BREAK`` rows, value low + high in
+ms when known: every break the sniffer hears (``origin: foreign``, bounded
+from the UART's report and the next byte, :func:`break_record`) and every
+wake-up CANary drives itself (``origin: canary``, host-measured low and high,
+whether the module answered, :func:`wake_record`), so a tester's wake-up and
+CANary's can be compared in one session.
 """
 
 from __future__ import annotations
@@ -68,7 +75,13 @@ from src.collection.kline.actions import (
     KlineActions,
     StoredCode,
 )
-from src.collection.kline.names import FRAME_CHANNEL, capture_key, did_channel, ram_channel
+from src.collection.kline.names import (
+    BREAK_CHANNEL,
+    FRAME_CHANNEL,
+    capture_key,
+    did_channel,
+    ram_channel,
+)
 from src.collection.kline.plan import (
     KlineCatalog,
     KlinePlan,
@@ -83,7 +96,13 @@ from src.collection.kline.profile import (
     load_kline_profile,
 )
 from src.collection.kline.sessions import MODULE_SESSIONS
-from src.collection.kline.sniff import DefinitionTracker, Exchange, FrameDecoder, SniffedFrame
+from src.collection.kline.sniff import (
+    DefinitionTracker,
+    Exchange,
+    FrameDecoder,
+    SniffedBreak,
+    SniffedFrame,
+)
 from src.collection.kline.transport import (
     BusBusyError,
     EchoMismatchError,
@@ -93,6 +112,7 @@ from src.collection.kline.transport import (
     Mode,
     PassiveArmedError,
     RxChunk,
+    WakePulse,
 )
 from src.collection.queueing import QueueDropCounter, put_nowait_or_drop
 from src.collection.reconnect import ReconnectPolicy, wait_for_stop_or_timeout
@@ -360,7 +380,7 @@ class KlineCollector:
             action = self._actions.take()
             if action is not None:
                 try:
-                    await self._run_action(action)
+                    await self._run_action(action, queue)
                 finally:
                     self._actions.done(action)
                 continue
@@ -483,12 +503,30 @@ class KlineCollector:
                         pass  # the session ends either way; the module times it out
             finally:
                 await asyncio.to_thread(transport.close)
+                self._record_wakes(transport, profile, queue)
         finally:
             MODULE_SESSIONS.release(plan.address, "kline")
             if is_ecm:
                 tx_gate.release_ecm_session("kline")
 
-    async def _run_action(self, action: KlineAction) -> None:
+    def _record_wakes(
+        self,
+        transport: KlineTransport,
+        profile: KlineProfile,
+        queue: asyncio.Queue[TelemetryRecord] | None,
+    ) -> None:
+        """CANary's own wake-ups from ``transport``, as ``kline:BREAK`` rows."""
+        pulses = transport.take_wake_pulses()
+        if queue is None:
+            return
+        to_epoch = time.time() - time.monotonic()
+        for pulse in pulses:
+            record = wake_record(pulse, to_epoch, profile.module_label(pulse.target))
+            put_nowait_or_drop(queue, record, on_drop=self.drop_counter)
+
+    async def _run_action(
+        self, action: KlineAction, queue: asyncio.Queue[TelemetryRecord] | None = None
+    ) -> None:
         """One diagnostic function in a session of its own: StartCommunication,
         the function's requests in order, StopCommunication. Always finishes
         ``action``'s future."""
@@ -529,6 +567,7 @@ class KlineCollector:
                     pass  # the function is done; the module times the session out
             finally:
                 await asyncio.to_thread(transport.close)
+                self._record_wakes(transport, profile, queue)
         except kp.NegativeResponseError as exc:
             action.finish(ok=False, started=started, detail=f"{action.module} refused: {exc}")
         except (KlineTransportError, kp.KlineProtocolError) as exc:
@@ -748,7 +787,12 @@ class KlineCollector:
                         chunk = chunks.get_nowait()
                     except Empty:
                         break
-                    for frame in decoder.feed_chunk(chunk):
+                    for event in decoder.feed_chunk_events(chunk):
+                        if isinstance(event, SniffedBreak):
+                            record = break_record(event, to_epoch)
+                            put_nowait_or_drop(queue, record, on_drop=self.drop_counter)
+                            continue
+                        frame = event
                         self.sniffed_frames += 1
                         if frame.direction == "tester":
                             self.foreign_frames += 1
@@ -761,12 +805,18 @@ class KlineCollector:
                                 tx_gate.claim_ecm_session("foreign", ttl_seconds=hold)
                         for record in recorder.observe(frame, frame.finished + to_epoch):
                             put_nowait_or_drop(queue, record, on_drop=self.drop_counter)
+                for brk in decoder.flush_breaks(time.monotonic()):
+                    record = break_record(brk, to_epoch)
+                    put_nowait_or_drop(queue, record, on_drop=self.drop_counter)
                 if failures:
                     raise failures[0]
         finally:
             halt.set()
             await asyncio.to_thread(reader.join)
             await asyncio.to_thread(transport.close)
+            to_epoch = time.time() - time.monotonic()
+            for brk in decoder.flush_breaks(time.monotonic(), force=True):
+                put_nowait_or_drop(queue, break_record(brk, to_epoch), on_drop=self.drop_counter)
 
 
 class SniffRecorder:
@@ -848,6 +898,94 @@ def frame_record(frame: SniffedFrame, stamp: float, module: str) -> TelemetryRec
     )
 
 
+def _ns(t: float | None) -> int | None:
+    return None if t is None else int(round(t * 1e9))
+
+
+def _ms(t: float | None) -> float | None:
+    return None if t is None else round(t * 1000.0, 3)
+
+
+def break_record(brk: SniffedBreak, to_epoch: float) -> TelemetryRecord:
+    """A break the sniffer heard (another tester's, or a module's), stamped at
+    the latest the UART can have reported it.
+
+    ``*_ns`` are the host's monotonic clock. The low is only bounded
+    (``low_ms_min``..``low_ms_max``): the UART reports a break's start, never
+    its release, so ``low_ms`` and ``high_ms`` are ``None``. ``span_ms`` (the
+    value) is falling edge to the next byte's start bit, i.e. low + high,
+    within ``timing_uncertainty_s``.
+    """
+    span = brk.span_bounds_s
+    low_min, low_max = brk.low_bounds_s
+    metadata: dict[str, str | int | float | None] = {
+        "instrument": "sniff",
+        "origin": "foreign",
+        "detected_ns": _ns(brk.detected),
+        "detected_earliest_ns": _ns(brk.detected_earliest),
+        "prev_activity_ns": _ns(brk.prev_activity),
+        "next_byte_ns": _ns(brk.next_byte),
+        "next_break_ns": _ns(brk.next_break),
+        "idle_before_ms": _ms(brk.idle_before_s),
+        "low_ms": None,
+        "low_ms_min": _ms(low_min),
+        "low_ms_max": _ms(low_max),
+        "high_ms": None,
+        "span_ms": _ms(brk.span_s),
+        "span_ms_min": _ms(span[0]) if span is not None else None,
+        "span_ms_max": _ms(span[1]) if span is not None else None,
+        "timing_uncertainty_s": round(brk.timing_uncertainty_s, 6),
+        "char_s": round(brk.char_s, 9),
+    }
+    return TelemetryRecord.from_epoch(
+        brk.detected + to_epoch,
+        source=KLINE_SOURCE,
+        channel=BREAK_CHANNEL,
+        value=_ms(brk.span_s),
+        unit="ms",
+        metadata=metadata,
+    )
+
+
+def wake_record(pulse: WakePulse, to_epoch: float, module: str) -> TelemetryRecord:
+    """A wake-up CANary drove, stamped at its falling edge (host clock).
+
+    Low and high are host-clock readings around the break ioctls; how late the
+    pin follows the ioctl is not measured, so ``timing_uncertainty_s`` is
+    ``None`` and ``timing_basis`` says why. ``module`` labels ``pulse.target``.
+    """
+    metadata: dict[str, str | int | float | None] = {
+        "instrument": "command",
+        "origin": "canary",
+        "wakeup": pulse.name,
+        "wanted_low_ms": pulse.wanted_low_ms,
+        "wanted_high_ms": pulse.wanted_high_ms,
+        "fall_ns": _ns(pulse.fall),
+        "release_ns": _ns(pulse.release),
+        "next_byte_ns": _ns(pulse.end),
+        "low_ms": round(pulse.low_ms, 3),
+        "high_ms": round(pulse.high_ms, 3),
+        "span_ms": round(pulse.low_ms + pulse.high_ms, 3),
+        "readback": pulse.readback.hex(),
+        "module": module,
+        "answered": pulse.answered,
+        "refused": pulse.refused,
+        "timing_uncertainty_s": None,
+        "timing_basis": "host clock around the break ioctls; pin latency unmeasured",
+        "char_s": round(pulse.char_s, 9),
+    }
+    if pulse.target is not None:
+        metadata["module_address"] = pulse.target
+    return TelemetryRecord.from_epoch(
+        pulse.fall + to_epoch,
+        source=KLINE_SOURCE,
+        channel=BREAK_CHANNEL,
+        value=round(pulse.low_ms + pulse.high_ms, 3),
+        unit="ms",
+        metadata=metadata,
+    )
+
+
 def sniffed_value_records(
     exchange: Exchange, tracker: DefinitionTracker, stamp: float, module: str
 ) -> list[TelemetryRecord]:
@@ -898,9 +1036,11 @@ __all__ = [
     "LOCAL_ID",
     "KlineCollector",
     "SniffRecorder",
+    "break_record",
     "did_record",
     "frame_record",
     "module_did_widths",
     "plan_records",
     "sniffed_value_records",
+    "wake_record",
 ]
