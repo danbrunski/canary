@@ -209,6 +209,20 @@ timing_trim:
     - 'obd:TIMING_ADVANCE'
     - 'did:ECM_IGNITION_TIMING'
     - 'mem:ECM_IGNITION_TIMING_RAM'
+  # B08.4 option (c), operator decision 2026-10-08 (interim): final timing
+  # with a memory-only tuple. The target and the rpm word are one read, and
+  # BFS-X and HI DET follow in the same window's back-to-back memory burst
+  # (option b). timing_lookup.py refuses, by name, to compare this target
+  # against a surface on Mode 01 axes: that comparison is what is given up.
+  memory_only_targets:
+    - channel: 'mem:ECM_IGNITION_TIMING_RAM'
+      same_read_as: engine_speed_word
+      evidence: >-
+        0xFFFF11C7 and the rpm word 0xFFFF11D8 are both in the `spark` memory
+        window (data/dids.yaml), one 19-byte service-0x23 read from 0xFFFF11C7,
+        so they share one acquisition. 0xFFFF11C7 is declared equals_did 0x110A
+        (ECM_IGNITION_TIMING), the same byte as PID 0x0E, and is final ignition
+        timing, not the trim lookup or knock retard.
   evidence: >-
     rpm 0xCC93 x BFS-X 0xCC83, cells read masked & 0x7F with bit 7 of the
     lower-left cell ORed back (0x026F9C); a trim lookup, never final ignition

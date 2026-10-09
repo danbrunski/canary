@@ -235,6 +235,9 @@ class DidWindowController:
         self._did_indices = frozenset(did_indices)
         self.phase: Literal["mode01", "window", "lapse"] = "mode01"
         self._next_window_at = now + self._interval()
+        self._window_opened_at = 0.0
+        #: When pacing would have closed the open window (``close_as_paced``).
+        self._paced_close_at: float | None = None
         self._window_deadline = 0.0
         self._lapse_until = 0.0
         self._last_session_sent = 0.0
@@ -405,8 +408,13 @@ class DidWindowController:
         self._next_cycle_k = k_next
         self._next_window_at = boundary
 
-    def session_control_due(self, states: Sequence[PollRequestState], now: float) -> bool:
-        """Whether the loop should send ``10 <session>`` now."""
+    def session_control_due(
+        self, states: Sequence[PollRequestState], now: float, *, keepalive_lead: float = 0.0
+    ) -> bool:
+        """Whether the loop should send ``10 <session>`` now.
+
+        ``keepalive_lead`` sends a window's keep-alive that much early, so it
+        does not fall due inside a memory burst about to start (B08.4)."""
         if self.phase == "mode01":
             if now < self._next_window_at:
                 return False
@@ -433,7 +441,7 @@ class DidWindowController:
                 return False
             return True
         if self.phase == "window":
-            return now - self._last_session_sent >= self._spec.keepalive_seconds
+            return now + keepalive_lead - self._last_session_sent >= self._spec.keepalive_seconds
         return False
 
     def session_work_pending(self, states: Sequence[PollRequestState], now: float) -> bool:
@@ -487,6 +495,8 @@ class DidWindowController:
             if ok:
                 self.phase = "window"
                 self.windows_opened += 1
+                self._window_opened_at = now
+                self._paced_close_at = None
                 self._window_deadline = now + self._spec.window_max_seconds
                 self._pending = set(self._due_dids(states, now))
             else:
@@ -678,6 +688,27 @@ class DidWindowController:
             return self._lapse_until
         return self._next_window_at
 
+    @property
+    def keepalive_seconds(self) -> float:
+        return self._spec.keepalive_seconds
+
+    def close_as_paced(self, at: float) -> None:
+        """The open window's last members were moved to its end (a memory
+        burst): schedule the next window as if it had closed at ``at``, when its
+        paced last read would have been answered."""
+        if self.phase == "window":
+            self._paced_close_at = at
+
+    def window_opened_at(self) -> float:
+        """When the open window's session entry was answered: the instant its
+        pending set was fixed."""
+        return self._window_opened_at
+
+    def window_deadline(self) -> float:
+        """When the open window closes however much is still owed
+        (``window_max_seconds`` after it opened); infinite outside a window."""
+        return self._window_deadline if self.phase == "window" else math.inf
+
     def next_keepalive_at(self) -> float | None:
         """When the held session next needs ``10 <session>`` re-sent."""
         if self.phase != "window":
@@ -748,7 +779,13 @@ class DidWindowController:
         self._unknown_exit_pending = False
         if not self._exit_due:
             self.cycle.on_lapse_started()
-        self._schedule_next_window(now, earliest=now)
+        # A window whose memory reads were held back to its end is scheduled
+        # from when pacing would have closed it, so where its reads sit never
+        # moves the next window (B08.4): the end-to-start interval used to
+        # restart 0.18 s later per window on the fake clock.
+        paced = now if self._paced_close_at is None else min(now, self._paced_close_at)
+        self._paced_close_at = None
+        self._schedule_next_window(paced, earliest=paced)
         self.windows_completed += 1
         self._pending.clear()
 

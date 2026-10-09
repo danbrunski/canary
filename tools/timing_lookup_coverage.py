@@ -9,8 +9,9 @@ coordinate under ``--pairing-ms`` (each unpaired read counted under its
 reason), the existing surface graded on those identical samples through the
 B02 evaluator (a capture-profile sample is refused by name, R03.12), the
 barometric pressure the session spans, and where the coordinate falls on the
-session's image's trim tables. Across sessions it reports HI DET branch
-evidence and whether it could validate both branches.
+session's image's trim tables. Each memory-only target (B08.4 option c) is
+counted with the coordinate from its own read, by reason. Across sessions it
+reports HI DET branch evidence and whether it could validate both branches.
 
 The images come from ``--image`` files matched by plain sha256 against the
 tune registry's revision for each session's start; a session whose image is
@@ -54,6 +55,7 @@ from src.analysis.timing_lookup import (
     branch_evidence,
     coordinate_samples,
     identical_samples,
+    memory_only_samples,
     require_branch_validation,
     score_identical_samples,
     summarize,
@@ -189,6 +191,17 @@ def main(argv: Sequence[str] | None = None) -> int:
             ),
             "slots_observed": slots,
             "identical": summary.__dict__,
+            # B08.4 option (c): each memory-only target with the coordinate
+            # from its own read, no Mode 01 leg.
+            "memory_only": {
+                target.channel: summarize(
+                    memory_only_samples(
+                        provider, long, session=directory.name, target=target.channel
+                    ),
+                    [],
+                ).__dict__
+                for target in definition.timing_trim.memory_only_targets
+            },
             "graded": [
                 {
                     "t": s.sample.t,

@@ -15,13 +15,16 @@ profile data cannot fix, and each is a refusal here rather than a note:
   feature policy now refuses memory channels at training
   (``feature_pipeline.MEMORY_CHANNEL_EXCLUSION``); an artifact that already
   carries them keeps being served them until it is replaced.
-- **The coordinate tuple cannot meet its 0.25 s skew at the serving budget.**
+- **The coordinate tuple could not meet its 0.25 s skew at the serving budget.**
   The rpm word, BFS-X and the HI DET latch are three service-0x23 reads (their
   addresses are hundreds of bytes apart, past the ECM's 63-byte ceiling), and
-  ``default`` paces every request at the 8 req/s budget its 1 Hz poll rate
-  derives. Mode 01 is silent from session entry to exit, so no Mode 01 read
-  can sit inside the tuple either. Skew is measured on the fake clock from
-  each read's acquisition time, never count over wall-clock.
+  ``default`` paced every request at the 8 req/s budget its 1 Hz poll rate
+  derives: 0.5 s for the memory tuple, 0.75 s and more with Mode 01. The
+  operator approved option (b) on 2026-10-08: a window's memory reads now go
+  last, back to back, with the session exit straight after
+  (``can_obd_loop._CanObdLoop._memory_burst``), so the tuple and its Mode 01
+  leg meet the skew at the serving budget. Skew is measured on the fake clock
+  from each read's acquisition time, never count over wall-clock.
 """
 
 from __future__ import annotations
@@ -253,22 +256,23 @@ def _with_b08(profile: CaptureProfile) -> CaptureProfile:
 
 
 @pytest.mark.slow
-def test_the_b08_additions_miss_the_lookup_skew_at_the_serving_budget(
+def test_the_b08_additions_meet_the_lookup_skew_at_the_serving_budget(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Two windows of the approved additions at the 8 req/s the 1 Hz poll
-    rate derives, and the same at 40 req/s: pacing alone decides it."""
+    rate derives, and the same at 40 req/s. Paced, the tuple spanned 0.5 s
+    (0.75 s and more with Mode 01) at 8 req/s; with the window's memory reads
+    back to back before the exit it fits the lookup's skew at either budget,
+    Mode 01 rpm/load/timing included."""
     channels, skew = _coordinate_tuple()
     candidate = _with_b08(_default())
 
-    paced = _tuple_spreads(_run(monkeypatch, candidate, 130.0), channels)
-    assert len(paced) == 2
-    # 0.125 s per request: rpm word, BFS-X, two other windows, HI DET.
-    assert all(memory > skew for memory, _joined in paced)
-    assert all(joined > skew for _memory, joined in paced)
-
-    unpaced = _tuple_spreads(_run(monkeypatch, candidate, 130.0, budget_rps=40.0), channels)
-    assert all(memory <= skew for memory, _joined in unpaced)
+    for budget in (None, 40.0):
+        spreads = _tuple_spreads(_run(monkeypatch, candidate, 130.0, budget_rps=budget), channels)
+        assert len(spreads) == 2
+        # Five reads back to back, never a budget slot (0.125 s) between two.
+        assert all(memory < 0.125 for memory, _joined in spreads), spreads
+        assert all(joined <= skew for _memory, joined in spreads), spreads
 
 
 @pytest.mark.slow

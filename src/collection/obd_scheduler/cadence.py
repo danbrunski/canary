@@ -345,12 +345,23 @@ def _next_request_due_at(
     request: PollRequest,
     state: PollRequestState,
     spec: CanObdSpec,
+    *,
+    served_at: float | None = None,
 ) -> float:
+    """The next due time on the request's grid.
+
+    ``served_at`` is the instant the request counts as served when that is
+    not the issue instant: a memory read a session window holds back to its
+    end is served by that window, so its grid steps from the window's opening
+    (B08.4). Measured from the late issue instant instead, a read issued a few
+    milliseconds past its next grid point skipped a whole period, and a 4 s
+    window plan read the spark window every other window on the fake clock.
+    """
     view = tuning_profile.view()
     interval = _request_interval_seconds(request, spec, view)
     if interval == float("inf"):
         return float("inf")
-    now = time.monotonic()
+    now = time.monotonic() if served_at is None else served_at
     # Every cadence is a grid: advance from the due time just served and skip
     # whole missed periods (never a catch-up burst). Anchoring on the request
     # instant instead adds every delay to every later period, and it did so

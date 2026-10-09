@@ -29,7 +29,9 @@ from src.analysis.ecu_state_models import trim_lookup
 from src.analysis.operating_context import (
     ContextDefinition,
     ContextProvider,
+    ContextRefusalError,
     ResolvedContext,
+    check_catalog,
     image_tables,
 )
 from src.analysis.surface_2d import fit_grid_binned_mean
@@ -40,13 +42,17 @@ from src.analysis.timing_lookup import (
     branch_evidence,
     coordinate_samples,
     identical_samples,
+    memory_only_samples,
     require_branch_validation,
     require_final_timing_target,
+    require_memory_only_target,
     score_identical_samples,
     summarize,
     trim_cell_coverage,
 )
 from src.behavior.behavior_models import BehaviorModel2D
+from src.decode.dids import load_did_map
+from src.paths import DIDS_YAML
 from src.signals.pairing import PairingPolicy
 from tests import test_operating_context as operating_context_tests
 from tests.rom_fixtures import PROFILE, xterra_map
@@ -573,3 +579,178 @@ def test_min_drives_cannot_fall_below_two() -> None:
     with pytest.raises(ValueError, match="at least 2"):
         require_branch_validation(branch_evidence(samples), min_drives=1)
     assert MIN_BRANCH_DRIVES == 2
+
+
+# -- memory-only target (B08.4 option c, operator decision 2026-10-08) -------------------------
+
+TIMING_RAM = "mem:ECM_IGNITION_TIMING_RAM"
+
+
+def _raw_definition() -> dict[str, Any]:
+    raw: dict[str, Any] = yaml.safe_load((PROFILE / "operating_context.yaml").read_text())
+    return raw
+
+
+def test_the_memory_only_target_is_final_timing_read_with_the_rpm_word(
+    provider: ContextProvider,
+) -> None:
+    """Declared in data with its evidence, carried in the contract, and held
+    by the catalog to the rpm word's own memory window (one 0x23 read)."""
+    declared = require_memory_only_target(provider, TIMING_RAM)
+    assert declared.same_read_as == "engine_speed_word"
+    assert "spark" in declared.evidence
+    timing = provider.contract("fit")["lookups"]["timing_trim"]
+    assert timing["memory_only_targets"] == {TIMING_RAM: {"same_read_as": "engine_speed_word"}}
+    catalog = load_did_map(DIDS_YAML)
+    windows = {
+        c.window for c in catalog.memory if c.name in {TIMING_RAM[4:], "ECM_ENGINE_SPEED_RAM"}
+    }
+    assert windows == {"spark"}
+
+
+@pytest.mark.parametrize(
+    ("update", "match"),
+    [
+        ({"channel": "mem:ECM_KNOCK_RETARD_APPLIED"}, "not one of final_timing_channels"),
+        ({"same_read_as": "high_det_flags"}, "is not a coordinate input"),
+    ],
+)
+def test_a_memory_only_target_must_be_final_timing_on_a_coordinate_input(
+    update: dict[str, str], match: str
+) -> None:
+    raw = _raw_definition()
+    raw["timing_trim"]["memory_only_targets"][0].update(update)
+    with pytest.raises(ValueError, match=match):
+        ContextDefinition.model_validate(raw)
+
+
+def test_a_memory_only_target_in_another_read_than_its_input_is_refused() -> None:
+    """BFS-X is a coordinate input, but in the fuel_axis window: the timing
+    byte is not read with it, so it cannot be its same-read coordinate."""
+    raw = _raw_definition()
+    raw["timing_trim"]["memory_only_targets"][0]["same_read_as"] = "bfs_x"
+    defn = ContextDefinition.model_validate(raw)
+    with pytest.raises(ContextRefusalError) as caught:
+        check_catalog(defn, load_did_map(DIDS_YAML))
+    assert caught.value.reason == "catalog_mismatch"
+    assert "not one memory window" in caught.value.message
+
+
+@pytest.mark.parametrize(
+    ("spec", "reason"),
+    [
+        ("obd:TIMING_ADVANCE", "not_memory_only_target:obd:TIMING_ADVANCE"),
+        ("did:ECM_IGNITION_TIMING", "not_memory_only_target:did:ECM_IGNITION_TIMING"),
+        ("mem:ECM_FUEL_TARGET_MAP_X_TRACE", "not_final_timing:mem:ECM_FUEL_TARGET_MAP_X_TRACE"),
+    ],
+)
+def test_only_a_declared_memory_only_target_has_a_memory_only_tuple(
+    provider: ContextProvider, spec: str, reason: str
+) -> None:
+    with pytest.raises(TimingLookupRefusalError) as caught:
+        memory_only_samples(provider, _long([(T0, spec, 20.0)]), session=DEFAULT, target=spec)
+    assert caught.value.reason == reason
+
+
+def _burst(collect: _Collect, t: float, **feed: Any) -> list[tuple[float, str, float]]:
+    """One window's memory burst as option (b) issues it: the spark read
+    (final timing and the rpm word) first, BFS-X 10 ms and HI DET 20 ms
+    after; every other context channel at the spark read."""
+    _feed(collect, t, **feed)
+    later = {"mem:ECM_FUEL_TARGET_MAP_X_TRACE": 0.010, "mem:ECM_HIGH_DET_FLAGS": 0.020}
+    reads = [(at + later.get(spec, 0.0), spec, v) for at, spec, v in collect.reads]
+    collect.reads.clear()
+    return reads
+
+
+def _memory_drive(t0: float) -> pd.DataFrame:
+    """Five reads of final timing from RAM, each a different case.
+
+    - t0: a burst: a memory-only sample, its BFS-X and HI DET read after it.
+    - t0+10: the newest rpm word is 0.1 s older than the timing read (another
+      read): not its coordinate.
+    - t0+20: no BFS-X since t0's: the coordinate's own refusal.
+    - t0+30: the timing read did not decode.
+    - t0+40: a continuous capture's spark read 0.1 s later: the coordinate
+      still stands on the target's own rpm word.
+    - t0+50 and t0+50.21 (the verifier's probe): the second burst reads its
+      BFS-X at t0+50.2, before its spark read. The first sample keeps its own
+      BFS-X (t0+50.01), never the next burst's; the second takes the one read
+      just before it in its own group.
+    """
+    collect = _Collect()
+    reads = [
+        *_burst(collect, t0, rpm_word=200, x=72, high_det=True),
+        *_burst(collect, t0 + 9.9, rpm_word=120, x=40, high_det=False),
+        *_burst(collect, t0 + 20.0, rpm_word=200, skip=("mem:ECM_FUEL_TARGET_MAP_X_TRACE",)),
+        *_burst(collect, t0 + 30.0, rpm_word=200, x=72),
+        *_burst(collect, t0 + 40.0, rpm_word=160, x=56, high_det=False),
+        *_burst(collect, t0 + 40.1, rpm_word=168, x=56, high_det=False),
+        *_burst(collect, t0 + 50.0, rpm_word=200, x=72, high_det=True),
+        *[
+            (t - 0.02 if spec == "mem:ECM_FUEL_TARGET_MAP_X_TRACE" else t, spec, v)
+            for t, spec, v in _burst(collect, t0 + 50.21, rpm_word=120, x=40, high_det=False)
+        ],
+    ]
+    return _long(
+        [
+            *reads,
+            (t0, TIMING_RAM, 24.0),
+            (t0 + 10.0, TIMING_RAM, 26.0),
+            (t0 + 20.0, TIMING_RAM, 26.0),
+            (t0 + 30.0, TIMING_RAM, float("nan")),
+            (t0 + 40.0, TIMING_RAM, 22.0),
+            (t0 + 50.0, TIMING_RAM, 24.0),
+            (t0 + 50.21, TIMING_RAM, 26.0),
+        ]
+    )
+
+
+def test_a_memory_only_sample_takes_its_coordinate_from_the_same_read(
+    provider: ContextProvider,
+) -> None:
+    samples = memory_only_samples(provider, _memory_drive(T0), session=DEFAULT, target=TIMING_RAM)
+    assert [s.reason for s in samples] == [
+        None,
+        "not_same_read:engine_speed_word",
+        "no_read_in_group:bfs_x",
+        f"missing:{TIMING_RAM}",
+        None,
+        None,
+        None,
+    ]
+    burst, continuous = samples[0], samples[4]
+    assert (burst.coordinate.rpm_word, burst.coordinate.load_raw) == (200, 72)
+    assert burst.coordinate.high_det is True
+    assert burst.coordinate.read_times["engine_speed_word"] == pytest.approx(T0, abs=1e-6)
+    assert burst.coordinate.read_times["bfs_x"] == pytest.approx(T0 + 0.010, abs=1e-6)
+    assert burst.target == 24.0
+    assert continuous.coordinate.rpm_word == 160
+    probe_a, probe_b = samples[5], samples[6]
+    assert probe_a.coordinate.read_times["bfs_x"] == pytest.approx(T0 + 50.01, abs=1e-6)
+    assert probe_a.coordinate.load_raw == 72
+    assert probe_b.coordinate.read_times["bfs_x"] == pytest.approx(T0 + 50.20, abs=1e-6)
+    assert probe_b.coordinate.load_raw == 40
+    summary = summarize(samples, [])
+    assert (summary.target_reads, summary.identical) == (7, 4)
+
+
+def test_the_memory_only_target_is_never_graded_on_the_mode01_surface(
+    provider: ContextProvider, surface: BehaviorModel2D, tmp_path: Path
+) -> None:
+    """Option (c) gives up the identical-sample comparison against the Mode 01
+    surface: a surface grading the memory target on Mode 01 axes is refused by
+    name, and the Mode 01 surface refuses memory-only samples as another
+    target's (``target_mismatch``, unchanged)."""
+    (tmp_path / DEFAULT).mkdir()
+    on_mode01 = surface.model_copy(update={"output": TIMING_RAM})
+    with pytest.raises(TimingLookupRefusalError) as caught:
+        identical_samples(provider, _memory_drive(T0), on_mode01, session=DEFAULT, policy=POLICY)
+    assert caught.value.reason == f"memory_only_target:{TIMING_RAM}"
+    samples = memory_only_samples(provider, _memory_drive(T0), session=DEFAULT, target=TIMING_RAM)
+    with pytest.raises(TimingLookupRefusalError) as caught:
+        score_identical_samples(provider, surface, samples, sessions=[tmp_path / DEFAULT])  # type: ignore[arg-type]
+    assert caught.value.reason == "target_mismatch"
+    with pytest.raises(TimingLookupRefusalError) as caught:
+        score_identical_samples(provider, on_mode01, samples, sessions=[tmp_path / DEFAULT])  # type: ignore[arg-type]
+    assert caught.value.reason == f"memory_only_target:{TIMING_RAM}"

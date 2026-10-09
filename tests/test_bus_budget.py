@@ -120,8 +120,9 @@ def test_collector_reads_the_override_live_not_at_startup() -> None:
 
     source = inspect.getsource(can_obd_loop)
     # The pacing sites divide by the rate; every one of them must go through
-    # the gate rather than the captured default. Since R02.9 they are one
-    # method, `_spend_budget_slot`, which every served slot calls.
+    # the gate rather than the captured default. They all read the rate
+    # through one method, `_slot()`: `_spend_budget_slot` (every request) and
+    # the memory burst's up-front charge (B08.4).
     assert "1.0 / budget_rps" not in source, (
         "a pacing site still uses the startup-captured rate; an override "
         "armed mid-drive would not take effect"

@@ -12,6 +12,7 @@ public names.
 
 from __future__ import annotations
 
+import dataclasses
 import logging
 import threading
 import time
@@ -71,6 +72,7 @@ from src.collection.obd_scheduler import (
     _count_active_requests,
     _DiscoveryClient,
     _initial_request_states,
+    _is_request_suppressed,
     _next_due_at,
     _next_request_due_at,
     _next_unsuppressed_at,
@@ -336,6 +338,59 @@ class BatchGovernor:
         }
 
 
+@dataclass(frozen=True)
+class _BurstPlan:
+    """The open window's memory burst: when it starts and what it is charged."""
+
+    #: The first slot a paced memory read could have used.
+    first_slot: float
+    #: Memory reads the burst was planned for.
+    reads: int
+    #: What one paced read costs: a budget slot, or its own turnaround when
+    #: that is longer (a paced read cannot go before the last one answered).
+    per_read: float
+    #: When the burst starts if nothing else spends a slot in the meantime:
+    #: late enough that the reads, the exit and its grace end when Mode 01
+    #: would have resumed after a paced exit.
+    start_at: float
+    #: ``_CanObdLoop.slots_spent`` when the plan was made. A slot spent since
+    #: by anything but a burst read (a keep-alive, an identification read)
+    #: moves the start and the charged clock out by one slot.
+    spent_at_plan: int
+    #: False: the window's deadline falls before the paced reads would end,
+    #: so the reads go at once and each is charged its slot as it is sent.
+    prepaid: bool
+    #: Burst reads issued so far.
+    reads_done: int = 0
+    started: bool = False
+
+    def others(self, spent: int) -> int:
+        """Slots spent since the plan by anything but a burst read."""
+        return spent - self.spent_at_plan - self.reads_done
+
+    def start(self, spent: int, slot: float) -> float:
+        return self.start_at + self.others(spent) * slot
+
+    def release(self, spent: int, slot: float) -> float:
+        """The budget clock with every read charged as pacing would have
+        charged it, plus every other slot spent since the plan."""
+        return self.first_slot + self.reads * self.per_read + self.others(spent) * slot
+
+
+@dataclass(frozen=True)
+class _BurstDecision:
+    """One tick's answer from :meth:`_CanObdLoop._memory_burst`."""
+
+    members: frozenset[int]
+    #: The ordinary filter with every memory read taken out: memory goes last.
+    outside: RequestFilter
+    hold_until: float | None
+    issue_now: bool
+
+    def member(self, index: int, _request: PollRequest) -> bool:
+        return index in self.members
+
+
 class _CanObdLoop:
     """One run of the single-bus loop; see :func:`run_can_obd_loop`."""
 
@@ -413,6 +468,23 @@ class _CanObdLoop:
         self.did_indices = [
             index for index, request in enumerate(self.requests) if request.in_session_window
         ]
+        #: Service-0x23 reads, which a window issues last and back to back.
+        self.memory_indices = frozenset(
+            index for index, request in enumerate(self.requests) if request.kind == "memory"
+        )
+        self._burst: _BurstPlan | None = None
+        #: Budget slots spent since the loop started (``_spend_budget_slot``).
+        self.slots_spent = 0
+        #: Mean turnaround of the latest memory burst's reads (0.0 until one
+        #: has run): how long the next burst takes back to back, per read.
+        self._memory_read_seconds = 0.0
+        #: The same reads as pacing would have spaced them: each the longer of
+        #: a budget slot and its turnaround.
+        self._paced_read_seconds = 0.0
+        self._burst_reads_s: list[float] = []
+        #: Turnaround of the latest session-control request (entry, exit or
+        #: keep-alive): the exit's cost when a burst is placed before it.
+        self._session_seconds = 0.0
         self.freeze_frame_indices = [
             index for index, request in enumerate(self.requests) if request.kind == "freeze_frame"
         ]
@@ -512,6 +584,7 @@ class _CanObdLoop:
 
         if self._maybe_probe_discovery(now, eligible):
             return
+        burst = self._memory_burst(now, eligible)
         discovery_wants_budget = self.discovery_wait == "budget"
 
         active_request_count = _count_active_requests(
@@ -533,7 +606,21 @@ class _CanObdLoop:
             self._drain_until(wake.at)
             return
 
-        if now < self.next_budget_at:
+        if burst is not None and burst.hold_until is not None and now < burst.hold_until:
+            # The window's memory reads are owed and its slots are being paid
+            # up front: wait them out, then issue every read back to back.
+            self._drain_until(
+                _wake_for(
+                    now,
+                    self.controller,
+                    self.request_states,
+                    budget_at=burst.hold_until,
+                    next_due=None,
+                    deadline=self.deadline,
+                ).at
+            )
+            return
+        if now < self.next_budget_at and (burst is None or not burst.issue_now):
             wake = _wake_for(
                 now,
                 self.controller,
@@ -549,14 +636,39 @@ class _CanObdLoop:
         if current_round is None:
             return
         preferred = _preferred_members(self.requests, current_round)
-        selection = _select_next_due_request(
-            self.requests,
-            self.request_states,
-            now,
-            eligible=eligible,
-            among=current_round.remaining,
-            preferred=preferred,
-        )
+        selection = None
+        if burst is not None and burst.issue_now:
+            selection = _select_next_due_request(
+                self.requests,
+                self.request_states,
+                now,
+                eligible=burst.member,
+                among=current_round.remaining,
+                preferred=preferred,
+            )
+            if selection is None and now < self.next_budget_at:
+                # No burst member is in the open round: an ordinary request
+                # waits for its slot, as it always did.
+                self._drain_until(
+                    _wake_for(
+                        now,
+                        self.controller,
+                        self.request_states,
+                        budget_at=self.next_budget_at,
+                        next_due=None,
+                        deadline=self.deadline,
+                    ).at
+                )
+                return
+        if selection is None:
+            selection = _select_next_due_request(
+                self.requests,
+                self.request_states,
+                now,
+                eligible=eligible if burst is None else burst.outside,
+                among=current_round.remaining,
+                preferred=preferred,
+            )
         if selection is None:
             # Members remain but none is pollable any more (the DID window
             # closed, a member got suppressed): the round cannot complete and
@@ -596,9 +708,22 @@ class _CanObdLoop:
         if len(batch_indices) > 1:
             self._serve_batch(request_index, request, batch_indices, current_round, round_timestamp)
         else:
+            in_burst = burst is not None and burst.issue_now and request_index in burst.members
+            started = time.monotonic()
             self._serve_single(
-                request_index, request, request_state, current_round, round_timestamp
+                request_index,
+                request,
+                request_state,
+                current_round,
+                round_timestamp,
+                served_at=(
+                    self.controller.window_opened_at()
+                    if in_burst and self.controller is not None
+                    else None
+                ),
             )
+            if in_burst:
+                self._after_burst_read(time.monotonic() - started)
 
     # ------------------------------------------------------------------
     # Tick steps
@@ -753,14 +878,16 @@ class _CanObdLoop:
                         batch_max_pids=self.pid_batching.effective_max,
                     )
                 )
+            session_started = time.monotonic()
             sent = _drive_session_controller(
                 self.bus,
                 self.spec,
                 controller,
                 self.request_states,
                 now=now,
-                next_budget_at=self.next_budget_at,
+                next_budget_at=self._session_budget_at(controller),
                 allow_entry=dids_selected,
+                keepalive=self.keepalive_policy(now),
                 on_frame=self.on_frame,
                 stop_event=self.stop_event,
                 stats=self.stats,
@@ -773,6 +900,7 @@ class _CanObdLoop:
                 # window opened under a shared 4 Hz target).
                 self.rounds.idle(now)
             if sent:
+                self._session_seconds = time.monotonic() - session_started
                 self._spend_budget_slot()
                 return None, True
             eligible = partial(_loop_request_eligible, controller, self.profile_gated, self.forced)
@@ -961,6 +1089,8 @@ class _CanObdLoop:
         request_state: PollRequestState,
         current_round: RoundState,
         round_timestamp: float | None,
+        *,
+        served_at: float | None = None,
     ) -> None:
         controller = self.controller
         stats = self.stats
@@ -1055,13 +1185,225 @@ class _CanObdLoop:
             controller.on_request_attempted(request_index)
         self.forced.discard(request_index)
 
-        request_state.next_due_at = _next_request_due_at(request, request_state, self.spec)
+        request_state.next_due_at = _next_request_due_at(
+            request, request_state, self.spec, served_at=served_at
+        )
         _close_round_if_complete(self.rounds, time.monotonic())
         self._spend_budget_slot()
 
     # ------------------------------------------------------------------
     # Shared small steps
     # ------------------------------------------------------------------
+
+    def _memory_burst(self, now: float, eligible: RequestFilter | None) -> _BurstDecision | None:
+        """Where the open window's memory reads stand (B08.4, operator 2026-10-08).
+
+        The coordinate a timing lookup searches is spread over several
+        service-0x23 reads (the rpm word, BFS-X and the HI DET latch are
+        hundreds of bytes apart, past the ECM's 63-byte read). Paced one budget
+        slot apart, three reads span 0.25 s at the 8 req/s serving budget, which
+        is the lookup's whole skew limit, before any Mode 01 read joins them.
+        So a window's memory reads go **last, back to back, flush against the
+        session exit**:
+
+        - while any other session-window member is still owed, memory reads
+          wait (``outside`` excludes them);
+        - then the window waits (``hold_until``) until the reads, back to back
+          at the turnaround the last burst measured, will finish where pacing's
+          last read would have ended. A paced read costs the longer of a slot
+          and its turnaround, so at high budgets the plan runs on turnaround;
+        - then every read is charged at once from the plan, the reads go with
+          no slot between them, and the exit goes when pacing sent it. The
+          lapse, Mode 01 and the next window keep pacing's times;
+        - a slot anything else spends meanwhile (a keep-alive, an
+          identification read) moves the start and the charge out by exactly
+          that slot, never by the wait (``_BurstPlan.others``). Keep-alives
+          follow ``keepalive_policy``; a burst read's cadence grid steps from
+          the window's opening (``served_at``).
+
+        Over the window the request count and its span are what pacing gave,
+        so the window's average rate is unchanged; only the order and spacing
+        inside it change. The ECM needs no gap between 0x23 reads (measured:
+        the 2026-09-21 rom-trace captures issued 6,081 memory reads straight
+        after a memory read, the closest 1.79 ms acquisition to acquisition,
+        against a 2.05-2.11 ms median request-to-response).
+
+        ``None`` (pacing as before) when no window is open, the window is
+        continuous (it never closes, so it has no exit to sit against and
+        no "last"), or no memory read is owed. A profile without memory reads
+        therefore never reaches any of this. A window whose deadline would
+        fall inside the wait reads its memory at once instead and is charged
+        per read as before (``prepaid`` false).
+        """
+        controller = self.controller
+        if (
+            controller is None
+            or controller.phase != "window"
+            or not self.memory_indices
+            or tuning_profile.did_continuous_enabled()
+        ):
+            self._burst = None
+            return None
+
+        def owed(index: int) -> bool:
+            return (
+                controller.did_pending(index)
+                and not _is_request_suppressed(self.request_states[index], now)
+                and (eligible is None or eligible(index, self.requests[index]))
+            )
+
+        members = frozenset(i for i in self.memory_indices if owed(i))
+        if not members:
+            self._burst = None
+            return None
+        memory = self.memory_indices
+
+        def outside(index: int, request: PollRequest) -> bool:
+            return index not in memory and (eligible is None or eligible(index, request))
+
+        if any(owed(i) for i in self.did_indices if i not in memory):
+            self._burst = None
+            return _BurstDecision(members, outside, hold_until=None, issue_now=False)
+        plan = self._burst
+        slot = self._slot()
+        if plan is None:
+            first = max(self.next_budget_at, now)
+            # Back to back, each read takes its turnaround: the last burst's
+            # mean, or the session control's before any burst has run.
+            read_s = self._memory_read_seconds or self._session_seconds
+            # Paced, a read waits for its slot or for the last one's answer,
+            # whichever is later (measured per read on the last burst).
+            per_read = max(slot, self._paced_read_seconds or read_s)
+            # Paced, the last read ends here and the exit goes. The burst ends
+            # there too, so the exit, the lapse after it and the next window
+            # keep pacing's times: a later exit moved the next cycle-mode
+            # window past a boundary (``tuning`` at 8 req/s, 294 -> 280
+            # windows in 900 s).
+            paced_end = first + len(members) * per_read
+            prepaid = paced_end < controller.window_deadline()
+            plan = _BurstPlan(
+                first_slot=first,
+                reads=len(members),
+                per_read=per_read,
+                start_at=max(first, paced_end - len(members) * read_s) if prepaid else now,
+                spent_at_plan=self.slots_spent,
+                prepaid=prepaid,
+            )
+            self._burst_reads_s = []
+        if not plan.started and now < plan.start(self.slots_spent, slot):
+            self._burst = plan
+            return _BurstDecision(
+                members,
+                outside,
+                hold_until=plan.start(self.slots_spent, slot),
+                issue_now=False,
+            )
+        if not plan.started:
+            plan = dataclasses.replace(plan, started=True)
+            if plan.prepaid:
+                # Every read is charged now, as pacing would have charged it;
+                # the reads then go without waiting, and the exit waits for the
+                # clock, so the window's request count and span are pacing's.
+                release = plan.release(self.slots_spent, slot)
+                self.next_budget_at = release
+                # Paced, the last read went one read before the release and
+                # the window closed once it was answered.
+                controller.close_as_paced(
+                    release - plan.per_read + (self._memory_read_seconds or self._session_seconds)
+                )
+        self._burst = plan
+        return _BurstDecision(members, outside, hold_until=None, issue_now=True)
+
+    def _session_budget_at(self, controller: DidWindowController) -> float:
+        """The budget slot a session-control request waits for.
+
+        A running prepaid burst charged every read's slot up front, so the
+        clock sits at its paced end. A keep-alive due mid-burst (an unanswered
+        read takes its 1 s timeout) may not wait for that: it goes now and is
+        charged one slot on top (``_BurstPlan.others``). Nothing else is due
+        mid-burst; the exit follows the burst and waits for the clock."""
+        plan = self._burst
+        if (
+            plan is not None
+            and plan.started
+            and plan.prepaid
+            and controller.phase == "window"
+            and not controller.session_exit_due()
+        ):
+            return min(self.next_budget_at, time.monotonic())
+        return self.next_budget_at
+
+    def keepalive_policy(self, now: float) -> tuple[bool, float]:
+        """Whether a due keep-alive may go now, and how far ahead of its due
+        time it goes (B08.4).
+
+        Pacing sent a keep-alive only if it fell due by the window's last
+        read slot; one due after that met the exit first and was never sent.
+        The burst replaces those read slots, so while it waits:
+
+        - a keep-alive due by the last read slot goes, and if the burst is
+          about to start it goes now, so it does not land inside the burst and
+          split the tuple;
+        - one due only after the last read slot is not sent, as pacing did
+          not send it (the exit follows the burst).
+
+        Once the burst has started, a keep-alive pacing would have sent goes
+        when due, and once the burst runs past its paced end (a read slower
+        than paced, an unanswered read's 1 s timeout) every due keep-alive goes:
+        a keep-alive is held at most one paced read, as pacing held it. Held
+        for the whole burst, unanswered reads kept it back for seconds, past
+        the ECM's 3-5 s S3 timeout.
+        """
+        plan = self._burst
+        controller = self.controller
+        if plan is None or not plan.prepaid or controller is None:
+            return True, 0.0
+        slot = self._slot()
+        release = plan.release(self.slots_spent, slot)
+        # Pacing's last read slot.
+        last_read_slot = release - plan.per_read
+        due_at = controller.next_keepalive_at()
+        if plan.started:
+            # Mid-burst: pacing's keep-alive goes when due, and so does any
+            # once the burst runs past its paced end (a read slower than
+            # paced, an unanswered read's timeout). Only one pacing would not
+            # have sent goes after the burst, at most one read late.
+            return (due_at is None or due_at <= last_read_slot or now >= release), 0.0
+        if due_at is None or due_at > last_read_slot:
+            return False, 0.0
+        if now < plan.start(self.slots_spent, slot):
+            return True, 0.0
+        # About to start: one due within the burst's estimated length goes
+        # now. Never more than once: a burst estimated at a whole keep-alive
+        # interval or longer (unanswered reads) pre-sends nothing, or every
+        # fresh keep-alive would fall inside it again and repeat each slot.
+        burst_s = plan.reads * (self._memory_read_seconds or self._session_seconds)
+        if burst_s >= controller.keepalive_seconds:
+            return True, 0.0
+        return True, burst_s + self._session_seconds
+
+    def _after_burst_read(self, seconds: float) -> None:
+        """A prepaid read was charged when the burst started: the next read
+        goes without a slot. ``seconds`` is its turnaround; the mean over a
+        burst sizes the next burst's start."""
+        self._burst_reads_s.append(seconds)
+        self._memory_read_seconds = sum(self._burst_reads_s) / len(self._burst_reads_s)
+        slot = self._slot()
+        self._paced_read_seconds = sum(max(slot, r) for r in self._burst_reads_s) / len(
+            self._burst_reads_s
+        )
+        plan = self._burst
+        if plan is None:
+            return
+        plan = dataclasses.replace(plan, reads_done=plan.reads_done + 1)
+        self._burst = plan
+        if plan.prepaid:
+            self.next_budget_at = plan.release(self.slots_spent, self._slot())
+
+    def _slot(self) -> float:
+        """One budget slot, read per call through ``bus_budget.effective`` so
+        an override armed mid-drive applies to the next request."""
+        return 1.0 / bus_budget.effective(self.budget_rps)
 
     def _on_ecu_answer(self) -> None:
         """Any answer is proof of life for both services' batch governors."""
@@ -1071,12 +1413,16 @@ class _CanObdLoop:
     def _spend_budget_slot(self) -> None:
         """Advance the budget clock one slot, never into the past.
 
+        Every request spends its slot here. The one exception to *when* the
+        clock is read is a prepaid memory burst: it sets the clock once to its
+        planned charge (``_BurstPlan.release``) and restores it after each of
+        its reads, so its reads go without waiting for a slot.
+
         Read per slot through ``bus_budget.effective`` so an override armed
         mid-drive takes effect on the next request, not after a restart.
         """
-        self.next_budget_at = max(
-            self.next_budget_at + 1.0 / bus_budget.effective(self.budget_rps), time.monotonic()
-        )
+        self.next_budget_at = max(self.next_budget_at + self._slot(), time.monotonic())
+        self.slots_spent += 1
 
     def _drain_until(self, until: float) -> None:
         _drain_frames_until(
@@ -1213,6 +1559,7 @@ def _drive_session_controller(
     now: float,
     next_budget_at: float,
     allow_entry: bool = True,
+    keepalive: tuple[bool, float] = (True, 0.0),
     on_frame: Callable[[can.Message], None],
     stop_event: threading.Event,
     stats: CanObdLoopStats,
@@ -1221,7 +1568,9 @@ def _drive_session_controller(
     """Send the exit, entry or keep-alive the controller owes, budget allowing.
 
     ``allow_entry=False`` (no DID selected right now) still sends an owed
-    exit but never opens a window.
+    exit but never opens a window. ``keepalive`` is ``(allowed, lead)``: a
+    window's keep-alive is sent only if allowed, and ``lead`` seconds before
+    it is due (a memory burst is about to start; see ``keepalive_policy``).
 
     Returns True when a request went out (the caller spends the budget slot
     and restarts its tick), False when nothing was due or the budget slot has
@@ -1249,7 +1598,11 @@ def _drive_session_controller(
         )
         controller.on_service_time("session", time.monotonic() - started)
         controller.on_exit_response(result=exit_result, now=time.monotonic())
-    elif allow_entry and controller.session_control_due(states, now):
+    elif (
+        allow_entry
+        and (keepalive[0] or controller.phase != "window")
+        and controller.session_control_due(states, now, keepalive_lead=keepalive[1])
+    ):
         controller.on_entry_sent(now)
         started = time.monotonic()
         entry_result = _send_session_control(

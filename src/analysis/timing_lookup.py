@@ -36,6 +36,15 @@ What it enforces, because each has been learned rather than assumed:
   observed it: a constant flag on one drive validates neither branch.
 - **Empty results say which kind of empty** (:class:`IdenticalSampleSummary`):
   every unpaired sample is counted under its reason.
+- **A memory-only target is its own path** (B08.4 option c, operator decision
+  2026-10-08). ``timing_trim.memory_only_targets`` declares a final-timing
+  channel read in the same service-0x23 read as a coordinate input
+  (``mem:ECM_IGNITION_TIMING_RAM`` with the rpm word). :func:`memory_only_samples`
+  pairs it with the coordinate from that very read (``not_same_read:<input>``
+  otherwise) and the other coordinate reads within the lookup's skew. Grading
+  it against a surface on Mode 01 axes is refused by name
+  (``memory_only_target:<spec>``): that identical-sample comparison is what
+  the interim gives up.
 """
 
 from __future__ import annotations
@@ -59,6 +68,7 @@ from src.analysis.ecu_state_models import TRIM_VALUE_MASK, trim_lookup
 from src.analysis.operating_context import (
     ACQUIRED,
     ContextProvider,
+    MemoryOnlyTargetDecl,
     ResolvedContext,
 )
 from src.analysis.splits import Drive, group_drives
@@ -67,7 +77,8 @@ from src.columns import SESSION_COLUMN
 from src.signals.pairing import PairingPolicy, match_ordered, to_seconds
 
 #: Bumped when a sample's fields, reasons or the summary change.
-TIMING_LOOKUP_VERSION = 2
+#: 3 (B08.4 option c): memory-only samples and their refusals.
+TIMING_LOOKUP_VERSION = 3
 
 Branch = Literal["set", "clear"]
 BRANCHES: tuple[Branch, ...] = ("set", "clear")
@@ -92,6 +103,43 @@ def require_final_timing_target(provider: ContextProvider, spec: str) -> None:
             f"not_final_timing:{spec}",
             f"the target must observe final ignition timing ({', '.join(declared)}); "
             "the timing-trim lookup is an intermediate, never final timing or knock retard",
+        )
+
+
+def require_memory_only_target(provider: ContextProvider, spec: str) -> MemoryOnlyTargetDecl:
+    """The declaration of a memory-only target, or ``not_memory_only_target``:
+    a target without a same-read coordinate input has no memory-only tuple."""
+    require_final_timing_target(provider, spec)
+    for target in provider.definition.timing_trim.memory_only_targets:
+        if target.channel == spec:
+            return target
+    raise TimingLookupRefusalError(
+        f"not_memory_only_target:{spec}",
+        "operating_context.yaml timing_trim.memory_only_targets does not declare it: its "
+        "coordinate is not read in the same service-0x23 read",
+    )
+
+
+def refuse_mode01_surface_for_memory_target(
+    provider: ContextProvider, model: BehaviorModel2D
+) -> None:
+    """Refuse ``memory_only_target:<spec>`` for a model whose output is a
+    memory-only target and whose axes are not all memory reads.
+
+    B08.4 option (c) narrows the tuple to memory and gives up the
+    identical-sample comparison with the Mode 01 surface for as long as it is
+    in use (operator decision 2026-10-08). Refused here rather than quietly
+    re-joined, so the comparison returns only by a decision that lifts it."""
+    declared = {t.channel for t in provider.definition.timing_trim.memory_only_targets}
+    if model.output not in declared:
+        return
+    foreign = sorted(a.channel for a in model.axes if not str(a.channel).startswith("mem:"))
+    if foreign:
+        raise TimingLookupRefusalError(
+            f"memory_only_target:{model.output}",
+            f"{model.output} is graded on its memory-only tuple; the identical-sample "
+            f"comparison against a surface on {foreign} is given up while B08.4 option (c) "
+            "is in use (operator decision 2026-10-08)",
         )
 
 
@@ -209,6 +257,7 @@ def identical_samples(
     """
     target_spec = model.output
     require_final_timing_target(provider, target_spec)
+    refuse_mode01_surface_for_memory_target(provider, model)
     require_policy_within_skew(provider, policy)
     target = _reads(long, target_spec)
     if target.empty:
@@ -311,6 +360,7 @@ def score_identical_samples(
             "target_mismatch",
             f"samples read {foreign}, the model grades {model.output}",
         )
+    refuse_mode01_surface_for_memory_target(provider, model)
     usable = [s for s in samples if s.reason is None]
     if not usable:
         return []
@@ -339,6 +389,135 @@ def score_identical_samples(
     return out
 
 
+# -- memory-only samples (B08.4 option c) ----------------------------------------------------
+
+
+#: Two channels decoded from one read carry one acquisition time; this only
+#: absorbs float round-off in a stored timestamp.
+SAME_READ_TOLERANCE_S = 1e-6
+
+
+@dataclass(frozen=True)
+class MemoryOnlySample:
+    """One read of a memory-only target with the coordinate from the same
+    read, or the reason it is not one. No Mode 01 axis is paired."""
+
+    session: str
+    t: float
+    target_spec: str
+    target: float
+    coordinate: CoordinateSample
+    #: Why this is not a memory-only sample (``None``: it is one).
+    reason: str | None
+
+
+def memory_only_samples(
+    provider: ContextProvider,
+    long: pd.DataFrame,
+    *,
+    session: str,
+    target: str,
+) -> list[MemoryOnlySample]:
+    """The coordinate at every read of a declared memory-only ``target``.
+
+    The ``same_read_as`` input must be the read the target came in (its
+    acquisition time equal to the target's), else ``not_same_read:<input>``;
+    every other coordinate read must lie within the lookup's
+    ``max_acquisition_skew_s`` of it (``skew:target_coordinate``).
+
+    The rest of the tuple is taken from the target's own **read group**: the
+    reads between the previous and the next read of the target's window. A
+    window's memory burst reads the target's window and the others
+    milliseconds apart, in either order, so each other coordinate input uses
+    its first read at or after the target inside the group, else its last
+    one before it. A read from another group is never used: evaluated just
+    before the next spark read, the next burst's BFS-X (read first in that
+    burst) used to replace this burst's own. An input with no read in the
+    group is refused ``no_read_in_group:<input>``, one whose read in the
+    group lies beyond the skew ``skew:target_coordinate``, and one the
+    provider still takes from an earlier group ``other_read_group:<input>``. The provider's
+    own freshness and tuple-skew refusals apply unchanged."""
+    declared = require_memory_only_target(provider, target)
+    reads = _reads(long, target)
+    if reads.empty:
+        return []
+    t_target = to_seconds(reads["timestamp"])
+    order = np.argsort(t_target, kind="stable")
+    t_target = t_target[order]
+    values = pd.to_numeric(reads["value"], errors="coerce").to_numpy(dtype=float)[order]
+    unacquired = (reads["timestamp_basis"].astype(str) != ACQUIRED).to_numpy()[order]
+    skew = provider.definition.timing_trim.max_acquisition_skew_s
+    trim = provider.definition.timing_trim
+    others = [
+        name
+        for name in (trim.rows.input, trim.columns.input, trim.select_input)
+        if name != declared.same_read_as
+    ]
+    inputs = provider.definition.inputs
+    other_times = {
+        name: np.sort(to_seconds(_reads(long, inputs[name].channel)["timestamp"]))
+        for name in others
+    }
+    n = len(t_target)
+    group_lo = np.concatenate([[-np.inf], t_target[:-1]])
+    group_hi = np.concatenate([t_target[1:], [np.inf]])
+    t_eval = t_target.copy()
+    no_read: list[str | None] = [None] * n
+    beyond = [False] * n
+    for name in others:
+        times = other_times[name]
+        at_or_after = np.searchsorted(times, t_target - SAME_READ_TOLERANCE_S, side="left")
+        for i in range(n):
+            j = int(at_or_after[i])
+            if j < len(times) and times[j] < group_hi[i]:
+                chosen = float(times[j])
+            elif j > 0 and times[j - 1] > group_lo[i]:
+                chosen = float(times[j - 1])
+            else:
+                if no_read[i] is None and name != trim.select_input:
+                    no_read[i] = f"no_read_in_group:{name}"
+                continue
+            if abs(chosen - t_target[i]) > skew:
+                beyond[i] = True
+            t_eval[i] = max(t_eval[i], chosen)
+    records = provider.evaluate_frame(long, t_eval.tolist())
+    out: list[MemoryOnlySample] = []
+    for i, t in enumerate(t_target.tolist()):
+        coordinate = _coordinate(session, t, records[i])
+        reason: str | None = None
+        if unacquired[i]:
+            reason = f"clock_unacquired:{target}"
+        elif not math.isfinite(values[i]):
+            reason = f"missing:{target}"
+        elif no_read[i] is not None:
+            reason = no_read[i]
+        elif beyond[i]:
+            reason = "skew:target_coordinate"
+        elif coordinate.refused is not None:
+            reason = coordinate.refused
+        elif abs(coordinate.read_times[declared.same_read_as] - t) > SAME_READ_TOLERANCE_S:
+            reason = f"not_same_read:{declared.same_read_as}"
+        elif foreign := sorted(
+            name
+            for name, at in coordinate.read_times.items()
+            if name != declared.same_read_as and at <= group_lo[i]
+        ):
+            reason = f"other_read_group:{foreign[0]}"
+        elif any(abs(r - t) > skew for r in coordinate.read_times.values()):
+            reason = "skew:target_coordinate"
+        out.append(
+            MemoryOnlySample(
+                session=session,
+                t=t,
+                target_spec=target,
+                target=float(values[i]),
+                coordinate=coordinate,
+                reason=reason,
+            )
+        )
+    return out
+
+
 @dataclass(frozen=True)
 class IdenticalSampleSummary:
     """Counts by reason, so an empty comparison names its kind of empty."""
@@ -351,7 +530,7 @@ class IdenticalSampleSummary:
 
 
 def summarize(
-    samples: Sequence[IdenticalSample], scored: Sequence[ScoredSample]
+    samples: Sequence[IdenticalSample | MemoryOnlySample], scored: Sequence[ScoredSample]
 ) -> IdenticalSampleSummary:
     return IdenticalSampleSummary(
         target_reads=len(samples),
@@ -523,6 +702,8 @@ __all__ = [
     "CoordinateSample",
     "IdenticalSample",
     "IdenticalSampleSummary",
+    "MemoryOnlySample",
+    "SAME_READ_TOLERANCE_S",
     "ScoredSample",
     "TimingLookupRefusalError",
     "TrimCellCoverage",
@@ -530,7 +711,10 @@ __all__ = [
     "coordinate_samples",
     "drives_of",
     "identical_samples",
+    "memory_only_samples",
+    "refuse_mode01_surface_for_memory_target",
     "require_branch_validation",
+    "require_memory_only_target",
     "require_policy_within_skew",
     "require_final_timing_target",
     "score_identical_samples",

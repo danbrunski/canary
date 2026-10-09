@@ -178,6 +178,25 @@ class FuelCompDecl(_Strict):
     evidence: str = Field(min_length=1)
 
 
+class MemoryOnlyTargetDecl(_Strict):
+    """A final-timing channel read in the same service-0x23 read as one of the
+    timing lookup's coordinate inputs (B08.4, operator decision 2026-10-08,
+    option c).
+
+    Its tuple is memory only: the target and ``same_read_as`` share one
+    acquisition, so their skew is zero by construction, and the remaining
+    coordinate reads sit in the same window's back-to-back memory burst. What
+    it gives up is the identical-sample comparison against a surface on Mode 01
+    axes, which :mod:`src.analysis.timing_lookup` refuses by name for it."""
+
+    channel: str = Field(pattern=r"^mem:[A-Za-z0-9_]+$")
+    #: The coordinate input (``timing_trim.rows`` or ``columns``) whose channel
+    #: is decoded from the same read; :func:`check_catalog` holds the two to
+    #: one catalog window.
+    same_read_as: str = Field(min_length=1)
+    evidence: str = Field(min_length=1)
+
+
 class TimingTrimDecl(_Strict):
     application_node: str = Field(min_length=1)
     application_output: str = Field(min_length=1)
@@ -194,7 +213,28 @@ class TimingTrimDecl(_Strict):
     #: timing evaluation cannot take the trim lookup (an intermediate) as its
     #: target.
     final_timing_channels: list[Annotated[str, Field(pattern=_SPEC)]] = Field(min_length=1)
+    #: Final-timing channels with a memory-only tuple (B08.4 option c). Each
+    #: is one of ``final_timing_channels``.
+    memory_only_targets: list[MemoryOnlyTargetDecl] = Field(default_factory=list)
     evidence: str = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def _memory_only_targets(self) -> TimingTrimDecl:
+        channels = [t.channel for t in self.memory_only_targets]
+        if len(set(channels)) != len(channels):
+            raise ValueError("memory_only_targets names a channel twice")
+        coordinate = {self.rows.input, self.columns.input}
+        for target in self.memory_only_targets:
+            if target.channel not in self.final_timing_channels:
+                raise ValueError(
+                    f"memory_only_targets: {target.channel} is not one of final_timing_channels"
+                )
+            if target.same_read_as not in coordinate:
+                raise ValueError(
+                    f"memory_only_targets: {target.channel} same_read_as "
+                    f"{target.same_read_as} is not a coordinate input ({sorted(coordinate)})"
+                )
+        return self
 
 
 class SaturationDecl(_Strict):
@@ -348,7 +388,9 @@ def stored_decode(spec: str, catalog: DidMap) -> StoredDecode:
 
 def check_catalog(definition: ContextDefinition, catalog: DidMap) -> None:
     """Refuse (``catalog_mismatch``) a ``mem:`` input whose catalog address is
-    not the RAM the definition says it reads."""
+    not the RAM the definition says it reads, and a memory-only timing target
+    that does not share one memory window (one service-0x23 read) with the
+    coordinate input it declares ``same_read_as``."""
     wrong = []
     for name, decl in definition.inputs.items():
         source, _, channel = decl.channel.partition(":")
@@ -358,6 +400,18 @@ def check_catalog(definition: ContextDefinition, catalog: DidMap) -> None:
         if entry is None or entry.address != decl.ram:
             found = "absent" if entry is None else f"0x{entry.address:08X}"
             wrong.append(f"{name}: catalog {found}, declared 0x{decl.ram:08X}")
+    memory = {c.name: c for c in catalog.memory}
+    for target in definition.timing_trim.memory_only_targets:
+        # One service-0x23 read decodes both, or the target's coordinate is not
+        # "from the same read" at all (B08.4 option c).
+        partner = definition.inputs[target.same_read_as].channel
+        pair = [memory.get(spec.partition(":")[2]) for spec in (target.channel, partner)]
+        windows = {None if channel is None else channel.window for channel in pair}
+        if None in windows or len(windows) != 1:
+            wrong.append(
+                f"memory_only_targets: {target.channel} and {partner} are not one memory "
+                f"window (catalog windows {sorted(str(w) for w in windows)})"
+            )
     if wrong:
         raise ContextRefusalError("catalog_mismatch", "; ".join(wrong))
 
@@ -782,6 +836,9 @@ def contract(
                 "cell_mask": f"0x{TRIM_VALUE_MASK:02X}",
                 "max_acquisition_skew_s": trim.max_acquisition_skew_s,
                 "final_timing_channels": list(trim.final_timing_channels),
+                "memory_only_targets": {
+                    t.channel: {"same_read_as": t.same_read_as} for t in trim.memory_only_targets
+                },
                 "applicability": {
                     **lookup_applicability(model, model_sha, trim.application_node, observed),
                     "output": trim_output.output,

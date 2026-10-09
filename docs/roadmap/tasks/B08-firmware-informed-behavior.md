@@ -610,7 +610,9 @@ extra independent votes.
       `default`'s budget is not profile data: `bus_budget_override` is armed
       only by the capture route. Pinned by
       `tests/test_default_profile_b08_context.py::test_the_b08_additions_miss_the_lookup_skew_at_the_serving_budget`
-      (slow).
+      (slow). That test is now
+      `::test_the_b08_additions_meet_the_lookup_skew_at_the_serving_budget`:
+      option (b) below closed the gap.
     - **The deployed LSTM learned the spark window.** The Pi's
       `lstm_autoencoder_2026-09-24T035125`
       (`tests/fixtures/deployed_manifests`) carries
@@ -649,6 +651,291 @@ extra independent votes.
 
       Also owed: an LSTM retrain without memory features, and the fixture
       refresh, before `default` reads the spark window.
+      *Chosen 2026-10-08: (b) a scheduler change and (c) the memory-only
+      target as an interim. See the next sub-item.*
+  - **Operator decisions 2026-10-08 (second round), recorded:**
+    - **(b)** a scheduler change, so a session window's memory (0x23) reads
+      go back to back, last in the window. Approved and implemented (below).
+    - **(c)** as an interim, B08.4's tuple narrows to the memory-only target
+      `mem:ECM_IGNITION_TIMING_RAM`, which arrives in the same read as the rpm
+      word. While (c) is in use, the identical-sample comparison against the
+      Mode 01 surface is given up. Implemented (below).
+    - The LSTM is retrained without memory features before `default` reads
+      any RAM. That is separate work.
+    - The HI DET key-on read (D03.38) comes before HI DET joins any profile.
+    - Coolant DID `0x1101` is accepted as a detector candidate once `default`
+      polls it.
+    - **`default` is still unchanged.** Adding the windows waits for the LSTM
+      retrain and the key-on read.
+  - **(b) Done 2026-10-08 (desk, fake clock). A window's memory reads go
+    last, back to back, flush against the session exit.**
+    - **Design.** [`can_obd_loop.py`](../../../src/collection/can_obd_loop.py)
+      `_CanObdLoop._memory_burst`:
+      - While any other session-window member is owed, memory reads are left
+        out of selection.
+      - Then the window waits until the reads, back to back, will finish
+        where pacing's last read would have ended.
+        - A paced read costs the longer of a budget slot and its turnaround.
+          At 90 req/s a multi-frame read outlasts the 11 ms slot.
+        - The turnaround is the previous burst's mean, or the last
+          session-control turnaround before any burst has run.
+      - Then every read is charged at once from the plan
+        (`_BurstPlan.release`), the reads go without a slot between them, and
+        the exit goes when pacing sent it. So do the lapse, Mode 01 and the
+        next window.
+      - A slot spent by anything else during the wait or the burst (a
+        keep-alive, an identification read) moves the start and the charge
+        out by exactly one slot (`_BurstPlan.others`).
+      - Keep-alives (`keepalive_policy`) follow pacing:
+        - one due by pacing's last read slot is sent. If the burst is about
+          to start, it goes just before the burst, so it does not split the
+          tuple;
+        - one due later is not sent, as pacing did not send it;
+        - once the burst runs past its paced end (an unanswered read's 1 s
+          timeout), every due keep-alive goes, and it bypasses the pre-charged
+          clock (`_session_budget_at`).
+      - The next window is scheduled from when pacing would have closed this
+        one (`DidWindowController.close_as_paced`). Without that, the
+        end-to-start interval restarted 0.18 s later for every 60 s window.
+      - A burst read's cadence grid steps from the window's opening
+        (`_next_request_due_at(served_at=...)`). Measured from the late issue
+        instant, a read issued 10 ms past its next grid point skipped a whole
+        period. On a 4 s plan the spark window was then read only every other
+        window. This also changes one measured rate; see "`tuning` at 8 req/s"
+        below.
+      - Untouched cases:
+        - continuous windows (`did_continuous`), which never close, so there
+          is no exit to sit against;
+        - a window whose deadline falls before the paced slots run out. Its
+          reads go at once and are charged as sent.
+    - **What the ECM needs between 0x23 reads: nothing beyond the turnaround.**
+      This is measured on stored sessions (laptop, read-only), not assumed:
+      - `_capture-rom-trace-2026-09-21T142926`, 184 req/s override, continuous:
+        - 7,821 memory reads, 5,211 of them issued straight after another
+          memory read;
+        - acquisition-to-acquisition gap: minimum 1.82 ms, median 6.15 ms;
+        - memory request-to-response (`response_interval_s`): median
+          2.11 ms, p95 5.11 ms.
+      - `_capture-rom-trace-2026-09-21T195647`:
+        - 870 memory-after-memory pairs, minimum 1.79 ms;
+        - request-to-response median 2.05 ms, p95 4.95 ms;
+        - 0 storage drops (`storage.dropped_records` delta 0);
+        - `can0.rx_over_errors` +11 in 89.8 s. That was the MCP2515 rig,
+          scope `controller`, reported but never a failure.
+      - Earlier figures (`data/analyses/2026-09-20-uprev-usb-road.md`):
+        - back-to-back 63-byte memory reads ran about 176 req/s;
+        - 2,500/2,500 and 3,998/4,000 reads were answered at that pace;
+        - single DIDs answered at 649 req/s (~1.5 ms each).
+      - A burst is 3–5 reads once per 60 s window, about 15 ms on the truck.
+        D03's MCP2515 overflow lead (bursty rounds, 36/min at ~650 req/s
+        sustained) concerned the old rig. The MCP2518FD on HAT rev 2.0 has no
+        overflow measurement yet: see Remaining.
+    - **Budget evidence** (fake clock, `default` plus the B08 additions,
+      Pi collection settings, 8 req/s, 600 s):
+      - every window still has 16 requests: entry, 9 DIDs, 5 memory reads,
+        exit;
+      - entry to the next Mode 01 request is 1.885 s, and entry to exit
+        1.760–1.762 s. HEAD gives 1.885 s and 1.760 s;
+      - whole run: Mode 01 2,331 requests, DIDs 81, memory 45, session 19.
+        These are identical to HEAD;
+      - window entries match HEAD within 1 ms.
+      - `tests/test_memory_window_burst.py::test_memory_reads_go_last_back_to_back_and_the_exit_follows`
+        asserts that a window's N requests still span at least N−1 slots
+        before the next Mode 01 request.
+    - **Profiles with no memory reads are unchanged.** After the
+      verification fixes, the Xterra `default` (300 s) and the generic
+      `default` (300 s) were re-run with the verifier's harness. Their sent
+      frames and readings are identical to a `git archive HEAD` export. The
+      first run, before the fixes: the fake-clock harness
+      ran the D03.38 verifier's method: the tracked catalog, the Pi's
+      collection settings, a session-gated `ScriptedEcu`, 130 s per profile.
+      It diffed every sent frame (time, id, payload) and every reading
+      (channel, acquisition time) against a `git archive HEAD` export. All
+      32 profiles without memory reads are **identical**:
+      - the 6 tracked profiles without memory reads: the Xterra `default`,
+        and the generic `default`, `fuel-map`, `tuning-did`,
+        `broadcast-every-frame` and `fuel-pulsation`;
+      - 2 saved `fuel-map` snapshots;
+      - 24 DID-only twins: every memory profile with its memory reads removed
+        (23 saved snapshots plus Xterra `tuning`);
+      - 5 saved `tuning-did` snapshots from 2026-08 do not load at HEAD
+        either (old DID names), so they were not compared.
+
+      Profiles with memory reads (verifier's harness, after the fixes):
+      - The continuous `rom-trace` snapshots are identical (first run).
+      - `ram-study`, `fuel-target-research` 09-21T195844 and `tuning`
+        09-23T164007 snapshots, 300 s each:
+        - every channel's reading count is equal to HEAD;
+        - window counts are equal (43, 160 and 120);
+        - there are no lapses.
+      - **Xterra `tuning` at its 90 req/s, 900 s:** every channel is within
+        ±1 of HEAD. `COMMANDED_EQUIV_RATIO` is 2,752 → 2,751 and
+        `FUEL_STATUS` 2,755 → 2,754.
+        - Verification had found both 5.5 % low (2,752 → 2,614), and the
+          core Mode 01 channels high.
+        - The first report called this a batch-phase artifact. That was wrong:
+          it was systematic. The cause was the exit landing where the burst
+          ended instead of where pacing sent it. Pacing at 90 req/s runs on
+          read turnaround, not on slots.
+        - Mode 01 therefore resumed at a different point of the 0.5 s cycle,
+          and a core-only round displaced the second batch, which carries
+          0x44 and 0x03.
+        - Now the burst ends at pacing's last read and the exit goes there.
+          `::test_tuning_at_90_req_s_keeps_every_channel_at_its_paced_rate`
+          (slow) pins every channel within ±1 of the burst switched off over
+          300 s. The ±1 is the run's last partial window. The test fails with
+          the old exit placement.
+      - **Xterra `tuning` at 8 req/s, 900 s** (infeasible for that profile:
+        its 0.5 s cycle needs 2.8 s at 8 req/s):
+        - windows go 294 → 280, every window keeps pacing's span (20
+          requests, 2.5 s), and there are no lapses;
+        - the 0.125-weighted knock-sensor reads go 210 → 280 (read in every
+          window), and the other memory and DID channels lose 14 each.
+        - Their configured 0.5 Hz exceeds the window rate, so they are due
+          in every window. HEAD read them in only 210 of 294 windows: issued
+          late in the window, they missed the next grid point. That is the
+          defect `served_at` removes.
+        - A pacing-position anchor was tried. It gave 169, further from the
+          configured rate, so it was dropped.
+        - The double charge the verifier found (spans 3.145 s, 294 → 210
+          windows) is fixed; see Tests.
+        - Mode 01 pays for it too (verifier, against a fresh HEAD export,
+          900 s): RPM, MAF, ENGINE_LOAD, THROTTLE_POS, TIMING_ADVANCE and
+          O2_WR_LAMBDA_S1 −69 each (about −8 %, RPM 869 → 800);
+          COOLANT_TEMP 477 → 337 (−29 %); INTAKE_TEMP −55; FUEL_STATUS −28;
+          COMMANDED_EQUIV_RATIO −16; LONG_FUEL_TRIM_1 −14;
+          BAROMETRIC_PRESSURE +70; LONG_FUEL_TRIM_2 +28; SHORT_FUEL_TRIM_1/2
+          +13 each. Mode 01 requests 1,683 → 1,586, session frames 758 → 841
+          (every window now needs its keep-alive).
+        - All of it follows from the knock-sensor reads filling every window:
+          with uniform memory weights the same run is identical to HEAD
+          (280 = 280 windows, 9,621 = 9,621 frames, every reading count
+          equal), so the burst itself changes nothing at 8 req/s.
+        - `tuning` does not run at 8 req/s in practice: all 13 stored
+          `_capture-tuning-*` snapshots carry `bus_budget_override: 90.0`,
+          which `profile_capture` applies unless a request names another.
+    - **Skew, re-run** (fake clock, nine windows in 600 s, the B08.4
+      evidence's setup, acquisition-time pairs per window):
+
+      | budget | coordinate (rpm, BFS-X, HI DET): HEAD → now | with Mode 01 rpm/load/timing: HEAD → now |
+      |---|---|---|
+      | 8 req/s (serving) | 0.500 → 0.042 s | 0.750–0.937 → 0.175–0.177 s |
+      | 16 req/s | 0.250 → 0.042 s | 0.375–0.812 → 0.113–0.115 s |
+      | 25 req/s | 0.160 → 0.042 s | 0.260–0.500 → 0.112 s |
+      | 40 req/s | 0.100 → 0.042 s | 0.185 → 0.112 s |
+
+      - The 0.042 s is five reads at the fake ECU's 10 ms turnaround: the
+        tuple's three reads are the first, second and fifth of the burst. On
+        the truck's ~2 ms turnaround it would be about 10 ms.
+      - With Mode 01, the spread is the burst plus the wait for Mode 01 after
+        the exit. At 8 req/s that wait is one slot (0.125 s); from 16 req/s
+        it is the exit turnaround and the 50 ms grace.
+      - Under (c) the narrowed tuple is the same three reads, with final
+        timing in the rpm word's own read (0 s apart).
+      - The HEAD column reproduces the B08.4 evidence, except the 8 req/s
+        Mode 01 upper bound (0.937 here, 1.312 there).
+  - **(c) Done 2026-10-08 (desk). A memory-only target, declared in data and
+    held to one read.**
+    - [`operating_context.yaml`](../../../data/nissan-xterra-2008/operating_context.yaml)
+      `timing_trim.memory_only_targets` declares
+      `mem:ECM_IGNITION_TIMING_RAM` with `same_read_as: engine_speed_word` and
+      its evidence: the `spark` window is one 19-byte read, and the byte is
+      `equals_did 0x110A`.
+    - Schema (`MemoryOnlyTargetDecl`) refusals:
+      - the target is not one of `final_timing_channels`;
+      - `same_read_as` is not a coordinate input;
+      - (`check_catalog`) the two channels are not one catalog memory window.
+        This is `catalog_mismatch`, "not one memory window".
+    - The contract carries `memory_only_targets`. The definition file changed,
+      so the context fingerprint changes.
+    - [`timing_lookup.py`](../../../src/analysis/timing_lookup.py)
+      (`TIMING_LOOKUP_VERSION` 3):
+      - `memory_only_samples(provider, long, session, target)` pairs each
+        target read with the coordinate from its own read.
+        - It refuses `not_same_read:<input>` when the rpm word is another read.
+        - The other inputs come from the target's **read group**: the reads
+          between the previous and the next read of the target's window.
+          - It takes the first read at or after the target, else the last one
+            before it.
+          - Refusals: `no_read_in_group:<input>`; `skew:target_coordinate`
+            when that read is beyond 0.25 s; `other_read_group:<input>` when
+            the provider still took an earlier group's read.
+          - The first rule (evaluate just before the next rpm-word read) let
+            the next burst's BFS-X, read before its own spark read, replace
+            this burst's. Verification found this. The probe case is now in
+            `::test_a_memory_only_sample_takes_its_coordinate_from_the_same_read`.
+        - It keeps every provider refusal.
+      - `require_memory_only_target` refuses `not_memory_only_target:<spec>`.
+        That includes `obd:TIMING_ADVANCE` and `did:ECM_IGNITION_TIMING`.
+      - **The Mode 01 comparison is refused by name.** `identical_samples` and
+        `score_identical_samples` refuse `memory_only_target:<spec>` for a
+        model whose output is the memory-only target and whose axes are not
+        all memory.
+      - Grading memory-only samples with the Mode 01 surface is still
+        `target_mismatch`. Every earlier refusal is kept.
+    - [`tools/timing_lookup_coverage.py`](../../../tools/timing_lookup_coverage.py)
+      reports `memory_only` per session. Re-run on the three coordinate
+      sessions:
+      - `_capture-rom-trace-2026-09-21T142926`: 1,539 / 1,547 (7
+        `no_read_in_group:bfs_x`, 1 `skew:target_coordinate`);
+      - `_capture-rom-trace-2026-09-21T195647`: 224 / 224;
+      - `_capture-ram-study-2026-10-04T204557`: 1 / 181 (180
+        `skew:target_coordinate`). Its windows were seconds apart.
+      - Nothing is graded. HI DET was never captured, so
+        `selection_unobserved` stands.
+  - **Tests (b, c):**
+    - `tests/test_memory_window_burst.py` (9 fast, 1 slow). Each runs the real
+      loop on the fake clock. They show:
+      - memory goes last and back to back, with the exit after it;
+      - the tuple and its Mode 01 leg fit 0.25 s at 8 req/s, and final timing
+        has the rpm word's acquisition time;
+      - a DID-only profile stays paced;
+      - a continuous window stays paced;
+      - a window whose deadline cuts the wait reads at once;
+      - a keep-alive does not split the burst;
+      - the next window does not move;
+      - `::test_a_keepalive_in_the_wait_is_charged_once`: a keep-alive in
+        the wait spends one slot and no more. Window counts equal the run
+        without it, and each window spans N−1 to N slots;
+      - `::test_unanswered_memory_reads_never_hold_the_keepalive_past_s3`:
+        0x23 requests are lost before the ECM and do not refresh S3
+        (S3 3.0 s, 30 s blackout). There are 0 lapses, the session-control
+        gap stays ≤ the keep-alive interval plus one request timeout, and
+        Mode 01 never gaps 10 s;
+      - `::test_tuning_at_90_req_s_keeps_every_channel_at_its_paced_rate`
+        (slow).
+      - Controls, each checked by hand with the fix removed: the keep-alive
+        split test, the window test, the double charge (release from the live
+        clock), the keep-alive held for the whole burst (S3 test), and the
+        old exit placement (the tuning-rate test).
+      - The verifier's silent-read scenario: `default` plus the B08 windows,
+        every 0x23 unseen, S3 3.0 s, 30 s blackout, 600 s. HEAD and now both
+        have 0 lapses and 9 windows. The longest session-control gap is
+        2.127 s at HEAD and 2.586 s now (one read timeout). The verifier's
+        own configuration had measured 6.78 s and 2 lapses before the fix.
+    - `tests/test_default_profile_b08_context.py::test_the_b08_additions_meet_the_lookup_skew_at_the_serving_budget`
+      (slow): two windows each at 8 and 40 req/s; memory spread < 0.125 s,
+      joined ≤ 0.25 s.
+    - `tests/test_timing_lookup.py` (+9):
+      - `::test_the_memory_only_target_is_final_timing_read_with_the_rpm_word`
+      - `::test_a_memory_only_target_must_be_final_timing_on_a_coordinate_input`
+        (2)
+      - `::test_a_memory_only_target_in_another_read_than_its_input_is_refused`
+      - `::test_only_a_declared_memory_only_target_has_a_memory_only_tuple` (3)
+      - `::test_a_memory_only_sample_takes_its_coordinate_from_the_same_read`
+        (a burst, a different read, no read in the group, missing, a
+        continuous capture's next spark read, and the verifier's two-burst
+        probe)
+      - `::test_the_memory_only_target_is_never_graded_on_the_mode01_surface`
+  - **Remaining after (b)/(c):**
+    - `default` still reads no RAM. It waits for the LSTM retrain (separate
+      work) and the HI DET key-on read.
+    - The burst is checked on the fake clock only. On the truck, read the
+      achieved tuple spread from a capture's acquisition times, and
+      `can0.rx_over_errors` on the MCP2518FD.
+    - Items 1–3 above still close the item. Under (c), item 1's Mode 01 leg
+      is not needed, and the comparison against the Mode 01 surface is
+      given up until (c) is lifted.
 
 - [~] **B08.5 — Connect distinct residuals to investigation evidence.**
   Feed B08 context and qualified behavior results into E03 while keeping
