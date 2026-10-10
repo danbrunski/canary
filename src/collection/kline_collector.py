@@ -90,6 +90,8 @@ from src.collection.kline.plan import (
     split_reply,
 )
 from src.collection.kline.profile import (
+    P4_AGREEMENT_MS,
+    P4_SPACED_MS,
     KlineNotConfiguredError,
     KlineProfile,
     decode_codes,
@@ -803,6 +805,9 @@ class KlineCollector:
                             )
                             if frame.module in (None, profile.ecm_address):
                                 tx_gate.claim_ecm_session("foreign", ttl_seconds=hold)
+                            spacing = undeclared_spacing(profile, frame)
+                            if spacing is not None:
+                                self._say_once(f"p4-{frame.module}", "%s", spacing)
                         for record in recorder.observe(frame, frame.finished + to_epoch):
                             put_nowait_or_drop(queue, record, on_drop=self.drop_counter)
                 for brk in decoder.flush_breaks(time.monotonic()):
@@ -839,7 +844,7 @@ class SniffRecorder:
 
     def observe(self, frame: SniffedFrame, stamp: float) -> list[TelemetryRecord]:
         label = self.profile.module_label(frame.module)
-        out = [frame_record(frame, stamp, label)]
+        out = [frame_record(frame, stamp, label, char_s=10.0 / self.profile.baud)]
         if frame.direction == "tester":
             self._pending = frame
             return out
@@ -852,6 +857,37 @@ class SniffRecorder:
             tracker = self._trackers[frame.module] = DefinitionTracker(widths)
         out += sniffed_value_records(exchange, tracker, stamp, label)
         return out
+
+
+def undeclared_spacing(profile: KlineProfile, frame: SniffedFrame) -> str | None:
+    """What to tell the operator when another tester's StartCommunication to
+    a module was spaced unlike the gap CANary would use for it
+    (:meth:`KlineProfile.p4_ms`); ``None`` when they agree or it says nothing.
+
+    Only a start that arrived in reads of its own measures its spacing, so a
+    frame whose last byte waited out a stall is not judged."""
+    if (
+        frame.direction != "tester"
+        or frame.kind != "addressed"
+        or frame.module is None
+        or frame.payload[:1] != bytes([kp.SID_START_COMMUNICATION])
+        or frame.timing_uncertainty_s > P4_SPACED_MS / 1000.0
+    ):
+        return None
+    gap = frame_byte_gap_s(frame, 10.0 / profile.baud)
+    if gap is None:
+        return None
+    measured_ms, declared_ms = gap * 1000.0, profile.p4_ms(frame.module)
+    if measured_ms <= P4_SPACED_MS and declared_ms <= P4_SPACED_MS:
+        return None
+    if abs(measured_ms - declared_ms) <= P4_AGREEMENT_MS:
+        return None
+    return (
+        f"another tester's StartCommunication to {profile.module_label(frame.module)} "
+        f"spaced its bytes {measured_ms:.1f} ms apart; CANary's profile sends that module "
+        f"{declared_ms:g} ms apart. Record the start under the module's sniffed_starts and "
+        "request_timing in kline.yaml, or CANary's own requests may go unanswered."
+    )
 
 
 def module_did_widths(
@@ -873,9 +909,29 @@ def module_did_widths(
     return recorded
 
 
-def frame_record(frame: SniffedFrame, stamp: float, module: str) -> TelemetryRecord:
+def frame_byte_gap_s(frame: SniffedFrame, char_s: float) -> float | None:
+    """The sender's idle between ``frame``'s bytes (ISO P4 for a tester):
+    first byte to last, between their latest arrival bounds, over the gaps,
+    less one character each. Exact when the first and last byte each arrived
+    in a read of their own, as a spaced tester's do; a frame that waited out
+    a host stall in one read measures ~0. ``None`` for a one-byte frame."""
+    n = len(frame.raw)
+    if n < 2:
+        return None
+    return max(0.0, (frame.finished - frame.started) / (n - 1) - char_s)
+
+
+def frame_record(
+    frame: SniffedFrame, stamp: float, module: str, *, char_s: float | None = None
+) -> TelemetryRecord:
     """``module`` is the profile's label for ``frame.module``
-    (:meth:`~src.collection.kline.profile.KlineProfile.module_label`)."""
+    (:meth:`~src.collection.kline.profile.KlineProfile.module_label`).
+
+    The row is stamped at the frame's last byte (``frame.finished``, the
+    latest it can have arrived); ``timing_uncertainty_s`` bounds that byte.
+    With ``char_s``, ``first_to_last_ms`` (first byte to last) and
+    ``byte_gap_ms`` (:func:`frame_byte_gap_s`) say how the bytes were spaced:
+    a scan tool's 15 ms to the airbag module went unseen until 2026-10-10."""
     metadata: dict[str, str | int | float | None] = {
         "instrument": "sniff",
         "direction": frame.direction,
@@ -883,6 +939,10 @@ def frame_record(frame: SniffedFrame, stamp: float, module: str) -> TelemetryRec
         "timing_uncertainty_s": round(frame.timing_uncertainty_s, 6),
         "module": module,
     }
+    if char_s is not None:
+        gap = frame_byte_gap_s(frame, char_s)
+        metadata["first_to_last_ms"] = round((frame.finished - frame.started) * 1000.0, 3)
+        metadata["byte_gap_ms"] = None if gap is None else round(gap * 1000.0, 3)
     if frame.module is not None:
         metadata["module_address"] = frame.module
     if frame.source is not None:
@@ -953,6 +1013,9 @@ def wake_record(pulse: WakePulse, to_epoch: float, module: str) -> TelemetryReco
     Low and high are host-clock readings around the break ioctls; how late the
     pin follows the ioctl is not measured, so ``timing_uncertainty_s`` is
     ``None`` and ``timing_basis`` says why. ``module`` labels ``pulse.target``.
+    ``p4_ms`` is the inter-byte gap the StartCommunication after it was sent
+    with (``0``: back to back; ``None``: it was not sent), and
+    ``byte_gap_ms_*`` the gaps the host measured between those byte writes.
     """
     metadata: dict[str, str | int | float | None] = {
         "instrument": "command",
@@ -969,6 +1032,11 @@ def wake_record(pulse: WakePulse, to_epoch: float, module: str) -> TelemetryReco
         "readback": pulse.readback.hex(),
         "module": module,
         "answered": pulse.answered,
+        # How the StartCommunication after it was spaced: the profile's gap
+        # for that module, and what the host measured between its writes.
+        "p4_ms": pulse.p4_ms,
+        "byte_gap_ms_min": round(min(pulse.byte_gaps_ms), 3) if pulse.byte_gaps_ms else None,
+        "byte_gap_ms_max": round(max(pulse.byte_gaps_ms), 3) if pulse.byte_gaps_ms else None,
         "refused": pulse.refused,
         "timing_uncertainty_s": None,
         "timing_basis": "host clock around the break ioctls; pin latency unmeasured",

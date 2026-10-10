@@ -237,6 +237,49 @@ modules:
       19:48:54.56Z, the tool sent 02 10 C0 on CAN 0x752 and nothing answered,
       so this module is K-line only (data/analyses/2026-10-04-srs-kline-scan-tool.md).
       No reader: CANary does not poll it.
+    # The scan tool's StartCommunication as the HAT sniffed it, KOEO, session
+    # 2026-10-10T153117 (mark-parity sniff, H05.9). Each is the BREAK row's
+    # span_ms (break report to the first byte) and the FRAME row's stamp
+    # minus the BREAK row's (break report to the last byte); both are the
+    # latest each byte can have arrived. Model: SniffedStart in
+    # src/collection/kline/profile.py.
+    sniffed_starts:
+      - session: 2026-10-10T153117
+        break_at: "2026-10-10T15:32:14.711150Z"
+        frame: "81 58 FC 81 56"
+        span_ms: 50.154
+        frame_end_ms: 113.981
+      - session: 2026-10-10T153117
+        break_at: "2026-10-10T15:32:17.265361Z"
+        frame: "81 58 FC 81 56"
+        span_ms: 50.435
+        frame_end_ms: 114.143
+      - session: 2026-10-10T153117
+        break_at: "2026-10-10T15:32:22.588592Z"
+        frame: "81 58 FC 81 56"
+        span_ms: 50.332
+        frame_end_ms: 114.596
+      - session: 2026-10-10T153117
+        break_at: "2026-10-10T15:33:20.706572Z"
+        frame: "81 58 FC 81 56"
+        span_ms: 49.188
+        frame_end_ms: 113.720
+    # CANary's requests to the SRS go out byte by byte, 15 ms apart, as the
+    # scan tool's did. The ECM keeps timing.p4_ms (back to back, answered).
+    request_timing:
+      p4_ms: 15.0
+      evidence: >-
+        Session 2026-10-10T153117: the scan tool's four 81 58 FC 81 56 took
+        63.7-64.5 ms first byte to last after a 49.2-50.4 ms fast init, i.e.
+        14.97-15.17 ms idle between bytes (sniffed_starts above). In the same
+        session and on 2026-10-04 and 2026-10-08, all 177 of the tool's SRS
+        frames arrived with their last byte alone in a read (timing
+        uncertainty > 0) and 199 of the module's 209 back-to-back replies did
+        not (uncertainty 0), so every request is spaced, not only the start.
+        CANary's back-to-back start went unanswered after long-low, fast
+        25/25, 25/20, 25/15 and 25/10 (2026-10-08) and after long-low and fast
+        25/25 at 15:35:51-52Z (2026-10-10), its fast init matching the tool's
+        to 0.01 ms (50.145 vs 50.154 ms).
     # How the scan tool read the stored codes, sniffed KOEO on 2026-10-08
     # (session 2026-10-08T172943; data/analyses/2026-10-08-srs-kline-code-read.md).
     # Model: ReadCodes in src/collection/kline/profile.py.

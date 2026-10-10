@@ -8,6 +8,7 @@ import asyncio
 import time
 from collections import deque
 from collections.abc import Callable, Iterator
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -15,15 +16,23 @@ import pytest
 from src.collection import tx_gate
 from src.collection.kline import protocol as kp
 from src.collection.kline.plan import resolve_plan
-from src.collection.kline.profile import KlineProfile
+from src.collection.kline.profile import KlineProfile, load_kline_profile
 from src.collection.kline.sessions import MODULE_SESSIONS
+from src.collection.kline.sniff import SniffedFrame
 from src.collection.kline.transport import (
     EchoMismatchError,
     KlineTimeoutError,
     RxChunk,
     WakePulse,
 )
-from src.collection.kline_collector import LOCAL_ID, KlineCollector, plan_records
+from src.collection.kline_collector import (
+    LOCAL_ID,
+    KlineCollector,
+    SniffRecorder,
+    plan_records,
+    undeclared_spacing,
+    wake_record,
+)
 from src.collection.reconnect import ReconnectPolicy
 from src.config import KlineConfig
 from src.decode.dids import load_did_map
@@ -1010,3 +1019,71 @@ async def test_canarys_own_wake_up_is_stored_with_its_measured_low_and_high() ->
     assert brk.value == pytest.approx(50.0)
     assert meta["readback"] == "00" and meta["wakeup"] == "iso14230-fast"
     assert meta["timing_uncertainty_s"] is None and "unmeasured" in str(meta["timing_basis"])
+
+
+# --------------------------------------------------------------------------
+# Inter-byte spacing on the record (2026-10-10, the airbag module)
+# --------------------------------------------------------------------------
+
+
+def _srs_start_frame(*, gap_s: float, uncertainty_s: float = 0.0002) -> SniffedFrame:
+    char_s = 10 / 10400
+    return SniffedFrame(
+        started=100.0,
+        finished=100.0 + 4 * (char_s + gap_s),
+        raw=bytes.fromhex("81 58 fc 81 56"),
+        kind="addressed",
+        payload=b"\x81",
+        direction="tester",
+        source=0xFC,
+        target=0x58,
+        timing_uncertainty_s=uncertainty_s,
+        module=0x58,
+        tester=0xFC,
+    )
+
+
+def test_a_sniffed_frame_row_carries_the_testers_byte_spacing() -> None:
+    profile = load_kline_profile(PROFILE)
+    (row,) = SniffRecorder(profile, {}).observe(_srs_start_frame(gap_s=0.015), 1_000.0)
+    assert row.metadata["byte_gap_ms"] == pytest.approx(15.0)
+    assert row.metadata["first_to_last_ms"] == pytest.approx(4 * (1000 / 1040 + 15.0), abs=1e-3)
+
+
+def test_a_spaced_start_the_profile_does_not_declare_is_said() -> None:
+    profile = load_kline_profile(PROFILE)
+    # The SRS declares 15 ms: agreement says nothing.
+    assert undeclared_spacing(profile, _srs_start_frame(gap_s=0.015)) is None
+    # Back to back to the SRS, or spaced to a module declaring 0: said, by name.
+    said = undeclared_spacing(profile, _srs_start_frame(gap_s=0.0))
+    assert said is not None and "SRS" in said and "0.0 ms apart" in said
+    abs_start = replace(
+        _srs_start_frame(gap_s=0.012), raw=bytes.fromhex("81 28 fc 81 26"), target=0x28, module=0x28
+    )
+    said = undeclared_spacing(profile, abs_start)
+    assert said is not None and "ABS" in said and "12.0 ms apart" in said
+    # A start that waited out a host stall cannot measure its spacing.
+    assert undeclared_spacing(profile, replace(abs_start, timing_uncertainty_s=0.3)) is None
+
+
+def test_canarys_wake_up_record_says_how_its_start_was_spaced() -> None:
+    pulse = WakePulse(
+        name="iso14230-fast",
+        wanted_low_ms=25.0,
+        wanted_high_ms=25.0,
+        fall=10.0,
+        release=10.025,
+        end=10.05,
+        readback=b"\x00",
+        char_s=10 / 10400,
+        target=0x58,
+        answered=True,
+        p4_ms=15.0,
+        byte_gaps_ms=(15.0, 15.2, 14.9, 15.1),
+    )
+    record = wake_record(pulse, 1_000.0, "SRS")
+    assert record.metadata["p4_ms"] == 15.0
+    assert (record.metadata["byte_gap_ms_min"], record.metadata["byte_gap_ms_max"]) == (14.9, 15.2)
+    back_to_back = wake_record(replace(pulse, p4_ms=0.0, byte_gaps_ms=()), 1_000.0, "ECM")
+    assert back_to_back.metadata["p4_ms"] == 0.0
+    assert back_to_back.metadata["byte_gap_ms_min"] is None

@@ -306,3 +306,22 @@ What exists in `src/` is coupled to the USB cable:
   **Remaining (truck):** the scan-tool session itself. Not measurable here:
   how a sniffed low splits into low and high (the UART never reports the
   release), and how late the pin follows CANary's break ioctls.
+  **Evidence (2026-10-10, the scan-tool session `2026-10-10T153117`): the
+  difference is not the pulse but the byte spacing.** The tool's fast init
+  measured 49.2-50.4 ms low + high (CANary's: 50.145 ms). A BREAK's
+  `next_byte_ns` is the frame's *first* byte; a FRAME row is stamped at its
+  *last* (`SniffedFrame.finished`), and its `timing_uncertainty_s` bounds that
+  byte. The tool's `81 58 FC 81 56` ran 63.7-64.5 ms first byte to last, i.e.
+  14.97-15.17 ms idle between bytes (ISO P4); CANary sent the same five bytes
+  back to back in one write. Control: across 10-04, 10-08 and 10-10, 177 of 177
+  tool frames to the SRS had their last byte alone in a read (uncertainty > 0)
+  and 199 of the module's 209 back-to-back replies did not. Fix: per-module
+  `request_timing.p4_ms` (15.0 for `0x58`, schema-checked against recorded
+  `sniffed_starts`, required when a sniffed start was spaced); the transport
+  writes byte by byte at that gap, echo checked per byte; the ECM keeps
+  `timing.p4_ms` 0 (one write). Wake-up records carry `p4_ms` and the measured
+  gaps; sniffed FRAME rows carry `byte_gap_ms`
+  (`test_a_frame_row_is_stamped_at_its_last_byte_and_a_break_at_the_next_byte`,
+  `test_the_airbag_module_gets_its_bytes_one_by_one_at_the_declared_gap`,
+  `test_a_spaced_sniffed_start_without_request_timing_is_refused`).
+  **Remaining (truck):** a KOEO read_codes on the SRS with the fix deployed.

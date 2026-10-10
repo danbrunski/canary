@@ -30,7 +30,7 @@ from src.collection.reconnect import ReconnectPolicy
 from src.config import CanaryConfig, KlineConfig
 from src.dashboard.api import create_app
 from src.telemetry import TelemetryRecord
-from tests.test_kline_transport import FakeLines, FakePort, World
+from tests.test_kline_transport import FakeLines, SpacedModulePort, World
 from tests.waits import HANG_GUARD_SECONDS
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -303,7 +303,8 @@ async def test_an_ecm_function_is_refused_while_the_ram_verifier_holds_it() -> N
 # --------------------------------------------------------------------------- read codes
 # The airbag module's code read, frame for frame as the scan tool's was
 # sniffed KOEO on 2026-10-08 (session 2026-10-08T172943), the tool showing
-# B1023 PAST. The real transport runs over a fake serial port.
+# B1023 PAST. The real transport runs over a fake serial port that answers
+# only frames whose bytes came spaced, as the module does (2026-10-10).
 
 SRS_START = bytes.fromhex("81 58 fc 81 56")
 SRS_START_REPLY = bytes.fromhex("83 fc 58 c1 6d 8f 94")
@@ -325,10 +326,11 @@ def _srs(past: bytes, *, pending: bool = False) -> dict[bytes, bytes]:
 
 
 def _wire_collector(
-    actions: KlineActions, replies: dict[bytes, bytes], world: World
+    actions: KlineActions, replies: dict[bytes, bytes], world: _World
 ) -> KlineCollector:
     def factory(profile: KlineProfile, mode: Mode) -> KlineTransport:
-        port = FakePort(world, replies.get)
+        port = SpacedModulePort(world, replies)
+        world.ports.append(port)
         return KlineTransport(
             profile,
             mode=mode,
@@ -354,12 +356,19 @@ def _read() -> KlineAction:
     return KlineAction(kind="read_codes", module="SRS", address=SRS, read_codes=recipe)
 
 
-def _writes(world: World) -> list[bytes]:
-    return [e[1] for e in world.log if e[0] == "write" and isinstance(e[1], bytes)]
+class _World(World):
+    def __init__(self) -> None:
+        super().__init__()
+        self.ports: list[SpacedModulePort] = []
+
+
+def _writes(world: _World) -> list[bytes]:
+    """The frames the module heard, each reassembled from its spaced bytes."""
+    return [frame for port in world.ports for frame, _gaps in port.heard]
 
 
 async def test_the_sniffed_read_returns_b1023_past() -> None:
-    actions, world = KlineActions(), World()
+    actions, world = KlineActions(), _World()
     collector = _wire_collector(actions, _srs(B1023, pending=True), world)
     result = await _run_one(actions, collector, _read())
     assert result.ok, result.detail
@@ -373,12 +382,15 @@ async def test_the_sniffed_read_returns_b1023_past() -> None:
     ]
     assert body["detail"] == "read current, past: 1 code(s) stored"
     assert _writes(world)[-4:] == [SRS_START, READ_CURRENT, READ_PAST, STOP]
+    # Every frame went out byte by byte, 15 ms apart: the profile's p4 for 0x58.
+    gaps = [g for port in world.ports for _frame, frame_gaps in port.heard for g in frame_gaps]
+    assert gaps and all(g == pytest.approx(0.015) for g in gaps)
     assert MODULE_SESSIONS.owner(SRS) == "none"
 
 
 async def test_a_read_that_finds_nothing_says_so_and_is_not_a_failure() -> None:
     """After the clear (17:58:37Z) both reads answered E2 00."""
-    actions, world = KlineActions(), World()
+    actions, world = KlineActions(), _World()
     result = await _run_one(actions, _wire_collector(actions, _srs(NO_CODES), world), _read())
     assert result.ok and result.codes == ()
     assert result.to_dict()["codes"] == []
@@ -386,7 +398,7 @@ async def test_a_read_that_finds_nothing_says_so_and_is_not_a_failure() -> None:
 
 
 async def test_a_refused_read_is_a_named_failure_and_the_session_still_ends() -> None:
-    actions, world = KlineActions(), World()
+    actions, world = KlineActions(), _World()
     refusal = kp.encode_length_frame(bytes([0x7F, 0xA2, 0x12]))
     result = await _run_one(actions, _wire_collector(actions, _srs(refusal), world), _read())
     assert not result.ok and result.codes is None
@@ -398,7 +410,7 @@ async def test_a_refused_read_is_a_named_failure_and_the_session_still_ends() ->
 
 
 async def test_a_malformed_code_reply_is_a_named_failure() -> None:
-    actions, world = KlineActions(), World()
+    actions, world = KlineActions(), _World()
     short = kp.encode_length_frame(bytes.fromhex("e2 02 90 23"))  # says 2 codes, carries 1
     result = await _run_one(actions, _wire_collector(actions, _srs(short), world), _read())
     assert not result.ok and result.codes is None
@@ -408,7 +420,7 @@ async def test_a_malformed_code_reply_is_a_named_failure() -> None:
 
 async def test_passive_mode_refuses_a_read_without_touching_the_line() -> None:
     tx_gate.set_passive(True, source="test")
-    actions, world = KlineActions(), World()
+    actions, world = KlineActions(), _World()
     result = await _run_one(actions, _wire_collector(actions, _srs(B1023), world), _read())
     assert not result.ok and "passive" in result.detail
     assert world.log == []

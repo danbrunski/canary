@@ -470,3 +470,154 @@ def test_uprevs_session_marked_decodes_byte_for_byte_as_unmarked() -> None:
     assert [f.raw for f in marked_frames] == [f.raw for f in plain_frames]
     assert [f.module for f in marked_frames] == [f.module for f in plain_frames]
     assert decoder.stats.breaks == plain.stats.wakeups
+
+
+# --------------------------------------------------------------------------
+# What the stamps mean: the scan tool's spaced SRS start (2026-10-10)
+# --------------------------------------------------------------------------
+
+
+class _Pl011Line:
+    """A marked PL011 on a virtual line, read by the real
+    ``KlineTransport.listen``: each run of back-to-back characters becomes
+    readable :data:`UART_RX_TIMEOUT_CHARS` after its last one ends (the
+    receive timeout), and every poll sleep overruns by ``overrun_s``."""
+
+    def __init__(self, chars: list[tuple[float, bytes]], char_s: float) -> None:
+        # (end of the character on the wire, what a marked port delivers for it)
+        self.ready: list[tuple[float, bytes]] = []
+        run: list[bytes] = []
+        for k, (end, data) in enumerate(chars):
+            run.append(data)
+            following = chars[k + 1][0] if k + 1 < len(chars) else None
+            if following is None or following - char_s > end + 1e-9:
+                at = end + UART_RX_TIMEOUT_CHARS * char_s
+                self.ready += [(at, d) for d in run]
+                run = []
+        self.t = chars[0][0] - 0.1
+        self.end = self.ready[-1][0] + 0.1
+        self.break_condition = False
+        self.overrun_s = 0.0001
+
+    def read(self, size: int = 1, /) -> bytes:
+        out = b"".join(d for at, d in self.ready if at <= self.t)
+        self.ready = [(at, d) for at, d in self.ready if at > self.t]
+        return out
+
+    def write(self, data: bytes, /) -> int:  # pragma: no cover - sniff never writes
+        raise AssertionError("sniff mode transmitted")
+
+    def reset_input_buffer(self) -> None:
+        pass
+
+    def flush(self) -> None:
+        pass
+
+    def close(self) -> None:
+        pass
+
+    def set(self, levels: object, /) -> None:
+        pass
+
+    def clock(self) -> float:
+        return self.t
+
+    def sleep(self, seconds: float) -> None:
+        self.t += seconds + self.overrun_s
+
+    def done(self) -> bool:
+        return self.t > self.end
+
+
+CHAR_S = 10 / 10400
+SRS_REPLY_GAP_S = 0.010  # the module's P2 before its back-to-back reply
+
+
+def _sniff_line(chars: list[tuple[float, bytes]]) -> list[SniffedFrame | SniffedBreak]:
+    line = _Pl011Line(chars, CHAR_S)
+    transport = KlineTransport(
+        load_kline_profile(Path("data/nissan-xterra-2008/kline.yaml")),
+        mode=Mode.SNIFF,
+        open_port=lambda: line,
+        open_lines=lambda: line,
+        clock=line.clock,
+        sleep=line.sleep,
+        mark_port=lambda port: True,
+    )
+    chunks: list[RxChunk] = []
+    with transport:
+        transport.listen(line.done, chunks.append)
+    decoder = FrameDecoder()
+    events = [e for c in chunks for e in decoder.feed_chunk_events(c)]
+    return events + decoder.flush_breaks(line.t, force=True)
+
+
+def _scan_tool_start(t0: float, *, gap_s: float, stray: bool) -> list[tuple[float, bytes]]:
+    """A 25/25 ms fast init falling at ``t0``, then ``81 58 FC 81 56`` whose
+    last byte ends 114 ms after the fall, then the module's reply.
+
+    ``gap_s``: the tester's idle between bytes (explanation a). ``stray``: one
+    byte where the first should be, at TWuP, and the frame back to back after
+    a long high (explanation b)."""
+    chars: list[tuple[float, bytes]] = [(t0 + CHAR_S, b"\xff\x00\x00")]
+    last_end = t0 + 0.050 + 4 * (CHAR_S + 0.015) + CHAR_S  # the measured shape
+    if stray:
+        chars.append((t0 + 0.050 + CHAR_S, b"\x55"))
+    start = last_end - 5 * CHAR_S - 4 * gap_s
+    chars += [(start + k * (CHAR_S + gap_s) + CHAR_S, bytes([b])) for k, b in enumerate(SRS_START)]
+    reply_start = last_end + SRS_REPLY_GAP_S
+    chars += [(reply_start + (k + 1) * CHAR_S, bytes([b])) for k, b in enumerate(SRS_START_REPLY)]
+    return chars
+
+
+def span_s(brk: SniffedBreak) -> float:
+    assert brk.span_s is not None
+    return brk.span_s
+
+
+def test_a_frame_row_is_stamped_at_its_last_byte_and_a_break_at_the_next_byte() -> None:
+    """Known answer, the scan tool's SRS start on 2026-10-10 replayed through
+    the real reader: bytes 15 ms apart after a 50 ms fast init. The break's
+    next byte is the frame's *first* byte (span ~50 ms), the frame ends ~114 ms
+    after the break (its stamp is its last byte), its last byte arrived in a
+    read of its own (uncertainty > 0, as all 177 of the tool's SRS frames),
+    while the module's back-to-back reply arrived in one read (uncertainty 0,
+    as 199 of its 209). The gap they give is the 15 ms that went in."""
+    from src.collection.kline.profile import SniffedStart
+    from src.collection.kline_collector import frame_byte_gap_s
+
+    events = _sniff_line(_scan_tool_start(10.0, gap_s=0.015, stray=False))
+    (brk,) = [e for e in events if isinstance(e, SniffedBreak)]
+    start, reply = [e for e in events if isinstance(e, SniffedFrame)]
+    assert (start.raw, start.direction, reply.raw) == (SRS_START, "tester", SRS_START_REPLY)
+    assert brk.next_byte == start.started  # the same byte: the frame's first
+    assert span_s(brk) == pytest.approx(0.050, abs=0.0015)
+    assert start.finished - brk.detected == pytest.approx(0.114, abs=0.0015)
+    assert 0.0 < start.timing_uncertainty_s < 0.001
+    assert reply.timing_uncertainty_s == 0.0
+    gap = frame_byte_gap_s(start, CHAR_S)
+    assert gap == pytest.approx(0.015, abs=0.0005)
+    recorded = SniffedStart(
+        session="replay",
+        break_at="replay",
+        frame=SRS_START.hex(" "),
+        span_ms=span_s(brk) * 1000.0,
+        frame_end_ms=(start.finished - brk.detected) * 1000.0,
+    )
+    assert recorded.inter_byte_gap_ms(CHAR_S * 1000.0) == pytest.approx(15.0, abs=0.5)
+
+
+def test_a_stray_byte_then_a_late_back_to_back_frame_reads_otherwise() -> None:
+    """Explanation (b) gives the same 50 ms span and the same 114 ms end, but
+    its frame arrives in one read (uncertainty 0, byte gap 0) and the stray
+    byte is dropped: the opposite of every tester frame on the SRS."""
+    from src.collection.kline_collector import frame_byte_gap_s
+
+    events = _sniff_line(_scan_tool_start(10.0, gap_s=0.0, stray=True))
+    (brk,) = [e for e in events if isinstance(e, SniffedBreak)]
+    start = next(e for e in events if isinstance(e, SniffedFrame))
+    assert start.raw == SRS_START
+    assert span_s(brk) == pytest.approx(0.050, abs=0.0015)
+    assert start.finished - brk.detected == pytest.approx(0.114, abs=0.0015)
+    assert start.timing_uncertainty_s == 0.0
+    assert frame_byte_gap_s(start, CHAR_S) == pytest.approx(0.0, abs=1e-9)

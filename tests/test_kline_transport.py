@@ -18,6 +18,7 @@ import pytest
 from src.collection.kline import protocol as kp
 from src.collection.kline.profile import load_kline_profile
 from src.collection.kline.transport import (
+    P4_MAX_S,
     BusBusyError,
     EchoMismatchError,
     HatPins,
@@ -536,3 +537,163 @@ def test_a_refused_wake_up_is_still_kept() -> None:
             transport.wake(PROFILE.wakeups[0])
         (pulse,) = transport.take_wake_pulses()
     assert pulse.refused == "host timing" and pulse.low_ms > PROFILE.wakeups[0].low_ms
+
+
+# ------------------------------------------------------- per-module P4 (2026-10-10)
+
+SRS = 0x58
+SRS_START = bytes.fromhex("81 58 fc 81 56")
+SRS_START_REPLY = bytes.fromhex("83 fc 58 c1 6d 8f 94")
+CHAR_S = 10.0 / PROFILE.baud
+
+
+class SpacedModulePort(FakePort):
+    """The airbag module as sniffed on 2026-10-10: it answers a frame only
+    when its bytes came at least ``min_gap_s`` apart (the scan tool's were
+    15 ms apart, CANary's back to back went unanswered), and drops one with a
+    gap past ISO P4max. Bytes are assembled into frames across writes, so a
+    frame written in one call is back to back."""
+
+    def __init__(
+        self,
+        world: World,
+        replies: Mapping[bytes, bytes],
+        *,
+        min_gap_s: float = 0.010,
+        corrupt_byte: int | None = None,
+    ) -> None:
+        super().__init__(world)
+        self.replies = dict(replies)
+        self.min_gap_s = min_gap_s
+        self.corrupt_byte = corrupt_byte
+        self._frame = bytearray()
+        self._at: list[float] = []
+        self.heard: list[tuple[bytes, tuple[float, ...]]] = []
+
+    def write(self, data: bytes, /) -> int:
+        self.world.log.append(("write", bytes(data), self.world.t))
+        for byte in data:
+            k = len(self._frame)
+            self.rx.append(byte ^ 0xFF if k == self.corrupt_byte else byte)
+            self._frame.append(byte)
+            self._at.append(self.world.t + k * CHAR_S if len(data) > 1 else self.world.t)
+        first = self._frame[0]
+        total = (first & 0x3F) + 4 if first & 0xC0 == 0x80 else first + 2
+        if len(self._frame) >= total:
+            frame = bytes(self._frame)
+            gaps = tuple(b - a - CHAR_S for a, b in zip(self._at, self._at[1:], strict=False))
+            self.heard.append((frame, gaps))
+            self._frame.clear()
+            self._at.clear()
+            spaced = self.min_gap_s - 1e-9 <= min(gaps) and max(gaps) <= P4_MAX_S
+            if frame in self.replies and spaced:
+                self.rx += self.replies[frame]
+        return len(data)
+
+
+def _srs_port(world: World, **kwargs: object) -> SpacedModulePort:
+    return SpacedModulePort(
+        world,
+        {
+            SRS_START: SRS_START_REPLY,
+            kp.encode_length_frame(b"\xa2\x01"): kp.encode_length_frame(b"\xe2\x01\x91\x34"),
+            kp.encode_length_frame(b"\x82"): kp.encode_length_frame(b"\xc2"),
+        },
+        **kwargs,  # type: ignore[arg-type]
+    )
+
+
+def test_the_airbag_module_gets_its_bytes_one_by_one_at_the_declared_gap() -> None:
+    """The profile's 15 ms for 0x58: StartCommunication, the past-code read
+    and StopCommunication each go out a byte per write, every byte's echo
+    read before the next, 15 ms of idle between them."""
+    world = World()
+    port = _srs_port(world)
+    with make(world, port=port) as transport:
+        reply = transport.start_communication(SRS)
+        params = transport.request(b"\xa2\x01")
+        transport.stop_communication()
+        (pulse,) = transport.take_wake_pulses()
+    assert (reply.source, reply.key_bytes) == (SRS, b"\x6d\x8f")
+    assert params == b"\x01\x91\x34"  # B1134, as the scan tool read it
+    writes = [e for e in world.log if e[0] == "write"]
+    assert all(len(e[1]) == 1 for e in writes)  # type: ignore[arg-type]
+    assert b"".join(e[1] for e in writes[:5]) == SRS_START  # type: ignore[misc]
+    for frame, gaps in port.heard:
+        assert gaps == pytest.approx((0.015,) * (len(frame) - 1), abs=1e-9), frame.hex()
+    # Recorded on the wake-up, so the next attempt documents itself.
+    assert pulse.answered and pulse.p4_ms == pytest.approx(15.0)
+    assert pulse.byte_gaps_ms == pytest.approx((15.0,) * 4)
+
+
+def test_each_spaced_byte_is_echo_checked_before_the_next_goes_out() -> None:
+    world = World()
+    port = _srs_port(world, corrupt_byte=2)
+    with make(world, port=port) as transport, pytest.raises(EchoMismatchError, match="byte 2 fc"):
+        transport.start_communication(SRS)
+    assert [e[1] for e in world.log if e[0] == "write"] == [b"\x81", b"\x58", b"\xfc"]
+
+
+def test_back_to_back_bytes_are_what_the_airbag_module_ignored() -> None:
+    """The control: the same port leaves CANary's old one-write frame
+    unanswered, which is what both 2026-10-08 and 2026-10-10 saw."""
+    world = World()
+    port = _srs_port(world)
+    with make(world, port=port) as transport:
+        transport.wake(PROFILE.wakeups[1])
+        transport._p4_s = 0.0  # the pre-2026-10-10 transport: one write
+        transport.send_frame(SRS_START)
+        with pytest.raises(KlineTimeoutError):
+            transport.read_frame("addressed", PROFILE.timing.p2_max_ms / 1000.0)
+    ((frame, gaps),) = port.heard
+    assert frame == SRS_START and gaps == pytest.approx((0.0,) * 4, abs=1e-9)
+
+
+def test_the_ecm_keeps_one_back_to_back_write() -> None:
+    """The ECM (0x10) path is unchanged: ``timing.p4_ms`` is 0, so its frames
+    go out in one write, and the wake-up says so."""
+    world = World()
+    with make(world, ecu=xterra()) as transport:
+        transport.start_communication(0x10)
+        transport.request(PROFILE.known_answers[0].request_bytes())
+        (pulse,) = transport.take_wake_pulses()
+    writes = [e[1] for e in world.log if e[0] == "write"]
+    assert writes == [F["start_communication"], F["read_did"]]
+    assert pulse.p4_ms == 0.0 and pulse.byte_gaps_ms == ()
+
+
+def test_a_session_after_the_airbag_one_goes_back_to_the_ecms_timing() -> None:
+    """The gap belongs to the module a StartCommunication addresses, not to
+    the transport: an ECM start after an SRS one is back to back again."""
+    world = World()
+    port = SpacedModulePort(
+        world,
+        {SRS_START: SRS_START_REPLY, F["start_communication"]: F["start_communication_reply"]},
+        min_gap_s=0.0,
+    )
+    with make(world, port=port) as transport:
+        transport.start_communication(SRS)
+        transport.start_communication(0x10)
+    (srs_frame, srs_gaps), (ecm_frame, ecm_gaps) = port.heard
+    assert (srs_frame, ecm_frame) == (SRS_START, F["start_communication"])
+    assert srs_gaps == pytest.approx((0.015,) * 4)
+    assert ecm_gaps == pytest.approx((0.0,) * 4, abs=1e-9)
+    assert F["start_communication"] in [e[1] for e in world.log if e[0] == "write"]
+
+
+class _StallingWorld(World):
+    """A host whose every sleep of 10 ms or more runs ``overshoot`` long."""
+
+    def sleep(self, seconds: float) -> None:
+        self.t += seconds + (self.overshoot if seconds >= 0.01 else 0.0)
+
+
+def test_a_gap_the_host_stretched_past_p4max_is_named_not_read_as_silence() -> None:
+    world = _StallingWorld()
+    world.overshoot = 0.008  # 15 ms becomes 23 ms: past ISO's 20 ms
+    port = _srs_port(world)
+    with (
+        make(world, port=port) as transport,
+        pytest.raises(KlineTimeoutError, match="stretched a gap to 23.0 ms"),
+    ):
+        transport.start_communication(SRS)

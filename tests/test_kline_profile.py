@@ -180,3 +180,86 @@ def test_two_code_reads_with_one_status_are_refused() -> None:
     raw["modules"][0x58]["read_codes"]["requests"][0]["status"] = "past"
     with pytest.raises(ValueError, match="same status"):
         KlineProfile.model_validate(raw)
+
+
+# --------------------------------------------------------------------------
+# Per-module inter-byte gap (ISO P4): the airbag module, 2026-10-10
+# --------------------------------------------------------------------------
+
+
+def test_the_airbag_module_declares_the_scan_tools_fifteen_millisecond_gap() -> None:
+    """Known answer: session 2026-10-10T153117's four sniffed starts measure
+    14.97-15.17 ms between bytes; the ECM and the ABS keep timing.p4_ms."""
+    profile = load_kline_profile(XTERRA)
+    srs = profile.modules[0x58]
+    char_ms = 10_000.0 / profile.baud
+    gaps = [s.inter_byte_gap_ms(char_ms) for s in srs.sniffed_starts]
+    assert len(gaps) == 4
+    assert all(14.9 < g < 15.2 for g in gaps)
+    assert profile.p4_ms(0x58) == 15.0
+    assert profile.p4_ms(0x10) == profile.timing.p4_ms == 0.0
+    assert profile.p4_ms(0x28) == 0.0
+    assert profile.p4_ms(0x7E) == 0.0  # an address with no entry: the profile's
+
+
+def test_a_spaced_sniffed_start_without_request_timing_is_refused() -> None:
+    """Make it impossible to forget: evidence of a spaced tester start means
+    CANary's own requests to that module must be spaced too."""
+    raw = _srs_read()
+    del raw["modules"][0x58]["request_timing"]
+    with pytest.raises(ValueError, match=r"0x58 \(SRS\).*15\.2 ms apart.*request_timing\.p4_ms"):
+        KlineProfile.model_validate(raw)
+
+
+def test_a_back_to_back_sniffed_start_needs_no_request_timing() -> None:
+    raw = _srs_read()
+    del raw["modules"][0x58]["request_timing"]
+    # UpRev's long-low start to the ECM: five bytes back to back (4 characters).
+    char_ms = 10_000.0 / raw["baud"]
+    raw["modules"][0x58]["sniffed_starts"] = [
+        {
+            "session": "test",
+            "break_at": "test",
+            "frame": "81 58 FC 81 56",
+            "span_ms": 536.9,
+            "frame_end_ms": 536.9 + 4 * char_ms,
+        }
+    ]
+    assert KlineProfile.model_validate(raw).p4_ms(0x58) == 0.0
+
+
+def test_a_declared_gap_the_sniffed_starts_disagree_with_is_refused() -> None:
+    raw = _srs_read()
+    raw["modules"][0x58]["request_timing"]["p4_ms"] = 10.0
+    with pytest.raises(ValueError, match="p4_ms 10.0 ms, but its sniffed starts measured 15.05 ms"):
+        KlineProfile.model_validate(raw)
+
+
+def test_a_declared_gap_without_sniffed_starts_is_refused() -> None:
+    raw = _srs_read()
+    del raw["modules"][0x58]["sniffed_starts"]
+    with pytest.raises(ValueError, match="needs sniffed_starts measuring it"):
+        KlineProfile.model_validate(raw)
+
+
+@pytest.mark.parametrize(
+    ("where", "value", "match"),
+    [
+        ("p4_ms", 25.0, "less than or equal to 20"),
+        ("evidence", "", "at least 1 character"),
+    ],
+)
+def test_request_timing_is_bounded_by_iso_p4max_and_carries_evidence(
+    where: str, value: object, match: str
+) -> None:
+    raw = _srs_read()
+    raw["modules"][0x58]["request_timing"][where] = value
+    with pytest.raises(ValueError, match=match):
+        KlineProfile.model_validate(raw)
+
+
+def test_a_sniffed_start_that_ends_before_it_begins_is_refused() -> None:
+    raw = _srs_read()
+    raw["modules"][0x58]["sniffed_starts"][0]["frame_end_ms"] = 40.0
+    with pytest.raises(ValueError, match="is not after span_ms"):
+        KlineProfile.model_validate(raw)

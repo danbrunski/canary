@@ -10,7 +10,10 @@ done out of order by a caller:
 3. every wake-up pulse is timed with the host clock and refused if the host
    could not make it (a scheduling stall stretches a 25 ms pulse);
 4. every transmitted byte must come back as echo — K-line is one wire, so a
-   mismatch means another tester is talking;
+   mismatch means another tester is talking. A module whose profile declares
+   an inter-byte gap (ISO P4, :meth:`KlineProfile.p4_ms`) gets its request
+   bytes one at a time, that far apart, each echo checked before the next:
+   the airbag module ignores the same bytes sent back to back (2026-10-10);
 5. every request passes :func:`src.collection.kline.protocol.check_request`,
    the read-only allowlist;
 6. EN and the pull-up are driven low **before** the tty closes, on every exit
@@ -57,6 +60,8 @@ WAKEUP_TOLERANCE_FRACTION = 0.02
 MODE_CHANGE_S = 0.005
 #: How long a responsePending (NRC 0x78) may keep a request open (ISO P2*).
 RESPONSE_PENDING_MAX_S = 5.0
+#: ISO 14230-2's longest inter-byte gap: past it a module drops the frame.
+P4_MAX_S = 0.020
 
 
 class KlineTransportError(RuntimeError):
@@ -81,6 +86,11 @@ class BusBusyError(KlineTransportError):
 
 class WakeupTimingError(KlineTransportError):
     """The host could not produce the wake-up pulse the profile asks for."""
+
+
+class ByteTimingError(KlineTransportError):
+    """The host stretched a gap between request bytes past ISO P4max: the
+    module drops such a frame, so silence after it says nothing about it."""
 
 
 class TransmitRefusedError(KlineTransportError):
@@ -253,6 +263,11 @@ class WakePulse:
     answered: bool | None = None
     #: Why the pulse was not used (a host timing refusal), when it was not.
     refused: str | None = None
+    #: The inter-byte gap the StartCommunication after it was sent with
+    #: (``0``: back to back), and the gaps the host measured between its byte
+    #: writes (start to start less one character), ms.
+    p4_ms: float | None = None
+    byte_gaps_ms: tuple[float, ...] = ()
 
     @property
     def low_ms(self) -> float:
@@ -299,6 +314,11 @@ class KlineTransport:
         self._last_rx = float("-inf")
         self.char_s = 10.0 / profile.baud  # 8N1: ten bit times per byte
         self._pulses: list[WakePulse] = []
+        #: The inter-byte gap of the module being talked to; set by
+        #: :meth:`start_communication`, the ECM's until then.
+        self._p4_s = profile.p4_ms(profile.ecm_address) / 1000.0
+        #: Measured gaps of the last frame :meth:`send_frame` spaced (ms).
+        self.last_byte_gaps_ms: tuple[float, ...] = ()
 
     # ------------------------------------------------------------------ lifecycle
 
@@ -417,11 +437,48 @@ class KlineTransport:
             self._sleep(0.002)
 
     def send_frame(self, frame: bytes) -> None:
+        """Put ``frame`` on the line and check its echo. Back to back in one
+        write when the current module's gap is zero (the ECM); otherwise byte
+        by byte, each written that gap after the last one's end and echoed
+        before the next goes."""
         self._require_command()
-        self.port.write(frame)
-        self.port.flush()
+        self.last_byte_gaps_ms = ()
+        if self._p4_s <= 0.0:
+            self.port.write(frame)
+            self.port.flush()
+            echo = self._read_echo(frame, len(frame))
+            if echo != frame:  # 4.
+                raise EchoMismatchError(f"sent {frame.hex(' ')}, line carried {echo.hex(' ')}")
+            return
+        step = self.char_s + self._p4_s  # one byte start to the next
+        gaps: list[float] = []
+        previous: float | None = None
+        for k, byte in enumerate(frame):
+            if previous is not None:
+                wait = previous + step - self._clock()
+                if wait > 0:
+                    self._sleep(wait)
+            written = self._clock()
+            if previous is not None:
+                gaps.append((written - previous - self.char_s) * 1000.0)
+                self.last_byte_gaps_ms = tuple(gaps)
+            previous = written
+            self.port.write(bytes([byte]))
+            self.port.flush()
+            echo = self._read_echo(frame, 1)
+            if echo[0] != byte:  # 4., per byte
+                raise EchoMismatchError(
+                    f"sent {frame.hex(' ')}, byte {k} {byte:02x} came back as {echo.hex(' ')}"
+                )
+        if gaps and max(gaps) > P4_MAX_S * 1000.0:
+            raise ByteTimingError(
+                f"sent {frame.hex(' ')} {self._p4_s * 1000.0:g} ms apart, but the host "
+                f"stretched a gap to {max(gaps):.1f} ms (ISO P4max {P4_MAX_S * 1000.0:g})"
+            )
+
+    def _read_echo(self, frame: bytes, count: int) -> bytes:
         try:
-            echo = self.read_exact(len(frame), len(frame) * self.char_s + 0.05)
+            return self.read_exact(count, count * self.char_s + 0.05)
         except KlineTimeoutError as exc:
             if not self.port.read(1):
                 # Nothing at all came back: the transceiver is not driving the
@@ -432,8 +489,6 @@ class KlineTransport:
                     "driving K-line (no +12 V at J2, i.e. the OBD plug is out?)"
                 ) from exc
             raise
-        if echo != frame:  # 4.
-            raise EchoMismatchError(f"sent {frame.hex(' ')}, line carried {echo.hex(' ')}")
 
     def read_frame(self, kind: Literal["addressed", "length"], timeout_s: float) -> bytes:
         first = self.read_exact(1, timeout_s)
@@ -487,17 +542,19 @@ class KlineTransport:
 
     def start_communication(self, target: int | None = None) -> kp.StartCommunicationReply:
         """Try each wake-up in profile order until ``target`` (default: the
-        ECM) answers."""
+        ECM) answers. Its bytes, and every request of the session after it,
+        are spaced by ``target``'s inter-byte gap (:meth:`KlineProfile.p4_ms`)."""
         failures: list[str] = []
         address = self.profile.ecm_address if target is None else target
         request = kp.start_communication(address, self.profile.tester_address)
+        self._p4_s = self.profile.p4_ms(address) / 1000.0
         for wakeup in self.profile.wakeups:
             sent = len(self._pulses)
             try:
                 self.wake(wakeup)
                 self.send_frame(request)
                 raw = self.read_frame("addressed", self.profile.timing.p2_max_ms / 1000.0)
-            except (KlineTimeoutError, WakeupTimingError) as exc:
+            except (KlineTimeoutError, WakeupTimingError, ByteTimingError) as exc:
                 failures.append(f"{wakeup.name}: {exc}")
                 self._note_pulse(sent, address, answered=False)
                 continue
@@ -517,8 +574,12 @@ class KlineTransport:
 
     def _note_pulse(self, sent: int, target: int, *, answered: bool) -> None:
         if len(self._pulses) > sent:
-            self._pulses[-1].target = target
-            self._pulses[-1].answered = answered
+            pulse = self._pulses[-1]
+            pulse.target = target
+            pulse.answered = answered
+            if pulse.refused is None:  # the StartCommunication went out
+                pulse.p4_ms = self._p4_s * 1000.0
+                pulse.byte_gaps_ms = self.last_byte_gaps_ms
 
     def request(self, payload: bytes) -> bytes:
         """Send one request after StartCommunication; return the positive
@@ -550,6 +611,7 @@ class KlineTransport:
 
 __all__ = [
     "BusBusyError",
+    "ByteTimingError",
     "EchoMismatchError",
     "HatPins",
     "KlineTimeoutError",
@@ -560,6 +622,7 @@ __all__ = [
     "Mode",
     "NoEchoError",
     "OutputLines",
+    "P4_MAX_S",
     "RxChunk",
     "SerialPort",
     "PassiveArmedError",

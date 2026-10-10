@@ -11,6 +11,7 @@ said as such, not a fallback.
 from __future__ import annotations
 
 import re
+import statistics
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Literal
@@ -44,8 +45,9 @@ class Timing(_Strict):
     p3_min_ms: float = Field(gt=0.0)
     #: Longest the tester may stay silent before the ECU drops the session.
     p3_max_ms: float = Field(gt=0.0)
-    #: Gap between the tester's own request bytes.
-    p4_ms: float = Field(ge=0.0)
+    #: Gap between the tester's own request bytes, for every module without
+    #: its own ``request_timing`` (:meth:`KlineProfile.p4_ms`).
+    p4_ms: float = Field(ge=0.0, le=20.0)
 
 
 class KnownAnswer(_Strict):
@@ -312,6 +314,76 @@ def decode_codes(params: bytes) -> tuple[tuple[str, int], ...]:
     return tuple((kp.decode_code_word(word), word) for word in kp.split_code_reply(params))
 
 
+#: ISO 14230-2's longest P4 (the gap between a tester's request bytes).
+P4_MAX_MS = 20.0
+#: A sniffed StartCommunication whose bytes sat further apart than this was
+#: *spaced* by its tester: well above the stamps' error, which four gaps share
+#: (a back-to-back frame measures ~0 ms; the SRS scan tool 15.0 ms).
+P4_SPACED_MS = 2.0
+#: How far a module's declared ``p4_ms`` may sit from what its sniffed starts
+#: measured.
+P4_AGREEMENT_MS = 2.0
+
+
+class SniffedStart(_Strict):
+    """Another tester's StartCommunication to this module, as the sniffer
+    stamped it: the ``kline:BREAK`` row before it and the ``kline:FRAME`` row
+    that carried it (``src.collection.kline_collector``).
+
+    Both rows are stamped at the *latest* a byte can have arrived, the BREAK's
+    ``next_byte_ns`` at the frame's first byte and the FRAME row at its last
+    (``SniffedFrame.finished``), so ``frame_end_ms - span_ms`` is the first
+    byte to the last. A tester sending back to back takes one character per
+    byte; anything beyond that is the tester's inter-byte gap (ISO P4).
+    """
+
+    session: str = Field(min_length=1)
+    #: The BREAK row's timestamp (UTC), to find it again.
+    break_at: str = Field(min_length=1)
+    #: The frame, hex (``"81 58 FC 81 56"``).
+    frame: str
+    #: The BREAK row's ``span_ms``: break report to the frame's first byte.
+    span_ms: float = Field(gt=0.0)
+    #: The FRAME row's stamp minus the BREAK row's: break report to its last byte.
+    frame_end_ms: float = Field(gt=0.0)
+
+    @field_validator("frame")
+    @classmethod
+    def _frame(cls, value: str) -> str:
+        if len(bytes.fromhex(value)) < 2:
+            raise ValueError("a sniffed start needs at least two bytes to show their spacing")
+        return value
+
+    @model_validator(mode="after")
+    def _ordered(self) -> SniffedStart:
+        if self.frame_end_ms <= self.span_ms:
+            raise ValueError(
+                f"sniffed start {self.break_at}: frame_end_ms {self.frame_end_ms} is not "
+                f"after span_ms {self.span_ms}"
+            )
+        return self
+
+    def inter_byte_gap_ms(self, char_ms: float) -> float:
+        """The tester's idle between bytes: first-to-last over the gaps, less
+        the character each byte takes on the wire."""
+        n = len(bytes.fromhex(self.frame))
+        return (self.frame_end_ms - self.span_ms) / (n - 1) - char_ms
+
+
+class ModuleRequestTiming(_Strict):
+    """How CANary spaces its own request bytes to one module (ISO 14230 P4).
+
+    Absent: the profile's ``timing.p4_ms``. The airbag module ignored the
+    HAT's back-to-back ``81 58 FC 81 56`` after every wake-up tried (2026-10-08
+    and 2026-10-10) and answered a scan tool that sent the same bytes 15 ms
+    apart; ``sniffed_starts`` is that measurement, and the declared gap must
+    agree with it.
+    """
+
+    p4_ms: float = Field(ge=0.0, le=P4_MAX_MS)
+    evidence: str = Field(min_length=1)
+
+
 class KlineModule(_Strict):
     """One module on this vehicle's K-line, by its KWP2000 address."""
 
@@ -323,6 +395,10 @@ class KlineModule(_Strict):
     read_codes: ReadCodes | None = None
     clear_codes: ClearCodes | None = None
     dids: tuple[ModuleDid, ...] = ()
+    #: Other testers' StartCommunications to it, as sniffed. One whose bytes
+    #: were spaced makes ``request_timing`` required (:class:`KlineProfile`).
+    sniffed_starts: tuple[SniffedStart, ...] = ()
+    request_timing: ModuleRequestTiming | None = None
 
     @field_validator("name")
     @classmethod
@@ -405,6 +481,43 @@ class KlineProfile(_Strict):
             raise ValueError("two modules share a name")
         return self
 
+    @model_validator(mode="after")
+    def _spaced_starts_declare_p4(self) -> KlineProfile:
+        """A module whose sniffed tester spaced its StartCommunication bytes
+        gets CANary's requests spaced too: forgetting it is what left the SRS
+        silent through five wake-up variants (2026-10-08, 2026-10-10)."""
+        char_ms = 10_000.0 / self.baud  # 8N1: ten bits a character
+        for address, module in self.modules.items():
+            gaps = [s.inter_byte_gap_ms(char_ms) for s in module.sniffed_starts]
+            label = f"module 0x{address:02X} ({module.name})"
+            timing = module.request_timing
+            if timing is None:
+                spaced = [g for g in gaps if g > P4_SPACED_MS]
+                if spaced:
+                    raise ValueError(
+                        f"{label}: its sniffed StartCommunication bytes were "
+                        f"{max(spaced):.1f} ms apart, so it needs request_timing.p4_ms; "
+                        "the SRS ignored CANary's back-to-back bytes until it had one"
+                    )
+                continue
+            if not gaps:
+                raise ValueError(f"{label}: request_timing.p4_ms needs sniffed_starts measuring it")
+            measured = statistics.median(gaps)
+            if abs(timing.p4_ms - max(0.0, measured)) > P4_AGREEMENT_MS:
+                raise ValueError(
+                    f"{label}: request_timing.p4_ms {timing.p4_ms} ms, but its sniffed "
+                    f"starts measured {measured:.2f} ms"
+                )
+        return self
+
+    def p4_ms(self, address: int) -> float:
+        """The gap CANary leaves between its own request bytes to ``address``:
+        the module's ``request_timing`` when it has one, else ``timing.p4_ms``."""
+        module = self.modules.get(address)
+        if module is not None and module.request_timing is not None:
+            return module.request_timing.p4_ms
+        return self.timing.p4_ms
+
     def trailer(self) -> bytes:
         return bytes(self.request_trailer)
 
@@ -453,7 +566,12 @@ __all__ = [
     "KnownAnswer",
     "ModuleDid",
     "ModuleReader",
+    "ModuleRequestTiming",
+    "P4_AGREEMENT_MS",
+    "P4_MAX_MS",
+    "P4_SPACED_MS",
     "ReadCodes",
+    "SniffedStart",
     "Timing",
     "Wakeup",
     "decode_codes",
