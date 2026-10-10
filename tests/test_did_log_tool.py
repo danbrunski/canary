@@ -287,7 +287,9 @@ def test_discovery_widths_feed_batching() -> None:
     assert widths == {0x1101: 1, 0x1201: 2, 0x1202: 1, 0x1207: 2}
     # Discovery is unbatched.
     assert transport.batch_calls == []
-    assert len(transport.single_calls) == 0x200
+    # Every DID in range but 0x120B, whose read changes ECU state (side_effect).
+    assert len(transport.single_calls) == 0x200 - 1
+    assert 0x120B not in transport.single_calls
 
     transport.single_calls.clear()
     clock = FakeClock(step=0.1)

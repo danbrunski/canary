@@ -2261,6 +2261,14 @@ dids:
 
   - did: 0x120B
     name: ECM_FIRST_FLAGGED_DTC
+    side_effect: >-
+      Clears status bit 0 ("NG at last report") of EVERY diagnostic item each
+      time it answers: the CAN handler calls FUN_0002f748 at 0xD17F4 after the
+      scan (firmware ZS44A, ~/ecu-re/NOTES.md "2026-10-10: Knock-sensor DTC
+      reporting"). Bit 0 of the knock-sensor items is what
+      mem:ECM_KS_FAULT_FLAGS (0xFFFF479D) bit 7 ORs, so each read drops the
+      knock fallback for about one pass. Read the item status bytes instead
+      (0xFFFF677A-6785, memory catalog) or Nissan service 0x17.
     byte_start: 0
     byte_length: 2
     response_length: 2
@@ -2276,7 +2284,11 @@ dids:
           Not a table entry: the CAN Mode 22 handler special-cases 0x120B
           (loop at 0xD178E). It scans diagnostic items 0..0x113 for status
           bit 0 (0xFFFF657E + 3i) and returns the DTC word of the first item
-          with it set (table 0x102D2 + 12i), else 0.
+          with it set (table 0x102D2 + 12i), else 0. The item records start at
+          0x102CC (code = low 16 bits of the u32 at record + 4, the same
+          0x102D2 + 12i field); 0x10FBC is a pointer table to the config words,
+          in the calibration region (firmware session, 2026-10-10). The scan
+          then clears bit 0 on every item: see side_effect.
       - session: did-sweep-20260804-koeo-baseline + did-drive-sweeps-20260805 + did_log-2026-09-17
         method: census
         transport: can

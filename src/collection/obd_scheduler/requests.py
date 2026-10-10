@@ -26,7 +26,7 @@ from src.collection.obd_scheduler.spec import (
     parse_pid_token,
 )
 from src.collection.request_eligibility import RequestKind
-from src.decode.dids import MEMORY_SOURCE, plan_memory_reads
+from src.decode.dids import MEMORY_SOURCE, plan_memory_reads, refuse_side_effect_dids
 
 if TYPE_CHECKING:
     from src.collection.custom_pids import CustomPid
@@ -300,7 +300,9 @@ def build_poll_requests(client: _PidDiscoveryClient | None, spec: CanObdSpec) ->
     # while every other channel got 14.7, spending a seventh of the round on a
     # duplicate. The channel name is derived from the identifier, so the second
     # request also wrote rows indistinguishable from the first.
-    for did in dict.fromkeys(parse_did_token(d) for d in spec.dids):
+    dids = tuple(dict.fromkeys(parse_did_token(d) for d in spec.dids))
+    refuse_side_effect_dids(dids, where="the Mode 22 poll plan")
+    for did in dids:
         requests.append(
             PollRequest(
                 kind="did",

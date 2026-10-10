@@ -17,7 +17,7 @@ from __future__ import annotations
 import json
 import time
 from collections.abc import Callable, Iterable, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Protocol
 
@@ -25,6 +25,7 @@ from typing import TYPE_CHECKING, Any, Protocol
 # runtime does not couple this analysis module to the CAN stack (which is why
 # CanObdClient below stays behind TYPE_CHECKING and duck-typed).
 from src.collection.isotp import MAX_BATCHED_DIDS, nrc_name, split_batched_did_response
+from src.decode.dids import without_side_effect_dids
 
 if TYPE_CHECKING:
     from src.collection.can_obd_client import CanObdClient
@@ -105,6 +106,10 @@ class DidSnapshot:
     * ``batch_nrc`` — the NRC of the most recent rejection, if it had one.
     * ``batched_reads`` — values that came from an accepted batched response
       (the ones that actually share a sample instant).
+
+    ``skipped`` holds the DIDs in range that were never requested, with why:
+    a catalogued read that changes ECU state (``DidEntry.side_effect``). A
+    skipped DID is absent from ``values`` for that reason, not for silence.
     """
 
     values: Mapping[int, bytes]
@@ -115,6 +120,7 @@ class DidSnapshot:
     batch_rejections: int | None = None
     batch_nrc: int | None = None
     batched_reads: int | None = None
+    skipped: Mapping[int, str] = field(default_factory=dict)
 
     @property
     def dids(self) -> frozenset[int]:
@@ -141,6 +147,7 @@ class DidSnapshot:
             "batch_nrc": None if self.batch_nrc is None else f"0x{self.batch_nrc:02X}",
             "batch_nrc_name": None if self.batch_nrc is None else nrc_name(self.batch_nrc),
             "batched_reads": self.batched_reads,
+            "skipped": {f"0x{did:04X}": why for did, why in sorted(self.skipped.items())},
         }
 
     @classmethod
@@ -169,6 +176,9 @@ class DidSnapshot:
             batch_rejections=_opt_int("batch_rejections"),
             batch_nrc=_opt_int("batch_nrc"),
             batched_reads=_opt_int("batched_reads"),
+            skipped={
+                int(did_hex, 16): str(why) for did_hex, why in (data.get("skipped") or {}).items()
+            },
         )
 
 
@@ -214,9 +224,14 @@ def sweep_dids(
     label: str = "",
     on_progress: Callable[[int, bytes | None], None] | None = None,
 ) -> DidSnapshot:
-    """Read every DID in ``dids``; keep the ones that answered positively."""
+    """Read every DID in ``dids``; keep the ones that answered positively.
+
+    A DID whose read changes ECU state is not requested; the snapshot's
+    ``skipped`` names it.
+    """
     values: dict[int, bytes] = {}
-    for did in dids:
+    readable, skipped = without_side_effect_dids(dids)
+    for did in readable:
         data = transport.read_did(did)
         if on_progress is not None:
             on_progress(did, data)
@@ -232,6 +247,7 @@ def sweep_dids(
         batch_effective=1,
         batch_rejections=0,
         batched_reads=0,
+        skipped=skipped,
     )
 
 
@@ -293,9 +309,10 @@ def sweep_dids_batched(
             batch_rejections=rejections,
             batch_nrc=last_nrc,
             batched_reads=batched_reads,
+            skipped=skipped,
         )
 
-    requested = list(dids)
+    requested, skipped = without_side_effect_dids(dids)
     batchable = [d for d in requested if (byte_length_for(d) or 0) > 0]
     unknown = [d for d in requested if (byte_length_for(d) or 0) <= 0]
 

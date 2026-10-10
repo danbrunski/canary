@@ -25,7 +25,12 @@ from src.collection.bus_budget import (
     MIN_BUDGET_REQUESTS_PER_SECOND,
 )
 from src.config import CollectionConfig, DaemonConfig
-from src.decode.dids import memory_channels, select_memory_channels
+from src.decode.dids import (
+    did_ids_for_tokens,
+    memory_channels,
+    refuse_side_effect_dids,
+    select_memory_channels,
+)
 from src.signals.derived import DERIVED_CHANNEL_INPUTS
 
 if TYPE_CHECKING:
@@ -1118,6 +1123,9 @@ class CaptureProfileStore:
             raise ValueError(f"capture profile already exists: {profile.name}")
         self._check_memory(profile)
         self._check_kline(profile)
+        refuse_side_effect_dids(
+            did_ids_for_tokens(profile.mode22), where=f"capture profile {profile.name!r}"
+        )
         # Only this machine's layer is written (S03.4); the tracked catalog never is.
         path = self._overrides_path()
         base = {item.name: item for item in self._base().profiles}

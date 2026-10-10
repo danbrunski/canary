@@ -70,6 +70,7 @@ from typing import Any, Protocol, TextIO
 
 from src.analysis.did_scan import BatchRead, CanableMode22Transport, load_widths, sweep_dids
 from src.collection.isotp import MAX_BATCHED_DIDS, nrc_name
+from src.decode.dids import without_side_effect_dids
 from tools._bus_tool import (
     PASSIVE_REFUSED_EXIT,
     RECORD_KEY,
@@ -253,11 +254,15 @@ def run(
     """Log ``widths``' DIDs until duration / passive disarm / stop_event.
 
     ``passive_checker=None`` means no daemon (bench). Returns the summary
-    record, which is also the last line written.
+    record, which is also the last line written. A DID whose read changes ECU
+    state is never logged, even from ``--widths-from``; the header's
+    ``skipped`` names it.
     """
     writer = _Writer(out)
     batch = max(1, min(batch, MAX_BATCHED_DIDS))
-    dids = sorted(widths)
+    kept, skipped = without_side_effect_dids(sorted(widths))
+    widths = {did: widths[did] for did in kept}
+    dids = kept
     unbatchable = [d for d in dids if widths[d] <= 0]
     groups: list[tuple[list[int], bool]] = []
     if batch > 1:
@@ -279,6 +284,7 @@ def run(
             range=[_did_key(did_range[0]), _did_key(did_range[1])],
             batch=batch,
             widths={_did_key(d): widths[d] for d in dids},
+            skipped={_did_key(d): why for d, why in skipped.items()},
             label=label,
             daemon_checked=passive_checker is not None,
         )

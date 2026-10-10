@@ -44,6 +44,7 @@ from src.collection.obd_reading import acquisition_metadata as acquisition_metad
 from src.collection.obd_reading import reading_to_record as reading_to_record
 from src.collection.queueing import DropCallback, QueueDropCounter, threadsafe_enqueue
 from src.collection.reconnect import DEFAULT_RECONNECT_POLICY, ReconnectPolicy, run_with_reconnect
+from src.decode.dids import refuse_side_effect_dids
 from src.telemetry import TelemetryRecord
 
 log = logging.getLogger(__name__)
@@ -253,6 +254,7 @@ def obd_factory(
     """
     explicit_commands = resolve_pids(spec.pids)
     did_commands = [did_command(d, header=spec.did_header) for d in spec.dids]
+    refuse_side_effect_dids((int(d, 16) for d in spec.dids), where="the ELM327 DID list")
     auto_mode = AUTO_PIDS in spec.pids
 
     kwargs: dict[str, Any] = {"portstr": spec.port, "baudrate": spec.baudrate}

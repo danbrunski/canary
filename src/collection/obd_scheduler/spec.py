@@ -28,8 +28,9 @@ from src.decode.dids import (
     _did_ids_by_name,
     did_access,
     did_response_widths,
-    known_did_names,
     memory_channels,
+    pollable_did_names,
+    refuse_side_effect_dids,
     select_memory_channels,
 )
 
@@ -513,12 +514,24 @@ def profile_did_union(
     The config's DIDs, the catalogued inventory and every saved profile's
     Mode 22 selection. Computed once here: ``default_collectors`` used to
     spell it twice (the request plan and the alias table).
+
+    The inventory leaves out DIDs whose read changes ECU state; a config or
+    profile naming one is refused by name, so the daemon start, the
+    capture-profile preview and capture start all fail on it.
     """
+    refuse_side_effect_dids(
+        (parse_did_token(token) for token in collection.obd_dids), where="collection.obd_dids"
+    )
+    for profile in profiles:
+        refuse_side_effect_dids(
+            (parse_did_token(token) for token in profile.mode22),
+            where=f"capture profile {profile.name!r}",
+        )
     return tuple(
         dict.fromkeys(
             [
                 *collection.obd_dids,
-                *known_did_names(),
+                *pollable_did_names(),
                 *(did for profile in profiles for did in profile.mode22),
             ]
         )

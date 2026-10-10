@@ -206,6 +206,11 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     elapsed = time.time() - t0
     print(f"did_sweep: {hits}/{len(dids)} DIDs answered in {elapsed:.1f}s", file=sys.stderr)
+    for did, why in sorted(snapshot.skipped.items()):
+        print(
+            f"did_sweep: skipped 0x{did:04X}, its read changes ECU state ({why})",
+            file=sys.stderr,
+        )
     args.out.parent.mkdir(parents=True, exist_ok=True)
     args.out.write_text(json.dumps(snapshot.to_dict(), indent=2, sort_keys=True))
     if snapshot.batch_rejections:

@@ -183,6 +183,15 @@ class DidEntry(ByteSlice, LinearScale, PlausibleRange, _Strict):
     #: decoder ignores both.
     evidence_against: list[Evidence] = Field(default_factory=list)
     notes: str | None = None
+    #: What answering this DID does to the ECU besides answering, with where
+    #: that was shown. Set, the DID is never polled: capture profiles and the
+    #: config's ``obd_dids`` refuse it, the profile inventory leaves it out and
+    #: the sweep and logging tools skip it (:func:`side_effect_dids`). 0x120B
+    #: cleared status bit 0 of every diagnostic item on each read, so it was
+    #: catalogued as a read while it perturbed the knock-fault state CANary was
+    #: observing (firmware, 2026-10-10). A one-off ``/control/obd_request``
+    #: still reads it: that is an operator asking for it by number.
+    side_effect: str | None = Field(default=None, min_length=1)
 
     @model_validator(mode="after")
     def _response_length_has_provenance(self) -> DidEntry:
@@ -817,8 +826,75 @@ def _did_ids_by_name() -> dict[str, int]:
 
 
 def known_did_names() -> tuple[str, ...]:
-    """Return the vehicle DID inventory available to capture profiles."""
+    """Every DID name and alias the catalog resolves, side-effect DIDs included
+    (naming one is fine; polling one is refused: :func:`refuse_side_effect_dids`)."""
     return tuple(_did_ids_by_name())
+
+
+@lru_cache(maxsize=1)
+def side_effect_dids() -> dict[int, str]:
+    """DID id -> ``"<NAME>: <side effect>"`` for every entry that changes ECU
+    state when read (:attr:`DidEntry.side_effect`). Empty without a catalog."""
+    did_map = load_repo_did_map()
+    if did_map is None:
+        return {}
+    return {
+        entry.did: f"{entry.name}: {entry.side_effect}"
+        for entry in did_map.dids
+        if entry.side_effect
+    }
+
+
+def pollable_did_names() -> tuple[str, ...]:
+    """The inventory a capture profile may poll: :func:`known_did_names`
+    without the side-effect DIDs."""
+    banned = side_effect_dids()
+    by_name = _did_ids_by_name()
+    return tuple(name for name in by_name if by_name[name] not in banned)
+
+
+def refuse_side_effect_dids(dids: Iterable[int], *, where: str) -> None:
+    """Raise naming every DID in ``dids`` that changes ECU state when read.
+
+    The one check behind every path that turns a DID into a repeated request,
+    so a profile, a config list or a tool cannot poll one by forgetting to ask.
+    """
+    banned = side_effect_dids()
+    hits = sorted({did for did in dids if did in banned})
+    if hits:
+        named = "; ".join(f"0x{did:04X} ({banned[did]})" for did in hits)
+        raise ValueError(
+            f"{where} would poll a DID whose read changes ECU state, which is never "
+            f"polled: {named}. Read it once by hand with /control/obd_request if it "
+            "is needed."
+        )
+
+
+def did_ids_for_tokens(tokens: Iterable[str]) -> list[int]:
+    """The DID ids that ``tokens`` (names, aliases or 4-digit hex) resolve to;
+    a token the catalog does not know is left to the callers that refuse it."""
+    by_name = _did_ids_by_name()
+    ids: list[int] = []
+    for token in tokens:
+        text = token.strip()
+        if len(text) == 4 and all(c in "0123456789abcdefABCDEF" for c in text):
+            ids.append(int(text, 16))
+        elif text in by_name:
+            ids.append(by_name[text])
+    return ids
+
+
+def without_side_effect_dids(dids: Iterable[int]) -> tuple[list[int], dict[int, str]]:
+    """``dids`` split into the ones a sweep may read and the skipped ones with why."""
+    banned = side_effect_dids()
+    kept: list[int] = []
+    skipped: dict[int, str] = {}
+    for did in dids:
+        if did in banned:
+            skipped[did] = banned[did]
+        else:
+            kept.append(did)
+    return kept, skipped
 
 
 def did_access() -> DidAccess | None:
