@@ -310,10 +310,16 @@ def _rpm_series(session_dir: Path, rpm_channel: str, channels: pd.DataFrame) -> 
 
 
 def _value_series(channels: pd.DataFrame, channel: str) -> pd.Series:
-    """One channel of the session read, indexed by acquisition time."""
+    """One channel of the session read, indexed by acquisition time.
+
+    Empty when the session never recorded it, still time-indexed: a bare
+    ``pd.Series(dtype=float)`` has a RangeIndex, and slicing it by a window's
+    timestamps raised ``TypeError`` on every session without a GPS course
+    (dyno 500, 2026-10-10) instead of reading as "no reading in the window".
+    """
     long = _rows(channels, channel)
     if long.empty:
-        return pd.Series(dtype=float)
+        return pd.Series(dtype=float, index=pd.DatetimeIndex([], tz="UTC"))
     return pd.Series(
         long["value"].to_numpy(dtype=float),
         index=pd.DatetimeIndex(pd.to_datetime(long["timestamp"], utc=True)),

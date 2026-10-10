@@ -271,3 +271,28 @@ def test_a_caller_that_read_the_session_passes_it_and_nothing_reads_it_again(
         channels=channels,
     )
     assert found.refusal is None and round(found.course_deg or 0) == 10
+
+
+def test_a_session_without_gps_or_demand_reads_as_missing_not_a_crash(
+    tmp_path: Path, inputs_by_window: list[Any]
+) -> None:
+    """The dyno page returned 500 on 2026-10-10: a session that never recorded
+    a GPS course (or the demand channel) sliced an empty, RangeIndex series by
+    timestamps. No course is ``course-unknown``; no demand is ``inputs_missing``."""
+    records = [TelemetryRecord.obd(t, "RPM", rpm, "rpm") for t, rpm in _pull_rpm(T0)]
+    session = tmp_path / "2026-10-10T120000"
+    write_records_to_parquet(records, session, max_rows=100_000)
+    inputs_by_window.append(_inputs_in_gear(3))
+
+    (found,) = _find(session)
+    assert found.refusal is None and found.course_deg is None
+    assert [p.heading for p in label_headings([found])] == ["course-unknown"]
+
+    (gated,) = find_power_pulls(
+        session,
+        sources=SOURCES,
+        driveline=DRIVELINE,
+        demand_channel="obd:THROTTLE_POS",
+        wot_threshold=4.0,
+    )
+    assert gated.refusal is not None and gated.refusal.kind == "inputs_missing"
