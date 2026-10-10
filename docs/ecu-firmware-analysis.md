@@ -463,22 +463,64 @@ Sources: `data/analyses/did-drive-sweeps-20260805/`,
 So **knock control is very probably in its fixed-retard fallback whenever the
 engine runs**. Generic Mode 03/07 never show it, which is why no scan tool did.
 
-Still to reconcile:
-- The 2026-08-01 retard event predates the first `0328` read and may come
-  before the fault.
-- The 08-01 unplug/reconnect test is a candidate cause: a connector not fully
-  re-seated.
-- The status bit is the early flag, not a confirmed code.
+**Update 2026-10-09: the fault predates the 2026-08-01 unplug test, and the
+ECM reports it to a Nissan code read.**
+- The scan tool's self-diagnosis read at ECM entry, `17 FF 00`, was answered
+  `57 01 03 28 C0`: one DTC, **P0328**, status `C0`.
+  - 2026-07-27 22:46Z, engine idling at 750 rpm (session
+    `2026-07-27T223930`, laptop copy under `~/canary-data/sessions/`).
+  - 2026-09-24 16:56Z, engine running (Pi session `2026-09-24T165319`). That
+    session's note had recorded only `57 01`.
+  - `C0` matches item `0xAB`'s byte 1 in the 2026-10-08 read (bit 7, failing
+    now). The two were not read at the same instant.
+- Every UpRev log that carries the knock columns reads KNOCK STRENGTH = 1280
+  and HI DET = 1, from the first (2026-07-26 22:53Z, engine running) to
+  2026-09-24. That is the fallback signature the 2026-10-08 read confirmed at
+  `0xFFFF13FE` (`0xFB00`, −5.00°) and `0xFFFF283F` (bit 6).
+- **So the 08-01 test did not cause the fault, and its result did not show
+  knock sensor 1 intact.** Unplugging a circuit that is already open changes
+  nothing. For "unplugging set a code, reconnecting cleared it" to hold, one
+  of these must be true:
+  - the connector unplugged that day was sensor 2's;
+  - sensor 1's open is intermittent, and re-mating the connector briefly
+    restored it. The circuit carries a few µA, too little to break through a
+    film on a fretted terminal.
+
+  Every live sample so far shows sensor 1 failing. No CANary session exists
+  for 2026-08-01.
+- **Why no one saw a code:**
+  - generic Mode 03/07 can never list it (below);
+  - the item never reaches "confirmed";
+  - its status reads zero at key-on, and the circuit check runs only with the
+    engine running, so a key-on engine-off read of any kind is empty;
+  - the scan tool did receive it at ECM entry, but did not visibly report it.
+
+The 2026-10-05 list "still to reconcile" is settled:
+- **The 2026-08-01 retard event.** It is in the 20.8-minute UpRev log of
+  2026-07-31 at 17:35 local, written up on 08-01. Logged timing falls from
+  19° to 9° while load rises from 76 % to 94 % at about 2,190 rpm. That is
+  the timing map following load, not evidence of knock retard. The log has
+  no knock columns, and P0328 was being reported before and after it.
+- **The 08-01 unplug test as the cause.** Refuted, above.
+- **Early flag versus confirmed code.** The 2026-10-08 read: pending, never
+  confirmed.
 
 **Confirm live** (reads only): key-on engine-off, then idle. Read `0xFFFF479D`
 bit 7, `0xFFFF677D`–`677F` (item `0xAB`), the KS1 level `0xFFFF2CEF` (normal
-50–199) and `0xFFFF13FE` under light load. Then check knock sensor 1's
-connector and harness (bank 1, in the V).
+50–199) and `0xFFFF13FE` under light load. *Done 2026-10-08 (D03.40): the
+fallback is engaged, KS1 is pegged at `0xFF`, and KS2 reads `0x7F`/`0x80`.*
+
+**Next** (bank 1, in the V):
+- Measure knock sensor 1 from the sensor side, terminal 1 to the block. The
+  FSM gives 532–588 kΩ. In range means the open is in the connector or
+  harness; open means the sensor or its mounting.
+- Wiggle the connector and harness at idle while watching
+  `mem:ECM_KS1_LEVEL`. A drop from 255 toward 127 locates the open.
 
 The earlier verdicts follow as the record of how this was reached.
 
-**Verdict (revised 2026-10-05, after a follow-up pass; now in doubt, see
-above): knock control is active in this image.** A first reading said "fault fallback". It is retracted;
+**Verdict (revised 2026-10-05, after a follow-up pass; superseded by the
+2026-10-08 live read, see above): knock control is active in this image.** A first reading said "fault fallback". It is retracted;
 the reasons are below.
 
 - **The 2026-08-01 drive's single retard event** (2,200 rpm, 89 % load,
@@ -486,6 +528,9 @@ the reasons are below.
   dip that recovers cannot happen with the fixed fallback engaged (verified
   from code plus the drive log). The sensors were confirmed intact the same
   day: unplugging one set the code, and reconnecting it cleared it.
+  *(Both halves refuted 2026-10-09: the dip is logged timing with no knock
+  column, and P0328 was already being reported on 2026-07-27. See the update
+  above.)*
 - **The fallback has one code origin.** `0xFFFF13FE` takes `0xFB00` only in
   the branch where bit 7 of `0xFFFF479D` (the knock-sensor fault flag) is set.
   The learned words never take that value (verified).
@@ -502,8 +547,8 @@ the reasons are below.
   - The four knock-sensor items (`0xAA`–`0xAD`, P0327/P0328/P0332/P0333) have
     config `0x0020`, with that bit clear. Every other item checked has it set.
   - So a generic code read can never show a knock-sensor fault, which is why
-    none has appeared. A Nissan self-diagnosis read (service 0x17) may
-    (inferred).
+    none has appeared. A Nissan self-diagnosis read (service 0x17) does: it
+    returned P0328 on 2026-07-27 and 2026-09-24 (see the update above).
   - **Generic DTC polling therefore cannot monitor knock-sensor health.** The
     RAM flags below can.
 - **Item status bytes** (three per item, from `0xFFFF657C + 3i`):
@@ -512,7 +557,10 @@ the reasons are below.
     "pending" state;
   - `657E` bit 0 is the early flag that `0xFFFF479D` bit 7 ORs, and it can be
     set before a code is pending.
-  The `17 FF 00` → `57 01` reply's last byte (count or status) is unresolved.
+  The full `17 FF 00` reply is `57 01 03 28 C0`: a DTC count, then the DTC
+  and one status byte per code. Its `C0` matches item `0xAB`'s byte 1
+  (`677E`) as read on 2026-10-08, on different days. An earlier version of
+  this line had only `57 01`.
 - **Settle it live, with reads only:**
   - at key-on and warm idle: `0xFFFF479D` bit 7 (0 = normal), the item status
     bytes `0xFFFF677A`–`6785`, and circuit levels `0xFFFF2CEF`/`2CF0` (band

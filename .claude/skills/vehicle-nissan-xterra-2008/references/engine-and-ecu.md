@@ -232,8 +232,15 @@ this truck:
   **cannot be converted to degrees**. The only degree-valued outputs are
   `IGN TIMING` (PID `0x0E`) and `mem:ECM_IGNITION_TIMING_RAM`, so a timing
   change must be read from the log, not predicted from a trim edit.
-- **Knock control is active on this ROM, and its state is readable from RAM** (see
-  above). The HI DET latch `0xFFFF283F` bit 6 also **selects the timing-trim
+- **Knock control is built into this ROM, and its state is readable from RAM**
+  (see above). **On this truck it runs in the knock-sensor fault fallback**
+  (fixed −5° target, trim B, no knock loop). The cause is knock sensor 1's
+  circuit reading pegged high (P0328), confirmed live 2026-10-08 and reported
+  to the scan tool's Nissan code read (`17 FF 00`) since at least 2026-07-27.
+  The 2026-08-01 unplug test did not cause it and did not prove the sensor
+  intact. Until the KS1 circuit is fixed, timing results describe the fallback,
+  not the engine's knock margin (`docs/ecu-firmware-analysis.md`, "Knock
+  monitoring"). The HI DET latch `0xFFFF283F` bit 6 also **selects the timing-trim
   table**: B (`+0x120`) while it is set, A (`+0x020`) only when it is clear
   (verified, `0x04E6FE`). Read it live before editing a trim table.
   UpRev's columns: CONSULT has no knock item. Pre-2009

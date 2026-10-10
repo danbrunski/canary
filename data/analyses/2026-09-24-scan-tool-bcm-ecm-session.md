@@ -87,8 +87,12 @@ and switch bits.
   - Mode 21 local ids: `21 80`, `21 81`, `21 83`, `21 10`, `21 FE`, `21 01`
     answered; `21 12` → `7F 21 12`. This bears on D03.16 (live data in
     Mode 21 blocks).
-  - `17 FF 00` → `57 01`: ReadDiagnosticTroubleCodesByStatus, one code?
-    Cross-check `/obd/dtc`.
+  - `17 FF 00` → `57 01 03 28 C0`: the Nissan self-diagnosis code read
+    returned one DTC, **P0328** (knock sensor 1 circuit high), with status
+    `C0`. *(Corrected 2026-10-09: this line first recorded only `57 01`.)*
+    `/obd/dtc` cannot cross-check it: generic Mode 03/07 never list the
+    knock-sensor items. The same reply came on 2026-07-27, before the 08-01
+    unplug test; see `docs/ecu-firmware-analysis.md`, "Knock monitoring".
   - `10 03` → `7F 10 12`.
   - `22 F1 A0` → NRC.
   - 20× `7F 22 12`: unsupported DIDs probed during screen build.

@@ -3100,6 +3100,12 @@ live here now, so the documents could be archived
     `tuning` now polls those windows (the knock_chain, knock_detect and
     knock_intensity windows, the learned words 0x124E–1252 and 0x28AA stay
     hypothesized and out of every profile).
+    *Addendum 2026-10-09: the fault predates 2026-08-05 and the 08-01 unplug
+    test.* The ECM answered the scan tool's `17 FF 00` with `57 01 03 28 C0`
+    (P0328) on 2026-07-27 and 2026-09-24. UpRev's fallback signature is in
+    every UpRev log since 2026-07-26. Next: measure knock sensor 1 from the
+    sensor side (terminal 1 to block, 532–588 kΩ), then wiggle-test at idle.
+    See `docs/ecu-firmware-analysis.md`, "Knock monitoring".
 
 - [ ] **D03.41 Measured AFR's declaration claims the A/F voltage suffices
   without baro (found 2026-10-08, B08.1 follow-up).** `derived:AFR_B1/B2`
