@@ -1,8 +1,10 @@
-import { useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 
 import { Panel } from "../../components/Panel";
 import { SegmentedControl, type SegmentOption } from "../../components/SegmentedControl";
 import { getDyno } from "../../api/workbench";
+import { getProfiles } from "../../api/http";
+import { useControlResource } from "../../hooks/useControlResource";
 import { useAnalysisRun } from "../../hooks/useWorkbench";
 import type {
   DynoCurve,
@@ -248,6 +250,17 @@ function exportCsv(result: DynoResponse) {
   );
 }
 
+/** The active vehicle profile's saved mass, which the dyno adds payload to
+ *  (``config.vehicle.parameters.mass_kg`` after the profile is applied).
+ *  ``null`` while loading, without a token, or when the profile has none. */
+function useSavedVehicleMass(token: string): number | null {
+  const fetcher = useCallback((signal: AbortSignal) => getProfiles(token, signal), [token]);
+  const { data } = useControlResource(fetcher, { enabled: Boolean(token), intervalMs: 60000 });
+  const active = data?.profiles.find((p) => p.slug === data.active_slug);
+  const mass = active?.parameters?.mass_kg;
+  return typeof mass === "number" && Number.isFinite(mass) ? mass : null;
+}
+
 /** H07.9: wheel power and torque against rpm per pull pair, runs overlaid,
  *  with the prerequisites first — a pending coefficient is shown pending and
  *  no curve is drawn from it. */
@@ -255,6 +268,8 @@ export function DynoView({ token, choice }: { token: string; choice: SessionChoi
   const { result, refusal, busy, run } = useAnalysisRun<DynoResponse>();
   const [road, setRoad] = useState("");
   const [payload, setPayload] = useState("");
+  const vehicleMass = useSavedVehicleMass(token);
+  const payloadKg = payload.trim() ? Number(payload) : null;
   const [induction, setInduction] = useState<"" | "na" | "boosted">("");
   const [ambient, setAmbient] = useState("");
   const [single, setSingle] = useState(false);
@@ -289,15 +304,23 @@ export function DynoView({ token, choice }: { token: string; choice: SessionChoi
           />
         </label>
         <label className="flex flex-col gap-1">
-          Payload (kg)
+          Payload (kg), added to the vehicle
           <input
             className={inputClass}
             aria-label="Payload (kg)"
             inputMode="decimal"
-            placeholder="what was aboard"
+            placeholder="driver, passengers, cargo"
             value={payload}
             onChange={(e) => setPayload(e.target.value)}
           />
+          <span className="max-w-[16rem] text-[0.68rem] leading-snug text-fg-faint">
+            {vehicleMass === null
+              ? "Saved vehicle weight: not loaded. Payload is added to the weight in Profiles."
+              : `Saved vehicle weight ${vehicleMass.toLocaleString()} kg (Profiles). Enter only what was aboard on top of it.`}
+            {vehicleMass !== null && payloadKg !== null && Number.isFinite(payloadKg)
+              ? ` Test mass: ${(vehicleMass + payloadKg).toLocaleString()} kg.`
+              : ""}
+          </span>
         </label>
         <label className="flex flex-col gap-1">
           Induction

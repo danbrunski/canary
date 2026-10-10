@@ -221,6 +221,24 @@ function respond(body: DynoResponse) {
       });
     }
     if (path.startsWith("/analysis/dyno")) return Promise.resolve(body);
+    if (path.startsWith("/control/profiles")) {
+      return Promise.resolve({
+        profiles: [
+          {
+            slug: "nissan-xterra-2008",
+            vin: "",
+            name: "",
+            make: "Nissan",
+            model: "Xterra",
+            year: 2008,
+            parameters: { mass_kg: 1980 },
+            calibration_id: "",
+            cvn: "",
+          },
+        ],
+        active_slug: "nissan-xterra-2008",
+      });
+    }
     return Promise.reject(new Error(`unexpected ${path}`));
   });
 }
@@ -230,6 +248,17 @@ const CHOICE = { sessions: ["2026-09-26T120000"], revision: null };
 afterEach(() => vi.clearAllMocks());
 
 describe("DynoView", () => {
+  it("shows the saved vehicle weight the payload is added to, and the test mass", async () => {
+    respond(pending());
+    render(<DynoView token="t" choice={CHOICE} />);
+    expect(
+      await screen.findByText(/Saved vehicle weight 1,980 kg \(Profiles\)/),
+    ).toBeInTheDocument();
+    expect(screen.getByText(/added to the vehicle/)).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("Payload (kg)"), { target: { value: "127" } });
+    expect(screen.getByText(/Test mass: 2,107 kg/)).toBeInTheDocument();
+  });
+
   it("sends the stated run conditions and nothing it was not told", async () => {
     respond(pending());
     render(<DynoView token="t" choice={CHOICE} />);
