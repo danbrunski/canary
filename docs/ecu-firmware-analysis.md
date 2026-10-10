@@ -571,6 +571,63 @@ the reasons are below.
   If `283F` bit 6 is set while `479D` bit 7 is clear, HI DET is accumulated
   knock, not a fault.
 
+**Why the knock-sensor codes never show in a code read (decompiler pass,
+2026-10-10; verified from code unless marked inferred):**
+- **The calibration hides them on purpose.** Each item's config word is
+  reached through a pointer table at `0x10FBC`. The table and the words both
+  sit in the calibration region, so a tune can edit them. The four knock items
+  (`0xF37E/0xF37C/0xF382/0xF380`) read `0x0020` in ZS44A-20260920, -20261004
+  and the UpRev base.
+  - Bit `0x80` gates Mode 01 PID 01's count, Mode 03, Mode 07 (K-line and CAN),
+    the MIL request (byte 1 bit 5 → lamp flag `0xFFFF649C`), the
+    pending-at-confirm bit and freeze-frame priority. The knock items lack it,
+    so they can never light the MIL.
+  - Bit `0x20` only clears "failing now" at key-on.
+  - 45 items lack `0x80`; inferred to be the no-MIL, dealer-tool-only set,
+    including P0550, U1000/1001, P1550–1554 and P0456.
+  - The item table starts at `0x102CC`: the code is the low 16 bits of the
+    u32 at record + 4.
+- **Status bytes** (three per item from `0xFFFF657C`; item `0xAB` = `677D–677F`):
+  - **byte 0:** a warm-up aging counter;
+  - **byte 1:** b7 failing now, b6 a latched copy, b5 MIL request, b4 newly
+    failing, b2 passed this cycle;
+  - **byte 2:**
+    - b0 failed at last result: the bit `0xFFFF479D` bit 7 ORs, which holds
+      the fallback;
+    - b1 failed this drive cycle;
+    - b2 listed by Mode 03, computed as b4 ∧ byte 0 < 40;
+    - b3 pending; b4 stored; b5 confirmed-active; b6 first-trip.
+- **Maturing takes two trips** (`FUN_0007f57a`). A first failure gives byte 2 =
+  `0x4B`, which is what 2026-10-08 read. A failure on the next key cycle
+  confirms it as `0x3F`, which is what the 2026-10-10 tuning capture read. **P0328 is
+  confirmed.** Confirmation changes neither the MIL nor the fallback.
+  Readiness comes from `0xFFFF651A`, not item status. Mode 0A doesn't exist.
+  Mode 06 doesn't read item status. A knock item *can* take and lock the Mode
+  02 freeze frame (`0xFFFF6476`, no `0x80` check), so Mode 02 PID 02 may show
+  P0328.
+- **What does report them:**
+  - CAN service `0x17` (`FUN_000d1908`; the first reply byte is the count, so
+    the 09-24 `57 01` was one DTC, and `57 01 03 28 C0` is expected now);
+  - K-line `0xA3` (`FUN_00033ab0`);
+  - DID `0x120B`.
+  None of them checks `0x80`. There's no `0x18` or UDS `0x19` handler.
+- **Clearing:**
+  - With the circuit back in band, only "failing now" clears. b0 stays, so
+    **the fallback holds for the rest of the key cycle**. The next key-on
+    releases it.
+  - Pending and first-trip clear after 1 good trip; confirmed after 3; the
+    `0x17`/`0xA3`/Mode 03 listing after 40 warm-ups. "Stored" stays until a
+    clear.
+  - Generic Mode 04 (K-line and CAN), KWP `0x14 FF00` (CAN) and K-line `0x14`
+    all reach one clear-all (`FUN_00083252`), which erases them. A fault that's
+    still present re-sets as first-trip `0x4B` after about one pass (inferred).
+- **⚠ Reading DID `0x120B` is not side-effect-free.** When it returns a code,
+  the CAN handler clears byte 2 bit 0 on every item (`FUN_0002f748`, near
+  `0xD17F4`). That drops the knock fallback for about one pass (inferred) and
+  touches every item's last-result flag. Polling it is a volatile write to ECU
+  diagnostic state, so no profile should poll it. Read the status bytes
+  (`0xFFFF677A`–`6785`) or service `0x17` instead.
+
 **Where the observation values live.** All are RAM, reset at engine stop, and
 none is exposed by any Mode 01 PID, Mode 22 DID (both pointer tables
 searched) or Mode 06 MID.
