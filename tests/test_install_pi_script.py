@@ -137,6 +137,7 @@ def installer(tmp_path: Path) -> Installer:
     (checkout / "scripts").mkdir(parents=True)
     shutil.copy(INSTALL_SCRIPT, checkout / "scripts" / "install_pi.sh")
     shutil.copy(REPO_ROOT / "scripts" / "update_canary.sh", checkout / "scripts")
+    shutil.copy(REPO_ROOT / "scripts" / "data_drive.sh", checkout / "scripts")
     (checkout / "scripts" / "install_deps.py").write_text(_INSTALL_DEPS_STUB)
     shutil.copy(EXAMPLE_CONFIG, checkout / "canary.pi.example.yaml")
     (checkout / "systemd").mkdir()
@@ -181,6 +182,9 @@ def installer(tmp_path: Path) -> Installer:
         "CANARY_PYTHON": sys.executable,
         "CANARY_GPS_DEVICE": GPS_DEVICE,
         "SHIM_LOG": str(shim_log),
+        # Adopting a drive mounts real block devices; the guard (fstab-driven)
+        # still runs.
+        "CANARY_DATA_DRIVE_ADOPT": "0",
     }
     return Installer(checkout=checkout, root=root, shim_log=shim_log, env=env)
 
@@ -632,3 +636,41 @@ def test_the_pi5_default_console_passes(installer: Installer) -> None:
 
 def test_without_a_hat_the_console_is_not_the_installers_business(installer: Installer) -> None:
     installer.run(CANARY_CMDLINE=str(_cmdline(installer, "console=ttyAMA0,115200 root=PARTUUID=1")))
+
+
+# ---------------------------------------------------------------------------
+# Data drive (2026-10-10): the services require the mount that holds /data
+# ---------------------------------------------------------------------------
+
+
+def _dropins(installer: Installer) -> list[Path]:
+    unit_dir = installer.root / "etc" / "systemd" / "system"
+    return [unit_dir / f"{u}.service.d" / "data-drive.conf" for u in ("canary", "canary-mcp")]
+
+
+def test_a_data_drive_in_fstab_makes_both_services_require_it(installer: Installer) -> None:
+    (installer.root / "etc" / "fstab").write_text(
+        "PARTUUID=c0579362-02  /  ext4  defaults,noatime  0  1\n"
+        "UUID=59c3d070-69dc-45fb-aadc-195135cbc0b2 /data ext4 defaults,noatime,nofail 0 2\n"
+    )
+    installer.run()
+    for dropin in _dropins(installer):
+        assert "RequiresMountsFor=/data\n" in dropin.read_text()
+
+
+def test_no_data_drive_no_guard_and_removing_the_entry_removes_it(
+    installer: Installer,
+) -> None:
+    fstab = installer.root / "etc" / "fstab"
+    root_line = "PARTUUID=c0579362-02  /  ext4  defaults,noatime  0  1\n"
+    fstab.write_text(root_line)
+    installer.run()
+    assert not any(d.exists() for d in _dropins(installer))
+
+    fstab.write_text(root_line + "UUID=x /data ext4 defaults,nofail 0 2\n")
+    installer.run()
+    assert all(d.exists() for d in _dropins(installer))
+
+    fstab.write_text(root_line)
+    installer.run()
+    assert not any(d.exists() for d in _dropins(installer))

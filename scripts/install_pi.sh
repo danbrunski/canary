@@ -583,6 +583,20 @@ runuser -u "${CANARY_USER}" -- "${CANARY_PYTHON}" scripts/install_deps.py \
   --extras "${CANARY_EXTRAS}" \
   --torch "${CANARY_TORCH}"
 
+# Data drive (docs/pi-setup.md "Data drive"): a drive labelled canary-data is
+# adopted as /data, and canary/canary-mcp then require it. A Pi without one
+# keeps /data on the SD card. Nothing is ever formatted here: a blank drive
+# gets the one command that would (operator, 2026-10-10).
+DATA_DRIVE_ENV=(
+  CANARY_INSTALL_ROOT="${ROOT}"
+  CANARY_DATA_DIR="${CANARY_DATA_DIR}"
+  CANARY_UNIT_DIR="$(dirname "${CANARY_SERVICE}")"
+)
+if [[ "${CANARY_DATA_DRIVE_ADOPT:-1}" != "0" ]]; then
+  env "${DATA_DRIVE_ENV[@]}" bash "${CANARY_HOME}/scripts/data_drive.sh" adopt --if-present
+fi
+env "${DATA_DRIVE_ENV[@]}" bash "${CANARY_HOME}/scripts/data_drive.sh" guard
+
 systemctl daemon-reload
 systemctl enable canary.service
 systemctl enable canary-mcp.service

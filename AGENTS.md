@@ -227,7 +227,10 @@ to direct HTTP.
   one test.
 - **Pi deployment path**: `ssh canary@192.168.137.2` (or
   `canary.local`); install via `sudo bash scripts/install_pi.sh`; data
-  lives under `/data/canary/`; control token at
+  lives under `/data/canary/`. `/data` is on a USB NVMe on the dev Pi since
+  2026-10-10; it is optional, adopted by label, and without the drive the
+  services refuse to start rather than write to the SD card
+  (`scripts/data_drive.sh`, docs/pi-setup.md "Data Drive"). Control token at
   `/etc/canary/control.token`. **Nothing the Pi writes lives in the
   checkout** (S03): `daemon.state_dir: /data/canary` puts models (manifests
   and `behavior_models.yaml` included) under `/data/canary/models/<vehicle>/`

@@ -198,6 +198,41 @@ http://canary.local:8000/
 
 If mDNS is not available, use the Pi's IP address instead of `canary.local`.
 
+## Data Drive (Optional)
+
+CANary's data (`/data`, with `/data/canary` under it) can live on a separate
+drive, such as an NVMe SSD in a USB 3 enclosure. Without one it stays on the SD
+card, and nothing needs doing. On the dev Pi (2026-10-10, Patriot P300 in a
+Realtek RTL9210 enclosure) the drive read all of `/data` in 47 s, against
+about 225 s from the SD card, and took the constant small writes off the card.
+
+A drive is recognised by its filesystem label, `canary-data`.
+`install_pi.sh` (and so `sudo canary-update`) adopts a labelled drive on every
+run:
+1. mounts it at `/data` by UUID;
+2. copies what `/data` already held onto it, keeping the SD card's copy as
+   `/data.sd-backup-<time>`;
+3. makes `canary` and `canary-mcp` require the mount.
+
+**A brand-new drive is never formatted automatically.** `install_pi.sh` prints
+the one command that does it:
+
+```bash
+sudo bash scripts/data_drive.sh status            # where /data lives; any blank drive
+sudo bash scripts/data_drive.sh setup /dev/sda    # format a BLANK drive as canary-data, then adopt it
+```
+
+`setup` refuses a drive that has partitions, a signature, or anything mounted.
+
+**With a data drive, the services do not start without it.** Each gets a
+`RequiresMountsFor=/data` drop-in, `data-drive.conf`, written from `fstab` by
+`data_drive.sh guard`. Starting without the drive would write into the empty
+mount point on the SD card, and that data would vanish behind the drive once
+it came back. The empty mount point is also made immutable (`chattr +i`).
+`fstab` uses `nofail`, so the Pi still boots without the drive. To go back to
+the SD card, remove the `/data` line from `/etc/fstab` and copy the data back.
+The next `canary-update` then removes the guard.
+
 ## Useful Operations
 
 ```bash
