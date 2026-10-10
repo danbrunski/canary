@@ -59,7 +59,10 @@ import type {
   TuningEstimate,
   TuningResponse,
   VehicleProfile,
+  VehicleProfileEditResponse,
   VehicleProfilesResponse,
+  VehicleProfileUpdate,
+  VinReadResult,
   VersionResponse,
 } from "../types";
 import type {
@@ -654,6 +657,40 @@ export function updateProfileName(
     token,
     { method: "POST", body: jsonBody({ name }) },
   );
+}
+
+/** Edit a profile's identity and vehicle parameters (the machine overlay;
+ *  applies to the daemon at its next start). */
+export function updateProfile(
+  token: string,
+  slug: string,
+  update: VehicleProfileUpdate,
+): Promise<VehicleProfileEditResponse> {
+  return controlJson<VehicleProfileEditResponse>(
+    `/control/profiles/${encodeURIComponent(slug)}`,
+    token,
+    { method: "PATCH", body: jsonBody(update) },
+  );
+}
+
+/** Put `fields` (or, with none, every override) back to the tracked values. */
+export function revertProfile(
+  token: string,
+  slug: string,
+  fields?: string[],
+): Promise<VehicleProfileEditResponse> {
+  return controlJson<VehicleProfileEditResponse>(
+    `/control/profiles/${encodeURIComponent(slug)}/revert`,
+    token,
+    { method: "POST", body: jsonBody({ fields: fields ?? null }) },
+  );
+}
+
+/** Read the connected vehicle's VIN through the running collector. Never saves it. */
+export function readVin(token: string): Promise<{ vin_read: VinReadResult }> {
+  return controlJson<{ vin_read: VinReadResult }>("/control/vin/read", token, {
+    method: "POST",
+  });
 }
 
 /** `/control/trends` (Task 4.5) — per-stat session-fingerprint drift over

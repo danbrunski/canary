@@ -43,12 +43,97 @@ export interface VehicleProfile {
    *  verification number. Blank until the first successful probe. */
   calibration_id: string;
   cvn: string;
+  /** Whether the tracked `profiles.yaml` holds this profile (else it exists
+   *  only on this machine). Absent from a profile returned by an edit. */
+  tracked?: boolean;
+  /** Fields this machine's overlay sets over the tracked registry
+   *  (`parameters.<name>` for parameters). */
+  overrides?: string[];
+}
+
+/** One vehicle parameter's display metadata (`parameter_fields`). */
+export interface VehicleParameterField {
+  name: string;
+  label: string;
+  unit: string;
+  kind: "number" | "evidence" | "choice" | "ratios";
+  choices?: string[];
+  /** The evidence field a change to this fact must come with. */
+  evidence_field: string | null;
+  /** For an evidence field: the facts it supports. */
+  evidence_for: string[];
+}
+
+/** How this daemon start chose its profile. `vin_read` is the VIN the
+ *  startup probe actually read off the vehicle (null when none was read). */
+export interface ProfileResolution {
+  slug: string;
+  how: string;
+  vin_read: string | null;
+}
+
+/** The `vehicle:` block the daemon is running (copied at startup). */
+export interface VehicleInUse {
+  make: string;
+  model: string;
+  year: number;
+  vin: string;
+  parameters: Record<string, unknown>;
 }
 
 export interface VehicleProfilesResponse {
   profiles: VehicleProfile[];
   active_slug: string;
   count: number;
+  in_use?: VehicleInUse;
+  /** Active-profile fields whose registry value the daemon does not run yet. */
+  pending_restart?: string[];
+  restart_required?: boolean;
+  /** Where an edit to the active profile takes effect. */
+  applies?: string;
+  resolution?: ProfileResolution | null;
+  parameter_fields?: VehicleParameterField[];
+}
+
+/** `PATCH /control/profiles/{slug}`: only the fields present are edited. */
+export interface VehicleProfileUpdate {
+  name?: string;
+  make?: string;
+  model?: string;
+  year?: number | null;
+  vin?: string;
+  parameters?: Record<string, unknown>;
+}
+
+/** An edit or revert's response. */
+export interface VehicleProfileEditResponse {
+  profile: VehicleProfile;
+  changed: string[];
+  warnings: string[];
+  vin_resolution: string | null;
+  active: boolean;
+  pending_restart: string[];
+  restart_required: boolean;
+  applies: string;
+}
+
+/** `POST /control/vin/read`. */
+export interface VinReadResult {
+  ok: boolean;
+  vin: string | null;
+  refusal: string | null;
+  detail: string;
+  raw: string | null;
+  negative_response_code: string | null;
+  check?: {
+    vin: string;
+    check_digit: "pass" | "fail";
+    expected_check_digit: string;
+    north_american: boolean;
+    warning: string | null;
+  } | null;
+  check_problem?: string | null;
+  held_by?: string | null;
 }
 
 export interface TestProfilesResponse {

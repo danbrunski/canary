@@ -34,10 +34,12 @@ from src.collection import (
     queueing,
     tuning_profile,
     tx_gate,
+    vin_read,
 )
 from src.collection.kline.actions import KLINE_ACTIONS
 from src.collection.kline.sessions import MODULE_SESSIONS
 from src.collection.vehicle_power import VEHICLE_POWER
+from src.vehicle.profiles import record_resolution
 
 #: Every collection module holding process-global state this function resets,
 #: as ``src/collection``-relative paths.
@@ -55,6 +57,7 @@ COVERED_MODULES: frozenset[str] = frozenset(
         "tuning_profile.py",
         "tx_gate.py",
         "vehicle_power.py",
+        "vin_read.py",
     }
 )
 
@@ -103,6 +106,9 @@ def reset_process_state_for_tests() -> None:
     capture_lifetime._reset_for_tests()
     capture_generation._reset_for_tests()
     capture_profiles._reset_for_tests()
+    vin_read.reset()
+    # The profile-resolution record the dashboard's VIN edit rules read.
+    record_resolution(None)
 
 
 __all__ = ["COVERED_GLOBALS", "COVERED_MODULES", "reset_process_state_for_tests"]

@@ -23,12 +23,13 @@ from typing import Any, Literal
 
 import can
 
-from src.collection import bus_budget, capture_generation, tuning_profile, tx_gate
+from src.collection import bus_budget, capture_generation, tuning_profile, tx_gate, vin_read
 from src.collection import discovery as discovery_registry
 from src.collection.calibration_id import (
     CalibrationIdSchedule,
 )
 from src.collection.can_obd_client import (
+    DEFAULT_REQUEST_ID,
     CanObdClient,
     FrameTap,
 )
@@ -567,6 +568,9 @@ class _CanObdLoop:
             self._drain_until(next_wake_at(now, deadline=self.deadline).at)
             return
 
+        if self._maybe_read_vin(now):
+            return
+
         if not self.requests and not self.discovery.pending():
             self._drain_until(next_wake_at(now, deadline=self.deadline).at)
             return
@@ -937,6 +941,60 @@ class _CanObdLoop:
             ),
             now=time.monotonic(),
         )
+        self._spend_budget_slot()
+        return True
+
+    def _maybe_read_vin(self, now: float) -> bool:
+        """Serve an operator's on-demand VIN read (:mod:`src.collection.vin_read`).
+
+        Mode 09 goes out on this loop's own bus, in a budget slot of its own
+        (like the calibration-id read), between polls and only while no
+        Mode 22 window holds the session (the startup probe's rule: Mode 09
+        needs the default session). A ticket waiting through a window, a
+        paused capture or the rest of a slot is served once that ends.
+        """
+        if now < self.next_budget_at or tuning_profile.is_paused():
+            return False
+        controller = self.controller
+        if controller is not None and controller.phase not in ("none", "mode01"):
+            return False
+        ticket = vin_read.take()
+        if ticket is None:
+            return False
+        request = PollRequest(
+            kind="identification",
+            service=vin_read.VIN_SERVICE,
+            identifier=vin_read.VIN_INFO_TYPE,
+            request_id=DEFAULT_REQUEST_ID,
+            channel="VIN",
+        )
+        sent_before = self.stats.requests_sent
+        try:
+            result = _query_with_tap(
+                self.bus,
+                request,
+                timeout_seconds=ticket.timeout_seconds,
+                on_frame=self.on_frame,
+                stop_event=self.stop_event,
+                stats=self.stats,
+                deadline_monotonic=self.deadline,
+            )
+        except Exception as exc:
+            ticket.fulfil(
+                vin_read.VinReadOutcome(None, "no_answer", f"the VIN request failed: {exc}")
+            )
+            raise
+        self.stats.identification_requests_sent += self.stats.requests_sent - sent_before
+        if self.stats.requests_sent == sent_before:
+            outcome = vin_read.VinReadOutcome(
+                None, "passive_armed", "the transmit gate suppressed the request"
+            )
+        else:
+            outcome = vin_read.outcome_from_reply(
+                None if result.response is None else bytes(result.response.payload),
+                result.negative_response_code,
+            )
+        ticket.fulfil(outcome)
         self._spend_budget_slot()
         return True
 

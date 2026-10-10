@@ -157,6 +157,30 @@ class ProfileNameUpdateRequest(_ControlRequest):
     name: str = Field(..., max_length=255)
 
 
+class ProfileUpdateRequest(_ControlRequest):
+    """``PATCH /control/profiles/{slug}``: only the fields present are edited.
+
+    ``parameters`` is partial, merged over the profile's current parameters
+    and validated as a whole :class:`~src.config.VehicleParameters`. ``year:
+    null`` clears the year; an absent field is left alone.
+    """
+
+    name: str | None = Field(default=None, max_length=255)
+    make: str | None = Field(default=None, max_length=64)
+    model: str | None = Field(default=None, max_length=64)
+    year: int | None = None
+    vin: str | None = Field(default=None, max_length=32)
+    parameters: dict[str, Any] | None = None
+
+
+class ProfileRevertRequest(_ControlRequest):
+    """``POST /control/profiles/{slug}/revert``: the fields to put back to the
+    tracked registry's values (``name``, ``make``, ``model``, ``year``,
+    ``parameters.<name>``); omitted or ``null`` reverts every override."""
+
+    fields: list[str] | None = None
+
+
 class TuningUpdateRequest(_ControlRequest):
     """Replace the tuning config. ``version`` is auto-bumped."""
 

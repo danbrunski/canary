@@ -214,7 +214,9 @@ Control endpoints:
 | `GET /control/classifications/events` | sessions containing a given derived event kind |
 | `GET /control/sequence-detector` / `POST /control/sequence-detector` | inspect / switch the live sequence backbone (lstm\|tcn) |
 | `POST /control/replay` / `POST /control/replay/stop` / `GET /control/replay` | run a stored session through the live pipeline with isolated `_replay-*` outputs. A `loop: false` replay ends on its own when its pass runs out (writer back to live, live input reopened); the idle status keeps that replay's id and final counters with `ended` = `completed` / `stopped` / `failed`. Stop after a replay already ended returns that final status (200) and publishes another `replay.stop` control event; 409 only when no replay has run since the daemon started. A stop lands within one chunk load. Start answers 422 when a change-only session (P02.10) cannot be replayed faithfully: slower than real time, or recorded with a longer `collection.broadcast_stale_timeout_seconds` than the daemon's |
-| `GET /control/profiles` / `POST /control/profiles/{slug}/name` | list vehicle profiles / set a profile display name |
+| `GET /control/profiles` / `POST /control/profiles/{slug}/name` | list vehicle profiles / set a profile display name. The listing also carries each profile's `tracked` flag and `overrides` (fields this machine's overlay sets, `parameters.<name>` for parameters), `in_use` (the `vehicle:` block the daemon is running, copied at startup), `pending_restart` (active-profile fields whose registry value the daemon does not run yet), `resolution` (how this start chose its profile: `how`, `vin_read`) and `parameter_fields` (label, unit, kind, evidence field per vehicle parameter) — see [Vehicle profile editing](#vehicle-profile-editing) |
+| `PATCH /control/profiles/{slug}` / `POST /control/profiles/{slug}/revert` | edit a profile's `name`, `make`, `model`, `year`, `vin` and partial `parameters` / put `fields` (or every override) back to the tracked registry's values — see [Vehicle profile editing](#vehicle-profile-editing) |
+| `POST /control/vin/read` | read the connected vehicle's VIN (Mode 09 0x02) through the running OBD collector; returned for confirmation, never saved — see [Vehicle profile editing](#vehicle-profile-editing) |
 | `GET /control/power` / `POST /control/power/keepalive` | UPS watchdog status / set or cancel the keep-alive hold |
 | `GET /control/passive` / `POST /control/passive` | inspect / arm the CAN transmit gate (receive-only mode) — see [Passive mode](#passive-mode) |
 | `POST /control/trigger_poll` | force specific channels due on the OBD scheduler's next tick — `{channels}` — instead of waiting out their tier cadence |
@@ -489,6 +491,69 @@ pnpm dev
 
 Vite proxies `/status`, `/config`, `/telemetry`, `/anomalies`, and `/ws/*` to
 `127.0.0.1:8000`, so the laptop browser talks to the Pi through the SSH tunnel.
+
+## Vehicle profile editing
+
+The dashboard's Profiles page edits the registry (operator request
+2026-10-10). Every write lands in the machine overlay
+(`profiles.registry_overlay_path`, under `daemon.state_dir`); the tracked
+`profiles.yaml` is never written. Each successful edit, revert and VIN read is
+audit-logged (`profile.update`, `profile.revert`, `vin.read`).
+
+**`PATCH /control/profiles/{slug}`** takes only the fields being edited:
+`name`, `make`, `model`, `year` (`null` clears it), `vin`, and `parameters`, a
+partial mapping merged over the profile's current parameters and validated as a
+whole `VehicleParameters`. Refusals name the field:
+
+- 422 an out-of-range or unknown parameter (`parameters.final_drive: Input should
+  be greater than 0`), a malformed VIN, or a North American VIN whose check digit
+  (position 9) is wrong. A non-North-American VIN with a mismatching check digit
+  is accepted with a `warnings` entry.
+- 422 **evidence required**: changing `mass_kg` needs a new `mass_evidence`;
+  changing `final_drive`, `gearbox_ratios` or `tyre_loaded_circumference_m`
+  needs a new `driveline_evidence` (the same text again is not new evidence).
+- 409 a VIN another profile already holds, or a VIN edit that moves the
+  **active** profile off the VIN the startup probe read off the connected
+  vehicle (the next start would find no profile for that vehicle and register a
+  new, empty one).
+
+The overlay stores parameters field by field. A fact and its evidence form one
+unit (`mass_kg` + `mass_evidence`; the three driveline facts +
+`driveline_evidence`), stored, merged and reverted whole, so a later laptop edit
+to any *other* parameter still reaches this machine, and evidence never pairs
+with a number from the other side of the merge.
+
+**When an edit applies.** The response's `applies` says it: the daemon copies
+the active profile into its configuration at startup, and every session
+manifest records that copy. An edit to the active profile reaches the derived
+fuel/trip/power channels, the gear estimate, the dyno, tyre wear and the next
+session's manifest only after a restart (`scripts/restart_canary.sh`). The
+daemon never restarts itself, and a running session's manifest is never
+rewritten. Until then `pending_restart` lists the fields that differ, and
+`in_use` shows the values the daemon runs; offline tools that resolve the
+profile themselves (MCP analysis tools, scripts) already read the new values,
+so the two can differ, visibly, until the restart. `fuel_plant.yaml` and the
+engine simulator carry their own displacement in the profile directory and do
+not read `parameters.displacement_l`.
+
+**`POST /control/profiles/{slug}/revert`** — `{fields?: [...]}`: `name`,
+`make`, `model`, `year`, `parameters.<name>` (reverts its whole evidence unit).
+Omitted reverts every override and keeps the VIN, calibration ID and CVN, which
+this machine read off the vehicle and cannot be reverted. 409 for a profile the
+tracked registry does not hold.
+
+**`POST /control/vin/read`** returns `{"vin_read": {ok, vin, refusal, detail,
+raw, negative_response_code, check?, held_by?}}`. The request goes out on the
+OBD collector's own bus handle between its polls, in a bus-budget slot of its
+own (never a second handle beside it, and never inside a Mode 22 window). Refusals before anything is sent:
+`unsupported` (`obd_source` is not `canable`), `passive_armed`, `ecm_held`
+(another tool holds the ECM: `kline`, `foreign`, `rom_backup`,
+`memory_verify`), `capture_paused` (the collector is not polling), `replay`,
+`key_off` (`vehicle_state` `parked`, `engine_off`,
+`no_data` or `bench`). After sending: `no_answer`, `refused` (NRC), or
+`implausible` (not 17 characters); `not_polling` when the collector did not
+take the request within 5 s. `check` is the check-digit verdict; `held_by` names
+a profile that already has this VIN. The VIN is never saved by this call.
 
 ## Passive mode
 

@@ -231,12 +231,21 @@ function respond(body: DynoResponse) {
             make: "Nissan",
             model: "Xterra",
             year: 2008,
-            parameters: { mass_kg: 1980 },
+            // Edited in Profiles since the daemon started; the dyno still
+            // runs on ``in_use`` until a restart.
+            parameters: { mass_kg: 2230 },
             calibration_id: "",
             cvn: "",
           },
         ],
         active_slug: "nissan-xterra-2008",
+        in_use: {
+          make: "Nissan",
+          model: "Xterra",
+          year: 2008,
+          vin: "",
+          parameters: { mass_kg: 1980 },
+        },
       });
     }
     return Promise.reject(new Error(`unexpected ${path}`));
@@ -257,6 +266,9 @@ describe("DynoView", () => {
     expect(screen.getByText(/added to the vehicle/)).toBeInTheDocument();
     fireEvent.change(screen.getByLabelText("Payload (kg)"), { target: { value: "127" } });
     expect(screen.getByText(/Test mass: 2,107 kg/)).toBeInTheDocument();
+    expect(
+      screen.getByText(/Profiles now holds 2,230 kg; the dyno uses it after a daemon restart/),
+    ).toBeInTheDocument();
   });
 
   it("sends the stated run conditions and nothing it was not told", async () => {

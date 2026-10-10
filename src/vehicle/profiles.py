@@ -43,7 +43,7 @@ from typing import TYPE_CHECKING, Any, cast
 import yaml
 
 from src.atomic_write import atomic_write_text
-from src.config import CanaryConfig, ProfilesConfig, VehicleParameters
+from src.config import CanaryConfig, ProfilesConfig, VehicleConfig, VehicleParameters
 
 if TYPE_CHECKING:
     from src.signals.afr import FlashHistory
@@ -52,6 +52,64 @@ if TYPE_CHECKING:
 log = logging.getLogger(__name__)
 
 REGISTRY_SCHEMA_VERSION = 1
+
+#: Vehicle facts and the evidence field that must say how each was arrived at.
+#: A fact and its evidence form one *unit*: an edit to the fact needs new
+#: evidence (:func:`update_profile`), and the overlay stores and reverts the
+#: unit whole (:func:`_parameter_overrides`), so evidence never describes a
+#: number from the other side of the merge (operator, 2026-10-10).
+PARAMETER_EVIDENCE: dict[str, tuple[str, ...]] = {
+    "mass_evidence": ("mass_kg",),
+    "driveline_evidence": ("final_drive", "gearbox_ratios", "tyre_loaded_circumference_m"),
+}
+
+#: How the dashboard shows each :class:`~src.config.VehicleParameters` field:
+#: label, unit (``""`` for unitless) and input kind. Every field must appear
+#: (``tests/test_profile_edit.py``), so a new parameter cannot be invisible.
+PARAMETER_FIELDS: dict[str, dict[str, str]] = {
+    "mass_kg": {"label": "Vehicle mass", "unit": "kg", "kind": "number"},
+    "mass_evidence": {"label": "Mass evidence", "unit": "", "kind": "evidence"},
+    "wheel_tire_assembly_kg": {"label": "Wheel + tyre assembly", "unit": "kg", "kind": "number"},
+    "usual_payload_kg": {"label": "Usual payload", "unit": "kg", "kind": "number"},
+    "fuel_type": {"label": "Fuel", "unit": "", "kind": "choice"},
+    "displacement_l": {"label": "Displacement", "unit": "L", "kind": "number"},
+    "volumetric_efficiency": {"label": "Volumetric efficiency", "unit": "", "kind": "number"},
+    "drivetrain_loss_fraction": {"label": "Drivetrain loss", "unit": "", "kind": "number"},
+    "thermal_efficiency": {"label": "Thermal efficiency", "unit": "", "kind": "number"},
+    "tire_diameter_m": {"label": "Tyre diameter", "unit": "m", "kind": "number"},
+    "final_drive": {"label": "Final drive", "unit": "", "kind": "number"},
+    "gearbox_ratios": {"label": "Gearbox ratios (1st first)", "unit": "", "kind": "ratios"},
+    "tyre_loaded_circumference_m": {
+        "label": "Loaded tyre circumference",
+        "unit": "m",
+        "kind": "number",
+    },
+    "driveline_evidence": {"label": "Driveline evidence", "unit": "", "kind": "evidence"},
+}
+
+
+def parameter_unit(name: str) -> tuple[str, ...]:
+    """The parameters stored, merged and reverted together with ``name``."""
+    for evidence, facts in PARAMETER_EVIDENCE.items():
+        if name == evidence or name in facts:
+            return (*facts, evidence)
+    return (name,)
+
+
+def parameter_schema() -> list[dict[str, Any]]:
+    """Every vehicle parameter with its label, unit, kind, choices and evidence unit."""
+    rows: list[dict[str, Any]] = []
+    for name, info in VehicleParameters.model_fields.items():
+        meta = PARAMETER_FIELDS[name]
+        row: dict[str, Any] = {"name": name, **meta}
+        args = getattr(info.annotation, "__args__", ())
+        if meta["kind"] == "choice":
+            row["choices"] = list(args)
+        evidence = next((ev for ev, facts in PARAMETER_EVIDENCE.items() if name in facts), None)
+        row["evidence_field"] = evidence
+        row["evidence_for"] = list(PARAMETER_EVIDENCE.get(name, ()))
+        rows.append(row)
+    return rows
 
 
 # ---------------------------------------------------------------------------
@@ -156,22 +214,54 @@ def read_registry_file(path: Path) -> list[VehicleProfile]:
     return [VehicleProfile.from_dict(entry) for entry in _registry_entries(path)]
 
 
+def _merge_entry(base: dict[str, Any], overlay: dict[str, Any]) -> dict[str, Any]:
+    """One slug's overlay entry over its tracked entry.
+
+    Top-level fields replace; ``parameters`` merges field by field (the
+    overlay stores only the parameters this machine changed, evidence units
+    whole: :func:`_parameter_overrides`). Merging the block as one value let a
+    single dashboard edit shadow every tracked parameter, so a later laptop
+    edit to any other one stopped reaching the Pi (2026-10-10).
+    """
+    merged = {**base, **overlay}
+    if isinstance(base.get("parameters"), dict) and isinstance(overlay.get("parameters"), dict):
+        merged["parameters"] = {**base["parameters"], **overlay["parameters"]}
+    return merged
+
+
 def load_registry(profiles: ProfilesConfig) -> list[VehicleProfile]:
     """The VIN → profile registry: the tracked file with this machine's overlay
     merged over it by slug (S03.2).
 
     The tracked ``registry_path`` holds the laptop-authored vehicle facts and is
     never written at runtime. ``registry_overlay_path`` holds what this machine
-    learned: per tracked slug, only the top-level fields that differ (a display
-    name, a VIN, the calibration ID / CVN); a vehicle the tracked registry does
-    not know, whole. So a later laptop edit to a vehicle's parameters still
-    takes effect here, unless this machine has changed that same field.
+    learned or was told: per tracked slug, only the fields that differ (a
+    display name, a VIN, the calibration ID / CVN, a vehicle parameter edited in
+    the dashboard); a vehicle the tracked registry does not know, whole.
+    ``parameters`` merges field by field (:func:`_merge_entry`), so a later
+    laptop edit to a vehicle's parameters still takes effect here unless this
+    machine has changed that same parameter, or another in its evidence unit.
     """
     merged = {entry["slug"]: entry for entry in _registry_entries(profiles.registry_path)}
     for entry in _registry_entries(profiles.registry_overlay_path):
         slug = entry["slug"]
-        merged[slug] = {**merged.get(slug, {}), **entry}
+        merged[slug] = _merge_entry(merged.get(slug, {}), entry)
     return [VehicleProfile.from_dict(entry) for entry in merged.values()]
+
+
+def _parameter_overrides(base: dict[str, Any], current: dict[str, Any]) -> dict[str, Any]:
+    """The parameters ``current`` changes from ``base``, each evidence unit whole.
+
+    A fact and the evidence for it travel as one unit (:data:`PARAMETER_EVIDENCE`):
+    an overlay holding a dashboard-entered ``mass_kg`` with the *tracked*
+    ``mass_evidence`` would pair the machine's number with whatever text the
+    laptop commits next, describing a different mass.
+    """
+    changed = {name for name, value in current.items() if base.get(name) != value}
+    keep: set[str] = set()
+    for name in changed:
+        keep.update(parameter_unit(name))
+    return {name: value for name, value in current.items() if name in keep}
 
 
 def save_registry(profiles: ProfilesConfig, entries: list[VehicleProfile]) -> None:
@@ -188,7 +278,14 @@ def save_registry(profiles: ProfilesConfig, entries: list[VehicleProfile]) -> No
         if base is None:
             overlay.append(current)
             continue
-        changed = {key: value for key, value in current.items() if base.get(key) != value}
+        changed: dict[str, Any] = {
+            key: value
+            for key, value in current.items()
+            if key != "parameters" and base.get(key) != value
+        }
+        parameters = _parameter_overrides(base["parameters"], current["parameters"])
+        if parameters:
+            changed["parameters"] = parameters
         if changed:
             overlay.append({"slug": profile.slug, **changed})
     payload = {"schema_version": REGISTRY_SCHEMA_VERSION, "profiles": overlay}
@@ -210,6 +307,400 @@ def update_profile_name(profiles: ProfilesConfig, slug: str, name: str) -> Vehic
             save_registry(profiles, registry)
             return profile
     raise KeyError(slug)
+
+
+# ---------------------------------------------------------------------------
+# Dashboard editing (operator request 2026-10-10)
+# ---------------------------------------------------------------------------
+#
+# An edit lands in the overlay like a rename. It reaches the daemon at its
+# next start: ``resolve_active_profile`` + ``scope_config`` copy the profile
+# into the config every component holds, and each session manifest records
+# that copy. Nothing re-reads it mid-run, so a running session's derived
+# channels and manifest keep the values it started with.
+
+#: Top-level fields the dashboard edits besides ``parameters``.
+EDITABLE_FIELDS: tuple[str, ...] = ("name", "make", "model", "year", "vin")
+#: Revertable to the tracked value. ``vin``, ``calibration_id`` and ``cvn``
+#: are what this machine read off the vehicle; the tracked file usually has
+#: none, and reverting a VIN would unhook the vehicle at the next start.
+REVERTABLE_FIELDS: tuple[str, ...] = ("name", "make", "model", "year")
+#: Bounds on the identity fields (the year: the first production car to a
+#: model year two ahead).
+MAX_TEXT_LENGTH = 64
+YEAR_RANGE = (1886, 2100)
+
+
+class ProfileEditError(ValueError):
+    """An edit refused; ``field`` names the field that refused it."""
+
+    def __init__(self, field: str, message: str) -> None:
+        super().__init__(message)
+        self.field = field
+
+
+class EvidenceRequiredError(ProfileEditError):
+    """A vehicle fact changed without new evidence for it."""
+
+
+class DuplicateVinError(ProfileEditError):
+    """The VIN already identifies another profile."""
+
+
+class ActiveVinMismatchError(ProfileEditError):
+    """The active profile's VIN changed away from the VIN read at startup."""
+
+
+class NoTrackedProfileError(ProfileEditError):
+    """A revert on a profile the tracked registry does not hold."""
+
+
+@dataclass(frozen=True)
+class ProfileResolution:
+    """How this process chose its active profile, for the edit rules and the UI.
+
+    ``vin_read`` is the VIN the startup probe actually read off the vehicle,
+    not the one the profile stores; ``None`` when nothing was read.
+    """
+
+    slug: str
+    how: str
+    vin_read: str | None
+
+    def to_dict(self) -> dict[str, Any]:
+        return {"slug": self.slug, "how": self.how, "vin_read": self.vin_read}
+
+
+_resolution: ProfileResolution | None = None
+
+
+def last_resolution() -> ProfileResolution | None:
+    """What :func:`resolve_active_profile` decided in this process, if it ran."""
+    return _resolution
+
+
+def record_resolution(resolution: ProfileResolution | None) -> None:
+    """Set (or, with ``None``, clear) the process's resolution record."""
+    global _resolution
+    _resolution = resolution
+
+
+@dataclass(frozen=True)
+class ProfileEdit:
+    """A saved edit or revert: the merged profile and what changed."""
+
+    profile: VehicleProfile
+    #: Field names changed, ``parameters.<name>`` for parameters.
+    changed: tuple[str, ...]
+    warnings: tuple[str, ...] = ()
+    #: What the next start does with this profile's VIN, when it was edited.
+    vin_resolution: str | None = None
+
+
+def _find(registry: list[VehicleProfile], slug: str) -> VehicleProfile:
+    for profile in registry:
+        if profile.slug == slug:
+            return profile
+    raise KeyError(slug)
+
+
+def _text(field_name: str, value: Any) -> str:
+    if not isinstance(value, str):
+        raise ProfileEditError(field_name, f"{field_name} must be text")
+    text = value.strip()
+    limit = 255 if field_name == "name" else MAX_TEXT_LENGTH
+    if len(text) > limit:
+        raise ProfileEditError(field_name, f"{field_name} is longer than {limit} characters")
+    return text
+
+
+def _year(value: Any) -> int | None:
+    if value is None:
+        return None
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise ProfileEditError("year", "year must be a whole number")
+    low, high = YEAR_RANGE
+    if not low <= value <= high:
+        raise ProfileEditError("year", f"year {value} is outside {low}..{high}")
+    return int(value)
+
+
+def _validated_parameters(merged: dict[str, Any]) -> VehicleParameters:
+    from pydantic import ValidationError
+
+    try:
+        return VehicleParameters(**merged)
+    except ValidationError as exc:
+        first = exc.errors()[0]
+        loc = ".".join(str(part) for part in first["loc"]) or "parameters"
+        raise ProfileEditError(
+            f"parameters.{loc}" if first["loc"] else "parameters",
+            f"parameters.{loc}: {first['msg']}" if first["loc"] else str(first["msg"]),
+        ) from exc
+    except ValueError as exc:  # a before-validator's plain refusal
+        raise ProfileEditError("parameters", str(exc)) from exc
+
+
+_EVIDENCE_EXAMPLES = {
+    "mass_evidence": "scale ticket 2026-10-10, CAT scale, full fuel, no occupants",
+    "driveline_evidence": "final drive from the axle tag; ratios from the gearbox manual",
+}
+
+
+def _evidence_key(text: str | None) -> str:
+    """Evidence text as compared for "new": whitespace collapsed, case folded,
+    so a trailing space or a capital letter is not new evidence."""
+    return " ".join((text or "").split()).casefold()
+
+
+def _require_evidence(before: VehicleParameters, after: VehicleParameters) -> None:
+    """Refuse a changed vehicle fact that does not come with new evidence for it.
+
+    A constraint, not advice: the dyno and the derived channels quote these
+    numbers, and a figure nobody can trace is how the WOT noise floor was once
+    quoted against idle. Clearing every driveline fact needs no evidence; the
+    model's own validator stops requiring it then.
+    """
+    for evidence, facts in PARAMETER_EVIDENCE.items():
+        moved = [name for name in facts if getattr(before, name) != getattr(after, name)]
+        if not moved:
+            continue
+        if evidence == "driveline_evidence" and not any(getattr(after, f) for f in facts):
+            continue
+        text = _evidence_key(getattr(after, evidence))
+        if text and text != _evidence_key(getattr(before, evidence)):
+            continue
+        changes = ", ".join(
+            f"{name} {getattr(before, name)!r} -> {getattr(after, name)!r}" for name in moved
+        )
+        raise EvidenceRequiredError(
+            evidence,
+            f"{changes}: changing it needs a new {evidence} saying how the new value was "
+            f"arrived at (for example {_EVIDENCE_EXAMPLES[evidence]!r})",
+        )
+
+
+def _vin_resolution_note(vin: str, slug: str, active_slug: str | None) -> str:
+    """What the next daemon start does with ``vin`` on profile ``slug``."""
+    resolution = last_resolution()
+    read = resolution.vin_read if resolution is not None else None
+    if not vin:
+        return (
+            "No VIN: the next start never selects this profile by VIN; it is used only "
+            "as the fallback when no VIN can be read, if its slug is the vehicle: block's."
+        )
+    if read is not None and vin == read:
+        if slug == active_slug:
+            return f"The connected vehicle reported {vin} at this start: it stays active."
+        return (
+            f"The connected vehicle reported {vin} at this start: the next start selects "
+            "this profile."
+        )
+    return (
+        f"The next start selects this profile only if the vehicle reports {vin}. A vehicle "
+        "reporting another VIN gets that VIN's profile, or a new blank one; no VIN read "
+        "falls back to the vehicle: block's slug. Nothing changes until the daemon restarts."
+    )
+
+
+def _apply_vin(
+    registry: list[VehicleProfile],
+    profile: VehicleProfile,
+    value: Any,
+    *,
+    active_slug: str | None,
+) -> tuple[str, tuple[str, ...]]:
+    """Validate a new VIN for ``profile``; the VIN and any warning."""
+    from src.vehicle.vin import InvalidVinError, normalize_vin, validate_vin
+
+    if not isinstance(value, str):
+        raise ProfileEditError("vin", "vin must be text")
+    warnings: tuple[str, ...] = ()
+    vin = normalize_vin(value)
+    if vin:
+        try:
+            check = validate_vin(vin)
+        except InvalidVinError as exc:
+            raise ProfileEditError("vin", str(exc)) from exc
+        if check.warning:
+            warnings = (check.warning,)
+        holder = next((p for p in registry if p.vin == vin and p.slug != profile.slug), None)
+        if holder is not None:
+            raise DuplicateVinError(
+                "vin",
+                f"VIN {vin} already identifies profile {holder.slug!r}"
+                f"{f' ({holder.name})' if holder.name else ''}; one VIN keys one profile",
+            )
+    resolution = last_resolution()
+    read = resolution.vin_read if resolution is not None else None
+    if profile.slug == active_slug and read is not None and vin != read and vin != profile.vin:
+        raise ActiveVinMismatchError(
+            "vin",
+            f"this daemon read VIN {read} off the connected vehicle at startup and resolved "
+            f"it to this profile; giving the profile {vin or 'no VIN'} would make the next "
+            f"start find no profile for {read} and register a new, empty one. Change the VIN "
+            "of a profile that is not active, or connect the vehicle that carries it",
+        )
+    return vin, warnings
+
+
+def update_profile(
+    profiles: ProfilesConfig,
+    slug: str,
+    changes: dict[str, Any],
+    *,
+    active_slug: str | None = None,
+) -> ProfileEdit:
+    """Apply a dashboard edit to one profile and persist it to the overlay.
+
+    ``changes`` holds only the fields being edited: any of
+    :data:`EDITABLE_FIELDS`, and ``parameters`` as a partial mapping merged
+    over the profile's current parameters and validated through
+    :class:`~src.config.VehicleParameters` (an out-of-range value is refused
+    naming the field). A changed vehicle fact needs new evidence
+    (:func:`_require_evidence`); a VIN must be well formed, unique, and, on
+    the active profile, the one read at startup (:func:`_apply_vin`).
+
+    Raises ``KeyError`` for an unknown slug and :class:`ProfileEditError`
+    (with ``field``) for a refused edit; nothing is written then.
+    """
+    unknown = sorted(set(changes) - {*EDITABLE_FIELDS, "parameters"})
+    if unknown:
+        raise ProfileEditError(unknown[0], f"not an editable profile field: {', '.join(unknown)}")
+    registry = load_registry(profiles)
+    profile = _find(registry, slug)
+    before = profile.to_dict()
+    warnings: tuple[str, ...] = ()
+    vin_note: str | None = None
+
+    for name in ("name", "make", "model"):
+        if name in changes:
+            setattr(profile, name, _text(name, changes[name]))
+    if "year" in changes:
+        profile.year = _year(changes["year"])
+    if "vin" in changes:
+        profile.vin, warnings = _apply_vin(
+            registry, profile, changes["vin"], active_slug=active_slug
+        )
+        vin_note = _vin_resolution_note(profile.vin, slug, active_slug)
+    if "parameters" in changes:
+        edits = changes["parameters"]
+        if not isinstance(edits, dict):
+            raise ProfileEditError("parameters", "parameters must be a mapping of field to value")
+        merged = {**profile.parameters.model_dump(), **edits}
+        after = _validated_parameters(merged)
+        _require_evidence(profile.parameters, after)
+        profile.parameters = after
+
+    current = profile.to_dict()
+    changed = [k for k in EDITABLE_FIELDS if before[k] != current[k]]
+    changed += [
+        f"parameters.{k}"
+        for k, v in current["parameters"].items()
+        if before["parameters"].get(k) != v
+    ]
+    if changed:
+        save_registry(profiles, registry)
+    return ProfileEdit(
+        profile=profile, changed=tuple(changed), warnings=warnings, vin_resolution=vin_note
+    )
+
+
+def profile_overrides(profiles: ProfilesConfig) -> dict[str, dict[str, Any]]:
+    """Per slug: whether the tracked registry holds it, and which fields this
+    machine's overlay sets over it (``parameters.<name>`` for parameters).
+
+    A profile only this machine knows (``tracked: false``) is entirely its own;
+    its ``fields`` list is empty because there is nothing to revert to.
+    """
+    tracked = {entry["slug"] for entry in _registry_entries(profiles.registry_path)}
+    result: dict[str, dict[str, Any]] = {slug: {"tracked": True, "fields": []} for slug in tracked}
+    for entry in _registry_entries(profiles.registry_overlay_path):
+        slug = entry["slug"]
+        if slug not in tracked:
+            result[slug] = {"tracked": False, "fields": []}
+            continue
+        fields = [key for key in entry if key not in ("slug", "parameters")]
+        parameters = entry.get("parameters")
+        if isinstance(parameters, dict):
+            fields += [f"parameters.{name}" for name in parameters]
+        result[slug] = {"tracked": True, "fields": fields}
+    return result
+
+
+def revert_profile(
+    profiles: ProfilesConfig, slug: str, fields: list[str] | None = None
+) -> ProfileEdit:
+    """Put ``fields`` of one profile back to the tracked registry's values.
+
+    ``None`` reverts every override the dashboard can make (identity fields
+    and parameters), keeping the VIN, calibration ID and CVN this machine read
+    off the vehicle. A parameter reverts with its evidence unit, so a tracked
+    number never ends up beside the machine's evidence text. Mirrors
+    ``POST /control/capture/profiles/{name}/revert``.
+    """
+    base = next((p for p in read_registry_file(profiles.registry_path) if p.slug == slug), None)
+    registry = load_registry(profiles)
+    profile = _find(registry, slug)
+    if base is None:
+        raise NoTrackedProfileError(
+            "slug",
+            f"profile {slug!r} exists only on this machine; there is no tracked value to revert to",
+        )
+    if fields is None:
+        overridden = profile_overrides(profiles).get(slug, {"fields": []})["fields"]
+        fields = [f for f in overridden if f in REVERTABLE_FIELDS or f.startswith("parameters.")]
+    before = profile.to_dict()
+    parameters = profile.parameters.model_dump()
+    tracked_parameters = base.parameters.model_dump()
+    for name in fields:
+        if name in REVERTABLE_FIELDS:
+            setattr(profile, name, getattr(base, name))
+        elif name.startswith("parameters.") and name[11:] in tracked_parameters:
+            for member in parameter_unit(name[11:]):
+                parameters[member] = tracked_parameters[member]
+        else:
+            raise ProfileEditError(
+                name,
+                f"{name} cannot be reverted: revert takes {', '.join(REVERTABLE_FIELDS)} and "
+                "parameters.<name>; the VIN, calibration ID and CVN are what this machine "
+                "read off the vehicle",
+            )
+    profile.parameters = _validated_parameters(parameters)
+    current = profile.to_dict()
+    changed = [k for k in EDITABLE_FIELDS if before[k] != current[k]]
+    changed += [
+        f"parameters.{k}"
+        for k, v in current["parameters"].items()
+        if before["parameters"].get(k) != v
+    ]
+    save_registry(profiles, registry)
+    return ProfileEdit(profile=profile, changed=tuple(changed))
+
+
+def pending_restart(in_use: VehicleConfig, profile: VehicleProfile) -> list[str]:
+    """Fields where the registry's ``profile`` differs from what the daemon runs.
+
+    ``in_use`` is the running config's ``vehicle`` block, copied from the
+    profile at startup. Each field listed reaches the daemon (derived
+    channels, the dyno, tyre wear, new session manifests) only after a
+    restart; offline tools that resolve the profile themselves already see
+    the registry's value, so a non-empty list is two values in use at once.
+    """
+    differs: list[str] = []
+    year = profile.year if profile.year is not None else 0
+    for name, registry_value, running in (
+        ("make", profile.make, in_use.make),
+        ("model", profile.model, in_use.model),
+        ("year", year, in_use.year),
+        ("vin", profile.vin, in_use.vin),
+    ):
+        if registry_value != running:
+            differs.append(name)
+    stored = profile.parameters.model_dump()
+    running_parameters = in_use.parameters.model_dump()
+    differs += [f"parameters.{k}" for k, v in stored.items() if running_parameters.get(k) != v]
+    return differs
 
 
 # ---------------------------------------------------------------------------
@@ -366,7 +857,8 @@ def _resolve_active_profile(
     * else read the VIN with ``probe``; a registry hit returns that profile;
       an unknown VIN is registered with a blank display name for the operator
       to fill in.
-    * no VIN (disabled / virtual / probe failed) → the default profile.
+    * no VIN (disabled / virtual / probe failed) → the default profile: the
+      registry entry under the ``vehicle:`` block's slug, else one built from it.
 
     The resolved profile is persisted to the registry (when ``auto_register``)
     if not already present, so the dashboard can always show and rename it.
@@ -378,6 +870,7 @@ def _resolve_active_profile(
     by_vin = {p.vin: p for p in profiles if p.vin}
 
     if override_slug is not None:
+        record_resolution(ProfileResolution(override_slug, "override", None))
         if override_slug in by_slug:
             return by_slug[override_slug]
         profile = _default_profile(config, slug=override_slug)
@@ -385,19 +878,24 @@ def _resolve_active_profile(
         return profile
 
     if not config.profiles.enabled:
-        return _default_profile(config)
+        profile = _default_profile(config)
+        record_resolution(ProfileResolution(profile.slug, "profiles_disabled", None))
+        return profile
 
     vin_probe = probe(config)
     vin = vin_probe.vin
     if vin is None:
-        profile = _default_profile(config)
+        profile = _registered_default(config, by_slug)
+        record_resolution(ProfileResolution(profile.slug, "no_vin_read", None))
         _maybe_persist(config, profiles, profile)
         return profile
 
     if vin in by_vin:
         profile = by_vin[vin]
+        record_resolution(ProfileResolution(profile.slug, "vin_matched", vin))
     else:
         profile = _new_profile_for_vin(vin, taken=set(by_slug))
+        record_resolution(ProfileResolution(profile.slug, "vin_registered", vin))
         _maybe_persist(config, profiles, profile)
 
     # Only touch calibration bookkeeping for a profile that's actually in the
@@ -407,6 +905,20 @@ def _resolve_active_profile(
     if any(p.slug == profile.slug for p in profiles):
         _apply_calibration_probe(config, profiles, profile, vin_probe)
     return profile
+
+
+def _registered_default(config: CanaryConfig, by_slug: dict[str, VehicleProfile]) -> VehicleProfile:
+    """The fallback profile: the registry's entry under the ``vehicle:`` block's
+    slug when there is one, else one built from that block.
+
+    Until 2026-10-10 the fallback was always built from the block, so a start
+    that read no VIN (key off, parked, bench) ran on ``canary.yaml``'s vehicle
+    parameters, often the code defaults, while the dashboard showed the
+    registry's: a dashboard edit had no effect, and the dyno added payload to a
+    mass other than the one it displayed.
+    """
+    default = _default_profile(config)
+    return by_slug.get(default.slug, default)
 
 
 def resolve_active_profile(
@@ -471,7 +983,9 @@ def resolve_profile_for_tooling(config: CanaryConfig, slug: str | None) -> Vehic
     and WITHOUT mutating the registry (so a dry-run stays read-only).
 
     ``--profile <slug>`` selects a registry entry (or a synthetic default under
-    that slug); otherwise the ``vehicle:`` block's default profile is used. A
+    that slug); otherwise the ``vehicle:`` block's default profile, as the
+    registry holds it when it does (:func:`_registered_default`, the daemon's
+    own fallback). A
     config already scoped (P02.11) resolves to the profile it was scoped to, so
     re-resolving downstream of an entry point's ``scope_config`` is a no-op.
     """
@@ -481,7 +995,9 @@ def resolve_profile_for_tooling(config: CanaryConfig, slug: str | None) -> Vehic
             if profile.slug == slug:
                 return profile
         return _default_profile(config, slug=slug)
-    return _default_profile(config)
+    if not config.profiles.enabled:
+        return _default_profile(config)
+    return _registered_default(config, {p.slug: p for p in load_registry(config.profiles)})
 
 
 # ---------------------------------------------------------------------------

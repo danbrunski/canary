@@ -250,15 +250,22 @@ function exportCsv(result: DynoResponse) {
   );
 }
 
-/** The active vehicle profile's saved mass, which the dyno adds payload to
- *  (``config.vehicle.parameters.mass_kg`` after the profile is applied).
- *  ``null`` while loading, without a token, or when the profile has none. */
-function useSavedVehicleMass(token: string): number | null {
+function finiteMass(value: unknown): number | null {
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+/** The vehicle mass the dyno adds payload to: ``config.vehicle.parameters.mass_kg``,
+ *  which the daemon copied from the active profile when it started
+ *  (``in_use``). ``saved`` is the profile's value now; the two differ after a
+ *  Profiles edit until the daemon restarts. ``mass`` is ``null`` while
+ *  loading, without a token, or when neither carries one. */
+function useSavedVehicleMass(token: string): { mass: number | null; saved: number | null } {
   const fetcher = useCallback((signal: AbortSignal) => getProfiles(token, signal), [token]);
   const { data } = useControlResource(fetcher, { enabled: Boolean(token), intervalMs: 60000 });
   const active = data?.profiles.find((p) => p.slug === data.active_slug);
-  const mass = active?.parameters?.mass_kg;
-  return typeof mass === "number" && Number.isFinite(mass) ? mass : null;
+  const saved = finiteMass(active?.parameters?.mass_kg);
+  const inUse = finiteMass(data?.in_use?.parameters?.mass_kg);
+  return { mass: inUse ?? saved, saved };
 }
 
 /** H07.9: wheel power and torque against rpm per pull pair, runs overlaid,
@@ -268,7 +275,7 @@ export function DynoView({ token, choice }: { token: string; choice: SessionChoi
   const { result, refusal, busy, run } = useAnalysisRun<DynoResponse>();
   const [road, setRoad] = useState("");
   const [payload, setPayload] = useState("");
-  const vehicleMass = useSavedVehicleMass(token);
+  const { mass: vehicleMass, saved: savedMass } = useSavedVehicleMass(token);
   const payloadKg = payload.trim() ? Number(payload) : null;
   const [induction, setInduction] = useState<"" | "na" | "boosted">("");
   const [ambient, setAmbient] = useState("");
@@ -319,6 +326,9 @@ export function DynoView({ token, choice }: { token: string; choice: SessionChoi
               : `Saved vehicle weight ${vehicleMass.toLocaleString()} kg (Profiles). Enter only what was aboard on top of it.`}
             {vehicleMass !== null && payloadKg !== null && Number.isFinite(payloadKg)
               ? ` Test mass: ${(vehicleMass + payloadKg).toLocaleString()} kg.`
+              : ""}
+            {vehicleMass !== null && savedMass !== null && savedMass !== vehicleMass
+              ? ` Profiles now holds ${savedMass.toLocaleString()} kg; the dyno uses it after a daemon restart.`
               : ""}
           </span>
         </label>

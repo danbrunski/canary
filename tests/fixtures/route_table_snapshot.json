@@ -946,8 +946,24 @@
     {
       "auth": "control",
       "body": true,
+      "method": "PATCH",
+      "path": "/control/profiles/{slug}",
+      "query": [],
+      "status_code": null
+    },
+    {
+      "auth": "control",
+      "body": true,
       "method": "POST",
       "path": "/control/profiles/{slug}/name",
+      "query": [],
+      "status_code": null
+    },
+    {
+      "auth": "control",
+      "body": true,
+      "method": "POST",
+      "path": "/control/profiles/{slug}/revert",
       "query": [],
       "status_code": null
     },
@@ -1357,6 +1373,14 @@
       "body": false,
       "method": "GET",
       "path": "/control/version",
+      "query": [],
+      "status_code": null
+    },
+    {
+      "auth": "control",
+      "body": false,
+      "method": "POST",
+      "path": "/control/vin/read",
       "query": [],
       "status_code": null
     },
