@@ -277,7 +277,7 @@ What exists in `src/` is coupled to the USB cable:
   (commanded AFR, ignition timing, BFS), with its own null-run noise floor
   (all-did-tuning-hardening 3.8, 7.5; `instrument: kline` kept separate from
   `uprev`). **Accept:** a same-ROM null run recorded with `conditions`.
-- [~] **H05.13 Measure the scan tool's airbag wake-up.** CANary's own wake-up
+- [x] **H05.13 Measure the scan tool's airbag wake-up.** CANary's own wake-up
   is ignored by the SRS (`0x58`). On 2026-10-08 five variants were tried on the
   truck with the same `81 58 FC 81 56` StartCommunication the scan tool sends,
   and none got a reply: long-low 518.9/18.1 ms, fast 25/25, 25/20, 25/15 and
@@ -325,3 +325,12 @@ What exists in `src/` is coupled to the USB cable:
   `test_the_airbag_module_gets_its_bytes_one_by_one_at_the_declared_gap`,
   `test_a_spaced_sniffed_start_without_request_timing_is_refused`).
   **Remaining (truck):** a KOEO read_codes on the SRS with the fix deployed.
+
+  **Closed 2026-10-10, live:** with 2f7effd deployed (per-module p4 15 ms),
+  CANary's own read_codes on the SRS succeeded KOEO (session
+  2026-10-10T165941): `a2 00 -> e2 00`, `a2 01 -> e2 00`, "no codes stored"
+  (the scan tool's earlier B1134 clear had gone through). Canary BREAK rows,
+  two attempts: long-low (520/18 ms, gaps 15.1-15.6 ms) unanswered both times;
+  iso14230-fast (25.4/29.2 and 25.2/25.1 ms, gaps 15.1-15.5 ms) **answered**
+  both times. The cause was byte spacing, not the pulse. Follow-up: an
+  SRS-only fast-init wake list saves the ~0.9 s spent on long-low.
