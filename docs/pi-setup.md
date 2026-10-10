@@ -206,19 +206,40 @@ card, and nothing needs doing. On the dev Pi (2026-10-10, Patriot P300 in a
 Realtek RTL9210 enclosure) the drive read all of `/data` in 47 s, against
 about 225 s from the SD card, and took the constant small writes off the card.
 
-A drive is recognised by its filesystem label, `canary-data`.
-`install_pi.sh` (and so `sudo canary-update`) adopts a labelled drive on every
-run:
+**Run from a terminal, `install_pi.sh` asks where `/data` should live.** The
+drive is the default when one is fitted:
+
+```
+Where should CANary keep /data?
+  1) /dev/sda: 476.9G usb M.2 P300 512GB, blank: will be formatted
+  2) the SD card (root filesystem)
+Choice [1]:
+```
+
+Offered drives:
+- **Already labelled `canary-data`:** used as it is.
+- **Completely blank solid-state drives of 32 GB or more:** formatted when
+  picked.
+- **Not offered:** a drive with anything on it, and the SD card.
+
+Choosing a drive does three things:
 1. mounts it at `/data` by UUID;
 2. copies what `/data` already held onto it, keeping the SD card's copy as
    `/data.sd-backup-<time>`;
 3. makes `canary` and `canary-mcp` require the mount.
 
-**A brand-new drive is never formatted automatically.** `install_pi.sh` prints
-the one command that does it:
+Choosing the SD card is remembered in `/etc/canary/data-drive.choice`, so
+`canary-update` does not ask again about that drive. Once `/data` is on a
+drive, nothing asks either.
+
+**Run without a terminal** (unattended), the installer only adopts a drive
+already labelled `canary-data`, and never formats.
+
+To ask again, or to work by hand:
 
 ```bash
-sudo bash scripts/data_drive.sh status            # where /data lives; any blank drive
+sudo bash scripts/data_drive.sh status            # where /data lives; any candidate drive
+sudo bash scripts/data_drive.sh choose --ask      # the prompt, including drives turned down before
 sudo bash scripts/data_drive.sh setup /dev/sda    # format a BLANK drive as canary-data, then adopt it
 ```
 

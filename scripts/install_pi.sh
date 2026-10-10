@@ -583,17 +583,23 @@ runuser -u "${CANARY_USER}" -- "${CANARY_PYTHON}" scripts/install_deps.py \
   --extras "${CANARY_EXTRAS}" \
   --torch "${CANARY_TORCH}"
 
-# Data drive (docs/pi-setup.md "Data drive"): a drive labelled canary-data is
-# adopted as /data, and canary/canary-mcp then require it. A Pi without one
-# keeps /data on the SD card. Nothing is ever formatted here: a blank drive
-# gets the one command that would (operator, 2026-10-10).
+# Data drive (docs/pi-setup.md "Data Drive"). Run from a terminal, this asks
+# where /data should live, with a drive (an NVMe or other SSD) the default when
+# one is fitted; picking a blank drive formats it. Run unattended, it only
+# adopts a drive already labelled canary-data and never formats. Either way a
+# Pi without a drive keeps /data on the SD card, and once /data is on a drive
+# canary/canary-mcp require it (operator, 2026-10-10).
 DATA_DRIVE_ENV=(
   CANARY_INSTALL_ROOT="${ROOT}"
   CANARY_DATA_DIR="${CANARY_DATA_DIR}"
   CANARY_UNIT_DIR="$(dirname "${CANARY_SERVICE}")"
 )
 if [[ "${CANARY_DATA_DRIVE_ADOPT:-1}" != "0" ]]; then
-  env "${DATA_DRIVE_ENV[@]}" bash "${CANARY_HOME}/scripts/data_drive.sh" adopt --if-present
+  if [[ -t 0 && -t 1 ]]; then
+    env "${DATA_DRIVE_ENV[@]}" bash "${CANARY_HOME}/scripts/data_drive.sh" choose
+  else
+    env "${DATA_DRIVE_ENV[@]}" bash "${CANARY_HOME}/scripts/data_drive.sh" adopt --if-present
+  fi
 fi
 env "${DATA_DRIVE_ENV[@]}" bash "${CANARY_HOME}/scripts/data_drive.sh" guard
 
