@@ -50,6 +50,16 @@ def _raw_config(tmp_path: Path, *, fuel_type: str = "gasoline") -> dict:
     # The operational registry lives beside ``jobs_dir``; keep it in tmp.
     raw.setdefault("daemon", {})["jobs_dir"] = str(tmp_path / "control" / "jobs")
     raw.setdefault("vehicle", {}).setdefault("parameters", {})["fuel_type"] = fuel_type
+    # The registry entry is the vehicle's facts and wins over the vehicle:
+    # block (S03.8), so the fuel goes on a tmp copy of the tracked registry.
+    registry = yaml.safe_load(Path("profiles.yaml").read_text())
+    for entry in registry["profiles"]:
+        entry.setdefault("parameters", {})["fuel_type"] = fuel_type
+    registry_path = tmp_path / "profiles.yaml"
+    registry_path.write_text(yaml.safe_dump(registry, sort_keys=False))
+    profiles = raw.setdefault("profiles", {})
+    profiles["registry_path"] = str(registry_path)
+    profiles["registry_overlay_path"] = str(tmp_path / "control" / "profiles.yaml")
     return raw
 
 
