@@ -590,10 +590,23 @@ def relation_reads(
         start = min(c.address for c in members)
         end = max(c.address + c.length for c in members)
         if key == subject_key:
-            start = min(start, subject.address - subject.byte_length)
-            end = max(end, subject.address + subject.length + subject.byte_length)
+            span_start, span_length = neighbour_span(subject)
+            start = min(start, span_start)
+            end = max(end, span_start + span_length)
         reads.append((start, end - start))
     return reads
+
+
+def neighbour_span(subject: MemoryChannel) -> tuple[int, int]:
+    """The (address, length) read that carries `subject` and both neighbours.
+
+    Widened by the subject's width on each side: a check is only evidence
+    if it fails on the bytes beside the address, so every verifier read --
+    a relation's or a DID known answer's -- takes them in the same reply.
+    """
+    start = subject.address - subject.byte_length
+    end = subject.address + subject.length + subject.byte_length
+    return start, end - start
 
 
 class DidMap(_Strict):

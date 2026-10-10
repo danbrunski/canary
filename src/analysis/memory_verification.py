@@ -13,6 +13,7 @@ import re
 import time
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import asdict, dataclass
+from functools import partial
 from pathlib import Path
 from typing import Any, Literal, Protocol
 
@@ -25,9 +26,9 @@ from src.decode.dids import (
     MemoryChannel,
     apply_memory_scaling,
     check_known_answer,
-    decode_memory_raw,
     is_memory_sentinel,
     memory_checks,
+    neighbour_span,
     relation_channel_names,
     relation_reads,
 )
@@ -113,6 +114,19 @@ class ChannelVerdict:
 
 
 @dataclass(frozen=True)
+class KnownAnswerSample:
+    """One sample of a DID known answer: the memory reply and the DID's raw value.
+
+    ``replies`` maps the read's start address to its payload, widened to the
+    neighbouring slices (:func:`neighbour_span`); ``did_raw`` is ``None`` when
+    the DID did not answer.
+    """
+
+    replies: Mapping[int, bytes]
+    did_raw: int | None
+
+
+@dataclass(frozen=True)
 class RelationSample:
     """One sample of a relation check: the memory replies and the PID reply.
 
@@ -184,9 +198,7 @@ def evaluate_relation(
     address.
     """
     names = relation_channel_names(owner, relation)
-    width = subject.byte_length
-    shifts = (-width, width)
-    neighbour_counts = {shift: [0, 0] for shift in shifts}
+    neighbour_counts = _neighbour_counts(subject)
     observed = agreements = pid_missing = 0
     non_zero = False
     subject_values: set[int] = set()
@@ -210,21 +222,13 @@ def evaluate_relation(
                 non_zero = non_zero or _witness(owner, relation, raws) != 0
                 if isinstance(relation, FlagEquivalenceRelation):
                     antecedents.add(relation.antecedent(raws))
-            for shift in shifts:
-                moved = raw_at(subject, sample.replies, shift)
-                if moved is None:
-                    continue
-                at_neighbour = relation_holds(
-                    owner, relation, {**raws, subject.name: moved}, sample.pid_payload
-                )
-                if at_neighbour is None:
-                    continue
-                neighbour_counts[shift][0] += 1
-                neighbour_counts[shift][1] += int(at_neighbour)
-    neighbours = tuple(
-        NeighbourResult(shift, subject.address + shift, counts[0], counts[1])
-        for shift, counts in neighbour_counts.items()
-    )
+            _count_neighbours(
+                subject,
+                sample.replies,
+                neighbour_counts,
+                partial(_holds_with, owner, relation, raws, subject.name, sample.pid_payload),
+            )
+    neighbours = _neighbour_results(subject, neighbour_counts)
     where = f"{relation.label} on {owner.name}"
 
     def verdict(outcome: Outcome, reason: str) -> RelationVerdict:
@@ -257,22 +261,11 @@ def evaluate_relation(
             f"{where} held for {agreements}/{observed} reads, under its "
             f"{relation.min_agreement:.2f}; the address has moved or the relation does not hold",
         )
-    unread = [n for n in neighbours if n.samples == 0]
-    if unread:
-        return verdict(
-            "unverifiable",
-            f"{where} held for {agreements}/{observed}, but the neighbouring bytes at "
-            + ", ".join(f"0x{n.address:08X}" for n in unread)
-            + " were not read, so it was never shown able to fail",
-        )
-    held_beside = [n for n in neighbours if n.agreements >= n.samples * relation.min_agreement]
-    if held_beside:
-        return verdict(
-            "unverifiable",
-            f"{where} held for {agreements}/{observed}, and also on the neighbouring bytes at "
-            + ", ".join(f"0x{n.address:08X} ({n.agreements}/{n.samples})" for n in held_beside)
-            + ": it did not tell this address from the bytes beside it",
-        )
+    undiscriminating = _undiscriminating(
+        where, agreements, observed, neighbours, relation.min_agreement
+    )
+    if undiscriminating is not None:
+        return verdict("unverifiable", undiscriminating)
     if relation.kind in VALUE_RELATION_KINDS and not non_zero:
         return verdict(
             "unverifiable",
@@ -297,11 +290,92 @@ def evaluate_relation(
                 + ("both states" if relation.logic == "iff" else "it true")
                 + " before it says which byte this is",
             )
-    return verdict(
-        "pass",
+    return verdict("pass", _held_and_failed_beside(where, agreements, observed, neighbours))
+
+
+def _holds_with(
+    owner: MemoryChannel,
+    relation: MemoryRelation,
+    raws: Mapping[str, int],
+    subject_name: str,
+    pid_payload: bytes | None,
+    moved: int,
+) -> bool | None:
+    """`relation` on one sample with the subject's raw replaced by `moved`."""
+    return relation_holds(owner, relation, {**raws, subject_name: moved}, pid_payload)
+
+
+def _neighbour_counts(subject: MemoryChannel) -> dict[int, list[int]]:
+    """``{shift: [judged, held]}`` for the slices one subject-width either side."""
+    width = subject.byte_length
+    return {shift: [0, 0] for shift in (-width, width)}
+
+
+def _count_neighbours(
+    subject: MemoryChannel,
+    replies: Mapping[int, bytes],
+    counts: dict[int, list[int]],
+    holds_at: Callable[[int], bool | None],
+) -> None:
+    """Re-apply a check (``holds_at(moved_raw)``) to each neighbouring slice."""
+    for shift, tally in counts.items():
+        moved = raw_at(subject, replies, shift)
+        if moved is None:
+            continue
+        held = holds_at(moved)
+        if held is None:
+            continue
+        tally[0] += 1
+        tally[1] += int(held)
+
+
+def _neighbour_results(
+    subject: MemoryChannel, counts: Mapping[int, list[int]]
+) -> tuple[NeighbourResult, ...]:
+    return tuple(
+        NeighbourResult(shift, subject.address + shift, tally[0], tally[1])
+        for shift, tally in counts.items()
+    )
+
+
+def _undiscriminating(
+    where: str,
+    agreements: int,
+    observed: int,
+    neighbours: Sequence[NeighbourResult],
+    min_agreement: float,
+) -> str | None:
+    """Why a check that held did not single out its address, or ``None``.
+
+    The neighbour rule every check shares, a relation's and a DID known
+    answer's alike: a check never read beside the address was never shown
+    able to fail, and one that holds there too did not tell the address from
+    the bytes beside it. Either is ``unverifiable``, never ``pass``.
+    """
+    unread = [n for n in neighbours if n.samples == 0]
+    if unread:
+        return (
+            f"{where} held for {agreements}/{observed}, but the neighbouring bytes at "
+            + ", ".join(f"0x{n.address:08X}" for n in unread)
+            + " were not read, so it was never shown able to fail"
+        )
+    held_beside = [n for n in neighbours if n.agreements >= n.samples * min_agreement]
+    if held_beside:
+        return (
+            f"{where} held for {agreements}/{observed}, and also on the neighbouring bytes at "
+            + ", ".join(f"0x{n.address:08X} ({n.agreements}/{n.samples})" for n in held_beside)
+            + ": it did not tell this address from the bytes beside it"
+        )
+    return None
+
+
+def _held_and_failed_beside(
+    where: str, agreements: int, observed: int, neighbours: Sequence[NeighbourResult]
+) -> str:
+    return (
         f"{where} held for {agreements}/{observed} reads and failed beside it ("
         + ", ".join(f"0x{n.address:08X} {n.agreements}/{n.samples}" for n in neighbours)
-        + ")",
+        + ")"
     )
 
 
@@ -347,7 +421,9 @@ def verify_channel(
     long channel neither outlives its claim nor reads through a foreign
     tester's session.
 
-    A ``fail`` means bytes were read and disagreed. Silence is never a fail:
+    A ``fail`` means bytes were read and disagreed with a reference that
+    moved (a DID stuck at one value, or at rpm 0 under a reciprocal, is
+    ``did_constant`` / ``did_degenerate``). Silence is never a fail:
     a refused session or reads that all went unanswered (the gate suppressing
     our frames, another tester on the ECM) are ``unverifiable`` with a named
     cause (``session_entry_refused``, ``reads_unanswered``).
@@ -416,59 +492,187 @@ def _verify_did(
     request_id: int,
     before_sample: Callable[[], None] | None = None,
 ) -> ChannelVerdict:
+    """Read `samples` (word, DID) pairs and judge them by :func:`evaluate_known_answer`.
+
+    The memory read is widened to carry both neighbouring slices
+    (:func:`neighbour_span`), the same read a relation takes, so the known
+    answer is tried beside the address in the same reply.
+    """
     known = channel.known_answer
     assert known is not None
-    agreements = observed = sentinels = 0
-    out_of_range: list[float] = []
+    address, length = neighbour_span(channel)
+    collected: list[KnownAnswerSample] = []
     for _ in range(samples):
         if before_sample is not None:
             before_sample()
-        reply = client.query_raw(
-            0x23, _memory_body(channel.address, channel.length), request_id=request_id
-        )
+        reply = client.query_raw(0x23, _memory_body(address, length), request_id=request_id)
         payload = getattr(reply, "payload", None)
         if not payload:
-            continue
-        word = decode_memory_raw(channel, payload)
-        if word is None:
             continue
         did_response = client.query_mode_22(known.did, request_id=request_id)
         if did_response is None or not did_response.payload:
             continue
         did_raw = int.from_bytes(did_response.payload, "big")
-        observed += 1
-        agreements += int(check_known_answer(channel, word, did_raw))
-        if is_memory_sentinel(channel, word):
-            sentinels += 1
-            continue
-        value = apply_memory_scaling(channel, word)
-        if value is not None and (
-            (channel.plausible_min is not None and value < channel.plausible_min)
-            or (channel.plausible_max is not None and value > channel.plausible_max)
-        ):
-            out_of_range.append(value)
+        collected.append(KnownAnswerSample({address: bytes(payload)}, did_raw))
+    return evaluate_known_answer(channel, collected, requested=samples)
 
-    if observed == 0:
-        return ChannelVerdict(
-            channel.name,
+
+def evaluate_known_answer(
+    channel: MemoryChannel,
+    samples: Sequence[KnownAnswerSample],
+    *,
+    requested: int | None = None,
+) -> ChannelVerdict:
+    """Judge `channel`'s DID known answer by the rules the D03.38 relations use.
+
+    The legacy kinds (``clamped_high_byte``, ``equals_did``, ``linear_did``,
+    ``reciprocal_did``) used to pass on agreement alone. A key-on read on
+    2026-10-10 (``ignition_only``, 20 samples, recorded 0) showed what that
+    costs: seven passes were a constant matching a constant -- rpm 0 equal
+    to rpm 0, a timing byte at its key-off zero, every value outside its
+    plausible bounds -- and three fails were the DID side having nothing to
+    say (the reciprocal of rpm 0; a reference that never moved). So:
+
+    * **The DID side must say something.** A DID reading on which the
+      relation is undefined (``reciprocal_did`` of 0: no period at 0 rpm) is
+      not a sample; a DID that read one constant over every sample cannot
+      separate agreement from coincidence. Both are ``unverifiable`` with a
+      named cause (``did_degenerate``, ``did_constant``), checked *before*
+      the agreement threshold: a ``fail`` means the bytes disagreed with a
+      reference that moved.
+    * **It must fail beside the address** (:func:`_undiscriminating`, shared
+      with the relations).
+    * **The agreement must be exercised.** An agreeing sample counts as a
+      witness only when it is neither a sentinel nor outside the channel's
+      plausible bounds, and the compared value is not trivial for the kind
+      (:func:`_known_answer_exercised`: non-zero, or above the clamp floor);
+      at least two distinct DID values must be witnessed. One constant
+      witnessed twenty times is still a constant.
+
+    Anything short of that is ``unverifiable``, never ``pass``, so a record
+    run (``plan_restamp``) cannot stamp an address from an unexercised read.
+    """
+    known = channel.known_answer
+    if known is None:
+        raise ValueError(f"{channel.name} declares no known-answer check")
+    where = f"known-answer relation {known.relation} (DID 0x{known.did:04X})"
+    neighbour_counts = _neighbour_counts(channel)
+    observed = agreements = sentinels = degenerate = out_of_range = 0
+    did_values: set[int] = set()
+    witnessed: set[int] = set()
+    for sample in samples:
+        word = raw_at(channel, sample.replies)
+        did_raw = sample.did_raw
+        if word is None or did_raw is None:
+            continue
+        if not _did_defined(channel, did_raw):
+            degenerate += 1
+            continue
+        observed += 1
+        did_values.add(did_raw)
+        held = check_known_answer(channel, word, did_raw)
+        agreements += int(held)
+        sentinel = is_memory_sentinel(channel, word)
+        sentinels += int(sentinel)
+        plausible = not sentinel and _plausible(channel, word)
+        out_of_range += int(not sentinel and not plausible)
+        if held and plausible and _known_answer_exercised(channel, word, did_raw):
+            witnessed.add(did_raw)
+        _count_neighbours(
+            channel,
+            sample.replies,
+            neighbour_counts,
+            partial(_known_answer_at, channel, did_raw=did_raw),
+        )
+    neighbours = _neighbour_results(channel, neighbour_counts)
+
+    def verdict(outcome: Outcome, reason: str) -> ChannelVerdict:
+        return ChannelVerdict(channel.name, outcome, reason, observed, agreements, sentinels)
+
+    if observed == 0 and degenerate:
+        return verdict(
             "unverifiable",
-            f"reads_unanswered: no memory/DID reply pair in {samples} samples; "
-            "that is the bus, not the address",
+            f"did_degenerate: {where}: the DID read 0 on all {degenerate} samples, where "
+            f"{known.relation} is undefined (no period at 0 rpm); nothing was exercised -- "
+            "verify with the engine running",
+        )
+    if observed == 0:
+        asked = f" in {requested} samples" if requested is not None else ""
+        return verdict(
+            "unverifiable",
+            f"reads_unanswered: no memory/DID reply pair{asked}; that is the bus, not the address",
+        )
+    if len(did_values) < 2:
+        (constant,) = did_values
+        return verdict(
+            "unverifiable",
+            f"did_constant: {where}: the DID read one value ({constant}) on all {observed} "
+            f"samples ({agreements} agreed); a reference that never moved cannot tell "
+            "agreement from coincidence -- verify with the engine running",
         )
     if agreements < observed * known.min_agreement:
-        return ChannelVerdict(
-            channel.name,
+        return verdict(
             "fail",
-            f"known-answer relation {known.relation} held for {agreements}/{observed} reads; "
-            "the address has probably moved",
-            observed,
-            agreements,
-            sentinels,
+            f"{where} held for {agreements}/{observed} reads against a DID that moved "
+            f"({len(did_values)} distinct values); the address has probably moved",
         )
-    reason = f"known-answer relation {known.relation} held for {agreements}/{observed} reads"
+    undiscriminating = _undiscriminating(
+        where, agreements, observed, neighbours, known.min_agreement
+    )
+    if undiscriminating is not None:
+        return verdict("unverifiable", undiscriminating)
+    if len(witnessed) < 2:
+        seen = "no agreeing sample" if not witnessed else f"one DID value ({next(iter(witnessed))})"
+        return verdict(
+            "unverifiable",
+            f"{where} held for {agreements}/{observed}, but {seen} was exercised -- the "
+            "rest agreed only on zero, clamped, sentinel or implausible values: a constant "
+            "matching a constant is not evidence",
+        )
+    reason = _held_and_failed_beside(where, agreements, observed, neighbours)
     if out_of_range:
-        reason += f"; {len(out_of_range)} scaled value(s) were outside plausible bounds"
-    return ChannelVerdict(channel.name, "pass", reason, observed, agreements, sentinels)
+        reason += f"; {out_of_range} scaled value(s) were outside plausible bounds"
+    return verdict("pass", reason)
+
+
+def _known_answer_at(channel: MemoryChannel, moved: int, *, did_raw: int) -> bool:
+    return check_known_answer(channel, moved, did_raw)
+
+
+def _did_defined(channel: MemoryChannel, did_raw: int) -> bool:
+    """Whether the known answer is defined at `did_raw` (a reciprocal of 0 is not)."""
+    known = channel.known_answer
+    assert known is not None
+    return not (known.relation == "reciprocal_did" and did_raw == 0)
+
+
+def _plausible(channel: MemoryChannel, word: int) -> bool:
+    value = apply_memory_scaling(channel, word)
+    if value is None:
+        return True  # no scale pinned: bounds cannot be applied, the kind rule still is
+    return not (
+        (channel.plausible_min is not None and value < channel.plausible_min)
+        or (channel.plausible_max is not None and value > channel.plausible_max)
+    )
+
+
+def _known_answer_exercised(channel: MemoryChannel, word: int, did_raw: int) -> bool:
+    """Whether an agreeing (word, DID) pair compared a non-trivial value.
+
+    The legacy kinds' counterpart of the relations' non-zero witness:
+    ``clamped_high_byte`` must sit above its floor (every word under it maps
+    to the floor, so agreement there says nothing about the low bits'
+    owner); the others must compare a non-zero value on both sides.
+    """
+    known = channel.known_answer
+    assert known is not None
+    if known.relation == "clamped_high_byte":
+        return (word >> 8) > known.floor
+    if known.relation == "linear_did":
+        assert known.did_scale is not None and known.word_scale is not None
+        reference = did_raw * known.did_scale + (known.did_offset or 0.0)
+        return word * known.word_scale != 0 and reference != 0
+    return word != 0 and did_raw != 0
 
 
 def _verify_relation(
@@ -669,12 +873,14 @@ def restamp(dids_path: Path, stamps: dict[str, str | None], revision: str) -> in
 
 __all__ = [
     "ChannelVerdict",
+    "KnownAnswerSample",
     "MemoryVerificationClient",
     "NeighbourResult",
     "RelationSample",
     "RelationVerdict",
     "RestampRefusedError",
     "VerifyAbortedError",
+    "evaluate_known_answer",
     "evaluate_relation",
     "plan_restamp",
     "raw_at",

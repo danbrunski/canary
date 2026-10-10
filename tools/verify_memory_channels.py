@@ -3,8 +3,11 @@
 
 A known answer is a Mode 22 DID relation (``known_answer``) or a declared
 memory relation (``relations``: other RAM, a bit pattern, or a Mode 01 PID
-read across a session exit). A relation counts only where it fails on the
-neighbouring bytes; see :mod:`src.decode.memory_relations`.
+read across a session exit). Either counts only where it fails on the
+neighbouring bytes and compared an exercised value; see
+:mod:`src.decode.memory_relations` and
+:func:`src.analysis.memory_verification.evaluate_known_answer`. At rest
+(key on, engine off) almost nothing is exercised, so expect ``SKIP``.
 """
 
 from __future__ import annotations

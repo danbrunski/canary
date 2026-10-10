@@ -2645,7 +2645,7 @@ live here now, so the documents could be archived
     while 0x9254 = 10601. At warm idle, read 0x46AC/46B2 too. If the 0.871 idle
     PID 0x44 reads are the target factor, they sit near 6,400 there and not at
     the 7350 the closed-loop check above expects (inferred).
-  - [ ] **Key-on read (operator; reads only).** KOEO, warm idle and one light
+  - [~] **Key-on read (operator; reads only).** KOEO, warm idle and one light
     pull, then `python -m tools.verify_memory_channels` over the knock and
     lambda channels. It runs `ECM_IGNITION_TIMING_FINAL`'s DID relation and
     every relation declared in the sub-item below (2026-10-08):
@@ -2677,6 +2677,61 @@ live here now, so the documents could be archived
     other routines also write 0x2842). **Capture profile only after a key-on read
     passes:** none of these is in any profile
     (`test_new_channels_are_code_verified_and_not_yet_in_any_profile`).
+    **KOEO half done 2026-10-10; warm idle and the light pull still owed.**
+    The daemon's `POST /control/memory-channels/verify` at `ignition_only`,
+    20 samples, recorded 0: every D03.38 relation came back `unverifiable`
+    (held 20/20 and also on the neighbouring bytes), so **nothing in the
+    knock, λ or HI DET set was exercised**, and every one of them still needs
+    an engine-running verification. The same read exposed the legacy
+    known-answer defect in the next sub-item.
+  - [x] **Legacy known answers take the relations' rules (2026-10-10).** The
+    KOEO read above returned 7 passes and 3 fails from the legacy
+    `known_answer` kinds, none of them evidence. The passes were constants
+    matching constants: `ECM_ENGINE_SPEED_RAM` equals_did held on rpm 0 = 0,
+    and `ECM_IGNITION_TIMING_RAM` passed with all 20 values outside its
+    plausible bounds (a key-off zero). The fails were on a DID with nothing to
+    say: `ECM_ENGINE_PERIOD` (reciprocal of rpm 0), and
+    `ECM_THROTTLE_MAP_Y_TRACE` and `ECM_IGNITION_TIMING_FINAL` (linear_did).
+    A record run would have stamped the passes and called the fails moved.
+    `evaluate_known_answer` (`src/analysis/memory_verification.py`) now
+    judges `clamped_high_byte` / `equals_did` / `linear_did` /
+    `reciprocal_did`, reusing the relations' neighbour tally and
+    discrimination steps (`_count_neighbours`, `_undiscriminating`). The
+    word is read widened by one width either side (`neighbour_span` in
+    `src/decode/dids.py`, now shared with `relation_reads`). In order:
+    - DID side degenerate → `unverifiable`, before the agreement threshold,
+      so it is never `fail`. That covers a DID where the relation is
+      undefined (`did_degenerate`: reciprocal of 0) and a DID that read one
+      value on every sample (`did_constant`). A `fail` now means the bytes
+      disagreed with a reference that moved.
+    - It must fall below `min_agreement` on both neighbouring slices.
+    - Exercised: an agreeing sample counts only if it is not a sentinel, is
+      inside the plausible bounds, and compared a non-trivial value
+      (`clamped_high_byte` above its floor; the others non-zero on both
+      sides). At least two distinct DID values must be witnessed.
+
+    **No `vehicle_state` gate (decided here).** The per-check rules already
+    make an at-rest read `unverifiable`, never `pass` or `fail`, so
+    `plan_restamp` cannot stamp from it without `carry_reason`. A gate
+    would have duplicated that and refused useful KOEO reads (the bus, the
+    session, the ceiling). No advisory hint was added either: the
+    calibration route has no `vehicle_state` source.
+    Tests in `tests/test_verify_memory_channels.py` (19):
+    - `test_the_key_on_read_verifies_nothing_and_fails_nothing` replays the
+      key-on case over all 10 legacy channels: zero RAM, rpm 0, phi at the
+      clamp floor, and a nonzero throttle-trace and final-timing byte. All
+      10 are `unverifiable`, period `did_degenerate` and the rest
+      `did_constant`. The old passes still agree 20/20 and the old fails
+      0/20. `plan_restamp` stamps nothing.
+    - `test_an_out_of_plausible_value_that_moves_is_still_not_evidence`.
+    - `test_agreement_only_at_the_clamp_floor_is_not_evidence`.
+    - `test_a_disagreement_with_a_constant_did_is_unverifiable_not_a_fail`.
+    - `test_engine_running_the_correct_addresses_pass`: seven pass, failing
+      beside the address. The three `ECM_AIR_CHARGE_SLOT_*` stay
+      `unverifiable` because the adjacent slots hold the same air charge,
+      which is what their catalog note already says ("the REGION, not
+      which slot").
+    - `test_engine_running_a_moved_address_fails`.
   - [x] **Verifier relations built (2026-10-08).** Before this,
     `MemoryKnownAnswer` checked one word against one DID only. A
     `MemoryChannel` now carries `relations:`, a discriminated union in
