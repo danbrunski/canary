@@ -556,7 +556,7 @@ _ASLEEP = "wheel sensor not transmitting"
 def _sentinel_bindings(*, with_sentinel: bool = True) -> Bindings:
     extra = {"sentinel_raw": 0, "sentinel_meaning": _ASLEEP} if with_sentinel else {}
     return _bindings(
-        _sig(name="TYRE_A", can_id=0x385, byte_start=2, scale=0.25, unit="psi", **extra),
+        _sig(name="TIRE_A", can_id=0x385, byte_start=2, scale=0.25, unit="psi", **extra),
         _sig(name="NEIGHBOUR", can_id=0x385, byte_start=3),
     )
 
@@ -595,12 +595,12 @@ def test_a_sentinel_decodes_to_the_same_state_rows_on_the_live_and_batch_paths()
     }
     batch = _rows_as_tuples(decode_can_rows(_can_long_frame(rows), bindings))
     assert live == batch
-    assert {r for r in live if r[1] == "TYRE_A_SENTINEL"} == {
-        (1000.0, "TYRE_A_SENTINEL", _ASLEEP),
-        (1000.2, "TYRE_A_SENTINEL", _ASLEEP),
+    assert {r for r in live if r[1] == "TIRE_A_SENTINEL"} == {
+        (1000.0, "TIRE_A_SENTINEL", _ASLEEP),
+        (1000.2, "TIRE_A_SENTINEL", _ASLEEP),
     }
     # The sentinel word never becomes a number, anywhere.
-    assert {r[2] for r in live if r[1] == "TYRE_A"} == {148.0, 150.0}
+    assert {r[2] for r in live if r[1] == "TIRE_A"} == {148.0, 150.0}
     # Zero is still a value for a binding that declares no sentinel.
     assert (1000.1, "NEIGHBOUR", 0.0) in live
 
@@ -612,7 +612,7 @@ def test_non_sentinel_values_decode_exactly_as_without_the_declaration() -> None
     numeric = ~with_sentinel["channel"].str.endswith("_SENTINEL")
     kept = with_sentinel[numeric & (with_sentinel["source"] == "decoded")].reset_index(drop=True)
     plain = without[without["source"] == "decoded"]
-    plain = plain[~((plain["channel"] == "TYRE_A") & (plain["value_number"] == 0))]
+    plain = plain[~((plain["channel"] == "TIRE_A") & (plain["value_number"] == 0))]
     # ``value`` coalesces text and numbers once state rows are present (the
     # loader's long frame is object-valued anyway); the values are identical.
     pd.testing.assert_frame_equal(kept, plain.reset_index(drop=True), check_dtype=False)
@@ -621,8 +621,8 @@ def test_non_sentinel_values_decode_exactly_as_without_the_declaration() -> None
 
 def test_a_sentinel_column_is_a_text_state_and_the_number_column_skips_it() -> None:
     wide = to_wide(decode_can_rows(_can_long_frame(_sentinel_frames()), _sentinel_bindings()))
-    number = wide[decoded_channel("TYRE_A")]
-    state = wide[decoded_channel("TYRE_A_SENTINEL")]
+    number = wide[decoded_channel("TIRE_A")]
+    state = wide[decoded_channel("TIRE_A_SENTINEL")]
     assert pd.api.types.is_numeric_dtype(number)
     assert not pd.api.types.is_numeric_dtype(state)
     assert number.dropna().tolist() == [148.0, 150.0]
@@ -636,7 +636,7 @@ def test_stored_sentinel_rows_count_as_stored() -> None:
     frame = _can_long_frame(_sentinel_frames()[:1])
     stored = decode_can_rows(frame, _sentinel_bindings())
     assert set(stored.loc[stored["source"] == "decoded", "channel"]) == {
-        "TYRE_A_SENTINEL",
+        "TIRE_A_SENTINEL",
         "NEIGHBOUR",
     }
     again = decode_can_rows(stored, _sentinel_bindings())
@@ -712,7 +712,7 @@ def test_decode_on_read_writes_what_the_storage_decoder_wrote(tmp_path: Path) ->
     bindings = _sentinel_bindings()
     records = [TelemetryRecord.can(ts, can_id, raw) for ts, can_id, raw in _sentinel_frames()]
     records.append(TelemetryRecord.can(1000.4, 0x385, bytes([0, 0, 21])))  # too short for byte 3
-    stale = TelemetryRecord.decoded(records[1].timestamp, "TYRE_A", 1.0, "psi")
+    stale = TelemetryRecord.decoded(records[1].timestamp, "TIRE_A", 1.0, "psi")
     decoder = FrameDecoder.from_bindings(bindings)
     expected = [row for record in records for row in (record, *decoder.decode(record))]
 

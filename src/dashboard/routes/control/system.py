@@ -67,7 +67,7 @@ APPLIES_AT_RESTART = (
     "The daemon copied this profile into its configuration when it started, and every "
     "session manifest records that copy. Restart the daemon (scripts/restart_canary.sh, "
     "which refuses during a capture) for the change to reach the derived fuel, trip and "
-    "power channels, the gear estimate, the dyno, tyre wear and the next session's manifest. "
+    "power channels, the gear estimate, the dyno, tire wear and the next session's manifest. "
     "The running session keeps the values it started with. Offline tools that resolve the "
     "profile themselves (MCP analysis tools, scripts) read the new values at once."
 )

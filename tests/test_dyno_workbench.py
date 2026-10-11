@@ -138,8 +138,8 @@ def _profile(tmp: Path, *, measured: bool) -> Path:
                 "date": "2026-09-26",
                 "sessions": ["synthetic"],
                 "payload_kg": 127.0,
-                "tyre_pressure_front_kpa": 234.0,
-                "tyre_pressure_rear_kpa": 234.0,
+                "tire_pressure_front_kpa": 234.0,
+                "tire_pressure_rear_kpa": 234.0,
                 "ambient_temp_c": 22.0,
             },
         }
@@ -164,8 +164,8 @@ def _profile(tmp: Path, *, measured: bool) -> Path:
             ],
             "conditions": {
                 "payload_kg": 127.0,
-                "tyre_pressure_front_kpa": 234.0,
-                "tyre_pressure_rear_kpa": 234.0,
+                "tire_pressure_front_kpa": 234.0,
+                "tire_pressure_rear_kpa": 234.0,
                 "road": "synthetic road",
                 "date": "2026-09-26",
                 "sessions": ["synthetic"],

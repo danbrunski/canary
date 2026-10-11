@@ -35,7 +35,7 @@ failing the H04.3 speed-committee gates, or the gate channels not recorded),
 ``inputs_missing``, ``inputs_gap``, ``speed_too_coarse`` (no listed source,
 nor GPS, has enough samples per smoothing window to differentiate),
 ``speed_scale_mismatch`` (the scaled speed disagrees with GPS by more than
-:data:`SPEED_SCALE_TOLERANCE`: a stale ratio, another tyre, a wrong channel).
+:data:`SPEED_SCALE_TOLERANCE`: a stale ratio, another tire, a wrong channel).
 
 **A missing IMU frame degrades, by name.** :class:`DynoInputs` is still built
 (speed, acceleration, rpm and altitude are useful alone) and records why
@@ -114,7 +114,7 @@ GPS_MAX_GAP_S = 2.5
 #: 10th-90th percentile spread is about +/-2.5 % on the pre-HAT receiver
 #: (2026-09-20/21, gated like the committee), and GPS error is correlated
 #: from epoch to epoch, so this is a gross-error check (a stale ratio after a
-#: tyre change, the wrong channel, a missing correction), not a calibration:
+#: tire change, the wrong channel, a missing correction), not a calibration:
 #: using 0x6F7's 0.9203 for 0x2D1 (0.932) is a 1.3 % error and passes it.
 SPEED_SCALE_TOLERANCE = 0.03
 #: GPS is received late: the committee evidence shows 3-5 s behind the wheels
@@ -544,7 +544,7 @@ def build_motion_inputs(
                 f"{speed_channel.name} over its profile ratio {ratio:g} reads "
                 f"{100 * (1.0 / check.ratio - 1.0):+.1f} % against GPS ({check.n_epochs} epochs, "
                 f"GPS {check.lag_s:+.2f} s late); this window implies a ratio of "
-                f"{ratio / check.ratio:.4f}. Re-measure the ratio (a tyre change moves it) "
+                f"{ratio / check.ratio:.4f}. Re-measure the ratio (a tire change moves it) "
                 f"before trusting power (tolerance {100 * SPEED_SCALE_TOLERANCE:.0f} %)",
             )
 

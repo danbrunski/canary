@@ -64,10 +64,10 @@ mirrors:
     channels: [decoded:ECM_COOLANT_TEMP, decoded:ECM_COOLANT_TEMP_233, decoded:ECM_COOLANT_TEMP_23D]
 
 excluded:
-  decoded:TPMS_FL_PRESSURE: tyre pressure; a driving condition the engine does not respond to
-  decoded:TPMS_FR_PRESSURE: tyre pressure; a driving condition the engine does not respond to
-  decoded:TPMS_RL_PRESSURE: tyre pressure; a driving condition the engine does not respond to
-  decoded:TPMS_RR_PRESSURE: tyre pressure; a driving condition the engine does not respond to
+  decoded:TPMS_FL_PRESSURE: tire pressure; a driving condition the engine does not respond to
+  decoded:TPMS_FR_PRESSURE: tire pressure; a driving condition the engine does not respond to
+  decoded:TPMS_RL_PRESSURE: tire pressure; a driving condition the engine does not respond to
+  decoded:TPMS_RR_PRESSURE: tire pressure; a driving condition the engine does not respond to
   decoded:STEERING_ANGLE_002: steering; a driving condition the engine does not respond to
   decoded:STEERING_RATE_002: steering; a driving condition the engine does not respond to
   decoded:STEERING_002_LOW: steering; a driving condition the engine does not respond to

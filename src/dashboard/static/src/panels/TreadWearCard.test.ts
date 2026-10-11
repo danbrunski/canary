@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest";
 
-import type { TyreStatus } from "../types";
+import type { TireStatus } from "../types";
 import { treadHeadline } from "./TreadWearCard";
 
-const base: TyreStatus = {
+const base: TireStatus = {
   method_version: 1,
   series_start: null,
   series_reset_by: null,
@@ -20,7 +20,7 @@ describe("treadHeadline", () => {
   });
 
   it("asks for a gauge reading when there are drives but no baseline", () => {
-    const status: TyreStatus = {
+    const status: TireStatus = {
       ...base,
       current: {
         circumference_m: 2.559,
@@ -34,7 +34,7 @@ describe("treadHeadline", () => {
   });
 
   it("names a pending baseline by its drive count", () => {
-    const status: TyreStatus = {
+    const status: TireStatus = {
       ...base,
       baseline: {
         tread_depth_mm: 10,
@@ -48,7 +48,7 @@ describe("treadHeadline", () => {
   });
 
   it("shows the estimated depth with its uncertainty", () => {
-    const status: TyreStatus = {
+    const status: TireStatus = {
       ...base,
       estimate: {
         tread_depth_mm: 8.52,
@@ -62,7 +62,7 @@ describe("treadHeadline", () => {
   });
 
   it("says so when no drive has been measured since the gauge reading", () => {
-    const status: TyreStatus = {
+    const status: TireStatus = {
       ...base,
       estimate: {
         tread_depth_mm: 12.7,

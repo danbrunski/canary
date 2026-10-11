@@ -51,7 +51,7 @@ under GPS. Defects a dyno would inherit:
 ## Rules
 
 - Vehicle facts are profile data with their evidence and date: mass (with
-  what was in the truck), tyre, gears, road load, inertia.
+  what was in the truck), tire, gears, road load, inertia.
 - Every result carries required **conditions**: gear, direction, tune
   revision, NA/boosted, baro, intake and ambient temperature, road
   identifier. A result without them cannot be constructed (the
@@ -73,7 +73,7 @@ under GPS. Defects a dyno would inherit:
 
 - [x] **H07.1 Driveline facts that cannot be misread.** **Do:** replace
   `gear_ratios` with typed fields: `final_drive`, `gearbox_ratios` (unitless,
-  one per gear), `tyre_loaded_circumference_m` with its evidence; compute
+  one per gear), `tire_loaded_circumference_m` with its evidence; compute
   expected rpm per km/h from them, so the unit mismatch cannot recur. Fix
   `derived:GEAR_ESTIMATE` and its tests to match; fix `canary.example.yaml`.
   Put the measured Xterra values in its profile with their provenance (the
@@ -81,7 +81,7 @@ under GPS. Defects a dyno would inherit:
   ground-truth slice match the three measured clusters; a config with the old
   field is refused with a message naming the new ones.
   **Evidence (2026-09-23):** `VehicleParameters` gains `final_drive`,
-  `gearbox_ratios` (unitless, all gears or none), `tyre_loaded_circumference_m`
+  `gearbox_ratios` (unitless, all gears or none), `tire_loaded_circumference_m`
   and a required `driveline_evidence`; `rpm_per_kph()` computes the table, and
   `derived:GEAR_ESTIMATE` uses it. A non-empty `gear_ratios` is refused naming
   the new fields; a stored empty one (the old default) still loads. The
@@ -173,7 +173,7 @@ under GPS. Defects a dyno would inherit:
 - [~] **H07.4 Body pitch under acceleration.** **Do:** on flat ground,
   `f − a` should equal `g·sin(θ)` with θ ≈ 0; fit the residual against `a` to
   get a squat coefficient (degrees of pitch per g). Store it as profile data
-  with conditions (load in the truck, tyre pressure). **Accept:** synthetic
+  with conditions (load in the truck, tire pressure). **Accept:** synthetic
   recovery of a known coefficient; the fit refuses when the stretch is not
   flat by GPS altitude over the window.
   **Partial (2026-09-26): desk done; truck: real coefficients owed (H07.12),
@@ -306,7 +306,7 @@ under GPS. Defects a dyno would inherit:
   The leak and its se, the largest segment grade and the noise model used
   are recorded on every fit. Stored as `SquatCoefficient` in the vehicle's
   `dyno.yaml`. Its required `SquatConditions` are payload, front and rear
-  tyre pressure, road, date and sessions, and a record is only built through
+  tire pressure, road, date and sessions, and a record is only built through
   `SquatFit.to_record(conditions)`.
 
   Known answer 1.2 deg/g with a 0.3 deg mounting offset:
@@ -328,7 +328,7 @@ under GPS. Defects a dyno would inherit:
   wind's ±2·C·w in B cancels and C·w² is left in A. Stored as
   `RoadLoadCoefficients` with per-heading fits, standard errors, residual sd,
   test mass, `m_eff,neutral`, the `inertia` flag and `squat_corrected`, plus
-  required `RoadLoadConditions` (road, date, sessions, payload, tyre
+  required `RoadLoadConditions` (road, date, sessions, payload, tire
   pressures, ambient temperature). `DynoProfile` refuses a single-direction
   road load. **Found by the known-answer test:** the IMU's residual pitch
   offset μ (mount, bias, the grade the gravity vector was estimated on) is the
@@ -360,7 +360,7 @@ under GPS. Defects a dyno would inherit:
   **Partial (2026-09-26): desk done; truck: real coefficients owed (H07.12
   pulls in two gears).** `data/nissan-xterra-2008/dyno.yaml` `inertia` holds
   the stated estimates, labelled as such: 4 road wheels, shape factor 0.7 of
-  m·r² on the profile's 40.3 kg wheel and 2.609 m tyre, 1.0 kg·m² output
+  m·r² on the profile's 40.3 kg wheel and 2.609 m tire, 1.0 kg·m² output
   driveline, 0.25 kg·m² engine side. That is ~119 kg wheel-side plus ~62 kg
   engine-side in 3rd (η × 0.25 through the ratio, with η = 0.85). `Driveline.from_vehicle` builds `m_eff` per gear and
   neutral from those and `VehicleParameters`, refusing `not_configured` and
@@ -515,7 +515,7 @@ under GPS. Defects a dyno would inherit:
   - per pull: `inputs_missing` (rpm; operator demand), `too_few_samples`,
     `gear_change` (rpm on another gear's line, named), `clutch_slip` (above
     the line), `gear_ratio_mismatch` (below it, which slip cannot do: the
-    speed scale, tyre or gear is wrong), `not_wot`, `grade_varies` (2nd–98th
+    speed scale, tire or gear is wrong), `not_wot`, `grade_varies` (2nd–98th
     percentile of the IMU's own grade > 2 %, H07.7's stated amount),
     `rpm_span_too_small` (< 1,000), `too_few_bins`;
   - `too_many_directions`, `single_direction` (unless allowed, then labelled
@@ -706,11 +706,11 @@ under GPS. Defects a dyno would inherit:
   **Partial (2026-09-24):** an itemised estimate in the profile until a scale
   ticket: **2,185 kg (4,816 lb), range 4,728–4,893 lb**, from the operator's
   4,387 lb curb (6-speed manual; 4,400 lb is the automatic) plus 489 lb of
-  additions less ~60 lb of stock step rails and hitch they replaced (wheels and KO3 tyres, Hefty
+  additions less ~60 lb of stock step rails and hitch they replaced (wheels and KO3 tires, Hefty
   bumpers, winch, skids and sliders), each item's source in
   `mass_evidence`. About ±1.3 %, which scales absolute power by the same;
   before/after comparisons on the same truck cancel it. Also recorded:
-  40.3 kg per road wheel and tyre (stock 28.6 kg), the rotating mass H07.6
+  40.3 kg per road wheel and tire (stock 28.6 kg), the rotating mass H07.6
   needs. Occupants, cargo and fuel level are per-run conditions; the usual
   load is `usual_payload_kg` = 127 kg (driver 180 lb + cargo 100 lb), so a
   typical run moves ~2,311 kg (5,096 lb) on a full tank.
@@ -722,7 +722,7 @@ under GPS. Defects a dyno would inherit:
   stock 3.69 axles to 4.08), so `derived:GEAR_ESTIMATE` now runs for the
   Xterra — it was already on the non-trainable categorical list, so no model
   changes. Against the three cruise clusters already measured: 5th exact (the
-  tyre circumference was solved from it), 3rd within 0.2 %, 4th 2.0 % high.
+  tire circumference was solved from it), 3rd within 0.2 %, 4th 2.0 % high.
   The estimate reads ECU speed, ~8 % under true, so its rpm per km/h runs
   ~8.7 % high; adjacent gears are 25–30 % apart, so the nearest match holds,
   with less margin (H07.3's scaled speed removes it). Still owed on the truck:
@@ -736,18 +736,18 @@ under GPS. Defects a dyno would inherit:
     1.282 / 0.769 against published 2.518 / 1.743 / 1.283 / 0.769 (2nd
     +0.4 % on 24 pairs; 3rd, 4th and 6th within 0.1 % on 412–5,952 pairs).
   - **4th's 2 % is explained.** Every gear reads +1.85–2.34 % against the
-    profile, by one common factor in final drive × tyre, not the gearbox. With
+    profile, by one common factor in final drive × tire, not the gearbox. With
     the 4.08 regear, these drives imply a rolling circumference of
     **2.559 m** (2.609 / 1.0194), not the profile's 2.609 m (5th: 9,611
     pairs, 22 sessions, p10–p90 ±1.1 %).
     - The first version said 2.660 m, multiplying where it should divide;
       corrected the same day.
-    - Cross-checked against the LT285/75R16 load-range-E tyre at ~34 psi:
+    - Cross-checked against the LT285/75R16 load-range-E tire at ~34 psi:
       free circumference 2.617 m, published 634 rev/mi = 2.538 m, and a
       Rhyne-stiffness load/pressure model gives 2.583 m new. The 0.9 % gap is
       about 4 mm of tread wear. Details in the note.
   - **Set 2026-10-03 (operator: "yes on tire value"):**
-    `tyre_loaded_circumference_m: 2.559` in `profiles.yaml`, with the
+    `tire_loaded_circumference_m: 2.559` in `profiles.yaml`, with the
     evidence string. `dyno.yaml`'s inertia note follows: r = 0.407 m, and the
     3rd-gear rotating equivalent is ~184 kg, up from ~181.
   - **Still owed (truck):** 1st, which has 2 steady pairs on disk.

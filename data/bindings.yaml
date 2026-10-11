@@ -938,7 +938,7 @@ signals:
     offset: 0.0
     unit: psi
     confidence: hypothesized
-    model_feature: false  # tyre pressure — not engine behaviour
+    model_feature: false  # tire pressure — not engine behaviour
     plausible_min: 0.0
     plausible_max: 80.0
     evidence:
@@ -973,7 +973,7 @@ signals:
     offset: 0.0
     unit: psi
     confidence: hypothesized
-    model_feature: false  # tyre pressure — not engine behaviour
+    model_feature: false  # tire pressure — not engine behaviour
     plausible_min: 0.0
     plausible_max: 80.0
     evidence:
@@ -995,7 +995,7 @@ signals:
     offset: 0.0
     unit: psi
     confidence: hypothesized
-    model_feature: false  # tyre pressure — not engine behaviour
+    model_feature: false  # tire pressure — not engine behaviour
     plausible_min: 0.0
     plausible_max: 80.0
     evidence:
@@ -1017,7 +1017,7 @@ signals:
     offset: 0.0
     unit: psi
     confidence: hypothesized
-    model_feature: false  # tyre pressure — not engine behaviour
+    model_feature: false  # tire pressure — not engine behaviour
     plausible_min: 0.0
     plausible_max: 80.0
     evidence:

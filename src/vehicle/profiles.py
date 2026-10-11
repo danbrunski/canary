@@ -60,7 +60,7 @@ REGISTRY_SCHEMA_VERSION = 1
 #: number from the other side of the merge (operator, 2026-10-10).
 PARAMETER_EVIDENCE: dict[str, tuple[str, ...]] = {
     "mass_evidence": ("mass_kg",),
-    "driveline_evidence": ("final_drive", "gearbox_ratios", "tyre_loaded_circumference_m"),
+    "driveline_evidence": ("final_drive", "gearbox_ratios", "tire_loaded_circumference_m"),
 }
 
 #: How the dashboard shows each :class:`~src.config.VehicleParameters` field:
@@ -69,18 +69,18 @@ PARAMETER_EVIDENCE: dict[str, tuple[str, ...]] = {
 PARAMETER_FIELDS: dict[str, dict[str, str]] = {
     "mass_kg": {"label": "Vehicle mass", "unit": "kg", "kind": "number"},
     "mass_evidence": {"label": "Mass evidence", "unit": "", "kind": "evidence"},
-    "wheel_tire_assembly_kg": {"label": "Wheel + tyre assembly", "unit": "kg", "kind": "number"},
+    "wheel_tire_assembly_kg": {"label": "Wheel + tire assembly", "unit": "kg", "kind": "number"},
     "usual_payload_kg": {"label": "Usual payload", "unit": "kg", "kind": "number"},
     "fuel_type": {"label": "Fuel", "unit": "", "kind": "choice"},
     "displacement_l": {"label": "Displacement", "unit": "L", "kind": "number"},
     "volumetric_efficiency": {"label": "Volumetric efficiency", "unit": "", "kind": "number"},
     "drivetrain_loss_fraction": {"label": "Drivetrain loss", "unit": "", "kind": "number"},
     "thermal_efficiency": {"label": "Thermal efficiency", "unit": "", "kind": "number"},
-    "tire_diameter_m": {"label": "Tyre diameter", "unit": "m", "kind": "number"},
+    "tire_diameter_m": {"label": "Tire diameter", "unit": "m", "kind": "number"},
     "final_drive": {"label": "Final drive", "unit": "", "kind": "number"},
     "gearbox_ratios": {"label": "Gearbox ratios (1st first)", "unit": "", "kind": "ratios"},
-    "tyre_loaded_circumference_m": {
-        "label": "Loaded tyre circumference",
+    "tire_loaded_circumference_m": {
+        "label": "Loaded tire circumference",
         "unit": "m",
         "kind": "number",
     },
@@ -202,7 +202,24 @@ def _registry_entries(path: Path) -> list[dict[str, Any]]:
         return []
     raw = yaml.safe_load(path.read_text()) or {}
     entries = raw.get("profiles", []) if isinstance(raw, dict) else []
-    return [dict(entry) for entry in entries]
+    return [_current_spelling(dict(entry)) for entry in entries]
+
+
+def _current_spelling(entry: dict[str, Any]) -> dict[str, Any]:
+    """One registry entry with pre-2026-10-11 parameter names renamed.
+
+    Done per file, before the tracked file and the overlay merge: a tracked
+    ``tyre_loaded_circumference_m`` beside an overlay's
+    ``tire_loaded_circumference_m`` would otherwise reach
+    :class:`~src.config.VehicleParameters` as both, which it refuses.
+    """
+    params = entry.get("parameters")
+    if isinstance(params, dict) and "tyre_loaded_circumference_m" in params:
+        params = dict(params)
+        value = params.pop("tyre_loaded_circumference_m")
+        params.setdefault("tire_loaded_circumference_m", value)
+        entry["parameters"] = params
+    return entry
 
 
 def read_registry_file(path: Path) -> list[VehicleProfile]:
@@ -683,7 +700,7 @@ def pending_restart(in_use: VehicleConfig, profile: VehicleProfile) -> list[str]
 
     ``in_use`` is the running config's ``vehicle`` block, copied from the
     profile at startup. Each field listed reaches the daemon (derived
-    channels, the dyno, tyre wear, new session manifests) only after a
+    channels, the dyno, tire wear, new session manifests) only after a
     restart; offline tools that resolve the profile themselves already see
     the registry's value, so a non-empty list is two values in use at once.
     """

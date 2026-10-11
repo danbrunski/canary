@@ -118,7 +118,7 @@ survive a restart; tracked as D03.30.
    aloud a page at a time works.
 2. **TPMS:** read the per-wheel IDs off the scan tool's screen to confirm the
    byte format and wheel order. Decode `21 32` against pressures shown on the
-   scan tool (a known answer: inflate or deflate one tyre).
+   scan tool (a known answer: inflate or deflate one tire).
 3. **BCM as a CAN diagnostics target:** a small follow-up to K01/D03. The
    same 0xC0 session plumbing, with a separate request/response pair.
 

@@ -115,7 +115,7 @@ method that "doesn't cause git or updater problems".
   the rename has none. *Merge depth:* `_merge_entry` merges `parameters` key by
   key and `save_registry` stores only changed parameters, each evidence unit
   whole (`mass_kg`+`mass_evidence`; `final_drive`, `gearbox_ratios`,
-  `tyre_loaded_circumference_m`+`driveline_evidence`), so evidence never pairs
+  `tire_loaded_circumference_m`+`driveline_evidence`), so evidence never pairs
   with a number from the other side of the merge.
   `test_a_later_laptop_edit_to_another_parameter_still_flows_after_a_dashboard_edit`,
   `test_evidence_travels_with_its_fact_across_the_merge`. *Evidence refusals:*
@@ -129,7 +129,7 @@ method that "doesn't cause git or updater problems".
   `pending_restart` and `in_use`; nothing restarts on its own, and no running
   manifest is rewritten. *Consumers checked:* derived fuel/trip/power and gear
   channels, the dyno (`workbench_jobs` passes `config.vehicle.parameters`), and
-  tyre wear (`rolling_circumference`) all read the startup copy. Offline tools
+  tire wear (`rolling_circumference`) all read the startup copy. Offline tools
   that resolve the profile themselves (MCP `tuning_analysis`/`behavior`,
   scripts) read the registry at once; `pending_restart` is that gap, shown.
   `fuel_plant.yaml` and the engine simulator keep their own displacement

@@ -121,7 +121,7 @@ def test_delete_removes_an_entry_and_audits_only_its_name(tmp_path: Path) -> Non
             "occurred_at": "2026-10-04",
             "kind": "maintenance",
             "title": "Tread depth gauge reading: 15.0 mm",
-            "tyres": {"action": "tread_measured", "tread_depth_mm": 15.04},
+            "tires": {"action": "tread_measured", "tread_depth_mm": 15.04},
         },
     ).json()["event"]
     assert client.delete(f"/control/vehicle-ledger/{posted['id']}").status_code == 401

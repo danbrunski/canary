@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Measure the tyre rolling circumference of stored sessions (tyre wear).
+"""Measure the tire rolling circumference of stored sessions (tire wear).
 
 Writes each session's ``rolling_circumference.json``, the one input
-``/control/tyres`` trends. Every session is measured, with or without a trip
+``/control/tires`` trends. Every session is measured, with or without a trip
 digest: the drives the digest refused (the long ones) are the measurement's
 best input, and it reads only two channels (rpm and GPS speed), so the digest's
 budgets do not apply to it.

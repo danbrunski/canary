@@ -237,8 +237,8 @@ def test_persist_defaults_off_so_the_on_read_set_stays_opt_in() -> None:
 def test_a_sentinel_word_decodes_to_a_state_row_not_a_number() -> None:
     """A04.6: the declared no-measurement word is a ``_SENTINEL`` state row
     carrying the stated meaning; every other value decodes exactly as before."""
-    tyre = Signal(
-        name="TYRE_A",
+    tire = Signal(
+        name="TIRE_A",
         module="BCM",
         can_id=0x385,
         byte_start=2,
@@ -249,13 +249,13 @@ def test_a_sentinel_word_decodes_to_a_state_row_not_a_number() -> None:
         sentinel_raw=0,
         sentinel_meaning="wheel sensor not transmitting",
     )
-    decoder = FrameDecoder.from_bindings(_bindings(tyre))
+    decoder = FrameDecoder.from_bindings(_bindings(tire))
     (asleep,) = decoder.decode(TelemetryRecord.can(1.0, 0x385, bytes(8)))
     assert (asleep.channel, asleep.value, asleep.unit) == (
-        "TYRE_A_SENTINEL",
+        "TIRE_A_SENTINEL",
         "wheel sensor not transmitting",
         "",
     )
     assert asleep.metadata == {"can_id": 0x385, "binding_confidence": "hypothesized"}
     (awake,) = decoder.decode(TelemetryRecord.can(2.0, 0x385, bytes([0, 0, 148, 0])))
-    assert (awake.channel, awake.value, awake.unit) == ("TYRE_A", 148.0, "psi")
+    assert (awake.channel, awake.value, awake.unit) == ("TIRE_A", 148.0, "psi")

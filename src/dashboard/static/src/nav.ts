@@ -39,7 +39,7 @@ export const NAV: NavGroupDef[] = [
       { id: "diag-functions", label: "Diagnostic Functions", group: "diagnose" },
       { id: "diag-monitors", label: "Monitors", group: "diagnose" },
       { id: "diag-trends", label: "Drift Trends", group: "diagnose" },
-      { id: "diag-tpms", label: "Tyres", group: "diagnose" },
+      { id: "diag-tpms", label: "Tires", group: "diagnose" },
       { id: "diag-ledger", label: "Vehicle Ledger", group: "diagnose" },
       { id: "diag-brain", label: "Investigations", group: "diagnose" },
       { id: "diag-llm-assist", label: "LLM Assist", group: "diagnose" },

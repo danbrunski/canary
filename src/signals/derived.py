@@ -524,7 +524,7 @@ def _gear_estimate(
     ``vehicle.rpm_per_kph()`` (Task 4.6, H07.1).
 
     The table is computed from the profile's gearbox ratios, final drive and
-    loaded tyre circumference, never hardcoded here (this platform is meant to
+    loaded tire circumference, never hardcoded here (this platform is meant to
     generalize to any vehicle). Until all three are known the vehicle simply
     never gets this channel — same absent-input contract as every other
     channel here, not a special case. ``speed`` is the ECU's, which may read
@@ -571,7 +571,7 @@ def compute_instantaneous_channels(
     ``FUEL_RATE_LPH``, ``INSTANT_ECONOMY_L_PER_100KM``,
     ``INSTANT_ECONOMY_MPG``, ``BOOST_VACUUM_KPA``, ``ESTIMATED_POWER_HP``,
     ``ESTIMATED_TORQUE_NM``, ``GEAR_ESTIMATE`` (Task 4.6 — only when the
-    profile's gearbox ratios, final drive and tyre are all known, H07.1).
+    profile's gearbox ratios, final drive and tire are all known, H07.1).
     """
     if wide.empty or "timestamp" not in wide.columns:
         return wide.copy()

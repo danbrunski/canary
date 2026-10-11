@@ -76,7 +76,7 @@ PARAMS = VehicleParameters(
     wheel_tire_assembly_kg=40.3,
     final_drive=4.08,
     gearbox_ratios=(4.368, 2.518, 1.743, 1.283, 1.0, 0.769),
-    tyre_loaded_circumference_m=2.609,
+    tire_loaded_circumference_m=2.609,
     driveline_evidence="synthetic test vehicle",
     drivetrain_loss_fraction=1.0 - ETA,
 )
@@ -274,7 +274,7 @@ def _pull(
 ) -> GearPull:
     """A WOT pull in one gear from a known torque curve, road load and inertia."""
     ratio = driveline.overall_ratio(gear)
-    r = driveline.tyre_radius_m
+    r = driveline.tire_radius_m
     # The crank inertia is upstream of the lossy gearbox: the wheel sees
     # ETA·N/r·(T − I_e·α), so the engine's share of m_eff is ETA·I_e·N²/r².
     # Written out here, independently of Driveline.effective_mass.
@@ -332,8 +332,8 @@ def _squat_record() -> SquatCoefficient:
     return fit.to_record(
         SquatConditions(
             payload_kg=127.0,
-            tyre_pressure_front_kpa=240.0,
-            tyre_pressure_rear_kpa=240.0,
+            tire_pressure_front_kpa=240.0,
+            tire_pressure_rear_kpa=240.0,
             road="synthetic flat",
             date=dt.date(2026, 9, 26),
             sessions=["synthetic"],
@@ -951,8 +951,8 @@ def test_road_load_single_direction_is_refused_unless_asked_and_then_labelled(
             date=dt.date(2026, 9, 26),
             sessions=["s"],
             payload_kg=127.0,
-            tyre_pressure_front_kpa=240.0,
-            tyre_pressure_rear_kpa=240.0,
+            tire_pressure_front_kpa=240.0,
+            tire_pressure_rear_kpa=240.0,
             ambient_temp_c=20.0,
         )
     )
@@ -1009,7 +1009,7 @@ def test_driveline_from_vehicle_names_every_missing_fact() -> None:
     for fact in (
         "final_drive",
         "gearbox_ratios",
-        "tyre_loaded_circumference_m",
+        "tire_loaded_circumference_m",
         "wheel_tire_assembly_kg",
         "inertia",
     ):

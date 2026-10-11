@@ -94,22 +94,22 @@ class _RefusingExecutor(Executor):
         raise AssertionError("a child was started for a session that should have been refused")
 
 
-class _TyresOnlyExecutor(Executor):
-    """Refuses a digest child, runs the tyre measurement inline (D03.35).
+class _TiresOnlyExecutor(Executor):
+    """Refuses a digest child, runs the tire measurement inline (D03.35).
 
-    A drive refused a digest is still measured for tyre wear: two channels,
+    A drive refused a digest is still measured for tire wear: two channels,
     not the session, so the digest's budgets do not apply to it.
     """
 
     def __init__(self) -> None:
         self.digests = 0
-        self.tyres = 0
+        self.tires = 0
 
     def submit(self, fn: Callable[..., Any], /, *args: Any, **kwargs: Any) -> Future[Any]:
-        if getattr(fn, "func", None) is not trip_end.measure_tyres_under_limit:
+        if getattr(fn, "func", None) is not trip_end.measure_tires_under_limit:
             self.digests += 1
             raise AssertionError("a digest child was started for a refused session")
-        self.tyres += 1
+        self.tires += 1
         # Inline, so without the child's address-space cap: in this process
         # it would cap the test worker itself.
         call = functools.partial(fn, address_space_bytes=None)
@@ -186,7 +186,7 @@ async def test_concurrent_trip_end_requests_share_the_running_digest(
 # --- 2. the budgets refuse before anything is started ---------------------
 
 
-async def test_a_session_over_the_span_budget_is_refused_and_only_its_tyres_are_measured(
+async def test_a_session_over_the_span_budget_is_refused_and_only_its_tires_are_measured(
     tmp_path: Path,
 ) -> None:
     """P02.1: the ``value_number`` chain reads part by part, so every digest is
@@ -196,15 +196,15 @@ async def test_a_session_over_the_span_budget_is_refused_and_only_its_tyres_are_
     span = session_time_span_seconds(session)
     assert span is not None and span > 10
     config = _budgeted(digest_config(tmp_path), digest_span_budget_seconds=10)
-    pool = _TyresOnlyExecutor()
+    pool = _TiresOnlyExecutor()
 
     result = await handle_trip_end_off_loop(session, config, executor=pool)
 
     assert result is None
     assert pool.digests == 0
-    assert pool.tyres == 1
-    tyres = read_rolling_circumference(session)
-    assert tyres is not None and tyres["method_version"] == METHOD_VERSION
+    assert pool.tires == 1
+    tires = read_rolling_circumference(session)
+    assert tires is not None and tires["method_version"] == METHOD_VERSION
     assert not (session / DIGEST_FILENAME).exists()
     skipped = read_digest_skipped(session)
     assert skipped is not None
@@ -220,7 +220,7 @@ async def test_a_session_over_the_span_budget_is_refused_and_only_its_tyres_are_
     await asyncio.sleep(0)
 
 
-async def test_a_capture_over_the_row_budget_is_refused_and_only_its_tyres_are_measured(
+async def test_a_capture_over_the_row_budget_is_refused_and_only_its_tires_are_measured(
     tmp_path: Path,
 ) -> None:
     """A capture's tuning section still reads the session whole (until P02.2),
@@ -229,15 +229,15 @@ async def test_a_capture_over_the_row_budget_is_refused_and_only_its_tyres_are_m
     rows = count_session_rows(session)
     assert rows is not None and rows > 10
     config = _budgeted(digest_config(tmp_path), digest_row_budget=10)
-    pool = _TyresOnlyExecutor()
+    pool = _TiresOnlyExecutor()
 
     result = await handle_trip_end_off_loop(session, config, executor=pool)
 
     assert result is None
     assert pool.digests == 0
-    assert pool.tyres == 1
-    tyres = read_rolling_circumference(session)
-    assert tyres is not None and tyres["method_version"] == METHOD_VERSION
+    assert pool.tires == 1
+    tires = read_rolling_circumference(session)
+    assert tires is not None and tires["method_version"] == METHOD_VERSION
     skipped = read_digest_skipped(session)
     assert skipped is not None
     assert skipped["reason"] == REASON_OVER_ROW_BUDGET
@@ -257,15 +257,15 @@ def test_an_ordinary_drive_is_not_budgeted_by_rows(tmp_path: Path) -> None:
     assert read_digest_skipped(session) is None
 
 
-def test_a_digest_stores_its_tyre_measurement_as_its_own_sidecar(tmp_path: Path) -> None:
-    """D03.35: ``rolling_circumference.json`` is the tyre trend's only input,
+def test_a_digest_stores_its_tire_measurement_as_its_own_sidecar(tmp_path: Path) -> None:
+    """D03.35: ``rolling_circumference.json`` is the tire trend's only input,
     so a digest writes it there and not into ``digest.json``."""
     session = _session(tmp_path)
     payload = get_or_compute_digest(session, digest_config(tmp_path), now=RICH_SESSION_END)
     assert payload is not None
     assert "rolling_circumference" not in payload
-    tyres = read_rolling_circumference(session)
-    assert tyres is not None and tyres["method_version"] == METHOD_VERSION
+    tires = read_rolling_circumference(session)
+    assert tires is not None and tires["method_version"] == METHOD_VERSION
 
 
 async def test_a_replay_directory_is_refused_by_the_shared_function(tmp_path: Path) -> None:

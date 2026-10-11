@@ -1,10 +1,10 @@
-/** `/control/tyres` — tyre wear from the trip digests' rolling circumference
- *  (`src/control/tyres.py`). `estimate` is null until a gauge reading on the
+/** `/control/tires` — tire wear from the trip digests' rolling circumference
+ *  (`src/control/tires.py`). `estimate` is null until a gauge reading on the
  *  vehicle ledger has ≥3 measured drives near it; `current` is null with no
  *  measured drive since the series start (the latest rotation/replacement). */
-export type TyreAction = "tread_measured" | "rotated" | "replaced" | "pressure_changed";
+export type TireAction = "tread_measured" | "rotated" | "replaced" | "pressure_changed";
 
-export interface TyreDrive {
+export interface TireDrive {
   session: string;
   started_at: string;
   circumference_m: number;
@@ -12,18 +12,18 @@ export interface TyreDrive {
   se_pct: number | null;
 }
 
-export interface TyreEventRef {
+export interface TireEventRef {
   id: string;
   occurred_at: string;
   title: string;
-  action: TyreAction;
+  action: TireAction;
 }
 
-export interface TyreStatus {
+export interface TireStatus {
   method_version: number;
   series_start: string | null;
-  series_reset_by: TyreEventRef | null;
-  drives: TyreDrive[];
+  series_reset_by: TireEventRef | null;
+  drives: TireDrive[];
   current: {
     circumference_m: number;
     uncertainty_m: number;
@@ -34,7 +34,7 @@ export interface TyreStatus {
   baseline: {
     tread_depth_mm: number;
     measured_on: string;
-    event: TyreEventRef | null;
+    event: TireEventRef | null;
     drives: number;
     status: "pending" | "fixed";
     circumference_m?: number;

@@ -1,6 +1,6 @@
 import { useCallback, useState } from "react";
 
-import { getTyres, recordTyreEvent } from "../api/http";
+import { getTires, recordTireEvent } from "../api/http";
 import { Panel } from "../components/Panel";
 import { Sparkline } from "../components/Sparkline";
 import { useControlResource } from "../hooks/useControlResource";
@@ -12,14 +12,14 @@ import {
   definitionValueClass,
   placeholderClass,
 } from "../styles";
-import type { TyreAction, TyreStatus } from "../types";
+import type { TireAction, TireStatus } from "../types";
 
 interface TreadWearCardProps {
   token: string;
 }
 
 /** The headline: estimated tread, else why there is none yet. */
-export function treadHeadline(status: TyreStatus): string {
+export function treadHeadline(status: TireStatus): string {
   const estimate = status.estimate;
   if (estimate) {
     if (estimate.drives_since_reading === 0) {
@@ -34,17 +34,17 @@ export function treadHeadline(status: TyreStatus): string {
   return "record a gauge reading to estimate tread depth";
 }
 
-/** Tyre wear from GPS (`/control/tyres`): each trip's rolling circumference
+/** Tire wear from GPS (`/control/tires`): each trip's rolling circumference
  *  on steady cruise, trended. One mm of tread is 2π mm of circumference, so a
  *  gauge reading on the ledger turns the trend into an estimated depth; a
- *  rotation or new tyres restarts it. */
+ *  rotation or new tires restarts it. */
 export function TreadWearCard({ token }: TreadWearCardProps) {
-  const fetcher = useCallback((signal: AbortSignal) => getTyres(token, signal), [token]);
+  const fetcher = useCallback((signal: AbortSignal) => getTires(token, signal), [token]);
   const { data, error, loading, refresh } = useControlResource(fetcher, {
     enabled: Boolean(token),
     intervalMs: 60000,
   });
-  const [action, setAction] = useState<TyreAction>("tread_measured");
+  const [action, setAction] = useState<TireAction>("tread_measured");
   const [value, setValue] = useState("");
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
@@ -53,7 +53,7 @@ export function TreadWearCard({ token }: TreadWearCardProps) {
     return (
       <Panel title="Tread wear">
         <p className={placeholderClass}>
-          Enter the control token (Control panel) to view tyre wear.
+          Enter the control token (Control panel) to view tire wear.
         </p>
       </Panel>
     );
@@ -85,7 +85,7 @@ export function TreadWearCard({ token }: TreadWearCardProps) {
     setSaving(true);
     setSaveError(null);
     try {
-      await recordTyreEvent(token, {
+      await recordTireEvent(token, {
         occurredAt: new Date().toISOString().slice(0, 10),
         action,
         treadDepthMm: action === "tread_measured" ? number : undefined,
@@ -160,15 +160,15 @@ export function TreadWearCard({ token }: TreadWearCardProps) {
       )}
       <div className="mt-3 flex flex-wrap items-center gap-2 text-[0.82rem]">
         <select
-          aria-label="tyre event"
+          aria-label="tire event"
           value={action}
-          onChange={(e) => setAction(e.target.value as TyreAction)}
+          onChange={(e) => setAction(e.target.value as TireAction)}
           className="rounded border border-border bg-bg px-1 py-0.5"
         >
           <option value="tread_measured">gauge reading (mm)</option>
           <option value="pressure_changed">pressure set (psi)</option>
-          <option value="rotated">tyres rotated</option>
-          <option value="replaced">tyres replaced</option>
+          <option value="rotated">tires rotated</option>
+          <option value="replaced">tires replaced</option>
         </select>
         {needsValue && (
           <input

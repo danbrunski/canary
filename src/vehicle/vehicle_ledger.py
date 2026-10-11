@@ -49,8 +49,8 @@ __all__ = [
     "PHYSICAL_INTERVENTION_KINDS",
     "VEHICLE_EVENT_KINDS",
     "PhysicalInterventionKind",
-    "TyreAction",
-    "TyreRecord",
+    "TireAction",
+    "TireRecord",
     "VehicleEvent",
     "VehicleEventKind",
     "VehicleLedgerStore",
@@ -65,7 +65,7 @@ VEHICLE_EVENT_KINDS: frozenset[str] = frozenset(
 )
 
 
-TyreAction = Literal["tread_measured", "rotated", "replaced", "pressure_changed"]
+TireAction = Literal["tread_measured", "rotated", "replaced", "pressure_changed"]
 
 #: What kind of intervention a physical event is (E01.4). Flashes are not
 #: here: they live in ``tune_revisions.yaml`` (``src.vehicle.interventions``
@@ -74,25 +74,25 @@ PhysicalInterventionKind = Literal["hardware", "fuel", "instrumentation"]
 PHYSICAL_INTERVENTION_KINDS: frozenset[str] = frozenset({"hardware", "fuel", "instrumentation"})
 
 
-class TyreRecord(BaseModel):
-    """A tyre fact on a ledger event, readable by code (tyre wear).
+class TireRecord(BaseModel):
+    """A tire fact on a ledger event, readable by code (tire wear).
 
     ``tread_measured`` is a gauge reading: the baseline that turns the trip
-    digests' rolling circumference into tread depth (:mod:`src.control.tyres`).
-    ``rotated`` and ``replaced`` change which tyres the driven axle carries,
+    digests' rolling circumference into tread depth (:mod:`src.control.tires`).
+    ``rotated`` and ``replaced`` change which tires the driven axle carries,
     so a circumference trend restarts there; ``pressure_changed`` is named
     because ~6 psi moves the circumference as much as ~0.8 mm of tread.
     """
 
     model_config = ConfigDict(extra="forbid")
 
-    action: TyreAction
-    #: Gauge reading, driven-axle tyres, mm (required for ``tread_measured``).
+    action: TireAction
+    #: Gauge reading, driven-axle tires, mm (required for ``tread_measured``).
     tread_depth_mm: float | None = Field(default=None, gt=0.0, lt=40.0)
     pressure_psi: float | None = Field(default=None, gt=0.0, lt=120.0)
 
     @model_validator(mode="after")
-    def _a_measurement_has_a_depth(self) -> TyreRecord:
+    def _a_measurement_has_a_depth(self) -> TireRecord:
         if self.action == "tread_measured" and self.tread_depth_mm is None:
             raise ValueError("a tread_measured record needs tread_depth_mm")
         return self
@@ -121,14 +121,27 @@ class VehicleEvent(BaseModel):
     #: expected sensor behavior should bisect the training corpus (Task 3.5);
     #: routine maintenance and observations usually don't.
     corpus_boundary: bool = False
-    #: A tyre fact the tyre-wear trend reads, or ``None``.
-    tyres: TyreRecord | None = None
+    #: A tire fact the tire-wear trend reads, or ``None``.
+    tires: TireRecord | None = None
     #: The intervention this event is, when it changed the vehicle or its
     #: instruments (E01.4): a hardware change, a fuel change, an
     #: instrumentation change. ``None`` is "not classified" — an event written
     #: before this field existed stays unclassified rather than being guessed
     #: into a kind from its ``kind``/title.
     intervention: PhysicalInterventionKind | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def _british_tires_key(cls, data: Any) -> Any:
+        """Read events written before the US-English rename (2026-10-11),
+        whose tire fact sits under ``tyres``. Both keys at once is refused."""
+        if isinstance(data, dict) and "tyres" in data:
+            data = dict(data)
+            value = data.pop("tyres")
+            if "tires" in data:
+                raise ValueError("event gives both tyres (the old spelling) and tires")
+            data["tires"] = value
+        return data
 
     def to_dict(self) -> dict[str, Any]:
         return self.model_dump(mode="json")
@@ -139,7 +152,7 @@ class VehicleEvent(BaseModel):
 
 
 #: One lock per ledger file, shared by every store instance on it: the route
-#: handlers, the DTC auto-append and the tyre trend each build their own store.
+#: handlers, the DTC auto-append and the tire trend each build their own store.
 _LOCKS: dict[Path, threading.Lock] = {}
 _LOCKS_GUARD = threading.Lock()
 
@@ -216,7 +229,7 @@ class VehicleLedgerStore(JsonlStore[VehicleEvent]):
         affected_channels: list[str] | None = None,
         corpus_boundary: bool = False,
         event_id: str | None = None,
-        tyres: TyreRecord | None = None,
+        tires: TireRecord | None = None,
         intervention: PhysicalInterventionKind | None = None,
     ) -> VehicleEvent:
         """Build and store a :class:`VehicleEvent`: appended when new, or in
@@ -229,7 +242,7 @@ class VehicleLedgerStore(JsonlStore[VehicleEvent]):
             "odometer_km": odometer_km,
             "affected_channels": affected_channels or [],
             "corpus_boundary": corpus_boundary,
-            "tyres": tyres,
+            "tires": tires,
             "intervention": intervention,
         }
         if event_id is not None:

@@ -188,7 +188,7 @@ def test_a_sentinel_word_never_becomes_a_live_feature_value(config: CanaryConfig
             "schema_version": 1,
             "signals": [
                 {
-                    "name": "TYRE_A",
+                    "name": "TIRE_A",
                     "module": "TEST",
                     "can_id": 0x385,
                     "byte_start": 2,
@@ -204,7 +204,7 @@ def test_a_sentinel_word_never_becomes_a_live_feature_value(config: CanaryConfig
     now = datetime(2026, 5, 13, 12, 0, tzinfo=UTC)
     asleep = TelemetryRecord.can(now.timestamp(), 0x385, bytes(8))
     assert [(r.channel, r.value) for r in src.decode_for_telemetry(asleep)] == [
-        ("TYRE_A_SENTINEL", "wheel sensor not transmitting")
+        ("TIRE_A_SENTINEL", "wheel sensor not transmitting")
     ]
     src.observe(asleep)
     assert src.tick(now) is None  # nothing numeric arrived
@@ -212,8 +212,8 @@ def test_a_sentinel_word_never_becomes_a_live_feature_value(config: CanaryConfig
     src.observe(TelemetryRecord.can(later.timestamp(), 0x385, bytes([0, 0, 148, 0, 0, 0, 0, 0])))
     row = src.tick(later)
     assert row is not None
-    assert row["decoded:TYRE_A"].iloc[0] == 148.0
-    assert "decoded:TYRE_A_SENTINEL" not in row.columns
+    assert row["decoded:TIRE_A"].iloc[0] == 148.0
+    assert "decoded:TIRE_A_SENTINEL" not in row.columns
 
 
 # ---------------------------------------------------------------------------

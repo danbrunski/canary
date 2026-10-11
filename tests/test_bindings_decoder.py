@@ -519,9 +519,9 @@ def test_collect_stats_implausible_skipped_when_no_scaling(tmp_path: Path):
 # ---------------------------------------------------------------------------
 
 
-def _tyre(**extra: object) -> dict[str, object]:
+def _tire(**extra: object) -> dict[str, object]:
     return {
-        "name": "TYRE_A",
+        "name": "TIRE_A",
         "module": "BCM",
         "can_id": 0x385,
         "byte_start": 2,
@@ -549,7 +549,7 @@ def test_a_half_declared_or_impossible_sentinel_is_refused(extra: dict[str, obje
     from src.decode.bindings import Signal
 
     with pytest.raises(ValidationError, match="sentinel"):
-        Signal.model_validate(_tyre(**extra))
+        Signal.model_validate(_tire(**extra))
 
 
 def test_a_sentinel_scales_to_nothing_everywhere() -> None:
@@ -558,11 +558,11 @@ def test_a_sentinel_scales_to_nothing_everywhere() -> None:
     from src.decode.bindings import Bindings, Signal, apply_scaling
     from src.decode.engineering import physical_series, physical_value
 
-    signal = Signal.model_validate(_tyre(sentinel_raw=0, sentinel_meaning="asleep"))
+    signal = Signal.model_validate(_tire(sentinel_raw=0, sentinel_meaning="asleep"))
     catalog = Bindings(schema_version=1, signals=[signal])
     assert apply_scaling(signal, 0) is None
     assert apply_scaling(signal, 148) == 37.0
-    assert physical_value(0.0, "decoded:TYRE_A", catalog) is None
-    assert physical_value(148.0, "decoded:TYRE_A", catalog) == 37.0
-    series = physical_series(pd.Series([0.0, 148.0]), "decoded:TYRE_A", catalog)
+    assert physical_value(0.0, "decoded:TIRE_A", catalog) is None
+    assert physical_value(148.0, "decoded:TIRE_A", catalog) == 37.0
+    series = physical_series(pd.Series([0.0, 148.0]), "decoded:TIRE_A", catalog)
     assert series.isna().tolist() == [True, False] and series.iloc[1] == 37.0

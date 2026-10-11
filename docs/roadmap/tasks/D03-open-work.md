@@ -2263,9 +2263,9 @@ live here now, so the documents could be archived
     - A throttle cross-check (commanded vs actual, pedal D vs E) was the one
       reason to keep the dropped throttle PIDs, and it was not built.
 
-- [~] **D03.35 Tyre wear from GPS: rolling circumference trended into tread
+- [~] **D03.35 Tire wear from GPS: rolling circumference trended into tread
   depth.** *Operator request, 2026-10-03.* H07.11 showed that a drive's steady
-  cruise fixes the driven tyres' rolling circumference: same-instant rpm /
+  cruise fixes the driven tires' rolling circumference: same-instant rpm /
   GPS speed through the gearbox and final drive.
   **Reliability, measured first** (18 September drives, so no wear between
   them):
@@ -2275,7 +2275,7 @@ live here now, so the documents could be archived
   - so one drive resolves ~±0.6 mm of tread, and a month of drives
     ~±0.15 mm. Tread wears ~1 mm per 5,000–10,000 km.
 
-  It is a trend, not an absolute depth: a tyre model is good to ~±1 %, about
+  It is a trend, not an absolute depth: a tire model is good to ~±1 %, about
   ±4 mm. Absolute depth needs one gauge reading as the baseline.
   *Built 2026-10-03:*
   - **Measurement.** `src/analysis/rolling_circumference.py` takes the
@@ -2286,7 +2286,7 @@ live here now, so the documents could be archived
     - The rpm sources come from the vehicle's `dyno.yaml`
       `motion_sources.rpm`, else Mode 01. Nothing names a vehicle.
     - The prior only picks the gear: wear moves C far less than the 5 %
-      tolerance, and a tyre of another size is refused.
+      tolerance, and a tire of another size is refused.
     - Reproduces the analysis on `2026-09-18T213818` (2.55465 m) and
       `2026-09-20T211925` (2.55779 m).
   - **Each drive's own sidecar**, `rolling_circumference.json` (2026-10-04;
@@ -2301,11 +2301,11 @@ live here now, so the documents could be archived
       the two reference drives among them, and ~40 more of ≥10 MB with no
       digest at all (pre-D03.6), the long highway drives the trend needs.
       The 37 sessions of ≤1 MB were the Pi on with the engine off (operator).
-  - **Ledger.** `VehicleEvent.tyres: TyreRecord` with `action` ∈
+  - **Ledger.** `VehicleEvent.tires: TireRecord` with `action` ∈
     {`tread_measured` (requires `tread_depth_mm`), `rotated`, `replaced`,
     `pressure_changed`}. Carried on `POST /control/vehicle-ledger` and the
-    MCP `record_vehicle_event` (`tyres=`).
-  - **Trend.** `src/control/tyres.py`, served at `GET /control/tyres`, reads
+    MCP `record_vehicle_event` (`tires=`).
+  - **Trend.** `src/control/tires.py`, served at `GET /control/tires`, reads
     the digests and the ledger only. Rules:
     - a rotation or replacement starts a new series;
     - the gauge reading is tied to the ≤5 measured drives nearest it within
@@ -2313,12 +2313,12 @@ live here now, so the documents could be archived
     - estimated depth = gauge − (C_baseline − C_now) / 2π, with an
       uncertainty from the drives' own scatter;
     - a pressure change since the baseline is named.
-  - **Dashboard.** Diagnose ▸ **Tyres** (was TPMS): a "Tread wear" card
+  - **Dashboard.** Diagnose ▸ **Tires** (was TPMS): a "Tread wear" card
     under the TPMS stub shows estimated depth ± uncertainty, worn since the
     gauge, rolling circumference ± and drives, a sparkline, the caveats, and
     a form to record a gauge reading, pressure, rotation or replacement.
-  - **Tests.** `tests/test_tyre_wear.py` (9: recovery from a synthetic
-    drive, refusals, `TyreRecord` validation, no baseline, a fixed estimate
+  - **Tests.** `tests/test_tire_wear.py` (9: recovery from a synthetic
+    drive, refusals, `TireRecord` validation, no baseline, a fixed estimate
     of 1.5 mm worn, a rotation restarting the series, a pressure caveat, the
     route) and `TreadWearCard.test.ts` (4). The route-table, MCP-tool and
     script-CLI snapshots are updated.
@@ -2342,7 +2342,7 @@ live here now, so the documents could be archived
   each drive carries its own SE.
 
   **Remaining (operator):**
-  - one gauge reading on the driven (rear) tyres, recorded from the card,
+  - one gauge reading on the driven (rear) tires, recorded from the card,
     to turn the trend into depth;
 
 - [~] **D03.36 Correct the CAN Mode 22 catalog from the firmware's DID tables

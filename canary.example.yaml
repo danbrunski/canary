@@ -22,7 +22,7 @@ vehicle:
     # separate facts, and evidence for them; rpm per km/h is computed.
     # final_drive: 4.08
     # gearbox_ratios: [...]          # one unitless ratio per forward gear, 1st first
-    # tyre_loaded_circumference_m: 2.609
+    # tire_loaded_circumference_m: 2.609
     # driveline_evidence: "how each was measured"
 
 hardware:

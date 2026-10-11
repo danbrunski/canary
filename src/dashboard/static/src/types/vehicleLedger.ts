@@ -1,4 +1,4 @@
-import type { TyreAction } from "./tyres";
+import type { TireAction } from "./tires";
 
 /** One vehicle ledger entry (`src/vehicle/vehicle_ledger.py` `VehicleEvent`). */
 export type VehicleEventKind = "maintenance" | "mod" | "repair" | "observation" | "dtc";
@@ -6,8 +6,8 @@ export type VehicleEventKind = "maintenance" | "mod" | "repair" | "observation" 
 /** What kind of intervention a physical event is (E01.4); `null`: unclassified. */
 export type PhysicalInterventionKind = "hardware" | "fuel" | "instrumentation";
 
-export interface VehicleLedgerTyres {
-  action: TyreAction;
+export interface VehicleLedgerTires {
+  action: TireAction;
   tread_depth_mm: number | null;
   pressure_psi: number | null;
 }
@@ -22,7 +22,7 @@ export interface VehicleLedgerEvent {
   details: string;
   affected_channels: string[];
   corpus_boundary: boolean;
-  tyres: VehicleLedgerTyres | null;
+  tires: VehicleLedgerTires | null;
   intervention?: PhysicalInterventionKind | null;
 }
 
@@ -36,7 +36,7 @@ export interface VehicleLedgerDraft {
   odometer_km: number | null;
   affected_channels: string[];
   corpus_boundary: boolean;
-  tyres: VehicleLedgerTyres | null;
+  tires: VehicleLedgerTires | null;
   /** Carried through an edit so re-saving never drops the classification. */
   intervention?: PhysicalInterventionKind | null;
 }

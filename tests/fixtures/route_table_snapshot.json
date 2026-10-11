@@ -1340,7 +1340,7 @@
       "auth": "control",
       "body": false,
       "method": "GET",
-      "path": "/control/tyres",
+      "path": "/control/tires",
       "query": [],
       "status_code": null
     },

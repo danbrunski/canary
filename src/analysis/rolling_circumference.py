@@ -1,7 +1,7 @@
-"""The driven tyres' rolling circumference, measured from one drive (tyre wear).
+"""The driven tires' rolling circumference, measured from one drive (tire wear).
 
 Engine speed and GPS ground speed on steady cruise fix the distance the driven
-tyres roll per revolution, given the gearbox and final-drive ratios:
+tires roll per revolution, given the gearbox and final-drive ratios:
 
     C = v / (rpm / (gear · final_drive))
 
@@ -16,9 +16,9 @@ Measured on the Xterra (H07.11, D03.35): one drive's median has a standard
 error of 0.03-0.10 %, but drives scatter from one another by more: 0.15 % (σ)
 over 18 September drives on the laptop, 0.43 % over the 9 drives the Pi first
 measured (2026-10-04). One millimetre of tread is 2π mm of circumference, 0.25 %
-on a 2.56 m tyre, so one drive resolves wear to about ±0.6-1.7 mm, and the
+on a 2.56 m tire, so one drive resolves wear to about ±0.6-1.7 mm, and the
 trend is read from many. Absolute tread depth needs a gauge reading as the
-baseline (:mod:`src.control.tyres`); this module measures circumference only.
+baseline (:mod:`src.control.tires`); this module measures circumference only.
 
 Each drive's result is its own sidecar, ``rolling_circumference.json``: the
 digest writes it, trip end measures it alone when the digest is refused, and
@@ -58,11 +58,11 @@ GEAR_TOLERANCE = 0.05
 #: Fewer steady pairs than this and the drive gives no value, by name.
 MIN_PAIRS = 50
 #: Gear-choice prior when the profile has no circumference: a typical road
-#: tyre. Only picks the gear, never enters the measurement.
+#: tire. Only picks the gear, never enters the measurement.
 DEFAULT_PRIOR_M = 2.6
 
 #: Bumped when the method changes, so values from different methods are never
-#: trended together (:mod:`src.control.tyres` groups by it).
+#: trended together (:mod:`src.control.tires` groups by it).
 METHOD_VERSION = 1
 
 
@@ -108,14 +108,14 @@ def measure_rolling_circumference(
     final_drive: float,
     prior_m: float | None = None,
 ) -> RollingCircumference:
-    """The driven tyres' rolling circumference over ``session_dir``'s steady cruise.
+    """The driven tires' rolling circumference over ``session_dir``'s steady cruise.
 
     ``rpm_channels`` are tried in order (the vehicle's ``dyno.yaml``
     ``motion_sources.rpm``, best first); the first that pairs with GPS speed
     is used. ``prior_m`` (the profile's circumference, else
     :data:`DEFAULT_PRIOR_M`) only chooses each pair's gear: wear moves the
     circumference by well under :data:`GEAR_TOLERANCE`, so the prior's own
-    error does not reach the result. A tyre of a different size from the prior
+    error does not reach the result. A tire of a different size from the prior
     by more than that matches no gear and is refused by name. Never raises for
     missing data: an absent GPS, no steady cruise or too few pairs is returned
     with its ``reason``.
@@ -214,7 +214,7 @@ def measure_session(session_dir: Path, config: CanaryConfig) -> dict[str, Any]:
             rpm_channels=rpm_channels,
             gearbox_ratios=tuple(params.gearbox_ratios),
             final_drive=params.final_drive or 0.0,
-            prior_m=params.tyre_loaded_circumference_m,
+            prior_m=params.tire_loaded_circumference_m,
         ).to_dict()
     except MemoryError:
         raise

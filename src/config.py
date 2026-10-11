@@ -91,7 +91,7 @@ class VehicleParameters(_Strict):
     #: full are *test conditions*, not vehicle facts: the dyno records them
     #: per run (H07).
     mass_evidence: str | None = None
-    #: Mass of one road wheel with its tyre, kg: rotating mass, which the
+    #: Mass of one road wheel with its tire, kg: rotating mass, which the
     #: dyno's inertia term needs separately from the total (H07.6).
     wheel_tire_assembly_kg: float | None = Field(default=None, gt=0.0)
     #: The operator's usual load — driver and cargo — in kg. A default for a
@@ -123,8 +123,8 @@ class VehicleParameters(_Strict):
     #: first). All of them or none: a gear estimate against a partial table
     #: would name the wrong gear whenever the driver is in a missing one.
     gearbox_ratios: tuple[float, ...] = ()
-    #: Loaded rolling circumference of the driven tyres, metres.
-    tyre_loaded_circumference_m: float | None = Field(default=None, gt=0.0)
+    #: Loaded rolling circumference of the driven tires, metres.
+    tire_loaded_circumference_m: float | None = Field(default=None, gt=0.0)
     #: Where the driveline numbers come from. Required once any is set.
     driveline_evidence: str | None = None
 
@@ -137,13 +137,34 @@ class VehicleParameters(_Strict):
                 raise ValueError(
                     "vehicle parameter gear_ratios is retired (it mixed up gearbox x final "
                     "drive with rpm per km/h): use final_drive, gearbox_ratios (one "
-                    "unitless ratio per gear) and tyre_loaded_circumference_m"
+                    "unitless ratio per gear) and tire_loaded_circumference_m"
                 )
+        return data
+
+    @model_validator(mode="before")
+    @classmethod
+    def _british_tire_key(cls, data: Any) -> Any:
+        """Read the pre-2026-10-11 spelling ``tyre_loaded_circumference_m``.
+
+        Registries, machine overlays and every session manifest written before
+        the US-English rename carry it; they load as the new field. Both at
+        once is refused: one would silently win.
+        """
+        old = "tyre_loaded_circumference_m"
+        if isinstance(data, dict) and old in data:
+            data = dict(data)
+            value = data.pop(old)
+            if "tire_loaded_circumference_m" in data:
+                raise ValueError(
+                    f"vehicle parameters give both {old} (the old spelling) and "
+                    "tire_loaded_circumference_m; keep tire_loaded_circumference_m"
+                )
+            data["tire_loaded_circumference_m"] = value
         return data
 
     @model_validator(mode="after")
     def _driveline_has_evidence(self) -> VehicleParameters:
-        driveline = (self.final_drive, self.gearbox_ratios, self.tyre_loaded_circumference_m)
+        driveline = (self.final_drive, self.gearbox_ratios, self.tire_loaded_circumference_m)
         if any(driveline) and not self.driveline_evidence:
             raise ValueError(
                 "driveline facts need driveline_evidence saying how they were measured"
@@ -154,10 +175,10 @@ class VehicleParameters(_Strict):
 
     def rpm_per_kph(self) -> tuple[float, ...]:
         """Engine rpm per km/h of true road speed in each gear, or ``()``
-        unless the gearbox, final drive and tyre are all known."""
-        if not (self.gearbox_ratios and self.final_drive and self.tyre_loaded_circumference_m):
+        unless the gearbox, final drive and tire are all known."""
+        if not (self.gearbox_ratios and self.final_drive and self.tire_loaded_circumference_m):
             return ()
-        wheel_rpm_per_kph = 1000.0 / 60.0 / self.tyre_loaded_circumference_m
+        wheel_rpm_per_kph = 1000.0 / 60.0 / self.tire_loaded_circumference_m
         return tuple(g * self.final_drive * wheel_rpm_per_kph for g in self.gearbox_ratios)
 
 

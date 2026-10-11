@@ -16,7 +16,7 @@ import type {
   VehicleEventKind,
   VehicleLedgerDraft,
   VehicleLedgerEvent,
-  VehicleLedgerTyres,
+  VehicleLedgerTires,
 } from "../types";
 
 const KINDS: VehicleEventKind[] = ["maintenance", "mod", "repair", "observation", "dtc"];
@@ -35,8 +35,8 @@ export interface LedgerForm {
   odometerKm: string;
   affectedChannels: string;
   corpusBoundary: boolean;
-  tyres: VehicleLedgerTyres | null;
-  tyreValue: string;
+  tires: VehicleLedgerTires | null;
+  tireValue: string;
   /** E01.4 classification, carried through an edit (no form control yet). */
   intervention?: PhysicalInterventionKind | null;
 }
@@ -50,18 +50,18 @@ export function emptyForm(today: string): LedgerForm {
     odometerKm: "",
     affectedChannels: "",
     corpusBoundary: false,
-    tyres: null,
-    tyreValue: "",
+    tires: null,
+    tireValue: "",
   };
 }
 
 export function formFromEvent(event: VehicleLedgerEvent): LedgerForm {
-  const tyres = event.tyres;
-  const tyreValue =
-    tyres?.action === "tread_measured"
-      ? String(tyres.tread_depth_mm ?? "")
-      : tyres?.action === "pressure_changed"
-        ? String(tyres.pressure_psi ?? "")
+  const tires = event.tires;
+  const tireValue =
+    tires?.action === "tread_measured"
+      ? String(tires.tread_depth_mm ?? "")
+      : tires?.action === "pressure_changed"
+        ? String(tires.pressure_psi ?? "")
         : "";
   return {
     eventId: event.id,
@@ -72,8 +72,8 @@ export function formFromEvent(event: VehicleLedgerEvent): LedgerForm {
     odometerKm: event.odometer_km === null ? "" : String(event.odometer_km),
     affectedChannels: event.affected_channels.join(", "),
     corpusBoundary: event.corpus_boundary,
-    tyres,
-    tyreValue,
+    tires,
+    tireValue,
     intervention: event.intervention ?? null,
   };
 }
@@ -84,18 +84,18 @@ export function draftFromForm(form: LedgerForm): VehicleLedgerDraft | string {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(form.occurredAt)) return "the date must be YYYY-MM-DD";
   const odometer = form.odometerKm.trim() === "" ? null : Number(form.odometerKm);
   if (odometer !== null && !(odometer >= 0)) return "the odometer must be a number";
-  let tyres = form.tyres;
-  if (tyres && (tyres.action === "tread_measured" || tyres.action === "pressure_changed")) {
-    const value = Number(form.tyreValue);
+  let tires = form.tires;
+  if (tires && (tires.action === "tread_measured" || tires.action === "pressure_changed")) {
+    const value = Number(form.tireValue);
     if (!(value > 0)) {
-      return tyres.action === "tread_measured"
+      return tires.action === "tread_measured"
         ? "the tread depth must be a number of mm"
         : "the pressure must be a number of psi";
     }
-    tyres =
-      tyres.action === "tread_measured"
-        ? { ...tyres, tread_depth_mm: value }
-        : { ...tyres, pressure_psi: value };
+    tires =
+      tires.action === "tread_measured"
+        ? { ...tires, tread_depth_mm: value }
+        : { ...tires, pressure_psi: value };
   }
   return {
     ...(form.eventId ? { event_id: form.eventId } : {}),
@@ -109,23 +109,23 @@ export function draftFromForm(form: LedgerForm): VehicleLedgerDraft | string {
       .map((c) => c.trim())
       .filter(Boolean),
     corpus_boundary: form.corpusBoundary,
-    tyres,
+    tires,
     ...(form.intervention ? { intervention: form.intervention } : {}),
   };
 }
 
-/** A tyre fact in words, for the list. */
-export function tyreFact(tyres: VehicleLedgerTyres | null): string | null {
-  if (!tyres) return null;
-  switch (tyres.action) {
+/** A tire fact in words, for the list. */
+export function tireFact(tires: VehicleLedgerTires | null): string | null {
+  if (!tires) return null;
+  switch (tires.action) {
     case "tread_measured":
-      return `tread ${tyres.tread_depth_mm} mm`;
+      return `tread ${tires.tread_depth_mm} mm`;
     case "pressure_changed":
-      return `pressure ${tyres.pressure_psi} psi`;
+      return `pressure ${tires.pressure_psi} psi`;
     case "rotated":
-      return "tyres rotated";
+      return "tires rotated";
     case "replaced":
-      return "tyres replaced";
+      return "tires replaced";
   }
 }
 
@@ -236,10 +236,10 @@ export function VehicleLedgerPage({ token }: VehicleLedgerPageProps) {
                     <span className="text-[0.72rem] text-fg-faint"> · corpus boundary</span>
                   )}
                 </div>
-                {(event.details || event.tyres || event.odometer_km !== null) && (
+                {(event.details || event.tires || event.odometer_km !== null) && (
                   <div className="text-[0.8rem] text-fg-dim">
                     {[
-                      tyreFact(event.tyres),
+                      tireFact(event.tires),
                       event.odometer_km !== null ? `${event.odometer_km} km` : null,
                       event.details || null,
                     ]
@@ -284,10 +284,10 @@ interface LedgerFormViewProps {
 
 function LedgerFormView({ form, busy, onChange, onSave, onCancel }: LedgerFormViewProps) {
   const set = (patch: Partial<LedgerForm>) => onChange({ ...form, ...patch });
-  const tyreLabel =
-    form.tyres?.action === "tread_measured"
+  const tireLabel =
+    form.tires?.action === "tread_measured"
       ? "tread depth (mm)"
-      : form.tyres?.action === "pressure_changed"
+      : form.tires?.action === "pressure_changed"
         ? "pressure (psi)"
         : null;
   return (
@@ -320,14 +320,14 @@ function LedgerFormView({ form, busy, onChange, onSave, onCancel }: LedgerFormVi
           value={form.odometerKm}
           onChange={(e) => set({ odometerKm: e.target.value })}
         />
-        {tyreLabel && (
+        {tireLabel && (
           <input
-            aria-label={tyreLabel}
-            placeholder={tyreLabel}
+            aria-label={tireLabel}
+            placeholder={tireLabel}
             inputMode="decimal"
             className={cn(inputClass, "w-36")}
-            value={form.tyreValue}
-            onChange={(e) => set({ tyreValue: e.target.value })}
+            value={form.tireValue}
+            onChange={(e) => set({ tireValue: e.target.value })}
           />
         )}
       </div>

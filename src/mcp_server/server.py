@@ -744,7 +744,7 @@ def _register_write_tools(
         affected_channels: list[str] | None = None,
         corpus_boundary: bool = False,
         event_id: str | None = None,
-        tyres: dict[str, Any] | None = None,
+        tires: dict[str, Any] | None = None,
         intervention: str | None = None,
     ) -> dict[str, Any]:
         """Log a maintenance/mod/repair/observation to the vehicle ledger (3.3).
@@ -759,7 +759,7 @@ def _register_write_tools(
         Re-state the whole event, not just the changed field. Removing an
         entry outright is ``DELETE /control/vehicle-ledger/{id}``.
 
-        ``tyres`` records a tyre fact the tyre-wear trend reads:
+        ``tires`` records a tire fact the tire-wear trend reads:
         ``{"action": "tread_measured", "tread_depth_mm": 9.5}`` (a gauge
         reading on the driven axle, the baseline for estimated tread depth),
         or ``{"action": "rotated" | "replaced" | "pressure_changed"}``.
@@ -799,7 +799,7 @@ def _register_write_tools(
             affected_channels=affected_channels,
             corpus_boundary=corpus_boundary,
             event_id=event_id,
-            tyres=tyres,
+            tires=tires,
             intervention=narrowed_intervention,
         )
 

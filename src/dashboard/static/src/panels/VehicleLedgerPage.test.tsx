@@ -10,7 +10,7 @@ vi.mock("../api/http", () => ({
 }));
 
 const api = await import("../api/http");
-const { VehicleLedgerPage, draftFromForm, emptyForm, formFromEvent, tyreFact } =
+const { VehicleLedgerPage, draftFromForm, emptyForm, formFromEvent, tireFact } =
   await import("./VehicleLedgerPage");
 
 const gauge: VehicleLedgerEvent = {
@@ -23,25 +23,25 @@ const gauge: VehicleLedgerEvent = {
   details: "",
   affected_channels: [],
   corpus_boundary: false,
-  tyres: { action: "tread_measured", tread_depth_mm: 15.04, pressure_psi: null },
+  tires: { action: "tread_measured", tread_depth_mm: 15.04, pressure_psi: null },
 };
 
 afterEach(() => vi.clearAllMocks());
 
 describe("ledger form", () => {
   it("edits a gauge reading's depth and keeps its id, so the save replaces it", () => {
-    const form = { ...formFromEvent(gauge), tyreValue: "12.07", title: "Tread: 12.1 mm" };
+    const form = { ...formFromEvent(gauge), tireValue: "12.07", title: "Tread: 12.1 mm" };
     const draft = draftFromForm(form);
     expect(draft).toMatchObject({
       event_id: "a4078578",
       title: "Tread: 12.1 mm",
-      tyres: { action: "tread_measured", tread_depth_mm: 12.07 },
+      tires: { action: "tread_measured", tread_depth_mm: 12.07 },
     });
   });
 
   it("refuses what the server would reject, by name", () => {
     expect(draftFromForm(emptyForm("2026-10-04"))).toBe("a title is required");
-    expect(draftFromForm({ ...formFromEvent(gauge), tyreValue: "abc" })).toBe(
+    expect(draftFromForm({ ...formFromEvent(gauge), tireValue: "abc" })).toBe(
       "the tread depth must be a number of mm",
     );
     expect(draftFromForm({ ...formFromEvent(gauge), odometerKm: "-3" })).toBe(
@@ -61,14 +61,14 @@ describe("ledger form", () => {
   });
 
   it("an edit keeps the event's intervention classification (E01.4)", () => {
-    const pump: VehicleLedgerEvent = { ...gauge, kind: "mod", tyres: null, intervention: "fuel" };
+    const pump: VehicleLedgerEvent = { ...gauge, kind: "mod", tires: null, intervention: "fuel" };
     expect(draftFromForm(formFromEvent(pump))).toMatchObject({ intervention: "fuel" });
     expect(draftFromForm(formFromEvent(gauge))).not.toHaveProperty("intervention");
   });
 
-  it("names tyre facts", () => {
-    expect(tyreFact(gauge.tyres)).toBe("tread 15.04 mm");
-    expect(tyreFact(null)).toBeNull();
+  it("names tire facts", () => {
+    expect(tireFact(gauge.tires)).toBe("tread 15.04 mm");
+    expect(tireFact(null)).toBeNull();
   });
 });
 
@@ -89,7 +89,7 @@ describe("VehicleLedgerPage", () => {
     await waitFor(() => expect(api.saveVehicleEvent).toHaveBeenCalledTimes(1));
     expect(vi.mocked(api.saveVehicleEvent).mock.calls[0][1]).toMatchObject({
       event_id: gauge.id,
-      tyres: { tread_depth_mm: 12.07 },
+      tires: { tread_depth_mm: 12.07 },
     });
 
     await screen.findByRole("button", { name: "Delete" });

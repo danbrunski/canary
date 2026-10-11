@@ -1,4 +1,4 @@
-"""Tyre wear from GPS: the per-drive rolling circumference and its trend."""
+"""Tire wear from GPS: the per-drive rolling circumference and its trend."""
 
 from __future__ import annotations
 
@@ -16,10 +16,10 @@ from src.analysis.rolling_circumference import (
     MIN_PAIRS,
     measure_rolling_circumference,
 )
-from src.control.tyres import tyre_status
+from src.control.tires import tire_status
 from src.storage.parquet_writer import write_records_to_parquet
 from src.telemetry import TelemetryRecord
-from src.vehicle.vehicle_ledger import TyreRecord, VehicleLedgerStore
+from src.vehicle.vehicle_ledger import TireRecord, VehicleLedgerStore
 
 GEARS = (4.368, 2.518, 1.743, 1.283, 1.0, 0.769)
 FD = 4.08
@@ -58,7 +58,7 @@ def _measure(session: Path, **kwargs: float) -> dict:  # type: ignore[type-arg]
     ).to_dict()
 
 
-def test_a_drive_gives_its_tyres_rolling_circumference(tmp_path: Path) -> None:
+def test_a_drive_gives_its_tires_rolling_circumference(tmp_path: Path) -> None:
     result = _measure(_drive(tmp_path, "2026-10-01T120000", circumference=2.559), prior_m=2.6)
     assert result["available"] is True
     assert result["median_m"] == pytest.approx(2.559, rel=1e-4)
@@ -76,8 +76,8 @@ def test_too_little_steady_cruise_is_refused_by_name(tmp_path: Path) -> None:
     assert result["reason"] == "too_few_steady_pairs"
 
 
-def test_a_tyre_far_from_the_prior_matches_no_gear(tmp_path: Path) -> None:
-    """A different tyre size is refused, never fitted to the wrong gear."""
+def test_a_tire_far_from_the_prior_matches_no_gear(tmp_path: Path) -> None:
+    """A different tire size is refused, never fitted to the wrong gear."""
     result = _measure(_drive(tmp_path, "2026-10-01T120000", circumference=2.2), prior_m=2.559)
     assert result["available"] is False
     assert "within 5% of a gear at 2.559 m" in result["detail"]
@@ -85,8 +85,8 @@ def test_a_tyre_far_from_the_prior_matches_no_gear(tmp_path: Path) -> None:
 
 def test_a_gauge_reading_needs_a_depth() -> None:
     with pytest.raises(ValidationError, match="tread_depth_mm"):
-        TyreRecord(action="tread_measured")
-    assert TyreRecord(action="rotated").tread_depth_mm is None
+        TireRecord(action="tread_measured")
+    assert TireRecord(action="rotated").tread_depth_mm is None
 
 
 def _measured(storage: Path, session: str, circumference: float) -> None:
@@ -114,7 +114,7 @@ def test_without_a_gauge_reading_there_is_a_circumference_and_no_depth(tmp_path:
     storage = tmp_path / "sessions"
     for day in range(1, 6):
         _measured(storage, f"2026-10-0{day}T120000", 2.559)
-    status = tyre_status(storage, _ledger(tmp_path))
+    status = tire_status(storage, _ledger(tmp_path))
     assert status["current"]["circumference_m"] == pytest.approx(2.559)
     assert status["estimate"] is None
     assert "no gauge reading" in status["caveats"][0]
@@ -122,7 +122,7 @@ def test_without_a_gauge_reading_there_is_a_circumference_and_no_depth(tmp_path:
 
 def test_a_gauge_reading_turns_circumference_into_tread_depth(tmp_path: Path) -> None:
     storage = tmp_path / "sessions"
-    # Five drives around the 10 mm gauge reading, then the tyre loses 1.5 mm.
+    # Five drives around the 10 mm gauge reading, then the tire loses 1.5 mm.
     for day in range(1, 6):
         _measured(storage, f"2026-10-0{day}T120000", 2.559)
     for day in range(10, 20):
@@ -132,9 +132,9 @@ def test_a_gauge_reading_turns_circumference_into_tread_depth(tmp_path: Path) ->
         occurred_at=date(2026, 10, 3),
         kind="maintenance",
         title="tread gauge",
-        tyres=TyreRecord(action="tread_measured", tread_depth_mm=10.0),
+        tires=TireRecord(action="tread_measured", tread_depth_mm=10.0),
     )
-    status = tyre_status(storage, ledger)
+    status = tire_status(storage, ledger)
     assert status["baseline"]["status"] == "fixed"
     assert status["estimate"]["worn_since_baseline_mm"] == pytest.approx(1.5, abs=0.01)
     assert status["estimate"]["tread_depth_mm"] == pytest.approx(8.5, abs=0.01)
@@ -156,9 +156,9 @@ def test_before_any_drive_since_the_reading_the_estimate_is_the_reading(
         occurred_at=date(2026, 9, 20),
         kind="maintenance",
         title="gauge",
-        tyres=TyreRecord(action="tread_measured", tread_depth_mm=12.0),
+        tires=TireRecord(action="tread_measured", tread_depth_mm=12.0),
     )
-    status = tyre_status(storage, ledger)
+    status = tire_status(storage, ledger)
     assert status["baseline"]["status"] == "fixed"
     assert status["estimate"]["tread_depth_mm"] == 12.0
     assert status["estimate"]["worn_since_baseline_mm"] == 0.0
@@ -175,15 +175,15 @@ def test_a_rotation_restarts_the_series_and_retires_the_old_reading(tmp_path: Pa
         occurred_at=date(2026, 10, 1),
         kind="maintenance",
         title="gauge",
-        tyres=TyreRecord(action="tread_measured", tread_depth_mm=10.0),
+        tires=TireRecord(action="tread_measured", tread_depth_mm=10.0),
     )
     ledger.record(
         occurred_at=date(2026, 10, 10),
         kind="maintenance",
         title="rotation",
-        tyres=TyreRecord(action="rotated"),
+        tires=TireRecord(action="rotated"),
     )
-    status = tyre_status(storage, ledger)
+    status = tire_status(storage, ledger)
     assert status["series_start"] == "2026-10-10"
     assert [d["session"] for d in status["drives"]] == ["2026-10-12T120000"]
     assert status["estimate"] is None
@@ -198,20 +198,20 @@ def test_a_pressure_change_since_the_baseline_is_named(tmp_path: Path) -> None:
         occurred_at=date(2026, 10, 2),
         kind="maintenance",
         title="gauge",
-        tyres=TyreRecord(action="tread_measured", tread_depth_mm=10.0),
+        tires=TireRecord(action="tread_measured", tread_depth_mm=10.0),
     )
     ledger.record(
         occurred_at=date(2026, 10, 5),
         kind="maintenance",
         title="aired up",
-        tyres=TyreRecord(action="pressure_changed", pressure_psi=40.0),
+        tires=TireRecord(action="pressure_changed", pressure_psi=40.0),
     )
-    status = tyre_status(storage, ledger)
+    status = tire_status(storage, ledger)
     assert status["estimate"] is not None
     assert any("pressure changed" in c for c in status["caveats"])
 
 
-def test_the_tyres_route_serves_the_trend(tmp_path: Path) -> None:
+def test_the_tires_route_serves_the_trend(tmp_path: Path) -> None:
     from src.dashboard.api import create_app
     from tests.configs import isolated_config
 
@@ -224,7 +224,7 @@ def test_the_tyres_route_serves_the_trend(tmp_path: Path) -> None:
         control_token="secret",
         vehicle_ledger_store=_ledger(tmp_path),
     )
-    response = TestClient(app).get("/control/tyres", headers={"Authorization": "Bearer secret"})
+    response = TestClient(app).get("/control/tires", headers={"Authorization": "Bearer secret"})
     assert response.status_code == 200, response.text
     body = response.json()
     assert len(body["drives"]) == 3

@@ -1,6 +1,6 @@
 # Driving-dyno facts for the 2008 Nissan Xterra — H07.
 #
-# Loaded by src/analysis/dyno.py (strict schema). Mass, tyre and gear ratios
+# Loaded by src/analysis/dyno.py (strict schema). Mass, tire and gear ratios
 # are NOT here: they are vehicle parameters in profiles.yaml, with their own
 # evidence (H07.1, H07.10, H07.11). This file holds what the dyno adds:
 #
@@ -63,9 +63,9 @@ inertia:
   engine_side_kg_m2: 0.25
   evidence: >-
     ESTIMATES, 2026-09-26, none measured. Wheel side: four road wheels at the
-    profile's measured 40.3 kg per wheel and tyre (wheel_tire_assembly_kg) and
+    profile's measured 40.3 kg per wheel and tire (wheel_tire_assembly_kg) and
     the 2.559 m rolling circumference (r = 0.407 m; 2.609 m until 2026-10-03, H07.11), with a shape factor of 0.7
-    of m*r^2 (an LT tyre's mass sits near the rim; a solid disc is 0.5, a thin
+    of m*r^2 (an LT tire's mass sits near the rim; a solid disc is 0.5, a thin
     ring 1.0) -- about 19.4 kg m^2. driveline_output_kg_m2 (propshaft,
     differentials, axle shafts, hubs and rotors, referred to the wheels) is an
     order-of-magnitude figure, not a part weight. engine_side_kg_m2 (crank,

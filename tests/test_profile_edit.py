@@ -84,7 +84,7 @@ def _tracked_params(**overrides: Any) -> VehicleParameters:
         "usual_payload_kg": 127.0,
         "final_drive": 4.08,
         "gearbox_ratios": (4.368, 2.518, 1.743, 1.283, 1.0, 0.769),
-        "tyre_loaded_circumference_m": 2.559,
+        "tire_loaded_circumference_m": 2.559,
         "driveline_evidence": "published ratios; GPS cruise",
     }
     return VehicleParameters(**{**base, **overrides})
@@ -237,7 +237,7 @@ def test_reusing_the_old_evidence_text_is_not_new_evidence(tmp_path: Path, reuse
     [
         {"final_drive": 4.56},
         {"gearbox_ratios": [4.0, 2.5, 1.7, 1.3, 1.0, 0.8]},
-        {"tyre_loaded_circumference_m": 2.6},
+        {"tire_loaded_circumference_m": 2.6},
     ],
 )
 def test_changing_a_driveline_fact_needs_driveline_evidence(

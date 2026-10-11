@@ -71,7 +71,7 @@ def test_engine_response_conditions_on_inputs_and_scores_only_targets() -> None:
     # One source per quantity: the confirmed coolant mirrors drop for the PID.
     assert "mirror of obd:COOLANT_TEMP" in record["dropped"]["decoded:ECM_COOLANT_TEMP_233"]
     assert "restates obd:MAF" in record["dropped"]["derived:FUEL_RATE_LPH"]
-    assert "tyre pressure" in record["dropped"]["decoded:TPMS_FL_PRESSURE"]
+    assert "tire pressure" in record["dropped"]["decoded:TPMS_FL_PRESSURE"]
     assert record["unassigned"] == ["decoded:MOTION_SIGNAL_590_2"]
     assert context_columns_from_schema({FEATURE_SET_SCHEMA_KEY: record}) == tuple(
         resolved.context_columns

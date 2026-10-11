@@ -251,7 +251,7 @@ def _gear(inputs: DynoInputs, driveline: Driveline) -> int | DynoRefusal:
         inputs.rpm[moving]
         * 2.0
         * math.pi
-        * driveline.tyre_radius_m
+        * driveline.tire_radius_m
         / (60.0 * inputs.speed_mps[moving])
     )
     median = float(np.nanmedian(implied))

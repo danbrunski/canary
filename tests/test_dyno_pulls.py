@@ -25,7 +25,7 @@ from src.telemetry import TelemetryRecord
 
 T0 = 1_790_000_000.0
 DRIVELINE = Driveline(
-    tyre_radius_m=2.609 / (2 * math.pi),
+    tire_radius_m=2.609 / (2 * math.pi),
     final_drive=4.08,
     gearbox_ratios=(4.368, 2.518, 1.743, 1.283, 1.0, 0.769),
     wheel_side_kg_m2=5.0,
@@ -73,7 +73,7 @@ def _session(tmp_path: Path, pulls: list[tuple[float, float, bool]]) -> Path:
 def _inputs_in_gear(gear: int, *, motion: Any = None) -> Any:
     """A stand-in for one window's DynoInputs: rpm and speed consistent with ``gear``."""
     rpm = np.linspace(2000.0, 5000.0, 120)
-    speed = rpm * 2 * math.pi * DRIVELINE.tyre_radius_m / (60 * DRIVELINE.overall_ratio(gear))
+    speed = rpm * 2 * math.pi * DRIVELINE.tire_radius_m / (60 * DRIVELINE.overall_ratio(gear))
     samples = MotionSamples(
         t_s=np.arange(120) / 20.0,
         speed_mps=speed,

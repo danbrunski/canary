@@ -60,7 +60,7 @@ GPS_LAG_S = 1.5
 SPEED = "decoded:TEST_SPEED"
 RPM = "decoded:TEST_RPM"
 OVERALL_RATIO = 1.0 * 4.08  # 5th: keeps 0x1F9 counts in 16 bits
-TYRE_RADIUS = 2.609 / (2 * math.pi)
+TIRE_RADIUS = 2.609 / (2 * math.pi)
 
 SOURCES = MotionSources(
     speed=[SpeedSource(channel=SPEED, ratio_to_gps=RATIO, evidence="synthetic")],
@@ -109,7 +109,7 @@ def _channels(
     kmh = np.round(v(t_can) * RATIO * 3.6, 1)
     gps = v(t_gps - GPS_LAG_S) * 3.6 + rng.normal(0.0, 0.1, len(t_gps))
     sf = a(t_imu) + G * np.sin(np.arctan(_grade(t_imu))) + rng.normal(0.0, 0.05, len(t_imu))
-    rpm = v(t_can) * OVERALL_RATIO / TYRE_RADIUS * 60 / (2 * math.pi)
+    rpm = v(t_can) * OVERALL_RATIO / TIRE_RADIUS * 60 / (2 * math.pi)
     channels = {
         SPEED: _series(t_can, kmh),
         RPM: _series(t_can, rpm),
@@ -157,7 +157,7 @@ def test_speed_and_acceleration_recover_a_known_profile() -> None:
     assert out.speed_source == SPEED and out.speed_ratio_to_gps == RATIO
     assert out.rpm is not None and out.rpm_source == RPM
     np.testing.assert_allclose(
-        out.rpm, _v(true_t) * OVERALL_RATIO / TYRE_RADIUS * 60 / (2 * math.pi), rtol=2e-3
+        out.rpm, _v(true_t) * OVERALL_RATIO / TIRE_RADIUS * 60 / (2 * math.pi), rtol=2e-3
     )
     assert out.altitude_m is not None
     np.testing.assert_allclose(out.altitude_m, 300.0 + 0.5 * true_t, atol=1e-6)
@@ -436,7 +436,7 @@ def _session(tmp_path: Path) -> Path:
         records.append(
             TelemetryRecord.can(epoch + t, 0x2D1, bytes([0, raw & 0xFF, raw >> 8, 0, 0, 0, 0, 0]))
         )
-        rpm = _v(np.array([t]))[0] * OVERALL_RATIO / TYRE_RADIUS * 60 / (2 * math.pi)
+        rpm = _v(np.array([t]))[0] * OVERALL_RATIO / TIRE_RADIUS * 60 / (2 * math.pi)
         counts = int(round(rpm * 8))
         records.append(
             TelemetryRecord.can(

@@ -2,7 +2,7 @@
 
 **Question.** Do the FS6R31A's published gearbox ratios (4.368 / 2.518 /
 1.743 / 1.283 / 1.000 / 0.769), with the 4.08 final drive and the profile's
-2.609 m loaded tyre circumference, match what the truck does? H07.11 had 5th
+2.609 m loaded tire circumference, match what the truck does? H07.11 had 5th
 exact (the circumference was solved from it), 3rd within 0.2 % and 4th 2.0 %
 high, from three cruise clusters.
 
@@ -33,16 +33,16 @@ against published 2.518 / 1.743 / 1.283 / 1.000 / 0.769: within 0.4 % (2nd,
 
 - **The published gearbox ratios are confirmed for 2nd–6th.** 1st has too
   few steady pairs (2) to say.
-- **The common +1.9 % is in final drive × tyre, not the gearbox.** Each
+- **The common +1.9 % is in final drive × tire, not the gearbox.** Each
   implied ratio is the true ratio × (2.609 m / true circumference). An
-  all-gears +1.94 % (5th) therefore means the tyre rolls **less** than 2.609 m
+  all-gears +1.94 % (5th) therefore means the tire rolls **less** than 2.609 m
   per revolution: 2.609 / 1.0194 ≈ **2.559 m**, with the 4.08 regear as given.
   4th's "2.0 % high" in H07.11 was this same common factor, not a 4th-gear
   anomaly.
   - *Corrected the same day:* the first version of this note multiplied
-    instead of dividing and gave 2.660 m. That is larger than the tyre's
+    instead of dividing and gave 2.660 m. That is larger than the tire's
     free circumference, which is impossible.
-- **Cross-checks against the tyre** (operator, 2026-10-03: LT285/75R16, load
+- **Cross-checks against the tire** (operator, 2026-10-03: LT285/75R16, load
   range E, ~34 psi; the published figures below are BFGoodrich's KO2
   [specifications](https://tiresize.com/tires/BFGoodrich/All-Terrain-TA-KO2-285-75R16.htm)):
   - **Free circumference:** π × 32.8 in = 2.617 m. The measured 2.559 m is
@@ -55,15 +55,15 @@ against published 2.518 / 1.743 / 1.283 / 1.000 / 0.769: within 0.4 % (2nd,
     [Clemson thesis](https://open.clemson.edu/all_theses/1539)), with W ≈ 0.8 ×
     285 mm (footprint width, an assumption) and OD = 833 mm, gives 32.1
     kg/mm at 34 psi. Profile mass 2,311 kg with usual payload, ~45 % on the
-    rear, is ~520 kg per driven tyre, so the deflection δ ≈ 16 mm. The
+    rear, is ~520 kg per driven tire, so the deflection δ ≈ 16 mm. The
     effective rolling radius sits about a third of the way down the
-    deflection (R_e ≈ R_free − δ/3, the usual radial-tyre approximation),
-    which gives **2.583 m for a new tyre**.
+    deflection (R_e ≈ R_free − δ/3, the usual radial-tire approximation),
+    which gives **2.583 m for a new tire**.
   - **The 0.9 % gap** between 2.583 and 2.559 m is about 4 mm of radius:
     tread wear (a new KO2 has 11.9 mm of tread) plus the model's own
     uncertainty (~1 %).
   - **Sensitivity** (same model): 30→45 psi moves C by +0.5 %; ±100 kg on a
-    tyre moves it ∓0.2 %; 1 mm of tread wear moves it −0.25 %. Pressure and
+    tire moves it ∓0.2 %; 1 mm of tread wear moves it −0.25 %. Pressure and
     payload are second-order. Wear is the slow drift, which is why the
     circumference should be re-measured from GPS cruise, not computed.
 - A 2 % circumference error is 2 % of wheel force and speed in the dyno
@@ -72,9 +72,9 @@ against published 2.518 / 1.743 / 1.283 / 1.000 / 0.769: within 0.4 % (2nd,
 
 **Recommendation.** Use the GPS-measured **2.559 m**: it already includes
 wear, load and pressure. Use the model only to predict changes, such as new
-tyres, a pressure change or the supercharger build's added weight.
+tires, a pressure change or the supercharger build's added weight.
 `profiles.yaml` still carries 2.609 m. If accepted:
-`tyre_loaded_circumference_m: 2.559`, with this note as the evidence.
+`tire_loaded_circumference_m: 2.559`, with this note as the evidence.
 
 ```python
 """H07.11 desk: per-sample rpm / GPS speed on steady cruise, clustered by gear."""

@@ -25,7 +25,7 @@ This module holds the four pieces the power computation (H07.7) stands on:
 
 Rules carried from H07 and ``AGENTS.md``:
 
-* **Vehicle facts are data.** Mass, tyre and gears come from the profile's
+* **Vehicle facts are data.** Mass, tire and gears come from the profile's
   :class:`~src.config.VehicleParameters`; inertia estimates, the squat
   coefficient, the road load and the noise floors live in the vehicle's
   ``dyno.yaml`` beside ``noise_floor.yaml``. Nothing here names a vehicle.
@@ -629,11 +629,11 @@ def measure_altitude_noise(
 
 
 class SquatConditions(_Strict):
-    """What the squat coefficient depends on: load and tyres (H07.4)."""
+    """What the squat coefficient depends on: load and tires (H07.4)."""
 
     payload_kg: float = Field(ge=0.0)
-    tyre_pressure_front_kpa: float = Field(gt=0.0)
-    tyre_pressure_rear_kpa: float = Field(gt=0.0)
+    tire_pressure_front_kpa: float = Field(gt=0.0)
+    tire_pressure_rear_kpa: float = Field(gt=0.0)
     road: str = Field(min_length=1)
     date: dt.date
     sessions: list[str] = Field(min_length=1)
@@ -1100,14 +1100,14 @@ class InertiaData(_Strict):
     """Rotating-inertia facts for one vehicle, as stored in ``dyno.yaml``.
 
     Wheel-side inertia is built from the profile's measured
-    ``wheel_tire_assembly_kg`` and the tyre radius, through a stated shape
+    ``wheel_tire_assembly_kg`` and the tire radius, through a stated shape
     factor; the engine side (crank, flywheel, clutch, gearbox input) is an
     estimate until :attr:`measured_engine` holds a two-gear measurement.
     """
 
     #: Road wheels that turn with the vehicle (the spare does not).
     road_wheels: int = Field(ge=2)
-    #: One wheel and tyre's inertia as a fraction of ``m·r²`` (a tyre's mass
+    #: One wheel and tire's inertia as a fraction of ``m·r²`` (a tire's mass
     #: sits near the rim, so 0.6-0.75; a solid disc is 0.5).
     wheel_shape_factor: float = Field(gt=0.0, le=1.0)
     #: Propshaft, differentials, axle shafts, hubs and rotors, referred to the
@@ -1125,7 +1125,7 @@ class InertiaData(_Strict):
 class Driveline:
     """Everything the dyno needs to turn engine speed into wheel speed and back."""
 
-    tyre_radius_m: float
+    tire_radius_m: float
     final_drive: float
     gearbox_ratios: tuple[float, ...]
     #: All road wheels plus output driveline, at wheel speed (kg·m²).
@@ -1147,7 +1147,7 @@ class Driveline:
             for label, value in (
                 ("final_drive", params.final_drive),
                 ("gearbox_ratios", params.gearbox_ratios),
-                ("tyre_loaded_circumference_m", params.tyre_loaded_circumference_m),
+                ("tire_loaded_circumference_m", params.tire_loaded_circumference_m),
                 ("wheel_tire_assembly_kg", params.wheel_tire_assembly_kg),
                 ("dyno.yaml inertia", inertia),
             )
@@ -1160,10 +1160,10 @@ class Driveline:
                 "the vehicle profile lacks " + ", ".join(missing),
             )
         assert params.final_drive is not None
-        assert params.tyre_loaded_circumference_m is not None
+        assert params.tire_loaded_circumference_m is not None
         assert params.wheel_tire_assembly_kg is not None
         assert inertia is not None
-        radius = params.tyre_loaded_circumference_m / (2.0 * math.pi)
+        radius = params.tire_loaded_circumference_m / (2.0 * math.pi)
         wheel = inertia.wheel_shape_factor * params.wheel_tire_assembly_kg * radius**2
         efficiency = 1.0 - params.drivetrain_loss_fraction
         if not 0.0 < efficiency <= 1.0:
@@ -1186,7 +1186,7 @@ class Driveline:
                 f"{measured.reflected_kg_m2:.4f}; re-derive engine_kg_m2 with the new value.",
             )
         return cls(
-            tyre_radius_m=radius,
+            tire_radius_m=radius,
             final_drive=params.final_drive,
             gearbox_ratios=tuple(params.gearbox_ratios),
             wheel_side_kg_m2=inertia.road_wheels * wheel + inertia.driveline_output_kg_m2,
@@ -1205,7 +1205,7 @@ class Driveline:
 
     def neutral_effective_mass(self, mass_kg: float) -> float:
         """``m_eff`` with the clutch in: only the wheel side turns with the road."""
-        return mass_kg + self.wheel_side_kg_m2 / self.tyre_radius_m**2
+        return mass_kg + self.wheel_side_kg_m2 / self.tire_radius_m**2
 
     def effective_mass(self, mass_kg: float, gear: int) -> float:
         """``m_eff`` in a gear, as the wheel force sees it.
@@ -1216,7 +1216,7 @@ class Driveline:
         ratio = self.overall_ratio(gear)
         return (
             self.neutral_effective_mass(mass_kg)
-            + self.efficiency * self.engine_side_kg_m2 * ratio**2 / self.tyre_radius_m**2
+            + self.efficiency * self.engine_side_kg_m2 * ratio**2 / self.tire_radius_m**2
         )
 
 
@@ -1345,7 +1345,7 @@ def fit_engine_inertia(
             ratio = driveline.overall_ratio(pull.gear)
         except ValueError as exc:
             return DynoRefusal(name, "invalid_input", str(exc))
-        r = driveline.tyre_radius_m
+        r = driveline.tire_radius_m
         sf = _correct_specific_force(
             s.sf_lon_mps2, s.accel_mps2, squat=squat, pitch_offset_deg=pitch_offset.deg
         )
@@ -1422,14 +1422,14 @@ def fit_engine_inertia(
 
 
 class RoadLoadConditions(_Strict):
-    """What road load depends on: the road, load, tyres and air (H07.5)."""
+    """What road load depends on: the road, load, tires and air (H07.5)."""
 
     road: str = Field(min_length=1)
     date: dt.date
     sessions: list[str] = Field(min_length=1)
     payload_kg: float = Field(ge=0.0)
-    tyre_pressure_front_kpa: float = Field(gt=0.0)
-    tyre_pressure_rear_kpa: float = Field(gt=0.0)
+    tire_pressure_front_kpa: float = Field(gt=0.0)
+    tire_pressure_rear_kpa: float = Field(gt=0.0)
     ambient_temp_c: float
 
 
@@ -2249,7 +2249,7 @@ def _pull_points(
     v = s.speed_mps[keep]
     a = s.accel_mps2[keep]
     rpm = s.rpm[keep]
-    r = driveline.tyre_radius_m
+    r = driveline.tire_radius_m
     to_rpm = 60.0 / (2.0 * math.pi)
     ratio = driveline.overall_ratio(pull.gear)
     implied = v * ratio / r * to_rpm
@@ -2281,7 +2281,7 @@ def _pull_points(
             "gear_ratio_mismatch",
             f"{label}: engine speed runs {100 * deviation[worst]:+.1f} % below what gear "
             f"{pull.gear} and the road speed give, {at} (band +/-{100 * gear_tolerance:.0f} %). "
-            "Slip cannot lower it: the speed scale, the tyre or the stated gear is wrong",
+            "Slip cannot lower it: the speed scale, the tire or the stated gear is wrong",
         )
     demand = pull.demand[keep]
     low = int(np.argmin(demand))
@@ -2548,7 +2548,7 @@ GPS_SPEED_CHANNEL = "gps:speed"
 class SpeedSource(_Strict):
     """A speed channel the dyno may differentiate, with its measured scale (H07.3).
 
-    ECU and broadcast speeds read under true road speed on most vehicles (tyre
+    ECU and broadcast speeds read under true road speed on most vehicles (tire
     growth, a conservative speedometer) by an amount that differs between
     copies of the same quantity, so each channel carries its own ratio, as
     measured, never a platform default.

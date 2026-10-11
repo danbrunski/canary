@@ -97,7 +97,7 @@ Optional = Mapping[str, tuple[str, ...]]
 VEHICLE = VehicleParameters(
     final_drive=3.357,
     gearbox_ratios=(3.79, 2.28, 1.45, 1.0, 0.82),
-    tyre_loaded_circumference_m=2.4,
+    tire_loaded_circumference_m=2.4,
     driveline_evidence="synthetic test vehicle",
 )
 #: Committee outputs whose first group is "any ``min_members`` of these".

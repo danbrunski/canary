@@ -47,7 +47,7 @@ def read_digest_skipped(session_dir: Path) -> dict[str, Any] | None:
 # Rolling circumference (analysis.rolling_circumference)
 # --------------------------------------------------------------------------- #
 
-#: The driven tyres' rolling circumference over one drive, or why there is
+#: The driven tires' rolling circumference over one drive, or why there is
 #: none (D03.35). Its own product, not a digest field: a drive refused a digest
 #: (a capture over the row budget, or one recorded before P02.1 lifted the row
 #: budget from ordinary drives) still has steady cruise to measure, and those

@@ -156,7 +156,7 @@ class Signal(ByteSlice, LinearScale, PlausibleRange, SentinelState, _Strict):
     #: written, while road speed sat on the bus the entire time. Declaring it
     #: here — rather than a CAN id in :mod:`src.analysis.gps_tracker` — keeps the
     #: shared code vehicle-agnostic. Motion edges only: a road-speed binding
-    #: that under-reads true ground speed (tyre size, final drive) is fine for
+    #: that under-reads true ground speed (tire size, final drive) is fine for
     #: "is it moving" and wrong for distance, so nothing integrates it.
     #:
     #: A declared quantity must decode to engineering units (pinned ``scale``,

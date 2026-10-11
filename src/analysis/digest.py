@@ -141,12 +141,12 @@ class SessionDigest:
     #: capture started mid-drive, or a restart, from silently dropping the
     #: rest of the drive. ``None`` for an on-demand or shutdown-less digest.
     trip: dict[str, Any] | None = None
-    #: The driven tyres' rolling circumference measured over this drive's
+    #: The driven tires' rolling circumference measured over this drive's
     #: steady cruise (:mod:`src.analysis.rolling_circumference`), or why there
     #: is none. Computed here because the digest already reads the session in
     #: its bounded child, but **not part of ``digest.json``**: :func:`write_digest`
     #: stores it as its own ``rolling_circumference.json``, the one place
-    #: :mod:`src.control.tyres` reads, so a drive refused a digest can still
+    #: :mod:`src.control.tires` reads, so a drive refused a digest can still
     #: carry one.
     rolling_circumference: dict[str, Any] | None = None
 

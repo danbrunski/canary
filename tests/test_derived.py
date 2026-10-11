@@ -278,15 +278,15 @@ def test_fuel_properties_by_type() -> None:
 
 
 XTERRA_FD = 4.08
-XTERRA_TYRE_M = 2.609  # back-solved loaded circumference, data/bindings.yaml 0x6F7 notes
-RPM_PER_KPH_PER_UNIT_RATIO = XTERRA_FD * 1000.0 / 60.0 / XTERRA_TYRE_M
+XTERRA_TIRE_M = 2.609  # back-solved loaded circumference, data/bindings.yaml 0x6F7 notes
+RPM_PER_KPH_PER_UNIT_RATIO = XTERRA_FD * 1000.0 / 60.0 / XTERRA_TIRE_M
 
 
 def _driveline(*rpm_per_kph: float) -> VehicleParameters:
     """A vehicle whose gears give exactly these rpm per km/h."""
     return VehicleParameters(
         final_drive=XTERRA_FD,
-        tyre_loaded_circumference_m=XTERRA_TYRE_M,
+        tire_loaded_circumference_m=XTERRA_TIRE_M,
         gearbox_ratios=tuple(r / RPM_PER_KPH_PER_UNIT_RATIO for r in rpm_per_kph),
         driveline_evidence="test",
     )
@@ -298,7 +298,7 @@ def test_rpm_per_kph_is_computed_from_the_driveline() -> None:
     vehicle = VehicleParameters(
         final_drive=4.08,
         gearbox_ratios=(1.0,),
-        tyre_loaded_circumference_m=2.609,
+        tire_loaded_circumference_m=2.609,
         driveline_evidence="data/bindings.yaml 0x6F7 notes",
     )
     assert vehicle.rpm_per_kph() == pytest.approx((26.063,), abs=1e-3)

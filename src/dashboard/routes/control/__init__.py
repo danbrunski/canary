@@ -53,8 +53,8 @@ from . import (
     replay,
     sessions,
     system,
+    tires,
     tuning,
-    tyres,
 )
 from .context import ControlContext, SessionDir, _require
 
@@ -91,7 +91,7 @@ _ROUTER_BUILDERS: tuple[Callable[[ControlContext], APIRouter], ...] = (
     feedback.build_router,
     tuning.build_router,
     custom_pids.build_router,
-    tyres.build_router,
+    tires.build_router,
     brain.build_router,
 )
 

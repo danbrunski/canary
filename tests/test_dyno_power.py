@@ -61,8 +61,8 @@ MOUNT_OFFSET_DEG = 0.3
 ETA = 0.85
 ENGINE_INERTIA = 0.18  # kg m^2 at the crank
 WHEEL_MASS = 40.3
-TYRE_CIRCUMFERENCE = 2.609
-RADIUS = TYRE_CIRCUMFERENCE / (2 * math.pi)
+TIRE_CIRCUMFERENCE = 2.609
+RADIUS = TIRE_CIRCUMFERENCE / (2 * math.pi)
 GEARBOX = (4.368, 2.518, 1.743, 1.283, 1.0, 0.769)
 FINAL_DRIVE = 4.08
 #: Written out independently of Driveline: 4 wheels at 0.7 m r^2, plus 1.0
@@ -86,7 +86,7 @@ PARAMS = VehicleParameters(
     wheel_tire_assembly_kg=WHEEL_MASS,
     final_drive=FINAL_DRIVE,
     gearbox_ratios=GEARBOX,
-    tyre_loaded_circumference_m=TYRE_CIRCUMFERENCE,
+    tire_loaded_circumference_m=TIRE_CIRCUMFERENCE,
     driveline_evidence="synthetic test vehicle",
     drivetrain_loss_fraction=1.0 - ETA,
 )

@@ -252,7 +252,7 @@ normal drive sessions only.
 | `GET /control/tuning-mode` / `POST /control/tuning-mode` | inspect / arm the focused high-rate tuning poll profile (narrows Mode 01 to a tuning channel set, suspends DID windows) |
 | `GET /control/feedback` / `POST /control/feedback` | read / record anomaly-feedback verdicts |
 | `GET /control/training-runs` | training-run ledger |
-| `GET /control/vehicle-ledger` / `POST /control/vehicle-ledger` / `DELETE /control/vehicle-ledger/{id}` | vehicle maintenance/intervention ledger. POST body `{occurred_at, kind, title, details?, odometer_km?, affected_channels?, corpus_boundary?, event_id?, tyres?, intervention?}`; `intervention` is `hardware` \| `fuel` \| `instrumentation` (E01.4: the change is recorded into investigation memory as an intervention; omitted = unclassified). `event_id` replaces that entry whole, so a correction re-states `intervention` or erases it |
+| `GET /control/vehicle-ledger` / `POST /control/vehicle-ledger` / `DELETE /control/vehicle-ledger/{id}` | vehicle maintenance/intervention ledger. POST body `{occurred_at, kind, title, details?, odometer_km?, affected_channels?, corpus_boundary?, event_id?, tires?, intervention?}`; `intervention` is `hardware` \| `fuel` \| `instrumentation` (E01.4: the change is recorded into investigation memory as an intervention; omitted = unclassified). `event_id` replaces that entry whole, so a correction re-states `intervention` or erases it |
 | `GET /control/datasets/health` | corpus readiness + per-mode counts |
 | `GET /control/tuning` / `POST /control/tuning` / `POST /control/tuning/estimate` / `POST /control/tuning/revert` | inspect / set / estimate / revert alert-tuning overrides |
 
@@ -510,7 +510,7 @@ whole `VehicleParameters`. Refusals name the field:
   (position 9) is wrong. A non-North-American VIN with a mismatching check digit
   is accepted with a `warnings` entry.
 - 422 **evidence required**: changing `mass_kg` needs a new `mass_evidence`;
-  changing `final_drive`, `gearbox_ratios` or `tyre_loaded_circumference_m`
+  changing `final_drive`, `gearbox_ratios` or `tire_loaded_circumference_m`
   needs a new `driveline_evidence` (the same text again is not new evidence).
 - 409 a VIN another profile already holds, or a VIN edit that moves the
   **active** profile off the VIN the startup probe read off the connected
@@ -526,7 +526,7 @@ with a number from the other side of the merge.
 **When an edit applies.** The response's `applies` says it: the daemon copies
 the active profile into its configuration at startup, and every session
 manifest records that copy. An edit to the active profile reaches the derived
-fuel/trip/power channels, the gear estimate, the dyno, tyre wear and the next
+fuel/trip/power channels, the gear estimate, the dyno, tire wear and the next
 session's manifest only after a restart (`scripts/restart_canary.sh`). The
 daemon never restarts itself, and a running session's manifest is never
 rewritten. Until then `pending_restart` lists the fields that differ, and

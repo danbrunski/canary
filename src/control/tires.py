@@ -1,6 +1,6 @@
-"""Tyre wear from GPS: the trip digests' rolling circumference, trended.
+"""Tire wear from GPS: the trip digests' rolling circumference, trended.
 
-Every drive's ``rolling_circumference.json`` holds the driven tyres' rolling
+Every drive's ``rolling_circumference.json`` holds the driven tires' rolling
 circumference over its steady cruise (:mod:`src.analysis.rolling_circumference`;
 written by the trip-end digest, by trip end alone when the digest is refused,
 and by ``scripts/backfill_rolling_circumference.py``). One
@@ -9,10 +9,10 @@ is a change in tread depth:
 
     Δdepth = ΔC / 2π
 
-That is a **trend**, not an absolute depth. A tyre model predicts the
+That is a **trend**, not an absolute depth. A tire model predicts the
 circumference to ~±1 % (±4 mm of tread), far worse than the wear it would
 track. So absolute depth needs one gauge reading, recorded on the vehicle
-ledger as a ``tyres: {action: tread_measured, tread_depth_mm}`` event: the
+ledger as a ``tires: {action: tread_measured, tread_depth_mm}`` event: the
 drives around it fix the circumference that depth corresponds to, and later
 drives move it.
 
@@ -21,7 +21,7 @@ ledger. Safe to serve live on the Pi.
 
 Rules:
 - A ``rotated`` or ``replaced`` event starts a new series. The driven axle
-  then carries different tyres, so drives either side never trend together,
+  then carries different tires, so drives either side never trend together,
   and an earlier gauge reading stops applying.
 - A ``pressure_changed`` event since the baseline is named in ``caveats``.
   About 6 psi moves the circumference as much as ~0.8 mm of tread.
@@ -57,14 +57,14 @@ BASELINE_DRIVES = 5
 DEFAULT_DRIVE_SCATTER_PCT = 0.15
 
 
-def tyre_status(
+def tire_status(
     storage_path: Path,
     ledger: VehicleLedgerStore,
     *,
     now: datetime | None = None,
 ) -> dict[str, Any]:
-    """The tyre-wear readout: drives, current circumference, estimated depth."""
-    events = [e for e in ledger.records() if e.tyres is not None]
+    """The tire-wear readout: drives, current circumference, estimated depth."""
+    events = [e for e in ledger.records() if e.tires is not None]
     reset = _latest(events, ("rotated", "replaced"))
     series_start = reset.occurred_at if reset is not None else None
     drives = [d for d in _drives(storage_path) if series_start is None or d["date"] >= series_start]
@@ -99,7 +99,7 @@ def tyre_status(
     if measured is None:
         out["caveats"].append(
             "no gauge reading since the series start: record one on the vehicle ledger "
-            "(tyres: tread_measured) to turn the circumference into tread depth"
+            "(tires: tread_measured) to turn the circumference into tread depth"
         )
         return out
     window = timedelta(days=BASELINE_WINDOW_DAYS)
@@ -109,9 +109,9 @@ def tyre_status(
         (d for d in drives if abs(d["date"] - measured.occurred_at) <= window),
         key=lambda d: abs(d["started_at"].date() - measured.occurred_at),
     )[:BASELINE_DRIVES]
-    assert measured.tyres is not None and measured.tyres.tread_depth_mm is not None
+    assert measured.tires is not None and measured.tires.tread_depth_mm is not None
     baseline: dict[str, Any] = {
-        "tread_depth_mm": measured.tyres.tread_depth_mm,
+        "tread_depth_mm": measured.tires.tread_depth_mm,
         "measured_on": measured.occurred_at.isoformat(),
         "event": _event_ref(measured),
         "drives": len(near),
@@ -129,13 +129,13 @@ def tyre_status(
     baseline.update({"status": "fixed", "circumference_m": round(base_m, 5)})
     # Wear is read only from drives after the reading. The latest drives
     # overall can be the very drives that fixed the baseline, and their
-    # difference is two noisy medians of one tyre, not wear (2026-10-04: a
+    # difference is two noisy medians of one tire, not wear (2026-10-04: a
     # reading taken 13 days after the last drive showed 0.23 mm "worn").
     since = [d for d in drives if d["date"] > measured.occurred_at][-CURRENT_DRIVES:]
     as_of = (now or datetime.now(UTC)).date().isoformat()
     if not since:
         out["estimate"] = {
-            "tread_depth_mm": measured.tyres.tread_depth_mm,
+            "tread_depth_mm": measured.tires.tread_depth_mm,
             "worn_since_baseline_mm": 0.0,
             "uncertainty_mm": 0.0,
             "drives_since_reading": 0,
@@ -150,7 +150,7 @@ def tyre_status(
         worn_mm = (base_m - since_m) / (2.0 * math.pi) * 1000.0
         worn_se_mm = math.hypot(base_se_m, since_se_m) / (2.0 * math.pi) * 1000.0
         out["estimate"] = {
-            "tread_depth_mm": round(measured.tyres.tread_depth_mm - worn_mm, 2),
+            "tread_depth_mm": round(measured.tires.tread_depth_mm - worn_mm, 2),
             "worn_since_baseline_mm": round(worn_mm, 2),
             "uncertainty_mm": round(worn_se_mm, 2),
             "drives_since_reading": len(since),
@@ -159,20 +159,20 @@ def tyre_status(
     pressure = [
         e
         for e in events
-        if e.tyres is not None
-        and e.tyres.action == "pressure_changed"
+        if e.tires is not None
+        and e.tires.action == "pressure_changed"
         and e.occurred_at > measured.occurred_at
     ]
     if pressure:
         out["caveats"].append(
-            f"tyre pressure changed {len(pressure)} time(s) since the gauge reading: "
+            f"tire pressure changed {len(pressure)} time(s) since the gauge reading: "
             "~6 psi moves the circumference as much as ~0.8 mm of tread"
         )
     return out
 
 
 def _drives(storage_path: Path) -> list[dict[str, Any]]:
-    """Every session's tyre measurement, oldest first."""
+    """Every session's tire measurement, oldest first."""
     found: list[dict[str, Any]] = []
     if not storage_path.is_dir():
         return found
@@ -209,18 +209,18 @@ def _scatter_pct(drives: list[dict[str, Any]]) -> float:
 
 
 def _latest(events: list[VehicleEvent], actions: tuple[str, ...]) -> VehicleEvent | None:
-    chosen = [e for e in events if e.tyres is not None and e.tyres.action in actions]
+    chosen = [e for e in events if e.tires is not None and e.tires.action in actions]
     return max(chosen, key=lambda e: (e.occurred_at, e.recorded_at)) if chosen else None
 
 
 def _event_ref(event: VehicleEvent | None) -> dict[str, Any] | None:
-    if event is None or event.tyres is None:
+    if event is None or event.tires is None:
         return None
     return {
         "id": event.id,
         "occurred_at": event.occurred_at.isoformat(),
         "title": event.title,
-        "action": event.tyres.action,
+        "action": event.tires.action,
     }
 
 
@@ -234,4 +234,4 @@ def _drive_json(drive: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-__all__ = ["tyre_status"]
+__all__ = ["tire_status"]

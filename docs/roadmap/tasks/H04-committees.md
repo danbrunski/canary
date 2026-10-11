@@ -20,7 +20,7 @@ members on rows where the gates hold, designed as an IF/LSTM feature
   committee is an external sensor, so no committee residual may become a
   detector feature again; `trainable` stops being a per-committee choice.
 - **Known offsets read as faults.** ECU speed reads ~8 % under GPS on this
-  truck (`obd/gps` 0.9203, `data/bindings.yaml` 0x6F7 notes: tyre size plus an
+  truck (`obd/gps` 0.9203, `data/bindings.yaml` 0x6F7 notes: tire size plus an
   unexplained remainder, magnitude settled). A raw spread of 0.08 × speed would
   fire on every drive.
 

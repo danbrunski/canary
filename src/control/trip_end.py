@@ -176,13 +176,13 @@ def tuning_section_under_limit(
     return tuning_section(session_dir, config)
 
 
-def measure_tyres_under_limit(
+def measure_tires_under_limit(
     session_dir: Path, config: CanaryConfig, *, address_space_bytes: int | None = None
 ) -> dict[str, Any]:
-    """The tyre measurement's child entry point (D03.35): cap, then measure.
+    """The tire measurement's child entry point (D03.35): cap, then measure.
 
     Runs only when the digest was refused; a digest that runs measures the
-    tyres in its own child. Two channels, so it fits any drive the digest's
+    tires in its own child. Two channels, so it fits any drive the digest's
     budgets refuse.
     """
     if address_space_bytes is not None:
@@ -400,7 +400,7 @@ async def handle_trip_end_off_loop(  # noqa: PLR0913
     if skipped is not None:
         write_digest_skipped(session_dir, skipped)
         if skipped.reason != REASON_NOT_A_SESSION:
-            await _measure_tyres_off_loop(session_dir, config, executor=executor, timeout=timeout)
+            await _measure_tires_off_loop(session_dir, config, executor=executor, timeout=timeout)
         return None
 
     if current_task is not None:
@@ -482,35 +482,35 @@ async def handle_trip_end_off_loop(  # noqa: PLR0913
     return payload
 
 
-async def _measure_tyres_off_loop(
+async def _measure_tires_off_loop(
     session_dir: Path,
     config: CanaryConfig,
     *,
     executor: Executor | None,
     timeout: float,
 ) -> None:
-    """Measure a digest-refused drive's tyres in a child; never raises.
+    """Measure a digest-refused drive's tires in a child; never raises.
 
-    A refused digest used to mean no tyre measurement either, and the drives
+    A refused digest used to mean no tire measurement either, and the drives
     the digest refuses are the long ones (17 on the Pi by 2026-10-04, the two
     reference drives among them). A sidecar already present is kept.
     """
     if read_rolling_circumference(session_dir) is not None:
         return
     call = functools.partial(
-        measure_tyres_under_limit,
+        measure_tires_under_limit,
         session_dir,
         config,
         address_space_bytes=digest_address_space_bytes(config),
     )
     try:
         block = await _in_digest_child(
-            call, session_dir, executor=executor, timeout=timeout, what="tyre measurement"
+            call, session_dir, executor=executor, timeout=timeout, what="tire measurement"
         )
     except asyncio.CancelledError:
         raise
     except Exception:  # noqa: BLE001 — a report, not a gate; MemoryError included
-        log.warning("tyre measurement for %s failed", session_dir.name, exc_info=True)
+        log.warning("tire measurement for %s failed", session_dir.name, exc_info=True)
         return
     write_rolling_circumference(session_dir, block)
 

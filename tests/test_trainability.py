@@ -213,7 +213,7 @@ def test_every_derived_channel_the_pipeline_emits_declares_its_inputs() -> None:
     vehicle = VehicleParameters(
         final_drive=3.357,
         gearbox_ratios=(3.79, 2.28, 1.45, 1.0, 0.82),
-        tyre_loaded_circumference_m=2.4,
+        tire_loaded_circumference_m=2.4,
         driveline_evidence="synthetic test vehicle",
     )
     calibration = load_afr_calibration(XTERRA / "afr_calibration.yaml")
