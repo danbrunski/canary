@@ -672,6 +672,49 @@ if [[ "${hat_product}" == CANary-HAT* && -f "${BOOT_CONFIG}" ]] \
   I2C_REBOOT_NEEDED=1
 fi
 
+# ---------------------------------------------------------------------------
+# Dashboard build tools: Node.js + pnpm
+# ---------------------------------------------------------------------------
+# canary-update rebuilds the dashboard bundle (gitignored dist/) whenever the
+# frontend changes or dist/ is missing, and refuses the whole update without
+# pnpm. A fresh Pi had neither, so its first `canary-update` failed (exit 7,
+# 2026-10-11). Node comes from apt, alone: Debian's npm is 362 packages on
+# trixie, and trixie's Node ships without corepack. pnpm is its standalone
+# binary at the version package.json pins (`packageManager`), so the lockfile
+# stays valid. CANARY_DASHBOARD_TOOLS=0 skips both.
+PNPM_BIN="${ROOT}/usr/local/bin/pnpm"
+if [[ "${CANARY_DASHBOARD_TOOLS:-1}" == "1" ]]; then
+  pnpm_version="$(sed -n 's/.*"packageManager": *"pnpm@\([0-9.]*\)".*/\1/p' \
+    "${CANARY_HOME}/src/dashboard/static/package.json" 2>/dev/null || true)"
+  if ! command -v node >/dev/null 2>&1 && command -v apt-get >/dev/null 2>&1; then
+    DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends nodejs
+  fi
+  if [[ -z "${pnpm_version}" ]]; then
+    echo "WARNING: no pnpm version in package.json's packageManager; pnpm not installed" >&2
+  elif [[ "$("${PNPM_BIN}" --version 2>/dev/null || true)" != "${pnpm_version}" ]]; then
+    case "$(uname -m)" in
+      aarch64 | arm64) pnpm_arch=arm64 ;;
+      x86_64) pnpm_arch=x64 ;;
+      *) pnpm_arch="" ;;
+    esac
+    pnpm_tmp="$(mktemp)"
+    if [[ -n "${pnpm_arch}" ]] && curl -fsSL -o "${pnpm_tmp}" \
+        "https://github.com/pnpm/pnpm/releases/download/v${pnpm_version}/pnpm-linux-${pnpm_arch}"; then
+      chmod 0755 "${pnpm_tmp}"
+      if [[ "$("${pnpm_tmp}" --version 2>/dev/null || true)" == "${pnpm_version}" ]]; then
+        install -d -m 0755 "$(dirname "${PNPM_BIN}")"
+        install -m 0755 "${pnpm_tmp}" "${PNPM_BIN}"
+        echo "Installed pnpm ${pnpm_version} at ${PNPM_BIN}"
+      else
+        echo "WARNING: downloaded pnpm does not report ${pnpm_version}; not installed" >&2
+      fi
+    else
+      echo "WARNING: could not download pnpm ${pnpm_version} for $(uname -m); canary-update cannot build the dashboard" >&2
+    fi
+    rm -f "${pnpm_tmp}"
+  fi
+fi
+
 cd "${CANARY_HOME}"
 runuser -u "${CANARY_USER}" -- "${CANARY_PYTHON}" scripts/install_deps.py \
   --venv "${CANARY_HOME}/.venv" \

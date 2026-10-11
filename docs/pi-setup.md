@@ -46,7 +46,10 @@ sudo apt update
 sudo apt install -y git python3 python3-venv python3-pip can-utils iproute2
 ```
 
-Optional, only if you want to build the React dashboard on the Pi:
+`install_pi.sh` installs what the dashboard build needs (`canary-update`
+rebuilds it and refuses to update without it): `nodejs` from apt without
+npm (362 packages on trixie), and pnpm as its standalone binary at the
+version `package.json` pins, in `/usr/local/bin/pnpm`. By hand, the older way:
 
 ```bash
 sudo apt install -y nodejs npm

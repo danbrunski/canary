@@ -15,6 +15,7 @@ loader, as it does on the Pi.
 from __future__ import annotations
 
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -196,6 +197,8 @@ def installer(tmp_path: Path) -> Installer:
         # Adopting a drive mounts real block devices; the guard (fstab-driven)
         # still runs.
         "CANARY_DATA_DRIVE_ADOPT": "0",
+        # Node/pnpm: off here, exercised with a fake download below.
+        "CANARY_DASHBOARD_TOOLS": "0",
         # The laptop's own interfaces must not name the scratch Pi.
         "CANARY_NET_DIR": str(_fake_net_dir(tmp_path, eth0="88:a2:9e:1d:89:74")),
     }
@@ -812,3 +815,51 @@ def test_can0_comes_up_on_every_boot(installer: Installer) -> None:
     assert 'ENV{SYSTEMD_WANTS}+="can0.service"' in rule.read_text()
     assert "systemctl enable can0.service" in installer.calls("systemctl enable")
     assert not [c for c in installer.calls("systemctl start") if "can0" in c]
+
+
+def _fake_curl(installer: Installer, version: str) -> Path:
+    """A curl that "downloads" a pnpm reporting ``version``."""
+    bin_dir = installer.root.parent / "fake-curl-bin"
+    bin_dir.mkdir(exist_ok=True)
+    _write_exec(
+        bin_dir / "curl",
+        "#!/bin/sh\n"
+        'while [ "$1" != "-o" ]; do shift; done\n'
+        f"printf '#!/bin/sh\\necho {version}\\n' > \"$2\"\n",
+    )
+    return bin_dir
+
+
+def _pinned_pnpm() -> str:
+    """The version package.json's packageManager pins (the fixture's src/ is the repo's)."""
+    text = (REPO_ROOT / "src" / "dashboard" / "static" / "package.json").read_text()
+    match = re.search(r'"packageManager": *"pnpm@([0-9.]+)"', text)
+    assert match is not None
+    return match.group(1)
+
+
+def test_the_pinned_pnpm_is_installed_so_canary_update_can_build(
+    installer: Installer,
+) -> None:
+    """A fresh Pi's first canary-update failed for want of pnpm (2026-10-11)."""
+    version = _pinned_pnpm()
+    path = f"{_fake_curl(installer, version)}:{installer.env['PATH']}"
+    result = installer.run(CANARY_DASHBOARD_TOOLS="1", PATH=path)
+
+    pnpm = installer.root / "usr" / "local" / "bin" / "pnpm"
+    assert f"Installed pnpm {version}" in result.stdout
+    reported = subprocess.run([pnpm, "--version"], capture_output=True, text=True).stdout
+    assert reported == f"{version}\n"
+    # No npm: Debian's is 362 packages on trixie.
+    assert not [c for c in installer.calls("apt-get") if " npm" in c]
+
+    again = installer.run(CANARY_DASHBOARD_TOOLS="1", PATH=path)
+    assert "Installed pnpm" not in again.stdout
+
+
+def test_a_pnpm_reporting_the_wrong_version_is_refused(installer: Installer) -> None:
+    path = f"{_fake_curl(installer, '0.0.1')}:{installer.env['PATH']}"
+    result = installer.run(CANARY_DASHBOARD_TOOLS="1", PATH=path)
+
+    assert not (installer.root / "usr" / "local" / "bin" / "pnpm").exists()
+    assert f"does not report {_pinned_pnpm()}" in result.stderr
