@@ -46,3 +46,22 @@ profiles:
       load range E at ~34 psi (free 2.617 m, published 634 rev/mi = 2.538 m, Rhyne
       load/pressure model 2.583 m new). data/analyses/2026-10-03-gear-ratios-steady-cruise.md.
       Was 2.609 m (solved from 5th on three clusters) until 2026-10-03 (operator).'
+- slug: nissan-xterra-2013
+  vin: 5N1AN0NW6DN821840
+  name: 2013 Nissan Xterra
+  make: Nissan
+  model: Xterra
+  year: 2013
+  parameters:
+    mass_kg: 2007.2
+    mass_evidence: 'Published curb weight, not a scale ticket: 4,425 lb for the 2013 Xterra
+      PRO-4X 4x4 with the 5-speed automatic (iseecars.com 2013 Xterra specs, KBB PRO-4X
+      agrees; the 6MT PRO-4X is 4,408 lb), fetched 2026-10-11 at the operator''s request.
+      Stock vehicle, full fuel, no occupants or cargo; aftermarket additions, if any, not
+      counted. GVWR 5,399 lb. Weigh it (H07.10).'
+    fuel_type: gasoline
+    displacement_l: 4.0
+    # 265/75R16 (operator, 2026-10-11): 406.4 mm rim + 2 x 198.75 mm sidewall,
+    # nominal and unloaded. The loaded rolling circumference is measured from
+    # GPS per drive, not derived from this.
+    tire_diameter_m: 0.804

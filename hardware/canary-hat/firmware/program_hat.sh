@@ -41,7 +41,11 @@ else
     # The EEPROM names the overlay; a config.txt line as well would load it twice.
     sed -i -E 's/^(dtoverlay=canary-hat.*)$/#eeprom# \1/' "$CONFIG"
 fi
-grep -n -E 'mcp2515|canary-hat' "$CONFIG" || true
+# The IMU, barometer and 12 V sense are read over /dev/i2c-1, which a fresh
+# image leaves off (install_pi.sh adds the same line; 2026-10-11).
+grep -qE '^[[:space:]]*dtparam=([^#]*,)?i2c(_arm)?=on' "$CONFIG" \
+    || printf '\n[all]\ndtparam=i2c_arm=on\n' >> "$CONFIG"
+grep -n -E 'mcp2515|canary-hat|i2c_arm' "$CONFIG" || true
 echo "backup: $CONFIG.bak-$STAMP"
 
 if [[ $WRITE_EEPROM -eq 1 ]]; then
@@ -56,5 +60,8 @@ if [[ $WRITE_EEPROM -eq 1 ]]; then
     cp "$work/canary-hat.eep" "$HERE/canary-hat-$STAMP.eep"
 fi
 
+# On 2026-10-11 the Pi lost power ~30 s after a run and the overlay and
+# config.txt edits never reached the card. Flush before saying "done".
+sync
 echo
 echo "done -- reboot, then: bash $HERE/checkout_hat.sh"

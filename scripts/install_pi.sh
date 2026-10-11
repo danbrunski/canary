@@ -230,7 +230,13 @@ GPS_STACK_INSTALLED=0
 if [[ "${CANARY_INSTALL_GPS_STACK}" == "1" ]] && command -v apt-get >/dev/null 2>&1; then
   echo "Installing GPS + time-sync stack (gpsd, chrony)..."
   GPS_STACK_INSTALLED=1
-  DEBIAN_FRONTEND=noninteractive apt-get install -y gpsd gpsd-clients chrony
+  # gpsd itself carries gpsctl, ubxtool and ntpshmmon, all this stack calls.
+  # Not gpsd-clients: on trixie it *depends* on GTK and matplotlib (xgps,
+  # gpsplot), 138 packages and 384 MB on a fresh card (2026-10-11), for
+  # gpspipe alone. gpsd-tools is the ncurses cgps/gpsmon, where it exists.
+  _gps_pkgs=(gpsd chrony)
+  apt-cache show gpsd-tools >/dev/null 2>&1 && _gps_pkgs+=(gpsd-tools)
+  DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends "${_gps_pkgs[@]}"
 
   # A CANary-HAT carries its own GNSS receiver on uart2 (/dev/ttyAMA2, from the
   # board overlay its ID EEPROM names). When the firmware reports the HAT, that
@@ -562,6 +568,7 @@ fi
 OVERLAY_DIR="${CANARY_OVERLAY_DIR:-${ROOT}/boot/firmware/overlays}"
 HAT_OVERLAY_SRC="${CANARY_HOME}/hardware/canary-hat/firmware/canary-hat-overlay.dts"
 HAT_REBOOT_NEEDED=0
+I2C_REBOOT_NEEDED=0
 if [[ -d "${OVERLAY_DIR}" && -f "${HAT_OVERLAY_SRC}" ]]; then
   if command -v dtc >/dev/null 2>&1; then
     hat_dtbo="$(mktemp)"
@@ -575,6 +582,22 @@ if [[ -d "${OVERLAY_DIR}" && -f "${HAT_OVERLAY_SRC}" ]]; then
   else
     echo "WARNING: dtc not found (raspi-utils-dt); canary-hat.dtbo not installed" >&2
   fi
+fi
+
+# The HAT's IMU, barometer and 12 V sense are read from userspace over
+# /dev/i2c-1, which exists only with the ARM I2C bus enabled. A fresh image
+# leaves it off, and the overlay deliberately binds no driver there, so on
+# 2026-10-11 a new board came up with can0 and GNSS but no I2C at all: no IMU,
+# no supply voltage, so no `parked`/`bench` verdict. Appended under its own
+# [all], since the file may end inside a conditional section.
+BOOT_CONFIG="${CANARY_BOOT_CONFIG:-${ROOT}/boot/firmware/config.txt}"
+if [[ "${hat_product}" == CANary-HAT* && -f "${BOOT_CONFIG}" ]] \
+    && ! grep -qE '^[[:space:]]*dtparam=([^#]*,)?i2c(_arm)?=on' "${BOOT_CONFIG}"; then
+  cp -p "${BOOT_CONFIG}" "${BOOT_CONFIG}.canary-$(date +%Y%m%dT%H%M%S)"
+  printf '\n[all]\n# Added by canary scripts/install_pi.sh: the CANary-HAT sensors are on /dev/i2c-1.\ndtparam=i2c_arm=on\n' \
+    >>"${BOOT_CONFIG}"
+  echo "Enabled the ARM I2C bus in ${BOOT_CONFIG} for the CANary-HAT sensors."
+  I2C_REBOOT_NEEDED=1
 fi
 
 cd "${CANARY_HOME}"
@@ -644,7 +667,7 @@ Next:
   5. Export the laptop token: export CANARY_CONTROL_TOKEN="$(cat "${CANARY_CONTROL_TOKEN_FILE}")"
   6. Open: http://<pi-hostname-or-ip>:8000/status
   7. MCP server: http://<pi-hostname-or-ip>:8001/mcp (see docs/mcp-server.md)
-  8. GPS/time: verify with 'gpspipe -w -n 5' and 'chronyc sources' — the GPS
+  8. GPS/time: verify with 'cgps' (or gpsmon) and 'chronyc sources' — the GPS
      refclock should appear. See docs/time-sync.md
   9. Future updates: sudo canary-update
 EOF
@@ -656,4 +679,8 @@ fi
 if [[ "${HAT_REBOOT_NEEDED}" -eq 1 ]]; then
   echo
   echo "REBOOT REQUIRED: canary-hat.dtbo changed; the firmware loads it only at boot."
+fi
+if [[ "${I2C_REBOOT_NEEDED}" -eq 1 ]]; then
+  echo
+  echo "REBOOT REQUIRED: dtparam=i2c_arm=on was added; /dev/i2c-1 appears only after a boot."
 fi

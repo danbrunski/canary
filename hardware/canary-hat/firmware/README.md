@@ -22,7 +22,7 @@ JP1 must be **open** (bridged = EEPROM write-protected). On the Pi, from a copy
 of this directory:
 
 ```bash
-sudo bash program_hat.sh        # overlay + config.txt + EEPROM (asks nothing)
+sudo bash program_hat.sh        # overlay + config.txt (incl. I2C) + EEPROM (asks nothing)
 sudo reboot
 bash checkout_hat.sh
 ```

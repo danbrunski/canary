@@ -190,6 +190,10 @@ itself on `USBAUTO=true`, which is why canary ships its own ungated copy.)
 
 ## Verifying
 
+`gpspipe` is in `gpsd-clients`, which `install_pi.sh` leaves out: on trixie it
+depends on GTK and matplotlib (384 MB). `sudo apt-get install gpsd-clients` for
+the two `gpspipe` lines, or watch with `cgps` / `gpsmon` (`gpsd-tools`).
+
 ```bash
 gpspipe -w -n 5                 # gpsd is talking to the receiver
 gpspipe -w -n 2 | grep DEVICES  # expect exactly ONE entry (see above)

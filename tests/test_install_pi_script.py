@@ -72,6 +72,7 @@ _HOST_COMMANDS = (
     "systemctl",
     "udevadm",
     "apt-get",
+    "apt-cache",
     "chown",
     "visudo",
     "modprobe",
@@ -572,6 +573,17 @@ def test_a_canary_hat_reattaches_its_receiver_and_sets_the_gnss_baud(installer: 
     assert "ExecStartPost=-" in baud
 
 
+def test_the_gps_stack_skips_the_gui_clients(installer: Installer) -> None:
+    """gpsd-clients depends on GTK and matplotlib on trixie: 384 MB on a fresh
+    card for gpspipe alone (2026-10-11). gpsd carries every tool the stack runs."""
+    installer.run()
+
+    (install,) = [c for c in installer.calls("apt-get") if " install " in f" {c} "]
+    assert "--no-install-recommends" in install
+    assert " gpsd " in f" {install} " and " chrony" in install
+    assert "gpsd-clients" not in install
+
+
 def test_a_usb_receiver_gets_no_baud_change(installer: Installer) -> None:
     installer.run()
 
@@ -636,6 +648,49 @@ def test_the_pi5_default_console_passes(installer: Installer) -> None:
 
 def test_without_a_hat_the_console_is_not_the_installers_business(installer: Installer) -> None:
     installer.run(CANARY_CMDLINE=str(_cmdline(installer, "console=ttyAMA0,115200 root=PARTUUID=1")))
+
+
+def _boot_config(installer: Installer, text: str) -> Path:
+    path = installer.root / "config.txt"
+    path.write_text(text)
+    return path
+
+
+def test_a_hat_gets_the_arm_i2c_bus_once(installer: Installer) -> None:
+    """A fresh image has no /dev/i2c-1, so the HAT's IMU, barometer and 12 V
+    sense were all dark on a new board (2026-10-11). The line goes under its
+    own [all]: the stock file ends inside a [pi5] section."""
+    config = _boot_config(installer, "#dtparam=i2c_arm=on\n[pi5]\ndtoverlay=nospi10\n")
+    hat = str(_hat_product_file(installer))
+
+    result = installer.run(CANARY_HAT_PRODUCT_FILE=hat, CANARY_BOOT_CONFIG=str(config))
+    assert config.read_text().endswith("[all]\n" + _I2C_COMMENT + "dtparam=i2c_arm=on\n")
+    assert "dtparam=i2c_arm=on was added" in result.stdout
+    assert list(installer.root.glob("config.txt.canary-*"))
+
+    again = installer.run(CANARY_HAT_PRODUCT_FILE=hat, CANARY_BOOT_CONFIG=str(config))
+    assert config.read_text().count("\ndtparam=i2c_arm=on") == 1
+    assert "dtparam=i2c_arm=on was added" not in again.stdout
+
+
+_I2C_COMMENT = (
+    "# Added by canary scripts/install_pi.sh: the CANary-HAT sensors are on /dev/i2c-1.\n"
+)
+
+
+def test_an_i2c_bus_already_on_is_left_alone(installer: Installer) -> None:
+    text = "dtparam=audio=on,i2c_arm=on\n"
+    config = _boot_config(installer, text)
+    installer.run(
+        CANARY_HAT_PRODUCT_FILE=str(_hat_product_file(installer)), CANARY_BOOT_CONFIG=str(config)
+    )
+    assert config.read_text() == text
+
+
+def test_without_a_hat_the_i2c_bus_is_not_touched(installer: Installer) -> None:
+    config = _boot_config(installer, "[pi5]\ndtoverlay=nospi10\n")
+    installer.run(CANARY_BOOT_CONFIG=str(config))
+    assert "i2c_arm" not in config.read_text()
 
 
 # ---------------------------------------------------------------------------

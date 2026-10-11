@@ -168,6 +168,28 @@ Measurements from the §13.1 table that this board answered:
 Still open on this board: 4 (TTFF / hotspot desense, measured only as "fixed
 within minutes"), 5, 6, 7, 8, 9 (blocked by U5), 11, 12.
 
+#### 13.1.2 Rev 2.0 bring-up — second board, 2026-10-11
+
+A second assembled rev 2.0 board on a fresh Pi 5 (Debian 13 trixie), in a 2013
+Xterra 5AT (VIN `5N1AN0NW6DN821840`) through the OBD port at KOEO, no UPS
+stacked, no GNSS antenna.
+
+| Subsystem | Result | Evidence |
+|---|---|---|
+| ID EEPROM (U1) | **Pass** | Arrived blank; `program_hat.sh` wrote the HAT+ record (uuid `5d2b016a-…`), read back with both atom CRCs intact, firmware reports it and loads the overlay. |
+| CAN (U3/U4/Y1) | **Pass** | `MCP2518FD … o:40.00MHz`, ERROR-ACTIVE, ~1,500 frames/s listen-only at KOEO; Mode 09 VIN read answered by `7E8` (ISO-TP, flow control from `7E0`). |
+| 12V sense | **Pass** | 12.33 V KOEO. |
+| IMU (U6) | **Pass** | `WHO_AM_I` 0x6C. |
+| **Barometer (U5)** | **Pass** | The temperature word is live (raw `0x8ADA80`), unlike the first board's constant 0. Compensated with its own temperature: 79.52 kPa at 37.1 °C, ±0.01 kPa over three reads, at the operator's ~80 kPa home altitude. So §13.1.1's U5 failure was that part, not the schematic or the command sequence. |
+| GNSS (U7) + PPS | **Partial** | NMEA on `/dev/ttyAMA2`, PPS device registered; no antenna, so no fix and no pulses. |
+| K-line (U2) + pull-up FET | **Pass (echo)** | `kline_bringup.py echo`: 32/32 bytes, 0 wrong, at 9600 and 10400 baud with the pull-up off and on. No ECU session attempted. |
+
+Found on the way, both now handled by the scripts: a fresh image has no
+`/dev/i2c-1` (`dtparam=i2c_arm=on` is off), which leaves the IMU, barometer and
+12 V sense dark although the overlay loads; and a power loss ~30 s after
+`program_hat.sh` lost the overlay and `config.txt` edits (never flushed), while
+the EEPROM write survived.
+
 ### 13.2 Rev 2.0 — the board that gets fabricated
 
 **This is the submission list**, re-triaged 2026-08-22 when rev 1.0 was withdrawn
