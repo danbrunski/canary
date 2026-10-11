@@ -18,7 +18,7 @@ profiles:
       and engine skid (~20 lb, est.), Hefty steel rock sliders (~120 lb pair, owner
       report; replaced the factory step rails, ~30 lb pair, est.). Removed: 4 x stock
       16in OR alloy (23.35 lb) + Rugged Trail P265/75R16 (39.8 lb), stock steel spare +
-      tyre (~66 lb), stock bumpers (~30 lb each, est.), stock skids (~12 lb, est.). Curb
+      tire (~66 lb), stock bumpers (~30 lb each, est.), stock skids (~12 lb, est.). Curb
       = full fuel, no occupants or cargo (usual_payload_kg). Weigh it (H07.10).'
     wheel_tire_assembly_kg: 40.3
     usual_payload_kg: 127.0
@@ -36,13 +36,13 @@ profiles:
     - 1.283
     - 1.0
     - 0.769
-    tyre_loaded_circumference_m: 2.559
+    tire_loaded_circumference_m: 2.559
     driveline_evidence: 'Final drive 4.08: regeared by the operator from the Off-Road
       trim''s stock 3.69. Gearbox: the FS6R31A 6-speed manual''s published ratios
       4.368/2.518/1.743/1.283/1.000/0.769 (reverse 3.966; diyauto.com, clubfrontier.org),
       confirmed for 2nd-6th within 0.4 % by same-instant broadcast rpm / GPS speed on
       steady cruise over every September 2026 drive (H07.11). Rolling circumference
-      2.559 m measured the same way (5th: 9,611 pairs, 22 sessions); tyres LT285/75R16
+      2.559 m measured the same way (5th: 9,611 pairs, 22 sessions); tires LT285/75R16
       load range E at ~34 psi (free 2.617 m, published 634 rev/mi = 2.538 m, Rhyne
       load/pressure model 2.583 m new). data/analyses/2026-10-03-gear-ratios-steady-cruise.md.
       Was 2.609 m (solved from 5th on three clusters) until 2026-10-03 (operator).'
