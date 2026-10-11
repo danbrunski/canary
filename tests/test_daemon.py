@@ -217,6 +217,9 @@ async def test_storage_sink_drains_backlog_in_bounded_batches() -> None:
         async def close(self) -> Path | None:
             return None
 
+        def publish_stats(self) -> dict[str, Any]:
+            return {}
+
     queue: asyncio.Queue[TelemetryRecord] = asyncio.Queue()
     for i in range(2500):
         queue.put_nowait(TelemetryRecord.can(1_778_000_000.0 + i, 0x123, b"12345678"))
@@ -262,6 +265,9 @@ async def test_storage_sink_coalesces_records_arriving_just_after_first() -> Non
 
         async def close(self) -> Path | None:
             return None
+
+        def publish_stats(self) -> dict[str, Any]:
+            return {}
 
     queue: asyncio.Queue[TelemetryRecord] = asyncio.Queue()
     queue.put_nowait(TelemetryRecord.can(1_778_000_000.0, 0x123, b"12345678"))

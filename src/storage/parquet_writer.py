@@ -7,6 +7,16 @@ it is published (and the directory entry fsync'd after the rename): once
 still buffered since the last flush (bounded by ``flush_interval_seconds`` /
 ``max_rows``) can be lost. A chunk caught mid-write still leaves a truncated
 tail, which the loader skips and the husk sweep removes.
+
+Slow cards (``publish_in_background``): the daemon's writer hands each due
+chunk to one background thread and keeps buffering while it is written and
+fsync'd. A cheap SD card stalled one fsync for 12.8 s on 2026-10-11; with the
+publish inline, the storage sink stopped draining for the whole stall and its
+queue dropped ~7,000 records a minute. In the background a stall only delays
+the next chunk, which grows to hold what arrived meanwhile. Explicit
+``flush()`` (rotation, isolated-directory entry and exit, ``close()``) still
+waits, so "once ``flush()`` returns, everything accepted is on disk" holds;
+the path a periodic write returns is that of a chunk already durable.
 """
 
 from __future__ import annotations
@@ -14,8 +24,11 @@ from __future__ import annotations
 import json
 import logging
 import os
+import time
 from collections.abc import Callable, Iterable
-from datetime import UTC, datetime
+from concurrent.futures import Future, ThreadPoolExecutor
+from dataclasses import dataclass, field
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -69,8 +82,59 @@ TELEMETRY_SCHEMA: Any = _PA.schema(
 ENGINE_RUN_TIME_CHANNELS = frozenset({"RUN_TIME", "run_time", "runtime", "engine_run_time"})
 
 
+#: Rows a background-publishing writer buffers, behind a chunk still being
+#: written, before it waits for that chunk (backpressure) as an inline writer
+#: always does. In units of ``max_rows``: 20 x 10,000 rows is ~90 MB of
+#: records, two minutes of a busy bus — longer than any stall measured.
+BACKGROUND_BUFFER_CHUNKS = 20
+
+
 class IsolatedSessionExistsError(FileExistsError):
     """An isolated directory (capture, tuning, replay) already holds a recording."""
+
+
+@dataclass
+class PublishStats:
+    """How the chunk publishes are keeping up (``/status`` storage sink).
+
+    ``deferred``: a flush came due while the previous chunk was still being
+    written, so its rows waited in the buffer. ``waits``: the buffer reached
+    its cap and the writer blocked on the slow chunk, as an inline writer
+    always does. ``errors``: chunk writes that raised; their rows were put
+    back in the buffer and retried.
+    """
+
+    background: bool = False
+    published: int = 0
+    last_ms: float | None = None
+    max_ms: float = 0.0
+    deferred: int = 0
+    waits: int = 0
+    errors: int = 0
+    last_error: str | None = None
+    rows_in_flight: int = 0
+
+    def snapshot(self) -> dict[str, Any]:
+        return {
+            "background": self.background,
+            "chunks_published": self.published,
+            "last_publish_ms": self.last_ms,
+            "max_publish_ms": self.max_ms,
+            "publishes_deferred": self.deferred,
+            "publish_waits": self.waits,
+            "publish_errors": self.errors,
+            "last_publish_error": self.last_error,
+            "rows_in_flight": self.rows_in_flight,
+        }
+
+
+@dataclass
+class _Publish:
+    """One chunk handed to the background thread."""
+
+    path: Path
+    records: list[TelemetryRecord] = field(repr=False)
+    future: Future[float] = field(repr=False)
 
 
 class ParquetTelemetryWriter:
@@ -88,6 +152,7 @@ class ParquetTelemetryWriter:
         clock: Callable[[], datetime] | None = None,
         arming_gate: RecordGate | None = None,
         broadcast_stale_timeout_seconds: float = DEFAULT_BROADCAST_STALE_TIMEOUT_SECONDS,
+        publish_in_background: bool = False,
     ):
         self._clock: Callable[[], datetime] = (
             (lambda: datetime.now(UTC)) if clock is None else clock
@@ -141,6 +206,16 @@ class ParquetTelemetryWriter:
         #: The records the last :meth:`write_many` recorded (not withheld by
         #: the arming gate).
         self.last_accepted: list[TelemetryRecord] = []
+        #: Background publishing (see the module docstring): at most one chunk
+        #: in flight, so chunks land in index order.
+        self.publish_in_background = publish_in_background
+        self.publish_stats = PublishStats(background=publish_in_background)
+        self._executor: ThreadPoolExecutor | None = None
+        self._in_flight: _Publish | None = None
+        #: After a chunk write raised, the next periodic attempt waits one
+        #: flush interval: a disk that keeps failing is retried at the
+        #: inline writer's cadence, not on every record.
+        self._retry_at: datetime | None = None
 
     def write(self, record: TelemetryRecord) -> Path | None:
         """Append one record, flushing when row count or time threshold is reached.
@@ -177,12 +252,10 @@ class ParquetTelemetryWriter:
         if self.can_storage.is_change_only and not self._can_filter.keep_record(record):
             self.can_frames_suppressed += 1
             self.can_frames_suppressed_total += 1
-            return True, (self.flush() if self.flush_due() else None)
+            return True, self.publish_due()
         self._buffer.append(record)
         self.rows_written += 1
-        if len(self._buffer) >= self.max_rows or self.flush_due():
-            return True, self.flush()
-        return True, None
+        return True, self.publish_due()
 
     def write_many(self, records: Iterable[TelemetryRecord]) -> list[Path]:
         """Write each record; :attr:`last_accepted` is then the ones recorded."""
@@ -201,25 +274,109 @@ class ParquetTelemetryWriter:
         elapsed = (self._clock() - self._last_flush).total_seconds()
         return elapsed >= self.flush_interval_seconds
 
+    def publish_due(self) -> Path | None:
+        """The periodic flush: publish the buffer when the row count or the
+        interval says so. Inline, that is :meth:`flush`. In the background it
+        never waits on the disk unless the buffer has reached its cap; it
+        returns the path of a chunk that has finished, durable, since the
+        last call, or ``None``."""
+        if not self.publish_in_background:
+            if len(self._buffer) >= self.max_rows or self.flush_due():
+                return self.flush()
+            return None
+        finished = self._collect(wait=False)
+        if not self._buffer or not (len(self._buffer) >= self.max_rows or self.flush_due()):
+            return finished
+        if self._retry_at is not None and self._clock() < self._retry_at:
+            return finished
+        if self._in_flight is not None:
+            if len(self._buffer) < self.max_rows * BACKGROUND_BUFFER_CHUNKS:
+                self.publish_stats.deferred += 1
+                return finished
+            self.publish_stats.waits += 1
+            finished = self._collect(wait=True) or finished
+        self._submit()
+        return finished
+
     def flush(self) -> Path | None:
-        """Write the current buffer to one Parquet file and clear it."""
+        """Write the current buffer to one Parquet file and clear it.
+
+        Durable on return, in both modes: a chunk still being written in the
+        background is waited for first, and this one is written inline.
+        """
+        finished = self._collect(wait=True) if self.publish_in_background else None
         if not self._buffer:
             self._last_flush = self._clock()
-            return None
+            return finished
 
-        rows = [record.parquet_row() for record in self._buffer]
-        table = _PA.Table.from_pylist(rows, schema=chunk_schema(self.can_storage, self._buffer))
         path = self.paths.root / f"telemetry-{self._chunk_index:05d}.parquet"
-        _write_table_atomic(table, path, compression="snappy")
-
+        # A write that raises keeps the buffer, so the next flush retries it.
+        _write_records_atomic(self._buffer, path, self.can_storage)
         self._chunk_index += 1
-        self._buffer.clear()
+        self._buffer = []
         self._last_flush = self._clock()
         self.files_written.append(path)
         return path
 
     def close(self) -> Path | None:
-        return self.flush()
+        flushed = self.flush()
+        if self._executor is not None:
+            # Nothing is in flight after flush(); a later write starts another.
+            self._executor.shutdown(wait=True)
+            self._executor = None
+        return flushed
+
+    def _submit(self) -> None:
+        """Hand the buffer to the background thread as the next chunk."""
+        if self._executor is None:
+            self._executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="parquet-publish")
+        path = self.paths.root / f"telemetry-{self._chunk_index:05d}.parquet"
+        self._chunk_index += 1
+        records, self._buffer = self._buffer, []
+        can_storage = self.can_storage
+        self._last_flush = self._clock()
+        self.publish_stats.rows_in_flight = len(records)
+
+        def publish() -> float:
+            started = time.perf_counter()
+            _write_records_atomic(records, path, can_storage)
+            return (time.perf_counter() - started) * 1000.0
+
+        self._in_flight = _Publish(path, records, self._executor.submit(publish))
+
+    def _collect(self, *, wait: bool) -> Path | None:
+        """Retire the chunk in flight once it is written; its path, if it is.
+
+        A write that raised is logged and counted, not re-raised: its rows go
+        back to the front of the buffer, so the next publish retries them,
+        as an inline flush that raises keeps its buffer. The rows that arrived
+        meanwhile are not refused for it.
+        """
+        publish = self._in_flight
+        if publish is None or (not wait and not publish.future.done()):
+            return None
+        self._in_flight = None
+        stats = self.publish_stats
+        stats.rows_in_flight = 0
+        try:
+            elapsed_ms = publish.future.result()
+        except Exception as exc:  # noqa: BLE001 — counted and surfaced in /status
+            stats.errors += 1
+            stats.last_error = f"{type(exc).__name__}: {exc}"
+            log.error(
+                "background chunk write failed; %d row(s) back in the buffer for a retry",
+                len(publish.records),
+                extra={"path": str(publish.path), "error": stats.last_error},
+            )
+            self._buffer[:0] = publish.records
+            self._retry_at = self._clock() + timedelta(seconds=self.flush_interval_seconds)
+            return None
+        self._retry_at = None
+        stats.published += 1
+        stats.last_ms = round(elapsed_ms, 3)
+        stats.max_ms = round(max(stats.max_ms, elapsed_ms), 3)
+        self.files_written.append(publish.path)
+        return publish.path
 
     def rotate_session(self, *, started_at: datetime | None = None) -> Path | None:
         """Flush the current buffer and start a new timestamped session directory."""
@@ -475,6 +632,16 @@ def _engine_run_time_seconds(record: TelemetryRecord) -> float | None:
         return float(record.value)
     except (TypeError, ValueError):
         return None
+
+
+def _write_records_atomic(
+    records: list[TelemetryRecord], path: Path, can_storage: CanStorage
+) -> None:
+    """One session chunk: ``records`` as a table, published by
+    :func:`_write_table_atomic`."""
+    rows = [record.parquet_row() for record in records]
+    table = _PA.Table.from_pylist(rows, schema=chunk_schema(can_storage, records))
+    _write_table_atomic(table, path, compression="snappy")
 
 
 def _write_table_atomic(table: Any, path: Path, *, compression: str) -> None:

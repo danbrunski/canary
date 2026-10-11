@@ -269,11 +269,15 @@ async def run_storage_sink(
             try:
                 first = await asyncio.wait_for(queue.get(), timeout=poll_interval)
             except TimeoutError:
+                # The periodic publish, never ``flush``: a background-publishing
+                # writer must not wait out a slow chunk here, or the queue fills
+                # behind it exactly as it did with the publish inline.
                 if await async_writer.flush_due():
                     await _storage_call(
-                        async_writer.flush,
+                        async_writer.publish_due,
                         health_monitor=health_monitor,
                     )
+                    _observe_publish(health_monitor, async_writer)
                     if storage_path is not None and storage_warning_mb is not None:
                         warn_if_storage_low(storage_path, storage_warning_mb)
                 continue
@@ -325,6 +329,7 @@ async def run_storage_sink(
                         # record, and counting those claimed recording had
                         # begun while nothing was written (2026-10-04).
                         health_monitor.startup.note_stored(async_writer.last_accepted)
+                _observe_publish(health_monitor, async_writer)
             finally:
                 for _ in records:
                     queue.task_done()
@@ -933,6 +938,13 @@ def _did_to_dict(record: TelemetryRecord, decoded: DecodedDid) -> dict[str, Any]
         "value": decoded.value,
         "unit": decoded.unit,
     }
+
+
+def _observe_publish(
+    health_monitor: HealthMonitor | None, writer: AsyncParquetTelemetryWriter
+) -> None:
+    if health_monitor is not None:
+        health_monitor.observe_storage_publish("storage", writer.publish_stats())
 
 
 def _sink_queue_size(queue: asyncio.Queue[TelemetryRecord]) -> int:

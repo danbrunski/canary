@@ -740,6 +740,12 @@ class HealthMonitor:
                 max(float(state.get("max_flushing_write_ms", 0.0)), elapsed_ms), 3
             )
 
+    def observe_storage_publish(self, name: str, stats: dict[str, Any]) -> None:
+        """The durable writer's chunk publishes (``PublishStats``): with
+        background publishing, ``max_publish_ms`` is the disk's stall and the
+        write timings above are not."""
+        self._sink_state(name).update(stats)
+
     def _sink_state(self, name: str) -> dict[str, Any]:
         return self._telemetry_sinks.setdefault(
             name,

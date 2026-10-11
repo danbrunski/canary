@@ -562,6 +562,9 @@ async def run_daemon(
             config.collection.storage_path,
             arming_gate=arming_gate,
             broadcast_stale_timeout_seconds=config.collection.broadcast_stale_timeout_seconds,
+            # A slow card's fsync stall must not stop the sink draining
+            # (2026-10-11: 12.8 s stalls, ~7,000 records dropped a minute).
+            publish_in_background=True,
         )
         if writer is None
         else writer

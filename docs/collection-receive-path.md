@@ -144,6 +144,19 @@ is callable).
   the C10 storage-stall scenario dropped 3,742 records behind a 256-deep
   queue that reported depth 0. Read the high-water mark, not the last
   depth, when attributing a drop.
+- The daemon's writer publishes each chunk (Parquet write + fsync) on a
+  background thread and keeps accepting rows meanwhile
+  (`publish_in_background`, 2026-10-11). A cheap SD card stalled one fsync
+  for 12.8 s, and with the publish inline the storage sink stopped draining
+  for the whole stall: its queue dropped ~7,000 records a minute. Now a stall
+  only grows the next chunk. `telemetry_sinks.storage` carries the publish
+  side: `max_publish_ms` is the disk's worst stall (the `*_write_ms` fields
+  time the sink's calls, which no longer wait on it), `publishes_deferred`
+  counts flushes that waited behind a slow chunk, and `publish_waits` counts
+  the buffer reaching its cap (20 chunks) and blocking as the inline writer
+  always did. `publish_errors` / `last_publish_error`: a chunk write raised;
+  its rows went back in the buffer for a retry. Explicit flushes (rotation,
+  capture entry and exit, shutdown) still wait until everything is on disk.
 - Decode/conversion dedup (the broadcast sink and storage sink both decode
   CAN frames) is **deferred**: not profiled here and ownership is shared
   between the dashboard stream and persistence; nothing in this task

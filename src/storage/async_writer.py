@@ -68,6 +68,15 @@ class AsyncParquetTelemetryWriter:
         async with self._lock:
             return bool(self._writer.flush_due())
 
+    async def publish_due(self) -> Path | None:
+        """The periodic flush (:meth:`ParquetTelemetryWriter.publish_due`):
+        with background publishing it does not wait on the disk."""
+        return await self._call(self._writer.publish_due)
+
+    def publish_stats(self) -> dict[str, Any]:
+        """How the chunk publishes are keeping up, for ``/status``."""
+        return self._writer.publish_stats.snapshot()
+
     async def enter_replay_mode(self, replay_id: str) -> Path | None:
         return await self._call(self._writer.enter_replay_mode, replay_id)
 
