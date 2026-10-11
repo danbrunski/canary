@@ -20,8 +20,6 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-import pdfplumber
-
 # A param name is mostly uppercase, may include digits/spaces/punctuation
 # common in Nissan signal naming (B1, B2, /, -, ·, *, parens, dots).
 _PARAM_NAME_RE = re.compile(r"^[A-Z0-9·][A-Z0-9 /\-\(\)\.\*·\+]{2,28}$")
@@ -179,6 +177,12 @@ def extract_pdf_section(
     Returns deduplicated `[{"name": ..., "page": ...}]`, preserving the
     page on which the name was first seen so we can cite the FSM.
     """
+    # pdfplumber is the dev extra (tools/extract_fsm_signals.py). Imported here,
+    # not at module level: the daemon reaches PHYSICAL_LIMITS through the
+    # quality gate, and a fresh Pi without dev tools crash-looped on it
+    # (2026-10-11).
+    import pdfplumber
+
     seen: set[str] = set()
     out: list[dict[str, str | int]] = []
     with pdfplumber.open(pdf_path) as pdf:
@@ -586,6 +590,8 @@ def extract_pdf_section_with_specs(
         "expected_ranges": list[{"min", "max", "unit"}],
       }
     """
+    import pdfplumber  # dev extra; see extract_section
+
     by_name: dict[str, dict[str, Any]] = {}
     with pdfplumber.open(pdf_path) as pdf:
         for page_no in pages:

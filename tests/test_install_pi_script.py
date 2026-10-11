@@ -93,6 +93,8 @@ _INSTALLED_UNIT_FILES = (
     "tmpfiles-canary.conf",
     "canary-gpsd@.service",
     "canary-chrony-pps.service",
+    "can0.service",
+    "70-canable-can0.rules",
 )
 
 
@@ -797,3 +799,16 @@ def test_an_explicit_hostname_wins_and_is_validated(installer: Installer) -> Non
 
     refused = installer.run(check=False, CANARY_HOSTNAME="Bad_Name")
     assert refused.returncode == 1 and "REFUSING hostname" in refused.stderr
+
+
+def test_can0_comes_up_on_every_boot(installer: Installer) -> None:
+    """can0.service lived only in deploy_truck.sh, so a docs-installed Pi lost
+    its bus at the first reboot (2026-10-11)."""
+    installer.run()
+
+    unit = installer.root / "etc" / "systemd" / "system" / "can0.service"
+    assert "BindsTo=sys-subsystem-net-devices-can0.device" in unit.read_text()
+    rule = installer.root / "etc" / "udev" / "rules.d" / "70-canable-can0.rules"
+    assert 'ENV{SYSTEMD_WANTS}+="can0.service"' in rule.read_text()
+    assert "systemctl enable can0.service" in installer.calls("systemctl enable")
+    assert not [c for c in installer.calls("systemctl start") if "can0" in c]

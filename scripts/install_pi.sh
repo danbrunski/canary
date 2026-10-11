@@ -148,6 +148,14 @@ chmod 0640 "${CANARY_ENV}"
 install -m 0644 "${CANARY_HOME}/systemd/canary.service" "${CANARY_SERVICE}"
 install -m 0644 "${CANARY_HOME}/systemd/canary-mcp.service" \
   "$(dirname "${CANARY_SERVICE}")/canary-mcp.service"
+# can0 at the configured bitrate on every boot and every re-appearance of the
+# device (HAT driver probe, Canable re-enumeration). It lived only in
+# deploy_truck.sh, so a Pi installed by docs/pi-setup.md had can0 up until its
+# first reboot and then a daemon with no bus (2026-10-11). Enabled, not
+# started: the unit BindsTo the device and fails without one.
+install -m 0644 "${CANARY_HOME}/systemd/can0.service" "$(dirname "${CANARY_SERVICE}")/can0.service"
+install -m 0644 "${CANARY_HOME}/systemd/70-canable-can0.rules" \
+  "${ROOT}/etc/udev/rules.d/70-canable-can0.rules"
 # UPS power-loss auto-shutdown watchdog (Geekworm X1202). Independent of the
 # canary daemon; self-disarms when no UPS is present. Runs on system python3
 # (uses lgpio), not the venv.
@@ -209,15 +217,16 @@ if [[ -n "${canary_hostname}" && "${canary_hostname}" != "${current_hostname}" ]
     echo "REFUSING hostname '${canary_hostname}': lowercase letters, digits and inner hyphens only." >&2
     exit 1
   fi
-  if [[ -z "${ROOT}" ]] && command -v hostnamectl >/dev/null 2>&1; then
-    hostnamectl set-hostname "${canary_hostname}"
-  else
-    printf '%s\n' "${canary_hostname}" >"${HOSTNAME_FILE}"
-  fi
+  # /etc/hosts first: between the two, sudo cannot resolve its own host.
   if [[ -f "${HOSTS_FILE}" ]] && grep -q '^127\.0\.1\.1[[:space:]]' "${HOSTS_FILE}"; then
     sed -i "s/^127\.0\.1\.1[[:space:]].*/127.0.1.1\t${canary_hostname}/" "${HOSTS_FILE}"
   else
     printf '127.0.1.1\t%s\n' "${canary_hostname}" >>"${HOSTS_FILE}"
+  fi
+  if [[ -z "${ROOT}" ]] && command -v hostnamectl >/dev/null 2>&1; then
+    hostnamectl set-hostname "${canary_hostname}"
+  else
+    printf '%s\n' "${canary_hostname}" >"${HOSTNAME_FILE}"
   fi
   echo "Hostname: ${current_hostname:-<none>} -> ${canary_hostname} (reach it at ${canary_hostname}.local)"
   current_hostname="${canary_hostname}"
@@ -690,6 +699,8 @@ fi
 env "${DATA_DRIVE_ENV[@]}" bash "${CANARY_HOME}/scripts/data_drive.sh" guard
 
 systemctl daemon-reload
+udevadm control --reload || true
+systemctl enable can0.service
 systemctl enable canary.service
 systemctl enable canary-mcp.service
 systemctl enable ups-shutdown.service

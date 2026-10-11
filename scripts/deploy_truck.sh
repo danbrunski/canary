@@ -38,16 +38,11 @@ install -d -o "${CANARY_USER}" -g "${CANARY_GROUP}" -m 0750 "${DATA_DIR}/control
 echo "ensured ${DATA_DIR}/control"
 
 step "3/4 can0 auto-recovery"
-install -m 0644 "${REPO_ROOT}/systemd/can0.service" /etc/systemd/system/can0.service
-install -m 0644 "${REPO_ROOT}/systemd/70-canable-can0.rules" \
-        /etc/udev/rules.d/70-canable-can0.rules
-udevadm control --reload
-systemctl daemon-reload
-# Enable only: the unit BindsTo the can0 device, so it starts when the
-# Canable appears (udev SYSTEMD_WANTS) — starting it now with no adapter
-# attached would just fail.
-systemctl enable can0.service
-echo "can0.service enabled (starts when the Canable is plugged in)"
+# install_pi.sh (step 1) installs and enables can0.service and its udev rule
+# since 2026-10-11; this step only reports it.
+systemctl is-enabled can0.service >/dev/null 2>&1 \
+  && echo "can0.service enabled (starts when can0 appears)" \
+  || echo "WARNING: can0.service is not enabled" >&2
 
 step "4/4 start the daemon"
 systemctl enable canary.service

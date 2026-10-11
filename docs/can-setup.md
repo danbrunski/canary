@@ -110,6 +110,8 @@ make the link come back without a human:
   brown-out auto-recovers the link. Harmless when the HAT is the
   adapter.
 
+`scripts/install_pi.sh` installs and enables both (since 2026-10-11); by hand:
+
 ```bash
 sudo install -m0644 systemd/can0.service /etc/systemd/system/can0.service
 sudo install -m0644 systemd/70-canable-can0.rules \

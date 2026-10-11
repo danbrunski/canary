@@ -129,8 +129,10 @@ firmware so it appears as a native `can0` (slcan firmware exposes only
 `/dev/ttyACM0` and breaks the headless automation) — if `can0` does not
 appear on plug-in, reflash per **`docs/canable-firmware.md`**.
 
-Once `can0` exists, bring it up for the default active-diagnostics
-OBD + CAN mode:
+`install_pi.sh` installs and enables `can0.service` with its udev rule, so
+`can0` comes up at 500 kbit/s on every boot and whenever the device
+reappears. To raise it by hand (first check, or after changing the
+bitrate) for the default active-diagnostics OBD + CAN mode:
 
 ```bash
 sudo ip link set can0 down || true
