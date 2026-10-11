@@ -128,6 +128,10 @@ Rejected, with reasons, so they are not re-proposed:
   set the hostname, enable avahi, install `iw` and `avahi-utils`, set the
   WiFi regulatory domain, materialise the client profiles, and apply
   `never-default` to the wired connection.
+  *Hostname done (2026-10-11):* a first install names the Pi `canary-XXXX`
+  from its wired MAC, so two CANaries on one LAN no longer race for
+  `canary.local` (docs/pi-setup.md). A fallback AP's SSID should carry the
+  same suffix. The rest of this item is open.
   **WiFi passphrases must not land in a repo-tracked config file.** Keep
   the network list under `/etc/canary/` beside the control token, or let
   NetworkManager hold the secrets in its own store and have the installer

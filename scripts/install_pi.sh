@@ -106,6 +106,11 @@ install -d -m 0750 "${CANARY_DATA_DIR}/audit"
 
 chown -R "${CANARY_USER}:${CANARY_GROUP}" "${CANARY_HOME}" "${CANARY_DATA_DIR}"
 
+# A first install is one with no daemon config yet. It decides the hostname
+# below; a re-run (canary-update) never renames a Pi.
+FIRST_INSTALL=0
+[[ -f "${CANARY_CONFIG}" ]] || FIRST_INSTALL=1
+
 if [[ ! -f "${CANARY_CONFIG}" ]]; then
   install -m 0644 "${CANARY_HOME}/canary.pi.example.yaml" "${CANARY_CONFIG}"
   echo "Created ${CANARY_CONFIG}; edit it before starting the service."
@@ -159,6 +164,64 @@ modprobe i2c-dev 2>/dev/null || true
 install -m 0644 "${CANARY_HOME}/systemd/tmpfiles-canary.conf" \
   "${ROOT}/etc/tmpfiles.d/canary.conf"
 systemd-tmpfiles --create "${ROOT}/etc/tmpfiles.d/canary.conf"
+
+# ---------------------------------------------------------------------------
+# Hostname: canary-<last four hex digits of the board's MAC>
+# ---------------------------------------------------------------------------
+# Every CANary answering as `canary.local` made two of them on one network
+# race for the name: mDNS renamed the loser `canary-2.local`, so the name
+# meant whichever booted first (2026-10-11, a second Pi on the dev LAN). A
+# suffix from the hardware is unique without coordination and stable across
+# reinstalls, the usual appliance convention. Only on a first install, and
+# only over a generic name (the image's `raspberrypi`, or a bare `canary`): a
+# name someone chose is theirs. CANARY_HOSTNAME=<name> sets one explicitly on
+# any run. Runs before cloud-init is disabled below, which matters: on a
+# later boot cloud-init would put the Imager's hostname back.
+HOSTNAME_FILE="${ROOT}/etc/hostname"
+HOSTS_FILE="${ROOT}/etc/hosts"
+NET_DIR="${CANARY_NET_DIR:-/sys/class/net}"
+current_hostname="$(tr -d '[:space:]' <"${HOSTNAME_FILE}" 2>/dev/null || true)"
+canary_hostname=""
+if [[ -n "${CANARY_HOSTNAME:-}" ]]; then
+  canary_hostname="${CANARY_HOSTNAME}"
+elif [[ "${FIRST_INSTALL}" -eq 1 && "${current_hostname}" =~ ^(raspberrypi|canary|localhost)?$ ]]; then
+  # The wired MAC: printed nowhere, but fixed in the SoC's OTP on a Pi, and
+  # the Wi-Fi MAC is derived from it.
+  mac=""
+  if [[ -r "${NET_DIR}/eth0/address" ]]; then
+    mac="$(cat "${NET_DIR}/eth0/address")"
+  else
+    for addr in "${NET_DIR}"/*/address; do
+      [[ "${addr}" == */lo/address || ! -r "${addr}" ]] && continue
+      mac="$(cat "${addr}")"
+      break
+    done
+  fi
+  mac="${mac//:/}"
+  if [[ "${mac}" =~ ^[0-9a-fA-F]{12}$ ]]; then
+    canary_hostname="canary-$(tr '[:upper:]' '[:lower:]' <<<"${mac: -4}")"
+  else
+    echo "WARNING: no network MAC found; keeping hostname '${current_hostname}'" >&2
+  fi
+fi
+if [[ -n "${canary_hostname}" && "${canary_hostname}" != "${current_hostname}" ]]; then
+  if [[ ! "${canary_hostname}" =~ ^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$ ]]; then
+    echo "REFUSING hostname '${canary_hostname}': lowercase letters, digits and inner hyphens only." >&2
+    exit 1
+  fi
+  if [[ -z "${ROOT}" ]] && command -v hostnamectl >/dev/null 2>&1; then
+    hostnamectl set-hostname "${canary_hostname}"
+  else
+    printf '%s\n' "${canary_hostname}" >"${HOSTNAME_FILE}"
+  fi
+  if [[ -f "${HOSTS_FILE}" ]] && grep -q '^127\.0\.1\.1[[:space:]]' "${HOSTS_FILE}"; then
+    sed -i "s/^127\.0\.1\.1[[:space:]].*/127.0.1.1\t${canary_hostname}/" "${HOSTS_FILE}"
+  else
+    printf '127.0.1.1\t%s\n' "${canary_hostname}" >>"${HOSTS_FILE}"
+  fi
+  echo "Hostname: ${current_hostname:-<none>} -> ${canary_hostname} (reach it at ${canary_hostname}.local)"
+  current_hostname="${canary_hostname}"
+fi
 
 # Stable operator command. It discovers the active checkout through
 # /etc/canary/canary.env, so callers do not need to cd into the repository.
@@ -658,6 +721,9 @@ fi
 
 cat <<EOF
 CANary Pi install complete.
+
+This Pi answers as ${current_hostname:-<unknown>}.local
+  Dashboard: http://${current_hostname:-<pi-hostname>}.local:8000/
 
 Next:
   1. Edit ${CANARY_CONFIG}

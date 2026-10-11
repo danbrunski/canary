@@ -97,6 +97,16 @@ a fresh card); otherwise it prints `unchanged: <service> not restarted`.
 ("set `hardware.gps.source: gpsd`") appears only when the config's
 `hardware.gps.source` is not already `gpsd`.
 
+**Hostname.** On a first install the installer renames a Pi still called
+`raspberrypi` or `canary` to `canary-XXXX`, the last four hex digits of its
+wired MAC (`88:a2:9e:1d:89:74` → `canary-8974`), and prints it at the end:
+the Pi is then `canary-XXXX.local`. Every CANary calling itself `canary` made
+two of them on one network race for the name, and mDNS gave whichever booted
+second `canary-2.local`. A name you chose yourself is kept, a re-run
+(`canary-update`) never renames, and `CANARY_HOSTNAME=<name>` sets one
+explicitly. To find the name without a screen: `ip link show eth0` on the Pi,
+or your router's client list.
+
 The installer copies `canary.pi.example.yaml` to `/etc/canary/canary.yaml` if
 the config does not already exist. Edit that file before first start:
 

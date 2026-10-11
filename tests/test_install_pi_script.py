@@ -132,6 +132,14 @@ class Installer:
         return self.calls("systemctl restart")
 
 
+def _fake_net_dir(tmp_path: Path, **macs: str) -> Path:
+    net = tmp_path / "sys-class-net"
+    for iface, mac in {"lo": "00:00:00:00:00:00", **macs}.items():
+        (net / iface).mkdir(parents=True, exist_ok=True)
+        (net / iface / "address").write_text(mac + "\n")
+    return net
+
+
 @pytest.fixture
 def installer(tmp_path: Path) -> Installer:
     checkout = tmp_path / "checkout"
@@ -186,6 +194,8 @@ def installer(tmp_path: Path) -> Installer:
         # Adopting a drive mounts real block devices; the guard (fstab-driven)
         # still runs.
         "CANARY_DATA_DRIVE_ADOPT": "0",
+        # The laptop's own interfaces must not name the scratch Pi.
+        "CANARY_NET_DIR": str(_fake_net_dir(tmp_path, eth0="88:a2:9e:1d:89:74")),
     }
     return Installer(checkout=checkout, root=root, shim_log=shim_log, env=env)
 
@@ -729,3 +739,61 @@ def test_no_data_drive_no_guard_and_removing_the_entry_removes_it(
     fstab.write_text(root_line)
     installer.run()
     assert not any(d.exists() for d in _dropins(installer))
+
+
+# ---------------------------------------------------------------------------
+# Hostname (2026-10-11): canary-<MAC suffix>, so two CANaries can share a LAN
+# ---------------------------------------------------------------------------
+
+
+def _hostname(installer: Installer, name: str | None) -> Path:
+    path = installer.root / "etc" / "hostname"
+    if name is not None:
+        path.write_text(name + "\n")
+    (installer.root / "etc" / "hosts").write_text(
+        f"127.0.0.1\tlocalhost\n127.0.1.1\t{name or 'raspberrypi'}\n"
+    )
+    return path
+
+
+def test_a_first_install_names_the_pi_from_its_mac(installer: Installer) -> None:
+    """Two Pis answering as canary.local raced for the name on one LAN."""
+    hostname = _hostname(installer, "canary")
+    result = installer.run()
+
+    assert hostname.read_text() == "canary-8974\n"
+    hosts = (installer.root / "etc" / "hosts").read_text()
+    assert "127.0.1.1\tcanary-8974\n" in hosts and "127.0.0.1\tlocalhost" in hosts
+    assert "This Pi answers as canary-8974.local" in result.stdout
+
+
+def test_a_rerun_never_renames(installer: Installer) -> None:
+    """canary-update re-runs the installer; the dev Pi stays `canary`."""
+    hostname = _hostname(installer, "canary")
+    installer.config.parent.mkdir(parents=True, exist_ok=True)
+    installer.config.write_text("existing: config\n")
+
+    installer.run()
+    assert hostname.read_text() == "canary\n"
+
+
+def test_a_chosen_hostname_is_kept(installer: Installer) -> None:
+    hostname = _hostname(installer, "truckpi")
+    installer.run()
+    assert hostname.read_text() == "truckpi\n"
+
+
+def test_without_eth0_another_interface_names_it(installer: Installer) -> None:
+    hostname = _hostname(installer, "raspberrypi")
+    net = _fake_net_dir(installer.root.parent / "other", wlan0="D8:3A:DD:00:AB:CD")
+    installer.run(CANARY_NET_DIR=str(net))
+    assert hostname.read_text() == "canary-abcd\n"
+
+
+def test_an_explicit_hostname_wins_and_is_validated(installer: Installer) -> None:
+    hostname = _hostname(installer, "truckpi")
+    installer.run(CANARY_HOSTNAME="canary-garage")
+    assert hostname.read_text() == "canary-garage\n"
+
+    refused = installer.run(check=False, CANARY_HOSTNAME="Bad_Name")
+    assert refused.returncode == 1 and "REFUSING hostname" in refused.stderr
