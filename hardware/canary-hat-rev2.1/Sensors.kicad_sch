@@ -4,6 +4,13 @@
 	(generator_version "10.0")
 	(uuid "9ef2a228-d549-4b66-b052-5035011a5237")
 	(paper "A4")
+	(title_block
+		(title "CANary-HAT")
+		(date "2026-10-12")
+		(rev "2.1")
+		(comment 1 "Barometer (U5), IMU (U6), GNSS (U7), backup cell (BT1), U.FL (J4)")
+		(comment 2 "Design record: docs/CANary-HAT-Rev2.1.md")
+	)
 	(lib_symbols
 		(symbol "2026-08-09_04-12-51:BMP384"
 			(pin_names
@@ -204,7 +211,7 @@
 						)
 					)
 				)
-				(pin bidirectional line
+				(pin input line
 					(at 0 -10.16 0)
 					(length 7.62)
 					(name "SDO"
@@ -480,7 +487,7 @@
 						(type none)
 					)
 				)
-				(pin bidirectional line
+				(pin input line
 					(at 0 -2.54 0)
 					(length 7.62)
 					(name "SDX"
@@ -498,7 +505,7 @@
 						)
 					)
 				)
-				(pin bidirectional line
+				(pin input line
 					(at 0 -5.08 0)
 					(length 7.62)
 					(name "SCX"

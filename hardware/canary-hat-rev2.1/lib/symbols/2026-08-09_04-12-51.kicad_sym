@@ -201,7 +201,7 @@
 					)
 				)
 			)
-			(pin bidirectional line
+			(pin input line
 				(at 0 -10.16 0)
 				(length 7.62)
 				(name "SDO"

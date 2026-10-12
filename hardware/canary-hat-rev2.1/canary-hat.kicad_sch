@@ -5,7 +5,11 @@
 	(uuid "e63e39d7-6ac0-4ffd-8aa3-1841a4541b55")
 	(paper "A4")
 	(title_block
-		(date "09 aug 2026")
+		(title "CANary-HAT")
+		(date "2026-10-12")
+		(rev "2.1")
+		(comment 1 "Top level: Pi 5 header (J1, DNP), HAT+ ID EEPROM")
+		(comment 2 "Design record: docs/CANary-HAT-Rev2.1.md")
 	)
 	(lib_symbols
 		(symbol "Connector_Generic:Conn_02x20_Odd_Even"
@@ -4183,7 +4187,7 @@
 		(in_bom yes)
 		(on_board yes)
 		(in_pos_files yes)
-		(dnp no)
+		(dnp yes)
 		(uuid "00000000-0000-0000-0000-000059ad464a")
 		(property "Reference" "J1"
 			(at 133.35 55.4798 0)
@@ -4195,7 +4199,7 @@
 				)
 			)
 		)
-		(property "Value" "2x20 stacking hdr 13mm"
+		(property "Value" "2x20 stacking hdr 13.5mm (DNP)"
 			(at 133.35 57.785 0)
 			(show_name no)
 			(do_not_autoplace no)
@@ -4238,7 +4242,7 @@
 				)
 			)
 		)
-		(property "Note" "2x20 STACKING header, 13mm plastic body - same part proven to clear the Pi 5 active cooler with the Waveshare HAT. Re-check if the X1202 ends up between the Pi and this board."
+		(property "Note" "DO NOT POPULATE at the assembler: the operator sources and fits J1. Part: a 2x20, 2.54 mm Raspberry Pi stacking header with a 13.5 mm (extended-height) female body, whose long pins come through the HAT. 13.5 mm is the height that clears the Pi 5 active cooler (~6.3 mm above the fan, measured on the stack, CANary-HAT-Rev2.1.md 13.5.7). A standard-height header does NOT fit: PCBWay fitted one on rev 2.0 because this line named no exact part (13.5.6). Not Adafruit 2223 (8.5 mm body)."
 			(at 133.35 55.4798 0)
 			(hide yes)
 			(show_name no)
@@ -4250,7 +4254,7 @@
 				(justify left)
 			)
 		)
-		(property "Height" "13mm insulator"
+		(property "Height" "13.5mm insulator"
 			(at 133.35 55.4798 0)
 			(hide yes)
 			(show_name no)
@@ -4262,7 +4266,7 @@
 				(justify left)
 			)
 		)
-		(property "Quote" "Operator-sourced - do not fit at the assembler. Candidates: Adafruit 2223 (2x20 stacking, 8.5mm body / 10mm pins) or 1979 (extra-tall). Confirm the insulator height against the mechanical stack before ordering."
+		(property "Quote" "Not quoted: DNP, operator-sourced and operator-fitted (decision 2026-10-12). Tell the assembler: J1 is intentionally unpopulated."
 			(at 8.89 107.95 0)
 			(hide yes)
 			(show_name no)

@@ -147,7 +147,7 @@
 					(type none)
 				)
 			)
-			(pin bidirectional line
+			(pin input line
 				(at 0 -2.54 0)
 				(length 7.62)
 				(name "SDX"
@@ -165,7 +165,7 @@
 					)
 				)
 			)
-			(pin bidirectional line
+			(pin input line
 				(at 0 -5.08 0)
 				(length 7.62)
 				(name "SCX"

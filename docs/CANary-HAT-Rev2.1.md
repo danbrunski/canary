@@ -90,7 +90,7 @@ AEM gauge answers what the new system actually runs on first key-on.
 | 11 | ~~One 40 MHz oscillator replaces the Y1 Pierce loop~~. **Decided 2026-10-12: Y1 stays a crystal, but a 3.2 × 2.5 mm 8 pF part with real start-up margin** (the §13.5.6 fallback design, chosen for sourcing) | Y1 Kyocera CX3225SA40000D0PTWCC, C33/C34 8.2 pF C0G, R43 0 Ω in series with OSC2; rev 2.0's ABLS2 + C5/C6 27 pF deleted |
 | 12 | **BT1 polarity reversed** — swap BT1's GND and D2-anode pins (§13.5.6). **Done 2026-10-12**: + on pad 2, − on pad 1 | BT1 (net change) |
 | 13 | ~~U5 barometer: fix whatever the rev 2.0 investigation finds~~ — **no design change**: the second board's U5 works, so the first board's was one bad part (§13.5.6, 2026-10-11) | — |
-| 14 | **J1 BOM line names the 13.5 mm stacking header by part number** (§13.5.6) | J1 (BOM only) |
+| 14 | **J1 BOM line** — **done 2026-10-12: J1 is DNP**, operator-sourced and operator-fitted. Its fields say "2x20 Pi stacking header, 13.5 mm body" and warn against standard-height parts and Adafruit 2223 (§13.5.6) | J1 (DNP) |
 | 15 | **Fix J4 colliding with the Pi 5's USB ports** (§13.5.7): either swap edges (U7 + J4 to the terminal-block edge, some terminals to the right edge) or replace J4 with a U.FL and a U.FL→SMA pigtail, leaving everything in place | J4; U7, J2/J3 if edges swap |
 
 > **Superseded at schematic entry (2026-10-12): +47 net, not +8.** The figure below counted the ICs and dividers but not item 8's conditioning pads, item 7's matching resistors, item 31's clamps or the spare-channel pads, all decided since. By netlist count the board goes from 59 symbols to 106, 5 of them DNF; see §13.5.10 for the count and the ways to trim it.
@@ -1077,6 +1077,12 @@ because it is the only way left to separate "this part" from "every part".
 
 #### J1 — the BOM let the assembler fit the wrong header
 
+> **Decided 2026-10-12 (operator): J1 is DNP in rev 2.1.** The operator
+> sources and fits a 2x20 Pi stacking header with a 13.5 mm body. The schematic
+> marks J1 do-not-populate, its fields name the 13.5 mm requirement and warn
+> against standard-height parts, and `BOM-offboard.md` lists it. This is the
+> second of the two options below, stated so it cannot be misread.
+
 PCBWay fitted a **standard-height** 2×20 header at J1. The stack needs the
 **13.5 mm stacking header** to clear the Pi 5 active cooler. **Reworked on the
 rev 2.0 board: the operator desoldered it and fitted a 13.5 mm extended-height
@@ -1443,7 +1449,7 @@ the header closes with **GPIO 12/13/19/20/21/27 uncommitted** instead of none
 | 12 | ~~U5 root cause: part, process or design~~ — **closed 2026-10-11: the part.** The second board's U5 converts temperature and pressure correctly (§13.5.6) | **Closed** |
 | 15 | **Board #1 only** (item 12 closed): U5 pressure calibration against the U6 surrogate: fit `P = Bosch(raw, T_imu) + a + b·(T_imu − T0)` as pinned per-board data (deferred by operator 2026-09-23) | Cold-start warm-up log at the desk (constant pressure, phone as reference) separates a wrong temperature from a pressure offset; then the ECM baro PID 0x33 on a drive as the known answer |
 | 13 | ~~BT1 polarity~~ — **decided 2026-10-12: reversed from rev 2.0, + on pad 2** (§13.5.6). No vendor documents JST-SH polarity on a primary cell, so the lead is checked, not trusted | **Closed** in the schematic; at layout, `+` silkscreen beside pad 2; meter each lead (`BOM-offboard.md`) |
-| 14 | J1 13.5 mm stacking header MPN; assembler-fit or DNF decided. The rev 2.0 board is reworked to a 13.5 mm part (§13.5.6), so this is now a **BOM/notes defect only** — capture the MPN of the part actually fitted | Read the MPN off the part in hand, then make `BOM.csv`, `FAB-NOTES.md` and `pcbway-assembly-notes.txt` agree |
+| 14 | ~~J1 13.5 mm stacking header MPN~~ — **closed 2026-10-12: DNP.** The operator sources and fits J1, so it is unpopulated at the assembler and no part number is pinned. The schematic and `BOM-offboard.md` both say: 2x20 Pi stacking header, 13.5 mm body | **Closed** |
 | 16 | ~~J4 fix~~ — **decided 2026-10-12: U.FL + pigtail** (option B). J4 is `U.FL-R-SMT-1(10)` in the schematic; pigtail, bulkhead mount and strain relief go in the off-board BOM at layout | **Closed** (footprint in schematic) |
 | 17 | ~~ADS8688A datasheet confirmation~~ — **closed 2026-10-03** against SBAS680 (§13.5.3 item 5a). Range, reference, package, rails, 500 kSPS, 17 MHz SCLK and −40/+125 °C all confirmed; part is **`ADS8688A`**. Two corrections: ±20 V protection is conditional on AVDD **impedance** (±11 V if floating > 30 kΩ), and inputs are **1 MΩ**, not high-Z | **Closed** |
 | 30 | ~~AVDD bleed resistor~~ — **closed 2026-10-12**: R18 = 10 kΩ, `+5V` to GND | **Closed** |
@@ -1452,7 +1458,7 @@ the header closes with **GPIO 12/13/19/20/21/27 uncommitted** instead of none
 | 18 | ~~Is the AEM gauge output sensor-ratiometric or buffered?~~ — **closed from the install manual, 2026-10-03.** Buffered, with a published fixed transfer function (`psig = 25.00·V − 12.50`): one channel, no divider, no reference, 6 terminal positions. The proposed ~0.5 V discriminator would have answered this **wrong** (§13.5.4) | **Closed** |
 | 25 | ~~Does the gauge have separate power and signal grounds?~~ — **closed: yes, and they are not tied internally.** BROWN (analog −) is separate from power ground, which is why BROWN must be bonded at the board (§13.5.3 item 7) | **Closed** |
 | 26 | ~~`MKKDS 1,5/7-5,08` fit between MH3 and MH4~~ — **moot**, item 18 closed as buffered so 6 positions suffice (§13.5.5) | **Closed** |
-| 28 | **Gauge-ground offset under load — now a go/no-go against ±0.1 V.** `AIN_nGND` tolerates only **±100 mV**, and the rev 2.0 doc warns the offset may be "tens or hundreds of millivolts." Over spec, CH4 needs a different front end and bonding BROWN at the board becomes the fallback | Meter BROWN against the gauge's power ground, gauge powered, engine running (§13.5.3 item 7) |
+| 28 | ~~Gauge-ground offset under load~~ — **closed: already measured 2026-10-03** (`docs/aem-fuel-pressure-analog-input.md`, "BROWN on module GND, measured"). With BROWN bonded to the Pi/HAT ground, BROWN read **+37…+47 mV KOEO and +40 mV running** against the gauge's power ground, inside `AIN_4GND`'s ±100 mV with ~2.5× margin. The topology matches rev 2.1 (HAT ground to chassis through J2's ground terminal). Re-measure if the harness grounding changes | **Closed** |
 | 29 | **The 0.50–4.50 V fault gate is a decoder requirement, not a note** — out-of-window must return a fault state, never a clamped number (§13.5.4) | Implement with the collector; a broken WHITE at 0 V must not decode as 0.0 psig |
 | 27 | ~~DNF conditioning pads~~ — **decided 2026-10-12**: `R_series` = **1 kΩ fitted** on CH1–CH4 (and on CH4's negative leg), 0 Ω on the spares; pull-up/pull-down pads on CH1, CH2 and the spares (§13.5.10) | **Closed** |
 | 33 | **Spare channels CH5–CH7** — **schematic half closed 2026-10-12**: each `AIN_nP` is pulled to GND by 10 kΩ through a 0 Ω series pad to a test point, `AIN_nGND` tied to GND. **Driver half still open**: refuse any channel not in the configured map | Driver |

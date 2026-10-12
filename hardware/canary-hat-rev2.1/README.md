@@ -13,8 +13,8 @@ so nothing here can be sent to a fab by mistake: `production/`, `BOM.csv`,
 `FAB-NOTES.md`, the PCBWay assembly notes and quote, and the DRC/ERC reports.
 Regenerate them from this project at fab time. Rev 2.0's versions in
 `../canary-hat-rev2.0/` are the templates. The stackup, impedance and
-assembly constraints in its `FAB-NOTES.md` still apply. Rev 2.1 adds the J1
-part-number fix (open item 14) and the parts open items 34–36 settle.
+assembly constraints in its `FAB-NOTES.md` still apply. J1 is DNP in rev 2.1
+(operator-fitted 13.5 mm stacking header, open item 14) and the parts open items 34–36 settle.
 
 The overlay and bring-up scripts are shared across revisions in
 [`../canary-hat-firmware/`](../canary-hat-firmware/).
