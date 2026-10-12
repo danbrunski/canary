@@ -29,7 +29,7 @@ KiCad-generated BOM; neither is complete on its own.
 
 | Item | Status |
 |---|---|
-| **Fiducials** | ❌ **Not on the board.** Rev 2.1 has 114 symbols and no fiducials yet. Machine placement of the 0.5mm-pitch LGA-14 (U6) and LGA-10 (U5) normally wants 3 global fiducials. Add before sending. |
+| **Fiducials** | ✅ **On the board:** three global fiducials, top side, `Fiducial_1mm_Mask2mm` (FID1–FID3), carried over from rev 2.0. They are board-only footprints with no schematic symbol. If the outline changes (the RJ45 tab), check they still span the board's corners and stay clear of parts, and list their final positions in rev 2.1's fab notes, as rev 2.0's `FAB-NOTES.md` did. |
 | Position / centroid file | Generate with `kicad-cli pcb export pos`. |
 | Assembly drawing with pin 1 marked | **Do this for U5, U6, U7, and in rev 2.1 also Y1, U8 and U9.** Y1 is a 4-pad crystal: a 90° rotation puts the crystal on its GND pads and shorts OSC1/OSC2 through the lid. Their footprints are SnapEDA/UltraLibrarian imports whose zero-rotation convention often disagrees with IPC-7351 and therefore with the assembler's. Rotation error on those three is the most likely assembly defect. |
 | Assembly scope split | State which parts they place (U5, U6, U7 at minimum) vs which are hand-soldered, so the centroid and BOM agree. |
