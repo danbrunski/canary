@@ -87,7 +87,7 @@ AEM gauge answers what the new system actually runs on first key-on.
 | 8 | ~~Divider networks for MAP / IAT / 5V_SENS~~ — **deleted**, the ADS8688A takes 0–5 V directly | R17/R18, R20/R21, R22/R23 and the 15 kΩ BOM value dropped; replaced by DNF series / pull / `AIN_nGND`-matching pads (§13.5.3 item 8) |
 | 9 | ~~`J2` → two-level terminal block, 12 positions~~ — **J2 is one 13-way `PT 1,5/13-3,5-H`**: OBD pin 5 dropped, J3 folded in (2026-10-12, §13.5.5) | J2 PT 1,5/13-3,5-H; J3 deleted |
 | 10 | ~~Correct U8's stale schematic note~~ — **moot**, the part is replaced (§13.5.6) | — |
-| 11 | **One 40 MHz oscillator replaces the Y1 Pierce loop**; Y1 + C5/C6 deleted | X1 MEMS oscillator, C25 100n, R27 33 Ω |
+| 11 | ~~One 40 MHz oscillator replaces the Y1 Pierce loop~~. **Decided 2026-10-12: Y1 stays a crystal, but a 3.2 × 2.5 mm 8 pF part with real start-up margin** (the §13.5.6 fallback design, chosen for sourcing) | Y1 Kyocera CX3225SA40000D0PTWCC, C33/C34 8.2 pF C0G, R43 0 Ω in series with OSC2; rev 2.0's ABLS2 + C5/C6 27 pF deleted |
 | 12 | **BT1 polarity reversed** — swap BT1's GND and D2-anode pins (§13.5.6). **Done 2026-10-12**: + on pad 2, − on pad 1 | BT1 (net change) |
 | 13 | ~~U5 barometer: fix whatever the rev 2.0 investigation finds~~ — **no design change**: the second board's U5 works, so the first board's was one bad part (§13.5.6, 2026-10-11) | — |
 | 14 | **J1 BOM line names the 13.5 mm stacking header by part number** (§13.5.6) | J1 (BOM only) |
@@ -1109,6 +1109,43 @@ the channel map is. Nothing to carry over.
 
 #### Y1 — the 40 MHz Pierce loop has no start-up margin on paper
 
+> **Decided and entered 2026-10-12 (operator): rev 2.1 builds the crystal
+> fallback below, not an oscillator.** The text that follows argued for an
+> oscillator, and it still holds electrically. But no 40 MHz oscillator could
+> be bought easily: the automotive SiT8924 is programmed to order, a SiT8008
+> code showed no DigiKey results, an ECS XO had zero stock, and the one stocked
+> SiT8008A was rev A silicon held by an end-of-life distributor. Crystals are
+> the most sourceable part in the class, and this one carries real margin:
+>
+> - **Y1 = Kyocera `CX3225SA40000D0PTWCC`** (DigiKey 9698138, stocked;
+>   `datasheets/cx3225sa_e.pdf`): 40.000 MHz fundamental, CL 8.0 pF,
+>   ±50 ppm at 25 °C, ±200 ppm over −40…150 °C, ESR ≤ 50 Ω, C0 ≤ 3 pF,
+>   drive 10 µW typ / **200 µW max**, AEC-Q200. Pads #1/#3 are the crystal,
+>   #2/#4 ground, on the stock `Crystal_GND24` symbol and the
+>   `Crystal_SMD_3225-4Pin_3.2x2.5mm` footprint. Check Kyocera's 1.45 ×
+>   1.05 mm land against that footprint at layout.
+> - **C33/C34 = 8.2 pF C0G** (Murata GRM1885C1H8R2CA01D). With ~4 pF of pin
+>   and trace stray per side, plus a little across the crystal, they land
+>   near CL = 8 pF.
+> - **Start-up margin:** about **4.5–6.7×** (224–336 Ω of negative resistance
+>   at gm min/max against ≤ 50 Ω). Rev 2.0's 18 pF ABLS2 had 0.8–1.3×.
+> - **R43 = 0 Ω in series with OSC2**, a drive limiter sized at bring-up. A
+>   rail-to-rail 40 MHz Pierce could reach 0.2–0.5 mW against the 200 µW
+>   limit. Measure the amplitude at OSC1 with a ≤ 1 pF probe and compute
+>   drive ≈ ESR · (π·f·Vpp·(C0 + CL))² / 2. If it is over ~100 µW, fit Rs
+>   (of order X_C2, a few hundred Ω). Rs costs margin, so fit only what the
+>   measurement asks for. Moderate overdrive only speeds ageing, which is
+>   irrelevant against the ±0.5 % this needs.
+> - **Second source:** ECS `ECS-400-8-33Q-JES-TR` (ECX-33Q). It has the same
+>   footprint and pinout and ESR ≤ 40 Ω, but C0 ≤ 7 pF and a **100 µW** drive
+>   limit, so about 3.7× less drive headroom. With it, R43 will very likely
+>   need fitting.
+> - Rejected on the way: NDK NX3225SA-40.000M (ESR 100 Ω, ~2.2× margin); ECS
+>   ECS-400-8-37B2-CWY (−30 °C minimum).
+> - **The overlay is unchanged** (`oscillator=40000000`). The MCP2518FD only
+>   accepts 40, 20 or 4 MHz, and 20 MHz would halve its SPI limit to 8.5 MHz
+>   and cap CAN FD at about 2 Mbps.
+
 > **Relocated.** This was §13.5.4's "one oscillator for both controllers"
 > (operator decision 2026-09-14). CAN1 is gone, so the *share a clock between
 > two controllers* argument is gone with it — but the rev 2.0 defect it also
@@ -1401,8 +1438,8 @@ the header closes with **GPIO 12/13/19/20/21/27 uncommitted** instead of none
 | 7 | Z1 rail port thread vs AEM sensor's NPT | Inspect rails; adapter if ORB |
 | 8 | ~~GPIO19 / GPIO27 vs 20/21~~ — **closed**, CAN1 is dropped so no interrupt or STB GPIO is needed; the ADC uses CE1 natively. GPIO 12/13/19/20/21/27 all stay free | **Closed** |
 | 9 | Board area closes single-sided? **Doubtful now**: schematic entry made it +47 parts net, not +8, and the two-level J2 is 21.4 mm deep (§13.5.10) | Placement attempt, after item 34 and the trim decision |
-| 10 | ~~X1 part~~ — **closed 2026-10-12**: SiTime `SiT8008BI-13-YYE-40.000000` (−40…85 °C, ±50 ppm, 1.62–3.63 V, 2.5 × 2.0 mm, OE on pin 1, tied to `+3V3`). It replaced the first choice, the automotive `SiT8924BA-12-33E-40.000000E`, for sourcing (item 36) | **Closed** |
-| 11 | Rev 2.0 Y1 starts cold? (§13.1 meas. 14) — informs whether the crystal fallback is ever viable | Bench, ≤ 1 pF probe on OSC2 |
+| 10 | ~~X1 part~~ — **superseded 2026-10-12: no oscillator.** Y1 is the crystal fallback, Kyocera `CX3225SA40000D0PTWCC` (§13.5.6) | **Closed** |
+| 11 | Rev 2.0 Y1 starts cold? (§13.1 meas. 14) — still worth answering on the rev 2.0 boards. **For rev 2.1's Y1 it becomes a bring-up step:** OSC1 amplitude (≤ 1 pF probe) → drive level → size R43; then a cold start | Bench |
 | 12 | ~~U5 root cause: part, process or design~~ — **closed 2026-10-11: the part.** The second board's U5 converts temperature and pressure correctly (§13.5.6) | **Closed** |
 | 15 | **Board #1 only** (item 12 closed): U5 pressure calibration against the U6 surrogate: fit `P = Bosch(raw, T_imu) + a + b·(T_imu − T0)` as pinned per-board data (deferred by operator 2026-09-23) | Cold-start warm-up log at the desk (constant pressure, phone as reference) separates a wrong temperature from a pressure offset; then the ECM baro PID 0x33 on a drive as the known answer |
 | 13 | ~~BT1 polarity~~ — **decided 2026-10-12: reversed from rev 2.0, + on pad 2** (§13.5.6). No vendor documents JST-SH polarity on a primary cell, so the lead is checked, not trusted | **Closed** in the schematic; at layout, `+` silkscreen beside pad 2; meter each lead (`BOM-offboard.md`) |
@@ -1427,7 +1464,7 @@ the header closes with **GPIO 12/13/19/20/21/27 uncommitted** instead of none
 | 24 | **Update §13.3.9 of `CANary-HAT-Revisions.md`** for the dropped CAN1 — rev 3.0's GPIO and safe-state assumptions changed (§13.5.8) | Edit that section |
 | 34 | ~~J2 physical part~~ — **decided 2026-10-12: Phoenix `PT 1,5/13-3,5-H`**, 13-way, 3.5 mm, screw with wire protector, collared ferrules 0.25–0.75 mm² (pins 1–4 are 18 AWG on AI 0,75 ferrules; the rest 20 AWG), 45.5 × 7.6 mm, stock KiCad footprint; J3 folded in (§13.5.5) | **Closed**; confirm the 13-way item number (12-way is 1984714) at ordering |
 | 35 | **MCP2518FD OSC2 with an external clock** — left open on the schematic; Microchip documents that only for the MCP2515 (DS20001801J fig. 8-2) | Microchip app note or forum confirmation; bring-up proves it either way |
-| 36 | ~~SiT8924 order code and stock~~ — **closed 2026-10-12.** The SiT8924 code decoded as valid against the datasheet's ordering table, but no distributor stocked it: it is programmed to order and would have to be supplied to the assembler. **Operator: easy-to-source parts, so X1 is `SiT8008BI-13-YYE-40.000000`**, which SiTime lists in stock. It keeps the same pinout, footprint and symbol. Grade 1 bought nothing on a board limited to ~85 °C by U6/U7, and ±50 ppm is ~100× inside the MCP2518FD's ±0.5 % | **Closed** |
+| 36 | ~~Oscillator order code and stock~~ — **closed 2026-10-12** (operator: easy-to-source parts). No 40 MHz oscillator was easy to buy: SiT8924 is programmed to order, the SiT8008BI code returned nothing at DigiKey, ECS-2333 had zero stock, and SiT8008AI-13-33S was end-of-life stock. **Y1 = Kyocera `CX3225SA40000D0PTWCC` crystal** (stocked), with ECS `ECS-400-8-33Q-JES-TR` as second source (§13.5.6) | **Closed** |
 
 ### 13.5.10 Schematic entry — 2026-10-12
 
@@ -1443,7 +1480,7 @@ Sensors, nothing new. Every net below was checked in the exported netlist.
 | Root | New sheet `Analog_Inputs`. OBD_IO loses `SCL`/`SDA` (U8 was their only user) and gains `V12_SENSE`, `5V_SENS`, `MAP`, `IAT`, `FUEL_P`, `FUEL_GND`. J1 pin 26 (GPIO7, SPI0 CE1) now goes to U8 `~CS`. |
 | OBD_IO | ADS1015 (U8), C17 and their wiring deleted. `V12_SENSE` leaves through a sheet pin; R11/R12/C18 unchanged. J2 is a 13-pin `PT 1,5/13-3,5-H` in the sequence of §13.5.5: OBD pin 5 dropped, J3 folded in as pins 3–4 (`+12V`, GND). Pins 2, 4 and 8 are GND. |
 | Analog_Inputs (new) | U8 ADS8688A, U9 TPS7A1650-Q1 and the CH0–CH7 front ends, §13.5.3 as amended below. |
-| CANFD_Interface | Y1 + C5/C6 deleted. X1 (40 MHz MEMS) → R43 33 Ω → U3 OSC1, C33 100 nF at X1, OSC2 open. U3 SDO pin type corrected to tri-state (also in its library). |
+| CANFD_Interface | Rev 2.0's ABLS2 Y1 + C5/C6 (27 pF) deleted. New Y1 = Kyocera CX3225SA 40 MHz 8 pF crystal on OSC1/OSC2, C33/C34 8.2 pF C0G, R43 0 Ω in series with OSC2 (§13.5.6). An interim X1 oscillator design was entered and then replaced the same day. U3 SDO pin type corrected to tri-state (also in its library). |
 | Sensors | J4 → U.FL (`U.FL-R-SMT-1(10)`). BT1 polarity reversed (+ on pad 2) through the project symbol `Battery_Cell_JST_SH_Pin2Plus` (§13.5.6). |
 
 New project symbol library `lib/symbols/canary-hat.kicad_sym`, in `sym-lib-table`:
@@ -1469,7 +1506,7 @@ The §13.5.3 placeholders are superseded. In the schematic:
 | CH4 FUEL: pull-downs / series + / series − / differential cap | R30, R31 100 kΩ / R32 1 kΩ / R33 1 kΩ / C31 |
 | CH5–CH7 spares | TP1–TP3, R34–R42 |
 | Harness TVS | D7 (MAP, IAT), D8 (FUEL_P, FUEL_GND), D9 (5V_SENS) |
-| X1 series resistor / decoupling | R43 33 Ω / C33 100 nF |
+| Y1 crystal / load caps / OSC2 drive limiter | Y1 CX3225SA40000D0PTWCC / C33, C34 8.2 pF / R43 0 Ω |
 
 #### Decisions taken at entry, and the datasheet findings behind them
 
@@ -1519,7 +1556,7 @@ The §13.5.3 placeholders are superseded. In the schematic:
 #### Part count, and how to trim it
 
 Rev 2.0's netlist has 59 symbols (the "57 components" above counted differently); rev 2.1 as entered has
-**106** (+49 on Analog_Inputs, +3 for X1, −5 for the ADS1015/C17/Y1/C5/C6). Five are DNF and three are test
+**106** (+49 on Analog_Inputs; +4 for the new Y1, C33, C34, R43; −5 for the ADS1015, C17 and rev 2.0's Y1, C5, C6; −1 for J3). Five are DNF and three are test
 points. That is far from §13.5.2's "+8", because the conditioning pads,
 matching resistors, clamps and spare-channel pads were all decided after that
 estimate. If placement does not close single-sided (open item 9), trim in
