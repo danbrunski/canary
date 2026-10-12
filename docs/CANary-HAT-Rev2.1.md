@@ -808,8 +808,8 @@ level.**
 > |---|---|---|
 > | 1 | `+12V_RAW` (OBD 16) | **18 AWG** |
 > | 2 | GND, chassis (OBD 4) | **18 AWG** |
-> | 3 | `+12V` protected (downstream of Q1/D1), out to the X1202 (was J3 pin 1) | 20 AWG |
-> | 4 | GND, out to the X1202 (was J3 pin 2) | 20 AWG |
+> | 3 | `+12V` protected (downstream of Q1/D1), out to the X1202 (was J3 pin 1) | **18 AWG** |
+> | 4 | GND, out to the X1202 (was J3 pin 2) | **18 AWG** |
 > | 5 | `CANH_RAW` (OBD 6) | 20 AWG |
 > | 6 | `CANL_RAW` (OBD 14) | 20 AWG |
 > | 7 | `KLINE` (OBD 7) | 20 AWG |
@@ -821,7 +821,8 @@ level.**
 > | 13 | `FUEL_P`, AEM WHITE, analog + | 20 AWG, twisted with 12 |
 >
 > **Every wire is ferruled.** The order follows from the reasoning below:
-> - all four power conductors (1–4) sit at one end, away from the analog pins;
+> - all four power conductors (1–4, all 18 AWG) sit at one end, away from the
+>   analog pins;
 > - `SENS_GND` sits between the K-line's ISO 7637 transients and the analog
 >   inputs;
 > - the TMAP's four wires (8–11) and the gauge's twisted pair (12–13) each
@@ -1424,7 +1425,7 @@ the header closes with **GPIO 12/13/19/20/21/27 uncommitted** instead of none
 | 22 | **SPI0 contention** — downgraded 2026-10-03 from a risk to a confirmation: the arithmetic gives **0.11 %** bus occupancy at 6 channels × 100 Hz (§13.5.3 item 5a), and per-device SPI speed is a devicetree property so CAN0 keeps its 20 MHz | Bring-up measurement to confirm the arithmetic, not to discover the answer |
 | 23 | **Re-verify `V12_SENSE` on the new ADC** — same divider, different part | Repeat `CANary-HAT-Revisions.md:119`: 0.000 V no vehicle, ~12.68 V key-off, ~12.43 V KOEO |
 | 24 | **Update §13.3.9 of `CANary-HAT-Revisions.md`** for the dropped CAN1 — rev 3.0's GPIO and safe-state assumptions changed (§13.5.8) | Edit that section |
-| 34 | ~~J2 physical part~~ — **decided 2026-10-12: Phoenix `PT 1,5/13-3,5-H`**, 13-way, 3.5 mm, screw with wire protector, collared ferrules 0.25–0.75 mm² (18 AWG uses AI 0,75), 45.5 × 7.6 mm, stock KiCad footprint; J3 folded in (§13.5.5) | **Closed**; confirm the 13-way item number (12-way is 1984714) at ordering |
+| 34 | ~~J2 physical part~~ — **decided 2026-10-12: Phoenix `PT 1,5/13-3,5-H`**, 13-way, 3.5 mm, screw with wire protector, collared ferrules 0.25–0.75 mm² (pins 1–4 are 18 AWG on AI 0,75 ferrules; the rest 20 AWG), 45.5 × 7.6 mm, stock KiCad footprint; J3 folded in (§13.5.5) | **Closed**; confirm the 13-way item number (12-way is 1984714) at ordering |
 | 35 | **MCP2518FD OSC2 with an external clock** — left open on the schematic; Microchip documents that only for the MCP2515 (DS20001801J fig. 8-2) | Microchip app note or forum confirmation; bring-up proves it either way |
 | 36 | **SiT8924 order code and stock** — field order inferred from the datasheet; SiTime parts are often programmed to order | SiTime part-number generator + distributor stock; fall back to SIT8008BI |
 
