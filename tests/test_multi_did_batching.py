@@ -17,7 +17,6 @@ keep that impossible.
 from __future__ import annotations
 
 import threading
-import time
 
 import can
 import pytest
@@ -290,8 +289,15 @@ def _scheduler_spec(**overrides: object) -> CanObdSpec:
     return CanObdSpec(**values)
 
 
-def test_active_scheduler_batches_known_width_dids_with_full_provenance() -> None:
-    bus = _SchedulerDidEcu()
+def test_active_scheduler_batches_known_width_dids_with_full_provenance(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # On a fake clock (T01.25): 0.2 s of wall clock saw no DID batch at all in
+    # a parallel push-gate run at load average ~8.8 (`0 > 0`, 2026-10-12), the
+    # shape T01.8 and T01.16 fixed in the tests below.
+    clock = FakeClock()
+    install_clock(monkeypatch, clock)
+    bus = _SchedulerDidEcu(clock=clock)
     readings: list = []
     stats = run_can_obd_loop(
         bus,  # type: ignore[arg-type]
@@ -299,7 +305,7 @@ def test_active_scheduler_batches_known_width_dids_with_full_provenance() -> Non
         on_frame=lambda _message: None,
         on_reading=readings.append,
         stop_event=threading.Event(),
-        deadline_monotonic=time.monotonic() + 0.2,
+        deadline_monotonic=clock.monotonic() + 0.5,
     )
     assert bus.did_batches > 0
     assert stats.did_batched_requests > 0
@@ -378,8 +384,14 @@ def test_rejected_did_batches_fall_back_without_backing_off_members(
     assert demand["best_case_batched"] == demand["single_request_fallback"]
 
 
-def test_physical_did_batch_rejects_a_different_ecu_responder() -> None:
-    bus = _SchedulerDidEcu(responder_id=0x7E9)
+def test_physical_did_batch_rejects_a_different_ecu_responder(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # On a fake clock (T01.25): the same 0.15 s wall-clock exposure as the
+    # batching test above; one stall before the first batch and nothing fails.
+    clock = FakeClock()
+    install_clock(monkeypatch, clock)
+    bus = _SchedulerDidEcu(responder_id=0x7E9, clock=clock)
     readings: list = []
     stats = run_can_obd_loop(
         bus,  # type: ignore[arg-type]
@@ -387,7 +399,7 @@ def test_physical_did_batch_rejects_a_different_ecu_responder() -> None:
         on_frame=lambda _message: None,
         on_reading=readings.append,
         stop_event=threading.Event(),
-        deadline_monotonic=time.monotonic() + 0.15,
+        deadline_monotonic=clock.monotonic() + 0.5,
     )
     assert stats.did_batch_failures > 0
     assert not any(reading.pid.startswith("DID_") for reading in readings)

@@ -783,15 +783,25 @@ measurement in hand.
     (`10000 < 2000`).
   - **Left exposed:** a machine ~4× faster than this one per row. The bound
     is still a time budget measured in rows.
-- [ ] **T01.25 `tests/test_multi_did_batching.py::test_active_scheduler_batches_known_width_dids_with_full_provenance`
+- [x] **T01.25 `tests/test_multi_did_batching.py::test_active_scheduler_batches_known_width_dids_with_full_provenance`
   saw no DID batch within its 0.2 s wall-clock deadline under load.**
   - **Seen** 2026-10-12 in the push gate for `391c27a` (T01.24, which touched
     no collection code), parallel run at load average ~8.8:
     `assert bus.did_batches > 0` → `0 > 0`. It passed serially (FLAKY UNDER
     LOAD). The failed log is kept in
     `.git/ci-gate/failed-logs/20261012T152353Z-391c27a-pytest.log`.
-  - **Likely cause:** T01.16's shape in a sibling test. `run_can_obd_loop`
-    gets `deadline_monotonic=time.monotonic() + 0.2` of real time, so under
-    load the scheduler can reach the deadline before its first DID batch. Fix
-    it the T01.16 way, judging by work done rather than wall time. Not
-    investigated further yet.
+  - **Cause:** T01.16's shape in a sibling test. `run_can_obd_loop` got
+    `deadline_monotonic=time.monotonic() + 0.2` of real time, so one stall
+    before the first batch used up the whole run. CPU burners alone did not
+    reproduce it (68 of 68 copies passed beside 16 or 32 burners on 8 cores).
+    The full suite's I/O and GC pauses are what stall a worker. A scratch probe
+    confirmed the cause deterministically: one real 0.25 s sleep on the first
+    `send` fails the old test with the gate's exact `0 > 0`.
+    `test_physical_did_batch_rejects_a_different_ecu_responder` had the same
+    exposure on 0.15 s of wall clock.
+  - **Fixed 2026-10-12, test only:** both tests now run on a `FakeClock`
+    (`install_clock`, `_SchedulerDidEcu(clock=clock)`) with a 0.5 s simulated
+    deadline, like T01.8 and T01.16. No test in the file reads the wall clock
+    any more, and `import time` is gone.
+  - **After:** the file runs 20 of 20 in 0.34 s. The same probe on the fake
+    clock passes, because a real stall does not advance simulated time.
