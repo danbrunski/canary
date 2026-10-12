@@ -638,7 +638,7 @@ fi
 # GNSS UART and the CAN transceiver in standby. Installed on every Pi whether or
 # not a HAT is fitted: the firmware ignores an overlay nothing names.
 OVERLAY_DIR="${CANARY_OVERLAY_DIR:-${ROOT}/boot/firmware/overlays}"
-HAT_OVERLAY_SRC="${CANARY_HOME}/hardware/canary-hat/firmware/canary-hat-overlay.dts"
+HAT_OVERLAY_SRC="${CANARY_HOME}/hardware/canary-hat-firmware/canary-hat-overlay.dts"
 HAT_REBOOT_NEEDED=0
 I2C_REBOOT_NEEDED=0
 if [[ -d "${OVERLAY_DIR}" && -f "${HAT_OVERLAY_SRC}" ]]; then

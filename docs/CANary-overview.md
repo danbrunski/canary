@@ -12,7 +12,7 @@ capture and standardized OBD-II diagnostics. The hardware interface is a
 single SocketCAN device (`can0`) used for both broadcast CAN capture and
 active ISO-TP OBD/UDS requests. Two SocketCAN adapters are supported
 first-class: the CANary-HAT (MCP2518FD/SPI, the current in-vehicle rig — see
-`hardware/canary-hat/`), the Waveshare 2-CH CAN HAT (MCP2515/SPI) and the
+`hardware/canary-hat-rev2.0/`, with rev 2.1 in `hardware/canary-hat-rev2.1/`), the Waveshare 2-CH CAN HAT (MCP2515/SPI) and the
 Canable USB (gs_usb/candleLight). The original ELM327 path
 remains in the repo as a legacy fallback.
 

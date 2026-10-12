@@ -1,11 +1,24 @@
 # CANary-HAT — Rev 2.1 (proposed)
 
-> **Status: proposal, under discussion — nothing here is in KiCad.** Rev 2.0 is
-> in assembly and is not being changed. Rev 2.1 is a delta against rev 2.0 as
-> it exists in `hardware/canary-hat/` (57 components, `U8` ADS1015 on AIN0
-> only, `J2` MKDS 1,5/6 + `J3` MKDS 1,5/2). Reference designators below are
-> placeholders to make the text unambiguous; they are assigned for real at
-> schematic entry.
+> **Status: schematic entry started 2026-10-12.** Rev 2.0 is built and brought
+> up on two boards (§13.1.1, §13.1.2 of
+> [`CANary-HAT-Revisions.md`](CANary-HAT-Revisions.md)); its KiCad sources are
+> tagged `hat-rev2.0` and kept as their own project in
+> `hardware/canary-hat-rev2.0/`; rev 2.1 is a separate project in
+> `hardware/canary-hat-rev2.1/` (split 2026-10-12; the shared overlay and
+> bring-up scripts moved to `hardware/canary-hat-firmware/`). Rev 2.1
+> is a delta against rev 2.0 (57 components, `U8` ADS1015 on AIN0 only, `J2`
+> MKDS 1,5/6 + `J3` MKDS 1,5/2). Reference designators below were placeholders;
+> where schematic entry assigned different ones, the schematic wins.
+
+> **Power assumption (operator, 2026-10-12): rev 2.1 runs with the X1202.**
+> CANary-PWR ([`CANary-PWR-Spec.md`](CANary-PWR-Spec.md)) is a separate board
+> and nothing in rev 2.1 is designed for it. GPIO6 stays the X1202's, and
+> **`J3` stays** (12 V to the X1202). Delete J3 only if placement needs its
+> ~10 mm of the terminal edge. The PWR interface waits for its own decision.
+> The operator raised a dedicated latching cable connector (JST GH class) as
+> an alternative to passing PWR's signals through the stacking header. It is
+> not adopted, but it is recorded here so it is not lost.
 
 > **Part of the CANary-HAT board documentation.** Section numbers continue the
 > stable scheme: this file is **§13.5**, extending §13 in
@@ -76,9 +89,11 @@ AEM gauge answers what the new system actually runs on first key-on.
 | 10 | ~~Correct U8's stale schematic note~~ — **moot**, the part is replaced (§13.5.6) | — |
 | 11 | **One 40 MHz oscillator replaces the Y1 Pierce loop**; Y1 + C5/C6 deleted | X1 MEMS oscillator, C25 100n, R27 33 Ω |
 | 12 | **BT1 polarity reversed** — swap BT1's GND and D2-anode pins (§13.5.6) | BT1 (net change) |
-| 13 | **U5 barometer: fix whatever the rev 2.0 investigation finds** (§13.5.6) | U5 — TBD |
+| 13 | ~~U5 barometer: fix whatever the rev 2.0 investigation finds~~ — **no design change**: the second board's U5 works, so the first board's was one bad part (§13.5.6, 2026-10-11) | — |
 | 14 | **J1 BOM line names the 13.5 mm stacking header by part number** (§13.5.6) | J1 (BOM only) |
 | 15 | **Fix J4 colliding with the Pi 5's USB ports** (§13.5.7): either swap edges (U7 + J4 to the terminal-block edge, some terminals to the right edge) or replace J4 with a U.FL and a U.FL→SMA pigtail, leaving everything in place | J4; U7, J2/J3 if edges swap |
+
+> **Superseded at schematic entry (2026-10-12): +47 net, not +8.** The figure below counted the ICs and dividers but not item 8's conditioning pads, item 7's matching resistors, item 31's clamps or the spare-channel pads, all decided since. By netlist count the board goes from 59 symbols to 106, 5 of them DNF; see §13.5.10 for the count and the ways to trim it.
 
 **Roughly +8 components net**, on a 65 × 56 mm board that already carries 57.
 Dropping CAN1 and the dividers took about 18 parts back out of the ~25 the
@@ -422,7 +437,7 @@ available instead:
 #### 7. Ground references — one `AIN_nGND` pin per channel settles this
 
 **Settled 2026-10-03 from the ADS8688A datasheet** (SBAS680, in
-`hardware/canary-hat/datasheets/ads8684a.pdf` — one document covers the
+`hardware/canary-hat-rev2.1/datasheets/ads8684a.pdf` — one document covers the
 4-channel `ADS8684A` and the 8-channel `ADS8688A`). This item has now been
 wrong twice; the datasheet supersedes both attempts, and the reason it
 supersedes them is a feature of the part neither draft knew about.
@@ -818,7 +833,9 @@ Why this arrangement:
   distinguishes them — `FGND` against `SGND` is not enough.
 - **There is no growth room left on this connector.** Spare ADC channels
   (CH5–CH7) go to labelled test pads, not terminals (§13.5.3 item 8).
-- `J3` (+12V pass-through to the X1202) is **unchanged**.
+- `J3` (+12V pass-through to the X1202) is **unchanged**. Rev 2.1 runs with
+  the X1202 (operator, 2026-10-12). Delete J3 only if placement needs the room:
+  its ~10 mm is the only slack on this edge.
 
 ### 13.5.6 Carry-over fixes
 
@@ -840,11 +857,21 @@ only; the footprint and D2 stay as they are.
   rework the board.
 - **Make it impossible next time.** JST-SH battery leads have no standard
   polarity: vendors wire red to either pin. Pin the exact cell/lead part number in
-  [`BOM-offboard.md`](../hardware/canary-hat/BOM-offboard.md), mark `+` in the
+  [`BOM-offboard.md`](../hardware/canary-hat-rev2.1/BOM-offboard.md), mark `+` in the
   silkscreen beside BT1, and check the chosen lead against the footprint before
   ordering. "A 2-pin JST-SH cell" alone is what let this happen.
 
 #### U5 — BMP384 powers up but never converts
+
+> **Resolved 2026-10-11: one bad part, no design change.** Check 1 below ran on
+> the second rev 2.0 board (§13.1.2 of `CANary-HAT-Revisions.md`). Its U5's
+> temperature word is live (raw `0x8ADA80`), and compensated with its own
+> temperature it reads 79.52 kPa at 37.1 °C, ±0.01 kPa over three reads, at the
+> operator's ~80 kPa altitude. Rev 2.1 keeps U5, its footprint and its wiring
+> as they are. Checks 2–5 are not needed. **The U6-surrogate decision below is
+> now a property of board #1 alone**, not of the board revision. The BMP384
+> driver uses U5's own temperature by default and takes the surrogate only
+> from per-board config. The history below is kept as the record.
 
 Symptom (§13.1.1): chip ID `0x50`, NVM, error register, sensor-time counter and
 data-ready flags are all correct, but every conversion returns temperature
@@ -1287,34 +1314,153 @@ the header closes with **GPIO 12/13/19/20/21/27 uncommitted** instead of none
 |---|---|---|
 | 1 | `0 261 230 416` pinout, NTC curve, pressure range (`a`, `b`) | Meter + bench, before R19 and the calibration model are fixed |
 | 2 | Sensor mating connector part number | Match against the sensor in hand |
-| 3 | MKKDS 1,5/6-5,08 standard-colour item number, height, row offset; KiCad footprint | Phoenix datasheet |
+| 3 | ~~MKKDS 1,5/6-5,08 standard-colour item number, height, row offset; KiCad footprint~~ — **partly answered 2026-10-12, and the answer reopens the part choice** (§13.5.10): no green item number found (BK is 1016295), no KiCad footprint, row geometry only from a third-party Eagle library, and the block is **21.4 mm deep and 25.2 mm tall** above the PCB | See item 34 |
 | 4 | ~~Stack clearance under the HAT~~ — **closed: ~1/4" ≈ 6.3 mm above the fan**, measured with the 13.5 mm header fitted (operator, 2026-10-03). Height is not the binding constraint; every SMT package on the list clears it (§13.5.7) | **Closed** |
-| 5 | TPS7A1650-Q1 capacitor requirements and EN threshold | TI datasheet |
+| 5 | ~~TPS7A1650-Q1 capacitor requirements and EN threshold~~ — **closed 2026-10-12** (SBVS188E): IN > 0.1 µF, OUT > 2.2 µF effective; EN thresholds 1.2 V / 0.3 V, **EN must never exceed IN** — which the planned EN-from-`+3V3` violates on the bench (§13.5.10) | **Closed** |
 | 6 | ~~AEMnet byte layout~~ — **off the critical path**, the gauge is analog (§13.5.4). Keep the note in case a future device uses AEMnet | Deferred indefinitely |
 | 7 | Z1 rail port thread vs AEM sensor's NPT | Inspect rails; adapter if ORB |
 | 8 | ~~GPIO19 / GPIO27 vs 20/21~~ — **closed**, CAN1 is dropped so no interrupt or STB GPIO is needed; the ADC uses CE1 natively. GPIO 12/13/19/20/21/27 all stay free | **Closed** |
-| 9 | Board area closes single-sided? **Expected yes now** (+8 parts net, §13.5.7) | Placement attempt |
-| 10 | X1 part: 40 MHz, 3.3 V, CMOS out, −40…+85 °C, EN pin polarity/default, current | Datasheet of the chosen part |
+| 9 | Board area closes single-sided? **Doubtful now**: schematic entry made it +47 parts net, not +8, and the two-level J2 is 21.4 mm deep (§13.5.10) | Placement attempt, after item 34 and the trim decision |
+| 10 | ~~X1 part~~ — **closed 2026-10-12**: SiTime `SiT8924BA-12-33E-40.000000E` (AEC-Q100 grade 1, ±25 ppm, 2.5 × 2.0 mm), OE tied to `+3V3`; pin-compatible fallback `SIT8008BI-11-33E-40.000000E` (LCSC C1237126). Confirm the order code in SiTime's generator before the BOM (item 36) | **Closed** |
 | 11 | Rev 2.0 Y1 starts cold? (§13.1 meas. 14) — informs whether the crystal fallback is ever viable | Bench, ≤ 1 pF probe on OSC2 |
-| 12 | U5 root cause: part, process or design (§13.5.6) | Checks 1–5 in §13.5.6, starting with a second board (hand rework of U5 ruled out) |
-| 15 | U5 pressure calibration against the U6 surrogate: fit `P = Bosch(raw, T_imu) + a + b·(T_imu − T0)` as pinned per-board data (deferred by operator 2026-09-23) | Cold-start warm-up log at the desk (constant pressure, phone as reference) separates a wrong temperature from a pressure offset; then the ECM baro PID 0x33 on a drive as the known answer |
-| 13 | BT1 cell/lead part number with known polarity; `+` on silkscreen | Pick the lead, meter it against the swapped footprint |
+| 12 | ~~U5 root cause: part, process or design~~ — **closed 2026-10-11: the part.** The second board's U5 converts temperature and pressure correctly (§13.5.6) | **Closed** |
+| 15 | **Board #1 only** (item 12 closed): U5 pressure calibration against the U6 surrogate: fit `P = Bosch(raw, T_imu) + a + b·(T_imu − T0)` as pinned per-board data (deferred by operator 2026-09-23) | Cold-start warm-up log at the desk (constant pressure, phone as reference) separates a wrong temperature from a pressure offset; then the ECM baro PID 0x33 on a drive as the known answer |
+| 13 | **BT1 cell/lead with known polarity** — no vendor documents which JST-SH pin carries + on a primary cell (2026-10-12 search), so "swap the pins" only moves the mismatch to the other half of the market. **Operator decision pending** (§13.5.10) | Decide: keep the rev 2.0 pinout, swap, or an on-board holder |
 | 14 | J1 13.5 mm stacking header MPN; assembler-fit or DNF decided. The rev 2.0 board is reworked to a 13.5 mm part (§13.5.6), so this is now a **BOM/notes defect only** — capture the MPN of the part actually fitted | Read the MPN off the part in hand, then make `BOM.csv`, `FAB-NOTES.md` and `pcbway-assembly-notes.txt` agree |
-| 16 | J4 fix (§13.5.7): edge swap or U.FL pigtail. If swap: which terminals move, U7 spacing from the 12 V/K-line/CAN entry. If U.FL: receptacle + retention part number, pigtail length, bulkhead mount | Decide, then placement and a fit check on the rev 2.0 stack |
+| 16 | ~~J4 fix~~ — **decided 2026-10-12: U.FL + pigtail** (option B). J4 is `U.FL-R-SMT-1(10)` in the schematic; pigtail, bulkhead mount and strain relief go in the off-board BOM at layout | **Closed** (footprint in schematic) |
 | 17 | ~~ADS8688A datasheet confirmation~~ — **closed 2026-10-03** against SBAS680 (§13.5.3 item 5a). Range, reference, package, rails, 500 kSPS, 17 MHz SCLK and −40/+125 °C all confirmed; part is **`ADS8688A`**. Two corrections: ±20 V protection is conditional on AVDD **impedance** (±11 V if floating > 30 kΩ), and inputs are **1 MΩ**, not high-Z | **Closed** |
-| 30 | **AVDD bleed resistor < 30 kΩ** — keeps the device in the ±20 V protection row whatever the Pi is doing; without it a 12 V fault on an input with `+5V` floating exceeds the ±11 V limit (§13.5.3 item 5a) | Pick a value (10 kΩ suggested), add to the schematic |
-| 31 | **External transient protection per analog channel** — the internal OVP is a DC limit; TI "highly recommends" external surge/ESD/EFT devices, and this is a vehicle harness | Decide a clamp at schematic entry; §13.2.3's D1 precedent |
-| 32 | **`AIN_nGND` matching resistors** — which channels get them populated and at what value (§13.5.3 item 7 table) | Falls out of R11/R12's Thevenin and R19's final value |
+| 30 | ~~AVDD bleed resistor~~ — **closed 2026-10-12**: R18 = 10 kΩ, `+5V` to GND | **Closed** |
+| 31 | ~~External transient protection~~ — **decided 2026-10-12**: onsemi `NUP2105LT1G` (dual bidirectional TVS, 24 V working, SOT-23) on MAP/IAT, FUEL_P/FUEL_GND and 5V_SENS, behind which the 1 kΩ series resistors limit clamp current into U8 (§13.5.10) | **Closed** |
+| 32 | **`AIN_nGND` matching resistors** — CH0 **closed** (R19 = 18 kΩ = R11‖R12); CH1, CH3, CH4 = 1 kΩ to match `R_series`; CH2 = 2.7 kΩ, **provisional** with R25 | CH2 follows R25's final value (item 1) |
 | 18 | ~~Is the AEM gauge output sensor-ratiometric or buffered?~~ — **closed from the install manual, 2026-10-03.** Buffered, with a published fixed transfer function (`psig = 25.00·V − 12.50`): one channel, no divider, no reference, 6 terminal positions. The proposed ~0.5 V discriminator would have answered this **wrong** (§13.5.4) | **Closed** |
 | 25 | ~~Does the gauge have separate power and signal grounds?~~ — **closed: yes, and they are not tied internally.** BROWN (analog −) is separate from power ground, which is why BROWN must be bonded at the board (§13.5.3 item 7) | **Closed** |
 | 26 | ~~`MKKDS 1,5/7-5,08` fit between MH3 and MH4~~ — **moot**, item 18 closed as buffered so 6 positions suffice (§13.5.5) | **Closed** |
 | 28 | **Gauge-ground offset under load — now a go/no-go against ±0.1 V.** `AIN_nGND` tolerates only **±100 mV**, and the rev 2.0 doc warns the offset may be "tens or hundreds of millivolts." Over spec, CH4 needs a different front end and bonding BROWN at the board becomes the fallback | Meter BROWN against the gauge's power ground, gauge powered, engine running (§13.5.3 item 7) |
 | 29 | **The 0.50–4.50 V fault gate is a decoder requirement, not a note** — out-of-window must return a fault state, never a clamped number (§13.5.4) | Implement with the collector; a broken WHITE at 0 V must not decode as 0.0 psig |
-| 27 | **DNF conditioning pads: which channels, and is `R_series` populated at 0 Ω or a real value?** (§13.5.3 item 8) | Item 17 is closed: a real value buys OVP headroom and the gain error cancels via item 32, so this is now a deliberate choice rather than a wait |
-| 33 | **Spare channels CH5–CH7 tied to analog ground, and the driver refuses unmapped channels** — a floating `AIN_nP` reads an internal bias voltage the datasheet calls invalid, which looks like data (§13.5.3 item 7) | Schematic + driver; make it unrepresentable rather than documented |
+| 27 | ~~DNF conditioning pads~~ — **decided 2026-10-12**: `R_series` = **1 kΩ fitted** on CH1–CH4 (and on CH4's negative leg), 0 Ω on the spares; pull-up/pull-down pads on CH1, CH2 and the spares (§13.5.10) | **Closed** |
+| 33 | **Spare channels CH5–CH7** — **schematic half closed 2026-10-12**: each `AIN_nP` is pulled to GND by 10 kΩ through a 0 Ω series pad to a test point, `AIN_nGND` tied to GND. **Driver half still open**: refuse any channel not in the configured map | Driver |
 | 19 | ~~Which AEM wire is signal and which is ground~~ — **closed, and the question was mis-framed.** WHITE is analog **+**, BROWN analog **−**; neither is a ground (§13.5.3 item 7). Meter once as a build check | **Closed** |
-| 20 | **MAP sensor pull-down resistor** — deleting the divider removed the ≥ 10 kΩ Bosch requires (§13.5.3 item 2); lands on a DNF pad per item 8 | Value from the Bosch datasheet with item 1's pinout |
+| 20 | **MAP sensor pull-down resistor** — now a *fitted* pad (R20, value `TBD`) on the terminal side of the series resistor. Also needed for open-wire detection: without it a broken signal wire reads U8's internal bias voltage | Value from the Bosch datasheet with item 1's pinout; the `TBD` value cannot be ordered, by design |
 | 21 | ~~Fuel-pressure transfer function~~ — **closed: AEM publishes it**, `psig = 25.00·V − 12.50`, valid 0.50–4.50 V. Only the *electrical* chain needs calibrating, and on rev 2.1 that is just the ADS8688A's reference (no divider, no resistor tolerance). Gauge face remains the independent cross-check | **Closed**; pin in `catalog_pins` |
 | 22 | **SPI0 contention** — downgraded 2026-10-03 from a risk to a confirmation: the arithmetic gives **0.11 %** bus occupancy at 6 channels × 100 Hz (§13.5.3 item 5a), and per-device SPI speed is a devicetree property so CAN0 keeps its 20 MHz | Bring-up measurement to confirm the arithmetic, not to discover the answer |
 | 23 | **Re-verify `V12_SENSE` on the new ADC** — same divider, different part | Repeat `CANary-HAT-Revisions.md:119`: 0.000 V no vehicle, ~12.68 V key-off, ~12.43 V KOEO |
 | 24 | **Update §13.3.9 of `CANary-HAT-Revisions.md`** for the dropped CAN1 — rev 3.0's GPIO and safe-state assumptions changed (§13.5.8) | Edit that section |
+| 34 | **J2 physical part** — MKKDS 1,5/6-5,08 is 21.4 mm deep (back row ~15 mm in from the board edge) and 25.2 mm tall, with no confirmed green item number and no footprint. The schematic fixes only the pin order (1–6 lower = rev 2.0 vehicle harness, 7–12 upper = sensors), so the part can change without schematic work | Choose: MKKDS as planned, or a lower-profile two-row block / pluggable; then draw the footprint from the maker's drilling drawing |
+| 35 | **MCP2518FD OSC2 with an external clock** — left open on the schematic; Microchip documents that only for the MCP2515 (DS20001801J fig. 8-2) | Microchip app note or forum confirmation; bring-up proves it either way |
+| 36 | **SiT8924 order code and stock** — field order inferred from the datasheet; SiTime parts are often programmed to order | SiTime part-number generator + distributor stock; fall back to SIT8008BI |
+
+### 13.5.10 Schematic entry — 2026-10-12
+
+What went into `hardware/canary-hat-rev2.1/` (diff against `hardware/canary-hat-rev2.0/`),
+what the datasheets changed on the way, and what is still open. ERC matches
+the rev 2.0 baseline: the same three pre-existing `pin_to_pin` warnings on
+Sensors, nothing new. Every net below was checked in the exported netlist.
+
+#### What changed, sheet by sheet
+
+| Sheet | Change |
+|---|---|
+| Root | New sheet `Analog_Inputs`. OBD_IO loses `SCL`/`SDA` (U8 was their only user) and gains `V12_SENSE`, `5V_SENS`, `MAP`, `IAT`, `FUEL_P`, `FUEL_GND`. J1 pin 26 (GPIO7, SPI0 CE1) now goes to U8 `~CS`. |
+| OBD_IO | ADS1015 (U8), C17 and their wiring deleted. `V12_SENSE` leaves through a sheet pin; R11/R12/C18 unchanged. J2 is a 12-pin symbol: pins 1–6 are rev 2.0's J2 pin for pin, 7–12 the upper level per §13.5.5 (pin 12 `SENS_GND` = GND). J3 unchanged. |
+| Analog_Inputs (new) | U8 ADS8688A, U9 TPS7A1650-Q1 and the CH0–CH7 front ends, §13.5.3 as amended below. |
+| CANFD_Interface | Y1 + C5/C6 deleted. X1 (40 MHz MEMS) → R43 33 Ω → U3 OSC1, C33 100 nF at X1, OSC2 open. U3 SDO pin type corrected to tri-state (also in its library). |
+| Sensors | J4 → U.FL (`U.FL-R-SMT-1(10)`). BT1 **not changed yet** (open item 13). |
+
+New project symbol library `lib/symbols/canary-hat.kicad_sym`, in `sym-lib-table`:
+`TPS7A1650-Q1` (no stock symbol exists) and `ADS8688A`. The latter is the stock
+`ADS8688` with **pin 35 corrected from `DNC` to `ALARM` (output)**, a
+non-A/A difference the stock symbol does not know about, and SDO as tri-state.
+
+#### Reference designators
+
+The §13.5.3 placeholders are superseded. In the schematic:
+
+| Function | Ref |
+|---|---|
+| U9 input / output caps | C19 1 µF 50 V / C20 4.7 µF 50 V |
+| U9 EN: pull-up / clamp / slew cap | R17 330 kΩ / D10 BAT46WJ / C32 100 nF |
+| U8 REFIO / REFCAP / REFCAP HF | C21 22 µF / C22 22 µF / C23 1 µF |
+| U8 AVDD bulk / pin 9 / pin 30 / DVDD | C24 10 µF / C25 1 µF / C26 1 µF / C27 10 µF |
+| AVDD bleed (open item 30) | R18 10 kΩ |
+| CH0 `AIN_0GND` match | R19 18 kΩ |
+| CH1 MAP: pull-down / pull-up (DNF) / series / filter / match | R20 TBD / R21 / R22 1 kΩ / C28 / R23 1 kΩ |
+| CH2 IAT: pull-down (DNF) / NTC pull-up / series / filter / match | R24 / **R25 4.99 kΩ** (was "R19") / R26 1 kΩ / C29 / R27 2.7 kΩ |
+| CH3 5V_SENS: series / filter / match | R28 1 kΩ / C30 / R29 1 kΩ |
+| CH4 FUEL: pull-downs / series + / series − / differential cap | R30, R31 100 kΩ / R32 1 kΩ / R33 1 kΩ / C31 |
+| CH5–CH7 spares | TP1–TP3, R34–R42 |
+| Harness TVS | D7 (MAP, IAT), D8 (FUEL_P, FUEL_GND), D9 (5V_SENS) |
+| X1 series resistor / decoupling | R43 33 Ω / C33 100 nF |
+
+#### Decisions taken at entry, and the datasheet findings behind them
+
+- **U9 EN cannot come straight from `+3V3`.** The TPS7A16 abs max is
+  EN − IN ≤ +0.3 V, and TI writes *"make sure that VEN ≤ VIN at all times"*
+  (SBVS188E). With the Pi up and no vehicle 12 V (bench, UPS), the planned
+  wiring puts 3.3 V on EN over IN = 0. Tying EN to IN instead (self-bias) is
+  not acceptable either: the TMAP draws ~10 mA, and U9 sits on always-hot
+  OBD pin 16, so that would drain ~0.25 Ah a day while parked. **Fix: R17
+  330 kΩ from `+3V3`, D10 (100 V Schottky) from EN to IN, C32 100 nF to
+  GND.** With IN at 0, EN clamps to ~0.15 V (10 µA through R17), inside the
+  0.3 V abs max and below V_EN_LO. With IN up, EN = 3.3 V − 330 kΩ × 1 µA
+  leakage ≥ 2.97 V, well above the 1.2 V threshold. This is not a TI
+  reference circuit, so **verify at bring-up**: EN with the Pi on and 12 V
+  absent, and again cold.
+- **U9 output cap is 4.7 µF / 50 V, not 2.2 µF.** TI requires > 2.2 µF
+  effective (and recommends 10 µF). A 2.2 µF part falls below that after DC
+  bias. 50 V because `5V_SENS` is a harness wire.
+- **Clamps (open item 31): `NUP2105LT1G`, 24 V working, bidirectional**,
+  the same class as D1 so a harness short to battery never conducts them.
+  Their clamp voltage (~40 V at peak current) exceeds U8's ±20 V abs max, so
+  the **1 kΩ series resistors are fitted, not 0 Ω** (open item 27). With the
+  100 nF at the pin they hold U8 inside its limit for coupled transients
+  (ns–µs). The residual exposure is a sustained 24 V on a sensor wire
+  (harness short *and* a 24 V jump start), which is accepted.
+- **CH3 (`5V_SENS`) gets the series resistor and clamp too.** §13.5.3
+  item 4 had "C21 as the only part", but `5V_SENS` is a harness wire into the
+  engine bay, exactly as exposed as MAP.
+- **CH4 gets fitted 100 kΩ pull-downs on both legs.** Open item 29 assumed
+  "a broken WHITE wire reads 0 V". On this ADC it does not: a floating
+  `AIN_nP` reads an internal bias voltage (SBAS680 §8.3.1), which can land
+  inside the 0.50–4.50 V window and decode as a plausible pressure. R30 makes
+  the broken-wire case read 0 V, so the gate can catch it. R31 holds
+  `AIN_4GND` inside ±0.1 V if BROWN opens. Load on the gauge's buffered
+  output is < 50 µA. MAP's R20 does the same job on CH1, and IAT's R25 pulls
+  an open NTC to the rail.
+- **U8 decoupling per SBAS680 §10–11**: 1 µF at each AVDD pin plus 10 µF
+  bulk, 10 µF on DVDD. The plan's single 100 nF per rail was below the
+  datasheet.
+- **SPI: U8 is mode 1** (CPOL 0, CPHA 1; the datasheet references falling
+  edges, and the mainline `ti-ads8688` driver uses `SPI_MODE_1`); U3 stays
+  mode 0. Both SDOs tri-state with CS high, so MISO is shared cleanly.
+- **Values that cannot be ordered yet carry `TBD` on purpose**: R20 (open
+  item 20). R25 4.99 kΩ and R27 2.7 kΩ are fitted but **provisional** until
+  the NTC is metered (open items 1, 32).
+
+#### Part count, and how to trim it
+
+Rev 2.0's netlist has 59 symbols (the "57 components" above counted differently); rev 2.1 as entered has
+**106** (+49 on Analog_Inputs, +3 for X1, −5 for the ADS1015/C17/Y1/C5/C6). Five are DNF and three are test
+points. That is far from §13.5.2's "+8", because the conditioning pads,
+matching resistors, clamps and spare-channel pads were all decided after that
+estimate. If placement does not close single-sided (open item 9), trim in
+this order:
+
+1. **Spare channels to bare ties**: −12 parts. Tie `AIN_5P`–`AIN_7P`
+   straight to GND and drop the test points and pads. This costs the
+   "experiment channel" option, but no committed signal.
+2. **DNF pads on CH1/CH2**: −2 parts (R21, R24).
+3. **D9** (the 5V_SENS clamp): −1 part, since U9's own output is a
+   low-impedance node.
+
+#### J2 is a pin order, not yet a part
+
+The schematic fixes only J2's pin order (1–6 lower, 7–12 upper). The planned
+MKKDS 1,5/6-5,08 turned out on 2026-10-12 to be **21.4 mm deep and 25.2 mm
+tall** (Phoenix datasheet for the 9-way sibling, 1700812). Its back pin row
+sits ~15 mm in from the board edge, so it takes a large bite out of a
+65 × 56 mm board and sets the enclosure height. No green item number for the
+6-way was found (BK is 1016295). The only row geometry available (15.24 mm
+between rows, 2.54 mm stagger, 1.3 mm drill) comes from a third-party Eagle
+library. §13.5.5's option table compared widths only. The choice is open
+item 34; the footprint is drawn once the part is chosen, from the maker's
+drilling drawing.

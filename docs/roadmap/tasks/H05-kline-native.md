@@ -6,7 +6,7 @@ records it with its own lineage.
 
 ## Where it stands
 
-Proven 2026-09-23 with the bring-up scripts in `hardware/canary-hat/firmware/`
+Proven 2026-09-23 with the bring-up scripts in `hardware/canary-hat-firmware/`
 (KOEO only): wake-up (518.9 ms low / 18.1 ms high), StartCommunication
 `81 10 FC 81 0E` → `83 FC 10 C1 5D 8F 3C`, a read `05 22 11 03 04 01 40` →
 `04 62 11 03 99 13`, StopCommunication. UpRev's full session was sniffed:

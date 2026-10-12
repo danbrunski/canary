@@ -434,11 +434,9 @@ cp "$src" "$out"
 
 
 def _with_overlay(installer: Installer) -> Path:
-    firmware = installer.checkout / "hardware" / "canary-hat" / "firmware"
+    firmware = installer.checkout / "hardware" / "canary-hat-firmware"
     firmware.mkdir(parents=True)
-    shutil.copy(
-        REPO_ROOT / "hardware" / "canary-hat" / "firmware" / "canary-hat-overlay.dts", firmware
-    )
+    shutil.copy(REPO_ROOT / "hardware" / "canary-hat-firmware" / "canary-hat-overlay.dts", firmware)
     overlays = installer.root / "boot" / "firmware" / "overlays"
     overlays.mkdir(parents=True)
     bin_dir = Path(installer.env["PATH"].split(":", 1)[0])

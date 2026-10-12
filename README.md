@@ -28,7 +28,7 @@ detecting subtle signs of trouble before they become failures.
 - **Dual-channel ingestion** — raw CAN frames plus OBD-II Mode 01 / selected
   Mode 22 (Nissan DID) reads through one CAN-native `python-can` path, over
   the CANary-HAT (MCP2518FD/SPI, the current in-vehicle rig; see
-  `hardware/canary-hat/`), the Waveshare 2-CH CAN HAT (MCP2515/SPI) or a
+  `hardware/canary-hat-rev2.0/`, with rev 2.1 in `hardware/canary-hat-rev2.1/`), the Waveshare 2-CH CAN HAT (MCP2515/SPI) or a
   Canable USB adapter; the ELM327 path remains for emulator/fallback
   coverage. An optional serial NMEA GPS receiver adds ground-speed and
   position channels.

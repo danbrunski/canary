@@ -91,7 +91,7 @@ xterra_fsm/
 # synthesised fixture would only prove the chain agrees with itself.
 !tests/fixtures/**/*.parquet
 
-# ── KiCad hardware project (hardware/canary-hat) ──────────────────────────
+# ── KiCad hardware projects (hardware/canary-hat-rev*) ────────────────────
 # The board design is tracked so the claims docs/CANary-HAT-*.md make about it
 # are checkable — kicad-cli can run against any commit to regenerate a netlist
 # and diff it. Datasheets are tracked too: six rev 2.0 decisions turned on

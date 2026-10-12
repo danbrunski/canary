@@ -1,6 +1,6 @@
 """Offline tests for the CANary-HAT K-line edge decoder.
 
-``hardware/canary-hat/firmware/kline_decode.py`` turns a passive edge capture
+``hardware/canary-hat-firmware/kline_decode.py`` turns a passive edge capture
 (``kline_edges.py``) into bytes. It was validated on a real UpRev session
 (1,462 frames, every checksum good); these tests pin the behaviour that result
 rests on, with synthetic edges whose answer is known by construction.
@@ -14,7 +14,7 @@ from types import ModuleType
 
 import pytest
 
-DECODER = Path(__file__).resolve().parents[1] / "hardware/canary-hat/firmware/kline_decode.py"
+DECODER = Path(__file__).resolve().parents[1] / "hardware/canary-hat-firmware/kline_decode.py"
 BIT_NS = 1e9 / 10400
 
 

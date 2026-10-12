@@ -113,7 +113,7 @@ useful context for any future form-factor work.
 
 One assembled rev 2.0 board on the Pi 5, checked on the bench and then on the
 Xterra through the OBD port (key off, then KOEO), with no UPS stacked. Tools and
-the procedure are in `hardware/canary-hat/firmware/` (`checkout_hat.sh`,
+the procedure are in `hardware/canary-hat-firmware/` (`checkout_hat.sh`,
 `kline_bringup.py`, `kline_edges.py`, `kline_decode.py`).
 
 | Subsystem | Result | Evidence |

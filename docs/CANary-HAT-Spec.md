@@ -578,7 +578,7 @@ models (H00 operator decision 1, 2026-09-23; enforced by H01.1).
 None of this is blocking for fabrication.
 
 > **Status, 2026-09-23 (rev 2.0 bring-up, §13.1.1).** Done: the board overlay
-> (`hardware/canary-hat/firmware/canary-hat-overlay.dts` — `mcp251xfd`, the STB
+> (`hardware/canary-hat-firmware/canary-hat-overlay.dts` — `mcp251xfd`, the STB
 > `gpio-hog`, GNSS `uart2`, `pps-gpio`, K-line `uart0`), its delivery by
 > ID EEPROM (`program_hat.sh`) and by `scripts/install_pi.sh` (which installs the
 > `.dtbo` and points gpsd at `/dev/ttyAMA2` when a CANary-HAT is fitted). K-line

@@ -561,7 +561,7 @@ rev 2.0 was fitted to the same OBD port and sniffed K-line passively (TLIN1027
 in normal mode, commander pull-up off, nothing transmitted) through ROM Editor's
 startup ECU check and a logging run. 93 s, 37,403 bytes, 1,462 frames, **every
 checksum good**; UpRev behaved normally. Tools: `kline_edges.py` (kernel-
-timestamped RXD edges) and `kline_decode.py` in `hardware/canary-hat/firmware/`.
+timestamped RXD edges) and `kline_decode.py` in `hardware/canary-hat-firmware/`.
 
 **Physical layer.** 10400 baud 8N1 (ISO 14230). Two wake-ups, alternating while
 the cable retries: a standard fast init (25.0 ms low, 25.1 ms high, request bytes

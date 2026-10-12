@@ -621,14 +621,14 @@ def test_hat_overlay_change_runs_install_pi(harness: Harness) -> None:
     # leave the Pi booting the old one.
     harness.commit_upstream(
         "overlay",
-        **{"hardware/canary-hat/firmware/canary-hat-overlay.dts": "/dts-v1/;\n/plugin/;\n"},
+        **{"hardware/canary-hat-firmware/canary-hat-overlay.dts": "/dts-v1/;\n/plugin/;\n"},
     )
 
     result = harness.run()
 
     assert result.returncode == 0, result.stdout + result.stderr
     assert (
-        "install_pi.sh: ran (hardware/canary-hat/firmware/canary-hat-overlay.dts changed)"
+        "install_pi.sh: ran (hardware/canary-hat-firmware/canary-hat-overlay.dts changed)"
         in _summary(result.stdout)
     )
 

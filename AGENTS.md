@@ -444,7 +444,7 @@ overnight run plus a daytime terminal). Consequences:
 - Commit with **explicit pathspecs** (`git commit <paths>`) so another
   session's staged or unstaged work is never swept into your commit.
 - Never run tree-wide destructive git commands (`git restore .`,
-  `git checkout .`, `git stash`, `git clean`) — revert only files you
-  yourself changed.
+  `git checkout .`, `git clean`) — revert only files you yourself changed.
+  `git stash` is allowed (operator, 2026-10-12).
 - If a file you need is already dirty with work you didn't do, treat it
   as owned by the other session: coordinate, don't overwrite.
