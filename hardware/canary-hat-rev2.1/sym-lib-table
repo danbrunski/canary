@@ -6,8 +6,6 @@
 	(lib (name "2026-08-09_04-56-55") (type "KiCad") (uri "${KIPRJMOD}/lib/symbols/2026-08-09_04-56-55.kicad_sym") (options "") (descr ""))
 	(lib (name "2026-08-09_05-20-06") (type "KiCad") (uri "${KIPRJMOD}/lib/symbols/2026-08-09_05-20-06.kicad_sym") (options "") (descr ""))
 	(lib (name "2026-08-09_22-23-41") (type "KiCad") (uri "${KIPRJMOD}/lib/symbols/2026-08-09_22-23-41.kicad_sym") (options "") (descr ""))
-	(lib (name "2026-08-09_23-22-53") (type "KiCad") (uri "${KIPRJMOD}/lib/symbols/2026-08-09_23-22-53.kicad_sym") (options "") (descr ""))
-	(lib (name "2026-08-09_23-31-23") (type "KiCad") (uri "${KIPRJMOD}/lib/symbols/2026-08-09_23-31-23.kicad_sym") (options "") (descr ""))
 	(lib (name "2026-08-09_23-42-39") (type "KiCad") (uri "${KIPRJMOD}/lib/symbols/2026-08-09_23-42-39.kicad_sym") (options "") (descr ""))
 	(lib (name "Inductor_Wurth_WE-PD2") (type "KiCad") (uri "${KIPRJMOD}/lib/symbols/Inductor_Wurth_WE-PD2.kicad_sym") (options "") (descr ""))
 	(lib (name "2026-08-11_01-59-43") (type "KiCad") (uri "${KIPRJMOD}/lib/symbols/2026-08-11_01-59-43.kicad_sym") (options "") (descr ""))

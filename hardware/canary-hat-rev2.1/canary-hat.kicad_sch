@@ -3,7 +3,7 @@
 	(generator "eeschema")
 	(generator_version "10.0")
 	(uuid "e63e39d7-6ac0-4ffd-8aa3-1841a4541b55")
-	(paper "A4")
+	(paper "A3")
 	(title_block
 		(title "CANary-HAT")
 		(date "2026-10-12")
@@ -2646,10 +2646,7 @@
 		(at 139.7 106.68)
 		(uuid "c3a07ac3-a402-4969-a578-d24a598adbb7")
 	)
-	(no_connect
-		(at 127 104.14)
-		(uuid "d4c3b214-355c-4ec2-9eea-21986cce4444")
-	)
+	
 	(no_connect
 		(at 127 101.6)
 		(uuid "ffa20921-a81c-45f5-9367-2a309696139f")
@@ -5644,36 +5641,9 @@
 				(justify right)
 			)
 		)
-		(pin "UART1_RXD" output
-			(at 66.04 74.93 0)
-			(uuid "ad1a13c5-d249-4509-9ee2-cd2bfb4e5512")
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify right)
-			)
-		)
-		(pin "UART1_TXD" input
-			(at 66.04 69.85 0)
-			(uuid "d14c1d3b-f50c-4d1c-a5d2-71f05b32ec35")
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify right)
-			)
-		)
-		(pin "PPS" output
-			(at 52.07 53.34 90)
-			(uuid "7286c80b-76c8-4837-90c6-ba8707b1776b")
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify right)
-			)
-		)
+		
+		
+		
 		(pin "INT2" output
 			(at 54.61 53.34 90)
 			(uuid "37ac8f04-e8e5-4efe-a887-9d6dd9809e66")
@@ -5984,16 +5954,7 @@
 		)
 		
 		
-		(pin "V12_SENSE" output
-			(at 237.49 129.54 0)
-			(uuid "8593c534-1778-4666-994b-6b110292acb3")
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify right)
-			)
-		)
+		
 		(pin "5V_SENS" input
 			(at 237.49 134.62 0)
 			(uuid "4e219f2e-33cf-4cb7-ac96-febdea6743ad")
@@ -6044,6 +6005,16 @@
 				(justify right)
 			)
 		)
+		(pin "+12V_RAW" output
+			(at 237.49 147.32 0)
+			(uuid "fe7fc6d0-2225-4991-b813-2e173f16de94")
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify right)
+			)
+		)
 		(instances
 			(project "canary-hat"
 				(path "/e63e39d7-6ac0-4ffd-8aa3-1841a4541b55"
@@ -6052,26 +6023,8 @@
 			)
 		)
 	)
-	(wire
-		(pts
-			(xy 237.49 129.54) (xy 242.57 129.54)
-		)
-		(stroke
-			(width 0)
-			(type default)
-		)
-		(uuid "249a3dcb-95dc-4653-b1bf-d46d38c79e39")
-	)
-	(label "V12_SENSE"
-		(at 242.57 129.54 0)
-		(effects
-			(font
-				(size 1.27 1.27)
-			)
-			(justify left bottom)
-		)
-		(uuid "a852ca7c-5da2-45b9-8ee0-09788427dfd8")
-	)
+	
+	
 	(wire
 		(pts
 			(xy 237.49 134.62) (xy 242.57 134.62)
@@ -6301,7 +6254,7 @@
 				(justify right)
 			)
 		)
-		(pin "5V_SENS" output
+		(pin "5V_SENS" input
 			(at 151.13 154.94 0)
 			(uuid "fef612a3-26fd-4937-9815-220e3753b380")
 			(effects
@@ -6559,10 +6512,382 @@
 		)
 		(uuid "2c2e4f8c-968a-41ec-99d6-254f6321af0b")
 	)
+	(sheet
+		(at 262.89 53.34)
+		(size 30.48 25.4)
+		(exclude_from_sim no)
+		(in_bom yes)
+		(on_board yes)
+		(dnp no)
+		(fields_autoplaced yes)
+		(stroke
+			(width 0.1524)
+			(type solid)
+		)
+		(fill
+			(color 0 0 0 0)
+		)
+		(uuid "4e8392e5-b845-4003-b99d-b2bd970031fc")
+		(property "Sheetname" "Power"
+			(at 262.89 52.6284 0)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify left bottom)
+			)
+		)
+		(property "Sheetfile" "Power.kicad_sch"
+			(at 262.89 79.3246 0)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify left top)
+			)
+		)
+		(pin "+12V_RAW" input
+			(at 293.37 58.42 0)
+			(uuid "ae697a4e-afee-41c5-ae79-78b6c36916d3")
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify right)
+			)
+		)
+		(pin "V12_SENSE" output
+			(at 293.37 63.5 0)
+			(uuid "d8b8a532-10ad-49b4-89ea-3cb76836a0dd")
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify right)
+			)
+		)
+		(pin "5V_SENS" output
+			(at 293.37 68.58 0)
+			(uuid "8e520193-10eb-4bdf-bb03-52b74bc5c8fe")
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify right)
+			)
+		)
+		(pin "SENS_PWR_EN" input
+			(at 293.37 73.66 0)
+			(uuid "9a56019b-0d37-45e8-9236-02690aedef24")
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify right)
+			)
+		)
+		(instances
+			(project "canary-hat"
+				(path "/e63e39d7-6ac0-4ffd-8aa3-1841a4541b55"
+					(page "7")
+				)
+			)
+		)
+	)
+	(sheet
+		(at 262.89 93.98)
+		(size 30.48 20.32)
+		(exclude_from_sim no)
+		(in_bom yes)
+		(on_board yes)
+		(dnp no)
+		(fields_autoplaced yes)
+		(stroke
+			(width 0.1524)
+			(type solid)
+		)
+		(fill
+			(color 0 0 0 0)
+		)
+		(uuid "83f4b6ea-15ff-47f0-9040-ffad90890087")
+		(property "Sheetname" "GNSS"
+			(at 262.89 93.2684 0)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify left bottom)
+			)
+		)
+		(property "Sheetfile" "GNSS.kicad_sch"
+			(at 262.89 114.8846 0)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify left top)
+			)
+		)
+		(pin "UART1_RXD" output
+			(at 293.37 99.06 0)
+			(uuid "95d5726a-9884-4821-9938-81be2d9c0d62")
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify right)
+			)
+		)
+		(pin "UART1_TXD" input
+			(at 293.37 104.14 0)
+			(uuid "5c16c996-acc7-4b67-a87f-fa1af2f11d31")
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify right)
+			)
+		)
+		(pin "PPS" output
+			(at 293.37 109.22 0)
+			(uuid "f16ad9b1-a2b4-4659-ac0e-f999293e41b9")
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify right)
+			)
+		)
+		(instances
+			(project "canary-hat"
+				(path "/e63e39d7-6ac0-4ffd-8aa3-1841a4541b55"
+					(page "8")
+				)
+			)
+		)
+	)
+	(label "GPIO5{slash}RXD1"
+		(at 66.04 74.93 0)
+		(effects
+			(font
+				(size 1.27 1.27)
+			)
+			(justify left bottom)
+		)
+		(uuid "01eff526-e684-4464-b8e7-a4913ace905c")
+	)
+	(label "GPIO4{slash}TXD1"
+		(at 66.04 69.85 0)
+		(effects
+			(font
+				(size 1.27 1.27)
+			)
+			(justify left bottom)
+		)
+		(uuid "6597e4c5-aefb-4ab8-9a9e-14f32929bcdd")
+	)
+	(label "GPIO18{slash}PPS"
+		(at 52.07 53.34 90)
+		(effects
+			(font
+				(size 1.27 1.27)
+			)
+			(justify left bottom)
+		)
+		(uuid "ea8dc292-f61e-4d54-9a6e-6ec9a11be117")
+	)
+	(wire
+		(pts
+			(xy 237.49 147.32) (xy 242.57 147.32)
+		)
+		(stroke
+			(width 0)
+			(type default)
+		)
+		(uuid "1699e340-2897-4e4b-b874-82e2a01cc05c")
+	)
+	(label "+12V_RAW"
+		(at 242.57 147.32 0)
+		(effects
+			(font
+				(size 1.27 1.27)
+			)
+			(justify left bottom)
+		)
+		(uuid "472095fd-a07e-47c6-9990-a3e4c0544050")
+	)
+	(wire
+		(pts
+			(xy 293.37 58.42) (xy 298.45 58.42)
+		)
+		(stroke
+			(width 0)
+			(type default)
+		)
+		(uuid "97145bbc-9199-4e44-96e1-d2ded3ab4fb7")
+	)
+	(label "+12V_RAW"
+		(at 298.45 58.42 0)
+		(effects
+			(font
+				(size 1.27 1.27)
+			)
+			(justify left bottom)
+		)
+		(uuid "b77e5985-b86a-44e9-9651-6a38167844a1")
+	)
+	(wire
+		(pts
+			(xy 293.37 63.5) (xy 298.45 63.5)
+		)
+		(stroke
+			(width 0)
+			(type default)
+		)
+		(uuid "979beca8-8a84-4a04-aa26-0d81f5206a67")
+	)
+	(label "V12_SENSE"
+		(at 298.45 63.5 0)
+		(effects
+			(font
+				(size 1.27 1.27)
+			)
+			(justify left bottom)
+		)
+		(uuid "a6a85e91-714e-411f-b6ee-bb09cfd185aa")
+	)
+	(wire
+		(pts
+			(xy 293.37 68.58) (xy 298.45 68.58)
+		)
+		(stroke
+			(width 0)
+			(type default)
+		)
+		(uuid "919ff832-5f8f-4ddc-b2b6-de14274d2c68")
+	)
+	(label "5V_SENS"
+		(at 298.45 68.58 0)
+		(effects
+			(font
+				(size 1.27 1.27)
+			)
+			(justify left bottom)
+		)
+		(uuid "ee994b16-eae2-4b7c-953e-d51f5235132f")
+	)
+	(wire
+		(pts
+			(xy 293.37 99.06) (xy 298.45 99.06)
+		)
+		(stroke
+			(width 0)
+			(type default)
+		)
+		(uuid "be795c37-a303-4792-ab81-5daf3d8d3cec")
+	)
+	(label "GPIO5{slash}RXD1"
+		(at 298.45 99.06 0)
+		(effects
+			(font
+				(size 1.27 1.27)
+			)
+			(justify left bottom)
+		)
+		(uuid "717b5b8d-e969-4c7c-acac-7ecda7747a22")
+	)
+	(wire
+		(pts
+			(xy 293.37 104.14) (xy 298.45 104.14)
+		)
+		(stroke
+			(width 0)
+			(type default)
+		)
+		(uuid "11d26069-7913-477c-9fbb-9aa7d43c177a")
+	)
+	(label "GPIO4{slash}TXD1"
+		(at 298.45 104.14 0)
+		(effects
+			(font
+				(size 1.27 1.27)
+			)
+			(justify left bottom)
+		)
+		(uuid "91be4f8f-75a5-43f1-995f-085ff20295e5")
+	)
+	(wire
+		(pts
+			(xy 293.37 109.22) (xy 298.45 109.22)
+		)
+		(stroke
+			(width 0)
+			(type default)
+		)
+		(uuid "8e68b7d7-2c93-4829-b79f-2e55c1c5f94b")
+	)
+	(label "GPIO18{slash}PPS"
+		(at 298.45 109.22 0)
+		(effects
+			(font
+				(size 1.27 1.27)
+			)
+			(justify left bottom)
+		)
+		(uuid "0e0f7c84-4975-41d0-b7ed-4a1438280bd6")
+	)
 	(sheet_instances
 		(path "/"
 			(page "1")
 		)
+	)
+	(wire
+		(pts
+			(xy 293.37 73.66) (xy 298.45 73.66)
+		)
+		(stroke
+			(width 0)
+			(type default)
+		)
+		(uuid "00220684-09ab-4181-bcac-d534bdd133d3")
+	)
+	(label "GPIO19"
+		(at 298.45 73.66 0)
+		(effects
+			(font
+				(size 1.27 1.27)
+			)
+			(justify left bottom)
+		)
+		(uuid "50cdda94-0218-4d23-a085-bf9da19487a4")
+	)
+	(wire
+		(pts
+			(xy 127 104.14) (xy 119.38 104.14)
+		)
+		(stroke
+			(width 0)
+			(type default)
+		)
+		(uuid "5de1e420-c6bc-4261-9f35-7173ea86eb75")
+	)
+	(label "GPIO19"
+		(at 119.38 104.14 180)
+		(effects
+			(font
+				(size 1.27 1.27)
+			)
+			(justify right bottom)
+		)
+		(uuid "b5f029d1-0456-49b4-a3b4-100b09bef3b4")
 	)
 	(embedded_fonts no)
 )

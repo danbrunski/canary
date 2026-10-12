@@ -854,6 +854,18 @@
     [
       "034bc961-6eba-4290-ab59-b0ac36a8eaba",
       "Sensors"
+    ],
+    [
+      "421b2317-5779-468f-96b0-ffd0e1a2d866",
+      "Analog_Inputs"
+    ],
+    [
+      "4e8392e5-b845-4003-b99d-b2bd970031fc",
+      "Power"
+    ],
+    [
+      "83f4b6ea-15ff-47f0-9040-ffad90890087",
+      "GNSS"
     ]
   ],
   "text_variables": {},

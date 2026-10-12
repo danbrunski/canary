@@ -2370,1956 +2370,48 @@
 				(embedded_fonts no)
 			)
 	)
-	(text "5 V SENSOR SUPPLY (13.5.3 item 1). U9 on +12V (post Q1/D1); enabled from +3V3 so it is off whenever the Pi is."
-		(exclude_from_sim no)
-		(at 20 18 0)
-		(effects
-			(font
-				(size 1.27 1.27)
-			)
-			(justify left top)
-		)
-		(uuid "0e9a4c8b-df20-4b4d-8585-c006fe8802f6")
-	)
-	(symbol
-		(lib_id "Device:C")
-		(at 35.56 49.53 0)
-		(unit 1)
-		(body_style 1)
-		(exclude_from_sim no)
-		(in_bom yes)
-		(on_board yes)
-		(in_pos_files yes)
-		(dnp no)
-		(uuid "30860a81-7d5c-4ca7-ace4-ebd615268463")
-		(property "Reference" "C19"
-			(at 38.1 48.26 0)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify left)
-			)
-		)
-		(property "Value" "1u/50V"
-			(at 38.1 50.8 0)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify left)
-			)
-		)
-		(property "Footprint" "Capacitor_SMD:C_0805_2012Metric"
-			(at 35.56 49.53 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Datasheet" ""
-			(at 35.56 49.53 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Description" "Unpolarized capacitor"
-			(at 35.56 49.53 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Manufacturer" "Samsung Electro-Mechanics"
-			(at 35.56 49.53 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify left)
-			)
-		)
-		(property "MPN" "CL21B105KBFNNNE"
-			(at 35.56 49.53 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify left)
-			)
-		)
-		(property "Voltage" "50V"
-			(at 35.56 49.53 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify left)
-			)
-		)
-		(property "Dielectric" "X7R"
-			(at 35.56 49.53 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify left)
-			)
-		)
-		(property "Tolerance" "10%"
-			(at 35.56 49.53 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify left)
-			)
-		)
-		(property "Quote" "Rev 2.1: not yet quoted."
-			(at 35.56 49.53 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify left)
-			)
-		)
-		(property "Note" "U9 input (TI: > 0.1 uF; C2 47 uF bulk is on the same rail). 50 V: D1 clamps +12V at 38.9 V, so 50 V is the floor for anything on +12V."
-			(at 35.56 49.53 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify left)
-			)
-		)
-		(pin "1"
-			(uuid "498703f8-afdb-4f19-bf98-7084db73b0d3")
-		)
-		(pin "2"
-			(uuid "f0729d02-77b3-4535-8b8a-618d815823be")
-		)
-		(instances
-			(project "canary-hat"
-				(path "/e63e39d7-6ac0-4ffd-8aa3-1841a4541b55/421b2317-5779-468f-96b0-ffd0e1a2d866"
-					(reference "C19")
-					(unit 1)
-				)
-			)
-		)
-	)
-	(wire
-		(pts
-			(xy 35.56 45.72) (xy 35.56 43.18)
-		)
-		(stroke
-			(width 0)
-			(type default)
-		)
-		(uuid "6ef8ad9f-ee23-44aa-a197-34027001c629")
-	)
-	(symbol
-		(lib_id "power:+12V")
-		(at 35.56 43.18 0)
-		(unit 1)
-		(body_style 1)
-		(exclude_from_sim no)
-		(in_bom yes)
-		(on_board yes)
-		(in_pos_files yes)
-		(dnp no)
-		(uuid "020f7cfa-65c1-4b72-9b2d-12fcea66ebdf")
-		(property "Reference" "#PWR001"
-			(at 38.1 41.91 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify left)
-			)
-		)
-		(property "Value" "+12V"
-			(at 38.1 45.72 0)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Footprint" ""
-			(at 35.56 43.18 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Datasheet" ""
-			(at 35.56 43.18 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Description" ""
-			(at 35.56 43.18 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(pin "1"
-			(uuid "4bd7b566-de00-46b9-9694-f9d1cb80ee57")
-		)
-		(instances
-			(project "canary-hat"
-				(path "/e63e39d7-6ac0-4ffd-8aa3-1841a4541b55/421b2317-5779-468f-96b0-ffd0e1a2d866"
-					(reference "#PWR001")
-					(unit 1)
-				)
-			)
-		)
-	)
-	(wire
-		(pts
-			(xy 35.56 53.34) (xy 35.56 55.88)
-		)
-		(stroke
-			(width 0)
-			(type default)
-		)
-		(uuid "95587c10-9b32-409c-91b3-6505785a64a6")
-	)
-	(symbol
-		(lib_id "power:GND")
-		(at 35.56 55.88 0)
-		(unit 1)
-		(body_style 1)
-		(exclude_from_sim no)
-		(in_bom yes)
-		(on_board yes)
-		(in_pos_files yes)
-		(dnp no)
-		(uuid "26d7fa3d-bd31-43a0-9fdc-c77ef0760bd6")
-		(property "Reference" "#PWR002"
-			(at 38.1 54.61 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify left)
-			)
-		)
-		(property "Value" "GND"
-			(at 38.1 58.42 0)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Footprint" ""
-			(at 35.56 55.88 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Datasheet" ""
-			(at 35.56 55.88 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Description" ""
-			(at 35.56 55.88 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(pin "1"
-			(uuid "22e66019-ddad-40ae-b88b-355918f1495e")
-		)
-		(instances
-			(project "canary-hat"
-				(path "/e63e39d7-6ac0-4ffd-8aa3-1841a4541b55/421b2317-5779-468f-96b0-ffd0e1a2d866"
-					(reference "#PWR002")
-					(unit 1)
-				)
-			)
-		)
-	)
-	(symbol
-		(lib_id "canary-hat:TPS7A1650-Q1")
-		(at 85.09 49.53 0)
-		(unit 1)
-		(body_style 1)
-		(exclude_from_sim no)
-		(in_bom yes)
-		(on_board yes)
-		(in_pos_files yes)
-		(dnp no)
-		(uuid "4b687df4-635a-49e6-83d6-ddd8b11a46f3")
-		(property "Reference" "U9"
-			(at 77.47 39.37 0)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify left)
-			)
-		)
-		(property "Value" "TPS7A1650QDGNRQ1"
-			(at 77.47 64.77 0)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify left)
-			)
-		)
-		(property "Footprint" "Package_SO:Texas_DGN0008B_VSSOP-8-1EP_3x3mm_P0.65mm_EP2x3mm_Mask1.88x1.98mm"
-			(at 85.09 49.53 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Datasheet" ""
-			(at 85.09 49.53 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Description" "60 V, 100 mA, 5.0 V fixed automotive LDO with enable and power-good"
-			(at 85.09 49.53 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Manufacturer" "Texas Instruments"
-			(at 85.09 49.53 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify left)
-			)
-		)
-		(property "MPN" "TPS7A1650QDGNRQ1"
-			(at 85.09 49.53 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify left)
-			)
-		)
-		(property "Quote" "Rev 2.1: not yet quoted."
-			(at 85.09 49.53 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify left)
-			)
-		)
-		(property "Note" "5V sensor supply (13.5.3 item 1). 60 V input clears the board's 50 V floor on +12V. Separate current-limited rail so a chafed sensor-harness wire costs one sensor, not the Pi's 5V."
-			(at 85.09 49.53 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify left)
-			)
-		)
-		(pin "8"
-			(uuid "cc6c7b98-e331-496e-8afb-900f439fe4b7")
-		)
-		(pin "5"
-			(uuid "8fcf07bf-7931-4fb5-b6a0-53826d2a9394")
-		)
-		(pin "6"
-			(uuid "7ff57b24-ca82-4bcf-9914-d2a67b8c9704")
-		)
-		(pin "1"
-			(uuid "6079f6a3-5a65-4337-8b5f-97f6321a4622")
-		)
-		(pin "3"
-			(uuid "46858070-5f6d-4d9d-88fa-2bdc17417f9b")
-		)
-		(pin "7"
-			(uuid "b5195f2d-1234-460b-af37-bea1e13ad1c4")
-		)
-		(pin "2"
-			(uuid "a3260826-b935-4cdc-952e-2e2fa1f8dd50")
-		)
-		(pin "4"
-			(uuid "f8f292dc-a40d-4d4b-af2c-269c6f8810c5")
-		)
-		(pin "9"
-			(uuid "94d5456e-85fb-4b58-a2db-2d08a2cd4c68")
-		)
-		(instances
-			(project "canary-hat"
-				(path "/e63e39d7-6ac0-4ffd-8aa3-1841a4541b55/421b2317-5779-468f-96b0-ffd0e1a2d866"
-					(reference "U9")
-					(unit 1)
-				)
-			)
-		)
-	)
-	(wire
-		(pts
-			(xy 72.39 44.45) (xy 69.85 44.45)
-		)
-		(stroke
-			(width 0)
-			(type default)
-		)
-		(uuid "a1a2d7f7-1145-4a07-9c12-4658b338841a")
-	)
-	(symbol
-		(lib_id "power:+12V")
-		(at 69.85 44.45 90)
-		(unit 1)
-		(body_style 1)
-		(exclude_from_sim no)
-		(in_bom yes)
-		(on_board yes)
-		(in_pos_files yes)
-		(dnp no)
-		(uuid "65b93385-2848-46a5-8c3e-984e31e1b5de")
-		(property "Reference" "#PWR003"
-			(at 72.39 43.18 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify left)
-			)
-		)
-		(property "Value" "+12V"
-			(at 72.39 46.99 0)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Footprint" ""
-			(at 69.85 44.45 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Datasheet" ""
-			(at 69.85 44.45 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Description" ""
-			(at 69.85 44.45 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(pin "1"
-			(uuid "1919f2a1-326d-4217-9b3d-41806aea4860")
-		)
-		(instances
-			(project "canary-hat"
-				(path "/e63e39d7-6ac0-4ffd-8aa3-1841a4541b55/421b2317-5779-468f-96b0-ffd0e1a2d866"
-					(reference "#PWR003")
-					(unit 1)
-				)
-			)
-		)
-	)
-	(wire
-		(pts
-			(xy 72.39 49.53) (xy 69.85 49.53)
-		)
-		(stroke
-			(width 0)
-			(type default)
-		)
-		(uuid "0cbde181-adec-4402-a730-eacc6c054f81")
-	)
-	(label "U9_EN"
-		(at 69.85 49.53 180)
-		(effects
-			(font
-				(size 1.27 1.27)
-			)
-			(justify right bottom)
-		)
-		(uuid "fc29d4ef-b46e-47be-a9bc-df36d0367389")
-	)
-	(no_connect
-		(at 72.39 54.61)
-		(uuid "09652708-0529-41c2-b613-9faa856072b4")
-	)
-	(wire
-		(pts
-			(xy 97.79 44.45) (xy 100.33 44.45)
-		)
-		(stroke
-			(width 0)
-			(type default)
-		)
-		(uuid "ec2be42d-9a2c-4f2c-84bd-347ca6504272")
-	)
-	(label "5V_SENS"
-		(at 100.33 44.45 0)
-		(effects
-			(font
-				(size 1.27 1.27)
-			)
-			(justify left bottom)
-		)
-		(uuid "68803dd1-6f61-4321-8e8f-d942f389d482")
-	)
-	(no_connect
-		(at 97.79 49.53)
-		(uuid "46a31206-bec7-4f2e-954a-b0362f2899e7")
-	)
-	(no_connect
-		(at 97.79 52.07)
-		(uuid "2370caea-0948-4851-920a-a9eb09a48a82")
-	)
-	(wire
-		(pts
-			(xy 97.79 54.61) (xy 100.33 54.61)
-		)
-		(stroke
-			(width 0)
-			(type default)
-		)
-		(uuid "bc47379e-a555-430a-86b9-e7318cb66dbf")
-	)
-	(symbol
-		(lib_id "power:GND")
-		(at 100.33 54.61 90)
-		(unit 1)
-		(body_style 1)
-		(exclude_from_sim no)
-		(in_bom yes)
-		(on_board yes)
-		(in_pos_files yes)
-		(dnp no)
-		(uuid "b21a327d-adc9-4f64-a3b2-a6bdae84c443")
-		(property "Reference" "#PWR004"
-			(at 102.87 53.34 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify left)
-			)
-		)
-		(property "Value" "GND"
-			(at 102.87 57.15 0)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Footprint" ""
-			(at 100.33 54.61 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Datasheet" ""
-			(at 100.33 54.61 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Description" ""
-			(at 100.33 54.61 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(pin "1"
-			(uuid "1e0ff46e-8693-4bce-bff0-0e1ce8b9c7c7")
-		)
-		(instances
-			(project "canary-hat"
-				(path "/e63e39d7-6ac0-4ffd-8aa3-1841a4541b55/421b2317-5779-468f-96b0-ffd0e1a2d866"
-					(reference "#PWR004")
-					(unit 1)
-				)
-			)
-		)
-	)
-	(wire
-		(pts
-			(xy 83.82 62.23) (xy 83.82 64.77)
-		)
-		(stroke
-			(width 0)
-			(type default)
-		)
-		(uuid "7519e648-a411-46ec-ba76-442310b8d6ca")
-	)
-	(symbol
-		(lib_id "power:GND")
-		(at 83.82 64.77 0)
-		(unit 1)
-		(body_style 1)
-		(exclude_from_sim no)
-		(in_bom yes)
-		(on_board yes)
-		(in_pos_files yes)
-		(dnp no)
-		(uuid "3856b1b7-0eea-472f-9f57-02c5da9be20f")
-		(property "Reference" "#PWR005"
-			(at 86.36 63.5 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify left)
-			)
-		)
-		(property "Value" "GND"
-			(at 86.36 67.31 0)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Footprint" ""
-			(at 83.82 64.77 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Datasheet" ""
-			(at 83.82 64.77 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Description" ""
-			(at 83.82 64.77 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(pin "1"
-			(uuid "8edf231a-d3fb-4ed7-8bad-d900b896c7fb")
-		)
-		(instances
-			(project "canary-hat"
-				(path "/e63e39d7-6ac0-4ffd-8aa3-1841a4541b55/421b2317-5779-468f-96b0-ffd0e1a2d866"
-					(reference "#PWR005")
-					(unit 1)
-				)
-			)
-		)
-	)
-	(wire
-		(pts
-			(xy 86.36 62.23) (xy 86.36 64.77)
-		)
-		(stroke
-			(width 0)
-			(type default)
-		)
-		(uuid "faf48c36-c1b1-4dc5-b3bc-6dc0b4c24589")
-	)
-	(symbol
-		(lib_id "power:GND")
-		(at 86.36 64.77 0)
-		(unit 1)
-		(body_style 1)
-		(exclude_from_sim no)
-		(in_bom yes)
-		(on_board yes)
-		(in_pos_files yes)
-		(dnp no)
-		(uuid "05c4441b-b9ad-4f6a-97a8-dc2e25553588")
-		(property "Reference" "#PWR006"
-			(at 88.9 63.5 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify left)
-			)
-		)
-		(property "Value" "GND"
-			(at 88.9 67.31 0)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Footprint" ""
-			(at 86.36 64.77 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Datasheet" ""
-			(at 86.36 64.77 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Description" ""
-			(at 86.36 64.77 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(pin "1"
-			(uuid "7843ea95-5ed2-4cbf-b3ef-07aaadf7fcfd")
-		)
-		(instances
-			(project "canary-hat"
-				(path "/e63e39d7-6ac0-4ffd-8aa3-1841a4541b55/421b2317-5779-468f-96b0-ffd0e1a2d866"
-					(reference "#PWR006")
-					(unit 1)
-				)
-			)
-		)
-	)
-	(symbol
-		(lib_id "Device:C")
-		(at 124.46 49.53 0)
-		(unit 1)
-		(body_style 1)
-		(exclude_from_sim no)
-		(in_bom yes)
-		(on_board yes)
-		(in_pos_files yes)
-		(dnp no)
-		(uuid "9ac944e7-4d08-4c47-815c-969ca8f43bc5")
-		(property "Reference" "C20"
-			(at 127 48.26 0)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify left)
-			)
-		)
-		(property "Value" "4.7u/50V"
-			(at 127 50.8 0)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify left)
-			)
-		)
-		(property "Footprint" "Capacitor_SMD:C_1206_3216Metric"
-			(at 124.46 49.53 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Datasheet" ""
-			(at 124.46 49.53 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Description" "Unpolarized capacitor"
-			(at 124.46 49.53 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Manufacturer" "Samsung Electro-Mechanics"
-			(at 124.46 49.53 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify left)
-			)
-		)
-		(property "MPN" "CL31B475KBHNNNE"
-			(at 124.46 49.53 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify left)
-			)
-		)
-		(property "Voltage" "50V"
-			(at 124.46 49.53 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify left)
-			)
-		)
-		(property "Dielectric" "X7R"
-			(at 124.46 49.53 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify left)
-			)
-		)
-		(property "Tolerance" "10%"
-			(at 124.46 49.53 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify left)
-			)
-		)
-		(property "Quote" "Rev 2.1: not yet quoted."
-			(at 124.46 49.53 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify left)
-			)
-		)
-		(property "Note" "U9 output: TI requires > 2.2 uF effective (recommends 10 uF); 4.7 uF/50 V X7R 1206 stays above 2.2 uF at 5 V bias. 50 V because 5V_SENS leaves the board on the sensor harness, where a chafe to battery puts 12-14 V on it."
-			(at 124.46 49.53 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify left)
-			)
-		)
-		(pin "1"
-			(uuid "30fecca1-717a-44ce-88ba-8b4aef743dbe")
-		)
-		(pin "2"
-			(uuid "9be55c94-ce66-4174-8952-2866a9a769ce")
-		)
-		(instances
-			(project "canary-hat"
-				(path "/e63e39d7-6ac0-4ffd-8aa3-1841a4541b55/421b2317-5779-468f-96b0-ffd0e1a2d866"
-					(reference "C20")
-					(unit 1)
-				)
-			)
-		)
-	)
-	(wire
-		(pts
-			(xy 124.46 45.72) (xy 124.46 43.18)
-		)
-		(stroke
-			(width 0)
-			(type default)
-		)
-		(uuid "204b7c00-7f51-4af8-bff0-1a7ff0b1eaab")
-	)
-	(label "5V_SENS"
-		(at 124.46 43.18 90)
-		(effects
-			(font
-				(size 1.27 1.27)
-			)
-			(justify left bottom)
-		)
-		(uuid "93613423-8dac-43b1-94ab-fd9f5c39cf9d")
-	)
-	(wire
-		(pts
-			(xy 124.46 53.34) (xy 124.46 55.88)
-		)
-		(stroke
-			(width 0)
-			(type default)
-		)
-		(uuid "1ce4fc68-0116-41fa-a431-08905335baf5")
-	)
-	(symbol
-		(lib_id "power:GND")
-		(at 124.46 55.88 0)
-		(unit 1)
-		(body_style 1)
-		(exclude_from_sim no)
-		(in_bom yes)
-		(on_board yes)
-		(in_pos_files yes)
-		(dnp no)
-		(uuid "051296d6-283c-4f12-85c7-774da0131592")
-		(property "Reference" "#PWR007"
-			(at 127 54.61 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify left)
-			)
-		)
-		(property "Value" "GND"
-			(at 127 58.42 0)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Footprint" ""
-			(at 124.46 55.88 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Datasheet" ""
-			(at 124.46 55.88 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Description" ""
-			(at 124.46 55.88 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(pin "1"
-			(uuid "453d2819-dbf6-42e8-bfb0-cee1e5a79b2d")
-		)
-		(instances
-			(project "canary-hat"
-				(path "/e63e39d7-6ac0-4ffd-8aa3-1841a4541b55/421b2317-5779-468f-96b0-ffd0e1a2d866"
-					(reference "#PWR007")
-					(unit 1)
-				)
-			)
-		)
-	)
-	(symbol
-		(lib_id "Device:R")
-		(at 49.53 80.01 0)
-		(unit 1)
-		(body_style 1)
-		(exclude_from_sim no)
-		(in_bom yes)
-		(on_board yes)
-		(in_pos_files yes)
-		(dnp no)
-		(uuid "87cf2be4-3750-4a65-bff1-9ce8952a11d2")
-		(property "Reference" "R17"
-			(at 52.07 78.74 0)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify left)
-			)
-		)
-		(property "Value" "330k"
-			(at 52.07 81.28 0)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify left)
-			)
-		)
-		(property "Footprint" "Resistor_SMD:R_0603_1608Metric"
-			(at 49.53 80.01 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Datasheet" ""
-			(at 49.53 80.01 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Description" "Resistor"
-			(at 49.53 80.01 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Manufacturer" "Yageo"
-			(at 49.53 80.01 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify left)
-			)
-		)
-		(property "MPN" "RC0603FR-07330KL"
-			(at 49.53 80.01 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify left)
-			)
-		)
-		(property "Power" "0.1W"
-			(at 49.53 80.01 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify left)
-			)
-		)
-		(property "Tolerance" "1%"
-			(at 49.53 80.01 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify left)
-			)
-		)
-		(property "Quote" "Rev 2.1: not yet quoted."
-			(at 49.53 80.01 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify left)
-			)
-		)
-		(property "Note" "U9 EN from +3V3: the sensor rail (and the TMAP's ~10 mA) exists only while the Pi is up - no parked drain from always-hot +12V, and no sensor driving U8 while it is dark (13.5.3 item 1). 330k keeps EN >= 2.97 V against the 1 uA EN leakage."
-			(at 49.53 80.01 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify left)
-			)
-		)
-		(pin "1"
-			(uuid "3ab0f95b-bc0c-41c1-b408-52a1f09590cc")
-		)
-		(pin "2"
-			(uuid "97b4ba48-59c4-40f3-aee6-bcda964cfd86")
-		)
-		(instances
-			(project "canary-hat"
-				(path "/e63e39d7-6ac0-4ffd-8aa3-1841a4541b55/421b2317-5779-468f-96b0-ffd0e1a2d866"
-					(reference "R17")
-					(unit 1)
-				)
-			)
-		)
-	)
-	(wire
-		(pts
-			(xy 49.53 76.2) (xy 49.53 73.66)
-		)
-		(stroke
-			(width 0)
-			(type default)
-		)
-		(uuid "4af0a82f-d1b4-4f19-acde-025d0c095984")
-	)
-	(symbol
-		(lib_id "power:+3V3")
-		(at 49.53 73.66 0)
-		(unit 1)
-		(body_style 1)
-		(exclude_from_sim no)
-		(in_bom yes)
-		(on_board yes)
-		(in_pos_files yes)
-		(dnp no)
-		(uuid "de34b62f-a375-41cc-bd1f-281b9bc72fec")
-		(property "Reference" "#PWR008"
-			(at 52.07 72.39 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify left)
-			)
-		)
-		(property "Value" "+3V3"
-			(at 52.07 76.2 0)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Footprint" ""
-			(at 49.53 73.66 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Datasheet" ""
-			(at 49.53 73.66 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Description" ""
-			(at 49.53 73.66 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(pin "1"
-			(uuid "579292e1-db44-4cf9-b33d-f5495d0d67a8")
-		)
-		(instances
-			(project "canary-hat"
-				(path "/e63e39d7-6ac0-4ffd-8aa3-1841a4541b55/421b2317-5779-468f-96b0-ffd0e1a2d866"
-					(reference "#PWR008")
-					(unit 1)
-				)
-			)
-		)
-	)
-	(wire
-		(pts
-			(xy 49.53 83.82) (xy 49.53 86.36)
-		)
-		(stroke
-			(width 0)
-			(type default)
-		)
-		(uuid "45750201-71d9-4a77-b0a0-30908e3f8a39")
-	)
-	(label "U9_EN"
-		(at 49.53 86.36 270)
-		(effects
-			(font
-				(size 1.27 1.27)
-			)
-			(justify right bottom)
-		)
-		(uuid "28e73f04-7616-43f4-a316-3ae218e5889a")
-	)
-	(symbol
-		(lib_id "Device:C")
-		(at 64.77 80.01 0)
-		(unit 1)
-		(body_style 1)
-		(exclude_from_sim no)
-		(in_bom yes)
-		(on_board yes)
-		(in_pos_files yes)
-		(dnp no)
-		(uuid "9bcdd65f-dc46-4e3a-91b7-adf76889c773")
-		(property "Reference" "C32"
-			(at 67.31 78.74 0)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify left)
-			)
-		)
-		(property "Value" "100n"
-			(at 67.31 81.28 0)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify left)
-			)
-		)
-		(property "Footprint" "Capacitor_SMD:C_0603_1608Metric"
-			(at 64.77 80.01 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Datasheet" ""
-			(at 64.77 80.01 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Description" "Unpolarized capacitor"
-			(at 64.77 80.01 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Manufacturer" "Samsung Electro-Mechanics"
-			(at 64.77 80.01 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify left)
-			)
-		)
-		(property "MPN" "CL10B104KB8NNNC"
-			(at 64.77 80.01 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify left)
-			)
-		)
-		(property "Voltage" "50V"
-			(at 64.77 80.01 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify left)
-			)
-		)
-		(property "Dielectric" "X7R"
-			(at 64.77 80.01 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify left)
-			)
-		)
-		(property "Tolerance" "10%"
-			(at 64.77 80.01 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify left)
-			)
-		)
-		(property "Quote" "Rev 2.1: not yet quoted."
-			(at 64.77 80.01 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify left)
-			)
-		)
-		(property "Note" "EN slew limit (< 1.5 V/us) with R17; TI recommends 0.1 uF EN to GND."
-			(at 64.77 80.01 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify left)
-			)
-		)
-		(pin "1"
-			(uuid "f460bf5c-abb4-4fa8-a4f3-25a6231a8d6c")
-		)
-		(pin "2"
-			(uuid "db1c307b-7c5a-4311-a8bd-9ac4badd3000")
-		)
-		(instances
-			(project "canary-hat"
-				(path "/e63e39d7-6ac0-4ffd-8aa3-1841a4541b55/421b2317-5779-468f-96b0-ffd0e1a2d866"
-					(reference "C32")
-					(unit 1)
-				)
-			)
-		)
-	)
-	(wire
-		(pts
-			(xy 64.77 76.2) (xy 64.77 73.66)
-		)
-		(stroke
-			(width 0)
-			(type default)
-		)
-		(uuid "50bbb797-a287-499f-af45-300842148558")
-	)
-	(label "U9_EN"
-		(at 64.77 73.66 90)
-		(effects
-			(font
-				(size 1.27 1.27)
-			)
-			(justify left bottom)
-		)
-		(uuid "38ed5b5a-9fab-4547-922c-569c0f97ed49")
-	)
-	(wire
-		(pts
-			(xy 64.77 83.82) (xy 64.77 86.36)
-		)
-		(stroke
-			(width 0)
-			(type default)
-		)
-		(uuid "ccaed3a0-a877-4bb6-b334-d42aa938428f")
-	)
-	(symbol
-		(lib_id "power:GND")
-		(at 64.77 86.36 0)
-		(unit 1)
-		(body_style 1)
-		(exclude_from_sim no)
-		(in_bom yes)
-		(on_board yes)
-		(in_pos_files yes)
-		(dnp no)
-		(uuid "b8176ede-afcd-4401-b892-e334d3bc9a10")
-		(property "Reference" "#PWR009"
-			(at 67.31 85.09 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify left)
-			)
-		)
-		(property "Value" "GND"
-			(at 67.31 88.9 0)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Footprint" ""
-			(at 64.77 86.36 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Datasheet" ""
-			(at 64.77 86.36 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Description" ""
-			(at 64.77 86.36 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(pin "1"
-			(uuid "44030ca6-3fc4-471b-9e4e-cded2c2982f9")
-		)
-		(instances
-			(project "canary-hat"
-				(path "/e63e39d7-6ac0-4ffd-8aa3-1841a4541b55/421b2317-5779-468f-96b0-ffd0e1a2d866"
-					(reference "#PWR009")
-					(unit 1)
-				)
-			)
-		)
-	)
-	(symbol
-		(lib_id "Device:D_Schottky")
-		(at 90.17 80.01 270)
-		(unit 1)
-		(body_style 1)
-		(exclude_from_sim no)
-		(in_bom yes)
-		(on_board yes)
-		(in_pos_files yes)
-		(dnp no)
-		(uuid "179af1ab-a258-4197-828a-0ff252864ed5")
-		(property "Reference" "D10"
-			(at 92.71 78.74 0)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify left)
-			)
-		)
-		(property "Value" "BAT46WJ"
-			(at 92.71 81.28 0)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify left)
-			)
-		)
-		(property "Footprint" "Diode_SMD:D_SOD-323F"
-			(at 90.17 80.01 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Datasheet" ""
-			(at 90.17 80.01 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Description" "100 V Schottky diode, SOD-323F"
-			(at 90.17 80.01 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Manufacturer" "Nexperia"
-			(at 90.17 80.01 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify left)
-			)
-		)
-		(property "MPN" "BAT46WJ,115"
-			(at 90.17 80.01 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify left)
-			)
-		)
-		(property "Quote" "Rev 2.1: not yet quoted."
-			(at 90.17 80.01 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify left)
-			)
-		)
-		(property "Note" "EN clamp. TPS7A16 abs max: EN <= IN + 0.3 V ('make sure VEN <= VIN at all times'). With the Pi up and no +12V (bench, UPS) R17 would hold EN at 3.3 V over IN = 0; D10 clamps it to ~0.15 V (10 uA). 100 V part: +12V can sit at D1's 38.9 V clamp."
-			(at 90.17 80.01 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify left)
-			)
-		)
-		(pin "1"
-			(uuid "24ef010d-2dbd-4c14-95e7-ce52c7ec89c5")
-		)
-		(pin "2"
-			(uuid "8efd4610-e99f-44ad-9270-14502329b1e8")
-		)
-		(instances
-			(project "canary-hat"
-				(path "/e63e39d7-6ac0-4ffd-8aa3-1841a4541b55/421b2317-5779-468f-96b0-ffd0e1a2d866"
-					(reference "D10")
-					(unit 1)
-				)
-			)
-		)
-	)
-	(wire
-		(pts
-			(xy 90.17 83.82) (xy 90.17 86.36)
-		)
-		(stroke
-			(width 0)
-			(type default)
-		)
-		(uuid "0e9d5afb-1e8e-4290-b85b-23d665228949")
-	)
-	(label "U9_EN"
-		(at 90.17 86.36 270)
-		(effects
-			(font
-				(size 1.27 1.27)
-			)
-			(justify right bottom)
-		)
-		(uuid "1e92692b-7f8a-4b8e-b6f9-c420c93fcad1")
-	)
-	(wire
-		(pts
-			(xy 90.17 76.2) (xy 90.17 73.66)
-		)
-		(stroke
-			(width 0)
-			(type default)
-		)
-		(uuid "4ac134c6-8d6f-4ad6-8263-75f592e3ea1f")
-	)
-	(symbol
-		(lib_id "power:+12V")
-		(at 90.17 73.66 0)
-		(unit 1)
-		(body_style 1)
-		(exclude_from_sim no)
-		(in_bom yes)
-		(on_board yes)
-		(in_pos_files yes)
-		(dnp no)
-		(uuid "163b5ee3-efa0-42ff-8f23-4bbf26260365")
-		(property "Reference" "#PWR010"
-			(at 92.71 72.39 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify left)
-			)
-		)
-		(property "Value" "+12V"
-			(at 92.71 76.2 0)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Footprint" ""
-			(at 90.17 73.66 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Datasheet" ""
-			(at 90.17 73.66 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Description" ""
-			(at 90.17 73.66 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(pin "1"
-			(uuid "29f13b4b-8245-4544-b2df-916f872031d6")
-		)
-		(instances
-			(project "canary-hat"
-				(path "/e63e39d7-6ac0-4ffd-8aa3-1841a4541b55/421b2317-5779-468f-96b0-ffd0e1a2d866"
-					(reference "#PWR010")
-					(unit 1)
-				)
-			)
-		)
-	)
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
 	(wire
 		(pts
 			(xy 144.78 40.64) (xy 152.4 40.64)
@@ -4341,7 +2433,7 @@
 		(uuid "bebf795d-9c4d-49e9-b8fd-c3e53c5d74e4")
 	)
 	(hierarchical_label "5V_SENS"
-		(shape output)
+		(shape input)
 		(at 152.4 40.64 0)
 		(effects
 			(font
@@ -4351,7 +2443,7 @@
 		)
 		(uuid "3ca49f5c-4a44-441b-b5d5-ee09f4033dd5")
 	)
-	(text "SENSOR HARNESS from J2 upper level (OBD_IO) + transient clamps (open item 31): 24 V bidirectional, same class as D1.\nU8's internal OVP is a DC limit, not ESD/EFT immunity."
+	(text "SENSOR HARNESS from J2 pins 9-13 (OBD_IO) + transient clamps (open item 31): 24 V bidirectional, same class as D1.\nU8's internal OVP is a DC limit, not ESD/EFT immunity."
 		(exclude_from_sim no)
 		(at 175 18 0)
 		(effects
@@ -4667,7 +2759,7 @@
 		(in_pos_files yes)
 		(dnp no)
 		(uuid "7d10d2e3-0f57-40be-bb3c-efb6f10a13a4")
-		(property "Reference" "#PWR011"
+		(property "Reference" "#PWR1011"
 			(at 222.25 49.53 0)
 			(hide yes)
 			(show_name no)
@@ -4728,7 +2820,7 @@
 		(instances
 			(project "canary-hat"
 				(path "/e63e39d7-6ac0-4ffd-8aa3-1841a4541b55/421b2317-5779-468f-96b0-ffd0e1a2d866"
-					(reference "#PWR011")
+					(reference "#PWR1011")
 					(unit 1)
 				)
 			)
@@ -4915,7 +3007,7 @@
 		(in_pos_files yes)
 		(dnp no)
 		(uuid "7d9494ac-c0ac-4265-858b-4f09d1c2e8c0")
-		(property "Reference" "#PWR012"
+		(property "Reference" "#PWR1012"
 			(at 273.05 49.53 0)
 			(hide yes)
 			(show_name no)
@@ -4976,7 +3068,7 @@
 		(instances
 			(project "canary-hat"
 				(path "/e63e39d7-6ac0-4ffd-8aa3-1841a4541b55/421b2317-5779-468f-96b0-ffd0e1a2d866"
-					(reference "#PWR012")
+					(reference "#PWR1012")
 					(unit 1)
 				)
 			)
@@ -5122,10 +3214,7 @@
 		)
 		(uuid "7b536570-ea74-4e38-a037-11dd407b371d")
 	)
-	(no_connect
-		(at 328.93 44.45)
-		(uuid "e776d756-38a3-4647-b4f2-2d0e52aa53b8")
-	)
+	
 	(wire
 		(pts
 			(xy 320.04 48.26) (xy 320.04 50.8)
@@ -5147,7 +3236,7 @@
 		(in_pos_files yes)
 		(dnp no)
 		(uuid "0760fd94-883d-4989-a68f-20866f2c3d9e")
-		(property "Reference" "#PWR013"
+		(property "Reference" "#PWR1013"
 			(at 322.58 49.53 0)
 			(hide yes)
 			(show_name no)
@@ -5208,7 +3297,7 @@
 		(instances
 			(project "canary-hat"
 				(path "/e63e39d7-6ac0-4ffd-8aa3-1841a4541b55/421b2317-5779-468f-96b0-ffd0e1a2d866"
-					(reference "#PWR013")
+					(reference "#PWR1013")
 					(unit 1)
 				)
 			)
@@ -5493,7 +3582,7 @@
 		(in_pos_files yes)
 		(dnp no)
 		(uuid "e81cabe7-9a28-4363-96ca-821b9e603273")
-		(property "Reference" "#PWR014"
+		(property "Reference" "#PWR1014"
 			(at 337.82 156.21 0)
 			(hide yes)
 			(show_name no)
@@ -5554,7 +3643,7 @@
 		(instances
 			(project "canary-hat"
 				(path "/e63e39d7-6ac0-4ffd-8aa3-1841a4541b55/421b2317-5779-468f-96b0-ffd0e1a2d866"
-					(reference "#PWR014")
+					(reference "#PWR1014")
 					(unit 1)
 				)
 			)
@@ -5581,7 +3670,7 @@
 		(in_pos_files yes)
 		(dnp no)
 		(uuid "a54fdf69-df23-42eb-9dfd-1a3b85d470cf")
-		(property "Reference" "#PWR015"
+		(property "Reference" "#PWR1015"
 			(at 337.82 151.13 0)
 			(hide yes)
 			(show_name no)
@@ -5642,7 +3731,7 @@
 		(instances
 			(project "canary-hat"
 				(path "/e63e39d7-6ac0-4ffd-8aa3-1841a4541b55/421b2317-5779-468f-96b0-ffd0e1a2d866"
-					(reference "#PWR015")
+					(reference "#PWR1015")
 					(unit 1)
 				)
 			)
@@ -5669,7 +3758,7 @@
 		(in_pos_files yes)
 		(dnp no)
 		(uuid "93e10c3b-adbe-4b07-9fd2-4d2ff0de7971")
-		(property "Reference" "#PWR016"
+		(property "Reference" "#PWR1016"
 			(at 337.82 161.29 0)
 			(hide yes)
 			(show_name no)
@@ -5730,7 +3819,7 @@
 		(instances
 			(project "canary-hat"
 				(path "/e63e39d7-6ac0-4ffd-8aa3-1841a4541b55/421b2317-5779-468f-96b0-ffd0e1a2d866"
-					(reference "#PWR016")
+					(reference "#PWR1016")
 					(unit 1)
 				)
 			)
@@ -5777,7 +3866,7 @@
 		(in_pos_files yes)
 		(dnp no)
 		(uuid "8a6483b6-1b36-4b5f-b0f0-b94f2a05d5c0")
-		(property "Reference" "#PWR017"
+		(property "Reference" "#PWR1017"
 			(at 337.82 186.69 0)
 			(hide yes)
 			(show_name no)
@@ -5838,7 +3927,7 @@
 		(instances
 			(project "canary-hat"
 				(path "/e63e39d7-6ac0-4ffd-8aa3-1841a4541b55/421b2317-5779-468f-96b0-ffd0e1a2d866"
-					(reference "#PWR017")
+					(reference "#PWR1017")
 					(unit 1)
 				)
 			)
@@ -5885,7 +3974,7 @@
 		(in_pos_files yes)
 		(dnp no)
 		(uuid "85816aec-acab-4a87-bb23-7ce370f87c56")
-		(property "Reference" "#PWR018"
+		(property "Reference" "#PWR1018"
 			(at 320.04 128.27 0)
 			(hide yes)
 			(show_name no)
@@ -5946,7 +4035,7 @@
 		(instances
 			(project "canary-hat"
 				(path "/e63e39d7-6ac0-4ffd-8aa3-1841a4541b55/421b2317-5779-468f-96b0-ffd0e1a2d866"
-					(reference "#PWR018")
+					(reference "#PWR1018")
 					(unit 1)
 				)
 			)
@@ -5973,7 +4062,7 @@
 		(in_pos_files yes)
 		(dnp no)
 		(uuid "98ca2d7b-deb8-42e7-9fec-176959420ab3")
-		(property "Reference" "#PWR019"
+		(property "Reference" "#PWR1019"
 			(at 299.72 184.15 0)
 			(hide yes)
 			(show_name no)
@@ -6034,7 +4123,7 @@
 		(instances
 			(project "canary-hat"
 				(path "/e63e39d7-6ac0-4ffd-8aa3-1841a4541b55/421b2317-5779-468f-96b0-ffd0e1a2d866"
-					(reference "#PWR019")
+					(reference "#PWR1019")
 					(unit 1)
 				)
 			)
@@ -6061,7 +4150,7 @@
 		(in_pos_files yes)
 		(dnp no)
 		(uuid "02c2398d-93c7-42bf-a557-aed039b82a5b")
-		(property "Reference" "#PWR020"
+		(property "Reference" "#PWR1020"
 			(at 299.72 186.69 0)
 			(hide yes)
 			(show_name no)
@@ -6122,7 +4211,7 @@
 		(instances
 			(project "canary-hat"
 				(path "/e63e39d7-6ac0-4ffd-8aa3-1841a4541b55/421b2317-5779-468f-96b0-ffd0e1a2d866"
-					(reference "#PWR020")
+					(reference "#PWR1020")
 					(unit 1)
 				)
 			)
@@ -6169,7 +4258,7 @@
 		(in_pos_files yes)
 		(dnp no)
 		(uuid "dd5b15bf-1a28-4702-88bc-a9d0d7e2e041")
-		(property "Reference" "#PWR021"
+		(property "Reference" "#PWR1021"
 			(at 299.72 173.99 0)
 			(hide yes)
 			(show_name no)
@@ -6230,7 +4319,7 @@
 		(instances
 			(project "canary-hat"
 				(path "/e63e39d7-6ac0-4ffd-8aa3-1841a4541b55/421b2317-5779-468f-96b0-ffd0e1a2d866"
-					(reference "#PWR021")
+					(reference "#PWR1021")
 					(unit 1)
 				)
 			)
@@ -6277,7 +4366,7 @@
 		(in_pos_files yes)
 		(dnp no)
 		(uuid "e34391c7-c869-418a-9677-235f3a798a64")
-		(property "Reference" "#PWR022"
+		(property "Reference" "#PWR1022"
 			(at 299.72 179.07 0)
 			(hide yes)
 			(show_name no)
@@ -6338,7 +4427,7 @@
 		(instances
 			(project "canary-hat"
 				(path "/e63e39d7-6ac0-4ffd-8aa3-1841a4541b55/421b2317-5779-468f-96b0-ffd0e1a2d866"
-					(reference "#PWR022")
+					(reference "#PWR1022")
 					(unit 1)
 				)
 			)
@@ -6566,7 +4655,7 @@
 		(in_pos_files yes)
 		(dnp no)
 		(uuid "9f143616-0022-4988-a104-4180c1b5925d")
-		(property "Reference" "#PWR023"
+		(property "Reference" "#PWR1023"
 			(at 299.72 168.91 0)
 			(hide yes)
 			(show_name no)
@@ -6627,7 +4716,7 @@
 		(instances
 			(project "canary-hat"
 				(path "/e63e39d7-6ac0-4ffd-8aa3-1841a4541b55/421b2317-5779-468f-96b0-ffd0e1a2d866"
-					(reference "#PWR023")
+					(reference "#PWR1023")
 					(unit 1)
 				)
 			)
@@ -6674,7 +4763,7 @@
 		(in_pos_files yes)
 		(dnp no)
 		(uuid "81082151-7e55-4196-875f-ecf9e098e972")
-		(property "Reference" "#PWR024"
+		(property "Reference" "#PWR1024"
 			(at 322.58 123.19 0)
 			(hide yes)
 			(show_name no)
@@ -6735,7 +4824,7 @@
 		(instances
 			(project "canary-hat"
 				(path "/e63e39d7-6ac0-4ffd-8aa3-1841a4541b55/421b2317-5779-468f-96b0-ffd0e1a2d866"
-					(reference "#PWR024")
+					(reference "#PWR1024")
 					(unit 1)
 				)
 			)
@@ -6762,7 +4851,7 @@
 		(in_pos_files yes)
 		(dnp no)
 		(uuid "0b340aed-066f-4b89-b3b3-2a646a1b2351")
-		(property "Reference" "#PWR025"
+		(property "Reference" "#PWR1025"
 			(at 325.12 118.11 0)
 			(hide yes)
 			(show_name no)
@@ -6823,7 +4912,7 @@
 		(instances
 			(project "canary-hat"
 				(path "/e63e39d7-6ac0-4ffd-8aa3-1841a4541b55/421b2317-5779-468f-96b0-ffd0e1a2d866"
-					(reference "#PWR025")
+					(reference "#PWR1025")
 					(unit 1)
 				)
 			)
@@ -6917,7 +5006,7 @@
 		(in_pos_files yes)
 		(dnp no)
 		(uuid "4acf20e8-cce4-40aa-92fc-8226d827e7a6")
-		(property "Reference" "#PWR026"
+		(property "Reference" "#PWR1026"
 			(at 320.04 199.39 0)
 			(hide yes)
 			(show_name no)
@@ -6978,7 +5067,7 @@
 		(instances
 			(project "canary-hat"
 				(path "/e63e39d7-6ac0-4ffd-8aa3-1841a4541b55/421b2317-5779-468f-96b0-ffd0e1a2d866"
-					(reference "#PWR026")
+					(reference "#PWR1026")
 					(unit 1)
 				)
 			)
@@ -7005,7 +5094,7 @@
 		(in_pos_files yes)
 		(dnp no)
 		(uuid "ea10c3b5-8a2a-47ef-ada4-46f7dfacfd26")
-		(property "Reference" "#PWR027"
+		(property "Reference" "#PWR1027"
 			(at 325.12 199.39 0)
 			(hide yes)
 			(show_name no)
@@ -7066,7 +5155,7 @@
 		(instances
 			(project "canary-hat"
 				(path "/e63e39d7-6ac0-4ffd-8aa3-1841a4541b55/421b2317-5779-468f-96b0-ffd0e1a2d866"
-					(reference "#PWR027")
+					(reference "#PWR1027")
 					(unit 1)
 				)
 			)
@@ -7116,7 +5205,7 @@
 				(justify left)
 			)
 		)
-		(property "Value" "22u/16V"
+		(property "Value" "22u/25V"
 			(at 278.13 83.82 0)
 			(show_name no)
 			(do_not_autoplace no)
@@ -7127,7 +5216,7 @@
 				(justify left)
 			)
 		)
-		(property "Footprint" "Capacitor_SMD:C_1206_3216Metric"
+		(property "Footprint" "Capacitor_SMD:C_1210_3225Metric"
 			(at 275.59 82.55 0)
 			(hide yes)
 			(show_name no)
@@ -7172,7 +5261,7 @@
 				(justify left)
 			)
 		)
-		(property "MPN" "CL31A226KOHNNNE"
+		(property "MPN" "CL32B226KAJNNNE"
 			(at 275.59 82.55 0)
 			(hide yes)
 			(show_name no)
@@ -7184,7 +5273,7 @@
 				(justify left)
 			)
 		)
-		(property "Voltage" "16V"
+		(property "Voltage" "25V"
 			(at 275.59 82.55 0)
 			(hide yes)
 			(show_name no)
@@ -7196,7 +5285,7 @@
 				(justify left)
 			)
 		)
-		(property "Dielectric" "X5R"
+		(property "Dielectric" "X7R"
 			(at 275.59 82.55 0)
 			(hide yes)
 			(show_name no)
@@ -7232,7 +5321,7 @@
 				(justify left)
 			)
 		)
-		(property "Note" "REFIO: 22 uF typ, 10 uF min after DC bias (SBAS680)."
+		(property "Note" "REFIO: 22 uF X7R 1210 (SBAS680 11.1 layout example); keeps >= 10 uF after 4.1 V bias, tolerance and temperature (review minor 1)."
 			(at 275.59 82.55 0)
 			(hide yes)
 			(show_name no)
@@ -7300,7 +5389,7 @@
 		(in_pos_files yes)
 		(dnp no)
 		(uuid "b9e124ee-0a93-4c27-b7a3-1658b865ef6b")
-		(property "Reference" "#PWR028"
+		(property "Reference" "#PWR1028"
 			(at 278.13 87.63 0)
 			(hide yes)
 			(show_name no)
@@ -7361,7 +5450,7 @@
 		(instances
 			(project "canary-hat"
 				(path "/e63e39d7-6ac0-4ffd-8aa3-1841a4541b55/421b2317-5779-468f-96b0-ffd0e1a2d866"
-					(reference "#PWR028")
+					(reference "#PWR1028")
 					(unit 1)
 				)
 			)
@@ -7389,7 +5478,7 @@
 				(justify left)
 			)
 		)
-		(property "Value" "22u/16V"
+		(property "Value" "22u/25V"
 			(at 292.1 83.82 0)
 			(show_name no)
 			(do_not_autoplace no)
@@ -7400,7 +5489,7 @@
 				(justify left)
 			)
 		)
-		(property "Footprint" "Capacitor_SMD:C_1206_3216Metric"
+		(property "Footprint" "Capacitor_SMD:C_1210_3225Metric"
 			(at 289.56 82.55 0)
 			(hide yes)
 			(show_name no)
@@ -7445,7 +5534,7 @@
 				(justify left)
 			)
 		)
-		(property "MPN" "CL31A226KOHNNNE"
+		(property "MPN" "CL32B226KAJNNNE"
 			(at 289.56 82.55 0)
 			(hide yes)
 			(show_name no)
@@ -7457,7 +5546,7 @@
 				(justify left)
 			)
 		)
-		(property "Voltage" "16V"
+		(property "Voltage" "25V"
 			(at 289.56 82.55 0)
 			(hide yes)
 			(show_name no)
@@ -7469,7 +5558,7 @@
 				(justify left)
 			)
 		)
-		(property "Dielectric" "X5R"
+		(property "Dielectric" "X7R"
 			(at 289.56 82.55 0)
 			(hide yes)
 			(show_name no)
@@ -7505,7 +5594,7 @@
 				(justify left)
 			)
 		)
-		(property "Note" "REFCAP bulk: 22 uF typ, 10 uF min after DC bias. Pair with C23."
+		(property "Note" "REFCAP bulk: 22 uF X7R 1210 (SBAS680 11.1), >= 10 uF effective; pair with C23 1 uF at the pin, no vias."
 			(at 289.56 82.55 0)
 			(hide yes)
 			(show_name no)
@@ -7573,7 +5662,7 @@
 		(in_pos_files yes)
 		(dnp no)
 		(uuid "0965205f-4b7e-4e07-91a4-0fa63074889d")
-		(property "Reference" "#PWR029"
+		(property "Reference" "#PWR1029"
 			(at 292.1 87.63 0)
 			(hide yes)
 			(show_name no)
@@ -7634,7 +5723,7 @@
 		(instances
 			(project "canary-hat"
 				(path "/e63e39d7-6ac0-4ffd-8aa3-1841a4541b55/421b2317-5779-468f-96b0-ffd0e1a2d866"
-					(reference "#PWR029")
+					(reference "#PWR1029")
 					(unit 1)
 				)
 			)
@@ -7846,7 +5935,7 @@
 		(in_pos_files yes)
 		(dnp no)
 		(uuid "a2c73937-9884-42ad-b8ae-bc3c1733bb3c")
-		(property "Reference" "#PWR030"
+		(property "Reference" "#PWR1030"
 			(at 307.34 87.63 0)
 			(hide yes)
 			(show_name no)
@@ -7907,7 +5996,7 @@
 		(instances
 			(project "canary-hat"
 				(path "/e63e39d7-6ac0-4ffd-8aa3-1841a4541b55/421b2317-5779-468f-96b0-ffd0e1a2d866"
-					(reference "#PWR030")
+					(reference "#PWR1030")
 					(unit 1)
 				)
 			)
@@ -7991,7 +6080,7 @@
 				(justify left)
 			)
 		)
-		(property "MPN" "CL21A106KOQNNNE"
+		(property "MPN" "CL21B106KOQNNNE"
 			(at 320.04 82.55 0)
 			(hide yes)
 			(show_name no)
@@ -8015,7 +6104,7 @@
 				(justify left)
 			)
 		)
-		(property "Dielectric" "X5R"
+		(property "Dielectric" "X7R"
 			(at 320.04 82.55 0)
 			(hide yes)
 			(show_name no)
@@ -8099,7 +6188,7 @@
 		(in_pos_files yes)
 		(dnp no)
 		(uuid "67f24f90-d253-4373-b2a7-a4e461ae0285")
-		(property "Reference" "#PWR031"
+		(property "Reference" "#PWR1031"
 			(at 322.58 74.93 0)
 			(hide yes)
 			(show_name no)
@@ -8160,7 +6249,7 @@
 		(instances
 			(project "canary-hat"
 				(path "/e63e39d7-6ac0-4ffd-8aa3-1841a4541b55/421b2317-5779-468f-96b0-ffd0e1a2d866"
-					(reference "#PWR031")
+					(reference "#PWR1031")
 					(unit 1)
 				)
 			)
@@ -8187,7 +6276,7 @@
 		(in_pos_files yes)
 		(dnp no)
 		(uuid "d8573dd8-0bd0-4add-a6a0-a1ee9819b71b")
-		(property "Reference" "#PWR032"
+		(property "Reference" "#PWR1032"
 			(at 322.58 87.63 0)
 			(hide yes)
 			(show_name no)
@@ -8248,7 +6337,7 @@
 		(instances
 			(project "canary-hat"
 				(path "/e63e39d7-6ac0-4ffd-8aa3-1841a4541b55/421b2317-5779-468f-96b0-ffd0e1a2d866"
-					(reference "#PWR032")
+					(reference "#PWR1032")
 					(unit 1)
 				)
 			)
@@ -8440,7 +6529,7 @@
 		(in_pos_files yes)
 		(dnp no)
 		(uuid "9dc8836c-5878-4feb-b53b-b0c9ce9a5f3d")
-		(property "Reference" "#PWR033"
+		(property "Reference" "#PWR1033"
 			(at 337.82 74.93 0)
 			(hide yes)
 			(show_name no)
@@ -8501,7 +6590,7 @@
 		(instances
 			(project "canary-hat"
 				(path "/e63e39d7-6ac0-4ffd-8aa3-1841a4541b55/421b2317-5779-468f-96b0-ffd0e1a2d866"
-					(reference "#PWR033")
+					(reference "#PWR1033")
 					(unit 1)
 				)
 			)
@@ -8528,7 +6617,7 @@
 		(in_pos_files yes)
 		(dnp no)
 		(uuid "e5ef89ab-58cf-4177-902d-b6ca6b3a9c9e")
-		(property "Reference" "#PWR034"
+		(property "Reference" "#PWR1034"
 			(at 337.82 87.63 0)
 			(hide yes)
 			(show_name no)
@@ -8589,7 +6678,7 @@
 		(instances
 			(project "canary-hat"
 				(path "/e63e39d7-6ac0-4ffd-8aa3-1841a4541b55/421b2317-5779-468f-96b0-ffd0e1a2d866"
-					(reference "#PWR034")
+					(reference "#PWR1034")
 					(unit 1)
 				)
 			)
@@ -8781,7 +6870,7 @@
 		(in_pos_files yes)
 		(dnp no)
 		(uuid "46ad8549-294d-4e7c-9600-d126d4f8722c")
-		(property "Reference" "#PWR035"
+		(property "Reference" "#PWR1035"
 			(at 353.06 74.93 0)
 			(hide yes)
 			(show_name no)
@@ -8842,7 +6931,7 @@
 		(instances
 			(project "canary-hat"
 				(path "/e63e39d7-6ac0-4ffd-8aa3-1841a4541b55/421b2317-5779-468f-96b0-ffd0e1a2d866"
-					(reference "#PWR035")
+					(reference "#PWR1035")
 					(unit 1)
 				)
 			)
@@ -8869,7 +6958,7 @@
 		(in_pos_files yes)
 		(dnp no)
 		(uuid "055efa61-b83a-470c-ab8c-1de03c77842d")
-		(property "Reference" "#PWR036"
+		(property "Reference" "#PWR1036"
 			(at 353.06 87.63 0)
 			(hide yes)
 			(show_name no)
@@ -8930,7 +7019,7 @@
 		(instances
 			(project "canary-hat"
 				(path "/e63e39d7-6ac0-4ffd-8aa3-1841a4541b55/421b2317-5779-468f-96b0-ffd0e1a2d866"
-					(reference "#PWR036")
+					(reference "#PWR1036")
 					(unit 1)
 				)
 			)
@@ -9014,7 +7103,7 @@
 				(justify left)
 			)
 		)
-		(property "MPN" "CL21A106KOQNNNE"
+		(property "MPN" "CL21B106KOQNNNE"
 			(at 364.49 82.55 0)
 			(hide yes)
 			(show_name no)
@@ -9038,7 +7127,7 @@
 				(justify left)
 			)
 		)
-		(property "Dielectric" "X5R"
+		(property "Dielectric" "X7R"
 			(at 364.49 82.55 0)
 			(hide yes)
 			(show_name no)
@@ -9074,7 +7163,7 @@
 				(justify left)
 			)
 		)
-		(property "Note" "DVDD, 10 uF very close to the pin."
+		(property "Note" "DVDD: 10 uF X7R 0805 very close to the pin (SBAS680 11.1)."
 			(at 364.49 82.55 0)
 			(hide yes)
 			(show_name no)
@@ -9122,7 +7211,7 @@
 		(in_pos_files yes)
 		(dnp no)
 		(uuid "99aa2ffd-9441-49b1-8713-622401e84de0")
-		(property "Reference" "#PWR037"
+		(property "Reference" "#PWR1037"
 			(at 367.03 74.93 0)
 			(hide yes)
 			(show_name no)
@@ -9183,7 +7272,7 @@
 		(instances
 			(project "canary-hat"
 				(path "/e63e39d7-6ac0-4ffd-8aa3-1841a4541b55/421b2317-5779-468f-96b0-ffd0e1a2d866"
-					(reference "#PWR037")
+					(reference "#PWR1037")
 					(unit 1)
 				)
 			)
@@ -9210,7 +7299,7 @@
 		(in_pos_files yes)
 		(dnp no)
 		(uuid "f3564d7a-39c1-445a-aa59-0e1e0af9f647")
-		(property "Reference" "#PWR038"
+		(property "Reference" "#PWR1038"
 			(at 367.03 87.63 0)
 			(hide yes)
 			(show_name no)
@@ -9271,7 +7360,7 @@
 		(instances
 			(project "canary-hat"
 				(path "/e63e39d7-6ac0-4ffd-8aa3-1841a4541b55/421b2317-5779-468f-96b0-ffd0e1a2d866"
-					(reference "#PWR038")
+					(reference "#PWR1038")
 					(unit 1)
 				)
 			)
@@ -9451,7 +7540,7 @@
 		(in_pos_files yes)
 		(dnp no)
 		(uuid "75541755-cb3d-4526-8dc0-c1cc33b07a5b")
-		(property "Reference" "#PWR039"
+		(property "Reference" "#PWR1039"
 			(at 382.27 74.93 0)
 			(hide yes)
 			(show_name no)
@@ -9512,7 +7601,7 @@
 		(instances
 			(project "canary-hat"
 				(path "/e63e39d7-6ac0-4ffd-8aa3-1841a4541b55/421b2317-5779-468f-96b0-ffd0e1a2d866"
-					(reference "#PWR039")
+					(reference "#PWR1039")
 					(unit 1)
 				)
 			)
@@ -9539,7 +7628,7 @@
 		(in_pos_files yes)
 		(dnp no)
 		(uuid "7ef796ee-cf86-4c59-836c-e440f4d3cacc")
-		(property "Reference" "#PWR040"
+		(property "Reference" "#PWR1040"
 			(at 382.27 87.63 0)
 			(hide yes)
 			(show_name no)
@@ -9600,7 +7689,7 @@
 		(instances
 			(project "canary-hat"
 				(path "/e63e39d7-6ac0-4ffd-8aa3-1841a4541b55/421b2317-5779-468f-96b0-ffd0e1a2d866"
-					(reference "#PWR040")
+					(reference "#PWR1040")
 					(unit 1)
 				)
 			)
@@ -9743,7 +7832,7 @@
 				(justify left)
 			)
 		)
-		(property "Note" "AIN_0GND source-impedance match: R11 || R12 = 100k || 22k = 18.0 kohm (SBAS680 8.3.2; 13.5.3 item 7)."
+		(property "Note" "AIN_0GND match: R11 || R12 = 100k || 22k = 18.0 kohm. Cancels the offset of U8's (VIN - 2.5 V)/RIN leakage through the divider's source impedance, not the gain term: CH0 keeps a ~1.8 % (+/-15 % of that) gain error and must be calibrated (open item 23)."
 			(at 124.46 118.11 0)
 			(hide yes)
 			(show_name no)
@@ -9811,7 +7900,7 @@
 		(in_pos_files yes)
 		(dnp no)
 		(uuid "9f67bd5f-283c-48ee-9762-bc250e86fe69")
-		(property "Reference" "#PWR041"
+		(property "Reference" "#PWR1041"
 			(at 127 123.19 0)
 			(hide yes)
 			(show_name no)
@@ -9872,7 +7961,7 @@
 		(instances
 			(project "canary-hat"
 				(path "/e63e39d7-6ac0-4ffd-8aa3-1841a4541b55/421b2317-5779-468f-96b0-ffd0e1a2d866"
-					(reference "#PWR041")
+					(reference "#PWR1041")
 					(unit 1)
 				)
 			)
@@ -10083,7 +8172,7 @@
 		(in_pos_files yes)
 		(dnp no)
 		(uuid "fb9b8800-ba9a-468d-a82c-30b21dc40c94")
-		(property "Reference" "#PWR042"
+		(property "Reference" "#PWR1042"
 			(at 39.37 149.86 0)
 			(hide yes)
 			(show_name no)
@@ -10144,7 +8233,7 @@
 		(instances
 			(project "canary-hat"
 				(path "/e63e39d7-6ac0-4ffd-8aa3-1841a4541b55/421b2317-5779-468f-96b0-ffd0e1a2d866"
-					(reference "#PWR042")
+					(reference "#PWR1042")
 					(unit 1)
 				)
 			)
@@ -10421,7 +8510,7 @@
 				(justify left)
 			)
 		)
-		(property "Note" "Series resistor: buys input-protection headroom (SBAS680: higher source impedance raises the OVP range) and limits TVS clamp current into U8. Its gain error against U8's 1 Mohm input is cancelled by the equal resistor on AIN_nGND (13.5.3 items 7-8)."
+		(property "Note" "Series resistor (1k): buys input-protection headroom (SBAS680: higher source impedance raises the OVP range) and limits TVS clamp current into U8. U8's input leakage is (VIN - 2.50 V)/RIN with RIN ~1 Mohm (SBAS680 7.5): the equal resistor on AIN_nGND cancels the OFFSET term only; a GAIN error of R/RIN = ~0.1 % remains and is calibrated out with the channel (review minor 3)."
 			(at 80.01 144.78 0)
 			(hide yes)
 			(show_name no)
@@ -10626,7 +8715,7 @@
 				(justify left)
 			)
 		)
-		(property "Note" "Filter at U8's pin."
+		(property "Note" "SENS_V1 filter, differential: AIN_1P to AIN_1GND at U8 (SBAS680 pin table)."
 			(at 105.41 144.78 0)
 			(hide yes)
 			(show_name no)
@@ -10683,84 +8772,7 @@
 		)
 		(uuid "1b9acc50-13db-4679-bdb5-b6df3c2ef509")
 	)
-	(symbol
-		(lib_id "power:GND")
-		(at 105.41 151.13 0)
-		(unit 1)
-		(body_style 1)
-		(exclude_from_sim no)
-		(in_bom yes)
-		(on_board yes)
-		(in_pos_files yes)
-		(dnp no)
-		(uuid "ad079a60-392f-4b32-9993-aa2aeed9201d")
-		(property "Reference" "#PWR043"
-			(at 107.95 149.86 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify left)
-			)
-		)
-		(property "Value" "GND"
-			(at 107.95 153.67 0)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Footprint" ""
-			(at 105.41 151.13 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Datasheet" ""
-			(at 105.41 151.13 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Description" ""
-			(at 105.41 151.13 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(pin "1"
-			(uuid "e818008c-f275-44b6-909d-f26ca5931dc3")
-		)
-		(instances
-			(project "canary-hat"
-				(path "/e63e39d7-6ac0-4ffd-8aa3-1841a4541b55/421b2317-5779-468f-96b0-ffd0e1a2d866"
-					(reference "#PWR043")
-					(unit 1)
-				)
-			)
-		)
-	)
+	
 	(symbol
 		(lib_id "Device:R")
 		(at 124.46 144.78 0)
@@ -10955,7 +8967,7 @@
 		(in_pos_files yes)
 		(dnp no)
 		(uuid "6d69a2a3-0d53-4ddb-a282-381467de90da")
-		(property "Reference" "#PWR044"
+		(property "Reference" "#PWR1044"
 			(at 127 149.86 0)
 			(hide yes)
 			(show_name no)
@@ -11016,7 +9028,7 @@
 		(instances
 			(project "canary-hat"
 				(path "/e63e39d7-6ac0-4ffd-8aa3-1841a4541b55/421b2317-5779-468f-96b0-ffd0e1a2d866"
-					(reference "#PWR044")
+					(reference "#PWR1044")
 					(unit 1)
 				)
 			)
@@ -11179,7 +9191,7 @@
 		(in_pos_files yes)
 		(dnp no)
 		(uuid "6c5b90f1-dd19-4a13-a421-44f62368d3fa")
-		(property "Reference" "#PWR045"
+		(property "Reference" "#PWR1045"
 			(at 39.37 176.53 0)
 			(hide yes)
 			(show_name no)
@@ -11240,7 +9252,7 @@
 		(instances
 			(project "canary-hat"
 				(path "/e63e39d7-6ac0-4ffd-8aa3-1841a4541b55/421b2317-5779-468f-96b0-ffd0e1a2d866"
-					(reference "#PWR045")
+					(reference "#PWR1045")
 					(unit 1)
 				)
 			)
@@ -11565,7 +9577,7 @@
 				(justify left)
 			)
 		)
-		(property "Note" "Series resistor: buys input-protection headroom (SBAS680: higher source impedance raises the OVP range) and limits TVS clamp current into U8. Its gain error against U8's 1 Mohm input is cancelled by the equal resistor on AIN_nGND (13.5.3 items 7-8)."
+		(property "Note" "Series resistor (1k): buys input-protection headroom (SBAS680: higher source impedance raises the OVP range) and limits TVS clamp current into U8. U8's input leakage is (VIN - 2.50 V)/RIN with RIN ~1 Mohm (SBAS680 7.5): the equal resistor on AIN_nGND cancels the OFFSET term only; a GAIN error of R/RIN = ~0.1 % remains and is calibrated out with the channel (review minor 3)."
 			(at 80.01 171.45 0)
 			(hide yes)
 			(show_name no)
@@ -11770,7 +9782,7 @@
 				(justify left)
 			)
 		)
-		(property "Note" "Filter at U8's pin."
+		(property "Note" "SENS_R1 filter, differential: AIN_2P to AIN_2GND at U8 (SBAS680 pin table)."
 			(at 105.41 171.45 0)
 			(hide yes)
 			(show_name no)
@@ -11827,84 +9839,7 @@
 		)
 		(uuid "a3e028f7-e63d-4fbd-8f3d-2524d7f62a29")
 	)
-	(symbol
-		(lib_id "power:GND")
-		(at 105.41 177.8 0)
-		(unit 1)
-		(body_style 1)
-		(exclude_from_sim no)
-		(in_bom yes)
-		(on_board yes)
-		(in_pos_files yes)
-		(dnp no)
-		(uuid "3c32f34d-50bd-4dc2-b6dd-ea0a8acfe800")
-		(property "Reference" "#PWR046"
-			(at 107.95 176.53 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify left)
-			)
-		)
-		(property "Value" "GND"
-			(at 107.95 180.34 0)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Footprint" ""
-			(at 105.41 177.8 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Datasheet" ""
-			(at 105.41 177.8 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Description" ""
-			(at 105.41 177.8 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(pin "1"
-			(uuid "b798de95-b159-4313-974f-c3ccd0a4d458")
-		)
-		(instances
-			(project "canary-hat"
-				(path "/e63e39d7-6ac0-4ffd-8aa3-1841a4541b55/421b2317-5779-468f-96b0-ffd0e1a2d866"
-					(reference "#PWR046")
-					(unit 1)
-				)
-			)
-		)
-	)
+	
 	(symbol
 		(lib_id "Device:R")
 		(at 124.46 171.45 0)
@@ -12099,7 +10034,7 @@
 		(in_pos_files yes)
 		(dnp no)
 		(uuid "77471347-a89f-4d9b-a6a3-564c2166967e")
-		(property "Reference" "#PWR047"
+		(property "Reference" "#PWR1047"
 			(at 127 176.53 0)
 			(hide yes)
 			(show_name no)
@@ -12160,7 +10095,7 @@
 		(instances
 			(project "canary-hat"
 				(path "/e63e39d7-6ac0-4ffd-8aa3-1841a4541b55/421b2317-5779-468f-96b0-ffd0e1a2d866"
-					(reference "#PWR047")
+					(reference "#PWR1047")
 					(unit 1)
 				)
 			)
@@ -12303,7 +10238,7 @@
 				(justify left)
 			)
 		)
-		(property "Note" "Series resistor: buys input-protection headroom (SBAS680: higher source impedance raises the OVP range) and limits TVS clamp current into U8. Its gain error against U8's 1 Mohm input is cancelled by the equal resistor on AIN_nGND (13.5.3 items 7-8)."
+		(property "Note" "Series resistor (1k): buys input-protection headroom (SBAS680: higher source impedance raises the OVP range) and limits TVS clamp current into U8. U8's input leakage is (VIN - 2.50 V)/RIN with RIN ~1 Mohm (SBAS680 7.5): the equal resistor on AIN_nGND cancels the OFFSET term only; a GAIN error of R/RIN = ~0.1 % remains and is calibrated out with the channel (review minor 3)."
 			(at 80.01 199.39 0)
 			(hide yes)
 			(show_name no)
@@ -12508,7 +10443,7 @@
 				(justify left)
 			)
 		)
-		(property "Note" "Filter at U8's pin."
+		(property "Note" "5V_SENS filter, differential: AIN_3P to AIN_3GND at U8 (SBAS680 pin table). CH3 headroom is thin: 5V_SENS up to 5.10 V vs ~5.116 V full scale; the driver treats a full-scale CH3 code as clipped."
 			(at 105.41 199.39 0)
 			(hide yes)
 			(show_name no)
@@ -12565,84 +10500,7 @@
 		)
 		(uuid "a90d24f7-7ca7-451b-b2ab-79b98ba245bf")
 	)
-	(symbol
-		(lib_id "power:GND")
-		(at 105.41 205.74 0)
-		(unit 1)
-		(body_style 1)
-		(exclude_from_sim no)
-		(in_bom yes)
-		(on_board yes)
-		(in_pos_files yes)
-		(dnp no)
-		(uuid "8dbf83ab-ca3f-4d6f-8740-afbc7539dce4")
-		(property "Reference" "#PWR048"
-			(at 107.95 204.47 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify left)
-			)
-		)
-		(property "Value" "GND"
-			(at 107.95 208.28 0)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Footprint" ""
-			(at 105.41 205.74 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Datasheet" ""
-			(at 105.41 205.74 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Description" ""
-			(at 105.41 205.74 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(pin "1"
-			(uuid "aa54b09b-e1fd-43c8-80b3-dbaf4f2d6bab")
-		)
-		(instances
-			(project "canary-hat"
-				(path "/e63e39d7-6ac0-4ffd-8aa3-1841a4541b55/421b2317-5779-468f-96b0-ffd0e1a2d866"
-					(reference "#PWR048")
-					(unit 1)
-				)
-			)
-		)
-	)
+	
 	(symbol
 		(lib_id "Device:R")
 		(at 124.46 199.39 0)
@@ -12837,7 +10695,7 @@
 		(in_pos_files yes)
 		(dnp no)
 		(uuid "880e7a56-4379-4add-a0cc-3c9115a57dfb")
-		(property "Reference" "#PWR049"
+		(property "Reference" "#PWR1049"
 			(at 127 204.47 0)
 			(hide yes)
 			(show_name no)
@@ -12898,7 +10756,7 @@
 		(instances
 			(project "canary-hat"
 				(path "/e63e39d7-6ac0-4ffd-8aa3-1841a4541b55/421b2317-5779-468f-96b0-ffd0e1a2d866"
-					(reference "#PWR049")
+					(reference "#PWR1049")
 					(unit 1)
 				)
 			)
@@ -13109,7 +10967,7 @@
 		(in_pos_files yes)
 		(dnp no)
 		(uuid "a9a27f0f-6a07-4307-8df3-25c0b62cb59c")
-		(property "Reference" "#PWR050"
+		(property "Reference" "#PWR1050"
 			(at 39.37 231.14 0)
 			(hide yes)
 			(show_name no)
@@ -13170,7 +11028,7 @@
 		(instances
 			(project "canary-hat"
 				(path "/e63e39d7-6ac0-4ffd-8aa3-1841a4541b55/421b2317-5779-468f-96b0-ffd0e1a2d866"
-					(reference "#PWR050")
+					(reference "#PWR1050")
 					(unit 1)
 				)
 			)
@@ -13302,7 +11160,7 @@
 				(justify left)
 			)
 		)
-		(property "Note" "FUEL_GND open-wire pull-down: holds AIN_4GND inside its +/-0.1 V window if BROWN is disconnected."
+		(property "Note" "FUEL_GND open-wire pull-down: gives AIN_4GND a defined DC level if BROWN is disconnected. SBAS680 gives no AIN_nGND leakage figure, so the resulting level is not guaranteed inside the +/-0.1 V window; an open BROWN is a fault the decoder should flag, not a reading."
 			(at 54.61 226.06 0)
 			(hide yes)
 			(show_name no)
@@ -13370,7 +11228,7 @@
 		(in_pos_files yes)
 		(dnp no)
 		(uuid "a73d0208-8ca3-4c03-9f07-0aebe1a9ab65")
-		(property "Reference" "#PWR051"
+		(property "Reference" "#PWR1051"
 			(at 57.15 231.14 0)
 			(hide yes)
 			(show_name no)
@@ -13431,7 +11289,7 @@
 		(instances
 			(project "canary-hat"
 				(path "/e63e39d7-6ac0-4ffd-8aa3-1841a4541b55/421b2317-5779-468f-96b0-ffd0e1a2d866"
-					(reference "#PWR051")
+					(reference "#PWR1051")
 					(unit 1)
 				)
 			)
@@ -13563,7 +11421,7 @@
 				(justify left)
 			)
 		)
-		(property "Note" "Series resistor: buys input-protection headroom (SBAS680: higher source impedance raises the OVP range) and limits TVS clamp current into U8. Its gain error against U8's 1 Mohm input is cancelled by the equal resistor on AIN_nGND (13.5.3 items 7-8)."
+		(property "Note" "Series resistor (1k): buys input-protection headroom (SBAS680: higher source impedance raises the OVP range) and limits TVS clamp current into U8. U8's input leakage is (VIN - 2.50 V)/RIN with RIN ~1 Mohm (SBAS680 7.5): the equal resistor on AIN_nGND cancels the OFFSET term only; a GAIN error of R/RIN = ~0.1 % remains and is calibrated out with the channel (review minor 3)."
 			(at 80.01 226.06 0)
 			(hide yes)
 			(show_name no)
@@ -14343,7 +12201,7 @@
 		(in_pos_files yes)
 		(dnp no)
 		(uuid "bb96e40e-bd34-4725-b5a3-69e1a6677bfc")
-		(property "Reference" "#PWR052"
+		(property "Reference" "#PWR1052"
 			(at 41.91 270.51 0)
 			(hide yes)
 			(show_name no)
@@ -14404,7 +12262,7 @@
 		(instances
 			(project "canary-hat"
 				(path "/e63e39d7-6ac0-4ffd-8aa3-1841a4541b55/421b2317-5779-468f-96b0-ffd0e1a2d866"
-					(reference "#PWR052")
+					(reference "#PWR1052")
 					(unit 1)
 				)
 			)
@@ -15052,7 +12910,7 @@
 		(in_pos_files yes)
 		(dnp no)
 		(uuid "f7dcd172-8af5-46f2-8b56-a9f0dffb9584")
-		(property "Reference" "#PWR053"
+		(property "Reference" "#PWR1053"
 			(at 121.92 270.51 0)
 			(hide yes)
 			(show_name no)
@@ -15113,7 +12971,7 @@
 		(instances
 			(project "canary-hat"
 				(path "/e63e39d7-6ac0-4ffd-8aa3-1841a4541b55/421b2317-5779-468f-96b0-ffd0e1a2d866"
-					(reference "#PWR053")
+					(reference "#PWR1053")
 					(unit 1)
 				)
 			)
@@ -15761,7 +13619,7 @@
 		(in_pos_files yes)
 		(dnp no)
 		(uuid "0597899a-933a-4c89-ada2-45e8a268e8cf")
-		(property "Reference" "#PWR054"
+		(property "Reference" "#PWR1054"
 			(at 201.93 270.51 0)
 			(hide yes)
 			(show_name no)
@@ -15822,7 +13680,7 @@
 		(instances
 			(project "canary-hat"
 				(path "/e63e39d7-6ac0-4ffd-8aa3-1841a4541b55/421b2317-5779-468f-96b0-ffd0e1a2d866"
-					(reference "#PWR054")
+					(reference "#PWR1054")
 					(unit 1)
 				)
 			)
@@ -16165,6 +14023,261 @@
 			(justify left bottom)
 		)
 		(uuid "327e8a9d-858b-4fb4-9b03-d8c723adaf9f")
+	)
+	(label "AIN1_GND"
+		(at 105.41 151.13 270)
+		(effects
+			(font
+				(size 1.27 1.27)
+			)
+			(justify right bottom)
+		)
+		(uuid "c46c1832-2351-4b8b-95d2-e54ffa778fc8")
+	)
+	(label "AIN2_GND"
+		(at 105.41 177.8 270)
+		(effects
+			(font
+				(size 1.27 1.27)
+			)
+			(justify right bottom)
+		)
+		(uuid "5f316292-8d05-41eb-95af-06b74793a796")
+	)
+	(label "AIN3_GND"
+		(at 105.41 205.74 270)
+		(effects
+			(font
+				(size 1.27 1.27)
+			)
+			(justify right bottom)
+		)
+		(uuid "006342b3-008b-45b0-b5d5-34ce94ba075d")
+	)
+	(wire
+		(pts
+			(xy 328.93 44.45) (xy 331.47 44.45)
+		)
+		(stroke
+			(width 0)
+			(type default)
+		)
+		(uuid "80616dd0-5368-49a6-a34b-76fe0bd12e6b")
+	)
+	(label "5V_SENS"
+		(at 331.47 44.45 0)
+		(effects
+			(font
+				(size 1.27 1.27)
+			)
+			(justify left bottom)
+		)
+		(uuid "f4f9a679-6a54-48cc-8748-a66782fda20b")
+	)
+	(symbol
+		(lib_id "Device:C")
+		(at 139.7 118.11 0)
+		(unit 1)
+		(body_style 1)
+		(exclude_from_sim no)
+		(in_bom yes)
+		(on_board yes)
+		(in_pos_files yes)
+		(dnp no)
+		(uuid "852d2f8d-b859-4f23-98cf-2ee28f75fb36")
+		(property "Reference" "C36"
+			(at 142.24 116.84 0)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify left)
+			)
+		)
+		(property "Value" "10nF"
+			(at 142.24 119.38 0)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify left)
+			)
+		)
+		(property "Footprint" "Capacitor_SMD:C_0603_1608Metric"
+			(at 139.7 118.11 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Datasheet" ""
+			(at 139.7 118.11 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Description" "Unpolarized capacitor"
+			(at 139.7 118.11 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Manufacturer" "Murata"
+			(at 139.7 118.11 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify left)
+			)
+		)
+		(property "MPN" "GRM1885C1H103JA01D"
+			(at 139.7 118.11 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify left)
+			)
+		)
+		(property "Voltage" "50V"
+			(at 139.7 118.11 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify left)
+			)
+		)
+		(property "Dielectric" "C0G/NP0"
+			(at 139.7 118.11 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify left)
+			)
+		)
+		(property "Tolerance" "5%"
+			(at 139.7 118.11 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify left)
+			)
+		)
+		(property "Quote" "Rev 2.1: not yet quoted."
+			(at 139.7 118.11 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify left)
+			)
+		)
+		(property "Note" "CH0 differential decoupling, AIN_0P to AIN_0GND at U8 (SBAS680 pin table: decouple each AIN_nP with its AIN_nGND). Without it AIN_0GND is a bare 18k node (review minor 2). C18 at the divider stays."
+			(at 139.7 118.11 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify left)
+			)
+		)
+		(pin "1"
+			(uuid "e5f495d0-e73d-4c79-9b26-65e9b94bfecf")
+		)
+		(pin "2"
+			(uuid "c771d950-a156-4838-a939-b300ecc41f06")
+		)
+		(instances
+			(project "canary-hat"
+				(path "/e63e39d7-6ac0-4ffd-8aa3-1841a4541b55/421b2317-5779-468f-96b0-ffd0e1a2d866"
+					(reference "C36")
+					(unit 1)
+				)
+			)
+		)
+	)
+	(wire
+		(pts
+			(xy 139.7 114.3) (xy 139.7 111.76)
+		)
+		(stroke
+			(width 0)
+			(type default)
+		)
+		(uuid "2c0d7d58-c3b1-4463-82a8-968eebf5410b")
+	)
+	(label "V12_SENSE"
+		(at 139.7 111.76 90)
+		(effects
+			(font
+				(size 1.27 1.27)
+			)
+			(justify left bottom)
+		)
+		(uuid "b8ae3c48-c973-4ec8-9869-738cd17e77e0")
+	)
+	(wire
+		(pts
+			(xy 139.7 121.92) (xy 139.7 124.46)
+		)
+		(stroke
+			(width 0)
+			(type default)
+		)
+		(uuid "e77fa0b8-7e22-49f7-b0e9-a8b6e51a2fb2")
+	)
+	(label "AIN0_GND"
+		(at 139.7 124.46 270)
+		(effects
+			(font
+				(size 1.27 1.27)
+			)
+			(justify right bottom)
+		)
+		(uuid "34a157bd-7de3-4aea-9cf1-5651c1737612")
 	)
 	(embedded_fonts no)
 )

@@ -140,6 +140,11 @@ enable and power-good, HVSSOP-8 (`DGN`).
 - **Why this part, not the smaller TPS7B6950-Q1.** §3.7.1 sets the board rule:
   D1 clamps at **38.9 V**, so **50 V is the rating floor for anything on
   `+12V`**. The TPS7B69-Q1 is a 40 V part. The TPS7A16 is 60 V.
+- **Superseded 2026-10-12 (review M1): EN is GPIO-controlled.** EN = +12V/2
+  through R17/R44, so EN can never exceed IN. Q4 holds EN low by default, and
+  GPIO19 (`SENS_PWR_EN`) releases it through Q5. The supply is off until
+  software enables it, and software can switch it off when parked. §13.5.12
+  has the circuit; the paragraph below is the original reasoning.
 - **EN from `+3V3`** (through a resistor, or the part's EN directly if its
   threshold permits — check the datasheet). The sensor is powered only when the
   Pi's logic rail is up, so the MAP and IAT dividers **never drive U8's inputs
@@ -371,8 +376,10 @@ free:
    *"if the sources driving the inputs have higher impedance, the current
    flowing through the protection diodes reduces further, thereby increasing
    the OVP voltage range."* This is a second, independent reason for item 8's
-   series pads — and its gain-error cost is cancelled by the `AIN_nGND`
-   matching in item 7.
+   series pads. *(Corrected 2026-10-12, review: the `AIN_nGND` match cancels
+   only the offset term of U8's (VIN − 2.5 V)/RIN leakage. A gain error of
+   R/RIN remains: 0.1 % at 1 kΩ, ~1.8 % on CH0's 18 kΩ, which is calibrated
+   out with the channel.)*
 3. **External protection is still wanted.** The datasheet is explicit that
    *"using external protection devices against surges, electrostatic discharge
    (ESD), and electrical fast transient (EFT) conditions is highly
@@ -538,8 +545,9 @@ terminal ──┬── R_pulldown → GND     (DNF)
   *"reduces [the current through the protection diodes] further, thereby
   increasing the OVP voltage range"* — so a series resistor directly buys
   overvoltage headroom, which matters because the ±20 V limit degrades to
-  **±11 V** with AVDD floating (item 5a). Its usual cost, a gain error, is
-  cancelled by matching the same value on `AIN_nGND` (item 7). Fit 0 Ω and the
+  **±11 V** with AVDD floating (item 5a). Matching the same value on
+  `AIN_nGND` (item 7) cancels its offset; a gain error of R/RIN (~0.1 % at
+  1 kΩ) remains and is calibrated out (corrected 2026-10-12). Fit 0 Ω and the
   no-divider simplification is intact; fit a real value and you get headroom
   for free.
 - **`AIN_nGND` gets a matching pad on every channel too**, for the same
@@ -592,7 +600,8 @@ goes to the ADS8688A instead (§13.5.3 item 5), which is what lets an 8-channel
 SPI ADC cost zero GPIOs. Never added: U10 MCP2518FD, U11 TCAN1042, FL2,
 R24/R25 split termination, C24, JP2, D7/R26. GPIO19 and GPIO27 go back to the
 free pool, so **GPIO12/13 (reserved `uart4`), 19, 20, 21 and 27 are all
-uncommitted** after rev 2.1 — a markedly better position than the earlier plan
+uncommitted** after rev 2.1 *(2026-10-12: GPIO19 is now `SENS_PWR_EN`, the U9
+enable, §13.5.12; 12/13/20/21/27 remain)* — a markedly better position than the earlier plan
 left, which spent down to two.
 
 This also keeps the board at **one** CAN controller, so §13.5.3's SPI
@@ -1193,7 +1202,9 @@ its load caps C5/C6 are deleted.
   risk, and the same footprint. Either works electrically.
 - **Footprint.** 2.5 × 2.0 mm or 3.2 × 2.5 mm 4-pad oscillator (stock KiCad
   `Oscillator:Oscillator_SMD_*`). Pin 1 is EN/ST, so a rotation error turns
-  the part off — §12's pin-1 hazard applies here, unlike a crystal.
+  the part off — §12's pin-1 hazard applies here. *(The 4-pad crystal rev 2.1
+  actually uses has the same hazard: a 90° error puts the crystal on its GND
+  pads, review minor 7.)*
 - **Not applicable now, kept because it would bite a future second
   controller:** branching U3's CLKO to clock another MCP2518FD does not work.
   The mainline `mcp251xfd` driver sets CLKO to SYSCLK ÷ 10 at init, and puts a
@@ -1276,8 +1287,9 @@ is worth recording either way:
     B.Cu copper and parts clear of the inlet footprint regardless of package
     height.
 - **Only low-profile parts on B.Cu:** 0603 passives, SOT-23, SOIC. Keep tall
-  and through-hole parts on top: C2 (electrolytic), J2/J3. X1 goes on top
-  beside U3 so the clock trace stays short.
+  and through-hole parts on top: C2 (electrolytic), J2. Y1 (the crystal),
+  C33/C34 and R43 go on top beside U3, so the OSC1/OSC2 loop stays short and
+  symmetric.
 - **Keep the analog front end on top, next to U8.** With the dividers deleted
   this is now just C19–C22 and R19 — far less to place than the ~9 parts the
   earlier plan had, but the same rule: a filter cap belongs at the pin it
@@ -1428,8 +1440,9 @@ changes them — that section needs updating to match: **CE1 is spent on the
 ADC** rather than a second CAN controller (so it is still not free for the MCU
 link, for a different reason), the ADC is now an **eight-channel** set,
 **U11 no longer exists** so only U9 EN joins the MCU's safe-state nets, and
-the header closes with **GPIO 12/13/19/20/21/27 uncommitted** instead of none
-— which materially improves rev 3.0's options.
+the header closes with **GPIO 12/13/20/21/27 uncommitted** instead of none
+(GPIO19 became `SENS_PWR_EN` on 2026-10-12) — which materially improves
+rev 3.0's options.
 
 ### 13.5.9 Open items before schematic entry
 
@@ -1442,8 +1455,8 @@ the header closes with **GPIO 12/13/19/20/21/27 uncommitted** instead of none
 | 5 | ~~TPS7A1650-Q1 capacitor requirements and EN threshold~~ — **closed 2026-10-12** (SBVS188E): IN > 0.1 µF, OUT > 2.2 µF effective; EN thresholds 1.2 V / 0.3 V, **EN must never exceed IN** — which the planned EN-from-`+3V3` violates on the bench (§13.5.10) | **Closed** |
 | 6 | ~~AEMnet byte layout~~ — **off the critical path**, the gauge is analog (§13.5.4). Keep the note in case a future device uses AEMnet | Deferred indefinitely |
 | 7 | Z1 rail port thread vs AEM sensor's NPT | Inspect rails; adapter if ORB |
-| 8 | ~~GPIO19 / GPIO27 vs 20/21~~ — **closed**, CAN1 is dropped so no interrupt or STB GPIO is needed; the ADC uses CE1 natively. GPIO 12/13/19/20/21/27 all stay free | **Closed** |
-| 9 | Board area closes single-sided? **Doubtful now**: schematic entry made it +47 parts net, not +8, and the two-level J2 is 21.4 mm deep (§13.5.10) | Placement attempt, after item 34 and the trim decision |
+| 8 | ~~GPIO19 / GPIO27 vs 20/21~~ — **closed**, CAN1 is dropped so no interrupt or STB GPIO is needed; the ADC uses CE1 natively. **GPIO19 is now `SENS_PWR_EN`** (U9 enable, 2026-10-12); GPIO 12/13/20/21/27 stay free | **Closed** |
+| 9 | Board area closes single-sided? **Doubtful**: rev 2.1 has 114 symbols against rev 2.0's 59 (§13.5.10). J2 is now a 45.5 × 7.6 mm single row (PT 1,5/13), not the two-level block | Placement attempt |
 | 10 | ~~X1 part~~ — **superseded 2026-10-12: no oscillator.** Y1 is the crystal fallback, Kyocera `CX3225SA40000D0PTWCC` (§13.5.6) | **Closed** |
 | 11 | Rev 2.0 Y1 starts cold? (§13.1 meas. 14) — still worth answering on the rev 2.0 boards. **For rev 2.1's Y1 it becomes a bring-up step:** OSC1 amplitude (≤ 1 pF probe) → drive level → size R43; then a cold start | Bench |
 | 12 | ~~U5 root cause: part, process or design~~ — **closed 2026-10-11: the part.** The second board's U5 converts temperature and pressure correctly (§13.5.6) | **Closed** |
@@ -1469,21 +1482,23 @@ the header closes with **GPIO 12/13/19/20/21/27 uncommitted** instead of none
 | 23 | **Re-verify `V12_SENSE` on the new ADC** — same divider, different part | Repeat `CANary-HAT-Revisions.md:119`: 0.000 V no vehicle, ~12.68 V key-off, ~12.43 V KOEO |
 | 24 | **Update §13.3.9 of `CANary-HAT-Revisions.md`** for the dropped CAN1 — rev 3.0's GPIO and safe-state assumptions changed (§13.5.8) | Edit that section |
 | 34 | ~~J2 physical part~~ — **decided 2026-10-12: Phoenix `PT 1,5/13-3,5-H`**, 13-way, 3.5 mm, screw with wire protector, collared ferrules 0.25–0.75 mm² (pins 1–4 are 18 AWG on AI 0,75 ferrules; the rest 20 AWG), 45.5 × 7.6 mm, stock KiCad footprint; J3 folded in (§13.5.5) | **Closed**; confirm the 13-way item number (12-way is 1984714) at ordering |
-| 35 | **MCP2518FD OSC2 with an external clock** — left open on the schematic; Microchip documents that only for the MCP2515 (DS20001801J fig. 8-2) | Microchip app note or forum confirmation; bring-up proves it either way |
+| 35 | ~~MCP2518FD OSC2 with an external clock~~ — **moot**: Y1 is a crystal, so OSC2 drives it through R43 | **Closed** |
 | 36 | ~~Oscillator order code and stock~~ — **closed 2026-10-12** (operator: easy-to-source parts). No 40 MHz oscillator was easy to buy: SiT8924 is programmed to order, the SiT8008BI code returned nothing at DigiKey, ECS-2333 had zero stock, and SiT8008AI-13-33S was end-of-life stock. **Y1 = Kyocera `CX3225SA40000D0PTWCC` crystal** (stocked), with ECS `ECS-400-8-33Q-JES-TR` as second source (§13.5.6) | **Closed** |
 
 ### 13.5.10 Schematic entry — 2026-10-12
 
 What went into `hardware/canary-hat-rev2.1/` (diff against `hardware/canary-hat-rev2.0/`),
-what the datasheets changed on the way, and what is still open. ERC matches
-the rev 2.0 baseline: the same three pre-existing `pin_to_pin` warnings on
-Sensors, nothing new. Every net below was checked in the exported netlist.
+what the datasheets changed on the way, and what is still open. ERC is
+**0 errors, 0 warnings**. Three checks are suppressed project-wide, as in
+rev 2.0: global label used once, four-way junctions, footprint filters.
+Every net below was checked in the exported netlist. An independent review
+followed, and the sheets were reorganised; see §13.5.12.
 
 #### What changed, sheet by sheet
 
 | Sheet | Change |
 |---|---|
-| Root | New sheet `Analog_Inputs`. OBD_IO loses `SCL`/`SDA` (U8 was their only user) and gains `V12_SENSE`, `5V_SENS`, `MAP`, `IAT`, `FUEL_P`, `FUEL_GND`. J1 pin 26 (GPIO7, SPI0 CE1) now goes to U8 `~CS`. |
+| Root | New sheet `Analog_Inputs`. OBD_IO loses `SCL`/`SDA` (U8 was their only user) and gains `V12_SENSE`, `5V_SENS`, `SENS_V1`, `SENS_R1`, `FUEL_P`, `FUEL_GND`. J1 pin 26 (GPIO7, SPI0 CE1) now goes to U8 `~CS`. |
 | OBD_IO | ADS1015 (U8), C17 and their wiring deleted. `V12_SENSE` leaves through a sheet pin; R11/R12/C18 unchanged. J2 is a 13-pin `PT 1,5/13-3,5-H` in the sequence of §13.5.5: OBD pin 5 dropped, J3 folded in as pins 3–4 (`+12V`, GND). Pins 2, 4 and 8 are GND. |
 | Analog_Inputs (new) | U8 ADS8688A, U9 TPS7A1650-Q1 and the CH0–CH7 front ends, §13.5.3 as amended below. |
 | CANFD_Interface | Rev 2.0's ABLS2 Y1 + C5/C6 (27 pF) deleted. New Y1 = Kyocera CX3225SA 40 MHz 8 pF crystal on OSC1/OSC2, C33/C34 8.2 pF C0G, R43 0 Ω in series with OSC2 (§13.5.6). An interim X1 oscillator design was entered and then replaced the same day. U3 SDO pin type corrected to tri-state (also in its library). |
@@ -1501,7 +1516,10 @@ The §13.5.3 placeholders are superseded. In the schematic:
 | Function | Ref |
 |---|---|
 | U9 input / output caps | C19 1 µF 50 V / C20 4.7 µF 50 V |
-| U9 EN: pull-up / clamp / slew cap | R17 330 kΩ / D10 BAT46WJ / C32 100 nF |
+| U9 EN (review M1): divider top / bottom, slew cap, clamp | R17 1 MΩ / R44 1 MΩ, C32 470 pF, D10 BAT46WJ |
+| U9 EN switch: hold-off FET, its gate bias, GPIO19 FET, pull-down | Q4 BSS138, R45 1 MΩ / R46 470 kΩ, Q5 BSS138, R47 100 kΩ |
+| CH0 differential cap at U8 (review) | C36 10 nF C0G |
+| Q2 gate–source clamp (review M2, KLine sheet) | D11 BZT52C15 |
 | U8 REFIO / REFCAP / REFCAP HF | C21 22 µF / C22 22 µF / C23 1 µF |
 | U8 AVDD bulk / pin 9 / pin 30 / DVDD | C24 10 µF / C25 1 µF / C26 1 µF / C27 10 µF |
 | AVDD bleed (open item 30) | R18 10 kΩ |
@@ -1516,7 +1534,10 @@ The §13.5.3 placeholders are superseded. In the schematic:
 
 #### Decisions taken at entry, and the datasheet findings behind them
 
-- **U9 EN cannot come straight from `+3V3`.** The TPS7A16 abs max is
+- *(Superseded by review M1, §13.5.12: the R17/D10 clamp below fails hot
+  (Schottky leakage turns U9 on with the Pi off) and on a fast 12 V collapse.
+  Kept as the record.)* **U9 EN cannot come straight from `+3V3`.** The
+  TPS7A16 abs max is
   EN − IN ≤ +0.3 V, and TI writes *"make sure that VEN ≤ VIN at all times"*
   (SBVS188E). With the Pi up and no vehicle 12 V (bench, UPS), the planned
   wiring puts 3.3 V on EN over IN = 0. Tying EN to IN instead (self-bias) is
@@ -1562,8 +1583,10 @@ The §13.5.3 placeholders are superseded. In the schematic:
 #### Part count, and how to trim it
 
 Rev 2.0's netlist has 59 symbols (the "57 components" above counted differently); rev 2.1 as entered has
-**106** (+49 on Analog_Inputs; +4 for the new Y1, C33, C34, R43; −5 for the ADS1015, C17 and rev 2.0's Y1, C5, C6; −1 for J3). Five are DNF and three are test
-points. That is far from §13.5.2's "+8", because the conditioning pads,
+**114**: +49 on Analog_Inputs; +4 for the new Y1, C33, C34, R43; −5 for the
+ADS1015, C17 and rev 2.0's Y1, C5, C6; −1 for J3; +8 from the review (C36,
+D11, Q4, Q5, R44–R47). Eight are DNP (R7, R9, R21, R24, R35, R38, R41, J1)
+and three are test points. That is far from §13.5.2's "+8", because the conditioning pads,
 matching resistors, clamps and spare-channel pads were all decided after that
 estimate. If placement does not close single-sided (open item 9), trim in
 this order:
@@ -1576,6 +1599,9 @@ this order:
    low-impedance node.
 
 #### J2 is a pin order, not yet a part
+
+> **Superseded 2026-10-12:** J2 is a Phoenix `PT 1,5/13-3,5-H` (open item
+> 34 closed, §13.5.5). The paragraph below is the history.
 
 The schematic fixes only J2's pin order (1–6 lower, 7–12 upper). The planned
 MKKDS 1,5/6-5,08 turned out on 2026-10-12 to be **21.4 mm deep and 25.2 mm
@@ -1633,3 +1659,48 @@ EEPROM population record (§13.5.8) recovers that for the pad approach.
   pluggable connector, bring the spares out with the same pad set.
 - **Frequency or digital outputs** (flex-fuel, some MAFs, speed sensors) are
   not ADC inputs and are out of scope for these ports.
+
+### 13.5.12 Independent review and sheet reorganisation — 2026-10-12
+
+An independent agent reviewed rev 2.1 at commit `98cff9bc`. It checked
+every IC's pinout against its datasheet and footprint, every net, the
+ratings, BOM consistency, and doc consistency. There were **no blockers**.
+Every IC's pin numbering, the J2 order, BT1's polarity, the crystal topology,
+SPI0 sharing and the analog channels all checked correct. Dispositions:
+
+| # | Finding | Disposition |
+|---|---|---|
+| M1 | U9's R17/D10/C32 enable clamp fails three ways. Hot, BAT46WJ leakage (up to 20 µA at 60 °C) through 330 kΩ turns U9 on with the Pi off. A fast `+12V` collapse breaks EN − IN ≤ 0.3 V while C32 discharges. The "~0.15 V" arithmetic was wrong (the state stays safe through U9's UVLO). And tying EN to `+3V3` never avoided parked drain, because the Pi stays up when parked | **Redesigned.** EN = +12V/2 through R17/R44 (1 MΩ/1 MΩ), so EN ≤ IN by construction. C32 470 pF sets the slew (τ ≈ 0.24 ms). D10 stays as a µA-level clamp for fast collapses; its leakage now only adds to EN while on, and Q4 shunts it while off. Q4 (BSS138, gate biased from +12V by R45/R46: 3.8 V at 12 V, 12.4 V at D1's clamp) holds EN low by default. **Q5 (BSS138) on GPIO19 = `SENS_PWR_EN`** (J1 pin 35, R47 100 kΩ pull-down) releases it. GPIO low, undriven or Pi off means the sensor supply is OFF; software turns it on and can turn it off when parked. Standby from always-hot +12V is ~20 µA. Bring-up: EN with the Pi off, at room temperature and ≥ 60 °C, and on a fast 12 V removal |
+| M2 | Q2 (BSS84, K-line pull-up) Vgs = −0.91 × V12 with Q3 on: −21.8 V at a 24 V jump start, −35 V at D1's clamp, past ±20 V (a rev 2.0 carry-over) | **Fixed:** D11 BZT52C15 across gate–source, the same part and reason as D3 on Q1 |
+| 1 | C21/C22 22 µF X5R 1206 sit right at the 10 µF REFIO/REFCAP minimum after bias, and X5R is rated only to 85 °C | C21/C22 → 22 µF 25 V **X7R 1210** (CL32B226KAJNNNE); C24/C27 → 10 µF X7R 0805 (CL21B106KOQNNNE) |
+| 2 | The `AIN_nGND` matching nodes are bare; SBAS680 says to decouple each AIN_nP with its AIN_nGND | C28–C30 now go **across AIN_nP/AIN_nGND** (like C31 on CH4); new **C36 10 nF** across CH0's pair at U8 |
+| 3 | Matching does not cancel the series-resistor gain error: only the offset of the (VIN − 2.5 V)/RIN leakage cancels | Notes and §13.5.3 corrected. CH0's ~1.8 % gain error is calibrated (open item 23). Open-wire defaults confirmed by the same arithmetic: open WHITE reads 0.21–0.26 V, under the 0.50 V gate |
+| 4 | D9's second line was unconnected | Both lines on `5V_SENS` |
+| 5 | Duplicate power-symbol references (generator reuse) | Renumbered `#PWR1001+`; no duplicates remain |
+| 6 | Y1's "CC" suffix is an individual spec; `ECX-33Q.pdf` was missing from `datasheets/` | Caveat added to the Y1 note (confirm C0/drive with Kyocera or at bring-up); ECX-33Q, TPS7A16-Q1 and BAT46WJ datasheets added |
+| 7 | A 90° rotation of Y1 shorts OSC1/OSC2 through the lid | Y1, U8 and U9 added to the pin-1 assembly-drawing list (`BOM-offboard.md`) |
+| 8–10 | Stale notes and doc text (C18, R11, D10, R17, sheet text, the J2 "pin order" section, items 9 and 35, X1 placement, DNP count, ERC wording, BOM-offboard J4 and fiducials) | Updated |
+| 11 | CH3 headroom is ~0.3 % (5V_SENS up to 5.10 V vs ~5.116 V full scale) | Software: the driver treats a full-scale CH3 code as clipped (§13.5.8) |
+| 12 | A 5V_SENS short to battery can exceed U9's OUT − IN abs max when +12V sags under the X1202 load | **Accepted and recorded:** "costs one sensor" holds for shorts to ground. A short to battery may also cost U9 |
+| 13 | Housekeeping: blank Datasheet fields; D7–D9 drawn with a unidirectional TVS graphic; two missing libraries in `sym-lib-table`; the DGN0008B/C outline; X1202 return routing | Missing libraries removed. At layout: confirm U9's DGN outline (B vs C), route the X1202 return straight from J2 pin 4 to pin 2, not under the analog front end. Datasheet fields and the TVS graphic are cosmetic and left |
+
+**Sheet reorganisation (operator, 2026-10-12).** This is pure reorganisation.
+Before the review fixes, connectivity was verified identical: all 102 nets
+had the same pin sets, and all 106 parts kept every field.
+
+- **Power** (new, A3): the J2 pin 1 → Q1/D3/R10 reverse block → D1/C2 →
+  +12V path, the 12 V sense divider R11/R12/C18 → `V12_SENSE`, and U9 with
+  its enable circuit → `5V_SENS`. Rev 3.0 moves the input chain to CANary-PWR,
+  which then means deleting part of one sheet.
+- **GNSS** (new): U7, L1, C16, J4 (U.FL), BT1 and D2, with C14/C15.
+- **OBD_IO** now holds only J2 and its harness wiring. **Sensors** holds
+  U5/U6 and the I2C pull-ups. The root sheet is A3.
+- **Layout note:** moved parts change their schematic path. In "Update PCB
+  from Schematic", tick **re-link footprints by reference designator**, so the
+  rev 2.0 parts keep their placement.
+
+**Software implied (adds to §13.5.8):**
+- **GPIO19 (`SENS_PWR_EN`) must be driven high for the sensor ports and the
+  TMAP to get power.** It defaults off. The rev 2.1 overlay or the daemon
+  owns it, alongside the ADS8688A node on CE1.
+- The CH3 clipping rule.
