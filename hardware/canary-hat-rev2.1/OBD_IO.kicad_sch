@@ -5604,7 +5604,7 @@
 		)
 		(uuid "d19676c1-6d4d-4075-86a7-83e5527858df")
 	)
-	(hierarchical_label "MAP"
+	(hierarchical_label "SENS_V1"
 		(shape passive)
 		(at 43.18 142.24 0)
 		(effects
@@ -5625,7 +5625,7 @@
 		)
 		(uuid "10f30768-79d4-474a-9b43-dac8d6c33c88")
 	)
-	(hierarchical_label "IAT"
+	(hierarchical_label "SENS_R1"
 		(shape passive)
 		(at 43.18 144.78 0)
 		(effects
@@ -5766,7 +5766,7 @@
 			)
 		)
 	)
-	(text "J2 rev 2.1: MKKDS 1,5/6-5,08 two-level block.\nPins 1-6 = LOWER level, rev 2.0's J2 pin for pin (do not re-land the vehicle harness).\nPins 7-12 = UPPER level, sensor harness (CANary-HAT-Rev2.1.md 13.5.5).\nPin 11 FUEL_GND is the gauge's analog minus (ADS8688A AIN_4GND), NOT a ground.\nPin 12 SENS_GND is the TMAP sensor return."
+	(text "J2 rev 2.1: two-level 2x6 block (part open: CANary-HAT-Rev2.1.md open item 34).\nPins 1-6 = LOWER level, rev 2.0's J2 pin for pin (do not re-land the vehicle harness).\nPins 7-12 = UPPER level, sensor ports (13.5.5, 13.5.11): 7 5V_SENS, 8 SENS_V1 (voltage port),\n9 SENS_R1 (resistive port), 10/11 FUEL_P/FUEL_GND, 12 SENS_GND.\nPin 11 FUEL_GND is the gauge's analog minus (ADS8688A AIN_4GND), NOT a ground."
 		(exclude_from_sim no)
 		(at 22.86 167.64 0)
 		(effects

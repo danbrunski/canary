@@ -103,6 +103,11 @@ the one part that got bigger.
 
 ### 13.5.3 Analog front end — MAP, IAT, fuel pressure
 
+> **Since 2026-10-12, CH1 and CH2 are generic sensor ports** (§13.5.11):
+> `SENS_V1` (voltage) and `SENS_R1` (resistive). Items 2–3 below are the
+> design record for the TMAP that the dev truck plugs into them. Their
+> resistor values are now the ports' generic defaults.
+
 #### Sensor facts, and what is still unverified
 
 The only datasheet found is Bosch's *pressure sensors* catalogue for the
@@ -748,7 +753,7 @@ The manual's table is internally inconsistent — it places a 16-bit value in
 
 | Harness | Positions | |
 |---|---|---|
-| Bosch TMAP (one 4-way connector) | `5V_SENS`, `MAP`, `IAT`, `SENS_GND` | 4 |
+| Bosch TMAP (one 4-way connector) | `5V_SENS`, `SENS_V1` (pressure), `SENS_R1` (NTC), `SENS_GND` | 4 |
 | AEM gauge | `FUEL_P` (WHITE, analog +), `FUEL_GND` (BROWN, analog −) | 2 |
 | | **Total** | **6 — exactly fits** |
 
@@ -800,16 +805,20 @@ again. Columns are grouped so each one reads as a single function.
 | Column | Lower level (vehicle OBD — unchanged from rev 2.0) | Upper level (new) |
 |---|---|---|
 | 1 | `+12V_RAW` (OBD 16) | `5V_SENS` — sensor supply |
-| 2 | GND (OBD 5, left unconnected per §3.9) | `MAP` — pressure signal |
-| 3 | GND (OBD 4, chassis) | `IAT` — NTC signal |
+| 2 | GND (OBD 5, left unconnected per §3.9) | `SENS_V1` — voltage sensor port (TMAP pressure on the dev truck) |
+| 3 | GND (OBD 4, chassis) | `SENS_R1` — resistive sensor port (TMAP NTC on the dev truck) |
 | 4 | `CANH_RAW` (OBD 6) | `FUEL_P` — gauge signal |
 | 5 | `CANL_RAW` (OBD 14) | `FUEL_GND` — gauge BROWN (analog −) → `AIN_4GND` (§13.5.3 item 7) |
 | 6 | `KLINE` (OBD 7) | `SENS_GND` — sensor return |
 
 Why this arrangement:
 - **Column 1 = supply** (12 V below, 5 V above).
-- **Each sensor's wires stay adjacent.** `MAP` + `IAT` (columns 2–3) are the
-  two signals from the one Bosch TMAP connector; `FUEL_P` + `FUEL_GND`
+> **Renamed 2026-10-12 (§13.5.11):** the upper level's `MAP`/`IAT` are the
+> generic sensor ports `SENS_V1` (voltage) and `SENS_R1` (resistive). The
+> TMAP is what the dev truck plugs into them. The reasoning below is unchanged.
+
+- **Each sensor's wires stay adjacent.** `SENS_V1` + `SENS_R1` (columns 2–3)
+  are the two signals from the one Bosch TMAP connector; `FUEL_P` + `FUEL_GND`
   (columns 4–5) are the gauge's pair. The operator lands this harness by hand
   under a dash, and grouping by harness is what prevents a miswire.
 - **The Bosch sensor's signals get the two quiet columns.** They sit over
@@ -1294,6 +1303,14 @@ committed work.
 - **ADC transfer functions as pinned data**, not literals in code — `a`/`b` for
   MAP and the Steinhart–Hart coefficients for IAT live beside the other decode
   constants and are asserted by the ground-truth suite once measured.
+- **Sensor ports are configured, not wired in code** (§13.5.11). Which sensor
+  is on `SENS_V1`/`SENS_R1` is per-vehicle data (profile or config), never a
+  channel name baked into the driver. The board's population (each port's
+  fitted pull-up, pull-down and series values) is per-board data that the
+  resistive solve and the open-wire gate depend on. Store it in the HAT's ID
+  EEPROM (U1, 32 KB) as a custom HAT+ atom, so software reads what is actually
+  soldered rather than trusting a config file that can disagree with the
+  board.
 - **Derived channels:** boost (MAP − baro) and injector ΔP (§13.5.1).
 - **Hardware boundary for learned state.** Pre- and post-supercharger sessions
   share a VIN and profile. Training discovery must not mix them — enforced, not
@@ -1312,7 +1329,7 @@ the header closes with **GPIO 12/13/19/20/21/27 uncommitted** instead of none
 
 | # | Item | How it closes |
 |---|---|---|
-| 1 | `0 261 230 416` pinout, NTC curve, pressure range (`a`, `b`) | Meter + bench, before R19 and the calibration model are fixed |
+| 1 | `0 261 230 416` pinout, NTC curve, pressure range (`a`, `b`) — **no longer gates the board** (§13.5.11): the port defaults are generic. Still needed for the TMAP's *decode* (calibration data, not resistor values) | Meter + bench, before the TMAP's catalog entry is pinned |
 | 2 | Sensor mating connector part number | Match against the sensor in hand |
 | 3 | ~~MKKDS 1,5/6-5,08 standard-colour item number, height, row offset; KiCad footprint~~ — **partly answered 2026-10-12, and the answer reopens the part choice** (§13.5.10): no green item number found (BK is 1016295), no KiCad footprint, row geometry only from a third-party Eagle library, and the block is **21.4 mm deep and 25.2 mm tall** above the PCB | See item 34 |
 | 4 | ~~Stack clearance under the HAT~~ — **closed: ~1/4" ≈ 6.3 mm above the fan**, measured with the 13.5 mm header fitted (operator, 2026-10-03). Height is not the binding constraint; every SMT package on the list clears it (§13.5.7) | **Closed** |
@@ -1331,7 +1348,7 @@ the header closes with **GPIO 12/13/19/20/21/27 uncommitted** instead of none
 | 17 | ~~ADS8688A datasheet confirmation~~ — **closed 2026-10-03** against SBAS680 (§13.5.3 item 5a). Range, reference, package, rails, 500 kSPS, 17 MHz SCLK and −40/+125 °C all confirmed; part is **`ADS8688A`**. Two corrections: ±20 V protection is conditional on AVDD **impedance** (±11 V if floating > 30 kΩ), and inputs are **1 MΩ**, not high-Z | **Closed** |
 | 30 | ~~AVDD bleed resistor~~ — **closed 2026-10-12**: R18 = 10 kΩ, `+5V` to GND | **Closed** |
 | 31 | ~~External transient protection~~ — **decided 2026-10-12**: onsemi `NUP2105LT1G` (dual bidirectional TVS, 24 V working, SOT-23) on MAP/IAT, FUEL_P/FUEL_GND and 5V_SENS, behind which the 1 kΩ series resistors limit clamp current into U8 (§13.5.10) | **Closed** |
-| 32 | **`AIN_nGND` matching resistors** — CH0 **closed** (R19 = 18 kΩ = R11‖R12); CH1, CH3, CH4 = 1 kΩ to match `R_series`; CH2 = 2.7 kΩ, **provisional** with R25 | CH2 follows R25's final value (item 1) |
+| 32 | ~~`AIN_nGND` matching resistors~~ — **closed 2026-10-12**: CH0 18 kΩ (= R11‖R12); CH1, CH3, CH4 1 kΩ (= `R_series`); CH2 2.7 kΩ as the resistive port's default for a ~2.5 kΩ NTC. The exact match is sensor-dependent and worth ≤ ~6 mV, so it is a default, not a calibration | **Closed** |
 | 18 | ~~Is the AEM gauge output sensor-ratiometric or buffered?~~ — **closed from the install manual, 2026-10-03.** Buffered, with a published fixed transfer function (`psig = 25.00·V − 12.50`): one channel, no divider, no reference, 6 terminal positions. The proposed ~0.5 V discriminator would have answered this **wrong** (§13.5.4) | **Closed** |
 | 25 | ~~Does the gauge have separate power and signal grounds?~~ — **closed: yes, and they are not tied internally.** BROWN (analog −) is separate from power ground, which is why BROWN must be bonded at the board (§13.5.3 item 7) | **Closed** |
 | 26 | ~~`MKKDS 1,5/7-5,08` fit between MH3 and MH4~~ — **moot**, item 18 closed as buffered so 6 positions suffice (§13.5.5) | **Closed** |
@@ -1340,7 +1357,7 @@ the header closes with **GPIO 12/13/19/20/21/27 uncommitted** instead of none
 | 27 | ~~DNF conditioning pads~~ — **decided 2026-10-12**: `R_series` = **1 kΩ fitted** on CH1–CH4 (and on CH4's negative leg), 0 Ω on the spares; pull-up/pull-down pads on CH1, CH2 and the spares (§13.5.10) | **Closed** |
 | 33 | **Spare channels CH5–CH7** — **schematic half closed 2026-10-12**: each `AIN_nP` is pulled to GND by 10 kΩ through a 0 Ω series pad to a test point, `AIN_nGND` tied to GND. **Driver half still open**: refuse any channel not in the configured map | Driver |
 | 19 | ~~Which AEM wire is signal and which is ground~~ — **closed, and the question was mis-framed.** WHITE is analog **+**, BROWN analog **−**; neither is a ground (§13.5.3 item 7). Meter once as a build check | **Closed** |
-| 20 | **MAP sensor pull-down resistor** — now a *fitted* pad (R20, value `TBD`) on the terminal side of the series resistor. Also needed for open-wire detection: without it a broken signal wire reads U8's internal bias voltage | Value from the Bosch datasheet with item 1's pinout; the `TBD` value cannot be ordered, by design |
+| 20 | ~~MAP sensor pull-down resistor~~ — **closed 2026-10-12: R20 = 47 kΩ fitted**, chosen for the generic voltage port rather than the Bosch datasheet: inside every automotive driver's load rating (Bosch ≥ 10 kΩ), and an open wire reads ~4 % of U8's floating bias, near 0 V (§13.5.11) | **Closed** |
 | 21 | ~~Fuel-pressure transfer function~~ — **closed: AEM publishes it**, `psig = 25.00·V − 12.50`, valid 0.50–4.50 V. Only the *electrical* chain needs calibrating, and on rev 2.1 that is just the ADS8688A's reference (no divider, no resistor tolerance). Gauge face remains the independent cross-check | **Closed**; pin in `catalog_pins` |
 | 22 | **SPI0 contention** — downgraded 2026-10-03 from a risk to a confirmation: the arithmetic gives **0.11 %** bus occupancy at 6 channels × 100 Hz (§13.5.3 item 5a), and per-device SPI speed is a devicetree property so CAN0 keeps its 20 MHz | Bring-up measurement to confirm the arithmetic, not to discover the answer |
 | 23 | **Re-verify `V12_SENSE` on the new ADC** — same divider, different part | Repeat `CANary-HAT-Revisions.md:119`: 0.000 V no vehicle, ~12.68 V key-off, ~12.43 V KOEO |
@@ -1383,8 +1400,8 @@ The §13.5.3 placeholders are superseded. In the schematic:
 | U8 AVDD bulk / pin 9 / pin 30 / DVDD | C24 10 µF / C25 1 µF / C26 1 µF / C27 10 µF |
 | AVDD bleed (open item 30) | R18 10 kΩ |
 | CH0 `AIN_0GND` match | R19 18 kΩ |
-| CH1 MAP: pull-down / pull-up (DNF) / series / filter / match | R20 TBD / R21 / R22 1 kΩ / C28 / R23 1 kΩ |
-| CH2 IAT: pull-down (DNF) / NTC pull-up / series / filter / match | R24 / **R25 4.99 kΩ** (was "R19") / R26 1 kΩ / C29 / R27 2.7 kΩ |
+| CH1 `SENS_V1` (voltage port): pull-down / pull-up (DNF) / series / filter / match | **R20 47 kΩ** / R21 / R22 1 kΩ / C28 / R23 1 kΩ |
+| CH2 `SENS_R1` (resistive port): pull-down (DNF) / pull-up / series / filter / match | R24 / **R25 4.99 kΩ** (was "R19") / R26 1 kΩ / C29 / R27 2.7 kΩ |
 | CH3 5V_SENS: series / filter / match | R28 1 kΩ / C30 / R29 1 kΩ |
 | CH4 FUEL: pull-downs / series + / series − / differential cap | R30, R31 100 kΩ / R32 1 kΩ / R33 1 kΩ / C31 |
 | CH5–CH7 spares | TP1–TP3, R34–R42 |
@@ -1432,9 +1449,9 @@ The §13.5.3 placeholders are superseded. In the schematic:
 - **SPI: U8 is mode 1** (CPOL 0, CPHA 1; the datasheet references falling
   edges, and the mainline `ti-ads8688` driver uses `SPI_MODE_1`); U3 stays
   mode 0. Both SDOs tri-state with CS high, so MISO is shared cleanly.
-- **Values that cannot be ordered yet carry `TBD` on purpose**: R20 (open
-  item 20). R25 4.99 kΩ and R27 2.7 kΩ are fitted but **provisional** until
-  the NTC is metered (open items 1, 32).
+- **Sensor-port defaults are generic, not TMAP-specific** (§13.5.11): R20
+  47 kΩ, R25 4.99 kΩ, R27 2.7 kΩ. The remaining `TBD` values (R21, R24, the
+  spare pull-ups) are all on DNF pads.
 
 #### Part count, and how to trim it
 
@@ -1464,3 +1481,49 @@ between rows, 2.54 mm stagger, 1.3 mm drill) comes from a third-party Eagle
 library. §13.5.5's option table compared widths only. The choice is open
 item 34; the footprint is drawn once the part is chosen, from the maker's
 drilling drawing.
+
+### 13.5.11 Generic sensor ports — 2026-10-12
+
+**Decision (operator, 2026-10-12): CH1 and CH2 are generic sensor ports, not
+TMAP inputs** ("option C" of three). The circuit was already the generic
+automotive input: pull-up and pull-down pads on the terminal side, a series
+resistor, a filter, an `AIN_nGND` match and a clamp. What made it
+TMAP-specific was only the populated values and the names. Now:
+
+| Port | Net / J2 pin | Accepts | Default population | Reconfigure by |
+|---|---|---|---|---|
+| **V1** voltage | `SENS_V1`, pin 8 (U8 CH1) | Any *driven* output: 0–5 V, 0–3.3 V, or 0–10 V (U8's range is per channel in software; inputs survive ±20 V DC) | R20 47 kΩ pull-down fitted; R21 pull-up DNF | Open-collector / switch-to-ground sensor: fit R21 to `5V_SENS`, remove R20 |
+| **R1** resistive | `SENS_R1`, pin 9 (U8 CH2) | Two-wire resistive sensors returned to `SENS_GND`: automotive NTCs (~2–5 kΩ at 20 °C) as fitted | R25 4.99 kΩ pull-up to `5V_SENS` fitted; R24 pull-down DNF | Low-ohm sender (fuel level 30–240 Ω): swap R25 to ~100–200 Ω. Use as a second voltage port: remove R25, fit R24 |
+
+On the dev truck the Bosch TMAP occupies both: pressure on V1, NTC on R1.
+Nothing in the hardware knows that any more. It is configuration (§13.5.8).
+
+**Why R20 is 47 kΩ.** A pull-down well below U8's 1 MΩ input does two jobs
+for any voltage sensor. With the sensor unplugged, the node sits at ~4 % of
+U8's internal bias voltage, near 0 V and below any sensor's valid window,
+instead of reading the bias as plausible data (SBAS680 §8.3.1). And it is a
+load every automotive driver is rated for: Bosch allows ≥ 10 kΩ, and it costs
+0.1 mA at 5 V. This closes open item 20 without the TMAP's datasheet.
+
+**Why not one port that does both.** A resistive sensor needs a pull-up whose
+value matters, and a fitted pull-up loads a voltage sensor. Doing both on one
+channel needs a choice somewhere. Option A was solder pads only, with no
+defaults. Option B was a software-switched pull-up per channel: an analog
+switch that survives a 12 V harness fault plus a control line, about 2–3 parts
+per port. B is the upgrade path if sensor types get swapped often without a
+soldering iron. It has one real advantage, that software knows the state. The
+EEPROM population record (§13.5.8) recovers that for the pad approach.
+
+**Limits that are not about resistors:**
+
+- **Supply is 5 V only.** `5V_SENS` is U9. A sensor that needs a 3.3 V
+  supply has two routes. U9's adjustable sibling TPS7A1601 sets the output
+  with two resistors, but that gives one voltage per board. A second LDO
+  footprint, left DNF, gives both rails. `+3V3` on the harness stays ruled
+  out: that is the Pi's rail, and a chafe would take the Pi down.
+- **Ports need terminals.** Only V1 and R1 reach J2; CH5–CH7 go to test
+  pads because the six upper positions are full. More user-pluggable ports
+  depend on the J2 part (open item 34). If it changes to a denser or
+  pluggable connector, bring the spares out with the same pad set.
+- **Frequency or digital outputs** (flex-fuel, some MAFs, speed sensors) are
+  not ADC inputs and are out of scope for these ports.

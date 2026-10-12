@@ -6000,7 +6000,7 @@
 				(justify right)
 			)
 		)
-		(pin "MAP" passive
+		(pin "SENS_V1" passive
 			(at 237.49 137.16 0)
 			(uuid "63f2740c-8a20-449d-b91b-3531f824f709")
 			(effects
@@ -6010,7 +6010,7 @@
 				(justify right)
 			)
 		)
-		(pin "IAT" passive
+		(pin "SENS_R1" passive
 			(at 237.49 139.7 0)
 			(uuid "7fa78018-e270-4005-9976-dfea5f302d57")
 			(effects
@@ -6098,7 +6098,7 @@
 		)
 		(uuid "555afb44-986e-4fae-a7b4-b66aa6b63028")
 	)
-	(label "MAP"
+	(label "SENS_V1"
 		(at 242.57 137.16 0)
 		(effects
 			(font
@@ -6118,7 +6118,7 @@
 		)
 		(uuid "d1e72ef5-fe46-4543-9300-5e4c292fb4ca")
 	)
-	(label "IAT"
+	(label "SENS_R1"
 		(at 242.57 139.7 0)
 		(effects
 			(font
@@ -6307,7 +6307,7 @@
 				(justify right)
 			)
 		)
-		(pin "MAP" passive
+		(pin "SENS_V1" passive
 			(at 151.13 157.48 0)
 			(uuid "66605530-ee62-452f-9f68-c27448d16897")
 			(effects
@@ -6317,7 +6317,7 @@
 				(justify right)
 			)
 		)
-		(pin "IAT" passive
+		(pin "SENS_R1" passive
 			(at 151.13 160.02 0)
 			(uuid "3559f84f-d5e6-4450-9117-46bb93ceaa32")
 			(effects
@@ -6485,7 +6485,7 @@
 		)
 		(uuid "46eaa83c-4157-4271-ab37-9a66c4377b26")
 	)
-	(label "MAP"
+	(label "SENS_V1"
 		(at 156.21 157.48 0)
 		(effects
 			(font
@@ -6505,7 +6505,7 @@
 		)
 		(uuid "54aa8790-9b55-4a59-ac99-e37618e49e11")
 	)
-	(label "IAT"
+	(label "SENS_R1"
 		(at 156.21 160.02 0)
 		(effects
 			(font

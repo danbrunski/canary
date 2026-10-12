@@ -4365,7 +4365,7 @@
 		)
 		(uuid "7579b268-8505-4155-9f0a-71a9894056ba")
 	)
-	(hierarchical_label "MAP"
+	(hierarchical_label "SENS_V1"
 		(shape passive)
 		(at 180.34 35.56 180)
 		(effects
@@ -4376,7 +4376,7 @@
 		)
 		(uuid "50030531-206b-4a70-936d-cb0b1ed2a9d5")
 	)
-	(label "MAP"
+	(label "SENS_V1"
 		(at 187.96 35.56 0)
 		(effects
 			(font
@@ -4396,7 +4396,7 @@
 		)
 		(uuid "87e6be57-2914-48ad-9488-0bfc8a6d16e7")
 	)
-	(hierarchical_label "IAT"
+	(hierarchical_label "SENS_R1"
 		(shape passive)
 		(at 180.34 40.64 180)
 		(effects
@@ -4407,7 +4407,7 @@
 		)
 		(uuid "c89921bf-52e5-4e7a-951d-2a953cf45e4d")
 	)
-	(label "IAT"
+	(label "SENS_R1"
 		(at 187.96 40.64 0)
 		(effects
 			(font
@@ -4609,7 +4609,7 @@
 		)
 		(uuid "bd27a007-ca85-418b-8eb0-8f7f96ba46d0")
 	)
-	(label "MAP"
+	(label "SENS_V1"
 		(at 208.28 44.45 180)
 		(effects
 			(font
@@ -4629,7 +4629,7 @@
 		)
 		(uuid "7570d303-3a38-49b3-af22-98fe88a191d4")
 	)
-	(label "IAT"
+	(label "SENS_R1"
 		(at 231.14 44.45 0)
 		(effects
 			(font
@@ -6388,7 +6388,7 @@
 		)
 		(uuid "4f4c569c-bf95-471b-a6e6-7009867213c0")
 	)
-	(label "MAP_ADC"
+	(label "SENS_V1_ADC"
 		(at 304.8 147.32 180)
 		(effects
 			(font
@@ -6448,7 +6448,7 @@
 		)
 		(uuid "41499293-246d-4a01-b1e1-4b7e29cbd9c8")
 	)
-	(label "IAT_ADC"
+	(label "SENS_R1_ADC"
 		(at 304.8 152.4 180)
 		(effects
 			(font
@@ -9871,7 +9871,7 @@
 			)
 		)
 	)
-	(text "CH1  MAP: Bosch TMAP pressure, J2 pin 8"
+	(text "CH1  SENS_V1: generic VOLTAGE-output sensor port, J2 pin 8. Any driven 0-5 V / 0-3.3 V / 0-10 V output (U8 range set per channel in software). Dev truck: Bosch TMAP pressure."
 		(exclude_from_sim no)
 		(at 25 133 0)
 		(effects
@@ -9904,7 +9904,7 @@
 				(justify left)
 			)
 		)
-		(property "Value" "TBD"
+		(property "Value" "47k"
 			(at 39.37 146.05 0)
 			(show_name no)
 			(do_not_autoplace no)
@@ -9960,7 +9960,55 @@
 				(justify left)
 			)
 		)
-		(property "Note" "MAP pull-down, REQUIRED: Bosch TMAP output load >= 10 kohm, and without it an open signal wire leaves U8's input floating, which reads an internal bias voltage that looks like data (SBAS680 8.3.1). VALUE TBD: open item 20 (sensor datasheet / pinout, open item 1)."
+		(property "Note" "SENS_V1 pull-down, fitted (generic voltage port, 13.5.11). Two jobs: (1) open-wire detection - with the sensor unplugged U8's 1 Mohm input would float to an internal bias voltage that reads as data (SBAS680 8.3.1); 47k pulls it to ~4% of that bias, near 0 V, below any sensor's valid window. (2) A defined load inside every automotive driver's rating (Bosch TMAP: >= 10 kohm). 0.1 mA at 5 V. Closes open item 20."
+			(at 36.83 144.78 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify left)
+			)
+		)
+		(property "Manufacturer" "Yageo"
+			(at 36.83 144.78 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify left)
+			)
+		)
+		(property "MPN" "RC0603FR-0747KL"
+			(at 36.83 144.78 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify left)
+			)
+		)
+		(property "Power" "0.1W"
+			(at 36.83 144.78 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify left)
+			)
+		)
+		(property "Tolerance" "1%"
 			(at 36.83 144.78 0)
 			(hide yes)
 			(show_name no)
@@ -9997,7 +10045,7 @@
 		)
 		(uuid "6b1727ca-8150-4073-9ca6-2fc02cd9b881")
 	)
-	(label "MAP"
+	(label "SENS_V1"
 		(at 36.83 138.43 90)
 		(effects
 			(font
@@ -10173,7 +10221,7 @@
 				(justify left)
 			)
 		)
-		(property "Note" "DNF pad. DNF configuration pad (13.5.3 item 8)."
+		(property "Note" "DNF pad: SENS_V1 pull-up to 5V_SENS, for an open-collector / switch-to-ground sensor on the voltage port (13.5.11). Fit it and remove R20, or the two form a divider."
 			(at 54.61 144.78 0)
 			(hide yes)
 			(show_name no)
@@ -10230,7 +10278,7 @@
 		)
 		(uuid "29e452e4-bf2b-449a-9ac6-a18176734c3a")
 	)
-	(label "MAP"
+	(label "SENS_V1"
 		(at 54.61 151.13 270)
 		(effects
 			(font
@@ -10403,7 +10451,7 @@
 		)
 		(uuid "3897133b-ca83-45c7-8155-2e679ee0fb81")
 	)
-	(label "MAP"
+	(label "SENS_V1"
 		(at 73.66 144.78 180)
 		(effects
 			(font
@@ -10423,7 +10471,7 @@
 		)
 		(uuid "ae244f4b-f771-4c65-8a62-79dd2c865943")
 	)
-	(label "MAP_ADC"
+	(label "SENS_V1_ADC"
 		(at 86.36 144.78 0)
 		(effects
 			(font
@@ -10608,7 +10656,7 @@
 		)
 		(uuid "6c555566-262c-4880-a874-2f553a581c9e")
 	)
-	(label "MAP_ADC"
+	(label "SENS_V1_ADC"
 		(at 105.41 138.43 90)
 		(effects
 			(font
@@ -10967,7 +11015,7 @@
 			)
 		)
 	)
-	(text "CH2  IAT: Bosch TMAP NTC, J2 pin 9"
+	(text "CH2  SENS_R1: generic RESISTIVE sensor port, J2 pin 9 (pull-up to 5V_SENS). Default suits automotive NTCs (~2-5 kohm at 20 C). Dev truck: Bosch TMAP NTC."
 		(exclude_from_sim no)
 		(at 25 160 0)
 		(effects
@@ -11056,7 +11104,7 @@
 				(justify left)
 			)
 		)
-		(property "Note" "DNF pad. DNF configuration pad (13.5.3 item 8)."
+		(property "Note" "DNF pad: SENS_R1 pull-down, for using the resistive port as a voltage port instead (then remove R25) (13.5.11)."
 			(at 36.83 171.45 0)
 			(hide yes)
 			(show_name no)
@@ -11093,7 +11141,7 @@
 		)
 		(uuid "c00990e1-097d-45f7-bb98-160d853d17bc")
 	)
-	(label "IAT"
+	(label "SENS_R1"
 		(at 36.83 165.1 90)
 		(effects
 			(font
@@ -11317,7 +11365,7 @@
 				(justify left)
 			)
 		)
-		(property "Note" "NTC pull-up to 5V_SENS (ratiometric with CH3). 4.99k is PROVISIONAL: <= 1.0 mA NTC current, ~1.6 V at 20 C. Final value after metering the NTC (open item 1)."
+		(property "Note" "SENS_R1 pull-up to 5V_SENS (ratiometric with CH3), the resistive port's default (13.5.11). 4.99k suits automotive NTCs (~2-5 kohm at 20 C, Bosch TMAP 2.5k): <= 1.0 mA sensor current, mid-range at 20 C. A low-ohm sender (fuel level, 30-240 ohm) needs ~100-200 ohm here instead. Software must know the fitted value: it is part of the resistance solve."
 			(at 54.61 171.45 0)
 			(hide yes)
 			(show_name no)
@@ -11374,7 +11422,7 @@
 		)
 		(uuid "bae803de-bc15-4f64-9fb8-e2ca77d0226e")
 	)
-	(label "IAT"
+	(label "SENS_R1"
 		(at 54.61 177.8 270)
 		(effects
 			(font
@@ -11547,7 +11595,7 @@
 		)
 		(uuid "d15454f5-9b73-4d6f-a999-9e65cdfe601e")
 	)
-	(label "IAT"
+	(label "SENS_R1"
 		(at 73.66 171.45 180)
 		(effects
 			(font
@@ -11567,7 +11615,7 @@
 		)
 		(uuid "02294191-44b5-445b-8a27-03a3a4da9a61")
 	)
-	(label "IAT_ADC"
+	(label "SENS_R1_ADC"
 		(at 86.36 171.45 0)
 		(effects
 			(font
@@ -11752,7 +11800,7 @@
 		)
 		(uuid "ae50f4e9-50dd-4a95-92bd-23083a235aae")
 	)
-	(label "IAT_ADC"
+	(label "SENS_R1_ADC"
 		(at 105.41 165.1 90)
 		(effects
 			(font
@@ -11976,7 +12024,7 @@
 				(justify left)
 			)
 		)
-		(property "Note" "AIN_2GND match: R26 1k + (R25 || NTC ~1.7k at 20 C) = ~2.7k. PROVISIONAL with R25 (open item 32)."
+		(property "Note" "AIN_2GND match: R26 1k + (R25 || sensor) ~ 2.7k for a ~2.5 kohm NTC at 20 C. A default, not a calibration: the exact match depends on the sensor and is worth ~6 mV (~0.1 C) at most (13.5.3 item 7)."
 			(at 124.46 171.45 0)
 			(hide yes)
 			(show_name no)
@@ -12111,7 +12159,7 @@
 			)
 		)
 	)
-	(text "CH3  5V_SENS sense: ratiometric reference for CH1/CH2. 5V_SENS is a harness wire too (J2 pin 7), so it gets the same series protection."
+	(text "CH3  5V_SENS sense: ratiometric reference for SENS_V1/SENS_R1. 5V_SENS is a harness wire too (J2 pin 7), so it gets the same series protection."
 		(exclude_from_sim no)
 		(at 25 187 0)
 		(effects
