@@ -783,3 +783,15 @@ measurement in hand.
     (`10000 < 2000`).
   - **Left exposed:** a machine ~4× faster than this one per row. The bound
     is still a time budget measured in rows.
+- [ ] **T01.25 `tests/test_multi_did_batching.py::test_active_scheduler_batches_known_width_dids_with_full_provenance`
+  saw no DID batch within its 0.2 s wall-clock deadline under load.**
+  - **Seen** 2026-10-12 in the push gate for `391c27a` (T01.24, which touched
+    no collection code), parallel run at load average ~8.8:
+    `assert bus.did_batches > 0` → `0 > 0`. It passed serially (FLAKY UNDER
+    LOAD). The failed log is kept in
+    `.git/ci-gate/failed-logs/20261012T152353Z-391c27a-pytest.log`.
+  - **Likely cause:** T01.16's shape in a sibling test. `run_can_obd_loop`
+    gets `deadline_monotonic=time.monotonic() + 0.2` of real time, so under
+    load the scheduler can reach the deadline before its first DID batch. Fix
+    it the T01.16 way, judging by work done rather than wall time. Not
+    investigated further yet.
