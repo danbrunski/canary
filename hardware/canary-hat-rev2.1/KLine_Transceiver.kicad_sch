@@ -2000,12 +2000,6 @@
 		(uuid "6b460ad6-5972-412c-b83e-b67d42460860")
 	)
 	(junction
-		(at 160.02 48.26)
-		(diameter 0)
-		(color 0 0 0 0)
-		(uuid "aebe1615-e8b6-4072-ba91-3ab6731e453c")
-	)
-	(junction
 		(at 99.06 88.9)
 		(diameter 0)
 		(color 0 0 0 0)
@@ -2028,6 +2022,12 @@
 		(diameter 0)
 		(color 0 0 0 0)
 		(uuid "fa15d8f8-ecee-4713-b3a5-ebc0264ccd73")
+	)
+	(junction
+		(at 160.02 48.26)
+		(diameter 0)
+		(color 0 0 0 0)
+		(uuid "ffce81d1-e618-4fd8-adf6-48de6d1d739f")
 	)
 	(no_connect
 		(at 161.29 88.9)
@@ -2056,6 +2056,16 @@
 			(type default)
 		)
 		(uuid "06ad22e1-5f3d-4982-bb25-603119e05442")
+	)
+	(wire
+		(pts
+			(xy 160.02 48.26) (xy 186.69 48.26)
+		)
+		(stroke
+			(width 0)
+			(type default)
+		)
+		(uuid "1983d6ef-62af-4c5a-8e49-c6b8929f36a7")
 	)
 	(wire
 		(pts
@@ -2359,6 +2369,16 @@
 	)
 	(wire
 		(pts
+			(xy 186.69 48.26) (xy 186.69 44.45)
+		)
+		(stroke
+			(width 0)
+			(type default)
+		)
+		(uuid "d6a8570a-d206-4ccc-8984-9203f4b24e3c")
+	)
+	(wire
+		(pts
 			(xy 99.06 110.49) (xy 99.06 111.76)
 		)
 		(stroke
@@ -2369,17 +2389,7 @@
 	)
 	(wire
 		(pts
-			(xy 181.61 30.48) (xy 184.15 30.48)
-		)
-		(stroke
-			(width 0)
-			(type default)
-		)
-		(uuid "dbec1baa-9298-4a0a-b9f9-6881ac32af3b")
-	)
-	(wire
-		(pts
-			(xy 173.99 30.48) (xy 171.45 30.48)
+			(xy 186.69 36.83) (xy 186.69 34.29)
 		)
 		(stroke
 			(width 0)
@@ -2418,24 +2428,14 @@
 		(uuid "0cb10504-cde2-422f-8be8-a367a087922c")
 	)
 	(label "Q2_GATE"
-		(at 184.15 30.48 0)
+		(at 163.83 48.26 0)
 		(effects
 			(font
 				(size 1.27 1.27)
 			)
 			(justify left bottom)
 		)
-		(uuid "1e30a9c3-a482-44e7-9c2a-bdd63db62e35")
-	)
-	(label "Q2_GATE"
-		(at 160.02 45.72 90)
-		(effects
-			(font
-				(size 1.27 1.27)
-			)
-			(justify left bottom)
-		)
-		(uuid "1f5633c6-cfd9-4e60-93a5-c614ab6a035f")
+		(uuid "b7b5a55a-3e34-44d5-b2e8-6e7f6ef9a3a7")
 	)
 	(hierarchical_label "GPIO26_EN"
 		(shape input)
@@ -2684,7 +2684,7 @@
 	)
 	(symbol
 		(lib_id "power:+12V")
-		(at 171.45 30.48 90)
+		(at 186.69 34.29 0)
 		(unit 1)
 		(body_style 1)
 		(exclude_from_sim no)
@@ -2694,7 +2694,7 @@
 		(dnp no)
 		(uuid "188c7690-f180-4c81-be71-6e5e335ff30d")
 		(property "Reference" "#PWR1201"
-			(at 173.99 29.21 0)
+			(at 187.96 36.83 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -2706,7 +2706,7 @@
 			)
 		)
 		(property "Value" "+12V"
-			(at 173.99 33.02 0)
+			(at 186.436 29.21 0)
 			(show_name no)
 			(do_not_autoplace no)
 			(effects
@@ -2716,7 +2716,7 @@
 			)
 		)
 		(property "Footprint" ""
-			(at 171.45 30.48 0)
+			(at 186.69 34.29 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -2727,7 +2727,7 @@
 			)
 		)
 		(property "Datasheet" ""
-			(at 171.45 30.48 0)
+			(at 186.69 34.29 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -2738,7 +2738,7 @@
 			)
 		)
 		(property "Description" ""
-			(at 171.45 30.48 0)
+			(at 186.69 34.29 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -4730,7 +4730,7 @@
 	)
 	(symbol
 		(lib_id "Device:D_Zener")
-		(at 177.8 30.48 0)
+		(at 186.69 40.64 270)
 		(unit 1)
 		(body_style 1)
 		(exclude_from_sim no)
@@ -4740,7 +4740,7 @@
 		(dnp no)
 		(uuid "c5543238-4b24-48a2-b52b-50479821c6bc")
 		(property "Reference" "D11"
-			(at 180.34 29.21 0)
+			(at 192.786 39.116 0)
 			(show_name no)
 			(do_not_autoplace no)
 			(effects
@@ -4751,7 +4751,7 @@
 			)
 		)
 		(property "Value" "BZT52C15"
-			(at 180.34 31.75 0)
+			(at 190.246 39.116 0)
 			(show_name no)
 			(do_not_autoplace no)
 			(effects
@@ -4762,7 +4762,7 @@
 			)
 		)
 		(property "Footprint" "Diode_SMD:D_SOD-123"
-			(at 177.8 30.48 0)
+			(at 186.69 40.64 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -4773,7 +4773,7 @@
 			)
 		)
 		(property "Datasheet" ""
-			(at 177.8 30.48 0)
+			(at 186.69 40.64 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -4784,7 +4784,7 @@
 			)
 		)
 		(property "Description" "Zener diode"
-			(at 177.8 30.48 0)
+			(at 186.69 40.64 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -4795,7 +4795,7 @@
 			)
 		)
 		(property "MPN" "BZT52C15"
-			(at 177.8 30.48 0)
+			(at 186.69 40.64 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -4807,7 +4807,7 @@
 			)
 		)
 		(property "Quote" "Rev 2.1: not yet quoted."
-			(at 177.8 30.48 0)
+			(at 186.69 40.64 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -4819,7 +4819,7 @@
 			)
 		)
 		(property "Note" "Q2 (BSS84) gate-source clamp, cathode to +12V (source), anode to the gate (review M2, 2026-10-12). With Q3 on, R13/R14 put -0.91 x V12 on Vgs: -21.8 V at a 24 V jump start and -35 V at D1's 38.9 V clamp, past BSS84's +/-20 V. 15 V clamp; worst case (38.9-15)/10k = 2.4 mA, 36 mW. Same part and reason as D3 on Q1."
-			(at 177.8 30.48 0)
+			(at 186.69 40.64 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)

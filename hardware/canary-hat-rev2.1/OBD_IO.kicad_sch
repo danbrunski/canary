@@ -2693,7 +2693,27 @@
 	)
 	(wire
 		(pts
-			(xy 40.64 152.4) (xy 45.72 152.4)
+			(xy 127 99.06) (xy 96.52 99.06)
+		)
+		(stroke
+			(width 0)
+			(type default)
+		)
+		(uuid "02334dac-8641-4449-b009-b9c1e2f5d50b")
+	)
+	(wire
+		(pts
+			(xy 127 115.57) (xy 127 99.06)
+		)
+		(stroke
+			(width 0)
+			(type default)
+		)
+		(uuid "030889d7-1dd5-41fa-89d4-40d0f6af5fe0")
+	)
+	(wire
+		(pts
+			(xy 96.52 109.22) (xy 101.6 109.22)
 		)
 		(stroke
 			(width 0)
@@ -2703,7 +2723,7 @@
 	)
 	(wire
 		(pts
-			(xy 40.64 129.54) (xy 45.72 129.54)
+			(xy 96.52 86.36) (xy 135.89 86.36)
 		)
 		(stroke
 			(width 0)
@@ -2713,7 +2733,7 @@
 	)
 	(wire
 		(pts
-			(xy 40.64 137.16) (xy 45.72 137.16)
+			(xy 96.52 93.98) (xy 101.6 93.98)
 		)
 		(stroke
 			(width 0)
@@ -2723,7 +2743,7 @@
 	)
 	(wire
 		(pts
-			(xy 58.42 127) (xy 58.42 158.75)
+			(xy 143.51 83.82) (xy 143.51 115.57)
 		)
 		(stroke
 			(width 0)
@@ -2733,7 +2753,17 @@
 	)
 	(wire
 		(pts
-			(xy 40.64 127) (xy 58.42 127)
+			(xy 96.52 88.9) (xy 133.35 88.9)
+		)
+		(stroke
+			(width 0)
+			(type default)
+		)
+		(uuid "2a979eb2-c27f-4d1f-84a0-4b0c75bf4e24")
+	)
+	(wire
+		(pts
+			(xy 96.52 83.82) (xy 143.51 83.82)
 		)
 		(stroke
 			(width 0)
@@ -2743,7 +2773,7 @@
 	)
 	(wire
 		(pts
-			(xy 40.64 134.62) (xy 45.72 134.62)
+			(xy 96.52 91.44) (xy 101.6 91.44)
 		)
 		(stroke
 			(width 0)
@@ -2753,7 +2783,7 @@
 	)
 	(wire
 		(pts
-			(xy 40.64 147.32) (xy 45.72 147.32)
+			(xy 96.52 104.14) (xy 101.6 104.14)
 		)
 		(stroke
 			(width 0)
@@ -2763,7 +2793,7 @@
 	)
 	(wire
 		(pts
-			(xy 40.64 154.94) (xy 45.72 154.94)
+			(xy 96.52 111.76) (xy 101.6 111.76)
 		)
 		(stroke
 			(width 0)
@@ -2773,7 +2803,7 @@
 	)
 	(wire
 		(pts
-			(xy 40.64 139.7) (xy 45.72 139.7)
+			(xy 96.52 96.52) (xy 101.6 96.52)
 		)
 		(stroke
 			(width 0)
@@ -2783,27 +2813,17 @@
 	)
 	(wire
 		(pts
-			(xy 40.64 132.08) (xy 45.72 132.08)
+			(xy 133.35 115.57) (xy 133.35 88.9)
 		)
 		(stroke
 			(width 0)
 			(type default)
 		)
-		(uuid "e97f683c-90a3-49b4-afab-0a840835f50d")
+		(uuid "e34c18b7-2b37-43bb-8bd0-4e2e5f8fd882")
 	)
 	(wire
 		(pts
-			(xy 40.64 142.24) (xy 45.72 142.24)
-		)
-		(stroke
-			(width 0)
-			(type default)
-		)
-		(uuid "ed2daefa-8b0a-4ed4-8cac-9d52055d79d4")
-	)
-	(wire
-		(pts
-			(xy 40.64 149.86) (xy 45.72 149.86)
+			(xy 96.52 106.68) (xy 101.6 106.68)
 		)
 		(stroke
 			(width 0)
@@ -2813,7 +2833,7 @@
 	)
 	(wire
 		(pts
-			(xy 40.64 124.46) (xy 62.23 124.46)
+			(xy 96.52 81.28) (xy 143.51 81.28)
 		)
 		(stroke
 			(width 0)
@@ -2823,7 +2843,7 @@
 	)
 	(wire
 		(pts
-			(xy 40.64 144.78) (xy 45.72 144.78)
+			(xy 96.52 101.6) (xy 101.6 101.6)
 		)
 		(stroke
 			(width 0)
@@ -2832,7 +2852,7 @@
 		(uuid "f8cdc6a5-fb71-4e79-9793-325981be077a")
 	)
 	(label "+12V_RAW"
-		(at 49.53 124.46 0)
+		(at 105.41 81.28 0)
 		(effects
 			(font
 				(size 1.27 1.27)
@@ -2843,7 +2863,7 @@
 	)
 	(hierarchical_label "SENS_V1"
 		(shape passive)
-		(at 45.72 144.78 0)
+		(at 101.6 101.6 0)
 		(effects
 			(font
 				(size 1.27 1.27)
@@ -2854,7 +2874,7 @@
 	)
 	(hierarchical_label "+12V_RAW"
 		(shape output)
-		(at 62.23 124.46 0)
+		(at 143.51 81.28 0)
 		(effects
 			(font
 				(size 1.27 1.27)
@@ -2865,7 +2885,7 @@
 	)
 	(hierarchical_label "SENS_R1"
 		(shape passive)
-		(at 45.72 147.32 0)
+		(at 101.6 104.14 0)
 		(effects
 			(font
 				(size 1.27 1.27)
@@ -2876,7 +2896,7 @@
 	)
 	(hierarchical_label "FUEL_P"
 		(shape passive)
-		(at 45.72 154.94 0)
+		(at 101.6 111.76 0)
 		(effects
 			(font
 				(size 1.27 1.27)
@@ -2887,7 +2907,7 @@
 	)
 	(hierarchical_label "FUEL_GND"
 		(shape passive)
-		(at 45.72 152.4 0)
+		(at 101.6 109.22 0)
 		(effects
 			(font
 				(size 1.27 1.27)
@@ -2898,7 +2918,7 @@
 	)
 	(hierarchical_label "5V_SENS"
 		(shape input)
-		(at 45.72 149.86 0)
+		(at 101.6 106.68 0)
 		(effects
 			(font
 				(size 1.27 1.27)
@@ -2909,7 +2929,7 @@
 	)
 	(hierarchical_label "CANH_RAW"
 		(shape bidirectional)
-		(at 45.72 134.62 0)
+		(at 101.6 91.44 0)
 		(effects
 			(font
 				(size 1.27 1.27)
@@ -2920,7 +2940,7 @@
 	)
 	(hierarchical_label "KLINE"
 		(shape output)
-		(at 45.72 139.7 0)
+		(at 101.6 96.52 0)
 		(effects
 			(font
 				(size 1.27 1.27)
@@ -2931,7 +2951,7 @@
 	)
 	(hierarchical_label "CANL_RAW"
 		(shape bidirectional)
-		(at 45.72 137.16 0)
+		(at 101.6 93.98 0)
 		(effects
 			(font
 				(size 1.27 1.27)
@@ -2942,7 +2962,7 @@
 	)
 	(symbol
 		(lib_id "power:+12V")
-		(at 45.72 129.54 270)
+		(at 135.89 86.36 270)
 		(unit 1)
 		(body_style 1)
 		(exclude_from_sim no)
@@ -2952,7 +2972,7 @@
 		(dnp no)
 		(uuid "5bb31ff4-b3a1-4d94-b670-43a896ba8a8a")
 		(property "Reference" "#PWR0201"
-			(at 48.26 128.27 0)
+			(at 138.43 85.09 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -2964,7 +2984,7 @@
 			)
 		)
 		(property "Value" "+12V"
-			(at 48.26 132.08 0)
+			(at 140.716 87.376 0)
 			(show_name no)
 			(do_not_autoplace no)
 			(effects
@@ -2974,7 +2994,7 @@
 			)
 		)
 		(property "Footprint" ""
-			(at 45.72 129.54 0)
+			(at 135.89 86.36 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -2985,7 +3005,7 @@
 			)
 		)
 		(property "Datasheet" ""
-			(at 45.72 129.54 0)
+			(at 135.89 86.36 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -2996,7 +3016,7 @@
 			)
 		)
 		(property "Description" ""
-			(at 45.72 129.54 0)
+			(at 135.89 86.36 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -3020,7 +3040,7 @@
 	)
 	(symbol
 		(lib_id "power:GND")
-		(at 58.42 158.75 0)
+		(at 143.51 115.57 0)
 		(unit 1)
 		(body_style 1)
 		(exclude_from_sim no)
@@ -3031,7 +3051,7 @@
 		(fields_autoplaced yes)
 		(uuid "67d2a37b-8b85-416e-92dd-84af5f1c1e64")
 		(property "Reference" "#PWR012"
-			(at 58.42 165.1 0)
+			(at 143.51 121.92 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -3042,7 +3062,7 @@
 			)
 		)
 		(property "Value" "GND"
-			(at 58.42 163.83 0)
+			(at 143.51 120.65 0)
 			(show_name no)
 			(do_not_autoplace no)
 			(effects
@@ -3052,7 +3072,7 @@
 			)
 		)
 		(property "Footprint" ""
-			(at 58.42 158.75 0)
+			(at 143.51 115.57 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -3063,7 +3083,7 @@
 			)
 		)
 		(property "Datasheet" ""
-			(at 58.42 158.75 0)
+			(at 143.51 115.57 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -3074,7 +3094,7 @@
 			)
 		)
 		(property "Description" "Power symbol creates a global label with name \"GND\" , ground"
-			(at 58.42 158.75 0)
+			(at 143.51 115.57 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -3098,7 +3118,7 @@
 	)
 	(symbol
 		(lib_id "power:GND")
-		(at 45.72 142.24 90)
+		(at 127 115.57 0)
 		(unit 1)
 		(body_style 1)
 		(exclude_from_sim no)
@@ -3108,7 +3128,7 @@
 		(dnp no)
 		(uuid "69c7ab24-28f1-421f-8acf-10889ba8be39")
 		(property "Reference" "#PWR0203"
-			(at 48.26 140.97 0)
+			(at 128.27 118.11 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -3120,7 +3140,7 @@
 			)
 		)
 		(property "Value" "GND"
-			(at 48.26 144.78 0)
+			(at 124.46 118.11 0)
 			(show_name no)
 			(do_not_autoplace no)
 			(effects
@@ -3130,7 +3150,7 @@
 			)
 		)
 		(property "Footprint" ""
-			(at 45.72 142.24 0)
+			(at 127 115.57 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -3141,7 +3161,7 @@
 			)
 		)
 		(property "Datasheet" ""
-			(at 45.72 142.24 0)
+			(at 127 115.57 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -3152,7 +3172,7 @@
 			)
 		)
 		(property "Description" ""
-			(at 45.72 142.24 0)
+			(at 127 115.57 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -3176,7 +3196,7 @@
 	)
 	(symbol
 		(lib_id "Connector:Screw_Terminal_01x13")
-		(at 35.56 139.7 0)
+		(at 91.44 96.52 0)
 		(mirror y)
 		(unit 1)
 		(body_style 1)
@@ -3187,7 +3207,7 @@
 		(dnp no)
 		(uuid "a929111c-f6ef-46fc-8319-43bdea26cfef")
 		(property "Reference" "J2"
-			(at 35.56 118.11 0)
+			(at 91.44 74.93 0)
 			(show_name no)
 			(do_not_autoplace no)
 			(effects
@@ -3197,7 +3217,7 @@
 			)
 		)
 		(property "Value" "PT 1,5/13-3,5-H"
-			(at 34.036 120.396 0)
+			(at 89.916 77.216 0)
 			(show_name no)
 			(do_not_autoplace no)
 			(effects
@@ -3207,7 +3227,7 @@
 			)
 		)
 		(property "Footprint" "TerminalBlock_Phoenix:TerminalBlock_Phoenix_PT-1,5-13-3.5-H_1x13_P3.50mm_Horizontal"
-			(at 35.56 129.54 0)
+			(at 91.44 86.36 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -3218,7 +3238,7 @@
 			)
 		)
 		(property "Datasheet" ""
-			(at 35.56 129.54 0)
+			(at 91.44 86.36 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -3229,7 +3249,7 @@
 			)
 		)
 		(property "Description" "Phoenix Contact PT 1,5/13-3,5-H, 13-position 3.5 mm screw terminal block (screw connection with wire protector)"
-			(at 35.56 129.54 0)
+			(at 91.44 86.36 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -3240,7 +3260,7 @@
 			)
 		)
 		(property "Note" "Vehicle + sensor harness, one 13-way block (rev 2.1 folds rev 2.0's J3 in and drops OBD pin 5). 1 +12V_RAW (OBD 16, 18 AWG) 2 GND chassis (OBD 4, 18 AWG) 3 +12V protected out to X1202 (18 AWG) 4 GND out to X1202 (18 AWG) 5 CANH 6 CANL 7 KLINE 8 SENS_GND 9 SENS_V1 10 SENS_R1 11 5V_SENS 12 FUEL_GND (AEM BROWN, analog minus) 13 FUEL_P (AEM WHITE). FERRULE ON EVERY WIRE: this family takes ferrules with plastic sleeve 0.25-0.75 mm2, so the four 18 AWG power wires (pins 1-4) use 0.75 mm2 collared ferrules (Phoenix AI 0,75, rated AWG 18) and 20 AWG a 0.5 mm2. The MKDS 1 / SMKDS 1 3.5 mm families were rejected: 0.5 mm2 ferrule maximum. A rev 2.0 harness does NOT fit this pin order."
-			(at 0 0 0)
+			(at 55.88 -43.18 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -3252,7 +3272,7 @@
 			)
 		)
 		(property "Manufacturer" "Phoenix Contact"
-			(at 35.56 118.11 0)
+			(at 91.44 74.93 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -3264,7 +3284,7 @@
 			)
 		)
 		(property "MPN" "PT 1,5/13-3,5-H"
-			(at 35.56 118.11 0)
+			(at 91.44 74.93 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -3276,7 +3296,7 @@
 			)
 		)
 		(property "Cost_5u" ""
-			(at 35.56 129.54 0)
+			(at 91.44 86.36 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -3287,7 +3307,7 @@
 			)
 		)
 		(property "Quote" "Rev 2.1: not yet quoted. Item number to confirm in Phoenix's catalog (family: 12-way is 1984714). Side-latching family: a 10-way + 3-way latched together has the same pitch and footprint if the 13-way is not stocked."
-			(at 35.56 129.54 0)
+			(at 91.44 86.36 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -3347,7 +3367,7 @@
 	)
 	(symbol
 		(lib_id "power:GND")
-		(at 45.72 132.08 90)
+		(at 133.35 115.57 0)
 		(unit 1)
 		(body_style 1)
 		(exclude_from_sim no)
@@ -3357,7 +3377,7 @@
 		(dnp no)
 		(uuid "ad6772a3-4382-4888-9af7-3985c7fcd23e")
 		(property "Reference" "#PWR0202"
-			(at 48.26 130.81 0)
+			(at 134.62 118.11 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -3369,7 +3389,7 @@
 			)
 		)
 		(property "Value" "GND"
-			(at 48.26 134.62 0)
+			(at 130.81 118.11 0)
 			(show_name no)
 			(do_not_autoplace no)
 			(effects
@@ -3379,7 +3399,7 @@
 			)
 		)
 		(property "Footprint" ""
-			(at 45.72 132.08 0)
+			(at 133.35 115.57 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -3390,7 +3410,7 @@
 			)
 		)
 		(property "Datasheet" ""
-			(at 45.72 132.08 0)
+			(at 133.35 115.57 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -3401,7 +3421,7 @@
 			)
 		)
 		(property "Description" ""
-			(at 45.72 132.08 0)
+			(at 133.35 115.57 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)

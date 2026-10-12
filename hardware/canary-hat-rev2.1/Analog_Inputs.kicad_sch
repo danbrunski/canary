@@ -2386,7 +2386,7 @@
 	)
 	(text "CH4  FUEL_P: AEM 30-0301 WHITE (analog +) -> AIN_4P, BROWN (analog -) -> AIN_4GND (13.5.3 item 7). FUEL_N_ADC is an INPUT pair leg, never poured to ground."
 		(exclude_from_sim no)
-		(at 25 214 0)
+		(at 20.066 189.992 0)
 		(effects
 			(font
 				(size 1.27 1.27)
@@ -2397,7 +2397,7 @@
 	)
 	(text "U8 ADS8688A on SPI0 CE1, SPI mode 1 (CPOL 0, CPHA 1; Linux ti-ads8688). SDO tri-states with CS high, so it shares MISO with U3.\nALARM (pin 35) unused. Internal 4.096 V reference: REFSEL low; REFIO/REFCAP start-up 15 ms."
 		(exclude_from_sim no)
-		(at 270 110 0)
+		(at 198.628 108.712 0)
 		(effects
 			(font
 				(size 1.27 1.27)
@@ -2419,7 +2419,7 @@
 	)
 	(text "CH1  SENS_V1: generic VOLTAGE-output sensor port, J2 pin 9. Any driven 0-5 V / 0-3.3 V / 0-10 V output (U8 range set per channel in software). Dev truck: Bosch TMAP pressure."
 		(exclude_from_sim no)
-		(at 25 133 0)
+		(at 18.542 62.484 0)
 		(effects
 			(font
 				(size 1.27 1.27)
@@ -2430,7 +2430,7 @@
 	)
 	(text "CH3  5V_SENS sense: ratiometric reference for SENS_V1/SENS_R1. 5V_SENS is a harness wire too (J2 pin 11), so it gets the same series protection."
 		(exclude_from_sim no)
-		(at 25 187 0)
+		(at 19.05 153.924 0)
 		(effects
 			(font
 				(size 1.27 1.27)
@@ -2441,7 +2441,7 @@
 	)
 	(text "CH5-CH7  spares to test pads, pulled to GND by default: a floating AIN_nP reads a plausible bias voltage (SBAS680 8.3.1). Driver refuses unmapped channels (open item 33)."
 		(exclude_from_sim no)
-		(at 25 250 0)
+		(at 24.13 244.348 0)
 		(effects
 			(font
 				(size 1.27 1.27)
@@ -2452,7 +2452,7 @@
 	)
 	(text "CH2  SENS_R1: generic RESISTIVE sensor port, J2 pin 10 (pull-up to 5V_SENS). Default suits automotive NTCs (~2-5 kohm at 20 C). Dev truck: Bosch TMAP NTC."
 		(exclude_from_sim no)
-		(at 25 160 0)
+		(at 19.812 106.426 0)
 		(effects
 			(font
 				(size 1.27 1.27)
@@ -2463,7 +2463,7 @@
 	)
 	(text "CH0  V12_SENSE: divider R11/R12 + C18 stay on OBD_IO (rev 2.0). Only the AIN_0GND match lives here."
 		(exclude_from_sim no)
-		(at 25 106 0)
+		(at 17.78 16.764 0)
 		(effects
 			(font
 				(size 1.27 1.27)
@@ -2484,12 +2484,12 @@
 		(uuid "c6bc81ef-a7d8-4e9f-ba33-f273624f4a7e")
 	)
 	(no_connect
-		(at 330.2 170.18)
+		(at 259.08 172.72)
 		(uuid "50ebb16c-3f50-446f-aa37-7520cb68940c")
 	)
 	(wire
 		(pts
-			(xy 83.82 236.22) (xy 86.36 236.22)
+			(xy 78.74 219.71) (xy 81.28 219.71)
 		)
 		(stroke
 			(width 0)
@@ -2509,7 +2509,7 @@
 	)
 	(wire
 		(pts
-			(xy 307.34 177.8) (xy 304.8 177.8)
+			(xy 236.22 180.34) (xy 233.68 180.34)
 		)
 		(stroke
 			(width 0)
@@ -2519,7 +2519,7 @@
 	)
 	(wire
 		(pts
-			(xy 83.82 171.45) (xy 86.36 171.45)
+			(xy 77.47 129.54) (xy 80.01 129.54)
 		)
 		(stroke
 			(width 0)
@@ -2539,7 +2539,7 @@
 	)
 	(wire
 		(pts
-			(xy 76.2 236.22) (xy 73.66 236.22)
+			(xy 71.12 219.71) (xy 68.58 219.71)
 		)
 		(stroke
 			(width 0)
@@ -2569,7 +2569,7 @@
 	)
 	(wire
 		(pts
-			(xy 124.46 140.97) (xy 124.46 138.43)
+			(xy 115.57 81.28) (xy 115.57 78.74)
 		)
 		(stroke
 			(width 0)
@@ -2579,7 +2579,7 @@
 	)
 	(wire
 		(pts
-			(xy 105.41 148.59) (xy 105.41 151.13)
+			(xy 96.52 88.9) (xy 96.52 91.44)
 		)
 		(stroke
 			(width 0)
@@ -2589,7 +2589,7 @@
 	)
 	(wire
 		(pts
-			(xy 36.83 222.25) (xy 36.83 219.71)
+			(xy 31.75 205.74) (xy 31.75 203.2)
 		)
 		(stroke
 			(width 0)
@@ -2609,7 +2609,7 @@
 	)
 	(wire
 		(pts
-			(xy 83.82 199.39) (xy 86.36 199.39)
+			(xy 78.74 171.45) (xy 81.28 171.45)
 		)
 		(stroke
 			(width 0)
@@ -2629,7 +2629,7 @@
 	)
 	(wire
 		(pts
-			(xy 332.74 142.24) (xy 335.28 142.24)
+			(xy 261.62 144.78) (xy 264.16 144.78)
 		)
 		(stroke
 			(width 0)
@@ -2639,7 +2639,7 @@
 	)
 	(wire
 		(pts
-			(xy 54.61 148.59) (xy 54.61 151.13)
+			(xy 45.72 88.9) (xy 45.72 91.44)
 		)
 		(stroke
 			(width 0)
@@ -2649,7 +2649,7 @@
 	)
 	(wire
 		(pts
-			(xy 139.7 114.3) (xy 139.7 111.76)
+			(xy 105.41 34.29) (xy 105.41 31.75)
 		)
 		(stroke
 			(width 0)
@@ -2679,7 +2679,7 @@
 	)
 	(wire
 		(pts
-			(xy 307.34 144.78) (xy 304.8 144.78)
+			(xy 236.22 147.32) (xy 233.68 147.32)
 		)
 		(stroke
 			(width 0)
@@ -2689,7 +2689,7 @@
 	)
 	(wire
 		(pts
-			(xy 76.2 144.78) (xy 73.66 144.78)
+			(xy 67.31 85.09) (xy 64.77 85.09)
 		)
 		(stroke
 			(width 0)
@@ -2709,7 +2709,7 @@
 	)
 	(wire
 		(pts
-			(xy 307.34 185.42) (xy 297.18 185.42)
+			(xy 236.22 187.96) (xy 226.06 187.96)
 		)
 		(stroke
 			(width 0)
@@ -2719,7 +2719,7 @@
 	)
 	(wire
 		(pts
-			(xy 332.74 147.32) (xy 335.28 147.32)
+			(xy 261.62 149.86) (xy 264.16 149.86)
 		)
 		(stroke
 			(width 0)
@@ -2729,7 +2729,7 @@
 	)
 	(wire
 		(pts
-			(xy 124.46 175.26) (xy 124.46 177.8)
+			(xy 118.11 133.35) (xy 118.11 135.89)
 		)
 		(stroke
 			(width 0)
@@ -2749,7 +2749,7 @@
 	)
 	(wire
 		(pts
-			(xy 307.34 152.4) (xy 304.8 152.4)
+			(xy 236.22 154.94) (xy 233.68 154.94)
 		)
 		(stroke
 			(width 0)
@@ -2759,7 +2759,7 @@
 	)
 	(wire
 		(pts
-			(xy 54.61 222.25) (xy 54.61 219.71)
+			(xy 49.53 205.74) (xy 49.53 203.2)
 		)
 		(stroke
 			(width 0)
@@ -2769,7 +2769,7 @@
 	)
 	(wire
 		(pts
-			(xy 332.74 152.4) (xy 335.28 152.4)
+			(xy 261.62 154.94) (xy 264.16 154.94)
 		)
 		(stroke
 			(width 0)
@@ -2779,7 +2779,7 @@
 	)
 	(wire
 		(pts
-			(xy 332.74 162.56) (xy 335.28 162.56)
+			(xy 261.62 165.1) (xy 264.16 165.1)
 		)
 		(stroke
 			(width 0)
@@ -2809,7 +2809,7 @@
 	)
 	(wire
 		(pts
-			(xy 307.34 147.32) (xy 304.8 147.32)
+			(xy 236.22 149.86) (xy 233.68 149.86)
 		)
 		(stroke
 			(width 0)
@@ -2829,7 +2829,7 @@
 	)
 	(wire
 		(pts
-			(xy 54.61 167.64) (xy 54.61 165.1)
+			(xy 48.26 125.73) (xy 48.26 123.19)
 		)
 		(stroke
 			(width 0)
@@ -2839,7 +2839,7 @@
 	)
 	(wire
 		(pts
-			(xy 76.2 199.39) (xy 73.66 199.39)
+			(xy 71.12 171.45) (xy 68.58 171.45)
 		)
 		(stroke
 			(width 0)
@@ -2849,7 +2849,7 @@
 	)
 	(wire
 		(pts
-			(xy 307.34 149.86) (xy 304.8 149.86)
+			(xy 236.22 152.4) (xy 233.68 152.4)
 		)
 		(stroke
 			(width 0)
@@ -2859,7 +2859,7 @@
 	)
 	(wire
 		(pts
-			(xy 124.46 195.58) (xy 124.46 193.04)
+			(xy 119.38 167.64) (xy 119.38 165.1)
 		)
 		(stroke
 			(width 0)
@@ -2869,7 +2869,7 @@
 	)
 	(wire
 		(pts
-			(xy 105.41 234.95) (xy 105.41 237.49)
+			(xy 100.33 218.44) (xy 100.33 220.98)
 		)
 		(stroke
 			(width 0)
@@ -2879,7 +2879,7 @@
 	)
 	(wire
 		(pts
-			(xy 307.34 154.94) (xy 304.8 154.94)
+			(xy 236.22 157.48) (xy 233.68 157.48)
 		)
 		(stroke
 			(width 0)
@@ -2889,7 +2889,7 @@
 	)
 	(wire
 		(pts
-			(xy 105.41 195.58) (xy 105.41 193.04)
+			(xy 100.33 167.64) (xy 100.33 165.1)
 		)
 		(stroke
 			(width 0)
@@ -2899,7 +2899,7 @@
 	)
 	(wire
 		(pts
-			(xy 332.74 157.48) (xy 335.28 157.48)
+			(xy 261.62 160.02) (xy 264.16 160.02)
 		)
 		(stroke
 			(width 0)
@@ -2909,7 +2909,7 @@
 	)
 	(wire
 		(pts
-			(xy 36.83 140.97) (xy 36.83 138.43)
+			(xy 27.94 81.28) (xy 27.94 78.74)
 		)
 		(stroke
 			(width 0)
@@ -2919,7 +2919,7 @@
 	)
 	(wire
 		(pts
-			(xy 307.34 170.18) (xy 297.18 170.18)
+			(xy 236.22 172.72) (xy 226.06 172.72)
 		)
 		(stroke
 			(width 0)
@@ -2939,7 +2939,7 @@
 	)
 	(wire
 		(pts
-			(xy 317.5 132.08) (xy 317.5 129.54)
+			(xy 246.38 134.62) (xy 246.38 132.08)
 		)
 		(stroke
 			(width 0)
@@ -2949,7 +2949,7 @@
 	)
 	(wire
 		(pts
-			(xy 105.41 140.97) (xy 105.41 138.43)
+			(xy 96.52 81.28) (xy 96.52 78.74)
 		)
 		(stroke
 			(width 0)
@@ -3019,7 +3019,7 @@
 	)
 	(wire
 		(pts
-			(xy 36.83 148.59) (xy 36.83 151.13)
+			(xy 27.94 88.9) (xy 27.94 91.44)
 		)
 		(stroke
 			(width 0)
@@ -3039,7 +3039,7 @@
 	)
 	(wire
 		(pts
-			(xy 307.34 187.96) (xy 297.18 187.96)
+			(xy 236.22 190.5) (xy 226.06 190.5)
 		)
 		(stroke
 			(width 0)
@@ -3059,7 +3059,7 @@
 	)
 	(wire
 		(pts
-			(xy 307.34 167.64) (xy 304.8 167.64)
+			(xy 236.22 170.18) (xy 233.68 170.18)
 		)
 		(stroke
 			(width 0)
@@ -3069,7 +3069,7 @@
 	)
 	(wire
 		(pts
-			(xy 307.34 162.56) (xy 304.8 162.56)
+			(xy 236.22 165.1) (xy 233.68 165.1)
 		)
 		(stroke
 			(width 0)
@@ -3089,7 +3089,7 @@
 	)
 	(wire
 		(pts
-			(xy 317.5 198.12) (xy 317.5 200.66)
+			(xy 246.38 200.66) (xy 246.38 203.2)
 		)
 		(stroke
 			(width 0)
@@ -3099,7 +3099,7 @@
 	)
 	(wire
 		(pts
-			(xy 307.34 160.02) (xy 304.8 160.02)
+			(xy 236.22 162.56) (xy 233.68 162.56)
 		)
 		(stroke
 			(width 0)
@@ -3109,7 +3109,7 @@
 	)
 	(wire
 		(pts
-			(xy 36.83 229.87) (xy 36.83 232.41)
+			(xy 31.75 213.36) (xy 31.75 215.9)
 		)
 		(stroke
 			(width 0)
@@ -3119,7 +3119,7 @@
 	)
 	(wire
 		(pts
-			(xy 332.74 180.34) (xy 335.28 180.34)
+			(xy 261.62 182.88) (xy 264.16 182.88)
 		)
 		(stroke
 			(width 0)
@@ -3139,7 +3139,7 @@
 	)
 	(wire
 		(pts
-			(xy 124.46 114.3) (xy 124.46 111.76)
+			(xy 90.17 34.29) (xy 90.17 31.75)
 		)
 		(stroke
 			(width 0)
@@ -3159,7 +3159,7 @@
 	)
 	(wire
 		(pts
-			(xy 124.46 203.2) (xy 124.46 205.74)
+			(xy 119.38 175.26) (xy 119.38 177.8)
 		)
 		(stroke
 			(width 0)
@@ -3169,7 +3169,7 @@
 	)
 	(wire
 		(pts
-			(xy 307.34 157.48) (xy 304.8 157.48)
+			(xy 236.22 160.02) (xy 233.68 160.02)
 		)
 		(stroke
 			(width 0)
@@ -3189,7 +3189,7 @@
 	)
 	(wire
 		(pts
-			(xy 307.34 180.34) (xy 297.18 180.34)
+			(xy 236.22 182.88) (xy 226.06 182.88)
 		)
 		(stroke
 			(width 0)
@@ -3199,7 +3199,7 @@
 	)
 	(wire
 		(pts
-			(xy 332.74 187.96) (xy 335.28 187.96)
+			(xy 261.62 190.5) (xy 264.16 190.5)
 		)
 		(stroke
 			(width 0)
@@ -3209,7 +3209,7 @@
 	)
 	(wire
 		(pts
-			(xy 54.61 229.87) (xy 54.61 232.41)
+			(xy 49.53 213.36) (xy 49.53 215.9)
 		)
 		(stroke
 			(width 0)
@@ -3219,7 +3219,7 @@
 	)
 	(wire
 		(pts
-			(xy 332.74 175.26) (xy 335.28 175.26)
+			(xy 261.62 177.8) (xy 264.16 177.8)
 		)
 		(stroke
 			(width 0)
@@ -3239,7 +3239,7 @@
 	)
 	(wire
 		(pts
-			(xy 307.34 165.1) (xy 304.8 165.1)
+			(xy 236.22 167.64) (xy 233.68 167.64)
 		)
 		(stroke
 			(width 0)
@@ -3249,7 +3249,7 @@
 	)
 	(wire
 		(pts
-			(xy 307.34 172.72) (xy 304.8 172.72)
+			(xy 236.22 175.26) (xy 233.68 175.26)
 		)
 		(stroke
 			(width 0)
@@ -3279,7 +3279,7 @@
 	)
 	(wire
 		(pts
-			(xy 105.41 175.26) (xy 105.41 177.8)
+			(xy 99.06 133.35) (xy 99.06 135.89)
 		)
 		(stroke
 			(width 0)
@@ -3289,7 +3289,7 @@
 	)
 	(wire
 		(pts
-			(xy 105.41 203.2) (xy 105.41 205.74)
+			(xy 100.33 175.26) (xy 100.33 177.8)
 		)
 		(stroke
 			(width 0)
@@ -3319,7 +3319,7 @@
 	)
 	(wire
 		(pts
-			(xy 83.82 144.78) (xy 86.36 144.78)
+			(xy 74.93 85.09) (xy 77.47 85.09)
 		)
 		(stroke
 			(width 0)
@@ -3329,7 +3329,7 @@
 	)
 	(wire
 		(pts
-			(xy 105.41 167.64) (xy 105.41 165.1)
+			(xy 99.06 125.73) (xy 99.06 123.19)
 		)
 		(stroke
 			(width 0)
@@ -3339,7 +3339,7 @@
 	)
 	(wire
 		(pts
-			(xy 307.34 175.26) (xy 297.18 175.26)
+			(xy 236.22 177.8) (xy 226.06 177.8)
 		)
 		(stroke
 			(width 0)
@@ -3349,7 +3349,7 @@
 	)
 	(wire
 		(pts
-			(xy 54.61 140.97) (xy 54.61 138.43)
+			(xy 45.72 81.28) (xy 45.72 78.74)
 		)
 		(stroke
 			(width 0)
@@ -3359,7 +3359,7 @@
 	)
 	(wire
 		(pts
-			(xy 124.46 167.64) (xy 124.46 165.1)
+			(xy 118.11 125.73) (xy 118.11 120.65)
 		)
 		(stroke
 			(width 0)
@@ -3379,7 +3379,7 @@
 	)
 	(wire
 		(pts
-			(xy 124.46 121.92) (xy 124.46 124.46)
+			(xy 90.17 41.91) (xy 90.17 44.45)
 		)
 		(stroke
 			(width 0)
@@ -3419,7 +3419,7 @@
 	)
 	(wire
 		(pts
-			(xy 54.61 175.26) (xy 54.61 177.8)
+			(xy 48.26 133.35) (xy 48.26 135.89)
 		)
 		(stroke
 			(width 0)
@@ -3449,7 +3449,7 @@
 	)
 	(wire
 		(pts
-			(xy 36.83 167.64) (xy 36.83 165.1)
+			(xy 30.48 125.73) (xy 30.48 123.19)
 		)
 		(stroke
 			(width 0)
@@ -3459,7 +3459,7 @@
 	)
 	(wire
 		(pts
-			(xy 322.58 132.08) (xy 322.58 119.38)
+			(xy 251.46 134.62) (xy 251.46 121.92)
 		)
 		(stroke
 			(width 0)
@@ -3509,7 +3509,7 @@
 	)
 	(wire
 		(pts
-			(xy 124.46 148.59) (xy 124.46 151.13)
+			(xy 115.57 88.9) (xy 115.57 91.44)
 		)
 		(stroke
 			(width 0)
@@ -3519,7 +3519,7 @@
 	)
 	(wire
 		(pts
-			(xy 76.2 226.06) (xy 73.66 226.06)
+			(xy 71.12 209.55) (xy 68.58 209.55)
 		)
 		(stroke
 			(width 0)
@@ -3529,7 +3529,7 @@
 	)
 	(wire
 		(pts
-			(xy 76.2 171.45) (xy 73.66 171.45)
+			(xy 69.85 129.54) (xy 67.31 129.54)
 		)
 		(stroke
 			(width 0)
@@ -3539,7 +3539,7 @@
 	)
 	(wire
 		(pts
-			(xy 83.82 226.06) (xy 86.36 226.06)
+			(xy 78.74 209.55) (xy 81.28 209.55)
 		)
 		(stroke
 			(width 0)
@@ -3549,7 +3549,7 @@
 	)
 	(wire
 		(pts
-			(xy 332.74 149.86) (xy 335.28 149.86)
+			(xy 261.62 152.4) (xy 264.16 152.4)
 		)
 		(stroke
 			(width 0)
@@ -3559,7 +3559,7 @@
 	)
 	(wire
 		(pts
-			(xy 36.83 175.26) (xy 36.83 177.8)
+			(xy 30.48 133.35) (xy 30.48 135.89)
 		)
 		(stroke
 			(width 0)
@@ -3599,7 +3599,7 @@
 	)
 	(wire
 		(pts
-			(xy 139.7 121.92) (xy 139.7 124.46)
+			(xy 105.41 41.91) (xy 105.41 44.45)
 		)
 		(stroke
 			(width 0)
@@ -3609,7 +3609,7 @@
 	)
 	(wire
 		(pts
-			(xy 322.58 198.12) (xy 322.58 200.66)
+			(xy 251.46 200.66) (xy 251.46 203.2)
 		)
 		(stroke
 			(width 0)
@@ -3649,7 +3649,7 @@
 	)
 	(wire
 		(pts
-			(xy 320.04 132.08) (xy 320.04 124.46)
+			(xy 248.92 134.62) (xy 248.92 127)
 		)
 		(stroke
 			(width 0)
@@ -3659,7 +3659,7 @@
 	)
 	(wire
 		(pts
-			(xy 332.74 144.78) (xy 335.28 144.78)
+			(xy 261.62 147.32) (xy 264.16 147.32)
 		)
 		(stroke
 			(width 0)
@@ -3669,7 +3669,7 @@
 	)
 	(wire
 		(pts
-			(xy 105.41 227.33) (xy 105.41 224.79)
+			(xy 100.33 210.82) (xy 100.33 208.28)
 		)
 		(stroke
 			(width 0)
@@ -3719,7 +3719,7 @@
 	)
 	(wire
 		(pts
-			(xy 307.34 142.24) (xy 304.8 142.24)
+			(xy 236.22 144.78) (xy 233.68 144.78)
 		)
 		(stroke
 			(width 0)
@@ -3728,7 +3728,7 @@
 		(uuid "fdcaf3a0-c8c3-4f0c-a9d4-7e995a3a6230")
 	)
 	(label "AIN3_GND"
-		(at 105.41 205.74 270)
+		(at 100.33 177.8 270)
 		(effects
 			(font
 				(size 1.27 1.27)
@@ -3738,7 +3738,7 @@
 		(uuid "006342b3-008b-45b0-b5d5-34ce94ba075d")
 	)
 	(label "FUEL_P_ADC"
-		(at 304.8 162.56 180)
+		(at 233.68 165.1 180)
 		(effects
 			(font
 				(size 1.27 1.27)
@@ -3748,7 +3748,7 @@
 		(uuid "03fafafb-3e5c-4748-91d5-63eb7001e1b4")
 	)
 	(label "FUEL_GND"
-		(at 73.66 236.22 180)
+		(at 68.58 219.71 180)
 		(effects
 			(font
 				(size 1.27 1.27)
@@ -3758,7 +3758,7 @@
 		(uuid "04bffd89-7020-44ec-9874-bd70db224650")
 	)
 	(label "SENS_V1_ADC"
-		(at 304.8 147.32 180)
+		(at 233.68 149.86 180)
 		(effects
 			(font
 				(size 1.27 1.27)
@@ -3768,7 +3768,7 @@
 		(uuid "067b3651-fe00-4ec5-bc6b-f278711e94fb")
 	)
 	(label "SENS_R1"
-		(at 36.83 165.1 90)
+		(at 30.48 123.19 90)
 		(effects
 			(font
 				(size 1.27 1.27)
@@ -3778,7 +3778,7 @@
 		(uuid "06a9ae53-8cd9-4fb6-9dfd-de7a095a8321")
 	)
 	(label "FUEL_P_ADC"
-		(at 105.41 224.79 90)
+		(at 100.33 208.28 90)
 		(effects
 			(font
 				(size 1.27 1.27)
@@ -3788,7 +3788,7 @@
 		(uuid "0ac60887-65d2-44bd-9de5-c491e4300d13")
 	)
 	(label "SPARE7_ADC"
-		(at 304.8 177.8 180)
+		(at 233.68 180.34 180)
 		(effects
 			(font
 				(size 1.27 1.27)
@@ -3798,7 +3798,7 @@
 		(uuid "0b59a6fc-1bbb-4b82-83ec-a000ca3b988b")
 	)
 	(label "AIN3_GND"
-		(at 124.46 193.04 90)
+		(at 119.38 165.1 90)
 		(effects
 			(font
 				(size 1.27 1.27)
@@ -3818,7 +3818,7 @@
 		(uuid "247b6323-5530-4232-8cda-3389d9f4a4c6")
 	)
 	(label "AIN0_GND"
-		(at 304.8 144.78 180)
+		(at 233.68 147.32 180)
 		(effects
 			(font
 				(size 1.27 1.27)
@@ -3838,7 +3838,7 @@
 		(uuid "28e1c70d-a188-47c2-9570-4427ed865a2f")
 	)
 	(label "FUEL_P"
-		(at 36.83 219.71 90)
+		(at 31.75 203.2 90)
 		(effects
 			(font
 				(size 1.27 1.27)
@@ -3858,7 +3858,7 @@
 		(uuid "327e8a9d-858b-4fb4-9b03-d8c723adaf9f")
 	)
 	(label "AIN0_GND"
-		(at 139.7 124.46 270)
+		(at 105.41 44.45 270)
 		(effects
 			(font
 				(size 1.27 1.27)
@@ -3878,7 +3878,7 @@
 		(uuid "3bb856ca-2894-4aef-abff-b3eef74ea42e")
 	)
 	(label "FUEL_N_ADC"
-		(at 304.8 165.1 180)
+		(at 233.68 167.64 180)
 		(effects
 			(font
 				(size 1.27 1.27)
@@ -3908,7 +3908,7 @@
 		(uuid "4f53bed5-057d-4566-b48a-eb67ac22de3c")
 	)
 	(label "5V_SENS"
-		(at 54.61 138.43 90)
+		(at 45.72 78.74 90)
 		(effects
 			(font
 				(size 1.27 1.27)
@@ -3918,7 +3918,7 @@
 		(uuid "500856e1-bf21-4f7f-90e5-48d4bb8506d6")
 	)
 	(label "FUEL_N_ADC"
-		(at 105.41 237.49 270)
+		(at 100.33 220.98 270)
 		(effects
 			(font
 				(size 1.27 1.27)
@@ -3948,7 +3948,7 @@
 		(uuid "57b67064-4d27-4e5d-917a-764d36acdb66")
 	)
 	(label "SENS_R1"
-		(at 73.66 171.45 180)
+		(at 67.31 129.54 180)
 		(effects
 			(font
 				(size 1.27 1.27)
@@ -3958,7 +3958,7 @@
 		(uuid "5a4cbc77-cd8d-4541-ad5b-c9bb23af83d1")
 	)
 	(label "SENS_R1_ADC"
-		(at 105.41 165.1 90)
+		(at 99.06 123.19 90)
 		(effects
 			(font
 				(size 1.27 1.27)
@@ -3968,7 +3968,7 @@
 		(uuid "5a5b8b73-3635-4dec-bebd-0eb9f4324768")
 	)
 	(label "AIN2_GND"
-		(at 105.41 177.8 270)
+		(at 99.06 135.89 270)
 		(effects
 			(font
 				(size 1.27 1.27)
@@ -3978,7 +3978,7 @@
 		(uuid "5f316292-8d05-41eb-95af-06b74793a796")
 	)
 	(label "AIN2_GND"
-		(at 124.46 165.1 90)
+		(at 118.11 120.65 90)
 		(effects
 			(font
 				(size 1.27 1.27)
@@ -3998,7 +3998,7 @@
 		(uuid "619b16ad-93a2-4ee9-b825-acd9af30ef65")
 	)
 	(label "SENS_R1_ADC"
-		(at 304.8 152.4 180)
+		(at 233.68 154.94 180)
 		(effects
 			(font
 				(size 1.27 1.27)
@@ -4008,7 +4008,7 @@
 		(uuid "6509500a-f02d-406d-9a6e-5a7fc4b9b607")
 	)
 	(label "5VS_ADC"
-		(at 304.8 157.48 180)
+		(at 233.68 160.02 180)
 		(effects
 			(font
 				(size 1.27 1.27)
@@ -4018,7 +4018,7 @@
 		(uuid "6b6afc71-dff2-44bf-bc98-23aea4084bdb")
 	)
 	(label "U8_REFIO"
-		(at 335.28 180.34 0)
+		(at 264.16 182.88 0)
 		(effects
 			(font
 				(size 1.27 1.27)
@@ -4028,7 +4028,7 @@
 		(uuid "6c23b531-135e-47fd-84c5-8f975c556154")
 	)
 	(label "FUEL_P"
-		(at 73.66 226.06 180)
+		(at 68.58 209.55 180)
 		(effects
 			(font
 				(size 1.27 1.27)
@@ -4048,7 +4048,7 @@
 		(uuid "723aa818-0dd2-4629-ac1d-933f7fcdd51b")
 	)
 	(label "5VS_ADC"
-		(at 86.36 199.39 0)
+		(at 81.28 171.45 0)
 		(effects
 			(font
 				(size 1.27 1.27)
@@ -4058,7 +4058,7 @@
 		(uuid "72884c5e-4102-4662-927f-06d371ab0393")
 	)
 	(label "SENS_R1_ADC"
-		(at 86.36 171.45 0)
+		(at 80.01 129.54 0)
 		(effects
 			(font
 				(size 1.27 1.27)
@@ -4088,7 +4088,7 @@
 		(uuid "7752813a-a36c-4e56-acac-ee9ad564eb55")
 	)
 	(label "5V_SENS"
-		(at 73.66 199.39 180)
+		(at 68.58 171.45 180)
 		(effects
 			(font
 				(size 1.27 1.27)
@@ -4118,7 +4118,7 @@
 		(uuid "7d0f587b-e4e8-48c0-9de7-59d51552732f")
 	)
 	(label "5V_SENS"
-		(at 54.61 165.1 90)
+		(at 48.26 123.19 90)
 		(effects
 			(font
 				(size 1.27 1.27)
@@ -4148,7 +4148,7 @@
 		(uuid "93abbe92-f38b-47ce-91c0-967ac8d32ebc")
 	)
 	(label "AIN2_GND"
-		(at 304.8 154.94 180)
+		(at 233.68 157.48 180)
 		(effects
 			(font
 				(size 1.27 1.27)
@@ -4158,7 +4158,7 @@
 		(uuid "988b6cb7-e751-49b2-986e-5b1f85271855")
 	)
 	(label "FUEL_N_ADC"
-		(at 86.36 236.22 0)
+		(at 81.28 219.71 0)
 		(effects
 			(font
 				(size 1.27 1.27)
@@ -4168,7 +4168,7 @@
 		(uuid "a04c9ad8-5399-4eb3-b296-83635fd51a03")
 	)
 	(label "SENS_V1"
-		(at 54.61 151.13 270)
+		(at 45.72 91.44 270)
 		(effects
 			(font
 				(size 1.27 1.27)
@@ -4178,7 +4178,7 @@
 		(uuid "a53a71c6-bb2c-4733-8cde-20853b556495")
 	)
 	(label "AIN1_GND"
-		(at 124.46 138.43 90)
+		(at 115.57 78.74 90)
 		(effects
 			(font
 				(size 1.27 1.27)
@@ -4198,7 +4198,7 @@
 		(uuid "b0c64a26-39cd-473f-b414-3f137d823a38")
 	)
 	(label "SPARE6_ADC"
-		(at 304.8 172.72 180)
+		(at 233.68 175.26 180)
 		(effects
 			(font
 				(size 1.27 1.27)
@@ -4208,7 +4208,7 @@
 		(uuid "b8aa4440-295d-4c41-97ee-612a84fabfc2")
 	)
 	(label "V12_SENSE"
-		(at 139.7 111.76 90)
+		(at 105.41 31.75 90)
 		(effects
 			(font
 				(size 1.27 1.27)
@@ -4248,7 +4248,7 @@
 		(uuid "bebf795d-9c4d-49e9-b8fd-c3e53c5d74e4")
 	)
 	(label "FUEL_GND"
-		(at 54.61 219.71 90)
+		(at 49.53 203.2 90)
 		(effects
 			(font
 				(size 1.27 1.27)
@@ -4258,7 +4258,7 @@
 		(uuid "bed56b30-5b8c-40a1-be0e-e735911fd47f")
 	)
 	(label "SENS_V1"
-		(at 36.83 138.43 90)
+		(at 27.94 78.74 90)
 		(effects
 			(font
 				(size 1.27 1.27)
@@ -4268,7 +4268,7 @@
 		(uuid "c3091589-54fc-4dfa-9a5e-55e804988d8b")
 	)
 	(label "AIN1_GND"
-		(at 105.41 151.13 270)
+		(at 96.52 91.44 270)
 		(effects
 			(font
 				(size 1.27 1.27)
@@ -4278,7 +4278,7 @@
 		(uuid "c46c1832-2351-4b8b-95d2-e54ffa778fc8")
 	)
 	(label "AIN1_GND"
-		(at 304.8 149.86 180)
+		(at 233.68 152.4 180)
 		(effects
 			(font
 				(size 1.27 1.27)
@@ -4288,7 +4288,7 @@
 		(uuid "c5fbcd27-75d6-4e68-ac6a-064e455172b1")
 	)
 	(label "FUEL_P_ADC"
-		(at 86.36 226.06 0)
+		(at 81.28 209.55 0)
 		(effects
 			(font
 				(size 1.27 1.27)
@@ -4318,7 +4318,7 @@
 		(uuid "ce67dc90-c830-4a65-9516-aaca1aa968aa")
 	)
 	(label "AIN0_GND"
-		(at 124.46 111.76 90)
+		(at 90.17 31.75 90)
 		(effects
 			(font
 				(size 1.27 1.27)
@@ -4338,7 +4338,7 @@
 		(uuid "d029aab2-433e-4a87-a2ef-aae130303040")
 	)
 	(label "5VS_ADC"
-		(at 105.41 193.04 90)
+		(at 100.33 165.1 90)
 		(effects
 			(font
 				(size 1.27 1.27)
@@ -4348,7 +4348,7 @@
 		(uuid "d1de975e-a96a-4189-bca8-0034879e3ac2")
 	)
 	(label "SPARE5_ADC"
-		(at 304.8 167.64 180)
+		(at 233.68 170.18 180)
 		(effects
 			(font
 				(size 1.27 1.27)
@@ -4358,7 +4358,7 @@
 		(uuid "d3193d7e-ec92-4773-8a44-37b681b3c78f")
 	)
 	(label "U8_REFCAP"
-		(at 335.28 175.26 0)
+		(at 264.16 177.8 0)
 		(effects
 			(font
 				(size 1.27 1.27)
@@ -4368,7 +4368,7 @@
 		(uuid "d6f036a9-9e81-4596-955c-5f4bbcd04cbc")
 	)
 	(label "SENS_V1_ADC"
-		(at 105.41 138.43 90)
+		(at 96.52 78.74 90)
 		(effects
 			(font
 				(size 1.27 1.27)
@@ -4378,7 +4378,7 @@
 		(uuid "d93f0ab7-bd68-43fa-9f96-2d46744bbe7e")
 	)
 	(label "SENS_V1_ADC"
-		(at 86.36 144.78 0)
+		(at 77.47 85.09 0)
 		(effects
 			(font
 				(size 1.27 1.27)
@@ -4448,7 +4448,7 @@
 		(uuid "eaceede6-9891-42c7-bce1-dd0d84c4dfbb")
 	)
 	(label "SENS_R1"
-		(at 54.61 177.8 270)
+		(at 48.26 135.89 270)
 		(effects
 			(font
 				(size 1.27 1.27)
@@ -4478,7 +4478,7 @@
 		(uuid "f4f9a679-6a54-48cc-8748-a66782fda20b")
 	)
 	(label "SENS_V1"
-		(at 73.66 144.78 180)
+		(at 64.77 85.09 180)
 		(effects
 			(font
 				(size 1.27 1.27)
@@ -4498,7 +4498,7 @@
 		(uuid "f7b09742-35ad-4f02-a1a9-197086fd786a")
 	)
 	(label "AIN3_GND"
-		(at 304.8 160.02 180)
+		(at 233.68 162.56 180)
 		(effects
 			(font
 				(size 1.27 1.27)
@@ -4553,7 +4553,7 @@
 	)
 	(hierarchical_label "SPI0_SDI"
 		(shape input)
-		(at 335.28 144.78 0)
+		(at 264.16 147.32 0)
 		(effects
 			(font
 				(size 1.27 1.27)
@@ -4564,7 +4564,7 @@
 	)
 	(hierarchical_label "V12_SENSE"
 		(shape input)
-		(at 304.8 142.24 180)
+		(at 233.68 144.78 180)
 		(effects
 			(font
 				(size 1.27 1.27)
@@ -4575,7 +4575,7 @@
 	)
 	(hierarchical_label "SPI0_nCS"
 		(shape input)
-		(at 335.28 149.86 0)
+		(at 264.16 152.4 0)
 		(effects
 			(font
 				(size 1.27 1.27)
@@ -4586,7 +4586,7 @@
 	)
 	(hierarchical_label "SPI0_SCK"
 		(shape input)
-		(at 335.28 147.32 0)
+		(at 264.16 149.86 0)
 		(effects
 			(font
 				(size 1.27 1.27)
@@ -4597,7 +4597,7 @@
 	)
 	(hierarchical_label "SPI0_SDO"
 		(shape output)
-		(at 335.28 142.24 0)
+		(at 264.16 144.78 0)
 		(effects
 			(font
 				(size 1.27 1.27)
@@ -4619,7 +4619,7 @@
 	)
 	(symbol
 		(lib_id "power:GND")
-		(at 297.18 187.96 270)
+		(at 226.06 190.5 270)
 		(unit 1)
 		(body_style 1)
 		(exclude_from_sim no)
@@ -4629,7 +4629,7 @@
 		(dnp no)
 		(uuid "02c2398d-93c7-42bf-a557-aed039b82a5b")
 		(property "Reference" "#PWR1020"
-			(at 299.72 186.69 0)
+			(at 228.6 189.23 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -4641,7 +4641,7 @@
 			)
 		)
 		(property "Value" "GND"
-			(at 299.72 190.5 0)
+			(at 221.488 190.5 0)
 			(show_name no)
 			(do_not_autoplace no)
 			(effects
@@ -4651,7 +4651,7 @@
 			)
 		)
 		(property "Footprint" ""
-			(at 297.18 187.96 0)
+			(at 226.06 190.5 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -4662,7 +4662,7 @@
 			)
 		)
 		(property "Datasheet" ""
-			(at 297.18 187.96 0)
+			(at 226.06 190.5 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -4673,7 +4673,7 @@
 			)
 		)
 		(property "Description" ""
-			(at 297.18 187.96 0)
+			(at 226.06 190.5 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -5009,7 +5009,7 @@
 	)
 	(symbol
 		(lib_id "power:+3V3")
-		(at 322.58 119.38 0)
+		(at 251.46 121.92 0)
 		(unit 1)
 		(body_style 1)
 		(exclude_from_sim no)
@@ -5019,7 +5019,7 @@
 		(dnp no)
 		(uuid "0b340aed-066f-4b89-b3b3-2a646a1b2351")
 		(property "Reference" "#PWR1025"
-			(at 325.12 118.11 0)
+			(at 254 120.65 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -5031,7 +5031,7 @@
 			)
 		)
 		(property "Value" "+3V3"
-			(at 325.12 121.92 0)
+			(at 251.206 116.332 0)
 			(show_name no)
 			(do_not_autoplace no)
 			(effects
@@ -5041,7 +5041,7 @@
 			)
 		)
 		(property "Footprint" ""
-			(at 322.58 119.38 0)
+			(at 251.46 121.92 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -5052,7 +5052,7 @@
 			)
 		)
 		(property "Datasheet" ""
-			(at 322.58 119.38 0)
+			(at 251.46 121.92 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -5063,7 +5063,7 @@
 			)
 		)
 		(property "Description" ""
-			(at 322.58 119.38 0)
+			(at 251.46 121.92 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -5087,7 +5087,7 @@
 	)
 	(symbol
 		(lib_id "Device:R")
-		(at 124.46 171.45 0)
+		(at 118.11 129.54 0)
 		(unit 1)
 		(body_style 1)
 		(exclude_from_sim no)
@@ -5097,7 +5097,7 @@
 		(dnp no)
 		(uuid "0b5b82cb-9487-445f-8b29-c7f01626c19c")
 		(property "Reference" "R27"
-			(at 127 170.18 0)
+			(at 120.65 128.27 0)
 			(show_name no)
 			(do_not_autoplace no)
 			(effects
@@ -5108,7 +5108,7 @@
 			)
 		)
 		(property "Value" "2.7k"
-			(at 127 172.72 0)
+			(at 120.65 130.81 0)
 			(show_name no)
 			(do_not_autoplace no)
 			(effects
@@ -5119,7 +5119,7 @@
 			)
 		)
 		(property "Footprint" "Resistor_SMD:R_0603_1608Metric"
-			(at 124.46 171.45 0)
+			(at 118.11 129.54 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -5130,7 +5130,7 @@
 			)
 		)
 		(property "Datasheet" ""
-			(at 124.46 171.45 0)
+			(at 118.11 129.54 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -5141,7 +5141,7 @@
 			)
 		)
 		(property "Description" "Resistor"
-			(at 124.46 171.45 0)
+			(at 118.11 129.54 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -5152,7 +5152,7 @@
 			)
 		)
 		(property "Manufacturer" "Yageo"
-			(at 124.46 171.45 0)
+			(at 118.11 129.54 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -5164,7 +5164,7 @@
 			)
 		)
 		(property "MPN" "RC0603FR-072K7L"
-			(at 124.46 171.45 0)
+			(at 118.11 129.54 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -5176,7 +5176,7 @@
 			)
 		)
 		(property "Power" "0.1W"
-			(at 124.46 171.45 0)
+			(at 118.11 129.54 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -5188,7 +5188,7 @@
 			)
 		)
 		(property "Tolerance" "1%"
-			(at 124.46 171.45 0)
+			(at 118.11 129.54 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -5200,7 +5200,7 @@
 			)
 		)
 		(property "Quote" "Rev 2.1: not yet quoted."
-			(at 124.46 171.45 0)
+			(at 118.11 129.54 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -5212,7 +5212,7 @@
 			)
 		)
 		(property "Note" "AIN_2GND match: R26 1k + (R25 || sensor) ~ 2.7k for a ~2.5 kohm NTC at 20 C. A default, not a calibration: the exact match depends on the sensor and is worth ~6 mV (~0.1 C) at most (13.5.3 item 7)."
-			(at 124.46 171.45 0)
+			(at 118.11 129.54 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -5240,7 +5240,7 @@
 	)
 	(symbol
 		(lib_id "Device:R")
-		(at 54.61 171.45 0)
+		(at 48.26 129.54 0)
 		(unit 1)
 		(body_style 1)
 		(exclude_from_sim no)
@@ -5250,7 +5250,7 @@
 		(dnp no)
 		(uuid "1e622419-5270-4daf-94d0-16298540bd95")
 		(property "Reference" "R25"
-			(at 57.15 170.18 0)
+			(at 50.8 128.27 0)
 			(show_name no)
 			(do_not_autoplace no)
 			(effects
@@ -5261,7 +5261,7 @@
 			)
 		)
 		(property "Value" "4.99k"
-			(at 57.15 172.72 0)
+			(at 50.8 130.81 0)
 			(show_name no)
 			(do_not_autoplace no)
 			(effects
@@ -5272,7 +5272,7 @@
 			)
 		)
 		(property "Footprint" "Resistor_SMD:R_0603_1608Metric"
-			(at 54.61 171.45 0)
+			(at 48.26 129.54 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -5283,7 +5283,7 @@
 			)
 		)
 		(property "Datasheet" ""
-			(at 54.61 171.45 0)
+			(at 48.26 129.54 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -5294,7 +5294,7 @@
 			)
 		)
 		(property "Description" "Resistor"
-			(at 54.61 171.45 0)
+			(at 48.26 129.54 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -5305,7 +5305,7 @@
 			)
 		)
 		(property "Manufacturer" "Yageo"
-			(at 54.61 171.45 0)
+			(at 48.26 129.54 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -5317,7 +5317,7 @@
 			)
 		)
 		(property "MPN" "RC0603FR-074K99L"
-			(at 54.61 171.45 0)
+			(at 48.26 129.54 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -5329,7 +5329,7 @@
 			)
 		)
 		(property "Power" "0.1W"
-			(at 54.61 171.45 0)
+			(at 48.26 129.54 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -5341,7 +5341,7 @@
 			)
 		)
 		(property "Tolerance" "1%"
-			(at 54.61 171.45 0)
+			(at 48.26 129.54 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -5353,7 +5353,7 @@
 			)
 		)
 		(property "Quote" "Rev 2.1: not yet quoted."
-			(at 54.61 171.45 0)
+			(at 48.26 129.54 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -5365,7 +5365,7 @@
 			)
 		)
 		(property "Note" "SENS_R1 pull-up to 5V_SENS (ratiometric with CH3), the resistive port's default (13.5.11). 4.99k suits automotive NTCs (~2-5 kohm at 20 C, Bosch TMAP 2.5k): <= 1.0 mA sensor current, mid-range at 20 C. A low-ohm sender (fuel level, 30-240 ohm) needs ~100-200 ohm here instead. Software must know the fitted value: it is part of the resistance solve."
-			(at 54.61 171.45 0)
+			(at 48.26 129.54 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -5414,7 +5414,7 @@
 			)
 		)
 		(property "Value" "NUP2105L"
-			(at 322.58 45.72 0)
+			(at 319.786 40.132 0)
 			(show_name no)
 			(do_not_autoplace no)
 			(effects
@@ -6014,7 +6014,7 @@
 	)
 	(symbol
 		(lib_id "Device:C")
-		(at 105.41 144.78 0)
+		(at 96.52 85.09 0)
 		(unit 1)
 		(body_style 1)
 		(exclude_from_sim no)
@@ -6024,7 +6024,7 @@
 		(dnp no)
 		(uuid "376e0764-de4c-48fb-98ee-1983e02e5302")
 		(property "Reference" "C28"
-			(at 107.95 143.51 0)
+			(at 99.06 83.82 0)
 			(show_name no)
 			(do_not_autoplace no)
 			(effects
@@ -6035,7 +6035,7 @@
 			)
 		)
 		(property "Value" "100n"
-			(at 107.95 146.05 0)
+			(at 99.06 86.36 0)
 			(show_name no)
 			(do_not_autoplace no)
 			(effects
@@ -6046,7 +6046,7 @@
 			)
 		)
 		(property "Footprint" "Capacitor_SMD:C_0603_1608Metric"
-			(at 105.41 144.78 0)
+			(at 96.52 85.09 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -6057,7 +6057,7 @@
 			)
 		)
 		(property "Datasheet" ""
-			(at 105.41 144.78 0)
+			(at 96.52 85.09 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -6068,7 +6068,7 @@
 			)
 		)
 		(property "Description" "Unpolarized capacitor"
-			(at 105.41 144.78 0)
+			(at 96.52 85.09 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -6079,7 +6079,7 @@
 			)
 		)
 		(property "Manufacturer" "Samsung Electro-Mechanics"
-			(at 105.41 144.78 0)
+			(at 96.52 85.09 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -6091,7 +6091,7 @@
 			)
 		)
 		(property "MPN" "CL10B104KB8NNNC"
-			(at 105.41 144.78 0)
+			(at 96.52 85.09 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -6103,7 +6103,7 @@
 			)
 		)
 		(property "Voltage" "50V"
-			(at 105.41 144.78 0)
+			(at 96.52 85.09 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -6115,7 +6115,7 @@
 			)
 		)
 		(property "Dielectric" "X7R"
-			(at 105.41 144.78 0)
+			(at 96.52 85.09 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -6127,7 +6127,7 @@
 			)
 		)
 		(property "Tolerance" "10%"
-			(at 105.41 144.78 0)
+			(at 96.52 85.09 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -6139,7 +6139,7 @@
 			)
 		)
 		(property "Quote" "Rev 2.1: not yet quoted."
-			(at 105.41 144.78 0)
+			(at 96.52 85.09 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -6151,7 +6151,7 @@
 			)
 		)
 		(property "Note" "SENS_V1 filter, differential: AIN_1P to AIN_1GND at U8 (SBAS680 pin table)."
-			(at 105.41 144.78 0)
+			(at 96.52 85.09 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -6344,7 +6344,7 @@
 	)
 	(symbol
 		(lib_id "Device:R")
-		(at 124.46 199.39 0)
+		(at 119.38 171.45 0)
 		(unit 1)
 		(body_style 1)
 		(exclude_from_sim no)
@@ -6354,7 +6354,7 @@
 		(dnp no)
 		(uuid "3e231c8b-70ce-4837-8649-1437cdf44eff")
 		(property "Reference" "R29"
-			(at 127 198.12 0)
+			(at 121.92 170.18 0)
 			(show_name no)
 			(do_not_autoplace no)
 			(effects
@@ -6365,7 +6365,7 @@
 			)
 		)
 		(property "Value" "1k"
-			(at 127 200.66 0)
+			(at 121.92 172.72 0)
 			(show_name no)
 			(do_not_autoplace no)
 			(effects
@@ -6376,7 +6376,7 @@
 			)
 		)
 		(property "Footprint" "Resistor_SMD:R_0603_1608Metric"
-			(at 124.46 199.39 0)
+			(at 119.38 171.45 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -6387,7 +6387,7 @@
 			)
 		)
 		(property "Datasheet" ""
-			(at 124.46 199.39 0)
+			(at 119.38 171.45 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -6398,7 +6398,7 @@
 			)
 		)
 		(property "Description" "Resistor"
-			(at 124.46 199.39 0)
+			(at 119.38 171.45 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -6409,7 +6409,7 @@
 			)
 		)
 		(property "Manufacturer" "Yageo"
-			(at 124.46 199.39 0)
+			(at 119.38 171.45 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -6421,7 +6421,7 @@
 			)
 		)
 		(property "MPN" "RC0603FR-071KL"
-			(at 124.46 199.39 0)
+			(at 119.38 171.45 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -6433,7 +6433,7 @@
 			)
 		)
 		(property "Power" "0.1W"
-			(at 124.46 199.39 0)
+			(at 119.38 171.45 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -6445,7 +6445,7 @@
 			)
 		)
 		(property "Tolerance" "1%"
-			(at 124.46 199.39 0)
+			(at 119.38 171.45 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -6457,7 +6457,7 @@
 			)
 		)
 		(property "Quote" "Rev 2.1: not yet quoted."
-			(at 124.46 199.39 0)
+			(at 119.38 171.45 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -6469,7 +6469,7 @@
 			)
 		)
 		(property "Note" "AIN_nGND source-impedance match, equal to this channel's series resistance (SBAS680 8.3.2)."
-			(at 124.46 199.39 0)
+			(at 119.38 171.45 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -6740,7 +6740,7 @@
 	)
 	(symbol
 		(lib_id "canary-hat:ADS8688A")
-		(at 320.04 165.1 0)
+		(at 248.92 167.64 0)
 		(unit 1)
 		(body_style 1)
 		(exclude_from_sim no)
@@ -6750,7 +6750,7 @@
 		(dnp no)
 		(uuid "49292644-9b94-4ed7-94b0-e8b2b23bbaf6")
 		(property "Reference" "U8"
-			(at 309.88 128.27 0)
+			(at 238.76 130.81 0)
 			(show_name no)
 			(do_not_autoplace no)
 			(effects
@@ -6761,7 +6761,7 @@
 			)
 		)
 		(property "Value" "ADS8688AIDBTR"
-			(at 309.88 204.47 0)
+			(at 238.76 207.01 0)
 			(show_name no)
 			(do_not_autoplace no)
 			(effects
@@ -6772,7 +6772,7 @@
 			)
 		)
 		(property "Footprint" "Package_SO:TSSOP-38_4.4x9.7mm_P0.5mm"
-			(at 320.04 165.1 0)
+			(at 248.92 167.64 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -6783,7 +6783,7 @@
 			)
 		)
 		(property "Datasheet" ""
-			(at 320.04 165.1 0)
+			(at 248.92 167.64 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -6794,7 +6794,7 @@
 			)
 		)
 		(property "Description" "16-bit 500 kSPS 8-channel SAR ADC, programmable ranges, SPI, TSSOP-38"
-			(at 320.04 165.1 0)
+			(at 248.92 167.64 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -6805,7 +6805,7 @@
 			)
 		)
 		(property "Manufacturer" "Texas Instruments"
-			(at 320.04 165.1 0)
+			(at 248.92 167.64 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -6817,7 +6817,7 @@
 			)
 		)
 		(property "MPN" "ADS8688AIDBTR"
-			(at 320.04 165.1 0)
+			(at 248.92 167.64 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -6829,7 +6829,7 @@
 			)
 		)
 		(property "Quote" "Rev 2.1: not yet quoted."
-			(at 320.04 165.1 0)
+			(at 248.92 167.64 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -6841,7 +6841,7 @@
 			)
 		)
 		(property "Note" "Rev 2.1 ADC (CANary-HAT-Rev2.1.md 13.5.3 items 5/5a), SPI0 CE1. A-suffix part (SBAS680). Internal 4.096 V reference (REFSEL low). Spare channels CH5-CH7 are pulled to GND and the driver must refuse unmapped channels (open item 33)."
-			(at 320.04 165.1 0)
+			(at 248.92 167.64 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -6977,7 +6977,7 @@
 	)
 	(symbol
 		(lib_id "power:GND")
-		(at 317.5 200.66 0)
+		(at 246.38 203.2 0)
 		(unit 1)
 		(body_style 1)
 		(exclude_from_sim no)
@@ -6987,7 +6987,7 @@
 		(dnp no)
 		(uuid "4acf20e8-cce4-40aa-92fc-8226d827e7a6")
 		(property "Reference" "#PWR1026"
-			(at 320.04 199.39 0)
+			(at 248.92 201.93 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -6999,7 +6999,7 @@
 			)
 		)
 		(property "Value" "GND"
-			(at 320.04 203.2 0)
+			(at 248.92 205.74 0)
 			(show_name no)
 			(do_not_autoplace no)
 			(effects
@@ -7009,7 +7009,7 @@
 			)
 		)
 		(property "Footprint" ""
-			(at 317.5 200.66 0)
+			(at 246.38 203.2 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -7020,7 +7020,7 @@
 			)
 		)
 		(property "Datasheet" ""
-			(at 317.5 200.66 0)
+			(at 246.38 203.2 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -7031,7 +7031,7 @@
 			)
 		)
 		(property "Description" ""
-			(at 317.5 200.66 0)
+			(at 246.38 203.2 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -7055,7 +7055,7 @@
 	)
 	(symbol
 		(lib_id "Device:R")
-		(at 54.61 226.06 0)
+		(at 49.53 209.55 0)
 		(unit 1)
 		(body_style 1)
 		(exclude_from_sim no)
@@ -7065,7 +7065,7 @@
 		(dnp no)
 		(uuid "4fb7dec4-3dd4-4c95-a7cd-3a3521b5a3bb")
 		(property "Reference" "R31"
-			(at 57.15 224.79 0)
+			(at 52.07 208.28 0)
 			(show_name no)
 			(do_not_autoplace no)
 			(effects
@@ -7076,7 +7076,7 @@
 			)
 		)
 		(property "Value" "100k"
-			(at 57.15 227.33 0)
+			(at 52.07 210.82 0)
 			(show_name no)
 			(do_not_autoplace no)
 			(effects
@@ -7087,7 +7087,7 @@
 			)
 		)
 		(property "Footprint" "Resistor_SMD:R_0603_1608Metric"
-			(at 54.61 226.06 0)
+			(at 49.53 209.55 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -7098,7 +7098,7 @@
 			)
 		)
 		(property "Datasheet" ""
-			(at 54.61 226.06 0)
+			(at 49.53 209.55 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -7109,7 +7109,7 @@
 			)
 		)
 		(property "Description" "Resistor"
-			(at 54.61 226.06 0)
+			(at 49.53 209.55 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -7120,7 +7120,7 @@
 			)
 		)
 		(property "Manufacturer" "Yageo"
-			(at 54.61 226.06 0)
+			(at 49.53 209.55 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -7132,7 +7132,7 @@
 			)
 		)
 		(property "MPN" "RC0603FR-07100KL"
-			(at 54.61 226.06 0)
+			(at 49.53 209.55 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -7144,7 +7144,7 @@
 			)
 		)
 		(property "Power" "0.1W"
-			(at 54.61 226.06 0)
+			(at 49.53 209.55 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -7156,7 +7156,7 @@
 			)
 		)
 		(property "Tolerance" "1%"
-			(at 54.61 226.06 0)
+			(at 49.53 209.55 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -7168,7 +7168,7 @@
 			)
 		)
 		(property "Quote" "Rev 2.1: not yet quoted."
-			(at 54.61 226.06 0)
+			(at 49.53 209.55 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -7180,7 +7180,7 @@
 			)
 		)
 		(property "Note" "FUEL_GND open-wire pull-down: gives AIN_4GND a defined DC level if BROWN is disconnected. SBAS680 gives no AIN_nGND leakage figure, so the resulting level is not guaranteed inside the +/-0.1 V window; an open BROWN is a fault the decoder should flag, not a reading."
-			(at 54.61 226.06 0)
+			(at 49.53 209.55 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -7208,7 +7208,7 @@
 	)
 	(symbol
 		(lib_id "Device:C")
-		(at 105.41 171.45 0)
+		(at 99.06 129.54 0)
 		(unit 1)
 		(body_style 1)
 		(exclude_from_sim no)
@@ -7218,7 +7218,7 @@
 		(dnp no)
 		(uuid "5ccddc3a-e318-4c4a-b0e7-52866c097da4")
 		(property "Reference" "C29"
-			(at 107.95 170.18 0)
+			(at 101.6 128.27 0)
 			(show_name no)
 			(do_not_autoplace no)
 			(effects
@@ -7229,7 +7229,7 @@
 			)
 		)
 		(property "Value" "100n"
-			(at 107.95 172.72 0)
+			(at 101.6 130.81 0)
 			(show_name no)
 			(do_not_autoplace no)
 			(effects
@@ -7240,7 +7240,7 @@
 			)
 		)
 		(property "Footprint" "Capacitor_SMD:C_0603_1608Metric"
-			(at 105.41 171.45 0)
+			(at 99.06 129.54 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -7251,7 +7251,7 @@
 			)
 		)
 		(property "Datasheet" ""
-			(at 105.41 171.45 0)
+			(at 99.06 129.54 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -7262,7 +7262,7 @@
 			)
 		)
 		(property "Description" "Unpolarized capacitor"
-			(at 105.41 171.45 0)
+			(at 99.06 129.54 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -7273,7 +7273,7 @@
 			)
 		)
 		(property "Manufacturer" "Samsung Electro-Mechanics"
-			(at 105.41 171.45 0)
+			(at 99.06 129.54 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -7285,7 +7285,7 @@
 			)
 		)
 		(property "MPN" "CL10B104KB8NNNC"
-			(at 105.41 171.45 0)
+			(at 99.06 129.54 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -7297,7 +7297,7 @@
 			)
 		)
 		(property "Voltage" "50V"
-			(at 105.41 171.45 0)
+			(at 99.06 129.54 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -7309,7 +7309,7 @@
 			)
 		)
 		(property "Dielectric" "X7R"
-			(at 105.41 171.45 0)
+			(at 99.06 129.54 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -7321,7 +7321,7 @@
 			)
 		)
 		(property "Tolerance" "10%"
-			(at 105.41 171.45 0)
+			(at 99.06 129.54 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -7333,7 +7333,7 @@
 			)
 		)
 		(property "Quote" "Rev 2.1: not yet quoted."
-			(at 105.41 171.45 0)
+			(at 99.06 129.54 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -7345,7 +7345,7 @@
 			)
 		)
 		(property "Note" "SENS_R1 filter, differential: AIN_2P to AIN_2GND at U8 (SBAS680 pin table)."
-			(at 105.41 171.45 0)
+			(at 99.06 129.54 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -7538,7 +7538,7 @@
 	)
 	(symbol
 		(lib_id "Device:R")
-		(at 54.61 144.78 0)
+		(at 45.72 85.09 0)
 		(unit 1)
 		(body_style 1)
 		(exclude_from_sim no)
@@ -7548,7 +7548,7 @@
 		(dnp yes)
 		(uuid "5fdf56f5-dfb1-4e61-b131-6afe13a1cbb2")
 		(property "Reference" "R21"
-			(at 57.15 143.51 0)
+			(at 48.26 83.82 0)
 			(show_name no)
 			(do_not_autoplace no)
 			(effects
@@ -7559,7 +7559,7 @@
 			)
 		)
 		(property "Value" "TBD"
-			(at 57.15 146.05 0)
+			(at 48.26 86.36 0)
 			(show_name no)
 			(do_not_autoplace no)
 			(effects
@@ -7570,7 +7570,7 @@
 			)
 		)
 		(property "Footprint" "Resistor_SMD:R_0603_1608Metric"
-			(at 54.61 144.78 0)
+			(at 45.72 85.09 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -7581,7 +7581,7 @@
 			)
 		)
 		(property "Datasheet" ""
-			(at 54.61 144.78 0)
+			(at 45.72 85.09 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -7592,7 +7592,7 @@
 			)
 		)
 		(property "Description" "Resistor"
-			(at 54.61 144.78 0)
+			(at 45.72 85.09 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -7603,7 +7603,7 @@
 			)
 		)
 		(property "Quote" "Rev 2.1: not yet quoted."
-			(at 54.61 144.78 0)
+			(at 45.72 85.09 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -7615,7 +7615,7 @@
 			)
 		)
 		(property "Note" "DNF pad: SENS_V1 pull-up to 5V_SENS, for an open-collector / switch-to-ground sensor on the voltage port (13.5.11). Fit it and remove R20, or the two form a divider."
-			(at 54.61 144.78 0)
+			(at 45.72 85.09 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -7643,7 +7643,7 @@
 	)
 	(symbol
 		(lib_id "Device:R")
-		(at 80.01 171.45 90)
+		(at 73.66 129.54 90)
 		(unit 1)
 		(body_style 1)
 		(exclude_from_sim no)
@@ -7653,7 +7653,7 @@
 		(dnp no)
 		(uuid "63da4528-9011-4b78-a2dd-4c0c01ee28e5")
 		(property "Reference" "R26"
-			(at 82.55 170.18 0)
+			(at 76.2 128.27 0)
 			(show_name no)
 			(do_not_autoplace no)
 			(effects
@@ -7664,7 +7664,7 @@
 			)
 		)
 		(property "Value" "1k"
-			(at 82.55 172.72 0)
+			(at 76.2 130.81 0)
 			(show_name no)
 			(do_not_autoplace no)
 			(effects
@@ -7675,7 +7675,7 @@
 			)
 		)
 		(property "Footprint" "Resistor_SMD:R_0603_1608Metric"
-			(at 80.01 171.45 0)
+			(at 73.66 129.54 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -7686,7 +7686,7 @@
 			)
 		)
 		(property "Datasheet" ""
-			(at 80.01 171.45 0)
+			(at 73.66 129.54 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -7697,7 +7697,7 @@
 			)
 		)
 		(property "Description" "Resistor"
-			(at 80.01 171.45 0)
+			(at 73.66 129.54 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -7708,7 +7708,7 @@
 			)
 		)
 		(property "Manufacturer" "Yageo"
-			(at 80.01 171.45 0)
+			(at 73.66 129.54 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -7720,7 +7720,7 @@
 			)
 		)
 		(property "MPN" "RC0603FR-071KL"
-			(at 80.01 171.45 0)
+			(at 73.66 129.54 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -7732,7 +7732,7 @@
 			)
 		)
 		(property "Power" "0.1W"
-			(at 80.01 171.45 0)
+			(at 73.66 129.54 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -7744,7 +7744,7 @@
 			)
 		)
 		(property "Tolerance" "1%"
-			(at 80.01 171.45 0)
+			(at 73.66 129.54 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -7756,7 +7756,7 @@
 			)
 		)
 		(property "Quote" "Rev 2.1: not yet quoted."
-			(at 80.01 171.45 0)
+			(at 73.66 129.54 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -7768,7 +7768,7 @@
 			)
 		)
 		(property "Note" "Series resistor (1k): buys input-protection headroom (SBAS680: higher source impedance raises the OVP range) and limits TVS clamp current into U8. U8's input leakage is (VIN - 2.50 V)/RIN with RIN ~1 Mohm (SBAS680 7.5): the equal resistor on AIN_nGND cancels the OFFSET term only; a GAIN error of R/RIN = ~0.1 % remains and is calibrated out with the channel (review minor 3)."
-			(at 80.01 171.45 0)
+			(at 73.66 129.54 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -7796,7 +7796,7 @@
 	)
 	(symbol
 		(lib_id "Device:R")
-		(at 36.83 171.45 0)
+		(at 30.48 129.54 0)
 		(unit 1)
 		(body_style 1)
 		(exclude_from_sim no)
@@ -7806,7 +7806,7 @@
 		(dnp yes)
 		(uuid "6668bf1b-c000-40c4-aed0-c40ff2c895cd")
 		(property "Reference" "R24"
-			(at 39.37 170.18 0)
+			(at 33.02 128.27 0)
 			(show_name no)
 			(do_not_autoplace no)
 			(effects
@@ -7817,7 +7817,7 @@
 			)
 		)
 		(property "Value" "TBD"
-			(at 39.37 172.72 0)
+			(at 33.02 130.81 0)
 			(show_name no)
 			(do_not_autoplace no)
 			(effects
@@ -7828,7 +7828,7 @@
 			)
 		)
 		(property "Footprint" "Resistor_SMD:R_0603_1608Metric"
-			(at 36.83 171.45 0)
+			(at 30.48 129.54 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -7839,7 +7839,7 @@
 			)
 		)
 		(property "Datasheet" ""
-			(at 36.83 171.45 0)
+			(at 30.48 129.54 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -7850,7 +7850,7 @@
 			)
 		)
 		(property "Description" "Resistor"
-			(at 36.83 171.45 0)
+			(at 30.48 129.54 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -7861,7 +7861,7 @@
 			)
 		)
 		(property "Quote" "Rev 2.1: not yet quoted."
-			(at 36.83 171.45 0)
+			(at 30.48 129.54 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -7873,7 +7873,7 @@
 			)
 		)
 		(property "Note" "DNF pad: SENS_R1 pull-down, for using the resistive port as a voltage port instead (then remove R25) (13.5.11)."
-			(at 36.83 171.45 0)
+			(at 30.48 129.54 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -7901,7 +7901,7 @@
 	)
 	(symbol
 		(lib_id "Device:R")
-		(at 36.83 144.78 0)
+		(at 27.94 85.09 0)
 		(unit 1)
 		(body_style 1)
 		(exclude_from_sim no)
@@ -7911,7 +7911,7 @@
 		(dnp no)
 		(uuid "6763711c-2ce9-4bdd-a257-f27444f0c8c0")
 		(property "Reference" "R20"
-			(at 39.37 143.51 0)
+			(at 30.48 83.82 0)
 			(show_name no)
 			(do_not_autoplace no)
 			(effects
@@ -7922,7 +7922,7 @@
 			)
 		)
 		(property "Value" "47k"
-			(at 39.37 146.05 0)
+			(at 30.48 86.36 0)
 			(show_name no)
 			(do_not_autoplace no)
 			(effects
@@ -7933,7 +7933,7 @@
 			)
 		)
 		(property "Footprint" "Resistor_SMD:R_0603_1608Metric"
-			(at 36.83 144.78 0)
+			(at 27.94 85.09 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -7944,7 +7944,7 @@
 			)
 		)
 		(property "Datasheet" ""
-			(at 36.83 144.78 0)
+			(at 27.94 85.09 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -7955,7 +7955,7 @@
 			)
 		)
 		(property "Description" "Resistor"
-			(at 36.83 144.78 0)
+			(at 27.94 85.09 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -7966,7 +7966,7 @@
 			)
 		)
 		(property "Quote" "Rev 2.1: not yet quoted."
-			(at 36.83 144.78 0)
+			(at 27.94 85.09 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -7978,7 +7978,7 @@
 			)
 		)
 		(property "Note" "SENS_V1 pull-down, fitted (generic voltage port, 13.5.11). Two jobs: (1) open-wire detection - with the sensor unplugged U8's 1 Mohm input would float to an internal bias voltage that reads as data (SBAS680 8.3.1); 47k pulls it to ~4% of that bias, near 0 V, below any sensor's valid window. (2) A defined load inside every automotive driver's rating (Bosch TMAP: >= 10 kohm). 0.1 mA at 5 V. Closes open item 20."
-			(at 36.83 144.78 0)
+			(at 27.94 85.09 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -7990,7 +7990,7 @@
 			)
 		)
 		(property "Manufacturer" "Yageo"
-			(at 36.83 144.78 0)
+			(at 27.94 85.09 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -8002,7 +8002,7 @@
 			)
 		)
 		(property "MPN" "RC0603FR-0747KL"
-			(at 36.83 144.78 0)
+			(at 27.94 85.09 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -8014,7 +8014,7 @@
 			)
 		)
 		(property "Power" "0.1W"
-			(at 36.83 144.78 0)
+			(at 27.94 85.09 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -8026,7 +8026,7 @@
 			)
 		)
 		(property "Tolerance" "1%"
-			(at 36.83 144.78 0)
+			(at 27.94 85.09 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -8285,7 +8285,7 @@
 	)
 	(symbol
 		(lib_id "Device:C")
-		(at 105.41 231.14 0)
+		(at 100.33 214.63 0)
 		(unit 1)
 		(body_style 1)
 		(exclude_from_sim no)
@@ -8295,7 +8295,7 @@
 		(dnp no)
 		(uuid "6b124929-891d-4e6c-b409-b6686af1744a")
 		(property "Reference" "C31"
-			(at 107.95 229.87 0)
+			(at 102.87 213.36 0)
 			(show_name no)
 			(do_not_autoplace no)
 			(effects
@@ -8306,7 +8306,7 @@
 			)
 		)
 		(property "Value" "100n"
-			(at 107.95 232.41 0)
+			(at 102.87 215.9 0)
 			(show_name no)
 			(do_not_autoplace no)
 			(effects
@@ -8317,7 +8317,7 @@
 			)
 		)
 		(property "Footprint" "Capacitor_SMD:C_0603_1608Metric"
-			(at 105.41 231.14 0)
+			(at 100.33 214.63 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -8328,7 +8328,7 @@
 			)
 		)
 		(property "Datasheet" ""
-			(at 105.41 231.14 0)
+			(at 100.33 214.63 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -8339,7 +8339,7 @@
 			)
 		)
 		(property "Description" "Unpolarized capacitor"
-			(at 105.41 231.14 0)
+			(at 100.33 214.63 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -8350,7 +8350,7 @@
 			)
 		)
 		(property "Manufacturer" "Samsung Electro-Mechanics"
-			(at 105.41 231.14 0)
+			(at 100.33 214.63 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -8362,7 +8362,7 @@
 			)
 		)
 		(property "MPN" "CL10B104KB8NNNC"
-			(at 105.41 231.14 0)
+			(at 100.33 214.63 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -8374,7 +8374,7 @@
 			)
 		)
 		(property "Voltage" "50V"
-			(at 105.41 231.14 0)
+			(at 100.33 214.63 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -8386,7 +8386,7 @@
 			)
 		)
 		(property "Dielectric" "X7R"
-			(at 105.41 231.14 0)
+			(at 100.33 214.63 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -8398,7 +8398,7 @@
 			)
 		)
 		(property "Tolerance" "10%"
-			(at 105.41 231.14 0)
+			(at 100.33 214.63 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -8410,7 +8410,7 @@
 			)
 		)
 		(property "Quote" "Rev 2.1: not yet quoted."
-			(at 105.41 231.14 0)
+			(at 100.33 214.63 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -8422,7 +8422,7 @@
 			)
 		)
 		(property "Note" "Differential filter across AIN_4P / AIN_4GND (13.5.3 item 7)."
-			(at 105.41 231.14 0)
+			(at 100.33 214.63 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -8450,7 +8450,7 @@
 	)
 	(symbol
 		(lib_id "power:GND")
-		(at 36.83 177.8 0)
+		(at 30.48 135.89 0)
 		(unit 1)
 		(body_style 1)
 		(exclude_from_sim no)
@@ -8460,7 +8460,7 @@
 		(dnp no)
 		(uuid "6c5b90f1-dd19-4a13-a421-44f62368d3fa")
 		(property "Reference" "#PWR1045"
-			(at 39.37 176.53 0)
+			(at 33.02 134.62 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -8472,7 +8472,7 @@
 			)
 		)
 		(property "Value" "GND"
-			(at 39.37 180.34 0)
+			(at 33.02 138.43 0)
 			(show_name no)
 			(do_not_autoplace no)
 			(effects
@@ -8482,7 +8482,7 @@
 			)
 		)
 		(property "Footprint" ""
-			(at 36.83 177.8 0)
+			(at 30.48 135.89 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -8493,7 +8493,7 @@
 			)
 		)
 		(property "Datasheet" ""
-			(at 36.83 177.8 0)
+			(at 30.48 135.89 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -8504,7 +8504,7 @@
 			)
 		)
 		(property "Description" ""
-			(at 36.83 177.8 0)
+			(at 30.48 135.89 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -8528,7 +8528,7 @@
 	)
 	(symbol
 		(lib_id "power:GND")
-		(at 124.46 151.13 0)
+		(at 115.57 91.44 0)
 		(unit 1)
 		(body_style 1)
 		(exclude_from_sim no)
@@ -8538,7 +8538,7 @@
 		(dnp no)
 		(uuid "6d69a2a3-0d53-4ddb-a282-381467de90da")
 		(property "Reference" "#PWR1044"
-			(at 127 149.86 0)
+			(at 118.11 90.17 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -8550,7 +8550,7 @@
 			)
 		)
 		(property "Value" "GND"
-			(at 127 153.67 0)
+			(at 118.11 93.98 0)
 			(show_name no)
 			(do_not_autoplace no)
 			(effects
@@ -8560,7 +8560,7 @@
 			)
 		)
 		(property "Footprint" ""
-			(at 124.46 151.13 0)
+			(at 115.57 91.44 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -8571,7 +8571,7 @@
 			)
 		)
 		(property "Datasheet" ""
-			(at 124.46 151.13 0)
+			(at 115.57 91.44 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -8582,7 +8582,7 @@
 			)
 		)
 		(property "Description" ""
-			(at 124.46 151.13 0)
+			(at 115.57 91.44 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -8606,7 +8606,7 @@
 	)
 	(symbol
 		(lib_id "Device:R")
-		(at 80.01 144.78 90)
+		(at 71.12 85.09 90)
 		(unit 1)
 		(body_style 1)
 		(exclude_from_sim no)
@@ -8616,7 +8616,7 @@
 		(dnp no)
 		(uuid "752f437b-1510-4c28-bcba-0fadf0bc6531")
 		(property "Reference" "R22"
-			(at 82.55 143.51 0)
+			(at 73.66 83.82 0)
 			(show_name no)
 			(do_not_autoplace no)
 			(effects
@@ -8627,7 +8627,7 @@
 			)
 		)
 		(property "Value" "1k"
-			(at 82.55 146.05 0)
+			(at 73.66 86.36 0)
 			(show_name no)
 			(do_not_autoplace no)
 			(effects
@@ -8638,7 +8638,7 @@
 			)
 		)
 		(property "Footprint" "Resistor_SMD:R_0603_1608Metric"
-			(at 80.01 144.78 0)
+			(at 71.12 85.09 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -8649,7 +8649,7 @@
 			)
 		)
 		(property "Datasheet" ""
-			(at 80.01 144.78 0)
+			(at 71.12 85.09 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -8660,7 +8660,7 @@
 			)
 		)
 		(property "Description" "Resistor"
-			(at 80.01 144.78 0)
+			(at 71.12 85.09 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -8671,7 +8671,7 @@
 			)
 		)
 		(property "Manufacturer" "Yageo"
-			(at 80.01 144.78 0)
+			(at 71.12 85.09 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -8683,7 +8683,7 @@
 			)
 		)
 		(property "MPN" "RC0603FR-071KL"
-			(at 80.01 144.78 0)
+			(at 71.12 85.09 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -8695,7 +8695,7 @@
 			)
 		)
 		(property "Power" "0.1W"
-			(at 80.01 144.78 0)
+			(at 71.12 85.09 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -8707,7 +8707,7 @@
 			)
 		)
 		(property "Tolerance" "1%"
-			(at 80.01 144.78 0)
+			(at 71.12 85.09 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -8719,7 +8719,7 @@
 			)
 		)
 		(property "Quote" "Rev 2.1: not yet quoted."
-			(at 80.01 144.78 0)
+			(at 71.12 85.09 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -8731,7 +8731,7 @@
 			)
 		)
 		(property "Note" "Series resistor (1k): buys input-protection headroom (SBAS680: higher source impedance raises the OVP range) and limits TVS clamp current into U8. U8's input leakage is (VIN - 2.50 V)/RIN with RIN ~1 Mohm (SBAS680 7.5): the equal resistor on AIN_nGND cancels the OFFSET term only; a GAIN error of R/RIN = ~0.1 % remains and is calibrated out with the channel (review minor 3)."
-			(at 80.01 144.78 0)
+			(at 71.12 85.09 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -8837,7 +8837,7 @@
 	)
 	(symbol
 		(lib_id "Device:R")
-		(at 80.01 226.06 90)
+		(at 74.93 209.55 90)
 		(unit 1)
 		(body_style 1)
 		(exclude_from_sim no)
@@ -8847,7 +8847,7 @@
 		(dnp no)
 		(uuid "75fbea16-1dd4-4dbe-bda8-5eaf7fca63a2")
 		(property "Reference" "R32"
-			(at 82.55 224.79 0)
+			(at 77.47 208.28 0)
 			(show_name no)
 			(do_not_autoplace no)
 			(effects
@@ -8858,7 +8858,7 @@
 			)
 		)
 		(property "Value" "1k"
-			(at 82.55 227.33 0)
+			(at 77.47 210.82 0)
 			(show_name no)
 			(do_not_autoplace no)
 			(effects
@@ -8869,7 +8869,7 @@
 			)
 		)
 		(property "Footprint" "Resistor_SMD:R_0603_1608Metric"
-			(at 80.01 226.06 0)
+			(at 74.93 209.55 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -8880,7 +8880,7 @@
 			)
 		)
 		(property "Datasheet" ""
-			(at 80.01 226.06 0)
+			(at 74.93 209.55 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -8891,7 +8891,7 @@
 			)
 		)
 		(property "Description" "Resistor"
-			(at 80.01 226.06 0)
+			(at 74.93 209.55 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -8902,7 +8902,7 @@
 			)
 		)
 		(property "Manufacturer" "Yageo"
-			(at 80.01 226.06 0)
+			(at 74.93 209.55 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -8914,7 +8914,7 @@
 			)
 		)
 		(property "MPN" "RC0603FR-071KL"
-			(at 80.01 226.06 0)
+			(at 74.93 209.55 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -8926,7 +8926,7 @@
 			)
 		)
 		(property "Power" "0.1W"
-			(at 80.01 226.06 0)
+			(at 74.93 209.55 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -8938,7 +8938,7 @@
 			)
 		)
 		(property "Tolerance" "1%"
-			(at 80.01 226.06 0)
+			(at 74.93 209.55 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -8950,7 +8950,7 @@
 			)
 		)
 		(property "Quote" "Rev 2.1: not yet quoted."
-			(at 80.01 226.06 0)
+			(at 74.93 209.55 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -8962,7 +8962,7 @@
 			)
 		)
 		(property "Note" "Series resistor (1k): buys input-protection headroom (SBAS680: higher source impedance raises the OVP range) and limits TVS clamp current into U8. U8's input leakage is (VIN - 2.50 V)/RIN with RIN ~1 Mohm (SBAS680 7.5): the equal resistor on AIN_nGND cancels the OFFSET term only; a GAIN error of R/RIN = ~0.1 % remains and is calibrated out with the channel (review minor 3)."
-			(at 80.01 226.06 0)
+			(at 74.93 209.55 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -8990,7 +8990,7 @@
 	)
 	(symbol
 		(lib_id "power:GND")
-		(at 124.46 177.8 0)
+		(at 118.11 135.89 0)
 		(unit 1)
 		(body_style 1)
 		(exclude_from_sim no)
@@ -9000,7 +9000,7 @@
 		(dnp no)
 		(uuid "77471347-a89f-4d9b-a6a3-564c2166967e")
 		(property "Reference" "#PWR1047"
-			(at 127 176.53 0)
+			(at 120.65 134.62 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -9012,7 +9012,7 @@
 			)
 		)
 		(property "Value" "GND"
-			(at 127 180.34 0)
+			(at 120.65 138.43 0)
 			(show_name no)
 			(do_not_autoplace no)
 			(effects
@@ -9022,7 +9022,7 @@
 			)
 		)
 		(property "Footprint" ""
-			(at 124.46 177.8 0)
+			(at 118.11 135.89 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -9033,7 +9033,7 @@
 			)
 		)
 		(property "Datasheet" ""
-			(at 124.46 177.8 0)
+			(at 118.11 135.89 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -9044,7 +9044,7 @@
 			)
 		)
 		(property "Description" ""
-			(at 124.46 177.8 0)
+			(at 118.11 135.89 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -9068,7 +9068,7 @@
 	)
 	(symbol
 		(lib_id "Device:R")
-		(at 80.01 236.22 90)
+		(at 74.93 219.71 90)
 		(unit 1)
 		(body_style 1)
 		(exclude_from_sim no)
@@ -9078,7 +9078,7 @@
 		(dnp no)
 		(uuid "7ace4dc8-782a-48b1-9d29-64f6e6d7bdc9")
 		(property "Reference" "R33"
-			(at 82.55 234.95 0)
+			(at 77.47 218.44 0)
 			(show_name no)
 			(do_not_autoplace no)
 			(effects
@@ -9089,7 +9089,7 @@
 			)
 		)
 		(property "Value" "1k"
-			(at 82.55 237.49 0)
+			(at 77.47 220.98 0)
 			(show_name no)
 			(do_not_autoplace no)
 			(effects
@@ -9100,7 +9100,7 @@
 			)
 		)
 		(property "Footprint" "Resistor_SMD:R_0603_1608Metric"
-			(at 80.01 236.22 0)
+			(at 74.93 219.71 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -9111,7 +9111,7 @@
 			)
 		)
 		(property "Datasheet" ""
-			(at 80.01 236.22 0)
+			(at 74.93 219.71 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -9122,7 +9122,7 @@
 			)
 		)
 		(property "Description" "Resistor"
-			(at 80.01 236.22 0)
+			(at 74.93 219.71 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -9133,7 +9133,7 @@
 			)
 		)
 		(property "Manufacturer" "Yageo"
-			(at 80.01 236.22 0)
+			(at 74.93 219.71 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -9145,7 +9145,7 @@
 			)
 		)
 		(property "MPN" "RC0603FR-071KL"
-			(at 80.01 236.22 0)
+			(at 74.93 219.71 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -9157,7 +9157,7 @@
 			)
 		)
 		(property "Power" "0.1W"
-			(at 80.01 236.22 0)
+			(at 74.93 219.71 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -9169,7 +9169,7 @@
 			)
 		)
 		(property "Tolerance" "1%"
-			(at 80.01 236.22 0)
+			(at 74.93 219.71 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -9181,7 +9181,7 @@
 			)
 		)
 		(property "Quote" "Rev 2.1: not yet quoted."
-			(at 80.01 236.22 0)
+			(at 74.93 219.71 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -9193,7 +9193,7 @@
 			)
 		)
 		(property "Note" "Series resistor on AIN_4GND, matched to R32 so the pair stays balanced."
-			(at 80.01 236.22 0)
+			(at 74.93 219.71 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -9698,7 +9698,7 @@
 	)
 	(symbol
 		(lib_id "Device:R")
-		(at 80.01 199.39 90)
+		(at 74.93 171.45 90)
 		(unit 1)
 		(body_style 1)
 		(exclude_from_sim no)
@@ -9708,7 +9708,7 @@
 		(dnp no)
 		(uuid "7f4c4701-df5c-459f-befb-2eb32580e9f1")
 		(property "Reference" "R28"
-			(at 82.55 198.12 0)
+			(at 77.47 170.18 0)
 			(show_name no)
 			(do_not_autoplace no)
 			(effects
@@ -9719,7 +9719,7 @@
 			)
 		)
 		(property "Value" "1k"
-			(at 82.55 200.66 0)
+			(at 77.47 172.72 0)
 			(show_name no)
 			(do_not_autoplace no)
 			(effects
@@ -9730,7 +9730,7 @@
 			)
 		)
 		(property "Footprint" "Resistor_SMD:R_0603_1608Metric"
-			(at 80.01 199.39 0)
+			(at 74.93 171.45 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -9741,7 +9741,7 @@
 			)
 		)
 		(property "Datasheet" ""
-			(at 80.01 199.39 0)
+			(at 74.93 171.45 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -9752,7 +9752,7 @@
 			)
 		)
 		(property "Description" "Resistor"
-			(at 80.01 199.39 0)
+			(at 74.93 171.45 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -9763,7 +9763,7 @@
 			)
 		)
 		(property "Manufacturer" "Yageo"
-			(at 80.01 199.39 0)
+			(at 74.93 171.45 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -9775,7 +9775,7 @@
 			)
 		)
 		(property "MPN" "RC0603FR-071KL"
-			(at 80.01 199.39 0)
+			(at 74.93 171.45 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -9787,7 +9787,7 @@
 			)
 		)
 		(property "Power" "0.1W"
-			(at 80.01 199.39 0)
+			(at 74.93 171.45 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -9799,7 +9799,7 @@
 			)
 		)
 		(property "Tolerance" "1%"
-			(at 80.01 199.39 0)
+			(at 74.93 171.45 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -9811,7 +9811,7 @@
 			)
 		)
 		(property "Quote" "Rev 2.1: not yet quoted."
-			(at 80.01 199.39 0)
+			(at 74.93 171.45 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -9823,7 +9823,7 @@
 			)
 		)
 		(property "Note" "Series resistor (1k): buys input-protection headroom (SBAS680: higher source impedance raises the OVP range) and limits TVS clamp current into U8. U8's input leakage is (VIN - 2.50 V)/RIN with RIN ~1 Mohm (SBAS680 7.5): the equal resistor on AIN_nGND cancels the OFFSET term only; a GAIN error of R/RIN = ~0.1 % remains and is calibrated out with the channel (review minor 3)."
-			(at 80.01 199.39 0)
+			(at 74.93 171.45 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -9851,7 +9851,7 @@
 	)
 	(symbol
 		(lib_id "power:+5V")
-		(at 320.04 124.46 0)
+		(at 248.92 127 0)
 		(unit 1)
 		(body_style 1)
 		(exclude_from_sim no)
@@ -9861,7 +9861,7 @@
 		(dnp no)
 		(uuid "81082151-7e55-4196-875f-ecf9e098e972")
 		(property "Reference" "#PWR1024"
-			(at 322.58 123.19 0)
+			(at 251.46 125.73 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -9873,7 +9873,7 @@
 			)
 		)
 		(property "Value" "+5V"
-			(at 322.58 127 0)
+			(at 248.666 122.174 0)
 			(show_name no)
 			(do_not_autoplace no)
 			(effects
@@ -9883,7 +9883,7 @@
 			)
 		)
 		(property "Footprint" ""
-			(at 320.04 124.46 0)
+			(at 248.92 127 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -9894,7 +9894,7 @@
 			)
 		)
 		(property "Datasheet" ""
-			(at 320.04 124.46 0)
+			(at 248.92 127 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -9905,7 +9905,7 @@
 			)
 		)
 		(property "Description" ""
-			(at 320.04 124.46 0)
+			(at 248.92 127 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -10094,7 +10094,7 @@
 	)
 	(symbol
 		(lib_id "Device:C")
-		(at 139.7 118.11 0)
+		(at 105.41 38.1 0)
 		(unit 1)
 		(body_style 1)
 		(exclude_from_sim no)
@@ -10104,7 +10104,7 @@
 		(dnp no)
 		(uuid "852d2f8d-b859-4f23-98cf-2ee28f75fb36")
 		(property "Reference" "C36"
-			(at 142.24 116.84 0)
+			(at 107.95 36.83 0)
 			(show_name no)
 			(do_not_autoplace no)
 			(effects
@@ -10115,7 +10115,7 @@
 			)
 		)
 		(property "Value" "10nF"
-			(at 142.24 119.38 0)
+			(at 107.95 39.37 0)
 			(show_name no)
 			(do_not_autoplace no)
 			(effects
@@ -10126,7 +10126,7 @@
 			)
 		)
 		(property "Footprint" "Capacitor_SMD:C_0603_1608Metric"
-			(at 139.7 118.11 0)
+			(at 105.41 38.1 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -10137,7 +10137,7 @@
 			)
 		)
 		(property "Datasheet" ""
-			(at 139.7 118.11 0)
+			(at 105.41 38.1 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -10148,7 +10148,7 @@
 			)
 		)
 		(property "Description" "Unpolarized capacitor"
-			(at 139.7 118.11 0)
+			(at 105.41 38.1 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -10159,7 +10159,7 @@
 			)
 		)
 		(property "Manufacturer" "Murata"
-			(at 139.7 118.11 0)
+			(at 105.41 38.1 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -10171,7 +10171,7 @@
 			)
 		)
 		(property "MPN" "GRM1885C1H103JA01D"
-			(at 139.7 118.11 0)
+			(at 105.41 38.1 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -10183,7 +10183,7 @@
 			)
 		)
 		(property "Voltage" "50V"
-			(at 139.7 118.11 0)
+			(at 105.41 38.1 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -10195,7 +10195,7 @@
 			)
 		)
 		(property "Dielectric" "C0G/NP0"
-			(at 139.7 118.11 0)
+			(at 105.41 38.1 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -10207,7 +10207,7 @@
 			)
 		)
 		(property "Tolerance" "5%"
-			(at 139.7 118.11 0)
+			(at 105.41 38.1 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -10219,7 +10219,7 @@
 			)
 		)
 		(property "Quote" "Rev 2.1: not yet quoted."
-			(at 139.7 118.11 0)
+			(at 105.41 38.1 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -10231,7 +10231,7 @@
 			)
 		)
 		(property "Note" "CH0 differential decoupling, AIN_0P to AIN_0GND at U8 (SBAS680 pin table: decouple each AIN_nP with its AIN_nGND). Without it AIN_0GND is a bare 18k node (review minor 2). C18 at the divider stays."
-			(at 139.7 118.11 0)
+			(at 105.41 38.1 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -10259,7 +10259,7 @@
 	)
 	(symbol
 		(lib_id "power:+5V")
-		(at 317.5 129.54 0)
+		(at 246.38 132.08 0)
 		(unit 1)
 		(body_style 1)
 		(exclude_from_sim no)
@@ -10269,7 +10269,7 @@
 		(dnp no)
 		(uuid "85816aec-acab-4a87-bb23-7ce370f87c56")
 		(property "Reference" "#PWR1018"
-			(at 320.04 128.27 0)
+			(at 248.92 130.81 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -10281,7 +10281,7 @@
 			)
 		)
 		(property "Value" "+5V"
-			(at 320.04 132.08 0)
+			(at 246.38 127.762 0)
 			(show_name no)
 			(do_not_autoplace no)
 			(effects
@@ -10291,7 +10291,7 @@
 			)
 		)
 		(property "Footprint" ""
-			(at 317.5 129.54 0)
+			(at 246.38 132.08 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -10302,7 +10302,7 @@
 			)
 		)
 		(property "Datasheet" ""
-			(at 317.5 129.54 0)
+			(at 246.38 132.08 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -10313,7 +10313,7 @@
 			)
 		)
 		(property "Description" ""
-			(at 317.5 129.54 0)
+			(at 246.38 132.08 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -10337,7 +10337,7 @@
 	)
 	(symbol
 		(lib_id "power:GND")
-		(at 124.46 205.74 0)
+		(at 119.38 177.8 0)
 		(unit 1)
 		(body_style 1)
 		(exclude_from_sim no)
@@ -10347,7 +10347,7 @@
 		(dnp no)
 		(uuid "880e7a56-4379-4add-a0cc-3c9115a57dfb")
 		(property "Reference" "#PWR1049"
-			(at 127 204.47 0)
+			(at 121.92 176.53 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -10359,7 +10359,7 @@
 			)
 		)
 		(property "Value" "GND"
-			(at 127 208.28 0)
+			(at 121.92 180.34 0)
 			(show_name no)
 			(do_not_autoplace no)
 			(effects
@@ -10369,7 +10369,7 @@
 			)
 		)
 		(property "Footprint" ""
-			(at 124.46 205.74 0)
+			(at 119.38 177.8 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -10380,7 +10380,7 @@
 			)
 		)
 		(property "Datasheet" ""
-			(at 124.46 205.74 0)
+			(at 119.38 177.8 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -10391,7 +10391,7 @@
 			)
 		)
 		(property "Description" ""
-			(at 124.46 205.74 0)
+			(at 119.38 177.8 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -10415,7 +10415,7 @@
 	)
 	(symbol
 		(lib_id "power:GND")
-		(at 335.28 187.96 90)
+		(at 264.16 190.5 90)
 		(unit 1)
 		(body_style 1)
 		(exclude_from_sim no)
@@ -10425,7 +10425,7 @@
 		(dnp no)
 		(uuid "8a6483b6-1b36-4b5f-b0f0-b94f2a05d5c0")
 		(property "Reference" "#PWR1017"
-			(at 337.82 186.69 0)
+			(at 266.7 189.23 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -10437,7 +10437,7 @@
 			)
 		)
 		(property "Value" "GND"
-			(at 337.82 190.5 0)
+			(at 266.7 193.04 0)
 			(show_name no)
 			(do_not_autoplace no)
 			(effects
@@ -10447,7 +10447,7 @@
 			)
 		)
 		(property "Footprint" ""
-			(at 335.28 187.96 0)
+			(at 264.16 190.5 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -10458,7 +10458,7 @@
 			)
 		)
 		(property "Datasheet" ""
-			(at 335.28 187.96 0)
+			(at 264.16 190.5 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -10469,7 +10469,7 @@
 			)
 		)
 		(property "Description" ""
-			(at 335.28 187.96 0)
+			(at 264.16 190.5 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -10493,7 +10493,7 @@
 	)
 	(symbol
 		(lib_id "Device:R")
-		(at 124.46 144.78 0)
+		(at 115.57 85.09 0)
 		(unit 1)
 		(body_style 1)
 		(exclude_from_sim no)
@@ -10503,7 +10503,7 @@
 		(dnp no)
 		(uuid "8b7f0a26-61e5-4670-8a11-ff1923e7fbd2")
 		(property "Reference" "R23"
-			(at 127 143.51 0)
+			(at 118.11 83.82 0)
 			(show_name no)
 			(do_not_autoplace no)
 			(effects
@@ -10514,7 +10514,7 @@
 			)
 		)
 		(property "Value" "1k"
-			(at 127 146.05 0)
+			(at 118.11 86.36 0)
 			(show_name no)
 			(do_not_autoplace no)
 			(effects
@@ -10525,7 +10525,7 @@
 			)
 		)
 		(property "Footprint" "Resistor_SMD:R_0603_1608Metric"
-			(at 124.46 144.78 0)
+			(at 115.57 85.09 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -10536,7 +10536,7 @@
 			)
 		)
 		(property "Datasheet" ""
-			(at 124.46 144.78 0)
+			(at 115.57 85.09 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -10547,7 +10547,7 @@
 			)
 		)
 		(property "Description" "Resistor"
-			(at 124.46 144.78 0)
+			(at 115.57 85.09 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -10558,7 +10558,7 @@
 			)
 		)
 		(property "Manufacturer" "Yageo"
-			(at 124.46 144.78 0)
+			(at 115.57 85.09 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -10570,7 +10570,7 @@
 			)
 		)
 		(property "MPN" "RC0603FR-071KL"
-			(at 124.46 144.78 0)
+			(at 115.57 85.09 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -10582,7 +10582,7 @@
 			)
 		)
 		(property "Power" "0.1W"
-			(at 124.46 144.78 0)
+			(at 115.57 85.09 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -10594,7 +10594,7 @@
 			)
 		)
 		(property "Tolerance" "1%"
-			(at 124.46 144.78 0)
+			(at 115.57 85.09 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -10606,7 +10606,7 @@
 			)
 		)
 		(property "Quote" "Rev 2.1: not yet quoted."
-			(at 124.46 144.78 0)
+			(at 115.57 85.09 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -10618,7 +10618,7 @@
 			)
 		)
 		(property "Note" "AIN_nGND source-impedance match, equal to this channel's series resistance (SBAS680 8.3.2)."
-			(at 124.46 144.78 0)
+			(at 115.57 85.09 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -10751,7 +10751,7 @@
 	)
 	(symbol
 		(lib_id "power:GND")
-		(at 335.28 162.56 90)
+		(at 264.16 165.1 90)
 		(unit 1)
 		(body_style 1)
 		(exclude_from_sim no)
@@ -10761,7 +10761,7 @@
 		(dnp no)
 		(uuid "93e10c3b-adbe-4b07-9fd2-4d2ff0de7971")
 		(property "Reference" "#PWR1016"
-			(at 337.82 161.29 0)
+			(at 266.7 163.83 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -10773,7 +10773,7 @@
 			)
 		)
 		(property "Value" "GND"
-			(at 337.82 165.1 0)
+			(at 268.732 165.1 0)
 			(show_name no)
 			(do_not_autoplace no)
 			(effects
@@ -10783,7 +10783,7 @@
 			)
 		)
 		(property "Footprint" ""
-			(at 335.28 162.56 0)
+			(at 264.16 165.1 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -10794,7 +10794,7 @@
 			)
 		)
 		(property "Datasheet" ""
-			(at 335.28 162.56 0)
+			(at 264.16 165.1 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -10805,7 +10805,7 @@
 			)
 		)
 		(property "Description" ""
-			(at 335.28 162.56 0)
+			(at 264.16 165.1 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -10829,7 +10829,7 @@
 	)
 	(symbol
 		(lib_id "power:GND")
-		(at 297.18 185.42 270)
+		(at 226.06 187.96 270)
 		(unit 1)
 		(body_style 1)
 		(exclude_from_sim no)
@@ -10839,7 +10839,7 @@
 		(dnp no)
 		(uuid "98ca2d7b-deb8-42e7-9fec-176959420ab3")
 		(property "Reference" "#PWR1019"
-			(at 299.72 184.15 0)
+			(at 228.6 186.69 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -10851,7 +10851,7 @@
 			)
 		)
 		(property "Value" "GND"
-			(at 299.72 187.96 0)
+			(at 218.186 187.706 0)
 			(show_name no)
 			(do_not_autoplace no)
 			(effects
@@ -10861,7 +10861,7 @@
 			)
 		)
 		(property "Footprint" ""
-			(at 297.18 185.42 0)
+			(at 226.06 187.96 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -10872,7 +10872,7 @@
 			)
 		)
 		(property "Datasheet" ""
-			(at 297.18 185.42 0)
+			(at 226.06 187.96 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -10883,7 +10883,7 @@
 			)
 		)
 		(property "Description" ""
-			(at 297.18 185.42 0)
+			(at 226.06 187.96 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -11063,7 +11063,7 @@
 	)
 	(symbol
 		(lib_id "power:GND")
-		(at 297.18 170.18 270)
+		(at 226.06 172.72 270)
 		(unit 1)
 		(body_style 1)
 		(exclude_from_sim no)
@@ -11073,7 +11073,7 @@
 		(dnp no)
 		(uuid "9f143616-0022-4988-a104-4180c1b5925d")
 		(property "Reference" "#PWR1023"
-			(at 299.72 168.91 0)
+			(at 228.6 171.45 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -11085,7 +11085,7 @@
 			)
 		)
 		(property "Value" "GND"
-			(at 299.72 172.72 0)
+			(at 228.6 175.26 0)
 			(show_name no)
 			(do_not_autoplace no)
 			(effects
@@ -11095,7 +11095,7 @@
 			)
 		)
 		(property "Footprint" ""
-			(at 297.18 170.18 0)
+			(at 226.06 172.72 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -11106,7 +11106,7 @@
 			)
 		)
 		(property "Datasheet" ""
-			(at 297.18 170.18 0)
+			(at 226.06 172.72 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -11117,7 +11117,7 @@
 			)
 		)
 		(property "Description" ""
-			(at 297.18 170.18 0)
+			(at 226.06 172.72 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -11141,7 +11141,7 @@
 	)
 	(symbol
 		(lib_id "power:GND")
-		(at 124.46 124.46 0)
+		(at 90.17 44.45 0)
 		(unit 1)
 		(body_style 1)
 		(exclude_from_sim no)
@@ -11151,7 +11151,7 @@
 		(dnp no)
 		(uuid "9f67bd5f-283c-48ee-9762-bc250e86fe69")
 		(property "Reference" "#PWR1041"
-			(at 127 123.19 0)
+			(at 92.71 43.18 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -11163,7 +11163,7 @@
 			)
 		)
 		(property "Value" "GND"
-			(at 127 127 0)
+			(at 92.71 46.99 0)
 			(show_name no)
 			(do_not_autoplace no)
 			(effects
@@ -11173,7 +11173,7 @@
 			)
 		)
 		(property "Footprint" ""
-			(at 124.46 124.46 0)
+			(at 90.17 44.45 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -11184,7 +11184,7 @@
 			)
 		)
 		(property "Datasheet" ""
-			(at 124.46 124.46 0)
+			(at 90.17 44.45 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -11195,7 +11195,7 @@
 			)
 		)
 		(property "Description" ""
-			(at 124.46 124.46 0)
+			(at 90.17 44.45 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -11297,7 +11297,7 @@
 	)
 	(symbol
 		(lib_id "power:GND")
-		(at 335.28 152.4 90)
+		(at 264.16 154.94 90)
 		(unit 1)
 		(body_style 1)
 		(exclude_from_sim no)
@@ -11307,7 +11307,7 @@
 		(dnp no)
 		(uuid "a54fdf69-df23-42eb-9dfd-1a3b85d470cf")
 		(property "Reference" "#PWR1015"
-			(at 337.82 151.13 0)
+			(at 266.7 153.67 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -11319,7 +11319,7 @@
 			)
 		)
 		(property "Value" "GND"
-			(at 337.82 154.94 0)
+			(at 268.224 155.956 0)
 			(show_name no)
 			(do_not_autoplace no)
 			(effects
@@ -11329,7 +11329,7 @@
 			)
 		)
 		(property "Footprint" ""
-			(at 335.28 152.4 0)
+			(at 264.16 154.94 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -11340,7 +11340,7 @@
 			)
 		)
 		(property "Datasheet" ""
-			(at 335.28 152.4 0)
+			(at 264.16 154.94 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -11351,7 +11351,7 @@
 			)
 		)
 		(property "Description" ""
-			(at 335.28 152.4 0)
+			(at 264.16 154.94 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -11375,7 +11375,7 @@
 	)
 	(symbol
 		(lib_id "power:GND")
-		(at 54.61 232.41 0)
+		(at 49.53 215.9 0)
 		(unit 1)
 		(body_style 1)
 		(exclude_from_sim no)
@@ -11385,7 +11385,7 @@
 		(dnp no)
 		(uuid "a73d0208-8ca3-4c03-9f07-0aebe1a9ab65")
 		(property "Reference" "#PWR1051"
-			(at 57.15 231.14 0)
+			(at 52.07 214.63 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -11397,7 +11397,7 @@
 			)
 		)
 		(property "Value" "GND"
-			(at 57.15 234.95 0)
+			(at 52.07 218.44 0)
 			(show_name no)
 			(do_not_autoplace no)
 			(effects
@@ -11407,7 +11407,7 @@
 			)
 		)
 		(property "Footprint" ""
-			(at 54.61 232.41 0)
+			(at 49.53 215.9 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -11418,7 +11418,7 @@
 			)
 		)
 		(property "Datasheet" ""
-			(at 54.61 232.41 0)
+			(at 49.53 215.9 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -11429,7 +11429,7 @@
 			)
 		)
 		(property "Description" ""
-			(at 54.61 232.41 0)
+			(at 49.53 215.9 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -11453,7 +11453,7 @@
 	)
 	(symbol
 		(lib_id "power:GND")
-		(at 36.83 232.41 0)
+		(at 31.75 215.9 0)
 		(unit 1)
 		(body_style 1)
 		(exclude_from_sim no)
@@ -11463,7 +11463,7 @@
 		(dnp no)
 		(uuid "a9a27f0f-6a07-4307-8df3-25c0b62cb59c")
 		(property "Reference" "#PWR1050"
-			(at 39.37 231.14 0)
+			(at 34.29 214.63 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -11475,7 +11475,7 @@
 			)
 		)
 		(property "Value" "GND"
-			(at 39.37 234.95 0)
+			(at 34.29 218.44 0)
 			(show_name no)
 			(do_not_autoplace no)
 			(effects
@@ -11485,7 +11485,7 @@
 			)
 		)
 		(property "Footprint" ""
-			(at 36.83 232.41 0)
+			(at 31.75 215.9 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -11496,7 +11496,7 @@
 			)
 		)
 		(property "Datasheet" ""
-			(at 36.83 232.41 0)
+			(at 31.75 215.9 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -11507,7 +11507,7 @@
 			)
 		)
 		(property "Description" ""
-			(at 36.83 232.41 0)
+			(at 31.75 215.9 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -11705,7 +11705,7 @@
 			)
 		)
 		(property "Value" "NUP2105L"
-			(at 222.25 45.72 0)
+			(at 219.202 40.894 0)
 			(show_name no)
 			(do_not_autoplace no)
 			(effects
@@ -11960,7 +11960,7 @@
 	)
 	(symbol
 		(lib_id "Device:R")
-		(at 36.83 226.06 0)
+		(at 31.75 209.55 0)
 		(unit 1)
 		(body_style 1)
 		(exclude_from_sim no)
@@ -11970,7 +11970,7 @@
 		(dnp no)
 		(uuid "c0fef390-cb4d-4f23-b75b-4c49546d337d")
 		(property "Reference" "R30"
-			(at 39.37 224.79 0)
+			(at 34.29 208.28 0)
 			(show_name no)
 			(do_not_autoplace no)
 			(effects
@@ -11981,7 +11981,7 @@
 			)
 		)
 		(property "Value" "100k"
-			(at 39.37 227.33 0)
+			(at 34.29 210.82 0)
 			(show_name no)
 			(do_not_autoplace no)
 			(effects
@@ -11992,7 +11992,7 @@
 			)
 		)
 		(property "Footprint" "Resistor_SMD:R_0603_1608Metric"
-			(at 36.83 226.06 0)
+			(at 31.75 209.55 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -12003,7 +12003,7 @@
 			)
 		)
 		(property "Datasheet" ""
-			(at 36.83 226.06 0)
+			(at 31.75 209.55 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -12014,7 +12014,7 @@
 			)
 		)
 		(property "Description" "Resistor"
-			(at 36.83 226.06 0)
+			(at 31.75 209.55 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -12025,7 +12025,7 @@
 			)
 		)
 		(property "Manufacturer" "Yageo"
-			(at 36.83 226.06 0)
+			(at 31.75 209.55 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -12037,7 +12037,7 @@
 			)
 		)
 		(property "MPN" "RC0603FR-07100KL"
-			(at 36.83 226.06 0)
+			(at 31.75 209.55 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -12049,7 +12049,7 @@
 			)
 		)
 		(property "Power" "0.1W"
-			(at 36.83 226.06 0)
+			(at 31.75 209.55 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -12061,7 +12061,7 @@
 			)
 		)
 		(property "Tolerance" "1%"
-			(at 36.83 226.06 0)
+			(at 31.75 209.55 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -12073,7 +12073,7 @@
 			)
 		)
 		(property "Quote" "Rev 2.1: not yet quoted."
-			(at 36.83 226.06 0)
+			(at 31.75 209.55 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -12085,7 +12085,7 @@
 			)
 		)
 		(property "Note" "FUEL_P open-wire pull-down: a broken WHITE wire must read 0 V, below the 0.50 V fault gate (open item 29), not U8's floating-input bias voltage. Loads the gauge's buffered output by < 50 uA."
-			(at 36.83 226.06 0)
+			(at 31.75 209.55 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -12299,7 +12299,7 @@
 			)
 		)
 		(property "Value" "NUP2105L"
-			(at 273.05 45.72 0)
+			(at 270.51 40.132 0)
 			(show_name no)
 			(do_not_autoplace no)
 			(effects
@@ -12398,7 +12398,7 @@
 	)
 	(symbol
 		(lib_id "Device:R")
-		(at 124.46 118.11 0)
+		(at 90.17 38.1 0)
 		(unit 1)
 		(body_style 1)
 		(exclude_from_sim no)
@@ -12408,7 +12408,7 @@
 		(dnp no)
 		(uuid "d4c60824-dae9-4239-9a01-f8f8525dc72a")
 		(property "Reference" "R19"
-			(at 127 116.84 0)
+			(at 92.71 36.83 0)
 			(show_name no)
 			(do_not_autoplace no)
 			(effects
@@ -12419,7 +12419,7 @@
 			)
 		)
 		(property "Value" "18k"
-			(at 127 119.38 0)
+			(at 92.71 39.37 0)
 			(show_name no)
 			(do_not_autoplace no)
 			(effects
@@ -12430,7 +12430,7 @@
 			)
 		)
 		(property "Footprint" "Resistor_SMD:R_0603_1608Metric"
-			(at 124.46 118.11 0)
+			(at 90.17 38.1 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -12441,7 +12441,7 @@
 			)
 		)
 		(property "Datasheet" ""
-			(at 124.46 118.11 0)
+			(at 90.17 38.1 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -12452,7 +12452,7 @@
 			)
 		)
 		(property "Description" "Resistor"
-			(at 124.46 118.11 0)
+			(at 90.17 38.1 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -12463,7 +12463,7 @@
 			)
 		)
 		(property "Manufacturer" "Yageo"
-			(at 124.46 118.11 0)
+			(at 90.17 38.1 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -12475,7 +12475,7 @@
 			)
 		)
 		(property "MPN" "RC0603FR-0718KL"
-			(at 124.46 118.11 0)
+			(at 90.17 38.1 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -12487,7 +12487,7 @@
 			)
 		)
 		(property "Power" "0.1W"
-			(at 124.46 118.11 0)
+			(at 90.17 38.1 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -12499,7 +12499,7 @@
 			)
 		)
 		(property "Tolerance" "1%"
-			(at 124.46 118.11 0)
+			(at 90.17 38.1 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -12511,7 +12511,7 @@
 			)
 		)
 		(property "Quote" "Rev 2.1: not yet quoted."
-			(at 124.46 118.11 0)
+			(at 90.17 38.1 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -12523,7 +12523,7 @@
 			)
 		)
 		(property "Note" "AIN_0GND match: R11 || R12 = 100k || 22k = 18.0 kohm. Cancels the offset of U8's (VIN - 2.5 V)/RIN leakage through the divider's source impedance, not the gain term: CH0 keeps a ~1.8 % (+/-15 % of that) gain error and must be calibrated (open item 23)."
-			(at 124.46 118.11 0)
+			(at 90.17 38.1 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -12629,7 +12629,7 @@
 	)
 	(symbol
 		(lib_id "power:GND")
-		(at 297.18 175.26 270)
+		(at 226.06 177.8 270)
 		(unit 1)
 		(body_style 1)
 		(exclude_from_sim no)
@@ -12639,7 +12639,7 @@
 		(dnp no)
 		(uuid "dd5b15bf-1a28-4702-88bc-a9d0d7e2e041")
 		(property "Reference" "#PWR1021"
-			(at 299.72 173.99 0)
+			(at 228.6 176.53 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -12651,7 +12651,7 @@
 			)
 		)
 		(property "Value" "GND"
-			(at 299.72 177.8 0)
+			(at 228.6 180.34 0)
 			(show_name no)
 			(do_not_autoplace no)
 			(effects
@@ -12661,7 +12661,7 @@
 			)
 		)
 		(property "Footprint" ""
-			(at 297.18 175.26 0)
+			(at 226.06 177.8 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -12672,7 +12672,7 @@
 			)
 		)
 		(property "Datasheet" ""
-			(at 297.18 175.26 0)
+			(at 226.06 177.8 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -12683,7 +12683,7 @@
 			)
 		)
 		(property "Description" ""
-			(at 297.18 175.26 0)
+			(at 226.06 177.8 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -12860,7 +12860,7 @@
 	)
 	(symbol
 		(lib_id "power:GND")
-		(at 297.18 180.34 270)
+		(at 226.06 182.88 270)
 		(unit 1)
 		(body_style 1)
 		(exclude_from_sim no)
@@ -12870,7 +12870,7 @@
 		(dnp no)
 		(uuid "e34391c7-c869-418a-9677-235f3a798a64")
 		(property "Reference" "#PWR1022"
-			(at 299.72 179.07 0)
+			(at 228.6 181.61 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -12882,7 +12882,7 @@
 			)
 		)
 		(property "Value" "GND"
-			(at 299.72 182.88 0)
+			(at 220.726 182.88 0)
 			(show_name no)
 			(do_not_autoplace no)
 			(effects
@@ -12892,7 +12892,7 @@
 			)
 		)
 		(property "Footprint" ""
-			(at 297.18 180.34 0)
+			(at 226.06 182.88 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -12903,7 +12903,7 @@
 			)
 		)
 		(property "Datasheet" ""
-			(at 297.18 180.34 0)
+			(at 226.06 182.88 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -12914,7 +12914,7 @@
 			)
 		)
 		(property "Description" ""
-			(at 297.18 180.34 0)
+			(at 226.06 182.88 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -13016,7 +13016,7 @@
 	)
 	(symbol
 		(lib_id "power:+3V3")
-		(at 335.28 157.48 270)
+		(at 264.16 160.02 270)
 		(unit 1)
 		(body_style 1)
 		(exclude_from_sim no)
@@ -13026,7 +13026,7 @@
 		(dnp no)
 		(uuid "e81cabe7-9a28-4363-96ca-821b9e603273")
 		(property "Reference" "#PWR1014"
-			(at 337.82 156.21 0)
+			(at 266.7 158.75 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -13038,7 +13038,7 @@
 			)
 		)
 		(property "Value" "+3V3"
-			(at 337.82 160.02 0)
+			(at 271.018 160.02 0)
 			(show_name no)
 			(do_not_autoplace no)
 			(effects
@@ -13048,7 +13048,7 @@
 			)
 		)
 		(property "Footprint" ""
-			(at 335.28 157.48 0)
+			(at 264.16 160.02 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -13059,7 +13059,7 @@
 			)
 		)
 		(property "Datasheet" ""
-			(at 335.28 157.48 0)
+			(at 264.16 160.02 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -13070,7 +13070,7 @@
 			)
 		)
 		(property "Description" ""
-			(at 335.28 157.48 0)
+			(at 264.16 160.02 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -13094,7 +13094,7 @@
 	)
 	(symbol
 		(lib_id "power:GND")
-		(at 322.58 200.66 0)
+		(at 251.46 203.2 0)
 		(unit 1)
 		(body_style 1)
 		(exclude_from_sim no)
@@ -13104,7 +13104,7 @@
 		(dnp no)
 		(uuid "ea10c3b5-8a2a-47ef-ada4-46f7dfacfd26")
 		(property "Reference" "#PWR1027"
-			(at 325.12 199.39 0)
+			(at 254 201.93 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -13116,7 +13116,7 @@
 			)
 		)
 		(property "Value" "GND"
-			(at 325.12 203.2 0)
+			(at 254 205.74 0)
 			(show_name no)
 			(do_not_autoplace no)
 			(effects
@@ -13126,7 +13126,7 @@
 			)
 		)
 		(property "Footprint" ""
-			(at 322.58 200.66 0)
+			(at 251.46 203.2 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -13137,7 +13137,7 @@
 			)
 		)
 		(property "Datasheet" ""
-			(at 322.58 200.66 0)
+			(at 251.46 203.2 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -13148,7 +13148,7 @@
 			)
 		)
 		(property "Description" ""
-			(at 322.58 200.66 0)
+			(at 251.46 203.2 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -13568,7 +13568,7 @@
 	)
 	(symbol
 		(lib_id "Device:C")
-		(at 105.41 199.39 0)
+		(at 100.33 171.45 0)
 		(unit 1)
 		(body_style 1)
 		(exclude_from_sim no)
@@ -13578,7 +13578,7 @@
 		(dnp no)
 		(uuid "f7b9a6c1-a0c4-4ce5-9647-4c434eeca707")
 		(property "Reference" "C30"
-			(at 107.95 198.12 0)
+			(at 102.87 170.18 0)
 			(show_name no)
 			(do_not_autoplace no)
 			(effects
@@ -13589,7 +13589,7 @@
 			)
 		)
 		(property "Value" "100n"
-			(at 107.95 200.66 0)
+			(at 102.87 172.72 0)
 			(show_name no)
 			(do_not_autoplace no)
 			(effects
@@ -13600,7 +13600,7 @@
 			)
 		)
 		(property "Footprint" "Capacitor_SMD:C_0603_1608Metric"
-			(at 105.41 199.39 0)
+			(at 100.33 171.45 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -13611,7 +13611,7 @@
 			)
 		)
 		(property "Datasheet" ""
-			(at 105.41 199.39 0)
+			(at 100.33 171.45 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -13622,7 +13622,7 @@
 			)
 		)
 		(property "Description" "Unpolarized capacitor"
-			(at 105.41 199.39 0)
+			(at 100.33 171.45 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -13633,7 +13633,7 @@
 			)
 		)
 		(property "Manufacturer" "Samsung Electro-Mechanics"
-			(at 105.41 199.39 0)
+			(at 100.33 171.45 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -13645,7 +13645,7 @@
 			)
 		)
 		(property "MPN" "CL10B104KB8NNNC"
-			(at 105.41 199.39 0)
+			(at 100.33 171.45 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -13657,7 +13657,7 @@
 			)
 		)
 		(property "Voltage" "50V"
-			(at 105.41 199.39 0)
+			(at 100.33 171.45 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -13669,7 +13669,7 @@
 			)
 		)
 		(property "Dielectric" "X7R"
-			(at 105.41 199.39 0)
+			(at 100.33 171.45 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -13681,7 +13681,7 @@
 			)
 		)
 		(property "Tolerance" "10%"
-			(at 105.41 199.39 0)
+			(at 100.33 171.45 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -13693,7 +13693,7 @@
 			)
 		)
 		(property "Quote" "Rev 2.1: not yet quoted."
-			(at 105.41 199.39 0)
+			(at 100.33 171.45 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -13705,7 +13705,7 @@
 			)
 		)
 		(property "Note" "5V_SENS filter, differential: AIN_3P to AIN_3GND at U8 (SBAS680 pin table). CH3 headroom is thin: 5V_SENS up to 5.10 V vs ~5.116 V full scale; the driver treats a full-scale CH3 code as clipped."
-			(at 105.41 199.39 0)
+			(at 100.33 171.45 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -14171,7 +14171,7 @@
 	)
 	(symbol
 		(lib_id "power:GND")
-		(at 36.83 151.13 0)
+		(at 27.94 91.44 0)
 		(unit 1)
 		(body_style 1)
 		(exclude_from_sim no)
@@ -14181,7 +14181,7 @@
 		(dnp no)
 		(uuid "fb9b8800-ba9a-468d-a82c-30b21dc40c94")
 		(property "Reference" "#PWR1042"
-			(at 39.37 149.86 0)
+			(at 30.48 90.17 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -14193,7 +14193,7 @@
 			)
 		)
 		(property "Value" "GND"
-			(at 39.37 153.67 0)
+			(at 30.48 93.98 0)
 			(show_name no)
 			(do_not_autoplace no)
 			(effects
@@ -14203,7 +14203,7 @@
 			)
 		)
 		(property "Footprint" ""
-			(at 36.83 151.13 0)
+			(at 27.94 91.44 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -14214,7 +14214,7 @@
 			)
 		)
 		(property "Datasheet" ""
-			(at 36.83 151.13 0)
+			(at 27.94 91.44 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -14225,7 +14225,7 @@
 			)
 		)
 		(property "Description" ""
-			(at 36.83 151.13 0)
+			(at 27.94 91.44 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)

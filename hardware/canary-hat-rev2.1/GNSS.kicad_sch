@@ -1787,72 +1787,72 @@
 		)
 	)
 	(junction
-		(at 171.45 83.82)
+		(at 130.81 97.79)
 		(diameter 0)
 		(color 0 0 0 0)
 		(uuid "4db884cf-7f46-4ef0-b997-4ffce21ca529")
 	)
 	(junction
-		(at 156.21 83.82)
+		(at 115.57 97.79)
 		(diameter 0)
 		(color 0 0 0 0)
 		(uuid "99d6c49f-6d93-4646-8715-fb873081f2ae")
 	)
 	(junction
-		(at 162.56 46.99)
+		(at 121.92 60.96)
 		(diameter 0)
 		(color 0 0 0 0)
 		(uuid "9f9cc78e-52eb-40d3-899e-aa07c066cea1")
 	)
 	(junction
-		(at 262.89 95.25)
+		(at 222.25 109.22)
 		(diameter 0)
 		(color 0 0 0 0)
 		(uuid "cc98f04f-1c36-4926-b089-eae91deb4420")
 	)
 	(junction
-		(at 149.86 83.82)
+		(at 109.22 97.79)
 		(diameter 0)
 		(color 0 0 0 0)
 		(uuid "dd3d21f5-9f7b-4190-a045-3619ae9aabb6")
 	)
 	(junction
-		(at 241.3 88.9)
+		(at 200.66 102.87)
 		(diameter 0)
 		(color 0 0 0 0)
 		(uuid "fd1d474f-b68f-4e1e-852e-badae4cbc366")
 	)
 	(no_connect
-		(at 237.49 68.58)
+		(at 196.85 82.55)
 		(uuid "06d8e672-5551-410d-9ed4-02c33925f7c8")
 	)
 	(no_connect
-		(at 237.49 81.28)
+		(at 196.85 95.25)
 		(uuid "30a3ccb5-3e24-4490-9fe3-45e038620e23")
 	)
 	(no_connect
-		(at 237.49 73.66)
+		(at 196.85 87.63)
 		(uuid "8f25742b-fb18-494b-aed1-e0cb71a188a4")
 	)
 	(no_connect
-		(at 171.45 78.74)
+		(at 130.81 92.71)
 		(uuid "8fffbee8-c35a-4c57-a2c3-bbaf7c6a7f56")
 	)
 	(no_connect
-		(at 237.49 71.12)
+		(at 196.85 85.09)
 		(uuid "a394b473-df48-45b0-9eb8-186556c35f18")
 	)
 	(no_connect
-		(at 237.49 76.2)
+		(at 196.85 90.17)
 		(uuid "f5d58e51-085d-4f02-95f9-0fab84b571ff")
 	)
 	(no_connect
-		(at 171.45 88.9)
+		(at 130.81 102.87)
 		(uuid "fa7aeebf-4286-4cf4-8777-3c8f18d1b966")
 	)
 	(wire
 		(pts
-			(xy 237.49 86.36) (xy 245.11 86.36)
+			(xy 196.85 100.33) (xy 204.47 100.33)
 		)
 		(stroke
 			(width 0)
@@ -1862,7 +1862,7 @@
 	)
 	(wire
 		(pts
-			(xy 166.37 46.99) (xy 162.56 46.99)
+			(xy 125.73 60.96) (xy 121.92 60.96)
 		)
 		(stroke
 			(width 0)
@@ -1872,7 +1872,7 @@
 	)
 	(wire
 		(pts
-			(xy 167.64 68.58) (xy 167.64 101.6)
+			(xy 127 82.55) (xy 127 115.57)
 		)
 		(stroke
 			(width 0)
@@ -1882,7 +1882,7 @@
 	)
 	(wire
 		(pts
-			(xy 171.45 71.12) (xy 158.75 71.12)
+			(xy 130.81 85.09) (xy 118.11 85.09)
 		)
 		(stroke
 			(width 0)
@@ -1892,7 +1892,7 @@
 	)
 	(wire
 		(pts
-			(xy 237.49 88.9) (xy 241.3 88.9)
+			(xy 196.85 102.87) (xy 200.66 102.87)
 		)
 		(stroke
 			(width 0)
@@ -1902,7 +1902,7 @@
 	)
 	(wire
 		(pts
-			(xy 149.86 82.55) (xy 149.86 83.82)
+			(xy 109.22 96.52) (xy 109.22 97.79)
 		)
 		(stroke
 			(width 0)
@@ -1912,7 +1912,7 @@
 	)
 	(wire
 		(pts
-			(xy 158.75 73.66) (xy 171.45 73.66)
+			(xy 118.11 87.63) (xy 130.81 87.63)
 		)
 		(stroke
 			(width 0)
@@ -1922,7 +1922,7 @@
 	)
 	(wire
 		(pts
-			(xy 237.49 83.82) (xy 241.3 83.82)
+			(xy 196.85 97.79) (xy 200.66 97.79)
 		)
 		(stroke
 			(width 0)
@@ -1932,7 +1932,7 @@
 	)
 	(wire
 		(pts
-			(xy 107.95 46.99) (xy 107.95 52.07)
+			(xy 67.31 60.96) (xy 67.31 66.04)
 		)
 		(stroke
 			(width 0)
@@ -1942,7 +1942,7 @@
 	)
 	(wire
 		(pts
-			(xy 156.21 90.17) (xy 156.21 83.82)
+			(xy 115.57 104.14) (xy 115.57 97.79)
 		)
 		(stroke
 			(width 0)
@@ -1952,7 +1952,7 @@
 	)
 	(wire
 		(pts
-			(xy 171.45 68.58) (xy 167.64 68.58)
+			(xy 130.81 82.55) (xy 127 82.55)
 		)
 		(stroke
 			(width 0)
@@ -1962,7 +1962,7 @@
 	)
 	(wire
 		(pts
-			(xy 262.89 95.25) (xy 270.51 95.25)
+			(xy 222.25 109.22) (xy 229.87 109.22)
 		)
 		(stroke
 			(width 0)
@@ -1972,7 +1972,7 @@
 	)
 	(wire
 		(pts
-			(xy 171.45 86.36) (xy 171.45 83.82)
+			(xy 130.81 100.33) (xy 130.81 97.79)
 		)
 		(stroke
 			(width 0)
@@ -1982,7 +1982,7 @@
 	)
 	(wire
 		(pts
-			(xy 158.75 76.2) (xy 171.45 76.2)
+			(xy 118.11 90.17) (xy 130.81 90.17)
 		)
 		(stroke
 			(width 0)
@@ -1992,7 +1992,7 @@
 	)
 	(wire
 		(pts
-			(xy 166.37 44.45) (xy 166.37 46.99)
+			(xy 125.73 58.42) (xy 125.73 60.96)
 		)
 		(stroke
 			(width 0)
@@ -2002,7 +2002,7 @@
 	)
 	(wire
 		(pts
-			(xy 156.21 97.79) (xy 156.21 101.6)
+			(xy 115.57 111.76) (xy 115.57 115.57)
 		)
 		(stroke
 			(width 0)
@@ -2012,7 +2012,7 @@
 	)
 	(wire
 		(pts
-			(xy 241.3 88.9) (xy 241.3 102.87)
+			(xy 200.66 102.87) (xy 200.66 116.84)
 		)
 		(stroke
 			(width 0)
@@ -2022,7 +2022,7 @@
 	)
 	(wire
 		(pts
-			(xy 245.11 86.36) (xy 245.11 95.25)
+			(xy 204.47 100.33) (xy 204.47 109.22)
 		)
 		(stroke
 			(width 0)
@@ -2032,7 +2032,7 @@
 	)
 	(wire
 		(pts
-			(xy 245.11 95.25) (xy 248.92 95.25)
+			(xy 204.47 109.22) (xy 208.28 109.22)
 		)
 		(stroke
 			(width 0)
@@ -2042,7 +2042,7 @@
 	)
 	(wire
 		(pts
-			(xy 162.56 81.28) (xy 162.56 46.99)
+			(xy 121.92 95.25) (xy 121.92 60.96)
 		)
 		(stroke
 			(width 0)
@@ -2052,7 +2052,7 @@
 	)
 	(wire
 		(pts
-			(xy 156.21 83.82) (xy 149.86 83.82)
+			(xy 115.57 97.79) (xy 109.22 97.79)
 		)
 		(stroke
 			(width 0)
@@ -2062,7 +2062,7 @@
 	)
 	(wire
 		(pts
-			(xy 262.89 78.74) (xy 262.89 80.01)
+			(xy 222.25 92.71) (xy 222.25 93.98)
 		)
 		(stroke
 			(width 0)
@@ -2072,7 +2072,7 @@
 	)
 	(wire
 		(pts
-			(xy 118.11 46.99) (xy 134.62 46.99)
+			(xy 77.47 60.96) (xy 93.98 60.96)
 		)
 		(stroke
 			(width 0)
@@ -2082,7 +2082,7 @@
 	)
 	(wire
 		(pts
-			(xy 162.56 81.28) (xy 171.45 81.28)
+			(xy 121.92 95.25) (xy 130.81 95.25)
 		)
 		(stroke
 			(width 0)
@@ -2092,7 +2092,7 @@
 	)
 	(wire
 		(pts
-			(xy 142.24 46.99) (xy 162.56 46.99)
+			(xy 101.6 60.96) (xy 121.92 60.96)
 		)
 		(stroke
 			(width 0)
@@ -2102,7 +2102,7 @@
 	)
 	(wire
 		(pts
-			(xy 110.49 46.99) (xy 107.95 46.99)
+			(xy 69.85 60.96) (xy 67.31 60.96)
 		)
 		(stroke
 			(width 0)
@@ -2112,7 +2112,7 @@
 	)
 	(wire
 		(pts
-			(xy 156.21 83.82) (xy 171.45 83.82)
+			(xy 115.57 97.79) (xy 130.81 97.79)
 		)
 		(stroke
 			(width 0)
@@ -2122,7 +2122,7 @@
 	)
 	(wire
 		(pts
-			(xy 275.59 100.33) (xy 275.59 102.87)
+			(xy 234.95 114.3) (xy 234.95 116.84)
 		)
 		(stroke
 			(width 0)
@@ -2132,7 +2132,7 @@
 	)
 	(wire
 		(pts
-			(xy 241.3 83.82) (xy 241.3 88.9)
+			(xy 200.66 97.79) (xy 200.66 102.87)
 		)
 		(stroke
 			(width 0)
@@ -2142,7 +2142,7 @@
 	)
 	(wire
 		(pts
-			(xy 262.89 87.63) (xy 262.89 95.25)
+			(xy 222.25 101.6) (xy 222.25 109.22)
 		)
 		(stroke
 			(width 0)
@@ -2152,7 +2152,7 @@
 	)
 	(wire
 		(pts
-			(xy 237.49 78.74) (xy 262.89 78.74)
+			(xy 196.85 92.71) (xy 222.25 92.71)
 		)
 		(stroke
 			(width 0)
@@ -2162,7 +2162,7 @@
 	)
 	(wire
 		(pts
-			(xy 149.86 83.82) (xy 149.86 90.17)
+			(xy 109.22 97.79) (xy 109.22 104.14)
 		)
 		(stroke
 			(width 0)
@@ -2172,7 +2172,7 @@
 	)
 	(wire
 		(pts
-			(xy 149.86 97.79) (xy 149.86 101.6)
+			(xy 109.22 111.76) (xy 109.22 115.57)
 		)
 		(stroke
 			(width 0)
@@ -2182,7 +2182,7 @@
 	)
 	(wire
 		(pts
-			(xy 256.54 95.25) (xy 262.89 95.25)
+			(xy 215.9 109.22) (xy 222.25 109.22)
 		)
 		(stroke
 			(width 0)
@@ -2192,7 +2192,7 @@
 	)
 	(hierarchical_label "PPS"
 		(shape output)
-		(at 158.75 76.2 180)
+		(at 118.11 90.17 180)
 		(effects
 			(font
 				(size 1.27 1.27)
@@ -2203,7 +2203,7 @@
 	)
 	(hierarchical_label "UART1_RXD"
 		(shape output)
-		(at 158.75 71.12 180)
+		(at 118.11 85.09 180)
 		(effects
 			(font
 				(size 1.27 1.27)
@@ -2214,7 +2214,7 @@
 	)
 	(hierarchical_label "UART1_TXD"
 		(shape input)
-		(at 158.75 73.66 180)
+		(at 118.11 87.63 180)
 		(effects
 			(font
 				(size 1.27 1.27)
@@ -2225,7 +2225,7 @@
 	)
 	(symbol
 		(lib_id "Device:C")
-		(at 149.86 93.98 0)
+		(at 109.22 107.95 0)
 		(unit 1)
 		(body_style 1)
 		(exclude_from_sim no)
@@ -2235,7 +2235,7 @@
 		(dnp no)
 		(uuid "031a9744-bf3a-4be1-a3c1-79e374fa285b")
 		(property "Reference" "C15"
-			(at 140.716 92.71 0)
+			(at 100.076 106.68 0)
 			(show_name no)
 			(do_not_autoplace no)
 			(effects
@@ -2246,7 +2246,7 @@
 			)
 		)
 		(property "Value" "10u"
-			(at 140.716 95.25 0)
+			(at 100.076 109.22 0)
 			(show_name no)
 			(do_not_autoplace no)
 			(effects
@@ -2257,7 +2257,7 @@
 			)
 		)
 		(property "Footprint" "Capacitor_SMD:C_1210_3225Metric"
-			(at 150.8252 97.79 0)
+			(at 110.1852 111.76 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -2268,7 +2268,7 @@
 			)
 		)
 		(property "Datasheet" ""
-			(at 149.86 93.98 0)
+			(at 109.22 107.95 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -2279,7 +2279,7 @@
 			)
 		)
 		(property "Description" "Unpolarized capacitor"
-			(at 149.86 93.98 0)
+			(at 109.22 107.95 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -2290,7 +2290,7 @@
 			)
 		)
 		(property "Manufacturer" "Samsung Electro-Mechanics"
-			(at 0 0 0)
+			(at -40.64 13.97 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -2302,7 +2302,7 @@
 			)
 		)
 		(property "Note" "Check DC-bias derating - 1210 X7R at 3.3V"
-			(at 140.716 92.71 0)
+			(at 100.076 106.68 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -2314,7 +2314,7 @@
 			)
 		)
 		(property "Tolerance" "10%"
-			(at 140.716 92.71 0)
+			(at 100.076 106.68 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -2326,7 +2326,7 @@
 			)
 		)
 		(property "Voltage" "25V"
-			(at 140.716 92.71 0)
+			(at 100.076 106.68 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -2338,7 +2338,7 @@
 			)
 		)
 		(property "Dielectric" "X7R"
-			(at 140.716 92.71 0)
+			(at 100.076 106.68 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -2350,7 +2350,7 @@
 			)
 		)
 		(property "MPN" "CL32B106KAJNNNE"
-			(at 149.86 93.98 0)
+			(at 109.22 107.95 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -2361,7 +2361,7 @@
 			)
 		)
 		(property "Cost_5u" "0.689"
-			(at 149.86 93.98 0)
+			(at 109.22 107.95 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -2372,7 +2372,7 @@
 			)
 		)
 		(property "Quote" "PCBWay T-B4W341056A (5 units, 2026-08-14): PCBWay-selected part, quoted. Manufacturer not stated on the quote."
-			(at 149.86 93.98 0)
+			(at 109.22 107.95 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -2399,7 +2399,7 @@
 	)
 	(symbol
 		(lib_id "2026-08-09_22-23-41:MAX-M10M-00B")
-		(at 171.45 68.58 0)
+		(at 130.81 82.55 0)
 		(unit 1)
 		(body_style 1)
 		(exclude_from_sim no)
@@ -2410,7 +2410,7 @@
 		(fields_autoplaced yes)
 		(uuid "0799a066-5801-4ae6-b327-071c6f8fa64b")
 		(property "Reference" "U7"
-			(at 204.47 58.42 0)
+			(at 163.83 72.39 0)
 			(show_name no)
 			(do_not_autoplace no)
 			(effects
@@ -2420,7 +2420,7 @@
 			)
 		)
 		(property "Value" "MAX-M10M-00B"
-			(at 204.47 60.96 0)
+			(at 163.83 74.93 0)
 			(show_name no)
 			(do_not_autoplace no)
 			(effects
@@ -2430,7 +2430,7 @@
 			)
 		)
 		(property "Footprint" "footprints:MOD18_MAX-M10M_UBL"
-			(at 171.45 68.58 0)
+			(at 130.81 82.55 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -2442,7 +2442,7 @@
 			)
 		)
 		(property "Datasheet" "MAX-M10M-00B"
-			(at 171.45 68.58 0)
+			(at 130.81 82.55 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -2454,7 +2454,7 @@
 			)
 		)
 		(property "Description" "GNSS receiver module, UART, LCC 9.7x10.1mm, no on-module SAW/LNA"
-			(at 204.47 58.42 0)
+			(at 163.83 72.39 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -2466,7 +2466,7 @@
 			)
 		)
 		(property "Note" "GNSS module. VIO_SEL left open selects 3.3V. V_BCKP draws 32 uA in hardware backup (Pi off) and ~3 uA running - so a CR2032 on BT1 is roughly 10 MONTHS, not indefinite; losing it costs both hot-start ephemeris and any configuration held in battery-backed RAM. Abs max on that pin is 3.6V. Antenna bias comes from the module's own VCC_RF (VCC - 0.1V = 3.2V) through L1; ICC_RF 100 mA is an ABSOLUTE MAXIMUM and the part has no internal protection, so a shorted coax kills it - the antenna supervisor that would prevent this is deferred to rev 3.0 and needs external MOSFETs plus a sense shunt. Config has three layers: RAM, battery-backed RAM (survives while V_BCKP holds) and a 74-byte one-time-programmable store applied at every startup. Internal LNA has three gain modes - use low gain at 15 dB or more of external antenna gain, bypass at 25 dB or more, to improve immunity against the Pi's WiFi hotspot at 1.575 GHz."
-			(at 0 0 0)
+			(at -40.64 13.97 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -2478,7 +2478,7 @@
 			)
 		)
 		(property "Manufacturer" "u-blox"
-			(at 204.47 58.42 0)
+			(at 163.83 72.39 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -2490,7 +2490,7 @@
 			)
 		)
 		(property "MPN" "MAX-M10M-00B"
-			(at 204.47 58.42 0)
+			(at 163.83 72.39 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -2502,7 +2502,7 @@
 			)
 		)
 		(property "Cost_5u" "10.741"
-			(at 171.45 68.58 0)
+			(at 130.81 82.55 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -2513,7 +2513,7 @@
 			)
 		)
 		(property "Quote" "PCBWay T-B4W341056A (5 units, 2026-08-14): quoted as specified. 7-10 workday lead time - the longest-lead part on the board and half the component cost."
-			(at 171.45 68.58 0)
+			(at 130.81 82.55 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -2588,7 +2588,7 @@
 	)
 	(symbol
 		(lib_id "Device:L")
-		(at 262.89 83.82 0)
+		(at 222.25 97.79 0)
 		(unit 1)
 		(body_style 1)
 		(exclude_from_sim no)
@@ -2599,7 +2599,7 @@
 		(fields_autoplaced yes)
 		(uuid "10c86261-cf70-4233-8339-61b57133a6c6")
 		(property "Reference" "L1"
-			(at 264.16 82.5499 0)
+			(at 223.52 96.5199 0)
 			(show_name no)
 			(do_not_autoplace no)
 			(effects
@@ -2610,7 +2610,7 @@
 			)
 		)
 		(property "Value" "27n"
-			(at 264.16 85.0899 0)
+			(at 223.52 99.0599 0)
 			(show_name no)
 			(do_not_autoplace no)
 			(effects
@@ -2621,7 +2621,7 @@
 			)
 		)
 		(property "Footprint" "Inductor_SMD:L_0603_1608Metric"
-			(at 262.89 83.82 0)
+			(at 222.25 97.79 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -2632,7 +2632,7 @@
 			)
 		)
 		(property "Datasheet" ""
-			(at 262.89 83.82 0)
+			(at 222.25 97.79 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -2643,7 +2643,7 @@
 			)
 		)
 		(property "Description" "Inductor"
-			(at 262.89 83.82 0)
+			(at 222.25 97.79 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -2654,7 +2654,7 @@
 			)
 		)
 		(property "Manufacturer" "Murata"
-			(at 0 0 0)
+			(at -40.64 13.97 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -2666,7 +2666,7 @@
 			)
 		)
 		(property "Note" "GNSS antenna bias feed inductor. 27 nH matches u-blox's recommended L3 value exactly. The requirement behind it is not a value to round: the inductor must resonate at L1 frequency to present >500 ohm series impedance so the feed point does not load the 50 ohm line, and must be rated above 300 mA. Pairs with C16 as the bias-T."
-			(at 0 0 0)
+			(at -40.64 13.97 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -2678,7 +2678,7 @@
 			)
 		)
 		(property "MPN" "LQG18HN27NJ00D"
-			(at 262.89 83.82 0)
+			(at 222.25 97.79 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -2689,7 +2689,7 @@
 			)
 		)
 		(property "Cost_5u" "0.330"
-			(at 262.89 83.82 0)
+			(at 222.25 97.79 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -2700,7 +2700,7 @@
 			)
 		)
 		(property "Quote" "PCBWay T-B4W341056A (5 units, 2026-08-14): quoted as specified."
-			(at 262.89 83.82 0)
+			(at 222.25 97.79 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -2727,7 +2727,7 @@
 	)
 	(symbol
 		(lib_id "power:PWR_FLAG")
-		(at 166.37 44.45 0)
+		(at 125.73 58.42 0)
 		(unit 1)
 		(body_style 1)
 		(exclude_from_sim no)
@@ -2737,7 +2737,7 @@
 		(dnp no)
 		(uuid "26d3cd7a-065d-4674-a21a-c64a6a296e1a")
 		(property "Reference" "#FLG05"
-			(at 166.37 42.545 0)
+			(at 125.73 56.515 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -2748,7 +2748,7 @@
 			)
 		)
 		(property "Value" "PWR_FLAG"
-			(at 165.862 39.624 0)
+			(at 125.222 53.594 0)
 			(show_name no)
 			(do_not_autoplace no)
 			(effects
@@ -2758,7 +2758,7 @@
 			)
 		)
 		(property "Footprint" ""
-			(at 166.37 44.45 0)
+			(at 125.73 58.42 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -2769,7 +2769,7 @@
 			)
 		)
 		(property "Datasheet" ""
-			(at 166.37 44.45 0)
+			(at 125.73 58.42 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -2780,7 +2780,7 @@
 			)
 		)
 		(property "Description" "Special symbol for telling ERC where power comes from"
-			(at 166.37 44.45 0)
+			(at 125.73 58.42 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -2804,7 +2804,7 @@
 	)
 	(symbol
 		(lib_id "power:GND")
-		(at 156.21 101.6 0)
+		(at 115.57 115.57 0)
 		(unit 1)
 		(body_style 1)
 		(exclude_from_sim no)
@@ -2815,7 +2815,7 @@
 		(fields_autoplaced yes)
 		(uuid "31cb964a-a0e4-4757-8f77-537994ed94b7")
 		(property "Reference" "#PWR043"
-			(at 156.21 107.95 0)
+			(at 115.57 121.92 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -2826,7 +2826,7 @@
 			)
 		)
 		(property "Value" "GND"
-			(at 156.21 106.68 0)
+			(at 115.57 120.65 0)
 			(show_name no)
 			(do_not_autoplace no)
 			(effects
@@ -2836,7 +2836,7 @@
 			)
 		)
 		(property "Footprint" ""
-			(at 156.21 101.6 0)
+			(at 115.57 115.57 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -2847,7 +2847,7 @@
 			)
 		)
 		(property "Datasheet" ""
-			(at 156.21 101.6 0)
+			(at 115.57 115.57 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -2858,7 +2858,7 @@
 			)
 		)
 		(property "Description" "Power symbol creates a global label with name \"GND\" , ground"
-			(at 156.21 101.6 0)
+			(at 115.57 115.57 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -2882,7 +2882,7 @@
 	)
 	(symbol
 		(lib_id "Device:C")
-		(at 252.73 95.25 90)
+		(at 212.09 109.22 90)
 		(unit 1)
 		(body_style 1)
 		(exclude_from_sim no)
@@ -2893,7 +2893,7 @@
 		(fields_autoplaced yes)
 		(uuid "49227434-f110-4941-b28f-724ad21c381a")
 		(property "Reference" "C16"
-			(at 252.73 87.63 90)
+			(at 212.09 101.6 90)
 			(show_name no)
 			(do_not_autoplace no)
 			(effects
@@ -2903,7 +2903,7 @@
 			)
 		)
 		(property "Value" "15p"
-			(at 252.73 90.17 90)
+			(at 212.09 104.14 90)
 			(show_name no)
 			(do_not_autoplace no)
 			(effects
@@ -2913,7 +2913,7 @@
 			)
 		)
 		(property "Footprint" "Capacitor_SMD:C_0402_1005Metric"
-			(at 256.54 94.2848 0)
+			(at 215.9 108.2548 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -2924,7 +2924,7 @@
 			)
 		)
 		(property "Datasheet" ""
-			(at 252.73 95.25 0)
+			(at 212.09 109.22 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -2935,7 +2935,7 @@
 			)
 		)
 		(property "Description" "Unpolarized capacitor"
-			(at 252.73 95.25 0)
+			(at 212.09 109.22 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -2946,7 +2946,7 @@
 			)
 		)
 		(property "Manufacturer" "Yageo"
-			(at 0 0 0)
+			(at -40.64 13.97 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -2958,7 +2958,7 @@
 			)
 		)
 		(property "Note" "GNSS RF DC block. 15pF is SRF-tuned, not arbitrary: an 0402's ~0.6nH mounted ESL resonates near 1.575 GHz at this value, so series impedance nearly vanishes. A larger cap is NOT safer here - above SRF the ESL dominates and 10nF would present ~9 ohm. C0G for Q."
-			(at 252.73 87.63 0)
+			(at 212.09 101.6 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -2970,7 +2970,7 @@
 			)
 		)
 		(property "Tolerance" "5%"
-			(at 252.73 87.63 0)
+			(at 212.09 101.6 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -2982,7 +2982,7 @@
 			)
 		)
 		(property "Voltage" "50V"
-			(at 252.73 87.63 0)
+			(at 212.09 101.6 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -2994,7 +2994,7 @@
 			)
 		)
 		(property "Dielectric" "C0G/NP0"
-			(at 252.73 87.63 0)
+			(at 212.09 101.6 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -3006,7 +3006,7 @@
 			)
 		)
 		(property "MPN" "CC0402JRNPO9BN150"
-			(at 252.73 95.25 0)
+			(at 212.09 109.22 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -3017,7 +3017,7 @@
 			)
 		)
 		(property "Cost_5u" "0.100"
-			(at 252.73 95.25 0)
+			(at 212.09 109.22 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -3028,7 +3028,7 @@
 			)
 		)
 		(property "Quote" "PCBWay T-B4W341056A (5 units, 2026-08-14): PCBWay-selected part, quoted. Manufacturer not stated on the quote."
-			(at 252.73 95.25 0)
+			(at 212.09 109.22 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -3055,7 +3055,7 @@
 	)
 	(symbol
 		(lib_id "power:GND")
-		(at 241.3 102.87 0)
+		(at 200.66 116.84 0)
 		(unit 1)
 		(body_style 1)
 		(exclude_from_sim no)
@@ -3066,7 +3066,7 @@
 		(fields_autoplaced yes)
 		(uuid "5fe99da4-4310-44f0-afb5-12684e80ef35")
 		(property "Reference" "#PWR041"
-			(at 241.3 109.22 0)
+			(at 200.66 123.19 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -3077,7 +3077,7 @@
 			)
 		)
 		(property "Value" "GND"
-			(at 241.3 107.95 0)
+			(at 200.66 121.92 0)
 			(show_name no)
 			(do_not_autoplace no)
 			(effects
@@ -3087,7 +3087,7 @@
 			)
 		)
 		(property "Footprint" ""
-			(at 241.3 102.87 0)
+			(at 200.66 116.84 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -3098,7 +3098,7 @@
 			)
 		)
 		(property "Datasheet" ""
-			(at 241.3 102.87 0)
+			(at 200.66 116.84 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -3109,7 +3109,7 @@
 			)
 		)
 		(property "Description" "Power symbol creates a global label with name \"GND\" , ground"
-			(at 241.3 102.87 0)
+			(at 200.66 116.84 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -3133,7 +3133,7 @@
 	)
 	(symbol
 		(lib_id "power:GND")
-		(at 107.95 52.07 0)
+		(at 67.31 66.04 0)
 		(unit 1)
 		(body_style 1)
 		(exclude_from_sim no)
@@ -3144,7 +3144,7 @@
 		(fields_autoplaced yes)
 		(uuid "74843189-fb69-40cb-9e25-eb53858d3a2c")
 		(property "Reference" "#PWR046"
-			(at 107.95 58.42 0)
+			(at 67.31 72.39 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -3155,7 +3155,7 @@
 			)
 		)
 		(property "Value" "GND"
-			(at 107.95 57.15 0)
+			(at 67.31 71.12 0)
 			(show_name no)
 			(do_not_autoplace no)
 			(effects
@@ -3165,7 +3165,7 @@
 			)
 		)
 		(property "Footprint" ""
-			(at 107.95 52.07 0)
+			(at 67.31 66.04 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -3176,7 +3176,7 @@
 			)
 		)
 		(property "Datasheet" ""
-			(at 107.95 52.07 0)
+			(at 67.31 66.04 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -3187,7 +3187,7 @@
 			)
 		)
 		(property "Description" "Power symbol creates a global label with name \"GND\" , ground"
-			(at 107.95 52.07 0)
+			(at 67.31 66.04 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -3211,7 +3211,7 @@
 	)
 	(symbol
 		(lib_id "power:GND")
-		(at 167.64 101.6 0)
+		(at 127 115.57 0)
 		(unit 1)
 		(body_style 1)
 		(exclude_from_sim no)
@@ -3222,7 +3222,7 @@
 		(fields_autoplaced yes)
 		(uuid "96902d96-b2b7-4a0f-aea1-c50605757ebe")
 		(property "Reference" "#PWR040"
-			(at 167.64 107.95 0)
+			(at 127 121.92 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -3233,7 +3233,7 @@
 			)
 		)
 		(property "Value" "GND"
-			(at 167.64 106.68 0)
+			(at 127 120.65 0)
 			(show_name no)
 			(do_not_autoplace no)
 			(effects
@@ -3243,7 +3243,7 @@
 			)
 		)
 		(property "Footprint" ""
-			(at 167.64 101.6 0)
+			(at 127 115.57 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -3254,7 +3254,7 @@
 			)
 		)
 		(property "Datasheet" ""
-			(at 167.64 101.6 0)
+			(at 127 115.57 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -3265,7 +3265,7 @@
 			)
 		)
 		(property "Description" "Power symbol creates a global label with name \"GND\" , ground"
-			(at 167.64 101.6 0)
+			(at 127 115.57 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -3289,7 +3289,7 @@
 	)
 	(symbol
 		(lib_id "power:GND")
-		(at 275.59 102.87 0)
+		(at 234.95 116.84 0)
 		(unit 1)
 		(body_style 1)
 		(exclude_from_sim no)
@@ -3300,7 +3300,7 @@
 		(fields_autoplaced yes)
 		(uuid "998cf133-66c0-425f-ab5b-f126012cca78")
 		(property "Reference" "#PWR045"
-			(at 275.59 109.22 0)
+			(at 234.95 123.19 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -3311,7 +3311,7 @@
 			)
 		)
 		(property "Value" "GND"
-			(at 275.59 107.95 0)
+			(at 234.95 121.92 0)
 			(show_name no)
 			(do_not_autoplace no)
 			(effects
@@ -3321,7 +3321,7 @@
 			)
 		)
 		(property "Footprint" ""
-			(at 275.59 102.87 0)
+			(at 234.95 116.84 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -3332,7 +3332,7 @@
 			)
 		)
 		(property "Datasheet" ""
-			(at 275.59 102.87 0)
+			(at 234.95 116.84 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -3343,7 +3343,7 @@
 			)
 		)
 		(property "Description" "Power symbol creates a global label with name \"GND\" , ground"
-			(at 275.59 102.87 0)
+			(at 234.95 116.84 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -3367,7 +3367,7 @@
 	)
 	(symbol
 		(lib_id "canary-hat:Battery_Cell_JST_SH_Pin2Plus")
-		(at 113.03 46.99 270)
+		(at 72.39 60.96 270)
 		(unit 1)
 		(body_style 1)
 		(exclude_from_sim no)
@@ -3378,7 +3378,7 @@
 		(fields_autoplaced yes)
 		(uuid "c069e433-35c6-4de2-9aa6-d40819137c01")
 		(property "Reference" "BT1"
-			(at 114.8715 39.37 90)
+			(at 74.2315 53.34 90)
 			(show_name no)
 			(do_not_autoplace no)
 			(effects
@@ -3388,7 +3388,7 @@
 			)
 		)
 		(property "Value" "GNSS backup cell (JST-SH)"
-			(at 114.8715 41.91 90)
+			(at 74.2315 55.88 90)
 			(show_name no)
 			(do_not_autoplace no)
 			(effects
@@ -3398,7 +3398,7 @@
 			)
 		)
 		(property "Footprint" "Connector_JST:JST_SH_SM02B-SRSS-TB_1x02-1MP_P1.00mm_Horizontal"
-			(at 114.554 46.99 90)
+			(at 73.914 60.96 90)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -3409,7 +3409,7 @@
 			)
 		)
 		(property "Datasheet" ""
-			(at 114.554 46.99 90)
+			(at 73.914 60.96 90)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -3420,7 +3420,7 @@
 			)
 		)
 		(property "Description" "Single-cell battery"
-			(at 113.03 46.99 0)
+			(at 72.39 60.96 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -3431,7 +3431,7 @@
 			)
 		)
 		(property "Note" "BOM line is the CONNECTOR (JST SM02B-SRSS-TB). REV 2.1 REVERSES REV 2.0's POLARITY: the cell's + is on PAD 2 (to D2's anode), - on PAD 1 (GND). Rev 2.0 had + on pad 1, and the lead fitted to it had + on pin 2, so the receiver cold-started every boot (13.5.6). JST-SH leads have no standard polarity: meter the lead (+ on housing pin 2) before fitting, and mark '+' beside pad 2 in the silkscreen at layout. The cell must be a primary cell: there is no charge path."
-			(at 114.8715 39.37 0)
+			(at 74.2315 53.34 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -3443,7 +3443,7 @@
 			)
 		)
 		(property "Manufacturer" "JST"
-			(at 114.8715 39.37 0)
+			(at 74.2315 53.34 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -3455,7 +3455,7 @@
 			)
 		)
 		(property "MPN" "SM02B-SRSS-TB"
-			(at 114.8715 39.37 0)
+			(at 74.2315 53.34 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -3467,7 +3467,7 @@
 			)
 		)
 		(property "Sim.Device" "V"
-			(at 113.03 46.99 0)
+			(at 72.39 60.96 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -3478,7 +3478,7 @@
 			)
 		)
 		(property "Sim.Type" "DC"
-			(at 113.03 46.99 0)
+			(at 72.39 60.96 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -3489,7 +3489,7 @@
 			)
 		)
 		(property "Sim.Pins" "2=+ 1=-"
-			(at 113.03 46.99 0)
+			(at 72.39 60.96 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -3500,7 +3500,7 @@
 			)
 		)
 		(property "Cost_5u" "0.483"
-			(at 0 0 0)
+			(at -40.64 13.97 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -3511,7 +3511,7 @@
 			)
 		)
 		(property "Quote" "PCBWay T-B4W341056A (5 units, 2026-08-14): quoted as specified."
-			(at 0 0 0)
+			(at -40.64 13.97 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -3538,7 +3538,7 @@
 	)
 	(symbol
 		(lib_id "Device:C")
-		(at 156.21 93.98 0)
+		(at 115.57 107.95 0)
 		(unit 1)
 		(body_style 1)
 		(exclude_from_sim no)
@@ -3549,7 +3549,7 @@
 		(fields_autoplaced yes)
 		(uuid "c96568dc-ada4-48ba-90a9-294119c8dfd8")
 		(property "Reference" "C14"
-			(at 160.02 92.7099 0)
+			(at 119.38 106.6799 0)
 			(show_name no)
 			(do_not_autoplace no)
 			(effects
@@ -3560,7 +3560,7 @@
 			)
 		)
 		(property "Value" "100n"
-			(at 160.02 95.2499 0)
+			(at 119.38 109.2199 0)
 			(show_name no)
 			(do_not_autoplace no)
 			(effects
@@ -3571,7 +3571,7 @@
 			)
 		)
 		(property "Footprint" "Capacitor_SMD:C_0603_1608Metric"
-			(at 157.1752 97.79 0)
+			(at 116.5352 111.76 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -3582,7 +3582,7 @@
 			)
 		)
 		(property "Datasheet" ""
-			(at 156.21 93.98 0)
+			(at 115.57 107.95 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -3593,7 +3593,7 @@
 			)
 		)
 		(property "Description" "Unpolarized capacitor"
-			(at 156.21 93.98 0)
+			(at 115.57 107.95 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -3604,7 +3604,7 @@
 			)
 		)
 		(property "Note" "Decoupling. Part of the 100n group - see C1's Note."
-			(at 0 0 0)
+			(at -40.64 13.97 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -3616,7 +3616,7 @@
 			)
 		)
 		(property "Tolerance" "10%"
-			(at 160.02 92.7099 0)
+			(at 119.38 106.6799 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -3628,7 +3628,7 @@
 			)
 		)
 		(property "Voltage" "50V"
-			(at 160.02 92.7099 0)
+			(at 119.38 106.6799 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -3640,7 +3640,7 @@
 			)
 		)
 		(property "Dielectric" "X7R"
-			(at 160.02 92.7099 0)
+			(at 119.38 106.6799 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -3652,7 +3652,7 @@
 			)
 		)
 		(property "MPN" "CL10B104KB8NNNC"
-			(at 156.21 93.98 0)
+			(at 115.57 107.95 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -3663,7 +3663,7 @@
 			)
 		)
 		(property "Manufacturer" "Samsung Electro-Mechanics"
-			(at 156.21 93.98 0)
+			(at 115.57 107.95 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -3674,7 +3674,7 @@
 			)
 		)
 		(property "Quote" "Rev 1.0 quote PCBWay T-B4W341056A (2026-08-14) is SUPERSEDED - that board was withdrawn before fabrication. Rev 2.0 needs a fresh RFQ. Prior status, kept for provenance: PCBWay T-B4W341056A (5 units, 2026-08-14): PCBWay asked for an exact part number; operator answered 'Samsung CL10B104KB8NNNC or equivalent spec'. Not yet priced."
-			(at 156.21 93.98 0)
+			(at 115.57 107.95 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -3701,7 +3701,7 @@
 	)
 	(symbol
 		(lib_id "Connector:Conn_Coaxial")
-		(at 275.59 95.25 0)
+		(at 234.95 109.22 0)
 		(unit 1)
 		(body_style 1)
 		(exclude_from_sim no)
@@ -3711,7 +3711,7 @@
 		(dnp no)
 		(uuid "cb08acf5-e08a-4522-8edf-21e9bc19d878")
 		(property "Reference" "J4"
-			(at 271.272 87.63 0)
+			(at 230.632 101.6 0)
 			(show_name no)
 			(do_not_autoplace no)
 			(effects
@@ -3722,7 +3722,7 @@
 			)
 		)
 		(property "Value" "U.FL"
-			(at 271.272 90.17 0)
+			(at 230.632 104.14 0)
 			(show_name no)
 			(do_not_autoplace no)
 			(effects
@@ -3733,7 +3733,7 @@
 			)
 		)
 		(property "Footprint" "Connector_Coaxial:U.FL_Hirose_U.FL-R-SMT-1_Vertical"
-			(at 275.59 95.25 0)
+			(at 234.95 109.22 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -3744,7 +3744,7 @@
 			)
 		)
 		(property "Datasheet" ""
-			(at 275.59 95.25 0)
+			(at 234.95 109.22 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -3755,7 +3755,7 @@
 			)
 		)
 		(property "Description" "coaxial connector (BNC, SMA, SMB, SMC, Cinch/RCA, LEMO, ...)"
-			(at 275.59 95.25 0)
+			(at 234.95 109.22 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -3766,7 +3766,7 @@
 			)
 		)
 		(property "Note" "GNSS antenna, U.FL receptacle (rev 2.1, replaces the rev 2.0 edge SMA that collided with the Pi 5 USB ports - CANary-HAT-Rev2.1.md 13.5.7 option B). The antenna connects through a ~10 cm 1.13 mm U.FL-to-SMA bulkhead pigtail (off-board BOM). U.FL holds by friction and is rated ~30 mating cycles: mate it once at assembly, strain-relieve the pigtail next to the receptacle, and connect/disconnect the antenna at the bulkhead SMA. Keep the 50 ohm feed to U7 RF_IN over solid In1.Cu."
-			(at 0 0 0)
+			(at -40.64 13.97 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -3778,7 +3778,7 @@
 			)
 		)
 		(property "Manufacturer" "Hirose"
-			(at 271.272 87.63 0)
+			(at 230.632 101.6 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -3790,7 +3790,7 @@
 			)
 		)
 		(property "MPN" "U.FL-R-SMT-1(10)"
-			(at 271.272 87.63 0)
+			(at 230.632 101.6 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -3802,7 +3802,7 @@
 			)
 		)
 		(property "Cost_5u" ""
-			(at 275.59 95.25 0)
+			(at 234.95 109.22 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -3813,7 +3813,7 @@
 			)
 		)
 		(property "Quote" "Rev 2.1: not yet quoted."
-			(at 275.59 95.25 0)
+			(at 234.95 109.22 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -3840,7 +3840,7 @@
 	)
 	(symbol
 		(lib_id "Diode:1N4148W")
-		(at 138.43 46.99 180)
+		(at 97.79 60.96 180)
 		(unit 1)
 		(body_style 1)
 		(exclude_from_sim no)
@@ -3851,7 +3851,7 @@
 		(fields_autoplaced yes)
 		(uuid "cc242650-cfaf-4f6d-be8a-04c8d7efcd11")
 		(property "Reference" "D2"
-			(at 138.43 40.64 0)
+			(at 97.79 54.61 0)
 			(show_name no)
 			(do_not_autoplace no)
 			(effects
@@ -3861,7 +3861,7 @@
 			)
 		)
 		(property "Value" "1N4148W"
-			(at 138.43 43.18 0)
+			(at 97.79 57.15 0)
 			(show_name no)
 			(do_not_autoplace no)
 			(effects
@@ -3871,7 +3871,7 @@
 			)
 		)
 		(property "Footprint" "Diode_SMD:D_SOD-123"
-			(at 138.43 42.545 0)
+			(at 97.79 56.515 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -3882,7 +3882,7 @@
 			)
 		)
 		(property "Datasheet" "https://www.vishay.com/docs/85748/1n4148w.pdf"
-			(at 138.43 46.99 0)
+			(at 97.79 60.96 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -3893,7 +3893,7 @@
 			)
 		)
 		(property "Description" "75V 0.15A Fast Switching Diode, SOD-123"
-			(at 138.43 46.99 0)
+			(at 97.79 60.96 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -3904,7 +3904,7 @@
 			)
 		)
 		(property "Sim.Device" "D"
-			(at 138.43 46.99 0)
+			(at 97.79 60.96 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -3915,7 +3915,7 @@
 			)
 		)
 		(property "Sim.Pins" "1=K 2=A"
-			(at 138.43 46.99 0)
+			(at 97.79 60.96 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -3926,7 +3926,7 @@
 			)
 		)
 		(property "MPN" "1N4148W"
-			(at 138.43 46.99 0)
+			(at 97.79 60.96 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -3937,7 +3937,7 @@
 			)
 		)
 		(property "Note" "Silicon, NOT Schottky - identical part to D5 and for the same reason. D2 blocks reverse current into BT1, which is a PRIMARY cell with no charge path. Schottky reverse leakage is orders of magnitude higher and roughly doubles per 10C, so a hot parked cabin would trickle-charge a non-rechargeable cell. Do NOT 'optimize' to a Schottky for the lower Vf: the ~0.4-0.5V drop at the ~20uA backup load is deliberate and accepted. The 2-pin package is deliberate too - SOD-123 cannot physically accept the BAT54A/C/S common-node dual that PCBWay proposed on quote T-B4W341056A (2026-08-14), so that substitution is now impossible rather than merely forbidden. Was a BAT54 in SOT-23 until 2026-08-15. UNVERIFIED: the MAX-M10M V_BCKP minimum has not been checked against u-blox's integration manual (datasheets/ holds only the 2-page product summary, which does not state it). Silicon leaves ~1.55V at cell EOL and cold raises Vf further; confirm the floor before trusting backup hold time at the tail of the cell."
-			(at 138.43 46.99 0)
+			(at 97.79 60.96 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -3948,7 +3948,7 @@
 			)
 		)
 		(property "Quote" "PCBWay T-B4W341056A (5 units, 2026-08-14): SUPERSEDED. That quote priced D2 as a BAT54 (Schottky, SOT-23) at $0.037 ea; the part was replaced 2026-08-15. D2 is now the same 1N4148W / SOD-123 as D5 and must be re-quoted - tell PCBWay to merge the two into one line item."
-			(at 138.43 46.99 0)
+			(at 97.79 60.96 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -3975,7 +3975,7 @@
 	)
 	(symbol
 		(lib_id "power:GND")
-		(at 149.86 101.6 0)
+		(at 109.22 115.57 0)
 		(unit 1)
 		(body_style 1)
 		(exclude_from_sim no)
@@ -3986,7 +3986,7 @@
 		(fields_autoplaced yes)
 		(uuid "dcb9dd8b-9eb3-4c1e-99a4-e5d10afdc653")
 		(property "Reference" "#PWR042"
-			(at 149.86 107.95 0)
+			(at 109.22 121.92 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -3997,7 +3997,7 @@
 			)
 		)
 		(property "Value" "GND"
-			(at 149.86 106.68 0)
+			(at 109.22 120.65 0)
 			(show_name no)
 			(do_not_autoplace no)
 			(effects
@@ -4007,7 +4007,7 @@
 			)
 		)
 		(property "Footprint" ""
-			(at 149.86 101.6 0)
+			(at 109.22 115.57 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -4018,7 +4018,7 @@
 			)
 		)
 		(property "Datasheet" ""
-			(at 149.86 101.6 0)
+			(at 109.22 115.57 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -4029,7 +4029,7 @@
 			)
 		)
 		(property "Description" "Power symbol creates a global label with name \"GND\" , ground"
-			(at 149.86 101.6 0)
+			(at 109.22 115.57 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -4053,7 +4053,7 @@
 	)
 	(symbol
 		(lib_id "power:+3V3")
-		(at 149.86 82.55 0)
+		(at 109.22 96.52 0)
 		(unit 1)
 		(body_style 1)
 		(exclude_from_sim no)
@@ -4064,7 +4064,7 @@
 		(fields_autoplaced yes)
 		(uuid "e277ff76-bf20-4b87-bb81-ad32a3ef4be5")
 		(property "Reference" "#PWR044"
-			(at 149.86 86.36 0)
+			(at 109.22 100.33 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -4075,7 +4075,7 @@
 			)
 		)
 		(property "Value" "+3V3"
-			(at 152.4 81.2799 0)
+			(at 111.76 95.2499 0)
 			(show_name no)
 			(do_not_autoplace no)
 			(effects
@@ -4086,7 +4086,7 @@
 			)
 		)
 		(property "Footprint" ""
-			(at 149.86 82.55 0)
+			(at 109.22 96.52 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -4097,7 +4097,7 @@
 			)
 		)
 		(property "Datasheet" ""
-			(at 149.86 82.55 0)
+			(at 109.22 96.52 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -4108,7 +4108,7 @@
 			)
 		)
 		(property "Description" "Power symbol creates a global label with name \"+3V3\""
-			(at 149.86 82.55 0)
+			(at 109.22 96.52 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
