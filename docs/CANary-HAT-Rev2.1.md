@@ -1401,7 +1401,7 @@ the header closes with **GPIO 12/13/19/20/21/27 uncommitted** instead of none
 | 7 | Z1 rail port thread vs AEM sensor's NPT | Inspect rails; adapter if ORB |
 | 8 | ~~GPIO19 / GPIO27 vs 20/21~~ — **closed**, CAN1 is dropped so no interrupt or STB GPIO is needed; the ADC uses CE1 natively. GPIO 12/13/19/20/21/27 all stay free | **Closed** |
 | 9 | Board area closes single-sided? **Doubtful now**: schematic entry made it +47 parts net, not +8, and the two-level J2 is 21.4 mm deep (§13.5.10) | Placement attempt, after item 34 and the trim decision |
-| 10 | ~~X1 part~~ — **closed 2026-10-12**: SiTime `SiT8924BA-12-33E-40.000000E` (AEC-Q100 grade 1, ±25 ppm, 2.5 × 2.0 mm), OE tied to `+3V3`; pin-compatible fallback `SIT8008BI-11-33E-40.000000E` (LCSC C1237126). Confirm the order code in SiTime's generator before the BOM (item 36) | **Closed** |
+| 10 | ~~X1 part~~ — **closed 2026-10-12**: SiTime `SiT8008BI-13-YYE-40.000000` (−40…85 °C, ±50 ppm, 1.62–3.63 V, 2.5 × 2.0 mm, OE on pin 1, tied to `+3V3`). It replaced the first choice, the automotive `SiT8924BA-12-33E-40.000000E`, for sourcing (item 36) | **Closed** |
 | 11 | Rev 2.0 Y1 starts cold? (§13.1 meas. 14) — informs whether the crystal fallback is ever viable | Bench, ≤ 1 pF probe on OSC2 |
 | 12 | ~~U5 root cause: part, process or design~~ — **closed 2026-10-11: the part.** The second board's U5 converts temperature and pressure correctly (§13.5.6) | **Closed** |
 | 15 | **Board #1 only** (item 12 closed): U5 pressure calibration against the U6 surrogate: fit `P = Bosch(raw, T_imu) + a + b·(T_imu − T0)` as pinned per-board data (deferred by operator 2026-09-23) | Cold-start warm-up log at the desk (constant pressure, phone as reference) separates a wrong temperature from a pressure offset; then the ECM baro PID 0x33 on a drive as the known answer |
@@ -1427,7 +1427,7 @@ the header closes with **GPIO 12/13/19/20/21/27 uncommitted** instead of none
 | 24 | **Update §13.3.9 of `CANary-HAT-Revisions.md`** for the dropped CAN1 — rev 3.0's GPIO and safe-state assumptions changed (§13.5.8) | Edit that section |
 | 34 | ~~J2 physical part~~ — **decided 2026-10-12: Phoenix `PT 1,5/13-3,5-H`**, 13-way, 3.5 mm, screw with wire protector, collared ferrules 0.25–0.75 mm² (pins 1–4 are 18 AWG on AI 0,75 ferrules; the rest 20 AWG), 45.5 × 7.6 mm, stock KiCad footprint; J3 folded in (§13.5.5) | **Closed**; confirm the 13-way item number (12-way is 1984714) at ordering |
 | 35 | **MCP2518FD OSC2 with an external clock** — left open on the schematic; Microchip documents that only for the MCP2515 (DS20001801J fig. 8-2) | Microchip app note or forum confirmation; bring-up proves it either way |
-| 36 | **SiT8924 order code and stock** — field order inferred from the datasheet; SiTime parts are often programmed to order | SiTime part-number generator + distributor stock; fall back to SIT8008BI |
+| 36 | ~~SiT8924 order code and stock~~ — **closed 2026-10-12.** The SiT8924 code decoded as valid against the datasheet's ordering table, but no distributor stocked it: it is programmed to order and would have to be supplied to the assembler. **Operator: easy-to-source parts, so X1 is `SiT8008BI-13-YYE-40.000000`**, which SiTime lists in stock. It keeps the same pinout, footprint and symbol. Grade 1 bought nothing on a board limited to ~85 °C by U6/U7, and ±50 ppm is ~100× inside the MCP2518FD's ±0.5 % | **Closed** |
 
 ### 13.5.10 Schematic entry — 2026-10-12
 

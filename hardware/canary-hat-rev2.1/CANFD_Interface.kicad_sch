@@ -2998,7 +2998,7 @@
 				(justify left)
 			)
 		)
-		(property "Note" "CAN FD controller. Requires a 40, 20 or 4 MHz reference; rev 2.1 clocks it from X1, a 40 MHz CMOS oscillator into OSC1 (OSC2 open), so the overlay keeps oscillator=40000000. External clock spec (DS20006027B table 7-3): 2-40 MHz, duty 45-55%, rise/fall <= 20 ns; X1 is +/-25 ppm. RXCAN Vil = 0.3 x VDD = 0.99V, which is the margin D6's activity LED on the RXD net sits against."
+		(property "Note" "CAN FD controller. Requires a 40, 20 or 4 MHz reference; rev 2.1 clocks it from X1, a 40 MHz CMOS oscillator into OSC1 (OSC2 open), so the overlay keeps oscillator=40000000. External clock spec (DS20006027B table 7-3): 2-40 MHz, duty 45-55%, rise/fall <= 20 ns; X1 is +/-50 ppm. RXCAN Vil = 0.3 x VDD = 0.99V, which is the margin D6's activity LED on the RXD net sits against."
 			(at 0 0 0)
 			(hide yes)
 			(show_name no)
@@ -4959,7 +4959,7 @@
 				)
 			)
 		)
-		(property "Description" "40 MHz MEMS oscillator, 3.3 V CMOS, 2.5 x 2.0 mm"
+		(property "Description" "40 MHz MEMS oscillator, LVCMOS, 1.62-3.63 V, +/-50 ppm, -40..85 C, 2.5 x 2.0 mm, OE on pin 1"
 			(at 60.96 162.56 0)
 			(hide yes)
 			(show_name no)
@@ -4982,7 +4982,7 @@
 				(justify left)
 			)
 		)
-		(property "MPN" "SiT8924BA-12-33E-40.000000E"
+		(property "MPN" "SiT8008BI-13-YYE-40.000000"
 			(at 60.96 162.56 0)
 			(hide yes)
 			(show_name no)
@@ -5006,7 +5006,7 @@
 				(justify left)
 			)
 		)
-		(property "Note" "U3 time reference, 40.000 MHz CMOS into OSC1 (replaces the rev 2.0 Y1 Pierce loop that had no start-up margin on paper, 13.5.6). AEC-Q100 grade 1, -40..125 C, +/-25 ppm, 3.3 V. CONFIRM THE EXACT ORDER CODE in SiTime's part-number generator (field order inferred from the SiT8924 datasheet). Pin-compatible fallback: SIT8008BI-11-33E-40.000000E (industrial, LCSC C1237126). OE (pin 1) tied to +3V3: SiTime recommends <= 10k pull-up if not driven. MCP2518FD: external clock 2-40 MHz, duty 45-55%, PLL off at reset; overlay keeps oscillator=40000000."
+		(property "Note" "U3 time reference: a 40.000 MHz CMOS clock into OSC1, with OSC2 left open. It replaces rev 2.0's Y1 Pierce loop, which had no start-up margin on paper (13.5.6). SiTime SiT8008BI-13-YYE-40.000000. The code decodes as: I = -40..85 C; 1 = 2.5 x 2.0 mm; 3 = +/-50 ppm; YY = 1.62-3.63 V; E = output enable; no letter = bulk. Chosen to be easy to source (operator, 2026-10-12): SiTime lists it in stock. The automotive SiT8924 was programmed to order, and its Grade 1 range buys nothing on a board limited to ~85 C by U6/U7. +/-50 ppm is ~100x inside the MCP2518FD's +/-0.5% clock requirement. OE (pin 1) is tied to +3V3; SiTime recommends <= 10k if pin 1 is not driven. External clock spec (DS20006027B table 7-3): 2-40 MHz, duty 45-55%, PLL off at reset; the overlay keeps oscillator=40000000."
 			(at 60.96 162.56 0)
 			(hide yes)
 			(show_name no)
