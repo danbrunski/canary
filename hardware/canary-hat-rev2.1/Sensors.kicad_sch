@@ -2288,6 +2288,230 @@
 			)
 			(embedded_fonts no)
 		)
+		(symbol "canary-hat:Battery_Cell_JST_SH_Pin2Plus"
+			(pin_numbers
+				(hide yes)
+			)
+			(pin_names
+				(offset 0)
+				(hide yes)
+			)
+			(exclude_from_sim no)
+			(in_bom yes)
+			(on_board yes)
+			(in_pos_files yes)
+			(duplicate_pin_numbers_are_jumpers no)
+			(property "Reference" "BT"
+				(at 2.54 2.54 0)
+				(show_name no)
+				(do_not_autoplace no)
+				(effects
+					(font
+						(size 1.27 1.27)
+					)
+					(justify left)
+				)
+			)
+			(property "Value" "Battery_Cell_JST_SH_Pin2Plus"
+				(at 2.54 0 0)
+				(show_name no)
+				(do_not_autoplace no)
+				(effects
+					(font
+						(size 1.27 1.27)
+					)
+					(justify left)
+				)
+			)
+			(property "Footprint" ""
+				(at 0 1.524 90)
+				(show_name no)
+				(do_not_autoplace no)
+				(hide yes)
+				(effects
+					(font
+						(size 1.27 1.27)
+					)
+				)
+			)
+			(property "Datasheet" ""
+				(at 0 1.524 90)
+				(show_name no)
+				(do_not_autoplace no)
+				(hide yes)
+				(effects
+					(font
+						(size 1.27 1.27)
+					)
+				)
+			)
+			(property "Description" "Primary backup cell on a 2-pin JST-SH lead, + on PIN 2 (CANary-HAT rev 2.1+; rev 2.0 had + on pin 1)"
+				(at 0 0 0)
+				(show_name no)
+				(do_not_autoplace no)
+				(hide yes)
+				(effects
+					(font
+						(size 1.27 1.27)
+					)
+				)
+			)
+			(property "Sim.Device" "V"
+				(at 0 0 0)
+				(show_name no)
+				(do_not_autoplace no)
+				(hide yes)
+				(effects
+					(font
+						(size 1.27 1.27)
+					)
+				)
+			)
+			(property "Sim.Type" "DC"
+				(at 0 0 0)
+				(show_name no)
+				(do_not_autoplace no)
+				(hide yes)
+				(effects
+					(font
+						(size 1.27 1.27)
+					)
+				)
+			)
+			(property "Sim.Pins" "1=+ 2=-"
+				(at 0 0 0)
+				(show_name no)
+				(do_not_autoplace no)
+				(hide yes)
+				(effects
+					(font
+						(size 1.27 1.27)
+					)
+				)
+			)
+			(property "ki_keywords" "battery cell"
+				(at 0 0 0)
+				(show_name no)
+				(do_not_autoplace no)
+				(hide yes)
+				(effects
+					(font
+						(size 1.27 1.27)
+					)
+				)
+			)
+			(symbol "Battery_Cell_JST_SH_Pin2Plus_0_1"
+				(rectangle
+					(start -2.286 1.778)
+					(end 2.286 1.524)
+					(stroke
+						(width 0)
+						(type default)
+					)
+					(fill
+						(type outline)
+					)
+				)
+				(rectangle
+					(start -1.524 1.016)
+					(end 1.524 0.508)
+					(stroke
+						(width 0)
+						(type default)
+					)
+					(fill
+						(type outline)
+					)
+				)
+				(polyline
+					(pts
+						(xy 0 1.778) (xy 0 2.54)
+					)
+					(stroke
+						(width 0)
+						(type default)
+					)
+					(fill
+						(type none)
+					)
+				)
+				(polyline
+					(pts
+						(xy 0 0.762) (xy 0 0)
+					)
+					(stroke
+						(width 0)
+						(type default)
+					)
+					(fill
+						(type none)
+					)
+				)
+				(polyline
+					(pts
+						(xy 0.762 3.048) (xy 1.778 3.048)
+					)
+					(stroke
+						(width 0.254)
+						(type default)
+					)
+					(fill
+						(type none)
+					)
+				)
+				(polyline
+					(pts
+						(xy 1.27 3.556) (xy 1.27 2.54)
+					)
+					(stroke
+						(width 0.254)
+						(type default)
+					)
+					(fill
+						(type none)
+					)
+				)
+			)
+			(symbol "Battery_Cell_JST_SH_Pin2Plus_1_1"
+				(pin passive line
+					(at 0 -2.54 90)
+					(length 2.54)
+					(name "-"
+						(effects
+							(font
+								(size 1.27 1.27)
+							)
+						)
+					)
+					(number "1"
+						(effects
+							(font
+								(size 1.27 1.27)
+							)
+						)
+					)
+				)
+				(pin passive line
+					(at 0 5.08 270)
+					(length 2.54)
+					(name "+"
+						(effects
+							(font
+								(size 1.27 1.27)
+							)
+						)
+					)
+					(number "2"
+						(effects
+							(font
+								(size 1.27 1.27)
+							)
+						)
+					)
+				)
+			)
+			(embedded_fonts no)
+		)
 		(symbol "power:+3V3"
 			(power global)
 			(pin_numbers
@@ -2657,230 +2881,6 @@
 			)
 			(embedded_fonts no)
 		)
-		(symbol "canary-hat:Battery_Cell_JST_SH_Pin2Plus"
-				(pin_numbers
-					(hide yes)
-				)
-				(pin_names
-					(offset 0)
-					(hide yes)
-				)
-				(exclude_from_sim no)
-				(in_bom yes)
-				(on_board yes)
-				(in_pos_files yes)
-				(duplicate_pin_numbers_are_jumpers no)
-				(property "Reference" "BT"
-					(at 2.54 2.54 0)
-					(show_name no)
-					(do_not_autoplace no)
-					(effects
-						(font
-							(size 1.27 1.27)
-						)
-						(justify left)
-					)
-				)
-				(property "Value" "Battery_Cell_JST_SH_Pin2Plus"
-					(at 2.54 0 0)
-					(show_name no)
-					(do_not_autoplace no)
-					(effects
-						(font
-							(size 1.27 1.27)
-						)
-						(justify left)
-					)
-				)
-				(property "Footprint" ""
-					(at 0 1.524 90)
-					(show_name no)
-					(do_not_autoplace no)
-					(hide yes)
-					(effects
-						(font
-							(size 1.27 1.27)
-						)
-					)
-				)
-				(property "Datasheet" ""
-					(at 0 1.524 90)
-					(show_name no)
-					(do_not_autoplace no)
-					(hide yes)
-					(effects
-						(font
-							(size 1.27 1.27)
-						)
-					)
-				)
-				(property "Description" "Primary backup cell on a 2-pin JST-SH lead, + on PIN 2 (CANary-HAT rev 2.1+; rev 2.0 had + on pin 1)"
-					(at 0 0 0)
-					(show_name no)
-					(do_not_autoplace no)
-					(hide yes)
-					(effects
-						(font
-							(size 1.27 1.27)
-						)
-					)
-				)
-				(property "Sim.Device" "V"
-					(at 0 0 0)
-					(show_name no)
-					(do_not_autoplace no)
-					(hide yes)
-					(effects
-						(font
-							(size 1.27 1.27)
-						)
-					)
-				)
-				(property "Sim.Type" "DC"
-					(at 0 0 0)
-					(show_name no)
-					(do_not_autoplace no)
-					(hide yes)
-					(effects
-						(font
-							(size 1.27 1.27)
-						)
-					)
-				)
-				(property "Sim.Pins" "1=+ 2=-"
-					(at 0 0 0)
-					(show_name no)
-					(do_not_autoplace no)
-					(hide yes)
-					(effects
-						(font
-							(size 1.27 1.27)
-						)
-					)
-				)
-				(property "ki_keywords" "battery cell"
-					(at 0 0 0)
-					(show_name no)
-					(do_not_autoplace no)
-					(hide yes)
-					(effects
-						(font
-							(size 1.27 1.27)
-						)
-					)
-				)
-				(symbol "Battery_Cell_JST_SH_Pin2Plus_0_1"
-					(rectangle
-						(start -2.286 1.778)
-						(end 2.286 1.524)
-						(stroke
-							(width 0)
-							(type default)
-						)
-						(fill
-							(type outline)
-						)
-					)
-					(rectangle
-						(start -1.524 1.016)
-						(end 1.524 0.508)
-						(stroke
-							(width 0)
-							(type default)
-						)
-						(fill
-							(type outline)
-						)
-					)
-					(polyline
-						(pts
-							(xy 0 1.778) (xy 0 2.54)
-						)
-						(stroke
-							(width 0)
-							(type default)
-						)
-						(fill
-							(type none)
-						)
-					)
-					(polyline
-						(pts
-							(xy 0 0.762) (xy 0 0)
-						)
-						(stroke
-							(width 0)
-							(type default)
-						)
-						(fill
-							(type none)
-						)
-					)
-					(polyline
-						(pts
-							(xy 0.762 3.048) (xy 1.778 3.048)
-						)
-						(stroke
-							(width 0.254)
-							(type default)
-						)
-						(fill
-							(type none)
-						)
-					)
-					(polyline
-						(pts
-							(xy 1.27 3.556) (xy 1.27 2.54)
-						)
-						(stroke
-							(width 0.254)
-							(type default)
-						)
-						(fill
-							(type none)
-						)
-					)
-				)
-				(symbol "Battery_Cell_JST_SH_Pin2Plus_1_1"
-					(pin passive line
-						(at 0 5.08 270)
-						(length 2.54)
-						(name "+"
-							(effects
-								(font
-									(size 1.27 1.27)
-								)
-							)
-						)
-						(number "2"
-							(effects
-								(font
-									(size 1.27 1.27)
-								)
-							)
-						)
-					)
-					(pin passive line
-						(at 0 -2.54 90)
-						(length 2.54)
-						(name "-"
-							(effects
-								(font
-									(size 1.27 1.27)
-								)
-							)
-						)
-						(number "1"
-							(effects
-								(font
-									(size 1.27 1.27)
-								)
-							)
-						)
-					)
-				)
-				(embedded_fonts no)
-			)
 	)
 	(junction
 		(at 54.61 144.78)
@@ -2930,7 +2930,6 @@
 		(color 0 0 0 0)
 		(uuid "49c0e37d-e4a5-4e2f-b989-72222da599e4")
 	)
-	
 	(junction
 		(at 54.61 152.4)
 		(diameter 0)
@@ -2943,8 +2942,6 @@
 		(color 0 0 0 0)
 		(uuid "8e86afcc-ee7b-4859-84a3-6f9d97341397")
 	)
-	
-	
 	(junction
 		(at 116.84 86.36)
 		(diameter 0)
@@ -2957,36 +2954,26 @@
 		(color 0 0 0 0)
 		(uuid "caaea20d-77ea-4849-b00d-f4ff03126894")
 	)
-	
 	(junction
 		(at 134.62 144.78)
 		(diameter 0)
 		(color 0 0 0 0)
 		(uuid "d405553f-00b5-4120-8605-bcabcd80e04f")
 	)
-	
 	(junction
 		(at 116.84 76.2)
 		(diameter 0)
 		(color 0 0 0 0)
 		(uuid "e740577c-1cd9-49cc-953b-9f3deb90acc5")
 	)
-	
-	
-	
 	(no_connect
 		(at 110.49 149.86)
 		(uuid "7472d94e-be77-427b-8a9b-43c411e7c1a7")
 	)
-	
-	
-	
 	(no_connect
 		(at 110.49 147.32)
 		(uuid "d272b76b-c975-4b3f-a0da-ef7f5016858f")
 	)
-	
-	
 	(wire
 		(pts
 			(xy 54.61 144.78) (xy 59.69 144.78)
@@ -3027,7 +3014,6 @@
 		)
 		(uuid "1473bdbc-6be0-468a-b40a-7c2b110e792d")
 	)
-	
 	(wire
 		(pts
 			(xy 114.3 142.24) (xy 114.3 118.11)
@@ -3058,7 +3044,6 @@
 		)
 		(uuid "1e91e001-5527-476a-b4eb-2b4b5f24f9d4")
 	)
-	
 	(wire
 		(pts
 			(xy 116.84 96.52) (xy 116.84 100.33)
@@ -3079,7 +3064,6 @@
 		)
 		(uuid "277b926d-e313-4588-a5bb-30d1bb71b6e0")
 	)
-	
 	(wire
 		(pts
 			(xy 54.61 152.4) (xy 54.61 154.94)
@@ -3090,7 +3074,6 @@
 		)
 		(uuid "2f3a3678-812f-4c0c-b07b-0ac406babcf8")
 	)
-	
 	(wire
 		(pts
 			(xy 116.84 76.2) (xy 116.84 59.69)
@@ -3101,7 +3084,6 @@
 		)
 		(uuid "342c7021-fd51-4642-844c-01244cd4469a")
 	)
-	
 	(wire
 		(pts
 			(xy 26.67 78.74) (xy 40.64 78.74)
@@ -3122,10 +3104,6 @@
 		)
 		(uuid "3d8af76c-a8e9-4034-8585-031fd00154b4")
 	)
-	
-	
-	
-	
 	(wire
 		(pts
 			(xy 134.62 154.94) (xy 134.62 144.78)
@@ -3136,7 +3114,6 @@
 		)
 		(uuid "56e4ac31-75fa-434d-9cc2-a2bafc7c0f5f")
 	)
-	
 	(wire
 		(pts
 			(xy 134.62 144.78) (xy 134.62 135.89)
@@ -3187,7 +3164,6 @@
 		)
 		(uuid "6202467d-0eaa-4275-ae6c-46f8041e04a6")
 	)
-	
 	(wire
 		(pts
 			(xy 63.5 83.82) (xy 30.48 83.82)
@@ -3248,7 +3224,6 @@
 		)
 		(uuid "719c3de1-468f-4f5d-b2d1-fc4e0699540e")
 	)
-	
 	(wire
 		(pts
 			(xy 104.14 76.2) (xy 116.84 76.2)
@@ -3269,7 +3244,6 @@
 		)
 		(uuid "774df746-a638-46e6-961e-86ca6820d5f1")
 	)
-	
 	(wire
 		(pts
 			(xy 52.07 96.52) (xy 52.07 100.33)
@@ -3280,9 +3254,6 @@
 		)
 		(uuid "78389357-e8fc-4978-b0e9-0c16578a7588")
 	)
-	
-	
-	
 	(wire
 		(pts
 			(xy 40.64 59.69) (xy 40.64 64.77)
@@ -3293,7 +3264,6 @@
 		)
 		(uuid "87c99c7e-59a0-4eab-bf7f-c2c67046edf6")
 	)
-	
 	(wire
 		(pts
 			(xy 30.48 83.82) (xy 30.48 72.39)
@@ -3304,7 +3274,6 @@
 		)
 		(uuid "8c094ed7-8717-4767-acd0-039427e27603")
 	)
-	
 	(wire
 		(pts
 			(xy 104.14 78.74) (xy 106.68 78.74)
@@ -3325,7 +3294,6 @@
 		)
 		(uuid "901e47fc-8cec-45cd-964b-021ed1367e34")
 	)
-	
 	(wire
 		(pts
 			(xy 59.69 152.4) (xy 54.61 152.4)
@@ -3336,7 +3304,6 @@
 		)
 		(uuid "9422103f-bd73-4da4-b0a5-cc582e4bac46")
 	)
-	
 	(wire
 		(pts
 			(xy 104.14 83.82) (xy 130.81 83.82)
@@ -3347,7 +3314,6 @@
 		)
 		(uuid "9f2eeb93-b194-4809-bc30-39aac4832a96")
 	)
-	
 	(wire
 		(pts
 			(xy 62.23 81.28) (xy 62.23 100.33)
@@ -3358,7 +3324,6 @@
 		)
 		(uuid "a33fb596-2a9c-4b6a-9848-648ba172586e")
 	)
-	
 	(wire
 		(pts
 			(xy 59.69 142.24) (xy 54.61 142.24)
@@ -3379,7 +3344,6 @@
 		)
 		(uuid "ae481554-de42-4c21-92e2-2b9a1decd682")
 	)
-	
 	(wire
 		(pts
 			(xy 106.68 78.74) (xy 106.68 81.28)
@@ -3400,7 +3364,6 @@
 		)
 		(uuid "b4330371-ee48-46c3-9b83-200e8cd0936c")
 	)
-	
 	(wire
 		(pts
 			(xy 104.14 81.28) (xy 106.68 81.28)
@@ -3411,9 +3374,6 @@
 		)
 		(uuid "b9ef6c5c-689c-4a24-886d-a279a12079e8")
 	)
-	
-	
-	
 	(wire
 		(pts
 			(xy 39.37 139.7) (xy 39.37 149.86)
@@ -3464,8 +3424,6 @@
 		)
 		(uuid "c6bbf6a3-a45f-449c-8452-82ddfb9e0693")
 	)
-	
-	
 	(wire
 		(pts
 			(xy 63.5 78.74) (xy 40.64 78.74)
@@ -3496,7 +3454,6 @@
 		)
 		(uuid "d75a8abd-7f87-40d1-8974-c9699b7cd5f4")
 	)
-	
 	(wire
 		(pts
 			(xy 104.14 86.36) (xy 116.84 86.36)
@@ -3537,8 +3494,6 @@
 		)
 		(uuid "e050aeae-c1f9-4576-95b9-0d6a7017d466")
 	)
-	
-	
 	(wire
 		(pts
 			(xy 63.5 81.28) (xy 62.23 81.28)
@@ -3559,7 +3514,6 @@
 		)
 		(uuid "f3910836-8a0e-4048-96c0-1548f556f7d9")
 	)
-	
 	(wire
 		(pts
 			(xy 134.62 154.94) (xy 134.62 158.75)
@@ -3580,7 +3534,6 @@
 		)
 		(uuid "fb425c9e-7b6a-44d3-afdf-bf79ff279b1d")
 	)
-	
 	(hierarchical_label "I2C1_SCL"
 		(shape bidirectional)
 		(at 26.67 78.74 180)
@@ -3592,8 +3545,6 @@
 		)
 		(uuid "142fd1b3-4da2-4886-a8f9-4c791415ea4a")
 	)
-	
-	
 	(hierarchical_label "I2C1_SDA"
 		(shape bidirectional)
 		(at 26.67 83.82 180)
@@ -3616,7 +3567,6 @@
 		)
 		(uuid "b26c15b0-a3d5-440d-9d50-b90062eeef14")
 	)
-	
 	(hierarchical_label "INT2"
 		(shape output)
 		(at 116.84 152.4 0)
@@ -3639,8 +3589,6 @@
 		)
 		(uuid "f8e81079-2855-4c1d-a35a-fcad60c3160a")
 	)
-	
-	
 	(symbol
 		(lib_id "2026-08-09_05-20-06:LSM6DSOX")
 		(at 59.69 139.7 0)
@@ -3896,7 +3844,6 @@
 			)
 		)
 	)
-	
 	(symbol
 		(lib_id "Device:C")
 		(at 39.37 162.56 0)
@@ -4139,8 +4086,6 @@
 			)
 		)
 	)
-	
-	
 	(symbol
 		(lib_id "Device:C")
 		(at 116.84 92.71 0)
@@ -4461,7 +4406,6 @@
 			)
 		)
 	)
-	
 	(symbol
 		(lib_id "2026-08-09_04-12-51:BMP384")
 		(at 63.5 76.2 0)
@@ -4627,7 +4571,6 @@
 			)
 		)
 	)
-	
 	(symbol
 		(lib_id "power:GND")
 		(at 54.61 172.72 0)
@@ -4785,7 +4728,6 @@
 			)
 		)
 	)
-	
 	(symbol
 		(lib_id "Device:R")
 		(at 40.64 68.58 180)
@@ -5267,7 +5209,6 @@
 			)
 		)
 	)
-	
 	(symbol
 		(lib_id "Device:C")
 		(at 134.62 162.56 0)
@@ -5431,7 +5372,6 @@
 			)
 		)
 	)
-	
 	(symbol
 		(lib_id "power:+3V3")
 		(at 116.84 59.69 0)
@@ -5511,8 +5451,6 @@
 			)
 		)
 	)
-	
-	
 	(symbol
 		(lib_id "power:GND")
 		(at 106.68 100.33 0)
@@ -5669,10 +5607,6 @@
 			)
 		)
 	)
-	
-	
-	
-	
 	(symbol
 		(lib_id "power:GND")
 		(at 116.84 100.33 0)

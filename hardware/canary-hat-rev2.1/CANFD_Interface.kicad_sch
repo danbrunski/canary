@@ -1214,7 +1214,6 @@
 			)
 			(embedded_fonts no)
 		)
-		
 		(symbol "Device:C"
 			(pin_numbers
 				(hide yes)
@@ -1360,6 +1359,289 @@
 						)
 					)
 					(number "2"
+						(effects
+							(font
+								(size 1.27 1.27)
+							)
+						)
+					)
+				)
+			)
+			(embedded_fonts no)
+		)
+		(symbol "Device:Crystal_GND24"
+			(pin_names
+				(offset 1.016)
+				(hide yes)
+			)
+			(exclude_from_sim no)
+			(in_bom yes)
+			(on_board yes)
+			(in_pos_files yes)
+			(duplicate_pin_numbers_are_jumpers no)
+			(property "Reference" "Y"
+				(at 3.175 5.08 0)
+				(show_name no)
+				(do_not_autoplace no)
+				(effects
+					(font
+						(size 1.27 1.27)
+					)
+					(justify left)
+				)
+			)
+			(property "Value" "Crystal_GND24"
+				(at 3.175 3.175 0)
+				(show_name no)
+				(do_not_autoplace no)
+				(effects
+					(font
+						(size 1.27 1.27)
+					)
+					(justify left)
+				)
+			)
+			(property "Footprint" ""
+				(at 0 0 0)
+				(show_name no)
+				(do_not_autoplace no)
+				(hide yes)
+				(effects
+					(font
+						(size 1.27 1.27)
+					)
+				)
+			)
+			(property "Datasheet" ""
+				(at 0 0 0)
+				(show_name no)
+				(do_not_autoplace no)
+				(hide yes)
+				(effects
+					(font
+						(size 1.27 1.27)
+					)
+				)
+			)
+			(property "Description" "Four pin crystal, GND on pins 2 and 4"
+				(at 0 0 0)
+				(show_name no)
+				(do_not_autoplace no)
+				(hide yes)
+				(effects
+					(font
+						(size 1.27 1.27)
+					)
+				)
+			)
+			(property private "KLC_S3.3" "The rectangle is not a symbol body but a graphical element"
+				(at 0 -12.7 0)
+				(show_name yes)
+				(do_not_autoplace no)
+				(hide yes)
+				(effects
+					(font
+						(size 1.27 1.27)
+					)
+				)
+			)
+			(property private "KLC_S4.1" "Some pins are on 50mil grid to make the symbol small"
+				(at 0 -15.24 0)
+				(show_name yes)
+				(do_not_autoplace no)
+				(hide yes)
+				(effects
+					(font
+						(size 1.27 1.27)
+					)
+				)
+			)
+			(property "ki_keywords" "quartz ceramic resonator oscillator"
+				(at 0 0 0)
+				(show_name no)
+				(do_not_autoplace no)
+				(hide yes)
+				(effects
+					(font
+						(size 1.27 1.27)
+					)
+				)
+			)
+			(property "ki_fp_filters" "Crystal*"
+				(at 0 0 0)
+				(show_name no)
+				(do_not_autoplace no)
+				(hide yes)
+				(effects
+					(font
+						(size 1.27 1.27)
+					)
+				)
+			)
+			(symbol "Crystal_GND24_0_1"
+				(polyline
+					(pts
+						(xy -2.54 2.286) (xy -2.54 3.556) (xy 2.54 3.556) (xy 2.54 2.286)
+					)
+					(stroke
+						(width 0)
+						(type default)
+					)
+					(fill
+						(type none)
+					)
+				)
+				(polyline
+					(pts
+						(xy -2.54 0) (xy -2.032 0)
+					)
+					(stroke
+						(width 0)
+						(type default)
+					)
+					(fill
+						(type none)
+					)
+				)
+				(polyline
+					(pts
+						(xy -2.54 -2.286) (xy -2.54 -3.556) (xy 2.54 -3.556) (xy 2.54 -2.286)
+					)
+					(stroke
+						(width 0)
+						(type default)
+					)
+					(fill
+						(type none)
+					)
+				)
+				(polyline
+					(pts
+						(xy -2.032 -1.27) (xy -2.032 1.27)
+					)
+					(stroke
+						(width 0.508)
+						(type default)
+					)
+					(fill
+						(type none)
+					)
+				)
+				(rectangle
+					(start -1.143 2.54)
+					(end 1.143 -2.54)
+					(stroke
+						(width 0.3048)
+						(type default)
+					)
+					(fill
+						(type none)
+					)
+				)
+				(polyline
+					(pts
+						(xy 0 -3.81) (xy 0 -3.556)
+					)
+					(stroke
+						(width 0)
+						(type default)
+					)
+					(fill
+						(type none)
+					)
+				)
+				(polyline
+					(pts
+						(xy 2.032 0) (xy 2.54 0)
+					)
+					(stroke
+						(width 0)
+						(type default)
+					)
+					(fill
+						(type none)
+					)
+				)
+				(polyline
+					(pts
+						(xy 2.032 -1.27) (xy 2.032 1.27)
+					)
+					(stroke
+						(width 0.508)
+						(type default)
+					)
+					(fill
+						(type none)
+					)
+				)
+			)
+			(symbol "Crystal_GND24_1_1"
+				(pin passive line
+					(at -3.81 0 0)
+					(length 1.27)
+					(name "1"
+						(effects
+							(font
+								(size 1.27 1.27)
+							)
+						)
+					)
+					(number "1"
+						(effects
+							(font
+								(size 1.27 1.27)
+							)
+						)
+					)
+				)
+				(pin passive line
+					(at 0 -5.08 90)
+					(length 1.27)
+					(name "G"
+						(effects
+							(font
+								(size 1.27 1.27)
+							)
+						)
+					)
+					(number "2"
+						(effects
+							(font
+								(size 1.27 1.27)
+							)
+						)
+					)
+				)
+				(pin passive line
+					(at 3.81 0 180)
+					(length 1.27)
+					(name "3"
+						(effects
+							(font
+								(size 1.27 1.27)
+							)
+						)
+					)
+					(number "3"
+						(effects
+							(font
+								(size 1.27 1.27)
+							)
+						)
+					)
+				)
+				(pin passive line
+					(at 0 -5.08 90)
+					(length 1.27)
+					(hide yes)
+					(name "G"
+						(effects
+							(font
+								(size 1.27 1.27)
+							)
+						)
+					)
+					(number "4"
 						(effects
 							(font
 								(size 1.27 1.27)
@@ -2104,290 +2386,6 @@
 			)
 			(embedded_fonts no)
 		)
-			
-		(symbol "Device:Crystal_GND24"
-				(pin_names
-					(offset 1.016)
-					(hide yes)
-				)
-				(exclude_from_sim no)
-				(in_bom yes)
-				(on_board yes)
-				(in_pos_files yes)
-				(duplicate_pin_numbers_are_jumpers no)
-				(property "Reference" "Y"
-					(at 3.175 5.08 0)
-					(show_name no)
-					(do_not_autoplace no)
-					(effects
-						(font
-							(size 1.27 1.27)
-						)
-						(justify left)
-					)
-				)
-				(property "Value" "Crystal_GND24"
-					(at 3.175 3.175 0)
-					(show_name no)
-					(do_not_autoplace no)
-					(effects
-						(font
-							(size 1.27 1.27)
-						)
-						(justify left)
-					)
-				)
-				(property "Footprint" ""
-					(at 0 0 0)
-					(show_name no)
-					(do_not_autoplace no)
-					(hide yes)
-					(effects
-						(font
-							(size 1.27 1.27)
-						)
-					)
-				)
-				(property "Datasheet" ""
-					(at 0 0 0)
-					(show_name no)
-					(do_not_autoplace no)
-					(hide yes)
-					(effects
-						(font
-							(size 1.27 1.27)
-						)
-					)
-				)
-				(property "Description" "Four pin crystal, GND on pins 2 and 4"
-					(at 0 0 0)
-					(show_name no)
-					(do_not_autoplace no)
-					(hide yes)
-					(effects
-						(font
-							(size 1.27 1.27)
-						)
-					)
-				)
-				(property private "KLC_S3.3" "The rectangle is not a symbol body but a graphical element"
-					(at 0 -12.7 0)
-					(show_name yes)
-					(do_not_autoplace no)
-					(hide yes)
-					(effects
-						(font
-							(size 1.27 1.27)
-						)
-					)
-				)
-				(property private "KLC_S4.1" "Some pins are on 50mil grid to make the symbol small"
-					(at 0 -15.24 0)
-					(show_name yes)
-					(do_not_autoplace no)
-					(hide yes)
-					(effects
-						(font
-							(size 1.27 1.27)
-						)
-					)
-				)
-				(property "ki_keywords" "quartz ceramic resonator oscillator"
-					(at 0 0 0)
-					(show_name no)
-					(do_not_autoplace no)
-					(hide yes)
-					(effects
-						(font
-							(size 1.27 1.27)
-						)
-					)
-				)
-				(property "ki_fp_filters" "Crystal*"
-					(at 0 0 0)
-					(show_name no)
-					(do_not_autoplace no)
-					(hide yes)
-					(effects
-						(font
-							(size 1.27 1.27)
-						)
-					)
-				)
-				(symbol "Crystal_GND24_0_1"
-					(polyline
-						(pts
-							(xy -2.54 2.286) (xy -2.54 3.556) (xy 2.54 3.556) (xy 2.54 2.286)
-						)
-						(stroke
-							(width 0)
-							(type default)
-						)
-						(fill
-							(type none)
-						)
-					)
-					(polyline
-						(pts
-							(xy -2.54 0) (xy -2.032 0)
-						)
-						(stroke
-							(width 0)
-							(type default)
-						)
-						(fill
-							(type none)
-						)
-					)
-					(polyline
-						(pts
-							(xy -2.54 -2.286) (xy -2.54 -3.556) (xy 2.54 -3.556) (xy 2.54 -2.286)
-						)
-						(stroke
-							(width 0)
-							(type default)
-						)
-						(fill
-							(type none)
-						)
-					)
-					(polyline
-						(pts
-							(xy -2.032 -1.27) (xy -2.032 1.27)
-						)
-						(stroke
-							(width 0.508)
-							(type default)
-						)
-						(fill
-							(type none)
-						)
-					)
-					(rectangle
-						(start -1.143 2.54)
-						(end 1.143 -2.54)
-						(stroke
-							(width 0.3048)
-							(type default)
-						)
-						(fill
-							(type none)
-						)
-					)
-					(polyline
-						(pts
-							(xy 0 -3.81) (xy 0 -3.556)
-						)
-						(stroke
-							(width 0)
-							(type default)
-						)
-						(fill
-							(type none)
-						)
-					)
-					(polyline
-						(pts
-							(xy 2.032 0) (xy 2.54 0)
-						)
-						(stroke
-							(width 0)
-							(type default)
-						)
-						(fill
-							(type none)
-						)
-					)
-					(polyline
-						(pts
-							(xy 2.032 -1.27) (xy 2.032 1.27)
-						)
-						(stroke
-							(width 0.508)
-							(type default)
-						)
-						(fill
-							(type none)
-						)
-					)
-				)
-				(symbol "Crystal_GND24_1_1"
-					(pin passive line
-						(at -3.81 0 0)
-						(length 1.27)
-						(name "1"
-							(effects
-								(font
-									(size 1.27 1.27)
-								)
-							)
-						)
-						(number "1"
-							(effects
-								(font
-									(size 1.27 1.27)
-								)
-							)
-						)
-					)
-					(pin passive line
-						(at 0 -5.08 90)
-						(length 1.27)
-						(name "G"
-							(effects
-								(font
-									(size 1.27 1.27)
-								)
-							)
-						)
-						(number "2"
-							(effects
-								(font
-									(size 1.27 1.27)
-								)
-							)
-						)
-					)
-					(pin passive line
-						(at 3.81 0 180)
-						(length 1.27)
-						(name "3"
-							(effects
-								(font
-									(size 1.27 1.27)
-								)
-							)
-						)
-						(number "3"
-							(effects
-								(font
-									(size 1.27 1.27)
-								)
-							)
-						)
-					)
-					(pin passive line
-						(at 0 -5.08 90)
-						(length 1.27)
-						(hide yes)
-						(name "G"
-							(effects
-								(font
-									(size 1.27 1.27)
-								)
-							)
-						)
-						(number "4"
-							(effects
-								(font
-									(size 1.27 1.27)
-								)
-							)
-						)
-					)
-				)
-				(embedded_fonts no)
-			)
 	)
 	(junction
 		(at 72.39 40.64)
@@ -2407,7 +2405,6 @@
 		(color 0 0 0 0)
 		(uuid "5424a450-6f1e-41b4-b226-fe8bf6f91660")
 	)
-	
 	(junction
 		(at 72.39 74.93)
 		(diameter 0)
@@ -2420,7 +2417,6 @@
 		(color 0 0 0 0)
 		(uuid "b743a9cf-7ca0-48a4-ba9a-0e9fafcd6123")
 	)
-	
 	(no_connect
 		(at 194.31 139.7)
 		(uuid "8790eaa6-f6af-4ab0-a6fc-56ab0cbc9572")
@@ -2493,7 +2489,6 @@
 		)
 		(uuid "1f21a28c-b3ee-43e6-8589-8d4b05445c45")
 	)
-	
 	(wire
 		(pts
 			(xy 194.31 129.54) (xy 203.2 129.54)
@@ -2516,6 +2511,26 @@
 	)
 	(wire
 		(pts
+			(xy 64.77 162.56) (xy 67.31 162.56)
+		)
+		(stroke
+			(width 0)
+			(type default)
+		)
+		(uuid "2702ce70-4480-4573-a96c-5c3897c170ca")
+	)
+	(wire
+		(pts
+			(xy 77.47 152.4) (xy 80.01 152.4)
+		)
+		(stroke
+			(width 0)
+			(type default)
+		)
+		(uuid "27e14992-ca9c-48f6-bb9e-1745c7abee2d")
+	)
+	(wire
+		(pts
 			(xy 205.74 85.09) (xy 219.71 85.09)
 		)
 		(stroke
@@ -2524,7 +2539,6 @@
 		)
 		(uuid "2a0cde34-c6ec-4f2f-a117-ecdb3e168a04")
 	)
-	
 	(wire
 		(pts
 			(xy 72.39 40.64) (xy 72.39 41.91)
@@ -2557,6 +2571,16 @@
 	)
 	(wire
 		(pts
+			(xy 45.72 163.83) (xy 45.72 161.29)
+		)
+		(stroke
+			(width 0)
+			(type default)
+		)
+		(uuid "41fb1168-7283-406c-86bc-09d8ce63f187")
+	)
+	(wire
+		(pts
 			(xy 95.25 80.01) (xy 95.25 127)
 		)
 		(stroke
@@ -2574,6 +2598,26 @@
 			(type default)
 		)
 		(uuid "475b32ea-8a14-410f-832f-179501c2dfe0")
+	)
+	(wire
+		(pts
+			(xy 57.15 162.56) (xy 54.61 162.56)
+		)
+		(stroke
+			(width 0)
+			(type default)
+		)
+		(uuid "478de11c-5650-41f2-8ab9-4635f2a193ec")
+	)
+	(wire
+		(pts
+			(xy 45.72 171.45) (xy 45.72 173.99)
+		)
+		(stroke
+			(width 0)
+			(type default)
+		)
+		(uuid "4cc03199-3cf3-4116-ab52-4b97808f3251")
 	)
 	(wire
 		(pts
@@ -2685,8 +2729,6 @@
 		)
 		(uuid "94ec2c43-c56e-4167-ae24-2dbb2ea5bf12")
 	)
-	
-	
 	(wire
 		(pts
 			(xy 83.82 93.98) (xy 83.82 74.93)
@@ -2717,7 +2759,6 @@
 		)
 		(uuid "a156b016-f8d1-440c-be59-9a5bfc40237c")
 	)
-	
 	(wire
 		(pts
 			(xy 227.33 118.11) (xy 227.33 127)
@@ -2728,7 +2769,6 @@
 		)
 		(uuid "a7c27f40-47be-47d5-8686-ec3ada6ac9f3")
 	)
-	
 	(wire
 		(pts
 			(xy 107.95 85.09) (xy 120.65 85.09)
@@ -2749,7 +2789,16 @@
 		)
 		(uuid "bca043fa-6434-4033-b4de-ec67f5397022")
 	)
-	
+	(wire
+		(pts
+			(xy 60.96 167.64) (xy 60.96 170.18)
+		)
+		(stroke
+			(width 0)
+			(type default)
+		)
+		(uuid "be393fc6-744a-4b65-8ca0-688303496489")
+	)
 	(wire
 		(pts
 			(xy 83.82 101.6) (xy 83.82 106.68)
@@ -2782,6 +2831,26 @@
 	)
 	(wire
 		(pts
+			(xy 69.85 152.4) (xy 67.31 152.4)
+		)
+		(stroke
+			(width 0)
+			(type default)
+		)
+		(uuid "cc95c64f-b280-4ee2-bd5b-44a459f3154a")
+	)
+	(wire
+		(pts
+			(xy 76.2 163.83) (xy 76.2 161.29)
+		)
+		(stroke
+			(width 0)
+			(type default)
+		)
+		(uuid "d59a850c-a0c6-43ed-8e8c-5cf8e8790ba3")
+	)
+	(wire
+		(pts
 			(xy 227.33 127) (xy 227.33 129.54)
 		)
 		(stroke
@@ -2789,6 +2858,16 @@
 			(type default)
 		)
 		(uuid "d5e19a95-ea3e-48bf-b5f6-90f1a02d7948")
+	)
+	(wire
+		(pts
+			(xy 76.2 171.45) (xy 76.2 173.99)
+		)
+		(stroke
+			(width 0)
+			(type default)
+		)
+		(uuid "dc998aa2-038b-4951-ab2b-25fc7414d03d")
 	)
 	(wire
 		(pts
@@ -2809,6 +2888,16 @@
 			(type default)
 		)
 		(uuid "e2e68817-711a-4498-b343-4099fae21193")
+	)
+	(wire
+		(pts
+			(xy 118.11 137.16) (xy 115.57 137.16)
+		)
+		(stroke
+			(width 0)
+			(type default)
+		)
+		(uuid "e39a3612-1c95-49fe-be8e-bbaf76583e06")
 	)
 	(wire
 		(pts
@@ -2860,8 +2949,86 @@
 		)
 		(uuid "f7ff76c4-16fc-4341-9c53-3ae52264b737")
 	)
-	
-	
+	(label "XTAL_IN"
+		(at 45.72 161.29 90)
+		(effects
+			(font
+				(size 1.27 1.27)
+			)
+			(justify left bottom)
+		)
+		(uuid "2f6cadf2-4fb9-480d-b661-cfa9c08f8d1d")
+	)
+	(label "OSC2_DRV"
+		(at 115.57 137.16 180)
+		(effects
+			(font
+				(size 1.27 1.27)
+			)
+			(justify right bottom)
+		)
+		(uuid "3dedff5a-ab5c-42fd-926a-be37b6e3c51f")
+	)
+	(label "XTAL_IN"
+		(at 54.61 162.56 180)
+		(effects
+			(font
+				(size 1.27 1.27)
+			)
+			(justify right bottom)
+		)
+		(uuid "514f95a7-da93-46eb-a860-be313e72b457")
+	)
+	(label "XTAL_OUT"
+		(at 67.31 162.56 0)
+		(effects
+			(font
+				(size 1.27 1.27)
+			)
+			(justify left bottom)
+		)
+		(uuid "796848b8-8439-4712-9338-880cf16144fb")
+	)
+	(label "OSC2_DRV"
+		(at 67.31 152.4 180)
+		(effects
+			(font
+				(size 1.27 1.27)
+			)
+			(justify right bottom)
+		)
+		(uuid "7c01aa1b-8a01-4893-844d-d278ee1a8e2b")
+	)
+	(label "XTAL_IN"
+		(at 90.17 139.7 180)
+		(effects
+			(font
+				(size 1.27 1.27)
+			)
+			(justify right bottom)
+		)
+		(uuid "a2c22131-18a5-42e3-8649-7b9e00f73108")
+	)
+	(label "XTAL_OUT"
+		(at 76.2 161.29 90)
+		(effects
+			(font
+				(size 1.27 1.27)
+			)
+			(justify left bottom)
+		)
+		(uuid "d618e023-fdb8-494a-9447-b19660b2b9a6")
+	)
+	(label "XTAL_OUT"
+		(at 80.01 152.4 0)
+		(effects
+			(font
+				(size 1.27 1.27)
+			)
+			(justify left bottom)
+		)
+		(uuid "ea280e5d-dcbc-4d9c-858c-aae9f72a3d22")
+	)
 	(hierarchical_label "CANL_RAW"
 		(shape bidirectional)
 		(at 219.71 85.09 0)
@@ -3024,6 +3191,414 @@
 			(project "canary-hat"
 				(path "/e63e39d7-6ac0-4ffd-8aa3-1841a4541b55/95d90167-31bb-4204-9df3-d22330310a75"
 					(reference "#PWR024")
+					(unit 1)
+				)
+			)
+		)
+	)
+	(symbol
+		(lib_id "Device:C")
+		(at 45.72 167.64 0)
+		(unit 1)
+		(body_style 1)
+		(exclude_from_sim no)
+		(in_bom yes)
+		(on_board yes)
+		(in_pos_files yes)
+		(dnp no)
+		(uuid "179df046-840f-484a-95d9-ec74aa93f840")
+		(property "Reference" "C33"
+			(at 48.26 166.37 0)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify left)
+			)
+		)
+		(property "Value" "8.2pF"
+			(at 48.26 168.91 0)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify left)
+			)
+		)
+		(property "Footprint" "Capacitor_SMD:C_0603_1608Metric"
+			(at 45.72 167.64 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Datasheet" ""
+			(at 45.72 167.64 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Description" "Unpolarized capacitor"
+			(at 45.72 167.64 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Manufacturer" "Murata"
+			(at 45.72 167.64 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify left)
+			)
+		)
+		(property "MPN" "GRM1885C1H8R2CA01D"
+			(at 45.72 167.64 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify left)
+			)
+		)
+		(property "Voltage" "50V"
+			(at 45.72 167.64 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify left)
+			)
+		)
+		(property "Dielectric" "C0G/NP0"
+			(at 45.72 167.64 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify left)
+			)
+		)
+		(property "Tolerance" "+/-0.25pF"
+			(at 45.72 167.64 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify left)
+			)
+		)
+		(property "Quote" "Rev 2.1: not yet quoted."
+			(at 45.72 167.64 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify left)
+			)
+		)
+		(property "Note" "Y1 load capacitor, C0G. CL = C1'C2'/(C1'+C2') with ~4 pF pin+trace stray per side: 8.2 pF -> ~6 pF + ~1-2 pF across the crystal ~ 8 pF, the CX3225SA's CL. Place both at the crystal, short symmetric traces, solid ground."
+			(at 45.72 167.64 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify left)
+			)
+		)
+		(pin "1"
+			(uuid "76630ec8-47b7-4c74-be91-e20f7cd7f422")
+		)
+		(pin "2"
+			(uuid "25e0ca7a-b3ae-4520-a19c-54c4ab0af2db")
+		)
+		(instances
+			(project "canary-hat"
+				(path "/e63e39d7-6ac0-4ffd-8aa3-1841a4541b55/95d90167-31bb-4204-9df3-d22330310a75"
+					(reference "C33")
+					(unit 1)
+				)
+			)
+		)
+	)
+	(symbol
+		(lib_id "power:GND")
+		(at 60.96 170.18 0)
+		(unit 1)
+		(body_style 1)
+		(exclude_from_sim no)
+		(in_bom yes)
+		(on_board yes)
+		(in_pos_files yes)
+		(dnp no)
+		(uuid "21589907-108c-475c-b824-4b778677af31")
+		(property "Reference" "#PWR0311"
+			(at 63.5 168.91 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify left)
+			)
+		)
+		(property "Value" "GND"
+			(at 63.5 172.72 0)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Footprint" ""
+			(at 60.96 170.18 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Datasheet" ""
+			(at 60.96 170.18 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Description" ""
+			(at 60.96 170.18 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(pin "1"
+			(uuid "a392e120-b2fa-44b9-a078-1c6e3187f512")
+		)
+		(instances
+			(project "canary-hat"
+				(path "/e63e39d7-6ac0-4ffd-8aa3-1841a4541b55/95d90167-31bb-4204-9df3-d22330310a75"
+					(reference "#PWR0311")
+					(unit 1)
+				)
+			)
+		)
+	)
+	(symbol
+		(lib_id "Device:C")
+		(at 76.2 167.64 0)
+		(unit 1)
+		(body_style 1)
+		(exclude_from_sim no)
+		(in_bom yes)
+		(on_board yes)
+		(in_pos_files yes)
+		(dnp no)
+		(uuid "3c390ad3-18c1-4a3a-9803-529e6ce0eef1")
+		(property "Reference" "C34"
+			(at 78.74 166.37 0)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify left)
+			)
+		)
+		(property "Value" "8.2pF"
+			(at 78.74 168.91 0)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify left)
+			)
+		)
+		(property "Footprint" "Capacitor_SMD:C_0603_1608Metric"
+			(at 76.2 167.64 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Datasheet" ""
+			(at 76.2 167.64 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Description" "Unpolarized capacitor"
+			(at 76.2 167.64 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Manufacturer" "Murata"
+			(at 76.2 167.64 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify left)
+			)
+		)
+		(property "MPN" "GRM1885C1H8R2CA01D"
+			(at 76.2 167.64 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify left)
+			)
+		)
+		(property "Voltage" "50V"
+			(at 76.2 167.64 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify left)
+			)
+		)
+		(property "Dielectric" "C0G/NP0"
+			(at 76.2 167.64 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify left)
+			)
+		)
+		(property "Tolerance" "+/-0.25pF"
+			(at 76.2 167.64 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify left)
+			)
+		)
+		(property "Quote" "Rev 2.1: not yet quoted."
+			(at 76.2 167.64 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify left)
+			)
+		)
+		(property "Note" "Y1 load capacitor, C0G. CL = C1'C2'/(C1'+C2') with ~4 pF pin+trace stray per side: 8.2 pF -> ~6 pF + ~1-2 pF across the crystal ~ 8 pF, the CX3225SA's CL. Place both at the crystal, short symmetric traces, solid ground."
+			(at 76.2 167.64 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify left)
+			)
+		)
+		(pin "1"
+			(uuid "8b1f18a0-fbe1-4a8e-9326-d23acae53a05")
+		)
+		(pin "2"
+			(uuid "c33d7082-a9c3-4400-83b4-d5b59cf9fe31")
+		)
+		(instances
+			(project "canary-hat"
+				(path "/e63e39d7-6ac0-4ffd-8aa3-1841a4541b55/95d90167-31bb-4204-9df3-d22330310a75"
+					(reference "C34")
 					(unit 1)
 				)
 			)
@@ -3206,6 +3781,84 @@
 		)
 	)
 	(symbol
+		(lib_id "power:GND")
+		(at 45.72 173.99 0)
+		(unit 1)
+		(body_style 1)
+		(exclude_from_sim no)
+		(in_bom yes)
+		(on_board yes)
+		(in_pos_files yes)
+		(dnp no)
+		(uuid "62218630-f277-4009-9331-4e527db25b2e")
+		(property "Reference" "#PWR0312"
+			(at 48.26 172.72 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify left)
+			)
+		)
+		(property "Value" "GND"
+			(at 48.26 176.53 0)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Footprint" ""
+			(at 45.72 173.99 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Datasheet" ""
+			(at 45.72 173.99 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Description" ""
+			(at 45.72 173.99 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(pin "1"
+			(uuid "baa6ac00-ace1-4b12-8bfa-387c1734a050")
+		)
+		(instances
+			(project "canary-hat"
+				(path "/e63e39d7-6ac0-4ffd-8aa3-1841a4541b55/95d90167-31bb-4204-9df3-d22330310a75"
+					(reference "#PWR0312")
+					(unit 1)
+				)
+			)
+		)
+	)
+	(symbol
 		(lib_id "Device:R")
 		(at 83.82 110.49 0)
 		(unit 1)
@@ -3359,7 +4012,6 @@
 			)
 		)
 	)
-	
 	(symbol
 		(lib_id "power:+5V")
 		(at 72.39 38.1 0)
@@ -3433,6 +4085,159 @@
 			(project "canary-hat"
 				(path "/e63e39d7-6ac0-4ffd-8aa3-1841a4541b55/95d90167-31bb-4204-9df3-d22330310a75"
 					(reference "#PWR023")
+					(unit 1)
+				)
+			)
+		)
+	)
+	(symbol
+		(lib_id "Device:R")
+		(at 73.66 152.4 90)
+		(unit 1)
+		(body_style 1)
+		(exclude_from_sim no)
+		(in_bom yes)
+		(on_board yes)
+		(in_pos_files yes)
+		(dnp no)
+		(uuid "780ea1f4-8c96-44a7-9453-d2466db562ab")
+		(property "Reference" "R43"
+			(at 76.2 151.13 0)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify left)
+			)
+		)
+		(property "Value" "0"
+			(at 76.2 153.67 0)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify left)
+			)
+		)
+		(property "Footprint" "Resistor_SMD:R_0603_1608Metric"
+			(at 73.66 152.4 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Datasheet" ""
+			(at 73.66 152.4 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Description" "Resistor"
+			(at 73.66 152.4 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Manufacturer" "Yageo"
+			(at 73.66 152.4 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify left)
+			)
+		)
+		(property "MPN" "RC0603JR-070RL"
+			(at 73.66 152.4 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify left)
+			)
+		)
+		(property "Power" "0.1W"
+			(at 73.66 152.4 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify left)
+			)
+		)
+		(property "Tolerance" "jumper"
+			(at 73.66 152.4 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify left)
+			)
+		)
+		(property "Quote" "Rev 2.1: not yet quoted."
+			(at 73.66 152.4 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify left)
+			)
+		)
+		(property "Note" "Crystal drive-limit resistor in series with U3 OSC2, 0 ohm fitted. Size it at bring-up: measure Y1's amplitude at OSC1 with a <= 1 pF probe, compute drive ~ ESR * (pi * f * Vpp * (C0 + CL))^2 / 2, and fit Rs (typically ~X_C2, a few hundred ohms) if it exceeds ~100 uW. CX3225SA allows 200 uW max; a rail-to-rail 40 MHz Pierce can reach 0.2-0.5 mW. Rs eats start-up margin (~4.5x at gm min with 0 ohm), so fit only what the measurement asks for."
+			(at 73.66 152.4 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify left)
+			)
+		)
+		(pin "1"
+			(uuid "8921b5e2-fc01-4843-ac30-f8ab3c3b60cf")
+		)
+		(pin "2"
+			(uuid "2a2dc4dc-9e92-4ee2-87ce-6831fe527914")
+		)
+		(instances
+			(project "canary-hat"
+				(path "/e63e39d7-6ac0-4ffd-8aa3-1841a4541b55/95d90167-31bb-4204-9df3-d22330310a75"
+					(reference "R43")
 					(unit 1)
 				)
 			)
@@ -3920,8 +4725,6 @@
 			)
 		)
 	)
-	
-	
 	(symbol
 		(lib_id "Device:C")
 		(at 227.33 133.35 0)
@@ -4306,6 +5109,141 @@
 		)
 	)
 	(symbol
+		(lib_id "Device:Crystal_GND24")
+		(at 60.96 162.56 0)
+		(unit 1)
+		(body_style 1)
+		(exclude_from_sim no)
+		(in_bom yes)
+		(on_board yes)
+		(in_pos_files yes)
+		(dnp no)
+		(uuid "c832e229-4d6a-447b-a9f7-f27f8388542f")
+		(property "Reference" "Y1"
+			(at 63.5 161.29 0)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify left)
+			)
+		)
+		(property "Value" "40MHz"
+			(at 63.5 163.83 0)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify left)
+			)
+		)
+		(property "Footprint" "Crystal:Crystal_SMD_3225-4Pin_3.2x2.5mm"
+			(at 60.96 162.56 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Datasheet" ""
+			(at 60.96 162.56 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Description" "Crystal, 4 pads, pads 2 and 4 case ground"
+			(at 60.96 162.56 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Manufacturer" "Kyocera AVX"
+			(at 60.96 162.56 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify left)
+			)
+		)
+		(property "MPN" "CX3225SA40000D0PTWCC"
+			(at 60.96 162.56 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify left)
+			)
+		)
+		(property "Quote" "Rev 2.1: not yet quoted. DigiKey 9698138, in stock (operator, 2026-10-12)."
+			(at 60.96 162.56 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify left)
+			)
+		)
+		(property "Note" "U3 time reference, 40.000 MHz fundamental crystal, the 13.5.6 fallback design (operator, 2026-10-12: easy to source). CX3225SA40000D0PTWCC (datasheets/cx3225sa_e.pdf): 40000 kHz; D0 = CL 8.0 pF; P = +/-50 ppm at 25 C; T = -40..150 C; W = +/-200 ppm over temperature, ~20x inside the MCP2518FD's +/-0.5 %; ESR <= 50 ohm; C0 <= 3 pF; drive 10 uW typ, 200 uW MAX (see R43); AEC-Q200. Pads #1/#3 are the crystal and #2/#4 ground, matching Crystal_GND24. Start-up margin |R_neg| ~ gm/(w^2 C1 C2) with C1 = C2 ~ 12 pF (8.2 pF + ~4 pF stray): 224-336 ohm vs 50 ohm ESR = ~4.5-6.7x. Rev 2.0's ABLS2 at CL 18 pF had 0.8-1.3x. Check Kyocera's recommended land (1.45 x 1.05 mm pads) against the KiCad 3225 footprint at layout. The MPN's last two letters 'CC' are an individual specification (the catalogue standard is 'HH'): the catalogue ESR/C0/drive figures are confirmed for this exact part by DigiKey's listing (8 pF, 50 ohm) only; confirm C0 and drive with Kyocera or at bring-up. ROTATION: a 90-degree error puts the crystal on the GND pads and shorts OSC1/OSC2 through the lid - pin-1 on the assembly drawing."
+			(at 60.96 162.56 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify left)
+			)
+		)
+		(pin "1"
+			(uuid "98968c86-14fe-45b6-b1a3-1fd6b50634eb")
+		)
+		(pin "2"
+			(uuid "5bc71610-2767-412b-9bd9-c8ad69bee4ef")
+		)
+		(pin "3"
+			(uuid "fd23b7c7-a4b5-48d3-bf88-7819838bfd96")
+		)
+		(pin "4"
+			(uuid "61780102-39ba-4f6a-95ef-58ae1f8a5485")
+		)
+		(instances
+			(project "canary-hat"
+				(path "/e63e39d7-6ac0-4ffd-8aa3-1841a4541b55/95d90167-31bb-4204-9df3-d22330310a75"
+					(reference "Y1")
+					(unit 1)
+				)
+			)
+		)
+	)
+	(symbol
 		(lib_id "power:GND")
 		(at 72.39 86.36 0)
 		(unit 1)
@@ -4461,8 +5399,84 @@
 			)
 		)
 	)
-	
-	
+	(symbol
+		(lib_id "power:GND")
+		(at 76.2 173.99 0)
+		(unit 1)
+		(body_style 1)
+		(exclude_from_sim no)
+		(in_bom yes)
+		(on_board yes)
+		(in_pos_files yes)
+		(dnp no)
+		(uuid "dea87975-2f42-45a6-8785-c1e181bd6c49")
+		(property "Reference" "#PWR0313"
+			(at 78.74 172.72 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify left)
+			)
+		)
+		(property "Value" "GND"
+			(at 78.74 176.53 0)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Footprint" ""
+			(at 76.2 173.99 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Datasheet" ""
+			(at 76.2 173.99 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Description" ""
+			(at 76.2 173.99 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(pin "1"
+			(uuid "267cedf5-0027-4cad-b215-fa67cf4ebd2b")
+		)
+		(instances
+			(project "canary-hat"
+				(path "/e63e39d7-6ac0-4ffd-8aa3-1841a4541b55/95d90167-31bb-4204-9df3-d22330310a75"
+					(reference "#PWR0313")
+					(unit 1)
+				)
+			)
+		)
+	)
 	(symbol
 		(lib_id "power:GND")
 		(at 227.33 139.7 0)
@@ -4838,1054 +5852,4 @@
 			)
 		)
 	)
-
-	
-	
-	
-	
-	
-	
-	
-	
-	
-	
-	
-	
-	
-	
-	
-	
-	
-	(label "XTAL_IN"
-		(at 90.17 139.7 180)
-		(effects
-			(font
-				(size 1.27 1.27)
-			)
-			(justify right bottom)
-		)
-		(uuid "a2c22131-18a5-42e3-8649-7b9e00f73108")
-	)
-	(wire
-		(pts
-			(xy 118.11 137.16) (xy 115.57 137.16)
-		)
-		(stroke
-			(width 0)
-			(type default)
-		)
-		(uuid "e39a3612-1c95-49fe-be8e-bbaf76583e06")
-	)
-	(label "OSC2_DRV"
-		(at 115.57 137.16 180)
-		(effects
-			(font
-				(size 1.27 1.27)
-			)
-			(justify right bottom)
-		)
-		(uuid "3dedff5a-ab5c-42fd-926a-be37b6e3c51f")
-	)
-	(symbol
-		(lib_id "Device:R")
-		(at 73.66 152.4 90)
-		(unit 1)
-		(body_style 1)
-		(exclude_from_sim no)
-		(in_bom yes)
-		(on_board yes)
-		(in_pos_files yes)
-		(dnp no)
-		(uuid "780ea1f4-8c96-44a7-9453-d2466db562ab")
-		(property "Reference" "R43"
-			(at 76.2 151.13 0)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify left)
-			)
-		)
-		(property "Value" "0"
-			(at 76.2 153.67 0)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify left)
-			)
-		)
-		(property "Footprint" "Resistor_SMD:R_0603_1608Metric"
-			(at 73.66 152.4 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Datasheet" ""
-			(at 73.66 152.4 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Description" "Resistor"
-			(at 73.66 152.4 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Manufacturer" "Yageo"
-			(at 73.66 152.4 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify left)
-			)
-		)
-		(property "MPN" "RC0603JR-070RL"
-			(at 73.66 152.4 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify left)
-			)
-		)
-		(property "Power" "0.1W"
-			(at 73.66 152.4 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify left)
-			)
-		)
-		(property "Tolerance" "jumper"
-			(at 73.66 152.4 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify left)
-			)
-		)
-		(property "Quote" "Rev 2.1: not yet quoted."
-			(at 73.66 152.4 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify left)
-			)
-		)
-		(property "Note" "Crystal drive-limit resistor in series with U3 OSC2, 0 ohm fitted. Size it at bring-up: measure Y1's amplitude at OSC1 with a <= 1 pF probe, compute drive ~ ESR * (pi * f * Vpp * (C0 + CL))^2 / 2, and fit Rs (typically ~X_C2, a few hundred ohms) if it exceeds ~100 uW. CX3225SA allows 200 uW max; a rail-to-rail 40 MHz Pierce can reach 0.2-0.5 mW. Rs eats start-up margin (~4.5x at gm min with 0 ohm), so fit only what the measurement asks for."
-			(at 73.66 152.4 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify left)
-			)
-		)
-		(pin "1"
-			(uuid "8921b5e2-fc01-4843-ac30-f8ab3c3b60cf")
-		)
-		(pin "2"
-			(uuid "2a2dc4dc-9e92-4ee2-87ce-6831fe527914")
-		)
-		(instances
-			(project "canary-hat"
-				(path "/e63e39d7-6ac0-4ffd-8aa3-1841a4541b55/95d90167-31bb-4204-9df3-d22330310a75"
-					(reference "R43")
-					(unit 1)
-				)
-			)
-		)
-	)
-	(wire
-		(pts
-			(xy 69.85 152.4) (xy 67.31 152.4)
-		)
-		(stroke
-			(width 0)
-			(type default)
-		)
-		(uuid "cc95c64f-b280-4ee2-bd5b-44a459f3154a")
-	)
-	(label "OSC2_DRV"
-		(at 67.31 152.4 180)
-		(effects
-			(font
-				(size 1.27 1.27)
-			)
-			(justify right bottom)
-		)
-		(uuid "7c01aa1b-8a01-4893-844d-d278ee1a8e2b")
-	)
-	(wire
-		(pts
-			(xy 77.47 152.4) (xy 80.01 152.4)
-		)
-		(stroke
-			(width 0)
-			(type default)
-		)
-		(uuid "27e14992-ca9c-48f6-bb9e-1745c7abee2d")
-	)
-	(label "XTAL_OUT"
-		(at 80.01 152.4 0)
-		(effects
-			(font
-				(size 1.27 1.27)
-			)
-			(justify left bottom)
-		)
-		(uuid "ea280e5d-dcbc-4d9c-858c-aae9f72a3d22")
-	)
-	(symbol
-		(lib_id "Device:Crystal_GND24")
-		(at 60.96 162.56 0)
-		(unit 1)
-		(body_style 1)
-		(exclude_from_sim no)
-		(in_bom yes)
-		(on_board yes)
-		(in_pos_files yes)
-		(dnp no)
-		(uuid "c832e229-4d6a-447b-a9f7-f27f8388542f")
-		(property "Reference" "Y1"
-			(at 63.5 161.29 0)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify left)
-			)
-		)
-		(property "Value" "40MHz"
-			(at 63.5 163.83 0)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify left)
-			)
-		)
-		(property "Footprint" "Crystal:Crystal_SMD_3225-4Pin_3.2x2.5mm"
-			(at 60.96 162.56 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Datasheet" ""
-			(at 60.96 162.56 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Description" "Crystal, 4 pads, pads 2 and 4 case ground"
-			(at 60.96 162.56 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Manufacturer" "Kyocera AVX"
-			(at 60.96 162.56 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify left)
-			)
-		)
-		(property "MPN" "CX3225SA40000D0PTWCC"
-			(at 60.96 162.56 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify left)
-			)
-		)
-		(property "Quote" "Rev 2.1: not yet quoted. DigiKey 9698138, in stock (operator, 2026-10-12)."
-			(at 60.96 162.56 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify left)
-			)
-		)
-		(property "Note" "U3 time reference, 40.000 MHz fundamental crystal, the 13.5.6 fallback design (operator, 2026-10-12: easy to source). CX3225SA40000D0PTWCC (datasheets/cx3225sa_e.pdf): 40000 kHz; D0 = CL 8.0 pF; P = +/-50 ppm at 25 C; T = -40..150 C; W = +/-200 ppm over temperature, ~20x inside the MCP2518FD's +/-0.5 %; ESR <= 50 ohm; C0 <= 3 pF; drive 10 uW typ, 200 uW MAX (see R43); AEC-Q200. Pads #1/#3 are the crystal and #2/#4 ground, matching Crystal_GND24. Start-up margin |R_neg| ~ gm/(w^2 C1 C2) with C1 = C2 ~ 12 pF (8.2 pF + ~4 pF stray): 224-336 ohm vs 50 ohm ESR = ~4.5-6.7x. Rev 2.0's ABLS2 at CL 18 pF had 0.8-1.3x. Check Kyocera's recommended land (1.45 x 1.05 mm pads) against the KiCad 3225 footprint at layout. The MPN's last two letters 'CC' are an individual specification (the catalogue standard is 'HH'): the catalogue ESR/C0/drive figures are confirmed for this exact part by DigiKey's listing (8 pF, 50 ohm) only; confirm C0 and drive with Kyocera or at bring-up. ROTATION: a 90-degree error puts the crystal on the GND pads and shorts OSC1/OSC2 through the lid - pin-1 on the assembly drawing."
-			(at 60.96 162.56 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify left)
-			)
-		)
-		(pin "1"
-			(uuid "98968c86-14fe-45b6-b1a3-1fd6b50634eb")
-		)
-		(pin "2"
-			(uuid "5bc71610-2767-412b-9bd9-c8ad69bee4ef")
-		)
-		(pin "3"
-			(uuid "fd23b7c7-a4b5-48d3-bf88-7819838bfd96")
-		)
-		(pin "4"
-			(uuid "61780102-39ba-4f6a-95ef-58ae1f8a5485")
-		)
-		(instances
-			(project "canary-hat"
-				(path "/e63e39d7-6ac0-4ffd-8aa3-1841a4541b55/95d90167-31bb-4204-9df3-d22330310a75"
-					(reference "Y1")
-					(unit 1)
-				)
-			)
-		)
-	)
-	(wire
-		(pts
-			(xy 57.15 162.56) (xy 54.61 162.56)
-		)
-		(stroke
-			(width 0)
-			(type default)
-		)
-		(uuid "478de11c-5650-41f2-8ab9-4635f2a193ec")
-	)
-	(label "XTAL_IN"
-		(at 54.61 162.56 180)
-		(effects
-			(font
-				(size 1.27 1.27)
-			)
-			(justify right bottom)
-		)
-		(uuid "514f95a7-da93-46eb-a860-be313e72b457")
-	)
-	(wire
-		(pts
-			(xy 64.77 162.56) (xy 67.31 162.56)
-		)
-		(stroke
-			(width 0)
-			(type default)
-		)
-		(uuid "2702ce70-4480-4573-a96c-5c3897c170ca")
-	)
-	(label "XTAL_OUT"
-		(at 67.31 162.56 0)
-		(effects
-			(font
-				(size 1.27 1.27)
-			)
-			(justify left bottom)
-		)
-		(uuid "796848b8-8439-4712-9338-880cf16144fb")
-	)
-	(wire
-		(pts
-			(xy 60.96 167.64) (xy 60.96 170.18)
-		)
-		(stroke
-			(width 0)
-			(type default)
-		)
-		(uuid "be393fc6-744a-4b65-8ca0-688303496489")
-	)
-	(symbol
-		(lib_id "power:GND")
-		(at 60.96 170.18 0)
-		(unit 1)
-		(body_style 1)
-		(exclude_from_sim no)
-		(in_bom yes)
-		(on_board yes)
-		(in_pos_files yes)
-		(dnp no)
-		(uuid "21589907-108c-475c-b824-4b778677af31")
-		(property "Reference" "#PWR0311"
-			(at 63.5 168.91 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify left)
-			)
-		)
-		(property "Value" "GND"
-			(at 63.5 172.72 0)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Footprint" ""
-			(at 60.96 170.18 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Datasheet" ""
-			(at 60.96 170.18 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Description" ""
-			(at 60.96 170.18 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(pin "1"
-			(uuid "a392e120-b2fa-44b9-a078-1c6e3187f512")
-		)
-		(instances
-			(project "canary-hat"
-				(path "/e63e39d7-6ac0-4ffd-8aa3-1841a4541b55/95d90167-31bb-4204-9df3-d22330310a75"
-					(reference "#PWR0311")
-					(unit 1)
-				)
-			)
-		)
-	)
-	(symbol
-		(lib_id "Device:C")
-		(at 45.72 167.64 0)
-		(unit 1)
-		(body_style 1)
-		(exclude_from_sim no)
-		(in_bom yes)
-		(on_board yes)
-		(in_pos_files yes)
-		(dnp no)
-		(uuid "179df046-840f-484a-95d9-ec74aa93f840")
-		(property "Reference" "C33"
-			(at 48.26 166.37 0)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify left)
-			)
-		)
-		(property "Value" "8.2pF"
-			(at 48.26 168.91 0)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify left)
-			)
-		)
-		(property "Footprint" "Capacitor_SMD:C_0603_1608Metric"
-			(at 45.72 167.64 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Datasheet" ""
-			(at 45.72 167.64 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Description" "Unpolarized capacitor"
-			(at 45.72 167.64 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Manufacturer" "Murata"
-			(at 45.72 167.64 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify left)
-			)
-		)
-		(property "MPN" "GRM1885C1H8R2CA01D"
-			(at 45.72 167.64 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify left)
-			)
-		)
-		(property "Voltage" "50V"
-			(at 45.72 167.64 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify left)
-			)
-		)
-		(property "Dielectric" "C0G/NP0"
-			(at 45.72 167.64 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify left)
-			)
-		)
-		(property "Tolerance" "+/-0.25pF"
-			(at 45.72 167.64 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify left)
-			)
-		)
-		(property "Quote" "Rev 2.1: not yet quoted."
-			(at 45.72 167.64 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify left)
-			)
-		)
-		(property "Note" "Y1 load capacitor, C0G. CL = C1'C2'/(C1'+C2') with ~4 pF pin+trace stray per side: 8.2 pF -> ~6 pF + ~1-2 pF across the crystal ~ 8 pF, the CX3225SA's CL. Place both at the crystal, short symmetric traces, solid ground."
-			(at 45.72 167.64 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify left)
-			)
-		)
-		(pin "1"
-			(uuid "76630ec8-47b7-4c74-be91-e20f7cd7f422")
-		)
-		(pin "2"
-			(uuid "25e0ca7a-b3ae-4520-a19c-54c4ab0af2db")
-		)
-		(instances
-			(project "canary-hat"
-				(path "/e63e39d7-6ac0-4ffd-8aa3-1841a4541b55/95d90167-31bb-4204-9df3-d22330310a75"
-					(reference "C33")
-					(unit 1)
-				)
-			)
-		)
-	)
-	(wire
-		(pts
-			(xy 45.72 163.83) (xy 45.72 161.29)
-		)
-		(stroke
-			(width 0)
-			(type default)
-		)
-		(uuid "41fb1168-7283-406c-86bc-09d8ce63f187")
-	)
-	(label "XTAL_IN"
-		(at 45.72 161.29 90)
-		(effects
-			(font
-				(size 1.27 1.27)
-			)
-			(justify left bottom)
-		)
-		(uuid "2f6cadf2-4fb9-480d-b661-cfa9c08f8d1d")
-	)
-	(wire
-		(pts
-			(xy 45.72 171.45) (xy 45.72 173.99)
-		)
-		(stroke
-			(width 0)
-			(type default)
-		)
-		(uuid "4cc03199-3cf3-4116-ab52-4b97808f3251")
-	)
-	(symbol
-		(lib_id "power:GND")
-		(at 45.72 173.99 0)
-		(unit 1)
-		(body_style 1)
-		(exclude_from_sim no)
-		(in_bom yes)
-		(on_board yes)
-		(in_pos_files yes)
-		(dnp no)
-		(uuid "62218630-f277-4009-9331-4e527db25b2e")
-		(property "Reference" "#PWR0312"
-			(at 48.26 172.72 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify left)
-			)
-		)
-		(property "Value" "GND"
-			(at 48.26 176.53 0)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Footprint" ""
-			(at 45.72 173.99 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Datasheet" ""
-			(at 45.72 173.99 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Description" ""
-			(at 45.72 173.99 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(pin "1"
-			(uuid "baa6ac00-ace1-4b12-8bfa-387c1734a050")
-		)
-		(instances
-			(project "canary-hat"
-				(path "/e63e39d7-6ac0-4ffd-8aa3-1841a4541b55/95d90167-31bb-4204-9df3-d22330310a75"
-					(reference "#PWR0312")
-					(unit 1)
-				)
-			)
-		)
-	)
-	(symbol
-		(lib_id "Device:C")
-		(at 76.2 167.64 0)
-		(unit 1)
-		(body_style 1)
-		(exclude_from_sim no)
-		(in_bom yes)
-		(on_board yes)
-		(in_pos_files yes)
-		(dnp no)
-		(uuid "3c390ad3-18c1-4a3a-9803-529e6ce0eef1")
-		(property "Reference" "C34"
-			(at 78.74 166.37 0)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify left)
-			)
-		)
-		(property "Value" "8.2pF"
-			(at 78.74 168.91 0)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify left)
-			)
-		)
-		(property "Footprint" "Capacitor_SMD:C_0603_1608Metric"
-			(at 76.2 167.64 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Datasheet" ""
-			(at 76.2 167.64 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Description" "Unpolarized capacitor"
-			(at 76.2 167.64 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Manufacturer" "Murata"
-			(at 76.2 167.64 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify left)
-			)
-		)
-		(property "MPN" "GRM1885C1H8R2CA01D"
-			(at 76.2 167.64 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify left)
-			)
-		)
-		(property "Voltage" "50V"
-			(at 76.2 167.64 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify left)
-			)
-		)
-		(property "Dielectric" "C0G/NP0"
-			(at 76.2 167.64 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify left)
-			)
-		)
-		(property "Tolerance" "+/-0.25pF"
-			(at 76.2 167.64 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify left)
-			)
-		)
-		(property "Quote" "Rev 2.1: not yet quoted."
-			(at 76.2 167.64 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify left)
-			)
-		)
-		(property "Note" "Y1 load capacitor, C0G. CL = C1'C2'/(C1'+C2') with ~4 pF pin+trace stray per side: 8.2 pF -> ~6 pF + ~1-2 pF across the crystal ~ 8 pF, the CX3225SA's CL. Place both at the crystal, short symmetric traces, solid ground."
-			(at 76.2 167.64 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify left)
-			)
-		)
-		(pin "1"
-			(uuid "8b1f18a0-fbe1-4a8e-9326-d23acae53a05")
-		)
-		(pin "2"
-			(uuid "c33d7082-a9c3-4400-83b4-d5b59cf9fe31")
-		)
-		(instances
-			(project "canary-hat"
-				(path "/e63e39d7-6ac0-4ffd-8aa3-1841a4541b55/95d90167-31bb-4204-9df3-d22330310a75"
-					(reference "C34")
-					(unit 1)
-				)
-			)
-		)
-	)
-	(wire
-		(pts
-			(xy 76.2 163.83) (xy 76.2 161.29)
-		)
-		(stroke
-			(width 0)
-			(type default)
-		)
-		(uuid "d59a850c-a0c6-43ed-8e8c-5cf8e8790ba3")
-	)
-	(label "XTAL_OUT"
-		(at 76.2 161.29 90)
-		(effects
-			(font
-				(size 1.27 1.27)
-			)
-			(justify left bottom)
-		)
-		(uuid "d618e023-fdb8-494a-9447-b19660b2b9a6")
-	)
-	(wire
-		(pts
-			(xy 76.2 171.45) (xy 76.2 173.99)
-		)
-		(stroke
-			(width 0)
-			(type default)
-		)
-		(uuid "dc998aa2-038b-4951-ab2b-25fc7414d03d")
-	)
-	(symbol
-		(lib_id "power:GND")
-		(at 76.2 173.99 0)
-		(unit 1)
-		(body_style 1)
-		(exclude_from_sim no)
-		(in_bom yes)
-		(on_board yes)
-		(in_pos_files yes)
-		(dnp no)
-		(uuid "dea87975-2f42-45a6-8785-c1e181bd6c49")
-		(property "Reference" "#PWR0313"
-			(at 78.74 172.72 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify left)
-			)
-		)
-		(property "Value" "GND"
-			(at 78.74 176.53 0)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Footprint" ""
-			(at 76.2 173.99 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Datasheet" ""
-			(at 76.2 173.99 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Description" ""
-			(at 76.2 173.99 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(pin "1"
-			(uuid "267cedf5-0027-4cad-b215-fa67cf4ebd2b")
-		)
-		(instances
-			(project "canary-hat"
-				(path "/e63e39d7-6ac0-4ffd-8aa3-1841a4541b55/95d90167-31bb-4204-9df3-d22330310a75"
-					(reference "#PWR0313")
-					(unit 1)
-				)
-			)
-		)
-	)
-	)
+)
