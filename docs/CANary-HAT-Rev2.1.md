@@ -88,7 +88,7 @@ AEM gauge answers what the new system actually runs on first key-on.
 | 9 | `J2` → two-level terminal block, 12 positions | J2 MKKDS 1,5/6-5,08 |
 | 10 | ~~Correct U8's stale schematic note~~ — **moot**, the part is replaced (§13.5.6) | — |
 | 11 | **One 40 MHz oscillator replaces the Y1 Pierce loop**; Y1 + C5/C6 deleted | X1 MEMS oscillator, C25 100n, R27 33 Ω |
-| 12 | **BT1 polarity reversed** — swap BT1's GND and D2-anode pins (§13.5.6) | BT1 (net change) |
+| 12 | **BT1 polarity reversed** — swap BT1's GND and D2-anode pins (§13.5.6). **Done 2026-10-12**: + on pad 2, − on pad 1 | BT1 (net change) |
 | 13 | ~~U5 barometer: fix whatever the rev 2.0 investigation finds~~ — **no design change**: the second board's U5 works, so the first board's was one bad part (§13.5.6, 2026-10-11) | — |
 | 14 | **J1 BOM line names the 13.5 mm stacking header by part number** (§13.5.6) | J1 (BOM only) |
 | 15 | **Fix J4 colliding with the Pi 5's USB ports** (§13.5.7): either swap edges (U7 + J4 to the terminal-block edge, some terminals to the right edge) or replace J4 with a U.FL and a U.FL→SMA pigtail, leaving everything in place | J4; U7, J2/J3 if edges swap |
@@ -854,6 +854,16 @@ They go into rev 2.1 whatever happens to the boosted-engine work above.
 
 #### BT1 — GNSS backup cell polarity is reversed
 
+> **Decided and entered 2026-10-12 (operator): rev 2.1 reverses rev 2.0's
+> polarity.** The cell's + is on connector **pad 2** (to D2's anode) and − on
+> **pad 1** (GND); rev 2.0 had + on pad 1. In the schematic BT1 uses the project
+> symbol `canary-hat:Battery_Cell_JST_SH_Pin2Plus`: `Device:Battery_Cell` with
+> its pin *numbers* swapped. The drawing still shows + toward D2, and only the
+> pad mapping changes. The netlist confirms pad 1 → GND, pad 2 → D2 anode.
+> Still to do at layout: a `+` beside pad 2 in the silkscreen. A lead
+> re-crimped to fit rev 2.0 (the workaround below) is now backwards for
+> rev 2.1. Meter every lead before fitting: + on housing pin 2.
+
 On the first board the cell's polarity at BT1 is backwards: the pin that should
 carry the cell's + (to D2's anode, then V_BCKP) is the one wired to GND.
 **Fix: swap BT1's two pin connections, GND ↔ D2 anode.** It is a net change
@@ -1342,7 +1352,7 @@ the header closes with **GPIO 12/13/19/20/21/27 uncommitted** instead of none
 | 11 | Rev 2.0 Y1 starts cold? (§13.1 meas. 14) — informs whether the crystal fallback is ever viable | Bench, ≤ 1 pF probe on OSC2 |
 | 12 | ~~U5 root cause: part, process or design~~ — **closed 2026-10-11: the part.** The second board's U5 converts temperature and pressure correctly (§13.5.6) | **Closed** |
 | 15 | **Board #1 only** (item 12 closed): U5 pressure calibration against the U6 surrogate: fit `P = Bosch(raw, T_imu) + a + b·(T_imu − T0)` as pinned per-board data (deferred by operator 2026-09-23) | Cold-start warm-up log at the desk (constant pressure, phone as reference) separates a wrong temperature from a pressure offset; then the ECM baro PID 0x33 on a drive as the known answer |
-| 13 | **BT1 cell/lead with known polarity** — no vendor documents which JST-SH pin carries + on a primary cell (2026-10-12 search), so "swap the pins" only moves the mismatch to the other half of the market. **Operator decision pending** (§13.5.10) | Decide: keep the rev 2.0 pinout, swap, or an on-board holder |
+| 13 | ~~BT1 polarity~~ — **decided 2026-10-12: reversed from rev 2.0, + on pad 2** (§13.5.6). No vendor documents JST-SH polarity on a primary cell, so the lead is checked, not trusted | **Closed** in the schematic; at layout, `+` silkscreen beside pad 2; meter each lead (`BOM-offboard.md`) |
 | 14 | J1 13.5 mm stacking header MPN; assembler-fit or DNF decided. The rev 2.0 board is reworked to a 13.5 mm part (§13.5.6), so this is now a **BOM/notes defect only** — capture the MPN of the part actually fitted | Read the MPN off the part in hand, then make `BOM.csv`, `FAB-NOTES.md` and `pcbway-assembly-notes.txt` agree |
 | 16 | ~~J4 fix~~ — **decided 2026-10-12: U.FL + pigtail** (option B). J4 is `U.FL-R-SMT-1(10)` in the schematic; pigtail, bulkhead mount and strain relief go in the off-board BOM at layout | **Closed** (footprint in schematic) |
 | 17 | ~~ADS8688A datasheet confirmation~~ — **closed 2026-10-03** against SBAS680 (§13.5.3 item 5a). Range, reference, package, rails, 500 kSPS, 17 MHz SCLK and −40/+125 °C all confirmed; part is **`ADS8688A`**. Two corrections: ±20 V protection is conditional on AVDD **impedance** (±11 V if floating > 30 kΩ), and inputs are **1 MΩ**, not high-Z | **Closed** |
@@ -1381,7 +1391,7 @@ Sensors, nothing new. Every net below was checked in the exported netlist.
 | OBD_IO | ADS1015 (U8), C17 and their wiring deleted. `V12_SENSE` leaves through a sheet pin; R11/R12/C18 unchanged. J2 is a 12-pin symbol: pins 1–6 are rev 2.0's J2 pin for pin, 7–12 the upper level per §13.5.5 (pin 12 `SENS_GND` = GND). J3 unchanged. |
 | Analog_Inputs (new) | U8 ADS8688A, U9 TPS7A1650-Q1 and the CH0–CH7 front ends, §13.5.3 as amended below. |
 | CANFD_Interface | Y1 + C5/C6 deleted. X1 (40 MHz MEMS) → R43 33 Ω → U3 OSC1, C33 100 nF at X1, OSC2 open. U3 SDO pin type corrected to tri-state (also in its library). |
-| Sensors | J4 → U.FL (`U.FL-R-SMT-1(10)`). BT1 **not changed yet** (open item 13). |
+| Sensors | J4 → U.FL (`U.FL-R-SMT-1(10)`). BT1 polarity reversed (+ on pad 2) through the project symbol `Battery_Cell_JST_SH_Pin2Plus` (§13.5.6). |
 
 New project symbol library `lib/symbols/canary-hat.kicad_sym`, in `sym-lib-table`:
 `TPS7A1650-Q1` (no stock symbol exists) and `ADS8688A`. The latter is the stock

@@ -8,7 +8,7 @@ KiCad-generated BOM; neither is complete on its own.
 
 | For | Item | Notes |
 |---|---|---|
-| **BT1** | JST SH 2-pin cable, 1.0mm pitch | Mates with SM02B-SRSS-TB. |
+| **BT1** | JST SH 2-pin cable, 1.0mm pitch | Mates with SM02B-SRSS-TB. **Rev 2.1: the cell's + must be on housing pin 2** (pad 2, marked `+` on the silkscreen), the reverse of rev 2.0. JST-SH battery leads have no standard polarity and vendors sell both, so **meter every lead before fitting**. A lead re-crimped for rev 2.0 is backwards here. |
 | **BT1** | GNSS backup cell — **primary cell only** | There is **no charge path** on the board (series 1N4148W, D2, from the cell to V_BCKP), so a supercap will never charge. Without a cell fitted, V_BCKP floats and the receiver cold-starts on every boot. |
 | **J4** | Active GNSS antenna, SMA male | Must have an **integrated SAW filter ahead of its LNA** — the MAX-M10M-00B has no on-module front end. Board supplies bias via L1 from VCC_RF. Confirm the LNA's bias current against VCC_RF's rating. |
 | **J2 / J3** | Ferrules or tinned leads, 5.08mm block | 6-way vehicle side, 2-way 12V pass-through. |
