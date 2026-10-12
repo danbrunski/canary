@@ -761,3 +761,25 @@ measurement in hand.
     assertion.
   - **Left exposed:** what T01.20 leaves (an edit to the parsed config or to
     the fixture channels' decode).
+- [x] **T01.24 `tests/test_replay.py::test_a_fast_pass_never_holds_the_event_loop`
+  failed on a fast machine with the yield working.**
+  - **Seen** 2026-10-12 in the push gate for `11a5613` (the HAT rev 2.1
+    split) on a WSL2 laptop. Both parametrizations failed, and failed again
+    serially: `max(per_turn)` was 2,426 against the < 2,000 bound. Run alone,
+    the same test failed `wall > 0.5` at 0.41 s. Not load, but speed.
+  - **Cause:** T01.22's fix judged rows per turn so that *load* cannot decide
+    the result, but the emit loop yields on a *time* budget
+    (`_MAX_HOLD_SECONDS`, 5 ms), so rows per turn scale with CPU speed. The
+    2,000-row bound assumed ≥ 2.5 µs per row; this machine emits ~2 µs per
+    row. `wall > 0.5` assumed a slow pass in the same way.
+  - **Fixed, test only:** the test monkeypatches `_MAX_HOLD_SECONDS` to 1 ms,
+    putting the bound ~4× clear of this machine's ~500 rows per turn. The 5 ms
+    value itself stays covered by T01.21's
+    `test_rows_already_due_yield_the_loop_every_few_milliseconds`. The
+    `wall > 0.5` premise check is removed: a held pass puts all 20,000 rows in
+    one turn, 10× the bound, on any machine.
+  - **After:** 3 of 3 serial and 3 of 3 `-n auto` runs of the file passed.
+    Mutation: with the yield branch disabled (`elif False:`) it fails
+    (`10000 < 2000`).
+  - **Left exposed:** a machine ~4× faster than this one per row. The bound
+    is still a time budget measured in rows.

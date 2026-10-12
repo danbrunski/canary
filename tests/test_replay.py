@@ -247,6 +247,12 @@ def test_a_fast_pass_never_holds_the_event_loop(
         return real_read(chunk, skip)  # type: ignore[arg-type]
 
     monkeypatch.setattr(replay_mod, "_read_chunk", slow_read)
+    # The yield comes after a *time* budget, so rows per turn scale with CPU
+    # speed: at the production 5 ms a fast laptop emits ~2,400 rows a turn and
+    # fails the 2,000-row bound with the yield working (T01.24). A 1 ms budget
+    # keeps the bound 4x clear of that; the 5 ms value itself is judged by
+    # test_rows_already_due_yield_the_loop_every_few_milliseconds.
+    monkeypatch.setattr(replay_mod, "_MAX_HOLD_SECONDS", 0.001)
     stats = ReplayEmissionStats()
 
     async def run() -> tuple[float, list[int], list[TelemetryRecord]]:
@@ -280,12 +286,13 @@ def test_a_fast_pass_never_holds_the_event_loop(
         await beat
         return wall, per_turn, [queue.get_nowait() for _ in range(queue.qsize())]
 
-    wall, per_turn, got = asyncio.run(run())
+    _wall, per_turn, got = asyncio.run(run())
     assert stats.rows_emitted == 20_000 and stats.passes == 1
     assert stats.pass_reconciled() is True
     assert [r.value for r in got] == [value for _, value in expected]
-    # The pass is long enough that holding the loop throughout would show.
-    assert wall > 0.5, wall
+    # No wall-clock premise check: a held pass would put all 20,000 rows in one
+    # turn, ten times the bound below, on any machine. (`wall > 0.5` measured
+    # 0.41 s on a fast laptop with nothing wrong: T01.24.)
     # Judged by rows per heartbeat turn, not wall time, so machine load cannot
     # decide it (T01.22: a 0.23 s preemption gap failed a 0.15 s bound at load
     # average 13). Before the fix the whole pass was one turn.
