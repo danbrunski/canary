@@ -14,8 +14,8 @@
 > **Power assumption (operator, 2026-10-12): rev 2.1 runs with the X1202.**
 > CANary-PWR ([`CANary-PWR-Spec.md`](CANary-PWR-Spec.md)) is a separate board
 > and nothing in rev 2.1 is designed for it. GPIO6 stays the X1202's, and
-> **`J3` stays** (12 V to the X1202). Delete J3 only if placement needs its
-> ~10 mm of the terminal edge. The PWR interface waits for its own decision.
+> the X1202 is still fed from the HAT: rev 2.0's `J3` is folded into J2 as pins
+> 3–4 (2026-10-12, §13.5.5). The PWR interface waits for its own decision.
 > The operator raised a dedicated latching cable connector (JST GH class) as
 > an alternative to passing PWR's signals through the stacking header. It is
 > not adopted, but it is recorded here so it is not lost.
@@ -85,7 +85,7 @@ AEM gauge answers what the new system actually runs on first key-on.
 | 6 | **Fuel-pressure input** — gauge WHITE → `AIN_4P`, BROWN → `AIN_4GND` (§13.5.3 item 7) | C22 only; **one channel, no divider, no reference** — settled from the AEM manual and the ADC datasheet, 2026-10-03 |
 | 7 | ~~Second CAN channel (CAN1)~~ — **dropped 2026-10-03**, the gauge is not AEMnet (§13.5.4). CE1 goes to U8 | — (U10, U11, FL2, R24/R25, C24, JP2, D7/R26 all never added) |
 | 8 | ~~Divider networks for MAP / IAT / 5V_SENS~~ — **deleted**, the ADS8688A takes 0–5 V directly | R17/R18, R20/R21, R22/R23 and the 15 kΩ BOM value dropped; replaced by DNF series / pull / `AIN_nGND`-matching pads (§13.5.3 item 8) |
-| 9 | `J2` → two-level terminal block, 12 positions | J2 MKKDS 1,5/6-5,08 |
+| 9 | ~~`J2` → two-level terminal block, 12 positions~~ — **J2 is one 13-way `PT 1,5/13-3,5-H`**: OBD pin 5 dropped, J3 folded in (2026-10-12, §13.5.5) | J2 PT 1,5/13-3,5-H; J3 deleted |
 | 10 | ~~Correct U8's stale schematic note~~ — **moot**, the part is replaced (§13.5.6) | — |
 | 11 | **One 40 MHz oscillator replaces the Y1 Pierce loop**; Y1 + C5/C6 deleted | X1 MEMS oscillator, C25 100n, R27 33 Ω |
 | 12 | **BT1 polarity reversed** — swap BT1's GND and D2-anode pins (§13.5.6). **Done 2026-10-12**: + on pad 2, − on pad 1 | BT1 (net change) |
@@ -685,7 +685,7 @@ confident wrong reading.
 - **Run WHITE and BROWN as a twisted pair.** They are a differential signal
   pair; treating them as "signal and ground" is what loses the benefit.
 - **Why a chassis return would not do.** A single-ended input has no
-  common-mode tolerance, and the HAT is bonded to chassis through J2 pin 3
+  common-mode tolerance, and the HAT is bonded to chassis through J2 pin 2 (rev 2.1; pin 3 on rev 2.0)
   (§3.9) — so tying BROWN to a chassis stud instead would put whatever drop
   exists between the two chassis points straight into the pressure reading.
   **20 mV is 0.5 psi.** Bringing BROWN back on its own wire costs one terminal
@@ -798,6 +798,58 @@ level.**
 
 #### Proposed pin map
 
+> **Superseded 2026-10-12 (operator): J2 is one 13-way Phoenix
+> `PT 1,5/13-3,5-H`.** OBD pin 5 is dropped: §3.9 already left it (the ECM's
+> signal ground) unconnected, keeping the terminal only so the choice was
+> reversible. Rev 2.0's J3 (the X1202 feed) is folded in. The harness is
+> re-landed once, in this revision, to:
+>
+> | Pin | Net | Wire |
+> |---|---|---|
+> | 1 | `+12V_RAW` (OBD 16) | **18 AWG** |
+> | 2 | GND, chassis (OBD 4) | **18 AWG** |
+> | 3 | `+12V` protected (downstream of Q1/D1), out to the X1202 (was J3 pin 1) | 20 AWG |
+> | 4 | GND, out to the X1202 (was J3 pin 2) | 20 AWG |
+> | 5 | `CANH_RAW` (OBD 6) | 20 AWG |
+> | 6 | `CANL_RAW` (OBD 14) | 20 AWG |
+> | 7 | `KLINE` (OBD 7) | 20 AWG |
+> | 8 | `SENS_GND`, the TMAP return (= GND) | 20 AWG |
+> | 9 | `SENS_V1`, voltage port (TMAP pressure) | 20 AWG |
+> | 10 | `SENS_R1`, resistive port (TMAP NTC) | 20 AWG |
+> | 11 | `5V_SENS`, sensor supply | 20 AWG |
+> | 12 | `FUEL_GND`, AEM BROWN, analog − → `AIN_4GND` | 20 AWG, twisted with 13 |
+> | 13 | `FUEL_P`, AEM WHITE, analog + | 20 AWG, twisted with 12 |
+>
+> **Every wire is ferruled.** The order follows from the reasoning below:
+> - all four power conductors (1–4) sit at one end, away from the analog pins;
+> - `SENS_GND` sits between the K-line's ISO 7637 transients and the analog
+>   inputs;
+> - the TMAP's four wires (8–11) and the gauge's twisted pair (12–13) each
+>   land on adjacent terminals.
+>
+> **Why this part.** Measured requirements:
+> - **It must clamp a collared ferrule on 18 AWG.** That rules out the
+>   obvious 3.5 mm screw families. Phoenix MKDS 1 / SMKDS 1 (3.5 mm) and
+>   MKDS 1 (3.81 mm) take ferrules of **0.5 mm² at most**, with or without a
+>   collar (Phoenix datasheets for 1751248 and 1727023). The push-in PTDA 1,5
+>   is the same, and 19.5 mm tall besides.
+> - `PT 1,5/..-3,5-H` (screw connection with wire protector) takes **collared
+>   ferrules of 0.25–0.75 mm²**, and Phoenix rates its AI 0,75 ferrule for
+>   **AWG 18**. 20 AWG uses a 0.5 mm² ferrule.
+> - Ratings: 17.5 A, 200 V. Pins 1–4 carry the rig's ~3 A.
+> - The 13-way body is **45.5 × 7.6 mm**, inside the ~51 mm between MH3 and
+>   MH4. Compare the two-level MKKDS's 21.4 × 25.2 mm section.
+> - KiCad 10 has the stock footprint
+>   `TerminalBlock_Phoenix_PT-1,5-13-3.5-H_1x13_P3.50mm_Horizontal` (1.2 mm
+>   drill, 2.4 mm pad).
+> - The family latches side by side. If the 13-way is not stocked, a 10-way
+>   and a 3-way latched together give the same pitch and footprint.
+>
+> **Board consequence: pins 1–4 carry ~3 A.** Route them, and the Q1 path,
+> with copper sized for it at layout. The two-level table below is the
+> earlier plan, kept for its reasoning.
+
+
 **The lower level is rev 2.0's J2, pin for pin.** The vehicle harness was
 re-landed once already for rev 2.0 (§3.9's warning); rev 2.1 must not move it
 again. Columns are grouped so each one reads as a single function.
@@ -842,9 +894,9 @@ Why this arrangement:
   distinguishes them — `FGND` against `SGND` is not enough.
 - **There is no growth room left on this connector.** Spare ADC channels
   (CH5–CH7) go to labelled test pads, not terminals (§13.5.3 item 8).
-- `J3` (+12V pass-through to the X1202) is **unchanged**. Rev 2.1 runs with
-  the X1202 (operator, 2026-10-12). Delete J3 only if placement needs the room:
-  its ~10 mm is the only slack on this edge.
+- ~~`J3` (+12V pass-through to the X1202) is unchanged~~ — **folded into J2
+  as pins 3–4** (operator, 2026-10-12). Rev 2.1 still feeds the X1202 from the
+  HAT.
 
 ### 13.5.6 Carry-over fixes
 
@@ -1372,7 +1424,7 @@ the header closes with **GPIO 12/13/19/20/21/27 uncommitted** instead of none
 | 22 | **SPI0 contention** — downgraded 2026-10-03 from a risk to a confirmation: the arithmetic gives **0.11 %** bus occupancy at 6 channels × 100 Hz (§13.5.3 item 5a), and per-device SPI speed is a devicetree property so CAN0 keeps its 20 MHz | Bring-up measurement to confirm the arithmetic, not to discover the answer |
 | 23 | **Re-verify `V12_SENSE` on the new ADC** — same divider, different part | Repeat `CANary-HAT-Revisions.md:119`: 0.000 V no vehicle, ~12.68 V key-off, ~12.43 V KOEO |
 | 24 | **Update §13.3.9 of `CANary-HAT-Revisions.md`** for the dropped CAN1 — rev 3.0's GPIO and safe-state assumptions changed (§13.5.8) | Edit that section |
-| 34 | **J2 physical part** — MKKDS 1,5/6-5,08 is 21.4 mm deep (back row ~15 mm in from the board edge) and 25.2 mm tall, with no confirmed green item number and no footprint. The schematic fixes only the pin order (1–6 lower = rev 2.0 vehicle harness, 7–12 upper = sensors), so the part can change without schematic work | Choose: MKKDS as planned, or a lower-profile two-row block / pluggable; then draw the footprint from the maker's drilling drawing |
+| 34 | ~~J2 physical part~~ — **decided 2026-10-12: Phoenix `PT 1,5/13-3,5-H`**, 13-way, 3.5 mm, screw with wire protector, collared ferrules 0.25–0.75 mm² (18 AWG uses AI 0,75), 45.5 × 7.6 mm, stock KiCad footprint; J3 folded in (§13.5.5) | **Closed**; confirm the 13-way item number (12-way is 1984714) at ordering |
 | 35 | **MCP2518FD OSC2 with an external clock** — left open on the schematic; Microchip documents that only for the MCP2515 (DS20001801J fig. 8-2) | Microchip app note or forum confirmation; bring-up proves it either way |
 | 36 | **SiT8924 order code and stock** — field order inferred from the datasheet; SiTime parts are often programmed to order | SiTime part-number generator + distributor stock; fall back to SIT8008BI |
 
@@ -1388,7 +1440,7 @@ Sensors, nothing new. Every net below was checked in the exported netlist.
 | Sheet | Change |
 |---|---|
 | Root | New sheet `Analog_Inputs`. OBD_IO loses `SCL`/`SDA` (U8 was their only user) and gains `V12_SENSE`, `5V_SENS`, `MAP`, `IAT`, `FUEL_P`, `FUEL_GND`. J1 pin 26 (GPIO7, SPI0 CE1) now goes to U8 `~CS`. |
-| OBD_IO | ADS1015 (U8), C17 and their wiring deleted. `V12_SENSE` leaves through a sheet pin; R11/R12/C18 unchanged. J2 is a 12-pin symbol: pins 1–6 are rev 2.0's J2 pin for pin, 7–12 the upper level per §13.5.5 (pin 12 `SENS_GND` = GND). J3 unchanged. |
+| OBD_IO | ADS1015 (U8), C17 and their wiring deleted. `V12_SENSE` leaves through a sheet pin; R11/R12/C18 unchanged. J2 is a 13-pin `PT 1,5/13-3,5-H` in the sequence of §13.5.5: OBD pin 5 dropped, J3 folded in as pins 3–4 (`+12V`, GND). Pins 2, 4 and 8 are GND. |
 | Analog_Inputs (new) | U8 ADS8688A, U9 TPS7A1650-Q1 and the CH0–CH7 front ends, §13.5.3 as amended below. |
 | CANFD_Interface | Y1 + C5/C6 deleted. X1 (40 MHz MEMS) → R43 33 Ω → U3 OSC1, C33 100 nF at X1, OSC2 open. U3 SDO pin type corrected to tri-state (also in its library). |
 | Sensors | J4 → U.FL (`U.FL-R-SMT-1(10)`). BT1 polarity reversed (+ on pad 2) through the project symbol `Battery_Cell_JST_SH_Pin2Plus` (§13.5.6). |
@@ -1502,8 +1554,8 @@ TMAP-specific was only the populated values and the names. Now:
 
 | Port | Net / J2 pin | Accepts | Default population | Reconfigure by |
 |---|---|---|---|---|
-| **V1** voltage | `SENS_V1`, pin 8 (U8 CH1) | Any *driven* output: 0–5 V, 0–3.3 V, or 0–10 V (U8's range is per channel in software; inputs survive ±20 V DC) | R20 47 kΩ pull-down fitted; R21 pull-up DNF | Open-collector / switch-to-ground sensor: fit R21 to `5V_SENS`, remove R20 |
-| **R1** resistive | `SENS_R1`, pin 9 (U8 CH2) | Two-wire resistive sensors returned to `SENS_GND`: automotive NTCs (~2–5 kΩ at 20 °C) as fitted | R25 4.99 kΩ pull-up to `5V_SENS` fitted; R24 pull-down DNF | Low-ohm sender (fuel level 30–240 Ω): swap R25 to ~100–200 Ω. Use as a second voltage port: remove R25, fit R24 |
+| **V1** voltage | `SENS_V1`, pin 9 (U8 CH1) | Any *driven* output: 0–5 V, 0–3.3 V, or 0–10 V (U8's range is per channel in software; inputs survive ±20 V DC) | R20 47 kΩ pull-down fitted; R21 pull-up DNF | Open-collector / switch-to-ground sensor: fit R21 to `5V_SENS`, remove R20 |
+| **R1** resistive | `SENS_R1`, pin 10 (U8 CH2) | Two-wire resistive sensors returned to `SENS_GND`: automotive NTCs (~2–5 kΩ at 20 °C) as fitted | R25 4.99 kΩ pull-up to `5V_SENS` fitted; R24 pull-down DNF | Low-ohm sender (fuel level 30–240 Ω): swap R25 to ~100–200 Ω. Use as a second voltage port: remove R25, fit R24 |
 
 On the dev truck the Bosch TMAP occupies both: pressure on V1, NTC on R1.
 Nothing in the hardware knows that any more. It is configuration (§13.5.8).

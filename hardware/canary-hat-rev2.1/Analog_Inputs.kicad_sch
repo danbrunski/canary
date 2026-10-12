@@ -9871,7 +9871,7 @@
 			)
 		)
 	)
-	(text "CH1  SENS_V1: generic VOLTAGE-output sensor port, J2 pin 8. Any driven 0-5 V / 0-3.3 V / 0-10 V output (U8 range set per channel in software). Dev truck: Bosch TMAP pressure."
+	(text "CH1  SENS_V1: generic VOLTAGE-output sensor port, J2 pin 9. Any driven 0-5 V / 0-3.3 V / 0-10 V output (U8 range set per channel in software). Dev truck: Bosch TMAP pressure."
 		(exclude_from_sim no)
 		(at 25 133 0)
 		(effects
@@ -11015,7 +11015,7 @@
 			)
 		)
 	)
-	(text "CH2  SENS_R1: generic RESISTIVE sensor port, J2 pin 9 (pull-up to 5V_SENS). Default suits automotive NTCs (~2-5 kohm at 20 C). Dev truck: Bosch TMAP NTC."
+	(text "CH2  SENS_R1: generic RESISTIVE sensor port, J2 pin 10 (pull-up to 5V_SENS). Default suits automotive NTCs (~2-5 kohm at 20 C). Dev truck: Bosch TMAP NTC."
 		(exclude_from_sim no)
 		(at 25 160 0)
 		(effects
@@ -12159,7 +12159,7 @@
 			)
 		)
 	)
-	(text "CH3  5V_SENS sense: ratiometric reference for SENS_V1/SENS_R1. 5V_SENS is a harness wire too (J2 pin 7), so it gets the same series protection."
+	(text "CH3  5V_SENS sense: ratiometric reference for SENS_V1/SENS_R1. 5V_SENS is a harness wire too (J2 pin 11), so it gets the same series protection."
 		(exclude_from_sim no)
 		(at 25 187 0)
 		(effects

@@ -6,212 +6,7 @@
 	(paper "A4")
 	(lib_symbols
 		
-		(symbol "Connector:Screw_Terminal_01x02"
-			(pin_names
-				(offset 1.016)
-				(hide yes)
-			)
-			(exclude_from_sim no)
-			(in_bom yes)
-			(on_board yes)
-			(in_pos_files yes)
-			(duplicate_pin_numbers_are_jumpers no)
-			(property "Reference" "J"
-				(at 0 2.54 0)
-				(show_name no)
-				(do_not_autoplace no)
-				(effects
-					(font
-						(size 1.27 1.27)
-					)
-				)
-			)
-			(property "Value" "Screw_Terminal_01x02"
-				(at 0 -5.08 0)
-				(show_name no)
-				(do_not_autoplace no)
-				(effects
-					(font
-						(size 1.27 1.27)
-					)
-				)
-			)
-			(property "Footprint" ""
-				(at 0 0 0)
-				(show_name no)
-				(do_not_autoplace no)
-				(hide yes)
-				(effects
-					(font
-						(size 1.27 1.27)
-					)
-				)
-			)
-			(property "Datasheet" ""
-				(at 0 0 0)
-				(show_name no)
-				(do_not_autoplace no)
-				(hide yes)
-				(effects
-					(font
-						(size 1.27 1.27)
-					)
-				)
-			)
-			(property "Description" "Generic screw terminal, single row, 01x02, script generated (kicad-library-utils/schlib/autogen/connector/)"
-				(at 0 0 0)
-				(show_name no)
-				(do_not_autoplace no)
-				(hide yes)
-				(effects
-					(font
-						(size 1.27 1.27)
-					)
-				)
-			)
-			(property "ki_keywords" "screw terminal"
-				(at 0 0 0)
-				(show_name no)
-				(do_not_autoplace no)
-				(hide yes)
-				(effects
-					(font
-						(size 1.27 1.27)
-					)
-				)
-			)
-			(property "ki_fp_filters" "TerminalBlock*:*"
-				(at 0 0 0)
-				(show_name no)
-				(do_not_autoplace no)
-				(hide yes)
-				(effects
-					(font
-						(size 1.27 1.27)
-					)
-				)
-			)
-			(symbol "Screw_Terminal_01x02_1_1"
-				(rectangle
-					(start -1.27 1.27)
-					(end 1.27 -3.81)
-					(stroke
-						(width 0.254)
-						(type default)
-					)
-					(fill
-						(type background)
-					)
-				)
-				(polyline
-					(pts
-						(xy -0.5334 0.3302) (xy 0.3302 -0.508)
-					)
-					(stroke
-						(width 0.1524)
-						(type default)
-					)
-					(fill
-						(type none)
-					)
-				)
-				(polyline
-					(pts
-						(xy -0.5334 -2.2098) (xy 0.3302 -3.048)
-					)
-					(stroke
-						(width 0.1524)
-						(type default)
-					)
-					(fill
-						(type none)
-					)
-				)
-				(polyline
-					(pts
-						(xy -0.3556 0.508) (xy 0.508 -0.3302)
-					)
-					(stroke
-						(width 0.1524)
-						(type default)
-					)
-					(fill
-						(type none)
-					)
-				)
-				(polyline
-					(pts
-						(xy -0.3556 -2.032) (xy 0.508 -2.8702)
-					)
-					(stroke
-						(width 0.1524)
-						(type default)
-					)
-					(fill
-						(type none)
-					)
-				)
-				(circle
-					(center 0 0)
-					(radius 0.635)
-					(stroke
-						(width 0.1524)
-						(type default)
-					)
-					(fill
-						(type none)
-					)
-				)
-				(circle
-					(center 0 -2.54)
-					(radius 0.635)
-					(stroke
-						(width 0.1524)
-						(type default)
-					)
-					(fill
-						(type none)
-					)
-				)
-				(pin passive line
-					(at -5.08 0 0)
-					(length 3.81)
-					(name "Pin_1"
-						(effects
-							(font
-								(size 1.27 1.27)
-							)
-						)
-					)
-					(number "1"
-						(effects
-							(font
-								(size 1.27 1.27)
-							)
-						)
-					)
-				)
-				(pin passive line
-					(at -5.08 -2.54 0)
-					(length 3.81)
-					(name "Pin_2"
-						(effects
-							(font
-								(size 1.27 1.27)
-							)
-						)
-					)
-					(number "2"
-						(effects
-							(font
-								(size 1.27 1.27)
-							)
-						)
-					)
-				)
-			)
-			(embedded_fonts no)
-		)
+		
 		(symbol "Connector:Screw_Terminal_01x06"
 			(pin_names
 				(offset 1.016)
@@ -2090,7 +1885,8 @@
 			)
 			(embedded_fonts no)
 		)
-			(symbol "Connector:Screw_Terminal_01x12"
+			
+		(symbol "Connector:Screw_Terminal_01x13"
 				(pin_names
 					(offset 1.016)
 					(hide yes)
@@ -2101,7 +1897,7 @@
 				(in_pos_files yes)
 				(duplicate_pin_numbers_are_jumpers no)
 				(property "Reference" "J"
-					(at 0 15.24 0)
+					(at 0 17.78 0)
 					(show_name no)
 					(do_not_autoplace no)
 					(effects
@@ -2110,7 +1906,7 @@
 						)
 					)
 				)
-				(property "Value" "Screw_Terminal_01x12"
+				(property "Value" "Screw_Terminal_01x13"
 					(at 0 -17.78 0)
 					(show_name no)
 					(do_not_autoplace no)
@@ -2142,7 +1938,7 @@
 						)
 					)
 				)
-				(property "Description" "Generic screw terminal, single row, 01x12, script generated (kicad-library-utils/schlib/autogen/connector/)"
+				(property "Description" "Generic screw terminal, single row, 01x13, script generated (kicad-library-utils/schlib/autogen/connector/)"
 					(at 0 0 0)
 					(show_name no)
 					(do_not_autoplace no)
@@ -2175,9 +1971,9 @@
 						)
 					)
 				)
-				(symbol "Screw_Terminal_01x12_1_1"
+				(symbol "Screw_Terminal_01x13_1_1"
 					(rectangle
-						(start -1.27 13.97)
+						(start -1.27 16.51)
 						(end 1.27 -16.51)
 						(stroke
 							(width 0.254)
@@ -2185,6 +1981,18 @@
 						)
 						(fill
 							(type background)
+						)
+					)
+					(polyline
+						(pts
+							(xy -0.5334 15.5702) (xy 0.3302 14.732)
+						)
+						(stroke
+							(width 0.1524)
+							(type default)
+						)
+						(fill
+							(type none)
 						)
 					)
 					(polyline
@@ -2322,6 +2130,18 @@
 					(polyline
 						(pts
 							(xy -0.5334 -14.9098) (xy 0.3302 -15.748)
+						)
+						(stroke
+							(width 0.1524)
+							(type default)
+						)
+						(fill
+							(type none)
+						)
+					)
+					(polyline
+						(pts
+							(xy -0.3556 15.748) (xy 0.508 14.9098)
 						)
 						(stroke
 							(width 0.1524)
@@ -2476,6 +2296,17 @@
 						)
 					)
 					(circle
+						(center 0 15.24)
+						(radius 0.635)
+						(stroke
+							(width 0.1524)
+							(type default)
+						)
+						(fill
+							(type none)
+						)
+					)
+					(circle
 						(center 0 12.7)
 						(radius 0.635)
 						(stroke
@@ -2608,7 +2439,7 @@
 						)
 					)
 					(pin passive line
-						(at -5.08 12.7 0)
+						(at -5.08 15.24 0)
 						(length 3.81)
 						(name "Pin_1"
 							(effects
@@ -2626,7 +2457,7 @@
 						)
 					)
 					(pin passive line
-						(at -5.08 10.16 0)
+						(at -5.08 12.7 0)
 						(length 3.81)
 						(name "Pin_2"
 							(effects
@@ -2644,7 +2475,7 @@
 						)
 					)
 					(pin passive line
-						(at -5.08 7.62 0)
+						(at -5.08 10.16 0)
 						(length 3.81)
 						(name "Pin_3"
 							(effects
@@ -2662,7 +2493,7 @@
 						)
 					)
 					(pin passive line
-						(at -5.08 5.08 0)
+						(at -5.08 7.62 0)
 						(length 3.81)
 						(name "Pin_4"
 							(effects
@@ -2680,7 +2511,7 @@
 						)
 					)
 					(pin passive line
-						(at -5.08 2.54 0)
+						(at -5.08 5.08 0)
 						(length 3.81)
 						(name "Pin_5"
 							(effects
@@ -2698,7 +2529,7 @@
 						)
 					)
 					(pin passive line
-						(at -5.08 0 0)
+						(at -5.08 2.54 0)
 						(length 3.81)
 						(name "Pin_6"
 							(effects
@@ -2716,7 +2547,7 @@
 						)
 					)
 					(pin passive line
-						(at -5.08 -2.54 0)
+						(at -5.08 0 0)
 						(length 3.81)
 						(name "Pin_7"
 							(effects
@@ -2734,7 +2565,7 @@
 						)
 					)
 					(pin passive line
-						(at -5.08 -5.08 0)
+						(at -5.08 -2.54 0)
 						(length 3.81)
 						(name "Pin_8"
 							(effects
@@ -2752,7 +2583,7 @@
 						)
 					)
 					(pin passive line
-						(at -5.08 -7.62 0)
+						(at -5.08 -5.08 0)
 						(length 3.81)
 						(name "Pin_9"
 							(effects
@@ -2770,7 +2601,7 @@
 						)
 					)
 					(pin passive line
-						(at -5.08 -10.16 0)
+						(at -5.08 -7.62 0)
 						(length 3.81)
 						(name "Pin_10"
 							(effects
@@ -2788,7 +2619,7 @@
 						)
 					)
 					(pin passive line
-						(at -5.08 -12.7 0)
+						(at -5.08 -10.16 0)
 						(length 3.81)
 						(name "Pin_11"
 							(effects
@@ -2806,7 +2637,7 @@
 						)
 					)
 					(pin passive line
-						(at -5.08 -15.24 0)
+						(at -5.08 -12.7 0)
 						(length 3.81)
 						(name "Pin_12"
 							(effects
@@ -2823,16 +2654,29 @@
 							)
 						)
 					)
+					(pin passive line
+						(at -5.08 -15.24 0)
+						(length 3.81)
+						(name "Pin_13"
+							(effects
+								(font
+									(size 1.27 1.27)
+								)
+							)
+						)
+						(number "13"
+							(effects
+								(font
+									(size 1.27 1.27)
+								)
+							)
+						)
+					)
 				)
 				(embedded_fonts no)
 			)
 	)
-	(junction
-		(at 171.45 114.3)
-		(diameter 0)
-		(color 0 0 0 0)
-		(uuid "3243e974-08be-451f-8e9f-cafa095e3cda")
-	)
+	
 	
 	(junction
 		(at 171.45 68.58)
@@ -2859,12 +2703,7 @@
 		(color 0 0 0 0)
 		(uuid "b27aee57-4498-4c65-b9ba-b1ecd17b98d9")
 	)
-	(junction
-		(at 58.42 129.54)
-		(diameter 0)
-		(color 0 0 0 0)
-		(uuid "b984628f-038e-4570-938b-98d753fbd7d1")
-	)
+	
 	(junction
 		(at 163.83 114.3)
 		(diameter 0)
@@ -2944,16 +2783,7 @@
 		)
 		(uuid "1d0cec21-de9c-43aa-a7ec-5db81cd5c3a4")
 	)
-	(wire
-		(pts
-			(xy 40.64 129.54) (xy 58.42 129.54)
-		)
-		(stroke
-			(width 0)
-			(type default)
-		)
-		(uuid "232464fb-a80f-4672-a076-2549a8b75854")
-	)
+	
 	(wire
 		(pts
 			(xy 83.82 114.3) (xy 121.92 114.3)
@@ -2974,16 +2804,7 @@
 		)
 		(uuid "26fa7eda-937b-485e-a067-af817eb4d3a6")
 	)
-	(wire
-		(pts
-			(xy 40.64 132.08) (xy 101.6 132.08)
-		)
-		(stroke
-			(width 0)
-			(type default)
-		)
-		(uuid "329397fc-603a-4105-b6fe-552991c1348b")
-	)
+	
 	
 	(wire
 		(pts
@@ -3036,16 +2857,7 @@
 		)
 		(uuid "4550588f-d8e6-4f78-8f75-2e8417f3786a")
 	)
-	(wire
-		(pts
-			(xy 40.64 134.62) (xy 101.6 134.62)
-		)
-		(stroke
-			(width 0)
-			(type default)
-		)
-		(uuid "485c4a4d-4eb9-4c2e-9b57-054b9a311766")
-	)
+	
 	(wire
 		(pts
 			(xy 189.23 86.36) (xy 189.23 76.2)
@@ -3087,16 +2899,7 @@
 		)
 		(uuid "651d7d62-27e5-43d2-bca8-ec41194a816c")
 	)
-	(wire
-		(pts
-			(xy 40.64 137.16) (xy 101.6 137.16)
-		)
-		(stroke
-			(width 0)
-			(type default)
-		)
-		(uuid "6598e5fd-5757-4152-8535-e5dc46dfa602")
-	)
+	
 	(wire
 		(pts
 			(xy 138.43 114.3) (xy 138.43 116.84)
@@ -3128,16 +2931,7 @@
 		)
 		(uuid "9451f6b1-8ae6-44c7-9a8a-d065e76a8ee5")
 	)
-	(wire
-		(pts
-			(xy 177.8 116.84) (xy 177.8 120.65)
-		)
-		(stroke
-			(width 0)
-			(type default)
-		)
-		(uuid "a64b68c0-7438-4f96-a00d-c45c9c5dd0cd")
-	)
+	
 	(wire
 		(pts
 			(xy 180.34 68.58) (xy 193.04 68.58)
@@ -3182,16 +2976,7 @@
 		)
 		(uuid "d84ae166-5f48-436c-9db3-28f8d5882350")
 	)
-	(wire
-		(pts
-			(xy 171.45 114.3) (xy 177.8 114.3)
-		)
-		(stroke
-			(width 0)
-			(type default)
-		)
-		(uuid "dbdb0f98-cdd9-4437-9fd7-81bcc3267da6")
-	)
+	
 	(wire
 		(pts
 			(xy 74.93 151.13) (xy 74.93 158.75)
@@ -3284,40 +3069,10 @@
 		(uuid "d0b213f3-27d2-4125-83f2-694d2b2d0060")
 	)
 	
-	(hierarchical_label "CANL_RAW"
-		(shape bidirectional)
-		(at 101.6 134.62 0)
-		(effects
-			(font
-				(size 1.27 1.27)
-			)
-			(justify left)
-		)
-		(uuid "08f54d6e-6e86-4e73-a68e-9226b519a192")
-	)
-	(hierarchical_label "CANH_RAW"
-		(shape bidirectional)
-		(at 101.6 132.08 0)
-		(effects
-			(font
-				(size 1.27 1.27)
-			)
-			(justify left)
-		)
-		(uuid "2e957106-abf1-4e3f-996a-fc1b6f11c109")
-	)
 	
-	(hierarchical_label "KLINE"
-		(shape output)
-		(at 101.6 137.16 0)
-		(effects
-			(font
-				(size 1.27 1.27)
-			)
-			(justify left)
-		)
-		(uuid "b097bf5a-f710-4883-b66a-13c41a84ac05")
-	)
+	
+	
+	
 	
 	
 	(symbol
@@ -3653,146 +3408,7 @@
 			)
 		)
 	)
-	(symbol
-		(lib_id "Connector:Screw_Terminal_01x02")
-		(at 182.88 114.3 0)
-		(unit 1)
-		(body_style 1)
-		(exclude_from_sim no)
-		(in_bom yes)
-		(on_board yes)
-		(in_pos_files yes)
-		(dnp no)
-		(fields_autoplaced yes)
-		(uuid "1193c3fe-a47b-4092-b56d-43b4515005f1")
-		(property "Reference" "J3"
-			(at 185.42 114.2999 0)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify left)
-			)
-		)
-		(property "Value" "Screw_Terminal_01x02"
-			(at 185.42 116.8399 0)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify left)
-			)
-		)
-		(property "Footprint" "TerminalBlock_Phoenix:TerminalBlock_Phoenix_MKDS-1,5-2-5.08_1x02_P5.08mm_Horizontal"
-			(at 182.88 114.3 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Datasheet" ""
-			(at 182.88 114.3 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Description" "Generic screw terminal, single row, 01x02, script generated (kicad-library-utils/schlib/autogen/connector/)"
-			(at 182.88 114.3 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Note" "12V pass-through to the X1202 UPS. REV 2.0 moved this from +12V_RAW to +12V, i.e. downstream of Q1 and D1, so the Pi's supply is now behind both reverse-polarity and transient protection for the first time. Costs no headroom: Q1 drops 38 mV at the 3A budget where a series Schottky would have dropped ~500 mV, which is why the tap was originally moved upstream."
-			(at 0 0 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify left)
-			)
-		)
-		(property "Manufacturer" "Phoenix Contact"
-			(at 185.42 114.2999 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify left)
-			)
-		)
-		(property "MPN" "MKDS 1,5/2-5,08"
-			(at 185.42 114.2999 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify left)
-			)
-		)
-		(property "Cost_5u" "2.175"
-			(at 182.88 114.3 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Quote" "PCBWay T-B4W341056A (5 units, 2026-08-14): quoted as specified, PCBWay internal PN 1715721, 7-10 workday lead time. Operator: a cheaper 5.08mm alternative (KF128 / DG128 family) is acceptable."
-			(at 182.88 114.3 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(pin "1"
-			(uuid "bf02883b-39d0-47c1-af92-72a1bc8c5d75")
-		)
-		(pin "2"
-			(uuid "cc19006e-48b7-405a-b6f9-0c51851b6d85")
-		)
-		(instances
-			(project "canary-hat"
-				(path "/e63e39d7-6ac0-4ffd-8aa3-1841a4541b55/c178e888-ad68-4fcb-839b-66a3244ff762"
-					(reference "J3")
-					(unit 1)
-				)
-			)
-		)
-	)
+	
 	(symbol
 		(lib_id "power:PWR_FLAG")
 		(at 163.83 109.22 0)
@@ -4723,8 +4339,8 @@
 		)
 	)
 	(symbol
-		(lib_id "Connector:Screw_Terminal_01x12")
-		(at 35.56 137.16 0)
+		(lib_id "Connector:Screw_Terminal_01x13")
+		(at 35.56 139.7 0)
 		(mirror y)
 		(unit 1)
 		(body_style 1)
@@ -4744,7 +4360,7 @@
 				)
 			)
 		)
-		(property "Value" "2x6 two-level 5.08"
+		(property "Value" "PT 1,5/13-3,5-H"
 			(at 34.036 120.396 0)
 			(show_name no)
 			(do_not_autoplace no)
@@ -4754,7 +4370,7 @@
 				)
 			)
 		)
-		(property "Footprint" "TerminalBlock_Phoenix:TerminalBlock_Phoenix_MKDS-1,5-6-5.08_1x06_P5.08mm_Horizontal"
+		(property "Footprint" "TerminalBlock_Phoenix:TerminalBlock_Phoenix_PT-1,5-13-3.5-H_1x13_P3.50mm_Horizontal"
 			(at 35.56 129.54 0)
 			(hide yes)
 			(show_name no)
@@ -4776,7 +4392,7 @@
 				)
 			)
 		)
-		(property "Description" "Generic screw terminal, single row, 01x06, script generated (kicad-library-utils/schlib/autogen/connector/)"
+		(property "Description" "Phoenix Contact PT 1,5/13-3,5-H, 13-position 3.5 mm screw terminal block (screw connection with wire protector)"
 			(at 35.56 129.54 0)
 			(hide yes)
 			(show_name no)
@@ -4787,7 +4403,7 @@
 				)
 			)
 		)
-		(property "Note" "Vehicle harness terminal block. PINS 4-6 WERE RE-ASSIGNED IN REV 2.0 for cleaner routing - pin 4 is now CAN High, pin 5 CAN Low, pin 6 K-line (previously K-line, CAN High, CAN Low). A HARNESS BUILT TO THE REV 1.0 PINOUT WILL PUT CAN HIGH ON THE K-LINE PIN. Pins 1 = +12V (OBD 16), 2 = signal ground (OBD 5), 3 = chassis ground (OBD 4), 4 = CANH (OBD 6), 5 = CANL (OBD 14), 6 = K-line (OBD 7). Pins 2 and 3 are the same GND net, so this board is the bonding point between the two returns - join them at a single star point near the connector. For bench work, clamp 120 ohm across pins 4 and 5; the board carries no CAN termination by design."
+		(property "Note" "Vehicle + sensor harness, one 13-way block (rev 2.1 folds rev 2.0's J3 in and drops OBD pin 5). 1 +12V_RAW (OBD 16, 18 AWG) 2 GND chassis (OBD 4, 18 AWG) 3 +12V protected out to X1202 4 GND out to X1202 5 CANH 6 CANL 7 KLINE 8 SENS_GND 9 SENS_V1 10 SENS_R1 11 5V_SENS 12 FUEL_GND (AEM BROWN, analog minus) 13 FUEL_P (AEM WHITE). FERRULE ON EVERY WIRE: this family takes ferrules with plastic sleeve 0.25-0.75 mm2, so 18 AWG uses a 0.75 mm2 collared ferrule (Phoenix AI 0,75, rated AWG 18) and 20 AWG a 0.5 mm2. The MKDS 1 / SMKDS 1 3.5 mm families were rejected: 0.5 mm2 ferrule maximum. A rev 2.0 harness does NOT fit this pin order."
 			(at 0 0 0)
 			(hide yes)
 			(show_name no)
@@ -4811,7 +4427,7 @@
 				(justify left)
 			)
 		)
-		(property "MPN" "MKDS 1,5/6-5,08"
+		(property "MPN" "PT 1,5/13-3,5-H"
 			(at 35.56 118.11 0)
 			(hide yes)
 			(show_name no)
@@ -4823,7 +4439,7 @@
 				(justify left)
 			)
 		)
-		(property "Cost_5u" "5.549"
+		(property "Cost_5u" ""
 			(at 35.56 129.54 0)
 			(hide yes)
 			(show_name no)
@@ -4834,7 +4450,7 @@
 				)
 			)
 		)
-		(property "Quote" "PCBWay T-B4W341056A (5 units, 2026-08-14): quoted as specified, PCBWay internal PN 1710726, 7-10 workday lead time. Operator: a cheaper 5.08mm alternative (KF128 / DG128 family) is acceptable."
+		(property "Quote" "Rev 2.1: not yet quoted. Item number to confirm in Phoenix's catalog (family: 12-way is 1984714). Side-latching family: a 10-way + 3-way latched together has the same pitch and footprint if the 13-way is not stocked."
 			(at 35.56 129.54 0)
 			(hide yes)
 			(show_name no)
@@ -4880,6 +4496,9 @@
 		)
 		(pin "12"
 			(uuid "dde32d2c-3d1b-4f92-9530-9b2faaef28f1")
+		)
+		(pin "13"
+			(uuid "9110880f-6796-4afd-8e5b-d9f69530c6e1")
 		)
 		(instances
 			(project "canary-hat"
@@ -5036,84 +4655,7 @@
 			)
 		)
 	)
-	(symbol
-		(lib_id "power:GND")
-		(at 177.8 120.65 0)
-		(unit 1)
-		(body_style 1)
-		(exclude_from_sim no)
-		(in_bom yes)
-		(on_board yes)
-		(in_pos_files yes)
-		(dnp no)
-		(fields_autoplaced yes)
-		(uuid "c5501446-ce36-4015-ad22-d37125d01169")
-		(property "Reference" "#PWR049"
-			(at 177.8 127 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Value" "GND"
-			(at 177.8 125.73 0)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Footprint" ""
-			(at 177.8 120.65 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Datasheet" ""
-			(at 177.8 120.65 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Description" "Power symbol creates a global label with name \"GND\" , ground"
-			(at 177.8 120.65 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(pin "1"
-			(uuid "8c4d3efb-dc3f-4389-9fc2-59495b23a452")
-		)
-		(instances
-			(project "canary-hat"
-				(path "/e63e39d7-6ac0-4ffd-8aa3-1841a4541b55/c178e888-ad68-4fcb-839b-66a3244ff762"
-					(reference "#PWR049")
-					(unit 1)
-				)
-			)
-		)
-	)
+	
 	(symbol
 		(lib_id "power:GND")
 		(at 163.83 86.36 0)
@@ -5573,124 +5115,42 @@
 		)
 		(uuid "f77b4a3b-6701-48c7-a668-269c510fd1f6")
 	)
-	(wire
-		(pts
-			(xy 40.64 139.7) (xy 43.18 139.7)
-		)
-		(stroke
-			(width 0)
-			(type default)
-		)
-		(uuid "2dec85d1-f846-4b9e-b8f1-c113bcff2b5f")
-	)
-	(hierarchical_label "5V_SENS"
-		(shape input)
-		(at 43.18 139.7 0)
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	(text "J2 rev 2.1: Phoenix PT 1,5/13-3,5-H, one 13-way 3.5 mm block. Rev 2.0's J3 (X1202 feed) folded in; OBD pin 5 (signal ground) dropped.\n1 +12V_RAW (OBD 16, 18 AWG)  2 GND chassis (OBD 4, 18 AWG)  3 +12V out to X1202  4 GND out to X1202\n5 CANH (OBD 6)  6 CANL (OBD 14)  7 KLINE (OBD 7)  8 SENS_GND (TMAP return; buffers the K-line from the analog pins)\n9 SENS_V1  10 SENS_R1  11 5V_SENS  12 FUEL_GND (AEM BROWN = analog minus -> AIN_4GND, NOT a ground)  13 FUEL_P (AEM WHITE)\nOther wires 20 AWG. Ferrule on every wire (collared, <= 0.75 mm2). A rev 2.0 harness does NOT fit this order."
+		(exclude_from_sim no)
+		(at 22.86 167.64 0)
 		(effects
 			(font
 				(size 1.27 1.27)
 			)
-			(justify left)
+			(justify left top)
 		)
-		(uuid "8f8cc596-c51a-4ffc-b87d-796bad9b2182")
+		(uuid "b68d7b72-ed04-4180-ba4c-152147f67748")
 	)
 	(wire
 		(pts
-			(xy 40.64 142.24) (xy 43.18 142.24)
+			(xy 40.64 129.54) (xy 45.72 129.54)
 		)
 		(stroke
 			(width 0)
 			(type default)
 		)
-		(uuid "d19676c1-6d4d-4075-86a7-83e5527858df")
-	)
-	(hierarchical_label "SENS_V1"
-		(shape passive)
-		(at 43.18 142.24 0)
-		(effects
-			(font
-				(size 1.27 1.27)
-			)
-			(justify left)
-		)
-		(uuid "01bb6a3e-3669-4384-879d-f5047f4e3d65")
-	)
-	(wire
-		(pts
-			(xy 40.64 144.78) (xy 43.18 144.78)
-		)
-		(stroke
-			(width 0)
-			(type default)
-		)
-		(uuid "10f30768-79d4-474a-9b43-dac8d6c33c88")
-	)
-	(hierarchical_label "SENS_R1"
-		(shape passive)
-		(at 43.18 144.78 0)
-		(effects
-			(font
-				(size 1.27 1.27)
-			)
-			(justify left)
-		)
-		(uuid "f95a17e8-1078-4e8c-a353-1bcaf9447fa1")
-	)
-	(wire
-		(pts
-			(xy 40.64 147.32) (xy 43.18 147.32)
-		)
-		(stroke
-			(width 0)
-			(type default)
-		)
-		(uuid "284b70b4-038a-4004-8cc9-79164d252d04")
-	)
-	(hierarchical_label "FUEL_P"
-		(shape passive)
-		(at 43.18 147.32 0)
-		(effects
-			(font
-				(size 1.27 1.27)
-			)
-			(justify left)
-		)
-		(uuid "8b037d5f-7542-4918-94b3-c133910723a2")
-	)
-	(wire
-		(pts
-			(xy 40.64 149.86) (xy 43.18 149.86)
-		)
-		(stroke
-			(width 0)
-			(type default)
-		)
-		(uuid "92ed403b-ca11-40d4-8d13-52e188fbadfa")
-	)
-	(hierarchical_label "FUEL_GND"
-		(shape passive)
-		(at 43.18 149.86 0)
-		(effects
-			(font
-				(size 1.27 1.27)
-			)
-			(justify left)
-		)
-		(uuid "92b180ff-8924-48a6-a022-1239c4c8ebb8")
-	)
-	(wire
-		(pts
-			(xy 40.64 152.4) (xy 43.18 152.4)
-		)
-		(stroke
-			(width 0)
-			(type default)
-		)
-		(uuid "ef844f80-99e2-43ef-b104-38392dd48006")
+		(uuid "117d1a32-b4f3-44a4-a507-06e0d03997d6")
 	)
 	(symbol
-		(lib_id "power:GND")
-		(at 43.18 152.4 90)
+		(lib_id "power:+12V")
+		(at 45.72 129.54 270)
 		(unit 1)
 		(body_style 1)
 		(exclude_from_sim no)
@@ -5698,9 +5158,97 @@
 		(on_board yes)
 		(in_pos_files yes)
 		(dnp no)
-		(uuid "4fc55a79-e461-4043-ab38-186855073ee0")
+		(uuid "5bb31ff4-b3a1-4d94-b670-43a896ba8a8a")
 		(property "Reference" "#PWR0201"
-			(at 45.72 151.13 0)
+			(at 48.26 128.27 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify left)
+			)
+		)
+		(property "Value" "+12V"
+			(at 48.26 132.08 0)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Footprint" ""
+			(at 45.72 129.54 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Datasheet" ""
+			(at 45.72 129.54 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Description" ""
+			(at 45.72 129.54 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(pin "1"
+			(uuid "f6f39937-d611-40b3-950a-a718a6efbd08")
+		)
+		(instances
+			(project "canary-hat"
+				(path "/e63e39d7-6ac0-4ffd-8aa3-1841a4541b55/c178e888-ad68-4fcb-839b-66a3244ff762"
+					(reference "#PWR0201")
+					(unit 1)
+				)
+			)
+		)
+	)
+	(wire
+		(pts
+			(xy 40.64 132.08) (xy 45.72 132.08)
+		)
+		(stroke
+			(width 0)
+			(type default)
+		)
+		(uuid "e97f683c-90a3-49b4-afab-0a840835f50d")
+	)
+	(symbol
+		(lib_id "power:GND")
+		(at 45.72 132.08 90)
+		(unit 1)
+		(body_style 1)
+		(exclude_from_sim no)
+		(in_bom yes)
+		(on_board yes)
+		(in_pos_files yes)
+		(dnp no)
+		(uuid "ad6772a3-4382-4888-9af7-3985c7fcd23e")
+		(property "Reference" "#PWR0202"
+			(at 48.26 130.81 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -5712,7 +5260,7 @@
 			)
 		)
 		(property "Value" "GND"
-			(at 45.72 154.94 0)
+			(at 48.26 134.62 0)
 			(show_name no)
 			(do_not_autoplace no)
 			(effects
@@ -5722,7 +5270,7 @@
 			)
 		)
 		(property "Footprint" ""
-			(at 43.18 152.4 0)
+			(at 45.72 132.08 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -5733,7 +5281,7 @@
 			)
 		)
 		(property "Datasheet" ""
-			(at 43.18 152.4 0)
+			(at 45.72 132.08 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -5744,7 +5292,7 @@
 			)
 		)
 		(property "Description" ""
-			(at 43.18 152.4 0)
+			(at 45.72 132.08 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -5755,26 +5303,271 @@
 			)
 		)
 		(pin "1"
-			(uuid "ab1ac5b3-00ee-4d2f-95dd-0a021d2c9ede")
+			(uuid "051bc4d1-2dda-4e06-813e-943dd9ba4fe5")
 		)
 		(instances
 			(project "canary-hat"
 				(path "/e63e39d7-6ac0-4ffd-8aa3-1841a4541b55/c178e888-ad68-4fcb-839b-66a3244ff762"
-					(reference "#PWR0201")
+					(reference "#PWR0202")
 					(unit 1)
 				)
 			)
 		)
 	)
-	(text "J2 rev 2.1: two-level 2x6 block (part open: CANary-HAT-Rev2.1.md open item 34).\nPins 1-6 = LOWER level, rev 2.0's J2 pin for pin (do not re-land the vehicle harness).\nPins 7-12 = UPPER level, sensor ports (13.5.5, 13.5.11): 7 5V_SENS, 8 SENS_V1 (voltage port),\n9 SENS_R1 (resistive port), 10/11 FUEL_P/FUEL_GND, 12 SENS_GND.\nPin 11 FUEL_GND is the gauge's analog minus (ADS8688A AIN_4GND), NOT a ground."
-		(exclude_from_sim no)
-		(at 22.86 167.64 0)
+	(wire
+		(pts
+			(xy 40.64 134.62) (xy 45.72 134.62)
+		)
+		(stroke
+			(width 0)
+			(type default)
+		)
+		(uuid "53b16caa-fce1-454c-a676-9166ecbba5e6")
+	)
+	(hierarchical_label "CANH_RAW"
+		(shape bidirectional)
+		(at 45.72 134.62 0)
 		(effects
 			(font
 				(size 1.27 1.27)
 			)
-			(justify left top)
+			(justify left)
 		)
-		(uuid "b68d7b72-ed04-4180-ba4c-152147f67748")
+		(uuid "c54f70b3-f02d-48df-a0ce-6bf607ec948a")
+	)
+	(wire
+		(pts
+			(xy 40.64 137.16) (xy 45.72 137.16)
+		)
+		(stroke
+			(width 0)
+			(type default)
+		)
+		(uuid "1847daad-9a1b-401d-8cfd-a584fd252b32")
+	)
+	(hierarchical_label "CANL_RAW"
+		(shape bidirectional)
+		(at 45.72 137.16 0)
+		(effects
+			(font
+				(size 1.27 1.27)
+			)
+			(justify left)
+		)
+		(uuid "f913beb9-987a-46d2-9f46-e49ba5ff33d0")
+	)
+	(wire
+		(pts
+			(xy 40.64 139.7) (xy 45.72 139.7)
+		)
+		(stroke
+			(width 0)
+			(type default)
+		)
+		(uuid "ca3cd69b-34a9-4b3b-b75b-38625d22667f")
+	)
+	(hierarchical_label "KLINE"
+		(shape output)
+		(at 45.72 139.7 0)
+		(effects
+			(font
+				(size 1.27 1.27)
+			)
+			(justify left)
+		)
+		(uuid "f726e048-650b-48d9-ba6d-b40f3fd9d34f")
+	)
+	(wire
+		(pts
+			(xy 40.64 142.24) (xy 45.72 142.24)
+		)
+		(stroke
+			(width 0)
+			(type default)
+		)
+		(uuid "ed2daefa-8b0a-4ed4-8cac-9d52055d79d4")
+	)
+	(symbol
+		(lib_id "power:GND")
+		(at 45.72 142.24 90)
+		(unit 1)
+		(body_style 1)
+		(exclude_from_sim no)
+		(in_bom yes)
+		(on_board yes)
+		(in_pos_files yes)
+		(dnp no)
+		(uuid "69c7ab24-28f1-421f-8acf-10889ba8be39")
+		(property "Reference" "#PWR0203"
+			(at 48.26 140.97 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify left)
+			)
+		)
+		(property "Value" "GND"
+			(at 48.26 144.78 0)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Footprint" ""
+			(at 45.72 142.24 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Datasheet" ""
+			(at 45.72 142.24 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Description" ""
+			(at 45.72 142.24 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(pin "1"
+			(uuid "fe099f51-7b89-405a-924b-e0a8d6f30081")
+		)
+		(instances
+			(project "canary-hat"
+				(path "/e63e39d7-6ac0-4ffd-8aa3-1841a4541b55/c178e888-ad68-4fcb-839b-66a3244ff762"
+					(reference "#PWR0203")
+					(unit 1)
+				)
+			)
+		)
+	)
+	(wire
+		(pts
+			(xy 40.64 144.78) (xy 45.72 144.78)
+		)
+		(stroke
+			(width 0)
+			(type default)
+		)
+		(uuid "f8cdc6a5-fb71-4e79-9793-325981be077a")
+	)
+	(hierarchical_label "SENS_V1"
+		(shape passive)
+		(at 45.72 144.78 0)
+		(effects
+			(font
+				(size 1.27 1.27)
+			)
+			(justify left)
+		)
+		(uuid "0c35db6f-2eb0-4fc4-b942-7946b390974e")
+	)
+	(wire
+		(pts
+			(xy 40.64 147.32) (xy 45.72 147.32)
+		)
+		(stroke
+			(width 0)
+			(type default)
+		)
+		(uuid "630f23b1-fc05-4d0f-98a0-ac6b2d7591d6")
+	)
+	(hierarchical_label "SENS_R1"
+		(shape passive)
+		(at 45.72 147.32 0)
+		(effects
+			(font
+				(size 1.27 1.27)
+			)
+			(justify left)
+		)
+		(uuid "173e6a36-5005-4fe9-9cf8-a95a1d8d63bc")
+	)
+	(wire
+		(pts
+			(xy 40.64 149.86) (xy 45.72 149.86)
+		)
+		(stroke
+			(width 0)
+			(type default)
+		)
+		(uuid "f3a33a16-6b72-4c14-ba95-d339ec471a84")
+	)
+	(hierarchical_label "5V_SENS"
+		(shape input)
+		(at 45.72 149.86 0)
+		(effects
+			(font
+				(size 1.27 1.27)
+			)
+			(justify left)
+		)
+		(uuid "bfd55a50-2ebc-4290-97b7-ccda55750f07")
+	)
+	(wire
+		(pts
+			(xy 40.64 152.4) (xy 45.72 152.4)
+		)
+		(stroke
+			(width 0)
+			(type default)
+		)
+		(uuid "0c75af13-0b67-4e90-8383-e93505bfc8c6")
+	)
+	(hierarchical_label "FUEL_GND"
+		(shape passive)
+		(at 45.72 152.4 0)
+		(effects
+			(font
+				(size 1.27 1.27)
+			)
+			(justify left)
+		)
+		(uuid "791ecff1-ca33-4462-96cb-d15d13b5f3ea")
+	)
+	(wire
+		(pts
+			(xy 40.64 154.94) (xy 45.72 154.94)
+		)
+		(stroke
+			(width 0)
+			(type default)
+		)
+		(uuid "af903b27-6d79-4d3f-b68e-e8fd070a0963")
+	)
+	(hierarchical_label "FUEL_P"
+		(shape passive)
+		(at 45.72 154.94 0)
+		(effects
+			(font
+				(size 1.27 1.27)
+			)
+			(justify left)
+		)
+		(uuid "6286b852-b895-4989-a369-481f46b0a35a")
 	)
 	)
