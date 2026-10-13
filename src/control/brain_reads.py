@@ -272,21 +272,36 @@ LIVE_TWIN_ABSENT: dict[str, Any] = {
 }
 
 
+#: ``live_proposals`` when no daemon tick publishes them.
+LIVE_PROPOSALS_ABSENT: dict[str, Any] = {
+    "enabled": False,
+    "result": "not_running",
+    "detail": "no live inference pipeline publishes measurement proposals in this process",
+    "proposals": [],
+}
+
+
 def brain_status(
     config: CanaryConfig,
     *,
     process_started_at: datetime | None = None,
     live_twin: Mapping[str, Any] | None = None,
+    live_proposals: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Recovery standing (identity, invalidations, tables, transient state,
     memory) plus job counts, and the live twin's current predictions,
     residuals and applicability as the inference tick last published them
     (``/status`` ``detectors.inference.twin``, the same block). Read-only:
-    computing it never records a change."""
+    computing it never records a change. ``live_proposals`` is the tick's
+    next-measurement proposals (``/status`` ``detectors.inference.proposals``,
+    E03.4), passed through the same way."""
     try:
         report = recovery_report(config, process_started_at=process_started_at, write=False)
     except UnscopedMemoryError as exc:
         raise BrainReadError(503, {"error": "unscoped", "message": str(exc)}) from exc
     report["jobs"] = brain_jobs(config)["counts"]
     report["live_twin"] = dict(live_twin) if live_twin is not None else dict(LIVE_TWIN_ABSENT)
+    report["live_proposals"] = (
+        dict(live_proposals) if live_proposals is not None else dict(LIVE_PROPOSALS_ABSENT)
+    )
     return report

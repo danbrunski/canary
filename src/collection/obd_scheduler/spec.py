@@ -604,6 +604,13 @@ def parse_did_token(token: str) -> int:
     )
 
 
-def _bus_budget_requests_per_second(spec: CanObdSpec) -> float:
-    base = max(float(spec.poll_rate_hz), 0.001)
+def default_bus_budget(poll_rate_hz: float) -> float:
+    """The request budget (req/s) a profile without ``bus_budget_override``
+    is paced at: ``BUS_BUDGET_MULTIPLIER x poll_rate_hz``, floored. The one
+    formula the scheduler and the brain's capacity check both use."""
+    base = max(float(poll_rate_hz), 0.001)
     return max(MIN_BUS_BUDGET_REQUESTS_PER_SECOND, base * BUS_BUDGET_MULTIPLIER)
+
+
+def _bus_budget_requests_per_second(spec: CanObdSpec) -> float:
+    return default_bus_budget(spec.poll_rate_hz)

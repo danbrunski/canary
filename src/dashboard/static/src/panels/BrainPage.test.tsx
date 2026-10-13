@@ -18,6 +18,10 @@ vi.mock("../api/brain", () => ({
   submitBrainJob: vi.fn(),
 }));
 
+vi.mock("../api/ecuApplication", () => ({
+  getApplicationModel: vi.fn(() => new Promise(() => undefined)),
+}));
+
 const api = await import("../api/brain");
 const { BrainPage, explanationParts, jobStateText } = await import("./BrainPage");
 
@@ -266,5 +270,80 @@ describe("BrainPage", () => {
     expect(screen.getByText(/predicted φ 1.16406 .* residual not qualified/)).toBeTruthy();
     expect(screen.getByText(/pending 4 · late 1 · dropped 0/)).toBeTruthy();
     expect(screen.getByText("ram_copy_unverified")).toBeTruthy();
+  });
+
+  it("shows live proposals apart from after-drive review, and never as a driver prompt", async () => {
+    vi.mocked(api.getBrainStatus).mockResolvedValue({
+      ...status,
+      live_proposals: {
+        enabled: true,
+        result: "proposing",
+        vehicle_state: "engine_running",
+        capture: { active: false, profile: "default", source: null },
+        investigation: "inv-1",
+        method: "structural",
+        missing_likelihoods: ["maf_error: no likelihood declared"],
+        proposals: [
+          {
+            measurement: "Log fuel pressure through a full-throttle pull.",
+            residual: "pressure_flow_loss",
+            region: "enrichment",
+            kind: "open_capture",
+            delivery: "brain",
+            reason: "region_entered",
+            detail: "the drive entered enrichment",
+            profile: "tuning",
+            during_capture: null,
+          },
+          {
+            measurement: "Fit an independent wideband lambda sensor.",
+            residual: "sensor_bias",
+            region: null,
+            kind: "review",
+            delivery: "after_drive",
+            reason: "instrument",
+            detail: "fit the wideband",
+            profile: null,
+            during_capture: null,
+          },
+        ],
+        opened: [
+          {
+            at: "2026-10-04T20:47:11+00:00",
+            measurement: "Log fuel pressure through a full-throttle pull.",
+            residual: "pressure_flow_loss",
+            region: "enrichment",
+            profile: "tuning",
+          },
+        ],
+      },
+    });
+    vi.mocked(api.getBrainJobs).mockResolvedValue({ jobs: [], counts: {} });
+    vi.mocked(api.queryMemory).mockResolvedValue({ vehicle: "v", count: 0, records: [] });
+    render(<BrainPage token="t" />);
+    expect(await screen.findByText(/propose capture tuning in enrichment/)).toBeTruthy();
+    expect(screen.getByText(/after the drive: instrument — fit the wideband/)).toBeTruthy();
+    expect(screen.getByText(/Captures proposed this run/)).toBeTruthy();
+    expect(screen.getByText(/missing likelihoods: maf_error/)).toBeTruthy();
+  });
+
+  it("says why there are no proposals", async () => {
+    vi.mocked(api.getBrainStatus).mockResolvedValue({
+      ...status,
+      live_proposals: {
+        enabled: true,
+        result: "no_open_investigation",
+        detail: "the memory holds no open delivery investigation",
+        proposals: [],
+      },
+    });
+    vi.mocked(api.getBrainJobs).mockResolvedValue({ jobs: [], counts: {} });
+    vi.mocked(api.queryMemory).mockResolvedValue({ vehicle: "v", count: 0, records: [] });
+    render(<BrainPage token="t" />);
+    expect(
+      await screen.findByText(
+        "no_open_investigation — the memory holds no open delivery investigation",
+      ),
+    ).toBeTruthy();
   });
 });

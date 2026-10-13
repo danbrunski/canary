@@ -95,6 +95,7 @@ __all__ = [
     "drive_reports",
     "evaluate_outcome",
     "investigate",
+    "open_investigation",
     "observation_of",
     "predict_pressure_flow_loss",
     "predict_recurrence",
@@ -404,7 +405,8 @@ class InvestigationStep:
     measurements: tuple[MeasurementChoice, ...]
 
 
-def _open_investigation(ledger: MemoryLedger) -> Investigation | None:
+def open_investigation(ledger: MemoryLedger) -> Investigation | None:
+    """The newest current open delivery investigation; ``None`` when none is open."""
     found = [
         entry.record
         for entry in ledger.query(MemoryQuery(kinds=("investigation",), incident=DELIVERY_INCIDENT))
@@ -430,7 +432,7 @@ def investigate(
     discrepancy = detect_discrepancy(ledger, delivery_evidence)
     for evidence_id in other_evidence:
         _require_engine_response(_evidence(ledger, evidence_id), tools=_OBSERVING_TOOLS)
-    existing = _open_investigation(ledger)
+    existing = open_investigation(ledger)
     ids = list(
         dict.fromkeys(
             [*(existing.observations if existing else ()), delivery_evidence, *other_evidence]

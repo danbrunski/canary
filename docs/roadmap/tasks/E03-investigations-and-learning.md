@@ -402,12 +402,57 @@ computed on the Pi and render without a language model.
     `test_missing_or_stale_region_inputs_defer_with_a_named_reason`,
     `test_the_plan_refuses_thresholds_that_differ_from_their_sources`,
     `test_profile_capacity_and_complete_tuples`.
-  - **Remaining:** (1) call `propose` from the live tick (E04.1's streaming
-    evaluator, `src/daemon/twin_live.py`/`inference.py`, held by the E04
-    agent) with `/status` capture state and fresh readings, and surface
-    proposals on the Brain page (`BrainPage.tsx`, also E04's); (2) the Pi
-    run; (3) no evidence-backed likelihood exists, so real rankings stay
-    structural until one is earned.
+  - **Live tick (desk, 2026-10-13).** `src/daemon/proposals_live.py`
+    `LiveProposals`, built in `LiveInferencePipeline` beside the twin
+    (`build_live_proposals`) and ticked every inference tick after it
+    (`tick_live`: the tick's `vehicle_state`, derived when the tick had no
+    row, and `CaptureState.from_snapshot(tuning_profile.snapshot())`).
+    Off the tick, on one worker thread (`ConfigPlanner.refresh`): the fault
+    model, the plan (with `mode01_wot`), the capture catalog with this
+    machine's overrides, the default bus budget (new
+    `obd_scheduler.spec.default_bus_budget`, the scheduler's own formula)
+    and the open delivery investigation's ranking
+    (`hypothesis_tracking.rank_investigation`, now shared with
+    `update_investigation`, which writes nothing; `open_investigation` made
+    public). Refreshed every 60 s; the ledger is re-ranked only when its
+    size/mtime changed. The tick never waits: a busy worker counts
+    `busy_ticks`. On the collector path an observer keeps the newest value
+    and acquisition time of only the plan's region and instrument channels
+    (Mode 01 names fold case; non-numeric/non-finite values are not
+    readings); ages are taken on the wall clock at the tick. Published as
+    `/status` `detectors.inference.proposals` (stages `proposals_tick`,
+    `proposals_refresh`) and `/control/brain/status` `live_proposals` (MCP
+    `get_brain_status` passes it through); each `open_capture` is logged
+    once per entry (`opened`, last 16). Names `starting`, `unscoped`,
+    `not_declared`, `no_open_investigation`, `failed`. Writes nothing.
+    Dashboard *Diagnose → Investigations* (`BrainPage.tsx` → new
+    `panels/BrainProposals.tsx`): "Next measurement (live)" splits *Now*
+    (`brain`) from *After the drive* (`after_drive`), lists captures
+    proposed this run, and names missing likelihoods when ranked
+    structurally. Tests: `tests/test_proposals_live.py` (15 passed, 10.7 s
+    serial): `test_the_tick_proposes_the_tuning_capture_only_inside_enrichment`,
+    `test_the_tick_never_displaces_an_operator_capture`,
+    `test_no_capture_is_proposed_unless_the_engine_runs`,
+    `test_stale_readings_defer_by_name`,
+    `test_a_stalled_worker_never_holds_the_tick` (1 hand-off, 19 busy
+    ticks), `test_the_tick_does_not_wait_for_a_slow_load` (real thread),
+    `test_refreshes_run_on_the_worker_at_the_refresh_interval`,
+    `test_the_observer_keeps_only_the_plans_channels`,
+    `test_status_and_the_brain_route_carry_the_published_block` (`/status`
+    == route == MCP), `test_the_config_planner_ranks_the_open_investigation_from_the_ledger`
+    (first measurement the fuel-pressure pull; unchanged ledger not
+    re-ranked), `test_the_config_planner_names_each_kind_of_nothing`,
+    `test_proposals_are_wired_into_the_inference_pipeline`;
+    `BrainPage.test.tsx` (8 passed) adds the proposal and no-proposal
+    views. `test_hypothesis_tracking.py`, `test_brain_routes.py`,
+    `test_twin_live.py`, `test_layering.py`, `test_state_dir.py` and the
+    inference/scheduler suites pass unchanged. Laptop cost (synthetic drive
+    B through the tick, load average ~24): tick p50 0.033 ms, p99 0.105 ms,
+    max 0.117 ms over 189 ticks; observer 1.7 µs/record including building
+    the record. Not a Pi figure.
+  - **Remaining:** (1) the Pi run: proposals on a real drive, and the tick
+    cost measured there with E04.3; (2) no evidence-backed likelihood
+    exists, so real rankings stay structural until one is earned.
 
 - [~] **E03.5 — Learn a small candidate without absorbing a fault.**
   Trial recursive least squares or a Kalman candidate over a few physically
@@ -583,15 +628,22 @@ computed on the Pi and render without a language model.
     over `canonical_params`); a brain job can now end `pending` (not
     `completed`) when its run finds too little independent evidence, and
     re-runs only when the count of sessions after the checkpoint changes.
+  - **Dashboard job kinds (desk, 2026-10-13).** `types/brain.ts` now lists
+    every kind as `BRAIN_JOB_KINDS` (`twin_session_evaluation`,
+    `memory_consolidation`, `candidate_evaluation`, `candidate_promotion`)
+    and `BrainJob.kind` is `BrainJobKind`. `tests/test_brain_job_kinds_ts.py`
+    (4 passed) fails when the TS list differs from
+    `src/control/brain_jobs.py` `JOB_KINDS` (order included), when the
+    `JobKind`/`JobState` literals differ from their tuples, or when
+    `BrainJobState` differs from `JOB_STATES`. `pnpm typecheck` and
+    `pnpm lint` clean.
   - **Remaining:** (1) a real reference (E03.3) and a real candidate;
     nothing yet installs a frozen reference into the store or registers a
     prediction for a live checkpoint (the E03.3 tool and E04.1 streaming
     path); (2) `stft_bank_balance_drive_mean` has no measured floor, so a
     real evaluation stays `unresolvable` until one is measured under a
     declared regime; (3) the Pi run (job in a no_data window, a promotion
-    surviving `scripts/restart_canary.sh`); (4) the dashboard job-kind type
-    (`src/dashboard/static/src/types/brain.ts`, E04's) lists only the two
-    older kinds.
+    surviving `scripts/restart_canary.sh`).
 
 - [ ] **E03.7 — Record the NA investigation and supercharger intervention.**
   Link to N01 and supercharger NA2. Resolve the WOT-lean investigation with

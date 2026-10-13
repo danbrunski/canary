@@ -48,8 +48,8 @@ ECU replica.
   conditional or unevaluable. Wrong-program artifacts refuse by name.
   The dashboard can report qualified outputs and uncovered logic from this
   manifest. Backfill E02 with it without changing established predictions.
-  *Partial 2026-10-04 (manifest, loader, E02 backfill and read API done; the
-  dashboard view is E04.5's):*
+  *Partial 2026-10-04 (manifest, loader, E02 backfill and read API done);
+  dashboard view added at the desk 2026-10-13; seeing it on the Pi remains:*
   - **Manifest.** `data/nissan-xterra-2008/ecu_application_model.yaml`
     (`schema_version` 1, `model_version` 1) is validated by `ApplicationModel`
     in `src/analysis/ecu_application.py` (layer 5; no new package). It covers
@@ -114,8 +114,25 @@ ECU replica.
     `GET /control/ecu/application-model` (control token; route snapshot
     updated, documented in `docs/headless-api.md`); see
     `test_the_route_serves_the_report_behind_the_control_token`.
-  - **Remaining:** the dashboard view of this report is
-    [E04.5](E04-pi-runtime-and-acceptance.md)'s job.
+  - **Dashboard (desk, 2026-10-13).** *Diagnose → Investigations* ends
+    with an "ECU application model" panel
+    (`panels/EcuApplicationModelPanel.tsx`, mounted in `BrainPage.tsx`;
+    getter `api/ecuApplication.ts`, types `types/ecuApplication.ts` typed to
+    the schema's literals). It reads `/control/ecu/application-model`
+    through `useControlResource` + `ResourceGate` (token gate; the 404 for a
+    vehicle without a model shows as the server's refusal) and shows: model
+    version, program and patch, the running image (known revision/role, or
+    "not checked against this program"); per output its status (`qualified`
+    in the ok tone only when the report says so) with the blockers holding
+    it and what closes each, the twin's path counted by role in reading
+    order (implemented, observed, assumed, not modelled, calibration-dead),
+    and the unevaluable/conditional regions; then the uncovered logic with
+    what it blocks and the next evidence. Tests:
+    `EcuApplicationModelPanel.test.tsx` (5 passed: role order, status text,
+    token gate, full report, refusal). `pnpm typecheck`, `pnpm lint`,
+    prettier clean.
+  - **Remaining:** seeing the panel against the Pi's daemon (phone
+    demonstration with E04.5).
 
 - [~] **E05.2 — Extend upstream through air charge and fuelling.**
   Trace `0x03C4D0`, K's read at `0x03C6E0` and Fuel Comp readers including

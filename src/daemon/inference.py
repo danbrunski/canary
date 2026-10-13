@@ -51,6 +51,7 @@ from .inference_worker import (
     WorkerTick,
 )
 from .lambda_delivery_live import build_live_lambda_delivery
+from .proposals_live import build_live_proposals
 from .twin_live import build_live_twin
 
 if TYPE_CHECKING:
@@ -493,6 +494,9 @@ class LiveInferencePipeline:
         #: E04.1 — the target-phi twin: a bounded intake on the record path and
         #: one worker thread; the tick hands reads over and never waits.
         self._twin = build_live_twin(components, source, recorder)
+        #: E03.4 — next-measurement proposals: latest values on the record
+        #: path, loading/ranking on one worker, ``propose`` on the tick.
+        self._proposals = build_live_proposals(components, source, recorder)
         #: Tick period, for naming a compute that outran it (D02.3).
         self._interval_seconds = interval_seconds
         self._owns_executor = executor is None
@@ -775,6 +779,13 @@ class LiveInferencePipeline:
             except Exception:  # noqa: BLE001 — the twin is best-effort
                 log.exception("live twin tick failed")
 
+        try:
+            if vehicle_state is None:
+                vehicle_state = _live_vehicle_state(source, components, now)
+            self._proposals.tick_live(vehicle_state.state)
+        except Exception:  # noqa: BLE001 — proposals are best-effort
+            log.exception("live proposals tick failed")
+
         ctx = TickContext(
             now=now,
             operating_mode=operating_mode,
@@ -953,6 +964,7 @@ class LiveInferencePipeline:
         self._pending = None
         if self._twin is not None:
             self._twin.close()
+        self._proposals.close()
         inflight = self._inflight
         if inflight is not None and not inflight.done():
             try:

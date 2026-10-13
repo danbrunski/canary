@@ -285,6 +285,9 @@ class InferenceTiming:
     #: E04.1 — the live target-phi twin: decided command samples, accounting,
     #: applicability, intake and cost; ``None`` before the pipeline starts.
     twin: Mapping[str, Any] | None = None
+    #: E03.4 — the brain's next-measurement proposals as the tick last made
+    #: them; ``None`` before the pipeline starts.
+    proposals: Mapping[str, Any] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -315,6 +318,7 @@ class InferenceTiming:
                 dict(self.lambda_delivery) if self.lambda_delivery is not None else None
             ),
             "twin": dict(self.twin) if self.twin is not None else None,
+            "proposals": dict(self.proposals) if self.proposals is not None else None,
         }
 
 
@@ -349,6 +353,7 @@ class InferenceTimingRecorder:
     _committees: Mapping[str, Any] | None = field(default=None, repr=False)
     _lambda_delivery: Mapping[str, Any] | None = field(default=None, repr=False)
     _twin: Mapping[str, Any] | None = field(default=None, repr=False)
+    _proposals: Mapping[str, Any] | None = field(default=None, repr=False)
     _envelope: EnvelopeCoverageMeter = field(default_factory=EnvelopeCoverageMeter, repr=False)
     _cadence_every_n: int | None = field(default=None, repr=False)
     _cadence_scored: int = field(default=0, repr=False)
@@ -430,6 +435,14 @@ class InferenceTimingRecorder:
     def twin(self) -> Mapping[str, Any] | None:
         """The live twin's last published block, for the brain routes."""
         return self._twin
+
+    def set_proposals(self, block: Mapping[str, Any] | None) -> None:
+        """Publish the live measurement proposals' block (E03.4)."""
+        self._proposals = dict(block) if block is not None else None
+
+    def proposals(self) -> Mapping[str, Any] | None:
+        """The live proposals' last published block, for the brain routes."""
+        return self._proposals
 
     def note_sequence_window(
         self,
@@ -527,6 +540,7 @@ class InferenceTimingRecorder:
             committees=self._committees,
             lambda_delivery=self._lambda_delivery,
             twin=self._twin,
+            proposals=self._proposals,
         )
 
 

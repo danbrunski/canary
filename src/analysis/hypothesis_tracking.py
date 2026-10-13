@@ -48,6 +48,7 @@ from typing import Literal
 import src.analysis.fault_model as fault_model_module
 from src.analysis.delivery_investigation import (
     MeasurementChoice,
+    UnresolvedPair,
     drive_reports,
     observation_of,
     select_measurement,
@@ -68,10 +69,12 @@ from src.evidence.records import Evidence, Hypothesis, Investigation, Provenance
 __all__ = [
     "TRACKING_TOOL",
     "HypothesisTrack",
+    "InvestigationRanking",
     "MeasurementRanking",
     "RankedMeasurement",
     "TrackedHypothesis",
     "TrackedObservation",
+    "rank_investigation",
     "rank_measurements",
     "track_hypotheses",
     "update_investigation",
@@ -367,6 +370,40 @@ def rank_measurements(
 
 
 @dataclass(frozen=True)
+class InvestigationRanking:
+    """An investigation's hypotheses and measurements re-ranked, not recorded."""
+
+    track: HypothesisTrack
+    pairs: tuple[UnresolvedPair, ...]
+    ranking: MeasurementRanking
+
+
+def rank_investigation(
+    ledger: MemoryLedger,
+    model: FaultModel,
+    plan: MeasurementPlan,
+    observations: Sequence[str],
+) -> InvestigationRanking:
+    """The ranking :func:`update_investigation` records for ``observations``
+    (an investigation's evidence ids plus any new ones), computed without
+    writing: the live proposal tick (E03.4) reads the same order the record
+    would carry."""
+    track = track_hypotheses(model, ledger, observations)
+    reports = drive_reports(
+        ledger,
+        model,
+        [
+            rid
+            for rid in track.counted
+            if not any(o.conflict for o in track.observations if rid in o.evidence)
+        ],
+    )
+    pairs = unresolved_pairs(model, list(reports.values()), track.signed(), track.open)
+    ranking = rank_measurements(model, plan, ledger, track.open, select_measurement(pairs))
+    return InvestigationRanking(track, tuple(pairs), ranking)
+
+
+@dataclass(frozen=True)
 class TrackingStep:
     investigation: str
     #: ``False`` when the evidence changed nothing (the same record returned).
@@ -391,18 +428,8 @@ def update_investigation(
         raise ValueError(f"{investigation_id} is not an investigation")
     if not entry.current:
         raise ValueError(f"{investigation_id} was superseded by {list(entry.superseded_by)}")
-    track = track_hypotheses(model, ledger, [*existing.observations, *evidence_ids])
-    reports = drive_reports(
-        ledger,
-        model,
-        [
-            rid
-            for rid in track.counted
-            if not any(o.conflict for o in track.observations if rid in o.evidence)
-        ],
-    )
-    pairs = unresolved_pairs(model, list(reports.values()), track.signed(), track.open)
-    ranking = rank_measurements(model, plan, ledger, track.open, select_measurement(pairs))
+    ranked = rank_investigation(ledger, model, plan, [*existing.observations, *evidence_ids])
+    track, pairs, ranking = ranked.track, ranked.pairs, ranked.ranking
     unknowns = [
         f"{pair.a} and {pair.b} are not yet separated by any qualified observation"
         for pair in pairs

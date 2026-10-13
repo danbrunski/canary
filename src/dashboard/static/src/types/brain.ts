@@ -3,9 +3,21 @@
 
 export type BrainJobState = "queued" | "running" | "deferred" | "pending" | "completed" | "failed";
 
+/** Every kind `POST /control/brain/jobs` accepts, in the order of
+ *  `src/control/brain_jobs.py` `JOB_KINDS` (`tests/test_brain_job_kinds_ts.py`
+ *  fails when the two differ). */
+export const BRAIN_JOB_KINDS = [
+  "twin_session_evaluation",
+  "memory_consolidation",
+  "candidate_evaluation",
+  "candidate_promotion",
+] as const;
+
+export type BrainJobKind = (typeof BRAIN_JOB_KINDS)[number];
+
 export interface BrainJob {
   job_id: string;
-  kind: "twin_session_evaluation" | "memory_consolidation";
+  kind: BrainJobKind;
   params: Record<string, unknown>;
   state: BrainJobState;
   created_at: string;
@@ -44,6 +56,44 @@ export interface BrainStatus {
   /** The live twin as the inference tick last published it (E04.1; the same
    *  block as `/status` `detectors.inference.twin`). */
   live_twin?: LiveTwin;
+  /** The next-measurement proposals as the inference tick last made them
+   *  (E03.4; the same block as `/status` `detectors.inference.proposals`). */
+  live_proposals?: LiveProposals;
+}
+
+/** One `propose` decision (`src/analysis/measurement_plan.py` `Proposal`).
+ *  `brain` is the brain's own state on this page; `after_drive` is a review
+ *  item. Nothing is delivered to the driver. */
+export interface MeasurementProposal {
+  measurement: string;
+  residual: string;
+  region: string | null;
+  kind: "open_capture" | "collecting" | "defer" | "review";
+  delivery: "brain" | "after_drive";
+  reason: string;
+  detail: string;
+  profile: string | null;
+  during_capture: string | null;
+}
+
+export interface LiveProposals {
+  enabled: boolean;
+  result: string;
+  detail?: string;
+  vehicle_state?: string | null;
+  capture?: { active: boolean; profile: string; source: string | null } | null;
+  investigation?: string | null;
+  method?: "information_gain_per_cost" | "structural" | null;
+  missing_likelihoods?: string[];
+  proposals: MeasurementProposal[];
+  opened?: {
+    at: string;
+    measurement: string;
+    residual: string;
+    region: string | null;
+    profile: string | null;
+  }[];
+  ranked_at?: string | null;
 }
 
 export interface LiveTwinSample {

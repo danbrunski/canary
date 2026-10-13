@@ -9,6 +9,7 @@ import {
   queryMemory,
   submitBrainJob,
 } from "../api/brain";
+import { Notice } from "../components/Notice";
 import { Panel } from "../components/Panel";
 import { ResourceGate } from "../components/ResourceGate";
 import { Sparkline } from "../components/Sparkline";
@@ -22,6 +23,7 @@ import {
   definitionValueClass,
   inputClass,
   placeholderClass,
+  type NoticeState,
 } from "../styles";
 import type {
   BrainJob,
@@ -32,6 +34,8 @@ import type {
   TwinEvaluation,
   TwinSessionResponse,
 } from "../types/brain";
+import { ProposalsView } from "./BrainProposals";
+import { EcuApplicationModelPanel } from "./EcuApplicationModelPanel";
 
 interface BrainPageProps {
   token: string;
@@ -380,16 +384,19 @@ export function BrainPage({ token }: BrainPageProps) {
     { enabled: enabled && session !== null, intervalMs: null },
   );
   const [queueSession, setQueueSession] = useState("");
-  const [notice, setNotice] = useState<string | null>(null);
+  const [notice, setNotice] = useState<NoticeState | null>(null);
 
   const queue = async (kind: BrainJob["kind"], params: Record<string, unknown> = {}) => {
     setNotice(null);
     try {
       const { job, created } = await submitBrainJob(token, kind, params);
-      setNotice(created ? `queued ${job.job_id}` : `already ${jobStateText(job)}`);
+      setNotice({
+        kind: "ok",
+        text: created ? `queued ${job.job_id}` : `already ${jobStateText(job)}`,
+      });
       jobs.refresh();
     } catch (err) {
-      setNotice(err instanceof Error ? err.message : String(err));
+      setNotice({ kind: "error", text: err instanceof Error ? err.message : String(err) });
     }
   };
 
@@ -404,6 +411,23 @@ export function BrainPage({ token }: BrainPageProps) {
           data={status.data}
         >
           {(data) => <StatusView status={data} />}
+        </ResourceGate>
+      </Panel>
+      <Panel title="Next measurement (live)">
+        <ResourceGate
+          enabled={enabled}
+          enabledMessage={TOKEN_MESSAGE}
+          loading={status.loading}
+          error={status.error}
+          data={status.data}
+        >
+          {(data) =>
+            data.live_proposals ? (
+              <ProposalsView block={data.live_proposals} />
+            ) : (
+              <p className={placeholderClass}>this daemon does not publish proposals</p>
+            )
+          }
         </ResourceGate>
       </Panel>
       <Panel title="Brain jobs" count={jobs.data ? `${jobs.data.jobs.length} jobs` : undefined}>
@@ -433,7 +457,7 @@ export function BrainPage({ token }: BrainPageProps) {
             >
               Consolidate memory
             </button>
-            {notice && <span className="text-[0.82rem] text-fg-dim">{notice}</span>}
+            <Notice notice={notice} />
           </div>
         )}
         <ResourceGate
@@ -537,6 +561,7 @@ export function BrainPage({ token }: BrainPageProps) {
           </ResourceGate>
         </Panel>
       )}
+      <EcuApplicationModelPanel token={token} />
     </>
   );
 }

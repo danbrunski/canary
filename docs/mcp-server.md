@@ -48,7 +48,7 @@ Read tools:
 | `get_training_runs` | `GET /control/training-runs` |
 | `list_vehicle_events` | `GET /control/vehicle-ledger` — vehicle maintenance/intervention ledger (maintenance/mod/repair/observation/DTC), oldest-first, latest per id |
 | `list_jobs` / `get_job` / `get_job_logs` | `GET /control/jobs[...]` |
-| `get_brain_status` | `GET /control/brain/status` — second brain (E04): ECM program/calibration in force, what a program or calibration change invalidated, selected twin tables, RAM-address standing (re-verify only on a program change), transient ECU state (unknown after a restart), memory and job counts |
+| `get_brain_status` | `GET /control/brain/status` — second brain (E04): ECM program/calibration in force, what a program or calibration change invalidated, selected twin tables, RAM-address standing (re-verify only on a program change), transient ECU state (unknown after a restart), memory and job counts, the live twin and the live next-measurement proposals (`live_proposals`, E03.4) |
 | `query_memory` | `GET /control/brain/memory` — `MemoryQuery` over the vehicle's investigation memory (kind, incident, subject, session, regime, calibration/program, valid/as-of times, text, history) |
 | `resolve_evidence` | `GET /control/brain/evidence/{id}` — one evidence id resolved, with `part`: ECU computation (twin) or measured engine response |
 | `get_investigation_card` | `GET /control/brain/investigations/{id}/card` — the deterministic E01.5 card; `parts` splits its evidence into ECU computation and measured engine response |
