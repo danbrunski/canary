@@ -621,6 +621,22 @@
           }
         }
       },
+      "devices": {
+        "options": {
+          "--remove": {
+            "action": "_StoreAction",
+            "choices": null,
+            "default": null,
+            "dest": "remove",
+            "nargs": null,
+            "option_strings": [
+              "--remove"
+            ],
+            "required": false,
+            "type": null
+          }
+        }
+      },
       "jobs": {
         "options": {},
         "subcommands": {
@@ -818,6 +834,34 @@
                 "type": null
               }
             }
+          }
+        }
+      },
+      "pair": {
+        "options": {
+          "--approve": {
+            "action": "_StoreAction",
+            "choices": null,
+            "default": null,
+            "dest": "approve",
+            "nargs": null,
+            "option_strings": [
+              "--approve"
+            ],
+            "required": false,
+            "type": null
+          },
+          "--yes": {
+            "action": "_StoreTrueAction",
+            "choices": null,
+            "default": false,
+            "dest": "yes",
+            "nargs": 0,
+            "option_strings": [
+              "--yes"
+            ],
+            "required": false,
+            "type": null
           }
         }
       },
