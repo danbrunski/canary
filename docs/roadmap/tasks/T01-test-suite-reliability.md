@@ -821,3 +821,15 @@ measurement in hand.
     Pi whose clock NTP steps backwards would refuse the same append. Decide
     whether the ledger should clamp to `index.latest` (monotonic record time)
     or the test should pass `now=`.
+  - **Seen again** 2026-10-13 in a different test, so the cause is in the
+    shared ledger rather than one test. The push gate for `7cf315b` (a KiCad
+    board file only) failed
+    `tests/test_twin_investigation.py::test_a_later_occurrence_of_the_same_direction_updates_its_investigation`
+    with the same `ValueError` at `_append_locked`. It passed serially. Log:
+    `.git/ci-gate/failed-logs/20261013T150132Z-7cf315b-pytest.log`.
+  - **Probably the same, traceback not kept:** earlier that day four
+    `tests/test_residual_chain.py` tests (B08.5, which appends to the same
+    ledger) failed in one full parallel `pytest -m "not integration and not
+    slow"` run on the laptop. They passed alone, 3 of 3 runs in parallel on
+    their own, and in a second full run. That run was outside the gate, so
+    no log was kept.
