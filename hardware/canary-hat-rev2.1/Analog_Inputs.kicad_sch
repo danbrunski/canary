@@ -12,129 +12,6 @@
 		(comment 2 "Design record: docs/CANary-HAT-Rev2.1.md")
 	)
 	(lib_symbols
-		(symbol "Connector:TestPoint"
-			(pin_numbers
-				(hide yes)
-			)
-			(pin_names
-				(offset 0.762)
-				(hide yes)
-			)
-			(exclude_from_sim no)
-			(in_bom yes)
-			(on_board yes)
-			(in_pos_files yes)
-			(duplicate_pin_numbers_are_jumpers no)
-			(property "Reference" "TP"
-				(at 0 6.858 0)
-				(show_name no)
-				(do_not_autoplace no)
-				(effects
-					(font
-						(size 1.27 1.27)
-					)
-				)
-			)
-			(property "Value" "TestPoint"
-				(at 0 5.08 0)
-				(show_name no)
-				(do_not_autoplace no)
-				(effects
-					(font
-						(size 1.27 1.27)
-					)
-				)
-			)
-			(property "Footprint" ""
-				(at 5.08 0 0)
-				(show_name no)
-				(do_not_autoplace no)
-				(hide yes)
-				(effects
-					(font
-						(size 1.27 1.27)
-					)
-				)
-			)
-			(property "Datasheet" ""
-				(at 5.08 0 0)
-				(show_name no)
-				(do_not_autoplace no)
-				(hide yes)
-				(effects
-					(font
-						(size 1.27 1.27)
-					)
-				)
-			)
-			(property "Description" "test point"
-				(at 0 0 0)
-				(show_name no)
-				(do_not_autoplace no)
-				(hide yes)
-				(effects
-					(font
-						(size 1.27 1.27)
-					)
-				)
-			)
-			(property "ki_keywords" "test point tp"
-				(at 0 0 0)
-				(show_name no)
-				(do_not_autoplace no)
-				(hide yes)
-				(effects
-					(font
-						(size 1.27 1.27)
-					)
-				)
-			)
-			(property "ki_fp_filters" "Pin* Test*"
-				(at 0 0 0)
-				(show_name no)
-				(do_not_autoplace no)
-				(hide yes)
-				(effects
-					(font
-						(size 1.27 1.27)
-					)
-				)
-			)
-			(symbol "TestPoint_0_1"
-				(circle
-					(center 0 3.302)
-					(radius 0.762)
-					(stroke
-						(width 0)
-						(type default)
-					)
-					(fill
-						(type none)
-					)
-				)
-			)
-			(symbol "TestPoint_1_1"
-				(pin passive line
-					(at 0 0 90)
-					(length 2.54)
-					(name "1"
-						(effects
-							(font
-								(size 1.27 1.27)
-							)
-						)
-					)
-					(number "1"
-						(effects
-							(font
-								(size 1.27 1.27)
-							)
-						)
-					)
-				)
-			)
-			(embedded_fonts no)
-		)
 		(symbol "Device:C"
 			(pin_numbers
 				(hide yes)
@@ -2439,17 +2316,6 @@
 		)
 		(uuid "55a34380-6083-4bf5-a314-f1113afd5fba")
 	)
-	(text "CH5-CH7  spares to test pads, pulled to GND by default: a floating AIN_nP reads a plausible bias voltage (SBAS680 8.3.1). Driver refuses unmapped channels (open item 33)."
-		(exclude_from_sim no)
-		(at 24.13 244.348 0)
-		(effects
-			(font
-				(size 1.27 1.27)
-			)
-			(justify left top)
-		)
-		(uuid "74513076-7bfa-45d6-9375-e79ea48f17a3")
-	)
 	(text "CH2  SENS_R1: generic RESISTIVE sensor port, J2 pin 10 (pull-up to 5V_SENS). Default suits automotive NTCs (~2-5 kohm at 20 C). Dev truck: Bosch TMAP NTC."
 		(exclude_from_sim no)
 		(at 19.812 106.426 0)
@@ -2483,6 +2349,48 @@
 		)
 		(uuid "c6bc81ef-a7d8-4e9f-ba33-f273624f4a7e")
 	)
+	(junction
+		(at 218.44 182.88)
+		(diameter 0)
+		(color 0 0 0 0)
+		(uuid "0d20bd10-402b-473c-be61-b928e8ccf143")
+	)
+	(junction
+		(at 218.44 190.5)
+		(diameter 0)
+		(color 0 0 0 0)
+		(uuid "14683f3a-1704-4f3d-b50d-68f1f6efbe33")
+	)
+	(junction
+		(at 218.44 187.96)
+		(diameter 0)
+		(color 0 0 0 0)
+		(uuid "3945514e-4410-4f91-b86d-399c32afc9c9")
+	)
+	(junction
+		(at 218.44 175.26)
+		(diameter 0)
+		(color 0 0 0 0)
+		(uuid "626adc11-4c2c-4a14-8214-1fbe4f093771")
+	)
+	(junction
+		(at 218.44 177.8)
+		(diameter 0)
+		(color 0 0 0 0)
+		(uuid "8725f8a0-288c-49ed-9b0c-f381014c8117")
+	)
+	(junction
+		(at 218.44 180.34)
+		(diameter 0)
+		(color 0 0 0 0)
+		(uuid "b026e5dc-9737-4538-a311-cf00aecd51b4")
+	)
+	(junction
+		(at 218.44 172.72)
+		(diameter 0)
+		(color 0 0 0 0)
+		(uuid "f7bd681e-2227-4308-8afe-d19bda72e2bb")
+	)
 	(no_connect
 		(at 259.08 172.72)
 		(uuid "50ebb16c-3f50-446f-aa37-7520cb68940c")
@@ -2506,16 +2414,6 @@
 			(type default)
 		)
 		(uuid "00e7d59f-63dc-40ff-9753-0806a81c9812")
-	)
-	(wire
-		(pts
-			(xy 236.22 180.34) (xy 233.68 180.34)
-		)
-		(stroke
-			(width 0)
-			(type default)
-		)
-		(uuid "01a0251d-17f0-4949-8174-a4e88a058389")
 	)
 	(wire
 		(pts
@@ -2566,6 +2464,16 @@
 			(type default)
 		)
 		(uuid "0ab97a03-714b-4c62-b142-a2192aa69834")
+	)
+	(wire
+		(pts
+			(xy 218.44 182.88) (xy 218.44 187.96)
+		)
+		(stroke
+			(width 0)
+			(type default)
+		)
+		(uuid "118ee189-75da-4e5f-b606-5f2e4cfb2749")
 	)
 	(wire
 		(pts
@@ -2639,6 +2547,26 @@
 	)
 	(wire
 		(pts
+			(xy 218.44 190.5) (xy 236.22 190.5)
+		)
+		(stroke
+			(width 0)
+			(type default)
+		)
+		(uuid "263915ee-2d52-4df3-9eca-fa56d2ff739c")
+	)
+	(wire
+		(pts
+			(xy 218.44 180.34) (xy 236.22 180.34)
+		)
+		(stroke
+			(width 0)
+			(type default)
+		)
+		(uuid "26b81b63-477d-4cb0-8cdd-1a8a9cf5ca7d")
+	)
+	(wire
+		(pts
 			(xy 45.72 88.9) (xy 45.72 91.44)
 		)
 		(stroke
@@ -2659,23 +2587,23 @@
 	)
 	(wire
 		(pts
-			(xy 156.21 265.43) (xy 153.67 265.43)
+			(xy 218.44 177.8) (xy 236.22 177.8)
 		)
 		(stroke
 			(width 0)
 			(type default)
 		)
-		(uuid "2ed045a3-4266-44c3-bbf6-a5fbd5a4b204")
+		(uuid "33478e82-b97d-4883-ba85-7434decece11")
 	)
 	(wire
 		(pts
-			(xy 137.16 261.62) (xy 137.16 259.08)
+			(xy 218.44 182.88) (xy 236.22 182.88)
 		)
 		(stroke
 			(width 0)
 			(type default)
 		)
-		(uuid "341f6677-e688-4f56-ae4e-2e4b329ac443")
+		(uuid "362e0a70-9c3a-4785-8afc-bf097396af60")
 	)
 	(wire
 		(pts
@@ -2699,6 +2627,16 @@
 	)
 	(wire
 		(pts
+			(xy 218.44 175.26) (xy 218.44 177.8)
+		)
+		(stroke
+			(width 0)
+			(type default)
+		)
+		(uuid "3a176612-d870-4a09-a95e-683bc8d1affc")
+	)
+	(wire
+		(pts
 			(xy 350.52 78.74) (xy 350.52 76.2)
 		)
 		(stroke
@@ -2706,16 +2644,6 @@
 			(type default)
 		)
 		(uuid "3e25844f-1544-499e-b2af-9ecb6802df3f")
-	)
-	(wire
-		(pts
-			(xy 236.22 187.96) (xy 226.06 187.96)
-		)
-		(stroke
-			(width 0)
-			(type default)
-		)
-		(uuid "3e590c82-14dc-4cc4-93d9-2d20219558e5")
 	)
 	(wire
 		(pts
@@ -2736,6 +2664,16 @@
 			(type default)
 		)
 		(uuid "3ffebcb3-ba1f-4b6d-ac01-74e26c770ad7")
+	)
+	(wire
+		(pts
+			(xy 218.44 170.18) (xy 236.22 170.18)
+		)
+		(stroke
+			(width 0)
+			(type default)
+		)
+		(uuid "40a167f1-a5dc-48dd-9337-05a62a533cba")
 	)
 	(wire
 		(pts
@@ -2799,16 +2737,6 @@
 	)
 	(wire
 		(pts
-			(xy 25.4 260.35) (xy 25.4 265.43)
-		)
-		(stroke
-			(width 0)
-			(type default)
-		)
-		(uuid "4c8de9c9-4920-4a99-b8c1-b4a75a7c96bf")
-	)
-	(wire
-		(pts
 			(xy 236.22 149.86) (xy 233.68 149.86)
 		)
 		(stroke
@@ -2816,6 +2744,16 @@
 			(type default)
 		)
 		(uuid "4f4c569c-bf95-471b-a6e6-7009867213c0")
+	)
+	(wire
+		(pts
+			(xy 218.44 175.26) (xy 236.22 175.26)
+		)
+		(stroke
+			(width 0)
+			(type default)
+		)
+		(uuid "53ad0bb6-7a58-444d-92b4-9795e3f15c9b")
 	)
 	(wire
 		(pts
@@ -2899,6 +2837,16 @@
 	)
 	(wire
 		(pts
+			(xy 218.44 187.96) (xy 218.44 190.5)
+		)
+		(stroke
+			(width 0)
+			(type default)
+		)
+		(uuid "6423cae7-69d2-48ac-8f10-e1a4e7639f8e")
+	)
+	(wire
+		(pts
 			(xy 261.62 160.02) (xy 264.16 160.02)
 		)
 		(stroke
@@ -2916,26 +2864,6 @@
 			(type default)
 		)
 		(uuid "6b1727ca-8150-4073-9ca6-2fc02cd9b881")
-	)
-	(wire
-		(pts
-			(xy 236.22 172.72) (xy 226.06 172.72)
-		)
-		(stroke
-			(width 0)
-			(type default)
-		)
-		(uuid "6b729780-92bb-4aa8-879a-e7011a5e5e44")
-	)
-	(wire
-		(pts
-			(xy 217.17 269.24) (xy 217.17 271.78)
-		)
-		(stroke
-			(width 0)
-			(type default)
-		)
-		(uuid "6be74fdc-2716-4a40-a4c4-d9866e901800")
 	)
 	(wire
 		(pts
@@ -2959,26 +2887,6 @@
 	)
 	(wire
 		(pts
-			(xy 199.39 261.62) (xy 199.39 259.08)
-		)
-		(stroke
-			(width 0)
-			(type default)
-		)
-		(uuid "6fd27067-b093-48d2-9e13-9531e564b1fd")
-	)
-	(wire
-		(pts
-			(xy 236.22 265.43) (xy 233.68 265.43)
-		)
-		(stroke
-			(width 0)
-			(type default)
-		)
-		(uuid "73b5fd5d-dc2e-490e-bf93-6577854de613")
-	)
-	(wire
-		(pts
 			(xy 228.6 44.45) (xy 231.14 44.45)
 		)
 		(stroke
@@ -2996,16 +2904,6 @@
 			(type default)
 		)
 		(uuid "7579b268-8505-4155-9f0a-71a9894056ba")
-	)
-	(wire
-		(pts
-			(xy 105.41 260.35) (xy 105.41 265.43)
-		)
-		(stroke
-			(width 0)
-			(type default)
-		)
-		(uuid "7608420e-81a0-4c54-bc70-1c00c771e159")
 	)
 	(wire
 		(pts
@@ -3029,26 +2927,6 @@
 	)
 	(wire
 		(pts
-			(xy 185.42 260.35) (xy 185.42 265.43)
-		)
-		(stroke
-			(width 0)
-			(type default)
-		)
-		(uuid "7bc6cc24-d821-4fd1-b0f1-72d336945662")
-	)
-	(wire
-		(pts
-			(xy 236.22 190.5) (xy 226.06 190.5)
-		)
-		(stroke
-			(width 0)
-			(type default)
-		)
-		(uuid "7fa35a23-119a-4033-9b52-07cf7fbea7a5")
-	)
-	(wire
-		(pts
 			(xy 328.93 44.45) (xy 331.47 44.45)
 		)
 		(stroke
@@ -3056,16 +2934,6 @@
 			(type default)
 		)
 		(uuid "80616dd0-5368-49a6-a34b-76fe0bd12e6b")
-	)
-	(wire
-		(pts
-			(xy 236.22 170.18) (xy 233.68 170.18)
-		)
-		(stroke
-			(width 0)
-			(type default)
-		)
-		(uuid "81605baa-d051-4161-b212-55ff43ffad24")
 	)
 	(wire
 		(pts
@@ -3159,6 +3027,16 @@
 	)
 	(wire
 		(pts
+			(xy 218.44 177.8) (xy 218.44 180.34)
+		)
+		(stroke
+			(width 0)
+			(type default)
+		)
+		(uuid "8bba90e0-bb2b-41b5-9305-4a34ee8ab7ee")
+	)
+	(wire
+		(pts
 			(xy 119.38 175.26) (xy 119.38 177.8)
 		)
 		(stroke
@@ -3176,26 +3054,6 @@
 			(type default)
 		)
 		(uuid "8f26eca2-2157-47b7-ac22-b7bc44ebdd16")
-	)
-	(wire
-		(pts
-			(xy 76.2 265.43) (xy 73.66 265.43)
-		)
-		(stroke
-			(width 0)
-			(type default)
-		)
-		(uuid "90058cf0-e402-46c1-a984-c4be62fa4dc0")
-	)
-	(wire
-		(pts
-			(xy 236.22 182.88) (xy 226.06 182.88)
-		)
-		(stroke
-			(width 0)
-			(type default)
-		)
-		(uuid "92b35645-39af-416e-ab54-6726059637e4")
 	)
 	(wire
 		(pts
@@ -3249,16 +3107,6 @@
 	)
 	(wire
 		(pts
-			(xy 236.22 175.26) (xy 233.68 175.26)
-		)
-		(stroke
-			(width 0)
-			(type default)
-		)
-		(uuid "a1bb4e6c-ee60-4910-be6a-d9cbe0dbefbf")
-	)
-	(wire
-		(pts
 			(xy 335.28 86.36) (xy 335.28 88.9)
 		)
 		(stroke
@@ -3266,16 +3114,6 @@
 			(type default)
 		)
 		(uuid "a2828a65-2708-41fe-b835-8cc8ffb726da")
-	)
-	(wire
-		(pts
-			(xy 137.16 269.24) (xy 137.16 271.78)
-		)
-		(stroke
-			(width 0)
-			(type default)
-		)
-		(uuid "a30b7b5f-fa35-49fd-b04f-4bb5748d42d9")
 	)
 	(wire
 		(pts
@@ -3309,16 +3147,6 @@
 	)
 	(wire
 		(pts
-			(xy 39.37 261.62) (xy 39.37 259.08)
-		)
-		(stroke
-			(width 0)
-			(type default)
-		)
-		(uuid "ab6faab3-6cab-4c6f-ab78-37fb96597132")
-	)
-	(wire
-		(pts
 			(xy 74.93 85.09) (xy 77.47 85.09)
 		)
 		(stroke
@@ -3339,13 +3167,13 @@
 	)
 	(wire
 		(pts
-			(xy 236.22 177.8) (xy 226.06 177.8)
+			(xy 218.44 180.34) (xy 218.44 182.88)
 		)
 		(stroke
 			(width 0)
 			(type default)
 		)
-		(uuid "aeec1836-50bd-41f0-90d0-fcfaaaabf714")
+		(uuid "af6c7034-5903-4ee7-80de-bc9c399ca171")
 	)
 	(wire
 		(pts
@@ -3369,16 +3197,6 @@
 	)
 	(wire
 		(pts
-			(xy 243.84 265.43) (xy 246.38 265.43)
-		)
-		(stroke
-			(width 0)
-			(type default)
-		)
-		(uuid "b46edaae-23a0-4e91-a34c-e7f64a1a337c")
-	)
-	(wire
-		(pts
 			(xy 90.17 41.91) (xy 90.17 44.45)
 		)
 		(stroke
@@ -3396,6 +3214,16 @@
 			(type default)
 		)
 		(uuid "b507c7ba-40ac-42c5-8fef-b454f7d89b91")
+	)
+	(wire
+		(pts
+			(xy 218.44 187.96) (xy 236.22 187.96)
+		)
+		(stroke
+			(width 0)
+			(type default)
+		)
+		(uuid "b50c517c-5afc-47ae-8a50-6647540d8bbc")
 	)
 	(wire
 		(pts
@@ -3426,16 +3254,6 @@
 			(type default)
 		)
 		(uuid "bae803de-bc15-4f64-9fb8-e2ca77d0226e")
-	)
-	(wire
-		(pts
-			(xy 57.15 261.62) (xy 57.15 259.08)
-		)
-		(stroke
-			(width 0)
-			(type default)
-		)
-		(uuid "bc1e8212-7f25-482c-ae15-1d0da4c11f54")
 	)
 	(wire
 		(pts
@@ -3479,33 +3297,13 @@
 	)
 	(wire
 		(pts
-			(xy 163.83 265.43) (xy 166.37 265.43)
+			(xy 218.44 172.72) (xy 218.44 175.26)
 		)
 		(stroke
 			(width 0)
 			(type default)
 		)
-		(uuid "c518b097-f6d1-47e0-96df-d4d485562418")
-	)
-	(wire
-		(pts
-			(xy 199.39 269.24) (xy 199.39 271.78)
-		)
-		(stroke
-			(width 0)
-			(type default)
-		)
-		(uuid "c5d97772-218c-4c2c-b718-04bae0412712")
-	)
-	(wire
-		(pts
-			(xy 119.38 269.24) (xy 119.38 271.78)
-		)
-		(stroke
-			(width 0)
-			(type default)
-		)
-		(uuid "ca7c7940-c7a2-4272-8eea-4502a2aaae18")
+		(uuid "cbf10001-aac1-4656-a423-92e0eac324a6")
 	)
 	(wire
 		(pts
@@ -3569,13 +3367,13 @@
 	)
 	(wire
 		(pts
-			(xy 39.37 269.24) (xy 39.37 271.78)
+			(xy 218.44 190.5) (xy 218.44 203.2)
 		)
 		(stroke
 			(width 0)
 			(type default)
 		)
-		(uuid "dbbd6b1b-8e00-4613-a0f2-d794ebb5efb4")
+		(uuid "dca15c39-ddad-4537-896c-c3db2e296a56")
 	)
 	(wire
 		(pts
@@ -3589,13 +3387,13 @@
 	)
 	(wire
 		(pts
-			(xy 217.17 261.62) (xy 217.17 259.08)
+			(xy 218.44 170.18) (xy 218.44 172.72)
 		)
 		(stroke
 			(width 0)
 			(type default)
 		)
-		(uuid "e75e19e0-47f4-4c27-b789-7e93291a3365")
+		(uuid "e2713751-791b-4784-9514-082121b38725")
 	)
 	(wire
 		(pts
@@ -3619,16 +3417,6 @@
 	)
 	(wire
 		(pts
-			(xy 83.82 265.43) (xy 86.36 265.43)
-		)
-		(stroke
-			(width 0)
-			(type default)
-		)
-		(uuid "ebe960e3-707e-4366-8c4f-7b9c50525d25")
-	)
-	(wire
-		(pts
 			(xy 289.56 78.74) (xy 289.56 76.2)
 		)
 		(stroke
@@ -3636,16 +3424,6 @@
 			(type default)
 		)
 		(uuid "ec05ec95-6f55-4b34-81c9-24e4f6e37371")
-	)
-	(wire
-		(pts
-			(xy 57.15 269.24) (xy 57.15 271.78)
-		)
-		(stroke
-			(width 0)
-			(type default)
-		)
-		(uuid "ec9fd317-f6f4-4c22-9f48-ee72dccec999")
 	)
 	(wire
 		(pts
@@ -3689,16 +3467,6 @@
 	)
 	(wire
 		(pts
-			(xy 119.38 261.62) (xy 119.38 259.08)
-		)
-		(stroke
-			(width 0)
-			(type default)
-		)
-		(uuid "fb143b95-4083-46e3-838b-f61f869db122")
-	)
-	(wire
-		(pts
 			(xy 180.34 45.72) (xy 187.96 45.72)
 		)
 		(stroke
@@ -3726,6 +3494,16 @@
 			(type default)
 		)
 		(uuid "fdcaf3a0-c8c3-4f0c-a9d4-7e995a3a6230")
+	)
+	(wire
+		(pts
+			(xy 218.44 172.72) (xy 236.22 172.72)
+		)
+		(stroke
+			(width 0)
+			(type default)
+		)
+		(uuid "ffdf3430-b628-4e8f-a965-a7197a033a6a")
 	)
 	(label "AIN3_GND"
 		(at 100.33 177.8 270)
@@ -3787,16 +3565,6 @@
 		)
 		(uuid "0ac60887-65d2-44bd-9de5-c491e4300d13")
 	)
-	(label "SPARE7_ADC"
-		(at 233.68 180.34 180)
-		(effects
-			(font
-				(size 1.27 1.27)
-			)
-			(justify right bottom)
-		)
-		(uuid "0b59a6fc-1bbb-4b82-83ec-a000ca3b988b")
-	)
 	(label "AIN3_GND"
 		(at 119.38 165.1 90)
 		(effects
@@ -3827,16 +3595,6 @@
 		)
 		(uuid "2785dee2-0ad2-4d5f-ab84-05adb52c9ce7")
 	)
-	(label "SPARE7"
-		(at 199.39 259.08 90)
-		(effects
-			(font
-				(size 1.27 1.27)
-			)
-			(justify left bottom)
-		)
-		(uuid "28e1c70d-a188-47c2-9570-4427ed865a2f")
-	)
 	(label "FUEL_P"
 		(at 31.75 203.2 90)
 		(effects
@@ -3846,16 +3604,6 @@
 			(justify left bottom)
 		)
 		(uuid "32432bef-1320-4a15-953b-5387f71ad76a")
-	)
-	(label "SPARE7_ADC"
-		(at 246.38 265.43 0)
-		(effects
-			(font
-				(size 1.27 1.27)
-			)
-			(justify left bottom)
-		)
-		(uuid "327e8a9d-858b-4fb4-9b03-d8c723adaf9f")
 	)
 	(label "AIN0_GND"
 		(at 105.41 44.45 270)
@@ -3867,16 +3615,6 @@
 		)
 		(uuid "34a157bd-7de3-4aea-9cf1-5651c1737612")
 	)
-	(label "SPARE5"
-		(at 73.66 265.43 180)
-		(effects
-			(font
-				(size 1.27 1.27)
-			)
-			(justify right bottom)
-		)
-		(uuid "3bb856ca-2894-4aef-abff-b3eef74ea42e")
-	)
 	(label "FUEL_N_ADC"
 		(at 233.68 167.64 180)
 		(effects
@@ -3886,16 +3624,6 @@
 			(justify right bottom)
 		)
 		(uuid "3bc3100a-a196-4c0b-9444-95e7e8cb2b94")
-	)
-	(label "5V_SENS"
-		(at 137.16 259.08 90)
-		(effects
-			(font
-				(size 1.27 1.27)
-			)
-			(justify left bottom)
-		)
-		(uuid "45ab5d80-d60d-42ee-9884-e7610dfb8f93")
 	)
 	(label "SENS_R1"
 		(at 231.14 44.45 0)
@@ -3926,16 +3654,6 @@
 			(justify right bottom)
 		)
 		(uuid "5191375e-6bf4-434d-824e-25397e9d0f68")
-	)
-	(label "SPARE6"
-		(at 137.16 271.78 270)
-		(effects
-			(font
-				(size 1.27 1.27)
-			)
-			(justify right bottom)
-		)
-		(uuid "54abf48d-b944-482f-8346-12b102768940")
 	)
 	(label "FUEL_GND"
 		(at 187.96 50.8 0)
@@ -3986,16 +3704,6 @@
 			(justify left bottom)
 		)
 		(uuid "5fb633a0-049a-4d24-8a1d-133682b9e182")
-	)
-	(label "SPARE5"
-		(at 57.15 271.78 270)
-		(effects
-			(font
-				(size 1.27 1.27)
-			)
-			(justify right bottom)
-		)
-		(uuid "619b16ad-93a2-4ee9-b825-acd9af30ef65")
 	)
 	(label "SENS_R1_ADC"
 		(at 233.68 154.94 180)
@@ -4077,16 +3785,6 @@
 		)
 		(uuid "76799968-c769-455a-9888-eeff6bf0cb8d")
 	)
-	(label "SPARE5"
-		(at 39.37 259.08 90)
-		(effects
-			(font
-				(size 1.27 1.27)
-			)
-			(justify left bottom)
-		)
-		(uuid "7752813a-a36c-4e56-acac-ee9ad564eb55")
-	)
 	(label "5V_SENS"
 		(at 68.58 171.45 180)
 		(effects
@@ -4107,16 +3805,6 @@
 		)
 		(uuid "7b536570-ea74-4e38-a037-11dd407b371d")
 	)
-	(label "SPARE7"
-		(at 217.17 271.78 270)
-		(effects
-			(font
-				(size 1.27 1.27)
-			)
-			(justify right bottom)
-		)
-		(uuid "7d0f587b-e4e8-48c0-9de7-59d51552732f")
-	)
 	(label "5V_SENS"
 		(at 48.26 123.19 90)
 		(effects
@@ -4126,26 +3814,6 @@
 			(justify left bottom)
 		)
 		(uuid "82abb2fd-51a3-42f3-88a8-6d578c89b8f2")
-	)
-	(label "SPARE5_ADC"
-		(at 86.36 265.43 0)
-		(effects
-			(font
-				(size 1.27 1.27)
-			)
-			(justify left bottom)
-		)
-		(uuid "8bc47635-5ae8-4795-973b-4cf0c6ecf600")
-	)
-	(label "SPARE7"
-		(at 233.68 265.43 180)
-		(effects
-			(font
-				(size 1.27 1.27)
-			)
-			(justify right bottom)
-		)
-		(uuid "93abbe92-f38b-47ce-91c0-967ac8d32ebc")
 	)
 	(label "AIN2_GND"
 		(at 233.68 157.48 180)
@@ -4187,26 +3855,6 @@
 		)
 		(uuid "abcc6641-4282-4614-8996-c6db299671fa")
 	)
-	(label "SPARE5"
-		(at 25.4 265.43 270)
-		(effects
-			(font
-				(size 1.27 1.27)
-			)
-			(justify right bottom)
-		)
-		(uuid "b0c64a26-39cd-473f-b414-3f137d823a38")
-	)
-	(label "SPARE6_ADC"
-		(at 233.68 175.26 180)
-		(effects
-			(font
-				(size 1.27 1.27)
-			)
-			(justify right bottom)
-		)
-		(uuid "b8aa4440-295d-4c41-97ee-612a84fabfc2")
-	)
 	(label "V12_SENSE"
 		(at 105.41 31.75 90)
 		(effects
@@ -4216,26 +3864,6 @@
 			(justify left bottom)
 		)
 		(uuid "b8ae3c48-c973-4ec8-9869-738cd17e77e0")
-	)
-	(label "SPARE6"
-		(at 105.41 265.43 270)
-		(effects
-			(font
-				(size 1.27 1.27)
-			)
-			(justify right bottom)
-		)
-		(uuid "bd2f3329-6e61-4705-8797-3279c61b7c46")
-	)
-	(label "SPARE6"
-		(at 153.67 265.43 180)
-		(effects
-			(font
-				(size 1.27 1.27)
-			)
-			(justify right bottom)
-		)
-		(uuid "beac47f7-f44e-4970-86c3-af29c29186ac")
 	)
 	(label "5V_SENS"
 		(at 144.78 40.64 180)
@@ -4327,16 +3955,6 @@
 		)
 		(uuid "cf61b5aa-1e5e-4da2-9f59-77777bb48d47")
 	)
-	(label "5V_SENS"
-		(at 57.15 259.08 90)
-		(effects
-			(font
-				(size 1.27 1.27)
-			)
-			(justify left bottom)
-		)
-		(uuid "d029aab2-433e-4a87-a2ef-aae130303040")
-	)
 	(label "5VS_ADC"
 		(at 100.33 165.1 90)
 		(effects
@@ -4346,16 +3964,6 @@
 			(justify left bottom)
 		)
 		(uuid "d1de975e-a96a-4189-bca8-0034879e3ac2")
-	)
-	(label "SPARE5_ADC"
-		(at 233.68 170.18 180)
-		(effects
-			(font
-				(size 1.27 1.27)
-			)
-			(justify right bottom)
-		)
-		(uuid "d3193d7e-ec92-4773-8a44-37b681b3c78f")
 	)
 	(label "U8_REFCAP"
 		(at 264.16 177.8 0)
@@ -4406,46 +4014,6 @@
 			(justify left bottom)
 		)
 		(uuid "df3846d0-fea5-499d-8fd0-ab278d24f93d")
-	)
-	(label "SPARE6_ADC"
-		(at 166.37 265.43 0)
-		(effects
-			(font
-				(size 1.27 1.27)
-			)
-			(justify left bottom)
-		)
-		(uuid "df71a967-9e53-4e68-a0f3-a9bb5a0574fa")
-	)
-	(label "5V_SENS"
-		(at 217.17 259.08 90)
-		(effects
-			(font
-				(size 1.27 1.27)
-			)
-			(justify left bottom)
-		)
-		(uuid "df7c642e-cdf6-45a9-b710-a223135e38fc")
-	)
-	(label "SPARE6"
-		(at 119.38 259.08 90)
-		(effects
-			(font
-				(size 1.27 1.27)
-			)
-			(justify left bottom)
-		)
-		(uuid "e35899a6-97cf-40ab-8480-289b544f0541")
-	)
-	(label "SPARE7"
-		(at 185.42 265.43 270)
-		(effects
-			(font
-				(size 1.27 1.27)
-			)
-			(justify right bottom)
-		)
-		(uuid "eaceede6-9891-42c7-bce1-dd0d84c4dfbb")
 	)
 	(label "SENS_R1"
 		(at 48.26 135.89 270)
@@ -4619,84 +4187,6 @@
 	)
 	(symbol
 		(lib_id "power:GND")
-		(at 226.06 190.5 270)
-		(unit 1)
-		(body_style 1)
-		(exclude_from_sim no)
-		(in_bom yes)
-		(on_board yes)
-		(in_pos_files yes)
-		(dnp no)
-		(uuid "02c2398d-93c7-42bf-a557-aed039b82a5b")
-		(property "Reference" "#PWR1020"
-			(at 228.6 189.23 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify left)
-			)
-		)
-		(property "Value" "GND"
-			(at 221.488 190.5 0)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Footprint" ""
-			(at 226.06 190.5 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Datasheet" ""
-			(at 226.06 190.5 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Description" ""
-			(at 226.06 190.5 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(pin "1"
-			(uuid "a75fdd07-7eeb-4c63-9714-ebaa7f89403b")
-		)
-		(instances
-			(project "canary-hat"
-				(path "/e63e39d7-6ac0-4ffd-8aa3-1841a4541b55/421b2317-5779-468f-96b0-ffd0e1a2d866"
-					(reference "#PWR1020")
-					(unit 1)
-				)
-			)
-		)
-	)
-	(symbol
-		(lib_id "power:GND")
 		(at 350.52 88.9 0)
 		(unit 1)
 		(body_style 1)
@@ -4768,84 +4258,6 @@
 			(project "canary-hat"
 				(path "/e63e39d7-6ac0-4ffd-8aa3-1841a4541b55/421b2317-5779-468f-96b0-ffd0e1a2d866"
 					(reference "#PWR1036")
-					(unit 1)
-				)
-			)
-		)
-	)
-	(symbol
-		(lib_id "power:GND")
-		(at 199.39 271.78 0)
-		(unit 1)
-		(body_style 1)
-		(exclude_from_sim no)
-		(in_bom yes)
-		(on_board yes)
-		(in_pos_files yes)
-		(dnp no)
-		(uuid "0597899a-933a-4c89-ada2-45e8a268e8cf")
-		(property "Reference" "#PWR1054"
-			(at 201.93 270.51 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify left)
-			)
-		)
-		(property "Value" "GND"
-			(at 201.93 274.32 0)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Footprint" ""
-			(at 199.39 271.78 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Datasheet" ""
-			(at 199.39 271.78 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Description" ""
-			(at 199.39 271.78 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(pin "1"
-			(uuid "4a889a04-b042-4f34-b451-d3104cf5f01c")
-		)
-		(instances
-			(project "canary-hat"
-				(path "/e63e39d7-6ac0-4ffd-8aa3-1841a4541b55/421b2317-5779-468f-96b0-ffd0e1a2d866"
-					(reference "#PWR1054")
 					(unit 1)
 				)
 			)
@@ -5512,507 +4924,6 @@
 		)
 	)
 	(symbol
-		(lib_id "Device:R")
-		(at 57.15 265.43 0)
-		(unit 1)
-		(body_style 1)
-		(exclude_from_sim no)
-		(in_bom yes)
-		(on_board yes)
-		(in_pos_files yes)
-		(dnp yes)
-		(uuid "29ff2233-7b22-46da-bc2c-c9453f195a5f")
-		(property "Reference" "R35"
-			(at 59.69 264.16 0)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify left)
-			)
-		)
-		(property "Value" "TBD"
-			(at 59.69 266.7 0)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify left)
-			)
-		)
-		(property "Footprint" "Resistor_SMD:R_0603_1608Metric"
-			(at 57.15 265.43 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Datasheet" ""
-			(at 57.15 265.43 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Description" "Resistor"
-			(at 57.15 265.43 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Quote" "Rev 2.1: not yet quoted."
-			(at 57.15 265.43 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify left)
-			)
-		)
-		(property "Note" "DNF pad. DNF configuration pad."
-			(at 57.15 265.43 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify left)
-			)
-		)
-		(pin "1"
-			(uuid "67359c1c-814e-44ed-be49-6e65b9121b34")
-		)
-		(pin "2"
-			(uuid "51b4f2e2-6cd1-4e3a-91ea-ae34e412f639")
-		)
-		(instances
-			(project "canary-hat"
-				(path "/e63e39d7-6ac0-4ffd-8aa3-1841a4541b55/421b2317-5779-468f-96b0-ffd0e1a2d866"
-					(reference "R35")
-					(unit 1)
-				)
-			)
-		)
-	)
-	(symbol
-		(lib_id "Device:R")
-		(at 80.01 265.43 90)
-		(unit 1)
-		(body_style 1)
-		(exclude_from_sim no)
-		(in_bom yes)
-		(on_board yes)
-		(in_pos_files yes)
-		(dnp no)
-		(uuid "2a797d83-a0d8-4a85-b697-c843cf7d28e8")
-		(property "Reference" "R36"
-			(at 82.55 264.16 0)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify left)
-			)
-		)
-		(property "Value" "0"
-			(at 82.55 266.7 0)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify left)
-			)
-		)
-		(property "Footprint" "Resistor_SMD:R_0603_1608Metric"
-			(at 80.01 265.43 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Datasheet" ""
-			(at 80.01 265.43 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Description" "Resistor"
-			(at 80.01 265.43 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Manufacturer" "Yageo"
-			(at 80.01 265.43 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify left)
-			)
-		)
-		(property "MPN" "RC0603JR-070RL"
-			(at 80.01 265.43 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify left)
-			)
-		)
-		(property "Power" "0.1W"
-			(at 80.01 265.43 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify left)
-			)
-		)
-		(property "Tolerance" "jumper"
-			(at 80.01 265.43 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify left)
-			)
-		)
-		(property "Quote" "Rev 2.1: not yet quoted."
-			(at 80.01 265.43 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify left)
-			)
-		)
-		(property "Note" "Series pad, 0 ohm fitted."
-			(at 80.01 265.43 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify left)
-			)
-		)
-		(pin "1"
-			(uuid "4d965851-fe05-4241-bcf6-0efb2bb17ec1")
-		)
-		(pin "2"
-			(uuid "3c2ba490-9e9f-40cd-89e5-39df6ff9af04")
-		)
-		(instances
-			(project "canary-hat"
-				(path "/e63e39d7-6ac0-4ffd-8aa3-1841a4541b55/421b2317-5779-468f-96b0-ffd0e1a2d866"
-					(reference "R36")
-					(unit 1)
-				)
-			)
-		)
-	)
-	(symbol
-		(lib_id "Device:R")
-		(at 119.38 265.43 0)
-		(unit 1)
-		(body_style 1)
-		(exclude_from_sim no)
-		(in_bom yes)
-		(on_board yes)
-		(in_pos_files yes)
-		(dnp no)
-		(uuid "2e5b1c4b-3abf-4c1e-8ece-9c0df1977868")
-		(property "Reference" "R37"
-			(at 121.92 264.16 0)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify left)
-			)
-		)
-		(property "Value" "10k"
-			(at 121.92 266.7 0)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify left)
-			)
-		)
-		(property "Footprint" "Resistor_SMD:R_0603_1608Metric"
-			(at 119.38 265.43 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Datasheet" ""
-			(at 119.38 265.43 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Description" "Resistor"
-			(at 119.38 265.43 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Manufacturer" "Yageo"
-			(at 119.38 265.43 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify left)
-			)
-		)
-		(property "MPN" "RC0603FR-0710KL"
-			(at 119.38 265.43 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify left)
-			)
-		)
-		(property "Power" "0.1W"
-			(at 119.38 265.43 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify left)
-			)
-		)
-		(property "Tolerance" "1%"
-			(at 119.38 265.43 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify left)
-			)
-		)
-		(property "Quote" "Rev 2.1: not yet quoted."
-			(at 119.38 265.43 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify left)
-			)
-		)
-		(property "Note" "Spare-channel default: pulled to GND so the unused input reads 0, not a floating bias voltage."
-			(at 119.38 265.43 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify left)
-			)
-		)
-		(pin "1"
-			(uuid "89a57083-4682-4041-8a93-a1492e543d47")
-		)
-		(pin "2"
-			(uuid "736a678d-813d-4a0c-9b1f-199a032a8d65")
-		)
-		(instances
-			(project "canary-hat"
-				(path "/e63e39d7-6ac0-4ffd-8aa3-1841a4541b55/421b2317-5779-468f-96b0-ffd0e1a2d866"
-					(reference "R37")
-					(unit 1)
-				)
-			)
-		)
-	)
-	(symbol
-		(lib_id "Connector:TestPoint")
-		(at 185.42 260.35 0)
-		(unit 1)
-		(body_style 1)
-		(exclude_from_sim no)
-		(in_bom yes)
-		(on_board yes)
-		(in_pos_files yes)
-		(dnp no)
-		(uuid "2f0cb585-7325-4666-bbd8-c30b2c22db2c")
-		(property "Reference" "TP3"
-			(at 187.96 259.08 0)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify left)
-			)
-		)
-		(property "Value" "CH7"
-			(at 187.96 261.62 0)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify left)
-			)
-		)
-		(property "Footprint" "TestPoint:TestPoint_Pad_D1.5mm"
-			(at 185.42 260.35 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Datasheet" ""
-			(at 185.42 260.35 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Description" "test point"
-			(at 185.42 260.35 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Note" "Spare ADC channel CH7 (U8 AIN_7P)."
-			(at 185.42 260.35 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify left)
-			)
-		)
-		(pin "1"
-			(uuid "af537618-a84a-49de-89ea-16968d00b066")
-		)
-		(instances
-			(project "canary-hat"
-				(path "/e63e39d7-6ac0-4ffd-8aa3-1841a4541b55/421b2317-5779-468f-96b0-ffd0e1a2d866"
-					(reference "TP3")
-					(unit 1)
-				)
-			)
-		)
-	)
-	(symbol
 		(lib_id "Device:C")
 		(at 96.52 85.09 0)
 		(unit 1)
@@ -6661,6 +5572,84 @@
 		)
 	)
 	(symbol
+		(lib_id "power:GND")
+		(at 218.44 203.2 0)
+		(unit 1)
+		(body_style 1)
+		(exclude_from_sim no)
+		(in_bom yes)
+		(on_board yes)
+		(in_pos_files yes)
+		(dnp no)
+		(uuid "465f7262-c2b6-4400-bf47-c2fc9a92cc0d")
+		(property "Reference" "#PWR01043"
+			(at 217.17 200.66 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify left)
+			)
+		)
+		(property "Value" "GND"
+			(at 218.44 208.534 0)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Footprint" ""
+			(at 218.44 203.2 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Datasheet" ""
+			(at 218.44 203.2 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Description" ""
+			(at 218.44 203.2 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(pin "1"
+			(uuid "8ea2dc8e-ce29-4d98-9c76-b9b6926a7a0c")
+		)
+		(instances
+			(project "canary-hat"
+				(path "/e63e39d7-6ac0-4ffd-8aa3-1841a4541b55/421b2317-5779-468f-96b0-ffd0e1a2d866"
+					(reference "#PWR01043")
+					(unit 1)
+				)
+			)
+		)
+	)
+	(symbol
 		(lib_id "power:+5V")
 		(at 350.52 76.2 0)
 		(unit 1)
@@ -6840,7 +5829,7 @@
 				(justify left)
 			)
 		)
-		(property "Note" "Rev 2.1 ADC (CANary-HAT-Rev2.1.md 13.5.3 items 5/5a), SPI0 CE1. A-suffix part (SBAS680). Internal 4.096 V reference (REFSEL low). Spare channels CH5-CH7 are pulled to GND and the driver must refuse unmapped channels (open item 33)."
+		(property "Note" "Rev 2.1 ADC (CANary-HAT-Rev2.1.md 13.5.3 items 5/5a), SPI0 CE1. A-suffix part (SBAS680). Internal 4.096 V reference (REFSEL low). Spare channels CH5-CH7 are tied straight to GND at U8 (their pads and test points were removed at layout) and the driver must refuse unmapped channels (open item 33)."
 			(at 248.92 167.64 0)
 			(hide yes)
 			(show_name no)
@@ -8131,159 +7120,6 @@
 		)
 	)
 	(symbol
-		(lib_id "Device:R")
-		(at 240.03 265.43 90)
-		(unit 1)
-		(body_style 1)
-		(exclude_from_sim no)
-		(in_bom yes)
-		(on_board yes)
-		(in_pos_files yes)
-		(dnp no)
-		(uuid "6a2c3084-4bc3-4905-ba43-56c1d04c7399")
-		(property "Reference" "R42"
-			(at 242.57 264.16 0)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify left)
-			)
-		)
-		(property "Value" "0"
-			(at 242.57 266.7 0)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify left)
-			)
-		)
-		(property "Footprint" "Resistor_SMD:R_0603_1608Metric"
-			(at 240.03 265.43 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Datasheet" ""
-			(at 240.03 265.43 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Description" "Resistor"
-			(at 240.03 265.43 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Manufacturer" "Yageo"
-			(at 240.03 265.43 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify left)
-			)
-		)
-		(property "MPN" "RC0603JR-070RL"
-			(at 240.03 265.43 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify left)
-			)
-		)
-		(property "Power" "0.1W"
-			(at 240.03 265.43 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify left)
-			)
-		)
-		(property "Tolerance" "jumper"
-			(at 240.03 265.43 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify left)
-			)
-		)
-		(property "Quote" "Rev 2.1: not yet quoted."
-			(at 240.03 265.43 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify left)
-			)
-		)
-		(property "Note" "Series pad, 0 ohm fitted."
-			(at 240.03 265.43 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify left)
-			)
-		)
-		(pin "1"
-			(uuid "f316683c-62cd-4d82-b32a-1dac31cedbc5")
-		)
-		(pin "2"
-			(uuid "7408ea8b-dd82-4547-8732-f7282d239adf")
-		)
-		(instances
-			(project "canary-hat"
-				(path "/e63e39d7-6ac0-4ffd-8aa3-1841a4541b55/421b2317-5779-468f-96b0-ffd0e1a2d866"
-					(reference "R42")
-					(unit 1)
-				)
-			)
-		)
-	)
-	(symbol
 		(lib_id "Device:C")
 		(at 100.33 214.63 0)
 		(unit 1)
@@ -9214,249 +8050,6 @@
 			(project "canary-hat"
 				(path "/e63e39d7-6ac0-4ffd-8aa3-1841a4541b55/421b2317-5779-468f-96b0-ffd0e1a2d866"
 					(reference "R33")
-					(unit 1)
-				)
-			)
-		)
-	)
-	(symbol
-		(lib_id "Connector:TestPoint")
-		(at 105.41 260.35 0)
-		(unit 1)
-		(body_style 1)
-		(exclude_from_sim no)
-		(in_bom yes)
-		(on_board yes)
-		(in_pos_files yes)
-		(dnp no)
-		(uuid "7b817172-ed2b-4028-b05b-93df132c6046")
-		(property "Reference" "TP2"
-			(at 107.95 259.08 0)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify left)
-			)
-		)
-		(property "Value" "CH6"
-			(at 107.95 261.62 0)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify left)
-			)
-		)
-		(property "Footprint" "TestPoint:TestPoint_Pad_D1.5mm"
-			(at 105.41 260.35 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Datasheet" ""
-			(at 105.41 260.35 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Description" "test point"
-			(at 105.41 260.35 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Note" "Spare ADC channel CH6 (U8 AIN_6P)."
-			(at 105.41 260.35 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify left)
-			)
-		)
-		(pin "1"
-			(uuid "b8f3b46f-4be3-419a-96db-8aa24e0bfdc4")
-		)
-		(instances
-			(project "canary-hat"
-				(path "/e63e39d7-6ac0-4ffd-8aa3-1841a4541b55/421b2317-5779-468f-96b0-ffd0e1a2d866"
-					(reference "TP2")
-					(unit 1)
-				)
-			)
-		)
-	)
-	(symbol
-		(lib_id "Device:R")
-		(at 39.37 265.43 0)
-		(unit 1)
-		(body_style 1)
-		(exclude_from_sim no)
-		(in_bom yes)
-		(on_board yes)
-		(in_pos_files yes)
-		(dnp no)
-		(uuid "7cee7c58-918f-4d6f-8b1c-e8746fcd67a4")
-		(property "Reference" "R34"
-			(at 41.91 264.16 0)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify left)
-			)
-		)
-		(property "Value" "10k"
-			(at 41.91 266.7 0)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify left)
-			)
-		)
-		(property "Footprint" "Resistor_SMD:R_0603_1608Metric"
-			(at 39.37 265.43 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Datasheet" ""
-			(at 39.37 265.43 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Description" "Resistor"
-			(at 39.37 265.43 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Manufacturer" "Yageo"
-			(at 39.37 265.43 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify left)
-			)
-		)
-		(property "MPN" "RC0603FR-0710KL"
-			(at 39.37 265.43 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify left)
-			)
-		)
-		(property "Power" "0.1W"
-			(at 39.37 265.43 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify left)
-			)
-		)
-		(property "Tolerance" "1%"
-			(at 39.37 265.43 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify left)
-			)
-		)
-		(property "Quote" "Rev 2.1: not yet quoted."
-			(at 39.37 265.43 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify left)
-			)
-		)
-		(property "Note" "Spare-channel default: pulled to GND so the unused input reads 0, not a floating bias voltage."
-			(at 39.37 265.43 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify left)
-			)
-		)
-		(pin "1"
-			(uuid "c4cdb956-bf32-4ab2-b986-6d2777bf6e20")
-		)
-		(pin "2"
-			(uuid "90f743c8-b43a-4f5b-9c7e-3a1ac87d1459")
-		)
-		(instances
-			(project "canary-hat"
-				(path "/e63e39d7-6ac0-4ffd-8aa3-1841a4541b55/421b2317-5779-468f-96b0-ffd0e1a2d866"
-					(reference "R34")
 					(unit 1)
 				)
 			)
@@ -10645,111 +9238,6 @@
 		)
 	)
 	(symbol
-		(lib_id "Device:R")
-		(at 217.17 265.43 0)
-		(unit 1)
-		(body_style 1)
-		(exclude_from_sim no)
-		(in_bom yes)
-		(on_board yes)
-		(in_pos_files yes)
-		(dnp yes)
-		(uuid "902c9b42-55c9-4052-879b-e9187e45ce53")
-		(property "Reference" "R41"
-			(at 219.71 264.16 0)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify left)
-			)
-		)
-		(property "Value" "TBD"
-			(at 219.71 266.7 0)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify left)
-			)
-		)
-		(property "Footprint" "Resistor_SMD:R_0603_1608Metric"
-			(at 217.17 265.43 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Datasheet" ""
-			(at 217.17 265.43 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Description" "Resistor"
-			(at 217.17 265.43 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Quote" "Rev 2.1: not yet quoted."
-			(at 217.17 265.43 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify left)
-			)
-		)
-		(property "Note" "DNF pad. DNF configuration pad."
-			(at 217.17 265.43 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify left)
-			)
-		)
-		(pin "1"
-			(uuid "fa39b2ac-c44c-4e50-ad34-52024c3dc3ee")
-		)
-		(pin "2"
-			(uuid "8d537c9e-e835-49a5-8251-6116cf9a9287")
-		)
-		(instances
-			(project "canary-hat"
-				(path "/e63e39d7-6ac0-4ffd-8aa3-1841a4541b55/421b2317-5779-468f-96b0-ffd0e1a2d866"
-					(reference "R41")
-					(unit 1)
-				)
-			)
-		)
-	)
-	(symbol
 		(lib_id "power:GND")
 		(at 264.16 165.1 90)
 		(unit 1)
@@ -10822,84 +9310,6 @@
 			(project "canary-hat"
 				(path "/e63e39d7-6ac0-4ffd-8aa3-1841a4541b55/421b2317-5779-468f-96b0-ffd0e1a2d866"
 					(reference "#PWR1016")
-					(unit 1)
-				)
-			)
-		)
-	)
-	(symbol
-		(lib_id "power:GND")
-		(at 226.06 187.96 270)
-		(unit 1)
-		(body_style 1)
-		(exclude_from_sim no)
-		(in_bom yes)
-		(on_board yes)
-		(in_pos_files yes)
-		(dnp no)
-		(uuid "98ca2d7b-deb8-42e7-9fec-176959420ab3")
-		(property "Reference" "#PWR1019"
-			(at 228.6 186.69 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify left)
-			)
-		)
-		(property "Value" "GND"
-			(at 218.186 187.706 0)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Footprint" ""
-			(at 226.06 187.96 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Datasheet" ""
-			(at 226.06 187.96 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Description" ""
-			(at 226.06 187.96 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(pin "1"
-			(uuid "ce61da6a-405b-420c-9ddd-1296e89c6682")
-		)
-		(instances
-			(project "canary-hat"
-				(path "/e63e39d7-6ac0-4ffd-8aa3-1841a4541b55/421b2317-5779-468f-96b0-ffd0e1a2d866"
-					(reference "#PWR1019")
 					(unit 1)
 				)
 			)
@@ -11056,84 +9466,6 @@
 			(project "canary-hat"
 				(path "/e63e39d7-6ac0-4ffd-8aa3-1841a4541b55/421b2317-5779-468f-96b0-ffd0e1a2d866"
 					(reference "#PWR1033")
-					(unit 1)
-				)
-			)
-		)
-	)
-	(symbol
-		(lib_id "power:GND")
-		(at 226.06 172.72 270)
-		(unit 1)
-		(body_style 1)
-		(exclude_from_sim no)
-		(in_bom yes)
-		(on_board yes)
-		(in_pos_files yes)
-		(dnp no)
-		(uuid "9f143616-0022-4988-a104-4180c1b5925d")
-		(property "Reference" "#PWR1023"
-			(at 228.6 171.45 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify left)
-			)
-		)
-		(property "Value" "GND"
-			(at 228.6 175.26 0)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Footprint" ""
-			(at 226.06 172.72 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Datasheet" ""
-			(at 226.06 172.72 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Description" ""
-			(at 226.06 172.72 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(pin "1"
-			(uuid "88e86970-b96b-481a-9a74-421787021418")
-		)
-		(instances
-			(project "canary-hat"
-				(path "/e63e39d7-6ac0-4ffd-8aa3-1841a4541b55/421b2317-5779-468f-96b0-ffd0e1a2d866"
-					(reference "#PWR1023")
 					(unit 1)
 				)
 			)
@@ -11530,159 +9862,6 @@
 		)
 	)
 	(symbol
-		(lib_id "Device:R")
-		(at 160.02 265.43 90)
-		(unit 1)
-		(body_style 1)
-		(exclude_from_sim no)
-		(in_bom yes)
-		(on_board yes)
-		(in_pos_files yes)
-		(dnp no)
-		(uuid "aa5b97b6-6c97-4741-a597-414c78d50a58")
-		(property "Reference" "R39"
-			(at 162.56 264.16 0)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify left)
-			)
-		)
-		(property "Value" "0"
-			(at 162.56 266.7 0)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify left)
-			)
-		)
-		(property "Footprint" "Resistor_SMD:R_0603_1608Metric"
-			(at 160.02 265.43 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Datasheet" ""
-			(at 160.02 265.43 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Description" "Resistor"
-			(at 160.02 265.43 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Manufacturer" "Yageo"
-			(at 160.02 265.43 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify left)
-			)
-		)
-		(property "MPN" "RC0603JR-070RL"
-			(at 160.02 265.43 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify left)
-			)
-		)
-		(property "Power" "0.1W"
-			(at 160.02 265.43 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify left)
-			)
-		)
-		(property "Tolerance" "jumper"
-			(at 160.02 265.43 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify left)
-			)
-		)
-		(property "Quote" "Rev 2.1: not yet quoted."
-			(at 160.02 265.43 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify left)
-			)
-		)
-		(property "Note" "Series pad, 0 ohm fitted."
-			(at 160.02 265.43 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify left)
-			)
-		)
-		(pin "1"
-			(uuid "a8ca8292-d59c-4470-902e-8be13dad94f1")
-		)
-		(pin "2"
-			(uuid "170e43a6-53b0-4b66-a2d6-e592b695805a")
-		)
-		(instances
-			(project "canary-hat"
-				(path "/e63e39d7-6ac0-4ffd-8aa3-1841a4541b55/421b2317-5779-468f-96b0-ffd0e1a2d866"
-					(reference "R39")
-					(unit 1)
-				)
-			)
-		)
-	)
-	(symbol
 		(lib_id "Device:D_TVS_Dual_AAC")
 		(at 219.71 44.45 0)
 		(unit 1)
@@ -11875,84 +10054,6 @@
 			(project "canary-hat"
 				(path "/e63e39d7-6ac0-4ffd-8aa3-1841a4541b55/421b2317-5779-468f-96b0-ffd0e1a2d866"
 					(reference "#PWR1028")
-					(unit 1)
-				)
-			)
-		)
-	)
-	(symbol
-		(lib_id "power:GND")
-		(at 39.37 271.78 0)
-		(unit 1)
-		(body_style 1)
-		(exclude_from_sim no)
-		(in_bom yes)
-		(on_board yes)
-		(in_pos_files yes)
-		(dnp no)
-		(uuid "bb96e40e-bd34-4725-b5a3-69e1a6677bfc")
-		(property "Reference" "#PWR1052"
-			(at 41.91 270.51 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify left)
-			)
-		)
-		(property "Value" "GND"
-			(at 41.91 274.32 0)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Footprint" ""
-			(at 39.37 271.78 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Datasheet" ""
-			(at 39.37 271.78 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Description" ""
-			(at 39.37 271.78 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(pin "1"
-			(uuid "20d16508-6c5d-4e79-ad55-dd25eb2b50d5")
-		)
-		(instances
-			(project "canary-hat"
-				(path "/e63e39d7-6ac0-4ffd-8aa3-1841a4541b55/421b2317-5779-468f-96b0-ffd0e1a2d866"
-					(reference "#PWR1052")
 					(unit 1)
 				)
 			)
@@ -12628,84 +10729,6 @@
 		)
 	)
 	(symbol
-		(lib_id "power:GND")
-		(at 226.06 177.8 270)
-		(unit 1)
-		(body_style 1)
-		(exclude_from_sim no)
-		(in_bom yes)
-		(on_board yes)
-		(in_pos_files yes)
-		(dnp no)
-		(uuid "dd5b15bf-1a28-4702-88bc-a9d0d7e2e041")
-		(property "Reference" "#PWR1021"
-			(at 228.6 176.53 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify left)
-			)
-		)
-		(property "Value" "GND"
-			(at 228.6 180.34 0)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Footprint" ""
-			(at 226.06 177.8 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Datasheet" ""
-			(at 226.06 177.8 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Description" ""
-			(at 226.06 177.8 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(pin "1"
-			(uuid "96720658-f097-42e7-a55b-39dc9fad39f6")
-		)
-		(instances
-			(project "canary-hat"
-				(path "/e63e39d7-6ac0-4ffd-8aa3-1841a4541b55/421b2317-5779-468f-96b0-ffd0e1a2d866"
-					(reference "#PWR1021")
-					(unit 1)
-				)
-			)
-		)
-	)
-	(symbol
 		(lib_id "Device:R")
 		(at 379.73 82.55 0)
 		(unit 1)
@@ -12853,84 +10876,6 @@
 			(project "canary-hat"
 				(path "/e63e39d7-6ac0-4ffd-8aa3-1841a4541b55/421b2317-5779-468f-96b0-ffd0e1a2d866"
 					(reference "R18")
-					(unit 1)
-				)
-			)
-		)
-	)
-	(symbol
-		(lib_id "power:GND")
-		(at 226.06 182.88 270)
-		(unit 1)
-		(body_style 1)
-		(exclude_from_sim no)
-		(in_bom yes)
-		(on_board yes)
-		(in_pos_files yes)
-		(dnp no)
-		(uuid "e34391c7-c869-418a-9677-235f3a798a64")
-		(property "Reference" "#PWR1022"
-			(at 228.6 181.61 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify left)
-			)
-		)
-		(property "Value" "GND"
-			(at 220.726 182.88 0)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Footprint" ""
-			(at 226.06 182.88 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Datasheet" ""
-			(at 226.06 182.88 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Description" ""
-			(at 226.06 182.88 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(pin "1"
-			(uuid "9536147c-29a2-4263-98c9-b744c0360a21")
-		)
-		(instances
-			(project "canary-hat"
-				(path "/e63e39d7-6ac0-4ffd-8aa3-1841a4541b55/421b2317-5779-468f-96b0-ffd0e1a2d866"
-					(reference "#PWR1022")
 					(unit 1)
 				)
 			)
@@ -13165,159 +11110,6 @@
 			(project "canary-hat"
 				(path "/e63e39d7-6ac0-4ffd-8aa3-1841a4541b55/421b2317-5779-468f-96b0-ffd0e1a2d866"
 					(reference "#PWR1027")
-					(unit 1)
-				)
-			)
-		)
-	)
-	(symbol
-		(lib_id "Device:R")
-		(at 199.39 265.43 0)
-		(unit 1)
-		(body_style 1)
-		(exclude_from_sim no)
-		(in_bom yes)
-		(on_board yes)
-		(in_pos_files yes)
-		(dnp no)
-		(uuid "f0a79137-1245-495a-8d67-69a7c523d58f")
-		(property "Reference" "R40"
-			(at 201.93 264.16 0)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify left)
-			)
-		)
-		(property "Value" "10k"
-			(at 201.93 266.7 0)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify left)
-			)
-		)
-		(property "Footprint" "Resistor_SMD:R_0603_1608Metric"
-			(at 199.39 265.43 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Datasheet" ""
-			(at 199.39 265.43 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Description" "Resistor"
-			(at 199.39 265.43 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Manufacturer" "Yageo"
-			(at 199.39 265.43 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify left)
-			)
-		)
-		(property "MPN" "RC0603FR-0710KL"
-			(at 199.39 265.43 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify left)
-			)
-		)
-		(property "Power" "0.1W"
-			(at 199.39 265.43 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify left)
-			)
-		)
-		(property "Tolerance" "1%"
-			(at 199.39 265.43 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify left)
-			)
-		)
-		(property "Quote" "Rev 2.1: not yet quoted."
-			(at 199.39 265.43 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify left)
-			)
-		)
-		(property "Note" "Spare-channel default: pulled to GND so the unused input reads 0, not a floating bias voltage."
-			(at 199.39 265.43 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify left)
-			)
-		)
-		(pin "1"
-			(uuid "4a5c3118-c6bd-4f1b-9208-092aa1a3fc0f")
-		)
-		(pin "2"
-			(uuid "ffc4e4a4-74e8-4b00-a092-fb1e7d73e9ca")
-		)
-		(instances
-			(project "canary-hat"
-				(path "/e63e39d7-6ac0-4ffd-8aa3-1841a4541b55/421b2317-5779-468f-96b0-ffd0e1a2d866"
-					(reference "R40")
 					(unit 1)
 				)
 			)
@@ -13732,174 +11524,6 @@
 		)
 	)
 	(symbol
-		(lib_id "power:GND")
-		(at 119.38 271.78 0)
-		(unit 1)
-		(body_style 1)
-		(exclude_from_sim no)
-		(in_bom yes)
-		(on_board yes)
-		(in_pos_files yes)
-		(dnp no)
-		(uuid "f7dcd172-8af5-46f2-8b56-a9f0dffb9584")
-		(property "Reference" "#PWR1053"
-			(at 121.92 270.51 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify left)
-			)
-		)
-		(property "Value" "GND"
-			(at 121.92 274.32 0)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Footprint" ""
-			(at 119.38 271.78 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Datasheet" ""
-			(at 119.38 271.78 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Description" ""
-			(at 119.38 271.78 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(pin "1"
-			(uuid "afa9cc55-42c1-4144-870b-78fe8fc1494d")
-		)
-		(instances
-			(project "canary-hat"
-				(path "/e63e39d7-6ac0-4ffd-8aa3-1841a4541b55/421b2317-5779-468f-96b0-ffd0e1a2d866"
-					(reference "#PWR1053")
-					(unit 1)
-				)
-			)
-		)
-	)
-	(symbol
-		(lib_id "Connector:TestPoint")
-		(at 25.4 260.35 0)
-		(unit 1)
-		(body_style 1)
-		(exclude_from_sim no)
-		(in_bom yes)
-		(on_board yes)
-		(in_pos_files yes)
-		(dnp no)
-		(uuid "f9844f6f-c2b0-4f33-baf2-82b5132deb1b")
-		(property "Reference" "TP1"
-			(at 27.94 259.08 0)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify left)
-			)
-		)
-		(property "Value" "CH5"
-			(at 27.94 261.62 0)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify left)
-			)
-		)
-		(property "Footprint" "TestPoint:TestPoint_Pad_D1.5mm"
-			(at 25.4 260.35 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Datasheet" ""
-			(at 25.4 260.35 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Description" "test point"
-			(at 25.4 260.35 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Note" "Spare ADC channel CH5 (U8 AIN_5P)."
-			(at 25.4 260.35 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify left)
-			)
-		)
-		(pin "1"
-			(uuid "86cf9731-695d-4cdf-ba30-34dad4b6f920")
-		)
-		(instances
-			(project "canary-hat"
-				(path "/e63e39d7-6ac0-4ffd-8aa3-1841a4541b55/421b2317-5779-468f-96b0-ffd0e1a2d866"
-					(reference "TP1")
-					(unit 1)
-				)
-			)
-		)
-	)
-	(symbol
 		(lib_id "Device:C")
 		(at 350.52 82.55 0)
 		(unit 1)
@@ -14059,111 +11683,6 @@
 			(project "canary-hat"
 				(path "/e63e39d7-6ac0-4ffd-8aa3-1841a4541b55/421b2317-5779-468f-96b0-ffd0e1a2d866"
 					(reference "C26")
-					(unit 1)
-				)
-			)
-		)
-	)
-	(symbol
-		(lib_id "Device:R")
-		(at 137.16 265.43 0)
-		(unit 1)
-		(body_style 1)
-		(exclude_from_sim no)
-		(in_bom yes)
-		(on_board yes)
-		(in_pos_files yes)
-		(dnp yes)
-		(uuid "fa33a1c1-58e4-44f0-972b-9282a466e0e4")
-		(property "Reference" "R38"
-			(at 139.7 264.16 0)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify left)
-			)
-		)
-		(property "Value" "TBD"
-			(at 139.7 266.7 0)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify left)
-			)
-		)
-		(property "Footprint" "Resistor_SMD:R_0603_1608Metric"
-			(at 137.16 265.43 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Datasheet" ""
-			(at 137.16 265.43 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Description" "Resistor"
-			(at 137.16 265.43 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Quote" "Rev 2.1: not yet quoted."
-			(at 137.16 265.43 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify left)
-			)
-		)
-		(property "Note" "DNF pad. DNF configuration pad."
-			(at 137.16 265.43 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify left)
-			)
-		)
-		(pin "1"
-			(uuid "e523a641-43f0-47ba-ad02-badc7328287f")
-		)
-		(pin "2"
-			(uuid "86304d78-b372-4913-9bab-333e0ffbaabb")
-		)
-		(instances
-			(project "canary-hat"
-				(path "/e63e39d7-6ac0-4ffd-8aa3-1841a4541b55/421b2317-5779-468f-96b0-ffd0e1a2d866"
-					(reference "R38")
 					(unit 1)
 				)
 			)

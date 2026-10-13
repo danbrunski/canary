@@ -1224,6 +1224,12 @@ FET gate) and **rev 2.1 spends only GPIO7 (CE1, the ADS8688A's native chip
 select)** — revised 2026-10-03, when CAN1 was dropped (§13.5.4) and with it
 the nINT and STB pins that had taken GPIO27 and GPIO19.
 
+> **Superseded at rev 2.1 layout (2026-10-12):** rev 2.1 moved the GNSS to
+> `uart4` (GPIO12/13), its PPS to GPIO20 and the K-line pull-up to GPIO21, and
+> freed GPIO4/5 (`uart2`), 16, 18 and 24 (`CANary-HAT-Rev2.1.md` §13.5.13).
+> The count below still holds; the pins change, and rev 3.0 re-derives its map
+> from the new free list.
+
 **What remains for rev 3.0 is GPIO12, 13, 19, 20, 21 and 27 — six pins**, not
 four. `uart4` (GPIO12/13) is the home for item 4; GPIO20 is item 5's chip
 select; GPIO21 covers item 14's `BOOT0`/reset. That now closes with **two

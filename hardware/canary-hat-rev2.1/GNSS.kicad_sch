@@ -2201,7 +2201,7 @@
 		)
 		(uuid "3e78752c-a8fd-432a-87a9-43e6883adca7")
 	)
-	(hierarchical_label "UART1_RXD"
+	(hierarchical_label "UART_RXD"
 		(shape output)
 		(at 118.11 85.09 180)
 		(effects
@@ -2212,7 +2212,7 @@
 		)
 		(uuid "6d287136-2eb5-4c2d-8a02-7ca35a5dcc96")
 	)
-	(hierarchical_label "UART1_TXD"
+	(hierarchical_label "UART_TXD"
 		(shape input)
 		(at 118.11 87.63 180)
 		(effects

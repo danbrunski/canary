@@ -2448,7 +2448,7 @@
 		)
 		(uuid "06c0dffe-0ada-4d00-8198-fae36e955c34")
 	)
-	(hierarchical_label "GPIO24"
+	(hierarchical_label "PU_EN"
 		(shape input)
 		(at 139.7 63.5 180)
 		(effects
@@ -2574,7 +2574,7 @@
 				(justify left)
 			)
 		)
-		(property "Note" "Level-shifts GPIO24 up to Q2's gate; sinks only ~109 uA. Logic-level part, fully on at Vgs = 3.3V. R15 pulls its gate down so it is off whenever the Pi is not actively driving GPIO24 high - that is what makes sniff mode the default."
+		(property "Note" "Level-shifts PU_EN (rev 2.1: GPIO21, J1 pin 40; rev 2.0 used GPIO24) up to Q2's gate; sinks only ~109 uA. Logic-level part, fully on at Vgs = 3.3V. R15 pulls its gate down so it is off whenever the Pi is not actively driving PU_EN high - that is what makes sniff mode the default."
 			(at 0 0 0)
 			(hide yes)
 			(show_name no)
@@ -2887,7 +2887,7 @@
 				(justify left)
 			)
 		)
-		(property "Note" "GPIO24 pull-down. Holds Q3 off whenever the Pi's GPIO is high-Z - off, booting, or crashed - so the K-line pull-up defaults to disconnected and the board cannot perturb an NT510/UpRev session it is only meant to be sniffing. Safety-relevant despite being a plain resistor."
+		(property "Note" "PU_EN (GPIO21) pull-down. Holds Q3 off whenever the Pi's GPIO is high-Z - off, booting, or crashed - so the K-line pull-up defaults to disconnected and the board cannot perturb an NT510/UpRev session it is only meant to be sniffing. Safety-relevant despite being a plain resistor."
 			(at 0 0 0)
 			(hide yes)
 			(show_name no)
@@ -5479,7 +5479,7 @@
 				(justify left)
 			)
 		)
-		(property "Note" "K-line commander pull-up high-side switch. Connects/disconnects R5 (1k) from +12V, replacing the J5 jumper so the mode is software-selectable instead of needing the HAT unstacked from under the dash. GPIO24 high -> Q3 conducts -> R13/R14 divide +12V to 1.09V at this gate -> Vgs = -10.9V, inside the +/-20V limit. GPIO low OR high-Z -> R13 holds the gate at +12V -> Vgs = 0 -> off. So passive sniff mode is the safe default and a Pi that is off, booting or crashed cannot perturb a scan-tool session. Rds(on) ~10 ohm is a 1% error on a 1k pull-up. Body diode conducts D->S, i.e. away from the bus, so with Q2 off the pull-up is genuinely disconnected."
+		(property "Note" "K-line commander pull-up high-side switch. Connects/disconnects R5 (1k) from +12V, replacing the J5 jumper so the mode is software-selectable instead of needing the HAT unstacked from under the dash. PU_EN (GPIO21) high -> Q3 conducts -> R13/R14 divide +12V to 1.09V at this gate -> Vgs = -10.9V, inside the +/-20V limit. GPIO low OR high-Z -> R13 holds the gate at +12V -> Vgs = 0 -> off. So passive sniff mode is the safe default and a Pi that is off, booting or crashed cannot perturb a scan-tool session. Rds(on) ~10 ohm is a 1% error on a 1k pull-up. Body diode conducts D->S, i.e. away from the bus, so with Q2 off the pull-up is genuinely disconnected."
 			(at 0 0 0)
 			(hide yes)
 			(show_name no)

@@ -64,8 +64,11 @@ pressure is set by a regulator that does not know manifold pressure. Under
 boost, the pressure *across the injector* falls:
 
 ```
-injector ΔP = P_rail(gauge, AEM) − (MAP(abs, Bosch) − baro(abs, U5 BMP384))
+injector ΔP = P_rail(gauge, AEM) − (MAP(abs, Bosch) − baro(abs))
 ```
+
+*Baro source (2026-10-12): the ECM's `BAROMETRIC_PRESSURE` (PID 0x33) on rev 2.1, which
+has no barometer; U5 (BMP384) on a rev 2.0 board (§13.5.13).*
 
 Injector flow goes with √ΔP, so e.g. 7 psi of boost on a 51 psi rail is
 √(44/51) ≈ **7% less fuel at the same pulse width** — which the tune must
@@ -246,7 +249,7 @@ no-divider change removes one of its two original jobs:
 ```
 ratio    = code_CH1 / code_CH3              # dimensionless
 MAP_kPa  = a · ratio + b                     # a, b: THIS sensor's transfer function
-boost    = MAP_kPa − baro_kPa (U5)
+boost    = MAP_kPa − baro_kPa (ECM PID 0x33; U5 on a rev 2.0 board, §13.5.13)
 ```
 
 The ADS8688A's own reference (internal 4.096 V) cancels out of that ratio too,
@@ -280,7 +283,7 @@ that makes an SPI part cost no GPIO.
 | CH4 | `FUEL_P` | 0–5.12 V | gauge WHITE → `AIN_4P`, **BROWN → `AIN_4GND`** — pseudo-differential, item 7 |
 | CH5 | spare | — | **freed 2026-10-03**: the gauge needs no reference channel (§13.5.4) |
 | CH6 | spare | — | |
-| CH7 | spare | — | DNF conditioning pads to a test pad, not a terminal (item 8) |
+| CH7 | spare | — | ~~DNF conditioning pads to a test pad, not a terminal (item 8)~~ CH5–CH7 tied straight to GND at layout (§13.5.13) |
 
 Each row is a **pin pair** — `AIN_nP` and `AIN_nGND` — not a single input; see
 item 7, which is what makes CH4 carry the gauge's differential output
@@ -435,7 +438,8 @@ software regardless — but recorded as available.
 Nothing on the ECM reads MAP, so there is no OBD cross-check. The known answers
 available instead:
 
-- **Offset — every key-on.** Engine off, MAP must equal **U5 BMP384 baro**
+- **Offset — every key-on.** Engine off, MAP must equal **baro** — the ECM's
+  PID 0x33 on rev 2.1, U5 (BMP384) on a rev 2.0 board (§13.5.13) —
   (~80 kPa at this altitude). Free, automatic, repeatable.
 - **Slope — the kit supplies it.** The Z1 kit includes a **boost leak tester
   with gauge** (item 39). Engine off, pressurise the intake to a known gauge
@@ -572,6 +576,10 @@ terminal ──┬── R_pulldown → GND     (DNF)
   `MAP` losing its pull-down mid-drive is a silent wrong reading.
 - **Area.** A three-position header per channel across eight channels is more
   board area than the ADS8688A itself. Two DNF 0603s are ~2 mm².
+
+> **Superseded at layout (2026-10-12):** the spare pads and test points were
+> removed and CH5–CH7 tied straight to GND (§13.5.13). The paragraph below is
+> the history.
 
 **Where configurability does earn its place: the spare channels.** CH5–CH7
 have no known sensor, which is the one case where the value really is unknown
@@ -903,7 +911,8 @@ Why this arrangement:
   and the other is a ground-referenced *input* needs silkscreen that
   distinguishes them — `FGND` against `SGND` is not enough.
 - **There is no growth room left on this connector.** Spare ADC channels
-  (CH5–CH7) go to labelled test pads, not terminals (§13.5.3 item 8).
+  (CH5–CH7) ~~go to labelled test pads, not terminals (§13.5.3 item 8)~~ are
+  tied to GND, with no test pads (§13.5.13).
 - ~~`J3` (+12V pass-through to the X1202) is unchanged~~ — **folded into J2
   as pins 3–4** (operator, 2026-10-12). Rev 2.1 still feeds the X1202 from the
   HAT.
@@ -948,8 +957,9 @@ only; the footprint and D2 stay as they are.
 > the second rev 2.0 board (§13.1.2 of `CANary-HAT-Revisions.md`). Its U5's
 > temperature word is live (raw `0x8ADA80`), and compensated with its own
 > temperature it reads 79.52 kPa at 37.1 °C, ±0.01 kPa over three reads, at the
-> operator's ~80 kPa altitude. Rev 2.1 keeps U5, its footprint and its wiring
-> as they are. Checks 2–5 are not needed. **The U6-surrogate decision below is
+> operator's ~80 kPa altitude. ~~Rev 2.1 keeps U5, its footprint and its wiring
+> as they are.~~ *Superseded 2026-10-12: rev 2.1 drops U5 at layout and takes
+> baro from the ECM (§13.5.13); rev 2.0 boards keep theirs.* Checks 2–5 are not needed. **The U6-surrogate decision below is
 > now a property of board #1 alone**, not of the board revision. The BMP384
 > driver uses U5's own temperature by default and takes the surrogate only
 > from per-board config. The history below is kept as the record.
@@ -1356,7 +1366,8 @@ it clears, not where the board edge happens to be.
   (MAX-M10M) moves with J4**, so the 50 Ω feed from J4 to `U7-RF_IN` stays as
   short as it is today, along with the solid-ground SMA pads and the In1.Cu
   anti-pad notch at the launch (§3.6.1). BT1, the antenna bias and the
-  TIMEPULSE/UART routing to GPIO4/5/18 follow U7.
+  TIMEPULSE/UART routing to GPIO4/5/18 follow U7. *(Rev 2.1 moved those to
+  GPIO12/13 and GPIO20, nearer the GNSS, §13.5.13.)*
 - **Some terminals move to where the GNSS is now** (the right edge, which
   today also holds Q2/Q3, the K-line pull-up switch). Which positions move is
   not decided yet. Splitting the block across two edges also reopens
@@ -1456,7 +1467,7 @@ rev 3.0's options.
 | 6 | ~~AEMnet byte layout~~ — **off the critical path**, the gauge is analog (§13.5.4). Keep the note in case a future device uses AEMnet | Deferred indefinitely |
 | 7 | Z1 rail port thread vs AEM sensor's NPT | Inspect rails; adapter if ORB |
 | 8 | ~~GPIO19 / GPIO27 vs 20/21~~ — **closed**, CAN1 is dropped so no interrupt or STB GPIO is needed; the ADC uses CE1 natively. **GPIO19 is now `SENS_PWR_EN`** (U9 enable, 2026-10-12); GPIO 12/13/20/21/27 stay free | **Closed** |
-| 9 | Board area closes single-sided? **Doubtful**: rev 2.1 has 114 symbols against rev 2.0's 59 (§13.5.10). J2 is now a 45.5 × 7.6 mm single row (PT 1,5/13), not the two-level block | Placement attempt |
+| 9 | Board area closes single-sided? **Doubtful**: rev 2.1 has 114 symbols against rev 2.0's 59 (§13.5.10); 97 after the layout trims (§13.5.13). J2 is now a 45.5 × 7.6 mm single row (PT 1,5/13), not the two-level block | Placement attempt |
 | 10 | ~~X1 part~~ — **superseded 2026-10-12: no oscillator.** Y1 is the crystal fallback, Kyocera `CX3225SA40000D0PTWCC` (§13.5.6) | **Closed** |
 | 11 | Rev 2.0 Y1 starts cold? (§13.1 meas. 14) — still worth answering on the rev 2.0 boards. **For rev 2.1's Y1 it becomes a bring-up step:** OSC1 amplitude (≤ 1 pF probe) → drive level → size R43; then a cold start | Bench |
 | 12 | ~~U5 root cause: part, process or design~~ — **closed 2026-10-11: the part.** The second board's U5 converts temperature and pressure correctly (§13.5.6) | **Closed** |
@@ -1474,14 +1485,14 @@ rev 3.0's options.
 | 28 | ~~Gauge-ground offset under load~~ — **closed: already measured 2026-10-03** (`docs/aem-fuel-pressure-analog-input.md`, "BROWN on module GND, measured"). With BROWN bonded to the Pi/HAT ground, BROWN read **+37…+47 mV KOEO and +40 mV running** against the gauge's power ground, inside `AIN_4GND`'s ±100 mV with ~2.5× margin. The topology matches rev 2.1 (HAT ground to chassis through J2's ground terminal). Re-measure if the harness grounding changes | **Closed** |
 | 29 | **The 0.50–4.50 V fault gate is a decoder requirement, not a note** — out-of-window must return a fault state, never a clamped number (§13.5.4) | Implement with the collector; a broken WHITE at 0 V must not decode as 0.0 psig |
 | 27 | ~~DNF conditioning pads~~ — **decided 2026-10-12**: `R_series` = **1 kΩ fitted** on CH1–CH4 (and on CH4's negative leg), 0 Ω on the spares; pull-up/pull-down pads on CH1, CH2 and the spares (§13.5.10) | **Closed** |
-| 33 | **Spare channels CH5–CH7** — **schematic half closed 2026-10-12**: each `AIN_nP` is pulled to GND by 10 kΩ through a 0 Ω series pad to a test point, `AIN_nGND` tied to GND. **Driver half still open**: refuse any channel not in the configured map | Driver |
+| 33 | **Spare channels CH5–CH7** — **schematic half closed 2026-10-12**: ~~each `AIN_nP` is pulled to GND by 10 kΩ through a 0 Ω series pad to a test point~~ each `AIN_nP` is tied straight to GND at U8, as is `AIN_nGND` (layout trim, §13.5.13). **Driver half still open**: refuse any channel not in the configured map | Driver |
 | 19 | ~~Which AEM wire is signal and which is ground~~ — **closed, and the question was mis-framed.** WHITE is analog **+**, BROWN analog **−**; neither is a ground (§13.5.3 item 7). Meter once as a build check | **Closed** |
 | 20 | ~~MAP sensor pull-down resistor~~ — **closed 2026-10-12: R20 = 47 kΩ fitted**, chosen for the generic voltage port rather than the Bosch datasheet: inside every automotive driver's load rating (Bosch ≥ 10 kΩ), and an open wire reads ~4 % of U8's floating bias, near 0 V (§13.5.11) | **Closed** |
 | 21 | ~~Fuel-pressure transfer function~~ — **closed: AEM publishes it**, `psig = 25.00·V − 12.50`, valid 0.50–4.50 V. Only the *electrical* chain needs calibrating, and on rev 2.1 that is just the ADS8688A's reference (no divider, no resistor tolerance). Gauge face remains the independent cross-check | **Closed**; pin in `catalog_pins` |
 | 22 | **SPI0 contention** — downgraded 2026-10-03 from a risk to a confirmation: the arithmetic gives **0.11 %** bus occupancy at 6 channels × 100 Hz (§13.5.3 item 5a), and per-device SPI speed is a devicetree property so CAN0 keeps its 20 MHz | Bring-up measurement to confirm the arithmetic, not to discover the answer |
 | 23 | **Re-verify `V12_SENSE` on the new ADC** — same divider, different part | Repeat `CANary-HAT-Revisions.md:119`: 0.000 V no vehicle, ~12.68 V key-off, ~12.43 V KOEO |
 | 24 | **Update §13.3.9 of `CANary-HAT-Revisions.md`** for the dropped CAN1 — rev 3.0's GPIO and safe-state assumptions changed (§13.5.8) | Edit that section |
-| 34 | ~~J2 physical part~~ — **decided 2026-10-12: Phoenix `PT 1,5/13-3,5-H`**, 13-way, 3.5 mm, screw with wire protector, collared ferrules 0.25–0.75 mm² (pins 1–4 are 18 AWG on AI 0,75 ferrules; the rest 20 AWG), 45.5 × 7.6 mm, stock KiCad footprint; J3 folded in (§13.5.5) | **Closed**; confirm the 13-way item number (12-way is 1984714) at ordering |
+| 34 | ~~J2 physical part~~ — **decided 2026-10-12: Phoenix `PT 1,5/13-3,5-H`**, 13-way, 3.5 mm, screw with wire protector, collared ferrules 0.25–0.75 mm² (pins 1–4 are 18 AWG on AI 0,75 ferrules; the rest 20 AWG), 45.5 × 7.6 mm, stock KiCad footprint; J3 folded in (§13.5.5) | **Closed**; Phoenix order number **1984727** (the 12-way is 1984714, the 14-way 1984730), entered as J2's MPN 2026-10-12 |
 | 35 | ~~MCP2518FD OSC2 with an external clock~~ — **moot**: Y1 is a crystal, so OSC2 drives it through R43 | **Closed** |
 | 36 | ~~Oscillator order code and stock~~ — **closed 2026-10-12** (operator: easy-to-source parts). No 40 MHz oscillator was easy to buy: SiT8924 is programmed to order, the SiT8008BI code returned nothing at DigiKey, ECS-2333 had zero stock, and SiT8008AI-13-33S was end-of-life stock. **Y1 = Kyocera `CX3225SA40000D0PTWCC` crystal** (stocked), with ECS `ECS-400-8-33Q-JES-TR` as second source (§13.5.6) | **Closed** |
 
@@ -1528,7 +1539,7 @@ The §13.5.3 placeholders are superseded. In the schematic:
 | CH2 `SENS_R1` (resistive port): pull-down (DNF) / pull-up / series / filter / match | R24 / **R25 4.99 kΩ** (was "R19") / R26 1 kΩ / C29 / R27 2.7 kΩ |
 | CH3 5V_SENS: series / filter / match | R28 1 kΩ / C30 / R29 1 kΩ |
 | CH4 FUEL: pull-downs / series + / series − / differential cap | R30, R31 100 kΩ / R32 1 kΩ / R33 1 kΩ / C31 |
-| CH5–CH7 spares | TP1–TP3, R34–R42 |
+| CH5–CH7 spares | ~~TP1–TP3, R34–R42~~ removed at layout; inputs tied to GND (§13.5.13) |
 | Harness TVS | D7 (MAP, IAT), D8 (FUEL_P, FUEL_GND), D9 (5V_SENS) |
 | Y1 crystal / load caps / OSC2 drive limiter | Y1 CX3225SA40000D0PTWCC / C33, C34 8.2 pF / R43 0 Ω |
 
@@ -1590,6 +1601,9 @@ and three are test points. That is far from §13.5.2's "+8", because the conditi
 matching resistors, clamps and spare-channel pads were all decided after that
 estimate. If placement does not close single-sided (open item 9), trim in
 this order:
+
+> **Done at layout (2026-10-12):** option 1, plus R7/R9 and U5 (§13.5.13).
+> The board is 97 symbols.
 
 1. **Spare channels to bare ties**: −12 parts. Tie `AIN_5P`–`AIN_7P`
    straight to GND and drop the test points and pads. This costs the
@@ -1653,8 +1667,8 @@ EEPROM population record (§13.5.8) recovers that for the pad approach.
   with two resistors, but that gives one voltage per board. A second LDO
   footprint, left DNF, gives both rails. `+3V3` on the harness stays ruled
   out: that is the Pi's rail, and a chafe would take the Pi down.
-- **Ports need terminals.** Only V1 and R1 reach J2; CH5–CH7 go to test
-  pads because the six upper positions are full. More user-pluggable ports
+- **Ports need terminals.** Only V1 and R1 reach J2; CH5–CH7 ~~go to test
+  pads~~ are tied to GND (§13.5.13) because the six upper positions are full. More user-pluggable ports
   depend on the J2 part (open item 34). If it changes to a denser or
   pluggable connector, bring the spares out with the same pad set.
 - **Frequency or digital outputs** (flex-fuel, some MAFs, speed sensors) are
@@ -1703,4 +1717,115 @@ had the same pin sets, and all 106 parts kept every field.
 - **GPIO19 (`SENS_PWR_EN`) must be driven high for the sensor ports and the
   TMAP to get power.** It defaults off. The rev 2.1 overlay or the daemon
   owns it, alongside the ADS8688A node on CE1.
+- The CH3 clipping rule.
+
+### 13.5.13 Layout trims and moved header pins — 2026-10-12
+
+Placement showed that the unroutable nets came from long cross-board runs, not
+from part count. The GNSS sits on the tab at the far right, while GPIO4 and
+GPIO18 are at the far left of the header. Their routes crossed the whole board,
+through the analog section. Two kinds of change followed, and both are in the
+schematic (ERC 0/0). The netlist differs from the operator's saved version only
+by the moves below.
+
+**Removed (operator, at layout).**
+
+- **The spare-channel network** (§13.5.10 trim option 1): TP1–TP3 and
+  R34–R42. `AIN_5P`–`AIN_7P` are tied straight to GND at U8, beside their
+  `AIN_nGND`. This costs the "experiment channel"; the driver still refuses
+  unmapped channels (open item 33).
+- **R7/R9**, the DNP I²C pull-ups. The Pi 5 already has 1.8 kΩ on GPIO2/3.
+- **U5 (BMP384) with C10/C13.** Rev 2.1 has no barometer. Baro comes from the
+  ECM's `BAROMETRIC_PRESSURE` (PID 0x33). The capture profiles already poll it
+  at 1 Hz, and it reads 80.4 kPa at the home altitude. At key-on the TMAP reads
+  baro itself. The cost: boost and injector ΔP now depend on the vehicle
+  answering PID 0x33. Most vehicles do. One that does not falls back to the
+  key-on MAP. Rev 2.0 boards keep their U5.
+
+The board goes from 114 symbols to **97**. DNP parts: R21, R24 and J1. There
+are no test points.
+
+**Moved header pins.**
+
+| Signal | Rev 2.0 | Rev 2.1 |
+|---|---|---|
+| GNSS RXD (U7.3, Pi TX) | GPIO4, pin 7 (`uart2`) | **GPIO12, pin 32 (`uart4`)** |
+| GNSS TXD (U7.2, Pi RX) | GPIO5, pin 29 | **GPIO13, pin 33** |
+| GNSS TIMEPULSE (PPS) | GPIO18, pin 12 | **GPIO20, pin 38** |
+| K-line pull-up gate (Q3, sheet pin `PU_EN`) | GPIO24, pin 18 | **GPIO21, pin 40** |
+| IMU INT1 (U6.4) | GPIO16, pin 36 | **GPIO17, pin 11** (freed by U5) |
+
+Everything else is unchanged:
+- SPI0 with the CAN controller on CE0 and the ADC on CE1.
+- CAN nINT on GPIO25 and STB on GPIO22.
+- The K-line on uart0, with EN on GPIO26.
+- IMU INT2 on GPIO23.
+- `SENS_PWR_EN` on GPIO19.
+
+The five moved nets' pad-to-pad Manhattan length drops from 352 mm to ~232 mm.
+None of them crosses the analog section any more.
+
+- **GPIO6 (pin 31) stays free on both revisions.** It is the X1202's
+  power-loss line, which `scripts/ups_shutdown_watch.py` holds (§4.1 of
+  `CANary-HAT-Spec.md`). The first draft of this change put PPS there; it went
+  to GPIO20 instead.
+- **Free header pins now:** 7 (GPIO4), 12 (GPIO18), 13 (GPIO27), 18 (GPIO24),
+  29 (GPIO5) and 36 (GPIO16), plus 31 (GPIO6), which belongs to the X1202.
+- **Rev 3.0 consequence.** §13.3.9 of `CANary-HAT-Revisions.md` budgets
+  `uart4` (GPIO12/13) for the MCU link, GPIO20 for its chip select and GPIO21
+  for BOOT0. Those are taken now. The freed pins cover the same needs: GPIO4/5
+  are `uart2`, a full UART, and GPIO16/18/24 are plain GPIOs. Rev 3.0 re-derives
+  its pin map from this list. CANary-PWR's GPIO27 is untouched.
+
+**Software: two boards, two pin maps.** Rev 2.0 boards stay in service, and at
+least one other user has one. So nothing switches over to rev 2.1; the
+software follows whichever board is fitted.
+
+- **One table:** `hardware/canary-hat-firmware/hat_revisions.json` holds each
+  revision's facts. Two readers use it:
+  - `hat_rev.py` beside it, for the bring-up scripts, `install_pi.sh` and
+    `program_hat.sh`.
+  - `src/collection/hat_revision.py`, for the daemon.
+
+  `tests/test_hat_revisions.py` checks every overlay and EEPROM file against
+  the table, and checks that the two readers agree.
+- **One overlay and one EEPROM file per revision.** Rev 2.0 keeps
+  `canary-hat` and `eeprom_settings.txt`, unchanged. Rev 2.1 has
+  `canary-hat-r21` and `eeprom_settings-r21.txt` (product_ver `0x0201`). The
+  EEPROM names the overlay, so each board loads its own wiring.
+  `install_pi.sh` installs both overlays, and asks for a reboot only when the
+  fitted board's overlay changed.
+- **Which revision:** the EEPROM's product_ver. In the daemon,
+  `hardware.hat_revision` (default `auto`) overrides it; the bring-up scripts
+  take `CANARY_HAT_REV`. A Pi with no CANary-HAT EEPROM is treated as rev 2.0,
+  the only revision that has run without one. An EEPROM naming a revision the
+  table does not list is refused rather than guessed at.
+- **Daemon:**
+  - The K-line pull-up line comes from the revision: GPIO24 on rev 2.0,
+    GPIO21 on rev 2.1. `hardware.kline.enable_gpio` and `pullup_gpio` now
+    default to `None` and only override it.
+  - On rev 2.1, `hardware.supply_voltage` logs an error and records nothing.
+    There is no ADS1015 to read, and the OBD collector must not wait for it.
+- **Install:**
+  - gpsd gets the revision's UART: `/dev/ttyAMA2` on rev 2.0, `/dev/ttyAMA4`
+    on rev 2.1.
+  - The PPS node keeps the name `canary-pps`, so the `/dev/pps-canary` rule
+    and chrony are the same for both.
+- **Bring-up scripts:**
+  - `program_hat.sh` takes `--rev 2.0|2.1`, which is required on a blank
+    EEPROM.
+  - `checkout_hat.sh`, `kline_bringup.py` and `kline_edges.py` follow the
+    fitted revision.
+  - `baro_diag.py` refuses on rev 2.1.
+- **Not yet proven on a board:**
+  - The rev 2.1 overlay is rev 2.0's code with the moved pins substituted;
+    the test pins that. Its `uart4` / `uart4_pins` labels match Raspberry Pi's
+    own `uart4-pi5` overlay.
+  - The first rev 2.1 boot, with `checkout_hat.sh`, confirms `/dev/ttyAMA4`
+    and PPS on GPIO20.
+
+**Still owed for rev 2.1** (§13.5.8, §13.5.12), unchanged by this:
+- The ADS8688A driver, on `/dev/spidev0.1`.
+- Driving GPIO19 `SENS_PWR_EN`.
+- Re-pointing the 12 V sense to CH0.
 - The CH3 clipping rule.

@@ -3464,7 +3464,7 @@
 				(justify left)
 			)
 		)
-		(property "Quote" "PCBWay T-B4W341056A (5 units, 2026-08-14): self-source, do not populate at the assembler. The footprint error flagged on that quote is resolved for rev 2.0 by correcting the value to 47uF - see Note."
+		(property "Quote" "Rev 2.1: PCBWay sources and fits C2 (operator, 2026-10-12); not yet quoted. Rev 2.0 had it self-sourced and not populated at the assembler, after quote T-B4W341056A flagged the old 100uF value, since corrected to 47uF - see Note."
 			(at 138.43 120.65 0)
 			(hide yes)
 			(show_name no)

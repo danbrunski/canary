@@ -2617,23 +2617,27 @@
 		(uuid "14d8bfed-5dbe-4329-bc19-9cbe0c9156e7")
 	)
 	(no_connect
-		(at 130.81 87.63)
+		(at 118.11 57.15)
 		(uuid "a22799ca-4155-412a-ae81-91863761384d")
 	)
 	(no_connect
-		(at 130.81 97.79)
+		(at 130.81 69.85)
 		(uuid "b5018202-cc3e-4505-9270-967b61d37d9a")
 	)
 	(no_connect
-		(at 118.11 87.63)
+		(at 130.81 62.23)
 		(uuid "b60ddf4a-3d46-4d92-adfe-81977cd61a88")
 	)
 	(no_connect
-		(at 130.81 95.25)
+		(at 118.11 87.63)
 		(uuid "c3a07ac3-a402-4969-a578-d24a598adbb7")
 	)
 	(no_connect
-		(at 118.11 90.17)
+		(at 130.81 92.71)
+		(uuid "ee91f2e9-6a67-417c-bb4c-146c6b99313b")
+	)
+	(no_connect
+		(at 118.11 85.09)
 		(uuid "ffa20921-a81c-45f5-9367-2a309696139f")
 	)
 	(wire
@@ -2918,7 +2922,7 @@
 	)
 	(wire
 		(pts
-			(xy 118.11 57.15) (xy 110.49 57.15)
+			(xy 130.81 87.63) (xy 138.43 87.63)
 		)
 		(stroke
 			(width 0)
@@ -3478,7 +3482,7 @@
 	)
 	(wire
 		(pts
-			(xy 130.81 62.23) (xy 138.43 62.23)
+			(xy 130.81 95.25) (xy 138.43 95.25)
 		)
 		(stroke
 			(width 0)
@@ -3498,7 +3502,7 @@
 	)
 	(wire
 		(pts
-			(xy 130.81 69.85) (xy 138.43 69.85)
+			(xy 130.81 97.79) (xy 138.43 97.79)
 		)
 		(stroke
 			(width 0)
@@ -3565,16 +3569,6 @@
 			(type default)
 		)
 		(uuid "c22810e5-c343-4a5c-b1b7-38d997cf8d99")
-	)
-	(wire
-		(pts
-			(xy 130.81 92.71) (xy 138.43 92.71)
-		)
-		(stroke
-			(width 0)
-			(type default)
-		)
-		(uuid "c339e239-ae44-4b40-87ac-2e74486775f9")
 	)
 	(wire
 		(pts
@@ -3748,7 +3742,7 @@
 	)
 	(wire
 		(pts
-			(xy 118.11 85.09) (xy 110.49 85.09)
+			(xy 118.11 90.17) (xy 110.49 90.17)
 		)
 		(stroke
 			(width 0)
@@ -3775,16 +3769,6 @@
 			(type default)
 		)
 		(uuid "f11bf595-ea6c-4909-a5b5-0c989cd64d90")
-	)
-	(wire
-		(pts
-			(xy 59.69 50.8) (xy 62.23 50.8)
-		)
-		(stroke
-			(width 0)
-			(type default)
-		)
-		(uuid "f9955615-ce5a-4f20-8f23-b9defd1df02e")
 	)
 	(wire
 		(pts
@@ -3816,7 +3800,7 @@
 		)
 		(uuid "082c66ba-5961-402d-ba0f-1b062bf0f244")
 	)
-	(label "GPIO18{slash}PPS"
+	(label "GPIO20{slash}PPS"
 		(at 283.21 93.98 0)
 		(effects
 			(font
@@ -3936,7 +3920,7 @@
 		)
 		(uuid "2c2e4f8c-968a-41ec-99d6-254f6321af0b")
 	)
-	(label "GPIO24"
+	(label "GPIO21"
 		(at 181.61 50.8 180)
 		(effects
 			(font
@@ -4036,8 +4020,8 @@
 		)
 		(uuid "5af7562c-ed8d-4064-9e4e-1c328fd97d98")
 	)
-	(label "GPIO5{slash}RXD1"
-		(at 110.49 85.09 180)
+	(label "GPIO13{slash}RXD4"
+		(at 110.49 90.17 180)
 		(effects
 			(font
 				(size 1.27 1.27)
@@ -4056,25 +4040,15 @@
 		)
 		(uuid "62a37db6-bf85-4f65-b316-c1fe060957b1")
 	)
-	(label "GPIO4{slash}TXD1"
-		(at 110.49 57.15 180)
-		(effects
-			(font
-				(size 1.27 1.27)
-			)
-			(justify right bottom)
-		)
-		(uuid "648cd824-67c0-4daf-ad29-a180a8965162")
-	)
-	(label "GPIO17"
-		(at 62.23 50.8 0)
+	(label "GPIO12{slash}TXD4"
+		(at 138.43 87.63 0)
 		(effects
 			(font
 				(size 1.27 1.27)
 			)
 			(justify left bottom)
 		)
-		(uuid "6534ae0c-c1f7-4144-a54c-8930baddcb47")
+		(uuid "648cd824-67c0-4daf-ad29-a180a8965162")
 	)
 	(label "CANL_RAW"
 		(at 62.23 107.95 0)
@@ -4106,7 +4080,7 @@
 		)
 		(uuid "6e2ca323-b531-4876-b1e9-526f4d47954d")
 	)
-	(label "GPIO5{slash}RXD1"
+	(label "GPIO13{slash}RXD4"
 		(at 283.21 83.82 0)
 		(effects
 			(font
@@ -4176,7 +4150,7 @@
 		)
 		(uuid "8fb08cba-d4df-49b6-9046-9feb0783ae85")
 	)
-	(label "GPIO4{slash}TXD1"
+	(label "GPIO12{slash}TXD4"
 		(at 283.21 88.9 0)
 		(effects
 			(font
@@ -4196,8 +4170,8 @@
 		)
 		(uuid "9fc294f2-635b-4b78-aff3-1b19bdb590f4")
 	)
-	(label "GPIO24"
-		(at 138.43 69.85 0)
+	(label "GPIO21"
+		(at 138.43 97.79 0)
 		(effects
 			(font
 				(size 1.27 1.27)
@@ -4206,8 +4180,8 @@
 		)
 		(uuid "a0390b3d-c9a7-4474-9f1d-cdc47eaa8b24")
 	)
-	(label "GPIO18{slash}PPS"
-		(at 138.43 62.23 0)
+	(label "GPIO20{slash}PPS"
+		(at 138.43 95.25 0)
 		(effects
 			(font
 				(size 1.27 1.27)
@@ -4316,7 +4290,7 @@
 		)
 		(uuid "ba5035e6-4a19-44b3-b847-e292d5f7cff9")
 	)
-	(label "GPIO16"
+	(label "GPIO17"
 		(at 43.18 29.21 90)
 		(effects
 			(font
@@ -4355,16 +4329,6 @@
 			(justify left bottom)
 		)
 		(uuid "c5cd68a9-8dc2-4c77-8433-89d55cc9b1fb")
-	)
-	(label "GPIO16"
-		(at 138.43 92.71 0)
-		(effects
-			(font
-				(size 1.27 1.27)
-			)
-			(justify left bottom)
-		)
-		(uuid "d4f2bffd-504c-4d09-82b3-1f4a591dedd1")
 	)
 	(label "GPIO2{slash}SDA1"
 		(at 110.49 52.07 180)
@@ -6222,19 +6186,9 @@
 				(justify right)
 			)
 		)
-		(pin "GPIO16_INT" output
+		(pin "INT1" output
 			(at 43.18 31.75 90)
 			(uuid "07367e2f-3355-4665-9d90-784fb575f9d1")
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify right)
-			)
-		)
-		(pin "BMP_INT" output
-			(at 59.69 50.8 0)
-			(uuid "38bc5052-7cd6-41b5-b920-838ce033578d")
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -6530,7 +6484,7 @@
 				(justify left top)
 			)
 		)
-		(pin "UART1_RXD" output
+		(pin "UART_RXD" output
 			(at 278.13 83.82 0)
 			(uuid "95d5726a-9884-4821-9938-81be2d9c0d62")
 			(effects
@@ -6540,7 +6494,7 @@
 				(justify right)
 			)
 		)
-		(pin "UART1_TXD" input
+		(pin "UART_TXD" input
 			(at 278.13 88.9 0)
 			(uuid "5c16c996-acc7-4b67-a87f-fa1af2f11d31")
 			(effects
@@ -6772,7 +6726,7 @@
 				(justify right)
 			)
 		)
-		(pin "GPIO24" input
+		(pin "PU_EN" input
 			(at 184.15 50.8 180)
 			(uuid "2959760c-936c-4b7c-8c4d-d45fdff7ee43")
 			(effects

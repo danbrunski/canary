@@ -29,10 +29,10 @@ KiCad-generated BOM; neither is complete on its own.
 
 | Item | Status |
 |---|---|
-| **Fiducials** | ✅ **On the board:** three global fiducials, top side, `Fiducial_1mm_Mask2mm` (FID1–FID3), carried over from rev 2.0. They are board-only footprints with no schematic symbol. If the outline changes (the RJ45 tab), check they still span the board's corners and stay clear of parts, and list their final positions in rev 2.1's fab notes, as rev 2.0's `FAB-NOTES.md` did. |
+| **Fiducials** | ✅ **On the board:** three global fiducials, top side, `Fiducial_1mm_Mask2mm` (FID1–FID3), carried over from rev 2.0, with FID2 moved onto the GNSS tab so the three span the whole board. They are board-only footprints with no schematic symbol. Their positions are listed in `FAB-NOTES.md`. |
 | Position / centroid file | Generate with `kicad-cli pcb export pos`. |
-| Assembly drawing with pin 1 marked | **Do this for U5, U6, U7, and in rev 2.1 also Y1, U8 and U9.** Y1 is a 4-pad crystal: a 90° rotation puts the crystal on its GND pads and shorts OSC1/OSC2 through the lid. Their footprints are SnapEDA/UltraLibrarian imports whose zero-rotation convention often disagrees with IPC-7351 and therefore with the assembler's. Rotation error on those three is the most likely assembly defect. |
-| Assembly scope split | State which parts they place (U5, U6, U7 at minimum) vs which are hand-soldered, so the centroid and BOM agree. |
+| Assembly drawing with pin 1 marked | **Do this for U6, U7, Y1, U8 and U9** (rev 2.1 has no U5). Y1 is a 4-pad crystal: a 90° rotation puts the crystal on its GND pads and shorts OSC1/OSC2 through the lid. Their footprints are SnapEDA/UltraLibrarian imports whose zero-rotation convention often disagrees with IPC-7351 and therefore with the assembler's. Rotation error on those imports (U6, U7) is the most likely assembly defect. |
+| Assembly scope split | State which parts they place (U6, U7, U8 at minimum) vs which are hand-soldered, so the centroid and BOM agree. |
 | Stencil | Needed if the LGAs are self-assembled. Paste apertures to be decided alongside the solder-mask expansion (see below). |
 
 ## Decisions recorded
@@ -50,7 +50,8 @@ KiCad-generated BOM; neither is complete on its own.
 - **R5 stays 1 kΩ.** It must be a **0.2W-rated 0603** — it dissipates 151 mW
   during a stuck-dominant bus fault, over a standard 0603's 0.1W.
   *(J5, the 2-pin mode-select header this note used to describe, was removed in
-  rev 2.0: the commander pull-up is now switched by Q2/Q3 from GPIO24, so the
+  rev 2.0: the commander pull-up is now switched by Q2/Q3 from GPIO24, GPIO21
+  on rev 2.1, so the
   mode changes in software rather than by unstacking the HAT from under the
   dash. There is no shunt to order.)*
 - **D2 is a 1N4148W in SOD-123 — the same part as D5** (changed 2026-08-15 from

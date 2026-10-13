@@ -3283,7 +3283,7 @@
 				(justify left)
 			)
 		)
-		(property "MPN" "PT 1,5/13-3,5-H"
+		(property "MPN" "1984727"
 			(at 91.44 74.93 0)
 			(hide yes)
 			(show_name no)
@@ -3306,7 +3306,7 @@
 				)
 			)
 		)
-		(property "Quote" "Rev 2.1: not yet quoted. Item number to confirm in Phoenix's catalog (family: 12-way is 1984714). Side-latching family: a 10-way + 3-way latched together has the same pitch and footprint if the 13-way is not stocked."
+		(property "Quote" "Rev 2.1: not yet quoted. Phoenix order number 1984727 = PT 1,5/13-3,5-H (Phoenix catalogue; the 12-way is 1984714, the 14-way 1984730). Side-latching family: a 10-way + 3-way latched together has the same pitch and footprint if the 13-way is not stocked."
 			(at 91.44 86.36 0)
 			(hide yes)
 			(show_name no)
