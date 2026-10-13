@@ -848,6 +848,22 @@ This checklist builds the yardstick.
   - Under the deployed schema, `2026-09-18T134345` has 14 never-observed
     channels, matching the engine's 14 `uncalibrated_channels` at load.
 
+- [ ] **A02.13 — A zero-variance calibration gives a zero-width band.**
+  `error_distribution` sets the k-sigma threshold to `mean + k * std`. When
+  every block maximum of a channel or family is identical, std is exactly 0,
+  so the band equals the mean whatever k is. Any later error a float ulp
+  higher then flags. Found 2026-10-12: `_frame`'s periodic synthetic rows did
+  this to the `speed` family, failing
+  `test_benchmark_reports_zero_false_positives_with_loose_threshold`
+  (8 family flags at k = 1000; red on main since at least 2026-09-27, on this
+  laptop's torch). The test now trains on noisy rows. The calibration itself
+  is unchanged and needs a decision:
+  - treat zero spread as uncalibrated, like A02.12's unobserved families; or
+  - floor the band's width.
+
+  Real drives rarely produce exact ties, which is why this has not shown up
+  live.
+
 ## Acceptance
 
 A02.1–A02.5, A02.9–A02.12 are desk work. A02.8 needs the truck and the

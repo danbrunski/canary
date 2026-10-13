@@ -97,9 +97,32 @@ def _trained(**config_updates):
     )
 
 
+def _random_frame(session: str, *, rows: int, start: str, seed: int) -> pd.DataFrame:
+    rng = np.random.default_rng(seed)
+    return pd.DataFrame(
+        {
+            SESSION_COLUMN: [session] * rows,
+            TIMESTAMP_COLUMN: pd.date_range(start, periods=rows, freq="s"),
+            "rpm": 700.0 + rng.normal(0.0, 1.0, rows),
+            "speed": np.abs(rng.normal(0.0, 1.0, rows)),
+        }
+    )
+
+
 def test_benchmark_reports_zero_false_positives_with_loose_threshold() -> None:
-    trained = _trained(threshold_k=1_000.0)
-    held_out = _dataset(_frame("holdout", rows=20, start="2026-05-12T01:00:00Z"))
+    # Noisy, not `_frame`'s periodic rows: those make every calibration block
+    # maximum of a channel identical, so its family band is `mean + k * 0` --
+    # zero width whatever k is -- and the verdict turns on float noise in the
+    # held-out error. That degenerate band is tracked in A02.13.
+    _torch()
+    trained = train_lstm_autoencoder(
+        _dataset(_random_frame("train", rows=40, start="2026-05-12T00:00:00Z", seed=1)),
+        _config(threshold_k=1_000.0),
+        trained_at="2026-05-12T12:00:00Z",
+        model_version="fp-benchmark-test",
+        allow_in_sample_calibration=True,
+    )
+    held_out = _dataset(_random_frame("holdout", rows=20, start="2026-05-12T01:00:00Z", seed=11))
 
     report = benchmark_false_positives(trained, held_out)
 
