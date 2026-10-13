@@ -83,7 +83,7 @@ pasted token. Each row below is now built, as each item records.
   bookmark). Add an "Allow a phone to change WiFi for 5 min" button that calls
   `POST /control/network/provisioning/window`.
 - [~] **P2.4 Pairing instead of a pasted token** (desk complete; truck check
-  and installer wiring open) (operator decisions
+  open) (operator decisions
   2026-10-12). Physical presence is the proof: a person in the car turns the
   key ACC → ON → ACC. It is ACC rather than OFF because a Pi on a switched
   lighter socket would lose power at OFF; OBD-port power needs the X1202.
@@ -105,7 +105,11 @@ pasted token. Each row below is now built, as each item records.
       `pairing.test.ts`.
     - **Not yet run on the truck.** Measure how long after ACC the classifier
       leaves `ignition_only` (`FRESHNESS_THRESHOLD_SECONDS` is 10 s), and
-      confirm ACC never reads as ON on the Xterra.
+      confirm ACC never reads as ON on the Xterra. The daemon logs every phase
+      change (`journalctl -u canary | grep "key phase"`, 2026-10-13): note
+      when the key moved, read when the Pi saw it. `on -> acc ... after N s
+      ON` is the lag plus the time held at ON, and a `-> on` line while the
+      key sat at ACC is the misread.
   - [x] **Approval from a paired device.** (`04238c3`)
     `/control/pairing/requests` and `.../approve`. The shared auth records
     the caller (`request.state.control_caller`). Paired devices see an

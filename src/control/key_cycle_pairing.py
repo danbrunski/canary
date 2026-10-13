@@ -304,13 +304,27 @@ class KeyCyclePairing:
         with self._lock:
             self._observe(state)
             began = None
+            before, on_since = self._detector.phase, self._detector.on_since
             if state is None:
                 self._detector.reset()
             else:
                 began = self._detector.update(state, now)
+            self._log_phase_change(before, on_since, state, now)
             self._expire(now)
             if began is not None:
                 self._cycle_completed(began)
+
+    def _log_phase_change(
+        self, before: Phase, on_since: float | None, state: str | None, now: float
+    ) -> None:
+        """One journal line per phase change: the truck check (phone-ui P2.4)
+        compares when the key moved with when the Pi saw it, and an ACC that
+        reads as ON shows up here as a phase the key was not in."""
+        after = self._detector.phase
+        if after == before:
+            return
+        held = f" after {now - on_since:.1f} s ON" if before == "on" and on_since else ""
+        log.info("key phase %s -> %s (vehicle_state %s)%s", before, after, state, held)
 
     def _observe(self, state: str | None) -> None:
         self._observed.state = state

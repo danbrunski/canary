@@ -9,6 +9,7 @@ already ON, ON held like driving, and states that are not the car at all.
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 
 import pytest
@@ -286,3 +287,20 @@ def test_a_key_cycle_approval_is_announced(car: Car) -> None:
     car.pairing.request("Android phone")
     car.cycle()
     assert "pairing.approved" in car.events
+
+
+def test_every_phase_change_is_logged_with_its_state_and_on_time(
+    car: Car, caplog: pytest.LogCaptureFixture
+) -> None:
+    """The truck check (phone-ui P2.4) reads the journal: when the key went
+    back to ACC is the operator's note, when the Pi saw it is this line."""
+    caplog.set_level(logging.INFO, logger="src.control.key_cycle_pairing")
+    car.hold(ACC)
+    car.hold(ON, 5)
+    car.hold(ACC)
+    lines = [r.getMessage() for r in caplog.records if r.getMessage().startswith("key phase")]
+    assert lines == [
+        "key phase unknown -> acc (vehicle_state engine_off)",
+        "key phase acc -> on (vehicle_state ignition_only)",
+        "key phase on -> acc (vehicle_state engine_off) after 5.0 s ON",
+    ]
