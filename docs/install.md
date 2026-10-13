@@ -97,6 +97,33 @@ config for `/run/canary`, the i2c modules-load entry, and the
 deployment walkthrough. Use the token from the laptop as
 `CANARY_CONTROL_TOKEN` for `scripts/canaryctl.py`.
 
+## Making an Image to Hand Out
+
+A pre-flashed SD card must not carry the Pi it was made on: that Pi's
+control token would control every copy, its paired phone would control a
+customer's Pi, and its WiFi profile would keep Bluetooth setup closed. On the
+reference Pi, after `scripts/install_pi.sh`:
+
+```bash
+sudo scripts/prepare_image.sh     # strips token, paired devices, WiFi, hostname, keys
+sudo poweroff                     # then image the card
+```
+
+Each copy's first boot runs `canary-firstboot.service` once
+(`scripts/canary_firstboot.sh`), before the daemon and the BLE setup service.
+It generates that Pi's own control token, names it `canary-XXXX` from its
+MAC, and creates SSH host keys. The copy then boots with no WiFi, so the
+owner's phone sets it up over Bluetooth and pairs by key cycle
+(docs/ble-provisioning.md).
+
+Until `install_pi.sh` installs the unit itself, add it by hand on the
+reference Pi before preparing the image:
+
+```bash
+sudo install -m 0644 systemd/canary-firstboot.service /etc/systemd/system/
+sudo systemctl daemon-reload && sudo systemctl enable canary-firstboot
+```
+
 ## Verifying CUDA
 
 From a normal shell with GPU access:

@@ -1,0 +1,14 @@
+[Unit]
+Description=CANary first boot: this Pi's own control token, hostname and SSH keys
+# Only on a Pi imaged after scripts/prepare_image.sh, which leaves the marker.
+ConditionPathExists=/etc/canary/firstboot
+Before=canary.service canary-mcp.service canary-provision.service avahi-daemon.service ssh.service
+After=local-fs.target
+
+[Service]
+Type=oneshot
+EnvironmentFile=/etc/canary/canary.env
+ExecStart=/bin/bash ${CANARY_HOME}/scripts/canary_firstboot.sh
+
+[Install]
+WantedBy=multi-user.target
