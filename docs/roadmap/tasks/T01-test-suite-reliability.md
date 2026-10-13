@@ -805,3 +805,19 @@ measurement in hand.
     any more, and `import time` is gone.
   - **After:** the file runs 20 of 20 in 0.34 s. The same probe on the fake
     clock passes, because a real stall does not advance simulated time.
+- [ ] **T01.26 `tests/test_twin_command_change.py::test_the_brain_memory_and_card_routes_serve_a_what_if_unchanged`
+  raised "record time cannot move backwards on an append-only ledger".**
+  - **Seen** 2026-10-13 in the push gate for `030bcf1` (a docs/scripts-only
+    change), parallel run at load average 24.5 (1-min): `record_command_change`
+    → `MemoryLedger.append(prediction, now=None)` → `ValueError` at
+    `src/evidence/ledger.py` `_append_locked`. Passed serially in 3.5 s
+    (FLAKY UNDER LOAD). Log:
+    `.git/ci-gate/failed-logs/20261013T145525Z-030bcf1-pytest.log`.
+  - **Likely cause, not yet confirmed:** the only earlier record in the ledger
+    was appended a moment before with `now=None` too, so both stamps came from
+    the wall clock (`_now()`), and the second read lower than the first. WSL2
+    steps the guest clock back when it re-syncs with the host, which is
+    likeliest under heavy load. If that holds, it is not a test-only flake: a
+    Pi whose clock NTP steps backwards would refuse the same append. Decide
+    whether the ledger should clamp to `index.latest` (monotonic record time)
+    or the test should pass `now=`.
