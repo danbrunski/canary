@@ -3162,7 +3162,7 @@ live here now, so the documents could be archived
     sensor side (terminal 1 to block, 532–588 kΩ), then wiggle-test at idle.
     See `docs/ecu-firmware-analysis.md`, "Knock monitoring".
 
-- [ ] **D03.41 Measured AFR's declaration claims the A/F voltage suffices
+- [x] **D03.41 Measured AFR's declaration claims the A/F voltage suffices
   without baro (found 2026-10-08, B08.1 follow-up).** `derived:AFR_B1/B2`
   and `AFR_CENSORED_B1/B2` declare one group, `(wideband lambda PID, A/F
   voltage DID)`, with baro only *optional*
@@ -3199,6 +3199,42 @@ live here now, so the documents could be archived
     check producibility. Add a per-context assertion that every minimal frame
     of the declaration produces the channel. That would have failed here on
     the frame `{did:ECM_AF_SENSOR_V_B1}`.
+  - **Done 2026-10-13.** `derived:AFR_B1/B2` and `AFR_CENSORED_B1/B2` are
+    now `((lambda, V), (lambda, baro))` in both
+    `nissan_xterra_2008.DERIVED_CHANNEL_INPUTS` and the builder
+    `src.signals.derived._VEHICLE_INPUTS` (baro group present where a vehicle
+    declares `AF_SENSOR_BARO`, like `LAMBDA_BANK_BALANCE_AF_VOLTAGE_BARO`).
+    The vehicle `DERIVED_CHANNEL_OPTIONAL_INPUTS` table is gone;
+    `_VEHICLE_OPTIONAL_INPUTS` is kept empty so a vehicle literal optional
+    entry still refuses at import. Leaf sets are unchanged, so trainability,
+    `derived_channel_inputs` and `engine_dynamics` see the same inputs;
+    `channel_satisfied` and `FeaturePolicy._unserved_group` iterate groups and
+    become stricter with no code change. `declaration_problems` now reports
+    `not produced from the minimal frame [...]` for every base context that
+    produces nothing. Before the fix the new check failed exactly the four
+    AFR families (`AFR_B1+AFR_CENSORED_B1`, `AFR_B2+…`, `AFR_ERROR_B1`,
+    `AFR_ERROR_B2`, log: `baro_missing: derived:AFR_B2 needs
+    obd:BAROMETRIC_PRESSURE`) and nothing else. Evidence:
+    `tests/test_derived_inputs_declared.py`
+    `::test_a_declared_context_that_cannot_produce_the_channel_is_caught`
+    (old declaration → `not produced from the minimal frame
+    ['did:ECM_AF_SENSOR_V_B1']`),
+    `::test_a_profile_without_baro_or_lambda_cannot_supply_measured_afr`
+    (the repro profile: `channel_satisfied` False and `_unserved_group` not
+    None for AFR/CENSORED/ERROR B1+B2 and the baro balance; the old
+    declaration returned True for all three B1 channels),
+    `::test_either_route_supplies_measured_afr` (lambda, or voltage+baro);
+    `test_a_missing_alternative_is_caught` keeps baro in the frame so the
+    undeclared voltage read is still named. `pytest -n 4` over
+    test_derived_inputs_declared, test_afr, test_anomaly_signals_table,
+    test_artifact_lineage, test_base_fuel_schedule, test_capture_profiles,
+    test_feature_pipeline_incremental, test_feature_policy,
+    test_featurization_profile_scope, test_target_afr_load_axis,
+    test_train_anomaly_model, test_trainability, test_xterra_default_poll_list,
+    test_layering, test_state_dir: 371 passed. Side effect: a model built
+    2026-10-08..10-13 that reads `derived:AFR_*` now audits as
+    `definition_changed` (the 09-20/09-24 deployed fixtures predate the
+    literal form and are unaffected).
 
 ## Deferred by decision, not blocked
 

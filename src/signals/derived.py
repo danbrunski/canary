@@ -180,15 +180,14 @@ def _require_literal(
     )
 
 
-#: Measured AFR's optional input, built from the vehicle's declaration: B06.7,
-#: measured AFR from the A/F voltage needs the baro the ECM's gain is looked up
-#: on; from the lambda PID it does not, so it is optional.
-_VEHICLE_OPTIONAL_INPUTS: dict[str, tuple[str, ...]] = {
-    f"derived:AFR_{kind}B{bank}": vehicle_signals.af_sensor_baro_columns()
-    for bank in (1, 2)
-    for kind in ("", "CENSORED_")
-    if vehicle_signals.af_sensor_baro_columns()
-}
+#: The optional inputs built from vehicle declarations: none. Measured AFR's
+#: baro was declared here until D03.41 (2026-10-13), but the voltage route
+#: withholds every row without a fresh one (B06.7), so baro is a *required*
+#: input of that route and sits in its conjunctive groups in
+#: :data:`_VEHICLE_INPUTS`. Kept, empty, so a vehicle module's literal
+#: ``DERIVED_CHANNEL_OPTIONAL_INPUTS`` refuses at import unless code here
+#: builds it too.
+_VEHICLE_OPTIONAL_INPUTS: dict[str, tuple[str, ...]] = {}
 _require_literal(
     "the vehicle-built optional derived inputs",
     _VEHICLE_OPTIONAL_INPUTS,
@@ -1002,11 +1001,26 @@ _VEHICLE_INPUTS: dict[str, tuple[tuple[str, ...], ...]] = {
     # --- src.signals.afr.append_afr_channels ------------------------------
     # Measured AFR: the bank's wideband lambda PID, else the AF-sensor voltage
     # DID through the profile's transfer (only when a calibration is loaded).
+    # D03.41: the voltage route converts each row at the ECM's barometric gain
+    # and withholds rows with no fresh baro (B06.7), so it needs voltage *and*
+    # baro. Written in the conjunctive form of "lambda, or (voltage and baro)"
+    # like FUEL_RATE_LPH: each group necessary, together sufficient. The baro
+    # group is present where any vehicle declares an A/F baro channel.
     **{
         f"derived:AFR_{kind}B{bank}": (
             (
                 *vehicle_signals.wideband_lambda_columns(bank),
                 *vehicle_signals.af_sensor_voltage_columns(bank),
+            ),
+            *(
+                (
+                    (
+                        *vehicle_signals.wideband_lambda_columns(bank),
+                        *vehicle_signals.af_sensor_baro_columns(),
+                    ),
+                )
+                if vehicle_signals.af_sensor_baro_columns()
+                else ()
             ),
         )
         for bank in (1, 2)

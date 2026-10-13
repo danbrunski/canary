@@ -48,10 +48,13 @@ Blind spots, stated plainly; this test does **not** prove every read is caught:
 - *Leaf comparison.* A group naming a derived channel whose leaves are
   already declared through another group (the AFR error's censor flag) is not
   distinguished from its absence.
-- *Producibility.* A channel passes when *some* frame produces it; the test
-  does not assert that every minimal frame of the declaration does, so a
-  declaration that names a group as sufficient when the code also needs
-  another input (D03.41: measured AFR from the voltage needs baro) passes.
+
+Producibility is checked per context (D03.41): every minimal frame of the
+declaration must produce the channel, because each is a column set the
+registry's consumers (capture-profile validation, the serving gate) accept as
+sufficient. Measured AFR declared its A/F voltage DID as sufficient while the
+voltage route withholds every row without a fresh baro (B06.7), and the old
+"some frame produces it" check passed it.
 """
 
 from __future__ import annotations
@@ -67,10 +70,12 @@ import pandas as pd
 import pytest
 
 from src.analysis.artifact_lineage import parse_derived_sources
+from src.collection.capture_profiles import CaptureProfile, channel_satisfied
 from src.config import VehicleParameters
 from src.decode import engineering
 from src.decode.dids import DidMap, load_repo_did_map
 from src.decode.engineering import UnscaledDecodedChannelError, repo_bindings
+from src.features.feature_pipeline import FeaturePolicy
 from src.plausibility.limits import load_plausibility_profile, resolve_limits
 from src.preprocessing.channel_units import append_did_views, channel_units_for
 from src.preprocessing.imu_decimation import IMU_TICK_COLUMNS
@@ -512,6 +517,8 @@ def declaration_problems(
     - Each declared column must change the value when removed from one of
       those frames or from one with an optional input added (*every declared
       input is read*).
+    - Every minimal frame must produce the channel (*each context the
+      declaration calls sufficient is*; D03.41).
     """
     leaves = _leaves(channel, registry, optional)
     declared = _declared(channel, registry, optional)
@@ -540,6 +547,11 @@ def declaration_problems(
 
     frames = [*base, *variants]
     produced = any(chain.value(channel, columns) is not None for columns in frames)
+    # Producibility (D03.41): every minimal frame of the declaration is a
+    # context the registry calls sufficient (capture-profile validation and the
+    # serving gate accept a profile carrying just that frame), so each must
+    # produce the channel.
+    unproducible = [columns for columns in base if chain.value(channel, columns) is None]
     witnessed = {
         leaf
         for leaf in leaves
@@ -561,6 +573,10 @@ def declaration_problems(
             undeclared((holding - {leaf}) | optional_leaves)
     if not produced:
         problems.append("never produced from its declared inputs")
+    else:
+        problems += [
+            f"not produced from the minimal frame {sorted(columns)}" for columns in unproducible
+        ]
     problems += [f"declares {c} but never reads it" for c in sorted(leaves - witnessed)]
     return problems
 
@@ -681,10 +697,84 @@ def test_a_declared_input_the_computation_ignores_is_caught(chain: _Chain) -> No
 
 
 def test_a_missing_alternative_is_caught(chain: _Chain) -> None:
-    """The A/F voltage fallback removed from measured AFR: read, undeclared."""
+    """The A/F voltage fallback removed from measured AFR: read, undeclared.
+
+    Baro stays in the frame (as an optional input) so the voltage route can
+    run without the lambda PID; with neither, the undeclared read needs two
+    columns at once and is reported only as "a combination" (D03.41 made
+    baro a required input of that route)."""
     registry = dict(DERIVED_CHANNEL_INPUTS)
     registry["derived:AFR_B1"] = (("obd:O2_WR_LAMBDA_S1",),)
-    problems = declaration_problems(
-        "derived:AFR_B1", chain, registry, DERIVED_CHANNEL_OPTIONAL_INPUTS
-    )
+    optional = {**DERIVED_CHANNEL_OPTIONAL_INPUTS, "derived:AFR_B1": (BARO,)}
+    problems = declaration_problems("derived:AFR_B1", chain, registry, optional)
     assert any("did:ECM_AF_SENSOR_V_B1" in p for p in problems), problems
+
+
+#: D03.41's declaration of measured AFR before the fix: the A/F voltage DID
+#: alone named sufficient, baro only optional.
+_PRE_D03_41_AFR_B1 = (("obd:O2_WR_LAMBDA_S1", "did:ECM_AF_SENSOR_V_B1"),)
+
+
+def test_a_declared_context_that_cannot_produce_the_channel_is_caught(chain: _Chain) -> None:
+    """D03.41: with baro merely optional, the minimal frame of the voltage DID
+    alone is declared sufficient, but the voltage route withholds every row
+    without a fresh baro, so that frame produces nothing."""
+    registry = {**DERIVED_CHANNEL_INPUTS, "derived:AFR_B1": _PRE_D03_41_AFR_B1}
+    optional = {**DERIVED_CHANNEL_OPTIONAL_INPUTS, "derived:AFR_B1": (BARO,)}
+    problems = declaration_problems("derived:AFR_B1", chain, registry, optional)
+    assert "not produced from the minimal frame ['did:ECM_AF_SENSOR_V_B1']" in problems, problems
+
+
+#: The D03.41 repro: a tuning-style profile polling the A/F voltage DIDs but
+#: neither Mode 01 baro nor the wide-range lambda PIDs.
+_VOLTAGE_ONLY = CaptureProfile(
+    name="repro",
+    storage_prefix="_capture-repro",
+    mode01={"RPM": 1.0},
+    mode22=["ECM_AF_SENSOR_V_B1", "ECM_AF_SENSOR_V_B2", "ECM_AIR_CHARGE"],
+)
+
+
+@pytest.mark.parametrize(
+    "channel",
+    [
+        "derived:AFR_B1",
+        "derived:AFR_CENSORED_B1",
+        "derived:AFR_ERROR_B1",
+        "derived:AFR_B2",
+        "derived:AFR_CENSORED_B2",
+        "derived:AFR_ERROR_B2",
+        "derived:LAMBDA_BANK_BALANCE_AF_VOLTAGE_BARO",
+    ],
+)
+def test_a_profile_without_baro_or_lambda_cannot_supply_measured_afr(channel: str) -> None:
+    """Capture-profile validation and the serving gate read the registry's
+    groups, so the conjunctive declaration makes both refuse a profile that
+    could never produce measured AFR (D03.41)."""
+    assert not channel_satisfied(channel, _VOLTAGE_ONLY, frozenset())
+    policy = FeaturePolicy(
+        bindings=None,
+        serving_mode01=frozenset({"RPM"}),
+        serving_dids=frozenset({"ECM_AF_SENSOR_V_B1", "ECM_AF_SENSOR_V_B2", "ECM_AIR_CHARGE"}),
+        did_map=load_repo_did_map(),
+    )
+    assert policy._unserved_group(channel, frozenset()) is not None
+
+
+@pytest.mark.parametrize(
+    "mode01",
+    [
+        {"RPM": 1.0, "BAROMETRIC_PRESSURE": 1.0},
+        {"RPM": 1.0, "O2_WR_LAMBDA_S1": 1.0, "O2_WR_LAMBDA_S5": 1.0},
+    ],
+    ids=["voltage-and-baro", "lambda"],
+)
+def test_either_route_supplies_measured_afr(mode01: dict[str, float]) -> None:
+    """The stricter declaration still accepts both real routes: the lambda PID,
+    or the A/F voltage with baro."""
+    profile = CaptureProfile(
+        name="routes", storage_prefix="_capture-routes", mode01=mode01, mode22=_VOLTAGE_ONLY.mode22
+    )
+    for bank in (1, 2):
+        assert channel_satisfied(f"derived:AFR_B{bank}", profile, frozenset())
+        assert channel_satisfied(f"derived:AFR_CENSORED_B{bank}", profile, frozenset())
