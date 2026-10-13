@@ -14,12 +14,14 @@ import pytest
 from src.config import CanaryConfig, NonvolatileWriteConfig
 from src.control.audit import ControlAuditLogger
 from src.control.nonvolatile_write import (
+    SUPPLY_VOLTAGE_SOURCES,
     Authorization,
     AuthorizationRefusedError,
     NonvolatileWriteGuard,
     NonvolatileWriteRequest,
     NonvolatileWriteSignals,
     SupplyVoltageReading,
+    SupplyVoltageSources,
     execute_authorized_blocks,
     sha256_image,
     supply_voltage_from_latest_rows,
@@ -346,7 +348,9 @@ def _row(key: tuple[str, str], value: Any, age_seconds: float) -> dict[str, Any]
 
 
 def _read(*rows: dict[str, Any]) -> SupplyVoltageReading:
-    return supply_voltage_from_latest_rows(rows, now=NOW, max_age_seconds=MAX_AGE)
+    return supply_voltage_from_latest_rows(
+        rows, now=NOW, max_age_seconds=MAX_AGE, sources=SupplyVoltageSources(SUPPLY_VOLTAGE_SOURCES)
+    )
 
 
 @pytest.mark.parametrize(

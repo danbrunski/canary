@@ -325,12 +325,16 @@ class ImuConfig(_Strict):
 
 
 class SupplyVoltageConfig(_Strict):
-    """The CANary-HAT's 12 V sense: an ADS1015 reading the protected ``+12V``
-    rail through a resistor divider. Recorded as ``sensor:SUPPLY_VOLTAGE``.
+    """The CANary-HAT's 12 V sense: the protected ``+12V`` rail through a
+    resistor divider. Recorded as ``sensor:SUPPLY_VOLTAGE``.
 
     Unlike ``obd:CONTROL_MODULE_VOLTAGE`` it needs no awake ECM, so it reads
     key-off and parked. Disabled by default (no HAT, no ADC). An
     external-sensor channel: never trains or scores the anomaly detectors.
+
+    The fields below are rev 2.0's ADS1015. On rev 2.1 the same rail is the
+    ADS8688A's CH0, read by the ``hardware.hat_adc`` collector with the divider
+    from its board map; there only ``enabled`` and ``rate_hz`` apply.
     """
 
     enabled: bool = False
@@ -341,8 +345,54 @@ class SupplyVoltageConfig(_Strict):
     #: Rail volts per volt at the ADC pin. HAT rev 2.0: R11 100 k over R12
     #: 22 k, so (100 + 22) / 22. A per-board fact, kept here, not in code.
     divider_ratio: float = Field(default=122.0 / 22.0, gt=1.0)
-    #: Conversions per second. The rail moves slowly except while cranking.
+    #: Readings recorded per second. The rail moves slowly except while cranking.
     rate_hz: float = Field(default=10.0, gt=0.0, le=200.0)
+
+
+class HatAdcConfig(_Strict):
+    """The CANary-HAT rev 2.1's ADC (ADS8688A, U8): the fuel-pressure gauge
+    and the two generic sensor ports. ``src.collection.hat_adc_collector``.
+
+    Disabled by default; rev 2.1 only (rev 2.0 has no such ADC). The channel
+    map and every calibration number are data (``board``). The same chip also
+    carries rev 2.1's 12 V sense, which ``hardware.supply_voltage`` switches.
+    Recorded under ``sensor:``, so never trains or scores the detectors.
+
+    **Rates.** The chip shares SPI0 with the vehicle CAN controller, so it is
+    read in short bursts, one bus message each (about 75 µs for five inputs).
+    The fast channels (the sensors and the voltage ports) are stored at
+    ``record_hz``, each record the mean of ``burst_hz / record_hz`` bursts: the
+    USB ADC path stores fuel pressure the same way, 100 Hz averaged from about
+    500, so injector pulsation is not aliased into it. Supply rails and the
+    resistive ports move slowly and are stored at ``slow_record_hz``.
+    """
+
+    enabled: bool = False
+    #: ``None``: the revision table's (``/dev/spidev0.1`` on rev 2.1).
+    spi_device: str | None = None
+    #: The ADS8688A allows 17 MHz.
+    spi_speed_hz: int = Field(default=8_000_000, gt=0, le=17_000_000)
+    #: Bursts per second, every mapped input in each. At 500 the chip holds
+    #: the bus a few per cent of the time; measure CAN frame loss with it
+    #: idle and running at bring-up (docs/CANary-HAT-Rev2.1.md §13.5.3).
+    burst_hz: float = Field(default=500.0, gt=0.0, le=2000.0)
+    record_hz: float = Field(default=100.0, gt=0.0)
+    slow_record_hz: float = Field(default=10.0, gt=0.0)
+    #: Drive the sensor supply's enable (``SENS_PWR_EN``, GPIO19 on rev 2.1)
+    #: high while collecting, low on stop. Off, the ports read the supply as
+    #: low and record that instead of ratios.
+    sensor_power: bool = True
+    gpio_chip: str = "/dev/gpiochip0"
+    board: Path = DATA_DIR / "hat_adc_rev2_1.yaml"
+
+    @model_validator(mode="after")
+    def _rates_nest(self) -> Self:
+        if not self.slow_record_hz <= self.record_hz <= self.burst_hz:
+            raise ValueError(
+                "hardware.hat_adc: need slow_record_hz <= record_hz <= burst_hz, got "
+                f"{self.slow_record_hz} / {self.record_hz} / {self.burst_hz}"
+            )
+        return self
 
 
 class UsbAdcConfig(_Strict):
@@ -414,6 +464,7 @@ class HardwareConfig(_Strict):
     imu: ImuConfig = ImuConfig()
     sensor_can: SensorCanConfig = SensorCanConfig()
     supply_voltage: SupplyVoltageConfig = SupplyVoltageConfig()
+    hat_adc: HatAdcConfig = HatAdcConfig()
     usb_adc: UsbAdcConfig = UsbAdcConfig()
     kline: KlineConfig = KlineConfig()
 

@@ -78,10 +78,10 @@ def probe_vehicle_info(config: CanaryConfig) -> VehicleInfoProbe:
     # request would sit in the transmit queue until ENOBUFS: one warning at
     # every bench start (2026-10-05). The collectors are not running yet, so
     # read the HAT's 12 V sense once here.
-    from src.collection.supply_voltage_collector import read_supply_once
+    from src.collection.supply_sense import read_supply_once
     from src.collection.vehicle_power import ASLEEP_SECONDS, classify_supply
 
-    supply = read_supply_once(config.hardware.supply_voltage)
+    supply = read_supply_once(config.hardware)
     if classify_supply(supply) == "bench":
         log.info(
             "vehicle info probe skipped: no vehicle on the OBD port (12 V sense reads %.2f V)",

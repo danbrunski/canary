@@ -186,6 +186,7 @@ NOT_STATE: dict[tuple[str, str], str] = {
     **dict.fromkeys(
         [
             ("ads1015.py", "PGA_CODES"),
+            ("ads8688a.py", "RANGES"),
             ("custom_pids.py", "_ALLOWED_BINOPS"),
             ("custom_pids.py", "_ALLOWED_UNARYOPS"),
             ("custom_pids.py", "_ALLOWED_COMPARE"),
@@ -214,6 +215,10 @@ NOT_STATE: dict[tuple[str, str], str] = {
     ("capture_profiles.py", "_SERVING_MODE01_CACHE"): "keyed by both sources' mtimes; never stale",
     ("gpio_lines.py", "GPIO_V2_GET_LINE_IOCTL"): "an int computed at import",
     ("gpio_lines.py", "GPIO_V2_LINE_SET_VALUES_IOCTL"): "an int computed at import",
+    ("spi_dev.py", "SPI_IOC_MAGIC"): "an int computed at import",
+    ("spi_dev.py", "SPI_IOC_WR_MODE"): "an int computed at import",
+    ("spi_dev.py", "SPI_IOC_WR_BITS_PER_WORD"): "an int computed at import",
+    ("spi_dev.py", "SPI_IOC_WR_MAX_SPEED_HZ"): "an int computed at import",
     ("reconnect.py", "DEFAULT_RECONNECT_POLICY"): "frozen dataclass",
     ("request_eligibility.py", "ELIGIBLE"): "frozen dataclass",
     ("request_eligibility.py", "_CONTINUOUS"): "frozen dataclass",

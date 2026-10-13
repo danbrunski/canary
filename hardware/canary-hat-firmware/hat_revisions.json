@@ -7,7 +7,9 @@
     "(eeprom_settings*.txt); the firmware exposes it as /proc/device-tree/hat/product_ver.",
     "A board with no readable CANary-HAT EEPROM is treated as 'unidentified': rev 2.0 is",
     "the only revision that has run without one, and rev 2.1 needs its EEPROM to load its",
-    "own overlay at all. Rev 2.1's pin moves: docs/CANary-HAT-Rev2.1.md section 13.5.13."
+    "own overlay at all. Rev 2.1's pin moves: docs/CANary-HAT-Rev2.1.md section 13.5.13.",
+    "adc_spi_device and sensor_power_gpio are the ADS8688A's (rev 2.1 only): its spidev",
+    "node and SENS_PWR_EN, the 5 V sensor supply's enable (section 13.5.12)."
   ],
   "unidentified": "2.0",
   "revisions": [
@@ -23,7 +25,9 @@
       "kline_enable_gpio": 26,
       "kline_pullup_gpio": 24,
       "barometer": true,
-      "supply_adc": "ads1015"
+      "supply_adc": "ads1015",
+      "adc_spi_device": null,
+      "sensor_power_gpio": null
     },
     {
       "name": "2.1",
@@ -37,7 +41,9 @@
       "kline_enable_gpio": 26,
       "kline_pullup_gpio": 21,
       "barometer": false,
-      "supply_adc": "ads8688a"
+      "supply_adc": "ads8688a",
+      "adc_spi_device": "/dev/spidev0.1",
+      "sensor_power_gpio": 19
     }
   ]
 }

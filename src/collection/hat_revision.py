@@ -2,8 +2,9 @@
 
 Rev 2.1 moved pins (``docs/CANary-HAT-Rev2.1.md`` §13.5.13): the K-line
 commander pull-up went from GPIO24 to GPIO21, and the 12 V sense moved from the
-ADS1015 to the ADS8688A. Both revisions are in service, so nothing here assumes
-one. The facts are ``hardware/canary-hat-firmware/hat_revisions.json``, which
+ADS1015 to the ADS8688A, whose sensor supply GPIO19 switches. Both revisions
+are in service, so nothing here assumes one. The facts are
+``hardware/canary-hat-firmware/hat_revisions.json``, which
 the board's bring-up scripts read too (``hat_rev.py`` beside it). The fitted
 revision is the one the HAT's ID EEPROM reports, unless
 ``hardware.hat_revision`` names one.
@@ -39,8 +40,13 @@ class HatRevision:
     kline_enable_gpio: int
     kline_pullup_gpio: int
     #: The 12 V sense's converter: ``ads1015`` (rev 2.0, I2C, what
-    #: :mod:`src.collection.supply_voltage_collector` reads) or ``ads8688a``.
+    #: :mod:`src.collection.supply_voltage_collector` reads) or ``ads8688a``
+    #: (rev 2.1, SPI, :mod:`src.collection.hat_adc_collector`).
     supply_adc: str
+    #: The ADS8688A's spidev node; ``None`` on a board without one.
+    adc_spi_device: str | None
+    #: ``SENS_PWR_EN``, the 5 V sensor supply's enable; ``None`` where there is none.
+    sensor_power_gpio: int | None
     #: How it was chosen: ``config``, ``eeprom`` or ``unidentified``.
     source: str
 
@@ -59,6 +65,8 @@ def _revision(row: dict[str, Any], source: str) -> HatRevision:
         kline_enable_gpio=row["kline_enable_gpio"],
         kline_pullup_gpio=row["kline_pullup_gpio"],
         supply_adc=row["supply_adc"],
+        adc_spi_device=row["adc_spi_device"],
+        sensor_power_gpio=row["sensor_power_gpio"],
         source=source,
     )
 

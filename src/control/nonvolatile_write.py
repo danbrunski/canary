@@ -20,8 +20,10 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any, Protocol, TypeVar
 
-from src.config import NonvolatileWriteConfig
+from src.collection.hat_revision import HatRevisionError, resolve_hat_revision
+from src.config import HardwareConfig, NonvolatileWriteConfig
 from src.control.audit import ControlAuditLogger
+from src.decode.hat_adc_board import load_hat_adc_board
 from src.timefmt import parse_iso_utc
 from src.vehicle_state import VehicleState
 
@@ -49,6 +51,51 @@ SUPPLY_VOLTAGE_SOURCES: tuple[tuple[str, str], ...] = (
     ("sensor", "SUPPLY_VOLTAGE"),
     ("obd", "CONTROL_MODULE_VOLTAGE"),
 )
+
+
+@dataclass(frozen=True)
+class SupplyVoltageSources:
+    """The supply-voltage channels a write may be gated on, in preference
+    order, and the ones held back with the reason. Build it with
+    :func:`supply_voltage_sources`, which knows when the HAT's 12 V sense is
+    not to be trusted; :func:`supply_voltage_from_latest_rows` requires one, so
+    no caller can skip that question."""
+
+    order: tuple[tuple[str, str], ...]
+    #: ``"<source>:<channel>: <why>"`` for each source held back.
+    withheld: tuple[str, ...] = ()
+
+
+def supply_voltage_sources(hardware: HardwareConfig) -> SupplyVoltageSources:
+    """:data:`SUPPLY_VOLTAGE_SOURCES`, less a 12 V sense whose calibration is
+    not known.
+
+    Rev 2.1's sense is the ADS8688A's CH0. Until its ``gain_trim`` is measured
+    against a meter (open item 23), the divider's 1 % parts alone leave it
+    about ±1.6 % out, so an 11.8 V battery can read 12.0 V. That reading is
+    still fine for telling parked from bench, but it must not pass a write's
+    battery floor. The gate then falls back to the ECM's own reading, which a
+    write's ``ignition_only`` state guarantees is awake."""
+    sense = ("sensor", "SUPPLY_VOLTAGE")
+    others = tuple(s for s in SUPPLY_VOLTAGE_SOURCES if s != sense)
+    if not hardware.supply_voltage.enabled:
+        return SupplyVoltageSources(SUPPLY_VOLTAGE_SOURCES)
+    try:
+        revision = resolve_hat_revision(hardware.hat_revision)
+    except HatRevisionError as exc:
+        return SupplyVoltageSources(others, (f"sensor:SUPPLY_VOLTAGE: {exc}",))
+    if revision.supply_adc == "ads8688a":
+        board = load_hat_adc_board(hardware.hat_adc.board)
+        if board.supply.gain_trim is None:
+            return SupplyVoltageSources(
+                others,
+                (
+                    "sensor:SUPPLY_VOLTAGE: rev 2.1's 12 V sense is uncalibrated "
+                    f"(supply.gain_trim is null in {hardware.hat_adc.board.name} until it is "
+                    "measured against a meter, open item 23)",
+                ),
+            )
+    return SupplyVoltageSources(SUPPLY_VOLTAGE_SOURCES)
 
 
 @dataclass(frozen=True)
@@ -110,21 +157,26 @@ def _row_instant(raw: object) -> datetime | None:
 
 
 def supply_voltage_from_latest_rows(
-    rows: Iterable[Mapping[str, Any]], *, now: datetime, max_age_seconds: float
+    rows: Iterable[Mapping[str, Any]],
+    *,
+    now: datetime,
+    max_age_seconds: float,
+    sources: SupplyVoltageSources,
 ) -> SupplyVoltageReading:
     """The production supply-voltage reader for :class:`NonvolatileWriteSignals`.
 
     ``rows`` are latest-per-channel rows (``{source, channel, value,
     timestamp}``, what ``dashboard.readers.read_latest_per_channel`` returns
     for the session being written — pass the writer's live directory, or a
-    capture is invisible). Tries :data:`SUPPLY_VOLTAGE_SOURCES` in order and
-    returns the first whose newest value is a finite number stamped no more
+    capture is invisible). Tries ``sources`` in order (from
+    :func:`supply_voltage_sources`) and returns the first whose newest value
+    is a finite number stamped no more
     than ``max_age_seconds`` before ``now`` (and not after it: a reading from
     the future is a clock fault, not a fresh one). Anything else is an
     unknown reading naming why each source failed, which the guard refuses.
     Pure: the read stays with the caller.
     """
-    wanted = {(source, channel) for source, channel in SUPPLY_VOLTAGE_SOURCES}
+    wanted = set(sources.order)
     newest: dict[tuple[str, str], tuple[datetime | None, object]] = {}
     for row in rows:
         key = (str(row.get("source")), str(row.get("channel")))
@@ -134,8 +186,8 @@ def supply_voltage_from_latest_rows(
         held = newest.get(key)
         if held is None or (stamp is not None and (held[0] is None or stamp > held[0])):
             newest[key] = (stamp, row.get("value"))
-    why: list[str] = []
-    for source, channel in SUPPLY_VOLTAGE_SOURCES:
+    why: list[str] = list(sources.withheld)
+    for source, channel in sources.order:
         name = f"{source}:{channel}"
         entry = newest.get((source, channel))
         if entry is None:
@@ -497,9 +549,11 @@ __all__ = [
     "NonvolatileWriteRequest",
     "NonvolatileWriteSignals",
     "SUPPLY_VOLTAGE_SOURCES",
+    "SupplyVoltageSources",
     "SupplyVoltageReading",
     "authorize_nonvolatile_write",
     "execute_authorized_blocks",
     "sha256_image",
     "supply_voltage_from_latest_rows",
+    "supply_voltage_sources",
 ]

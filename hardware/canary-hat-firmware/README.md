@@ -18,7 +18,8 @@ Rev 2.0 and rev 2.1 are both in service, and rev 2.1 moved pins
 | GNSS PPS | GPIO18 | GPIO20 |
 | K-line EN / pull-up | GPIO26 / GPIO24 | GPIO26 / GPIO21 |
 | Barometer (U5) | yes | no (baro from the ECM, PID 0x33) |
-| 12 V sense | ADS1015 (I²C 0x48) | ADS8688A CH0 (SPI0 CE1; driver still owed) |
+| 12 V sense | ADS1015 (I²C 0x48) | ADS8688A CH0 (SPI0 CE1, `/dev/spidev0.1`) |
+| Fuel gauge, sensor ports | — (fuel via the USB ADC) | ADS8688A CH4, CH1 (V1), CH2 (R1); 5 V sensor supply enabled by GPIO19 |
 
 `hat_revisions.json` is the table. `hat_rev.py` reads it for the scripts here
 and for `install_pi.sh`; the daemon reads the same file
@@ -27,6 +28,13 @@ product_ver. A Pi with no CANary-HAT EEPROM is treated as rev 2.0. To name one
 instead, set `CANARY_HAT_REV=2.1` for the scripts and
 `hardware.hat_revision: "2.1"` for the daemon. `python3 hat_rev.py --shell`
 prints everything it knows about the fitted board.
+
+**Rev 2.1's ADC** is read by the daemon (`hardware.hat_adc`, and
+`hardware.supply_voltage` for the 12 V sense), with the channel map and
+calibration numbers in `data/hat_adc_rev2_1.yaml`. To look at it on a new board
+with the daemon stopped, run `python -m src.collection.hat_adc_collector` from
+the checkout; `checkout_hat.sh` does this for a few seconds. Bring-up items:
+`docs/roadmap/tasks/H08-hat-adc.md`.
 
 | File | What it is |
 |---|---|

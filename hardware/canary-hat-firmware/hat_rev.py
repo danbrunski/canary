@@ -96,12 +96,15 @@ def detect(
 
 def shell_lines(rev: dict[str, Any], how: str) -> list[str]:
     """``HAT_<FIELD>=value`` lines for a shell ``eval``: lists comma-joined,
-    booleans 1/0, the revision name as ``HAT_REV``."""
+    booleans 1/0, a missing fact (``null``) empty, the revision name as
+    ``HAT_REV``."""
     lines = [f"HAT_REV={shlex.quote(rev['name'])}", f"HAT_HOW={shlex.quote(how)}"]
     for key, value in rev.items():
         if key == "name":
             continue
-        if isinstance(value, bool):
+        if value is None:
+            text = ""
+        elif isinstance(value, bool):
             text = "1" if value else "0"
         elif isinstance(value, list):
             text = ",".join(str(v) for v in value)
@@ -138,7 +141,10 @@ def main(argv: list[str] | None = None) -> int:
             print(f"hat_rev: no field {args.field!r} (have: {', '.join(rev)})", file=sys.stderr)
             return 2
         value = rev[args.field]
-        print(",".join(map(str, value)) if isinstance(value, list) else value)
+        if value is None:
+            print("")  # a fact this revision does not have
+        else:
+            print(",".join(map(str, value)) if isinstance(value, list) else value)
     else:
         print(rev["name"])
     return 0

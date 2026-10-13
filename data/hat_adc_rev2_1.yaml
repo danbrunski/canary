@@ -1,0 +1,121 @@
+# CANary-HAT rev 2.1's ADC (U8, ADS8688A on SPI0 CE1): what each input is
+# wired to, and every number its readings need. Schema:
+# src/decode/hat_adc_board.py. Collector: src/collection/hat_adc_collector.py.
+# Design record: docs/CANary-HAT-Rev2.1.md section 13.5.3 (front end),
+# 13.5.11 (sensor ports), 13.5.13 (CH5-CH7 grounded).
+#
+# Resistor values are the board's BOM population (1 %). A board reworked for a
+# different sensor is an edit here, until the per-board population record
+# moves into the HAT's ID EEPROM (section 13.5.8).
+
+device: ADS8688A (U8), SPI0 CE1, internal 4.096 V reference
+# Every mapped input. 0-5.12 V takes a 0-5 V automotive signal directly, and
+# the inputs survive +/-20 V whatever the range (SBAS680).
+range: "0-5.12"
+# U8 loads every input: 1 Mohm (0.85-1.15, SBAS680 electrical
+# characteristics), leaking (VIN - 2.50 V) / RIN on the unipolar ranges. Each
+# channel below names its series resistor (to AIN_nP) and its match (on
+# AIN_nGND), and the decode turns U8's differential back into the voltage at
+# the board node with them.
+adc_input_ohms: 1000000
+adc_input_bias_volts: 2.50
+
+# CH0: the protected +12V rail through R11 (100 k) and R12 (22 k), the rev 2.0
+# divider carried over. Recorded as sensor:SUPPLY_VOLTAGE, the channel rev 2.0's
+# ADS1015 recorded, and fed to the vehicle-power state (parked / bench).
+supply:
+  input: 0
+  r_top_ohms: 100000
+  r_bottom_ohms: 22000
+  # R19 on AIN_0GND, sized to the divider's 18 k Thevenin resistance. Against
+  # U8's 1 Mohm that source reads 1.8 % low; R19 cancels the offset it causes,
+  # not the gain (review minor 3), so the decode corrects the gain for the
+  # nominal input resistance. That leaves +/-0.27 %, which gain_trim takes out.
+  match_ohms: 18000
+  # Rail volts on a meter at the J2 terminals over rail volts read here,
+  # repeating rev 2.0's 12.68 V check on this ADC (open item 23). null until
+  # that measurement is made: the readings are recorded (good to about
+  # +/-2 %, plenty for parked versus bench), but a non-volatile write's
+  # battery floor ignores them and uses the ECM's own reading instead.
+  gain_trim: null
+  notes: >-
+    Rev 2.0's validated readings (CANary-HAT-Revisions.md, 12 V sense: 0.000 V
+    unplugged, 12.68 V and 12.43 V against a meter) are re-taken on the first
+    rev 2.1 board before this channel is trusted for the non-volatile write
+    gate's battery check.
+
+# CH3: 5V_SENS, the sensor supply U9 regulates (through R28, 1 k; R29 1 k on
+# AIN_3GND). Ratiometric sensors' outputs are fractions of it, so the port
+# ratios divide by this channel. A full-scale code means it clipped (5V_SENS
+# can sit at 5.10 V against a 5.12 V range, review item 11): no ratio is
+# formed against a clipped reading.
+sensor_supply:
+  input: 3
+  series_ohms: 1000         # R28
+  match_ohms: 1000          # R29
+  # U9 regulates 5.00 V. Below this it is off (SENS_PWR_EN low) or dropping
+  # out while cranking, and a ratio against it describes U9, not the sensor.
+  min_volts: 4.50
+
+# J2 pin 9, "V1": a driven voltage output. R22 (1 k) series, R23 (1 k) match,
+# C28 (100 n) across the pair. Recorded as PORT_V1_VOLTAGE and PORT_V1_RATIO.
+voltage_ports:
+  - name: V1
+    input: 1
+    series_ohms: 1000       # R22
+    match_ohms: 1000        # R23
+    pull_down_ohms: 47000   # R20: an open wire reads near 0 V, not U8's bias
+    pull_up_ohms: null      # R21, empty: fit it (and remove R20) for an open-collector sensor
+    notes: >-
+      On the dev truck the Bosch TMAP's pressure output is wired here. Its
+      transfer function is not pinned (section 13.5.3 item 4: a and b must not
+      be guessed), so only the port's volts and ratio are recorded.
+
+# J2 pin 10, "R1": a two-wire resistive sensor returned to SENS_GND, pulled up
+# to 5V_SENS. R26 (1 k) series, R27 (2.7 k) match for a ~2.5 k NTC, C29 (100 n)
+# across the pair. Recorded as PORT_R1_RESISTANCE.
+resistive_ports:
+  - name: R1
+    input: 2
+    series_ohms: 1000       # R26
+    match_ohms: 2700        # R27
+    pull_up_ohms: 4990      # R25
+    # An automotive NTC is ~50 kohm at -40 C. U8's leakage is in the solve,
+    # so an open port reads as no current left for a sensor, or one beyond
+    # this: either way a disconnected sensor, not a reading.
+    open_above_ohms: 500000
+    notes: >-
+      On the dev truck the TMAP's NTC is wired here. Its Steinhart-Hart fit is
+      not measured yet (section 13.5.3 item 3), so only resistance is recorded.
+
+# Decoded by src/decode/analog_sensors.py, the same code as the USB ADC path.
+sensors:
+  - name: FUEL_PRESSURE
+    input: 4
+    device: AEM X-Series 30-0301 fuel pressure gauge, analog output (WHITE +, BROWN -)
+    source: AEM install manual 10-0301, analog output section (psig = 25.00 x V - 12.50)
+    # No divider. WHITE -> R32 (1 k) -> AIN_4P and BROWN -> R33 (1 k) ->
+    # AIN_4GND, so U8 reads the gauge's own differential output (section
+    # 13.5.3 item 7). R30 / R31 (100 k) pull both lines down: an open WHITE
+    # reads 0.21-0.26 V, under the 0.50 V gate.
+    divider: null
+    transfer:
+      slope: 25.00
+      intercept: -12.50
+      unit: psi
+    # AEM: outside 0.50-4.50 V the gauge reads SENSOR ERROR.
+    valid_volts:
+      min: 0.50
+      max: 4.50
+    record_unit: kPa
+    # The sensor leg (device, transfer, window, unit, trim) is the gauge's, so
+    # it must equal data/usb_adc_sensors.yaml's FUEL_PRESSURE.
+    # tests/test_hat_adc.py holds them equal; change both or neither.
+    offset: 0.0
+    notes: >-
+      The series resistors against U8's 1 Mohm input read about 0.1 % low, a
+      fraction of the gauge's own accuracy.
+
+# Rev 2.1 ties CH5-CH7 straight to ground at U8 (section 13.5.13). The driver
+# refuses to read them.
+tied_to_ground: [5, 6, 7]

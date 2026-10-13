@@ -116,10 +116,35 @@ else
     bad "no pps-gpio device"
 fi
 
+if [[ "$HAT_SUPPLY_ADC" == "ads8688a" ]]; then
+    echo "== ADC (ADS8688A, SPI0 CE1) + 5 V sensor supply"
+    if [[ -e "$HAT_ADC_SPI_DEVICE" ]]; then
+        ok "$HAT_ADC_SPI_DEVICE exists (CE1's spidev: the overlay disables only CE0's)"
+        repo="$(cd "$HERE/../.." && pwd)"
+        if systemctl is-active --quiet canary 2>/dev/null; then
+            note "canary is running and owns the ADC: read its sensor:SUPPLY_VOLTAGE and SENSOR_SUPPLY_VOLTAGE instead"
+        elif [[ -x "$repo/.venv/bin/python" ]]; then
+            if (cd "$repo" && .venv/bin/python -m src.collection.hat_adc_collector --rev "$HAT_REV" --seconds 3) 2>&1 \
+                | tail -n 14 | sed 's/^/        /'; then
+                ok "ADS8688A configured, read and verified"
+            else
+                bad "ADS8688A did not answer as configured (above)"
+            fi
+            note "no vehicle: SUPPLY_VOLTAGE ~0 V; SENSOR_SUPPLY_VOLTAGE ~5.0 V (GPIO$HAT_SENSOR_POWER_GPIO driven high);"
+            note "nothing on the ports: PORT_V1_VOLTAGE ~0 V, PORT_R1_RESISTANCE_FAULT open; no gauge: FUEL_PRESSURE_FAULT"
+        else
+            note "no $repo/.venv: run install_pi.sh, then python -m src.collection.hat_adc_collector"
+        fi
+    else
+        bad "no $HAT_ADC_SPI_DEVICE -- spi0 not enabled by the overlay, or CE1's spidev disabled"
+    fi
+fi
+
 echo "== Not covered by this script"
 note "K-line (TLIN1027): kline_bringup.py echo / fastinit -- needs +12V on J2 and uart0 (README.md)"
 note "D6 CAN LED and the X1202 12 V feed (rev 2.0 J3, rev 2.1 J2 pins 3-4): visual / meter checks"
-if [[ "$HAT_REV" != "2.0" ]]; then
-    note "ADS8688A (SPI0 CE1) and the 5 V sensor supply (GPIO19 SENS_PWR_EN): no checks yet"
+if [[ "$HAT_SUPPLY_ADC" == "ads8688a" ]]; then
+    note "ADS8688A vs CAN on the shared SPI0: can0 frame loss with the ADC idle vs collecting (a measurement)"
+    note "12 V sense against a meter at J2 (sets gain_trim in data/hat_adc_rev2_1.yaml, open item 23)"
 fi
 note "X1202 coexistence (fuel gauge 0x36, GPIO6): needs the UPS stacked"

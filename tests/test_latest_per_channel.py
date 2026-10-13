@@ -13,7 +13,11 @@ import math
 from datetime import UTC, datetime
 from pathlib import Path
 
-from src.control.nonvolatile_write import supply_voltage_from_latest_rows
+from src.control.nonvolatile_write import (
+    SUPPLY_VOLTAGE_SOURCES,
+    SupplyVoltageSources,
+    supply_voltage_from_latest_rows,
+)
 from src.dashboard.readers import read_latest_per_channel
 from src.storage.parquet_writer import ParquetTelemetryWriter
 from src.telemetry import TelemetryRecord
@@ -51,7 +55,10 @@ def test_a_nan_newest_row_is_not_dressed_in_an_older_value(tmp_path: Path) -> No
     )
     # The repro: the voltage gate reads it as unknown, not as a fresh 12.6 V.
     reading = supply_voltage_from_latest_rows(
-        rows, now=datetime(2026, 9, 26, 12, 0, 1, tzinfo=UTC), max_age_seconds=5.0
+        rows,
+        now=datetime(2026, 9, 26, 12, 0, 1, tzinfo=UTC),
+        max_age_seconds=5.0,
+        sources=SupplyVoltageSources(SUPPLY_VOLTAGE_SOURCES),
     )
     assert reading.volts is None
     assert reading.reason is not None and "obd:CONTROL_MODULE_VOLTAGE" in reading.reason

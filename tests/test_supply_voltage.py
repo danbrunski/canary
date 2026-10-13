@@ -13,7 +13,7 @@ import pytest
 
 from src.collection import ads1015
 from src.collection.ads1015 import Ads1015, Ads1015Error, code_to_volts, config_word
-from src.collection.collectors import _supply_voltage_collectors
+from src.collection.collectors import _hat_adc_collectors, _supply_voltage_collectors
 from src.collection.reconnect import ReconnectPolicy
 from src.collection.supply_voltage_collector import (
     collect_supply_voltage_from_config,
@@ -137,13 +137,20 @@ def test_supply_voltage_collector_runs_only_when_enabled() -> None:
     assert len(_supply_voltage_collectors(enabled, ReconnectPolicy())) == 1
 
 
-def test_rev_2_1_has_no_ads1015_so_nothing_waits_for_it(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Rev 2.1's 12 V sense is ADS8688A CH0. Reading the absent ADS1015 would
-    retry forever, and expecting its readings would hold the OBD collector."""
+def test_rev_2_1_reads_its_12v_sense_through_the_ads8688a(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Rev 2.1's 12 V sense is ADS8688A CH0. The ADS1015 collector stays out
+    (it would retry an absent chip forever); the ADS8688A's collector records
+    the rail instead, and the OBD collector waits for its first reading."""
     expected: list[bool] = []
     monkeypatch.setattr(
         "src.collection.collectors.VEHICLE_POWER.expect_readings", lambda: expected.append(True)
     )
     config = _with_supply(CanaryConfig.from_yaml(REPO / "canary.example.yaml"), "2.1")
     assert _supply_voltage_collectors(config, ReconnectPolicy()) == []
-    assert expected == []
+    assert len(_hat_adc_collectors(config, ReconnectPolicy())) == 1
+    assert expected == [True]
+
+
+def test_rev_2_0_never_starts_the_ads8688a_collector() -> None:
+    config = _with_supply(CanaryConfig.from_yaml(REPO / "canary.example.yaml"), "2.0")
+    assert _hat_adc_collectors(config, ReconnectPolicy()) == []

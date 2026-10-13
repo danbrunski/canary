@@ -21,11 +21,13 @@
 //
 // Deliberately NOT here:
 //   - The ADS8688A (U8) on SPI0 CE1. Only CE0's spidev is disabled, so with
-//     spi0 enabled below CE1 should come up as /dev/spidev0.1 for a userspace
-//     driver (SPI mode 1), the way the IMU and rev 2.0's ADC are read. Not yet
-//     confirmed on a board; the ADC driver is still owed (§13.5.8).
+//     spi0 enabled below CE1 comes up as /dev/spidev0.1 for the userspace
+//     driver (SPI mode 1, src/collection/ads8688a.py), the way the IMU and
+//     rev 2.0's ADC are read. Not yet confirmed on a board: checkout_hat.sh
+//     reads it on the first one.
 //   - GPIO19 = SENS_PWR_EN (U9 enable, the 5 V sensor supply). R47 holds it
-//     low, so the sensor ports are off until software drives it high.
+//     low, so the sensor ports are off until software drives it high: the
+//     ADC collector (hardware.hat_adc) does, while it runs.
 //   - GPIO21 (K-line pull-up FET) and GPIO26 (TLIN1027 EN): the K-line
 //     collector's, as on rev 2.0 (there GPIO24 and GPIO26).
 //   - The LSM6DSOX (0x6B); its INT1 is GPIO17 and INT2 GPIO23, both unused.

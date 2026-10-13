@@ -39,6 +39,13 @@ hardware:
   # (hardware/canary-hat-firmware/hat_revisions.json). Name one only for a
   # board whose EEPROM is blank.
   # hat_revision: auto
+  # CANary-HAT rev 2.1's ADC (ADS8688A): the AEM fuel gauge on J2 pins 12-13
+  # (sensor:FUEL_PRESSURE, as the USB ADC records it: enable one or the other)
+  # and the generic sensor ports V1 / R1 (sensor:PORT_V1_*, PORT_R1_RESISTANCE).
+  # Its channel map and calibration numbers are data/hat_adc_rev2_1.yaml.
+  # Rev 2.1's 12 V sense is the same chip; hardware.supply_voltage switches it.
+  # hat_adc:
+  #   enabled: true
   # USB ADC module for analog sensors: the AEM fuel-pressure gauge's analog
   # output on CH0, recorded as sensor:FUEL_PRESSURE (kPa). Every calibration
   # number is in data/usb_adc_sensors.yaml. Name it by USB port, not

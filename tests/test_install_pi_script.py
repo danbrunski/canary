@@ -81,6 +81,7 @@ _HOST_COMMANDS = (
     "journalctl",
     "groupadd",
     "useradd",
+    "usermod",
     # The canary user/group "exist", so groupadd/useradd are not reached.
     "getent",
     "id",
@@ -256,6 +257,15 @@ def test_the_daemon_config_is_owned_by_canary_and_the_secrets_stay_root(
         assert f"chown canary:canary {config} {config / 'canary.yaml'}" in chowns, chowns
         assert f"chown root:canary {config / 'canary.env'}" in chowns
         assert not any("control.token" in c and "canary:canary" in c for c in chowns)
+
+
+def test_the_daemon_joins_the_hat_device_groups(installer: Installer) -> None:
+    """Rev 2.1's ADC is /dev/spidev0.1, group spi on Raspberry Pi OS; the IMU
+    and the K-line lines are i2c and gpio. Nothing else grants them."""
+    installer.run()
+    usermods = installer.calls("usermod")
+    for group in ("i2c", "gpio", "spi"):
+        assert f"usermod -aG {group} canary" in usermods, usermods
 
 
 def test_second_run_on_an_unchanged_system_restarts_nothing(installer: Installer) -> None:

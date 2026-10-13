@@ -1824,8 +1824,19 @@ software follows whichever board is fitted.
   - The first rev 2.1 boot, with `checkout_hat.sh`, confirms `/dev/ttyAMA4`
     and PPS on GPIO20.
 
-**Still owed for rev 2.1** (§13.5.8, §13.5.12), unchanged by this:
-- The ADS8688A driver, on `/dev/spidev0.1`.
-- Driving GPIO19 `SENS_PWR_EN`.
-- Re-pointing the 12 V sense to CH0.
-- The CH3 clipping rule.
+~~**Still owed for rev 2.1** (§13.5.8, §13.5.12)~~ **Written 2026-10-12, not
+yet run on a board** (`docs/roadmap/tasks/H08-hat-adc.md`):
+- The ADS8688A driver, on `/dev/spidev0.1`: `src/collection/ads8688a.py`,
+  over `src/collection/spi_dev.py`.
+- Driving GPIO19 `SENS_PWR_EN`: high while `hardware.hat_adc` collects, low
+  on stop.
+- Re-pointing the 12 V sense to CH0: `hardware.supply_voltage` on a rev 2.1
+  board reads it through the same collector, divider corrected for the
+  ADC's 1 MΩ input, `gain_trim` set at bring-up (open item 23). Until it is,
+  a reflash's battery floor ignores this sense and uses the ECM's own voltage
+  (`supply_voltage_sources`).
+- The CH3 clipping rule: a full-scale CH3 code marks its window clipped, and
+  no ratio is formed against it.
+- The channel map and calibration numbers are `data/hat_adc_rev2_1.yaml`.
+  Fuel pressure decodes through the same code and the same gauge numbers as
+  the USB path, and a test holds the two equal.

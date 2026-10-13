@@ -114,7 +114,27 @@ def test_every_overlay_source_has_a_row() -> None:
 def test_no_revision_drives_the_x1202_power_loss_line(name: str) -> None:
     row = ROWS[name]
     used = {row["pps_gpio"], row["kline_enable_gpio"], row["kline_pullup_gpio"], *row["gnss_gpios"]}
+    if row["sensor_power_gpio"] is not None:
+        used.add(row["sensor_power_gpio"])
     assert X1202_PLD_GPIO not in used
+
+
+@pytest.mark.parametrize("name", sorted(ROWS))
+def test_the_adc_facts_match_the_overlay(name: str) -> None:
+    """The ADS8688A is read through CE1's spidev, which only exists because the
+    overlay disables CE0's alone; its sensor supply's enable is a GPIO no other
+    function on the board uses."""
+    row = ROWS[name]
+    dts = (FIRMWARE / f"{row['overlay']}-overlay.dts").read_text(encoding="utf-8")
+    if row["supply_adc"] != "ads8688a":
+        assert row["adc_spi_device"] is None and row["sensor_power_gpio"] is None
+        return
+    assert row["adc_spi_device"] == "/dev/spidev0.1"
+    assert "target = <&spidev0>;" in dts and "&spidev1" not in dts
+    gpio = row["sensor_power_gpio"]
+    assert f"GPIO{gpio} = SENS_PWR_EN" in dts
+    assert gpio not in {row["pps_gpio"], row["kline_enable_gpio"], row["kline_pullup_gpio"]}
+    assert gpio not in row["gnss_gpios"]
 
 
 # --------------------------------------------------------------------------
@@ -195,6 +215,10 @@ def test_hat_rev_py_reads_the_eeprom_as_the_daemon_does(
         daemon.kline_enable_gpio,
         daemon.kline_pullup_gpio,
     )
+    assert (script["adc_spi_device"], script["sensor_power_gpio"]) == (
+        daemon.adc_spi_device,
+        daemon.sensor_power_gpio,
+    )
 
 
 def test_hat_rev_py_refuses_an_unlisted_revision(tmp_path: Path) -> None:
@@ -215,3 +239,13 @@ def test_hat_rev_py_shell_lines_name_the_gnss_tty_per_revision(
     # install_pi.sh passes the EEPROM's product_ver, empty when there is none.
     assert hat_rev.main(["--product-ver", "", "gnss_tty"]) == 0
     assert capsys.readouterr().out.strip() == ROWS[TABLE["unidentified"]]["gnss_tty"]
+
+
+def test_hat_rev_py_prints_a_missing_fact_as_empty(capsys: pytest.CaptureFixture[str]) -> None:
+    hat_rev = _hat_rev()
+    assert hat_rev.main(["--rev", "2.0", "--shell"]) == 0
+    assert "HAT_ADC_SPI_DEVICE=''" in capsys.readouterr().out.splitlines()
+    assert hat_rev.main(["--rev", "2.0", "sensor_power_gpio"]) == 0
+    assert capsys.readouterr().out == "\n"
+    assert hat_rev.main(["--rev", "2.1", "sensor_power_gpio"]) == 0
+    assert capsys.readouterr().out.strip() == "19"

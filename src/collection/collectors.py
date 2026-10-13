@@ -31,6 +31,7 @@ from src.collection.can_obd_collector import (
 from src.collection.capture_profiles import CaptureProfileSources, CaptureProfileStore
 from src.collection.gps_collector import GpsSpec, collect_gps_from_config
 from src.collection.gps_gpsd import GpsdSpec, collect_gpsd_from_config
+from src.collection.hat_adc_collector import Plan, collect_hat_adc_from_config
 from src.collection.hat_revision import kline_pins, resolve_hat_revision
 from src.collection.imu_collector import ImuHealth, collect_imu_from_config
 from src.collection.kline_collector import KlineCollector
@@ -48,6 +49,7 @@ from src.collection.usb_adc_collector import collect_usb_adc_from_config
 from src.collection.vehicle_power import VEHICLE_POWER
 from src.config import CanaryConfig
 from src.decode.analog_sensors import load_analog_sensor_catalog
+from src.decode.hat_adc_board import load_hat_adc_board
 from src.decode.sensor_can import load_sensor_can_catalog
 from src.telemetry import TelemetryRecord
 from src.vehicle.profiles import active_registry
@@ -111,6 +113,7 @@ def default_collectors(
         *_sensor_collectors(config, reconnect_policy),
         *_imu_collectors(config, reconnect_policy, health=imu_health),
         *_supply_voltage_collectors(config, reconnect_policy),
+        *_hat_adc_collectors(config, reconnect_policy),
         *_usb_adc_collectors(config, reconnect_policy),
         *_kline_collectors(config),
     ]
@@ -303,21 +306,15 @@ def _supply_voltage_collectors(
     config: CanaryConfig,
     reconnect_policy: ReconnectPolicy,
 ) -> list[CollectorStarter]:
-    """The HAT's 12 V sense collector, or empty when it is not enabled."""
+    """Rev 2.0's 12 V sense (an ADS1015), or empty when it is not enabled.
+
+    Rev 2.1 has no ADS1015: its 12 V sense is the ADS8688A's CH0, and
+    :func:`_hat_adc_collectors` records it."""
     supply = config.hardware.supply_voltage
     if not supply.enabled:
         return []
-    # Rev 2.1 has no ADS1015: its 12 V sense is ADS8688A CH0. Reading 0x48
-    # there would retry an absent chip forever and make the OBD collector wait
-    # for a first reading that never comes, so say so and record nothing.
     revision = resolve_hat_revision(config.hardware.hat_revision)
     if revision.supply_adc != "ads1015":
-        log.error(
-            "hardware.supply_voltage reads an ADS1015; CANary-HAT rev %s has none (its 12 V "
-            "sense is on the %s, which has no driver yet), so supply voltage is not recorded",
-            revision.name,
-            revision.supply_adc,
-        )
         return []
     # Before any collector starts, so the OBD collector knows to wait for
     # the first reading rather than transmit into an unknown port.
@@ -331,6 +328,72 @@ def _supply_voltage_collectors(
         )
 
     return [supply_voltage_collector]
+
+
+def _hat_adc_collectors(
+    config: CanaryConfig,
+    reconnect_policy: ReconnectPolicy,
+) -> list[CollectorStarter]:
+    """The rev 2.1 HAT's ADC collector, or empty when nothing asks for it.
+
+    One collector owns the chip, for ``hardware.supply_voltage`` (the 12 V
+    sense on CH0) and ``hardware.hat_adc`` (the sensor inputs) alike. Refuses
+    a channel another instrument also produces: two writers of one
+    ``sensor:<name>`` interleave in a single column (``FUEL_PRESSURE`` from
+    both this chip and the USB ADC, say)."""
+    hat_adc = config.hardware.hat_adc
+    supply = config.hardware.supply_voltage
+    if not (hat_adc.enabled or supply.enabled):
+        return []
+    revision = resolve_hat_revision(config.hardware.hat_revision)
+    if revision.supply_adc != "ads8688a":
+        if hat_adc.enabled:
+            log.error(
+                "hardware.hat_adc reads rev 2.1's ADS8688A; CANary-HAT rev %s has none, so "
+                "its sensor inputs are not recorded",
+                revision.name,
+            )
+        return []
+    plan = Plan(supply=supply.enabled, sensors=hat_adc.enabled)
+    ignored = sorted(
+        supply.model_fields_set & {"i2c_bus", "i2c_address", "input_channel", "divider_ratio"}
+    )
+    if plan.supply and ignored:
+        log.warning(
+            "hardware.supply_voltage %s: rev 2.0's ADS1015 settings, ignored on CANary-HAT rev "
+            "%s, whose 12 V sense is the ADS8688A's CH0 with its divider in %s",
+            ", ".join(ignored),
+            revision.name,
+            hat_adc.board.name,
+        )
+    if plan.sensors:
+        ours = plan.channels(load_hat_adc_board(hat_adc.board))
+        others: dict[str, set[str]] = {}
+        if config.hardware.usb_adc.enabled:
+            others["hardware.usb_adc"] = {
+                c.name for c in load_analog_sensor_catalog(config.hardware.usb_adc.sensors).channels
+            }
+        if config.hardware.sensor_can.enabled:
+            others["hardware.sensor_can"] = {
+                s.name for s in load_sensor_can_catalog(config.hardware.sensor_can.signals).signals
+            }
+        for owner, names in others.items():
+            shared = sorted(ours & names)
+            if shared:
+                raise ValueError(
+                    f"sensor channels {shared} are produced by both hardware.hat_adc and "
+                    f"{owner}; disable one, or rename the channel in one map"
+                )
+    if plan.supply:
+        # Before any collector starts, as for rev 2.0's sense (above).
+        VEHICLE_POWER.expect_readings()
+
+    async def hat_adc_collector(queue: asyncio.Queue[TelemetryRecord], stop: asyncio.Event) -> None:
+        await collect_hat_adc_from_config(
+            hat_adc, supply, plan, revision, queue, stop, reconnect_policy=reconnect_policy
+        )
+
+    return [hat_adc_collector]
 
 
 def _usb_adc_collectors(

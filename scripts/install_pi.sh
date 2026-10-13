@@ -96,6 +96,16 @@ if ! id -u "${CANARY_USER}" >/dev/null 2>&1; then
   useradd --system --gid "${CANARY_GROUP}" --home-dir "${CANARY_HOME}" --create-home \
     --shell /usr/sbin/nologin "${CANARY_USER}"
 fi
+# The daemon reaches the CANary-HAT through device nodes Raspberry Pi OS gives
+# to groups: /dev/i2c-* (i2c: the IMU, rev 2.0's 12 V ADC), /dev/gpiochip*
+# (gpio: the K-line lines, rev 2.1's sensor-supply enable) and /dev/spidev*
+# (spi: rev 2.1's ADC). Join whichever exist; a re-run changes nothing. The
+# service picks the groups up at its next start.
+for device_group in i2c gpio spi; do
+  if getent group "${device_group}" >/dev/null 2>&1; then
+    usermod -aG "${device_group}" "${CANARY_USER}"
+  fi
+done
 
 install -d -m 0755 "${CANARY_CONFIG_DIR}"
 install -d -m 0755 "${CANARY_DATA_DIR}" "${CANARY_DATA_DIR}/sessions" "${CANARY_DATA_DIR}/anomalies" \
