@@ -5,6 +5,8 @@ import { MultiSeriesChart, type ChartSeries } from "../components/MultiSeriesCha
 import { Notice } from "../components/Notice";
 import { Panel } from "../components/Panel";
 import { useAsyncAction } from "../hooks/useAsyncAction";
+import { useLocalStorageJson } from "../hooks/useLocalStorage";
+import { useIsPhone } from "../hooks/useMediaQuery";
 import type { ChannelSnapshot } from "../hooks/useTelemetryStream";
 import { buttonClass, cn, inputClass, placeholderClass } from "../styles";
 import type { SessionChartResponse } from "../types";
@@ -22,6 +24,16 @@ interface ChartsPanelProps {
 
 const MAX_SERIES = 6;
 const WINDOWS = [60, 120, 300] as const;
+const SELECTION_STORAGE_KEY = "canary.charts.selected";
+/** Height of each per-series row in the phone layout. */
+const PHONE_ROW_HEIGHT = 96;
+
+/** The stored selection, defensively: anything but a list of strings (an
+ *  older format, a hand-edited value) reads as nothing selected. */
+function storedChannels(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return value.filter((key): key is string => typeof key === "string").slice(0, MAX_SERIES);
+}
 
 /** Advanced charting (Task 6.10, session mode Task 5.3): pick up to six
  *  numeric channels and trend them together. "Live" mode charts the current
@@ -49,7 +61,13 @@ export function ChartsPanel({ channels, token = "" }: ChartsPanelProps) {
     [channels],
   );
 
-  const [selected, setSelected] = useState<string[]>([]);
+  // P4.2: the picked channels survive a reload, per device, as the Builder's
+  // layout does. A channel not streaming yet stays picked and draws nothing.
+  const [storedSelection, setSelected] = useLocalStorageJson<string[]>(SELECTION_STORAGE_KEY, []);
+  const selected = useMemo(() => storedChannels(storedSelection), [storedSelection]);
+  const phone = useIsPhone();
+  // One readout position shared by the stacked per-series charts on a phone.
+  const [cursor, setCursor] = useState<number | null>(null);
   const [windowN, setWindowN] = useState<number>(120);
   const [paused, setPaused] = useState(false);
   const [filter, setFilter] = useState("");
@@ -78,13 +96,14 @@ export function ChartsPanel({ channels, token = "" }: ChartsPanelProps) {
   };
 
   const toggle = (key: string) =>
-    setSelected((prev) =>
-      prev.includes(key)
+    setSelected((stored) => {
+      const prev = storedChannels(stored);
+      return prev.includes(key)
         ? prev.filter((k) => k !== key)
         : prev.length >= MAX_SERIES
           ? prev
-          : [...prev, key],
-    );
+          : [...prev, key];
+    });
 
   const loadSession = () =>
     run(
@@ -149,7 +168,7 @@ export function ChartsPanel({ channels, token = "" }: ChartsPanelProps) {
       title="Charts"
       count={mode === "live" ? `${selected.length}/${MAX_SERIES} selected` : undefined}
       actions={
-        <div className="flex items-center gap-2 text-[0.76rem] text-fg-dim">
+        <div className="flex flex-wrap items-center gap-2 text-[0.76rem] text-fg-dim">
           <div className="flex overflow-hidden rounded border border-border-soft">
             {(["live", "session"] as const).map((m) => (
               <button
@@ -269,7 +288,35 @@ export function ChartsPanel({ channels, token = "" }: ChartsPanelProps) {
         </p>
       ) : (
         <>
-          {series.length > 0 ? (
+          {series.length > 0 && phone ? (
+            // P4.2: one series per row at phone width. Six lines overlaid in
+            // a 380 px plot are unreadable; stacked rows share one readout
+            // position, so a touch reads every channel at the same instant.
+            <div className="flex flex-col gap-2" data-testid="chart-rows">
+              {series.map((s) => (
+                <div key={s.key} className="flex flex-col gap-0.5">
+                  <div className="flex items-baseline gap-1.5 text-[0.78rem]">
+                    <span
+                      className="inline-block h-2 w-3 shrink-0 rounded-sm"
+                      style={{ background: s.color }}
+                    />
+                    <b className="truncate font-num">{s.key}</b>
+                    <span className="ml-auto font-num tabular-nums text-fg-dim">
+                      {fmt(s.values.filter((x) => Number.isFinite(x)).at(-1))}
+                    </span>
+                  </div>
+                  <MultiSeriesChart
+                    series={[s]}
+                    height={PHONE_ROW_HEIGHT}
+                    timestamps={sessionTimestamps}
+                    showExport={false}
+                    cursor={cursor}
+                    onCursorChange={setCursor}
+                  />
+                </div>
+              ))}
+            </div>
+          ) : series.length > 0 ? (
             <MultiSeriesChart
               series={series}
               height={240}
@@ -284,7 +331,7 @@ export function ChartsPanel({ channels, token = "" }: ChartsPanelProps) {
             </p>
           )}
 
-          <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-[0.78rem]">
+          <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-[0.78rem] max-[600px]:flex-col">
             {series.map((s) => {
               const v = s.values.filter((x) => Number.isFinite(x));
               const last = v.at(-1);

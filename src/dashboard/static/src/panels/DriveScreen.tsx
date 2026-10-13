@@ -13,7 +13,8 @@ interface DriveScreenProps {
  *  cluster and nothing else — the "is everything OK" facts (anomaly state,
  *  freshness, model health) live in the always-visible StatusStrip above,
  *  so a moving driver never navigates and never hunts for status. The full
- *  workbench is one tap away via the header mode toggle. */
+ *  workbench is one tap away via the header mode toggle (the bottom bar on
+ *  a phone, where the tiles run two to a row and the pins are edited). */
 export function DriveScreen({ channels, bindings, scheduler }: DriveScreenProps) {
   return (
     <div className={scrollPaneClass}>

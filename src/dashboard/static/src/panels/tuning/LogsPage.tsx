@@ -1,4 +1,5 @@
 import { useCallback, useMemo, useRef, useState } from "react";
+import { TableScroll } from "../../components/TableScroll";
 
 import { getFrame } from "../../api/workbench";
 import { Panel } from "../../components/Panel";
@@ -65,7 +66,7 @@ export function LogBrowser({
         </p>
       )}
       {data && data.logs.length > 0 && (
-        <div className="max-h-80 overflow-auto">
+        <TableScroll className="max-h-80 overflow-auto">
           <table aria-label="Capture browser" className="w-full text-left text-xs">
             <thead className="text-fg-faint">
               <tr>
@@ -89,7 +90,7 @@ export function LogBrowser({
               ))}
             </tbody>
           </table>
-        </div>
+        </TableScroll>
       )}
     </Panel>
   );
@@ -374,7 +375,7 @@ export function FrameTable({ frame }: { frame: FrameResponse }) {
           Export CSV ({order.length.toLocaleString()} rows)
         </button>
       </div>
-      <div
+      <TableScroll
         ref={scroller}
         className="overflow-auto"
         style={{ maxHeight: ROW_HEIGHT * VIEWPORT_ROWS + 28 }}
@@ -425,7 +426,7 @@ export function FrameTable({ frame }: { frame: FrameResponse }) {
             )}
           </tbody>
         </table>
-      </div>
+      </TableScroll>
     </div>
   );
 }

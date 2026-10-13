@@ -3,7 +3,7 @@
 // until their rich UI lands) without ever growing the five top-level groups,
 // which is the whole point of the navigation refactor.
 
-import type { NavGroupDef, NavGroupId, NavItemDef, WorkbenchItem } from "./types";
+import type { AppMode, NavGroupDef, NavGroupId, NavItemDef, WorkbenchItem } from "./types";
 
 export const NAV: NavGroupDef[] = [
   {
@@ -128,4 +128,49 @@ export function isWorkbenchItem(value: string): value is WorkbenchItem {
 export function defaultItemForGroup(group: NavGroupId): WorkbenchItem {
   const g = NAV.find((x) => x.id === group);
   return (g?.items[0] ?? ITEMS[0]).id;
+}
+
+// ---------------------------------------------------------------------------
+// Phone navigation (docs/roadmap/phone-ui.md P2.2, operator decision
+// 2026-10-12: the five proposed entries). Below 600px a bottom bar holds the
+// five things done from a phone; everything else in NAV sits in the grouped
+// "More" sheet, derived from NAV, so a page registered above appears there
+// with no phone-specific change.
+// ---------------------------------------------------------------------------
+
+export interface PhoneTab {
+  id: "drive" | "logging" | "alerts" | "rom" | "system";
+  label: string;
+  /** The Workbench pages this entry owns, its landing page first. Empty for
+   *  Drive, which is the driving context rather than a Workbench page. More
+   *  than one page shows a strip of chips to move between them. */
+  items: readonly WorkbenchItem[];
+}
+
+export const PHONE_TABS: readonly PhoneTab[] = [
+  { id: "drive", label: "Drive", items: [] },
+  { id: "logging", label: "Logging", items: ["tuning-logging", "tuning-logs"] },
+  // "Alerts/DTCs": the trouble codes first (the check-engine light is the
+  // question asked from a phone), with CANary's own alerts beside them.
+  { id: "alerts", label: "Alerts", items: ["diag-dtc", "diag-anomalies", "observe-alarms"] },
+  { id: "rom", label: "ROM", items: ["tuning-rom-library", "tuning-rom-maps"] },
+  { id: "system", label: "System", items: ["system-info"] },
+];
+
+/** The bottom-bar entry a route belongs to; `null` for a More page. */
+export function phoneTabFor(mode: AppMode, item: WorkbenchItem): PhoneTab | null {
+  if (mode === "driving") return PHONE_TABS[0];
+  return PHONE_TABS.find((tab) => tab.items.includes(item)) ?? null;
+}
+
+/** NAV without the pages a bottom-bar entry already reaches, grouped as in
+ *  the sidebar. Groups left empty are dropped. */
+export function moreNavGroups(nav: readonly NavGroupDef[] = NAV): NavGroupDef[] {
+  const onBar = new Set<WorkbenchItem>(PHONE_TABS.flatMap((tab) => tab.items));
+  return nav
+    .map((group) => ({
+      ...group,
+      items: group.items.filter((item) => !onBar.has(item.id)),
+    }))
+    .filter((group) => group.items.length > 0);
 }

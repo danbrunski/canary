@@ -3,11 +3,12 @@ import { useCallback, useMemo, useState } from "react";
 import { getCanCoverage, getDids, getObdCoverage } from "../api/http";
 import { Panel } from "../components/Panel";
 import { ResourceGate } from "../components/ResourceGate";
+import { TableScroll } from "../components/TableScroll";
 import type { ChannelSnapshot } from "../hooks/useTelemetryStream";
 import { useControlResource } from "../hooks/useControlResource";
 import { streamKey } from "../lib/romMaps";
 import { renderChannel } from "../lib/telemetryDisplay";
-import { cn, placeholderClass } from "../styles";
+import { cn, keyValueTableClass, placeholderClass } from "../styles";
 import type {
   CanCoverageResponse,
   DidEntry,
@@ -197,7 +198,7 @@ function ObdTab({ channels, view }: { channels: Map<string, ChannelSnapshot>; vi
       {(data) => (
         <>
           <Summary text={`${data.decoded_count}/${data.rows.length} PIDs supported`} />
-          <div className={SCROLL}>
+          <TableScroll className={SCROLL}>
             <table className={TABLE}>
               <thead className={THEAD}>
                 <tr>
@@ -222,14 +223,14 @@ function ObdTab({ channels, view }: { channels: Map<string, ChannelSnapshot>; vi
                 })}
               </tbody>
             </table>
-          </div>
+          </TableScroll>
 
           {data.custom_pids.length > 0 && (
             <>
               <h3 className="mb-1 mt-3 text-[0.66rem] uppercase tracking-[0.12em] text-fg-faint">
                 Custom PIDs ({data.custom_pids.length})
               </h3>
-              <div className={SCROLL}>
+              <TableScroll className={SCROLL}>
                 <table className={TABLE}>
                   <thead className={THEAD}>
                     <tr>
@@ -249,7 +250,7 @@ function ObdTab({ channels, view }: { channels: Map<string, ChannelSnapshot>; vi
                     })}
                   </tbody>
                 </table>
-              </div>
+              </TableScroll>
             </>
           )}
         </>
@@ -333,7 +334,7 @@ function DidTab({
                 no DIDs catalogued — pin findings into <code>data/dids.yaml</code>.
               </p>
             ) : (
-              <div className={SCROLL}>
+              <TableScroll className={SCROLL}>
                 <table className={TABLE}>
                   <thead className={THEAD}>
                     <tr>
@@ -377,7 +378,7 @@ function DidTab({
                     })}
                   </tbody>
                 </table>
-              </div>
+              </TableScroll>
             )}
           </>
         );
@@ -423,7 +424,7 @@ function MemoryTab({
           {(catalog.memory ?? []).length === 0 ? (
             <p className={placeholderClass}>No RAM channels catalogued for this vehicle.</p>
           ) : (
-            <div className={SCROLL}>
+            <TableScroll className={SCROLL}>
               <table className={TABLE}>
                 <thead className={THEAD}>
                   <tr>
@@ -460,7 +461,7 @@ function MemoryTab({
                   })}
                 </tbody>
               </table>
-            </div>
+            </TableScroll>
           )}
         </>
       )}
@@ -539,7 +540,7 @@ function CanTab({ channels, view }: { channels: Map<string, ChannelSnapshot>; vi
       {(data) => (
         <>
           <Summary text={`${data.decoded_id_count} IDs decoded · ${data.signal_count} signals`} />
-          <div className={SCROLL}>
+          <TableScroll className={SCROLL}>
             <table className={TABLE}>
               <thead className={THEAD}>
                 <tr>
@@ -585,7 +586,7 @@ function CanTab({ channels, view }: { channels: Map<string, ChannelSnapshot>; vi
                 })}
               </tbody>
             </table>
-          </div>
+          </TableScroll>
         </>
       )}
     </ResourceGate>
@@ -618,7 +619,7 @@ function GpsTab({ status }: { status: StatusResponse | null }) {
     ["fix age", `${gps.age_seconds.toFixed(1)}s`],
   ];
   return (
-    <table className={TABLE}>
+    <table className={cn(TABLE, keyValueTableClass)}>
       <tbody className="font-num tabular-nums">
         {rows.map(([k, v]) => (
           <tr key={k} className={ROW}>

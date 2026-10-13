@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 
+import { fitWidth, useContainerWidth } from "../hooks/useContainerWidth";
 import { prepareCanvas } from "../lib/canvas";
 import { cssColor, useThemeVersion, withAlpha } from "../lib/chartTheme";
 import { buttonClass, cn } from "../styles";
@@ -13,6 +14,8 @@ export interface ChartSeries {
 
 interface MultiSeriesChartProps {
   series: ChartSeries[];
+  /** Upper bound on the drawn width in CSS px. The chart fills its
+   *  container (P2.5), so omit this to span the panel at any width. */
   width?: number;
   height?: number;
   /** ISO-8601 timestamp per sample index, same length as each series'
@@ -31,7 +34,16 @@ interface MultiSeriesChartProps {
   /** Show the export toolbar (PNG/CSV of the plotted window). Defaults to
    *  true; the caller can hide it if it wants its own export affordance. */
   showExport?: boolean;
+  /** Controlled readout position (sample index), so several charts stacked
+   *  one series per row read the same instant together (P4.2). Leave both
+   *  unset for a chart that keeps its own. */
+  cursor?: number | null;
+  onCursorChange?: (index: number | null) => void;
 }
+
+/** Fallback drawing width before the container has been measured (and in
+ *  jsdom, which has no ResizeObserver). */
+const DEFAULT_WIDTH = 640;
 
 function seriesExtent(values: number[]): [number, number] | null {
   let lo = Infinity;
@@ -53,17 +65,31 @@ function formatTimeLabel(iso: string): string {
 /** Multi-channel trend chart on a single canvas (Task 6.10; ergonomics —
  *  shared/dual Y axis, hover cursor, time labels, PNG/CSV export — Task
  *  5.5). One canvas, no chart-lib dep, consistent with the Sparkline
- *  approach; redraws cheaply on each telemetry tick. */
+ *  approach; redraws cheaply on each telemetry tick.
+ *
+ *  The readout follows a pointer, not hover (P4.2): a mouse reads as it
+ *  moves and clears on leaving; a finger reads where it touches or drags
+ *  sideways (vertical drags still scroll the page), and the readout stays
+ *  until the next touch or its clear button, since a phone has no "leave". */
 export function MultiSeriesChart({
   series,
-  width = 640,
+  width,
   height = 240,
   timestamps,
   yAxisMode = "independent",
   showExport = true,
+  cursor,
+  onCursorChange,
 }: MultiSeriesChartProps) {
   const ref = useRef<HTMLCanvasElement>(null);
-  const [hoverIndex, setHoverIndex] = useState<number | null>(null);
+  const [frame, measured] = useContainerWidth<HTMLDivElement>();
+  const drawWidth = fitWidth(measured, width, DEFAULT_WIDTH);
+  const [ownCursor, setOwnCursor] = useState<number | null>(null);
+  const controlled = onCursorChange !== undefined;
+  const hoverIndex = controlled ? (cursor ?? null) : ownCursor;
+  const setHoverIndex = controlled ? onCursorChange : setOwnCursor;
+  // A touch readout stays put after the finger lifts; a mouse one does not.
+  const [touchHeld, setTouchHeld] = useState(false);
   const themeVersion = useThemeVersion();
 
   const sampleCount = useMemo(() => Math.max(0, ...series.map((s) => s.values.length)), [series]);
@@ -84,6 +110,7 @@ export function MultiSeriesChart({
   useEffect(() => {
     const canvas = ref.current;
     if (!canvas) return;
+    const width = drawWidth;
     const ctx = prepareCanvas(canvas, width, height);
     if (!ctx) return;
     const fg = cssColor("fg");
@@ -151,7 +178,7 @@ export function MultiSeriesChart({
     }
   }, [
     series,
-    width,
+    drawWidth,
     height,
     timestamps,
     yAxisMode,
@@ -161,11 +188,24 @@ export function MultiSeriesChart({
     themeVersion,
   ]);
 
-  const handleMove = (e: React.MouseEvent<HTMLCanvasElement>) => {
+  const pointAt = (e: React.PointerEvent<HTMLCanvasElement>) => {
     if (sampleCount < 2) return;
     const rect = e.currentTarget.getBoundingClientRect();
+    if (!(rect.width > 0)) return;
     const frac = Math.min(1, Math.max(0, (e.clientX - rect.left) / rect.width));
     setHoverIndex(Math.round(frac * (sampleCount - 1)));
+  };
+  const handleDown = (e: React.PointerEvent<HTMLCanvasElement>) => {
+    setTouchHeld(e.pointerType !== "mouse");
+    pointAt(e);
+  };
+  const handleLeave = (e: React.PointerEvent<HTMLCanvasElement>) => {
+    // A lifted finger "leaves" too; keep its readout so it can be read.
+    if (e.pointerType === "mouse") setHoverIndex(null);
+  };
+  const clearReadout = () => {
+    setTouchHeld(false);
+    setHoverIndex(null);
   };
 
   const exportPng = () => {
@@ -192,16 +232,34 @@ export function MultiSeriesChart({
   };
 
   return (
-    <div className="flex flex-col gap-1">
-      <div className="relative">
+    <div className="flex min-w-0 flex-col gap-1">
+      <div ref={frame} className="relative min-w-0">
         <canvas
           ref={ref}
-          className="block w-full"
-          onMouseMove={handleMove}
-          onMouseLeave={() => setHoverIndex(null)}
+          className="block max-w-full touch-pan-y"
+          onPointerDown={handleDown}
+          onPointerMove={pointAt}
+          onPointerLeave={handleLeave}
         />
         {hoverIndex !== null && (
-          <div className="pointer-events-none absolute top-1 right-1 rounded bg-elev-2/90 px-2 py-1 text-[0.68rem] tabular-nums text-fg-dim shadow">
+          <div
+            className={cn(
+              "absolute top-1 right-1 rounded bg-elev-2/90 px-2 py-1 text-[0.68rem] tabular-nums text-fg-dim shadow",
+              "max-[600px]:text-[0.8rem]",
+              touchHeld ? "pointer-events-auto" : "pointer-events-none",
+            )}
+            data-testid="chart-readout"
+          >
+            {touchHeld && (
+              <button
+                type="button"
+                className="float-right -mr-1 -mt-0.5 ml-2 min-h-6 min-w-6 text-fg-dim"
+                aria-label="clear readout"
+                onClick={clearReadout}
+              >
+                ✕
+              </button>
+            )}
             {timestamps?.[hoverIndex] && (
               <div className="mb-0.5 text-fg">{formatTimeLabel(timestamps[hoverIndex])}</div>
             )}

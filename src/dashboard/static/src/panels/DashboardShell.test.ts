@@ -3,6 +3,7 @@ import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
 import type { ChannelSnapshot } from "../hooks/useTelemetryStream";
+import type { ConnectionState } from "../types";
 import { DashboardShell } from "./DashboardShell";
 
 const BASE = {
@@ -93,5 +94,58 @@ describe("DashboardShell", () => {
       }),
     );
     expect(screen.getByText("queued offline")).toBeInTheDocument();
+  });
+});
+
+describe("DashboardShell on a phone (P2.2)", () => {
+  function renderPhone(overrides: { anomalyState?: ConnectionState } = {}) {
+    const onToggleTheme = vi.fn();
+    render(
+      createElement(DashboardShell, {
+        ...BASE,
+        ...overrides,
+        onToggleTheme,
+        appMode: "parked",
+        onToggleMode: () => {},
+        phone: true,
+        bottomNav: createElement("nav", { "aria-label": "Phone sections" }),
+      }),
+    );
+    return { onToggleTheme };
+  }
+
+  it("condenses the header to brand, connection status and one menu", () => {
+    renderPhone({ anomalyState: "error" });
+    expect(screen.getByText("CANary")).toBeInTheDocument();
+    expect(screen.getByRole("status", { name: "connection: live pi, stream down" })).toBeVisible();
+    // The widgets moved into the menu; the bottom bar replaces the mode toggle.
+    expect(screen.queryByRole("button", { name: "control token" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /switch to the/ })).not.toBeInTheDocument();
+    expect(screen.getByRole("navigation", { name: "Phone sections" })).toBeInTheDocument();
+  });
+
+  it("holds the theme toggle, token pill and stream detail in the menu", () => {
+    const { onToggleTheme } = renderPhone();
+    fireEvent.click(screen.getByRole("button", { name: "open menu" }));
+    const menu = screen.getByRole("dialog", { name: "Menu" });
+    expect(menu).toHaveTextContent("tel");
+    expect(menu).toHaveTextContent("anom");
+    expect(screen.getByRole("button", { name: "control token" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /switch to the night/ }));
+    expect(onToggleTheme).toHaveBeenCalledOnce();
+    fireEvent.keyDown(window, { key: "Escape" });
+    expect(screen.queryByRole("dialog", { name: "Menu" })).not.toBeInTheDocument();
+  });
+
+  it("renders no bottom bar on a desktop", () => {
+    render(
+      createElement(DashboardShell, {
+        ...BASE,
+        appMode: "parked",
+        onToggleMode: () => {},
+        bottomNav: createElement("nav", { "aria-label": "Phone sections" }),
+      }),
+    );
+    expect(screen.queryByRole("navigation", { name: "Phone sections" })).not.toBeInTheDocument();
   });
 });

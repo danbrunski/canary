@@ -45,7 +45,7 @@ export function Panel({
         {/* count + actions coexist (count = info, actions = controls);
             either may be omitted. */}
         {(count != null || actions) && (
-          <span className="flex items-center gap-3">
+          <span className="flex min-w-0 items-center gap-3 max-[600px]:flex-wrap">
             {count != null && <span className={panelCountClass}>{count}</span>}
             {actions}
           </span>

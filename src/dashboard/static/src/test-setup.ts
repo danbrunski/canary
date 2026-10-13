@@ -11,6 +11,24 @@ import { cleanup, configure } from "@testing-library/react";
 // holds, so this costs nothing when green.
 configure({ asyncUtilTimeout: 4500 });
 
+// jsdom 25 has no PointerEvent, so `fireEvent.pointerDown(el, { pointerType:
+// "touch", clientX })` would build a plain Event and drop both fields. The
+// charts read pointers, not mouse events (phone touch readout, P4.2).
+if (typeof window.PointerEvent === "undefined") {
+  class PointerEventPolyfill extends MouseEvent {
+    readonly pointerId: number;
+    readonly pointerType: string;
+    readonly isPrimary: boolean;
+    constructor(type: string, init: PointerEventInit = {}) {
+      super(type, init);
+      this.pointerId = init.pointerId ?? 1;
+      this.pointerType = init.pointerType ?? "mouse";
+      this.isPrimary = init.isPrimary ?? true;
+    }
+  }
+  window.PointerEvent = PointerEventPolyfill as unknown as typeof PointerEvent;
+}
+
 beforeAll(() => {
   Object.defineProperty(HTMLCanvasElement.prototype, "getContext", {
     configurable: true,

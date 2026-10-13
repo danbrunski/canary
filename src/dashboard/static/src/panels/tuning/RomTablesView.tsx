@@ -1,4 +1,5 @@
 import { useCallback, useState } from "react";
+import { TableScroll } from "../../components/TableScroll";
 
 import { getRomTables } from "../../api/workbench";
 import { useControlResource } from "../../hooks/useControlResource";
@@ -179,7 +180,7 @@ function ValuesGrid({ table }: { table: RomTableValues }) {
           : "Columns: index"}
         {" · "}Cells: {unit || "value"}
       </p>
-      <div className="overflow-x-auto rounded-lg border border-border">
+      <TableScroll className="rounded-lg border border-border">
         <table
           className="w-full border-separate border-spacing-1 text-center font-num text-xs"
           aria-label={`${table.name} values`}
@@ -218,7 +219,7 @@ function ValuesGrid({ table }: { table: RomTableValues }) {
             ))}
           </tbody>
         </table>
-      </div>
+      </TableScroll>
     </div>
   );
 }
@@ -319,7 +320,7 @@ function SlotLayout({
         <span className="absolute left-0">+0x000</span>
         <span className="absolute right-0">+{hexAddress(mapSlots.stride - 1, 3)}</span>
       </div>
-      <div className="overflow-x-auto rounded-lg border border-border">
+      <TableScroll className="rounded-lg border border-border">
         <table
           className="w-full min-w-[40rem] text-left text-sm"
           aria-label={`Map ${slot} contents`}
@@ -357,7 +358,7 @@ function SlotLayout({
             ))}
           </tbody>
         </table>
-      </div>
+      </TableScroll>
     </section>
   );
 }

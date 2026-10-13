@@ -43,9 +43,9 @@ export function ProfilePicker({
   disabled?: boolean;
 }) {
   return (
-    <Field label="Profile" hint={hint}>
+    <Field label="Profile" hint={hint} className="max-[600px]:w-full">
       <select
-        className={`${inputClass} mt-1 w-56`}
+        className={`${inputClass} mt-1 w-56 max-[600px]:w-full`}
         value={value}
         disabled={disabled}
         onChange={(event) => onChange(event.target.value)}

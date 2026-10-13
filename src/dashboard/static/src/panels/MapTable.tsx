@@ -1,4 +1,5 @@
 import { cssVar } from "../lib/chartTheme";
+import { TableScroll } from "../components/TableScroll";
 import { mapColor } from "../lib/romMaps";
 import type { RomTable } from "../lib/romMaps";
 import { coverageClass, coverageColor, THIN_COVERAGE_SAMPLES } from "../lib/romTrace";
@@ -44,7 +45,7 @@ export function MapTable({
           {outOfRange && (
             <p role="status">Operating point is outside the verified axes; no cell highlighted.</p>
           )}
-          <div className="overflow-x-auto rounded-lg border border-border">
+          <TableScroll className="rounded-lg border border-border">
             <table
               className={`w-full border-separate border-spacing-1 text-center font-mono ${large ? "text-xl" : "text-sm"}`}
               aria-label={`Map ${table.slot} ${table.title} values`}
@@ -128,7 +129,7 @@ export function MapTable({
                 ))}
               </tbody>
             </table>
-          </div>
+          </TableScroll>
           {coverage ? (
             <div className="flex flex-wrap items-center gap-3 text-xs text-fg-dim">
               <span className="inline-flex items-center gap-1">

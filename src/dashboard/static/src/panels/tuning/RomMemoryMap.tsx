@@ -1,4 +1,5 @@
 import { useRef, useState, type KeyboardEvent } from "react";
+import { TableScroll } from "../../components/TableScroll";
 
 import {
   BLOCK_CLASS_TEXT,
@@ -14,7 +15,7 @@ import {
   regionsOverlapping,
   sortRegions,
 } from "../../lib/romLibrary";
-import { cn } from "../../styles";
+import { buttonClass, cn } from "../../styles";
 import type { RomBlock, RomBlockClass, RomEraseSector, RomRegion } from "../../types/romLibrary";
 import { ConfidenceChip, ConfidenceLegend, UpRevChip } from "./romLibraryParts";
 
@@ -60,6 +61,12 @@ export function RomBlockGrid({ blocks, regions }: { blocks: RomBlock[]; regions:
     cells.current[next]?.focus();
   }
 
+  function step(delta: number) {
+    // Nothing selected yet: "next" starts at the first block.
+    const from = selected ?? (delta > 0 ? -1 : 0);
+    setSelected(Math.min(blocks.length - 1, Math.max(0, from + delta)));
+  }
+
   const overlapping = block
     ? regionsOverlapping(regions, block.offset, block.offset + BLOCK_SIZE - 1)
     : [];
@@ -81,7 +88,7 @@ export function RomBlockGrid({ blocks, regions }: { blocks: RomBlock[]; regions:
           <div
             role="group"
             aria-label={`${formatBytes(BLOCK_SIZE)} blocks of the flash image`}
-            className="grid grid-cols-[4.5rem_repeat(16,1.15rem)] items-center gap-0.5"
+            className="grid grid-cols-[4.5rem_repeat(16,1.15rem)] items-center gap-0.5 max-[600px]:grid-cols-[3.5rem_repeat(16,minmax(0,1fr))]"
           >
             {rows.map((row, r) => (
               <RowCells
@@ -143,6 +150,29 @@ export function RomBlockGrid({ blocks, regions }: { blocks: RomBlock[]; regions:
             </span>
           )}
         </div>
+        {/* The touch counterpart of hover-scrubbing and the arrow keys
+            (P5.2): a 4 KiB block is a 16-24 px target, so after one tap
+            the neighbours are reached with finger-sized steps. */}
+        <div className="flex gap-2 min-[900px]:col-span-2">
+          <button
+            type="button"
+            className={cn(buttonClass, "min-h-10 text-sm")}
+            aria-label="previous block"
+            disabled={selected === null || selected <= 0}
+            onClick={() => step(-1)}
+          >
+            ◀ prev
+          </button>
+          <button
+            type="button"
+            className={cn(buttonClass, "min-h-10 text-sm")}
+            aria-label="next block"
+            disabled={selected !== null && selected >= blocks.length - 1}
+            onClick={() => step(1)}
+          >
+            next ▶
+          </button>
+        </div>
       </div>
     </div>
   );
@@ -183,6 +213,7 @@ function RowCells({
             data-block-class={block.class}
             className={cn(
               "h-[1.15rem] w-[1.15rem] rounded-sm border-0 p-0",
+              "max-[600px]:aspect-square max-[600px]:h-auto max-[600px]:w-full",
               "focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-accent",
               selected === index && "outline-2 outline-offset-1 outline-accent",
               blockStyle(block.class),
@@ -231,7 +262,7 @@ export function RomRegionTable({
           time, so changing one cell rewrites the sector holding it.
         </p>
       )}
-      <div className="overflow-x-auto rounded-lg border border-border">
+      <TableScroll className="rounded-lg border border-border">
         <table className="w-full min-w-[46rem] text-left text-sm" aria-label="Regions">
           <thead className="text-[0.7rem] uppercase tracking-[0.08em] text-fg-faint">
             <tr>
@@ -269,7 +300,7 @@ export function RomRegionTable({
             ))}
           </tbody>
         </table>
-      </div>
+      </TableScroll>
     </div>
   );
 }

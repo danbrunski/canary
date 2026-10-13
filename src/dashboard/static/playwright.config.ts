@@ -31,6 +31,22 @@ export default defineConfig({
     {
       name: "chromium",
       use: { ...devices["Desktop Chrome"] },
+      testIgnore: /phone\.spec\.ts$/,
+    },
+    {
+      // P2.6: the regression net for the phone layout (docs/roadmap/
+      // phone-ui.md P2-P5). A Pixel 7 in portrait at its full 412x915 screen
+      // (the descriptor's own viewport subtracts browser chrome), touch and
+      // mobile viewport semantics on. Runs the dashboard journeys plus the
+      // phone-only spec; the ROM maps spec sizes its own viewport.
+      name: "phone",
+      use: {
+        ...devices["Pixel 7"],
+        viewport: { width: 412, height: 915 },
+        isMobile: true,
+        hasTouch: true,
+      },
+      testMatch: /(dashboard|phone)\.spec\.ts$/,
     },
   ],
   webServer: {

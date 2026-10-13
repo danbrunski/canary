@@ -16,6 +16,10 @@ export const shellClass = [
   "[text-rendering:optimizeLegibility]",
   "bg-[radial-gradient(900px_600px_at_88%_-10%,rgba(79,214,224,0.06),transparent_60%),radial-gradient(1100px_700px_at_6%_-8%,rgba(255,181,71,0.05),transparent_55%),var(--color-bg)]",
   "bg-fixed",
+  // viewport-fit=cover (index.html) hands the notch/rounded corners to the
+  // page; the side insets are 0 everywhere but a landscape phone.
+  "pl-[env(safe-area-inset-left)]",
+  "pr-[env(safe-area-inset-right)]",
 ].join(" ");
 
 /** Body region between the status strip and the viewport floor. It only
@@ -31,7 +35,7 @@ export const mainClass = "flex min-h-0 flex-1 flex-col";
  *  tall panel clip its own content while the scroll container still reports
  *  no overflow — content disappears past the fold with no scrollbar and no
  *  way to reach it. An indefinite-height inner grid overflows honestly. */
-export const scrollPaneClass = "min-h-0 flex-1 overflow-y-auto p-[1.15rem]";
+export const scrollPaneClass = "min-h-0 flex-1 overflow-y-auto p-[1.15rem] max-[600px]:p-3";
 
 export const responsiveGridClass = "grid gap-[1.15rem] max-[900px]:grid-cols-1";
 
@@ -50,6 +54,14 @@ export const headerClass = [
   "backdrop-blur-md",
   "max-[900px]:flex-wrap",
   "max-[900px]:items-stretch",
+  // Phone header (P2.2): brand, connection status and one menu on one row,
+  // clear of the status bar when the PWA draws under it.
+  "max-[600px]:flex-nowrap",
+  "max-[600px]:items-center",
+  "max-[600px]:gap-2",
+  "max-[600px]:px-3",
+  "max-[600px]:pb-2",
+  "max-[600px]:pt-[max(0.5rem,env(safe-area-inset-top))]",
 ].join(" ");
 
 export const panelClass = [
@@ -60,6 +72,7 @@ export const panelClass = [
   "border-border-soft",
   "bg-[linear-gradient(180deg,var(--color-elev),var(--color-bg))]",
   "p-4",
+  "max-[600px]:p-3",
   "shadow-panel",
   "before:absolute",
   "before:inset-x-0",
@@ -69,8 +82,10 @@ export const panelClass = [
   "before:opacity-50",
 ].join(" ");
 
-export const panelHeaderClass = "mb-3 flex items-baseline justify-between gap-4";
-export const panelHeaderCenterClass = "mb-3 flex items-center justify-between gap-4";
+export const panelHeaderClass =
+  "mb-3 flex items-baseline justify-between gap-4 max-[600px]:flex-wrap max-[600px]:gap-2";
+export const panelHeaderCenterClass =
+  "mb-3 flex items-center justify-between gap-4 max-[600px]:flex-wrap max-[600px]:gap-2";
 export const panelTitleClass =
   "m-0 text-[0.82rem] font-bold uppercase tracking-[0.14em] text-fg-dim";
 export const panelCountClass = "font-num text-[0.74rem] tracking-[0.03em] text-fg-faint";
@@ -138,9 +153,36 @@ export const badgeClass = [
 ].join(" ");
 
 export const definitionListClass = "m-0 flex flex-col gap-1.5";
-export const definitionRowClass = "flex items-baseline justify-between gap-3 text-[0.88rem]";
+/** A key/value row. Below 600px (P2.5) it becomes a small stacked card —
+ *  term above value — so a long value (a storage path, a revision string)
+ *  wraps under its label instead of squeezing it off the row. */
+export const definitionRowClass =
+  "flex items-baseline justify-between gap-3 text-[0.88rem] " +
+  "max-[600px]:flex-col max-[600px]:items-stretch max-[600px]:gap-0.5 " +
+  "max-[600px]:rounded-tile max-[600px]:border max-[600px]:border-border-soft " +
+  "max-[600px]:bg-black/15 max-[600px]:px-2.5 max-[600px]:py-1.5";
 export const definitionTermClass = "text-[0.72rem] uppercase tracking-[0.08em] text-fg-faint";
-export const definitionValueClass = "m-0 font-num tabular-nums";
+export const definitionValueClass =
+  "m-0 min-w-0 break-words font-num tabular-nums max-[600px]:text-left";
+
+/** The one wrapper for a wide data table (P2.5): the table scrolls sideways
+ *  inside its own box instead of pushing the page wider, and below 600px its
+ *  first column (the row's name) stays put while the rest scrolls under it.
+ *  Use `TableScroll` (components/TableScroll) rather than this directly. */
+export const tableScrollClass =
+  "max-w-full overflow-x-auto overscroll-x-contain " +
+  "max-[600px]:[&_tr>:first-child]:sticky max-[600px]:[&_tr>:first-child]:left-0 " +
+  "max-[600px]:[&_tr>:first-child]:z-[1] max-[600px]:[&_tr>:first-child]:bg-elev";
+
+/** A two-column key/value `<table>` that stacks into cards below 600px: each
+ *  row becomes a block with the key over the value. */
+export const keyValueTableClass =
+  "w-full border-collapse " +
+  "max-[600px]:block max-[600px]:[&_tbody]:flex max-[600px]:[&_tbody]:flex-col " +
+  "max-[600px]:[&_tbody]:gap-1.5 max-[600px]:[&_tr]:flex max-[600px]:[&_tr]:flex-col " +
+  "max-[600px]:[&_tr]:rounded-tile max-[600px]:[&_tr]:border " +
+  "max-[600px]:[&_tr]:border-border-soft max-[600px]:[&_tr]:px-2.5 max-[600px]:[&_tr]:py-1.5 " +
+  "max-[600px]:[&_td]:w-auto max-[600px]:[&_td]:p-0";
 
 export type NoticeKind = "ok" | "error" | "busy";
 
@@ -202,7 +244,7 @@ export const sidebarClass =
  *  A plain block wrapping the panel grid, for the reason in
  *  `scrollPaneClass` above. */
 export const workbenchContentClass =
-  "min-w-0 overflow-y-auto overscroll-contain p-[1.15rem] " + "max-[900px]:overflow-y-visible";
+  "min-w-0 overflow-y-auto overscroll-contain p-[1.15rem] max-[900px]:overflow-y-visible";
 
 export const navGroupLabelClass =
   "px-2 text-[0.6rem] font-bold uppercase tracking-[0.16em] text-fg-faint max-[900px]:hidden";
@@ -214,5 +256,78 @@ export function navItemClass(active: boolean): string {
     "max-[900px]:whitespace-nowrap",
     active &&
       "border-border-soft bg-[linear-gradient(180deg,var(--color-elev-3),var(--color-elev-2))] text-fg",
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Phone layout (docs/roadmap/phone-ui.md P2.2). Below 600px the sidebar and
+// the header's widget row give way to a bottom bar of five entries, a "More"
+// sheet holding the rest of NAV, and one header menu.
+// ---------------------------------------------------------------------------
+
+/** Workbench body on a phone: an optional page strip, then one scroll pane. */
+export const phoneWorkbenchClass = "flex min-h-0 flex-1 flex-col";
+
+/** The bottom bar is the shell's last flex row, not `position: fixed`: the
+ *  panes above already own the scrolling, so nothing ever slides under it
+ *  and no pane needs bottom padding to stay reachable. */
+export const bottomBarClass = [
+  "grid",
+  "shrink-0",
+  "border-t",
+  "border-border-soft",
+  "bg-elev",
+  "pb-[env(safe-area-inset-bottom)]",
+].join(" ");
+
+export function bottomTabClass(active: boolean): string {
+  return cn(
+    "relative flex min-h-14 min-w-0 flex-col items-center justify-center px-1",
+    "text-[0.7rem] font-semibold uppercase tracking-[0.05em] text-fg-dim",
+    "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent-2",
+    active &&
+      "text-accent before:absolute before:inset-x-3 before:top-0 before:h-0.5 before:rounded-full before:bg-accent",
+  );
+}
+
+/** Backdrop + bottom sheet shared by the More sheet and the header menu. */
+export const sheetBackdropClass = "fixed inset-0 z-20 bg-black/55";
+export const sheetClass = [
+  "fixed",
+  "inset-x-0",
+  "bottom-0",
+  "z-30",
+  "flex",
+  "max-h-[80dvh]",
+  "flex-col",
+  "rounded-t-[16px]",
+  "border-t",
+  "border-border",
+  "bg-elev",
+  "shadow-panel",
+  "pb-[env(safe-area-inset-bottom)]",
+  "pl-[env(safe-area-inset-left)]",
+  "pr-[env(safe-area-inset-right)]",
+].join(" ");
+export const sheetHeaderClass = "flex shrink-0 items-center justify-between gap-3 px-4 py-3";
+export const sheetBodyClass = "min-h-0 overflow-y-auto overscroll-contain px-4 pb-4";
+
+export function sheetItemClass(active: boolean): string {
+  return cn(
+    "flex min-h-11 w-full items-center rounded-[8px] px-3 text-left text-[0.95rem] text-fg-dim",
+    "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-2",
+    active && "bg-elev-3 text-fg",
+  );
+}
+
+/** The sibling pages under one bottom-bar entry (e.g. Alerts: codes,
+ *  anomalies, alarms): a strip of chips above the pane. */
+export const pageStripClass =
+  "flex shrink-0 gap-2 overflow-x-auto border-b border-border-soft px-3 py-2";
+
+export function pageChipClass(active: boolean): string {
+  return cn(
+    "min-h-9 shrink-0 whitespace-nowrap rounded-full border px-3 text-[0.8rem]",
+    active ? "border-accent bg-accent/15 text-accent" : "border-border-soft text-fg-dim",
   );
 }

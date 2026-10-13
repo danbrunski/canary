@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { TableScroll } from "../components/TableScroll";
 
 import { Sparkline } from "../components/Sparkline";
 import type { ChannelSnapshot } from "../hooks/useTelemetryStream";
@@ -56,6 +57,13 @@ const DEFAULT_PIN_CANDIDATES = [
   "did:ECM_AF_SENSOR_V_B2",
   "did:ECM_THROTTLE_POS_SENSOR_1",
 ];
+
+/** The tile's pin and graph toggles are glyph-sized on a desktop; on a phone
+ *  (P4.1) they are where the pinned set is edited, so they get a
+ *  finger-sized hit box. */
+const PHONE_TAP_TARGET =
+  "max-[600px]:inline-flex max-[600px]:h-9 max-[600px]:w-9 max-[600px]:items-center " +
+  "max-[600px]:justify-center max-[600px]:text-[1.05rem]";
 
 const PIN_STORAGE_KEY = "canary.drive.pinned";
 const GRAPH_STORAGE_KEY = "canary.drive.graphs";
@@ -181,7 +189,7 @@ export function TelemetryPanel({
             {compact && activePinned.length > 0 && ` · ${activePinned.length} pinned`}
           </span>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex min-w-0 items-center gap-2 max-[600px]:w-full">
           {compact && activePinned.length > 0 && (
             <button
               type="button"
@@ -197,7 +205,7 @@ export function TelemetryPanel({
             </button>
           )}
           <input
-            className={cn(inputClass, "w-[min(20rem,40vw)] max-[700px]:w-full")}
+            className={cn(inputClass, "w-[min(20rem,40vw)] min-w-0 max-[700px]:w-full")}
             value={query}
             onChange={(event) => setQuery(event.target.value)}
             placeholder="search PID or signal"
@@ -210,7 +218,7 @@ export function TelemetryPanel({
           {gridChannels.length === 0 ? (
             <p className={placeholderClass}>no channels match “{query}”.</p>
           ) : (
-            <div className="grid grid-cols-[repeat(auto-fill,minmax(165px,1fr))] gap-2.5">
+            <div className="grid grid-cols-[repeat(auto-fill,minmax(165px,1fr))] gap-2.5 max-[600px]:grid-cols-2 max-[600px]:gap-2">
               {gridChannels.map(([key, snap]) => (
                 <ChannelCard
                   key={key}
@@ -239,7 +247,7 @@ export function TelemetryPanel({
             <b className="text-fg">Gauge table</b>
             <span>{visibleChannels.length} visible</span>
           </div>
-          <div className="max-h-[44rem] overflow-auto rounded-[8px] border border-border-soft bg-black/20">
+          <TableScroll className="max-h-[44rem] overflow-auto rounded-[8px] border border-border-soft bg-black/20">
             <table
               aria-label="Live telemetry values"
               className="w-full min-w-[42rem] border-collapse font-console text-[0.78rem] tabular-nums"
@@ -277,7 +285,7 @@ export function TelemetryPanel({
                 ))}
               </tbody>
             </table>
-          </div>
+          </TableScroll>
         </div>
       )}
     </section>
@@ -367,12 +375,13 @@ function ChannelCard({
         bandUtility(rendered.bandClass),
       )}
     >
-      <div className="absolute right-1.5 top-1.5 flex items-center gap-1.5">
+      <div className="absolute right-1.5 top-1.5 flex items-center gap-1.5 max-[600px]:right-0.5 max-[600px]:top-0.5 max-[600px]:gap-0">
         {onToggleGraph && (
           <button
             type="button"
             className={cn(
               "text-[0.78rem] leading-none transition-colors",
+              PHONE_TAP_TARGET,
               graphOn ? "text-accent-2" : "text-fg-faint hover:text-fg-dim",
             )}
             onClick={onToggleGraph}
@@ -388,6 +397,7 @@ function ChannelCard({
             type="button"
             className={cn(
               "text-[0.8rem] leading-none transition-colors",
+              PHONE_TAP_TARGET,
               pinned ? "text-accent" : "text-fg-faint hover:text-fg-dim",
             )}
             onClick={onTogglePin}
@@ -398,19 +408,19 @@ function ChannelCard({
           </button>
         )}
       </div>
-      <div className="mb-1 pr-10 text-[0.62rem] uppercase tracking-[0.13em] text-fg-faint">
+      <div className="mb-1 pr-10 text-[0.62rem] uppercase tracking-[0.13em] text-fg-faint max-[600px]:truncate max-[600px]:pr-[4.5rem] max-[600px]:text-[0.66rem]">
         {pretty}
       </div>
       <div
         className={cn(
-          "font-num text-2xl font-semibold tabular-nums text-fg",
+          "font-num text-2xl font-semibold tabular-nums text-fg max-[600px]:text-[1.75rem] max-[600px]:leading-tight",
           rendered.bandClass === "band-bad" && "text-bad",
           rendered.bandClass === "band-warn" && "text-warn",
         )}
       >
         {rendered.text}
         {rendered.unit && (
-          <span className="ml-1.5 font-num text-[0.7rem] font-medium text-fg-faint">
+          <span className="ml-1.5 inline-block font-num text-[0.7rem] font-medium text-fg-faint">
             {rendered.unit}
           </span>
         )}

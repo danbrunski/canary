@@ -8,13 +8,14 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { pauseProfileCapture, startProfileCapture, stopProfileCapture } from "../api/http";
 import { Notice } from "../components/Notice";
 import { Panel } from "../components/Panel";
+import { TableScroll } from "../components/TableScroll";
 import { useAsyncAction } from "../hooks/useAsyncAction";
 import { useCaptureCatalog } from "../hooks/useCaptureCatalog";
 import { useNow } from "../hooks/useNow";
 import type { ChannelSnapshot } from "../hooks/useTelemetryStream";
 import { streamKey } from "../lib/romMaps";
 import { effectiveTargetHz } from "../lib/scheduler";
-import { buttonClass, inputClass } from "../styles";
+import { buttonClass, cn, inputClass } from "../styles";
 import type { CaptureProfileState, CaptureQuality, StatusResponse } from "../types";
 import { formatReading } from "../util/format";
 import { CapturePlanSummary, CollectionStatus, Field, ProfilePicker } from "./captureProfileParts";
@@ -37,6 +38,10 @@ export function capturePhase(
   if (!active?.active) return "idle";
   return active.paused ? "paused" : "recording";
 }
+
+/** Start / Pause / Stop on a phone (P5.1): full-height, sharing the row, so
+ *  they can be hit from the driver's seat. */
+const RUN_BUTTON_PHONE = "max-[600px]:min-h-11 max-[600px]:flex-1";
 
 const TRANSITIONS: ReadonlySet<CapturePhase> = new Set([
   "starting",
@@ -225,9 +230,10 @@ export function CaptureRunner({
           <Field
             label="Tune revision"
             hint={selectedProfile?.requires_tune_revision ? "required by this profile" : "optional"}
+            className="max-[600px]:w-full"
           >
             <input
-              className={`${inputClass} mt-1 w-48`}
+              className={`${inputClass} mt-1 w-48 max-[600px]:w-full`}
               value={tuneRevision}
               disabled={capturing || transitioning}
               onChange={(event) => setTuneRevisionEdit(event.target.value)}
@@ -237,7 +243,7 @@ export function CaptureRunner({
 
           {!capturing ? (
             <button
-              className={buttonClass}
+              className={cn(buttonClass, RUN_BUTTON_PHONE)}
               type="button"
               disabled={!token || !selectedProfile || selectedProfile.name === "default" || !!busy}
               onClick={() => void start()}
@@ -247,7 +253,7 @@ export function CaptureRunner({
           ) : (
             <>
               <button
-                className={buttonClass}
+                className={cn(buttonClass, RUN_BUTTON_PHONE)}
                 type="button"
                 disabled={!token || !!busy}
                 onClick={togglePause}
@@ -259,10 +265,12 @@ export function CaptureRunner({
                     : paused
                       ? "Resume"
                       : "Pause"}
-                {!transitioning && <span className="ml-1 text-fg-dim">(space)</span>}
+                {!transitioning && (
+                  <span className="ml-1 text-fg-dim max-[600px]:hidden">(space)</span>
+                )}
               </button>
               <button
-                className={buttonClass}
+                className={cn(buttonClass, RUN_BUTTON_PHONE)}
                 type="button"
                 disabled={!token || !!busy}
                 onClick={() => void stop()}
@@ -475,41 +483,43 @@ function RecordingReadout({
             </p>
           )}
           {requestRows.length > 0 ? (
-            <table className="mt-1 w-full font-num text-[0.72rem] tabular-nums">
-              <thead>
-                <tr className="text-fg-dim">
-                  <th className="text-left">Channel</th>
-                  <th>kind</th>
-                  <th>requested</th>
-                  <th>achieved</th>
-                  <th>sent</th>
-                  <th>responses</th>
-                  <th>timeouts</th>
-                  <th>NRCs</th>
-                </tr>
-              </thead>
-              <tbody>
-                {requestRows.map((row) => {
-                  const neverSent = captureAgeSeconds >= 10 && (row.requests_sent ?? 0) === 0;
-                  const short = minRateHz != null && row.achievedHz < minRateHz;
-                  return (
-                    <tr
-                      key={`${row.kind}:${row.channel}`}
-                      className={`border-b border-border/40 ${neverSent ? "text-bad" : short ? "text-warn" : ""}`}
-                    >
-                      <td>{row.displayChannel}</td>
-                      <td className="text-center">{row.kind}</td>
-                      <td className="text-right">{effectiveTargetHz(row)?.toFixed(2) ?? "—"}</td>
-                      <td className="text-right">{row.achievedHz.toFixed(2)}</td>
-                      <td className="text-right">{row.requests_sent ?? 0}</td>
-                      <td className="text-right">{row.responses ?? 0}</td>
-                      <td className="text-right">{row.timeouts ?? 0}</td>
-                      <td className="text-right">{row.negative_responses ?? 0}</td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
+            <TableScroll className="mt-1">
+              <table className="w-full min-w-[30rem] font-num text-[0.72rem] tabular-nums">
+                <thead>
+                  <tr className="text-fg-dim">
+                    <th className="text-left">Channel</th>
+                    <th>kind</th>
+                    <th>requested</th>
+                    <th>achieved</th>
+                    <th>sent</th>
+                    <th>responses</th>
+                    <th>timeouts</th>
+                    <th>NRCs</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {requestRows.map((row) => {
+                    const neverSent = captureAgeSeconds >= 10 && (row.requests_sent ?? 0) === 0;
+                    const short = minRateHz != null && row.achievedHz < minRateHz;
+                    return (
+                      <tr
+                        key={`${row.kind}:${row.channel}`}
+                        className={`border-b border-border/40 ${neverSent ? "text-bad" : short ? "text-warn" : ""}`}
+                      >
+                        <td>{row.displayChannel}</td>
+                        <td className="text-center">{row.kind}</td>
+                        <td className="text-right">{effectiveTargetHz(row)?.toFixed(2) ?? "—"}</td>
+                        <td className="text-right">{row.achievedHz.toFixed(2)}</td>
+                        <td className="text-right">{row.requests_sent ?? 0}</td>
+                        <td className="text-right">{row.responses ?? 0}</td>
+                        <td className="text-right">{row.timeouts ?? 0}</td>
+                        <td className="text-right">{row.negative_responses ?? 0}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </TableScroll>
           ) : (
             achievedRates.length > 0 && (
               <table className="mt-1 w-full font-num tabular-nums">

@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { TableScroll } from "../../components/TableScroll";
 
 import { compareRomImages } from "../../api/workbench";
 import { Notice } from "../../components/Notice";
@@ -158,7 +159,7 @@ function CellChanges({ cells }: { cells: RomCompareCell[] }) {
   const tableOf = (cell: RomCompareCell) => cell.table_label ?? cell.table ?? "";
   const withTable = cells.some((cell) => tableOf(cell));
   return (
-    <div className="mt-2 overflow-x-auto">
+    <TableScroll className="mt-2">
       <table className="text-left font-num text-xs" aria-label="Changed cells">
         <thead className="text-fg-faint">
           <tr>
@@ -181,6 +182,6 @@ function CellChanges({ cells }: { cells: RomCompareCell[] }) {
           ))}
         </tbody>
       </table>
-    </div>
+    </TableScroll>
   );
 }

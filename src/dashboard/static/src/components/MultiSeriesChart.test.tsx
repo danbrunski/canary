@@ -85,10 +85,55 @@ describe("MultiSeriesChart", () => {
       left: 0,
       width: 200,
     } as DOMRect);
-    fireEvent.mouseMove(canvas, { clientX: 100 });
+    fireEvent.pointerMove(canvas, { clientX: 100, pointerType: "mouse" });
     expect(screen.getByText("1500")).toBeInTheDocument();
     expect(screen.getByText("20")).toBeInTheDocument();
-    fireEvent.mouseLeave(canvas);
+    expect(screen.queryByRole("button", { name: "clear readout" })).not.toBeInTheDocument();
+    fireEvent.pointerLeave(canvas, { pointerType: "mouse" });
     expect(screen.queryByText("1500")).not.toBeInTheDocument();
+  });
+
+  // P4.2: a phone has no hover. A touch reads the sample under the finger,
+  // dragging moves it, and the readout outlives the finger lifting.
+  it("reads values by touch and keeps the readout until it is cleared", () => {
+    const { container } = render(<MultiSeriesChart series={SERIES} width={200} />);
+    const canvas = container.querySelector("canvas")!;
+    vi.spyOn(canvas, "getBoundingClientRect").mockReturnValue({
+      left: 0,
+      width: 200,
+    } as DOMRect);
+    fireEvent.pointerDown(canvas, { clientX: 0, pointerType: "touch" });
+    expect(screen.getByTestId("chart-readout")).toHaveTextContent("800");
+    fireEvent.pointerMove(canvas, { clientX: 200, pointerType: "touch" });
+    expect(screen.getByTestId("chart-readout")).toHaveTextContent("3000");
+    fireEvent.pointerUp(canvas, { clientX: 200, pointerType: "touch" });
+    fireEvent.pointerLeave(canvas, { pointerType: "touch" });
+    expect(screen.getByTestId("chart-readout")).toHaveTextContent("3000");
+    fireEvent.click(screen.getByRole("button", { name: "clear readout" }));
+    expect(screen.queryByTestId("chart-readout")).not.toBeInTheDocument();
+  });
+
+  it("follows a controlled cursor so stacked charts read the same instant", () => {
+    const onCursorChange = vi.fn();
+    const { container, rerender } = render(
+      <MultiSeriesChart
+        series={SERIES}
+        width={200}
+        cursor={null}
+        onCursorChange={onCursorChange}
+      />,
+    );
+    const canvas = container.querySelector("canvas")!;
+    vi.spyOn(canvas, "getBoundingClientRect").mockReturnValue({
+      left: 0,
+      width: 200,
+    } as DOMRect);
+    fireEvent.pointerDown(canvas, { clientX: 100, pointerType: "touch" });
+    expect(onCursorChange).toHaveBeenLastCalledWith(1);
+    expect(screen.queryByTestId("chart-readout")).not.toBeInTheDocument();
+    rerender(
+      <MultiSeriesChart series={SERIES} width={200} cursor={2} onCursorChange={onCursorChange} />,
+    );
+    expect(screen.getByTestId("chart-readout")).toHaveTextContent("3000");
   });
 });

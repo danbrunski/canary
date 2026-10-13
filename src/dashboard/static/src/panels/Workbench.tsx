@@ -4,12 +4,16 @@ import type { ChannelSnapshot } from "../hooks/useTelemetryStream";
 import type { CompanionSettings } from "../hooks/useCompanionSettings";
 import type { ScoresBySource } from "../hooks/useScoreStream";
 import { useTuningContext, type TuningContext } from "../hooks/useTuningContext";
-import { DEFAULT_ITEM, NAV, defaultItemForGroup } from "../nav";
+import { DEFAULT_ITEM, NAV, defaultItemForGroup, findItem, phoneTabFor } from "../nav";
 import {
   cn,
   navGroupLabelClass,
   navItemClass,
+  pageChipClass,
+  pageStripClass,
+  phoneWorkbenchClass,
   responsiveGridClass,
+  scrollPaneClass,
   sidebarClass,
   workbenchClass,
   workbenchContentClass,
@@ -86,12 +90,15 @@ interface WorkbenchProps {
   active: WorkbenchItem;
   onNavigate: (item: WorkbenchItem) => void;
   data: DashboardData;
+  /** Phone layout (below 600px): no sidebar, the shell's bottom bar
+   *  navigates instead. */
+  phone?: boolean;
 }
 
 /** The parked workspace: grouped sidebar nav + the active panel. Every
  *  panel — current and Phase-6 — has exactly one home here (see `nav.ts`),
  *  so adding the next panel never reignites the "which tab?" question. */
-export function Workbench({ active, onNavigate, data }: WorkbenchProps) {
+export function Workbench({ active, onNavigate, data, phone = false }: WorkbenchProps) {
   const content = useRef<HTMLDivElement>(null);
   // Engine Tuning group state (W02.5): owned here, above the pages, so the
   // selected log and loaded ROM survive navigation between them.
@@ -101,6 +108,45 @@ export function Workbench({ active, onNavigate, data }: WorkbenchProps) {
   useEffect(() => {
     if (content.current) content.current.scrollTop = 0;
   }, [active]);
+  const body = (
+    <>
+      {active.startsWith("tuning-") && (
+        <div className="mb-[1.15rem] max-[600px]:mb-3">
+          <TuningContextBar status={data.status} context={tuning} onNavigate={onNavigate} />
+        </div>
+      )}
+      <div className={cn(responsiveGridClass, "grid-cols-1")}>
+        {renderItem(active, data, onNavigate, tuning)}
+      </div>
+    </>
+  );
+  if (phone) {
+    // Phone (P2.2): the bottom bar and More sheet replace the sidebar. A
+    // bottom-bar entry owning several pages gets a strip to move between them.
+    const tab = phoneTabFor("parked", active);
+    return (
+      <div className={phoneWorkbenchClass}>
+        {tab && tab.items.length > 1 && (
+          <nav aria-label={`${tab.label} pages`} className={pageStripClass}>
+            {tab.items.map((id) => (
+              <button
+                key={id}
+                type="button"
+                className={pageChipClass(id === active)}
+                aria-current={id === active ? "page" : undefined}
+                onClick={() => onNavigate(id)}
+              >
+                {findItem(id).label}
+              </button>
+            ))}
+          </nav>
+        )}
+        <div ref={content} className={scrollPaneClass}>
+          {body}
+        </div>
+      </div>
+    );
+  }
   return (
     <div className={workbenchClass}>
       <nav className={sidebarClass} aria-label="Workbench sections">
@@ -128,14 +174,7 @@ export function Workbench({ active, onNavigate, data }: WorkbenchProps) {
         ))}
       </nav>
       <div ref={content} className={workbenchContentClass}>
-        {active.startsWith("tuning-") && (
-          <div className="mb-[1.15rem]">
-            <TuningContextBar status={data.status} context={tuning} onNavigate={onNavigate} />
-          </div>
-        )}
-        <div className={cn(responsiveGridClass, "grid-cols-1")}>
-          {renderItem(active, data, onNavigate, tuning)}
-        </div>
+        {body}
       </div>
     </div>
   );

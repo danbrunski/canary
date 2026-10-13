@@ -1,0 +1,234 @@
+import { expect, test, type Page } from "@playwright/test";
+
+import {
+  DESCRIPTION,
+  ENTRY_K106,
+  ENTRY_TUNED,
+  TABLES,
+  backupState,
+} from "../src/test/romLibraryFixtures";
+import type { DtcReportResponse, PowerStatusResponse } from "../src/types";
+import { mockDaemon } from "./fixtures/mockDaemon";
+
+/**
+ * P2.6 — the phone layout's regression net (docs/roadmap/phone-ui.md). Runs
+ * in the `phone` project only: a Pixel 7 in portrait, 412x915, touch on.
+ *
+ * "No horizontal page scroll" is checked two ways. The document must not be
+ * wider than the viewport. That alone passes trivially here, because the
+ * shell clips its own overflow (`h-dvh overflow-hidden`), so it also checks
+ * that nothing visible pokes past the right edge of the screen, unless it sits
+ * inside a box that scrolls sideways on purpose (a TableScroll, a chip strip):
+ * content clipped off-screen is as unreachable as content scrolled off it.
+ */
+
+const BOTTOM_BAR_PAGES = [
+  { tab: "Drive", hash: "#drive" },
+  { tab: "Logging", hash: "#wb/tuning-logging" },
+  { tab: "Alerts", hash: "#wb/diag-dtc" },
+  { tab: "ROM", hash: "#wb/tuning-rom-library" },
+  { tab: "System", hash: "#wb/system-info" },
+] as const;
+
+const NOW = new Date().toISOString();
+const SEED_ROWS = [
+  ["RPM", 2412, "rpm"],
+  ["SPEED", 64, "km/h"],
+  ["COOLANT_TEMP", 91, "°C"],
+  ["MAF", 18.4, "g/s"],
+  ["THROTTLE_POS", 22.7, "%"],
+  ["CONTROL_MODULE_VOLTAGE", 14.1, "V"],
+  ["ENGINE_LOAD", 38.2, "%"],
+  ["INTAKE_TEMP", 31, "°C"],
+].map(([channel, value, unit]) => ({ timestamp: NOW, source: "obd", channel, value, unit }));
+
+const DTC_REPORT: DtcReportResponse = {
+  captured_at: NOW,
+  stored: [
+    {
+      code: "P0171",
+      description: "System Too Lean (Bank 1)",
+      system: "fuel and air metering",
+      generic: true,
+      curated: true,
+    },
+  ],
+  pending: [],
+  permanent: [],
+  mil_on: true,
+  dtc_count: 1,
+  freeze_frame: null,
+  stale: false,
+};
+
+const POWER: PowerStatusResponse = {
+  power: {
+    watchdog_running: true,
+    watchdog_stale: false,
+    armed: true,
+    input_lost: false,
+    on_battery: false,
+    soc: 96,
+    vcell: 4.12,
+    seconds_lost: null,
+    grace_s: 60,
+    keepalive_remaining_s: 0,
+    status_age_s: 1.2,
+  },
+};
+
+let pageErrors: string[] = [];
+
+test.beforeEach(async ({ page }) => {
+  pageErrors = [];
+  // A render error unmounts the whole app; name it instead of timing out on
+  // a bottom bar that is no longer there.
+  page.on("pageerror", (error) => pageErrors.push(error.message));
+  await mockDaemon(page);
+  // Live values for the Drive tiles (the WebSocket mock sends nothing).
+  await page.route("**/telemetry/latest?*", (route) =>
+    route.fulfill({ json: { rows: SEED_ROWS } }),
+  );
+  // Real shapes where a page would otherwise render an empty state: the
+  // trouble-code report, and a ROM library wide enough to need its scroller.
+  await page.route(/\/obd\/dtc(\?|$)/, (route) => route.fulfill({ json: DTC_REPORT }));
+  await page.route(/\/control\/rom\/library(\?|$)/, (route) =>
+    route.fulfill({ json: { entries: [ENTRY_TUNED, ENTRY_K106], count: 2 } }),
+  );
+  await page.route(/\/control\/rom\/library\/[0-9a-f]+(\?|$)/, (route) =>
+    route.fulfill({ json: DESCRIPTION }),
+  );
+  await page.route(/\/control\/rom\/library\/[0-9a-f]+\/tables(\?|$)/, (route) =>
+    route.fulfill({ json: TABLES }),
+  );
+  await page.route(/\/control\/rom\/backup(\?|$)/, (route) =>
+    route.fulfill({ json: backupState() }),
+  );
+  await page.route(/\/control\/power(\?|$)/, (route) => route.fulfill({ json: POWER }));
+});
+
+async function overflowReport(page: Page) {
+  return page.evaluate(() => {
+    const viewport = window.innerWidth;
+    const scrollsSideways = (el: Element) => {
+      const style = getComputedStyle(el);
+      return (
+        (style.overflowX === "auto" || style.overflowX === "scroll") &&
+        el.scrollWidth > el.clientWidth
+      );
+    };
+    const offenders: string[] = [];
+    for (const el of Array.from(document.body.querySelectorAll("*"))) {
+      const rect = el.getBoundingClientRect();
+      if (rect.width === 0 || rect.height === 0) continue;
+      if (rect.right <= viewport + 1) continue;
+      let parent = el.parentElement;
+      let contained = false;
+      while (parent) {
+        if (scrollsSideways(parent)) {
+          contained = true;
+          break;
+        }
+        parent = parent.parentElement;
+      }
+      if (contained) continue;
+      const label = el.getAttribute("aria-label") ?? el.textContent?.trim().slice(0, 40) ?? "";
+      offenders.push(`${el.tagName.toLowerCase()} right=${Math.round(rect.right)} "${label}"`);
+    }
+    return {
+      viewport,
+      documentWidth: document.scrollingElement?.scrollWidth ?? 0,
+      offenders: offenders.slice(0, 10),
+    };
+  });
+}
+
+for (const { tab, hash } of BOTTOM_BAR_PAGES) {
+  test(`${tab} page has no horizontal page scroll at 412px`, async ({ page }) => {
+    await page.addInitScript(() => localStorage.setItem("canary.controlToken", "ui-test"));
+    await page.goto(`/${hash}`);
+    // Let polled panels settle into whatever they render with the stubs.
+    await page.waitForLoadState("networkidle");
+    expect(pageErrors).toEqual([]);
+    const bar = page.getByRole("navigation", { name: "Phone sections" });
+    await expect(bar.getByRole("button", { name: tab })).toHaveAttribute("aria-current", "page");
+    const report = await overflowReport(page);
+    expect(report.documentWidth).toBeLessThanOrEqual(report.viewport);
+    expect(report.offenders).toEqual([]);
+  });
+}
+
+test("the bottom bar and the More sheet navigate", async ({ page }) => {
+  await page.goto("/#drive");
+  const bar = page.getByRole("navigation", { name: "Phone sections" });
+  await expect(bar).toBeVisible();
+  // The desktop sidebar and mode toggle are gone at this width.
+  await expect(page.getByRole("navigation", { name: "Workbench sections" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: /switch to the/ })).toHaveCount(0);
+
+  await bar.getByRole("button", { name: "Alerts" }).tap();
+  await expect(page).toHaveURL(/#wb\/diag-dtc$/);
+  await page
+    .getByRole("navigation", { name: "Alerts pages" })
+    .getByRole("button", { name: "Anomalies" })
+    .tap();
+  await expect(page).toHaveURL(/#wb\/diag-anomalies$/);
+
+  await bar.getByRole("button", { name: "More" }).tap();
+  const sheet = page.getByRole("dialog", { name: "More" });
+  await expect(sheet).toBeVisible();
+  await expect(sheet.getByRole("region", { name: "Diagnose" })).toBeVisible();
+  await sheet.getByRole("button", { name: "Explore" }).tap();
+  await expect(sheet).toBeHidden();
+  await expect(page).toHaveURL(/#wb\/diag-explore$/);
+  await expect(bar.getByRole("button", { name: "More" })).toHaveAttribute("aria-current", "page");
+
+  // Escape and the backdrop close it too.
+  await bar.getByRole("button", { name: "More" }).tap();
+  await expect(sheet).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(sheet).toBeHidden();
+  await bar.getByRole("button", { name: "More" }).tap();
+  await page.getByTestId("sheet-backdrop").tap({ position: { x: 20, y: 20 } });
+  await expect(sheet).toBeHidden();
+
+  await bar.getByRole("button", { name: "Drive" }).tap();
+  await expect(page).toHaveURL(/#drive$/);
+});
+
+test("the header menu holds the theme toggle and the control token", async ({ page }) => {
+  await page.goto("/#drive");
+  await expect(page.getByRole("status", { name: /^connection: / })).toBeVisible();
+  await page.getByRole("button", { name: "open menu" }).tap();
+  const menu = page.getByRole("dialog", { name: "Menu" });
+  await expect(menu.getByRole("button", { name: "control token" })).toBeVisible();
+  await expect(menu.getByRole("button", { name: /switch to the/ })).toBeVisible();
+});
+
+test("the Drive screen shows two large tiles a row with finger-sized pins", async ({ page }) => {
+  await page.goto("/#drive");
+  const pin = page.getByRole("button", { name: /^(un)?pin Rpm$/i });
+  await expect(pin).toBeVisible();
+  const box = await pin.boundingBox();
+  expect(box?.width).toBeGreaterThanOrEqual(32);
+  expect(box?.height).toBeGreaterThanOrEqual(32);
+
+  const tiles = await page
+    .getByRole("button", { name: /^(un)?pin / })
+    .evaluateAll((pins) =>
+      pins.map((p) => Math.round((p.parentElement!.parentElement as HTMLElement).offsetLeft)),
+    );
+  expect(new Set(tiles).size).toBe(2);
+
+  // Pinning from the phone persists per device.
+  const pinnedCount = () =>
+    page.evaluate(
+      () => (JSON.parse(localStorage.getItem("canary.drive.pinned") ?? "[]") as string[]).length,
+    );
+  const before = await pinnedCount();
+  const unpinned = page.getByRole("button", { name: /^pin / }).first();
+  const name = (await unpinned.getAttribute("aria-label"))!.replace(/^pin /, "");
+  await unpinned.tap();
+  await expect(page.getByRole("button", { name: `unpin ${name}` })).toBeVisible();
+  await expect.poll(pinnedCount).toBe(before + 1);
+});

@@ -1,4 +1,5 @@
 import { FormEvent, useCallback, useMemo, useState } from "react";
+import { TableScroll } from "../../components/TableScroll";
 
 import {
   getCalibration,
@@ -154,48 +155,52 @@ export function CalibrationPage({
           <p>No RAM channels for this vehicle.</p>
         ) : (
           groups.map(([window, channels]) => (
-            <section key={window} className="mb-4 overflow-x-auto">
+            <section key={window} className="mb-4">
               <h3 className="mb-1 font-semibold">{window}</h3>
-              <table className="w-full text-left text-sm">
-                <thead>
-                  <tr>
-                    <th>Channel</th>
-                    <th>Address</th>
-                    <th>Evidence</th>
-                    <th>State</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {channels.map((channel) => (
-                    <tr key={channel.name} className="border-t border-border">
-                      <td className="py-2">{channel.name}</td>
-                      <td className="font-mono">{channel.address}</td>
-                      <td>
-                        {channel.known_answer
-                          ? `${channel.known_answer.relation} vs 0x${channel.known_answer.did.toString(16).toUpperCase()}`
-                          : channel.relations?.length
-                            ? channel.relations
-                                .map((relation) =>
-                                  relation.owner === channel.name
-                                    ? relation.kind
-                                    : `${relation.kind} (via ${relation.owner})`,
-                                )
-                                .join(", ")
-                            : "No known-answer relation"}
-                      </td>
-                      <td
-                        className={stateClass[channel.state]}
-                        title={channel.revision_carried_reason ?? channel.known_answer?.notes ?? ""}
-                      >
-                        {channel.state}
-                        {channel.revision_carried_reason
-                          ? ` — ${channel.revision_carried_reason}`
-                          : ""}
-                      </td>
+              <TableScroll>
+                <table className="w-full text-left text-sm">
+                  <thead>
+                    <tr>
+                      <th>Channel</th>
+                      <th>Address</th>
+                      <th>Evidence</th>
+                      <th>State</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
+                  </thead>
+                  <tbody>
+                    {channels.map((channel) => (
+                      <tr key={channel.name} className="border-t border-border">
+                        <td className="py-2">{channel.name}</td>
+                        <td className="font-mono">{channel.address}</td>
+                        <td>
+                          {channel.known_answer
+                            ? `${channel.known_answer.relation} vs 0x${channel.known_answer.did.toString(16).toUpperCase()}`
+                            : channel.relations?.length
+                              ? channel.relations
+                                  .map((relation) =>
+                                    relation.owner === channel.name
+                                      ? relation.kind
+                                      : `${relation.kind} (via ${relation.owner})`,
+                                  )
+                                  .join(", ")
+                              : "No known-answer relation"}
+                        </td>
+                        <td
+                          className={stateClass[channel.state]}
+                          title={
+                            channel.revision_carried_reason ?? channel.known_answer?.notes ?? ""
+                          }
+                        >
+                          {channel.state}
+                          {channel.revision_carried_reason
+                            ? ` — ${channel.revision_carried_reason}`
+                            : ""}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </TableScroll>
             </section>
           ))
         )}

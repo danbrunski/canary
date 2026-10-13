@@ -1,6 +1,7 @@
 import { useEffect, useRef } from "react";
 
 import { severityToken } from "../lib/behaviorOverlay";
+import { fitWidth, useContainerWidth } from "../hooks/useContainerWidth";
 import { prepareCanvas } from "../lib/canvas";
 import { cssColor, useThemeVersion, withAlpha } from "../lib/chartTheme";
 import type {
@@ -44,8 +45,19 @@ interface CurveProps {
  *  — is a handful of cheap canvas paths redrawn on each 2 s live poll. The
  *  y-range is fitted over the curve *and* the band *and* the live values so
  *  an excursion past "normal" is visible rather than clipped off-canvas. */
-export function Curve({ fit, domain, deviation, live, width = 240, height = 90 }: CurveProps) {
+export function Curve({
+  fit,
+  domain,
+  deviation,
+  live,
+  width: requestedWidth = 240,
+  height = 90,
+}: CurveProps) {
   const ref = useRef<HTMLCanvasElement>(null);
+  // Fills its container up to the requested width (P2.5): a phone column
+  // narrower than the request shrinks the drawing instead of clipping it.
+  const [frame, measured] = useContainerWidth<HTMLDivElement>();
+  const width = fitWidth(measured, requestedWidth, requestedWidth);
   const themeVersion = useThemeVersion();
 
   useEffect(() => {
@@ -187,7 +199,11 @@ export function Curve({ fit, domain, deviation, live, width = 240, height = 90 }
     ctx.fillText(yLo.toFixed(1), 2, height - 2);
   }, [fit, domain, deviation, live, width, height, themeVersion]);
 
-  return <canvas ref={ref} width={width} height={height} />;
+  return (
+    <div ref={frame} className="min-w-0 max-w-full" style={{ width: requestedWidth }}>
+      <canvas ref={ref} className="block" width={width} height={height} />
+    </div>
+  );
 }
 
 function evaluate(fit: CurveFit, x: number): number {

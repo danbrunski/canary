@@ -330,6 +330,29 @@ describe("ROM Library page — list, memory map, regions and tables", () => {
     );
   });
 
+  // P5.2: on a phone a block is a 16-24 px target with no hover. One tap
+  // selects; finger-sized steps reach the neighbours.
+  it("steps between blocks with tap-sized prev / next buttons", async () => {
+    withEntries([ENTRY_TUNED]);
+    render(<RomLibraryPage token="t" status={null} />);
+    await screen.findByRole("group", { name: "4 KiB blocks of the flash image" });
+    const readout = screen.getByRole("status", { name: "Block readout" });
+    const prev = screen.getByRole("button", { name: "previous block" });
+    const next = screen.getByRole("button", { name: "next block" });
+    expect(prev).toBeDisabled();
+    fireEvent.click(next);
+    expect(readout).toHaveTextContent("0x000000–0x000FFF");
+    fireEvent.click(next);
+    expect(readout).toHaveTextContent("0x001000–0x001FFF");
+    fireEvent.click(prev);
+    expect(readout).toHaveTextContent("0x000000–0x000FFF");
+    expect(prev).toBeDisabled();
+    const grid = screen.getByRole("group", { name: "4 KiB blocks of the flash image" });
+    fireEvent.click(within(grid).getByRole("button", { name: /^0x0FF000, / }));
+    expect(next).toBeDisabled();
+    expect(readout).toHaveTextContent("0x0FF000–0x0FFFFF");
+  });
+
   it("lists regions with Verified / Inferred / Unknown / UpRev chips and evidence", async () => {
     withEntries([ENTRY_TUNED]);
     render(<RomLibraryPage token="t" status={null} />);

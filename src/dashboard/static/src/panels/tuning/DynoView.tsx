@@ -1,4 +1,5 @@
 import { useCallback, useMemo, useState } from "react";
+import { TableScroll } from "../../components/TableScroll";
 
 import { Panel } from "../../components/Panel";
 import { SegmentedControl, type SegmentOption } from "../../components/SegmentedControl";
@@ -410,44 +411,47 @@ export function DynoView({ token, choice }: { token: string; choice: SessionChoi
             </p>
           )}
           {computed.length > 0 && (
-            <table aria-label="Dyno runs" className="mt-2 w-full text-left text-xs">
-              <thead>
-                <tr>
-                  <th>Session</th>
-                  <th>Gear</th>
-                  <th>Run</th>
-                  <th>Peak</th>
-                  <th>Conditions</th>
-                  <th>Flags</th>
-                  <th>Uncertainty</th>
-                </tr>
-              </thead>
-              <tbody>
-                {computed.map((r) => (
-                  <tr key={`${r.session_id}-${r.gear}`}>
-                    <td>{r.session_id}</td>
-                    <td>{r.gear}</td>
-                    <td>
-                      {r.direction} · {r.n_pulls} pulls
-                    </td>
-                    <td>{peak(r, quantity)}</td>
-                    <td>
-                      {r.conditions.tune_revision} · {r.conditions.induction} · {r.conditions.road}{" "}
-                      · {r.conditions.baro_kpa.toFixed(1)} kPa · IAT{" "}
-                      {r.conditions.intake_temp_c.toFixed(0)} °C · ambient{" "}
-                      {r.conditions.ambient_temp_c.toFixed(0)} °C · payload{" "}
-                      {r.conditions.payload_kg} kg · {r.conditions.date}
-                    </td>
-                    <td>
-                      inertia {r.flags.inertia} · squat{" "}
-                      {r.flags.squat_corrected ? "corrected" : "not corrected"} · pitch offset{" "}
-                      {r.flags.imu_pitch_offset_deg.toFixed(2)}° ({r.flags.imu_pitch_offset_source})
-                    </td>
-                    <td>{floorSentence(r.uncertainty.noise_floor[quantity])}</td>
+            <TableScroll className="mt-2">
+              <table aria-label="Dyno runs" className="w-full text-left text-xs">
+                <thead>
+                  <tr>
+                    <th>Session</th>
+                    <th>Gear</th>
+                    <th>Run</th>
+                    <th>Peak</th>
+                    <th>Conditions</th>
+                    <th>Flags</th>
+                    <th>Uncertainty</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  {computed.map((r) => (
+                    <tr key={`${r.session_id}-${r.gear}`}>
+                      <td>{r.session_id}</td>
+                      <td>{r.gear}</td>
+                      <td>
+                        {r.direction} · {r.n_pulls} pulls
+                      </td>
+                      <td>{peak(r, quantity)}</td>
+                      <td>
+                        {r.conditions.tune_revision} · {r.conditions.induction} ·{" "}
+                        {r.conditions.road} · {r.conditions.baro_kpa.toFixed(1)} kPa · IAT{" "}
+                        {r.conditions.intake_temp_c.toFixed(0)} °C · ambient{" "}
+                        {r.conditions.ambient_temp_c.toFixed(0)} °C · payload{" "}
+                        {r.conditions.payload_kg} kg · {r.conditions.date}
+                      </td>
+                      <td>
+                        inertia {r.flags.inertia} · squat{" "}
+                        {r.flags.squat_corrected ? "corrected" : "not corrected"} · pitch offset{" "}
+                        {r.flags.imu_pitch_offset_deg.toFixed(2)}° (
+                        {r.flags.imu_pitch_offset_source})
+                      </td>
+                      <td>{floorSentence(r.uncertainty.noise_floor[quantity])}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </TableScroll>
           )}
           {refusedRuns.length > 0 && (
             <ul aria-label="Refused runs" className="m-0 mt-2 space-y-0.5 p-0 text-xs">

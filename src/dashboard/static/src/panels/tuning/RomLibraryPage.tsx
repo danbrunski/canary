@@ -1,4 +1,5 @@
 import { useCallback, useRef, useState, type DragEvent, type ReactNode } from "react";
+import { TableScroll } from "../../components/TableScroll";
 
 import {
   deleteRomImage,
@@ -219,7 +220,7 @@ export function RomLibraryPage({
             </div>
           )}
           {entries.length > 0 && (
-            <div className="overflow-x-auto">
+            <TableScroll>
               <table className="w-full min-w-[48rem] text-left text-sm" aria-label="ROM images">
                 <thead className="text-[0.7rem] uppercase tracking-[0.08em] text-fg-faint">
                   <tr>
@@ -256,7 +257,7 @@ export function RomLibraryPage({
                   ))}
                 </tbody>
               </table>
-            </div>
+            </TableScroll>
           )}
         </div>
       </Panel>

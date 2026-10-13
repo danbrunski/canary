@@ -1,4 +1,5 @@
 import { useCallback, useState } from "react";
+import { TableScroll } from "../components/TableScroll";
 
 import {
   getBrainJobs,
@@ -298,26 +299,28 @@ function TwinView({ response }: { response: TwinSessionResponse }) {
               </span>
             </div>
             {predicted.length > 0 && (
-              <table className="text-[0.8rem]">
-                <thead>
-                  <tr>
-                    <th className="text-left">time</th>
-                    <th>observed φ</th>
-                    <th>predicted φ</th>
-                    <th>state</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {predicted.slice(0, 20).map((p) => (
-                    <tr key={p.t}>
-                      <td className="font-num">{p.t}</td>
-                      <td className="font-num">{p.observed_phi ?? "cut"}</td>
-                      <td className="font-num">{p.predicted_phi}</td>
-                      <td>{p.reason ? `${p.state} (${p.reason})` : p.state}</td>
+              <TableScroll>
+                <table className="text-[0.8rem]">
+                  <thead>
+                    <tr>
+                      <th className="text-left">time</th>
+                      <th>observed φ</th>
+                      <th>predicted φ</th>
+                      <th>state</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
+                  </thead>
+                  <tbody>
+                    {predicted.slice(0, 20).map((p) => (
+                      <tr key={p.t}>
+                        <td className="font-num">{p.t}</td>
+                        <td className="font-num">{p.observed_phi ?? "cut"}</td>
+                        <td className="font-num">{p.predicted_phi}</td>
+                        <td>{p.reason ? `${p.state} (${p.reason})` : p.state}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </TableScroll>
             )}
             <div>
               <span className={definitionTermClass}>Missing inputs</span>{" "}

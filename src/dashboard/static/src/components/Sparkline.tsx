@@ -1,5 +1,6 @@
 import { useEffect, useRef } from "react";
 
+import { fitWidth, useContainerWidth } from "../hooks/useContainerWidth";
 import { prepareCanvas } from "../lib/canvas";
 import { cssColor, useThemeVersion, withAlpha, type ColorToken } from "../lib/chartTheme";
 
@@ -22,7 +23,7 @@ interface SparklineProps {
  *  every WebSocket tick. ~50 LOC; not worth pulling a chart library for. */
 export function Sparkline({
   values,
-  width = 120,
+  width: requestedWidth = 120,
   height = 28,
   stroke = "accent",
   min,
@@ -30,6 +31,10 @@ export function Sparkline({
   baseline,
 }: SparklineProps) {
   const ref = useRef<HTMLCanvasElement>(null);
+  // Fills its container up to the requested width (P2.5): a phone column
+  // narrower than the request shrinks the drawing instead of clipping it.
+  const [frame, measured] = useContainerWidth<HTMLDivElement>();
+  const width = fitWidth(measured, requestedWidth, requestedWidth);
   const themeVersion = useThemeVersion();
 
   useEffect(() => {
@@ -71,5 +76,9 @@ export function Sparkline({
     ctx.stroke();
   }, [values, width, height, stroke, min, max, baseline, themeVersion]);
 
-  return <canvas ref={ref} width={width} height={height} />;
+  return (
+    <div ref={frame} className="min-w-0 max-w-full" style={{ width: requestedWidth }}>
+      <canvas ref={ref} className="block" width={width} height={height} />
+    </div>
+  );
 }

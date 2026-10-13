@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { TableScroll } from "../../components/TableScroll";
 
 import type {
   Cell,
@@ -194,7 +195,7 @@ export function CellGrid({
     scale === "diverging" ? divergingAround0(value, maxAbs) : sequentialIn(value, lo, hi);
   if (!cells.length) return <p className="m-0 text-sm text-fg-dim">No cells.</p>;
   return (
-    <div className="overflow-x-auto">
+    <TableScroll>
       <table aria-label={label} className="border-collapse text-[0.7rem]">
         <thead>
           <tr>
@@ -246,6 +247,6 @@ export function CellGrid({
       <p className="m-0 mt-1 text-[0.65rem] text-fg-faint">
         Values in {unit}; grey cells are below the minimum sample count and are not coloured.
       </p>
-    </div>
+    </TableScroll>
   );
 }

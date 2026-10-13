@@ -1,5 +1,6 @@
 import { PairingApprovalPrompt } from "./components/PairingApprovalPrompt";
 import { PairingCard } from "./components/PairingCard";
+import { PhoneNav } from "./components/PhoneNav";
 import { useAnomalyStream } from "./hooks/useAnomalyStream";
 import { useBehaviorLive } from "./hooks/useBehaviorLive";
 import { useBehaviorModels } from "./hooks/useBehaviorModels";
@@ -8,6 +9,7 @@ import { useBindings } from "./hooks/useBindings";
 import { useConnectivityMode } from "./hooks/useConnectivityMode";
 import { useControlToken } from "./hooks/useControlToken";
 import { useHashRoute } from "./hooks/useHashRoute";
+import { useIsPhone } from "./hooks/useMediaQuery";
 import { useScoreStream } from "./hooks/useScoreStream";
 import { useStatus } from "./hooks/useStatus";
 import { useTelemetryStream } from "./hooks/useTelemetryStream";
@@ -15,6 +17,7 @@ import { useTheme } from "./hooks/useTheme";
 import { DashboardShell } from "./panels/DashboardShell";
 import { DriveScreen } from "./panels/DriveScreen";
 import { Workbench, type DashboardData } from "./panels/Workbench";
+import type { WorkbenchItem } from "./types";
 
 /** Top-level app: owns the Drive↔Workbench context and the active Workbench
  *  view (mirrored to the URL hash for kiosk reload), wires hooks into the
@@ -33,6 +36,13 @@ export default function App() {
   const bindings = useBindings();
   const controlToken = useControlToken();
   const companion = useCompanionSettings();
+  const phone = useIsPhone();
+  // A Workbench page opened from the phone bottom bar or More sheet leaves
+  // the driving context, as the desktop mode toggle does.
+  const openItem = (next: WorkbenchItem) => {
+    setItem(next);
+    setMode("parked");
+  };
 
   const data: DashboardData = {
     mode,
@@ -66,6 +76,15 @@ export default function App() {
       channels={telemetry.channels}
       token={controlToken.token}
       onTokenChange={controlToken.setToken}
+      phone={phone}
+      bottomNav={
+        <PhoneNav
+          mode={mode}
+          item={item}
+          onDrive={() => setMode("driving")}
+          onNavigate={openItem}
+        />
+      }
     >
       {!controlToken.hasToken && connectivity === "live-pi" && (
         <PairingCard onPaired={controlToken.setToken} />
@@ -78,7 +97,7 @@ export default function App() {
           scheduler={status?.health?.obd_scheduler}
         />
       ) : (
-        <Workbench active={item} onNavigate={setItem} data={data} />
+        <Workbench active={item} onNavigate={setItem} data={data} phone={phone} />
       )}
     </DashboardShell>
   );

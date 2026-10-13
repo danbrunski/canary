@@ -1,6 +1,7 @@
 import { useEffect, useRef } from "react";
 
 import { binIndex, severityToken } from "../lib/behaviorOverlay";
+import { fitWidth, useContainerWidth } from "../hooks/useContainerWidth";
 import { prepareCanvas } from "../lib/canvas";
 import { cssColor, useThemeVersion } from "../lib/chartTheme";
 import { sequential } from "../lib/colorScale";
@@ -47,7 +48,7 @@ export function Heatmap({
   cells,
   rows,
   cols,
-  width = 240,
+  width: requestedWidth = 240,
   height = 140,
   value = "mean",
   caption,
@@ -56,6 +57,10 @@ export function Heatmap({
   live,
 }: HeatmapProps) {
   const ref = useRef<HTMLCanvasElement>(null);
+  // Fills its container up to the requested width (P2.5): a phone column
+  // narrower than the request shrinks the drawing instead of clipping it.
+  const [frame, measured] = useContainerWidth<HTMLDivElement>();
+  const width = fitWidth(measured, requestedWidth, requestedWidth);
   const themeVersion = useThemeVersion();
 
   useEffect(() => {
@@ -123,7 +128,9 @@ export function Heatmap({
   return (
     <div className="flex flex-col gap-1">
       {caption && <div className="text-[0.7rem] tracking-[0.04em] text-fg-dim">{caption}</div>}
-      <canvas ref={ref} width={width} height={height} />
+      <div ref={frame} className="min-w-0 max-w-full" style={{ width: requestedWidth }}>
+        <canvas ref={ref} className="block" width={width} height={height} />
+      </div>
     </div>
   );
 }

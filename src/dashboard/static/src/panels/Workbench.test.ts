@@ -1,6 +1,6 @@
 import { createElement } from "react";
-import { fireEvent, render, screen } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { fireEvent, render, screen, within } from "@testing-library/react";
+import { describe, expect, it, vi } from "vitest";
 
 import type { ChannelSnapshot } from "../hooks/useTelemetryStream";
 import type { WorkbenchItem } from "../types";
@@ -117,5 +117,35 @@ describe("Workbench navigation", () => {
     renderAt("model-thresholds");
     expect(screen.getByRole("heading", { name: "Alert Thresholds" })).toBeInTheDocument();
     expect(screen.queryByRole("heading", { name: "Tuning" })).not.toBeInTheDocument();
+  });
+});
+
+describe("Workbench on a phone (P2.2)", () => {
+  it("drops the sidebar; the shell's bottom bar navigates instead", () => {
+    render(
+      createElement(Workbench, {
+        active: "diag-explore",
+        onNavigate: () => {},
+        data: DATA,
+        phone: true,
+      }),
+    );
+    expect(
+      screen.queryByRole("navigation", { name: "Workbench sections" }),
+    ).not.toBeInTheDocument();
+    // A More page has no sibling strip.
+    expect(screen.queryByRole("navigation", { name: /pages$/ })).not.toBeInTheDocument();
+  });
+
+  it("offers the sibling pages of a bar entry as a strip", () => {
+    const onNavigate = vi.fn();
+    render(createElement(Workbench, { active: "diag-dtc", onNavigate, data: DATA, phone: true }));
+    const strip = within(screen.getByRole("navigation", { name: "Alerts pages" }));
+    expect(strip.getByRole("button", { name: "Trouble Codes" })).toHaveAttribute(
+      "aria-current",
+      "page",
+    );
+    fireEvent.click(strip.getByRole("button", { name: "Anomalies" }));
+    expect(onNavigate).toHaveBeenCalledWith("diag-anomalies");
   });
 });
