@@ -27,4 +27,4 @@ else
   echo "push: documentation only -- no gate"
 fi
 git push origin "$head:refs/heads/main"
-echo "push: pushed ${head:0:7}. Confirm CI: gh run watch \$(gh run list --limit 1 --json databaseId --jq '.[0].databaseId')"
+echo "push: pushed ${head:0:7}. GitHub CI is off (AGENTS.md): the gate above is the verdict."

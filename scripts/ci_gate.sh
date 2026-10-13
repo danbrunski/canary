@@ -3,12 +3,12 @@
 # origin. On success it stamps that exact commit, which is what the pre-push
 # hook checks. Usually run by scripts/push.sh rather than by hand.
 #
-# **About a minute (operator, 2026-09-24); GitHub CI runs everything.** The
-# gate runs lint, types, and the whole suite except the `slow` tier -- the
-# ~140 tests measured at 2 s or more (tests/slow_tests.txt), which were 3 % of
-# the tests and most of the time: without them the rest ran in 86 s at load
-# average 10. CI runs the slow tier, full vitest and e2e on every push, so
-# after pushing, confirm CI, and a red main is fixed before anything else.
+# **About a minute (operator, 2026-09-24).** The gate runs lint, types, and
+# the whole suite except the `slow` tier -- the tests measured at 1.5 s or
+# more (tests/slow_tests.txt), a few percent of the tests and most of the
+# time. GitHub CI is switched off (operator, 2026-10-13; see AGENTS.md), so
+# this gate is the only one: the slow tier, full vitest and e2e run by hand
+# after changing code they cover.
 #
 #   scripts/ci_gate.sh [<commit>] [<base>]    # default: HEAD against origin/main
 #
@@ -73,7 +73,7 @@ start=$(date +%s)
     echo "==> ruff format --check ."; "$venv/ruff" format --check . >/dev/null || { "$venv/ruff" format --check . | tail -5; rc=1; }
     echo "==> mypy";                  MYPY_CACHE_DIR="$stamp_dir/mypy-cache" "$venv/mypy" || rc=1
     [[ $rc -ne 0 ]] && exit 1
-    echo "==> pytest (not slow; CI runs the slow tier)"
+    echo "==> pytest (not slow; run pytest -m slow by hand)"
     log="$wt/.prepush-pytest.log"
     "$venv/pytest" -q -rf -p no:cacheprovider \
       -m "not integration and not ml_training and not slow" >"$log" 2>&1

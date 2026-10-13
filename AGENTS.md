@@ -159,17 +159,23 @@ to direct HTTP.
 - **Python**: always `.venv/bin/python` (3.12), never system `python3`.
 - **Branching**: work directly on `main`, no feature branches or PRs; push
   with `scripts/push.sh` (see "Push with" below).
-- **Lint/test gate: about a minute locally; CI per push without the slow
-  tier; the slow tier nightly** (operator, 2026-09-24; slow tier moved to a
-  nightly run on 2026-10-04). A pre-commit hook runs ruff + mypy. The push
-  gate (`scripts/push.sh`, below) runs lint, types and every test except the
-  `slow` tier. **GitHub CI runs the same suite on every push**, plus the full
-  frontend checks. It runs lint and types once, and splits pytest across 4
-  parallel jobs (`CANARY_TEST_SHARD=i/4`, a stable node-id hash in
-  `tests/conftest.py`). **The slow tier runs nightly**
-  (`.github/workflows/nightly-slow.yml`, 09:00 UTC) and on demand with
-  `gh workflow run nightly-slow.yml`. Run it on demand after changing code
-  those tests cover. A red nightly is fixed like a red main. While iterating, run the test files you are working on. For dashboard
+- **GitHub CI is switched off** (operator, 2026-10-13). Both workflows
+  (`ci.yml`, `nightly-slow.yml`) are disabled on GitHub because the account's
+  Actions billing refused every run from 2026-10-08. The files stay in the
+  repo; `gh workflow enable CI` and `gh workflow enable "Nightly slow tier"`
+  turn them back on. Until then **the local push gate is the only gate**:
+  don't `gh run watch` after a push, and don't treat the last red runs as a
+  red `main`.
+- **Lint/test gate: about a minute locally; the slow tier and full frontend
+  checks by hand** (operator, 2026-09-24). A pre-commit hook runs ruff + mypy.
+  The push gate (`scripts/push.sh`, below) runs lint, types and every test
+  except the `slow` tier. Nothing runs the rest for you while CI is off: after
+  changing code they cover, run `pytest -m slow` (the tier the nightly ran),
+  and for dashboard work `pnpm lint`, `pnpm test` and `pnpm e2e` in
+  `src/dashboard/static` (what per-push CI ran). A red slow test is fixed like
+  a red main. When CI is on it runs lint and types once and splits pytest
+  across 4 parallel jobs (`CANARY_TEST_SHARD=i/4`, a stable node-id hash in
+  `tests/conftest.py`). While iterating, run the test files you are working on. For dashboard
   changes, `pnpm typecheck`, `pnpm format`, `pnpm lint` and the vitest files you
   touched (re-run `TuningFeedback.test.ts` once on flake before treating it as a
   regression). ESLint is type-aware, and its pre-existing violations are
@@ -198,17 +204,19 @@ to direct HTTP.
   tier only when the push touches `scripts/ml_paths.txt` (see "Test tiers"):
   CI has no torch, so those pushes take minutes. When the push touches
   `src/dashboard/static` it runs pnpm typecheck, ESLint and Prettier on the
-  changed files, and `vitest related`; full lint, vitest and e2e are CI's. A green run stamps that commit, and
+  changed files, and `vitest related`; full lint, vitest and e2e are yours to
+  run while CI is off. A green run stamps that commit, and
   the tracked `pre-push` hook (`git config core.hooksPath scripts/git-hooks`)
   refuses any unstamped, non-documentation push. The gate cannot run inside
   the hook itself: git opens the connection first, and GitHub closed it during
   the gate on 2026-09-23. Tests that fail in the parallel run are re-run once
   serially. Failing again blocks the push. Passing is printed as "FLAKY UNDER
   LOAD" and belongs in `docs/roadmap/tasks/T01-test-suite-reliability.md`.
-- **After pushing, confirm CI.** `gh run watch` (or `gh run list --limit 3`),
-  and on a red run `gh run view <id> --log-failed`. A red `main` is fixed
-  before anything else is pushed. If a pushed test flaked, re-run it alone
-  before calling it a flake, and open a task for the flake either way.
+- **After pushing, confirm CI — when CI is on.** `gh run watch` (or
+  `gh run list --limit 3`), and on a red run `gh run view <id> --log-failed`.
+  A red `main` is fixed before anything else is pushed. If a pushed test
+  flaked, re-run it alone before calling it a flake, and open a task for the
+  flake either way. While CI is off, the push gate's verdict is the record.
 - **Test tiers** (pytest runs in parallel via `-n auto`, needs
   `pytest-xdist` from the `dev` extra): bare `pytest` is the full suite —
   everything except `integration` and `ml_training`, about 5 minutes on a
