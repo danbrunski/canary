@@ -1,7 +1,7 @@
 # R01 — shared primitives: one home for the rules everyone re-derives
 
 Opened 2026-09-24 from the refactor review (see
-[R00](../R00-refactor-README.md)). Every item here is a rule that four or more
+[R00](R00-refactor-README.md)). Every item here is a rule that four or more
 modules implement for themselves. The copies have already diverged, and later
 R-files build on these homes, so this file goes first. Same conventions as
 the other task files: `[x]` only with evidence, `[~]` partial with the rest

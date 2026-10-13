@@ -1,6 +1,6 @@
 # R04 — models, preprocessing, validation, plausibility
 
-Opened 2026-09-24 from the refactor review ([R00](../R00-refactor-README.md)).
+Opened 2026-09-24 from the refactor review ([R00](R00-refactor-README.md)).
 The costliest duplication in this area is between training, calibration,
 evaluation and serving. That is the train/serve parity AGENTS.md cares
 about: a rule copied four times is a rule that four places can disagree on.

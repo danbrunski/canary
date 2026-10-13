@@ -1,6 +1,6 @@
 # R07 — test infrastructure
 
-Opened 2026-09-24 from the refactor review ([R00](../R00-refactor-README.md)).
+Opened 2026-09-24 from the refactor review ([R00](R00-refactor-README.md)).
 The suite has 351 files. Two problems outrank the rest:
 
 - **The suite writes into the repo tree.** There is a memory note about it

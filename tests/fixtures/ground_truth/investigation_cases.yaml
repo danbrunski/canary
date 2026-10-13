@@ -247,7 +247,7 @@ incidents:
     links:
       - commit 0ee0876
       - docs/roadmap/archive/tuning-analysis-toolkit.md (retraction table)
-      - docs/roadmap/tasks/R05-analysis-and-decode.md
+      - docs/roadmap/tasks/archive/R05-analysis-and-decode.md
     gaps:
       - >
         Needs the two 2026-08-03/04 sessions on both sides of the K edit and a

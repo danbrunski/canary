@@ -792,7 +792,7 @@ code:
   A registry-less legacy dir on a Pi with more than one registered profile is
   reported, not adopted.
 
-- [~] **R05.16 One delivery-error engine: the acquisition-paired
+- [x] **R05.16 One delivery-error engine: the acquisition-paired
   `match_ordered`.** *Operator decision 2026-09-25 (R05.3): converge; numbers
   will shift.*
   - Two engines answer "how far is measured AFR from commanded":
@@ -1047,6 +1047,9 @@ code:
   `src/control/trip_end.py` / the digest route.
 
   *(2) done 2026-10-03; (1), the deploy, is still the operator's.*
+  *(1) closed 2026-10-13:* the operator deployed it. Both R05.16 commits
+  (`fb472121`, `1f27090b`) are ancestors of `896b3f7`, the commit the Pi ran
+  for W08.9's backup on 2026-10-04 (`git merge-base --is-ancestor`).
   - **Scope: only the tuning section.** A06.5 rules out recomputing a whole
     digest late, because its anomaly window would end at "now". The tuning
     section reads nothing but the session (`_tuning_section`), so it alone

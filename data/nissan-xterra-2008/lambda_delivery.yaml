@@ -11,7 +11,7 @@
 # reproduced by scripts/lambda_delivery_evidence.py and pinned on a committed
 # slice by tests/test_lambda_delivery_known_answers.py. The enrichment rule and
 # its frozen transport delay (R05.16) are in
-# docs/roadmap/tasks/R05-analysis-and-decode.md; the delay scan reproduces with
+# docs/roadmap/tasks/archive/R05-analysis-and-decode.md; the delay scan reproduces with
 # `scripts/lambda_delivery_evidence.py --fit-enrichment-delay <informed_by>`.
 schema_version: 1
 

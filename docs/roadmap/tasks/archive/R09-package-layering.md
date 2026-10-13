@@ -3,7 +3,7 @@
 Opened 2026-09-27 from a whole-repo complexity review. Same conventions as
 the other task files: `[x]` only with evidence, `[~]` partial with the rest
 named. R00's shared acceptance rules apply to every item here
-([R00](../R00-refactor-README.md#shared-acceptance-rules)).
+([R00](R00-refactor-README.md#shared-acceptance-rules)).
 
 Imports between `src/` packages run both ways. There are 91
 package-to-package edges, and 19 pairs of packages import each other. In 16

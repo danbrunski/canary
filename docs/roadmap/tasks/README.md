@@ -1,11 +1,12 @@
 # Implementation task index
 
-**Status 2026-10-13: fourteen finished checklists archived.** D05, P01,
-R01–R04, R06–R09, S03, W05 and W08 had every box ticked; they moved to
+**Status 2026-10-13: sixteen finished checklists archived.** D05, P01,
+R01–R09, S03, W05 and W08 had every box ticked; they moved to
 [`archive/`](archive/) with their links. W00 went with them, since every W file
 is now archived. T01 stays here although it is fully ticked: `scripts/ci_gate.sh`
 and AGENTS.md send "FLAKY UNDER LOAD" reports to it, so it is a standing
-receptacle, not a finished plan. R00 stays until R05.16 closes.
+receptacle, not a finished plan. R05.16's last remainder, the deploy, was
+met when the Pi ran `896b3f7` (2026-10-04), so R05 and the R00 index went too.
 
 **Status 2026-10-04: E07, coupled engine/ECU simulator.**
 [`E07-engine-plant-simulator.md`](E07-engine-plant-simulator.md) plans an
@@ -79,7 +80,7 @@ they moved to [`archive/`](archive/), and the links in B00, W00 and
 `../workbench-workflows.md` point there.
 
 **Status 2026-09-24: R01–R08, the second refactor review.**
-[`R00-refactor-README.md`](R00-refactor-README.md) indexes eight checklists
+[`R00-refactor-README.md`](archive/R00-refactor-README.md) indexes eight checklists
 from a six-area review of the ~125k lines added since the July refactor
 ([`../archive/refactoring.md`](../archive/refactoring.md)). The biggest items
 are the 1,640-line `register_control_routes`, the 727-line
