@@ -56,10 +56,13 @@ GPS receiver ──serial──> gpsd ──SHM unit 0──> chrony ──> sys
 `CANARY_INSTALL_GPS_STACK=0` to skip it, or `CANARY_GPS_DEVICE=/dev/serial/by-id/...`
 to name the receiver when autodetection can't (more than one serial device).
 On a CANary-HAT (the firmware reports it in `/proc/device-tree/hat/product`) the
-board's own MAX-M10M on `/dev/ttyAMA2` is chosen automatically, and the udev rule
-matches it by kernel name — a device-tree UART has no `by-id` symlink. Its
-TIMEPULSE is `pps-gpio` on GPIO18 (a `/dev/ppsN` named `canary-pps`, given the
-stable name `/dev/pps-canary` by `70-canary-pps.rules`), and chrony reads it
+board's own MAX-M10M is chosen automatically: `/dev/ttyAMA2` on rev 2.0 and
+`/dev/ttyAMA4` on rev 2.1, by the EEPROM's product_ver
+(`hardware/canary-hat-firmware/hat_revisions.json`). The udev rule matches it
+by kernel name, since a device-tree UART has no `by-id` symlink. Its
+TIMEPULSE is `pps-gpio` on GPIO18 (GPIO20 on rev 2.1), a `/dev/ppsN` named
+`canary-pps` on both revisions, given the stable name `/dev/pps-canary` by
+`70-canary-pps.rules`. chrony reads it
 directly as `refclock PPS /dev/pps-canary refid PPS lock GPS`: the NMEA time
 numbers each pulse, and the pulse carries the precision (selected at −205 ns ±
 621 ns on 2026-10-04). chronyd exits when a configured PPS device is missing,

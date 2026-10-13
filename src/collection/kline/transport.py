@@ -177,12 +177,14 @@ class OutputLines(Protocol):
 
 @dataclass(frozen=True)
 class HatPins:
-    """Where the CANary-HAT rev 2.0 wires the transceiver."""
+    """Where a CANary-HAT wires the transceiver. The lines differ by revision
+    (the pull-up is GPIO24 on rev 2.0, GPIO21 on rev 2.1), so they have no
+    default: :func:`src.collection.hat_revision.kline_pins` decides."""
 
+    enable: int
+    pullup: int
     tty: str = "/dev/ttyAMA0"
     gpio_chip: str = "/dev/gpiochip0"
-    enable: int = 26
-    pullup: int = 24
 
 
 def _open_serial(tty: str, baud: int) -> SerialPort:
@@ -292,7 +294,7 @@ class KlineTransport:
         profile: KlineProfile,
         *,
         mode: Mode,
-        pins: HatPins | None = None,
+        pins: HatPins,
         open_port: Callable[[], SerialPort] | None = None,
         open_lines: Callable[[], OutputLines] | None = None,
         clock: Callable[[], float] = time.monotonic,
@@ -301,7 +303,7 @@ class KlineTransport:
     ) -> None:
         self.profile = profile
         self.mode = mode
-        self.pins = pins or HatPins()
+        self.pins = pins
         pins_ = self.pins
         self._open_port = open_port or (lambda: _open_serial(pins_.tty, profile.baud))
         self._open_lines = open_lines or (lambda: _open_lines(pins_))

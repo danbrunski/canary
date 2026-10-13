@@ -249,25 +249,29 @@ class KlineCollector:
         dids_path: Path,
         *,
         entries: EntriesSource = _active_entries,
+        pins: HatPins | None = None,
         transport_factory: TransportFactory | None = None,
         reconnect_policy: ReconnectPolicy | None = None,
         clock: Callable[[], float] = time.time,
         actions: KlineActions = KLINE_ACTIONS,
     ) -> None:
+        """``pins``: the fitted board's lines (``hat_revision.kline_pins``);
+        required unless ``transport_factory`` builds the transport itself."""
         self.config = config
         self._actions = actions
         self.profile_path = profile_path
         self.dids_path = dids_path
         self._entries = entries
-        pins = HatPins(
-            tty=config.tty,
-            gpio_chip=config.gpio_chip,
-            enable=config.enable_gpio,
-            pullup=config.pullup_gpio,
-        )
-        self._factory = transport_factory or (
-            lambda profile, mode: KlineTransport(profile, mode=mode, pins=pins)
-        )
+        if transport_factory is None:
+            if pins is None:
+                raise ValueError("KlineCollector needs the HAT's pins (hat_revision.kline_pins)")
+            hat_pins = pins
+
+            def default_factory(profile: KlineProfile, mode: Mode) -> KlineTransport:
+                return KlineTransport(profile, mode=mode, pins=hat_pins)
+
+            transport_factory = default_factory
+        self._factory = transport_factory
         self._policy = reconnect_policy or ReconnectPolicy(
             initial_delay_seconds=2.0, max_delay_seconds=30.0
         )

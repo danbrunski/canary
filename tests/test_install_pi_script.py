@@ -156,6 +156,12 @@ def installer(tmp_path: Path) -> Installer:
     for name in _INSTALLED_UNIT_FILES:
         shutil.copy(REPO_ROOT / "systemd" / name, checkout / "systemd" / name)
     (checkout / "src").symlink_to(REPO_ROOT / "src")
+    # The CANary-HAT revision table and its reader, which pick the HAT's GNSS
+    # UART and say which overlay a board loads.
+    firmware = checkout / "hardware" / "canary-hat-firmware"
+    firmware.mkdir(parents=True)
+    for name in ("hat_rev.py", "hat_revisions.json"):
+        shutil.copy(REPO_ROOT / "hardware" / "canary-hat-firmware" / name, firmware)
     # A wrapper, not a symlink: the venv is found relative to the interpreter
     # path, so a symlinked copy would run without the venv's site-packages.
     _write_exec(checkout / ".venv" / "bin" / "python", f'#!/bin/sh\nexec "{VENV_PYTHON}" "$@"\n')
@@ -201,6 +207,9 @@ def installer(tmp_path: Path) -> Installer:
         "CANARY_DASHBOARD_TOOLS": "0",
         # The laptop's own interfaces must not name the scratch Pi.
         "CANARY_NET_DIR": str(_fake_net_dir(tmp_path, eth0="88:a2:9e:1d:89:74")),
+        # Nor its HAT, if it has one: no EEPROM unless a test writes one.
+        "CANARY_HAT_PRODUCT_FILE": str(tmp_path / "no-hat" / "product"),
+        "CANARY_HAT_PRODUCT_VER_FILE": str(tmp_path / "no-hat" / "product_ver"),
     }
     return Installer(checkout=checkout, root=root, shim_log=shim_log, env=env)
 
@@ -384,6 +393,16 @@ def _hat_product_file(installer: Installer, product: str = "CANary-HAT rev 2.0")
     return path
 
 
+def _hat_eeprom(installer: Installer, rev: str) -> dict[str, str]:
+    """The env for a CANary-HAT whose EEPROM carries product_ver (eeprom_settings*.txt)."""
+    ver = installer.root / "proc-hat-product_ver"
+    ver.write_bytes({"2.0": b"0x0200", "2.1": b"0x0201"}[rev] + b"\0")
+    return {
+        "CANARY_HAT_PRODUCT_FILE": str(_hat_product_file(installer, f"CANary-HAT rev {rev}")),
+        "CANARY_HAT_PRODUCT_VER_FILE": str(ver),
+    }
+
+
 def _gps_rule(installer: Installer) -> str:
     return (installer.root / "etc" / "udev" / "rules.d" / "70-canary-gps.rules").read_text()
 
@@ -393,10 +412,36 @@ def test_a_canary_hat_makes_its_gnss_uart_the_gps(installer: Installer) -> None:
         CANARY_GPS_DEVICE="", CANARY_HAT_PRODUCT_FILE=str(_hat_product_file(installer))
     )
 
-    assert "CANary-HAT detected; GPS device: /dev/ttyAMA2" in result.stdout
+    assert "CANary-HAT detected (rev 2.0); GPS device: /dev/ttyAMA2" in result.stdout
     # A board UART has no by-id symlink, so a SYMLINK match would never fire.
     assert 'KERNEL=="ttyAMA2"' in _gps_rule(installer)
     assert "SYMLINK" not in _gps_rule(installer)
+
+
+@pytest.mark.parametrize(("rev", "tty"), [("2.0", "ttyAMA2"), ("2.1", "ttyAMA4")])
+def test_each_hat_revision_gets_its_own_gnss_uart(installer: Installer, rev: str, tty: str) -> None:
+    """Rev 2.1 moved the receiver from uart2 to uart4; a rev 2.0 board is
+    still in service, so the EEPROM's product_ver decides."""
+    result = installer.run(CANARY_GPS_DEVICE="", **_hat_eeprom(installer, rev))
+
+    assert f"CANary-HAT detected (rev {rev}); GPS device: /dev/{tty}" in result.stdout
+    assert f'KERNEL=="{tty}"' in _gps_rule(installer)
+    units = installer.root / "etc" / "systemd" / "system"
+    baud = (units / f"canary-gpsd@{tty}.service.d" / "canary-baud.conf").read_text()
+    assert f"/usr/bin/gpsctl -s 115200 /dev/{tty}" in baud
+
+
+def test_an_unknown_hat_revision_picks_no_gnss_uart(installer: Installer) -> None:
+    ver = installer.root / "proc-hat-product_ver"
+    ver.write_bytes(b"0x0300\0")
+    result = installer.run(
+        CANARY_GPS_DEVICE="",
+        CANARY_HAT_PRODUCT_FILE=str(_hat_product_file(installer, "CANary-HAT rev 3.0")),
+        CANARY_HAT_PRODUCT_VER_FILE=str(ver),
+    )
+
+    assert "CANary-HAT of unknown revision" in result.stderr
+    assert "CANary-HAT detected" not in result.stdout
 
 
 def test_an_explicit_gps_device_beats_the_hat(installer: Installer) -> None:
@@ -433,10 +478,10 @@ cp "$src" "$out"
 )
 
 
-def _with_overlay(installer: Installer) -> Path:
+def _with_overlay(installer: Installer, *names: str) -> Path:
     firmware = installer.checkout / "hardware" / "canary-hat-firmware"
-    firmware.mkdir(parents=True)
-    shutil.copy(REPO_ROOT / "hardware" / "canary-hat-firmware" / "canary-hat-overlay.dts", firmware)
+    for name in names or ("canary-hat-overlay.dts",):
+        shutil.copy(REPO_ROOT / "hardware" / "canary-hat-firmware" / name, firmware)
     overlays = installer.root / "boot" / "firmware" / "overlays"
     overlays.mkdir(parents=True)
     bin_dir = Path(installer.env["PATH"].split(":", 1)[0])
@@ -460,6 +505,32 @@ def test_an_unchanged_hat_overlay_asks_for_nothing(installer: Installer) -> None
     result = installer.run()
 
     assert "canary-hat.dtbo changed" not in result.stdout
+
+
+_BOTH_OVERLAYS = ("canary-hat-overlay.dts", "canary-hat-r21-overlay.dts")
+
+
+def test_every_revisions_overlay_is_installed(installer: Installer) -> None:
+    overlays = _with_overlay(installer, *_BOTH_OVERLAYS)
+
+    result = installer.run()
+
+    assert (overlays / "canary-hat.dtbo").exists()
+    assert (overlays / "canary-hat-r21.dtbo").exists()
+    # No EEPROM says which one loads, so either changing needs a boot.
+    assert "REBOOT REQUIRED: canary-hat.dtbo canary-hat-r21.dtbo changed" in result.stdout
+
+
+@pytest.mark.parametrize(("rev", "loaded"), [("2.0", "canary-hat"), ("2.1", "canary-hat-r21")])
+def test_only_the_fitted_boards_overlay_asks_for_a_reboot(
+    installer: Installer, rev: str, loaded: str
+) -> None:
+    """A rev 2.0 Pi pulling rev 2.1's new overlay should not be told to reboot."""
+    _with_overlay(installer, *_BOTH_OVERLAYS)
+
+    result = installer.run(**_hat_eeprom(installer, rev))
+
+    assert f"REBOOT REQUIRED: {loaded}.dtbo changed" in result.stdout
 
 
 def test_no_overlay_dir_means_no_overlay_work(installer: Installer) -> None:

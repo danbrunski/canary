@@ -616,21 +616,24 @@ def test_systemd_change_runs_install_pi_which_covers_pip(harness: Harness) -> No
     assert not harness.calls("venv-python -m pip install")
 
 
-def test_hat_overlay_change_runs_install_pi(harness: Harness) -> None:
-    # install_pi.sh compiles the overlay into /boot/firmware; a pull alone would
-    # leave the Pi booting the old one.
-    harness.commit_upstream(
-        "overlay",
-        **{"hardware/canary-hat-firmware/canary-hat-overlay.dts": "/dts-v1/;\n/plugin/;\n"},
-    )
+@pytest.mark.parametrize(
+    "path",
+    [
+        "hardware/canary-hat-firmware/canary-hat-overlay.dts",
+        "hardware/canary-hat-firmware/canary-hat-r21-overlay.dts",
+        "hardware/canary-hat-firmware/hat_revisions.json",
+    ],
+)
+def test_hat_overlay_change_runs_install_pi(harness: Harness, path: str) -> None:
+    # install_pi.sh compiles every revision's overlay into /boot/firmware and
+    # picks the HAT's GNSS UART from the revision table; a pull alone would
+    # leave the Pi booting the old overlay or gpsd on the old UART.
+    harness.commit_upstream("overlay", **{path: "/dts-v1/;\n/plugin/;\n"})
 
     result = harness.run()
 
     assert result.returncode == 0, result.stdout + result.stderr
-    assert (
-        "install_pi.sh: ran (hardware/canary-hat-firmware/canary-hat-overlay.dts changed)"
-        in _summary(result.stdout)
-    )
+    assert f"install_pi.sh: ran ({path} changed)" in _summary(result.stdout)
 
 
 def test_full_forces_every_step(harness: Harness) -> None:

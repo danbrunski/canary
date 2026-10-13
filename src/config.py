@@ -379,10 +379,13 @@ class KlineConfig(_Strict):
     enabled: bool = False
     tty: str = "/dev/ttyAMA0"
     gpio_chip: str = "/dev/gpiochip0"
-    #: TLIN1027 EN (HAT rev 2.0: GPIO26) and the commander pull-up FET gate
-    #: (GPIO24), as line offsets on ``gpio_chip``.
-    enable_gpio: int = 26
-    pullup_gpio: int = 24
+    #: TLIN1027 EN and the commander pull-up FET gate, as line offsets on
+    #: ``gpio_chip``. ``None`` (the default) takes them from the HAT revision
+    #: (``hardware.hat_revision``): EN is GPIO26 on both, the pull-up GPIO24 on
+    #: rev 2.0 and GPIO21 on rev 2.1. Set them only for a board the revision
+    #: table does not describe.
+    enable_gpio: int | None = None
+    pullup_gpio: int | None = None
     #: Pause between polls of the defined set; 0 polls as fast as P3 allows.
     poll_interval_seconds: float = Field(default=0.0, ge=0.0, le=10.0)
     #: Listen whenever no capture profile asks for a session (pull-up off,
@@ -395,8 +398,17 @@ class KlineConfig(_Strict):
     foreign_hold_seconds: float = Field(default=10.0, gt=0.0, le=300.0)
 
 
+#: Which CANary-HAT revision is fitted. ``auto`` reads the HAT's ID EEPROM; a
+#: name overrides it. The names are the rows of
+#: ``hardware/canary-hat-firmware/hat_revisions.json`` (a test keeps them equal).
+HatRevisionSetting = Literal["auto", "2.0", "2.1"]
+
+
 class HardwareConfig(_Strict):
     elm327_port: str
+    #: Rev 2.0 and rev 2.1 wire the K-line pull-up and the 12 V sense
+    #: differently (``src.collection.hat_revision``).
+    hat_revision: HatRevisionSetting = "auto"
     can: CanBusConfig
     gps: GpsConfig = GpsConfig()
     imu: ImuConfig = ImuConfig()

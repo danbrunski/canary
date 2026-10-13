@@ -1,0 +1,43 @@
+{
+  "_doc": [
+    "Where each CANary-HAT revision wires what software drives. One table, two readers:",
+    "hat_rev.py beside this file (bring-up scripts, install_pi.sh, program_hat.sh) and",
+    "src/collection/hat_revision.py (the daemon). tests/test_hat_revisions.py checks each",
+    "overlay against its row. product_ver is what the board's ID EEPROM carries",
+    "(eeprom_settings*.txt); the firmware exposes it as /proc/device-tree/hat/product_ver.",
+    "A board with no readable CANary-HAT EEPROM is treated as 'unidentified': rev 2.0 is",
+    "the only revision that has run without one, and rev 2.1 needs its EEPROM to load its",
+    "own overlay at all. Rev 2.1's pin moves: docs/CANary-HAT-Rev2.1.md section 13.5.13."
+  ],
+  "unidentified": "2.0",
+  "revisions": [
+    {
+      "name": "2.0",
+      "product_ver": "0x0200",
+      "overlay": "canary-hat",
+      "eeprom_settings": "eeprom_settings.txt",
+      "gnss_uart": "uart2",
+      "gnss_tty": "/dev/ttyAMA2",
+      "gnss_gpios": [4, 5],
+      "pps_gpio": 18,
+      "kline_enable_gpio": 26,
+      "kline_pullup_gpio": 24,
+      "barometer": true,
+      "supply_adc": "ads1015"
+    },
+    {
+      "name": "2.1",
+      "product_ver": "0x0201",
+      "overlay": "canary-hat-r21",
+      "eeprom_settings": "eeprom_settings-r21.txt",
+      "gnss_uart": "uart4",
+      "gnss_tty": "/dev/ttyAMA4",
+      "gnss_gpios": [12, 13],
+      "pps_gpio": 20,
+      "kline_enable_gpio": 26,
+      "kline_pullup_gpio": 21,
+      "barometer": false,
+      "supply_adc": "ads8688a"
+    }
+  ]
+}

@@ -30,7 +30,7 @@ from src.collection.reconnect import ReconnectPolicy
 from src.config import CanaryConfig, KlineConfig
 from src.dashboard.api import create_app
 from src.telemetry import TelemetryRecord
-from tests.test_kline_transport import FakeLines, SpacedModulePort, World
+from tests.test_kline_transport import PINS, FakeLines, SpacedModulePort, World
 from tests.waits import HANG_GUARD_SECONDS
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -334,6 +334,7 @@ def _wire_collector(
         return KlineTransport(
             profile,
             mode=mode,
+            pins=PINS,
             open_port=lambda: port,
             open_lines=lambda: FakeLines(world),
             clock=world.clock,

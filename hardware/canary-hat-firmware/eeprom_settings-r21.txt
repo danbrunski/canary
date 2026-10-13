@@ -1,0 +1,29 @@
+########################################################################
+# CANary-HAT rev 2.1 -- HAT+ ID EEPROM settings (U1, CAT24C256 @ 0x50)
+#
+# Build:  eepmake eeprom_settings-r21.txt canary-hat-r21.eep
+# Check:  eepdump canary-hat-r21.eep
+# Flash:  see README.md in this directory
+#
+# HAT+ format (v2). Not a Power HAT+: the board sources no 5V to the Pi
+# (docs/CANary-HAT-Circuits.md §3.8), so current_supply stays 0.
+########################################################################
+
+# Zero -> eepmake generates a fresh RFC 4122 UUID, so each board flashed from
+# this file is distinguishable.
+product_uuid 00000000-0000-0000-0000-000000000000
+
+product_id 0x0001
+
+# 0xMMmm: rev 2.1 (hat_revisions.json keys the pin map on this)
+product_ver 0x0201
+
+vendor "CANary"
+
+product "CANary-HAT rev 2.1"
+
+current_supply 0
+
+# Firmware loads /boot/firmware/overlays/canary-hat-r21.dtbo at boot (rev 2.0
+# boards name canary-hat; each revision wires the GNSS and K-line differently).
+dt_blob "canary-hat-r21"

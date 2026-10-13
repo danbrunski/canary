@@ -34,6 +34,11 @@ hardware:
   # imu:
   #   source: lsm6dsox
   #   sample_rate_hz: 104
+  # CANary-HAT revision. `auto` (the default) reads the board's ID EEPROM:
+  # rev 2.0 and rev 2.1 wire the K-line pull-up and the 12 V sense differently
+  # (hardware/canary-hat-firmware/hat_revisions.json). Name one only for a
+  # board whose EEPROM is blank.
+  # hat_revision: auto
   # USB ADC module for analog sensors: the AEM fuel-pressure gauge's analog
   # output on CH0, recorded as sensor:FUEL_PRESSURE (kPa). Every calibration
   # number is in data/usb_adc_sensors.yaml. Name it by USB port, not

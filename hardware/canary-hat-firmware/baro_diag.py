@@ -1,4 +1,4 @@
-"""U5 (BMP384) register-level diagnostic: is it the command sequence, or the part?
+"""U5 (BMP384, rev 2.0 only) register-level diagnostic: is it the command sequence, or the part?
 
 Runs each channel on its own (temp-only, press-only), both together at two
 oversampling settings, then normal mode at a valid OSR/ODR pair, printing the
@@ -11,9 +11,15 @@ the first rev 2.0 board the temperature word is always 0 (CANary-HAT-Rev2.1.md
 """
 
 import struct
+import sys
 import time
 
+from hat_rev import detect
 from smbus2 import SMBus
+
+_rev, _ = detect()
+if not _rev["barometer"]:
+    sys.exit(f"CANary-HAT rev {_rev['name']} has no barometer: U5 was removed in rev 2.1")
 
 BARO, IMU = 0x77, 0x6B
 bus = SMBus(1)

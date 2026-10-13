@@ -4,15 +4,18 @@
     python3 kline_edges.py [seconds] [out-file]
 
 Holds the TLIN1027 in normal mode (EN, GPIO26, high) with the commander
-pull-up (GPIO24) off, so RXD (GPIO15) mirrors the bus and the HAT is invisible
-to whatever else is on K-line -- e.g. UpRev's cable while it logs. Records the
-kernel timestamp of every RXD edge, so any baud rate, 5-baud address or fast-init
-pulse can be decoded afterwards with kline_decode.py.
+pull-up (GPIO24 on rev 2.0, GPIO21 on rev 2.1) off, so RXD (GPIO15) mirrors
+the bus and the HAT is invisible to whatever else is on K-line -- e.g. UpRev's
+cable while it logs. Records the kernel timestamp of every RXD edge, so any
+baud rate, 5-baud address or fast-init pulse can be decoded afterwards with
+kline_decode.py.
 
 Claiming GPIO15 as an input re-muxes it away from uart0 (the overlay enables
 uart0 at boot), and the kernel leaves it that way after release — measured on
 the HAT 2026-09-23. So this script puts the pin back to uart0 RXD (``a4``) on
 exit; while it runs, the daemon's K-line collector hears nothing.
+The pins come from the board's ID EEPROM through hat_rev.py; set
+CANARY_HAT_REV=2.1 (or 2.0) to name the revision instead.
 Output: a `# start_wall ...` header, then one line per edge,
 "<timestamp_ns> <level after the edge>".
 """
@@ -23,13 +26,20 @@ import time
 
 import gpiod
 from gpiod.line import Direction, Edge, Value
+from hat_rev import HatRevisionError, detect
 
-GPIO_RXD, GPIO_PULLUP, GPIO_EN = 15, 24, 26
+GPIO_RXD = 15  # uart0 RXD on every revision
 #: GPIO15's uart0 function on the Pi 5 (RXD0), restored on exit.
 UART0_RXD_FUNCTION = "a4"
 
 
 def main() -> None:
+    try:
+        rev, how = detect()
+    except HatRevisionError as e:
+        sys.exit(f"kline_edges: {e}")
+    gpio_en, gpio_pullup = rev["kline_enable_gpio"], rev["kline_pullup_gpio"]
+    print(f"CANary-HAT rev {rev['name']} ({how}): EN GPIO{gpio_en}, pull-up GPIO{gpio_pullup}")
     dur = float(sys.argv[1]) if len(sys.argv) > 1 else 300
     stamp = time.strftime("%Y%m%d-%H%M%S")
     out = sys.argv[2] if len(sys.argv) > 2 else f"kline-edges-{stamp}.txt"
@@ -37,7 +47,7 @@ def main() -> None:
     ctl = chip.request_lines(
         consumer="kline-sniff",
         config={
-            (GPIO_EN, GPIO_PULLUP): gpiod.LineSettings(
+            (gpio_en, gpio_pullup): gpiod.LineSettings(
                 direction=Direction.OUTPUT, output_value=Value.INACTIVE
             )
         },
@@ -49,7 +59,7 @@ def main() -> None:
     )
     n = 0
     try:
-        ctl.set_value(GPIO_EN, Value.ACTIVE)
+        ctl.set_value(gpio_en, Value.ACTIVE)
         time.sleep(0.01)
         if rx.wait_edge_events(0):
             rx.read_edge_events()  # discard the mode-change edges
@@ -72,7 +82,7 @@ def main() -> None:
     except KeyboardInterrupt:
         pass
     finally:
-        ctl.set_value(GPIO_EN, Value.INACTIVE)
+        ctl.set_value(gpio_en, Value.INACTIVE)
         ctl.release()
         rx.release()
         subprocess.run(["pinctrl", "set", str(GPIO_RXD), UART0_RXD_FUNCTION], check=False)

@@ -28,6 +28,9 @@ BINDINGS_YAML = DATA_DIR / "bindings.yaml"
 DBC_DIR = DATA_DIR / "dbc"
 #: Scanned directory of YAML test-session profiles for the Test panel.
 TEST_PROFILES_DIR = DATA_DIR / "test_profiles"
+#: Where each CANary-HAT revision wires what software drives. Beside the board
+#: overlays rather than in ``data/``: the bring-up scripts there read it too.
+HAT_REVISIONS_JSON = REPO_ROOT / "hardware" / "canary-hat-firmware" / "hat_revisions.json"
 
 # Runtime state (gitignored, written by the daemon and tools). Anchored to the
 # checkout for the same reason as the catalogs: a tool started from another
@@ -51,6 +54,7 @@ __all__ = [
     "DATA_DIR",
     "DBC_DIR",
     "DIDS_YAML",
+    "HAT_REVISIONS_JSON",
     "REPO_ROOT",
     "TEST_PROFILES_DIR",
 ]

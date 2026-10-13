@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""CANary-HAT rev 2.0 K-line bring-up (TLIN1027 on uart0, run on the Pi).
+"""CANary-HAT K-line bring-up (TLIN1027 on uart0, run on the Pi).
 
 Needs uart0 (on in the board overlay), +12V on J2, the daemon's K-line
 collector stopped, and nothing else driving K-line.
@@ -14,7 +14,11 @@ Steps, each a subcommand:
 
 Hardware order (docs/CANary-HAT-Spec.md §11): open the tty BEFORE raising EN
 (GPIO26); discard RX after the mode change; drop EN and the commander pull-up
-(GPIO24) before releasing the tty, on every exit path; strip the local echo.
+before releasing the tty, on every exit path; strip the local echo.
+
+The pull-up is GPIO24 on rev 2.0 and GPIO21 on rev 2.1. The pins come from the
+board's ID EEPROM through hat_rev.py; --rev names a revision instead, e.g.
+`python3 kline_bringup.py --rev 2.1 echo`.
 """
 
 from __future__ import annotations
@@ -27,10 +31,12 @@ import time
 import gpiod
 import serial
 from gpiod.line import Direction, Value
+from hat_rev import HatRevisionError, detect
 
-TTY = "/dev/ttyAMA0"
-GPIO_EN = 26  # TLIN1027 EN: high = normal mode
-GPIO_PULLUP = 24  # Q3 -> Q2: high = 1k commander pull-up to +12V
+TTY = "/dev/ttyAMA0"  # uart0 on every revision
+#: TLIN1027 EN (high = normal mode) and Q3 -> Q2 (high = 1k commander pull-up
+#: to +12V). Set in main() from the fitted revision (hat_revisions.json).
+GPIO_EN = GPIO_PULLUP = -1
 TESTER = 0xF1  # ISO 14230-4 default; this ECM answers 0xFC
 
 
@@ -206,6 +212,7 @@ def main() -> int:
     p = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
+    p.add_argument("--rev", help="board revision (2.0, 2.1); default: the ID EEPROM's")
     sub = p.add_subparsers(dest="cmd", required=True)
     s = sub.add_parser("sniff")
     s.add_argument("--seconds", type=float, default=3.0)
@@ -217,6 +224,13 @@ def main() -> int:
     f.add_argument("--wakeups", nargs="+", choices=list(WAKEUPS), default=["std", "uprev-long"])
     f.add_argument("--no-pullup", dest="pullup", action="store_false")
     args = p.parse_args()
+    global GPIO_EN, GPIO_PULLUP
+    try:
+        rev, how = detect(args.rev)
+    except HatRevisionError as e:
+        p.error(str(e))
+    GPIO_EN, GPIO_PULLUP = rev["kline_enable_gpio"], rev["kline_pullup_gpio"]
+    print(f"CANary-HAT rev {rev['name']} ({how}): EN GPIO{GPIO_EN}, pull-up GPIO{GPIO_PULLUP}")
     return {"sniff": cmd_sniff, "echo": cmd_echo, "fastinit": cmd_fastinit}[args.cmd](args)
 
 

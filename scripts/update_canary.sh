@@ -298,8 +298,9 @@ changed_between() {
 }
 
 # Files install_pi.sh installs somewhere outside the checkout, or runs.
-# The HAT overlay source is one: install_pi.sh compiles it into /boot/firmware.
-INSTALL_PI_INPUTS='^(scripts/install_pi\.sh|scripts/install_deps\.py|scripts/update_canary\.sh|systemd/|canary\.pi\.example\.yaml|hardware/canary-hat-firmware/canary-hat-overlay\.dts)'
+# The HAT overlay sources are: install_pi.sh compiles them into /boot/firmware,
+# and picks the GNSS UART from the revision table (hat_revisions.json, hat_rev.py).
+INSTALL_PI_INPUTS='^(scripts/install_pi\.sh|scripts/install_deps\.py|scripts/update_canary\.sh|systemd/|canary\.pi\.example\.yaml|hardware/canary-hat-firmware/([^/]*-overlay\.dts|hat_revisions\.json|hat_rev\.py))'
 PIP_INPUTS='^(pyproject\.toml|requirements[^/]*\.txt|uv\.lock|poetry\.lock|pdm\.lock)$'
 
 decide_dashboard() {

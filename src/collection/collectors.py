@@ -31,6 +31,7 @@ from src.collection.can_obd_collector import (
 from src.collection.capture_profiles import CaptureProfileSources, CaptureProfileStore
 from src.collection.gps_collector import GpsSpec, collect_gps_from_config
 from src.collection.gps_gpsd import GpsdSpec, collect_gpsd_from_config
+from src.collection.hat_revision import kline_pins, resolve_hat_revision
 from src.collection.imu_collector import ImuHealth, collect_imu_from_config
 from src.collection.kline_collector import KlineCollector
 from src.collection.obd_scheduler import (
@@ -306,6 +307,18 @@ def _supply_voltage_collectors(
     supply = config.hardware.supply_voltage
     if not supply.enabled:
         return []
+    # Rev 2.1 has no ADS1015: its 12 V sense is ADS8688A CH0. Reading 0x48
+    # there would retry an absent chip forever and make the OBD collector wait
+    # for a first reading that never comes, so say so and record nothing.
+    revision = resolve_hat_revision(config.hardware.hat_revision)
+    if revision.supply_adc != "ads1015":
+        log.error(
+            "hardware.supply_voltage reads an ADS1015; CANary-HAT rev %s has none (its 12 V "
+            "sense is on the %s, which has no driver yet), so supply voltage is not recorded",
+            revision.name,
+            revision.supply_adc,
+        )
+        return []
     # Before any collector starts, so the OBD collector knows to wait for
     # the first reading rather than transmit into an unknown port.
     VEHICLE_POWER.expect_readings()
@@ -362,7 +375,9 @@ def _kline_collectors(config: CanaryConfig) -> list[CollectorStarter]:
         return []
     from src.paths import DIDS_YAML
 
-    collector = KlineCollector(kline, config.daemon.kline_profile, DIDS_YAML)
+    pins = kline_pins(kline, resolve_hat_revision(config.hardware.hat_revision))
+    log.info("K-line on %s: EN GPIO%d, pull-up GPIO%d", pins.tty, pins.enable, pins.pullup)
+    collector = KlineCollector(kline, config.daemon.kline_profile, DIDS_YAML, pins=pins)
 
     async def kline_collector(queue: asyncio.Queue[TelemetryRecord], stop: asyncio.Event) -> None:
         await collector.run(queue, stop)

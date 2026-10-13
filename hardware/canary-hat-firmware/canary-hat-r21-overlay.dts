@@ -1,0 +1,135 @@
+// CANary-HAT rev 2.1 board overlay (Raspberry Pi 5).
+//
+// Named by the rev 2.1 ID EEPROM (eeprom_settings-r21.txt, dt_blob
+// "canary-hat-r21"); a rev 2.0 board's EEPROM names canary-hat-overlay.dts
+// instead, so each board loads its own wiring. hat_revisions.json holds the
+// same pin facts for software, and tests/test_hat_revisions.py checks this file
+// against its row. What changed from rev 2.0 (docs/CANary-HAT-Rev2.1.md
+// §13.5.13) is the GNSS UART and PPS pin; CAN and K-line are unchanged:
+//
+//   CAN   MCP2518FD (U3) on SPI0 CE0, nINT GPIO25, 40 MHz crystal (Y1) -> can0
+//         TCAN1042 (U4) STB on GPIO22, hogged LOW (see canary-hat-overlay.dts
+//         for why the hog, not the daemon, owns it)
+//   GNSS  MAX-M10M (U7) on uart4 (GPIO12 TX / GPIO13 RX) -> /dev/ttyAMA4
+//         TIMEPULSE on GPIO20 -> pps-gpio. The node keeps rev 2.0's name
+//         (canary-pps), so install_pi.sh's /dev/pps-canary rule and chrony's
+//         refclock need nothing per revision.
+//   K-line TLIN1027 (U2) on uart0 (GPIO14/15) -> /dev/ttyAMA0
+//
+// GPIO6 stays free on both revisions: it is the X1202's power-loss line,
+// held by scripts/ups_shutdown_watch.py.
+//
+// Deliberately NOT here:
+//   - The ADS8688A (U8) on SPI0 CE1. Only CE0's spidev is disabled, so with
+//     spi0 enabled below CE1 should come up as /dev/spidev0.1 for a userspace
+//     driver (SPI mode 1), the way the IMU and rev 2.0's ADC are read. Not yet
+//     confirmed on a board; the ADC driver is still owed (§13.5.8).
+//   - GPIO19 = SENS_PWR_EN (U9 enable, the 5 V sensor supply). R47 holds it
+//     low, so the sensor ports are off until software drives it high.
+//   - GPIO21 (K-line pull-up FET) and GPIO26 (TLIN1027 EN): the K-line
+//     collector's, as on rev 2.0 (there GPIO24 and GPIO26).
+//   - The LSM6DSOX (0x6B); its INT1 is GPIO17 and INT2 GPIO23, both unused.
+//     Rev 2.1 has no barometer.
+//
+// Constants are written numerically so plain `dtc` builds it on the Pi with no
+// kernel headers: IRQ_TYPE_LEVEL_LOW = 8, GPIO_ACTIVE_HIGH = 0,
+// BCM2835_FSEL_GPIO_IN = 0.
+//
+// Build: dtc -@ -I dts -O dtb -o canary-hat-r21.dtbo canary-hat-r21-overlay.dts
+
+/dts-v1/;
+/plugin/;
+
+/ {
+	compatible = "brcm,bcm2712";
+
+	fragment@0 {
+		target = <&spidev0>;
+		__overlay__ {
+			status = "disabled";
+		};
+	};
+
+	fragment@1 {
+		target-path = "/clocks";
+		__overlay__ {
+			clk_canary_can: clk_canary_can {
+				#clock-cells = <0>;
+				compatible = "fixed-clock";
+				clock-frequency = <40000000>;
+			};
+		};
+	};
+
+	fragment@2 {
+		target = <&gpio>;
+		__overlay__ {
+			canary_can_int: canary_can_int {
+				brcm,pins = <25>;
+				brcm,function = <0>;
+			};
+
+			canary_pps_pins: canary_pps_pins {
+				brcm,pins = <20>;
+				brcm,function = <0>;
+				brcm,pull = <0>;
+			};
+
+			canary_can_stb {
+				gpio-hog;
+				gpios = <22 0>;
+				output-low;
+				line-name = "CANARY_CAN_STB";
+			};
+		};
+	};
+
+	fragment@3 {
+		target = <&spi0>;
+		__overlay__ {
+			status = "okay";
+			#address-cells = <1>;
+			#size-cells = <0>;
+
+			canary_can: can@0 {
+				compatible = "microchip,mcp2518fd";
+				reg = <0>;
+				pinctrl-names = "default";
+				pinctrl-0 = <&canary_can_int>;
+				spi-max-frequency = <20000000>;
+				interrupt-parent = <&gpio>;
+				interrupts = <25 8>;
+				clocks = <&clk_canary_can>;
+			};
+		};
+	};
+
+	fragment@4 {
+		target = <&uart4>;
+		__overlay__ {
+			status = "okay";
+			pinctrl-0 = <&uart4_pins>;
+		};
+	};
+
+	fragment@5 {
+		target-path = "/";
+		__overlay__ {
+			canary_pps: canary-pps {
+				compatible = "pps-gpio";
+				pinctrl-names = "default";
+				pinctrl-0 = <&canary_pps_pins>;
+				gpios = <&gpio 20 0>;
+				status = "okay";
+			};
+		};
+	};
+
+	fragment@6 {
+		target = <&uart0>;
+		__overlay__ {
+			status = "okay";
+			pinctrl-0 = <&uart0_pins>;
+		};
+	};
+};

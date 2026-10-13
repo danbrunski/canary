@@ -267,8 +267,21 @@ fi
 # Is a CANary-HAT fitted? The firmware reads its ID EEPROM at boot and exposes
 # the product string here; several steps below differ for it.
 HAT_PRODUCT_FILE="${CANARY_HAT_PRODUCT_FILE:-/proc/device-tree/hat/product}"
+HAT_PRODUCT_VER_FILE="${CANARY_HAT_PRODUCT_VER_FILE:-/proc/device-tree/hat/product_ver}"
 hat_product=""
+hat_product_ver=""
 [[ -r "${HAT_PRODUCT_FILE}" ]] && hat_product="$(tr -d '\0' <"${HAT_PRODUCT_FILE}")"
+[[ -r "${HAT_PRODUCT_VER_FILE}" ]] && hat_product_ver="$(tr -d '\0' <"${HAT_PRODUCT_VER_FILE}")"
+
+# hat_fact <field>: one fact about the fitted CANary-HAT's revision, from
+# hardware/canary-hat-firmware/hat_revisions.json. Rev 2.0 and rev 2.1 wire the
+# GNSS UART differently, and each loads its own overlay. The EEPROM's
+# product_ver picks the row; an empty one is the table's "unidentified" (2.0).
+# Fails, saying why, for a product_ver the checkout does not know.
+hat_fact() {
+  "${CANARY_PYTHON}" "${CANARY_HOME}/hardware/canary-hat-firmware/hat_rev.py" \
+    --product-ver "${hat_product_ver}" "$1"
+}
 
 # The HAT's K-line transceiver is on uart0 (GPIO14/15). A kernel console there
 # would turn a held-low K-line (every wake-up pulse) into a serial break, which
@@ -310,13 +323,18 @@ if [[ "${CANARY_INSTALL_GPS_STACK}" == "1" ]] && command -v apt-get >/dev/null 2
   apt-cache show gpsd-tools >/dev/null 2>&1 && _gps_pkgs+=(gpsd-tools)
   DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends "${_gps_pkgs[@]}"
 
-  # A CANary-HAT carries its own GNSS receiver on uart2 (/dev/ttyAMA2, from the
-  # board overlay its ID EEPROM names). When the firmware reports the HAT, that
-  # receiver is the GPS — the antenna is on the board — whatever USB serial
-  # devices are also plugged in. An explicit CANARY_GPS_DEVICE still wins.
+  # A CANary-HAT carries its own GNSS receiver on a board UART, from the overlay
+  # its ID EEPROM names: uart2 (/dev/ttyAMA2) on rev 2.0, uart4 (/dev/ttyAMA4)
+  # on rev 2.1. When the firmware reports the HAT, that receiver is the GPS —
+  # the antenna is on the board — whatever USB serial devices are also plugged
+  # in. An explicit CANARY_GPS_DEVICE still wins.
   if [[ -z "${CANARY_GPS_DEVICE}" && "${hat_product}" == CANary-HAT* ]]; then
-    CANARY_GPS_DEVICE="/dev/ttyAMA2"
-    echo "  CANary-HAT detected; GPS device: ${CANARY_GPS_DEVICE}"
+    if hat_tty="$(hat_fact gnss_tty)"; then
+      CANARY_GPS_DEVICE="${hat_tty}"
+      echo "  CANary-HAT detected (rev $(hat_fact name)); GPS device: ${CANARY_GPS_DEVICE}"
+    else
+      echo "WARNING: CANary-HAT of unknown revision; its GNSS UART is not chosen" >&2
+    fi
   fi
 
   # Autodetect the receiver when not told. The by-id symlink is stable across
@@ -378,7 +396,7 @@ EOF
     # precisely the case this rule exists to cover. 70- runs after 60-serial's
     # by-id symlink is in place.
     #
-    # A board UART (the HAT's /dev/ttyAMA2) has no by-id symlink: udev never
+    # A board UART (the HAT's /dev/ttyAMA2 or ttyAMA4) has no by-id symlink: udev never
     # lists it under SYMLINK, so a SYMLINK match would silently never fire.
     # Match those on their kernel name, which a device-tree UART keeps.
     if [[ "${CANARY_GPS_DEVICE}" == /dev/serial/* ]]; then
@@ -632,27 +650,43 @@ fi
 # ---------------------------------------------------------------------------
 # CANary-HAT board overlay
 # ---------------------------------------------------------------------------
-# The HAT's ID EEPROM names the overlay ("canary-hat") and the firmware loads
-# /boot/firmware/overlays/canary-hat.dtbo at boot — but only if that file is
-# there. On a fresh image it is not, and the board comes up with no can0, no
-# GNSS UART and the CAN transceiver in standby. Installed on every Pi whether or
-# not a HAT is fitted: the firmware ignores an overlay nothing names.
+# The HAT's ID EEPROM names its revision's overlay ("canary-hat" on rev 2.0,
+# "canary-hat-r21" on rev 2.1) and the firmware loads that .dtbo from
+# /boot/firmware/overlays at boot — but only if the file is there. On a fresh
+# image it is not, and the board comes up with no can0, no GNSS UART and the
+# CAN transceiver in standby. Every revision's overlay is installed on every
+# Pi, HAT or not: the firmware ignores an overlay nothing names, and a card then
+# works with whichever board is stacked on it.
 OVERLAY_DIR="${CANARY_OVERLAY_DIR:-${ROOT}/boot/firmware/overlays}"
-HAT_OVERLAY_SRC="${CANARY_HOME}/hardware/canary-hat-firmware/canary-hat-overlay.dts"
+HAT_FIRMWARE_DIR="${CANARY_HOME}/hardware/canary-hat-firmware"
 HAT_REBOOT_NEEDED=0
+HAT_CHANGED_DTBOS=()
 I2C_REBOOT_NEEDED=0
-if [[ -d "${OVERLAY_DIR}" && -f "${HAT_OVERLAY_SRC}" ]]; then
+# Only the overlay the fitted board loads needs a reboot when it changes. A
+# CANary-HAT's EEPROM says which; without one, config.txt may name either.
+hat_loaded_overlay=""
+if [[ "${hat_product}" == CANary-HAT* ]]; then
+  hat_loaded_overlay="$(hat_fact overlay 2>/dev/null)" || hat_loaded_overlay=""
+fi
+if [[ -d "${OVERLAY_DIR}" ]] && compgen -G "${HAT_FIRMWARE_DIR}/*-overlay.dts" >/dev/null; then
   if command -v dtc >/dev/null 2>&1; then
-    hat_dtbo="$(mktemp)"
-    if dtc -@ -q -I dts -O dtb -o "${hat_dtbo}" "${HAT_OVERLAY_SRC}"; then
-      write_managed hat-overlay "${OVERLAY_DIR}/canary-hat.dtbo" <"${hat_dtbo}"
-      [[ -n "${CONFIG_CHANGED[hat-overlay]:-}" ]] && HAT_REBOOT_NEEDED=1
-    else
-      echo "WARNING: could not compile ${HAT_OVERLAY_SRC}; canary-hat.dtbo not updated" >&2
-    fi
-    rm -f "${hat_dtbo}"
+    for hat_src in "${HAT_FIRMWARE_DIR}"/*-overlay.dts; do
+      hat_name="$(basename "${hat_src}" -overlay.dts)"
+      hat_dtbo="$(mktemp)"
+      if dtc -@ -q -I dts -O dtb -o "${hat_dtbo}" "${hat_src}"; then
+        write_managed "hat-overlay-${hat_name}" "${OVERLAY_DIR}/${hat_name}.dtbo" <"${hat_dtbo}"
+        if [[ -n "${CONFIG_CHANGED[hat-overlay-${hat_name}]:-}" ]] \
+            && [[ -z "${hat_loaded_overlay}" || "${hat_loaded_overlay}" == "${hat_name}" ]]; then
+          HAT_REBOOT_NEEDED=1
+          HAT_CHANGED_DTBOS+=("${hat_name}.dtbo")
+        fi
+      else
+        echo "WARNING: could not compile ${hat_src}; ${hat_name}.dtbo not updated" >&2
+      fi
+      rm -f "${hat_dtbo}"
+    done
   else
-    echo "WARNING: dtc not found (raspi-utils-dt); canary-hat.dtbo not installed" >&2
+    echo "WARNING: dtc not found (raspi-utils-dt); CANary-HAT overlays not installed" >&2
   fi
 fi
 
@@ -798,7 +832,7 @@ if [[ "${CGROUP_REBOOT_NEEDED}" -eq 1 ]]; then
 fi
 if [[ "${HAT_REBOOT_NEEDED}" -eq 1 ]]; then
   echo
-  echo "REBOOT REQUIRED: canary-hat.dtbo changed; the firmware loads it only at boot."
+  echo "REBOOT REQUIRED: ${HAT_CHANGED_DTBOS[*]} changed; the firmware loads it only at boot."
 fi
 if [[ "${I2C_REBOOT_NEEDED}" -eq 1 ]]; then
   echo

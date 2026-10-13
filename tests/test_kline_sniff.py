@@ -23,6 +23,7 @@ from src.collection.kline.sniff import (
 )
 from src.collection.kline.transport import KlineTransport, Mode, RxChunk
 from src.collection.obd_scheduler import did_response_widths
+from tests.test_kline_transport import PINS
 
 FIXTURE = Path(__file__).parent / "fixtures" / "kline" / "uprev_session_bytes.json.gz"
 
@@ -231,6 +232,7 @@ def _listen(stall_s: float) -> list[RxChunk]:
     transport = KlineTransport(
         load_kline_profile(Path("data/nissan-xterra-2008/kline.yaml")),
         mode=Mode.SNIFF,
+        pins=PINS,
         open_port=lambda: host,
         open_lines=lambda: host,
         clock=host.clock,
@@ -538,6 +540,7 @@ def _sniff_line(chars: list[tuple[float, bytes]]) -> list[SniffedFrame | Sniffed
     transport = KlineTransport(
         load_kline_profile(Path("data/nissan-xterra-2008/kline.yaml")),
         mode=Mode.SNIFF,
+        pins=PINS,
         open_port=lambda: line,
         open_lines=lambda: line,
         clock=line.clock,

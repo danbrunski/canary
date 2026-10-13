@@ -123,10 +123,27 @@ def test_divider_ratio_must_divide() -> None:
         SupplyVoltageConfig(divider_ratio=0.5)
 
 
+def _with_supply(config: CanaryConfig, hat_revision: str) -> CanaryConfig:
+    hardware = config.hardware.model_copy(
+        update={"supply_voltage": HAT, "hat_revision": hat_revision}
+    )
+    return config.model_copy(update={"hardware": hardware})
+
+
 def test_supply_voltage_collector_runs_only_when_enabled() -> None:
     config = CanaryConfig.from_yaml(REPO / "canary.example.yaml")
     assert _supply_voltage_collectors(config, ReconnectPolicy()) == []
-    enabled = config.model_copy(
-        update={"hardware": config.hardware.model_copy(update={"supply_voltage": HAT})}
-    )
+    enabled = _with_supply(config, "2.0")
     assert len(_supply_voltage_collectors(enabled, ReconnectPolicy())) == 1
+
+
+def test_rev_2_1_has_no_ads1015_so_nothing_waits_for_it(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Rev 2.1's 12 V sense is ADS8688A CH0. Reading the absent ADS1015 would
+    retry forever, and expecting its readings would hold the OBD collector."""
+    expected: list[bool] = []
+    monkeypatch.setattr(
+        "src.collection.collectors.VEHICLE_POWER.expect_readings", lambda: expected.append(True)
+    )
+    config = _with_supply(CanaryConfig.from_yaml(REPO / "canary.example.yaml"), "2.1")
+    assert _supply_voltage_collectors(config, ReconnectPolicy()) == []
+    assert expected == []

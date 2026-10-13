@@ -38,7 +38,8 @@ from src.collection.kline.transport import (
 PROFILE = load_kline_profile(Path("data/nissan-xterra-2008/kline.yaml"))
 FIXTURE = Path(__file__).parent / "fixtures" / "kline" / "uprev_session_frames.json"
 F = {k: bytes.fromhex(v) for k, v in json.loads(FIXTURE.read_text())["frames"].items()}
-PINS = HatPins()
+#: Rev 2.0's lines; nothing here depends on which revision.
+PINS = HatPins(enable=26, pullup=24)
 EN, PU = PINS.enable, PINS.pullup
 
 
@@ -152,6 +153,7 @@ def make(
     return KlineTransport(
         PROFILE,
         mode=mode,
+        pins=PINS,
         open_port=open_port,
         open_lines=lambda: FakeLines(world),
         clock=world.clock,
@@ -206,6 +208,7 @@ def test_a_failure_while_raising_en_releases_everything() -> None:
     transport = KlineTransport(
         PROFILE,
         mode=Mode.COMMAND,
+        pins=PINS,
         open_port=lambda: port,
         open_lines=lambda: Broken(world),
         clock=world.clock,
@@ -444,6 +447,7 @@ def test_the_real_sniff_port_reads_marked_bytes_and_says_so() -> None:
         transport = KlineTransport(
             PROFILE,
             mode=Mode.SNIFF,
+            pins=PINS,
             open_port=lambda: port,
             open_lines=lambda: FakeLines(world),
         )
