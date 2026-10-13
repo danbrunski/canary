@@ -821,6 +821,17 @@ measurement in hand.
     Pi whose clock NTP steps backwards would refuse the same append. Decide
     whether the ledger should clamp to `index.latest` (monotonic record time)
     or the test should pass `now=`.
+  - **Seen again** the same day in the push gate for `8f46a20`:
+    `tests/test_investigation_cases.py::test_the_memory_path_reproduces_the_known_answer[ecm-calc-load-b]`,
+    the same `ValueError`, passed serially. Log:
+    `.git/ci-gate/failed-logs/20261013T150458Z-8f46a20-pytest.log`. Two
+    different tests in one hour point at the shared ledger path, not at
+    either test.
+- [ ] **T01.27 `tests/test_residual_chain.py` failed under load (four tests).**
+  - **Seen** 2026-10-13 by another session in a full local pytest run, while
+    it worked on H08. They passed alone, in parallel on their own, in a second
+    full run and in the push gate. No log or error text was kept. Next time
+    it shows up, keep the failure text and the load average.
   - **Seen again** 2026-10-13 in a different test, so the cause is in the
     shared ledger rather than one test. The push gate for `7cf315b` (a KiCad
     board file only) failed
