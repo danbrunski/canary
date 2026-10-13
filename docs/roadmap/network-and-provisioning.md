@@ -77,7 +77,8 @@ Rejected, with reasons, so they are not re-proposed:
   reaches an argv, a failed join restores the profiles),
   `systemd/canary-provision.service`, operator guide `docs/ble-provisioning.md`,
   tests `tests/test_provisioning_*.py`. Open: a bench run against a real
-  phone (Android Chrome on improv-wifi.com), and installer wiring (N2.1).
+  phone (Android Chrome on improv-wifi.com). `install_pi.sh` installs and
+  enables the unit (2026-10-13).
   Original scope: A BlueZ GATT server that
   advertises, lists the networks the Pi can currently see, accepts an SSID
   and passphrase, hands them to NetworkManager, and reports the resulting

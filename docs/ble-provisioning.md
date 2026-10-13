@@ -213,15 +213,14 @@ Two known rough edges:
   NetworkManager tries the higher-priority one first.
 - **Captive portals** (hotel or café sign-in pages) are not handled.
 
-## Installing it (manual until N2.1)
+## Installing it
 
-`scripts/install_pi.sh` does not install this unit yet. On the Pi:
+`scripts/install_pi.sh` installs the dependencies (`dbus-fast` comes with the
+venv) and installs and enables `canary-provision.service`. It starts at the
+next boot. To start it now, and to watch it:
 
 ```bash
-cd ~canary/canary && .venv/bin/pip install -e .   # pulls in dbus-fast
-sudo install -m 0644 systemd/canary-provision.service /etc/systemd/system/
-sudo systemctl daemon-reload
-sudo systemctl enable --now canary-provision
+sudo systemctl start canary-provision
 journalctl -u canary-provision -f
 ```
 

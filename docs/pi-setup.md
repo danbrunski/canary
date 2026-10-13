@@ -394,8 +394,9 @@ before anything starts, not after a fetch timeout. `--force` is not offered
 from the dashboard; `--full` is.
 
 Logs: `journalctl -u canary-update` has every line `canary-update` printed.
-`install_pi.sh` installs and enables the two units; until it has run once,
-`POST /control/update` answers 503 naming `canary-update.path`.
+`install_pi.sh` installs the two units and starts `canary-update.path`. On a
+Pi installed before that, `POST /control/update` answers 503 naming
+`canary-update.path` until `install_pi.sh` runs again.
 
 The planned public distribution replaces the Git fetch with a signed or
 checksummed release bundle. The rest of this update path remains the same, and

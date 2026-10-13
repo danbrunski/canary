@@ -41,9 +41,10 @@ pasted token. Each row below is now built, as each item records.
 
 - [~] **P1.1 Improv WiFi over BLE**, with the gate and the status
   characteristic. The code, tests and `docs/ble-provisioning.md` landed on
-  2026-10-12 (`ab78d54`). Still open:
-  - a bench run with Android Chrome on improv-wifi.com;
-  - `install_pi.sh` installing and enabling `canary-provision.service` (N2.1).
+  2026-10-12 (`ab78d54`). `install_pi.sh` installs and enables
+  `canary-provision.service` (2026-10-13,
+  `test_phone_setup_update_and_first_boot_units_are_installed`). Still open:
+  a bench run with Android Chrome on improv-wifi.com (P1.2).
 - [ ] **P1.2 Bench acceptance.** On a freshly installed Pi with no WiFi
   profile, provision from Android and confirm three things:
   - the dashboard link the provisioner returns opens;
@@ -119,12 +120,13 @@ pasted token. Each row below is now built, as each item records.
   - [x] **Bench pairing.** `canaryctl pair [--yes | --approve ID]` and
     `canaryctl devices [--remove ID]`. canaryctl reads
     `/etc/canary/control.token` (`04238c3`).
-  - [~] **A per-device secret in images.** (`57d1e73`) Before imaging,
+  - [x] **A per-device secret in images.** (`57d1e73`) Before imaging,
     `scripts/prepare_image.sh` strips the token, paired devices, WiFi
     profiles, hostname, machine-id and SSH keys. `canary-firstboot.service`
     then makes them per-Pi (`tests/test_prepare_image.py`; docs/install.md
-    "Making an Image to Hand Out"). Open: `install_pi.sh` installing the
-    unit.
+    "Making an Image to Hand Out"). `install_pi.sh` installs and enables the
+    unit, and names a Pi with the same `scripts/lib/canary_hostname.sh` rule
+    first boot uses (2026-10-13).
 - [x] **P2.5 Tables and charts below 600px.** (`b25f6d8`) `TableScroll`
   wraps 19 tables, with a sticky first column on phones. Key/value rows
   stack. `useContainerWidth` sizes MultiSeriesChart, Sparkline, Curve and
@@ -146,9 +148,12 @@ pasted token. Each row below is now built, as each item records.
   `canary-update.path` and `.service`, with `src/control/update_runner.py`
   (root, checkout venv). The request is renamed away before Python runs, and
   read with `O_NOFOLLOW` within a size cap. Status goes to
-  `/run/canary/update_status` with a heartbeat. Open: `install_pi.sh`
-  installing and enabling the path unit, and a real update run from the
-  phone. The daemon cannot run sudo
+  `/run/canary/update_status` with a heartbeat. `install_pi.sh` installs
+  both units and starts the path unit (2026-10-13). `canary-update` runs git
+  as root with `safe.directory` passed through `GIT_CONFIG_*`. On 2026-10-13
+  git 2.39.5 (Debian bookworm, a container) refused a root `rev-parse` in a
+  user-owned repository without it and accepted it with it. Open: a real
+  update run from the phone. The daemon cannot run sudo
   and should not be able to. Use the same pattern as the UPS keep-alive and
   the provisioning window:
   - The daemon writes `/run/canary/update_request`.
@@ -218,20 +223,17 @@ pasted token. Each row below is now built, as each item records.
 
 ## Remaining
 
-Each of these needs hardware, a phone or the installer:
+Each of these needs the Pi, the truck or a real phone:
 
-1. **Installer wiring.** It waits on another session committing its
-   `install_pi.sh` edit. `install_pi.sh` then installs and enables
-   `canary-provision.service`, `canary-update.path` and `.service`, and
-   `canary-firstboot.service`. The lines are in the P3.1 and image commits.
-2. **P1.2 bench acceptance.** Provision a fresh Pi from Android Chrome. Then
+1. **P1.2 bench acceptance.** Provision a fresh Pi from Android Chrome. Then
    confirm a second setup is refused until a window opens, and that nRF
    Connect reads the status characteristic.
-3. **Key cycle on the truck (P2.4).** Measure the lag after ACC, and confirm
+2. **Key cycle on the truck (P2.4).** Measure the lag after ACC, and confirm
    ACC never reads as ON on the Xterra.
-4. **A real update from the phone (P3.1).** Include whether the Pi's git
-   honours `safe.directory` given through `GIT_CONFIG_*`.
-5. **P5.2 on Android.** Progress across screen sleep, and the download
+3. **A real update from the phone (P3.1).** The Pi's git honouring
+   `safe.directory` through `GIT_CONFIG_*` was confirmed on git 2.39.5 in a
+   container; the Pi's own git still gets the real run.
+4. **P5.2 on Android.** Progress across screen sleep, and the download
    landing in Downloads.
-6. **A pass on a real Android phone and in mobile Safari**, with icon masking
+5. **A pass on a real Android phone and in mobile Safari**, with icon masking
    on the launcher.

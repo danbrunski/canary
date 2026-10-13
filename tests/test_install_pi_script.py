@@ -97,6 +97,10 @@ _INSTALLED_UNIT_FILES = (
     "canary-chrony-pps.service",
     "can0.service",
     "70-canable-can0.rules",
+    "canary-provision.service",
+    "canary-update.path",
+    "canary-update.service",
+    "canary-firstboot.service",
 )
 
 
@@ -151,6 +155,8 @@ def installer(tmp_path: Path) -> Installer:
     shutil.copy(INSTALL_SCRIPT, checkout / "scripts" / "install_pi.sh")
     shutil.copy(REPO_ROOT / "scripts" / "update_canary.sh", checkout / "scripts")
     shutil.copy(REPO_ROOT / "scripts" / "data_drive.sh", checkout / "scripts")
+    (checkout / "scripts" / "lib").mkdir()
+    shutil.copy(REPO_ROOT / "scripts" / "lib" / "canary_hostname.sh", checkout / "scripts" / "lib")
     (checkout / "scripts" / "install_deps.py").write_text(_INSTALL_DEPS_STUB)
     shutil.copy(EXAMPLE_CONFIG, checkout / "canary.pi.example.yaml")
     (checkout / "systemd").mkdir()
@@ -894,6 +900,30 @@ def test_can0_comes_up_on_every_boot(installer: Installer) -> None:
     assert 'ENV{SYSTEMD_WANTS}+="can0.service"' in rule.read_text()
     assert "systemctl enable can0.service" in installer.calls("systemctl enable")
     assert not [c for c in installer.calls("systemctl start") if "can0" in c]
+
+
+def test_phone_setup_update_and_first_boot_units_are_installed(installer: Installer) -> None:
+    """docs/roadmap/phone-ui.md: BLE WiFi setup (P1.1), update from the
+    dashboard (P3.1) and an imaged Pi's first boot (P3.3) each need their unit
+    on the Pi, not only in the checkout."""
+    installer.run()
+
+    units = installer.root / "etc" / "systemd" / "system"
+    for name in (
+        "canary-provision.service",
+        "canary-update.path",
+        "canary-update.service",
+        "canary-firstboot.service",
+    ):
+        assert (units / name).read_text() == (REPO_ROOT / "systemd" / name).read_text()
+    enabled = installer.calls("systemctl enable")
+    assert "systemctl enable canary-provision.service" in enabled
+    assert "systemctl enable canary-firstboot.service" in enabled
+    # Live now, not at the next boot: an update request from the dashboard
+    # must be served on the Pi that was just installed.
+    assert "systemctl enable --now canary-update.path" in enabled
+    # The oneshot is started only by its path unit.
+    assert not [c for c in enabled if c.endswith("canary-update.service")]
 
 
 def _fake_curl(installer: Installer, version: str) -> Path:

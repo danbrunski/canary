@@ -116,13 +116,9 @@ MAC, and creates SSH host keys. The copy then boots with no WiFi, so the
 owner's phone sets it up over Bluetooth and pairs by key cycle
 (docs/ble-provisioning.md).
 
-Until `install_pi.sh` installs the unit itself, add it by hand on the
-reference Pi before preparing the image:
-
-```bash
-sudo install -m 0644 systemd/canary-firstboot.service /etc/systemd/system/
-sudo systemctl daemon-reload && sudo systemctl enable canary-firstboot
-```
+`install_pi.sh` installs and enables the unit. On a Pi that was not imaged
+it does nothing: it runs only while `/etc/canary/firstboot` exists, which
+`scripts/prepare_image.sh` leaves.
 
 ## Verifying CUDA
 

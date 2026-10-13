@@ -6,8 +6,8 @@
 # coordination and stable across reinstalls. Falls back to the first non-lo
 # interface. Prints nothing (status 1) when no MAC can be read.
 #
-# Sourced by scripts/canary_firstboot.sh. scripts/install_pi.sh carries the
-# same rule inline and should source this once its pending edits land.
+# Sourced by scripts/install_pi.sh and scripts/canary_firstboot.sh, so an
+# installed Pi and an imaged one name themselves the same way.
 canary_hostname_from_mac() {
   local net_dir="$1" mac="" addr
   if [[ -r "${net_dir}/eth0/address" ]]; then

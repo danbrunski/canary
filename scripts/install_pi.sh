@@ -171,6 +171,17 @@ install -m 0644 "${CANARY_HOME}/systemd/70-canable-can0.rules" \
 # (uses lgpio), not the venv.
 install -m 0644 "${CANARY_HOME}/systemd/ups-shutdown.service" \
   "$(dirname "${CANARY_SERVICE}")/ups-shutdown.service"
+# Phone setup and updates (docs/roadmap/phone-ui.md). canary-provision: WiFi
+# setup over Bluetooth (Improv), root, standalone from the daemon like the UPS
+# watchdog (docs/ble-provisioning.md). canary-update.path/.service: the root
+# side of "update from the dashboard", started by the request file the
+# daemon writes (src/control/updater.py). canary-firstboot: an imaged Pi's own
+# token, hostname and SSH keys, a no-op without the marker
+# scripts/prepare_image.sh leaves.
+for unit in canary-provision.service canary-update.path canary-update.service \
+    canary-firstboot.service; do
+  install -m 0644 "${CANARY_HOME}/systemd/${unit}" "$(dirname "${CANARY_SERVICE}")/${unit}"
+done
 # Load i2c-dev at boot so /dev/i2c-1 (X1202 fuel gauge at 0x36) exists.
 install -m 0644 "${CANARY_HOME}/systemd/canary-modules.conf" \
   "${ROOT}/etc/modules-load.d/canary.conf"
@@ -203,22 +214,11 @@ canary_hostname=""
 if [[ -n "${CANARY_HOSTNAME:-}" ]]; then
   canary_hostname="${CANARY_HOSTNAME}"
 elif [[ "${FIRST_INSTALL}" -eq 1 && "${current_hostname}" =~ ^(raspberrypi|canary|localhost)?$ ]]; then
-  # The wired MAC: printed nowhere, but fixed in the SoC's OTP on a Pi, and
-  # the Wi-Fi MAC is derived from it.
-  mac=""
-  if [[ -r "${NET_DIR}/eth0/address" ]]; then
-    mac="$(cat "${NET_DIR}/eth0/address")"
-  else
-    for addr in "${NET_DIR}"/*/address; do
-      [[ "${addr}" == */lo/address || ! -r "${addr}" ]] && continue
-      mac="$(cat "${addr}")"
-      break
-    done
-  fi
-  mac="${mac//:/}"
-  if [[ "${mac}" =~ ^[0-9a-fA-F]{12}$ ]]; then
-    canary_hostname="canary-$(tr '[:upper:]' '[:lower:]' <<<"${mac: -4}")"
-  else
+  # The same rule an imaged Pi applies on its first boot.
+  # shellcheck source=lib/canary_hostname.sh
+  source "${CANARY_HOME}/scripts/lib/canary_hostname.sh"
+  if ! canary_hostname="$(canary_hostname_from_mac "${NET_DIR}")"; then
+    canary_hostname=""
     echo "WARNING: no network MAC found; keeping hostname '${current_hostname}'" >&2
   fi
 fi
@@ -791,6 +791,9 @@ systemctl enable can0.service
 systemctl enable canary.service
 systemctl enable canary-mcp.service
 systemctl enable ups-shutdown.service
+systemctl enable canary-provision.service
+systemctl enable canary-firstboot.service
+systemctl enable --now canary-update.path
 
 # The hint is only worth printing when it is true: read hardware.gps.source
 # through the project's own config loader (not a grep, which a comment or a
