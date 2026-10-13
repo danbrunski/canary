@@ -87,6 +87,14 @@ PLANT_READS: tuple[str, ...] = (
     "lambda_observation_delay",
 )
 
+#: What a ``speed_density_load_dependent`` plant reads on top (the ideal-cycle
+#: residual-gas factor, :func:`part_load_breathing_factor`).
+LOAD_DEPENDENT_READS: tuple[str, ...] = (
+    "compression_ratio",
+    "residual_expansion_exponent",
+    "exhaust_pressure_ratio",
+)
+
 FloatArray = NDArray[np.float64]
 
 #: Quantities another plant stage owns (E07.5's contract) that this plant
@@ -105,11 +113,32 @@ COMPUTES_INTERNALLY: tuple[str, ...] = ("manifold_pressure",)
 #: * ``speed_density_refusing`` (E07.5 reconciliation): VE(rpm) from the
 #:   baseline's fitted curve, and a sample whose steady MAP would exceed baro is
 #:   NaN with ``manifold_above_ambient`` -- the stage's own refusal, never a cap.
-ManifoldModel = Literal["speed_density_capped", "speed_density_refusing"]
+#: * ``speed_density_load_dependent`` (fuel-mv-3): the same fitted VE(rpm) as
+#:   the full-breathing value, scaled at part load by the ideal-cycle residual
+#:   gas factor (:func:`part_load_breathing_factor`), so VE falls with manifold
+#:   pressure; MAP solves ``charge fraction = VE(rpm, MAP) x MAP / baro`` and
+#:   refuses as ``speed_density_refusing`` does.
+ManifoldModel = Literal[
+    "speed_density_capped", "speed_density_refusing", "speed_density_load_dependent"
+]
 MANIFOLD_MODELS: dict[str, tuple[str, ...]] = {
     "speed_density_capped": (),
     "speed_density_refusing": ("manifold_at_or_below_ambient",),
+    "speed_density_load_dependent": ("manifold_at_or_below_ambient",),
 }
+#: Forms that run a fitted VE(rpm) and refuse MAP above ambient per sample.
+REFUSING_MODELS: frozenset[str] = frozenset(
+    {"speed_density_refusing", "speed_density_load_dependent"}
+)
+
+
+def plant_reads(manifold_model: str) -> tuple[str, ...]:
+    """The registry parameters one manifold form reads."""
+    if manifold_model == "speed_density_load_dependent":
+        return PLANT_READS + LOAD_DEPENDENT_READS
+    return PLANT_READS
+
+
 #: Per-sample MAP refusals of ``speed_density_refusing``, by name.
 MAP_ABOVE_AMBIENT = "manifold_above_ambient"
 MAP_OUTSIDE_VE_FIT = "outside_ve_fit"
@@ -545,7 +574,8 @@ class FuelPlantProfile(_Strict):
     plant_version: str = Field(min_length=1)
     #: How this version computes MAP (:data:`MANIFOLD_MODELS`).
     manifold_model: ManifoldModel = "speed_density_capped"
-    #: The VE(rpm) fit rule; required by, and only by, ``speed_density_refusing``.
+    #: The VE(rpm) fit rule; required by, and only by, a refusing form
+    #: (:data:`REFUSING_MODELS`).
     volumetric_efficiency: VeFitRule | None = None
     #: A labelled synthetic plant (tests and demonstrations): it is identified
     #: and scored only on ``_sim-*`` traces, and a real plant refuses them
@@ -589,12 +619,20 @@ class FuelPlantProfile(_Strict):
             )
         if self.specs.reference_phi not in commands:
             raise ValueError("reference_phi must be one of the declared command_specs")
-        refusing = self.manifold_model == "speed_density_refusing"
+        refusing = self.manifold_model in REFUSING_MODELS
         if refusing != (self.volumetric_efficiency is not None):
             raise ValueError(
                 "volumetric_efficiency (the VE fit rule) is declared by, and only by, a "
                 "speed_density_refusing plant"
             )
+        declared = {p.id: p for p in self.registry.parameters}
+        missing = [p for p in plant_reads(self.manifold_model) if p not in declared]
+        if missing:
+            raise ValueError(
+                f"{self.manifold_model} reads parameters the registry does not declare: {missing}"
+            )
+        if self.manifold_model == "speed_density_load_dependent":
+            _check_breathing_form(declared)
         if self.baseline is not None:
             curve = self.baseline.ve_curve
             if refusing and (
@@ -612,12 +650,11 @@ class FuelPlantProfile(_Strict):
                 raise ValueError("baseline was identified on another plant_version")
             if self.baseline.hardware_configuration != self.hardware_configuration:
                 raise ValueError("baseline belongs to another hardware configuration")
+            reads = plant_reads(self.manifold_model)
             identifiable = {
                 p.id
                 for p in self.registry.parameters
-                if p.status == "identifiable"
-                and p.id in PLANT_READS
-                and p.working_assumption is None
+                if p.status == "identifiable" and p.id in reads and p.working_assumption is None
             }
             if set(self.baseline.values) != identifiable:
                 raise ValueError(
@@ -658,6 +695,29 @@ class FuelPlantProfile(_Strict):
 
     def spent(self) -> dict[str, SpentRecord]:
         return {r.recording: r for r in self.spent_held_out}
+
+
+def _check_breathing_form(declared: Mapping[str, PlantParameter]) -> None:
+    """The residual-gas factor's inputs: geometry and physics are known (they
+    carry no fitted error), the exhaust back-pressure is an assumption with a
+    bracket, and the form is defined at every bracket end."""
+    for pid in ("compression_ratio", "residual_expansion_exponent"):
+        if declared[pid].status != "known":
+            raise ValueError(f"{pid} is a geometry or physics fact here: status known")
+    rc = declared["compression_ratio"].value
+    n = declared["residual_expansion_exponent"].value
+    assert rc is not None and n is not None
+    if not (rc > 1.0 and n > 0.0):
+        raise ValueError(f"compression ratio {rc} must exceed 1 and exponent {n} be positive")
+    pe = declared["exhaust_pressure_ratio"]
+    if pe.working_assumption is None:
+        raise ValueError("exhaust_pressure_ratio runs under a bracketed working assumption")
+    for end in pe.working_assumption.bracket:
+        if not 0.0 < end < rc**n:
+            raise ValueError(
+                f"exhaust_pressure_ratio {end}: the residual gas would fill the cylinder at "
+                "ambient intake pressure"
+            )
 
 
 @functools.lru_cache(maxsize=32)
@@ -911,16 +971,117 @@ def manifold_pressure_ve_curve(
         p_kpa = _f(air_g) / 1000.0 * R_AIR * (_f(iat_c) + KELVIN) / (ve * v_m3) / 1000.0
     baro = _f(baro_kpa)
     iat = _f(iat_c)
-    outside = (
-        ~np.isfinite(ve)
-        | ~((baro >= curve.baro_kpa[0]) & (baro <= curve.baro_kpa[1]))
-        | ~((iat >= curve.iat_c[0]) & (iat <= curve.iat_c[1]))
-    )
+    outside = _outside_ve_fit(ve, baro, iat, curve)
     above = ~outside & (p_kpa > baro * (1.0 + AMBIENT_ROUNDING))
     reason = np.full(p_kpa.shape, "", dtype="<U32")
     reason[above] = MAP_ABOVE_AMBIENT
     reason[outside] = MAP_OUTSIDE_VE_FIT
     return np.where(above | outside, np.nan, p_kpa), reason
+
+
+def _outside_ve_fit(
+    ve: FloatArray, baro: FloatArray, iat: FloatArray, curve: VeCurve
+) -> NDArray[np.bool_]:
+    out: NDArray[np.bool_] = (
+        ~np.isfinite(ve)
+        | ~((baro >= curve.baro_kpa[0]) & (baro <= curve.baro_kpa[1]))
+        | ~((iat >= curve.iat_c[0]) & (iat <= curve.iat_c[1]))
+    )
+    return out
+
+
+def part_load_breathing_factor(
+    pressure_ratio: ArrayLike,
+    *,
+    compression_ratio: float,
+    exhaust_ratio: float,
+    exponent: float,
+) -> FloatArray:
+    """VE at intake pressure ``x = MAP / baro`` relative to VE at ``x = 1``.
+
+    The ideal-cycle residual-gas form: at TDC the clearance volume ``V_c``
+    holds exhaust at ``p_e``; it expands to the intake pressure ``p_i`` and
+    occupies ``V_c (p_e / p_i)^(1/n)``, so the fresh charge per displacement
+    is ``eta = (r_c - (p_e / p_i)^(1/n)) / (r_c - 1)``. Here ``p_e / p_i =
+    exhaust_ratio / x`` (exhaust pressure as a ratio of baro) and the result is
+    normalised to ``eta`` at ``x = 1``, so the fitted full-breathing VE(rpm)
+    is unchanged there. It falls as the manifold empties (the residual takes
+    more of the cylinder) and is 0 where the residual alone fills it. A
+    geometry/physics form, not a fit: overlap backflow and throttling losses
+    beyond it are not modelled."""
+    x = _f(pressure_ratio)
+    rc, pe, n = compression_ratio, exhaust_ratio, exponent
+
+    def eta(r: FloatArray) -> FloatArray:
+        with np.errstate(divide="ignore", invalid="ignore"):
+            out: FloatArray = (rc - (pe / r) ** (1.0 / n)) / (rc - 1.0)
+        return out
+
+    full = float(eta(np.array([1.0]))[0])
+    if not full > 0:
+        raise FuelPlantRefusalError(
+            "breathing_form_invalid", "the residual gas fills the cylinder at ambient pressure"
+        )
+    with np.errstate(invalid="ignore"):
+        return np.where(x > 0, np.maximum(eta(np.where(x > 0, x, 1.0)), 0.0) / full, 0.0)
+
+
+#: Bisection steps of :func:`manifold_pressure_load_dependent` (2^-80 of the
+#: bracket: far below float resolution).
+_BISECTION_STEPS = 80
+
+
+def manifold_pressure_load_dependent(
+    air_g: ArrayLike,
+    rpm: ArrayLike,
+    iat_c: ArrayLike,
+    baro_kpa: ArrayLike,
+    geometry: Geometry,
+    curve: VeCurve,
+    floor: float,
+    *,
+    compression_ratio: float,
+    exhaust_ratio: float,
+    exponent: float,
+) -> tuple[FloatArray, NDArray[np.str_]]:
+    """Steady speed-density MAP with a load-dependent VE, kPa, and a per-sample refusal.
+
+    Solves ``charge fraction = VE(rpm) x f(x) x x`` for ``x = MAP / baro``,
+    ``f`` the :func:`part_load_breathing_factor`. The right side rises
+    monotonically in ``x`` (both factors do), so the root is unique; it is
+    bracketed between where ``f`` reaches 0 and ``x = 1``. A charge fraction
+    above VE(rpm) needs ``x > 1``: NaN with :data:`MAP_ABOVE_AMBIENT`, as
+    :func:`manifold_pressure_ve_curve` refuses it; an rpm, baro or IAT outside
+    the fit is :data:`MAP_OUTSIDE_VE_FIT`. With an infinite compression ratio
+    ``f = 1`` and this is :func:`manifold_pressure_ve_curve`."""
+    if not floor > 0:
+        raise FuelPlantRefusalError("ve_nonpositive", "volumetric efficiency must be > 0")
+    form = dict(compression_ratio=compression_ratio, exhaust_ratio=exhaust_ratio, exponent=exponent)
+    part_load_breathing_factor([1.0], **form)  # refuses an undefined form
+    ve = curve.ve(rpm, floor)
+    v_m3 = geometry.cylinder_volume_l / 1000.0
+    baro = _f(baro_kpa)
+    iat = _f(iat_c)
+    p_full = _f(air_g) / 1000.0 * R_AIR * (iat + KELVIN) / v_m3 / 1000.0
+    with np.errstate(invalid="ignore", divide="ignore"):
+        target = p_full / baro / ve
+    outside = _outside_ve_fit(ve, baro, iat, curve)
+    above = ~outside & (target > 1.0 + AMBIENT_ROUNDING)
+    solve = ~outside & ~above & np.isfinite(target)
+    x_zero = exhaust_ratio / compression_ratio**exponent
+    lo = np.full(target.shape, x_zero)
+    hi = np.ones(target.shape)
+    t = np.where(solve, np.minimum(target, 1.0), 0.0)
+    for _ in range(_BISECTION_STEPS):
+        mid = (lo + hi) / 2.0
+        under = part_load_breathing_factor(mid, **form) * mid < t
+        lo = np.where(under, mid, lo)
+        hi = np.where(under, hi, mid)
+    p_kpa = np.where(solve, (lo + hi) / 2.0 * baro, np.nan)
+    reason = np.full(p_kpa.shape, "", dtype="<U32")
+    reason[above] = MAP_ABOVE_AMBIENT
+    reason[outside] = MAP_OUTSIDE_VE_FIT
+    return p_kpa, reason
 
 
 def injector_delta_p_kpa(
@@ -996,7 +1157,7 @@ def resolve_parameters(
     values: dict[str, float] = {}
     effects: list[str] = []
     rail_effect = ""
-    for pid in PLANT_READS:
+    for pid in plant_reads(profile.manifold_model):
         p = profile.registry.get(pid)
         if pid == "lambda_observation_delay":
             wa = p.working_assumption
@@ -1039,7 +1200,7 @@ def resolve_parameters(
         )
     sha = "" if for_identification or baseline is None else baseline.sha256()
     curve: VeCurve | None = None
-    if profile.manifold_model == "speed_density_refusing":
+    if profile.manifold_model in REFUSING_MODELS:
         if ve_curve is not None and not for_identification:
             raise FuelPlantRefusalError(
                 "ve_curve_not_frozen", "outside identification VE(rpm) comes from the baseline"
@@ -1108,6 +1269,20 @@ def predict(inputs: PlantInputs, params: ResolvedParameters, geometry: Geometry)
     refusal: NDArray[np.str_] | None = None
     if inputs.map_kpa is not None:
         map_kpa = _f(inputs.map_kpa)
+    elif params.manifold_model == "speed_density_load_dependent":
+        assert params.ve_curve is not None
+        map_kpa, refusal = manifold_pressure_load_dependent(
+            air,
+            inputs.rpm,
+            inputs.iat_c,
+            inputs.baro_kpa,
+            geometry,
+            params.ve_curve,
+            v["manifold_pressure"],
+            compression_ratio=v["compression_ratio"],
+            exhaust_ratio=v["exhaust_pressure_ratio"],
+            exponent=v["residual_expansion_exponent"],
+        )
     elif params.manifold_model == "speed_density_refusing":
         assert params.ve_curve is not None
         map_kpa, refusal = manifold_pressure_ve_curve(
@@ -1203,7 +1378,7 @@ def plant_qualification(profile: FuelPlantProfile) -> Qualification:
 def sensitivity_cases(profile: FuelPlantProfile, delay: B06Rules) -> dict[str, dict[str, float]]:
     """One override set per bracket end of every working assumption."""
     cases: dict[str, dict[str, float]] = {}
-    for pid in PLANT_READS:
+    for pid in plant_reads(profile.manifold_model):
         p = profile.registry.get(pid)
         if pid == "lambda_observation_delay":
             lo, hi = delay.bracket

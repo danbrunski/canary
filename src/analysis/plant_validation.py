@@ -612,6 +612,34 @@ def build_case_samples(
     return frame
 
 
+def load_input_pairing(samples: pd.DataFrame, case: InterventionCase) -> dict[str, Any]:
+    """How many eligible reads carry the case's load input, paired within its
+    tolerance. Every effect test matches pairs on the load input, so a side
+    with eligible reads and none paired can form no pair at all -- an empty
+    result that must say which kind of empty it is."""
+    eligible = samples[samples["state"] == "eligible"] if len(samples) else samples
+    if "load_input" in eligible:
+        paired = int(np.isfinite(eligible["load_input"].to_numpy(dtype=float)).sum())
+    else:
+        paired = 0
+    return {
+        "channel": case.load_input,
+        "tolerance_s": case.load_input_pair_tolerance_s,
+        "eligible_reads": len(eligible),
+        "paired": paired,
+    }
+
+
+def _unpaired_reason(side: str, pairing: dict[str, Any]) -> str | None:
+    if not pairing["eligible_reads"] or pairing["paired"]:
+        return None
+    return (
+        f"load_input_unpaired: {side}: 0 of {pairing['eligible_reads']} eligible reads have "
+        f"{pairing['channel']} within {pairing['tolerance_s']} s, so no pair can be matched "
+        "on the load input"
+    )
+
+
 def _span(frame: pd.DataFrame) -> tuple[float, float]:
     t = frame["t"].to_numpy(dtype=float)
     return float(np.nanmin(t)), float(np.nanmax(t))
@@ -926,11 +954,11 @@ def lambda_effect_test(
     ltft_state = _ltft_state(post_o["ltft_pct"].to_numpy(dtype=float), policy)
     counts = {str(k): int(v) for k, v in pd.Series(ltft_state).value_counts().items()}
     usable = post_o[ltft_state == "reset_holds"].reset_index(drop=True)
-    lo, hi = predictor(
-        usable["load_input"].to_numpy(dtype=float), usable["rpm"].to_numpy(dtype=float)
-    )
+    load = usable["load_input"].to_numpy(dtype=float)
+    counts["load_input_unpaired"] = int((~np.isfinite(load)).sum())
+    lo, hi = predictor(load, usable["rpm"].to_numpy(dtype=float))
     predicted = np.isfinite(lo)
-    counts["not_predicted"] = int((~predicted).sum())
+    counts["not_predicted"] = int((~predicted & np.isfinite(load)).sum())
     usable = usable[predicted].reset_index(drop=True)
     lo, hi = lo[predicted], hi[predicted]
     i, j = match_pairs(usable, pre_o, case.matching)
@@ -1003,11 +1031,11 @@ def trim_effect_test(
     ltft_state = _ltft_state(post_c["ltft_pct"].to_numpy(dtype=float), policy)
     counts = {str(k): int(v) for k, v in pd.Series(ltft_state).value_counts().items()}
     usable = post_c[ltft_state == "reset_holds"].reset_index(drop=True)
-    lo, hi = predictor(
-        usable["load_input"].to_numpy(dtype=float), usable["rpm"].to_numpy(dtype=float)
-    )
+    load = usable["load_input"].to_numpy(dtype=float)
+    counts["load_input_unpaired"] = int((~np.isfinite(load)).sum())
+    lo, hi = predictor(load, usable["rpm"].to_numpy(dtype=float))
     predicted = np.isfinite(lo)
-    counts["not_predicted"] = int((~predicted).sum())
+    counts["not_predicted"] = int((~predicted & np.isfinite(load)).sum())
     usable = usable[predicted].reset_index(drop=True)
     lo, hi = lo[predicted], hi[predicted]
     i, j = match_pairs(usable, pre_c, case.matching)
@@ -1112,6 +1140,14 @@ def evaluate_intervention(
     post_report, post_samples = replay_report(post, profile, delay)
     if not post or not post_report.get("n_reads"):
         pending.append("no_post_change_data: no recording after the flash is in this split")
+    pairing = {
+        side: load_input_pairing(frame, case)
+        for side, frame in (("pre", pre_samples), ("post", post_samples))
+    }
+    for side, summary in pairing.items():
+        why = _unpaired_reason(side, summary)
+        if why is not None:
+            pending.append(why)
     if len(post_samples):
         post_samples = post_samples.assign(
             ltft_state=_ltft_state(
@@ -1170,6 +1206,7 @@ def evaluate_intervention(
         },
         "baseline_reproduction": pre_report,
         "post_change_replay": post_report,
+        "load_input_pairing": pairing,
         "effect_tests": tests,
         "learned_state": case.learned_state.model_dump(),
         "base_image_sha256": case.base_image_sha256,
@@ -1198,6 +1235,7 @@ __all__ = [
     "PredictionOfRecord",
     "acceptance_checks",
     "band_predictor",
+    "load_input_pairing",
     "build_case_samples",
     "check_one_plant",
     "evaluate_intervention",

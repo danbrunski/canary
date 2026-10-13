@@ -631,6 +631,22 @@ class StateInit(_Strict):
     #: Events that reset the state (each declared under ``events``).
     reset_on: list[str] = Field(default_factory=list)
     note: str = Field(min_length=1)
+    #: Manifest nodes a ``steady_state`` initialisation stands for: the
+    #: dynamic terms (filters, transients) whose settled value the quantity's
+    #: implemented fixed point already is. Each must lie upstream of the
+    #: quantity's ``manifest_node`` (:func:`check_against_application_model`);
+    #: a consumer may treat them as computed only where the change under study
+    #: does not itself reach them.
+    absorbs: list[str] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def _absorbs(self) -> StateInit:
+        if self.absorbs and self.method != "steady_state":
+            raise ValueError(
+                f"only a steady_state initialisation absorbs dynamic nodes, not {self.method}"
+            )
+        _unique("absorbed node", self.absorbs)
+        return self
 
 
 class Assignment(_Strict):
@@ -1121,6 +1137,49 @@ def check_against_application_model(contract: SimContract, model: ApplicationMod
                 problems.append(f"{q.id}: manifest node {q.manifest_node!r} is not declared")
             elif rep is None or rep.ram is None or rep.ram not in node.writes:
                 problems.append(f"{q.id}: {q.manifest_node} does not write its RAM word")
+    problems.extend(_check_absorbed(contract, nodes))
+    return problems
+
+
+def _upstream(nodes: dict[str, Any], start: str) -> set[str]:
+    """Every manifest node ``start`` depends on, transitively."""
+    seen: set[str] = set()
+    stack = list(nodes[start].depends_on)
+    while stack:
+        node_id = stack.pop()
+        if node_id in seen or node_id not in nodes:
+            continue
+        seen.add(node_id)
+        stack.extend(nodes[node_id].depends_on)
+    return seen
+
+
+def _check_absorbed(contract: SimContract, nodes: dict[str, Any]) -> list[str]:
+    """A steady fixed point absorbs only dynamics that feed its own quantity,
+    and only when the manifest implements that quantity's node: an absorbed
+    filter on another path, or a fixed point nothing computes, is a claim
+    without a computation behind it."""
+    problems: list[str] = []
+    for mode in contract.modes:
+        for qid, assignment in mode.roles.items():
+            init = assignment.init
+            if init is None or not init.absorbs:
+                continue
+            node_id = contract.quantity(qid).manifest_node
+            if node_id is None or node_id not in nodes:
+                problems.append(f"{mode.id}.{qid}: absorbs nodes but has no manifest node")
+                continue
+            if nodes[node_id].twin != "implemented":
+                problems.append(
+                    f"{mode.id}.{qid}: absorbs into {node_id}, which the manifest does not "
+                    "implement (no fixed point is computed)"
+                )
+            upstream = _upstream(nodes, node_id)
+            for absorbed in init.absorbs:
+                if absorbed not in upstream:
+                    problems.append(
+                        f"{mode.id}.{qid}: absorbed {absorbed!r} is not upstream of {node_id}"
+                    )
     return problems
 
 

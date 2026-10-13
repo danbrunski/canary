@@ -490,6 +490,53 @@ supercharger is a hardware intervention with a new plant parameter set.
         flow), on 614 of the 841 spent-drive reads.
       - Recorded in the contract's `parameter_fits` evidence and in
         `fuel_plant_mv2.yaml`.
+  - **fuel-mv-3: a load-dependent VE (2026-10-13, desk; not yet identified).**
+    - **Where it lives.** `data/nissan-xterra-2008/fuel_plant_mv3.yaml`, beside
+      fuel-mv-1 and fuel-mv-2, which are untouched (their baseline shas still
+      pin in `tests/test_fuel_plant.py`). `manifold_model:
+      speed_density_load_dependent` (`fuel_plant.REFUSING_MODELS`), with the
+      contract's `fuel_delivery.implementation.other_plant_versions` and a
+      reconciled `internal_models` entry (invariant
+      `manifold_at_or_below_ambient`, no `parameter_fits` until a fit is
+      frozen); `check_internal_models(contract, profile)` returns `[]`.
+    - **Structure.** VE(rpm, MAP) = VE(rpm) × `part_load_breathing_factor`, the
+      ideal-cycle residual-gas form: exhaust in the clearance volume expands to
+      the manifold pressure, so the fresh charge is
+      (r_c − (p_e/p_m)^(1/n)) / (r_c − 1), normalised at MAP = baro so the fitted
+      full-breathing VE(rpm) (fuel-mv-2's rule, restated unchanged) holds there.
+      `manifold_pressure_load_dependent` solves charge fraction = VE(rpm) ×
+      f(x) × x for x = MAP/baro by bisection (the right side is monotone) and
+      refuses above ambient / outside the fit as fuel-mv-2 does. It is physics,
+      not a fit: only VE × MAP is identifiable without a MAP sensor. Registry:
+      `compression_ratio` (known, profile fact 9.7), `residual_expansion_exponent`
+      (known, physics 1.3) and `exhaust_pressure_ratio` (working assumption
+      1.0 [1.0, 1.1], effect `exhaust_back_pressure_unmeasured`); the profile
+      refuses a missing one, a non-`known` geometry/physics value and a bracket
+      at which the residual fills the cylinder.
+    - **Idle.** Charge fraction 0.151 at 762 rpm, baro 81 kPa, IAT 30 °C: MAP
+      17.47 kPa (fuel-mv-2) → **21.84 kPa** (22.20 at exhaust 1.1 × baro;
+      21.60–22.11 over n 1.25–1.35). A warm NA idle is ~28–35 kPa, so the
+      factor closes about a third of the gap; overlap backflow and cam phasing
+      are not modelled and stay inside the floor's bracket.
+    - **Declared before any fit:** split (`declared_on: 2026-10-13`, the same
+      three identification drives, `held_out: []` with `held_out_pending`) and
+      acceptance (fuel-mv-1/2's bounds, re-declared 2026-10-13).
+    - **Tests (`tests/test_fuel_plant_mv3.py`, 7 pass):**
+      `test_fuel_mv_3_is_declared_unidentified_beside_the_frozen_versions`
+      (no baseline, `baseline_not_frozen`, `plant_not_qualified: no frozen
+      baseline`); `test_the_residual_gas_factor_and_its_limiting_cases` (1 at
+      ambient, 0 where the residual fills the cylinder, → 1 as r_c → ∞,
+      monotone, back-pressure lowers it); `test_without_residual_gas_it_is_fuel_mv_2s_map`
+      (r_c = 1e12 reproduces `manifold_pressure_ve_curve` to 1e-9, same
+      refusals); `test_the_map_solves_its_own_equation_and_never_exceeds_ambient`
+      (round trip 1e-12, MAP ≥ fuel-mv-2's, baro at the envelope, refused
+      above and outside); `test_idle_map_moves_toward_a_warm_na_idle`;
+      `test_the_breathing_form_is_declared_never_fitted`;
+      `test_identification_then_a_frozen_baseline_predicts` (the identify →
+      freeze → predict path on the committed slice relabelled with a synthetic
+      0.05 g/ms lambda: recovers 0.05, and λ = air/(s·f(dP)·Te) recomputed
+      term by term to 1e-12). These are structure and unit checks; nothing
+      was fitted to the truck and no drive was scored.
   - **Remaining:**
     1. A revised plant structure, with a new `plant_version`, a new baseline
        and newly declared bounds. The in-sample failure points at the
@@ -503,9 +550,19 @@ supercharger is a hardware intervention with a new plant parameter set.
        held-out drive. Still owed:
        - the idle/short-pulse and 10–40 g/s structure;
        - the never-scored drives;
-       - a load-dependent VE. The 0.7 floor at idle gives MAP ~17.5 kPa
-         against a normal ~28–35 kPa, which overstates idle injector dP by
-         ~3 % ("Known limitation" above).
+       - ~~a load-dependent VE~~ *structure done in fuel-mv-3 (above,
+         2026-10-13)*; owed: its baseline. Run `.venv/bin/python -m
+         tools.fuel_plant_check identify --plant-version fuel-mv-3` where the
+         identification drives are (`~/canary-data`; not on the machine it was
+         declared on), freeze the result in `fuel_plant_mv3.yaml`, and add the
+         frozen VE fit's bounds as the contract's fuel-mv-3 `parameter_fits`.
+         Then `compare --plant-version fuel-mv-2 fuel-mv-3` on spent drives is
+         the per-sample diagnostic; a verdict still needs never-scored drives.
+       - the idle/short-pulse and 10–40 g/s structure was not attempted at
+         the desk: choosing it needs the in-sample residuals of the
+         identification drives (corpus) and the short-pulse correction's
+         decode (`0x9120`–`0x9126`, the disassembly), neither available
+         offline here.
     2. A tuning-profile drive that logs the AEM rail pressure with the pulse
        DID (truck). No such drive exists yet.
     3. MAP, injector flow and injector latency still require measurement.
@@ -644,6 +701,21 @@ supercharger is a hardware intervention with a new plant parameter set.
     - `test_the_split_is_by_sample_time_and_declared_first`.
     - `test_synthetic_and_recorded_never_mix`: `synthetic_mismatch`,
       `synthetic_as_observed` and `synthetic_plant_on_recording`.
+  - **Load-input pairing refuses by name (2026-10-13).** Every effect test and
+    the floor match pairs on the fill byte, so a side with eligible reads and
+    none paired within `load_input_pair_tolerance_s` can form no pair.
+    `load_input_pairing` reports per side (channel, tolerance, eligible reads,
+    paired) in `report["load_input_pairing"]`, and such a side adds
+    `load_input_unpaired: <side>: 0 of N eligible reads have <channel> within
+    <tol> s` to `pending`; inside the effect tests an unpaired read is counted
+    as `load_input_unpaired`, apart from `not_predicted`. On the committed slice
+    the real case now reads pending `plant_not_qualified`,
+    `no_post_change_data`, `load_input_unpaired` (pre: 0 of 152;
+    `test_the_real_case_is_pending_because_the_plant_failed_its_bounds`). On
+    the committed ram-study slice 0 of 192 fill-byte reads have a PID 0x0C read
+    within 0.1 s (median gap 0.87 s), and that recording has no pulse anchors
+    (E07.3: 188 `not_co_observed`), so today the case forms no load-input pair
+    on either recording type. The frozen tolerance was not changed.
   - **Remaining:**
     1. A qualified plant: E07.3's remaining items 1–3, with never-scored
        held-out drives (truck). Until then the verdict stays
@@ -970,7 +1042,8 @@ supercharger is a hardware intervention with a new plant parameter set.
     - A rollout that prescribes rpm, airflow or the trims is refused
       (`boundary_not_supplied_here`). A rollout that passes the contract is
       refused as `dynamic_plant_unbuilt` (E07.5).
-  - **BFS is a conditioning value, not a held one.** BFS formation is
+  - **BFS is a conditioning value, not a held one** *(2026-10-05; superseded
+    2026-10-13 by the steady BFS below)*. BFS formation is
     unmodelled, so the comparison is conditional on a stated BFS shared by
     both ROMs. That is allowed only where `compare_roms` shows the change does
     not reach it. A Fuel Comp edit reaches it, and every output then reads
@@ -1028,16 +1101,73 @@ supercharger is a hardware intervention with a new plant parameter set.
 
     The paired tests also pass against HEAD `e19a1c1`'s manifest and rom_map
     (E05.2 committed), in a scratch worktree.
+  - **Steady BFS per ROM and the closed-loop fixed point (2026-10-13, desk).**
+    `TOOL_VERSION` 2; the helpers are `src/analysis/paired_steady.py`.
+    - **BFS is computed, not conditioned on.** Each ROM's BFS comes from
+      `air_charge_twin.predict_steady_bfs` (E05.2's implementation of the
+      manifest's `base_fuel_schedule`) at the point's prescribed airflow (PID
+      0x10 word), rpm word and a stated fill byte `fuel_comp_load_byte`, with
+      that image's K, Fuel Comp, axes, multipliers and ceiling. It feeds X, the
+      Target AFR lookup, the pulse and the plant. A new `base_fuel_schedule`
+      output carries the word and its exact interval. Stating BFS or X is
+      refused (`conditioning_not_allowed`: computed here); the fill byte is
+      the conditioned quantity, and an edit that reaches it (a fill-curve
+      edit) gives `conditioned_on_changed_path:fuel_comp_load_byte` with no
+      candidate values.
+    - **What the steady fixed point absorbs is declared in the contract**, not
+      in code: the comparison mode's `base_fuel_schedule` `init.absorbs`
+      (`airflow_qa`, `fill_coefficient`, `manifold_fill_filter`,
+      `near_wot_flag`, `fill_transient`, `fill_blend`). `StateInit.absorbs` is
+      allowed only for `steady_state`, and `check_against_application_model`
+      refuses an absorbed node that is not upstream of the quantity's manifest
+      node, or a node the manifest does not implement. `SteadyCoverage`
+      treats `unmodelled:<absorbed>` and `observed_not_predicted:load_input_x`
+      as computed only when the change does not edit that node itself; every
+      covered reason is restated as an assumption in the result.
+    - **Closed loop runs at the trim's fixed point.** Same air, rail and
+      manifold for both ROMs, so the same delivered λ needs the same metered
+      open time: k_c = k_b·G_b/G_c (`PulsePrediction.g` now exposes G). The
+      candidate's pulse, λ and fuel equal the base's and the new
+      `fuel_trim_total_pct` output carries the change;
+      `candidate_stft_at_its_ltft_pct` gives the STFT the candidate needs at its
+      (flash-reset) LTFT. Closed-loop outputs carry
+      `closed_loop_trim_authority_undecoded` (the clamp is not decoded), so
+      they are computed but unsupported. A point whose target φ word differs
+      between the ROMs is `closed_loop_setpoint_moved`, with no candidate fuel
+      values: the A/F feedback target's relation to φ (`0xFFFF46B2`) is not
+      decoded.
+    - **Tests (`tests/test_paired_scenarios.py`, 16 pass;** the synthetic
+      image now carries the 20260920 air-charge calibration — K 28715,
+      multipliers 226/3, MAF scale 149, flat Fuel Comp 128 — so WOT BFS is
+      39,604 at 4,800 rpm/150 g/s):
+      `test_a_fuel_comp_edit_is_computed_through_steady_bfs` (+3 counts: BFS
+      × 131/128, WOT pulse +0.35 ms, λ −2.28 %, supported; ignition stays
+      traced/unevaluable, so not rankable);
+      `test_a_k_edit_moves_bfs_one_for_one` (K +5 % → BFS +5 %);
+      `test_an_edit_reaching_the_stated_fill_byte_is_unresolved`;
+      `test_a_computed_quantity_cannot_be_stated`;
+      `test_closed_loop_runs_at_the_trims_fixed_point` (cruise: pulse, λ and
+      fuel deltas 0.0, total trim 2.34 → 0.44 %);
+      `test_a_moved_closed_loop_setpoint_is_not_computed`;
+      `test_the_steady_fixed_point_covers_only_unedited_absorbed_nodes`;
+      `test_absorbed_nodes_must_feed_the_fixed_point`; and the nine earlier
+      tests, updated (the negative control is still exact, now with BFS
+      computed).
   - **Remaining:**
     1. "A known edit passes the held-out intervention test": E07.4 must reach
        `pass` (a qualified plant and post-change drives, both truck).
     2. Coupled rollout: E07.5's dynamic plant.
-    3. BFS formation, Fuel Comp and the manifold filter are not modelled, so
-       Fuel Comp/K/axis edits stay unresolved. The short-pulse correction is
-       undecoded. The injector-chain bytes are not in the manifest, so a
-       change there reads `unknown`.
-    4. Closed-loop trim response is not modelled, so closed-loop points are
-       unsupported.
+    3. *Steady BFS formation, Fuel Comp, K and its axes: done (above).* Still
+       open: off-steady BFS (the airflow pipeline and fill filters are
+       stateful, application-model `airflow_unmodelled`), the fill byte
+       (stated, not computed: `fill_byte_not_computed`), an edit to any
+       absorbed node itself (kept unresolved), the undecoded short-pulse
+       correction, and the injector-chain bytes, which are not in the manifest
+       (a change there reads `unknown`; the manifest is E05's data).
+    4. *Closed loop: steady fixed point done (above).* Still open: the trim
+       authority/clamp (until decoded every closed-loop output is
+       unsupported), the setpoint's dependence on φ, and the STFT/LTFT split
+       and settling dynamics.
 
 - [ ] **E07.7 — Integrate the simulator on the Pi through E06/E04.**
   Trial pure Rust controller and plant libraries behind a small scheduler

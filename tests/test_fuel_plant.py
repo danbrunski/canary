@@ -547,6 +547,7 @@ def test_fuel_mv_1_stays_frozen_and_fuel_mv_2_is_declared_beside_it(
     assert {v: f.name for v, f in plant_files(PROFILE).items()} == {
         "fuel-mv-1": PLANT_FILE,
         MV2: MV2_FILE,
+        "fuel-mv-3": "fuel_plant_mv3.yaml",
     }
     # fuel-mv-1: the same baseline hash its spent records were scored under.
     assert mv1.plant_version == "fuel-mv-1" and mv1.manifold_model == "speed_density_capped"

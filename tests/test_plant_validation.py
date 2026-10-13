@@ -143,7 +143,20 @@ def test_the_real_case_is_pending_because_the_plant_failed_its_bounds(
     assert [p.split(":")[0] for p in report["pending"]] == [
         "plant_not_qualified",
         "no_post_change_data",
+        "load_input_unpaired",
     ]
+    # Every effect test matches on the fill byte; with none paired on the pre
+    # side no pair or floor can form, and the case says so by name instead of
+    # reporting an empty test later.
+    assert report["load_input_pairing"]["pre"] == {
+        "channel": "mem:ECM_FUEL_COMP_X_INPUT",
+        "tolerance_s": 0.1,
+        "eligible_reads": 152,
+        "paired": 0,
+    }
+    assert any(
+        p.startswith("load_input_unpaired: pre: 0 of 152 eligible reads") for p in report["pending"]
+    )
     assert report["effect_tests"] == {}
     steady = report["baseline_reproduction"]["steady"]
     assert (steady["n_samples"], steady["n_regions"]) == (152, 38)

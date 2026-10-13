@@ -1,9 +1,11 @@
 """E07.6: paired baseline/candidate scenarios without leaking observations.
 
 Synthetic images (``tests.rom_fixtures`` noise in the Xterra's layout, with
-every constant the decodes check written in) and the real application model
-re-pinned to them. The real frozen plant runs both sides: it is not
-qualified, so nothing here can be ranked as an improvement whatever it shows.
+every constant the decodes check written in, and the air-charge calibration at
+the 20260920 tune's values so steady BFS lands where the truck's does) and the
+real application model re-pinned to them. The real frozen plant runs both
+sides: it is not qualified, so nothing here can be ranked as an improvement
+whatever it shows.
 """
 
 from __future__ import annotations
@@ -22,6 +24,7 @@ from src.analysis.fuel_plant import PLANT_FILE, FuelPlantProfile
 from src.analysis.fuel_plant_eval import identify
 from src.analysis.paired_scenarios import (
     OUTPUTS,
+    TOOL_VERSION,
     LearnedState,
     OperatingPoint,
     PairedScenario,
@@ -31,14 +34,19 @@ from src.analysis.paired_scenarios import (
     rank_as_improvement,
     run_paired,
 )
+from src.analysis.paired_steady import steady_coverage
 from src.analysis.plant_validation import InterventionVerdict
 from src.analysis.rom_effects import CellEdit, make_candidate
 from src.analysis.rom_image import sha256_hex
+from src.analysis.rom_map import load_rom_map
 from src.analysis.sim_contract import (
+    CONTRACT_FILE,
     EcuIdentity,
     PlantIdentity,
+    SimContract,
     SimulationRefusalError,
     SuppliedValue,
+    check_against_application_model,
 )
 from src.evidence.ledger import MemoryLedger, SyntheticIsolationError
 from src.evidence.records import (
@@ -83,7 +91,28 @@ def _image(model: ApplicationModel, kit_plant: Any) -> bytes:
         chain.flow_scaler,
     ):
         image[word.address : word.address + word.width] = word.value.to_bytes(word.width, "big")
+    _air_charge_calibration(image)
     return bytes(image)
+
+
+def _air_charge_calibration(image: bytearray) -> None:
+    """The steady-BFS calibration at the 20260920 tune's values (K 28715, flow
+    and speed multipliers 226/3, MAF report scale 149, BFS ceiling 255:
+    docs/ecu-firmware-analysis.md, tests/test_air_charge.py), flat Fuel Comp
+    128 on rising axes, so WOT BFS lands near the truck's ~38-40k."""
+    rom_map = load_rom_map(PROFILE)
+
+    def put(table_id: str, slot: int | None, values: list[int], width: int = 1) -> None:
+        at = rom_map.table_address(rom_map.table(table_id), slot)
+        for k, v in enumerate(values):
+            image[at + k * width : at + (k + 1) * width] = v.to_bytes(width, "big")
+
+    put("fuel_comp_engine_speed_axis", None, [8 * (i + 1) for i in range(16)])
+    put("fuel_comp_flow_axis", None, [16 * i for i in range(16)])
+    put("fuel_compensation", 1, [128] * 256)
+    put("k_constant", 1, [28715], width=2)
+    put("bfs_ceiling", None, [255] * 16)
+    image[0x89D2], image[0x88AD], image[0x83E9] = 226, 3, 149
 
 
 @pytest.fixture(scope="module")
@@ -110,7 +139,7 @@ WOT = OperatingPoint(
     map_kpa=79.0,
     throttle_pct=90.0,
     pedal_flag=0,
-    conditioned={"base_fuel_schedule": 42000.0},
+    conditioned={"fuel_comp_load_byte": 200.0},
     source="design: WOT point, E07.6 test grid",
 )
 CRUISE = dataclasses.replace(
@@ -119,7 +148,7 @@ CRUISE = dataclasses.replace(
     maf_gps=18.0,
     map_kpa=40.0,
     throttle_pct=10.0,
-    conditioned={"base_fuel_schedule": 9000.0},
+    conditioned={"fuel_comp_load_byte": 60.0},
     source="design: cruise point, E07.6 test grid",
 )
 LEARNED = LearnedState(
@@ -157,7 +186,7 @@ def _scenario(
     return PairedScenario(**fields)
 
 
-def _edit_all(image: bytes, kit: SimKit, table_id: str, slot: int, step: int) -> bytes:
+def _edit_all(image: bytes, kit: SimKit, table_id: str, slot: int | None, step: int) -> bytes:
     table = kit.rom_map.table(table_id)
     start = kit.rom_map.table_address(table, slot)
     edits = []
@@ -183,10 +212,18 @@ def test_the_negative_control_rom_reproduces_the_baseline_exactly(
         assert wot[name]["base"] == wot[name]["candidate"]
         assert wot[name]["delta"] == 0.0
     # The WOT point is open loop and supported by the slice (unqualified plant
-    # aside); the cruise point is closed loop: computed, but not supported.
+    # aside); the cruise point is closed loop: computed at the trim's fixed
+    # point, but not supported while the trim authority is undecoded.
     assert wot["delivered_lambda"]["status"] == "supported"
+    assert result.points[0]["loop"] == "open_loop" and result.points[1]["loop"] == "closed_loop"
     cruise = result.points[1]["outputs"]
-    assert "regime_unsupported:closed_loop" in cruise["delivered_lambda"]["reasons"]
+    assert cruise["delivered_lambda"]["reasons"] == ["closed_loop_trim_authority_undecoded"]
+    # BFS is computed per ROM at its steady fixed point (no stated BFS).
+    assert 38000 < wot["base_fuel_schedule"]["base"] < 42000
+    assert wot["base_fuel_schedule"]["status"] == "supported"
+    lo, hi = wot["base_fuel_schedule"]["interval"]["base"]
+    assert lo <= wot["base_fuel_schedule"]["base"] <= hi
+    assert result.provenance["tool_version"] == TOOL_VERSION == "2"
     again = run_paired(kit, _scenario(kit, image, bytes(image)), image, bytes(image))
     assert again.to_dict() == result.to_dict()
 
@@ -222,27 +259,164 @@ def test_a_target_afr_edit_is_computed_through_the_pulse_and_the_plant(
     assert any("@point1" in r and "closed_loop" in r for r in verdict["reasons"])
 
 
-def test_a_fuel_comp_edit_leaves_its_downstream_unresolved_and_unrankable(
+def test_a_fuel_comp_edit_is_computed_through_steady_bfs(
     kit_and_image: tuple[SimKit, bytes],
 ) -> None:
-    """Fuel Comp acts inside BFS, which the comparison is conditioned on: the
-    change reaches it, so nothing downstream is computed as if BFS were fixed."""
+    """Fuel Comp acts inside BFS. BFS is computed per ROM at its steady fixed
+    point, so the edit reaches X, phi, the pulse and lambda as numbers, with
+    the fill dynamics the fixed point absorbs stated, never silently held."""
     kit, image = kit_and_image
     candidate = _edit_all(image, kit, "fuel_compensation", 1, 3)
     result = run_paired(kit, _scenario(kit, image, candidate), image, candidate)
     assert {c["table"] for c in result.affected_cells} == {"fuel_compensation"}
+    wot = result.points[0]["outputs"]
+    bfs = wot["base_fuel_schedule"]
+    assert bfs["status"] == "supported"
+    # Fuel Comp 128 -> 131 scales BFS by 131/128 (within the word quantisation).
+    assert bfs["candidate"] / bfs["base"] == pytest.approx(131 / 128, rel=2e-3)
+    pulse, lam = wot["injector_pulse_ms"], wot["delivered_lambda"]
+    assert pulse["status"] == lam["status"] == "supported"
+    assert pulse["delta"] > 0 and lam["delta"] < 0
+    # Open loop: more base fuel through the same plant, lambda down by ~2.3 %.
+    assert lam["relative_delta"] == pytest.approx(-0.0228, abs=0.002)
+    assert any("absorbed" in a and "manifold_fill_filter" in a for a in result.assumptions)
+    assert any("MAF reading is the prescribed airflow" in a for a in result.assumptions)
+    assert not any(r.startswith("conditioned_on_changed_path") for r in result.unresolved)
+    # Ignition reads the moved X through trims the slice does not compute:
+    # traced, unevaluable, so the change still cannot be ranked.
+    assert result.traced_outputs["ignition_timing"]["status"] == "unevaluable"
+    assert "base_fuel_schedule_word" not in result.traced_outputs
+    verdict = rank_as_improvement(result, intervention=_minted(result, "pass"))
+    assert not verdict["rankable"]
+    assert "unsupported:ignition_timing:unevaluable" in verdict["reasons"]
+
+
+def test_a_k_edit_moves_bfs_one_for_one(kit_and_image: tuple[SimKit, bytes]) -> None:
+    kit, image = kit_and_image
+    k = CellEdit("k_constant", 0, 0, 28715 * 105 // 100, slot=1)
+    candidate = make_candidate(image, kit.rom_map, [k], base_label="synthetic").image
+    result = run_paired(kit, _scenario(kit, image, candidate, WOT), image, candidate)
+    bfs = result.points[0]["outputs"]["base_fuel_schedule"]
+    assert bfs["status"] == "supported"
+    assert bfs["candidate"] / bfs["base"] == pytest.approx(1.05, rel=2e-3)
+
+
+def test_an_edit_reaching_the_stated_fill_byte_is_unresolved(
+    kit_and_image: tuple[SimKit, bytes],
+) -> None:
+    """The fill byte is conditioned on (not computed): a fill-curve edit
+    reaches it, so nothing downstream is given as if the byte were fixed."""
+    kit, image = kit_and_image
+    candidate = _edit_all(image, kit, "fill_curve_low", None, 2)
+    result = run_paired(kit, _scenario(kit, image, candidate), image, candidate)
     for point in result.points:
         for name in OUTPUTS:
             o = point["outputs"][name]
             assert o["status"] == "unsupported"
-            assert "conditioned_on_changed_path:base_fuel_schedule" in o["reasons"]
+            assert "conditioned_on_changed_path:fuel_comp_load_byte" in o["reasons"]
             # Unsupported is not unchanged: no candidate value, no delta.
             assert o["candidate"] is None and o["delta"] is None
-    assert "conditioned_on_changed_path:base_fuel_schedule" in result.unresolved
+    # The edited node is not absorbed by the fixed point: its reason stays.
+    assert "rom:unmodelled:fuel_comp_load_byte" in result.unresolved
     assert result.coverage == dict.fromkeys(OUTPUTS, 0.0)
-    verdict = rank_as_improvement(result, intervention=_minted(result, "pass"))
-    assert not verdict["rankable"]
-    assert any(r.startswith("unsupported:delivered_lambda") for r in verdict["reasons"])
+
+
+def test_a_computed_quantity_cannot_be_stated(kit_and_image: tuple[SimKit, bytes]) -> None:
+    kit, image = kit_and_image
+    for quantity in ("base_fuel_schedule", "target_afr_x"):
+        stated = dataclasses.replace(
+            WOT, conditioned={"fuel_comp_load_byte": 200.0, quantity: 42000.0}
+        )
+        with pytest.raises(SimulationRefusalError) as err:
+            run_paired(kit, _scenario(kit, image, image, stated), image, bytes(image))
+        assert err.value.reason == "conditioning_not_allowed"
+        assert "computed here" in str(err.value)
+    missing = dataclasses.replace(WOT, conditioned={})
+    result = run_paired(kit, _scenario(kit, image, image, missing), image, bytes(image))
+    out = result.points[0]["outputs"]["base_fuel_schedule"]
+    assert "conditioning_missing:fuel_comp_load_byte" in out["reasons"]
+
+
+def test_closed_loop_runs_at_the_trims_fixed_point(kit_and_image: tuple[SimKit, bytes]) -> None:
+    """At a closed-loop point the trim absorbs a Fuel Comp edit: the same
+    metered open time, so lambda and fuel do not move and the total trim
+    carries the change, k_c = k_b x G_b / G_c."""
+    kit, image = kit_and_image
+    candidate = _edit_all(image, kit, "fuel_compensation", 1, 3)
+    result = run_paired(
+        kit,
+        _scenario(kit, image, candidate, CRUISE, candidate_events=("ecu_reflash",)),
+        image,
+        candidate,
+    )
+    point = result.points[0]
+    assert point["loop"] == "closed_loop"
+    out = point["outputs"]
+    assert out["target_phi"]["delta"] == 0.0 and out["target_phi"]["status"] == "supported"
+    assert out["base_fuel_schedule"]["delta"] > 0
+    for name in ("injector_pulse_ms", "delivered_lambda", "fuel_per_event_g"):
+        assert out[name]["delta"] == 0.0
+    trim = out["fuel_trim_total_pct"]
+    # The base runs at its stated trims (0 + 2.34 %); the candidate's total
+    # falls by about the BFS increase net of the ECM's pressure correction.
+    assert trim["base"] == pytest.approx(2.34, abs=0.01)
+    assert -2.4 < trim["delta"] < -1.5
+    for name in ("injector_pulse_ms", "fuel_trim_total_pct", "delivered_lambda"):
+        assert out[name]["reasons"] == ["closed_loop_trim_authority_undecoded"]
+    # The flash reset LTFT to 0: the STFT carries the whole total until it relearns.
+    assert point["candidate_stft_at_its_ltft_pct"] == pytest.approx(trim["candidate"])
+    assert any(a.startswith("closed loop:") for a in result.assumptions)
+
+
+def test_a_moved_closed_loop_setpoint_is_not_computed(
+    kit_and_image: tuple[SimKit, bytes],
+) -> None:
+    """A target edit at a closed-loop cell moves the commanded phi; the A/F
+    feedback setpoint's relation to it is undecoded, so the candidate's fuel
+    side is refused by name instead of computed at the stated trims."""
+    kit, image = kit_and_image
+    candidate = _edit_all(image, kit, "fuel_targets", 1, 4)
+    result = run_paired(kit, _scenario(kit, image, candidate, CRUISE), image, candidate)
+    point = result.points[0]
+    assert point["loop"] == "closed_loop_setpoint_moved"
+    out = point["outputs"]
+    assert out["target_phi"]["delta"] != 0.0
+    for name in ("injector_pulse_ms", "fuel_trim_total_pct", "delivered_lambda"):
+        assert "closed_loop_setpoint_moved" in out[name]["reasons"]
+        assert out[name]["candidate"] is None and out[name]["delta"] is None
+
+
+def test_the_steady_fixed_point_covers_only_unedited_absorbed_nodes(
+    kit_and_image: tuple[SimKit, bytes],
+) -> None:
+    kit, _ = kit_and_image
+    cov = steady_coverage(kit.contract, "conditional_rom_comparison", ["fuel_comp_lookup"])
+    assert cov.absorbed >= {"manifold_fill_filter", "fill_transient", "airflow_qa"}
+    assert cov.covers("unmodelled:fill_blend")
+    assert cov.covers("observed_not_predicted:load_input_x")
+    assert not cov.covers("unmodelled:fuel_comp_load_byte")
+    assert not cov.covers("unmodelled:final_command_word")
+    assert not cov.covers("outside_decode:fill_blend")
+    edited = steady_coverage(kit.contract, "conditional_rom_comparison", ["fill_coefficient"])
+    assert not edited.covers("unmodelled:fill_coefficient")
+
+
+def test_absorbed_nodes_must_feed_the_fixed_point(kit_and_image: tuple[SimKit, bytes]) -> None:
+    """The contract's absorbs list is checked against the manifest: an absorbed
+    node off BFS's upstream graph is a claim with no computation behind it."""
+    kit, _ = kit_and_image
+    assert check_against_application_model(kit.contract, kit.model) == []
+    raw = yaml.safe_load((PROFILE / CONTRACT_FILE).read_text())
+    mode = next(m for m in raw["modes"] if m["id"] == "conditional_rom_comparison")
+    mode["roles"]["base_fuel_schedule"]["init"]["absorbs"].append("timing_rate_limit")
+    contract = SimContract.model_validate(raw)
+    assert check_against_application_model(contract, kit.model) == [
+        "conditional_rom_comparison.base_fuel_schedule: absorbed 'timing_rate_limit' is not "
+        "upstream of base_fuel_schedule"
+    ]
+    mode["roles"]["base_fuel_schedule"]["init"]["method"] = "prescribed"
+    with pytest.raises(ValueError, match="only a steady_state initialisation absorbs"):
+        SimContract.model_validate(raw)
 
 
 def test_the_flash_resets_the_learned_trim_on_the_candidate_only(

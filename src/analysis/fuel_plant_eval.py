@@ -52,6 +52,7 @@ from src.analysis.engine_dynamics import breathing_samples
 from src.analysis.fuel_plant import (
     MAP_ABOVE_AMBIENT,
     MAP_OUTSIDE_VE_FIT,
+    REFUSING_MODELS,
     B06Rules,
     FloatArray,
     FuelPlantProfile,
@@ -433,7 +434,7 @@ def apply_manifold_refusals(
     never refuses), so fuel-mv-1's samples are bit-identical. Otherwise each
     eligible read whose MAP is refused takes the refusal as its state; regions
     keep their ids (a refused read drops out of its region)."""
-    if params.manifold_model != "speed_density_refusing" or not len(frame):
+    if params.manifold_model not in REFUSING_MODELS or not len(frame):
         return frame
     eligible = (frame["state"] == "eligible").to_numpy()
     if not eligible.any():

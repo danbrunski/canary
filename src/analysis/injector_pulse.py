@@ -177,6 +177,9 @@ class PulsePrediction:
     pressure_word: Int
     #: The ECM's vacuum estimate, kPa.
     vacuum_kpa: NDArray[np.float64]
+    #: ``G``: the untrimmed metering word the trims multiply (``Ti - Ts =
+    #: (G x k) >> 16``). A closed-loop fixed point holds ``G x k`` (E07.6).
+    g: Int | None = None
 
     @property
     def effective(self) -> Int:
@@ -211,5 +214,9 @@ def predict_pulse(
     pulse = ((g * k) >> 16) + ts
     ts = np.broadcast_to(ts, pulse.shape).copy()
     return PulsePrediction(
-        pulse=pulse, dead_time=ts, pressure_word=w1800, vacuum_kpa=vac.astype(float) / 512.0
+        pulse=pulse,
+        dead_time=ts,
+        pressure_word=w1800,
+        vacuum_kpa=vac.astype(float) / 512.0,
+        g=np.broadcast_to(g, pulse.shape).copy(),
     )

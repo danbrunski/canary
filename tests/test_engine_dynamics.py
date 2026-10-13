@@ -450,7 +450,11 @@ def test_the_fuel_plants_own_map_is_a_declared_exception(kit: Any) -> None:
     entries = {
         tuple(im.plant_versions): im for im in contract.subsystem("fuel_delivery").internal_models
     }
-    assert set(entries) == {("fuel-mv-1",), ("fuel-mv-2",)}
+    assert set(entries) == {("fuel-mv-1",), ("fuel-mv-2",), ("fuel-mv-3",)}
+    # fuel-mv-3 (load-dependent VE) is reconciled too, with no fit until identified.
+    mv3 = entries[("fuel-mv-3",)]
+    assert mv3.reconciled_by and mv3.invariants == ["manifold_at_or_below_ambient"]
+    assert mv3.parameter_fits == []
     owed, reconciled = entries[("fuel-mv-1",)], entries[("fuel-mv-2",)]
     for im in (owed, reconciled):
         assert (im.quantity, im.owner, im.modes) == (
@@ -521,7 +525,7 @@ def test_a_reconciliation_is_held_by_the_plant_not_stated(kit: Any) -> None:
         "fuel_delivery: fuel-mv-2 has 0 internal-model entries for manifold_pressure (exactly one)"
     ]
     raw = _raw()
-    _sub(raw, "fuel_delivery")["internal_models"][1]["plant_versions"] = ["fuel-mv-3"]
+    _sub(raw, "fuel_delivery")["internal_models"][1]["plant_versions"] = ["fuel-mv-9"]
     with pytest.raises(ValidationError, match="does not declare"):
         SimContract.model_validate(raw)
     raw = _raw()
