@@ -322,6 +322,35 @@ CANARY_INSTALL_GPS_STACK="${CANARY_INSTALL_GPS_STACK:-1}"
 CANARY_GPS_DEVICE="${CANARY_GPS_DEVICE:-}"
 GPS_STACK_INSTALLED=0
 
+# The HAT receiver's UART speed and measurement period, set on every attach
+# (below). 100 ms is the 10 Hz the roadmap asks of the HAT's GNSS (H03.4).
+CANARY_HAT_GPS_BAUD="${CANARY_HAT_GPS_BAUD:-115200}"
+CANARY_HAT_GPS_RATE_MS="${CANARY_HAT_GPS_RATE_MS:-100}"
+# Both land in a unit file and in arithmetic, so they must be plain numbers.
+# 25 ms is UBX CFG-RATE-MEAS's floor; 1000 ms is the receiver's power-up 1 Hz.
+if [[ ! "${CANARY_HAT_GPS_BAUD}" =~ ^[1-9][0-9]*$ ]]; then
+  echo "REFUSING: CANARY_HAT_GPS_BAUD=${CANARY_HAT_GPS_BAUD} is not a baud rate." >&2
+  exit 1
+fi
+if [[ ! "${CANARY_HAT_GPS_RATE_MS}" =~ ^[1-9][0-9]*$ ]] \
+    || ((CANARY_HAT_GPS_RATE_MS < 25 || CANARY_HAT_GPS_RATE_MS > 1000)); then
+  echo "REFUSING: CANARY_HAT_GPS_RATE_MS=${CANARY_HAT_GPS_RATE_MS} is not a 25-1000 ms measurement period." >&2
+  exit 1
+fi
+# At 9600 baud a *1 Hz* epoch of the M10's NMEA already overflowed its transmit
+# buffer and its time ran ~14 s late (2026-10-04, H03.4). Faster than 1 Hz needs
+# 38400 or more, which is H03.4's floor for 10 Hz of the sentences gpsd reads.
+if ((CANARY_HAT_GPS_RATE_MS < 1000 && CANARY_HAT_GPS_BAUD < 38400)); then
+  echo "REFUSING: CANARY_HAT_GPS_BAUD=${CANARY_HAT_GPS_BAUD} cannot carry a ${CANARY_HAT_GPS_RATE_MS} ms GNSS rate." >&2
+  echo "  At 9600 baud even 1 Hz overflowed the receiver (\`txbuf alloc\`, time ~14 s late)." >&2
+  echo "  Use 38400 or higher, or CANARY_HAT_GPS_RATE_MS=1000." >&2
+  exit 1
+fi
+# The receiver both HAT revisions carry, a u-blox MAX-M10M, speaks UBX protocol
+# 34 (SPG 5.x). ubxtool needs it to send CFG-VALSET, the M10's only way to
+# configure: it has no legacy CFG-RATE/CFG-MSG.
+HAT_GNSS_UBX_PROTVER=34
+
 if [[ "${CANARY_INSTALL_GPS_STACK}" == "1" ]] && command -v apt-get >/dev/null 2>&1; then
   echo "Installing GPS + time-sync stack (gpsd, chrony)..."
   GPS_STACK_INSTALLED=1
@@ -445,14 +474,31 @@ EOF
     # 2026-10-04 one try sat for minutes, and a oneshot unit has no start
     # timeout, so the loop never reached its next try. Each try is killed at
     # 20 s, which bounds the loop at ~3.5 min.
+    #
+    # Then the measurement rate (H03.4), lost at a power cut for the same
+    # reason: UBX CFG-VALSET into RAM (layer 1) through gpsd with ubxtool. Only
+    # once the speed is set: 10 Hz at the power-up 9600 baud is the overflow
+    # above ten times over. GSV goes first, to one in every 1000/rate epochs
+    # (1 Hz): its 14 lines are most of an epoch's NMEA, and ten of those a
+    # second (~10k chars/s by the 9600-baud overflow's growth) would nearly
+    # fill 115200 baud's ~11.5k, or overfill it with more satellites in view.
+    # gpsd reads TPV from RMC/GGA, not GSV, so the fix still comes every epoch.
     if [[ -n "${hat_product}" && "${hat_product}" == CANary-HAT* \
           && "${CANARY_GPS_DEVICE}" == /dev/ttyAMA* ]]; then
       _gps_unit="canary-gpsd@${CANARY_GPS_DEVICE#/dev/}.service"
+      _gsv_every=$((1000 / CANARY_HAT_GPS_RATE_MS))
+      _ubxtool="/usr/bin/timeout -s KILL 20 /usr/bin/ubxtool -P ${HAT_GNSS_UBX_PROTVER}"
+      _ubx_target="localhost:2947:${CANARY_GPS_DEVICE}"
       install -d -m 0755 "${UNIT_DIR}/${_gps_unit}.d"
       write_managed gpsd "${UNIT_DIR}/${_gps_unit}.d/canary-baud.conf" <<EOF
-# Managed by canary scripts/install_pi.sh — HAT GNSS at ${CANARY_HAT_GPS_BAUD:-115200} baud on every attach.
+# Managed by canary scripts/install_pi.sh — HAT GNSS at ${CANARY_HAT_GPS_BAUD} baud and a ${CANARY_HAT_GPS_RATE_MS} ms measurement rate on every attach.
 [Service]
-ExecStartPost=-/bin/sh -c 'for i in 1 2 3 4 5 6 7 8 9 10; do /usr/bin/timeout -s KILL 20 /usr/bin/gpsctl -s ${CANARY_HAT_GPS_BAUD:-115200} ${CANARY_GPS_DEVICE} && exit 0; sleep 1; done; echo "could not set ${CANARY_GPS_DEVICE} to ${CANARY_HAT_GPS_BAUD:-115200} baud" >&2; exit 1'
+ExecStartPost=-/bin/sh -c '( for i in 1 2 3 4 5 6 7 8 9 10; do /usr/bin/timeout -s KILL 20 /usr/bin/gpsctl -s ${CANARY_HAT_GPS_BAUD} ${CANARY_GPS_DEVICE} && exit 0; sleep 1; done; exit 1 ) \\
+  || { echo "could not set ${CANARY_GPS_DEVICE} to ${CANARY_HAT_GPS_BAUD} baud; its rate is left alone" >&2; exit 1; }; \\
+  for i in 1 2 3 4 5; do \\
+  ${_ubxtool} -z CFG-MSGOUT-NMEA_ID_GSV_UART1,${_gsv_every},1 ${_ubx_target} \\
+  && ${_ubxtool} -z CFG-RATE-MEAS,${CANARY_HAT_GPS_RATE_MS},1 ${_ubx_target} && exit 0; sleep 1; done; \\
+  echo "could not set ${CANARY_GPS_DEVICE} to a ${CANARY_HAT_GPS_RATE_MS} ms measurement rate" >&2; exit 1'
 EOF
     fi
     systemctl daemon-reload

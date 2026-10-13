@@ -238,7 +238,7 @@ other checklist leans on.
   started` within 6 s, and the receiver was at 115200 30 s after the start,
   with no `txbuf`.
 
-- [ ] **H03.4 GNSS at 10 Hz.** **Do:** configure the MAX-M10M on every gpsd
+- [~] **H03.4 GNSS at 10 Hz.** **Do:** configure the MAX-M10M on every gpsd
   attach (it has no backup cell fitted, so settings in RAM do not survive a
   power cut): UBX `CFG-VALSET` for `CFG-RATE-MEAS` 100 ms and a UART1 baud that
   carries 10 Hz of the sentences gpsd needs (38400 or higher), sent by
@@ -270,7 +270,33 @@ other checklist leans on.
     stayed at 9600 until the try was SIGKILLed. Each try now runs under
     `timeout -s KILL 20`. On the rerun the first try hung again, was killed at
     20 s, and the second succeeded.
-  **Still owed:** `CFG-RATE-MEAS` 100 ms, and the 10 Hz checks.
+  **Rate half, desk side done 2026-10-13 (not yet on a Pi).** The same
+  `canary-baud.conf` drop-in now sends, in one `ExecStartPost` and only after
+  `gpsctl -s` succeeded (10 Hz at the power-up 9600 baud is the overflow above
+  ten times over), two RAM-layer CFG-VALSETs through gpsd:
+  `ubxtool -P 34 -z CFG-MSGOUT-NMEA_ID_GSV_UART1,10,1 localhost:2947:<tty>`, then
+  `ubxtool -P 34 -z CFG-RATE-MEAS,100,1 …`, each under `timeout -s KILL 20`,
+  five tries. GSV goes to 1 Hz first: the 9600-baud overflow's growth (~45 ms/s)
+  puts a 1 Hz epoch near 1000 chars, so ten a second with GSV would nearly fill
+  115200 baud's ~11.5k chars/s, or overfill it with more satellites in view.
+  `CANARY_HAT_GPS_RATE_MS` (default 100) overrides the period, GSV following at
+  1000/rate. The installer refuses a non-numeric baud or period, a period
+  outside 25–1000 ms, and a sub-1 Hz period below 38400 baud. The tty still
+  comes from `hat_revisions.json`: rev 2.0 gets `/dev/ttyAMA2`, rev 2.1
+  `/dev/ttyAMA4`. Tests in `tests/test_install_pi_script.py`:
+  `test_each_hat_revision_sets_its_receiver_to_10_hz_on_every_attach[2.0/2.1]`,
+  `test_the_rate_is_set_only_once_the_baud_is` (runs the drop-in's own script
+  against shims: gpsctl → GSV → rate in that order, and ten gpsctl tries and no
+  ubxtool when the baud never sets), `test_the_gnss_rate_override_keeps_gsv_at_1_hz`,
+  `test_a_gnss_setting_the_link_cannot_carry_is_refused` (4 cases),
+  `test_1_hz_at_9600_baud_is_still_allowed`; the file is 64 passed.
+  `systemd-analyze verify` parses the rendered drop-in, continuation lines
+  included.
+  **Still owed (Pi):** install, then after a power cut and after a gpsd
+  stop/start: `gpspipe -w` shows TPV at 10 Hz, the daemon's `gps:speed` at
+  ~10 Hz, no `txbuf alloc`, and the journal shows the ubxtool ACK (its exit
+  status is not known to reflect a NAK). Recheck the NMEA lag with `ntpshmmon`:
+  chrony's `offset 0.065` was measured at 1 Hz.
 - [x] **H03.5 uart0 on by default in the overlay** once H05 has a collector
   that uses it. The SysRq hazard needs a console on uart0, and on the Pi 5 the
   console is `ttyAMA10`; make `install_pi.sh` refuse a `console=` on

@@ -690,6 +690,131 @@ def test_a_usb_receiver_gets_no_baud_change(installer: Installer) -> None:
     assert not list(_unit_dir(installer).glob("canary-gpsd@*.service.d"))
 
 
+def _attach_dropin(installer: Installer, tty: str) -> str:
+    return (_unit_dir(installer) / f"canary-gpsd@{tty}.service.d" / "canary-baud.conf").read_text()
+
+
+def _exec_start_post_script(dropin: str) -> str:
+    """The ``sh -c`` body of the drop-in's ExecStartPost, as systemd reads it:
+    a trailing backslash joins the next line with a space."""
+    joined = re.sub(r"\\\n", " ", dropin)
+    (line,) = [ln for ln in joined.splitlines() if ln.startswith("ExecStartPost=")]
+    prefix = "ExecStartPost=-/bin/sh -c '"
+    assert line.startswith(prefix) and line.endswith("'"), line
+    body = line[len(prefix) : -1]
+    # systemd would expand these; the script must not lean on either.
+    assert "$" not in body and "%" not in body
+    return body
+
+
+@pytest.mark.parametrize(("rev", "tty"), [("2.0", "ttyAMA2"), ("2.1", "ttyAMA4")])
+def test_each_hat_revision_sets_its_receiver_to_10_hz_on_every_attach(
+    installer: Installer, rev: str, tty: str
+) -> None:
+    """H03.4: the MAX-M10M has no backup cell, so a RAM CFG-VALSET of
+    CFG-RATE-MEAS 100 ms is lost at every power cut and is sent on every attach,
+    on whichever UART the revision wires it to."""
+    installer.run(CANARY_GPS_DEVICE="", **_hat_eeprom(installer, rev))
+
+    dropin = _attach_dropin(installer, tty)
+    script = _exec_start_post_script(dropin)
+    target = f"localhost:2947:/dev/{tty}"
+    rate = f"/usr/bin/ubxtool -P 34 -z CFG-RATE-MEAS,100,1 {target}"
+    gsv = f"/usr/bin/ubxtool -P 34 -z CFG-MSGOUT-NMEA_ID_GSV_UART1,10,1 {target}"
+    assert rate in script and gsv in script
+    # Speed first, then GSV to 1 Hz, then the 10 Hz rate: never 10 Hz of the
+    # full NMEA set on a link that may still be at the power-up 9600 baud.
+    assert script.index("gpsctl -s 115200") < script.index(gsv) < script.index(rate)
+    # ubxtool talks to the port through gpsd and, like gpsctl, may hang.
+    assert script.count("/usr/bin/timeout -s KILL 20 /usr/bin/ubxtool") == 2
+    assert "ExecStartPost=-" in dropin
+    assert "100 ms measurement rate" in dropin
+
+
+def _run_attach_script(installer: Installer, script: str, *, gpsctl_ok: bool) -> list[str]:
+    """Run the drop-in's script with gpsctl/ubxtool/timeout/sleep as logging
+    shims; returns the commands it ran, in order."""
+    shims = installer.root.parent / "attach-shims"
+    log = shims / "calls.log"
+    shims.mkdir()
+    log.write_text("")
+    logger = f'#!/bin/sh\necho "$(basename "$0") $*" >>"{log}"\n'
+    _write_exec(shims / "gpsctl", logger + ("exit 0\n" if gpsctl_ok else "exit 1\n"))
+    _write_exec(shims / "ubxtool", logger + "exit 0\n")
+    _write_exec(shims / "timeout", '#!/bin/sh\nshift 3\nexec "$@"\n')
+    _write_exec(shims / "sleep", "#!/bin/sh\nexit 0\n")
+    result = subprocess.run(
+        ["/bin/sh", "-c", script.replace("/usr/bin/", f"{shims}/")],
+        capture_output=True,
+        text=True,
+        env={"PATH": f"{shims}:/usr/bin:/bin"},
+        timeout=30,
+    )
+    assert (result.returncode == 0) == gpsctl_ok, result.stderr
+    return log.read_text().splitlines()
+
+
+def test_the_rate_is_set_only_once_the_baud_is(installer: Installer) -> None:
+    """The drop-in's own script, run against shims: 10 Hz goes out only after
+    gpsctl moved the port off 9600, and never when it could not."""
+    installer.run(CANARY_GPS_DEVICE="", **_hat_eeprom(installer, "2.0"))
+    script = _exec_start_post_script(_attach_dropin(installer, "ttyAMA2"))
+
+    calls = _run_attach_script(installer, script, gpsctl_ok=True)
+    assert [c.split()[0] for c in calls] == ["gpsctl", "ubxtool", "ubxtool"]
+    assert "CFG-MSGOUT-NMEA_ID_GSV_UART1,10,1" in calls[1]
+    assert "CFG-RATE-MEAS,100,1" in calls[2]
+
+    shutil.rmtree(installer.root.parent / "attach-shims")
+    calls = _run_attach_script(installer, script, gpsctl_ok=False)
+    assert calls == ["gpsctl -s 115200 /dev/ttyAMA2"] * 10
+
+
+def test_the_gnss_rate_override_keeps_gsv_at_1_hz(installer: Installer) -> None:
+    installer.run(
+        CANARY_GPS_DEVICE="", CANARY_HAT_GPS_RATE_MS="200", **_hat_eeprom(installer, "2.1")
+    )
+
+    script = _exec_start_post_script(_attach_dropin(installer, "ttyAMA4"))
+    assert "CFG-RATE-MEAS,200,1" in script
+    assert "CFG-MSGOUT-NMEA_ID_GSV_UART1,5,1" in script
+
+
+@pytest.mark.parametrize(
+    ("env", "refusal"),
+    [
+        # At 9600 even 1 Hz overflowed the M10 (2026-10-04); H03.4's floor.
+        ({"CANARY_HAT_GPS_BAUD": "9600"}, "cannot carry a 100 ms GNSS rate"),
+        ({"CANARY_HAT_GPS_BAUD": "115200;reboot"}, "is not a baud rate"),
+        ({"CANARY_HAT_GPS_RATE_MS": "10"}, "is not a 25-1000 ms measurement period"),
+        ({"CANARY_HAT_GPS_RATE_MS": "0.1"}, "is not a 25-1000 ms measurement period"),
+    ],
+)
+def test_a_gnss_setting_the_link_cannot_carry_is_refused(
+    installer: Installer, env: dict[str, str], refusal: str
+) -> None:
+    result = installer.run(
+        check=False, CANARY_GPS_DEVICE="", **_hat_eeprom(installer, "2.0"), **env
+    )
+
+    assert result.returncode != 0
+    assert "REFUSING" in result.stderr and refusal in result.stderr
+    assert not list(_unit_dir(installer).glob("canary-gpsd@*.service.d"))
+
+
+def test_1_hz_at_9600_baud_is_still_allowed(installer: Installer) -> None:
+    installer.run(
+        CANARY_GPS_DEVICE="",
+        CANARY_HAT_GPS_BAUD="9600",
+        CANARY_HAT_GPS_RATE_MS="1000",
+        **_hat_eeprom(installer, "2.0"),
+    )
+
+    script = _exec_start_post_script(_attach_dropin(installer, "ttyAMA2"))
+    assert "CFG-RATE-MEAS,1000,1" in script
+    assert "CFG-MSGOUT-NMEA_ID_GSV_UART1,1,1" in script
+
+
 def test_fitting_a_hat_later_restarts_chrony_once(installer: Installer) -> None:
     installer.run()
     hat = str(_hat_product_file(installer))
