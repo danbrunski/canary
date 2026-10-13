@@ -29,6 +29,7 @@ from src.control.jobs import JobController
 from src.control.profile_capture import CaptureAutostart, EventPublisher, ProfileCaptureSession
 from src.control.replay_control import ReplayController
 from src.control.sequence_detector import SequenceDetectorController
+from src.control.updater import DEFAULT_UPDATE_PATHS, UpdatePaths
 from src.daemon.broadcast import Broadcaster
 from src.models.feedback import FeedbackStore
 from src.provisioning.gate import DEFAULT_WINDOW_PATH
@@ -99,6 +100,9 @@ class ControlContext:
     #: Cached ``nmcli``/``ip`` reads for ``GET /control/network`` (P2.3);
     #: ``None`` (tests, bare apps) reports the route as not wired.
     network_reader: NetworkStatusReader | None = None
+    #: The software-update request/status files shared with the root
+    #: ``canary-update`` units (``src/control/updater.py``).
+    update_paths: UpdatePaths = DEFAULT_UPDATE_PATHS
 
     def router(self) -> APIRouter:
         """A router whose every route requires the control token."""

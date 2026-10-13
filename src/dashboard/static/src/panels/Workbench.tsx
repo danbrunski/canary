@@ -56,6 +56,7 @@ import { TripPanel } from "./TripPanel";
 import { TuningPanel } from "./TuningPanel";
 import { TpmsPanel } from "./TpmsPanel";
 import { TreadWearCard } from "./TreadWearCard";
+import { UpdateCard } from "./UpdateCard";
 import { VehicleLedgerPage } from "./VehicleLedgerPage";
 import { RomMapsPanel } from "./RomMapsPanel";
 import { AnalysisPage } from "./tuning/AnalysisPage";
@@ -165,12 +166,15 @@ function renderItem(
       return <AnomalyPanel events={d.events} token={d.token} liveScores={d.liveScores} />;
     case "system-info":
       return (
-        <SystemPanel
-          status={d.status}
-          channels={d.channels}
-          statusError={d.statusError}
-          onNavigate={onNavigate}
-        />
+        <>
+          <SystemPanel
+            status={d.status}
+            channels={d.channels}
+            statusError={d.statusError}
+            onNavigate={onNavigate}
+          />
+          <UpdateCard token={d.token} />
+        </>
       );
     case "diag-tpms":
       return (

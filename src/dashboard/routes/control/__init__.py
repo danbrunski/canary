@@ -31,6 +31,7 @@ from src.control.jobs import JobController
 from src.control.profile_capture import CaptureAutostart, ProfileCaptureSession
 from src.control.replay_control import ReplayController
 from src.control.sequence_detector import SequenceDetectorController
+from src.control.updater import DEFAULT_UPDATE_PATHS, UpdatePaths
 from src.daemon.broadcast import Broadcaster
 from src.daemon.ups import DEFAULT_UPS_KEEPALIVE_PATH, DEFAULT_UPS_STATUS_PATH
 from src.dashboard.routes.session_reads import build_session_read_router
@@ -58,6 +59,7 @@ from . import (
     system,
     tires,
     tuning,
+    update,
 )
 from .context import ControlContext, SessionDir, _require
 
@@ -97,6 +99,7 @@ _ROUTER_BUILDERS: tuple[Callable[[ControlContext], APIRouter], ...] = (
     custom_pids.build_router,
     tires.build_router,
     brain.build_router,
+    update.build_router,
 )
 
 
@@ -131,6 +134,7 @@ def register_control_routes(
     ups_keepalive_path: Path = DEFAULT_UPS_KEEPALIVE_PATH,
     provision_window_path: Path = DEFAULT_WINDOW_PATH,
     network_reader: NetworkStatusReader | None = None,
+    update_paths: UpdatePaths = DEFAULT_UPDATE_PATHS,
     emitter: AnomalyEventEmitter | None = None,
     #: The daemon's in-memory observations, so the capture-autostart tick can
     #: classify the vehicle without Parquet I/O. ``None`` (tests, replay-only
@@ -186,6 +190,7 @@ def register_control_routes(
         inference_timing=inference_timing,
         provision_window_path=provision_window_path,
         network_reader=network_reader,
+        update_paths=update_paths,
     )
     # `SessionDir` resolves against the app's context.
     app.state.control_context = ctx

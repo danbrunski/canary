@@ -1420,6 +1420,22 @@
       "auth": "control",
       "body": false,
       "method": "GET",
+      "path": "/control/update",
+      "query": [],
+      "status_code": null
+    },
+    {
+      "auth": "control",
+      "body": true,
+      "method": "POST",
+      "path": "/control/update",
+      "query": [],
+      "status_code": 202
+    },
+    {
+      "auth": "control",
+      "body": false,
+      "method": "GET",
       "path": "/control/vehicle-ledger",
       "query": [],
       "status_code": null

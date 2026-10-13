@@ -360,6 +360,43 @@ The updater is tested offline by `tests/test_update_canary_script.py`, which
 runs it against a throwaway git upstream with shimmed `systemctl`, `curl`,
 `pnpm` and `runuser`; add a test there before changing its behaviour.
 
+### Updating from the dashboard
+
+System → System Info has an **Update** card: what is installed, **Check for
+updates** (the commits available, with their subjects), and **Update**, which
+runs this same `canary-update` and shows each step as it starts. The daemon
+runs as `canary` with `NoNewPrivileges` and cannot run sudo, so it never
+updates anything itself:
+
+1. `POST /control/update` writes `/run/canary/update_request`.
+2. The root `canary-update.path` unit sees it and starts the oneshot
+   `canary-update.service`. Its `ExecStartPre` renames the request to
+   `update_request.taken` before any Python runs, so a request that crashes
+   the runner is already consumed and cannot start it again.
+3. The runner (`python -m src.control.update_runner`, on the checkout's venv)
+   runs a check (`git fetch` as the checkout's owner, then the commits behind
+   and whether the checkout is dirty) or `canary-update`, and writes
+   `/run/canary/update_status` throughout: the step, the summary block, the
+   exit code and what it means, and a heartbeat every 10 s. A status whose
+   heartbeat is over 3 minutes old reads `lost`.
+
+The daemon restarts in the middle of an update, so the page loses its
+connection. It keeps polling, and when the daemon answers again it reads the
+status and says "Updated to `<sha>`" or "Rolled back: `<reason>`".
+
+Every refusal `canary-update` has still applies, and some come earlier:
+the update action is refused (409) before anything is filed while a capture
+records or an ECU backup runs; either action is refused while another is
+running, and with no default route ("no internet"). Before running
+`canary-update` the runner also checks that the git remote answers
+(`git ls-remote`, 20 s), so a WiFi network without internet is reported
+before anything starts, not after a fetch timeout. `--force` is not offered
+from the dashboard; `--full` is.
+
+Logs: `journalctl -u canary-update` has every line `canary-update` printed.
+`install_pi.sh` installs and enables the two units; until it has run once,
+`POST /control/update` answers 503 naming `canary-update.path`.
+
 The planned public distribution replaces the Git fetch with a signed or
 checksummed release bundle. The rest of this update path remains the same, and
 the Pi will no longer need repository credentials.

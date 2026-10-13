@@ -1,0 +1,16 @@
+[Unit]
+Description=CANary software update requests from the dashboard
+# The daemon (user canary, NoNewPrivileges) cannot update itself. It writes
+# /run/canary/update_request (POST /control/update); this root path unit sees
+# it and starts canary-update.service. See src/control/updater.py.
+ConditionPathExists=/etc/canary/canary.env
+
+[Path]
+# PathExists, not PathModified: it fires once per request file, and again
+# after the service exits only if a new request is waiting. The service's
+# ExecStartPre moves the file away first, so a finished run never re-fires.
+PathExists=/run/canary/update_request
+Unit=canary-update.service
+
+[Install]
+WantedBy=multi-user.target

@@ -22,6 +22,7 @@ import subprocess
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -822,3 +823,85 @@ def test_docs_describe_the_same_exit_codes() -> None:
     doc = (REPO_ROOT / "docs" / "pi-setup.md").read_text()
     for code in range(3, 9):
         assert f"| {code} |" in doc, f"exit code {code} missing from docs/pi-setup.md"
+
+
+# ---------------------------------------------------------------------------
+# phone-ui P3.1 — the root runner relays this script's steps and summary
+# ---------------------------------------------------------------------------
+
+
+def _run_from_the_dashboard(
+    harness: Harness, monkeypatch: pytest.MonkeyPatch, **env: str
+) -> dict[str, Any]:
+    """File an update request and serve it with the real runner, the real
+    script and real git, as ``canary-update.service`` would (minus root)."""
+    from src.control.update_runner import SystemCommands, run_once
+    from src.control.updater import UpdatePaths, new_request, read_status, write_request
+
+    run_dir = harness.tmp / "run"
+    run_dir.mkdir()
+    paths = UpdatePaths(
+        request=run_dir / "update_request",
+        taken=run_dir / "update_request.taken",
+        status=run_dir / "update_status",
+        trigger_unit=run_dir / "canary-update.path",
+        proc_net=run_dir / "proc-net",
+    )
+    # What ExecStartPre's `mv -fT` leaves for the runner.
+    write_request(new_request("update"), paths.taken)
+    for key, value in {**harness.env, **env}.items():
+        monkeypatch.setenv(key, value)
+    commands = SystemCommands(
+        checkout=harness.checkout, owner="tester", updater=str(harness.sbin_script)
+    )
+    assert run_once(paths, commands, route=lambda: True) == 0
+    assert not paths.taken.exists(), "the runner consumes the request"
+    return read_status(paths.status)
+
+
+def test_runner_relays_every_step_and_the_summary(
+    harness: Harness, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    before = harness.head()
+    after = harness.commit_upstream("docs", **{"docs/readme.md": "new docs\n"})
+
+    status = _run_from_the_dashboard(harness, monkeypatch)
+
+    assert status["state"] == "done", status
+    assert status["outcome"] == "updated"
+    assert status["message"] == f"Updated to {after}."
+    assert (status["before"], status["after"], status["target"]) == (before, after, after)
+    assert status["exit_code"] == 0
+    phases = [phase["name"] for phase in status["phases"]]
+    assert phases[:3] == [
+        "Checking the internet connection",
+        "Checking whether CANary can restart",
+        "Fetching CANary update",
+    ]
+    for name in ("Restarting services", "Verifying daemon health"):
+        assert name in phases
+    assert phases[-1] == "Summary"
+    assert status["summary"]["source"] == f"{before} -> {after}"
+    assert status["summary"]["result"] == "updated (exit 0)"
+    assert status["log_tail"], "the last lines are kept for the UI"
+
+
+def test_runner_reports_a_rollback_with_its_reason(
+    harness: Harness, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    before = harness.head()
+    target = harness.commit_upstream(
+        "ui", **{"src/dashboard/static/index.html": "<html>v2</html>\n"}
+    )
+
+    status = _run_from_the_dashboard(
+        harness, monkeypatch, SHIM_HEALTH_FAIL_CALLS_1="-1", SHIM_HEALTH_FAIL_CALLS_2="0"
+    )
+
+    assert status["state"] == "failed", status
+    assert status["outcome"] == "rolled_back"
+    assert status["exit_code"] == EXIT_ROLLED_BACK
+    assert (status["after"], status["target"]) == (before, target)
+    message = str(status["message"])
+    assert message.startswith("Rolled back: health check FAILED (no answer from"), message
+    assert message.endswith(f"Back on {before}, healthy."), message

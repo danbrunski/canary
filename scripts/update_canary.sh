@@ -119,6 +119,11 @@ if [[ ! -x "${CANARY_HOME}/scripts/install_pi.sh" ]]; then
   exit "${EXIT_SETUP}"
 fi
 
+# The `=== <step> ===` lines and the summary block below are also the progress
+# feed of an update started from the dashboard: src/control/update_runner.py
+# relays each step to /run/canary/update_status as it starts, and reads the
+# summary's `key: value` lines. tests/test_update_canary_script.py pins both
+# (test_runner_relays_every_step_and_the_summary).
 step() { printf '\n=== %s ===\n' "$1"; }
 
 # ---------------------------------------------------------------------------

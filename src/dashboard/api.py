@@ -39,6 +39,7 @@ from src.control.paired_devices import PairedDevices
 from src.control.paired_devices import default_path as paired_devices_default_path
 from src.control.replay_control import ReplayController
 from src.control.sequence_detector import SequenceDetectorController
+from src.control.updater import DEFAULT_UPDATE_PATHS, UpdatePaths
 from src.daemon.behavior_live import BehaviorLiveState
 from src.daemon.broadcast import Broadcaster
 from src.daemon.ups import DEFAULT_UPS_KEEPALIVE_PATH, DEFAULT_UPS_STATUS_PATH
@@ -164,6 +165,8 @@ def create_app(
     #: ``/status.network`` (P2.3). ``None`` (tests, bare apps) reports them as
     #: not wired; the daemon passes one.
     network_reader: NetworkStatusReader | None = None,
+    #: Software-update request/status files (``src/control/updater.py``).
+    update_paths: UpdatePaths = DEFAULT_UPDATE_PATHS,
     #: Phones and laptops with their own control tokens (P2.4); ``None`` uses
     #: ``paired_devices.json`` beside the control state.
     paired_devices: PairedDevices | None = None,
@@ -296,6 +299,7 @@ def create_app(
         ups_keepalive_path=ups_keepalive_path,
         provision_window_path=provision_window_path,
         network_reader=network_reader,
+        update_paths=update_paths,
         emitter=emitter,
         live_source=live_source,
         profile_capture=profile_capture,

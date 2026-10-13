@@ -1,0 +1,25 @@
+[Unit]
+Description=CANary software update (check or update, requested from the dashboard)
+# Started only by canary-update.path. Not After/PartOf canary.service: the
+# update restarts canary.service (through scripts/restart_canary.sh) and must
+# outlive that restart to report the outcome.
+ConditionPathExists=/etc/canary/canary.env
+
+[Service]
+Type=oneshot
+# Root, unsandboxed: canary-update runs install_pi.sh (writes /etc, /boot,
+# /usr/local) and restarts the CANary services. git runs as the checkout's
+# owner (runuser); see src/control/update_runner.py.
+EnvironmentFile=/etc/canary/canary.env
+Environment=PYTHONUNBUFFERED=1
+Environment=PYTHONDONTWRITEBYTECODE=1
+# Consume the request before any Python runs: a request that crashes the
+# runner is already gone, so the path unit cannot start it again in a loop.
+# -T: never move it *into* a directory planted at the .taken name. "-": a
+# start by hand with no request is not a failure (the runner says so).
+ExecStartPre=-/bin/mv -fT /run/canary/update_request /run/canary/update_request.taken
+ExecStart=/bin/bash -c 'cd "$CANARY_HOME" && exec "$CANARY_HOME/.venv/bin/python" -m src.control.update_runner'
+# A full update on a Pi 5 (pnpm install + build, pip, install_pi.sh, a 90 s
+# health wait, possibly a rollback doing it all again) is minutes, not hours.
+# Past this systemd stops it; the runner reports the stop in update_status.
+TimeoutStartSec=45min
