@@ -127,6 +127,46 @@ describe("EcuApplicationModelPanel", () => {
     expect(screen.getByText("ZS44A-20260920 (decoded)")).toBeTruthy();
   });
 
+  it("lists firmware overrides with how far each was checked", async () => {
+    vi.mocked(api.getApplicationModel).mockResolvedValue({
+      ...report,
+      overrides: [
+        {
+          id: "fuel_cut_zero_command",
+          regime: "fuel_cut",
+          acts_on: ["target_equiv_ratio"],
+          acts_on_ram: [],
+          nodes: ["fuel_cut_gate"],
+          routine: "0x03D06E",
+          span: null,
+          condition: "0xFFFF26B8 is 0x3F",
+          effect: "the command word is zero",
+          established_by: "listing",
+          confidence: "code",
+          qualification: "fixture",
+          qualified_by: ["tests/test_ecu_overrides.py"],
+          evidence: ["2026-10-04 listing pass"],
+          consistent_with: [],
+          gaps: ["the writer of 0xFFFF26B8"],
+          verify_with: "a held-out drive with fuel cuts",
+        },
+      ],
+    });
+    render(<EcuApplicationModelPanel token="t" />);
+    expect(await screen.findByText("Firmware overrides (1)")).toBeTruthy();
+    expect(screen.getByText("fuel_cut_zero_command")).toBeTruthy();
+    expect(screen.getByText("fixture")).toBeTruthy();
+    expect(screen.getByText(/when 0xFFFF26B8 is 0x3F: the command word is zero/)).toBeTruthy();
+    expect(screen.getByText(/1 gap; verify: a held-out drive/)).toBeTruthy();
+  });
+
+  it("omits the overrides section for a daemon that reports none", async () => {
+    vi.mocked(api.getApplicationModel).mockResolvedValue(report);
+    render(<EcuApplicationModelPanel token="t" />);
+    expect(await screen.findByText("target_equiv_ratio")).toBeTruthy();
+    expect(screen.queryByText(/Firmware overrides/)).toBeNull();
+  });
+
   it("shows the server's refusal when the vehicle has no model", async () => {
     vi.mocked(api.getApplicationModel).mockRejectedValue(
       new Error("No ECU application model for this vehicle"),

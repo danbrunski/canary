@@ -44,6 +44,8 @@ export interface ApplicationOutput {
   blockers: ApplicationBlocker[];
   equals_output_when: { id: string; statement: string; settled_by: string }[];
   regions: ApplicationRegion[];
+  /** Ids of the overrides acting on this output (model_version 5+). */
+  overrides?: string[];
 }
 
 export interface UncoveredLogic {
@@ -51,6 +53,29 @@ export interface UncoveredLogic {
   where: string;
   blocks: string;
   next_evidence: string;
+}
+
+/** A firmware condition that replaces or reshapes a command (E05.3).
+ *  `traced` is read from code only; `fixture` was checked in a committed
+ *  capture; `vehicle` on a held-out drive. */
+export interface FirmwareOverride {
+  id: string;
+  regime: "start" | "warm_up" | "closed_loop" | "transient" | "fuel_cut";
+  acts_on: string[];
+  acts_on_ram: string[];
+  nodes: string[];
+  routine: string | null;
+  span: string[] | null;
+  condition: string;
+  effect: string;
+  established_by: "listing" | "decompile_text" | "inferred";
+  confidence: "observed" | "code" | "inferred" | "unknown";
+  qualification: "traced" | "fixture" | "vehicle";
+  qualified_by: string[];
+  evidence: string[];
+  consistent_with: string[];
+  gaps: string[];
+  verify_with: string;
 }
 
 export interface ApplicationModelReport {
@@ -67,4 +92,6 @@ export interface ApplicationModelReport {
   schedule: { function: string; cycle_start: string; order: string[] };
   outputs: ApplicationOutput[];
   uncovered: UncoveredLogic[];
+  /** Absent from daemons older than model_version 5. */
+  overrides?: FirmwareOverride[];
 }

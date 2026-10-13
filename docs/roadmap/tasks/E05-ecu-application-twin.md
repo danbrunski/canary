@@ -488,6 +488,10 @@ ECU replica.
       switch sequence.
     - **(d) Overrides: desk part done 2026-10-13; qualification needs the
       vehicle, and the gaps below need the listing.**
+      - *Dashboard.* The E05.1 panel lists them under "Firmware overrides"
+        with regime, qualification, routine, condition → effect and the gap
+        count (`EcuApplicationModelPanel.test.tsx`, 7 passed); a daemon older
+        than `model_version` 5 omits the section.
       - *Data, not code.* `ecu_application_model.yaml` is `model_version` 5
         and has a new `overrides:` list of 15 entries, each with routine,
         span, nodes, condition, effect, RAM read and written, ROM constants,

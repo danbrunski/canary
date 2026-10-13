@@ -12,7 +12,12 @@ import {
   definitionValueClass,
   placeholderClass,
 } from "../styles";
-import type { ApplicationModelReport, ApplicationOutput, TwinRole } from "../types/ecuApplication";
+import type {
+  ApplicationModelReport,
+  ApplicationOutput,
+  FirmwareOverride,
+  TwinRole,
+} from "../types/ecuApplication";
 
 /** The order a path is read in: what the twin computes, what it reads, what
  *  it takes on trust, what it leaves out, and what the calibration disables. */
@@ -43,6 +48,45 @@ export function roleCounts(output: ApplicationOutput): { role: TwinRole; nodes: 
 export function outputStatusText(output: ApplicationOutput): string {
   if (output.blockers.length === 0) return output.status;
   return `${output.status} — ${output.blockers.map((b) => b.name).join(", ")}`;
+}
+
+const QUALIFICATION_CLASS: Record<FirmwareOverride["qualification"], string> = {
+  traced: "text-fg-dim",
+  fixture: "text-warn",
+  vehicle: "text-ok",
+};
+
+/** Firmware overrides (E05.3): where the ECM replaces or reshapes a command,
+ *  and how far each reading has been checked. */
+function OverridesView({ overrides }: { overrides: readonly FirmwareOverride[] }) {
+  return (
+    <section>
+      <h3 className={definitionTermClass}>Firmware overrides ({overrides.length})</h3>
+      {overrides.length === 0 ? (
+        <p className={placeholderClass}>none recorded</p>
+      ) : (
+        <ul className="m-0 flex list-none flex-col gap-2 p-0">
+          {overrides.map((o) => (
+            <li key={o.id}>
+              <div>
+                <strong>{o.id}</strong> <span className="text-fg-dim">{o.regime}</span> ·{" "}
+                <span className={QUALIFICATION_CLASS[o.qualification]}>{o.qualification}</span>
+                {o.routine !== null && <span className="font-num text-fg-dim"> {o.routine}</span>}
+              </div>
+              <div>
+                when {o.condition}: {o.effect}
+              </div>
+              {o.gaps.length > 0 && (
+                <div className="text-fg-faint">
+                  {o.gaps.length} gap{o.gaps.length === 1 ? "" : "s"}; verify: {o.verify_with}
+                </div>
+              )}
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
+  );
 }
 
 function Row({ term, value }: { term: string; value: string }) {
@@ -121,6 +165,7 @@ function ReportView({ report }: { report: ApplicationModelReport }) {
       {report.outputs.map((output) => (
         <OutputView key={output.id} output={output} />
       ))}
+      {report.overrides !== undefined && <OverridesView overrides={report.overrides} />}
       <section>
         <h3 className={definitionTermClass}>Uncovered logic ({report.uncovered.length})</h3>
         {report.uncovered.length === 0 ? (
