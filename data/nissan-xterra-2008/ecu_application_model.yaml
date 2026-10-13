@@ -24,7 +24,7 @@
 # refuses a blocker that names a resolved node and an unresolved node that no
 # blocker names). target_phi consumes these blockers; it does not restate them.
 schema_version: 1
-model_version: 4
+model_version: 5
 name: ecm_application_model
 
 program:
@@ -468,6 +468,21 @@ ram:
      meaning: 'Byte the MAF-fault table 0x95E5 is banded by (0x40/0x80/0xC0).'}
   - {address: 0xFFFF107F, width: 8, signed: false, name: unidentified_107f, units: raw_counts, confidence: unknown,
      meaning: 'Second band of the MAF-fault table 0x95E5 (7/15/22).'}
+  # -- E05.3 (d): RAM the command overrides touch outside the traced nodes
+  # (closed-loop feedback and the injector pulse chain; docs/ecu-firmware-analysis.md,
+  # "A/F sensor and lambda chain" and "Injector pulse chain").
+  - {address: 0xFFFF26B4, width: 16, signed: false, name: short_term_trim_b1, units: q_0x6400, confidence: code,
+     meaning: 'Short-term fuel trim bank 1, 0x6400 = 1.0 (PID 0x06, DID 0x1123); adds into the bank pulse factor.'}
+  - {address: 0xFFFF26B6, width: 16, signed: false, name: short_term_trim_b2, units: q_0x6400, confidence: code,
+     meaning: 'Short-term fuel trim bank 2, 0x6400 = 1.0 (PID 0x08, DID 0x1124).'}
+  - {address: 0xFFFF4722, width: 16, signed: false, name: measured_af_b1, units: lambda_x7350, confidence: code,
+     meaning: 'Bank 1 A/F after the barometric gain, AFR x 500 (0x03FAD0); the word the STFT controller measures.'}
+  - {address: 0xFFFF4724, width: 16, signed: false, name: measured_af_b2, units: lambda_x7350, confidence: code,
+     meaning: 'Bank 2 A/F, as 0xFFFF4722.'}
+  - {address: 0xFFFF46B2, width: 16, signed: false, name: af_feedback_target, units: lambda_x7350, confidence: code,
+     meaning: 'A/F feedback target the STFT controller regulates to; default 7350 (14.7).'}
+  - {address: 0xFFFF26DC, width: 16, signed: false, name: wall_film_term, units: raw_counts, confidence: inferred,
+     meaning: 'Wall-film (transient) term added to the bank pulse base before the fuel-pressure factor; name inferred, writer not recorded, signedness from the pulse formula''s u16 statement.'}
 
 # The fuel-command task (FUN_000575EC): its calls in order, each once per
 # cycle, after the cycle-start copies of FUN_00020EF2. A node later in the
@@ -1823,10 +1838,39 @@ outputs:
         status: conditional
         when: 'coolant byte below 115 (65 degC): state 5 takes the lookup word directly, but the corrections are not modelled'
         nodes: [enrichment_state_request, correction_sum]
+        overrides: [cold_request_direct_enrichment]
       - id: fuel_cut_recovery
         status: conditional
         when: 'first cycles after fuel cut on the guarded path: slew-limited from 0 by 0x3FC0 per cycle'
         nodes: [final_command_word]
+        overrides: [fuel_cut_recovery_slew]
+      # E05.3 (d): each command override that has not qualified on the vehicle
+      # holds its samples out here (the schema refuses one that no region names).
+      - id: fuel_cut
+        status: unevaluable
+        when: '0xFFFF26B8 = 0x3F: the word is written 0, the twin''s sentinel; no lookup prediction applies'
+        nodes: [final_command_word]
+        overrides: [fuel_cut_zero_command]
+      - id: closed_loop_hold
+        status: conditional
+        when: 'gated lookup 0x80 (cell below the gate): multiplier 0x4000, so the command is the correction sum plus the curve term, which applies only here and is not modelled'
+        nodes: [enrichment_gate, enrichment_multiplier, curve_term]
+        overrides: [closed_loop_phi_one, closed_loop_curve_term]
+      - id: enrichment_ramp
+        status: conditional
+        when: 'states 2, 3 or 6 before 0xFFFF2867 bit 7 records the ramp reaching the lookup: the multiplier is the ramp, not the lookup'
+        nodes: [enrichment_multiplier]
+        overrides: [enrichment_ramp]
+      - id: command_cap_and_slew
+        status: conditional
+        when: 'guarded path with a step above 0x3FC0 from last cycle''s word, or a word above 0xFE00: the output is the limiter''s'
+        nodes: [final_command_word]
+        overrides: [command_cap_and_slew]
+      - id: coolant_correction
+        status: conditional
+        when: '0xFFFF26E8 non-zero (not read): the correction sum is not 0x4000'
+        nodes: [correction_26e8]
+        overrides: [coolant_correction_26e8]
 
   - id: ignition_timing
     ram: 0xFFFF11FF
@@ -1933,10 +1977,12 @@ outputs:
         status: unevaluable
         when: 'inputs not held within SteadyGates (MAF word +-2 %, rpm word +-1 % over +-1 s): the filter, transient and airflow filter states are not observed'
         nodes: [airflow_qa, manifold_fill_filter, fill_transient]
+        overrides: [bfs_fill_transient]
       - id: cranking
         status: unevaluable
         when: '0xFFFF2C91 = 0, or 0xFFFF4786 bit 7 with 0xFFFF4A2D non-zero, or bit 6 with 0xFFFF2C91 < 0x20: Tp from the coolant curve 0xEEBA. No channel reads these flags: the steady-state evaluator assumes a sample is outside this region (and outside maf_fault and fill_subtracting_form) and counts each scored sample under regions_assumed'
         nodes: [air_charge_tp]
+        overrides: [cranking_tp]
       - id: maf_fault
         status: unevaluable
         when: '0xFFFF2824 bit 7: BFS from table 0x95E5'
@@ -2003,3 +2049,400 @@ uncovered:
     where: 'slot +0x260 (RAM 0xFFFFB2A0), >= 21 readers through 0x026B14'
     blocks: 'any output it feeds; not identified'
     next_evidence: 'Identify a reader and an independently observed quantity.'
+  # E05.3 (d): what the override trace reached and did not resolve.
+  - id: closed_loop_enable
+    where: >-
+      What starts, freezes and resets the STFT controller 0x05E368 (cells,
+      coolant, time after start or fuel cut). In the fuel task the gate writes
+      phi 1.0 (0x80) for every lookup below cal 0x8B39 (130), lean cells
+      included, so UpRev's "closed loop only where the cell is exactly 14.7"
+      is not the gate; it would have to be this enable.
+    blocks: 'knowing where the feedback trims run (closed_loop_feedback_stft) and so which samples carry feedback'
+    next_evidence: >-
+      Desk: trace the enable of 0x05E368 and the writer that holds
+      0xFFFF26B4/0xFFFF26B6 at 0x6400 (both read exactly 0x6400 on all 21
+      fuel-cut reads of the 2026-10-04 slice, against 13 and 12 of 153
+      outside cut). Vehicle: read 0xFFFF26B4, 0xFFFF4722 and 0xFFFF46B2 in
+      one window at warm cruise in a 14.7 cell and in an enriching cell.
+  - id: fuel_cut_paths
+    where: >-
+      The writer of 0xFFFF26B8 and its place in the cycle; the routines and
+      RAM of the stationary cut and the item-0x30 limp cut; what the rev
+      limiter 0x04F768 writes; the decel-cut trigger (the BFS decel-cut
+      curves are all zero, so the cut while moving is not BFS-based).
+    blocks: >-
+      predicting fuel cut instead of reading 0xFFFF26B8, and the
+      fuel_cut_recovery_slew limit (it holds only if 0xFFFF26B8 is cleared
+      after the fuel task in the cycle)
+    next_evidence: 'Desk, with the listing (~/ecu-re, not on every machine): find every store to 0xFFFF26B8 and its task-table entry.'
+  - id: cold_fuel_comp_table
+    where: >-
+      UpRev documents a Cold Fuel Comp table used below 70 degC. The traced
+      Fuel Comp lookup (0x03CC3C, 0x03D06E-0x03D100) reads only the slot
+      table at 0xFFFFB6A0 and has no coolant branch in that span.
+    blocks: 'warm-up BFS below 70 degC (base_fuel_schedule_word); a warm-up override may be missing from overrides'
+    next_evidence: 'Desk: locate the cold table in the calibration block and find its readers.'
+
+# E05.3 (d): command overrides by regime, each a traced condition -> effect
+# with how it was established and how far it has been checked. Consolidated
+# 2026-10-13 from the 2026-10-04/05 listing and decompiler passes recorded in
+# this file's nodes and docs/ecu-firmware-analysis.md; the listing itself was
+# not re-read for this entry (it lives in ~/ecu-re, not on the machine that
+# made it). `qualification`: traced = read from the code only; fixture =
+# condition and effect read together in a committed real capture
+# (`qualified_by` names the test); vehicle = the same on a held-out drive. The
+# schema refuses an override above traced without `qualified_by`, an inferred
+# trace that claims to qualify, and an override on an output that is not
+# vehicle-qualified unless one of that output's regions holds it out.
+overrides:
+  # -- start
+  - id: cranking_tp
+    regime: start
+    acts_on: [base_fuel_schedule_word]
+    nodes: [air_charge_tp]
+    routine: 0x03C62C
+    span: [0x03C646, 0x03C7AA]
+    condition: '0xFFFF2C91 = 0, or 0xFFFF4786 bit 7 with 0xFFFF4A2D non-zero, or 0xFFFF4786 bit 6 with 0xFFFF2C91 < 0x20'
+    effect: 'Tp is the coolant curve 0xEEBA instead of K x airflow / N: 0xFFFF2114 = the curve at 0xFFFF1081 << 8, 0xFFFF2110 = it >> 2'
+    reads: [0xFFFF2C91, 0xFFFF4786, 0xFFFF4A2D, 0xFFFF1081]
+    writes: [0xFFFF2114, 0xFFFF2110]
+    established_by: listing
+    confidence: code
+    evidence:
+      - 'listing 0x03C646-0x03C7AA (node air_charge_tp, E05.2)'
+      - 'docs/ecu-firmware-analysis.md "BFS formation, traced (E05.2)"'
+    qualification: traced
+    gaps:
+      - 'curve 0xEEBA is not decoded to units and is not a rom_map table'
+      - 'the coolant meaning of 0xFFFF1081 is inferred from the curve'
+    verify_with: 'E05.2 remaining (d): read 0xFFFF4786, 0xFFFF2C91, 0xFFFF4A2D and 0xFFFF283B with BFS through key-on and crank.'
+
+  # -- warm-up
+  - id: cold_request_direct_enrichment
+    regime: warm_up
+    acts_on: [target_equiv_ratio]
+    nodes: [enrichment_state_request, enrichment_state, enrichment_multiplier]
+    routine: 0x055DB2
+    span: [0x055EF0, 0x0568B4]
+    condition: 'coolant snapshot 0xFFFF1079 below cal 0x8C98 (0x73 = 115, 65 degC), +3 while the warm latch 0xFFFF288A bit 6 is set'
+    effect: >-
+      Request 0xFFFF14C5 = 8, which commits 0xFFFF14C4 = 5. State 5 takes
+      the gated lookup word 0xFFFF174B << 7 as the multiplier 0xFFFF26C0
+      directly, with no rpm bands, timers or ramp, unless the hold
+      (0xFFFF2947 non-zero or 0xFFFF2BA9 < 0x20) forces 0x4000.
+    reads: [0xFFFF1079, 0xFFFF288A, 0xFFFF174B, 0xFFFF2947, 0xFFFF2BA9]
+    writes: [0xFFFF14C5, 0xFFFF14C4, 0xFFFF26C0, 0xFFFF288A]
+    rom:
+      - {offset: 0x8C98, width: 8, value: 0x73, role: 'warm latch threshold'}
+    established_by: listing
+    confidence: code
+    evidence:
+      - 'listing 0x055EF0-0x056050 (request), 0x056050-0x0566BC (8 -> 5), 0x0566BE-0x0568B4 (states 4 and 5 take the lookup word)'
+      - 'reference models src.analysis.ecu_state_models.enrichment_request / enrichment_commit (synthetic only)'
+    qualification: traced
+    gaps:
+      - 'the coolant meaning of 0xFFFF1083 / 0xFFFF1079 is inferred from the DID 0x1101 pointer table'
+      - 'the hold counter''s decrement is not found (uncovered multiplier_hold_counter)'
+    verify_with: >-
+      Cold start: read 0xFFFF1079, 0xFFFF14C4, 0xFFFF14C5 and 0xFFFF174B
+      with the catalog's fuel_target window, all four members selected (57
+      bytes from 0xFFFF26AE, which carries 0xFFFF26C0) from key-on through 65 degC with an enriching
+      cell. Expect state 5 and multiplier = 0xFFFF174B << 7 below 115.
+
+  - id: coolant_correction_26e8
+    regime: warm_up
+    acts_on: [target_equiv_ratio]
+    nodes: [correction_26e8]
+    routine: 0x055386
+    condition: >-
+      The second term runs under the gates that zero correction_175c
+      (0xFFFF26B9 bit 0 or 1, 0xFFFF2867 bit 6, or 0xFFFF1796 bits with
+      0xFFFF26C0 above 0x4000); when it starts it latches the coolant byte
+      0xFFFF1079 into 0xFFFF1794.
+    effect: >-
+      0xFFFF26E8, added into the correction sum, gains map 0xA0D9 at rpm and
+      load scaled by 0xFFFF1770 (the coolant byte relative to its value at
+      the start), 0xFFFF1764 and 0xFFFF1E55; its first term is a map of
+      0xFFFF11CF by curves of 0xFFFF1077, times 0xFFFF10C6.
+    reads: [0xFFFF26B9, 0xFFFF2867, 0xFFFF1796, 0xFFFF26C0, 0xFFFF1079, 0xFFFF1794, 0xFFFF1764,
+            0xFFFF1E55, 0xFFFF11CF, 0xFFFF1077, 0xFFFF10C6]
+    writes: [0xFFFF26E8, 0xFFFF1770, 0xFFFF1794]
+    established_by: decompile_text
+    confidence: code
+    evidence:
+      - 'decompile text FUN_00055386 (node correction_26e8)'
+      - 'docs/ecu-firmware-analysis.md "Injector pulse chain": coolant and after-start enrichment live inside phi (the 0xFFFF26F6 terms and the cold state)'
+    qualification: traced
+    consistent_with:
+      - '0xFFFF26B9 read 0x03 (bits 0 and 1 set, so the second term''s gate open) on 173 of 174 command reads of the 2026-10-04 slice, while the command read exactly 0x4000 on 149 of 153: the term was zero or cancelled there. Its factors were not read (tests/test_ecu_overrides.py::test_the_correction_gate_byte_is_set_on_almost_every_october_4_read).'
+    gaps:
+      - 'that this is the coolant / after-start enrichment is inferred: the firmware notes place that enrichment in the correction terms without assigning it to one'
+      - '0xFFFF1077, 0xFFFF10C6, 0xFFFF1764 and 0xFFFF1E55 are unidentified (uncovered correction_inputs)'
+      - 'decompile text only, not line-checked against the listing'
+    verify_with: 'Cold start: read 0xFFFF26E8, 0xFFFF1770, 0xFFFF1794, 0xFFFF1079 and the gate bytes 0xFFFF26B9, 0xFFFF2867, 0xFFFF1796 from key-on through warm-up.'
+
+  # -- closed loop
+  - id: closed_loop_phi_one
+    regime: closed_loop
+    acts_on: [target_equiv_ratio]
+    nodes: [enrichment_gate, enrichment_state_request, enrichment_multiplier]
+    routine: 0x055DB2
+    span: [0x055E5C, 0x0568B4]
+    condition: 'the scaled Target AFR lookup below 130 (cal 0x8B39), or below 129 while the gate latch 0xFFFF2886 bit 3 is set (release cal 0x8B3D)'
+    effect: >-
+      0xFFFF174B = 0x80 (phi 1.0) whatever the cell; warm, the request
+      0xFFFF14C5 is 1, state 1 sets the multiplier 0xFFFF26C0 = 0x4000, and
+      the command is the correction sum alone.
+    reads: [0xFFFF2886]
+    writes: [0xFFFF174B, 0xFFFF2886, 0xFFFF14C5, 0xFFFF26C0]
+    rom:
+      - {offset: 0x8B39, width: 8, value: 130, role: 'gate threshold'}
+      - {offset: 0x8B3D, width: 8, value: 129, role: 'release threshold'}
+    established_by: listing
+    confidence: code
+    evidence:
+      - 'listing 0x055E5C-0x055EEC (gate), 0x055EF0-0x056050 (request 1), 0x0566BE-0x0568B4 (state 1 gives 0x4000)'
+      - 'the gate is implemented by src.analysis.target_phi.predict (node enrichment_gate); the multiplier is not'
+    qualification: traced
+    consistent_with:
+      - '2026-10-04: 149 of 153 command reads were exactly 0x4000 with X at or below 100, mostly below the first BFS column where the table reads 128; the gate latch and state were not read, so the drive cannot separate this override from the table (docs/ecu-firmware-analysis.md)'
+    gaps:
+      - 'cells 128 and 129 and every lean cell give 0x80 alike; whether the feedback runs in them is the enable, not traced (uncovered closed_loop_enable)'
+    verify_with: 'Warm: read 0xFFFF174B, 0xFFFF2886 and 0xFFFF14C4 with the fuel_target window (all four members: 0xFFFF26AE, 57 bytes) across cells at 128, 129, 130 and above.'
+
+  - id: closed_loop_curve_term
+    regime: closed_loop
+    acts_on: [target_equiv_ratio]
+    nodes: [curve_term]
+    routine: 0x055966
+    condition: '0xFFFF26C0 exactly 0x4000, 0xFFFF135F bits 0 and 1 set, 0xFFFF26B9 bits 0 and 1 set and 0xFFFF2A90 zero (cleared while 0xFFFF15B3 is non-zero)'
+    effect: >-
+      0xFFFF27DC = curve 0xED3A (axis 0xDFD2) at max(0xFFFF2D10,
+      0xFFFF2D14), capped at 3,768 and added to the correction sum before
+      the multiplier; otherwise 0, so it is 0 whenever the multiplier
+      enriches.
+    reads: [0xFFFF26C0, 0xFFFF135F, 0xFFFF26B9, 0xFFFF2A90, 0xFFFF15B3, 0xFFFF2D10, 0xFFFF2D14]
+    writes: [0xFFFF27DC, 0xFFFF2A90]
+    established_by: decompile_text
+    confidence: code
+    evidence: ['decompile text FUN_00055966 (node curve_term)']
+    qualification: traced
+    consistent_with:
+      - '0xFFFF26B9 read 0x03 on 173 of 174 command reads of the 2026-10-04 slice: that half of the condition held; 0xFFFF135F, 0xFFFF2A90 and 0xFFFF27DC were not read'
+    gaps:
+      - 'placing it in closed loop rests on its running only at multiplier 1.0, not on a traced feedback flag'
+      - '0xFFFF2D10/0xFFFF2D14 and the enabling flags are unidentified (uncovered correction_inputs, enrichment_flags)'
+      - 'decompile text only'
+    verify_with: 'Warm, stoichiometric cells: read 0xFFFF27DC with 0xFFFF135F, 0xFFFF26B9 and 0xFFFF2A90 and the command window.'
+
+  - id: closed_loop_feedback_stft
+    regime: closed_loop
+    acts_on_ram: [0xFFFF26B4, 0xFFFF26B6]
+    routine: 0x05E368
+    condition: 'feedback running; its enable is not traced'
+    effect: >-
+      Moves the short-term trims 0xFFFF26B4 / 0xFFFF26B6 (0x6400 = 1.0) to
+      bring the measured A/F words 0xFFFF4722 / 0xFFFF4724 (AFR x 500) to
+      the target 0xFFFF46B2 (default 7350, 14.7). The trims add into the
+      bank pulse factor (1 + STFT + LTFT), not into the phi word.
+    reads: [0xFFFF4722, 0xFFFF4724, 0xFFFF46B2]
+    writes: [0xFFFF26B4, 0xFFFF26B6]
+    established_by: decompile_text
+    confidence: code
+    evidence:
+      - 'docs/ecu-firmware-analysis.md "A/F sensor and lambda chain" (decompiler pass 2026-10-05): the STFT controller 0x05E368 measures 0xFFFF4722/4724 against 0xFFFF46B2'
+      - 'docs/ecu-firmware-analysis.md "Injector pulse chain": k_b = STFT + LTFT + w2E8C - 0xC800'
+    qualification: traced
+    consistent_with:
+      - 'the pulse chain with the logged trims reproduces DIDs 0x1206/0x1207 at median 1.006 over 5,039 steady samples (six tuning captures, not in this repo); that checks how the trims are applied, not when the controller runs'
+      - 'both trim words read exactly 0x6400 on all 21 fuel-cut reads of the 2026-10-04 slice, against 13 (bank 1) and 12 (bank 2) of 153 outside cut: consistent with the feedback being suspended and reset in cut; the code that does it is not traced (tests/test_ecu_overrides.py::test_both_trims_sit_at_neutral_on_every_october_4_fuel_cut_read)'
+    gaps:
+      - 'the enable, freeze and reset conditions are not traced (uncovered closed_loop_enable)'
+      - 'gains and step size are not recorded'
+      - 'decompile text only'
+    verify_with: 'Read 0xFFFF26B4, 0xFFFF4722 and 0xFFFF46B2 in one window at warm cruise in a 14.7 cell, in an enriching cell and through a decel cut.'
+
+  # -- transient
+  - id: enrichment_ramp
+    regime: transient
+    acts_on: [target_equiv_ratio]
+    nodes: [enrichment_multiplier]
+    routine: 0x055DB2
+    span: [0x0566BE, 0x0568B4]
+    condition: 'committed state 0xFFFF14C4 2, 3 or 6 with 0xFFFF2867 bit 7 clear, stepping only on ticks of 0xFFFF84C3 bit 7'
+    effect: >-
+      0xFFFF26C0 starts at 0x82 << 7 and climbs +0x180 per tick (cal 0x8496
+      x 8) toward 0xFFFF174B << 7; in state 2 or 6 between about 2,000 and
+      3,400 rpm (0xFFFF2875 bit 0 clear, 0xFFFF2876 bit 7 set) it instead
+      falls -0x130 per tick (cal 0x8495 x 8) toward 0x4000. Last cycle's
+      value is 0xFFFF26CE.
+    reads: [0xFFFF14C4, 0xFFFF2867, 0xFFFF84C3, 0xFFFF174B, 0xFFFF2875, 0xFFFF2876, 0xFFFF26CE]
+    writes: [0xFFFF26C0, 0xFFFF2867]
+    rom:
+      - {offset: 0x8496, width: 8, value: 48, role: 'ramp-up step / 8'}
+      - {offset: 0x8495, width: 8, value: 38, role: 'ramp-down step / 8'}
+    established_by: listing
+    confidence: code
+    evidence: ['listing 0x0566BE-0x0568B4 (node enrichment_multiplier)']
+    qualification: traced
+    gaps: ['the tick rate of 0xFFFF84C3 bit 7 is not decoded (uncovered enrichment_tick_rate), so the ramp''s duration in time is unknown']
+    verify_with: 'E05.3 (b): 0xFFFF14C4-0xFFFF14C5, 0xFFFF1742-0xFFFF1749, 0xFFFF2866, 0xFFFF2875, 0xFFFF2876, 0xFFFF174B and 0xFFFF26C0 held through enrichment entry and exit in each rpm band.'
+
+  - id: command_cap_and_slew
+    regime: transient
+    acts_on: [target_equiv_ratio]
+    nodes: [final_command_word]
+    routine: 0x055B5E
+    span: [0x055B5E, 0x055DA4]
+    condition: >-
+      The guarded path: 0xFFFF26C6 and 0xFFFF26B8 not 0x3F, 0xFFFF4787 and
+      0xFFFF4785 bit 6 clear, the pedal flag 0xFFFF2841 bit 0 clear and
+      0xFFFF125C = 0x8000.
+    effect: >-
+      The word written to 0xFFFF26BE is capped at 0xFE00 (cal 0x8B3B) and
+      moves at most 0x3FC0 per cycle from last cycle's word 0xFFFF26CC, or
+      holds toward it while 0xFFFF2886 bit 2 is set.
+    reads: [0xFFFF26C6, 0xFFFF26B8, 0xFFFF4787, 0xFFFF4785, 0xFFFF2841, 0xFFFF125C, 0xFFFF26CC, 0xFFFF2886]
+    writes: [0xFFFF26BE]
+    rom:
+      - {offset: 0x8B3B, width: 8, value: 254, role: 'cap high byte'}
+    established_by: listing
+    confidence: code
+    evidence: ['listing 0x055B5E-0x055DA4 (node final_command_word)']
+    qualification: traced
+    gaps: ['0xFFFF125C, 0xFFFF4785, 0xFFFF4787 and the hold path through 0xFFFF2849 are unidentified']
+    verify_with: 'The fuel_target window with all four members (0xFFFF26AE, 57 bytes: command, multiplier, previous command and cut state) at the highest window rate through tip-in into an enriching cell with the pedal flag clear.'
+
+  - id: bfs_fill_transient
+    regime: transient
+    acts_on: [base_fuel_schedule_word]
+    nodes: [fill_transient]
+    routine: 0x03C62C
+    span: [0x03C8EA, 0x03CA0E]
+    condition: '0xFFFF283C bits 3 and 2 set (transient fill model on, load-byte transient), 0xFFFF289B bit 7 clear, and the fault holds 0xFFFF20C6 and 0xFFFF2117 both 0'
+    effect: '0xFFFF105A = clamp_s16(((0xFFFF20A6 - 0xFFFF20B6) x 160) >> 6), added to the filtered pulse before the BFS ceiling; 0 otherwise'
+    reads: [0xFFFF283C, 0xFFFF289B, 0xFFFF20C6, 0xFFFF2117, 0xFFFF20A6, 0xFFFF20B6]
+    writes: [0xFFFF105A]
+    rom:
+      - {offset: 0x8653, width: 8, value: 160, role: 'transient gain'}
+    established_by: listing
+    confidence: code
+    evidence:
+      - 'listing 0x03C8EA-0x03CA0E (node fill_transient)'
+      - 'reference src.decode.air_charge.fill_transient (synthetic only)'
+    qualification: traced
+    verify_with: 'E05.2 remaining (b): 0x23 windows 0xFFFF1038-0xFFFF105D and 0xFFFF20A4-0xFFFF20C7 with flags 0xFFFF283A-0xFFFF283C through throttle steps.'
+
+  - id: injector_wall_film
+    regime: transient
+    acts_on_ram: [0xFFFF26DC]
+    routine: 0x0527CC
+    condition: 'the transient task, entry 44 of the 0x020EF2 task table, every cycle; its own conditions are not recorded'
+    effect: 'the wall-film term 0xFFFF26DC is added to each bank''s pulse base (BFS x phi / 8 x the purge factor) before the fuel-pressure factor and the trims'
+    writes: [0xFFFF26DC]
+    established_by: decompile_text
+    confidence: inferred
+    evidence:
+      - 'docs/ecu-firmware-analysis.md "Injector pulse chain" (decompiler pass 2026-10-05): task order and the G_b formula'
+    qualification: traced
+    consistent_with:
+      - 'the pulse chain reproduces DIDs 0x1206/0x1207 at median 1.006 over 5,039 steady samples, where the term should be near zero: steady state does not exercise it'
+    gaps:
+      - 'that 0x0527CC writes 0xFFFF26DC is inferred from the task order and the term''s place in the formula; the notes record the term and the task, not the store'
+      - 'its inputs, gains, decay and signedness are not recorded'
+      - 'decompile text only'
+    verify_with: 'Read 0xFFFF26DC with DIDs 0x1206/0x1207, BFS and the command word through throttle steps: it should move only on transients.'
+
+  # -- fuel cut
+  - id: fuel_cut_zero_command
+    regime: fuel_cut
+    acts_on: [target_equiv_ratio]
+    nodes: [final_command_word]
+    routine: 0x055B5E
+    span: [0x055B5E, 0x055DA4]
+    condition: 'fuel-cut state 0xFFFF26B8 = 0x3F'
+    effect: '0xFFFF26BE is written 0 (the twin''s sentinel); 0xFFFF1B2E keeps the computed word'
+    reads: [0xFFFF26B8]
+    writes: [0xFFFF26BE, 0xFFFF1B2E]
+    established_by: listing
+    confidence: observed
+    evidence: ['listing 0x055B5E-0x055DA4 (node final_command_word)']
+    qualification: fixture
+    qualified_by:
+      - 'tests/test_ecu_overrides.py::test_the_fuel_cut_state_and_the_zero_word_agree_on_every_october_4_read'
+    consistent_with:
+      - 'On the 2026-10-04 slice each 18-byte read from 0xFFFF26AE carries 0xFFFF26B8 at offset 10 and the command at offset 16: 0x3F with a zero word on all 21 sentinel reads, 0x00 with a non-zero word on all 153 others. That is the condition and effect in one reply; it is not a held-out drive, and 0xFFFF1B2E was not read.'
+    gaps: ['the writer of 0xFFFF26B8, so every condition that sets 0x3F, is not traced (uncovered fuel_cut_paths)']
+    verify_with: 'A held-out drive with decel coasts on the fuel_target window with all four members (0xFFFF26AE, 57 bytes, which adds 0xFFFF26C6), plus 0xFFFF1B2E.'
+
+  - id: fuel_cut_recovery_slew
+    regime: fuel_cut
+    acts_on: [target_equiv_ratio]
+    nodes: [final_command_word]
+    routine: 0x055B5E
+    span: [0x055B5E, 0x055DA4]
+    condition: 'the cycle a cut ends, on the guarded path: 0xFFFF26B8 and 0xFFFF26C6 both not 0x3F, the pedal flag 0xFFFF2841 bit 0 clear, last cycle''s word 0xFFFF26CC = 0'
+    effect: 'the first word written to 0xFFFF26BE after the cut is at most 0x3FC0 (phi 0.996), and the next within 0x3FC0 of it'
+    reads: [0xFFFF26B8, 0xFFFF26C6, 0xFFFF2841, 0xFFFF26CC]
+    writes: [0xFFFF26BE]
+    established_by: listing
+    confidence: code
+    evidence: ['listing 0x055B5E-0x055DA4 (node final_command_word)']
+    qualification: traced
+    gaps:
+      - >-
+        The limit needs 0xFFFF26C6 (the cycle-start copy of 0xFFFF26B8) clear
+        on the cycle the cut ends, so it holds only if 0xFFFF26B8 is cleared
+        after the fuel task. If its writer runs before the fuel task, the
+        first cycle still sees 0xFFFF26C6 = 0x3F, skips the guarded path and
+        writes the full word. The writer and its place in the cycle are not
+        traced (uncovered fuel_cut_paths).
+      - 'the 2026-10-04 reads are about 5 s apart, so no read lands on the first cycles after a cut'
+    verify_with: 'Trace the writer of 0xFFFF26B8 first; then read 0xFFFF26B8, 0xFFFF26C6, 0xFFFF26CC and 0xFFFF26BE at the highest window rate through cut exits.'
+
+  - id: rev_limiter_cut
+    regime: fuel_cut
+    routine: 0x04F768
+    condition: >-
+      Engine speed at or above 6,350 rpm, resuming below 6,150; 6,200 / 5,800
+      while 0xFFFF2841 bit 1 is set. The thresholds are map-slot words read
+      from the RAM slot copy 0xFFFFB040 (+0 to +6), equal in every slot and in
+      the base.
+    effect: 'fuel cut'
+    reads: [0xFFFFB040, 0xFFFF2841]
+    established_by: decompile_text
+    confidence: code
+    evidence:
+      - 'docs/ecu-firmware-analysis.md "Injector pulse chain" -> "Fuel cut" (decompiler pass 2026-10-05)'
+    qualification: traced
+    consistent_with:
+      - '0xFFFF2841 bit 1 was clear on all 191 flag reads of the 2026-10-04 slice, so the 6,350 / 6,150 pair was in force (tests/test_ecu_overrides.py::test_the_rev_limiter_alternate_flag_was_clear_all_october_4)'
+    gaps:
+      - 'the rpm word it compares and the RAM it writes are not recorded, so whether it cuts through the fuel-cut state and the command word or per injector is unknown'
+      - 'what sets 0xFFFF2841 bit 1 is unidentified'
+      - 'decompile text only'
+    verify_with: 'Desk first (fuel_cut_paths). Then read 0xFFFFB040-0xFFFFB047 once and compare with the resolved slot''s first words.'
+
+  - id: stationary_cut
+    regime: fuel_cut
+    condition: 'vehicle speed 0, engine speed at or above 3,600 rpm and BFS at or above 36,864, held for a delay'
+    effect: 'fuel cut'
+    established_by: decompile_text
+    confidence: code
+    evidence: ['docs/ecu-firmware-analysis.md "Injector pulse chain" -> "Fuel cut" (decompiler pass 2026-10-05)']
+    qualification: traced
+    gaps:
+      - 'routine address, RAM read and written, and the delay are not recorded, and the listing is not in the repo'
+      - 'FSM EC-486 describes a no-load cut in Neutral above 1,800 rpm, restored at 1,500 rpm; the decoded condition differs, and which one this calibration runs is not established'
+    verify_with: 'Trace the routine (fuel_cut_paths); then a short parked rev with the rpm word, vehicle speed, BFS and 0xFFFF26B8.'
+
+  - id: limp_cut
+    regime: fuel_cut
+    condition: 'diagnostic item 0x30 failing'
+    effect: 'fuel cut above 2,800 rpm'
+    established_by: decompile_text
+    confidence: code
+    evidence: ['docs/ecu-firmware-analysis.md "Injector pulse chain" -> "Fuel cut" (decompiler pass 2026-10-05)']
+    qualification: traced
+    gaps: ['routine, the DTC behind item 0x30 and the RAM involved are not recorded']
+    verify_with: 'Desk only: trace the routine and item 0x30 (it needs the fault to observe).'

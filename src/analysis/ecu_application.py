@@ -21,11 +21,18 @@ Two rules are enforced by the schema rather than stated:
   calibrations share it. :func:`check_image` hashes the program spans, checks
   the patch markers and every node's ``calibration_conditions`` on the bytes,
   and refuses by name.
+- **A traced override is never a verified one** (E05.3). Each warm-up,
+  closed-loop, transient, fuel-cut or start override records how it was read
+  (``listing`` / ``decompile_text`` / ``inferred``) and how far it was checked
+  (``traced`` / ``fixture`` / ``vehicle``). Above ``traced`` needs the named
+  evidence, and an override on an output that has not qualified on the
+  vehicle must be held out by one of that output's regions.
 """
 
 from __future__ import annotations
 
 import hashlib
+import re
 from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
@@ -282,6 +289,10 @@ class Region(_Strict):
     status: Literal["conditional", "unevaluable"]
     when: str = Field(min_length=1)
     nodes: list[str] = Field(min_length=1)
+    #: Command overrides (E05.3) whose samples this region holds out: every
+    #: override on this output that has not qualified on the vehicle must be
+    #: named by one of the output's regions.
+    overrides: list[str] = Field(default_factory=list)
 
 
 class Output(_Strict):
@@ -325,6 +336,90 @@ class Uncovered(_Strict):
     next_evidence: str = Field(min_length=1)
 
 
+#: The operating regimes whose command overrides E05.3 identifies one by one.
+OverrideRegime = Literal["start", "warm_up", "closed_loop", "transient", "fuel_cut"]
+#: How the override was read: ``listing`` (the instructions read through),
+#: ``decompile_text`` (the decompiler's output, not line-checked against the
+#: listing), ``inferred`` (from use or naming, not read through).
+TraceSource = Literal["listing", "decompile_text", "inferred"]
+#: ``traced``: read from the code only, never checked. ``fixture``: condition
+#: and effect both read in a committed real capture and the effect followed.
+#: ``vehicle``: the same on a held-out drive.
+OverrideQualification = Literal["traced", "fixture", "vehicle"]
+
+_ADDRESS = re.compile(r"0xFFFF[0-9A-Fa-f]{4}\b")
+
+
+class Override(_Strict):
+    """One identified condition under which the firmware replaces or reshapes
+    a command (E05.3): where it is, what it reads and writes, how the trace
+    was made, and how far it has been checked. A traced override is
+    representable as exactly that; it qualifies only with named evidence."""
+
+    id: str = Field(pattern=r"^[a-z][a-z0-9_]*$")
+    regime: OverrideRegime
+    #: Model outputs whose value it overrides. Each must hold its samples out
+    #: through a region until the override qualifies on the vehicle.
+    acts_on: list[str] = Field(default_factory=list)
+    #: Declared RAM it writes that no output models (the injector pulse terms).
+    acts_on_ram: list[int] = Field(default_factory=list)
+    #: The traced nodes it lives in; every one is in ``routine``.
+    nodes: list[str] = Field(default_factory=list)
+    routine: int | None = Field(default=None, ge=0)
+    span: tuple[int, int] | None = None
+    condition: str = Field(min_length=1)
+    effect: str = Field(min_length=1)
+    reads: list[int] = Field(default_factory=list)
+    writes: list[int] = Field(default_factory=list)
+    rom: list[RomRef] = Field(default_factory=list)
+    established_by: TraceSource
+    #: Of the condition-to-effect reading itself; ``observed`` only once it
+    #: has qualified.
+    confidence: Confidence
+    evidence: list[str] = Field(min_length=1)
+    qualification: OverrideQualification
+    #: Tests or sessions where condition and effect were both read.
+    qualified_by: list[str] = Field(default_factory=list)
+    #: Observations that agree but do not qualify it (the condition was not
+    #: read with the effect, or the regime was not exercised).
+    consistent_with: list[str] = Field(default_factory=list)
+    #: What the trace did not reach.
+    gaps: list[str] = Field(default_factory=list)
+    verify_with: str = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def _honest(self) -> Override:
+        if (self.qualification == "traced") != (not self.qualified_by):
+            raise ValueError(
+                f"override {self.id}: qualified_by is required for, and only for, a "
+                f"qualification above traced (got {self.qualification})"
+            )
+        if self.qualification != "traced" and self.established_by == "inferred":
+            raise ValueError(
+                f"override {self.id}: an inferred trace cannot qualify; read it through first"
+            )
+        if (self.confidence == "observed") != (self.qualification != "traced"):
+            raise ValueError(
+                f"override {self.id}: confidence observed goes with, and only with, a "
+                "qualified override"
+            )
+        if self.established_by == "inferred" and self.confidence == "code":
+            raise ValueError(f"override {self.id}: an inferred trace is not confidence code")
+        if self.routine is None and not self.gaps:
+            raise ValueError(f"override {self.id}: an unrecorded routine is a gap; name it")
+        if self.nodes and self.routine is None:
+            raise ValueError(f"override {self.id}: nodes need the routine they share")
+        if self.span is not None and (self.routine is None or self.span[0] > self.span[1]):
+            raise ValueError(f"override {self.id}: span needs a routine and start <= end")
+        if not (self.acts_on or self.acts_on_ram or self.gaps):
+            raise ValueError(f"override {self.id}: name what it acts on, or the gap that hides it")
+        return self
+
+    def cited(self) -> set[int]:
+        """RAM addresses its condition and effect text cite."""
+        return {int(m, 16) for m in _ADDRESS.findall(f"{self.condition} {self.effect}")}
+
+
 class ApplicationModel(_Strict):
     schema_version: Literal[1]
     model_version: int = Field(ge=1)
@@ -335,6 +430,9 @@ class ApplicationModel(_Strict):
     nodes: list[Node] = Field(min_length=1)
     outputs: list[Output] = Field(min_length=1)
     uncovered: list[Uncovered] = Field(default_factory=list)
+    #: E05.3: warm-up, closed-loop, transient, fuel-cut and start overrides of
+    #: the commands, each with its trace and qualification.
+    overrides: list[Override] = Field(default_factory=list)
 
     @model_validator(mode="after")
     def _graph(self) -> ApplicationModel:
@@ -381,7 +479,12 @@ class ApplicationModel(_Strict):
         for output in self.outputs:
             _check_output(output, by_id, addresses)
         _check_intermediates(self.outputs, by_id)
+        _check_overrides(self.overrides, self.outputs, by_id, addresses)
         return self
+
+    def overrides_on(self, output_id: str) -> list[Override]:
+        """The overrides acting on one output, in declared order."""
+        return [o for o in self.overrides if output_id in o.acts_on]
 
     def node(self, node_id: str) -> Node:
         return next(n for n in self.nodes if n.id == node_id)
@@ -467,6 +570,77 @@ def _check_intermediates(outputs: list[Output], by_id: dict[str, Node]) -> None:
             raise ValueError(f"output {output.id}: an intermediate cannot be {fed.id}'s word")
         if output.written_by not in _reachable(fed.written_by, by_id):
             raise ValueError(f"output {output.id}: {output.written_by} is not on {fed.id}'s path")
+
+
+def _check_overrides(
+    overrides: list[Override],
+    outputs: list[Output],
+    by_id: dict[str, Node],
+    addresses: set[int],
+) -> None:
+    """Each override sits where its nodes are, touches only declared RAM,
+    cites only what it reads or writes, and acts on an output only from that
+    output's path. An override that has not qualified on the vehicle is held
+    out by a region of every output it acts on, so a traced override can never
+    leave its samples counted as if the twin covered them."""
+    ids = [o.id for o in overrides]
+    twice = sorted({i for i in ids if ids.count(i) > 1})
+    if twice:
+        raise ValueError(f"duplicate override ids: {twice}")
+    by_output = {o.id: o for o in outputs}
+    for override in overrides:
+        name = f"override {override.id}"
+        for node_id in override.nodes:
+            node = by_id.get(node_id)
+            if node is None:
+                raise ValueError(f"{name}: node {node_id!r} is not declared")
+            if node.function != override.routine:
+                raise ValueError(
+                    f"{name}: node {node_id} is in 0x{node.function:06X}, not routine "
+                    f"0x{override.routine or 0:06X}"
+                )
+        touched = [*override.reads, *override.writes, *override.acts_on_ram]
+        undeclared = [a for a in touched if a not in addresses]
+        if undeclared:
+            raise ValueError(
+                f"{name} touches RAM not declared under `ram`: {[f'0x{a:08X}' for a in undeclared]}"
+            )
+        loose = override.cited() - set(touched)
+        if loose:
+            raise ValueError(
+                f"{name}: its condition or effect cites RAM it neither reads nor writes: "
+                f"{sorted(f'0x{a:08X}' for a in loose)}"
+            )
+        for output_id in override.acts_on:
+            output = by_output.get(output_id)
+            if output is None:
+                raise ValueError(f"{name}: acts on undeclared output {output_id!r}")
+            reachable = _reachable(output.written_by, by_id)
+            off_path = [n for n in override.nodes if n not in reachable]
+            if not override.nodes or off_path:
+                raise ValueError(
+                    f"{name}: acts on {output_id} but its nodes {off_path or '[]'} are not "
+                    "on that output's path"
+                )
+            held_out = {i for r in output.regions for i in r.overrides}
+            if override.qualification != "vehicle" and override.id not in held_out:
+                raise ValueError(
+                    f"{name} is {override.qualification}, not vehicle-qualified: a region of "
+                    f"{output_id} must hold its samples out"
+                )
+    for output in outputs:
+        for region in output.regions:
+            stray = [i for i in region.overrides if output.id not in _acts_on(overrides, i)]
+            if stray:
+                raise ValueError(
+                    f"output {output.id} region {region.id}: {stray} are not overrides "
+                    "acting on this output"
+                )
+
+
+def _acts_on(overrides: list[Override], override_id: str) -> list[str]:
+    found = next((o for o in overrides if o.id == override_id), None)
+    return [] if found is None else found.acts_on
 
 
 def _reachable(start: str, by_id: dict[str, Node]) -> set[str]:
@@ -640,13 +814,36 @@ def _node_summary(node: Node) -> dict[str, Any]:
     }
 
 
+def _override_summary(override: Override) -> dict[str, Any]:
+    return {
+        "id": override.id,
+        "regime": override.regime,
+        "acts_on": list(override.acts_on),
+        "acts_on_ram": [_hex(a, 8) for a in override.acts_on_ram],
+        "nodes": list(override.nodes),
+        "routine": None if override.routine is None else _hex(override.routine),
+        "span": None if override.span is None else [_hex(a) for a in override.span],
+        "condition": override.condition,
+        "effect": override.effect,
+        "established_by": override.established_by,
+        "confidence": override.confidence,
+        "qualification": override.qualification,
+        "qualified_by": list(override.qualified_by),
+        "evidence": list(override.evidence),
+        "consistent_with": list(override.consistent_with),
+        "gaps": list(override.gaps),
+        "verify_with": override.verify_with,
+    }
+
+
 def coverage_report(
     model: ApplicationModel, model_sha256: str, *, image_sha256: str | None = None
 ) -> dict[str, Any]:
     """What the dashboard reports: each output's status (``qualified`` only
     with no blockers), what the twin implements, observes and assumes on its
-    path, the blockers with their nodes, the conditions and regions, and the
-    logic the trace reached without resolving.
+    path, the blockers with their nodes, the conditions and regions, the
+    logic the trace reached without resolving, and the command overrides
+    (E05.3) with each one's qualification.
 
     ``image_sha256`` (the running image, when known) adds whether the model's
     program was checked on it; the bytes themselves are checked by
@@ -672,6 +869,7 @@ def coverage_report(
                 "blockers": [b.model_dump() for b in output.blockers],
                 "equals_output_when": [c.model_dump() for c in output.equals_output_when],
                 "regions": [r.model_dump() for r in output.regions],
+                "overrides": [o.id for o in model.overrides_on(output.id)],
             }
         )
     image = None
@@ -706,6 +904,7 @@ def coverage_report(
         },
         "outputs": outputs,
         "uncovered": [u.model_dump() for u in model.uncovered],
+        "overrides": [_override_summary(o) for o in model.overrides],
     }
 
 
@@ -714,6 +913,7 @@ __all__ = [
     "Applicability",
     "ApplicationModel",
     "ApplicationModelRefusalError",
+    "Override",
     "applicability",
     "check_image",
     "check_image_sha",

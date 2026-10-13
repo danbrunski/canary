@@ -486,8 +486,83 @@ ECU replica.
     - **(c) Map switching** needs an operator decision (report) and the
       `0xFFFFB000`–`0xFFFFB00F` block with `0xFFFF2EE0` read through a known
       switch sequence.
-    - **(d)** Warm-up, closed-loop, transient and fuel-cut overrides are not
-      started.
+    - **(d) Overrides: desk part done 2026-10-13; qualification needs the
+      vehicle, and the gaps below need the listing.**
+      - *Data, not code.* `ecu_application_model.yaml` is `model_version` 5
+        and has a new `overrides:` list of 15 entries, each with routine,
+        span, nodes, condition, effect, RAM read and written, ROM constants,
+        `established_by` (`listing` / `decompile_text` / `inferred`),
+        `confidence`, `qualification` (`traced` / `fixture` / `vehicle`),
+        `qualified_by`, `consistent_with`, `gaps` and `verify_with`:
+        - start: `cranking_tp`;
+        - warm-up: `cold_request_direct_enrichment` (coolant below 115 →
+          state 5, the lookup word with no ramp) and
+          `coolant_correction_26e8`;
+        - closed loop: `closed_loop_phi_one` (any cell below the 130 gate
+          → φ 1.0, multiplier 0x4000), `closed_loop_curve_term` and
+          `closed_loop_feedback_stft` (0x05E368);
+        - transient: `enrichment_ramp`, `command_cap_and_slew`,
+          `bfs_fill_transient` and `injector_wall_film`;
+        - fuel cut: `fuel_cut_zero_command`, `fuel_cut_recovery_slew`,
+          `rev_limiter_cut`, `stationary_cut` and `limp_cut`.
+
+        New `uncovered`: `closed_loop_enable`, `fuel_cut_paths` and
+        `cold_fuel_comp_table`. Six RAM words were added (STFT B1/B2, the
+        measured A/F words, the feedback target and the wall-film term).
+      - *How established.* Consolidated from the 2026-10-04/05 listing and
+        decompiler passes recorded in the manifest's nodes and
+        `docs/ecu-firmware-analysis.md`. The listing (`~/ecu-re`) and the
+        private ROMs are not on this machine, so no instruction was re-read.
+        Each entry names its pass, and the decompile-only and unlocated
+        entries name what they lack. Two have no routine address at all
+        (`stationary_cut`, `limp_cut`).
+      - *Honest by schema* (`src/analysis/ecu_application.py`, `Override`):
+        - a qualification above `traced` needs `qualified_by`;
+        - an `inferred` trace cannot qualify;
+        - `confidence: observed` goes with qualification and only with it;
+        - an unrecorded routine must be named as a gap;
+        - the text may cite only the RAM the override reads or writes;
+        - an override acting on an output must sit on that output's path,
+          and must be held out by one of that output's regions until it
+          qualifies on the vehicle. On `target_equiv_ratio` five new regions
+          do that (`fuel_cut`, `closed_loop_hold`, `enrichment_ramp`,
+          `command_cap_and_slew`, `coolant_correction`) with the existing
+          `cold_state_5` and `fuel_cut_recovery`; on
+          `base_fuel_schedule_word` the existing `not_steady` and `cranking`
+          do it.
+
+        No output's blockers, twin or status moved.
+        `coverage_report` (and so `/control/ecu/application-model`) lists
+        the overrides, and each output the ids acting on it.
+      - *One fixture qualification.* `fuel_cut_zero_command` is `fixture`:
+        the 2026-10-04 slice's 18-byte reads from `0xFFFF26AE` carry the cut
+        state `0xFFFF26B8` and the command word in one reply. `0x3F` with a
+        zero word on 21/21 sentinel reads, `0x00` with a non-zero word on
+        153/153 others, the alignment pinned by the decoded channel, and the
+        neighbouring bytes do not separate the two
+        (`test_the_fuel_cut_state_and_the_zero_word_agree_on_every_october_4_read`).
+        It is not `vehicle`: one drive, not held out. The other 14 are
+        `traced`.
+      - *Consistent, not qualifying* (fixture tests):
+        - both STFT words read exactly `0x6400` on 21/21 cut reads, against
+          13 and 12 of 153 outside cut;
+        - `0xFFFF26B9` reads `0x03` on 173/174;
+        - `0xFFFF2841` bit 1 (the 6,200/5,800 limiter pair) is clear on
+          191/191.
+      - *Tests.* `tests/test_ecu_overrides.py`, 25 passed: schema refusals,
+        the report, unchanged blockers, the fixture checks. The existing
+        application-model, state-model and target-φ tests pass.
+      - *Remaining.*
+        - **Desk, with the listing:** the writer of `0xFFFF26B8` and its
+          place in the cycle (`fuel_cut_recovery_slew` holds only if the cut
+          state is cleared after the fuel task); the stationary and limp-cut
+          routines; what the rev limiter writes; the STFT enable; the store
+          of `0xFFFF26DC`; the cold Fuel Comp table's readers.
+        - **Vehicle:** each `verify_with`. The catalog's `fuel_target`
+          window, read with all four members, is 57 bytes from
+          `0xFFFF26AE`. It already carries `0xFFFF26B4`–`26B9`,
+          `0xFFFF26BE`–`26CF` and `0xFFFF26DC`, so a capture made with it can
+          score several overrides (none is in this repo).
 
 - [~] **E05.4 — Add ignition and later identified outputs incrementally.**
   Start by tracing both timing-trim readers through the final ignition
