@@ -40,14 +40,15 @@ pasted token. Each row below is now built, as each item records.
 
 ## P1: onto a network from the phone (`network-and-provisioning.md` N1)
 
-- [~] **P1.1 Improv WiFi over BLE**, with the gate and the status
-  characteristic. The code, tests and `docs/ble-provisioning.md` landed on
-  2026-10-12 (`ab78d54`). `install_pi.sh` installs and enables
-  `canary-provision.service` (2026-10-13,
-  `test_phone_setup_update_and_first_boot_units_are_installed`). Still open:
-  a bench run with Android Chrome on improv-wifi.com (P1.2).
-- [ ] **P1.2 Bench acceptance.** On a freshly installed Pi with no WiFi
-  profile, provision from Android and confirm three things:
+- [x] **P1.1 Improv WiFi over BLE**, with the gate and the status
+  characteristic. Implementation complete: the code, tests and
+  `docs/ble-provisioning.md` landed on 2026-10-12 (`ab78d54`), and
+  `install_pi.sh` installs and enables `canary-provision.service`
+  (`8f46a20`, `test_phone_setup_update_and_first_boot_units_are_installed`).
+  Its on-device run is P1.2.
+- [ ] **P1.2 Bench acceptance.** A test, with nothing to build, deferred to
+  the truck and phone session (operator, 2026-10-13). On a freshly installed
+  Pi with no WiFi profile, provision from Android and confirm three things:
   - the dashboard link the provisioner returns opens;
   - after that, a second provisioning is refused until a window is opened;
   - nRF Connect reads the status characteristic.
@@ -82,9 +83,10 @@ pasted token. Each row below is now built, as each item records.
   addresses (also from `/status`, so the phone learns the IP it should
   bookmark). Add an "Allow a phone to change WiFi for 5 min" button that calls
   `POST /control/network/provisioning/window`.
-- [~] **P2.4 Pairing instead of a pasted token** (desk complete; truck check
-  open) (operator decisions
-  2026-10-12). Physical presence is the proof: a person in the car turns the
+- [x] **P2.4 Pairing instead of a pasted token.** Implementation complete
+  (`ab78d54`, `04238c3`, `57d1e73`, `3135d51`); its sub-items below are ticked
+  except the truck check, deferred to the truck session (operator,
+  2026-10-13). Operator decisions of 2026-10-12: physical presence is the proof: a person in the car turns the
   key ACC → ON → ACC. It is ACC rather than OFF because a Pi on a switched
   lighter socket would lose power at OFF; OBD-port power needs the X1202.
   Each device gets its own revocable token, and the shared token stays for
@@ -149,7 +151,7 @@ pasted token. Each row below is now built, as each item records.
 
 ## P3: software update from the UI (extends `tasks/S02-pi-updater.md`)
 
-- [~] **P3.1 A root trigger the daemon can pull.** (`ecf97de`)
+- [x] **P3.1 A root trigger the daemon can pull.** (`ecf97de`, `8f46a20`)
   `canary-update.path` and `.service`, with `src/control/update_runner.py`
   (root, checkout venv). The request is renamed away before Python runs, and
   read with `O_NOFOLLOW` within a size cap. Status goes to
@@ -157,8 +159,9 @@ pasted token. Each row below is now built, as each item records.
   both units and starts the path unit (2026-10-13). `canary-update` runs git
   as root with `safe.directory` passed through `GIT_CONFIG_*`. On 2026-10-13
   git 2.39.5 (Debian bookworm, a container) refused a root `rev-parse` in a
-  user-owned repository without it and accepted it with it. Open: a real
-  update run from the phone. The daemon cannot run sudo
+  user-owned repository without it and accepted it with it. Implementation
+  complete; a real update run from the phone is deferred to the truck
+  session (operator, 2026-10-13). The daemon cannot run sudo
   and should not be able to. Use the same pattern as the UPS keep-alive and
   the provisioning window:
   - The daemon writes `/run/canary/update_request`.
@@ -209,9 +212,11 @@ pasted token. Each row below is now built, as each item records.
   (`CaptureRunner`), with the active profile visible on every page
   (`CaptureProfileBanner`). Editing a profile can stay desktop-first, but it
   must not be broken at phone width.
-- [~] **P5.2 ROM read and download on Android.** Desk part done (`b25f6d8`):
-  the card and table fit 412px, and the memory map has tap selection and
-  step buttons. Open: the three on-device checks below. Run `EcuBackupCard` end to
+- [x] **P5.2 ROM read and download on Android.** Implementation complete
+  (`b25f6d8`): the card and table fit 412px (`e2e/phone.spec.ts`), the memory
+  map has tap selection and step buttons, and the refusal wording is covered
+  by `EcuBackupCard.test.tsx`. The three on-device checks below are deferred
+  to the truck session (operator, 2026-10-13). Run `EcuBackupCard` end to
   end on a phone:
   - the precondition refusal reads clearly (`vehicle_state` must allow it);
   - progress survives the screen sleeping;
@@ -228,7 +233,8 @@ pasted token. Each row below is now built, as each item records.
 
 ## Remaining
 
-Each of these needs the Pi, the truck or a real phone:
+Nothing here is left to build. Each of these is a check on the Pi, the truck
+or a real phone, deferred to one session there (operator, 2026-10-13):
 
 1. **P1.2 bench acceptance.** Provision a fresh Pi from Android Chrome. Then
    confirm a second setup is refused until a window opens, and that nRF
