@@ -119,3 +119,31 @@ def test_names_are_cleaned() -> None:
 def test_default_path_follows_state_dir(tmp_path: Path) -> None:
     assert default_path(tmp_path) == tmp_path / "control" / "paired_devices.json"
     assert default_path(None).name == "paired_devices.json"
+
+
+def test_rename_is_durable_and_keeps_the_token(tmp_path: Path) -> None:
+    path = tmp_path / "devices.json"
+    store = PairedDevices(path, clock=lambda: NOW)
+    device, token = store.pair("Android phone", method="key-cycle")
+    renamed = store.rename(device.id, "  Dan's\nPixel ")
+    assert renamed is not None and renamed.name == "Dan'sPixel"
+    assert renamed.id == device.id and renamed.method == "key-cycle"
+    reloaded = PairedDevices(path, clock=lambda: NOW)
+    assert [d.name for d in reloaded.list()] == ["Dan'sPixel"]
+    assert reloaded.authenticate(token) is not None
+    assert store.rename("no-such-device", "x") is None
+
+
+def test_a_rename_the_disk_refused_does_not_show(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    store = PairedDevices(tmp_path / "devices.json")
+    device, _ = store.pair("Pixel", method="test")
+
+    def full(*_: object) -> None:
+        raise OSError("No space left on device")
+
+    monkeypatch.setattr("src.control.paired_devices._durable_write", full)
+    with pytest.raises(OSError):
+        store.rename(device.id, "Renamed")
+    assert [d.name for d in store.list()] == ["Pixel"]

@@ -5,16 +5,54 @@ from __future__ import annotations
 import ipaddress
 import secrets
 from collections.abc import Awaitable, Callable
+from dataclasses import dataclass
+from typing import Literal
 
 from fastapi import Header, HTTPException, Request, WebSocket, WebSocketException, status
 from starlette.requests import HTTPConnection
 
-from src.control.paired_devices import PairedDevices
+from src.control.paired_devices import PairedDevice, PairedDevices
 
 #: Attribute set on every shared auth dependency, naming its rule. The route
 #: snapshot (``tests/test_route_table_snapshot.py``) reads it to prove every
 #: ``/control/*`` route carries the one shared dependency, not a copy.
 AUTH_MARKER = "canary_auth"
+#: ``request.state`` attribute the shared dependency fills with the caller.
+CALLER_STATE_ATTR = "control_caller"
+
+
+@dataclass(frozen=True)
+class ControlCaller:
+    """Who a guarded request was authorized as.
+
+    ``device``: a paired device's own token. ``shared-token``: the shared
+    control token (SSH, MCP, scripts). ``loopback``: no token configured and
+    the peer is local.
+    """
+
+    kind: Literal["device", "shared-token", "loopback"]
+    device: PairedDevice | None = None
+
+    @property
+    def label(self) -> str:
+        """The paired device's id, else the kind: what an audit trail records."""
+        return self.device.id if self.device is not None else self.kind
+
+
+def control_caller(connection: HTTPConnection) -> ControlCaller:
+    """The caller the shared auth dependency authorized for this request.
+
+    Every route behind :func:`control_auth_dependency` gets it for free. A
+    route that is not behind it gets an error here rather than an anonymous
+    caller, so "who did this" cannot silently read as nobody.
+    """
+    caller = getattr(connection.state, CALLER_STATE_ATTR, None)
+    if not isinstance(caller, ControlCaller):
+        raise RuntimeError(
+            f"{connection.url.path} has no authorized caller: "
+            "the route is not behind control_auth_dependency"
+        )
+    return caller
 
 
 def _client_is_loopback(request: HTTPConnection) -> bool:
@@ -41,22 +79,19 @@ def _require_control_auth(
     *,
     client_is_loopback: bool = False,
     devices: PairedDevices | None = None,
-) -> None:
+) -> ControlCaller:
     """Bearer-token guard for mutating control-plane routes.
 
     Accepts the shared control token or a paired device's own token
-    (``src.control.paired_devices``).
+    (``src.control.paired_devices``), and returns which one it was.
     """
-    if (
-        devices is not None
-        and authorization is not None
-        and authorization.startswith("Bearer ")
-        and devices.authenticate(authorization[len("Bearer ") :]) is not None
-    ):
-        return
+    if devices is not None and authorization is not None and authorization.startswith("Bearer "):
+        device = devices.authenticate(authorization[len("Bearer ") :])
+        if device is not None:
+            return ControlCaller(kind="device", device=device)
     if control_token is None or control_token == "":
         if client_is_loopback:
-            return
+            return ControlCaller(kind="loopback")
         raise HTTPException(status_code=503, detail="control API token is not configured")
     presented = ""
     if authorization is not None and authorization.startswith("Bearer "):
@@ -69,6 +104,7 @@ def _require_control_auth(
             detail="missing or invalid bearer token",
             headers={"WWW-Authenticate": "Bearer"},
         )
+    return ControlCaller(kind="shared-token")
 
 
 def control_auth_dependency(control_token: str | None) -> Callable[..., None]:
@@ -78,19 +114,21 @@ def control_auth_dependency(control_token: str | None) -> Callable[..., None]:
     no token is configured. Four route modules used to carry their own
     identical closure; every guarded route now depends on this one. Paired
     device tokens are found through the request's app, so no route has to
-    pass the store along.
+    pass the store along. The authorized caller lands on ``request.state``
+    for :func:`control_caller`, so no route has to re-authenticate to learn it.
     """
 
     def require_control_auth(
         request: Request,
         authorization: str | None = Header(default=None),
     ) -> None:
-        _require_control_auth(
+        caller = _require_control_auth(
             control_token,
             authorization,
             client_is_loopback=_client_is_loopback(request),
             devices=_paired_devices(request),
         )
+        setattr(request.state, CALLER_STATE_ATTR, caller)
 
     setattr(require_control_auth, AUTH_MARKER, "control")
     return require_control_auth
@@ -111,7 +149,7 @@ def websocket_control_auth_dependency(
     async def require_control_auth(websocket: WebSocket) -> None:
         token = websocket.query_params.get("token")
         try:
-            _require_control_auth(
+            caller = _require_control_auth(
                 control_token,
                 None if token is None else f"Bearer {token}",
                 client_is_loopback=_client_is_loopback(websocket),
@@ -119,6 +157,7 @@ def websocket_control_auth_dependency(
             )
         except HTTPException as exc:
             raise WebSocketException(code=status.WS_1008_POLICY_VIOLATION) from exc
+        setattr(websocket.state, CALLER_STATE_ATTR, caller)
 
     setattr(require_control_auth, AUTH_MARKER, "control")
     return require_control_auth
@@ -126,8 +165,11 @@ def websocket_control_auth_dependency(
 
 __all__ = [
     "AUTH_MARKER",
+    "CALLER_STATE_ATTR",
+    "ControlCaller",
     "_client_is_loopback",
     "_require_control_auth",
     "control_auth_dependency",
+    "control_caller",
     "websocket_control_auth_dependency",
 ]

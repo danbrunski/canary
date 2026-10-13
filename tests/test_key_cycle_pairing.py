@@ -227,3 +227,62 @@ def test_an_approval_survives_a_failed_save(car: Car, monkeypatch: pytest.Monkey
         car.pairing.status(req.id, req.secret)
     monkeypatch.undo()
     assert "token" in _collect(car, req.id, req.secret)
+
+
+# --- approval by a trusted caller -----------------------------------------
+
+
+def test_pending_lists_waiting_requests_oldest_first_without_secrets(car: Car) -> None:
+    first = car.pairing.request("Android phone")
+    car.hold(ACC, 3)
+    second = car.pairing.request("Laptop")
+    pending = car.pairing.pending()
+    assert [p.id for p in pending] == [first.id, second.id]
+    assert pending[0].age_s == pytest.approx(3.0)
+    assert pending[1].expires_in_s == pytest.approx(REQUEST_TTL_S)
+    public = pending[0].public()
+    assert set(public) == {"id", "name", "age_s", "expires_in_s"}
+    assert first.secret not in str(public)
+
+
+def test_approve_picks_one_of_several_and_records_who(car: Car) -> None:
+    owner = car.pairing.request("Android phone")
+    laptop = car.pairing.request("Laptop")
+    assert car.pairing.approve(laptop.id, by="a1b2c3")
+    done = _collect(car, laptop.id, laptop.secret)
+    assert done["status"] == "approved"
+    assert done["device"]["method"] == "approved-by:a1b2c3"
+    assert "a1b2c3" in done["detail"]
+    assert car.devices.authenticate(done["token"]) is not None
+    # The other request is untouched: still waiting, still listed.
+    assert _collect(car, owner.id, owner.secret)["status"] == "waiting"
+    assert [p.id for p in car.pairing.pending()] == [owner.id]
+    assert "pairing.approved" in car.events
+
+
+def test_approve_only_a_waiting_request(car: Car) -> None:
+    req = car.pairing.request("Android phone")
+    assert car.pairing.approve(req.id, by="shared-token")
+    assert not car.pairing.approve(req.id, by="shared-token")  # already approved
+    with pytest.raises(KeyError):
+        car.pairing.approve("no-such-request", by="shared-token")
+    stale = car.pairing.request("Old phone")
+    car.hold(ACC, REQUEST_TTL_S + 2)
+    assert not car.pairing.approve(stale.id, by="shared-token")  # expired
+    assert car.pairing.pending() == []
+
+
+def test_approval_cannot_rescue_a_conflict(car: Car) -> None:
+    car.hold(ACC)
+    owner = car.pairing.request("Android phone")
+    car.pairing.request("Galaxy S23")
+    car.cycle()
+    assert not car.pairing.approve(owner.id, by="shared-token")
+    assert car.devices.list() == []
+
+
+def test_a_key_cycle_approval_is_announced(car: Car) -> None:
+    car.hold(ACC)
+    car.pairing.request("Android phone")
+    car.cycle()
+    assert "pairing.approved" in car.events

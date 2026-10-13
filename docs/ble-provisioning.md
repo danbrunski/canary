@@ -78,10 +78,38 @@ car can produce that, so it is the proof. The code is
 
 Each paired device has its own token. The Pi stores only a hash of it, in
 `paired_devices.json` beside the control state, written so a power cut cannot
-tear it. `GET /control/devices` lists the devices and
-`DELETE /control/devices/{id}` removes a lost one. The shared token
-(`/etc/canary/control.token`) stays the key for SSH, the MCP server and
-scripts.
+tear it. **System → Paired Devices** in the dashboard lists them, renames
+them and removes a lost one (`GET`/`PATCH`/`DELETE /control/devices`). The
+shared token (`/etc/canary/control.token`) stays the key for SSH, the MCP
+server and scripts.
+
+### Approving from a paired device, or on the bench
+
+Something that already holds a token can vouch for a new device instead of
+the key. It picks the request by name, so the key cycle's two-at-once rule
+does not apply.
+
+- **From a paired phone or laptop.** Every page of a paired dashboard shows
+  "Android phone wants to pair — Approve / Ignore" the moment a request
+  arrives (control event `pairing.requested` on `/ws/control`). The Paired
+  Devices panel lists the waiting requests too. Ignore hides it on that
+  device only; it still expires after 2 minutes.
+- **On a bench Pi with no vehicle**, over SSH on the Pi itself:
+
+  ```bash
+  scripts/canaryctl.py --host localhost:8000 pair            # list; approve a lone one after a yes
+  scripts/canaryctl.py --host localhost:8000 pair --approve <id>
+  scripts/canaryctl.py --host localhost:8000 devices [--remove <id>]
+  ```
+
+  On the Pi, `canaryctl` reads `/etc/canary/control.token` when no token is
+  set. With several requests waiting it never guesses: name one with
+  `--approve`.
+
+The new device's `method` records who approved it: `key-cycle`,
+`approved-by:<device id>`, or `approved-by:shared-token`
+(`GET /control/pairing/requests`,
+`POST /control/pairing/requests/{id}/approve`).
 
 ## Where did it go? The status characteristic (N1.3)
 
@@ -147,9 +175,10 @@ same contract as the UPS keep-alive hold.
   the key ACC → ON → ACC to reopen setup and set it up again.
 - **An accidental cycle while a stranger's request waits.** If someone on the
   Pi's network asks to pair, and within 2 minutes you happen to turn ACC →
-  ON → ACC with no request of your own, their request is approved. Check
-  `/control/devices` if that worries you. Approval from an already-paired
-  phone (planned) will show such requests as they arrive.
+  ON → ACC with no request of your own, their request is approved. A paired
+  phone shows every request as it arrives, so you see the stranger's name
+  before you turn the key; check System → Paired Devices afterwards if that
+  worries you.
 
 ## What a join does
 

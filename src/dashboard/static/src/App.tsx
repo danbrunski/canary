@@ -1,3 +1,4 @@
+import { PairingApprovalPrompt } from "./components/PairingApprovalPrompt";
 import { PairingCard } from "./components/PairingCard";
 import { useAnomalyStream } from "./hooks/useAnomalyStream";
 import { useBehaviorLive } from "./hooks/useBehaviorLive";
@@ -69,6 +70,7 @@ export default function App() {
       {!controlToken.hasToken && connectivity === "live-pi" && (
         <PairingCard onPaired={controlToken.setToken} />
       )}
+      {controlToken.hasToken && <PairingApprovalPrompt token={controlToken.token} />}
       {mode === "driving" ? (
         <DriveScreen
           channels={telemetry.channels}

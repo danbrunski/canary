@@ -45,6 +45,7 @@ export type WorkbenchItem =
   | "system-capture-profiles"
   | "system-power"
   | "system-network"
+  | "system-paired-devices"
   | "system-control"
   | "system-test"
   | "system-info";

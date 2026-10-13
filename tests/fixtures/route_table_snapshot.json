@@ -743,7 +743,23 @@
     {
       "auth": "control",
       "body": false,
+      "method": "GET",
+      "path": "/control/devices/me",
+      "query": [],
+      "status_code": null
+    },
+    {
+      "auth": "control",
+      "body": false,
       "method": "DELETE",
+      "path": "/control/devices/{device_id}",
+      "query": [],
+      "status_code": null
+    },
+    {
+      "auth": "control",
+      "body": true,
+      "method": "PATCH",
       "path": "/control/devices/{device_id}",
       "query": [],
       "status_code": null
@@ -932,6 +948,22 @@
       "body": true,
       "method": "POST",
       "path": "/control/obd_request",
+      "query": [],
+      "status_code": null
+    },
+    {
+      "auth": "control",
+      "body": false,
+      "method": "GET",
+      "path": "/control/pairing/requests",
+      "query": [],
+      "status_code": null
+    },
+    {
+      "auth": "control",
+      "body": false,
+      "method": "POST",
+      "path": "/control/pairing/requests/{request_id}/approve",
       "query": [],
       "status_code": null
     },

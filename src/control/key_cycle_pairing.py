@@ -20,6 +20,12 @@ for, so approval is all-or-nothing:
 - None waiting: the cycle opens the BLE provisioning window instead
   (``src.provisioning.gate``), so changing WiFi later needs only the car.
 
+**Approval by someone already trusted.** A paired device, or a holder of the
+shared token (``canaryctl pair`` on a bench Pi), may approve one waiting
+request by its id (:meth:`KeyCyclePairing.approve`). The conflict rule does
+not apply: the approver chose that request by name, which is exactly what a
+key cycle cannot do. The new device's ``method`` records who approved it.
+
 Evidence that is not the car never counts. ``replay`` re-emits a stored
 session, ``passive`` means CANary is not asking the ECM, and ``unknown`` is
 unclassified. Any of them resets the detector.
@@ -33,7 +39,7 @@ import secrets
 import threading
 import time
 from collections.abc import Callable
-from dataclasses import dataclass, replace
+from dataclasses import asdict, dataclass, replace
 from pathlib import Path
 from typing import Any, Literal
 
@@ -106,6 +112,27 @@ class PairingRequest:
     #: ``waiting``, ``approved``, ``conflict`` or ``expired``.
     status: str = "waiting"
     detail: str = ""
+    #: Who approved it when it was not a key cycle: a paired device's id, or
+    #: ``shared-token``. ``None`` for a key-cycle approval.
+    approved_by: str | None = None
+
+    @property
+    def method(self) -> str:
+        """The paired device's ``method``: how this request was approved."""
+        return "key-cycle" if self.approved_by is None else f"approved-by:{self.approved_by}"
+
+
+@dataclass(frozen=True)
+class PendingRequest:
+    """A waiting request as a trusted caller sees it: never its secret."""
+
+    id: str
+    name: str
+    age_s: float
+    expires_in_s: float
+
+    def public(self) -> dict[str, Any]:
+        return asdict(self)
 
 
 @dataclass
@@ -186,7 +213,7 @@ class KeyCyclePairing:
             if req.status == "approved":
                 # Paired before the request is dropped: if the disk refuses,
                 # the approval survives for the next poll.
-                device, token = self._devices.pair(req.name, method="key-cycle")
+                device, token = self._devices.pair(req.name, method=req.method)
             del self._requests[req.id]
             if req.status != "approved":
                 return payload
@@ -201,6 +228,49 @@ class KeyCyclePairing:
                 return False
             del self._requests[request_id]
             return True
+
+    def pending(self) -> list[PendingRequest]:
+        """Waiting requests, oldest first, for a trusted caller to choose from."""
+        with self._lock:
+            now = self._clock()
+            self._expire(now)
+            waiting = sorted(
+                (r for r in self._requests.values() if r.status == "waiting"),
+                key=lambda r: r.created_at,
+            )
+            return [
+                PendingRequest(
+                    id=r.id,
+                    name=r.name,
+                    age_s=now - r.created_at,
+                    expires_in_s=max(0.0, r.created_at + REQUEST_TTL_S - now),
+                )
+                for r in waiting
+            ]
+
+    def approve(self, request_id: str, *, by: str) -> bool:
+        """Approve one waiting request chosen by an already-trusted caller.
+
+        ``by`` names the approver (a paired device's id, or ``shared-token``)
+        and becomes the device's ``method``. The key-cycle conflict rule does
+        not apply: the approver picked this request, a key cycle cannot.
+        Returns False when the request exists but is no longer waiting
+        (approved, a conflict, expired); raises :class:`KeyError` when there
+        is no such request at all.
+        """
+        with self._lock:
+            self._expire(self._clock())
+            req = self._requests.get(request_id)
+            if req is None:
+                raise KeyError(request_id)
+            if req.status != "waiting":
+                return False
+            self._requests[req.id] = replace(
+                req, status="approved", approved_by=by, detail=f"Approved by {by}."
+            )
+        log.warning("pairing request %s (%s) approved by %s", req.id, req.name, by)
+        self._publish("pairing.approved", "ok", {"id": req.id, "name": req.name, "by": by})
+        return True
 
     def _step(self, req: PairingRequest) -> Step:
         if not self._observed.available:
@@ -289,6 +359,8 @@ class KeyCyclePairing:
             return
         self._requests[req.id] = replace(req, status="approved")
         log.warning("key cycle approved pairing request %s (%s)", req.id, req.name)
+        # Lets every other device's approval prompt close (approve() does the same).
+        self._publish("pairing.approved", "ok", {"id": req.id, "name": req.name, "by": "key-cycle"})
 
     async def _run(self) -> None:
         while True:

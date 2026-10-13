@@ -6,6 +6,7 @@ Examples:
   scripts/canaryctl.py --host http://192.168.0.230:8000 capture start --protocol drive
   scripts/canaryctl.py --host http://192.168.0.230:8000 tag highway_cruise
   scripts/canaryctl.py --host http://192.168.0.230:8000 capture stop
+  scripts/canaryctl.py --host http://localhost:8000 pair    # on the Pi, over SSH
 
 Set CANARY_HOST and CANARY_CONTROL_TOKEN to avoid repeating flags.
 """
@@ -91,6 +92,23 @@ def _resolve_default(file_env: dict[str, str], *names: str) -> str | None:
     return None
 
 
+#: Where ``install_pi.sh`` puts the shared token (root:canary, 0640).
+DEFAULT_TOKEN_FILE = Path("/etc/canary/control.token")
+
+
+def _token_file_value() -> str | None:
+    """The shared token from the Pi's own token file, when run on the Pi.
+
+    Lets ``canaryctl pair`` over SSH work without copying the token around.
+    ``CANARY_CONTROL_TOKEN_FILE`` overrides the path, as in ``install_pi.sh``.
+    """
+    path = Path(os.environ.get("CANARY_CONTROL_TOKEN_FILE") or DEFAULT_TOKEN_FILE)
+    try:
+        return path.read_text().strip() or None
+    except (OSError, UnicodeDecodeError):
+        return None
+
+
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         prog="canaryctl",
@@ -107,11 +125,15 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument(
         "--token",
-        default=_resolve_default(file_env, "CANARY_CONTROL_TOKEN", "CANARY_TOKEN"),
+        default=(
+            _resolve_default(file_env, "CANARY_CONTROL_TOKEN", "CANARY_TOKEN")
+            or _token_file_value()
+        ),
         help=(
             "Bearer token for /control endpoints. Defaults to "
             "$CANARY_CONTROL_TOKEN, then CANARY_CONTROL_TOKEN in "
-            "~/.canary/env (CANARY_TOKEN accepted as a fallback)."
+            "~/.canary/env (CANARY_TOKEN accepted as a fallback), then "
+            "/etc/canary/control.token when run on the Pi."
         ),
     )
 
@@ -209,6 +231,20 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     upload.add_argument("model_type", choices=["isolation_forest", "lstm_autoencoder"])
     upload.add_argument("--artifact", required=True)
     upload.add_argument("--manifest", required=True)
+
+    pair = sub.add_parser(
+        "pair",
+        help="Approve a device waiting to pair (a bench Pi with no key to turn).",
+        description=(
+            "List devices waiting to pair. With exactly one waiting, ask to approve it "
+            "(--yes skips the question); with several, name one with --approve ID."
+        ),
+    )
+    pair.add_argument("--approve", metavar="ID", default=None, help="Approve this request.")
+    pair.add_argument("--yes", action="store_true", help="Approve a lone request unasked.")
+
+    devices = sub.add_parser("devices", help="List paired devices, or remove one.")
+    devices.add_argument("--remove", metavar="ID", default=None, help="Remove this device.")
 
     return parser.parse_args(argv)
 
@@ -352,7 +388,59 @@ def _dispatch(args: argparse.Namespace) -> dict[str, Any]:
                 body={"artifact_b64": artifact, "manifest": manifest},
             )
 
+    if args.command == "pair":
+        return _pair(host, args)
+    if args.command == "devices":
+        if args.remove is not None:
+            return _request_json(
+                host, "DELETE", f"/control/devices/{args.remove}", token=args.token
+            )
+        return _request_json(host, "GET", "/control/devices", token=args.token)
+
     raise RuntimeError(f"unsupported command: {args.command}")
+
+
+def _confirm(question: str) -> bool:
+    """Ask on the terminal; stdout stays the JSON result. No terminal is a no."""
+    if not sys.stdin.isatty():
+        return False
+    print(f"{question} [y/N] ", end="", file=sys.stderr, flush=True)
+    return sys.stdin.readline().strip().lower() in ("y", "yes")
+
+
+def _pair(host: str, args: argparse.Namespace) -> dict[str, Any]:
+    """Approve a waiting pairing request with the shared token.
+
+    The bench path (docs/ble-provisioning.md): a Pi with no vehicle has no key
+    to turn, so whoever holds the shared token vouches for the device instead.
+    A lone request still needs a yes, because a stranger on the same network
+    can make one too: read the name before approving it.
+    """
+    if args.approve is not None:
+        return _approve(host, args.approve, token=args.token)
+    waiting = _request_json(host, "GET", "/control/pairing/requests", token=args.token)
+    requests = waiting.get("requests", [])
+    if not requests:
+        return {
+            "requests": [],
+            "detail": "No device is waiting to pair. Tap 'Pair this device' on it first.",
+        }
+    if len(requests) > 1:
+        return {
+            "requests": requests,
+            "detail": f"{len(requests)} devices are waiting; approve one with --approve ID.",
+        }
+    (only,) = requests
+    question = f"Approve {only['name']!r} (request {only['id']}, {only['age_s']:.0f} s old)?"
+    if not (args.yes or _confirm(question)):
+        return {"requests": requests, "approved": None, "detail": "Not approved."}
+    return _approve(host, str(only["id"]), token=args.token)
+
+
+def _approve(host: str, request_id: str, *, token: str | None) -> dict[str, Any]:
+    return _request_json(
+        host, "POST", f"/control/pairing/requests/{request_id}/approve", token=token, body={}
+    )
 
 
 def _base_url(host: str) -> str:

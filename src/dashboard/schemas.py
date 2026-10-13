@@ -226,6 +226,12 @@ class PairingRequestCreate(_ControlRequest):
     name: str = Field(default="", max_length=128)
 
 
+class PairedDeviceRename(_ControlRequest):
+    """``PATCH /control/devices/{id}``: a paired device's new display name."""
+
+    name: str = Field(..., min_length=1, max_length=128)
+
+
 class CanActivityRequest(_ControlRequest):
     """Capture N seconds of raw CAN traffic (the ``can_activity`` tool).
 

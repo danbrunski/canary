@@ -57,8 +57,8 @@ class PairedDevice:
     id: str
     name: str
     paired_at: float
-    #: How it was paired: ``bluetooth-setup`` today; approval and key-cycle
-    #: pairing (P2.4 parts 2 and 3) will add their own.
+    #: How it was paired: ``key-cycle``, or ``approved-by:<device id>`` /
+    #: ``approved-by:shared-token`` when a trusted caller approved it.
     method: str
     token_sha256: str
     last_seen: float | None = None
@@ -185,9 +185,30 @@ class PairedDevices:
                     log.warning("could not record last_seen: %s", exc)
         return device
 
+    def is_paired(self, device_id: str) -> bool:
+        with self._lock:
+            return any(d.id == device_id for d in self._devices.values())
+
     def list(self) -> list[PairedDevice]:
         with self._lock:
             return sorted(self._devices.values(), key=lambda d: d.paired_at)
+
+    def rename(self, device_id: str, name: str) -> PairedDevice | None:
+        """Give a device a new display name; ``None`` if no such device.
+
+        Saved before it is live, like :meth:`pair`: a name the disk refused
+        must not show until the next restart and then revert.
+        """
+        with self._lock:
+            for digest, device in self._devices.items():
+                if device.id == device_id:
+                    renamed = replace(device, name=clean_name(name))
+                    devices = {**self._devices, digest: renamed}
+                    self._save(devices)
+                    self._devices = devices
+                    log.info("renamed paired device %s to %s", device.id, renamed.name)
+                    return renamed
+        return None
 
     def remove(self, device_id: str) -> PairedDevice | None:
         with self._lock:

@@ -44,6 +44,7 @@ import { ModelPanel } from "./ModelPanel";
 import { MonitorsPanel } from "./MonitorsPanel";
 import { NetworkPanel } from "./NetworkPanel";
 import { PlaceholderPanel } from "./PlaceholderPanel";
+import { PairedDevicesPanel } from "./PairedDevicesPanel";
 import { PowerPanel } from "./PowerPanel";
 import { ProfilesPanel } from "./ProfilesPanel";
 import { SessionsPanel } from "./SessionsPanel";
@@ -204,6 +205,8 @@ function renderItem(
       return <PowerPanel token={d.token} />;
     case "system-network":
       return <NetworkPanel token={d.token} status={d.status} />;
+    case "system-paired-devices":
+      return <PairedDevicesPanel token={d.token} />;
     case "observe-charts":
       return <ChartsPanel channels={d.channels} token={d.token} />;
     case "observe-alarms":
