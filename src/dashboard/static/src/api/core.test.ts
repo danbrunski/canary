@@ -1,6 +1,14 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { controlBlob, fetchJson, HttpError, NetworkError, queryString } from "./core";
+import {
+  controlBlob,
+  fetchJson,
+  HttpError,
+  NetworkError,
+  queryString,
+  requireFields,
+  UnexpectedResponseError,
+} from "./core";
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -97,5 +105,27 @@ describe("getBinnedAnalysis query (R08.4)", () => {
     expect(fetchMock.mock.calls[1][0]).toBe(
       "/analysis/binned?value=obd%3AMAF&x=&x_bins=0&agg=mean",
     );
+  });
+});
+
+describe("requireFields (phone-ui P3.1: a daemon of another version)", () => {
+  it("passes a response that has every field", () => {
+    const body = { stored: [], pending: [], permanent: [] };
+    expect(requireFields("/obd/dtc", body, ["stored", "pending"])).toBe(body);
+  });
+
+  it("names every missing field, which an empty body ({}) lacks", () => {
+    const empty = {} as { stored: unknown[]; pending: unknown[] };
+    expect(() => requireFields("/obd/dtc", empty, ["stored", "pending"])).toThrow(
+      UnexpectedResponseError,
+    );
+    expect(() => requireFields("/obd/dtc", empty, ["stored", "pending"])).toThrow(
+      "The daemon's /obd/dtc response has no stored, pending.",
+    );
+  });
+
+  it("treats null as missing", () => {
+    const body = { rows: null } as unknown as { rows: unknown[] };
+    expect(() => requireFields("/obd/coverage", body, ["rows"])).toThrow("has no rows");
   });
 });

@@ -29,6 +29,34 @@ export class NetworkError extends Error {
   }
 }
 
+/** A 200 whose body lacks fields the page reads: an empty body (which
+ *  `fetchJson` returns as `{}`), or a daemon older or newer than this
+ *  dashboard, as for a minute after a software update. Raised as an error so
+ *  the page shows its load-error state instead of crashing on `undefined`. */
+export class UnexpectedResponseError extends Error {
+  constructor(path: string, missing: readonly string[]) {
+    super(
+      `The daemon's ${path} response has no ${missing.join(", ")}. ` +
+        "The dashboard and daemon may be different versions; reload once an update finishes.",
+    );
+    this.name = "UnexpectedResponseError";
+  }
+}
+
+/** Refuse a response missing any of `fields`, so a page can index them
+ *  without guarding each one. */
+export function requireFields<T extends object>(
+  path: string,
+  body: T,
+  fields: readonly (keyof T & string)[],
+): T {
+  const record: Record<string, unknown> =
+    typeof body === "object" && body !== null ? (body as Record<string, unknown>) : {};
+  const missing = fields.filter((field) => record[field] === undefined || record[field] === null);
+  if (missing.length > 0) throw new UnexpectedResponseError(path, missing);
+  return body;
+}
+
 function requestUrl(input: RequestInfo | URL): string {
   if (typeof input === "string") return input;
   if (input instanceof URL) return input.href;

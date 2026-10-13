@@ -71,9 +71,9 @@ import type {
   ReadCodesResult,
 } from "../types/diagnostics";
 import type { NetworkResponse, ProvisioningWindowResponse } from "../types/network";
-import { controlBlob, controlJson, fetchJson, jsonBody, queryString } from "./core";
+import { controlBlob, controlJson, fetchJson, jsonBody, queryString, requireFields } from "./core";
 
-export { HttpError, NetworkError } from "./core";
+export { HttpError, NetworkError, UnexpectedResponseError } from "./core";
 
 /** Key-cycle pairing (`src/control/key_cycle_pairing.py`): no token needed,
  *  since these are how a device gets one. The request secret rides a header so
@@ -272,14 +272,15 @@ export function stopReplay(token: string): Promise<ReplayStatusResponse> {
   });
 }
 
-export function listSessions(
+export async function listSessions(
   token: string,
   signal?: AbortSignal,
   baseUrl?: string,
   captures = false,
 ): Promise<SessionsResponse> {
-  const suffix = captures ? "?captures=true" : "";
-  return controlJson<SessionsResponse>(`/control/sessions${suffix}`, token, { signal }, baseUrl);
+  const path = `/control/sessions${captures ? "?captures=true" : ""}`;
+  const body = await controlJson<SessionsResponse>(path, token, { signal }, baseUrl);
+  return requireFields(path, body, ["sessions"]);
 }
 
 export function getCaptureProfiles(
@@ -509,8 +510,9 @@ export function syncSessionToCompanion(
 // --- Phase-6 panels --------------------------------------------------------
 
 /** `/obd/coverage` is read-only + unauthenticated (Task 6.3). */
-export function getObdCoverage(signal?: AbortSignal): Promise<ObdCoverageResponse> {
-  return fetchJson("/obd/coverage", { signal });
+export async function getObdCoverage(signal?: AbortSignal): Promise<ObdCoverageResponse> {
+  const body = await fetchJson<ObdCoverageResponse>("/obd/coverage", { signal });
+  return requireFields("/obd/coverage", body, ["rows", "custom_pids", "undecoded_supported"]);
 }
 
 /** `/can/coverage` — static catalog of decodable broadcast-CAN signals. */
@@ -526,15 +528,17 @@ export function getDids(signal?: AbortSignal): Promise<DidMapResponse> {
 /** `/obd/dtc` is read-only + unauthenticated, like `/obd/coverage` (Task
  *  1.5) — the cached stored/pending/permanent DTC report. No clear-codes
  *  endpoint exists; this API surface is read-only by design. */
-export function getDtc(signal?: AbortSignal): Promise<DtcReportResponse> {
-  return fetchJson("/obd/dtc", { signal });
+export async function getDtc(signal?: AbortSignal): Promise<DtcReportResponse> {
+  const body = await fetchJson<DtcReportResponse>("/obd/dtc", { signal });
+  return requireFields("/obd/dtc", body, ["stored", "pending", "permanent"]);
 }
 
 /** `/obd/monitors` (Task 3.1) — cached Mode 06 on-board monitor sweep:
  *  per-cylinder misfire counts + raw monitor test results. Read-only, like
  *  `/obd/dtc` above. */
-export function getMonitors(signal?: AbortSignal): Promise<MonitorsResponse> {
-  return fetchJson("/obd/monitors", { signal });
+export async function getMonitors(signal?: AbortSignal): Promise<MonitorsResponse> {
+  const body = await fetchJson<MonitorsResponse>("/obd/monitors", { signal });
+  return requireFields("/obd/monitors", body, ["misfire_counts", "results"]);
 }
 
 /** `/analysis/llm-assist/cards` (Task S.2) — public/read-only like
@@ -546,11 +550,13 @@ export function getLlmAssistCards(signal?: AbortSignal): Promise<LlmAssistCardsR
 
 /** `/sessions/{id}/trip-summary` is read-only + unauthenticated, like
  *  `/obd/dtc` (Task 1.5) — computed on demand from the stored session. */
-export function getTripSummary(
+export async function getTripSummary(
   sessionId: string,
   signal?: AbortSignal,
 ): Promise<TripSummaryResponse> {
-  return fetchJson(`/sessions/${encodeURIComponent(sessionId)}/trip-summary`, { signal });
+  const path = `/sessions/${encodeURIComponent(sessionId)}/trip-summary`;
+  const body = await fetchJson<TripSummaryResponse>(path, { signal });
+  return requireFields(path, body, ["summary"]);
 }
 
 /** `/control/sessions/{id}/digest` is authenticated (auth-consistency
@@ -559,14 +565,19 @@ export function getTripSummary(
  *  authenticated `/control/*` routes (see getTrends below). Computed on
  *  demand if the trip-end hook hasn't already written
  *  `digest.json`. */
-export function getSessionDigest(
+export async function getSessionDigest(
   token: string,
   sessionId: string,
   signal?: AbortSignal,
 ): Promise<SessionDigestResponse> {
-  return controlJson(`/control/sessions/${encodeURIComponent(sessionId)}/digest`, token, {
-    signal,
-  });
+  const path = `/control/sessions/${encodeURIComponent(sessionId)}/digest`;
+  const body = await controlJson<SessionDigestResponse>(path, token, { signal });
+  return requireFields(path, body, [
+    "anomaly_counts_by_source",
+    "fingerprint_top_movers",
+    "new_dtcs",
+    "new_ledger_events",
+  ]);
 }
 
 /** `/analysis/binned` (Task 5.1) is read-only + unauthenticated, same
@@ -632,11 +643,19 @@ export function getTestProfiles(signal?: AbortSignal): Promise<TestProfilesRespo
   return fetchJson("/test-profiles", { signal });
 }
 
-export function getDatasetHealth(
+export async function getDatasetHealth(
   token: string,
   signal?: AbortSignal,
 ): Promise<DatasetHealthResponse> {
-  return controlJson("/control/datasets/health", token, { signal });
+  const body = await controlJson<DatasetHealthResponse>("/control/datasets/health", token, {
+    signal,
+  });
+  return requireFields("/control/datasets/health", body, [
+    "sessions",
+    "mode_coverage",
+    "channel_availability",
+    "readiness",
+  ]);
 }
 
 export function getTrainingRuns(
@@ -663,8 +682,9 @@ export function approveTrainingRun(
   );
 }
 
-export function getTuning(token: string, signal?: AbortSignal): Promise<TuningResponse> {
-  return controlJson("/control/tuning", token, { signal });
+export async function getTuning(token: string, signal?: AbortSignal): Promise<TuningResponse> {
+  const body = await controlJson<TuningResponse>("/control/tuning", token, { signal });
+  return requireFields("/control/tuning", body, ["tuning"]);
 }
 
 export function updateTuning(
@@ -692,8 +712,12 @@ export function revertTuning(token: string, version: number): Promise<TuningResp
   });
 }
 
-export function getProfiles(token: string, signal?: AbortSignal): Promise<VehicleProfilesResponse> {
-  return controlJson<VehicleProfilesResponse>("/control/profiles", token, { signal });
+export async function getProfiles(
+  token: string,
+  signal?: AbortSignal,
+): Promise<VehicleProfilesResponse> {
+  const body = await controlJson<VehicleProfilesResponse>("/control/profiles", token, { signal });
+  return requireFields("/control/profiles", body, ["profiles"]);
 }
 
 export function updateProfileName(
@@ -751,8 +775,9 @@ export function getTrends(token: string, signal?: AbortSignal): Promise<TrendsRe
 
 /** `/control/tires` — tire wear from the trip digests (rolling circumference
  *  trend, estimated tread depth once a gauge reading is on the ledger). */
-export function getTires(token: string, signal?: AbortSignal): Promise<TireStatus> {
-  return controlJson<TireStatus>("/control/tires", token, { signal });
+export async function getTires(token: string, signal?: AbortSignal): Promise<TireStatus> {
+  const body = await controlJson<TireStatus>("/control/tires", token, { signal });
+  return requireFields("/control/tires", body, ["drives", "caveats"]);
 }
 
 /** Record a tire fact on the vehicle ledger: a gauge tread reading (the
@@ -818,8 +843,12 @@ export function deleteVehicleEvent(
   });
 }
 
-export function getPowerStatus(token: string, signal?: AbortSignal): Promise<PowerStatusResponse> {
-  return controlJson<PowerStatusResponse>("/control/power", token, { signal });
+export async function getPowerStatus(
+  token: string,
+  signal?: AbortSignal,
+): Promise<PowerStatusResponse> {
+  const body = await controlJson<PowerStatusResponse>("/control/power", token, { signal });
+  return requireFields("/control/power", body, ["power"]);
 }
 
 export function setKeepAlive(token: string, minutes: number): Promise<PowerKeepaliveResponse> {
@@ -830,8 +859,9 @@ export function setKeepAlive(token: string, minutes: number): Promise<PowerKeepa
 }
 
 /** What the Pi joined and its addresses, plus the BLE provisioning window (P2.3). */
-export function getNetwork(token: string, signal?: AbortSignal): Promise<NetworkResponse> {
-  return controlJson<NetworkResponse>("/control/network", token, { signal });
+export async function getNetwork(token: string, signal?: AbortSignal): Promise<NetworkResponse> {
+  const body = await controlJson<NetworkResponse>("/control/network", token, { signal });
+  return requireFields("/control/network", body, ["network", "provisioning"]);
 }
 
 /** Open the BLE provisioning window for `minutes` (`0` closes it). */
@@ -845,8 +875,9 @@ export function setProvisioningWindow(
   });
 }
 
-export function getFeedback(token: string, signal?: AbortSignal): Promise<FeedbackResponse> {
-  return controlJson("/control/feedback", token, { signal });
+export async function getFeedback(token: string, signal?: AbortSignal): Promise<FeedbackResponse> {
+  const body = await controlJson<FeedbackResponse>("/control/feedback", token, { signal });
+  return requireFields("/control/feedback", body, ["feedback", "summary"]);
 }
 
 export function postFeedback(
@@ -874,8 +905,12 @@ export function postFeedback(
   });
 }
 
-export function getCustomPids(token: string, signal?: AbortSignal): Promise<CustomPidsResponse> {
-  return controlJson("/control/custom-pids", token, { signal });
+export async function getCustomPids(
+  token: string,
+  signal?: AbortSignal,
+): Promise<CustomPidsResponse> {
+  const body = await controlJson<CustomPidsResponse>("/control/custom-pids", token, { signal });
+  return requireFields("/control/custom-pids", body, ["custom_pids"]);
 }
 
 export function addCustomPid(token: string, pid: CustomPid): Promise<{ custom_pid: CustomPid }> {
@@ -906,13 +941,13 @@ export function importCustomPidsCsv(
 
 /** `/control/diagnostics/functions`: the diagnostic functions this vehicle's
  *  profile records (today, reading and clearing a K-line module's codes). */
-export function getDiagnosticFunctions(
+export async function getDiagnosticFunctions(
   token: string,
   signal?: AbortSignal,
 ): Promise<DiagnosticFunctionsResponse> {
-  return controlJson<DiagnosticFunctionsResponse>("/control/diagnostics/functions", token, {
-    signal,
-  });
+  const path = "/control/diagnostics/functions";
+  const body = await controlJson<DiagnosticFunctionsResponse>(path, token, { signal });
+  return requireFields(path, body, ["diagnostic_functions"]);
 }
 
 /** Read one module's stored codes. Resolves after the module answered (or

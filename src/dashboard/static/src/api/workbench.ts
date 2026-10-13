@@ -30,19 +30,17 @@ import type {
   RomTablesResponse,
   RomUploadResponse,
 } from "../types/romLibrary";
-import { controlBlob, controlJson, jsonBody, queryString } from "./core";
+import { controlBlob, controlJson, jsonBody, queryString, requireFields } from "./core";
 
 function choiceParams(choice: SessionChoice) {
   return { sessions: choice.sessions.join(","), revision: choice.revision };
 }
 
 /** `GET /control/logs` — the capture browser (W04.1). */
-export function getLogs(token: string, includeSessions: boolean, signal?: AbortSignal) {
-  return controlJson<LogsResponse>(
-    `/control/logs${queryString({ include_sessions: includeSessions })}`,
-    token,
-    { signal },
-  );
+export async function getLogs(token: string, includeSessions: boolean, signal?: AbortSignal) {
+  const path = `/control/logs${queryString({ include_sessions: includeSessions })}`;
+  const body = await controlJson<LogsResponse>(path, token, { signal });
+  return requireFields(path, body, ["logs"]);
 }
 
 /** `GET /control/sessions/{id}/frame` — one log as a wide frame (W04.3). */
@@ -138,8 +136,9 @@ export function getDyno(
 }
 
 /** `GET /control/calibration` — running revision and flash history. */
-export function getCalibration(token: string, signal?: AbortSignal) {
-  return controlJson<CalibrationResponse>("/control/calibration", token, { signal });
+export async function getCalibration(token: string, signal?: AbortSignal) {
+  const body = await controlJson<CalibrationResponse>("/control/calibration", token, { signal });
+  return requireFields("/control/calibration", body, ["history"]);
 }
 
 /** `POST /control/calibration` — record a flash in the registry. */
@@ -151,8 +150,10 @@ export function recordFlash(token: string, flash: FlashRecordRequest) {
 }
 
 /** `GET /control/memory-channels` — RAM channels and their evidence state. */
-export function getMemoryChannels(token: string, signal?: AbortSignal) {
-  return controlJson<MemoryChannelsResponse>("/control/memory-channels", token, { signal });
+export async function getMemoryChannels(token: string, signal?: AbortSignal) {
+  const path = "/control/memory-channels";
+  const body = await controlJson<MemoryChannelsResponse>(path, token, { signal });
+  return requireFields(path, body, ["channels"]);
 }
 
 /** `POST /control/memory-channels/verify` — re-read and check each address. */

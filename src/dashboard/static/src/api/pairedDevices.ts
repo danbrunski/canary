@@ -2,7 +2,7 @@
 // (`src/dashboard/routes/pairing.py`, docs/roadmap/phone-ui.md P2.4). All of
 // these need a control token; a paired device's own token counts.
 
-import { controlJson, jsonBody } from "./core";
+import { controlJson, jsonBody, requireFields } from "./core";
 
 export interface PairedDevice {
   id: string;
@@ -36,11 +36,14 @@ export interface ApprovePairingResult {
 
 const enc = encodeURIComponent;
 
-export function listPairedDevices(
+export async function listPairedDevices(
   token: string,
   signal?: AbortSignal,
 ): Promise<{ devices: PairedDevice[] }> {
-  return controlJson("/control/devices", token, { signal });
+  const body = await controlJson<{ devices: PairedDevice[] }>("/control/devices", token, {
+    signal,
+  });
+  return requireFields("/control/devices", body, ["devices"]);
 }
 
 export function getDeviceMe(token: string, signal?: AbortSignal): Promise<DeviceMe> {
@@ -62,11 +65,13 @@ export function removePairedDevice(token: string, id: string): Promise<{ removed
   return controlJson(`/control/devices/${enc(id)}`, token, { method: "DELETE" });
 }
 
-export function listPairingRequests(
+export async function listPairingRequests(
   token: string,
   signal?: AbortSignal,
 ): Promise<{ requests: PendingPairingRequest[] }> {
-  return controlJson("/control/pairing/requests", token, { signal });
+  const path = "/control/pairing/requests";
+  const body = await controlJson<{ requests: PendingPairingRequest[] }>(path, token, { signal });
+  return requireFields(path, body, ["requests"]);
 }
 
 export function approvePairingRequest(token: string, id: string): Promise<ApprovePairingResult> {

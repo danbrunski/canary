@@ -9,33 +9,46 @@ import type {
   MemoryResponse,
   TwinSessionResponse,
 } from "../types/brain";
-import { controlJson, jsonBody, queryString } from "./core";
+import { controlJson, jsonBody, queryString, requireFields } from "./core";
 
 const enc = encodeURIComponent;
 
 /** `GET /control/brain/status` — identity, invalidations, transient state. */
-export function getBrainStatus(token: string, signal?: AbortSignal) {
-  return controlJson<BrainStatus>("/control/brain/status", token, { signal });
+export async function getBrainStatus(token: string, signal?: AbortSignal) {
+  const body = await controlJson<BrainStatus>("/control/brain/status", token, { signal });
+  return requireFields("/control/brain/status", body, [
+    "identity",
+    "last_change",
+    "tables",
+    "ram_addresses",
+    "transient",
+    "memory",
+    "jobs",
+  ]);
 }
 
 /** `GET /control/brain/memory` — `MemoryQuery` filters as query parameters. */
-export function queryMemory(
+export async function queryMemory(
   token: string,
   params: { kind?: string; text?: string; session?: string; history?: boolean },
   signal?: AbortSignal,
 ) {
-  return controlJson<MemoryResponse>(`/control/brain/memory${queryString(params)}`, token, {
-    signal,
-  });
+  const body = await controlJson<MemoryResponse>(
+    `/control/brain/memory${queryString(params)}`,
+    token,
+    { signal },
+  );
+  return requireFields("/control/brain/memory", body, ["records"]);
 }
 
 /** `GET /control/brain/investigations/{id}/card` — the deterministic card. */
-export function getInvestigationCard(token: string, id: string, signal?: AbortSignal) {
-  return controlJson<InvestigationCardResponse>(
+export async function getInvestigationCard(token: string, id: string, signal?: AbortSignal) {
+  const body = await controlJson<InvestigationCardResponse>(
     `/control/brain/investigations/${enc(id)}/card`,
     token,
     { signal },
   );
+  return requireFields("/control/brain/investigations/{id}/card", body, ["card", "parts"]);
 }
 
 /** `GET /control/brain/twin/sessions/{session}` — the twin's evaluation. */
@@ -46,8 +59,9 @@ export function getTwinSession(token: string, session: string, signal?: AbortSig
 }
 
 /** `GET /control/brain/jobs` — idle-time jobs and their states. */
-export function getBrainJobs(token: string, signal?: AbortSignal) {
-  return controlJson<BrainJobsResponse>("/control/brain/jobs", token, { signal });
+export async function getBrainJobs(token: string, signal?: AbortSignal) {
+  const body = await controlJson<BrainJobsResponse>("/control/brain/jobs", token, { signal });
+  return requireFields("/control/brain/jobs", body, ["jobs"]);
 }
 
 /** `POST /control/brain/jobs` — queue work for the next idle window. */
