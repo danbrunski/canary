@@ -1,5 +1,6 @@
 import { PairingApprovalPrompt } from "./components/PairingApprovalPrompt";
 import { PairingCard } from "./components/PairingCard";
+import { PanelErrorBoundary } from "./components/PanelErrorBoundary";
 import { PhoneNav } from "./components/PhoneNav";
 import { useAnomalyStream } from "./hooks/useAnomalyStream";
 import { useBehaviorLive } from "./hooks/useBehaviorLive";
@@ -91,11 +92,13 @@ export default function App() {
       )}
       {controlToken.hasToken && <PairingApprovalPrompt token={controlToken.token} />}
       {mode === "driving" ? (
-        <DriveScreen
-          channels={telemetry.channels}
-          bindings={bindings}
-          scheduler={status?.health?.obd_scheduler}
-        />
+        <PanelErrorBoundary resetKey="drive">
+          <DriveScreen
+            channels={telemetry.channels}
+            bindings={bindings}
+            scheduler={status?.health?.obd_scheduler}
+          />
+        </PanelErrorBoundary>
       ) : (
         <Workbench active={item} onNavigate={setItem} data={data} phone={phone} />
       )}

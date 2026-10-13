@@ -1,3 +1,4 @@
+import { PanelErrorBoundary } from "../components/PanelErrorBoundary";
 import { useEffect, useRef } from "react";
 
 import type { ChannelSnapshot } from "../hooks/useTelemetryStream";
@@ -116,7 +117,9 @@ export function Workbench({ active, onNavigate, data, phone = false }: Workbench
         </div>
       )}
       <div className={cn(responsiveGridClass, "grid-cols-1")}>
-        {renderItem(active, data, onNavigate, tuning)}
+        <PanelErrorBoundary resetKey={active}>
+          {renderItem(active, data, onNavigate, tuning)}
+        </PanelErrorBoundary>
       </div>
     </>
   );
