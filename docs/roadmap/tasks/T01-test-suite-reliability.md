@@ -827,20 +827,18 @@ measurement in hand.
     `.git/ci-gate/failed-logs/20261013T150458Z-8f46a20-pytest.log`. Two
     different tests in one hour point at the shared ledger path, not at
     either test.
-- [ ] **T01.27 `tests/test_residual_chain.py` failed under load (four tests).**
-  - **Seen** 2026-10-13 by another session in a full local pytest run, while
-    it worked on H08. They passed alone, in parallel on their own, in a second
-    full run and in the push gate. No log or error text was kept. Next time
-    it shows up, keep the failure text and the load average.
-  - **Seen again** 2026-10-13 in a different test, so the cause is in the
-    shared ledger rather than one test. The push gate for `7cf315b` (a KiCad
-    board file only) failed
+  - **And a third:** the push gate for `7cf315b` (a KiCad board file only)
+    failed
     `tests/test_twin_investigation.py::test_a_later_occurrence_of_the_same_direction_updates_its_investigation`
     with the same `ValueError` at `_append_locked`. It passed serially. Log:
     `.git/ci-gate/failed-logs/20261013T150132Z-7cf315b-pytest.log`.
-  - **Probably the same, traceback not kept:** earlier that day four
-    `tests/test_residual_chain.py` tests (B08.5, which appends to the same
-    ledger) failed in one full parallel `pytest -m "not integration and not
-    slow"` run on the laptop. They passed alone, 3 of 3 runs in parallel on
-    their own, and in a second full run. That run was outside the gate, so
-    no log was kept.
+- [ ] **T01.27 `tests/test_residual_chain.py` failed under load (four tests).**
+  - **Seen** 2026-10-13 by another session in one full parallel
+    `pytest -m "not integration and not slow"` run on the laptop, while it
+    worked on H08. They passed alone, 3 of 3 runs in parallel on their own, in
+    a second full run and in the push gate. That run was outside the gate, so
+    no log or error text was kept. Next time it shows up, keep the failure
+    text and the load average.
+  - **Probably T01.26:** B08.5's residual chain appends to the same evidence
+    ledger, and T01.26's `ValueError` hit three other ledger tests that day.
+    Close this with T01.26 if the ledger fix stops it.
