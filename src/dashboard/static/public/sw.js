@@ -27,7 +27,10 @@ const SHELL = [
 
 self.addEventListener("install", (event) => {
   event.waitUntil(
-    caches.open(CACHE).then((c) => c.addAll(SHELL)).then(() => self.skipWaiting()),
+    caches
+      .open(CACHE)
+      .then((c) => c.addAll(SHELL))
+      .then(() => self.skipWaiting()),
   );
 });
 
@@ -35,9 +38,7 @@ self.addEventListener("activate", (event) => {
   event.waitUntil(
     caches
       .keys()
-      .then((keys) =>
-        Promise.all(keys.filter((k) => k !== CACHE).map((k) => caches.delete(k))),
-      )
+      .then((keys) => Promise.all(keys.filter((k) => k !== CACHE).map((k) => caches.delete(k))))
       .then(() => self.clients.claim()),
   );
 });
@@ -65,9 +66,7 @@ self.addEventListener("fetch", (event) => {
 
   if (request.mode === "navigate") {
     // App shell: try network, fall back to the cached index for offline.
-    event.respondWith(
-      fetch(request).catch(() => caches.match("/index.html")),
-    );
+    event.respondWith(fetch(request).catch(() => caches.match("/index.html")));
     return;
   }
 
