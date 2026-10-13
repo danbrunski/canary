@@ -36,6 +36,7 @@ pasted token. Each row below is now built, as each item records.
 | ROM download | Backup and download fit 412px, with a tap-friendly memory map (P5.2, desk part) |
 | Control token on a phone | Pairing by key cycle, by a paired device, or over SSH (P2.4) |
 | A panel that crashes | Contained to that panel (`PanelErrorBoundary`); the app no longer blanks |
+| A daemon of another version | Pages show their load error, not a crash: `requireFields` in `api/core.ts`; `e2e/emptyDaemon.spec.ts` opens every page against `{}` responses (2026-10-13) |
 
 ## P1: onto a network from the phone (`network-and-provisioning.md` N1)
 
