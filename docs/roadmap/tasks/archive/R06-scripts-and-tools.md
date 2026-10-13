@@ -1,6 +1,6 @@
 # R06 — scripts and tools
 
-Opened 2026-09-24 from the refactor review ([R00](R00-refactor-README.md)).
+Opened 2026-09-24 from the refactor review ([R00](../R00-refactor-README.md)).
 The July refactor gave `scripts/` a shared preamble (`scripts/_cli.py`).
 `tools/` never got one. The bus tools written since, for memory channels,
 DID logging and sweeps and batch probing, copy each other and import each

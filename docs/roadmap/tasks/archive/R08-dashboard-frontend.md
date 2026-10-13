@@ -1,6 +1,6 @@
 # R08 — dashboard frontend
 
-Opened 2026-09-24 from the refactor review ([R00](R00-refactor-README.md)).
+Opened 2026-09-24 from the refactor review ([R00](../R00-refactor-README.md)).
 The stack is React 18, TypeScript, Vite and Tailwind v4, and `pnpm typecheck`
 is clean.
 

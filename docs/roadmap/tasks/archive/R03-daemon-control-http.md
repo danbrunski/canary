@@ -1,6 +1,6 @@
 # R03 — daemon, control and the HTTP layer
 
-Opened 2026-09-24 from the refactor review ([R00](R00-refactor-README.md)).
+Opened 2026-09-24 from the refactor review ([R00](../R00-refactor-README.md)).
 Three problems carry most of the weight here:
 
 - **One route function.** `src/dashboard/routes/control.py` is 1,823 lines,

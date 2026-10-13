@@ -1,5 +1,12 @@
 # Implementation task index
 
+**Status 2026-10-13: fourteen finished checklists archived.** D05, P01,
+R01–R04, R06–R09, S03, W05 and W08 had every box ticked; they moved to
+[`archive/`](archive/) with their links. W00 went with them, since every W file
+is now archived. T01 stays here although it is fully ticked: `scripts/ci_gate.sh`
+and AGENTS.md send "FLAKY UNDER LOAD" reports to it, so it is a standing
+receptacle, not a finished plan. R00 stays until R05.16 closes.
+
 **Status 2026-10-04: E07, coupled engine/ECU simulator.**
 [`E07-engine-plant-simulator.md`](E07-engine-plant-simulator.md) plans an
 engine physics model connected to the ROM-backed ECU twin, validated with
@@ -35,7 +42,7 @@ firmware findings and expands qualified outputs incrementally. All new
 implementation work starts unchecked; the overnight queue is unchanged.
 
 **Status 2026-09-27: R09, package layering.**
-[`R09-package-layering.md`](R09-package-layering.md) gives `src/` one import
+[`R09-package-layering.md`](archive/R09-package-layering.md) gives `src/` one import
 direction. Nineteen pairs of packages import each other, up from 3 in May and
 13 two weeks ago. They trace to four misplacements, not nineteen:
 
@@ -55,7 +62,7 @@ pure move with an identical 900 s replay. The remaining work is R09.6 (the
 overnight queue is unchanged.
 
 **Status 2026-09-26: P01 and P02, pipeline memory and time.**
-[`P01-derived-session-frames.md`](P01-derived-session-frames.md) took the
+[`P01-derived-session-frames.md`](archive/P01-derived-session-frames.md) took the
 training and evaluation chain from 12–15 GB per long session to about 1.3 GB.
 It does this by reducing sessions before the pivot and storing each 1 Hz frame
 once. [`P02-raw-reads-evaluation-and-pi-costs.md`](P02-raw-reads-evaluation-and-pi-costs.md)
@@ -165,7 +172,7 @@ D03.25 is worth reading before any retrain: it is the same debt as D02.5 and
 D03.22, and a fourth reason for it arrived this week.
 
 **Status 2026-09-21 — a second live set: the workbench checklists.**
-[`W00-workbench-README.md`](W00-workbench-README.md) indexes seven files
+[`W00-workbench-README.md`](archive/W00-workbench-README.md) indexes seven files
 (W01–W07) covering the dashboard regroup and the Engine Tuning pages planned in
 [`../workbench-workflows.md`](../workbench-workflows.md). They are independent
 of D03, which remains the live checklist for collection and diagnostics. W07

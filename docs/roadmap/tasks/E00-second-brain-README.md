@@ -97,14 +97,14 @@ acceptance.
 
 | Existing work | E-series responsibility |
 |---|---|
-| [W08 ROM Library](W08-rom-library.md), [W05 trace coverage](W05-rom-maps-trace-coverage.md) | Consume exact images, table definitions and verified axis mappings; close a remaining prerequisite there with linked evidence. Do not build another ROM store. |
+| [W08 ROM Library](archive/W08-rom-library.md), [W05 trace coverage](archive/W05-rom-maps-trace-coverage.md) | Consume exact images, table definitions and verified axis mappings; close a remaining prerequisite there with linked evidence. Do not build another ROM store. |
 | [B06 delivery error](B06-lambda-delivery-error.md) | Consume its command-versus-measured residual and eligibility; the twin predicts the command itself. A twin residual cannot replace a delivery residual. |
 | [B08 firmware-informed behavior](B08-firmware-informed-behavior.md) | Consume qualified models using actual Fuel Comp/timing context and the throttle-fill/MAF comparison. Keep ECU-computation, engine-response and historical residuals distinct; B08 owns candidate evaluation, E05 owns decoded calculations. |
 | [B03 lifecycle](B03-behavior-lifecycle-and-refit.md), [online training](../online-training-strategy.md) | Reuse disposition, held-out validation, reference retirement and promotion. E03 adds the investigation/candidate connections. |
 | [A05 plausibility](A05-plausibility-checks.md) | Consume qualified existing checks; E-series does not rebuild or declare them completed. |
 | [LLM-assist S.5](../llm-assist-and-compute-roadmap.md#implementation-checklist--seams-only-sequencing-step-1) | E01 owns the shared resolvable-evidence implementation; update S.5 only when its own acceptance passes. |
 | [N01 experiments](N01-na-rom-response-experiments.md), [supercharger plan](../supercharger-build.md) | E03 records predictions/outcomes and unresolved history; it does not initiate flashes or fabricate missing pre-build evidence. |
-| [S03 state](S03-state-out-of-checkout.md), [D03 open work](D03-open-work.md) | Reuse runtime paths, bounded analysis jobs and capture/restart rules. |
+| [S03 state](archive/S03-state-out-of-checkout.md), [D03 open work](D03-open-work.md) | Reuse runtime paths, bounded analysis jobs and capture/restart rules. |
 
 The optional language interface and distillation remain lower-priority work
 in the parent roadmap's Part B and LLM-assist plan. Their host choices do not

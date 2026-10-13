@@ -1,6 +1,6 @@
 # W — workbench navigation and Engine Tuning pages
 
-Implementation checklists for [`../workbench-workflows.md`](../workbench-workflows.md),
+Implementation checklists for [`../workbench-workflows.md`](../../workbench-workflows.md),
 which holds the reasoning. Read that first; these files only say what to build,
 in what order, and how to know it is done.
 
@@ -10,18 +10,18 @@ commit, screenshot, or measurement), `[~]` for partial with the remainder named.
 
 | file | covers | roadmap task | needs the truck |
 |---|---|---|---|
-| [W01](archive/W01-navigation-regroup.md) ✅ | five groups, renames, redirects, reserved entries | W1, W10 | no |
-| [W02](archive/W02-tuning-context-bar.md) | shared context bar, calibration id in `/status`, readiness chips | W2 | one KOEO probe |
-| [W03](archive/W03-logging-page.md) ✅ | Logging page, ended-capture announcement | W3, W4 | final check only |
-| [W04](archive/W04-logs-and-analysis.md) ✅ | Logs (table / visual) and Analysis pages | W5, W6 | no |
-| [W05](W05-rom-maps-trace-coverage.md) | ECM-coordinate trace, coverage overlay | W7, W8 | final check only |
-| [W06](archive/W06-calibration-page.md) ✅ | flash history, memory-channel state, re-verify | W9 | final check only |
-| [W07](archive/W07-flash-interlocks.md) ✅ | the two AGENTS.md conditions as server-side code | W11 | no |
-| [W08](W08-rom-library.md) | ROM library, memory map, compare, ECU backup (read-only) | operator request 2026-10-04 | W08.9 only (KOEO) |
+| [W01](W01-navigation-regroup.md) ✅ | five groups, renames, redirects, reserved entries | W1, W10 | no |
+| [W02](W02-tuning-context-bar.md) ✅ | shared context bar, calibration id in `/status`, readiness chips | W2 | one KOEO probe |
+| [W03](W03-logging-page.md) ✅ | Logging page, ended-capture announcement | W3, W4 | final check only |
+| [W04](W04-logs-and-analysis.md) ✅ | Logs (table / visual) and Analysis pages | W5, W6 | no |
+| [W05](W05-rom-maps-trace-coverage.md) ✅ | ECM-coordinate trace, coverage overlay | W7, W8 | final check only |
+| [W06](W06-calibration-page.md) ✅ | flash history, memory-channel state, re-verify | W9 | final check only |
+| [W07](W07-flash-interlocks.md) ✅ | the two AGENTS.md conditions as server-side code | W11 | no |
+| [W08](W08-rom-library.md) ✅ | ROM library, memory map, compare, ECU backup (read-only) | operator request 2026-10-04 | W08.9 only (KOEO) |
 
-✅ complete and moved to [`archive/`](archive/). W02 and W05 stay live: each
-has one item that needs the truck (W02.1 KOEO probe; W05.1 X-trace mapping,
-plus W05's final drive check).
+✅ complete and moved to [`archive/`](./). As of 2026-10-13 every file
+here is archived (W05 closed with `6430d7f3`, W08 with its KOEO backup), and
+this index moved to `archive/` with them.
 
 ## Order
 

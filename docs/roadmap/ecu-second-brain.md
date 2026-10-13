@@ -1107,7 +1107,7 @@ source cannot be inferred from φ being close to the prediction. Check live
 `replay`.
 
 Read axes, cell bytes and their definitions from the per-vehicle
-[ROM Library (W08)](tasks/W08-rom-library.md). Every prediction carries the
+[ROM Library (W08)](tasks/archive/W08-rom-library.md). Every prediction carries the
 **plain image SHA-256**, active slot, table/axis references, profile/decoder
 version and twin code version; a tune name or `.OsirisROM` container hash
 alone is insufficient. The October 4 reference is image

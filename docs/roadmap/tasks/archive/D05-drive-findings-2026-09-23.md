@@ -3,7 +3,7 @@
 A separate file on purpose: `D03-open-work.md` was mid-edit by another session
 (D03.29) when these were found. Same conventions as D03: `[x]` only with the
 measurement in hand and the session named. Fold into D03 when it is free.
-Evidence: [drive log, "Drive 2"](../../../data/analyses/2026-09-23-drive-log.md).
+Evidence: [drive log, "Drive 2"](../../../../data/analyses/2026-09-23-drive-log.md).
 
 - [x] **D05.1 Six of eight `tuning` DIDs were silent for the first 37.5 s of a
   capture.** `_capture-tuning-2026-09-23T164007` started at 16:40:07.5Z with the

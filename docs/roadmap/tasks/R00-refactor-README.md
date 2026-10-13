@@ -24,14 +24,14 @@ code.
 
 | File | Scope | Serve path | `ml_training` tier |
 |---|---|---|---|
-| [R01](R01-shared-primitives.md) | One home each for session names and ordering, data paths, coercion, sidecars, sha256, operating constants; a layering test | parts | R01.2 |
-| [R02](R02-collection.md) | slcan parse errors, the Mode 22 window predicate, preview/live plan parity, frame timestamps, responder pinning, recorders; then the 727-line `run_can_obd_loop` and the 3,137-line `obd_scheduler` | yes | no |
-| [R03](R03-daemon-control-http.md) | One vehicle-state classifier; bounded classification; the delete guard; a route snapshot; then the capture lifecycle and per-domain `APIRouter`s out of the 1,640-line `register_control_routes` | yes | no |
-| [R04](R04-models-and-preprocessing.md) | FP benchmark and scoring-rule parity, the suffix parser, one decode path, promotion-gate silent passes; then health out of `models/`, the IF/sequence trainer splits | yes | most items |
+| [R01](archive/R01-shared-primitives.md) | One home each for session names and ordering, data paths, coercion, sidecars, sha256, operating constants; a layering test | parts | R01.2 |
+| [R02](archive/R02-collection.md) | slcan parse errors, the Mode 22 window predicate, preview/live plan parity, frame timestamps, responder pinning, recorders; then the 727-line `run_can_obd_loop` and the 3,137-line `obd_scheduler` | yes | no |
+| [R03](archive/R03-daemon-control-http.md) | One vehicle-state classifier; bounded classification; the delete guard; a route snapshot; then the capture lifecycle and per-domain `APIRouter`s out of the 1,640-line `register_control_routes` | yes | no |
+| [R04](archive/R04-models-and-preprocessing.md) | FP benchmark and scoring-rule parity, the suffix parser, one decode path, promotion-gate silent passes; then health out of `models/`, the IF/sequence trainer splits | yes | most items |
 | [R05](R05-analysis-and-decode.md) | One tuning context (registry, stoich, noise floor), refusing significance, `compare_channels` for cam tracking, derived-signal table, fingerprint featurization, recipe clones; then `fit_recipe`, decode slices, surface eval | parts | no |
-| [R06](R06-scripts-and-tools.md) | A shared bus-tool module (two tools skip the passive check), a CLI snapshot, `retrain.py` phases, library code out of `scripts/` | no | R06.4 |
-| [R07](R07-test-infrastructure.md) | `src → tests` import, test writes into the repo tree, ScriptedEcu for collector fakes, one global-state reset, shared builders | no | no |
-| [R08](R08-dashboard-frontend.md) | Undefined theme class, raw error text, a localStorage crash, then API layering, formatter sweep, the 840-line `CaptureProfilesPanel`, one palette, one poll loop; ESLint + Prettier with a ratcheted baseline (R08.13) | UI | no |
+| [R06](archive/R06-scripts-and-tools.md) | A shared bus-tool module (two tools skip the passive check), a CLI snapshot, `retrain.py` phases, library code out of `scripts/` | no | R06.4 |
+| [R07](archive/R07-test-infrastructure.md) | `src → tests` import, test writes into the repo tree, ScriptedEcu for collector fakes, one global-state reset, shared builders | no | no |
+| [R08](archive/R08-dashboard-frontend.md) | Undefined theme class, raw error text, a localStorage crash, then API layering, formatter sweep, the 840-line `CaptureProfilesPanel`, one palette, one poll loop; ESLint + Prettier with a ratcheted baseline (R08.13) | UI | no |
 
 ## Fix first: drift bugs found by the review
 

@@ -10,7 +10,7 @@ and each root module (``src/*.py``) in :data:`LAYERS`. Two rules:
 
 R01.8 forbade six named edges "rather than imposing a strict layer order".
 The pair count rose from 13 to 19 anyway, and the operator replaced that rule
-with this order on 2026-09-27 (``docs/roadmap/tasks/R09-package-layering.md``).
+with this order on 2026-09-27 (``docs/roadmap/tasks/archive/R09-package-layering.md``).
 The six R01.8 edges are all upward under :data:`LAYERS` and stay pinned in
 :func:`test_the_edges_r01_removed_stay_removed`.
 
@@ -94,7 +94,7 @@ STANDING: dict[tuple[str, str], str] = {
 }
 
 #: Upward imports present when the order was adopted (2026-09-27). Each value
-#: names the R09 item (docs/roadmap/tasks/R09-package-layering.md) that
+#: names the R09 item (docs/roadmap/tasks/archive/R09-package-layering.md) that
 #: removes the import. (file relative to src, imported module).
 #:
 #: - R09.2 leaf moves: ``src/columns.py``, ``src/artifact_hash.py``, the dtc

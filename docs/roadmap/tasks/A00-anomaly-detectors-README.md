@@ -53,9 +53,9 @@ Findings to carry forward, not re-derive:
   `corpus_eligible: false` profiles write to `_capture-*`, which training
   discovery skips. Two paths still let them in:
   - live scoring, where the inference gate looks only at vehicle state
-    ([R03.12](R03-daemon-control-http.md));
+    ([R03.12](archive/R03-daemon-control-http.md));
   - A02's `evaluate_detectors`, which includes captures as evaluation drives
-    ([R04.6](R04-models-and-preprocessing.md)).
+    ([R04.6](archive/R04-models-and-preprocessing.md)).
 
   Both are closed: R03.12 (93bf6ef) keeps live scoring off
   non-corpus-eligible captures, and R04.6 (2026-09-25) scores only

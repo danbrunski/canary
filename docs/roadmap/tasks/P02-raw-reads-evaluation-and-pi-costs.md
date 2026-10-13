@@ -1,7 +1,7 @@
 # P02 — the next costs: whole-session reads, the evaluation harness, the Pi's write and tick path
 
 Opened 2026-09-26 (operator: "Write up the task checklist for these issues"),
-after [P01](P01-derived-session-frames.md).
+after [P01](archive/P01-derived-session-frames.md).
 
 P01 made three changes:
 - the training and evaluation chain dropped from 12–15 GB per long session

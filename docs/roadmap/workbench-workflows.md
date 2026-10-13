@@ -171,7 +171,7 @@ acts on separate pages.
 ## Tasks
 
 Each task below has a detailed implementation checklist under
-[`tasks/`](tasks/W00-workbench-README.md) — files, symbols, tests, empty states
+[`tasks/`](tasks/archive/W00-workbench-README.md) — files, symbols, tests, empty states
 and acceptance. The checkboxes *there* are task-level truth; the list here is
 the index.
 
@@ -194,10 +194,10 @@ the index.
   pull comparison — each with sample counts, gate report, and a named reason
   when unavailable. Backed by the existing `src/analysis` functions, which
   already take a session directory.
-- [~] **[W7](tasks/W05-rom-maps-trace-coverage.md) — ROM Maps: trace from the ECM's own coordinates.** Use the map-trace
+- [x] **[W7](tasks/archive/W05-rom-maps-trace-coverage.md) — ROM Maps: trace from the ECM's own coordinates.** Use the map-trace
   memory channels; keep the inferred lookup as a displayed cross-check; name
   the fix when the channels are not being polled.
-- [~] **[W8](tasks/W05-rom-maps-trace-coverage.md) — ROM Maps: coverage overlay.** Cells visited and samples per cell,
+- [x] **[W8](tasks/archive/W05-rom-maps-trace-coverage.md) — ROM Maps: coverage overlay.** Cells visited and samples per cell,
   for the live capture or the selected log.
 - [x] **[W9](tasks/archive/W06-calibration-page.md) — Calibration page.** Flash history, running revision, per-channel
   known-answer verify state, and the re-verify action.

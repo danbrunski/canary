@@ -1,6 +1,6 @@
 # R04 — models, preprocessing, validation, plausibility
 
-Opened 2026-09-24 from the refactor review ([R00](R00-refactor-README.md)).
+Opened 2026-09-24 from the refactor review ([R00](../R00-refactor-README.md)).
 The costliest duplication in this area is between training, calibration,
 evaluation and serving. That is the train/serve parity AGENTS.md cares
 about: a rule copied four times is a rule that four places can disagree on.
@@ -362,7 +362,7 @@ about: a rule copied four times is a rule that four places can disagree on.
     first needed the bounded decode (P01.1): two sessions OOM-killed the
     laptop at 12-15 GB, and now peak at 1.31 GB and 1.06 GB. The A02.11
     command (no `--cache-only`, `--workers 1`) wrote
-    [`data/analyses/2026-09-25-a02-detector-baseline-default-profile.md`](../../../data/analyses/2026-09-25-a02-detector-baseline-default-profile.md).
+    [`data/analyses/2026-09-25-a02-detector-baseline-default-profile.md`](../../../../data/analyses/2026-09-25-a02-detector-baseline-default-profile.md).
     A second run on the P01 derived frames gave an identical report. The
     full table is in A02.11, beside the superseded one. In-era,
     default-profile rows only, 8 drives with engine time, 6.70 engine-h:

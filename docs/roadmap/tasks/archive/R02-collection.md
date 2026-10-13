@@ -1,6 +1,6 @@
 # R02 — collection: the OBD loop, the scheduler, recorders, ISO-TP
 
-Opened 2026-09-24 from the refactor review ([R00](R00-refactor-README.md)).
+Opened 2026-09-24 from the refactor review ([R00](../R00-refactor-README.md)).
 `src/collection/` is 21k lines. Its two largest files are the serve path's
 core:
 
