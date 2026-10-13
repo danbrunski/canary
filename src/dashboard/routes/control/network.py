@@ -1,13 +1,18 @@
-"""Network provisioning control: the BLE provisioning window (roadmap N1.2).
+"""Network control: what the Pi joined (P2.3) and the BLE provisioning window (N1.2).
 
 The root ``canary-provision`` service accepts WiFi credentials over Bluetooth
 only while the Pi has no WiFi profile or a window is open. These routes open
 and read that window; they need the control token like every ``/control/*``
 route, which is what "opened by someone who already has access" means.
+
+``GET /control/network`` answers "which network is it on, and at what
+address" -- the BLE status characteristic's facts -- so a phone learns the IP
+it should bookmark (Android does not resolve ``canary.local``).
 """
 
 from __future__ import annotations
 
+import time
 from typing import Any
 
 from fastapi import APIRouter, HTTPException
@@ -15,6 +20,10 @@ from fastapi import APIRouter, HTTPException
 from src.dashboard.routes.control.context import ControlContext
 from src.dashboard.schemas import ProvisioningWindowRequest
 from src.provisioning.gate import MAX_WINDOW_MINUTES, read_window_remaining, write_window
+from src.provisioning.reader import NetworkReading
+
+#: Reported when the app was built without a reader (tests, bare apps).
+NOT_WIRED = "network status is not wired into this app"
 
 
 def build_router(ctx: ControlContext) -> APIRouter:
@@ -25,6 +34,21 @@ def build_router(ctx: ControlContext) -> APIRouter:
         return {
             "window_remaining_s": read_window_remaining(window_path),
             "max_minutes": MAX_WINDOW_MINUTES,
+        }
+
+    @router.get("/control/network")
+    def get_network() -> dict[str, Any]:
+        # A sync route: FastAPI runs it in its threadpool, so the nmcli forks
+        # (cached and single-flight in the reader) never block the event loop.
+        reader = ctx.network_reader
+        reading = (
+            reader.read()
+            if reader is not None
+            else NetworkReading(status=None, error=NOT_WIRED, read_at=time.time())
+        )
+        return {
+            "network": reading.to_dict(dashboard_port=ctx.config.dashboard.port),
+            "provisioning": _snapshot(),
         }
 
     @router.get("/control/network/provisioning")

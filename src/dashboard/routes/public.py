@@ -37,6 +37,7 @@ from src.dashboard.status import (
 )
 from src.evidence import MemoryLedger, UnscopedMemoryError, memory_ledger_for
 from src.models.feedback import FeedbackStore, annotate_events_with_feedback
+from src.provisioning.reader import NetworkStatusReader
 
 if TYPE_CHECKING:  # decode.dids is imported lazily inside the route bodies
     from src.daemon.health import HealthMonitor
@@ -69,6 +70,7 @@ def register_public_routes(
     inference_timing: InferenceTimingRecorder | None = None,
     live_source: Any = None,
     ups_status_path: Path = DEFAULT_UPS_STATUS_PATH,
+    network_reader: NetworkStatusReader | None = None,
 ) -> None:
     # Owned here rather than passed in, so the vehicle-state derivation is
     # shared by both /status views of every app without any caller having to
@@ -127,6 +129,13 @@ def register_public_routes(
         # file is tiny and an operator's edit should show up without a
         # daemon restart.
         payload["accepted_baseline_overrides"] = read_accepted_baselines(accepted_baselines_path)
+        # P2.3 — the address a phone should bookmark. ``peek`` never waits on
+        # nmcli: a stale copy (its ``age_s`` says how stale) is served while a
+        # background refresh replaces it, at most every STATUS_MAX_AGE_S.
+        reading = network_reader.peek() if network_reader is not None else None
+        payload["network"] = (
+            None if reading is None else reading.to_dict(dashboard_port=config.dashboard.port)
+        )
         return payload
 
     @app.get("/config")

@@ -13,6 +13,7 @@ UPS watchdog and the daemon share the keep-alive hold.
 - :mod:`.network` -- NetworkManager, through ``nmcli`` and keyfiles.
 - :mod:`.gate` -- who may provision right now (N1.2).
 - :mod:`.status` -- the status characteristic's payload (N1.3).
+- :mod:`.reader` -- the same facts, cached, for the daemon's dashboard (P2.3).
 - :mod:`.controller` -- the Improv state machine, transport-agnostic.
 - :mod:`.bluez` -- the BlueZ GATT server and advertisement over D-Bus.
 """

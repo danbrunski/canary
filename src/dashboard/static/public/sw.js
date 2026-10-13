@@ -8,8 +8,22 @@
 // surfaces freshness/reconnect state itself. WebSocket upgrades bypass the
 // SW entirely.
 
-const CACHE = "canary-shell-v1";
-const SHELL = ["/", "/index.html", "/manifest.webmanifest", "/canary.svg"];
+// The shell is cache-first, so a changed shell file reaches an installed app
+// only when this name changes (activate drops the old cache). v2: the P2.1
+// manifest (no landscape lock) and its PNG icons.
+const CACHE = "canary-shell-v2";
+// `cache.addAll` fails the whole install on one 404: every entry must exist in
+// public/ (manifest.test.ts checks it).
+const SHELL = [
+  "/",
+  "/index.html",
+  "/manifest.webmanifest",
+  "/canary.svg",
+  "/icon-192.png",
+  "/icon-512.png",
+  "/icon-maskable-512.png",
+  "/apple-touch-icon.png",
+];
 
 self.addEventListener("install", (event) => {
   event.waitUntil(

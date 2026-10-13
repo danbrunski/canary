@@ -69,6 +69,7 @@ export const NAV: NavGroupDef[] = [
       { id: "system-profiles", label: "Profiles", group: "system" },
       { id: "system-capture-profiles", label: "Capture Profiles", group: "system" },
       { id: "system-power", label: "Power / UPS", group: "system" },
+      { id: "system-network", label: "Network", group: "system" },
       { id: "system-control", label: "Control Plane", group: "system" },
       { id: "system-test", label: "Test", group: "system" },
       { id: "system-info", label: "System Info", group: "system" },

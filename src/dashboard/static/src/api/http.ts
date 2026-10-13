@@ -70,6 +70,7 @@ import type {
   DiagnosticFunctionsResponse,
   ReadCodesResult,
 } from "../types/diagnostics";
+import type { NetworkResponse, ProvisioningWindowResponse } from "../types/network";
 import { controlBlob, controlJson, fetchJson, jsonBody, queryString } from "./core";
 
 export { HttpError, NetworkError } from "./core";
@@ -823,6 +824,22 @@ export function getPowerStatus(token: string, signal?: AbortSignal): Promise<Pow
 
 export function setKeepAlive(token: string, minutes: number): Promise<PowerKeepaliveResponse> {
   return controlJson<PowerKeepaliveResponse>("/control/power/keepalive", token, {
+    method: "POST",
+    body: jsonBody({ minutes }),
+  });
+}
+
+/** What the Pi joined and its addresses, plus the BLE provisioning window (P2.3). */
+export function getNetwork(token: string, signal?: AbortSignal): Promise<NetworkResponse> {
+  return controlJson<NetworkResponse>("/control/network", token, { signal });
+}
+
+/** Open the BLE provisioning window for `minutes` (`0` closes it). */
+export function setProvisioningWindow(
+  token: string,
+  minutes: number,
+): Promise<ProvisioningWindowResponse> {
+  return controlJson<ProvisioningWindowResponse>("/control/network/provisioning/window", token, {
     method: "POST",
     body: jsonBody({ minutes }),
   });

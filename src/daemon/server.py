@@ -28,6 +28,7 @@ def _build_app(components: DaemonComponents) -> Any:
 
     from src.dashboard.api import create_app
     from src.models.feedback import FeedbackStore
+    from src.provisioning.reader import NetworkStatusReader
 
     # R03.5: the routes must drive the *same* capture lifecycle the shutdown
     # path stops, or an HTTP-started capture's start epoch lives in a session
@@ -72,6 +73,7 @@ def _build_app(components: DaemonComponents) -> Any:
         live_source=components.live_source,
         profile_capture=components.profile_capture,
         capture_autostart=components.capture_autostart,
+        network_reader=NetworkStatusReader(),
     )
 
 

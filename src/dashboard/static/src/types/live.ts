@@ -7,6 +7,7 @@
 // explicit nulls when they have a None default.
 
 import type { CaptureProfileState, ObdSchedulerStatus, ReplayStatus } from "./control";
+import type { NetworkSummary } from "./network";
 
 /** One row from `/telemetry/latest` or one message on `/ws/telemetry`. */
 export interface TelemetryRow {
@@ -154,6 +155,9 @@ export interface StatusResponse {
   calibration_alert_reason?: string | null;
   /** Engine Tuning readiness chips (W02.4). Absent on an older daemon. */
   tuning_readiness?: TuningReadiness | null;
+  /** The address a phone should bookmark (P2.3); a cached read, null until
+   *  the first one. Absent on an older daemon. */
+  network?: NetworkSummary | null;
 }
 
 /** One `/status.tuning_readiness` entry. `ok: null` = reported but not

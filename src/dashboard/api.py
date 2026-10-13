@@ -80,6 +80,7 @@ from src.dashboard.version import _canary_version
 from src.dashboard.websockets import _publish_on_app_loop
 from src.models.feedback import FeedbackStore
 from src.provisioning.gate import DEFAULT_WINDOW_PATH
+from src.provisioning.reader import NetworkStatusReader
 from src.storage.async_writer import AsyncParquetTelemetryWriter
 from src.vehicle.vehicle_ledger import VehicleLedgerStore
 from src.vehicle_state import derive_from_live_source
@@ -159,6 +160,10 @@ def create_app(
     ups_keepalive_path: Path = DEFAULT_UPS_KEEPALIVE_PATH,
     #: BLE provisioning window (``src/provisioning/gate.py``).
     provision_window_path: Path = DEFAULT_WINDOW_PATH,
+    #: Cached ``nmcli``/``ip`` reads behind ``GET /control/network`` and
+    #: ``/status.network`` (P2.3). ``None`` (tests, bare apps) reports them as
+    #: not wired; the daemon passes one.
+    network_reader: NetworkStatusReader | None = None,
     #: Phones and laptops with their own control tokens (P2.4); ``None`` uses
     #: ``paired_devices.json`` beside the control state.
     paired_devices: PairedDevices | None = None,
@@ -267,6 +272,7 @@ def create_app(
         inference_timing=inference_timing,
         live_source=live_source,
         ups_status_path=ups_status_path,
+        network_reader=network_reader,
     )
     register_control_routes(
         app,
@@ -289,6 +295,7 @@ def create_app(
         ups_status_path=ups_status_path,
         ups_keepalive_path=ups_keepalive_path,
         provision_window_path=provision_window_path,
+        network_reader=network_reader,
         emitter=emitter,
         live_source=live_source,
         profile_capture=profile_capture,

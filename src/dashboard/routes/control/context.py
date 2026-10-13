@@ -32,6 +32,7 @@ from src.control.sequence_detector import SequenceDetectorController
 from src.daemon.broadcast import Broadcaster
 from src.models.feedback import FeedbackStore
 from src.provisioning.gate import DEFAULT_WINDOW_PATH
+from src.provisioning.reader import NetworkStatusReader
 from src.storage.async_writer import AsyncParquetTelemetryWriter
 from src.storage.sessions import resolve_session
 from src.vehicle.vehicle_ledger import VehicleLedgerStore
@@ -95,6 +96,9 @@ class ControlContext:
     #: The BLE provisioning window file, shared with the root
     #: ``canary-provision`` service (``src/provisioning/gate.py``).
     provision_window_path: Path = DEFAULT_WINDOW_PATH
+    #: Cached ``nmcli``/``ip`` reads for ``GET /control/network`` (P2.3);
+    #: ``None`` (tests, bare apps) reports the route as not wired.
+    network_reader: NetworkStatusReader | None = None
 
     def router(self) -> APIRouter:
         """A router whose every route requires the control token."""

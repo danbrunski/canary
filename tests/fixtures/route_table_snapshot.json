@@ -891,6 +891,14 @@
       "auth": "control",
       "body": false,
       "method": "GET",
+      "path": "/control/network",
+      "query": [],
+      "status_code": null
+    },
+    {
+      "auth": "control",
+      "body": false,
+      "method": "GET",
       "path": "/control/network/provisioning",
       "query": [],
       "status_code": null

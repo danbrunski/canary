@@ -42,6 +42,7 @@ import { LlmAssistPanel } from "./LlmAssistPanel";
 import { ModelHealthPanel } from "./ModelHealthPanel";
 import { ModelPanel } from "./ModelPanel";
 import { MonitorsPanel } from "./MonitorsPanel";
+import { NetworkPanel } from "./NetworkPanel";
 import { PlaceholderPanel } from "./PlaceholderPanel";
 import { PowerPanel } from "./PowerPanel";
 import { ProfilesPanel } from "./ProfilesPanel";
@@ -201,6 +202,8 @@ function renderItem(
       return <CaptureProfileEditor token={d.token} status={d.status} />;
     case "system-power":
       return <PowerPanel token={d.token} />;
+    case "system-network":
+      return <NetworkPanel token={d.token} status={d.status} />;
     case "observe-charts":
       return <ChartsPanel channels={d.channels} token={d.token} />;
     case "observe-alarms":

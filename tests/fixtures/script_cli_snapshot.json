@@ -4421,6 +4421,22 @@
       }
     }
   },
+  "render_pwa_icons.py": {
+    "options": {
+      "--public": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": null,
+        "dest": "public",
+        "nargs": null,
+        "option_strings": [
+          "--public"
+        ],
+        "required": false,
+        "type": "Path"
+      }
+    }
+  },
   "replay.py": {
     "options": {
       "--config": {

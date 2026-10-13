@@ -37,6 +37,7 @@ from src.dashboard.routes.session_reads import build_session_read_router
 from src.dashboard.security import control_auth_dependency
 from src.models.feedback import FeedbackStore
 from src.provisioning.gate import DEFAULT_WINDOW_PATH
+from src.provisioning.reader import NetworkStatusReader
 from src.storage.async_writer import AsyncParquetTelemetryWriter
 from src.vehicle.vehicle_ledger import VehicleLedgerStore
 
@@ -129,6 +130,7 @@ def register_control_routes(
     ups_status_path: Path = DEFAULT_UPS_STATUS_PATH,
     ups_keepalive_path: Path = DEFAULT_UPS_KEEPALIVE_PATH,
     provision_window_path: Path = DEFAULT_WINDOW_PATH,
+    network_reader: NetworkStatusReader | None = None,
     emitter: AnomalyEventEmitter | None = None,
     #: The daemon's in-memory observations, so the capture-autostart tick can
     #: classify the vehicle without Parquet I/O. ``None`` (tests, replay-only
@@ -183,6 +185,7 @@ def register_control_routes(
         live_source=live_source,
         inference_timing=inference_timing,
         provision_window_path=provision_window_path,
+        network_reader=network_reader,
     )
     # `SessionDir` resolves against the app's context.
     app.state.control_context = ctx
