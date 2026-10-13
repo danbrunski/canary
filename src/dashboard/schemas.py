@@ -8,6 +8,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 from src.collection.capture_profiles import MAX_TARGET_RATE_HZ, CaptureProfile
+from src.provisioning.gate import MAX_WINDOW_MINUTES
 from src.vehicle.vehicle_ledger import PhysicalInterventionKind, TireRecord
 
 
@@ -208,6 +209,21 @@ class UpsKeepaliveRequest(_ControlRequest):
     the watchdog's grace window. See scripts/ups_shutdown_watch.py."""
 
     minutes: float = Field(..., ge=0.0, le=720.0)
+
+
+class ProvisioningWindowRequest(_ControlRequest):
+    """Open (or close, with 0) the BLE provisioning window: while it is open a
+    phone may hand the Pi new WiFi credentials over Improv. Capped at
+    ``src.provisioning.gate.MAX_WINDOW_MINUTES``; see docs/ble-provisioning.md."""
+
+    minutes: float = Field(..., ge=0.0, le=MAX_WINDOW_MINUTES)
+
+
+class PairingRequestCreate(_ControlRequest):
+    """``POST /pair/request``: ask to pair this device; a key cycle approves."""
+
+    #: Shown in the paired-devices list and in conflicts ("Android phone").
+    name: str = Field(default="", max_length=128)
 
 
 class CanActivityRequest(_ControlRequest):

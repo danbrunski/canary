@@ -37,6 +37,10 @@ dependencies = [
     # returns the raw `timestamp` column (TIMESTAMPTZ) raises
     # InvalidInputException instead of returning rows.
     "pytz",
+    # BLE provisioning (src/provisioning, docs/ble-provisioning.md): a BlueZ GATT
+    # server over the system D-Bus. Pure Python with optional compiled speedups,
+    # no dependencies; typed (Annotated D-Bus signatures), so mypy checks it.
+    "dbus-fast>=4.0",
 ]
 
 [project.optional-dependencies]

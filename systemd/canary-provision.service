@@ -1,0 +1,31 @@
+[Unit]
+Description=CANary BLE provisioning (Improv WiFi + network status)
+# Standalone from canary.service, like the UPS watchdog: a Pi whose daemon is
+# down still needs a way onto a network and a way to say where it is.
+After=bluetooth.service NetworkManager.service
+Requires=bluetooth.service
+Wants=NetworkManager.service
+ConditionPathExists=/etc/canary/canary.env
+
+[Service]
+Type=simple
+# Runs as root: it registers BlueZ GATT objects and writes NetworkManager
+# keyfiles (0600, root-owned, as NM requires) under
+# /etc/NetworkManager/system-connections.
+EnvironmentFile=/etc/canary/canary.env
+Environment=PYTHONUNBUFFERED=1
+Environment=PYTHONDONTWRITEBYTECODE=1
+# The window file the daemon writes (POST /control/network/provisioning/window).
+Environment=CANARY_PROVISION_WINDOW_FILE=/run/canary/provision_window
+ExecStart=/bin/bash -c 'cd "$CANARY_HOME" && exec "$CANARY_HOME/.venv/bin/python" -m src.provisioning run'
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=10
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectKernelLogs=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+
+[Install]
+WantedBy=multi-user.target

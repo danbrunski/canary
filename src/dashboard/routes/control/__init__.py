@@ -36,6 +36,7 @@ from src.daemon.ups import DEFAULT_UPS_KEEPALIVE_PATH, DEFAULT_UPS_STATUS_PATH
 from src.dashboard.routes.session_reads import build_session_read_router
 from src.dashboard.security import control_auth_dependency
 from src.models.feedback import FeedbackStore
+from src.provisioning.gate import DEFAULT_WINDOW_PATH
 from src.storage.async_writer import AsyncParquetTelemetryWriter
 from src.vehicle.vehicle_ledger import VehicleLedgerStore
 
@@ -49,6 +50,7 @@ from . import (
     feedback,
     jobs,
     models,
+    network,
     profile_capture,
     replay,
     sessions,
@@ -77,6 +79,7 @@ def _session_reads(ctx: ControlContext) -> APIRouter:
 #: Domain router builders in registration order.
 _ROUTER_BUILDERS: tuple[Callable[[ControlContext], APIRouter], ...] = (
     system.build_router,
+    network.build_router,
     captures.build_router,
     replay.build_router,
     sessions.build_router,
@@ -125,6 +128,7 @@ def register_control_routes(
     health_monitor: HealthMonitor | None = None,
     ups_status_path: Path = DEFAULT_UPS_STATUS_PATH,
     ups_keepalive_path: Path = DEFAULT_UPS_KEEPALIVE_PATH,
+    provision_window_path: Path = DEFAULT_WINDOW_PATH,
     emitter: AnomalyEventEmitter | None = None,
     #: The daemon's in-memory observations, so the capture-autostart tick can
     #: classify the vehicle without Parquet I/O. ``None`` (tests, replay-only
@@ -178,6 +182,7 @@ def register_control_routes(
         emitter=emitter,
         live_source=live_source,
         inference_timing=inference_timing,
+        provision_window_path=provision_window_path,
     )
     # `SessionDir` resolves against the app's context.
     app.state.control_context = ctx

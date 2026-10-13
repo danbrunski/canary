@@ -75,6 +75,7 @@ LAYERS: dict[str, int] = {
     # 6 application
     "control": 6,
     "vehicle_state": 6,
+    "provisioning": 6,
     # 7 runtime
     "daemon": 7,
     "startup": 7,

@@ -15,6 +15,7 @@ export default defineConfig({
       "/status": "http://127.0.0.1:8000",
       "/config": "http://127.0.0.1:8000",
       "/control": "http://127.0.0.1:8000",
+      "/pair": "http://127.0.0.1:8000",
       "/anomalies": "http://127.0.0.1:8000",
       "/telemetry": "http://127.0.0.1:8000",
       // Without these, dev (`pnpm dev`) serves index.html for the API path,

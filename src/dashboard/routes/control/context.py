@@ -31,6 +31,7 @@ from src.control.replay_control import ReplayController
 from src.control.sequence_detector import SequenceDetectorController
 from src.daemon.broadcast import Broadcaster
 from src.models.feedback import FeedbackStore
+from src.provisioning.gate import DEFAULT_WINDOW_PATH
 from src.storage.async_writer import AsyncParquetTelemetryWriter
 from src.storage.sessions import resolve_session
 from src.vehicle.vehicle_ledger import VehicleLedgerStore
@@ -91,6 +92,9 @@ class ControlContext:
     #: The inference scheduler's recorder (``/status`` ``detectors.inference``),
     #: read by the brain routes for the live twin block; ``None`` without one.
     inference_timing: Any = None
+    #: The BLE provisioning window file, shared with the root
+    #: ``canary-provision`` service (``src/provisioning/gate.py``).
+    provision_window_path: Path = DEFAULT_WINDOW_PATH
 
     def router(self) -> APIRouter:
         """A router whose every route requires the control token."""

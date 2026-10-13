@@ -11,6 +11,8 @@ from __future__ import annotations
 
 import logging
 import os
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -31,7 +33,10 @@ from src.control.audit import ControlAuditLogger
 from src.control.capture import CaptureController
 from src.control.dtc_state import DtcState
 from src.control.jobs import JobController
+from src.control.key_cycle_pairing import KeyCyclePairing
 from src.control.monitor_state import MonitorState
+from src.control.paired_devices import PairedDevices
+from src.control.paired_devices import default_path as paired_devices_default_path
 from src.control.replay_control import ReplayController
 from src.control.sequence_detector import SequenceDetectorController
 from src.daemon.behavior_live import BehaviorLiveState
@@ -59,6 +64,7 @@ from src.dashboard.routes import (
     register_stream_routes,
 )
 from src.dashboard.routes.calibration import register_calibration_routes
+from src.dashboard.routes.pairing import register_pairing_routes
 from src.dashboard.routes.rom_library import register_rom_library_routes
 from src.dashboard.routes.rom_maps import register_rom_routes
 from src.dashboard.routes.workbench import register_workbench_routes
@@ -73,8 +79,10 @@ from src.dashboard.status import (
 from src.dashboard.version import _canary_version
 from src.dashboard.websockets import _publish_on_app_loop
 from src.models.feedback import FeedbackStore
+from src.provisioning.gate import DEFAULT_WINDOW_PATH
 from src.storage.async_writer import AsyncParquetTelemetryWriter
 from src.vehicle.vehicle_ledger import VehicleLedgerStore
+from src.vehicle_state import derive_from_live_source
 
 if TYPE_CHECKING:  # annotation only — src.daemon's package __init__ imports this module
     # Annotation only: importing it at runtime loads the whole src.daemon package (R04.8).
@@ -88,6 +96,23 @@ log = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 # App factory
 # ---------------------------------------------------------------------------
+
+
+@asynccontextmanager
+async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
+    """Run the key-cycle pairing tick while the app serves.
+
+    It watches the key even with no pairing request waiting, because a lone
+    ACC -> ON -> ACC is also how the owner reopens BLE setup to change WiFi.
+    """
+    pairing: KeyCyclePairing | None = getattr(app.state, "pairing", None)
+    if pairing is not None:
+        pairing.ensure_running()
+    try:
+        yield
+    finally:
+        if pairing is not None:
+            await pairing.aclose()
 
 
 def create_app(
@@ -132,6 +157,14 @@ def create_app(
     capture_profile_store: CaptureProfileStore | None = None,
     ups_status_path: Path = DEFAULT_UPS_STATUS_PATH,
     ups_keepalive_path: Path = DEFAULT_UPS_KEEPALIVE_PATH,
+    #: BLE provisioning window (``src/provisioning/gate.py``).
+    provision_window_path: Path = DEFAULT_WINDOW_PATH,
+    #: Phones and laptops with their own control tokens (P2.4); ``None`` uses
+    #: ``paired_devices.json`` beside the control state.
+    paired_devices: PairedDevices | None = None,
+    #: Key-cycle pairing over ``paired_devices``; ``None`` builds one that
+    #: watches ``live_source``. Tests inject one with a scripted key.
+    pairing: KeyCyclePairing | None = None,
     #: C08 — live-inference scheduler timing for ``/status``
     #: ``detectors.inference`` (``None`` in tests that don't run inference).
     inference_timing: InferenceTimingRecorder | None = None,
@@ -155,7 +188,7 @@ def create_app(
     """
     if behavior_models_path is None:
         behavior_models_path = config.daemon.behavior_models
-    app = FastAPI(title="CANary", version=_canary_version())
+    app = FastAPI(title="CANary", version=_canary_version(), lifespan=_lifespan)
     if enable_dev_cors:
         # `pnpm dev` serves the SPA on :5173 and proxies the backend.
         # Add CORS so a developer can also hit the backend directly from
@@ -192,6 +225,11 @@ def create_app(
     app.state.scores_broadcaster = scores_bus
     app.state.control_broadcaster = control_bus
     app.state.control_loop = None
+    # Read by the shared control-auth dependency (src/dashboard/security.py),
+    # so every guarded route accepts paired-device tokens without wiring.
+    app.state.paired_devices = paired_devices or PairedDevices(
+        paired_devices_default_path(config.daemon.state_dir)
+    )
 
     def publish_control_event(action: str, result: str, payload: dict[str, Any]) -> None:
         event = (
@@ -250,6 +288,7 @@ def create_app(
         health_monitor=health_monitor,
         ups_status_path=ups_status_path,
         ups_keepalive_path=ups_keepalive_path,
+        provision_window_path=provision_window_path,
         emitter=emitter,
         live_source=live_source,
         profile_capture=profile_capture,
@@ -281,6 +320,28 @@ def create_app(
         bindings_path=bindings_path,
         dids_path=dids_path,
         resolved_control_token=resolved_control_token,
+    )
+
+    def live_vehicle_state() -> str | None:
+        if live_source is None:
+            return None
+        vehicle = derive_from_live_source(live_source, replay_controller=replay_controller)
+        # Key-on without the engine shows only as the ECM answering OBD. While
+        # passive, CANary is not asking, so no verdict is evidence of the key.
+        return "passive" if vehicle.passive else vehicle.state
+
+    app.state.pairing = pairing or KeyCyclePairing(
+        app.state.paired_devices,
+        live_vehicle_state,
+        window_path=provision_window_path,
+        publish=publish_control_event,
+    )
+    register_pairing_routes(
+        app,
+        devices=app.state.paired_devices,
+        pairing=app.state.pairing,
+        resolved_control_token=resolved_control_token,
+        publish_control_event=publish_control_event,
     )
     register_stream_routes(
         app,

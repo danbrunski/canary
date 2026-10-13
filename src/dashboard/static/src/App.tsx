@@ -1,3 +1,4 @@
+import { PairingCard } from "./components/PairingCard";
 import { useAnomalyStream } from "./hooks/useAnomalyStream";
 import { useBehaviorLive } from "./hooks/useBehaviorLive";
 import { useBehaviorModels } from "./hooks/useBehaviorModels";
@@ -65,6 +66,9 @@ export default function App() {
       token={controlToken.token}
       onTokenChange={controlToken.setToken}
     >
+      {!controlToken.hasToken && connectivity === "live-pi" && (
+        <PairingCard onPaired={controlToken.setToken} />
+      )}
       {mode === "driving" ? (
         <DriveScreen
           channels={telemetry.channels}

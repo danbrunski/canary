@@ -1,6 +1,6 @@
 # Roadmap — networking, discovery, and headless provisioning
 
-Status: **partially landed** (2026-09-11). Straight to `main`, no feature
+Status: **partially landed** (2026-09-11; BLE provisioning code 2026-10-12). Straight to `main`, no feature
 branches.
 
 ## Why this exists
@@ -71,7 +71,14 @@ Rejected, with reasons, so they are not re-proposed:
 
 ### Provisioning and discovery
 
-- [ ] **N1.1 Bluetooth LE provisioning service.** A BlueZ GATT server that
+- [~] **N1.1 Bluetooth LE provisioning service.** *Code landed 2026-10-12, not
+  yet run on the Pi:* `src/provisioning/` (Improv BLE v2.2 over BlueZ with
+  dbus-fast, joins through NetworkManager keyfiles so the passphrase never
+  reaches an argv, a failed join restores the profiles),
+  `systemd/canary-provision.service`, operator guide `docs/ble-provisioning.md`,
+  tests `tests/test_provisioning_*.py`. Open: a bench run against a real
+  phone (Android Chrome on improv-wifi.com), and installer wiring (N2.1).
+  Original scope: A BlueZ GATT server that
   advertises, lists the networks the Pi can currently see, accepts an SSID
   and passphrase, hands them to NetworkManager, and reports the resulting
   address. This is the only way to put a Pi onto an unfamiliar network from
@@ -85,7 +92,16 @@ Rejected, with reasons, so they are not re-proposed:
   Note the free win: because WiFi is now always a client, the Pi can scan
   whenever it likes, so the user picks from a real list instead of typing a
   name. Under the old AP-by-default design that scan cost an outage.
-- [ ] **N1.2 Gate the provisioning service so it is not an open write.**
+- [~] **N1.2 Gate the provisioning service so it is not an open write.**
+  *Landed with N1.1 (`src/provisioning/gate.py`):* open while no WiFi client
+  profile exists or while a window (`POST /control/network/provisioning/window`,
+  at most 30 min, or `python -m src.provisioning open-window`, or a key cycle
+  ACC → ON → ACC with no pairing request waiting) is open; otherwise
+  Improv's *authorization required*. Fails closed when NetworkManager cannot
+  be queried. The service keeps advertising when locked so N1.3 stays
+  reachable. Open: a dashboard button for the window (phone-ui P2.3).
+  The Improv success URL is plain; devices pair by key cycle (phone-ui P2.4).
+  Original scope:
   A service that accepts network credentials over the air and creates
   profiles is reachable by anyone in range. Advertise unconditionally only
   while no WiFi profile is configured; afterwards only inside a short
@@ -94,7 +110,10 @@ Rejected, with reasons, so they are not re-proposed:
   requires already being on the network being joined — so the
   unprovisioned-is-open model is forced, and the post-provisioning gate is
   where the restriction goes.
-- [ ] **N1.3 Status characteristic.** Expose current mode, joined SSID, and
+- [~] **N1.3 Status characteristic.** *Landed with N1.1
+  (`src/provisioning/status.py`):* JSON with mode, SSID, every address, an
+  IP-based dashboard URL, and the gate state. Open: bench verification.
+  Original scope: Expose current mode, joined SSID, and
   every current address, readable without provisioning rights. This is the
   answer to "the Pi joined something and I do not know where it went", and
   it is the out-of-band recovery path that makes a client-only design safe:
@@ -115,7 +134,8 @@ Rejected, with reasons, so they are not re-proposed:
   - A DHCP reservation on the home router plus a bookmarked IP covers the
     garage case on any phone. The Starlink router cannot make reservations.
 
-- [ ] **N1.4 Document the iOS limitation.** Safari implements no Web
+- [x] **N1.4 Document the iOS limitation.** `docs/ble-provisioning.md`
+  "iPhone" (2026-10-12). Safari implements no Web
   Bluetooth, so an iPhone needs a native client or a third-party browser
   that does. Every Bluetooth path in this design has the same hole; say so
   once, in `docs/`, rather than letting each reader rediscover it.

@@ -74,6 +74,54 @@ import { controlBlob, controlJson, fetchJson, jsonBody, queryString } from "./co
 
 export { HttpError, NetworkError } from "./core";
 
+/** Key-cycle pairing (`src/control/key_cycle_pairing.py`): no token needed,
+ *  since these are how a device gets one. The request secret rides a header so
+ *  access logs never record it. */
+export interface PairingRequestCreated {
+  id: string;
+  secret: string;
+}
+
+export type PairingStep = "set_acc" | "turn_on" | "back_to_acc" | "unavailable";
+
+export interface PairingRequestStatus {
+  id: string;
+  status: "waiting" | "approved" | "conflict" | "expired";
+  step?: PairingStep;
+  detail: string;
+  vehicle_state: string | null;
+  expires_in_s: number;
+  /** Present once, on the poll that collects an approval. */
+  token?: string;
+  device?: { id: string; name: string };
+}
+
+export function createPairingRequest(name: string): Promise<PairingRequestCreated> {
+  return fetchJson<PairingRequestCreated>("/pair/request", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: jsonBody({ name }),
+  });
+}
+
+export function getPairingRequest(
+  request: PairingRequestCreated,
+  signal?: AbortSignal,
+): Promise<PairingRequestStatus> {
+  return fetchJson<PairingRequestStatus>(`/pair/request/${encodeURIComponent(request.id)}`, {
+    headers: { "X-Pairing-Secret": request.secret },
+    signal,
+  });
+}
+
+export function cancelPairingRequest(request: PairingRequestCreated): Promise<unknown> {
+  return fetchJson(`/pair/request/${encodeURIComponent(request.id)}`, {
+    method: "DELETE",
+    headers: { "X-Pairing-Secret": request.secret },
+    keepalive: true,
+  });
+}
+
 export function getStatus(signal?: AbortSignal): Promise<StatusResponse> {
   return fetchJson<StatusResponse>("/status", { signal });
 }

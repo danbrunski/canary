@@ -734,6 +734,22 @@
     },
     {
       "auth": "control",
+      "body": false,
+      "method": "GET",
+      "path": "/control/devices",
+      "query": [],
+      "status_code": null
+    },
+    {
+      "auth": "control",
+      "body": false,
+      "method": "DELETE",
+      "path": "/control/devices/{device_id}",
+      "query": [],
+      "status_code": null
+    },
+    {
+      "auth": "control",
       "body": true,
       "method": "POST",
       "path": "/control/diagnostics/clear_codes",
@@ -868,6 +884,22 @@
       "body": false,
       "method": "GET",
       "path": "/control/models/{model_type}/manifest",
+      "query": [],
+      "status_code": null
+    },
+    {
+      "auth": "control",
+      "body": false,
+      "method": "GET",
+      "path": "/control/network/provisioning",
+      "query": [],
+      "status_code": null
+    },
+    {
+      "auth": "control",
+      "body": true,
+      "method": "POST",
+      "path": "/control/network/provisioning/window",
       "query": [],
       "status_code": null
     },
@@ -1258,6 +1290,14 @@
       "auth": "control",
       "body": false,
       "method": "GET",
+      "path": "/control/tires",
+      "query": [],
+      "status_code": null
+    },
+    {
+      "auth": "control",
+      "body": false,
+      "method": "GET",
       "path": "/control/training-runs",
       "query": [],
       "status_code": null
@@ -1333,14 +1373,6 @@
       "body": true,
       "method": "POST",
       "path": "/control/tuning/revert",
-      "query": [],
-      "status_code": null
-    },
-    {
-      "auth": "control",
-      "body": false,
-      "method": "GET",
-      "path": "/control/tires",
       "query": [],
       "status_code": null
     },
@@ -1431,6 +1463,30 @@
       "body": false,
       "method": "GET",
       "path": "/obd/monitors",
+      "query": [],
+      "status_code": null
+    },
+    {
+      "auth": null,
+      "body": true,
+      "method": "POST",
+      "path": "/pair/request",
+      "query": [],
+      "status_code": 201
+    },
+    {
+      "auth": null,
+      "body": false,
+      "method": "DELETE",
+      "path": "/pair/request/{request_id}",
+      "query": [],
+      "status_code": null
+    },
+    {
+      "auth": null,
+      "body": false,
+      "method": "GET",
+      "path": "/pair/request/{request_id}",
       "query": [],
       "status_code": null
     },
