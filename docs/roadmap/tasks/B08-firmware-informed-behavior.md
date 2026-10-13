@@ -1145,7 +1145,7 @@ extra independent votes.
     3. The Pi run through E04: job wiring, and persistence across a restart.
     - Not wired: no job, route or MCP tool calls the chain yet.
 
-- [ ] **B08.6 — Evaluate the October 4 Fuel Comp intervention.**
+- [~] **B08.6 — Evaluate the October 4 Fuel Comp intervention.**
   Preserve the original pre-flash prediction as written, including its
   historical uncertainty; add new interpretation and results as linked
   records. Old image:
@@ -1165,6 +1165,99 @@ extra independent votes.
   coverage, exclusions and remaining confounders. No effect and insufficient
   evidence are distinct outcomes. Unchanged target/timing bytes are not
   asserted to guarantee unchanged commands. This evaluation issues no flash.
+  *Partial 2026-10-13 (laptop, desk part only). The reproduction machinery is
+  built and tested on the committed slice. The real-image numbers were not
+  run: neither private ROM is on this laptop. The physical outcome needs
+  post-flash drives.*
+  - **Code.**
+    - [`src/analysis/fuel_comp_restore.py`](../../../src/analysis/fuel_comp_restore.py)
+      (`REPRODUCTION_VERSION` 1) computes both images' Fuel Comp multipliers at
+      each input point. Each image is read on its own rpm and load axes with
+      the firmware lookup (`ecm_lookup.lookup_2d`). The module fits nothing and
+      writes nothing.
+    - [`tools/fuel_comp_restore_reproduction.py`](../../../tools/fuel_comp_restore_reproduction.py)
+      runs it per session.
+    - The written rows, both image hashes and the flash come from E07.4's case
+      `fuel-comp-restore-2026-10-04` (`plant_interventions.yaml`, read through
+      `load_interventions` / `resolve_boundary`). The prediction of record is
+      not restated or edited.
+  - **Input points are never paired by nearest neighbour.** On the slice, the
+    byte is read 0.25–2.27 s from any PID 0x0C read (median 0.87 s), and
+    0 / 192 reads fall within 0.1 s.
+    - An `observed` point is one byte read plus the rpm words of the PID 0x0C
+      reads that bracket it. Each read must be within `fuel_comp_fit.yaml`
+      `known_answer.max_gap_s` (2.5 s).
+    - The rpm is assumed to lie between the two bracketing reads. This
+      assumption is printed in every report.
+    - Change extremes over a point's rpm × byte rectangle are taken at the
+      corners of the sub-grid that both images' breakpoints cut.
+    - `reconstructed:<route>` points carry N02's byte intervals
+      (`points_from_samples`; tool `--reconstructed`).
+  - **Refusals (learned constraints).**
+    - Image identity: `image_mismatch:base|candidate` and `boundary_mismatch`.
+    - The same logged byte must be the same operating point on both images.
+      A changed load-byte chain is refused `load_input_chain_changed`, a
+      changed K `k_changed` (the Fuel Comp ratio alone would then not be the
+      fuel change), and a different map slot `slot_mismatch`.
+    - Points outside the base revision: `after_flash` and
+      `before_base_revision`.
+    - `precision_unstated`: an endpoint the written row does not state.
+  - **Tolerance.** Each endpoint gets half a unit in the last digit it is
+    written with, read from `as_written`. This gives ±0.5 for "about −1 %",
+    ±0.05 for "−0.2 to −0.5 %", and +0.5 / −0.05 for "+3 to +5.5 %". No
+    tolerance was chosen.
+  - **Verdicts.** `reproduced`, `contradicted`, `unresolved` and `no_points`
+    (insufficient evidence) are distinct. Points that no row holds whole are
+    reported separately as `no_predicted_row` or `straddles_band_edge`, with
+    their changes.
+  - **Committed slice** (`tests/fixtures/fuel_comp/_capture-ram-study-2026-10-04T204557`,
+    no ROM needed):
+    - 192 byte reads: 167 placed, 14 `unbracketed:after`, 11
+      `unbracketed:before`.
+    - Row "< 64": 77 points. Row "64–144": 51 points.
+    - **Row "≥ 144 at 4,000–5,600 rpm": 0 observed points (`no_points`).**
+      All 39 placed bytes ≥ 144 sit below 3,787.5 rpm, so they are
+      `no_predicted_row`: the written table makes no claim for them. The
+      drive reached 5,350 rpm, but no byte read is bracketed there. The
+      "+3 to +5.5 %" row therefore cannot be reproduced from observed
+      coordinates on this drive. It needs N02's reconstructed bytes (needs the
+      images' curves) or a byte logged at WOT.
+    - The row's "45 % of samples": 89 / 192 byte reads are below 64 (46.4 %).
+  - **Tests.** `tests/test_fuel_comp_restore.py`, 16 pass; synthetic images go
+    through the real `RevisionImageResolver`.
+    - `::test_the_change_is_each_image_on_its_own_axes` checks 5 hand-worked
+      vectors: unchanged, the 144 breakpoint, the old column clamping past
+      144, an rpm interval, and a byte interval across both axes.
+    - Controls: `::test_new_cells_on_the_old_axis_or_transposed_are_different_answers`.
+    - `::test_interval_extremes_are_the_brute_force_extremes` uses random cells
+      and compares against every whole (word, byte). It fails when the
+      interior breakpoints are dropped (mutation checked).
+    - Slice: `::test_every_byte_read_on_the_slice_is_placed_or_named` and
+      `::test_the_slice_has_no_observed_point_in_the_high_load_row`.
+    - `::test_constant_multipliers_give_each_kind_of_verdict`: 200 → 198
+      gives `reproduced` 77, `contradicted` 51 and `no_points` 0.
+    - Refusals and edges: `::test_the_images_must_be_the_cases_and_compare_the_same_input`,
+      `::test_points_outside_the_base_revision_are_not_placed`,
+      `::test_the_tolerance_is_the_written_precision`,
+      `::test_a_point_across_a_band_edge_belongs_to_neither`,
+      `::test_observed_points_name_what_the_session_lacks` and
+      `::test_reconstructed_samples_become_interval_points`.
+    - `tests/test_fuel_comp_restore_private_rom.py` skips here because the
+      images are absent. It asserts that the real pair is comparable (same
+      chain, K and rpm axis; load axis top 144 → 255). It also asserts rows
+      "< 64" and "64–144" `reproduced` and the high row `no_points`. That claim
+      has not been run.
+  - **Remaining:**
+    1. Run on a machine holding both images:
+       `.venv/bin/python -m tools.fuel_comp_restore_reproduction --session
+       tests/fixtures/fuel_comp/_capture-ram-study-2026-10-04T204557
+       --rom-dir "<Uprev>/Tuned ROMs" --out <scratch>/fuel_comp_restore.json`.
+       Then run the private-ROM test.
+    2. The high row needs `--reconstructed` on the slice (images required) or
+       a drive that logs the byte at WOT.
+    3. **Truck:** physical outcomes on independent post-flash drives. E07.4's
+       case scores them (`split.post: []`, rules frozen `f522ff53…`). No
+       post-flash session is on this laptop.
 
 - [ ] **B08.7 — Publish qualified models and verify their Pi integration.**
   Reuse B03 compatibility/publication gates and E04's shared runtime. Record
