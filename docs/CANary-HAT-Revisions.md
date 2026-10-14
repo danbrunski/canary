@@ -677,9 +677,9 @@ objection, so the two jobs split along the power domains:
 
 | | CANary-PWR MCU (always-on) | Rev 3.0 coprocessor (powered by the Pi) |
 |---|---|---|
-| Jobs | wake (§13.3.1), the Pi's 5V switch, watchdog with power-cycle authority (§13.3.3e), battery voltage and wake events while parked (§13.3.3d), power-fail line | boot-gap CAN buffer (§13.3.3a), kHz ADC and crank capture (§13.3.3b), PPS-locked time base (§13.3.3c), K-line (§13.3.4), IMU/baro FIFO, bulk dump to the Pi |
+| Jobs | wake (§13.3.1), the Pi's 5V switch, watchdog with power-cycle authority (§13.3.3e), battery voltage and wake events while parked (§13.3.3d), power-fail line | boot-gap CAN buffer (§13.3.3a), kHz ADC and crank capture (§13.3.3b), PPS-locked time base (§13.3.3c), K-line (§13.3.4), IMU FIFO (barometer dropped 2026-10-14), bulk dump to the Pi |
 | Firmware | small, rarely changed | the complex code, changed often |
-| If it fails | the Pi stays powered: §13.3.3(e)'s fail-safe rule, now on CANary-PWR | ~~the extras are lost and the rig behaves like rev 2.1~~ CAN (OBD requests included) and GNSS keep working; K-line, IMU, barometer and analog go dark until the Pi reflashes it over SWD (failure containment, below) |
+| If it fails | the Pi stays powered: §13.3.3(e)'s fail-safe rule, now on CANary-PWR | ~~the extras are lost and the rig behaves like rev 2.1~~ CAN (OBD requests included) and GNSS keep working; K-line, IMU and analog go dark until the Pi reflashes it over SWD (failure containment, below) |
 
 **The HAT becomes a single power domain again.** The rev 3.0 coprocessor runs
 from the Pi's 3V3, as every other part on the HAT does. **§13.3.2's
@@ -716,7 +716,7 @@ binds the HAT:
 | §13.3.13 placement | The stack is NVMe base / Pi / **PWR** / HAT (2026-10-13), not X1202 / Pi / HAT. **J3, Q1, D1, C2 and the always-on buck leave the HAT**; J3 already lives in rev 2.1's J2 as pins 3–4, and rev 3.0 drops those two positions (§13.3.9 item 5). The HAT's bottom face now looks at CANary-PWR's top side rather than the cooler, so the fan keep-out and the ~6 mm cooler clearance move to PWR; the HAT's bottom-side budget becomes whatever its 13.5 mm J1 leaves above PWR's top-side parts (`CANary-PWR-Spec.md` §P2). Its top face is free. |
 
 **Failure containment (operator, 2026-10-14).** The coprocessor is not purely
-additive. K-line (§13.3.4), the IMU and barometer (private I²C, §13.3.4) and
+additive. K-line (§13.3.4), the IMU (private I²C, §13.3.4) and
 the analog channels (private SPI, §13.3.9 item 2) sit *behind* it. Only vehicle
 CAN and GNSS are fan-outs the Pi keeps. That dependency is accepted. What is not
 accepted is the coprocessor taking the Pi's CAN path down with it. Silicon
@@ -982,6 +982,31 @@ firmware (§13.3.7). That suffices, because broadcast is already the primary liv
 path; `docs/data-architecture.md` on it: "zero polling cost, no contention,
 deterministic cadence, high refresh rate."
 
+> **After boot, and stitching (operator, 2026-10-14).** `can0` stays the
+> system of record for every CAN frame once the collector runs. The MCU does
+> not stream the whole bus in steady state. Two copies of each frame with
+> different stamps would be two truths; `can0` is needed anyway because it
+> carries the Pi's OBD requests; and a dead coprocessor then changes nothing
+> about CAN (§13.3.0, failure containment).
+>
+> The boot-gap buffer is joined to `can0` **by content, not by time**:
+> - The MCU keeps buffering until `can0` is running, so its dump overlaps
+>   `can0`'s first seconds.
+> - The Pi aligns the overlap by exact (ID, payload) sequence. It keeps the
+>   MCU's frames from before the first match and maps their times with the fit
+>   from the overlap (see (c)). That leaves no duplicate rows and no gap.
+> - **Keep the head, ring the tail.** The start of the window (crank, prime)
+>   is the valuable part, and the end is what makes stitching possible. A plain
+>   ring buffer would overwrite the crank first.
+> - If no overlap matches (the MCU reset during the gap, or the buffer
+>   overflowed), the rows are still written, labelled `clock: "mcu"` with
+>   unmapped times, never passed off as `kernel` rows. That label is a new
+>   value in `src/collection/frame_time.py`'s acquisition-clock policy.
+>
+> *Rejected:* the MCU as the CAN system of record. It is reversible in
+> firmware alone if `can0`'s jitter ever matters: raise the witness stream in
+> (c) to every frame.
+
 **(b) Electrical-system diagnostics.** §13.2 already queues a 12V divider into an
 ADC as a *status* input. Behind an MCU sampling at 1–10 kHz it becomes an
 instrument, measuring quantities the ECU does not publish at all:
@@ -1029,6 +1054,28 @@ It also largely dissolves `docs/time-sync.md`'s cold-boot problem: the MCU keeps
 monotonic time across Pi power cycles, so a session's *internal* timeline is
 never fractured by a mid-session step. That doc's outstanding "clock-jump session
 roll" item drops from a correctness issue to bookkeeping.
+
+> **How the two clocks meet: CAN witnesses (operator, 2026-10-14).** The MCU
+> stamps what only it sees: IMU, analog, K-line and the boot-gap frames. The
+> Pi stamps `can0` rows with the kernel's `SO_TIMESTAMP` (`frame_time.py`),
+> which lags arrival by the driver's IRQ and SPI latency. They are joined
+> through the bus both sides watch. The MCU sends a **witness stream**: ID,
+> payload and MCU time for every frame of one or two high-rate IDs whose
+> payloads carry a rolling counter. That is ~200 records/s, a few KB/s.
+> - The Pi matches each witness to its `can0` row by ID, payload and order,
+>   then fits a continuous MCU→Pi mapping over a sliding window.
+> - **It works without a GNSS fix.** Nothing in it depends on PPS.
+> - **It maps into the time `can0` rows are actually stored in**, lag
+>   included. An ADC or IMU sample then sits on the same scale as the CAN rows
+>   it will be paired with, which is what same-instant pairing needs. A mapping
+>   through PPS would be truer to absolute time but offset from the CAN rows by
+>   that lag.
+> - **It measures `can0`'s timing for free.** The fit's residual spread is the
+>   jitter of `can0`'s stamps, which is unmeasured today. Comparing against the
+>   MCP2518FD's hardware stamps is a separate, Pi-side question.
+>
+> PPS still disciplines the MCU counter's rate. The re-scope already narrowed
+> the "across Pi power cycles" claim above (§13.3.0).
 
 **(d) Parked monitoring.** Battery voltage every few minutes, CAN wake events,
 and motion via the LSM6DSOX — **INT2 (pin 9) is unconnected on rev 1.0**, so it is
@@ -1085,6 +1132,56 @@ of for a whole session. That shrinks the open NT510 question (§13.1 measurement
 2) from "does the pull-up disturb a tool session" to "does it disturb one during
 our own ~20 ms of talking."
 
+> **The Pi ↔ MCU K-line contract (operator, 2026-10-14).** The cut is the
+> existing `KlineTransport` boundary (`src/collection/kline/transport.py`).
+> The MCU replaces only what sits under it: the tty, EN, the pull-up and host
+> timing. A `McuKlineTransport` implements the same Python API over the SPI
+> link. Everything above it stays in tested Python, unchanged: sessions, the
+> plan, the read-only allowlist, `tx_gate` claims, foreign-tester detection
+> and sniff frame decoding. This is §13.3.7's reasoning for ISO-TP applied to
+> K-line.
+>
+> **The firmware is protocol-agnostic.** It knows bytes, breaks and timing,
+> not KWP2000. It offers:
+> - `set_mode(off | sniff | command)`: the TLIN1027 sequence. In sniff the
+>   pull-up is off and TX cannot happen.
+> - `wake(kind, timings)`: fast init or a 5-baud address. It checks W5 idle
+>   first and returns the low and high times measured off the line.
+> - `transact(frame, p4_ms, reply_timeout, end_silence)`: sends with the P4
+>   gap, checks every echoed byte (aborting on a mismatch, which means another
+>   tester), turns the pull-up on for that exchange only, and collects the
+>   reply until the line goes quiet. Returns the bytes with per-byte MCU
+>   timestamps and a status.
+> - `receive(timeout, end_silence)`: for the follow-up after NRC 0x78
+>   (responsePending).
+> - A **sniff event stream** on DATA_RDY: bytes with per-byte stamps, breaks
+>   with measured low and high times, and framing errors.
+>
+> A frame ends at a silence threshold the Pi passes per call, so the firmware
+> never parses headers. Another vehicle's K-line protocol is a profile change,
+> not a reflash.
+>
+> **MCU guarantees:**
+> - It **never transmits on its own initiative**, only inside a `wake` or
+>   `transact` the Pi commanded.
+> - If the command channel goes quiet for a few seconds in command mode, it
+>   **drops EN and the pull-up in the safe order** by itself. That is the
+>   crash-path guarantee a Python process could not give (§11, R8).
+>
+> **The allowlist stays in Python only.** It is one tested source of truth,
+> and it is policy. A K-line reflash under AGENTS.md's permission rule must not
+> need a coprocessor reflash, so the firmware is not a policy point.
+>
+> **What improves:**
+> - Breaks and wake-ups are measured by edge capture instead of being bounded
+>   through the mark-parity tty trick (H05.9), which retires.
+> - `WakeupTimingError` and `ByteTimingError` lose their cause, since the MCU
+>   cannot stall. The other errors map one-to-one onto the existing exception
+>   classes.
+> - "RXD low" is classified using the 12 V reading.
+> - `acquired_at` becomes mapped MCU time through the witness fit (§13.3.3c)
+>   instead of the host-clock midpoint of the exchange.
+
 **CAN (U3/U4) — modest, plus one option to record and defer.** The MCU should not
 touch the working path: MCP2518FD → mainline `mcp251xfd` → SocketCAN `can0` →
 `can_collector.py` is clean and has no problem an MCU solves. The hardware story
@@ -1111,6 +1208,11 @@ sensors** — and leave CAN alone.
 
 **IMU and barometer (U6/U5) — real gains, and one trap not to walk into.**
 
+> **Barometer dropped from rev 3.0 (operator, 2026-10-14).** Rev 2.1 already
+> has none (boost uses ECM PID 0x33 for baro, `hat_revisions.json`
+> `"barometer": false`), and rev 3.0 does not bring it back. The MCU's private
+> I²C carries the **LSM6DSOX alone**. The BMP384 bullets below are history.
+
 > **Do not put the MCU on I2C1.** §5 records the X1202 fuel gauge at **0x36 on
 > bus 1**, and `scripts/ups_shutdown_watch.py` / `src/daemon/ups.py` depend on
 > it. Multi-master I2C between Linux and an MCU is a reliability hazard even
@@ -1133,10 +1235,11 @@ entirely**, leaving Pi I2C1 with the fuel gauge and nothing else. That buys:
 - **R7/R9 stop being a question.** §5's doubled pull-ups (~1.3 kΩ effective,
   ~2.5 mA sink per line) that §8.3 wants depopulated do not exist on a new bus.
 
-**The timing for this is unusually favourable and will not recur.**
+~~**The timing for this is unusually favourable and will not recur.**
 `imu_collector.py` does not exist, and §11 records that the barometer has "no
-config, collector, or channel." Both collectors would be written against the MCU
-link *from the start* rather than migrated onto it later.
+config, collector, or channel."~~ *Stale by 2026-10-14:* `imu_collector.py`
+exists, and H02 made its transport swappable for exactly this move. The
+barometer is dropped.
 
 **GNSS (U7) — the MCU's rail closes a recorded defect for free.** §3.6:
 "**Backup supply has no fallback.** V_BCKP is fed *only* from BT1 through D2. If
@@ -1211,17 +1314,17 @@ Fix this list before layout: a missing net is a re-spin, unused firmware is free
 | 1 | **Always-on 3.3V** from `+12V_RAW`, nA-class-Iq regulator | MCU + TCAN1042 VIO (wake) + GNSS V_BCKP OR leg (§13.3.2) |
 | 2 | 12V divider → MCU ADC | crank/alternator/parasitic (§13.3.3b); K-line undervoltage disambiguation. **Divider lands in rev 2.0** behind a small I2C ADC (§13.2.3) — rev 3.0 re-points it at the MCU for kHz sampling. **Rev 2.1 makes this four channels** (`V12_SENSE`, `MAP`, `IAT`, `5V_SENS`; §13.5.3), and MAP/IAT are ratios against `5V_SENS`, so all three must land on the *same* ADC — §13.3.9. **From 2026-10-14 that ADC is the ADS8688A on a private MCU SPI bus**, not the MCU's own (§13.3.9 item 2), and the crank summary is CANary-PWR's (§13.3.3b) |
 | 3 | MCU GPIO → high-side load switch on the J3 leg | §13.3.1 sleep/wake |
-| 4 | MCU ↔ Pi UART pair | handshake; works whenever the MCU is up |
+| 4 | MCU ↔ Pi UART pair | ~~handshake; works whenever the MCU is up~~ **From 2026-10-14: the MCU's console and fallback control, on `uart0` (GPIO14/15).** Item 5 plus DATA_RDY carry data and control, and the handshake is a status word read over SPI (header map below) |
 | 5 | MCU ↔ Pi on **SPI0 CE1 (GPIO7, pin 26)** — ~~SPI0 with a GPIO chip select on GPIO20~~ | bulk buffer dump; a few hundred KB over UART is painful. ~~CE1 is spent by rev 2.1 — on the ADS8688A ADC, not CAN1~~ **Back on CE1 from 2026-10-14:** rev 2.1's ADS8688A moves behind the MCU (§13.3.9 item 2), and GPIO20 went to GNSS PPS at rev 2.1 layout. The MCU's MISO goes through a CE1-gated tri-state buffer (§13.3.0, failure containment) |
 | 6 | Pi 3V3 rail sense → MCU | the tri-state invariant in §13.3.2 |
 | 7 | TCAN1042 RXD → MCU (fan-out) | boot-gap capture, wake, timestamps. ~~Rev 2.1 adds U11 (CAN1/aux)~~ — **CAN1 was dropped 2026-10-03** (§13.5.4), so there is one transceiver and one RXD fan-out. Fuel pressure is an analog channel on U8, which means **capturing it across the boot gap now needs the MCU to read the ADC**, not a second RXD — a change in kind for §13.3.9 to absorb |
 | 8 | K-line RXD / TXD / EN → MCU | §13.3.4; supersedes the Pi's `uart0` connection |
 | 9 | GNSS TX + TIMEPULSE → MCU (fan-out) | time base, hot fix, absolute time at wake |
 | 10 | **LSM6DSOX INT2 (pin 9 — unconnected on rev 1.0)** → MCU | motion wake. **Landed in rev 2.0** as a net to a free Pi GPIO (§13.2.3); rev 3.0 re-points it |
-| 11 | Private MCU I2C → LSM6DSOX + BMP384 | §13.3.4 — **must not be I2C1** |
+| 11 | Private MCU I2C → LSM6DSOX ~~+ BMP384~~ (barometer dropped 2026-10-14), plus its INT1 and INT2 | §13.3.4 — **must not be I2C1** |
 | 12 | ~~GNSS antenna bias sense → MCU ADC~~ **→ u-blox two-pin antenna supervisor** | Open/short antenna detection, **but not via the MCU** — the M10M does it itself. Deferred here from rev 2.0 on 2026-08-22. See below. |
 | 13 | STB (U4), **U9 sensor-rail EN (rev 2.1)** and the §13.2 pull-up FET gate → MCU | safe-state ownership. **U4 STB and the FET gate exist in rev 2.0** as Pi GPIOs (§13.2.1, §13.2.4); rev 2.1 ties U9 EN to `+3V3` (§13.5.3). ~~STB (U11)~~ — **gone with CAN1, 2026-10-03** (§13.5.4). Rev 3.0 moves the rest to the MCU. **Revised 2026-10-14:** U4 STB stays on the Pi (§13.3.0, failure containment). The FET gate goes with K-line to the MCU. U9 EN can go either way, since its "parked MAP-equals-baro" reason went with the always-on MCU |
-| 14 | **A flash path from the Pi** — SWD bit-banged from Pi GPIO, or a UART bootloader with BOOT0 on a Pi-drivable pin | see below |
+| 14 | **A flash path from the Pi** — SWD bit-banged from Pi GPIO, or a UART bootloader with BOOT0 on a Pi-drivable pin | see below. **Settled: SWD** (§13.3.12), on GPIO26 SWDIO, GPIO21 SWCLK, and GPIO16 NRST through a BSS138 (header map below) |
 | 15 | Status LEDs → MCU | §13.2, §13.3.4 |
 
 **Item 12 changed shape entirely.** It was written as an MCU ADC channel watching
@@ -1270,6 +1373,72 @@ every capability above freezes at whatever shipped.
 
 **Items 4, 5 and 6 are the crossing nets** that §13.3.2 governs — size their
 series resistance there, not here.
+
+##### Rev 3.0 header map (operator, 2026-10-14)
+
+**This map supersedes the budget paragraphs after it**, which are kept as the
+history of how the count moved. It is derived from the rev 2.1 overlay
+(`canary-hat-r21-overlay.dts`), `hat_revisions.json` and CANary-PWR's §P6.
+Things that free pins:
+- K-line moves to the MCU: GPIO14/15, 21 and 26.
+- The IMU moves to the private I²C bus: INT1 GPIO17, INT2 GPIO23.
+- The ADS8688A moves behind the MCU: CE1 goes to the link.
+- U9's EN moves to the MCU, which reads the sensors it powers: GPIO19.
+
+Eleven pins come free and the coprocessor uses six.
+
+| GPIO (pin) | Rev 2.1 | Rev 3.0 |
+|---|---|---|
+| 0/1 (27/28) | ID EEPROM | same |
+| 2/3 (3/5) | I²C1: LSM6DSOX, plus PWR when fitted | I²C1: **PWR only** |
+| 6 (31) | PWR `~PWR_FAIL` | same |
+| 7 (26) | CE1: ADS8688A | **CE1: MCU link** (item 5; MISO through the CE1-gated buffer) |
+| 8–11 | SPI0, CE0: MCP2518FD | same |
+| 12/13 (32/33) | `uart4`: GNSS | same (GNSS TX also fans out to the MCU) |
+| 14/15 (8/10) | `uart0`: K-line | **`uart0`: MCU console and fallback control** (item 4) |
+| 16 (36) | free | **MCU NRST, through a BSS138** (gate pulled down) |
+| 20 (38) | PPS | same (TIMEPULSE also to an MCU timer input) |
+| 21 (40) | K-line pull-up FET | **SWCLK** (item 14) |
+| 22 (15) | U4 STB | same: **stays on the Pi** (§13.3.0, failure containment) |
+| 23 (16) | IMU INT2 | **DATA_RDY, MCU → Pi**, active high, external pull-down |
+| 24 / 27 (18/13) | PWR NRST / BOOT0 | same |
+| 25 (22) | CAN nINT | same |
+| 26 (37) | TLIN1027 EN | **SWDIO** (item 14) |
+| **4, 5, 17, 18, 19** | free / INT1 / free / `SENS_PWR_EN` | **spare** |
+
+- **SPI plus DATA_RDY carries data and control.** The Pi is the SPI master, so
+  the MCU raises DATA_RDY when it has something to send: the boot-gap dump, a
+  K-line reply, or a FIFO at its watermark. The pull-down makes a resetting MCU
+  read as idle. A status word read over SPI is the heartbeat. A failed or stale
+  read is how the Pi reports "no coprocessor".
+- **The UART is a console, not the handshake.** It gives a log stream that
+  works before the SPI protocol does and without OpenOCD attached, which bring-up
+  on the fabricated board needs. `uart0` already has the overlay plumbing and
+  the H03.5 guard that refuses a Linux console on it.
+- **NRST goes through a FET, as on CANary-PWR**, so the Pi pin's default pull
+  at boot cannot fight the MCU's internal NRST pull-up and leave it half-reset.
+  The gate pull-down makes "released" the default whatever the Pi is doing.
+- **SWD sits together at the end of the header** (pins 36, 37, 40), on the
+  same nets as the bench SWD header. Use series resistors, and keep the rule
+  that no bench probe is attached while OpenOCD runs on the Pi (§13.3.12).
+- **Decide per pin at schematic entry** (caveat (a) below still applies): a
+  freed pin only returns if rev 3.0 declines to route it. Routing may swap
+  equivalent pins. The functions and the pull directions are what this map
+  fixes.
+
+**Software this implies (open, not started):**
+- A 3.0 row in `hat_revisions.json`, plus a `canary-hat-r30` overlay with
+  `uart0` as the MCU console, no K-line pins and no ADC spidev on CE1.
+- The K-line and ADC collectors reach their hardware through the MCU link
+  instead of `uart0` and `/dev/spidev0.1`.
+- `imu_collector` takes the MCU-link transport H02 left room for.
+- OpenOCD with `linuxgpiod` on GPIO26/21/16 for in-vehicle flashing and debug.
+- Boot-gap ingest: content-matched stitching against `can0`, the head-kept
+  ring, and the `clock: "mcu"` label (§13.3.3a).
+- The witness fit from MCU time to `can0` time, applied to every MCU-stamped
+  stream, with its residual reported as `can0` stamp jitter (§13.3.3c).
+- `McuKlineTransport`: `KlineTransport`'s API over the MCU link (§13.3.4). The
+  sniff decoder takes measured break events in place of mark-parity bytes.
 
 Header budget — **re-counted 2026-09-14 against rev 2.1.** §4.1's list of ten
 unconnected GPIOs is stale: rev 2.0 spent 22, 23 and 24 (STB, INT2, K-line
@@ -1439,7 +1608,7 @@ want of pins** — that comparison should be re-run on its merits.
 pins on one converter with one reference**… U8 is then deleted, which also
 takes the ADS1015's traffic off I2C1.~~ That plan was written for the ADS1015
 and is superseded. Rev 3.0 keeps the ADS8688A and moves it to a **private SPI
-bus that only the MCU drives**, the same way the IMU and barometer get a
+bus that only the MCU drives**, the same way the IMU gets a
 private I²C bus (§13.3.4). Why:
 
 - The analog worth giving the MCU happens in the boot gap or at kHz: MAP at
@@ -1790,7 +1959,9 @@ recover hangs.
   slow, which is fine for debugging and tolerable for flashing at this image
   size; the bench probe is the fast path.
 - **`BOOT0` and the UART bootloader both leave the header**, freeing **GPIO21**
-  and leaving `uart4` to item 4's handshake alone.
+  and leaving `uart4` to item 4's handshake alone. *(Superseded by the
+  2026-10-14 header map, §13.3.6: `uart4` is GNSS's since rev 2.1, item 4 is a
+  console on `uart0`, and GPIO21 is SWCLK.)*
 - **SWDIO/SWCLK/nRST are one net set with two consumers** (Pi GPIO and the bench
   header). Series resistance per §13.3.2, and the procedural rule that a probe
   is not attached while OpenOCD runs on the Pi. These are Pi→MCU crossings, so
