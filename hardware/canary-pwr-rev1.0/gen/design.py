@@ -186,7 +186,7 @@ part(
     mpn="1803293",
     mfr="Phoenix Contact",
     desc="MC 1,5/4-G-3,81 pluggable header; mating plug MC 1,5/4-ST-3,81 (1803594)",
-    note="OBD 16 = +12V_RAW (18 AWG), OBD 4 = GND (18 AWG), OBD 6/14 = CANH/CANL. Spec P3. Verify Phoenix order numbers before ordering.",
+    note="OBD 16 = +12V_RAW, OBD 4 = GND, OBD 6/14 = CANH/CANL, all 20 AWG (operator 2026-10-14). Spec P3. Verify Phoenix order numbers before ordering.",
 )
 part(
     S,

@@ -144,14 +144,22 @@ gate clamp (BZT52C15) and pull-down, D1 (SMBJ24A TVS, 38.9 V max clamp) and
 50 V because of D1's clamp; the switching FETs are 60 V for the same reason.
 
 **Vehicle in: a pluggable terminal** (Phoenix MC 1,5/4-G-3,81, order number
-1803293; plug MC 1,5/4-ST-3,81). The OBD harness is field wiring with 18 AWG on
-the power pair: its wires are screwed into the plug off the stack and the plug
+1803293; plug MC 1,5/4-ST-3,81). The OBD harness is field wiring, 20 AWG
+throughout: its wires are screwed into the plug off the stack and the plug
 pushes in from the side, no crimping.
+
+**20 AWG on the power pair** (operator, 2026-10-14). RSNSI caps the input at
+4 A (load plus charger), and that peak lasts only while the bank recharges; the
+worst steady load (Pi at 5 A plus the HAT) is ~2.9 A at 12 V. A 1 m pigtail
+drops ~0.27 V at 4 A, ahead of the buck and far above the 8.95 V PFI
+threshold. The plug stays MC 1,5 (8 A, 28–16 AWG): Phoenix's 2.5 mm
+FK-MC 0,5 would save ~5 mm of edge but is rated 4 A, no margin over RSNSI, and
+RS lists its 4-way plug as discontinued.
 
 | Pin | Net | Wire |
 |---|---|---|
-| 1 | `+12V_RAW` (OBD 16) | 18 AWG |
-| 2 | GND, chassis (OBD 4) | 18 AWG |
+| 1 | `+12V_RAW` (OBD 16) | 20 AWG |
+| 2 | GND, chassis (OBD 4) | 20 AWG |
 | 3 | `CANH` (OBD 6) | 20 AWG |
 | 4 | `CANL` (OBD 14) | 20 AWG |
 

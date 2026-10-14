@@ -2310,7 +2310,7 @@
 				)
 			)
 		)
-		(property "Note" "OBD 16 = +12V_RAW (18 AWG), OBD 4 = GND (18 AWG), OBD 6/14 = CANH/CANL. Spec P3. Verify Phoenix order numbers before ordering."
+		(property "Note" "OBD 16 = +12V_RAW, OBD 4 = GND, OBD 6/14 = CANH/CANL, all 20 AWG (operator 2026-10-14). Spec P3. Verify Phoenix order numbers before ordering."
 			(at 35.56 43.18 0)
 			(show_name no)
 			(do_not_autoplace no)
