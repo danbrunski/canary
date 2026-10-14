@@ -38,6 +38,7 @@ from src.collection.obd_scheduler import (
     CAPTURE_MISS_BACKOFF_SECONDS,
     FAST_EXIT_RETRY_MIN_SECONDS,
     MAX_MISS_BACKOFF_SECONDS,
+    PRIORITY_MISS_BACKOFF_SECONDS,
     CanObdLoopStats,
     ForcePollTrigger,
     FreezeFrameTrigger,
@@ -515,12 +516,12 @@ def test_miss_backoff_escalates_only_for_requests_that_never_answered() -> None:
     dropout still recovers promptly."""
     never_answered = _PollRequestState()
     for _ in range(3):
-        _update_response_state(never_answered, emitted=False, now=0.0)
+        _update_response_state(never_answered, emitted=False, now=0.0, priority=False)
     assert never_answered.suppressed_until == AUTO_MISS_BACKOFF_SECONDS * 4
 
     answered_before = _PollRequestState(last_response_at=5.0)
     for _ in range(3):
-        _update_response_state(answered_before, emitted=False, now=0.0)
+        _update_response_state(answered_before, emitted=False, now=0.0, priority=False)
     assert answered_before.suppressed_until == AUTO_MISS_BACKOFF_SECONDS
 
 
@@ -535,7 +536,7 @@ def test_focused_capture_retries_a_transient_miss_without_a_30_second_hole() -> 
 
     delays: list[float] = []
     for _ in range(7):
-        _update_response_state(state, emitted=False, now=0.0, focused_capture=True)
+        _update_response_state(state, emitted=False, now=0.0, priority=False, focused_capture=True)
         delays.append(state.suppressed_until)
 
     assert delays == [
@@ -548,18 +549,53 @@ def test_focused_capture_retries_a_transient_miss_without_a_30_second_hole() -> 
         AUTO_MISS_BACKOFF_SECONDS,
     ]
 
-    _update_response_state(state, emitted=True, now=0.0, focused_capture=True)
+    _update_response_state(state, emitted=True, now=0.0, priority=False, focused_capture=True)
     assert state.missed_responses == 0
     assert state.suppressed_until == 0.0
+
+
+def test_a_priority_request_that_answered_retries_after_ten_seconds() -> None:
+    """Operator decision 2026-10-13 (A05.8): the priority PIDs retry 10 s
+    after a miss, not 30 s. Their answering-time gaps under the 30 s back-off
+    reached 64.8 s (RPM) and 69.1 s (THROTTLE_POS) on the calibration drives,
+    and that back-off bounded plausibility's dropout detection."""
+    assert PRIORITY_MISS_BACKOFF_SECONDS == 10.0
+    answered = _PollRequestState(last_response_at=5.0)
+    for _ in range(3):
+        _update_response_state(answered, emitted=False, now=100.0, priority=True)
+        assert answered.suppressed_until == 100.0 + PRIORITY_MISS_BACKOFF_SECONDS
+
+    # Never answered is support probing, not a dropout: it escalates from the
+    # ordinary step whatever its lane.
+    never_answered = _PollRequestState()
+    for _ in range(3):
+        _update_response_state(never_answered, emitted=False, now=0.0, priority=True)
+    assert never_answered.suppressed_until == AUTO_MISS_BACKOFF_SECONDS * 4
+
+
+def test_a_focused_capture_priority_miss_escalates_only_to_the_priority_ceiling() -> None:
+    state = _PollRequestState(last_response_at=5.0)
+    delays: list[float] = []
+    for _ in range(6):
+        _update_response_state(state, emitted=False, now=0.0, priority=True, focused_capture=True)
+        delays.append(state.suppressed_until)
+    assert delays == [
+        CAPTURE_MISS_BACKOFF_SECONDS,
+        2.0,
+        4.0,
+        8.0,
+        PRIORITY_MISS_BACKOFF_SECONDS,
+        PRIORITY_MISS_BACKOFF_SECONDS,
+    ]
 
 
 def test_miss_backoff_is_capped_and_resets_on_a_response() -> None:
     state = _PollRequestState()
     for _ in range(40):
-        _update_response_state(state, emitted=False, now=0.0)
+        _update_response_state(state, emitted=False, now=0.0, priority=False)
     assert state.suppressed_until == MAX_MISS_BACKOFF_SECONDS
 
-    _update_response_state(state, emitted=True, now=0.0)
+    _update_response_state(state, emitted=True, now=0.0, priority=False)
     assert state.suppressed_until == 0.0
     assert state.missed_responses == 0
 

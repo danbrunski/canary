@@ -35,11 +35,27 @@ log = logging.getLogger(__name__)
 AUTO_MISS_BACKOFF_SECONDS = 30.0
 
 
+#: Miss back-off for a *priority* request (``CanObdSpec.priority_channels``,
+#: or the active capture profile's own ``priority_channels``) that has
+#: answered before. Operator decision 2026-10-13 (A05.8): the priority PIDs
+#: are what the segmenter gates on and what plausibility's freshness check
+#: watches, and a 30 s back-off after one missed poll is the dominant term in
+#: how long a real dropout takes to see. On the calibration drives the
+#: priority PIDs' answering-time gaps reached 64.8 s (RPM) and 69.1 s
+#: (THROTTLE_POS), two 30 s back-offs back to back, which is why
+#: ``plausibility.yaml``'s fast tier reads 33 s (threshold 99 s). A priority
+#: request is already first in line for a slot, so its retry costs one slot
+#: per 10 s of silence, not bus time stolen from the rest. Never-answered
+#: requests keep the escalation from ``AUTO_MISS_BACKOFF_SECONDS``: this is
+#: about a channel that answered going quiet, not about probing support.
+PRIORITY_MISS_BACKOFF_SECONDS = 10.0
+
+
 #: A focused high-rate capture has already established that every selected
 #: channel answers.  One transient miss must not erase 30 seconds of that
 #: channel (roughly 450 samples at 15 Hz), so retry quickly and escalate only
 #: if the channel keeps missing.  Normal collection retains the conservative
-#: 30-second retry below.
+#: retries above (30 s; 10 s for a priority request).
 CAPTURE_MISS_BACKOFF_SECONDS = 1.0
 
 
@@ -65,8 +81,15 @@ def _update_response_state(
     *,
     emitted: bool,
     now: float,
+    priority: bool,
     focused_capture: bool = False,
 ) -> None:
+    """Record one attempt's outcome; a miss sets the back-off.
+
+    ``priority`` is required, not defaulted: whether the request is in the
+    priority lane decides its back-off (``PRIORITY_MISS_BACKOFF_SECONDS``),
+    so every caller has to say which it is (:func:`request_is_priority`).
+    """
     if emitted:
         state.missed_responses = 0
         state.suppressed_until = 0.0
@@ -74,18 +97,30 @@ def _update_response_state(
         return
     state.missed_responses += 1
     state.missed_at = now
-    state.suppressed_until = now + _miss_backoff_seconds(state, focused_capture=focused_capture)
+    state.suppressed_until = now + _miss_backoff_seconds(
+        state, focused_capture=focused_capture, priority=priority
+    )
     state.backoffs += 1
 
 
-def _miss_backoff_seconds(state: PollRequestState, *, focused_capture: bool = False) -> float:
+def request_is_priority(request: PollRequest) -> bool:
+    """Whether ``request`` is in the priority lane right now: the active
+    capture profile's decision, else the spec's (``request.priority``) — the
+    same resolution slot selection uses."""
+    return tuning_profile.priority_channel(request.channel, request.priority)
+
+
+def _miss_backoff_seconds(
+    state: PollRequestState, *, priority: bool, focused_capture: bool = False
+) -> float:
     """Backoff to apply after a missed response.
 
     A request that has answered at least once normally keeps the flat
-    ``AUTO_MISS_BACKOFF_SECONDS``.  During a focused high-rate capture that
-    would turn one transient timeout into a 30-second hole, so capture-owned
-    channels retry after one second and exponentially approach the normal
-    ceiling only when misses continue.
+    ``AUTO_MISS_BACKOFF_SECONDS``, or ``PRIORITY_MISS_BACKOFF_SECONDS`` when it
+    is a priority request (operator decision 2026-10-13).  During a focused
+    high-rate capture that would turn one transient timeout into a
+    30-second hole, so capture-owned channels retry after one second and
+    exponentially approach that ceiling only when misses continue.
 
     A request that has *never* answered is a different thing: on the ``auto``
     PID set the catalog is probed wholesale, so unsupported PIDs are expected
@@ -96,13 +131,11 @@ def _miss_backoff_seconds(state: PollRequestState, *, focused_capture: bool = Fa
     ECU that only answers in a particular state still gets a periodic probe.
     """
     if state.last_response_at is not None:
+        ceiling = PRIORITY_MISS_BACKOFF_SECONDS if priority else AUTO_MISS_BACKOFF_SECONDS
         if focused_capture:
             exponent = min(max(state.missed_responses - 1, 0), 20)
-            return min(
-                CAPTURE_MISS_BACKOFF_SECONDS * (2.0**exponent),
-                AUTO_MISS_BACKOFF_SECONDS,
-            )
-        return AUTO_MISS_BACKOFF_SECONDS
+            return min(CAPTURE_MISS_BACKOFF_SECONDS * (2.0**exponent), ceiling)
+        return ceiling
     # Clamped before the exponentiation: float ** big raises OverflowError.
     exponent = min(max(state.missed_responses - 1, 0), 20)
     return min(AUTO_MISS_BACKOFF_SECONDS * (2.0**exponent), MAX_MISS_BACKOFF_SECONDS)
@@ -158,7 +191,9 @@ def replan_for_generation(
         if state.suppressed_until > now and state.missed_at is not None:
             # The same policy the loop applies to the next miss.
             focused = tuning_profile.is_active() and member
-            rederived = state.missed_at + _miss_backoff_seconds(state, focused_capture=focused)
+            rederived = state.missed_at + _miss_backoff_seconds(
+                state, focused_capture=focused, priority=request_is_priority(request)
+            )
             state.suppressed_until = min(state.suppressed_until, rederived)
         if (state.next_due_at, state.suppressed_until) != before:
             moved += 1

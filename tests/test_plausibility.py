@@ -210,6 +210,24 @@ def test_the_xterra_profile_resolves_against_its_catalogs_and_modes() -> None:
     assert rpm.maximum is not None and PLAUSIBILITY_FILENAME in rpm.maximum.source
 
 
+@pytest.mark.parametrize(
+    "path", sorted((REPO / "data").glob(f"*/{PLAUSIBILITY_FILENAME}")), ids=lambda p: p.parent.name
+)
+def test_no_tier_interval_is_shorter_than_the_priority_miss_backoff(path: Path) -> None:
+    """Freshness only watches the priority PIDs, and one missed poll benches
+    a priority PID for ``PRIORITY_MISS_BACKOFF_SECONDS`` (10 s since operator
+    decision 2026-10-13) while its group keeps answering. A tier interval
+    shorter than that would read a routine miss as most of a dropout. The
+    Xterra's 33 s was measured under the old 30 s back-off and stays until
+    drives recorded with the 10 s one re-measure it (A05.8)."""
+    from src.collection.obd_scheduler import PRIORITY_MISS_BACKOFF_SECONDS
+
+    profile = load_plausibility_profile(path)
+    assert profile.tiers, f"{path} states no tier"
+    for name, tier in profile.tiers.items():
+        assert tier.interval_seconds >= PRIORITY_MISS_BACKOFF_SECONDS, (name, tier)
+
+
 # ---------------------------------------------------------------------------
 # A05.2–A05.7 — the evaluator
 # ---------------------------------------------------------------------------

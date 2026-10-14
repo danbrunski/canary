@@ -81,6 +81,22 @@ code.
     inside 0-7,000 and its 4,487 rpm step in 1.03 s is inside the 4,500 rpm/s
     slew; idle RPM x 5 ~ 3,500 rpm and closed throttle x 5 ~ 75 % likewise. A
     single-channel range cannot see these; see Operator decisions (A05.8).
+  - **Operator decision 2026-10-13 (A05.8):** *the committees own RPM/THROTTLE
+    faults at idle and stuck-at-cruise; plausibility keeps single-channel
+    range/slew.* The known answer is therefore restated: every injected spike
+    and scale fault *whose values leave the channel's range or slew envelope*
+    is caught. The in-envelope idle misses are the committees' (A05.8 (a)). The
+    restated answer holds where it has been run: on the committed 08-03 slice
+    (`scripts/evaluate_committee_coverage.py`, A05.8 evidence), every spike and
+    scale fault is plausibility-owned and confirmed, 25/25 each. The 5,187.5 rpm
+    idle spike is classified as in-envelope (committee-owned) by
+    `test_committee_coverage.py::test_the_idle_rpm_spike_a05_2_described_is_the_committees`.
+    **Remaining:** run `scripts/evaluate_committee_coverage.py` on the two
+    benchmark drives (`2026-08-07T164617`, `2026-09-18T173749`, in
+    `~/canary-data`, not on the machine this ran on). That confirms by
+    measurement that each of the 5 spike and 20 scale misses is in-envelope (owner `committee`)
+    and that plausibility-owned spikes and scales confirm at 100 %. The by-hand
+    analysis above says so; it has not been run through the classifier.
 - [x] **A05.3 — Stuck check.** Flag a channel whose value has not changed
   across N consecutive *arrived* samples (A03.1), where the channel is
   expected to move in that operating mode.
@@ -107,7 +123,9 @@ code.
     suspended taken out (group answering clock; `groups.obd.silence_seconds: 4.0`,
     measured bimodal gaps), so a Mode 22 window or key-off is not a per-channel
     fault and a whole source going stale stays `vehicle_state`'s. Threshold = tier
-    interval x `freshness_k` (fast: 33 s x 3, the scheduler's 30 s miss backoff).
+    interval x `freshness_k` (fast: 33 s x 3, the scheduler's 30 s miss backoff;
+    the priority PIDs retry at 10 s since 2026-10-13, and the 33 s is re-measured
+    once drives recorded that way exist — A05.8).
     Only `collection.obd_priority_channels` are checked (others were measured absent
     176-1,912 s of answering time on clean drives), a channel needs 3 arrivals
     first, DIDs/RAM/broadcast report `unchecked` with the reason. The evaluator keeps
@@ -198,10 +216,104 @@ code.
       0/25, thermostat 0/43 (pending slew detections 34/43 at 10 degC and 40/43 at
       15 degC, all at the injection's instantaneous end, an artefact of the
       injection). Range checks miss subtle faults by design, as expected.
-  - Remainder: (1) **100 % of plumbing faults is not met** — an operator
-    decision: whether a cross-channel check (committee) owns RPM/THROTTLE faults at
-    idle and stuck-at-cruise, and whether the scheduler's 30 s miss backoff for the
-    priority PIDs (which bounds dropout detection at 99 s + 33 s) should shrink.
+  - Remainder: (1) **100 % of plumbing faults is not met** — the operator
+    decision is now made (below); what remains is named under it.
+    - **Operator decision 2026-10-13:** (a) *the committees own RPM/THROTTLE
+      faults at idle and stuck-at-cruise; plausibility keeps single-channel
+      range/slew.* "100 % of plumbing faults" is restated per detector:
+      plausibility is judged on the faults inside its single-channel scope,
+      the committees on the cross-channel cases. (b) *Shrink the scheduler's
+      30 s miss backoff for the priority PIDs to ~10 s.*
+    - **(b) done in the scheduler.** `PRIORITY_MISS_BACKOFF_SECONDS = 10.0`
+      (`src/collection/obd_scheduler/cadence.py`): a priority request
+      (`collection.obd_priority_channels`, or the active capture profile's own
+      `priority_channels`, resolved by `request_is_priority`, the same rule slot
+      selection uses) that has answered before retries 10 s after a miss;
+      others keep 30 s, never-answered probes keep the 30 s → 900 s escalation,
+      and a focused capture's 1 s retry now escalates only to 10 s for a priority
+      channel. A policy constant beside `AUTO_MISS_BACKOFF_SECONDS`, not a
+      vehicle fact. `priority` is a required argument of
+      `_update_response_state`/`_miss_backoff_seconds`, so no call site can leave
+      it out. Pinned: `test_can_obd_collector.py::test_a_priority_request_that_answered_retries_after_ten_seconds`,
+      `::test_a_focused_capture_priority_miss_escalates_only_to_the_priority_ceiling`,
+      and on the fake clock through the real loop
+      `test_default_profile_core_rate.py::test_a_priority_pid_that_goes_silent_is_re_asked_every_ten_seconds[6|1]`.
+      There THROTTLE_POS (priority) and SPEED both go silent while RPM answers:
+      THROTTLE_POS is re-asked every 11.0 s batched or 12.0 s unbatched (10 s +
+      the 1 s round or timeout), SPEED every 31-32 s. All four tests fail with
+      the constant set back to 30.
+      **The dropout bound the docs cite has not moved yet.** It is set by
+      `plausibility.yaml`'s fast tier (33 s x `freshness_k` 3 = 99 s, then
+      confirmation on the repeat, ~99 s + 33 s of answering time), and that 33 s
+      was measured on drives recorded under the 30 s back-off. Every stored drive
+      was. A shorter interval now would read their routine back-off gaps (up to
+      69.1 s) as dropouts. The file keeps 33 s with the reason updated, and
+      `test_plausibility.py::test_no_tier_interval_is_shorter_than_the_priority_miss_backoff`
+      makes an interval below the back-off a failing test. Expected after
+      re-measurement, not measured: ~10 s + the 1.0-2.7 s routine interval
+      ≈ 13 s, so ~39 s to pending and ~52 s to confirmed.
+      **Remaining (truck):** drives recorded with the 10 s back-off, then
+      re-measure the priority PIDs' longest routine answering-time gap and set
+      `tiers.fast.interval_seconds` from it.
+    - **(a) measured, not assumed:** `scripts/evaluate_committee_coverage.py` grades
+      both detectors on A05.8's own injections (same seed, generator and kind order
+      as `evaluate_plausibility.py`, so the same windows and magnitudes). Committees
+      run as replay runs them (`evaluate_committee_frame` over
+      `resample_and_segment`'s frame, the fault applied to the cells where the
+      channel arrived). Each fault gets an owner: `plausibility` if its values leave
+      the resolved range or slew envelope (mode gates ignored, so generous to
+      plausibility), if it is stuck on a channel with a stuck rule, or if it is a
+      dropout where freshness runs; `committee` if it is an in-envelope
+      spike/scale/drift on RPM/THROTTLE_POS, or stuck on RPM/SPEED; `unassigned`
+      otherwise, reported and never folded into either denominator.
+      Evidence:
+      [`2026-10-13-a05-committee-coverage-slice.json`](../../../data/analyses/2026-10-13-a05-committee-coverage-slice.json).
+      This is the committed 08-03 ground-truth slice: 420 s of driving, 5 channels
+      x 5 kinds x 5 runs, `--assume-gps-fix` because the slice was cut without
+      sats/HDOP. The 38 evaluation drives are not on the machine this ran on.
+      Results:
+      - **Committees cover no RPM or THROTTLE_POS fault at all.** No committee
+        declares `obd:RPM` or `obd:THROTTLE_POS` as a member, so every fault on
+        them is `uncovered` and the committee catch is 0 by construction. The
+        only benchmark channel a committee reads is `obd:SPEED`
+        (`SPEED_SOURCE_DIVERGENCE`).
+      - Speed committee, on SPEED's faults: spike 1/5, drift 2/5, scale 3/5,
+        stuck 1/5, dropout 0/5 (a dropout is `stale`, not a departure). It raised
+        0 flags on the clean slice. The partial catch comes from the tolerance: Mode
+        01 SPEED arrives every ~2 s, and a run needs ≥ 5 departed verdicts with
+        ≤ 3 s between them. Ticks that fail the 0.05 g acceleration conditions
+        give no verdict, so the run often restarts.
+      - By owner, confirmed or caught / graded:
+        - plausibility-owned: spike 25/25, scale 25/25 and drift 25/25 (the slice
+          drives, so every RPM/THROTTLE spike/scale/drift left the envelope);
+          stuck 0/10 (THROTTLE_POS and ENGINE_LOAD rules against 40 s windows);
+          dropout 0/10 (RPM and THROTTLE_POS, 40 s windows under the 99 s
+          threshold).
+        - committee-owned: stuck 1/10 (SPEED 1/5; RPM 0/5, uncovered). No
+          in-envelope RPM/THROTTLE fault arises on a driving slice, so the idle
+          case is graded only by the known-answer test below.
+        - unassigned: dropout 15 (COOLANT_TEMP, ENGINE_LOAD and SPEED; freshness
+          watches only the priority PIDs) and stuck 5 (COOLANT_TEMP).
+      - Known answer, A05.2's idle case:
+        `test_committee_coverage.py::test_the_idle_rpm_spike_a05_2_described_is_the_committees`.
+        A 5,187.5 rpm spike from 700 rpm at 1.03 s spacing stays inside the Xterra
+        range and slew envelope, so it is the committees' fault. The same spike
+        at 7,500 rpm breaches the range and is plausibility's. Also
+        `::test_ownership_follows_the_decision_and_names_what_neither_owns` and
+        `::test_on_the_real_slice_no_committee_reads_rpm_and_speed_is_caught_in_part`
+        (pins the counts above).
+      **Remaining:** (i) a committee that reads RPM and THROTTLE_POS. None exists,
+      so the faults the decision gives the committees are caught by nothing today.
+      The resampled frame already carries broadcast copies
+      (`decoded:ECM_RPM`, `decoded:ECM_THROTTLE_SENSOR_V`) that could pair with
+      the Mode 01 PIDs. Their relations and tolerances must be measured on
+      known-good drives, as H04's rules require (H04 work). Note that a
+      broadcast/Mode 01 pair of one sensor sees plumbing faults, not sensor
+      faults. (ii) Run `evaluate_committee_coverage.py` on the 38 evaluation
+      drives (`~/canary-data`, the A05.8 split) to get per-owner recall where
+      idle and cruise actually occur. (iii) The unassigned faults (dropout of
+      non-priority PIDs, coolant stuck, in-envelope drift on unnamed channels)
+      are covered by neither detector under the decision.
     (2) ~~A02's harness itself was not used~~ — **closed in `b037a51`**: A02
     added a `RawStreamDetector` protocol and `PlausibilityDetector`
     (`src/models/evaluation_detectors.py`), and `plausibility` is a default
@@ -250,8 +362,10 @@ code.
       later, under `confirm.range.min_separation_seconds` (1.0 s). That is
       the only thing that kept it from confirming. The A05.6 running-mode
       gate does not cover the seconds before the mode label changes.
-    - Criterion (1) stays the operator's decision (Remainder (1) above), so
-      the box stays `[~]`.
+    - Criterion (1) was decided on 2026-10-13 (Remainder (1) above). The box
+      stays `[~]` for that item's named remainders: a committee that reads
+      RPM/THROTTLE_POS, the per-owner run on the 38 evaluation drives, and the
+      re-measured fast tier from drives recorded with the 10 s back-off.
 - [~] **A05.9 — Run it live and measure the cost.** Wire the evaluator into
   the live tick (or the collector's decode path for raw-sample checks).
   Measure per-tick cost on the Pi against the missed-tick budget before

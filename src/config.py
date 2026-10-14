@@ -595,7 +595,8 @@ class CollectionConfig(_Strict):
     obd_did_window_max_seconds: float = 10.0
     #: Quiet time after a window so the ECM's diagnostic session expires
     #: (S3 timeout) before Mode 01 polling resumes — resuming earlier would
-    #: time the first Mode 01 polls out into their 30 s miss backoff.
+    #: time the first Mode 01 polls out into their miss backoff (30 s; 10 s
+    #: for the priority channels).
     obd_did_session_lapse_seconds: float = 5.0
     obd_request_timeout_seconds: float = 1.0
     obd_poll_rate_hz: float

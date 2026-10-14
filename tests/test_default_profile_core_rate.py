@@ -35,6 +35,7 @@ on the fake clock against the real loop:
 from __future__ import annotations
 
 import dataclasses
+import itertools
 import threading
 from collections import Counter
 from collections.abc import Iterable
@@ -310,6 +311,67 @@ def test_a_listed_pid_the_ecm_never_answers_costs_a_probe_per_back_off(
     assert not any(r.pid == "O2_WR_LAMBDA_S5" for r in readings)
     assert Counter(r.pid for r in readings)["O2_WR_LAMBDA_S1"] == pytest.approx(750, abs=2)
     assert MAX_MISS_BACKOFF_SECONDS == 900.0
+
+
+# ---------------------------------------------------------------------------
+# A priority PID that drops out is re-asked every 10 s (A05.8)
+# ---------------------------------------------------------------------------
+
+
+def _request_times(bus: ScriptedEcu, pid: int, *, after: float) -> list[float]:
+    """Monotonic instants of Mode 01 requests carrying ``pid`` at or after ``after``."""
+    out: list[float] = []
+    for at, msg in bus.sent:
+        data = bytes(msg.data)
+        if at < after:
+            continue
+        if len(data) >= 3 and data[1] == 0x01 and data[0] < 0x10 and pid in data[2 : 1 + data[0]]:
+            out.append(at)
+    return out
+
+
+@pytest.mark.parametrize("batch_max_pids", [6, 1])
+def test_a_priority_pid_that_goes_silent_is_re_asked_every_ten_seconds(
+    clock: FakeClock, batch_max_pids: int
+) -> None:
+    """Operator decision 2026-10-13: the priority PIDs' miss back-off is 10 s.
+
+    THROTTLE_POS (priority) and SPEED (not) both answer for 60 s, then both
+    go silent while RPM keeps answering. THROTTLE_POS is re-asked every
+    ~10 s, SPEED every ~30 s. Under the old flat back-off THROTTLE_POS also
+    waited 30 s, which is what put plausibility's fast tier at 33 s (dropout
+    threshold 99 s).
+    """
+    channels = ("RPM", "SPEED", "THROTTLE_POS")
+    tuning_profile.configure_default(_default(dict.fromkeys(channels, 1.0)))
+    bus = ScriptedEcu(clock, latency=TRUCK_LATENCY_S, values=_payloads(channels))
+    silent_from = clock.monotonic() + 60.0
+
+    def drop_out(_msg: object) -> None:
+        if clock.monotonic() >= silent_from and not bus.silent_pids:
+            bus.silent_pids = frozenset({_pid("SPEED"), _pid("THROTTLE_POS")})
+
+    bus.on_send.append(drop_out)
+    spec = dataclasses.replace(
+        _small_spec(*channels, batch_max_pids=batch_max_pids),
+        priority_channels=("THROTTLE_POS",),
+    )
+    readings, _ = _run(clock, bus, spec, 240.0)
+
+    def gaps(channel: str) -> list[float]:
+        times = _request_times(bus, _pid(channel), after=silent_from + 1.0)
+        return [b - a for a, b in itertools.pairwise(times)]
+
+    throttle, speed = gaps("THROTTLE_POS"), gaps("SPEED")
+    # Batched: 10 s + the 1 s round = 11 s; single: + the 1 s timeout = 12 s.
+    assert len(throttle) >= 13, throttle
+    assert all(10.0 <= gap <= 12.5 for gap in throttle), throttle
+    # SPEED keeps the ordinary 30 s back-off: 31-32 s.
+    assert len(speed) >= 4, speed
+    assert all(30.0 <= gap <= 32.5 for gap in speed), speed
+    # RPM keeps flowing; unbatched, each silent probe costs RPM its 1 s timeout.
+    lost = 0 if batch_max_pids > 1 else len(throttle) + len(speed) + 2
+    assert Counter(r.pid for r in readings)["RPM"] >= 236 - lost
 
 
 # ---------------------------------------------------------------------------

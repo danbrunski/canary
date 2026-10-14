@@ -43,6 +43,13 @@ tiers:
       On the calibration drives the priority PIDs' answering-time gaps reached
       64.8 s (RPM, 2026-07-27T152444) and 69.1 s (THROTTLE_POS,
       2026-07-31T145209) — two backoffs back to back. 33 s x 3 = 99 s.
+      Measured under the flat 30 s backoff. Since operator decision
+      2026-10-13 the scheduler retries the priority PIDs 10 s after a miss
+      (PRIORITY_MISS_BACKOFF_SECONDS); this interval stays until drives
+      recorded with that scheduler measure the new longest routine gap. Every
+      stored drive was recorded under 30 s, so a shorter number here would
+      read their routine backoff gaps as dropouts. It may never fall below
+      the priority backoff (tests/test_plausibility.py pins that).
   # Only `fast` is stated. Freshness runs only on Mode 01 PIDs in
   # collection.obd_priority_channels (RPM and THROTTLE_POS by default, both
   # fast): the scheduler degrades every other PID under bus-budget pressure,

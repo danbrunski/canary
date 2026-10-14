@@ -59,6 +59,7 @@ from src.collection.obd_reading import (
 from src.collection.obd_response_decode import _response_to_reading
 from src.collection.obd_scheduler import (
     AUTO_MISS_BACKOFF_SECONDS,
+    PRIORITY_MISS_BACKOFF_SECONDS,
     CanObdLoopStats,
     CanObdSpec,
     DidWindowController,
@@ -86,6 +87,7 @@ from src.collection.obd_scheduler import (
     mode06_requests,
     rearm_on_engine_start,
     replan_for_generation,
+    request_is_priority,
     round_members,
     round_period_seconds,
     select_batch_companions,
@@ -1234,6 +1236,7 @@ class _CanObdLoop:
                 request_state,
                 emitted=emitted,
                 now=time.monotonic(),
+                priority=request_is_priority(request),
                 focused_capture=(
                     tuning_profile.is_active()
                     and tuning_profile.request_eligible(request_index, request)
@@ -1505,6 +1508,7 @@ class _CanObdLoop:
                     "poll_tiers": {r.channel: r.poll_tier for r in requests},
                     "bus_budget_requests_per_second": self.budget_rps,
                     "auto_miss_backoff_seconds": AUTO_MISS_BACKOFF_SECONDS,
+                    "priority_miss_backoff_seconds": PRIORITY_MISS_BACKOFF_SECONDS,
                     "did_session_windows": (
                         self.controller.snapshot(time.monotonic())
                         if self.controller is not None
@@ -2147,6 +2151,7 @@ def _issue_batched_request(
             state,
             emitted=emitted,
             now=now,
+            priority=request_is_priority(request),
             focused_capture=(
                 tuning_profile.is_active() and tuning_profile.request_eligible(index, request)
             ),

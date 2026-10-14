@@ -1,0 +1,4062 @@
+{
+ "generated_at": "2026-10-14T03:11:39.353877+00:00",
+ "decision": "operator 2026-10-13: committees own RPM/THROTTLE faults at idle and stuck-at-cruise; plausibility keeps single-channel range/slew",
+ "config": "canary.example.yaml",
+ "profile": "nissan-xterra-2008",
+ "committee_profile": "/home/thebo/code/canary/data/nissan-xterra-2008/committees.yaml",
+ "seed": 42,
+ "n_injections": 5,
+ "grace_seconds": 60.0,
+ "assume_gps_fix": true,
+ "summary": {
+  "by_owner_kind": {
+   "committee stuck": {
+    "graded": 10,
+    "plausibility_confirmed": 0,
+    "committee_caught": 1,
+    "either": 1,
+    "committee_uncovered": 5
+   },
+   "plausibility drift": {
+    "graded": 25,
+    "plausibility_confirmed": 25,
+    "committee_caught": 2,
+    "either": 25,
+    "committee_uncovered": 20
+   },
+   "plausibility dropout": {
+    "graded": 10,
+    "plausibility_confirmed": 0,
+    "committee_caught": 0,
+    "either": 0,
+    "committee_uncovered": 10
+   },
+   "plausibility scale": {
+    "graded": 25,
+    "plausibility_confirmed": 25,
+    "committee_caught": 3,
+    "either": 25,
+    "committee_uncovered": 20
+   },
+   "plausibility spike": {
+    "graded": 25,
+    "plausibility_confirmed": 25,
+    "committee_caught": 1,
+    "either": 25,
+    "committee_uncovered": 20
+   },
+   "plausibility stuck": {
+    "graded": 10,
+    "plausibility_confirmed": 0,
+    "committee_caught": 0,
+    "either": 0,
+    "committee_uncovered": 10
+   },
+   "unassigned dropout": {
+    "graded": 15,
+    "plausibility_confirmed": 0,
+    "committee_caught": 0,
+    "either": 0,
+    "committee_uncovered": 10
+   },
+   "unassigned stuck": {
+    "graded": 5,
+    "plausibility_confirmed": 0,
+    "committee_caught": 0,
+    "either": 0,
+    "committee_uncovered": 5
+   }
+  },
+  "by_channel_kind": {
+   "obd:COOLANT_TEMP drift": {
+    "graded": 5,
+    "plausibility_confirmed": 5,
+    "committee_caught": 0,
+    "either": 5,
+    "committee_uncovered": 5,
+    "owner_plausibility": 5
+   },
+   "obd:COOLANT_TEMP dropout": {
+    "graded": 5,
+    "plausibility_confirmed": 0,
+    "committee_caught": 0,
+    "either": 0,
+    "committee_uncovered": 5,
+    "owner_unassigned": 5
+   },
+   "obd:COOLANT_TEMP scale": {
+    "graded": 5,
+    "plausibility_confirmed": 5,
+    "committee_caught": 0,
+    "either": 5,
+    "committee_uncovered": 5,
+    "owner_plausibility": 5
+   },
+   "obd:COOLANT_TEMP spike": {
+    "graded": 5,
+    "plausibility_confirmed": 5,
+    "committee_caught": 0,
+    "either": 5,
+    "committee_uncovered": 5,
+    "owner_plausibility": 5
+   },
+   "obd:COOLANT_TEMP stuck": {
+    "graded": 5,
+    "plausibility_confirmed": 0,
+    "committee_caught": 0,
+    "either": 0,
+    "committee_uncovered": 5,
+    "owner_unassigned": 5
+   },
+   "obd:ENGINE_LOAD drift": {
+    "graded": 5,
+    "plausibility_confirmed": 5,
+    "committee_caught": 0,
+    "either": 5,
+    "committee_uncovered": 5,
+    "owner_plausibility": 5
+   },
+   "obd:ENGINE_LOAD dropout": {
+    "graded": 5,
+    "plausibility_confirmed": 0,
+    "committee_caught": 0,
+    "either": 0,
+    "committee_uncovered": 5,
+    "owner_unassigned": 5
+   },
+   "obd:ENGINE_LOAD scale": {
+    "graded": 5,
+    "plausibility_confirmed": 5,
+    "committee_caught": 0,
+    "either": 5,
+    "committee_uncovered": 5,
+    "owner_plausibility": 5
+   },
+   "obd:ENGINE_LOAD spike": {
+    "graded": 5,
+    "plausibility_confirmed": 5,
+    "committee_caught": 0,
+    "either": 5,
+    "committee_uncovered": 5,
+    "owner_plausibility": 5
+   },
+   "obd:ENGINE_LOAD stuck": {
+    "graded": 5,
+    "plausibility_confirmed": 0,
+    "committee_caught": 0,
+    "either": 0,
+    "committee_uncovered": 5,
+    "owner_plausibility": 5
+   },
+   "obd:RPM drift": {
+    "graded": 5,
+    "plausibility_confirmed": 5,
+    "committee_caught": 0,
+    "either": 5,
+    "committee_uncovered": 5,
+    "owner_plausibility": 5
+   },
+   "obd:RPM dropout": {
+    "graded": 5,
+    "plausibility_confirmed": 0,
+    "committee_caught": 0,
+    "either": 0,
+    "committee_uncovered": 5,
+    "owner_plausibility": 5
+   },
+   "obd:RPM scale": {
+    "graded": 5,
+    "plausibility_confirmed": 5,
+    "committee_caught": 0,
+    "either": 5,
+    "committee_uncovered": 5,
+    "owner_plausibility": 5
+   },
+   "obd:RPM spike": {
+    "graded": 5,
+    "plausibility_confirmed": 5,
+    "committee_caught": 0,
+    "either": 5,
+    "committee_uncovered": 5,
+    "owner_plausibility": 5
+   },
+   "obd:RPM stuck": {
+    "graded": 5,
+    "plausibility_confirmed": 0,
+    "committee_caught": 0,
+    "either": 0,
+    "committee_uncovered": 5,
+    "owner_committee": 5
+   },
+   "obd:SPEED drift": {
+    "graded": 5,
+    "plausibility_confirmed": 5,
+    "committee_caught": 2,
+    "either": 5,
+    "committee_uncovered": 0,
+    "owner_plausibility": 5
+   },
+   "obd:SPEED dropout": {
+    "graded": 5,
+    "plausibility_confirmed": 0,
+    "committee_caught": 0,
+    "either": 0,
+    "committee_uncovered": 0,
+    "owner_unassigned": 5
+   },
+   "obd:SPEED scale": {
+    "graded": 5,
+    "plausibility_confirmed": 5,
+    "committee_caught": 3,
+    "either": 5,
+    "committee_uncovered": 0,
+    "owner_plausibility": 5
+   },
+   "obd:SPEED spike": {
+    "graded": 5,
+    "plausibility_confirmed": 5,
+    "committee_caught": 1,
+    "either": 5,
+    "committee_uncovered": 0,
+    "owner_plausibility": 5
+   },
+   "obd:SPEED stuck": {
+    "graded": 5,
+    "plausibility_confirmed": 0,
+    "committee_caught": 1,
+    "either": 1,
+    "committee_uncovered": 0,
+    "owner_committee": 5
+   },
+   "obd:THROTTLE_POS drift": {
+    "graded": 5,
+    "plausibility_confirmed": 5,
+    "committee_caught": 0,
+    "either": 5,
+    "committee_uncovered": 5,
+    "owner_plausibility": 5
+   },
+   "obd:THROTTLE_POS dropout": {
+    "graded": 5,
+    "plausibility_confirmed": 0,
+    "committee_caught": 0,
+    "either": 0,
+    "committee_uncovered": 5,
+    "owner_plausibility": 5
+   },
+   "obd:THROTTLE_POS scale": {
+    "graded": 5,
+    "plausibility_confirmed": 5,
+    "committee_caught": 0,
+    "either": 5,
+    "committee_uncovered": 5,
+    "owner_plausibility": 5
+   },
+   "obd:THROTTLE_POS spike": {
+    "graded": 5,
+    "plausibility_confirmed": 5,
+    "committee_caught": 0,
+    "either": 5,
+    "committee_uncovered": 5,
+    "owner_plausibility": 5
+   },
+   "obd:THROTTLE_POS stuck": {
+    "graded": 5,
+    "plausibility_confirmed": 0,
+    "committee_caught": 0,
+    "either": 0,
+    "committee_uncovered": 5,
+    "owner_plausibility": 5
+   }
+  }
+ },
+ "sessions": [
+  {
+   "session": "tests/fixtures/ground_truth/drive-slice",
+   "name": "drive-slice",
+   "span_seconds": 420.0,
+   "result": "graded",
+   "committee_clean_flags": [],
+   "committee_clean_counts": {
+    "SPEED_SOURCE_DIVERGENCE": {
+     "no_verdict:reference_missing": 1,
+     "no_verdict:member_missing": 74,
+     "no_verdict:condition": 70,
+     "no_verdict:stale": 80,
+     "agree": 194,
+     "disagree": 1
+    },
+    "LON_ACCEL_SOURCE_DIVERGENCE": {
+     "no_verdict:not_configured": 420
+    },
+    "HEADING_RATE_DIVERGENCE": {
+     "no_verdict:not_configured": 420
+    },
+    "STATIONARY_CONFIRM_DIVERGENCE": {
+     "no_verdict:not_configured": 420
+    },
+    "ALTITUDE_SOURCE_DIVERGENCE": {
+     "no_verdict:not_configured": 420
+    },
+    "BARO_PRESSURE_DIVERGENCE": {
+     "no_verdict:not_configured": 420
+    },
+    "VERTICAL_SPEED_DIVERGENCE": {
+     "no_verdict:not_configured": 420
+    }
+   },
+   "faults": [
+    {
+     "channel": "obd:COOLANT_TEMP",
+     "kind": "spike",
+     "run": 0,
+     "start": 1785799290.8929548,
+     "end": 1785799330.8929548,
+     "changed_samples": 10,
+     "parameter": 1460.0,
+     "result": "graded",
+     "owner": "plausibility",
+     "owner_reason": "leaves the range/slew envelope",
+     "envelope_breaches": [
+      "range",
+      "slew"
+     ],
+     "plausibility": {
+      "detected": true,
+      "confirmed": true,
+      "checks": [
+       "range",
+       "slew"
+      ],
+      "latency_seconds": 0.078,
+      "confirm_latency_seconds": 3.065
+     },
+     "committee": {
+      "result": "uncovered",
+      "reason": "no committee declares obd:COOLANT_TEMP"
+     }
+    },
+    {
+     "channel": "obd:COOLANT_TEMP",
+     "kind": "spike",
+     "run": 1,
+     "start": 1785799361.8929548,
+     "end": 1785799401.8929548,
+     "changed_samples": 10,
+     "parameter": 1460.0,
+     "result": "graded",
+     "owner": "plausibility",
+     "owner_reason": "leaves the range/slew envelope",
+     "envelope_breaches": [
+      "range",
+      "slew"
+     ],
+     "plausibility": {
+      "detected": true,
+      "confirmed": true,
+      "checks": [
+       "range",
+       "slew"
+      ],
+      "latency_seconds": 2.239,
+      "confirm_latency_seconds": 5.239
+     },
+     "committee": {
+      "result": "uncovered",
+      "reason": "no committee declares obd:COOLANT_TEMP"
+     }
+    },
+    {
+     "channel": "obd:COOLANT_TEMP",
+     "kind": "spike",
+     "run": 2,
+     "start": 1785799349.8929548,
+     "end": 1785799389.8929548,
+     "changed_samples": 10,
+     "parameter": 1460.0,
+     "result": "graded",
+     "owner": "plausibility",
+     "owner_reason": "leaves the range/slew envelope",
+     "envelope_breaches": [
+      "range",
+      "slew"
+     ],
+     "plausibility": {
+      "detected": true,
+      "confirmed": true,
+      "checks": [
+       "range",
+       "slew"
+      ],
+      "latency_seconds": 0.059,
+      "confirm_latency_seconds": 3.186
+     },
+     "committee": {
+      "result": "uncovered",
+      "reason": "no committee declares obd:COOLANT_TEMP"
+     }
+    },
+    {
+     "channel": "obd:COOLANT_TEMP",
+     "kind": "spike",
+     "run": 3,
+     "start": 1785799326.8929548,
+     "end": 1785799366.8929548,
+     "changed_samples": 7,
+     "parameter": 1460.0,
+     "result": "graded",
+     "owner": "plausibility",
+     "owner_reason": "leaves the range/slew envelope",
+     "envelope_breaches": [
+      "range",
+      "slew"
+     ],
+     "plausibility": {
+      "detected": true,
+      "confirmed": true,
+      "checks": [
+       "range",
+       "slew"
+      ],
+      "latency_seconds": 12.185,
+      "confirm_latency_seconds": 16.036
+     },
+     "committee": {
+      "result": "uncovered",
+      "reason": "no committee declares obd:COOLANT_TEMP"
+     }
+    },
+    {
+     "channel": "obd:COOLANT_TEMP",
+     "kind": "spike",
+     "run": 4,
+     "start": 1785799326.8929548,
+     "end": 1785799366.8929548,
+     "changed_samples": 7,
+     "parameter": 1460.0,
+     "result": "graded",
+     "owner": "plausibility",
+     "owner_reason": "leaves the range/slew envelope",
+     "envelope_breaches": [
+      "range",
+      "slew"
+     ],
+     "plausibility": {
+      "detected": true,
+      "confirmed": true,
+      "checks": [
+       "range",
+       "slew"
+      ],
+      "latency_seconds": 12.185,
+      "confirm_latency_seconds": 16.036
+     },
+     "committee": {
+      "result": "uncovered",
+      "reason": "no committee declares obd:COOLANT_TEMP"
+     }
+    },
+    {
+     "channel": "obd:COOLANT_TEMP",
+     "kind": "drift",
+     "run": 0,
+     "start": 1785799370.8929548,
+     "end": 1785799410.8929548,
+     "changed_samples": 9,
+     "parameter": 121.41669112338923,
+     "result": "graded",
+     "owner": "plausibility",
+     "owner_reason": "leaves the range/slew envelope",
+     "envelope_breaches": [
+      "range",
+      "slew"
+     ],
+     "plausibility": {
+      "detected": true,
+      "confirmed": true,
+      "checks": [
+       "range",
+       "slew"
+      ],
+      "latency_seconds": 3.563,
+      "confirm_latency_seconds": 6.684
+     },
+     "committee": {
+      "result": "uncovered",
+      "reason": "no committee declares obd:COOLANT_TEMP"
+     }
+    },
+    {
+     "channel": "obd:COOLANT_TEMP",
+     "kind": "drift",
+     "run": 1,
+     "start": 1785799289.8929548,
+     "end": 1785799329.8929548,
+     "changed_samples": 10,
+     "parameter": 121.41669112338923,
+     "result": "graded",
+     "owner": "plausibility",
+     "owner_reason": "leaves the range/slew envelope",
+     "envelope_breaches": [
+      "range",
+      "slew"
+     ],
+     "plausibility": {
+      "detected": true,
+      "confirmed": true,
+      "checks": [
+       "range",
+       "slew"
+      ],
+      "latency_seconds": 4.065,
+      "confirm_latency_seconds": 7.929
+     },
+     "committee": {
+      "result": "uncovered",
+      "reason": "no committee declares obd:COOLANT_TEMP"
+     }
+    },
+    {
+     "channel": "obd:COOLANT_TEMP",
+     "kind": "drift",
+     "run": 2,
+     "start": 1785799353.8929548,
+     "end": 1785799393.8929548,
+     "changed_samples": 9,
+     "parameter": 121.41669112338923,
+     "result": "graded",
+     "owner": "plausibility",
+     "owner_reason": "leaves the range/slew envelope",
+     "envelope_breaches": [
+      "range",
+      "slew"
+     ],
+     "plausibility": {
+      "detected": true,
+      "confirmed": true,
+      "checks": [
+       "range",
+       "slew"
+      ],
+      "latency_seconds": 3.078,
+      "confirm_latency_seconds": 6.072
+     },
+     "committee": {
+      "result": "uncovered",
+      "reason": "no committee declares obd:COOLANT_TEMP"
+     }
+    },
+    {
+     "channel": "obd:COOLANT_TEMP",
+     "kind": "drift",
+     "run": 3,
+     "start": 1785799301.8929548,
+     "end": 1785799341.8929548,
+     "changed_samples": 7,
+     "parameter": 121.41669112338923,
+     "result": "graded",
+     "owner": "plausibility",
+     "owner_reason": "leaves the range/slew envelope",
+     "envelope_breaches": [
+      "range",
+      "slew"
+     ],
+     "plausibility": {
+      "detected": true,
+      "confirmed": true,
+      "checks": [
+       "range",
+       "slew"
+      ],
+      "latency_seconds": 5.024,
+      "confirm_latency_seconds": 7.857
+     },
+     "committee": {
+      "result": "uncovered",
+      "reason": "no committee declares obd:COOLANT_TEMP"
+     }
+    },
+    {
+     "channel": "obd:COOLANT_TEMP",
+     "kind": "drift",
+     "run": 4,
+     "start": 1785799290.8929548,
+     "end": 1785799330.8929548,
+     "changed_samples": 10,
+     "parameter": 121.41669112338923,
+     "result": "graded",
+     "owner": "plausibility",
+     "owner_reason": "leaves the range/slew envelope",
+     "envelope_breaches": [
+      "range",
+      "slew"
+     ],
+     "plausibility": {
+      "detected": true,
+      "confirmed": true,
+      "checks": [
+       "range",
+       "slew"
+      ],
+      "latency_seconds": 3.065,
+      "confirm_latency_seconds": 6.929
+     },
+     "committee": {
+      "result": "uncovered",
+      "reason": "no committee declares obd:COOLANT_TEMP"
+     }
+    },
+    {
+     "channel": "obd:COOLANT_TEMP",
+     "kind": "dropout",
+     "run": 0,
+     "start": 1785799335.8929548,
+     "end": 1785799375.8929548,
+     "changed_samples": 10,
+     "parameter": null,
+     "result": "graded",
+     "owner": "unassigned",
+     "owner_reason": "freshness unchecked: not a priority channel: the scheduler degrades it under bus-budget pressure (collection.obd_priority_channels), so its absence is not evidence",
+     "envelope_breaches": [],
+     "plausibility": {
+      "detected": false,
+      "confirmed": false,
+      "checks": [],
+      "latency_seconds": null,
+      "confirm_latency_seconds": null
+     },
+     "committee": {
+      "result": "uncovered",
+      "reason": "no committee declares obd:COOLANT_TEMP"
+     }
+    },
+    {
+     "channel": "obd:COOLANT_TEMP",
+     "kind": "dropout",
+     "run": 1,
+     "start": 1785799382.8929548,
+     "end": 1785799422.8929548,
+     "changed_samples": 11,
+     "parameter": null,
+     "result": "graded",
+     "owner": "unassigned",
+     "owner_reason": "freshness unchecked: not a priority channel: the scheduler degrades it under bus-budget pressure (collection.obd_priority_channels), so its absence is not evidence",
+     "envelope_breaches": [],
+     "plausibility": {
+      "detected": false,
+      "confirmed": false,
+      "checks": [],
+      "latency_seconds": null,
+      "confirm_latency_seconds": null
+     },
+     "committee": {
+      "result": "uncovered",
+      "reason": "no committee declares obd:COOLANT_TEMP"
+     }
+    },
+    {
+     "channel": "obd:COOLANT_TEMP",
+     "kind": "dropout",
+     "run": 2,
+     "start": 1785799357.8929548,
+     "end": 1785799397.8929548,
+     "changed_samples": 10,
+     "parameter": null,
+     "result": "graded",
+     "owner": "unassigned",
+     "owner_reason": "freshness unchecked: not a priority channel: the scheduler degrades it under bus-budget pressure (collection.obd_priority_channels), so its absence is not evidence",
+     "envelope_breaches": [],
+     "plausibility": {
+      "detected": false,
+      "confirmed": false,
+      "checks": [],
+      "latency_seconds": null,
+      "confirm_latency_seconds": null
+     },
+     "committee": {
+      "result": "uncovered",
+      "reason": "no committee declares obd:COOLANT_TEMP"
+     }
+    },
+    {
+     "channel": "obd:COOLANT_TEMP",
+     "kind": "dropout",
+     "run": 3,
+     "start": 1785799360.8929548,
+     "end": 1785799400.8929548,
+     "changed_samples": 10,
+     "parameter": null,
+     "result": "graded",
+     "owner": "unassigned",
+     "owner_reason": "freshness unchecked: not a priority channel: the scheduler degrades it under bus-budget pressure (collection.obd_priority_channels), so its absence is not evidence",
+     "envelope_breaches": [],
+     "plausibility": {
+      "detected": false,
+      "confirmed": false,
+      "checks": [],
+      "latency_seconds": null,
+      "confirm_latency_seconds": null
+     },
+     "committee": {
+      "result": "uncovered",
+      "reason": "no committee declares obd:COOLANT_TEMP"
+     }
+    },
+    {
+     "channel": "obd:COOLANT_TEMP",
+     "kind": "dropout",
+     "run": 4,
+     "start": 1785799355.8929548,
+     "end": 1785799395.8929548,
+     "changed_samples": 10,
+     "parameter": null,
+     "result": "graded",
+     "owner": "unassigned",
+     "owner_reason": "freshness unchecked: not a priority channel: the scheduler degrades it under bus-budget pressure (collection.obd_priority_channels), so its absence is not evidence",
+     "envelope_breaches": [],
+     "plausibility": {
+      "detected": false,
+      "confirmed": false,
+      "checks": [],
+      "latency_seconds": null,
+      "confirm_latency_seconds": null
+     },
+     "committee": {
+      "result": "uncovered",
+      "reason": "no committee declares obd:COOLANT_TEMP"
+     }
+    },
+    {
+     "channel": "obd:COOLANT_TEMP",
+     "kind": "stuck",
+     "run": 0,
+     "start": 1785799362.8929548,
+     "end": 1785799402.8929548,
+     "changed_samples": 3,
+     "parameter": 91.0,
+     "result": "graded",
+     "owner": "unassigned",
+     "owner_reason": "no stuck rule, not a cruise-held channel",
+     "envelope_breaches": [],
+     "plausibility": {
+      "detected": false,
+      "confirmed": false,
+      "checks": [],
+      "latency_seconds": null,
+      "confirm_latency_seconds": null
+     },
+     "committee": {
+      "result": "uncovered",
+      "reason": "no committee declares obd:COOLANT_TEMP"
+     }
+    },
+    {
+     "channel": "obd:COOLANT_TEMP",
+     "kind": "stuck",
+     "run": 1,
+     "start": 1785799334.8929548,
+     "end": 1785799374.8929548,
+     "changed_samples": 10,
+     "parameter": 88.0,
+     "result": "graded",
+     "owner": "unassigned",
+     "owner_reason": "no stuck rule, not a cruise-held channel",
+     "envelope_breaches": [],
+     "plausibility": {
+      "detected": false,
+      "confirmed": false,
+      "checks": [],
+      "latency_seconds": null,
+      "confirm_latency_seconds": null
+     },
+     "committee": {
+      "result": "uncovered",
+      "reason": "no committee declares obd:COOLANT_TEMP"
+     }
+    },
+    {
+     "channel": "obd:COOLANT_TEMP",
+     "kind": "stuck",
+     "run": 2,
+     "start": 1785799294.8929548,
+     "end": 1785799334.8929548,
+     "changed_samples": 3,
+     "parameter": 89.0,
+     "result": "graded",
+     "owner": "unassigned",
+     "owner_reason": "no stuck rule, not a cruise-held channel",
+     "envelope_breaches": [],
+     "plausibility": {
+      "detected": false,
+      "confirmed": false,
+      "checks": [],
+      "latency_seconds": null,
+      "confirm_latency_seconds": null
+     },
+     "committee": {
+      "result": "uncovered",
+      "reason": "no committee declares obd:COOLANT_TEMP"
+     }
+    },
+    {
+     "channel": "obd:COOLANT_TEMP",
+     "kind": "stuck",
+     "run": 3,
+     "start": 1785799368.8929548,
+     "end": 1785799408.8929548,
+     "changed_samples": 9,
+     "parameter": 92.0,
+     "result": "graded",
+     "owner": "unassigned",
+     "owner_reason": "no stuck rule, not a cruise-held channel",
+     "envelope_breaches": [],
+     "plausibility": {
+      "detected": false,
+      "confirmed": false,
+      "checks": [],
+      "latency_seconds": null,
+      "confirm_latency_seconds": null
+     },
+     "committee": {
+      "result": "uncovered",
+      "reason": "no committee declares obd:COOLANT_TEMP"
+     }
+    },
+    {
+     "channel": "obd:COOLANT_TEMP",
+     "kind": "stuck",
+     "run": 4,
+     "start": 1785799327.8929548,
+     "end": 1785799367.8929548,
+     "changed_samples": 8,
+     "parameter": 88.0,
+     "result": "graded",
+     "owner": "unassigned",
+     "owner_reason": "no stuck rule, not a cruise-held channel",
+     "envelope_breaches": [],
+     "plausibility": {
+      "detected": false,
+      "confirmed": false,
+      "checks": [],
+      "latency_seconds": null,
+      "confirm_latency_seconds": null
+     },
+     "committee": {
+      "result": "uncovered",
+      "reason": "no committee declares obd:COOLANT_TEMP"
+     }
+    },
+    {
+     "channel": "obd:COOLANT_TEMP",
+     "kind": "scale",
+     "run": 0,
+     "start": 1785799333.8929548,
+     "end": 1785799373.8929548,
+     "changed_samples": 9,
+     "parameter": 5.0,
+     "result": "graded",
+     "owner": "plausibility",
+     "owner_reason": "leaves the range/slew envelope",
+     "envelope_breaches": [
+      "range",
+      "slew"
+     ],
+     "plausibility": {
+      "detected": true,
+      "confirmed": true,
+      "checks": [
+       "range",
+       "slew"
+      ],
+      "latency_seconds": 5.185,
+      "confirm_latency_seconds": 9.036
+     },
+     "committee": {
+      "result": "uncovered",
+      "reason": "no committee declares obd:COOLANT_TEMP"
+     }
+    },
+    {
+     "channel": "obd:COOLANT_TEMP",
+     "kind": "scale",
+     "run": 1,
+     "start": 1785799319.8929548,
+     "end": 1785799359.8929548,
+     "changed_samples": 6,
+     "parameter": 5.0,
+     "result": "graded",
+     "owner": "plausibility",
+     "owner_reason": "leaves the range/slew envelope",
+     "envelope_breaches": [
+      "range",
+      "slew"
+     ],
+     "plausibility": {
+      "detected": true,
+      "confirmed": true,
+      "checks": [
+       "range",
+       "slew"
+      ],
+      "latency_seconds": 1.726,
+      "confirm_latency_seconds": 19.185
+     },
+     "committee": {
+      "result": "uncovered",
+      "reason": "no committee declares obd:COOLANT_TEMP"
+     }
+    },
+    {
+     "channel": "obd:COOLANT_TEMP",
+     "kind": "scale",
+     "run": 2,
+     "start": 1785799299.8929548,
+     "end": 1785799339.8929548,
+     "changed_samples": 8,
+     "parameter": 5.0,
+     "result": "graded",
+     "owner": "plausibility",
+     "owner_reason": "leaves the range/slew envelope",
+     "envelope_breaches": [
+      "range",
+      "slew"
+     ],
+     "plausibility": {
+      "detected": true,
+      "confirmed": true,
+      "checks": [
+       "range",
+       "slew"
+      ],
+      "latency_seconds": 0.841,
+      "confirm_latency_seconds": 3.846
+     },
+     "committee": {
+      "result": "uncovered",
+      "reason": "no committee declares obd:COOLANT_TEMP"
+     }
+    },
+    {
+     "channel": "obd:COOLANT_TEMP",
+     "kind": "scale",
+     "run": 3,
+     "start": 1785799377.8929548,
+     "end": 1785799417.8929548,
+     "changed_samples": 9,
+     "parameter": 5.0,
+     "result": "graded",
+     "owner": "plausibility",
+     "owner_reason": "leaves the range/slew envelope",
+     "envelope_breaches": [
+      "range",
+      "slew"
+     ],
+     "plausibility": {
+      "detected": true,
+      "confirmed": true,
+      "checks": [
+       "range",
+       "slew"
+      ],
+      "latency_seconds": 7.379,
+      "confirm_latency_seconds": 13.637
+     },
+     "committee": {
+      "result": "uncovered",
+      "reason": "no committee declares obd:COOLANT_TEMP"
+     }
+    },
+    {
+     "channel": "obd:COOLANT_TEMP",
+     "kind": "scale",
+     "run": 4,
+     "start": 1785799362.8929548,
+     "end": 1785799402.8929548,
+     "changed_samples": 10,
+     "parameter": 5.0,
+     "result": "graded",
+     "owner": "plausibility",
+     "owner_reason": "leaves the range/slew envelope",
+     "envelope_breaches": [
+      "range",
+      "slew"
+     ],
+     "plausibility": {
+      "detected": true,
+      "confirmed": true,
+      "checks": [
+       "range",
+       "slew"
+      ],
+      "latency_seconds": 1.239,
+      "confirm_latency_seconds": 4.239
+     },
+     "committee": {
+      "result": "uncovered",
+      "reason": "no committee declares obd:COOLANT_TEMP"
+     }
+    },
+    {
+     "channel": "obd:ENGINE_LOAD",
+     "kind": "spike",
+     "run": 0,
+     "start": 1785799290.8929548,
+     "end": 1785799330.8929548,
+     "changed_samples": 28,
+     "parameter": 1480.3921568627452,
+     "result": "graded",
+     "owner": "plausibility",
+     "owner_reason": "leaves the range envelope",
+     "envelope_breaches": [
+      "range"
+     ],
+     "plausibility": {
+      "detected": true,
+      "confirmed": true,
+      "checks": [
+       "range"
+      ],
+      "latency_seconds": 1.444,
+      "confirm_latency_seconds": 2.446
+     },
+     "committee": {
+      "result": "uncovered",
+      "reason": "no committee declares obd:ENGINE_LOAD"
+     }
+    },
+    {
+     "channel": "obd:ENGINE_LOAD",
+     "kind": "spike",
+     "run": 1,
+     "start": 1785799361.8929548,
+     "end": 1785799401.8929548,
+     "changed_samples": 24,
+     "parameter": 1480.3921568627452,
+     "result": "graded",
+     "owner": "plausibility",
+     "owner_reason": "leaves the range envelope",
+     "envelope_breaches": [
+      "range"
+     ],
+     "plausibility": {
+      "detected": true,
+      "confirmed": true,
+      "checks": [
+       "range"
+      ],
+      "latency_seconds": 0.731,
+      "confirm_latency_seconds": 1.865
+     },
+     "committee": {
+      "result": "uncovered",
+      "reason": "no committee declares obd:ENGINE_LOAD"
+     }
+    },
+    {
+     "channel": "obd:ENGINE_LOAD",
+     "kind": "spike",
+     "run": 2,
+     "start": 1785799349.8929548,
+     "end": 1785799389.8929548,
+     "changed_samples": 26,
+     "parameter": 1480.3921568627452,
+     "result": "graded",
+     "owner": "plausibility",
+     "owner_reason": "leaves the range envelope",
+     "envelope_breaches": [
+      "range"
+     ],
+     "plausibility": {
+      "detected": true,
+      "confirmed": true,
+      "checks": [
+       "range"
+      ],
+      "latency_seconds": 0.704,
+      "confirm_latency_seconds": 2.684
+     },
+     "committee": {
+      "result": "uncovered",
+      "reason": "no committee declares obd:ENGINE_LOAD"
+     }
+    },
+    {
+     "channel": "obd:ENGINE_LOAD",
+     "kind": "spike",
+     "run": 3,
+     "start": 1785799326.8929548,
+     "end": 1785799366.8929548,
+     "changed_samples": 29,
+     "parameter": 1480.3921568627452,
+     "result": "graded",
+     "owner": "plausibility",
+     "owner_reason": "leaves the range envelope",
+     "envelope_breaches": [
+      "range"
+     ],
+     "plausibility": {
+      "detected": true,
+      "confirmed": true,
+      "checks": [
+       "range"
+      ],
+      "latency_seconds": 3.622,
+      "confirm_latency_seconds": 5.081
+     },
+     "committee": {
+      "result": "uncovered",
+      "reason": "no committee declares obd:ENGINE_LOAD"
+     }
+    },
+    {
+     "channel": "obd:ENGINE_LOAD",
+     "kind": "spike",
+     "run": 4,
+     "start": 1785799326.8929548,
+     "end": 1785799366.8929548,
+     "changed_samples": 29,
+     "parameter": 1480.3921568627452,
+     "result": "graded",
+     "owner": "plausibility",
+     "owner_reason": "leaves the range envelope",
+     "envelope_breaches": [
+      "range"
+     ],
+     "plausibility": {
+      "detected": true,
+      "confirmed": true,
+      "checks": [
+       "range"
+      ],
+      "latency_seconds": 3.622,
+      "confirm_latency_seconds": 5.081
+     },
+     "committee": {
+      "result": "uncovered",
+      "reason": "no committee declares obd:ENGINE_LOAD"
+     }
+    },
+    {
+     "channel": "obd:ENGINE_LOAD",
+     "kind": "drift",
+     "run": 0,
+     "start": 1785799370.8929548,
+     "end": 1785799410.8929548,
+     "changed_samples": 22,
+     "parameter": 392.4577395390258,
+     "result": "graded",
+     "owner": "plausibility",
+     "owner_reason": "leaves the range envelope",
+     "envelope_breaches": [
+      "range"
+     ],
+     "plausibility": {
+      "detected": true,
+      "confirmed": true,
+      "checks": [
+       "range"
+      ],
+      "latency_seconds": 6.183,
+      "confirm_latency_seconds": 7.184
+     },
+     "committee": {
+      "result": "uncovered",
+      "reason": "no committee declares obd:ENGINE_LOAD"
+     }
+    },
+    {
+     "channel": "obd:ENGINE_LOAD",
+     "kind": "drift",
+     "run": 1,
+     "start": 1785799289.8929548,
+     "end": 1785799329.8929548,
+     "changed_samples": 28,
+     "parameter": 392.4577395390258,
+     "result": "graded",
+     "owner": "plausibility",
+     "owner_reason": "leaves the range envelope",
+     "envelope_breaches": [
+      "range"
+     ],
+     "plausibility": {
+      "detected": true,
+      "confirmed": true,
+      "checks": [
+       "range"
+      ],
+      "latency_seconds": 7.466,
+      "confirm_latency_seconds": 8.598
+     },
+     "committee": {
+      "result": "uncovered",
+      "reason": "no committee declares obd:ENGINE_LOAD"
+     }
+    },
+    {
+     "channel": "obd:ENGINE_LOAD",
+     "kind": "drift",
+     "run": 2,
+     "start": 1785799353.8929548,
+     "end": 1785799393.8929548,
+     "changed_samples": 26,
+     "parameter": 392.4577395390258,
+     "result": "graded",
+     "owner": "plausibility",
+     "owner_reason": "leaves the range envelope",
+     "envelope_breaches": [
+      "range"
+     ],
+     "plausibility": {
+      "detected": true,
+      "confirmed": true,
+      "checks": [
+       "range"
+      ],
+      "latency_seconds": 1.548,
+      "confirm_latency_seconds": 2.695
+     },
+     "committee": {
+      "result": "uncovered",
+      "reason": "no committee declares obd:ENGINE_LOAD"
+     }
+    },
+    {
+     "channel": "obd:ENGINE_LOAD",
+     "kind": "drift",
+     "run": 3,
+     "start": 1785799301.8929548,
+     "end": 1785799341.8929548,
+     "changed_samples": 26,
+     "parameter": 392.4577395390258,
+     "result": "graded",
+     "owner": "plausibility",
+     "owner_reason": "leaves the range envelope",
+     "envelope_breaches": [
+      "range"
+     ],
+     "plausibility": {
+      "detected": true,
+      "confirmed": true,
+      "checks": [
+       "range"
+      ],
+      "latency_seconds": 9.311,
+      "confirm_latency_seconds": 11.331
+     },
+     "committee": {
+      "result": "uncovered",
+      "reason": "no committee declares obd:ENGINE_LOAD"
+     }
+    },
+    {
+     "channel": "obd:ENGINE_LOAD",
+     "kind": "drift",
+     "run": 4,
+     "start": 1785799290.8929548,
+     "end": 1785799330.8929548,
+     "changed_samples": 28,
+     "parameter": 392.4577395390258,
+     "result": "graded",
+     "owner": "plausibility",
+     "owner_reason": "leaves the range envelope",
+     "envelope_breaches": [
+      "range"
+     ],
+     "plausibility": {
+      "detected": true,
+      "confirmed": true,
+      "checks": [
+       "range"
+      ],
+      "latency_seconds": 6.466,
+      "confirm_latency_seconds": 7.598
+     },
+     "committee": {
+      "result": "uncovered",
+      "reason": "no committee declares obd:ENGINE_LOAD"
+     }
+    },
+    {
+     "channel": "obd:ENGINE_LOAD",
+     "kind": "dropout",
+     "run": 0,
+     "start": 1785799335.8929548,
+     "end": 1785799375.8929548,
+     "changed_samples": 31,
+     "parameter": null,
+     "result": "graded",
+     "owner": "unassigned",
+     "owner_reason": "freshness unchecked: not a priority channel: the scheduler degrades it under bus-budget pressure (collection.obd_priority_channels), so its absence is not evidence",
+     "envelope_breaches": [],
+     "plausibility": {
+      "detected": false,
+      "confirmed": false,
+      "checks": [],
+      "latency_seconds": null,
+      "confirm_latency_seconds": null
+     },
+     "committee": {
+      "result": "uncovered",
+      "reason": "no committee declares obd:ENGINE_LOAD"
+     }
+    },
+    {
+     "channel": "obd:ENGINE_LOAD",
+     "kind": "dropout",
+     "run": 1,
+     "start": 1785799382.8929548,
+     "end": 1785799422.8929548,
+     "changed_samples": 22,
+     "parameter": null,
+     "result": "graded",
+     "owner": "unassigned",
+     "owner_reason": "freshness unchecked: not a priority channel: the scheduler degrades it under bus-budget pressure (collection.obd_priority_channels), so its absence is not evidence",
+     "envelope_breaches": [],
+     "plausibility": {
+      "detected": false,
+      "confirmed": false,
+      "checks": [],
+      "latency_seconds": null,
+      "confirm_latency_seconds": null
+     },
+     "committee": {
+      "result": "uncovered",
+      "reason": "no committee declares obd:ENGINE_LOAD"
+     }
+    },
+    {
+     "channel": "obd:ENGINE_LOAD",
+     "kind": "dropout",
+     "run": 2,
+     "start": 1785799357.8929548,
+     "end": 1785799397.8929548,
+     "changed_samples": 24,
+     "parameter": null,
+     "result": "graded",
+     "owner": "unassigned",
+     "owner_reason": "freshness unchecked: not a priority channel: the scheduler degrades it under bus-budget pressure (collection.obd_priority_channels), so its absence is not evidence",
+     "envelope_breaches": [],
+     "plausibility": {
+      "detected": false,
+      "confirmed": false,
+      "checks": [],
+      "latency_seconds": null,
+      "confirm_latency_seconds": null
+     },
+     "committee": {
+      "result": "uncovered",
+      "reason": "no committee declares obd:ENGINE_LOAD"
+     }
+    },
+    {
+     "channel": "obd:ENGINE_LOAD",
+     "kind": "dropout",
+     "run": 3,
+     "start": 1785799360.8929548,
+     "end": 1785799400.8929548,
+     "changed_samples": 24,
+     "parameter": null,
+     "result": "graded",
+     "owner": "unassigned",
+     "owner_reason": "freshness unchecked: not a priority channel: the scheduler degrades it under bus-budget pressure (collection.obd_priority_channels), so its absence is not evidence",
+     "envelope_breaches": [],
+     "plausibility": {
+      "detected": false,
+      "confirmed": false,
+      "checks": [],
+      "latency_seconds": null,
+      "confirm_latency_seconds": null
+     },
+     "committee": {
+      "result": "uncovered",
+      "reason": "no committee declares obd:ENGINE_LOAD"
+     }
+    },
+    {
+     "channel": "obd:ENGINE_LOAD",
+     "kind": "dropout",
+     "run": 4,
+     "start": 1785799355.8929548,
+     "end": 1785799395.8929548,
+     "changed_samples": 25,
+     "parameter": null,
+     "result": "graded",
+     "owner": "unassigned",
+     "owner_reason": "freshness unchecked: not a priority channel: the scheduler degrades it under bus-budget pressure (collection.obd_priority_channels), so its absence is not evidence",
+     "envelope_breaches": [],
+     "plausibility": {
+      "detected": false,
+      "confirmed": false,
+      "checks": [],
+      "latency_seconds": null,
+      "confirm_latency_seconds": null
+     },
+     "committee": {
+      "result": "uncovered",
+      "reason": "no committee declares obd:ENGINE_LOAD"
+     }
+    },
+    {
+     "channel": "obd:ENGINE_LOAD",
+     "kind": "stuck",
+     "run": 0,
+     "start": 1785799362.8929548,
+     "end": 1785799402.8929548,
+     "changed_samples": 24,
+     "parameter": 87.84313725490196,
+     "result": "graded",
+     "owner": "plausibility",
+     "owner_reason": "channel has a stuck rule",
+     "envelope_breaches": [],
+     "plausibility": {
+      "detected": false,
+      "confirmed": false,
+      "checks": [],
+      "latency_seconds": null,
+      "confirm_latency_seconds": null
+     },
+     "committee": {
+      "result": "uncovered",
+      "reason": "no committee declares obd:ENGINE_LOAD"
+     }
+    },
+    {
+     "channel": "obd:ENGINE_LOAD",
+     "kind": "stuck",
+     "run": 1,
+     "start": 1785799334.8929548,
+     "end": 1785799374.8929548,
+     "changed_samples": 30,
+     "parameter": 10.196078431372548,
+     "result": "graded",
+     "owner": "plausibility",
+     "owner_reason": "channel has a stuck rule",
+     "envelope_breaches": [],
+     "plausibility": {
+      "detected": false,
+      "confirmed": false,
+      "checks": [],
+      "latency_seconds": null,
+      "confirm_latency_seconds": null
+     },
+     "committee": {
+      "result": "uncovered",
+      "reason": "no committee declares obd:ENGINE_LOAD"
+     }
+    },
+    {
+     "channel": "obd:ENGINE_LOAD",
+     "kind": "stuck",
+     "run": 2,
+     "start": 1785799294.8929548,
+     "end": 1785799334.8929548,
+     "changed_samples": 26,
+     "parameter": 27.45098039215686,
+     "result": "graded",
+     "owner": "plausibility",
+     "owner_reason": "channel has a stuck rule",
+     "envelope_breaches": [],
+     "plausibility": {
+      "detected": false,
+      "confirmed": false,
+      "checks": [],
+      "latency_seconds": null,
+      "confirm_latency_seconds": null
+     },
+     "committee": {
+      "result": "uncovered",
+      "reason": "no committee declares obd:ENGINE_LOAD"
+     }
+    },
+    {
+     "channel": "obd:ENGINE_LOAD",
+     "kind": "stuck",
+     "run": 3,
+     "start": 1785799368.8929548,
+     "end": 1785799408.8929548,
+     "changed_samples": 22,
+     "parameter": 20.784313725490197,
+     "result": "graded",
+     "owner": "plausibility",
+     "owner_reason": "channel has a stuck rule",
+     "envelope_breaches": [],
+     "plausibility": {
+      "detected": false,
+      "confirmed": false,
+      "checks": [],
+      "latency_seconds": null,
+      "confirm_latency_seconds": null
+     },
+     "committee": {
+      "result": "uncovered",
+      "reason": "no committee declares obd:ENGINE_LOAD"
+     }
+    },
+    {
+     "channel": "obd:ENGINE_LOAD",
+     "kind": "stuck",
+     "run": 4,
+     "start": 1785799327.8929548,
+     "end": 1785799367.8929548,
+     "changed_samples": 29,
+     "parameter": 59.21568627450981,
+     "result": "graded",
+     "owner": "plausibility",
+     "owner_reason": "channel has a stuck rule",
+     "envelope_breaches": [],
+     "plausibility": {
+      "detected": false,
+      "confirmed": false,
+      "checks": [],
+      "latency_seconds": null,
+      "confirm_latency_seconds": null
+     },
+     "committee": {
+      "result": "uncovered",
+      "reason": "no committee declares obd:ENGINE_LOAD"
+     }
+    },
+    {
+     "channel": "obd:ENGINE_LOAD",
+     "kind": "scale",
+     "run": 0,
+     "start": 1785799333.8929548,
+     "end": 1785799373.8929548,
+     "changed_samples": 30,
+     "parameter": 5.0,
+     "result": "graded",
+     "owner": "plausibility",
+     "owner_reason": "leaves the range envelope",
+     "envelope_breaches": [
+      "range"
+     ],
+     "plausibility": {
+      "detected": true,
+      "confirmed": true,
+      "checks": [
+       "range"
+      ],
+      "latency_seconds": 4.496,
+      "confirm_latency_seconds": 7.398
+     },
+     "committee": {
+      "result": "uncovered",
+      "reason": "no committee declares obd:ENGINE_LOAD"
+     }
+    },
+    {
+     "channel": "obd:ENGINE_LOAD",
+     "kind": "scale",
+     "run": 1,
+     "start": 1785799319.8929548,
+     "end": 1785799359.8929548,
+     "changed_samples": 27,
+     "parameter": 5.0,
+     "result": "graded",
+     "owner": "plausibility",
+     "owner_reason": "leaves the range envelope",
+     "envelope_breaches": [
+      "range"
+     ],
+     "plausibility": {
+      "detected": true,
+      "confirmed": true,
+      "checks": [
+       "range"
+      ],
+      "latency_seconds": 0.348,
+      "confirm_latency_seconds": 1.473
+     },
+     "committee": {
+      "result": "uncovered",
+      "reason": "no committee declares obd:ENGINE_LOAD"
+     }
+    },
+    {
+     "channel": "obd:ENGINE_LOAD",
+     "kind": "scale",
+     "run": 2,
+     "start": 1785799299.8929548,
+     "end": 1785799339.8929548,
+     "changed_samples": 26,
+     "parameter": 5.0,
+     "result": "graded",
+     "owner": "plausibility",
+     "owner_reason": "leaves the range envelope",
+     "envelope_breaches": [
+      "range"
+     ],
+     "plausibility": {
+      "detected": true,
+      "confirmed": true,
+      "checks": [
+       "range"
+      ],
+      "latency_seconds": 1.525,
+      "confirm_latency_seconds": 2.612
+     },
+     "committee": {
+      "result": "uncovered",
+      "reason": "no committee declares obd:ENGINE_LOAD"
+     }
+    },
+    {
+     "channel": "obd:ENGINE_LOAD",
+     "kind": "scale",
+     "run": 3,
+     "start": 1785799377.8929548,
+     "end": 1785799417.8929548,
+     "changed_samples": 22,
+     "parameter": 5.0,
+     "result": "graded",
+     "owner": "plausibility",
+     "owner_reason": "leaves the range envelope",
+     "envelope_breaches": [
+      "range"
+     ],
+     "plausibility": {
+      "detected": true,
+      "confirmed": true,
+      "checks": [
+       "range"
+      ],
+      "latency_seconds": 0.184,
+      "confirm_latency_seconds": 4.61
+     },
+     "committee": {
+      "result": "uncovered",
+      "reason": "no committee declares obd:ENGINE_LOAD"
+     }
+    },
+    {
+     "channel": "obd:ENGINE_LOAD",
+     "kind": "scale",
+     "run": 4,
+     "start": 1785799362.8929548,
+     "end": 1785799402.8929548,
+     "changed_samples": 24,
+     "parameter": 5.0,
+     "result": "graded",
+     "owner": "plausibility",
+     "owner_reason": "leaves the range envelope",
+     "envelope_breaches": [
+      "range"
+     ],
+     "plausibility": {
+      "detected": true,
+      "confirmed": true,
+      "checks": [
+       "range"
+      ],
+      "latency_seconds": 0.865,
+      "confirm_latency_seconds": 1.866
+     },
+     "committee": {
+      "result": "uncovered",
+      "reason": "no committee declares obd:ENGINE_LOAD"
+     }
+    },
+    {
+     "channel": "obd:RPM",
+     "kind": "spike",
+     "run": 0,
+     "start": 1785799290.8929548,
+     "end": 1785799330.8929548,
+     "changed_samples": 28,
+     "parameter": 22500.0,
+     "result": "graded",
+     "owner": "plausibility",
+     "owner_reason": "leaves the range/slew envelope",
+     "envelope_breaches": [
+      "range",
+      "slew"
+     ],
+     "plausibility": {
+      "detected": true,
+      "confirmed": true,
+      "checks": [
+       "range",
+       "slew"
+      ],
+      "latency_seconds": 1.444,
+      "confirm_latency_seconds": 2.446
+     },
+     "committee": {
+      "result": "uncovered",
+      "reason": "no committee declares obd:RPM"
+     }
+    },
+    {
+     "channel": "obd:RPM",
+     "kind": "spike",
+     "run": 1,
+     "start": 1785799361.8929548,
+     "end": 1785799401.8929548,
+     "changed_samples": 24,
+     "parameter": 22500.0,
+     "result": "graded",
+     "owner": "plausibility",
+     "owner_reason": "leaves the range/slew envelope",
+     "envelope_breaches": [
+      "range",
+      "slew"
+     ],
+     "plausibility": {
+      "detected": true,
+      "confirmed": true,
+      "checks": [
+       "range",
+       "slew"
+      ],
+      "latency_seconds": 0.731,
+      "confirm_latency_seconds": 1.865
+     },
+     "committee": {
+      "result": "uncovered",
+      "reason": "no committee declares obd:RPM"
+     }
+    },
+    {
+     "channel": "obd:RPM",
+     "kind": "spike",
+     "run": 2,
+     "start": 1785799349.8929548,
+     "end": 1785799389.8929548,
+     "changed_samples": 26,
+     "parameter": 22500.0,
+     "result": "graded",
+     "owner": "plausibility",
+     "owner_reason": "leaves the range/slew envelope",
+     "envelope_breaches": [
+      "range",
+      "slew"
+     ],
+     "plausibility": {
+      "detected": true,
+      "confirmed": true,
+      "checks": [
+       "range",
+       "slew"
+      ],
+      "latency_seconds": 0.704,
+      "confirm_latency_seconds": 2.684
+     },
+     "committee": {
+      "result": "uncovered",
+      "reason": "no committee declares obd:RPM"
+     }
+    },
+    {
+     "channel": "obd:RPM",
+     "kind": "spike",
+     "run": 3,
+     "start": 1785799326.8929548,
+     "end": 1785799366.8929548,
+     "changed_samples": 29,
+     "parameter": 22500.0,
+     "result": "graded",
+     "owner": "plausibility",
+     "owner_reason": "leaves the range/slew envelope",
+     "envelope_breaches": [
+      "range",
+      "slew"
+     ],
+     "plausibility": {
+      "detected": true,
+      "confirmed": true,
+      "checks": [
+       "range",
+       "slew"
+      ],
+      "latency_seconds": 3.622,
+      "confirm_latency_seconds": 5.081
+     },
+     "committee": {
+      "result": "uncovered",
+      "reason": "no committee declares obd:RPM"
+     }
+    },
+    {
+     "channel": "obd:RPM",
+     "kind": "spike",
+     "run": 4,
+     "start": 1785799326.8929548,
+     "end": 1785799366.8929548,
+     "changed_samples": 29,
+     "parameter": 22500.0,
+     "result": "graded",
+     "owner": "plausibility",
+     "owner_reason": "leaves the range/slew envelope",
+     "envelope_breaches": [
+      "range",
+      "slew"
+     ],
+     "plausibility": {
+      "detected": true,
+      "confirmed": true,
+      "checks": [
+       "range",
+       "slew"
+      ],
+      "latency_seconds": 3.622,
+      "confirm_latency_seconds": 5.081
+     },
+     "committee": {
+      "result": "uncovered",
+      "reason": "no committee declares obd:RPM"
+     }
+    },
+    {
+     "channel": "obd:RPM",
+     "kind": "drift",
+     "run": 0,
+     "start": 1785799370.8929548,
+     "end": 1785799410.8929548,
+     "changed_samples": 22,
+     "parameter": 6999.937551598264,
+     "result": "graded",
+     "owner": "plausibility",
+     "owner_reason": "leaves the range envelope",
+     "envelope_breaches": [
+      "range"
+     ],
+     "plausibility": {
+      "detected": true,
+      "confirmed": true,
+      "checks": [
+       "range"
+      ],
+      "latency_seconds": 28.028,
+      "confirm_latency_seconds": 29.155
+     },
+     "committee": {
+      "result": "uncovered",
+      "reason": "no committee declares obd:RPM"
+     }
+    },
+    {
+     "channel": "obd:RPM",
+     "kind": "drift",
+     "run": 1,
+     "start": 1785799289.8929548,
+     "end": 1785799329.8929548,
+     "changed_samples": 28,
+     "parameter": 6999.937551598264,
+     "result": "graded",
+     "owner": "plausibility",
+     "owner_reason": "leaves the range envelope",
+     "envelope_breaches": [
+      "range"
+     ],
+     "plausibility": {
+      "detected": true,
+      "confirmed": true,
+      "checks": [
+       "range"
+      ],
+      "latency_seconds": 25.335,
+      "confirm_latency_seconds": 27.602
+     },
+     "committee": {
+      "result": "uncovered",
+      "reason": "no committee declares obd:RPM"
+     }
+    },
+    {
+     "channel": "obd:RPM",
+     "kind": "drift",
+     "run": 2,
+     "start": 1785799353.8929548,
+     "end": 1785799393.8929548,
+     "changed_samples": 26,
+     "parameter": 6999.937551598264,
+     "result": "graded",
+     "owner": "plausibility",
+     "owner_reason": "leaves the range/slew envelope",
+     "envelope_breaches": [
+      "range",
+      "slew"
+     ],
+     "plausibility": {
+      "detected": true,
+      "confirmed": true,
+      "checks": [
+       "range",
+       "slew"
+      ],
+      "latency_seconds": 28.61,
+      "confirm_latency_seconds": 29.9
+     },
+     "committee": {
+      "result": "uncovered",
+      "reason": "no committee declares obd:RPM"
+     }
+    },
+    {
+     "channel": "obd:RPM",
+     "kind": "drift",
+     "run": 3,
+     "start": 1785799301.8929548,
+     "end": 1785799341.8929548,
+     "changed_samples": 26,
+     "parameter": 6999.937551598264,
+     "result": "graded",
+     "owner": "plausibility",
+     "owner_reason": "leaves the range/slew envelope",
+     "envelope_breaches": [
+      "range",
+      "slew"
+     ],
+     "plausibility": {
+      "detected": true,
+      "confirmed": true,
+      "checks": [
+       "range",
+       "slew"
+      ],
+      "latency_seconds": 19.473,
+      "confirm_latency_seconds": 20.476
+     },
+     "committee": {
+      "result": "uncovered",
+      "reason": "no committee declares obd:RPM"
+     }
+    },
+    {
+     "channel": "obd:RPM",
+     "kind": "drift",
+     "run": 4,
+     "start": 1785799290.8929548,
+     "end": 1785799330.8929548,
+     "changed_samples": 28,
+     "parameter": 6999.937551598264,
+     "result": "graded",
+     "owner": "plausibility",
+     "owner_reason": "leaves the range/slew envelope",
+     "envelope_breaches": [
+      "range",
+      "slew"
+     ],
+     "plausibility": {
+      "detected": true,
+      "confirmed": true,
+      "checks": [
+       "range",
+       "slew"
+      ],
+      "latency_seconds": 24.335,
+      "confirm_latency_seconds": 26.602
+     },
+     "committee": {
+      "result": "uncovered",
+      "reason": "no committee declares obd:RPM"
+     }
+    },
+    {
+     "channel": "obd:RPM",
+     "kind": "dropout",
+     "run": 0,
+     "start": 1785799335.8929548,
+     "end": 1785799375.8929548,
+     "changed_samples": 31,
+     "parameter": null,
+     "result": "graded",
+     "owner": "plausibility",
+     "owner_reason": "freshness checked",
+     "envelope_breaches": [],
+     "plausibility": {
+      "detected": false,
+      "confirmed": false,
+      "checks": [],
+      "latency_seconds": null,
+      "confirm_latency_seconds": null
+     },
+     "committee": {
+      "result": "uncovered",
+      "reason": "no committee declares obd:RPM"
+     }
+    },
+    {
+     "channel": "obd:RPM",
+     "kind": "dropout",
+     "run": 1,
+     "start": 1785799382.8929548,
+     "end": 1785799422.8929548,
+     "changed_samples": 22,
+     "parameter": null,
+     "result": "graded",
+     "owner": "plausibility",
+     "owner_reason": "freshness checked",
+     "envelope_breaches": [],
+     "plausibility": {
+      "detected": false,
+      "confirmed": false,
+      "checks": [],
+      "latency_seconds": null,
+      "confirm_latency_seconds": null
+     },
+     "committee": {
+      "result": "uncovered",
+      "reason": "no committee declares obd:RPM"
+     }
+    },
+    {
+     "channel": "obd:RPM",
+     "kind": "dropout",
+     "run": 2,
+     "start": 1785799357.8929548,
+     "end": 1785799397.8929548,
+     "changed_samples": 24,
+     "parameter": null,
+     "result": "graded",
+     "owner": "plausibility",
+     "owner_reason": "freshness checked",
+     "envelope_breaches": [],
+     "plausibility": {
+      "detected": false,
+      "confirmed": false,
+      "checks": [],
+      "latency_seconds": null,
+      "confirm_latency_seconds": null
+     },
+     "committee": {
+      "result": "uncovered",
+      "reason": "no committee declares obd:RPM"
+     }
+    },
+    {
+     "channel": "obd:RPM",
+     "kind": "dropout",
+     "run": 3,
+     "start": 1785799360.8929548,
+     "end": 1785799400.8929548,
+     "changed_samples": 24,
+     "parameter": null,
+     "result": "graded",
+     "owner": "plausibility",
+     "owner_reason": "freshness checked",
+     "envelope_breaches": [],
+     "plausibility": {
+      "detected": false,
+      "confirmed": false,
+      "checks": [],
+      "latency_seconds": null,
+      "confirm_latency_seconds": null
+     },
+     "committee": {
+      "result": "uncovered",
+      "reason": "no committee declares obd:RPM"
+     }
+    },
+    {
+     "channel": "obd:RPM",
+     "kind": "dropout",
+     "run": 4,
+     "start": 1785799355.8929548,
+     "end": 1785799395.8929548,
+     "changed_samples": 25,
+     "parameter": null,
+     "result": "graded",
+     "owner": "plausibility",
+     "owner_reason": "freshness checked",
+     "envelope_breaches": [],
+     "plausibility": {
+      "detected": false,
+      "confirmed": false,
+      "checks": [],
+      "latency_seconds": null,
+      "confirm_latency_seconds": null
+     },
+     "committee": {
+      "result": "uncovered",
+      "reason": "no committee declares obd:RPM"
+     }
+    },
+    {
+     "channel": "obd:RPM",
+     "kind": "stuck",
+     "run": 0,
+     "start": 1785799362.8929548,
+     "end": 1785799402.8929548,
+     "changed_samples": 23,
+     "parameter": 2312.5,
+     "result": "graded",
+     "owner": "committee",
+     "owner_reason": "stuck-at-cruise (no stuck rule: cruise holds it)",
+     "envelope_breaches": [],
+     "plausibility": {
+      "detected": false,
+      "confirmed": false,
+      "checks": [],
+      "latency_seconds": null,
+      "confirm_latency_seconds": null
+     },
+     "committee": {
+      "result": "uncovered",
+      "reason": "no committee declares obd:RPM"
+     }
+    },
+    {
+     "channel": "obd:RPM",
+     "kind": "stuck",
+     "run": 1,
+     "start": 1785799334.8929548,
+     "end": 1785799374.8929548,
+     "changed_samples": 31,
+     "parameter": 3925.0,
+     "result": "graded",
+     "owner": "committee",
+     "owner_reason": "stuck-at-cruise (no stuck rule: cruise holds it)",
+     "envelope_breaches": [],
+     "plausibility": {
+      "detected": false,
+      "confirmed": false,
+      "checks": [],
+      "latency_seconds": null,
+      "confirm_latency_seconds": null
+     },
+     "committee": {
+      "result": "uncovered",
+      "reason": "no committee declares obd:RPM"
+     }
+    },
+    {
+     "channel": "obd:RPM",
+     "kind": "stuck",
+     "run": 2,
+     "start": 1785799294.8929548,
+     "end": 1785799334.8929548,
+     "changed_samples": 26,
+     "parameter": 750.0,
+     "result": "graded",
+     "owner": "committee",
+     "owner_reason": "stuck-at-cruise (no stuck rule: cruise holds it)",
+     "envelope_breaches": [],
+     "plausibility": {
+      "detected": false,
+      "confirmed": false,
+      "checks": [],
+      "latency_seconds": null,
+      "confirm_latency_seconds": null
+     },
+     "committee": {
+      "result": "uncovered",
+      "reason": "no committee declares obd:RPM"
+     }
+    },
+    {
+     "channel": "obd:RPM",
+     "kind": "stuck",
+     "run": 3,
+     "start": 1785799368.8929548,
+     "end": 1785799408.8929548,
+     "changed_samples": 19,
+     "parameter": 2275.0,
+     "result": "graded",
+     "owner": "committee",
+     "owner_reason": "stuck-at-cruise (no stuck rule: cruise holds it)",
+     "envelope_breaches": [],
+     "plausibility": {
+      "detected": false,
+      "confirmed": false,
+      "checks": [],
+      "latency_seconds": null,
+      "confirm_latency_seconds": null
+     },
+     "committee": {
+      "result": "uncovered",
+      "reason": "no committee declares obd:RPM"
+     }
+    },
+    {
+     "channel": "obd:RPM",
+     "kind": "stuck",
+     "run": 4,
+     "start": 1785799327.8929548,
+     "end": 1785799367.8929548,
+     "changed_samples": 29,
+     "parameter": 4300.0,
+     "result": "graded",
+     "owner": "committee",
+     "owner_reason": "stuck-at-cruise (no stuck rule: cruise holds it)",
+     "envelope_breaches": [],
+     "plausibility": {
+      "detected": false,
+      "confirmed": false,
+      "checks": [],
+      "latency_seconds": null,
+      "confirm_latency_seconds": null
+     },
+     "committee": {
+      "result": "uncovered",
+      "reason": "no committee declares obd:RPM"
+     }
+    },
+    {
+     "channel": "obd:RPM",
+     "kind": "scale",
+     "run": 0,
+     "start": 1785799333.8929548,
+     "end": 1785799373.8929548,
+     "changed_samples": 30,
+     "parameter": 5.0,
+     "result": "graded",
+     "owner": "plausibility",
+     "owner_reason": "leaves the range/slew envelope",
+     "envelope_breaches": [
+      "range",
+      "slew"
+     ],
+     "plausibility": {
+      "detected": true,
+      "confirmed": true,
+      "checks": [
+       "range",
+       "slew"
+      ],
+      "latency_seconds": 1.35,
+      "confirm_latency_seconds": 2.99
+     },
+     "committee": {
+      "result": "uncovered",
+      "reason": "no committee declares obd:RPM"
+     }
+    },
+    {
+     "channel": "obd:RPM",
+     "kind": "scale",
+     "run": 1,
+     "start": 1785799319.8929548,
+     "end": 1785799359.8929548,
+     "changed_samples": 27,
+     "parameter": 5.0,
+     "result": "graded",
+     "owner": "plausibility",
+     "owner_reason": "leaves the range/slew envelope",
+     "envelope_breaches": [
+      "range",
+      "slew"
+     ],
+     "plausibility": {
+      "detected": true,
+      "confirmed": true,
+      "checks": [
+       "range",
+       "slew"
+      ],
+      "latency_seconds": 0.348,
+      "confirm_latency_seconds": 1.473
+     },
+     "committee": {
+      "result": "uncovered",
+      "reason": "no committee declares obd:RPM"
+     }
+    },
+    {
+     "channel": "obd:RPM",
+     "kind": "scale",
+     "run": 2,
+     "start": 1785799299.8929548,
+     "end": 1785799339.8929548,
+     "changed_samples": 26,
+     "parameter": 5.0,
+     "result": "graded",
+     "owner": "plausibility",
+     "owner_reason": "leaves the range/slew envelope",
+     "envelope_breaches": [
+      "range",
+      "slew"
+     ],
+     "plausibility": {
+      "detected": true,
+      "confirmed": true,
+      "checks": [
+       "range",
+       "slew"
+      ],
+      "latency_seconds": 0.525,
+      "confirm_latency_seconds": 2.612
+     },
+     "committee": {
+      "result": "uncovered",
+      "reason": "no committee declares obd:RPM"
+     }
+    },
+    {
+     "channel": "obd:RPM",
+     "kind": "scale",
+     "run": 3,
+     "start": 1785799377.8929548,
+     "end": 1785799417.8929548,
+     "changed_samples": 22,
+     "parameter": 5.0,
+     "result": "graded",
+     "owner": "plausibility",
+     "owner_reason": "leaves the range/slew envelope",
+     "envelope_breaches": [
+      "range",
+      "slew"
+     ],
+     "plausibility": {
+      "detected": true,
+      "confirmed": true,
+      "checks": [
+       "range",
+       "slew"
+      ],
+      "latency_seconds": 0.184,
+      "confirm_latency_seconds": 3.21
+     },
+     "committee": {
+      "result": "uncovered",
+      "reason": "no committee declares obd:RPM"
+     }
+    },
+    {
+     "channel": "obd:RPM",
+     "kind": "scale",
+     "run": 4,
+     "start": 1785799362.8929548,
+     "end": 1785799402.8929548,
+     "changed_samples": 24,
+     "parameter": 5.0,
+     "result": "graded",
+     "owner": "plausibility",
+     "owner_reason": "leaves the range/slew envelope",
+     "envelope_breaches": [
+      "range",
+      "slew"
+     ],
+     "plausibility": {
+      "detected": true,
+      "confirmed": true,
+      "checks": [
+       "range",
+       "slew"
+      ],
+      "latency_seconds": 0.865,
+      "confirm_latency_seconds": 1.866
+     },
+     "committee": {
+      "result": "uncovered",
+      "reason": "no committee declares obd:RPM"
+     }
+    },
+    {
+     "channel": "obd:SPEED",
+     "kind": "spike",
+     "run": 0,
+     "start": 1785799290.8929548,
+     "end": 1785799330.8929548,
+     "changed_samples": 28,
+     "parameter": 1530.0,
+     "result": "graded",
+     "owner": "plausibility",
+     "owner_reason": "leaves the range/slew envelope",
+     "envelope_breaches": [
+      "range",
+      "slew"
+     ],
+     "plausibility": {
+      "detected": true,
+      "confirmed": true,
+      "checks": [
+       "range",
+       "slew"
+      ],
+      "latency_seconds": 1.444,
+      "confirm_latency_seconds": 2.446
+     },
+     "committee": {
+      "result": "graded",
+      "caught": false,
+      "latency_seconds": null,
+      "flags": [],
+      "counts": {
+       "SPEED_SOURCE_DIVERGENCE": {
+        "no_verdict:reference_missing": 1,
+        "no_verdict:member_missing": 74,
+        "no_verdict:condition": 70,
+        "no_verdict:stale": 80,
+        "agree": 192,
+        "disagree": 3
+       }
+      }
+     }
+    },
+    {
+     "channel": "obd:SPEED",
+     "kind": "spike",
+     "run": 1,
+     "start": 1785799361.8929548,
+     "end": 1785799401.8929548,
+     "changed_samples": 24,
+     "parameter": 1530.0,
+     "result": "graded",
+     "owner": "plausibility",
+     "owner_reason": "leaves the range/slew envelope",
+     "envelope_breaches": [
+      "range",
+      "slew"
+     ],
+     "plausibility": {
+      "detected": true,
+      "confirmed": true,
+      "checks": [
+       "range",
+       "slew"
+      ],
+      "latency_seconds": 0.731,
+      "confirm_latency_seconds": 1.865
+     },
+     "committee": {
+      "result": "graded",
+      "caught": false,
+      "latency_seconds": null,
+      "flags": [],
+      "counts": {
+       "SPEED_SOURCE_DIVERGENCE": {
+        "no_verdict:reference_missing": 1,
+        "no_verdict:member_missing": 74,
+        "no_verdict:condition": 70,
+        "no_verdict:stale": 80,
+        "agree": 176,
+        "disagree": 19
+       }
+      }
+     }
+    },
+    {
+     "channel": "obd:SPEED",
+     "kind": "spike",
+     "run": 2,
+     "start": 1785799349.8929548,
+     "end": 1785799389.8929548,
+     "changed_samples": 26,
+     "parameter": 1530.0,
+     "result": "graded",
+     "owner": "plausibility",
+     "owner_reason": "leaves the range/slew envelope",
+     "envelope_breaches": [
+      "range",
+      "slew"
+     ],
+     "plausibility": {
+      "detected": true,
+      "confirmed": true,
+      "checks": [
+       "range",
+       "slew"
+      ],
+      "latency_seconds": 0.704,
+      "confirm_latency_seconds": 2.684
+     },
+     "committee": {
+      "result": "graded",
+      "caught": true,
+      "latency_seconds": 19.107,
+      "flags": [
+       {
+        "committee": "SPEED_SOURCE_DIVERGENCE",
+        "member": "obd:SPEED",
+        "detected_at": "2026-08-03T23:22:49+00:00",
+        "departure": 13.5021,
+        "text": "SPEED_SOURCE_DIVERGENCE: obd:SPEED reads 1530 where 0.9203 x gps:speed expects 105.5 (gps:speed 114.6); departure +1350.2% beyond 15% for 10 s"
+       }
+      ],
+      "counts": {
+       "SPEED_SOURCE_DIVERGENCE": {
+        "no_verdict:reference_missing": 1,
+        "no_verdict:member_missing": 74,
+        "no_verdict:condition": 70,
+        "no_verdict:stale": 80,
+        "agree": 177,
+        "disagree": 18
+       }
+      }
+     }
+    },
+    {
+     "channel": "obd:SPEED",
+     "kind": "spike",
+     "run": 3,
+     "start": 1785799326.8929548,
+     "end": 1785799366.8929548,
+     "changed_samples": 29,
+     "parameter": 1530.0,
+     "result": "graded",
+     "owner": "plausibility",
+     "owner_reason": "leaves the range/slew envelope",
+     "envelope_breaches": [
+      "range",
+      "slew"
+     ],
+     "plausibility": {
+      "detected": true,
+      "confirmed": true,
+      "checks": [
+       "range",
+       "slew"
+      ],
+      "latency_seconds": 3.622,
+      "confirm_latency_seconds": 5.081
+     },
+     "committee": {
+      "result": "graded",
+      "caught": false,
+      "latency_seconds": null,
+      "flags": [],
+      "counts": {
+       "SPEED_SOURCE_DIVERGENCE": {
+        "no_verdict:reference_missing": 1,
+        "no_verdict:member_missing": 74,
+        "no_verdict:condition": 70,
+        "no_verdict:stale": 80,
+        "agree": 180,
+        "disagree": 15
+       }
+      }
+     }
+    },
+    {
+     "channel": "obd:SPEED",
+     "kind": "spike",
+     "run": 4,
+     "start": 1785799326.8929548,
+     "end": 1785799366.8929548,
+     "changed_samples": 29,
+     "parameter": 1530.0,
+     "result": "graded",
+     "owner": "plausibility",
+     "owner_reason": "leaves the range/slew envelope",
+     "envelope_breaches": [
+      "range",
+      "slew"
+     ],
+     "plausibility": {
+      "detected": true,
+      "confirmed": true,
+      "checks": [
+       "range",
+       "slew"
+      ],
+      "latency_seconds": 3.622,
+      "confirm_latency_seconds": 5.081
+     },
+     "committee": {
+      "result": "graded",
+      "caught": false,
+      "latency_seconds": null,
+      "flags": [],
+      "counts": {
+       "SPEED_SOURCE_DIVERGENCE": {
+        "no_verdict:reference_missing": 1,
+        "no_verdict:member_missing": 74,
+        "no_verdict:condition": 70,
+        "no_verdict:stale": 80,
+        "agree": 180,
+        "disagree": 15
+       }
+      }
+     }
+    },
+    {
+     "channel": "obd:SPEED",
+     "kind": "drift",
+     "run": 0,
+     "start": 1785799370.8929548,
+     "end": 1785799410.8929548,
+     "changed_samples": 22,
+     "parameter": 394.9069453429632,
+     "result": "graded",
+     "owner": "plausibility",
+     "owner_reason": "leaves the range/slew envelope",
+     "envelope_breaches": [
+      "range",
+      "slew"
+     ],
+     "plausibility": {
+      "detected": true,
+      "confirmed": true,
+      "checks": [
+       "range",
+       "slew"
+      ],
+      "latency_seconds": 20.633,
+      "confirm_latency_seconds": 22.061
+     },
+     "committee": {
+      "result": "graded",
+      "caught": true,
+      "latency_seconds": 31.107,
+      "flags": [
+       {
+        "committee": "SPEED_SOURCE_DIVERGENCE",
+        "member": "obd:SPEED",
+        "detected_at": "2026-08-03T23:23:22+00:00",
+        "departure": 3.2159,
+        "text": "SPEED_SOURCE_DIVERGENCE: obd:SPEED reads 403.1 where 0.9203 x gps:speed expects 95.62 (gps:speed 103.9); departure +321.6% beyond 15% for 10 s"
+       }
+      ],
+      "counts": {
+       "SPEED_SOURCE_DIVERGENCE": {
+        "no_verdict:reference_missing": 1,
+        "no_verdict:member_missing": 74,
+        "no_verdict:condition": 70,
+        "no_verdict:stale": 80,
+        "agree": 177,
+        "disagree": 18
+       }
+      }
+     }
+    },
+    {
+     "channel": "obd:SPEED",
+     "kind": "drift",
+     "run": 1,
+     "start": 1785799289.8929548,
+     "end": 1785799329.8929548,
+     "changed_samples": 28,
+     "parameter": 394.9069453429632,
+     "result": "graded",
+     "owner": "plausibility",
+     "owner_reason": "leaves the range/slew envelope",
+     "envelope_breaches": [
+      "range",
+      "slew"
+     ],
+     "plausibility": {
+      "detected": true,
+      "confirmed": true,
+      "checks": [
+       "range",
+       "slew"
+      ],
+      "latency_seconds": 23.331,
+      "confirm_latency_seconds": 24.331
+     },
+     "committee": {
+      "result": "graded",
+      "caught": false,
+      "latency_seconds": null,
+      "flags": [],
+      "counts": {
+       "SPEED_SOURCE_DIVERGENCE": {
+        "no_verdict:reference_missing": 1,
+        "no_verdict:member_missing": 74,
+        "no_verdict:condition": 70,
+        "no_verdict:stale": 80,
+        "agree": 192,
+        "disagree": 3
+       }
+      }
+     }
+    },
+    {
+     "channel": "obd:SPEED",
+     "kind": "drift",
+     "run": 2,
+     "start": 1785799353.8929548,
+     "end": 1785799393.8929548,
+     "changed_samples": 26,
+     "parameter": 394.9069453429632,
+     "result": "graded",
+     "owner": "plausibility",
+     "owner_reason": "leaves the range/slew envelope",
+     "envelope_breaches": [
+      "range",
+      "slew"
+     ],
+     "plausibility": {
+      "detected": true,
+      "confirmed": true,
+      "checks": [
+       "range",
+       "slew"
+      ],
+      "latency_seconds": 14.877,
+      "confirm_latency_seconds": 16.075
+     },
+     "committee": {
+      "result": "graded",
+      "caught": true,
+      "latency_seconds": 15.107,
+      "flags": [
+       {
+        "committee": "SPEED_SOURCE_DIVERGENCE",
+        "member": "obd:SPEED",
+        "detected_at": "2026-08-03T23:22:49+00:00",
+        "departure": 1.3995,
+        "text": "SPEED_SOURCE_DIVERGENCE: obd:SPEED reads 253.1 where 0.9203 x gps:speed expects 105.5 (gps:speed 114.6); departure +139.9% beyond 15% for 10 s"
+       }
+      ],
+      "counts": {
+       "SPEED_SOURCE_DIVERGENCE": {
+        "no_verdict:reference_missing": 1,
+        "no_verdict:member_missing": 74,
+        "no_verdict:condition": 70,
+        "no_verdict:stale": 80,
+        "agree": 178,
+        "disagree": 17
+       }
+      }
+     }
+    },
+    {
+     "channel": "obd:SPEED",
+     "kind": "drift",
+     "run": 3,
+     "start": 1785799301.8929548,
+     "end": 1785799341.8929548,
+     "changed_samples": 26,
+     "parameter": 394.9069453429632,
+     "result": "graded",
+     "owner": "plausibility",
+     "owner_reason": "leaves the range/slew envelope",
+     "envelope_breaches": [
+      "range",
+      "slew"
+     ],
+     "plausibility": {
+      "detected": true,
+      "confirmed": true,
+      "checks": [
+       "range",
+       "slew"
+      ],
+      "latency_seconds": 20.476,
+      "confirm_latency_seconds": 21.621
+     },
+     "committee": {
+      "result": "graded",
+      "caught": false,
+      "latency_seconds": null,
+      "flags": [],
+      "counts": {
+       "SPEED_SOURCE_DIVERGENCE": {
+        "no_verdict:reference_missing": 1,
+        "no_verdict:member_missing": 74,
+        "no_verdict:condition": 70,
+        "no_verdict:stale": 80,
+        "agree": 189,
+        "disagree": 6
+       }
+      }
+     }
+    },
+    {
+     "channel": "obd:SPEED",
+     "kind": "drift",
+     "run": 4,
+     "start": 1785799290.8929548,
+     "end": 1785799330.8929548,
+     "changed_samples": 28,
+     "parameter": 394.9069453429632,
+     "result": "graded",
+     "owner": "plausibility",
+     "owner_reason": "leaves the range/slew envelope",
+     "envelope_breaches": [
+      "range",
+      "slew"
+     ],
+     "plausibility": {
+      "detected": true,
+      "confirmed": true,
+      "checks": [
+       "range",
+       "slew"
+      ],
+      "latency_seconds": 22.331,
+      "confirm_latency_seconds": 23.331
+     },
+     "committee": {
+      "result": "graded",
+      "caught": false,
+      "latency_seconds": null,
+      "flags": [],
+      "counts": {
+       "SPEED_SOURCE_DIVERGENCE": {
+        "no_verdict:reference_missing": 1,
+        "no_verdict:member_missing": 74,
+        "no_verdict:condition": 70,
+        "no_verdict:stale": 80,
+        "agree": 192,
+        "disagree": 3
+       }
+      }
+     }
+    },
+    {
+     "channel": "obd:SPEED",
+     "kind": "dropout",
+     "run": 0,
+     "start": 1785799335.8929548,
+     "end": 1785799375.8929548,
+     "changed_samples": 31,
+     "parameter": null,
+     "result": "graded",
+     "owner": "unassigned",
+     "owner_reason": "freshness unchecked: not a priority channel: the scheduler degrades it under bus-budget pressure (collection.obd_priority_channels), so its absence is not evidence",
+     "envelope_breaches": [],
+     "plausibility": {
+      "detected": false,
+      "confirmed": false,
+      "checks": [],
+      "latency_seconds": null,
+      "confirm_latency_seconds": null
+     },
+     "committee": {
+      "result": "graded",
+      "caught": false,
+      "latency_seconds": null,
+      "flags": [],
+      "counts": {
+       "SPEED_SOURCE_DIVERGENCE": {
+        "no_verdict:reference_missing": 1,
+        "no_verdict:member_missing": 89,
+        "no_verdict:condition": 60,
+        "no_verdict:stale": 75,
+        "agree": 194,
+        "disagree": 1
+       }
+      }
+     }
+    },
+    {
+     "channel": "obd:SPEED",
+     "kind": "dropout",
+     "run": 1,
+     "start": 1785799382.8929548,
+     "end": 1785799422.8929548,
+     "changed_samples": 22,
+     "parameter": null,
+     "result": "graded",
+     "owner": "unassigned",
+     "owner_reason": "freshness unchecked: not a priority channel: the scheduler degrades it under bus-budget pressure (collection.obd_priority_channels), so its absence is not evidence",
+     "envelope_breaches": [],
+     "plausibility": {
+      "detected": false,
+      "confirmed": false,
+      "checks": [],
+      "latency_seconds": null,
+      "confirm_latency_seconds": null
+     },
+     "committee": {
+      "result": "graded",
+      "caught": false,
+      "latency_seconds": null,
+      "flags": [],
+      "counts": {
+       "SPEED_SOURCE_DIVERGENCE": {
+        "no_verdict:reference_missing": 1,
+        "no_verdict:member_missing": 81,
+        "no_verdict:condition": 68,
+        "no_verdict:stale": 75,
+        "agree": 194,
+        "disagree": 1
+       }
+      }
+     }
+    },
+    {
+     "channel": "obd:SPEED",
+     "kind": "dropout",
+     "run": 2,
+     "start": 1785799357.8929548,
+     "end": 1785799397.8929548,
+     "changed_samples": 24,
+     "parameter": null,
+     "result": "graded",
+     "owner": "unassigned",
+     "owner_reason": "freshness unchecked: not a priority channel: the scheduler degrades it under bus-budget pressure (collection.obd_priority_channels), so its absence is not evidence",
+     "envelope_breaches": [],
+     "plausibility": {
+      "detected": false,
+      "confirmed": false,
+      "checks": [],
+      "latency_seconds": null,
+      "confirm_latency_seconds": null
+     },
+     "committee": {
+      "result": "graded",
+      "caught": false,
+      "latency_seconds": null,
+      "flags": [],
+      "counts": {
+       "SPEED_SOURCE_DIVERGENCE": {
+        "no_verdict:reference_missing": 1,
+        "no_verdict:member_missing": 81,
+        "no_verdict:condition": 67,
+        "no_verdict:stale": 76,
+        "agree": 194,
+        "disagree": 1
+       }
+      }
+     }
+    },
+    {
+     "channel": "obd:SPEED",
+     "kind": "dropout",
+     "run": 3,
+     "start": 1785799360.8929548,
+     "end": 1785799400.8929548,
+     "changed_samples": 24,
+     "parameter": null,
+     "result": "graded",
+     "owner": "unassigned",
+     "owner_reason": "freshness unchecked: not a priority channel: the scheduler degrades it under bus-budget pressure (collection.obd_priority_channels), so its absence is not evidence",
+     "envelope_breaches": [],
+     "plausibility": {
+      "detected": false,
+      "confirmed": false,
+      "checks": [],
+      "latency_seconds": null,
+      "confirm_latency_seconds": null
+     },
+     "committee": {
+      "result": "graded",
+      "caught": false,
+      "latency_seconds": null,
+      "flags": [],
+      "counts": {
+       "SPEED_SOURCE_DIVERGENCE": {
+        "no_verdict:reference_missing": 1,
+        "no_verdict:member_missing": 80,
+        "no_verdict:condition": 68,
+        "no_verdict:stale": 76,
+        "agree": 194,
+        "disagree": 1
+       }
+      }
+     }
+    },
+    {
+     "channel": "obd:SPEED",
+     "kind": "dropout",
+     "run": 4,
+     "start": 1785799355.8929548,
+     "end": 1785799395.8929548,
+     "changed_samples": 25,
+     "parameter": null,
+     "result": "graded",
+     "owner": "unassigned",
+     "owner_reason": "freshness unchecked: not a priority channel: the scheduler degrades it under bus-budget pressure (collection.obd_priority_channels), so its absence is not evidence",
+     "envelope_breaches": [],
+     "plausibility": {
+      "detected": false,
+      "confirmed": false,
+      "checks": [],
+      "latency_seconds": null,
+      "confirm_latency_seconds": null
+     },
+     "committee": {
+      "result": "graded",
+      "caught": false,
+      "latency_seconds": null,
+      "flags": [],
+      "counts": {
+       "SPEED_SOURCE_DIVERGENCE": {
+        "no_verdict:reference_missing": 1,
+        "no_verdict:member_missing": 83,
+        "no_verdict:condition": 66,
+        "no_verdict:stale": 75,
+        "agree": 194,
+        "disagree": 1
+       }
+      }
+     }
+    },
+    {
+     "channel": "obd:SPEED",
+     "kind": "stuck",
+     "run": 0,
+     "start": 1785799362.8929548,
+     "end": 1785799402.8929548,
+     "changed_samples": 21,
+     "parameter": 104.0,
+     "result": "graded",
+     "owner": "committee",
+     "owner_reason": "stuck-at-cruise (no stuck rule: cruise holds it)",
+     "envelope_breaches": [],
+     "plausibility": {
+      "detected": false,
+      "confirmed": false,
+      "checks": [],
+      "latency_seconds": null,
+      "confirm_latency_seconds": null
+     },
+     "committee": {
+      "result": "graded",
+      "caught": false,
+      "latency_seconds": null,
+      "flags": [],
+      "counts": {
+       "SPEED_SOURCE_DIVERGENCE": {
+        "no_verdict:reference_missing": 1,
+        "no_verdict:member_missing": 74,
+        "no_verdict:condition": 70,
+        "no_verdict:stale": 80,
+        "agree": 194,
+        "disagree": 1
+       }
+      }
+     }
+    },
+    {
+     "channel": "obd:SPEED",
+     "kind": "stuck",
+     "run": 1,
+     "start": 1785799334.8929548,
+     "end": 1785799374.8929548,
+     "changed_samples": 30,
+     "parameter": 78.0,
+     "result": "graded",
+     "owner": "committee",
+     "owner_reason": "stuck-at-cruise (no stuck rule: cruise holds it)",
+     "envelope_breaches": [],
+     "plausibility": {
+      "detected": false,
+      "confirmed": false,
+      "checks": [],
+      "latency_seconds": null,
+      "confirm_latency_seconds": null
+     },
+     "committee": {
+      "result": "graded",
+      "caught": true,
+      "latency_seconds": 34.107,
+      "flags": [
+       {
+        "committee": "SPEED_SOURCE_DIVERGENCE",
+        "member": "obd:SPEED",
+        "detected_at": "2026-08-03T23:22:49+00:00",
+        "departure": -0.2607,
+        "text": "SPEED_SOURCE_DIVERGENCE: obd:SPEED reads 78 where 0.9203 x gps:speed expects 105.5 (gps:speed 114.6); departure -26.1% beyond 15% for 10 s"
+       }
+      ],
+      "counts": {
+       "SPEED_SOURCE_DIVERGENCE": {
+        "no_verdict:reference_missing": 1,
+        "no_verdict:member_missing": 74,
+        "no_verdict:condition": 70,
+        "no_verdict:stale": 80,
+        "agree": 181,
+        "disagree": 14
+       }
+      }
+     }
+    },
+    {
+     "channel": "obd:SPEED",
+     "kind": "stuck",
+     "run": 2,
+     "start": 1785799294.8929548,
+     "end": 1785799334.8929548,
+     "changed_samples": 26,
+     "parameter": 0.0,
+     "result": "graded",
+     "owner": "committee",
+     "owner_reason": "stuck-at-cruise (no stuck rule: cruise holds it)",
+     "envelope_breaches": [
+      "slew"
+     ],
+     "plausibility": {
+      "detected": true,
+      "confirmed": false,
+      "checks": [
+       "slew"
+      ],
+      "latency_seconds": 40.35,
+      "confirm_latency_seconds": null
+     },
+     "committee": {
+      "result": "graded",
+      "caught": false,
+      "latency_seconds": null,
+      "flags": [],
+      "counts": {
+       "SPEED_SOURCE_DIVERGENCE": {
+        "no_verdict:reference_missing": 1,
+        "no_verdict:member_missing": 74,
+        "no_verdict:condition": 70,
+        "no_verdict:stale": 80,
+        "agree": 192,
+        "disagree": 3
+       }
+      }
+     }
+    },
+    {
+     "channel": "obd:SPEED",
+     "kind": "stuck",
+     "run": 3,
+     "start": 1785799368.8929548,
+     "end": 1785799408.8929548,
+     "changed_samples": 21,
+     "parameter": 104.0,
+     "result": "graded",
+     "owner": "committee",
+     "owner_reason": "stuck-at-cruise (no stuck rule: cruise holds it)",
+     "envelope_breaches": [],
+     "plausibility": {
+      "detected": false,
+      "confirmed": false,
+      "checks": [],
+      "latency_seconds": null,
+      "confirm_latency_seconds": null
+     },
+     "committee": {
+      "result": "graded",
+      "caught": false,
+      "latency_seconds": null,
+      "flags": [],
+      "counts": {
+       "SPEED_SOURCE_DIVERGENCE": {
+        "no_verdict:reference_missing": 1,
+        "no_verdict:member_missing": 74,
+        "no_verdict:condition": 70,
+        "no_verdict:stale": 80,
+        "agree": 194,
+        "disagree": 1
+       }
+      }
+     }
+    },
+    {
+     "channel": "obd:SPEED",
+     "kind": "stuck",
+     "run": 4,
+     "start": 1785799327.8929548,
+     "end": 1785799367.8929548,
+     "changed_samples": 29,
+     "parameter": 58.0,
+     "result": "graded",
+     "owner": "committee",
+     "owner_reason": "stuck-at-cruise (no stuck rule: cruise holds it)",
+     "envelope_breaches": [],
+     "plausibility": {
+      "detected": false,
+      "confirmed": false,
+      "checks": [],
+      "latency_seconds": null,
+      "confirm_latency_seconds": null
+     },
+     "committee": {
+      "result": "graded",
+      "caught": false,
+      "latency_seconds": null,
+      "flags": [],
+      "counts": {
+       "SPEED_SOURCE_DIVERGENCE": {
+        "no_verdict:reference_missing": 1,
+        "no_verdict:member_missing": 74,
+        "no_verdict:condition": 70,
+        "no_verdict:stale": 80,
+        "agree": 180,
+        "disagree": 15
+       }
+      }
+     }
+    },
+    {
+     "channel": "obd:SPEED",
+     "kind": "scale",
+     "run": 0,
+     "start": 1785799333.8929548,
+     "end": 1785799373.8929548,
+     "changed_samples": 30,
+     "parameter": 5.0,
+     "result": "graded",
+     "owner": "plausibility",
+     "owner_reason": "leaves the range/slew envelope",
+     "envelope_breaches": [
+      "range",
+      "slew"
+     ],
+     "plausibility": {
+      "detected": true,
+      "confirmed": true,
+      "checks": [
+       "range",
+       "slew"
+      ],
+      "latency_seconds": 1.35,
+      "confirm_latency_seconds": 2.99
+     },
+     "committee": {
+      "result": "graded",
+      "caught": true,
+      "latency_seconds": 35.107,
+      "flags": [
+       {
+        "committee": "SPEED_SOURCE_DIVERGENCE",
+        "member": "obd:SPEED",
+        "detected_at": "2026-08-03T23:22:49+00:00",
+        "departure": 3.9288,
+        "text": "SPEED_SOURCE_DIVERGENCE: obd:SPEED reads 520 where 0.9203 x gps:speed expects 105.5 (gps:speed 114.6); departure +392.9% beyond 15% for 10 s"
+       }
+      ],
+      "counts": {
+       "SPEED_SOURCE_DIVERGENCE": {
+        "no_verdict:reference_missing": 1,
+        "no_verdict:member_missing": 74,
+        "no_verdict:condition": 70,
+        "no_verdict:stale": 80,
+        "agree": 179,
+        "disagree": 16
+       }
+      }
+     }
+    },
+    {
+     "channel": "obd:SPEED",
+     "kind": "scale",
+     "run": 1,
+     "start": 1785799319.8929548,
+     "end": 1785799359.8929548,
+     "changed_samples": 27,
+     "parameter": 5.0,
+     "result": "graded",
+     "owner": "plausibility",
+     "owner_reason": "leaves the range/slew envelope",
+     "envelope_breaches": [
+      "range",
+      "slew"
+     ],
+     "plausibility": {
+      "detected": true,
+      "confirmed": true,
+      "checks": [
+       "range",
+       "slew"
+      ],
+      "latency_seconds": 0.348,
+      "confirm_latency_seconds": 1.473
+     },
+     "committee": {
+      "result": "graded",
+      "caught": false,
+      "latency_seconds": null,
+      "flags": [],
+      "counts": {
+       "SPEED_SOURCE_DIVERGENCE": {
+        "no_verdict:reference_missing": 1,
+        "no_verdict:member_missing": 74,
+        "no_verdict:condition": 70,
+        "no_verdict:stale": 80,
+        "agree": 186,
+        "disagree": 9
+       }
+      }
+     }
+    },
+    {
+     "channel": "obd:SPEED",
+     "kind": "scale",
+     "run": 2,
+     "start": 1785799299.8929548,
+     "end": 1785799339.8929548,
+     "changed_samples": 26,
+     "parameter": 5.0,
+     "result": "graded",
+     "owner": "plausibility",
+     "owner_reason": "leaves the range/slew envelope",
+     "envelope_breaches": [
+      "range",
+      "slew"
+     ],
+     "plausibility": {
+      "detected": true,
+      "confirmed": true,
+      "checks": [
+       "range",
+       "slew"
+      ],
+      "latency_seconds": 0.525,
+      "confirm_latency_seconds": 21.473
+     },
+     "committee": {
+      "result": "graded",
+      "caught": false,
+      "latency_seconds": null,
+      "flags": [],
+      "counts": {
+       "SPEED_SOURCE_DIVERGENCE": {
+        "no_verdict:reference_missing": 1,
+        "no_verdict:member_missing": 74,
+        "no_verdict:condition": 70,
+        "no_verdict:stale": 80,
+        "agree": 189,
+        "disagree": 6
+       }
+      }
+     }
+    },
+    {
+     "channel": "obd:SPEED",
+     "kind": "scale",
+     "run": 3,
+     "start": 1785799377.8929548,
+     "end": 1785799417.8929548,
+     "changed_samples": 22,
+     "parameter": 5.0,
+     "result": "graded",
+     "owner": "plausibility",
+     "owner_reason": "leaves the range/slew envelope",
+     "envelope_breaches": [
+      "range",
+      "slew"
+     ],
+     "plausibility": {
+      "detected": true,
+      "confirmed": true,
+      "checks": [
+       "range",
+       "slew"
+      ],
+      "latency_seconds": 0.184,
+      "confirm_latency_seconds": 3.21
+     },
+     "committee": {
+      "result": "graded",
+      "caught": true,
+      "latency_seconds": 24.107,
+      "flags": [
+       {
+        "committee": "SPEED_SOURCE_DIVERGENCE",
+        "member": "obd:SPEED",
+        "detected_at": "2026-08-03T23:23:22+00:00",
+        "departure": 4.0201,
+        "text": "SPEED_SOURCE_DIVERGENCE: obd:SPEED reads 480 where 0.9203 x gps:speed expects 95.62 (gps:speed 103.9); departure +402.0% beyond 15% for 10 s"
+       }
+      ],
+      "counts": {
+       "SPEED_SOURCE_DIVERGENCE": {
+        "no_verdict:reference_missing": 1,
+        "no_verdict:member_missing": 74,
+        "no_verdict:condition": 70,
+        "no_verdict:stale": 80,
+        "agree": 178,
+        "disagree": 17
+       }
+      }
+     }
+    },
+    {
+     "channel": "obd:SPEED",
+     "kind": "scale",
+     "run": 4,
+     "start": 1785799362.8929548,
+     "end": 1785799402.8929548,
+     "changed_samples": 24,
+     "parameter": 5.0,
+     "result": "graded",
+     "owner": "plausibility",
+     "owner_reason": "leaves the range/slew envelope",
+     "envelope_breaches": [
+      "range",
+      "slew"
+     ],
+     "plausibility": {
+      "detected": true,
+      "confirmed": true,
+      "checks": [
+       "range",
+       "slew"
+      ],
+      "latency_seconds": 0.865,
+      "confirm_latency_seconds": 1.866
+     },
+     "committee": {
+      "result": "graded",
+      "caught": true,
+      "latency_seconds": 39.107,
+      "flags": [
+       {
+        "committee": "SPEED_SOURCE_DIVERGENCE",
+        "member": "obd:SPEED",
+        "detected_at": "2026-08-03T23:23:22+00:00",
+        "departure": 4.0201,
+        "text": "SPEED_SOURCE_DIVERGENCE: obd:SPEED reads 480 where 0.9203 x gps:speed expects 95.62 (gps:speed 103.9); departure +402.0% beyond 15% for 10 s"
+       }
+      ],
+      "counts": {
+       "SPEED_SOURCE_DIVERGENCE": {
+        "no_verdict:reference_missing": 1,
+        "no_verdict:member_missing": 74,
+        "no_verdict:condition": 70,
+        "no_verdict:stale": 80,
+        "agree": 176,
+        "disagree": 19
+       }
+      }
+     }
+    },
+    {
+     "channel": "obd:THROTTLE_POS",
+     "kind": "spike",
+     "run": 0,
+     "start": 1785799290.8929548,
+     "end": 1785799330.8929548,
+     "changed_samples": 28,
+     "parameter": 1445.0980392156862,
+     "result": "graded",
+     "owner": "plausibility",
+     "owner_reason": "leaves the range envelope",
+     "envelope_breaches": [
+      "range"
+     ],
+     "plausibility": {
+      "detected": true,
+      "confirmed": true,
+      "checks": [
+       "range"
+      ],
+      "latency_seconds": 1.444,
+      "confirm_latency_seconds": 2.446
+     },
+     "committee": {
+      "result": "uncovered",
+      "reason": "no committee declares obd:THROTTLE_POS"
+     }
+    },
+    {
+     "channel": "obd:THROTTLE_POS",
+     "kind": "spike",
+     "run": 1,
+     "start": 1785799361.8929548,
+     "end": 1785799401.8929548,
+     "changed_samples": 24,
+     "parameter": 1445.0980392156862,
+     "result": "graded",
+     "owner": "plausibility",
+     "owner_reason": "leaves the range envelope",
+     "envelope_breaches": [
+      "range"
+     ],
+     "plausibility": {
+      "detected": true,
+      "confirmed": true,
+      "checks": [
+       "range"
+      ],
+      "latency_seconds": 0.731,
+      "confirm_latency_seconds": 1.865
+     },
+     "committee": {
+      "result": "uncovered",
+      "reason": "no committee declares obd:THROTTLE_POS"
+     }
+    },
+    {
+     "channel": "obd:THROTTLE_POS",
+     "kind": "spike",
+     "run": 2,
+     "start": 1785799349.8929548,
+     "end": 1785799389.8929548,
+     "changed_samples": 26,
+     "parameter": 1445.0980392156862,
+     "result": "graded",
+     "owner": "plausibility",
+     "owner_reason": "leaves the range envelope",
+     "envelope_breaches": [
+      "range"
+     ],
+     "plausibility": {
+      "detected": true,
+      "confirmed": true,
+      "checks": [
+       "range"
+      ],
+      "latency_seconds": 0.704,
+      "confirm_latency_seconds": 2.684
+     },
+     "committee": {
+      "result": "uncovered",
+      "reason": "no committee declares obd:THROTTLE_POS"
+     }
+    },
+    {
+     "channel": "obd:THROTTLE_POS",
+     "kind": "spike",
+     "run": 3,
+     "start": 1785799326.8929548,
+     "end": 1785799366.8929548,
+     "changed_samples": 29,
+     "parameter": 1445.0980392156862,
+     "result": "graded",
+     "owner": "plausibility",
+     "owner_reason": "leaves the range envelope",
+     "envelope_breaches": [
+      "range"
+     ],
+     "plausibility": {
+      "detected": true,
+      "confirmed": true,
+      "checks": [
+       "range"
+      ],
+      "latency_seconds": 3.622,
+      "confirm_latency_seconds": 5.081
+     },
+     "committee": {
+      "result": "uncovered",
+      "reason": "no committee declares obd:THROTTLE_POS"
+     }
+    },
+    {
+     "channel": "obd:THROTTLE_POS",
+     "kind": "spike",
+     "run": 4,
+     "start": 1785799326.8929548,
+     "end": 1785799366.8929548,
+     "changed_samples": 29,
+     "parameter": 1445.0980392156862,
+     "result": "graded",
+     "owner": "plausibility",
+     "owner_reason": "leaves the range envelope",
+     "envelope_breaches": [
+      "range"
+     ],
+     "plausibility": {
+      "detected": true,
+      "confirmed": true,
+      "checks": [
+       "range"
+      ],
+      "latency_seconds": 3.622,
+      "confirm_latency_seconds": 5.081
+     },
+     "committee": {
+      "result": "uncovered",
+      "reason": "no committee declares obd:THROTTLE_POS"
+     }
+    },
+    {
+     "channel": "obd:THROTTLE_POS",
+     "kind": "drift",
+     "run": 0,
+     "start": 1785799370.8929548,
+     "end": 1785799410.8929548,
+     "changed_samples": 22,
+     "parameter": 289.7879000166936,
+     "result": "graded",
+     "owner": "plausibility",
+     "owner_reason": "leaves the range envelope",
+     "envelope_breaches": [
+      "range"
+     ],
+     "plausibility": {
+      "detected": true,
+      "confirmed": true,
+      "checks": [
+       "range"
+      ],
+      "latency_seconds": 14.005,
+      "confirm_latency_seconds": 20.633
+     },
+     "committee": {
+      "result": "uncovered",
+      "reason": "no committee declares obd:THROTTLE_POS"
+     }
+    },
+    {
+     "channel": "obd:THROTTLE_POS",
+     "kind": "drift",
+     "run": 1,
+     "start": 1785799289.8929548,
+     "end": 1785799329.8929548,
+     "changed_samples": 28,
+     "parameter": 289.7879000166936,
+     "result": "graded",
+     "owner": "plausibility",
+     "owner_reason": "leaves the range envelope",
+     "envelope_breaches": [
+      "range"
+     ],
+     "plausibility": {
+      "detected": true,
+      "confirmed": true,
+      "checks": [
+       "range"
+      ],
+      "latency_seconds": 11.525,
+      "confirm_latency_seconds": 12.612
+     },
+     "committee": {
+      "result": "uncovered",
+      "reason": "no committee declares obd:THROTTLE_POS"
+     }
+    },
+    {
+     "channel": "obd:THROTTLE_POS",
+     "kind": "drift",
+     "run": 2,
+     "start": 1785799353.8929548,
+     "end": 1785799393.8929548,
+     "changed_samples": 26,
+     "parameter": 289.7879000166936,
+     "result": "graded",
+     "owner": "plausibility",
+     "owner_reason": "leaves the range envelope",
+     "envelope_breaches": [
+      "range"
+     ],
+     "plausibility": {
+      "detected": true,
+      "confirmed": true,
+      "checks": [
+       "range"
+      ],
+      "latency_seconds": 2.695,
+      "confirm_latency_seconds": 9.865
+     },
+     "committee": {
+      "result": "uncovered",
+      "reason": "no committee declares obd:THROTTLE_POS"
+     }
+    },
+    {
+     "channel": "obd:THROTTLE_POS",
+     "kind": "drift",
+     "run": 3,
+     "start": 1785799301.8929548,
+     "end": 1785799341.8929548,
+     "changed_samples": 26,
+     "parameter": 289.7879000166936,
+     "result": "graded",
+     "owner": "plausibility",
+     "owner_reason": "leaves the range envelope",
+     "envelope_breaches": [
+      "range"
+     ],
+     "plausibility": {
+      "detected": true,
+      "confirmed": true,
+      "checks": [
+       "range"
+      ],
+      "latency_seconds": 12.331,
+      "confirm_latency_seconds": 13.335
+     },
+     "committee": {
+      "result": "uncovered",
+      "reason": "no committee declares obd:THROTTLE_POS"
+     }
+    },
+    {
+     "channel": "obd:THROTTLE_POS",
+     "kind": "drift",
+     "run": 4,
+     "start": 1785799290.8929548,
+     "end": 1785799330.8929548,
+     "changed_samples": 28,
+     "parameter": 289.7879000166936,
+     "result": "graded",
+     "owner": "plausibility",
+     "owner_reason": "leaves the range envelope",
+     "envelope_breaches": [
+      "range"
+     ],
+     "plausibility": {
+      "detected": true,
+      "confirmed": true,
+      "checks": [
+       "range"
+      ],
+      "latency_seconds": 12.612,
+      "confirm_latency_seconds": 14.537
+     },
+     "committee": {
+      "result": "uncovered",
+      "reason": "no committee declares obd:THROTTLE_POS"
+     }
+    },
+    {
+     "channel": "obd:THROTTLE_POS",
+     "kind": "dropout",
+     "run": 0,
+     "start": 1785799335.8929548,
+     "end": 1785799375.8929548,
+     "changed_samples": 31,
+     "parameter": null,
+     "result": "graded",
+     "owner": "plausibility",
+     "owner_reason": "freshness checked",
+     "envelope_breaches": [],
+     "plausibility": {
+      "detected": false,
+      "confirmed": false,
+      "checks": [],
+      "latency_seconds": null,
+      "confirm_latency_seconds": null
+     },
+     "committee": {
+      "result": "uncovered",
+      "reason": "no committee declares obd:THROTTLE_POS"
+     }
+    },
+    {
+     "channel": "obd:THROTTLE_POS",
+     "kind": "dropout",
+     "run": 1,
+     "start": 1785799382.8929548,
+     "end": 1785799422.8929548,
+     "changed_samples": 22,
+     "parameter": null,
+     "result": "graded",
+     "owner": "plausibility",
+     "owner_reason": "freshness checked",
+     "envelope_breaches": [],
+     "plausibility": {
+      "detected": false,
+      "confirmed": false,
+      "checks": [],
+      "latency_seconds": null,
+      "confirm_latency_seconds": null
+     },
+     "committee": {
+      "result": "uncovered",
+      "reason": "no committee declares obd:THROTTLE_POS"
+     }
+    },
+    {
+     "channel": "obd:THROTTLE_POS",
+     "kind": "dropout",
+     "run": 2,
+     "start": 1785799357.8929548,
+     "end": 1785799397.8929548,
+     "changed_samples": 24,
+     "parameter": null,
+     "result": "graded",
+     "owner": "plausibility",
+     "owner_reason": "freshness checked",
+     "envelope_breaches": [],
+     "plausibility": {
+      "detected": false,
+      "confirmed": false,
+      "checks": [],
+      "latency_seconds": null,
+      "confirm_latency_seconds": null
+     },
+     "committee": {
+      "result": "uncovered",
+      "reason": "no committee declares obd:THROTTLE_POS"
+     }
+    },
+    {
+     "channel": "obd:THROTTLE_POS",
+     "kind": "dropout",
+     "run": 3,
+     "start": 1785799360.8929548,
+     "end": 1785799400.8929548,
+     "changed_samples": 24,
+     "parameter": null,
+     "result": "graded",
+     "owner": "plausibility",
+     "owner_reason": "freshness checked",
+     "envelope_breaches": [],
+     "plausibility": {
+      "detected": false,
+      "confirmed": false,
+      "checks": [],
+      "latency_seconds": null,
+      "confirm_latency_seconds": null
+     },
+     "committee": {
+      "result": "uncovered",
+      "reason": "no committee declares obd:THROTTLE_POS"
+     }
+    },
+    {
+     "channel": "obd:THROTTLE_POS",
+     "kind": "dropout",
+     "run": 4,
+     "start": 1785799355.8929548,
+     "end": 1785799395.8929548,
+     "changed_samples": 25,
+     "parameter": null,
+     "result": "graded",
+     "owner": "plausibility",
+     "owner_reason": "freshness checked",
+     "envelope_breaches": [],
+     "plausibility": {
+      "detected": false,
+      "confirmed": false,
+      "checks": [],
+      "latency_seconds": null,
+      "confirm_latency_seconds": null
+     },
+     "committee": {
+      "result": "uncovered",
+      "reason": "no committee declares obd:THROTTLE_POS"
+     }
+    },
+    {
+     "channel": "obd:THROTTLE_POS",
+     "kind": "stuck",
+     "run": 0,
+     "start": 1785799362.8929548,
+     "end": 1785799402.8929548,
+     "changed_samples": 24,
+     "parameter": 35.68627450980392,
+     "result": "graded",
+     "owner": "plausibility",
+     "owner_reason": "channel has a stuck rule",
+     "envelope_breaches": [],
+     "plausibility": {
+      "detected": false,
+      "confirmed": false,
+      "checks": [],
+      "latency_seconds": null,
+      "confirm_latency_seconds": null
+     },
+     "committee": {
+      "result": "uncovered",
+      "reason": "no committee declares obd:THROTTLE_POS"
+     }
+    },
+    {
+     "channel": "obd:THROTTLE_POS",
+     "kind": "stuck",
+     "run": 1,
+     "start": 1785799334.8929548,
+     "end": 1785799374.8929548,
+     "changed_samples": 31,
+     "parameter": 9.411764705882353,
+     "result": "graded",
+     "owner": "plausibility",
+     "owner_reason": "channel has a stuck rule",
+     "envelope_breaches": [],
+     "plausibility": {
+      "detected": true,
+      "confirmed": false,
+      "checks": [
+       "stuck"
+      ],
+      "latency_seconds": 39.184,
+      "confirm_latency_seconds": null
+     },
+     "committee": {
+      "result": "uncovered",
+      "reason": "no committee declares obd:THROTTLE_POS"
+     }
+    },
+    {
+     "channel": "obd:THROTTLE_POS",
+     "kind": "stuck",
+     "run": 2,
+     "start": 1785799294.8929548,
+     "end": 1785799334.8929548,
+     "changed_samples": 26,
+     "parameter": 3.9215686274509802,
+     "result": "graded",
+     "owner": "plausibility",
+     "owner_reason": "channel has a stuck rule",
+     "envelope_breaches": [],
+     "plausibility": {
+      "detected": false,
+      "confirmed": false,
+      "checks": [],
+      "latency_seconds": null,
+      "confirm_latency_seconds": null
+     },
+     "committee": {
+      "result": "uncovered",
+      "reason": "no committee declares obd:THROTTLE_POS"
+     }
+    },
+    {
+     "channel": "obd:THROTTLE_POS",
+     "kind": "stuck",
+     "run": 3,
+     "start": 1785799368.8929548,
+     "end": 1785799408.8929548,
+     "changed_samples": 21,
+     "parameter": 7.0588235294117645,
+     "result": "graded",
+     "owner": "plausibility",
+     "owner_reason": "channel has a stuck rule",
+     "envelope_breaches": [],
+     "plausibility": {
+      "detected": false,
+      "confirmed": false,
+      "checks": [],
+      "latency_seconds": null,
+      "confirm_latency_seconds": null
+     },
+     "committee": {
+      "result": "uncovered",
+      "reason": "no committee declares obd:THROTTLE_POS"
+     }
+    },
+    {
+     "channel": "obd:THROTTLE_POS",
+     "kind": "stuck",
+     "run": 4,
+     "start": 1785799327.8929548,
+     "end": 1785799367.8929548,
+     "changed_samples": 29,
+     "parameter": 29.019607843137255,
+     "result": "graded",
+     "owner": "plausibility",
+     "owner_reason": "channel has a stuck rule",
+     "envelope_breaches": [],
+     "plausibility": {
+      "detected": true,
+      "confirmed": false,
+      "checks": [
+       "stuck"
+      ],
+      "latency_seconds": 38.866,
+      "confirm_latency_seconds": null
+     },
+     "committee": {
+      "result": "uncovered",
+      "reason": "no committee declares obd:THROTTLE_POS"
+     }
+    },
+    {
+     "channel": "obd:THROTTLE_POS",
+     "kind": "scale",
+     "run": 0,
+     "start": 1785799333.8929548,
+     "end": 1785799373.8929548,
+     "changed_samples": 30,
+     "parameter": 5.0,
+     "result": "graded",
+     "owner": "plausibility",
+     "owner_reason": "leaves the range envelope",
+     "envelope_breaches": [
+      "range"
+     ],
+     "plausibility": {
+      "detected": true,
+      "confirmed": true,
+      "checks": [
+       "range"
+      ],
+      "latency_seconds": 7.398,
+      "confirm_latency_seconds": 8.538
+     },
+     "committee": {
+      "result": "uncovered",
+      "reason": "no committee declares obd:THROTTLE_POS"
+     }
+    },
+    {
+     "channel": "obd:THROTTLE_POS",
+     "kind": "scale",
+     "run": 1,
+     "start": 1785799319.8929548,
+     "end": 1785799359.8929548,
+     "changed_samples": 27,
+     "parameter": 5.0,
+     "result": "graded",
+     "owner": "plausibility",
+     "owner_reason": "leaves the range envelope",
+     "envelope_breaches": [
+      "range"
+     ],
+     "plausibility": {
+      "detected": true,
+      "confirmed": true,
+      "checks": [
+       "range"
+      ],
+      "latency_seconds": 0.348,
+      "confirm_latency_seconds": 1.473
+     },
+     "committee": {
+      "result": "uncovered",
+      "reason": "no committee declares obd:THROTTLE_POS"
+     }
+    },
+    {
+     "channel": "obd:THROTTLE_POS",
+     "kind": "scale",
+     "run": 2,
+     "start": 1785799299.8929548,
+     "end": 1785799339.8929548,
+     "changed_samples": 26,
+     "parameter": 5.0,
+     "result": "graded",
+     "owner": "plausibility",
+     "owner_reason": "leaves the range envelope",
+     "envelope_breaches": [
+      "range"
+     ],
+     "plausibility": {
+      "detected": true,
+      "confirmed": true,
+      "checks": [
+       "range"
+      ],
+      "latency_seconds": 14.331,
+      "confirm_latency_seconds": 17.602
+     },
+     "committee": {
+      "result": "uncovered",
+      "reason": "no committee declares obd:THROTTLE_POS"
+     }
+    },
+    {
+     "channel": "obd:THROTTLE_POS",
+     "kind": "scale",
+     "run": 3,
+     "start": 1785799377.8929548,
+     "end": 1785799417.8929548,
+     "changed_samples": 22,
+     "parameter": 5.0,
+     "result": "graded",
+     "owner": "plausibility",
+     "owner_reason": "leaves the range envelope",
+     "envelope_breaches": [
+      "range"
+     ],
+     "plausibility": {
+      "detected": true,
+      "confirmed": true,
+      "checks": [
+       "range"
+      ],
+      "latency_seconds": 13.633,
+      "confirm_latency_seconds": 26.684
+     },
+     "committee": {
+      "result": "uncovered",
+      "reason": "no committee declares obd:THROTTLE_POS"
+     }
+    },
+    {
+     "channel": "obd:THROTTLE_POS",
+     "kind": "scale",
+     "run": 4,
+     "start": 1785799362.8929548,
+     "end": 1785799402.8929548,
+     "changed_samples": 24,
+     "parameter": 5.0,
+     "result": "graded",
+     "owner": "plausibility",
+     "owner_reason": "leaves the range envelope",
+     "envelope_breaches": [
+      "range"
+     ],
+     "plausibility": {
+      "detected": true,
+      "confirmed": true,
+      "checks": [
+       "range"
+      ],
+      "latency_seconds": 0.865,
+      "confirm_latency_seconds": 28.633
+     },
+     "committee": {
+      "result": "uncovered",
+      "reason": "no committee declares obd:THROTTLE_POS"
+     }
+    }
+   ]
+  }
+ ]
+}

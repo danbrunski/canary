@@ -14,6 +14,7 @@ from src.collection.obd_scheduler.cadence import (
     CAPTURE_MISS_BACKOFF_SECONDS,
     ENGINE_OFF_HOLD_SECONDS,
     MAX_MISS_BACKOFF_SECONDS,
+    PRIORITY_MISS_BACKOFF_SECONDS,
     PROFILE_CADENCE_KINDS,
     TIER_RATE_FACTORS,
     EngineStartLatch,
@@ -29,6 +30,7 @@ from src.collection.obd_scheduler.cadence import (
     _update_response_state,
     rearm_on_engine_start,
     replan_for_generation,
+    request_is_priority,
 )
 from src.collection.obd_scheduler.did_window import (
     FAST_EXIT_REFUSALS_BEFORE_DISABLE,
@@ -157,6 +159,7 @@ __all__ = [
     "MODE22_BATCHING_COUNTERS",
     "Mode01WidthLedger",
     "ObdSchedulerMetrics",
+    "PRIORITY_MISS_BACKOFF_SECONDS",
     "PROFILE_CADENCE_KINDS",
     "PollRequest",
     "PollRequestState",
@@ -220,6 +223,7 @@ __all__ = [
     "profile_memory_union",
     "rearm_on_engine_start",
     "replan_for_generation",
+    "request_is_priority",
     "resolve_did_session_spec",
     "round_members",
     "round_period_seconds",
