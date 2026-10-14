@@ -27,9 +27,9 @@ KINDS = ("spike", "drift", "dropout", "stuck", "scale")
 
 @pytest.fixture(scope="module")
 def context():  # type: ignore[no-untyped-def]
-    from scripts.evaluate_plausibility import _context
+    from src.plausibility.benchmark import load_benchmark_context
 
-    return _context(CONFIG, "nissan-xterra-2008")
+    return load_benchmark_context(CONFIG, "nissan-xterra-2008")
 
 
 def _idle_rpm_with_spike(spike: float) -> tuple[SessionStream, Injection]:

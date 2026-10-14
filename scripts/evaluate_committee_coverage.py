@@ -10,7 +10,8 @@ cross-channel cases. This script grades both on the same injections.
 Every fault is the one ``scripts/evaluate_plausibility.py`` injects — same
 seed, same per-(drive, channel) generator, same kind order, so the same
 windows and magnitudes (``src.plausibility.offline.inject_plumbing_fault`` on
-arrived samples). For each graded fault it reports:
+arrived samples); both scripts share :mod:`src.plausibility.benchmark`. For
+each graded fault it reports:
 
 * **owner** under the decision (:func:`fault_owner`):
 
@@ -61,31 +62,20 @@ import pandas as pd
 
 try:
     from _cli import add_common_args, add_profile_arg, load_config
-    from evaluate_plausibility import (
-        BENCHMARK_CHANNELS,
-        DEFAULT_GRACE_SECONDS,
-        Context,
-        _context,
-        _evaluate,
-        _grade,
-        _hits,
-        _restrict,
-        _stream,
-    )
 except ImportError:  # loaded as `scripts.evaluate_committee_coverage`
     from scripts._cli import add_common_args, add_profile_arg, load_config  # type: ignore[no-redef]
-    from scripts.evaluate_plausibility import (  # type: ignore[no-redef]
-        BENCHMARK_CHANNELS,
-        DEFAULT_GRACE_SECONDS,
-        Context,
-        _context,
-        _evaluate,
-        _grade,
-        _hits,
-        _restrict,
-        _stream,
-    )
 
+from src.plausibility.benchmark import (
+    BENCHMARK_CHANNELS,
+    DEFAULT_GRACE_SECONDS,
+    BenchmarkContext,
+    evaluate_stream,
+    fault_hits,
+    grade_hits,
+    load_benchmark_context,
+    load_benchmark_stream,
+    restrict_to_groups,
+)
 from src.plausibility.evaluator import PlausibilityEvaluator
 from src.plausibility.limits import ChannelLimits
 from src.plausibility.offline import (
@@ -258,7 +248,7 @@ class Options:
     assume_gps_fix: bool
 
 
-def _session_frame(session: Path, context: Context, assume_gps_fix: bool) -> pd.DataFrame:
+def _session_frame(session: Path, context: BenchmarkContext, assume_gps_fix: bool) -> pd.DataFrame:
     from src.preprocessing.loader import resample_and_segment
 
     frame = resample_and_segment([session], context.config)
@@ -269,12 +259,12 @@ def _session_frame(session: Path, context: Context, assume_gps_fix: bool) -> pd.
 
 def evaluate_session(
     session: Path,
-    context: Context,
+    context: BenchmarkContext,
     committee_profile: CommitteeProfile | None,
     options: Options,
 ) -> dict[str, Any]:
     """Both detectors over every plumbing fault on one session."""
-    stream = _stream(session, context, None)
+    stream = load_benchmark_stream(session, context, None)
     if stream.span is None:
         return {"session": str(session), "result": "withheld", "reason": "no numeric samples"}
     clean_records = run_evaluator(
@@ -291,7 +281,7 @@ def evaluate_session(
         limits = context.catalog.get(channel)
         coverage = covering_committees(channel, committee_profile)
         rng = np.random.default_rng(options.seed)
-        subset = _restrict(stream, [channel])
+        subset = restrict_to_groups(stream, [channel])
         if subset.span is None:
             continue
         for kind in options.fault_kinds:
@@ -315,8 +305,8 @@ def evaluate_session(
                 breaches = envelope_breaches(faulted, injection, limits)
                 owner, why = fault_owner(kind, limits, breaches)
                 end = injection.end + options.grace_seconds
-                records = _evaluate(faulted, context, session.name)
-                hits = _hits(
+                records = evaluate_stream(faulted, context, session.name)
+                hits = fault_hits(
                     records, clean_keys, channels=[channel], start=injection.start, end=end
                 )
                 row.update(
@@ -324,7 +314,7 @@ def evaluate_session(
                     owner=owner,
                     owner_reason=why,
                     envelope_breaches=breaches,
-                    plausibility=_grade(hits, injection.start),
+                    plausibility=grade_hits(hits, injection.start),
                     committee=_committee_grade(
                         frame, injection, committee_profile, context, coverage, clean_flags, end
                     ),
@@ -345,7 +335,7 @@ def _committee_grade(
     frame: pd.DataFrame,
     injection: Injection,
     profile: CommitteeProfile | None,
-    context: Context,
+    context: BenchmarkContext,
     coverage: Mapping[str, list[str]],
     clean_flags: set[tuple[str, str, float]],
     end: float,
@@ -434,7 +424,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = parser.parse_args(argv)
     load_config(args)  # fail fast on a bad config
     logging.getLogger("src.plausibility.evaluator").setLevel(logging.ERROR)
-    context = _context(Path(args.config), args.profile)
+    context = load_benchmark_context(Path(args.config), args.profile)
     committee_profile, committee_path = resolve_committee_profile(context.config)
     options = Options(
         fault_channels=tuple(args.fault_channels),

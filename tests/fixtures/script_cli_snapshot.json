@@ -1860,6 +1860,142 @@
       }
     }
   },
+  "evaluate_committee_coverage.py": {
+    "options": {
+      "--assume-gps-fix": {
+        "action": "_StoreTrueAction",
+        "choices": null,
+        "default": false,
+        "dest": "assume_gps_fix",
+        "nargs": 0,
+        "option_strings": [
+          "--assume-gps-fix"
+        ],
+        "required": false,
+        "type": null
+      },
+      "--config": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": "Path(canary.yaml)",
+        "dest": "config",
+        "nargs": null,
+        "option_strings": [
+          "--config"
+        ],
+        "required": false,
+        "type": "Path"
+      },
+      "--fault-channels": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": [
+          "obd:COOLANT_TEMP",
+          "obd:ENGINE_LOAD",
+          "obd:RPM",
+          "obd:SPEED",
+          "obd:THROTTLE_POS"
+        ],
+        "dest": "fault_channels",
+        "nargs": "*",
+        "option_strings": [
+          "--fault-channels"
+        ],
+        "required": false,
+        "type": null
+      },
+      "--fault-kinds": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": [
+          "spike",
+          "drift",
+          "dropout",
+          "stuck",
+          "scale"
+        ],
+        "dest": "fault_kinds",
+        "nargs": "*",
+        "option_strings": [
+          "--fault-kinds"
+        ],
+        "required": false,
+        "type": null
+      },
+      "--grace-seconds": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": 60.0,
+        "dest": "grace_seconds",
+        "nargs": null,
+        "option_strings": [
+          "--grace-seconds"
+        ],
+        "required": false,
+        "type": "float"
+      },
+      "--n-injections": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": 5,
+        "dest": "n_injections",
+        "nargs": null,
+        "option_strings": [
+          "--n-injections"
+        ],
+        "required": false,
+        "type": "int"
+      },
+      "--out": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": null,
+        "dest": "out",
+        "nargs": null,
+        "option_strings": [
+          "--out"
+        ],
+        "required": true,
+        "type": "Path"
+      },
+      "--profile": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": null,
+        "dest": "profile",
+        "nargs": null,
+        "option_strings": [
+          "--profile"
+        ],
+        "required": false,
+        "type": null
+      },
+      "--seed": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": 42,
+        "dest": "seed",
+        "nargs": null,
+        "option_strings": [
+          "--seed"
+        ],
+        "required": false,
+        "type": "int"
+      },
+      "--sessions": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": null,
+        "dest": "sessions",
+        "nargs": "+",
+        "option_strings": [
+          "--sessions"
+        ],
+        "required": true,
+        "type": "Path"
+      }
+    }
+  },
   "evaluate_detectors.py": {
     "options": {
       "--baseline": {

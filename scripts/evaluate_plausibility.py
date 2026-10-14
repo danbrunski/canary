@@ -48,38 +48,28 @@ try:
 except ImportError:  # loaded as `scripts.evaluate_plausibility`
     from scripts._cli import add_common_args, add_profile_arg, load_config  # type: ignore[no-redef]
 
-from src.config import CanaryConfig
-from src.decode.bindings import Bindings, load_bindings
-from src.decode.dids import DidMap, load_did_map
-from src.paths import BINDINGS_YAML, DIDS_YAML
-from src.plausibility.evaluator import EvidenceRecord, PlausibilityEvaluator
-from src.plausibility.limits import (
-    LimitsCatalog,
-    channel_group,
-    plausibility_path,
-    resolve_limits_for_config,
+from src.plausibility.benchmark import (
+    BENCHMARK_CHANNELS,
+    DEFAULT_GRACE_SECONDS,
+    BenchmarkContext,
+    evaluate_stream,
+    fault_hits,
+    grade_hits,
+    load_benchmark_context,
+    load_benchmark_stream,
+    restrict_to_groups,
 )
+from src.plausibility.evaluator import EvidenceRecord, PlausibilityEvaluator
 from src.plausibility.offline import (
     PLUMBING_FAULT_KINDS,
     SessionStream,
-    detections_in,
     inject_plumbing_fault,
     inject_realistic_samples,
-    load_stream,
     run_evaluator,
 )
 from src.session import session_sort_key
 from src.storage.sessions import session_started_at
 
-#: The 2026-09-20 benchmark's channels (``bench_new.json``).
-BENCHMARK_CHANNELS = (
-    "obd:COOLANT_TEMP",
-    "obd:ENGINE_LOAD",
-    "obd:RPM",
-    "obd:SPEED",
-    "obd:THROTTLE_POS",
-)
-DEFAULT_GRACE_SECONDS = 60.0
 DEFAULT_WINDOW_SECONDS = 240.0
 DEFAULT_LEAD_SECONDS = 240.0
 
@@ -100,16 +90,7 @@ class Job:
     cache_dir: str | None
 
 
-@dataclass(frozen=True)
-class Context:
-    config: CanaryConfig
-    catalog: LimitsCatalog
-    bindings: Bindings
-    did_map: DidMap
-    roles: Mapping[str, Sequence[str]]
-
-
-_CONTEXT: Context | None = None
+_CONTEXT: BenchmarkContext | None = None
 
 
 def _init(config_path: str, profile: str | None) -> None:
@@ -117,77 +98,7 @@ def _init(config_path: str, profile: str | None) -> None:
     # Every injected fault confirms by design; the live warning per
     # confirmation would bury the report.
     logging.getLogger("src.plausibility.evaluator").setLevel(logging.ERROR)
-    _CONTEXT = _context(Path(config_path), profile)
-
-
-def _context(config_path: Path, profile: str | None) -> Context:
-    from src.preprocessing.anomaly_injection import load_fault_channel_roles
-    from src.vehicle.profiles import resolve_profile_for_tooling, scope_config
-
-    config = CanaryConfig.from_yaml(config_path)
-    if config.profiles.enabled:
-        config = scope_config(config, resolve_profile_for_tooling(config, profile))
-    bindings = load_bindings(BINDINGS_YAML)
-    did_map = load_did_map(DIDS_YAML)
-    catalog = resolve_limits_for_config(config, bindings=bindings, did_map=did_map)
-    roles_path = plausibility_path(config).parent / "fault_injection.yaml"
-    roles = load_fault_channel_roles(roles_path if roles_path.exists() else None)
-    return Context(config, catalog, bindings, did_map, roles)
-
-
-def _decoded_key(catalog: LimitsCatalog) -> str:
-    names = sorted(
-        name
-        for name, limits in catalog.channels.items()
-        if name.startswith("decoded:") and limits.is_checked()
-    )
-    return hashlib.sha256("\n".join(names).encode()).hexdigest()[:8]
-
-
-def _stream(session: Path, context: Context, cache_dir: str | None) -> SessionStream:
-    cache = None
-    if cache_dir is not None:
-        key = _decoded_key(context.catalog)
-        cache = Path(cache_dir) / f"{session.parent.name}__{session.name}__{key}.parquet"
-        if cache.exists():
-            frame = pd.read_parquet(cache)
-            modes = frame.pop("mode").replace({"None": None}).to_numpy(dtype=object)
-            return SessionStream(session.name, frame.reset_index(drop=True), modes)
-    stream = load_stream(
-        session,
-        context.config,
-        context.catalog,
-        bindings=context.bindings,
-        did_map=context.did_map,
-    )
-    if cache is not None:
-        cache.parent.mkdir(parents=True, exist_ok=True)
-        stream.samples.assign(mode=stream.modes.astype(str)).to_parquet(cache)
-    return stream
-
-
-def _evaluate(stream: SessionStream, context: Context, session: str) -> list[EvidenceRecord]:
-    evaluator = PlausibilityEvaluator(context.catalog, session=session)
-    return run_evaluator(evaluator, stream)
-
-
-def _restrict(stream: SessionStream, channels: Sequence[str]) -> SessionStream:
-    """Only the answer groups of ``channels``.
-
-    Every check on a channel reads its own samples and, for freshness, its
-    group's; nothing else can change a detection on it, so a faulted drive is
-    scored on this subset (a tenth of the samples: broadcast frames dominate)
-    with identical results for the faulted channels.
-    """
-    groups = {channel_group(c) for c in channels}
-    keep = stream.samples["channel"].map(channel_group).isin(groups).to_numpy()
-    return SessionStream(
-        stream.name, stream.samples.loc[keep].reset_index(drop=True), stream.modes[keep]
-    )
-
-
-def _epoch(iso: str) -> float:
-    return datetime.fromisoformat(iso.replace("Z", "+00:00")).timestamp()
+    _CONTEXT = load_benchmark_context(Path(config_path), profile)
 
 
 def _record_brief(record: EvidenceRecord) -> dict[str, Any]:
@@ -198,36 +109,6 @@ def _record_brief(record: EvidenceRecord) -> dict[str, Any]:
         "mode": record.operating_mode,
         "detected_at": record.detected_at,
         "text": record.text,
-    }
-
-
-def _hits(
-    records: Sequence[EvidenceRecord],
-    clean_keys: set[tuple[str, str, str]],
-    *,
-    channels: Sequence[str],
-    start: float,
-    end: float,
-) -> list[EvidenceRecord]:
-    return [
-        r
-        for r in detections_in(records, channels=channels, start=start, end=end)
-        if (r.channel, r.check, r.detected_at) not in clean_keys
-    ]
-
-
-def _grade(hits: Sequence[EvidenceRecord], start: float) -> dict[str, Any]:
-    confirmed = [r for r in hits if r.state == "confirmed"]
-    first = min((_epoch(r.detected_at) for r in hits), default=None)
-    first_confirmed = min((_epoch(r.detected_at) for r in confirmed), default=None)
-    return {
-        "detected": bool(hits),
-        "confirmed": bool(confirmed),
-        "checks": sorted({r.check for r in hits}),
-        "latency_seconds": None if first is None else round(first - start, 3),
-        "confirm_latency_seconds": (
-            None if first_confirmed is None else round(first_confirmed - start, 3)
-        ),
     }
 
 
@@ -273,7 +154,7 @@ def run_job(job: Job) -> dict[str, Any]:
         "started_at": started.isoformat() if started else None,
     }
     try:
-        stream = _stream(session, context, job.cache_dir)
+        stream = load_benchmark_stream(session, context, job.cache_dir)
     except FileNotFoundError as exc:
         out["result"] = "withheld"
         out["reason"] = f"no telemetry: {exc}"
@@ -324,7 +205,7 @@ def run_job(job: Job) -> dict[str, Any]:
                 )
             continue
         rng = np.random.default_rng(job.seed)
-        subset = _restrict(stream, [channel])
+        subset = restrict_to_groups(stream, [channel])
         for kind in job.fault_kinds:
             for run in range(job.n_injections):
                 faulted, injection = inject_plumbing_fault(
@@ -344,15 +225,15 @@ def run_job(job: Job) -> dict[str, Any]:
                     row["reason"] = "the injection changed no arrived sample"
                     faults.append(row)
                     continue
-                records = _evaluate(faulted, context, session.name)
-                hits = _hits(
+                records = evaluate_stream(faulted, context, session.name)
+                hits = fault_hits(
                     records,
                     clean_keys,
                     channels=[channel],
                     start=injection.start,
                     end=injection.end + job.grace_seconds,
                 )
-                row.update(_grade(hits, injection.start))
+                row.update(grade_hits(hits, injection.start))
                 row["result"] = "graded"
                 faults.append(row)
     out["plumbing"] = faults
@@ -363,7 +244,7 @@ def run_job(job: Job) -> dict[str, Any]:
 
         frame = _context_frame(stream)
         role_channels = [c for channels in context.roles.values() for c in channels]
-        realistic_stream = _restrict(stream, [*role_channels, "obd:RPM"])
+        realistic_stream = restrict_to_groups(stream, [*role_channels, "obd:RPM"])
         for kind, spec in REALISTIC_FAULTS.items():
             for rep in range(job.realistic_reps):
                 digest = hashlib.sha256(f"{job.seed}|{session.name}|{kind}|{rep}".encode())
@@ -406,15 +287,15 @@ def run_job(job: Job) -> dict[str, Any]:
                         row["reason"] = "no role channel arrived in the window"
                         realistic.append(row)
                         continue
-                    records = _evaluate(faulted, context, session.name)
-                    hits = _hits(
+                    records = evaluate_stream(faulted, context, session.name)
+                    hits = fault_hits(
                         records,
                         clean_keys,
                         channels=report["perturbed"],
                         start=start,
                         end=end + job.grace_seconds,
                     )
-                    row.update(_grade(hits, start))
+                    row.update(grade_hits(hits, start))
                     row["result"] = "graded"
                     realistic.append(row)
     out["realistic"] = realistic
