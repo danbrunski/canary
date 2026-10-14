@@ -100,12 +100,12 @@ touches can be **edge-mounted and reached from the side of the stack**
 
 | Edge | Parts (all facing out) |
 |---|---|
-| Far long edge (y = 100, under the HAT's J2) | *Vehicle in* and *HAT out* pluggable terminals, status LEDs (side-view) |
+| Far long edge (y = 100, under the HAT's J2) | *Vehicle in* pluggable terminal, *HAT out* Micro-Fit, status LEDs (side-view) |
 | Left edge (x = 100) | Cap-bank connector, bench button (side-actuated), SWD (right-angle) |
 | Header edge | J1 only |
 | USB/Ethernet end | nothing: the Pi's port stack sits just below PWR there |
 
-The HAT-out terminal sits directly under the HAT's J2, so the jumper between
+The HAT-out connector sits directly under the HAT's J2, so the jumper between
 them is a few centimetres.
 
 **Two-sided placement.** The part courtyards alone (~2,870 mm² before the trim)
@@ -143,24 +143,38 @@ gate clamp (BZT52C15) and pull-down, D1 (SMBJ24A TVS, 38.9 V max clamp) and
 47 µF/50 V bulk. §3.7.1 is the design record. Every capacitor on the 12 V side is
 50 V because of D1's clamp; the switching FETs are 60 V for the same reason.
 
-**Two pluggable terminal blocks** (Phoenix MC 1,5 header + FK-MC/MC-ST plug,
-3.81 mm): wires are screwed into the plug off the stack and the plug pushes in
-from the side.
+**Vehicle in: a pluggable terminal** (Phoenix MC 1,5/4-G-3,81, order number
+1803293; plug MC 1,5/4-ST-3,81). The OBD harness is field wiring with 18 AWG on
+the power pair: its wires are screwed into the plug off the stack and the plug
+pushes in from the side, no crimping.
 
-| Block | Pin | Net | Wire |
+| Pin | Net | Wire |
+|---|---|---|
+| 1 | `+12V_RAW` (OBD 16) | 18 AWG |
+| 2 | GND, chassis (OBD 4) | 18 AWG |
+| 3 | `CANH` (OBD 6) | 20 AWG |
+| 4 | `CANL` (OBD 14) | 20 AWG |
+
+**HAT out: Molex Micro-Fit 3.0, 2 × 3, right-angle (43045-0600)** (2026-10-13,
+replacing a 5-way Phoenix MC). Every wire in the jumper is light-duty — 12 V at
+≤ 0.5 A behind the polyfuse, CAN, the GNSS backup supply — so 20 AWG on
+Micro-Fit's 18–24 AWG contacts is plenty. It is 14.2 mm along the edge against
+21.6 mm, latches, and shares the cap-bank connector's family and crimp tool; a
+2 × 3 plug cannot go into the bank's 2 × 5 header. The jumper is crimped at this
+end and ferruled into the HAT's J2 at the other. Molex numbering, 1–3 on one
+row and 4–6 on the other:
+
+| Pin | Net | Pin | Net |
 |---|---|---|---|
-| **Vehicle in** (MC 1,5/4-G-3,81, 1803293) | 1 | `+12V_RAW` (OBD 16) | 18 AWG |
-| | 2 | GND, chassis (OBD 4) | 18 AWG |
-| | 3 | `CANH` (OBD 6) | 20 AWG |
-| | 4 | `CANL` (OBD 14) | 20 AWG |
-| **HAT out** (MC 1,5/5-G-3,81, 1803303) | 1 | `+12V_HAT` | 18 AWG |
-| | 2 | GND | 18 AWG |
-| | 3 | `CANH` | 20 AWG |
-| | 4 | `CANL` | 20 AWG |
-| | 5 | `V_BCKP_AON` — rev 2.2/3.0; unconnected on rev 2.1 | 20 AWG |
+| 1 | `+12V_HAT` | 4 | `V_BCKP_AON` (rev 2.2/3.0; unused on rev 2.1) |
+| 2 | GND | 5 | GND |
+| 3 | `CANH` | 6 | `CANL` |
+
+CANH and CANL share a column, so the pair runs side by side; 12 V sits beside a
+ground.
 
 **The harness lands once.** 12 V, ground and the CAN pair land on *Vehicle in*;
-a short jumper carries them from *HAT out* to the HAT's J2. The K-line, sensor
+a short jumper (20 AWG) carries them from *HAT out* to the HAT's J2. The K-line, sensor
 wires and everything else still go straight to the HAT. CAN passes through PWR
 so the wake transceiver (§P7) sees it without a splice; NUP2105L clamps the pair.
 
@@ -238,6 +252,8 @@ enclosure wants them.
   latching.** Ten pins, not the seven first planned, because the stack's top
   and bottom get **Kelvin sense wires**: otherwise the cell-4 and cell-1
   measurements include the drop along the power wires at 4 A.
+
+  Molex numbering: pins 1–5 on one row, 6–10 on the other.
 
   | Pin | Net | Pin | Net |
   |---|---|---|---|
@@ -340,8 +356,9 @@ idles low; NRST is behind a FET.
 INA226 (0x40). The Pi sees one target, the supervisor; the system bootloader
 answers at 0x56 on the same pins (§P7).
 
-**Edge connectors:** *Vehicle in*, *HAT out* (§P3), cap bank (§P4), SWD
-(Cortex 10-pin, right-angle, bench only).
+**Edge connectors:** *Vehicle in* (Phoenix MC), *HAT out* (Micro-Fit 2 × 3)
+(§P3), cap bank (Micro-Fit 2 × 5, §P4), SWD (Cortex 10-pin, right-angle, bench
+only).
 
 **Rule: no 3.3 V or 5 V logic rail goes to the HAT except through the Pi.** The
 HAT's logic stays on the Pi's 3V3 so it powers up and down with the Pi (§3.7.5).
@@ -421,8 +438,9 @@ history at each boot.
 ## P8. Running with HAT rev 2.1
 
 - **12 V and CAN.** The OBD harness's 12 V, ground and CAN pair land on PWR's
-  *Vehicle in*; the jumper from *HAT out* lands on rev 2.1's J2: `+12V_HAT` → pin
-  1 (`+12V_RAW`), GND → pin 2, CANH/CANL → the HAT's CAN pair. The HAT's own
+  *Vehicle in*; the 20 AWG jumper from *HAT out* (Micro-Fit pins 1, 2, 3, 6) lands
+  on rev 2.1's J2: `+12V_HAT` → pin 1 (`+12V_RAW`), GND → pin 2, CANH/CANL →
+  the HAT's CAN pair. The HAT's own
   Q1/D1 stay in circuit behind PWR's. J2 pins 3–4 (the old X1202 feed) go
   unused.
 - **Header.** The HAT's J1 plugs onto PWR's stacking header; nothing on the
@@ -466,11 +484,11 @@ history at each boot.
 | 5 | Pi 5 3V3 rise after 5 V is applied (§13.1 measurement 15) | 3V3 sense as the halt signal; the rev 3.0 split |
 | 6 | Bus-quiet time after key-off on the Xterra (from existing captures) | OFF_HOLDOFF window |
 | 7 | Crank-dip window: longest dip the bank should ride before `~PWR_FAIL` | DIP vs HOLDUP timing |
-| 8 | Right-angle connector heights (Phoenix MC 1,5 G, Micro-Fit 43045, SWD) against the ~13 mm gap under the HAT | Edge placement |
+| 8 | Right-angle connector heights (Phoenix MC 1,5 G, Micro-Fit 43045 2 × 3 and 2 × 5, SWD) against the ~13 mm gap under the HAT | Edge placement |
 | 9 | Side-view LED and side-actuated button orientation on the footprints | They face the edge |
 | 10 | Part choices still open: the polyfuse (0.5 A hold, ≥ 40 V), the right-angle SWD header, the 25 F cells | BOM |
 | 11 | The cap-bank lead's resistance at bring-up | Calibrates the ESR readout |
-| 12 | Phoenix order numbers 1803303 (5-pos) and the plugs (KiCad's footprint confirms 1803293 for 4-pos) | BOM |
+| 12 | The Vehicle-in plug's order number (KiCad's footprint confirms 1803293 for the header) and the Micro-Fit housings and crimps (43025-0600, 43025-1000, 43030) | BOM |
 | 13 | Copper weight: TI recommends 2 oz outer layers for the LM61460 | Fab order |
 
 ## P11. Hardware project

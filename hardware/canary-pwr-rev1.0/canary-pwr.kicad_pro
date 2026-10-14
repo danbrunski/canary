@@ -890,27 +890,27 @@
   },
   "sheets": [
     [
-      "1f18135f-bc09-4a65-8ba8-2408b715cd62",
+      "bdc204b9-ea66-4e3b-87f2-f8b429651126",
       "canary-pwr"
     ],
     [
-      "49782fa0-4a9c-4d92-a602-4f1400d6b131",
+      "256012bb-6267-49df-af10-da0e7ef9ad36",
       "Input"
     ],
     [
-      "00fc72fb-c766-4e41-b16e-e6dc647e2620",
+      "49a9597d-152b-4afd-82fd-11a54916433c",
       "Holdup"
     ],
     [
-      "31d53cab-6307-4db2-baad-40d3a32c031c",
+      "d128d183-3009-472b-b62b-3d546d2df9b5",
       "Pi_Supply"
     ],
     [
-      "c0291078-9862-498d-b21a-ad48c48e64cc",
+      "5427379f-4398-4052-803a-d0ab54250639",
       "Supervisor"
     ],
     [
-      "e3036545-26ea-4452-bafc-b9d08a9defb5",
+      "bea078c0-dcfe-4068-9acb-f216f38abac7",
       "Pi_Interface"
     ]
   ],

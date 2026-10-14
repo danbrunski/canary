@@ -255,14 +255,14 @@ part(
 part(
     S,
     g,
-    "Connector_Generic:Conn_01x05",
+    "Connector_Generic:Conn_02x03_Top_Bottom",
     "HAT out",
-    {"1": "+12V_HAT", "2": "GND", "3": "CANH", "4": "CANL", "5": "V_BCKP_AON"},
-    fp="Connector_Phoenix_MC:PhoenixContact_MC_1,5_5-G-3.81_1x05_P3.81mm_Horizontal",
-    mpn="1803303",
-    mfr="Phoenix Contact",
-    desc="MC 1,5/5-G-3,81; mating plug MC 1,5/5-ST-3,81 (1803607)",
-    note="To rev 2.1 J2: +12V_HAT -> pin 1 (+12V_RAW), GND -> pin 2, CANH/CANL -> the HAT's CAN pair. Pin 5 unused on rev 2.1. Verify order numbers.",
+    {"1": "+12V_HAT", "2": "GND", "3": "CANH", "4": "V_BCKP_AON", "5": "GND", "6": "CANL"},
+    fp="Connector_Molex:Molex_Micro-Fit_3.0_43045-0600_2x03_P3.00mm_Horizontal",
+    mpn="43045-0600",
+    mfr="Molex",
+    desc="Micro-Fit 3.0 2x3 right-angle header; mating 43025-0600 + 43030 crimps (18-24 AWG)",
+    note="Changed 2026-10-13 from a 5-way Phoenix MC (21.6 mm) to save ~7 mm of edge: latching, keyed, and the same family and crimp tool as the cap-bank connector. Molex numbering, 1-3 on one row, 4-6 on the other: CANH (3) and CANL (6) share a column; 12 V (1) sits beside GND (2). Jumper to rev 2.1 J2: +12V_HAT -> pin 1 (+12V_RAW), GND -> pin 2, CANH/CANL -> the HAT's CAN pair; V_BCKP_AON unused on rev 2.1.",
 )
 R(
     S,

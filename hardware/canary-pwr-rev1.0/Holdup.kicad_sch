@@ -2,7 +2,7 @@
 	(version 20260306)
 	(generator "eeschema")
 	(generator_version "10.0")
-	(uuid "e75e2c48-e952-4cad-8fe3-4538e11cea7c")
+	(uuid "e01bbb08-938f-45bb-a786-ecf96a5046b3")
 	(paper "A3")
 	(title_block
 		(title "CANary-PWR")
@@ -2727,7 +2727,7 @@
 			)
 			(justify left bottom)
 		)
-		(uuid "0f09e5e9-6f7d-4a4c-b777-b6aef55c13b7")
+		(uuid "43cc74c6-1f76-4973-96a1-e96a5976a772")
 	)
 	(text "LTC3350 backup controller"
 		(exclude_from_sim no)
@@ -2738,7 +2738,7 @@
 			)
 			(justify left bottom)
 		)
-		(uuid "8e36f82f-9feb-4258-a8ba-a218f208413f")
+		(uuid "2dad26a7-8981-4513-9b41-f23f62158c4b")
 	)
 	(symbol
 		(lib_id "LTC3350EUHF-PBF:LTC3350EUHF-PBF")
@@ -2750,7 +2750,7 @@
 		(on_board yes)
 		(in_pos_files yes)
 		(dnp no)
-		(uuid "b873cfa3-2f53-41f4-87bf-28125fc3845f")
+		(uuid "6e41be3f-5417-4971-bf26-63d1770740e4")
 		(property "Reference" "U1"
 			(at 74.625 39.04 0)
 			(show_name no)
@@ -2838,125 +2838,125 @@
 			)
 		)
 		(pin "1"
-			(uuid "460e2c95-d9d9-43ea-b81a-2f7b65e4390e")
+			(uuid "8b5074c6-4419-449f-9642-8523a57b880f")
 		)
 		(pin "2"
-			(uuid "f79b51d1-8b01-4f5b-95e6-ccb824463be3")
+			(uuid "111d4f40-4f55-4cbe-b979-66e4d3bb3cf6")
 		)
 		(pin "3"
-			(uuid "57162aa5-b619-49ff-881a-363a4c4aa794")
+			(uuid "9a12b1cc-98f0-4051-adb2-181f56a1d22b")
 		)
 		(pin "4"
-			(uuid "94441c5d-0a01-4725-a6ad-f33e1f4f0a1c")
+			(uuid "8cad7072-9b08-4812-ab5b-bf820b6563e4")
 		)
 		(pin "5"
-			(uuid "3a18507f-ac10-446a-adca-5decc8a228f9")
+			(uuid "a91821a9-45df-47c1-8ec1-5d4db06cffd3")
 		)
 		(pin "6"
-			(uuid "b009c160-94ba-4d17-8625-9359ebd2845a")
+			(uuid "e98478fa-8348-49ce-bf77-fbd2bad68b0c")
 		)
 		(pin "7"
-			(uuid "a51e6e33-edda-4064-a0ce-54e4875842f6")
+			(uuid "e7db3525-d58b-4405-bccd-fe6327dec608")
 		)
 		(pin "8"
-			(uuid "79ada90f-f2b0-4f8e-a741-f8a73c8c5a5b")
+			(uuid "9fa63bae-cd0e-4288-9ba4-975ce29b243c")
 		)
 		(pin "9"
-			(uuid "4f9fbab0-b4d0-4bcf-9edc-c33495af2c6a")
+			(uuid "61723811-f8fe-45af-8c5a-b77f4b3fdd07")
 		)
 		(pin "10"
-			(uuid "98d8322b-21bc-40bd-bec9-3c83f6b39a81")
+			(uuid "3b9679de-ab62-40eb-88d6-e7eea0fe40a5")
 		)
 		(pin "11"
-			(uuid "24cc0621-8d24-481b-a35c-ca5fdf1de96b")
+			(uuid "55cbf47d-055d-48e7-bab7-88302591cadf")
 		)
 		(pin "12"
-			(uuid "b6fc6a41-888b-4c98-a04a-2a8202e72b33")
+			(uuid "6ea1fd97-75e9-4127-8c95-0279b7ac063a")
 		)
 		(pin "13"
-			(uuid "99d10d79-6375-4845-b0ac-a8b7ab5beed1")
+			(uuid "fc8b8e37-3283-4b1c-9698-35ed7f7b6265")
 		)
 		(pin "14"
-			(uuid "8a2e57a0-66a5-4d37-b590-df231e3e183c")
+			(uuid "a884a475-3ab2-4a60-be1a-4dbfb0a2c200")
 		)
 		(pin "15"
-			(uuid "99586495-fefa-4ef8-ab3f-115a5edd4c43")
+			(uuid "73d82162-0a84-435a-b92c-f664405b76e3")
 		)
 		(pin "16"
-			(uuid "6e0e7359-aa4f-48f4-84f8-3ff6545f0e08")
+			(uuid "eb23d97c-9d70-43d2-b633-2c33a9dc1742")
 		)
 		(pin "17"
-			(uuid "a16b262f-50e4-40a8-84aa-c83a30634b67")
+			(uuid "f8687d08-2070-47ce-bd00-cf537da8be0e")
 		)
 		(pin "18"
-			(uuid "fc2065a3-8206-4cd0-9a3b-950a1d8f3ca7")
+			(uuid "89a9ff92-5d0a-43dc-a611-727811fd8b8f")
 		)
 		(pin "19"
-			(uuid "d6fd156e-8bf0-4d64-8077-d69bd602b391")
+			(uuid "a4ab8270-4d25-4e44-9f71-a6eb32cf66b5")
 		)
 		(pin "20"
-			(uuid "69b986e1-16a4-4c3e-8847-8c613fb4c13e")
+			(uuid "6206ddf1-4fea-4c06-b37c-0bf347b5bba8")
 		)
 		(pin "21"
-			(uuid "5b2474ae-bde4-42b1-945e-0b7cc033fa94")
+			(uuid "52825896-83e2-4657-963b-08c6567608bf")
 		)
 		(pin "22"
-			(uuid "bdeb0a99-ccf4-41b1-8a59-c46cf3f4c41b")
+			(uuid "dd62d549-4290-4e33-85d6-41814a4cdad9")
 		)
 		(pin "23"
-			(uuid "a3357800-f833-48d3-a8a1-10cce1765b23")
+			(uuid "cfa7e7da-171b-4214-8af3-1cb1c4b5e5d8")
 		)
 		(pin "24"
-			(uuid "7c99c5f3-d1c2-4378-ac04-d91d3739f241")
+			(uuid "0fa6089b-0eec-46b0-9e48-883778d5f42c")
 		)
 		(pin "25"
-			(uuid "0b923be7-88c0-4377-9a2f-7c39fc7899d3")
+			(uuid "8284760a-be48-42e0-88a2-32b7320f1136")
 		)
 		(pin "26"
-			(uuid "baa057ef-2f17-4963-8124-e00a6c859a00")
+			(uuid "9bc91158-3efe-4de0-ba70-e93eb00d161b")
 		)
 		(pin "27"
-			(uuid "a13549a6-2326-409c-8a8d-1335b6154c2c")
+			(uuid "07040533-50e9-48e8-87d9-c912efad4d51")
 		)
 		(pin "28"
-			(uuid "bf322995-719b-4191-abea-72e74e797f56")
+			(uuid "6c39642c-300c-42c7-b003-77bde7ce2aa5")
 		)
 		(pin "29"
-			(uuid "a0cdca16-9738-4993-8da6-cd45c6be4a35")
+			(uuid "a45d309a-18b0-4f46-a5cf-07175fca09ff")
 		)
 		(pin "30"
-			(uuid "c2b3767d-1302-4fc8-8269-822041a763a6")
+			(uuid "d2d1478a-92be-4821-9a11-dbea891a2336")
 		)
 		(pin "31"
-			(uuid "6a4a4123-704f-471b-864b-cd102d7adef4")
+			(uuid "fa00793c-2e8b-40cd-ae2d-ded3e41f7954")
 		)
 		(pin "32"
-			(uuid "08a85d76-2fb5-4ac8-85b4-417d0d7804ca")
+			(uuid "8c66d4de-f51e-4e29-a040-51b61f32483c")
 		)
 		(pin "33"
-			(uuid "6202428b-3274-4e80-a300-ebd2c81b8938")
+			(uuid "9295b0b6-9ac6-4e8e-93c6-46744f193a65")
 		)
 		(pin "34"
-			(uuid "fe9c48f6-aa7e-46f8-8ab6-f25805dcf0ac")
+			(uuid "15f7bda1-dcd2-43b1-984f-abffb6ae3d03")
 		)
 		(pin "35"
-			(uuid "284b8a8e-83de-42ba-8fb1-98e62e4b0b17")
+			(uuid "213a1384-53f8-4dc2-be95-d106e529c29b")
 		)
 		(pin "36"
-			(uuid "7913b2a3-f892-4939-9ac1-d2bcadda9de1")
+			(uuid "b6ed4909-6153-4a58-95f7-62bd17b20e61")
 		)
 		(pin "37"
-			(uuid "81312b95-e9ea-434a-aca8-365f948958fd")
+			(uuid "f2caaffc-e606-4447-b1cd-3c12e1399c2c")
 		)
 		(pin "38"
-			(uuid "1242c936-9ad2-4a92-9733-529d35dbfbe4")
+			(uuid "40660025-65a0-434b-a443-ba344c19c407")
 		)
 		(pin "39"
-			(uuid "9c0016ce-e6f8-454c-be9d-095261ec316e")
+			(uuid "05952968-34f4-4c77-9466-0ddf6dc923ea")
 		)
 		(instances
 			(project "canary-pwr"
-				(path "/1f18135f-bc09-4a65-8ba8-2408b715cd62/00fc72fb-c766-4e41-b16e-e6dc647e2620"
+				(path "/bdc204b9-ea66-4e3b-87f2-f8b429651126/49a9597d-152b-4afd-82fd-11a54916433c"
 					(reference "U1")
 					(unit 1)
 				)
@@ -2973,7 +2973,7 @@
 			)
 			(justify right)
 		)
-		(uuid "408204b5-694d-4159-8438-ca450d1d7957")
+		(uuid "30afbdf5-5448-475c-ae5d-b5ff42b7c971")
 		(property "Intersheetrefs" "${INTERSHEET_REFS}"
 			(at 35.56 45.72 0)
 			(show_name no)
@@ -2997,7 +2997,7 @@
 			)
 			(justify right)
 		)
-		(uuid "3da90d82-c1d3-43be-b794-db0a3f5401c3")
+		(uuid "cfdf8055-263f-4c4f-a542-b33e89f12aac")
 		(property "Intersheetrefs" "${INTERSHEET_REFS}"
 			(at 35.56 48.26 0)
 			(show_name no)
@@ -3021,7 +3021,7 @@
 			)
 			(justify right)
 		)
-		(uuid "dd24e283-bb6e-4e13-b8e2-8836e4473fb9")
+		(uuid "5f932423-932d-4b45-a645-5a7020ee9a6f")
 		(property "Intersheetrefs" "${INTERSHEET_REFS}"
 			(at 35.56 50.8 0)
 			(show_name no)
@@ -3037,7 +3037,7 @@
 	)
 	(no_connect
 		(at 35.56 53.34)
-		(uuid "f937e779-fc18-41a9-90a2-6dc9a91b21a2")
+		(uuid "536561f4-55e1-4f93-9f33-3a3f4a6de726")
 	)
 	(label "LTC_VC"
 		(at 35.56 55.88 180)
@@ -3048,7 +3048,7 @@
 			)
 			(justify right bottom)
 		)
-		(uuid "83a7f690-193e-4b6c-8cc6-fff6e73b8b2b")
+		(uuid "c703d8d1-9139-436e-b810-4d03c7261ba8")
 	)
 	(label "LTC_CAPFB"
 		(at 35.56 58.42 180)
@@ -3059,7 +3059,7 @@
 			)
 			(justify right bottom)
 		)
-		(uuid "5bea2b06-61be-4632-bee4-71fc963deafa")
+		(uuid "53e979ba-a0b1-4094-99b9-a09ce4ddd77b")
 	)
 	(label "LTC_OUTFB"
 		(at 35.56 60.96 180)
@@ -3070,7 +3070,7 @@
 			)
 			(justify right bottom)
 		)
-		(uuid "bf8f65a1-593f-4b3b-9a6c-2916ad7b785a")
+		(uuid "92b76515-1e21-45e2-b8b6-0efc0f74d299")
 	)
 	(symbol
 		(lib_id "power:GND")
@@ -3082,8 +3082,8 @@
 		(on_board yes)
 		(in_pos_files yes)
 		(dnp no)
-		(uuid "2e37a138-2de0-4951-b123-06e17240be48")
-		(property "Reference" "#PWR014"
+		(uuid "8756f4e9-e809-4ee4-841e-356389410290")
+		(property "Reference" "#PWR015"
 			(at 35.56 68.5 0)
 			(show_name no)
 			(do_not_autoplace no)
@@ -3138,12 +3138,12 @@
 			)
 		)
 		(pin "1"
-			(uuid "564a5b01-f3f3-4fb8-9e74-6fa136624e67")
+			(uuid "f4dfdc6b-6a34-4e55-bc0c-fd9f4dd00add")
 		)
 		(instances
 			(project "canary-pwr"
-				(path "/1f18135f-bc09-4a65-8ba8-2408b715cd62/00fc72fb-c766-4e41-b16e-e6dc647e2620"
-					(reference "#PWR014")
+				(path "/bdc204b9-ea66-4e3b-87f2-f8b429651126/49a9597d-152b-4afd-82fd-11a54916433c"
+					(reference "#PWR015")
 					(unit 1)
 				)
 			)
@@ -3158,7 +3158,7 @@
 			)
 			(justify right bottom)
 		)
-		(uuid "9ce6bd3a-3bd6-4531-bc20-073f06fe0286")
+		(uuid "c38994df-494a-4f08-8d08-71ec1acf4cca")
 	)
 	(label "LTC_GPI"
 		(at 35.56 68.58 180)
@@ -3169,7 +3169,7 @@
 			)
 			(justify right bottom)
 		)
-		(uuid "5da697fd-7076-4eab-b69b-0f3c59bb587c")
+		(uuid "2f902f2e-1b29-43dc-980e-cfee1f4eac4e")
 	)
 	(label "LTC_ITST"
 		(at 35.56 71.12 180)
@@ -3180,7 +3180,7 @@
 			)
 			(justify right bottom)
 		)
-		(uuid "ee3c7347-eb18-4528-96cb-9879ec2d886c")
+		(uuid "e1f0430c-8279-4113-9520-145a38be5050")
 	)
 	(label "LTC_CAPRTN"
 		(at 35.56 73.66 180)
@@ -3191,7 +3191,7 @@
 			)
 			(justify right bottom)
 		)
-		(uuid "a070368f-dd42-4e73-8dae-fb5d7e0ece24")
+		(uuid "4c637c89-c7d9-4d60-b20f-54e79d2c1bbf")
 	)
 	(label "LTC_CAP1"
 		(at 35.56 76.2 180)
@@ -3202,7 +3202,7 @@
 			)
 			(justify right bottom)
 		)
-		(uuid "cc78eaa8-b536-45a6-8138-ce63bd8fa8bd")
+		(uuid "453fcfc0-7c86-440f-aa11-6225d031bc38")
 	)
 	(label "LTC_CAP2"
 		(at 35.56 78.74 180)
@@ -3213,7 +3213,7 @@
 			)
 			(justify right bottom)
 		)
-		(uuid "75cd3dbd-bb6f-4ee6-9f27-96468b223de8")
+		(uuid "14d3f9a6-3382-4112-ac4d-23cbd102ba4b")
 	)
 	(label "LTC_CAP3"
 		(at 35.56 81.28 180)
@@ -3224,7 +3224,7 @@
 			)
 			(justify right bottom)
 		)
-		(uuid "6cfac85a-bf80-43a2-83fe-961709800c69")
+		(uuid "11f6827b-a7b1-4053-8650-9b9493fd689a")
 	)
 	(label "LTC_CAP4"
 		(at 35.56 83.82 180)
@@ -3235,7 +3235,7 @@
 			)
 			(justify right bottom)
 		)
-		(uuid "6ce51e88-21c5-4441-84a6-fc1801732300")
+		(uuid "406c1fb0-da08-4010-9b03-0cfd7eb9ae1d")
 	)
 	(label "LTC_CFP"
 		(at 35.56 86.36 180)
@@ -3246,7 +3246,7 @@
 			)
 			(justify right bottom)
 		)
-		(uuid "4c1b13af-7d05-4ffb-9f0b-e72d08f8d111")
+		(uuid "62706da6-359c-4e2c-80c1-aa2d20432755")
 	)
 	(label "LTC_CFN"
 		(at 35.56 88.9 180)
@@ -3257,7 +3257,7 @@
 			)
 			(justify right bottom)
 		)
-		(uuid "2486c028-9c05-4d5b-b048-aa645e2ab930")
+		(uuid "185d6b2e-e25b-46ac-a359-9ad214bcba1a")
 	)
 	(label "LTC_VCAPP5"
 		(at 35.56 91.44 180)
@@ -3268,7 +3268,7 @@
 			)
 			(justify right bottom)
 		)
-		(uuid "cb7c8d69-fde9-49dd-8d1d-4e625349e86a")
+		(uuid "07bc6fc5-362b-40cf-9cb1-e87cf89d7067")
 	)
 	(label "LTC_OUTFET"
 		(at 116.84 93.98 0)
@@ -3279,7 +3279,7 @@
 			)
 			(justify left bottom)
 		)
-		(uuid "ff424305-b8d9-4ffc-8fa2-864b5c847931")
+		(uuid "64c5e891-3e3d-435f-a815-6f49c27843b8")
 	)
 	(label "VCAP"
 		(at 116.84 91.44 0)
@@ -3290,7 +3290,7 @@
 			)
 			(justify left bottom)
 		)
-		(uuid "c663dd22-bdea-4524-ab17-6dc35ff5ac32")
+		(uuid "6996515c-cf51-4e52-9b03-9a0ca63772db")
 	)
 	(label "LTC_ICAP"
 		(at 116.84 88.9 0)
@@ -3301,7 +3301,7 @@
 			)
 			(justify left bottom)
 		)
-		(uuid "1399ea5d-05b3-4452-aa4f-34b482c482b9")
+		(uuid "baaa91a4-44f7-4676-bdec-60cddcb81ae6")
 	)
 	(label "LTC_VCC2P5"
 		(at 116.84 86.36 0)
@@ -3312,7 +3312,7 @@
 			)
 			(justify left bottom)
 		)
-		(uuid "9f31b7c7-1e4c-446d-b2fc-be6c380d753e")
+		(uuid "a00b0755-b1e5-4aad-bca9-46986c61420f")
 	)
 	(label "LTC_SW"
 		(at 116.84 83.82 0)
@@ -3323,7 +3323,7 @@
 			)
 			(justify left bottom)
 		)
-		(uuid "e8cfaade-a938-4db4-8e0c-2c7c07781bfc")
+		(uuid "f51948c4-5a30-442f-93d1-71c0308388b6")
 	)
 	(label "LTC_TG"
 		(at 116.84 81.28 0)
@@ -3334,7 +3334,7 @@
 			)
 			(justify left bottom)
 		)
-		(uuid "f3dd13ef-b4b1-4a14-9f65-3b7d7de0ef6a")
+		(uuid "c6f2057f-d4f4-493d-a4f2-a11c4022d4b5")
 	)
 	(label "LTC_BST"
 		(at 116.84 78.74 0)
@@ -3345,7 +3345,7 @@
 			)
 			(justify left bottom)
 		)
-		(uuid "8b3712c1-f65c-44b4-a76b-f39a5422ab32")
+		(uuid "b6821496-b9aa-4d1d-ab2f-5ddc0ca9d2b7")
 	)
 	(label "LTC_BG"
 		(at 116.84 76.2 0)
@@ -3356,7 +3356,7 @@
 			)
 			(justify left bottom)
 		)
-		(uuid "26869fd8-e82f-4639-8849-28355c2e68c2")
+		(uuid "d910b025-695f-4162-929c-693d3afb622b")
 	)
 	(label "LTC_INTVCC"
 		(at 116.84 73.66 0)
@@ -3367,7 +3367,7 @@
 			)
 			(justify left bottom)
 		)
-		(uuid "adc53d93-81bf-4ec3-94cd-793a9d7ccbb5")
+		(uuid "a2bb632e-cbeb-4925-af87-c8c3422ac2f1")
 	)
 	(label "LTC_INTVCC"
 		(at 116.84 71.12 0)
@@ -3378,7 +3378,7 @@
 			)
 			(justify left bottom)
 		)
-		(uuid "3662d3ab-c19c-4b27-abce-88a00ceabce5")
+		(uuid "11b1f69f-019c-495b-b084-9f4b5b948147")
 	)
 	(global_label "+12V_BUS"
 		(shape passive)
@@ -3390,7 +3390,7 @@
 			)
 			(justify left)
 		)
-		(uuid "388e5e77-205f-41e6-bb59-9adf20ec9373")
+		(uuid "32dabd8e-4b48-4339-aed5-ce5969909414")
 		(property "Intersheetrefs" "${INTERSHEET_REFS}"
 			(at 116.84 68.58 0)
 			(show_name no)
@@ -3413,7 +3413,7 @@
 			)
 			(justify left bottom)
 		)
-		(uuid "3b1c8794-fba6-4055-a3a7-11ce385ba77d")
+		(uuid "ce7a5a3d-4483-47d3-81ed-49a2fea7ca0a")
 	)
 	(label "LTC_VOUTM5"
 		(at 116.84 63.5 0)
@@ -3424,7 +3424,7 @@
 			)
 			(justify left bottom)
 		)
-		(uuid "2c119012-0aa0-48bf-88d4-1cf86ad37abb")
+		(uuid "99ec4193-d378-4251-8541-0d4d44b5d375")
 	)
 	(label "LTC_INFET"
 		(at 116.84 60.96 0)
@@ -3435,7 +3435,7 @@
 			)
 			(justify left bottom)
 		)
-		(uuid "3ae67738-653f-4e3b-9bbd-78100ff31c40")
+		(uuid "4f654cde-48e1-4286-a1ef-298aa37767fc")
 	)
 	(global_label "+12V_PROT"
 		(shape passive)
@@ -3447,7 +3447,7 @@
 			)
 			(justify left)
 		)
-		(uuid "1791a8a1-cbc5-4d72-9451-ccbb041da661")
+		(uuid "c5151e32-a25a-40a1-808d-4a807221efb7")
 		(property "Intersheetrefs" "${INTERSHEET_REFS}"
 			(at 116.84 58.42 0)
 			(show_name no)
@@ -3470,7 +3470,7 @@
 			)
 			(justify left bottom)
 		)
-		(uuid "b885d444-2621-49be-8878-bc2886c68a52")
+		(uuid "9640234e-cc52-4fd8-8dfe-a0a8d2744410")
 	)
 	(label "LTC_VCC2P5"
 		(at 116.84 53.34 0)
@@ -3481,7 +3481,7 @@
 			)
 			(justify left bottom)
 		)
-		(uuid "c2c3d04f-c7d6-4336-af74-09c9eb48ffe6")
+		(uuid "0ead94fb-122e-497a-8364-ac877156ece3")
 	)
 	(label "LTC_PFI"
 		(at 116.84 50.8 0)
@@ -3492,7 +3492,7 @@
 			)
 			(justify left bottom)
 		)
-		(uuid "29e62947-dc61-4726-9698-c124f63966ad")
+		(uuid "044055a8-3b45-4750-9a5a-b9c22fa88fe4")
 	)
 	(global_label "LTC_PFO"
 		(shape passive)
@@ -3504,7 +3504,7 @@
 			)
 			(justify left)
 		)
-		(uuid "14862ef1-efd2-4bf7-827d-5b72793a9d16")
+		(uuid "ffb51d38-f348-4ec5-a37b-a95ea527066a")
 		(property "Intersheetrefs" "${INTERSHEET_REFS}"
 			(at 116.84 48.26 0)
 			(show_name no)
@@ -3528,8 +3528,8 @@
 		(on_board yes)
 		(in_pos_files yes)
 		(dnp no)
-		(uuid "c117d64e-5442-478f-92ce-32d09d7ffbcc")
-		(property "Reference" "#PWR015"
+		(uuid "7d1fc1a6-84aa-4851-b3e0-ee8e1f29ba48")
+		(property "Reference" "#PWR016"
 			(at 116.84 50.72 0)
 			(show_name no)
 			(do_not_autoplace no)
@@ -3584,12 +3584,12 @@
 			)
 		)
 		(pin "1"
-			(uuid "6785f64a-db40-49f5-9f7b-d9bf6c3cd454")
+			(uuid "1c6073ee-0629-4f0a-957e-c05ac429cc1e")
 		)
 		(instances
 			(project "canary-pwr"
-				(path "/1f18135f-bc09-4a65-8ba8-2408b715cd62/00fc72fb-c766-4e41-b16e-e6dc647e2620"
-					(reference "#PWR015")
+				(path "/bdc204b9-ea66-4e3b-87f2-f8b429651126/49a9597d-152b-4afd-82fd-11a54916433c"
+					(reference "#PWR016")
 					(unit 1)
 				)
 			)
@@ -3605,7 +3605,7 @@
 		(on_board yes)
 		(in_pos_files yes)
 		(dnp no)
-		(uuid "19e4adde-0e0d-4703-84de-94ed00a0c1f7")
+		(uuid "f7e1f184-b2b5-4f83-b82b-b833353345ab")
 		(property "Reference" "C4"
 			(at 147.925 37.008 0)
 			(show_name no)
@@ -3682,14 +3682,14 @@
 			)
 		)
 		(pin "1"
-			(uuid "2b1055e5-b0bb-4fe0-a704-0f135812166a")
+			(uuid "04ef6af3-1411-42c0-9347-f64cdaa4c88f")
 		)
 		(pin "2"
-			(uuid "15220244-cd46-4328-a5eb-6f0061273d9a")
+			(uuid "f459faa6-8b0c-4d07-8d24-1025ffb29a47")
 		)
 		(instances
 			(project "canary-pwr"
-				(path "/1f18135f-bc09-4a65-8ba8-2408b715cd62/00fc72fb-c766-4e41-b16e-e6dc647e2620"
+				(path "/bdc204b9-ea66-4e3b-87f2-f8b429651126/49a9597d-152b-4afd-82fd-11a54916433c"
 					(reference "C4")
 					(unit 1)
 				)
@@ -3706,7 +3706,7 @@
 			)
 			(justify right)
 		)
-		(uuid "bc8626dc-d2a5-43b8-8469-827ffc1c8da2")
+		(uuid "ee6ed914-b823-41c3-b129-b3f1c0f7016d")
 		(property "Intersheetrefs" "${INTERSHEET_REFS}"
 			(at 148.59 40.64 0)
 			(show_name no)
@@ -3730,8 +3730,8 @@
 		(on_board yes)
 		(in_pos_files yes)
 		(dnp no)
-		(uuid "711ac933-9083-48ad-b9ad-07e585428b28")
-		(property "Reference" "#PWR016"
+		(uuid "2e831d25-52c5-4d7f-8d11-7372ad2a59ac")
+		(property "Reference" "#PWR017"
 			(at 156.21 45.64 0)
 			(show_name no)
 			(do_not_autoplace no)
@@ -3786,12 +3786,12 @@
 			)
 		)
 		(pin "1"
-			(uuid "b9b0fdcf-fcac-4168-8137-d84a42397bbb")
+			(uuid "2d874a19-0af9-44c1-9335-781568bff7a0")
 		)
 		(instances
 			(project "canary-pwr"
-				(path "/1f18135f-bc09-4a65-8ba8-2408b715cd62/00fc72fb-c766-4e41-b16e-e6dc647e2620"
-					(reference "#PWR016")
+				(path "/bdc204b9-ea66-4e3b-87f2-f8b429651126/49a9597d-152b-4afd-82fd-11a54916433c"
+					(reference "#PWR017")
 					(unit 1)
 				)
 			)
@@ -3807,7 +3807,7 @@
 		(on_board yes)
 		(in_pos_files yes)
 		(dnp no)
-		(uuid "93a7f752-0144-47c9-99bb-b7ed447ba25b")
+		(uuid "0fbcacc5-4d8c-4cc3-ac21-6f230ef25a7e")
 		(property "Reference" "C5"
 			(at 35.56 108.128 0)
 			(show_name no)
@@ -3884,14 +3884,14 @@
 			)
 		)
 		(pin "1"
-			(uuid "878c1195-981d-4e9a-9641-572175d96042")
+			(uuid "a74694b7-5cb2-4446-913c-e1ed0480b58d")
 		)
 		(pin "2"
-			(uuid "32db7efa-2792-410d-8f05-f61196ba7c0b")
+			(uuid "f61e4f92-38ba-44ee-9878-ad6ea9c1c1ff")
 		)
 		(instances
 			(project "canary-pwr"
-				(path "/1f18135f-bc09-4a65-8ba8-2408b715cd62/00fc72fb-c766-4e41-b16e-e6dc647e2620"
+				(path "/bdc204b9-ea66-4e3b-87f2-f8b429651126/49a9597d-152b-4afd-82fd-11a54916433c"
 					(reference "C5")
 					(unit 1)
 				)
@@ -3907,7 +3907,7 @@
 			)
 			(justify right bottom)
 		)
-		(uuid "326d52f4-ca17-4bbd-9d75-db2fe658cd9e")
+		(uuid "6e95a137-159f-4110-ad2f-f6398f511a4f")
 	)
 	(label "LTC_VOUTSP"
 		(at 39.37 111.76 0)
@@ -3918,7 +3918,7 @@
 			)
 			(justify left bottom)
 		)
-		(uuid "543e144b-1452-46c0-99ae-7457d6e22843")
+		(uuid "39c7a178-4fd5-4b81-8b88-b55dcad906dd")
 	)
 	(symbol
 		(lib_id "Device:C")
@@ -3930,7 +3930,7 @@
 		(on_board yes)
 		(in_pos_files yes)
 		(dnp no)
-		(uuid "7559168d-2d51-4487-86d6-09cd47da291d")
+		(uuid "ae0ead01-47b6-4ca0-bde6-6715357cab4b")
 		(property "Reference" "C6"
 			(at 68.58 108.128 0)
 			(show_name no)
@@ -4007,14 +4007,14 @@
 			)
 		)
 		(pin "1"
-			(uuid "8d5851cc-c6ba-4659-bf29-b8c3cc6177f2")
+			(uuid "4086d896-be4a-4d55-a195-04b061db5765")
 		)
 		(pin "2"
-			(uuid "6f066e31-b78e-4190-bb90-dcfb146ecf39")
+			(uuid "af2f070e-2184-4112-b3e7-c9e249565c12")
 		)
 		(instances
 			(project "canary-pwr"
-				(path "/1f18135f-bc09-4a65-8ba8-2408b715cd62/00fc72fb-c766-4e41-b16e-e6dc647e2620"
+				(path "/bdc204b9-ea66-4e3b-87f2-f8b429651126/49a9597d-152b-4afd-82fd-11a54916433c"
 					(reference "C6")
 					(unit 1)
 				)
@@ -4030,7 +4030,7 @@
 			)
 			(justify right bottom)
 		)
-		(uuid "3d0ce936-bd56-48e3-b91a-4bac874bad30")
+		(uuid "cb912f9c-2833-4738-8ace-879e59b4811b")
 	)
 	(label "LTC_CFN"
 		(at 72.39 111.76 0)
@@ -4041,7 +4041,7 @@
 			)
 			(justify left bottom)
 		)
-		(uuid "1cb137ec-5bb4-4b18-a676-f75c8f2d8d3d")
+		(uuid "509aeff4-074c-4163-a5cc-03c8f660e11d")
 	)
 	(symbol
 		(lib_id "Device:C")
@@ -4053,7 +4053,7 @@
 		(on_board yes)
 		(in_pos_files yes)
 		(dnp no)
-		(uuid "9b35483c-3e61-492f-be74-1b84798000c4")
+		(uuid "c1688701-e95d-4e37-bcf3-a3d61cdb7479")
 		(property "Reference" "C7"
 			(at 98.45 108.128 0)
 			(show_name no)
@@ -4130,14 +4130,14 @@
 			)
 		)
 		(pin "1"
-			(uuid "eb6e9a94-69bd-4d9e-ad8f-bc4d97080bc1")
+			(uuid "ebef5698-d233-4a0e-9fb0-9ee31035fc4e")
 		)
 		(pin "2"
-			(uuid "ccec56e9-15f7-4372-b39b-5fadacac7419")
+			(uuid "8a61dbb1-0db0-48bc-af79-ecc46622a5a7")
 		)
 		(instances
 			(project "canary-pwr"
-				(path "/1f18135f-bc09-4a65-8ba8-2408b715cd62/00fc72fb-c766-4e41-b16e-e6dc647e2620"
+				(path "/bdc204b9-ea66-4e3b-87f2-f8b429651126/49a9597d-152b-4afd-82fd-11a54916433c"
 					(reference "C7")
 					(unit 1)
 				)
@@ -4153,7 +4153,7 @@
 			)
 			(justify right bottom)
 		)
-		(uuid "1844c2df-e1a5-4dc5-9c89-a7d6a93517a8")
+		(uuid "8cde6f68-845c-4f3c-8825-27036e040b70")
 	)
 	(label "VCAP"
 		(at 105.41 111.76 0)
@@ -4164,7 +4164,7 @@
 			)
 			(justify left bottom)
 		)
-		(uuid "23286cf0-7d89-4c41-b12f-f0fa8004bc59")
+		(uuid "cdd147dd-476d-4f87-bd35-7b92624f16dc")
 	)
 	(symbol
 		(lib_id "Device:C")
@@ -4176,7 +4176,7 @@
 		(on_board yes)
 		(in_pos_files yes)
 		(dnp no)
-		(uuid "5968af17-59af-4559-a588-6c940b865254")
+		(uuid "60b16ecd-c712-4a89-895b-0c777a081f51")
 		(property "Reference" "C8"
 			(at 125.79 108.128 0)
 			(show_name no)
@@ -4242,14 +4242,14 @@
 			)
 		)
 		(pin "1"
-			(uuid "7043ee46-512c-4922-a3b7-f46750ab1d2c")
+			(uuid "d69932a0-327f-4e63-ad79-7513286a00e3")
 		)
 		(pin "2"
-			(uuid "131cc28f-e55f-47cd-8fe4-38ecdd6cfc91")
+			(uuid "8091f5b3-2a0d-44cc-8bc1-9dab1175fb1e")
 		)
 		(instances
 			(project "canary-pwr"
-				(path "/1f18135f-bc09-4a65-8ba8-2408b715cd62/00fc72fb-c766-4e41-b16e-e6dc647e2620"
+				(path "/bdc204b9-ea66-4e3b-87f2-f8b429651126/49a9597d-152b-4afd-82fd-11a54916433c"
 					(reference "C8")
 					(unit 1)
 				)
@@ -4265,7 +4265,7 @@
 			)
 			(justify right bottom)
 		)
-		(uuid "e743ad78-2cf3-44b0-bf46-5faa9640593b")
+		(uuid "034688b0-2f73-47b6-894f-ddb57774e37a")
 	)
 	(symbol
 		(lib_id "power:GND")
@@ -4277,8 +4277,8 @@
 		(on_board yes)
 		(in_pos_files yes)
 		(dnp no)
-		(uuid "b7a1d803-13fc-49b8-bb9f-8e295312e7d0")
-		(property "Reference" "#PWR017"
+		(uuid "84ae8294-c5bc-41e6-a43f-085a9842127b")
+		(property "Reference" "#PWR018"
 			(at 133.35 116.76 0)
 			(show_name no)
 			(do_not_autoplace no)
@@ -4333,12 +4333,12 @@
 			)
 		)
 		(pin "1"
-			(uuid "486acf6a-fb9e-4320-92e7-136d3b548ac8")
+			(uuid "c8212879-5c8f-4c6a-ae11-a01274106626")
 		)
 		(instances
 			(project "canary-pwr"
-				(path "/1f18135f-bc09-4a65-8ba8-2408b715cd62/00fc72fb-c766-4e41-b16e-e6dc647e2620"
-					(reference "#PWR017")
+				(path "/bdc204b9-ea66-4e3b-87f2-f8b429651126/49a9597d-152b-4afd-82fd-11a54916433c"
+					(reference "#PWR018")
 					(unit 1)
 				)
 			)
@@ -4354,7 +4354,7 @@
 		(on_board yes)
 		(in_pos_files yes)
 		(dnp no)
-		(uuid "1c2085c4-1135-4781-8708-61547704e6ef")
+		(uuid "83144867-45a4-45b3-a1bd-5e26ae0fcc65")
 		(property "Reference" "C9"
 			(at 153.73 108.128 0)
 			(show_name no)
@@ -4431,14 +4431,14 @@
 			)
 		)
 		(pin "1"
-			(uuid "3ecd06c8-4f82-42cf-95c0-40a9647bd5b4")
+			(uuid "f9dd206a-c6ed-47c9-892a-c3c63510e092")
 		)
 		(pin "2"
-			(uuid "eb76f2b3-ea83-41af-98e1-7e128c26bb5b")
+			(uuid "e9474670-38f1-4caa-9ce1-8d086c2b1b78")
 		)
 		(instances
 			(project "canary-pwr"
-				(path "/1f18135f-bc09-4a65-8ba8-2408b715cd62/00fc72fb-c766-4e41-b16e-e6dc647e2620"
+				(path "/bdc204b9-ea66-4e3b-87f2-f8b429651126/49a9597d-152b-4afd-82fd-11a54916433c"
 					(reference "C9")
 					(unit 1)
 				)
@@ -4454,7 +4454,7 @@
 			)
 			(justify right bottom)
 		)
-		(uuid "47bc2d79-7c69-4e5f-85c9-dc0cd13c1a13")
+		(uuid "356a8d7e-5e0e-4648-bfc7-f0a4e7328b9c")
 	)
 	(symbol
 		(lib_id "power:GND")
@@ -4466,8 +4466,8 @@
 		(on_board yes)
 		(in_pos_files yes)
 		(dnp no)
-		(uuid "c2b167fb-2c59-4a9a-94f9-32b3898f2ce9")
-		(property "Reference" "#PWR018"
+		(uuid "6a6ed30f-5974-4cf6-be10-848ee72a9117")
+		(property "Reference" "#PWR019"
 			(at 161.29 116.76 0)
 			(show_name no)
 			(do_not_autoplace no)
@@ -4522,12 +4522,12 @@
 			)
 		)
 		(pin "1"
-			(uuid "42096c07-8139-4f26-8c7d-716dea103221")
+			(uuid "4382eb82-69a3-4f36-b38f-d5b9c5c701f9")
 		)
 		(instances
 			(project "canary-pwr"
-				(path "/1f18135f-bc09-4a65-8ba8-2408b715cd62/00fc72fb-c766-4e41-b16e-e6dc647e2620"
-					(reference "#PWR018")
+				(path "/bdc204b9-ea66-4e3b-87f2-f8b429651126/49a9597d-152b-4afd-82fd-11a54916433c"
+					(reference "#PWR019")
 					(unit 1)
 				)
 			)
@@ -4543,7 +4543,7 @@
 		(on_board yes)
 		(in_pos_files yes)
 		(dnp no)
-		(uuid "443ccfad-8eef-4cb3-bb5e-ea621055f049")
+		(uuid "d8b6dfc9-e3ef-403e-ab65-1b6d68e2f572")
 		(property "Reference" "C10"
 			(at 31.81 123.368 0)
 			(show_name no)
@@ -4620,14 +4620,14 @@
 			)
 		)
 		(pin "1"
-			(uuid "00e2f3a4-171a-443f-961a-84f819e0a5e3")
+			(uuid "5b443d7b-b062-4540-a9e0-c59988433e74")
 		)
 		(pin "2"
-			(uuid "1e9f6819-ba7b-40e6-b70e-401eddcf5f29")
+			(uuid "d1dafbde-f953-4a57-9694-b18f7392e750")
 		)
 		(instances
 			(project "canary-pwr"
-				(path "/1f18135f-bc09-4a65-8ba8-2408b715cd62/00fc72fb-c766-4e41-b16e-e6dc647e2620"
+				(path "/bdc204b9-ea66-4e3b-87f2-f8b429651126/49a9597d-152b-4afd-82fd-11a54916433c"
 					(reference "C10")
 					(unit 1)
 				)
@@ -4643,7 +4643,7 @@
 			)
 			(justify right bottom)
 		)
-		(uuid "1b6dd55c-5c12-4d55-9fda-c431f3a4b1af")
+		(uuid "9a4629bc-7684-457f-bc2c-039a6925c761")
 	)
 	(symbol
 		(lib_id "power:GND")
@@ -4655,8 +4655,8 @@
 		(on_board yes)
 		(in_pos_files yes)
 		(dnp no)
-		(uuid "6e7b9271-8ac4-467c-81e0-fcd061d45af7")
-		(property "Reference" "#PWR019"
+		(uuid "a5b758cc-835d-455d-a7d3-16dc799e522a")
+		(property "Reference" "#PWR020"
 			(at 39.37 132 0)
 			(show_name no)
 			(do_not_autoplace no)
@@ -4711,12 +4711,12 @@
 			)
 		)
 		(pin "1"
-			(uuid "320c4db6-70b3-4ba0-9510-bbc4550c7417")
+			(uuid "0c9dc7f3-44ff-4b73-8c50-69fbd59f5b88")
 		)
 		(instances
 			(project "canary-pwr"
-				(path "/1f18135f-bc09-4a65-8ba8-2408b715cd62/00fc72fb-c766-4e41-b16e-e6dc647e2620"
-					(reference "#PWR019")
+				(path "/bdc204b9-ea66-4e3b-87f2-f8b429651126/49a9597d-152b-4afd-82fd-11a54916433c"
+					(reference "#PWR020")
 					(unit 1)
 				)
 			)
@@ -4732,7 +4732,7 @@
 		(on_board yes)
 		(in_pos_files yes)
 		(dnp no)
-		(uuid "69f06b64-5a1c-405a-8753-a433acb1f6c1")
+		(uuid "5dc172c3-da89-4252-976f-5b53b0cb6148")
 		(property "Reference" "C11"
 			(at 56.77 123.368 0)
 			(show_name no)
@@ -4809,14 +4809,14 @@
 			)
 		)
 		(pin "1"
-			(uuid "3328db8b-9fb5-48d9-860d-776846cb230b")
+			(uuid "a9e46809-e265-4395-aeb1-aba347107e41")
 		)
 		(pin "2"
-			(uuid "9134b973-f035-428c-b0c9-1ea2f3dfa881")
+			(uuid "264fb916-e45f-4e9f-a0a1-b499ebc35f00")
 		)
 		(instances
 			(project "canary-pwr"
-				(path "/1f18135f-bc09-4a65-8ba8-2408b715cd62/00fc72fb-c766-4e41-b16e-e6dc647e2620"
+				(path "/bdc204b9-ea66-4e3b-87f2-f8b429651126/49a9597d-152b-4afd-82fd-11a54916433c"
 					(reference "C11")
 					(unit 1)
 				)
@@ -4832,7 +4832,7 @@
 			)
 			(justify right bottom)
 		)
-		(uuid "2e4aa2d4-15dd-4dd2-ba3e-19502f949abc")
+		(uuid "3fee6ebb-565a-4a81-9a37-a01b1b095ee2")
 	)
 	(symbol
 		(lib_id "power:GND")
@@ -4844,8 +4844,8 @@
 		(on_board yes)
 		(in_pos_files yes)
 		(dnp no)
-		(uuid "3cd0d1c1-4cb8-464c-87d6-b5c42ca655a7")
-		(property "Reference" "#PWR020"
+		(uuid "c74462b4-d49d-4b38-8b71-b1a5900568ef")
+		(property "Reference" "#PWR021"
 			(at 62.23 132 0)
 			(show_name no)
 			(do_not_autoplace no)
@@ -4900,12 +4900,12 @@
 			)
 		)
 		(pin "1"
-			(uuid "acf068ff-47dc-4951-9f04-05c42da143b6")
+			(uuid "0354b0fd-b940-4e4e-bfbd-f21eb3e32458")
 		)
 		(instances
 			(project "canary-pwr"
-				(path "/1f18135f-bc09-4a65-8ba8-2408b715cd62/00fc72fb-c766-4e41-b16e-e6dc647e2620"
-					(reference "#PWR020")
+				(path "/bdc204b9-ea66-4e3b-87f2-f8b429651126/49a9597d-152b-4afd-82fd-11a54916433c"
+					(reference "#PWR021")
 					(unit 1)
 				)
 			)
@@ -4921,7 +4921,7 @@
 		(on_board yes)
 		(in_pos_files yes)
 		(dnp no)
-		(uuid "7aa0851c-ac06-4a81-8aaf-4662b2ef5b21")
+		(uuid "1c9ff91d-74e0-4d2e-8e0e-087a769c4d01")
 		(property "Reference" "R5"
 			(at 82.17 123.9 0)
 			(show_name no)
@@ -5009,14 +5009,14 @@
 			)
 		)
 		(pin "1"
-			(uuid "da6d940a-6179-4b9c-8613-64a0f3566fd3")
+			(uuid "d71a17e4-70f6-458a-a20b-71af5ed638df")
 		)
 		(pin "2"
-			(uuid "0e640181-259a-4a64-8c63-cdc0f560aced")
+			(uuid "74d1943e-1b22-4892-9a57-793f74faf1ef")
 		)
 		(instances
 			(project "canary-pwr"
-				(path "/1f18135f-bc09-4a65-8ba8-2408b715cd62/00fc72fb-c766-4e41-b16e-e6dc647e2620"
+				(path "/bdc204b9-ea66-4e3b-87f2-f8b429651126/49a9597d-152b-4afd-82fd-11a54916433c"
 					(reference "R5")
 					(unit 1)
 				)
@@ -5032,7 +5032,7 @@
 			)
 			(justify right bottom)
 		)
-		(uuid "87aa0e17-deb0-449d-a3ca-6ef1687edafb")
+		(uuid "6c1cf907-e4a1-4ad5-9128-66b83f889a8b")
 	)
 	(symbol
 		(lib_id "power:GND")
@@ -5044,8 +5044,8 @@
 		(on_board yes)
 		(in_pos_files yes)
 		(dnp no)
-		(uuid "92addaae-bf9d-48a1-8c4c-ab491c8361c2")
-		(property "Reference" "#PWR021"
+		(uuid "717703fc-dc0a-4a14-93ce-ba0227033686")
+		(property "Reference" "#PWR022"
 			(at 87.63 132 0)
 			(show_name no)
 			(do_not_autoplace no)
@@ -5100,12 +5100,12 @@
 			)
 		)
 		(pin "1"
-			(uuid "459654d0-7bb3-471c-8fe7-4640841e558c")
+			(uuid "380411b1-3973-46f7-b8d1-6a920779d8ef")
 		)
 		(instances
 			(project "canary-pwr"
-				(path "/1f18135f-bc09-4a65-8ba8-2408b715cd62/00fc72fb-c766-4e41-b16e-e6dc647e2620"
-					(reference "#PWR021")
+				(path "/bdc204b9-ea66-4e3b-87f2-f8b429651126/49a9597d-152b-4afd-82fd-11a54916433c"
+					(reference "#PWR022")
 					(unit 1)
 				)
 			)
@@ -5121,7 +5121,7 @@
 		(on_board yes)
 		(in_pos_files yes)
 		(dnp no)
-		(uuid "354346ae-8a5c-444a-a5f1-b60786d14433")
+		(uuid "8eec49d2-ec36-4f55-b72c-a8e0a802abe9")
 		(property "Reference" "R6"
 			(at 106.52 123.9 0)
 			(show_name no)
@@ -5209,14 +5209,14 @@
 			)
 		)
 		(pin "1"
-			(uuid "85db30d9-27ad-4d2c-bd22-d4f1259eb955")
+			(uuid "3600118e-75e4-4ba3-85b8-bceaf17112cb")
 		)
 		(pin "2"
-			(uuid "6d60581e-19d3-422a-962a-aa903f71c3b1")
+			(uuid "794123c1-e73d-4fc9-8c11-3ad052b66cae")
 		)
 		(instances
 			(project "canary-pwr"
-				(path "/1f18135f-bc09-4a65-8ba8-2408b715cd62/00fc72fb-c766-4e41-b16e-e6dc647e2620"
+				(path "/bdc204b9-ea66-4e3b-87f2-f8b429651126/49a9597d-152b-4afd-82fd-11a54916433c"
 					(reference "R6")
 					(unit 1)
 				)
@@ -5232,7 +5232,7 @@
 			)
 			(justify right bottom)
 		)
-		(uuid "494c93bf-e2ff-41a6-83c6-c6efcdc6776f")
+		(uuid "a04213cd-e5df-4692-b8f4-4f11a5ed7c0a")
 	)
 	(symbol
 		(lib_id "power:GND")
@@ -5244,8 +5244,8 @@
 		(on_board yes)
 		(in_pos_files yes)
 		(dnp no)
-		(uuid "deb11bd1-7ec2-4ef0-8272-242cb1a3e846")
-		(property "Reference" "#PWR022"
+		(uuid "e731effa-7476-45ba-b350-3be3966834b6")
+		(property "Reference" "#PWR023"
 			(at 113.03 132 0)
 			(show_name no)
 			(do_not_autoplace no)
@@ -5300,12 +5300,12 @@
 			)
 		)
 		(pin "1"
-			(uuid "db4ae293-db45-4c5b-a88f-73a999bdffef")
+			(uuid "a304c289-4bd2-4940-8799-3f8369e657e5")
 		)
 		(instances
 			(project "canary-pwr"
-				(path "/1f18135f-bc09-4a65-8ba8-2408b715cd62/00fc72fb-c766-4e41-b16e-e6dc647e2620"
-					(reference "#PWR022")
+				(path "/bdc204b9-ea66-4e3b-87f2-f8b429651126/49a9597d-152b-4afd-82fd-11a54916433c"
+					(reference "#PWR023")
 					(unit 1)
 				)
 			)
@@ -5321,7 +5321,7 @@
 		(on_board yes)
 		(in_pos_files yes)
 		(dnp no)
-		(uuid "df4878d6-8441-4622-8213-689e25909458")
+		(uuid "41c7a70d-f2ab-4ddb-9277-a7eb5d6e2876")
 		(property "Reference" "R7"
 			(at 134.705 123.9 0)
 			(show_name no)
@@ -5409,14 +5409,14 @@
 			)
 		)
 		(pin "1"
-			(uuid "959da504-dbca-44f1-b7b2-a1173f9e52bf")
+			(uuid "043a3bb6-bdbc-4ac1-bf59-90d18f49b5da")
 		)
 		(pin "2"
-			(uuid "ffd8c49f-1cea-4ae2-9666-0b5f1100b849")
+			(uuid "6fcabccc-a843-4e16-b659-8d1307d204ec")
 		)
 		(instances
 			(project "canary-pwr"
-				(path "/1f18135f-bc09-4a65-8ba8-2408b715cd62/00fc72fb-c766-4e41-b16e-e6dc647e2620"
+				(path "/bdc204b9-ea66-4e3b-87f2-f8b429651126/49a9597d-152b-4afd-82fd-11a54916433c"
 					(reference "R7")
 					(unit 1)
 				)
@@ -5432,7 +5432,7 @@
 			)
 			(justify right bottom)
 		)
-		(uuid "cf32beab-25c9-4e1e-9cc4-e3a79a6038ff")
+		(uuid "5e612abc-6bea-4b63-8e34-f7889a208880")
 	)
 	(label "LTC_CAPFB"
 		(at 135.89 127 0)
@@ -5443,7 +5443,7 @@
 			)
 			(justify left bottom)
 		)
-		(uuid "795bc7bd-42e7-4577-8b72-7a212c5fb799")
+		(uuid "6b89f741-06ec-4b7d-8b02-674f170e892c")
 	)
 	(symbol
 		(lib_id "Device:R")
@@ -5455,7 +5455,7 @@
 		(on_board yes)
 		(in_pos_files yes)
 		(dnp no)
-		(uuid "b0417c13-59e2-438c-b381-bfc548a36726")
+		(uuid "1a0723ce-15e2-4a06-a278-fdc9f598ba77")
 		(property "Reference" "R8"
 			(at 32.335 139.14 0)
 			(show_name no)
@@ -5532,14 +5532,14 @@
 			)
 		)
 		(pin "1"
-			(uuid "a60ff8fe-85d2-4a58-87a9-2a8a3f52ea80")
+			(uuid "1f790c73-b000-40d8-bb3c-1fdf29ad2c16")
 		)
 		(pin "2"
-			(uuid "f3c0b781-1532-42c3-9c43-975f3c0e0f17")
+			(uuid "84199279-f52c-4d2e-b898-8da9567507f5")
 		)
 		(instances
 			(project "canary-pwr"
-				(path "/1f18135f-bc09-4a65-8ba8-2408b715cd62/00fc72fb-c766-4e41-b16e-e6dc647e2620"
+				(path "/bdc204b9-ea66-4e3b-87f2-f8b429651126/49a9597d-152b-4afd-82fd-11a54916433c"
 					(reference "R8")
 					(unit 1)
 				)
@@ -5555,7 +5555,7 @@
 			)
 			(justify right bottom)
 		)
-		(uuid "6f212703-e969-4015-aaf5-acdc29c7bea2")
+		(uuid "3f1e3d1b-0822-4d9a-8c03-904411ac9ff3")
 	)
 	(symbol
 		(lib_id "power:GND")
@@ -5567,8 +5567,8 @@
 		(on_board yes)
 		(in_pos_files yes)
 		(dnp no)
-		(uuid "7bcc28f5-950a-4708-8dfb-c964cc0c8179")
-		(property "Reference" "#PWR023"
+		(uuid "2c8d9552-20da-443f-8baf-14280f1612ec")
+		(property "Reference" "#PWR024"
 			(at 39.37 147.24 0)
 			(show_name no)
 			(do_not_autoplace no)
@@ -5623,12 +5623,12 @@
 			)
 		)
 		(pin "1"
-			(uuid "b25d9009-4a28-4c6d-80c0-c2cba9b41258")
+			(uuid "d9d5d928-a2c5-4866-926f-9cac611c192d")
 		)
 		(instances
 			(project "canary-pwr"
-				(path "/1f18135f-bc09-4a65-8ba8-2408b715cd62/00fc72fb-c766-4e41-b16e-e6dc647e2620"
-					(reference "#PWR023")
+				(path "/bdc204b9-ea66-4e3b-87f2-f8b429651126/49a9597d-152b-4afd-82fd-11a54916433c"
+					(reference "#PWR024")
 					(unit 1)
 				)
 			)
@@ -5644,7 +5644,7 @@
 		(on_board yes)
 		(in_pos_files yes)
 		(dnp no)
-		(uuid "b20f8825-3d86-4fa8-b6eb-e89c73d2c3b5")
+		(uuid "3ff6ef6f-fed0-4455-81ce-a25c5f48d0be")
 		(property "Reference" "R9"
 			(at 62.775 139.14 0)
 			(show_name no)
@@ -5732,14 +5732,14 @@
 			)
 		)
 		(pin "1"
-			(uuid "42726f93-1c13-4c86-99d4-d1a7ff1663ba")
+			(uuid "19bbc43e-9f8a-4683-aaf6-034c902f1375")
 		)
 		(pin "2"
-			(uuid "ca65446f-2b8e-4826-b6b0-69e832909a64")
+			(uuid "ea93cf71-2a55-4869-b8ad-a7fd28c2d46d")
 		)
 		(instances
 			(project "canary-pwr"
-				(path "/1f18135f-bc09-4a65-8ba8-2408b715cd62/00fc72fb-c766-4e41-b16e-e6dc647e2620"
+				(path "/bdc204b9-ea66-4e3b-87f2-f8b429651126/49a9597d-152b-4afd-82fd-11a54916433c"
 					(reference "R9")
 					(unit 1)
 				)
@@ -5756,7 +5756,7 @@
 			)
 			(justify right)
 		)
-		(uuid "846c415d-f622-4485-b718-dd8650f70c95")
+		(uuid "45a01750-8124-4ed2-bb45-e81d1fb335b4")
 		(property "Intersheetrefs" "${INTERSHEET_REFS}"
 			(at 59.69 142.24 0)
 			(show_name no)
@@ -5779,7 +5779,7 @@
 			)
 			(justify left bottom)
 		)
-		(uuid "81093472-3137-42a4-b33b-dc11036c002e")
+		(uuid "03b5a8f1-8c90-4a3d-929c-a82bad3d0064")
 	)
 	(symbol
 		(lib_id "Device:R")
@@ -5791,7 +5791,7 @@
 		(on_board yes)
 		(in_pos_files yes)
 		(dnp no)
-		(uuid "5000861f-ed18-4929-b0a4-d856e3a5f3b1")
+		(uuid "be9f96ec-e30e-4c21-827b-b66b7eb4d244")
 		(property "Reference" "R10"
 			(at 93.295 139.14 0)
 			(show_name no)
@@ -5868,14 +5868,14 @@
 			)
 		)
 		(pin "1"
-			(uuid "2718f931-ff9f-4170-84b9-be73fb4261b6")
+			(uuid "bbdb6109-3385-461d-9915-fd1fbb9202d6")
 		)
 		(pin "2"
-			(uuid "34496498-79c4-48df-ac9a-432d7f64b19d")
+			(uuid "c1a7309a-b774-4427-a853-3da38a20cb9a")
 		)
 		(instances
 			(project "canary-pwr"
-				(path "/1f18135f-bc09-4a65-8ba8-2408b715cd62/00fc72fb-c766-4e41-b16e-e6dc647e2620"
+				(path "/bdc204b9-ea66-4e3b-87f2-f8b429651126/49a9597d-152b-4afd-82fd-11a54916433c"
 					(reference "R10")
 					(unit 1)
 				)
@@ -5891,7 +5891,7 @@
 			)
 			(justify right bottom)
 		)
-		(uuid "6f26c7ec-cc4a-4b96-938c-0aef4e93ff4f")
+		(uuid "ae96350f-d94e-4096-9839-cee9438ba032")
 	)
 	(symbol
 		(lib_id "power:GND")
@@ -5903,8 +5903,8 @@
 		(on_board yes)
 		(in_pos_files yes)
 		(dnp no)
-		(uuid "88ff0b6c-11d1-4f9d-ab3a-ea75949a4b26")
-		(property "Reference" "#PWR024"
+		(uuid "f702f233-437b-4553-b297-3b28e9ed1d3d")
+		(property "Reference" "#PWR025"
 			(at 100.33 147.24 0)
 			(show_name no)
 			(do_not_autoplace no)
@@ -5959,12 +5959,12 @@
 			)
 		)
 		(pin "1"
-			(uuid "46f42ad8-b487-46c7-98e3-dc28064d8867")
+			(uuid "a305e507-2aa4-4b94-9e3c-1b5a34388f6b")
 		)
 		(instances
 			(project "canary-pwr"
-				(path "/1f18135f-bc09-4a65-8ba8-2408b715cd62/00fc72fb-c766-4e41-b16e-e6dc647e2620"
-					(reference "#PWR024")
+				(path "/bdc204b9-ea66-4e3b-87f2-f8b429651126/49a9597d-152b-4afd-82fd-11a54916433c"
+					(reference "#PWR025")
 					(unit 1)
 				)
 			)
@@ -5980,7 +5980,7 @@
 		(on_board yes)
 		(in_pos_files yes)
 		(dnp no)
-		(uuid "8927f549-8cbf-431b-8ab6-09490f1b7146")
+		(uuid "210770c8-2c5f-4e35-9ba3-9eeb44fb361a")
 		(property "Reference" "C12"
 			(at 123.735 138.608 0)
 			(show_name no)
@@ -6057,14 +6057,14 @@
 			)
 		)
 		(pin "1"
-			(uuid "e7558fd1-23c0-44f1-a6ba-88688db1f9e7")
+			(uuid "e9714ff5-9e2f-4409-b9b0-7aa7a2769026")
 		)
 		(pin "2"
-			(uuid "d36c66ac-1288-4ff6-b0dc-e81ab8f98dc2")
+			(uuid "e3e4a9c6-d7c5-47c3-9988-6b1c28d32d41")
 		)
 		(instances
 			(project "canary-pwr"
-				(path "/1f18135f-bc09-4a65-8ba8-2408b715cd62/00fc72fb-c766-4e41-b16e-e6dc647e2620"
+				(path "/bdc204b9-ea66-4e3b-87f2-f8b429651126/49a9597d-152b-4afd-82fd-11a54916433c"
 					(reference "C12")
 					(unit 1)
 				)
@@ -6081,7 +6081,7 @@
 			)
 			(justify right)
 		)
-		(uuid "b00e7947-89c3-4aef-b646-6229e51281c7")
+		(uuid "6a1e5c71-47b0-4384-97bb-d681ae34798b")
 		(property "Intersheetrefs" "${INTERSHEET_REFS}"
 			(at 120.65 142.24 0)
 			(show_name no)
@@ -6104,7 +6104,7 @@
 			)
 			(justify left bottom)
 		)
-		(uuid "1beba7b9-9ca2-4ce4-a7ef-fe83ec907c5b")
+		(uuid "18858c44-8f10-4792-8232-a8fe07747d24")
 	)
 	(symbol
 		(lib_id "Device:R")
@@ -6116,7 +6116,7 @@
 		(on_board yes)
 		(in_pos_files yes)
 		(dnp no)
-		(uuid "e33f52b2-273f-46a2-ad1e-2f5458d00e1d")
+		(uuid "985846d1-6342-4201-a15c-97bf2e9ce0f6")
 		(property "Reference" "R11"
 			(at 35.8 154.38 0)
 			(show_name no)
@@ -6204,14 +6204,14 @@
 			)
 		)
 		(pin "1"
-			(uuid "8307df2b-ff73-4178-816e-6d881a4def10")
+			(uuid "3b0c91b0-9d23-498c-bcfc-56446df1f1f5")
 		)
 		(pin "2"
-			(uuid "2049d253-5cd6-41e4-8cdb-3279650d51a3")
+			(uuid "ec8f0a2f-826f-47bf-b4b2-a4aaec65deef")
 		)
 		(instances
 			(project "canary-pwr"
-				(path "/1f18135f-bc09-4a65-8ba8-2408b715cd62/00fc72fb-c766-4e41-b16e-e6dc647e2620"
+				(path "/bdc204b9-ea66-4e3b-87f2-f8b429651126/49a9597d-152b-4afd-82fd-11a54916433c"
 					(reference "R11")
 					(unit 1)
 				)
@@ -6228,7 +6228,7 @@
 			)
 			(justify right)
 		)
-		(uuid "a6a8aebd-5d4a-40e3-bed6-f412bd88ca54")
+		(uuid "e4de6779-e8bd-4158-84bf-8182d95f4e2c")
 		(property "Intersheetrefs" "${INTERSHEET_REFS}"
 			(at 34.29 157.48 0)
 			(show_name no)
@@ -6251,7 +6251,7 @@
 			)
 			(justify left bottom)
 		)
-		(uuid "614cf8cb-0af1-4014-86e4-9f6104650357")
+		(uuid "7fa53192-c04a-470f-9940-d91bbfc7fd92")
 	)
 	(symbol
 		(lib_id "Device:R")
@@ -6263,7 +6263,7 @@
 		(on_board yes)
 		(in_pos_files yes)
 		(dnp no)
-		(uuid "7ecdd70c-f809-48d5-bd0c-758c865a82b5")
+		(uuid "5d816808-c052-4025-8be9-6a4ec6431904")
 		(property "Reference" "R12"
 			(at 63.865 154.38 0)
 			(show_name no)
@@ -6340,14 +6340,14 @@
 			)
 		)
 		(pin "1"
-			(uuid "5e3290be-701a-4a28-a9f5-adbcfb76db85")
+			(uuid "58e848b8-d1e4-4b6e-9d5e-083c1cc9736c")
 		)
 		(pin "2"
-			(uuid "94638206-5bf0-4e1b-8f3f-e076bfc15260")
+			(uuid "2843e7e1-34c8-4b16-a763-305157709bcd")
 		)
 		(instances
 			(project "canary-pwr"
-				(path "/1f18135f-bc09-4a65-8ba8-2408b715cd62/00fc72fb-c766-4e41-b16e-e6dc647e2620"
+				(path "/bdc204b9-ea66-4e3b-87f2-f8b429651126/49a9597d-152b-4afd-82fd-11a54916433c"
 					(reference "R12")
 					(unit 1)
 				)
@@ -6363,7 +6363,7 @@
 			)
 			(justify right bottom)
 		)
-		(uuid "db4fc654-e90e-4e74-ac30-b23dda36e8e7")
+		(uuid "3e5f410d-e252-405c-86fb-0f9f537a21f8")
 	)
 	(symbol
 		(lib_id "power:GND")
@@ -6375,8 +6375,8 @@
 		(on_board yes)
 		(in_pos_files yes)
 		(dnp no)
-		(uuid "7203f7a0-f5bc-449d-82be-9f225c7cd663")
-		(property "Reference" "#PWR025"
+		(uuid "15038c88-1e5a-4006-bf40-da576dcbd23a")
+		(property "Reference" "#PWR026"
 			(at 69.85 162.48 0)
 			(show_name no)
 			(do_not_autoplace no)
@@ -6431,12 +6431,12 @@
 			)
 		)
 		(pin "1"
-			(uuid "66ef4be1-53dd-41b9-8305-5b73df1b6b3a")
+			(uuid "70c8eb70-fb7e-48a0-ad7d-302ae3e44b4b")
 		)
 		(instances
 			(project "canary-pwr"
-				(path "/1f18135f-bc09-4a65-8ba8-2408b715cd62/00fc72fb-c766-4e41-b16e-e6dc647e2620"
-					(reference "#PWR025")
+				(path "/bdc204b9-ea66-4e3b-87f2-f8b429651126/49a9597d-152b-4afd-82fd-11a54916433c"
+					(reference "#PWR026")
 					(unit 1)
 				)
 			)
@@ -6452,7 +6452,7 @@
 		(on_board yes)
 		(in_pos_files yes)
 		(dnp no)
-		(uuid "81db470b-2df3-4f90-8274-80b6367d61ec")
+		(uuid "cf785b1c-5908-4a6c-9515-b6a40f534b48")
 		(property "Reference" "R13"
 			(at 92.405 154.38 0)
 			(show_name no)
@@ -6540,14 +6540,14 @@
 			)
 		)
 		(pin "1"
-			(uuid "d999ea85-de66-4c6d-88cc-e009a88163c6")
+			(uuid "54e42904-bf99-402d-b1e6-65c065816ca6")
 		)
 		(pin "2"
-			(uuid "8ee09b9d-64ee-448b-9042-7f8a8128ed42")
+			(uuid "7b04b1be-5f45-47b6-98e4-b0a47faa0a87")
 		)
 		(instances
 			(project "canary-pwr"
-				(path "/1f18135f-bc09-4a65-8ba8-2408b715cd62/00fc72fb-c766-4e41-b16e-e6dc647e2620"
+				(path "/bdc204b9-ea66-4e3b-87f2-f8b429651126/49a9597d-152b-4afd-82fd-11a54916433c"
 					(reference "R13")
 					(unit 1)
 				)
@@ -6563,7 +6563,7 @@
 			)
 			(justify right bottom)
 		)
-		(uuid "198118b1-366b-4e70-bd78-96b422ab8cea")
+		(uuid "cd70eb9e-d00b-44c5-a487-715183b9ac0e")
 	)
 	(label "LTC_GPI"
 		(at 97.79 157.48 0)
@@ -6574,7 +6574,7 @@
 			)
 			(justify left bottom)
 		)
-		(uuid "faa4f59a-3239-4d72-a4b5-39238074f808")
+		(uuid "afb38767-deae-4c60-ae49-2bb291a5cedf")
 	)
 	(symbol
 		(lib_id "Device:C")
@@ -6586,7 +6586,7 @@
 		(on_board yes)
 		(in_pos_files yes)
 		(dnp no)
-		(uuid "94e2f8a3-9810-4163-9c3c-e38af441f1a9")
+		(uuid "79dad3ec-bd4d-4250-be16-eb120f0430fc")
 		(property "Reference" "C13"
 			(at 122.285 153.848 0)
 			(show_name no)
@@ -6652,14 +6652,14 @@
 			)
 		)
 		(pin "1"
-			(uuid "3e494b7f-f0ee-4b15-9086-14b669549b47")
+			(uuid "cda0185d-03a5-4eef-bd58-77a8c3082ca4")
 		)
 		(pin "2"
-			(uuid "e44fe274-c9ca-4753-bf13-e85640b0e816")
+			(uuid "80f36886-1af7-4057-b40c-612818ceb599")
 		)
 		(instances
 			(project "canary-pwr"
-				(path "/1f18135f-bc09-4a65-8ba8-2408b715cd62/00fc72fb-c766-4e41-b16e-e6dc647e2620"
+				(path "/bdc204b9-ea66-4e3b-87f2-f8b429651126/49a9597d-152b-4afd-82fd-11a54916433c"
 					(reference "C13")
 					(unit 1)
 				)
@@ -6675,7 +6675,7 @@
 			)
 			(justify right bottom)
 		)
-		(uuid "5f896e52-7a29-4982-beae-8d13739d6ee8")
+		(uuid "a98e98ff-d75e-4ba6-b067-5285d7402d1c")
 	)
 	(symbol
 		(lib_id "power:GND")
@@ -6687,8 +6687,8 @@
 		(on_board yes)
 		(in_pos_files yes)
 		(dnp no)
-		(uuid "dc1e4259-72d5-4a36-aa19-01f2df1360f3")
-		(property "Reference" "#PWR026"
+		(uuid "c94a0bf8-1911-4cd3-88d1-b968b24b08c8")
+		(property "Reference" "#PWR027"
 			(at 128.27 162.48 0)
 			(show_name no)
 			(do_not_autoplace no)
@@ -6743,12 +6743,12 @@
 			)
 		)
 		(pin "1"
-			(uuid "0a558c9f-48aa-4525-a516-3e4f0826bd87")
+			(uuid "e966e67b-8ad8-492c-a566-9cdfd6ab1316")
 		)
 		(instances
 			(project "canary-pwr"
-				(path "/1f18135f-bc09-4a65-8ba8-2408b715cd62/00fc72fb-c766-4e41-b16e-e6dc647e2620"
-					(reference "#PWR026")
+				(path "/bdc204b9-ea66-4e3b-87f2-f8b429651126/49a9597d-152b-4afd-82fd-11a54916433c"
+					(reference "#PWR027")
 					(unit 1)
 				)
 			)
@@ -6763,7 +6763,7 @@
 			)
 			(justify left bottom)
 		)
-		(uuid "14a0ab1b-ba33-4bf7-9f5e-18b820fd70f6")
+		(uuid "ceda1276-f554-4a6f-aa49-e34d9c159149")
 	)
 	(symbol
 		(lib_id "Transistor_FET:CSD18543Q3A")
@@ -6775,7 +6775,7 @@
 		(on_board yes)
 		(in_pos_files yes)
 		(dnp no)
-		(uuid "74b7bb1e-a275-4e03-a687-cc3a3b9e8811")
+		(uuid "861d059c-f4f3-4ad6-b9a5-4df5b81931c7")
 		(property "Reference" "Q2"
 			(at 190.0375 38.74 0)
 			(show_name no)
@@ -6863,23 +6863,23 @@
 			)
 		)
 		(pin "1"
-			(uuid "54c83c6a-34ba-49cd-8253-585565406fb3")
+			(uuid "40d42beb-3f89-4df0-93cc-c6639ae57ad3")
 		)
 		(pin "2"
-			(uuid "843be039-880f-413d-95b4-3ac4537b2f87")
+			(uuid "b025a80b-b58a-4831-8589-a15efbe1a0dd")
 		)
 		(pin "3"
-			(uuid "374c3d3c-e76b-4679-8b23-0416e45b6e2a")
+			(uuid "2e660260-126c-4ebb-bd11-e4ef99a959c9")
 		)
 		(pin "4"
-			(uuid "65ebe524-f919-496b-bff5-3350019b8a8f")
+			(uuid "d56fef88-a77c-4d34-9d56-8475ed718170")
 		)
 		(pin "5"
-			(uuid "a443b519-5ec0-4852-8cc3-cb2609e6261c")
+			(uuid "81e8af54-fc77-4989-b284-0f1e1effdc1f")
 		)
 		(instances
 			(project "canary-pwr"
-				(path "/1f18135f-bc09-4a65-8ba8-2408b715cd62/00fc72fb-c766-4e41-b16e-e6dc647e2620"
+				(path "/bdc204b9-ea66-4e3b-87f2-f8b429651126/49a9597d-152b-4afd-82fd-11a54916433c"
 					(reference "Q2")
 					(unit 1)
 				)
@@ -6896,7 +6896,7 @@
 			)
 			(justify right)
 		)
-		(uuid "89b0d123-9e48-4701-89b6-aacd9bf92dd3")
+		(uuid "8f50d170-2200-4504-87a3-e829cd641737")
 		(property "Intersheetrefs" "${INTERSHEET_REFS}"
 			(at 198.12 63.5 0)
 			(show_name no)
@@ -6919,7 +6919,7 @@
 			)
 			(justify right bottom)
 		)
-		(uuid "45de09df-bb39-4b20-9605-f23e4ef2e3c8")
+		(uuid "8a1ce714-fddf-4b3c-bd7b-1211a4a83d35")
 	)
 	(label "LTC_VOUTSP"
 		(at 198.12 53.34 90)
@@ -6930,7 +6930,7 @@
 			)
 			(justify left bottom)
 		)
-		(uuid "3ed7f9b1-10aa-434d-855e-79d63e02c086")
+		(uuid "5d6130b8-c2db-4712-bd17-a0e6f0515937")
 	)
 	(symbol
 		(lib_id "Transistor_FET:CSD18543Q3A")
@@ -6942,7 +6942,7 @@
 		(on_board yes)
 		(in_pos_files yes)
 		(dnp no)
-		(uuid "078ea2be-69d9-4ec4-9887-9d21d94a0eb5")
+		(uuid "10cb547b-674b-446c-b76a-0cfbdce4b9d6")
 		(property "Reference" "Q3"
 			(at 211.9325 38.34 0)
 			(show_name no)
@@ -7030,23 +7030,23 @@
 			)
 		)
 		(pin "1"
-			(uuid "68d8597c-79a0-4c3a-8839-6b4cdf637f87")
+			(uuid "3cec6dc4-8c24-4c0f-89e5-8cae38a7dc20")
 		)
 		(pin "2"
-			(uuid "d99c346e-e685-44cc-a823-1b36a9681a5d")
+			(uuid "d013c3f1-fdb3-4218-8caf-93bbd5ddeda1")
 		)
 		(pin "3"
-			(uuid "7736ab6d-99bb-4088-80f0-e4f9d954e5f9")
+			(uuid "09fdccfd-43a8-4a2a-9b3c-9d350dee5605")
 		)
 		(pin "4"
-			(uuid "365091bb-da1f-4d04-8d82-88ec9392dbb7")
+			(uuid "2a6432fa-a95b-41aa-b8ca-4a4cabca362f")
 		)
 		(pin "5"
-			(uuid "267570db-530b-4c18-aa43-58663e737ff6")
+			(uuid "0951e493-abcf-4074-ba7b-0efda55a5d3f")
 		)
 		(instances
 			(project "canary-pwr"
-				(path "/1f18135f-bc09-4a65-8ba8-2408b715cd62/00fc72fb-c766-4e41-b16e-e6dc647e2620"
+				(path "/bdc204b9-ea66-4e3b-87f2-f8b429651126/49a9597d-152b-4afd-82fd-11a54916433c"
 					(reference "Q3")
 					(unit 1)
 				)
@@ -7062,7 +7062,7 @@
 			)
 			(justify right bottom)
 		)
-		(uuid "fd13644b-fd3d-4916-8863-ce7565959820")
+		(uuid "5107074b-dcbc-4890-b31a-6e8b3a69cc1b")
 	)
 	(label "LTC_TG"
 		(at 210.82 58.42 180)
@@ -7073,7 +7073,7 @@
 			)
 			(justify right bottom)
 		)
-		(uuid "6a45e9cd-0f42-4f45-9c59-05f464edf3c1")
+		(uuid "dcb68fd8-738c-4e5c-9c86-0126e94e6979")
 	)
 	(global_label "+12V_BUS"
 		(shape passive)
@@ -7085,7 +7085,7 @@
 			)
 			(justify left)
 		)
-		(uuid "a163143c-ea0a-4f8f-843b-3a5722136246")
+		(uuid "441701a6-ec53-47df-b3d1-9959ffeccbbb")
 		(property "Intersheetrefs" "${INTERSHEET_REFS}"
 			(at 218.44 53.34 0)
 			(show_name no)
@@ -7109,7 +7109,7 @@
 		(on_board yes)
 		(in_pos_files yes)
 		(dnp no)
-		(uuid "b002d2f6-e9e7-4c3d-abee-103be3e47322")
+		(uuid "32073abe-bb7c-428e-bd0a-9bb82c2c1489")
 		(property "Reference" "Q4"
 			(at 234.7925 37.86 0)
 			(show_name no)
@@ -7197,23 +7197,23 @@
 			)
 		)
 		(pin "1"
-			(uuid "36450d48-0bb5-433c-b39a-9cd70deb7b5e")
+			(uuid "2bab4500-dd30-4b81-a9ec-e67923ef756c")
 		)
 		(pin "2"
-			(uuid "da5548b4-69f1-444a-a0cb-f9de82e0ecb5")
+			(uuid "9093d23b-6c3c-47d9-9f30-5840e0664671")
 		)
 		(pin "3"
-			(uuid "828fa080-7a8c-4804-97f2-9fc0295c027e")
+			(uuid "b6a48585-0030-4462-83de-e2bab5b062b7")
 		)
 		(pin "4"
-			(uuid "17ad46f6-4542-467c-9a2f-ab0508a57f7b")
+			(uuid "5a9bf92a-bbbd-4b0f-8456-23c58193063a")
 		)
 		(pin "5"
-			(uuid "52d162d5-0159-4b75-9e91-7ad48f68413c")
+			(uuid "ea7437d0-f236-4cc8-9ad0-884b121589da")
 		)
 		(instances
 			(project "canary-pwr"
-				(path "/1f18135f-bc09-4a65-8ba8-2408b715cd62/00fc72fb-c766-4e41-b16e-e6dc647e2620"
+				(path "/bdc204b9-ea66-4e3b-87f2-f8b429651126/49a9597d-152b-4afd-82fd-11a54916433c"
 					(reference "Q4")
 					(unit 1)
 				)
@@ -7230,8 +7230,8 @@
 		(on_board yes)
 		(in_pos_files yes)
 		(dnp no)
-		(uuid "3ff708d5-308b-40b8-8ba3-2b1eaef84992")
-		(property "Reference" "#PWR027"
+		(uuid "c35d78a5-2c2d-427f-916e-fedc4d779598")
+		(property "Reference" "#PWR028"
 			(at 241.3 63.42 0)
 			(show_name no)
 			(do_not_autoplace no)
@@ -7286,12 +7286,12 @@
 			)
 		)
 		(pin "1"
-			(uuid "b5d70d5b-c948-410c-9a1c-972c4a05c5ab")
+			(uuid "39ae6bff-348b-41ac-b6ad-e9dcc71d6132")
 		)
 		(instances
 			(project "canary-pwr"
-				(path "/1f18135f-bc09-4a65-8ba8-2408b715cd62/00fc72fb-c766-4e41-b16e-e6dc647e2620"
-					(reference "#PWR027")
+				(path "/bdc204b9-ea66-4e3b-87f2-f8b429651126/49a9597d-152b-4afd-82fd-11a54916433c"
+					(reference "#PWR028")
 					(unit 1)
 				)
 			)
@@ -7306,7 +7306,7 @@
 			)
 			(justify right bottom)
 		)
-		(uuid "e5fa7eb3-c696-47d3-b8a6-c5f3ded93a71")
+		(uuid "4fa59923-7db4-4801-ab25-26c824561b2e")
 	)
 	(label "LTC_SW"
 		(at 241.3 48.26 90)
@@ -7317,7 +7317,7 @@
 			)
 			(justify left bottom)
 		)
-		(uuid "2606fff1-fbcb-4b06-a8d4-949ab7aef39e")
+		(uuid "773b6318-a7f5-4a8e-ab82-d20e92e065f3")
 	)
 	(symbol
 		(lib_id "Transistor_FET:CSD18543Q3A")
@@ -7329,7 +7329,7 @@
 		(on_board yes)
 		(in_pos_files yes)
 		(dnp no)
-		(uuid "784d708f-24a2-4ee8-9192-e3d84874e1ac")
+		(uuid "442a3e7d-b013-4fba-8ac8-e3d6d7a9de02")
 		(property "Reference" "Q5"
 			(at 258.0925 38.34 0)
 			(show_name no)
@@ -7417,23 +7417,23 @@
 			)
 		)
 		(pin "1"
-			(uuid "9e869268-ac5c-414e-aaa7-7e3e2e375b36")
+			(uuid "5ff55907-bb38-4990-bd39-5b7b2c1b333a")
 		)
 		(pin "2"
-			(uuid "d42da96a-30db-4c62-8c81-0f602eafc9e3")
+			(uuid "02bff2b6-63db-47e9-b090-6342a343b337")
 		)
 		(pin "3"
-			(uuid "f7b06658-ed75-4276-9efa-9866329b2ce3")
+			(uuid "747a3ae5-24fc-4950-8654-ff92c79600b5")
 		)
 		(pin "4"
-			(uuid "c6aa8e2f-2051-4c13-9a36-cd567013b7dd")
+			(uuid "0598e530-de7a-4259-97aa-e35d79cd05e0")
 		)
 		(pin "5"
-			(uuid "d3c2987c-4160-43ad-979d-f1489af1a10a")
+			(uuid "da6fa987-65fc-4442-8806-ed6d2ebd6125")
 		)
 		(instances
 			(project "canary-pwr"
-				(path "/1f18135f-bc09-4a65-8ba8-2408b715cd62/00fc72fb-c766-4e41-b16e-e6dc647e2620"
+				(path "/bdc204b9-ea66-4e3b-87f2-f8b429651126/49a9597d-152b-4afd-82fd-11a54916433c"
 					(reference "Q5")
 					(unit 1)
 				)
@@ -7449,7 +7449,7 @@
 			)
 			(justify right bottom)
 		)
-		(uuid "1a1a8f73-ea53-4045-a465-50b4a58fa477")
+		(uuid "24909a27-10bc-4c07-b7c6-9c933c1c0269")
 	)
 	(label "LTC_OUTFET"
 		(at 259.08 58.42 180)
@@ -7460,7 +7460,7 @@
 			)
 			(justify right bottom)
 		)
-		(uuid "0693605f-33f7-4c56-8e22-6d769a1d82c0")
+		(uuid "7b2401fc-7568-49d9-8204-5579dbae6f92")
 	)
 	(global_label "+12V_BUS"
 		(shape passive)
@@ -7472,7 +7472,7 @@
 			)
 			(justify left)
 		)
-		(uuid "3a810244-84a7-4b0b-88a1-006f34bc9973")
+		(uuid "222ea39b-c3fc-4014-9c79-64fc67a294d8")
 		(property "Intersheetrefs" "${INTERSHEET_REFS}"
 			(at 266.7 53.34 0)
 			(show_name no)
@@ -7496,7 +7496,7 @@
 		(on_board yes)
 		(in_pos_files yes)
 		(dnp no)
-		(uuid "561d2ada-9f8a-4a48-aa03-05594f45696b")
+		(uuid "9e6421eb-d1bb-4f9e-bfd2-ed64be9d6b51")
 		(property "Reference" "R14"
 			(at 289.76 37.54 0)
 			(show_name no)
@@ -7584,14 +7584,14 @@
 			)
 		)
 		(pin "1"
-			(uuid "fe7cfbe0-a0e5-4767-985c-d7ccbd39678d")
+			(uuid "4d56dd8f-4493-41b9-838d-b499f4067f7a")
 		)
 		(pin "2"
-			(uuid "35e89e05-6cba-4ff0-916d-dc3e27c7a918")
+			(uuid "a2899d82-73a8-4b46-ba1e-b1df44a27ec8")
 		)
 		(instances
 			(project "canary-pwr"
-				(path "/1f18135f-bc09-4a65-8ba8-2408b715cd62/00fc72fb-c766-4e41-b16e-e6dc647e2620"
+				(path "/bdc204b9-ea66-4e3b-87f2-f8b429651126/49a9597d-152b-4afd-82fd-11a54916433c"
 					(reference "R14")
 					(unit 1)
 				)
@@ -7607,7 +7607,7 @@
 			)
 			(justify right bottom)
 		)
-		(uuid "ad6bf21a-3cbc-43ef-a3df-54cda71c7695")
+		(uuid "2ef13a1d-3eaa-4198-9b6e-b8bb121fa804")
 	)
 	(global_label "+12V_BUS"
 		(shape passive)
@@ -7619,7 +7619,7 @@
 			)
 			(justify left)
 		)
-		(uuid "ecf8cf10-3ade-4940-b562-88d724d97a17")
+		(uuid "a49d177c-b662-4536-8056-d17b45d31eba")
 		(property "Intersheetrefs" "${INTERSHEET_REFS}"
 			(at 293.37 40.64 0)
 			(show_name no)
@@ -7643,7 +7643,7 @@
 		(on_board yes)
 		(in_pos_files yes)
 		(dnp no)
-		(uuid "8c1397c0-ac46-47b6-92e6-69a3984cb953")
+		(uuid "a1298a65-ed73-44f7-a3d8-77aa7ff36859")
 		(property "Reference" "L1"
 			(at 191.55 88.34 0)
 			(show_name no)
@@ -7731,14 +7731,14 @@
 			)
 		)
 		(pin "1"
-			(uuid "cee980b7-301d-4c56-9b09-3e78ccf450e7")
+			(uuid "2ccd7c58-1e1c-4f29-ba63-ae2064283ffc")
 		)
 		(pin "2"
-			(uuid "3e67d826-6d22-402c-9724-9d7a2ded557e")
+			(uuid "604c93a6-2b6a-4ef7-85c9-b8a3967ff2ea")
 		)
 		(instances
 			(project "canary-pwr"
-				(path "/1f18135f-bc09-4a65-8ba8-2408b715cd62/00fc72fb-c766-4e41-b16e-e6dc647e2620"
+				(path "/bdc204b9-ea66-4e3b-87f2-f8b429651126/49a9597d-152b-4afd-82fd-11a54916433c"
 					(reference "L1")
 					(unit 1)
 				)
@@ -7754,7 +7754,7 @@
 			)
 			(justify right bottom)
 		)
-		(uuid "ef3c423d-55ec-4590-b261-7b4e97af5595")
+		(uuid "bcbddf5b-fc8a-48ba-adc3-92c23d2bee30")
 	)
 	(label "LTC_ICAP"
 		(at 194.31 91.44 0)
@@ -7765,7 +7765,7 @@
 			)
 			(justify left bottom)
 		)
-		(uuid "86dc4e94-673d-47b6-bf25-6797dcc84f7a")
+		(uuid "208ffc16-f789-46da-b540-acb7babe1773")
 	)
 	(symbol
 		(lib_id "Device:R")
@@ -7777,7 +7777,7 @@
 		(on_board yes)
 		(in_pos_files yes)
 		(dnp no)
-		(uuid "ac2de9a5-c53c-4024-bbc6-433103b0235b")
+		(uuid "630104c8-fdd7-433d-8f9a-734e5ddcff0e")
 		(property "Reference" "R15"
 			(at 218.88 88.34 0)
 			(show_name no)
@@ -7865,14 +7865,14 @@
 			)
 		)
 		(pin "1"
-			(uuid "817a015c-7f33-4329-950b-19697ac7e8e0")
+			(uuid "a8f17cf2-933d-4048-8628-0a6e8ea2b79e")
 		)
 		(pin "2"
-			(uuid "0c58ad8b-da95-48e0-a9b0-14af07aaec24")
+			(uuid "d39d0037-f22d-4750-b36b-dc326dbd0f76")
 		)
 		(instances
 			(project "canary-pwr"
-				(path "/1f18135f-bc09-4a65-8ba8-2408b715cd62/00fc72fb-c766-4e41-b16e-e6dc647e2620"
+				(path "/bdc204b9-ea66-4e3b-87f2-f8b429651126/49a9597d-152b-4afd-82fd-11a54916433c"
 					(reference "R15")
 					(unit 1)
 				)
@@ -7888,7 +7888,7 @@
 			)
 			(justify right bottom)
 		)
-		(uuid "240224d0-90d5-4029-9fda-01e6d19178ac")
+		(uuid "ed068594-d285-48f3-bbd4-beeef63cdafc")
 	)
 	(label "VCAP"
 		(at 224.79 91.44 0)
@@ -7899,7 +7899,7 @@
 			)
 			(justify left bottom)
 		)
-		(uuid "74fbc0e3-de85-442f-a1cd-1cd771da8840")
+		(uuid "8631e426-15e2-4e1f-ac25-cfbd98a2443b")
 	)
 	(symbol
 		(lib_id "Diode:1N4148W")
@@ -7911,7 +7911,7 @@
 		(on_board yes)
 		(in_pos_files yes)
 		(dnp no)
-		(uuid "5bd446f4-996a-4a5a-b0f6-942c0042fdf6")
+		(uuid "fe6cb237-715c-49ac-bcfa-9f2a872d69ce")
 		(property "Reference" "D4"
 			(at 250.495 88.34 0)
 			(show_name no)
@@ -7999,14 +7999,14 @@
 			)
 		)
 		(pin "1"
-			(uuid "32631c2c-41d1-4fed-88fb-6fbcbae8d71a")
+			(uuid "9111c9bc-acee-4be2-ad10-67a12869b6a6")
 		)
 		(pin "2"
-			(uuid "149f7555-64c9-49ef-a848-0022e400cfa7")
+			(uuid "921859ec-cd9e-40b3-918b-15a127a5a159")
 		)
 		(instances
 			(project "canary-pwr"
-				(path "/1f18135f-bc09-4a65-8ba8-2408b715cd62/00fc72fb-c766-4e41-b16e-e6dc647e2620"
+				(path "/bdc204b9-ea66-4e3b-87f2-f8b429651126/49a9597d-152b-4afd-82fd-11a54916433c"
 					(reference "D4")
 					(unit 1)
 				)
@@ -8022,7 +8022,7 @@
 			)
 			(justify right bottom)
 		)
-		(uuid "290fbd36-9a6c-4294-8d37-5fc39a8db625")
+		(uuid "c63e5a5b-a82d-4893-a7cd-a9e4b2aac16d")
 	)
 	(label "LTC_INTVCC"
 		(at 252.73 91.44 0)
@@ -8033,7 +8033,7 @@
 			)
 			(justify left bottom)
 		)
-		(uuid "42ccde72-ac8d-4c1d-be0f-ff678ad1efcc")
+		(uuid "e1d93c21-918e-461c-bf8a-958eec021c57")
 	)
 	(symbol
 		(lib_id "Device:C")
@@ -8045,7 +8045,7 @@
 		(on_board yes)
 		(in_pos_files yes)
 		(dnp no)
-		(uuid "d3756e01-58d2-49d2-9a40-bfa227e7b253")
+		(uuid "69eae68a-29dc-4bef-90b7-89cf1dad6640")
 		(property "Reference" "C14"
 			(at 278.875 87.808 0)
 			(show_name no)
@@ -8122,14 +8122,14 @@
 			)
 		)
 		(pin "1"
-			(uuid "993bf984-5d6c-44e6-b6b3-beb4c44cb95c")
+			(uuid "6679ee21-56f6-4441-84e9-b243de66a19f")
 		)
 		(pin "2"
-			(uuid "b1ba047a-6e7e-4f7b-9c28-56b5cd482d9d")
+			(uuid "888683ca-0a77-4406-9c6d-3023254d435e")
 		)
 		(instances
 			(project "canary-pwr"
-				(path "/1f18135f-bc09-4a65-8ba8-2408b715cd62/00fc72fb-c766-4e41-b16e-e6dc647e2620"
+				(path "/bdc204b9-ea66-4e3b-87f2-f8b429651126/49a9597d-152b-4afd-82fd-11a54916433c"
 					(reference "C14")
 					(unit 1)
 				)
@@ -8145,7 +8145,7 @@
 			)
 			(justify right bottom)
 		)
-		(uuid "9e6f54e2-937a-4bc4-871a-7e9a40e09371")
+		(uuid "ef098e6c-e1d4-4f7a-b4f5-a671016d62fa")
 	)
 	(label "LTC_SW"
 		(at 283.21 91.44 0)
@@ -8156,7 +8156,7 @@
 			)
 			(justify left bottom)
 		)
-		(uuid "e9f15a94-48eb-4648-aeb3-adb6ce079dc3")
+		(uuid "d410a60d-34b6-4ad1-9a8e-f05671027263")
 	)
 	(symbol
 		(lib_id "Device:C")
@@ -8168,7 +8168,7 @@
 		(on_board yes)
 		(in_pos_files yes)
 		(dnp no)
-		(uuid "6eecc64d-abb4-4085-8b22-9060269bb729")
+		(uuid "ad1b4dcf-900f-4d19-b194-09e6b76285a0")
 		(property "Reference" "C15"
 			(at 304.2 87.808 0)
 			(show_name no)
@@ -8234,14 +8234,14 @@
 			)
 		)
 		(pin "1"
-			(uuid "3b9fbc16-9dc4-4df1-8e70-47168bec6534")
+			(uuid "5cff38ce-4ac7-4c72-a863-fad9bc655545")
 		)
 		(pin "2"
-			(uuid "704d2332-cec3-4835-8a81-f730b76b8d3f")
+			(uuid "1e01ae25-32c3-4834-a74f-45c690a85a5d")
 		)
 		(instances
 			(project "canary-pwr"
-				(path "/1f18135f-bc09-4a65-8ba8-2408b715cd62/00fc72fb-c766-4e41-b16e-e6dc647e2620"
+				(path "/bdc204b9-ea66-4e3b-87f2-f8b429651126/49a9597d-152b-4afd-82fd-11a54916433c"
 					(reference "C15")
 					(unit 1)
 				)
@@ -8257,7 +8257,7 @@
 			)
 			(justify right bottom)
 		)
-		(uuid "995d6934-f40c-432b-b811-d40d6b4f411f")
+		(uuid "72e7ebc2-57c3-4ada-9dac-a7df98003624")
 	)
 	(symbol
 		(lib_id "power:GND")
@@ -8269,8 +8269,8 @@
 		(on_board yes)
 		(in_pos_files yes)
 		(dnp no)
-		(uuid "da79b55b-11f5-481a-b11d-47247f06075d")
-		(property "Reference" "#PWR028"
+		(uuid "f5ae34fe-129e-49b4-ac92-8835ae080c2c")
+		(property "Reference" "#PWR029"
 			(at 308.61 96.44 0)
 			(show_name no)
 			(do_not_autoplace no)
@@ -8325,12 +8325,12 @@
 			)
 		)
 		(pin "1"
-			(uuid "43f88026-3956-4745-b06a-14ee3ba3519b")
+			(uuid "bf1c9244-ead9-4091-b54c-3d95fb520df0")
 		)
 		(instances
 			(project "canary-pwr"
-				(path "/1f18135f-bc09-4a65-8ba8-2408b715cd62/00fc72fb-c766-4e41-b16e-e6dc647e2620"
-					(reference "#PWR028")
+				(path "/bdc204b9-ea66-4e3b-87f2-f8b429651126/49a9597d-152b-4afd-82fd-11a54916433c"
+					(reference "#PWR029")
 					(unit 1)
 				)
 			)
@@ -8346,7 +8346,7 @@
 		(on_board yes)
 		(in_pos_files yes)
 		(dnp no)
-		(uuid "ab7833b8-76e6-40b4-be12-1d144df22411")
+		(uuid "a23c6c48-e396-4b20-a751-5b27253fbd55")
 		(property "Reference" "C16"
 			(at 187.36 103.048 0)
 			(show_name no)
@@ -8412,14 +8412,14 @@
 			)
 		)
 		(pin "1"
-			(uuid "a584d1a1-f451-4542-b15c-7dc403d1df9e")
+			(uuid "8afbd5ae-a674-42c1-9238-e7ee7f5664ff")
 		)
 		(pin "2"
-			(uuid "b32e6603-cee8-4983-acbf-f8ad4200dc55")
+			(uuid "191a5f0a-0c78-4780-bfe9-f497dc472c02")
 		)
 		(instances
 			(project "canary-pwr"
-				(path "/1f18135f-bc09-4a65-8ba8-2408b715cd62/00fc72fb-c766-4e41-b16e-e6dc647e2620"
+				(path "/bdc204b9-ea66-4e3b-87f2-f8b429651126/49a9597d-152b-4afd-82fd-11a54916433c"
 					(reference "C16")
 					(unit 1)
 				)
@@ -8435,7 +8435,7 @@
 			)
 			(justify right bottom)
 		)
-		(uuid "9dcfc171-51e9-4570-bf21-6d07ac94152c")
+		(uuid "d7e0e745-0469-4ad4-99d6-91d443dc702b")
 	)
 	(symbol
 		(lib_id "power:GND")
@@ -8447,8 +8447,8 @@
 		(on_board yes)
 		(in_pos_files yes)
 		(dnp no)
-		(uuid "4c43a314-392a-4fd7-a179-bcc302f6eae3")
-		(property "Reference" "#PWR029"
+		(uuid "8c1eacd4-a246-4e9a-92d2-65c2b5cd6678")
+		(property "Reference" "#PWR030"
 			(at 191.77 111.68 0)
 			(show_name no)
 			(do_not_autoplace no)
@@ -8503,12 +8503,12 @@
 			)
 		)
 		(pin "1"
-			(uuid "f4b3c2aa-de98-4f74-95b6-9fdde141575a")
+			(uuid "809eb341-96b4-4914-a797-5f51bcc79c06")
 		)
 		(instances
 			(project "canary-pwr"
-				(path "/1f18135f-bc09-4a65-8ba8-2408b715cd62/00fc72fb-c766-4e41-b16e-e6dc647e2620"
-					(reference "#PWR029")
+				(path "/bdc204b9-ea66-4e3b-87f2-f8b429651126/49a9597d-152b-4afd-82fd-11a54916433c"
+					(reference "#PWR030")
 					(unit 1)
 				)
 			)
@@ -8524,7 +8524,7 @@
 		(on_board yes)
 		(in_pos_files yes)
 		(dnp no)
-		(uuid "7444e90f-8dc6-4d04-ab7a-f0a45cc44562")
+		(uuid "b28c0fb0-ed60-433c-b471-fa5559cb60ec")
 		(property "Reference" "C17"
 			(at 210.22 103.048 0)
 			(show_name no)
@@ -8590,14 +8590,14 @@
 			)
 		)
 		(pin "1"
-			(uuid "d6c8b9d9-e1f3-4184-9de5-4a4a7e6ccac4")
+			(uuid "0e3f4fb2-edd6-446e-9654-02dc05a7942d")
 		)
 		(pin "2"
-			(uuid "09325589-19e6-4321-b285-24b5f916e1b5")
+			(uuid "4374e221-eb0a-4e84-a152-5b28c59dfa9e")
 		)
 		(instances
 			(project "canary-pwr"
-				(path "/1f18135f-bc09-4a65-8ba8-2408b715cd62/00fc72fb-c766-4e41-b16e-e6dc647e2620"
+				(path "/bdc204b9-ea66-4e3b-87f2-f8b429651126/49a9597d-152b-4afd-82fd-11a54916433c"
 					(reference "C17")
 					(unit 1)
 				)
@@ -8613,7 +8613,7 @@
 			)
 			(justify right bottom)
 		)
-		(uuid "82394d18-5998-4d71-a567-035f9d7dd60f")
+		(uuid "bbdec17e-5c01-4044-8417-48b995e33e05")
 	)
 	(symbol
 		(lib_id "power:GND")
@@ -8625,8 +8625,8 @@
 		(on_board yes)
 		(in_pos_files yes)
 		(dnp no)
-		(uuid "7c6bfbd7-20ba-4460-af17-d1f12ae357c8")
-		(property "Reference" "#PWR030"
+		(uuid "165746fa-6f2c-452f-bfee-d000b77ce867")
+		(property "Reference" "#PWR031"
 			(at 214.63 111.68 0)
 			(show_name no)
 			(do_not_autoplace no)
@@ -8681,12 +8681,12 @@
 			)
 		)
 		(pin "1"
-			(uuid "408a6bb9-ffda-45b9-97d5-7b742e291fa6")
+			(uuid "e92006fe-4bdb-4342-9c8c-ddffef0b7943")
 		)
 		(instances
 			(project "canary-pwr"
-				(path "/1f18135f-bc09-4a65-8ba8-2408b715cd62/00fc72fb-c766-4e41-b16e-e6dc647e2620"
-					(reference "#PWR030")
+				(path "/bdc204b9-ea66-4e3b-87f2-f8b429651126/49a9597d-152b-4afd-82fd-11a54916433c"
+					(reference "#PWR031")
 					(unit 1)
 				)
 			)
@@ -8702,7 +8702,7 @@
 		(on_board yes)
 		(in_pos_files yes)
 		(dnp no)
-		(uuid "174ce4fa-5ec9-4d74-9e8f-3efe5dcc4248")
+		(uuid "86c1fef9-a3c9-4c78-95a8-f15493aabdaa")
 		(property "Reference" "C18"
 			(at 234.81 102.794 0)
 			(show_name no)
@@ -8790,14 +8790,14 @@
 			)
 		)
 		(pin "1"
-			(uuid "cfd0d612-a2dc-4b0f-a7a3-23897ad75397")
+			(uuid "51fae2ec-8e19-4572-96e2-26c6415970fc")
 		)
 		(pin "2"
-			(uuid "3d5540dc-7b11-4eea-8213-a67a6d11ca2b")
+			(uuid "86850458-5a0a-4b87-a630-2e5dc28a029b")
 		)
 		(instances
 			(project "canary-pwr"
-				(path "/1f18135f-bc09-4a65-8ba8-2408b715cd62/00fc72fb-c766-4e41-b16e-e6dc647e2620"
+				(path "/bdc204b9-ea66-4e3b-87f2-f8b429651126/49a9597d-152b-4afd-82fd-11a54916433c"
 					(reference "C18")
 					(unit 1)
 				)
@@ -8814,7 +8814,7 @@
 			)
 			(justify right)
 		)
-		(uuid "fa739673-5ab9-4bbb-9726-0d6a68477d6e")
+		(uuid "cd1876fb-44d2-4475-92e5-18b8c727b254")
 		(property "Intersheetrefs" "${INTERSHEET_REFS}"
 			(at 234.95 106.68 0)
 			(show_name no)
@@ -8838,8 +8838,8 @@
 		(on_board yes)
 		(in_pos_files yes)
 		(dnp no)
-		(uuid "c2c0a7cc-dfa0-46f4-94f7-a8ad02a6e6f7")
-		(property "Reference" "#PWR031"
+		(uuid "f767ab1e-36ad-4877-a258-5c7c2791a0b4")
+		(property "Reference" "#PWR032"
 			(at 242.57 111.68 0)
 			(show_name no)
 			(do_not_autoplace no)
@@ -8894,12 +8894,12 @@
 			)
 		)
 		(pin "1"
-			(uuid "489c39b6-fcc2-46d0-a32d-4b3af531d6be")
+			(uuid "720b6364-efba-4794-88e6-f4586f6b4f5d")
 		)
 		(instances
 			(project "canary-pwr"
-				(path "/1f18135f-bc09-4a65-8ba8-2408b715cd62/00fc72fb-c766-4e41-b16e-e6dc647e2620"
-					(reference "#PWR031")
+				(path "/bdc204b9-ea66-4e3b-87f2-f8b429651126/49a9597d-152b-4afd-82fd-11a54916433c"
+					(reference "#PWR032")
 					(unit 1)
 				)
 			)
@@ -8915,7 +8915,7 @@
 		(on_board yes)
 		(in_pos_files yes)
 		(dnp no)
-		(uuid "0b2ce6d5-b11a-4d6e-b803-f2f0aa48cae8")
+		(uuid "1e5748c1-9ce1-44d9-8571-570e278a9690")
 		(property "Reference" "C19"
 			(at 262.75 102.794 0)
 			(show_name no)
@@ -8992,14 +8992,14 @@
 			)
 		)
 		(pin "1"
-			(uuid "2169cad8-89e3-4337-9e5b-d9ebed7c18d0")
+			(uuid "8c711743-52d4-4d0c-9060-1f10d5e21ded")
 		)
 		(pin "2"
-			(uuid "51112679-3b53-40fc-8eb8-c2bb589818cb")
+			(uuid "fe64c8d4-74d5-40b3-9a81-2cede9570ad3")
 		)
 		(instances
 			(project "canary-pwr"
-				(path "/1f18135f-bc09-4a65-8ba8-2408b715cd62/00fc72fb-c766-4e41-b16e-e6dc647e2620"
+				(path "/bdc204b9-ea66-4e3b-87f2-f8b429651126/49a9597d-152b-4afd-82fd-11a54916433c"
 					(reference "C19")
 					(unit 1)
 				)
@@ -9016,7 +9016,7 @@
 			)
 			(justify right)
 		)
-		(uuid "ccb41d8d-cf0a-424b-8966-8c9a8fded4a0")
+		(uuid "cf8bed78-aa05-4a30-87f3-376244ec2ae2")
 		(property "Intersheetrefs" "${INTERSHEET_REFS}"
 			(at 262.89 106.68 0)
 			(show_name no)
@@ -9040,8 +9040,8 @@
 		(on_board yes)
 		(in_pos_files yes)
 		(dnp no)
-		(uuid "d85c2b3d-3943-48fc-a831-33e9e6d37838")
-		(property "Reference" "#PWR032"
+		(uuid "f1d59f16-f06c-4845-8d6b-bd4b4a9d9943")
+		(property "Reference" "#PWR033"
 			(at 270.51 111.68 0)
 			(show_name no)
 			(do_not_autoplace no)
@@ -9096,12 +9096,12 @@
 			)
 		)
 		(pin "1"
-			(uuid "3df22b83-7492-4d7b-bab9-b774d2c13842")
+			(uuid "7a75df1a-8287-473c-86db-e2b7988a1e3c")
 		)
 		(instances
 			(project "canary-pwr"
-				(path "/1f18135f-bc09-4a65-8ba8-2408b715cd62/00fc72fb-c766-4e41-b16e-e6dc647e2620"
-					(reference "#PWR032")
+				(path "/bdc204b9-ea66-4e3b-87f2-f8b429651126/49a9597d-152b-4afd-82fd-11a54916433c"
+					(reference "#PWR033")
 					(unit 1)
 				)
 			)
@@ -9117,7 +9117,7 @@
 		(on_board yes)
 		(in_pos_files yes)
 		(dnp no)
-		(uuid "b61b3062-c148-4658-a64a-30d2008ca390")
+		(uuid "95de4b29-cc93-483a-9ef2-f9983af21e70")
 		(property "Reference" "C20"
 			(at 290.69 103.048 0)
 			(show_name no)
@@ -9183,14 +9183,14 @@
 			)
 		)
 		(pin "1"
-			(uuid "9b41a9a0-5423-4a6f-a1e2-c26a6e66962c")
+			(uuid "33a47608-7d60-42df-9a2a-bf292e072e53")
 		)
 		(pin "2"
-			(uuid "d93e304f-b266-4f63-a2b1-a036708f07a8")
+			(uuid "f3f3d71b-6942-477e-b16c-2bfec363eb27")
 		)
 		(instances
 			(project "canary-pwr"
-				(path "/1f18135f-bc09-4a65-8ba8-2408b715cd62/00fc72fb-c766-4e41-b16e-e6dc647e2620"
+				(path "/bdc204b9-ea66-4e3b-87f2-f8b429651126/49a9597d-152b-4afd-82fd-11a54916433c"
 					(reference "C20")
 					(unit 1)
 				)
@@ -9207,7 +9207,7 @@
 			)
 			(justify right)
 		)
-		(uuid "2f149aca-4a44-471b-af04-e2ee661e4791")
+		(uuid "1f8dd988-6b51-476c-91b0-036ee6f30fff")
 		(property "Intersheetrefs" "${INTERSHEET_REFS}"
 			(at 290.83 106.68 0)
 			(show_name no)
@@ -9231,8 +9231,8 @@
 		(on_board yes)
 		(in_pos_files yes)
 		(dnp no)
-		(uuid "70b3281b-889c-4be6-88b3-dc9733c710a9")
-		(property "Reference" "#PWR033"
+		(uuid "ee168924-73a0-4d31-b04f-650212939401")
+		(property "Reference" "#PWR034"
 			(at 298.45 111.68 0)
 			(show_name no)
 			(do_not_autoplace no)
@@ -9287,12 +9287,12 @@
 			)
 		)
 		(pin "1"
-			(uuid "14bf34ce-08f2-4cd9-a502-68f8ed869319")
+			(uuid "b5405006-0cb1-42ce-a7e3-4aea8720936b")
 		)
 		(instances
 			(project "canary-pwr"
-				(path "/1f18135f-bc09-4a65-8ba8-2408b715cd62/00fc72fb-c766-4e41-b16e-e6dc647e2620"
-					(reference "#PWR033")
+				(path "/bdc204b9-ea66-4e3b-87f2-f8b429651126/49a9597d-152b-4afd-82fd-11a54916433c"
+					(reference "#PWR034")
 					(unit 1)
 				)
 			)
@@ -9308,7 +9308,7 @@
 		(on_board yes)
 		(in_pos_files yes)
 		(dnp no)
-		(uuid "e4130c1c-ccfb-4b8c-be56-8063da07d121")
+		(uuid "edc5d82f-0e7b-462b-866e-ba9e302db775")
 		(property "Reference" "C21"
 			(at 191.63 118.288 0)
 			(show_name no)
@@ -9374,14 +9374,14 @@
 			)
 		)
 		(pin "1"
-			(uuid "125bf078-3dcd-4f9d-a6f7-40b31dcd097e")
+			(uuid "db751c1f-927e-4a50-adcb-12e2ed28c7af")
 		)
 		(pin "2"
-			(uuid "35df58d0-aff9-4511-b11b-bb02be59e69c")
+			(uuid "169a3eba-b4be-4e7c-a858-1a22458c285e")
 		)
 		(instances
 			(project "canary-pwr"
-				(path "/1f18135f-bc09-4a65-8ba8-2408b715cd62/00fc72fb-c766-4e41-b16e-e6dc647e2620"
+				(path "/bdc204b9-ea66-4e3b-87f2-f8b429651126/49a9597d-152b-4afd-82fd-11a54916433c"
 					(reference "C21")
 					(unit 1)
 				)
@@ -9398,7 +9398,7 @@
 			)
 			(justify right)
 		)
-		(uuid "15c1f88c-49af-4c91-bcfb-6884b1db5025")
+		(uuid "27ad8cae-62e5-4055-a258-8643622b8336")
 		(property "Intersheetrefs" "${INTERSHEET_REFS}"
 			(at 191.77 121.92 0)
 			(show_name no)
@@ -9422,8 +9422,8 @@
 		(on_board yes)
 		(in_pos_files yes)
 		(dnp no)
-		(uuid "48f0ba0c-11f4-4dd0-b6d1-5eb9d2dc4e74")
-		(property "Reference" "#PWR034"
+		(uuid "35227aec-15d0-4b5a-95b9-e48c5220f430")
+		(property "Reference" "#PWR035"
 			(at 199.39 126.92 0)
 			(show_name no)
 			(do_not_autoplace no)
@@ -9478,12 +9478,12 @@
 			)
 		)
 		(pin "1"
-			(uuid "67d20084-0dda-454d-9aad-62f2dd985f21")
+			(uuid "a5497515-f64d-4a16-a0cd-e363752f4ca9")
 		)
 		(instances
 			(project "canary-pwr"
-				(path "/1f18135f-bc09-4a65-8ba8-2408b715cd62/00fc72fb-c766-4e41-b16e-e6dc647e2620"
-					(reference "#PWR034")
+				(path "/bdc204b9-ea66-4e3b-87f2-f8b429651126/49a9597d-152b-4afd-82fd-11a54916433c"
+					(reference "#PWR035")
 					(unit 1)
 				)
 			)
@@ -9498,7 +9498,7 @@
 			)
 			(justify left bottom)
 		)
-		(uuid "8d5c92d6-0dfb-4c3e-92ba-7d1f7337ff62")
+		(uuid "417c4598-4ecd-4621-b367-ded5e7e806cf")
 	)
 	(symbol
 		(lib_id "Connector_Generic:Conn_02x05_Odd_Even")
@@ -9510,7 +9510,7 @@
 		(on_board yes)
 		(in_pos_files yes)
 		(dnp no)
-		(uuid "61a94853-6966-440b-87ca-25c6a6ad92eb")
+		(uuid "579330d8-cfb1-4b62-a1a8-247ca0d7788d")
 		(property "Reference" "J4"
 			(at 39.37 182.32 0)
 			(show_name no)
@@ -9598,38 +9598,38 @@
 			)
 		)
 		(pin "1"
-			(uuid "64cc2980-77df-40fa-beb7-c85e3eb8fcca")
+			(uuid "4874df31-0844-4048-9214-3fdad11e7223")
 		)
 		(pin "2"
-			(uuid "e443abb0-706d-41fb-acba-fc576d027703")
+			(uuid "9928510a-8a84-4602-92f6-82122593bed2")
 		)
 		(pin "3"
-			(uuid "986f58a8-e0aa-4cb4-9640-37e002683679")
+			(uuid "f070ad21-3af4-4060-9aef-5c5ede38321e")
 		)
 		(pin "4"
-			(uuid "0c560580-b286-4f48-b064-9d741d58a5b1")
+			(uuid "510773ed-9497-4672-9cac-53056a3e95ed")
 		)
 		(pin "5"
-			(uuid "cc370606-ec0e-4357-85ba-b01872327ec4")
+			(uuid "a17031cb-84c4-41f4-bf9a-8af2b6efdd6e")
 		)
 		(pin "6"
-			(uuid "3a22a96f-e7ce-401c-b044-8160b6a1ae32")
+			(uuid "b716201c-c896-47dc-85a9-4ef79671647c")
 		)
 		(pin "7"
-			(uuid "2b2a4739-829a-4a6a-9152-1b514b296506")
+			(uuid "53d46293-fc52-4ac4-842a-6986df2002cc")
 		)
 		(pin "8"
-			(uuid "16a4cf50-25ea-434a-ae2c-0a7e77d6a946")
+			(uuid "2618c86c-8e18-4108-a5bf-7cf884906966")
 		)
 		(pin "9"
-			(uuid "a5a5a2a1-9e65-42b9-864a-d7656d3b2e00")
+			(uuid "ea246353-1c9c-498f-89d5-757caf9bdb8b")
 		)
 		(pin "10"
-			(uuid "13af47d9-a13c-4faf-846d-a3d5d19e5943")
+			(uuid "61af8599-3a4c-463d-8b0c-d76e740b5594")
 		)
 		(instances
 			(project "canary-pwr"
-				(path "/1f18135f-bc09-4a65-8ba8-2408b715cd62/00fc72fb-c766-4e41-b16e-e6dc647e2620"
+				(path "/bdc204b9-ea66-4e3b-87f2-f8b429651126/49a9597d-152b-4afd-82fd-11a54916433c"
 					(reference "J4")
 					(unit 1)
 				)
@@ -9645,7 +9645,7 @@
 			)
 			(justify right bottom)
 		)
-		(uuid "2a2a38fb-eb17-4454-bc87-18ef391b6811")
+		(uuid "a61e6a6f-11e0-43e3-b684-b925621f155c")
 	)
 	(label "VCAP"
 		(at 45.72 185.42 0)
@@ -9656,7 +9656,7 @@
 			)
 			(justify left bottom)
 		)
-		(uuid "41345b64-e5d0-4073-aecc-ca4efb9915e1")
+		(uuid "ebc44ea8-8036-469e-a561-dbfca8d88283")
 	)
 	(symbol
 		(lib_id "power:GND")
@@ -9668,8 +9668,8 @@
 		(on_board yes)
 		(in_pos_files yes)
 		(dnp no)
-		(uuid "5a480572-ac74-4824-8360-917e5b6cefa1")
-		(property "Reference" "#PWR035"
+		(uuid "0e2eca93-37e1-46c8-9718-94f9c1f71d8b")
+		(property "Reference" "#PWR036"
 			(at 33.02 192.96 0)
 			(show_name no)
 			(do_not_autoplace no)
@@ -9724,12 +9724,12 @@
 			)
 		)
 		(pin "1"
-			(uuid "548a7472-cea6-4eb2-8dd0-bef8273694dc")
+			(uuid "e860c76f-17c5-4584-825c-7cd8bb9f2bc5")
 		)
 		(instances
 			(project "canary-pwr"
-				(path "/1f18135f-bc09-4a65-8ba8-2408b715cd62/00fc72fb-c766-4e41-b16e-e6dc647e2620"
-					(reference "#PWR035")
+				(path "/bdc204b9-ea66-4e3b-87f2-f8b429651126/49a9597d-152b-4afd-82fd-11a54916433c"
+					(reference "#PWR036")
 					(unit 1)
 				)
 			)
@@ -9745,8 +9745,8 @@
 		(on_board yes)
 		(in_pos_files yes)
 		(dnp no)
-		(uuid "d0518780-dbdf-4ebb-bfde-c80f9a2da775")
-		(property "Reference" "#PWR036"
+		(uuid "269c2753-4e14-496b-8393-1616c7304f12")
+		(property "Reference" "#PWR037"
 			(at 45.72 192.96 0)
 			(show_name no)
 			(do_not_autoplace no)
@@ -9801,12 +9801,12 @@
 			)
 		)
 		(pin "1"
-			(uuid "19156b79-9b64-439f-af28-b69ac2d3f494")
+			(uuid "031f05e5-9aa5-4906-b0cc-f6d9ec9a54c3")
 		)
 		(instances
 			(project "canary-pwr"
-				(path "/1f18135f-bc09-4a65-8ba8-2408b715cd62/00fc72fb-c766-4e41-b16e-e6dc647e2620"
-					(reference "#PWR036")
+				(path "/bdc204b9-ea66-4e3b-87f2-f8b429651126/49a9597d-152b-4afd-82fd-11a54916433c"
+					(reference "#PWR037")
 					(unit 1)
 				)
 			)
@@ -9821,7 +9821,7 @@
 			)
 			(justify right bottom)
 		)
-		(uuid "029faf38-c1a5-4a27-9039-9e695f1172da")
+		(uuid "60e87705-abb6-4d15-9ede-04dd3e689266")
 	)
 	(label "BANK_NEG_S"
 		(at 45.72 190.5 0)
@@ -9832,7 +9832,7 @@
 			)
 			(justify left bottom)
 		)
-		(uuid "f389507c-56ed-4807-9e92-a92438afe2d6")
+		(uuid "5e679baa-a0c7-42d9-bc96-4428004e3272")
 	)
 	(label "BANK_TAP3"
 		(at 33.02 193.04 180)
@@ -9843,7 +9843,7 @@
 			)
 			(justify right bottom)
 		)
-		(uuid "23f77c9c-80e4-415f-926a-09c778bac40e")
+		(uuid "2bcbf402-1cbc-4dd6-93ca-6f17b94bcbc6")
 	)
 	(label "BANK_TAP2"
 		(at 45.72 193.04 0)
@@ -9854,7 +9854,7 @@
 			)
 			(justify left bottom)
 		)
-		(uuid "5a44c03a-f595-4004-81b7-2bdd8d5f543d")
+		(uuid "d03e7cc3-d33b-428e-866a-06e9d9169aca")
 	)
 	(label "BANK_TAP1"
 		(at 33.02 195.58 180)
@@ -9865,7 +9865,7 @@
 			)
 			(justify right bottom)
 		)
-		(uuid "0f00358e-11a6-4f5a-910b-4e43dc6d807f")
+		(uuid "209f513c-85d7-41b3-8152-1c13459ba961")
 	)
 	(label "LTC_GPI"
 		(at 45.72 195.58 0)
@@ -9876,7 +9876,7 @@
 			)
 			(justify left bottom)
 		)
-		(uuid "ef4c8c91-b6cc-4d84-a0ee-f77cf0cbd50f")
+		(uuid "7f80a855-f114-4dc3-b13e-b1825e4dea49")
 	)
 	(symbol
 		(lib_id "Device:R")
@@ -9888,7 +9888,7 @@
 		(on_board yes)
 		(in_pos_files yes)
 		(dnp no)
-		(uuid "a09084d3-f350-4e56-ae07-cce5e52176d9")
+		(uuid "7cc0132b-ebe1-425a-90c0-3d0c8b7e5b05")
 		(property "Reference" "R16"
 			(at 76.2 182.32 0)
 			(show_name no)
@@ -9976,14 +9976,14 @@
 			)
 		)
 		(pin "1"
-			(uuid "44a2006d-a43e-49c5-bf2e-2e274477e0ea")
+			(uuid "9319010a-6161-40e6-9675-db0177a20859")
 		)
 		(pin "2"
-			(uuid "3e236641-44d7-4bf0-9202-8fce5223face")
+			(uuid "d22127ac-7bcc-4431-85bd-2ad6e58725e4")
 		)
 		(instances
 			(project "canary-pwr"
-				(path "/1f18135f-bc09-4a65-8ba8-2408b715cd62/00fc72fb-c766-4e41-b16e-e6dc647e2620"
+				(path "/bdc204b9-ea66-4e3b-87f2-f8b429651126/49a9597d-152b-4afd-82fd-11a54916433c"
 					(reference "R16")
 					(unit 1)
 				)
@@ -9999,7 +9999,7 @@
 			)
 			(justify right bottom)
 		)
-		(uuid "98a25f7e-6b5a-49ce-b93a-92f442d0b5b3")
+		(uuid "5a2708c3-c21e-41f5-9894-4c767eeb992a")
 	)
 	(label "BANK_NEG_S"
 		(at 80.01 185.42 0)
@@ -10010,7 +10010,7 @@
 			)
 			(justify left bottom)
 		)
-		(uuid "594eac2f-2577-4cce-a277-d5f4634bc387")
+		(uuid "013fefda-854d-4e21-b434-2316ac21c531")
 	)
 	(symbol
 		(lib_id "Device:R")
@@ -10022,7 +10022,7 @@
 		(on_board yes)
 		(in_pos_files yes)
 		(dnp no)
-		(uuid "2c0e547e-49a7-4718-9328-c7914d15e532")
+		(uuid "b0474b03-e550-43e4-9e17-e62deb64712f")
 		(property "Reference" "R17"
 			(at 109.745 182.32 0)
 			(show_name no)
@@ -10099,14 +10099,14 @@
 			)
 		)
 		(pin "1"
-			(uuid "72a6cab5-09ba-428d-8bd8-17f5b6c1f8af")
+			(uuid "7a11b63d-d15b-43e0-b15a-312d00c37484")
 		)
 		(pin "2"
-			(uuid "700cd26f-e0b1-4c4b-a789-274435d6e186")
+			(uuid "75668895-d6b6-49ba-9a9d-ed3591513b51")
 		)
 		(instances
 			(project "canary-pwr"
-				(path "/1f18135f-bc09-4a65-8ba8-2408b715cd62/00fc72fb-c766-4e41-b16e-e6dc647e2620"
+				(path "/bdc204b9-ea66-4e3b-87f2-f8b429651126/49a9597d-152b-4afd-82fd-11a54916433c"
 					(reference "R17")
 					(unit 1)
 				)
@@ -10122,7 +10122,7 @@
 			)
 			(justify right bottom)
 		)
-		(uuid "0e9d2f1d-07d8-469b-bb0e-452f5f667e84")
+		(uuid "e2837c75-a042-43b1-a829-eef837e471d5")
 	)
 	(label "BANK_TAP1"
 		(at 113.03 185.42 0)
@@ -10133,7 +10133,7 @@
 			)
 			(justify left bottom)
 		)
-		(uuid "36dc3f58-777d-4d6d-b8e9-78902a637db8")
+		(uuid "289931c7-1ee2-4f40-b96d-167d15102be8")
 	)
 	(symbol
 		(lib_id "Device:R")
@@ -10145,7 +10145,7 @@
 		(on_board yes)
 		(in_pos_files yes)
 		(dnp no)
-		(uuid "266cf1d0-470a-48ae-94c3-d3563dc38fdd")
+		(uuid "93d85e57-d8b7-4c1c-bdc9-9ac74eda2219")
 		(property "Reference" "R18"
 			(at 142.765 182.32 0)
 			(show_name no)
@@ -10222,14 +10222,14 @@
 			)
 		)
 		(pin "1"
-			(uuid "95fee8f9-4b9b-47c8-85c4-7bd61894d9bc")
+			(uuid "37a9b17a-ab39-4987-9226-4f87a73a2081")
 		)
 		(pin "2"
-			(uuid "6679b46d-dd5e-4caa-9c11-fdba28796484")
+			(uuid "2a469edb-b0f6-4988-aafa-47b8ef571781")
 		)
 		(instances
 			(project "canary-pwr"
-				(path "/1f18135f-bc09-4a65-8ba8-2408b715cd62/00fc72fb-c766-4e41-b16e-e6dc647e2620"
+				(path "/bdc204b9-ea66-4e3b-87f2-f8b429651126/49a9597d-152b-4afd-82fd-11a54916433c"
 					(reference "R18")
 					(unit 1)
 				)
@@ -10245,7 +10245,7 @@
 			)
 			(justify right bottom)
 		)
-		(uuid "1308035d-e33d-45e8-94da-e7386c2949c3")
+		(uuid "08091b8e-a258-4bd8-a099-7432838ef968")
 	)
 	(label "BANK_TAP2"
 		(at 146.05 185.42 0)
@@ -10256,7 +10256,7 @@
 			)
 			(justify left bottom)
 		)
-		(uuid "eb1594a3-ad73-42eb-be03-49f023a65b30")
+		(uuid "eacd7e21-8bfa-48ad-b020-479140ef38c6")
 	)
 	(symbol
 		(lib_id "Device:R")
@@ -10268,7 +10268,7 @@
 		(on_board yes)
 		(in_pos_files yes)
 		(dnp no)
-		(uuid "4c79a0bc-a1b0-4239-95b4-4ecc98166dad")
+		(uuid "a4cf29a8-3840-4b1d-aaf2-7c24f50d762a")
 		(property "Reference" "R19"
 			(at 33.545 207.72 0)
 			(show_name no)
@@ -10345,14 +10345,14 @@
 			)
 		)
 		(pin "1"
-			(uuid "856874c0-54f6-48b9-b9c1-0fece9e0118e")
+			(uuid "dbfa6d3c-23b2-49f2-b3ca-8db221e15efb")
 		)
 		(pin "2"
-			(uuid "ac623a55-3ace-4482-a4ea-d46a10975b40")
+			(uuid "3bd4a58b-11ff-4893-9757-adc955d9530f")
 		)
 		(instances
 			(project "canary-pwr"
-				(path "/1f18135f-bc09-4a65-8ba8-2408b715cd62/00fc72fb-c766-4e41-b16e-e6dc647e2620"
+				(path "/bdc204b9-ea66-4e3b-87f2-f8b429651126/49a9597d-152b-4afd-82fd-11a54916433c"
 					(reference "R19")
 					(unit 1)
 				)
@@ -10368,7 +10368,7 @@
 			)
 			(justify right bottom)
 		)
-		(uuid "71bc70e2-2b4d-4c02-ab46-c5d49117bc53")
+		(uuid "c7c76676-f170-4e09-b6c2-87dc126c2103")
 	)
 	(label "BANK_TAP3"
 		(at 36.83 210.82 0)
@@ -10379,7 +10379,7 @@
 			)
 			(justify left bottom)
 		)
-		(uuid "a4d06343-cd03-4d4e-9575-92da24d006cb")
+		(uuid "dbb7d9a1-0df2-4e95-9779-5f055565f8d2")
 	)
 	(symbol
 		(lib_id "Device:R")
@@ -10391,7 +10391,7 @@
 		(on_board yes)
 		(in_pos_files yes)
 		(dnp no)
-		(uuid "014cf6a3-f0dc-475c-a16b-e19d54aa0f79")
+		(uuid "4bdc7a43-6413-4b86-a8c9-e86b2345341d")
 		(property "Reference" "R20"
 			(at 67.09 207.72 0)
 			(show_name no)
@@ -10468,14 +10468,14 @@
 			)
 		)
 		(pin "1"
-			(uuid "619d03b9-4e0b-4b1d-82f7-7f21497b9979")
+			(uuid "d50f6748-0fbe-49f8-9eb2-7f7a1277d999")
 		)
 		(pin "2"
-			(uuid "6751fa74-85ba-4c8e-8911-03b1b7dcde85")
+			(uuid "f61512a8-320b-43c6-baf5-de41513b3b44")
 		)
 		(instances
 			(project "canary-pwr"
-				(path "/1f18135f-bc09-4a65-8ba8-2408b715cd62/00fc72fb-c766-4e41-b16e-e6dc647e2620"
+				(path "/bdc204b9-ea66-4e3b-87f2-f8b429651126/49a9597d-152b-4afd-82fd-11a54916433c"
 					(reference "R20")
 					(unit 1)
 				)
@@ -10491,7 +10491,7 @@
 			)
 			(justify right bottom)
 		)
-		(uuid "622d4583-e752-49b0-a778-c2dc9cd5de5c")
+		(uuid "29c7e718-f26b-416e-b49b-89e0e82d9831")
 	)
 	(label "BANK_POS_S"
 		(at 69.85 210.82 0)
@@ -10502,7 +10502,7 @@
 			)
 			(justify left bottom)
 		)
-		(uuid "4c47d075-af6d-406a-9d9d-36ceb4e6a42b")
+		(uuid "7eaea2d1-4d73-4fb5-bad6-d752b12765c3")
 	)
 	(text "Power flags (nets fed by passive pins)"
 		(exclude_from_sim no)
@@ -10513,7 +10513,7 @@
 			)
 			(justify left bottom)
 		)
-		(uuid "2187bd92-b298-4d91-91d4-e06db6fde967")
+		(uuid "4c2d6c31-3dd7-4d02-b9a9-e738292b2d11")
 	)
 	(symbol
 		(lib_id "power:PWR_FLAG")
@@ -10525,8 +10525,8 @@
 		(on_board yes)
 		(in_pos_files yes)
 		(dnp no)
-		(uuid "589d1ffe-d8b7-4b0b-88c2-9583cce439ed")
-		(property "Reference" "#FLG037"
+		(uuid "f1fd0ce2-6fd0-4999-86e0-6028224cbb0f")
+		(property "Reference" "#FLG038"
 			(at 25.4 261.7 0)
 			(show_name no)
 			(do_not_autoplace no)
@@ -10582,12 +10582,12 @@
 			)
 		)
 		(pin "1"
-			(uuid "b34c43cc-8b09-4718-bd32-997a8f0f0c45")
+			(uuid "61e16425-9ca2-4f2b-bb64-420866afab31")
 		)
 		(instances
 			(project "canary-pwr"
-				(path "/1f18135f-bc09-4a65-8ba8-2408b715cd62/00fc72fb-c766-4e41-b16e-e6dc647e2620"
-					(reference "#FLG037")
+				(path "/bdc204b9-ea66-4e3b-87f2-f8b429651126/49a9597d-152b-4afd-82fd-11a54916433c"
+					(reference "#FLG038")
 					(unit 1)
 				)
 			)
@@ -10602,7 +10602,7 @@
 			)
 			(justify right bottom)
 		)
-		(uuid "b1e1ae06-24b0-4f1f-a0d4-a388cda650cc")
+		(uuid "b59b683f-0bfc-45e6-8b52-6d8a4fb3c6d7")
 	)
 	(embedded_fonts no)
 )

@@ -2,7 +2,7 @@
 	(version 20260306)
 	(generator "eeschema")
 	(generator_version "10.0")
-	(uuid "1f18135f-bc09-4a65-8ba8-2408b715cd62")
+	(uuid "bdc204b9-ea66-4e3b-87f2-f8b429651126")
 	(paper "A3")
 	(title_block
 		(title "CANary-PWR")
@@ -25,7 +25,7 @@
 			)
 			(justify left bottom)
 		)
-		(uuid "c19df94a-55d0-4465-aab4-de0ddef0f62a")
+		(uuid "b492cc35-becb-474a-a0ed-09e640b2ec62")
 	)
 	(text "Stack: NVMe base / Pi 5 / CANary-PWR / CANary HAT (rev 2.1 and later). PWR plugs directly on the Pi; the HAT plugs on PWR's stacking header.\nPower path: OBD 12 V -> reverse block + TVS -> charger switch (TPS1HB35) -> LTC3350 input ideal diode -> +12V_BUS (backed up by the cap bank)\n            +12V_BUS -> LM61460 5.1 V -> INA226 shunt -> LM74700 ideal diode -> Pi header pins 2/4 (Power HAT+ style, no USB-C)\n            +12V_BUS -> TPS1HB35 -> HAT out terminal -> jumper to the HAT's J2\nEvery switch defaults ON: a dead or resetting supervisor degrades to an always-on Pi, never a dark rig.\nSupervisor <-> Pi: I2C1 through a Pi-powered TCA4307, GPIO6 = power fail (HIGH = OK), GPIO27 = MCU BOOT0, GPIO24 = MCU reset, Pi 3V3 sense.\nNets are connected by labels on this first pass; global labels cross sheets."
 		(exclude_from_sim no)
@@ -36,7 +36,7 @@
 			)
 			(justify left bottom)
 		)
-		(uuid "6c0ba2bb-f291-483e-b9a2-be109b7e16b4")
+		(uuid "96a646cb-f806-4512-ad14-9c16cf391746")
 	)
 	(sheet
 		(at 20.32 76.2)
@@ -53,7 +53,7 @@
 		(fill
 			(color 0 0 0 0)
 		)
-		(uuid "49782fa0-4a9c-4d92-a602-4f1400d6b131")
+		(uuid "256012bb-6267-49df-af10-da0e7ef9ad36")
 		(property "Sheetname" "Input"
 			(at 20.32 75.4884 0)
 			(show_name no)
@@ -78,7 +78,7 @@
 		)
 		(instances
 			(project "canary-pwr"
-				(path "/1f18135f-bc09-4a65-8ba8-2408b715cd62"
+				(path "/bdc204b9-ea66-4e3b-87f2-f8b429651126"
 					(page "2")
 				)
 			)
@@ -99,7 +99,7 @@
 		(fill
 			(color 0 0 0 0)
 		)
-		(uuid "00fc72fb-c766-4e41-b16e-e6dc647e2620")
+		(uuid "49a9597d-152b-4afd-82fd-11a54916433c")
 		(property "Sheetname" "Holdup"
 			(at 81.28 75.4884 0)
 			(show_name no)
@@ -124,7 +124,7 @@
 		)
 		(instances
 			(project "canary-pwr"
-				(path "/1f18135f-bc09-4a65-8ba8-2408b715cd62"
+				(path "/bdc204b9-ea66-4e3b-87f2-f8b429651126"
 					(page "3")
 				)
 			)
@@ -145,7 +145,7 @@
 		(fill
 			(color 0 0 0 0)
 		)
-		(uuid "31d53cab-6307-4db2-baad-40d3a32c031c")
+		(uuid "d128d183-3009-472b-b62b-3d546d2df9b5")
 		(property "Sheetname" "Pi_Supply"
 			(at 142.24 75.4884 0)
 			(show_name no)
@@ -170,7 +170,7 @@
 		)
 		(instances
 			(project "canary-pwr"
-				(path "/1f18135f-bc09-4a65-8ba8-2408b715cd62"
+				(path "/bdc204b9-ea66-4e3b-87f2-f8b429651126"
 					(page "4")
 				)
 			)
@@ -191,7 +191,7 @@
 		(fill
 			(color 0 0 0 0)
 		)
-		(uuid "c0291078-9862-498d-b21a-ad48c48e64cc")
+		(uuid "5427379f-4398-4052-803a-d0ab54250639")
 		(property "Sheetname" "Supervisor"
 			(at 203.2 75.4884 0)
 			(show_name no)
@@ -216,7 +216,7 @@
 		)
 		(instances
 			(project "canary-pwr"
-				(path "/1f18135f-bc09-4a65-8ba8-2408b715cd62"
+				(path "/bdc204b9-ea66-4e3b-87f2-f8b429651126"
 					(page "5")
 				)
 			)
@@ -237,7 +237,7 @@
 		(fill
 			(color 0 0 0 0)
 		)
-		(uuid "e3036545-26ea-4452-bafc-b9d08a9defb5")
+		(uuid "bea078c0-dcfe-4068-9acb-f216f38abac7")
 		(property "Sheetname" "Pi_Interface"
 			(at 264.16 75.4884 0)
 			(show_name no)
@@ -262,7 +262,7 @@
 		)
 		(instances
 			(project "canary-pwr"
-				(path "/1f18135f-bc09-4a65-8ba8-2408b715cd62"
+				(path "/bdc204b9-ea66-4e3b-87f2-f8b429651126"
 					(page "6")
 				)
 			)
