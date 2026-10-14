@@ -1,5 +1,14 @@
 # Implementation task index
 
+**Status 2026-10-14: R11–R21, the next refactor checklists.**
+[`R10-refactor-README.md`](R10-refactor-README.md) indexes eleven implementation
+plans from the October 14 review: explicit time lookup, library replay,
+preprocessing dependencies, feature assembly, detector evaluation, dyno,
+recipe definitions, collector burst scheduling, dashboard pages, behavior
+validation, and configuration schemas. Each plan specifies preserved contracts,
+caller migration, verification, and acceptance evidence. All implementation
+items start unchecked; this set does not change the overnight queue.
+
 **Status 2026-10-13: sixteen finished checklists archived.** D05, P01,
 R01–R09, S03, W05 and W08 had every box ticked; they moved to
 [`archive/`](archive/) with their links. W00 went with them, since every W file
