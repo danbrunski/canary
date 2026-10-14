@@ -295,7 +295,7 @@ any artifact affected. B08.6 evaluates the recorded Fuel Comp intervention.
   slowly) polling `0x120F` and `0x1210` in the same round at ≥ 5 Hz, plus the
   same pair on a normal drive. Detection of offset/stuck-track/dropout stays
   untested until then. Evidence: [report §6](../../../data/analyses/2026-09-22-b04-b05-measurements.md).
-- [~] **B05.8 — Qualify AFR bank balance separately.** Assess the existing
+- [x] **B05.8 — Qualify AFR bank balance separately.** Assess the existing
   `afr_bank_balance_robust` recipe with both bank measurements, fuel state,
   lag and relevant steady-state gates. Verify voltage-to-mixture semantics;
   equal voltages do not constitute an independently calibrated lambda reference.
@@ -409,6 +409,17 @@ any artifact affected. B08.6 evaluates the recorded Fuel Comp intervention.
   in `afr_calibration.yaml` (bank 2 PID/DID 0.9991 near stoich, n=51, vs
   bank 1's 1.0041 control), so `derived:LAMBDA_BANK_BALANCE_WIDEBAND` now
   exists and the recipe switch is available.
+
+  **Closed 2026-10-13 by operator decision (b): leave `default` alone.** The
+  A/F DIDs stay at the default DID cadence, so `afr_bank_balance_robust`
+  stays unfitted and unpublished and says why (31 clean samples < 300). That
+  is this item's own outcome when no asymmetry claim can be supported. The
+  default drives and refit above were the consequences of (a) and are not
+  owed. No detector exclusion is needed either: the channels stay under
+  D03.34's coverage floor. The wideband route
+  (`derived:LAMBDA_BANK_BALANCE_WIDEBAND`, a one-line output change that
+  forces a refit) remains available; pursuing it belongs to B05.9's
+  publication work, not to this assessment.
 - [~] **B05.9 — Publish the qualified subset.** Archive B02 reports and run
   B03 compatibility/replay/rollout steps per accepted model. Record explicit
   reasons for each unfitted recipe and the smallest missing capture. Dashboard
