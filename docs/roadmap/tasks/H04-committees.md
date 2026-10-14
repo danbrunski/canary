@@ -302,6 +302,26 @@ members on rows where the gates hold, designed as an IF/LSTM feature
       `test_preprocessing_{loader,live,segmenter}`, `test_autotag*`,
       `test_inference_scheduling` with `-m ""`: 376 passed.
 
+- [ ] **H04.6 RPM and throttle plumbing committees: Mode 01 ↔ broadcast.**
+  *Opened 2026-10-13 by operator decision (A05.8):* the committee owns
+  RPM/THROTTLE_POS faults at idle and stuck-at-cruise, which single-channel
+  plausibility cannot see. No committee reads either today, so those faults
+  are caught by nothing (`scripts/evaluate_committee_coverage.py`: every
+  RPM/THROTTLE fault `uncovered` on the committed slice).
+  **Do:** members `obd:RPM` ↔ `decoded:ECM_RPM` and `obd:THROTTLE_POS` ↔
+  `decoded:ECM_THROTTLE_SENSOR_V`, both already in the resampled frame. Each
+  pair is one sensor read two ways, so it detects *plumbing* faults (a stuck,
+  scaled or dropped PID or binding), not sensor faults; name it that way in
+  the flag. The throttle relation (volts to percent) is profile data with the
+  evidence that measured it, never assumed. Pairing is acquisition-paired
+  (`compare_channels`), not by aggregate.
+  **Accept:** relations and tolerances measured on known-good default drives
+  per this file's rules (at least the drive count the other committees used);
+  a known-good replay stays silent; `evaluate_committee_coverage.py` on the
+  A05.8 split shows the committee owner catching RPM/THROTTLE spike, scale,
+  drift and stuck faults, with the counts recorded here and in A05.8.
+  Needs: those drives (`~/canary-data`), which are not on the laptop.
+
 ## Hardware
 
 - [ ] **H04.5 Barometer committee** **(hardware — H03.6)**. HAT barometer vs

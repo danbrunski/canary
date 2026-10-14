@@ -302,8 +302,10 @@ code.
         `::test_ownership_follows_the_decision_and_names_what_neither_owns` and
         `::test_on_the_real_slice_no_committee_reads_rpm_and_speed_is_caught_in_part`
         (pins the counts above).
-      **Remaining:** (i) a committee that reads RPM and THROTTLE_POS. None exists,
-      so the faults the decision gives the committees are caught by nothing today.
+      **Remaining:** (i) a committee that reads RPM and THROTTLE_POS, now
+      [H04.6](H04-committees.md) (opened by operator decision 2026-10-13). None
+      exists yet, so the faults the decision gives the committees are caught by
+      nothing today.
       The resampled frame already carries broadcast copies
       (`decoded:ECM_RPM`, `decoded:ECM_THROTTLE_SENSOR_V`) that could pair with
       the Mode 01 PIDs. Their relations and tolerances must be measured on
@@ -311,9 +313,11 @@ code.
       broadcast/Mode 01 pair of one sensor sees plumbing faults, not sensor
       faults. (ii) Run `evaluate_committee_coverage.py` on the 38 evaluation
       drives (`~/canary-data`, the A05.8 split) to get per-owner recall where
-      idle and cruise actually occur. (iii) The unassigned faults (dropout of
-      non-priority PIDs, coolant stuck, in-envelope drift on unnamed channels)
-      are covered by neither detector under the decision.
+      idle and cruise actually occur. (iii) ~~The unassigned faults~~ —
+      **decided 2026-10-13 (operator): out of scope for now.** Dropout of
+      non-priority PIDs, coolant stuck and in-envelope drift on unnamed channels
+      are accepted, unowned gaps; revisit when a committee or a priority-PID
+      change covers them. Not a remainder of this item.
     (2) ~~A02's harness itself was not used~~ — **closed in `b037a51`**: A02
     added a `RawStreamDetector` protocol and `PlausibilityDetector`
     (`src/models/evaluation_detectors.py`), and `plausibility` is a default
