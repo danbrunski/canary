@@ -28066,7 +28066,7 @@
 				)
 			)
 		)
-		(property "Note" "D1 (SMBJ24A) clamps at ~38.9V, so 50V is the floor for anything on +12V - dropping to 25V makes 100uF fit this footprint and fails on the first load dump. REV 2.0: value corrected 100uF -> 47uF. 100uF/50V does not exist in a 6.3mm can (smallest standard case is 8x11.5mm on 3.5mm pitch); at D6.3mm/P2.50mm the largest standard 50V value is 47uF - Panasonic EEU-FR1H470 or Nichicon UPW1H470MED. The value was changed to match the footprint, not the reverse: 6.3mm is right for a rail carrying tens of mA and board area is needed for the rev 3.0 MCU. Capacitance is not load-bearing here - C3 is the part the TLIN1027 datasheet requires and D1 does the transient clamping; C2 only shaves the leading edge before the TVS conducts (22mV sag at 47uF vs 11mV at 100uF on one dominant bit). Populate/DNP is a bring-up call: if the TLIN1027 upsets or resets during cranking or hot-plug, populating C2 is the first thing to try."
+		(property "Note" "Fitted by the assembler from rev 2.1. Bulk on +12V ahead of D1: damps hot-plug ringing from the harness inductance and shaves the leading edge of a transient before the TVS conducts. D1 (SMBJ24A) clamps at ~38.9V, so 50V is the floor for anything on +12V - dropping to 25V makes 100uF fit this footprint and fails on the first load dump. At D6.3mm/P2.50mm the largest standard 50V value is 47uF - Panasonic EEU-FR1H470 or Nichicon UPW1H470MED. REV 2.0: value corrected 100uF -> 47uF to match the footprint (100uF/50V needs an 8x11.5mm can on 3.5mm pitch)."
 			(at 0 0 270)
 			(unlocked yes)
 			(layer "F.Fab")
@@ -28131,7 +28131,7 @@
 				)
 			)
 		)
-		(property "Quote" "Rev 2.1: PCBWay sources and fits C2 (operator, 2026-10-12); not yet quoted. Rev 2.0 had it self-sourced and not populated at the assembler, after quote T-B4W341056A flagged the old 100uF value, since corrected to 47uF - see Note."
+		(property "Quote" "Rev 2.1: PCBWay sources and fits C2 (operator, 2026-10-12); not yet quoted."
 			(at 0 0 270)
 			(unlocked yes)
 			(layer "F.Fab")

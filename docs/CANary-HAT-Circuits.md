@@ -591,7 +591,7 @@ nothing.
 | ~~D4~~ | ~~SS54 (SMB, 5A/40V Schottky)~~ | **Removed rev 2.0** — Q1 does the one job it had. See below |
 | **J3** | 2-pos terminal block | Pass-through to the X1202, now tapped off **`+12V`, downstream of Q1 and D1** |
 | D1 | SMBJ24A (SMB, 600W TVS, 24V standoff) | `+12V` → GND transient clamp — **now ahead of the J3 fan-out**, so it clamps the Pi's leg too |
-| C2 | **DNP on rev 1.0** — footprint Ø6.3mm / 2.5mm pitch; if populated, **47µF 50V 105°C** (Panasonic `EEU-FR1H470`) | Bulk on `+12V`. **Was documented as 100µF, which does not exist in this footprint** — see below |
+| C2 | **Fitted from rev 2.1**, sourced by PCBWay (operator, 2026-10-12; DNP on rev 1.0, left off at the assembler on rev 2.0) — footprint Ø6.3mm / 2.5mm pitch, **47µF 50V 105°C** (Panasonic `EEU-FR1H470`) | Bulk on `+12V`. **Was documented as 100µF, which does not exist in this footprint** — see below |
 | C3 | 100nF 0603 X7R, **50V minimum** | HF decoupling on `+12V`, at the TLIN1027 VSUP pin. Rating set by D1's clamp, not by the rail — see below |
 
 **C2's value and its footprint were never compatible — found 2026-08-13, when
