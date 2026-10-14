@@ -657,15 +657,17 @@ speculative.
 #### 13.3.0 Re-scope, 2026-10-04: the supervisor moves to a power board
 
 **Operator decision, 2026-10-04.** The X1202 is retired. A separate power
-board, **CANary-PWR** ([`CANary-PWR-Spec.md`](CANary-PWR-Spec.md)), sits on
-top of the CANary HAT and owns every power function:
+board, **CANary-PWR** ([`CANary-PWR-Spec.md`](CANary-PWR-Spec.md)), owns every
+power function (it sat on top of the HAT in the first draft; **since
+2026-10-13 it sits between the Pi and the HAT**, §P2):
 - vehicle 12V input and its protection;
 - supercapacitor hold-up instead of Li-ion cells;
 - the 5V supply to the Pi;
 - the always-on supervisor: wake, load switch, watchdog, power-fail signalling.
 
 An NVMe base goes under the Pi, in the slot the X1202 leaves (S01.7). The stack
-is **NVMe base / Pi 5 / CANary HAT / CANary-PWR**.
+is **NVMe base / Pi 5 / CANary-PWR / CANary HAT** (order settled 2026-10-13;
+the 2026-10-04 draft had PWR on top).
 
 **Why this changes rev 3.0 and not just the power path.** The MCU this section
 plans has two jobs whose failure requirements are opposite: a boring,
@@ -711,7 +713,7 @@ binds the HAT:
 | §13.3.6 net list | Item 1 (always-on 3.3V) and item 3 (load switch) **leave the HAT**. Item 6 (Pi 3V3 sense) moves to CANary-PWR. Items 4, 5 and 14 are **no longer crossings**: both ends are in the Pi domain, so §13.3.2's pulls are no longer required. Keep the series resistors as cheap ESD/fault margin. Item 10 (INT2 motion wake) loses its purpose. **Added:** the CANary-PWR connector (`CANary-PWR-Spec.md` §P6). |
 | §13.3.10 MCU selection | The coprocessor no longer needs low standby current, and the "regulator Iq decides" argument moves to CANary-PWR. Part choice is RAM, FDCAN and ADC alone, as that section already concluded. |
 | §13.3.12 USB | "Powered from `+12V_RAW`, self-powered device" becomes powered from the Pi. The rule against drawing from or back-feeding VBUS still holds. |
-| §13.3.13 placement | The stack is NVMe base / Pi / HAT / PWR, not X1202 / Pi / HAT. **J3, Q1, D1, C2 and the always-on buck leave the HAT**, freeing J3's ~10 mm on J2's edge, which §13.3.9 item 5 calls the only slack there. The HAT's bottom-face height budget is unchanged. Its top face now looks at CANary-PWR, so top-side height (terminal blocks, the GNSS connector) sets the gap between the two boards. |
+| §13.3.13 placement | The stack is NVMe base / Pi / **PWR** / HAT (2026-10-13), not X1202 / Pi / HAT. **J3, Q1, D1, C2 and the always-on buck leave the HAT**, freeing J3's ~10 mm on J2's edge, which §13.3.9 item 5 calls the only slack there. The HAT's bottom face now looks at CANary-PWR's top side rather than the cooler, so the fan keep-out and the ~6 mm cooler clearance move to PWR; the HAT's bottom-side budget becomes whatever its 13.5 mm J1 leaves above PWR's top-side parts (`CANary-PWR-Spec.md` §P2). Its top face is free. |
 
 **Rev 2.1 is not held for any of this.** It carries the supercharger
 instrumentation and the rev 2.0 fixes. CANary-PWR rev 1.0 is designed to run
@@ -1686,8 +1688,9 @@ rev 2.1 already **deletes Y1 and C5/C6** for a single oscillator (§13.3.9 item
 
 ##### The stack, and the height budget it leaves
 
-> **Superseded 2026-10-04 (§13.3.0):** the stack is NVMe base / Pi 5 /
-> CANary HAT / CANary-PWR. The HAT's bottom-face budget below is unchanged.
+> **Superseded 2026-10-04 (§13.3.0), order corrected 2026-10-13:** the stack
+> is NVMe base / Pi 5 / CANary-PWR / CANary HAT. The cooler-clearance figures
+> below now apply to PWR's underside; the HAT's underside faces PWR's top.
 
 **Settled by the operator, 2026-10-01**, which closes what §13.1.1 left open
 ("X1202 coexistence — not tested, UPS not stacked"):

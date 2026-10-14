@@ -1,0 +1,6 @@
+(sym_lib_table
+	(version 7)
+	(lib (name "canary-pwr") (type "KiCad") (uri "${KIPRJMOD}/lib/symbols/canary-pwr.kicad_sym") (options "") (descr "CANary-PWR project symbols"))
+	(lib (name "LTC3350EUHF-PBF") (type "KiCad") (uri "${KIPRJMOD}/lib/symbols/LTC3350EUHF-PBF.kicad_sym") (options "") (descr "Ultra Librarian, pin map checked against the datasheet"))
+	(lib (name "LM61460AFSQRJRRQ1") (type "KiCad") (uri "${KIPRJMOD}/lib/symbols/LM61460AFSQRJRRQ1.kicad_sym") (options "") (descr "Ultra Librarian, pin map checked against the datasheet"))
+)

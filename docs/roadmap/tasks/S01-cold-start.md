@@ -388,7 +388,7 @@ system starting beside it.
   `usb_max_current_enable=1` first: the X1202 feeds the Pi through pogo pins,
   not USB-C PD, so the Pi assumes a 3 A supply and caps USB at 600 mA. *Later:*
   an NVMe base under the Pi, in the slot the retired X1202 frees. The power side
-  moves to a supercapacitor power board on top
+  moves to a supercapacitor power board between the Pi and the HAT
   ([`CANary-PWR-Spec.md`](../../CANary-PWR-Spec.md),
   `CANary-HAT-Revisions.md` §13.3.0). Still owed after each step: re-measure
   with S01.1's method. The original question follows. Every remaining

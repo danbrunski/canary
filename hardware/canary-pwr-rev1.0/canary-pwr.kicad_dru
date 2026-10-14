@@ -1,0 +1,31 @@
+(version 1)
+(rule "Q2 land pattern"
+	(constraint clearance (min 0.13mm))
+	(condition "A.insideCourtyard('Q2') && B.insideCourtyard('Q2')"))
+(rule "Q3 land pattern"
+	(constraint clearance (min 0.13mm))
+	(condition "A.insideCourtyard('Q3') && B.insideCourtyard('Q3')"))
+(rule "Q4 land pattern"
+	(constraint clearance (min 0.13mm))
+	(condition "A.insideCourtyard('Q4') && B.insideCourtyard('Q4')"))
+(rule "Q5 land pattern"
+	(constraint clearance (min 0.13mm))
+	(condition "A.insideCourtyard('Q5') && B.insideCourtyard('Q5')"))
+(rule "Q7 land pattern"
+	(constraint clearance (min 0.13mm))
+	(condition "A.insideCourtyard('Q7') && B.insideCourtyard('Q7')"))
+(rule "U1 land pattern"
+	(constraint clearance (min 0.13mm))
+	(condition "A.insideCourtyard('U1') && B.insideCourtyard('U1')"))
+(rule "U2 land pattern"
+	(constraint clearance (min 0.13mm))
+	(condition "A.insideCourtyard('U2') && B.insideCourtyard('U2')"))
+(rule "U3 land pattern"
+	(constraint clearance (min 0.13mm))
+	(condition "A.insideCourtyard('U3') && B.insideCourtyard('U3')"))
+(rule "U4 land pattern"
+	(constraint clearance (min 0.13mm))
+	(condition "A.insideCourtyard('U4') && B.insideCourtyard('U4')"))
+(rule "U8 land pattern"
+	(constraint clearance (min 0.13mm))
+	(condition "A.insideCourtyard('U8') && B.insideCourtyard('U8')"))

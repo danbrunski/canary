@@ -15,10 +15,11 @@
 > CANary-PWR ([`CANary-PWR-Spec.md`](CANary-PWR-Spec.md)) is a separate board
 > and nothing in rev 2.1 is designed for it. GPIO6 stays the X1202's, and
 > the X1202 is still fed from the HAT: rev 2.0's `J3` is folded into J2 as pins
-> 3–4 (2026-10-12, §13.5.5). The PWR interface waits for its own decision.
-> The operator raised a dedicated latching cable connector (JST GH class) as
-> an alternative to passing PWR's signals through the stacking header. It is
-> not adopted, but it is recorded here so it is not lost.
+> 3–4 (2026-10-12, §13.5.5). The PWR interface was decided 2026-10-13
+> (`CANary-PWR-Spec.md` §P3, §P8): PWR sits under the HAT, feeds 12V and CAN
+> to J2 through a jumper from its own pluggable terminals, and needs nothing
+> from rev 2.1. The JST GH cable the operator raised earlier is superseded by
+> that; `V_BCKP_AON` waits for rev 2.2/3.0.
 
 > **Part of the CANary-HAT board documentation.** Section numbers continue the
 > stable scheme: this file is **§13.5**, extending §13 in
