@@ -428,6 +428,14 @@ Also: VIN rising past ~13.2 V (alternator), and the bench button.
   carries the bus through it, invisibly. The MCU asserts `~PWR_FAIL` only when
   the input stays gone past a window, or VIN reads like an unplug (near 0 V).
   The Pi then shuts down at once.
+- **Crank summary** (2026-10-14). For every dip judged to be a crank, record
+  the resting VIN just before it, the plateau minimum, the duration and the
+  recovery time from `VIN_SENSE`. This board is the only one that sees the
+  battery below ~9 V: the HAT's `V12_SENSE` is on the held bus (§P3). This is
+  the battery-health trend from HAT §13.3.3(b). `VIN_SENSE` is ~12 Hz wide
+  (1 MΩ ∥ 150 kΩ into C3, 100 nF), enough for the plateau but not the first
+  inrush spike. Keep it a summary, or at most a ~100 Hz waveform (~400 B per
+  crank): no DMA buffers and no timebase work on the supervisor.
 - **OFF_HOLDOFF.** After key-off the bus stays busy while modules wind down;
   re-arm wake only after it has been quiet for a window set from observation.
 - **Watchdog.** Heartbeat over I²C; on timeout, power-cycle the Pi.
@@ -440,7 +448,7 @@ Also: VIN rising past ~13.2 V (alternator), and the bench button.
 **Telemetry.** VIN, bus and stack voltages, per-cell voltages, charge/input
 current, measured capacitance and ESR, bank temperature (LTC3350); Pi 5 V
 voltage and current (INA226); state, last wake source, last shutdown cause,
-firmware version, parked battery-voltage history. The Pi ingests the parked
+firmware version, parked battery-voltage history, crank summaries. The Pi ingests the parked
 history at each boot.
 
 ## P8. Running with HAT rev 2.1
@@ -498,6 +506,7 @@ history at each boot.
 | 11 | The cap-bank lead's resistance at bring-up | Calibrates the ESR readout |
 | 12 | The Vehicle-in plug's order number (KiCad's footprint confirms 1803293 for the header) and the Micro-Fit housings and crimps (43025-0600, 43025-1000, 43030) | BOM |
 | 13 | Copper weight: TI recommends 2 oz outer layers for the LM61460 | Fab order |
+| 14 | Alternator ripple at `+12V_HAT` against `VIN_SENSE`'s input, engine running | Whether the HAT coprocessor can measure ripple from `V12_SENSE` through the hold-up path (HAT §13.3.3b) |
 
 ## P11. Hardware project
 

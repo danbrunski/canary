@@ -679,7 +679,7 @@ objection, so the two jobs split along the power domains:
 |---|---|---|
 | Jobs | wake (§13.3.1), the Pi's 5V switch, watchdog with power-cycle authority (§13.3.3e), battery voltage and wake events while parked (§13.3.3d), power-fail line | boot-gap CAN buffer (§13.3.3a), kHz ADC and crank capture (§13.3.3b), PPS-locked time base (§13.3.3c), K-line (§13.3.4), IMU/baro FIFO, bulk dump to the Pi |
 | Firmware | small, rarely changed | the complex code, changed often |
-| If it fails | the Pi stays powered: §13.3.3(e)'s fail-safe rule, now on CANary-PWR | the extras are lost and the rig behaves like rev 2.1 |
+| If it fails | the Pi stays powered: §13.3.3(e)'s fail-safe rule, now on CANary-PWR | ~~the extras are lost and the rig behaves like rev 2.1~~ CAN (OBD requests included) and GNSS keep working; K-line, IMU, barometer and analog go dark until the Pi reflashes it over SWD (failure containment, below) |
 
 **The HAT becomes a single power domain again.** The rev 3.0 coprocessor runs
 from the Pi's 3V3, as every other part on the HAT does. **§13.3.2's
@@ -704,16 +704,50 @@ binds the HAT:
 | §13.3.1 sleep/wake | **Moved to CANary-PWR.** Wake-on-CAN uses a receive-only transceiver on the power board, so the HAT's TCAN1042 never needs standby power. The J3 load-switch architecture and the X1202 handshake are superseded. The `vehicle_state` → shutdown software (§3.7.6) is still required, unchanged. |
 | §13.3.2 power domains | **Dissolved on the HAT; applies to CANary-PWR's crossings.** |
 | §13.3.3(a) boot-gap buffer | Stays, on the coprocessor, subject to measurement 15. |
-| §13.3.3(b) electrical diagnostics | Crank, ripple and kHz sampling stay on the coprocessor: the Pi is powered by the time the engine cranks. **The parked parasitic-draw trend moves to CANary-PWR.** |
+| §13.3.3(b) electrical diagnostics | Ripple and kHz sampling stay on the coprocessor: the Pi is powered by the time the engine cranks. **The parked parasitic-draw trend moves to CANary-PWR**, and **from 2026-10-14 so does the crank summary**: only PWR sees the battery below ~9 V (§13.3.3b). |
 | §13.3.3(c) one time base | Stays, **but weaker.** The coprocessor no longer keeps time across a Pi power cycle, so `docs/time-sync.md`'s cold-boot problem is not dissolved, only narrowed to what PPS re-locks at each boot. |
 | §13.3.3(d) parked monitoring | **Moved to CANary-PWR.** Battery voltage and wake events only. **Motion-while-parked through INT2 is lost**: the IMU is dark when the Pi is off. If wanted, it is a cheap accelerometer on CANary-PWR. |
 | §13.3.3(e) watchdog | **Moved to CANary-PWR**, fail-safe toward Pi-on kept. |
 | §13.3.4 GNSS | The always-on rail that was V_BCKP's missing OR leg now comes from CANary-PWR as a **backup supply net**. V_BCKP is meant to be live while the module is off, so this is not a hazardous crossing. It also retires BT1. Keeping the receiver *tracking* while the Pi is off is lost. Hot-start ephemeris via V_BCKP is kept. |
 | §13.3.4 "do not put the MCU on I2C1" | The X1202 fuel gauge it protected is gone. CANary-PWR talks to the Pi as an **I2C target** on I2C1, behind a buffer powered from the Pi side. The Pi stays the only master, so the multi-master hazard behind that rule does not arise. The rule still holds for the coprocessor, which keeps its private sensor bus. |
 | §13.3.6 net list | Item 1 (always-on 3.3V) and item 3 (load switch) **leave the HAT**. Item 6 (Pi 3V3 sense) moves to CANary-PWR. Items 4, 5 and 14 are **no longer crossings**: both ends are in the Pi domain, so §13.3.2's pulls are no longer required. Keep the series resistors as cheap ESD/fault margin. Item 10 (INT2 motion wake) loses its purpose. **Added:** the CANary-PWR connector (`CANary-PWR-Spec.md` §P6). |
-| §13.3.10 MCU selection | The coprocessor no longer needs low standby current, and the "regulator Iq decides" argument moves to CANary-PWR. Part choice is RAM, FDCAN and ADC alone, as that section already concluded. |
+| §13.3.10 MCU selection | The coprocessor no longer needs low standby current, and the "regulator Iq decides" argument moves to CANary-PWR. Part choice is RAM, FDCAN and ADC alone, as that section already concluded. **Chosen 2026-10-14: `STM32U575RGT6`** (RIT6 alternate), on boot-gap RAM and DigiKey stock. |
 | §13.3.12 USB | "Powered from `+12V_RAW`, self-powered device" becomes powered from the Pi. The rule against drawing from or back-feeding VBUS still holds. |
 | §13.3.13 placement | The stack is NVMe base / Pi / **PWR** / HAT (2026-10-13), not X1202 / Pi / HAT. **J3, Q1, D1, C2 and the always-on buck leave the HAT**; J3 already lives in rev 2.1's J2 as pins 3–4, and rev 3.0 drops those two positions (§13.3.9 item 5). The HAT's bottom face now looks at CANary-PWR's top side rather than the cooler, so the fan keep-out and the ~6 mm cooler clearance move to PWR; the HAT's bottom-side budget becomes whatever its 13.5 mm J1 leaves above PWR's top-side parts (`CANary-PWR-Spec.md` §P2). Its top face is free. |
+
+**Failure containment (operator, 2026-10-14).** The coprocessor is not purely
+additive. K-line (§13.3.4), the IMU and barometer (private I²C, §13.3.4) and
+the analog channels (private SPI, §13.3.9 item 2) sit *behind* it. Only vehicle
+CAN and GNSS are fan-outs the Pi keeps. That dependency is accepted. What is not
+accepted is the coprocessor taking the Pi's CAN path down with it. Silicon
+failure is not the case to design for: the MCU faces no harness pin and runs
+only while the Pi does. The routine cases are: held in reset for every SWD
+reflash, a firmware hang, halted at a gdb breakpoint, and unflashed at
+bring-up. So:
+
+- **U4's STB stays on the Pi** (GPIO22, the overlay's `gpio-hog`, as on rev 2.0
+  and 2.1), not on the MCU (§13.3.6 item 13). STB has an internal pull-up
+  (§13.3.1), so with the MCU in reset it would float to standby and deafen
+  `can0` for every reflash and every watchdog reset. Owning STB only meant
+  something while the MCU was the always-on supervisor. After the re-scope the
+  HAT is unpowered when parked and wake-on-CAN is PWR's.
+- **The MCU's SPI0 MISO goes through a single-gate tri-state buffer enabled by
+  CE1** (e.g. 74LVC1G125). U3 shares that MISO, so a firmware bug that drives
+  it while unselected would corrupt CAN reads. The buffer makes that impossible
+  rather than a firmware rule. Reset alone is safe, since STM32 pins float in
+  reset; bugs are the case.
+- **The independent watchdog (IWDG) is on from the first image**, by option
+  byte as on PWR (`CANary-PWR-Spec.md` §P7), so a hang becomes a reset lasting
+  milliseconds.
+- **Recovery is an SWD reflash from the Pi** (§13.3.12). The Pi stays up
+  because PWR, not the coprocessor, owns power. The Pi reports a missing
+  coprocessor in `/status` when the item-4 handshake goes quiet.
+
+*Rejected:* DNP 0 Ω links wiring the ADC to SPI0 and the IMU to I²C1 as on
+rev 2.1. They only pay off for permanent silicon failure, which is negligible,
+or for an unflashed board. *Also rejected:* writing the bridge firmware on a
+Nucleo before fab. The operator brings firmware up on the fabricated rev 3.0
+board itself, and the rev 2.x board covers the truck meanwhile.
 
 **Rev 2.1 is not held for any of this.** It carries the supercharger
 instrumentation and the rev 2.0 fixes. CANary-PWR rev 1.0 is designed to run
@@ -962,6 +996,23 @@ These need no reverse engineering and carry no binding risk — rare in this
 project — and they degrade slowly and monotonically, the exact shape
 `docs/roadmap/archive/eval-longitudinal-and-dtc.md` Phase 4 exists to detect.
 
+> **Split between the boards (operator, 2026-10-14).** With CANary-PWR fitted,
+> the HAT's `V12_SENSE` reads PWR's backed-up bus, which stops following the
+> battery below ~9 V (`CANary-PWR-Spec.md` §P3). That is where a weakening
+> battery's crank minimum lives (the usual threshold is ~9.6 V), so the HAT can
+> no longer measure the crank. The **crank summary** (resting voltage, plateau
+> minimum, duration, recovery) goes to PWR's supervisor instead. It reads
+> `VIN_SENSE`, which sits before the hold-up and sees the battery through the
+> whole crank (§P7). PWR already judges every dip for DIP vs HOLDUP, so the
+> summary is bookkeeping on a decision it makes anyway. `VIN_SENSE` is ~12 Hz
+> wide (1 MΩ ∥ 150 kΩ into 100 nF): it keeps the cranking plateau and smooths
+> the first inrush spike. **Alternator ripple and kHz sampling while running
+> stay on the coprocessor**, from `V12_SENSE`: above ~9 V the bus follows the
+> input. Whether the hold-up path passes ripple unchanged is a bring-up
+> measurement (`CANary-PWR-Spec.md` §P10 item 14), not an assumption.
+> *Rejected:* a raw `VIN_SENSE` wire from PWR to the HAT. HAT out has no free
+> position, and with this split nothing needs it.
+
 **(c) One hardware time base.** Today CAN frames, OBD responses, IMU samples and
 GPS fixes are each stamped in a different place with different latency, all
 through Linux scheduling. An MCU counter disciplined by the M10's TIMEPULSE can
@@ -1158,10 +1209,10 @@ Fix this list before layout: a missing net is a re-spin, unused firmware is free
 | # | Net | For |
 |---|---|---|
 | 1 | **Always-on 3.3V** from `+12V_RAW`, nA-class-Iq regulator | MCU + TCAN1042 VIO (wake) + GNSS V_BCKP OR leg (§13.3.2) |
-| 2 | 12V divider → MCU ADC | crank/alternator/parasitic (§13.3.3b); K-line undervoltage disambiguation. **Divider lands in rev 2.0** behind a small I2C ADC (§13.2.3) — rev 3.0 re-points it at the MCU for kHz sampling. **Rev 2.1 makes this four channels** (`V12_SENSE`, `MAP`, `IAT`, `5V_SENS`; §13.5.3), and MAP/IAT are ratios against `5V_SENS`, so all three must land on the *same* ADC — §13.3.9 |
+| 2 | 12V divider → MCU ADC | crank/alternator/parasitic (§13.3.3b); K-line undervoltage disambiguation. **Divider lands in rev 2.0** behind a small I2C ADC (§13.2.3) — rev 3.0 re-points it at the MCU for kHz sampling. **Rev 2.1 makes this four channels** (`V12_SENSE`, `MAP`, `IAT`, `5V_SENS`; §13.5.3), and MAP/IAT are ratios against `5V_SENS`, so all three must land on the *same* ADC — §13.3.9. **From 2026-10-14 that ADC is the ADS8688A on a private MCU SPI bus**, not the MCU's own (§13.3.9 item 2), and the crank summary is CANary-PWR's (§13.3.3b) |
 | 3 | MCU GPIO → high-side load switch on the J3 leg | §13.3.1 sleep/wake |
 | 4 | MCU ↔ Pi UART pair | handshake; works whenever the MCU is up |
-| 5 | MCU ↔ Pi on ~~SPI0 CE1 (GPIO7, pin 26)~~ **SPI0 with a GPIO chip select on GPIO20** | bulk buffer dump; a few hundred KB over UART is painful. **CE1 is spent by rev 2.1 — on the ADS8688A ADC, not CAN1** (§13.5.4, revised 2026-10-03); the conclusion for this item is unchanged, only the reason |
+| 5 | MCU ↔ Pi on **SPI0 CE1 (GPIO7, pin 26)** — ~~SPI0 with a GPIO chip select on GPIO20~~ | bulk buffer dump; a few hundred KB over UART is painful. ~~CE1 is spent by rev 2.1 — on the ADS8688A ADC, not CAN1~~ **Back on CE1 from 2026-10-14:** rev 2.1's ADS8688A moves behind the MCU (§13.3.9 item 2), and GPIO20 went to GNSS PPS at rev 2.1 layout. The MCU's MISO goes through a CE1-gated tri-state buffer (§13.3.0, failure containment) |
 | 6 | Pi 3V3 rail sense → MCU | the tri-state invariant in §13.3.2 |
 | 7 | TCAN1042 RXD → MCU (fan-out) | boot-gap capture, wake, timestamps. ~~Rev 2.1 adds U11 (CAN1/aux)~~ — **CAN1 was dropped 2026-10-03** (§13.5.4), so there is one transceiver and one RXD fan-out. Fuel pressure is an analog channel on U8, which means **capturing it across the boot gap now needs the MCU to read the ADC**, not a second RXD — a change in kind for §13.3.9 to absorb |
 | 8 | K-line RXD / TXD / EN → MCU | §13.3.4; supersedes the Pi's `uart0` connection |
@@ -1169,7 +1220,7 @@ Fix this list before layout: a missing net is a re-spin, unused firmware is free
 | 10 | **LSM6DSOX INT2 (pin 9 — unconnected on rev 1.0)** → MCU | motion wake. **Landed in rev 2.0** as a net to a free Pi GPIO (§13.2.3); rev 3.0 re-points it |
 | 11 | Private MCU I2C → LSM6DSOX + BMP384 | §13.3.4 — **must not be I2C1** |
 | 12 | ~~GNSS antenna bias sense → MCU ADC~~ **→ u-blox two-pin antenna supervisor** | Open/short antenna detection, **but not via the MCU** — the M10M does it itself. Deferred here from rev 2.0 on 2026-08-22. See below. |
-| 13 | STB (U4), **U9 sensor-rail EN (rev 2.1)** and the §13.2 pull-up FET gate → MCU | safe-state ownership. **U4 STB and the FET gate exist in rev 2.0** as Pi GPIOs (§13.2.1, §13.2.4); rev 2.1 ties U9 EN to `+3V3` (§13.5.3). ~~STB (U11)~~ — **gone with CAN1, 2026-10-03** (§13.5.4). Rev 3.0 moves the rest to the MCU |
+| 13 | STB (U4), **U9 sensor-rail EN (rev 2.1)** and the §13.2 pull-up FET gate → MCU | safe-state ownership. **U4 STB and the FET gate exist in rev 2.0** as Pi GPIOs (§13.2.1, §13.2.4); rev 2.1 ties U9 EN to `+3V3` (§13.5.3). ~~STB (U11)~~ — **gone with CAN1, 2026-10-03** (§13.5.4). Rev 3.0 moves the rest to the MCU. **Revised 2026-10-14:** U4 STB stays on the Pi (§13.3.0, failure containment). The FET gate goes with K-line to the MCU. U9 EN can go either way, since its "parked MAP-equals-baro" reason went with the always-on MCU |
 | 14 | **A flash path from the Pi** — SWD bit-banged from Pi GPIO, or a UART bootloader with BOOT0 on a Pi-drivable pin | see below |
 | 15 | Status LEDs → MCU | §13.2, §13.3.4 |
 
@@ -1261,7 +1312,9 @@ Pi that can put the vehicle transceiver in a safe state with the supervisor dead
 which pairs with the fail-safe-to-Pi-on rule in §13.3.3(e). If a pin is retained
 for that, it is retained *deliberately* and the net carries two drivers, so it
 needs the arbitration spelled out. What is not defensible is treating those pins
-as unavailable by accident.
+as unavailable by accident. **Settled for STB, 2026-10-14:** it stays on the
+Pi alone, with one driver and no arbitration (§13.3.0, failure containment), so
+GPIO22 does not return to the budget.
 
 **And SWD does not need header GPIO at all.** Item 14 is called a hard
 requirement, then satisfied in its weakest form — a UART bootloader, no debugger
@@ -1371,20 +1424,39 @@ differs. Note option (c) below is now moot.)* Three ways out were weighed on
 | (b) MCU as a USB device — bulk dump, DFU flashing, optional `gs_usb` channels on one cable | A USB connector on the HAT and a cable to a Pi port; frees GPIO20/21 | Fallback if (a) fails at bring-up. §13.3.4's objection (every other interface arrives through the header) is weaker now that the header is full, but it still stands |
 | ~~(c) Fold CAN1 into the MCU and give CE1 back~~ | **Moot from 2026-10-03** — there is no CAN1 to fold, and CE1 is held by the ADC, which the MCU is not a substitute for | Moot |
 
+**Superseded 2026-10-14:** the ADS8688A moves to a private MCU bus (item 2),
+so CE1 comes back and the MCU link takes it natively. That means no `cs-gpios`
+overlay, and GPIO20 (GNSS PPS since the rev 2.1 layout) is not needed.
+
 Consequence of (a): ~~the header closes with **no spare GPIO**~~ — **revised
 2026-10-03.** With CAN1 dropped, the budget above closes with **two spare
 (GPIO19, GPIO27)**. Item 14 may therefore still be the UART-bootloader form
 (`uart4` + `BOOT0` on GPIO21), but **bit-banged SWD is no longer excluded for
 want of pins** — that comparison should be re-run on its merits.
 
-**2. The ADC is four channels, and three of them are a set.** Item 2 was
-written for one divider. Rev 2.1 adds `MAP`, `IAT` and `5V_SENS` on U8 and
-computes MAP and IAT as *ratios* against `5V_SENS` (§13.5.3 item 4). Re-pointing
-at the MCU means **all four dividers go to MCU ADC pins on one converter with
-one reference**, or the ratio no longer cancels what it was built to cancel. U8
-is then deleted, which also takes the ADS1015's traffic off I2C1 (§13.5.3 item
-5's bus-loading concern goes with it). The crank-voltage instrument in
-§13.3.3(b) gains MAP-at-crank for free.
+**2. The ADC stays the ADS8688A, on a private bus behind the MCU (operator,
+2026-10-14).** ~~Re-pointing at the MCU means **all four dividers go to MCU ADC
+pins on one converter with one reference**… U8 is then deleted, which also
+takes the ADS1015's traffic off I2C1.~~ That plan was written for the ADS1015
+and is superseded. Rev 3.0 keeps the ADS8688A and moves it to a **private SPI
+bus that only the MCU drives**, the same way the IMU and barometer get a
+private I²C bus (§13.3.4). Why:
+
+- The analog worth giving the MCU happens in the boot gap or at kHz: MAP at
+  crank, and the fuel-pump prime at key-on. A Pi-owned ADC sees neither,
+  whatever bus it sits on.
+- Fast sampling by the Pi costs CAN. Rev 2.1 records ADC polling competing
+  with U3 on SPI0 (§13.5.3 item 5). Behind the MCU, a kHz capture costs SPI0
+  only a batched upload, and the CAN controller gets its bus back.
+- The ADS8688A is better here than any MCU ADC: 16-bit, ±20 V input
+  protection, 0–5 V direct. MAP and IAT stay ratios against `5V_SENS` on one
+  converter with one reference. Using the MCU's ADC instead would bring the
+  dividers and protection back.
+- Each sensor has exactly one master: no shared SPI, no bus switch, no
+  hand-off.
+- It gives CE1 back to the MCU link (item 1).
+
+The cost: the Pi reads analog only through the coprocessor.
 
 **3. ~~Two transceivers~~ one transceiver, one always-on rail.** *(Revised
 2026-10-03: CAN1 and its U11 were dropped — §13.5.4.)* Item 1's always-on VIO
@@ -1403,9 +1475,9 @@ is cheap, continuous sensor power is not.
 **A new one in its place: the MCU needs to reach the ADC.** Fuel pressure was
 going to arrive on CAN1, so §13.3.6 item 7's RXD fan-out captured it across
 the boot gap for free. As an analog channel on U8 it does not, so **boot-gap
-fuel-pressure capture now requires the MCU to read the ADS8688A** — either
-sharing SPI0 or its own link. Weigh that in rev 3.0 rather than assuming item
-7 still covers it.
+fuel-pressure capture now requires the MCU to read the ADS8688A** — **over
+its own link, settled 2026-10-14 (item 2)**. Sharing SPI0 would put two
+masters on one bus.
 
 **5. J2 becomes a pluggable Phoenix MC 1,5 (operator, 2026-10-14).** Rev 2.1
 ends at one fixed 13-way screw terminal, `PT 1,5/13-3,5-H`, with J3 folded
@@ -1465,12 +1537,14 @@ not the MCU's sleep mode" is what makes this a free choice rather than a
   still a live rev 3.0 option.
 - **An SPI master that can read the ADS8688A** — new requirement from
   2026-10-03, replacing the aux-CAN decode path above: boot-gap fuel pressure
-  is an ADC read now, not a frame.
+  is an ADC read now, not a frame. From 2026-10-14 it is on a private bus
+  (§13.3.9 item 2), so it is a second SPI peripheral beside item 5's slave.
 - **Several hundred KB SRAM** — §13.3.3(a)'s boot-gap buffer. *Unmeasured; see
   the gating item below.*
-- **Four ADC channels on one converter with one reference** — §13.3.9 item 2's
-  ratiometric MAP/IAT against `5V_SENS`. Split across converters and the ratio
-  stops cancelling what it exists to cancel.
+- ~~**Four ADC channels on one converter with one reference** — §13.3.9 item 2's
+  ratiometric MAP/IAT against `5V_SENS`.~~ **Dropped 2026-10-14:** the
+  ADS8688A stays and provides that (§13.3.9 item 2), so no ratiometric channel
+  depends on the MCU's own ADC.
 - **µs-deterministic UART gating** — §13.3.4's K-line table.
 - **SPI slave** for item 5's bulk dump; **LQFP**; able to take 40 MHz from rev
   2.1's X1 (§13.3.9 item 8).
@@ -1487,7 +1561,8 @@ Three things that table settles, all verified against datasheets 2026-10-01:
   leads to, and it cannot decode both fan-outs in hardware. The aux line carries
   one node (the AEM gauge) at low rate, so software decode there is defensible
   — but it is a second CAN implementation in firmware, which §13.3.7 is
-  rightly allergic to.
+  rightly allergic to. **Moot from 2026-10-03:** CAN1 is dropped, so there is
+  one fan-out, and the U575 is the chosen part (below).
 - **The standby column is a red herring.** §13.3.2's own arithmetic puts 200 µA
   at over a decade on 20 Ah, so 3.5 µA and 210 nA are indistinguishable here.
   Do not let low-power marketing pick this part; **RAM and FDCAN count decide it.**
@@ -1505,8 +1580,72 @@ is an hour's arithmetic. At ~1500 frames/s and 20 B/frame, 40 s is over 1 MB; at
 ~500 frames/s it is ~400 KB; with per-ID delta encoding — most broadcast traffic
 is the same IDs repeating — it could land under 100 KB. **Do this first.** If it
 fits in 128 KB, the STM32G4 wins on every other axis (3× FDCAN, the best ADCs of
-the three, cheapest, and the part this section already named). If it needs
-hundreds of KB, the **STM32H563 in LQFP64** matches the two fan-outs exactly.
+the three, cheapest, and the part this section already named). The ADC axis
+counts for less from 2026-10-14, since the ADS8688A does the measuring. If it needs
+hundreds of KB, the **STM32H563 in LQFP64** ~~matches the two fan-outs exactly~~
+has one FDCAN for the vehicle fan-out and one spare.
+
+**Sized and chosen (operator, 2026-10-14): `STM32U575RGT6`**, with
+`STM32U575RIT6` as a same-footprint alternate (2 MB flash instead of 1 MB).
+That is LQFP64, **784 KB SRAM** (512 KB of it one contiguous bank, SRAM3),
+Cortex-M33 at 160 MHz, **1× FDCAN**, USB OTG FS, the LDO (non-`Q`) variant,
+−40…85 °C. The STM32H563 was picked first on the same sizing, then dropped on
+supply. The operator found **zero DigiKey stock on every H5 code** with enough
+RAM: H563 RIT6/RGT6, H562 RGT6/RIT6, H573RIT6, the `TR` reels, the VFQFPN68
+`RGV6`/`RIV6` and the LQFP100 `VGT6`/`VIT6`. The U575 RIT6 and RGT6 were the
+only stocked candidates. The arithmetic:
+
+- **Rate: ~1,556 frames/s** aggregate on the Xterra
+  (`docs/abs-wheel-speed-and-did-gap-protocol.md`, and ~1,500 at KOEO in the
+  §13.1.2 bring-up).
+- **Packed frame: 13.8 B** (4 B timestamp, 2 B ID + DLC, mean DLC 7.8), so
+  **~21.5 KB/s**.
+- **Per-ID XOR delta: ~6 B/frame**, so **~9.6 KB/s**. *Weak evidence:* this
+  was measured on the committed 5-ID ground-truth slice, the only raw CAN in
+  the repo. Rolling counters and checksums change in most frames, so the
+  doc's earlier "under 100 KB" hope does not hold. Re-check on a full session.
+- **Window: 40 s**, the top of §13.3.3(a)'s estimate. Measurement 12 is still
+  open.
+- **~64 KB of SRAM** is held back for firmware, stacks and the other streams'
+  buffers.
+
+| Part | SRAM | Usable | Raw window | Delta window |
+|---|---|---|---|---|
+| STM32G474 | 128 KB | ~64 KB | ~3 s | ~7 s |
+| STM32H523/533 | 272 KB | ~208 KB | ~10 s | ~22 s |
+| STM32H563 (no stock) | 640 KB | ~576 KB | ~27 s | ~60 s |
+| **STM32U575** | **784 KB** | **~720 KB** (512 KB contiguous) | **~24–33 s** | **~53–75 s** |
+
+The U575's lower figure is the ring in SRAM3 alone; the upper one adds SRAM1.
+**Only the H563 and U575 cover the boot gap, and both need the per-ID delta
+encoding to cover 40 s with margin.** At 1,556 frames/s that encoding is
+trivial work for an M33. The G474's other advantages (3× FDCAN, the best ADCs,
+the lowest cost) no longer decide anything: one FDCAN is used, and the
+ADS8688A does the measuring.
+
+**The U575's single FDCAN is now exactly enough.** The earlier objection
+(below, "The STM32U5 has one FDCAN") assumed two fan-outs. CAN1 was dropped on
+2026-10-03, and every aux bus is a `gs_usb` adapter (§13.3.9 item 7), so the
+only thing lost is the spare. Its 160 MHz against the H563's 250 MHz does not
+matter for this work.
+
+LQFP64's ~49 I/O cover the ~32 this section needs: FDCAN RX, two SPI, I²C plus
+two IMU interrupts, three UARTs, the K-line EN and FET gate, TIMEPULSE, USB,
+SWD, LEDs and HSE.
+
+*At schematic entry:*
+- confirm HSE accepts X1's 40 MHz in bypass mode (§13.3.9 item 8);
+- add the LDO variant's `VDD11` decoupling;
+- keep TrustZone (`TZEN`) off.
+
+**Never set RDP level 2.** It disables debug permanently, and SWD is this
+part's whole recovery story (§13.3.12).
+
+*Rejected:* a G474 plus an 8 MB QSPI PSRAM. It holds minutes of raw frames,
+but at the cost of a sixth bus on a full board to save on a chip that does not
+need saving. The stocked grades are −40…85 °C. That is acceptable: the MCU is
+unpowered while parked, so the worst case is a hot-cab key-on under the Pi
+stack's fan.
 
 **Rejected: the Teensy / i.MX RT1062 class.** Raised 2026-10-01 from the
 coprocessor idea, and it belongs to a different architecture — an external box on
@@ -1688,7 +1827,9 @@ dumps, K-line, GNSS, IMU, ADC telemetry, received CAN with MCU timestamps — is
 **CAN transmit over USB**, which is what the declined gate would have bought.
 This also confirms §13.3.10's framing: the MCU's FDCAN peripherals stay
 **listen-only**, so two silent instances remain the natural requirement and the
-STM32U5's single FDCAN remains the caveat recorded there.
+STM32U5's single FDCAN remains the caveat recorded there. *(Moot from
+2026-10-14: with one fan-out, one silent FDCAN is the requirement, and the
+STM32U575 is the chosen part.)*
 
 #### 13.3.13 Placement: rev 3.0 goes double-sided
 
