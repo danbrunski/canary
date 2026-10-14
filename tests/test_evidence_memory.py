@@ -405,6 +405,28 @@ def test_record_time_never_moves_backwards(tmp_path: Path) -> None:
         ledger.append(_evidence(subject="other"), now=T0)
 
 
+def test_a_wall_clock_stepped_back_does_not_refuse_an_append(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """T01.26: WSL2 under load, or a Pi whose NTP steps backwards, reads the
+    wall clock lower than the newest record. The ledger minted that stamp
+    itself, so record time holds at the newest instead of refusing; record
+    order is still never reversed."""
+    import src.evidence.ledger as ledger_module
+
+    ledger = _ledger(tmp_path)
+    first = ledger.append(_evidence(), now=T0 + timedelta(hours=1))
+    monkeypatch.setattr(ledger_module, "_now", lambda: T0)  # clock stepped back an hour
+    second = ledger.append(_evidence(subject="other"))
+    assert second.recorded_at == first.recorded_at
+    assert second.id != first.id
+    reopened = _ledger(tmp_path)
+    assert reopened.get(second.id).recorded_at == first.recorded_at
+    # an explicit earlier time is still the caller's error, not the clock's
+    with pytest.raises(ValueError, match="backwards"):
+        ledger.append(_evidence(subject="third"), now=T0)
+
+
 def test_replaying_the_log_preserves_both_times_and_supersession_history(
     tmp_path: Path,
 ) -> None:

@@ -805,7 +805,7 @@ measurement in hand.
     any more, and `import time` is gone.
   - **After:** the file runs 20 of 20 in 0.34 s. The same probe on the fake
     clock passes, because a real stall does not advance simulated time.
-- [ ] **T01.26 `tests/test_twin_command_change.py::test_the_brain_memory_and_card_routes_serve_a_what_if_unchanged`
+- [x] **T01.26 `tests/test_twin_command_change.py::test_the_brain_memory_and_card_routes_serve_a_what_if_unchanged`
   raised "record time cannot move backwards on an append-only ledger".**
   - **Seen** 2026-10-13 in the push gate for `030bcf1` (a docs/scripts-only
     change), parallel run at load average 24.5 (1-min): `record_command_change`
@@ -832,7 +832,21 @@ measurement in hand.
     `tests/test_twin_investigation.py::test_a_later_occurrence_of_the_same_direction_updates_its_investigation`
     with the same `ValueError` at `_append_locked`. It passed serially. Log:
     `.git/ci-gate/failed-logs/20261013T150132Z-7cf315b-pytest.log`.
-- [ ] **T01.27 `tests/test_residual_chain.py` failed under load (four tests).**
+  - **Fixed 2026-10-13: the ledger, not the tests.** Record time is when the
+    ledger came to believe a record, so it is monotonic. In
+    `MemoryLedger._append_locked`, a stamp the ledger mints from the wall
+    clock (`now=None`) that reads below `index.latest` is held at
+    `index.latest` instead of refusing. An explicit `now=` earlier than the
+    newest record is still the caller's error and still refuses. So a Pi
+    whose NTP steps the clock back keeps appending, in record order, rather
+    than losing the record. Test:
+    `tests/test_evidence_memory.py::test_a_wall_clock_stepped_back_does_not_refuse_an_append`
+    (patches `_now` an hour back after an append: fails before the fix with
+    the same `ValueError`; after it, the stamp equals the newest, the id
+    differs, a reopened ledger reads the same, and an explicit earlier
+    `now=` still refuses). The three tests named above and the 10 ledger-using
+    files pass (168).
+- [x] **T01.27 `tests/test_residual_chain.py` failed under load (four tests).**
   - **Seen** 2026-10-13 by another session in one full parallel
     `pytest -m "not integration and not slow"` run on the laptop, while it
     worked on H08. They passed alone, 3 of 3 runs in parallel on their own, in
@@ -842,3 +856,10 @@ measurement in hand.
   - **Probably T01.26:** B08.5's residual chain appends to the same evidence
     ledger, and T01.26's `ValueError` hit three other ledger tests that day.
     Close this with T01.26 if the ledger fix stops it.
+  - **Closed with T01.26, 2026-10-13.** Every `test_residual_chain.py` test
+    appends without `now=` (`residual_chain` passes its `now=None` through
+    to `MemoryLedger.append`), so its stamps come from the wall clock: the one
+    path that raised T01.26's `ValueError`, and it no longer can. The failure
+    text was not kept, so that this was the same error is an inference from
+    the shared path and the same day. If it recurs with a different error,
+    reopen it with the text and the load average.

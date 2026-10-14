@@ -423,6 +423,8 @@ class MemoryLedger(JsonlStore[AnyRecord]):
 
         ``now`` exists for tests that need a known record time; it must not
         precede the newest record on file (record time only moves forward).
+        Without it the ledger stamps the wall clock, held at the newest record
+        if the clock has stepped back (T01.26).
         """
         if record.id or record.recorded_at is not None:
             raise ValueError(
@@ -498,9 +500,18 @@ class MemoryLedger(JsonlStore[AnyRecord]):
                 update["supersession_reason"] = record.supersession_reason or (
                     f"recomputed {record.subject} with different inputs, code or values"
                 )
-        stamp = now if now is not None else _now()
-        if index.latest is not None and stamp < index.latest:
-            raise ValueError("record time cannot move backwards on an append-only ledger")
+        if now is not None:
+            stamp = now
+            if index.latest is not None and stamp < index.latest:
+                raise ValueError("record time cannot move backwards on an append-only ledger")
+        else:
+            # Record time is when the ledger came to believe a record, so it is
+            # monotonic. A wall clock stepped back (NTP on the Pi, WSL2 under
+            # load: T01.26) holds at the newest record rather than refusing a
+            # record the ledger is stamping itself.
+            stamp = _now()
+            if index.latest is not None and stamp < index.latest:
+                stamp = index.latest
         update["recorded_at"] = stamp
         stamped = record.model_copy(update=update)
         salt = 0
