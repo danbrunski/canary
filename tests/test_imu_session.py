@@ -194,7 +194,7 @@ def test_known_tilt_and_manoeuvres_resolve_both_families(yaw_deg: float) -> None
     vehicle-frame specific force; ACCEL_* equal it without gravity; LAT is
     left-positive either way."""
     truth = drive(MANOEUVRES, mount_matrix=mount(6.0, -8.0, yaw_deg), noise_g=0.005)
-    out = resolved(resolve_imu_frame(channels(truth), now=NOW))
+    out = resolved(resolve_imu_frame(channels(truth), now=NOW, change_only_timeout_seconds=None))
     f, frame = truth.frame, out.frame
 
     pull = rows_where(truth, f["a_g"] > 0.2)
@@ -228,7 +228,11 @@ def test_quiescent_lookahead_keeps_a_pull_from_rest_out_of_the_reference() -> No
     speed still reads 0. A trailing window counts that second as quiescent
     and tilts the reference by the pull; the look-ahead does not."""
     truth = drive(MANOEUVRES, mount_matrix=mount(0.0, 0.0, 0.0))
-    out = resolved(resolve_imu_frame(channels(truth, speed=("gps:speed",)), now=NOW))
+    out = resolved(
+        resolve_imu_frame(
+            channels(truth, speed=("gps:speed",)), now=NOW, change_only_timeout_seconds=None
+        )
+    )
     sf = out.sidecar.specific_force
     assert sf is not None
     reference = np.array(sf.pitch_reference.gravity_body_g)
@@ -254,7 +258,7 @@ def test_sf_lon_on_a_known_grade_is_a_plus_g_sin_grade() -> None:
         Segment(6.0, 70.0, 20.0, grade=grade),
     ]
     truth = drive(segments, mount_matrix=mount(3.0, 5.0, 40.0), noise_g=0.003)
-    out = resolved(resolve_imu_frame(channels(truth), now=NOW))
+    out = resolved(resolve_imu_frame(channels(truth), now=NOW, change_only_timeout_seconds=None))
     f = truth.frame
     uphill_pull = rows_where(truth, (f["grade_rad"] > 0) & (f["a_g"] > 0))
     uphill_brake = rows_where(truth, (f["grade_rad"] > 0) & (f["a_g"] < 0))
@@ -282,7 +286,7 @@ def test_accel_lon_excludes_the_grade_after_a_steady_climb() -> None:
         Segment(5.0, 80.0, 80.0, grade=grade),
     ]
     truth = drive(segments, mount_matrix=mount(-4.0, 7.0, 130.0), noise_g=0.003)
-    out = resolved(resolve_imu_frame(channels(truth), now=NOW))
+    out = resolved(resolve_imu_frame(channels(truth), now=NOW, change_only_timeout_seconds=None))
     f = truth.frame
     pull = rows_where(truth, (f["grade_rad"] > 0) & (f["a_g"] > 0))
     a = f["a_g"].iloc[pull].mean()
@@ -317,7 +321,7 @@ def test_the_recorded_reference_composes_with_the_dyno_pitch_offset() -> None:
         Segment(20.0, 30.0, 30.0, heading0=270.0, heading1=270.0, grade=-grade),  # down
     ]
     truth = drive(segments, mount_matrix=mount(2.0, -6.0, 75.0))
-    out = resolved(resolve_imu_frame(channels(truth), now=NOW))
+    out = resolved(resolve_imu_frame(channels(truth), now=NOW, change_only_timeout_seconds=None))
     sf_block = out.sidecar.specific_force
     assert sf_block is not None
     f = truth.frame
@@ -366,7 +370,7 @@ def test_a_session_without_obd_speed_resolves_from_0x2d1() -> None:
     truth = drive(MANOEUVRES, mount_matrix=mount(4.0, 3.0, 60.0), noise_g=0.005)
     recorded = channels(truth, speed=("decoded:VEHICLE_SPEED_2D1",))
     assert "obd:SPEED" not in recorded
-    out = resolved(resolve_imu_frame(recorded, now=NOW))
+    out = resolved(resolve_imu_frame(recorded, now=NOW, change_only_timeout_seconds=None))
     assert out.sidecar.inputs is not None
     assert out.sidecar.inputs.speed_source == "decoded:VEHICLE_SPEED_2D1"
     pull = rows_where(truth, truth.frame["a_g"] > 0.2)
@@ -376,7 +380,11 @@ def test_a_session_without_obd_speed_resolves_from_0x2d1() -> None:
 
 def test_a_session_without_obd_speed_resolves_from_gps() -> None:
     truth = drive(MANOEUVRES, mount_matrix=mount(4.0, 3.0, 60.0), noise_g=0.005)
-    out = resolved(resolve_imu_frame(channels(truth, speed=("gps:speed",)), now=NOW))
+    out = resolved(
+        resolve_imu_frame(
+            channels(truth, speed=("gps:speed",)), now=NOW, change_only_timeout_seconds=None
+        )
+    )
     assert out.sidecar.inputs is not None
     assert out.sidecar.inputs.speed_source == "gps:speed"
 
@@ -384,7 +392,9 @@ def test_a_session_without_obd_speed_resolves_from_gps() -> None:
 def test_0x2d1_outranks_obd_and_gps() -> None:
     truth = drive(MANOEUVRES, mount_matrix=mount(0.0, 0.0, 0.0))
     speeds = ("decoded:VEHICLE_SPEED_2D1", "obd:SPEED", "gps:speed")
-    out = resolved(resolve_imu_frame(channels(truth, speed=speeds), now=NOW))
+    out = resolved(
+        resolve_imu_frame(channels(truth, speed=speeds), now=NOW, change_only_timeout_seconds=None)
+    )
     assert out.sidecar.inputs is not None
     assert out.sidecar.inputs.speed_source == "decoded:VEHICLE_SPEED_2D1"
 
@@ -402,34 +412,42 @@ def _refusal(result: ImuSessionFrame | ImuFrameRefusal) -> ImuFrameRefusal:
 def test_refusals_name_their_cause() -> None:
     truth = drive(MANOEUVRES, mount_matrix=mount(0.0, 0.0, 0.0))
 
-    no_imu = _refusal(resolve_imu_frame(channels(truth, imu=False)))
+    no_imu = _refusal(
+        resolve_imu_frame(channels(truth, imu=False), change_only_timeout_seconds=None)
+    )
     assert no_imu.kind == "imu_rows_missing" and "imu:ACCEL_X" in no_imu.reason
 
-    no_speed = _refusal(resolve_imu_frame(channels(truth, speed=())))
+    no_speed = _refusal(
+        resolve_imu_frame(channels(truth, speed=()), change_only_timeout_seconds=None)
+    )
     assert no_speed.kind == "no_speed_source"
     assert "decoded:VEHICLE_SPEED_2D1" in no_speed.reason and "gps:speed" in no_speed.reason
 
-    no_heading = _refusal(resolve_imu_frame(channels(truth, heading=False)))
+    no_heading = _refusal(
+        resolve_imu_frame(channels(truth, heading=False), change_only_timeout_seconds=None)
+    )
     assert no_heading.kind == "no_heading" and "gps:heading" in no_heading.reason
 
     always_moving = drive(
         [Segment(10.0, 0.0, 50.0), Segment(10.0, 50.0, 0.0)] * 2,
         mount_matrix=mount(0.0, 0.0, 0.0),
     )
-    no_rest = _refusal(resolve_imu_frame(channels(always_moving)))
+    no_rest = _refusal(resolve_imu_frame(channels(always_moving), change_only_timeout_seconds=None))
     assert no_rest.kind == "no_quiescent_period" and "obd:SPEED" in no_rest.reason
 
     never_straight_accel = drive(
         [Segment(20.0, 50.0, 50.0), Segment(10.0, 50.0, 50.0, heading1=180.0, lat_g=0.2)],
         mount_matrix=mount(0.0, 0.0, 0.0),
     )
-    no_yaw = _refusal(resolve_imu_frame(channels(never_straight_accel)))
+    no_yaw = _refusal(
+        resolve_imu_frame(channels(never_straight_accel), change_only_timeout_seconds=None)
+    )
     assert no_yaw.kind == "yaw_unresolved" and "straight" in no_yaw.reason
 
     in_m_per_s2 = channels(truth)
     for axis in "XYZ":
         in_m_per_s2[f"imu:ACCEL_{axis}"] = in_m_per_s2[f"imu:ACCEL_{axis}"] * STANDARD_GRAVITY
-    wrong_unit = _refusal(resolve_imu_frame(in_m_per_s2))
+    wrong_unit = _refusal(resolve_imu_frame(in_m_per_s2, change_only_timeout_seconds=None))
     assert wrong_unit.kind == "gravity_implausible" and "9.8" in wrong_unit.reason
 
 
@@ -442,7 +460,7 @@ def test_sign_unresolved_when_speed_never_changes_with_the_accel() -> None:
     )
     recorded = channels(truth, speed=("gps:speed",))
     recorded["gps:speed"] = recorded["gps:speed"] * 0.0 + 20.0
-    refusal = _refusal(resolve_imu_frame(recorded))
+    refusal = _refusal(resolve_imu_frame(recorded, change_only_timeout_seconds=None))
     assert refusal.kind == "sign_unresolved" and "gps:speed" in refusal.reason
 
 
@@ -531,7 +549,9 @@ def test_a_resolved_frame_is_not_silently_replaced(tmp_path: Path) -> None:
     assert first.sidecar.specific_force is not None and second.sidecar.specific_force is not None
     assert first.sidecar.specific_force.reference_id != second.sidecar.specific_force.reference_id
     # Nor replaced by a refusal: "resolved to nothing" would hide the frame.
-    refusal = _refusal(resolve_imu_frame(channels(truth, heading=False)))
+    refusal = _refusal(
+        resolve_imu_frame(channels(truth, heading=False), change_only_timeout_seconds=None)
+    )
     with pytest.raises(ImuFrameOfRecordError, match="refusal"):
         write_imu_frame_sidecar(session, refused_sidecar(refusal, now=NOW))
     write_imu_frame_sidecar(session, refused_sidecar(refusal, now=NOW), replace=True)

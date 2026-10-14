@@ -17,8 +17,10 @@ repeats each one on the rows it has, carrying state between parts:
 
 1. **Inputs at each IMU instant.** It aligns speed and course to the IMU
    instants (the newest earlier reading, no older than
-   ``imu_session.INPUT_MAX_AGE_SECONDS``), carrying the last reading of
-   each across parts.
+   ``imu_session.INPUT_MAX_AGE_SECONDS``, or for the speed the age the
+   sidecar records, ``inputs.speed_max_age_seconds``: a broadcast speed
+   stored change-only is held for the session's stale timeout, P02.10),
+   carrying the last reading of each across parts.
 2. **The quiescent mask.** Rolling windows ``[i − window + 1, i +
    lookahead]`` over IMU rows. It keeps ``window − 1`` rows of history, and
    holds the last ``lookahead`` rows back until the next part supplies their
@@ -204,9 +206,14 @@ class ImuFramePlan:
         inputs, linear = self.sidecar.inputs, self.sidecar.linear_accel
         assert inputs is not None and linear is not None
         speed = [] if self.speed_catalog is None else self.speed_catalog.signals
+        # The default speed age keys as before the field existed (P02.10), so
+        # no stored frame of a session storing every frame goes stale.
+        default_age = inputs.speed_max_age_seconds is None
         payload = {
             "stream_code_version": IMU_STREAM_CODE_VERSION,
-            "inputs": inputs.model_dump(mode="json"),
+            "inputs": inputs.model_dump(
+                mode="json", exclude={"speed_max_age_seconds"} if default_age else None
+            ),
             "linear_accel": linear.model_dump(mode="json"),
             "speed_decode": [signal.model_dump(mode="json") for signal in speed],
         }
@@ -368,7 +375,13 @@ class LinearAccelStream:
         self._align_ns = int(align_ns)
         self._bindings = bindings
         self._drop = frozenset(drop)
-        self._tolerance = pd.Timedelta(seconds=INPUT_MAX_AGE_SECONDS)
+        #: Per input, how old a reading may be at an IMU instant: the speed's
+        #: as the resolver held it (recorded in the sidecar), the course's
+        #: the default.
+        self._tolerance = {
+            self._speed_column: pd.Timedelta(seconds=inputs.speed_max_age),
+            self._heading_column: pd.Timedelta(seconds=INPUT_MAX_AGE_SECONDS),
+        }
         #: The parts' timestamp dtype: emitted ACCEL rows take it, so adding
         #: them never changes the frame's resolution (the resampled grid
         #: inherits it). Lossless: their instants came from that column.
@@ -446,8 +459,9 @@ class LinearAccelStream:
 
     def _aligned(self, part: pd.DataFrame, column: str, base: pd.DatetimeIndex) -> np.ndarray:
         """``column`` at each ``base`` instant: the newest reading no older than
-        ``INPUT_MAX_AGE_SECONDS``, from this part or the last one before it
-        (``imu_session._aligned`` over the whole session)."""
+        its tolerance (``INPUT_MAX_AGE_SECONDS``, or the sidecar's speed age),
+        from this part or the last one before it (``imu_session._aligned``
+        over the whole session)."""
         raw = _clean(part, column)
         readings = pd.DataFrame(
             {
@@ -466,7 +480,11 @@ class LinearAccelStream:
         if readings.empty:
             return np.full(len(base), np.nan)
         merged = pd.merge_asof(
-            left, readings, on="timestamp", direction="backward", tolerance=self._tolerance
+            left,
+            readings,
+            on="timestamp",
+            direction="backward",
+            tolerance=self._tolerance[column],
         )
         return np.asarray(merged["value"].to_numpy(dtype=float))
 

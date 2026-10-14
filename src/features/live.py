@@ -366,7 +366,12 @@ class LiveFeatureSource:
         self._frame_decoder = (
             FrameDecoder.from_bindings(self.bindings) if self.bindings is not None else None
         )
-        self.imu_frame = LiveImuFrame(bindings=self.bindings)
+        # The frame reads the decoded speed this source's change filter keeps
+        # (P02.10), so it holds a broadcast speed for the same timeout.
+        self.imu_frame = LiveImuFrame(
+            bindings=self.bindings,
+            broadcast_stale_timeout_s=self._can_filter.stale_timeout_seconds,
+        )
         # Same idea for the DBC database: frame_id → message so a per-frame
         # decode is an O(1) lookup, not a scan of every message.
         self._dbc_message_by_id = {}

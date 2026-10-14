@@ -461,7 +461,7 @@ def test_a_stale_sidecar_backfills_with_the_same_reference(tmp_path: Path) -> No
         for column, series in read_imu_inputs(session).items()
         if column != "decoded:VEHICLE_SPEED_2D1"
     }
-    old = resolve_imu_frame(old_inputs, now=NOW)
+    old = resolve_imu_frame(old_inputs, now=NOW, change_only_timeout_seconds=None)
     assert isinstance(old, ImuSessionFrame)
     raw = old.sidecar.model_dump(mode="json")
     del raw["linear_accel"]["initial_gravity_body_g"]

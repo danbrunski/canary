@@ -73,8 +73,10 @@ import numpy as np
 import pandas as pd
 
 from src.atomic_write import atomic_write_text
+from src.config import validate_broadcast_stale_timeout
 from src.decode.bindings import Bindings
 from src.decode.engineering import UnscaledDecodedChannelError, physical_series
+from src.storage.broadcast_storage import is_broadcast_channel
 from src.storage.sidecar import read_json_object
 
 YAW_OFFSET_FILENAME = "imu_yaw_offset.json"
@@ -105,6 +107,39 @@ GRAVITY_MAGNITUDE_RANGE_G = (0.8, 1.2)
 #: over ``[t − window, t + lookahead]`` needs the lookahead to exceed the
 #: slowest speed source's period: GPS 1 Hz, Mode 01 speed ~0.7 Hz (1.43 s).
 QUIESCENT_LOOKAHEAD_SECONDS = 1.5
+
+#: A speed or heading older than this at an IMU sample is missing there, not
+#: carried: GPS is 1 Hz and Mode 01 speed ~0.7 Hz. A broadcast speed stored
+#: change-only is held longer (:func:`input_max_age_seconds`).
+INPUT_MAX_AGE_SECONDS = 3.0
+
+
+def input_max_age_seconds(
+    column: str,
+    change_only_timeout_seconds: float | None,
+    *,
+    base_seconds: float = INPUT_MAX_AGE_SECONDS,
+) -> float:
+    """How old a reading of ``column`` may be at an IMU sample and still steer
+    it: the one rule the offline resolver (``imu_session``), its part-by-part
+    rebuild (``imu_stream``) and the live frame (``imu_live``) share.
+
+    ``base_seconds`` (:data:`INPUT_MAX_AGE_SECONDS`) for every input of a
+    stream that carries every frame. A broadcast channel (``can:``/``decoded:``
+    /``dbc:``) of a stream stored change-only (P02.10: a frame is kept only when
+    its payload changes, an unchanged id re-written before
+    ``change_only_timeout_seconds``) has no row while its value holds, so its
+    newest row stands for "still this value" until the timeout, never longer:
+    ``max(base_seconds, timeout)``, the resampler's broadcast ceiling rule.
+    Without it a speed frame with no rolling counter, stored once per
+    re-write on a steady leg, ages out three seconds after each row and the leg
+    loses its quiescent windows. ``None``: every frame stored (or a stream that
+    is not change-only), and nothing changes.
+    """
+    if change_only_timeout_seconds is None or not is_broadcast_channel(column):
+        return base_seconds
+    return max(base_seconds, validate_broadcast_stale_timeout(change_only_timeout_seconds))
+
 
 #: The gravity low-pass's smoothing factor per quiescent sample
 #: (:func:`estimate_gravity`, ``adjust=False``: ``g ← α·a + (1 − α)·g``). Its

@@ -74,9 +74,11 @@ from src.preprocessing.imu_decimation import ACCEL_LAT_COLUMN, ACCEL_LON_COLUMN
 from src.preprocessing.imu_frame import (
     GRAVITY_MAGNITUDE_RANGE_G,
     HEADING_COLUMN,
+    INPUT_MAX_AGE_SECONDS,
     QUIESCENT_LOOKAHEAD_SECONDS,
     SPEED_SOURCES,
     apply_rotation,
+    input_max_age_seconds,
     longitudinal_sign_votes,
     quiescent_mask,
     resolve_frame,
@@ -84,13 +86,16 @@ from src.preprocessing.imu_frame import (
     select_speed,
     straight_mask,
 )
+from src.storage.broadcast_storage import session_can_storage
 from src.storage.sidecar import read_json_object
 from src.telemetry import CAN_SOURCE, IMU_SOURCE, SOURCE_SEP, channel_key
 
 IMU_FRAME_FILENAME = "imu_frame.json"
 IMU_FRAME_SCHEMA_VERSION = 1
 #: Bump when the resolution changes for unchanged inputs.
-IMU_FRAME_CODE_VERSION = 1
+#: 2 -- P02.10: a broadcast speed stored change-only is held for the session's
+#: stale timeout (``ImuFrameInputs.speed_max_age_seconds``).
+IMU_FRAME_CODE_VERSION = 2
 
 ACCEL_X_COLUMN = channel_key(IMU_SOURCE, "ACCEL_X")
 ACCEL_Y_COLUMN = channel_key(IMU_SOURCE, "ACCEL_Y")
@@ -108,9 +113,6 @@ FRAME_UNIT = "g"
 #: 3 deg: ``imu_frame.quiescent_mask``'s thresholds), converted to samples at
 #: the IMU's measured rate: a fixed row count means 0.1 s at 208 Hz.
 DEFAULT_QUIESCENT_SECONDS = 2.0
-#: A speed or heading older than this at an IMU sample is missing there, not
-#: carried: GPS is 1 Hz and Mode 01 speed ~0.7 Hz.
-INPUT_MAX_AGE_SECONDS = 3.0
 #: Speeds at or below this count as stationary in the reference's record.
 STATIONARY_KPH = 1.0
 
@@ -242,6 +244,20 @@ class ImuFrameInputs(_Strict):
     #: (``imu_frame.QUIESCENT_LOOKAHEAD_SECONDS``).
     quiescent_lookahead_seconds: float
     quiescent_lookahead_samples: int
+    #: How old a ``speed_source`` reading could be at an IMU sample and still
+    #: steer it (``imu_frame.input_max_age_seconds``): the session's change-only
+    #: stale timeout for a broadcast speed stored change-only (P02.10), so the
+    #: part-by-part rebuild (``imu_stream``) holds it exactly as the resolver
+    #: did. ``None``: :data:`INPUT_MAX_AGE_SECONDS`, the age every sidecar
+    #: before this field used and every session storing every frame uses.
+    speed_max_age_seconds: float | None = None
+
+    @property
+    def speed_max_age(self) -> float:
+        """``speed_max_age_seconds`` with ``None`` read as the default."""
+        if self.speed_max_age_seconds is None:
+            return INPUT_MAX_AGE_SECONDS
+        return self.speed_max_age_seconds
 
 
 class RefusalRecord(_Strict):
@@ -367,9 +383,9 @@ def _clean(series: pd.Series) -> pd.Series:
     return series.sort_index(kind="stable").astype(float)
 
 
-def _aligned(series: pd.Series, base: pd.DatetimeIndex) -> pd.Series:
+def _aligned(series: pd.Series, base: pd.DatetimeIndex, *, max_age_seconds: float) -> pd.Series:
     """``series`` sampled at ``base``: the newest value no older than
-    :data:`INPUT_MAX_AGE_SECONDS`, else NaN."""
+    ``max_age_seconds`` (``imu_frame.input_max_age_seconds``), else NaN."""
     left = pd.DataFrame({"timestamp": base})
     right = pd.DataFrame({"timestamp": series.index, "value": series.to_numpy()})
     merged = pd.merge_asof(
@@ -377,7 +393,7 @@ def _aligned(series: pd.Series, base: pd.DatetimeIndex) -> pd.Series:
         right,
         on="timestamp",
         direction="backward",
-        tolerance=pd.Timedelta(seconds=INPUT_MAX_AGE_SECONDS),
+        tolerance=pd.Timedelta(seconds=max_age_seconds),
     )
     return pd.Series(merged["value"].to_numpy(dtype=float), index=base)
 
@@ -416,6 +432,7 @@ def reference_id(rotation: np.ndarray) -> str:
 def resolve_imu_frame(
     channels: Mapping[str, pd.Series],
     *,
+    change_only_timeout_seconds: float | None,
     bindings: Bindings | None = None,
     quiescent_seconds: float = DEFAULT_QUIESCENT_SECONDS,
     speed_source: str | None = None,
@@ -432,6 +449,14 @@ def resolve_imu_frame(
     ``speed_source`` pins the speed to that one column (a frame of record
     being re-resolved, :func:`resolve_session_imu_frame`); ``None`` takes the
     best of ``SPEED_SOURCES``.
+
+    ``change_only_timeout_seconds`` is how the channels were stored, and is
+    required so no caller can forget it: the session's change-only stale
+    timeout (``session_can_storage(...).stale_timeout_seconds``), or ``None``
+    when every frame was stored. A broadcast speed stored change-only has no
+    row while its value holds, so its newest row steers the IMU samples after
+    it for up to that timeout (``imu_frame.input_max_age_seconds``), never
+    longer; the sidecar records the age used.
     """
     missing_axes = [c for c in RAW_ACCEL_COLUMNS if c not in channels or channels[c].empty]
     if missing_axes:
@@ -471,7 +496,8 @@ def resolve_imu_frame(
             "pinned scale): quiescence and the longitudinal sign both need a speed",
         )
     speed_series, speed_source = speed_choice
-    speed = _aligned(speed_series, base)
+    speed_max_age = input_max_age_seconds(speed_source, change_only_timeout_seconds)
+    speed = _aligned(speed_series, base, max_age_seconds=speed_max_age)
 
     heading_series = channels.get(HEADING_COLUMN)
     if heading_series is None or heading_series.empty:
@@ -480,7 +506,11 @@ def resolve_imu_frame(
             f"no {HEADING_COLUMN}: the mount's yaw comes from GPS course on straight "
             "stretches (imu-gps-integration.md, a recorded decision), and nothing else",
         )
-    heading = _aligned(heading_series, base)
+    heading = _aligned(
+        heading_series,
+        base,
+        max_age_seconds=input_max_age_seconds(HEADING_COLUMN, change_only_timeout_seconds),
+    )
 
     quiescent = quiescent_mask(speed, heading, window=window, lookahead=lookahead)
     quiescent_values = quiescent.to_numpy(dtype=bool)
@@ -602,6 +632,11 @@ def resolve_imu_frame(
             quiescent_window_samples=window,
             quiescent_lookahead_seconds=QUIESCENT_LOOKAHEAD_SECONDS,
             quiescent_lookahead_samples=lookahead,
+            # None where the default applies, so an every-frame sidecar (and
+            # the stream's key from it) is what it was before the hold.
+            speed_max_age_seconds=(
+                None if speed_max_age == INPUT_MAX_AGE_SECONDS else speed_max_age
+            ),
         ),
         specific_force=SpecificForceFrame(
             reference_id=reference_id(rotation),
@@ -785,6 +820,11 @@ def resolve_session_imu_frame(
     else:
         result = resolve_imu_frame(
             channels,
+            # P02.10: how the session stored its CAN frames, from the chunks'
+            # footers (the longest timeout of any change-only chunk).
+            change_only_timeout_seconds=session_can_storage(
+                Path(session_dir)
+            ).stale_timeout_seconds,
             bindings=bindings,
             quiescent_seconds=quiescent_seconds,
             speed_source=pinned,

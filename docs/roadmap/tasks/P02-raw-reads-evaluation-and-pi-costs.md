@@ -1331,10 +1331,10 @@ recomputes the rolling frame over the whole buffered window every tick.
 
   Size **M–L**. Built at the desk; measured on the Pi.
 
-  *Implemented and verified at the desk 2026-09-26. Remaining:* the Pi
-  measurement (rows, bytes and writer CPU before and after, last Accept
-  bullet); the retrain decision (count below); the optional IMU speed hold
-  (below).
+  *Implemented and verified at the desk 2026-09-26; the optional IMU speed
+  hold added 2026-10-13 (below). Remaining:* the Pi measurement (rows, bytes
+  and writer CPU before and after, last Accept bullet); the retrain decision
+  (count below).
   - **One rule, one module.** `src/storage/broadcast_storage.py`:
     `CanChangeFilter` (first frame of an id kept, a changed payload kept, an
     unchanged id re-written at `timeout - 1` s, a backwards clock step kept),
@@ -1577,12 +1577,63 @@ recomputes the rolling frame over the whole buffered window every tick.
       `slow_channel_max_gap_seconds` (`test_manifest_max_gap_seconds_honours_max_gap_factor`,
       the pinned spec in `test_train_anomaly_model.py`). Manifests written
       before this lack the key.
-  - **Not done (optional, other work's files).** `imu_session._aligned` and
-    `LiveImuFrame.input_max_age_s` age a decoded speed out after 3 s; a vehicle
-    whose speed frame has no counter would lose quiescent windows on a steady
-    leg (the Xterra's `0x2D1` carries one: verified by the verifier). The live
-    frame's steadiness window and look-ahead also assume dense samples, so a
-    fix there is more than a longer age.
+  - **IMU speed hold (optional; done 2026-10-13).** `imu_session._aligned` and
+    `LiveImuFrame.input_max_age_s` aged a decoded speed out after 3 s, so a
+    vehicle whose speed frame has no counter lost its quiescent windows on a
+    steady leg (the Xterra's `0x2D1` carries one: verified by the verifier).
+    - *One rule.* `imu_frame.input_max_age_seconds(column,
+      change_only_timeout_seconds)`: a broadcast input (`can:`/`decoded:`/
+      `dbc:`) stored change-only steers IMU samples for max(3 s, timeout),
+      the resampler's ceiling rule; anything else, or `None`, keeps 3 s
+      (`INPUT_MAX_AGE_SECONDS`, moved to `imu_frame`, still exported by
+      `imu_session`).
+    - *Offline.* `resolve_imu_frame` takes a required
+      `change_only_timeout_seconds`, so no caller can leave it out.
+      `resolve_session_imu_frame` passes `session_can_storage(...)
+      .stale_timeout_seconds` from the chunks' footers. The age used is
+      recorded as `ImuFrameInputs.speed_max_age_seconds` (`None` = 3 s, so
+      every-frame sidecars match the old ones), and `LinearAccelStream`
+      aligns the speed with the recorded age. `ImuFramePlan.key()` leaves the
+      field out when it is `None`, so no stored frame of an every-frame
+      session goes stale. `IMU_FRAME_CODE_VERSION` is now 2.
+    - *Live.* `LiveImuFrame.broadcast_stale_timeout_s`, which
+      `LiveFeatureSource` sets from its own `CanChangeFilter`. A held source
+      is fresh for the same max(3 s, timeout) after its last real reading.
+      While no reading comes, `_Steadiness.hold_through` re-emits the held
+      value every `_DECISION_SLACK_S` (1.5 s, the slowest reading period the
+      steadiness window and look-ahead were built for), and never past that
+      age. A reading stamped before a re-emitted entry withdraws it. A
+      stream whose readings are less than 1.5 s apart is never re-emitted
+      into.
+    - *Tests.* `tests/test_imu_speed_hold.py`, 8 passed, all on a
+      counterless 10 Hz `0x2D1` that is the drive's only speed:
+      - `test_a_counterless_speed_stored_change_only_keeps_its_quiescent_windows`:
+        the change-only session's frame equals the every-frame session's
+        (`check_exact`): 1,708 quiescent samples, same `reference_id`, and
+        the part-by-part `ACCEL_LON` is identical. Held 3 s, the same
+        change-only rows give 6 quiescent samples in 1 window.
+      - `test_every_frame_storage_is_unchanged` (no footer, and the
+        `every_frame` footer): the age is 3 s, a 6 s `0x2D1` dropout still
+        ages out 3 s in, and the plan key equals a pre-field sidecar's.
+      - `test_a_real_gap_longer_than_the_timeout_still_ages_out`: a 20 s
+        silence has no quiescent window past the last stored row + 10 s.
+      - Live: `test_live_holds_a_counterless_change_only_speed` (rows at
+        0/9/18 s through the real filter: gravity forms; unheld it stays
+        `no_quiescent_period`); `test_live_holds_no_longer_than_the_timeout`
+        (a tilted "up" after last row + 10 s never reaches gravity);
+        `test_live_dense_speed_is_unchanged_by_the_hold` (every tick
+        identical with and without the hold, nothing re-emitted);
+        `test_the_live_source_holds_with_its_own_filter_timeout` (raw 100 Hz
+        frames, 3 of 2,000 kept, gravity forms).
+      - Mutation checks: with the rule forced to 3 s, 5 of 8 fail; with the
+        hold unbounded, 4 of 8 fail, including both gap tests.
+    - *Layering.* `imu_frame` now imports `storage.broadcast_storage`
+      (preprocessing -> storage, downward); `tests/test_layering.py` passes.
+    - *Not measured.* No stored session with a counterless speed exists. On
+      the Xterra, `0x2D1`'s counter keeps it dense, so neither path changes
+      except while `0x2D1` is really silent: offline from 3 s into the
+      silence, live from 1.5 s (re-emission), up to 10 s. In those the speed
+      is now held: the operator's accepted P02.10 cost.
 
 ## Desk (found 2026-09-27)
 

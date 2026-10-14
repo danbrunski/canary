@@ -19,7 +19,9 @@ incrementally:
    over :attr:`LiveImuFrame.quiescent_seconds` and, when GPS course is fresh,
    a steady course. Speed is the best fresh source
    (``imu_frame.SPEED_SOURCES``: ``0x2D1`` broadcast, Mode 01, GPS), each
-   judged on its own history, never mixed.
+   judged on its own history, never mixed. The broadcast speed comes from
+   the change-only stream (P02.10), so it is held for the stale timeout
+   (:attr:`LiveImuFrame.broadcast_stale_timeout_s`), as offline.
 2. **Yaw**: the offline principal-axis fit as running sums over straight
    samples (steady course, ≥ 0.05 g horizontal).
 
@@ -112,8 +114,10 @@ from src.preprocessing.imu_decimation import (
 from src.preprocessing.imu_frame import (
     GRAVITY_LOW_PASS_ALPHA,
     HEADING_COLUMN,
+    INPUT_MAX_AGE_SECONDS,
     QUIESCENT_LOOKAHEAD_SECONDS,
     SPEED_SOURCES,
+    input_max_age_seconds,
 )
 from src.signals.committees import STANDARD_GRAVITY
 
@@ -180,15 +184,27 @@ class _Steadiness:
     daemon's event loop. Linear spread is the sample standard deviation (the
     offline ``rolling().std()``); circular spread is Mardia's
     ``sqrt(−2 ln R)`` over the window (``imu_frame._circular_steady``).
+
+    ``max_age_s`` is how old the newest reading may be and still steer a
+    sample (``imu_frame.input_max_age_seconds``). ``held`` marks a broadcast
+    input whose stream is change-only (P02.10): a reading then stands for its
+    value until the next one, up to ``max_age_s``, and
+    :meth:`hold_through` re-emits it into the history so the window and the
+    look-ahead see the samples the bus carried. History entries are
+    ``(t, a, b, real)``; a re-emitted one is not ``real``.
     """
 
     window_s: float
     circular: bool
     threshold: float
-    history: deque[tuple[float, float, float]] = field(default_factory=deque)
+    max_age_s: float = INPUT_MAX_AGE_SECONDS
+    held: bool = False
+    history: deque[tuple[float, float, float, bool]] = field(default_factory=deque)
     steady: bool = False
     _s1: float = 0.0
     _s2: float = 0.0
+    #: The last real reading to arrive: its instant and value.
+    _real: tuple[float, float] | None = None
 
     def _terms(self, value: float) -> tuple[float, float]:
         if self.circular:
@@ -197,12 +213,37 @@ class _Steadiness:
         return value, value * value
 
     def add(self, t: float, value: float) -> None:
+        """A reading as it arrived. Re-emitted entries stamped after it (a
+        reading delivered after a later IMU sample) are withdrawn first: the
+        held value did not hold past a reading that changed it."""
+        while self.history and not self.history[-1][3] and self.history[-1][0] > t:
+            _, old_a, old_b, _ = self.history.pop()
+            self._s1 -= old_a
+            self._s2 -= old_b
+        self._real = (t, value)
+        self._append(t, value, real=True)
+
+    def hold_through(self, now: float, period_s: float) -> None:
+        """Re-emit the newest real reading every ``period_s`` after the newest
+        entry, through ``now`` and no later than ``max_age_s`` after that
+        reading (a held source only). A stream whose readings arrive less than
+        ``period_s`` apart is never touched: no entry is that old."""
+        if not self.held or self._real is None or not self.history:
+            return
+        real_t, value = self._real
+        limit = min(now, real_t + self.max_age_s)
+        newest = self.history[-1][0]
+        while newest + period_s <= limit:
+            newest += period_s
+            self._append(newest, value, real=False)
+
+    def _append(self, t: float, value: float, *, real: bool) -> None:
         a, b = self._terms(value)
-        self.history.append((t, a, b))
+        self.history.append((t, a, b, real))
         self._s1 += a
         self._s2 += b
         while self.history and self.history[0][0] < t - self.window_s:
-            _, old_a, old_b = self.history.popleft()
+            _, old_a, old_b, _ = self.history.popleft()
             self._s1 -= old_a
             self._s2 -= old_b
         n = len(self.history)
@@ -225,6 +266,10 @@ class _Steadiness:
     def newest(self) -> float | None:
         return self.history[-1][0] if self.history else None
 
+    def fresh_at(self, t: float) -> bool:
+        """Whether the newest real reading still steers a sample at ``t``."""
+        return self._real is not None and t - self._real[0] <= self.max_age_s
+
 
 @dataclass
 class LiveImuFrame:
@@ -233,14 +278,28 @@ class LiveImuFrame:
     Feed raw axes with :meth:`observe_imu`, speed/heading with
     :meth:`observe_input`, and read one tick's aggregates with
     :meth:`take_tick`. :meth:`reset` is a session boundary.
+
+    ``broadcast_stale_timeout_s`` says the inputs are the change-only stream
+    (P02.10): ``LiveFeatureSource`` forwards a decoded speed only from the
+    frames its ``CanChangeFilter`` keeps, so a speed frame with no rolling
+    counter arrives once per change, or once per re-write on a steady leg. A
+    broadcast speed then holds its value up to the timeout
+    (``imu_frame.input_max_age_seconds``, as offline), re-emitted every
+    ``_DECISION_SLACK_S`` while no reading comes, so the steadiness window and
+    the look-ahead, which assume a reading at least that often, see one. A
+    stream whose readings come closer together is untouched. ``None``: every
+    reading arrives, and nothing is held.
     """
 
     bindings: Bindings | None = None
     quiescent_seconds: float = 2.0
     speed_std_max_kph: float = 1.5
     heading_std_max_deg: float = 3.0
-    #: An input older than this at an IMU sample is not steering it.
-    input_max_age_s: float = 3.0
+    #: An input older than this at an IMU sample is not steering it (a held
+    #: broadcast speed: the longer of this and the stale timeout).
+    input_max_age_s: float = INPUT_MAX_AGE_SECONDS
+    #: The change-only stream's stale timeout; ``None``: every frame arrives.
+    broadcast_stale_timeout_s: float | None = None
     min_yaw_magnitude_g: float = 0.05
     #: A sign vote's speed change must be at least this fast, g.
     min_vote_accel_g: float = 0.05
@@ -288,7 +347,8 @@ class LiveImuFrame:
     _last_resolved_at: datetime | None = field(init=False, default=None)
 
     #: Seconds of ``Σh`` history kept: a speed reading interval is at most
-    #: ``input_max_age_s`` (else the source is not fresh), plus slack.
+    #: ``input_max_age_s`` (else the source is not fresh; a held source's
+    #: entries are at most ``_DECISION_SLACK_S`` apart), plus slack.
     _H_HISTORY_S = 6.0
 
     def __post_init__(self) -> None:
@@ -297,10 +357,8 @@ class LiveImuFrame:
     def reset(self) -> None:
         """Forget everything: gravity, yaw, inputs, the open tick."""
         span = self.quiescent_seconds + self.lookahead_s + _DECISION_SLACK_S
-        self._speeds = {
-            name: _Steadiness(span, False, self.speed_std_max_kph) for name in SPEED_SOURCES
-        }
-        self._heading = _Steadiness(span, True, self.heading_std_max_deg)
+        self._speeds = {name: self._input(name, span) for name in SPEED_SOURCES}
+        self._heading = self._input(HEADING_COLUMN, span)
         self._pending_t = None
         self._pending = [None, None, None]
         self._undecided = deque()
@@ -314,6 +372,18 @@ class LiveImuFrame:
         self._last_sample_at = None
         self._samples = 0
         self._clear_tick()
+
+    def _input(self, channel: str, span: float) -> _Steadiness:
+        """One input's history, held when the stream stores it change-only."""
+        timeout = self.broadcast_stale_timeout_s
+        max_age = input_max_age_seconds(channel, timeout, base_seconds=self.input_max_age_s)
+        return _Steadiness(
+            span,
+            channel == HEADING_COLUMN,
+            self.heading_std_max_deg if channel == HEADING_COLUMN else self.speed_std_max_kph,
+            max_age_s=max_age,
+            held=max_age > self.input_max_age_s,
+        )
 
     def _clear_tick(self) -> None:
         self._lon_max = None
@@ -347,8 +417,7 @@ class LiveImuFrame:
             steadiness.add(t, kph)
 
     def _fresh(self, steadiness: _Steadiness, t: float) -> bool:
-        newest = steadiness.newest()
-        return newest is not None and t - newest <= self.input_max_age_s
+        return steadiness.fresh_at(t)
 
     def _seen_past(self, steadiness: _Steadiness, t: float) -> bool:
         newest = steadiness.newest()
@@ -411,6 +480,8 @@ class LiveImuFrame:
         self._samples += 1
         self._last_sample_at = observed_at
         self._undecided.append((t, a))
+        for speed in self._speeds.values():
+            speed.hold_through(t, _DECISION_SLACK_S)
         self._decide(t)
         if self._gravity is None:
             return
