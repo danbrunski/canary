@@ -60,7 +60,7 @@ from src.analysis.behavior_validation import (
     piece_time_ranges,
     validation_document_path,
 )
-from src.analysis.refit import default_recipes
+from src.analysis.recipes.catalog import default_recipes
 from src.behavior.behavior_models import CURRENT_SCHEMA_VERSION, BehaviorModels
 from src.features.feature_pipeline import DEFAULT_DIDS_PATH
 from src.log import configure_logging

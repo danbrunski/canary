@@ -25,8 +25,8 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Collection, Mapping, Sequence
-from dataclasses import dataclass, field, replace
-from typing import Any, Literal
+from dataclasses import dataclass, replace
+from typing import Literal
 
 import numpy as np
 import pandas as pd
@@ -49,6 +49,36 @@ from src.analysis.behavior_validation import (
     piece_time_ranges,
     profile_refusals,
 )
+from src.analysis.recipe_builders import (
+    CATALOG_1D_DEFAULTS,
+    CATALOG_2D_DEFAULTS,
+    RPM_LOAD_2D_FIELDS,
+    TOTAL_TRIM_STEADY_RATES,
+    WARMUP_1D_FIELDS,
+    rpm_load_2d_recipe,
+    sigma_deviation,
+    surface_1d_recipe,
+    surface_2d_recipe,
+    warmup_1d_recipe,
+)
+from src.analysis.recipe_contract import (
+    RPM_COLUMN,
+    Recipe,
+    Surface1DRecipe,
+    Surface2DRecipe,
+    recipe_columns,
+    recipe_contract_fingerprint,
+    recipe_serving_spec,
+)
+from src.analysis.recipes.catalog import default_recipes
+from src.analysis.recipes.shared import (
+    BANK_BALANCE_MODES,
+    STFT_BANK_BALANCE_PERSISTENCE,
+    TOTAL_TRIM_UNIT,
+    WARM_IDLE_LOCAL_RANGES,
+    WARM_IDLE_STEADY_RATES,
+    shared_recipes,
+)
 from src.analysis.surface_1d import fit_binned_lookup, fit_polynomial, fit_robust_baseline
 from src.analysis.surface_2d import fit_grid_binned_mean
 from src.behavior.behavior_eligibility import (
@@ -60,23 +90,11 @@ from src.behavior.behavior_eligibility import (
 )
 from src.behavior.behavior_models import (
     CURRENT_SCHEMA_VERSION,
-    BandExcessPersistence,
     BehaviorModel1D,
     BehaviorModel2D,
     BehaviorModels,
-    ColdStartRequirement,
-    DeviationConfig,
-    EngineStateRequirement,
-    FuelControlRequirement,
-    LocalRangeCondition,
     RateOfChangeCondition,
-    RequiredContext,
     ServingEligibility,
-    TrainingSelection,
-    ValidationCriteria,
-    contract_fingerprint_payload,
-    fingerprint,
-    refuse_non_trainable_sources,
 )
 from src.behavior.local_range import append_local_ranges, local_range_column
 from src.behavior.session_context import (
@@ -84,26 +102,22 @@ from src.behavior.session_context import (
     append_start_context,
     start_context_columns,
 )
-from src.columns import MODE_COLUMN, SESSION_COLUMN, roc_column
-from src.operating import CLOSED_LOOP_FUEL_STATES, ENGINE_RUNNING_MIN_RPM
-from src.signals.derived import (
-    STFT_BANK_BALANCE_SMOOTHING_SECONDS,
-    VE_AMBIENT_CHANNEL,
-    VE_MANIFOLD_CHANNEL,
-)
+from src.columns import MODE_COLUMN, SESSION_COLUMN
+from src.operating import ENGINE_RUNNING_MIN_RPM
 from src.storage.sessions import session_started_at
 
 log = logging.getLogger(__name__)
 
-#: RPM column used by the engine-running gate.
-RPM_COLUMN = "obd:RPM"
-
-# ``ENGINE_RUNNING_MIN_RPM`` (imported from ``src.operating``, R01.7) is the
-# vehicle_state classifier's engine_running threshold. KOEO rows read RPM == 0
-# with wildly off-map outputs (TIMING_ADVANCE ≈ 63° vs ~17° at idle), and an
-# unfiltered KOEO-heavy corpus poisons both the fitted cells and the auto-edge
-# quantiles — the May 2026 IAT surface shipped a 62.9° ± 5.0 "expectation" in
-# its idle cell that would fire critical on every heat-soaked summer idle.
+# The recipe definitions moved out of this module (R17): contracts to
+# ``recipe_contract``, builders and family defaults to ``recipe_builders``, the
+# catalogs to ``recipes/``. The old names stay importable from here as direct
+# aliases (compatibility; internal modules import the owners).
+_recipe_columns = recipe_columns
+_surface_1d = surface_1d_recipe
+_surface_2d = surface_2d_recipe
+_warmup_1d = warmup_1d_recipe
+_rpm_load_2d = rpm_load_2d_recipe
+_sigma = sigma_deviation
 
 # ---------------------------------------------------------------------------
 # 4.6 — warmup-surface confounding
@@ -116,7 +130,7 @@ RPM_COLUMN = "obd:RPM"
 # one load/IAT regime bakes that regime's warmup shape into the "expected"
 # curve and then flags a real warmup under different conditions as
 # deviation. (The same lesson already retired the load-blind 1D timing
-# surface, above.)
+# surface from the shared catalog.)
 #
 # Operator-approved decision rule (OVERNIGHT-QUEUE.md, ml-hardening 4.6):
 # count cold-start sessions in the corpus that actually have usable
@@ -129,7 +143,8 @@ RPM_COLUMN = "obd:RPM"
 # via ``discover_sessions`` + ``count_usable_cold_start_sessions``): 14
 # discoverable sessions total, 2 carry a ``cold_start`` event, and only 1 of
 # those has enough load/IAT spread in its warmup window to be "usable" —
-# far under the floor. So the three warmup recipes below take option (b):
+# far under the floor. So the three warmup recipes in the shared catalog
+# (:mod:`src.analysis.recipes.shared`) take option (b):
 # widened bands (roughly +50% over the pre-4.6 values) instead of a context
 # axis. Re-run the count once the corpus grows past the floor.
 
@@ -146,694 +161,6 @@ WARMUP_CONTEXT_MIN_SPREAD: Mapping[str, float] = {
 #: warmup recipes; fewer → widen bands + document (operator-approved,
 #: OVERNIGHT-QUEUE.md).
 WARMUP_CONTEXT_SESSION_FLOOR = 8
-
-
-# ---------------------------------------------------------------------------
-# Recipes
-# ---------------------------------------------------------------------------
-
-#: B05.2 — ``derived:TOTAL_TRIM_B*`` is STFT + LTFT summed in percentage
-#: points: an additive index, not the multiplicative fuel correction
-#: ``(1 + STFT)(1 + LTFT)`` and not a calibrated injector multiplier.
-TOTAL_TRIM_UNIT = "percentage points (additive STFT+LTFT index)"
-
-#: B05.2 — steady-state gates the total-trim surfaces persist. A rate gate
-#: reads ``<channel>__roc``: the *net* change over the feature pipeline's 30 s
-#: rolling horizon divided by elapsed time, so these allow at most ~300 rpm
-#: and ~15 % load of net change across the last 30 s. Measured on the
-#: dense-trim capture _capture-tuning-2026-09-21T223734 (closed loop, not
-#: warmup, 801 rows): the cam recipes' 75 rpm/s passed 724 rows, 443 of them
-#: locally transient (5 s rpm range > 100 or load range > 5 %), STFT sigma
-#: 3.5 %; these limits pass 247 rows, 74 locally transient, STFT sigma 1.2 %
-#: (the locally-steady figure). A net-change gate cannot see an up-and-back
-#: excursion inside the horizon — see
-#: data/analyses/2026-09-22-b04-b05-measurements.md (B05.2).
-TOTAL_TRIM_STEADY_RATES: Mapping[str, float] = {
-    "obd:RPM": 10.0,
-    "obd:ENGINE_LOAD": 0.5,
-}
-
-#: B07.6 — the warm-idle baseline grades steady idle only (operator decision
-#: 2026-09-23). The limit is B05.2's recorded 10 rpm/s (TOTAL_TRIM_STEADY_RATES),
-#: not re-derived: on the warm-idle training fold (drive 2026-09-21T194247, 631
-#: idle rows, 627 of them locally steady) 75/20/10 rpm/s pass the same 561
-#: rate-defined rows, so that fold cannot choose between limits, and no test
-#: drive was consulted. Before the gate, rpm excursions inside ``idle`` mode
-#: (a 30 s net change) were graded as idle deviations.
-#: data/analyses/2026-09-23-behavior-refit-validation-report.md §11.
-WARM_IDLE_STEADY_RATES: Mapping[str, float] = {"obd:RPM": 10.0}
-
-#: B07.6 — and a local-range limit the net-change gate cannot express
-#: (operator decision 2026-09-23): the rpm spread over the last 5 s. The limit
-#: is B05.2's "locally transient" definition (5 s rpm range > 100), recorded in
-#: data/analyses/2026-09-22-b04-b05-measurements.md §4, adopted as defined,
-#: not tuned. The capture it was defined on lies in warm idle's test drive
-#: group; on the warm-idle training fold 627 of 631 idle rows satisfy it.
-WARM_IDLE_LOCAL_RANGES: tuple[LocalRangeCondition, ...] = (
-    LocalRangeCondition(
-        channel="obd:RPM",
-        window_seconds=5.0,
-        max_range=100.0,
-        basis=(
-            "B05.2 'locally transient' definition: 5 s rpm range > 100 "
-            "(data/analyses/2026-09-22-b04-b05-measurements.md §4); adopted for warm "
-            "idle by operator decision 2026-09-23 (B07.6)"
-        ),
-    ),
-)
-
-
-@dataclass(frozen=True)
-class _RecipeBase:
-    """Shared recipe fields. Subclasses add fitter-specific knobs."""
-
-    name: str
-    output: str  # the column that *carries* the actual value; also the model's `output` name
-    output_unit: str = "unknown"
-    operating_mode: str | None = None  # restrict the input frame to this mode before fitting
-    deviation: DeviationConfig | None = None
-    min_samples: int = 50  # below this, skip the recipe rather than fit a brittle surface
-    #: Independent drives required after all row/event/mode filters. A long
-    #: single drive is not independent evidence of a stable vehicle behavior.
-    min_sessions: int = 1
-    #: Rows a session must contribute before it counts toward ``min_sessions``.
-    min_session_samples: int = 30
-    min_validation_coverage: float = 0.5
-    max_validation_warning_rate: float = 0.10
-    max_validation_critical_rate: float = 0.02
-    diagnostic_capabilities: tuple[str, ...] = ()
-    diagnostic_limitations: tuple[str, ...] = ()
-    #: B01.3 serving rule — rows must belong to an observed engine start
-    #: whose coolant was at or below this (see ``ColdStartRequirement``).
-    max_initial_coolant_c: float | None = None
-    #: Window after a start within which it counts as observed and its first
-    #: coolant reading stands in for the initial temperature.
-    cold_start_evidence_seconds: float = 60.0
-    #: Training-only corpus rule: drop whole sessions whose run-time clock
-    #: resets or gaps. Persisted as provenance, never evaluated at serve.
-    require_contiguous_runtime: bool = False
-    #: B01.4 — explicit fuel-status membership. ``closed_loop_only`` is the
-    #: common case and means ``CLOSED_LOOP_FUEL_STATES``; ``fuel_states``
-    #: names any other explicit set. Never "any nonzero status".
-    closed_loop_only: bool = False
-    fuel_states: tuple[int, ...] | None = None
-    fuel_status_channel: str = "obd:FUEL_STATUS"
-    #: B05.2 — operating modes the model never speaks for (persisted on the
-    #: contract, refused at fit and serve alike).
-    excluded_operating_modes: tuple[str, ...] = ()
-    #: Measured quantities the output's meaning depends on; each tuple is an
-    #: any-of group that must be present and fresh on the row.
-    required_context: tuple[tuple[str, ...], ...] = ()
-    #: B07.6 — persisted local-range steady limits (``LocalRangeCondition``);
-    #: the refit builds their context before selecting rows, like serving.
-    local_ranges: tuple[LocalRangeCondition, ...] = ()
-    #: B05.3 — the model's own event persistence rule. Its limit is fitted on
-    #: the training fold only (``fit_band_excess_persistence``) and persisted
-    #: on the model; ``None`` leaves the daemon's configured M-of-N gate.
-    event_persistence: BandExcessPersistence | None = None
-    #: Persisted steady-state constraints. Keys are base telemetry columns;
-    #: values are maximum absolute per-second rates over the feature
-    #: pipeline's rolling horizon. The fitter applies them and the resulting
-    #: model stores the corresponding ``__roc`` conditions for live serving.
-    max_abs_rate_of_change: Mapping[str, float] = field(default_factory=dict)
-    notes: str | None = None
-    #: Auto-detected events (see ``src.analysis.events``) the *source session*
-    #: must contain for any of its rows to feed this recipe. Use to gate
-    #: warmup-specific surfaces to sessions that actually start cold, etc.
-    #: Empty tuple means "no event requirement" — back-compat default.
-    require_session_events: tuple[str, ...] = ()
-    #: Engine-running gate: drop rows where ``obd:RPM`` < this before fitting
-    #: (and before 2D auto-edge computation, so the quantiles aren't dragged
-    #: to 0 by KOEO mass). ``None`` = no gate — for surfaces that genuinely
-    #: describe key-on-engine-off behavior. Catalog recipes that describe
-    #: *running* behavior set ``ENGINE_RUNNING_MIN_RPM`` explicitly.
-    min_rpm: float | None = None
-    #: B02 acceptance criteria from the vehicle profile's
-    #: ``behavior_validation.yaml`` (attach with :func:`attach_criteria`).
-    #: ``None`` → the model may publish, but its evidence verdict is
-    #: ``insufficient_evidence: no_declared_criteria`` and it cannot alert.
-    validation: ValidationCriteria | None = None
-    #: 4.1 publish gate (1D only — grid fits' R² isn't well-defined, see
-    #: ``Surface2DRecipe.min_populated_cell_fraction``). A fit whose R²
-    #: falls below this is skipped rather than published, same as a
-    #: missing-column or too-few-samples skip. ``None`` disables the gate.
-    min_r_squared: float | None = 0.6
-
-    def fuel_control_states(self) -> tuple[int, ...] | None:
-        if self.fuel_states is not None:
-            return self.fuel_states
-        return CLOSED_LOOP_FUEL_STATES if self.closed_loop_only else None
-
-    def serving_eligibility(self) -> ServingEligibility:
-        """The typed contract this recipe persists on its model (B01.3)."""
-        fuel_states = self.fuel_control_states()
-        return ServingEligibility(
-            engine_state=EngineStateRequirement(
-                state="engine_running" if self.min_rpm is not None else "any",
-                rpm_channel=RPM_COLUMN,
-                min_running_rpm=self.min_rpm or ENGINE_RUNNING_MIN_RPM,
-            ),
-            fuel_control=(
-                FuelControlRequirement(
-                    channel=self.fuel_status_channel, allowed_states=list(fuel_states)
-                )
-                if fuel_states is not None
-                else None
-            ),
-            cold_start=(
-                ColdStartRequirement(
-                    rpm_channel=RPM_COLUMN,
-                    min_running_rpm=self.min_rpm or ENGINE_RUNNING_MIN_RPM,
-                    max_start_runtime_s=self.cold_start_evidence_seconds,
-                    max_initial_coolant_c=self.max_initial_coolant_c,
-                )
-                if self.max_initial_coolant_c is not None
-                else None
-            ),
-            required_context=[
-                RequiredContext(any_of=list(group)) for group in self.required_context
-            ],
-            excluded_operating_modes=list(self.excluded_operating_modes),
-            local_ranges=list(self.local_ranges),
-            training_selection=TrainingSelection(
-                require_session_events=list(self.require_session_events),
-                require_contiguous_runtime=self.require_contiguous_runtime,
-                min_sessions=self.min_sessions,
-            ),
-        )
-
-    def rate_conditions(self) -> list[RateOfChangeCondition]:
-        return [
-            RateOfChangeCondition(channel=roc_column(channel), max_abs_per_second=limit)
-            for channel, limit in self.max_abs_rate_of_change.items()
-        ]
-
-    def __post_init__(self) -> None:
-        invalid = {
-            channel: limit
-            for channel, limit in self.max_abs_rate_of_change.items()
-            if not channel or limit <= 0
-        }
-        if invalid:
-            raise ValueError(
-                f"max_abs_rate_of_change requires named channels and positive limits: {invalid}"
-            )
-        # H01.1 — refused at construction, before any corpus is read: a
-        # recipe naming an external-sensor input can never fit.
-        refuse_non_trainable_sources(self.name, self._named_channels())
-
-    def _named_channels(self) -> list[str]:
-        """Every telemetry channel this recipe names (axes, output, gates)."""
-        axes = [
-            str(getattr(self, field_name))
-            for field_name in ("x_column", "y_column")
-            if getattr(self, field_name, "")
-        ]
-        return [
-            *axes,
-            self.output,
-            self.fuel_status_channel,
-            *self.max_abs_rate_of_change,
-            *(channel for group in self.required_context for channel in group),
-            *(condition.channel for condition in self.local_ranges),
-        ]
-
-
-@dataclass(frozen=True)
-class Surface1DRecipe(_RecipeBase):
-    """How to fit one ``BehaviorModel1D`` from a feature frame."""
-
-    kind: Literal["surface_1d"] = "surface_1d"
-    x_column: str = ""
-    x_axis_name: str = "x"
-    x_axis_unit: str = "unknown"
-    domain: tuple[float, float] | None = None  # None → derived from x.min()/x.max()
-    fit_method: Literal["poly", "binned_lookup", "robust_baseline"] = "poly"
-    degree: int = 3
-    n_knots: int = 10
-
-
-@dataclass(frozen=True)
-class Surface2DRecipe(_RecipeBase):
-    """How to fit one ``BehaviorModel2D`` from a feature frame."""
-
-    kind: Literal["surface_2d"] = "surface_2d"
-    x_column: str = ""
-    y_column: str = ""
-    x_axis_name: str = "x"
-    y_axis_name: str = "y"
-    x_axis_unit: str = "unknown"
-    y_axis_unit: str = "unknown"
-    #: Explicit bin edges per axis. ``None`` triggers auto-edges from the data's
-    #: quantiles (``auto_bin_count + 1`` edges); useful when the operating
-    #: envelope isn't known upfront. Required to be explicit only when you want
-    #: a specific grid layout (e.g. matching a published OEM map).
-    x_edges: tuple[float, ...] | None = None
-    y_edges: tuple[float, ...] | None = None
-    auto_bin_count: int = 8
-    #: Cells with fewer samples than this evaluate as off-map at serve time
-    #: instead of grading against a one-/six-sample "expectation".
-    min_cell_count: int = 30
-    #: 4.1 publish gate — fraction of cells that must clear
-    #: ``min_cell_count`` for the grid to publish. Catches the silent
-    #: all-empty-grid case (0.0 coverage) as well as a corpus too thin to
-    #: populate most of the operating envelope; R² isn't meaningful for a
-    #: grid-binned-mean fit so coverage is this recipe family's quality gate.
-    min_populated_cell_fraction: float = 0.3
-    min_cell_sessions: int = 1
-    min_cell_dwell_seconds: float = 0.0
-
-
-Recipe = Surface1DRecipe | Surface2DRecipe
-
-
-# ---------------------------------------------------------------------------
-# Default catalog
-# ---------------------------------------------------------------------------
-
-
-#: Catalog family defaults (R05.7). Applied *under* each recipe's own
-#: fields, so a value a recipe declares wins. Until 2026-09 a trailing loop in
-#: :func:`default_recipes` ``replace``-d these over every recipe instead,
-#: silently discarding any per-recipe minimum.
-CATALOG_1D_DEFAULTS: Mapping[str, Any] = {"min_sessions": 3}
-CATALOG_2D_DEFAULTS: Mapping[str, Any] = {
-    "min_sessions": 3,
-    "min_cell_sessions": 2,
-    "min_cell_dwell_seconds": 10.0,
-}
-
-#: The cold-start transient family: warmup mode, sessions with a cold start
-#: from <= 40 degC and a contiguous run-time clock, engine running (KOEO rows
-#: have RUN_TIME=0 — not warmup data), and a binned lookup (warmup is
-#: sigmoid-ish; polynomials overshoot). Without these gates a fit to "all
-#: data" reverts to the R²=0.41 May 2026 surface that flooded the dashboard
-#: with warmup-storm anomalies.
-WARMUP_1D_FIELDS: Mapping[str, Any] = {
-    "operating_mode": "warmup",
-    "require_session_events": ("cold_start",),
-    "max_initial_coolant_c": 40.0,
-    "require_contiguous_runtime": True,
-    "min_rpm": ENGINE_RUNNING_MIN_RPM,
-    "fit_method": "binned_lookup",
-    "min_samples": 120,
-}
-
-#: The rpm x calculated-load grid shared by the Mode 01 2D surfaces, running
-#: engine only (KOEO timing reads ~63°, trims are frozen zeros, and there is
-#: no fill to measure).
-RPM_LOAD_2D_FIELDS: Mapping[str, Any] = {
-    "x_column": "obd:RPM",
-    "y_column": "obd:ENGINE_LOAD",
-    "x_axis_name": "rpm",
-    "y_axis_name": "engine_load",
-    "x_axis_unit": "rpm",
-    "y_axis_unit": "%",
-    "min_samples": 500,
-    "min_rpm": ENGINE_RUNNING_MIN_RPM,
-}
-
-#: Operating modes the bank-balance baselines are conditioned on.
-BANK_BALANCE_MODES: tuple[str, ...] = ("idle", "city", "highway")
-
-#: B05.3 — the STFT bank-balance baselines are evented by accumulated excess
-#: beyond their warning band, not by the daemon's 3-of-5 tick count. The gap
-#: that restarts the accumulation is the signal's own memory: the balance is a
-#: 30 s trailing mean (``STFT_BANK_BALANCE_SMOOTHING_SECONDS``), so a value
-#: after a longer gap shares no sample with one before it. The limit is fitted
-#: per refit on the training fold. Measured before the rule (2026-09-23 city
-#: model v1, default gate): 5 events in 0.81 h on its training drives and 5 in
-#: 1.75 h on its test drives, every one a run of <= 18 warning ticks just past
-#: the 3.1-point band (peaks 3.1-5.7).
-STFT_BANK_BALANCE_PERSISTENCE = BandExcessPersistence(
-    reset_gap_seconds=STFT_BANK_BALANCE_SMOOTHING_SECONDS,
-    basis=(
-        "STFT_BANK_BALANCE_SMOOTHING_SECONDS: derived:STFT_BANK_BALANCE is a 30 s "
-        "trailing mean, so an evaluated tick after a longer gap shares no sample "
-        "with the accumulation before it (B05.3, 2026-09-26)"
-    ),
-)
-
-_BANK_BALANCE_NOTES: Mapping[str, str] = {
-    "stft": (
-        "Mode-conditioned robust median/MAD bank-balance baseline. "
-        "A flat healthy signal is valuable and is not gated on R²."
-    ),
-    "ltft": "Mode-conditioned robust median/MAD long-term bank-balance baseline.",
-}
-
-
-def _surface_1d(**fields: Any) -> Surface1DRecipe:
-    return Surface1DRecipe(**{**CATALOG_1D_DEFAULTS, **fields})
-
-
-def _surface_2d(**fields: Any) -> Surface2DRecipe:
-    return Surface2DRecipe(**{**CATALOG_2D_DEFAULTS, **fields})
-
-
-def _warmup_1d(**fields: Any) -> Surface1DRecipe:
-    return _surface_1d(**{**WARMUP_1D_FIELDS, **fields})
-
-
-def _rpm_load_2d(**fields: Any) -> Surface2DRecipe:
-    return _surface_2d(**{**RPM_LOAD_2D_FIELDS, **fields})
-
-
-def _sigma(
-    sigma_floor: float, *, warning_band: float = 3.0, critical_band: float = 6.0
-) -> DeviationConfig:
-    """The catalog's usual sigma band (3 / 6); ``sigma_floor`` is the output's LSB."""
-    return DeviationConfig(
-        kind="sigma",
-        warning_band=warning_band,
-        critical_band=critical_band,
-        sigma_floor=sigma_floor,
-    )
-
-
-def _bank_balance(kind: Literal["stft", "ltft"], mode: str) -> Surface1DRecipe:
-    """Mode-conditioned robust bank-balance baseline, closed loop only."""
-    channel = f"derived:{kind.upper()}_BANK_BALANCE"
-    return _surface_1d(
-        name=f"{kind}_bank_balance_{mode}",
-        output=channel,
-        output_unit="%",
-        x_column=channel,
-        operating_mode=mode,
-        fit_method="robust_baseline",
-        min_samples=150,
-        min_r_squared=None,
-        min_rpm=ENGINE_RUNNING_MIN_RPM,
-        closed_loop_only=True,
-        deviation=_sigma(0.8),
-        # B05.3 — STFT only: ordinary closed-loop oscillation is the STFT
-        # channel's; the LTFT baselines keep the daemon gate.
-        event_persistence=STFT_BANK_BALANCE_PERSISTENCE if kind == "stft" else None,
-        notes=_BANK_BALANCE_NOTES[kind],
-    )
-
-
-def shared_recipes() -> list[Recipe]:
-    """The vehicle-neutral catalog: standard Mode 01 PIDs and derived channels.
-
-    Surfaces that only need standard Mode 01 PIDs (Coolant, RPM, MAF,
-    TIMING_ADVANCE, STFT, ENGINE_LOAD) and the derived channels built from
-    them. Nothing here names a manufacturer DID: surfaces over a vehicle's own
-    Mode 22 identifiers live in that profile's module under
-    :mod:`src.analysis.recipes` (R05.7, operator decision 2026-09-25).
-
-    Naming convention: ``<output>_vs_<axes>``. The dashboard's performance
-    panel (5.12) will key off these names — keep them stable.
-    """
-    recipes: list[Recipe] = [
-        _warmup_1d(
-            name="coolant_warmup",
-            output="obd:COOLANT_TEMP",
-            output_unit="degC",
-            x_column="obd:RUN_TIME",
-            x_axis_name="time_since_start",
-            x_axis_unit="s",
-            # WARMUP_1D_FIELDS carries the cold-to-warm transient gates.
-            n_knots=12,
-            # 4.6: widened from (5.0, 15.0) — the corpus doesn't have enough
-            # usable cold-start sessions to add a load/IAT context axis (see
-            # WARMUP_CONTEXT_SESSION_FLOOR above), so the band absorbs
-            # load/ambient-driven warmup-shape variance instead.
-            deviation=DeviationConfig(kind="absolute", warning_band=8.0, critical_band=22.0),
-            notes=(
-                "Thermostat health — sticking open / stuck closed shows as a "
-                "flatter / delayed curve."
-            ),
-        ),
-        _surface_1d(
-            name="warm_idle_rpm_baseline",
-            output="obd:RPM",
-            output_unit="rpm",
-            x_column="obd:RPM",
-            operating_mode="idle",
-            min_rpm=ENGINE_RUNNING_MIN_RPM,  # keep KOEO rows (rpm=0) out of the idle curve
-            fit_method="robust_baseline",
-            min_r_squared=None,
-            min_samples=200,
-            max_abs_rate_of_change=WARM_IDLE_STEADY_RATES,
-            local_ranges=WARM_IDLE_LOCAL_RANGES,
-            deviation=_sigma(25.0),
-            notes=(
-                "Warm stabilized idle baseline. Accessory-load state is not available, "
-                "so robust bands absorb ordinary A/C/electrical-load steps. Graded only "
-                "at steady rpm (WARM_IDLE_STEADY_RATES, WARM_IDLE_LOCAL_RANGES)."
-            ),
-            diagnostic_capabilities=("sustained warm-idle speed shift",),
-            diagnostic_limitations=(
-                "steady idle only: an rpm excursion (net change above 10 rpm/s over the "
-                "30 s feature horizon, or more than 100 rpm of spread within 5 s) is not "
-                "graded",
-                "does not detect elevated idle in general, nor identify its cause",
-            ),
-        ),
-        _warmup_1d(
-            name="cold_start_idle_rpm_vs_coolant",
-            output="obd:RPM",
-            output_unit="rpm",
-            x_column="obd:COOLANT_TEMP",
-            x_axis_name="coolant_temp",
-            x_axis_unit="degC",
-            n_knots=8,
-            deviation=DeviationConfig(kind="absolute", warning_band=150.0, critical_band=300.0),
-            notes="Cold-start fast-idle curve, isolated from warm accessory-loaded idle.",
-        ),
-        # NOTE: the 1D ``timing_advance_vs_rpm`` rollup was removed — timing
-        # advance is heavily load-dependent, so an RPM-only surface fit on an
-        # idle-heavy corpus predicts the idle value (~23°) and fires "critical"
-        # on every normal cruise (~39°): 292 false alarms vs 6 for the 2D
-        # version on a known-good drive. The load-conditioned surface below
-        # supersedes it.
-        _rpm_load_2d(
-            name="timing_advance_vs_rpm_load",
-            output="obd:TIMING_ADVANCE",
-            output_unit="degBTDC",
-            # sigma_floor = one LSB of PID 0x0E (0.5°/bit): a cell fit on a
-            # quantization-flat idle stretch can't alert on single-bit flicker.
-            deviation=_sigma(0.5),
-            notes=(
-                "Ignition surface. A sustained drop versus the learned cell is an "
-                "unexpected timing change; knock-control retard is one possible "
-                "cause among IAT/coolant compensation, calibration change and "
-                "transients, and this surface does not identify which (B04.3)."
-            ),
-            diagnostic_capabilities=("unexpected sustained timing change",),
-            diagnostic_limitations=(
-                "does not identify knock retard or any other cause of a timing change",
-                "load and RPM only: IAT/coolant compensation is unmodelled context",
-            ),
-        ),
-        _surface_2d(
-            name="timing_advance_vs_rpm_iat",
-            output="obd:TIMING_ADVANCE",
-            output_unit="degBTDC",
-            x_column="obd:RPM",
-            y_column="obd:INTAKE_TEMP",
-            x_axis_name="rpm",
-            y_axis_name="intake_temp",
-            x_axis_unit="rpm",
-            y_axis_unit="degC",
-            min_samples=500,
-            min_rpm=ENGINE_RUNNING_MIN_RPM,  # KOEO timing reads ~63°; see ENGINE_RUNNING_MIN_RPM
-            # Same band shape as the load-axis sibling — timing magnitudes and
-            # cell-spread are the same; what differs is what we're trying to
-            # catch. sigma_floor = one LSB of PID 0x0E.
-            deviation=_sigma(0.5),
-            notes=(
-                "Thermal-compensation surface for ignition. Cold dense charge "
-                "lets the ECU advance more; hot charge gets retarded to keep "
-                "knock margin. The surface learns the ECU's actual (RPM, IAT) "
-                "→ timing map, so we read deviations from what the engine "
-                "*normally* does at this thermal+rpm operating point — "
-                "ambient-invariant by construction (the same IAT bin sees "
-                "summer afternoons and winter mornings).\n\n"
-                "Can show (never identify):\n"
-                "* Sustained negative residuals clustered at the hot-IAT side "
-                "  of the surface — consistent with, not proof of, knock-control "
-                "  retard.\n"
-                "* Thermal-compensation or knock-control drift. A biased IAT "
-                "  that the ECU itself uses for timing is a common-mode fault "
-                "  and is not identifiable from this surface alone.\n"
-                "* Firmware / calibration drift after an ECU re-flash.\n\n"
-                "Complementary to ``timing_advance_vs_rpm_load`` (load-axis "
-                "compensation) — both feed the same timing output through "
-                "different physical axes."
-            ),
-            diagnostic_capabilities=("timing-map drift",),
-            diagnostic_limitations=(
-                "cannot identify an IAT bias also consumed by the ECU "
-                "without an independent reference",
-                "does not identify knock retard; RPM/IAT alone omits load",
-            ),
-        ),
-        _rpm_load_2d(
-            name="fuel_trim_vs_rpm_load",
-            output="obd:SHORT_FUEL_TRIM_1",
-            output_unit="%",
-            # sigma_floor = one LSB of the trim PIDs (100/128 ≈ 0.78 %).
-            deviation=_sigma(100.0 / 128.0),
-            notes=(
-                "STFT B1 surface. Vacuum leaks / injector wear / fuel-quality "
-                "drift shift cells off zero."
-            ),
-        ),
-        # ----- Phase 1: derived-signal surfaces (no DIDs required) --------
-        _rpm_load_2d(
-            name="air_mass_per_cycle_vs_rpm_load",
-            output="derived:AIR_MASS_PER_CYCLE",
-            output_unit="g/cycle",
-            # sigma_floor ≈ one MAF LSB (0.01 g/s) translated to g/cycle at idle.
-            deviation=_sigma(0.002),
-            notes=(
-                "Measured air mass per four-stroke cycle (MAF x 120 / RPM), the raw "
-                "quantity behind both VE channels, kept for inspection. Not "
-                "density-normalized: altitude and intake temperature move it at a "
-                "fixed operating point. Fed by ``compute_anomaly_signals``."
-            ),
-            diagnostic_capabilities=("measured airflow relationship drift",),
-            diagnostic_limitations=(
-                "does not separate MAF bias, unmetered air, restriction or air density",
-            ),
-        ),
-        # B04.5 — VE is two quantities depending on the reference pressure;
-        # each recipe targets the channel for exactly one of them. The
-        # pre-B04.5 artifact of this name was fitted on the legacy
-        # ``derived:VE_PERCENT`` (baro-referenced on a vehicle without MAP);
-        # its output no longer matches this recipe, so a carry-over is flagged
-        # ``contract_changed:recipe`` rather than served as either definition.
-        _rpm_load_2d(
-            name="ve_vs_rpm_load",
-            output=VE_AMBIENT_CHANNEL,
-            output_unit="%",
-            # The channel exists only with measured baro AND measured IAT
-            # (no 25 degC default), and its gap marks either stale, so no
-            # separate context requirement is needed for them.
-            # sigma_floor: same MAF-LSB reasoning as air_mass_per_cycle_vs_rpm_load
-            # (0.002 g/cycle) expressed as a percent of a representative idle-cell
-            # 100%-VE fill (~0.4 g/cycle for this displacement class) — approximate,
-            # like every other LSB-derived floor in this catalog, not exact.
-            deviation=_sigma(0.5),
-            notes=(
-                "Ambient-referenced volumetric efficiency: measured air mass per "
-                "cycle (MAF/RPM) over the ideal-gas fill at measured barometric "
-                "pressure and measured IAT. Includes throttling, so it tracks load "
-                "(~20-30 % at idle); it normalizes air density (altitude, "
-                "temperature) out of air_mass_per_cycle_vs_rpm_load, nothing more. "
-                "Fed by ``compute_anomaly_signals``."
-            ),
-            diagnostic_capabilities=("density-normalized airflow relationship drift",),
-            diagnostic_limitations=(
-                "cannot distinguish MAF, baro, IAT, or mechanical airflow causes by itself",
-                "shares the MAF/RPM measurement with air_mass_per_cycle_vs_rpm_load; "
-                "the two are not independent confirmation",
-            ),
-        ),
-        _rpm_load_2d(
-            name="ve_manifold_vs_rpm_load",
-            output=VE_MANIFOLD_CHANNEL,
-            output_unit="%",
-            deviation=_sigma(0.5),
-            notes=(
-                "Manifold-referenced volumetric efficiency: measured air mass per "
-                "cycle over the ideal-gas fill at measured MAP and measured IAT "
-                "(~80-95 % naturally aspirated at any throttle). Needs a MAP sensor; "
-                "skipped (missing column) on a vehicle without one. Fed by "
-                "``compute_anomaly_signals``."
-            ),
-            diagnostic_capabilities=("air-model relationship drift",),
-            diagnostic_limitations=(
-                "cannot distinguish MAF, MAP, IAT, or mechanical airflow causes by itself",
-                "a restriction moves both measured flow and MAP, so it can cancel",
-            ),
-        ),
-        # B05.2 — total trim is an additive STFT+LTFT index in percentage
-        # points, graded only in healthy closed loop (J1979 0x02: excludes
-        # open-loop warmup 0x01, enrichment / fuel cut 0x04 and feedback
-        # faults 0x08/0x10), outside the ``warmup`` mode (closed loop while
-        # cold still carries cold enrichment and inhibited trim learning) and
-        # at steady RPM/load (TOTAL_TRIM_STEADY_RATES). All persisted on the
-        # contract, so fit and serve apply the same rows.
-        *[
-            _rpm_load_2d(
-                name=f"total_trim_vs_rpm_load_b{bank}",
-                output=f"derived:TOTAL_TRIM_B{bank}",
-                output_unit=TOTAL_TRIM_UNIT,
-                closed_loop_only=True,
-                excluded_operating_modes=("warmup",),
-                max_abs_rate_of_change=TOTAL_TRIM_STEADY_RATES,
-                # Same trim-PID LSB floor as fuel_trim_vs_rpm_load (100/128 ≈
-                # 0.78 %); TOTAL_TRIM sums two channels sharing that LSB, so
-                # this is a lower bound on the achievable resolution.
-                deviation=_sigma(100.0 / 128.0),
-                notes=(
-                    f"Total fuel trim, bank {bank}: STFT + LTFT as an additive "
-                    "percentage-point index (not a calibrated fuel multiplier). "
-                    "Elevated only at low rpm/load points suggests unmetered air; "
-                    "elevated across the surface suggests a metering or fuel-supply "
-                    "bias — a human reads the map; no detection logic here."
-                ),
-                diagnostic_capabilities=("closed-loop fuel correction drift",),
-                diagnostic_limitations=(
-                    "an additive index, not a calibrated injector multiplier",
-                    "does not identify a particular injector, leak or sensor",
-                    *(
-                        ()
-                        if bank == 1
-                        else (
-                            "gated on fuel system 1's status (PID 0x03 byte A); "
-                            "system 2's own state is recorded but not decoded",
-                        )
-                    ),
-                ),
-            )
-            for bank in (1, 2)
-        ],
-        *(_bank_balance("stft", mode) for mode in BANK_BALANCE_MODES),
-        *(_bank_balance("ltft", mode) for mode in BANK_BALANCE_MODES),
-        _warmup_1d(
-            name="cat_warmup",
-            output="obd:CATALYST_TEMP_B1S1",
-            output_unit="degC",
-            x_column="obd:RUN_TIME",
-            x_axis_name="time_since_start",
-            x_axis_unit="s",
-            # Cat light-off mirrors coolant warmup — gate on warmup + cold_start
-            # for the same reasons (the surface only describes cold-start
-            # transients; warm-restart and steady-state shouldn't fit it).
-            n_knots=12,
-            # 4.6: widened from (30.0, 80.0) — same corpus/rationale as
-            # coolant_warmup above (WARMUP_CONTEXT_SESSION_FLOOR).
-            deviation=DeviationConfig(kind="absolute", warning_band=45.0, critical_band=115.0),
-            notes=(
-                "Catalyst light-off curve. Detects cat aging (slower "
-                "light-off), exhaust restriction (faster temp rise), "
-                "secondary air failure. Sister surface to coolant_warmup."
-            ),
-        ),
-    ]
-    return recipes
-
-
-def default_recipes(profile: str | None) -> list[Recipe]:
-    """The catalog the daemon refits for ``profile``: shared, then the vehicle's own.
-
-    ``profile`` is the vehicle profile slug (required, so no caller can forget
-    it and silently fit another vehicle's DID surfaces, or none); ``None``
-    asks for the shared catalog only. The profile's recipes come from
-    :func:`src.analysis.recipes.profile_recipes` and follow the shared ones.
-    """
-    from src.analysis.recipes import profile_recipes
-
-    recipes = shared_recipes()
-    own = profile_recipes(profile)
-    clash = {recipe.name for recipe in recipes} & {recipe.name for recipe in own}
-    if clash:
-        raise ValueError(f"profile {profile!r} recipes shadow shared ones: {sorted(clash)}")
-    return [*recipes, *own]
 
 
 # ---------------------------------------------------------------------------
@@ -1453,23 +780,6 @@ def _fit_event_persistence(
     return model.model_copy(update={"event_persistence": fitted})
 
 
-def recipe_serving_spec(recipe: Recipe) -> ServingSpec:
-    """The serving contract a recipe persists, before any model exists.
-
-    Also the row-selection contract for reproducing a legacy artifact that
-    predates persisted contracts (B02.1): its catalog recipe says which rows
-    it was fitted and validated on.
-    """
-    return ServingSpec(
-        operating_mode=recipe.operating_mode,
-        conditions=tuple(recipe.rate_conditions()),
-        eligibility=recipe.serving_eligibility(),
-        inputs=tuple(_recipe_columns(recipe)[:-1]),
-        # The refit reads ``recipe.output`` verbatim as its column.
-        output=recipe.output,
-    )
-
-
 def legacy_reproduction_spec(
     recipe: Recipe, model: BehaviorModel1D | BehaviorModel2D
 ) -> tuple[ServingSpec, str | None]:
@@ -1704,13 +1014,6 @@ def refit_all(
 # ---------------------------------------------------------------------------
 
 
-def _recipe_columns(recipe: Recipe) -> list[str]:
-    """All input columns a recipe needs present + non-NaN to fit."""
-    if isinstance(recipe, Surface1DRecipe):
-        return [recipe.x_column, recipe.output]
-    return [recipe.x_column, recipe.y_column, recipe.output]
-
-
 def _fit_1d(
     recipe: Surface1DRecipe,
     frame: pd.DataFrame,
@@ -1883,22 +1186,6 @@ def _same_evidence_context(
     )
 
 
-def recipe_contract_fingerprint(recipe: Recipe) -> str:
-    """The contract fingerprint the recipe's next fit would carry."""
-    return fingerprint(
-        contract_fingerprint_payload(
-            kind=recipe.kind,
-            output=recipe.output,
-            inputs=_recipe_columns(recipe)[:-1],
-            operating_mode=recipe.operating_mode,
-            conditions=recipe.rate_conditions(),
-            eligibility=recipe.serving_eligibility(),
-            deviation=recipe.deviation,
-            event_persistence=recipe.event_persistence,
-        )
-    )
-
-
 def attach_criteria(
     recipes: Sequence[Recipe], document: BehaviorValidationDocument | None
 ) -> list[Recipe]:
@@ -2026,10 +1313,23 @@ def _auto_edges(series: pd.Series, n_bins: int) -> list[float]:
     return [float(e) for e in edges]
 
 
-# Helpers consumers may want to inspect
+# Helpers consumers may want to inspect. The recipe-definition names below
+# (contracts, catalog constants, ``default_recipes``/``shared_recipes``,
+# fingerprint and serving-spec helpers) are compatibility aliases of their R17
+# owners; new code imports the owner.
 __all__ = [
+    "BANK_BALANCE_MODES",
+    "CATALOG_1D_DEFAULTS",
+    "CATALOG_2D_DEFAULTS",
     "ENGINE_RUNNING_MIN_RPM",
     "RPM_COLUMN",
+    "RPM_LOAD_2D_FIELDS",
+    "STFT_BANK_BALANCE_PERSISTENCE",
+    "TOTAL_TRIM_STEADY_RATES",
+    "TOTAL_TRIM_UNIT",
+    "WARMUP_1D_FIELDS",
+    "WARM_IDLE_LOCAL_RANGES",
+    "WARM_IDLE_STEADY_RATES",
     "WARMUP_CONTEXT_MIN_SPREAD",
     "WARMUP_CONTEXT_SESSION_FLOOR",
     "Recipe",

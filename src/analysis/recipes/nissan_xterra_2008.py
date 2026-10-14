@@ -2,7 +2,7 @@
 
 These surfaces read VQ40 ECM Mode 22 identifiers (``did:ECM_*``), so they
 are this vehicle's, not the shared catalog's (R05.7, operator decision
-2026-09-25). Moved verbatim from ``refit.default_recipes``; their contract
+2026-09-25). Moved verbatim from the former ``refit.default_recipes``; their contract
 fingerprints are pinned by ``tests/test_recipe_catalog_golden.py``, so the
 Pi sees no ``contract_changed:recipe``. ``afr_bank_balance_robust`` is here
 too: its input is the AF-sensor-voltage DID pair (B05.8 moved it from the
@@ -19,14 +19,13 @@ from __future__ import annotations
 
 from typing import Literal
 
-from src.analysis.refit import (
+from src.analysis.recipe_builders import (
     TOTAL_TRIM_STEADY_RATES,
-    Recipe,
-    Surface2DRecipe,
-    _sigma,
-    _surface_1d,
-    _surface_2d,
+    sigma_deviation,
+    surface_1d_recipe,
+    surface_2d_recipe,
 )
+from src.analysis.recipe_contract import Recipe, Surface2DRecipe
 from src.behavior.behavior_models import BandExcessPersistence, DeviationConfig
 from src.operating import ENGINE_RUNNING_MIN_RPM
 from src.signals.afr import LAMBDA_BANK_BALANCE_AF_VOLTAGE
@@ -53,7 +52,7 @@ def _cam_tracking_2d(
     ``role`` survives in the recipe name, which fitted artifacts and capture
     profiles reference; the bank is the firmware's (D03.37).
     """
-    return _surface_2d(
+    return surface_2d_recipe(
         name=f"cam_{role}_vs_command_rpm_did",
         output=output,
         output_unit="deg",
@@ -69,7 +68,7 @@ def _cam_tracking_2d(
             "did:ECM_INTAKE_CAM_ANGLE_COMMANDED": 0.25,
             "did:ECM_RPM": 75.0,
         },
-        deviation=_sigma(0.5),
+        deviation=sigma_deviation(0.5),
         notes=(
             f"Bank {bank} measured-cam tracking surface ({role} in the name, which "
             "predates the firmware bank assignment). Which cylinder side is bank 1 "
@@ -88,7 +87,7 @@ def recipes() -> list[Recipe]:
     """The Xterra's DID-dependent surfaces, in their pre-R05.7 catalog order."""
     return [
         # DID-dependent surfaces (skipped by refit until the DIDs are polled).
-        _surface_2d(
+        surface_2d_recipe(
             name="air_charge_vs_rpm_throttle_did",
             output="did:ECM_AIR_CHARGE",
             output_unit="raw",  # scale not yet locked; raw counts are stable for anomaly detection
@@ -100,7 +99,7 @@ def recipes() -> list[Recipe]:
             y_axis_unit="V",
             min_samples=500,
             # sigma_floor = 1 raw count (scale constant not yet pinned).
-            deviation=_sigma(1.0),
+            deviation=sigma_deviation(1.0),
             notes=(
                 "Mode-22-synchronous air-charge surface. Detects a change in the "
                 "ECM's air charge per intake event at the same DID RPM and throttle "
@@ -120,7 +119,7 @@ def recipes() -> list[Recipe]:
         # healthy closed loop (J1979 0x02), outside warmup and at steady
         # rpm/load (B05.2's measured TOTAL_TRIM_STEADY_RATES), so enrichment
         # and fuel-cut rails are never graded as asymmetry.
-        _surface_1d(
+        surface_1d_recipe(
             name="afr_bank_balance_robust",
             output=LAMBDA_BANK_BALANCE_AF_VOLTAGE,
             output_unit="lambda",
@@ -135,7 +134,7 @@ def recipes() -> list[Recipe]:
             # sigma_floor: one A/F-voltage DID LSB (0.005 V) at the transfer's
             # steepest near-stoich slope (3.9 AFR/V lean of stoich) is 0.0013 λ
             # per bank; a difference of two such channels, rounded up.
-            deviation=_sigma(0.002),
+            deviation=sigma_deviation(0.002),
             event_persistence=AFR_BANK_BALANCE_PERSISTENCE,
             notes=(
                 "Bank 1 minus bank 2 measured lambda from the A/F sensor voltage DIDs, "
@@ -154,7 +153,7 @@ def recipes() -> list[Recipe]:
                 "cancels, and a single-sensor bias is indistinguishable from mixture",
             ),
         ),
-        _surface_2d(
+        surface_2d_recipe(
             name="afr_voltage_vs_rpm_throttle_did",
             output="did:ECM_AF_SENSOR_V_B1",
             output_unit="V",
@@ -174,7 +173,7 @@ def recipes() -> list[Recipe]:
                 "oscillation amplitude drift."
             ),
         ),
-        _surface_1d(
+        surface_1d_recipe(
             name="tps_sensor_1_vs_sensor_2_did",
             output="did:ECM_THROTTLE_POS_SENSOR_1",
             output_unit="V",

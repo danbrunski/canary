@@ -1,7 +1,7 @@
 """R05.7 — the default recipe catalog is pinned byte-for-byte.
 
 A recipe contract change flags every Pi artifact ``contract_changed:recipe``,
-so a restructure of :func:`src.analysis.refit.default_recipes` must leave each
+so a restructure of :func:`src.analysis.recipes.catalog.default_recipes` must leave each
 recipe identical: its contract fingerprint (what the Pi compares) *and* its
 full ``asdict`` form (what the next fit reads). ``repr`` keeps tuple/list and
 int/float distinctions that JSON would erase.
@@ -18,7 +18,9 @@ import os
 from dataclasses import asdict
 from pathlib import Path
 
-from src.analysis.refit import default_recipes, recipe_contract_fingerprint
+from src.analysis.recipe_builders import surface_1d_recipe, surface_2d_recipe
+from src.analysis.recipe_contract import recipe_contract_fingerprint
+from src.analysis.recipes.catalog import default_recipes
 
 GOLDEN = Path(__file__).parent / "fixtures" / "recipe_catalog_golden.json"
 
@@ -51,9 +53,7 @@ def test_the_default_catalog_is_unchanged() -> None:
 def test_a_minimum_a_recipe_declares_wins_over_the_family_default() -> None:
     """The old trailing loop ``replace``-d min_sessions / min_cell_sessions /
     min_cell_dwell_seconds over every recipe, so none could be set per recipe."""
-    from src.analysis.refit import _surface_1d, _surface_2d
-
-    grid = _surface_2d(
+    grid = surface_2d_recipe(
         name="probe_2d",
         output="obd:MAF",
         x_column="obd:RPM",
@@ -63,8 +63,10 @@ def test_a_minimum_a_recipe_declares_wins_over_the_family_default() -> None:
         min_cell_dwell_seconds=2.5,
     )
     assert (grid.min_sessions, grid.min_cell_sessions, grid.min_cell_dwell_seconds) == (7, 4, 2.5)
-    line = _surface_1d(name="probe_1d", output="obd:MAF", x_column="obd:RPM", min_sessions=5)
+    line = surface_1d_recipe(name="probe_1d", output="obd:MAF", x_column="obd:RPM", min_sessions=5)
     assert line.min_sessions == 5
     # And the family default still applies when the recipe says nothing.
-    default = _surface_2d(name="d", output="obd:MAF", x_column="obd:RPM", y_column="obd:SPEED")
+    default = surface_2d_recipe(
+        name="d", output="obd:MAF", x_column="obd:RPM", y_column="obd:SPEED"
+    )
     assert (default.min_sessions, default.min_cell_sessions) == (3, 2)

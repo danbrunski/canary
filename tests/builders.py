@@ -19,7 +19,7 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
-from src.analysis.refit import Surface2DRecipe
+from src.analysis.recipe_contract import Surface2DRecipe
 from src.behavior.behavior_models import (
     DeviationConfig,
     NoiseFloor,

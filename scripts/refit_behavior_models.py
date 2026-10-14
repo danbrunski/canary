@@ -69,7 +69,9 @@ from src.analysis.behavior_validation import (
     stamp_profile_exclusions,
     validation_document_path,
 )
-from src.analysis.refit import Recipe, attach_criteria, default_recipes, refit_all
+from src.analysis.recipe_contract import Recipe
+from src.analysis.recipes.catalog import default_recipes
+from src.analysis.refit import attach_criteria, refit_all
 from src.behavior.behavior_models import (
     apply_behavior_policy,
     behavior_policy_path,

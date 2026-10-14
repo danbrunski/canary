@@ -102,7 +102,9 @@ from src.analysis.behavior_validation import (
     transient_controls,
     validation_document_path,
 )
-from src.analysis.refit import default_recipes, legacy_reproduction_spec, recipe_serving_spec
+from src.analysis.recipe_contract import recipe_serving_spec
+from src.analysis.recipes.catalog import default_recipes
+from src.analysis.refit import legacy_reproduction_spec
 from src.behavior.behavior_eligibility import ServingSpec, required_channel_groups, serving_spec
 from src.behavior.behavior_models import (
     BehaviorModel1D,

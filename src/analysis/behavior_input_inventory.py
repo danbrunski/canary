@@ -33,7 +33,7 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
-from src.analysis.refit import RPM_COLUMN, Recipe, recipe_serving_spec
+from src.analysis.recipe_contract import RPM_COLUMN, Recipe, recipe_serving_spec
 from src.behavior.behavior_eligibility import (
     eligibility_reasons,
     reason_code,

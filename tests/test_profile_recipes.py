@@ -14,7 +14,8 @@ from dataclasses import asdict, replace
 import pytest
 
 from src.analysis.recipes import module_name, profile_recipes
-from src.analysis.refit import default_recipes, shared_recipes
+from src.analysis.recipes.catalog import default_recipes
+from src.analysis.recipes.shared import shared_recipes
 
 XTERRA = "nissan-xterra-2008"
 
