@@ -1,6 +1,6 @@
 """Offline replay of a single session window through the inference pipeline.
 
-Composes the existing pieces — :func:`scripts.replay.replay_sessions` for
+Composes the existing pieces — :func:`src.analysis.replay.replay_sessions` for
 preprocessing + Isolation Forest scoring, :class:`SequenceInferenceEngine` for
 window-level LSTM scoring, and the on-disk anomaly log — into a single
 structured report. The output is consumed by the MCP ``replay_window`` tool
@@ -21,6 +21,7 @@ from typing import Any, cast
 
 import pandas as pd
 
+from src.analysis.replay import replay_sessions
 from src.coerce import finite_float
 from src.columns import MODE_COLUMN, SESSION_COLUMN, TIMESTAMP_COLUMN
 from src.config import CanaryConfig
@@ -92,10 +93,6 @@ def replay_window(
     whole replay. The intent is to see *as much as is recoverable* — useful
     when only one of the two models is currently deployed.
     """
-    # Import lazily — scripts/ is not a real package, and this keeps the
-    # cost of importing src.analysis.replay_window low for tests.
-    from scripts.replay import replay_sessions
-
     warnings: list[str] = []
     session_id = session_dir.name
 

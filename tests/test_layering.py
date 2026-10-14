@@ -294,6 +294,56 @@ def test_src_never_imports_tests() -> None:
     assert not offenders, "src imports the test tree: " + ", ".join(offenders)
 
 
+def _script_imports(root: Path) -> list[str]:
+    return sorted(
+        f"{relative.as_posix()} -> {module}"
+        for relative, modules in _file_imports(root).items()
+        for module in modules
+        if module == "scripts" or module.startswith("scripts.")
+    )
+
+
+def test_src_never_imports_scripts() -> None:
+    """R12.4: a library module must not depend on an executable.
+
+    ``src.analysis.replay_window`` once imported ``replay_sessions`` from
+    ``scripts/replay.py`` inside the function. ``scripts`` may import ``src``;
+    the reverse is forbidden everywhere, lazy and ``TYPE_CHECKING`` imports
+    included. There is no allowance table for this edge.
+    """
+    offenders = _script_imports(SRC)
+    assert not offenders, "src imports a script (move the code into src): " + ", ".join(offenders)
+
+
+def test_scripts_import_scanner_flags_nested_and_type_checking_imports(tmp_path: Path) -> None:
+    """The scanner sees every form of the forbidden import, and ignores look-alikes."""
+    _write(
+        tmp_path,
+        "analysis/lazy.py",
+        "def run():\n    from scripts.replay import replay_sessions\n    return replay_sessions\n",
+    )
+    _write(
+        tmp_path,
+        "analysis/typed.py",
+        "from typing import TYPE_CHECKING\nif TYPE_CHECKING:\n    import scripts.retrain\n",
+    )
+    _write(
+        tmp_path,
+        "analysis/guarded.py",
+        "try:\n    from scripts import replay\nexcept ImportError:\n    replay = None\n",
+    )
+    _write(
+        tmp_path,
+        "analysis/clean.py",
+        "import src.models.isolation_forest\nfrom src.scripts_helper import x\nimport scriptsy\n",
+    )
+    assert _script_imports(tmp_path) == [
+        "analysis/guarded.py -> scripts",
+        "analysis/lazy.py -> scripts.replay",
+        "analysis/typed.py -> scripts.retrain",
+    ]
+
+
 def test_validation_harness_imports_without_pytest() -> None:
     """``import src.validation.harness`` must work where pytest is not installed."""
     import subprocess

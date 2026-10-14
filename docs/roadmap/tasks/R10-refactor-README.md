@@ -17,7 +17,7 @@ import-time exception. Deliberately lazy backend registries are not targets.
 | Task | Outcome | Size / risk | Prerequisite |
 |---|---|---|---|
 | [R11](archive/R11-explicit-time-lookup.md) | Shared previous, nearest and bracket lookup with explicit semantics | S–M / numerical | none |
-| [R12](R12-library-replay.md) | Library replay no longer imports a CLI | S–M / offline scoring | none |
+| [R12](archive/R12-library-replay.md) | Library replay no longer imports a CLI | S–M / offline scoring | none |
 | [R13](R13-preprocessing-boundaries.md) | Readers, transforms and orchestration have one dependency direction | L / data ordering and memory | none |
 | [R14](R14-feature-pipeline.md) | Feature assembly separated into cohesive modules | L / training and serving | R13 before loading moves |
 | [R15](R15-detector-evaluation.md) | Library scoring and a phased evaluation CLI | L / scoring, cache and spawn | R14 before feature caller migration |

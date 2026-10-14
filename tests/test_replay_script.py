@@ -1,11 +1,19 @@
-"""Tests for the offline replay harness."""
+"""Tests for the offline replay harness.
+
+The operation is ``src.analysis.replay.replay_sessions`` (R12); ``scripts/replay.py``
+is the entrypoint over it. The ``replay_sessions`` tests exercise the library
+directly, ``main`` tests exercise the script's arguments, output and exit codes.
+"""
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from scripts.replay import main, replay_sessions
+import scripts.replay as replay_script
+from scripts.replay import main
+from src.analysis import replay as replay_library
+from src.analysis.replay import replay_sessions
 from src.config import CanaryConfig
 from src.models.isolation_forest import fit_isolation_forest
 from src.storage.parquet_writer import write_records_to_parquet
@@ -193,3 +201,73 @@ def test_replay_reports_can_only_payload_sessions_as_unusable_numeric_features(
     assert report["numeric_value_columns"] == ["can:0x100"]
     assert report["rolling_feature_column_count"] == 3
     assert report["complete_model_input_rows"] == 0
+
+
+def test_script_reexports_are_the_library_objects() -> None:
+    """Old programmatic callers keep working, and the names are not copies."""
+    assert replay_script.replay_sessions is replay_library.replay_sessions
+    assert replay_script.ReplayFrames is replay_library.ReplayFrames
+    assert replay_script.ReplayResult is replay_library.ReplayResult
+    assert replay_library.ReplayResult.__module__ == "src.analysis.replay"
+
+
+def test_script_is_an_entrypoint_not_the_implementation() -> None:
+    """Nothing the replay does is defined in the script besides its CLI."""
+    owned = {
+        name
+        for name, value in vars(replay_script).items()
+        if getattr(value, "__module__", None) == replay_script.__name__
+    }
+    assert owned == {"parse_args", "main"}
+
+
+def test_replay_main_runs_the_library_and_prints_its_report(
+    tmp_path: Path, monkeypatch, capsys
+) -> None:
+    """``main`` prints exactly the library's report, sorted, one JSON document."""
+    import json
+
+    session = _write_obd_session(tmp_path, n=6)
+    returned: list[object] = []
+
+    def _through(*args, **kwargs):
+        result = replay_library.replay_sessions(*args, **kwargs)
+        returned.append(result)
+        return result
+
+    monkeypatch.setattr(replay_script, "replay_sessions", _through)
+
+    rc = main(["--config", str(EXAMPLE_YAML), str(session)])
+
+    assert rc == 0
+    (result,) = returned
+    assert capsys.readouterr().out == json.dumps(result.report, sort_keys=True) + "\n"
+
+
+def test_replay_main_forwards_value_and_model_to_the_library(
+    tmp_path: Path, monkeypatch, capsys
+) -> None:
+    seen: dict[str, object] = {}
+
+    class _Result:
+        report = {"ok": True}
+
+    def _spy(session_dirs, config, **kwargs):
+        seen["sessions"] = list(session_dirs)
+        seen.update(kwargs)
+        return _Result()
+
+    monkeypatch.setattr(replay_script, "replay_sessions", _spy)
+    model = tmp_path / "m.joblib"
+    rc = main(["--config", str(EXAMPLE_YAML), "--value", "value_bool", "--model", str(model), "s"])
+
+    assert rc == 0
+    assert seen == {"sessions": [Path("s")], "value": "value_bool", "model_path": model}
+    assert capsys.readouterr().out == '{"ok": true}\n'
+
+
+def test_replay_sessions_refuses_no_sessions() -> None:
+    import pytest
+
+    with pytest.raises(ValueError, match="at least one session"):
+        replay_sessions([], _config())

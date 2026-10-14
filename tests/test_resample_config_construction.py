@@ -243,10 +243,10 @@ def test_dataset_export_uses_the_recipe_at_the_requested_rate(
     assert seen[0].session_gap_seconds == 45.0
 
 
-def test_replay_script_uses_the_recipe(
+def test_replay_library_uses_the_recipe(
     tuned: CanaryConfig, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    import scripts.replay as replay
+    from src.analysis import replay
 
     seen = _spy_resample_wide(monkeypatch, replay)
     wide = pd.DataFrame(

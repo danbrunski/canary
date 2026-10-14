@@ -1,6 +1,6 @@
 """Unit tests for the ``src.analysis.replay_window`` module.
 
-These tests mock out :func:`scripts.replay.replay_sessions` so they don't
+These tests mock out :func:`src.analysis.replay.replay_sessions` so they don't
 exercise the full preprocessing pipeline (that has its own integration
 tests). The focus here is the post-processing: window filtering, the IF
 block, the LSTM block (skipped when no artifact), historical lookup, and
@@ -61,7 +61,7 @@ def _patched_replay(
     features: pd.DataFrame,
     scored: pd.DataFrame | None,
 ) -> Iterator[None]:
-    """Stand in for ``scripts.replay.replay_sessions``."""
+    """Stand in for the ``replay_sessions`` binding ``replay_window`` calls."""
 
     def _fake(_sessions, _config, *, model_path=None):
         result_scored = scored if model_path is not None else None
@@ -76,7 +76,7 @@ def _patched_replay(
             )
         )
 
-    with patch("scripts.replay.replay_sessions", side_effect=_fake):
+    with patch("src.analysis.replay_window.replay_sessions", side_effect=_fake):
         yield
 
 
