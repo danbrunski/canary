@@ -56,6 +56,7 @@ from src.decode.fuel_comp_load import (
 )
 from src.paths import BINDINGS_YAML, DIDS_YAML
 from src.signals.pairing import to_seconds
+from src.signals.time_lookup import previous_sample_indices, values_or_nan
 
 #: File name of the declaration in a vehicle profile directory.
 FUEL_COMP_FILE = "fuel_comp_fit.yaml"
@@ -728,18 +729,12 @@ class ClosedPositionEstimate:
         }
 
 
-def _as_of(times: np.ndarray, values: np.ndarray, at: np.ndarray, max_age: float) -> np.ndarray:
+def _value_at_or_before(
+    times: np.ndarray, values: np.ndarray, at: np.ndarray, max_age: float
+) -> np.ndarray:
     """The latest value at or before each instant, NaN when older than ``max_age``."""
-    out = np.full(len(at), np.nan)
-    if not len(times):
-        return out
-    index = np.searchsorted(times, at, side="right") - 1
-    ok = index >= 0
-    age = np.full(len(at), np.inf)
-    age[ok] = at[ok] - times[index[ok]]
-    take = ok & (age <= max_age)
-    out[take] = values[index[take]]
-    return out
+    index = previous_sample_indices(times, at, max_age_s=max_age)
+    return values_or_nan(values, index)
 
 
 def estimate_closed_position(
@@ -760,8 +755,10 @@ def estimate_closed_position(
     """
     method = declaration.inputs.throttle_did.closed_position
     validated = declaration.inputs.throttle_did.validated
-    rpm = _as_of(rpm_times, rpm_values, did_times, method.rpm_max_age_s)
-    coolant = _as_of(coolant_times, coolant_values, did_times, method.coolant_max_age_s)
+    rpm = _value_at_or_before(rpm_times, rpm_values, did_times, method.rpm_max_age_s)
+    coolant = _value_at_or_before(
+        coolant_times, coolant_values, did_times, method.coolant_max_age_s
+    )
     idle = (
         np.isfinite(rpm)
         & (rpm >= method.idle_rpm_min)

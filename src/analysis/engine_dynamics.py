@@ -93,6 +93,7 @@ from src.analysis.sim_contract import (
 )
 from src.signals.derived import DERIVED_CHANNEL_INPUTS, DERIVED_CHANNEL_OPTIONAL_INPUTS
 from src.signals.pairing import PairingPolicy, match_ordered, to_seconds
+from src.signals.time_lookup import nearest_sample_indices, values_or_nan
 
 MANIFOLD_FILE = "manifold_plant.yaml"
 MANIFOLD_SUBSYSTEM = "manifold_breathing"
@@ -1405,7 +1406,7 @@ def breathing_samples(session: Path, fuel: FuelPlantProfile) -> pd.DataFrame:
     out["rpm"] = paired
     for name, spec in (("baro_kpa", s.baro), ("iat_c", s.intake_temp), ("coolant_c", s.coolant)):
         t, v = _channel(long, spec)
-        out[name] = _as_of(t, v, t_maf, fuel.steady.slow_max_age_s)
+        out[name] = _nearest_value(t, v, t_maf, fuel.steady.slow_max_age_s)
     out["charge_fraction"] = charge_fraction(
         out["maf_gps"], out["rpm"], out["iat_c"], out["baro_kpa"], fuel.geometry
     )
@@ -1413,17 +1414,10 @@ def breathing_samples(session: Path, fuel: FuelPlantProfile) -> pd.DataFrame:
     return out
 
 
-def _as_of(t: FloatArray, v: FloatArray, at: FloatArray, max_age_s: float) -> FloatArray:
-    out = np.full(len(at), np.nan)
-    if not len(t):
-        return out
-    i = np.searchsorted(t, at)
-    lo, hi = np.clip(i - 1, 0, len(t) - 1), np.clip(i, 0, len(t) - 1)
-    d_lo, d_hi = np.abs(at - t[lo]), np.abs(t[hi] - at)
-    j = np.where(d_lo <= d_hi, lo, hi)
-    ok = np.minimum(d_lo, d_hi) <= max_age_s
-    out[ok] = v[j[ok]]
-    return out
+def _nearest_value(t: FloatArray, v: FloatArray, at: FloatArray, max_age_s: float) -> FloatArray:
+    """The read nearest each instant (a future one included), NaN when none is
+    within ``max_age_s``. Reuse allowed: slow environment channels only."""
+    return values_or_nan(v, nearest_sample_indices(t, at, max_age_s=max_age_s))
 
 
 #: rpm bands the breathing bound is reported in.

@@ -106,6 +106,7 @@ from src.signals.pairing import (
     to_seconds,
     weakest_basis,
 )
+from src.signals.time_lookup import next_sample_indices, previous_sample_indices, values_or_nan
 from src.vehicle.tune_revisions import TuneRevisionRegistry
 
 #: Bumped whenever a state, gate, pairing or column changes meaning.
@@ -365,32 +366,16 @@ def _separation(anchor: np.ndarray, series: _Series, index: np.ndarray) -> np.nd
     return out
 
 
-def _as_of(series: _Series, at: np.ndarray, max_age: float) -> np.ndarray:
+def _value_at_or_before(series: _Series, at: np.ndarray, max_age: float) -> np.ndarray:
     """The latest value at or before each instant, NaN when none is that recent."""
-    out = np.full(len(at), np.nan)
-    if not series.captured or not len(at):
-        return out
-    index = np.searchsorted(series.times, at, side="right") - 1
-    ok = index >= 0
-    age = np.full(len(at), np.inf)
-    age[ok] = at[ok] - series.times[index[ok]]
-    take = ok & (age <= max_age)
-    out[take] = series.values[index[take]]
-    return out
+    index = previous_sample_indices(series.times, at, max_age_s=max_age)
+    return values_or_nan(series.values, index)
 
 
-def _next_within(series: _Series, at: np.ndarray, max_age: float) -> np.ndarray:
+def _value_after(series: _Series, at: np.ndarray, max_age: float) -> np.ndarray:
     """The first value strictly after each instant, NaN when none is that soon."""
-    out = np.full(len(at), np.nan)
-    if not series.captured or not len(at):
-        return out
-    index = np.searchsorted(series.times, at, side="right")
-    ok = index < len(series.times)
-    gap = np.full(len(at), np.inf)
-    gap[ok] = series.times[index[ok]] - at[ok]
-    take = ok & (gap <= max_age)
-    out[take] = series.values[index[take]]
-    return out
+    index = next_sample_indices(series.times, at, max_age_s=max_age)
+    return values_or_nan(series.values, index)
 
 
 def _window_span(
@@ -983,11 +968,11 @@ def _route_frame(
         source = open_loop.commanded or rules.open_loop.commanded_preference[0]
         shift = declared_delays_s(ctx.delivery, source)["enrichment"]
         bracket = _delay_bracket(ctx, times, shift, policy)
-    coolant_now = _as_of(ctx.coolant, times, gates.coolant.max_age_s)
-    baro_now = _as_of(ctx.baro, times, gates.baro.max_age_s)
+    coolant_now = _value_at_or_before(ctx.coolant, times, gates.coolant.max_age_s)
+    baro_now = _value_at_or_before(ctx.baro, times, gates.baro.max_age_s)
     route_rules = rules.closed_loop if route == "closed_loop" else rules.open_loop
-    fs_prior = _as_of(ctx.fuel_status, times, route_rules.fuel_status_max_age_s)
-    fs_next = _next_within(ctx.fuel_status, times, route_rules.fuel_status_max_age_s)
+    fs_prior = _value_at_or_before(ctx.fuel_status, times, route_rules.fuel_status_max_age_s)
+    fs_next = _value_after(ctx.fuel_status, times, route_rules.fuel_status_max_age_s)
 
     columns: dict[str, Any] = {name: np.full(n, np.nan, dtype=object) for name in COLUMNS}
     columns.update(

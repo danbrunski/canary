@@ -65,6 +65,7 @@ from src.decode.target_phi_command import Branch, GateConstants, target_command
 from src.decode.target_phi_command import x_from_bfs as _x_from_bfs
 from src.paths import DIDS_YAML
 from src.signals.pairing import PairingPolicy, match_ordered, to_seconds
+from src.signals.time_lookup import MISSING, bracketing_sample_indices
 
 #: Bumped when the evaluator's states, reasons or record shape change.
 #: 2: provenance names the application model; blockers come from it (E05.1).
@@ -809,21 +810,20 @@ def _iso(seconds: float) -> str:
     return pd.Timestamp(seconds, unit="s", tz="UTC").isoformat()
 
 
-def _as_of(series: _Series, t: float, max_age: float) -> tuple[int | None, int | None]:
+def _bracket(series: _Series, t: float, max_age: float) -> tuple[int | None, int | None]:
     """Indices of the latest reading at/before ``t`` and the next reading
-    after that one, each within ``max_age`` of ``t``.
+    after that one, each within ``max_age`` of ``t`` (``None`` when missing).
 
     The two are always distinct reads: a reading stamped exactly at ``t`` is
-    the prior, and the bracket still needs a later one. Returning the same
-    read on both sides would let a change between it and the next read (a
+    the prior, and the bracket still needs a later one (see
+    :func:`~src.signals.time_lookup.bracketing_sample_indices`). Returning the
+    same read on both sides would let a change between it and the next read (a
     map switch, a mode change) pass as a stable bracket."""
-    if not len(series.times):
-        return None, None
-    before = int(np.searchsorted(series.times, t, side="right")) - 1
-    after = before + 1
-    prior = before if before >= 0 and t - series.times[before] <= max_age else None
-    nxt = after if after < len(series.times) and series.times[after] - t <= max_age else None
-    return prior, nxt
+    prior, nxt = bracketing_sample_indices(series.times, np.array([t]), max_age_s=max_age)
+    return (
+        None if prior[0] == MISSING else int(prior[0]),
+        None if nxt[0] == MISSING else int(nxt[0]),
+    )
 
 
 @dataclass
@@ -1095,7 +1095,7 @@ def _identity(
     reads: list[SlotResolution] = []
     detail: dict[str, Any] = {}
     for side, pick in (("before", 0), ("after", 1)):
-        index = _as_of(magic, candidate.time, rules.max_age_s)[pick]
+        index = _bracket(magic, candidate.time, rules.max_age_s)[pick]
         if index is None:
             detail[side] = None
             continue
@@ -1280,7 +1280,7 @@ def _gates(
         out["coolant"] = None
     else:
         s = series[coolant_spec]
-        prior, nxt = _as_of(s, t, coolant.max_age_s)
+        prior, nxt = _bracket(s, t, coolant.max_age_s)
         values = [float(s.values[i]) for i in (prior, nxt) if i is not None]
         out["coolant"] = {"spec": coolant_spec, "values": values}
         if not values:
@@ -1294,7 +1294,7 @@ def _gates(
         reasons.append(("unevaluable", "gate_missing:mode"))
         out["mode"] = None
     else:
-        prior, nxt = _as_of(s, t, mode.max_age_s)
+        prior, nxt = _bracket(s, t, mode.max_age_s)
         names = [
             mode.states.get(int(s.values[i]), f"unknown_{s.values[i]:g}")
             for i in (prior, nxt)

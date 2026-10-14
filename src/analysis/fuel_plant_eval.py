@@ -78,6 +78,7 @@ from src.analysis.injector_pulse import (
 from src.preprocessing.drives import physical_drives
 from src.session import is_synthetic_session
 from src.signals.pairing import PairingPolicy, match_ordered, to_seconds
+from src.signals.time_lookup import nearest_sample_indices, values_or_nan
 
 #: Every state a pulse read can be in, first failing check wins.
 STATES: tuple[str, ...] = (
@@ -126,19 +127,10 @@ def _pair(anchor: FloatArray, series: _Series, tolerance_s: float) -> FloatArray
     return out
 
 
-def _as_of(series: _Series, at: FloatArray, max_age_s: float) -> FloatArray:
+def _nearest_value(series: _Series, at: FloatArray, max_age_s: float) -> FloatArray:
     """Nearest read within ``max_age_s`` (reuse allowed: slow environment only)."""
-    out = np.full(len(at), np.nan)
-    if series.empty:
-        return out
-    t = series.times
-    i = np.searchsorted(t, at)
-    lo, hi = np.clip(i - 1, 0, len(t) - 1), np.clip(i, 0, len(t) - 1)
-    d_lo, d_hi = np.abs(at - t[lo]), np.abs(t[hi] - at)
-    j = np.where(d_lo <= d_hi, lo, hi)
-    ok = np.minimum(d_lo, d_hi) <= max_age_s
-    out[ok] = series.values[j[ok]]
-    return out
+    index = nearest_sample_indices(series.times, at, max_age_s=max_age_s)
+    return values_or_nan(series.values, index)
 
 
 def _bracketed(series: _Series, at: FloatArray, max_age_s: float) -> FloatArray:
@@ -246,21 +238,23 @@ def build_samples(session: Path, profile: FuelPlantProfile, delay: B06Rules) -> 
         ("lambda_obs_hi", delay.bracket[1]),
     ):
         frame[col] = _pair(t + d, lam_s, rule.pair_tolerance_s)
-    frame["baro_kpa"] = _as_of(_series(long, s.baro), t, rule.slow_max_age_s)
-    frame["iat_c"] = _as_of(_series(long, s.intake_temp), t, rule.slow_max_age_s)
-    frame["coolant_c"] = _as_of(_series(long, s.coolant), t, rule.slow_max_age_s)
-    frame["vb_v"] = _as_of(_series(long, s.battery_voltage), t, rule.battery_max_age_s)
+    frame["baro_kpa"] = _nearest_value(_series(long, s.baro), t, rule.slow_max_age_s)
+    frame["iat_c"] = _nearest_value(_series(long, s.intake_temp), t, rule.slow_max_age_s)
+    frame["coolant_c"] = _nearest_value(_series(long, s.coolant), t, rule.slow_max_age_s)
+    frame["vb_v"] = _nearest_value(_series(long, s.battery_voltage), t, rule.battery_max_age_s)
     rail = _series(long, s.rail_pressure)
     frame["rail_kpa"] = _window_median(rail, t, rule.rail_window_s)
     # ECU-side reads, for the pulse-chain check only.
     bfs = _series(long, s.bfs)
     frame["bfs"] = _pair(t, bfs, rule.ecu_pair_tolerance_s)
-    frame["bfs_before"] = _as_of(bfs, t - chain.check_bfs_lag_s, rule.ecu_pair_tolerance_s * 2)
-    frame["stft_pct"] = _as_of(_series(long, s.stft), t, rule.pair_tolerance_s * 2)
-    frame["ltft_pct"] = _as_of(_series(long, s.ltft), t, rule.slow_max_age_s)
+    frame["bfs_before"] = _nearest_value(
+        bfs, t - chain.check_bfs_lag_s, rule.ecu_pair_tolerance_s * 2
+    )
+    frame["stft_pct"] = _nearest_value(_series(long, s.stft), t, rule.pair_tolerance_s * 2)
+    frame["ltft_pct"] = _nearest_value(_series(long, s.ltft), t, rule.slow_max_age_s)
     phi = _bracketed(_series(long, s.reference_phi), t, rule.reference_phi_max_age_s)
     frame["reference_phi"] = phi
-    cut_ref = _as_of(_series(long, s.fuel_cut_reference), t, rule.ecu_pair_tolerance_s * 3)
+    cut_ref = _nearest_value(_series(long, s.fuel_cut_reference), t, rule.ecu_pair_tolerance_s * 3)
 
     # The ECM's dead time: from PID 0x42 where logged, else from this
     # session's own fuel-cut pulse reads (in cut the word *is* Ts).

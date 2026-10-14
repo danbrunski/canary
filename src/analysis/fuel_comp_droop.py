@@ -47,6 +47,7 @@ from src.analysis.channels import ChannelSpecError, parse_spec, read_channels, r
 from src.analysis.fuel_comp_inputs import DroopRules
 from src.paths import BINDINGS_YAML, DIDS_YAML
 from src.signals.pairing import to_seconds
+from src.signals.time_lookup import MISSING, previous_sample_indices, values_or_nan
 from src.storage.session_files import PARQUET_PATTERN
 
 #: Bumped whenever a kind, a column or the decomposition changes meaning.
@@ -186,14 +187,11 @@ def _running_maf(session: PressureSession, rules: DroopRules) -> tuple[np.ndarra
     """Every MAF read with the engine running (rpm as of it, within the age)."""
     if not len(session.maf_times) or not len(session.rpm_times):
         return _EMPTY, _EMPTY
-    index = np.searchsorted(session.rpm_times, session.maf_times, side="right") - 1
-    ok = index >= 0
-    age = np.full(len(index), np.inf)
-    age[ok] = session.maf_times[ok] - session.rpm_times[index[ok]]
-    rpm = np.full(len(index), np.nan)
-    fresh = ok & (age <= rules.rpm_max_age_s)
-    rpm[fresh] = session.rpm[index[fresh]]
-    running = fresh & (rpm >= rules.running_rpm_min)
+    index = previous_sample_indices(
+        session.rpm_times, session.maf_times, max_age_s=rules.rpm_max_age_s
+    )
+    rpm = values_or_nan(session.rpm, index)
+    running = (index != MISSING) & (rpm >= rules.running_rpm_min)
     return session.maf_times[running], session.maf_gs[running]
 
 
