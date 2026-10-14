@@ -2456,8 +2456,12 @@ live here now, so the documents could be archived
     `tps_sensor_1_vs_sensor_2_did` recipe's `sigma_floor=0.005`, the
     `afr_voltage_vs_rpm_throttle_did` y axis, the recipe golden, and the
     `wot_criterion` thresholds in `tuning_providers.yaml` (0.62/4.12/4.00 V,
-    measured at ×0.005). Remaining: the operator picks a rescale-with-retrain
-    or keeping 0.005.
+    measured at ×0.005). **Decided 2026-10-13 (operator): rescale with the
+    retrain.** 0x120F/0x1210 move to 5/1024 V in the same change as the owed
+    retrain (D03.25), together with the `tps_sensor_1_vs_sensor_2_did`
+    `sigma_floor`, the recipe golden and the `wot_criterion` thresholds, so no
+    served model ever reads the rescaled inputs. Until then the scale stays
+    0.005. Remaining: that change, at the retrain.
   - [x] **`mem:ECM_FUEL_COMP_X_INPUT` evidence rewritten to the merged
     finding.** It is an alpha-N relative fill, 0..224. X = w116A × (w1124/512 +
     w139E/2048), with w116A ≈ 1,141,245/rpm. w1124 is the throttle area

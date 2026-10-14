@@ -733,6 +733,11 @@ supercharger is a hardware intervention with a new plant parameter set.
        acquisition clock (as in E07.3) and the one-to-one matched pairs
        above; no aggregates are compared.
 
+  - *Operator, 2026-10-13: keep `load_input_pair_tolerance_s: 0.1`.* Before
+    the first post-change drive, change the capture so the fill byte is read
+    in the same RAM window or poll round as the pulse DID, rather than
+    widening the tolerance (0 of 152 pre-side reads pair at 0.1 s on the
+    committed slice; median gap 0.87 s).
 - [~] **E07.5 — Add dynamic air, torque and vehicle response in stages.**
   Add manifold mass/energy balance and cylinder breathing, then spark/lambda
   efficiency, friction, rotational inertia and road/driveline load. Separate

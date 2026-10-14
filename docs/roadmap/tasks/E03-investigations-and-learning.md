@@ -454,6 +454,8 @@ computed on the Pi and render without a language model.
     cost measured there with E04.3; (2) no evidence-backed likelihood
     exists, so real rankings stay structural until one is earned.
 
+  - *Operator, 2026-10-13:* live proposals stay on by default (no
+    `enabled` flag, unlike `twin_live`); E04.3 measures their tick cost on the Pi.
 - [~] **E03.5 — Learn a small candidate without absorbing a fault.**
   Trial recursive least squares or a Kalman candidate over a few physically
   meaningful parameters. Predict before updating; gate on excitation,
