@@ -713,7 +713,7 @@ binds the HAT:
 | §13.3.6 net list | Item 1 (always-on 3.3V) and item 3 (load switch) **leave the HAT**. Item 6 (Pi 3V3 sense) moves to CANary-PWR. Items 4, 5 and 14 are **no longer crossings**: both ends are in the Pi domain, so §13.3.2's pulls are no longer required. Keep the series resistors as cheap ESD/fault margin. Item 10 (INT2 motion wake) loses its purpose. **Added:** the CANary-PWR connector (`CANary-PWR-Spec.md` §P6). |
 | §13.3.10 MCU selection | The coprocessor no longer needs low standby current, and the "regulator Iq decides" argument moves to CANary-PWR. Part choice is RAM, FDCAN and ADC alone, as that section already concluded. |
 | §13.3.12 USB | "Powered from `+12V_RAW`, self-powered device" becomes powered from the Pi. The rule against drawing from or back-feeding VBUS still holds. |
-| §13.3.13 placement | The stack is NVMe base / Pi / **PWR** / HAT (2026-10-13), not X1202 / Pi / HAT. **J3, Q1, D1, C2 and the always-on buck leave the HAT**, freeing J3's ~10 mm on J2's edge, which §13.3.9 item 5 calls the only slack there. The HAT's bottom face now looks at CANary-PWR's top side rather than the cooler, so the fan keep-out and the ~6 mm cooler clearance move to PWR; the HAT's bottom-side budget becomes whatever its 13.5 mm J1 leaves above PWR's top-side parts (`CANary-PWR-Spec.md` §P2). Its top face is free. |
+| §13.3.13 placement | The stack is NVMe base / Pi / **PWR** / HAT (2026-10-13), not X1202 / Pi / HAT. **J3, Q1, D1, C2 and the always-on buck leave the HAT**; J3 already lives in rev 2.1's J2 as pins 3–4, and rev 3.0 drops those two positions (§13.3.9 item 5). The HAT's bottom face now looks at CANary-PWR's top side rather than the cooler, so the fan keep-out and the ~6 mm cooler clearance move to PWR; the HAT's bottom-side budget becomes whatever its 13.5 mm J1 leaves above PWR's top-side parts (`CANary-PWR-Spec.md` §P2). Its top face is free. |
 
 **Rev 2.1 is not held for any of this.** It carries the supercharger
 instrumentation and the rev 2.0 fixes. CANary-PWR rev 1.0 is designed to run
@@ -1407,10 +1407,25 @@ fuel-pressure capture now requires the MCU to read the ADS8688A** — either
 sharing SPI0 or its own link. Weigh that in rev 3.0 rather than assuming item
 7 still covers it.
 
-**5. The terminal block starts from rev 2.1's.** J2 is the two-level MKKDS
-1,5/6-5,08 with all 12 positions used and the rev 2.0 vehicle pinout frozen on
-the lower level (§13.5.5). §3.9's "rev 3.0 should weigh deleting J3" now has a
-concrete payoff: J3's ~10 mm is the only slack left on that edge.
+**5. J2 becomes a pluggable Phoenix MC 1,5 (operator, 2026-10-14).** Rev 2.1
+ends at one fixed 13-way screw terminal, `PT 1,5/13-3,5-H`, with J3 folded
+in as pins 3–4 (§13.5.5; the two-level MKKDS first drawn there was
+superseded on 2026-10-12). Rev 3.0 replaces it with the plug CANary-PWR uses
+for *Vehicle in* (`CANary-PWR-Spec.md` §P3): an `MC 1,5/..-G-3,81`
+right-angle header and an `MC 1,5/..-ST-3,81` screw plug, 8 A, 28–16 AWG. The
+harness is wired into the plug off the stack and pushed in from the side, and
+both boards take the same plug.
+
+- **What forced PT 1,5 is gone.** It was chosen because it clamps a collared
+  ferrule on 18 AWG; the MC 1,5 plug takes collared ferrules only up to
+  0.5 mm². From 2026-10-14 the harness is 20 AWG throughout, which takes a
+  0.5 mm² ferrule, and the 18 AWG X1202 feed is retired with the X1202.
+- **Positions.** Pins 3–4 (the X1202 feed) go. 12 V, ground and CAN arrive on
+  PWR's *HAT out* jumper and land on pins 1, 2, 5 and 6 as on rev 2.1. That
+  leaves 11 positions (41.9 mm at 3.81 mm), or 12 (45.7 mm) if `V_BCKP_AON`
+  lands on J2 as well. Either fits the ~51 mm between MH3 and MH4, where
+  PT 1,5/13's body is 45.5 mm today; 13 positions (49.5 mm) is the most that
+  fits.
 
 **6. Termination is decided per channel, not per revision.** CAN0 (vehicle)
 carries no termination footprint by design. ~~CAN1 (aux) carries
