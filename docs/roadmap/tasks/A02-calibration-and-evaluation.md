@@ -848,7 +848,7 @@ This checklist builds the yardstick.
   - Under the deployed schema, `2026-09-18T134345` has 14 never-observed
     channels, matching the engine's 14 `uncalibrated_channels` at load.
 
-- [ ] **A02.13 — A zero-variance calibration gives a zero-width band.**
+- [x] **A02.13 — A zero-variance calibration gives a zero-width band.**
   `error_distribution` sets the k-sigma threshold to `mean + k * std`. When
   every block maximum of a channel or family is identical, std is exactly 0,
   so the band equals the mean whatever k is. Any later error a float ulp
@@ -863,6 +863,38 @@ This checklist builds the yardstick.
 
   Real drives rarely produce exact ties, which is why this has not shown up
   live.
+
+  *Decided 2026-10-13 (operator): zero spread is uncalibrated, like A02.12's
+  unobserved families. The band is not floored.* Done 2026-10-13.
+  `calibrate_sequence_thresholds` (`src/models/sequence_calibration.py`)
+  checks each family's distribution with `zero_spread_reason`: when every
+  independent block maximum is the same float (`maximum == minimum`, exact
+  ties, under k-sigma and quantile alike), the family goes into
+  `uncalibrated_families` with a named reason ("zero spread: all N
+  independent calibration windows peak at V, no band to set (A02.13)") and
+  the A02.12 zero distribution (threshold 0.0), which `SequenceScoringRule`
+  already leaves out of the family path. It contributes nothing to
+  `family_max_score`; with no family left, `family_max_score` is `None` and
+  the family path is off. Its channels keep their bands and still score into
+  the global error.
+  - Original case reproduced before the fix: `_frame`'s periodic rows at
+    k = 1000 gave `speed` a band of 1.79758 with std 0.0 (count 5) and
+    flagged 8 of 17 held-out windows, all on the family path. After: 0.
+  - Tests (both red before the fix, green after):
+    `test_periodic_rows_give_no_zero_width_family_band`
+    (`tests/test_false_positive_benchmark.py`, the original case) and
+    `test_a_zero_spread_family_is_uncalibrated_and_never_flags`
+    (`tests/test_sequence_calibration.py`: a channel held at 50.0 under k-sigma
+    and quantile calibration, then served at `nextafter(50.0)` through the real
+    engine without a flag). The noisy-row
+    `test_benchmark_reports_zero_false_positives_with_loose_threshold` still
+    passes.
+  - Gate: calibration, scoring, budget-level, FP-benchmark and sequence
+    training/inference files with `-m ""`, ml_training and slow included:
+    280 passed, 1 skipped. No family in the deployed-manifest fixture
+    (`tests/fixtures/deployed_manifests/.../lstm_autoencoder`, 67 families)
+    has zero spread. Deployed thresholds are unchanged until the retrain
+    deferral lifts.
 
 ## Acceptance
 

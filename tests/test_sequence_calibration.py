@@ -127,6 +127,57 @@ def test_an_unobserved_channel_gets_no_threshold_and_never_flags() -> None:
     assert all("c" not in r.family_scores for r in scored)
 
 
+def test_a_zero_spread_family_is_uncalibrated_and_never_flags() -> None:
+    """A02.13 (operator 2026-10-13): a family whose every independent block
+    maximum is the same value has no spread to put a band on. ``mean + k * 0``
+    is a zero-width band whatever k is, so a later error one ulp higher
+    flagged. Such a family is uncalibrated with a named reason, as A02.12's
+    unobserved families are — no floored band."""
+    from src.models.inference import SequenceInferenceEngine
+
+    # c is observed in every row and held at 50.0, so every window's error on
+    # it (|value| under the zero model) is exactly 50.0: an exact tie.
+    frame = _frame(c_observed=True)
+    for k_sigma in (True, False):
+        calibration = calibrate_sequence_thresholds(
+            _ZeroModel(),
+            _dataset(frame),
+            feature_columns=("a", "b", "c"),
+            threshold_k=1_000.0,
+            threshold_quantile=None if k_sigma else 0.99,
+        )
+        assert calibration.family_errors is not None
+        assert calibration.family_errors["c"].threshold == 0.0
+        assert calibration.uncalibrated_families is not None
+        reason = calibration.uncalibrated_families["c"]
+        assert "zero spread" in reason and "50" in reason and "A02.13" in reason
+        # a and b vary, so they keep their bands; c's channel still scores
+        # into the global error (only its family band is degenerate).
+        assert set(calibration.uncalibrated_families) == {"c"}
+        assert calibration.family_errors["a"].threshold > 0.0
+        assert calibration.uncalibrated_channels == {}
+        assert SequenceThresholdCalibration.from_dict(calibration.to_dict()) == calibration
+
+    # Served: c arrives a float hair above its tie. Nothing may flag on it.
+    serve = _frame(rows=40, c_observed=True)
+    serve["c"] = np.nextafter(50.0, np.inf)
+    trained = SimpleNamespace(
+        model=_ZeroModel(),
+        feature_columns=("a", "b", "c"),
+        manifest=SimpleNamespace(
+            thresholds=calibration.to_dict(),
+            schema={"sequence_length": SEQ},
+            model_version="stub",
+            scaler=None,
+        ),
+    )
+    engine = SequenceInferenceEngine(trained)  # type: ignore[arg-type]
+    results = [engine.observe(serve.iloc[i]) for i in range(len(serve))]
+    scored = [r for r in results if r is not None]
+    assert scored and all("c" not in r.family_scores for r in scored)
+    assert not any(r.is_anomaly for r in scored)
+
+
 def test_a_channel_rare_in_training_is_uncalibrated_with_the_reason() -> None:
     calibration = _calibrate(_dataset(_frame()), training_observed_blocks={"a": 50, "b": 3})
     assert calibration.uncalibrated_channels is not None

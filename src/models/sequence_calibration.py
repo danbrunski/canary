@@ -53,6 +53,16 @@ MIN_OBSERVED_BLOCKS = MIN_CALIBRATION_SAMPLES
 RARE_OBSERVED_FRACTION = 0.5
 
 
+#: A02.13 (operator decision 2026-10-13) — a family whose every independent
+#: calibration block maximum is the same value has no spread to put a band on:
+#: ``mean + k * 0`` (or any quantile) is that value whatever ``k`` is, so a
+#: later error one float ulp higher flags. `_frame`'s periodic rows in the
+#: FP-benchmark tests did this to ``speed`` (8 of 17 held-out windows flagged
+#: at k = 1000). Such a family is uncalibrated, like A02.12's unobserved ones;
+#: the band is never floored to a width nobody measured.
+ZERO_SPREAD_REASON_PREFIX = "zero spread"
+
+
 #: Reason recorded for an ``engine_response`` context input (A03.2).
 CONTEXT_UNCALIBRATED_REASON = "context input: conditions the encoder, never scored (A03.2)"
 
@@ -161,7 +171,8 @@ class SequenceThresholdCalibration:
     #: family thresholds were computed without them, exactly as the serving
     #: engine scores them (out of the score mask).
     uncalibrated_channels: Mapping[str, str] | None = None
-    #: Families left without a threshold, same meaning.
+    #: Families left without a threshold: no calibrated member (A02.12), or
+    #: zero spread -- every block maximum the same float (A02.13).
     uncalibrated_families: Mapping[str, str] | None = None
     #: A02.3 — the distributions are per-block maxima over non-overlapping
     #: blocks of this many rows, pooled across sessions: independent samples,
@@ -333,6 +344,13 @@ def calibrate_sequence_thresholds(
     out of the global, per-mode and family distributions, which is how the
     serving engine scores it.
 
+    **No band without spread (A02.13).** A family whose every independent
+    block maximum is the same float is recorded in ``uncalibrated_families``
+    with the tied value (:func:`zero_spread_reason`) and gets threshold 0.0,
+    so serve leaves it out of the family path; its channels still score into
+    the global error. When no family is left, ``family_max_score`` is
+    ``None`` and the family path is off.
+
     **Independent windows (A02.3).** Stride-1 windows overlap by all but one
     row, so a 0.999 quantile over a session's ~1,000 windows is its maximum.
     Every distribution is taken over per-block maxima: the worst window ending
@@ -451,13 +469,22 @@ def calibrate_sequence_thresholds(
         )
         filled = np.where(np.isfinite(member_values), member_values, -np.inf)
         values = np.where(present, filled.max(axis=1), np.nan)
-        family_distributions[family] = distribution(block_maxima(values, blocks))
-        threshold = max(family_distributions[family].threshold, np.finfo(np.float64).eps)
+        family_distribution = distribution(block_maxima(values, blocks))
+        if (reason := zero_spread_reason(family_distribution)) is not None:
+            uncalibrated_families[family] = reason
+            family_distributions[family] = uncalibrated_distribution()
+            continue
+        family_distributions[family] = family_distribution
+        threshold = max(family_distribution.threshold, np.finfo(np.float64).eps)
         # An unobserved family contributes 0 to the serving max (its channel
         # scores are 0 there), so it does here too.
         normalized_columns.append(np.where(present, values / threshold, 0.0))
-    family_max_distribution = distribution(
-        block_maxima(np.max(np.column_stack(normalized_columns), axis=1), blocks)
+    # With no family left to score, the family path is off (the engine reads
+    # a missing ``family_max_score`` that way) rather than banded on nothing.
+    family_max_distribution = (
+        distribution(block_maxima(np.max(np.column_stack(normalized_columns), axis=1), blocks))
+        if normalized_columns
+        else None
     )
 
     # Per-operating-mode global thresholds. The mode for a window is its last
@@ -486,6 +513,20 @@ def calibrate_sequence_thresholds(
         uncalibrated_families=uncalibrated_families,
         block_rows=int(dataset.sequence_length),
         effective_window_count=int(global_maxima.size),
+    )
+
+
+def zero_spread_reason(distribution: ReconstructionErrorDistribution) -> str | None:
+    """Why ``distribution`` cannot carry a band, or ``None`` when it can (A02.13).
+
+    Zero spread means every sample is the *same float* -- exact ties, not a
+    small spread -- so any threshold taken from it sits on the tie itself.
+    """
+    if distribution.count == 0 or distribution.maximum != distribution.minimum:
+        return None
+    return (
+        f"{ZERO_SPREAD_REASON_PREFIX}: all {distribution.count} independent calibration "
+        f"windows peak at {distribution.maximum:.6g}, no band to set (A02.13)"
     )
 
 
@@ -647,6 +688,7 @@ __all__ = [
     "MIN_CALIBRATION_SAMPLES",
     "MIN_OBSERVED_BLOCKS",
     "RARE_OBSERVED_FRACTION",
+    "ZERO_SPREAD_REASON_PREFIX",
     "ReconstructionErrorDistribution",
     "SequenceThresholdCalibration",
     "block_maxima",
@@ -659,4 +701,5 @@ __all__ = [
     "uncalibrated_distribution",
     "window_blocks",
     "window_modes",
+    "zero_spread_reason",
 ]

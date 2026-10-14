@@ -139,6 +139,30 @@ def test_benchmark_reports_zero_false_positives_with_loose_threshold() -> None:
     assert [point.k for point in report.k_sweep] == sorted(point.k for point in report.k_sweep)
 
 
+def test_periodic_rows_give_no_zero_width_family_band() -> None:
+    """A02.13, the original case (2026-10-12): `_frame`'s periodic rows make
+    every calibration block maximum of the `speed` family identical, so its
+    band was `mean + k * 0` and 8 held-out windows flagged at k = 1000 on
+    float noise. Operator 2026-10-13: that family is uncalibrated, named."""
+    trained = _trained(threshold_k=1_000.0)
+    calibration = SequenceThresholdCalibration.from_dict(trained.manifest.thresholds)
+    assert calibration.family_errors is not None
+    tied = {
+        family
+        for family, band in calibration.family_errors.items()
+        if band.count > 0 and band.maximum == band.minimum
+    }
+    assert not tied, f"zero-spread families kept a band: {sorted(tied)}"
+    uncalibrated = calibration.uncalibrated_families or {}
+    assert all("zero spread" in uncalibrated[family] for family in uncalibrated)
+    held_out = _dataset(_frame("holdout", rows=20, start="2026-05-12T01:00:00Z"))
+
+    report = benchmark_false_positives(trained, held_out)
+
+    assert report.family_flagged_windows == 0
+    assert report.flagged_windows == 0
+
+
 def test_benchmark_flags_windows_when_threshold_is_tight() -> None:
     trained = _trained(threshold_k=0.0)
     held_out = _dataset(_frame("holdout", rows=20, start="2026-05-12T01:00:00Z", jitter=4.0))
