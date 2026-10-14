@@ -56,7 +56,7 @@ DRIVE_GAP_SECONDS = 300.0
 #: broadcast. GPS, IMU, derived channels and raw bus frames keep arriving
 #: from a parked truck with the Pi powered, so they are not evidence of a
 #: drive. ``decoded`` rows are decoded on read from the frames (P02.8), the
-#: rows a session read by :mod:`src.preprocessing.loader` carries, so a
+#: rows a session read by :mod:`src.preprocessing.session_reader` carries, so a
 #: session recorded after 2026-09-26 (which stores none) is placed exactly
 #: as one recorded before it.
 ACTIVITY_SOURCES: tuple[str, ...] = ("obd", "decoded")

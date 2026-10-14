@@ -54,14 +54,13 @@ import pandas as pd
 
 from src.columns import SESSION_COLUMN, TIMESTAMP_COLUMN, arrived_column, gap_column
 from src.decode.bindings import Bindings
+from src.preprocessing.imu_decimation import decimate_imu_long
 from src.preprocessing.imu_stream import ImuFramePlan, iter_framed_numeric_parts
-from src.preprocessing.loader import (
-    INDEX_COLUMNS,
-    coerce_numeric_columns,
-    non_numeric_columns,
-)
 from src.preprocessing.quality_gate import apply_quality_gate
-from src.preprocessing.resampler import ResampleConfig, resample_wide
+from src.preprocessing.resampler import ResampleConfig, resample_long, resample_wide
+from src.preprocessing.session_contracts import INDEX_COLUMNS
+from src.preprocessing.session_reader import SESSION_PART_ROWS
+from src.preprocessing.wide_frame import coerce_numeric_columns, non_numeric_columns
 from src.signals.fsm import PHYSICAL_LIMITS
 from src.storage.broadcast_storage import (
     SessionCanStorage,
@@ -588,7 +587,7 @@ def resample_numeric_reduced(
 ) -> pd.DataFrame:
     """``resample_long`` of a session reduced from its ``value_number`` rows.
 
-    The chain ``loader.resample_and_segment(value="value_number")`` runs (the
+    The chain ``session_pipeline.resample_and_segment(value="value_number")`` runs (the
     digest, fingerprints, classification): no decode, no quality gate, IMU
     decimated per tick before the reduction (:func:`reduce_numeric_session`).
     The kept cells are turned back into long rows and handed to the real
@@ -597,8 +596,6 @@ def resample_numeric_reduced(
     numeric reading, which are bin extremes; its segment split reads every
     row's time, which the structural cells keep.
     """
-    from src.preprocessing.resampler import resample_long
-
     grid_interval_ns(resample_config)
     refuse_shorter_stored_timeout(
         reduced.broadcast_stale_timeout_seconds,
@@ -637,13 +634,11 @@ def reduce_numeric_session(
     when ``None``), decimates them per tick exactly as ``resample_and_segment``
     does, and keeps the cells ``resample_long`` reads. No gate, and no decode
     beyond the loader's decode on read of the ``decoded:`` rows (P02.8;
-    ``on_read`` is that catalog, ``loader.iter_session_numeric_parts``): that
+    ``on_read`` is that catalog, ``session_reader.iter_session_numeric_parts``): that
     chain has neither. The one addition is the IMU frame's ``decoded:`` speed
     source, decoded for the stream and dropped after it
     (``imu_stream.iter_framed_numeric_parts``).
     """
-    from src.preprocessing.loader import SESSION_PART_ROWS, _decimate_imu_long
-
     interval_ns = grid_interval_ns(resample_config)
     refuse_shorter_read_timeout(session_dir, resample_config.broadcast_max_gap_seconds)
     framed = iter_framed_numeric_parts(
@@ -653,7 +648,7 @@ def reduce_numeric_session(
         on_read=on_read,
         plan=imu_plan,
     )
-    parts = (_decimate_imu_long(part, hz=resample_config.hz) for part in framed)
+    parts = (decimate_imu_long(part, hz=resample_config.hz) for part in framed)
     return reduce_long_frames(
         session_dir.name,
         parts,

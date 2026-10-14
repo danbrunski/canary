@@ -3,7 +3,7 @@
 The longitudinal-acceleration committee's IMU member. Every other IMU
 aggregate is a magnitude; this one keeps the sign, so it can be compared with
 a speed derivative. One aggregation (the per-tick mean of the resolved
-``imu:ACCEL_LON``): offline in ``imu_decimation`` / ``loader._decimate_imu_long``
+``imu:ACCEL_LON``): offline in ``imu_decimation`` / ``imu_decimation.decimate_imu_long``
 on the sidecar's frame, live in ``LiveImuFrame`` with its own running sign
 evidence. Absent — never 0 — wherever the frame cannot say which way is
 forward.
@@ -28,11 +28,12 @@ from src.preprocessing.imu_decimation import (
     ACCEL_LON_COLUMN,
     ACCEL_LON_MAX_COLUMN,
     ACCEL_LON_MEAN_COLUMN,
+    decimate_imu_long,
     decimate_imu_wide,
 )
 from src.preprocessing.imu_live import SIGN_ALPHA, SIGN_RHO_G2, LiveImuFrame, sign_log_evidence
 from src.preprocessing.imu_session import ImuSessionFrame, resolve_session_imu_frame
-from src.preprocessing.loader import _decimate_imu_long, resample_and_segment
+from src.preprocessing.loader import resample_and_segment
 from src.signals.committees import (
     GPS_SPEED_ACCEL_G,
     IMU_ACCEL_LON_MEAN,
@@ -290,7 +291,7 @@ def test_offline_wide_and_long_decimation_agree_and_keep_the_sign() -> None:
         id_vars=["session", "timestamp"], var_name="source_channel", value_name="value_number"
     )
     long = long.dropna(subset=["value_number"]).reset_index(drop=True)
-    decimated = _decimate_imu_long(long, hz=1.0)
+    decimated = decimate_imu_long(long, hz=1.0)
     means = decimated.loc[decimated["source_channel"] == ACCEL_LON_MEAN_COLUMN]
     long_by_tick = means.groupby(means["timestamp"].dt.floor("1s"))["value_number"].first()
     expected = by_tick.dropna()

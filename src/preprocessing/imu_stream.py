@@ -1,9 +1,9 @@
 """The offline IMU frame on the ``value_number`` chain, part by part (H02.4).
 
-``loader.resample_and_segment`` (the trip-end digest, fingerprints, session
+``session_pipeline.resample_and_segment`` (the trip-end digest, fingerprints, session
 classification, ``scripts/autotag.py``) reads a session part by part (P02.1)
 and decimates ``imu:ACCEL_LON``/``imu:ACCEL_LAT`` per tick
-(``loader._decimate_imu_long``). No session records those two channels: the
+(``imu_decimation.decimate_imu_long``). No session records those two channels: the
 LSM6DSOX records raw body-frame ``imu:ACCEL_X/Y/Z``, and the frame that turns
 them into ``ACCEL_LON/LAT`` is resolved per session into ``imu_frame.json``
 (:mod:`src.preprocessing.imu_session`). This module rebuilds that frame's
@@ -44,7 +44,7 @@ the sidecar does not describe these rows. It raises
 :class:`ImuFrameStaleError` rather than emit a frame from another session's
 fit.
 
-**Ticks stay whole.** ``_decimate_imu_long`` aggregates per tick, and places
+**Ticks stay whole.** ``decimate_imu_long`` aggregates per tick, and places
 each aggregate at the tick's first and last row over *every* channel. So a
 tick's rows are emitted together, ``ACCEL_LON/LAT`` included. The ticks that
 still hold unresolved IMU rows are held back: about ``lookahead`` samples,
@@ -75,7 +75,7 @@ channels):
   and no ``--replace`` is needed, even on a session whose ``0x2D1`` frames the
   old resolver could not decode.
 
-``loader.resample_and_segment`` puts each session's :class:`ImuFrameUse` on its
+``session_pipeline.resample_and_segment`` puts each session's :class:`ImuFrameUse` on its
 result (``attrs[IMU_FRAME_ATTR]``), so an absent ``imu:ACCEL_LON_MAX`` says
 which kind of absent it is.
 
@@ -123,6 +123,7 @@ from src.preprocessing.imu_session import (
     read_imu_frame_sidecar,
     speed_decode_catalog,
 )
+from src.preprocessing.session_reader import SESSION_PART_ROWS, iter_session_numeric_parts
 from src.telemetry import DECODED_SOURCE, SOURCE_SEP, channel_key
 
 log = logging.getLogger(__name__)
@@ -303,7 +304,7 @@ def iter_framed_numeric_parts(
     on_read: Bindings | None | Literal["current"] = "current",
     plan: ImuFramePlan | None = None,
 ) -> Iterator[pd.DataFrame]:
-    """``loader.iter_session_numeric_parts`` with the session's
+    """``session_reader.iter_session_numeric_parts`` with the session's
     ``imu:ACCEL_LON/LAT`` rows added, whole ticks at a time: the one way the
     ``value_number`` chain reads a session (``derived.reduce_numeric_session``).
 
@@ -314,8 +315,6 @@ def iter_framed_numeric_parts(
     defaults to :func:`plan_imu_frame`; the parts are the reader's own when it
     does not apply.
     """
-    from src.preprocessing.loader import SESSION_PART_ROWS, iter_session_numeric_parts
-
     plan = plan_imu_frame(session_dir) if plan is None else plan
     catalog = on_read_catalog() if on_read == "current" else on_read
     read_with, stream_only = plan.read_catalog(catalog)

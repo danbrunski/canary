@@ -32,28 +32,35 @@ Until then the recorder also stored a ``decoded`` row per confirmed (or
 them repeating the previous value, and all of them recomputable (0 of 2.70 M
 same-instant pairs differed, P01 round 2). :func:`decode_on_read` is the one
 place those rows come from now: the session loader
-(:mod:`src.preprocessing.loader`) replaces any stored ``decoded`` row with it,
+(:mod:`src.preprocessing.session_reader`) replaces any stored ``decoded`` row with it,
 for old sessions and new alike, so every reader sees the same rows with the
 current catalog. Old sessions keep their stored rows on disk; nothing reads
 them. (``tools/backfill_decoded.py``, which wrote ``decoded`` rows into old
 sessions, is retired with it: it rewrote sessions to store what is now
 decoded on read.)
+
+**This module is a row transform, not a reader (R13).** It imports no session
+reader: the two functions that read a session and then decode it
+(``read_session_decoded``, ``read_session_decoded_subset``) live in
+:mod:`src.preprocessing.decoded_reader`, above both this module and
+``session_reader``. :func:`__getattr__` below keeps their old path here
+resolving.
 """
 
 from __future__ import annotations
 
 import hashlib
+import importlib
 import json
 from collections.abc import Iterable
-from pathlib import Path
-from typing import Any, Literal
+from typing import Any
 
 import numpy as np
 import pandas as pd
 import pyarrow as pa
 
 from src.can_ids import parse_can_channel
-from src.decode.bindings import Bindings, Signal, load_bindings
+from src.decode.bindings import Bindings, Signal
 from src.decode.on_read import can_channel_spellings
 from src.decode.slices import payload_lengths, sentinel_channel, slice_raw_column
 from src.paths import BINDINGS_YAML
@@ -258,63 +265,6 @@ def decode_can_rows(
     return combined.sort_values(["timestamp", "source", "channel"], kind="stable").reset_index(
         drop=True
     )
-
-
-def read_session_decoded(
-    session_dir: Path,
-    *,
-    bindings_path: Path = DEFAULT_BINDINGS_PATH,
-    confidence_levels: set[str] | None = None,
-) -> pd.DataFrame:
-    """The session read with ``bindings_path`` as its decode catalog.
-
-    Convenience for the standard pipeline entry point: the raw rows, and a
-    ``decoded`` row for each frame the catalog's (confidence-filtered)
-    signals read, decoded here. No stored ``decoded`` row survives (P02.8),
-    and neither does the loader's own decode on read, which uses the repo
-    catalog: every decoded row comes from ``bindings_path``. If it doesn't
-    exist, the frame has no decoded rows — so the pipeline still works in a
-    checkout without the bindings file.
-    """
-    # Local import to avoid a module-level loader ↔ decode dependency.
-    from src.preprocessing.loader import read_session
-
-    long_frame = read_session(session_dir, decoded="as_recorded")
-    long_frame = decode_on_read(long_frame, None).reset_index(drop=True)
-    if not bindings_path.exists():
-        return long_frame
-    bindings = load_bindings(bindings_path)
-    return decode_can_rows(long_frame, bindings, confidence_levels=confidence_levels)
-
-
-def read_session_decoded_subset(
-    session_dir: Path,
-    *,
-    bindings: Bindings | None,
-    decoded: Iterable[str],
-    rows: Literal["on_read", "as_recorded"] = "on_read",
-) -> tuple[pd.DataFrame, Bindings | None]:
-    """One bounded read of a session for a *subset* of broadcast signals (R04.14).
-
-    Returns ``(long, subset)``: the session's long frame holding every non-CAN
-    row plus only the raw CAN rows whose id one of the ``decoded`` bindings
-    reads -- pushed down to parquet over every era's channel spelling
-    (:func:`can_channel_spellings`) and matched exactly by parsed id -- and
-    ``bindings`` narrowed to those signals (``None`` when there is nothing to
-    decode). Decoding is the caller's: ``decode_can_rows(long, subset)`` or
-    the resample chain. A whole-bus read of one 42 MB drive peaked above 6 GB,
-    which is why both bounded readers (``plausibility.offline.session_long``,
-    ``analysis.behavior_validation.build_evaluation_frame``) exist at all.
-
-    ``rows`` is the loader's ``decoded`` mode: the session's ``decoded`` rows
-    decoded on read (default), or as recorded for a caller that drops every
-    ``decoded`` row it is given and decodes what it keeps itself.
-    """
-    from src.preprocessing.loader import read_session
-
-    filters, subset, ids = decoded_subset_plan(bindings, decoded)
-    long = read_session(Path(session_dir), filters=filters, decoded=rows)
-    return keep_can_ids(long, ids), subset
 
 
 def decoded_subset_plan(
@@ -529,3 +479,17 @@ def _repeated(labels: list[Any], counts: np.ndarray[Any, np.dtype[Any]], dtype: 
         column = pa.array(labels, type=pa.large_string()).take(codes)
         return pd.Series(pd.array(column, dtype=dtype))
     return pd.Series(np.repeat(np.array(labels, dtype=object), counts), dtype=dtype)
+
+
+#: Names that moved to :mod:`src.preprocessing.decoded_reader` (R13), still
+#: importable from here. Resolved by name on first access: a static import
+#: would put the reader back under the module it must sit above.
+_MOVED_TO_DECODED_READER = frozenset({"read_session_decoded", "read_session_decoded_subset"})
+
+
+def __getattr__(name: str) -> Any:
+    if name in _MOVED_TO_DECODED_READER:
+        value = getattr(importlib.import_module("src.preprocessing.decoded_reader"), name)
+        globals()[name] = value
+        return value
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

@@ -491,7 +491,7 @@ def _whole_session_numeric(session: Path) -> pd.DataFrame:
     no-store chain made before P02.1, kept here as the reference the
     part-by-part chain must reproduce."""
     from src.decode.on_read import on_read_catalog
-    from src.preprocessing.loader import _read_numeric_chunks
+    from src.preprocessing.session_reader import _read_numeric_chunks
     from src.storage.session_files import PARQUET_PATTERN
     from src.telemetry import SOURCE_SEP
 
@@ -517,7 +517,8 @@ def test_the_value_number_chain_reads_the_store_and_matches_raw(
     from src.config import CanaryConfig
     from src.preprocessing.derived import reduce_numeric_session, resample_numeric_reduced
     from src.preprocessing.derived_store import use_store
-    from src.preprocessing.loader import _decimate_imu_long, resample_and_segment
+    from src.preprocessing.imu_decimation import decimate_imu_long
+    from src.preprocessing.loader import resample_and_segment
     from src.preprocessing.resampler import resample_config_for, resample_long
     from src.preprocessing.segmenter import segment_operating_modes
 
@@ -527,7 +528,7 @@ def test_the_value_number_chain_reads_the_store_and_matches_raw(
     session = _imu_session(tmp_path / "sessions")
 
     raw = resample_long(
-        _decimate_imu_long(_whole_session_numeric(session), hz=resample.hz), config=resample
+        decimate_imu_long(_whole_session_numeric(session), hz=resample.hz), config=resample
     )
     assert {"imu:ACCEL_LON_RMS", "imu:JERK_MAX", "imu:ACCEL_LAT_MAX"} <= set(raw.columns)
     for part_rows in (700, 5_000):
@@ -570,24 +571,26 @@ def test_without_a_store_the_value_number_chain_reads_one_part_at_a_time(
     session part by part, so its memory is one part plus the 1 Hz cells, never
     the whole session. The store only adds reuse."""
     from src.config import CanaryConfig
-    from src.preprocessing import loader
+    from src.preprocessing import derived, imu_stream, session_pipeline, session_reader
     from src.storage.session_files import count_session_rows
 
     monkeypatch.delenv(DERIVED_DIR_ENV, raising=False)
-    monkeypatch.setattr(loader, "SESSION_PART_ROWS", 3_000)
+    # The part size is read by name in each module that cuts or batches parts.
+    for owner in (session_reader, derived, imu_stream):
+        monkeypatch.setattr(owner, "SESSION_PART_ROWS", 3_000)
     session = _imu_session(tmp_path / "sessions")
     total = count_session_rows(session)
     assert total is not None
     reads: list[int] = []
-    real = loader._read_numeric_chunks
+    real = session_reader._read_numeric_chunks
 
     def counted(paths: Any, catalog: Any) -> list[pd.DataFrame]:
         frames = real(paths, catalog)
         reads.append(sum(len(frame) for frame in frames))
         return frames
 
-    monkeypatch.setattr(loader, "_read_numeric_chunks", counted)
-    frame = loader.resample_and_segment(
+    monkeypatch.setattr(session_reader, "_read_numeric_chunks", counted)
+    frame = session_pipeline.resample_and_segment(
         [session], CanaryConfig.from_yaml(Path("canary.example.yaml")), value="value_number"
     )
     assert not frame.empty

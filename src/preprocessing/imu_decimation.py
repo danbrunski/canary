@@ -6,7 +6,7 @@ frame"): a 100 Hz IMU must not flow raw into the feature pipeline the way
 per-timestamp pivot, dwarfing the OBD rows and bloating the pivot the
 resampler then has to collapse.
 
-This module runs on the WIDE frame — after ``loader.to_wide`` pivots long
+This module runs on the WIDE frame — after ``wide_frame.to_wide`` pivots long
 telemetry to one column per ``source:channel``, before ``resampler.
 resample_wide`` collapses it onto the uniform tick grid. Raw per-sample rows
 still land in Parquet unchanged (the storage layer never sees this module);
@@ -26,6 +26,10 @@ arbitrary raw sample per tick and discard every transient peak in between
 row-broadcast value per resample-tick bin *before* ``resample_wide`` runs
 means its own ``.last()`` picks up the already-correct aggregate instead of
 an arbitrary raw sample.
+
+:func:`decimate_imu_long` is the same aggregation on long rows, for the
+bounded ``value_number`` chain that never pivots (it moved here from
+``loader._decimate_imu_long``, so the reduction does not import the loader).
 
 A no-op (returns the input unchanged) whenever neither longitudinal nor
 lateral IMU channel is present — the case for every session recorded before
@@ -132,3 +136,64 @@ def decimate_imu_wide(wide: pd.DataFrame, *, hz: float) -> pd.DataFrame:
         out = out.drop(columns=[ACCEL_LAT_COLUMN])
 
     return out
+
+
+def decimate_imu_long(frame: pd.DataFrame, *, hz: float) -> pd.DataFrame:
+    """Long-form equivalent of :func:`decimate_imu_wide` without a raw pivot."""
+    raw_channels = {ACCEL_LON_COLUMN, ACCEL_LAT_COLUMN}
+    if frame.empty or not bool(frame["source_channel"].isin(raw_channels).any()):
+        return frame
+    tick = pd.Timedelta(seconds=1.0 / hz)
+    work = frame.copy()
+    work["_tick"] = work["timestamp"].dt.floor(tick)
+    # Wide decimation broadcasts each aggregate over every raw timestamp in
+    # its tick; resample_wide then observes it at that tick's final timestamp.
+    grouped_timestamps = work.groupby("_tick", sort=True)["timestamp"]
+    observed_first = grouped_timestamps.min()
+    observed_last = grouped_timestamps.max()
+    synthetic: list[pd.DataFrame] = []
+
+    def append_metric(values: pd.Series, channel: str) -> None:
+        starts = observed_first.reindex(values.index)
+        ends = observed_last.reindex(values.index)
+        # Two observations reproduce the wide path's broadcast without one
+        # synthetic row per raw sample: the first controls whether the value
+        # exists at this grid edge, and the last controls age at the next.
+        timestamps = pd.concat([starts, ends]).drop_duplicates()
+        repeated = values.reindex(timestamps.index)
+        synthetic.append(
+            pd.DataFrame(
+                {
+                    "session": frame["session"].iloc[0],
+                    "timestamp": timestamps.to_numpy(),
+                    "source_channel": channel,
+                    "value_number": repeated.to_numpy(),
+                }
+            )
+        )
+
+    lon = work.loc[work["source_channel"] == ACCEL_LON_COLUMN].copy()
+    if not lon.empty:
+        lon = lon.sort_values("timestamp", kind="stable").drop_duplicates("timestamp", keep="last")
+        values = pd.to_numeric(lon["value_number"], errors="coerce")
+        grouped = values.groupby(lon["_tick"])
+        append_metric(grouped.apply(lambda series: series.abs().max()), ACCEL_LON_MAX_COLUMN)
+        append_metric(
+            grouped.apply(lambda series: np.sqrt((series**2).mean())),
+            ACCEL_LON_RMS_COLUMN,
+        )
+        # The one signed aggregate (H04.4's committee member): NaN, never 0,
+        # for a tick without a finite sample.
+        append_metric(grouped.mean(), ACCEL_LON_MEAN_COLUMN)
+        dt = lon["timestamp"].groupby(lon["_tick"]).diff().dt.total_seconds()
+        jerk = (values.groupby(lon["_tick"]).diff() / dt.replace(0.0, np.nan)).abs()
+        append_metric(jerk.groupby(lon["_tick"]).max(), JERK_MAX_COLUMN)
+
+    lat = work.loc[work["source_channel"] == ACCEL_LAT_COLUMN].copy()
+    if not lat.empty:
+        lat = lat.sort_values("timestamp", kind="stable").drop_duplicates("timestamp", keep="last")
+        values = pd.to_numeric(lat["value_number"], errors="coerce")
+        append_metric(values.abs().groupby(lat["_tick"]).max(), ACCEL_LAT_MAX_COLUMN)
+
+    ordinary = work.loc[~work["source_channel"].isin(raw_channels), frame.columns]
+    return pd.concat([ordinary, *synthetic], ignore_index=True)

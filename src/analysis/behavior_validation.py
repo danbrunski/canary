@@ -109,7 +109,8 @@ from src.dataframe_utils import numeric_values
 from src.models.fusion import BandExcessAccumulator, PersistenceGate
 from src.paths import BINDINGS_YAML, DIDS_YAML
 from src.preprocessing import drives as _drives
-from src.preprocessing.decode import decode_on_read, read_session_decoded_subset
+from src.preprocessing.decode import decode_on_read
+from src.preprocessing.decoded_reader import read_session_decoded_subset
 from src.preprocessing.features import compute_rate_of_change
 from src.session import SessionKind, session_kind
 from src.signals.pairing import PairingPolicy, match_ordered, to_seconds
@@ -2067,7 +2068,7 @@ def build_evaluation_frame(
     CAN frames are read only for the ids of the bindings in
     :func:`evaluation_decoded_signals` — a whole-bus decode of one 42 MB drive
     peaked above 6 GB. The bounded read is
-    :func:`src.preprocessing.decode.read_session_decoded_subset`, the one
+    :func:`src.preprocessing.decoded_reader.read_session_decoded_subset`, the one
     reader that pushes the ids down under every era's channel spelling
     (R04.14; this reader used to push ``0x{id:X}`` only and silently decoded
     nothing from an older session). DBC decoding is not run. Returns the operating frame

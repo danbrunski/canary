@@ -126,7 +126,7 @@ def _recording_reads(monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, tuple[s
         reads.append((Path(str(path)).parent.name, None if columns is None else tuple(columns)))  # type: ignore[arg-type]
         return real(path, *args, **kwargs)  # type: ignore[arg-type]
 
-    monkeypatch.setattr(loader.pd, "read_parquet", recording)
+    monkeypatch.setattr(pd, "read_parquet", recording)
     return reads
 
 

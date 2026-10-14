@@ -13,7 +13,7 @@ from pathlib import Path
 import pandas as pd
 import pytest
 
-from src.preprocessing import loader
+from src.preprocessing import session_reader
 from src.preprocessing.loader import read_session
 from src.storage.parquet_writer import write_records_to_parquet
 from src.storage.session_files import chunk_time_range, chunks_overlapping
@@ -58,13 +58,13 @@ def test_a_windowed_read_opens_only_its_chunks_and_returns_the_same_rows(
     whole = read_session(session, filters=window, decoded="as_recorded")
 
     opened: list[Path] = []
-    real = loader.pd.read_parquet
+    real = session_reader.pd.read_parquet
 
     def spy(path: Path, *args: object, **kwargs: object) -> pd.DataFrame:
         opened.append(Path(path))
         return real(path, *args, **kwargs)  # type: ignore[arg-type]
 
-    monkeypatch.setattr(loader.pd, "read_parquet", spy)
+    monkeypatch.setattr(session_reader.pd, "read_parquet", spy)
     pruned = read_session(session, filters=window, decoded="as_recorded", time_range=(lo, hi))
 
     assert len(opened) == 1

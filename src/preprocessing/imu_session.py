@@ -33,7 +33,7 @@ pitch offset measured against this reference cannot silently meet ``SF_*``
 from another.
 
 **Readers get ``ACCEL_LON/LAT`` from the sidecar, part by part.** The
-``value_number`` chain (``loader.resample_and_segment``: the digest,
+``value_number`` chain (``session_pipeline.resample_and_segment``: the digest,
 classification, ``scripts/autotag.py``) rebuilds the linear family from the
 recorded yaw, sign and low-pass initial state
 (``LinearAccelFrame.initial_gravity_body_g``) with
@@ -70,6 +70,7 @@ from src.atomic_write import atomic_write_text
 from src.decode.bindings import Bindings
 from src.decode.engineering import is_decoded_column, repo_bindings
 from src.decode.on_read import can_channel_spellings
+from src.preprocessing.decode import decode_on_read, on_read_can_ids
 from src.preprocessing.imu_decimation import ACCEL_LAT_COLUMN, ACCEL_LON_COLUMN
 from src.preprocessing.imu_frame import (
     GRAVITY_MAGNITUDE_RANGE_G,
@@ -86,6 +87,7 @@ from src.preprocessing.imu_frame import (
     select_speed,
     straight_mask,
 )
+from src.preprocessing.session_reader import read_session
 from src.storage.broadcast_storage import session_can_storage
 from src.storage.sidecar import read_json_object
 from src.telemetry import CAN_SOURCE, IMU_SOURCE, SOURCE_SEP, channel_key
@@ -307,7 +309,7 @@ class ImuSessionFrame:
 
     def rows(self, session: str) -> pd.DataFrame:
         """The families as long telemetry rows (``source`` ``imu``, unit g), in
-        :func:`src.preprocessing.loader.read_session`'s core columns: the
+        :func:`src.preprocessing.session_reader.read_session`'s core columns: the
         whole-session reference the part-by-part rebuild
         (``src.preprocessing.imu_stream``) is checked against. Readers of a
         stored session go through that rebuild, which never holds the session."""
@@ -349,7 +351,7 @@ def _read_filters() -> list[list[tuple[str, str, Any]]]:
 
 def channels_from_long(long: pd.DataFrame) -> dict[str, pd.Series]:
     """Per-``source:channel`` numeric series indexed by UTC timestamp, from
-    long rows (:func:`~src.preprocessing.loader.read_session`'s shape)."""
+    long rows (:func:`~src.preprocessing.session_reader.read_session`'s shape)."""
     if long.empty:
         return {}
     numbers = pd.to_numeric(long["value_number"], errors="coerce")
@@ -761,16 +763,13 @@ def speed_decode_catalog(bindings: Bindings | None = None) -> Bindings | None:
 def read_imu_inputs(session_dir: Path, *, bindings: Bindings | None = None) -> dict[str, pd.Series]:
     """The channels :func:`resolve_imu_frame` reads, from a session directory.
 
-    One filtered :func:`~src.preprocessing.loader.read_session` of the IMU,
+    One filtered :func:`~src.preprocessing.session_reader.read_session` of the IMU,
     speed and course rows plus the raw frames of the ``decoded:`` speed
     sources, which are decoded here (:func:`speed_decode_catalog`): any stored
     ``decoded`` row is dropped and the frames decoded with the current catalog,
     exactly as a decode on read would. Raises ``FileNotFoundError`` without
     telemetry.
     """
-    from src.preprocessing.decode import decode_on_read, on_read_can_ids
-    from src.preprocessing.loader import read_session
-
     catalog = speed_decode_catalog(bindings)
     filters = _read_filters()
     if catalog is not None:

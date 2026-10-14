@@ -93,11 +93,11 @@ def session_long(
     """The session's long frame with the named broadcast signals and every
     DID decoded, raw CAN rows dropped.
 
-    Reads through :func:`src.preprocessing.decode.read_session_decoded_subset`,
+    Reads through :func:`src.preprocessing.decoded_reader.read_session_decoded_subset`,
     the one bounded reader: raw CAN is read only for the ids the named
     bindings decode, under every era's channel spelling (R04.14).
     """
-    from src.preprocessing.decode import read_session_decoded_subset
+    from src.preprocessing.decoded_reader import read_session_decoded_subset
 
     wanted = set(decoded)
     # As recorded: _decode_subset drops every decoded row it is given and

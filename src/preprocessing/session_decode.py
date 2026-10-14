@@ -17,8 +17,8 @@ from src.decode.dbc import decode_can_rows_dbc
 from src.decode.dids import decode_did_rows
 from src.preprocessing.decode import decode_can_rows
 from src.preprocessing.derived import ReducedSession, grid_interval_ns, reduce_long_frames
-from src.preprocessing.loader import SESSION_PART_ROWS, iter_session_parts
 from src.preprocessing.resampler import ResampleConfig
+from src.preprocessing.session_reader import SESSION_PART_ROWS, iter_session_parts
 from src.storage.broadcast_storage import session_can_storage
 
 #: Raw CAN rows fed through the decoders per chunk. Decoding is row-local (each
