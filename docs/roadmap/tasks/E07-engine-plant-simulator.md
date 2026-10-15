@@ -537,6 +537,54 @@ supercharger is a hardware intervention with a new plant parameter set.
       0.05 g/ms lambda: recovers 0.05, and λ = air/(s·f(dP)·Te) recomputed
       term by term to 1e-12). These are structure and unit checks; nothing
       was fitted to the truck and no drive was scored.
+    - **Baseline `na-stock-2026-10-15.mv3`** (sha256 `e6b9b5c3…807d6`, pinned
+      in `test_fuel_mv_3_is_frozen_and_unqualified_beside_the_other_versions`,
+      which replaces the unidentified test and keeps the `baseline_not_frozen`
+      refusal on the declaration without its baseline). From `identify
+      --plant-version fuel-mv-3` on the three identification drives:
+      s = **0.050994 g/ms**, 90 % interval 0.050472–0.051402, 89 regions,
+      764 reads (2 `manifold_above_ambient`), 0.40 % above fuel-mv-2's. The
+      VE envelope is fuel-mv-2's to 1e-6. The contract's fuel-mv-3 internal
+      model now carries the frozen fit's bounds (`check_internal_models`
+      returns `[]`). A per-sample comparison was run the same day on a scratch
+      copy holding these identical numbers before the freeze; nothing was
+      re-fitted after it.
+    - **Against fuel-mv-1/2, per sample (`compare --plant-version fuel-mv-1
+      fuel-mv-2 fuel-mv-3`; fuel-mv-1 is named so its spent drives are
+      admissible).** In-sample |err| p90 12.01 / 11.61 / **11.69 %**, region
+      pass 0.573 / 0.618 / 0.618. On the spent drives (726 reads) 11.74 /
+      12.21 / 12.24 %; against fuel-mv-1, 36 % of reads better and 64 %
+      worse, idle (< 5 g/s, 575 reads) +0.68 pp median. The load-dependent VE
+      is not the structural miss either.
+    - **The STFT residual (2026-10-15, desk, all six scored drives; a
+      diagnostic, not a verdict).** Per read, the plant error tracks the
+      ECM's short-term trim one for one: err = **−0.92 × STFT − 0.15**
+      (1,601 steady reads with |err| < 100 %, corr −0.69; −0.53 within the
+      ~1 s regions, −0.32 between them). Removing that linear term alone takes
+      |err| p90 from 11.6 % to **6.8 %**, inside the 8 % bound. The pulse
+      carries STFT; measured λ (PID 0x24) stays within ~±3 %, which is why
+      λ ≡ 1 beats every version.
+      - *Not the λ delay.* Re-pairing λ at 0–1.5 s on the identification
+        drives (eligibility fixed at 0.10 s) leaves corr(err, STFT) at −0.68 to
+        −0.82 and |err| p90 at 11.4–13.9 %. B06's median-only sensitivity
+        (< 0.05 %) hid this, because a limit cycle is symmetric about its
+        median.
+      - *Candidates.* EVAP purge enters the manifold downstream of the MAF, so
+        its fuel is invisible to both the MAF and the pulse. The contract said
+        "purge flow inside MAF"; that is corrected. The other candidate is a
+        fast MAF transfer error. The within-region part (fast) argues that
+        purge is not the whole answer. None of the six drives logs purge
+        (PID 0x2E or DID 0x1110), so neither is tested.
+      - *Not a plant input.* STFT is the controller's own estimate of the
+        error, so feeding it in would be circular and would converge on
+        λ ≡ 1. Closed-loop reads are therefore a weak test of the plant. The
+        28 open-loop enrichment reads give median −2.9 %, |err| p90 4.9 %.
+      - *Pairing leak.* 8 eligible reads pair 27–46 g/s MAF with an idle
+        pulse and rpm (err > 100 %): the steady rule is admitting a MAF read
+        from another instant.
+      - Measurement now declared: `evap_purge_drive` (contract, `planned`;
+        operator 2026-10-15). The `tuning` capture profile polls DID 0x1110 at
+        2 Hz on the pulse DID's cycle from 2026-10-15.
   - **Remaining:**
     1. A revised plant structure, with a new `plant_version`, a new baseline
        and newly declared bounds. The in-sample failure points at the
@@ -550,19 +598,15 @@ supercharger is a hardware intervention with a new plant parameter set.
        held-out drive. Still owed:
        - the idle/short-pulse and 10–40 g/s structure;
        - the never-scored drives;
-       - ~~a load-dependent VE~~ *structure done in fuel-mv-3 (above,
-         2026-10-13)*; owed: its baseline. Run `.venv/bin/python -m
-         tools.fuel_plant_check identify --plant-version fuel-mv-3` where the
-         identification drives are (`~/canary-data`; not on the machine it was
-         declared on), freeze the result in `fuel_plant_mv3.yaml`, and add the
-         frozen VE fit's bounds as the contract's fuel-mv-3 `parameter_fits`.
-         Then `compare --plant-version fuel-mv-2 fuel-mv-3` on spent drives is
-         the per-sample diagnostic; a verdict still needs never-scored drives.
-       - the idle/short-pulse and 10–40 g/s structure was not attempted at
-         the desk: choosing it needs the in-sample residuals of the
-         identification drives (corpus) and the short-pulse correction's
-         decode (`0x9120`–`0x9126`, the disassembly), neither available
-         offline here.
+       - ~~a load-dependent VE~~ *done in fuel-mv-3: structure 2026-10-13,
+         baseline frozen 2026-10-15 (above); no better than fuel-mv-2.*
+       - the idle/short-pulse and 10–40 g/s structure. The in-sample residuals
+         (2026-10-15, above) point at STFT, not breathing: a tuning drive with
+         purge logged (`evap_purge_drive`) decides whether purge is a missing
+         plant input before another VE/MAP revision. The short-pulse
+         correction's decode (`0x9120`–`0x9126`) is still owed for the
+         Te < 1.5 ms reads.
+       - the steady rule's MAF pairing leak (8 reads, above).
     2. A tuning-profile drive that logs the AEM rail pressure with the pulse
        DID (truck). No such drive exists yet.
     3. MAP, injector flow and injector latency still require measurement.

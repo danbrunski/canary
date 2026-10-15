@@ -2,10 +2,10 @@
 
 The physics (the ideal-cycle residual-gas factor and the MAP it solves for) is
 checked on its limiting cases and its own equation; the profile is checked to
-be declared, unidentified and unqualified beside the two frozen versions; and
-the identify -> freeze -> predict path is run on the committed slice with a
-synthetic lambda, so the version is ready for identification on the corpus.
-Nothing here is a fit of the truck.
+be declared, frozen (identified on the corpus 2026-10-15) and unqualified beside
+the two other frozen versions; and the identify -> freeze -> predict path is run
+on the committed slice with a synthetic lambda. Nothing here fits the truck: the
+frozen baseline is pinned by hash, never recomputed.
 """
 
 from __future__ import annotations
@@ -76,7 +76,7 @@ def _air_at(cf: float, rpm: float, baro: float = 81.0, iat: float = 30.0) -> flo
     return cf * baro * 1000.0 * v_m3 / (R_AIR * (iat + 273.15)) * 1000.0
 
 
-def test_fuel_mv_3_is_declared_unidentified_beside_the_frozen_versions() -> None:
+def test_fuel_mv_3_is_frozen_and_unqualified_beside_the_other_versions() -> None:
     assert {v: f.name for v, f in plant_files(PROFILE).items()}[MV3] == MV3_FILE
     mv3, _ = load_fuel_plant(PROFILE, MV3)
     mv2, _ = load_fuel_plant(PROFILE, "fuel-mv-2")
@@ -88,17 +88,33 @@ def test_fuel_mv_3_is_declared_unidentified_beside_the_frozen_versions() -> None
         exclude={"declared_on"}
     )
     assert mv3.acceptance.declared_on == mv3.split.declared_on == date(2026, 10, 13)
-    # Not identified: no baseline, nothing evaluates, never qualified.
-    assert mv3.baseline is None and mv3.spent_held_out == []
+    # Identified 2026-10-15 on the corpus (hash pinned: a re-fit is a new
+    # baseline, never an edit). Its VE envelope is fuel-mv-2's on the same drives.
+    assert mv3.baseline is not None and mv3.baseline.frozen and mv3.baseline.ve_curve
+    assert mv3.baseline.sha256() == (
+        "e6b9b5c3c3439709b5505dac6f3636f3e7d1fa3d42c3ff19669163af588807d6"
+    )
+    assert mv2.baseline is not None
+    assert mv3.baseline.fitted_on == mv3.split.identification
+    assert mv3.baseline.ve_curve == mv2.baseline.ve_curve
+    # No never-scored drive exists: none held out, so it is never qualified.
+    assert mv3.spent_held_out == []
     assert mv3.split.held_out == [] and mv3.split.held_out_pending
-    assert plant_qualification(mv3).reason == "plant_not_qualified: no frozen baseline"
+    q = plant_qualification(mv3)
+    assert not q.qualified and q.reason is not None and "no held-out recording" in q.reason
     delay = load_b06(PROFILE, mv3.delay)
-    with pytest.raises(FuelPlantRefusalError) as err:
-        resolve_parameters(mv3, delay)
-    assert err.value.reason == "baseline_not_frozen"
-    params = resolve_parameters(mv3, delay, for_identification=True, ve_curve=CURVE)
+    params = resolve_parameters(mv3, delay)
+    assert params.values["stoich_air_per_open_ms"] == 0.050994
     assert params.values["compression_ratio"] == 9.7
     assert "exhaust_back_pressure_unmeasured" in params.effects
+    # Without its baseline the same declaration refuses to resolve.
+    raw = _raw()
+    raw.pop("baseline")
+    unfrozen = FuelPlantProfile.model_validate(raw)
+    assert plant_qualification(unfrozen).reason == "plant_not_qualified: no frozen baseline"
+    with pytest.raises(FuelPlantRefusalError) as err:
+        resolve_parameters(unfrozen, delay)
+    assert err.value.reason == "baseline_not_frozen"
 
 
 def test_the_residual_gas_factor_and_its_limiting_cases() -> None:
