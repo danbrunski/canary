@@ -551,6 +551,13 @@ def _rpm_quantum(contract: SimContract) -> float:
     return q.sensor.quantization
 
 
+def rpm_word(rpm: float, contract: SimContract) -> int:
+    """The ECM's engine-speed word for a stated rpm: ``round(rpm / quantum)``,
+    the contract's ``rpm_word`` quantization. The one conversion the paired
+    run and anything placing its points (E08.4's cells) share."""
+    return int(round(rpm / _rpm_quantum(contract)))
+
+
 def _ecu_chain(kit: SimKit, side: _Side, point: OperatingPoint) -> dict[str, Any]:
     """One ROM at one point, ECU side: steady BFS, X and the phi word, or why not."""
     out: dict[str, Any] = {name: None for name in OUTPUTS}
@@ -565,7 +572,7 @@ def _ecu_chain(kit: SimKit, side: _Side, point: OperatingPoint) -> dict[str, Any
     if side.table.load_point_scaler is None:
         out["reasons"].append("load_point_scaler_unresolved")
         return out
-    rpm_raw = int(round(point.rpm / _rpm_quantum(kit.contract)))
+    rpm_raw = rpm_word(point.rpm, kit.contract)
     try:
         bfs = steady_bfs(side.air, maf_gps=point.maf_gps, rpm_word=rpm_raw, load_byte=int(load))
     except AirChargeRefusalError as exc:
@@ -1198,5 +1205,6 @@ __all__ = [
     "plant_parameters",
     "plant_rail_kpa",
     "rank_as_improvement",
+    "rpm_word",
     "run_paired",
 ]
