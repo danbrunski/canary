@@ -55,6 +55,22 @@ commit line up.
    like a blocked checklist (step 6). **Echo the diff-stat, checkbox
    state and any operator decisions into your own transcript** — the
    /goal evaluator and the verifier both read from here.
+   - **Tier.** Pass `model` and `effort` from the dispatch tiers in
+     CLAUDE.md, and escalate — never repeat — a dispatch that comes
+     back BLOCKED on difficulty or cut off. Split a checklist too big
+     for one 250-turn dispatch into named item subsets up front.
+   - **Cut off, no verdict.** An implementer that hits `maxTurns`
+     returns partial output with no `IMPLEMENTED`/`BLOCKED`. Resume it
+     via `SendMessage` asking only for the report (no further
+     implementation). If it cannot report, trust none of its boxes:
+     read `git status --short` and the diff yourself, then re-dispatch
+     the unfinished items one tier up, naming what is already in the
+     tree. Items its report lists as "not attempted" go out in the next
+     dispatch.
+   - **Failures outside its files.** The report may name test failures
+     it traced to another session's work. Confirm the attribution when
+     you run the gate; don't let a foreign failure block this
+     checklist's commit, and log it.
    - **Concurrency.** Implementers may run in parallel when their
      checklists touch disjoint areas — name each one's area to the
      others, and never run two on the same file. A file with hunks from
@@ -64,25 +80,30 @@ commit line up.
      with the options recorded; note it for the morning and never
      resolve it yourself. Pre-made decisions in the queue are not
      open.
-3. Run the full gate yourself, once per checklist, in the main session:
-   `ruff check . && ruff format --check . && mypy src` and bare
-   `.venv/bin/python -m pytest` (the whole commit gate, `-n auto`;
-   ~5–7 min), **plus** `pnpm test` and `pnpm typecheck` in
-   `src/dashboard/static` for FE changes. Do not run it while another
-   implementer's tests are running — the cadence/daemon tests flake
+3. Run the gate yourself, once per checklist, in the main session —
+   the push gate's suite (`scripts/ci_gate.sh`, which needs a commit,
+   runs the same thing): `ruff check . && ruff format --check . &&
+   mypy src` and `.venv/bin/python -m pytest -m "not integration and
+   not slow"` (~1.5 min), plus by path any `slow` test covering the
+   changed code, `pytest -m ml_training` when the checklist touched a
+   path in `scripts/ml_paths.txt`, and `pnpm typecheck`, `pnpm lint`
+   and `pnpm test` in `src/dashboard/static` for FE changes. Do not run
+   it while another implementer's tests are running — the cadence/daemon tests flake
    under load; a failure that passes when re-run serially (`-n0`, by
    path) is a load flake, and a failure that does not is a defect. Tests
    write into `models/` manifests and `data/analyses/`; restore those
    with explicit paths. Inspect the diff before proceeding. Vet any
    `NEW DEP:` the report flagged: accept only if the checklist warrants
    it, and log it.
-4. Spawn the `verifier` with the checklist text (boxes as the
-   implementer left them), the diff **and the list of created
+4. Spawn the `verifier` — at the implementer's tier, never lower — with
+   the checklist text (boxes as the implementer left them), the diff
+   **and the list of created
    (untracked) files** — `git diff` alone misses new files, which are
    often the main artifact. It is a distinct, deliberately write-less
    agent so it cannot fix-and-pass its own target — keep it separate
    from the implementer. Fix what it confirms (dispatch a follow-up to
-   the implementer, or edit directly for a one-liner); re-verify. Two
+   the implementer — one tier up when the defect is a misunderstanding
+   rather than a slip — or edit directly for a one-liner); re-verify. Two
    consecutive FAILs on the same checklist → mark the affected items
    blocked and move on.
    - **If the verifier call errors or stalls mid-stream** ("Response
@@ -108,9 +129,13 @@ commit line up.
    `<checklist id> — done|partial|blocked — <one-line summary>`.
 
 **Run-level sweep (once per /goal):** the per-checklist gate above is
-already the full commit gate, so the end-of-run sweep is one more bare
-`.venv/bin/python -m pytest` on a quiet machine (no implementer running)
-plus `pnpm test` / `pnpm typecheck`, as the run's done-condition. If it
+the push gate, so the end-of-run sweep covers what CI ran while it was
+on: bare `.venv/bin/python -m pytest` (the full suite, `slow` tier
+included; ~5 min) on a quiet machine (no implementer running),
+`pytest -m ml_training` when `scripts/ml_changed.sh <run-start sha>`
+selects it, and `pnpm typecheck`, `pnpm lint`, `pnpm test` and
+`pnpm e2e` when the run touched the dashboard, as the run's
+done-condition. If it
 comes back red: the failing test's area usually points to the culprit
 checklist — fix it within the rules if you can, else annotate that item
 `[~] blocked-overnight: <reason>`, and log it in `OVERNIGHT-LOG.md` for
