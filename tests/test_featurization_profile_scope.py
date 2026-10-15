@@ -330,15 +330,16 @@ def test_the_evaluation_harness_scores_on_the_scoped_config(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     import scripts.evaluate_detectors as harness
+    from src.models.evaluation import PersistenceSpec
 
     seen: list[CanaryConfig] = []
-    real = harness.PersistenceSpec.from_config
+    real = PersistenceSpec.from_config
 
     def recording(config: CanaryConfig) -> Any:
         seen.append(config)
         return real(config)
 
-    monkeypatch.setattr(harness.PersistenceSpec, "from_config", staticmethod(recording))
+    monkeypatch.setattr(PersistenceSpec, "from_config", staticmethod(recording))
     (tmp_path / "sessions").mkdir()
     code = harness.main(
         [

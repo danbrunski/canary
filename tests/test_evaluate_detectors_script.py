@@ -5,7 +5,6 @@ from __future__ import annotations
 
 import json
 import os
-from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -17,15 +16,9 @@ pytest.importorskip("sklearn")
 
 from scripts.evaluate_detectors import (  # noqa: E402
     EVALUATION_SESSION_KINDS,
-    SessionScore,
-    clean_drive_record,
     main,
-    render_markdown,
-    summarize_recall,
 )
-from src.analysis.labelled_events import LabelledEvent  # noqa: E402
 from src.decode.dids import load_repo_did_map
-from src.models.evaluation import SessionSpan, group_into_drives  # noqa: E402
 from src.storage.parquet_writer import write_records_to_parquet  # noqa: E402
 from src.storage.sessions import recorded_sessions  # noqa: E402
 from src.telemetry import TelemetryRecord  # noqa: E402
@@ -70,52 +63,6 @@ def test_discovery_keeps_captures_drops_quarantine_and_orders_by_parsed_time(
         "_tuning-2026-09-18T113000",
         "2026-09-18T120000",
     ]
-
-
-def test_recall_excludes_withheld_outcomes_from_its_denominator() -> None:
-    outcomes = [
-        {"drive": "d1", "kind": "k", "severity": 1.0, "detector": "x", "status": "detected",
-         "time_to_detect_seconds": 4.0},
-        {"drive": "d1", "kind": "k", "severity": 1.0, "detector": "x", "status": "missed",
-         "time_to_detect_seconds": None},
-        {"drive": "d2", "kind": "k", "severity": 1.0, "detector": "x", "status": "withheld",
-         "time_to_detect_seconds": None},
-    ]  # fmt: skip
-    block = summarize_recall(outcomes, ["x"], seed=0)["x"]["k"]["1.0"]
-    assert block["graded"] == 2 and block["withheld"] == 1
-    assert block["recall"]["estimate"] == pytest.approx(0.5)
-    assert block["median_time_to_detect_seconds"] == 4.0
-
-
-def test_only_fault_labels_take_episodes_out_of_the_false_alarms() -> None:
-    stamps = pd.Series(pd.date_range("2026-09-18T12:00:00Z", periods=60, freq="1s"))
-    frame = pd.DataFrame({"timestamp": stamps, "obd:RPM": 800.0})
-    alerting = np.zeros(60, dtype=bool)
-    alerting[5:8] = True  # inside the label
-    alerting[40:43] = True  # outside it
-    score = SessionScore(stamps, np.full(60, True, dtype=object), np.zeros(60), alerting)
-    span = SessionSpan("s", stamps.iloc[0].to_pydatetime(), stamps.iloc[-1].to_pydatetime())
-    (drive,) = group_into_drives([span])
-    label = LabelledEvent(
-        id="altitude",
-        kind="novelty",
-        title="t",
-        start=datetime(2026, 9, 18, 12, 0, 0, tzinfo=UTC),
-        end=datetime(2026, 9, 18, 12, 0, 20, tzinfo=UTC),
-        end_basis="measured",
-        provenance="test",
-    )
-    record = clean_drive_record(drive, {"s": frame}, {"s": {"x": score}}, ["x"], [label])
-    block = record.detectors["x"]
-    assert block["episodes"] == 2
-    assert block["labelled_episodes"] == {"novelty": 1}
-    # An altitude alert is explained, not excused: still a false alarm.
-    assert block["false_alarm_episodes"] == 2
-    assert record.labels == ["altitude"]
-
-    fault = label.model_copy(update={"id": "leak", "kind": "fault"})
-    record = clean_drive_record(drive, {"s": frame}, {"s": {"x": score}}, ["x"], [fault])
-    assert record.detectors["x"]["false_alarm_episodes"] == 1
 
 
 def _main_args(root: Path, artifact: Path, tmp_path: Path) -> list[str]:
@@ -222,113 +169,6 @@ def test_main_scores_only_unseen_drives_and_names_every_skip(tmp_path: Path) -> 
     assert list((tmp_path / "cache" / "plausibility").glob("*.parquet"))
 
 
-def test_markdown_renders_a_minimal_report() -> None:
-    report = {
-        "generated_at": "2026-09-22T00:00:00Z",
-        "detectors": ["x"],
-        "artifacts": {},
-        "persistence": {},
-        "budget_per_engine_hour": 1.0,
-        "sequence_parity": None,
-        "training_eras": [],
-        "drives": [],
-        "false_alarms": {
-            "x": {
-                "false_alarms_per_engine_hour": {"estimate": None, "note": "withheld"},
-                "withheld_share": None,
-                "strata": {"baro": {}},
-            }
-        },
-        "recall": {},
-        "vus_pr": {},
-        "events": [{"id": "e", "kind": "novelty", "start": "a", "end": "b", "status": "skipped"}],
-        "skipped_drives": [{"drive": "d", "sessions": ["s"], "reason": "skipped: seen"}],
-    }
-    text = render_markdown(report)
-    assert "| x | withheld |" in text
-    assert "- d (s): skipped: seen" in text
-    assert "## Not loaded" not in text
-
-
-def test_a_baseline_session_that_did_not_load_is_named_not_counted() -> None:
-    """A02.11 verifier: the report named a threshold session it never loaded.
-    What the baselines rest on and what failed to load are separate lines."""
-    report = {
-        "generated_at": "2026-09-23T00:00:00Z",
-        "detectors": [],
-        "artifacts": {},
-        "persistence": {},
-        "budget_per_engine_hour": 1.0,
-        "sequence_parity": None,
-        "training_eras": [],
-        "drives": [],
-        "false_alarms": {},
-        "recall": {},
-        "vus_pr": {},
-        "events": [],
-        "skipped_drives": [],
-        "baseline_threshold_sessions": ["a"],
-        "baseline_threshold_sessions_not_loaded": ["b"],
-        "load_errors": {"b": "not decoded yet (--cache-only)"},
-    }
-    text = render_markdown(report)
-    assert "Baseline threshold sessions: ['a'] (requested but not loaded: ['b'])" in text
-    assert "## Not loaded" in text
-    assert "- b: not decoded yet (--cache-only)" in text
-
-
-def test_each_injection_is_recorded_once_with_every_detectors_outcome() -> None:
-    from scripts.evaluate_detectors import compact_injections
-
-    injection = {"kind": "k", "severity": 1.0, "perturbed": ["obd:MAF"]}
-    base = {"drive": "d", "session": "s", "kind": "k", "severity": 1.0, "rep": 0}
-    compact = compact_injections(
-        [
-            {**base, "detector": "a", "status": "detected", "time_to_detect_seconds": 3.0,
-             "injection": injection},
-            {**base, "detector": "b", "status": "missed", "time_to_detect_seconds": None,
-             "injection": injection},
-        ]
-    )  # fmt: skip
-    assert len(compact) == 1
-    assert compact[0]["perturbed"] == ["obd:MAF"]
-    assert compact[0]["outcomes"] == {
-        "a": {"status": "detected", "time_to_detect_seconds": 3.0},
-        "b": {"status": "missed", "time_to_detect_seconds": None},
-    }
-
-
-def test_evidence_role_detectors_are_not_held_to_the_alert_budget() -> None:
-    """A06.5: an evidence-role detector still reports its episodes per drive,
-    but only alert-role detectors count against the budget."""
-    from scripts.evaluate_detectors import DriveRecord, summarize_false_alarms
-    from src.models.evaluation_detectors import detector_roles
-
-    config = example_config(EXAMPLE_YAML)
-    config.models.roles.isolation_forest = "alert"  # one of each role
-    config.models.roles.sequence = "evidence"
-    roles = detector_roles(config, ["isolation_forest", "sequence", "sequence_global", "fused"])
-    assert roles == {
-        "isolation_forest": "alert",
-        "sequence": "evidence",
-        "sequence_global": "evidence",
-        "fused": "alert",
-    }
-
-    stamps = pd.Series(pd.date_range("2026-09-18T12:00:00Z", periods=2, freq="1s"))
-    span = SessionSpan("s", stamps.iloc[0].to_pydatetime(), stamps.iloc[-1].to_pydatetime())
-    (drive,) = group_into_drives([span])
-    block = {"rows": 10, "withheld_rows": 0, "false_alarm_episodes": 4}
-    record = DriveRecord(drive, ["s"], rows=10, hours=2.0)
-    record.detectors = {"isolation_forest": dict(block), "sequence": dict(block)}
-    summary = summarize_false_alarms(
-        [record], ["isolation_forest", "sequence"], seed=0, roles=roles
-    )
-    assert summary["isolation_forest"]["false_alarms_per_engine_hour"]["estimate"] == 2.0
-    assert summary["sequence"]["role"] == "evidence"
-    assert summary["sequence"]["false_alarms_per_engine_hour"]["estimate"] is None
-
-
 # ---------------------------------------------------------------------------
 # R06.5: the regression compare folded in from the retired grid, and rows
 # featurized with the behavior models (the grid's blind spot)
@@ -404,6 +244,18 @@ def test_baseline_compare_exits_3_on_a_regression_and_names_incomparable_baselin
     assert main([*argv, "--out", str(tmp_path / "x.json")]) == 2
 
 
+def _patch_featurization(patched: pytest.MonkeyPatch, replacement: Any) -> None:
+    """Replace ``featurize_wide_frame`` at both places the run calls it (R15):
+    the scorer's per-unit featurization and the phase module's baseline and
+    parity featurization. The script itself no longer calls it, so a patch on
+    the script would change nothing."""
+    from src.analysis import detector_evaluation_run as run_phase
+    from src.models import evaluation_scorer
+
+    patched.setattr(evaluation_scorer, "featurize_wide_frame", replacement)
+    patched.setattr(run_phase, "featurize_wide_frame", replacement)
+
+
 def _behavior_models_file(path: Path) -> Path:
     import yaml
 
@@ -441,7 +293,6 @@ def test_rows_are_featurized_with_the_behavior_models(
     on ``deviation:*`` columns could not be scored as served. Every
     featurization here carries the profile's (or ``--behavior-models``) set,
     and the report says which file."""
-    import scripts.evaluate_detectors as harness
     from src.features import feature_pipeline
 
     root, artifact = _unseen_drive_fixture(tmp_path)
@@ -452,7 +303,7 @@ def test_rows_are_featurized_with_the_behavior_models(
         seen.append(kwargs.get("behavior_models"))
         return feature_pipeline.featurize_wide_frame(*args, **kwargs)  # type: ignore[arg-type]
 
-    monkeypatch.setattr(harness, "featurize_wide_frame", spy)
+    _patch_featurization(monkeypatch, spy)
     out = tmp_path / "report.json"
     argv = [*_main_args(root, artifact, tmp_path), "--behavior-models", str(models_path)]
     assert main([*argv, "--out", str(out)]) == 0
@@ -469,11 +320,11 @@ def test_an_if_whose_deviation_columns_cannot_be_produced_is_refused(
 ) -> None:
     """Scoring it with those columns empty would report a detector the daemon
     does not serve."""
-    import scripts.evaluate_detectors as harness
+    from src.analysis import detector_evaluation_inputs
 
     root, artifact = _unseen_drive_fixture(tmp_path)
     monkeypatch.setattr(
-        harness,
+        detector_evaluation_inputs,
         "behavior_fingerprint_provenance",
         lambda *_a, **_k: {
             "speed_vs_rpm": {"status": "absent", "reason": "no behavior model 'speed_vs_rpm'"}
@@ -518,18 +369,21 @@ def _entries(cache: Path, component: str) -> set[Path]:
     return set(cache.glob(f"scores/{component}-*/*/*.pkl"))
 
 
-def _record_scoring_pids(monkeypatch: pytest.MonkeyPatch, harness: Any) -> list[int]:
-    """Wrap ``score_drives``; the returned list fills with the pid that scored
-    each drive (a pool worker's, or this process's)."""
+def _record_scoring_pids(monkeypatch: pytest.MonkeyPatch) -> list[int]:
+    """Wrap ``score_drives`` where the run looks it up (R15: the phase module,
+    not the script's re-export); the returned list fills with the pid that
+    scored each drive (a pool worker's, or this process's)."""
+    from src.analysis import detector_evaluation_run as run_phase
+
     pids: list[int] = []
-    real = harness.score_drives
+    real = run_phase.score_drives
 
     def recording(*args: Any, **kwargs: Any) -> Any:
         results = real(*args, **kwargs)
         pids.extend(result.pid for result in results)
         return results
 
-    monkeypatch.setattr(harness, "score_drives", recording)
+    monkeypatch.setattr(run_phase, "score_drives", recording)
     return pids
 
 
@@ -540,7 +394,7 @@ def test_workers_and_the_score_cache_leave_the_report_unchanged(
     ``--workers 2`` write the same report, an unchanged re-run is read back
     from the cache without featurizing anything, and a new IF artifact is
     rescored for the IF alone (the plausibility scores are reused)."""
-    import scripts.evaluate_detectors as harness
+    import src.models.evaluation_workers as workers_module
     from tests.pinned_checkout_harness import CHECKOUT_KEY_INPUTS, pin_in_process
 
     # T01.23: the score cache keys on the working tree (src/, data/, the
@@ -561,7 +415,7 @@ def test_workers_and_the_score_cache_leave_the_report_unchanged(
     base = _main_args(root, artifact, tmp_path)
     base[base.index("robust_z")] = "plausibility"
     # Size the pool by a tiny per-worker peak, so two workers always fit.
-    monkeypatch.setattr(harness, "SCORING_WORKER_PEAK_BYTES", 1)
+    monkeypatch.setattr(workers_module, "SCORING_WORKER_PEAK_BYTES", 1)
 
     serial = tmp_path / "serial.json"
     assert main([*base, "--no-score-cache", "--out", str(serial)]) == 0
@@ -571,7 +425,7 @@ def test_workers_and_the_score_cache_leave_the_report_unchanged(
     workers = base.index("--workers") + 1
     argv = [*base[:workers], "2", *base[workers + 1 :]]
     # The pool really ran: every drive's result came from another process.
-    scored_by = _record_scoring_pids(monkeypatch, harness)
+    scored_by = _record_scoring_pids(monkeypatch)
     assert main([*argv, "--out", str(parallel)]) == 0
     assert len(scored_by) == 2 and os.getpid() not in scored_by
     assert len(json.loads(parallel.read_text())["drives"]) == 2
@@ -584,7 +438,12 @@ def test_workers_and_the_score_cache_leave_the_report_unchanged(
 
     capsys.readouterr()
     with monkeypatch.context() as patched:
-        patched.setattr(harness, "featurize_wide_frame", refuse)
+        _patch_featurization(patched, refuse)
+        # Control: the patch reaches every featurization the run does. With
+        # nothing cached the same run trips it, so the re-run below passing
+        # means it featurized nothing, not that the patch missed.
+        with pytest.raises(AssertionError, match="featurized rows"):
+            main([*base, "--no-score-cache", "--out", str(tmp_path / "control.json")])
         rerun = tmp_path / "rerun.json"
         assert main([*base, "--out", str(rerun)]) == 0
     line = next(x for x in capsys.readouterr().out.splitlines() if x.startswith("score cache:"))
@@ -644,26 +503,6 @@ def test_score_cache_keys_follow_content_and_entries_round_trip_exactly(
     assert ScoreCache(None).get("iforest-abc", "unit") is None
 
 
-def test_the_scoring_pool_is_capped_by_the_measured_worker_peak(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """``--workers`` is a ceiling: memory (the measured per-worker peak, as if
-    every worker peaked at once), cores at the pinned thread count, and the
-    drive count each cap it; one worker never spawns a pool."""
-    import scripts.evaluate_detectors as harness
-
-    peak = harness.SCORING_WORKER_PEAK_BYTES
-    monkeypatch.setattr(harness.os, "cpu_count", lambda: 12)
-    room = int(3 * peak / harness.SCORING_MEMORY_FRACTION) + 1
-    monkeypatch.setattr(harness, "_available_memory_bytes", lambda: room)
-    assert harness.scoring_workers(4, 18) == 3
-    assert harness.scoring_workers(4, 2) == 2
-    assert harness.scoring_workers(4, 18, threads=6) == 2
-    assert harness.scoring_workers(1, 18) == 1
-    monkeypatch.setattr(harness, "_available_memory_bytes", lambda: peak // 2)
-    assert harness.scoring_workers(4, 18) == 1
-
-
 @pytest.mark.parametrize("workers", ["1", "2"])
 def test_an_input_edited_mid_run_leaves_no_entry_under_either_key(
     tmp_path: Path,
@@ -675,7 +514,8 @@ def test_an_input_edited_mid_run_leaves_no_entry_under_either_key(
     then and scoring must not leave a score under the old key or the new one.
     Scoring workers re-hash before they load and refuse (the parent finishes
     in-process); the parent re-hashes after scoring and commits nothing."""
-    import scripts.evaluate_detectors as harness
+    import src.models.evaluation_workers as workers_module
+    from src.analysis import detector_evaluation_run as run_phase
 
     training = _write_session(tmp_path / "train", "2026-05-12T000000", start=1_778_544_000.0)
     root = tmp_path / "sessions"
@@ -688,9 +528,9 @@ def test_an_input_edited_mid_run_leaves_no_entry_under_either_key(
     base = _main_args(root, artifact, tmp_path)
     at = base.index("--workers") + 1
     argv = [*base[:at], workers, *base[at + 1 :], "--bindings", str(bindings)]
-    monkeypatch.setattr(harness, "SCORING_WORKER_PEAK_BYTES", 1)
+    monkeypatch.setattr(workers_module, "SCORING_WORKER_PEAK_BYTES", 1)
 
-    real = harness.score_drives
+    real = run_phase.score_drives
 
     def edit_then_score(*args: Any, **kwargs: Any) -> Any:
         bindings.write_bytes(bindings.read_bytes() + b"\n# edited mid-run\n")
@@ -699,7 +539,7 @@ def test_an_input_edited_mid_run_leaves_no_entry_under_either_key(
         assert all(result.pid == os.getpid() for result in results)
         return results
 
-    monkeypatch.setattr(harness, "score_drives", edit_then_score)
+    monkeypatch.setattr(run_phase, "score_drives", edit_then_score)
     assert main([*argv, "--out", str(tmp_path / "r.json")]) == 0
     assert "key inputs changed during the run: bindings" in capsys.readouterr().err
     scores = tmp_path / "cache" / "scores"
@@ -755,42 +595,6 @@ def test_the_score_cache_stages_until_commit_and_prunes_least_recently_used(
     assert sorted(p.stem for p in root.rglob("*.pkl")) == left
 
 
-def test_the_scoring_pool_respects_the_cgroup_and_stays_in_process_on_the_pi(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    import scripts.evaluate_detectors as harness
-
-    group = tmp_path / "cgroup" / "system.slice" / "canary.service"
-    group.mkdir(parents=True)
-    self_cgroup = tmp_path / "self_cgroup"
-    self_cgroup.write_text("0::/system.slice/canary.service\n")
-    (group / "memory.max").write_text(f"{6 * 1024**3}\n")
-    (group / "memory.current").write_text(f"{1024**3}\n")
-    headroom = harness._cgroup_memory_headroom(
-        cgroup_root=tmp_path / "cgroup", self_cgroup=self_cgroup
-    )
-    assert headroom == 5 * 1024**3
-    (group / "memory.max").write_text("max\n")
-    assert (
-        harness._cgroup_memory_headroom(cgroup_root=tmp_path / "cgroup", self_cgroup=self_cgroup)
-        is None
-    )
-
-    peak = harness.SCORING_WORKER_PEAK_BYTES
-    monkeypatch.setattr(harness.os, "cpu_count", lambda: 12)
-    monkeypatch.setattr(harness, "on_the_pi", lambda: False)
-    monkeypatch.setattr(harness, "_available_memory_bytes", lambda: 100 * peak)
-    # The cgroup's headroom caps the pool below what MemAvailable would allow.
-    room = int(2 * peak / harness.SCORING_MEMORY_FRACTION) + 1
-    monkeypatch.setattr(harness, "_cgroup_memory_headroom", lambda: room)
-    assert harness.scoring_workers(4, 18) == 2
-    monkeypatch.setattr(harness, "_cgroup_memory_headroom", lambda: None)
-    assert harness.scoring_workers(4, 18) == 4
-    # On the Pi: in-process, whatever memory says, and no refusal.
-    monkeypatch.setattr(harness, "on_the_pi", lambda: True)
-    assert harness.scoring_workers(4, 18) == 1
-
-
 def test_zero_drives_because_every_load_failed_is_refused_and_named(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -819,39 +623,21 @@ def test_zero_drives_because_every_load_failed_is_refused_and_named(
     assert len(json.loads(out.read_text())["drives"]) == 1
 
 
-def test_the_cgroup_headroom_is_the_tightest_level_up_to_the_root(tmp_path: Path) -> None:
-    import scripts.evaluate_detectors as harness
-
-    root = tmp_path / "cgroup"
-    leaf = root / "system.slice" / "canary.service"
-    leaf.mkdir(parents=True)
-    self_cgroup = tmp_path / "self_cgroup"
-    self_cgroup.write_text("0::/system.slice/canary.service\n")
-    (leaf / "memory.max").write_text("max\n")
-    (leaf / "memory.current").write_text("100\n")
-    (root / "system.slice" / "memory.max").write_text("1000\n")
-    (root / "system.slice" / "memory.current").write_text("400\n")
-    # The leaf is unlimited; its parent's ceiling binds it.
-    assert harness._cgroup_memory_headroom(cgroup_root=root, self_cgroup=self_cgroup) == 600
-    (leaf / "memory.max").write_text("300\n")
-    assert harness._cgroup_memory_headroom(cgroup_root=root, self_cgroup=self_cgroup) == 200
-
-
 def test_the_key_hashes_the_afr_calibration_featurization_reads(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """The key hashes the ``afr_calibration`` featurization reads: the
     profile-scoped one (P02.11), never the absent unscoped ``data/`` path."""
-    import scripts.evaluate_detectors as harness
+    from src.analysis import detector_evaluation_inputs
 
     seen: list[Any] = []
-    real = harness.key_inputs
+    real = detector_evaluation_inputs.key_inputs
 
     def recording(sources: Any) -> Any:
         seen.append(sources)
         return real(sources)
 
-    monkeypatch.setattr(harness, "key_inputs", recording)
+    monkeypatch.setattr(detector_evaluation_inputs, "key_inputs", recording)
     root = tmp_path / "sessions"
     _write_session(root, "2026-05-13T000000", start=1_778_630_400.0, seed=2)
     argv = _main_args(root, tmp_path / "absent.joblib", tmp_path)
@@ -864,3 +650,155 @@ def test_the_key_hashes_the_afr_calibration_featurization_reads(
     assert afr.is_file(), "the example vehicle ships a calibration"
     assert afr.resolve() in seen[0].extra_data
     assert base.daemon.afr_calibration.resolve() not in seen[0].extra_data
+
+
+# ---------------------------------------------------------------------------
+# R15: spawned workers and interruption, on a fixture whose injections score
+# ---------------------------------------------------------------------------
+
+
+def _write_thermostat_session(root: Path, name: str, *, start: float, seed: int) -> Path:
+    """Three channels (RPM, SPEED, COOLANT_TEMP), 300 s: enough rows for the
+    ``thermostat`` fault to find a window, so injection outcomes, slices and the
+    shift test all carry numbers."""
+    rng = np.random.default_rng(seed)
+    records: list[TelemetryRecord] = []
+    for i in range(300):
+        t = start + i
+        records.append(TelemetryRecord.obd(t, "RPM", float(rng.normal(1500.0, 50.0)), "rpm"))
+        records.append(TelemetryRecord.obd(t, "SPEED", float(rng.normal(30.0, 3.0)), "km/h"))
+        records.append(TelemetryRecord.obd(t, "COOLANT_TEMP", float(rng.normal(90.0, 1.0)), "degC"))
+    write_records_to_parquet(records, root / name, max_rows=2000)
+    return root / name
+
+
+def _thermostat_argv(root: Path, artifact: Path, tmp_path: Path) -> list[str]:
+    argv = _main_args(root, artifact, tmp_path)
+    argv[argv.index("bank_imbalance")] = "thermostat"
+    argv += ["--shift-rows", "100", "--no-score-cache"]
+    return argv
+
+
+def _array_view(array: Any) -> tuple[str, tuple[int, ...], list[Any]]:
+    """An array as (dtype, shape, element type and value): NaN-safe and sensitive
+    to ``bool`` versus ``numpy.bool_`` in an object array."""
+    values = np.asarray(array)
+    cells = [(type(v).__name__, "nan" if isinstance(v, float) and v != v else v) for v in values]
+    return str(values.dtype), values.shape, cells
+
+
+def _result_view(result: Any) -> dict[str, Any]:
+    """Everything a drive's result carries that must not depend on the process
+    that scored it (not its pid or peak RSS)."""
+    return {
+        "scores": {
+            session: {
+                name: {
+                    "timestamps": _array_view(score.timestamps.to_numpy()),
+                    "verdict": _array_view(score.verdict),
+                    "score": _array_view(score.score),
+                    "alerting": _array_view(score.alerting),
+                }
+                for name, score in by_detector.items()
+            }
+            for session, by_detector in result.scores.items()
+        },
+        "shift": result.shift,
+        "outcomes": [
+            {k: (v.to_dict() if hasattr(v, "to_dict") else v) for k, v in outcome.items()}
+            for outcome in result.outcomes
+        ],
+        "skipped": result.skipped,
+        "slices": [
+            {k: _array_view(v) if isinstance(v, np.ndarray) else v for k, v in piece.items()}
+            for piece in result.slices
+        ],
+        "stream_reads": result.stream_reads,
+        "cache_counts": result.cache_counts,
+    }
+
+
+@pytest.mark.slow
+def test_spawned_workers_return_the_serial_results_array_for_array(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """R15.3/R15.6: a spawned worker rebuilds its scorer from a ``ScorerSpec`` and
+    scores a pickled ``DriveTask`` in another interpreter. What it sends back is
+    the in-process result: every per-sample score, verdict, alerting flag and
+    timestamp, every injection outcome (status and time to detect), the VUS
+    slices, the shift report and the skips, with element types. A report
+    comparison alone could not see a score that moved and was averaged away."""
+    import src.models.evaluation_workers as workers_module
+    from tests.pinned_checkout_harness import pin_in_process
+
+    pin_in_process(monkeypatch, tmp_path / "key-pins.json")
+    training = _write_thermostat_session(tmp_path / "train", "2026-05-12T000000",
+                                         start=1_778_544_000.0, seed=1)  # fmt: skip
+    root = tmp_path / "sessions"
+    _write_thermostat_session(root, "2026-05-13T000000", start=1_778_630_400.0, seed=2)
+    _write_thermostat_session(root, "2026-05-14T000000", start=1_778_716_800.0, seed=3)
+    artifact = tmp_path / "models" / "model.joblib"
+    _fit_if(training, artifact, seed=0)
+    base = _thermostat_argv(root, artifact, tmp_path)
+    monkeypatch.setattr(workers_module, "SCORING_WORKER_PEAK_BYTES", 1)
+
+    from src.analysis import detector_evaluation_run as run_phase
+
+    scored: list[list[Any]] = []
+    real = run_phase.score_drives
+
+    def recording(*args: Any, **kwargs: Any) -> Any:
+        results = real(*args, **kwargs)
+        scored.append(list(results))
+        return results
+
+    monkeypatch.setattr(run_phase, "score_drives", recording)
+    at = base.index("--workers") + 1
+    for workers in ("1", "2"):
+        argv = [*base[:at], workers, *base[at + 1 :]]
+        assert main([*argv, "--out", str(tmp_path / f"w{workers}.json")]) == 0
+    serial, parallel = scored
+    assert len(serial) == len(parallel) == 2
+    assert {r.pid for r in serial} == {os.getpid()}
+    assert os.getpid() not in {r.pid for r in parallel}, "the pool did not spawn"
+    # The comparison has something to compare: injected outcomes and slices exist.
+    assert any(r.outcomes for r in serial) and any(r.slices for r in serial)
+    assert all(r.shift is not None for r in serial)
+    for one, many in zip(serial, parallel, strict=True):
+        assert _result_view(many) == _result_view(one)
+    assert _report_body(tmp_path / "w1.json") == _report_body(tmp_path / "w2.json")
+
+
+@pytest.mark.slow
+def test_an_interrupted_run_publishes_no_score(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """R15.5: scores are staged and committed only after the run proved its key.
+    An interrupt after scoring leaves nothing staged or published; the same run
+    left alone does publish (the control: the assertion below can fail)."""
+    from src.analysis import detector_evaluation_run as run_phase
+
+    training = _write_session(tmp_path / "train", "2026-05-12T000000", start=1_778_544_000.0)
+    root = tmp_path / "sessions"
+    _write_session(root, "2026-05-13T000000", start=1_778_630_400.0, seed=2)
+    artifact = tmp_path / "models" / "model.joblib"
+    _fit_if(training, artifact, seed=0)
+    base = _main_args(root, artifact, tmp_path)
+
+    assert main([*base, "--out", str(tmp_path / "control.json")]) == 0
+    assert list((tmp_path / "cache" / "scores").rglob("*.pkl")), "the control published nothing"
+
+    interrupted = [*base]
+    interrupted[interrupted.index("--cache-dir") + 1] = str(tmp_path / "cache-interrupted")
+    real = run_phase.score_drives
+
+    def score_then_interrupt(*args: Any, **kwargs: Any) -> Any:
+        real(*args, **kwargs)
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(run_phase, "score_drives", score_then_interrupt)
+    with pytest.raises(KeyboardInterrupt):
+        main([*interrupted, "--out", str(tmp_path / "interrupted.json")])
+    scores = tmp_path / "cache-interrupted" / "scores"
+    assert not list(scores.rglob("*.pkl")), "an interrupted run left a score behind"
+    assert not (tmp_path / "interrupted.json").exists()

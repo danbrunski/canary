@@ -635,7 +635,7 @@ def test_the_harness_grades_the_sequence_detector_on_the_served_windows(
 
 def test_the_score_cache_never_reuses_a_sequence_entry_across_cadences() -> None:
     pytest.importorskip("sklearn")
-    from scripts.evaluate_detectors import sequence_identity
+    from src.models.evaluation_identity import sequence_identity
 
     one = sequence_identity("artifact-digest", _cadence_config(1))
     three = sequence_identity("artifact-digest", _cadence_config(3))

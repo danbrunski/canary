@@ -10,6 +10,12 @@ src/behavior/
 src/features/
 src/columns.py
 src/artifact_hash.py
+# R15: the detector evaluation moved out of scripts/evaluate_detectors.py (below);
+# its analysis-layer phases and the cgroup reader its worker pool sizes by are
+# listed so the move does not shrink the tier's coverage. The scoring libraries
+# are under src/models/.
+src/analysis/detector_evaluation_*.py
+src/cgroup_memory.py
 src/decode/on_read.py
 src/storage/session_files.py
 src/signals/
