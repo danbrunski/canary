@@ -1166,9 +1166,9 @@ extra independent votes.
   evidence are distinct outcomes. Unchanged target/timing bytes are not
   asserted to guarantee unchanged commands. This evaluation issues no flash.
   *Partial 2026-10-13 (laptop, desk part only). The reproduction machinery is
-  built and tested on the committed slice. The real-image numbers were not
-  run: neither private ROM is on this laptop. The physical outcome needs
-  post-flash drives.*
+  built and tested on the committed slice. The physical outcome needs
+  post-flash drives. 2026-10-15: run on both real images, the written
+  low-load rows are contradicted by the images themselves (below).*
   - **Code.**
     - [`src/analysis/fuel_comp_restore.py`](../../../src/analysis/fuel_comp_restore.py)
       (`REPRODUCTION_VERSION` 1) computes both images' Fuel Comp multipliers at
@@ -1242,19 +1242,47 @@ extra independent votes.
       `::test_a_point_across_a_band_edge_belongs_to_neither`,
       `::test_observed_points_name_what_the_session_lacks` and
       `::test_reconstructed_samples_become_interval_points`.
-    - `tests/test_fuel_comp_restore_private_rom.py` skips here because the
-      images are absent. It asserts that the real pair is comparable (same
-      chain, K and rpm axis; load axis top 144 → 255). It also asserts rows
-      "< 64" and "64–144" `reproduced` and the high row `no_points`. That claim
-      has not been run.
+    - `tests/test_fuel_comp_restore_private_rom.py` skips without the images.
+      As written on 2026-10-13 it asserted rows "< 64" and "64–144"
+      `reproduced`, a claim nobody had run. It failed on its first run with
+      the images (2026-10-15), and now pins the measured result (below).
+  - **Real images, 2026-10-15 (laptop, both images present). The written
+    low-load rows are contradicted by the images themselves.**
+    - **Known answer first.** At 4,000–5,600 rpm and full-throttle bytes
+      207–217 the decode reads 130–131 on ZS44A-20260920 and 134–138 on
+      ZS44A-20261004. Those are exactly the multipliers the prediction quotes
+      ("tune ~1.016–1.023, base 1.047–1.078"). So the decode, axes and slot
+      agree with the prediction's own reading, and the disagreement is in its
+      summary rows. The pair is comparable (same chain, K and rpm axis; load
+      axis top 144 → 255).
+    - **Observed slice:** "< 64" `contradicted` (77 points, 0 within, 73
+      outside); "64–144" `contradicted` (51, 0, 44); "≥ 144 at 4,000–5,600"
+      `no_points`.
+    - **Per point the change is whole Fuel Comp counts** (0.78 % steps near
+      128). The "−0.2 to −0.5 %" row cannot be met by any single point; it
+      reads like an average over samples.
+    - **Below byte 64 the sign depends on rpm.** Idle (~760 rpm, bytes
+      48–57) goes leaner, −1.56 % (39 points) to −2.33 %. Light load off
+      idle (bytes 32–41) goes **richer**: +0.8 to +2.3 % at 2,000–3,000 rpm
+      cruise, up to +4.8 % near 1,200 rpm. "About −1 %, any rpm" describes
+      neither.
+    - **High row, via `--reconstructed`** (09-22T235224 31 points,
+      09-23T142926 29 points, both pre-flash): `contradicted`. At full
+      throttle (bytes ≥ ~197) the change is +2.3 to +4.6 % and grows with
+      rpm, so the sign and the scaling hold. It is +2.3 % near 4,000–4,400
+      rpm, below the written +3 %, and part-load bytes 171–187 at ~4,000 rpm
+      go −0.8 to −2.3 %.
+    - **Consequence for the truck half.** The prediction's part-throttle
+      expectation ("~1 % lower at low load, so STFT should move about +1 %")
+      has the wrong sign at light-load cruise, where the images add fuel. The
+      prediction of record stays as written. The physical evaluation (E07.4)
+      must compare per rpm × byte cell against these image-derived changes,
+      not the written rows.
   - **Remaining:**
-    1. Run on a machine holding both images:
-       `.venv/bin/python -m tools.fuel_comp_restore_reproduction --session
-       tests/fixtures/fuel_comp/_capture-ram-study-2026-10-04T204557
-       --rom-dir "<Uprev>/Tuned ROMs" --out <scratch>/fuel_comp_restore.json`.
-       Then run the private-ROM test.
-    2. The high row needs `--reconstructed` on the slice (images required) or
-       a drive that logs the byte at WOT.
+    1. ~~Run on a machine holding both images~~ *done 2026-10-15 (above)*.
+    2. ~~The high row needs `--reconstructed`~~ *done 2026-10-15 on two
+       pre-flash tuning drives (above)*. An observed full-throttle byte read
+       is still owed.
     3. **Truck:** physical outcomes on independent post-flash drives. E07.4's
        case scores them (`split.post: []`, rules frozen `f522ff53…`). No
        post-flash session is on this laptop.
