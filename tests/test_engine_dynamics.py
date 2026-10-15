@@ -451,10 +451,11 @@ def test_the_fuel_plants_own_map_is_a_declared_exception(kit: Any) -> None:
         tuple(im.plant_versions): im for im in contract.subsystem("fuel_delivery").internal_models
     }
     assert set(entries) == {("fuel-mv-1",), ("fuel-mv-2",), ("fuel-mv-3",)}
-    # fuel-mv-3 (load-dependent VE) is reconciled too, with no fit until identified.
+    # fuel-mv-3 (load-dependent VE) is reconciled too; its fit is the frozen
+    # baseline's (check_internal_models above compares the bounds).
     mv3 = entries[("fuel-mv-3",)]
     assert mv3.reconciled_by and mv3.invariants == ["manifold_at_or_below_ambient"]
-    assert mv3.parameter_fits == []
+    assert [f.parameter for f in mv3.parameter_fits] == ["volumetric_efficiency"]
     owed, reconciled = entries[("fuel-mv-1",)], entries[("fuel-mv-2",)]
     for im in (owed, reconciled):
         assert (im.quantity, im.owner, im.modes) == (

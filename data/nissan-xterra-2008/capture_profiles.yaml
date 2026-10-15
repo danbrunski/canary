@@ -157,7 +157,14 @@ profiles:
     only). knock_chain, knock_detect and knock_intensity are held out, and so are the
     learned-retard words 0x124E-1252 and 0x28AA, until a read covers their own bytes:
     a channel enters a profile only once it is no longer hypothesized and carries
-    live-read evidence (tests/test_memory_catalog_knock_lambda.py).'
+    live-read evidence (tests/test_memory_catalog_knock_lambda.py).
+
+
+    2026-10-15: adds EVAP purge duty, DID 0x1110 (ECM_EVAP_PURGE_CMD), on the Mode
+    22 cycle at the pulse DID''s rate, so every pulse read has a purge read from the
+    same cycle. The fuel plant''s per-sample error tracks STFT one for one (E07.3), and
+    purge enters downstream of the MAF, so its fuel is unmetered. No tuning drive
+    logged purge before this (operator, 2026-10-15).'
   experimental: false
   mode01:
     RPM: 1.0
@@ -185,6 +192,7 @@ profiles:
   - ECM_INJECTOR_PULSE_1
   - ECM_INJECTOR_PULSE_2
   - ECM_THROTTLE_POS_SENSOR_1
+  - ECM_EVAP_PURGE_CMD
   mode22_rate_weights:
     ECM_RPM: 0.5
     ECM_AF_SENSOR_V_B1: 0.5
@@ -194,6 +202,7 @@ profiles:
     ECM_INJECTOR_PULSE_1: 0.5
     ECM_INJECTOR_PULSE_2: 0.5
     ECM_THROTTLE_POS_SENSOR_1: 0.5
+    ECM_EVAP_PURGE_CMD: 0.5
   memory:
   - ECM_TARGET_EQUIV_RATIO
   - ECM_ENGINE_PERIOD
@@ -233,12 +242,12 @@ profiles:
   did_continuous: false
   bus_budget_override: 90.0
   priority_channels: null
-  expected_total_demand_hz: 59.0
+  expected_total_demand_hz: 61.0
   capacity_evidence: 'Demand: 7 Mode 01 PIDs x 4 Hz + 4 trims x 2 Hz + 3 context PIDs
-    x 1 Hz + 8 DIDs x 2 Hz = 55 channel reads/s, plus 2 session requests per 0.5 s
-    cycle, about 59 req/s unbatched, against the 90 req/s budget. Worst-case cycle
-    with batching off: (14 Mode 01 + 8 DID + 2 session) / 90 + 0.05 s grace = 0.32
-    s of a 0.5 s cycle. Parent evidence: fuel-target-research on 2026-09-21 ran 20
+    x 1 Hz + 9 DIDs x 2 Hz = 57 channel reads/s, plus 2 session requests per 0.5 s
+    cycle, about 61 req/s unbatched, against the 90 req/s budget. Worst-case cycle
+    with batching off: (14 Mode 01 + 9 DID + 2 session) / 90 + 0.05 s grace = 0.33
+    s of a 0.5 s cycle (the ninth DID, 0x1110, added 2026-10-15). Parent evidence: fuel-target-research on 2026-09-21 ran 20
     min at 4 Hz Mode 01 / 2 Hz per DID with memory windows. No capture of this exact
     revision exists yet; replace this text with the first one.'
   required_tuple: []

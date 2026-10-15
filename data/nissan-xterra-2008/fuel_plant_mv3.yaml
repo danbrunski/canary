@@ -25,14 +25,12 @@
 # working assumption's bracket. No MAP sensor will ever exist on this NA intake
 # (operator, 2026-10-08), so this VE is never validated against measured MAP.
 #
-# NOT YET IDENTIFIED. There is no baseline: identification needs the three
-# identification drives (~/canary-data), which are not on the machine this was
-# declared on. Before anything is scored:
-#   .venv/bin/python -m tools.fuel_plant_check identify --plant-version fuel-mv-3
-# then freeze the result here as baseline na-stock-<date>.mv3 (its VE(rpm) is
-# fuel-mv-2's rule on the same drives) and add the frozen fit's bounds as
-# parameter_fits on the contract's fuel-mv-3 internal model (check_internal_models
-# compares them). Held-out scoring needs never-scored drives (truck).
+# IDENTIFIED 2026-10-15 (baseline below) on the three identification drives
+# in ~/canary-data. It does not beat fuel-mv-2: in-sample |err| p90 11.69 %
+# (fuel-mv-2 11.61 %), and per sample it is slightly worse at idle. The
+# per-sample miss is not VE or MAP: the plant error tracks STFT one for one
+# (E07.3, "STFT residual", 2026-10-15). Held-out scoring needs never-scored
+# drives (truck).
 #
 # Schema: src/analysis/fuel_plant.py (FuelPlantProfile); evaluation:
 # src/analysis/fuel_plant_eval.py. Physics is generic; every number below is
@@ -384,9 +382,66 @@ acceptance:
     (100 (lambda_obs/lambda_pred - 1)) and is held to the same bounds, not
     counted as a second test.
 
-# No baseline yet (header): identification is pending on the corpus. A
-# baseline is frozen once, from tools.fuel_plant_check identify on
-# split.identification, before any comparison with fuel-mv-1 or fuel-mv-2.
+# fuel-mv-3's baseline hardware parameter set, frozen 2026-10-15 -- sha256
+# (computed by BaselineParameterSet.sha256, never supplied):
+#   8d54217e1f91af57efedab9bba2c323ccf61d5f85245f15dff284ed28677d523 from
+# `tools.fuel_plant_check identify --plant-version fuel-mv-3` on
+# split.identification. The values are identify's output, unedited. A
+# per-sample comparison with fuel-mv-1/fuel-mv-2 was run the same day on a
+# scratch copy of the profile holding these identical numbers, before this
+# freeze; nothing was re-fitted after it.
+baseline:
+  id: na-stock-2026-10-15.mv3
+  frozen: true
+  frozen_on: 2026-10-15
+  plant_version: fuel-mv-3
+  hardware_configuration: na_stock_injectors_2026_10
+  fitted_on:
+    - _capture-tuning-2026-09-21T223734
+    - _capture-tuning-2026-09-21T232153
+    - _capture-tuning-2026-09-23T164007
+  revisions: [ZS44A-20260920]
+  values:
+    stoich_air_per_open_ms: 0.050994
+  intervals:
+    stoich_air_per_open_ms: [0.050472, 0.051402]
+  method: >-
+    VE(rpm) first, fuel-mv-2's rule unchanged: per band of
+    volumetric_efficiency.rpm_edges, the largest steady warm charge fraction
+    over the identification drives (3,067 of 12,647 MAF reads steady, warm and
+    in range), rounded up at 1e-6 so the envelope's own read is not refused.
+    Then the scale: median over 89 steady regions of the region median of
+    lambda_pred(s = 1) / lambda_obs (764 pulse reads; 2 more refused as
+    manifold_above_ambient), with MAP solved at VE(rpm) x the residual-gas
+    factor; 90 % interval from 2000 bootstrap resamples of regions (seed
+    20261005). Other working assumptions at their central values (dead-time
+    offset 0, rail 350 kPa, equal banks, delay 0.10 s, exhaust 1.0 x baro).
+  fit_summary:
+    n_samples: 764
+    n_regions: 89
+    sample_p10: 0.047685
+    sample_p90: 0.055537
+    session_median_min: 0.049581
+    session_median_max: 0.05261
+    fit_over_datasheet_prior: 0.911
+    ve_reads_used: 3067
+    ve_bands_above_floor: 4
+    note: >-
+      0.40 % above fuel-mv-2's 0.050792 (a higher part-load MAP lowers
+      injector dP and flow, so the scale rises to match). In-sample, paired on
+      the same 764 reads (compare_versions): |err| p90 11.69 % (fuel-mv-2
+      11.61 %, fuel-mv-1 12.01 %), region pass fraction 0.618 (0.618, 0.573);
+      against fuel-mv-1 per sample 44 % better, 56 % worse, idle (< 5 g/s)
+      +0.68 pp median on the spent drives. Still fails its own bounds
+      in-sample: the load-dependent VE is not the structural miss.
+  ve_curve:
+    rpm_edges: [500.0, 1000.0, 2000.0, 3000.0, 4000.0, 5000.0, 6500.0]
+    # Runs at max(envelope, 0.7): 0.7, 0.7, 0.888395, 0.894657, 0.905535, 0.872824.
+    envelope: [0.217445, 0.67674, 0.888395, 0.894657, 0.905535, 0.872824]
+    n_reads: [1875, 72, 805, 286, 24, 5]
+    # The baro and IAT ranges of the 3,067 reads the fit used (fuel-mv-2's).
+    baro_kpa: [79.0, 82.0]
+    iat_c: [23.0, 50.0]
 
 # Held-out recordings scored against this plant's baseline (none). A recording
 # spent by any version in this profile is refused as held-out evidence here too.

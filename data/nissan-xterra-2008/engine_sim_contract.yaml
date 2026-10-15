@@ -981,9 +981,9 @@ subsystems:
               841 spent-drive reads.
               Frozen in fuel_plant_mv2.yaml baseline na-stock-2026-10-08.mv2.
       # fuel-mv-3 (fuel_plant_mv3.yaml, E07.3 remaining 1, 2026-10-13): the
-      # load-dependent VE. Not yet identified, so it declares no parameter_fits:
-      # the VE(rpm) fit's bounds are added here when its baseline is frozen
-      # (check_internal_models compares them with the frozen fit).
+      # load-dependent VE. Identified 2026-10-15 (baseline na-stock-2026-10-15.mv3);
+      # its parameter_fits are the frozen fit's bounds (check_internal_models
+      # compares them).
       - quantity: manifold_pressure
         owner: manifold_breathing
         plant_versions: [fuel-mv-3]
@@ -1005,6 +1005,35 @@ subsystems:
           the plant's code), and part-load VE follows the residual-gas factor
           instead of the full-breathing value.
         invariants: [manifold_at_or_below_ambient]
+        parameter_fits:
+          - parameter: volumetric_efficiency
+            kind: log_fit
+            form: >-
+              Full-breathing VE(rpm), fuel-mv-2's rule unchanged: per band of
+              500/1000/2000/3000/4000/5000/6500 rpm, the largest steady warm
+              charge fraction on the identification drives, run at max(that,
+              0.7). Part load is the residual-gas factor (declared physics, not
+              fitted): only VE x MAP is identifiable without a MAP sensor.
+            identified_from: [mass_air_flow, engine_speed, barometric_pressure, intake_air_temperature]
+            inherits: [maf_transfer_bias]
+            hardware_configurations: [na_stock_injectors_2026_10]
+            bounds:
+              - {quantity: engine_speed, minimum: 500.0, maximum: 6500.0,
+                 evidence: 'The fitted bands, as fuel-mv-2. The top band (5000-6500) rests on 5 steady reads. Outside: outside_ve_fit.'}
+              - {quantity: barometric_pressure, minimum: 79.0, maximum: 82.0,
+                 evidence: 'The baro range of the 3,067 reads the fit used, as fuel-mv-2. Outside: outside_ve_fit.'}
+              - {quantity: intake_air_temperature, minimum: 23.0, maximum: 50.0,
+                 evidence: 'The IAT range of the reads the fit used, as fuel-mv-2 (INTAKE_TEMP tracks airflow on this truck). Outside: outside_ve_fit.'}
+            fitted_on:
+              - _capture-tuning-2026-09-21T223734
+              - _capture-tuning-2026-09-21T232153
+              - _capture-tuning-2026-09-23T164007
+            evidence: >-
+              Not an independent VE measurement (no MAP sensor; inherits
+              maf_transfer_bias). The envelope is fuel-mv-2's to 1e-6 on the
+              same drives. Frozen in fuel_plant_mv3.yaml baseline
+              na-stock-2026-10-15.mv3 (s = 0.050994 g/ms); in-sample |err| p90
+              11.69 %, no better than fuel-mv-2.
     applicability:
       hardware_configurations: [na_stock_injectors_2026_10]
       bounds:
@@ -1033,6 +1062,27 @@ subsystems:
         identifies: [injector_static_flow, injector_dead_time]
         status: missing
         evidence: 'E07.3: only the lumped stoich_air_per_open_ms is identifiable.'
+      - id: evap_purge_drive
+        what: 'A tuning-profile drive logging DID 0x1110 (ECM_EVAP_PURGE_CMD) with the pulse DID, MAF and lambda.'
+        identifies: [evap_purge_area]
+        status: planned
+        plan:
+          decided_on: '2026-10-15'
+          decided_by: operator
+          arrives_with: >-
+            The next tuning drive: the tuning capture profile polls 0x1110 from
+            2026-10-15 (data/capture_profiles.yaml).
+          recorded_in: docs/roadmap/tasks/E07-engine-plant-simulator.md (E07.3, STFT residual)
+          consequence: >-
+            Tests whether purge explains the per-sample plant error, which
+            tracks STFT one for one (err = -0.92 STFT on 1,601 steady reads,
+            2026-10-15). Purge enters downstream of the MAF, so its fuel is
+            unmetered by both MAF and the pulse. It separates purge from MAF
+            transfer error only where purge is on and off at the same operating
+            point; it does not measure the purge mass flow.
+        evidence: >-
+          No tuning capture before 2026-10-15 polled PID 0x2E or DID 0x1110 (the
+          six fuel-plant drives have zero purge reads). E07.3, STFT residual.
       - id: map_sensor
         what: 'Manifold absolute pressure logged with the pulse (see manifold_breathing).'
         identifies: [manifold_pressure]
@@ -1108,7 +1158,9 @@ subsystems:
         solver output, not a prediction. Naturally aspirated only: a manifold
         above ambient is refused per sample (the supercharger is a new hardware
         configuration and a new plant). One manifold for both banks; no
-        runner wave dynamics, no EGR, purge flow inside MAF.
+        runner wave dynamics, no EGR, and no purge: EVAP
+        purge enters the manifold downstream of the MAF, so its air and fuel
+        are unmetered and outside this stage (E07.3, 2026-10-15).
     numerical:
       refinement: [1, 2, 4, 8]
       order_tolerance: 0.15
