@@ -19,6 +19,13 @@ anything else; a capture window or profile capture active (the read pauses all
 polling for ~10 minutes, the reason ``scripts/restart_canary.sh`` refuses
 too); another backup running. An engine start mid-read aborts it.
 
+**A key-off mid-read.** While the job holds the ECM, ``vehicle_state`` reads
+``passive``, so the re-check cannot see the key turned off. The ECM's own
+broadcast frames can: the recipe's ``ecm_broadcast_ids`` are filtered onto
+the read's bus, and a block that fails on silence says whether they went
+quiet too ("the ECM went silent (key off?)"), were still arriving (powered,
+not answering), or were never heard.
+
 **Bus ownership.** The job claims the ECM session through
 :func:`src.collection.tx_gate.claim_ecm_session` (holder ``rom_backup``), so
 the OBD loop pauses Mode 01, Mode 22 and RAM polling exactly as it does for a
@@ -162,6 +169,23 @@ class BackupRecipe(_Strict):
     pacing: RecipePacing
     verify: RecipeVerify
     provenance: RecipeProvenance
+    #: Frames the ECM broadcasts by itself whenever it is powered, at least
+    #: one of them faster than ``pacing.request_timeout_seconds``. Empty: a
+    #: timeout is reported without saying whether the ECM went silent.
+    ecm_broadcast_ids: list[int] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def _broadcast_ids(self) -> BackupRecipe:
+        diagnostic = {self.request_id, self.response_id, DEFAULT_REQUEST_ID}
+        for value in self.ecm_broadcast_ids:
+            if not 0 <= value <= 0x7FF:
+                raise ValueError(f"ecm_broadcast_ids 0x{value:X} is not an 11-bit CAN id")
+            if value in diagnostic:
+                raise ValueError(
+                    f"ecm_broadcast_ids 0x{value:03X} is a diagnostic id; list frames the ECM "
+                    "broadcasts by itself"
+                )
+        return self
 
 
 def load_backup_recipe(profile_dir: Path, rom_map: RomMap) -> BackupRecipe:
@@ -206,6 +230,15 @@ class _AbortError(Exception):
 
 class _CancelledError(Exception):
     pass
+
+
+@dataclass(frozen=True)
+class _Failure:
+    """One failed request: what to report, and whether the ECM said nothing."""
+
+    cause: str
+    #: Sent, and neither a reply nor a negative response came back in time.
+    no_answer: bool
 
 
 def _engine_running(reading: VehicleReading) -> str | None:
@@ -308,6 +341,8 @@ class RomBackupJob:
         self._shutting_down = threading.Event()
         self._foreign_can: int | None = None
         self._watched_ids: frozenset[int] = frozenset()
+        self._ecm_ids: frozenset[int] = frozenset()
+        self._ecm_heard_at: float | None = None
         self._started_mono = 0.0
 
     # -- public -------------------------------------------------------------
@@ -446,6 +481,7 @@ class RomBackupJob:
             wall = time.time()
             self._cancel.clear()
             self._foreign_can = None
+            self._ecm_heard_at = None
             self._state = {
                 **_idle_state(),
                 "state": "running",
@@ -517,14 +553,18 @@ class RomBackupJob:
             log.exception("could not publish %s", action)
 
     def _tap(self, message: can.Message) -> None:
-        """Every frame the read's own bus receives: another tester on CAN?
+        """Every frame the read's own bus receives: the ECM still broadcasting,
+        or another tester on CAN?
 
         This socket never hears its own transmissions, and the daemon's poll
         loop sends nothing while the claim stands, so a frame on a request id
         is another tester.
         """
-        if self._foreign_can is None and message.arbitration_id in self._watched_ids:
-            self._foreign_can = int(message.arbitration_id)
+        arbitration_id = int(message.arbitration_id)
+        if arbitration_id in self._ecm_ids:
+            self._ecm_heard_at = time.monotonic()
+        elif self._foreign_can is None and arbitration_id in self._watched_ids:
+            self._foreign_can = arbitration_id
 
     def _midread_problem(self, *, check_vehicle: bool) -> str | None:
         if self._cancel.is_set():
@@ -582,6 +622,7 @@ class RomBackupJob:
         entered = False
         frames_excluded = 0
         self._watched_ids = frozenset({recipe.request_id, DEFAULT_REQUEST_ID})
+        self._ecm_ids = frozenset(recipe.ecm_broadcast_ids)
         try:
             tx_gate.claim_ecm_session(HOLDER, ttl_seconds=CLAIM_TTL_SECONDS)
             private_traffic.hold(HOLDER, {recipe.request_id, recipe.response_id})
@@ -593,7 +634,7 @@ class RomBackupJob:
                 bus.set_filters(
                     [
                         {"can_id": i, "can_mask": 0x7FF, "extended": False}
-                        for i in sorted({recipe.response_id, *self._watched_ids})
+                        for i in sorted({recipe.response_id, *self._watched_ids, *self._ecm_ids})
                     ]
                 )
             except (NotImplementedError, can.CanError, OSError):
@@ -755,17 +796,46 @@ class RomBackupJob:
         return reply
 
     @staticmethod
-    def _cause(what: str, reply: RawReply, timeout: float) -> str:
+    def _cause(what: str, reply: RawReply, timeout: float) -> _Failure:
         if reply.send_error is not None:
-            return f"{what}: CAN send failed ({reply.send_error})"
+            return _Failure(f"{what}: CAN send failed ({reply.send_error})", no_answer=False)
         if reply.negative_response_code is not None:
             code = reply.negative_response_code
-            return f"{what}: negative response 0x{code:02X} ({nrc_name(code)})"
-        return f"{what}: no response within {timeout:g} s"
+            return _Failure(
+                f"{what}: negative response 0x{code:02X} ({nrc_name(code)})", no_answer=False
+            )
+        return _Failure(f"{what}: no response within {timeout:g} s", no_answer=True)
+
+    def _explain(self, detail: str, last: _Failure | None, timeout: float) -> str:
+        """``detail``, with what the ECM's broadcasts say about a silent failure.
+
+        Nothing heard on any of them for a whole request timeout is an ECM
+        that is off, not one ignoring the request: at least one broadcasts
+        faster than that.
+        """
+        if last is None or not last.no_answer or not self._ecm_ids:
+            return detail
+        names = ", ".join(f"0x{i:03X}" for i in sorted(self._ecm_ids))
+        heard = self._ecm_heard_at
+        if heard is None:
+            return (
+                f"{detail}; the ECM's broadcasts ({names}) were never heard during the read, so "
+                "a key-off cannot be told apart from an ECM that stopped answering"
+            )
+        quiet = time.monotonic() - heard
+        if quiet >= timeout:
+            return (
+                f"the ECM went silent (key off?): none of its broadcasts ({names}) heard for "
+                f"{quiet:.1f} s; {detail}"
+            )
+        return (
+            f"{detail}; the ECM was still broadcasting (heard {quiet:.2f} s before this "
+            "failure), so it is powered but not answering"
+        )
 
     def _session_step(
         self, client: CanObdClient, recipe: BackupRecipe, sub: int, counters: dict[str, Any]
-    ) -> str | None:
+    ) -> _Failure | None:
         reply = self._send(client, recipe, SESSION_SERVICE, bytes([sub]), counters)
         if reply.positive:
             return None
@@ -774,7 +844,7 @@ class RomBackupJob:
     def _enter_session(
         self, client: CanObdClient, recipe: BackupRecipe, sub: int, counters: dict[str, Any]
     ) -> None:
-        last = None
+        last: _Failure | None = None
         for attempt in range(recipe.pacing.retries_per_block + 1):
             if attempt:
                 counters["retries"] += 1
@@ -785,7 +855,8 @@ class RomBackupJob:
             last = self._session_step(client, recipe, sub, counters)
             if last is None:
                 return
-        raise _AbortError(f"could not enter the session: {last}")
+        detail = f"could not enter the session: {last.cause if last else None}"
+        raise _AbortError(self._explain(detail, last, recipe.pacing.request_timeout_seconds))
 
     def _read_block(
         self,
@@ -795,7 +866,7 @@ class RomBackupJob:
         length: int,
         counters: dict[str, Any],
     ) -> bytes:
-        last = None
+        last: _Failure | None = None
         timeout = recipe.pacing.request_timeout_seconds
         for attempt in range(recipe.pacing.retries_per_block + 1):
             if attempt:
@@ -816,13 +887,17 @@ class RomBackupJob:
             if reply.payload is not None and len(reply.payload) == length:
                 return reply.payload
             if reply.payload is not None:
-                last = f"read: {len(reply.payload)} bytes back for a {length}-byte read"
+                last = _Failure(
+                    f"read: {len(reply.payload)} bytes back for a {length}-byte read",
+                    no_answer=False,
+                )
             else:
                 last = self._cause("read", reply, timeout)
-        raise _AbortError(
+        detail = (
             f"read at 0x{address:06X} ({length} bytes) failed after "
-            f"{recipe.pacing.retries_per_block + 1} attempts; last: {last}"
+            f"{recipe.pacing.retries_per_block + 1} attempts; last: {last.cause if last else None}"
         )
+        raise _AbortError(self._explain(detail, last, timeout))
 
     def _read_all(
         self,
