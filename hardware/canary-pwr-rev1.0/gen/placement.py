@@ -148,5 +148,17 @@ PLACEMENT: dict[str, tuple[float, float, int, str]] = {
 # Bottom-silk board label: inside the fan-inlet keep-out, which bars parts but not silk.
 LABEL_B = (149.5, 66.0)
 
-# In2 +12V_BUS plane: covers the buck input, the bulk caps, RSNSI, the charger FETs, Q5 and the HAT-out fuse.
-IN2_ZONE = [(101.0, 52.0), (164.0, 52.0), (164.0, 85.0), (101.0, 85.0)]
+# In2 is GND (gen_pcb.py) except this +12V_BUS island, the higher-priority zone: under the buck input, the
+# bus electrolytics, RSNSI, the charger FETs, Q5 and the HAT-out fuse. Everything the bottom carries west of
+# x 132 and above y 73 (MCU, I2C buffer, Pi crossings) then sits 0.1 mm above GND instead of above the bus.
+# R9 and C12 (OUTFB divider top, feed-forward) are the only +12V_BUS pads outside it: a top trace feeds them.
+IN2_ZONE = [
+    (113.0, 73.0),
+    (132.0, 73.0),
+    (132.0, 52.0),
+    (164.0, 52.0),
+    (164.0, 79.0),
+    (136.0, 79.0),
+    (136.0, 85.0),
+    (113.0, 85.0),
+]
