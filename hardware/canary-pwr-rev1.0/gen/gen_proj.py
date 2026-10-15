@@ -16,6 +16,12 @@ root_uuid, sheet_uuids = gen_sch.main(projdir)
 pro = json.load(open(hat_pro))
 pro["meta"] = {"filename": "canary-pwr.kicad_pro", "version": 3}
 pro["sheets"] = [[root_uuid, "canary-pwr"]] + [[u, s] for s, u in sheet_uuids.items()]
+# KiCad 10 roots the hierarchy at top_level_sheets. Copied from the HAT it kept the HAT's root UUID,
+# so KiCad re-keyed every instance path on each open and offered that as a fix (2026-10-15).
+pro["schematic"]["top_level_sheets"] = [
+    {"filename": "canary-pwr.kicad_sch", "name": "canary-pwr", "uuid": root_uuid}
+]
+pro["schematic"]["used_designators"] = ""  # the HAT's list otherwise
 pro["text_variables"] = {}
 base = next(c for c in pro["net_settings"]["classes"] if c["name"] == "Default")
 

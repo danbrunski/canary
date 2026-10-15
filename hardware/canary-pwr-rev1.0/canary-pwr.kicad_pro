@@ -274,7 +274,7 @@
       "internal_id": "",
       "mfg": "",
       "mpn": "",
-      "sch_revision": "2.1"
+      "sch_revision": "1.0"
     },
     "layer_pairs": [],
     "layer_presets": [],
@@ -890,7 +890,7 @@
   },
   "sheets": [
     [
-      "bdc204b9-ea66-4e3b-87f2-f8b429651126",
+      "e63e39d7-6ac0-4ffd-8aa3-1841a4541b55",
       "canary-pwr"
     ],
     [

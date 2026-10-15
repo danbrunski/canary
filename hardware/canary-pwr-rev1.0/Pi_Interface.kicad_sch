@@ -1366,8 +1366,7 @@
 			(symbol "C_0_1"
 				(polyline
 					(pts
-						(xy -2.032 0.762)
-						(xy 2.032 0.762)
+						(xy -2.032 0.762) (xy 2.032 0.762)
 					)
 					(stroke
 						(width 0.508)
@@ -1379,8 +1378,7 @@
 				)
 				(polyline
 					(pts
-						(xy -2.032 -0.762)
-						(xy 2.032 -0.762)
+						(xy -2.032 -0.762) (xy 2.032 -0.762)
 					)
 					(stroke
 						(width 0.508)
@@ -1664,8 +1662,7 @@
 			(symbol "BSS138_0_1"
 				(polyline
 					(pts
-						(xy 0.254 1.905)
-						(xy 0.254 -1.905)
+						(xy 0.254 1.905) (xy 0.254 -1.905)
 					)
 					(stroke
 						(width 0.254)
@@ -1677,8 +1674,7 @@
 				)
 				(polyline
 					(pts
-						(xy 0.254 0)
-						(xy -2.54 0)
+						(xy 0.254 0) (xy -2.54 0)
 					)
 					(stroke
 						(width 0)
@@ -1690,8 +1686,7 @@
 				)
 				(polyline
 					(pts
-						(xy 0.762 2.286)
-						(xy 0.762 1.27)
+						(xy 0.762 2.286) (xy 0.762 1.27)
 					)
 					(stroke
 						(width 0.254)
@@ -1703,8 +1698,7 @@
 				)
 				(polyline
 					(pts
-						(xy 0.762 0.508)
-						(xy 0.762 -0.508)
+						(xy 0.762 0.508) (xy 0.762 -0.508)
 					)
 					(stroke
 						(width 0.254)
@@ -1716,8 +1710,7 @@
 				)
 				(polyline
 					(pts
-						(xy 0.762 -1.27)
-						(xy 0.762 -2.286)
+						(xy 0.762 -1.27) (xy 0.762 -2.286)
 					)
 					(stroke
 						(width 0.254)
@@ -1729,10 +1722,7 @@
 				)
 				(polyline
 					(pts
-						(xy 0.762 -1.778)
-						(xy 3.302 -1.778)
-						(xy 3.302 1.778)
-						(xy 0.762 1.778)
+						(xy 0.762 -1.778) (xy 3.302 -1.778) (xy 3.302 1.778) (xy 0.762 1.778)
 					)
 					(stroke
 						(width 0)
@@ -1744,10 +1734,7 @@
 				)
 				(polyline
 					(pts
-						(xy 1.016 0)
-						(xy 2.032 0.381)
-						(xy 2.032 -0.381)
-						(xy 1.016 0)
+						(xy 1.016 0) (xy 2.032 0.381) (xy 2.032 -0.381) (xy 1.016 0)
 					)
 					(stroke
 						(width 0)
@@ -1770,8 +1757,7 @@
 				)
 				(polyline
 					(pts
-						(xy 2.54 2.54)
-						(xy 2.54 1.778)
+						(xy 2.54 2.54) (xy 2.54 1.778)
 					)
 					(stroke
 						(width 0)
@@ -1805,9 +1791,7 @@
 				)
 				(polyline
 					(pts
-						(xy 2.54 -2.54)
-						(xy 2.54 0)
-						(xy 0.762 0)
+						(xy 2.54 -2.54) (xy 2.54 0) (xy 0.762 0)
 					)
 					(stroke
 						(width 0)
@@ -1819,8 +1803,7 @@
 				)
 				(polyline
 					(pts
-						(xy 2.921 0.381)
-						(xy 3.683 0.381)
+						(xy 2.921 0.381) (xy 3.683 0.381)
 					)
 					(stroke
 						(width 0)
@@ -1832,10 +1815,7 @@
 				)
 				(polyline
 					(pts
-						(xy 3.302 0.381)
-						(xy 2.921 -0.254)
-						(xy 3.683 -0.254)
-						(xy 3.302 0.381)
+						(xy 3.302 0.381) (xy 2.921 -0.254) (xy 3.683 -0.254) (xy 3.302 0.381)
 					)
 					(stroke
 						(width 0)
@@ -1991,42 +1971,6 @@
 				)
 			)
 			(symbol "TCA4307_1_1"
-				(pin bidirectional line
-					(at -8.89 2.54 0)
-					(length 2.54)
-					(name "SDAIN"
-						(effects
-							(font
-								(size 1.27 1.27)
-							)
-						)
-					)
-					(number "6"
-						(effects
-							(font
-								(size 1.27 1.27)
-							)
-						)
-					)
-				)
-				(pin bidirectional line
-					(at -8.89 0.0 0)
-					(length 2.54)
-					(name "SCLIN"
-						(effects
-							(font
-								(size 1.27 1.27)
-							)
-						)
-					)
-					(number "3"
-						(effects
-							(font
-								(size 1.27 1.27)
-							)
-						)
-					)
-				)
 				(pin input line
 					(at -8.89 -5.08 0)
 					(length 2.54)
@@ -2046,25 +1990,7 @@
 					)
 				)
 				(pin bidirectional line
-					(at 8.89 2.54 180)
-					(length 2.54)
-					(name "SDAOUT"
-						(effects
-							(font
-								(size 1.27 1.27)
-							)
-						)
-					)
-					(number "7"
-						(effects
-							(font
-								(size 1.27 1.27)
-							)
-						)
-					)
-				)
-				(pin bidirectional line
-					(at 8.89 0.0 180)
+					(at 8.89 0 180)
 					(length 2.54)
 					(name "SCLOUT"
 						(effects
@@ -2074,6 +2000,42 @@
 						)
 					)
 					(number "2"
+						(effects
+							(font
+								(size 1.27 1.27)
+							)
+						)
+					)
+				)
+				(pin bidirectional line
+					(at -8.89 0 0)
+					(length 2.54)
+					(name "SCLIN"
+						(effects
+							(font
+								(size 1.27 1.27)
+							)
+						)
+					)
+					(number "3"
+						(effects
+							(font
+								(size 1.27 1.27)
+							)
+						)
+					)
+				)
+				(pin power_in line
+					(at 0 -10.16 90)
+					(length 2.54)
+					(name "GND"
+						(effects
+							(font
+								(size 1.27 1.27)
+							)
+						)
+					)
+					(number "4"
 						(effects
 							(font
 								(size 1.27 1.27)
@@ -2099,8 +2061,44 @@
 						)
 					)
 				)
+				(pin bidirectional line
+					(at -8.89 2.54 0)
+					(length 2.54)
+					(name "SDAIN"
+						(effects
+							(font
+								(size 1.27 1.27)
+							)
+						)
+					)
+					(number "6"
+						(effects
+							(font
+								(size 1.27 1.27)
+							)
+						)
+					)
+				)
+				(pin bidirectional line
+					(at 8.89 2.54 180)
+					(length 2.54)
+					(name "SDAOUT"
+						(effects
+							(font
+								(size 1.27 1.27)
+							)
+						)
+					)
+					(number "7"
+						(effects
+							(font
+								(size 1.27 1.27)
+							)
+						)
+					)
+				)
 				(pin power_in line
-					(at 0.0 7.62 270)
+					(at 0 7.62 270)
 					(length 2.54)
 					(name "VCC"
 						(effects
@@ -2110,24 +2108,6 @@
 						)
 					)
 					(number "8"
-						(effects
-							(font
-								(size 1.27 1.27)
-							)
-						)
-					)
-				)
-				(pin power_in line
-					(at 0.0 -10.16 90)
-					(length 2.54)
-					(name "GND"
-						(effects
-							(font
-								(size 1.27 1.27)
-							)
-						)
-					)
-					(number "4"
 						(effects
 							(font
 								(size 1.27 1.27)
@@ -2220,12 +2200,7 @@
 			(symbol "GND_0_1"
 				(polyline
 					(pts
-						(xy 0 0)
-						(xy 0 -1.27)
-						(xy 1.27 -1.27)
-						(xy 0 -2.54)
-						(xy -1.27 -1.27)
-						(xy 0 -1.27)
+						(xy 0 0) (xy 0 -1.27) (xy 1.27 -1.27) (xy 0 -2.54) (xy -1.27 -1.27) (xy 0 -1.27)
 					)
 					(stroke
 						(width 0)
@@ -2360,12 +2335,7 @@
 			(symbol "PWR_FLAG_0_1"
 				(polyline
 					(pts
-						(xy 0 0)
-						(xy 0 1.27)
-						(xy -1.016 1.905)
-						(xy 0 2.54)
-						(xy 1.016 1.905)
-						(xy 0 1.27)
+						(xy 0 0) (xy 0 1.27) (xy -1.016 1.905) (xy 0 2.54) (xy 1.016 1.905) (xy 0 1.27)
 					)
 					(stroke
 						(width 0)
@@ -2379,16 +2349,27 @@
 			(embedded_fonts no)
 		)
 	)
-	(text "Pi Interface: Pi 5 header (stacking), I2C hot-swap buffer, crossing nets into the Pi's 3.3 V domain"
+	(text "Crossing nets (safe-state pulls)"
 		(exclude_from_sim no)
-		(at 20.32 22.86 0)
+		(at 228.25 33.02 0)
 		(effects
 			(font
-				(size 2.54 2.54)
+				(size 1.778 1.778)
 			)
 			(justify left bottom)
 		)
-		(uuid "f84499ba-1698-4800-89a3-673ab98472e3")
+		(uuid "2d88ddc3-2ff5-40e9-b3eb-d74a3590d049")
+	)
+	(text "I2C hot-swap buffer (Pi side powered)"
+		(exclude_from_sim no)
+		(at 93.92 33.02 0)
+		(effects
+			(font
+				(size 1.778 1.778)
+			)
+			(justify left bottom)
+		)
+		(uuid "30d44596-3569-4482-a01a-0fa78fe4acda")
 	)
 	(text "Pi 5 header (stacking, the HAT plugs on top)"
 		(exclude_from_sim no)
@@ -2400,6 +2381,1724 @@
 			(justify left bottom)
 		)
 		(uuid "71f635f8-8a59-4da0-9b4f-5ab5b4ebd8fc")
+	)
+	(text "Power flags (nets fed by passive pins)"
+		(exclude_from_sim no)
+		(at 25.4 254 0)
+		(effects
+			(font
+				(size 1.778 1.778)
+			)
+			(justify left bottom)
+		)
+		(uuid "ab70ffce-fb44-42d0-8f38-b75445059103")
+	)
+	(text "Pi Interface: Pi 5 header (stacking), I2C hot-swap buffer, crossing nets into the Pi's 3.3 V domain"
+		(exclude_from_sim no)
+		(at 20.32 22.86 0)
+		(effects
+			(font
+				(size 2.54 2.54)
+			)
+			(justify left bottom)
+		)
+		(uuid "f84499ba-1698-4800-89a3-673ab98472e3")
+	)
+	(no_connect
+		(at 45.72 78.74)
+		(uuid "0d93dfe8-bccf-4649-8cdc-9559598cb086")
+	)
+	(no_connect
+		(at 45.72 73.66)
+		(uuid "1c6b1278-7122-4795-bb57-2440df33a6de")
+	)
+	(no_connect
+		(at 45.72 83.82)
+		(uuid "1e8c7008-54a1-4835-a0b5-ff7ecf2ec039")
+	)
+	(no_connect
+		(at 33.02 81.28)
+		(uuid "2b9a7ff4-bb8a-467e-b140-70c14d746218")
+	)
+	(no_connect
+		(at 45.72 86.36)
+		(uuid "309172b1-4773-4379-9681-ad2602efc688")
+	)
+	(no_connect
+		(at 45.72 66.04)
+		(uuid "3598039c-20e6-4b2b-aca3-ff37052535c9")
+	)
+	(no_connect
+		(at 45.72 71.12)
+		(uuid "4195f64d-7478-41fe-886f-a73c436b31e2")
+	)
+	(no_connect
+		(at 33.02 68.58)
+		(uuid "42fcd9ce-027a-4a9c-82c0-d1fa079af57b")
+	)
+	(no_connect
+		(at 33.02 63.5)
+		(uuid "4ca8e455-5905-4523-9ab1-2172ad375955")
+	)
+	(no_connect
+		(at 45.72 48.26)
+		(uuid "5d917ac6-6c39-4388-b041-d82277b9115f")
+	)
+	(no_connect
+		(at 33.02 66.04)
+		(uuid "5f90e48a-77db-4a5f-aea4-8d0863e6d680")
+	)
+	(no_connect
+		(at 33.02 83.82)
+		(uuid "665332d8-9d6c-4519-b429-8de2805849cd")
+	)
+	(no_connect
+		(at 45.72 58.42)
+		(uuid "80e2cd2a-0d90-4a66-a159-56478f609213")
+	)
+	(no_connect
+		(at 33.02 73.66)
+		(uuid "9700283a-c765-4147-8a56-02ee36b86ce0")
+	)
+	(no_connect
+		(at 45.72 88.9)
+		(uuid "b4b671ad-6d70-4606-b61a-727e2d09a898")
+	)
+	(no_connect
+		(at 45.72 53.34)
+		(uuid "b634d357-5b2a-4c1d-8d31-a95ad8dbe244")
+	)
+	(no_connect
+		(at 33.02 86.36)
+		(uuid "b91e6071-8739-48ec-a148-0948f7966fa9")
+	)
+	(no_connect
+		(at 33.02 53.34)
+		(uuid "be81f77f-8087-4fa9-9c39-ec9f18dd1b13")
+	)
+	(no_connect
+		(at 33.02 76.2)
+		(uuid "bf77b233-2055-41ce-9833-d9482ad803e1")
+	)
+	(no_connect
+		(at 45.72 68.58)
+		(uuid "c6712e34-b935-4bdd-a344-e7a5c778a034")
+	)
+	(no_connect
+		(at 33.02 48.26)
+		(uuid "df80390f-6e25-461f-8223-1ee8e04d267b")
+	)
+	(no_connect
+		(at 45.72 50.8)
+		(uuid "e6756393-bf3d-4ade-8358-6b48807745e3")
+	)
+	(no_connect
+		(at 33.02 58.42)
+		(uuid "ec5f04ae-fc1f-466d-ab11-cff91946a06c")
+	)
+	(label "PI_3V3"
+		(at 247.65 40.64 0)
+		(effects
+			(font
+				(size 1.27 1.27)
+			)
+			(justify left bottom)
+		)
+		(uuid "040c45f3-bee1-4b1d-9d8b-98a73fa7cc5a")
+	)
+	(label "PI_BOOT0"
+		(at 270.51 40.64 180)
+		(effects
+			(font
+				(size 1.27 1.27)
+			)
+			(justify right bottom)
+		)
+		(uuid "11521989-7c8c-4467-b1c7-76c6626ad91b")
+	)
+	(label "NRST_GATE"
+		(at 237.49 55.88 180)
+		(effects
+			(font
+				(size 1.27 1.27)
+			)
+			(justify right bottom)
+		)
+		(uuid "1de874d8-1ffa-4739-8612-d1404768522b")
+	)
+	(label "PI_NRST"
+		(at 45.72 60.96 0)
+		(effects
+			(font
+				(size 1.27 1.27)
+			)
+			(justify left bottom)
+		)
+		(uuid "33918a5c-e995-4d9b-a8a2-a3f8f27cb8f5")
+	)
+	(label "PI_3V3"
+		(at 100.33 60.96 180)
+		(effects
+			(font
+				(size 1.27 1.27)
+			)
+			(justify right bottom)
+		)
+		(uuid "3d2cc99a-10c2-49d0-9461-adf7fde9dc15")
+	)
+	(label "PI_3V3"
+		(at 109.22 48.26 90)
+		(effects
+			(font
+				(size 1.27 1.27)
+			)
+			(justify left bottom)
+		)
+		(uuid "55d22b3b-8c99-4dd2-b346-8d40696cc7b3")
+	)
+	(label "PI_3V3"
+		(at 207.01 40.64 0)
+		(effects
+			(font
+				(size 1.27 1.27)
+			)
+			(justify left bottom)
+		)
+		(uuid "5b28cc73-84ee-4be6-84cd-7c8e09c9fb1c")
+	)
+	(label "PI_SCL"
+		(at 33.02 45.72 180)
+		(effects
+			(font
+				(size 1.27 1.27)
+			)
+			(justify right bottom)
+		)
+		(uuid "5ea4176b-f1c8-4232-9edd-06b864e820b9")
+	)
+	(label "I2C_READY"
+		(at 118.11 60.96 0)
+		(effects
+			(font
+				(size 1.27 1.27)
+			)
+			(justify left bottom)
+		)
+		(uuid "611a5921-3e6c-4a8e-85a5-75e7246a7395")
+	)
+	(label "PI_3V3"
+		(at 33.02 60.96 180)
+		(effects
+			(font
+				(size 1.27 1.27)
+			)
+			(justify right bottom)
+		)
+		(uuid "6caf085c-c6fd-4aaf-8502-4833e2000987")
+	)
+	(label "PI_SDA"
+		(at 100.33 53.34 180)
+		(effects
+			(font
+				(size 1.27 1.27)
+			)
+			(justify right bottom)
+		)
+		(uuid "759c45db-2f8f-4209-b8c3-38050c8f01a0")
+	)
+	(label "PI_3V3"
+		(at 113.03 83.82 0)
+		(effects
+			(font
+				(size 1.27 1.27)
+			)
+			(justify left bottom)
+		)
+		(uuid "9a7dde38-0adb-4063-a51a-8cc220159ba6")
+	)
+	(label "PI_3V3"
+		(at 33.02 40.64 180)
+		(effects
+			(font
+				(size 1.27 1.27)
+			)
+			(justify right bottom)
+		)
+		(uuid "a509e8d1-4e7f-448c-a74d-8d57f9a74d0f")
+	)
+	(label "NRST_GATE"
+		(at 344.17 40.64 0)
+		(effects
+			(font
+				(size 1.27 1.27)
+			)
+			(justify left bottom)
+		)
+		(uuid "a54603b9-8b60-4242-963e-bf8d9899d2a1")
+	)
+	(label "PI_3V3"
+		(at 140.97 40.64 180)
+		(effects
+			(font
+				(size 1.27 1.27)
+			)
+			(justify right bottom)
+		)
+		(uuid "b2af34fd-73d8-4fa4-9a74-85b5625b528b")
+	)
+	(label "PI_BOOT0"
+		(at 33.02 55.88 180)
+		(effects
+			(font
+				(size 1.27 1.27)
+			)
+			(justify right bottom)
+		)
+		(uuid "b4d6f5c4-fcc7-4cad-920c-3d86f84eb17d")
+	)
+	(label "NRST_GATE"
+		(at 266.7 73.66 180)
+		(effects
+			(font
+				(size 1.27 1.27)
+			)
+			(justify right bottom)
+		)
+		(uuid "bb109e59-0457-4417-a4a9-2b6f2e79f7c9")
+	)
+	(label "PI_3V3"
+		(at 288.29 55.88 180)
+		(effects
+			(font
+				(size 1.27 1.27)
+			)
+			(justify right bottom)
+		)
+		(uuid "c867add4-3ea3-473e-a259-2bb91560f361")
+	)
+	(label "PI_SCL"
+		(at 100.33 55.88 180)
+		(effects
+			(font
+				(size 1.27 1.27)
+			)
+			(justify right bottom)
+		)
+		(uuid "d69dc186-1665-4e4d-8bed-e4a398f849d4")
+	)
+	(label "PI_3V3"
+		(at 176.53 40.64 0)
+		(effects
+			(font
+				(size 1.27 1.27)
+			)
+			(justify left bottom)
+		)
+		(uuid "e071fccc-c670-4c00-a5e6-8745edc98ea3")
+	)
+	(label "I2C_READY"
+		(at 105.41 83.82 180)
+		(effects
+			(font
+				(size 1.27 1.27)
+			)
+			(justify right bottom)
+		)
+		(uuid "e545f245-b968-4d93-9720-e5466cd77a26")
+	)
+	(label "PI_NRST"
+		(at 336.55 40.64 180)
+		(effects
+			(font
+				(size 1.27 1.27)
+			)
+			(justify right bottom)
+		)
+		(uuid "fae56a2d-0cbc-4cb2-8e32-96e11e88bab9")
+	)
+	(label "PI_SDA"
+		(at 33.02 43.18 180)
+		(effects
+			(font
+				(size 1.27 1.27)
+			)
+			(justify right bottom)
+		)
+		(uuid "fb5cc56c-61f2-401b-9827-8da83d9df3e5")
+	)
+	(label "PI_3V3"
+		(at 25.4 266.7 270)
+		(effects
+			(font
+				(size 1.27 1.27)
+			)
+			(justify right bottom)
+		)
+		(uuid "fc46dcd3-77a2-4b43-b69e-d71f26ca91f2")
+	)
+	(global_label "+5V_PI"
+		(shape passive)
+		(at 69.85 40.64 180)
+		(fields_autoplaced yes)
+		(effects
+			(font
+				(size 1.27 1.27)
+			)
+			(justify right)
+		)
+		(uuid "270fe4ce-3ab0-4a33-ac72-22f8b86e5913")
+		(property "Intersheetrefs" "${INTERSHEET_REFS}"
+			(at 69.85 40.64 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify right)
+			)
+		)
+	)
+	(global_label "SWCLK_BOOT0"
+		(shape passive)
+		(at 278.13 40.64 0)
+		(fields_autoplaced yes)
+		(effects
+			(font
+				(size 1.27 1.27)
+			)
+			(justify left)
+		)
+		(uuid "52767b79-160d-4d7a-8f4a-8725f24059e3")
+		(property "Intersheetrefs" "${INTERSHEET_REFS}"
+			(at 278.13 40.64 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify left)
+			)
+		)
+	)
+	(global_label "~{PWR_FAIL}"
+		(shape passive)
+		(at 33.02 78.74 180)
+		(fields_autoplaced yes)
+		(effects
+			(font
+				(size 1.27 1.27)
+			)
+			(justify right)
+		)
+		(uuid "5354f6ed-9184-46e0-ab4f-861abc8f6c07")
+		(property "Intersheetrefs" "${INTERSHEET_REFS}"
+			(at 33.02 78.74 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify right)
+			)
+		)
+	)
+	(global_label "MCU_SCL"
+		(shape passive)
+		(at 118.11 55.88 0)
+		(fields_autoplaced yes)
+		(effects
+			(font
+				(size 1.27 1.27)
+			)
+			(justify left)
+		)
+		(uuid "7d596693-6942-40da-866d-1d5cad33d568")
+		(property "Intersheetrefs" "${INTERSHEET_REFS}"
+			(at 118.11 55.88 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify left)
+			)
+		)
+	)
+	(global_label "MCU_SDA"
+		(shape passive)
+		(at 118.11 53.34 0)
+		(fields_autoplaced yes)
+		(effects
+			(font
+				(size 1.27 1.27)
+			)
+			(justify left)
+		)
+		(uuid "7eb8a968-cbbc-4cd4-8f8e-728a5f1348f4")
+		(property "Intersheetrefs" "${INTERSHEET_REFS}"
+			(at 118.11 53.34 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify left)
+			)
+		)
+	)
+	(global_label "MCU_SDA"
+		(shape passive)
+		(at 168.91 40.64 180)
+		(fields_autoplaced yes)
+		(effects
+			(font
+				(size 1.27 1.27)
+			)
+			(justify right)
+		)
+		(uuid "8258c8f2-d651-47ff-8c57-b8f296eb4ee3")
+		(property "Intersheetrefs" "${INTERSHEET_REFS}"
+			(at 168.91 40.64 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify right)
+			)
+		)
+	)
+	(global_label "MCU_NRST"
+		(shape passive)
+		(at 274.32 68.58 90)
+		(fields_autoplaced yes)
+		(effects
+			(font
+				(size 1.27 1.27)
+			)
+			(justify left)
+		)
+		(uuid "9a36c430-3fe8-40bf-a28b-e865c6af8472")
+		(property "Intersheetrefs" "${INTERSHEET_REFS}"
+			(at 274.32 68.58 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify left)
+			)
+		)
+	)
+	(global_label "PI_3V3_SENSE"
+		(shape passive)
+		(at 295.91 55.88 0)
+		(fields_autoplaced yes)
+		(effects
+			(font
+				(size 1.27 1.27)
+			)
+			(justify left)
+		)
+		(uuid "a4dfed74-9e49-4fb8-8d80-cc63e9a1c9e1")
+		(property "Intersheetrefs" "${INTERSHEET_REFS}"
+			(at 295.91 55.88 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify left)
+			)
+		)
+	)
+	(global_label "SWCLK_BOOT0"
+		(shape passive)
+		(at 311.15 40.64 180)
+		(fields_autoplaced yes)
+		(effects
+			(font
+				(size 1.27 1.27)
+			)
+			(justify right)
+		)
+		(uuid "cb5e396f-6740-4e15-a117-c9df14d331b8")
+		(property "Intersheetrefs" "${INTERSHEET_REFS}"
+			(at 311.15 40.64 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify right)
+			)
+		)
+	)
+	(global_label "+5V_PI"
+		(shape passive)
+		(at 45.72 40.64 0)
+		(fields_autoplaced yes)
+		(effects
+			(font
+				(size 1.27 1.27)
+			)
+			(justify left)
+		)
+		(uuid "cbeb5eb5-e84b-411d-845e-c59cebc6be11")
+		(property "Intersheetrefs" "${INTERSHEET_REFS}"
+			(at 45.72 40.64 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify left)
+			)
+		)
+	)
+	(global_label "~{PWR_FAIL}"
+		(shape passive)
+		(at 240.03 40.64 180)
+		(fields_autoplaced yes)
+		(effects
+			(font
+				(size 1.27 1.27)
+			)
+			(justify right)
+		)
+		(uuid "d40774b1-6487-4170-91d9-98a7792c143d")
+		(property "Intersheetrefs" "${INTERSHEET_REFS}"
+			(at 240.03 40.64 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify right)
+			)
+		)
+	)
+	(global_label "MCU_SCL"
+		(shape passive)
+		(at 199.39 40.64 180)
+		(fields_autoplaced yes)
+		(effects
+			(font
+				(size 1.27 1.27)
+			)
+			(justify right)
+		)
+		(uuid "dc6a7e2b-48c9-43c3-b492-5ff1dc54a00d")
+		(property "Intersheetrefs" "${INTERSHEET_REFS}"
+			(at 199.39 40.64 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify right)
+			)
+		)
+	)
+	(global_label "+5V_PI"
+		(shape passive)
+		(at 45.72 43.18 0)
+		(fields_autoplaced yes)
+		(effects
+			(font
+				(size 1.27 1.27)
+			)
+			(justify left)
+		)
+		(uuid "f3a3f67b-433b-42df-9473-18b1a8b8c7b6")
+		(property "Intersheetrefs" "${INTERSHEET_REFS}"
+			(at 45.72 43.18 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify left)
+			)
+		)
+	)
+	(symbol
+		(lib_id "canary-pwr:TCA4307")
+		(at 109.22 55.88 0)
+		(unit 1)
+		(body_style 1)
+		(exclude_from_sim no)
+		(in_bom yes)
+		(on_board yes)
+		(in_pos_files yes)
+		(dnp no)
+		(uuid "03e90041-7b43-464a-8f91-081879197f53")
+		(property "Reference" "U8"
+			(at 110.995 37.86 0)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Value" "TCA4307DGKR"
+			(at 110.995 73.74 0)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Footprint" "canary-pwr:SOIC8_DGK_TEX"
+			(at 109.22 55.88 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Datasheet" "https://www.ti.com/lit/ds/symlink/tca4307.pdf"
+			(at 109.22 55.88 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Description" "I2C buffer, powered from the Pi's 3.3 V"
+			(at 109.22 55.88 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "MPN" "TCA4307DGKR"
+			(at 109.22 55.88 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Manufacturer" "Texas Instruments"
+			(at 109.22 55.88 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Note" "Powered-off high-impedance I/O (datasheet p.1): the always-on board can never load or back-feed the Pi's I2C1 while the Pi is dark (spec P6). Pi side uses the Pi's own 1.8k pull-ups."
+			(at 109.22 55.88 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(pin "1"
+			(uuid "e22bc6f5-d96f-4ac6-8c59-743b1771d765")
+		)
+		(pin "2"
+			(uuid "2edaef1d-6117-4498-ac75-e16dfd97f53b")
+		)
+		(pin "3"
+			(uuid "3ff02c09-c827-46fc-bab4-f77bb4f75b58")
+		)
+		(pin "4"
+			(uuid "3ad3a29e-becf-4348-87a5-5fb3d53953b6")
+		)
+		(pin "5"
+			(uuid "44ab658f-293c-4344-a78b-9aba86292c30")
+		)
+		(pin "6"
+			(uuid "f94ec73e-8a72-49bf-bec0-f6ed2d2f20e7")
+		)
+		(pin "7"
+			(uuid "c42dba94-6956-48e6-89eb-125caa77e534")
+		)
+		(pin "8"
+			(uuid "f3efbadf-2cc0-47bf-9fe9-d182b6110f30")
+		)
+		(instances
+			(project "canary-pwr"
+				(path "/e63e39d7-6ac0-4ffd-8aa3-1841a4541b55/bea078c0-dcfe-4068-9acb-f216f38abac7"
+					(reference "U8")
+					(unit 1)
+				)
+			)
+		)
+	)
+	(symbol
+		(lib_id "power:GND")
+		(at 33.02 50.8 270)
+		(unit 1)
+		(body_style 1)
+		(exclude_from_sim no)
+		(in_bom yes)
+		(on_board yes)
+		(in_pos_files yes)
+		(dnp no)
+		(uuid "063b988c-3e71-4c77-81c1-d309d277683d")
+		(property "Reference" "#PWR085"
+			(at 33.02 55.8 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Value" "GND"
+			(at 33.02 54.6 0)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Footprint" ""
+			(at 33.02 50.8 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Datasheet" ""
+			(at 33.02 50.8 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Description" ""
+			(at 33.02 50.8 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(pin "1"
+			(uuid "a0fdfb19-6270-4cdc-a4f2-f9e2d76ac1f9")
+		)
+		(instances
+			(project "canary-pwr"
+				(path "/e63e39d7-6ac0-4ffd-8aa3-1841a4541b55/bea078c0-dcfe-4068-9acb-f216f38abac7"
+					(reference "#PWR085")
+					(unit 1)
+				)
+			)
+		)
+	)
+	(symbol
+		(lib_id "Transistor_FET:BSS138")
+		(at 271.78 73.66 0)
+		(unit 1)
+		(body_style 1)
+		(exclude_from_sim no)
+		(in_bom yes)
+		(on_board yes)
+		(in_pos_files yes)
+		(dnp no)
+		(uuid "0df206f1-3f09-43fe-bb78-c6484a56fa2c")
+		(property "Reference" "Q8"
+			(at 266.2375 53.58 0)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Value" "BSS138"
+			(at 266.2375 86.44 0)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Footprint" "Package_TO_SOT_SMD:SOT-23"
+			(at 271.78 73.66 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Datasheet" ""
+			(at 271.78 73.66 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Description" "N-channel MOSFET, SOT-23"
+			(at 271.78 73.66 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "MPN" "BSS138"
+			(at 271.78 73.66 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Manufacturer" "onsemi"
+			(at 271.78 73.66 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Note" "A FET, not a resistor: a powered-off Pi pin would otherwise clamp NRST and hold the supervisor in reset"
+			(at 271.78 73.66 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(pin "1"
+			(uuid "aa2a7330-b2e5-4bef-9c79-9596630a4730")
+		)
+		(pin "2"
+			(uuid "4449e2ab-b3f4-427e-8733-b61babf599a6")
+		)
+		(pin "3"
+			(uuid "7948f372-75d8-414c-a603-f64ac8660fa5")
+		)
+		(instances
+			(project "canary-pwr"
+				(path "/e63e39d7-6ac0-4ffd-8aa3-1841a4541b55/bea078c0-dcfe-4068-9acb-f216f38abac7"
+					(reference "Q8")
+					(unit 1)
+				)
+			)
+		)
+	)
+	(symbol
+		(lib_id "power:GND")
+		(at 318.77 40.64 90)
+		(unit 1)
+		(body_style 1)
+		(exclude_from_sim no)
+		(in_bom yes)
+		(on_board yes)
+		(in_pos_files yes)
+		(dnp no)
+		(uuid "0e5a3fc3-82e6-46a0-b921-244f871f0705")
+		(property "Reference" "#PWR095"
+			(at 318.77 45.64 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Value" "GND"
+			(at 318.77 44.44 0)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Footprint" ""
+			(at 318.77 40.64 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Datasheet" ""
+			(at 318.77 40.64 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Description" ""
+			(at 318.77 40.64 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(pin "1"
+			(uuid "a457c770-7290-4351-8125-0fa2e74b371a")
+		)
+		(instances
+			(project "canary-pwr"
+				(path "/e63e39d7-6ac0-4ffd-8aa3-1841a4541b55/bea078c0-dcfe-4068-9acb-f216f38abac7"
+					(reference "#PWR095")
+					(unit 1)
+				)
+			)
+		)
+	)
+	(symbol
+		(lib_id "Device:R")
+		(at 241.3 55.88 90)
+		(unit 1)
+		(body_style 1)
+		(exclude_from_sim no)
+		(in_bom yes)
+		(on_board yes)
+		(in_pos_files yes)
+		(dnp no)
+		(uuid "1c2c7e2f-0afa-46c7-9253-7ec6051a606f")
+		(property "Reference" "R41"
+			(at 238.075 52.78 0)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Value" "100k"
+			(at 238.075 59.58 0)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Footprint" "Resistor_SMD:R_0603_1608Metric"
+			(at 241.3 55.88 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Datasheet" ""
+			(at 241.3 55.88 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Description" "Resistor 100k 0603"
+			(at 241.3 55.88 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "MPN" "RC0603FR-07100KL"
+			(at 241.3 55.88 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Manufacturer" "Yageo"
+			(at 241.3 55.88 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(pin "1"
+			(uuid "f7cd4f29-9968-43e0-b643-15bb6d6437bf")
+		)
+		(pin "2"
+			(uuid "0fbb4e72-8144-45b8-b87b-17629d56f8a4")
+		)
+		(instances
+			(project "canary-pwr"
+				(path "/e63e39d7-6ac0-4ffd-8aa3-1841a4541b55/bea078c0-dcfe-4068-9acb-f216f38abac7"
+					(reference "R41")
+					(unit 1)
+				)
+			)
+		)
+	)
+	(symbol
+		(lib_id "Device:C")
+		(at 73.66 40.64 90)
+		(unit 1)
+		(body_style 1)
+		(exclude_from_sim no)
+		(in_bom yes)
+		(on_board yes)
+		(in_pos_files yes)
+		(dnp no)
+		(uuid "1c467593-a50e-434c-ab9e-0cc043e14321")
+		(property "Reference" "C44"
+			(at 70.76 37.008 0)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Value" "100n"
+			(at 70.76 44.872 0)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Footprint" "Capacitor_SMD:C_0603_1608Metric"
+			(at 73.66 40.64 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Datasheet" ""
+			(at 73.66 40.64 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Description" "Capacitor 100n 50V X7R/X5R 0603"
+			(at 73.66 40.64 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "MPN" "CL10B104KB8NNNC"
+			(at 73.66 40.64 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(pin "1"
+			(uuid "de1353c6-eae7-4e18-85dc-96dcb45b1fe4")
+		)
+		(pin "2"
+			(uuid "a9920501-e1df-49a3-9502-d142aba99cb7")
+		)
+		(instances
+			(project "canary-pwr"
+				(path "/e63e39d7-6ac0-4ffd-8aa3-1841a4541b55/bea078c0-dcfe-4068-9acb-f216f38abac7"
+					(reference "C44")
+					(unit 1)
+				)
+			)
+		)
+	)
+	(symbol
+		(lib_id "power:GND")
+		(at 45.72 81.28 90)
+		(unit 1)
+		(body_style 1)
+		(exclude_from_sim no)
+		(in_bom yes)
+		(on_board yes)
+		(in_pos_files yes)
+		(dnp no)
+		(uuid "39006b98-8c66-41f1-8976-ecf4b6727d1f")
+		(property "Reference" "#PWR090"
+			(at 45.72 86.28 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Value" "GND"
+			(at 45.72 85.08 0)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Footprint" ""
+			(at 45.72 81.28 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Datasheet" ""
+			(at 45.72 81.28 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Description" ""
+			(at 45.72 81.28 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(pin "1"
+			(uuid "a78ffd70-fae0-42aa-95a0-d2a8351f5b34")
+		)
+		(instances
+			(project "canary-pwr"
+				(path "/e63e39d7-6ac0-4ffd-8aa3-1841a4541b55/bea078c0-dcfe-4068-9acb-f216f38abac7"
+					(reference "#PWR090")
+					(unit 1)
+				)
+			)
+		)
+	)
+	(symbol
+		(lib_id "power:GND")
+		(at 45.72 63.5 90)
+		(unit 1)
+		(body_style 1)
+		(exclude_from_sim no)
+		(in_bom yes)
+		(on_board yes)
+		(in_pos_files yes)
+		(dnp no)
+		(uuid "3be78215-94d0-4fbf-8990-37c8039eb418")
+		(property "Reference" "#PWR087"
+			(at 45.72 68.5 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Value" "GND"
+			(at 45.72 67.3 0)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Footprint" ""
+			(at 45.72 63.5 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Datasheet" ""
+			(at 45.72 63.5 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Description" ""
+			(at 45.72 63.5 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(pin "1"
+			(uuid "88fd850c-bf92-4d72-947f-7069a0f7d5e2")
+		)
+		(instances
+			(project "canary-pwr"
+				(path "/e63e39d7-6ac0-4ffd-8aa3-1841a4541b55/bea078c0-dcfe-4068-9acb-f216f38abac7"
+					(reference "#PWR087")
+					(unit 1)
+				)
+			)
+		)
+	)
+	(symbol
+		(lib_id "power:GND")
+		(at 245.11 55.88 90)
+		(unit 1)
+		(body_style 1)
+		(exclude_from_sim no)
+		(in_bom yes)
+		(on_board yes)
+		(in_pos_files yes)
+		(dnp no)
+		(uuid "3c40bb91-e7a6-4245-89f0-56e6062c2cb5")
+		(property "Reference" "#PWR096"
+			(at 245.11 60.88 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Value" "GND"
+			(at 245.11 59.68 0)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Footprint" ""
+			(at 245.11 55.88 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Datasheet" ""
+			(at 245.11 55.88 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Description" ""
+			(at 245.11 55.88 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(pin "1"
+			(uuid "dd2b1cc3-cc81-4dc9-b810-01a511893ec1")
+		)
+		(instances
+			(project "canary-pwr"
+				(path "/e63e39d7-6ac0-4ffd-8aa3-1841a4541b55/bea078c0-dcfe-4068-9acb-f216f38abac7"
+					(reference "#PWR096")
+					(unit 1)
+				)
+			)
+		)
+	)
+	(symbol
+		(lib_id "power:GND")
+		(at 33.02 88.9 270)
+		(unit 1)
+		(body_style 1)
+		(exclude_from_sim no)
+		(in_bom yes)
+		(on_board yes)
+		(in_pos_files yes)
+		(dnp no)
+		(uuid "4d3dc0a4-dfff-40ef-ae08-2afd28d15b9c")
+		(property "Reference" "#PWR091"
+			(at 33.02 93.9 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Value" "GND"
+			(at 33.02 92.7 0)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Footprint" ""
+			(at 33.02 88.9 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Datasheet" ""
+			(at 33.02 88.9 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Description" ""
+			(at 33.02 88.9 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(pin "1"
+			(uuid "1ea5c414-5b6a-4807-bb8d-0ddf50059e53")
+		)
+		(instances
+			(project "canary-pwr"
+				(path "/e63e39d7-6ac0-4ffd-8aa3-1841a4541b55/bea078c0-dcfe-4068-9acb-f216f38abac7"
+					(reference "#PWR091")
+					(unit 1)
+				)
+			)
+		)
+	)
+	(symbol
+		(lib_id "power:GND")
+		(at 148.59 40.64 90)
+		(unit 1)
+		(body_style 1)
+		(exclude_from_sim no)
+		(in_bom yes)
+		(on_board yes)
+		(in_pos_files yes)
+		(dnp no)
+		(uuid "6647eb8f-4143-40f2-bec1-28cdd2672c32")
+		(property "Reference" "#PWR094"
+			(at 148.59 45.64 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Value" "GND"
+			(at 148.59 44.44 0)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Footprint" ""
+			(at 148.59 40.64 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Datasheet" ""
+			(at 148.59 40.64 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Description" ""
+			(at 148.59 40.64 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(pin "1"
+			(uuid "3e27d071-23c1-42ea-9642-82f4c7611847")
+		)
+		(instances
+			(project "canary-pwr"
+				(path "/e63e39d7-6ac0-4ffd-8aa3-1841a4541b55/bea078c0-dcfe-4068-9acb-f216f38abac7"
+					(reference "#PWR094")
+					(unit 1)
+				)
+			)
+		)
+	)
+	(symbol
+		(lib_id "power:GND")
+		(at 45.72 76.2 90)
+		(unit 1)
+		(body_style 1)
+		(exclude_from_sim no)
+		(in_bom yes)
+		(on_board yes)
+		(in_pos_files yes)
+		(dnp no)
+		(uuid "6f94d1af-9a10-4720-87f2-034d3de38152")
+		(property "Reference" "#PWR089"
+			(at 45.72 81.2 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Value" "GND"
+			(at 45.72 80 0)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Footprint" ""
+			(at 45.72 76.2 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Datasheet" ""
+			(at 45.72 76.2 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Description" ""
+			(at 45.72 76.2 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(pin "1"
+			(uuid "b5db971f-3201-4bed-87c5-4117c94d0ec4")
+		)
+		(instances
+			(project "canary-pwr"
+				(path "/e63e39d7-6ac0-4ffd-8aa3-1841a4541b55/bea078c0-dcfe-4068-9acb-f216f38abac7"
+					(reference "#PWR089")
+					(unit 1)
+				)
+			)
+		)
 	)
 	(symbol
 		(lib_id "Connector_Generic:Conn_02x20_Odd_Even")
@@ -2434,9 +4133,9 @@
 		)
 		(property "Footprint" "Connector_PinSocket_2.54mm:PinSocket_2x20_P2.54mm_Vertical"
 			(at 38.1 63.5 0)
+			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
-			(hide yes)
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -2445,9 +4144,9 @@
 		)
 		(property "Datasheet" ""
 			(at 38.1 63.5 0)
+			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
-			(hide yes)
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -2456,9 +4155,9 @@
 		)
 		(property "Description" "Pi 40-pin stacking header, 13.5 mm body, on B.Cu"
 			(at 38.1 63.5 0)
+			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
-			(hide yes)
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -2467,9 +4166,9 @@
 		)
 		(property "Note" "Operator-sourced and fitted, as on HAT rev 2.1 (S13.5.6). Every pin passes through to the HAT; PWR touches only the ones with nets. GPIO27 (pin 13) = MCU BOOT0, GPIO24 (pin 18) = MCU reset, GPIO6 (pin 31) = power fail. GPIO24 is free on rev 2.1 (PWR supports rev 2.1 and later)."
 			(at 38.1 63.5 0)
+			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
-			(hide yes)
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -2598,93 +4297,12 @@
 		)
 		(instances
 			(project "canary-pwr"
-				(path "/bdc204b9-ea66-4e3b-87f2-f8b429651126/bea078c0-dcfe-4068-9acb-f216f38abac7"
+				(path "/e63e39d7-6ac0-4ffd-8aa3-1841a4541b55/bea078c0-dcfe-4068-9acb-f216f38abac7"
 					(reference "J1")
 					(unit 1)
 				)
 			)
 		)
-	)
-	(label "PI_3V3"
-		(at 33.02 40.64 180)
-		(fields_autoplaced yes)
-		(effects
-			(font
-				(size 1.27 1.27)
-			)
-			(justify right bottom)
-		)
-		(uuid "a509e8d1-4e7f-448c-a74d-8d57f9a74d0f")
-	)
-	(global_label "+5V_PI"
-		(shape passive)
-		(at 45.72 40.64 0)
-		(fields_autoplaced yes)
-		(effects
-			(font
-				(size 1.27 1.27)
-			)
-			(justify left)
-		)
-		(uuid "cbeb5eb5-e84b-411d-845e-c59cebc6be11")
-		(property "Intersheetrefs" "${INTERSHEET_REFS}"
-			(at 45.72 40.64 0)
-			(show_name no)
-			(do_not_autoplace no)
-			(hide yes)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify left)
-			)
-		)
-	)
-	(label "PI_SDA"
-		(at 33.02 43.18 180)
-		(fields_autoplaced yes)
-		(effects
-			(font
-				(size 1.27 1.27)
-			)
-			(justify right bottom)
-		)
-		(uuid "fb5cc56c-61f2-401b-9827-8da83d9df3e5")
-	)
-	(global_label "+5V_PI"
-		(shape passive)
-		(at 45.72 43.18 0)
-		(fields_autoplaced yes)
-		(effects
-			(font
-				(size 1.27 1.27)
-			)
-			(justify left)
-		)
-		(uuid "f3a3f67b-433b-42df-9473-18b1a8b8c7b6")
-		(property "Intersheetrefs" "${INTERSHEET_REFS}"
-			(at 45.72 43.18 0)
-			(show_name no)
-			(do_not_autoplace no)
-			(hide yes)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify left)
-			)
-		)
-	)
-	(label "PI_SCL"
-		(at 33.02 45.72 180)
-		(fields_autoplaced yes)
-		(effects
-			(font
-				(size 1.27 1.27)
-			)
-			(justify right bottom)
-		)
-		(uuid "5ea4176b-f1c8-4232-9edd-06b864e820b9")
 	)
 	(symbol
 		(lib_id "power:GND")
@@ -2699,9 +4317,9 @@
 		(uuid "80f4e337-2600-4694-9edc-f8eb2ffa713f")
 		(property "Reference" "#PWR084"
 			(at 45.72 50.72 0)
+			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
-			(hide yes)
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -2720,9 +4338,9 @@
 		)
 		(property "Footprint" ""
 			(at 45.72 45.72 0)
+			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
-			(hide yes)
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -2731,9 +4349,9 @@
 		)
 		(property "Datasheet" ""
 			(at 45.72 45.72 0)
+			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
-			(hide yes)
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -2742,9 +4360,9 @@
 		)
 		(property "Description" ""
 			(at 45.72 45.72 0)
+			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
-			(hide yes)
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -2756,24 +4374,16 @@
 		)
 		(instances
 			(project "canary-pwr"
-				(path "/bdc204b9-ea66-4e3b-87f2-f8b429651126/bea078c0-dcfe-4068-9acb-f216f38abac7"
+				(path "/e63e39d7-6ac0-4ffd-8aa3-1841a4541b55/bea078c0-dcfe-4068-9acb-f216f38abac7"
 					(reference "#PWR084")
 					(unit 1)
 				)
 			)
 		)
 	)
-	(no_connect
-		(at 33.02 48.26)
-		(uuid "df80390f-6e25-461f-8223-1ee8e04d267b")
-	)
-	(no_connect
-		(at 45.72 48.26)
-		(uuid "5d917ac6-6c39-4388-b041-d82277b9115f")
-	)
 	(symbol
-		(lib_id "power:GND")
-		(at 33.02 50.8 270)
+		(lib_id "Device:R")
+		(at 292.1 55.88 90)
 		(unit 1)
 		(body_style 1)
 		(exclude_from_sim no)
@@ -2781,20 +4391,9 @@
 		(on_board yes)
 		(in_pos_files yes)
 		(dnp no)
-		(uuid "063b988c-3e71-4c77-81c1-d309d277683d")
-		(property "Reference" "#PWR085"
-			(at 33.02 55.8 0)
-			(show_name no)
-			(do_not_autoplace no)
-			(hide yes)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Value" "GND"
-			(at 33.02 54.6 0)
+		(uuid "82da5459-d9ce-4fe4-b2a4-357af89df8d5")
+		(property "Reference" "R42"
+			(at 296.5 52.78 0)
 			(show_name no)
 			(do_not_autoplace no)
 			(effects
@@ -2803,11 +4402,21 @@
 				)
 			)
 		)
-		(property "Footprint" ""
-			(at 33.02 50.8 0)
+		(property "Value" "10k"
+			(at 296.5 59.58 0)
 			(show_name no)
 			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Footprint" "Resistor_SMD:R_0603_1608Metric"
+			(at 292.1 55.88 0)
 			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -2815,21 +4424,54 @@
 			)
 		)
 		(property "Datasheet" ""
-			(at 33.02 50.8 0)
+			(at 292.1 55.88 0)
+			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
-			(hide yes)
 			(effects
 				(font
 					(size 1.27 1.27)
 				)
 			)
 		)
-		(property "Description" ""
-			(at 33.02 50.8 0)
+		(property "Description" "Resistor 10k 0603"
+			(at 292.1 55.88 0)
+			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "MPN" "RC0603FR-0710KL"
+			(at 292.1 55.88 0)
 			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Manufacturer" "Yageo"
+			(at 292.1 55.88 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Note" "Halt detection: Pi 5 halt = 3V3 down"
+			(at 292.1 55.88 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -2837,1054 +4479,19 @@
 			)
 		)
 		(pin "1"
-			(uuid "a0fdfb19-6270-4cdc-a4f2-f9e2d76ac1f9")
-		)
-		(instances
-			(project "canary-pwr"
-				(path "/bdc204b9-ea66-4e3b-87f2-f8b429651126/bea078c0-dcfe-4068-9acb-f216f38abac7"
-					(reference "#PWR085")
-					(unit 1)
-				)
-			)
-		)
-	)
-	(no_connect
-		(at 45.72 50.8)
-		(uuid "e6756393-bf3d-4ade-8358-6b48807745e3")
-	)
-	(no_connect
-		(at 33.02 53.34)
-		(uuid "be81f77f-8087-4fa9-9c39-ec9f18dd1b13")
-	)
-	(no_connect
-		(at 45.72 53.34)
-		(uuid "b634d357-5b2a-4c1d-8d31-a95ad8dbe244")
-	)
-	(label "PI_BOOT0"
-		(at 33.02 55.88 180)
-		(fields_autoplaced yes)
-		(effects
-			(font
-				(size 1.27 1.27)
-			)
-			(justify right bottom)
-		)
-		(uuid "b4d6f5c4-fcc7-4cad-920c-3d86f84eb17d")
-	)
-	(symbol
-		(lib_id "power:GND")
-		(at 45.72 55.88 90)
-		(unit 1)
-		(body_style 1)
-		(exclude_from_sim no)
-		(in_bom yes)
-		(on_board yes)
-		(in_pos_files yes)
-		(dnp no)
-		(uuid "a6552900-5860-4264-a8bb-fdcc78e12131")
-		(property "Reference" "#PWR086"
-			(at 45.72 60.88 0)
-			(show_name no)
-			(do_not_autoplace no)
-			(hide yes)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Value" "GND"
-			(at 45.72 59.68 0)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Footprint" ""
-			(at 45.72 55.88 0)
-			(show_name no)
-			(do_not_autoplace no)
-			(hide yes)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Datasheet" ""
-			(at 45.72 55.88 0)
-			(show_name no)
-			(do_not_autoplace no)
-			(hide yes)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Description" ""
-			(at 45.72 55.88 0)
-			(show_name no)
-			(do_not_autoplace no)
-			(hide yes)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(pin "1"
-			(uuid "28092ff3-d074-43c5-a2f5-51396aa1c095")
-		)
-		(instances
-			(project "canary-pwr"
-				(path "/bdc204b9-ea66-4e3b-87f2-f8b429651126/bea078c0-dcfe-4068-9acb-f216f38abac7"
-					(reference "#PWR086")
-					(unit 1)
-				)
-			)
-		)
-	)
-	(no_connect
-		(at 33.02 58.42)
-		(uuid "ec5f04ae-fc1f-466d-ab11-cff91946a06c")
-	)
-	(no_connect
-		(at 45.72 58.42)
-		(uuid "80e2cd2a-0d90-4a66-a159-56478f609213")
-	)
-	(label "PI_3V3"
-		(at 33.02 60.96 180)
-		(fields_autoplaced yes)
-		(effects
-			(font
-				(size 1.27 1.27)
-			)
-			(justify right bottom)
-		)
-		(uuid "6caf085c-c6fd-4aaf-8502-4833e2000987")
-	)
-	(label "PI_NRST"
-		(at 45.72 60.96 0)
-		(fields_autoplaced yes)
-		(effects
-			(font
-				(size 1.27 1.27)
-			)
-			(justify left bottom)
-		)
-		(uuid "33918a5c-e995-4d9b-a8a2-a3f8f27cb8f5")
-	)
-	(no_connect
-		(at 33.02 63.5)
-		(uuid "4ca8e455-5905-4523-9ab1-2172ad375955")
-	)
-	(symbol
-		(lib_id "power:GND")
-		(at 45.72 63.5 90)
-		(unit 1)
-		(body_style 1)
-		(exclude_from_sim no)
-		(in_bom yes)
-		(on_board yes)
-		(in_pos_files yes)
-		(dnp no)
-		(uuid "3be78215-94d0-4fbf-8990-37c8039eb418")
-		(property "Reference" "#PWR087"
-			(at 45.72 68.5 0)
-			(show_name no)
-			(do_not_autoplace no)
-			(hide yes)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Value" "GND"
-			(at 45.72 67.3 0)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Footprint" ""
-			(at 45.72 63.5 0)
-			(show_name no)
-			(do_not_autoplace no)
-			(hide yes)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Datasheet" ""
-			(at 45.72 63.5 0)
-			(show_name no)
-			(do_not_autoplace no)
-			(hide yes)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Description" ""
-			(at 45.72 63.5 0)
-			(show_name no)
-			(do_not_autoplace no)
-			(hide yes)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(pin "1"
-			(uuid "88fd850c-bf92-4d72-947f-7069a0f7d5e2")
-		)
-		(instances
-			(project "canary-pwr"
-				(path "/bdc204b9-ea66-4e3b-87f2-f8b429651126/bea078c0-dcfe-4068-9acb-f216f38abac7"
-					(reference "#PWR087")
-					(unit 1)
-				)
-			)
-		)
-	)
-	(no_connect
-		(at 33.02 66.04)
-		(uuid "5f90e48a-77db-4a5f-aea4-8d0863e6d680")
-	)
-	(no_connect
-		(at 45.72 66.04)
-		(uuid "3598039c-20e6-4b2b-aca3-ff37052535c9")
-	)
-	(no_connect
-		(at 33.02 68.58)
-		(uuid "42fcd9ce-027a-4a9c-82c0-d1fa079af57b")
-	)
-	(no_connect
-		(at 45.72 68.58)
-		(uuid "c6712e34-b935-4bdd-a344-e7a5c778a034")
-	)
-	(symbol
-		(lib_id "power:GND")
-		(at 33.02 71.12 270)
-		(unit 1)
-		(body_style 1)
-		(exclude_from_sim no)
-		(in_bom yes)
-		(on_board yes)
-		(in_pos_files yes)
-		(dnp no)
-		(uuid "e6259b34-ccc7-4822-bc4c-0157577ea9b1")
-		(property "Reference" "#PWR088"
-			(at 33.02 76.12 0)
-			(show_name no)
-			(do_not_autoplace no)
-			(hide yes)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Value" "GND"
-			(at 33.02 74.92 0)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Footprint" ""
-			(at 33.02 71.12 0)
-			(show_name no)
-			(do_not_autoplace no)
-			(hide yes)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Datasheet" ""
-			(at 33.02 71.12 0)
-			(show_name no)
-			(do_not_autoplace no)
-			(hide yes)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Description" ""
-			(at 33.02 71.12 0)
-			(show_name no)
-			(do_not_autoplace no)
-			(hide yes)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(pin "1"
-			(uuid "4c175170-6b24-44c3-b4cf-706ccbd93c4c")
-		)
-		(instances
-			(project "canary-pwr"
-				(path "/bdc204b9-ea66-4e3b-87f2-f8b429651126/bea078c0-dcfe-4068-9acb-f216f38abac7"
-					(reference "#PWR088")
-					(unit 1)
-				)
-			)
-		)
-	)
-	(no_connect
-		(at 45.72 71.12)
-		(uuid "4195f64d-7478-41fe-886f-a73c436b31e2")
-	)
-	(no_connect
-		(at 33.02 73.66)
-		(uuid "9700283a-c765-4147-8a56-02ee36b86ce0")
-	)
-	(no_connect
-		(at 45.72 73.66)
-		(uuid "1c6b1278-7122-4795-bb57-2440df33a6de")
-	)
-	(no_connect
-		(at 33.02 76.2)
-		(uuid "bf77b233-2055-41ce-9833-d9482ad803e1")
-	)
-	(symbol
-		(lib_id "power:GND")
-		(at 45.72 76.2 90)
-		(unit 1)
-		(body_style 1)
-		(exclude_from_sim no)
-		(in_bom yes)
-		(on_board yes)
-		(in_pos_files yes)
-		(dnp no)
-		(uuid "6f94d1af-9a10-4720-87f2-034d3de38152")
-		(property "Reference" "#PWR089"
-			(at 45.72 81.2 0)
-			(show_name no)
-			(do_not_autoplace no)
-			(hide yes)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Value" "GND"
-			(at 45.72 80 0)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Footprint" ""
-			(at 45.72 76.2 0)
-			(show_name no)
-			(do_not_autoplace no)
-			(hide yes)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Datasheet" ""
-			(at 45.72 76.2 0)
-			(show_name no)
-			(do_not_autoplace no)
-			(hide yes)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Description" ""
-			(at 45.72 76.2 0)
-			(show_name no)
-			(do_not_autoplace no)
-			(hide yes)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(pin "1"
-			(uuid "b5db971f-3201-4bed-87c5-4117c94d0ec4")
-		)
-		(instances
-			(project "canary-pwr"
-				(path "/bdc204b9-ea66-4e3b-87f2-f8b429651126/bea078c0-dcfe-4068-9acb-f216f38abac7"
-					(reference "#PWR089")
-					(unit 1)
-				)
-			)
-		)
-	)
-	(global_label "~{PWR_FAIL}"
-		(shape passive)
-		(at 33.02 78.74 180)
-		(fields_autoplaced yes)
-		(effects
-			(font
-				(size 1.27 1.27)
-			)
-			(justify right)
-		)
-		(uuid "5354f6ed-9184-46e0-ab4f-861abc8f6c07")
-		(property "Intersheetrefs" "${INTERSHEET_REFS}"
-			(at 33.02 78.74 0)
-			(show_name no)
-			(do_not_autoplace no)
-			(hide yes)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify right)
-			)
-		)
-	)
-	(no_connect
-		(at 45.72 78.74)
-		(uuid "0d93dfe8-bccf-4649-8cdc-9559598cb086")
-	)
-	(no_connect
-		(at 33.02 81.28)
-		(uuid "2b9a7ff4-bb8a-467e-b140-70c14d746218")
-	)
-	(symbol
-		(lib_id "power:GND")
-		(at 45.72 81.28 90)
-		(unit 1)
-		(body_style 1)
-		(exclude_from_sim no)
-		(in_bom yes)
-		(on_board yes)
-		(in_pos_files yes)
-		(dnp no)
-		(uuid "39006b98-8c66-41f1-8976-ecf4b6727d1f")
-		(property "Reference" "#PWR090"
-			(at 45.72 86.28 0)
-			(show_name no)
-			(do_not_autoplace no)
-			(hide yes)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Value" "GND"
-			(at 45.72 85.08 0)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Footprint" ""
-			(at 45.72 81.28 0)
-			(show_name no)
-			(do_not_autoplace no)
-			(hide yes)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Datasheet" ""
-			(at 45.72 81.28 0)
-			(show_name no)
-			(do_not_autoplace no)
-			(hide yes)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Description" ""
-			(at 45.72 81.28 0)
-			(show_name no)
-			(do_not_autoplace no)
-			(hide yes)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(pin "1"
-			(uuid "a78ffd70-fae0-42aa-95a0-d2a8351f5b34")
-		)
-		(instances
-			(project "canary-pwr"
-				(path "/bdc204b9-ea66-4e3b-87f2-f8b429651126/bea078c0-dcfe-4068-9acb-f216f38abac7"
-					(reference "#PWR090")
-					(unit 1)
-				)
-			)
-		)
-	)
-	(no_connect
-		(at 33.02 83.82)
-		(uuid "665332d8-9d6c-4519-b429-8de2805849cd")
-	)
-	(no_connect
-		(at 45.72 83.82)
-		(uuid "1e8c7008-54a1-4835-a0b5-ff7ecf2ec039")
-	)
-	(no_connect
-		(at 33.02 86.36)
-		(uuid "b91e6071-8739-48ec-a148-0948f7966fa9")
-	)
-	(no_connect
-		(at 45.72 86.36)
-		(uuid "309172b1-4773-4379-9681-ad2602efc688")
-	)
-	(symbol
-		(lib_id "power:GND")
-		(at 33.02 88.9 270)
-		(unit 1)
-		(body_style 1)
-		(exclude_from_sim no)
-		(in_bom yes)
-		(on_board yes)
-		(in_pos_files yes)
-		(dnp no)
-		(uuid "4d3dc0a4-dfff-40ef-ae08-2afd28d15b9c")
-		(property "Reference" "#PWR091"
-			(at 33.02 93.9 0)
-			(show_name no)
-			(do_not_autoplace no)
-			(hide yes)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Value" "GND"
-			(at 33.02 92.7 0)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Footprint" ""
-			(at 33.02 88.9 0)
-			(show_name no)
-			(do_not_autoplace no)
-			(hide yes)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Datasheet" ""
-			(at 33.02 88.9 0)
-			(show_name no)
-			(do_not_autoplace no)
-			(hide yes)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Description" ""
-			(at 33.02 88.9 0)
-			(show_name no)
-			(do_not_autoplace no)
-			(hide yes)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(pin "1"
-			(uuid "1ea5c414-5b6a-4807-bb8d-0ddf50059e53")
-		)
-		(instances
-			(project "canary-pwr"
-				(path "/bdc204b9-ea66-4e3b-87f2-f8b429651126/bea078c0-dcfe-4068-9acb-f216f38abac7"
-					(reference "#PWR091")
-					(unit 1)
-				)
-			)
-		)
-	)
-	(no_connect
-		(at 45.72 88.9)
-		(uuid "b4b671ad-6d70-4606-b61a-727e2d09a898")
-	)
-	(symbol
-		(lib_id "Device:C")
-		(at 73.66 40.64 90)
-		(unit 1)
-		(body_style 1)
-		(exclude_from_sim no)
-		(in_bom yes)
-		(on_board yes)
-		(in_pos_files yes)
-		(dnp no)
-		(uuid "1c467593-a50e-434c-ab9e-0cc043e14321")
-		(property "Reference" "C44"
-			(at 70.76 37.008 0)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Value" "100n"
-			(at 70.76 44.872 0)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Footprint" "Capacitor_SMD:C_0603_1608Metric"
-			(at 73.66 40.64 0)
-			(show_name no)
-			(do_not_autoplace no)
-			(hide yes)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Datasheet" ""
-			(at 73.66 40.64 0)
-			(show_name no)
-			(do_not_autoplace no)
-			(hide yes)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Description" "Capacitor 100n 50V X7R/X5R 0603"
-			(at 73.66 40.64 0)
-			(show_name no)
-			(do_not_autoplace no)
-			(hide yes)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "MPN" "CL10B104KB8NNNC"
-			(at 73.66 40.64 0)
-			(show_name no)
-			(do_not_autoplace no)
-			(hide yes)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(pin "1"
-			(uuid "de1353c6-eae7-4e18-85dc-96dcb45b1fe4")
+			(uuid "7356ed4e-058c-4a2a-a209-f487b3e7d960")
 		)
 		(pin "2"
-			(uuid "a9920501-e1df-49a3-9502-d142aba99cb7")
+			(uuid "0fa2b0a2-3557-425b-9c80-4e96241241f9")
 		)
 		(instances
 			(project "canary-pwr"
-				(path "/bdc204b9-ea66-4e3b-87f2-f8b429651126/bea078c0-dcfe-4068-9acb-f216f38abac7"
-					(reference "C44")
+				(path "/e63e39d7-6ac0-4ffd-8aa3-1841a4541b55/bea078c0-dcfe-4068-9acb-f216f38abac7"
+					(reference "R42")
 					(unit 1)
 				)
 			)
 		)
-	)
-	(global_label "+5V_PI"
-		(shape passive)
-		(at 69.85 40.64 180)
-		(fields_autoplaced yes)
-		(effects
-			(font
-				(size 1.27 1.27)
-			)
-			(justify right)
-		)
-		(uuid "270fe4ce-3ab0-4a33-ac72-22f8b86e5913")
-		(property "Intersheetrefs" "${INTERSHEET_REFS}"
-			(at 69.85 40.64 0)
-			(show_name no)
-			(do_not_autoplace no)
-			(hide yes)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify right)
-			)
-		)
-	)
-	(symbol
-		(lib_id "power:GND")
-		(at 77.47 40.64 90)
-		(unit 1)
-		(body_style 1)
-		(exclude_from_sim no)
-		(in_bom yes)
-		(on_board yes)
-		(in_pos_files yes)
-		(dnp no)
-		(uuid "9ba4ad02-13fa-491e-9ce6-6ae7025fd518")
-		(property "Reference" "#PWR092"
-			(at 77.47 45.64 0)
-			(show_name no)
-			(do_not_autoplace no)
-			(hide yes)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Value" "GND"
-			(at 77.47 44.44 0)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Footprint" ""
-			(at 77.47 40.64 0)
-			(show_name no)
-			(do_not_autoplace no)
-			(hide yes)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Datasheet" ""
-			(at 77.47 40.64 0)
-			(show_name no)
-			(do_not_autoplace no)
-			(hide yes)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Description" ""
-			(at 77.47 40.64 0)
-			(show_name no)
-			(do_not_autoplace no)
-			(hide yes)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(pin "1"
-			(uuid "1454b2b3-e888-4193-9f61-dbcb3837f4ab")
-		)
-		(instances
-			(project "canary-pwr"
-				(path "/bdc204b9-ea66-4e3b-87f2-f8b429651126/bea078c0-dcfe-4068-9acb-f216f38abac7"
-					(reference "#PWR092")
-					(unit 1)
-				)
-			)
-		)
-	)
-	(text "I2C hot-swap buffer (Pi side powered)"
-		(exclude_from_sim no)
-		(at 93.92 33.02 0)
-		(effects
-			(font
-				(size 1.778 1.778)
-			)
-			(justify left bottom)
-		)
-		(uuid "30d44596-3569-4482-a01a-0fa78fe4acda")
-	)
-	(symbol
-		(lib_id "canary-pwr:TCA4307")
-		(at 109.22 55.88 0)
-		(unit 1)
-		(body_style 1)
-		(exclude_from_sim no)
-		(in_bom yes)
-		(on_board yes)
-		(in_pos_files yes)
-		(dnp no)
-		(uuid "03e90041-7b43-464a-8f91-081879197f53")
-		(property "Reference" "U8"
-			(at 110.995 37.86 0)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Value" "TCA4307DGKR"
-			(at 110.995 73.74 0)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Footprint" "canary-pwr:SOIC8_DGK_TEX"
-			(at 109.22 55.88 0)
-			(show_name no)
-			(do_not_autoplace no)
-			(hide yes)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Datasheet" "https://www.ti.com/lit/ds/symlink/tca4307.pdf"
-			(at 109.22 55.88 0)
-			(show_name no)
-			(do_not_autoplace no)
-			(hide yes)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Description" "I2C buffer, powered from the Pi's 3.3 V"
-			(at 109.22 55.88 0)
-			(show_name no)
-			(do_not_autoplace no)
-			(hide yes)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "MPN" "TCA4307DGKR"
-			(at 109.22 55.88 0)
-			(show_name no)
-			(do_not_autoplace no)
-			(hide yes)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Manufacturer" "Texas Instruments"
-			(at 109.22 55.88 0)
-			(show_name no)
-			(do_not_autoplace no)
-			(hide yes)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Note" "Powered-off high-impedance I/O (datasheet p.1): the always-on board can never load or back-feed the Pi's I2C1 while the Pi is dark (spec P6). Pi side uses the Pi's own 1.8k pull-ups."
-			(at 109.22 55.88 0)
-			(show_name no)
-			(do_not_autoplace no)
-			(hide yes)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(pin "1"
-			(uuid "e22bc6f5-d96f-4ac6-8c59-743b1771d765")
-		)
-		(pin "2"
-			(uuid "2edaef1d-6117-4498-ac75-e16dfd97f53b")
-		)
-		(pin "3"
-			(uuid "3ff02c09-c827-46fc-bab4-f77bb4f75b58")
-		)
-		(pin "4"
-			(uuid "3ad3a29e-becf-4348-87a5-5fb3d53953b6")
-		)
-		(pin "5"
-			(uuid "44ab658f-293c-4344-a78b-9aba86292c30")
-		)
-		(pin "6"
-			(uuid "f94ec73e-8a72-49bf-bec0-f6ed2d2f20e7")
-		)
-		(pin "7"
-			(uuid "c42dba94-6956-48e6-89eb-125caa77e534")
-		)
-		(pin "8"
-			(uuid "f3efbadf-2cc0-47bf-9fe9-d182b6110f30")
-		)
-		(instances
-			(project "canary-pwr"
-				(path "/bdc204b9-ea66-4e3b-87f2-f8b429651126/bea078c0-dcfe-4068-9acb-f216f38abac7"
-					(reference "U8")
-					(unit 1)
-				)
-			)
-		)
-	)
-	(label "PI_SDA"
-		(at 100.33 53.34 180)
-		(fields_autoplaced yes)
-		(effects
-			(font
-				(size 1.27 1.27)
-			)
-			(justify right bottom)
-		)
-		(uuid "759c45db-2f8f-4209-b8c3-38050c8f01a0")
-	)
-	(label "PI_SCL"
-		(at 100.33 55.88 180)
-		(fields_autoplaced yes)
-		(effects
-			(font
-				(size 1.27 1.27)
-			)
-			(justify right bottom)
-		)
-		(uuid "d69dc186-1665-4e4d-8bed-e4a398f849d4")
-	)
-	(label "PI_3V3"
-		(at 100.33 60.96 180)
-		(fields_autoplaced yes)
-		(effects
-			(font
-				(size 1.27 1.27)
-			)
-			(justify right bottom)
-		)
-		(uuid "3d2cc99a-10c2-49d0-9461-adf7fde9dc15")
-	)
-	(global_label "MCU_SDA"
-		(shape passive)
-		(at 118.11 53.34 0)
-		(fields_autoplaced yes)
-		(effects
-			(font
-				(size 1.27 1.27)
-			)
-			(justify left)
-		)
-		(uuid "7eb8a968-cbbc-4cd4-8f8e-728a5f1348f4")
-		(property "Intersheetrefs" "${INTERSHEET_REFS}"
-			(at 118.11 53.34 0)
-			(show_name no)
-			(do_not_autoplace no)
-			(hide yes)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify left)
-			)
-		)
-	)
-	(global_label "MCU_SCL"
-		(shape passive)
-		(at 118.11 55.88 0)
-		(fields_autoplaced yes)
-		(effects
-			(font
-				(size 1.27 1.27)
-			)
-			(justify left)
-		)
-		(uuid "7d596693-6942-40da-866d-1d5cad33d568")
-		(property "Intersheetrefs" "${INTERSHEET_REFS}"
-			(at 118.11 55.88 0)
-			(show_name no)
-			(do_not_autoplace no)
-			(hide yes)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify left)
-			)
-		)
-	)
-	(label "I2C_READY"
-		(at 118.11 60.96 0)
-		(fields_autoplaced yes)
-		(effects
-			(font
-				(size 1.27 1.27)
-			)
-			(justify left bottom)
-		)
-		(uuid "611a5921-3e6c-4a8e-85a5-75e7246a7395")
-	)
-	(label "PI_3V3"
-		(at 109.22 48.26 90)
-		(fields_autoplaced yes)
-		(effects
-			(font
-				(size 1.27 1.27)
-			)
-			(justify left bottom)
-		)
-		(uuid "55d22b3b-8c99-4dd2-b346-8d40696cc7b3")
 	)
 	(symbol
 		(lib_id "power:GND")
@@ -3899,9 +4506,9 @@
 		(uuid "9ba33d75-e524-41c3-a113-3f7c2275f587")
 		(property "Reference" "#PWR093"
 			(at 109.22 71.04 0)
+			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
-			(hide yes)
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -3920,9 +4527,9 @@
 		)
 		(property "Footprint" ""
 			(at 109.22 66.04 0)
+			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
-			(hide yes)
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -3931,9 +4538,9 @@
 		)
 		(property "Datasheet" ""
 			(at 109.22 66.04 0)
+			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
-			(hide yes)
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -3942,9 +4549,9 @@
 		)
 		(property "Description" ""
 			(at 109.22 66.04 0)
+			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
-			(hide yes)
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -3956,7 +4563,7 @@
 		)
 		(instances
 			(project "canary-pwr"
-				(path "/bdc204b9-ea66-4e3b-87f2-f8b429651126/bea078c0-dcfe-4068-9acb-f216f38abac7"
+				(path "/e63e39d7-6ac0-4ffd-8aa3-1841a4541b55/bea078c0-dcfe-4068-9acb-f216f38abac7"
 					(reference "#PWR093")
 					(unit 1)
 				)
@@ -3964,109 +4571,8 @@
 		)
 	)
 	(symbol
-		(lib_id "Device:C")
-		(at 144.78 40.64 90)
-		(unit 1)
-		(body_style 1)
-		(exclude_from_sim no)
-		(in_bom yes)
-		(on_board yes)
-		(in_pos_files yes)
-		(dnp no)
-		(uuid "ef77867b-77d1-4ac3-bf36-e77dc58101a2")
-		(property "Reference" "C45"
-			(at 143.13 37.008 0)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Value" "100n"
-			(at 143.13 44.872 0)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Footprint" "Capacitor_SMD:C_0603_1608Metric"
-			(at 144.78 40.64 0)
-			(show_name no)
-			(do_not_autoplace no)
-			(hide yes)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Datasheet" ""
-			(at 144.78 40.64 0)
-			(show_name no)
-			(do_not_autoplace no)
-			(hide yes)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Description" "Capacitor 100n 50V X7R/X5R 0603"
-			(at 144.78 40.64 0)
-			(show_name no)
-			(do_not_autoplace no)
-			(hide yes)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "MPN" "CL10B104KB8NNNC"
-			(at 144.78 40.64 0)
-			(show_name no)
-			(do_not_autoplace no)
-			(hide yes)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(pin "1"
-			(uuid "99084c90-422a-4b53-9b30-a0b570e00fc5")
-		)
-		(pin "2"
-			(uuid "2ed526b9-ca93-4f8d-b3c5-70ecf88e90f5")
-		)
-		(instances
-			(project "canary-pwr"
-				(path "/bdc204b9-ea66-4e3b-87f2-f8b429651126/bea078c0-dcfe-4068-9acb-f216f38abac7"
-					(reference "C45")
-					(unit 1)
-				)
-			)
-		)
-	)
-	(label "PI_3V3"
-		(at 140.97 40.64 180)
-		(fields_autoplaced yes)
-		(effects
-			(font
-				(size 1.27 1.27)
-			)
-			(justify right bottom)
-		)
-		(uuid "b2af34fd-73d8-4fa4-9a74-85b5625b528b")
-	)
-	(symbol
 		(lib_id "power:GND")
-		(at 148.59 40.64 90)
+		(at 77.47 40.64 90)
 		(unit 1)
 		(body_style 1)
 		(exclude_from_sim no)
@@ -4074,12 +4580,12 @@
 		(on_board yes)
 		(in_pos_files yes)
 		(dnp no)
-		(uuid "6647eb8f-4143-40f2-bec1-28cdd2672c32")
-		(property "Reference" "#PWR094"
-			(at 148.59 45.64 0)
+		(uuid "9ba4ad02-13fa-491e-9ce6-6ae7025fd518")
+		(property "Reference" "#PWR092"
+			(at 77.47 45.64 0)
+			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
-			(hide yes)
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -4087,7 +4593,7 @@
 			)
 		)
 		(property "Value" "GND"
-			(at 148.59 44.44 0)
+			(at 77.47 44.44 0)
 			(show_name no)
 			(do_not_autoplace no)
 			(effects
@@ -4097,10 +4603,10 @@
 			)
 		)
 		(property "Footprint" ""
-			(at 148.59 40.64 0)
+			(at 77.47 40.64 0)
+			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
-			(hide yes)
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -4108,10 +4614,10 @@
 			)
 		)
 		(property "Datasheet" ""
-			(at 148.59 40.64 0)
+			(at 77.47 40.64 0)
+			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
-			(hide yes)
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -4119,10 +4625,10 @@
 			)
 		)
 		(property "Description" ""
-			(at 148.59 40.64 0)
+			(at 77.47 40.64 0)
+			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
-			(hide yes)
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -4130,12 +4636,12 @@
 			)
 		)
 		(pin "1"
-			(uuid "3e27d071-23c1-42ea-9642-82f4c7611847")
+			(uuid "1454b2b3-e888-4193-9f61-dbcb3837f4ab")
 		)
 		(instances
 			(project "canary-pwr"
-				(path "/bdc204b9-ea66-4e3b-87f2-f8b429651126/bea078c0-dcfe-4068-9acb-f216f38abac7"
-					(reference "#PWR094")
+				(path "/e63e39d7-6ac0-4ffd-8aa3-1841a4541b55/bea078c0-dcfe-4068-9acb-f216f38abac7"
+					(reference "#PWR092")
 					(unit 1)
 				)
 			)
@@ -4174,9 +4680,9 @@
 		)
 		(property "Footprint" "Resistor_SMD:R_0603_1608Metric"
 			(at 172.72 40.64 0)
+			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
-			(hide yes)
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -4185,9 +4691,9 @@
 		)
 		(property "Datasheet" ""
 			(at 172.72 40.64 0)
+			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
-			(hide yes)
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -4196,9 +4702,9 @@
 		)
 		(property "Description" "Resistor 10k 0603"
 			(at 172.72 40.64 0)
+			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
-			(hide yes)
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -4207,9 +4713,9 @@
 		)
 		(property "MPN" "RC0603FR-0710KL"
 			(at 172.72 40.64 0)
+			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
-			(hide yes)
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -4218,9 +4724,9 @@
 		)
 		(property "Manufacturer" "Yageo"
 			(at 172.72 40.64 0)
+			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
-			(hide yes)
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -4229,9 +4735,9 @@
 		)
 		(property "Note" "Card-side pull-ups to the Pi's 3.3 V, so nothing pulls up while the Pi is off"
 			(at 172.72 40.64 0)
+			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
-			(hide yes)
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -4246,598 +4752,10 @@
 		)
 		(instances
 			(project "canary-pwr"
-				(path "/bdc204b9-ea66-4e3b-87f2-f8b429651126/bea078c0-dcfe-4068-9acb-f216f38abac7"
+				(path "/e63e39d7-6ac0-4ffd-8aa3-1841a4541b55/bea078c0-dcfe-4068-9acb-f216f38abac7"
 					(reference "R34")
 					(unit 1)
 				)
-			)
-		)
-	)
-	(global_label "MCU_SDA"
-		(shape passive)
-		(at 168.91 40.64 180)
-		(fields_autoplaced yes)
-		(effects
-			(font
-				(size 1.27 1.27)
-			)
-			(justify right)
-		)
-		(uuid "8258c8f2-d651-47ff-8c57-b8f296eb4ee3")
-		(property "Intersheetrefs" "${INTERSHEET_REFS}"
-			(at 168.91 40.64 0)
-			(show_name no)
-			(do_not_autoplace no)
-			(hide yes)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify right)
-			)
-		)
-	)
-	(label "PI_3V3"
-		(at 176.53 40.64 0)
-		(fields_autoplaced yes)
-		(effects
-			(font
-				(size 1.27 1.27)
-			)
-			(justify left bottom)
-		)
-		(uuid "e071fccc-c670-4c00-a5e6-8745edc98ea3")
-	)
-	(symbol
-		(lib_id "Device:R")
-		(at 203.2 40.64 90)
-		(unit 1)
-		(body_style 1)
-		(exclude_from_sim no)
-		(in_bom yes)
-		(on_board yes)
-		(in_pos_files yes)
-		(dnp no)
-		(uuid "b3cd0ef1-d293-410b-ae1b-50b762d7a95a")
-		(property "Reference" "R35"
-			(at 201.425 37.54 0)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Value" "10k"
-			(at 201.425 44.34 0)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Footprint" "Resistor_SMD:R_0603_1608Metric"
-			(at 203.2 40.64 0)
-			(show_name no)
-			(do_not_autoplace no)
-			(hide yes)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Datasheet" ""
-			(at 203.2 40.64 0)
-			(show_name no)
-			(do_not_autoplace no)
-			(hide yes)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Description" "Resistor 10k 0603"
-			(at 203.2 40.64 0)
-			(show_name no)
-			(do_not_autoplace no)
-			(hide yes)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "MPN" "RC0603FR-0710KL"
-			(at 203.2 40.64 0)
-			(show_name no)
-			(do_not_autoplace no)
-			(hide yes)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Manufacturer" "Yageo"
-			(at 203.2 40.64 0)
-			(show_name no)
-			(do_not_autoplace no)
-			(hide yes)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(pin "1"
-			(uuid "16f1f90a-13dd-4837-a69e-a6783d2a6bcf")
-		)
-		(pin "2"
-			(uuid "bccab0c6-2e3a-4785-a35c-401b14da18e0")
-		)
-		(instances
-			(project "canary-pwr"
-				(path "/bdc204b9-ea66-4e3b-87f2-f8b429651126/bea078c0-dcfe-4068-9acb-f216f38abac7"
-					(reference "R35")
-					(unit 1)
-				)
-			)
-		)
-	)
-	(global_label "MCU_SCL"
-		(shape passive)
-		(at 199.39 40.64 180)
-		(fields_autoplaced yes)
-		(effects
-			(font
-				(size 1.27 1.27)
-			)
-			(justify right)
-		)
-		(uuid "dc6a7e2b-48c9-43c3-b492-5ff1dc54a00d")
-		(property "Intersheetrefs" "${INTERSHEET_REFS}"
-			(at 199.39 40.64 0)
-			(show_name no)
-			(do_not_autoplace no)
-			(hide yes)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify right)
-			)
-		)
-	)
-	(label "PI_3V3"
-		(at 207.01 40.64 0)
-		(fields_autoplaced yes)
-		(effects
-			(font
-				(size 1.27 1.27)
-			)
-			(justify left bottom)
-		)
-		(uuid "5b28cc73-84ee-4be6-84cd-7c8e09c9fb1c")
-	)
-	(symbol
-		(lib_id "Device:R")
-		(at 109.22 83.82 90)
-		(unit 1)
-		(body_style 1)
-		(exclude_from_sim no)
-		(in_bom yes)
-		(on_board yes)
-		(in_pos_files yes)
-		(dnp no)
-		(uuid "f0d14189-531e-409b-8def-6906c15c8c27")
-		(property "Reference" "R36"
-			(at 107.645 80.72 0)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Value" "10k"
-			(at 107.645 87.52 0)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Footprint" "Resistor_SMD:R_0603_1608Metric"
-			(at 109.22 83.82 0)
-			(show_name no)
-			(do_not_autoplace no)
-			(hide yes)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Datasheet" ""
-			(at 109.22 83.82 0)
-			(show_name no)
-			(do_not_autoplace no)
-			(hide yes)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Description" "Resistor 10k 0603"
-			(at 109.22 83.82 0)
-			(show_name no)
-			(do_not_autoplace no)
-			(hide yes)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "MPN" "RC0603FR-0710KL"
-			(at 109.22 83.82 0)
-			(show_name no)
-			(do_not_autoplace no)
-			(hide yes)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Manufacturer" "Yageo"
-			(at 109.22 83.82 0)
-			(show_name no)
-			(do_not_autoplace no)
-			(hide yes)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(pin "1"
-			(uuid "05ca5339-69c4-4a34-83eb-1846283bbc47")
-		)
-		(pin "2"
-			(uuid "cfbed5fb-fe7e-44ea-be93-d78d64893800")
-		)
-		(instances
-			(project "canary-pwr"
-				(path "/bdc204b9-ea66-4e3b-87f2-f8b429651126/bea078c0-dcfe-4068-9acb-f216f38abac7"
-					(reference "R36")
-					(unit 1)
-				)
-			)
-		)
-	)
-	(label "I2C_READY"
-		(at 105.41 83.82 180)
-		(fields_autoplaced yes)
-		(effects
-			(font
-				(size 1.27 1.27)
-			)
-			(justify right bottom)
-		)
-		(uuid "e545f245-b968-4d93-9720-e5466cd77a26")
-	)
-	(label "PI_3V3"
-		(at 113.03 83.82 0)
-		(fields_autoplaced yes)
-		(effects
-			(font
-				(size 1.27 1.27)
-			)
-			(justify left bottom)
-		)
-		(uuid "9a7dde38-0adb-4063-a51a-8cc220159ba6")
-	)
-	(text "Crossing nets (safe-state pulls)"
-		(exclude_from_sim no)
-		(at 228.25 33.02 0)
-		(effects
-			(font
-				(size 1.778 1.778)
-			)
-			(justify left bottom)
-		)
-		(uuid "2d88ddc3-2ff5-40e9-b3eb-d74a3590d049")
-	)
-	(symbol
-		(lib_id "Device:R")
-		(at 243.84 40.64 90)
-		(unit 1)
-		(body_style 1)
-		(exclude_from_sim no)
-		(in_bom yes)
-		(on_board yes)
-		(in_pos_files yes)
-		(dnp no)
-		(uuid "da8025c8-b12b-4a24-a7c0-8722079cc9e4")
-		(property "Reference" "R37"
-			(at 241.54 37.54 0)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Value" "10k"
-			(at 241.54 44.34 0)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Footprint" "Resistor_SMD:R_0603_1608Metric"
-			(at 243.84 40.64 0)
-			(show_name no)
-			(do_not_autoplace no)
-			(hide yes)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Datasheet" ""
-			(at 243.84 40.64 0)
-			(show_name no)
-			(do_not_autoplace no)
-			(hide yes)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Description" "Resistor 10k 0603"
-			(at 243.84 40.64 0)
-			(show_name no)
-			(do_not_autoplace no)
-			(hide yes)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "MPN" "RC0603FR-0710KL"
-			(at 243.84 40.64 0)
-			(show_name no)
-			(do_not_autoplace no)
-			(hide yes)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Manufacturer" "Yageo"
-			(at 243.84 40.64 0)
-			(show_name no)
-			(do_not_autoplace no)
-			(hide yes)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Note" "Pull-up to the Pi's rail: no back-feed while the Pi is off; a dead MCU reads as power OK"
-			(at 243.84 40.64 0)
-			(show_name no)
-			(do_not_autoplace no)
-			(hide yes)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(pin "1"
-			(uuid "8638aada-b187-44d8-95bc-0efb7ea86385")
-		)
-		(pin "2"
-			(uuid "679e147d-1870-4c18-9cac-fe6f5ba41063")
-		)
-		(instances
-			(project "canary-pwr"
-				(path "/bdc204b9-ea66-4e3b-87f2-f8b429651126/bea078c0-dcfe-4068-9acb-f216f38abac7"
-					(reference "R37")
-					(unit 1)
-				)
-			)
-		)
-	)
-	(global_label "~{PWR_FAIL}"
-		(shape passive)
-		(at 240.03 40.64 180)
-		(fields_autoplaced yes)
-		(effects
-			(font
-				(size 1.27 1.27)
-			)
-			(justify right)
-		)
-		(uuid "d40774b1-6487-4170-91d9-98a7792c143d")
-		(property "Intersheetrefs" "${INTERSHEET_REFS}"
-			(at 240.03 40.64 0)
-			(show_name no)
-			(do_not_autoplace no)
-			(hide yes)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify right)
-			)
-		)
-	)
-	(label "PI_3V3"
-		(at 247.65 40.64 0)
-		(fields_autoplaced yes)
-		(effects
-			(font
-				(size 1.27 1.27)
-			)
-			(justify left bottom)
-		)
-		(uuid "040c45f3-bee1-4b1d-9d8b-98a73fa7cc5a")
-	)
-	(symbol
-		(lib_id "Device:R")
-		(at 274.32 40.64 90)
-		(unit 1)
-		(body_style 1)
-		(exclude_from_sim no)
-		(in_bom yes)
-		(on_board yes)
-		(in_pos_files yes)
-		(dnp no)
-		(uuid "e97535cf-6163-44cb-a568-69a93b638947")
-		(property "Reference" "R38"
-			(at 277.145 37.54 0)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Value" "1k"
-			(at 277.145 44.34 0)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Footprint" "Resistor_SMD:R_0603_1608Metric"
-			(at 274.32 40.64 0)
-			(show_name no)
-			(do_not_autoplace no)
-			(hide yes)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Datasheet" ""
-			(at 274.32 40.64 0)
-			(show_name no)
-			(do_not_autoplace no)
-			(hide yes)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Description" "Resistor 1k 0603"
-			(at 274.32 40.64 0)
-			(show_name no)
-			(do_not_autoplace no)
-			(hide yes)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "MPN" "RC0603FR-071KL"
-			(at 274.32 40.64 0)
-			(show_name no)
-			(do_not_autoplace no)
-			(hide yes)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Manufacturer" "Yageo"
-			(at 274.32 40.64 0)
-			(show_name no)
-			(do_not_autoplace no)
-			(hide yes)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(pin "1"
-			(uuid "3a4ba415-53b3-4d89-ac1b-716cfe45958a")
-		)
-		(pin "2"
-			(uuid "bc585124-e803-44d0-ad93-dffbb6881a15")
-		)
-		(instances
-			(project "canary-pwr"
-				(path "/bdc204b9-ea66-4e3b-87f2-f8b429651126/bea078c0-dcfe-4068-9acb-f216f38abac7"
-					(reference "R38")
-					(unit 1)
-				)
-			)
-		)
-	)
-	(label "PI_BOOT0"
-		(at 270.51 40.64 180)
-		(fields_autoplaced yes)
-		(effects
-			(font
-				(size 1.27 1.27)
-			)
-			(justify right bottom)
-		)
-		(uuid "11521989-7c8c-4467-b1c7-76c6626ad91b")
-	)
-	(global_label "SWCLK_BOOT0"
-		(shape passive)
-		(at 278.13 40.64 0)
-		(fields_autoplaced yes)
-		(effects
-			(font
-				(size 1.27 1.27)
-			)
-			(justify left)
-		)
-		(uuid "52767b79-160d-4d7a-8f4a-8725f24059e3")
-		(property "Intersheetrefs" "${INTERSHEET_REFS}"
-			(at 278.13 40.64 0)
-			(show_name no)
-			(do_not_autoplace no)
-			(hide yes)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify left)
 			)
 		)
 	)
@@ -4874,9 +4792,9 @@
 		)
 		(property "Footprint" "Resistor_SMD:R_0603_1608Metric"
 			(at 314.96 40.64 0)
+			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
-			(hide yes)
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -4885,9 +4803,9 @@
 		)
 		(property "Datasheet" ""
 			(at 314.96 40.64 0)
+			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
-			(hide yes)
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -4896,9 +4814,9 @@
 		)
 		(property "Description" "Resistor 10k 0603"
 			(at 314.96 40.64 0)
+			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
-			(hide yes)
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -4907,9 +4825,9 @@
 		)
 		(property "MPN" "RC0603FR-0710KL"
 			(at 314.96 40.64 0)
+			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
-			(hide yes)
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -4918,9 +4836,9 @@
 		)
 		(property "Manufacturer" "Yageo"
 			(at 314.96 40.64 0)
+			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
-			(hide yes)
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -4929,9 +4847,9 @@
 		)
 		(property "Note" "BOOT0 low unless the Pi holds GPIO27 high"
 			(at 314.96 40.64 0)
+			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
-			(hide yes)
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -4946,40 +4864,16 @@
 		)
 		(instances
 			(project "canary-pwr"
-				(path "/bdc204b9-ea66-4e3b-87f2-f8b429651126/bea078c0-dcfe-4068-9acb-f216f38abac7"
+				(path "/e63e39d7-6ac0-4ffd-8aa3-1841a4541b55/bea078c0-dcfe-4068-9acb-f216f38abac7"
 					(reference "R39")
 					(unit 1)
 				)
 			)
 		)
 	)
-	(global_label "SWCLK_BOOT0"
-		(shape passive)
-		(at 311.15 40.64 180)
-		(fields_autoplaced yes)
-		(effects
-			(font
-				(size 1.27 1.27)
-			)
-			(justify right)
-		)
-		(uuid "cb5e396f-6740-4e15-a117-c9df14d331b8")
-		(property "Intersheetrefs" "${INTERSHEET_REFS}"
-			(at 311.15 40.64 0)
-			(show_name no)
-			(do_not_autoplace no)
-			(hide yes)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify right)
-			)
-		)
-	)
 	(symbol
 		(lib_id "power:GND")
-		(at 318.77 40.64 90)
+		(at 45.72 55.88 90)
 		(unit 1)
 		(body_style 1)
 		(exclude_from_sim no)
@@ -4987,12 +4881,12 @@
 		(on_board yes)
 		(in_pos_files yes)
 		(dnp no)
-		(uuid "0e5a3fc3-82e6-46a0-b921-244f871f0705")
-		(property "Reference" "#PWR095"
-			(at 318.77 45.64 0)
+		(uuid "a6552900-5860-4264-a8bb-fdcc78e12131")
+		(property "Reference" "#PWR086"
+			(at 45.72 60.88 0)
+			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
-			(hide yes)
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -5000,7 +4894,7 @@
 			)
 		)
 		(property "Value" "GND"
-			(at 318.77 44.44 0)
+			(at 45.72 59.68 0)
 			(show_name no)
 			(do_not_autoplace no)
 			(effects
@@ -5010,10 +4904,10 @@
 			)
 		)
 		(property "Footprint" ""
-			(at 318.77 40.64 0)
+			(at 45.72 55.88 0)
+			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
-			(hide yes)
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -5021,10 +4915,10 @@
 			)
 		)
 		(property "Datasheet" ""
-			(at 318.77 40.64 0)
+			(at 45.72 55.88 0)
+			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
-			(hide yes)
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -5032,10 +4926,10 @@
 			)
 		)
 		(property "Description" ""
-			(at 318.77 40.64 0)
+			(at 45.72 55.88 0)
+			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
-			(hide yes)
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -5043,12 +4937,480 @@
 			)
 		)
 		(pin "1"
-			(uuid "a457c770-7290-4351-8125-0fa2e74b371a")
+			(uuid "28092ff3-d074-43c5-a2f5-51396aa1c095")
 		)
 		(instances
 			(project "canary-pwr"
-				(path "/bdc204b9-ea66-4e3b-87f2-f8b429651126/bea078c0-dcfe-4068-9acb-f216f38abac7"
-					(reference "#PWR095")
+				(path "/e63e39d7-6ac0-4ffd-8aa3-1841a4541b55/bea078c0-dcfe-4068-9acb-f216f38abac7"
+					(reference "#PWR086")
+					(unit 1)
+				)
+			)
+		)
+	)
+	(symbol
+		(lib_id "Device:R")
+		(at 203.2 40.64 90)
+		(unit 1)
+		(body_style 1)
+		(exclude_from_sim no)
+		(in_bom yes)
+		(on_board yes)
+		(in_pos_files yes)
+		(dnp no)
+		(uuid "b3cd0ef1-d293-410b-ae1b-50b762d7a95a")
+		(property "Reference" "R35"
+			(at 201.425 37.54 0)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Value" "10k"
+			(at 201.425 44.34 0)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Footprint" "Resistor_SMD:R_0603_1608Metric"
+			(at 203.2 40.64 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Datasheet" ""
+			(at 203.2 40.64 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Description" "Resistor 10k 0603"
+			(at 203.2 40.64 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "MPN" "RC0603FR-0710KL"
+			(at 203.2 40.64 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Manufacturer" "Yageo"
+			(at 203.2 40.64 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(pin "1"
+			(uuid "16f1f90a-13dd-4837-a69e-a6783d2a6bcf")
+		)
+		(pin "2"
+			(uuid "bccab0c6-2e3a-4785-a35c-401b14da18e0")
+		)
+		(instances
+			(project "canary-pwr"
+				(path "/e63e39d7-6ac0-4ffd-8aa3-1841a4541b55/bea078c0-dcfe-4068-9acb-f216f38abac7"
+					(reference "R35")
+					(unit 1)
+				)
+			)
+		)
+	)
+	(symbol
+		(lib_id "power:GND")
+		(at 274.32 78.74 0)
+		(unit 1)
+		(body_style 1)
+		(exclude_from_sim no)
+		(in_bom yes)
+		(on_board yes)
+		(in_pos_files yes)
+		(dnp no)
+		(uuid "c9155ad6-3a57-4284-824d-29fc1ddd6b3c")
+		(property "Reference" "#PWR097"
+			(at 274.32 83.74 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Value" "GND"
+			(at 274.32 82.54 0)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Footprint" ""
+			(at 274.32 78.74 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Datasheet" ""
+			(at 274.32 78.74 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Description" ""
+			(at 274.32 78.74 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(pin "1"
+			(uuid "3d0f238f-3a52-416d-a69c-c2e5f7fe98f5")
+		)
+		(instances
+			(project "canary-pwr"
+				(path "/e63e39d7-6ac0-4ffd-8aa3-1841a4541b55/bea078c0-dcfe-4068-9acb-f216f38abac7"
+					(reference "#PWR097")
+					(unit 1)
+				)
+			)
+		)
+	)
+	(symbol
+		(lib_id "Device:R")
+		(at 243.84 40.64 90)
+		(unit 1)
+		(body_style 1)
+		(exclude_from_sim no)
+		(in_bom yes)
+		(on_board yes)
+		(in_pos_files yes)
+		(dnp no)
+		(uuid "da8025c8-b12b-4a24-a7c0-8722079cc9e4")
+		(property "Reference" "R37"
+			(at 241.54 37.54 0)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Value" "10k"
+			(at 241.54 44.34 0)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Footprint" "Resistor_SMD:R_0603_1608Metric"
+			(at 243.84 40.64 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Datasheet" ""
+			(at 243.84 40.64 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Description" "Resistor 10k 0603"
+			(at 243.84 40.64 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "MPN" "RC0603FR-0710KL"
+			(at 243.84 40.64 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Manufacturer" "Yageo"
+			(at 243.84 40.64 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Note" "Pull-up to the Pi's rail: no back-feed while the Pi is off; a dead MCU reads as power OK"
+			(at 243.84 40.64 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(pin "1"
+			(uuid "8638aada-b187-44d8-95bc-0efb7ea86385")
+		)
+		(pin "2"
+			(uuid "679e147d-1870-4c18-9cac-fe6f5ba41063")
+		)
+		(instances
+			(project "canary-pwr"
+				(path "/e63e39d7-6ac0-4ffd-8aa3-1841a4541b55/bea078c0-dcfe-4068-9acb-f216f38abac7"
+					(reference "R37")
+					(unit 1)
+				)
+			)
+		)
+	)
+	(symbol
+		(lib_id "power:GND")
+		(at 33.02 71.12 270)
+		(unit 1)
+		(body_style 1)
+		(exclude_from_sim no)
+		(in_bom yes)
+		(on_board yes)
+		(in_pos_files yes)
+		(dnp no)
+		(uuid "e6259b34-ccc7-4822-bc4c-0157577ea9b1")
+		(property "Reference" "#PWR088"
+			(at 33.02 76.12 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Value" "GND"
+			(at 33.02 74.92 0)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Footprint" ""
+			(at 33.02 71.12 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Datasheet" ""
+			(at 33.02 71.12 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Description" ""
+			(at 33.02 71.12 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(pin "1"
+			(uuid "4c175170-6b24-44c3-b4cf-706ccbd93c4c")
+		)
+		(instances
+			(project "canary-pwr"
+				(path "/e63e39d7-6ac0-4ffd-8aa3-1841a4541b55/bea078c0-dcfe-4068-9acb-f216f38abac7"
+					(reference "#PWR088")
+					(unit 1)
+				)
+			)
+		)
+	)
+	(symbol
+		(lib_id "Device:R")
+		(at 274.32 40.64 90)
+		(unit 1)
+		(body_style 1)
+		(exclude_from_sim no)
+		(in_bom yes)
+		(on_board yes)
+		(in_pos_files yes)
+		(dnp no)
+		(uuid "e97535cf-6163-44cb-a568-69a93b638947")
+		(property "Reference" "R38"
+			(at 277.145 37.54 0)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Value" "1k"
+			(at 277.145 44.34 0)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Footprint" "Resistor_SMD:R_0603_1608Metric"
+			(at 274.32 40.64 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Datasheet" ""
+			(at 274.32 40.64 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Description" "Resistor 1k 0603"
+			(at 274.32 40.64 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "MPN" "RC0603FR-071KL"
+			(at 274.32 40.64 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Manufacturer" "Yageo"
+			(at 274.32 40.64 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(pin "1"
+			(uuid "3a4ba415-53b3-4d89-ac1b-716cfe45958a")
+		)
+		(pin "2"
+			(uuid "bc585124-e803-44d0-ad93-dffbb6881a15")
+		)
+		(instances
+			(project "canary-pwr"
+				(path "/e63e39d7-6ac0-4ffd-8aa3-1841a4541b55/bea078c0-dcfe-4068-9acb-f216f38abac7"
+					(reference "R38")
 					(unit 1)
 				)
 			)
@@ -5087,9 +5449,9 @@
 		)
 		(property "Footprint" "Resistor_SMD:R_0603_1608Metric"
 			(at 340.36 40.64 0)
+			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
-			(hide yes)
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -5098,9 +5460,9 @@
 		)
 		(property "Datasheet" ""
 			(at 340.36 40.64 0)
+			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
-			(hide yes)
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -5109,9 +5471,9 @@
 		)
 		(property "Description" "Resistor 1k 0603"
 			(at 340.36 40.64 0)
+			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
-			(hide yes)
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -5120,9 +5482,9 @@
 		)
 		(property "MPN" "RC0603FR-071KL"
 			(at 340.36 40.64 0)
+			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
-			(hide yes)
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -5131,9 +5493,9 @@
 		)
 		(property "Manufacturer" "Yageo"
 			(at 340.36 40.64 0)
+			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
-			(hide yes)
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -5148,608 +5510,12 @@
 		)
 		(instances
 			(project "canary-pwr"
-				(path "/bdc204b9-ea66-4e3b-87f2-f8b429651126/bea078c0-dcfe-4068-9acb-f216f38abac7"
+				(path "/e63e39d7-6ac0-4ffd-8aa3-1841a4541b55/bea078c0-dcfe-4068-9acb-f216f38abac7"
 					(reference "R40")
 					(unit 1)
 				)
 			)
 		)
-	)
-	(label "PI_NRST"
-		(at 336.55 40.64 180)
-		(fields_autoplaced yes)
-		(effects
-			(font
-				(size 1.27 1.27)
-			)
-			(justify right bottom)
-		)
-		(uuid "fae56a2d-0cbc-4cb2-8e32-96e11e88bab9")
-	)
-	(label "NRST_GATE"
-		(at 344.17 40.64 0)
-		(fields_autoplaced yes)
-		(effects
-			(font
-				(size 1.27 1.27)
-			)
-			(justify left bottom)
-		)
-		(uuid "a54603b9-8b60-4242-963e-bf8d9899d2a1")
-	)
-	(symbol
-		(lib_id "Device:R")
-		(at 241.3 55.88 90)
-		(unit 1)
-		(body_style 1)
-		(exclude_from_sim no)
-		(in_bom yes)
-		(on_board yes)
-		(in_pos_files yes)
-		(dnp no)
-		(uuid "1c2c7e2f-0afa-46c7-9253-7ec6051a606f")
-		(property "Reference" "R41"
-			(at 238.075 52.78 0)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Value" "100k"
-			(at 238.075 59.58 0)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Footprint" "Resistor_SMD:R_0603_1608Metric"
-			(at 241.3 55.88 0)
-			(show_name no)
-			(do_not_autoplace no)
-			(hide yes)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Datasheet" ""
-			(at 241.3 55.88 0)
-			(show_name no)
-			(do_not_autoplace no)
-			(hide yes)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Description" "Resistor 100k 0603"
-			(at 241.3 55.88 0)
-			(show_name no)
-			(do_not_autoplace no)
-			(hide yes)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "MPN" "RC0603FR-07100KL"
-			(at 241.3 55.88 0)
-			(show_name no)
-			(do_not_autoplace no)
-			(hide yes)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Manufacturer" "Yageo"
-			(at 241.3 55.88 0)
-			(show_name no)
-			(do_not_autoplace no)
-			(hide yes)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(pin "1"
-			(uuid "f7cd4f29-9968-43e0-b643-15bb6d6437bf")
-		)
-		(pin "2"
-			(uuid "0fbb4e72-8144-45b8-b87b-17629d56f8a4")
-		)
-		(instances
-			(project "canary-pwr"
-				(path "/bdc204b9-ea66-4e3b-87f2-f8b429651126/bea078c0-dcfe-4068-9acb-f216f38abac7"
-					(reference "R41")
-					(unit 1)
-				)
-			)
-		)
-	)
-	(label "NRST_GATE"
-		(at 237.49 55.88 180)
-		(fields_autoplaced yes)
-		(effects
-			(font
-				(size 1.27 1.27)
-			)
-			(justify right bottom)
-		)
-		(uuid "1de874d8-1ffa-4739-8612-d1404768522b")
-	)
-	(symbol
-		(lib_id "power:GND")
-		(at 245.11 55.88 90)
-		(unit 1)
-		(body_style 1)
-		(exclude_from_sim no)
-		(in_bom yes)
-		(on_board yes)
-		(in_pos_files yes)
-		(dnp no)
-		(uuid "3c40bb91-e7a6-4245-89f0-56e6062c2cb5")
-		(property "Reference" "#PWR096"
-			(at 245.11 60.88 0)
-			(show_name no)
-			(do_not_autoplace no)
-			(hide yes)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Value" "GND"
-			(at 245.11 59.68 0)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Footprint" ""
-			(at 245.11 55.88 0)
-			(show_name no)
-			(do_not_autoplace no)
-			(hide yes)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Datasheet" ""
-			(at 245.11 55.88 0)
-			(show_name no)
-			(do_not_autoplace no)
-			(hide yes)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Description" ""
-			(at 245.11 55.88 0)
-			(show_name no)
-			(do_not_autoplace no)
-			(hide yes)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(pin "1"
-			(uuid "dd2b1cc3-cc81-4dc9-b810-01a511893ec1")
-		)
-		(instances
-			(project "canary-pwr"
-				(path "/bdc204b9-ea66-4e3b-87f2-f8b429651126/bea078c0-dcfe-4068-9acb-f216f38abac7"
-					(reference "#PWR096")
-					(unit 1)
-				)
-			)
-		)
-	)
-	(symbol
-		(lib_id "Transistor_FET:BSS138")
-		(at 271.78 73.66 0)
-		(unit 1)
-		(body_style 1)
-		(exclude_from_sim no)
-		(in_bom yes)
-		(on_board yes)
-		(in_pos_files yes)
-		(dnp no)
-		(uuid "0df206f1-3f09-43fe-bb78-c6484a56fa2c")
-		(property "Reference" "Q8"
-			(at 266.2375 53.58 0)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Value" "BSS138"
-			(at 266.2375 86.44 0)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Footprint" "Package_TO_SOT_SMD:SOT-23"
-			(at 271.78 73.66 0)
-			(show_name no)
-			(do_not_autoplace no)
-			(hide yes)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Datasheet" ""
-			(at 271.78 73.66 0)
-			(show_name no)
-			(do_not_autoplace no)
-			(hide yes)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Description" "N-channel MOSFET, SOT-23"
-			(at 271.78 73.66 0)
-			(show_name no)
-			(do_not_autoplace no)
-			(hide yes)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "MPN" "BSS138"
-			(at 271.78 73.66 0)
-			(show_name no)
-			(do_not_autoplace no)
-			(hide yes)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Manufacturer" "onsemi"
-			(at 271.78 73.66 0)
-			(show_name no)
-			(do_not_autoplace no)
-			(hide yes)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Note" "A FET, not a resistor: a powered-off Pi pin would otherwise clamp NRST and hold the supervisor in reset"
-			(at 271.78 73.66 0)
-			(show_name no)
-			(do_not_autoplace no)
-			(hide yes)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(pin "1"
-			(uuid "aa2a7330-b2e5-4bef-9c79-9596630a4730")
-		)
-		(pin "2"
-			(uuid "4449e2ab-b3f4-427e-8733-b61babf599a6")
-		)
-		(pin "3"
-			(uuid "7948f372-75d8-414c-a603-f64ac8660fa5")
-		)
-		(instances
-			(project "canary-pwr"
-				(path "/bdc204b9-ea66-4e3b-87f2-f8b429651126/bea078c0-dcfe-4068-9acb-f216f38abac7"
-					(reference "Q8")
-					(unit 1)
-				)
-			)
-		)
-	)
-	(label "NRST_GATE"
-		(at 266.7 73.66 180)
-		(fields_autoplaced yes)
-		(effects
-			(font
-				(size 1.27 1.27)
-			)
-			(justify right bottom)
-		)
-		(uuid "bb109e59-0457-4417-a4a9-2b6f2e79f7c9")
-	)
-	(symbol
-		(lib_id "power:GND")
-		(at 274.32 78.74 0)
-		(unit 1)
-		(body_style 1)
-		(exclude_from_sim no)
-		(in_bom yes)
-		(on_board yes)
-		(in_pos_files yes)
-		(dnp no)
-		(uuid "c9155ad6-3a57-4284-824d-29fc1ddd6b3c")
-		(property "Reference" "#PWR097"
-			(at 274.32 83.74 0)
-			(show_name no)
-			(do_not_autoplace no)
-			(hide yes)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Value" "GND"
-			(at 274.32 82.54 0)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Footprint" ""
-			(at 274.32 78.74 0)
-			(show_name no)
-			(do_not_autoplace no)
-			(hide yes)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Datasheet" ""
-			(at 274.32 78.74 0)
-			(show_name no)
-			(do_not_autoplace no)
-			(hide yes)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Description" ""
-			(at 274.32 78.74 0)
-			(show_name no)
-			(do_not_autoplace no)
-			(hide yes)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(pin "1"
-			(uuid "3d0f238f-3a52-416d-a69c-c2e5f7fe98f5")
-		)
-		(instances
-			(project "canary-pwr"
-				(path "/bdc204b9-ea66-4e3b-87f2-f8b429651126/bea078c0-dcfe-4068-9acb-f216f38abac7"
-					(reference "#PWR097")
-					(unit 1)
-				)
-			)
-		)
-	)
-	(global_label "MCU_NRST"
-		(shape passive)
-		(at 274.32 68.58 90)
-		(fields_autoplaced yes)
-		(effects
-			(font
-				(size 1.27 1.27)
-			)
-			(justify left)
-		)
-		(uuid "9a36c430-3fe8-40bf-a28b-e865c6af8472")
-		(property "Intersheetrefs" "${INTERSHEET_REFS}"
-			(at 274.32 68.58 0)
-			(show_name no)
-			(do_not_autoplace no)
-			(hide yes)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify left)
-			)
-		)
-	)
-	(symbol
-		(lib_id "Device:R")
-		(at 292.1 55.88 90)
-		(unit 1)
-		(body_style 1)
-		(exclude_from_sim no)
-		(in_bom yes)
-		(on_board yes)
-		(in_pos_files yes)
-		(dnp no)
-		(uuid "82da5459-d9ce-4fe4-b2a4-357af89df8d5")
-		(property "Reference" "R42"
-			(at 296.5 52.78 0)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Value" "10k"
-			(at 296.5 59.58 0)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Footprint" "Resistor_SMD:R_0603_1608Metric"
-			(at 292.1 55.88 0)
-			(show_name no)
-			(do_not_autoplace no)
-			(hide yes)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Datasheet" ""
-			(at 292.1 55.88 0)
-			(show_name no)
-			(do_not_autoplace no)
-			(hide yes)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Description" "Resistor 10k 0603"
-			(at 292.1 55.88 0)
-			(show_name no)
-			(do_not_autoplace no)
-			(hide yes)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "MPN" "RC0603FR-0710KL"
-			(at 292.1 55.88 0)
-			(show_name no)
-			(do_not_autoplace no)
-			(hide yes)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Manufacturer" "Yageo"
-			(at 292.1 55.88 0)
-			(show_name no)
-			(do_not_autoplace no)
-			(hide yes)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Note" "Halt detection: Pi 5 halt = 3V3 down"
-			(at 292.1 55.88 0)
-			(show_name no)
-			(do_not_autoplace no)
-			(hide yes)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(pin "1"
-			(uuid "7356ed4e-058c-4a2a-a209-f487b3e7d960")
-		)
-		(pin "2"
-			(uuid "0fa2b0a2-3557-425b-9c80-4e96241241f9")
-		)
-		(instances
-			(project "canary-pwr"
-				(path "/bdc204b9-ea66-4e3b-87f2-f8b429651126/bea078c0-dcfe-4068-9acb-f216f38abac7"
-					(reference "R42")
-					(unit 1)
-				)
-			)
-		)
-	)
-	(label "PI_3V3"
-		(at 288.29 55.88 180)
-		(fields_autoplaced yes)
-		(effects
-			(font
-				(size 1.27 1.27)
-			)
-			(justify right bottom)
-		)
-		(uuid "c867add4-3ea3-473e-a259-2bb91560f361")
-	)
-	(global_label "PI_3V3_SENSE"
-		(shape passive)
-		(at 295.91 55.88 0)
-		(fields_autoplaced yes)
-		(effects
-			(font
-				(size 1.27 1.27)
-			)
-			(justify left)
-		)
-		(uuid "a4dfed74-9e49-4fb8-8d80-cc63e9a1c9e1")
-		(property "Intersheetrefs" "${INTERSHEET_REFS}"
-			(at 295.91 55.88 0)
-			(show_name no)
-			(do_not_autoplace no)
-			(hide yes)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify left)
-			)
-		)
-	)
-	(text "Power flags (nets fed by passive pins)"
-		(exclude_from_sim no)
-		(at 25.4 254 0)
-		(effects
-			(font
-				(size 1.778 1.778)
-			)
-			(justify left bottom)
-		)
-		(uuid "ab70ffce-fb44-42d0-8f38-b75445059103")
 	)
 	(symbol
 		(lib_id "power:PWR_FLAG")
@@ -5764,9 +5530,9 @@
 		(uuid "ed22ca3a-b7be-4782-aca6-eec0c5a6f9ce")
 		(property "Reference" "#FLG098"
 			(at 25.4 261.7 0)
+			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
-			(hide yes)
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -5775,9 +5541,9 @@
 		)
 		(property "Value" "PWR_FLAG"
 			(at 25.4 262.7 0)
+			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
-			(hide yes)
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -5786,9 +5552,9 @@
 		)
 		(property "Footprint" ""
 			(at 25.4 266.7 0)
+			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
-			(hide yes)
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -5797,9 +5563,9 @@
 		)
 		(property "Datasheet" "~"
 			(at 25.4 266.7 0)
+			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
-			(hide yes)
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -5808,9 +5574,9 @@
 		)
 		(property "Description" ""
 			(at 25.4 266.7 0)
+			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
-			(hide yes)
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -5822,23 +5588,202 @@
 		)
 		(instances
 			(project "canary-pwr"
-				(path "/bdc204b9-ea66-4e3b-87f2-f8b429651126/bea078c0-dcfe-4068-9acb-f216f38abac7"
+				(path "/e63e39d7-6ac0-4ffd-8aa3-1841a4541b55/bea078c0-dcfe-4068-9acb-f216f38abac7"
 					(reference "#FLG098")
 					(unit 1)
 				)
 			)
 		)
 	)
-	(label "PI_3V3"
-		(at 25.4 266.7 270)
-		(fields_autoplaced yes)
-		(effects
-			(font
-				(size 1.27 1.27)
+	(symbol
+		(lib_id "Device:C")
+		(at 144.78 40.64 90)
+		(unit 1)
+		(body_style 1)
+		(exclude_from_sim no)
+		(in_bom yes)
+		(on_board yes)
+		(in_pos_files yes)
+		(dnp no)
+		(uuid "ef77867b-77d1-4ac3-bf36-e77dc58101a2")
+		(property "Reference" "C45"
+			(at 143.13 37.008 0)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
 			)
-			(justify right bottom)
 		)
-		(uuid "fc46dcd3-77a2-4b43-b69e-d71f26ca91f2")
+		(property "Value" "100n"
+			(at 143.13 44.872 0)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Footprint" "Capacitor_SMD:C_0603_1608Metric"
+			(at 144.78 40.64 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Datasheet" ""
+			(at 144.78 40.64 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Description" "Capacitor 100n 50V X7R/X5R 0603"
+			(at 144.78 40.64 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "MPN" "CL10B104KB8NNNC"
+			(at 144.78 40.64 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(pin "1"
+			(uuid "99084c90-422a-4b53-9b30-a0b570e00fc5")
+		)
+		(pin "2"
+			(uuid "2ed526b9-ca93-4f8d-b3c5-70ecf88e90f5")
+		)
+		(instances
+			(project "canary-pwr"
+				(path "/e63e39d7-6ac0-4ffd-8aa3-1841a4541b55/bea078c0-dcfe-4068-9acb-f216f38abac7"
+					(reference "C45")
+					(unit 1)
+				)
+			)
+		)
 	)
-	(embedded_fonts no)
+	(symbol
+		(lib_id "Device:R")
+		(at 109.22 83.82 90)
+		(unit 1)
+		(body_style 1)
+		(exclude_from_sim no)
+		(in_bom yes)
+		(on_board yes)
+		(in_pos_files yes)
+		(dnp no)
+		(uuid "f0d14189-531e-409b-8def-6906c15c8c27")
+		(property "Reference" "R36"
+			(at 107.645 80.72 0)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Value" "10k"
+			(at 107.645 87.52 0)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Footprint" "Resistor_SMD:R_0603_1608Metric"
+			(at 109.22 83.82 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Datasheet" ""
+			(at 109.22 83.82 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Description" "Resistor 10k 0603"
+			(at 109.22 83.82 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "MPN" "RC0603FR-0710KL"
+			(at 109.22 83.82 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Manufacturer" "Yageo"
+			(at 109.22 83.82 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(pin "1"
+			(uuid "05ca5339-69c4-4a34-83eb-1846283bbc47")
+		)
+		(pin "2"
+			(uuid "cfbed5fb-fe7e-44ea-be93-d78d64893800")
+		)
+		(instances
+			(project "canary-pwr"
+				(path "/e63e39d7-6ac0-4ffd-8aa3-1841a4541b55/bea078c0-dcfe-4068-9acb-f216f38abac7"
+					(reference "R36")
+					(unit 1)
+				)
+			)
+		)
+	)
 )

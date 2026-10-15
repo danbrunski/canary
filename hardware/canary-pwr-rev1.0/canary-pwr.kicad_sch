@@ -2,7 +2,7 @@
 	(version 20260306)
 	(generator "eeschema")
 	(generator_version "10.0")
-	(uuid "bdc204b9-ea66-4e3b-87f2-f8b429651126")
+	(uuid "e63e39d7-6ac0-4ffd-8aa3-1841a4541b55")
 	(paper "A3")
 	(title_block
 		(title "CANary-PWR")
@@ -13,8 +13,17 @@
 		(comment 2 "Design record: docs/CANary-PWR-Spec.md")
 		(comment 3 "First-pass capture generated 2026-10-13")
 	)
-	(lib_symbols
-
+	(lib_symbols)
+	(text "Stack: NVMe base / Pi 5 / CANary-PWR / CANary HAT (rev 2.1 and later). PWR plugs directly on the Pi; the HAT plugs on PWR's stacking header.\nPower path: OBD 12 V -> reverse block + TVS -> charger switch (TPS1HB35) -> LTC3350 input ideal diode -> +12V_BUS (backed up by the cap bank)\n            +12V_BUS -> LM61460 5.1 V -> INA226 shunt -> LM74700 ideal diode -> Pi header pins 2/4 (Power HAT+ style, no USB-C)\n            +12V_BUS -> TPS1HB35 -> HAT out terminal -> jumper to the HAT's J2\nEvery switch defaults ON: a dead or resetting supervisor degrades to an always-on Pi, never a dark rig.\nSupervisor <-> Pi: I2C1 through a Pi-powered TCA4307, GPIO6 = power fail (HIGH = OK), GPIO27 = MCU BOOT0, GPIO24 = MCU reset, Pi 3V3 sense.\nNets are connected by labels on this first pass; global labels cross sheets."
+		(exclude_from_sim no)
+		(at 20.32 45.72 0)
+		(effects
+			(font
+				(size 1.524 1.524)
+			)
+			(justify left bottom)
+		)
+		(uuid "96a646cb-f806-4512-ad14-9c16cf391746")
 	)
 	(text "CANary-PWR rev 1.0 -- supercapacitor UPS and always-on supervisor for the Pi 5 + CANary HAT"
 		(exclude_from_sim no)
@@ -26,17 +35,6 @@
 			(justify left bottom)
 		)
 		(uuid "b492cc35-becb-474a-a0ed-09e640b2ec62")
-	)
-	(text "Stack: NVMe base / Pi 5 / CANary-PWR / CANary HAT (rev 2.1 and later). PWR plugs directly on the Pi; the HAT plugs on PWR's stacking header.\nPower path: OBD 12 V -> reverse block + TVS -> charger switch (TPS1HB35) -> LTC3350 input ideal diode -> +12V_BUS (backed up by the cap bank)\n            +12V_BUS -> LM61460 5.1 V -> INA226 shunt -> LM74700 ideal diode -> Pi header pins 2/4 (Power HAT+ style, no USB-C)\n            +12V_BUS -> TPS1HB35 -> HAT out terminal -> jumper to the HAT's J2\nEvery switch defaults ON: a dead or resetting supervisor degrades to an always-on Pi, never a dark rig.\nSupervisor <-> Pi: I2C1 through a Pi-powered TCA4307, GPIO6 = power fail (HIGH = OK), GPIO27 = MCU BOOT0, GPIO24 = MCU reset, Pi 3V3 sense.\nNets are connected by labels on this first pass; global labels cross sheets."
-		(exclude_from_sim no)
-		(at 20.32 45.72 0)
-		(effects
-			(font
-				(size 1.524 1.524)
-			)
-			(justify left bottom)
-		)
-		(uuid "96a646cb-f806-4512-ad14-9c16cf391746")
 	)
 	(sheet
 		(at 20.32 76.2)
@@ -78,7 +76,7 @@
 		)
 		(instances
 			(project "canary-pwr"
-				(path "/bdc204b9-ea66-4e3b-87f2-f8b429651126"
+				(path "/e63e39d7-6ac0-4ffd-8aa3-1841a4541b55"
 					(page "2")
 				)
 			)
@@ -124,54 +122,8 @@
 		)
 		(instances
 			(project "canary-pwr"
-				(path "/bdc204b9-ea66-4e3b-87f2-f8b429651126"
+				(path "/e63e39d7-6ac0-4ffd-8aa3-1841a4541b55"
 					(page "3")
-				)
-			)
-		)
-	)
-	(sheet
-		(at 142.24 76.2)
-		(size 45.72 20.32)
-		(exclude_from_sim no)
-		(in_bom yes)
-		(on_board yes)
-		(dnp no)
-		(fields_autoplaced yes)
-		(stroke
-			(width 0.1524)
-			(type solid)
-		)
-		(fill
-			(color 0 0 0 0)
-		)
-		(uuid "d128d183-3009-472b-b62b-3d546d2df9b5")
-		(property "Sheetname" "Pi_Supply"
-			(at 142.24 75.4884 0)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify left bottom)
-			)
-		)
-		(property "Sheetfile" "Pi_Supply.kicad_sch"
-			(at 142.24 97.1046 0)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify left top)
-			)
-		)
-		(instances
-			(project "canary-pwr"
-				(path "/bdc204b9-ea66-4e3b-87f2-f8b429651126"
-					(page "4")
 				)
 			)
 		)
@@ -216,7 +168,7 @@
 		)
 		(instances
 			(project "canary-pwr"
-				(path "/bdc204b9-ea66-4e3b-87f2-f8b429651126"
+				(path "/e63e39d7-6ac0-4ffd-8aa3-1841a4541b55"
 					(page "5")
 				)
 			)
@@ -262,8 +214,54 @@
 		)
 		(instances
 			(project "canary-pwr"
-				(path "/bdc204b9-ea66-4e3b-87f2-f8b429651126"
+				(path "/e63e39d7-6ac0-4ffd-8aa3-1841a4541b55"
 					(page "6")
+				)
+			)
+		)
+	)
+	(sheet
+		(at 142.24 76.2)
+		(size 45.72 20.32)
+		(exclude_from_sim no)
+		(in_bom yes)
+		(on_board yes)
+		(dnp no)
+		(fields_autoplaced yes)
+		(stroke
+			(width 0.1524)
+			(type solid)
+		)
+		(fill
+			(color 0 0 0 0)
+		)
+		(uuid "d128d183-3009-472b-b62b-3d546d2df9b5")
+		(property "Sheetname" "Pi_Supply"
+			(at 142.24 75.4884 0)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify left bottom)
+			)
+		)
+		(property "Sheetfile" "Pi_Supply.kicad_sch"
+			(at 142.24 97.1046 0)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify left top)
+			)
+		)
+		(instances
+			(project "canary-pwr"
+				(path "/e63e39d7-6ac0-4ffd-8aa3-1841a4541b55"
+					(page "4")
 				)
 			)
 		)
