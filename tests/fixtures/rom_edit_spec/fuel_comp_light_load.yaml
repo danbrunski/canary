@@ -1,0 +1,22 @@
+# E08.1 example edit spec: what the operator writes. The base names a
+# tune_revisions.yaml revision, resolved by plain sha256 through the registry;
+# the region is in Fuel Comp's own axis units (rows rpm from
+# fuel_comp_engine_speed_axis 0xCACD, columns throttle-model fill % from
+# fuel_comp_flow_axis 0xCB29 -- UpRev labels these two swapped).
+schema_version: 1
+base:
+  revision: ZS44A-20261004
+label: light load off idle 2 % richer, idle K row untouched
+edits:
+  - table: fuel_compensation
+    slot: 1
+    region:
+      rpm: [1000, 1800]
+      load: [20, 30]
+      units: {rpm: rpm, load: "%"}
+    scale: 1.02
+    rounding: nearest
+  - table: fuel_compensation
+    slot: 1
+    cells: [[0, 0]]
+    add_raw: -2
