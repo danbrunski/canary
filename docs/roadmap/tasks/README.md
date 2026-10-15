@@ -1,5 +1,15 @@
 # Implementation task index
 
+**Status 2026-10-15: E08, ROM edit simulation workbench.**
+[`E08-rom-edit-simulation.md`](E08-rom-edit-simulation.md) turns E07's
+library pieces into an operator workflow: an edit spec (or an edited ROM file)
+and a point design built from pre-change drives go in; a paired Monte Carlo
+over the plant's declared uncertainty produces per-cell deltas, each cell
+`changed`, `unchanged`, `unsupported`, `no_points` or `not_reached`, plus a
+self-contained report. It reproduces known answers first (negative control,
+K +5 %, the 10-04 Fuel Comp restore on the real images) and states that the
+plant is unqualified and structural error unsampled on every result.
+
 **Status 2026-10-14: R11–R21, the next refactor checklists.**
 [`R10-refactor-README.md`](R10-refactor-README.md) indexes eleven implementation
 plans from the October 14 review: explicit time lookup, library replay,
