@@ -37,6 +37,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from src.cgroup_memory import CGROUP_ROOT as CGROUP_ROOT
+from src.cgroup_memory import memory_limit_status as memory_limit_status
 from src.collection import capture_lifetime
 from src.models.drift import FeatureDriftReport as FeatureDriftReport
 from src.models.drift import feature_drift as feature_drift
@@ -62,61 +64,6 @@ __all__ = [
 # ---------------------------------------------------------------------------
 # System metrics — best-effort, no psutil dependency (Pi target)
 # ---------------------------------------------------------------------------
-
-
-#: Where the unified (v2) cgroup hierarchy is mounted on the Pi.
-CGROUP_ROOT = Path("/sys/fs/cgroup")
-
-
-def memory_limit_status(
-    *,
-    cgroup_root: Path = CGROUP_ROOT,
-    self_cgroup: Path = Path("/proc/self/cgroup"),
-) -> dict[str, Any]:
-    """Is a memory ceiling actually enforced on this process right now?
-
-    Read from the cgroup file, never from ``systemctl show`` (D03.21): on
-    2026-09-18 the unit carried ``MemoryMax=6G`` and `systemctl show` echoed
-    it back for four days while the kernel enforced nothing, because the Pi
-    booted with ``cgroup_disable=memory``. The limits exist because the
-    trip-end digest once wedged the daemon for 38 minutes (D03.6), so
-    "configured" is not the question — "enforced" is.
-
-    ``memory_limits_enforced`` is deliberately three-valued: ``True`` (a byte
-    ceiling is set), ``False`` (the controller is there and the ceiling is
-    ``max``, i.e. unlimited), and ``None`` — no cgroup file, or it could not
-    be read, which is the *unknown* a laptop or container gives and must not
-    read as either reassurance or alarm.
-    """
-    status: dict[str, Any] = {
-        "memory_limits_enforced": None,
-        "memory_max_bytes": None,
-        "memory_max_source": None,
-    }
-    try:
-        # "0::/system.slice/canary.service" — the unified hierarchy's entry.
-        relative: str | None = None
-        for line in self_cgroup.read_text().splitlines():
-            hierarchy, _, group = line.partition("::")
-            if hierarchy == "0" and group:
-                relative = group.strip().lstrip("/")
-                break
-        if relative is None:
-            return status
-        memory_max = cgroup_root / relative / "memory.max"
-        status["memory_max_source"] = str(memory_max)
-        raw = memory_max.read_text().strip()
-    except (OSError, ValueError):
-        return status
-    if raw == "max":
-        status["memory_limits_enforced"] = False
-        return status
-    try:
-        status["memory_max_bytes"] = int(raw)
-    except ValueError:
-        return status
-    status["memory_limits_enforced"] = True
-    return status
 
 
 def system_metrics() -> dict[str, float | None]:

@@ -559,7 +559,7 @@ def test_retrain_sets_aside_a_holdout_too_small_and_publishes_only_with_a_reason
 
 
 def test_the_drives_a_level_was_chosen_on_are_recorded_as_seen() -> None:
-    from scripts.evaluate_detectors import record_seen
+    from src.models.evaluation_heldout import record_seen
 
     levelled = apply_budget_level(_calibration(), _level(1.2, sessions=("2026-09-22T171544",)))
     manifest = SimpleNamespace(
@@ -761,7 +761,7 @@ def test_the_levels_drives_still_score_the_if_and_refuse_an_alert_role_sequence_
 
 
 def test_only_a_budget_level_keeps_a_seen_drive_and_only_for_its_detectors() -> None:
-    from scripts.evaluate_detectors import in_sample_detectors
+    from src.models.evaluation_heldout import in_sample_detectors
 
     level_only = {"2026-09-22T171544": {"sequence": "budget_level"}}
     assert in_sample_detectors(level_only) == {
@@ -775,7 +775,7 @@ def test_only_a_budget_level_keeps_a_seen_drive_and_only_for_its_detectors() -> 
 
 
 def test_in_sample_results_leave_every_summary_of_their_drive() -> None:
-    from scripts.evaluate_detectors import DriveRecord, SessionScore, drop_in_sample
+    from src.models.evaluation_records import DriveRecord, SessionScore, drop_in_sample
 
     stamps = pd.Series(pd.date_range("2026-09-22T17:15:44Z", periods=3, freq="1s"))
     verdicts = np.array([False] * 3, dtype=object)

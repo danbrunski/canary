@@ -41,6 +41,7 @@ LAYERS: dict[str, int] = {
     "artifact_hash": 0,
     "atomic_write": 0,
     "can_ids": 0,
+    "cgroup_memory": 0,
     "coerce": 0,
     "columns": 0,
     "config": 0,

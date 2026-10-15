@@ -57,10 +57,18 @@ def pin(values: Mapping[str, str | None]) -> dict[str, str | None]:
     return {k: pins[k] for k in CHECKOUT_KEY_INPUTS if k in values}
 
 
-def _pinned(harness: Any) -> dict[str, Any]:
-    """Replacements for the harness's ``key_inputs`` and ``_evaluate`` that
-    hold the checkout inputs at their pins."""
-    real_key_inputs = harness.key_inputs
+def _pinned() -> list[tuple[Any, str, Any]]:
+    """``(module, name, replacement)`` for the harness's ``key_inputs`` (as each
+    module that calls it has bound it) and ``_evaluate``, holding the checkout
+    inputs at their pins. Since R15 ``key_inputs`` lives in the evaluation
+    libraries, not the script: ``prepare_inputs`` hashes with its own binding and
+    ``changed_key_inputs`` (the workers' and the parent's re-check) with the
+    identity module's."""
+    import scripts.evaluate_detectors as harness
+    import src.analysis.detector_evaluation_inputs as inputs_phase
+    import src.models.evaluation_identity as identity
+
+    real_key_inputs = identity.key_inputs
     real_evaluate = harness._evaluate
 
     def pinned_key_inputs(sources: Any) -> dict[str, str | None]:
@@ -72,17 +80,21 @@ def _pinned(harness: Any) -> dict[str, Any]:
         # lets them win over ``key_inputs``: pin those too.
         return real_evaluate(args, cleanup, {**early, **pin(early)})
 
-    return {"key_inputs": pinned_key_inputs, "_evaluate": pinned_evaluate}
+    return [
+        (identity, "key_inputs", pinned_key_inputs),
+        (inputs_phase, "key_inputs", pinned_key_inputs),
+        (harness, "_evaluate", pinned_evaluate),
+    ]
 
 
 def install() -> Any:
     """Patch the harness in *this* process (the script's own, or a scoring
     worker's); never called on import, so a test process importing the
-    constants above leaves the harness module alone. Returns the module."""
+    constants above leaves the harness module alone. Returns the script module."""
     import scripts.evaluate_detectors as harness
 
-    for name, replacement in _pinned(harness).items():
-        setattr(harness, name, replacement)
+    for module, name, replacement in _pinned():
+        setattr(module, name, replacement)
     return harness
 
 
@@ -90,7 +102,10 @@ def init_scoring_worker(spec: Any) -> None:
     """The pool initializer for an in-process run's scoring workers: pin this
     worker, then run the harness's own initializer, whose re-check of the key
     inputs now sees the pins the parent keyed the run on."""
-    install()._init_scoring_worker(spec)
+    from src.models.evaluation_workers import _init_scoring_worker
+
+    install()
+    _init_scoring_worker(spec)
 
 
 def pin_in_process(monkeypatch: Any, pins: Path) -> None:
@@ -98,12 +113,12 @@ def pin_in_process(monkeypatch: Any, pins: Path) -> None:
     recording to ``pins``; undone with ``monkeypatch``. The spawned scoring
     workers import the harness afresh, so the pool's initializer is replaced
     by :func:`init_scoring_worker` (picklable by name) to pin them too."""
-    import scripts.evaluate_detectors as harness
+    import src.models.evaluation_workers as workers
 
     monkeypatch.setenv(PIN_ENV, str(pins))
-    for name, replacement in _pinned(harness).items():
-        monkeypatch.setattr(harness, name, replacement)
-    monkeypatch.setattr(harness, "_init_scoring_worker", init_scoring_worker)
+    for module, name, replacement in _pinned():
+        monkeypatch.setattr(module, name, replacement)
+    monkeypatch.setattr(workers, "_init_scoring_worker", init_scoring_worker)
 
 
 # A spawned scoring worker runs this file as ``__mp_main__``.
