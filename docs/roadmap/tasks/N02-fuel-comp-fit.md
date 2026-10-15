@@ -506,6 +506,21 @@ the model of how Fuel Comp acts is wrong and N02.5's factors must not be used.
   - if the restore prediction passes, the proposal can inform an edit;
   - if it fails, record why and do not propose.
 
+- [ ] **N02.8 — Choose the throttle route per read, not per session.**
+  Found 2026-10-15 by E08.2's verifier. `fuel_comp_samples._throttle_input`
+  returns the PID 0x11 route for a whole session as soon as one PID 0x11 read
+  exists, and reaches the DID 0x120F route only when PID 0x11 was never
+  captured. `_capture-tuning-2026-09-23T164007` has a DID closed-position
+  estimate ([94, 103]) yet loses 170 eligible reads (115.5 s) to
+  `fill_byte:unpaired:pid_0x11`, so it gives E08 designs no points and N02
+  no samples. Fix at source: per read, use PID 0x11 where it is co-observed
+  within the pairing tolerance, else the DID, and name the route on each
+  sample. `tests/test_sim_design.py::test_pid_0x11_is_used_where_co_observed_and_the_did_elsewhere`
+  currently pins the per-session behaviour and changes with it.
+  **Accept:** the 09-23T164007 drive yields DID-route samples where PID 0x11
+  is absent. Sample counts on the other N02 sessions are reported before and
+  after, so any change is visible.
+
 ## Not now, and why
 
 - **Target AFR or timing optimisation:** there is no power or knock evidence.
