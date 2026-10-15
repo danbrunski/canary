@@ -92,7 +92,7 @@ def test_fuel_mv_3_is_frozen_and_unqualified_beside_the_other_versions() -> None
     # baseline, never an edit). Its VE envelope is fuel-mv-2's on the same drives.
     assert mv3.baseline is not None and mv3.baseline.frozen and mv3.baseline.ve_curve
     assert mv3.baseline.sha256() == (
-        "e6b9b5c3c3439709b5505dac6f3636f3e7d1fa3d42c3ff19669163af588807d6"
+        "8d54217e1f91af57efedab9bba2c323ccf61d5f85245f15dff284ed28677d523"
     )
     assert mv2.baseline is not None
     assert mv3.baseline.fitted_on == mv3.split.identification

@@ -537,7 +537,7 @@ supercharger is a hardware intervention with a new plant parameter set.
       0.05 g/ms lambda: recovers 0.05, and λ = air/(s·f(dP)·Te) recomputed
       term by term to 1e-12). These are structure and unit checks; nothing
       was fitted to the truck and no drive was scored.
-    - **Baseline `na-stock-2026-10-15.mv3`** (sha256 `e6b9b5c3…807d6`, pinned
+    - **Baseline `na-stock-2026-10-15.mv3`** (sha256 `8d54217e…7d523`, pinned
       in `test_fuel_mv_3_is_frozen_and_unqualified_beside_the_other_versions`,
       which replaces the unidentified test and keeps the `baseline_not_frozen`
       refusal on the declaration without its baseline). From `identify

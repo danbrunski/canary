@@ -384,7 +384,7 @@ acceptance:
 
 # fuel-mv-3's baseline hardware parameter set, frozen 2026-10-15 -- sha256
 # (computed by BaselineParameterSet.sha256, never supplied):
-#   e6b9b5c3c3439709b5505dac6f3636f3e7d1fa3d42c3ff19669163af588807d6 from
+#   8d54217e1f91af57efedab9bba2c323ccf61d5f85245f15dff284ed28677d523 from
 # `tools.fuel_plant_check identify --plant-version fuel-mv-3` on
 # split.identification. The values are identify's output, unedited. A
 # per-sample comparison with fuel-mv-1/fuel-mv-2 was run the same day on a
