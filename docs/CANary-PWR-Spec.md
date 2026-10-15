@@ -1,6 +1,7 @@
 # CANary-PWR — Power Board Spec
 
-> **Status: first-pass capture and placement done 2026-10-13, unrouted.** The
+> **Status: first-pass capture done 2026-10-13, functional placement
+> 2026-10-15 (§P2), unrouted.** The
 > KiCad project is [`hardware/canary-pwr-rev1.0/`](../hardware/canary-pwr-rev1.0/)
 > (§P11). Opened 2026-10-04, when the operator retired the X1202 and moved every
 > power function off the CANary HAT; [`CANary-HAT-Revisions.md`](CANary-HAT-Revisions.md)
@@ -118,7 +119,8 @@ sides:
   tails), enough for the tallest parts (7.7 mm electrolytics, 7 mm inductors)
   and the right-angle connectors.
 - **Bottom (B.Cu):** the supervisor, the CAN wake transceiver, the I²C buffer,
-  the crossing-net parts and the five cell-ballast resistors — all ≤ 1.75 mm.
+  the crossing-net parts, the five cell-ballast resistors, the HAT-out polyfuse
+  F1 and two passives — all ≤ 1.75 mm, so F1's part (§P10) must be too.
   The gap down to the cooler is **~6.3 mm** (measured under a 13.5 mm header,
   2026-10-03; operator confirms "a quarter inch", 2026-10-13).
 - **Fan-inlet keep-out on B.Cu.** §13.3.13's rule moves to this board: no
@@ -130,6 +132,42 @@ sides:
 
 **Heat.** The 5 V buck dissipates ~2 W at full load; keep it and the LTC3350
 FETs away from the cap-bank connector and the HAT's barometer/IMU above.
+
+**Placement (2026-10-15)** replaces the generator's packed grid with
+functional blocks. Board coordinates run x 100–165 from the left edge and
+y 44–100 from the header edge.
+- **5 V path, top, along the header edge.** LM61460 (U2) at x ≈ 133–139 with
+  its two input-capacitor pairs above and below, L2 to its left, then the
+  output capacitors, the R28 shunt and the Q7 ideal diode under J1 pins 2/4.
+  5 V can reach pins 2/4 only through the gaps between pins 1, 3 and 5,
+  because MH1 blocks the left side. Q7's drain therefore faces up into the
+  pin field, and the routing has to use more than one layer.
+- **LTC3350, top, centre**, rotated so its power pins face down. The charger
+  FETs stack below it, with the switch node toward L1 and C20/C21 across the
+  bus and ground. R15, Q5 and the VCAP capacitors sit at the cap-bank power
+  pins. RSNSI and the input FET are to its right, and the analogue dividers
+  are above it.
+- **Input protection, top, lower right:** Q1's tab faces *Vehicle in*, with
+  the TVS and the protected-node bulk beside it. The two bus electrolytics
+  are at the top right.
+- **Bottom:**
+  - the I²C buffer and the Pi-crossing parts in a row under J1;
+  - the MCU under the buck and LTC3350 analogue area;
+  - the always-on LDO beside the fan keep-out;
+  - the CAN wake transceiver between the HAT-out and Vehicle-in CAN pins;
+  - the ballast resistors stacked beside the cap-bank sense pins. Each takes
+    0.5 W while shunting, so spread them if the shunts run for long.
+- **Edge order:** the far edge runs LEDs, *HAT out*, *Vehicle in* from left to
+  right. The left edge runs button, SWD, cap bank from the header edge down.
+- **For HAT rev 3.0** (its sensitive-parts rule, §13.3): the buck occupies
+  x ≈ 121–148, y ≈ 51–66 (U2, L2, input capacitors). The charger FETs and L1
+  occupy x ≈ 117–136, y ≈ 76–86.
+
+The table is `gen/placement.py`, and `gen_pcb.py` applies it after packing,
+so a regenerated board reproduces it. `hardware/tools/review_placement.sh`
+scores a placement. Against the packed grid this one cuts the signal
+ratsnest from 2,465 to 911 mm and the power nets from 945 to 460 mm, with no
+courtyard overlaps.
 
 **J1** is the same 2 × 20 stacking header with a 13.5 mm body that HAT rev 2.1
 uses, operator-sourced and fitted (do-not-populate at the fab, §13.5.6), on
@@ -524,6 +562,7 @@ Nothing on this board changes for rev 3.0.
 | 12 | The Vehicle-in plug's order number (KiCad's footprint confirms 1803293 for the header) and the Micro-Fit housings and crimps (43025-0600, 43025-1000, 43030) | BOM |
 | 13 | Copper weight: TI recommends 2 oz outer layers for the LM61460 | Fab order |
 | 14 | Alternator ripple at `+12V_HAT` against `VIN_SENSE`'s input, engine running | Whether the HAT coprocessor can measure ripple from `V12_SENSE` through the hold-up path (HAT §13.3.3b) |
+| 15 | Routing pass on the 2026-10-15 placement: 5 V into J1 pins 2/4 through the pin-field gaps on several layers; the LTC3350 BG gate trace around Q3 (or through a via pair); Kelvin pairs to RSNSI, RSNSC and R28; silkscreen designators, which the denser packing put over neighbouring pads; the GND thermal spokes DRC reports as starved | Layout |
 
 ## P11. Hardware project
 
@@ -532,8 +571,9 @@ Nothing on this board changes for rev 3.0.
 (the HAT rev 2.1 stackup and rules). State at 2026-10-13: ERC clean at every
 severity; the exported netlist checked pin-for-pin against the design data
 (the checker was shown to fail on a deliberately broken label); placement done
-on both sides, **unrouted**; DRC clean of clearance, courtyard and parity
-errors, with silkscreen overlap and zone-spoke items left for layout.
+on both sides (functional placement 2026-10-15, §P2), **unrouted**; DRC clean
+of clearance, courtyard and parity errors, with silkscreen overlap and
+zone-spoke items left for layout (§P10 item 15).
 
 **Libraries** (`lib/`). Every vendor footprint was checked pad-by-pad against
 its datasheet land pattern, and two of five were wrong:
@@ -552,6 +592,9 @@ were corrected (UL marked the LM61460's ground pins as power outputs).
 **`gen/`** generated the first pass: `design.py` is the netlist with every
 value's rationale in each part's Note field; `gen_proj.py` writes the project and
 schematic, `verify_netlist.py` checks KiCad's netlist against it, `gen_pcb.py`
-builds the board on the HAT rev 2.1 template (run with KiCad's own Python).
+builds the board on the HAT rev 2.1 template (run with KiCad's own Python) and
+places it from `placement.py`. `placement_review.json` configures
+`hardware/tools/review_placement.sh` for this board. Since 2026-10-15 a
+regenerated board matches the committed one footprint for footprint.
 **Once the KiCad files are edited by hand they are the source of truth;
 regenerating overwrites them.**

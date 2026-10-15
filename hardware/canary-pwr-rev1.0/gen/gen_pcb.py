@@ -3,7 +3,8 @@
 
 Board: the HAT+ 65 x 56 outline, no ribbon slot, no overhang. Everything a person touches is mounted on an
 edge and reached from the side of the stack. Power stage on top; supervisor and Pi interface on the bottom,
-clear of the cooler's fan inlet.
+clear of the cooler's fan inlet. Final positions come from placement.py; the packer below only decides
+where a part that table does not list yet ends up.
 
 Usage: gen_pcb.py <hat_template.kicad_pcb> <netlist.xml> <out.kicad_pcb> <project_dir_windows> <syslib_fp_dir>
 """
@@ -20,6 +21,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import design  # noqa: E402
 import gen_sch  # noqa: E402
+import placement  # noqa: E402
 
 
 def V(x, y):
@@ -32,7 +34,9 @@ tb.SetTitle("CANary-PWR")
 tb.SetRevision("1.0")
 tb.SetDate("2026-10-13")
 tb.SetCompany("CANary")
-tb.SetComment(0, "First-pass placement, unrouted. Design record: docs/CANary-PWR-Spec.md")
+tb.SetComment(
+    0, "Functional placement 2026-10-15, unrouted. Design record: docs/CANary-PWR-Spec.md"
+)
 tb.SetComment(
     1,
     "HAT+ 65 x 56 outline from HAT rev 2.1, no ribbon slot. Edge-mounted connectors/LEDs/button/SWD; parts on both sides",
@@ -92,7 +96,7 @@ for txt, x, y, layer, size in [
         pcbnew.Dwgs_User,
         0.8,
     ),
-    ("CANary-PWR Rev 1.0 2026", 132.5, 80.0, pcbnew.B_SilkS, 1.0),
+    ("CANary-PWR Rev 1.0 2026", *placement.LABEL_B, pcbnew.B_SilkS, 1.0),
 ]:
     t = pcbnew.PCB_TEXT(b)
     t.SetText(txt)
@@ -385,6 +389,24 @@ for i, (x, y) in enumerate(FID_POS, 1):
 for i, (x, y) in enumerate(FID_POS_B, 4):
     add_lib_fp("Fiducial", "Fiducial_1mm_Mask2mm", f"FID{i}", x, y, back=True)
 
+# ---------------------------------------------------------------- functional placement
+unlisted = []
+for fp in b.GetFootprints():
+    ref = fp.GetReference()
+    if ref == "J1" or ref.startswith("MH"):
+        continue  # fixed by the HAT's geometry above
+    spot = placement.PLACEMENT.get(ref)
+    if spot is None:
+        unlisted.append(ref)
+        continue
+    x, y, rot, side = spot
+    if (side == "B") != fp.IsFlipped():
+        to_back(fp)  # Flip toggles the side
+    fp.SetOrientationDegrees(rot)
+    fp.SetPosition(V(x, y))
+if unlisted:
+    print(f"not in placement.py, left where the packer put them: {sorted(unlisted)}")
+
 # ---------------------------------------------------------------- planes
 BOARD = [(X0, Y0), (X1, Y0), (X1, Y1), (X0, Y1)]
 
@@ -405,7 +427,7 @@ def zone(layer, net, pts, prio=0):
 
 for layer in (pcbnew.F_Cu, pcbnew.In1_Cu, pcbnew.B_Cu):
     zone(layer, "GND", BOARD)
-zone(pcbnew.In2_Cu, "+12V_BUS", [(101, 52), (164, 52), (164, 76), (101, 76)], prio=1)
+zone(pcbnew.In2_Cu, "+12V_BUS", placement.IN2_ZONE, prio=1)
 pcbnew.ZONE_FILLER(b).Fill(b.Zones())
 
 FINE = (
