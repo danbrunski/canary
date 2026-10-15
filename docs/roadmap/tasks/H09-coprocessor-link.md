@@ -74,9 +74,15 @@ record: `docs/CANary-HAT-Revisions.md` §13.3. The decisions below were made
 
 ## Spec
 
-- [ ] **H09.1 Link protocol spec.** **Do:** write `docs/coprocessor-link.md`
-  and commit golden vectors under `tests/fixtures/coprocessor_link/`. It must
-  fix:
+- [~] **H09.1 Link protocol spec.** **Evidence (2026-10-15):**
+  `docs/coprocessor-link.md` (draft v1) and
+  `tests/fixtures/coprocessor_link/vectors.yaml`. There are 40 cases covering
+  all 23 message types, the headers, a poll, two full transactions, a
+  boot-gap block, and four invalid cases (header CRC, all-zero MISO, frame
+  CRC, version). All 40 were re-checked by a second, independent decoder with
+  bitwise CRCs. **Open:** the operator's review. **Do:** write
+  `docs/coprocessor-link.md` and commit golden vectors under
+  `tests/fixtures/coprocessor_link/`. It must fix:
   - **Physical:** SPI0 CE1, mode and clock; DATA_RDY on GPIO23, active high,
     pulled down; MISO through the CE1-gated buffer (§13.3.6, §13.3.0).
   - **Transaction model:** the Pi is always master. It reads a fixed status

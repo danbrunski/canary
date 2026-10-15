@@ -735,7 +735,9 @@ bring-up. So:
   CE1** (e.g. 74LVC1G125). U3 shares that MISO, so a firmware bug that drives
   it while unselected would corrupt CAN reads. The buffer makes that impossible
   rather than a firmware rule. Reset alone is safe, since STM32 pins float in
-  reset; bugs are the case.
+  reset; bugs are the case. **Pull the buffer's input down** (2026-10-15) so a
+  dead or resetting MCU reads as `00` bytes, which the link protocol names as
+  "no coprocessor" (`docs/coprocessor-link.md` §2, §3.7).
 - **The independent watchdog (IWDG) is on from the first image**, by option
   byte as on PWR (`CANary-PWR-Spec.md` §P7), so a hang becomes a reset lasting
   milliseconds.
@@ -1074,8 +1076,11 @@ roll" item drops from a correctness issue to bookkeeping.
 >   jitter of `can0`'s stamps, which is unmeasured today. Comparing against the
 >   MCP2518FD's hardware stamps is a separate, Pi-side question.
 >
-> PPS still disciplines the MCU counter's rate. The re-scope already narrowed
-> the "across Pi power cycles" claim above (§13.3.0).
+> ~~PPS still disciplines the MCU counter's rate.~~ **The firmware never steps
+> or slews its clock** (`docs/coprocessor-link.md` §5). It reports each PPS
+> edge raw (PPS_EDGE), and any rate correction is Pi-side arithmetic, where
+> pytest reaches it. The re-scope already narrowed the "across Pi power cycles"
+> claim above (§13.3.0).
 
 **(d) Parked monitoring.** Battery voltage every few minutes, CAN wake events,
 and motion via the LSM6DSOX — **INT2 (pin 9) is unconnected on rev 1.0**, so it is
