@@ -606,7 +606,19 @@ supercharger is a hardware intervention with a new plant parameter set.
          plant input before another VE/MAP revision. The short-pulse
          correction's decode (`0x9120`–`0x9126`) is still owed for the
          Te < 1.5 ms reads.
-       - the steady rule's MAF pairing leak (8 reads, above).
+       - the steady rule's MAF pairing leak (8 reads, above). *Root cause
+         traced 2026-10-15 (E08.4's verifier), on 09-23T142926 DID round
+         3047.* The pulse, throttle (3.3 %) and BFS reads are idle. The
+         paired Mode 01 round 3048 reads RPM 775 at +97 ms and MAF 31.71 g/s
+         at +105.7 ms, 85 ms into a launch from standstill (pedal moving at
+         +12 ms; MAF 3.66 g/s on the previous round). The pairing takes a
+         same-round MAF that is newer than the pulse. The steadiness spans
+         look back over the preceding 2 s from the pulse time, so they never
+         see the step. Fix at source: a pulse read's partners must come from
+         before the next change, or the steady window must include the
+         partner reads' own times. Changing eligibility changes what every
+         frozen fuel-mv-* baseline was identified on, so it ships as a new
+         plant_version with its own baseline, never as an edit to a frozen one.
     2. A tuning-profile drive that logs the AEM rail pressure with the pulse
        DID (truck). No such drive exists yet.
     3. MAP, injector flow and injector latency still require measurement.
