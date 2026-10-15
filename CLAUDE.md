@@ -46,8 +46,35 @@ order comes from `docs/roadmap/OVERNIGHT-QUEUE.md`.
   truck/Pi/operator-decision items partial rather than blocking; never
   commits) and `verifier` (adversarial per-checklist check; write-less).
   Keep them separate — the orchestrator owns the full gate, commits,
-  and blocked calls, and names each running implementer's area to the
-  others when it runs them in parallel.
+  and blocked calls, and names each running implementer's area (and
+  any shared file it may only append to) to the others when it runs
+  them in parallel.
+
+### Dispatch tiers
+
+Pass `model` and `effort` on every `implementer` dispatch, from this
+table; the frontmatter default (`sonnet` / `high`) is Standard. Pick the
+lowest tier that fits; between two, take the higher.
+
+| Tier | `model` | `effort` | Use for |
+|---|---|---|---|
+| Light | `haiku` | `low` | Mechanical edits the prompt specifies down to file, symbol and before/after: doc and checklist corrections, moves and renames with no behaviour change, splitting a file, appending entries the prompt spells out. No new logic. |
+| Standard | `sonnet` | `high` | The usual desk checklist with a worked design: a module + tests, an endpoint + MCP tool + docs, a dashboard panel, threading a config field through. |
+| Heavy | `sonnet` | `xhigh` | Wide changes: daemon + dashboard + MCP together, ~10+ files, layering moves (`tests/test_layering.py`), test infrastructure and the push gate. |
+| Deep | `opus` | `high` | Measurement and inference: signal comparison and decode/binding, detector, model and preprocessing code (`scripts/ml_paths.txt`), physics-derived channels, UDS/ISO-TP and anything near the non-volatile-write conditions; diagnosing a failure nobody has explained. |
+
+- **Escalate, don't repeat.** A dispatch that returns BLOCKED on
+  difficulty, is cut off at `maxTurns`, or fails the verifier on a
+  misunderstanding (not a slip) goes out again one tier up (from Deep:
+  `opus` / `xhigh`), with what the first attempt learned. Never re-send
+  the same prompt at the same tier.
+- **Haiku only with a pre-worked prompt.** Never for work that needs
+  judgement, and never for decode parameters or catalog values.
+- **The `verifier` runs at the implementer's tier, never lower**, and a
+  Light dispatch is verified at Standard.
+- **Split a big checklist.** `maxTurns` is 250 (past runs: 21–211,
+  median ~90). A checklist that looks like more than ~8 code items, or
+  one that spans backend and dashboard, goes out as named item subsets.
 
 ## Drive sessions (`/drive`)
 

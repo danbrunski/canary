@@ -20,8 +20,12 @@ Do, in order:
    the whole tier or the whole suite; the orchestrator does that once
    per checklist, and a second whole-suite run beside it produces load
    flakes). Add `-n0` if a failure's output is hard to read. Any
-   failure is a FAIL — quote the output. If a test writes into
-   `models/` or `data/analyses/`, say so; do not revert anything.
+   failure is a FAIL — quote the output — except one the implementer's
+   report lists under *Failures outside your files*: confirm that
+   attribution yourself (the failure traces to a file outside the diff,
+   or reproduces at HEAD). A confirmed foreign failure goes in your
+   verdict but is not a FAIL; an unconfirmed one is. If a test writes
+   into `models/` or `data/analyses/`, say so; do not revert anything.
 2. **Anchor check.** Items cite `file:line` anchors from an earlier
    review; **line numbers drift**. Resolve each anchor by its cited
    symbol/function name (Grep), not the raw line number. A stale line
