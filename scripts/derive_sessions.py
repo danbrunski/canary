@@ -35,7 +35,7 @@ except ImportError:  # loaded as `scripts.derive_sessions`: repo root on path
         load_config,
     )
 
-from src.features.feature_pipeline import default_decode_inputs
+from src.features.session_resampling import default_decode_inputs
 from src.log import configure_logging
 from src.preprocessing.derived_store import DEFAULT_DERIVED_DIR, DerivedStore
 from src.preprocessing.resampler import resample_config_for

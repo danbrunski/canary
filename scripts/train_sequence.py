@@ -67,7 +67,7 @@ except ImportError:  # loaded as `scripts.train_sequence` — repo root on path,
     )
 
 from src.config import CanaryConfig
-from src.features.feature_pipeline import DEFAULT_BINDINGS_PATH
+from src.features.feature_paths import DEFAULT_BINDINGS_PATH
 from src.log import configure_logging
 from src.models.evaluation import DriveHoldout, holdout_by_drive, nothing_left_to_train
 from src.models.false_positive_benchmark import FalsePositiveBenchmarkReport

@@ -55,10 +55,8 @@ from src.analysis.training_disposition import (  # noqa: E402
     classify_dispositions,
 )
 from src.behavior.accepted_baselines import AcceptedBaselines, load_accepted_baselines  # noqa: E402
-from src.features.feature_pipeline import (  # noqa: E402
-    candidate_feature_columns,
-    disposition_screen_frames,
-)
+from src.features.feature_build import disposition_screen_frames  # noqa: E402
+from src.features.feature_policy import candidate_feature_columns  # noqa: E402
 from src.log import configure_logging  # noqa: E402
 from src.models.golden_baselines import golden_baselines_path, read_golden_baselines  # noqa: E402
 from src.models.training_ledger import DEFAULT_TRAINING_LEDGER_PATH  # noqa: E402

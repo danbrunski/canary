@@ -112,7 +112,7 @@ def rows_to_resampled_frame(
     Reuses :func:`src.preprocessing.loader.to_wide` (pivot) +
     :func:`src.preprocessing.resampler.resample_wide` (forward-fill onto a
     fixed-hz grid, per session) — the exact pattern
-    :func:`src.features.feature_pipeline.featurize_wide_frame` builds
+    :func:`src.features.feature_transform.featurize_wide_frame` builds
     training frames with — rather than a fresh alignment implementation.
     Returns an empty frame (with the requested columns) when ``rows`` is
     empty.

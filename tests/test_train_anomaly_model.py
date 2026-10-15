@@ -16,7 +16,7 @@ from scripts.train_anomaly_model import (
 )
 from src.columns import MODE_COLUMN
 from src.config import CanaryConfig
-from src.features import feature_pipeline
+from src.features import feature_pipeline, session_resampling
 from src.features.feature_pipeline import (
     ALL_MODE,
     build_feature_frame,
@@ -164,10 +164,13 @@ def test_build_feature_frame_uses_disk_cache(
     )
     assert len(list(cache_dir.glob("*.pkl"))) == 1
 
-    def _fail_read_session(_session_dir: Path) -> pd.DataFrame:
-        raise AssertionError("cache miss should not re-read the session")
+    def _fail_read(*_args: object, **_kwargs: object) -> pd.DataFrame:
+        raise AssertionError("cache hit should not re-read the session")
 
-    monkeypatch.setattr(feature_pipeline, "read_session", _fail_read_session)
+    # Both readers the per-session chain can reach, patched where it calls them
+    # (R14: session_resampling owns the chain, not the feature_pipeline facade).
+    monkeypatch.setattr(session_resampling, "read_session", _fail_read)
+    monkeypatch.setattr(session_resampling, "reduce_session", _fail_read)
     cached = build_feature_frame(
         [session],
         _config(),
@@ -176,6 +179,18 @@ def test_build_feature_frame_uses_disk_cache(
     )
 
     pd.testing.assert_frame_equal(cached, features)
+
+    # The patch is on the executed path: a rebuild reaches the reader and fails
+    # (the failing session is skipped, so nothing readable is left).
+    with pytest.raises(ValueError, match="no readable sessions"):
+        build_feature_frame(
+            [session],
+            _config(),
+            bindings_path=bindings,
+            cache_dir=cache_dir,
+            force_rebuild=True,
+            max_workers=1,
+        )
 
 
 def test_feature_frame_cache_key_changes_when_bindings_change(tmp_path: Path) -> None:

@@ -13,7 +13,7 @@ incremental version:
 
 2. **tick(now)** — emit one wide row (current_values as of ``now``),
    append to the rolling buffer, then run the *shared* wide→features
-   builder (``feature_pipeline.featurize_wide_frame``: segment →
+   builder (``feature_transform.featurize_wide_frame``: segment →
    deviation → ``compute_features``) over the buffered window and return
    the *last* row. The offline batch path runs the same builder, so the
    two cannot schema-diverge by hand (7.1). ``None`` until enough history
@@ -71,7 +71,7 @@ from src.decode.dids import (
 )
 from src.decode.engineering import physical_value
 from src.decode.frame_decoder import FrameDecoder
-from src.features.feature_pipeline import FeaturizedFrame, featurize_wide_frame
+from src.features.feature_transform import FeaturizedFrame, featurize_wide_frame
 from src.preprocessing.features import FeatureConfig
 from src.preprocessing.imu_live import IMU_FRAME_INPUTS, LiveImuFrame
 from src.preprocessing.quality_gate import is_physically_valid

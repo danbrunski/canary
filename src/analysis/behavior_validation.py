@@ -2031,7 +2031,7 @@ def evaluation_decoded_signals(models: BehaviorModels) -> set[str]:
     segmenter's ``decoded:`` mode candidates plus any ``decoded:`` channel a
     model reads (input, output, gate or required context)."""
     from src.behavior.behavior_eligibility import required_channel_groups
-    from src.features.feature_pipeline import segmenter_input_columns
+    from src.features.feature_transform import segmenter_input_columns
 
     names: set[str] = set()
     columns: list[str] = list(segmenter_input_columns())
@@ -2087,12 +2087,9 @@ def build_evaluation_frame(
     """
     from src.decode.bindings import load_bindings
     from src.decode.dids import load_did_map
-    from src.features.feature_pipeline import (
-        drop_fully_stale_rows,
-        featurize_wide_frame,
-        resample_config_for,
-        resample_long_session,
-    )
+    from src.features.feature_transform import featurize_wide_frame
+    from src.features.session_resampling import drop_fully_stale_rows, resample_long_session
+    from src.preprocessing.resampler import resample_config_for
 
     bindings = load_bindings(bindings_path) if bindings_path.exists() else None
     did_map = load_did_map(dids_path) if dids_path.exists() else None

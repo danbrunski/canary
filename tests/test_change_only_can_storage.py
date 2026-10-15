@@ -783,13 +783,13 @@ async def test_a_session_stored_with_a_longer_timeout_than_the_daemons_is_not_re
 def test_every_training_read_path_refuses_a_shorter_read_timeout(
     tmp_path: Path, config: CanaryConfig
 ) -> None:
-    from src.features.feature_pipeline import (
+    from src.features.session_resampling import (
         default_decode_inputs,
-        reduce_session,
         resample_long_session,
         resample_session_bounded,
     )
     from src.preprocessing.derived import resample_reduced
+    from src.preprocessing.session_decode import reduce_session
 
     session = tmp_path / "2026-09-26T120000"
     write_records_to_parquet(_drive(60.0), session, can_storage=CanStorage.change_only(20.0))

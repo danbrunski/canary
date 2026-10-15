@@ -961,7 +961,7 @@ class PermittedUse(StrEnum):
       read it. Always retained: a demoted surface stays inspectable.
     * ``learned_feature`` — its ``deviation:<name>`` column may be *selected*
       as a feature by a new IF training run
-      (``feature_pipeline.FeaturePolicy``). Withholding it never stops the
+      (``feature_policy.FeaturePolicy``). Withholding it never stops the
       column being produced, so an existing detector trained on it keeps its
       input (the 2026-09 IF-blind incident was a silently deleted column).
     * ``alert`` — standalone ``BehaviorDetector`` events and fusion votes.

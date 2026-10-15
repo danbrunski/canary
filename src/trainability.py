@@ -2,7 +2,7 @@
 
 One function, :func:`source_exclusion_reason`, answers "does this channel's
 *origin* allow it to train?" for every consumer that chooses features or model
-inputs: the feature pipeline's :class:`~src.features.feature_pipeline.FeaturePolicy`
+inputs: the feature pipeline's :class:`~src.features.feature_policy.FeaturePolicy`
 (Isolation Forest and sequence detector), the sequence feature-set role tables,
 and behavior-model recipes and artifacts. It is an allowlist:
 

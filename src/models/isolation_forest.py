@@ -34,7 +34,7 @@ from src.columns import (
     is_flag_column,
 )
 from src.dataframe_utils import require_columns as _require_columns
-from src.features.feature_pipeline import build_feature_spec
+from src.features.feature_spec import build_feature_spec
 from src.models.manifest import (
     manifest_path_for,
     read_artifact,
@@ -1872,7 +1872,7 @@ def load_isolation_forest_model(
       artifact has any other model (its rows are withheld instead). The
       2026-09-20 artifact carried one over 20 context features, thresholded
       on 91 rows, and scoring routed to it;
-    * with a ``feature_policy`` (``feature_pipeline.FeaturePolicy``), every
+    * with a ``feature_policy`` (``feature_policy.FeaturePolicy``), every
       trained feature the policy forbids is named in ``policy_violations``.
       The forest cannot un-learn them; they stop training at the next retrain.
     """

@@ -206,7 +206,7 @@ def segment_operating_modes(
     still thread the operator-configured window and keep train/serve parity.
     ``mode_dwell_ticks`` overrides ``config.mode_dwell_ticks`` the same way
     (Phase 5.2 hysteresis). This is the one function both the batch loader
-    (``resample_and_segment``) and live serve (``feature_pipeline.
+    (``resample_and_segment``) and live serve (``feature_transform.
     segment_or_constant``, re-run over the buffered window each tick) call —
     dwell lives here, not duplicated per call site, so train/serve can't drift.
     """

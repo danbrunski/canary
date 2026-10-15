@@ -61,7 +61,7 @@ import pandas as pd
 from src.columns import TIMESTAMP_COLUMN
 from src.config import CanaryConfig
 from src.decode.dids import DidMap
-from src.features.feature_pipeline import configured_behavior_models, featurize_wide_frame
+from src.features.feature_transform import configured_behavior_models, featurize_wide_frame
 from src.models.fusion import (
     FusionScorer,
     FusionSource,

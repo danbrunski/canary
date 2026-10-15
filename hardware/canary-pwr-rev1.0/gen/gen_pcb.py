@@ -425,7 +425,9 @@ def zone(layer, net, pts, prio=0):
     b.Add(z)
 
 
-for layer in (pcbnew.F_Cu, pcbnew.In1_Cu, pcbnew.B_Cu):
+# Every layer is GND; In2 also carries the +12V_BUS island (placement.py), which wins where they overlap.
+# In1 sits 0.1 mm under the top power stage, In2 0.1 mm over the bottom-side supervisor (spec P2, Layers).
+for layer in (pcbnew.F_Cu, pcbnew.In1_Cu, pcbnew.In2_Cu, pcbnew.B_Cu):
     zone(layer, "GND", BOARD)
 zone(pcbnew.In2_Cu, "+12V_BUS", placement.IN2_ZONE, prio=1)
 pcbnew.ZONE_FILLER(b).Fill(b.Zones())

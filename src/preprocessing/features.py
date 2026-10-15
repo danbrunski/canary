@@ -463,7 +463,7 @@ def _rate_of_change_block(
     # Divide by the row pair's actual elapsed time, not the nominal
     # window_seconds (8.4). On a dense grid the two are identical
     # (n_rows was derived to make n_rows × median_delta ≈ window_seconds),
-    # but feature_pipeline._drop_fully_stale_rows can remove whole rows
+    # but session_resampling.drop_fully_stale_rows can remove whole rows
     # (a long power-off gap), leaving row-index-adjacent-but-time-distant
     # neighbors on either side of the seam. Dividing that pair's real
     # delta by the fixed window_seconds understates the elapsed time and

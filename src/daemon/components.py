@@ -414,7 +414,7 @@ def _load_isolation_forest(artifact_path: Path, *, config: CanaryConfig | None =
             )
             from src.decode.dids import load_repo_did_map
             from src.decode.engineering import repo_bindings
-            from src.features.feature_pipeline import FeaturePolicy
+            from src.features.feature_policy import FeaturePolicy
 
             policy = FeaturePolicy(
                 bindings=repo_bindings(),

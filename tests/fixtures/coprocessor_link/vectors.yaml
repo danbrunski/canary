@@ -1,0 +1,749 @@
+# Golden vectors for the Pi <-> coprocessor link, protocol v1 (docs/coprocessor-link.md §9).
+# Every implementation (H09.2 Python codec, H09.10 firmware framing) must decode each valid
+# case to its fields and re-encode the fields to the same bytes, and refuse each invalid case
+# with the named kind. Hex strings are the exact bytes on the wire.
+spec: docs/coprocessor-link.md
+protocol_version: 1
+generated: 2026-10-15, from the spec's tables by a scratch encoder (not committed); the CRC checks below
+  were confirmed against the standard check values
+crc_checks:
+  crc16_ccitt_false:
+    input_ascii: '123456789'
+    value: 10673
+  crc32_iso_hdlc:
+    input_ascii: '123456789'
+    value: 3421780262
+cases:
+- name: mcu_header_fresh_boot_idle
+  kind: mcu_header
+  hex: 434e01460000000000002b1a000030ca
+  valid: true
+  decoded:
+    magic: CN
+    version: 1
+    flags: 70
+    flag_names:
+    - CONFIG_VALID
+    - BOOTGAP_RECORDING
+    - FRESH_BOOT
+    staged_len: 0
+    next_len: 0
+    pi_ack_seq: 0
+    boot_id: 6699
+    rx_rejects: 0
+    queued: 0
+- name: pi_header_poll
+  kind: pi_header
+  hex: 5049010000000000000000000000be53
+  valid: true
+  decoded:
+    magic: PI
+    version: 1
+    flags: 0
+    pi_frame_len: 0
+    mcu_last_seq: 0
+- name: transaction_poll
+  kind: transaction
+  length: 16
+  mosi_hex: 5049010000000000000000000000be53
+  miso_hex: 434e01460000000000002b1a000030ca
+  valid: true
+  decoded:
+    pi_frame: null
+    mcu_frame: null
+- name: pi_get_status
+  kind: frame
+  direction: pi_to_mcu
+  hex: 010001000000631522c2
+  decoded:
+    type: 1
+    type_name: GET_STATUS
+    flags: 0
+    seq: 1
+    payload_len: 0
+    fields: {}
+  valid: true
+- name: pi_set_config_can
+  kind: frame
+  direction: pi_to_mcu
+  hex: 020002000c000101070020a107006b03010078edb885
+  decoded:
+    type: 2
+    type_name: SET_CONFIG
+    flags: 0
+    seq: 2
+    payload_len: 12
+    fields:
+      section: 1
+      persist: 1
+      config_version: 7
+      body:
+        bitrate: 500000
+        sample_point_permille: 875
+        bootgap_enable: 1
+  valid: true
+- name: pi_set_config_adc
+  kind: frame
+  direction: pi_to_mcu
+  hex: 020003001a0002010700e80300001f0606060606060606016400e80300001300d267fdfd
+  decoded:
+    type: 2
+    type_name: SET_CONFIG
+    flags: 0
+    seq: 3
+    payload_len: 26
+    fields:
+      section: 2
+      persist: 1
+      config_version: 7
+      body:
+        period_us: 1000
+        channel_mask: 31
+        ranges:
+        - 6
+        - 6
+        - 6
+        - 6
+        - 6
+        - 6
+        - 6
+        - 6
+        sensor_power: 1
+        block_sets: 100
+        boot_period_us: 1000
+        boot_mask: 19
+  valid: true
+- name: pi_set_config_imu
+  kind: frame
+  direction: pi_to_mcu
+  hex: 020004000f00030007006000041060116009660a465e7eab19
+  decoded:
+    type: 2
+    type_name: SET_CONFIG
+    flags: 0
+    seq: 4
+    payload_len: 15
+    fields:
+      section: 3
+      persist: 0
+      config_version: 7
+      body:
+        watermark: 96
+        writes:
+        - - 16
+          - 96
+        - - 17
+          - 96
+        - - 9
+          - 102
+        - - 10
+          - 70
+  valid: true
+- name: pi_set_config_witness
+  kind: frame
+  direction: pi_to_mcu
+  hex: 020005000f0004000700c80002f90100003d020000d60ccdd8
+  decoded:
+    type: 2
+    type_name: SET_CONFIG
+    flags: 0
+    seq: 5
+    payload_len: 15
+    fields:
+      section: 4
+      persist: 0
+      config_version: 7
+      body:
+        max_rate_hz: 200
+        ids:
+        - 505
+        - 573
+  valid: true
+- name: pi_set_config_kline
+  kind: frame
+  direction: pi_to_mcu
+  hex: 020006000c0005000700a02800003200d0078fc0b572
+  decoded:
+    type: 2
+    type_name: SET_CONFIG
+    flags: 0
+    seq: 6
+    payload_len: 12
+    fields:
+      section: 5
+      persist: 0
+      config_version: 7
+      body:
+        baud: 10400
+        rxd_blank_us: 50
+        command_timeout_ms: 2000
+  valid: true
+- name: pi_get_config
+  kind: frame
+  direction: pi_to_mcu
+  hex: 03000700010002e81268f1
+  decoded:
+    type: 3
+    type_name: GET_CONFIG
+    flags: 0
+    seq: 7
+    payload_len: 1
+    fields:
+      section: 2
+  valid: true
+- name: pi_bootgap_stop
+  kind: frame
+  direction: pi_to_mcu
+  hex: 0400080000005acbe7ef
+  decoded:
+    type: 4
+    type_name: BOOTGAP_STOP
+    flags: 0
+    seq: 8
+    payload_len: 0
+    fields: {}
+  valid: true
+- name: pi_bootgap_read
+  kind: frame
+  direction: pi_to_mcu
+  hex: 05000900060003000000e803c2c93650
+  decoded:
+    type: 5
+    type_name: BOOTGAP_READ
+    flags: 0
+    seq: 9
+    payload_len: 6
+    fields:
+      slot: 3
+      offset: 0
+      length: 1000
+  valid: true
+- name: pi_bootgap_release
+  kind: frame
+  direction: pi_to_mcu
+  hex: 06000a000000daa22608
+  decoded:
+    type: 6
+    type_name: BOOTGAP_RELEASE
+    flags: 0
+    seq: 10
+    payload_len: 0
+    fields: {}
+  valid: true
+- name: pi_reset
+  kind: frame
+  direction: pi_to_mcu
+  hex: 07000b0004005253455422545b29
+  decoded:
+    type: 7
+    type_name: RESET
+    flags: 0
+    seq: 11
+    payload_len: 4
+    fields:
+      magic: 1413829458
+  valid: true
+- name: pi_kline_set_mode
+  kind: frame
+  direction: pi_to_mcu
+  hex: 10000c00010002aaa58ed0
+  decoded:
+    type: 16
+    type_name: KLINE_SET_MODE
+    flags: 0
+    seq: 12
+    payload_len: 1
+    fields:
+      mode: 2
+  valid: true
+- name: pi_kline_wake_fast
+  kind: frame
+  direction: pi_to_mcu
+  hex: 11000d000e000100e0930400a8610000a86100008acc7a50
+  decoded:
+    type: 17
+    type_name: KLINE_WAKE
+    flags: 0
+    seq: 13
+    payload_len: 14
+    fields:
+      kind: 1
+      address: 0
+      idle_us: 300000
+      low_us: 25000
+      high_us: 25000
+  valid: true
+- name: pi_kline_transact
+  kind: frame
+  direction: pi_to_mcu
+  hex: 12000e000f00881332008813040105008110f181035831ee51
+  decoded:
+    type: 18
+    type_name: KLINE_TRANSACT
+    flags: 0
+    seq: 14
+    payload_len: 15
+    fields:
+      p4_us: 5000
+      reply_timeout_ms: 50
+      end_silence_us: 5000
+      max_reply: 260
+      tx_len: 5
+      tx_hex: 8110f18103
+  valid: true
+- name: pi_kline_receive
+  kind: frame
+  direction: pi_to_mcu
+  hex: 13000f000600881388130401e1a672c7
+  decoded:
+    type: 19
+    type_name: KLINE_RECEIVE
+    flags: 0
+    seq: 15
+    payload_len: 6
+    fields:
+      reply_timeout_ms: 5000
+      end_silence_us: 5000
+      max_reply: 260
+  valid: true
+- name: pi_kline_get_result
+  kind: frame
+  direction: pi_to_mcu
+  hex: 1400100002000e0026078faa
+  decoded:
+    type: 20
+    type_name: KLINE_GET_RESULT
+    flags: 0
+    seq: 16
+    payload_len: 2
+    fields:
+      cmd_seq: 14
+  valid: true
+- name: mcu_status
+  kind: frame
+  direction: mcu_to_pi
+  hex: 80000100640000010000dd99db1f2b1a0600d099a603000000001453020000000000020000000410000060ea00000000000000ee0200000000000000000001000000000000003c0000006067010004000000000000000101002040002000280000000000ba3100000000d36e9457
+  decoded:
+    type: 128
+    type_name: STATUS
+    flags: 0
+    seq: 1
+    payload_len: 100
+    fields:
+      fw:
+      - 0
+      - 1
+      - 0
+      reset_cause: 0
+      git_hash: 534485469
+      boot_id: 6699
+      flags: 6
+      kline_mode: 0
+      uptime_us: 61250000
+      counters:
+        can_rx: 152340
+        can_fifo_lost: 0
+        can_bus_errors: 2
+        witness_sent: 4100
+        adc_sets: 60000
+        adc_blocks_dropped: 0
+        imu_words: 192000
+        imu_blocks_dropped: 0
+        kline_events_dropped: 0
+        queue_frames_dropped: 1
+        pi_frames_rejected: 0
+        pps_edges: 60
+        bootgap_frames: 92000
+        bootgap_blocks_overwritten: 4
+        kline_failsafe_trips: 0
+      bootgap_state: 1
+      bootgap_encoding: 1
+      bootgap_block_size: 8192
+      bootgap_slots: 64
+      bootgap_head_slots: 32
+      bootgap_blocks_written: 40
+      kline_last_result_seq: 0
+      v12_mv: 12730
+  valid: true
+- name: mcu_cmd_result_ok
+  kind: frame
+  direction: mcu_to_pi
+  hex: 810002000600020002000000da55eca5
+  decoded:
+    type: 129
+    type_name: CMD_RESULT
+    flags: 0
+    seq: 2
+    payload_len: 6
+    fields:
+      cmd_seq: 2
+      cmd_type: 2
+      code: 0
+      detail: 0
+  valid: true
+- name: mcu_cmd_result_bad_value
+  kind: frame
+  direction: mcu_to_pi
+  hex: 8100030006000300020306009ef46ed5
+  decoded:
+    type: 129
+    type_name: CMD_RESULT
+    flags: 0
+    seq: 3
+    payload_len: 6
+    fields:
+      cmd_seq: 3
+      cmd_type: 2
+      code: 3
+      detail: 6
+  valid: true
+- name: mcu_config_report
+  kind: frame
+  direction: mcu_to_pi
+  hex: 820004000c000101070020a107006b0301001d624278
+  decoded:
+    type: 130
+    type_name: CONFIG_REPORT
+    flags: 0
+    seq: 4
+    payload_len: 12
+    fields:
+      section: 1
+      persisted: 1
+      config_version: 7
+      body:
+        bitrate: 500000
+        sample_point_permille: 875
+        bootgap_enable: 1
+  valid: true
+- name: mcu_adc_block
+  kind: frame
+  direction: mcu_to_pi
+  hex: 83000500260040c9a20300000000e8030000d0071f000200d80e0852247728a0b068d90e12521a773ca0a6686c784ddd
+  decoded:
+    type: 131
+    type_name: ADC_BLOCK
+    flags: 0
+    seq: 5
+    payload_len: 38
+    fields:
+      t0_us: 61000000
+      period_us: 1000
+      step_ns: 2000
+      channel_mask: 31
+      n_sets: 2
+      codes:
+      - - 3800
+        - 21000
+        - 30500
+        - 41000
+        - 26800
+      - - 3801
+        - 21010
+        - 30490
+        - 41020
+        - 26790
+  valid: true
+- name: mcu_imu_block
+  kind: frame
+  direction: mcu_to_pi
+  hex: 840006002700e04fa40300000000de4a25002500000003000a1100f0ff0040120300fdff0100224e2c00000000f0856662
+  decoded:
+    type: 132
+    type_name: IMU_BLOCK
+    flags: 0
+    seq: 6
+    payload_len: 39
+    fields:
+      before_us: 61100000
+      chip_ts: 2443998
+      after_delta_us: 37
+      n_words: 3
+      words_hex:
+      - 0a1100f0ff0040
+      - 120300fdff0100
+      - 224e2c00000000
+  valid: true
+- name: mcu_can_witness
+  kind: frame
+  direction: mcu_to_pi
+  hex: 850007002b0080d6a503000000000200000000f9010000082800177000005c00820200003d02000008630000f00087ff8d9901fd47
+  decoded:
+    type: 133
+    type_name: CAN_WITNESS
+    flags: 0
+    seq: 7
+    payload_len: 43
+    fields:
+      base_us: 61200000
+      n: 2
+      entries:
+      - delta_us: 0
+        id: 505
+        extended: false
+        dlc: 8
+        data_hex: 2800177000005c00
+      - delta_us: 642
+        id: 573
+        extended: false
+        dlc: 8
+        data_hex: 630000f00087ff8d
+  valid: true
+- name: bootgap_block_head_closed
+  kind: bootgap_block
+  hex: 424701050000000060e3160000000000300006003cce943e0000f903082800177000005c0001e601bd0408630000f00087ff8d40aa4c092a7180900313ce0e0d5232a0c00001c300
+  valid: true
+  decoded:
+    magic: BG
+    encoding: 1
+    flags: 5
+    flag_names:
+    - HEAD
+    - CLOSED
+    block_seq: 0
+    base_us: 1500000
+    used: 48
+    n_records: 6
+    crc: 1049939516
+    records:
+    - kind: FULL
+      index: 0
+      dt: 0
+      id: 505
+      extended: false
+      dlc: 8
+      data_hex: 2800177000005c00
+    - kind: FULL
+      index: 1
+      dt: 230
+      id: 573
+      extended: false
+      dlc: 8
+      data_hex: 630000f00087ff8d
+    - kind: DELTA
+      index: 0
+      dt: 9770
+      mask: 9
+      changed_hex: 2a71
+      result_hex: 2a00177100005c00
+    - kind: ANALOG
+      index: 0
+      dt: 400
+      mask: 19
+      codes:
+      - 3790
+      - 21005
+      - 41010
+    - kind: EVENT
+      event: FIFO_LOST
+      dt: 0
+      count: 1
+    - kind: EVENT
+      event: PAD
+      dt: 0
+- name: mcu_bootgap_chunk
+  kind: frame
+  direction: mcu_to_pi
+  hex: 860008004e00000000000000424701050000000060e3160000000000300006003cce943e0000f903082800177000005c0001e601bd0408630000f00087ff8d40aa4c092a7180900313ce0e0d5232a0c00001c300504581e7
+  decoded:
+    type: 134
+    type_name: BOOTGAP_CHUNK
+    flags: 0
+    seq: 8
+    payload_len: 78
+    fields:
+      slot: 0
+      offset: 0
+      status: 0
+      data_hex: 424701050000000060e3160000000000300006003cce943e0000f903082800177000005c0001e601bd0408630000f00087ff8d40aa4c092a7180900313ce0e0d5232a0c00001c300
+  valid: true
+- name: mcu_bootgap_chunk_not_frozen
+  kind: frame
+  direction: mcu_to_pi
+  hex: 860009000600030000000100cd6dda51
+  decoded:
+    type: 134
+    type_name: BOOTGAP_CHUNK
+    flags: 0
+    seq: 9
+    payload_len: 6
+    fields:
+      slot: 3
+      offset: 0
+      status: 1
+      data_hex: ''
+  valid: true
+- name: mcu_pps_edge
+  kind: frame
+  direction: mcu_to_pi
+  hex: 87000a000c00fb0bb203000000003e000000a42d5c43
+  decoded:
+    type: 135
+    type_name: PPS_EDGE
+    flags: 0
+    seq: 10
+    payload_len: 12
+    fields:
+      edge_us: 62000123
+      edge_count: 62
+  valid: true
+- name: mcu_kline_result_ok
+  kind: frame
+  direction: mcu_to_pi
+  hex: 88000b003f000e0012000200050000000000000000000000c04dc1030000000007008300000000f1100400001020080000c1300c0000ef401000008f50140000e96018000071938e6e
+  decoded:
+    type: 136
+    type_name: KLINE_RESULT
+    flags: 0
+    seq: 11
+    payload_len: 63
+    fields:
+      cmd_seq: 14
+      cmd_type: 18
+      status: 0
+      status_name: OK
+      mode: 2
+      m1: 5
+      m2: 0
+      m3: 0
+      base_us: 63000000
+      rx:
+      - byte: 131
+        delta_us: 0
+      - byte: 241
+        delta_us: 1040
+      - byte: 16
+        delta_us: 2080
+      - byte: 193
+        delta_us: 3120
+      - byte: 239
+        delta_us: 4160
+      - byte: 143
+        delta_us: 5200
+      - byte: 233
+        delta_us: 6240
+  valid: true
+- name: mcu_kline_result_echo_mismatch
+  kind: frame
+  direction: mcu_to_pi
+  hex: 88000c001c000e001201020002000000f1000000f300000060d4c2030000000000002938f48a
+  decoded:
+    type: 136
+    type_name: KLINE_RESULT
+    flags: 0
+    seq: 12
+    payload_len: 28
+    fields:
+      cmd_seq: 14
+      cmd_type: 18
+      status: 1
+      status_name: ECHO_MISMATCH
+      mode: 2
+      m1: 2
+      m2: 241
+      m3: 243
+      base_us: 63100000
+      rx: []
+  valid: true
+- name: mcu_kline_events
+  kind: frame
+  direction: mcu_to_pi
+  hex: 89000d0032000090d003000000000400020000000000d06100000181c8c3000000000000037fc0030000000000000401b80b0000000000003feeb99a
+  decoded:
+    type: 137
+    type_name: KLINE_EVENTS
+    flags: 0
+    seq: 13
+    payload_len: 50
+    fields:
+      base_us: 64000000
+      n: 4
+      events:
+      - kind: 2
+        value: 0
+        delta_us: 0
+        duration_us: 25040
+      - kind: 1
+        value: 129
+        delta_us: 50120
+        duration_us: 0
+      - kind: 3
+        value: 127
+        delta_us: 960
+        duration_us: 0
+      - kind: 4
+        value: 1
+        delta_us: 3000
+        duration_us: 0
+  valid: true
+- name: mcu_log
+  kind: frame
+  direction: mcu_to_pi
+  hex: 8a000e002500026b6c696e65206661696c736166653a206e6f205069206865616465722032303030206d733a72160b
+  decoded:
+    type: 138
+    type_name: LOG
+    flags: 0
+    seq: 14
+    payload_len: 37
+    fields:
+      level: 2
+      text: 'kline failsafe: no Pi header 2000 ms'
+  valid: true
+- name: transaction_pi_set_config
+  kind: transaction
+  length: 40
+  mosi_hex: 504901001600000000000000000097b4020002000c000101070020a107006b03010078edb8850000
+  miso_hex: 434e01460000000001002b1a0000908f000000000000000000000000000000000000000000000000
+  valid: true
+  decoded:
+    pi_header:
+      pi_frame_len: 22
+      mcu_last_seq: 0
+    pi_frame:
+      type: 2
+      seq: 2
+    mcu_header:
+      staged_len: 0
+      next_len: 0
+      pi_ack_seq: 1
+    mcu_frame: null
+- name: transaction_mcu_cmd_result
+  kind: transaction
+  length: 32
+  mosi_hex: 50490100000001000000000000006d1400000000000000000000000000000000
+  miso_hex: 434e01061000000002002b1a00003391810002000600020002000000da55eca5
+  valid: true
+  decoded:
+    pi_header:
+      pi_frame_len: 0
+      mcu_last_seq: 1
+    pi_frame: null
+    mcu_header:
+      staged_len: 16
+      next_len: 0
+      pi_ack_seq: 2
+    mcu_frame:
+      type: 129
+      seq: 2
+- name: invalid_mcu_header_crc
+  kind: mcu_header
+  hex: 434e01460000000000002b1a000031ca
+  valid: false
+  refuse: link header error
+- name: invalid_miso_all_zero
+  kind: mcu_header
+  hex: '00000000000000000000000000000000'
+  valid: false
+  refuse: no coprocessor (MISO idle)
+- name: invalid_frame_crc
+  kind: frame
+  direction: mcu_to_pi
+  hex: 87000a000c00fb0b4d03000000003e000000a42d5c43
+  valid: false
+  refuse: link frame CRC
+- name: invalid_mcu_header_version
+  kind: mcu_header
+  hex: 434e02000000000000002b1a00008e7a
+  valid: false
+  refuse: coprocessor protocol v2, expected v1

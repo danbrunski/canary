@@ -1413,7 +1413,7 @@ def active_flash_history(config: CanaryConfig) -> FlashHistory:
     naming why there is none.
 
     One function for the live tick and every offline frame, since both run
-    ``feature_pipeline._append_derived_channels``. The live rows are stamped
+    ``feature_transform.append_derived_channels``. The live rows are stamped
     "now", so they resolve to the revision currently flashed, by the same rule
     (``TuneRevisionRegistry.at``) ``/control/calibration`` reports as
     ``running_revision``. Re-read when either registry file changes.

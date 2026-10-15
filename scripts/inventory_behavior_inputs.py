@@ -62,7 +62,7 @@ from src.analysis.behavior_validation import (
 )
 from src.analysis.recipes.catalog import default_recipes
 from src.behavior.behavior_models import CURRENT_SCHEMA_VERSION, BehaviorModels
-from src.features.feature_pipeline import DEFAULT_DIDS_PATH
+from src.features.feature_paths import DEFAULT_DIDS_PATH
 from src.log import configure_logging
 from src.storage.session_files import has_telemetry
 from src.vehicle.profiles import active_registry, resolve_profile_for_tooling, scope_config

@@ -315,10 +315,8 @@ def _write_feature_matrix(
     Imported lazily — ``build_feature_frame`` pulls in the decode/behavior
     stack, and a CSV-only export shouldn't pay that import cost.
     """
-    from src.features.feature_pipeline import (
-        build_feature_frame,
-        trainable_feature_columns,
-    )
+    from src.features.feature_build import build_feature_frame
+    from src.features.feature_selection import trainable_feature_columns
 
     session_dirs = [storage_root / s for s in spec.sessions if (storage_root / s).exists()]
     if not session_dirs:

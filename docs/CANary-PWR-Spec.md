@@ -163,6 +163,32 @@ y 44–100 from the header edge.
   x ≈ 121–148, y ≈ 51–66 (U2, L2, input capacitors). The charger FETs and L1
   occupy x ≈ 117–136, y ≈ 76–86.
 
+**Layers (2026-10-15).** The stack is F.Cu, 0.1 mm prepreg, In1, a
+1.24 mm core, In2, 0.1 mm prepreg, B.Cu, with 1 oz copper until §P10 item 13
+is settled. Each outer layer therefore sits 0.1 mm from one inner plane, and
+that decides what each plane carries.
+- **In1 is solid GND.** The top-side power stage returns on it directly under
+  its own copper, so the buck's input loop and the charger's bus-capacitor and
+  FET loop are each only 0.1 mm tall. That is why every part in those loops is
+  on top, side by side.
+- **In2 is GND too, except a +12V_BUS island.** The island covers x 132–164,
+  y 52–79, plus a band at x 113–136, y 73–85. Under it are the buck input, the
+  bus electrolytics, RSNSI, the charger FETs, Q5 and the HAT-out polyfuse. The
+  bottom-side MCU, I²C buffer and Pi-crossing parts therefore sit 0.1 mm above
+  GND rather than above the bus and its ripple. The island holds every
+  +12V_BUS pad except R9 and C12 (the OUTFB divider top and its feed-forward
+  capacitor), which take a short top-side trace.
+- **5 V stays on the outer layers.** It runs as a wide F.Cu pour from L2 to Q7:
+  about 4–5 mm for 5 A on 1 oz copper, half that on 2 oz. A B.Cu pour joins it
+  at J1, where pins 2/4 are reachable only through the gaps between pins 1, 3
+  and 5.
+- **Vias.**
+  - Stitch In1 and In2 GND together around the island's edge and across the
+    supervisor area.
+  - Keep the bottom-to-top signal vias out from under the two switch nodes and
+    the two hot loops, where In1 must stay unbroken. That covers I²C, PFO,
+    SMBALERT, BUCK_PG, PI_5V_OFF and the cell-tap lines.
+
 The table is `gen/placement.py`, and `gen_pcb.py` applies it after packing,
 so a regenerated board reproduces it. `hardware/tools/review_placement.sh`
 scores a placement. Against the packed grid this one cuts the signal
@@ -562,7 +588,7 @@ Nothing on this board changes for rev 3.0.
 | 12 | The Vehicle-in plug's order number (KiCad's footprint confirms 1803293 for the header) and the Micro-Fit housings and crimps (43025-0600, 43025-1000, 43030) | BOM |
 | 13 | Copper weight: TI recommends 2 oz outer layers for the LM61460 | Fab order |
 | 14 | Alternator ripple at `+12V_HAT` against `VIN_SENSE`'s input, engine running | Whether the HAT coprocessor can measure ripple from `V12_SENSE` through the hold-up path (HAT §13.3.3b) |
-| 15 | Routing pass on the 2026-10-15 placement: 5 V into J1 pins 2/4 through the pin-field gaps on several layers; the LTC3350 BG gate trace around Q3 (or through a via pair); Kelvin pairs to RSNSI, RSNSC and R28; silkscreen designators, which the denser packing put over neighbouring pads; the GND thermal spokes DRC reports as starved | Layout |
+| 15 | Routing pass on the 2026-10-15 placement and layer plan (§P2): 5 V into J1 pins 2/4 through the pin-field gaps on F.Cu and B.Cu; vias from the +12V_BUS pads into the In2 island (DRC calls the island isolated copper until then); In1/In2 GND stitching; no signal vias under the switch nodes or hot loops; the LTC3350 BG gate trace around Q3 (or through a via pair); Kelvin pairs to RSNSI, RSNSC and R28; R9/C12's top trace from the island; silkscreen designators, which the denser packing put over neighbouring pads; the GND thermal spokes DRC reports as starved | Layout |
 
 ## P11. Hardware project
 

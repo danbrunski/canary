@@ -1,2701 +1,327 @@
-"""Shared offline feature pipeline: recorded sessions → model-ready feature frame.
+"""Compatibility facade over the focused feature-pipeline modules (R14).
 
-Both anomaly trainers (Isolation Forest and LSTM autoencoder) consume the same
-preprocessing path: read recorded Parquet sessions, decode CAN payloads via
-``bindings.yaml`` into numeric columns, pivot to wide, resample to a uniform
-grid, segment operating modes (or fall back to a single ``"all"`` mode when no
-OBD PIDs are present), and compute rolling features. Keeping it here means the
-training CLIs stay thin and behave identically.
+``feature_pipeline`` was one 2,701-line module. Its responsibilities now live
+in modules that depend one way (``tests/test_feature_pipeline_boundaries.py``
+holds the map):
+
+====================== ===========================================================
+``feature_paths``      repo-rooted default catalog / cache paths (leaf)
+``column_health``      finite / constant / all-NaN column health (leaf)
+``feature_policy``     ``FeaturePolicy``, exclusions, ``candidate_feature_columns``
+``feature_transform``  the one wide -> features transform, ``FeaturizedFrame``
+``feature_dependencies`` channel / derived / behavior-model reach
+``feature_perturbation`` ``featurize_perturbed_frame`` and its full-transform fallback
+``feature_selection``  trainable columns, coverage floor, IF versus sequence
+``feature_spec``       the persisted spec, health, reconciliation
+``session_resampling`` one session's decode -> gate -> resample, decode catalogs
+``feature_workers``    worker sizing, spawn entry points, serial fallback
+``feature_build``      ``build_feature_frame``, the disposition screen
+====================== ===========================================================
+
+This file defines nothing: every name below is the owner's object, kept so the
+old import path keeps working. Library code imports the owners.
 """
 
 from __future__ import annotations
 
-import hashlib
-import logging
-import multiprocessing
-import os
-from collections.abc import Collection, Mapping, Sequence
-from concurrent.futures import BrokenExecutor, ProcessPoolExecutor
-from dataclasses import dataclass, field
-from functools import cached_property
-from pathlib import Path
-from typing import Any
-
-import numpy as np
-import pandas as pd
-
-from src.behavior.behavior_decoder import append_deviation_columns, deviation_model_name
-from src.behavior.behavior_models import (
-    BehaviorModels,
-    artifact_fingerprint,
-    load_behavior_models,
+from src.features.feature_build import (
+    build_feature_frame as build_feature_frame,
 )
-from src.collection.capture_profiles import MODE01_AUTO
-from src.collection.obd_registry import MISFIRE_COUNT_CHANNEL_PREFIX, MODE01_REGISTRY
-from src.columns import (
-    FLAG_SUFFIXES,
-    GAP_SUFFIX,
-    MODE_COLUMN,
-    ROLLING_SUFFIXES,
-    UNKNOWN_MODE,
-    base_channel,
-    is_flag_column,
-    split_rolling,
+from src.features.feature_build import (
+    disposition_screen_frames as disposition_screen_frames,
 )
-from src.config import CanaryConfig, require_profile_scoped
-from src.decode.bindings import Bindings, Signal, is_trainable_binding, load_bindings
-from src.decode.dbc import DEFAULT_DBC_DIR, load_dbc_dir
-from src.decode.dids import MEMORY_SOURCE, DidMap, load_did_map
-from src.decode.engineering import DECODED_PREFIX, repo_bindings
 from src.features.feature_cache import (
     FEATURE_FRAME_CACHE_VERSION as FEATURE_FRAME_CACHE_VERSION,
 )
 from src.features.feature_cache import (
-    _feature_frame_cache_metadata,
-    _write_feature_frame_cache,
-)
-from src.features.feature_cache import (
     build_feature_frame_cache_key as build_feature_frame_cache_key,
 )
-from src.paths import BINDINGS_YAML, DATA_DIR, DIDS_YAML
-from src.preprocessing.channel_units import append_did_views, channel_units_for
-from src.preprocessing.derived import (
-    resample_reduced,
+from src.features.feature_dependencies import (
+    behavior_model_input_roots as behavior_model_input_roots,
 )
-from src.preprocessing.derived_store import DecodeInputs, DerivedStore, active_store
-from src.preprocessing.drives import DRIVE_COLUMN, stamp_physical_drives
-from src.preprocessing.features import (
-    CONTEXT_COLUMN_PREFIX,
-    FeatureConfig,
-    compute_features,
-    compute_features_last_row,
+from src.features.feature_dependencies import (
+    column_root as _column_root,
 )
-from src.preprocessing.loader import (
-    SESSION_PART_ROWS,
-    read_session,
-    to_wide,
+from src.features.feature_dependencies import (
+    derived_ancestors as _derived_ancestors,
 )
-from src.preprocessing.quality_gate import apply_quality_gate
-from src.preprocessing.resampler import ResampleConfig, resample_wide
+from src.features.feature_dependencies import (
+    derived_channel_inputs as derived_channel_inputs,
+)
+from src.features.feature_dependencies import (
+    derived_channels_reached as derived_channels_reached,
+)
+from src.features.feature_paths import (
+    DEFAULT_BINDINGS_PATH as DEFAULT_BINDINGS_PATH,
+)
+from src.features.feature_paths import (
+    DEFAULT_CAPTURE_PROFILES_PATH as DEFAULT_CAPTURE_PROFILES_PATH,
+)
+from src.features.feature_paths import (
+    DEFAULT_DIDS_PATH as DEFAULT_DIDS_PATH,
+)
+from src.features.feature_paths import (
+    DEFAULT_FEATURE_CACHE_DIR as DEFAULT_FEATURE_CACHE_DIR,
+)
+from src.features.feature_perturbation import (
+    featurize_perturbed_frame as featurize_perturbed_frame,
+)
+from src.features.feature_policy import (
+    DBC_PREFIX as DBC_PREFIX,
+)
+from src.features.feature_policy import (
+    DERIVED_PREFIX as DERIVED_PREFIX,
+)
+from src.features.feature_policy import (
+    DID_PREFIX as DID_PREFIX,
+)
+from src.features.feature_policy import (
+    DID_VIEW_EXCLUSION as DID_VIEW_EXCLUSION,
+)
+from src.features.feature_policy import (
+    MEMORY_CHANNEL_EXCLUSION as MEMORY_CHANNEL_EXCLUSION,
+)
+from src.features.feature_policy import (
+    MEMORY_FEATURE_PREFIX as MEMORY_FEATURE_PREFIX,
+)
+from src.features.feature_policy import (
+    NON_TRAINABLE_COUNTER_CHANNELS as NON_TRAINABLE_COUNTER_CHANNELS,
+)
+from src.features.feature_policy import (
+    NON_TRAINABLE_GPS_CHANNELS as NON_TRAINABLE_GPS_CHANNELS,
+)
+from src.features.feature_policy import (
+    NON_TRAINABLE_STATE_CHANNELS as NON_TRAINABLE_STATE_CHANNELS,
+)
+from src.features.feature_policy import (
+    OBD_PREFIX as OBD_PREFIX,
+)
+from src.features.feature_policy import (
+    FeaturePolicy as FeaturePolicy,
+)
+from src.features.feature_policy import (
+    candidate_feature_columns as candidate_feature_columns,
+)
+from src.features.feature_policy import (
+    feature_policy_exclusions as feature_policy_exclusions,
+)
+from src.features.feature_policy import (
+    resolve_feature_policy as resolve_feature_policy,
+)
+from src.features.feature_selection import (
+    BELOW_ROW_COVERAGE as BELOW_ROW_COVERAGE,
+)
+from src.features.feature_selection import (
+    COVERAGE_FLOOR_SCHEMA_KEY as COVERAGE_FLOOR_SCHEMA_KEY,
+)
+from src.features.feature_selection import (
+    DEVIATION_PREFIX as DEVIATION_PREFIX,
+)
+from src.features.feature_selection import (
+    MIN_DETECTOR_COVERAGE as MIN_DETECTOR_COVERAGE,
+)
+from src.features.feature_selection import (
+    MIN_ISOLATION_FOREST_COVERAGE as MIN_ISOLATION_FOREST_COVERAGE,
+)
+from src.features.feature_selection import (
+    SPARSE_FOR_GRID as SPARSE_FOR_GRID,
+)
+from src.features.feature_selection import (
+    CoverageExclusion as CoverageExclusion,
+)
+from src.features.feature_selection import (
+    DetectorFeatureSelection as DetectorFeatureSelection,
+)
+from src.features.feature_selection import (
+    apply_coverage_floor as apply_coverage_floor,
+)
+from src.features.feature_selection import (
+    detector_coverage as detector_coverage,
+)
+from src.features.feature_selection import (
+    detector_coverage_rows as detector_coverage_rows,
+)
+from src.features.feature_selection import (
+    detector_grid_density as detector_grid_density,
+)
+from src.features.feature_selection import (
+    expand_suppress_channels as expand_suppress_channels,
+)
+from src.features.feature_selection import (
+    isolation_forest_feature_columns as isolation_forest_feature_columns,
+)
+from src.features.feature_selection import (
+    isolation_forest_feature_selection as isolation_forest_feature_selection,
+)
+from src.features.feature_selection import (
+    low_coverage_columns as low_coverage_columns,
+)
+from src.features.feature_selection import (
+    restrict_isolation_forest_expansion as restrict_isolation_forest_expansion,
+)
+from src.features.feature_selection import (
+    sequence_feature_columns as sequence_feature_columns,
+)
+from src.features.feature_selection import (
+    sequence_feature_selection as sequence_feature_selection,
+)
+from src.features.feature_selection import (
+    trainable_feature_columns as trainable_feature_columns,
+)
+from src.features.feature_spec import (
+    FEATURE_SPEC_VERSION as FEATURE_SPEC_VERSION,
+)
+from src.features.feature_spec import (
+    FeatureSpecReconciliation as FeatureSpecReconciliation,
+)
+from src.features.feature_spec import (
+    _resolve_structural_columns as _resolve_structural_columns,
+)
+from src.features.feature_spec import (
+    align_features_to_schema as align_features_to_schema,
+)
+from src.features.feature_spec import (
+    build_feature_spec as build_feature_spec,
+)
+from src.features.feature_spec import (
+    consumed_behavior_fingerprints as consumed_behavior_fingerprints,
+)
+from src.features.feature_spec import (
+    reconcile_feature_frame_to_spec as reconcile_feature_frame_to_spec,
+)
+from src.features.feature_spec import (
+    summarize_feature_health as summarize_feature_health,
+)
+from src.features.feature_spec import (
+    validate_feature_health as validate_feature_health,
+)
+from src.features.feature_transform import (
+    _SEGMENTER_SIGNAL_COLUMNS as _SEGMENTER_SIGNAL_COLUMNS,
+)
+from src.features.feature_transform import (
+    ALL_MODE as ALL_MODE,
+)
+from src.features.feature_transform import (
+    SEGMENTER_SIGNAL_COLUMNS as SEGMENTER_SIGNAL_COLUMNS,
+)
+from src.features.feature_transform import (
+    FeaturizedFrame as FeaturizedFrame,
+)
+from src.features.feature_transform import (
+    append_derived_channels as _append_derived_channels,
+)
+from src.features.feature_transform import (
+    configured_behavior_models as configured_behavior_models,
+)
+from src.features.feature_transform import (
+    featurize_wide_frame as featurize_wide_frame,
+)
+from src.features.feature_transform import (
+    segment_or_constant as segment_or_constant,
+)
+from src.features.feature_transform import (
+    segmenter_input_columns as segmenter_input_columns,
+)
+from src.features.feature_transform import (
+    without_committee_columns as _without_committee_columns,
+)
+from src.features.session_resampling import (
+    _drop_fully_stale_rows as _drop_fully_stale_rows,
+)
+from src.features.session_resampling import (
+    decode_session_to_resampled as _decode_session_to_resampled,
+)
+from src.features.session_resampling import (
+    default_decode_inputs as default_decode_inputs,
+)
+from src.features.session_resampling import (
+    drop_fully_stale_rows as drop_fully_stale_rows,
+)
+from src.features.session_resampling import (
+    load_resampled_session as load_resampled_session,
+)
+from src.features.session_resampling import (
+    resample_long_session as resample_long_session,
+)
+from src.features.session_resampling import (
+    resample_session_bounded as resample_session_bounded,
+)
 from src.preprocessing.resampler import resample_config_for as resample_config_for
-from src.preprocessing.segmenter import SegmenterConfig, segment_operating_modes
-from src.preprocessing.session_decode import decode_long_frame, reduce_session
-from src.signals.afr import (
-    TARGET_AFR_CHANNELS,
-    FlashHistory,
-    append_afr_channels,
-    load_afr_calibration,
-    load_axis_refusal,
-)
-from src.signals.committees import (
-    append_committee_residuals,
-    committee_channel_reason,
-    non_trainable_committee_outputs,
-)
-from src.signals.derived import compute_anomaly_signals, compute_instantaneous_channels
-from src.signals.vehicle_signals import did_views
-from src.storage.broadcast_storage import (
-    change_only_timeout,
-    refuse_shorter_stored_timeout,
-)
-from src.telemetry import source_of
-from src.trainability import source_exclusion_reason
-from src.vehicle.profiles import active_flash_history
 
-log = logging.getLogger(__name__)
-
-#: Default location of the hand-edited CAN signal bindings file -- the repo's
-#: own, never the working directory's (R01.2).
-DEFAULT_BINDINGS_PATH = BINDINGS_YAML
-
-#: Default location of the Mode-22 DID map (data/dids.yaml), repo-rooted. Used
-#: to decode raw ``DID_<hex>`` poll readings into named ``did:<NAME>`` signals.
-DEFAULT_DIDS_PATH = DIDS_YAML
-
-#: Default retrain-time cache for model-ready feature frames.
-DEFAULT_FEATURE_CACHE_DIR = DATA_DIR / "cache" / "feature_frames"
-
-#: Mode label used when no OBD PIDs are present and the threshold segmenter
-#: can't run — everything becomes one mode and the model fits a single global
-#: detector. Per-mode models materialize once OBD data exists.
-ALL_MODE = "all"
-
-#: OBD channels the operating-mode segmenter needs as inputs. ``coolant_temp``
-#: is required for the cold-start / warm-idle split (see ``warmup`` /
-#: ``idle`` modes in canary.example.yaml — without it the segmenter can't
-#: tell a cold engine from a warm one and behavior models fit one surface
-#: to both regimes, which is what caused the May 2026 R²=0.41 warmup mess.
-#:
-#: Deliberately NOT ``segmenter.DEFAULT_SIGNAL_COLUMNS``, despite the overlap:
-#: ``have_inputs`` below requires *every* key here to resolve, and that table
-#: carries optional signals (``imu:``) absent from all pre-Phase-2b data. Using
-#: it would send every historical session to ``ALL_MODE``. This is the
-#: *required* set; that one is the full candidate map. Keep the per-signal
-#: candidate lists in step between them — a fallback added there and not here
-#: silently does nothing on the training path.
-SEGMENTER_SIGNAL_COLUMNS: dict[str, str | tuple[str, ...]] = {
-    # Broadcast CAN sits last: ~98 Hz against Mode 01's 0.26-0.93 Hz, so it
-    # fills the rows where the PID was stale rather than overriding it. See
-    # segmenter.DEFAULT_SIGNAL_COLUMNS for the measured agreement and for why
-    # those NaN rows mattered (they became the degenerate `unknown` mode).
-    "rpm": ("obd:RPM", "decoded:ECM_RPM"),
-    # OBD wheel-speed PID is the reliable primary; GPS is the back-stop when OBD
-    # is absent, coalesced row-wise (see segmenter). GPS↔OBD disagreement is a
-    # sensor-committee residual, not a coalesce winner.
-    "speed": ("obd:SPEED", "decoded:WHEEL_SPEED_6F7_C", "gps:speed"),
-    "throttle": "obd:THROTTLE_POS",
-    "coolant_temp": ("obd:COOLANT_TEMP", "decoded:ECM_COOLANT_TEMP"),
-}
-#: Pre-R04.14 private name, kept for its importers.
-_SEGMENTER_SIGNAL_COLUMNS = SEGMENTER_SIGNAL_COLUMNS
-
-
-def segmenter_input_columns() -> tuple[str, ...]:
-    """Every column :data:`SEGMENTER_SIGNAL_COLUMNS` names, flattened, in order,
-    once each: what a bounded reader must load for mode labels to match the
-    training path."""
-    columns: list[str] = []
-    for candidates in SEGMENTER_SIGNAL_COLUMNS.values():
-        columns.extend((candidates,) if isinstance(candidates, str) else candidates)
-    return tuple(dict.fromkeys(columns))
-
-
-#: GPS channels logged for trip reconstruction and data-quality context but
-#: deliberately excluded from model features. Absolute position would teach the
-#: detectors location identity; heading wraps at 360°; and fix-quality /
-#: satellite-count / HDOP describe the receiver, not the vehicle. Since H01.1
-#: the source gate (``src.trainability``) excludes *every* ``gps:`` channel,
-#: ``gps:speed`` included (H00 operator decision 1: external sensors never
-#: train or score the detectors; ``gps:speed`` still backs up the segmenter's
-#: speed signal, which is mode labelling, not a feature). This name list is
-#: kept as the named, older reason for these seven.
-NON_TRAINABLE_GPS_CHANNELS: frozenset[str] = frozenset(
-    {
-        "gps:latitude",
-        "gps:longitude",
-        "gps:altitude",
-        "gps:heading",
-        "gps:fix_quality",
-        "gps:num_satellites",
-        "gps:hdop",
-    }
-)
-
-#: Monotonic counters / odometers / run-clocks: they only ever increase (or
-#: reset on a DTC clear / key cycle), so their absolute level and rolling
-#: derivatives carry no anomaly signal — yet the LSTM can't reconstruct an
-#: ever-rising ramp and flags it on every window (RUN_TIME/DISTANCE were the
-#: top false-alarm contributors on a known-good drive), and they add noise to
-#: the IF. Excluded from trained features but kept in the frame so behavior
-#: models can still read them (e.g. ``obd:RUN_TIME`` is the coolant_warmup
-#: time-since-start axis). Same mechanism as NON_TRAINABLE_GPS_CHANNELS.
-#: ``derived:*`` trip integrals (Task 1.1/1.3) — cumulative sums over the
-#: session (fuel used, distance, CO2, idle time, running average economy)
-#: are monotonic-by-construction the same way ``obd:RUN_TIME`` is: real
-#: anomaly information, zero, and the LSTM can't reconstruct an ever-rising
-#: ramp. Excluded here for the same reason and by the same mechanism as the
-#: OBD counters below, in case a future feature frame ever includes
-#: ``compute_derived_channels``'s cumulative output (today only
-#: ``compute_instantaneous_channels``'s row-local subset feeds
-#: ``featurize_wide_frame`` — see there).
-_NON_TRAINABLE_DERIVED_INTEGRALS: frozenset[str] = frozenset(
-    {
-        "derived:TRIP_DISTANCE_KM",
-        "derived:FUEL_USED_L",
-        "derived:CO2_KG",
-        "derived:IDLE_TIME_S",
-        "derived:AVG_ECONOMY_L_PER_100KM",
-    }
-)
-
-#: Task 4.6 — ``derived:GEAR_ESTIMATE`` is a clustered/categorical label
-#: (nearest known gear ratio), not a continuous physical residual like the
-#: rest of ``compute_instantaneous_channels``'s output. It's redundant with
-#: rpm+speed (already trained features) for anomaly purposes and a
-#: stepwise/discrete signal would only add reconstruction noise to the IF
-#: z-score scaler and the LSTM's continuous-signal assumption — explicit
-#: model-trainability decision per the engine-analysis-and-mapping.md Phase
-#: 4 acceptance checklist. Kept in the frame (same mechanism as the counters
-#: below) so analysis/UI code can still read it.
-_NON_TRAINABLE_CATEGORICAL_CHANNELS: frozenset[str] = frozenset(
-    {
-        "derived:GEAR_ESTIMATE",
-    }
-)
-
-#: Per-cylinder misfire *counters* (Mode 06-style tallies surfaced as PIDs).
-#: Same defect as the odometers below: a count that only accumulates until the
-#: next DTC clear / key cycle. Its level says how long ago that was, and its
-#: rolling derivatives are zero on every healthy tick — a misfire is caught by
-#: the DTC/monitor path, not by teaching a forest what "0 forever" looks like.
-#: Matched by the registry's channel prefix, not an enumerated cylinder list,
-#: so a V8's CYL7/CYL8 are covered without anyone remembering to add them.
-_NON_TRAINABLE_MISFIRE_COUNTER_PREFIX = f"obd:{MISFIRE_COUNT_CHANNEL_PREFIX}"
-
-NON_TRAINABLE_COUNTER_CHANNELS: frozenset[str] = frozenset(
-    {
-        "obd:RUN_TIME",
-        "obd:DISTANCE_SINCE_DTC_CLEAR",
-        "obd:DISTANCE_W_MIL",
-        "obd:WARMUPS_SINCE_DTC_CLEAR",
-    }
-    | _NON_TRAINABLE_DERIVED_INTEGRALS
-    | _NON_TRAINABLE_CATEGORICAL_CHANNELS
-)
-
-#: Slow *state* of the vehicle rather than behaviour of the engine. The tank
-#: level drifts over days, not within a drive: a corpus sees a handful of
-#: distinct levels, so every fill-up (or every quarter-tank the corpus happened
-#: not to contain) is "novel" to a detector while saying nothing about engine
-#: health. Kept in the frame (trip/economy code reads it), never trained on —
-#: same mechanism as the counters above.
-NON_TRAINABLE_STATE_CHANNELS: frozenset[str] = frozenset(
-    {
-        "obd:FUEL_LEVEL",
-    }
-)
-
-FEATURE_SPEC_VERSION = 1
-
-#: Bookkeeping columns every feature frame carries; never features, and never
-#: judged by :class:`FeaturePolicy` (they name no source).
-_STRUCTURAL_COLUMNS: frozenset[str] = frozenset({"session", "timestamp", MODE_COLUMN, DRIVE_COLUMN})
-
-#: Repo-root-anchored serving capture-profile catalog, used when no config is
-#: threaded (same anchoring as ``engineering.DEFAULT_BINDINGS_PATH``).
-DEFAULT_CAPTURE_PROFILES_PATH = Path(__file__).resolve().parents[2] / "data/capture_profiles.yaml"
-
-DID_PREFIX = "did:"
-DBC_PREFIX = "dbc:"
-OBD_PREFIX = "obd:"
-DERIVED_PREFIX = "derived:"
-
-#: Wide-column prefix of a service-0x23 memory channel: the poller emits
-#: ``mem:<NAME>`` readings under source ``obd``.
-MEMORY_FEATURE_PREFIX = f"{OBD_PREFIX}{MEMORY_SOURCE}:"
-
-#: Why a memory channel is never a detector feature (B08.4, 2026-10-08). The
-#: source gate passes it (its source is ``obd``) and no serving gate covered
-#: it, because it is neither a Mode 01 PID nor a DID: the 2026-09-24 sequence
-#: artifact learned ``obd:mem:ECM_ENGINE_SPEED_RAM`` and
-#: ``obd:mem:ECM_IGNITION_TIMING_RAM`` from two drives that polled them,
-#: scaled on one idle count (775 rpm, std 12.5), and the serving profile never
-#: polled them. RAM channels are firmware-context evidence for the behavior and
-#: twin work; behavior recipes still read them (``src.trainability`` passes
-#: them), only the IF and sequence detectors do not.
-MEMORY_CHANNEL_EXCLUSION = (
-    "memory_channel: a service-0x23 RAM read is firmware-context evidence for "
-    "behavior and twin work, not an IF/sequence detector feature (B08.4, 2026-10-08)"
-)
-
-#: Mode 01 PID channel names, the ones a capture profile's ``mode01`` selects.
-_MODE01_CHANNELS = frozenset(d.channel.upper() for d in MODE01_REGISTRY.values())
-
-
-def _is_mode01_channel(column: str) -> bool:
-    return column.removeprefix(OBD_PREFIX).upper() in _MODE01_CHANNELS
-
-
-#: Prefix of the standing exclusion of a vehicle DID view (P02.14).
-DID_VIEW_EXCLUSION = "did_view"
-
-
-def _did_view_channels() -> frozenset[str]:
-    return frozenset(view.channel for view in did_views())
-
-
-@dataclass(frozen=True)
-class FeaturePolicy:
-    """Which *sourced* channels may become trained features — resolved facts.
-
-    The static exclusions (GPS position, counters, tank level) are constants in
-    this module. These two depend on data files, so they are resolved once
-    (:func:`resolve_feature_policy`) and carried here:
-
-    ``bindings``
-        The catalog ``decoded:`` columns were produced from. A ``decoded:``
-        channel trains only if its binding passes
-        :func:`src.decode.bindings.is_trainable_binding` — confidence
-        ``confirmed``/``high`` and not opted out with ``model_feature: false``.
-        ``None`` = no catalog could be loaded; then *no* ``decoded:`` channel
-        trains, because an unverifiable byte is not evidence.
-
-    ``serving_dids``
-        Upper-cased DID names the serving (``default``) capture profile polls.
-        A ``did:`` channel trains only if it is in here; one polled solely by a
-        research capture profile is NaN for the model's whole serving life.
-        ``None`` = unresolvable, and then no ``did:`` channel trains.
-
-    ``serving_mode01``
-        The same answer for Mode 01
-        (:func:`~src.collection.capture_profiles.serving_mode01_channels`):
-        upper-cased channel names, or ``AUTO`` for every supported PID. An
-        ``obd:`` Mode 01 channel trains only if the serving profile polls it,
-        and a ``derived:`` channel only if each of its required input groups
-        has an input the serving profile supplies. The Xterra ``default``
-        dropped ten PIDs on 2026-09-26 (D03.34) that the old corpus still
-        carries. ``None`` = unresolvable, and then no Mode 01 channel trains.
-
-    ``did_map``
-        The DID catalog the frame was decoded with (P02.14 verification). The
-        load-axis refusal and the DID-view exclusion read units from it, never
-        from the repo file, so a frame decoded with another catalog is judged
-        by that catalog. ``None`` = no DID catalog decoded the frame, and then
-        every DID view and DID-backed load axis is refused. Required: a
-        default would be the repo file, which is the mismatch this prevents.
-    """
-
-    bindings: Bindings | None
-    serving_dids: frozenset[str] | None
-    serving_mode01: frozenset[str] | None
-    did_map: DidMap | None = field(hash=False)
-
-    @cached_property
-    def _signals_by_name(self) -> dict[str, Signal]:
-        # reconcile_feature_frame_to_spec consults this per serve tick.
-        return {} if self.bindings is None else {sig.name: sig for sig in self.bindings.signals}
-
-    def exclusion_reason(self, base: str) -> str | None:
-        """Why base channel ``base`` may not train, or ``None`` if it may.
-
-        The source gate comes first (H01.1, :func:`src.trainability.source_exclusion_reason`):
-        a channel whose origin is not on the ECU-origin allowlist — ``gps:``,
-        ``imu:``, ``sensor:``, a ``derived:`` channel computed from one, an
-        undeclared ``derived:`` channel, an unclassified namespace — is
-        refused as ``source_not_trainable: ...`` before any data-file gate.
-        Enforced at *training*: a deployed artifact that already carries such
-        a feature keeps being served it (the serve-side reconciler aligns to
-        the manifest, never to this policy); the load audit names it as a
-        policy violation until the retrain replaces it.
-        """
-        # P02.13 first: the source gate also refuses TARGET_AFR while its load
-        # input group is empty, and the load-axis reason is the one that says
-        # why. P02.14's DID views are refused by name here too.
-        if base in TARGET_AFR_CHANNELS or base in _did_view_channels():
-            standing = self.standing_exclusions().get(base)
-            if standing is not None:
-                return standing
-        source_reason = source_exclusion_reason(base)
-        if source_reason is not None:
-            return source_reason
-        if base.startswith(MEMORY_FEATURE_PREFIX):
-            return MEMORY_CHANNEL_EXCLUSION
-        if base.startswith(DECODED_PREFIX) or base.startswith(DBC_PREFIX):
-            signal = self._signals_by_name.get(base.split(":", 1)[1])
-            if signal is None:
-                if base.startswith(DBC_PREFIX):
-                    # A genuinely external DBC signal: no binding to judge it by,
-                    # and none needed — it never came from bindings.yaml.
-                    return None
-                return (
-                    "no bindings catalog loaded"
-                    if self.bindings is None
-                    else "not in the bindings catalog"
-                )
-            if not signal.model_feature:
-                return "binding opted out (model_feature: false)"
-            if not is_trainable_binding(signal):
-                return f"binding confidence {signal.confidence!r} is below 'high'"
-            return None
-        if base.startswith(DID_PREFIX):
-            if self.serving_dids is None:
-                return "serving capture profile unresolvable"
-            if base.removeprefix(DID_PREFIX).upper() not in self.serving_dids:
-                return "not polled by the serving (default) capture profile"
-        if base.startswith(OBD_PREFIX) and _is_mode01_channel(base):
-            if self.serving_mode01 is None:
-                return "serving capture profile unresolvable"
-            if not self._served(base, frozenset()):
-                return "not polled by the serving (default) capture profile"
-        if base.startswith(DERIVED_PREFIX):
-            missing = self._unserved_group(base, frozenset())
-            if missing is not None:
-                return (
-                    f"needs one of {', '.join(missing)}, which the serving (default) "
-                    "capture profile does not poll"
-                )
-        return None
-
-    def standing_exclusions(self) -> dict[str, str]:
-        """``{channel: reason}`` the policy refuses by name, whether or not a
-        frame carries the channel.
-
-        P02.13 (operator decision 2026-09-27): ``derived:TARGET_AFR`` and
-        ``derived:AFR_ERROR_B*`` stay out of detector features until a channel
-        is verified to report the target map's load axis in its unit. They
-        were looked up with calculated load (%) on a base-fuel-schedule axis
-        (ms). The refusal lifts itself once a vehicle declares that channel
-        (``src.signals.vehicle_signals`` ``LOAD_AXIS_CHANNELS``) whose catalog
-        unit is the axis unit (:mod:`src.preprocessing.channel_units`). Recorded on
-        every manifest (:func:`build_feature_spec`), so an artifact answers
-        why the channels are absent even from a frame that never had them.
-
-        P02.14: each vehicle DID view (``derived:BASE_FUEL_SCHEDULE`` on the
-        Xterra) is its source DID times a constant. The source is already a
-        candidate, so the view would enter the detectors as a second copy of
-        one reading. It is refused by name, :data:`DID_VIEW_EXCLUSION`.
-        """
-        exclusions = {
-            view.channel: (
-                f"{DID_VIEW_EXCLUSION}: {view.channel} is {view.source} times a constant "
-                f"(dids.yaml evidence {view.scale_method!r}); the source is the feature, and "
-                "the view would be a second copy of one reading (P02.14)"
-            )
-            for view in did_views()
-        }
-        axis_refusal = load_axis_refusal(channel_units=channel_units_for(self.did_map))
-        if axis_refusal is not None:
-            exclusions.update(dict.fromkeys(TARGET_AFR_CHANNELS, axis_refusal))
-        return exclusions
-
-    def _served(self, column: str, seen: frozenset[str]) -> bool:
-        """Will the serving profile supply ``column``? Namespaces other than
-        polled Mode 01, Mode 22 and derived ones are not this gate's to judge,
-        except a memory channel: never a detector input, so a derived channel
-        needing one is never served to a detector either."""
-        if column.startswith(MEMORY_FEATURE_PREFIX):
-            return False
-        if column.startswith(OBD_PREFIX) and _is_mode01_channel(column):
-            if self.serving_mode01 is None:
-                return False
-            name = column.removeprefix(OBD_PREFIX).upper()
-            return MODE01_AUTO in self.serving_mode01 or name in self.serving_mode01
-        if column.startswith(DID_PREFIX):
-            dids = self.serving_dids
-            return dids is not None and column.removeprefix(DID_PREFIX).upper() in dids
-        if column.startswith(DERIVED_PREFIX):
-            return self._unserved_group(column, seen) is None
-        return True
-
-    def _unserved_group(self, channel: str, seen: frozenset[str]) -> tuple[str, ...] | None:
-        """The first required input group of derived ``channel`` with no served
-        input, or ``None``. Undeclared channels are the source gate's business."""
-        from src.signals.derived import DERIVED_CHANNEL_INPUTS
-
-        groups = DERIVED_CHANNEL_INPUTS.get(channel)
-        if groups is None or channel in seen:
-            return None
-        nested = seen | {channel}
-        for group in groups:
-            if not any(self._served(column, nested) for column in group):
-                return group
-        return None
-
-
-#: ``{path: ((mtime_ns, size), DidMap)}`` for :func:`_did_map_at`.
-_DID_MAP_CACHE: dict[Path, tuple[tuple[int, int], DidMap]] = {}
-
-
-def _did_map_at(path: Path) -> DidMap | None:
-    """The DID catalog at ``path``, re-read when its mtime or size changes;
-    ``None`` when absent. :func:`repo_bindings`' pattern for the other catalog.
-
-    :func:`reconcile_feature_frame_to_spec` resolves the default
-    :class:`FeaturePolicy` on every serve tick, once per detector, and
-    re-parsing ``dids.yaml`` there was ~300 ms of its ~400 ms on the laptop
-    (P02.9 measurement, 2026-10-05).
-    """
-    try:
-        stat = path.stat()
-    except FileNotFoundError:
-        return None
-    stamp = (stat.st_mtime_ns, stat.st_size)
-    cached = _DID_MAP_CACHE.get(path)
-    if cached is not None and cached[0] == stamp:
-        return cached[1]
-    did_map = load_did_map(path)
-    _DID_MAP_CACHE[path] = (stamp, did_map)
-    return did_map
-
-
-def resolve_feature_policy(
-    config: CanaryConfig | None = None,
-    *,
-    profile_slug: str | None = None,
-    bindings: Bindings | None = None,
-    bindings_path: Path | None = None,
-    dids_path: Path = DEFAULT_DIDS_PATH,
-) -> FeaturePolicy:
-    """The :class:`FeaturePolicy` for a training/selection run.
-
-    Bindings resolve the way :mod:`src.decode.engineering` does it: an explicit
-    catalog when threaded, else ``bindings_path``, else the repo catalog.
-
-    The DID catalog is ``dids_path`` (``None`` in the policy when absent), the
-    same default :func:`build_feature_frame` decodes with: a caller decoding
-    with another catalog passes that path here too.
-
-    The serving DID set comes from the ``default`` capture profile — the saved
-    catalog at the (vehicle-scoped, when profiles are enabled) configured path,
-    or what that catalog would be seeded with (``collection.obd_dids``). With no
-    ``config`` it falls back to the repo's ``data/capture_profiles.yaml``.
-    """
-    from src.collection.capture_profiles import (
-        CaptureProfileSources,
-        serving_mode01_channels,
-        serving_mode22_dids,
-    )
-
-    # No config: the starter catalog alone, with no machine's overrides.
-    starter_only = CaptureProfileSources(DEFAULT_CAPTURE_PROFILES_PATH, None)
-
-    catalog = bindings
-    if catalog is None:
-        catalog = (
-            repo_bindings(bindings_path.resolve()) if bindings_path is not None else repo_bindings()
-        )
-    did_map = _did_map_at(dids_path)
-    if config is None:
-        return FeaturePolicy(
-            bindings=catalog,
-            serving_dids=serving_mode22_dids(starter_only),
-            serving_mode01=serving_mode01_channels(starter_only),
-            did_map=did_map,
-        )
-    scoped = config
-    if config.profiles.enabled:
-        from src.vehicle.profiles import resolve_profile_for_tooling, scope_config
-
-        scoped = scope_config(config, resolve_profile_for_tooling(config, profile_slug))
-    return FeaturePolicy(
-        bindings=catalog,
-        serving_dids=serving_mode22_dids(
-            CaptureProfileSources.of(scoped.daemon), scoped.collection
-        ),
-        serving_mode01=serving_mode01_channels(
-            CaptureProfileSources.of(scoped.daemon), scoped.collection
-        ),
-        did_map=did_map,
-    )
-
-
-def feature_policy_exclusions(
-    features: pd.DataFrame, policy: FeaturePolicy | None = None
-) -> dict[str, str]:
-    """``{base channel: reason}`` for channels :class:`FeaturePolicy` keeps out.
-
-    Recorded in the manifest's feature spec so "why is ``did:X`` not a feature"
-    is answered by the artifact instead of re-derived from the data files as
-    they happen to look later.
-    """
-    resolved = policy if policy is not None else resolve_feature_policy()
-    out: dict[str, str] = {}
-    for raw in features.columns:
-        column = str(raw)
-        if (
-            column in _STRUCTURAL_COLUMNS
-            or is_flag_column(column)
-            or column.startswith(CONTEXT_COLUMN_PREFIX)
-        ):
-            continue
-        base = base_channel(column)
-        if base in out:
-            continue
-        reason = resolved.exclusion_reason(base)
-        if reason is not None:
-            out[base] = reason
-    return dict(sorted(out.items()))
-
-
-#: Worker-process state for the parallel feature build. Populated once per
-#: process via :func:`_init_feature_worker` so the heavy decoder objects
-#: (bindings, DBC database, DID map) are sent across the pool boundary one time
-#: per worker — not pickled per submitted session.
-_FEATURE_WORKER_STATE: dict[str, Any] = {}
-
-
-def _init_feature_worker(
-    bindings: Any,
-    dbc_database: Any,
-    did_map: Any,
-    resample_config: ResampleConfig,
-) -> None:
-    _FEATURE_WORKER_STATE["bindings"] = bindings
-    _FEATURE_WORKER_STATE["dbc"] = dbc_database
-    _FEATURE_WORKER_STATE["dids"] = did_map
-    _FEATURE_WORKER_STATE["resample"] = resample_config
-
-
-def _decode_session_to_wide(
-    session_dir: Path,
-    bindings: Any,
-    dbc_database: Any,
-    did_map: Any,
-) -> pd.DataFrame:
-    """parquet → decode → wide pivot, split out of
-    :func:`_decode_session_to_resampled` (Task 1.2) so the quality gate's
-    reject counts stay inspectable per-session (``scripts/disposition_report.py``)
-    without duplicating the decode steps.
-    """
-    long = decode_long_frame(
-        read_session(session_dir, decoded="as_recorded"), bindings, dbc_database, did_map
-    )
-    return to_wide(long, coerce_numeric=True)
-
-
-def _decode_session_to_resampled(
-    session_dir: Path,
-    bindings: Any,
-    dbc_database: Any,
-    did_map: Any,
-    resample_config: ResampleConfig,
-) -> pd.DataFrame:
-    """The per-session pipeline: parquet → decode → wide → reject gate → resample.
-
-    Top-level (not nested) so :class:`ProcessPoolExecutor` can pickle it. The
-    serial path also calls it directly, so there's exactly one implementation
-    of the per-session work.
-
-    The quality gate (Task 1.2) runs on the wide frame, before
-    ``resample_wide`` — a physically-impossible cell must be NaN'd before the
-    resampler's ffill/``__gap`` bookkeeping ever sees it, so a reject is
-    indistinguishable from any other gap to every downstream consumer.
-
-    Runs :func:`resample_session_bounded`, so training, the evaluation loader
-    and the session-deviation analysis share one bounded chain.
-    """
-    return resample_session_bounded(
-        session_dir,
-        bindings,
-        dbc_database,
-        did_map,
-        resample_config,
-    )
-
-
-def resample_session_bounded(
-    session_dir: Path,
-    bindings: Any,
-    dbc_database: Any,
-    did_map: Any,
-    resample_config: ResampleConfig,
-    *,
-    part_rows: int = SESSION_PART_ROWS,
-    store: DerivedStore | None = None,
-    channels: Collection[str] | None = None,
-) -> pd.DataFrame:
-    """decode → wide → reject gate → resample for one session, in bounded memory.
-
-    The one reader of a session's 1 Hz frame for every offline consumer
-    (P01.2): the trainers (via :func:`_decode_session_to_resampled`),
-    ``evaluate_detectors`` (via :func:`load_resampled_session`) and the
-    session-deviation analysis. Identical output to
-    ``resample_long_session(read_session(session_dir, decoded="as_recorded"), ...)``
-    (``tests/test_bounded_session_resample.py`` asserts it exactly), but it
-    never pivots at raw resolution: :func:`reduce_session` keeps only the cells
-    the resampler reads, and :func:`src.preprocessing.derived.resample_reduced`
-    builds the wide frame from those. Reading a 2 h, 17.9M-row drive whole cost
-    ~12 GB before a single value was decoded; the A02.11 baseline was
-    OOM-killed at 15 GB on it (2026-09-25).
-
-    ``store`` (default: :func:`~src.preprocessing.derived_store.active_store`,
-    which is ``None`` unless the process asked for one) reads the reduced
-    frame back, or builds and keeps it; without one nothing is written.
-    ``channels`` projects the frame to those value columns.
-    """
-    if store is None:
-        store = active_store()
-    if store is not None:
-        reduced, _load = store.load(
-            session_dir,
-            DecodeInputs(bindings=bindings, dbc=dbc_database, did_map=did_map),
-            resample_config,
-            part_rows=part_rows,
-        )
-    else:
-        reduced = reduce_session(
-            session_dir, bindings, dbc_database, did_map, resample_config, part_rows=part_rows
-        )
-    return resample_reduced(reduced, resample_config, channels=channels)
-
-
-def resample_long_session(
-    long: pd.DataFrame,
-    bindings: Any,
-    dbc_database: Any,
-    did_map: Any,
-    resample_config: ResampleConfig,
-    *,
-    session_name: str,
-) -> pd.DataFrame:
-    """decode → wide → reject gate → resample for one session's long frame.
-
-    Takes the long frame instead of reading it, so a filtered reader (the
-    behavior-validation evaluator reads only the CAN ids its decoded channels
-    need) runs the identical decode/gate/resample chain rather than a copy of
-    it. It holds the whole decoded session at once; a caller that reads a
-    whole session directory uses :func:`resample_session_bounded`, whose
-    output is identical and whose memory is not.
-    """
-    # P02.10: the decode drops ``attrs``, so the recorded timeout is checked here.
-    refuse_shorter_stored_timeout(
-        change_only_timeout(long), resample_config.broadcast_max_gap_seconds, what=session_name
-    )
-    wide = to_wide(decode_long_frame(long, bindings, dbc_database, did_map), coerce_numeric=True)
-    gated, quality = apply_quality_gate(wide)
-    if quality.total_rejected:
-        log.info(
-            "quality gate rejected cells in session",
-            extra={"session": session_name, "reject_counts": quality.reject_counts},
-        )
-    return resample_wide(gated, config=resample_config)
-
-
-def _worker_process_session(
-    session_dir: Path,
-) -> tuple[str, pd.DataFrame | None, str | None]:
-    """ProcessPool task body. Returns ``(session_name, frame_or_none, error_or_none)``
-    so a single bad session is reported as a skip rather than killing the pool."""
-    state = _FEATURE_WORKER_STATE
-    try:
-        frame = _decode_session_to_resampled(
-            session_dir,
-            state["bindings"],
-            state["dbc"],
-            state["dids"],
-            state["resample"],
-        )
-        return session_dir.name, frame, None
-    except Exception as exc:  # noqa: BLE001 — one bad session must not kill the corpus
-        return session_dir.name, None, f"{type(exc).__name__}: {exc}"
-
-
-#: Skip the process pool below this session count: per-session work is short
-#: enough that a fork + IPC round-trip wipes out the parallel win. Above this,
-#: the pool consistently beats serial wall time on our corpus.
-_PARALLEL_SESSION_THRESHOLD = 3
-
-#: Hard ceiling on auto-resolved workers, before the memory budget below trims
-#: it further. Callers can pass an explicit ``max_workers`` to override both.
-_PARALLEL_WORKER_CAP = 4
-
-#: Share of ``MemAvailable`` the pool may claim. Deliberately well under half:
-#: the parent process is concurrently accumulating every returned session frame
-#: in ``resampled_parts`` (a full-corpus retrain parent has been observed at
-#: 8 GB RSS), and it, not the workers, holds the final concatenated frame.
-_PARALLEL_MEMORY_FRACTION = 0.35
-
-#: Resident floor for one ``spawn`` worker before it touches data: a fresh
-#: interpreter re-importing pandas/pyarrow/torch-free decode stack measures
-#: ~130-200 MB on the dev laptop.
-_WORKER_BASELINE_BYTES = 250 * 1024 * 1024
-
-#: Peak working set per byte of session parquet, for the decode → long →
-#: wide-pivot → resample chain. Measured on this corpus (2026-07-26,
-#: ``resample_hz: 1``): 28.5 MB on disk → 487 MB peak (17×), 45.6 MB → 1360 MB
-#: (30×). Rounded up to 40× because the expansion scales with a session's
-#: *channel count and wall-clock span*, not just its byte count, and an
-#: underestimate is what gets a worker OOM-killed.
-_WORKER_BYTES_PER_DISK_BYTE = 40
-
-
-def _available_memory_bytes() -> int | None:
-    """Best-effort ``MemAvailable``, or ``None`` if the platform won't say.
-
-    ``MemAvailable`` (not ``MemFree``) is the right number: it accounts for
-    reclaimable page cache, which is most of what a just-finished parquet read
-    leaves behind.
-    """
-    try:
-        with open("/proc/meminfo", encoding="utf-8") as handle:
-            for line in handle:
-                if line.startswith("MemAvailable:"):
-                    return int(line.split()[1]) * 1024
-    except (OSError, ValueError, IndexError):
-        pass
-    try:  # non-Linux fallback: free pages only, no reclaimable cache
-        return int(os.sysconf("SC_AVPHYS_PAGES")) * int(os.sysconf("SC_PAGE_SIZE"))
-    except (OSError, ValueError, AttributeError):
-        return None
-
-
-def _largest_session_bytes(session_dirs: Sequence[Path]) -> int:
-    """On-disk parquet bytes of the biggest session in the batch.
-
-    Sizing off the max rather than the mean because ``pool.map`` hands sessions
-    out in order: several of the largest drives can be in flight simultaneously,
-    and it only takes one worker over the line to get the pool OOM-killed.
-    """
-    largest = 0
-    for session_dir in session_dirs:
-        try:
-            total = sum(path.stat().st_size for path in session_dir.glob("*.parquet"))
-        except OSError:
-            continue
-        largest = max(largest, total)
-    return largest
-
-
-def _resolve_worker_count(session_dirs: Sequence[Path], max_workers: int | None) -> int:
-    """Pick a worker count that fits in RAM.
-
-    A fixed cap is wrong on both ends: it OOM-kills a wide corpus on a loaded
-    box (4 workers × multi-GB frames on a 15 GB laptop) and leaves cores idle on
-    a small one. Derive it from what's actually free and what one worker is
-    actually going to hold, and log the arithmetic so a surprising choice is
-    inspectable rather than mysterious.
-    """
-    if max_workers is None:
-        configured = os.environ.get("CANARY_FEATURE_WORKERS")
-        if configured:
-            try:
-                max_workers = int(configured)
-            except ValueError:
-                log.warning("ignoring invalid CANARY_FEATURE_WORKERS=%r", configured)
-    if max_workers is not None:
-        return max(1, int(max_workers))
-
-    ceiling = min(len(session_dirs), os.cpu_count() or 1, _PARALLEL_WORKER_CAP)
-    if ceiling <= 1:
-        return max(1, ceiling)
-
-    available = _available_memory_bytes()
-    if available is None:
-        return ceiling
-
-    per_worker = _WORKER_BASELINE_BYTES + _largest_session_bytes(session_dirs) * (
-        _WORKER_BYTES_PER_DISK_BYTE
-    )
-    budget = int(available * _PARALLEL_MEMORY_FRACTION)
-    affordable = max(1, budget // per_worker)
-    workers = min(ceiling, affordable)
-    log.info(
-        "sized parallel feature build to available memory",
-        extra={
-            "workers": workers,
-            "cpu_ceiling": ceiling,
-            "available_mb": round(available / 1024 / 1024),
-            "budget_mb": round(budget / 1024 / 1024),
-            "per_worker_mb": round(per_worker / 1024 / 1024),
-        },
-    )
-    return workers
-
-
-def build_feature_frame(
-    session_dirs: Sequence[Path],
-    config: CanaryConfig,
-    *,
-    bindings_path: Path = DEFAULT_BINDINGS_PATH,
-    behavior_models_path: Path | None = None,
-    dbc_dir: Path = DEFAULT_DBC_DIR,
-    dids_path: Path = DEFAULT_DIDS_PATH,
-    cache_dir: Path | None = None,
-    force_rebuild: bool = False,
-    max_workers: int | None = None,
-) -> pd.DataFrame:
-    """Run the full preprocessing pipeline over ``session_dirs`` into a feature frame.
-
-    ``read_session`` → ``decode_can_rows`` (bindings.yaml, if present) →
-    ``decode_can_rows_dbc`` (any ``.dbc`` files under ``dbc_dir``, if present —
-    Task 1.8 interop hook) → ``decode_did_rows`` (``dids_path``, if present) →
-    ``to_wide(coerce_numeric=True)`` → ``resample_wide`` → operating-mode
-    segment (or constant ``"all"`` mode) → ``append_deviation_columns``
-    (behavior models, if present — Task 4.E.7) → ``compute_features``.
-
-    Every catalog path defaults to the repo's own file (:mod:`src.paths`), never
-    the working directory, and the cache key hashes exactly the files loaded
-    (R01.2): a build started outside the repo root used to drop every ``did:``
-    feature while its cache key hashed a different constant.
-
-    The deviation columns land *before* ``compute_features`` so they pick up
-    rolling mean/std/roc derivatives just like raw / decoded channels. The
-    ``ZScoreScaler`` then normalizes them through ``trainable_feature_columns``
-    without changes to either module.
-
-    P02.12 — the behavior models are the scoped ``config.daemon.behavior_models``,
-    the file the daemon serves. The default was the repo's unscoped
-    ``data/behavior_models.yaml``, which does not exist, and no trainer passed
-    a path, so trainer frames carried no ``deviation:*`` columns while the
-    served frames did. ``behavior_models_path`` overrides it only for a caller
-    whose subject is another artifact (``refit_behavior_models --out``).
-    """
-    # Before the cache: a hit would otherwise hand back a frame an unscoped
-    # config could never have built correctly (P02.11).
-    require_profile_scoped(config, reader="build_feature_frame")
-    if behavior_models_path is None:
-        behavior_models_path = config.daemon.behavior_models
-    session_dirs = [Path(session_dir) for session_dir in session_dirs]
-    cache_path: Path | None = None
-    cache_metadata: dict[str, Any] | None = None
-    if cache_dir is not None:
-        cache_metadata = _feature_frame_cache_metadata(
-            session_dirs,
-            config,
-            bindings_path=bindings_path,
-            behavior_models_path=behavior_models_path,
-            dbc_dir=dbc_dir,
-            dids_path=dids_path,
-        )
-        cache_path = Path(cache_dir) / f"{cache_metadata['cache_key']}.pkl"
-        if not force_rebuild:
-            cached = _load_cached(cache_path)
-            if cached is not None:
-                return _with_physical_drives(cached, session_dirs)
-
-    inputs = _load_decode_inputs(
-        bindings_path=bindings_path,
-        behavior_models_path=behavior_models_path,
-        dbc_dir=dbc_dir,
-        dids_path=dids_path,
-    )
-    resampled = _resample_sessions(
-        session_dirs, inputs, resample_config_for(config), max_workers=max_workers
-    )
-    features = featurize_wide_frame(
-        resampled,
-        config,
-        behavior_models=inputs.behavior_models,
-        did_map=inputs.did_map,
-        bindings=inputs.bindings,
-    ).features
-    if cache_path is not None and cache_metadata is not None:
-        _write_feature_frame_cache(cache_path, features, cache_metadata)
-    return _with_physical_drives(features, session_dirs)
-
-
-def _load_cached(cache_path: Path) -> pd.DataFrame | None:
-    """The cached feature frame at ``cache_path``, or ``None`` (absent or
-    unreadable: a corrupt cache rebuilds, it never fails a retrain)."""
-    if not cache_path.exists():
-        return None
-    try:
-        cached = pd.read_pickle(cache_path)
-        if not isinstance(cached, pd.DataFrame):
-            raise TypeError(f"cached object is {type(cached).__name__}, not DataFrame")
-    except Exception as exc:  # noqa: BLE001 - cache corruption should not fail retrain
-        log.warning(
-            "feature frame cache unreadable; rebuilding",
-            extra={"cache": str(cache_path), "error": str(exc)},
-        )
-        return None
-    log.info(
-        "loaded feature frame cache",
-        extra={"cache": str(cache_path), "rows": len(cached), "columns": len(cached.columns)},
-    )
-    return cached
-
-
-@dataclass(frozen=True)
-class _DecodeInputs:
-    """The catalogs a feature build decodes with; ``None`` where the file is absent."""
-
-    bindings: Bindings | None
-    behavior_models: BehaviorModels | None
-    dbc_database: Any
-    did_map: Any
-
-
-def _load_decode_inputs(
-    *, bindings_path: Path, behavior_models_path: Path, dbc_dir: Path, dids_path: Path
-) -> _DecodeInputs:
-    return _DecodeInputs(
-        bindings=load_bindings(bindings_path) if bindings_path.exists() else None,
-        behavior_models=(
-            load_behavior_models(behavior_models_path) if behavior_models_path.exists() else None
-        ),
-        dbc_database=load_dbc_dir(dbc_dir),
-        did_map=load_did_map(dids_path) if dids_path.exists() else None,
-    )
-
-
-def _resample_sessions(
-    session_dirs: Sequence[Path],
-    inputs: _DecodeInputs,
-    resample_config: ResampleConfig,
-    *,
-    max_workers: int | None,
-) -> pd.DataFrame:
-    """Decode → pivot → resample one session at a time, then concatenate.
-
-    ``resample_wide`` and ``compute_features`` already group by session (no
-    cross-session bleed), so per-session-then-concat is identical to
-    concat-then-resample — but peak memory is one session's raw bus-rate pivot
-    instead of all of them concatenated, which OOM-kills the Pi on a full
-    corpus.
-
-    Sessions are independent, so for >= ``_PARALLEL_SESSION_THRESHOLD`` inputs
-    the per-session pipeline fans out across a ``ProcessPoolExecutor`` (one
-    process per session, capped by CPU count and by the memory budget in
-    ``_resolve_worker_count``). ``max_workers=1`` forces the serial path — kept
-    exactly as it was for back-compat with tests and the Pi cold-start
-    fall-back, where multiprocessing overhead would lose. An unreadable session
-    is skipped and named; no readable session at all raises.
-    """
-    resampled_parts: list[pd.DataFrame] = []
-    skipped: list[str] = []
-
-    effective_workers = _resolve_worker_count(session_dirs, max_workers)
-    parallel = effective_workers > 1 and len(session_dirs) >= _PARALLEL_SESSION_THRESHOLD
-
-    def _build_serial() -> None:
-        for session_dir in session_dirs:
-            try:
-                resampled_parts.append(
-                    _decode_session_to_resampled(
-                        session_dir,
-                        inputs.bindings,
-                        inputs.dbc_database,
-                        inputs.did_map,
-                        resample_config,
-                    )
-                )
-            except Exception as exc:  # noqa: BLE001 — one bad session must not kill the corpus
-                skipped.append(session_dir.name)
-                log.warning(
-                    "skipping unreadable session",
-                    extra={"session": str(session_dir), "error": f"{type(exc).__name__}: {exc}"},
-                )
-
-    if parallel:
-        log.info(
-            "building feature frame in parallel",
-            extra={"sessions": len(session_dirs), "workers": effective_workers},
-        )
-        try:
-            with ProcessPoolExecutor(
-                max_workers=effective_workers,
-                initializer=_init_feature_worker,
-                initargs=(inputs.bindings, inputs.dbc_database, inputs.did_map, resample_config),
-                # ``spawn`` re-imports the codebase per worker rather than
-                # forking the parent's address space, which avoids the classic
-                # fork-with-threads deadlock (numpy / torch keep background
-                # threads alive). The extra ~0.5-1 s of worker startup is
-                # rounded off by even a single-session feature build.
-                mp_context=multiprocessing.get_context("spawn"),
-            ) as pool:
-                # ``map`` preserves order, so the concatenated frame is
-                # identical to the serial run — no ordering drift between runs.
-                for name, frame, err in pool.map(_worker_process_session, session_dirs):
-                    if frame is not None:
-                        resampled_parts.append(frame)
-                    else:
-                        skipped.append(name)
-                        log.warning(
-                            "skipping unreadable session",
-                            extra={"session": name, "error": err},
-                        )
-        except BrokenExecutor as exc:
-            # OOM-kill, segfault, or a worker dying mid-task all surface as
-            # BrokenExecutor. Don't fail the retrain — fall back to the
-            # serial path that's been in production all along. Partial
-            # results from the pool are dropped (we can't trust the ordering
-            # or completeness) and we restart fresh, serially.
-            log.warning(
-                "parallel feature build aborted (worker died); falling back to serial",
-                extra={
-                    "sessions": len(session_dirs),
-                    "workers": effective_workers,
-                    "error": f"{type(exc).__name__}: {exc}",
-                },
-            )
-            resampled_parts.clear()
-            skipped.clear()
-            _build_serial()
-    else:
-        _build_serial()
-    if not resampled_parts:
-        raise ValueError(
-            f"no readable sessions among the {len(session_dirs)} given "
-            f"(all skipped: {', '.join(skipped) or 'none'})"
-        )
-    if skipped:
-        log.warning(
-            "feature frame built from %d/%d sessions; %d skipped: %s",
-            len(resampled_parts),
-            len(session_dirs),
-            len(skipped),
-            ", ".join(skipped),
-        )
-    resampled = pd.concat(resampled_parts, ignore_index=True)
-    return drop_fully_stale_rows(resampled)
-
-
-def _with_physical_drives(features: pd.DataFrame, session_dirs: Sequence[Path]) -> pd.DataFrame:
-    """Label every row with its physical drive (``src.preprocessing.drives``).
-
-    Stamped after the cache, never into it: which drive a row belongs to
-    depends on the recordings beside it (captures bridge drives, quarantine
-    moves recordings away), not only on the sessions this frame was built from.
-    Every trainer's drive floor, validation split and count reads this label.
-    """
-    if features.empty or "session" not in features.columns:
-        return features
-    return stamp_physical_drives(features, session_dirs)
-
-
-def drop_fully_stale_rows(resampled: pd.DataFrame) -> pd.DataFrame:
-    """Drop resampled rows where *every* gap-flagged channel is stale.
-
-    The resampler emits a row per second across a session's whole span and
-    forward-fills values across data gaps, flagging each fast channel's
-    staleness in a ``<channel>__gap`` column. A row with *all* gap flags set had
-    no fresh observation that second — it's a synthesized fill (e.g. a session
-    left open across a long power-off gap), not telemetry, and training on it
-    poisons the affected mode (a 12 h gap forward-fills into tens of thousands
-    of identical "warmup" rows). Rows with only *some* channels stale (a slow
-    PID between updates) are real observations and kept. ``LiveFeatureSource.tick``
-    (src/features/live.py) applies the same all-gap-flags-set rule per tick
-    and returns ``None`` instead of emitting a row — dropping here moves training
-    rows toward "seconds actually observed", which is what serve scores.
-    """
-    gap_cols = [c for c in resampled.columns if str(c).endswith(GAP_SUFFIX)]
-    if not gap_cols or resampled.empty:
-        return resampled
-    fully_stale = resampled[gap_cols].fillna(True).all(axis=1)
-    dropped = int(fully_stale.sum())
-    if dropped:
-        log.info(
-            "dropped fully-stale (gap-filled) rows from training frame",
-            extra={"dropped": dropped, "total": len(resampled)},
-        )
-    return resampled.loc[~fully_stale].reset_index(drop=True)
-
-
-def load_resampled_session(
-    session_dir: Path,
-    config: CanaryConfig,
-    *,
-    bindings_path: Path = DEFAULT_BINDINGS_PATH,
-    store: DerivedStore | None = None,
-) -> pd.DataFrame:
-    """Read + decode + wide-pivot + quality-gate + resample one session (no
-    segmentation: ``featurize_wide_frame`` segments internally).
-
-    The same per-session chain the trainers run (:func:`resample_session_bounded`):
-    bindings, ``.dbc`` files and the DID map all decode, and the reject gate
-    NaNs impossible cells before the resampler sees them. The benchmark copy
-    this replaced decoded bindings only, with no DID decode and no quality
-    gate, so it scored the sequence detector on frames with every ``did:``
-    channel absent: rows the artifact never saw that way in training or
-    serving (A02). A missing bindings file or DID map is skipped, not an
-    error, as in training. Used by ``scripts/evaluate_detectors.py`` (and so
-    by retrain's benchmark and alert-budget gates), which passes its derived
-    ``store``.
-    """
-    decoders = default_decode_inputs(bindings_path)
-    resampled = resample_session_bounded(
-        session_dir,
-        decoders.bindings,
-        decoders.dbc,
-        decoders.did_map,
-        resample_config_for(config),
-        store=store,
-    )
-    return drop_fully_stale_rows(resampled)
-
-
-def default_decode_inputs(bindings_path: Path = DEFAULT_BINDINGS_PATH) -> DecodeInputs:
-    """The catalogs :func:`load_resampled_session` decodes with: bindings,
-    ``.dbc`` files and the DID map, each skipped when absent (as in training).
-
-    Loaded once per process for the same file bytes (P02.5): parsing the DBC
-    alone cost ~0.3 s, and the evaluation harness asked once per session.
-    Keyed on the files' contents, so an edited catalog is reloaded.
-    """
-    stamp = _catalog_stamp(bindings_path, *sorted(DEFAULT_DBC_DIR.glob("*.dbc")), DEFAULT_DIDS_PATH)
-    cached = _DECODE_INPUTS_MEMO.get(stamp)
-    if cached is None:
-        cached = DecodeInputs(
-            bindings=load_bindings(bindings_path) if bindings_path.exists() else None,
-            dbc=load_dbc_dir(DEFAULT_DBC_DIR),
-            did_map=load_did_map(DEFAULT_DIDS_PATH) if DEFAULT_DIDS_PATH.exists() else None,
-        )
-        _DECODE_INPUTS_MEMO.clear()
-        _DECODE_INPUTS_MEMO[stamp] = cached
-    return cached
-
-
-#: The last catalogs :func:`default_decode_inputs` loaded, by file contents.
-_DECODE_INPUTS_MEMO: dict[tuple[tuple[str, str | None], ...], DecodeInputs] = {}
-
-
-def _catalog_stamp(*paths: Path) -> tuple[tuple[str, str | None], ...]:
-    """Each path with its content hash (``None`` when absent)."""
-    import hashlib
-
-    stamp: list[tuple[str, str | None]] = []
-    for path in paths:
-        try:
-            digest = hashlib.sha256(path.read_bytes()).hexdigest()
-        except OSError:
-            digest = None
-        stamp.append((str(path.resolve()), digest))
-    return tuple(stamp)
-
-
-def disposition_screen_frames(
-    sessions: Sequence[Path],
-    config: CanaryConfig,
-    *,
-    bindings_path: Path = DEFAULT_BINDINGS_PATH,
-) -> tuple[list[pd.DataFrame], dict[str, int]]:
-    """Decode, quality-gate, resample and regime-gate every session for the
-    training-disposition screen (Task 1.4).
-
-    Returns the per-session regime-gated frames (ready for
-    ``training_disposition.classify_dispositions``) and the corpus-wide
-    per-channel reject counts accumulated across every session's quality gate.
-    Reuses :func:`_decode_session_to_wide`, the exact decode steps the trainers
-    run, so the screen sees precisely what training would see; the resample
-    uses the training recipe, gap rules included (D03.27). One unreadable
-    session is logged and skipped. Used by ``scripts/disposition_report.py``,
-    ``scripts/ledger.py`` (golden baselines) and ``scripts/retrain.py``'s
-    disposition summary: this was ``disposition_report._scan_sessions``,
-    imported by the other two across scripts (R06.4).
-    """
-    bindings = load_bindings(bindings_path) if bindings_path.exists() else None
-    dbc_database = load_dbc_dir(DEFAULT_DBC_DIR)
-    did_map = load_did_map(DEFAULT_DIDS_PATH) if DEFAULT_DIDS_PATH.exists() else None
-    resample_config = resample_config_for(config)
-
-    framed_parts: list[pd.DataFrame] = []
-    total_rejects: dict[str, int] = {}
-    for session_dir in sessions:
-        try:
-            wide = _decode_session_to_wide(Path(session_dir), bindings, dbc_database, did_map)
-        except Exception as exc:  # noqa: BLE001 — one bad session must not kill the scan
-            log.warning(
-                "skipping unreadable session",
-                extra={"session": str(session_dir), "error": str(exc)},
-            )
-            continue
-        gated, quality = apply_quality_gate(wide)
-        for channel, count in quality.reject_counts.items():
-            total_rejects[channel] = total_rejects.get(channel, 0) + count
-        resampled = resample_wide(gated, config=resample_config)
-        framed, _fell_back = segment_or_constant(resampled, config)
-        framed_parts.append(framed)
-
-    return framed_parts, total_rejects
-
-
-@dataclass(frozen=True)
-class FeaturizedFrame:
-    """Output of :func:`featurize_wide_frame`.
-
-    ``features`` is the model-ready frame (rolling features appended).
-    ``operating_frame`` is the *pre-feature* wide row set after segmentation
-    and behavior-deviation columns but before ``compute_features`` — the live
-    overlay reads its last row even during the feature-window warmup, so it is
-    returned rather than recomputed.
-    ``segmenter_fell_back`` (4.7) is ``True`` when :func:`segment_or_constant`
-    used the constant ``"all"`` mode because the segmenter's *inputs* weren't
-    present in this frame — every mode-gated surface silently never fires in
-    that case. ``False`` both on normal segmentation and on an explicit
-    ``preprocessing.single_operating_mode`` config (that's an intentional
-    choice, not a diagnostic-worthy fallback).
-    """
-
-    features: pd.DataFrame
-    operating_frame: pd.DataFrame
-    segmenter_fell_back: bool = False
-
-
-#: Pre-B02 private name, kept for existing importers.
-_drop_fully_stale_rows = drop_fully_stale_rows
-
-
-def configured_behavior_models(config: CanaryConfig) -> BehaviorModels | None:
-    """The behavior models the daemon serves for ``config``: its scoped
-    ``daemon.behavior_models``, or ``None`` when that file is absent (P02.12).
-
-    The value every offline :func:`featurize_wide_frame` caller passes unless it
-    means a different artifact set. Read once per call; hoist it out of loops.
-    """
-    require_profile_scoped(config, reader="behavior models (featurization)")
-    path = config.daemon.behavior_models
-    return load_behavior_models(path) if path.exists() else None
-
-
-def featurize_wide_frame(
-    wide: pd.DataFrame,
-    config: CanaryConfig,
-    *,
-    behavior_models: BehaviorModels | None,
-    did_map: DidMap | None,
-    feature_config: FeatureConfig | None = None,
-    bindings: Bindings | None = None,
-    flash_history: FlashHistory | None = None,
-    last_row_only: bool = False,
-) -> FeaturizedFrame:
-    """The single wide → model-ready feature transform (7.1 keystone).
-
-    Both the offline batch path (:func:`build_feature_frame`, after
-    read/decode/resample) and the online streaming path
-    (``LiveFeatureSource.tick``, after observe/snapshot) call this so the
-    schema-producing tail is *one* implementation, not two that must be kept
-    byte-identical by hand. The head differs by necessity — batch reads and
-    resamples a recorded session, streaming accumulates a current-value
-    snapshot per tick — and the persisted feature spec plus
-    :func:`reconcile_feature_frame_to_spec` are the contract that bridges any
-    residual head divergence at serve time. This function is the part that
-    must never diverge: ``segment_or_constant`` → ``append_deviation_columns``
-    (when behavior models are loaded) → ``compute_features``.
-
-    ``feature_config`` lets the streaming caller pass its once-built
-    ``FeatureConfig`` instead of reconstructing it each tick; when omitted it
-    is derived from ``config.preprocessing.rolling_window_seconds`` exactly as
-    the batch path always did — the two are value-identical.
-
-    ``bindings`` is forwarded to ``segment_or_constant`` so the ``decoded:``
-    mode candidates are scaled with the catalog that decoded them; omitted, the
-    accessor uses the repo ``data/bindings.yaml`` (identical to the daemon's
-    ``dashboard.paths.DEFAULT_BINDINGS_PATH`` — asserted in
-    tests/test_decoded_mode_signals.py, which is why the per-tick live path
-    does not have to ship a catalog across the scoring-process boundary).
-
-    B01.2 — behavior models are evaluated *before* ``compute_features``;
-    ``append_deviation_columns`` builds the context their serving contracts
-    read first (``__roc`` derivatives at this transform's rolling horizon,
-    ``context:*`` engine-start evidence). The live path's
-    :class:`~src.features.live.LiveFeatureSource` carries start
-    evidence across ticks itself (its ring buffer is far shorter than a
-    warmup) and has already written those columns into ``wide``.
-
-    P02.11 — ``config`` must be profile-scoped while profiles are enabled
-    (:func:`~src.config.require_profile_scoped`): the derived channels read the
-    vehicle's ``afr_calibration.yaml``, which only the scoped config names.
-
-    P02.12 — ``behavior_models`` has no default. A default of ``None`` let the
-    offline callers featurize without the deviations the daemon appends, so
-    each caller states its set: :func:`configured_behavior_models` for the
-    served one, the live source's hot-reloaded copy, or ``None`` on purpose.
-
-    P02.14 — ``did_map`` is the DID catalog ``wide`` was decoded with, and it
-    has no default either. The DID views (``derived:BASE_FUEL_SCHEDULE``) and
-    the target map's load-axis unit are judged against it. Read from the repo
-    file instead, a frame decoded with a catalog that scales 0x1208 got a base
-    fuel schedule scaled twice, silently. ``None``: no DID catalog decoded the
-    frame, so no view and no DID-backed load axis.
-
-    P02.16 — ``flash_history`` is where ``derived:TARGET_AFR`` reads each
-    row's tune revision. ``None`` is the vehicle's own
-    (:func:`~src.vehicle.profiles.active_flash_history`) at the row's stamp,
-    right for every frame stamped when it was recorded. The live tick passes
-    its source's, which reads a replayed row at its recorded instant.
-
-    P02.9 — ``last_row_only`` rolls only the row ``compute_features`` would
-    emit last (:func:`~src.preprocessing.features.compute_features_last_row`),
-    so ``features`` has at most one row; ``operating_frame`` is unchanged. The
-    live tick keeps one row of its ring buffer, and rolling the rest was about
-    two fifths of the tick. Same windows, same columns and dtypes; ``__roc``
-    bit-identical, mean/std within that function's declared tolerance.
-    """
-    require_profile_scoped(config, reader="featurize_wide_frame")
-    framed, segmenter_fell_back = segment_or_constant(wide, config, bindings=bindings)
-    framed = _append_derived_channels(framed, config, did_map=did_map, flash_history=flash_history)
-    cfg = _feature_config(config, feature_config)
-    if behavior_models is not None and behavior_models.models:
-        framed = append_deviation_columns(
-            framed, behavior_models, rate_window_seconds=cfg.window_seconds
-        )
-    roll = compute_features_last_row if last_row_only else compute_features
-    features = roll(_without_committee_columns(framed), config=cfg)
-    return FeaturizedFrame(
-        features=features, operating_frame=framed, segmenter_fell_back=segmenter_fell_back
-    )
-
-
-def _feature_config(config: CanaryConfig, feature_config: FeatureConfig | None) -> FeatureConfig:
-    return feature_config or FeatureConfig(
-        window_seconds=config.preprocessing.rolling_window_seconds
-    )
-
-
-def _append_derived_channels(
-    framed: pd.DataFrame,
-    config: CanaryConfig,
-    *,
-    did_map: DidMap | None,
-    flash_history: FlashHistory | None = None,
-) -> pd.DataFrame:
-    """Every derived channel :func:`featurize_wide_frame` appends between
-    segmentation and the behavior deviations, in order: the one list both it
-    and :func:`featurize_perturbed_frame` run."""
-    # Derived anomaly signals (air mass per cycle, VE, bank-balance
-    # asymmetries, total trim, catalyst efficiency, AFR/TPS cross-checks)
-    # appended BEFORE behavior deviations + feature extraction so recipes can
-    # target them as outputs and the rolling feature builder picks up their
-    # derivatives. `vehicle` unlocks VE_PERCENT (Task 4.1), which needs the
-    # configured displacement.
-    # P02.11: the scoped config is the only one naming the vehicle's file; an
-    # unscoped one reads as "no calibration" and drops channels silently.
-    require_profile_scoped(config, reader="featurization (afr_calibration)")
-    afr_calibration = (
-        load_afr_calibration(config.daemon.afr_calibration)
-        if config.daemon.afr_calibration.exists()
-        else None
-    )
-    # P02.14: a vehicle's DIDs read in an engineering unit their catalog entry
-    # does not carry (the Xterra's base fuel schedule in ms), before the
-    # target lookup that reads one of them as its load axis.
-    framed = append_did_views(framed, did_map=did_map)
-    # P02.13: the load axis's unit comes from the channel catalogs, which
-    # src.signals cannot import, so it is resolved here.
-    # P02.16: each row's target map is the one flashed when the row was
-    # recorded, from the vehicle's flash history. One resolver for the live
-    # tick (rows stamped now: the running revision) and offline frames that
-    # concatenate sessions from either side of a flash.
-    framed = append_afr_channels(
-        framed,
-        config.vehicle.parameters,
-        afr_calibration,
-        channel_units=channel_units_for(did_map),
-        flash_history=active_flash_history(config) if flash_history is None else flash_history,
-    )
-    framed = compute_anomaly_signals(framed, config.vehicle.parameters)
-    # Performance channels (Task 1.1): fuel rate, instant economy,
-    # boost/vacuum, estimated power/torque. Row-local only — the cumulative
-    # trip integrals (FUEL_USED_L, TRIP_DISTANCE_KM, ...) are deliberately
-    # NOT computed here, because this frame is a live ring-buffer *window*
-    # on the streaming path, not a full session; a cumsum over it would
-    # reset every time the window evicts old rows. See
-    # ``compute_instantaneous_channels`` and ``LiveFeatureSource``'s
-    # session-scoped accumulators (Task 1.3) for the integrated versions.
-    # `calibration` is not optional decoration: PID 0x44 is φ on some ECMs and
-    # λ on others, the two are reciprocals, and they agree at stoich — so
-    # guessing is silent at idle and worst under enrichment, exactly where the
-    # fuel estimate matters. Passing it lets the fuel math use the verified
-    # convention instead of hard-coding λ.
-    framed = compute_instantaneous_channels(
-        framed, config.vehicle.parameters, calibration=afr_calibration
-    )
-    # Sensor-committee channels (H04.1): the member transforms and the spread
-    # residuals of redundant sensors of one quantity (e.g. OBD↔GPS speed).
-    # Committees are detectors, not features — they stay in the operating
-    # frame for the committee evaluator and the fingerprint, and are never
-    # rolled into the feature frame (see signals.committees).
-    framed = append_committee_residuals(framed)
-    return framed
-
-
-def _without_committee_columns(framed: pd.DataFrame) -> pd.DataFrame:
-    """``framed`` without the sensor-committee columns: committees are
-    detectors, not features, so they are never rolled (H04.1)."""
-    committee_columns = [
-        column
-        for column in framed.columns
-        if committee_channel_reason(base_channel(str(column))) is not None
-    ]
-    return framed.drop(columns=committee_columns)
-
-
-def _column_root(column: str) -> str:
-    """The channel a column belongs to: rolling and bookkeeping suffixes off
-    (``obd:MAF__roc`` and ``obd:MAF__gap`` are both ``obd:MAF``)."""
-    root = base_channel(column)
-    for suffix in FLAG_SUFFIXES:
-        root = root.removesuffix(suffix)
-    return root
-
-
-def behavior_model_input_roots(model: Any) -> frozenset[str]:
-    """Every channel a behavior model's definition names, as column roots.
-
-    Read generically from the whole model (axes, output, eligibility gates,
-    cold-start channels, local ranges, required context), so a field added to
-    the schema is covered without this list being edited. Any string holding a
-    source separator counts; a timestamp string is harmlessly over-included.
-    """
-    from src.behavior.behavior_eligibility import resolve_output_column
-
-    held = _MODEL_ROOTS.get(id(model))
-    if held is not None and held[0] is model:
-        return held[1]
-    roots: set[str] = {_column_root(resolve_output_column(model.output))}
-
-    def walk(value: Any) -> None:
-        if isinstance(value, str):
-            if ":" in value:
-                roots.add(_column_root(value))
-        elif isinstance(value, Mapping):
-            for item in value.values():
-                walk(item)
-        elif isinstance(value, list | tuple | set | frozenset):
-            for item in value:
-                walk(item)
-
-    walk(model.model_dump())
-    if len(_MODEL_ROOTS) > 1024:
-        _MODEL_ROOTS.clear()
-    result = frozenset(roots)
-    # Held with the model itself, so a reused id can never serve another's.
-    _MODEL_ROOTS[id(model)] = (model, result)
-    return result
-
-
-#: :func:`behavior_model_input_roots` by model (a model's dump is ~2 ms, and
-#: the injection sweep asks for every model on every injection).
-_MODEL_ROOTS: dict[int, tuple[Any, frozenset[str]]] = {}
-
-
-def _changed_columns(frame: pd.DataFrame, reference: pd.DataFrame) -> list[str] | None:
-    """Columns of ``frame`` whose values differ from ``reference``'s (NaN equal
-    to NaN; a dtype change is a change), in ``frame``'s order, or ``None`` when
-    ``frame`` has a column ``reference`` lacks (not comparable).
-
-    Compared a dtype block at a time: column by column it was most of the
-    incremental path's cost.
-    """
-    if len(frame) != len(reference) or any(c not in reference.columns for c in frame.columns):
-        return None
-    columns = list(frame.columns)
-    ref_dtypes = dict(reference.dtypes.items())
-    changed: set[str] = set()
-    by_dtype: dict[Any, list[str]] = {}
-    for column, dtype in frame.dtypes.items():
-        if ref_dtypes[column] != dtype:
-            changed.add(str(column))
-        else:
-            by_dtype.setdefault(dtype, []).append(str(column))
-    for dtype, group in by_dtype.items():
-        kind = getattr(dtype, "kind", "O")
-        if kind in "fc" and isinstance(dtype, np.dtype):
-            a = frame[group].to_numpy()
-            b = reference[group].to_numpy()
-            same = ((a == b) | (np.isnan(a) & np.isnan(b))).all(axis=0)
-        elif kind in "biu" and isinstance(dtype, np.dtype):
-            same = (frame[group].to_numpy() == reference[group].to_numpy()).all(axis=0)
-        else:
-            same = np.array(
-                [
-                    frame[c].reset_index(drop=True).equals(reference[c].reset_index(drop=True))
-                    for c in group
-                ],
-                dtype=bool,
-            )
-        changed.update(c for c, ok in zip(group, same, strict=True) if not ok)
-    return [str(c) for c in columns if str(c) in changed]
-
-
-#: Columns every stage may read beside its own inputs: the row structure.
-_ROW_COLUMNS = ("session", "timestamp", MODE_COLUMN, DRIVE_COLUMN)
-
-
-def _segmenter_read_columns() -> frozenset[str]:
-    """Every column the operating-mode segmenter reads: its candidate signals,
-    their gap flags (stale-gated signals) and the row structure."""
-    inputs = segmenter_input_columns()
-    return frozenset({*inputs, *(f"{column}{GAP_SUFFIX}" for column in inputs), *_ROW_COLUMNS})
-
-
-def derived_channel_inputs(channel: str) -> frozenset[str]:
-    """Every channel a ``derived:`` channel's computation may read: each member
-    of each declared input group (any may be the one chosen) plus its
-    optional refinements. Empty for a channel that is not derived."""
-    from src.signals.derived import DERIVED_CHANNEL_INPUTS, DERIVED_CHANNEL_OPTIONAL_INPUTS
-
-    groups = DERIVED_CHANNEL_INPUTS.get(channel, ())
-    return frozenset(
-        {member for group in groups for member in group}
-        | set(DERIVED_CHANNEL_OPTIONAL_INPUTS.get(channel, ()))
-    )
-
-
-def derived_channels_reached(roots: Collection[str]) -> frozenset[str]:
-    """The derived *feature* channels whose value can depend on any of
-    ``roots``, through the declared inputs, transitively.
-
-    Sensor-committee outputs are left out: they are detectors, never features
-    (H04.1), and their member transforms are not declared inputs.
-    """
-    from src.signals.derived import DERIVED_CHANNEL_INPUTS
-
-    features = [c for c in DERIVED_CHANNEL_INPUTS if committee_channel_reason(c) is None]
-    reached: set[str] = set()
-    frontier = set(roots)
-    while True:
-        new = {
-            channel
-            for channel in features
-            if channel not in reached and derived_channel_inputs(channel) & (frontier | reached)
-        }
-        if not new:
-            return frozenset(reached)
-        reached |= new
-        frontier |= new
-
-
-def _derived_ancestors(channels: Collection[str]) -> frozenset[str]:
-    """``channels`` and every input they read, transitively."""
-    seen: set[str] = set()
-    stack = list(channels)
-    while stack:
-        channel = stack.pop()
-        if channel in seen:
-            continue
-        seen.add(channel)
-        stack.extend(derived_channel_inputs(channel) - seen)
-    return frozenset(seen)
-
-
-def _narrowed(frame: pd.DataFrame, roots: Collection[str]) -> pd.DataFrame:
-    """``frame``'s row-structure columns and every column of ``roots``
-    (values, gap and arrival flags), in ``frame``'s order."""
-    wanted = set(roots)
-    return frame.loc[
-        :, [c for c in frame.columns if c in _ROW_COLUMNS or _column_root(str(c)) in wanted]
-    ]
-
-
-def featurize_perturbed_frame(
-    clean: FeaturizedFrame,
-    clean_wide: pd.DataFrame,
-    wide: pd.DataFrame,
-    config: CanaryConfig,
-    *,
-    behavior_models: BehaviorModels | None,
-    did_map: DidMap | None,
-    feature_config: FeatureConfig | None = None,
-    bindings: Bindings | None = None,
-) -> pd.DataFrame:
-    """``featurize_wide_frame(wide, ...).features``, recomputing only what
-    changed (P02.4).
-
-    ``clean`` is :func:`featurize_wide_frame`'s output, with the same
-    arguments, for ``clean_wide`` — a frame with ``wide``'s rows and columns,
-    such as the one a fault was injected into. The changed columns are found
-    by comparing ``wide`` with ``clean_wide``, never taken on trust; only
-    what they can reach is recomputed:
-
-    - The operating mode is reused. When a column the segmenter reads
-      changed, the frame is re-segmented, and a row whose mode moved — like
-      rows or columns that differ — sends the whole frame down the full
-      transform.
-    - A derived channel is recomputed when a declared input changed
-      (:func:`derived_channels_reached`), from its declared inputs alone.
-    - A behavior deviation is recomputed when its model names a changed
-      channel (:func:`behavior_model_input_roots`), from those channels.
-    - Rolling features are recomputed for the changed columns alone:
-      :func:`~src.preprocessing.features.compute_features` is per column.
-
-    The rest is the clean frame's. That is exact only while each stage reads
-    what it declares, so ``tests/test_feature_pipeline_incremental.py``
-    perturbs every *undeclared* column and requires each derived channel and
-    deviation to stay put, and compares this against the full transform with
-    ``check_exact`` for every realistic fault. Returns features only: the
-    sensor-committee columns (detectors, never features) are not recomputed,
-    and a deviation that reads one sends the frame down the full path.
-    """
-    require_profile_scoped(config, reader="featurize_perturbed_frame")
-    reference = clean.operating_frame
-
-    def full() -> pd.DataFrame:
-        return featurize_wide_frame(
-            wide,
-            config,
-            behavior_models=behavior_models,
-            did_map=did_map,
-            feature_config=feature_config,
-            bindings=bindings,
-        ).features
-
-    if MODE_COLUMN in wide.columns or list(wide.columns) != list(clean_wide.columns):
-        return full()
-    changed_wide = _changed_columns(wide, clean_wide)
-    if changed_wide is None or set(changed_wide) & set(_ROW_COLUMNS):
-        return full()
-    if not changed_wide:
-        return clean.features
-    if set(changed_wide) & _segmenter_read_columns():
-        # A segmenter input moved (a coolant fault): re-segment, and go on
-        # only if not one row changed mode.
-        segmented, _ = segment_or_constant(wide, config, bindings=bindings)
-        if (
-            not segmented[MODE_COLUMN]
-            .reset_index(drop=True)
-            .equals(reference[MODE_COLUMN].reset_index(drop=True))
-        ):
-            return full()
-    # A column some stage rewrites (a collector-stored ``derived:`` channel
-    # that is recomputed here) is not an input the clean run kept as it was:
-    # only a column the stages carried through untouched is reused.
-    if _changed_columns(clean_wide.loc[:, changed_wide], reference) != []:
-        return full()
-    values: dict[str, pd.Series] = {c: wide[c] for c in changed_wide}
-    reached = derived_channels_reached({_column_root(c) for c in changed_wide})
-    if reached:
-        narrow = _narrowed(wide, _derived_ancestors(reached)).copy()
-        narrow[MODE_COLUMN] = reference[MODE_COLUMN].to_numpy()
-        derived = _append_derived_channels(narrow, config, did_map=did_map)
-        outputs = derived.loc[:, [c for c in derived.columns if _column_root(str(c)) in reached]]
-        moved = _changed_columns(outputs, reference)
-        if moved is None:
-            return full()
-        values.update({c: outputs[c] for c in moved})
-    cfg = _feature_config(config, feature_config)
-    if behavior_models is not None and behavior_models.models:
-        roots = {_column_root(c) for c in values}
-        models = [m for m in behavior_models.models if behavior_model_input_roots(m) & roots]
-        if models:
-            read = frozenset().union(*(behavior_model_input_roots(m) for m in models))
-            if any(committee_channel_reason(root) is not None for root in read):
-                return full()  # a committee column is never recomputed here
-            before = reference.loc[
-                :,
-                [
-                    c
-                    for c in reference.columns
-                    if not str(c).startswith((DEVIATION_PREFIX, CONTEXT_COLUMN_PREFIX))
-                    and not str(c).endswith(ROLLING_SUFFIXES)
-                ],
-            ]
-            frame = _narrowed(before, read).copy()
-            for column, series in values.items():
-                if column in frame.columns:
-                    frame[column] = series.to_numpy()
-            deviations = append_deviation_columns(
-                frame,
-                behavior_models.model_copy(update={"models": models}),
-                rate_window_seconds=cfg.window_seconds,
-            )
-            added = deviations.loc[:, [c for c in deviations.columns if c not in frame.columns]]
-            moved = _changed_columns(added, reference)
-            if moved is None:
-                return full()
-            values.update({c: added[c] for c in moved})
-    rolled_input = _without_committee_columns(
-        pd.concat(
-            [
-                reference.loc[:, ["session", "timestamp", MODE_COLUMN]],
-                *(
-                    series.rename(column).set_axis(reference.index)
-                    for column, series in values.items()
-                ),
-            ],
-            axis=1,
-        )
-    )
-    rolled = compute_features(rolled_input, config=cfg)
-    replaced = [c for c in rolled.columns if c not in ("session", "timestamp", MODE_COLUMN)]
-    features = clean.features
-    if any(column not in features.columns for column in replaced):
-        return full()
-    out = features.drop(columns=replaced)
-    out = pd.concat([out, rolled.loc[:, replaced]], axis=1)
-    return out.loc[:, list(features.columns)]
-
-
-def segment_or_constant(
-    resampled: pd.DataFrame, config: CanaryConfig, *, bindings: Bindings | None = None
-) -> tuple[pd.DataFrame, bool]:
-    """Apply the operating-mode segmenter when its inputs exist, else add a
-    constant ``operating_mode = "all"`` column so a single model is fit.
-
-    Returns ``(frame, fell_back)`` — ``fell_back`` (4.7) is ``True`` only for
-    the *runtime* fallback (segmenter input columns missing from this frame),
-    not for an explicit ``single_operating_mode`` config, which is an
-    intentional choice rather than a diagnostic-worthy degradation. Callers
-    that care about the constant-mode outcome but not *why* can ignore the
-    second element.
-
-    ``bindings`` is the catalog the ``decoded:`` candidates in
-    ``SEGMENTER_SIGNAL_COLUMNS`` are scaled with — pass the same one the
-    frame was *decoded* with (``build_feature_frame`` does, so ``--bindings``
-    reaches the mode rules too). Omitted, the shared accessor uses the repo's
-    ``data/bindings.yaml``, which is what every production decode path loads.
-    """
-    if config.preprocessing.single_operating_mode:
-        out = resampled.copy()
-        out[MODE_COLUMN] = ALL_MODE
-        return out, False
-    seg_cfg = SegmenterConfig(
-        signal_columns=dict(SEGMENTER_SIGNAL_COLUMNS),
-        recent_motion_window_seconds=config.preprocessing.idle_transient_lookback_seconds,
-        mode_dwell_ticks=config.preprocessing.mode_dwell_ticks,
-        bindings=bindings,
-    )
-    # A signal is available when *any* of its candidate columns is present, so
-    # the speed gate is satisfied by gps:speed or obd:SPEED.
-    have_inputs = all(
-        _signal_present(resampled, value) for value in seg_cfg.signal_columns.values()
-    )
-    if have_inputs:
-        segmented = segment_operating_modes(
-            resampled, config.preprocessing.operating_modes, config=seg_cfg
-        )
-        return segmented, False
-    out = resampled.copy()
-    out[MODE_COLUMN] = ALL_MODE
-    log.info("no OBD PID columns present; using a single operating mode", extra={"mode": ALL_MODE})
-    return out, True
-
-
-def trainable_feature_columns(
-    features: pd.DataFrame, *, policy: FeaturePolicy | None = None
-) -> list[str]:
-    """Numeric feature columns with informative variation in the corpus.
-
-    Excludes structural columns (``session``, ``timestamp``, the mode column)
-    and gap flags; keeps ``decoded:*`` and OBD channels plus their
-    ``__mean``/``__std``/``__roc`` derivatives. Drops all-NaN columns (signals
-    whose CAN ID never appeared this session) so the z-score scaler and the
-    sequence-window builder don't choke, and drops columns *constant across
-    the entire corpus*: a channel with zero training variance teaches the
-    detectors nothing, and the moment the sensor comes alive after training
-    it dominates every event's attribution (the May/June models trained while
-    ``obd:ABSOLUTE_LOAD`` polling was dead-constant; when the PID started
-    reporting in July, its family appeared in 37/37 LSTM events). Constancy
-    is judged over the whole multi-session frame, so a channel that is merely
-    steady *within* one session (coolant at temperature) survives as long as
-    the corpus saw it move. ``summarize_feature_health`` documents the drops
-    in the manifest (``dropped_constant_columns``).
-    """
-    cols: list[str] = []
-    for col in candidate_feature_columns(features, policy=policy):
-        health = _column_health(features[col])
-        if health["finite_count"] == 0:
-            continue
-        if health["constant"]:
-            continue
-        cols.append(col)
-    return cols
-
-
-#: Minimum fraction of classified 1 Hz grid rows a feature column must be
-#: valued on to be a **detector input** — one floor, shared by the Isolation
-#: Forest and the sequence detector (D03.34, 2026-09-26).
-#:
-#: The IF needs it most: it scores one row at a time and
-#: ``TrainedIsolationForest.score`` refuses any row with a NaN in ANY trained
-#: feature (``group[feats].isna().any(axis=1)`` → score=inf, missing flag set,
-#: and the daemon's fail-safe then suppresses the emit). So every sparse column
-#: in the IF's schema multiplies the chance that a row is unscoreable, and a
-#: single structurally-absent column makes the detector permanently blind.
-#: Measured on the 2026-07-26 corpus: the IF trained 273 features of which NONE
-#: reached 75% coverage, so it could not score a single row — matching the Pi's
-#: observed ``missing_feature_rate: 1.0``. Offenders split in two:
-#: genuinely-absent channels (``derived:TPS_VOLTAGE_PER_PCT`` at 0.21%,
-#: ``did:*`` at ~1.5% — polled only inside periodic Mode-22 windows) and
-#: channels NaN'd as stale because the resampler's ceiling assumed a poll rate
-#: the contended bus never achieves. This threshold removes the former; the
-#: staleness ceiling (``preprocessing.max_gap_factor``) governs the latter.
-#:
-#: The sequence detector gets the same floor on grid *density*
-#: (:func:`detector_grid_density`): its GRU-D mask/Δt channels make a
-#: forward-filled round-robin PID cheap, but a channel valued on 3 % of the
-#: rows of every drive that carries it (the Xterra ``default``'s eight Mode 22
-#: DIDs, read once per ~60 s window, and the ``derived:`` channels built from
-#: them) is a mostly-empty column, not a signal at the grid's rate. A channel
-#: that is dense where present but absent from some drives stays a sequence
-#: input: masking is what handles that, and the IF alone additionally needs
-#: it valued on the rows it scores (:data:`BELOW_ROW_COVERAGE`).
-MIN_DETECTOR_COVERAGE = 0.5
-
-#: The IF's coverage floor *is* the shared detector floor; the old name stays
-#: for callers and for the history in the comments that cite it.
-MIN_ISOLATION_FOREST_COVERAGE = MIN_DETECTOR_COVERAGE
-
-#: Named reasons a column fails the coverage floor, recorded per column in the
-#: manifest under :data:`COVERAGE_FLOOR_SCHEMA_KEY`.
-#:
-#: ``sparse_for_grid`` — both detectors: the column's *channel* (its base,
-#: :func:`~src.columns.base_channel`) is valued on fewer than
-#: :data:`MIN_DETECTOR_COVERAGE` of the classified rows of the sessions that
-#: carry it, i.e. polled too slowly for the 1 Hz grid. The whole family goes:
-#: a 30 s rolling ``__mean`` of a once-a-minute read is valued on over half the
-#: rows only because the rolling window holds the one read for 30 s, past the
-#: resampler's forward-fill ceiling — the same read smeared, not a 1 Hz signal.
-SPARSE_FOR_GRID = "sparse_for_grid"
-#: ``below_row_coverage`` — IF only, per column (its pre-D03.34 rule): valued
-#: on fewer than :data:`MIN_DETECTOR_COVERAGE` of *all* the classified rows, so
-#: the row-wise IF could not score the rest (a channel dense where present but
-#: absent from some drives, or a ``__roc`` NaN on every stale tick).
-BELOW_ROW_COVERAGE = "below_row_coverage"
-
-#: Manifest ``schema`` key: the coverage floor a detector was cut with and
-#: every candidate column it excluded, with the named reason, the measured
-#: coverage and the column it was measured on (D03.34).
-COVERAGE_FLOOR_SCHEMA_KEY = "coverage_floor_exclusions"
-
-
-@dataclass(frozen=True)
-class CoverageExclusion:
-    """Why the coverage floor kept one candidate column out."""
-
-    reason: str
-    coverage: float
-    #: The column the coverage was measured on: the channel's base column for
-    #: :data:`SPARSE_FOR_GRID`, the column itself for :data:`BELOW_ROW_COVERAGE`.
-    measured_on: str
-
-
-@dataclass(frozen=True)
-class DetectorFeatureSelection:
-    """A detector's feature columns and what the coverage floor kept out.
-
-    The trainers record :attr:`coverage_exclusions` from the *same* object they
-    take :attr:`columns` from, so the manifest cannot name a different set than
-    the one the model was fit on.
-    """
-
-    columns: list[str]
-    coverage_exclusions: dict[str, CoverageExclusion]
-    min_coverage: float
-
-    def coverage_record(self) -> dict[str, Any]:
-        """The manifest record (:data:`COVERAGE_FLOOR_SCHEMA_KEY`)."""
-        return {
-            "min_coverage": self.min_coverage,
-            "measured_over": "classified-mode rows of the training frame",
-            "columns": {
-                column: {
-                    "reason": excluded.reason,
-                    "coverage": excluded.coverage,
-                    "measured_on": excluded.measured_on,
-                }
-                for column, excluded in sorted(self.coverage_exclusions.items())
-            },
-        }
-
-
-def detector_grid_density(features: pd.DataFrame, columns: Sequence[str]) -> dict[str, float]:
-    """``{column: density}``: the share of classified grid rows a column is
-    valued on, counted over only the sessions that carry it at all.
-
-    This is the grid-rate half of the coverage question, separated from
-    corpus presence: a once-a-minute DID scores ~3 % in every session that
-    polls it, while a PID added to polling last week scores ~100 % in the
-    sessions that have it. Rows are those of :func:`detector_coverage_rows`;
-    a frame without a session column is one session. A column never valued on
-    those rows has density 0.
-    """
-    scored = detector_coverage_rows(features)
-    present = list(dict.fromkeys(str(c) for c in columns if c in scored.columns))
-    if not present or scored.empty:
-        return dict.fromkeys(present, 0.0)
-    valued = scored[present].notna()
-    if "session" not in scored.columns:
-        rows = float(len(scored))
-        return {c: float(valued[c].sum()) / rows for c in present}
-    sessions = scored["session"].astype(str).to_numpy()
-    per_session = valued.groupby(sessions, sort=False).sum()
-    session_rows = pd.Series(sessions).value_counts().reindex(per_session.index)
-    carried_rows = (per_session > 0).mul(session_rows, axis=0).sum()
-    counts = per_session.sum()
-    return {
-        c: (float(counts[c]) / float(carried_rows[c]) if carried_rows[c] > 0 else 0.0)
-        for c in present
-    }
-
-
-def detector_coverage(features: pd.DataFrame, columns: Sequence[str]) -> dict[str, float]:
-    """``{column: coverage}`` over every classified row (the IF's measure)."""
-    scored = detector_coverage_rows(features)
-    rows = len(scored)
-    return {
-        str(c): (float(scored[c].notna().sum()) / rows if rows else 0.0)
-        for c in columns
-        if c in scored.columns
-    }
-
-
-def apply_coverage_floor(
-    features: pd.DataFrame,
-    columns: Sequence[str],
-    *,
-    require_row_coverage: bool,
-    min_coverage: float = MIN_DETECTOR_COVERAGE,
-) -> DetectorFeatureSelection:
-    """The shared detector coverage rule over already-trainable ``columns``.
-
-    Every detector drops a column whose channel is under ``min_coverage``
-    grid density (:data:`SPARSE_FOR_GRID`, judged on the base column when the
-    frame has it, so a sparse channel's rolling siblings go with it).
-    ``require_row_coverage`` adds the IF's per-column, row-wise requirement:
-    the same floor over all classified rows (:data:`BELOW_ROW_COVERAGE`).
-    Density is never below whole-frame coverage, so a raw column that passes
-    the row check passes the density check too; the IF's only difference from
-    its pre-D03.34 selection is the rolling siblings of a sparse channel.
-    ``min_coverage <= 0`` (or an empty frame) disables the floor.
-    """
-    kept = [str(c) for c in columns]
-    if min_coverage <= 0 or features.empty:
-        return DetectorFeatureSelection(kept, {}, float(min_coverage))
-    measured_on = {
-        column: (base if (base := base_channel(column)) in features.columns else column)
-        for column in kept
-    }
-    density = detector_grid_density(features, list(measured_on.values()))
-    coverage = detector_coverage(features, kept) if require_row_coverage else {}
-    excluded: dict[str, CoverageExclusion] = {}
-    selected: list[str] = []
-    for column in kept:
-        channel = measured_on[column]
-        if density.get(channel, 0.0) < min_coverage:
-            excluded[column] = CoverageExclusion(
-                SPARSE_FOR_GRID, round(density.get(channel, 0.0), 6), channel
-            )
-        elif require_row_coverage and coverage.get(column, 0.0) < min_coverage:
-            excluded[column] = CoverageExclusion(
-                BELOW_ROW_COVERAGE, round(coverage.get(column, 0.0), 6), column
-            )
-        else:
-            selected.append(column)
-    return DetectorFeatureSelection(selected, excluded, float(min_coverage))
-
-
-def isolation_forest_feature_selection(
-    features: pd.DataFrame,
-    *,
-    min_coverage: float = MIN_DETECTOR_COVERAGE,
-    policy: FeaturePolicy | None = None,
-) -> DetectorFeatureSelection:
-    """:func:`trainable_feature_columns` through the shared coverage floor,
-    with the IF's row-coverage requirement (:func:`apply_coverage_floor`)."""
-    return apply_coverage_floor(
-        features,
-        trainable_feature_columns(features, policy=policy),
-        require_row_coverage=True,
-        min_coverage=min_coverage,
-    )
-
-
-def isolation_forest_feature_columns(
-    features: pd.DataFrame,
-    *,
-    min_coverage: float = MIN_ISOLATION_FOREST_COVERAGE,
-    policy: FeaturePolicy | None = None,
-) -> list[str]:
-    """Trainable columns restricted to those the IF can actually score on.
-
-    :func:`trainable_feature_columns` plus the per-column coverage floor — see
-    :data:`MIN_DETECTOR_COVERAGE` for why. ``min_coverage=0`` recovers the old
-    behaviour.
-    """
-    return isolation_forest_feature_selection(
-        features, min_coverage=min_coverage, policy=policy
-    ).columns
-
-
-def detector_coverage_rows(features: pd.DataFrame) -> pd.DataFrame:
-    """The rows the detector coverage floor is measured over: those in a
-    classified operating mode (both detectors, D03.34).
-
-    The IF never fits the ``unknown`` mode (``SKIP_UNCLASSIFIED_MODE``) and
-    serving refuses one (A04.8), so an unclassified row is a row it can never
-    score. Counting them let parked key-off chatter decide the feature set: in
-    the 2026-09-21..23 corpus 72 % of rows were ``unknown`` (the Pi recording
-    GPS with the engine off), every engine channel fell under the floor, and
-    the retrained IF kept two channels. A frame with no classified row (or no
-    mode column) is measured whole.
-    """
-    if MODE_COLUMN not in features.columns:
-        return features
-    classified = features[features[MODE_COLUMN].astype(str) != UNKNOWN_MODE]
-    return classified if len(classified) else features
-
-
-def low_coverage_columns(
-    features: pd.DataFrame,
-    columns: Sequence[str],
-    *,
-    min_coverage: float = MIN_ISOLATION_FOREST_COVERAGE,
-) -> dict[str, float]:
-    """``{column: coverage}`` for ``columns`` below the coverage floor.
-
-    Reported in the manifest so a blind-IF diagnosis doesn't require
-    re-deriving coverage from the corpus by hand.
-    """
-    if features.empty:
-        return {}
-    return {
-        column: round(coverage, 6)
-        for column, coverage in detector_coverage(features, columns).items()
-        if coverage < min_coverage
-    }
-
-
-def _is_constant_column(series: pd.Series) -> bool:
-    """True when every finite value in ``series`` is identical (or none exist).
-
-    Same definition as ``_column_health``'s ``constant`` flag so selection and
-    the manifest's health report can never disagree."""
-    return bool(_column_health(series)["constant"])
-
-
-def restrict_isolation_forest_expansion(
-    columns: Sequence[str],
-    *,
-    drop_suffixes: Sequence[str] = (),
-) -> list[str]:
-    """Drop rolling-feature-expansion columns ending in ``drop_suffixes`` from
-    an already-resolved IF feature list (e.g. ``trainable_feature_columns``'s
-    output).
-
-    Task 2.5 (ml-correctness-hardening): each channel expands 4x (raw +
-    ``__mean`` + ``__std`` + ``__roc``) and the IF trial benchmark compared
-    that full set against raw+``__roc``-only and raw-only subsets, passing
-    the trimmed list to ``fit_isolation_forest``'s existing ``feature_columns``
-    override (no new config knob needed). The trial found the full 4x set won
-    on both detection rate and nominal FP — the diluted-random-split theory
-    didn't hold up here because ``__std``/``__roc`` collapsing to ~0 IS the
-    primary signature of a "stuck" sensor fault, not a redundant copy of the
-    raw channel — so this is unused by the default IF training path today
-    (``scripts/train_anomaly_model.py`` keeps calling
-    ``trainable_feature_columns`` unfiltered). Kept here, not deleted, so a
-    future retrial (a real multi-session corpus, a different channel mix)
-    doesn't have to rebuild the plumbing from scratch. Never applied to
-    ``sequence_feature_columns`` — the sequence detector keeps the full
-    expansion (masking makes it cheap there, per the task).
-    """
-    return [c for c in columns if not any(c.endswith(suffix) for suffix in drop_suffixes)]
-
-
-def candidate_feature_columns(
-    features: pd.DataFrame, *, policy: FeaturePolicy | None = None
-) -> list[str]:
-    """Numeric, non-structural feature candidates before all-NaN filtering.
-
-    The one place trainability policy lives; every selector
-    (:func:`trainable_feature_columns`, the IF and sequence variants,
-    :func:`build_feature_spec`) goes through it. ``policy=None`` resolves the
-    repo defaults — the gates cannot be skipped by not passing an argument.
-    """
-    resolved_policy = policy if policy is not None else resolve_feature_policy()
-    skip_exact = _STRUCTURAL_COLUMNS
-    non_trainable_committees = non_trainable_committee_outputs()
-    # ``dbc:*`` signals that also exist as ``decoded:*`` are the same wire
-    # bytes decoded twice (data/dbc/xterra_2008.dbc was *emitted from*
-    # bindings.yaml). Training both double-weights those signals in the IF
-    # and doubles their share of sequence reconstruction loss for zero new
-    # information — keep the ``decoded:*`` copy, drop the duplicate.
-    # Genuinely external DBC signals (no bindings counterpart) still train.
-    decoded_signal_names = {
-        base_channel(str(c)).removeprefix("decoded:")
-        for c in features.columns
-        if str(c).startswith("decoded:")
-    }
-    cols: list[str] = []
-    for raw in features.columns:
-        col = str(raw)
-        if col in skip_exact or is_flag_column(col):
-            continue
-        # Behavior serving context (B01.5) — eligibility bookkeeping, never
-        # a learned feature.
-        if col.startswith(CONTEXT_COLUMN_PREFIX):
-            continue
-        if (
-            col.startswith("dbc:")
-            and base_channel(col).removeprefix("dbc:") in decoded_signal_names
-        ):
-            continue
-        # GPS position/quality channels (and their rolling derivatives) are
-        # logged but never modeled — see NON_TRAINABLE_GPS_CHANNELS.
-        if base_channel(col) in NON_TRAINABLE_GPS_CHANNELS:
-            continue
-        # Monotonic counters / odometers / run-clocks — see
-        # NON_TRAINABLE_COUNTER_CHANNELS (kept in frame for behavior axes).
-        base = base_channel(col)
-        if base in NON_TRAINABLE_COUNTER_CHANNELS or base.startswith(
-            _NON_TRAINABLE_MISFIRE_COUNTER_PREFIX
-        ):
-            continue
-        # Slow vehicle state (tank level) — see NON_TRAINABLE_STATE_CHANNELS.
-        if base in NON_TRAINABLE_STATE_CHANNELS:
-            continue
-        # Data-file gates: binding confidence / model_feature opt-out for
-        # ``decoded:``, servability for ``did:`` — see FeaturePolicy.
-        if resolved_policy.exclusion_reason(base) is not None:
-            continue
-        # Committee divergence residuals marked non-trainable: computed and
-        # logged, but kept out of the trained set — see signals.committees.
-        if base_channel(col) in non_trainable_committees:
-            continue
-        if pd.api.types.is_numeric_dtype(features[col]):
-            cols.append(col)
-    return cols
-
-
-def _signal_present(frame: pd.DataFrame, value: str | tuple[str, ...]) -> bool:
-    """True when at least one of a segmenter signal's candidate columns exists."""
-    columns = (value,) if isinstance(value, str) else value
-    return any(column in frame.columns for column in columns)
-
-
-#: Prefix of behavior-model deviation columns (raw + __mean/__std/__roc).
-DEVIATION_PREFIX = "deviation:"
-
-
-def sequence_feature_selection(
-    features: pd.DataFrame,
-    *,
-    min_coverage: float = MIN_DETECTOR_COVERAGE,
-    policy: FeaturePolicy | None = None,
-) -> DetectorFeatureSelection:
-    """GRU-D sequence-autoencoder feature columns, with what the shared
-    coverage floor kept out.
-
-    Differs from :func:`trainable_feature_columns` (which the Isolation Forest
-    starts from) in one way: it **drops the entire ``deviation:`` family** (raw
-    and rolling aggregates). Deviations are behavior-model-derived scores that
-    are NaN by contract whenever the model can't speak (off operating-regime) —
-    scattered NaN, not a gap. They are designed for the IF path, which imputes;
-    an autoencoder reconstructing sensor *sequences* should not consume them.
-
-    Then the detector coverage floor (D03.34, :func:`apply_coverage_floor`) on
-    grid density only: GRU-D feeds missingness to the model via the mask/Δt
-    channels, so a round-robin PID forward-filled between polls, or a channel
-    absent from some drives, is kept. A channel valued on under
-    :data:`MIN_DETECTOR_COVERAGE` of the rows of the drives that carry it (a
-    DID read once a minute) is not a sequence at the grid's rate, and it and
-    its rolling siblings are dropped as :data:`SPARSE_FOR_GRID`. The remaining drops — all-NaN
-    everywhere and corpus-constant (zero-variance) columns — are inherited from
-    :func:`trainable_feature_columns`.
-    """
-    candidates = [
-        col
-        for col in trainable_feature_columns(features, policy=policy)
-        if not col.startswith(DEVIATION_PREFIX)
-    ]
-    return apply_coverage_floor(
-        features, candidates, require_row_coverage=False, min_coverage=min_coverage
-    )
-
-
-def sequence_feature_columns(
-    features: pd.DataFrame,
-    *,
-    min_coverage: float = MIN_DETECTOR_COVERAGE,
-    policy: FeaturePolicy | None = None,
-) -> list[str]:
-    """The columns of :func:`sequence_feature_selection`."""
-    return sequence_feature_selection(features, min_coverage=min_coverage, policy=policy).columns
-
-
-def expand_suppress_channels(
-    suppress_bases: Sequence[str], feature_columns: Sequence[str]
-) -> tuple[str, ...]:
-    """Expand each ``suppress_channels`` entry to the matching base column
-    plus its rolling-derivative siblings.
-
-    Listing ``obd:FUEL_LEVEL`` matches all of ``obd:FUEL_LEVEL``,
-    ``obd:FUEL_LEVEL__mean``, ``obd:FUEL_LEVEL__std``, ``obd:FUEL_LEVEL__roc``.
-    Entries that don't match any column are silently dropped (a typo or a
-    channel that disappears from the corpus becomes a no-op, not a hard
-    failure that breaks the serve path). Order matches ``feature_columns``
-    so the result composes cleanly with index lookups.
-    """
-    suppress_set = {str(s) for s in suppress_bases}
-    if not suppress_set:
-        return ()
-    matched: list[str] = []
-    for column in feature_columns:
-        if column in suppress_set:
-            matched.append(column)
-            continue
-        # Rolling derivatives follow their base channel, so the operator lists
-        # the sensor once and its feature-pipeline siblings come along.
-        base, suffix = split_rolling(column)
-        if suffix and base in suppress_set:
-            matched.append(column)
-    return tuple(matched)
-
-
-def align_features_to_schema(
-    features: pd.DataFrame, feature_columns: Sequence[str]
-) -> pd.DataFrame:
-    """Ensure every model feature column exists, adding absent ones as all-NaN.
-
-    A drive may legitimately lack a whole sensor family — e.g. no GPS fix, so no
-    ``gps:*`` channels — while the model's schema (trained on a corpus that did
-    have it) still expects those columns. The GRU-D mask/Δt path already treats
-    an all-NaN channel as unobserved (it imputes the cell and masks it, so the
-    loss never scores a fill), which is exactly how the model saw GPS-less
-    sessions at training time. So an absent column should be scored as
-    masked-missing, never raise in the scaler or the ``.loc`` window slice.
-
-    Returns ``features`` unchanged when nothing is missing.
-    """
-    missing = [str(column) for column in feature_columns if column not in features.columns]
-    if not missing:
-        return features
-    aligned = features.copy()
-    for column in missing:
-        aligned[column] = np.nan
-    log.info(
-        "aligned feature frame to model schema; absent columns masked as unobserved",
-        extra={"missing_columns": missing, "missing_count": len(missing)},
-    )
-    return aligned
-
-
-def _afr_calibration_provenance(config: CanaryConfig) -> dict[str, str | None]:
-    """The ``afr_calibration.yaml`` featurization reads for ``config``, by path
-    and content hash (``None`` when absent)."""
-    require_profile_scoped(config, reader="feature spec (afr_calibration)")
-    return _file_provenance(config.daemon.afr_calibration)
-
-
-def _behavior_models_provenance(config: CanaryConfig) -> dict[str, str | None]:
-    """The ``behavior_models.yaml`` :func:`build_feature_frame` reads for
-    ``config`` by default, by path and content hash (P02.12)."""
-    require_profile_scoped(config, reader="feature spec (behavior_models)")
-    return _file_provenance(config.daemon.behavior_models)
-
-
-def _file_provenance(path: Path) -> dict[str, str | None]:
-    digest = hashlib.sha256(path.read_bytes()).hexdigest() if path.is_file() else None
-    return {"path": str(path), "sha256": digest}
-
-
-def build_feature_spec(
-    features: pd.DataFrame,
-    feature_columns: Sequence[str],
-    *,
-    config: CanaryConfig | None = None,
-    sequence_length: int | None = None,
-    sequence_stride: int | None = None,
-    policy: FeaturePolicy | None = None,
-    behavior_models: BehaviorModels | None = None,
-) -> dict[str, Any]:
-    """Return the versioned feature contract persisted in model manifests.
-
-    This is the first explicit train/serve schema artifact for Phase 7:
-    ordered feature columns, their dtypes, the preprocessing knobs that shape
-    them, source families, and a compact health report. Later 7.1 work can
-    compare this spec against the live source before scoring.
-
-    ``behavior_models`` is the artifact set that produced the frame's
-    ``deviation:*`` columns. When given, the spec records the
-    :func:`~src.behavior.behavior_models.artifact_fingerprint` of every model a
-    consumed deviation column came from (``behavior_model_fingerprints``), so
-    a later refit that changes that column's meaning is caught by the
-    producibility check instead of being fed to this artifact (B03.4). Left
-    ``None``, the field is absent and the provenance is *unknown* — which the
-    check reports as such, never as a pass.
-    """
-    columns = [str(col) for col in feature_columns]
-    resolved_policy = policy if policy is not None else resolve_feature_policy()
-    candidate_columns = candidate_feature_columns(features, policy=resolved_policy)
-    spec: dict[str, Any] = {
-        "feature_spec_version": FEATURE_SPEC_VERSION,
-        "feature_columns": columns,
-        "feature_dtypes": {column: str(features[column].dtype) for column in columns},
-        "source_prefixes": sorted({_source_prefix(column) for column in columns}),
-        "behavior_model_columns": sorted(
-            {base_channel(column) for column in columns if column.startswith("deviation:")}
-        ),
-        "feature_health": summarize_feature_health(
-            features,
-            columns,
-            candidate_columns=candidate_columns,
-        ),
-        # Channels present in the corpus that policy kept out, with the reason
-        # as it stood at training time (binding confidence / opt-out, DID not
-        # served). Empty when nothing was gated.
-        "feature_policy_exclusions": feature_policy_exclusions(features, resolved_policy),
-        # P02.13: channels the policy refuses by name, present in the frame or
-        # not, so the manifest says why ``derived:TARGET_AFR`` is absent.
-        "feature_policy_standing_exclusions": resolved_policy.standing_exclusions(),
-    }
-    if behavior_models is not None:
-        spec["behavior_model_fingerprints"] = consumed_behavior_fingerprints(
-            columns, behavior_models
-        )
-    if config is not None:
-        spec["preprocessing"] = {
-            "resample_hz": config.preprocessing.resample_hz,
-            "rolling_window_seconds": config.preprocessing.rolling_window_seconds,
-            "operating_modes": sorted(config.preprocessing.operating_modes),
-        }
-        # The resampler's max_gap is what flips a channel's ``__gap`` flag to
-        # stale at training time. GRU-D serve must mirror it exactly (it has no
-        # resampler), so persist it on the spec: the training recipe's
-        # max_gap, (1 / hz) * config.preprocessing.max_gap_factor. This once
-        # built ResampleConfig(hz=...) and so recorded the default factor 2.0
-        # whatever the config said (D03.27).
-        spec["max_gap_seconds"] = float(resample_config_for(config).max_gap.total_seconds())
-        # P02.10: broadcast channels (``can:``/``decoded:``/``dbc:``) have their
-        # own stale class, the broadcast stale timeout, which moved them from
-        # 2 s to 10 s; a model trained on one class and served with another
-        # reads different ``__gap``/``__arrived`` flags, so the class travels
-        # with the model beside the other two.
-        spec["broadcast_max_gap_seconds"] = float(
-            resample_config_for(config).broadcast_max_gap_seconds
-        )
-        spec["slow_channel_max_gap_seconds"] = float(
-            config.preprocessing.slow_channel_max_gap_seconds
-        )
-        # P02.11: which calibration the derived AFR channels were built with,
-        # by content. ``sha256: None`` says "featurized without one" — the
-        # state every pre-P02.11 trainer frame was in, silently.
-        spec["afr_calibration"] = _afr_calibration_provenance(config)
-        # P02.12: the behavior-model file the frame's ``deviation:*`` columns
-        # came from, by content (``sha256: None``: none was read).
-        spec["behavior_models"] = _behavior_models_provenance(config)
-    if sequence_length is not None:
-        spec["sequence_length"] = sequence_length
-    if sequence_stride is not None:
-        spec["sequence_stride"] = sequence_stride
-    return spec
-
-
-def consumed_behavior_fingerprints(
-    feature_columns: Sequence[str], behavior_models: BehaviorModels
-) -> dict[str, str]:
-    """``{behavior model name: artifact_fingerprint}`` for every consumed ``deviation:*`` column.
-
-    Refuses a consumed column whose model is not in ``behavior_models``: the
-    frame was then featurized against a different artifact set than the one
-    being recorded (a stale feature cache, or a model retired since), which
-    is exactly the unknown provenance this record exists to prevent — rebuild
-    the feature cache against the current ``behavior_models.yaml`` instead.
-    """
-    by_name = {model.name: model for model in behavior_models.models}
-    consumed = sorted(
-        {name for column in feature_columns if (name := deviation_model_name(column)) is not None}
-    )
-    missing = [name for name in consumed if name not in by_name]
-    if missing:
-        raise ValueError(
-            "feature spec consumes deviation columns of behavior models not in the "
-            f"loaded artifact set: {', '.join(missing)} — the frame was featurized "
-            "against a different behavior_models.yaml (stale feature cache?); rebuild it"
-        )
-    return {name: artifact_fingerprint(by_name[name]) for name in consumed}
-
-
-def summarize_feature_health(
-    features: pd.DataFrame,
-    feature_columns: Sequence[str],
-    *,
-    candidate_columns: Sequence[str] | None = None,
-) -> dict[str, Any]:
-    """Summarize missingness, finiteness, and constant features.
-
-    ``candidate_columns`` lets callers report numeric columns dropped before
-    training, especially all-NaN decoded/deviation columns.
-    """
-    columns = [str(col) for col in feature_columns]
-    candidates = [str(col) for col in (candidate_columns or columns)]
-    selected = set(columns)
-
-    all_nan_columns: list[str] = []
-    constant_columns: list[str] = []
-    non_finite_columns: list[str] = []
-    column_health: dict[str, dict[str, Any]] = {}
-
-    for column in columns:
-        health = _column_health(features[column])
-        column_health[column] = health
-        if health["non_null_count"] == 0:
-            all_nan_columns.append(column)
-        if health["non_finite_count"] > 0:
-            non_finite_columns.append(column)
-        if health["constant"]:
-            constant_columns.append(column)
-
-    dropped_all_nan_columns = [
-        column
-        for column in candidates
-        if column not in selected
-        and column in features.columns
-        and pd.api.types.is_numeric_dtype(features[column])
-        and not bool(features[column].notna().any())
-    ]
-    # Candidates excluded by trainable_feature_columns' zero-variance drop —
-    # observed but never moving across the whole corpus (usually a dead poll,
-    # e.g. ABSOLUTE_LOAD before its PID worked). Documented here so a manifest
-    # answers "why isn't channel X in the model?" without re-running training.
-    dropped_constant_columns = [
-        column
-        for column in candidates
-        if column not in selected
-        and column in features.columns
-        and pd.api.types.is_numeric_dtype(features[column])
-        and bool(features[column].notna().any())
-        and _is_constant_column(features[column])
-    ]
-    # Per-column coverage for everything that IS selected, plus the sub-floor
-    # coverage of what the IF's filter excluded. A blind detector
-    # (missing_feature_rate 1.0) is diagnosed straight from here: if any
-    # selected column's coverage is well under 1.0, per-row scoring will
-    # frequently hit a NaN and self-suppress.
-    coverage = {
-        column: round(float(features[column].notna().sum()) / len(features), 6)
-        for column in columns
-        if len(features)
-    }
-    dropped_low_coverage_columns = low_coverage_columns(
-        features, [c for c in candidates if c not in selected]
-    )
-
-    return {
-        "row_count": int(len(features)),
-        "candidate_feature_count": len(candidates),
-        "selected_feature_count": len(columns),
-        "dropped_all_nan_columns": dropped_all_nan_columns,
-        "dropped_constant_columns": dropped_constant_columns,
-        "dropped_low_coverage_columns": dropped_low_coverage_columns,
-        "min_selected_coverage": (min(coverage.values()) if coverage else None),
-        "all_nan_columns": all_nan_columns,
-        "constant_columns": constant_columns,
-        "non_finite_columns": non_finite_columns,
-        "columns": column_health,
-    }
-
-
-def validate_feature_health(feature_health: Mapping[str, Any]) -> None:
-    """Fail fast on selected columns that cannot produce meaningful scores."""
-    all_nan = [str(col) for col in feature_health.get("all_nan_columns", [])]
-    if all_nan:
-        raise ValueError("selected feature columns are all-NaN: " + ", ".join(all_nan))
-
-
-@dataclass(frozen=True)
-class FeatureSpecReconciliation:
-    """Result of aligning a live/offline frame to a persisted feature spec."""
-
-    row_count: int
-    expected_feature_columns: tuple[str, ...]
-    missing_feature_columns: tuple[str, ...]
-    extra_feature_columns: tuple[str, ...]
-    filled_feature_columns: tuple[str, ...]
-    coerced_feature_columns: tuple[str, ...]
-    output_columns: tuple[str, ...]
-
-    @property
-    def has_divergence(self) -> bool:
-        return bool(
-            self.missing_feature_columns
-            or self.extra_feature_columns
-            or self.coerced_feature_columns
-        )
-
-    def to_dict(self) -> dict[str, Any]:
-        return {
-            "row_count": self.row_count,
-            "expected_feature_columns": list(self.expected_feature_columns),
-            "missing_feature_columns": list(self.missing_feature_columns),
-            "extra_feature_columns": list(self.extra_feature_columns),
-            "filled_feature_columns": list(self.filled_feature_columns),
-            "coerced_feature_columns": list(self.coerced_feature_columns),
-            "output_columns": list(self.output_columns),
-            "has_divergence": self.has_divergence,
-        }
-
-
-def reconcile_feature_frame_to_spec(
-    frame: pd.DataFrame,
-    schema: Mapping[str, Any],
-    *,
-    structural_columns: Sequence[str] | None = None,
-    fill_missing: float = float("nan"),
-    coerce_numeric: bool = True,
-) -> tuple[pd.DataFrame, FeatureSpecReconciliation]:
-    """Align ``frame`` to the model feature spec persisted in a manifest.
-
-    The serving policy is deliberately explicit:
-
-    * expected feature columns absent from the live row are added as ``NaN``;
-    * extra live feature columns are dropped before scoring;
-    * expected feature columns are coerced numeric because every trained
-      feature column is numeric by construction.
-
-    Structural columns (timestamp/session/mode) are preserved ahead of feature
-    columns so model adapters still have the metadata they need.
-    """
-    feature_columns = tuple(str(column) for column in schema.get("feature_columns", ()))
-    if not feature_columns:
-        raise ValueError("feature schema has no feature_columns")
-
-    # Every column finished before any frame is built (D01.10). The previous
-    # form copied ``frame`` and then inserted each fill and re-assigned each
-    # coerced column in place: ~650 block-manager writes (``iset`` /
-    # ``_iset_split_block`` / ``blocks.delete``) per one-row tick, which was
-    # the whole cost. Keys follow the order the old insert sequence left them
-    # in — ``frame``'s own columns, then the fills — so the frame the extras
-    # are judged against is the same one.
-    if frame.columns.has_duplicates:
-        duplicated = sorted({str(c) for c in frame.columns[frame.columns.duplicated()]})
-        raise ValueError("feature frame has duplicate columns: " + ", ".join(duplicated))
-    finished: dict[Any, pd.Series] = dict(frame.items())
-    present = {str(column) for column in frame.columns}
-    missing = tuple(column for column in feature_columns if column not in present)
-    # One fill column shared by every missing key (the frame build copies it
-    # into place), so a spec that is mostly absent costs one Series, not one
-    # per absent feature.
-    fill = pd.Series(fill_missing, index=frame.index)
-    for column in missing:
-        finished[column] = fill
-
-    dtype_spec = schema.get("feature_dtypes", {})
-    coerced: list[str] = []
-    if coerce_numeric:
-        coerced_fill: pd.Series | None = None
-        for column in feature_columns:
-            series = finished[column]
-            before = str(series.dtype)
-            if series is fill:
-                if coerced_fill is None:
-                    coerced_fill = pd.to_numeric(fill, errors="coerce")
-                series = coerced_fill
-            else:
-                series = pd.to_numeric(series, errors="coerce")
-            finished[column] = series
-            after = str(series.dtype)
-            expected_dtype = (
-                str(dtype_spec.get(column, "")) if isinstance(dtype_spec, Mapping) else ""
-            )
-            if before != after or (expected_dtype and after != expected_dtype):
-                coerced.append(column)
-
-    out = pd.DataFrame(finished, index=frame.index, copy=False)
-    extras = tuple(
-        column for column in candidate_feature_columns(out) if column not in feature_columns
-    )
-    structural = _resolve_structural_columns(out, schema, structural_columns)
-    output_columns = tuple(dict.fromkeys([*structural, *feature_columns]))
-    aligned = out.loc[:, [column for column in output_columns if column in out.columns]].copy()
-    report = FeatureSpecReconciliation(
-        row_count=int(len(aligned)),
-        expected_feature_columns=feature_columns,
-        missing_feature_columns=missing,
-        extra_feature_columns=extras,
-        filled_feature_columns=missing,
-        coerced_feature_columns=tuple(coerced),
-        output_columns=tuple(str(column) for column in aligned.columns),
-    )
-    return aligned, report
-
-
-def _resolve_structural_columns(
-    frame: pd.DataFrame,
-    schema: Mapping[str, Any],
-    override: Sequence[str] | None,
-) -> tuple[str, ...]:
-    if override is not None:
-        return tuple(str(column) for column in override if str(column) in frame.columns)
-
-    candidates = [
-        schema.get("timestamp_column", "timestamp"),
-        schema.get("session_column", "session"),
-        schema.get("mode_column", MODE_COLUMN),
-    ]
-    return tuple(
-        dict.fromkeys(str(column) for column in candidates if str(column) in frame.columns)
-    )
-
-
-def _column_health(series: pd.Series) -> dict[str, Any]:
-    values = pd.to_numeric(series, errors="coerce").to_numpy(dtype=np.float64, copy=False)
-    finite_mask = np.isfinite(values)
-    finite_values = values[finite_mask]
-    non_null_count = int(series.notna().sum())
-    finite_count = int(finite_mask.sum())
-    unique_finite_count = int(pd.Series(finite_values).nunique(dropna=True))
-    return {
-        "dtype": str(series.dtype),
-        "non_null_count": non_null_count,
-        "finite_count": finite_count,
-        "nan_count": int(series.isna().sum()),
-        "non_finite_count": non_null_count - finite_count,
-        "unique_finite_count": unique_finite_count,
-        "constant": finite_count > 0 and unique_finite_count <= 1,
-    }
-
-
-def _source_prefix(column: str) -> str:
-    return source_of(base_channel(column)) or "derived"
+__all__ = [
+    "align_features_to_schema",
+    "ALL_MODE",
+    "_append_derived_channels",
+    "apply_coverage_floor",
+    "behavior_model_input_roots",
+    "BELOW_ROW_COVERAGE",
+    "build_feature_frame",
+    "build_feature_frame_cache_key",
+    "build_feature_spec",
+    "candidate_feature_columns",
+    "_column_root",
+    "configured_behavior_models",
+    "consumed_behavior_fingerprints",
+    "COVERAGE_FLOOR_SCHEMA_KEY",
+    "CoverageExclusion",
+    "DBC_PREFIX",
+    "_decode_session_to_resampled",
+    "DEFAULT_BINDINGS_PATH",
+    "DEFAULT_CAPTURE_PROFILES_PATH",
+    "default_decode_inputs",
+    "DEFAULT_DIDS_PATH",
+    "DEFAULT_FEATURE_CACHE_DIR",
+    "_derived_ancestors",
+    "derived_channel_inputs",
+    "derived_channels_reached",
+    "DERIVED_PREFIX",
+    "detector_coverage",
+    "detector_coverage_rows",
+    "detector_grid_density",
+    "DetectorFeatureSelection",
+    "DEVIATION_PREFIX",
+    "DID_PREFIX",
+    "DID_VIEW_EXCLUSION",
+    "disposition_screen_frames",
+    "drop_fully_stale_rows",
+    "_drop_fully_stale_rows",
+    "expand_suppress_channels",
+    "FEATURE_FRAME_CACHE_VERSION",
+    "feature_policy_exclusions",
+    "FEATURE_SPEC_VERSION",
+    "FeaturePolicy",
+    "FeatureSpecReconciliation",
+    "featurize_perturbed_frame",
+    "featurize_wide_frame",
+    "FeaturizedFrame",
+    "isolation_forest_feature_columns",
+    "isolation_forest_feature_selection",
+    "load_resampled_session",
+    "low_coverage_columns",
+    "MEMORY_CHANNEL_EXCLUSION",
+    "MEMORY_FEATURE_PREFIX",
+    "MIN_DETECTOR_COVERAGE",
+    "MIN_ISOLATION_FOREST_COVERAGE",
+    "NON_TRAINABLE_COUNTER_CHANNELS",
+    "NON_TRAINABLE_GPS_CHANNELS",
+    "NON_TRAINABLE_STATE_CHANNELS",
+    "OBD_PREFIX",
+    "reconcile_feature_frame_to_spec",
+    "resample_config_for",
+    "resample_long_session",
+    "resample_session_bounded",
+    "resolve_feature_policy",
+    "_resolve_structural_columns",
+    "restrict_isolation_forest_expansion",
+    "segment_or_constant",
+    "segmenter_input_columns",
+    "SEGMENTER_SIGNAL_COLUMNS",
+    "_SEGMENTER_SIGNAL_COLUMNS",
+    "sequence_feature_columns",
+    "sequence_feature_selection",
+    "SPARSE_FOR_GRID",
+    "summarize_feature_health",
+    "trainable_feature_columns",
+    "validate_feature_health",
+    "_without_committee_columns",
+]

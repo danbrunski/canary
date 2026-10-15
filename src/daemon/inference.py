@@ -23,10 +23,8 @@ from src.daemon.broadcast import Broadcaster
 from src.decode.bindings import load_bindings
 from src.decode.dbc import DEFAULT_DBC_DIR, load_dbc_dir
 from src.decode.dids import load_did_map
-from src.features.feature_pipeline import (
-    ALL_MODE,
-    DEFAULT_DIDS_PATH,
-)
+from src.features.feature_paths import DEFAULT_DIDS_PATH
+from src.features.feature_transform import ALL_MODE
 from src.features.live import LiveFeatureSource, build_prepared_live_tick
 from src.models.fusion import (
     FusionScorer,

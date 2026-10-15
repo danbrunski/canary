@@ -20,7 +20,7 @@ namespaces are enumerated from the same catalogs the live source loads
 (bindings → ``decoded:``, DBC → ``dbc:``, dids.yaml → ``did:``, the Mode 01
 registry → ``obd:``, the GPS record builder → ``gps:``); then one synthetic
 frame carrying every one of those columns is pushed through
-:func:`src.features.feature_pipeline.featurize_wide_frame` — the single
+:func:`src.features.feature_transform.featurize_wide_frame` — the single
 wide → model-ready transform both train and serve call. Whatever it emits is
 producible, including ``derived:``/``deviation:`` channels and the
 ``__mean``/``__std``/``__roc`` expansion, so a derived channel whose *input*
@@ -335,7 +335,7 @@ def build_producible_catalog(
     ``derived:``/``deviation:`` channels exist.
     """
     from src.behavior.behavior_models import load_behavior_models
-    from src.features.feature_pipeline import featurize_wide_frame
+    from src.features.feature_transform import featurize_wide_frame
 
     captured = captured_channels(bindings_path=bindings_path, dids_path=dids_path, dbc_dir=dbc_dir)
     raw_columns = sorted(set().union(*captured.values()))

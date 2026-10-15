@@ -13,9 +13,7 @@ from src.alerts.emitter import EmitterCounters
 from src.alerts.tuning import AlertTuner
 from src.coerce import finite_float
 from src.daemon.broadcast import Broadcaster
-from src.features.feature_pipeline import (
-    FeatureSpecReconciliation,
-)
+from src.features.feature_spec import FeatureSpecReconciliation
 from src.models.feature_spec_health import observe_reconciliation
 from src.models.fusion import (
     FusionSource,

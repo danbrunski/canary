@@ -571,13 +571,13 @@ def test_resolve_worker_count_trims_pool_to_available_memory(
 ) -> None:
     """The OOM this replaces: 4 fixed workers × a multi-GB frame each on a box
     with ~2 GB actually free. The budget has to win over the CPU ceiling."""
-    from src.features import feature_pipeline as fp
+    from src.features import feature_workers
 
     sessions = _sized_sessions(tmp_path, 6, megabytes=45.0)  # ~1.8 GB/worker at 40×
-    monkeypatch.setattr(fp, "_available_memory_bytes", lambda: 2 * 1024**3)
-    monkeypatch.setattr(fp.os, "cpu_count", lambda: 12)
+    monkeypatch.setattr(feature_workers, "available_memory_bytes", lambda: 2 * 1024**3)
+    monkeypatch.setattr(feature_workers.os, "cpu_count", lambda: 12)
 
-    assert fp._resolve_worker_count(sessions, None) == 1
+    assert feature_workers._resolve_worker_count(sessions, None) == 1
 
 
 def test_resolve_worker_count_uses_cpu_ceiling_when_memory_is_ample(
@@ -585,25 +585,28 @@ def test_resolve_worker_count_uses_cpu_ceiling_when_memory_is_ample(
 ) -> None:
     """Small sessions on a roomy box: the memory budget must not throttle
     below what the CPU/cap ceiling already allows."""
-    from src.features import feature_pipeline as fp
+    from src.features import feature_workers
 
     sessions = _sized_sessions(tmp_path, 8, megabytes=1.0)
-    monkeypatch.setattr(fp, "_available_memory_bytes", lambda: 64 * 1024**3)
-    monkeypatch.setattr(fp.os, "cpu_count", lambda: 12)
+    monkeypatch.setattr(feature_workers, "available_memory_bytes", lambda: 64 * 1024**3)
+    monkeypatch.setattr(feature_workers.os, "cpu_count", lambda: 12)
 
-    assert fp._resolve_worker_count(sessions, None) == fp._PARALLEL_WORKER_CAP
+    assert (
+        feature_workers._resolve_worker_count(sessions, None)
+        == feature_workers._PARALLEL_WORKER_CAP
+    )
 
 
 def test_resolve_worker_count_is_bounded_by_session_count(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from src.features import feature_pipeline as fp
+    from src.features import feature_workers
 
     sessions = _sized_sessions(tmp_path, 2, megabytes=1.0)
-    monkeypatch.setattr(fp, "_available_memory_bytes", lambda: 64 * 1024**3)
-    monkeypatch.setattr(fp.os, "cpu_count", lambda: 12)
+    monkeypatch.setattr(feature_workers, "available_memory_bytes", lambda: 64 * 1024**3)
+    monkeypatch.setattr(feature_workers.os, "cpu_count", lambda: 12)
 
-    assert fp._resolve_worker_count(sessions, None) == 2
+    assert feature_workers._resolve_worker_count(sessions, None) == 2
 
 
 def test_resolve_worker_count_honours_explicit_override(
@@ -611,17 +614,17 @@ def test_resolve_worker_count_honours_explicit_override(
 ) -> None:
     """An explicit ``max_workers`` is the caller's call — the memory heuristic
     must not second-guess it (nor consult memory at all)."""
-    from src.features import feature_pipeline as fp
+    from src.features import feature_workers
 
     sessions = _sized_sessions(tmp_path, 6, megabytes=45.0)
 
     def _boom() -> int:
         raise AssertionError("memory must not be probed when max_workers is explicit")
 
-    monkeypatch.setattr(fp, "_available_memory_bytes", _boom)
+    monkeypatch.setattr(feature_workers, "available_memory_bytes", _boom)
 
-    assert fp._resolve_worker_count(sessions, 8) == 8
-    assert fp._resolve_worker_count(sessions, 0) == 1
+    assert feature_workers._resolve_worker_count(sessions, 8) == 8
+    assert feature_workers._resolve_worker_count(sessions, 0) == 1
 
 
 def test_resolve_worker_count_falls_back_when_memory_is_unknown(
@@ -629,19 +632,22 @@ def test_resolve_worker_count_falls_back_when_memory_is_unknown(
 ) -> None:
     """On a platform that won't report free memory, keep the previous
     CPU/cap-only behaviour rather than collapsing to serial."""
-    from src.features import feature_pipeline as fp
+    from src.features import feature_workers
 
     sessions = _sized_sessions(tmp_path, 6, megabytes=45.0)
-    monkeypatch.setattr(fp, "_available_memory_bytes", lambda: None)
-    monkeypatch.setattr(fp.os, "cpu_count", lambda: 12)
+    monkeypatch.setattr(feature_workers, "available_memory_bytes", lambda: None)
+    monkeypatch.setattr(feature_workers.os, "cpu_count", lambda: 12)
 
-    assert fp._resolve_worker_count(sessions, None) == fp._PARALLEL_WORKER_CAP
+    assert (
+        feature_workers._resolve_worker_count(sessions, None)
+        == feature_workers._PARALLEL_WORKER_CAP
+    )
 
 
 def test_available_memory_bytes_is_plausible_or_none() -> None:
-    from src.features import feature_pipeline as fp
+    from src.features import feature_workers
 
-    available = fp._available_memory_bytes()
+    available = feature_workers.available_memory_bytes()
     assert available is None or available > 0
 
 
