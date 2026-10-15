@@ -39,6 +39,16 @@ verify:
   # Blocks re-read, spread evenly across the image, and compared byte for
   # byte with the first read.
   reread_blocks: 64
+# Frames the ECM broadcasts by itself whenever it is powered. While the read
+# holds the ECM, vehicle_state reads passive and cannot see the key turned
+# off; these stop with it. A block that fails on silence is reported as "the
+# ECM went silent (key off?)" when none of them has been heard for a request
+# timeout. That needs one of them faster than request_timeout_seconds: 0x1F9
+# is the ~100 Hz engine-speed frame (data/bindings.yaml ECM_RPM). Evidence:
+# the first truck read (2026-10-04 21:58:32Z) ended at a key-off at block
+# 1,729, and every ECM broadcast, 0x23D, 0x231 and 0x551 named among them,
+# stopped at 21:59:36Z while 0x2D1/0x2DE/0x280 carried on (W08.9).
+ecm_broadcast_ids: [0x1F9, 0x231, 0x23D, 0x551]
 provenance:
   capture: docs/skunkworks/uprev-backup-20261004.md
   evidence: >-

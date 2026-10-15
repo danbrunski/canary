@@ -75,7 +75,13 @@ def _rom_map_data() -> dict[str, Any]:
 
 
 def _write_profile(
-    root: Path, *, retries: int = 2, reread: int = 8, timeout: float = 1.0, block: int = 63
+    root: Path,
+    *,
+    retries: int = 2,
+    reread: int = 8,
+    timeout: float = 1.0,
+    block: int = 63,
+    ecm_broadcast_ids: list[int] | None = None,
 ) -> Path:
     profile = root / "profile"
     profile.mkdir(parents=True, exist_ok=True)
@@ -93,6 +99,8 @@ def _write_profile(
         "verify": {"reread_blocks": reread},
         "provenance": {"capture": "synthetic", "evidence": "fake ECU"},
     }
+    if ecm_broadcast_ids is not None:
+        recipe["ecm_broadcast_ids"] = ecm_broadcast_ids
     (profile / "rom_map.yaml").write_text(yaml.safe_dump(_rom_map_data()))
     (profile / "rom_backup.yaml").write_text(yaml.safe_dump(recipe))
     return profile
@@ -112,10 +120,15 @@ def _small_image(*, cal: bytes = CAL_ID, good_checksum: bool = True) -> bytes:
 
 
 class FakeEcu:
-    """Answers 0x10 and 0x23 on ``request_id`` like the Xterra ECM."""
+    """Answers 0x10 and 0x23 on ``request_id`` like the Xterra ECM, and sends
+    its own ``broadcast`` frames every 5 ms while powered."""
 
-    def __init__(self, channel: str, image: bytes) -> None:
+    def __init__(self, channel: str, image: bytes, broadcast: tuple[int, ...] = ()) -> None:
         self.bus = can.Bus(interface="virtual", channel=channel)
+        #: False is the key turned off: the ECM neither answers nor broadcasts.
+        self.powered = True
+        self._broadcast = broadcast
+        self._broadcast_bus = can.Bus(interface="virtual", channel=channel) if broadcast else None
         self.image = bytearray(image)
         self.log: list[tuple[str, int]] = []
         self.read_counts: dict[int, int] = {}
@@ -127,15 +140,33 @@ class FakeEcu:
         self._pending: bytes | None = None
         self._stop = threading.Event()
         self._thread = threading.Thread(target=self._run, daemon=True, name="fake-ecu")
+        self._broadcaster = threading.Thread(
+            target=self._broadcast_run, daemon=True, name="fake-ecu-broadcast"
+        )
 
     def start(self) -> FakeEcu:
         self._thread.start()
+        if self._broadcast_bus is not None:
+            self._broadcaster.start()
         return self
 
     def stop(self) -> None:
         self._stop.set()
         self._thread.join(2)
+        if self._broadcast_bus is not None:
+            self._broadcaster.join(2)
+            self._broadcast_bus.shutdown()
         self.bus.shutdown()
+
+    def _broadcast_run(self) -> None:
+        assert self._broadcast_bus is not None
+        while not self._stop.wait(0.005):
+            if not self.powered:
+                continue
+            for arbitration_id in self._broadcast:
+                self._broadcast_bus.send(
+                    can.Message(arbitration_id=arbitration_id, data=bytes(8), is_extended_id=False)
+                )
 
     @property
     def sessions(self) -> list[int]:
@@ -162,6 +193,8 @@ class FakeEcu:
             message = self.bus.recv(0.01)
             if message is None or message.arbitration_id != REQUEST_ID:
                 continue
+            if not self.powered:
+                continue
             data = bytes(message.data)
             kind = data[0] >> 4
             if kind == 3:  # flow control: send the consecutive frames
@@ -184,7 +217,11 @@ class FakeEcu:
                 self.log.append(("read", address))
                 if self.on_read is not None:
                     self.on_read(address, count)
-                if address in self.drop_reads or self.fail_first.get(address, 0) >= count:
+                if (
+                    not self.powered
+                    or address in self.drop_reads
+                    or self.fail_first.get(address, 0) >= count
+                ):
                     continue
                 if address in self.nrc_reads:
                     self._respond(bytes([0x7F, 0x23, self.nrc_reads[address]]))
@@ -238,11 +275,13 @@ def rig_factory(tmp_path: Path) -> Iterator[Callable[..., Rig]]:
         registry: Callable[[], Any] | None = None,
         obd_source: str = "canable",
         resume_timeout: float = 0.5,
+        broadcast: tuple[int, ...] = (),
         **profile_kwargs: Any,
     ) -> Rig:
         channel = f"rom-backup-{uuid.uuid4().hex}"
         profile = _write_profile(tmp_path / f"p{len(made)}", **profile_kwargs)
-        ecu = FakeEcu(channel, image if image is not None else _small_image()).start()
+        image = image if image is not None else _small_image()
+        ecu = FakeEcu(channel, image, broadcast).start()
         truck = Truck()
         library = RomLibrary(
             tmp_path / f"lib{len(made)}", profile_dir=profile, registry=registry or (lambda: None)
@@ -299,6 +338,7 @@ def test_shipped_recipe_reads_the_whole_image_like_uprev() -> None:
     assert recipe.session.before_each_read == [0xFB]
     assert recipe.session.exit == [0x81]
     assert recipe.verify.reread_blocks == 64
+    assert recipe.ecm_broadcast_ids == [0x1F9, 0x231, 0x23D, 0x551]
     assert recipe.provenance.capture == "docs/skunkworks/uprev-backup-20261004.md"
 
 
@@ -309,6 +349,13 @@ def test_a_recipe_that_misses_part_of_the_image_is_refused(tmp_path: Path) -> No
     (profile / "rom_backup.yaml").write_text(yaml.safe_dump(data))
     rom_map = RomMap.model_validate(yaml.safe_load((profile / "rom_map.yaml").read_text()))
     with pytest.raises(ValueError, match="the image is 0x000000-0x0007FF"):
+        load_backup_recipe(profile, rom_map)
+
+
+def test_a_diagnostic_id_cannot_stand_for_an_ecm_broadcast(tmp_path: Path) -> None:
+    profile = _write_profile(tmp_path, ecm_broadcast_ids=[0x551, RESPONSE_ID])
+    rom_map = RomMap.model_validate(yaml.safe_load((profile / "rom_map.yaml").read_text()))
+    with pytest.raises(ValueError, match="0x7E8 is a diagnostic id"):
         load_backup_recipe(profile, rom_map)
 
 
@@ -706,6 +753,67 @@ def test_a_timeout_retries_then_aborts_naming_the_address(
     assert "no response within 0.1 s" in state["reason"]
     assert state["retries"] == 2 and state["timeouts"] == 3
     assert rig.ecu.read_counts[63 * 7] == 3
+    _assert_released()
+
+
+def test_a_key_off_mid_read_is_named_as_the_ecm_going_silent(
+    rig_factory: Callable[..., Rig],
+) -> None:
+    """W08.9's first truck read ended at a key-off reported only as "no
+    response within 0.5 s". The ECM's own broadcasts stop with it, and the
+    job's bus hears that."""
+    rig = rig_factory(
+        retries=2, timeout=0.2, ecm_broadcast_ids=[0x551, 0x1F9], broadcast=(0x1F9, 0x551)
+    )
+
+    def key_off(address: int, count: int) -> None:
+        if address == 63 * 5:
+            rig.ecu.powered = False
+
+    rig.ecu.on_read = key_off
+    state = rig.run()
+    assert state["state"] == "failed"
+    assert state["reason"].startswith(
+        "the ECM went silent (key off?): none of its broadcasts (0x1F9, 0x551) heard for "
+    ), state["reason"]
+    assert "read at 0x00013B (63 bytes) failed after 3 attempts" in state["reason"]
+    assert "no response within 0.2 s" in state["reason"]
+    _assert_released()
+
+
+def test_a_timeout_while_the_ecm_still_broadcasts_says_it_is_powered(
+    rig_factory: Callable[..., Rig],
+) -> None:
+    rig = rig_factory(retries=2, timeout=0.3, ecm_broadcast_ids=[0x1F9], broadcast=(0x1F9,))
+    rig.ecu.drop_reads.add(63 * 7)
+    state = rig.run()
+    assert state["state"] == "failed"
+    assert state["reason"].startswith("read at 0x0001B9 (63 bytes) failed after 3 attempts")
+    assert "the ECM was still broadcasting" in state["reason"], state["reason"]
+    assert "key off" not in state["reason"]
+    _assert_released()
+
+
+def test_declared_broadcasts_never_heard_leave_the_cause_open(
+    rig_factory: Callable[..., Rig],
+) -> None:
+    rig = rig_factory(retries=1, timeout=0.1, ecm_broadcast_ids=[0x1F9])
+    rig.ecu.drop_reads.add(63 * 3)
+    state = rig.run()
+    assert state["state"] == "failed"
+    assert "the ECM's broadcasts (0x1F9) were never heard during the read" in state["reason"]
+    _assert_released()
+
+
+def test_a_negative_response_is_never_blamed_on_a_silent_ecm(
+    rig_factory: Callable[..., Rig],
+) -> None:
+    rig = rig_factory(retries=1, ecm_broadcast_ids=[0x1F9])
+    rig.ecu.nrc_reads[63 * 2] = 0x22
+    state = rig.run()
+    assert state["state"] == "failed"
+    assert "negative response 0x22" in state["reason"]
+    assert "broadcast" not in state["reason"]
     _assert_released()
 
 

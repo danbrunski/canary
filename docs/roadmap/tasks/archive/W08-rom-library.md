@@ -491,10 +491,15 @@ Evidence this builds on:
     - Gap found: the refusal names a timeout, not the cause. While the job
       holds the ECM, `vehicle_state` reads `passive`, so the in-read re-check
       cannot see key-off.
-    - A read timeout that coincides with the ECM's own broadcast frames going
-      silent could be reported as "ECM went silent (key off?)". This is not
-      implemented: an operator-facing message improvement, not a correctness
-      issue.
+    - *Fixed 2026-10-15.* The recipe's `ecm_broadcast_ids` (0x1F9, 0x231,
+      0x23D, 0x551) are filtered onto the read's bus. A block that fails on
+      silence leads with "the ECM went silent (key off?): none of its
+      broadcasts … heard for N s" when they stopped for a request timeout.
+      It says "the ECM was still broadcasting … powered but not answering"
+      when they had not, and that they were never heard when they never
+      arrived. Tests: `test_a_key_off_mid_read_is_named_as_the_ecm_going_silent`
+      and its three siblings in `tests/test_rom_backup.py`. Not yet seen on
+      the truck.
 
 ## Order
 
