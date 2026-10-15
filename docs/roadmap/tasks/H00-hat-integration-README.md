@@ -22,6 +22,7 @@ PENDING-HARDWARE used bare `H0`–`H9`; these are `H01.1` onward.)
 | [`H06-kline-sniffer.md`](H06-kline-sniffer.md) | Passive decoding of UpRev and scan-tool sessions, live |
 | [`H07-driving-dyno.md`](H07-driving-dyno.md) | Road-load and power from on-road pulls, IMU-compensated |
 | [`H08-hat-adc.md`](H08-hat-adc.md) | Rev 2.1's ADS8688A: driver, 12 V sense, fuel pressure, sensor ports |
+| [`H09-coprocessor-link.md`](H09-coprocessor-link.md) | Rev 3.0's STM32U575 coprocessor: link spec, Python side against a fake MCU, firmware |
 
 ## Operator decisions (2026-09-23 — do not re-open)
 

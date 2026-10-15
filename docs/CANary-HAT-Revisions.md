@@ -711,7 +711,7 @@ binds the HAT:
 | §13.3.4 GNSS | The always-on rail that was V_BCKP's missing OR leg now comes from CANary-PWR as a **backup supply net**. V_BCKP is meant to be live while the module is off, so this is not a hazardous crossing. It also retires BT1. Keeping the receiver *tracking* while the Pi is off is lost. Hot-start ephemeris via V_BCKP is kept. |
 | §13.3.4 "do not put the MCU on I2C1" | The X1202 fuel gauge it protected is gone. CANary-PWR talks to the Pi as an **I2C target** on I2C1, behind a buffer powered from the Pi side. The Pi stays the only master, so the multi-master hazard behind that rule does not arise. The rule still holds for the coprocessor, which keeps its private sensor bus. |
 | §13.3.6 net list | Item 1 (always-on 3.3V) and item 3 (load switch) **leave the HAT**. Item 6 (Pi 3V3 sense) moves to CANary-PWR. Items 4, 5 and 14 are **no longer crossings**: both ends are in the Pi domain, so §13.3.2's pulls are no longer required. Keep the series resistors as cheap ESD/fault margin. Item 10 (INT2 motion wake) loses its purpose. **Added:** the CANary-PWR connector (`CANary-PWR-Spec.md` §P6). |
-| §13.3.10 MCU selection | The coprocessor no longer needs low standby current, and the "regulator Iq decides" argument moves to CANary-PWR. Part choice is RAM, FDCAN and ADC alone, as that section already concluded. **Chosen 2026-10-14: `STM32U575RGT6`** (RIT6 alternate), on boot-gap RAM and DigiKey stock. |
+| §13.3.10 MCU selection | The coprocessor no longer needs low standby current, and the "regulator Iq decides" argument moves to CANary-PWR. Part choice is RAM, FDCAN and ADC alone, as that section already concluded. **Chosen: `STM32U575RGT3`** (RIT3 alternate; grade 3 from 2026-10-15), on boot-gap RAM and DigiKey stock. |
 | §13.3.12 USB | "Powered from `+12V_RAW`, self-powered device" becomes powered from the Pi. The rule against drawing from or back-feeding VBUS still holds. |
 | §13.3.13 placement | The stack is NVMe base / Pi / **PWR** / HAT (2026-10-13), not X1202 / Pi / HAT. **J3, Q1, D1, C2 and the always-on buck leave the HAT**; J3 already lives in rev 2.1's J2 as pins 3–4, and rev 3.0 drops those two positions (§13.3.9 item 5). The HAT's bottom face now looks at CANary-PWR's top side rather than the cooler, so the fan keep-out and the ~6 mm cooler clearance move to PWR; the HAT's bottom-side budget becomes whatever its 13.5 mm J1 leaves above PWR's top-side parts (`CANary-PWR-Spec.md` §P2). Its top face is free. |
 
@@ -1426,7 +1426,9 @@ Eleven pins come free and the coprocessor uses six.
   equivalent pins. The functions and the pull directions are what this map
   fixes.
 
-**Software this implies (open, not started):**
+**Software this implies (open, not started; tracked as
+`docs/roadmap/tasks/H09-coprocessor-link.md`, which also records the firmware
+approach, operator 2026-10-15):**
 - A 3.0 row in `hat_revisions.json`, plus a `canary-hat-r30` overlay with
   `uart0` as the MCU console, no K-line pins and no ADC spidev on CE1.
 - The K-line and ADC collectors reach their hardware through the MCU link
@@ -1761,11 +1763,12 @@ counts for less from 2026-10-14, since the ADS8688A does the measuring. If it ne
 hundreds of KB, the **STM32H563 in LQFP64** ~~matches the two fan-outs exactly~~
 has one FDCAN for the vehicle fan-out and one spare.
 
-**Sized and chosen (operator, 2026-10-14): `STM32U575RGT6`**, with
-`STM32U575RIT6` as a same-footprint alternate (2 MB flash instead of 1 MB).
-That is LQFP64, **784 KB SRAM** (512 KB of it one contiguous bank, SRAM3),
-Cortex-M33 at 160 MHz, **1× FDCAN**, USB OTG FS, the LDO (non-`Q`) variant,
-−40…85 °C. The STM32H563 was picked first on the same sizing, then dropped on
+**Sized and chosen (operator, 2026-10-14; grade 3 from 2026-10-15):
+`STM32U575RGT3`**, with `STM32U575RIT3` as a same-footprint alternate (2 MB
+flash instead of 1 MB). Both are stocked in the hundreds; the grade-6 RGT6/RIT6
+were the first pick. That is LQFP64, **784 KB SRAM** (512 KB of it one
+contiguous bank, SRAM3), Cortex-M33 at 160 MHz, **1× FDCAN**, USB OTG FS, the
+LDO (non-`Q`) variant, **−40…125 °C ambient, 130 °C junction**. The STM32H563 was picked first on the same sizing, then dropped on
 supply. The operator found **zero DigiKey stock on every H5 code** with enough
 RAM: H563 RIT6/RGT6, H562 RGT6/RIT6, H573RIT6, the `TR` reels, the VFQFPN68
 `RGV6`/`RIV6` and the LQFP100 `VGT6`/`VIT6`. The U575 RIT6 and RGT6 were the
@@ -1820,9 +1823,41 @@ Rev 7 and AN2867 Rev 24 (in `hardware/canary-hat-rev3.0/datasheets/`):
     C0 3 pF, CL 8 pF), gmcrit = 4·ESR·(2πF)²·(C0+CL)² = **1.53 mA/V** at
     40 MHz.
   - **A 16 MHz crystal clears it with wide margin**: the ESR limit at
-    C0 + CL = 11 pF is ~300 Ω. Pick a stocked 3225-size 16 MHz part
-    (operator confirms DigiKey stock) and size the load capacitors per AN2867
-    from its CL and the board's stray.
+    C0 + CL = 11 pF is ~300 Ω.
+  - **First pick, replaced on temperature (2026-10-15): Kyocera
+    `CX3225SB16000D0GZJC1`** (DigiKey 5995241). Its series sheet
+    (`datasheets/cx3225sb_e.pdf`) gives CL 8 pF (`D0`), ESR 80 Ω max at
+    13–20 MHz, C0 3.0 pF max and 100 µW max drive. Those give **gmcrit =
+    0.39 mA/V** against the 1.5 mA/V limit, so it is electrically fine. But
+    CX3225SB is a consumer series: **operating and storage both top out at
+    +85 °C** (its widest code is `P`, −40…85 °C, and this part's `Z` is an
+    unstated special range). A board that sits in a parked cab all summer,
+    beside a grade-3 MCU, wants a −40…125 °C crystal. Rev 2.1's Y1 is the
+    AEC-Q200 CX3225SA for the same reason.
+  - **Chosen (operator, 2026-10-15): Kyocera `CX3225CA16000D0HSSCC`**, the
+    automotive CX3225CA series (`datasheets/CX3225CA_ Series_Spec.pdf`,
+    K1101-13751-431).
+    - **Ratings:** 16 MHz fundamental, CL 8.0 pF, **ESR ≤ 100 Ω**, drive
+      0.01–**200 µW**, ±20 ppm at 25 °C, ±50 ppm over temperature,
+      **operating −40…+125 °C, storage −40…+150 °C**.
+    - **gmcrit = 0.49 mA/V** at C0 3 pF, about a third of the 1.5 mA/V
+      limit. The spec gives no C0, but even 5 pF gives 0.68 mA/V, so C0
+      cannot fail the check.
+    - **Pads #1/#3 are the crystal; #2/#4 are NC, not GND** (CX3225SA's are
+      GND). Grounding them on rev 2.1's `Crystal_GND24` symbol is harmless.
+      Check the recommended land (1.05 × 1.0 mm pads) against the footprint.
+      Height 0.8 mm, which fits B.Cu under §13.3.14's 2 mm rule.
+    - **Drive:** a full 3.3 V swing gives ~170 µW at C0 3 pF, inside 200 µW.
+      Only an unlikely 5 pF C0 at full swing (~230 µW) would exceed it, and
+      the `Rext` footprint below covers that.
+    - **Load capacitors: 8.2 pF C0G**, the value rev 2.1 uses on Y1, in 0402
+      here (§13.3.11). With ~4 pF of pin and trace stray they land near CL.
+      The pulling error is a few ppm, irrelevant against CAN's ±0.5 % and PPS
+      discipline.
+    - **A 0 Ω `Rext` footprint in series with OSC_OUT**, as rev 2.1's R43.
+      The U575's amplitude-controlled HSE normally swings well under rail to
+      rail. Measure at bring-up and fit `Rext` only if the drive computes over
+      ~150 µW.
   - FDCAN and the core run from a PLL off it. USB uses HSI48 trimmed from SOF
     and needs no crystal of its own.
 - **Regulator: `VCAP`, not `VDD11`.** `VDD11` belongs to the SMPS (`Q`)
@@ -1837,10 +1872,11 @@ Rev 7 and AN2867 Rev 24 (in `hardware/canary-hat-rev3.0/datasheets/`):
   - VBAT: tied to VDD with 100 nF, since there is no battery.
   - VDDUSB: 100 nF.
 - **BOOT0 is `PH3-BOOT0`.** Strap it low with a resistor, as §13.3.12 says.
-- **Temperature: grade 6 = −40…85 °C ambient, 105 °C junction.** Grade 3
-  (−40…125 °C, 130 °C junction) exists in the ordering scheme (§7), so
-  `STM32U575RGT3`/`RIT3` are worth one stock check. Otherwise grade 6 stands
-  (see below).
+- **Temperature: grade 3, −40…125 °C ambient, 130 °C junction** (operator,
+  2026-10-15). Grade 6 is −40…85 °C (105 °C junction). Table 32 limits
+  grade 3 only by power dissipation against TJ, not by clock, and this part
+  dissipates tens of mW. Every temperature-rated part beside it should match,
+  starting with the crystal.
 - **FDCAN: one instance, with tiny RX FIFOs**: 0.8 KB message RAM, **two RX
   FIFOs of three frames each** (§3.46). Back-to-back 8-byte frames at
   500 kbit/s arrive every ~0.25 ms, so a FIFO of three fills in ~0.75 ms.
@@ -1856,9 +1892,10 @@ part's whole recovery story (§13.3.12).
 
 *Rejected:* a G474 plus an 8 MB QSPI PSRAM. It holds minutes of raw frames,
 but at the cost of a sixth bus on a full board to save on a chip that does not
-need saving. The stocked grade is −40…85 °C (105 °C junction). That is
-acceptable: the MCU is unpowered while parked, so the worst case is a hot-cab
-key-on under the Pi stack's fan.
+need saving. ~~The stocked grade is −40…85 °C (105 °C junction). That is
+acceptable…~~ Grade 3 is stocked as well and was taken (2026-10-15): it is the
+same die for a little more money, and it buys margin for a hot-cab key-on above
+PWR's buck and the Pi stack.
 
 **Rejected: the Teensy / i.MX RT1062 class.** Raised 2026-10-01 from the
 coprocessor idea, and it belongs to a different architecture — an external box on
