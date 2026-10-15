@@ -1,6 +1,6 @@
 """Speed, acceleration and specific force for one dyno window, on one time base (H07.3).
 
-The producer of :class:`src.analysis.dyno.MotionSamples` from a session. For a
+The producer of :class:`src.analysis.dyno_contract.MotionSamples` from a session. For a
 window ``[start, end]`` of the acquisition clock it returns, on one uniform
 grid (:data:`DEFAULT_HZ`):
 
@@ -43,7 +43,7 @@ there is no specific force (:class:`ImuUnavailable`); :meth:`DynoInputs.motion`,
 which every dyno fit needs, then refuses with that cause.
 
 **The frame of record travels with the samples.** ``imu_reference_id`` is
-copied onto every :class:`~src.analysis.dyno.MotionSamples`, and the dyno's
+copied onto every :class:`~src.analysis.dyno_contract.MotionSamples`, and the dyno's
 estimators refuse to apply a pitch offset measured in any other frame.
 """
 
@@ -58,7 +58,7 @@ from typing import Any, Literal
 import numpy as np
 import pandas as pd
 
-from src.analysis.dyno import (
+from src.analysis.dyno_contract import (
     GPS_SPEED_CHANNEL,
     DynoRefusal,
     FloatArray,

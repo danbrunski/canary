@@ -3,7 +3,7 @@
 One request, one or more stored sessions, and per session the chain H07
 built at the desk: :func:`~src.analysis.dyno_pulls.find_power_pulls` →
 :func:`~src.analysis.dyno_pulls.label_headings` →
-:func:`~src.analysis.dyno.compute_power`, once per gear pulled. Runs in the
+:func:`~src.analysis.dyno_power.compute_power`, once per gear pulled. Runs in the
 workbench's bounded single-flight child (:mod:`src.control.workbench_jobs`),
 never on the event loop.
 
@@ -18,7 +18,7 @@ measured. So the answer carries, before any curve:
 - **every window found**, pull or refusal, so coverage is visible even when
   no curve can be drawn;
 - per run (one session, one gear) a curve with its required
-  :class:`~src.analysis.dyno.RunConditions`, its flags (``inertia``,
+  :class:`~src.analysis.dyno_comparison.RunConditions`, its flags (``inertia``,
   ``squat_corrected``, the pitch offset and where it came from) and its
   uncertainty: the recorded same-day floor for that regime (H07.8) or the
   floor's own refusal, plus the half-difference between the two headings at
@@ -27,7 +27,7 @@ measured. So the answer carries, before any curve:
 
 The IMU pitch offset is a property of one session's frame, so it is not
 profile data: each run estimates it from its own pulls' direction pair
-(:func:`~src.analysis.dyno.estimate_pitch_offset`, with the recorded squat
+(:func:`~src.analysis.dyno_motion.estimate_pitch_offset`, with the recorded squat
 removed) and says so.
 """
 
@@ -43,20 +43,12 @@ import numpy as np
 import pandas as pd
 
 from src.analysis.channels import parse_spec, read_channels
-from src.analysis.dyno import (
-    DYNO_FILENAME,
-    Driveline,
-    DynoPower,
-    DynoProfile,
-    DynoRefusal,
-    Leg,
-    PowerCurve,
-    PowerPull,
-    RunConditions,
-    compute_power,
-    estimate_pitch_offset,
-    load_dyno_profile,
-)
+from src.analysis.dyno_comparison import RunConditions
+from src.analysis.dyno_contract import DynoRefusal
+from src.analysis.dyno_driveline import Driveline
+from src.analysis.dyno_motion import Leg, estimate_pitch_offset
+from src.analysis.dyno_power import DynoPower, PowerCurve, PowerPull, compute_power
+from src.analysis.dyno_profile import DYNO_FILENAME, DynoProfile, load_dyno_profile
 from src.analysis.dyno_pulls import FoundPull, find_power_pulls, label_headings, session_reads
 from src.analysis.tuning_frame import WotCriterion
 from src.analysis.workbench import (

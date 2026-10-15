@@ -1,6 +1,6 @@
 """Find the dyno's pulls in a stored session (H07.7).
 
-:func:`~src.analysis.dyno.compute_power` takes :class:`~src.analysis.dyno.PowerPull`
+:func:`~src.analysis.dyno_power.compute_power` takes :class:`~src.analysis.dyno_power.PowerPull`
 windows; nothing turned a session into them. This does, from the session alone:
 
 1. **Where.** A sustained rpm rise (:func:`src.analysis.pulls.detect_pulls`,
@@ -13,7 +13,7 @@ windows; nothing turned a session into them. This does, from the session alone:
    without specific force.
 3. **Which gear.** The median overall ratio the window implies
    (``rpm · 2πr / (60 · v)``) against the driveline's gears; nearer than
-   :data:`~src.analysis.dyno.POWER_GEAR_TOLERANCE` to one of them, or refused
+   :data:`~src.analysis.dyno_power.POWER_GEAR_TOLERANCE` to one of them, or refused
    ``gear_unresolved``. :func:`compute_power` checks every sample again.
 4. **Which way.** The GPS course over the window, circular mean.
    :func:`label_headings` groups pulls whose courses are within
@@ -35,15 +35,10 @@ import numpy as np
 import pandas as pd
 
 from src.analysis.channels import parse_spec, read_channels
-from src.analysis.dyno import (
-    POWER_GEAR_TOLERANCE,
-    Driveline,
-    DynoRefusal,
-    MotionSources,
-    PowerPull,
-    RefusalKind,
-)
+from src.analysis.dyno_contract import DynoRefusal, MotionSources, RefusalKind
+from src.analysis.dyno_driveline import Driveline
 from src.analysis.dyno_inputs import DynoInputs, read_motion_inputs
+from src.analysis.dyno_power import POWER_GEAR_TOLERANCE, PowerPull
 from src.analysis.pulls import Pull, RpmSeries, detect_pulls
 from src.decode.bindings import Bindings
 from src.storage.broadcast_storage import session_can_storage

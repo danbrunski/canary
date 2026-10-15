@@ -201,7 +201,7 @@ def measure_session(session_dir: Path, config: CanaryConfig) -> dict[str, Any]:
     the profile's. Never raises but ``MemoryError``: it is a report, and the
     digest and trip end call it beside work that must not fail with it.
     """
-    from src.analysis.dyno import DYNO_FILENAME, load_dyno_profile
+    from src.analysis.dyno_profile import DYNO_FILENAME, load_dyno_profile
     from src.vehicle.profiles import profile_dir
 
     params = config.vehicle.parameters

@@ -21,7 +21,7 @@ import-time exception. Deliberately lazy backend registries are not targets.
 | [R13](archive/R13-preprocessing-boundaries.md) | Readers, transforms and orchestration have one dependency direction | L / data ordering and memory | none |
 | [R14](R14-feature-pipeline.md) | Feature assembly separated into cohesive modules | L / training and serving | R13 before loading moves |
 | [R15](R15-detector-evaluation.md) | Library scoring and a phased evaluation CLI | L / scoring, cache and spawn | R14 before feature caller migration |
-| [R16](R16-dyno-modules.md) | Separate dyno contracts, calibration, power, comparison and persistence | M–L / numerical | none |
+| [R16](archive/R16-dyno-modules.md) | Separate dyno contracts, calibration, power, comparison and persistence | M–L / numerical | none |
 | [R17](archive/R17-recipe-definitions.md) | Recipe definitions independent of the fitting engine | M / artifact contracts | before R20 refit caller migration |
 | [R18](R18-memory-burst-scheduler.md) | Burst planning and accounting have one owner | L / collection timing | none |
 | [R19](R19-dashboard-page-modules.md) | Logs and Analysis pages composed from focused views | M / UI behavior | none |
