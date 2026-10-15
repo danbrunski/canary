@@ -17,9 +17,7 @@ from src.daemon.detectors.common import (
     log,
 )
 from src.daemon.inference_scheduling import GenerationToken
-from src.features.feature_pipeline import (
-    reconcile_feature_frame_to_spec,
-)
+from src.features.feature_spec import reconcile_feature_frame_to_spec
 from src.models.fusion import (
     FusionSource,
     downgrade_unsustained,

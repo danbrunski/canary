@@ -235,7 +235,7 @@ def resolve_feature_set(
         raise ValueError(f"unknown sequence feature set {name!r}; expected one of {FEATURE_SETS}")
     columns = [str(column) for column in candidate_columns]
     # H01.1 source gate. Candidates normally arrive already gated
-    # (feature_pipeline.candidate_feature_columns); this is the second lock.
+    # (feature_policy.candidate_feature_columns); this is the second lock.
     source_refused = {
         column: reason
         for column in columns

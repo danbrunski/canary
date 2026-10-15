@@ -13,7 +13,7 @@ session looks anomalous enough to flag.
 segment`` loading path as :func:`~src.analysis.session_classifier.classify_session`
 (:func:`~src.preprocessing.loader.resample_and_segment`) rather than
 re-reading the session, then runs the models' own featurization
-(:func:`~src.features.feature_pipeline.featurize_wide_frame`, whose
+(:func:`~src.features.feature_transform.featurize_wide_frame`, whose
 ``operating_frame`` is what IF, the sequence detector and the behavior
 surfaces serve on) so the bank-balance / committee / behavior-deviation
 stats are simple aggregations over columns already computed elsewhere, not
@@ -41,7 +41,7 @@ from src.collection.obd_registry import MISFIRE_COUNT_CHANNEL_PREFIX
 from src.columns import MODE_COLUMN, TIMESTAMP_COLUMN
 from src.config import CanaryConfig
 from src.dataframe_utils import numeric_column
-from src.features.feature_pipeline import featurize_wide_frame
+from src.features.feature_transform import featurize_wide_frame
 from src.operating import ENGINE_RUNNING_MIN_RPM
 from src.preprocessing.loader import resample_and_segment
 from src.signals.committees import COMMITTEES

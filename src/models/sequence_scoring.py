@@ -88,7 +88,7 @@ def score_exclusions(
     match no column drop out (a typo is a no-op, not a serve crash).
     """
     # Lazy: the feature pipeline pulls in decode and analysis modules.
-    from src.features.feature_pipeline import expand_suppress_channels
+    from src.features.feature_selection import expand_suppress_channels
     from src.models.sequence_feature_set import context_columns_from_schema
 
     columns = tuple(feature_columns)

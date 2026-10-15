@@ -96,15 +96,11 @@ from src.config import CanaryConfig
 from src.decode.bindings import Bindings, load_bindings
 from src.decode.dids import DidMap, load_did_map
 from src.features.feature_cache import build_feature_frame_cache_key
-from src.features.feature_pipeline import (
-    DEFAULT_DIDS_PATH,
-    FeaturizedFrame,
-    _available_memory_bytes,
-    default_decode_inputs,
-    featurize_perturbed_frame,
-    featurize_wide_frame,
-    load_resampled_session,
-)
+from src.features.feature_paths import DEFAULT_DIDS_PATH
+from src.features.feature_perturbation import featurize_perturbed_frame
+from src.features.feature_transform import FeaturizedFrame, featurize_wide_frame
+from src.features.feature_workers import available_memory_bytes as _available_memory_bytes
+from src.features.session_resampling import default_decode_inputs, load_resampled_session
 from src.log import configure_logging
 from src.models.alert_budget import CADENCE_KEY
 from src.models.benchmark_gate import (
@@ -2356,7 +2352,15 @@ def main(argv: Sequence[str] | None = None) -> int:
 
 def _evaluate(args: argparse.Namespace, cleanup: ExitStack, early: Mapping[str, str | None]) -> int:
     started = time.time()
-    logging.getLogger("src.features.feature_pipeline").setLevel(logging.WARNING)
+    # The feature pipeline's per-session INFO chatter (R14: its loggers are the owner modules').
+    for owner in (
+        "feature_build",
+        "feature_spec",
+        "feature_transform",
+        "feature_workers",
+        "session_resampling",
+    ):
+        logging.getLogger(f"src.features.{owner}").setLevel(logging.WARNING)
     # Scoped once, here (P02.11): featurization, the plausibility limits and
     # the tune registry all read the vehicle's data directory. This harness
     # used to featurize through the unscoped config — without the vehicle's

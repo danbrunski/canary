@@ -120,6 +120,11 @@ _MOVED_OFF_THE_RECORDING_PATH = {
     "src.daemon.inference": "runtime.build_live_feature_source",
     "src.features.live": "runtime.build_live_feature_source",
     "src.features.feature_pipeline": "runtime.build_live_feature_source",
+    # R14: the pipeline's owners load with it, never earlier.
+    "src.features.feature_transform": "runtime.build_live_feature_source",
+    "src.features.feature_policy": "runtime.build_live_feature_source",
+    "src.features.feature_build": "runtime.build_live_feature_source",
+    "src.features.session_resampling": "runtime.build_live_feature_source",
     # Isolation Forest (and through it the FSM limits and pdfplumber): the
     # emitter wanted five column names from it.
     "src.models.isolation_forest": "the model poller's thread",

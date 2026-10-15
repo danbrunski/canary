@@ -131,7 +131,8 @@ detectors learn the normal residual distribution). See
 
 All sources converge through one preprocessing path so the offline trainer
 and the live daemon can never schema-diverge
-(`src/features/feature_pipeline.py`):
+(`src/features/`: the shared transform is `feature_transform.py`, the offline
+builder `feature_build.py`; `feature_pipeline.py` is the compatibility facade):
 
 ```
 read raw rows (Parquet offline / queue live)

@@ -19,7 +19,7 @@ from src.columns import TIMESTAMP_COLUMN
 from src.config import CanaryConfig
 from src.decode.bindings import load_bindings
 from src.decode.dids import load_repo_did_map
-from src.features import feature_pipeline
+from src.features import feature_perturbation, session_resampling
 from src.features.feature_pipeline import (
     _append_derived_channels,
     _column_root,
@@ -139,8 +139,11 @@ def test_every_realistic_fault_featurizes_incrementally_exactly(
     assert injection.perturbed, injection.not_perturbed
 
     expected = _full(faulted, config, inputs).features
+    # The full-transform fallback is called from feature_perturbation (R14).
     wrapped = mock.patch.object(
-        feature_pipeline, "featurize_wide_frame", wraps=feature_pipeline.featurize_wide_frame
+        feature_perturbation,
+        "featurize_wide_frame",
+        wraps=feature_perturbation.featurize_wide_frame,
     )
     with wrapped as whole:
         got = _incremental(clean, faulted, config, inputs)
@@ -301,21 +304,21 @@ def test_decode_catalogs_load_once_per_process_and_reload_on_an_edit(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     calls: list[Path] = []
-    real = feature_pipeline.load_dbc_dir
+    real = session_resampling.load_dbc_dir
 
     def counting(path: Path) -> object:
         calls.append(path)
         return real(path)
 
-    monkeypatch.setattr(feature_pipeline, "load_dbc_dir", counting)
-    monkeypatch.setattr(feature_pipeline, "_DECODE_INPUTS_MEMO", {})
+    monkeypatch.setattr(session_resampling, "load_dbc_dir", counting)
+    monkeypatch.setattr(session_resampling, "_DECODE_INPUTS_MEMO", {})
     bindings = tmp_path / "bindings.yaml"
     bindings.write_bytes((REPO / "data" / "bindings.yaml").read_bytes())
 
-    first = feature_pipeline.default_decode_inputs(bindings)
-    assert feature_pipeline.default_decode_inputs(bindings) is first
+    first = session_resampling.default_decode_inputs(bindings)
+    assert session_resampling.default_decode_inputs(bindings) is first
     assert len(calls) == 1
     # An edited catalog is a different catalog: reloaded, never served stale.
     bindings.write_bytes(bindings.read_bytes() + b"\n# edited\n")
-    assert feature_pipeline.default_decode_inputs(bindings) is not first
+    assert session_resampling.default_decode_inputs(bindings) is not first
     assert len(calls) == 2

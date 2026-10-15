@@ -41,7 +41,7 @@ from src.columns import (
     is_flag_column,
 )
 from src.config import CanaryConfig
-from src.features.feature_pipeline import featurize_wide_frame
+from src.features.feature_transform import featurize_wide_frame
 from src.models.isolation_forest import (
     LABEL_COLUMN,
     SCORE_COLUMN,

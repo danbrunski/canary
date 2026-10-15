@@ -12,7 +12,7 @@ NaN then flows through whatever missingness machinery already exists for
 that path, so this module adds no new plumbing:
 
 * **Training** — wired into
-  ``src.features.feature_pipeline._decode_session_to_resampled``,
+  ``src.features.session_resampling.decode_session_to_resampled``,
   between ``to_wide`` and ``resample_wide``. A gated-out cell is simply
   absent from the resampler's ``dropna()``-based "last observed" tracking,
   so it gets the resampler's existing bounded ffill + ``__gap`` flag — a

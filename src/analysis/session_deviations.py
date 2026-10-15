@@ -5,7 +5,7 @@ hand with DuckDB over SSH: for a given drive, how did each behavior surface's
 actual telemetry compare to what the learned model expects? Runs the *exact*
 same decode → segment → derive → evaluate pipeline the daemon uses live and
 the refit CLI uses to fit the surfaces
-(:func:`src.features.feature_pipeline.featurize_wide_frame`), so results
+(:func:`src.features.feature_transform.featurize_wide_frame`), so results
 here are directly comparable to ``GET /models/behavior/live`` — just computed
 over a whole stored session instead of the current live tick.
 
@@ -42,13 +42,12 @@ from src.config import CanaryConfig
 from src.decode.bindings import load_bindings
 from src.decode.dbc import DEFAULT_DBC_DIR, load_dbc_dir
 from src.decode.dids import load_did_map
-from src.features.feature_pipeline import (
-    DEFAULT_BINDINGS_PATH,
-    DEFAULT_DIDS_PATH,
-    _decode_session_to_resampled,
-    featurize_wide_frame,
-    resample_config_for,
+from src.features.feature_paths import DEFAULT_BINDINGS_PATH, DEFAULT_DIDS_PATH
+from src.features.feature_transform import featurize_wide_frame
+from src.features.session_resampling import (
+    decode_session_to_resampled as _decode_session_to_resampled,
 )
+from src.preprocessing.resampler import resample_config_for
 from src.telemetry import DECODED_SOURCE, SOURCE_SEP, channel_key
 
 
@@ -508,7 +507,7 @@ def analyze_session(
     """Diff one stored session's telemetry against ``models``.
 
     Runs the identical decode/segment/derive pipeline
-    :func:`~src.features.feature_pipeline.build_feature_frame` uses for
+    :func:`~src.features.feature_build.build_feature_frame` uses for
     training (same bindings/dbc/DID decode, same
     ``compute_anomaly_signals``/committee-residual derived channels, same
     operating-mode segmenter) so results are apples-to-apples with what the

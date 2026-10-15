@@ -1230,7 +1230,7 @@ def compute_anomaly_signals(
 
     Outputs (added when inputs are present; each is model-trainable unless
     noted otherwise — see ``NON_TRAINABLE_COUNTER_CHANNELS`` in
-    ``feature_pipeline.py`` for the actual exclusion mechanism):
+    ``feature_policy.py`` for the actual exclusion mechanism):
 
     * ``derived:AIR_MASS_PER_CYCLE`` — MAF translated to grams of air
       per engine cycle (4-stroke: one cycle = 2 revs of crank, all

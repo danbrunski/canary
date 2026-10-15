@@ -114,7 +114,7 @@ from src.behavior.behavior_models import (
     serving_status,
 )
 from src.columns import GAP_SUFFIX, MODE_COLUMN, ROC_SUFFIX, SESSION_COLUMN, TIMESTAMP_COLUMN
-from src.features.feature_pipeline import DEFAULT_DIDS_PATH
+from src.features.feature_paths import DEFAULT_DIDS_PATH
 from src.log import configure_logging
 from src.signals.derived import DERIVED_CHANNEL_INPUTS, resolved_dependencies
 from src.vehicle.profiles import (

@@ -561,7 +561,7 @@ def non_trainable_committee_outputs(
 ) -> frozenset[str]:
     """Every committee channel: all are kept out of the trained feature set.
 
-    Kept for ``feature_pipeline.candidate_feature_columns``; the source gate
+    Kept for ``feature_policy.candidate_feature_columns``; the source gate
     (:func:`committee_channel_reason` via :mod:`src.trainability`) refuses the
     same channels on every other path.
     """

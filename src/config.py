@@ -760,7 +760,7 @@ class PreprocessingConfig(_Strict):
     #: regime, or when the OBD mode signals (RPM/SPEED/THROTTLE) are too sparse
     #: to segment reliably live — that sparsity otherwise produces train/serve
     #: skew where serving emits a mode the trainer never produced. See
-    #: ``feature_pipeline.segment_or_constant``.
+    #: ``feature_transform.segment_or_constant``.
     single_operating_mode: bool = False
     #: Forward-fill ceiling (s) for slow channels (coolant/IAT/baro —
     #: ``resampler.DEFAULT_SLOW_CHANNEL_HINTS``) during resampling. Generous

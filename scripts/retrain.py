@@ -85,12 +85,11 @@ from src.analysis.training_disposition import classify_dispositions, compute_qua
 from src.artifact_hash import sha256_file_or_none
 from src.behavior.accepted_baselines import AcceptedBaselines, load_accepted_baselines
 from src.config import CanaryConfig
-from src.features.feature_pipeline import (
-    DEFAULT_FEATURE_CACHE_DIR,
+from src.features.feature_build import build_feature_frame, disposition_screen_frames
+from src.features.feature_paths import DEFAULT_FEATURE_CACHE_DIR
+from src.features.feature_policy import (
     FeaturePolicy,
-    build_feature_frame,
     candidate_feature_columns,
-    disposition_screen_frames,
     resolve_feature_policy,
 )
 from src.log import configure_logging
@@ -545,7 +544,7 @@ def derived_dir_for(args: argparse.Namespace) -> Path | None:
 def main(argv: Sequence[str] | None = None) -> int:
     args = parse_args(argv)
     # The trainers read each session's 1 Hz frame through the derived store
-    # (feature_pipeline.resample_session_bounded -> active_store()).
+    # (session_resampling.resample_session_bounded -> active_store()).
     with use_store(derived_dir_for(args)):
         return _main(args)
 
@@ -1322,7 +1321,7 @@ def _compute_disposition_summary(
 
     The same regime-gate -> data-quality-gate -> four-tier classify screen
     `scripts/disposition_report.py` runs standalone (reused via
-    `feature_pipeline.disposition_screen_frames`, not reimplemented), applied
+    `feature_build.disposition_screen_frames`, not reimplemented), applied
     here so a real retrain run finally populates `TrainingRunRecord.dispositions`
     (Task 1.4 added the schema field with the note "populated in Phase 3"; this is that wiring).
     Feeds the champion/challenger promotion gate's contamination sanity check

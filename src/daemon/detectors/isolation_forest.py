@@ -22,10 +22,7 @@ from src.daemon.detectors.common import (
     log,
 )
 from src.daemon.health import HealthMonitor
-from src.features.feature_pipeline import (
-    FeatureSpecReconciliation,
-    reconcile_feature_frame_to_spec,
-)
+from src.features.feature_spec import FeatureSpecReconciliation, reconcile_feature_frame_to_spec
 from src.models.fusion import (
     FusionSource,
     PersistenceGate,

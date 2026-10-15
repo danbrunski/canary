@@ -49,10 +49,10 @@ if TYPE_CHECKING:
 
 def segmenter_channels() -> tuple[str, ...]:
     """Every column the live segmenter reads
-    (``feature_pipeline.segmenter_input_columns``), so offline mode labels
+    (``feature_transform.segmenter_input_columns``), so offline mode labels
     cannot diverge from it. Imported here, not at module load: the feature
     pipeline stays off every path that only needs the evaluator."""
-    from src.features.feature_pipeline import segmenter_input_columns
+    from src.features.feature_transform import segmenter_input_columns
 
     return segmenter_input_columns()
 
@@ -169,7 +169,8 @@ def sample_modes(
 ) -> np.ndarray[Any, np.dtype[np.object_]]:
     """Operating mode in force at each sample (``None`` before the first tick)."""
     from src.columns import MODE_COLUMN, TIMESTAMP_COLUMN
-    from src.features.feature_pipeline import resample_long_session, segment_or_constant
+    from src.features.feature_transform import segment_or_constant
+    from src.features.session_resampling import resample_long_session
     from src.preprocessing.resampler import resample_config_for
 
     modes = np.full(len(samples), None, dtype=object)
@@ -281,7 +282,7 @@ def _modes_on_grid(
 ) -> np.ndarray[Any, np.dtype[np.object_]]:
     """:func:`sample_modes` from a reduced segmenter frame."""
     from src.columns import MODE_COLUMN, TIMESTAMP_COLUMN
-    from src.features.feature_pipeline import segment_or_constant
+    from src.features.feature_transform import segment_or_constant
     from src.preprocessing.derived import resample_reduced
     from src.preprocessing.resampler import resample_config_for
 

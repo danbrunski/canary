@@ -32,7 +32,7 @@ from typing import Any, Protocol
 
 import pandas as pd
 
-from src.features.feature_pipeline import build_feature_spec
+from src.features.feature_spec import build_feature_spec
 from src.models.manifest import (
     manifest_path_for,
     read_artifact,

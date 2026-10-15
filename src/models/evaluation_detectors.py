@@ -36,7 +36,8 @@ import pandas as pd
 
 from src.columns import GAP_SUFFIX, MODE_COLUMN, SESSION_COLUMN, TIMESTAMP_COLUMN, base_channel
 from src.config import CanaryConfig
-from src.features.feature_pipeline import align_features_to_schema, expand_suppress_channels
+from src.features.feature_selection import expand_suppress_channels
+from src.features.feature_spec import align_features_to_schema
 from src.models.fusion import FusionScorer
 from src.models.inference import SequenceInferenceEngine, SequenceInferenceResult, served_windows
 from src.models.isolation_forest import (
