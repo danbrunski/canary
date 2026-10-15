@@ -164,7 +164,13 @@ profiles:
     22 cycle at the pulse DID''s rate, so every pulse read has a purge read from the
     same cycle. The fuel plant''s per-sample error tracks STFT one for one (E07.3), and
     purge enters downstream of the MAF, so its fuel is unmetered. No tuning drive
-    logged purge before this (operator, 2026-10-15).'
+    logged purge before this (operator, 2026-10-15).
+
+
+    2026-10-15: adds module (battery) voltage, PID 0x42, at the context rate. The
+    ECM''s injector dead time Ts is a function of it, and the fuel plant pairs it
+    as slow context (fuel_plant.yaml battery_max_age_s 10 s). Without it no tuning
+    drive can feed an E08 simulation design (operator, 2026-10-15).'
   experimental: false
   mode01:
     RPM: 1.0
@@ -178,6 +184,7 @@ profiles:
     BAROMETRIC_PRESSURE: 0.25
     INTAKE_TEMP: 0.25
     COOLANT_TEMP: 0.25
+    CONTROL_MODULE_VOLTAGE: 0.25
     SHORT_FUEL_TRIM_1: 0.5
     SHORT_FUEL_TRIM_2: 0.5
     LONG_FUEL_TRIM_1: 0.5
@@ -242,12 +249,13 @@ profiles:
   did_continuous: false
   bus_budget_override: 90.0
   priority_channels: null
-  expected_total_demand_hz: 61.0
-  capacity_evidence: 'Demand: 7 Mode 01 PIDs x 4 Hz + 4 trims x 2 Hz + 3 context PIDs
-    x 1 Hz + 9 DIDs x 2 Hz = 57 channel reads/s, plus 2 session requests per 0.5 s
-    cycle, about 61 req/s unbatched, against the 90 req/s budget. Worst-case cycle
-    with batching off: (14 Mode 01 + 9 DID + 2 session) / 90 + 0.05 s grace = 0.33
-    s of a 0.5 s cycle (the ninth DID, 0x1110, added 2026-10-15). Parent evidence: fuel-target-research on 2026-09-21 ran 20
+  expected_total_demand_hz: 62.0
+  capacity_evidence: 'Demand: 7 Mode 01 PIDs x 4 Hz + 4 trims x 2 Hz + 4 context PIDs
+    x 1 Hz + 9 DIDs x 2 Hz = 58 channel reads/s, plus 2 session requests per 0.5 s
+    cycle, about 62 req/s unbatched, against the 90 req/s budget. Worst-case cycle
+    with batching off: (15 Mode 01 + 9 DID + 2 session) / 90 + 0.05 s grace = 0.34
+    s of a 0.5 s cycle (the ninth DID, 0x1110, and the fourth context PID, 0x42,
+    added 2026-10-15). Parent evidence: fuel-target-research on 2026-09-21 ran 20
     min at 4 Hz Mode 01 / 2 Hz per DID with memory windows. No capture of this exact
     revision exists yet; replace this text with the first one.'
   required_tuple: []
