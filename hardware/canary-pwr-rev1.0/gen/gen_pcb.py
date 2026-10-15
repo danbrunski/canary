@@ -19,9 +19,11 @@ tpl_path, net_xml, out_path, projdir, sysfp = sys.argv[1:6]
 MM = pcbnew.FromMM
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
+sys.path.insert(1, os.path.join(HERE, "..", "..", "tools"))
 import design  # noqa: E402
 import gen_sch  # noqa: E402
 import placement  # noqa: E402
+import silk_refs  # noqa: E402
 
 
 def V(x, y):
@@ -406,6 +408,10 @@ for fp in b.GetFootprints():
     fp.SetPosition(V(x, y))
 if unlisted:
     print(f"not in placement.py, left where the packer put them: {sorted(unlisted)}")
+
+# ---------------------------------------------------------------- silkscreen references
+# 0.8 mm (the board's minimum), each at a spot clear of pads and silk, or hidden (hardware/tools).
+print(f"silk references: {silk_refs.place_refs(b)}")
 
 # ---------------------------------------------------------------- planes
 BOARD = [(X0, Y0), (X1, Y0), (X1, Y1), (X0, Y1)]

@@ -588,7 +588,7 @@ Nothing on this board changes for rev 3.0.
 | 12 | The Vehicle-in plug's order number (KiCad's footprint confirms 1803293 for the header) and the Micro-Fit housings and crimps (43025-0600, 43025-1000, 43030) | BOM |
 | 13 | Copper weight: TI recommends 2 oz outer layers for the LM61460 | Fab order |
 | 14 | Alternator ripple at `+12V_HAT` against `VIN_SENSE`'s input, engine running | Whether the HAT coprocessor can measure ripple from `V12_SENSE` through the hold-up path (HAT §13.3.3b) |
-| 15 | Routing pass on the 2026-10-15 placement and layer plan (§P2): 5 V into J1 pins 2/4 through the pin-field gaps on F.Cu and B.Cu; vias from the +12V_BUS pads into the In2 island (DRC calls the island isolated copper until then); In1/In2 GND stitching; no signal vias under the switch nodes or hot loops; the LTC3350 BG gate trace around Q3 (or through a via pair); Kelvin pairs to RSNSI, RSNSC and R28; R9/C12's top trace from the island; silkscreen designators, which the denser packing put over neighbouring pads; the GND thermal spokes DRC reports as starved | Layout |
+| 15 | Routing pass on the 2026-10-15 placement and layer plan (§P2): 5 V into J1 pins 2/4 through the pin-field gaps on F.Cu and B.Cu; vias from the +12V_BUS pads into the In2 island (DRC calls the island isolated copper until then); In1/In2 GND stitching; no signal vias under the switch nodes or hot loops; the LTC3350 BG gate trace around Q3 (or through a via pair); Kelvin pairs to RSNSI, RSNSC and R28; R9/C12's top trace from the island; the 6 GND pads DRC reports as starved thermals (a trace or via each). Silkscreen is done (2026-10-15): DRC's remaining errors are these 6 and the 220 unrouted connections | Layout |
 
 ## P11. Hardware project
 
@@ -606,10 +606,10 @@ its datasheet land pattern, and two of five were wrong:
 
 | Part | Source | Result |
 |---|---|---|
-| LTC3350 | Ultra Librarian | Matches ADI's UHF land pattern (toe +0.1 mm, EP at max size) |
+| LTC3350 | Ultra Librarian | Matches ADI's UHF land pattern (toe +0.1 mm, EP at max size). Pin-1 `*` drawn twice; deduplicated |
 | LM61460 | SnapMagic, with STEP | Matches TI RJR0014A exactly, incl. the L-shaped corner pins. The Ultra Librarian version landed only the foot of those L pads and was discarded |
-| TCA4307 | Ultra Librarian | Standard VSSOP-8 |
-| TPS7A1633A | Ultra Librarian (DGN0008C) | Exposed pad renumbered `EPAD` → `9` so it joins GND |
+| TCA4307 | Ultra Librarian | Standard VSSOP-8. Pin-1 `*` drawn twice; deduplicated and moved beside pin 1 at 0.8 mm |
+| TPS7A1633A | Ultra Librarian (DGN0008C) | Exposed pad renumbered `EPAD` → `9` so it joins GND. Pin-1 `*` drawn twice, 0.6 mm outside the part, where it landed on the MCU's pin; deduplicated and moved beside pin 1 at 0.8 mm |
 | TPS1HB35 (since trimmed) | — | Both UL versions wrong (stencil-sized EP; thermal vias off the EP net) |
 
 The UL symbols' pin numbers match the datasheets; their electrical pin types
@@ -619,8 +619,11 @@ were corrected (UL marked the LM61460's ground pins as power outputs).
 value's rationale in each part's Note field; `gen_proj.py` writes the project and
 schematic, `verify_netlist.py` checks KiCad's netlist against it, `gen_pcb.py`
 builds the board on the HAT rev 2.1 template (run with KiCad's own Python) and
-places it from `placement.py`. `placement_review.json` configures
-`hardware/tools/review_placement.sh` for this board. Since 2026-10-15 a
+places it from `placement.py`, then labels it with `hardware/tools/silk_refs.py`
+(0.8 mm designators, each clear of pads and silk; 20 small passives in the
+densest rows have no room and keep only their fab-layer label).
+`placement_review.json` configures `hardware/tools/review_placement.sh` for
+this board. Since 2026-10-15 a
 regenerated board matches the committed one footprint for footprint.
 **Once the KiCad files are edited by hand they are the source of truth;
 regenerating overwrites them.**

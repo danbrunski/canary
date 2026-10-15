@@ -43,6 +43,33 @@ pads that had just moved. Run DRC with `--schematic-parity` afterwards.
 `[{"name", "side", "rect"}]`, `edge_refs`, `edge_tolerance_mm`, `power_nets`
 and `checks`. CANary-PWR's is `hardware/canary-pwr-rev1.0/gen/placement_review.json`.
 
+## Silkscreen references
+
+`silk_refs.py` puts every reference designator where it collides with
+nothing, so DRC's silkscreen checks pass on a densely placed board:
+
+```bash
+"/mnt/c/Program Files/KiCad/10.0/bin/python.exe" "$(wslpath -w hardware/tools/silk_refs.py)" \
+    "$(wslpath -w path/to/board.kicad_pcb)" [--out other.kicad_pcb] [--size 0.8]
+```
+
+- **Sizing.** Each label is set to 0.8 mm text with a 0.15 mm stroke, which
+  is the board's minimum.
+- **Where it tries.** Spots around the part at two distances, sliding along
+  each side, at 0° and 90°. Big parts can also carry the label on their body.
+- **What a spot must clear.** Every pad on that side (through-hole pads count
+  on both sides), all silkscreen already placed, fiducial mask openings and
+  the board edge.
+- **Order.** Semiconductors, magnetics, connectors and switches go first, then
+  passives, then fiducials and mounting holes.
+- **No room.** The label is hidden, and the fab-layer copy stays.
+
+The result depends only on the board, so CANary-PWR's `gen_pcb.py` calls
+`place_refs()` and a regenerated board gets the same labels. Footprint text
+drawn twice in one place is reported, not removed: fix it in the library.
+Removing footprint items from pcbnew's python left KiCad 10.0.5's wrappers
+returning raw pointers.
+
 **Pieces.** `kicad_placement.py` runs under KiCad's own python (it needs
 `pcbnew`; here that is the Windows KiCad 10 install, so paths go through
 `wslpath -w`). `placement_review.py` runs under the repo venv (Pillow).
