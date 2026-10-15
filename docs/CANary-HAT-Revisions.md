@@ -1504,7 +1504,9 @@ but did not land: the rev 2.0 PCB still carries `XTAL_ABLS2-40.000MHZ-D4YF-T`**
 (corrected 2026-09-14). **Rev 2.1 deletes Y1 and C5/C6 outright**: one
 2.5 × 2.0 mm 40 MHz oscillator clocks both MCP2518FDs on their OSC1 pins
 (§13.5.4, *Clock*), so rev 3.0 inherits the area after all — and if the MCU
-wants 40 MHz too, the same X1 can feed a third stub.
+wants 40 MHz too, the same X1 can feed a third stub. *(Superseded: rev 2.1
+kept Y1 as a 3.2 × 2.5 mm crystal, and the MCU gets its own 16 MHz crystal,
+§13.3.9 item 8 and §13.3.10.)*
 
 #### 13.3.7 Deliberately out of scope for the MCU
 
@@ -1664,7 +1666,7 @@ both boards take the same plug.
 - **Positions.** Pins 3–4 (the X1202 feed) go. 12 V, ground and CAN arrive on
   PWR's *HAT out* jumper and land on pins 1, 2, 5 and 6 as on rev 2.1. That
   leaves 11 positions (41.9 mm at 3.81 mm), or 12 (45.7 mm) if `V_BCKP_AON`
-  lands on J2 as well. Either fits the ~51 mm between MH3 and MH4, where
+  lands on J2 as well. **It does: 12 positions (2026-10-15, §13.3.14).** Either fits the ~51 mm between MH3 and MH4, where
   PT 1,5/13's body is 45.5 mm today; 13 positions (49.5 mm) is the most that
   fits.
 
@@ -1690,9 +1692,14 @@ not need the MCU to carry vehicle CAN to satisfy the multi-vehicle intent.
 it with **one oscillator, X1, driving both controllers' OSC1** (§13.5.4,
 *Clock*); the start-up-margin arithmetic recorded there also shows rev 2.0's
 18 pF crystal circuit thin on paper (§13.1 measurement 14). Rev 3.0 owes
-nothing here. If the MCU's own clock needs are compatible, X1 can supply it as
+nothing here. ~~If the MCU's own clock needs are compatible, X1 can supply it as
 well — one clock domain for CAN and the MCU timebase is exactly what
-§13.3.3(c) wants.
+§13.3.3(c) wants.~~ **Wrong from 2026-10-12, corrected 2026-10-14.** Rev 2.1
+built the crystal fallback, not X1: Y1 is a Kyocera CX3225SA 40 MHz crystal on
+U3 alone (`CANary-HAT-Rev2.1.md` item 11), and a crystal cannot drive a second
+chip. The MCU gets its own crystal (§13.3.10, schematic-entry facts). A shared
+clock domain is no longer needed either. The witness fit (§13.3.3c) absorbs
+drift between the two clocks, and PPS disciplines the MCU's rate.
 
 #### 13.3.10 MCU part selection
 
@@ -1715,8 +1722,8 @@ not the MCU's sleep mode" is what makes this a free choice rather than a
   ADS8688A stays and provides that (§13.3.9 item 2), so no ratiometric channel
   depends on the MCU's own ADC.
 - **µs-deterministic UART gating** — §13.3.4's K-line table.
-- **SPI slave** for item 5's bulk dump; **LQFP**; able to take 40 MHz from rev
-  2.1's X1 (§13.3.9 item 8).
+- **SPI slave** for item 5's bulk dump; **LQFP**; ~~able to take 40 MHz from rev
+  2.1's X1~~ its own HSE crystal (§13.3.9 item 8).
 
 | Part | FDCAN | SRAM | ADC | Standby |
 |---|---|---|---|---|
@@ -1802,19 +1809,56 @@ LQFP64's ~49 I/O cover the ~32 this section needs: FDCAN RX, two SPI, I²C plus
 two IMU interrupts, three UARTs, the K-line EN and FET gate, TIMEPULSE, USB,
 SWD, LEDs and HSE.
 
-*At schematic entry:*
-- confirm HSE accepts X1's 40 MHz in bypass mode (§13.3.9 item 8);
-- add the LDO variant's `VDD11` decoupling;
-- keep TrustZone (`TZEN`) off.
+**Schematic-entry facts, checked 2026-10-15** against DS13737 Rev 10, AN5373
+Rev 7 and AN2867 Rev 24 (in `hardware/canary-hat-rev3.0/datasheets/`):
+
+- **HSE: the MCU gets its own crystal, and not the 40 MHz part.** HSE takes a
+  4–50 MHz crystal (Table 79) or a digital-mode external clock up to 50 MHz
+  (Table 77), but there is no shared clock to take (§13.3.9 item 8).
+  - Reusing rev 2.1's Y1 part fails AN2867's check against the U575's
+    **Gm_crit_max = 1.5 mA/V**. At its datasheet worst case (ESR 50 Ω,
+    C0 3 pF, CL 8 pF), gmcrit = 4·ESR·(2πF)²·(C0+CL)² = **1.53 mA/V** at
+    40 MHz.
+  - **A 16 MHz crystal clears it with wide margin**: the ESR limit at
+    C0 + CL = 11 pF is ~300 Ω. Pick a stocked 3225-size 16 MHz part
+    (operator confirms DigiKey stock) and size the load capacitors per AN2867
+    from its CL and the board's stray.
+  - FDCAN and the core run from a PLL off it. USB uses HSI48 trimmed from SOF
+    and needs no crystal of its own.
+- **Regulator: `VCAP`, not `VDD11`.** `VDD11` belongs to the SMPS (`Q`)
+  variant. The LDO variant has one `VCAP` pin in LQFP64: **4.7 µF (or 2 ×
+  2.2 µF) ±20 %, ESR < 20 mΩ at 3 MHz, rated ≥ 10 V**, to VSS (DS13737
+  Figure 24).
+- **Other supplies (AN5373 §2.2):**
+  - VDD: 100 nF per pin plus one 10 µF bulk (4.7 µF minimum).
+  - VDDA: 100 nF + 1 µF, optionally through a ferrite from VDD.
+  - VREF+, if bonded out: 1 µF with the internal VREFBUF, or 100 nF + 1 µF
+    with an external reference.
+  - VBAT: tied to VDD with 100 nF, since there is no battery.
+  - VDDUSB: 100 nF.
+- **BOOT0 is `PH3-BOOT0`.** Strap it low with a resistor, as §13.3.12 says.
+- **Temperature: grade 6 = −40…85 °C ambient, 105 °C junction.** Grade 3
+  (−40…125 °C, 130 °C junction) exists in the ordering scheme (§7), so
+  `STM32U575RGT3`/`RIT3` are worth one stock check. Otherwise grade 6 stands
+  (see below).
+- **FDCAN: one instance, with tiny RX FIFOs**: 0.8 KB message RAM, **two RX
+  FIFOs of three frames each** (§3.46). Back-to-back 8-byte frames at
+  500 kbit/s arrive every ~0.25 ms, so a FIFO of three fills in ~0.75 ms.
+  **Firmware constraint:** the CAN RX interrupt is top priority, and no
+  critical section, flash write or blocking driver call may hold it off longer
+  than ~0.5 ms. Splitting IDs across both FIFOs by filter doubles that.
+  Bus-monitoring mode and the RX timestamp counter are in the reference manual
+  (RM0456), not the datasheet. Confirm them when the firmware starts.
+- Keep TrustZone (`TZEN`) off.
 
 **Never set RDP level 2.** It disables debug permanently, and SWD is this
 part's whole recovery story (§13.3.12).
 
 *Rejected:* a G474 plus an 8 MB QSPI PSRAM. It holds minutes of raw frames,
 but at the cost of a sixth bus on a full board to save on a chip that does not
-need saving. The stocked grades are −40…85 °C. That is acceptable: the MCU is
-unpowered while parked, so the worst case is a hot-cab key-on under the Pi
-stack's fan.
+need saving. The stocked grade is −40…85 °C (105 °C junction). That is
+acceptable: the MCU is unpowered while parked, so the worst case is a hot-cab
+key-on under the Pi stack's fan.
 
 **Rejected: the Teensy / i.MX RT1062 class.** Raised 2026-10-01 from the
 coprocessor idea, and it belongs to a different architecture — an external box on
@@ -2171,6 +2215,84 @@ SOIC-8 and QFN are fine inverted; connectors, the terminal blocks, the GNSS
 module and the buck inductor want T.Cu anyway. Tell PCBWay which side is which
 so they sequence it correctly rather than inferring it — and note J1's
 through-hole pin field must stay clear of bottom-side parts regardless.
+
+#### 13.3.14 Compatibility with CANary-PWR rev 1.0
+
+**Requirement (operator, 2026-10-15): rev 3.0 runs on CANary-PWR rev 1.0.**
+Checked against PWR's schematic as well as its spec. A netlist was exported
+from the 2026-10-15 working copy of `hardware/canary-pwr-rev1.0/`, and the
+result agrees with `CANary-PWR-Spec.md` §P6. Each point below is a rule
+rev 3.0's schematic and layout must keep.
+
+**Header: no shared signal pins.** PWR uses these header pins and passes the
+rest through untouched:
+
+| Pin | Use |
+|---|---|
+| 1, 17 | Pi 3V3 sense |
+| 2, 4 | `+5V_PI` in |
+| 3, 5 | I²C1, behind a TCA4307 |
+| 13 | GPIO27 `PI_BOOT0` |
+| 18 | GPIO24 `PI_NRST` |
+| 31 | GPIO6 `~PWR_FAIL` |
+| GND pins | ground |
+
+None of PWR's signal pins is in the rev 3.0 header map (§13.3.6). So rev 3.0:
+- leaves GPIO2/3, 6, 24 and 27 **unconnected on the HAT**;
+- deletes R7/R9, so there are no I²C1 pull-ups on the HAT (the Pi has 1.8 kΩ,
+  and the TCA4307's card side has its own);
+- keeps the ID EEPROM on GPIO0/1. PWR has none (§P5), so the HAT's
+  Standard-class 0x50 EEPROM is the only one, with `current_supply 0` as on
+  rev 2.1.
+
+**Power.** 5 V comes from header pins 2/4, which PWR feeds, and 3V3 from the
+Pi. The MCU adds about 10 mA on 3V3. The HAT's 12 V loads arrive on
+`+12V_HAT` behind PWR's 0.5 A polyfuse: the TLIN1027, the K-line pull-up
+(~12 mA while transacting), U9's sensor supply and the `V12_SENSE` divider.
+Rev 3.0 adds nothing on 12 V.
+
+**J2 takes `V_BCKP_AON`: 12 positions.** PWR's HAT out pin 4 is `+3V3_AON`
+through R2, 1 kΩ (schematic). On rev 3.0 it feeds U7's V_BCKP, and **BT1 and
+D2 are deleted** (§13.3.0's GNSS row). The M10M's backup current drops tens of
+mV across that 1 kΩ, against a 1.65 V minimum. PWR's resistor protects only
+PWR's end, though. A harness short at the HAT's J2 between `+12V` and
+`V_BCKP_AON` would put 12 V on a 3.6 V-max pin. So:
+- put `V_BCKP_AON` beside a ground position on J2, not beside `+12V`;
+- add a HAT-side series 1 kΩ and a ~3.6 V clamp to GND. A 12 V short then
+  puts ~8 mA into the clamp, and normal operation loses another few tens of
+  mV.
+
+**Mechanics.** PWR copied rev 2.1's 65 × 56 mm outline, its four M2.5 holes
+and its J1 position (§P2), so **rev 3.0 keeps all three exactly**, and its
+13.5 mm J1 sits on PWR's header tails.
+- The HAT's bottom face sits ~13 mm above PWR's top side. PWR's top side
+  carries parts to 7.7 mm (electrolytics), 7 mm inductors, and right-angle
+  connectors along the far long edge, whose heights are still open (PWR §P10
+  item 8).
+- **Rev 3.0's B.Cu parts stay ≤ 2 mm.** The LQFP64 is 1.6 mm.
+- **B.Cu stays clear above PWR's far-edge connector strip** (under J2) until
+  that height is measured.
+
+**Placement over PWR's power stage.** PWR's 5 V buck dissipates ~2 W, and it
+and the LTC3350 FETs sit under the HAT. Do not place the IMU (thermal drift),
+the ADS8688A and its reference capacitors, or the MCU's crystal directly above
+the buck's inductor or switch node. Check against PWR's final placement at
+rev 3.0 layout; PWR's own §P2 asks the same from its side.
+
+**Parked state.** `+12V_HAT` stays live while parked (it is the held bus), so
+rev 3.0's 12 V front ends face a dark MCU, where rev 2.1's faced a dark Pi.
+That is the same Pi-powered domain, so rev 2.1's crossing arguments carry
+over unchanged:
+- the `V12_SENSE` divider's ~141 µA into a dead rail (§13.2.3);
+- RXD with no back-feed path, and TXD's series resistor (§3.3);
+- R4 holding TLIN1027 EN low (§3.3);
+- R47 holding U9's EN low, now that the MCU drives it.
+
+`V_BCKP_AON` is the only always-on net entering the HAT, and V_BCKP is built
+to be live with the module off.
+
+**Software.** None of PWR §P9 changes for rev 3.0. `supply_voltage` comes from
+PWR's telemetry (§P3), and the crank summary is PWR's (§13.3.3b).
 
 ### 13.4 Lessons from the Macchina M2
 

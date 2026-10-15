@@ -466,6 +466,23 @@ history at each boot.
 - **Rev 2.0 is not supported** (operator, 2026-10-13): it uses GPIO24 for its
   K-line pull-up, which PWR now uses for the MCU reset.
 
+### Running with HAT rev 3.0
+
+**Required (operator, 2026-10-15).** HAT §13.3.14 holds the check and the
+rules. In short:
+- The rev 3.0 header map uses none of this board's signal pins (1/17, 3/5, 13,
+  18, 31).
+- The HAT leaves GPIO2/3, 6, 24 and 27 unconnected, with no I²C1 pull-ups.
+- HAT out pin 4, `V_BCKP_AON`, lands on rev 3.0's 12-position J2 and feeds the
+  GNSS V_BCKP (BT1 retired). The HAT adds its own series 1 kΩ and a clamp
+  against a harness short to `+12V`.
+- The HAT keeps rev 2.1's outline, holes and J1 position, holds its B.Cu parts
+  to ≤ 2 mm, and keeps B.Cu clear above this board's far-edge connectors until
+  §P10 item 8 is measured.
+- Keep the HAT's IMU, ADC and crystal off the area above the 5 V buck.
+
+Nothing on this board changes for rev 3.0.
+
 ## P9. Software implied
 
 - **Replace `scripts/ups_shutdown_watch.py`'s logic.** `~PWR_FAIL` (GPIO6, HIGH =
