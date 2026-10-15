@@ -62,7 +62,7 @@ import json
 import math
 import re
 from collections.abc import Mapping, Sequence
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, replace
 from pathlib import Path
 from typing import Any, Literal
 
@@ -80,9 +80,11 @@ from src.analysis.fuel_plant import (
     FuelPlantProfile,
     FuelPlantRefusalError,
     PlantInputs,
+    ResolvedParameters,
     load_b06,
     load_fuel_plant,
     plant_qualification,
+    plant_reads,
     predict,
     resolve_parameters,
     sensitivity_cases,
@@ -199,6 +201,15 @@ def load_kit(profile_dir: Path) -> SimKit:
     )
 
 
+MapSource = Literal["stated", "measured", "plant_model"]
+RailSource = Literal["stated", "measured", "working_assumption"]
+BatterySource = Literal["stated", "measured", "unmeasured"]
+#: The reason the absolute pulse carries at a point with no voltage read.
+BATTERY_UNMEASURED = "battery_voltage_unmeasured"
+#: The reason a result run on drawn plant parameters carries in ranking.
+OVERRIDES_NOT_FROZEN = "plant_overrides_not_frozen"
+
+
 @dataclass(frozen=True)
 class OperatingPoint:
     """One prescribed steady point. Every value is stated, none read from a recording."""
@@ -221,6 +232,29 @@ class OperatingPoint:
     conditioned: Mapping[str, float]
     #: Where the numbers come from (a design, a grid): never a recording.
     source: str
+    #: How ``map_kpa`` is had. ``stated``/``measured``: a boundary, held for
+    #: every plant parameter set. ``plant_model``: not a boundary at all -- the
+    #: plant's own manifold model computes it from the airflow on each run, so
+    #: a VE draw moves it (``map_kpa`` is then unused; the contract's
+    #: ``unstated: internal_model`` lets the scenario leave it out).
+    map_kpa_source: MapSource = "stated"
+    #: How ``rail_kpa`` is had. ``working_assumption``: no rail reading, so
+    #: the plant runs its rail working assumption (drawn in a Monte Carlo) and
+    #: ``rail_kpa`` is only the boundary's stated working value.
+    rail_kpa_source: RailSource = "stated"
+    #: ``unmeasured``: no module-voltage read; ``battery_v`` is a stated
+    #: stand-in. Only the absolute pulse (its dead time) reads it, so that
+    #: output alone is unsupported (``battery_voltage_unmeasured``).
+    battery_v_source: BatterySource = "stated"
+
+    @property
+    def sources_stated(self) -> bool:
+        """Every source is the default (the point predates them, E07.6)."""
+        return (self.map_kpa_source, self.rail_kpa_source, self.battery_v_source) == (
+            "stated",
+            "stated",
+            "stated",
+        )
 
 
 @dataclass(frozen=True)
@@ -289,6 +323,7 @@ class PairedScenario:
             boundaries: dict[str, SuppliedValue] = {
                 q: SuppliedValue(value=float(getattr(point, f)), source=point.source)
                 for q, f in _POINT_FIELDS.items()
+                if not (q == "manifold_pressure" and point.map_kpa_source == "plant_model")
             }
             boundaries.update(
                 {
@@ -320,6 +355,10 @@ class PairedScenario:
             "conditioned": [dict(sorted(p.conditioned.items())) for p in self.points],
             "candidate_events": list(self.candidate_events),
         }
+        if not all(p.sources_stated for p in self.points):
+            payload["boundary_sources"] = [
+                [p.map_kpa_source, p.rail_kpa_source, p.battery_v_source] for p in self.points
+            ]
         return hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest()
 
 
@@ -409,6 +448,54 @@ def affected_cells(base: bytes, candidate: bytes, rom_map: RomMap) -> list[dict[
                         }
                     )
     return out
+
+
+# -- plant parameters -------------------------------------------------------------------------
+
+
+def plant_parameters(
+    kit: SimKit, overrides: Mapping[str, float] | None = None
+) -> ResolvedParameters:
+    """The frozen plant's parameters with ``overrides`` applied (E08.3's hook).
+
+    A working assumption moves inside its bracket through
+    :func:`~src.analysis.fuel_plant.resolve_parameters`, which refuses
+    anything else. The lumped identified scale (``stoich_air_per_open_ms``)
+    has no bracket: it moves inside the frozen baseline's own bootstrap
+    interval, the measured spread a Monte Carlo draws it from. A name the
+    plant does not read is refused (``override_unknown``), as is a value
+    outside its bracket or interval (``override_outside_bracket``). No
+    overrides is exactly ``resolve_parameters`` with none."""
+    if not overrides:
+        return resolve_parameters(kit.plant, kit.delay)
+    unknown = sorted(set(overrides) - set(plant_reads(kit.plant.manifold_model)))
+    if unknown:
+        raise SimulationRefusalError(
+            "override_unknown",
+            f"{unknown} are not parameters plant {kit.plant.plant_version} reads",
+        )
+    baseline = kit.plant.baseline
+    measured = baseline.intervals if baseline is not None else {}
+    bracketed = {k: float(v) for k, v in overrides.items() if k not in measured}
+    try:
+        params = resolve_parameters(kit.plant, kit.delay, overrides=bracketed)
+    except FuelPlantRefusalError as exc:
+        if exc.reason == "override_outside_bracket":
+            raise SimulationRefusalError(exc.reason, str(exc)) from exc
+        raise
+    identified: dict[str, float] = {}
+    for pid in sorted(set(overrides) & set(measured)):
+        lo, hi = measured[pid]
+        value = float(overrides[pid])
+        if not lo <= value <= hi:
+            raise SimulationRefusalError(
+                "override_outside_bracket",
+                f"{pid}={value} outside the frozen baseline's interval ({lo}, {hi})",
+            )
+        identified[pid] = value
+    if identified:
+        params = replace(params, values={**params.values, **identified})
+    return params
 
 
 # -- running ---------------------------------------------------------------------------------
@@ -547,7 +634,7 @@ def _fuel_chain(
     dead_ms = dead * PULSE_COUNT_MS
     out["injector_pulse_ms"] = pulse_ms
     out["effective_ms"] = pulse_ms - dead_ms
-    params = resolve_parameters(kit.plant, kit.delay, overrides=overrides)
+    params = plant_parameters(kit, overrides)
     plant = predict(
         PlantInputs(
             pulse_ms=np.array([pulse_ms]),
@@ -556,15 +643,23 @@ def _fuel_chain(
             maf_gps=np.array([point.maf_gps]),
             baro_kpa=np.array([point.baro_kpa]),
             iat_c=np.array([point.iat_c]),
-            rail_kpa=np.array([point.rail_kpa]),
-            map_kpa=np.array([point.map_kpa]),
+            rail_kpa=np.array([plant_rail_kpa(point)]),
+            map_kpa=None if point.map_kpa_source == "plant_model" else np.array([point.map_kpa]),
         ),
         params,
         kit.plant.geometry,
     )
     out["delivered_lambda"] = float(plant.lambda_delivered[0])
     out["fuel_per_event_g"] = float(plant.fuel_g[0])
+    if plant.manifold_refusal is not None and plant.manifold_refusal[0]:
+        out["reasons"].append(f"plant:{plant.manifold_refusal[0]}")
     return out
+
+
+def plant_rail_kpa(point: OperatingPoint) -> float:
+    """The rail reading the plant gets: NaN where none was measured, so its
+    rail working assumption (a drawn parameter) applies."""
+    return math.nan if point.rail_kpa_source == "working_assumption" else float(point.rail_kpa)
 
 
 @dataclass(frozen=True)
@@ -736,10 +831,22 @@ def _twin_gate(report: EffectReport, coverage: SteadyCoverage, assumptions: list
 
 
 def run_paired(
-    kit: SimKit, scenario: PairedScenario, base_image: bytes, candidate_image: bytes
+    kit: SimKit,
+    scenario: PairedScenario,
+    base_image: bytes,
+    candidate_image: bytes,
+    *,
+    plant_overrides: Mapping[str, float] | None = None,
 ) -> PairedResult:
     """Run both ROMs over the scenario's points; refuse what the contract or the
-    slice cannot evaluate, and name what each output rests on."""
+    slice cannot evaluate, and name what each output rests on.
+
+    ``plant_overrides`` runs both ROMs on one plant parameter vector other
+    than the frozen working values (:func:`plant_parameters`: a Monte Carlo
+    draw, E08.3). Both sides always share it."""
+    overrides = dict(plant_overrides or {})
+    if overrides:
+        plant_parameters(kit, overrides)
     _refuse_recorded_sources(scenario)
     _with_contract_mode(kit.contract, scenario, kit.contract_sha256)
     for label, image, identity in (
@@ -785,6 +892,14 @@ def run_paired(
         "source": scenario.learned.source,
     }
     scenario_sha = scenario.scenario_hash(kit.contract, kit.contract_sha256)
+    if overrides:
+        # A run on drawn parameters is a different run: its own hash and session.
+        scenario_sha = hashlib.sha256(
+            json.dumps(
+                {"scenario": scenario_sha, "plant_overrides": dict(sorted(overrides.items()))},
+                sort_keys=True,
+            ).encode()
+        ).hexdigest()
     provenance = {
         "tool": "paired_scenarios",
         "tool_version": TOOL_VERSION,
@@ -794,6 +909,8 @@ def run_paired(
         "baseline_sha256": qualification.baseline_sha256,
         "rom_effects": report.provenance,
     }
+    if overrides:
+        provenance["plant_overrides"] = dict(sorted(overrides.items()))
     base_report = {
         "outcome": report.outcome,
         "reason": report.reason,
@@ -862,7 +979,7 @@ def run_paired(
     s_val = s_lo = s_hi = math.nan
     baseline = kit.plant.baseline
     if baseline is not None:
-        s_val = baseline.values["stoich_air_per_open_ms"]
+        s_val = overrides.get("stoich_air_per_open_ms", baseline.values["stoich_air_per_open_ms"])
         s_lo, s_hi = baseline.intervals["stoich_air_per_open_ms"]
     cases = {
         name: case
@@ -873,7 +990,7 @@ def run_paired(
     supported_counts = dict.fromkeys(OUTPUTS, 0)
     loops: set[str] = set()
     for index, point in enumerate(scenario.points):
-        pair = _pair_point(kit, sides, point, stfts, {})
+        pair = _pair_point(kit, sides, point, stfts, overrides)
         b, c = pair.base, pair.candidate
         if pair.loop is not None:
             loops.add(pair.loop)
@@ -903,6 +1020,10 @@ def run_paired(
                 eff = [s["effective_ms"] for s in (b, c) if s.get("effective_ms") is not None]
                 if any(e < kit.plant.steady.min_effective_pulse_ms for e in eff):
                     reasons.append("short_pulse_undecoded")
+            if name == "injector_pulse_ms" and point.battery_v_source == "unmeasured":
+                # The dead time reads the voltage; the metered part does not,
+                # so lambda, fuel and their deltas stand without it.
+                reasons.append(BATTERY_UNMEASURED)
             if b[name] is None or c[name] is None:
                 reasons.append("not_computed")
             reasons = sorted(set(reasons))
@@ -931,7 +1052,7 @@ def run_paired(
             lam["parameter_band"] = (lam["base"] * s_val / s_hi, lam["base"] * s_val / s_lo)
             spread = []
             for case in cases.values():
-                cp = _pair_point(kit, sides, point, stfts, case)
+                cp = _pair_point(kit, sides, point, stfts, {**overrides, **case})
                 cb, cc = cp.base["delivered_lambda"], cp.candidate["delivered_lambda"]
                 if cb is not None and cc is not None:
                     spread.append(cc / cb - 1.0)
@@ -965,7 +1086,11 @@ def run_paired(
     for p in points_out:
         for o in p["outputs"].values():
             unresolved.update(o["reasons"])
-    unresolved.update(f"plant:{e}" for e in resolve_parameters(kit.plant, kit.delay).effects)
+    resolved = resolve_parameters(kit.plant, kit.delay)
+    unresolved.update(f"plant:{e}" for e in resolved.effects)
+    if any(p.rail_kpa_source == "working_assumption" for p in scenario.points):
+        # No rail reading at the point: the plant ran its rail working value.
+        unresolved.add(f"plant:{resolved.rail_effect}")
     if not qualification.qualified:
         assert qualification.reason is not None
         unresolved.add(qualification.reason)
@@ -1013,6 +1138,11 @@ def rank_as_improvement(
         reasons.append("synthetic_plant: a labelled synthetic plant never ranks a tuning effect")
     if not result.plant.get("qualified"):
         reasons.append(str(result.plant.get("reason") or "plant_not_qualified"))
+    if result.provenance.get("plant_overrides"):
+        reasons.append(
+            f"{OVERRIDES_NOT_FROZEN}: the plant ran on overridden parameters "
+            f"{sorted(result.provenance['plant_overrides'])}, not its frozen set"
+        )
     if intervention is None:
         reasons.append("intervention_test_not_passed:none")
     elif not intervention.verify():
@@ -1054,7 +1184,9 @@ def optimise(*_: Any, **__: Any) -> None:
 
 
 __all__ = [
+    "BATTERY_UNMEASURED",
     "OUTPUTS",
+    "OVERRIDES_NOT_FROZEN",
     "LearnedState",
     "OperatingPoint",
     "PairedResult",
@@ -1063,6 +1195,8 @@ __all__ = [
     "affected_cells",
     "load_kit",
     "optimise",
+    "plant_parameters",
+    "plant_rail_kpa",
     "rank_as_improvement",
     "run_paired",
 ]

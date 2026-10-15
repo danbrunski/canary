@@ -656,9 +656,20 @@ class Assignment(_Strict):
     #: Why a held-fixed value of a non-environment quantity is acceptable.
     assumption: str | None = None
     init: StateInit | None = None
+    #: ``internal_model``: a scenario boundary the scenario may leave unstated,
+    #: in which case the plant's declared internal model of the quantity (for
+    #: this mode and the contract's plant version) computes it, the same for
+    #: both sides. A stated value stays a boundary. E08.3: MAP has no sensor,
+    #: so a design point either states a measured MAP or lets the plant's
+    #: manifold model compute it per parameter draw.
+    unstated: Literal["internal_model"] | None = None
 
     @model_validator(mode="after")
     def _fields(self) -> Assignment:
+        if self.unstated is not None and (
+            self.role != "prescribed_boundary" or self.source != "scenario"
+        ):
+            raise ValueError("only a scenario-prescribed boundary may be left unstated")
         supplied = self.role in SUPPLIED
         if supplied != (self.source is not None):
             raise ValueError(
@@ -757,6 +768,7 @@ class SimContract(_Strict):
         for mode in self.modes:
             _check_mode(mode, by_id, events)
         _check_subsystems(self, by_id)
+        _check_unstated(self)
         return self
 
     def subsystem(self, subsystem_id: str) -> Subsystem:
@@ -950,6 +962,28 @@ def _check_subsystems(contract: SimContract, by_id: dict[str, Quantity]) -> None
             if stray_modes:
                 raise ValueError(f"subsystem {sub.id}: internal model in undeclared {stray_modes}")
             _check_internal_model(contract, sub, im, by_id)
+
+
+def _check_unstated(contract: SimContract) -> None:
+    """A boundary left unstated is computed by a declared internal model of it
+    in that mode, for the plant version the contract runs: never by nothing."""
+    for mode in contract.modes:
+        for q_id, assignment in mode.roles.items():
+            if assignment.unstated is None:
+                continue
+            found = [
+                im
+                for sub in contract.subsystems
+                for im in sub.internal_models
+                if im.quantity == q_id
+                and mode.id in im.modes
+                and contract.plant_version in im.plant_versions
+            ]
+            if not found:
+                raise ValueError(
+                    f"mode {mode.id}: {q_id} may be left unstated, but no internal model of it "
+                    f"is declared for {mode.id} in plant {contract.plant_version}"
+                )
 
 
 def _check_internal_model(
@@ -1300,7 +1334,9 @@ def check_scenario(contract: SimContract, contract_sha256: str, scenario: Scenar
             "boundary_not_supplied_here", f"{mode.id} computes or ignores {stray}"
         )
     scenario_fed = sorted(
-        q for q, a in mode.roles.items() if a.source == "scenario" and q not in scenario.boundaries
+        q
+        for q, a in mode.roles.items()
+        if a.source == "scenario" and a.unstated is None and q not in scenario.boundaries
     )
     if scenario_fed:
         raise SimulationRefusalError(

@@ -696,7 +696,8 @@ modes:
       manifold_pressure:
         role: prescribed_boundary
         source: scenario
-        assumption: 'Equal for both ROMs at the prescribed airflow (no MAP sensor).'
+        assumption: 'Equal for both ROMs at the prescribed airflow (no MAP sensor). A measured MAP is stated; unstated, the plant''s manifold model computes it from the airflow, the same on both sides (E08.3: a VE draw moves it).'
+        unstated: internal_model
       manifold_temperature: {role: unused}
       cylinder_air_flow: {role: unused}
       mass_air_flow:
@@ -897,7 +898,7 @@ subsystems:
       - quantity: manifold_pressure
         owner: manifold_breathing
         plant_versions: [fuel-mv-1]
-        modes: [plant_replay]
+        modes: [plant_replay, conditional_rom_comparison]
         model: >-
           fuel_plant.manifold_pressure_speed_density: steady speed density from
           MAF, rpm and IAT at fuel_plant.yaml's working VE (0.7, bracket

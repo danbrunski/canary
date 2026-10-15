@@ -1,0 +1,92 @@
+# How the ROM-edit Monte Carlo (E08.3, src/analysis/sim_montecarlo.py) draws
+# the frozen fuel plant's uncertain parameters, and the operating points' one
+# uncertain input. A bracket says where a parameter lies, not how likely each
+# value inside it is: the form below is a declared fact with its evidence,
+# never a default. Every parameter the plant registry brackets must appear
+# here (distribution_undeclared otherwise), with its bracket copied from the
+# registry and checked equal (bracket_mismatch); a name the registry does not
+# have is refused (parameter_unknown).
+#
+# Parameter uncertainty only. The plant's structural error (E07.3,
+# 2026-10-15: per-read error about -0.92 x STFT, |err| p90 11.6 %) is not a
+# parameter and is not sampled; every result says so
+# (structural_error_not_sampled).
+schema_version: 1
+plant_version: fuel-mv-1
+
+parameters:
+  injector_dead_time:
+    distribution: uniform
+    bracket_from: working_assumption
+    bracket: [-0.1, 0.1]
+    evidence: >-
+      Bracket only: no measurement says where inside. The offset of the
+      injector's latency from the ECM's own Ts compensation, +-0.1 ms
+      (fuel_plant.yaml); the injector's physical latency is not checked at
+      all (E07.3 ground truth).
+  rail_pressure:
+    distribution: uniform
+    bracket_from: working_assumption
+    bracket: [305.0, 371.0]
+    evidence: >-
+      Bracket only: no measurement says where inside. The working rail
+      gauge pressure where the AEM channel is not logged (E07.3). A point
+      that states its rail pressure does not read it.
+  manifold_pressure:
+    distribution: uniform
+    bracket_from: working_assumption
+    bracket: [0.4, 1.0]
+    evidence: >-
+      Bracket only: no measurement says where inside. The working VE of
+      fuel-mv-1's speed-density MAP (E07.3); there is no MAP sensor. A point
+      that states its MAP does not read it.
+  bank_air_split:
+    distribution: uniform
+    bracket_from: working_assumption
+    bracket: [0.48, 0.52]
+    evidence: >-
+      Bracket only: no measurement says where inside. One MAF for both
+      banks; bank imbalance is not separable from a per-bank injector offset
+      (fuel_plant.yaml).
+  fuel_stoich_afr:
+    distribution: uniform
+    bracket_from: working_assumption
+    bracket: [14.0, 14.7]
+    evidence: >-
+      Bracket only: no measurement says where inside. The tank's ethanol
+      content is not measured (E10 assumed, E0 14.7). Moves fuel grams,
+      never lambda.
+  lambda_observation_delay:
+    distribution: uniform
+    bracket_from: working_assumption
+    bracket: [0.0, 0.5]
+    evidence: >-
+      Bracket only: no measurement says where inside. B06's frozen 0.10 s
+      and its 0-0.5 s bracket (fitted on enrichment RAM-target reads). A
+      steady point does not read it.
+  stoich_air_per_open_ms:
+    distribution: truncated_normal
+    bracket_from: baseline_interval
+    bracket: [0.050591, 0.051501]
+    mean: 0.051063
+    sigma: 0.0002766
+    evidence: >-
+      A measured interval, not a bracket: the frozen baseline
+      na-stock-2026-10-05.1's 90 % bootstrap interval of the median over 89
+      steady regions (2000 resamples of regions, E07.3). Declared as a
+      normal centred on the frozen value whose central 90 % has the
+      interval's mean half-width (0.000455 / 1.645), truncated at the
+      interval, so the 10 % of tails outside it are not drawn. It cancels
+      in relative delta lambda (lambda ~ 1/s on both ROMs); it moves
+      absolute lambda only.
+
+inputs:
+  fill_byte:
+    distribution: uniform_integer
+    evidence: >-
+      The design carries the Fuel Comp load byte as N02's reconstructed
+      interval (throttle, purge and idle-air intervals through the decoded
+      fill chain; median width 45 counts at idle, 14 off idle on the
+      2026-10-04 ram-study slice). Nothing says where inside the interval
+      the ECM's byte sat, so every whole count in it is equally likely; it
+      is never collapsed to a midpoint.

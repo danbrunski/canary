@@ -458,17 +458,22 @@ def test_the_fuel_plants_own_map_is_a_declared_exception(kit: Any) -> None:
     assert [f.parameter for f in mv3.parameter_fits] == ["volumetric_efficiency"]
     owed, reconciled = entries[("fuel-mv-1",)], entries[("fuel-mv-2",)]
     for im in (owed, reconciled):
-        assert (im.quantity, im.owner, im.modes) == (
-            "manifold_pressure",
-            "manifold_breathing",
-            ["plant_replay"],
-        )
+        assert (im.quantity, im.owner) == ("manifold_pressure", "manifold_breathing")
+    # fuel-mv-1, the version the contract runs, also computes an unstated MAP
+    # in the paired comparison (E08.3: a design point at the plant's manifold model).
+    assert owed.modes == ["plant_replay", "conditional_rom_comparison"]
+    assert reconciled.modes == ["plant_replay"]
     assert "caps MAP at baro" in owed.differs and owed.owed_by and "plant_version" in owed.owed_by
     assert owed.reconciled_by is None and owed.invariants == []
     assert reconciled.owed_by is None and reconciled.reconciled_by
     assert reconciled.invariants == ["manifold_at_or_below_ambient"]
     raw = _raw()
     _sub(raw, "fuel_delivery")["internal_models"] = []
+    # A MAP the comparison may leave unstated needs that internal model.
+    with pytest.raises(ValidationError, match="may be left unstated, but no internal model"):
+        SimContract.model_validate(raw)
+    mode = next(m for m in raw["modes"] if m["id"] == "conditional_rom_comparison")
+    del mode["roles"]["manifold_pressure"]["unstated"]
     assert check_internal_models(SimContract.model_validate(raw)) == [
         "fuel_delivery: src.analysis.fuel_plant computes manifold_pressure undeclared"
     ]
