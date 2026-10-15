@@ -1,5 +1,14 @@
 # Implementation task index
 
+**Status 2026-10-15: W09, ROM Editor page.**
+[`W09-rom-editor.md`](W09-rom-editor.md) brings E08.8 forward at the
+operator's request: edit Fuel Targets, Fuel Compensation and K (Map 1) in the
+dashboard as E08.1 edit specs, preview the candidate, download the spec, and
+run the E08.3 Monte Carlo on a stated grid as a bounded workbench job, with
+E08.4's per-cell statuses. The candidate never becomes a flashable file. It
+was written without ROM images; implement and accept it on the machine that
+has them.
+
 **Status 2026-10-15: E08, ROM edit simulation workbench.**
 [`E08-rom-edit-simulation.md`](E08-rom-edit-simulation.md) turns E07's
 library pieces into an operator workflow: an edit spec (or an edited ROM file)
