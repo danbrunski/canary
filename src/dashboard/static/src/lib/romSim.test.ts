@@ -15,7 +15,9 @@ import {
   SIM_STORAGE_KEY,
   centreOffset,
   checkSimForm,
+  PEDAL_FLAG_HINT,
   edgesFromBreakpoints,
+  editsTouchWotColumn,
   forgetRemembered,
   gridPoints,
   knownAnswersLine,
@@ -24,12 +26,15 @@ import {
   newSeed,
   parseEdges,
   parseNumber,
+  pedalFlagBit0Clear,
   resultFileName,
   saveRemembered,
   seedForm,
   simFailure,
   suggestEdges,
   trimLoadEdges,
+  wotColumnCaveat,
+  wotColumnWarning,
   type SimFormValues,
 } from "./romSim";
 
@@ -463,5 +468,72 @@ describe("files and the E08.7 line", () => {
     expect(line).toMatch(/post-flash truck drives \(item 5\) is still owed/);
     // It must not claim more than that.
     expect(line).not.toMatch(/not yet reproduced|unvalidated/);
+  });
+});
+
+describe("the WOT column", () => {
+  const tables = tablesWithAxes().tables;
+  const targets = (cells: [number, number][]) => ({
+    table: "fuel_targets",
+    slot: 1,
+    cells,
+    set_raw: 20,
+  });
+
+  it("is named on the pedal flag field: bit 0 forces the last Target AFR column", () => {
+    expect(PEDAL_FLAG_HINT).toMatch(/Bit 0 forces the last Target AFR column \(the WOT column\)/);
+    expect(PEDAL_FLAG_HINT).toMatch(/bit 0 clear, no simulated point reads that column/);
+  });
+
+  it("finds the last column from the loaded table, not from a constant", () => {
+    const fuel = tables.find((item) => item.id === "fuel_targets") as RomTableValues;
+    expect(fuel.raw[0]).toHaveLength(8);
+    expect(editsTouchWotColumn([targets([[2, 7]])], tables)).toBe(true);
+    expect(editsTouchWotColumn([targets([[2, 6]])], tables)).toBe(false);
+    expect(editsTouchWotColumn([targets([[0, 0]]), targets([[5, 7]])], tables)).toBe(true);
+    expect(
+      editsTouchWotColumn([{ table: "fuel_targets", slot: 1, all: true, scale: 1 }], tables),
+    ).toBe(true);
+    // A table of another width has another last column.
+    const narrow = [{ ...fuel, raw: fuel.raw.map((row) => row.slice(0, 5)) }];
+    expect(editsTouchWotColumn([targets([[2, 7]])], narrow)).toBe(false);
+    expect(editsTouchWotColumn([targets([[2, 4]])], narrow)).toBe(true);
+  });
+
+  it("ignores the other tables, another slot, and an unknown table", () => {
+    expect(
+      editsTouchWotColumn(
+        [{ table: "fuel_compensation", slot: 1, cells: [[0, 15]], scale: 1.02 }],
+        tables,
+      ),
+    ).toBe(false);
+    expect(
+      editsTouchWotColumn([{ table: "k_constant", slot: 1, cells: [[0, 0]], set_raw: 5 }], tables),
+    ).toBe(false);
+    expect(editsTouchWotColumn([{ ...targets([[2, 7]]), slot: 2 }], tables)).toBe(false);
+    expect(editsTouchWotColumn([targets([[2, 7]])], [])).toBe(false);
+  });
+
+  it("reads the flag as bit 0 clear only when it is a whole number in range", () => {
+    expect(pedalFlagBit0Clear("0")).toBe(0);
+    expect(pedalFlagBit0Clear(" 2 ")).toBe(2);
+    expect(pedalFlagBit0Clear("254")).toBe(254);
+    expect(pedalFlagBit0Clear("1")).toBeNull();
+    expect(pedalFlagBit0Clear("255")).toBeNull();
+    expect(pedalFlagBit0Clear("")).toBeNull();
+    expect(pedalFlagBit0Clear("1.5")).toBeNull();
+    expect(pedalFlagBit0Clear("300")).toBeNull();
+    expect(pedalFlagBit0Clear("x")).toBeNull();
+  });
+
+  it("words the warning and the caveat with the stated flag, and offers no value", () => {
+    expect(wotColumnWarning(0)).toBe(
+      "Your edit touches the WOT column. With pedal flag 0 the simulated points never read it, " +
+        "so this run will show no change from this edit. Set pedal flag to 1 (bit 0) to simulate " +
+        "wide-open throttle.",
+    );
+    expect(wotColumnCaveat(4)).toBe(
+      "The WOT column was edited with pedal flag 4: this run cannot show that edit's effect.",
+    );
   });
 });

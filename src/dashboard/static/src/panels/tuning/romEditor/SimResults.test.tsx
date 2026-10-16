@@ -427,3 +427,109 @@ describe("design, provenance and the download", () => {
     expect(screen.queryByText(/download (the )?(image|candidate|rom)\b/i)).not.toBeInTheDocument();
   });
 });
+
+describe("the coarse-run banner (W09.9)", () => {
+  /** A result of this size: the figures the banner reads are the result's own. */
+  function sized(draws: number, points: number): RomSimResult {
+    const result = buildSimResult();
+    return {
+      ...result,
+      cells: { ...result.cells, draws },
+      design: { ...result.design, points },
+    };
+  }
+  const fine = (points: number | null) => ({
+    ...buildRunContext(),
+    fineReference: { points, draws: 1000 },
+  });
+  const banner = () => screen.queryByRole("note", { name: "Coarse run" });
+
+  it("shows for a run with few draws and few points, stating both and the E08.3 wording", () => {
+    show({ result: sized(200, 64), run: fine(224) });
+    const note = banner() as HTMLElement;
+    expect(note).toBeVisible();
+    expect(note).toHaveTextContent("200 draws × 64 points");
+    expect(note).toHaveTextContent("200 draws, below the Fine preset's 1,000");
+    expect(note).toHaveTextContent("64 points, below the Fine preset's 224");
+    expect(note).toHaveTextContent("Quantiles over few draws are noisy");
+    expect(note).toHaveTextContent(
+      "E08.3 recorded that three draws give only a coarse per-cell spread",
+    );
+    expect(note).toHaveTextContent("Fine preset runs 1,000 draws on 224 points");
+  });
+
+  it("says no_points is not unchanged, from the result's own counts", () => {
+    show({ result: sized(1000, 64), run: fine(224) });
+    const note = banner() as HTMLElement;
+    expect(note).toHaveTextContent("Cells with no visited point read no_points");
+    expect(note).toHaveTextContent("not unchanged");
+    expect(note).toHaveTextContent(/\(\d+ of 12 cells here\)/);
+    // The cells themselves keep their no-points label under a coarse result.
+    const map = lambdaMap();
+    expect(byStatus(map, "no_points").length).toBeGreaterThan(0);
+    expect(byStatus(map, "no_points")[0].getAttribute("aria-label")).toMatch(/no points/);
+    expect(byStatus(map, "no_points")[0].textContent).toBe("–");
+    expect(byStatus(map, "no_points")[0].textContent).not.toBe("0");
+  });
+
+  it("shows for a hand-set low draw count alone, with no claim about unvisited cells", () => {
+    show({ result: sized(50, 224), run: fine(224) });
+    const note = banner() as HTMLElement;
+    expect(note).toHaveTextContent("50 draws × 224 points");
+    expect(note).not.toHaveTextContent("Cells with no visited point");
+  });
+
+  it("shows for a low point count alone", () => {
+    show({ result: sized(1000, 100), run: fine(224) });
+    expect(banner()).toHaveTextContent("100 points, below the Fine preset's 224");
+  });
+
+  it("does not show for a fine run", () => {
+    const { unmount } = show({ result: sized(1000, 224), run: fine(224) });
+    expect(banner()).not.toBeInTheDocument();
+    unmount();
+    show({ result: sized(2000, 1024), run: fine(224) });
+    expect(banner()).not.toBeInTheDocument();
+  });
+
+  it("is above the maps when it shows", () => {
+    show({ result: sized(200, 64), run: fine(224) });
+    const note = banner() as HTMLElement;
+    const maps = screen.getByRole("region", { name: "Maps" });
+    expect(note.compareDocumentPosition(maps) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(screen.getByRole("region", { name: "Read this first" })).toBeVisible();
+  });
+
+  it("judges only the draws when the Fine grid's size is unknown", () => {
+    show({ result: sized(1000, 4), run: fine(null) });
+    expect(banner()).not.toBeInTheDocument();
+  });
+});
+
+describe("the WOT column caveat", () => {
+  const withFlag = (wotColumnEdited: boolean, pedal_flag: number): SimRunContext => {
+    const run = buildRunContext();
+    return { ...run, wotColumnEdited, request: { ...run.request, pedal_flag } };
+  };
+  const caveats = () => screen.getByRole("region", { name: "Read this first" });
+  const LINE =
+    "The WOT column was edited with pedal flag 0: this run cannot show that edit's effect.";
+
+  it("is a line in the caveat block when the last column was edited with bit 0 clear", () => {
+    show({ run: withFlag(true, 0) });
+    expect(within(caveats()).getByText(LINE)).toBeVisible();
+  });
+
+  it("states the flag it was run with", () => {
+    show({ run: withFlag(true, 6) });
+    expect(within(caveats()).getByText(LINE.replace("flag 0", "flag 6"))).toBeVisible();
+  });
+
+  it("is absent when bit 0 was set, or the last column was not edited", () => {
+    const { unmount } = show({ run: withFlag(true, 1) });
+    expect(caveats()).not.toHaveTextContent("The WOT column was edited");
+    unmount();
+    show({ run: withFlag(false, 0) });
+    expect(caveats()).not.toHaveTextContent("The WOT column was edited");
+  });
+});

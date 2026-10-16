@@ -595,6 +595,31 @@ defaulted. Bounds, refused before any work: `grid_too_large` (more than
 `MAX_GRID_POINTS = 1024` cells) and `draws_too_many` (more than `MAX_DRAWS =
 2000`). The base must be a recorded revision (`base_not_a_recorded_revision`).
 
+**Coarse vs fine (W09.9).** Both are the same request with a different `draws`
+and different edges, and neither is a server default. For a **quick check**
+("did my edit move anything, and where?") send every other Fuel Comp
+breakpoint on each axis (about a quarter of the grid points; the page's
+*Coarse (quick check)* preset) and `draws: 200`, the count E08 reads cell
+quantiles from. For a **thorough run** send the full suggested edges (the
+page's *Fine* preset; 224 points on the 20261004 image after cutting the load
+edges to 0-100 %) and `draws: 1000`, E08.3's speed target and W09.6's
+reference row. Cost grows with points x draws on top of a fixed start-up:
+measured on the dev laptop (W09.6, the real `spawn` child, start-up
+included), 224 points x 200 draws took 4.5 s, 224 x 1,000 took 8.5 s,
+224 x 2,000 11.9 s, 1,024 x 1,000 34.1 s and the cap (1,024 x 2,000) 51.1 s.
+A least-squares fit through those seven rows is about `3.3 s + 2.3e-5 s x
+points x draws` (off by -20 % to +16 % against them; no run under 224 points
+was timed). The Pi is not measured, so treat these as the laptop's, not
+yours. Two things differ in the result and an agent must not read a coarse run
+as a fine one: table cells with no visited design point come back with status
+`no_points`, which is **not** `unchanged` (nothing was simulated there), and
+quantiles over few draws are noisy (E08.3: three draws give only a coarse
+per-cell spread). `provenance.draws` and `design.points` say what was run.
+The dashboard banners any result below the Fine preset's draws or points.
+A client that gives up does not stop the server: the job is held behind
+`asyncio.shield` and no route cancels it, so a different request is `409
+analysis_busy` until it finishes (an identical one re-attaches to it).
+
 `200`: `{"tool": "rom_editor", "tool_version": "1", "label": "simulation",
 "synthetic": bool, "caveats": [...] (the result's, first, unchanged),
 "assumptions": [...], "unresolved": [...], "inert_parameters": [...],

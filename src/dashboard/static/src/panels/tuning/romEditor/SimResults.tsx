@@ -1,4 +1,5 @@
 import { TableScroll } from "../../../components/TableScroll";
+import { coarseVerdict, formatCount, PRESET_DRAWS } from "../../../lib/romSimSize";
 import { g, pct } from "../../../lib/romSimView";
 import { buttonClass } from "../../../styles";
 import type { RomSimResult, SimRunContext } from "../../../types/romEditor";
@@ -184,6 +185,59 @@ function Provenance({
   );
 }
 
+/** Cells of the first output with no visited design point. */
+function noPointsCells(table: RomSimResult["cells"]): { none: number; all: number } | null {
+  const name = table.outputs[0];
+  const counts = name ? table.status_counts[name] : undefined;
+  if (!counts) return null;
+  return {
+    none: counts.no_points ?? 0,
+    all: Object.values(counts).reduce((total, count) => total + count, 0),
+  };
+}
+
+/** The banner of a run whose draws or points are below the Fine preset's (W09.9),
+ *  judged from the result's own numbers, so a hand-set low run is flagged like
+ *  a clicked preset. The wording is E08.3's: a few draws give only a coarse
+ *  per-cell spread. */
+function CoarseBanner({ result, run }: { result: RomSimResult; run: SimRunContext }) {
+  const draws = result.cells.draws;
+  const points = result.design.points;
+  const fine = run.fineReference ?? { points: null, draws: PRESET_DRAWS.fine };
+  const verdict = coarseVerdict(draws, points, fine);
+  if (!verdict.coarse) return null;
+  const cells = noPointsCells(result.cells);
+  return (
+    <section
+      role="note"
+      aria-label="Coarse run"
+      className="space-y-1 rounded-lg border border-warn/70 bg-warn/10 p-3 text-sm"
+    >
+      <h3 className="text-base font-semibold text-warn">Coarse run</h3>
+      <p>
+        <span className="font-num">
+          {formatCount(draws)} draws × {formatCount(points)} points
+        </span>{" "}
+        ({verdict.reasons.join("; ")}). This is a quick check, not a thorough run.
+      </p>
+      {verdict.fewPoints && (
+        <p>
+          Cells with no visited point read <code className="font-num">no_points</code>
+          {cells ? ` (${formatCount(cells.none)} of ${formatCount(cells.all)} cells here)` : ""}:
+          nothing was simulated there, which is not <code className="font-num">unchanged</code>.
+        </p>
+      )}
+      <p>
+        Quantiles over few draws are noisy: each cell&apos;s p05 / p50 / p95 are taken over its
+        (point, draw) pairs, and E08.3 recorded that three draws give only a coarse per-cell spread
+        (it reads cell quantiles from a run of {formatCount(PRESET_DRAWS.coarse)}). The Fine preset
+        runs {formatCount(fine.draws)} draws
+        {fine.points !== null ? ` on ${formatCount(fine.points)} points` : ""}.
+      </p>
+    </section>
+  );
+}
+
 /** A simulation result (W09.4). The caveat block is the first thing in it, in
  *  the DOM as on screen, and the maps never render without it. */
 export function SimResults({
@@ -205,6 +259,7 @@ export function SimResults({
           The pending edits have changed since this run. The result below is for the edits it lists.
         </p>
       )}
+      <CoarseBanner result={result} run={run} />
       <SimCaveats result={result} run={run} />
       <SimMaps table={result.cells} />
       <Provenance result={result} run={run} onDownload={onDownload} />

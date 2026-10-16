@@ -5,8 +5,10 @@ import { HttpError, controlBlob, controlJson } from "../../api/core";
 import {
   ENTRY_K106,
   ENTRY_TUNED,
+  ENTRY_UNRECORDED,
   SHA_K106,
   SHA_TUNED,
+  SHA_UNRECORDED,
   TABLES_WITH_FUEL_COMP,
   fuelCompTable,
 } from "../../test/romLibraryFixtures";
@@ -109,6 +111,7 @@ function previewFor(request: RomEditPreviewRequest): RomEditPreview {
 
 function route(
   preview: (init?: RequestInit) => unknown = (init) => previewFor(JSON.parse(bodyOf(init))),
+  extra: Record<string, unknown> = {},
 ) {
   const table: Record<string, unknown> = {
     "GET /control/rom/library": { entries: [ENTRY_TUNED, ENTRY_K106] },
@@ -116,6 +119,11 @@ function route(
     [`GET /control/rom/library/${SHA_K106}/tables`]: { ...TABLES_WITH_FUEL_COMP, sha256: SHA_K106 },
     [`POST ${PREVIEW_PATH(SHA_TUNED)}`]: preview,
     [`POST ${PREVIEW_PATH(SHA_K106)}`]: preview,
+    [`GET /control/rom/library/${SHA_UNRECORDED}/tables`]: {
+      ...TABLES_WITH_FUEL_COMP,
+      sha256: SHA_UNRECORDED,
+    },
+    ...extra,
   };
   control.mockImplementation((path: string, _token: string, init?: RequestInit) => {
     const key = `${init?.method ?? "GET"} ${path}`;
@@ -132,12 +140,21 @@ afterEach(() => {
   window.localStorage.clear();
 });
 
+/** The editor starts unloaded; a `?rom=<sha>` link (a reload, the desk
+ *  launcher) is what loads a base at start. Most tests start from one. */
+function renderEditor(sha: string | null = SHA_TUNED) {
+  if (sha && !new URLSearchParams(window.location.search).get("rom")) {
+    window.history.replaceState(null, "", `/?rom=${sha}`);
+  }
+  return render(<RomEditorPage token="t" status={null} />);
+}
+
 function cell(grid: HTMLElement, row: number, col: number) {
   return within(grid).getByRole("gridcell", { name: new RegExp(`^Row ${row}, column ${col}:`) });
 }
 
 async function openFuelComp() {
-  render(<RomEditorPage token="t" status={null} />);
+  renderEditor();
   fireEvent.click(await screen.findByRole("button", { name: "Fuel Compensation (Map 1)" }));
   return screen.getByRole("grid", { name: "Fuel Compensation (Map 1) cells" });
 }
@@ -155,19 +172,18 @@ async function applyScale(grid: HTMLElement) {
 }
 
 describe("ROM Editor page: base and table (W09.3)", () => {
-  it("lists each image with its revision and whether it can be simulated, and keeps the sha in the URL", async () => {
+  it("lists each image with its revision and whether it can be simulated; choosing one loads it and keeps the sha in the URL", async () => {
     route();
-    render(<RomEditorPage token="t" status={null} />);
+    renderEditor(null);
     const images = await screen.findByRole("table", { name: "Base images" });
     const rows = within(images).getAllByRole("row");
     expect(within(rows[1]).getByText("ZS44A-20260920")).toBeVisible();
     expect(within(rows[1]).getByText("can simulate")).toBeVisible();
     expect(within(rows[2]).getByText("unrecognised")).toBeVisible();
     expect(within(rows[2]).getByText("preview only")).toBeVisible();
-    await waitFor(() =>
-      expect(new URLSearchParams(window.location.search).get("rom")).toBe(SHA_TUNED),
-    );
-    await screen.findByRole("grid");
+    // Nothing was chosen, so nothing is loaded or in the URL.
+    expect(screen.queryByRole("grid")).not.toBeInTheDocument();
+    expect(new URLSearchParams(window.location.search).get("rom")).toBeNull();
 
     await userEvent.click(screen.getByRole("button", { name: /Edit from k106\.bin/ }));
     await waitFor(() =>
@@ -182,7 +198,7 @@ describe("ROM Editor page: base and table (W09.3)", () => {
   it("opens the image the URL names", async () => {
     route();
     window.history.replaceState(null, "", `/?rom=${SHA_K106}`);
-    render(<RomEditorPage token="t" status={null} />);
+    renderEditor();
     await screen.findByRole("grid");
     expect(screen.getByRole("button", { name: /Edit from k106\.bin/ })).toHaveAttribute(
       "aria-pressed",
@@ -192,7 +208,7 @@ describe("ROM Editor page: base and table (W09.3)", () => {
 
   it("offers Fuel Targets, Fuel Compensation and K in Map 1 only, with the Fuel Comp axis note", async () => {
     route();
-    render(<RomEditorPage token="t" status={null} />);
+    renderEditor();
     const group = await screen.findByRole("group", { name: "Table" });
     expect(
       within(group)
@@ -390,7 +406,7 @@ describe("ROM Editor page: operation, pending edits and preview", () => {
 
   it("refuses in the browser a value whose raw is outside u8, and sends nothing", async () => {
     route();
-    render(<RomEditorPage token="t" status={null} />);
+    renderEditor();
     const grid = await screen.findByRole("grid", { name: "Fuel Targets (Map 1) cells" });
     fireEvent.mouseDown(cell(grid, 1, 1));
     const operation = screen.getByRole("form", { name: "Operation" });
@@ -405,7 +421,7 @@ describe("ROM Editor page: operation, pending edits and preview", () => {
 
   it("shows the set-to-value chain: 12.5 AFR -> raw 151 -> 12.46 AFR", async () => {
     route();
-    render(<RomEditorPage token="t" status={null} />);
+    renderEditor();
     const grid = await screen.findByRole("grid", { name: "Fuel Targets (Map 1) cells" });
     fireEvent.mouseDown(cell(grid, 1, 1));
     const operation = screen.getByRole("form", { name: "Operation" });
@@ -439,13 +455,13 @@ describe("ROM Editor page: operation, pending edits and preview", () => {
 
   it("keeps the pending edits and label per image across a reload", async () => {
     route();
-    const first = render(<RomEditorPage token="t" status={null} />);
+    const first = renderEditor();
     fireEvent.click(await screen.findByRole("button", { name: "Fuel Compensation (Map 1)" }));
     await applyScale(screen.getByRole("grid", { name: "Fuel Compensation (Map 1) cells" }));
     await userEvent.type(screen.getByLabelText("Label for this edit set"), "kept");
     first.unmount();
 
-    render(<RomEditorPage token="t" status={null} />);
+    renderEditor();
     const list = await screen.findByRole("list", { name: "Pending edits" });
     expect(within(list).getByText(/scale raw ×1\.02/)).toBeVisible();
     expect(screen.getByLabelText("Label for this edit set")).toHaveValue("kept");
@@ -490,7 +506,7 @@ describe("ROM Editor page: spec download and no image", () => {
 describe("ROM Editor page: the Simulate slot", () => {
   it("holds the Simulate form for a matched revision (W09.4) and gives the reason otherwise", async () => {
     route();
-    render(<RomEditorPage token="t" status={null} />);
+    renderEditor();
     await screen.findByRole("grid");
     const slot = screen.getByRole("region", { name: "Simulate" });
     // A matched revision: the form is there, nothing says it is unavailable.
@@ -501,5 +517,261 @@ describe("ROM Editor page: the Simulate slot", () => {
       /Simulate is unavailable: base_not_a_recorded_revision\. The simulator needs a base recorded/,
     );
     expect(within(slot).getByRole("button", { name: "Run simulation" })).toBeDisabled();
+  });
+});
+
+/** The native file dialog is the browser's; a test hands the input a file. */
+function pickFile(name: string, size = 1048576) {
+  const file = new File([new Uint8Array(16)], name, { type: "application/octet-stream" });
+  Object.defineProperty(file, "size", { value: size });
+  return file;
+}
+
+async function openFile(file: File) {
+  await act(async () => {
+    fireEvent.change(screen.getByLabelText<HTMLInputElement>("ROM file"), {
+      target: { files: [file] },
+    });
+  });
+}
+
+const UPLOAD = (name: string) => `POST /control/rom/library?filename=${name}`;
+
+describe("ROM Editor page: Open ROM (W09.8)", () => {
+  it("with nothing stored, offers one Open ROM… button and no picker", async () => {
+    route(undefined, { "GET /control/rom/library": { entries: [] } });
+    renderEditor(null);
+    const open = await screen.findByRole("button", { name: "Open ROM…" });
+    expect(open).toBeEnabled();
+    expect(screen.queryByRole("table", { name: "Base images" })).not.toBeInTheDocument();
+    expect(screen.queryByText("Recent ROMs")).not.toBeInTheDocument();
+    expect(screen.queryByText(/ROM Library page/)).not.toBeInTheDocument();
+    // The button opens the browser's file dialog: a plain input, nothing filtered out.
+    const input = screen.getByLabelText<HTMLInputElement>("ROM file");
+    expect(input.type).toBe("file");
+    expect(input.hasAttribute("accept")).toBe(false);
+    const click = vi.spyOn(input, "click");
+    fireEvent.click(open);
+    expect(click).toHaveBeenCalled();
+  });
+
+  it("loads a picked file in one step: uploads it and makes the answered entry the base", async () => {
+    route(undefined, {
+      [UPLOAD("tuner-base.bin")]: { ...ENTRY_UNRECORDED, created: true },
+    });
+    renderEditor();
+    await screen.findByRole("grid");
+    const file = pickFile("tuner-base.bin");
+    await openFile(file);
+    const call = control.mock.calls.find(
+      ([path]) => path === "/control/rom/library?filename=tuner-base.bin",
+    );
+    expect(call?.[2]).toMatchObject({ method: "POST", body: file });
+    expect(new Headers(call?.[2]?.headers).get("Content-Type")).toBe("application/octet-stream");
+
+    await waitFor(() =>
+      expect(new URLSearchParams(window.location.search).get("rom")).toBe(SHA_UNRECORDED),
+    );
+    // The header names the file and its state: preview only, with the reason on the Simulate slot.
+    const loaded = await screen.findByLabelText("Loaded ROM");
+    expect(within(loaded).getByText("tuner-base.bin")).toBeVisible();
+    expect(within(loaded).getByText("unrecognised")).toBeVisible();
+    expect(within(loaded).getByText("preview only")).toBeVisible();
+    expect(
+      await screen.findByText(/Simulate is unavailable: base_not_a_recorded_revision/),
+    ).toBeVisible();
+    expect(screen.getByRole("button", { name: "Run simulation" })).toBeDisabled();
+    // Not announced as a new import step, and the control is now "another".
+    expect(screen.queryByText(/already in the library/)).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Open another ROM…" })).toBeEnabled();
+    // It is also in the recent list, selected.
+    expect(screen.getByRole("button", { name: /Edit from tuner-base\.bin/ })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+  });
+
+  it("a recorded revision opened from a file can simulate", async () => {
+    route(undefined, { [UPLOAD("tuned.bin")]: { ...ENTRY_TUNED, created: false } });
+    window.history.replaceState(null, "", `/?rom=${SHA_K106}`);
+    renderEditor();
+    await screen.findByRole("grid");
+    await openFile(pickFile("tuned.bin"));
+    const loaded = await screen.findByLabelText("Loaded ROM");
+    await within(loaded).findByText("can simulate");
+    expect(within(loaded).getByText("tuned.bin")).toBeVisible();
+    expect(within(loaded).getByText("ZS44A-20260920")).toBeVisible();
+    expect(screen.queryByText(/Simulate is unavailable/)).not.toBeInTheDocument();
+  });
+
+  it("says quietly when the file was already in the library", async () => {
+    route(undefined, { [UPLOAD("again.bin")]: { ...ENTRY_K106, created: false } });
+    renderEditor();
+    await screen.findByRole("grid");
+    await openFile(pickFile("again.bin"));
+    expect(
+      await screen.findByText("again.bin is already in the library; nothing new was stored."),
+    ).toBeVisible();
+    expect(screen.getByRole("button", { name: /Edit from k106\.bin/ })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+  });
+
+  it("shows UpRev's encrypted backup refusal by its name and keeps the current base", async () => {
+    const detail =
+      "UpRev encrypted backup (1,048,592 bytes, starts 32bec582): it cannot be decoded. Upload the .OsirisROM or a plain 1 MiB image instead.";
+    route(undefined, {
+      [UPLOAD("Xterra-backup.bin")]: new HttpError(422, JSON.stringify({ detail })),
+    });
+    renderEditor();
+    await screen.findByRole("grid");
+    await openFile(pickFile("Xterra-backup.bin", 1048592));
+    expect(await screen.findByText(`Xterra-backup.bin: ${detail}`)).toBeVisible();
+    expect(screen.getByRole("button", { name: /Edit from Running tune/ })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+    expect(new URLSearchParams(window.location.search).get("rom")).toBe(SHA_TUNED);
+    expect(screen.getByRole("grid", { name: "Fuel Targets (Map 1) cells" })).toBeVisible();
+  });
+
+  it("keeps a 413 and a 401 refusal's reason, and refuses an empty file without uploading", async () => {
+    route(undefined, {
+      [UPLOAD("big.bin")]: new HttpError(
+        413,
+        JSON.stringify({ detail: "ROM exceeds the 2 MiB upload limit" }),
+      ),
+      [UPLOAD("bad.bin")]: new HttpError(401, JSON.stringify({ detail: "Unauthorized" })),
+    });
+    renderEditor();
+    await screen.findByRole("grid");
+    await openFile(pickFile("big.bin"));
+    expect(await screen.findByText("big.bin: ROM exceeds the 2 MiB upload limit")).toBeVisible();
+    await openFile(pickFile("bad.bin"));
+    expect(await screen.findByText(/^bad\.bin: /)).toBeVisible();
+    expect(screen.queryByText(/^big\.bin: /)).not.toBeInTheDocument();
+    await openFile(pickFile("empty.bin", 0));
+    expect(screen.getByText("empty.bin is empty.")).toBeVisible();
+    expect(control.mock.calls.some(([path]) => String(path).includes("empty.bin"))).toBe(false);
+  });
+
+  it("accepts a dropped file", async () => {
+    route(undefined, { [UPLOAD("drop.bin")]: { ...ENTRY_UNRECORDED, created: true } });
+    renderEditor();
+    await screen.findByRole("grid");
+    const file = pickFile("drop.bin");
+    await act(async () => {
+      fireEvent.drop(screen.getByRole("group", { name: "Open a ROM file" }), {
+        dataTransfer: { files: [file] },
+      });
+    });
+    await waitFor(() =>
+      expect(control).toHaveBeenCalledWith(
+        "/control/rom/library?filename=drop.bin",
+        "t",
+        expect.objectContaining({ method: "POST", body: file }),
+      ),
+    );
+  });
+
+  it("keeps each image's pending edits across an upload-driven switch, and leaks none", async () => {
+    route(undefined, { [UPLOAD("tuner-base.bin")]: { ...ENTRY_UNRECORDED, created: true } });
+    renderEditor();
+    fireEvent.click(await screen.findByRole("button", { name: "Fuel Compensation (Map 1)" }));
+    await applyScale(screen.getByRole("grid", { name: "Fuel Compensation (Map 1) cells" }));
+    expect(screen.getAllByRole("listitem")).toHaveLength(1);
+
+    await openFile(pickFile("tuner-base.bin"));
+    await within(await screen.findByLabelText("Loaded ROM")).findByText("preview only");
+    await waitFor(() => expect(screen.getByText("No pending edits.")).toBeVisible());
+
+    // Back to the first image: its edit is still there.
+    await userEvent.click(screen.getByRole("button", { name: /Edit from Running tune/ }));
+    const list = await screen.findByRole("list", { name: "Pending edits" });
+    expect(within(list).getByText(/scale raw ×1\.02/)).toBeVisible();
+  }, 30000);
+
+  it("offers no image download after an upload", async () => {
+    route(undefined, { [UPLOAD("tuner-base.bin")]: { ...ENTRY_UNRECORDED, created: true } });
+    renderEditor();
+    await screen.findByRole("grid");
+    await openFile(pickFile("tuner-base.bin"));
+    await screen.findByLabelText("Loaded ROM");
+    expect(blob).not.toHaveBeenCalled();
+    expect(control.mock.calls.some(([path]) => String(path).endsWith("/download"))).toBe(false);
+    expect(document.querySelector("a[href], a[download]")).toBeNull();
+    const downloads = screen
+      .queryAllByRole("button")
+      .map((button) => button.textContent ?? "")
+      .filter((text) => /download/i.test(text));
+    expect(downloads).toEqual([]);
+  });
+});
+
+describe("ROM Editor page: starts unloaded (W09.8)", () => {
+  const rowTitles = () =>
+    within(screen.getByRole("table", { name: "Base images" }))
+      .getAllByRole("row")
+      .slice(1)
+      .map((row) => within(row).getAllByRole("cell")[0]?.textContent ?? "");
+
+  it("loads nothing at start, even with a library, and previews or simulates nothing", async () => {
+    route();
+    renderEditor(null);
+    await screen.findByRole("table", { name: "Base images" });
+    expect(screen.getByRole("button", { name: "Open ROM…" })).toBeEnabled();
+    expect(screen.queryByLabelText("Loaded ROM")).not.toBeInTheDocument();
+    for (const name of ["Edit", "Pending edits", "Preview", "Simulate"]) {
+      expect(screen.queryByRole("heading", { name })).not.toBeInTheDocument();
+    }
+    expect(screen.queryByRole("grid")).not.toBeInTheDocument();
+    expect(screen.queryByRole("form", { name: "Simulate form" })).not.toBeInTheDocument();
+    expect(screen.queryAllByRole("button", { pressed: true })).toHaveLength(0);
+    expect(new URLSearchParams(window.location.search).get("rom")).toBeNull();
+    // Only reads: no table fetch, no POST.
+    expect(control.mock.calls.map(([path]) => String(path))).toEqual(["/control/rom/library"]);
+    expect(window.localStorage.length).toBe(0);
+  });
+
+  it("lists recent ROMs newest first by added_at, whatever order the API answers", async () => {
+    route(undefined, {
+      "GET /control/rom/library": { entries: [ENTRY_K106, ENTRY_TUNED, ENTRY_UNRECORDED] },
+    });
+    renderEditor(null);
+    await screen.findByRole("table", { name: "Base images" });
+    expect(screen.getByText("Recent ROMs")).toBeVisible();
+    expect(rowTitles().map((text) => text.replace(/[0-9a-f]{12}$/, ""))).toEqual([
+      "tuner-base.bin",
+      "Running tune",
+      "k106.bin",
+    ]);
+  });
+
+  it("loads a recent ROM with one click and writes ?rom=", async () => {
+    route();
+    renderEditor(null);
+    await userEvent.click(await screen.findByRole("button", { name: /Edit from k106\.bin/ }));
+    await screen.findByRole("grid");
+    expect(new URLSearchParams(window.location.search).get("rom")).toBe(SHA_K106);
+    expect(within(screen.getByLabelText("Loaded ROM")).getByText("k106.bin")).toBeVisible();
+  });
+
+  it("a ?rom= link in the library loads at start", async () => {
+    route();
+    renderEditor(SHA_K106);
+    await screen.findByRole("grid");
+    expect(screen.queryByText(/is not in the library/)).not.toBeInTheDocument();
+  });
+
+  it("a ?rom= link that is not in the library stays unloaded with a quiet note", async () => {
+    route();
+    renderEditor("e".repeat(64));
+    expect(await screen.findByText(/is not in the library/)).toBeVisible();
+    expect(screen.getByText(/eeeeeeeeeeee/)).toBeVisible();
+    expect(screen.queryByRole("grid")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Loaded ROM")).not.toBeInTheDocument();
+    expect(screen.getByRole("table", { name: "Base images" })).toBeVisible();
+    expect(control.mock.calls.some(([path]) => String(path).includes("/tables"))).toBe(false);
   });
 });

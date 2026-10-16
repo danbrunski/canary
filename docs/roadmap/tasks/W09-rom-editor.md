@@ -622,6 +622,219 @@ W09.6 is the orchestrator's own, on the ROM machine.
     light-load Fuel Comp region +2 %, preview, download the spec, simulate,
     and screenshot the result. `pnpm e2e` gets `romEditor.spec.ts` with the
     API mocked (as `romMaps.spec.ts`).
+    - *Mocked e2e done 2026-10-15 (the real-image walkthrough above stays
+      open):* `e2e/romEditor.spec.ts` + `e2e/fixtures/romEditorApi.ts`, desktop
+      chromium only, 1280x600 so the 16 x 16 table is partly below the fold
+      (asserted). 5 tests, 5 passed in ~25 s (20/20 on `--repeat-each=4`);
+      `romMaps.spec.ts` and `emptyDaemon.spec.ts` still green. Covers: starts
+      unloaded (one Open ROM… button, Recent ROMs newest first although the
+      API answers oldest first, no grid/form/table request/`?rom=`); open a
+      file through the real file chooser (upload POST body, name, octet-stream;
+      header shows the file name, sha prefix, `can simulate`, `?rom=` written);
+      Fuel Compensation, ONE click selects exactly one cell (regression for the
+      click bug), shift-click makes a 6-cell range, a scale without rounding is
+      refused `rounding_undeclared`, scale +2 % nearest, Preview sends the exact
+      cells/scale/rounding, the after table outlines the six changed cells with
+      `+1.6 %`, Download spec is `<label>.edit-spec.yaml` holding the mocked
+      `spec_yaml`, and no image/candidate link or button exists (only
+      "Download spec", no blob anchors, no request beyond list/upload/tables/
+      preview); Simulate form (nothing defaulted, Baro empty blocks Run and is
+      named by "What blocks Run", the request carries all 21 fields), Run with
+      the mocked result (caveat block before any table/figure/status cell, all
+      six statuses plus `CL`/`∅` labels, Download result JSON equals the mocked
+      response); an unrecorded base shows `preview only`, Simulate disabled
+      with `base_not_a_recorded_revision` (also after a preview); UpRev's
+      encrypted backup refused by its server text with nothing loaded. The
+      mocks reuse the vitest fixtures (`src/test/romLibraryFixtures.ts`,
+      `romSimFixtures.ts`) by import, so there is one copy; the sim result's
+      `cells` validates against `sim_cells.CellTable` (rechecked 2026-10-15).
+      Not covered: phone project, drag-select, keyboard selection (vitest has
+      them), a real daemon, real images.
+    - *Laptop half done 2026-10-15. Still open: the Pi measurement and the Pi
+      browser walkthrough.* `tests/test_rom_editor_private_rom.py`
+      (`pytestmark = slow`). It skips by name when `OPERATOR_ROMS["r20261004"]`
+      is absent. Result: 9 passed, 1 xfailed (strict) in 11–22 s with
+      `-n0 -m slow`. The 20261004 image's decoded sha256 equals its
+      `tune_revisions.yaml` `image_sha256` (`5587f7e1…`). `revision_match`
+      against the tracked registry returns `matched`, and so does the
+      library's own match after an `.OsirisROM` upload.
+      - **The grid the form suggests is not 16 × 16 on this image.** Fuel
+        Comp's fill axis is raw 16..255, which decodes to 7.14–113.84 %.
+        `edgesFromBreakpoints` therefore ends at 117.19 %, and the design
+        refuses it as `load_outside_model`. After "Trim load edges to 0-100 %",
+        the edges are rpm 200…6,600 step 400 × load 3.571429…96.42857, 100.
+        That is 16 × 14 = **224 points**. This is
+        `test_the_form_suggests_these_edges_and_only_the_trimmed_grid_can_run`,
+        a Python port of `suggestEdges`/`trimLoadEdges` checked against those
+        literal numbers. Every value is stated: baro 81, IAT 25, coolant 88,
+        battery 14, rail 350, throttle 20, pedal flag 0, all learned values 0,
+        seed 20261015, 4 draws.
+      - **1. Negative control** (`_simulate`, base bytes as the candidate):
+        outcome `identical`, every reach `no_change`, 224/224 cells visited.
+        No output in any visited cell is `changed` or `partly_supported`, and
+        every computed delta is 0. Every pair is equal on both sides. 146
+        cells are closed loop and 78 open loop. Unsupported outputs name only
+        these reasons: `closed_loop_trim_authority_undecoded`,
+        `short_pulse_undecoded` (16 cells), and
+        `target_lookup:enrichment_gate_state_unknown` + `not_computed` (one
+        cell: 4,000 rpm, fill bytes 191–192, inside the enrichment gate's
+        hysteresis band). BFS and φ are `unchanged` in the other 223 cells.
+        **Known over-refusal, locked in on purpose:** in that cell BFS is
+        computed (finite) before the target lookup, yet reads `unsupported`.
+        `paired_scenarios.run_paired` (`reasons = list(gate) + …`, ~line 1017)
+        gives the lookup's gate reason to every output, BFS included. That is
+        cautious rather than falsely confident. The test asserts it with a
+        comment pointing at that line, so fixing it flips the test
+        deliberately. `src/analysis` is not edited here.
+      - **2. K +5 %** (`scale 1.05 nearest`): 28,715 → 30,151, so
+        r = 1.0500087. All 308 supported open-loop pairs satisfy
+        BFS_c − r·BFS_b ∈ (−9.17, +9.62) counts. That bound is E08.7's,
+        re-derived here with f = max Fuel Comp 139/128 in place of a flat 128.
+        The measured spread was −4.59…+4.82 counts, with base BFS 1,984–29,508,
+        and every pair moved. 77 all-open-loop cells read `changed`. Their
+        relative ΔBFS p50 lies within −5.5e-4…+2.4e-3 of r − 1 (the wider end
+        is the lowest-BFS cells). The gate-ambiguous cell reads `unsupported`
+        (the known over-refusal above).
+      - **3. Target AFR +4 on the WOT column** (col 7, the top X breakpoint
+        and the column the forced-column flag reads; 146/149/149/149/149/153/
+        155/159 → +4). The WOT row/column has to be reached through the
+        pedal flag (bit 0 set), because no grid point reaches it by X (below).
+        Setup: one rpm cell 4,600–5,000 (centre 4,800, as E07.6), the form's
+        three highest fill cells, and E07.6's environment and learned state
+        (LTFT 2.34), 200 draws.
+        - Δφ is exactly **+0.03125 at every pair** (157/128 → 161/128).
+        - At each point and drawn fill byte, BFS, φ and the pulse equal E07.6's
+          own `run_paired` exactly. λ p50 is within 2e-4 of its central value,
+          and p05–p95 lies inside its range over assumptions (E08.7's
+          tolerance).
+        - The reference `PairedScenario` is built **by hand** from the stated
+          `E076_LEARNED` / `E076_WOT_ENV`, never the editor's template. The
+          template's learned state and each design point's environment are
+          asserted equal to those constants. So a mutation forcing LTFT 0 in
+          `rom_editor._template` fails twice: on the learned-state assertion,
+          and, with that assertion removed, on the `run_paired` pulse
+          comparison.
+        - Measured: BFS 24,636/24,820, 27,296/27,496 and 29,080; pulse
+          +0.23, +0.26 and +0.28 ms; λ p50 −2.423, −2.455 and −2.486 %.
+      - **Finding (strict `xfail`, assertion kept literal):** E07.6's written
+        WOT figures do not reproduce at the grid's WOT point. The pulse and λ
+        miss for different reasons.
+        - **What the figures are.** E07.6 stated them on its *synthetic*
+          image: flat Fuel Comp 128, every slot-1 Target AFR cell +4, pedal
+          flag 0, BFS stated at 42,000. E07.6's own test asserts only their
+          signs. The "−2.52…−2.49 %" beside them is that run's one-point
+          spread over the plant's assumptions, not a tolerance.
+        - **At the grid's top fill cell** (98.2 %, BFS 29,080): pulse
+          +0.28 ms; λ p05/p50/p95 −2.507/−2.486/−2.468 %.
+        - **The pulse is a BFS/airflow condition.** The pulse step is
+          BFS-proportional. E07.6's own point (4,800 rpm, 150 g/s, MAP 79,
+          fill byte 200, forced-column flag set) on this image gives BFS
+          41,768, X 121, Δφ +0.03125 and pulse +0.41 ms. So the written pulse
+          needs about 41.8k BFS here. E08.7's ~41,997 threshold belongs to the
+          synthetic image.
+        - **The λ range is not reproducible on 20261004 at any BFS near
+          42k.** It is a property of the synthetic image plus the 0.01 ms
+          pulse quantum.
+          - E07.6's own point here: λ −2.483 % (range −2.498…−2.468).
+          - At BFS exactly 42,000 (MAF 150.83 g/s): λ −2.529 %
+            (−2.544…−2.514) and pulse +0.42 ms.
+          - Both ranges fall outside −2.52…−2.49. λ steps with the pulse
+            quantum as MAF moves by 0.01 g/s.
+          - These are pinned by
+            `test_at_e076s_own_points_on_this_image_the_pulse_holds_and_the_lambda_range_does_not`
+            (hand-built scenario through `run_paired`).
+        - **Why no grid reaches ~41.8k BFS here.** The cause is the plant
+          version's volumetric efficiency, not the grid's structure.
+          - A grid takes fill as MAP/baro and solves MAF through the sim kit's
+            plant, `fuel-mv-1` (`speed_density_capped`). Its VE is the working
+            assumption 0.7 (`data/nissan-xterra-2008/fuel_plant.yaml`
+            `manifold_pressure`, `requires_measurement`, bracket 0.4–1.0).
+          - That gives ~103 g/s at the grid's 100 % fill (102.9 g/s at MAP
+            79.6 kPa, 4,800 rpm, baro 81).
+          - fuel-mv-3's identified VE at 4,000–5,000 rpm is 0.9055
+            (`fuel_plant_mv3.yaml` `ve_curve`), which would give ~133 g/s.
+          - `test_no_grid_point_reaches_e076s_wot_bfs_or_the_wot_column_by_x`
+            asserts that the plant is fuel-mv-1, that load edges
+            [99.9, 100] at 4,800 rpm keep MAF < 110 g/s, and that BFS stays
+            < 41,768.
+        - **With the pedal flag 0, the WOT column is reached by no point of
+          the form's grid.** The visited X columns are 0–2, and Δφ = 0
+          wherever it is computed. An operator who edits the WOT column and
+          states pedal flag 0 sees nothing anywhere.
+      - **4. Fuel Comp region** (`fuel_comp_light_load.yaml`; `spec_sha256`
+        equals the fixture's): the edited cells are exactly (2,2), (2,3) and
+        (3,2) 130 → 133, (3,3) 128 → 131 (rpm rows 2–3 × fill cols 2–3, as
+        E08.1), and (0,0) 128 → 126.
+        - The `fuel_comp` overlay marks exactly those 5 cells.
+        - Per pair, "reached" is computed from the axes alone: an edited
+          interpolation corner with non-zero weight, with the rpm word against
+          the axis byte × 4 and the fill byte byte-for-byte. 27 of 896 pairs
+          (8 points at 400/1,200/1,600 rpm) reach it.
+        - The other 869 pairs have Δ = 0 in every output. BFS moved at 20
+          pairs, all of them reached, and the 5 edited cells are the only
+          cells where BFS reads `changed`.
+        - Every reaching pair runs **closed loop** under this environment, so
+          Δλ is 0 at all 896 pairs. The change is carried by
+          `fuel_trim_total_pct` at 16 reached pairs, `unsupported` because
+          the trim authority is undecoded. The page's open-loop λ map shows
+          nothing for this edit.
+      - **GUI path:** `run_job("rom_sim")` on a `<sha>.bin` in `tmp_path`
+        equals `simulate_edits`, survives `pickle` round-trip, and serialises
+        to JSON. `test_the_route_simulates_the_uploaded_osiris_file`: the
+        `.OsirisROM` goes through `POST /control/rom/library` (plain sha back,
+        `matched`), then `POST …/simulate` through `run_off_loop`
+        (in-process executor, the child's own `load_kit`). The response is
+        200 and equals `simulate_edits` through JSON, 224 points.
+      - **Mutation checks** (scratch copies outside the tree; each fails):
+        - dropping the upper interpolation corner (case 4: an unreached
+          pair's BFS moves);
+        - r = 1.04 (case 2: errors of 196–300 counts);
+        - Δφ 0.0234375 (case 3);
+        - `rom_editor._template` forced to LTFT 0 (case 3: fails on the
+          learned-state assertion, and without it on the hand-built
+          `run_paired` pulse comparison at (0, byte 191)).
+      - **Measured on the laptop** (offline, `.venv/bin/python -I
+        <scratchpad>/measure.py child|inproc <grid> <draws>`). The edit is
+        the light-load spec above with the environment of case 1 and seed
+        20261015.
+        - **Paths:** `child` is `asyncio.run(workbench_jobs.run_off_loop(
+          "rom_sim", …))`, the real `spawn` child under
+          `digest_address_space_bytes` = 4,096 MiB here. Peak RSS is
+          `getrusage(RUSAGE_CHILDREN).ru_maxrss` after the children are
+          joined. `inproc` is `run_workbench_job` in the same fresh process
+          under the same `RLIMIT_AS`, for `VmPeak`, the virtual peak that
+          `RLIMIT_AS` actually bounds.
+        - **Machine:** Intel Core Ultra 9 185H, 12 logical CPUs, 15,997 MiB,
+          WSL2 kernel 5.15.167.4, Python 3.12.3. 1-min load 0.6–1.0
+          throughout.
+
+        | grid | points | draws | wall (child, incl. spawn) | child peak RSS | VmPeak (inproc) | response JSON | `visited_only` |
+        |---|---|---|---|---|---|---|---|
+        | form 16 × 14 | 224 | 200 | 4.5 s | 188 MiB | 871 MiB | 705,543 B | 663,116 B |
+        | form 16 × 14 | 224 | 1,000 | 8.5 s | 277 MiB | 961 MiB | 710,118 B | 667,691 B |
+        | form 16 × 14 | 224 | 2,000 | 11.9 s | 390 MiB | — | 710,084 B | 667,657 B |
+        | 16 × 16 (fill 0–100 % in 16) | 256 | 200 | 4.5 s | 190 MiB | — | 705,749 B | 663,322 B |
+        | 16 × 16 | 256 | 1,000 | 9.1 s | 294 MiB | 977 MiB | 710,290 B | 667,863 B |
+        | 32 × 32 (the cap) | 1,024 | 1,000 | 34.1 s | 682 MiB | — | 755,301 B | 712,874 B |
+        | 32 × 32 (the cap) | 1,024 | 2,000 | 51.1 s | 1,196 MiB | 1,891 MiB | 757,089 B | 714,662 B |
+
+        - **Scaling:** RSS is about 180 MiB plus ~0.5 KB per point × draw.
+          `inproc` wall time is 1.3–7 s below `child`, which is spawn and
+          imports.
+        - **Response size:** about 0.7 MB whatever the draws (the 256 Fuel
+          Comp cells, 224 of them visited, even for 256 or 1,024 points).
+          W09.5's `visited_only` filter saves only ~6 % on a full grid; its
+          "< 60 KB" holds for sparse grids only.
+        - **Limits:** `DIGEST_TIMEOUT_SECONDS` = 900 s; the child's
+          `RLIMIT_AS` is 50 % of RAM clamped to 1,024–4,096 MiB.
+        - **Pi estimate (a guess, not measured):** if the Pi is 3–6× slower,
+          the form grid at 1,000 draws takes ~25–50 s, at 2,000 draws ~35–70 s,
+          and the cap (1,024 × 2,000) ~150–310 s. All are under 900 s. RSS
+          and VmPeak do not scale with CPU speed but may differ on aarch64.
+          The cap's 1.2 GiB RSS / 1.9 GiB virtual fit an 8 GB Pi's 4,096 MiB
+          ceiling, but not a 2 GB Pi's 1,024 MiB floor.
+        - `MAX_DRAWS` is unchanged (2,000); the operator decides after the Pi
+          numbers.
   - Tick E08.8 in the E08 doc with a pointer here.
 
 - [ ] **W09.7 — Later, named so they are not implied:** persisted runs under
@@ -630,6 +843,212 @@ W09.6 is the orchestrator's own, on the ROM machine.
   as a second point source. Slots 2–5 with a stated active slot. Timing-trim
   editing (traced but `unsupported` until a torque plant exists, E07.5). The
   E08.6 HTML report as a download.
+  Found by the independent verifier on the real ZS44A-20261004 image
+  (2026-10-15), to be done in the simulator, not the page:
+  - Name the working-assumption VE in the simulation caveats/assumptions
+    (fuel-mv-1 ve 0.7, `requires_measurement`, bracket 0.4-1.0; fuel-mv-3
+    identifies 0.9055 at 4,000-5,000 rpm). Today only
+    `plant:manifold_pressure_unmeasured` appears, and the grid's 100 % fill
+    sits at ~103 g/s (BFS ~29k) against the truck's ~38-42k, so pulse and BFS
+    deltas at the grid top are understated by about 30 % (relative lambda is
+    roughly unaffected). Lives in `sim_design` / the plant, E08 domain.
+  - `run_paired` applies the target-lookup gate reason to `base_fuel_schedule`
+    (`paired_scenarios.py` ~1017) although BFS is computed before the lookup:
+    an over-refusal, cautious not false.
+    `tests/test_rom_editor_private_rom.py` marks it as a known over-refusal.
+
+- [x] **W09.8 — "Open ROM…" on the ROM Editor page.** Requested 2026-10-15
+  by the operator via the E08 desk-launcher session: "we shouldn't have to run
+  with the rom folder, it should be browsable from the gui", then: "just think
+  about how a tool would normally work. You want to edit a rom, you click a
+  load button, it opens a file browser, you navigate to the folder, select
+  the file, and open." Frontend only; no backend change.
+  - The page's primary control is an **Open ROM…** button (an **Open another
+    ROM…** once something is loaded) that opens the browser's native file
+    dialog: a plain `<input type="file">` with no `accept` filter, so an
+    `.OsirisROM` or an odd extension is never hidden. Dropping a file on the
+    group does the same. With nothing stored the empty state is that one
+    button and no picker.
+  - One step: `uploadRomImage` -> the answered entry becomes the base (held
+    locally until the library refresh lands, so no other image shows in
+    between; `?rom=<sha>` written) -> the header shows the file's own name,
+    the sha prefix, the `revision_match` chip and `can simulate` / `preview
+    only` (the same `SimulateChip` the picker uses). The library's sha dedup
+    is behind the scenes: an existing entry gets one quiet line ("X is already
+    in the library; nothing new was stored"), not a dialog or a step.
+  - **Starts unloaded** (operator's reading, 2026-10-15: a normal tool starts
+    empty, then you open a file). No base is auto-selected, however many
+    images the library holds; the table, operation, pending-edit, preview
+    and Simulate sections appear only once a base is loaded, and nothing is
+    previewed, simulated or persisted before that. Only a `?rom=<sha>` in the
+    URL (a deliberate link: the desk launcher, a reload) loads a base at
+    start; a sha not in the library leaves the page unloaded with a quiet
+    "is not in the library" note. This reverses an earlier draft of this
+    item that kept W09.3's first-entry auto-select.
+  - The stored images are a secondary **Recent ROMs** list (BasePicker, rows
+    unchanged), **newest first by the entry's `added_at`** (the field the
+    library sets on every entry; the API's own order is not relied on),
+    one click to load, each with its `revision_match` chip and can simulate /
+    preview only. W09's rule stands: Simulate only when `revision_match
+    .status === 'matched'`; an unrecorded image previews and the Simulate slot
+    gives `base_not_a_recorded_revision`.
+  - Refusals by reason, as the library page does (`refusalText`): UpRev's
+    encrypted backup `.bin` by the server's own name and reason, 413, 401; an
+    empty or over-2 MiB file is refused client-side without uploading. A
+    refusal loads nothing and keeps the current base. No extension check
+    (the server detects the format from the bytes), which the library page
+    keeps.
+  - Evidence 2026-10-15: `RomEditorPage.test.tsx` 31 tests (14 new or
+    rewritten for W09.8): starts unloaded with a non-empty library (no grid,
+    no Edit/Pending/Preview/Simulate sections, no URL, no table fetch, no
+    POST, nothing in localStorage); recents newest first when the API answers
+    oldest first; one click on a recent loads it and writes `?rom=`; a
+    `?rom=` link in the library loads, one outside it stays unloaded with the
+    note; empty library is one Open ROM… button, no picker, no `accept`; a
+    picked file loads in one step (POST body/headers, URL, header name,
+    `preview only`, Simulate disabled with its reason); a recorded revision
+    shows `can simulate`; already-in-library note; encrypted-backup refusal by
+    name, selection and URL unchanged; 413/401/empty; drop; pending edits
+    survive an upload-driven switch and do not leak to the new base; no image
+    download after an upload (the existing no-download assertions unchanged
+    and green). The W09.3 and W09.4 tests that relied on auto-select now set
+    `?rom=` (`renderEditor()` in `RomEditorPage.test.tsx` and
+    `RomEditorSimulate.test.tsx`) or click a recent entry. Gate in
+    `src/dashboard/static`: `pnpm typecheck`, `pnpm lint` (no suppression
+    changes), `pnpm format:check` clean; vitest `--no-file-parallelism` on
+    RomEditorPage, RomEditorSimulate, romEditor/, RomLibraryPage: 4 files / 99
+    passed; `vitest related` on the touched files 15 files / 285 passed.
+    Files: `panels/tuning/RomEditorPage.tsx`, `romEditor/OpenRom.tsx` (new),
+    `romEditor/BasePicker.tsx` (`SimulateChip` extracted),
+    `test/romLibraryFixtures.ts` (`ENTRY_UNRECORDED`).
+    Not run: `pnpm e2e` (no browser walkthrough of the dialog).
+
+- [x] **W09.9 — Coarse and fine runs, a tunable Monte Carlo, a cost estimate and
+  Cancel on the Simulate form.** Requested 2026-10-15 by the operator: "for the
+  ROM simulation, make sure we can tune the monte carlo runs and have a coarse
+  and fine simulation, so a user doesn't have to run an hour long analysis every
+  time they want to check something". Frontend and documentation only; the
+  backend already takes `draws`, `seed` and the edges as required fields
+  (`tools/rom_sim.py` has no coarse/fine concept to align with: its flags are
+  `--draws` and `--design`).
+  - **Presets are buttons that fill the form, never defaults.** *Coarse (quick
+    check)* fills the RPM and load edges with **every other Fuel Comp
+    breakpoint** of each axis (edges rebuilt from those, so each grid point
+    still sits on a breakpoint; about a quarter of the points) and **200
+    draws**. *Fine* fills the full suggested edges (as the form suggests them)
+    and **1,000 draws**. Both cut a load edge past 100 % to the model's span,
+    as the Trim button does, and say so. After a click the form prints what it
+    filled ("Coarse (quick check) filled RPM edges (9 edges, 8 cells), load
+    edges ... and draws (200): 64 points x 200 draws. Nothing else was
+    touched."). Editing a filled field flips the state to **Custom** (derived
+    from the field values, so typing the preset's value back restores it).
+    The preset is page state: not stored, and the seed, environment, learned
+    state, grid choice and candidate events are never touched. Pressing a
+    preset clears the "remembered from your last run" mark on `draws` (the
+    existing remembered-values behaviour is unchanged).
+  - **The draw numbers and their basis** (`lib/romSimSize.ts`, `PRESET_DRAWS`,
+    both below `MAX_DRAWS` = 2,000): Coarse 200 is the count E08 reads cell
+    quantiles from (E08.3's Fuel-Comp-restore entry: "three draws give only a
+    coarse per-cell spread, so cell quantiles should be read from" the 200-draw
+    run; E08.5 and E08.7 use 200) and W09.6's low row. At 224 points W09.6
+    measured 4.5 s for 200 draws against 8.5 s for 1,000: start-up dominates a
+    small run, so fewer than 200 saves almost nothing. Fine 1,000 is E08.3's
+    stated speed target and W09.6's reference row. 2,000 is the cap, not a
+    recommendation. E08 states no minimum draw count or quantile-resolution
+    limit; none is invented.
+  - **Coarse means `no_points`, not `unchanged`.** The Coarse preset's
+    description says so on the button's page text, and a result below the Fine
+    preset's draws OR points (judged from the result's own `cells.draws` and
+    `design.points` against the Fine grid's size for this base, so a hand-set
+    low run is flagged like a clicked one) carries a **Coarse run** banner above
+    the caveat block and the maps: the draws and points, why it is below Fine,
+    the `no_points` sentence with the result's own count of such cells (when
+    points are the reason), and "quantiles over few draws are noisy" worded from
+    E08.3 (three draws give only a coarse per-cell spread). No other statistical
+    claim is made.
+  - **Cost estimate beside Run:** "N points x M draws = K point-draws", then
+    either "About T s from your last R runs on this server" or "Not yet measured
+    on this server" with the labelled reference ("the dev laptop took 8.5 s for
+    224 points x 1,000 draws (W09.6)", the measured row nearest the size, and
+    the fit's value for it). The model is `t = overhead + rate x points x
+    draws`, fitted (least squares on relative error) to W09.6's seven laptop
+    rows only: **3.3 s + 2.3e-5 s x points x draws**, off by -20 % to +16 %
+    against those rows, with no run under 224 points timed. The page shows that
+    fit. This browser stores its own runs (`canary.romSim.timings`, version 1,
+    last 8, `try`/`catch`; per origin, so per server): a successful run's size
+    and the page's elapsed timer, never a failed or cancelled one. The server
+    estimate is the fit scaled by the **median of observed / modelled** over
+    those runs, a ratio against the model rather than a seconds-per-point-draw,
+    so a coarse run (mostly start-up) and a fine one (mostly draws) calibrate
+    the same number. Checked: one coarse row (224 x 200, 4.5 s) alone estimates
+    224 x 1,000 at 8.85 s against the measured 8.5 s (+4 %), and the fine row
+    alone estimates 224 x 200 at 4.32 s against 4.5 s (-4 %).
+  - **Cancel stops waiting; it cannot stop the server.** Read
+    `workbench_jobs.run_off_loop`: the child's task is held behind
+    `asyncio.shield`, no route cancels a `rom_sim` job (the only cancel route is
+    the ECU backup's), and it ends only when it finishes or at the 900 s
+    timeout. So the button is "Cancel (stop waiting)" and says "the server
+    finishes this run (about N s, from your earlier runs here | the dev-laptop
+    fit; not yet measured on this server) before another can start". It aborts
+    the request (the `signal` `simulateRomEdits` already took), drops any later
+    result, records no timing, and the page then says the daemon is still
+    running it. A different request meanwhile is `409 analysis_busy`
+    (`child_busy`), and when that follows a cancel on this page the busy alert
+    says it is probably the cancelled run, with the estimated time left. An
+    identical request re-attaches to the running job (`_IN_FLIGHT` is keyed by
+    the request), which the page and `docs/headless-api.md` say. No backend
+    route was added.
+  - **Evidence 2026-10-15.** Tests, all in `src/dashboard/static`:
+    `lib/romSimSize.test.ts` 23 (presets within `MAX_DRAWS`, Coarse = a quarter
+    of Fine and centred on breakpoints, the fit equals its rows within the stated
+    error, localStorage validation and blocked storage, scale and the
+    coarse/fine non-distortion above, wording); `SimResults.test.tsx` +7
+    (banner for few draws and points, for draws alone, for points alone, not for
+    a fine run, above the maps, `no_points` cells keep `–` and their "no points"
+    name, unknown Fine size judges draws only); `RomEditorSimulate.test.tsx` +19
+    (presets fill exactly edges and draws and nothing else, Custom flips and
+    returns, preset not remembered and the draws mark clears, disabled without
+    breakpoints; banner after a Coarse-preset run, a hand-set run, a
+    hand-cut-grid run and not after Fine, the request still the 21 documented
+    fields; estimate with and without stored runs, learned from the elapsed timer
+    and stored as points x draws, not stored on a failure; Cancel aborts the
+    signal, says what it does, shows no result, records nothing, explains the
+    following 409, and does not claim a 409 it did not cause). The existing
+    21-field parity test, `RomEditorPage.test.tsx` 31, `romSim.test.ts` 29 and
+    `romSimView.test.ts` 23 stay green: `vitest run --no-file-parallelism` over
+    those six files, 175 passed. `pnpm typecheck`, `pnpm lint` (no suppression
+    change), `pnpm format:check` clean. `pnpm exec playwright test
+    e2e/romEditor.spec.ts --project=chromium`: 6 passed, one new (Coarse
+    pressed, edges and draws filled and counted, Custom on an edit, Run, the
+    banner; the request carries 21 fields and 9 rpm edges). Files:
+    `lib/romSimSize.ts` (new), `romEditor/SimForm.tsx`, `romEditor/SimResults.tsx`,
+    `RomEditorPage.tsx`, `types/romEditor.ts` (`SimRunContext.fineReference`),
+    the tests above, `e2e/romEditor.spec.ts`; docs `headless-api.md` ("Coarse vs
+    fine" under the simulate route) and the `simulate_rom_edit` row in
+    `mcp-server.md`.
+  - **Not done, on purpose:** the `simulate_rom_edit` docstring is the tool's
+    description and is pinned by `tests/fixtures/mcp_tool_snapshot.json`, so the
+    note is in the docs only. The Pi's own timings are still unmeasured (W09.6
+    owes them); the reference line is the laptop's and is labelled so.
+  - **The WOT column is stated, not silent (2026-10-15, found by the
+    verifier on the real ZS44A-20261004 image).** The pedal flag's bit 0 forces
+    the last Fuel Targets (Target AFR) column (`rom_map.yaml` `fuel_targets`;
+    `target_phi_twin.yaml` `forced_column_flag`), so with the flag stated 0 no
+    simulated point reads it and an edit to that column shows no change
+    anywhere (`no_points` on the target_afr grid, `unchanged` elsewhere). Not
+    silent-wrong, but it read as "no effect". Frontend only: the flag field's
+    hint now says what bit 0 does (`PEDAL_FLAG_HINT`); `SimForm` shows a
+    non-blocking `role="note"` before Run when a pending edit writes the last
+    column of a Fuel Targets table (`editsTouchWotColumn`, the column derived
+    from the loaded table's own width, `cells` and `all` selectors; a `region`
+    selector is not resolved) and the stated flag is a whole number with bit 0
+    clear; nothing when the flag is empty (Run names it) or bit 0 is set, and
+    it never offers or sets a flag. `SimRunContext.wotColumnEdited` (computed
+    by the page at Run) puts the matching line in the result's caveat block.
+    Vitest: `romSim.test.ts` +5, `RomEditorSimulate.test.tsx` +5,
+    `SimResults.test.tsx` +3 (hint, warning for flag 0 and 2, not for 1 / 3 /
+    empty / 1.5, not for a middle column, Fuel Comp or K edits; caveat likewise;
+    the 21-field request test unchanged). No e2e assertion added.
 
 ## Not in scope
 

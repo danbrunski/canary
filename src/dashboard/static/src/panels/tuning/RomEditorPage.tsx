@@ -5,6 +5,7 @@ import {
   getRomTables,
   previewRomEdits,
   simulateRomEdits,
+  uploadRomImage,
 } from "../../api/workbench";
 import { Notice } from "../../components/Notice";
 import { Panel } from "../../components/Panel";
@@ -22,8 +23,21 @@ import {
   simulateReason,
   specFileName,
 } from "../../lib/romEditor";
-import { describeEditorDisagreement } from "../../lib/romLibrary";
-import { SIM_BLOCK_TEXT, resultFileName, simFailure } from "../../lib/romSim";
+import {
+  ROM_UPLOAD_LIMIT,
+  describeEditorDisagreement,
+  entryTitle,
+  refusalText,
+} from "../../lib/romLibrary";
+import {
+  SIM_BLOCK_TEXT,
+  gridPoints,
+  resultFileName,
+  simFailure,
+  suggestEdges,
+} from "../../lib/romSim";
+import { editsTouchWotColumn } from "../../lib/romSim";
+import { expectedRun, fineReference, loadTimings, recordTiming } from "../../lib/romSimSize";
 import { buttonClass, cn } from "../../styles";
 import type { StatusResponse } from "../../types";
 import type {
@@ -39,13 +53,15 @@ import type {
 } from "../../types/romEditor";
 import type { RomLibraryEntry } from "../../types/romLibrary";
 import { downloadText } from "../../util/browser";
-import { BasePicker } from "./romEditor/BasePicker";
+import { BasePicker, SimulateChip } from "./romEditor/BasePicker";
 import { CellGrid } from "./romEditor/CellGrid";
+import { OpenRom } from "./romEditor/OpenRom";
 import { OperationPanel } from "./romEditor/OperationPanel";
 import { PendingEdits } from "./romEditor/PendingEdits";
 import { PreviewResult } from "./romEditor/PreviewResult";
-import { SimFailureAlert, SimForm, SimRunning } from "./romEditor/SimForm";
+import { SimCancelled, SimFailureAlert, SimForm, SimRunning } from "./romEditor/SimForm";
 import { SimResults } from "./romEditor/SimResults";
+import { RevisionChip } from "./romLibraryParts";
 
 /** The chosen image's sha lives in `?rom=<sha>`. The hash is the router's
  *  (`#wb/<page>`), which rewrites it, so the sha rides in the query. */
@@ -79,15 +95,74 @@ export function RomEditorPage({ token }: { token: string; status: StatusResponse
     useCallback((signal: AbortSignal) => getRomLibrary(token, signal), [token]),
     { enabled, intervalMs: null },
   );
-  const entries = library.data?.entries ?? [];
+  const stored = library.data?.entries ?? [];
+  // A file just opened is held here until the library list has caught up, so
+  // the editor never shows another image in between.
+  const [opened, setOpened] = useState<OpenedRom | null>(null);
+  const entries =
+    opened && !stored.some((entry) => entry.sha256 === opened.entry.sha256)
+      ? [opened.entry, ...stored]
+      : stored;
   const [chosen, setChosen] = useState<string | null>(shaFromUrl);
-  const selected = entries.find((entry) => entry.sha256 === chosen) ?? entries[0] ?? null;
+  // Unloaded until the operator opens a file, picks a recent one, or arrives
+  // by a `?rom=<sha>` link: never a base nobody chose.
+  const selected = entries.find((entry) => entry.sha256 === chosen) ?? null;
   const selectedSha = selected?.sha256 ?? null;
   useEffect(() => {
     if (selectedSha) writeShaToUrl(selectedSha);
   }, [selectedSha]);
 
-  const empty = enabled && !library.loading && !library.error && entries.length === 0;
+  const [busy, setBusy] = useState<string | null>(null);
+  const [refusal, setRefusal] = useState<string | null>(null);
+  const [dragging, setDragging] = useState(false);
+  const load = useRef(0);
+
+  /** Load a file into the editor in one step: upload it (the library keeps it
+   *  by sha256, idempotently), make the answered entry the base. A refusal
+   *  leaves the current base as it was. */
+  async function openFile(file: File | undefined) {
+    if (!file || !enabled) return;
+    setRefusal(null);
+    if (!file.size) {
+      setRefusal(`${file.name} is empty.`);
+      return;
+    }
+    if (file.size > ROM_UPLOAD_LIMIT) {
+      setRefusal(`${file.name} is larger than the 2 MiB upload limit.`);
+      return;
+    }
+    const mine = load.current + 1;
+    load.current = mine;
+    setBusy(`Opening ${file.name}`);
+    try {
+      const entry = await uploadRomImage(token, file);
+      if (load.current !== mine) return;
+      setOpened({ entry, name: file.name, existed: entry.created === false });
+      setChosen(entry.sha256);
+      writeShaToUrl(entry.sha256);
+      library.refresh();
+    } catch (err) {
+      if (load.current === mine) setRefusal(`${file.name}: ${refusalText(err)}`);
+    } finally {
+      if (load.current === mine) setBusy(null);
+    }
+  }
+
+  const loading = enabled && library.loading;
+  const recent = [...entries].sort((a, b) => Date.parse(b.added_at) - Date.parse(a.added_at));
+  const linkMissing =
+    enabled &&
+    !!library.data &&
+    !!chosen &&
+    !selected &&
+    !library.loading &&
+    !library.error &&
+    !library.stale;
+  const nothingLoaded = !selected;
+  const name =
+    selected && opened?.entry.sha256 === selected.sha256
+      ? opened.name
+      : selected && entryTitle(selected);
   return (
     <section className="space-y-4">
       <Panel
@@ -96,35 +171,75 @@ export function RomEditorPage({ token }: { token: string; status: StatusResponse
       >
         <div className="space-y-4">
           <p className="text-sm text-fg-dim">
-            Edit the fuel chain (Fuel Targets, Fuel Compensation and K, Map 1) of a stored image and
-            see the tables after the edits. The edited image is never stored or offered: you get an
-            edit spec, a reviewable file that reproduces the edit from its base. Nothing here writes
-            the ECU.
+            Edit the fuel chain (Fuel Targets, Fuel Compensation and K, Map 1) of a ROM and see the
+            tables after the edits. The edited image is never stored or offered: you get an edit
+            spec, a reviewable file that reproduces the edit from its base. Nothing here writes the
+            ECU.
           </p>
           {!token && <p role="status">Enter the control token to use the ROM Editor.</p>}
           {library.error && <Notice notice={{ kind: "error", text: library.error }} />}
-          {library.loading && enabled && <p className="text-fg-dim">Reading the library…</p>}
-          {empty && (
-            <p role="status" className="rounded-lg border border-border p-4">
-              The library is empty. Upload a plain image or an .OsirisROM on the ROM Library page
-              first.
+          <OpenRom
+            label={nothingLoaded ? "Open ROM…" : "Open another ROM…"}
+            primary={nothingLoaded && !loading}
+            disabled={!enabled || !!busy}
+            dragging={dragging}
+            onDraggingChange={setDragging}
+            onFile={(file) => void openFile(file)}
+          >
+            {selected ? (
+              <div className="flex min-w-0 flex-wrap items-center gap-2" aria-label="Loaded ROM">
+                <span className="font-semibold">{name}</span>
+                <span className="font-num text-xs text-fg-faint">
+                  {selected.sha256.slice(0, 12)}
+                </span>
+                <RevisionChip match={selected.revision_match} />
+                <SimulateChip reason={simulateReason(selected.revision_match)} />
+              </div>
+            ) : (
+              <span className="text-sm text-fg-dim">
+                Choose a ROM file, or drop one here: a plain image (.bin) or an .OsirisROM.
+              </span>
+            )}
+          </OpenRom>
+          {busy && <Notice notice={{ kind: "busy", text: `${busy}…` }} />}
+          {refusal && <Notice notice={{ kind: "error", text: refusal }} />}
+          {opened?.existed && opened.entry.sha256 === selectedSha && !busy && (
+            <p role="status" className="text-xs text-fg-dim">
+              {opened.name} is already in the library; nothing new was stored.
             </p>
           )}
-          {entries.length > 0 && (
-            <BasePicker
-              entries={entries}
-              selectedSha={selectedSha}
-              onChoose={(sha) => {
-                setChosen(sha);
-                writeShaToUrl(sha);
-              }}
-            />
+          {linkMissing && (
+            <p role="status" className="text-xs text-fg-dim">
+              The ROM this link names ({chosen?.slice(0, 12)}) is not in the library. Open a file or
+              choose a recent ROM.
+            </p>
+          )}
+          {loading && <p className="text-fg-dim">Reading the library…</p>}
+          {recent.length > 0 && (
+            <div className="space-y-2">
+              <h3 className="text-sm font-semibold">Recent ROMs</h3>
+              <BasePicker
+                entries={recent}
+                selectedSha={selectedSha}
+                onChoose={(sha) => {
+                  setChosen(sha);
+                  writeShaToUrl(sha);
+                }}
+              />
+            </div>
           )}
         </div>
       </Panel>
       {selected && <Workspace key={selected.sha256} token={token} entry={selected} />}
     </section>
   );
+}
+
+interface OpenedRom {
+  entry: RomLibraryEntry;
+  /** The file's own name, kept client-side for the header. */
+  name: string;
+  existed: boolean;
 }
 
 type PreviewState =
@@ -134,9 +249,17 @@ type PreviewState =
   | { kind: "refused"; refusal: RomEditRefusal }
   | { kind: "error"; text: string };
 
+/** What a run in flight is expected to take (the Cancel wording). */
+interface Expected {
+  seconds: number;
+  measured: boolean;
+}
+
 type SimState =
   | { kind: "idle" }
-  | { kind: "running"; startedAt: number }
+  | { kind: "running"; startedAt: number; expected: Expected }
+  /** The page stopped waiting; the daemon did not stop. */
+  | { kind: "cancelled"; startedAt: number; cancelledAt: number; expected: Expected }
   | { kind: "ok"; result: RomSimResult; run: SimRunContext }
   | { kind: "failed"; failure: SimFailure };
 
@@ -158,9 +281,15 @@ function Workspace({ token, entry }: { token: string; entry: RomLibraryEntry }) 
   const [preview, setPreview] = useState<PreviewState>({ kind: "idle" });
   const request = useRef(0);
   const counter = useRef(0);
+  const baseTables = tables.data?.tables ?? [];
   const [sim, setSim] = useState<SimState>({ kind: "idle" });
+  // This server's earlier runs, kept by the browser: the cost estimate's basis.
+  const [timings, setTimings] = useState(loadTimings);
   const simRun = useRef(0);
   const simAbort = useRef<AbortController | null>(null);
+  // A run this page stopped waiting for, so a later `analysis_busy` can be
+  // explained as that run. Cleared by the next run that returns.
+  const [abandoned, setAbandoned] = useState<{ startedAt: number; expectedS: number } | null>(null);
   const edits = useMemo(() => pending.map((item) => item.edit), [pending]);
 
   // Leaving the image (or the page) drops the wait; the daemon's job is its own.
@@ -243,10 +372,16 @@ function Workspace({ token, entry }: { token: string; entry: RomLibraryEntry }) 
     const controller = new AbortController();
     simAbort.current = controller;
     const startedAt = Date.now();
-    setSim({ kind: "running", startedAt });
+    const points = gridPoints(simRequest.rpm_edges, simRequest.load_edges);
+    const expected = expectedRun(points, simRequest.draws, timings);
+    setSim({ kind: "running", startedAt, expected });
     try {
       const result = await simulateRomEdits(token, sha, simRequest, controller.signal);
       if (simRun.current !== mine) return;
+      // This server's own wall time for this size: the next estimate's basis.
+      recordTiming({ points, draws: simRequest.draws, seconds: (Date.now() - startedAt) / 1000 });
+      setTimings(loadTimings());
+      setAbandoned(null);
       setSim({
         kind: "ok",
         result,
@@ -262,13 +397,30 @@ function Workspace({ token, entry }: { token: string; entry: RomLibraryEntry }) 
             label: entry.label ?? entry.filename ?? sha.slice(0, 12),
             revision: entry.revision_match.revision,
           },
+          wotColumnEdited: editsTouchWotColumn(simRequest.edits, baseTables),
           elapsedS: Math.round((Date.now() - startedAt) / 1000),
+          fineReference: fineReference(suggestEdges(baseTables)),
         },
       });
     } catch (err) {
       if (simRun.current !== mine) return;
       setSim({ kind: "failed", failure: simFailure(err) });
     }
+  }
+
+  function cancelSimulation() {
+    if (sim.kind !== "running") return;
+    // Drop the wait (the result, if it ever comes, is not shown); the daemon's
+    // job is its own and no route stops it.
+    simRun.current += 1;
+    simAbort.current?.abort();
+    setAbandoned({ startedAt: sim.startedAt, expectedS: sim.expected.seconds });
+    setSim({
+      kind: "cancelled",
+      startedAt: sim.startedAt,
+      cancelledAt: Date.now(),
+      expected: sim.expected,
+    });
   }
 
   if (tables.loading || tables.stale) return <p className="text-fg-dim">Reading tables…</p>;
@@ -283,7 +435,6 @@ function Workspace({ token, entry }: { token: string; entry: RomLibraryEntry }) 
     );
   }
 
-  const baseTables = tables.data?.tables ?? [];
   const decodeLine = [
     table.dtype,
     table.decoded ? (table.decode?.formula ?? null) : "raw: decode unconfirmed",
@@ -419,10 +570,26 @@ function Workspace({ token, entry }: { token: string; entry: RomLibraryEntry }) 
               edits={edits}
               blocked={simBlocked}
               startedAt={sim.kind === "running" ? sim.startedAt : null}
+              timings={timings}
               onRun={(simRequest) => void runSimulation(simRequest)}
             />
-            {sim.kind === "running" && <SimRunning startedAt={sim.startedAt} />}
-            {sim.kind === "failed" && <SimFailureAlert failure={sim.failure} />}
+            {sim.kind === "running" && (
+              <SimRunning
+                startedAt={sim.startedAt}
+                expected={sim.expected}
+                onCancel={cancelSimulation}
+              />
+            )}
+            {sim.kind === "cancelled" && (
+              <SimCancelled
+                startedAt={sim.startedAt}
+                cancelledAt={sim.cancelledAt}
+                expected={sim.expected}
+              />
+            )}
+            {sim.kind === "failed" && (
+              <SimFailureAlert failure={sim.failure} cancelled={abandoned} />
+            )}
           </div>
         </Panel>
         {sim.kind === "ok" && (

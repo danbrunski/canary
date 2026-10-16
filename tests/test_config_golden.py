@@ -844,7 +844,16 @@ def _scope() -> dict[str, Any]:
 # Cold import
 # ---------------------------------------------------------------------------
 
-_IMPORT_PROBE = "import json, sys\nimport src.config\nprint(json.dumps(sorted(sys.modules)))\n"
+# A namespace package (no file of its own, e.g. ``site-packages/cuda`` from
+# ``cuda-bindings``, installed beside torch) is the venv's, not a dependency of
+# ``src.config``: the editable-install finder probes it whatever the import is.
+_IMPORT_PROBE = (
+    "import json, sys\n"
+    "import src.config\n"
+    "namespace = [n for n, m in sys.modules.items()\n"
+    "             if getattr(getattr(m, '__spec__', None), 'origin', 0) in (None, 'namespace')]\n"
+    "print(json.dumps({'modules': sorted(sys.modules), 'namespace': sorted(namespace)}))\n"
+)
 
 
 def _fresh_python(code: str, *, cwd: Path) -> str:
@@ -859,7 +868,9 @@ def loaded_by_importing_config() -> dict[str, list[str]]:
     """Top-level third-party modules and ``src`` modules a fresh interpreter has
     after ``import src.config`` (and nothing else)."""
     out = _fresh_python(_IMPORT_PROBE, cwd=REPO)
-    modules = json.loads(out)
+    probed = json.loads(out)
+    namespace = {n.split(".")[0] for n in probed["namespace"]}
+    modules = [m for m in probed["modules"] if m.split(".")[0] not in namespace]
     stdlib = set(sys.stdlib_module_names)
     # Only distributions: the interpreter's own finders and site hooks differ by machine.
     third = sorted(

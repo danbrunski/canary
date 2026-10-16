@@ -50,6 +50,18 @@ export const ENTRY_K106: RomLibraryEntry = {
   revision_match: { revision: null, status: "unrecognised" },
 };
 
+/** A plain image nothing records: a reference or unknown image. The editor
+ *  can preview it, never simulate it. */
+export const SHA_UNRECORDED = "d".repeat(64);
+
+export const ENTRY_UNRECORDED: RomLibraryEntry = {
+  ...ENTRY_K106,
+  sha256: SHA_UNRECORDED,
+  crc32: "0badbeef",
+  filename: "tuner-base.bin",
+  added_at: "2026-10-15T15:00:00Z",
+};
+
 /** 256 blocks: dense boot code, erased tail of the boot block, calibration
  *  data, application code, the UpRev slots and the erased top. */
 export const BLOCKS: RomBlock[] = Array.from({ length: 256 }, (_, index) => {

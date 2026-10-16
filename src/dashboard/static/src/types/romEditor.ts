@@ -469,6 +469,12 @@ export interface SimRunContext {
   request: RomSimRequest;
   edits: { tableName: string; summary: string; chain: string | null }[];
   base: { sha256: string; label: string; revision: string | null };
+  /** An edit wrote the last Fuel Targets column (the one the pedal flag's
+   *  bit 0 forces); with that bit clear the run cannot show its effect. */
+  wotColumnEdited: boolean;
   /** Wall-clock seconds the request took, as the page measured them. */
   elapsedS: number;
+  /** The Fine preset's size for this base (W09.9): what a coarse run is
+   *  judged against. Absent: only the draw count is judged. */
+  fineReference?: { points: number | null; draws: number };
 }

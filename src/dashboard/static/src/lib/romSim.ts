@@ -21,6 +21,7 @@
 
 import { HttpError } from "../api/http";
 import { describeError } from "../hooks/useControlResource";
+import { isFuelTargets } from "./romLibrary";
 import type {
   RomEdit,
   RomSimRequest,
@@ -156,6 +157,14 @@ const field = (
 
 /** The stated environment (`rail_kpa` has its own control: it is a number or
  *  `working_assumption`). */
+/** What bit 0 of the pedal flag does (`target_phi_twin.yaml`
+ *  `forced_column_flag`; `rom_map.yaml` `fuel_targets`): the flag is not
+ *  logged, so the run states it, and a stated 0 means no simulated point
+ *  reads the WOT column. */
+export const PEDAL_FLAG_HINT =
+  "not logged, so you state it. Bit 0 forces the last Target AFR column (the WOT column): " +
+  "with bit 0 clear, no simulated point reads that column";
+
 export const ENVIRONMENT_FIELDS: NumberFieldSpec[] = [
   field("baro", "baro_kpa", "Baro", "kPa", {
     hint: "home is about 80 kPa, trips reach 63 kPa: no default",
@@ -168,7 +177,7 @@ export const ENVIRONMENT_FIELDS: NumberFieldSpec[] = [
     integer: true,
     min: 0,
     max: 255,
-    hint: "the pedal-enrichment flag is not logged",
+    hint: PEDAL_FLAG_HINT,
   }),
 ];
 
@@ -802,4 +811,46 @@ export function knownAnswersLine(): string {
   return KNOWN_ANSWERS_REPRODUCED
     ? "E08.7 is ticked in the E08 roadmap: the known answers (no-op control, K +5 % per point, the Fuel Comp restore, a Target AFR +4 edit) are reproduced and the post-flash truck drives were scored against a prediction written before them."
     : KNOWN_ANSWERS_LINE;
+}
+
+// -- the WOT column ---------------------------------------------------------------------
+
+/** Whether any pending edit writes the last column of a Fuel Targets table.
+ *  The last column is derived from the loaded table's own dimensions, never
+ *  assumed. Only `cells` and `all` selectors resolve (the page builds
+ *  nothing else); a `region` selector is in axis units and is not resolved
+ *  here. */
+export function editsTouchWotColumn(edits: readonly RomEdit[], tables: RomTableValues[]): boolean {
+  return edits.some((edit) => {
+    const table = tables.find(
+      (item) => item.id === edit.table && (item.slot ?? null) === (edit.slot ?? null),
+    );
+    if (!table || !isFuelTargets(table)) return false;
+    const cols = table.raw[0]?.length ?? 0;
+    if (cols === 0) return false;
+    if (edit.all) return true;
+    return (edit.cells ?? []).some(([, col]) => col === cols - 1);
+  });
+}
+
+/** The flag when it is a whole number with bit 0 clear, else null (empty,
+ *  invalid, or bit 0 set: nothing to warn about). */
+export function pedalFlagBit0Clear(text: string): number | null {
+  const parsed = parseNumber(text, { integer: true, min: 0, max: 255 });
+  return parsed.kind === "ok" && (parsed.value & 1) === 0 ? parsed.value : null;
+}
+
+/** The pre-Run note: the edit touches the WOT column and the stated flag
+ *  never reads it. It does not offer to set the flag. */
+export function wotColumnWarning(flag: number): string {
+  return (
+    `Your edit touches the WOT column. With pedal flag ${flag} the simulated points never ` +
+    "read it, so this run will show no change from this edit. Set pedal flag to 1 (bit 0) " +
+    "to simulate wide-open throttle."
+  );
+}
+
+/** The result's caveat line for the same case. */
+export function wotColumnCaveat(flag: number): string {
+  return `The WOT column was edited with pedal flag ${flag}: this run cannot show that edit's effect.`;
 }
