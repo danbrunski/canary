@@ -187,7 +187,16 @@ def replan_for_generation(
         if state.suppressed_until == float("inf") or _request_rate_hz(request, spec) <= 0.0:
             continue
         before = (state.next_due_at, state.suppressed_until)
-        state.next_due_at = min(state.next_due_at, now)
+        if request.in_session_window:
+            # A window member's grid restarts here, where the generation's
+            # first window anchors the cycle grid. Carried over (``min``), a
+            # stale due time kept its old phase, and the members' order in the
+            # window and whether they made each window at all depended on
+            # where in the cycle the switch fell and on the plan index the
+            # stale time came from (E09.1 verification, 2026-10-16).
+            state.next_due_at = now
+        else:
+            state.next_due_at = min(state.next_due_at, now)
         if state.suppressed_until > now and state.missed_at is not None:
             # The same policy the loop applies to the next miss.
             focused = tuning_profile.is_active() and member
@@ -292,13 +301,34 @@ def _initial_request_states(
     requests: list[PollRequest],
     spec: CanObdSpec,
     now: float,
+    *,
+    selected: RequestFilter | None = None,
 ) -> list[PollRequestState]:
+    """Fresh states, the requests' first due times one budget slot apart.
+
+    ``selected`` is the profile gate the loop applies (``None``: every
+    request is pollable). Only a selected request takes a slot in the
+    stagger; the rest start due now, which costs nothing while the gate
+    holds them and is what a profile switch replans them to anyway
+    (:func:`replan_for_generation`). The stagger used to be the plan
+    *index*, and the plan is the union of every saved profile, so a
+    profile nobody had armed moved every later request's first due time:
+    one ``twin`` memory window that ``tuning`` never reads moved
+    ``tuning``'s first DTC poll by a slot, which moved its Mode 01 round
+    grid against its 0.5 s window grid, and cost RPM 7 % of its reads on
+    the fake clock (440 -> 410 in 120 s, E09.1 verification, 2026-10-16).
+    """
     if not requests:
         return []
     spacing = 1.0 / _bus_budget_requests_per_second(spec)
     states: list[PollRequestState] = []
+    rank = 0
     for index, request in enumerate(requests):
-        states.append(PollRequestState(next_due_at=now + index * spacing))
+        if selected is None or selected(index, request):
+            states.append(PollRequestState(next_due_at=now + rank * spacing))
+            rank += 1
+        else:
+            states.append(PollRequestState(next_due_at=now))
         if _request_rate_hz(request, spec) <= 0.0:
             states[-1].suppressed_until = float("inf")
     return states

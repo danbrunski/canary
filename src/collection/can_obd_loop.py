@@ -87,6 +87,7 @@ from src.collection.obd_scheduler import (
     build_poll_requests,
     is_batchable,
     mode06_requests,
+    narrow_memory_reads,
     rearm_on_engine_start,
     replan_for_generation,
     request_is_priority,
@@ -392,8 +393,23 @@ class _CanObdLoop:
             if client_factory is None
             else client_factory(bus, self.tap)
         )
+        self.profile_gated = spec.capture_profiles_enabled or tuning_profile.is_active()
         self.requests = build_poll_requests(None, spec)
-        self.request_states = _initial_request_states(self.requests, spec, time.monotonic())
+        self._narrow_to_profile()
+        self.request_states = _initial_request_states(
+            self.requests,
+            spec,
+            time.monotonic(),
+            selected=tuning_profile.request_eligible if self.profile_gated else None,
+        )
+        if self.profile_gated and tuning_profile.is_active():
+            # A restart inside a capture (a bus reconnect) resumes the capture
+            # with every selected member due now, as a profile switch starts it
+            # (D05.1), not staggered one *default*-budget slot apart: `tuning`'s
+            # sixteen PIDs took 2 s at 8 req/s to come due under its 90 req/s.
+            replan_for_generation(
+                self.requests, self.request_states, spec, time.monotonic(), profile_gated=True
+            )
         self.discovery = discovery_registry.recall(spec.discovery_key, _discovery_items(spec))
         self.installed: set[DiscoveryItem] = set()
         _install_discovery(
@@ -411,7 +427,6 @@ class _CanObdLoop:
         self.discovery_blocked: str | None = None
         #: Request indices an operator forced due (``trigger_poll``), until served.
         self.forced: set[int] = set()
-        self.profile_gated = spec.capture_profiles_enabled or tuning_profile.is_active()
         self.budget_rps = _bus_budget_requests_per_second(spec)
         # Everything the Mode-22 window serves, not only Mode 22 itself:
         # service-0x23 memory reads are gated by the same session on this ECM,
@@ -686,6 +701,8 @@ class _CanObdLoop:
         # Profile change, pause/resume, passive toggle or replay
         # transition: rounds restart from zero under the new generation.
         self.rounds.reset(generation, now)
+        # The memory reads first: every gate below asks the request.
+        self._narrow_to_profile()
         # Every selected member starts now, under the new profile's
         # cadence and back-off policy, not the old one's (D05.1).
         gated = self.spec.capture_profiles_enabled or tuning_profile.is_active()
@@ -705,6 +722,19 @@ class _CanObdLoop:
                     if not gated or tuning_profile.request_eligible(index, self.requests[index])
                 },
             )
+
+    def _narrow_to_profile(self) -> None:
+        """Cut every memory read to the active profile's members of its window.
+
+        The plan's windows are every saved profile's union; what is sent and
+        decoded is the profile in force's part of each (``narrow_memory_reads``),
+        so no other profile in the catalog changes it. In place: the plan is one
+        list, shared with discovery installs.
+        """
+        gated = self.spec.capture_profiles_enabled or tuning_profile.is_active()
+        self.requests[:] = narrow_memory_reads(
+            self.requests, tuning_profile.view().profile.memory if gated else None
+        )
 
     def _apply_triggers(self, now: float) -> None:
         spec = self.spec
@@ -799,13 +829,16 @@ class _CanObdLoop:
                 # The startup request plan is the union of every saved
                 # profile. A DID outside the active profile must not keep
                 # this window's pending set alive until its max-duration
-                # timeout.
-                dids_selected = False
-                for did_index in self.did_indices:
-                    if tuning_profile.request_eligible(did_index, self.requests[did_index]):
-                        dids_selected = True
-                    else:
-                        controller.on_request_attempted(did_index)
+                # timeout, nor make a window due on its own.
+                selected = [
+                    did_index
+                    for did_index in self.did_indices
+                    if tuning_profile.request_eligible(did_index, self.requests[did_index])
+                ]
+                dids_selected = bool(selected)
+                controller.select(selected)
+                for did_index in set(self.did_indices) - set(selected):
+                    controller.on_request_attempted(did_index)
             phase_before = controller.phase
             if not dids_selected:
                 # No DID is selected right now (profile without DIDs, Mode 22

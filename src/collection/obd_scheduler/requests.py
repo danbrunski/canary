@@ -7,7 +7,7 @@ Part of the ``obd_scheduler`` package (R02.10).
 from __future__ import annotations
 
 import logging
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING, Any
 
@@ -178,7 +178,15 @@ class PollRequest:
     #: every channel decoded from the one reply. ``identifier`` is unused
     #: for these: a service-0x23 request has no identifier byte and its
     #: response echoes none, so there is nothing for the assembler to match.
+    #: Under a capture profile this is the *active* profile's members of the
+    #: window only (:func:`narrow_memory_reads`), so it is what goes on the
+    #: wire and what is decoded.
     memory_read: MemoryRead | None = None
+    #: The window as the plan holds it: every member any saved profile
+    #: selects. Never sent as such under a profile; it is what
+    #: :func:`narrow_memory_reads` cuts the active profile's read from, so a
+    #: profile switch needs no new plan.
+    memory_window: MemoryRead | None = None
 
     @property
     def in_session_window(self) -> bool:
@@ -351,6 +359,7 @@ def build_poll_requests(client: _PidDiscoveryClient | None, spec: CanObdSpec) ->
                 channel=f"{MEMORY_SOURCE}:{memory_read.name}",
                 poll_tier="medium",
                 memory_read=memory_read,
+                memory_window=memory_read,
                 priority=any(name.strip().upper() in priority_channels for name in names),
             )
         )
@@ -403,6 +412,45 @@ def build_poll_requests(client: _PidDiscoveryClient | None, spec: CanObdSpec) ->
                 )
             )
     return requests
+
+
+def narrow_memory_reads(
+    requests: Sequence[PollRequest], selection: Iterable[str] | None
+) -> list[PollRequest]:
+    """The plan with each memory read cut to ``selection``'s members of its window.
+
+    The plan's windows are the union of every saved profile's memory
+    selection, so a window read as planned spans every member any profile
+    asked for and decodes them all. With ``twin`` in the catalog that widened
+    ``tuning``'s HI DET read from one byte to three and recorded
+    ``mem:ECM_PEDAL_ENRICH_FLAGS`` in a profile that never named it (E09.1
+    verification, 2026-10-16). Here a read covers only the bytes of the
+    members the active profile selects, and only those are decoded, so no
+    other profile can change it.
+
+    ``selection`` is the active profile's memory channel names; ``None``
+    (no profile gates the plan: the recorder, a bare spec) keeps every
+    window whole. A window the selection does not touch is kept whole too:
+    the profile gate holds it, and a ``trigger_poll`` that lifts the gate
+    asked for the window as planned.
+    """
+    wanted = None if selection is None else {name.strip().upper() for name in selection}
+    narrowed: list[PollRequest] = []
+    for request in requests:
+        window = request.memory_window or request.memory_read
+        if request.kind != "memory" or window is None:
+            narrowed.append(request)
+            continue
+        members = [c for c in window.channels if wanted is None or c.name.upper() in wanted]
+        read = window
+        if members and len(members) < len(window.channels):
+            (read,) = plan_memory_reads(members)
+        narrowed.append(
+            request
+            if read == request.memory_read and request.memory_window is not None
+            else replace(request, memory_read=read, memory_window=window)
+        )
+    return narrowed
 
 
 def mode06_requests(mids: Iterable[int]) -> list[PollRequest]:

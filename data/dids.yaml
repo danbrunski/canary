@@ -2972,10 +2972,11 @@ memory:
       transient, and the decoded chain predicts about 110 at that instant.
       To test the whole chain on one instant, read 0xFFFF2CC8, 2C32, 63FC,
       139E, 116A, 2136, 118A, 225A, 105C and 103A in one memory window.
-  # Flag bytes, one 7-byte read 0xFFFF283C-2842 (window name kept from when it
-  # held only 2841/2842: capture profiles select channels by name and a read
-  # is planned from the selected members only, so widening it changes no saved
-  # profile's request). 283C bit 2 is the Fuel Comp load-input transient flag;
+  # Flag bytes, one 7-byte window 0xFFFF283C-2842 (name kept from when it held
+  # only 2841/2842: capture profiles select channels by name, and a profile's
+  # read spans only the members it selects, so widening the window changes no
+  # saved profile's request; requests.narrow_memory_reads, pinned by
+  # tests/test_capture_catalog_independence.py). 283C bit 2 is the Fuel Comp load-input transient flag;
   # 283F bit 6 is the HI DET latch, which also selects the timing-trim table
   # (set -> trim B +0x120, clear -> trim A +0x020); bit 0 of 2841 is the
   # pedal-switch enrichment flag that forces the Target AFR lookup to its last

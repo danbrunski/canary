@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import logging
 import math
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from typing import TYPE_CHECKING, Any, Literal
 
 from src.collection import tuning_profile
@@ -233,8 +233,30 @@ class DidWindowController:
     ) -> None:
         self._spec = spec
         self._did_indices = frozenset(did_indices)
+        #: The members the active profile selects (:meth:`select`); every
+        #: window request until told otherwise.
+        self._selected = self._did_indices
         self.phase: Literal["mode01", "window", "lapse"] = "mode01"
-        self._next_window_at = now + self._interval()
+        #: The first window: under a cycle (the active profile's, else the
+        #: config's) it is due at once, and the first entry anchors the grid,
+        #: as after a profile switch (``_schedule_next_window``). This used to
+        #: be ``now + interval`` whatever was active, the config's 60 s on the
+        #: Xterra, and the loop's own ``collector-start`` generation keeps
+        #: ``on_generation_change`` from correcting it, so every collector
+        #: restart inside a `tuning` capture (a bus reconnect) lost a minute of
+        #: DIDs and memory (E09.1 verification, 2026-10-16). Without a cycle
+        #: the end-to-start interval stands, as it does after every window.
+        self._next_window_at = now if self._cycle() is not None else now + self._interval()
+        #: Until that first window opens it waits, at most one cycle, for every
+        #: selected member's own first due time (the loop staggers them one
+        #: budget slot apart), so the members are admitted together without
+        #: being put on one identical due time. Opened on the first member,
+        #: the window read that one and the rest waited a cycle; putting every
+        #: member due at once instead gave them one grid phase, and a capture
+        #: switched on at the wrong instant of the cycle read every DID in
+        #: alternate windows for the rest of the drive.
+        self._gather_until: float | None = None
+        self._gathering = self._cycle() is not None
         self._window_opened_at = 0.0
         #: When pacing would have closed the open window (``close_as_paced``).
         self._paced_close_at: float | None = None
@@ -314,7 +336,7 @@ class DidWindowController:
                 # re-arm every DID that has come due instead. Closing would
                 # cost a session re-entry and, worse, a lapse during which the
                 # capture records nothing.
-                self._pending = {i for i in self._did_indices if states[i].suppressed_until <= now}
+                self._pending = {i for i in self._selected if states[i].suppressed_until <= now}
                 return
             live = any(states[i].suppressed_until <= now for i in self._pending)
             if now >= self._window_deadline or not live:
@@ -335,6 +357,19 @@ class DidWindowController:
                 # hybrid profile lost Mode 01 entirely on 2026-08-07. Hand
                 # Mode 01 a slice before reopening.
                 self._next_window_at = now + MODE01_MIN_SHARE_SECONDS
+
+    def select(self, indices: Iterable[int]) -> None:
+        """The window requests the active profile selects right now.
+
+        Only these make a window due, are owed in it, or set when the next
+        one opens. The plan holds every saved profile's members, and a member
+        nobody is polling is never requested, so its first due time stays in
+        the past: counted here, it opened a window whenever it was "due" and
+        nothing selected was, an entry and an exit that took Mode 01's time
+        and read nothing (every 0.5 s for the first seconds of a `tuning`
+        loop on the fake clock, 2026-10-16).
+        """
+        self._selected = self._did_indices & frozenset(indices)
 
     @staticmethod
     def _continuous() -> bool:
@@ -419,6 +454,8 @@ class DidWindowController:
             if now < self._next_window_at:
                 return False
             due = self._due_dids(states, now)
+            if due and self._gathering and self._gather_first(states, now):
+                return False
             if not due:
                 # Every DID is backed off or on a slower cadence; don't burn a
                 # diagnostic-session transition on an empty window. Slower
@@ -426,15 +463,17 @@ class DidWindowController:
                 next_due = min(
                     (
                         max(states[i].next_due_at, states[i].suppressed_until)
-                        for i in self._did_indices
+                        for i in self._selected
                     ),
                     default=now + (self._cycle() or self._interval()),
                 )
-                if all(states[i].suppressed_until > now for i in self._did_indices):
+                if all(states[i].suppressed_until > now for i in self._selected):
                     # Nothing schedulable: retain the historical idle re-anchor.
                     self._cycle_anchor = None
                     self._next_window_at = now + (self._cycle() or self._interval())
-                elif self._cycle() is not None and self._cycle_anchor is not None:
+                elif self._cycle() is not None:
+                    # With no grid yet this is "as soon as one is due", never
+                    # the config's interval (``_schedule_next_window``).
                     self._schedule_next_window(now, earliest=next_due)
                 else:
                     self._next_window_at = max(now + self._interval(), next_due)
@@ -443,6 +482,30 @@ class DidWindowController:
         if self.phase == "window":
             return now + keepalive_lead - self._last_session_sent >= self._spec.keepalive_seconds
         return False
+
+    def _gather_first(self, states: Sequence[PollRequestState], now: float) -> bool:
+        """Hold the loop's first window for its members' own due times.
+
+        True (and the window moved to the last of them, never more than one
+        cycle out) while a selected, unsuppressed member is not due yet.
+        """
+        cycle = self._cycle()
+        if cycle is None:
+            self._gathering = False
+            return False
+        if self._gather_until is None:
+            self._gather_until = now + cycle
+        waiting = [
+            states[i].next_due_at
+            for i in self._selected
+            if states[i].suppressed_until <= now and states[i].next_due_at > now
+        ]
+        until = min(max(waiting, default=now), self._gather_until)
+        if until <= now:
+            self._gathering = False
+            return False
+        self._next_window_at = until
+        return True
 
     def session_work_pending(self, states: Sequence[PollRequestState], now: float) -> bool:
         """Side-effect-free: is an exit, entry or keep-alive waiting on the budget?"""
@@ -455,10 +518,10 @@ class DidWindowController:
         return False
 
     def _due_dids(self, states: Sequence[PollRequestState], now: float) -> frozenset[int]:
-        """DIDs whose own cadence is due at this window boundary."""
+        """Selected members whose own cadence is due at this window boundary."""
         return frozenset(
             i
-            for i in self._did_indices
+            for i in self._selected
             if states[i].suppressed_until <= now and states[i].next_due_at <= now
         )
 
@@ -466,6 +529,7 @@ class DidWindowController:
         """The loop is about to send ``10 <session>``: a cycle begins (or a keep-alive)."""
         if self.phase != "mode01":
             return
+        self._gathering = False
         cycle = self._cycle()
         missed = 0
         if cycle is None or self._cycle_anchor is None:
@@ -749,6 +813,8 @@ class DidWindowController:
         not — the next window is due the moment the lapse ends.
         """
         self.release(now)
+        # A generation's members are replanned due now: nothing to gather.
+        self._gathering = False
         self.cycle.abandon(now)
         self.cycle.reset()
         self._plan = None

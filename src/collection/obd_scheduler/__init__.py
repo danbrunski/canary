@@ -74,6 +74,7 @@ from src.collection.obd_scheduler.requests import (
     build_poll_requests,
     mode01_registry_width,
     mode06_requests,
+    narrow_memory_reads,
 )
 from src.collection.obd_scheduler.rounds import (
     RoundScheduler,
@@ -215,6 +216,7 @@ __all__ = [
     "memory_channels",
     "mode01_registry_width",
     "mode06_requests",
+    "narrow_memory_reads",
     "parse_did_token",
     "parse_pid_token",
     "preview_discovery_active",
