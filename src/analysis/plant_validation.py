@@ -557,6 +557,79 @@ def post_chain_sha256(previous: str, recording: str, appended_on: date) -> str:
     return hashlib.sha256(f"{previous}:{recording}:{appended_on.isoformat()}".encode()).hexdigest()
 
 
+class EcuPredictionBlock(_Strict):
+    """A further prediction of the same intervention scored on the ECU-side
+    outputs (E09.12), frozen on its own: never an edit of ``ecu_outputs``,
+    whose artifact stays frozen inside its own sha.
+
+    It shares the case's flash, images, E07.4 matching, floor and acceptance,
+    and its declared post-change recordings (``ecu_outputs.post`` plus
+    ``ecu_post_appended``): those belong to the intervention, not to one
+    prediction. It carries its own artifact and hashes, outputs and quantities,
+    and the amendment-3 rules (``resolvable`` and ``exclude_unknown_regime``)
+    as required fields rather than an amendment chain.
+
+    ``design_recordings`` are the drives its design was built from, checked
+    against the design's own record before scoring (``design_recordings_mismatch``).
+    ``null_control`` are pre-flash drives on the base image scored against this
+    prediction as if they were post-change: none may be a design recording
+    (``null_control_in_design``), since a design point paired with its own
+    drive is not an independent no-change comparison. ``co_observed_at_freeze``
+    is, per output, how many co-observed post-change pairs existed when the
+    block froze: the order evidence, stated as a number."""
+
+    id: str = Field(pattern=r"^[a-z0-9][a-z0-9_.-]*$")
+    declared_on: date
+    prediction: PredictionArtifact
+    design_recordings: list[str] = Field(min_length=1)
+    null_control: list[str] = Field(min_length=1)
+    interval_quantiles: tuple[float, float]
+    unsigned_prediction: Literal["within_only"]
+    outputs: list[EcuOutputSpec] = Field(min_length=1)
+    #: Output id -> the quantity compared; an output not named keeps ``raw``.
+    quantities: dict[str, EcuQuantity] = Field(min_length=1)
+    bfs_ceiling_counts: int = Field(gt=0, le=0xFFFF)
+    resolvable: Literal["predicted_beyond_floor"]
+    exclude_unknown_regime: Literal[True]
+    co_observed_at_freeze: dict[str, int]
+    reason: str = Field(min_length=1)
+    frozen_rules: FrozenRules
+    evidence: str = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def _ordered(self) -> EcuPredictionBlock:
+        lo, hi = self.interval_quantiles
+        if not 0.0 < lo < 0.5 < hi < 1.0:
+            raise ValueError(f"interval quantiles {self.interval_quantiles} must bracket 0.5")
+        ids = [o.id for o in self.outputs]
+        if len(set(ids)) != len(ids):
+            raise ValueError(f"duplicate output ids {ids}")
+        unknown = sorted(set(self.quantities) - set(ids))
+        if unknown:
+            raise ValueError(f"block {self.id} names quantities for outputs {unknown} it lacks")
+        if sorted(self.co_observed_at_freeze) != sorted(ids):
+            raise ValueError(
+                f"co_observed_at_freeze names {sorted(self.co_observed_at_freeze)}, the block's "
+                f"outputs are {sorted(ids)}: state the order evidence for every output"
+            )
+        if any(n < 0 for n in self.co_observed_at_freeze.values()):
+            raise ValueError("co_observed_at_freeze counts pairs: none is negative")
+        shared = sorted(set(self.null_control) & set(self.design_recordings))
+        if shared:
+            raise ValueError(
+                f"null_control_in_design: {shared} built block {self.id}'s design, so they "
+                "cannot be its independent no-change control"
+            )
+        if len(set(self.null_control)) != len(self.null_control):
+            raise ValueError("a null-control drive is listed twice")
+        return self
+
+    def rules_sha256(self) -> str:
+        """Over every rule field: all but ``frozen_rules`` and ``evidence``."""
+        rules = self.model_dump(mode="json", exclude={"frozen_rules", "evidence"})
+        return hashlib.sha256(json.dumps(rules, sort_keys=True).encode()).hexdigest()
+
+
 class InterventionCase(_Strict):
     id: str = Field(pattern=r"^[a-z0-9][a-z0-9_.-]*$")
     synthetic: bool = False
@@ -581,7 +654,16 @@ class InterventionCase(_Strict):
     ecu_amendments: list[EcuAmendment] = Field(default_factory=list)
     #: Post-change recordings declared after ``ecu_outputs`` froze, append-only.
     ecu_post_appended: list[PostAppend] = Field(default_factory=list)
+    #: Further predictions of this intervention scored on the ECU-side
+    #: outputs, each frozen on its own (E09.12 follow-up).
+    ecu_predictions: list[EcuPredictionBlock] = Field(default_factory=list)
     evidence: str = Field(min_length=1)
+
+    def ecu_prediction(self, block_id: str) -> EcuPredictionBlock:
+        found = next((b for b in self.ecu_predictions if b.id == block_id), None)
+        if found is None:
+            raise KeyError(f"case {self.id} has no ECU-output prediction block {block_id!r}")
+        return found
 
     def ecu_post_recordings(self) -> list[str]:
         """Every declared post-change recording: the frozen block's, then the
@@ -670,7 +752,34 @@ class InterventionCase(_Strict):
             )
         self._check_amendments()
         self._check_post_appends()
+        self._check_predictions()
         return self
+
+    def _check_predictions(self) -> None:
+        if not self.ecu_predictions:
+            return
+        if self.ecu_outputs is None:
+            raise ValueError(
+                f"case {self.id}: a prediction block shares ecu_outputs' post list and needs it"
+            )
+        ids = [b.id for b in self.ecu_predictions]
+        if len(set(ids)) != len(ids) or "ecu_outputs" in ids:
+            raise ValueError(f"prediction block ids {ids} must be unique and not 'ecu_outputs'")
+        artifacts = [self.ecu_outputs.prediction.artifact] + [
+            b.prediction.artifact for b in self.ecu_predictions
+        ]
+        if len(set(artifacts)) != len(artifacts):
+            raise ValueError(
+                f"prediction_artifact_duplicate: {artifacts} -- an artifact already scored "
+                "under a frozen block is re-scored only by an amendment of that block"
+            )
+        for block in self.ecu_predictions:
+            if block.frozen_rules.sha256 != block.rules_sha256():
+                raise ValueError(
+                    f"rules_changed: case {self.id}'s prediction block {block.id} no longer "
+                    f"hashes to the frozen {block.frozen_rules.sha256[:12]}...; its rules are "
+                    "fixed before any co-observed post-change pair is scored"
+                )
 
     def _check_post_appends(self) -> None:
         if not self.ecu_post_appended:
@@ -1526,8 +1635,11 @@ class EcuOutputVerdict:
     base_image_sha256: str
     candidate_image_sha256: str
     traces_sha256: str
-    #: The rules it was scored under: 1 is the ``ecu_outputs`` block, 2.. an
-    #: :class:`EcuAmendment`; with that version's frozen sha256.
+    #: Which frozen block: ``ecu_outputs`` (its amendments by version), or an
+    #: :class:`EcuPredictionBlock`'s id.
+    block: str
+    #: The rules it was scored under: 1 is the block itself, 2.. an
+    #: :class:`EcuAmendment` of ``ecu_outputs``; with that version's frozen sha256.
     rules_version: int
     rules_sha256: str
     #: The post-change recordings this verdict scored, by name.
@@ -1658,7 +1770,7 @@ def trim_independence(model: ApplicationModel, output_ids: Sequence[str]) -> dic
 
 def prediction_points(
     directory: Path,
-    rules: EcuOutputRules,
+    rules: EcuOutputRules | EcuPredictionBlock,
     *,
     rpm_per_count: float,
     ceilings: Mapping[str, float] | None = None,
@@ -1748,7 +1860,10 @@ def _cell_label(axis: dict[str, Any], value: float, unit: float) -> str:
 
 
 def pre_observed(
-    points: pd.DataFrame, rules: EcuOutputRules, profile: FuelPlantProfile, sessions_root: Path
+    points: pd.DataFrame,
+    rules: EcuOutputRules | EcuPredictionBlock,
+    profile: FuelPlantProfile,
+    sessions_root: Path,
 ) -> pd.DataFrame:
     """Each design point's observed outputs on its own pre-change recording:
     the output's read paired one-to-one within the plant's ECU pairing
@@ -1805,6 +1920,7 @@ def ecu_output_reads(
     *,
     image_sha256: str,
     boundary: Boundary,
+    side: Literal["post", "pre"] = "post",
 ) -> pd.DataFrame:
     """One row per read of the output's own channel on a post-change recording,
     with the conditions the case matches on, each on the acquisition clock.
@@ -1822,7 +1938,9 @@ def ecu_output_reads(
     ``state`` is ``eligible`` or the first reason, in this precedence:
     ``not_co_observed`` (no rpm and no MAF read), ``missing_input``, ``cold``,
     ``transient``, ``fill_byte_unpaired``, ``fill_byte:<N02 state:reason>``.
-    Reads before the flash refuse (``wrong_side``)."""
+    Reads before the flash refuse (``wrong_side``). ``side="pre"`` reads a
+    pre-flash recording the same way (a null control, :func:`ecu_null_control`):
+    there a read at or after the flash refuses ``wrong_side``."""
     s, rule = profile.specs, profile.steady
     specs = list(
         dict.fromkeys(
@@ -1837,10 +1955,15 @@ def ecu_output_reads(
     t = obs.times
     if not len(t):
         return pd.DataFrame({c: pd.Series([], dtype=object) for c in ECU_READ_COLUMNS})
-    if float(t.min()) < boundary.at.timestamp():
+    if side == "post" and float(t.min()) < boundary.at.timestamp():
         raise FuelPlantRefusalError(
             "wrong_side",
             f"{session.name} has {output.observed} reads before {boundary.at.isoformat()}",
+        )
+    if side == "pre" and float(t.max()) >= boundary.at.timestamp():
+        raise FuelPlantRefusalError(
+            "wrong_side",
+            f"{session.name} has {output.observed} reads at or after {boundary.at.isoformat()}",
         )
     frame = pd.DataFrame({"session": session.name, "t": t, "observed": obs.values})
     rpm_s, maf_s = _series(long, s.rpm), _series(long, s.maf)
@@ -2213,6 +2336,105 @@ def _output_frame(points: pd.DataFrame, output_id: str) -> pd.DataFrame:
     return points[keep + list(rename)].rename(columns=rename)
 
 
+@dataclass(frozen=True)
+class _EcuScoring:
+    """The frozen rules one ECU-output score runs under, resolved once from
+    ``ecu_outputs`` (with an amendment) or a prediction block."""
+
+    block: str
+    rules: EcuOutputRules | EcuPredictionBlock
+    version: int
+    sha256: str
+    reason: str | None
+    quantities: dict[str, EcuQuantity]
+    ceiling: float | None
+    resolvable: bool
+    exclude_unknown_regime: bool
+
+    @property
+    def prediction(self) -> PredictionArtifact:
+        return self.rules.prediction
+
+    def ceilings(self) -> dict[str, float]:
+        """Output id -> the clamp a draw is left out at (``air_normalised`` only)."""
+        if self.ceiling is None:
+            return {}
+        return {k: self.ceiling for k, q in self.quantities.items() if q == "air_normalised"}
+
+
+def _ecu_scoring(
+    case: InterventionCase, *, amendment: int | None, block: str | None
+) -> _EcuScoring:
+    """``ecu_outputs_undeclared`` without the original block (every prediction
+    block shares its post list); ``block_and_amendment``: an amendment belongs
+    to ``ecu_outputs``, a prediction block is frozen with its own rules."""
+    rules = case.ecu_outputs
+    if rules is None:
+        raise FuelPlantRefusalError("ecu_outputs_undeclared", f"case {case.id} has no ecu_outputs")
+    if block is not None:
+        if amendment is not None:
+            raise FuelPlantRefusalError(
+                "block_and_amendment",
+                f"amendment {amendment} amends ecu_outputs; block {block!r} carries its own rules",
+            )
+        b = case.ecu_prediction(block)
+        return _EcuScoring(
+            block=b.id,
+            rules=b,
+            version=1,
+            sha256=b.frozen_rules.sha256,
+            reason=b.reason,
+            quantities=dict(b.quantities),
+            ceiling=float(b.bfs_ceiling_counts),
+            resolvable=b.resolvable == "predicted_beyond_floor",
+            exclude_unknown_regime=bool(b.exclude_unknown_regime),
+        )
+    amended = None if amendment is None else case.ecu_amendment(amendment)
+    if amended is None:
+        return _EcuScoring(
+            block="ecu_outputs",
+            rules=rules,
+            version=1,
+            sha256=rules.frozen_rules.sha256,
+            reason=None,
+            quantities={},
+            ceiling=None,
+            resolvable=False,
+            exclude_unknown_regime=False,
+        )
+    return _EcuScoring(
+        block="ecu_outputs",
+        rules=rules,
+        version=amended.version,
+        sha256=amended.frozen_rules.sha256,
+        reason=amended.reason,
+        quantities=dict(amended.quantities),
+        ceiling=float(amended.bfs_ceiling_counts),
+        resolvable=amended.resolvable == "predicted_beyond_floor",
+        exclude_unknown_regime=bool(amended.exclude_unknown_regime),
+    )
+
+
+def _ecu_test(
+    points: pd.DataFrame,
+    reads: pd.DataFrame,
+    case: InterventionCase,
+    scoring: _EcuScoring,
+    spec: EcuOutputSpec,
+) -> dict[str, Any]:
+    """:func:`ecu_effect_test` for one output under the resolved rules."""
+    quantity = scoring.quantities.get(spec.id, "raw")
+    return ecu_effect_test(
+        _output_frame(points, spec.id),
+        reads,
+        case,
+        quantity=quantity,
+        ceiling=scoring.ceiling if quantity == "air_normalised" else None,
+        resolvable=scoring.resolvable,
+        exclude_unknown_regime=scoring.exclude_unknown_regime,
+    )
+
+
 def evaluate_ecu_outputs(
     case: InterventionCase,
     points: pd.DataFrame,
@@ -2221,6 +2443,7 @@ def evaluate_ecu_outputs(
     artifact: Mapping[str, str],
     trims: Mapping[str, Any] | None = None,
     amendment: int | None = None,
+    block: str | None = None,
     recordings: Sequence[str] | None = None,
     scope_kind: Literal["all", "named"] | None = None,
     candidates_not_scored: Sequence[str] = (),
@@ -2228,8 +2451,10 @@ def evaluate_ecu_outputs(
     """E09.12's verdict per ECU-side output, sealed.
 
     ``amendment``: score under that :class:`EcuAmendment` version (its
-    quantities and ceiling) instead of the original block; either way the
-    verdict names the rules version and sha it was scored under.
+    quantities and ceiling) instead of the original block; ``block``: under
+    that :class:`EcuPredictionBlock` (its own artifact, outputs and rules)
+    instead. Either way the verdict names the block, rules version and sha it
+    was scored under.
     ``recordings``: the declared post-change recordings scored (default all
     of :meth:`InterventionCase.ecu_post_recordings`); the verdict names them.
     ``scope_kind`` (default ``all`` without ``recordings``, else ``named``) and
@@ -2247,22 +2472,15 @@ def evaluate_ecu_outputs(
     (a ``_sim-*`` recording on a recorded case, or the reverse) and
     ``prediction_not_verified``. The plant's qualification is not read:
     BFS and target phi are the ECU's decoded integer logic."""
-    rules = case.ecu_outputs
-    if rules is None:
-        raise FuelPlantRefusalError("ecu_outputs_undeclared", f"case {case.id} has no ecu_outputs")
+    scoring = _ecu_scoring(case, amendment=amendment, block=block)
+    rules = scoring.rules
     if case.frozen_rules is None:
         raise FuelPlantRefusalError(
             "rules_not_frozen",
             f"case {case.id}'s matching, floor and acceptance are not frozen: an ECU-output "
             "score uses them",
         )
-    amended = None if amendment is None else case.ecu_amendment(amendment)
-    rules_version = 1 if amended is None else amended.version
-    rules_sha = (rules.frozen_rules if amended is None else amended.frozen_rules).sha256
-    quantities: dict[str, EcuQuantity] = {} if amended is None else dict(amended.quantities)
-    ceiling = None if amended is None else float(amended.bfs_ceiling_counts)
-    resolvable = amended is not None and amended.resolvable == "predicted_beyond_floor"
-    no_unknown = amended is not None and bool(amended.exclude_unknown_regime)
+    rules_version, rules_sha = scoring.version, scoring.sha256
     ids = [o.id for o in rules.outputs]
     if sorted(post) != sorted(ids):
         raise FuelPlantRefusalError(
@@ -2302,15 +2520,7 @@ def evaluate_ecu_outputs(
         spec.id: {
             "observed_channel": spec.observed,
             "trace_output": spec.trace_output,
-            **ecu_effect_test(
-                _output_frame(points, spec.id),
-                post[spec.id],
-                case,
-                quantity=quantities.get(spec.id, "raw"),
-                ceiling=ceiling if quantities.get(spec.id) == "air_normalised" else None,
-                resolvable=resolvable,
-                exclude_unknown_regime=no_unknown,
-            ),
+            **_ecu_test(points, post[spec.id], case, scoring, spec),
         }
         for spec in rules.outputs
     }
@@ -2325,9 +2535,10 @@ def evaluate_ecu_outputs(
         "plant": "not used: BFS and target phi are decoded ECU logic; plant_not_qualified "
         "does not gate this verdict",
         "rules": {
+            "block": scoring.block,
             "version": rules_version,
             "sha256": rules_sha,
-            "reason": None if amended is None else amended.reason,
+            "reason": scoring.reason,
         },
         "verdicts": {k: t["outcome"] for k, t in tests.items()},
         "effect_tests": tests,
@@ -2354,6 +2565,7 @@ def evaluate_ecu_outputs(
         base_image_sha256=case.base_image_sha256,
         candidate_image_sha256=case.candidate_image_sha256,
         traces_sha256=traces_sha,
+        block=scoring.block,
         rules_version=rules_version,
         rules_sha256=rules_sha,
         recordings=tuple(scope),
@@ -2427,6 +2639,76 @@ def post_scope(
     return scope, sorted(set(on_candidate) - set(scope))
 
 
+@dataclass(frozen=True)
+class _EcuInputs:
+    """The pre side of one ECU-output score, built after the artifact check."""
+
+    scoring: _EcuScoring
+    artifact: dict[str, str]
+    design: dict[str, Any]
+    points: pd.DataFrame
+    profile: FuelPlantProfile
+    delay: B06Rules
+    trims: dict[str, Any]
+
+
+def _check_design_recordings(block: EcuPredictionBlock, design: Mapping[str, Any]) -> None:
+    """``design_recordings_mismatch``: the block names other drives than the
+    design was built from, so its null control's independence is unproven."""
+    built = sorted(str(s["session"]) for s in design.get("sessions") or [])
+    if built != sorted(block.design_recordings):
+        raise FuelPlantRefusalError(
+            "design_recordings_mismatch",
+            f"block {block.id} declares design recordings {sorted(block.design_recordings)}, "
+            f"the design was built from {built}",
+        )
+
+
+def _ecu_inputs(
+    case: InterventionCase,
+    *,
+    profile_dir: Path,
+    sessions_root: Path,
+    predictions_root: Path,
+    amendment: int | None,
+    block: str | None,
+) -> _EcuInputs:
+    """The artifact checked against its recorded hashes first, then (for a
+    prediction block) its design recordings, then the design points with their
+    pre-change values. No post-change recording is read here."""
+    scoring = _ecu_scoring(case, amendment=amendment, block=block)
+    rules = scoring.rules
+    directory = predictions_root / rules.prediction.artifact
+    artifact = verify_prediction_artifact(directory, rules.prediction)
+    design = json.loads((directory / rules.prediction.design_record).read_text())
+    if isinstance(rules, EcuPredictionBlock):
+        _check_design_recordings(rules, design)
+    profile, _ = load_fuel_plant(profile_dir, str(design["plant_version"]))
+    delay = load_b06(profile_dir, profile.delay)
+    model, _ = load_application_model(profile_dir)
+    trims = trim_independence(model, [o.model_output for o in rules.outputs])
+    declaration = load_fuel_comp_declaration(profile_dir)
+    points = prediction_points(
+        directory,
+        rules,
+        rpm_per_count=declaration.inputs.rpm.rpm_per_count,
+        ceilings=scoring.ceilings(),
+    )
+    if isinstance(rules, EcuPredictionBlock):
+        in_points = sorted(set(points["session"].astype(str)) - set(rules.design_recordings))
+        if in_points:
+            raise FuelPlantRefusalError(
+                "design_recordings_mismatch",
+                f"design points come from {in_points}, not declared in block {rules.id}",
+            )
+    points = pre_observed(points, rules, profile, sessions_root)
+    return _EcuInputs(scoring, artifact, design, points, profile, delay, trims)
+
+
+def _empty_reads() -> pd.DataFrame:
+    return pd.DataFrame({c: pd.Series([], dtype=object) for c in ECU_READ_COLUMNS})
+
+
 def score_ecu_outputs(
     case: InterventionCase,
     boundary: Boundary,
@@ -2438,6 +2720,7 @@ def score_ecu_outputs(
     resolver: RevisionImageResolver | Callable[[str], FuelCompCalibration],
     fuel_type: str,
     amendment: int | None = None,
+    block: str | None = None,
     recordings: Sequence[str] | None = None,
 ) -> tuple[dict[str, Any], pd.DataFrame, dict[str, pd.DataFrame]]:
     """E09.12 end to end, in the order of evidence: the prediction's files are
@@ -2446,41 +2729,26 @@ def score_ecu_outputs(
     (``post_recording_undeclared``); then the design points, their pre-change
     values, and each output's post-change reads. Returns the sealed report,
     the points and the post reads per output. ``amendment`` scores under that
-    :class:`EcuAmendment` version (:func:`evaluate_ecu_outputs`).
+    :class:`EcuAmendment` version, ``block`` under that
+    :class:`EcuPredictionBlock` (:func:`evaluate_ecu_outputs`).
     ``recordings`` names declared recordings to score instead of all of them
     (:func:`post_scope`): the report lists the candidates it did not score."""
-    rules = case.ecu_outputs
-    if rules is None:
-        raise FuelPlantRefusalError("ecu_outputs_undeclared", f"case {case.id} has no ecu_outputs")
-    directory = predictions_root / rules.prediction.artifact
-    artifact = verify_prediction_artifact(directory, rules.prediction)
+    scoring = _ecu_scoring(case, amendment=amendment, block=block)
+    directory = predictions_root / scoring.prediction.artifact
+    verify_prediction_artifact(directory, scoring.prediction)
     on_candidate = candidate_recordings(sessions_root, registry, case)
     scope, not_scored = post_scope(
         case, boundary, on_candidate, sessions_root, recordings=recordings
     )
-    design = json.loads((directory / rules.prediction.design_record).read_text())
-    profile, _ = load_fuel_plant(profile_dir, str(design["plant_version"]))
-    delay = load_b06(profile_dir, profile.delay)
-    model, _ = load_application_model(profile_dir)
-    trims = trim_independence(model, [o.model_output for o in rules.outputs])
-    declaration = load_fuel_comp_declaration(profile_dir)
-    amended = None if amendment is None else case.ecu_amendment(amendment)
-    ceilings = (
-        {}
-        if amended is None
-        else {
-            k: float(amended.bfs_ceiling_counts)
-            for k, q in amended.quantities.items()
-            if q == "air_normalised"
-        }
+    inputs = _ecu_inputs(
+        case,
+        profile_dir=profile_dir,
+        sessions_root=sessions_root,
+        predictions_root=predictions_root,
+        amendment=amendment,
+        block=block,
     )
-    points = prediction_points(
-        directory,
-        rules,
-        rpm_per_count=declaration.inputs.rpm.rpm_per_count,
-        ceilings=ceilings,
-    )
-    points = pre_observed(points, rules, profile, sessions_root)
+    rules = inputs.scoring.rules
     post: dict[str, list[pd.DataFrame]] = {o.id: [] for o in rules.outputs}
     for name in scope:
         path = sessions_root / name
@@ -2490,8 +2758,8 @@ def score_ecu_outputs(
                 ecu_output_reads(
                     path,
                     spec,
-                    profile,
-                    delay,
+                    inputs.profile,
+                    inputs.delay,
                     fill,
                     image_sha256=case.candidate_image_sha256,
                     boundary=boundary,
@@ -2501,23 +2769,107 @@ def score_ecu_outputs(
         k: (
             pd.concat([f for f in v if len(f)], ignore_index=True)
             if any(len(f) for f in v)
-            else pd.DataFrame({c: pd.Series([], dtype=object) for c in ECU_READ_COLUMNS})
+            else _empty_reads()
         )
         for k, v in post.items()
     }
     report = evaluate_ecu_outputs(
         case,
-        points,
+        inputs.points,
         reads,
-        artifact=artifact,
-        trims=trims,
+        artifact=inputs.artifact,
+        trims=inputs.trims,
         amendment=amendment,
+        block=block,
         recordings=scope,
         scope_kind="all" if recordings is None else "named",
         candidates_not_scored=not_scored,
     )
-    report["plant_version_of_design"] = design["plant_version"]
-    return report, points, reads
+    report["plant_version_of_design"] = inputs.design["plant_version"]
+    return report, inputs.points, reads
+
+
+def ecu_null_control(
+    case: InterventionCase,
+    boundary: Boundary,
+    registry: TuneRevisionRegistry,
+    *,
+    block: str,
+    profile_dir: Path,
+    sessions_root: Path,
+    predictions_root: Path,
+    resolver: RevisionImageResolver | Callable[[str], FuelCompCalibration],
+    fuel_type: str,
+) -> dict[str, Any]:
+    """A prediction block's null control: each of its ``null_control`` drives,
+    pre-flash on the base image (no ROM change), scored as if post-change
+    against the block's REAL prediction under the block's rules. A test with
+    power does not pass there.
+
+    In the order of evidence, as :func:`score_ecu_outputs`: the artifact and
+    the design recordings first. A drive must be here
+    (``null_drive_missing``), on the base revision by its first sample
+    (``null_drive_not_on_base``) and wholly before the flash (reads after it
+    refuse ``wrong_side``); the fill byte is reconstructed and checked on the
+    base image. Not part of any verdict: this is the control's evidence, and
+    ``passed`` names any drive and output that passed."""
+    inputs = _ecu_inputs(
+        case,
+        profile_dir=profile_dir,
+        sessions_root=sessions_root,
+        predictions_root=predictions_root,
+        amendment=None,
+        block=block,
+    )
+    rules = inputs.scoring.rules
+    assert isinstance(rules, EcuPredictionBlock)
+    drives: dict[str, dict[str, Any]] = {}
+    for name in rules.null_control:
+        path = sessions_root / name
+        if not path.is_dir():
+            raise FuelPlantRefusalError("null_drive_missing", f"{path} is not here")
+        rev = registry.for_session(path)
+        if rev is None or rev.revision != case.base_revision:
+            raise FuelPlantRefusalError(
+                "null_drive_not_on_base",
+                f"{name} ran on {None if rev is None else rev.revision}, not {case.base_revision}",
+            )
+        fill = fill_samples(path, profile_dir, registry, resolver, fuel_type=fuel_type)
+        drives[name] = {
+            spec.id: _ecu_test(
+                inputs.points,
+                ecu_output_reads(
+                    path,
+                    spec,
+                    inputs.profile,
+                    inputs.delay,
+                    fill,
+                    image_sha256=case.base_image_sha256,
+                    boundary=boundary,
+                    side="pre",
+                ),
+                case,
+                inputs.scoring,
+                spec,
+            )
+            for spec in rules.outputs
+        }
+    return {
+        "case": case.id,
+        "block": rules.id,
+        "rules_sha256": inputs.scoring.sha256,
+        "claim": "null control: the base image on both sides, scored against the real "
+        "prediction; a pass here is a test without power, not evidence",
+        "hashes_checked": inputs.artifact,
+        "design_points": len(inputs.points),
+        "drives": drives,
+        "passed": sorted(
+            f"{name}:{output}"
+            for name, tests in drives.items()
+            for output, test in tests.items()
+            if test["outcome"] == "pass"
+        ),
+    }
 
 
 __all__ = [
@@ -2528,6 +2880,7 @@ __all__ = [
     "EcuOutputRules",
     "EcuOutputSpec",
     "EcuOutputVerdict",
+    "EcuPredictionBlock",
     "InterventionCase",
     "InterventionFile",
     "InterventionVerdict",
@@ -2540,6 +2893,7 @@ __all__ = [
     "build_case_samples",
     "candidate_recordings",
     "ecu_effect_test",
+    "ecu_null_control",
     "ecu_output_reads",
     "evaluate_ecu_outputs",
     "fill_samples",

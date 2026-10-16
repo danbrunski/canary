@@ -39,6 +39,7 @@ from src.analysis.plant_validation import (
     EcuAmendment,
     EcuOutputRules,
     EcuOutputVerdict,
+    EcuPredictionBlock,
     InterventionCase,
     InterventionFile,
     InterventionVerdict,
@@ -79,6 +80,8 @@ def _case(
         raw["id"] = "synthetic-ecu-outputs"
     amendments = raw.pop("ecu_amendments")
     raw.pop("ecu_post_appended", None)
+    # Prediction blocks share ecu_outputs' post list: added back with it.
+    predictions = raw.pop("ecu_predictions", [])
     ecu = raw.pop("ecu_outputs")
     ecu["post"] = [POST] if post is None else post
     ecu["frozen_rules"]["sha256"] = "0" * 63 + "1"
@@ -88,7 +91,9 @@ def _case(
         update={"ecu_outputs": rules}
     ).ecu_rules_sha256()
     if not amend:
-        return InterventionCase.model_validate({**raw, "ecu_outputs": ecu})
+        return InterventionCase.model_validate(
+            {**raw, "ecu_outputs": ecu, "ecu_predictions": predictions}
+        )
     previous = ecu["frozen_rules"]["sha256"]
     for amendment in amendments:
         amendment["amends"] = previous
@@ -96,7 +101,12 @@ def _case(
         previous = EcuAmendment.model_validate(amendment).rules_sha256()
         amendment["frozen_rules"]["sha256"] = previous
     return InterventionCase.model_validate(
-        {**raw, "ecu_outputs": ecu, "ecu_amendments": amendments}
+        {
+            **raw,
+            "ecu_outputs": ecu,
+            "ecu_amendments": amendments,
+            "ecu_predictions": predictions,
+        }
     )
 
 
@@ -798,6 +808,254 @@ FIVE = [
 NULL_DRIVES = ("_capture-tuning-2026-09-22T235224", "_capture-tuning-2026-09-22T170459")
 
 
+# -- the second prediction of record: its own frozen block (E09.12 follow-up) ------------
+
+WOT = "fuel-comp-restore-2026-10-04-wot"
+#: E08.7's second-prediction block (commit b870e80f), verbatim.
+WOT_FILES = {
+    "run-200draws/result.json": "4f5db38a735a6fa3570c56f6bd2b06ac8266748f7654b99bbe9d27f477b81309",
+    "run-200draws/report.html": "4cde07b016eb972f838adfd1eab6eb010c1d0bbb423cf43920f1ff056b983fbd",
+    "run-200draws/traces.parquet": (
+        "760bcea01ef22fb1256a8855779b0d79eaaf516970e5b362fa79c7020b95381f"
+    ),
+}
+WOT_DESIGN = "f4332b8d0890c2de9805fb35e01c895a8a0c6621752e743399d95193dc5688fa"
+WOT_DESIGN_DRIVES = [
+    "_capture-tuning-2026-09-21T223734",
+    "_capture-tuning-2026-09-21T232153",
+    "_capture-tuning-2026-09-22T170459",
+    "_capture-tuning-2026-09-22T235224",
+]
+WOT_NULL_DRIVES = ["_capture-tuning-2026-09-23T142926", "_capture-tuning-2026-09-23T164007"]
+
+
+def _wot_raw() -> tuple[dict[str, Any], dict[str, Any]]:
+    raw = _raw()
+    return raw, raw["cases"][0]["ecu_predictions"][0]
+
+
+def test_the_wot_block_is_frozen_on_e08_7s_hashes_and_leaves_every_earlier_sha_unchanged() -> None:
+    case = load_interventions(PROFILE).case(CASE_ID)
+    block = case.ecu_prediction(WOT)
+    prediction = block.prediction
+    assert prediction.artifact == WOT
+    assert prediction.files == WOT_FILES
+    assert prediction.design_sha256 == WOT_DESIGN
+    assert prediction.result_digest == (
+        "6180dbcd0f6e05ce63b2caa1333890f24105e9d69734c4c659e74cd114efef71"
+    )
+    # E08.7 recorded the design's files by prefix and suffix; the full values
+    # here carry both.
+    design_json, design_parquet = (
+        prediction.design_files[f"designs/{WOT_DESIGN}/{f}"]
+        for f in ("design.json", "design.parquet")
+    )
+    assert design_json.startswith("20e516956daa5b2a") and design_json.endswith("2cdf")
+    assert design_parquet.startswith("b648148c4857c018") and design_parquet.endswith("000e")
+    assert block.design_recordings == WOT_DESIGN_DRIVES
+    assert block.null_control == WOT_NULL_DRIVES
+    assert not set(block.null_control) & set(block.design_recordings)
+    # Amendment 3's principles as required fields; the order evidence a number.
+    assert block.quantities == {"base_fuel_schedule": "air_normalised"}
+    assert block.bfs_ceiling_counts == 65280
+    assert (block.resolvable, block.exclude_unknown_regime) == ("predicted_beyond_floor", True)
+    assert block.co_observed_at_freeze == {"base_fuel_schedule": 0, "target_phi": 0}
+    assert "prediction_unresolvable" in block.reason
+    assert block.frozen_rules.sha256 == block.rules_sha256()
+    assert block.rules_sha256().startswith("bfc4e6ee")
+    # Every earlier frozen sha is untouched by the new block.
+    assert case.rules_sha256().startswith("f522ff53")
+    assert case.ecu_rules_sha256().startswith("15eaa48b")
+    assert [a.frozen_rules.sha256[:8] for a in case.ecu_amendments] == ["c458d1a6", "7a9f4279"]
+    assert [a.rules_sha256()[:8] for a in case.ecu_amendments] == ["c458d1a6", "7a9f4279"]
+    # The shared post list is the case's, unchanged.
+    assert case.ecu_post_recordings() == FIVE
+
+
+@pytest.mark.parametrize(
+    ("path", "value"),
+    [
+        (("prediction", "files", "run-200draws/traces.parquet"), "d" * 64),
+        (("null_control",), ["_capture-tuning-2026-09-23T142926"]),
+        (("interval_quantiles",), [0.1, 0.9]),
+        (("quantities", "base_fuel_schedule"), "raw"),
+        (("co_observed_at_freeze", "target_phi"), 3),
+        (("reason",), "edited"),
+    ],
+)
+def test_editing_the_wot_block_refuses_rules_changed(path: tuple[str, ...], value: Any) -> None:
+    raw, block = _wot_raw()
+    target = block
+    for key in path[:-1]:
+        target = target[key]
+    target[path[-1]] = value
+    with pytest.raises(ValidationError, match="rules_changed"):
+        InterventionFile.model_validate(raw)
+
+
+def test_the_wot_block_refuses_a_design_drive_as_null_control_and_a_reused_artifact() -> None:
+    raw, block = _wot_raw()
+    block["null_control"] = [*WOT_NULL_DRIVES, "_capture-tuning-2026-09-22T235224"]
+    with pytest.raises(ValidationError, match="null_control_in_design"):
+        InterventionFile.model_validate(raw)
+    raw, block = _wot_raw()
+    block["prediction"] = copy.deepcopy(raw["cases"][0]["ecu_outputs"]["prediction"])
+    block["frozen_rules"]["sha256"] = EcuPredictionBlock.model_validate(
+        {**block, "frozen_rules": {**block["frozen_rules"], "sha256": "0" * 64}}
+    ).rules_sha256()
+    with pytest.raises(ValidationError, match="prediction_artifact_duplicate"):
+        InterventionFile.model_validate(raw)
+    raw, block = _wot_raw()
+    del block["resolvable"]
+    with pytest.raises(ValidationError, match="resolvable"):
+        InterventionFile.model_validate(raw)
+    raw, block = _wot_raw()
+    del block["co_observed_at_freeze"]["target_phi"]
+    with pytest.raises(ValidationError, match="order evidence"):
+        InterventionFile.model_validate(raw)
+
+
+def test_the_wot_artifact_is_checked_against_e08_7s_hashes_before_any_recording(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A WOT artifact whose bytes differ from E08.7's record refuses by name,
+    before any recording is listed or read."""
+    import src.analysis.plant_validation as pv
+
+    def never(*_: Any, **__: Any) -> Any:
+        raise AssertionError("a recording was touched before the artifact was verified")
+
+    for name in ("candidate_recordings", "post_scope", "pre_observed", "fill_samples"):
+        monkeypatch.setattr(pv, name, never)
+    monkeypatch.setattr(pv, "ecu_output_reads", never)
+    monkeypatch.setattr(pv, "read_channels", never)
+    case = load_interventions(PROFILE).case(CASE_ID)
+    block = case.ecu_prediction(WOT)
+    registry = load_tune_revisions(PROFILE / "tune_revisions.yaml")
+    assert registry is not None
+    boundary = resolve_boundary(case, registry)
+    directory = tmp_path / "predictions" / WOT
+
+    def score() -> FuelPlantRefusalError:
+        with pytest.raises(FuelPlantRefusalError) as refused:
+            pv.score_ecu_outputs(
+                case,
+                boundary,
+                registry,
+                profile_dir=PROFILE,
+                sessions_root=tmp_path / "sessions",
+                predictions_root=tmp_path / "predictions",
+                resolver=never,
+                fuel_type="gasoline",
+                block=WOT,
+            )
+        return refused.value
+
+    assert score().reason == "prediction_artifact_missing"
+    for rel in {**block.prediction.files, **block.prediction.design_files}:
+        (directory / rel).parent.mkdir(parents=True, exist_ok=True)
+        (directory / rel).write_text("not the recorded bytes")
+    changed = score()
+    assert changed.reason == "prediction_artifact_changed"
+    assert "recorded" in str(changed) and "E08.7" in str(changed)
+    with pytest.raises(FuelPlantRefusalError) as both:
+        pv.score_ecu_outputs(
+            case,
+            boundary,
+            registry,
+            profile_dir=PROFILE,
+            sessions_root=tmp_path / "sessions",
+            predictions_root=tmp_path / "predictions",
+            resolver=never,
+            fuel_type="gasoline",
+            block=WOT,
+            amendment=3,
+        )
+    assert both.value.reason == "block_and_amendment"
+
+
+def test_the_wot_block_checks_its_design_drives_against_the_designs_record() -> None:
+    import src.analysis.plant_validation as pv
+
+    block = load_interventions(PROFILE).case(CASE_ID).ecu_prediction(WOT)
+    pv._check_design_recordings(block, {"sessions": [{"session": s} for s in WOT_DESIGN_DRIVES]})
+    with pytest.raises(FuelPlantRefusalError) as wrong:
+        pv._check_design_recordings(
+            block, {"sessions": [{"session": s} for s in WOT_DESIGN_DRIVES[:3]]}
+        )
+    assert wrong.value.reason == "design_recordings_mismatch"
+
+
+def test_a_prediction_block_is_scored_under_its_own_rules_and_named_in_the_seal(
+    rng: np.random.Generator,
+) -> None:
+    case = _case()
+    block = case.ecu_prediction(WOT)
+    traces = block.prediction.traces
+    pre = _predicted(_points(60, rng), 2.31)
+    # Same rpm and MAF on both sides, so BFS x rpm / MAF moves as BFS does.
+    post = _post_reads(pre, 2.31, rng).assign(rpm=pre["rpm"].to_numpy())
+    report = evaluate_ecu_outputs(
+        case,
+        _evaluate_points(pre),
+        {"base_fuel_schedule": post, "target_phi": post.assign(observed=1.0)},
+        artifact={traces: block.prediction.files[traces]},
+        block=WOT,
+    )
+    assert report["verdicts"]["base_fuel_schedule"] == "pass"
+    bfs = report["effect_tests"]["base_fuel_schedule"]
+    assert (bfs["quantity"], bfs["resolvable_only"]) == ("air_normalised", True)
+    # phi predicts no change at any point: under the block's rule nothing resolves.
+    assert report["verdicts"]["target_phi"] == "insufficient_evidence"
+    record = report["verdict_record"]
+    assert record.verify()
+    assert (record.block, record.rules_version, record.rules_sha256) == (
+        WOT,
+        1,
+        block.frozen_rules.sha256,
+    )
+    assert report["prediction"]["artifact"] == WOT
+    assert not dataclasses.replace(record, block="ecu_outputs").verify()
+    # The first prediction's traces do not verify the block's prediction.
+    with pytest.raises(FuelPlantRefusalError) as unverified:
+        evaluate_ecu_outputs(
+            case,
+            _evaluate_points(pre),
+            {"base_fuel_schedule": post, "target_phi": post.assign(observed=1.0)},
+            artifact=_traces_hash(case),
+            block=WOT,
+        )
+    assert unverified.value.reason == "prediction_not_verified"
+    first = _evaluate(case, pre, post)["verdict_record"]
+    assert (first.block, first.rules_version) == ("ecu_outputs", 1)
+
+
+def test_a_null_control_read_refuses_a_recording_after_the_flash() -> None:
+    profile, _ = load_fuel_plant(PROFILE, "fuel-mv-1")
+    delay = load_b06(PROFILE, profile.delay)
+    case = load_interventions(PROFILE).case(CASE_ID)
+    assert case.ecu_outputs is not None
+    bfs = case.ecu_outputs.outputs[0]
+    registry = load_tune_revisions(PROFILE / "tune_revisions.yaml")
+    assert registry is not None
+    boundary = resolve_boundary(case, registry)
+    no_fill = pd.DataFrame(
+        {c: [] for c in ("route", "timestamp", "byte_lo", "byte_hi", "rpm_word_lo")}
+    )
+    # The committed slice is pre-flash: a null-control (pre) read is allowed...
+    reads = ecu_output_reads(
+        FIXTURE, bfs, profile, delay, no_fill, image_sha256="0" * 64, boundary=boundary, side="pre"
+    )
+    assert len(reads) > 0
+    # ...and refused against a boundary it does not precede.
+    early = Boundary(datetime(2026, 9, 1, tzinfo=UTC), "exact", boundary.base, boundary.base)
+    with pytest.raises(FuelPlantRefusalError) as wrong:
+        ecu_output_reads(
+            FIXTURE, bfs, profile, delay, no_fill, image_sha256="0" * 64, boundary=early, side="pre"
+        )
+    assert wrong.value.reason == "wrong_side"
+
+
 def _private_inputs() -> tuple[InterventionCase, Boundary, Any, Any]:
     from src.analysis.fuel_comp_inputs import load_fuel_comp_declaration
     from src.analysis.fuel_comp_rom import RevisionImageResolver
@@ -1104,3 +1362,116 @@ def test_the_v3_real_verdict_is_still_insufficient_evidence() -> None:
     assert bfs["post_states"] == {"not_co_observed": 33}
     assert bfs["reason"] == "0 pairs < 20"
     assert report["effect_tests"]["target_phi"]["empty"].startswith("never_captured")
+
+
+def _wot_private() -> tuple[InterventionCase, Boundary, Any, Any]:
+    case, boundary, registry, resolver = _private_inputs()
+    artifact = PREDICTIONS_ROOT / case.ecu_prediction(WOT).prediction.artifact
+    if not artifact.is_dir():
+        pytest.skip(f"prediction_artifact_not_here: {artifact}")
+    absent = [n for n in (*WOT_DESIGN_DRIVES, *WOT_NULL_DRIVES) if not (SESSIONS_ROOT / n).is_dir()]
+    if absent:
+        pytest.skip(f"drives_not_here: {absent}")
+    return case, boundary, registry, resolver
+
+
+@pytest.mark.slow
+def test_the_wot_null_control_does_not_pass_on_pre_flash_drives_outside_its_design() -> None:
+    """Known answer: the base image on both sides, scored against the REAL
+    second prediction under its block. Neither drive passes, and neither can
+    fail either: 142926 gives no resolvable pair (both outputs
+    ``prediction_unresolvable``, 354 / 179 pairs before the rule), and 164007
+    has no eligible read at all (``filtered``: its fill byte never pairs and
+    the rest is transient). The control is unpowered; that is its measurement."""
+    from src.analysis.plant_validation import ecu_null_control
+
+    case, boundary, registry, resolver = _wot_private()
+    null = ecu_null_control(
+        case,
+        boundary,
+        registry,
+        block=WOT,
+        profile_dir=PROFILE,
+        sessions_root=SESSIONS_ROOT,
+        predictions_root=PREDICTIONS_ROOT,
+        resolver=resolver,
+        fuel_type="gasoline",
+    )
+    assert null["passed"] == []
+    assert null["design_points"] == 917
+    assert null["rules_sha256"] == case.ecu_prediction(WOT).frozen_rules.sha256
+    assert {k: null["hashes_checked"][k] for k in WOT_FILES} == WOT_FILES
+    late = null["drives"]["_capture-tuning-2026-09-23T142926"]
+    for output, before, floor, floor_pairs in (
+        ("base_fuel_schedule", 354, 3.1863, 330),
+        ("target_phi", 179, 0.0, 171),
+    ):
+        test = late[output]
+        assert test["outcome"] == "insufficient_evidence"
+        assert test["reason"].startswith("prediction_unresolvable")
+        assert (test["n_pairs"], test["pairs_before_resolvable"]) == (0, before)
+        assert test["noise_floor_pct"] == pytest.approx(floor, abs=1e-3)
+        assert test["floor_pairs"] == floor_pairs
+    assert late["base_fuel_schedule"]["exclusions"]["pre_unresolvable"] == 875
+    assert late["base_fuel_schedule"]["exclusions"]["pre_regime_unknown"] == 39
+    # phi: 9 design points resolvable in a named regime with a phi read.
+    phi_ex = late["target_phi"]["exclusions"]
+    assert (
+        917
+        - sum(
+            phi_ex[k] for k in ("pre_observed_unpaired", "pre_regime_unknown", "pre_not_predicted")
+        )
+        - phi_ex["pre_unresolvable"]
+        == 9
+    )
+    assert (late["base_fuel_schedule"]["post_eligible"], late["target_phi"]["post_eligible"]) == (
+        534,
+        261,
+    )
+    early = null["drives"]["_capture-tuning-2026-09-23T164007"]
+    for output, reads in (("base_fuel_schedule", 1353), ("target_phi", 708)):
+        test = early[output]
+        assert test["outcome"] == "insufficient_evidence"
+        assert (test["post_reads"], test["post_eligible"], test["n_pairs"]) == (reads, 0, 0)
+        assert test["empty"].startswith("filtered")
+
+
+@pytest.mark.slow
+def test_the_wot_post_flash_verdict_is_insufficient_evidence_for_both_outputs() -> None:
+    from src.analysis.plant_validation import score_ecu_outputs
+
+    case, boundary, registry, resolver = _wot_private()
+    report, points, reads = score_ecu_outputs(
+        case,
+        boundary,
+        registry,
+        profile_dir=PROFILE,
+        sessions_root=SESSIONS_ROOT,
+        predictions_root=PREDICTIONS_ROOT,
+        resolver=resolver,
+        fuel_type="gasoline",
+        block=WOT,
+        recordings=FIVE,
+    )
+    assert report["plant_version_of_design"] == "fuel-mv-2"
+    assert len(points) == 917
+    record = report["verdict_record"]
+    assert record.verify() and record.synthetic is False
+    assert (record.block, record.rules_version, record.rules_sha256) == (
+        WOT,
+        1,
+        case.ecu_prediction(WOT).frozen_rules.sha256,
+    )
+    assert (record.scope, record.recordings) == ("named", tuple(FIVE))
+    assert record.outcomes == (
+        ("base_fuel_schedule", "insufficient_evidence", 0, 330),
+        ("target_phi", "insufficient_evidence", 0, 171),
+    )
+    bfs = report["effect_tests"]["base_fuel_schedule"]
+    assert bfs["quantity"] == "air_normalised"
+    assert bfs["post_states"] == {"not_co_observed": 33}
+    assert bfs["empty"].startswith("filtered")
+    assert bfs["noise_floor_pct"] == pytest.approx(3.1863, abs=1e-3)
+    phi = report["effect_tests"]["target_phi"]
+    assert phi["empty"].startswith("never_captured")
+    assert reads["target_phi"].empty

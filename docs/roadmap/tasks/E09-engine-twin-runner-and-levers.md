@@ -792,6 +792,85 @@ Pi; E09.13 Light. Items marked **listing** need the firmware session
     `test_fuel_comp_restore_private_rom.py`: 24 passed. `ruff check .`,
     `ruff format --check .` and `mypy src` are clean. Each slow test spends
     about 32 s building the real score.
+  - **The second prediction of record: its own frozen block (2026-10-16,
+    laptop).** `ecu_predictions[0]` in `plant_interventions.yaml`, id
+    `fuel-comp-restore-2026-10-04-wot`, sha `bfc4e6ee…` (frozen
+    2026-10-16T11:14:00Z).
+    - **Why a block and not a second case.** It is the same intervention:
+      the same flash, images, E07.4 matching, floor and acceptance (frozen
+      once in `f522ff53…`) and the same post-flash recordings. A second case
+      would copy all of them, and the copies could drift. It is not an
+      amendment either: the first artifact stays frozen inside `15eaa48b…`.
+      So `EcuPredictionBlock` carries its own artifact and hashes, outputs,
+      quantities and the amendment-3 rules as required fields. It scores the
+      case's declared post list (`ecu_outputs.post` + `ecu_post_appended`,
+      whose chain is unchanged). Refusals: `rules_changed`,
+      `null_control_in_design`, `prediction_artifact_duplicate` (an
+      artifact already under a frozen block), `design_recordings_mismatch`
+      (checked against `design.json` before scoring), `block_and_amendment`.
+      The verdict seals `block` beside the rules version and sha.
+    - **Artifact hashes, verified before the block was written.** All equal
+      to E08.7's (b870e80f): `run-200draws/result.json` `4f5db38a…`,
+      `report.html` `4cde07b0…`, `traces.parquet` `760bcea0…`;
+      `result_digest` `6180dbcd…`; design `f4332b8d…` as named in
+      `result.json` and `design.json`. `design.json` `20e516956daa5b2a…2cdf`
+      and `design.parquet` `b648148c4857c018…000e` match E08.7's prefix and
+      suffix, and the block holds their full values.
+    - **Rules.** Amendment 3's: BFS air-normalised (ceiling 65,280), φ raw.
+      Only pairs whose predicted |p50| exceeds the floor count, with a
+      minimum of 20, and unknown regime is excluded. The reason, frozen in
+      the sha, states what the pre side alone predicts:
+      - **ΔBFS** `prediction_unresolvable`. The floor on this design is
+        3.19 % on 330 pairs. Only 3 of 917 points predict beyond it (points
+        365–367, +3.82 to +3.85 %), and all three are unknown regime.
+      - **Δφ**: 26 points have a nonzero p50 under the scoring quantile.
+        E08.7's 27 used the interpolated median. The floor is 0.0 % on 171
+        pairs, but only **9** of those points have a φ read within 0.1 s in
+        a named regime. So Δφ is capped at 9 pairs, below 20, however well a
+        post-flash drive is co-sampled.
+    - **Order evidence.** Frozen while 0 co-observed post-flash pairs exist
+      (`co_observed_at_freeze`: 0 / 0). The five recordings hold 33 BFS
+      reads, all `not_co_observed`, and no φ read. No null drive had been
+      scored. The design is fuel-mv-2's, whose pairing tolerances (0.3 s /
+      0.1 s) equal fuel-mv-1's.
+    - **Null control** (`ecu_null_control`: base image, the real WOT
+      prediction, the block's rules). It uses the pre-flash tuning drives
+      outside the design: `_capture-tuning-2026-09-23T142926` and
+      `-23T164007`. Its four design drives cannot serve. **Neither passes,
+      and neither can fail: the control is unpowered.**
+      - 142926: both outputs `insufficient_evidence`,
+        `prediction_unresolvable`. BFS 0 of 354 pairs (534 eligible reads,
+        floor 3.19 %). φ 0 of 179 pairs (261 eligible reads, floor 0.0 %);
+        none of the 9 resolvable φ points is matched.
+      - 164007: `filtered`, 0 eligible reads out of 1,353 BFS and 708 φ
+        reads. The fill byte never pairs (`fill_byte:unpaired:pid_0x11` 322
+        on BFS) and the rest is transient.
+    - **Post-flash, the five by name: `insufficient_evidence` for both
+      outputs, 0 pairs.** Sealed under block `fuel-comp-restore-2026-10-04-wot`,
+      rules v1, `bfc4e6ee…`, scope `named`. BFS: 33 reads, all
+      `not_co_observed`, floor 3.19 % on 330 pairs. φ: `never_captured`,
+      floor 0.0 % on 171 pairs.
+    - **Tests** (`tests/test_plant_validation_ecu_outputs.py`, now 30 fast
+      and 7 slow). Fast:
+      - the block's hashes, E08.7's values and the chain, with E07.4's
+        `f522ff53…`, v1 `15eaa48b…`, v2 `c458d1a6…` and v3 `7a9f4279…`
+        unchanged;
+      - six edits refusing `rules_changed`, plus `null_control_in_design`,
+        `prediction_artifact_duplicate` and the required fields;
+      - the artifact refusals (`prediction_artifact_missing`,
+        `prediction_artifact_changed`) before any recording is touched, and
+        `block_and_amendment`;
+      - `design_recordings_mismatch`, the seal naming the block, and a
+        null-control read refusing `wrong_side`.
+
+      Slow (each skips by name without the artifact or drives): the null
+      control and the post-flash verdict. Mutations caught: dropping
+      `_check_predictions`, and dropping the null-in-design check.
+    - **Gate.** `pytest -q -n 4 tests/test_plant_validation.py
+      tests/test_plant_validation_ecu_outputs.py tests/test_layering.py
+      tests/test_exceptions_pickle.py`: 225 passed. `-m "slow or not slow"`
+      on the ECU file: 37 passed. Whole-repo `ruff check`, `ruff format
+      --check` and `mypy src` are clean.
   - **Remaining:**
     1. **Open dependency: E09.1's `twin` profile, which does not exist yet.**
        It must poll BFS with rpm, MAF and the fill byte, and log the RAM φ
@@ -799,21 +878,39 @@ Pi; E09.13 Light. Items marked **listing** need the firmware session
     2. **Desk work once such a drive is pulled.** Append it to
        `ecu_post_appended` (chain value from `post_chain_sha256`), then run
        `score_ecu_outputs(..., amendment=3)` over every declared recording.
-    3. **Operator decision.** Under v3 this prediction has no resolvable
-       design point in a named regime (the Consequence above). The only
-       three beyond the 2.44 % floor are points 91–93 (5,162.5–5,362.5 rpm,
-       cell 5200×144, +3.82 to +4.62 %), and all three are unknown regime.
-       So a drive from item 1 cannot give a BFS or φ verdict against this
-       design.
-       - **Owed (not built here): score the second prediction.** Commit
-         `b870e80f` records a second 10-04 prediction in E08.7,
-         `fuel-comp-restore-2026-10-04-wot`: 917 points, 3 ΔBFS-resolvable,
-         27 with nonzero Δφ. Scoring it needs a new frozen block or case,
-         because the first artifact is frozen inside `15eaa48b…`.
-       - **Its null control needs other drives.** Its design is built on both
-         of this item's null drives (`_capture-tuning-2026-09-22T235224` and
-         `_capture-tuning-2026-09-22T170459`), so they cannot be an
-         independent null control for it.
+    3. **Operator decision: neither prediction can reach a BFS or φ verdict
+       under the v3 rules.**
+       - The first prediction has no resolvable design point in a named
+         regime (the Consequence above).
+       - The second, `fuel-comp-restore-2026-10-04-wot`, is now frozen and
+         scored (block `bfc4e6ee…`, above). Its ΔBFS has 3 points beyond the
+         3.19 % floor, all unknown regime. Its Δφ is capped at 9 resolvable
+         design points, below 20, because 421 of its 917 points have no φ
+         read within 0.1 s.
+       - So a drive from item 1 gives `insufficient_evidence` against both
+         designs, however well it is co-sampled.
+       - Its null control (142926, 164007) does not pass, but it is
+         unpowered: no resolvable pair on 142926, no eligible read on 164007.
+       - Options, each a new prediction or block and never an edit of a
+         frozen one:
+         - (a) accept `insufficient_evidence` and retire E09.12's scoring of
+           this flash;
+         - (b) a new design whose points carry a co-sampled φ read (a
+           `twin`-profile pre-change drive cannot exist: the base image is
+           gone), or a declared φ pairing tolerance justified by φ's own
+           update rate, frozen as a new block;
+         - (c) score the next flash, with the pre-change drive on the
+           `twin` profile recorded before it.
+       - **Decided 2026-10-16 (orchestrator, operator-delegated overnight):
+         (c).** (b) would loosen φ pairing after these numbers are known,
+         which is too close to fitting; (a) is what (c) implies for this
+         flash anyway. So the 10-04 flash's scoring stays
+         `insufficient_evidence` and is not pursued further. The next
+         intervention gets, in this order: E09.1's `twin` profile; a
+         pre-change drive on it; a prediction whose design comes from that
+         drive (so its points carry co-sampled BFS, rpm, MAF, fill byte and
+         φ); a frozen block; then the flash and the post-change drive. The
+         operator may revisit.
        - A narrower floor would need co-sampled pre-change data on the base
          image, which can no longer be recorded. ~~Comparing BFS across
          drives~~ was decided 2026-10-16 (amendments 2 and 3).
