@@ -90,6 +90,18 @@ computed output.
 | E09.10 | — | `ecu_application_model.yaml`, `paired_steady.py`, `paired_scenarios.py` |
 | E09.11 | `data/<vehicle>/fuel_plant_mv4.yaml`, `tests/test_fuel_plant_mv4.py` | `fuel_plant.py`, `fuel_plant_eval.py` |
 | E09.12 | `tests/test_plant_validation_ecu_outputs.py` | `plant_validation.py`, `plant_interventions.yaml` |
+| E09.14a | `src/analysis/rom_levers.py`, `tests/test_rom_levers.py` | `tools/rom_sim.py` (inspect) |
+| E09.14b | — | `rom_editor.py` (`preview_edits`), the ROM Editor page and its tests |
+
+**Session split (2026-10-15).** The W09 session (ROM Editor page,
+`rom_editor.py`, MCP ROM tools) takes E09.14b only, after E08.11 and its
+W09.6 real-image update are committed. The simulator session (`sim_*`,
+`paired_scenarios.py`, `tools/rom_sim.py`) takes E09.12 (started
+2026-10-15, Deep), E09.2a/b/c after E08.11 lands, and E09.14a. The review
+session takes E09.13. Unclaimed: E09.1, E09.3–E09.6, E09.11 (truck or Pi
+for acceptance) and the listing items E09.7–E09.10. Constraint from W09:
+if E09.2a changes the simulate result shape, the W09 session is told the
+shape before it lands, since the page and MCP tools render it.
 
 Dispatch tiers (CLAUDE.md): E09.1 Standard; E09.2, E09.3, E09.5, E09.7,
 E09.8, E09.9, E09.10, E09.11, E09.12 Deep; E09.4 Heavy; E09.6 Heavy on the
@@ -265,7 +277,7 @@ Pi; E09.13 Light. Items marked **listing** need the firmware session
   engine-truth check of the simulator. Only the ram-study logs the fill
   byte pre-flash, so the floor comes from within-recording pairs.
 
-- [ ] **E09.13 — Declare the minimum torque model and its order.** Light
+- [x] **E09.13 — Declare the minimum torque model and its order.** Light
   Doc work: in E07.5 stage 4, state the minimum model (friction and
   pumping from H07.5 coast-downs; a declared MBT-relative spark-efficiency
   shape and a λ-efficiency curve, both identified on H07 pulls, never
@@ -274,15 +286,26 @@ Pi; E09.13 Light. Items marked **listing** need the firmware session
   Add the three H07 items to the queue ahead of E07.5 stage 4.
   **Accept:** E07.5 stage 4 names the model and cites this order; the
   queue lists the H07 items.
+  *Done 2026-10-15:* E07.5 remaining item 4 now states the minimum model
+  (indicated torque from air per event × η(λ) × η(spark), friction and
+  pumping from coast-downs, an MBT-relative quadratic η(spark) identified
+  on H07 pulls and never on `derived:ESTIMATED_TORQUE_NM`) and the order
+  H07.10 → H07.5 → H07.12 → identification → spark sweeps.
+  `OVERNIGHT-QUEUE.md` Q27 records the order with the truck items marked
+  blocked overnight. No code.
 
-- [ ] **E09.14 — `inspect` names the lever and its blockers.**
-  `tools/rom_sim.py inspect` and the page's preview classify an edit by
-  lever (the table above) and list, per output, what blocks a number:
-  unmapped, unmodelled node, plant unqualified, closed loop. Read from the
-  manifest and `compare_roms`, not a hand table.
+- [ ] **E09.14 — `inspect` and the page name the lever and its blockers.**
+  One function, `src/analysis/rom_levers.py` (layer 5), classifies an edit
+  by lever (the table above) and lists, per output, what blocks a number:
+  unmapped, unmodelled node, plant unqualified, closed loop. It reads the
+  manifest and `compare_roms`, never a hand table. Two callers: 14a
+  `tools/rom_sim.py inspect` (simulator session), 14b
+  `rom_editor.preview_edits` and the ROM Editor page beside the preview
+  (W09 session). Neither caller classifies on its own.
   **Accept:** a timing-trim edit says "no torque plant"; a MAF-curve edit
   before E09.8 says "not mapped"; a Fuel Comp cruise edit before E09.10
-  says "closed loop: trim authority undecoded".
+  says "closed loop: trim authority undecoded"; the CLI and the page show
+  the same strings for the same edit (one test calls both).
 
 ## Where Rust would pay, and where it would not
 

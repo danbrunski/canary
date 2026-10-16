@@ -1057,6 +1057,21 @@ supercharger is a hardware intervention with a new plant parameter set.
     4. *Torque production* (unbuilt): a validated H07 torque reference
        (H07.12 NA baseline, H07.8 repeatability, H07.10 mass), controlled
        spark, lambda and cam sweeps on it, and MAP for pumping.
+       **Minimum model and order (E09.13, 2026-10-15).** The first torque
+       stage is: brake torque = indicated torque − friction − pumping, with
+       indicated torque = air per cylinder event × fuel energy × η(λ) ×
+       η(spark); friction and pumping from H07.5's coast-downs (a
+       speed-dependent friction term; pumping from MAP once measured, else a
+       named working assumption); η(spark) a declared MBT-relative shape
+       (quadratic in retard from MBT, its curvature a parameter identified on
+       H07 pulls, never fitted to `derived:ESTIMATED_TORQUE_NM`, which shares
+       its inputs); η(λ) a declared curve with its peak near λ 0.9. Every
+       parameter follows E07.3's registry rules (known / identifiable /
+       requires_measurement with brackets). Order: H07.10 (mass; the ±1.3 %
+       estimate stands until a scale ticket) → H07.5 (road load) → H07.12 (NA
+       baseline pulls, the torque reference) → this stage's identification →
+       spark sweeps (N01.2 gives degrees per count first). Queue entry Q27
+       records the order; the truck items stay blocked overnight.
     5. *Rotational dynamics* (unbuilt): H07.5 road load, H07.6 inertia and
        H07.10 mass on the truck.
     6. *Fuel rail* and *engine thermal* (unbuilt): rail-pressure drives
