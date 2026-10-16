@@ -798,3 +798,139 @@ def test_a_second_ctrl_c_while_stopping_escalates_to_kill_without_a_traceback() 
     code = desk.stop_child(daemon, grace=5)  # type: ignore[arg-type]
     assert daemon.terminated and daemon.killed
     assert code == -9
+
+
+# -- running under the venv, creating it when missing ---------------------------------------
+
+
+def plan(
+    argv: list[str],
+    *,
+    venv: Path,
+    inside: bool,
+    present: bool = True,
+    version: tuple[int, int] = (3, 12),
+    bootstrapped: bool = False,
+) -> desk.Launch:
+    return desk.launch_plan(
+        argv,
+        venv=venv,
+        prefix=str(venv) if inside else "/usr",
+        version=version,
+        executable="/usr/bin/python3",
+        environ={desk.BOOTSTRAPPED_ENV: "1"} if bootstrapped else {},
+        module_present=lambda _name: present,
+    )
+
+
+def make_venv(tmp_path: Path) -> Path:
+    venv = tmp_path / ".venv"
+    desk.venv_python(venv).parent.mkdir(parents=True)
+    desk.venv_python(venv).write_text("")
+    return venv
+
+
+def test_inside_a_complete_venv_the_launcher_simply_runs(tmp_path: Path) -> None:
+    assert plan([], venv=make_venv(tmp_path), inside=True) == desk.Launch("run")
+
+
+def test_outside_the_venv_the_script_re_launches_under_it_with_its_arguments(
+    tmp_path: Path,
+) -> None:
+    venv = make_venv(tmp_path)
+    launch = plan(["--port", "8123", "--no-browser"], venv=venv, inside=False)
+    assert launch.action == "exec"
+    assert launch.command == (
+        str(desk.venv_python(venv)),
+        str(desk._SCRIPT),
+        "--port",
+        "8123",
+        "--no-browser",
+    )
+
+
+def test_with_no_venv_the_installer_creates_one_without_torch(tmp_path: Path) -> None:
+    venv = tmp_path / ".venv"
+    launch = plan([], venv=venv, inside=False)
+    assert launch.action == "install"
+    assert launch.command == (
+        "/usr/bin/python3",
+        str(desk.INSTALLER),
+        "--venv",
+        str(venv),
+        "--torch",
+        "none",
+    )
+    assert desk.INSTALLER.exists()
+
+
+def test_a_venv_without_its_packages_is_installed_into_then_refused_if_still_empty(
+    tmp_path: Path,
+) -> None:
+    venv = make_venv(tmp_path)
+    first = plan([], venv=venv, inside=True, present=False)
+    assert first.action == "install"
+    assert first.command[0] == str(desk.venv_python(venv))
+    assert "--torch" in first.command and "none" in first.command
+    again = plan([], venv=venv, inside=True, present=False, bootstrapped=True)
+    assert again.action == "refuse" and again.reason == "venv_incomplete"
+    assert "pydantic" in again.message and desk.MANUAL_INSTALL in again.message
+
+
+def test_no_bootstrap_refuses_by_name_instead_of_installing(tmp_path: Path) -> None:
+    missing = plan(["--no-bootstrap"], venv=tmp_path / ".venv", inside=False)
+    assert (missing.action, missing.reason) == ("refuse", "venv_missing")
+    assert desk.MANUAL_INSTALL in missing.message
+    empty = plan(["--no-bootstrap"], venv=make_venv(tmp_path), inside=True, present=False)
+    assert (empty.action, empty.reason) == ("refuse", "venv_incomplete")
+    # An existing venv is still used: no install is needed to re-launch.
+    existing = plan(["--no-bootstrap"], venv=make_venv(tmp_path / "b"), inside=False)
+    assert existing.action == "exec"
+
+
+def test_an_old_python_cannot_create_the_venv_and_says_which_to_install(tmp_path: Path) -> None:
+    launch = plan([], venv=tmp_path / ".venv", inside=False, version=(3, 11))
+    assert (launch.action, launch.reason) == ("refuse", "python_too_old")
+    assert "3.12" in launch.message and "3.11" in launch.message
+
+
+def test_importing_the_module_never_re_launches() -> None:
+    # The prologue runs only under ``__main__``; this test file imported the module.
+    assert desk.__name__ != "__main__"
+    assert "yaml" in sys.modules
+
+
+def test_ensure_venv_refuses_with_exit_2_and_execs_nothing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    def forbidden(*_: Any, **__: Any) -> Any:
+        raise AssertionError("must not exec or install on a refusal")
+
+    monkeypatch.setattr(os, "execve", forbidden)
+    monkeypatch.setattr(subprocess, "call", forbidden)
+    monkeypatch.setattr(desk, "VENV_DIR", tmp_path / ".venv")
+    monkeypatch.setattr(sys, "prefix", "/usr")
+    with pytest.raises(SystemExit) as exc:
+        desk.ensure_venv(["--no-bootstrap"])
+    assert exc.value.code == 2
+    assert "venv_missing" in capsys.readouterr().err
+
+
+SYSTEM_PYTHON = Path("/usr/bin/python3")
+
+
+@pytest.mark.skipif(not SYSTEM_PYTHON.exists(), reason="needs a system python3")
+def test_run_with_the_system_python_it_re_launches_under_the_venv() -> None:
+    # The venv's python may be a symlink to this very binary; what differs is
+    # sys.prefix, which is what the prologue reads.
+    out = subprocess.run(
+        [str(SYSTEM_PYTHON), str(SCRIPT), "--help"],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+        timeout=60,
+        env={**os.environ, desk.BOOTSTRAPPED_ENV: ""},
+    )
+    assert out.returncode == 0, out.stderr
+    assert f"re-launching under {desk.venv_python()}" in out.stderr
+    assert "--state-dir" in out.stdout and "--no-bootstrap" in out.stdout

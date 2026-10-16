@@ -7,6 +7,10 @@ ROM Editor, where an edit can be previewed and run through the simulator:
 
     .venv/bin/python scripts/canary_desk.py --rom-dir "/path/to/Tuned ROMs"
 
+A bare ``python3 scripts/canary_desk.py`` works too: the script re-launches
+itself under ``.venv`` and, when there is none, creates it with
+``scripts/install_deps.py`` first (``--no-bootstrap`` refuses instead).
+
 Everything the daemon writes lives under ``--state-dir`` (default
 ``~/canary-data/desk``), never in the checkout: the ROM Library holds
 proprietary images, and ``canary.sim.example.yaml`` on its own would put
@@ -22,6 +26,7 @@ from __future__ import annotations
 
 import argparse
 import contextlib
+import importlib.util
 import json
 import os
 import re
@@ -36,13 +41,155 @@ import urllib.error
 import urllib.parse
 import urllib.request
 import webbrowser
-from collections.abc import Callable, Iterable, Iterator, Sequence
+from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 if __package__ in (None, ""):
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+# -- run under the repo's venv, creating it when missing ------------------------------------
+#
+# Standard library only, and it runs before any project import, so a bare
+# ``python3 scripts/canary_desk.py`` on a machine with nothing installed still
+# works: the script re-launches itself under ``.venv/bin/python``, and when
+# there is no ``.venv`` it creates one with ``scripts/install_deps.py`` first
+# (the project's own installer; Torch left out, since desk mode runs no model).
+
+_SCRIPT = Path(__file__).resolve()
+_REPO = _SCRIPT.parents[1]
+VENV_DIR = _REPO / ".venv"
+INSTALLER = _REPO / "scripts" / "install_deps.py"
+#: Set on the re-launch after an install, so a venv that still lacks its
+#: packages is a refusal, never a loop.
+BOOTSTRAPPED_ENV = "CANARY_DESK_BOOTSTRAPPED"
+REQUIRED_PYTHON = (3, 12)
+#: Modules whose absence means the venv was never installed into.
+VENV_MARKER_MODULES = ("pydantic", "yaml")
+NO_BOOTSTRAP_FLAG = "--no-bootstrap"
+MANUAL_INSTALL = "python3 scripts/install_deps.py"
+
+
+def venv_python(venv: Path = VENV_DIR) -> Path:
+    """The interpreter inside ``venv`` (``install_deps.venv_python``'s rule)."""
+    if sys.platform == "win32":
+        return venv / "Scripts" / "python.exe"
+    return venv / "bin" / "python"
+
+
+def running_in(venv: Path, prefix: str = sys.prefix) -> bool:
+    """Whether this interpreter is ``venv``'s own."""
+    try:
+        return Path(prefix).resolve() == venv.resolve()
+    except OSError:
+        return False
+
+
+@dataclass(frozen=True)
+class Launch:
+    """What the prologue does: ``run`` here, ``exec`` the venv, ``install`` then exec, or refuse.
+
+    ``command`` is the exec or install command; ``reason``/``message`` the refusal.
+    """
+
+    action: str
+    command: tuple[str, ...] = ()
+    reason: str = ""
+    message: str = ""
+
+
+def _module_present(name: str) -> bool:
+    return importlib.util.find_spec(name) is not None
+
+
+def launch_plan(
+    argv: Sequence[str],
+    *,
+    venv: Path = VENV_DIR,
+    prefix: str = sys.prefix,
+    version: tuple[int, int] = sys.version_info[:2],
+    executable: str = sys.executable,
+    environ: Mapping[str, str] = os.environ,
+    module_present: Callable[[str], bool] = _module_present,
+) -> Launch:
+    """Decide how to run, from the facts alone (pure, so the rules are testable)."""
+    python = venv_python(venv)
+    install = (executable, str(INSTALLER), "--venv", str(venv), "--torch", "none")
+    if running_in(venv, prefix):
+        missing = [name for name in VENV_MARKER_MODULES if not module_present(name)]
+        if not missing:
+            return Launch("run")
+        why = f"{venv} lacks {', '.join(missing)}"
+        if environ.get(BOOTSTRAPPED_ENV):
+            return Launch(
+                "refuse",
+                reason="venv_incomplete",
+                message=f"{why} even after installing; run `{MANUAL_INSTALL}` and read its output",
+            )
+        if NO_BOOTSTRAP_FLAG in argv:
+            return Launch(
+                "refuse",
+                reason="venv_incomplete",
+                message=f"{why}; run `{MANUAL_INSTALL}` or drop {NO_BOOTSTRAP_FLAG}",
+            )
+        return Launch("install", (str(python), *install[1:]))
+    if python.exists():
+        return Launch("exec", (str(python), str(_SCRIPT), *argv))
+    if NO_BOOTSTRAP_FLAG in argv:
+        return Launch(
+            "refuse",
+            reason="venv_missing",
+            message=f"no {venv}; run `{MANUAL_INSTALL}` or drop {NO_BOOTSTRAP_FLAG}",
+        )
+    if version < REQUIRED_PYTHON:
+        want = ".".join(str(part) for part in REQUIRED_PYTHON)
+        have = ".".join(str(part) for part in version)
+        return Launch(
+            "refuse",
+            reason="python_too_old",
+            message=f"no {venv}, and this is Python {have}; CANary needs {want}+ to create one "
+            f"(install python{want}, then run `python{want} {_SCRIPT.relative_to(_REPO)}`)",
+        )
+    return Launch("install", install)
+
+
+def ensure_venv(argv: Sequence[str] | None = None) -> None:
+    """Carry out ``launch_plan``: return only when this process may run the launcher."""
+    args = list(sys.argv[1:] if argv is None else argv)
+    # Read at call time, so a test (or a caller) can point VENV_DIR elsewhere.
+    plan = launch_plan(args, venv=VENV_DIR, prefix=sys.prefix, executable=sys.executable)
+    if plan.action == "run":
+        return
+    if plan.action == "refuse":
+        print(f"refused: {plan.reason}: {plan.message}", file=sys.stderr)
+        raise SystemExit(2)
+    env = dict(os.environ)
+    if plan.action == "install":
+        print(
+            f"canary_desk: installing CANary into {VENV_DIR} (one time, a few minutes)",
+            file=sys.stderr,
+        )
+        print("+ " + " ".join(plan.command), file=sys.stderr, flush=True)
+        rc = subprocess.call(list(plan.command), cwd=_REPO)  # noqa: S603 - our own installer
+        if rc != 0:
+            print(
+                f"refused: install_failed: `{' '.join(plan.command)}` exited {rc}; "
+                "read its output above",
+                file=sys.stderr,
+            )
+            raise SystemExit(2)
+        env[BOOTSTRAPPED_ENV] = "1"
+    python = venv_python(VENV_DIR)
+    command = [str(python), str(_SCRIPT), *args]
+    print(f"canary_desk: re-launching under {python}", file=sys.stderr, flush=True)
+    if sys.platform == "win32":
+        raise SystemExit(subprocess.call(command, env=env))  # noqa: S603 - our own script
+    os.execve(str(python), command, env)
+
+
+if __name__ == "__main__":
+    ensure_venv()
 
 import yaml  # noqa: E402
 
@@ -611,6 +758,12 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         type=float,
         default=DEFAULT_TIMEOUT_SECONDS,
         help=f"seconds to wait for the dashboard to answer (default {DEFAULT_TIMEOUT_SECONDS:g})",
+    )
+    parser.add_argument(
+        NO_BOOTSTRAP_FLAG,
+        action="store_true",
+        help="never create .venv or install packages; refuse by name instead "
+        "(the script still re-launches under an existing .venv)",
     )
     return parser.parse_args(argv)
 

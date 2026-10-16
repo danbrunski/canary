@@ -1760,6 +1760,24 @@ refusal carries a stable `reason` string that tests assert by name.
       escalates to kill with no traceback (tested). `--rom-dir` is optional;
       the README's one command is `scripts/canary_desk.py`, ROMs open from
       the GUI. `tests/test_canary_desk.py`: 45 passed.
+    - **Runs from any Python (2026-10-16).** The operator ran
+      `python scripts/canary_desk.py` with the system interpreter and got
+      `ModuleNotFoundError: pydantic`. The script now has a standard-library
+      prologue, before any project import and only under `__main__`:
+      `launch_plan` (pure, tested on its facts) decides to run, re-launch
+      under `.venv/bin/python` (`os.execve`, arguments kept), install first
+      (`scripts/install_deps.py --venv .venv --torch none`, the project's own
+      installer; desk mode runs no model) when there is no `.venv` or the
+      venv lacks `pydantic`/`yaml`, or refuse by name: `venv_missing` /
+      `venv_incomplete` under `--no-bootstrap`, `python_too_old` below 3.12
+      (naming the interpreter to install), `install_failed`, and
+      `venv_incomplete` again after one install (`CANARY_DESK_BOOTSTRAPPED`
+      marks the re-launch, so an empty venv can never loop). README "Desk
+      mode" now gives `python3 scripts/canary_desk.py`. Tests: the plan for
+      each case, `ensure_venv` refusing with exit 2 and no exec, import never
+      re-launching, and an end-to-end run of `--help` through
+      `/usr/bin/python3` (3.12.3, no pydantic here) that re-launches and
+      prints the help.
 
 - [x] **E08.10 — Name every held working assumption; BFS stops inheriting
   the target-lookup gate.** Found 2026-10-15 by W09.6's real-image runs

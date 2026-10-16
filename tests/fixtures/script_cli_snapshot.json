@@ -519,6 +519,18 @@
         "required": false,
         "type": null
       },
+      "--no-bootstrap": {
+        "action": "_StoreTrueAction",
+        "choices": null,
+        "default": false,
+        "dest": "no_bootstrap",
+        "nargs": 0,
+        "option_strings": [
+          "--no-bootstrap"
+        ],
+        "required": false,
+        "type": null
+      },
       "--no-browser": {
         "action": "_StoreTrueAction",
         "choices": null,
