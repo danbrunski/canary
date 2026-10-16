@@ -61,7 +61,7 @@ import hashlib
 import json
 import math
 import re
-from collections.abc import Mapping, Sequence
+from collections.abc import Collection, Iterable, Mapping, Sequence
 from dataclasses import asdict, dataclass, field, replace
 from pathlib import Path
 from typing import Any, Literal
@@ -76,6 +76,7 @@ from src.analysis.ecu_application import (
     load_application_model,
 )
 from src.analysis.fuel_plant import (
+    PLANT_FILE,
     B06Rules,
     FuelPlantProfile,
     FuelPlantRefusalError,
@@ -109,7 +110,7 @@ from src.analysis.paired_steady import (
     trim_k,
 )
 from src.analysis.plant_validation import InterventionVerdict
-from src.analysis.rom_effects import EffectReport, compare_roms
+from src.analysis.rom_effects import EffectReport, _ancestors, compare_roms
 from src.analysis.rom_image import sha256_hex
 from src.analysis.rom_map import DTYPE_BYTES, RomMap, load_rom_map
 from src.analysis.rom_trace import ViewerDefinition, load_viewer_definition
@@ -137,7 +138,9 @@ from src.session import SYNTHETIC_SESSION_PREFIX
 
 #: Bump when what a result means changes. 2: BFS is computed per ROM at its
 #: steady fixed point, and closed-loop points run at the trim's fixed point.
-TOOL_VERSION = "2"
+#: 3: a reason reaches only the outputs downstream of the node it names, and a
+#: gate withholds the candidate per output (E08.10).
+TOOL_VERSION = "3"
 
 #: Outputs the slice computes per point, in order.
 OUTPUTS: tuple[str, ...] = (
@@ -181,6 +184,9 @@ class SimKit:
     viewer: ViewerDefinition
     plant: FuelPlantProfile
     delay: B06Rules
+    #: The plant declaration's file, ``<profile>/<file>``: where each working
+    #: assumption a result names comes from (E08.10).
+    plant_file: str = PLANT_FILE
 
 
 def load_kit(profile_dir: Path) -> SimKit:
@@ -198,6 +204,7 @@ def load_kit(profile_dir: Path) -> SimKit:
         viewer=load_viewer_definition(profile_dir),
         plant=plant,
         delay=load_b06(profile_dir, plant.delay),
+        plant_file=f"{profile_dir.name}/{PLANT_FILE}",
     )
 
 
@@ -795,18 +802,44 @@ def _steady_assumptions(coverage: SteadyCoverage) -> list[str]:
     ]
 
 
-def _twin_gate(report: EffectReport, coverage: SteadyCoverage, assumptions: list[str]) -> list[str]:
+#: A gate reason and the application-model node it names (None: no node, so
+#: it reaches every output).
+GateReason = tuple[str, str | None]
+
+
+def computed_node(model: ApplicationModel, output_id: str, *, written: bool = False) -> str | None:
+    """The application-model node this slice computes for a model output:
+    the node its twin predicts, else the node that writes it (``written``:
+    always the writer, the word the output is). None when the model does not
+    declare the output."""
+    found = next((o for o in model.outputs if o.id == output_id), None)
+    if found is None:
+        return None
+    if found.twin is None or written:
+        return found.written_by
+    return found.twin.predicts
+
+
+def _twin_gate(
+    report: EffectReport,
+    coverage: SteadyCoverage,
+    assumptions: list[str],
+    model: ApplicationModel,
+) -> list[GateReason]:
     """Gate reasons from the two application-model outputs this slice
-    computes; a covered dependency becomes a stated assumption instead."""
-    gate: list[str] = []
+    computes, each with the node it names; a covered dependency becomes a
+    stated assumption instead."""
+    gate: list[GateReason] = []
+    bfs_node = computed_node(model, _BFS_OUTPUT, written=True)
+    twin_node = computed_node(model, _TWIN_OUTPUT, written=True)
     bfs = next((o for o in report.outputs if o.output == _BFS_OUTPUT), None)
     if bfs is None:
-        gate.append(f"rom:{_BFS_OUTPUT}_not_traced")
+        gate.append((f"rom:{_BFS_OUTPUT}_not_traced", bfs_node))
     elif bfs.status != "unchanged":
         rest = coverage.uncovered(bfs.reasons)
         if rest:
-            gate.extend(f"rom:{r}" for r in rest)
-            gate.append(f"rom:{_BFS_OUTPUT}_{bfs.status}")
+            gate.extend((f"rom:{r}", bfs_node) for r in rest)
+            gate.append((f"rom:{_BFS_OUTPUT}_{bfs.status}", bfs_node))
         else:
             assumptions.append(
                 f"steady: the change reaches BFS through {list(bfs.path)}; computed at the "
@@ -822,10 +855,10 @@ def _twin_gate(report: EffectReport, coverage: SteadyCoverage, assumptions: list
         )
     )
     if twin is None:
-        gate.append(f"rom:{_TWIN_OUTPUT}_not_traced")
+        gate.append((f"rom:{_TWIN_OUTPUT}_not_traced", twin_node))
     elif twin.status != "unchanged" and not evaluable:
-        gate.extend(f"rom:{r}" for r in twin.reasons)
-        gate.append(f"rom:{_TWIN_OUTPUT}_{twin.status}")
+        gate.extend((f"rom:{r}", twin_node) for r in twin.reasons)
+        gate.append((f"rom:{_TWIN_OUTPUT}_{twin.status}", twin_node))
     elif twin.status != "unchanged":
         # The twin computes the gated Target AFR lookup; the final word adds a
         # slew and a cap (not modelled). At a steady point neither binds (the
@@ -835,6 +868,189 @@ def _twin_gate(report: EffectReport, coverage: SteadyCoverage, assumptions: list
             f"rom_effects reasons {list(twin.reasons)}"
         )
     return gate
+
+
+# -- which outputs a reason reaches (E08.10) ---------------------------------------------------
+
+#: Per-point reasons that name a computed node, by prefix: the model output
+#: whose computed node (:func:`computed_node`) the reason is about. A
+#: ``target_lookup:*`` reason is the Target AFR lookup's (the twin's gated
+#: lookup), which steady BFS is computed before; ``steady_bfs:*`` is BFS's.
+#: Any other reason names no node and reaches every output.
+_REASON_OUTPUT_BY_PREFIX: dict[str, str] = {
+    "target_lookup": _TWIN_OUTPUT,
+    "steady_bfs": _BFS_OUTPUT,
+}
+
+
+def _output_sinks(model: ApplicationModel) -> dict[str, frozenset[str] | None]:
+    """The application-model nodes each computed output is: BFS the BFS
+    word's writer, target phi the final command word's (the twin computes the
+    gated lookup upstream of it; the corrections between are what its gate
+    reasons name), and every fuel-side output both (the pulse chain takes the
+    BFS word and the phi word, ``predict_pulse(bfs=, phi_q14=)``). None where
+    the model lacks one: every reason then reaches that output."""
+    bfs = computed_node(model, _BFS_OUTPUT, written=True)
+    phi = computed_node(model, _TWIN_OUTPUT, written=True)
+    own: dict[str, str | None] = {"base_fuel_schedule": bfs, "target_phi": phi}
+    out: dict[str, frozenset[str] | None] = {}
+    for name in OUTPUTS:
+        nodes = (own[name],) if name in own else (bfs, phi)
+        out[name] = None if any(n is None for n in nodes) else frozenset(n for n in nodes if n)
+    return out
+
+
+@dataclass(frozen=True)
+class ReasonScope:
+    """Which outputs each reason reaches: those downstream of the node it
+    names, through the application model's ``depends_on``
+    (:func:`~src.analysis.rom_effects._ancestors`). A reason tied to no node
+    reaches every output, conservatively. ``run_paired`` and the Monte Carlo
+    fast path both filter every output's reasons, and decide whether a gate
+    withholds the candidate, through this one object."""
+
+    #: Per output, every node it rests on (its sinks and their ancestors);
+    #: None: the output rests on everything.
+    rests_on: Mapping[str, frozenset[str] | None]
+    #: Run-level gate reasons and the nodes each is tied to (None: no node).
+    gate: Mapping[str, frozenset[str | None]]
+    #: Per-point reason prefixes and the node each names (None: no node).
+    prefixes: Mapping[str, str | None]
+    #: Every application-model node id.
+    model_nodes: frozenset[str]
+
+    @classmethod
+    def of(cls, kit: SimKit, gate: Iterable[GateReason]) -> ReasonScope:
+        rests_on: dict[str, frozenset[str] | None] = {}
+        for name, sinks in _output_sinks(kit.model).items():
+            rests_on[name] = (
+                None
+                if sinks is None
+                else frozenset(n for s in sinks for n in _ancestors(kit.model, s))
+            )
+        nodes: dict[str, set[str | None]] = {}
+        for reason, node in gate:
+            nodes.setdefault(reason, set()).add(node)
+        return cls(
+            rests_on=rests_on,
+            gate={r: frozenset(n) for r, n in nodes.items()},
+            prefixes={
+                prefix: computed_node(kit.model, output)
+                for prefix, output in _REASON_OUTPUT_BY_PREFIX.items()
+            },
+            model_nodes=frozenset(n.id for n in kit.model.nodes),
+        )
+
+    def _nodes(self, reason: str) -> frozenset[str | None]:
+        if reason in self.gate:
+            # A gate reason that names a model node itself (rom_effects'
+            # ``unmodelled:<node>``, ``observed_not_predicted:<node>``) is that
+            # node's; otherwise it is the node of the output that raised it.
+            named = reason.rsplit(":", 1)[-1]
+            if named in self.model_nodes:
+                return frozenset({named})
+            return self.gate[reason]
+        prefix = reason.split(":", 1)[0]
+        if ":" in reason and prefix in self.prefixes:
+            return frozenset({self.prefixes[prefix]})
+        return frozenset({None})
+
+    def reaches(self, reason: str, output: str) -> bool:
+        rests_on = self.rests_on[output]
+        if rests_on is None:
+            return True
+        return any(n is None or n in rests_on for n in self._nodes(reason))
+
+    def keep(self, output: str, reasons: Iterable[str]) -> list[str]:
+        """``reasons`` that reach ``output``, in order."""
+        return [r for r in reasons if self.reaches(r, output)]
+
+
+# -- the plant working assumptions a result rests on (E08.10) --------------------------------
+
+#: Every result names each plant working assumption it rests on with this
+#: prefix, one string per parameter (:func:`format_plant_assumption`).
+PLANT_ASSUMPTION_PREFIX = "plant working assumption: "
+#: The registry parameters whose working value the plant reads only at some
+#: points: the rail where no rail reading was given, VE where the plant's own
+#: manifold model sets MAP (a stated or measured MAP does not read it).
+_RAIL_PARAMETER = "rail_pressure"
+_VE_PARAMETER = "manifold_pressure"
+
+
+@dataclass(frozen=True)
+class PlantAssumption:
+    """One registry working assumption a run resolved and rests on."""
+
+    parameter: str
+    units: str
+    value: float
+    bracket: tuple[float, float]
+    #: The declaration it comes from (``<profile>/<file>``, plant version).
+    source: str
+    effect: str
+    #: True: the run varies it inside its bracket; False: held at ``value``.
+    drawn: bool
+    #: What the number is, where the plant uses it other than as itself.
+    role: str = ""
+
+
+def format_plant_assumption(a: PlantAssumption) -> str:
+    """The one string form of a plant working assumption (``assumptions`` is
+    a list of strings end to end: the CLI, the report and the GUI)."""
+    lo, hi = a.bracket
+    how = "drawn inside its bracket in this run" if a.drawn else "held at that value"
+    role = f", {a.role}" if a.role else ""
+    return (
+        f"{PLANT_ASSUMPTION_PREFIX}{a.parameter} ({a.units}) = {a.value!r}{role}, bracket "
+        f"[{lo!r}, {hi!r}], {how} ({a.source}; unresolved effect {a.effect})"
+    )
+
+
+def plant_assumptions(
+    kit: SimKit, points: Sequence[OperatingPoint], *, drawn: Collection[str]
+) -> list[PlantAssumption]:
+    """Every working assumption :func:`~src.analysis.fuel_plant.resolve_parameters`
+    resolves for ``kit``'s plant and some point reads, from the registry
+    itself (never a hand list): a parameter not ``known`` whose number is its
+    registry ``working_assumption`` (and B06's restated delay). The rail
+    counts only when a point has no rail reading, VE only when a point's MAP
+    is the plant's own model. ``drawn`` names the parameters the run varies."""
+    resolved = resolve_parameters(kit.plant, kit.delay)
+    source = f"{kit.plant_file} registry, plant {kit.plant.plant_version}"
+    out: list[PlantAssumption] = []
+    for pid in resolved.values:
+        p = kit.plant.registry.get(pid)
+        wa = p.working_assumption
+        if wa is None or (p.status == "known" and pid != "lambda_observation_delay"):
+            continue
+        if pid == _RAIL_PARAMETER and not any(
+            pt.rail_kpa_source == "working_assumption" for pt in points
+        ):
+            continue
+        if pid == _VE_PARAMETER and not any(pt.map_kpa_source == "plant_model" for pt in points):
+            continue
+        where = source
+        if pid == "lambda_observation_delay":
+            where = f"{source}, restating {kit.plant.delay.file}"
+        lo, hi = kit.delay.bracket if pid == "lambda_observation_delay" else tuple(wa.bracket)
+        out.append(
+            PlantAssumption(
+                parameter=pid,
+                units=p.units,
+                value=float(resolved.values[pid]),
+                bracket=(float(lo), float(hi)),
+                source=where,
+                effect=wa.effect,
+                drawn=pid in drawn,
+                role=(
+                    "the floor under the frozen baseline's VE(rpm) fit (the fit itself is held)"
+                    if pid == _VE_PARAMETER and resolved.ve_curve is not None
+                    else ""
+                ),
+            )
+        )
+    return out
 
 
 def run_paired(
@@ -947,7 +1163,7 @@ def run_paired(
     reached = set(report.changed_nodes) | {n for o in report.outputs for n in o.path}
     unknown_changed = any(r.byte_class in ("unknown", "mapped_unmodelled") for r in report.ranges)
     coverage = steady_coverage(kit.contract, scenario.mode, report.changed_nodes)
-    gate: list[str] = []
+    gated: list[GateReason] = []
     for point in scenario.points:
         for quantity in point.conditioned:
             if quantity in COMPUTED_HERE:
@@ -967,17 +1183,21 @@ def run_paired(
                     "a boundary if the mode takes it, or not at all",
                 )
             if node in reached:
-                gate.append(f"conditioned_on_changed_path:{quantity}")
+                gated.append((f"conditioned_on_changed_path:{quantity}", node))
     assumptions: list[str] = [
         "LTFT acts in open loop: the decoded pulse formula adds STFT and LTFT into k_b with "
         "no open-loop gate (docs/ecu-firmware-analysis.md:629)",
         "STFT is neutral (the stated value) in open loop: assumed, not decoded",
         *_steady_assumptions(coverage),
     ]
-    gate.extend(_twin_gate(report, coverage, assumptions))
+    gated.extend(_twin_gate(report, coverage, assumptions, kit.model))
     if unknown_changed:
-        gate.append("rom:unknown_bytes_changed")
-    gate = sorted(set(gate))
+        gated.append(("rom:unknown_bytes_changed", None))
+    gate = sorted({r for r, _ in gated})
+    # Each reason reaches only the outputs downstream of the node it names
+    # (E08.10): a Target AFR lookup gate does not withhold steady BFS.
+    scope = ReasonScope.of(kit, gated)
+    withheld = {name: bool(scope.keep(name, gate)) for name in OUTPUTS}
 
     base_side = _side(kit, base_image, scenario.base, base_ltft, "base")
     cand_side = _side(kit, candidate_image, scenario.candidate, cand_ltft, "candidate")
@@ -1014,7 +1234,7 @@ def run_paired(
         )
         outputs: dict[str, dict[str, Any]] = {}
         for name in OUTPUTS:
-            reasons = list(gate) + b["reasons"] + c["reasons"]
+            reasons = scope.keep(name, [*gate, *b["reasons"], *c["reasons"]])
             if name not in _ECU_OUTPUTS:
                 if regime is not None:
                     reasons.append(regime)
@@ -1040,7 +1260,7 @@ def run_paired(
             # The change reaches what this point is conditioned on (or an unknown
             # byte): the candidate's value at the shared condition is not what
             # it would compute, so neither it nor a delta is given.
-            candidate = None if gate else c[name]
+            candidate = None if withheld[name] else c[name]
             delta = (
                 None if b[name] is None or candidate is None else float(candidate) - float(b[name])
             )
@@ -1074,7 +1294,11 @@ def run_paired(
             "loop": pair.loop or "open_loop",
             "outputs": outputs,
         }
-        if pair.loop == "closed_loop" and c.get("fuel_trim_total_pct") is not None and not gate:
+        if (
+            pair.loop == "closed_loop"
+            and c.get("fuel_trim_total_pct") is not None
+            and not withheld["fuel_trim_total_pct"]
+        ):
             # The fixed point fixes the total; with the LTFT the candidate
             # starts from (reset by a flash), the STFT carries the rest until
             # the long-term trim relearns (not modelled).
@@ -1088,6 +1312,9 @@ def run_paired(
             "carries the change; trim authority, the STFT/LTFT split and settling are not "
             "modelled"
         )
+    assumptions.extend(
+        format_plant_assumption(a) for a in plant_assumptions(kit, scenario.points, drawn=overrides)
+    )
     n = max(len(scenario.points), 1)
     unresolved = set(gate)
     for p in points_out:
@@ -1194,13 +1421,20 @@ __all__ = [
     "BATTERY_UNMEASURED",
     "OUTPUTS",
     "OVERRIDES_NOT_FROZEN",
+    "PLANT_ASSUMPTION_PREFIX",
+    "GateReason",
     "LearnedState",
     "OperatingPoint",
     "PairedResult",
     "PairedScenario",
+    "PlantAssumption",
+    "ReasonScope",
     "SimKit",
     "affected_cells",
+    "computed_node",
+    "format_plant_assumption",
     "load_kit",
+    "plant_assumptions",
     "optimise",
     "plant_parameters",
     "plant_rail_kpa",

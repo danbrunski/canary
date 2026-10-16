@@ -400,17 +400,17 @@ def test_the_negative_control_is_unchanged_in_every_visited_cell(negative: Run) 
         # The ECU side (BFS, phi) is unchanged wherever the target lookup
         # resolved; one cell's lookup sits in the enrichment gate's hysteresis
         # band (4,000 rpm, fill bytes 191-192 here) and names that instead.
-        # KNOWN OVER-REFUSAL (cautious, not false confidence): BFS there is
-        # computed before the target lookup and is finite, but
-        # src/analysis/paired_scenarios.py run_paired (``reasons = list(gate) +
-        # ...``, ~line 1017) gives every output, BFS included, the lookup's
-        # gate reason. Locked in so that fixing it flips this deliberately.
-        for name in ("base_fuel_schedule", "target_phi"):
-            o = cell["outputs"][name]
-            if o["status"] == "unsupported":
-                assert {r for e in o["support"] for r in e["reasons"]} >= {GATE_UNKNOWN}
-            else:
-                assert o["status"] == "unchanged"
+        # Flipped by E08.10 (was KNOWN OVER-REFUSAL): BFS is computed before
+        # the target lookup, and a reason now reaches only the outputs
+        # downstream of the node it names (paired_scenarios.ReasonScope), so
+        # BFS is unchanged in every visited cell, the gate-ambiguous one
+        # included; target phi there keeps the lookup's gate reason.
+        assert cell["outputs"]["base_fuel_schedule"]["status"] == "unchanged"
+        o = cell["outputs"]["target_phi"]
+        if o["status"] == "unsupported":
+            assert {r for e in o["support"] for r in e["reasons"]} >= {GATE_UNKNOWN}
+        else:
+            assert o["status"] == "unchanged"
     assert statuses["unchanged"] > 0 and statuses["unsupported"] > 0
     # What made an output unsupported, measured 2026-10-15 on this grid: the
     # closed-loop trim authority (146 closed-loop cells), the undecoded short

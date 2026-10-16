@@ -223,7 +223,7 @@ def test_the_negative_control_rom_reproduces_the_baseline_exactly(
     assert wot["base_fuel_schedule"]["status"] == "supported"
     lo, hi = wot["base_fuel_schedule"]["interval"]["base"]
     assert lo <= wot["base_fuel_schedule"]["base"] <= hi
-    assert result.provenance["tool_version"] == TOOL_VERSION == "2"
+    assert result.provenance["tool_version"] == TOOL_VERSION == "3"
     again = run_paired(kit, _scenario(kit, image, bytes(image)), image, bytes(image))
     assert again.to_dict() == result.to_dict()
 

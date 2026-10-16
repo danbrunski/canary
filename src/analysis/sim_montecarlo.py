@@ -65,6 +65,7 @@ from src.analysis.fuel_plant import (
     ResolvedParameters,
     load_b06,
     load_fuel_plant,
+    plant_files,
     plant_qualification,
     plant_reads,
     predict,
@@ -82,12 +83,15 @@ from src.analysis.paired_scenarios import (
     _PLANT_OUTPUTS,
     BATTERY_UNMEASURED,
     OUTPUTS,
+    PLANT_ASSUMPTION_PREFIX,
     BatterySource,
+    GateReason,
     MapSource,
     OperatingPoint,
     PairedResult,
     PairedScenario,
     RailSource,
+    ReasonScope,
     SimKit,
     _ecu_chain,
     _plant_regime,
@@ -97,6 +101,8 @@ from src.analysis.paired_scenarios import (
     _side,
     _twin_gate,
     _with_contract_mode,
+    format_plant_assumption,
+    plant_assumptions,
     plant_parameters,
     plant_rail_kpa,
     run_paired,
@@ -113,11 +119,12 @@ from src.analysis.paired_steady import (
 from src.analysis.rom_effects import compare_roms
 from src.analysis.rom_image import sha256_hex
 from src.analysis.sim_contract import SimulationRefusalError
-from src.analysis.sim_design import SimDesign
+from src.analysis.sim_design import MAF_FROM_MANIFOLD_MODEL, SimDesign
 from src.session import SYNTHETIC_SESSION_PREFIX
 
-#: Bump when what a result means changes.
-TOOL_VERSION = "1"
+#: Bump when what a result means changes. 2: per-output blanking under a
+#: scoped gate, and held working and design assumptions named (E08.10).
+TOOL_VERSION = "2"
 UNCERTAINTY_FILE = "sim_uncertainty.yaml"
 #: The standing caveat: the plant's structural error is not a parameter.
 STRUCTURAL_ERROR_NOT_SAMPLED = "structural_error_not_sampled"
@@ -129,6 +136,10 @@ FILL_BYTE = _LOAD_BYTE
 SELF_CHECK_COMBOS = 8
 #: The mode a paired Monte Carlo runs (the only one run_paired computes).
 MODE = "conditional_rom_comparison"
+#: A design's own assumptions reach the result with this prefix (E08.10).
+DESIGN_ASSUMPTION_PREFIX = "design: "
+#: The plant parameter a grid design solved its MAF at (fuel_plant's VE).
+_VE_PARAMETER = "manifold_pressure"
 
 FloatArray = NDArray[np.float64]
 IntArray = NDArray[np.int64]
@@ -325,6 +336,12 @@ class MonteCarloDesign:
     #: The plant version the design placed its points with (its MAF and MAP
     #: model); ``None`` for a hand-built design. A run on another is refused.
     plant_version: str | None = None
+    #: The design's own stated assumptions (``SimDesign.assumptions``): every
+    #: result built on it carries them (E08.10).
+    assumptions: tuple[str, ...] = ()
+    #: Points whose MAF the design solved through the plant's manifold model
+    #: when it was built (a grid): frozen there, so a VE draw cannot move it.
+    maf_frozen_points: int = 0
 
     @classmethod
     def from_sim_design(cls, design: SimDesign) -> MonteCarloDesign:
@@ -357,6 +374,10 @@ class MonteCarloDesign:
             base_image_sha256=design.base_image_sha256,
             points=tuple(points),
             plant_version=design.plant_version,
+            assumptions=tuple(design.assumptions),
+            maf_frozen_points=sum(
+                p.maf_source.startswith(f"{MAF_FROM_MANIFOLD_MODEL}:") for p in design.points
+            ),
         )
 
 
@@ -627,7 +648,12 @@ def kit_for_plant(kit: SimKit, profile_dir: Path, plant_version: str | None) -> 
         raise SimulationRefusalError(
             "plant_not_frozen", f"{plant_version} has no frozen baseline parameter set"
         )
-    return replace(kit, plant=plant, delay=load_b06(profile_dir, plant.delay))
+    return replace(
+        kit,
+        plant=plant,
+        delay=load_b06(profile_dir, plant.delay),
+        plant_file=f"{profile_dir.name}/{plant_files(profile_dir)[plant_version].name}",
+    )
 
 
 @dataclass
@@ -657,9 +683,10 @@ def _with_byte(point: OperatingPoint, byte: int) -> OperatingPoint:
 
 def _gate(
     kit: SimKit, template: PairedScenario, base_image: bytes, candidate_image: bytes
-) -> list[str]:
-    """run_paired's run-level gate: what the change reaches that a point is
-    conditioned on, the twin's ROM gates and unknown changed bytes."""
+) -> list[GateReason]:
+    """run_paired's run-level gate, each reason with the node it names: what
+    the change reaches that a point is conditioned on, the twin's ROM gates
+    and unknown changed bytes."""
     report = compare_roms(
         base_image,
         candidate_image,
@@ -679,13 +706,14 @@ def _gate(
     reached = set(report.changed_nodes) | {n for o in report.outputs for n in o.path}
     unknown_changed = any(r.byte_class in ("unknown", "mapped_unmodelled") for r in report.ranges)
     coverage = steady_coverage(kit.contract, template.mode, report.changed_nodes)
-    gate: list[str] = []
-    if kit.contract.quantity(FILL_BYTE).manifest_node in reached:
-        gate.append(f"conditioned_on_changed_path:{FILL_BYTE}")
-    gate.extend(_twin_gate(report, coverage, []))
+    gate: list[GateReason] = []
+    fill_node = kit.contract.quantity(FILL_BYTE).manifest_node
+    if fill_node in reached:
+        gate.append((f"conditioned_on_changed_path:{FILL_BYTE}", fill_node))
+    gate.extend(_twin_gate(report, coverage, [], kit.model))
     if unknown_changed:
-        gate.append("rom:unknown_bytes_changed")
-    return sorted(set(gate))
+        gate.append(("rom:unknown_bytes_changed", None))
+    return gate
 
 
 @dataclass(frozen=True)
@@ -763,7 +791,7 @@ def _build_cache(
     draws: Draws,
     base_image: bytes,
     candidate_image: bytes,
-    gate: list[str],
+    gated: Sequence[GateReason],
     learned: dict[str, Any],
 ) -> tuple[_Cache, IntArray, list[tuple[str, ...]]]:
     """Every (point, fill byte) the draws visit, and the (point, draw) ->
@@ -777,6 +805,10 @@ def _build_cache(
     )
     stfts = (learned["base"]["stft_pct"], learned["candidate"]["stft_pct"])
     qualification = plant_qualification(kit.plant)
+    gate = sorted({r for r, _ in gated})
+    scope = ReasonScope.of(kit, gated)
+    withheld = {name: bool(scope.keep(name, gate)) for name in OUTPUTS}
+    plant_withheld = all(withheld[name] for name in _PLANT_OUTPUTS)
     n_points, n_draws = draws.fill_bytes.shape
     combo_of = np.empty((n_points, n_draws), dtype=np.int64)
     at: list[int] = []
@@ -832,7 +864,7 @@ def _build_cache(
             sorted(plant_regimes - set(qualification.regimes)) if qualification.qualified else []
         )
         for name in OUTPUTS:
-            reasons = list(gate) + b["reasons"] + cd["reasons"]
+            reasons = scope.keep(name, [*gate, *b["reasons"], *cd["reasons"]])
             if name not in _ECU_OUTPUTS:
                 if regime is not None:
                     reasons.append(regime)
@@ -858,10 +890,10 @@ def _build_cache(
                 continue
             if b[name] is not None:
                 base[name][c] = float(b[name])
-            if not gate and cd[name] is not None:
+            if not withheld[name] and cd[name] is not None:
                 cand[name][c] = float(cd[name])
         for s, fuel in enumerate((b, cd)):
-            if (s == 1 and gate) or fuel.get("dead_ms") is None:
+            if (s == 1 and plant_withheld) or fuel.get("dead_ms") is None:
                 continue
             computed[s, c] = True
             pulse[s, c] = fuel["injector_pulse_ms"]
@@ -1052,6 +1084,21 @@ def _inert(
     return inert
 
 
+def _design_assumptions(design: MonteCarloDesign, *, ve_drawn: bool) -> list[str]:
+    """The design's own assumptions, and, for points whose MAF the design
+    solved through the plant's manifold model, that it is frozen there."""
+    out = [f"{DESIGN_ASSUMPTION_PREFIX}{a}" for a in design.assumptions]
+    if design.maf_frozen_points:
+        out.append(
+            f"{DESIGN_ASSUMPTION_PREFIX}the MAF of {design.maf_frozen_points} of "
+            f"{len(design.points)} points was solved through the plant's manifold model at the "
+            "design's VE when the design was built and is frozen there: this run's VE "
+            f"({'drawn' if ve_drawn else 'held'}) moves the plant's MAP and lambda at a point, "
+            "never its MAF, so BFS and the pulse rest on the design's VE"
+        )
+    return out
+
+
 def run_monte_carlo(
     kit: SimKit,
     template: PairedScenario,
@@ -1126,9 +1173,11 @@ def run_monte_carlo(
             "ltft_pct": 0.0 if "ltft_b1" in resets else base_ltft,
         },
     }
-    gate = _gate(kit, template, base_image, candidate_image)
+    gated = _gate(kit, template, base_image, candidate_image)
+    gate = sorted({r for r, _ in gated})
+    scope = ReasonScope.of(kit, gated)
     cache, combo_of, reason_sets = _build_cache(
-        kit, template, design, sampled, base_image, candidate_image, gate, learned
+        kit, template, design, sampled, base_image, candidate_image, gated, learned
     )
     points = _PointArrays.of(design)
 
@@ -1146,6 +1195,10 @@ def run_monte_carlo(
         for name in _PLANT_OUTPUTS:
             base[name][:, d] = plant[name][0]
             cand[name][:, d] = plant[name][1]
+    for name in _PLANT_OUTPUTS:
+        if scope.keep(name, gate):
+            # A gate that reaches this output withholds the candidate, as run_paired.
+            cand[name][:] = np.nan
     support = {name: cache.reason_id[name][combo_of] for name in OUTPUTS}
     # The assembled arrays themselves, checked against run_paired.
     checks = _paired_at(
@@ -1166,10 +1219,21 @@ def run_monte_carlo(
 
     first = next(iter(checks.values()))[0]
     qualification = plant_qualification(kit.plant)
+    varied = sorted(sampled.parameters)
     assumptions: list[str] = []
     for paired, _ in checks.values():
-        assumptions.extend(a for a in paired.assumptions if a not in assumptions)
-    varied = sorted(sampled.parameters)
+        assumptions.extend(
+            a
+            for a in paired.assumptions
+            if a not in assumptions and not a.startswith(PLANT_ASSUMPTION_PREFIX)
+        )
+    # The plant's working assumptions over the whole design (a checked subset
+    # may miss a point that reads one), then the design's own (E08.10).
+    assumptions.extend(
+        format_plant_assumption(a)
+        for a in plant_assumptions(kit, [dp.point for dp in design.points], drawn=varied)
+    )
+    assumptions.extend(_design_assumptions(design, ve_drawn=_VE_PARAMETER in varied))
     inert = _inert(kit, cache, points, uncertainty.declaration, varied)
     caveats = [STRUCTURAL_ERROR_NOT_SAMPLED]
     if not qualification.qualified:
@@ -1254,6 +1318,7 @@ __all__ = [
     "STRUCTURAL_ERROR_NOT_SAMPLED",
     "TOOL_VERSION",
     "UNCERTAINTY_FILE",
+    "DESIGN_ASSUMPTION_PREFIX",
     "DesignPoint",
     "Draws",
     "LoadedUncertainty",

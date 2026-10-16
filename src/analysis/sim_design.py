@@ -141,6 +141,11 @@ THROTTLE_PID_SOURCE = "pid:0x11"
 THROTTLE_DID_SOURCE = "did:0x120F"
 #: The pedal-enrichment flag is not logged: stated, and said so.
 PEDAL_NOT_LOGGED = "stated_zero:not_logged"
+#: A grid point's ``maf_source`` prefix: MAF solved through the plant's
+#: manifold model when the design was built, so frozen in it (E08.10).
+MAF_FROM_MANIFOLD_MODEL = "manifold_model_inverse"
+#: The registry parameter that is the plant's volumetric efficiency.
+_VE_PARAMETER = "manifold_pressure"
 #: The only way a grid's fill-% load becomes airflow, stated by the caller.
 LoadBasis = Literal["fill_fraction_as_manifold_ratio"]
 _LOAD_BASIS_MEANING = {
@@ -440,6 +445,29 @@ def _plant(
     plant, plant_sha = load_fuel_plant(profile_dir, plant_version)
     delay = load_b06(profile_dir, plant.delay)
     return plant, plant_sha, delay, resolve_parameters(plant, delay)
+
+
+def _grid_ve_assumption(plant: FuelPlantProfile, params: ResolvedParameters) -> str:
+    """The VE a grid's MAF is solved at, from the registry the build resolved
+    (E08.10): a grid point's MAF rests on it and is frozen with the design."""
+    p = plant.registry.get(_VE_PARAMETER)
+    wa = p.working_assumption
+    held = (
+        f"the registry's {_VE_PARAMETER} working assumption, bracket "
+        f"[{wa.bracket[0]!r}, {wa.bracket[1]!r}]"
+        if wa is not None and p.status != "known"
+        else f"the registry's {_VE_PARAMETER} ({p.status})"
+    )
+    if params.ve_curve is not None:
+        floor = params.values[_VE_PARAMETER]
+        at = f"on the frozen baseline's VE(rpm) curve, floor {floor!r} ({held})"
+    else:
+        at = f"at VE {params.values[_VE_PARAMETER]!r} ({held})"
+    return (
+        f"MAF solved {at}, plant {plant.plant_version} {params.manifold_model}; the MAF is frozen "
+        "in the design when it is built: a run that draws VE moves MAP and lambda at a point, "
+        "never its MAF or BFS"
+    )
 
 
 def _inside(path: Path, root: Path) -> bool:
@@ -1067,7 +1095,7 @@ def build_grid_design(
                 cell_col=j,
                 rpm=float(rpm_c),
                 maf_gps=float(maf[k]),
-                maf_source=f"manifold_model_inverse:{params.manifold_model}:{load_basis}",
+                maf_source=f"{MAF_FROM_MANIFOLD_MODEL}:{params.manifold_model}:{load_basis}",
                 baro_kpa=env.baro_kpa,
                 iat_c=env.iat_c,
                 coolant_c=env.coolant_c,
@@ -1116,6 +1144,7 @@ def build_grid_design(
         unplaced_dwell_s={},
         assumptions=[
             _LOAD_BASIS_MEANING[load_basis],
+            _grid_ve_assumption(plant, params),
             "every environmental value, the throttle and the pedal flag are stated in the call",
             "regime unknown: a grid point has no read; the run labels it from its own target",
             "the fill byte at a cell centre is the whole counts either side of it",
@@ -1255,6 +1284,7 @@ def summary(design: SimDesign) -> dict[str, Any]:
 
 
 __all__ = [
+    "MAF_FROM_MANIFOLD_MODEL",
     "SCHEMA_VERSION",
     "SOURCE_PREFIX",
     "DesignPoint",

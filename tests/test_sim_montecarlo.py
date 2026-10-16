@@ -480,7 +480,7 @@ def test_provenance_caveats_and_synthetic_traces(
     assert prov["plant_version"] == "fuel-mv-1"
     assert prov["baseline_sha256"] == result.plant["baseline_sha256"] != ""
     assert prov["contract_sha256"] == kit.contract_sha256
-    assert (prov["seed"], prov["draws"], prov["tool_version"]) == (11, 4, "1")
+    assert (prov["seed"], prov["draws"], prov["tool_version"]) == (11, 4, "2")
     assert result.caveats[0] == STRUCTURAL_ERROR_NOT_SAMPLED
     assert result.caveats[1].startswith("plant_not_qualified")
     assert any(a.startswith("LTFT acts in open loop") for a in result.caveats)
