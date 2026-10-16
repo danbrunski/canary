@@ -123,6 +123,36 @@ cp canary.dev.example.yaml canary.yaml
 .venv/bin/python -m src.main
 ```
 
+### Desk mode (no truck)
+
+To edit a ROM and run the simulator on a laptop, with no truck and no CAN
+adapter, run one command:
+
+```bash
+.venv/bin/python scripts/canary_desk.py
+```
+
+It starts the whole daemon on a virtual CAN bus with OBD disabled (it never
+transmits) and opens the ROM Editor in your browser, already signed in: the
+control token travels in the link's `#` fragment, which the browser never
+sends to the server. Open ROMs from the GUI: the ROM Library page's upload
+today, and an "Open ROM..." button on the ROM Editor is coming. To load a
+folder of images up front instead, add `--rom-dir "/path/to/ROM folder"`
+(optional; repeatable; also `$CANARY_ROM_DIRS`): it adds the `.OsirisROM` and
+plain images to the ROM Library and prints each image's `revision_match`. Only
+a `matched` revision can be simulated; any image can be previewed. An
+encrypted UpRev `.bin` backup is reported and skipped; use the `.OsirisROM`.
+That folder is only read.
+
+Everything the daemon writes, the ROM Library included, lives under
+`--state-dir` (default `~/canary-data/desk`), never in the checkout. A state
+dir inside the checkout is refused. The token is kept at
+`<state>/control/desk.token` (mode 0600). The dashboard binds `127.0.0.1` only
+(`--host` widens it). On the first run, or after the frontend changes, it
+builds the dashboard with `pnpm` (it never installs it). With `--no-browser`
+it prints the full link once instead. Ctrl+C stops it. `--help` lists
+`--port`, `--replay` and the rest.
+
 ### Raspberry Pi / headless
 
 To bring up a fresh Pi for running **and developing** CANary in one idempotent

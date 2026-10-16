@@ -505,6 +505,118 @@
       }
     }
   },
+  "canary_desk.py": {
+    "options": {
+      "--host": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": "127.0.0.1",
+        "dest": "host",
+        "nargs": null,
+        "option_strings": [
+          "--host"
+        ],
+        "required": false,
+        "type": null
+      },
+      "--no-browser": {
+        "action": "_StoreTrueAction",
+        "choices": null,
+        "default": false,
+        "dest": "no_browser",
+        "nargs": 0,
+        "option_strings": [
+          "--no-browser"
+        ],
+        "required": false,
+        "type": null
+      },
+      "--no-build": {
+        "action": "_StoreTrueAction",
+        "choices": null,
+        "default": false,
+        "dest": "no_build",
+        "nargs": 0,
+        "option_strings": [
+          "--no-build"
+        ],
+        "required": false,
+        "type": null
+      },
+      "--port": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": 8000,
+        "dest": "port",
+        "nargs": null,
+        "option_strings": [
+          "--port"
+        ],
+        "required": false,
+        "type": "int"
+      },
+      "--profile": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": "nissan-xterra-2008",
+        "dest": "profile",
+        "nargs": null,
+        "option_strings": [
+          "--profile"
+        ],
+        "required": false,
+        "type": null
+      },
+      "--replay": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": null,
+        "dest": "replay",
+        "nargs": null,
+        "option_strings": [
+          "--replay"
+        ],
+        "required": false,
+        "type": "Path"
+      },
+      "--rom-dir": {
+        "action": "_AppendAction",
+        "choices": null,
+        "default": [],
+        "dest": "rom_dir",
+        "nargs": null,
+        "option_strings": [
+          "--rom-dir"
+        ],
+        "required": false,
+        "type": "Path"
+      },
+      "--state-dir": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": "Path(~/canary-data/desk)",
+        "dest": "state_dir",
+        "nargs": null,
+        "option_strings": [
+          "--state-dir"
+        ],
+        "required": false,
+        "type": "Path"
+      },
+      "--timeout": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": 120.0,
+        "dest": "timeout",
+        "nargs": null,
+        "option_strings": [
+          "--timeout"
+        ],
+        "required": false,
+        "type": "float"
+      }
+    }
+  },
   "canaryctl.py": {
     "options": {
       "--host": {

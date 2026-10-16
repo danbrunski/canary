@@ -1601,7 +1601,7 @@ refusal carries a stable `reason` string that tests assert by name.
     `/data/canary/sim/`, declared in `tests/test_state_dir.py`.
   - Shares E07.7's Pi integration rather than a second runtime.
 
-- [ ] **E08.9 — Desk launcher: one script brings up the GUI on a laptop.**
+- [x] **E08.9 — Desk launcher: one script brings up the GUI on a laptop.**
   Requested 2026-10-15 by the operator: "a single python script that a user
   can run that will launch the gui tool", to edit a ROM and run the simulator
   without the truck. The pieces exist. `canary.sim.example.yaml` runs the
@@ -1669,6 +1669,55 @@ refusal carries a stable `reason` string that tests assert by name.
     - A real run on this laptop with the operator's ROM dir: the ROM Editor
       lists the images and a simulate job completes.
     - A README section "Desk mode (no truck)" with the one command.
+  - **Evidence (2026-10-15).**
+    - `scripts/canary_desk.py` (new), `tests/test_canary_desk.py` (new, 37
+      tests: config builder, `inside_checkout`, token 0600 and reuse, ROM
+      import idempotence and the encrypted-`.bin` skip, WSL vs other browser,
+      port in use, bundle staleness, plus the `slow` smoke that launches the
+      real daemon, fetches `/` and `/control/rom/library` with the token,
+      stops it with SIGINT, checks the daemon pid is gone and that
+      `git status --porcelain --ignored` outside the frontend tree is
+      unchanged): `pytest tests/test_canary_desk.py` 37 passed. README
+      "Desk mode (no truck)" added; `tests/fixtures/script_cli_snapshot.json`
+      gained the script's entry (112 insertions, no deletions).
+    - Real run, this laptop: `.venv/bin/python scripts/canary_desk.py
+      --rom-dir ".../Uprev/Tuned ROMs" --no-browser --state-dir <scratch>
+      --port <free>`. The ROM Library listed all three `.OsirisROM` images,
+      each `matched`: `ZS44A-Tuned-20260920` sha `a46baa24...` (revision
+      `ZS44A-20260920`), `ZS44A-Tuned-20261004` sha `5587f7e1...`
+      (`ZS44A-20261004`), `ZS44A-Tuned` sha `e01cc0cb...` (`ZS44A-k106`). A
+      second run on the same state said `present` for all three. The preview
+      route answered 200 on the 20261004 image, and
+      `POST .../simulate` (Fuel Comp slot 1, 1500-3000 rpm x 20-50 %, 4
+      draws) returned 200 with a result (`outcome: unevaluable`, which is the
+      simulator's verdict for that edit and not a launcher fault). Ctrl+C
+      stopped launcher and daemon (exit 0); the ROM folder still held exactly
+      its three files. The browser page itself was not driven.
+    - Deviations from the item text: the stale-bundle rule is S02's, minus
+      `*.tsbuildinfo` (tsc caches, rewritten by every `pnpm typecheck`, which
+      kept a fresh build looking stale); ROMs go in through the daemon's own
+      upload route after it answers, so the library written is the one the
+      page shows; `--no-build` was added so the smoke test never runs `pnpm`;
+      state dirs under `/etc/canary` and `/data/canary` are refused too
+      (`reserved_state_dir`); the token variable is
+      `CANARY_DESK_CONTROL_TOKEN`, so the operator's real
+      `CANARY_CONTROL_TOKEN` is removed from the child's environment. The
+      launcher opens `http://127.0.0.1:<port>/#wb/tuning-rom-editor?token=<quote(token,
+      safe="")>` (aba2b1fe, `tokenHandoff.ts`): the `?` is inside the fragment,
+      so the token never reaches a request line or the daemon log, and is
+      never printed when a browser is opened. With `--no-browser` the full link
+      is printed once. The token never reaches the daemon's argv (environment
+      only). On WSL, `wslview` / `cmd.exe /c start` necessarily receive the
+      link as an argument of that short-lived process; acceptable on a
+      single-user laptop. `handoff_url` asserts the token is
+      `[A-Za-z0-9_-]+` (`token_not_urlsafe` refusal) rather than escaping for
+      `cmd.exe`. A failed browser launch names the bare URL, not the link.
+    - Follow-up (verifier minors): the `try` starts right after `Popen`, so
+      an interrupt cannot orphan the daemon; an exception during the health
+      wait stops the child (tested); a second Ctrl+C inside `stop_child`
+      escalates to kill with no traceback (tested). `--rom-dir` is optional;
+      the README's one command is `scripts/canary_desk.py`, ROMs open from
+      the GUI. `tests/test_canary_desk.py`: 45 passed.
 
 ## Not in scope (named so they are not implied)
 
