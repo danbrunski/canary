@@ -264,7 +264,7 @@ Pi; E09.13 Light. Items marked **listing** need the firmware session
   correlation with STFT below a threshold declared with the bounds. If it
   fails, the next version is not VE either; the evidence says where.
 
-- [ ] **E09.12 — Score the prediction of record on the plant-free outputs.**
+- [~] **E09.12 — Score the prediction of record on the plant-free outputs.**
   Five drives on ZS44A-20261004 exist (E08.7 item 5) and none is scored.
   Extend `plant_validation` with effect tests for ΔBFS and Δφ per matched
   pair (E07.4's bands and floor), read from `run-200draws/traces.parquet`,
@@ -276,6 +276,325 @@ Pi; E09.13 Light. Items marked **listing** need the firmware session
   with n per cell, recorded here with the drives named; the first
   engine-truth check of the simulator. Only the ram-study logs the fill
   byte pre-flash, so the floor comes from within-recording pairs.
+  *Partial 2026-10-16 (laptop). The machinery is done; the engine-truth check
+  could not happen. The verdict is `insufficient_evidence` for both outputs,
+  0 pairs in every cell, under the original rules and under amendment 2. The
+  post-flash drives were recorded on the live profile, which polls DID 0x1208
+  once a minute, never next to an rpm read, and never polls the RAM φ word.
+  The null control showed raw BFS cannot resolve this change between drives.
+  Amendment 2 (BFS·rpm/MAF) passed that null, but it also passed a no-change
+  drive against the real prediction. Amendment 3 counts only pairs where the
+  prediction is larger than the floor, and under it no design point of this
+  prediction can be resolved at all (below). Verdict under amendment 3:
+  `insufficient_evidence`.*
+  - **Code.**
+    - `src/analysis/plant_validation.py` gains `score_ecu_outputs`, which
+      runs in the order of evidence:
+      1. `verify_prediction_artifact` checks the artifact's files;
+      2. `candidate_recordings` lists every recording on the candidate
+         revision, and an undeclared one is refused;
+      3. `prediction_points` and `pre_observed` build the pre side;
+      4. `fill_samples` and `ecu_output_reads` build the post side;
+      5. `evaluate_ecu_outputs` and `ecu_effect_test` score it.
+    - `match_pairs` takes `load=` columns, so two N02 fill intervals match
+      only when **both** ends are within `load_input_abs`. The default stays
+      E07.4's single `load_input`.
+    - `plant_interventions.yaml` holds the rules in `ecu_outputs`. They are
+      frozen by `ecu_rules_sha256` (`15eaa48b…`, 2026-10-16T06:09:20Z), and
+      an edit refuses with `rules_changed`. They were declared before any
+      post-flash BFS or φ value was read. E07.4's `rules_sha256` is unchanged
+      (`f522ff53…`), and its matching, floor and acceptance are reused as
+      written.
+  - **Artifact first.** `verify_prediction_artifact` runs before any
+    post-change read. It refuses `prediction_artifact_changed` or
+    `prediction_artifact_missing` by name. Hashes checked, all equal to
+    E08.7's:
+    - `run/result.json` `0e129471…`, `run/report.html` `cd99ebcb…`,
+      `run/traces.parquet` `92d35caa…`;
+    - `run-200draws/result.json` `71267e16…`, `report.html` `5173dadd…`,
+      `traces.parquet` `f05b5c2d…`;
+    - `result_digest` `956d7bbe…`, and the design's canonical `322e4cab…` as
+      named in `result.json` and in `design.json`.
+
+    E08.7 did not record the design's own files, so they were hashed before
+    scoring: `design.json` `bccf7f73…`, `design.parquet` `119bf48a…`. Nothing
+    under `~/canary-data/sim/predictions/` was written.
+  - **Rules.**
+    - **Pre side.** The 298 design points (`fuel-mv-1`, committed code) on
+      `_capture-tuning-2026-09-23T142926`. At each point, the output's read
+      is paired within the plant's `ecu_pair_tolerance_s` (0.1 s).
+    - **Predicted change.** Per point, the 200 draws' relative Δ, as p05 /
+      p50 / p95 (inverted CDF, the cell table's method).
+    - **Post side.** A read is built the way a design point is:
+      - anchored on the output's own read;
+      - rpm and MAF within `pair_tolerance_s` (0.3 s);
+      - baro, IAT and coolant within `slow_max_age_s`;
+      - regime from the bracketed commanded φ;
+      - steady by the plant's rpm and MAF windows;
+      - warm;
+      - N02's closed-loop fill interval on the candidate image within 0.3 s
+        (`fill_image_mismatch` refuses).
+    - **Pairing.** One to one, nearest first, in the same regime, using E07.4's
+      matching (rpm 5 %, both fill ends within 4 counts, baro 2 kPa, IAT
+      10 °C).
+    - **Floor.** Pre-vs-pre design points within the one recording, at least
+      30 s apart.
+    - **Acceptance.** E07.4's: 20 pairs, 20 floor pairs, direction 0.7,
+      within 0.8. Where no pair predicts a signed change (`unsigned_prediction:
+      within_only`), within-uncertainty decides alone, named
+      `direction_not_applicable`.
+    - **Seal.** The verdict is an `EcuOutputVerdict`, sealed with E07.4's
+      HMAC key over a body that names its kind. It carries no plant baseline,
+      so it cannot stand in for a plant verdict in `rank_as_improvement`.
+  - **Learned state.** `trim_independence` walks the application model from
+    each output's writer, through every node it depends on: 16 nodes for
+    `base_fuel_schedule_word` and 36 for `target_equiv_ratio`. Neither touches
+    a trim word (`q_0x6400`: `0xFFFF26B4`/`26B6`), so the flash's LTFT reset
+    does not move BFS or φ. LTFT has no RAM word in the model, so the check
+    covers it only through the override text: trims enter the bank pulse
+    factor, not φ.
+  - **Drives.** All five post-flash recordings, and only those:
+    `candidate_recordings` finds no other on ZS44A-20261004.
+    - **`base_fuel_schedule` (DID 0x1208): `insufficient_evidence`, 0 pairs,
+      0 cells.**
+      - There are 33 post reads: 2026-10-08T172943 21, 2026-10-08T182550 9,
+        2026-10-10T153117 2, 2026-10-10T165941 1, and
+        `_capture-fuel-pulsation-2026-10-08T210012` 0.
+      - All 33 are `not_co_observed`. The nearest rpm/MAF read is 0.417 s
+        away at best (medians 0.43–1.4 s), against 0.3 s. The live profile
+        polls Mode 22 and Mode 01 apart.
+      - Only 2 of the 33 have a fill interval within 0.3 s, and every post
+        read's regime is `unknown`, because φ is not logged. So looser
+        pairing could not reach 20 pairs either.
+      - Floor: 4.11 % (p90 |Δ|) on 103 pairs. Pre exclusions: 4 points with
+        no BFS within 0.1 s, and 1 point not predicted.
+    - **`target_phi` (`mem:ECM_TARGET_EQUIV_RATIO`): `insufficient_evidence`,
+      0 pairs, `never_captured`.** No post-flash recording polls the word.
+      Floor: 0.0 % on 57 pairs. 133 design points have no φ read within
+      0.1 s.
+  - **Known answer: a null control across drives.** Two pre-flash drives on
+    the base image are scored as "post" against the design with a predicted
+    Δ of exactly 0.
+    - **φ passes** on both (closed loop, Δ 0.0 %).
+    - **BFS fails** on both:
+      - `_capture-tuning-2026-09-22T235224`: 114 pairs, median +8.56 %
+        (p10 +4.5, p90 +18.8), within 0.035;
+      - `_capture-tuning-2026-09-22T170459`: 93 pairs, median −0.21 % (p10
+        −6.4, p90 +2.8), within 0.73.
+
+    At these matching tolerances the same ROM moves BFS by more than the
+    within-recording floor between drives. The fill intervals are about 46
+    counts wide, and BFS ∝ Qa/rpm is not pinned by rpm and the fill byte.
+    The prediction's ΔBFS is at most −2.4 to +4.6 %. So a BFS `fail` on
+    co-sampled post-flash drives would not be evidence against the
+    prediction. E07.4 already named this limit of a within-recording floor;
+    this is its measurement.
+  - **Amendment 2: BFS·rpm/MAF (decided 2026-10-16, operator-delegated,
+    option a).** A versioned amendment, `ecu_amendments[0]` in
+    `plant_interventions.yaml`. It is not an edit: the original block, its
+    sha `15eaa48b…` and its verdict above stand as recorded.
+    - **Schema.** `EcuAmendment` names the sha it `amends` and has its own
+      `frozen_rules`: `c458d1a6…`, frozen 2026-10-16T06:33:31Z. The case
+      refuses `amendment_chain_broken`, and `rules_changed` on any edit.
+      Verdicts carry `rules_version` and `rules_sha256` in the seal.
+    - **Reason (in the file).** The null control above: raw BFS on
+      `_capture-tuning-2026-09-22T235224` sits +8.56 % at matched conditions
+      on the same ROM. No post-flash pair existed under either rule when the
+      amendment was made: 0 of 33 BFS reads co-observed, and no φ read. So it
+      cannot have been chosen to fit post-flash data.
+    - **Checked on the decoded chain before freezing.** In the running
+      branch, Tp = ⌊⌊K·Qa·m/256⌋ / (d·N)⌋ × 0x23CB >> 16, with Qa =
+      0xFFFF2100 and N = max(0x40, 0xFFFF1204). 0xFFFF1204 is 1.5625 rpm per
+      count, so the floor binds only below 100 rpm. Then 0xFFFF105C =
+      min(0xFFFF, (Tp·FC) >> 7), and steady BFS = min(0xFFFF, 4·105C,
+      ceiling << 8). So BFS·rpm/MAF ∝ K·FC/128, except where a named state
+      excludes the read:
+      - `*_at_ceiling` (BFS ≥ 65,280; both images' ceiling is flat 255), and
+        `draws_at_ceiling` for a draw clamped on base or candidate;
+      - `transient` (the fill filter, the transient term 0xFFFF105A, the
+        airflow low-pass and the 0xFFFF233C speed branch need the steady
+        windows);
+      - `cold` (the after-start hot-wire term);
+      - `*_maf_unpaired`.
+
+      Carried by the floor rather than excluded:
+      - N from PID 0x0C is the 12.5 rpm word, which bounds 0xFFFF1204 to 8
+        counts (up to 1.7 % at 750 rpm);
+      - PID 0x10 MAF stands in for Qa (curve 0xE27E, low-pass, purge hold).
+
+      The MAF-fault and cranking branches are assumed absent, as in E05.2.
+      The predicted change is unchanged: base and candidate share a point's
+      rpm and airflow. φ keeps `raw`.
+    - **Null control, re-run after freezing: passes on both drives.**
+      - `_capture-tuning-2026-09-22T235224`: 114 pairs, median −0.33 % (p10
+        −1.97, p90 +1.58), within 0.851.
+      - `_capture-tuning-2026-09-22T170459`: 93 pairs, median −0.23 % (p10
+        −1.93, p90 +1.74), within 0.860.
+
+      The floor is 2.44 % on 103 pairs, against raw's 4.11 %. Excluded reads
+      by state:
+      - `at_ceiling` 0, `maf_unpaired` 0, `draws_at_ceiling` 0 (pre and post);
+      - on the null drives' post side, before the amendment's own
+        exclusions: 235224 has eligible 603, transient 1,513, fill unpaired
+        72, not_co_observed 2; 170459 has eligible 247, transient 936, fill
+        unpaired 8.
+
+      The margin over 0.8 is thin (0.85 / 0.86). A correct idle prediction
+      (−1.6 %) also sits inside this floor, so direction carries most of the
+      information there.
+    - **Post-flash re-score under amendment 2: `insufficient_evidence` for
+      both outputs**, 0 pairs. BFS: 33 reads, all `not_co_observed`, floor
+      2.44 % on 103 pairs. φ: `never_captured`, floor 0.0 % on 57 pairs.
+      Pairing, not the quantity, is the limit.
+    - **The v2 evidence is idle-only, and it was overstated.** 96 of the 103
+      floor pairs are idle (800-rpm cells), and so are 109/114 and 62/93 of
+      the null pairs. Off idle, within-uncertainty is 0.40 (n = 5) and 0.74
+      (n = 31). These counts were re-measured here. The verifier's
+      pairing-robustness spread, not re-run here: within-uncertainty under a
+      random one-to-one pairing is at least 0.791 / 0.768; nearest design
+      point gives 0.880 and 0.717 (a fail); all pairs give 0.904 / 0.928. So
+      the floor and the v2 null pass say nothing about BFS off idle.
+    - **v2 passes a no-change drive against the real prediction**
+      (re-measured). `_capture-tuning-2026-09-22T235224` scores direction
+      0.762 on 21 signed pairs and within 0.904: `pass`. Cell 800×48 alone
+      supplies 73 of its 114 pairs, at points the prediction calls ≈ 0.
+      `_capture-tuning-2026-09-22T170459` fails (direction 0.60 on 30 signed
+      pairs, within 0.87). Version 2's block and verdict stand as recorded.
+  - **Amendment 3: only resolvable pairs count.** `ecu_amendments[1]`, sha
+    `7a9f4279…` (frozen 2026-10-16T06:56:08Z), amends `c458d1a6…`.
+    - **Rule.** A design point is paired only when its predicted |Δ| (p50)
+      is above the output's condition-matched floor; the rest are
+      `pre_unresolvable`. Direction and within-uncertainty are computed over
+      those pairs only. The minimum is E07.4's `min_pairs`, 20: E07.4
+      declares no per-cell or per-regime minimum. Fewer such pairs, where
+      all predicted points would have given 20, is `insufficient_evidence`
+      named `prediction_unresolvable`. That is distinct from `never_captured`,
+      `filtered` / `not_co_observed`, and `unmatched`.
+    - **unknown regime.** E07.4's effect tests score named regimes only
+      (`enrichment`, `closed_loop`); `match_pairs` itself compares labels, so
+      under v1/v2 `unknown` paired with `unknown`. Under v3 such reads are
+      `pre_regime_unknown` / `post_regime_unknown`.
+    - **Reason (in the file).** The v2 pass above. It was declared before
+      any co-observed post-flash pair existed: 0 pairs for both outputs under
+      v1 and under v2.
+    - **Control (a), the real prediction against the two pre-flash no-change
+      drives: `insufficient_evidence`, `prediction_unresolvable` on both.**
+      0 resolvable pairs, against 106 and 90 pairs that every predicted point
+      would have given. The floor is 2.44 % on 100 pairs. All 274 predicted
+      design points that are in a named regime and have a BFS read sit inside
+      the floor (`pre_unresolvable` 274, `pre_regime_unknown` 20). Only 3
+      points have |p50| > 2.44 %: indices 91 (+3.82 %), 92 (+4.62 %) and 93
+      (+3.85 %), at 5,162.5–5,362.5 rpm in cell 5200×144. All three are
+      excluded by regime (`pre_regime_unknown`), not by the floor.
+    - **Controls (b) and (c), synthetic.** A known +2.31 % change with a
+      floor of about 0.6 % passes (60 resolvable pairs), and the reversed
+      prediction fails.
+    - **Post-flash re-score under v3: `insufficient_evidence` for both
+      outputs**, 0 pairs. BFS: 33 reads, all `not_co_observed`; floor 2.44 %
+      on 100 pairs. φ: `never_captured`; floor 0.0 % on 54 pairs. Five
+      points predict a φ change: 19 (−2.90 %) and 92 have no φ read, and 90,
+      91 and 93 are unknown regime.
+    - **Consequence.** Against this prediction and this design, ΔBFS and Δφ
+      cannot reach a verdict under v3, however well a post-flash drive is
+      co-sampled. In a named regime no design point is resolvable: the
+      predicted changes (idle −1.6 %, light load up to +2.3 %) are inside the
+      2.44 % idle floor. The only three beyond it (91–93) are unknown regime.
+      Even if they counted, they would cap the pairs at 3, below the minimum
+      of 20.
+  - **Post list: append-only, outside the frozen hashes.** The five in
+    `ecu_outputs.post` stay inside `15eaa48b…`, so removing or reordering
+    them refuses with `rules_changed`. Later recordings go in the case's
+    `ecu_post_appended`: each entry is `{recording, appended_on,
+    chain_sha256}`. The chain value is `post_chain_sha256(previous,
+    recording, appended_on)`, starting from `15eaa48b…`. Nothing has been
+    appended yet, so the root and every frozen sha are unchanged.
+    - **What the chain catches.** It has no key. It catches a reordered,
+      edited (recording or `appended_on`), inserted or removed entry that does
+      not recompute the links after it: `post_list_rewritten`. Also refused:
+      a duplicate (`post_recording_duplicate`) and a name with no start time
+      (`recording_time_unknown`).
+    - **Against a rewrite that recomputes the tail,** the record is the disk
+      scan, which refuses any candidate recording left undeclared
+      (`post_recording_undeclared`, which also catches a dropped last entry),
+      plus git history.
+    - **End to end, a pre-flash recording appended to the list refuses as
+      `post_recording_missing`:** it is never on the candidate revision, so
+      `candidate_recordings` does not list it. `post_recording_before_flash`
+      is a backstop for a candidate list built by hand.
+    - **Named scope.** `score_ecu_outputs(..., recordings=[...])` scores only
+      the named recordings. The seal carries `recordings`, `scope` (`all` or
+      `named`) and `candidates_not_scored`, so a subset verdict never reads
+      as a full one: editing the scope fails `verify()`. The slow tests score
+      the five by name, so a newly pulled session does not change them.
+  - **Tests.** `tests/test_plant_validation_ecu_outputs.py` has 18 fast tests
+    and 5 slow private ones, which skip by name (`prediction_artifact_not_here`,
+    `drives_not_here`, `image_not_found`).
+    - Fast: a known +2.31 % ratio passes (60 pairs, direction 1.0); the
+      reversed prediction fails; 19 pairs, unmatched intervals and no floor
+      each give `insufficient_evidence`, each kind of empty named.
+    - Fast: unsigned prediction; one-to-one pairing with n per cell; the
+      seal; the refusals `undeclared_recording`, `synthetic_as_observed`,
+      `synthetic_mismatch` and `prediction_not_verified`.
+    - Fast: the artifact refusals; the frozen rules; trim independence,
+      including a mutated model that refuses `output_reads_trim`; post-read
+      states on the committed slice (`wrong_side`).
+    - Fast (amendment): an 8 % airflow difference fails raw and passes
+      air-normalised; the ceiling and MAF exclusions are counted by name;
+      `ceiling_unstated`; the chain, `rules_changed` and
+      `amendment_chain_broken` refusals; each verdict names its rules version
+      and sha.
+    - Fast (amendment 3 and post list):
+      - controls (b) and (c); `prediction_unresolvable`, with
+        `pairs_before_resolvable`; mixed points, where only the resolvable
+        ones are paired; `*_regime_unknown`;
+      - appending a recording leaves every frozen sha unchanged (no
+        `rules_changed`), and an appended recording is scored and named in
+        the seal, with its scope sealed (a relabelled scope fails
+        `verify()`); `post_list_rewritten` (including an edited
+        `appended_on`), `post_recording_duplicate` and
+        `recording_time_unknown`; the frozen five cannot be removed or
+        reordered (`rules_changed`);
+      - `post_scope`: full scope, named scope with the unscored ones listed,
+        `post_recording_undeclared` and `post_recording_before_flash`;
+      - in `score_ecu_outputs` the artifact is verified before any recording
+        is touched (monkeypatched readers raise if called).
+    - Slow: the real verdict under v1, v2 and v3; the null control (raw
+      fails, air-normalised passes); and control (a) (v2 passes 235224, v3
+      `prediction_unresolvable` on both).
+    - Mutation checks, each caught: the observed ratio inverted, matching on
+      the low fill end only, and direction 0 for an unsigned prediction.
+  - **Gate.** `pytest -n 4 tests/test_plant_validation.py
+    tests/test_plant_validation_ecu_outputs.py tests/test_layering.py
+    tests/test_fuel_comp_restore.py tests/test_paired_scenarios.py`: 78
+    passed. With `-m "slow or not slow"` on the new file and
+    `test_fuel_comp_restore_private_rom.py`: 24 passed. `ruff check .`,
+    `ruff format --check .` and `mypy src` are clean. Each slow test spends
+    about 32 s building the real score.
+  - **Remaining:**
+    1. **Open dependency: E09.1's `twin` profile, which does not exist yet.**
+       It must poll BFS with rpm, MAF and the fill byte, and log the RAM φ
+       word. A post-flash drive on it is truck work.
+    2. **Desk work once such a drive is pulled.** Append it to
+       `ecu_post_appended` (chain value from `post_chain_sha256`), then run
+       `score_ecu_outputs(..., amendment=3)` over every declared recording.
+    3. **Operator decision.** Under v3 this prediction has no resolvable
+       design point in a named regime (the Consequence above). The only
+       three beyond the 2.44 % floor are points 91–93 (5,162.5–5,362.5 rpm,
+       cell 5200×144, +3.82 to +4.62 %), and all three are unknown regime.
+       So a drive from item 1 cannot give a BFS or φ verdict against this
+       design.
+       - **Owed (not built here): score the second prediction.** Commit
+         `b870e80f` records a second 10-04 prediction in E08.7,
+         `fuel-comp-restore-2026-10-04-wot`: 917 points, 3 ΔBFS-resolvable,
+         27 with nonzero Δφ. Scoring it needs a new frozen block or case,
+         because the first artifact is frozen inside `15eaa48b…`.
+       - **Its null control needs other drives.** Its design is built on both
+         of this item's null drives (`_capture-tuning-2026-09-22T235224` and
+         `_capture-tuning-2026-09-22T170459`), so they cannot be an
+         independent null control for it.
+       - A narrower floor would need co-sampled pre-change data on the base
+         image, which can no longer be recorded. ~~Comparing BFS across
+         drives~~ was decided 2026-10-16 (amendments 2 and 3).
 
 - [x] **E09.13 — Declare the minimum torque model and its order.** Light
   Doc work: in E07.5 stage 4, state the minimum model (friction and

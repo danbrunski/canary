@@ -58,7 +58,7 @@ import json
 import math
 import secrets
 import subprocess
-from collections.abc import Callable, Iterable, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import asdict, dataclass
 from datetime import UTC, date, datetime
 from pathlib import Path
@@ -70,6 +70,10 @@ import yaml
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from src.analysis.channels import read_channels
+from src.analysis.ecu_application import ApplicationModel, load_application_model
+from src.analysis.fuel_comp_inputs import load_fuel_comp_declaration
+from src.analysis.fuel_comp_rom import FuelCompCalibration, RevisionImageResolver
+from src.analysis.fuel_comp_samples import session_samples
 from src.analysis.fuel_plant import (
     Acceptance,
     B06Rules,
@@ -77,24 +81,32 @@ from src.analysis.fuel_plant import (
     FuelPlantProfile,
     FuelPlantRefusalError,
     PlantInputs,
+    load_b06,
+    load_fuel_plant,
     plant_qualification,
     predict,
     resolve_parameters,
 )
 from src.analysis.fuel_plant_eval import (
+    _bracketed,
+    _nearest_value,
     _pair,
     _series,
     _stats,
+    _window,
     build_samples,
     check_drive_independence,
     check_origin,
     plant_inputs,
 )
+from src.analysis.lambda_delivery import load_lambda_delivery
 from src.paths import REPO_ROOT
 from src.session import SessionKind, is_synthetic_session, iter_sessions
-from src.signals.pairing import to_seconds
+from src.signals.afr import load_afr_calibration
+from src.signals.derived import FUEL_PROPERTIES
+from src.signals.pairing import PairingPolicy, match_ordered, to_seconds
 from src.storage.sessions import session_started_at
-from src.vehicle.tune_revisions import TuneRevision, TuneRevisionRegistry
+from src.vehicle.tune_revisions import TuneRevision, TuneRevisionRegistry, session_dated_at
 
 INTERVENTIONS_FILE = "plant_interventions.yaml"
 
@@ -385,6 +397,166 @@ class FrozenRules(_Strict):
     frozen_at: datetime
 
 
+_SHA256 = r"^[0-9a-f]{64}$"
+
+
+class EcuOutputSpec(_Strict):
+    """One ECU-side output scored against the truck (E09.12): the decoded
+    integer logic's value, which the plant does not touch."""
+
+    id: str = Field(pattern=r"^[a-z][a-z0-9_]*$")
+    #: The ``output`` name in the prediction's ``traces.parquet``.
+    trace_output: str = Field(min_length=1)
+    #: The channel the truck reports it on.
+    observed: str = Field(min_length=1)
+    #: The application-model output it is (``ecu_application_model.yaml``),
+    #: whose dependency chain :func:`trim_independence` walks.
+    model_output: str = Field(min_length=1)
+
+
+class PredictionArtifact(_Strict):
+    """A simulator prediction written before the drives it is scored on.
+
+    ``files`` are the sha256 values recorded with the prediction (E08.7 item
+    5), never recomputed here: :func:`verify_prediction_artifact` refuses any
+    difference (``prediction_artifact_changed``) before a post-change read is
+    taken. ``design_files`` are the design's own files, hashed before any
+    scoring, since the prediction recorded only the design's canonical hash."""
+
+    #: Directory name under the predictions root (outside the checkout).
+    artifact: str = Field(pattern=r"^[A-Za-z0-9][A-Za-z0-9_.-]*$")
+    recorded_in: str = Field(min_length=1)
+    design_sha256: str = Field(pattern=_SHA256)
+    result_digest: str = Field(pattern=_SHA256)
+    result: str = Field(min_length=1)
+    traces: str = Field(min_length=1)
+    design: str = Field(min_length=1)
+    design_record: str = Field(min_length=1)
+    files: dict[str, str] = Field(min_length=1)
+    design_files: dict[str, str] = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def _named(self) -> PredictionArtifact:
+        for label, digest in {**self.files, **self.design_files}.items():
+            if len(digest) != 64 or any(c not in "0123456789abcdef" for c in digest):
+                raise ValueError(f"{label}: {digest!r} is not a sha256")
+        for name in (self.result, self.traces):
+            if name not in self.files:
+                raise ValueError(f"{name} is scored but its recorded hash is not in files")
+        for name in (self.design, self.design_record):
+            if name not in self.design_files:
+                raise ValueError(f"{name} is read but its hash is not in design_files")
+        return self
+
+
+class EcuOutputRules(_Strict):
+    """E09.12: effect tests on the ECU-side outputs, per matched pair, with the
+    case's matching, floor and acceptance. The pre-change side is the
+    prediction's own design points; the post-change side is each output's own
+    reads on the recordings listed in ``post``. The plant is not used, so its
+    qualification does not gate the verdict."""
+
+    declared_on: date
+    prediction: PredictionArtifact
+    #: The predicted change at a point is the draws' quantiles of the relative
+    #: change (inverted CDF, as the prediction's own cell table), ``[lo, hi]``,
+    #: and their median as the central value.
+    interval_quantiles: tuple[float, float]
+    #: A test with no pair whose central prediction is signed has no direction
+    #: to agree with: it is judged on within-uncertainty alone, named
+    #: ``direction_not_applicable``.
+    unsigned_prediction: Literal["within_only"]
+    outputs: list[EcuOutputSpec] = Field(min_length=1)
+    #: Post-change recordings, listed before they are scored. Every recording
+    #: on the candidate revision must be here (``post_recording_undeclared``).
+    post: list[str] = Field(default_factory=list)
+    frozen_rules: FrozenRules
+    evidence: str = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def _ordered(self) -> EcuOutputRules:
+        lo, hi = self.interval_quantiles
+        if not 0.0 < lo < 0.5 < hi < 1.0:
+            raise ValueError(f"interval quantiles {self.interval_quantiles} must bracket 0.5")
+        ids = [o.id for o in self.outputs]
+        if len(set(ids)) != len(ids):
+            raise ValueError(f"duplicate output ids {ids}")
+        if len(set(self.post)) != len(self.post):
+            raise ValueError("a post-change recording is listed twice")
+        return self
+
+
+#: What an ECU-output test compares per pair. ``raw``: the output's own value.
+#: ``air_normalised``: BFS x rpm / MAF, which the decoded steady chain makes
+#: proportional to K x FC / 128 (:class:`EcuAmendment`).
+EcuQuantity = Literal["raw", "air_normalised"]
+
+
+class EcuAmendment(_Strict):
+    """A versioned amendment to the ECU-output rules: never an edit of the
+    block it amends, which stays frozen with its own verdict.
+
+    ``amends`` is the frozen sha256 of the rules it replaces (the
+    ``ecu_outputs`` block for version 2, the previous amendment after), and
+    its own ``frozen_rules`` hash :meth:`rules_sha256`. ``reason`` states why
+    and on what evidence it was made; it must say what post-change data
+    existed then, so it cannot have been chosen to fit them."""
+
+    version: int = Field(ge=2)
+    declared_on: date
+    amends: str = Field(pattern=_SHA256)
+    #: Output id -> the quantity compared; an output not named keeps ``raw``.
+    quantities: dict[str, EcuQuantity] = Field(min_length=1)
+    #: BFS at or above this is the rpm ceiling's clamp (``0xD8B3 << 8``), not
+    #: ``4 x 0xFFFF105C``: excluded as ``*_at_ceiling`` under ``air_normalised``.
+    bfs_ceiling_counts: int = Field(gt=0, le=0xFFFF)
+    #: ``predicted_beyond_floor`` (version 3): a pair counts toward the
+    #: verdict only where the design point's predicted |change| exceeds the
+    #: output's condition-matched floor, so the test has power there; fewer
+    #: than ``acceptance.min_pairs`` such pairs is ``insufficient_evidence``
+    #: named ``prediction_unresolvable``. ``None``: every predicted pair counts.
+    resolvable: Literal["predicted_beyond_floor"] | None = None
+    #: Version 3: reads whose regime is ``unknown`` are excluded by name
+    #: (``*_regime_unknown``) rather than paired as a regime of their own.
+    exclude_unknown_regime: bool | None = None
+    reason: str = Field(min_length=1)
+    frozen_rules: FrozenRules
+    evidence: str = Field(min_length=1)
+
+    def rules_sha256(self) -> str:
+        """Over every rule field; an unset (``None``) field is left out, so a
+        field added for a later version never moves an earlier one's hash."""
+        rules = self.model_dump(
+            mode="json", exclude={"frozen_rules", "evidence"}, exclude_none=True
+        )
+        return hashlib.sha256(json.dumps(rules, sort_keys=True).encode()).hexdigest()
+
+
+class PostAppend(_Strict):
+    """One post-change recording declared after the ECU-output rules froze.
+
+    The post list is append-only and outside every frozen hash, as E07.4's
+    ``split.post`` is outside its own: ``chain_sha256`` is
+    :func:`post_chain_sha256` of the entry before (the ``ecu_outputs`` frozen
+    sha for the first), so removing, reordering or editing an entry before the
+    last refuses (``post_list_rewritten``). Dropping the last entry leaves the
+    recording on disk undeclared, which :func:`score_ecu_outputs` refuses
+    (``post_recording_undeclared``)."""
+
+    recording: str = Field(min_length=1)
+    appended_on: date
+    chain_sha256: str = Field(pattern=_SHA256)
+
+
+def post_chain_sha256(previous: str, recording: str, appended_on: date) -> str:
+    """The next link of the append-only post list: the link before, the
+    recording and the day it was declared. The chain carries no key, so it
+    catches an edit that does not recompute the links after it; against a
+    recomputed rewrite the record is the disk scan
+    (``post_recording_undeclared``) and git history."""
+    return hashlib.sha256(f"{previous}:{recording}:{appended_on.isoformat()}".encode()).hexdigest()
+
+
 class InterventionCase(_Strict):
     id: str = Field(pattern=r"^[a-z0-9][a-z0-9_.-]*$")
     synthetic: bool = False
@@ -403,7 +575,36 @@ class InterventionCase(_Strict):
     split: CaseSplit
     #: Required once ``split.post`` is non-empty.
     frozen_rules: FrozenRules | None = None
+    #: E09.12's tests on the plant-free outputs (BFS, target phi).
+    ecu_outputs: EcuOutputRules | None = None
+    #: Versioned amendments to ``ecu_outputs``, oldest first (E09.12).
+    ecu_amendments: list[EcuAmendment] = Field(default_factory=list)
+    #: Post-change recordings declared after ``ecu_outputs`` froze, append-only.
+    ecu_post_appended: list[PostAppend] = Field(default_factory=list)
     evidence: str = Field(min_length=1)
+
+    def ecu_post_recordings(self) -> list[str]:
+        """Every declared post-change recording: the frozen block's, then the
+        appended ones, in declaration order."""
+        base = [] if self.ecu_outputs is None else list(self.ecu_outputs.post)
+        return base + [a.recording for a in self.ecu_post_appended]
+
+    def ecu_amendment(self, version: int) -> EcuAmendment:
+        found = next((a for a in self.ecu_amendments if a.version == version), None)
+        if found is None:
+            raise KeyError(f"case {self.id} has no ECU-output amendment {version}")
+        return found
+
+    def ecu_rules_sha256(self) -> str:
+        """sha256 over what decides an ECU-output score beyond E07.4's rules:
+        the prediction and its recorded hashes, the interval, the outputs and
+        their channels, and the post-change recordings. The matching,
+        acceptance and floor it shares are frozen by :attr:`frozen_rules`,
+        which :func:`evaluate_ecu_outputs` requires (``rules_not_frozen``)."""
+        if self.ecu_outputs is None:
+            raise ValueError(f"case {self.id} declares no ecu_outputs")
+        rules = self.ecu_outputs.model_dump(mode="json", exclude={"frozen_rules", "evidence"})
+        return hashlib.sha256(json.dumps(rules, sort_keys=True).encode()).hexdigest()
 
     def rules_sha256(self) -> str:
         """sha256 over everything that decides a score: the prediction's bands,
@@ -460,7 +661,72 @@ class InterventionCase(_Strict):
                     f"rules_frozen_after_post: {early} started before the rules were frozen "
                     f"({at.isoformat()})"
                 )
+        ecu = self.ecu_outputs
+        if ecu is not None and ecu.frozen_rules.sha256 != self.ecu_rules_sha256():
+            raise ValueError(
+                f"rules_changed: case {self.id}'s ECU-output rules no longer hash to the frozen "
+                f"{ecu.frozen_rules.sha256[:12]}...; they are fixed before any post-change read "
+                "is scored"
+            )
+        self._check_amendments()
+        self._check_post_appends()
         return self
+
+    def _check_post_appends(self) -> None:
+        if not self.ecu_post_appended:
+            return
+        if self.ecu_outputs is None:
+            raise ValueError(f"case {self.id}: an appended post recording needs ecu_outputs")
+        previous = self.ecu_outputs.frozen_rules.sha256
+        seen = set(self.ecu_outputs.post)
+        for k, entry in enumerate(self.ecu_post_appended):
+            if entry.recording in seen:
+                raise ValueError(f"post_recording_duplicate: {entry.recording} is already declared")
+            seen.add(entry.recording)
+            if session_started_at(entry.recording) is None and not is_synthetic_session(
+                entry.recording
+            ):
+                raise ValueError(
+                    f"recording_time_unknown: appended {entry.recording} has no parseable "
+                    "start time"
+                )
+            expected = post_chain_sha256(previous, entry.recording, entry.appended_on)
+            if entry.chain_sha256 != expected:
+                raise ValueError(
+                    f"post_list_rewritten: appended entry {k} ({entry.recording}) does not "
+                    f"chain from the one before it ({previous[:12]}...): the post list is "
+                    "append-only"
+                )
+            previous = entry.chain_sha256
+
+    def _check_amendments(self) -> None:
+        if not self.ecu_amendments:
+            return
+        if self.ecu_outputs is None:
+            raise ValueError(f"case {self.id}: an ECU-output amendment needs ecu_outputs")
+        previous = self.ecu_outputs.frozen_rules
+        outputs = {o.id for o in self.ecu_outputs.outputs}
+        for number, amendment in enumerate(self.ecu_amendments, start=2):
+            if amendment.version != number:
+                raise ValueError(
+                    f"amendment versions run 2, 3, ...: found {amendment.version} at {number}"
+                )
+            if amendment.amends != previous.sha256:
+                raise ValueError(
+                    f"amendment_chain_broken: version {number} amends "
+                    f"{amendment.amends[:12]}..., the rules before it are {previous.sha256[:12]}..."
+                )
+            if amendment.frozen_rules.sha256 != amendment.rules_sha256():
+                raise ValueError(
+                    f"rules_changed: case {self.id}'s ECU-output amendment {number} no longer "
+                    f"hashes to the frozen {amendment.frozen_rules.sha256[:12]}..."
+                )
+            unknown = sorted(set(amendment.quantities) - outputs)
+            if unknown:
+                raise ValueError(f"amendment {number} names outputs {unknown} the case lacks")
+            if amendment.frozen_rules.frozen_at < previous.frozen_at:
+                raise ValueError(f"amendment {number} is frozen before the rules it amends")
+            previous = amendment.frozen_rules
 
 
 class InterventionFile(_Strict):
@@ -807,17 +1073,27 @@ def replay_report(
 
 
 def match_pairs(
-    a: pd.DataFrame, b: pd.DataFrame, m: Matching, *, floor: FloorRule | None = None
+    a: pd.DataFrame,
+    b: pd.DataFrame,
+    m: Matching,
+    *,
+    floor: FloorRule | None = None,
+    load: Sequence[str] = ("load_input",),
 ) -> tuple[np.ndarray, np.ndarray]:
     """One-to-one pairs ``(i in a, j in b)`` at the same regime and conditions,
     nearest first. With ``floor`` (the pre-vs-pre noise floor), a pair inside
-    one recording must be at least ``floor.min_separation_s`` apart."""
-    cols = ["rpm", "load_input", "baro_kpa", "iat_c"]
+    one recording must be at least ``floor.min_separation_s`` apart.
+
+    ``load`` names the load-input columns, each held within
+    ``m.load_input_abs``: one logged byte, or both ends of a reconstructed
+    byte interval (``load_lo``, ``load_hi``), so two intervals match only when
+    every end is within the tolerance."""
+    cols = ["rpm", *load, "baro_kpa", "iat_c"]
     av, bv = a[cols].to_numpy(dtype=float), b[cols].to_numpy(dtype=float)
     ar, br = a["regime"].to_numpy(), b["regime"].to_numpy()
     asess, bsess = a["session"].to_numpy(), b["session"].to_numpy()
     at, bt = a["t"].to_numpy(dtype=float), b["t"].to_numpy(dtype=float)
-    scale = np.array([m.rpm_rel, m.load_input_abs, m.baro_kpa_abs, m.iat_c_abs])
+    scale = np.array([m.rpm_rel, *([m.load_input_abs] * len(load)), m.baro_kpa_abs, m.iat_c_abs])
     found: list[tuple[float, int, int]] = []
     for i in range(len(a)):
         if not np.isfinite(av[i]).all():
@@ -1225,18 +1501,1055 @@ def evaluate_intervention(
     return report, samples
 
 
+# -- E09.12: the plant-free (ECU-side) outputs ----------------------------------------
+
+#: The fuel-trim scaling the application model declares its trim words in
+#: (``0x6400`` = 1.0); :func:`trim_independence` reads them from the model.
+TRIM_UNITS = "q_0x6400"
+
+
+@dataclass(frozen=True)
+class EcuOutputVerdict:
+    """The outcome of one :func:`evaluate_ecu_outputs` run, sealed.
+
+    Sealed with :class:`InterventionVerdict`'s process-private HMAC key over a
+    body that names its kind, so a verdict typed by a caller, edited with
+    ``dataclasses.replace``, or copied field by field into the other class
+    fails :meth:`verify`. It is a verdict on decoded ECU logic, never on the
+    plant: it carries no plant baseline, so it cannot stand in for
+    :func:`evaluate_intervention`'s verdict when a tuning effect is ranked."""
+
+    case: str
+    #: ``(output id, outcome, n_pairs, floor_pairs)`` per output.
+    outcomes: tuple[tuple[str, str, int, int], ...]
+    synthetic: bool
+    base_image_sha256: str
+    candidate_image_sha256: str
+    traces_sha256: str
+    #: The rules it was scored under: 1 is the ``ecu_outputs`` block, 2.. an
+    #: :class:`EcuAmendment`; with that version's frozen sha256.
+    rules_version: int
+    rules_sha256: str
+    #: The post-change recordings this verdict scored, by name.
+    recordings: tuple[str, ...]
+    #: ``all``: every declared recording on the candidate revision; ``named``:
+    #: a subset chosen by name, with the candidates it left out. A sealed
+    #: subset verdict never reads as a full one.
+    scope: Literal["all", "named"]
+    candidates_not_scored: tuple[str, ...]
+    seal: str
+
+    KIND = "ecu_output_verdict"
+
+    @classmethod
+    def _digest(cls, fields: dict[str, Any]) -> str:
+        return InterventionVerdict._digest({"kind": cls.KIND, **fields})
+
+    @classmethod
+    def _mint(cls, **fields: Any) -> EcuOutputVerdict:
+        return cls(**fields, seal=cls._digest(fields))
+
+    def verify(self) -> bool:
+        fields = {k: v for k, v in asdict(self).items() if k != "seal"}
+        return hmac.compare_digest(self.seal, self._digest(fields))
+
+    def outcome(self, output: str) -> str:
+        for name, outcome, _, _ in self.outcomes:
+            if name == output:
+                return outcome
+        raise KeyError(output)
+
+
+def _file_sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as fh:
+        for block in iter(lambda: fh.read(1 << 20), b""):
+            digest.update(block)
+    return digest.hexdigest()
+
+
+def verify_prediction_artifact(directory: Path, prediction: PredictionArtifact) -> dict[str, str]:
+    """Check the prediction's files against their recorded hashes, before
+    anything is scored against it; return the hashes checked.
+
+    ``prediction_artifact_missing``: a recorded file is absent.
+    ``prediction_artifact_changed``: a file's bytes, the result's digest or
+    the design it names differ from the record. A changed prediction is not
+    the prediction of record: nothing re-runs or re-dates it here."""
+    checked: dict[str, str] = {}
+    for rel, recorded in {**prediction.files, **prediction.design_files}.items():
+        path = directory / rel
+        if not path.is_file():
+            raise FuelPlantRefusalError(
+                "prediction_artifact_missing", f"{path} is recorded but absent"
+            )
+        found = _file_sha256(path)
+        if found != recorded:
+            raise FuelPlantRefusalError(
+                "prediction_artifact_changed",
+                f"{rel}: sha256 {found}, recorded {recorded} ({prediction.recorded_in})",
+            )
+        checked[rel] = found
+    result = json.loads((directory / prediction.result).read_text())
+    design = json.loads((directory / prediction.design_record).read_text())
+    named = {
+        "result_digest": (result.get("result_digest"), prediction.result_digest),
+        "result design": (
+            (result.get("cell_table") or {}).get("design_sha256"),
+            prediction.design_sha256,
+        ),
+        "design": (design.get("sha256"), prediction.design_sha256),
+    }
+    for label, (found_value, recorded) in named.items():
+        if found_value != recorded:
+            raise FuelPlantRefusalError(
+                "prediction_artifact_changed", f"{label} is {found_value}, recorded {recorded}"
+            )
+    return checked
+
+
+def trim_independence(model: ApplicationModel, output_ids: Sequence[str]) -> dict[str, Any]:
+    """Whether an output's decoded chain reads a fuel trim: the flash reset
+    LTFT, so an output that depends on a trim is not comparable across it.
+
+    Walks every node the output's writer depends on (through ``observed``
+    nodes too: this is a dependency audit, not an evaluation) and refuses
+    (``output_reads_trim``) when one reads or writes a word the model declares
+    in the trim scaling (:data:`TRIM_UNITS`). Long-term trim has no RAM word
+    in the model; the report says so rather than claiming it was checked."""
+    by_id = {n.id: n for n in model.nodes}
+    outputs = {o.id: o for o in model.outputs}
+    trims = {v.address: v.name for v in model.ram if v.units == TRIM_UNITS}
+    named_ltft = sorted(v.name for v in model.ram if "long_term" in v.name)
+    out: dict[str, Any] = {
+        "trim_words": {f"0x{a:08X}": n for a, n in sorted(trims.items())},
+        "long_term_trim_in_model": named_ltft,
+        "outputs": {},
+    }
+    for output_id in output_ids:
+        if output_id not in outputs:
+            raise FuelPlantRefusalError(
+                "model_output_unknown", f"{output_id} is not an application-model output"
+            )
+        start = outputs[output_id].written_by
+        seen: set[str] = set()
+        stack = [start]
+        while stack:
+            current = stack.pop()
+            if current in seen:
+                continue
+            seen.add(current)
+            stack.extend(by_id[current].depends_on)
+        touched = sorted(
+            f"{node}:0x{a:08X}"
+            for node in seen
+            for a in (*by_id[node].reads, *by_id[node].writes)
+            if a in trims
+        )
+        if touched:
+            raise FuelPlantRefusalError(
+                "output_reads_trim",
+                f"{output_id}'s chain touches trim words {touched}: the flash's LTFT reset would "
+                "move it apart from the ROM change",
+            )
+        out["outputs"][output_id] = {"nodes": sorted(seen), "trim_words_read": []}
+    return out
+
+
+def prediction_points(
+    directory: Path,
+    rules: EcuOutputRules,
+    *,
+    rpm_per_count: float,
+    ceilings: Mapping[str, float] | None = None,
+) -> pd.DataFrame:
+    """The prediction's design points with each output's predicted relative
+    change, percent, from its draws: ``pred_lo/mid/hi:<id>`` (the declared
+    quantiles and the median, inverted CDF), ``draws:<id>`` the supported
+    draws (a point with none is ``not_predicted``), and ``cell``: the point's
+    rpm word and fill-interval midpoint on the prediction's own cell ranges.
+
+    ``ceilings`` (output id -> counts, an amendment's ``bfs_ceiling_counts``
+    for an ``air_normalised`` output): a draw whose base or candidate is at or
+    above it is clamped, not the multiplier's change; it is left out of the
+    interval and counted in ``draws_at_ceiling:<id>``.
+
+    Call :func:`verify_prediction_artifact` first; this reads the files as
+    they are."""
+    prediction = rules.prediction
+    design = pd.read_parquet(directory / prediction.design)
+    traces = pd.read_parquet(directory / prediction.traces)
+    result = json.loads((directory / prediction.result).read_text())
+    table = result["cell_table"]
+    frame = pd.DataFrame(
+        {
+            "point": np.arange(len(design)),
+            "session": design["session"].astype(str).to_numpy(),
+            "t": design["t"].to_numpy(dtype=float),
+            "regime": design["regime"].astype(str).to_numpy(),
+            "rpm": design["rpm"].to_numpy(dtype=float),
+            "load_lo": design["fill_byte_lo"].to_numpy(dtype=float),
+            "load_hi": design["fill_byte_hi"].to_numpy(dtype=float),
+            "baro_kpa": design["baro_kpa"].to_numpy(dtype=float),
+            "iat_c": design["iat_c"].to_numpy(dtype=float),
+            "maf_gps": design["maf_gps"].to_numpy(dtype=float),
+        }
+    )
+    lo_q, hi_q = rules.interval_quantiles
+    for spec in rules.outputs:
+        rows = traces[(traces["output"] == spec.trace_output) & (traces["status"] == "supported")]
+        rows = rows[np.isfinite(rows["relative_delta"].to_numpy(dtype=float))]
+        ceiling = (ceilings or {}).get(spec.id)
+        clamped = np.zeros(len(rows), dtype=bool)
+        if ceiling is not None:
+            clamped = (rows["base"].to_numpy(dtype=float) >= ceiling) | (
+                rows["candidate"].to_numpy(dtype=float) >= ceiling
+            )
+            at_ceiling = rows[clamped].groupby("point").size()
+            rows = rows[~clamped]
+        if not len(rows):
+            raise FuelPlantRefusalError(
+                "output_not_in_traces", f"{spec.trace_output} has no supported trace rows"
+            )
+        grouped = rows.groupby("point")["relative_delta"]
+        stats = pd.DataFrame(
+            {
+                f"pred_lo:{spec.id}": grouped.quantile(lo_q, interpolation="lower"),
+                f"pred_mid:{spec.id}": grouped.quantile(0.5, interpolation="lower"),
+                f"pred_hi:{spec.id}": grouped.quantile(hi_q, interpolation="higher"),
+                f"draws:{spec.id}": grouped.size(),
+            }
+        )
+        for col in stats.columns:
+            if col.startswith("pred_"):
+                stats[col] = 100.0 * stats[col]
+        frame = frame.merge(stats, left_on="point", right_index=True, how="left")
+        frame[f"draws:{spec.id}"] = frame[f"draws:{spec.id}"].fillna(0).astype(int)
+        if ceiling is not None:
+            frame[f"draws_at_ceiling:{spec.id}"] = (
+                frame["point"].map(at_ceiling).fillna(0).astype(int).to_numpy()
+            )
+    words = np.rint(frame["rpm"].to_numpy(dtype=float) / rpm_per_count)
+    mids = np.floor((frame["load_lo"].to_numpy() + frame["load_hi"].to_numpy()) / 2.0)
+    frame["cell"] = [
+        f"{_cell_label(table['rows'], w, rpm_per_count)}x{_cell_label(table['cols'], m, 1.0)}"
+        for w, m in zip(words, mids, strict=True)
+    ]
+    return frame
+
+
+def _cell_label(axis: dict[str, Any], value: float, unit: float) -> str:
+    """The breakpoint whose cell range (inclusive, open-ended at the ends)
+    holds ``value``, in display units (rpm for the speed word)."""
+    for bp, (lo, hi) in zip(axis["breakpoints"], axis["cell_ranges"], strict=True):
+        if (lo is None or value >= lo) and (hi is None or value <= hi):
+            return f"{bp * unit:g}"
+    raise FuelPlantRefusalError("cell_unplaced", f"{value} is in no cell range of {axis}")
+
+
+def pre_observed(
+    points: pd.DataFrame, rules: EcuOutputRules, profile: FuelPlantProfile, sessions_root: Path
+) -> pd.DataFrame:
+    """Each design point's observed outputs on its own pre-change recording:
+    the output's read paired one-to-one within the plant's ECU pairing
+    tolerance of the point's read (NaN where none is), as E07.3 pairs BFS."""
+    out = points.copy()
+    tol = profile.steady.ecu_pair_tolerance_s
+    for spec in rules.outputs:
+        out[f"observed:{spec.id}"] = np.nan
+    for session, idx in out.groupby("session").groups.items():
+        path = sessions_root / str(session)
+        if not path.is_dir():
+            raise FuelPlantRefusalError(
+                "pre_recording_missing", f"the design's recording {path} is not here"
+            )
+        long = read_channels(path, [s.observed for s in rules.outputs], acquired_time=True)
+        t = out.loc[idx, "t"].to_numpy(dtype=float)
+        for spec in rules.outputs:
+            out.loc[idx, f"observed:{spec.id}"] = _pair(t, _series(long, spec.observed), tol)
+    return out
+
+
+def _regime_labels(phi: FloatArray, band: float) -> np.ndarray:
+    """E07.3's regime from the bracketed commanded phi
+    (:func:`src.analysis.fuel_plant_eval.build_samples`, the same band)."""
+    regime = np.full(len(phi), "unknown", dtype=object)
+    regime[np.abs(phi - 1.0) <= band] = "closed_loop"
+    regime[phi > 1.0 + band] = "enrichment"
+    regime[phi < 1.0 - band] = "lean_target"
+    return regime
+
+
+ECU_READ_COLUMNS = (
+    "session",
+    "t",
+    "observed",
+    "rpm",
+    "maf_gps",
+    "baro_kpa",
+    "iat_c",
+    "coolant_c",
+    "regime",
+    "load_lo",
+    "load_hi",
+    "state",
+)
+
+
+def ecu_output_reads(
+    session: Path,
+    output: EcuOutputSpec,
+    profile: FuelPlantProfile,
+    delay: B06Rules,
+    fill: pd.DataFrame,
+    *,
+    image_sha256: str,
+    boundary: Boundary,
+) -> pd.DataFrame:
+    """One row per read of the output's own channel on a post-change recording,
+    with the conditions the case matches on, each on the acquisition clock.
+
+    The design built its points this way, so a post read is what would have
+    been a point on this drive: rpm and MAF paired one-to-one within the plant's
+    ``pair_tolerance_s``; baro, IAT and coolant the nearest read within
+    ``slow_max_age_s``; the regime from the bracketed commanded phi; steady when
+    the rpm and MAF windows over ``window_s`` before the read hold the plant's
+    spans (the pulse-read clause is dropped: the output's read is the anchor);
+    warm at ``min_coolant_c``; and the fill byte N02's closed-loop-route
+    interval (``fill``, :func:`fill_samples`) paired one-to-one within
+    ``pair_tolerance_s``, on ``image_sha256`` only (``fill_image_mismatch``).
+
+    ``state`` is ``eligible`` or the first reason, in this precedence:
+    ``not_co_observed`` (no rpm and no MAF read), ``missing_input``, ``cold``,
+    ``transient``, ``fill_byte_unpaired``, ``fill_byte:<N02 state:reason>``.
+    Reads before the flash refuse (``wrong_side``)."""
+    s, rule = profile.specs, profile.steady
+    specs = list(
+        dict.fromkeys(
+            [output.observed, s.rpm, s.maf, s.baro, s.intake_temp, s.coolant, s.reference_phi]
+        )
+    )
+    try:
+        long = read_channels(session, specs, acquired_time=True)
+    except FileNotFoundError:
+        long = pd.DataFrame(columns=["timestamp", "spec", "value"])
+    obs = _series(long, output.observed)
+    t = obs.times
+    if not len(t):
+        return pd.DataFrame({c: pd.Series([], dtype=object) for c in ECU_READ_COLUMNS})
+    if float(t.min()) < boundary.at.timestamp():
+        raise FuelPlantRefusalError(
+            "wrong_side",
+            f"{session.name} has {output.observed} reads before {boundary.at.isoformat()}",
+        )
+    frame = pd.DataFrame({"session": session.name, "t": t, "observed": obs.values})
+    rpm_s, maf_s = _series(long, s.rpm), _series(long, s.maf)
+    frame["rpm"] = _pair(t, rpm_s, rule.pair_tolerance_s)
+    frame["maf_gps"] = _pair(t, maf_s, rule.pair_tolerance_s)
+    frame["baro_kpa"] = _nearest_value(_series(long, s.baro), t, rule.slow_max_age_s)
+    frame["iat_c"] = _nearest_value(_series(long, s.intake_temp), t, rule.slow_max_age_s)
+    frame["coolant_c"] = _nearest_value(_series(long, s.coolant), t, rule.slow_max_age_s)
+    phi = _bracketed(_series(long, s.reference_phi), t, rule.reference_phi_max_age_s)
+    frame["regime"] = _regime_labels(phi, delay.closed_loop_band)
+    rmin, rmax, rn = _window(rpm_s, t, rule.window_s, 0.0)
+    mmin, mmax, mn = _window(maf_s, t, rule.window_s, 0.0)
+    with np.errstate(divide="ignore", invalid="ignore"):
+        steady = (
+            ((rmax - rmin) / frame["rpm"].to_numpy() <= rule.rpm_span)
+            & ((mmax - mmin) / frame["maf_gps"].to_numpy() <= rule.maf_span)
+            & (rn >= rule.min_rpm_reads)
+            & (mn >= rule.min_maf_reads)
+        )
+    fill_reason, load_lo, load_hi = _pair_fill(t, fill, rule.pair_tolerance_s, image_sha256)
+    frame["load_lo"], frame["load_hi"] = load_lo, load_hi
+    needed = frame[["rpm", "baro_kpa", "iat_c", "coolant_c"]].to_numpy(dtype=float)
+    state = np.full(len(t), "eligible", dtype=object)
+    checks: list[tuple[np.ndarray, object]] = [
+        (fill_reason != "", fill_reason),
+        (~steady, "transient"),
+        (frame["coolant_c"].to_numpy() < rule.min_coolant_c, "cold"),
+        (~np.isfinite(needed).all(axis=1), "missing_input"),
+        (
+            ~np.isfinite(frame[["rpm", "maf_gps"]].to_numpy(dtype=float)).any(axis=1),
+            "not_co_observed",
+        ),
+    ]
+    for mask, name in checks:  # last assignment wins: the list is reverse precedence
+        mask = np.asarray(mask, dtype=bool)
+        state[mask] = name[mask] if isinstance(name, np.ndarray) else name
+    frame["state"] = state
+    return frame[list(ECU_READ_COLUMNS)]
+
+
+def _pair_fill(
+    t: FloatArray, fill: pd.DataFrame, tolerance_s: float, image_sha256: str
+) -> tuple[np.ndarray, FloatArray, FloatArray]:
+    """N02's closed-loop fill interval per anchor: ``(reason, lo, hi)`` with
+    reason ``""`` where an interval is paired, as the design pairs it."""
+    reason = np.full(len(t), "fill_byte_unpaired", dtype=object)
+    lo = np.full(len(t), np.nan)
+    hi = np.full(len(t), np.nan)
+    rows = fill[fill["route"] == "closed_loop"].reset_index(drop=True) if len(fill) else fill
+    if not len(rows) or not len(t):
+        return reason, lo, hi
+    times = np.asarray(to_seconds(rows["timestamp"]), dtype=float)
+    order = np.argsort(times, kind="stable")
+    policy = PairingPolicy.within(pd.Timedelta(seconds=tolerance_s), reference="a")
+    matched = match_ordered(t, times[order], policy)
+    for a, b in zip(matched.index_a.tolist(), order[matched.index_b].tolist(), strict=True):
+        row = rows.iloc[int(b)]
+        values = [row[c] for c in ("byte_lo", "byte_hi", "rpm_word_lo", "rpm_word_hi")]
+        if not all(v is not None and pd.notna(v) for v in values):
+            why = row.get("reason")
+            reason[a] = (
+                f"fill_byte:{row['state']}:{why if isinstance(why, str) and why else 'no_interval'}"
+            )
+            continue
+        if row["image_sha256"] != image_sha256:
+            raise FuelPlantRefusalError(
+                "fill_image_mismatch",
+                f"fill byte at t={times[b]:.3f} was reconstructed on {row['revision']} "
+                f"({str(row['image_sha256'])[:12]}...), not {image_sha256[:12]}...",
+            )
+        reason[a], lo[a], hi[a] = "", float(values[0]), float(values[1])
+    return reason, lo, hi
+
+
+def fill_samples(
+    session: Path,
+    profile_dir: Path,
+    registry: TuneRevisionRegistry,
+    resolver: RevisionImageResolver | Callable[[str], FuelCompCalibration],
+    *,
+    fuel_type: str,
+) -> pd.DataFrame:
+    """N02's samples (:func:`src.analysis.fuel_comp_samples.session_samples`)
+    of one recording, the fill byte reconstructed on the revision in force at
+    each sample, as the design reconstructed its own."""
+    if fuel_type not in FUEL_PROPERTIES:
+        raise FuelPlantRefusalError("fuel_type_unknown", f"{fuel_type!r} is not a known fuel")
+    providers = profile_dir / "tuning_providers.yaml"
+    samples = session_samples(
+        session,
+        declaration=load_fuel_comp_declaration(profile_dir),
+        delivery=load_lambda_delivery(
+            profile_dir / "lambda_delivery.yaml",
+            providers_path=providers if providers.exists() else None,
+        ),
+        afr_calibration=load_afr_calibration(profile_dir / "afr_calibration.yaml"),
+        afr_stoich=FUEL_PROPERTIES[fuel_type].afr_stoich,
+        registry=registry,
+        resolver=resolver,
+    )
+    return samples.frame
+
+
+def _ecu_verdict(
+    n_pairs: int,
+    floor: float | None,
+    n_signed: int,
+    direction: float | None,
+    within: float,
+    acc: EffectAcceptance,
+) -> tuple[TestOutcome, str | None]:
+    if n_pairs < acc.min_pairs:
+        return "insufficient_evidence", f"{n_pairs} pairs < {acc.min_pairs}"
+    if floor is None:
+        return "insufficient_evidence", "condition-matched noise floor unavailable"
+    if direction is None:
+        if within >= acc.within_uncertainty:
+            return "pass", f"direction_not_applicable: no pair of {n_pairs} predicts a change"
+        return "fail", (
+            f"direction_not_applicable; within uncertainty {within:.2f} "
+            f"(>= {acc.within_uncertainty})"
+        )
+    if direction >= acc.direction_agreement and within >= acc.within_uncertainty:
+        return "pass", None
+    return "fail", (
+        f"direction agreement {direction:.2f} over {n_signed} signed pairs "
+        f"(>= {acc.direction_agreement}), within uncertainty {within:.2f} "
+        f"(>= {acc.within_uncertainty})"
+    )
+
+
+def _relative_pct(a: FloatArray, b: FloatArray) -> FloatArray:
+    out: FloatArray = 100.0 * (a / b - 1.0)
+    return out
+
+
+_INTERVAL = ("load_lo", "load_hi")
+
+
+def _compared(
+    frame: pd.DataFrame,
+    side: str,
+    quantity: EcuQuantity,
+    ceiling: float | None,
+    exclusions: dict[str, int],
+) -> FloatArray:
+    """The value one side compares per row, NaN where it is excluded, each
+    exclusion counted by name.
+
+    ``raw``: the output's read (``<side>_observed_unpaired`` when missing or
+    not positive). ``air_normalised``: BFS x rpm / MAF at the read's own
+    paired rpm and MAF; ``<side>_at_ceiling`` (a read at or above the rpm
+    ceiling's clamp is not 4 x (Tp x FC >> 7)) and ``<side>_maf_unpaired``
+    are named apart."""
+    if not len(frame):
+        exclusions[f"{side}_observed_unpaired"] = 0
+        return np.array([], dtype=float)
+    value = frame["observed"].to_numpy(dtype=float).copy()
+    missing = ~(np.isfinite(value) & (value > 0))
+    exclusions[f"{side}_observed_unpaired"] = int(missing.sum())
+    value[missing] = np.nan
+    if quantity == "raw":
+        return value
+    if ceiling is None:
+        raise FuelPlantRefusalError(
+            "ceiling_unstated", "air_normalised BFS needs the ceiling its clamp is excluded at"
+        )
+    clamped = ~missing & (value >= ceiling)
+    exclusions[f"{side}_at_ceiling"] = int(clamped.sum())
+    value[clamped] = np.nan
+    rpm = frame["rpm"].to_numpy(dtype=float)
+    maf = (
+        frame["maf_gps"].to_numpy(dtype=float)
+        if "maf_gps" in frame
+        else np.full(len(value), np.nan)
+    )
+    no_air = np.isfinite(value) & ~(np.isfinite(maf) & (maf > 0) & np.isfinite(rpm))
+    exclusions[f"{side}_maf_unpaired"] = int(no_air.sum())
+    with np.errstate(divide="ignore", invalid="ignore"):
+        out: FloatArray = np.where(no_air, np.nan, value * rpm / maf)
+    return out
+
+
+def ecu_effect_test(
+    pre: pd.DataFrame,
+    post: pd.DataFrame,
+    case: InterventionCase,
+    *,
+    quantity: EcuQuantity = "raw",
+    ceiling: float | None = None,
+    resolvable: bool = False,
+    exclude_unknown_regime: bool = False,
+) -> dict[str, Any]:
+    """Does one ECU-side output move, per matched pair, as the prediction says?
+
+    ``resolvable`` (amendment 3): only design points whose predicted |change|
+    (the median) exceeds the floor are paired, so every counted pair is one
+    the test has power at; with fewer than ``min_pairs`` such pairs where all
+    predicted points would have given enough, the verdict is
+    ``insufficient_evidence`` named ``prediction_unresolvable``.
+    ``exclude_unknown_regime`` drops ``unknown``-regime reads on both sides
+    (``*_regime_unknown``): E07.4's effect tests score named regimes only.
+
+    ``pre``: the prediction's design points (``session``, ``t``, ``regime``,
+    ``rpm``, ``load_lo``/``load_hi``, ``baro_kpa``, ``iat_c``), each with the
+    pre-change recording's ``observed`` value there and the predicted relative
+    change ``pred_lo``/``pred_mid``/``pred_hi`` (percent); optional ``cell``.
+    ``post``: the output's own post-change reads (:func:`ecu_output_reads`).
+
+    A post read is paired one-to-one, nearest first, with a design point in the
+    same regime under the case's matching, both ends of the two fill intervals
+    within the byte tolerance. Observed change = post / pre - 1 at the pair;
+    predicted = that point's interval. The floor is the same quantity over
+    pre-vs-pre pairs of design points (no change between them), within one
+    recording only at ``floor.min_separation_s``; its declared quantile of
+    |change| widens the predicted interval for within-uncertainty. Nothing
+    here reads a trim: the outputs do not depend on one
+    (:func:`trim_independence`).
+
+    ``quantity`` (an :class:`EcuAmendment`'s): ``air_normalised`` compares
+    BFS x rpm / MAF on both sides instead of BFS, each side at its own paired
+    rpm and MAF, and excludes reads at ``ceiling`` by name (:func:`_compared`).
+    The predicted interval is unchanged: at one design point base and
+    candidate share its rpm and airflow, so the normalised change is the
+    traces' candidate / base - 1."""
+    acc = case.acceptance
+    exclusions: dict[str, int] = {}
+    pre_value = _compared(pre, "pre", quantity, ceiling, exclusions)
+    if exclude_unknown_regime:
+        unknown = np.isfinite(pre_value) & (pre["regime"].astype(str).to_numpy() == "unknown")
+        exclusions["pre_regime_unknown"] = int(unknown.sum())
+        pre_value = np.where(unknown, np.nan, pre_value)
+    has_obs = np.isfinite(pre_value)
+    pre_obs = pre[has_obs].reset_index(drop=True).assign(value=pre_value[has_obs])
+    fi, fj = match_pairs(pre_obs, pre_obs, case.matching, floor=case.floor, load=_INTERVAL)
+    obs = pre_obs["value"].to_numpy(dtype=float)
+    floor_res = _relative_pct(obs[fi], obs[fj]) if len(fi) else np.array([], dtype=float)
+    floor_res = floor_res[np.isfinite(floor_res)]
+    floor = _floor(floor_res, acc)
+
+    predicted = np.isfinite(pre_obs["pred_mid"].to_numpy(dtype=float)) if len(pre_obs) else []
+    exclusions["pre_not_predicted"] = int((~np.asarray(predicted, dtype=bool)).sum())
+    scored = pre_obs[np.asarray(predicted, dtype=bool)].reset_index(drop=True)
+    all_predicted = scored
+    if resolvable:
+        mids = np.abs(scored["pred_mid"].to_numpy(dtype=float))
+        beyond = mids > floor if floor is not None else np.zeros(len(scored), dtype=bool)
+        exclusions["pre_unresolvable"] = int((~beyond).sum())
+        scored = scored[beyond].reset_index(drop=True)
+
+    post_states = (
+        {str(k): int(v) for k, v in post["state"].value_counts().items()} if len(post) else {}
+    )
+    in_state = (
+        post[(post["state"] == "eligible").to_numpy()].reset_index(drop=True) if len(post) else post
+    )
+    post_value = _compared(in_state, "post", quantity, ceiling, exclusions)
+    if exclude_unknown_regime:
+        unknown = np.isfinite(post_value) & (
+            in_state["regime"].astype(str).to_numpy() == "unknown"
+            if len(in_state)
+            else np.array([], dtype=bool)
+        )
+        exclusions["post_regime_unknown"] = int(unknown.sum())
+        post_value = np.where(unknown, np.nan, post_value)
+    keep = np.isfinite(post_value)
+    usable = in_state[keep].reset_index(drop=True).assign(value=post_value[keep])
+    i, j = match_pairs(usable, scored, case.matching, load=_INTERVAL)
+    a, b = usable.iloc[i].reset_index(drop=True), scored.iloc[j].reset_index(drop=True)
+    observed = (
+        _relative_pct(a["value"].to_numpy(dtype=float), b["value"].to_numpy(dtype=float))
+        if len(a)
+        else np.array([], dtype=float)
+    )
+    lo = b["pred_lo"].to_numpy(dtype=float) if len(b) else np.array([])
+    mid = b["pred_mid"].to_numpy(dtype=float) if len(b) else np.array([])
+    hi = b["pred_hi"].to_numpy(dtype=float) if len(b) else np.array([])
+    signed = mid != 0
+    n_signed = int(signed.sum())
+    agree = np.sign(observed) == np.sign(mid)
+    direction = float(np.mean(agree[signed])) if n_signed else None
+    u = floor if floor is not None else math.nan
+    inside = (observed >= lo - u) & (observed <= hi + u)
+    within = float(np.mean(inside)) if len(observed) else 0.0
+    outcome, why = _ecu_verdict(len(observed), floor, n_signed, direction, within, acc)
+    pairs_all = len(observed)
+    if resolvable:
+        pairs_all = len(match_pairs(usable, all_predicted, case.matching, load=_INTERVAL)[0])
+        if floor is None:
+            outcome, why = "insufficient_evidence", "condition-matched noise floor unavailable"
+        elif len(observed) < acc.min_pairs and pairs_all >= acc.min_pairs:
+            why = (
+                f"prediction_unresolvable: {len(observed)} pairs predict |change| beyond the "
+                f"{floor:.2f} % floor, < {acc.min_pairs} (all predicted points: {pairs_all} pairs)"
+            )
+    if (
+        resolvable
+        and outcome == "insufficient_evidence"
+        and str(why).startswith("prediction_unresolvable")
+    ):
+        empty: str | None = str(why)
+    elif not len(post):
+        empty = "never_captured: no read of the output on any post-change recording"
+    elif not len(usable):
+        empty = f"filtered: no post-change read is eligible ({post_states})"
+    elif not len(observed):
+        empty = "unmatched: no eligible post-change read matches a design point"
+    else:
+        empty = None
+    cells: dict[str, dict[str, int]] = {}
+    if len(b) and "cell" in b:
+        for k, cell in enumerate(b["cell"].astype(str).tolist()):
+            entry = cells.setdefault(cell, {"n_pairs": 0, "n_signed": 0, "agree": 0, "within": 0})
+            entry["n_pairs"] += 1
+            entry["n_signed"] += int(signed[k])
+            entry["agree"] += int(signed[k] and agree[k])
+            entry["within"] += int(inside[k])
+    return {
+        "quantity": quantity,
+        "resolvable_only": resolvable,
+        "n_pairs": len(observed),
+        "pairs_before_resolvable": pairs_all,
+        "n_signed": n_signed,
+        "post_reads": len(post),
+        "post_states": post_states,
+        "post_eligible": len(usable),
+        "post_sessions": sorted(set(post["session"])) if len(post) else [],
+        "design_points": len(pre),
+        "exclusions": exclusions,
+        "empty": empty,
+        "observed_change_pct": _summ(observed),
+        "predicted_change_pct": _summ(mid),
+        "residual_pct": _summ(observed - mid),
+        "noise_floor_pct": floor,
+        "floor_pairs": len(floor_res),
+        "direction_agreement": direction,
+        "within_uncertainty": within,
+        "cells": dict(sorted(cells.items())),
+        "outcome": outcome,
+        "reason": why,
+    }
+
+
+def _output_frame(points: pd.DataFrame, output_id: str) -> pd.DataFrame:
+    """The design points with one output's columns under the generic names
+    :func:`ecu_effect_test` reads."""
+    rename = {
+        f"observed:{output_id}": "observed",
+        f"pred_lo:{output_id}": "pred_lo",
+        f"pred_mid:{output_id}": "pred_mid",
+        f"pred_hi:{output_id}": "pred_hi",
+    }
+    keep = [
+        c
+        for c in (
+            "session",
+            "t",
+            "regime",
+            "rpm",
+            "maf_gps",
+            "load_lo",
+            "load_hi",
+            "baro_kpa",
+            "iat_c",
+        )
+        if c in points
+    ]
+    if "cell" in points:
+        keep.append("cell")
+    return points[keep + list(rename)].rename(columns=rename)
+
+
+def evaluate_ecu_outputs(
+    case: InterventionCase,
+    points: pd.DataFrame,
+    post: Mapping[str, pd.DataFrame],
+    *,
+    artifact: Mapping[str, str],
+    trims: Mapping[str, Any] | None = None,
+    amendment: int | None = None,
+    recordings: Sequence[str] | None = None,
+    scope_kind: Literal["all", "named"] | None = None,
+    candidates_not_scored: Sequence[str] = (),
+) -> dict[str, Any]:
+    """E09.12's verdict per ECU-side output, sealed.
+
+    ``amendment``: score under that :class:`EcuAmendment` version (its
+    quantities and ceiling) instead of the original block; either way the
+    verdict names the rules version and sha it was scored under.
+    ``recordings``: the declared post-change recordings scored (default all
+    of :meth:`InterventionCase.ecu_post_recordings`); the verdict names them.
+    ``scope_kind`` (default ``all`` without ``recordings``, else ``named``) and
+    ``candidates_not_scored`` are sealed with it.
+
+    ``points``: :func:`prediction_points` with :func:`pre_observed`'s columns.
+    ``post``: per output id, its post-change reads (:func:`ecu_output_reads`
+    over the case's ``post`` recordings). ``artifact``: the hashes
+    :func:`verify_prediction_artifact` checked (the traces' among them).
+
+    Refusals: ``ecu_outputs_undeclared``, ``outputs_mismatch``,
+    ``rules_not_frozen`` (the shared matching, floor and acceptance),
+    ``undeclared_recording`` (a post read from a recording not in
+    ``ecu_outputs.post``), ``synthetic_as_observed`` / ``synthetic_mismatch``
+    (a ``_sim-*`` recording on a recorded case, or the reverse) and
+    ``prediction_not_verified``. The plant's qualification is not read:
+    BFS and target phi are the ECU's decoded integer logic."""
+    rules = case.ecu_outputs
+    if rules is None:
+        raise FuelPlantRefusalError("ecu_outputs_undeclared", f"case {case.id} has no ecu_outputs")
+    if case.frozen_rules is None:
+        raise FuelPlantRefusalError(
+            "rules_not_frozen",
+            f"case {case.id}'s matching, floor and acceptance are not frozen: an ECU-output "
+            "score uses them",
+        )
+    amended = None if amendment is None else case.ecu_amendment(amendment)
+    rules_version = 1 if amended is None else amended.version
+    rules_sha = (rules.frozen_rules if amended is None else amended.frozen_rules).sha256
+    quantities: dict[str, EcuQuantity] = {} if amended is None else dict(amended.quantities)
+    ceiling = None if amended is None else float(amended.bfs_ceiling_counts)
+    resolvable = amended is not None and amended.resolvable == "predicted_beyond_floor"
+    no_unknown = amended is not None and bool(amended.exclude_unknown_regime)
+    ids = [o.id for o in rules.outputs]
+    if sorted(post) != sorted(ids):
+        raise FuelPlantRefusalError(
+            "outputs_mismatch", f"post reads for {sorted(post)}, the case declares {sorted(ids)}"
+        )
+    traces_sha = artifact.get(rules.prediction.traces)
+    if traces_sha != rules.prediction.files[rules.prediction.traces]:
+        raise FuelPlantRefusalError(
+            "prediction_not_verified",
+            "pass the hashes verify_prediction_artifact checked: the traces are not among them",
+        )
+    sessions = {str(s) for f in post.values() if len(f) for s in f["session"]}
+    declared = case.ecu_post_recordings()
+    scope = list(declared if recordings is None else recordings)
+    outside = sorted(set(scope) - set(declared))
+    if outside:
+        raise FuelPlantRefusalError(
+            "undeclared_recording", f"{outside} are not declared post-change recordings"
+        )
+    undeclared = sorted(sessions - set(scope))
+    if undeclared:
+        raise FuelPlantRefusalError(
+            "undeclared_recording",
+            f"{undeclared} are not in ecu_outputs.post: declare recordings before scoring them",
+        )
+    observed_sessions = sessions | {str(s) for s in points["session"]}
+    synthetic = {is_synthetic_session(s) for s in observed_sessions}
+    if case.synthetic and synthetic != {True}:
+        raise FuelPlantRefusalError(
+            "synthetic_mismatch", "a synthetic case scores _sim-* traces only"
+        )
+    if not case.synthetic and True in synthetic:
+        raise FuelPlantRefusalError(
+            "synthetic_as_observed", "a _sim-* trace is never an observation of the vehicle"
+        )
+    tests = {
+        spec.id: {
+            "observed_channel": spec.observed,
+            "trace_output": spec.trace_output,
+            **ecu_effect_test(
+                _output_frame(points, spec.id),
+                post[spec.id],
+                case,
+                quantity=quantities.get(spec.id, "raw"),
+                ceiling=ceiling if quantities.get(spec.id) == "air_normalised" else None,
+                resolvable=resolvable,
+                exclude_unknown_regime=no_unknown,
+            ),
+        }
+        for spec in rules.outputs
+    }
+    report: dict[str, Any] = {
+        "case": case.id,
+        "synthetic": case.synthetic,
+        "claim": (
+            "synthetic demonstration of the path; not evidence about the vehicle"
+            if case.synthetic
+            else "ECU-side outputs of the prediction of record against the truck"
+        ),
+        "plant": "not used: BFS and target phi are decoded ECU logic; plant_not_qualified "
+        "does not gate this verdict",
+        "rules": {
+            "version": rules_version,
+            "sha256": rules_sha,
+            "reason": None if amended is None else amended.reason,
+        },
+        "verdicts": {k: t["outcome"] for k, t in tests.items()},
+        "effect_tests": tests,
+        "prediction": {
+            "artifact": rules.prediction.artifact,
+            "result_digest": rules.prediction.result_digest,
+            "design_sha256": rules.prediction.design_sha256,
+            "hashes_checked": dict(artifact),
+        },
+        "post_recordings": scope,
+        "scope": scope_kind or ("all" if recordings is None else "named"),
+        "candidates_not_scored": list(candidates_not_scored),
+        "learned_state": trims,
+        "base_image_sha256": case.base_image_sha256,
+        "candidate_image_sha256": case.candidate_image_sha256,
+    }
+    report["verdict_record"] = EcuOutputVerdict._mint(
+        case=case.id,
+        outcomes=tuple(
+            (k, str(t["outcome"]), int(t["n_pairs"]), int(t["floor_pairs"]))
+            for k, t in tests.items()
+        ),
+        synthetic=case.synthetic,
+        base_image_sha256=case.base_image_sha256,
+        candidate_image_sha256=case.candidate_image_sha256,
+        traces_sha256=traces_sha,
+        rules_version=rules_version,
+        rules_sha256=rules_sha,
+        recordings=tuple(scope),
+        scope=report["scope"],
+        candidates_not_scored=tuple(candidates_not_scored),
+    )
+    return report
+
+
+def candidate_recordings(
+    root: Path, registry: TuneRevisionRegistry, case: InterventionCase
+) -> list[str]:
+    """Every recording under ``root`` that ran on the case's candidate
+    revision, dated by its first sample (``for_session``), oldest first."""
+    found: list[tuple[datetime, str]] = []
+    for path in recorded_sessions(root):
+        rev = registry.for_session(path)
+        if rev is not None and rev.revision == case.candidate_revision:
+            dated = session_dated_at(path)
+            found.append((dated or datetime.max.replace(tzinfo=UTC), path.name))
+    return [name for _, name in sorted(found)]
+
+
+def post_scope(
+    case: InterventionCase,
+    boundary: Boundary,
+    on_candidate: Sequence[str],
+    sessions_root: Path,
+    *,
+    recordings: Sequence[str] | None = None,
+) -> tuple[list[str], list[str]]:
+    """Which declared post-change recordings to score, and which candidate
+    recordings are left unscored.
+
+    Without ``recordings`` every recording on the candidate revision is
+    scored and must be declared (``post_recording_undeclared``): none is
+    chosen. With ``recordings``, those (declared, by name) only; the others on
+    disk are returned so the report names them. Every scored recording must be
+    here on the candidate revision (``post_recording_missing``) with its first
+    sample after the flash (``post_recording_before_flash``)."""
+    declared = case.ecu_post_recordings()
+    if recordings is None:
+        missing = sorted(set(on_candidate) - set(declared))
+        if missing:
+            raise FuelPlantRefusalError(
+                "post_recording_undeclared",
+                f"{missing} ran on {case.candidate_revision} and are not declared (append them "
+                "to ecu_post_appended): every post-change recording is scored, none is chosen",
+            )
+        scope = list(declared)
+    else:
+        scope = list(recordings)
+        outside = sorted(set(scope) - set(declared))
+        if outside:
+            raise FuelPlantRefusalError(
+                "undeclared_recording", f"{outside} are not declared post-change recordings"
+            )
+    absent = sorted(set(scope) - set(on_candidate))
+    if absent:
+        raise FuelPlantRefusalError(
+            "post_recording_missing",
+            f"{absent} are declared but not here on {case.candidate_revision}",
+        )
+    for name in scope:
+        first = session_dated_at(sessions_root / name)
+        if first is None or first < boundary.at:
+            raise FuelPlantRefusalError(
+                "post_recording_before_flash",
+                f"{name}'s first sample ({first}) is not after the flash {boundary.at.isoformat()}",
+            )
+    return scope, sorted(set(on_candidate) - set(scope))
+
+
+def score_ecu_outputs(
+    case: InterventionCase,
+    boundary: Boundary,
+    registry: TuneRevisionRegistry,
+    *,
+    profile_dir: Path,
+    sessions_root: Path,
+    predictions_root: Path,
+    resolver: RevisionImageResolver | Callable[[str], FuelCompCalibration],
+    fuel_type: str,
+    amendment: int | None = None,
+    recordings: Sequence[str] | None = None,
+) -> tuple[dict[str, Any], pd.DataFrame, dict[str, pd.DataFrame]]:
+    """E09.12 end to end, in the order of evidence: the prediction's files are
+    checked against their recorded hashes before any post-change read is
+    taken; every recording on the candidate revision must be declared
+    (``post_recording_undeclared``); then the design points, their pre-change
+    values, and each output's post-change reads. Returns the sealed report,
+    the points and the post reads per output. ``amendment`` scores under that
+    :class:`EcuAmendment` version (:func:`evaluate_ecu_outputs`).
+    ``recordings`` names declared recordings to score instead of all of them
+    (:func:`post_scope`): the report lists the candidates it did not score."""
+    rules = case.ecu_outputs
+    if rules is None:
+        raise FuelPlantRefusalError("ecu_outputs_undeclared", f"case {case.id} has no ecu_outputs")
+    directory = predictions_root / rules.prediction.artifact
+    artifact = verify_prediction_artifact(directory, rules.prediction)
+    on_candidate = candidate_recordings(sessions_root, registry, case)
+    scope, not_scored = post_scope(
+        case, boundary, on_candidate, sessions_root, recordings=recordings
+    )
+    design = json.loads((directory / rules.prediction.design_record).read_text())
+    profile, _ = load_fuel_plant(profile_dir, str(design["plant_version"]))
+    delay = load_b06(profile_dir, profile.delay)
+    model, _ = load_application_model(profile_dir)
+    trims = trim_independence(model, [o.model_output for o in rules.outputs])
+    declaration = load_fuel_comp_declaration(profile_dir)
+    amended = None if amendment is None else case.ecu_amendment(amendment)
+    ceilings = (
+        {}
+        if amended is None
+        else {
+            k: float(amended.bfs_ceiling_counts)
+            for k, q in amended.quantities.items()
+            if q == "air_normalised"
+        }
+    )
+    points = prediction_points(
+        directory,
+        rules,
+        rpm_per_count=declaration.inputs.rpm.rpm_per_count,
+        ceilings=ceilings,
+    )
+    points = pre_observed(points, rules, profile, sessions_root)
+    post: dict[str, list[pd.DataFrame]] = {o.id: [] for o in rules.outputs}
+    for name in scope:
+        path = sessions_root / name
+        fill = fill_samples(path, profile_dir, registry, resolver, fuel_type=fuel_type)
+        for spec in rules.outputs:
+            post[spec.id].append(
+                ecu_output_reads(
+                    path,
+                    spec,
+                    profile,
+                    delay,
+                    fill,
+                    image_sha256=case.candidate_image_sha256,
+                    boundary=boundary,
+                )
+            )
+    reads = {
+        k: (
+            pd.concat([f for f in v if len(f)], ignore_index=True)
+            if any(len(f) for f in v)
+            else pd.DataFrame({c: pd.Series([], dtype=object) for c in ECU_READ_COLUMNS})
+        )
+        for k, v in post.items()
+    }
+    report = evaluate_ecu_outputs(
+        case,
+        points,
+        reads,
+        artifact=artifact,
+        trims=trims,
+        amendment=amendment,
+        recordings=scope,
+        scope_kind="all" if recordings is None else "named",
+        candidates_not_scored=not_scored,
+    )
+    report["plant_version_of_design"] = design["plant_version"]
+    return report, points, reads
+
+
 __all__ = [
     "INTERVENTIONS_FILE",
     "PLANT_NEEDS",
     "Boundary",
+    "EcuAmendment",
+    "EcuOutputRules",
+    "EcuOutputSpec",
+    "EcuOutputVerdict",
     "InterventionCase",
     "InterventionFile",
     "InterventionVerdict",
+    "PostAppend",
+    "PredictionArtifact",
     "PredictionOfRecord",
     "acceptance_checks",
     "band_predictor",
     "load_input_pairing",
     "build_case_samples",
+    "candidate_recordings",
+    "ecu_effect_test",
+    "ecu_output_reads",
+    "evaluate_ecu_outputs",
+    "fill_samples",
+    "pre_observed",
+    "prediction_points",
+    "post_chain_sha256",
+    "post_scope",
+    "score_ecu_outputs",
+    "trim_independence",
+    "verify_prediction_artifact",
     "check_one_plant",
     "evaluate_intervention",
     "inventory_session",
