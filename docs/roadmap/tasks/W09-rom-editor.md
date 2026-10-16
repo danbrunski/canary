@@ -631,6 +631,72 @@ W09.6 is the orchestrator's own, on the ROM machine.
   editing (traced but `unsupported` until a torque plant exists, E07.5). The
   E08.6 HTML report as a download.
 
+- [x] **W09.8 — "Open ROM…" on the ROM Editor page.** Requested 2026-10-15
+  by the operator via the E08 desk-launcher session: "we shouldn't have to run
+  with the rom folder, it should be browsable from the gui", then: "just think
+  about how a tool would normally work. You want to edit a rom, you click a
+  load button, it opens a file browser, you navigate to the folder, select
+  the file, and open." Frontend only; no backend change.
+  - The page's primary control is an **Open ROM…** button (an **Open another
+    ROM…** once something is loaded) that opens the browser's native file
+    dialog: a plain `<input type="file">` with no `accept` filter, so an
+    `.OsirisROM` or an odd extension is never hidden. Dropping a file on the
+    group does the same. With nothing stored the empty state is that one
+    button and no picker.
+  - One step: `uploadRomImage` -> the answered entry becomes the base (held
+    locally until the library refresh lands, so no other image shows in
+    between; `?rom=<sha>` written) -> the header shows the file's own name,
+    the sha prefix, the `revision_match` chip and `can simulate` / `preview
+    only` (the same `SimulateChip` the picker uses). The library's sha dedup
+    is behind the scenes: an existing entry gets one quiet line ("X is already
+    in the library; nothing new was stored"), not a dialog or a step.
+  - **Starts unloaded** (operator's reading, 2026-10-15: a normal tool starts
+    empty, then you open a file). No base is auto-selected, however many
+    images the library holds; the table, operation, pending-edit, preview
+    and Simulate sections appear only once a base is loaded, and nothing is
+    previewed, simulated or persisted before that. Only a `?rom=<sha>` in the
+    URL (a deliberate link: the desk launcher, a reload) loads a base at
+    start; a sha not in the library leaves the page unloaded with a quiet
+    "is not in the library" note. This reverses an earlier draft of this
+    item that kept W09.3's first-entry auto-select.
+  - The stored images are a secondary **Recent ROMs** list (BasePicker, rows
+    unchanged), **newest first by the entry's `added_at`** (the field the
+    library sets on every entry; the API's own order is not relied on),
+    one click to load, each with its `revision_match` chip and can simulate /
+    preview only. W09's rule stands: Simulate only when `revision_match
+    .status === 'matched'`; an unrecorded image previews and the Simulate slot
+    gives `base_not_a_recorded_revision`.
+  - Refusals by reason, as the library page does (`refusalText`): UpRev's
+    encrypted backup `.bin` by the server's own name and reason, 413, 401; an
+    empty or over-2 MiB file is refused client-side without uploading. A
+    refusal loads nothing and keeps the current base. No extension check
+    (the server detects the format from the bytes), which the library page
+    keeps.
+  - Evidence 2026-10-15: `RomEditorPage.test.tsx` 31 tests (14 new or
+    rewritten for W09.8): starts unloaded with a non-empty library (no grid,
+    no Edit/Pending/Preview/Simulate sections, no URL, no table fetch, no
+    POST, nothing in localStorage); recents newest first when the API answers
+    oldest first; one click on a recent loads it and writes `?rom=`; a
+    `?rom=` link in the library loads, one outside it stays unloaded with the
+    note; empty library is one Open ROM… button, no picker, no `accept`; a
+    picked file loads in one step (POST body/headers, URL, header name,
+    `preview only`, Simulate disabled with its reason); a recorded revision
+    shows `can simulate`; already-in-library note; encrypted-backup refusal by
+    name, selection and URL unchanged; 413/401/empty; drop; pending edits
+    survive an upload-driven switch and do not leak to the new base; no image
+    download after an upload (the existing no-download assertions unchanged
+    and green). The W09.3 and W09.4 tests that relied on auto-select now set
+    `?rom=` (`renderEditor()` in `RomEditorPage.test.tsx` and
+    `RomEditorSimulate.test.tsx`) or click a recent entry. Gate in
+    `src/dashboard/static`: `pnpm typecheck`, `pnpm lint` (no suppression
+    changes), `pnpm format:check` clean; vitest `--no-file-parallelism` on
+    RomEditorPage, RomEditorSimulate, romEditor/, RomLibraryPage: 4 files / 99
+    passed; `vitest related` on the touched files 15 files / 285 passed.
+    Files: `panels/tuning/RomEditorPage.tsx`, `romEditor/OpenRom.tsx` (new),
+    `romEditor/BasePicker.tsx` (`SimulateChip` extracted),
+    `test/romLibraryFixtures.ts` (`ENTRY_UNRECORDED`).
+    Not run: `pnpm e2e` (no browser walkthrough of the dialog).
+
 ## Not in scope
 
 - **Writing the ECU or producing a flashable file.** See "Decisions"; the

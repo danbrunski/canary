@@ -81,13 +81,19 @@ afterEach(() => {
   window.localStorage.clear();
 });
 
+/** The editor starts unloaded; the `?rom=` link loads the recorded revision. */
+function renderEditor() {
+  window.history.replaceState(null, "", `/?rom=${SHA_TUNED}`);
+  return render(<RomEditorPage token="t" status={null} />);
+}
+
 function cell(grid: HTMLElement, row: number, col: number) {
   return within(grid).getByRole("gridcell", { name: new RegExp(`^Row ${row}, column ${col}:`) });
 }
 
 /** Open the page, pick Fuel Comp, scale cells (1,1)-(1,2) by 2 % and name the set. */
 async function withPendingEdit(label = "idle richer") {
-  render(<RomEditorPage token="t" status={null} />);
+  renderEditor();
   fireEvent.click(await screen.findByRole("button", { name: "Fuel Compensation (Map 1)" }));
   const grid = screen.getByRole("grid", { name: "Fuel Compensation (Map 1) cells" });
   fireEvent.mouseDown(cell(grid, 1, 1));
@@ -138,7 +144,7 @@ const runButton = (form: HTMLElement) =>
 describe("the Simulate form: off, empty, and honest about it", () => {
   it("is off for a base that is not a recorded revision, with the reason", async () => {
     route();
-    render(<RomEditorPage token="t" status={null} />);
+    renderEditor();
     await screen.findByRole("grid");
     fireEvent.click(screen.getByRole("button", { name: /Edit from k106\.bin/ }));
     const note = await screen.findByRole("note");

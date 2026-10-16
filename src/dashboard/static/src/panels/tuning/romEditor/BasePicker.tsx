@@ -5,6 +5,19 @@ import { buttonClass, cn } from "../../../styles";
 import type { RomLibraryEntry } from "../../../types/romLibrary";
 import { Chip, RevisionChip } from "../romLibraryParts";
 
+/** Whether the simulator can use an image: a recorded revision only. */
+export function SimulateChip({ reason }: { reason: string | null }) {
+  return reason === null ? (
+    <Chip tone="ok" title="A recorded revision: the simulator can use it as a base">
+      can simulate
+    </Chip>
+  ) : (
+    <Chip tone="warn" title={reason}>
+      preview only
+    </Chip>
+  );
+}
+
 /** The library images an edit can start from: label, revision match, and
  *  whether the simulator can use the image (a matched revision only). */
 export function BasePicker({
@@ -49,15 +62,7 @@ export function BasePicker({
                   <RevisionChip match={entry.revision_match} />
                 </td>
                 <td className="py-2 pr-3">
-                  {reason === null ? (
-                    <Chip tone="ok" title="A recorded revision: the simulator can use it as a base">
-                      can simulate
-                    </Chip>
-                  ) : (
-                    <Chip tone="warn" title={reason}>
-                      preview only
-                    </Chip>
-                  )}
+                  <SimulateChip reason={reason} />
                 </td>
                 <td className="py-2">
                   <button
