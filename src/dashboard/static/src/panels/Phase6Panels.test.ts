@@ -139,6 +139,39 @@ describe("TrainingPanel", () => {
     expect(await screen.findByText(/queued on laptop/)).toBeInTheDocument();
   });
 
+  it("with no companion URL, runs the laptop job on this server with the control token", async () => {
+    mocks.getTrainingRuns.mockResolvedValue({ count: 0, runs: [] });
+    mocks.submitJob.mockResolvedValue({
+      job: {
+        job_id: "job1",
+        kind: "retrain_if",
+        status: "queued",
+        created_at: "2026-05-17T10:00:00+00:00",
+        started_at: null,
+        finished_at: null,
+        returncode: null,
+        log_path: "job.log",
+        command: [],
+        params: { days: 14 },
+      },
+    });
+    render(
+      createElement(TrainingPanel, {
+        token: "secret",
+        companion: { ...COMPANION, baseUrl: "", token: "ignored" },
+      }),
+    );
+
+    // History is read relative to this server, with the control token.
+    await waitFor(() =>
+      expect(mocks.getTrainingRuns).toHaveBeenCalledWith("secret", expect.anything(), ""),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Start" }));
+    await waitFor(() =>
+      expect(mocks.submitJob).toHaveBeenCalledWith("secret", "retrain_if", { days: 14 }, ""),
+    );
+  });
+
   it("describes a refused job in the shared words (R08.2)", async () => {
     const { HttpErrorStub } = await import("../test/harness");
     mocks.getTrainingRuns.mockResolvedValue({ count: 0, runs: [] });

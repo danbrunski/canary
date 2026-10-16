@@ -946,7 +946,7 @@ def test_section_matches_the_golden(section: str, captured: dict[str, Any]) -> N
 
 def test_the_golden_covers_every_model_the_package_exports(captured: dict[str, Any]) -> None:
     assert set(captured["classes"]) == set(_golden()["classes"])
-    assert len(captured["classes"]) == 39
+    assert len(captured["classes"]) == 40  # +CompanionConfig (2026-10-16)
 
 
 def test_a_fresh_interpreter_loads_nothing_new_for_import_src_config(

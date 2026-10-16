@@ -65,6 +65,7 @@ from src.dashboard.routes import (
     register_stream_routes,
 )
 from src.dashboard.routes.calibration import register_calibration_routes
+from src.dashboard.routes.companion_link import register_companion_link_routes
 from src.dashboard.routes.pairing import register_pairing_routes
 from src.dashboard.routes.rom_editor import register_rom_editor_routes
 from src.dashboard.routes.rom_library import register_rom_library_routes
@@ -322,6 +323,13 @@ def create_app(
     )
     # After the library: the editor's images are its (app.state.rom_library).
     register_rom_editor_routes(app, config=config, resolved_control_token=resolved_control_token)
+    if config.companion.enabled:
+        # Companion mode (a laptop linked to a Pi): the library's sessions are
+        # this daemon's session store (config validator), and /companion/*
+        # syncs, publishes and names the linked Pi.
+        register_companion_link_routes(
+            app, config=config, resolved_control_token=resolved_control_token
+        )
     register_calibration_routes(
         app,
         config=config,

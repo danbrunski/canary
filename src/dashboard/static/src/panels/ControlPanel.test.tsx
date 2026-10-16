@@ -8,6 +8,10 @@ import { mockHttp } from "../test/harness";
 import type { CaptureState } from "../types";
 
 const mocks = mockHttp([
+  "getCompanionStatus",
+  "clearPi",
+  "discoverPis",
+  "selectPi",
   "getPreflight",
   "getControlVersion",
   "getCurrentCapture",
@@ -41,6 +45,7 @@ const ACTIVE: CaptureState = {
 };
 
 function serve(capture: CaptureState | null): void {
+  mocks.getCompanionStatus.mockReturnValue(new Promise(() => {}));
   mocks.getPreflight.mockResolvedValue({
     ok: true,
     checked_at: "2026-09-25T12:00:00Z",
@@ -138,6 +143,7 @@ describe("ControlPanel capture section", () => {
   });
 
   it("disables every capture action without a token", () => {
+    mocks.getCompanionStatus.mockReturnValue(new Promise(() => {}));
     render(<ControlPanel token="" companion={COMPANION} />);
     const panel = capturePanel();
     expect(button(panel, "Start")).toBeDisabled();

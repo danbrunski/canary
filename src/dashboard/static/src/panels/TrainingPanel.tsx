@@ -7,7 +7,7 @@ import { Panel } from "../components/Panel";
 import { ResourceGate } from "../components/ResourceGate";
 import { TRAINING_JOB_KINDS } from "../lib/jobKinds";
 import { Sparkline } from "../components/Sparkline";
-import type { CompanionSettings } from "../hooks/useCompanionSettings";
+import { companionAccess, type CompanionSettings } from "../hooks/useCompanionSettings";
 import { describeError, useControlResource } from "../hooks/useControlResource";
 import {
   type DistributionView,
@@ -58,9 +58,10 @@ export function TrainingPanel({ token, companion }: TrainingPanelProps) {
   const [device, setDevice] = useState("cpu");
   const [notice, setNotice] = useState<NoticeState | null>(null);
   const [busy, setBusy] = useState(false);
-  const historyBase = target === "local" ? companion.baseUrl : undefined;
-  const historyToken = target === "local" ? companion.token : token;
-  const historyEnabled = target === "local" ? Boolean(companion.baseUrl) : Boolean(token);
+  const local = companionAccess(companion, token);
+  const historyBase = target === "local" ? local.baseUrl : undefined;
+  const historyToken = target === "local" ? local.token : token;
+  const historyEnabled = target === "local" ? !local.sameOrigin || Boolean(token) : Boolean(token);
   const fetcher = useCallback(
     (signal: AbortSignal) => getTrainingRuns(historyToken, signal, historyBase),
     [historyBase, historyToken],
@@ -71,10 +72,10 @@ export function TrainingPanel({ token, companion }: TrainingPanelProps) {
   });
 
   const startTraining = async () => {
-    const base = target === "local" ? companion.baseUrl : undefined;
-    const jobToken = target === "local" ? companion.token : token;
-    if (target === "local" && !companion.baseUrl) {
-      setNotice({ kind: "error", text: "Enter the companion API URL." });
+    const base = target === "local" ? local.baseUrl : undefined;
+    const jobToken = target === "local" ? local.token : token;
+    if (target === "local" && local.sameOrigin && !token) {
+      setNotice({ kind: "error", text: "Enter the control token first." });
       return;
     }
     if (target === "pi" && !token) {
@@ -126,12 +127,12 @@ export function TrainingPanel({ token, companion }: TrainingPanelProps) {
         </label>
         {target === "local" ? (
           <label className="flex flex-col gap-1 text-[0.75rem] text-fg-dim">
-            Companion API
+            Companion API (blank: this server)
             <input
               className={inputClass}
               value={companion.baseUrl}
               onChange={(event) => companion.setBaseUrl(event.target.value)}
-              placeholder="http://127.0.0.1:8765"
+              placeholder="blank: this server"
             />
           </label>
         ) : (
@@ -183,7 +184,7 @@ export function TrainingPanel({ token, companion }: TrainingPanelProps) {
           </label>
         )}
       </div>
-      {target === "local" && (
+      {target === "local" && !local.sameOrigin && (
         <label className="mb-3 flex max-w-md flex-col gap-1 text-[0.75rem] text-fg-dim">
           Local token
           <input
@@ -201,7 +202,7 @@ export function TrainingPanel({ token, companion }: TrainingPanelProps) {
         enabled={historyEnabled}
         enabledMessage={
           target === "local"
-            ? "Enter the companion API URL to read laptop training history."
+            ? "Enter the control token to read this server's training history."
             : "Enter the Pi control token to read Pi training history."
         }
         loading={loading}

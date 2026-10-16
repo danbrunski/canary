@@ -2040,6 +2040,10 @@
       "after"
      ],
      [
+      "_companion_library",
+      "after"
+     ],
+     [
       "_broadcast_timeout_inside_session_gap",
       "after"
      ],
@@ -2455,10 +2459,32 @@
      "serialization_alias": null,
      "title": null,
      "validation_alias": null
+    },
+    {
+     "alias": null,
+     "annotation": "CompanionConfig",
+     "constraints": [],
+     "default": {
+      "discover": true,
+      "discover_sweep": true,
+      "enabled": false,
+      "library_root": null,
+      "pi_host": null,
+      "pi_token_env": "CANARY_CONTROL_TOKEN"
+     },
+     "description": null,
+     "exclude": null,
+     "frozen": null,
+     "json_schema_extra": null,
+     "name": "companion",
+     "serialization_alias": null,
+     "title": null,
+     "validation_alias": null
     }
    ],
    "methods": [
     "_broadcast_timeout_inside_session_gap",
+    "_companion_library",
     "_root_state_paths",
     "_sequence_cadence_can_latch",
     "from_yaml",
@@ -3113,6 +3139,121 @@
    },
    "mro": [
     "CommitteesConfig",
+    "_Strict"
+   ],
+   "private": {}
+  },
+  "CompanionConfig": {
+   "decorators": {
+    "computed_fields": [],
+    "field_serializers": [],
+    "field_validators": [],
+    "model_serializers": [],
+    "model_validators": []
+   },
+   "defaults": {
+    "ok": {
+     "discover": true,
+     "discover_sweep": true,
+     "enabled": false,
+     "library_root": null,
+     "pi_host": null,
+     "pi_token_env": "CANARY_CONTROL_TOKEN"
+    }
+   },
+   "doc": "Companion mode: this daemon keeps a library synced from a CANary Pi.\n\nA laptop runs the whole daemon with no bus (``scripts/canary_desk.py``)\nand, with this on, also acts as the companion of a Pi on the network:\nsessions are pulled into the library, models are published back, and\nthe ``/companion/*`` routes (``src.dashboard.routes.companion_link``)\nare served beside the dashboard. The library's ``sessions/`` becomes\n``collection.storage_path``, so the Sessions panel lists what was synced.\nOff by default: a Pi in the truck is nobody's companion.",
+   "fields": [
+    {
+     "alias": null,
+     "annotation": "bool",
+     "constraints": [],
+     "default": false,
+     "description": null,
+     "exclude": null,
+     "frozen": null,
+     "json_schema_extra": null,
+     "name": "enabled",
+     "serialization_alias": null,
+     "title": null,
+     "validation_alias": null
+    },
+    {
+     "alias": null,
+     "annotation": "Path | None",
+     "constraints": [],
+     "default": null,
+     "description": null,
+     "exclude": null,
+     "frozen": null,
+     "json_schema_extra": null,
+     "name": "library_root",
+     "serialization_alias": null,
+     "title": null,
+     "validation_alias": null
+    },
+    {
+     "alias": null,
+     "annotation": "str | None",
+     "constraints": [],
+     "default": null,
+     "description": null,
+     "exclude": null,
+     "frozen": null,
+     "json_schema_extra": null,
+     "name": "pi_host",
+     "serialization_alias": null,
+     "title": null,
+     "validation_alias": null
+    },
+    {
+     "alias": null,
+     "annotation": "str",
+     "constraints": [],
+     "default": "CANARY_CONTROL_TOKEN",
+     "description": null,
+     "exclude": null,
+     "frozen": null,
+     "json_schema_extra": null,
+     "name": "pi_token_env",
+     "serialization_alias": null,
+     "title": null,
+     "validation_alias": null
+    },
+    {
+     "alias": null,
+     "annotation": "bool",
+     "constraints": [],
+     "default": true,
+     "description": null,
+     "exclude": null,
+     "frozen": null,
+     "json_schema_extra": null,
+     "name": "discover",
+     "serialization_alias": null,
+     "title": null,
+     "validation_alias": null
+    },
+    {
+     "alias": null,
+     "annotation": "bool",
+     "constraints": [],
+     "default": true,
+     "description": null,
+     "exclude": null,
+     "frozen": null,
+     "json_schema_extra": null,
+     "name": "discover_sweep",
+     "serialization_alias": null,
+     "title": null,
+     "validation_alias": null
+    }
+   ],
+   "methods": [],
+   "model_config": {
+    "extra": "forbid"
+   },
+   "mro": [
+    "CompanionConfig",
     "_Strict"
    ],
    "private": {}
@@ -8671,6 +8812,14 @@
     "committees": {
      "enabled": true
     },
+    "companion": {
+     "discover": true,
+     "discover_sweep": true,
+     "enabled": false,
+     "library_root": null,
+     "pi_host": null,
+     "pi_token_env": "CANARY_CONTROL_TOKEN"
+    },
     "daemon": {
      "accepted_baselines": "<repo>/data/accepted_baselines.yaml",
      "afr_calibration": "<repo>/data/afr_calibration.yaml",
@@ -8987,6 +9136,7 @@
      "storage_warning_mb"
     ],
     "committees": [],
+    "companion": [],
     "daemon": [],
     "dashboard": [
      "host",
@@ -9163,6 +9313,14 @@
     },
     "committees": {
      "enabled": true
+    },
+    "companion": {
+     "discover": true,
+     "discover_sweep": true,
+     "enabled": false,
+     "library_root": null,
+     "pi_host": null,
+     "pi_token_env": "CANARY_CONTROL_TOKEN"
     },
     "daemon": {
      "accepted_baselines": "/golden-tmp<repo>/data/test-vehicle/accepted_baselines.yaml",
@@ -9468,6 +9626,7 @@
      "autotag",
      "collection",
      "committees",
+     "companion",
      "daemon",
      "dashboard",
      "hardware",
@@ -9541,6 +9700,14 @@
     ],
     "committees": [
      "enabled"
+    ],
+    "companion": [
+     "discover",
+     "discover_sweep",
+     "enabled",
+     "library_root",
+     "pi_host",
+     "pi_token_env"
     ],
     "daemon": [
      "accepted_baselines",
@@ -9762,6 +9929,14 @@
     },
     "committees": {
      "enabled": true
+    },
+    "companion": {
+     "discover": true,
+     "discover_sweep": true,
+     "enabled": false,
+     "library_root": null,
+     "pi_host": null,
+     "pi_token_env": "CANARY_CONTROL_TOKEN"
     },
     "daemon": {
      "accepted_baselines": "/golden-tmp<repo>/data/test-vehicle/accepted_baselines.yaml",
@@ -10142,6 +10317,14 @@
     "committees": {
      "enabled": true
     },
+    "companion": {
+     "discover": true,
+     "discover_sweep": true,
+     "enabled": false,
+     "library_root": null,
+     "pi_host": null,
+     "pi_token_env": "CANARY_CONTROL_TOKEN"
+    },
     "daemon": {
      "accepted_baselines": "/golden-tmp<repo>/data/accepted_baselines.yaml",
      "afr_calibration": "/golden-tmp<repo>/data/afr_calibration.yaml",
@@ -10446,6 +10629,7 @@
      "autotag",
      "collection",
      "committees",
+     "companion",
      "daemon",
      "dashboard",
      "hardware",
@@ -10519,6 +10703,14 @@
     ],
     "committees": [
      "enabled"
+    ],
+    "companion": [
+     "discover",
+     "discover_sweep",
+     "enabled",
+     "library_root",
+     "pi_host",
+     "pi_token_env"
     ],
     "daemon": [
      "accepted_baselines",
@@ -10740,6 +10932,14 @@
     },
     "committees": {
      "enabled": true
+    },
+    "companion": {
+     "discover": true,
+     "discover_sweep": true,
+     "enabled": false,
+     "library_root": null,
+     "pi_host": null,
+     "pi_token_env": "CANARY_CONTROL_TOKEN"
     },
     "daemon": {
      "accepted_baselines": "/golden-tmp<repo>/data/accepted_baselines.yaml",
@@ -11133,6 +11333,14 @@
     "committees": {
      "enabled": true
     },
+    "companion": {
+     "discover": true,
+     "discover_sweep": true,
+     "enabled": false,
+     "library_root": null,
+     "pi_host": null,
+     "pi_token_env": "CANARY_CONTROL_TOKEN"
+    },
     "daemon": {
      "accepted_baselines": "<repo>/data/accepted_baselines.yaml",
      "afr_calibration": "<repo>/data/afr_calibration.yaml",
@@ -11524,6 +11732,7 @@
      "storage_warning_mb"
     ],
     "committees": [],
+    "companion": [],
     "daemon": [
      "anomalies_dir",
      "broadcaster_queue_size",
@@ -11777,6 +11986,14 @@
     },
     "committees": {
      "enabled": true
+    },
+    "companion": {
+     "discover": true,
+     "discover_sweep": true,
+     "enabled": false,
+     "library_root": null,
+     "pi_host": null,
+     "pi_token_env": "CANARY_CONTROL_TOKEN"
     },
     "daemon": {
      "accepted_baselines": "<repo>/data/accepted_baselines.yaml",
@@ -12264,6 +12481,7 @@
      "storage_warning_mb"
     ],
     "committees": [],
+    "companion": [],
     "daemon": [],
     "dashboard": [
      "host",
@@ -12649,6 +12867,14 @@
     },
     "committees": {
      "enabled": true
+    },
+    "companion": {
+     "discover": true,
+     "discover_sweep": true,
+     "enabled": false,
+     "library_root": null,
+     "pi_host": null,
+     "pi_token_env": "CANARY_CONTROL_TOKEN"
     },
     "daemon": {
      "accepted_baselines": "<repo>/data/test-vehicle/accepted_baselines.yaml",
@@ -13138,6 +13364,7 @@
      "storage_warning_mb"
     ],
     "committees": [],
+    "companion": [],
     "daemon": [
      "accepted_baselines",
      "afr_calibration",
@@ -13575,6 +13802,14 @@
     "committees": {
      "enabled": true
     },
+    "companion": {
+     "discover": true,
+     "discover_sweep": true,
+     "enabled": false,
+     "library_root": null,
+     "pi_host": null,
+     "pi_token_env": "CANARY_CONTROL_TOKEN"
+    },
     "daemon": {
      "accepted_baselines": "<repo>/data/accepted_baselines.yaml",
      "afr_calibration": "<repo>/data/afr_calibration.yaml",
@@ -14062,6 +14297,7 @@
      "storage_warning_mb"
     ],
     "committees": [],
+    "companion": [],
     "daemon": [],
     "dashboard": [
      "host",
@@ -14444,6 +14680,14 @@
     "committees": {
      "enabled": true
     },
+    "companion": {
+     "discover": true,
+     "discover_sweep": true,
+     "enabled": false,
+     "library_root": null,
+     "pi_host": null,
+     "pi_token_env": "CANARY_CONTROL_TOKEN"
+    },
     "daemon": {
      "accepted_baselines": "/golden-tmp<repo>/data/accepted_baselines.yaml",
      "afr_calibration": "/golden-tmp<repo>/data/afr_calibration.yaml",
@@ -14748,6 +14992,7 @@
      "autotag",
      "collection",
      "committees",
+     "companion",
      "daemon",
      "dashboard",
      "hardware",
@@ -14821,6 +15066,14 @@
     ],
     "committees": [
      "enabled"
+    ],
+    "companion": [
+     "discover",
+     "discover_sweep",
+     "enabled",
+     "library_root",
+     "pi_host",
+     "pi_token_env"
     ],
     "daemon": [
      "accepted_baselines",
@@ -15042,6 +15295,14 @@
     },
     "committees": {
      "enabled": true
+    },
+    "companion": {
+     "discover": true,
+     "discover_sweep": true,
+     "enabled": false,
+     "library_root": null,
+     "pi_host": null,
+     "pi_token_env": "CANARY_CONTROL_TOKEN"
     },
     "daemon": {
      "accepted_baselines": "/golden-tmp<repo>/data/accepted_baselines.yaml",
@@ -15443,6 +15704,14 @@
     },
     "committees": {
      "enabled": true
+    },
+    "companion": {
+     "discover": true,
+     "discover_sweep": true,
+     "enabled": false,
+     "library_root": null,
+     "pi_host": null,
+     "pi_token_env": "CANARY_CONTROL_TOKEN"
     },
     "daemon": {
      "accepted_baselines": "/golden-tmp<repo>/data/accepted_baselines.yaml",
@@ -15892,6 +16161,7 @@
      "autotag",
      "collection",
      "committees",
+     "companion",
      "daemon",
      "dashboard",
      "hardware",
@@ -15965,6 +16235,14 @@
     ],
     "committees": [
      "enabled"
+    ],
+    "companion": [
+     "discover",
+     "discover_sweep",
+     "enabled",
+     "library_root",
+     "pi_host",
+     "pi_token_env"
     ],
     "daemon": [
      "accepted_baselines",
@@ -16195,6 +16473,14 @@
     },
     "committees": {
      "enabled": true
+    },
+    "companion": {
+     "discover": true,
+     "discover_sweep": true,
+     "enabled": false,
+     "library_root": null,
+     "pi_host": null,
+     "pi_token_env": "CANARY_CONTROL_TOKEN"
     },
     "daemon": {
      "accepted_baselines": "/golden-tmp<repo>/data/accepted_baselines.yaml",
@@ -16732,6 +17018,14 @@
     "committees": {
      "enabled": true
     },
+    "companion": {
+     "discover": true,
+     "discover_sweep": true,
+     "enabled": false,
+     "library_root": null,
+     "pi_host": null,
+     "pi_token_env": "CANARY_CONTROL_TOKEN"
+    },
     "daemon": {
      "accepted_baselines": "/golden-tmp<repo>/data/accepted_baselines.yaml",
      "afr_calibration": "/golden-tmp<repo>/data/afr_calibration.yaml",
@@ -17019,6 +17313,7 @@
      "autotag",
      "collection",
      "committees",
+     "companion",
      "daemon",
      "dashboard",
      "hardware",
@@ -17092,6 +17387,14 @@
     ],
     "committees": [
      "enabled"
+    ],
+    "companion": [
+     "discover",
+     "discover_sweep",
+     "enabled",
+     "library_root",
+     "pi_host",
+     "pi_token_env"
     ],
     "daemon": [
      "accepted_baselines",
@@ -17313,6 +17616,14 @@
     },
     "committees": {
      "enabled": true
+    },
+    "companion": {
+     "discover": true,
+     "discover_sweep": true,
+     "enabled": false,
+     "library_root": null,
+     "pi_host": null,
+     "pi_token_env": "CANARY_CONTROL_TOKEN"
     },
     "daemon": {
      "accepted_baselines": "/golden-tmp<repo>/data/accepted_baselines.yaml",
@@ -17689,6 +18000,14 @@
     "committees": {
      "enabled": true
     },
+    "companion": {
+     "discover": true,
+     "discover_sweep": true,
+     "enabled": false,
+     "library_root": null,
+     "pi_host": null,
+     "pi_token_env": "CANARY_CONTROL_TOKEN"
+    },
     "daemon": {
      "accepted_baselines": "<repo>/data/accepted_baselines.yaml",
      "afr_calibration": "<repo>/data/afr_calibration.yaml",
@@ -17988,6 +18307,7 @@
      "storage_warning_mb"
     ],
     "committees": [],
+    "companion": [],
     "daemon": [],
     "dashboard": [
      "host",
@@ -18167,6 +18487,14 @@
     },
     "committees": {
      "enabled": true
+    },
+    "companion": {
+     "discover": true,
+     "discover_sweep": true,
+     "enabled": false,
+     "library_root": null,
+     "pi_host": null,
+     "pi_token_env": "CANARY_CONTROL_TOKEN"
     },
     "daemon": {
      "accepted_baselines": "<repo>/data/accepted_baselines.yaml",
@@ -18597,6 +18925,7 @@
      "storage_warning_mb"
     ],
     "committees": [],
+    "companion": [],
     "daemon": [
      "anomalies_dir",
      "audit_log",
@@ -18941,6 +19270,14 @@
     },
     "committees": {
      "enabled": true
+    },
+    "companion": {
+     "discover": true,
+     "discover_sweep": true,
+     "enabled": false,
+     "library_root": null,
+     "pi_host": null,
+     "pi_token_env": "CANARY_CONTROL_TOKEN"
     },
     "daemon": {
      "accepted_baselines": "<repo>/data/accepted_baselines.yaml",
@@ -19336,6 +19673,7 @@
      "storage_warning_mb"
     ],
     "committees": [],
+    "companion": [],
     "daemon": [
      "anomalies_dir",
      "audit_log",
@@ -20007,6 +20345,7 @@
        "storage_warning_mb"
       ],
       "committees": [],
+      "companion": [],
       "daemon": [
        "anomalies_dir",
        "audit_log",
@@ -20179,6 +20518,7 @@
        "storage_warning_mb"
       ],
       "committees": [],
+      "companion": [],
       "daemon": [
        "anomalies_dir",
        "audit_log",
@@ -20351,6 +20691,7 @@
        "storage_warning_mb"
       ],
       "committees": [],
+      "companion": [],
       "daemon": [
        "anomalies_dir",
        "audit_log",
@@ -20523,6 +20864,7 @@
        "storage_warning_mb"
       ],
       "committees": [],
+      "companion": [],
       "daemon": [
        "anomalies_dir",
        "audit_log",
@@ -20695,6 +21037,7 @@
        "storage_warning_mb"
       ],
       "committees": [],
+      "companion": [],
       "daemon": [
        "afr_calibration",
        "anomalies_dir",
@@ -20866,6 +21209,7 @@
        "storage_warning_mb"
       ],
       "committees": [],
+      "companion": [],
       "daemon": [
        "state_dir"
       ],
@@ -21013,6 +21357,7 @@
        "storage_warning_mb"
       ],
       "committees": [],
+      "companion": [],
       "daemon": [],
       "dashboard": [
        "host",
@@ -21160,6 +21505,7 @@
        "storage_warning_mb"
       ],
       "committees": [],
+      "companion": [],
       "daemon": [
        "anomalies_dir",
        "audit_log",
@@ -21291,6 +21637,7 @@
        "autotag",
        "collection",
        "committees",
+       "companion",
        "daemon",
        "dashboard",
        "hardware",
@@ -21364,6 +21711,14 @@
       ],
       "committees": [
        "enabled"
+      ],
+      "companion": [
+       "discover",
+       "discover_sweep",
+       "enabled",
+       "library_root",
+       "pi_host",
+       "pi_token_env"
       ],
       "daemon": [
        "accepted_baselines",
@@ -21583,6 +21938,7 @@
        "storage_warning_mb"
       ],
       "committees": [],
+      "companion": [],
       "daemon": [
        "state_dir"
       ],
@@ -21732,6 +22088,7 @@
        "storage_warning_mb"
       ],
       "committees": [],
+      "companion": [],
       "daemon": [
        "anomalies_dir",
        "audit_log",
@@ -21830,9 +22187,10 @@
    "AlertsConfig": "40d2a25efded30311c3a2781c21f2d566f7c0c729af3e365be5c783a60281588",
    "AutoTagConfig": "460c49dceabbc6ab6771a5fc110af831a3171f714a26c474a67569f6e2de4e5d",
    "CanBusConfig": "bd87c3879adcff6ddc4a06b2ed1ae7f1a20625abca1fa40bf2b60e631c36053f",
-   "CanaryConfig": "4013a0dce82898c66ab6b2dd0412ba225eccbd6586241e8d7e9cac35d3877e82",
+   "CanaryConfig": "510804505fc13b82aa774662e2d61e480c4c80b5f2f67521a202c6387b97fe89",
    "CollectionConfig": "98e6c84db424d868397ad5603fb9ae205cdc9d715bb6eca63d8fb498a1d38f80",
    "CommitteesConfig": "9eb7046514943dd0444615e211830127965478958085f3db5e1691964eab8cbc",
+   "CompanionConfig": "8002ff2c0312e9cc9801f7b06f1928332bfec8e3df86d0e4cebded3ea1f5f9f9",
    "DaemonConfig": "ab8546edb580666ca8bea15f757aef793ee3b8a7f789f537ea865a975d4f93aa",
    "DashboardConfig": "b81240a5ff753fcedaad5833098b29b139bfcee08a7ae19b20ea5839f14c88cf",
    "DetectorRolesConfig": "80deb54664d9d9d899849465171c0cac85d06427c5c9839a53118cec8885ea75",
@@ -22293,6 +22651,59 @@
       }
      },
      "title": "CommitteesConfig",
+     "type": "object"
+    },
+    "CompanionConfig": {
+     "additionalProperties": false,
+     "description": "Companion mode: this daemon keeps a library synced from a CANary Pi.\n\nA laptop runs the whole daemon with no bus (``scripts/canary_desk.py``)\nand, with this on, also acts as the companion of a Pi on the network:\nsessions are pulled into the library, models are published back, and\nthe ``/companion/*`` routes (``src.dashboard.routes.companion_link``)\nare served beside the dashboard. The library's ``sessions/`` becomes\n``collection.storage_path``, so the Sessions panel lists what was synced.\nOff by default: a Pi in the truck is nobody's companion.",
+     "properties": {
+      "discover": {
+       "default": true,
+       "title": "Discover",
+       "type": "boolean"
+      },
+      "discover_sweep": {
+       "default": true,
+       "title": "Discover Sweep",
+       "type": "boolean"
+      },
+      "enabled": {
+       "default": false,
+       "title": "Enabled",
+       "type": "boolean"
+      },
+      "library_root": {
+       "anyOf": [
+        {
+         "format": "path",
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": null,
+       "title": "Library Root"
+      },
+      "pi_host": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": null,
+       "title": "Pi Host"
+      },
+      "pi_token_env": {
+       "default": "CANARY_CONTROL_TOKEN",
+       "title": "Pi Token Env",
+       "type": "string"
+      }
+     },
+     "title": "CompanionConfig",
      "type": "object"
     },
     "DaemonConfig": {
@@ -24362,6 +24773,17 @@
      "$ref": "#/$defs/CommitteesConfig",
      "default": {
       "enabled": true
+     }
+    },
+    "companion": {
+     "$ref": "#/$defs/CompanionConfig",
+     "default": {
+      "discover": true,
+      "discover_sweep": true,
+      "enabled": false,
+      "library_root": null,
+      "pi_host": null,
+      "pi_token_env": "CANARY_CONTROL_TOKEN"
      }
     },
     "daemon": {
@@ -24933,6 +25355,59 @@
      "title": "CommitteesConfig",
      "type": "object"
     },
+    "CompanionConfig": {
+     "additionalProperties": false,
+     "description": "Companion mode: this daemon keeps a library synced from a CANary Pi.\n\nA laptop runs the whole daemon with no bus (``scripts/canary_desk.py``)\nand, with this on, also acts as the companion of a Pi on the network:\nsessions are pulled into the library, models are published back, and\nthe ``/companion/*`` routes (``src.dashboard.routes.companion_link``)\nare served beside the dashboard. The library's ``sessions/`` becomes\n``collection.storage_path``, so the Sessions panel lists what was synced.\nOff by default: a Pi in the truck is nobody's companion.",
+     "properties": {
+      "discover": {
+       "default": true,
+       "title": "Discover",
+       "type": "boolean"
+      },
+      "discover_sweep": {
+       "default": true,
+       "title": "Discover Sweep",
+       "type": "boolean"
+      },
+      "enabled": {
+       "default": false,
+       "title": "Enabled",
+       "type": "boolean"
+      },
+      "library_root": {
+       "anyOf": [
+        {
+         "format": "path",
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": null,
+       "title": "Library Root"
+      },
+      "pi_host": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": null,
+       "title": "Pi Host"
+      },
+      "pi_token_env": {
+       "default": "CANARY_CONTROL_TOKEN",
+       "title": "Pi Token Env",
+       "type": "string"
+      }
+     },
+     "title": "CompanionConfig",
+     "type": "object"
+    },
     "DaemonConfig": {
      "additionalProperties": false,
      "description": "Where the long-running daemon reads / writes its sidecar artifacts.\n\nAll fields are optional so existing ``canary.yaml`` files keep loading\nwithout edits; the defaults are sensible relative-to-cwd paths for the\ncommon WSL-dev case. Production deployments override them (the systemd\nunit will pin absolute paths under ``/var/lib/canary``).",
@@ -27000,6 +27475,17 @@
      "$ref": "#/$defs/CommitteesConfig",
      "default": {
       "enabled": true
+     }
+    },
+    "companion": {
+     "$ref": "#/$defs/CompanionConfig",
+     "default": {
+      "discover": true,
+      "discover_sweep": true,
+      "enabled": false,
+      "library_root": null,
+      "pi_host": null,
+      "pi_token_env": "CANARY_CONTROL_TOKEN"
      }
     },
     "daemon": {
@@ -27668,6 +28154,18 @@
    ]
   },
   "class:CommitteesConfig": {
+   "error": "ValidationError",
+   "errors": [
+    {
+     "loc": [
+      "zz_typo"
+     ],
+     "msg": "Extra inputs are not permitted",
+     "type": "extra_forbidden"
+    }
+   ]
+  },
+  "class:CompanionConfig": {
    "error": "ValidationError",
    "errors": [
     {

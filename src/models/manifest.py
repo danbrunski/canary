@@ -305,7 +305,7 @@ def manifest_path_for(artifact_path: Path) -> Path:
     the literal duplicated across every trainer's own
     ``default_*_manifest_path`` plus half a dozen more call sites
     (``control/models.py``, ``control/preflight.py``,
-    ``control/sequence_detector.py``, ``companion/routes.py``,
+    ``control/sequence_detector.py``, ``dashboard/routes/companion_link.py``,
     ``models/manager.py``).
     """
     return Path(artifact_path).with_suffix(".manifest.json")

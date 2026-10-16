@@ -7,7 +7,7 @@ import { useBehaviorLive } from "./hooks/useBehaviorLive";
 import { useBehaviorModels } from "./hooks/useBehaviorModels";
 import { useCompanionSettings } from "./hooks/useCompanionSettings";
 import { useBindings } from "./hooks/useBindings";
-import { useConnectivityMode } from "./hooks/useConnectivityMode";
+import { useConnectivity } from "./hooks/useConnectivityMode";
 import { useControlToken } from "./hooks/useControlToken";
 import { useHashRoute } from "./hooks/useHashRoute";
 import { useIsPhone } from "./hooks/useMediaQuery";
@@ -31,7 +31,7 @@ export default function App() {
   const anomalies = useAnomalyStream();
   const liveScores = useScoreStream();
   const { status, error: statusError } = useStatus();
-  const connectivity = useConnectivityMode(status !== null && statusError === null);
+  const { mode: connectivity, linkedPi } = useConnectivity(status !== null && statusError === null);
   const behaviorModels = useBehaviorModels();
   const behaviorLive = useBehaviorLive();
   const bindings = useBindings();
@@ -71,6 +71,7 @@ export default function App() {
       controlState={controlToken.hasToken ? "open" : "closed"}
       controlReady={controlToken.hasToken}
       connectivity={connectivity}
+      linkedPi={linkedPi}
       events={anomalies.events}
       liveMode={behaviorLive?.operating_mode ?? null}
       status={status}

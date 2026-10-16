@@ -64,10 +64,57 @@ export interface AnomaliesResponse {
   count: number;
 }
 
-/** Response from `GET /companion/status` — only served by the companion
- *  app (`src/companion/routes.py`), never the Pi daemon. Its mere presence
- *  is the 6.35 connectivity signal: reachable means this dashboard instance
- *  is backed by the local library, not a live Pi. */
+/** Response from `GET /identity` (`src/dashboard/identity.py`): who answers
+ *  on this origin. No token. `host_kind` is the connectivity signal: a
+ *  `raspberry_pi` is the live Pi dashboard, anything else is a desk daemon. */
+export interface IdentityResponse {
+  product: "canary";
+  api: string;
+  hostname: string;
+  host_kind: "raspberry_pi" | "host";
+  profile: string | null;
+  version: string;
+  git_sha: string | null;
+  dashboard_port: number;
+}
+
+/** A Pi's identity as the companion probed it (`src/companion/discovery.py`). */
+export interface DaemonIdentity {
+  product: "canary";
+  hostname: string;
+  host_kind: string;
+  version: string | null;
+  profile: string | null;
+  dashboard_port: number;
+  source_path: string;
+}
+
+/** The Pi a companion-mode daemon is linked to. `source` says how: found on
+ *  the network, chosen in the dashboard, or named in the config. */
+export interface PiLink {
+  base_url: string;
+  identity: DaemonIdentity | null;
+  source: "selected" | "discovered" | "configured";
+  selected_at: string | null;
+}
+
+export interface DiscoveredPi {
+  base_url: string;
+  host: string;
+  source: "env" | "name" | "wired" | "sweep";
+  identity: DaemonIdentity;
+}
+
+export interface CompanionDiscovery {
+  state: "idle" | "running" | "done";
+  ran_at: string | null;
+  found: DiscoveredPi[];
+  error: string | null;
+}
+
+/** Response from `GET /companion/status` — served by a daemon running with
+ *  `companion.enabled` (`src/companion/routes.py`), same origin as the
+ *  dashboard; 404 when companion mode is off. */
 export interface CompanionStatusResponse {
   mode: string;
   library_root: string;
@@ -75,7 +122,15 @@ export interface CompanionStatusResponse {
   models: number;
   datasets: number;
   queued_actions: number;
-  config_path: string;
+  pi: PiLink | null;
+  pi_token_present: boolean;
+  discovery: CompanionDiscovery;
+}
+
+/** Response from `GET /companion/discover`. */
+export interface CompanionDiscoverResponse {
+  found: DiscoveredPi[];
+  pi: PiLink | null;
 }
 
 /** Response from `GET /status`. Mirrors `StatusSnapshot.to_dict()`. */

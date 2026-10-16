@@ -364,40 +364,19 @@
       }
     }
   },
-  "canary_companion.py": {
+  "canary_desk.py": {
     "options": {
-      "--allow-origin": {
-        "action": "_AppendAction",
-        "choices": null,
-        "default": [],
-        "dest": "allow_origin",
-        "nargs": null,
-        "option_strings": [
-          "--allow-origin"
-        ],
-        "required": false,
-        "type": null
-      },
-      "--config": {
+      "--companion": {
         "action": "_StoreAction",
-        "choices": null,
-        "default": "Path(canary.yaml)",
-        "dest": "config",
+        "choices": [
+          "auto",
+          "off"
+        ],
+        "default": "auto",
+        "dest": "companion",
         "nargs": null,
         "option_strings": [
-          "--config"
-        ],
-        "required": false,
-        "type": "Path"
-      },
-      "--dev-cors": {
-        "action": "_StoreTrueAction",
-        "choices": null,
-        "default": false,
-        "dest": "dev_cors",
-        "nargs": 0,
-        "option_strings": [
-          "--dev-cors"
+          "--companion"
         ],
         "required": false,
         "type": null
@@ -417,7 +396,7 @@
       "--library-root": {
         "action": "_StoreAction",
         "choices": null,
-        "default": "Path(<home>/.canary/library)",
+        "default": null,
         "dest": "library_root",
         "nargs": null,
         "option_strings": [
@@ -425,99 +404,6 @@
         ],
         "required": false,
         "type": "Path"
-      },
-      "--log-level": {
-        "action": "_StoreAction",
-        "choices": [
-          "DEBUG",
-          "INFO",
-          "WARNING",
-          "ERROR"
-        ],
-        "default": "INFO",
-        "dest": "log_level",
-        "nargs": null,
-        "option_strings": [
-          "--log-level"
-        ],
-        "required": false,
-        "type": null
-      },
-      "--no-static": {
-        "action": "_StoreTrueAction",
-        "choices": null,
-        "default": false,
-        "dest": "no_static",
-        "nargs": 0,
-        "option_strings": [
-          "--no-static"
-        ],
-        "required": false,
-        "type": null
-      },
-      "--pi-host": {
-        "action": "_StoreAction",
-        "choices": null,
-        "default": null,
-        "dest": "pi_host",
-        "nargs": null,
-        "option_strings": [
-          "--pi-host"
-        ],
-        "required": false,
-        "type": null
-      },
-      "--pi-token": {
-        "action": "_StoreAction",
-        "choices": null,
-        "default": null,
-        "dest": "pi_token",
-        "nargs": null,
-        "option_strings": [
-          "--pi-token"
-        ],
-        "required": false,
-        "type": null
-      },
-      "--port": {
-        "action": "_StoreAction",
-        "choices": null,
-        "default": 8765,
-        "dest": "port",
-        "nargs": null,
-        "option_strings": [
-          "--port"
-        ],
-        "required": false,
-        "type": "int"
-      },
-      "--token": {
-        "action": "_StoreAction",
-        "choices": null,
-        "default": null,
-        "dest": "token",
-        "nargs": null,
-        "option_strings": [
-          "--token"
-        ],
-        "required": false,
-        "type": null
-      }
-    }
-  },
-  "canary_desk.py": {
-    "options": {
-      "--host": {
-        "action": "_StoreAction",
-        "choices": null,
-        "default": "127.0.0.1",
-        "dest": "host",
-        "nargs": null,
-        "option_strings": [
-          "--host"
-        ],
-        "required": false,
-        "type": null
       },
       "--no-bootstrap": {
         "action": "_StoreTrueAction",

@@ -168,7 +168,7 @@ export function ControlPanel({ token, companion }: ControlPanelProps) {
           : "Read-only — enter the control token to enable captures, jobs, sessions and uploads."}
       </div>
 
-      <CompanionConfigCard companion={companion} />
+      <CompanionConfigCard companion={companion} token={token} />
 
       <Notice notice={notice} />
       <Notice notice={busy ? { kind: "busy", text: `Working: ${busy}` } : null} />

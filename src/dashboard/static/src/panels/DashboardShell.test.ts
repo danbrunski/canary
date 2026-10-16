@@ -94,6 +94,40 @@ describe("DashboardShell", () => {
       }),
     );
     expect(screen.getByText("queued offline")).toBeInTheDocument();
+
+    rerender(
+      createElement(DashboardShell, {
+        ...BASE,
+        appMode: "parked",
+        onToggleMode: () => {},
+        connectivity: "desk",
+      }),
+    );
+    expect(screen.getByText("desk")).toBeInTheDocument();
+  });
+
+  it("names the linked Pi on a desk badge, and only there", () => {
+    const { rerender } = render(
+      createElement(DashboardShell, {
+        ...BASE,
+        appMode: "parked",
+        onToggleMode: () => {},
+        connectivity: "desk",
+        linkedPi: "canary-8974",
+      }),
+    );
+    expect(screen.getByText("desk · linked to canary-8974")).toBeInTheDocument();
+
+    rerender(
+      createElement(DashboardShell, {
+        ...BASE,
+        appMode: "parked",
+        onToggleMode: () => {},
+        connectivity: "live-pi",
+        linkedPi: "canary-8974",
+      }),
+    );
+    expect(screen.getByText("live pi")).toBeInTheDocument();
   });
 });
 

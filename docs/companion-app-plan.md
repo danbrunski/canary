@@ -178,12 +178,24 @@ The existing control plane already has most of the required primitives:
 - `GET /control/jobs/{id}/logs`
 - `POST /control/models/{type}/artifact`
 
-Since shipped on the companion side (`src/companion/routes.py` /
-`services.py`, run via `scripts/canary_companion.py`): session sync
+Since shipped on the companion side (`src/companion/services.py`, routes in
+`src/dashboard/routes/companion_link.py`): session sync
 (`POST /companion/sync/sessions/{id}`, `/companion/sessions/import`) and
 model publish to the Pi (`publish_model_to_pi`,
 `upload_local_model_artifact`), backed by the SQLite library
 (`src/companion/library.py`).
+
+**Runtime, decided 2026-10-16 (operator: "it opens up the same website").**
+There is no separate companion process any more. The desk launcher
+(`scripts/canary_desk.py`) runs the whole daemon with `companion.enabled`,
+so one process on one port serves the dashboard, the ROM editor and
+simulator, the library (its `sessions/` is the daemon's session store) and
+the `/companion/*` routes. The daemon finds the Pi on the network at startup
+(`src/companion/discovery.py`, probing `GET /identity`), links to a lone find,
+and the dashboard's Companion card shows the link and offers a choice when
+several are found. `scripts/canary_companion.py` and the standalone
+`src/companion/api.py` were removed; `docs/headless-api.md` "Companion mode"
+documents the routes.
 
 Additional sync-oriented API work still needed:
 

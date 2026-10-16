@@ -26,7 +26,6 @@ from __future__ import annotations
 
 import argparse
 import contextlib
-import importlib.util
 import json
 import os
 import re
@@ -41,7 +40,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 import webbrowser
-from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
+from collections.abc import Callable, Iterable, Iterator, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -49,147 +48,12 @@ from typing import Any
 if __package__ in (None, ""):
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-# -- run under the repo's venv, creating it when missing ------------------------------------
-#
-# Standard library only, and it runs before any project import, so a bare
-# ``python3 scripts/canary_desk.py`` on a machine with nothing installed still
-# works: the script re-launches itself under ``.venv/bin/python``, and when
-# there is no ``.venv`` it creates one with ``scripts/install_deps.py`` first
-# (the project's own installer; Torch left out, since desk mode runs no model).
-
-_SCRIPT = Path(__file__).resolve()
-_REPO = _SCRIPT.parents[1]
-VENV_DIR = _REPO / ".venv"
-INSTALLER = _REPO / "scripts" / "install_deps.py"
-#: Set on the re-launch after an install, so a venv that still lacks its
-#: packages is a refusal, never a loop.
-BOOTSTRAPPED_ENV = "CANARY_DESK_BOOTSTRAPPED"
-REQUIRED_PYTHON = (3, 12)
-#: Modules whose absence means the venv was never installed into.
-VENV_MARKER_MODULES = ("pydantic", "yaml")
-NO_BOOTSTRAP_FLAG = "--no-bootstrap"
-MANUAL_INSTALL = "python3 scripts/install_deps.py"
-
-
-def venv_python(venv: Path = VENV_DIR) -> Path:
-    """The interpreter inside ``venv`` (``install_deps.venv_python``'s rule)."""
-    if sys.platform == "win32":
-        return venv / "Scripts" / "python.exe"
-    return venv / "bin" / "python"
-
-
-def running_in(venv: Path, prefix: str = sys.prefix) -> bool:
-    """Whether this interpreter is ``venv``'s own."""
-    try:
-        return Path(prefix).resolve() == venv.resolve()
-    except OSError:
-        return False
-
-
-@dataclass(frozen=True)
-class Launch:
-    """What the prologue does: ``run`` here, ``exec`` the venv, ``install`` then exec, or refuse.
-
-    ``command`` is the exec or install command; ``reason``/``message`` the refusal.
-    """
-
-    action: str
-    command: tuple[str, ...] = ()
-    reason: str = ""
-    message: str = ""
-
-
-def _module_present(name: str) -> bool:
-    return importlib.util.find_spec(name) is not None
-
-
-def launch_plan(
-    argv: Sequence[str],
-    *,
-    venv: Path = VENV_DIR,
-    prefix: str = sys.prefix,
-    version: tuple[int, int] = sys.version_info[:2],
-    executable: str = sys.executable,
-    environ: Mapping[str, str] = os.environ,
-    module_present: Callable[[str], bool] = _module_present,
-) -> Launch:
-    """Decide how to run, from the facts alone (pure, so the rules are testable)."""
-    python = venv_python(venv)
-    install = (executable, str(INSTALLER), "--venv", str(venv), "--torch", "none")
-    if running_in(venv, prefix):
-        missing = [name for name in VENV_MARKER_MODULES if not module_present(name)]
-        if not missing:
-            return Launch("run")
-        why = f"{venv} lacks {', '.join(missing)}"
-        if environ.get(BOOTSTRAPPED_ENV):
-            return Launch(
-                "refuse",
-                reason="venv_incomplete",
-                message=f"{why} even after installing; run `{MANUAL_INSTALL}` and read its output",
-            )
-        if NO_BOOTSTRAP_FLAG in argv:
-            return Launch(
-                "refuse",
-                reason="venv_incomplete",
-                message=f"{why}; run `{MANUAL_INSTALL}` or drop {NO_BOOTSTRAP_FLAG}",
-            )
-        return Launch("install", (str(python), *install[1:]))
-    if python.exists():
-        return Launch("exec", (str(python), str(_SCRIPT), *argv))
-    if NO_BOOTSTRAP_FLAG in argv:
-        return Launch(
-            "refuse",
-            reason="venv_missing",
-            message=f"no {venv}; run `{MANUAL_INSTALL}` or drop {NO_BOOTSTRAP_FLAG}",
-        )
-    if version < REQUIRED_PYTHON:
-        want = ".".join(str(part) for part in REQUIRED_PYTHON)
-        have = ".".join(str(part) for part in version)
-        return Launch(
-            "refuse",
-            reason="python_too_old",
-            message=f"no {venv}, and this is Python {have}; CANary needs {want}+ to create one "
-            f"(install python{want}, then run `python{want} {_SCRIPT.relative_to(_REPO)}`)",
-        )
-    return Launch("install", install)
-
-
-def ensure_venv(argv: Sequence[str] | None = None) -> None:
-    """Carry out ``launch_plan``: return only when this process may run the launcher."""
-    args = list(sys.argv[1:] if argv is None else argv)
-    # Read at call time, so a test (or a caller) can point VENV_DIR elsewhere.
-    plan = launch_plan(args, venv=VENV_DIR, prefix=sys.prefix, executable=sys.executable)
-    if plan.action == "run":
-        return
-    if plan.action == "refuse":
-        print(f"refused: {plan.reason}: {plan.message}", file=sys.stderr)
-        raise SystemExit(2)
-    env = dict(os.environ)
-    if plan.action == "install":
-        print(
-            f"canary_desk: installing CANary into {VENV_DIR} (one time, a few minutes)",
-            file=sys.stderr,
-        )
-        print("+ " + " ".join(plan.command), file=sys.stderr, flush=True)
-        rc = subprocess.call(list(plan.command), cwd=_REPO)  # noqa: S603 - our own installer
-        if rc != 0:
-            print(
-                f"refused: install_failed: `{' '.join(plan.command)}` exited {rc}; "
-                "read its output above",
-                file=sys.stderr,
-            )
-            raise SystemExit(2)
-        env[BOOTSTRAPPED_ENV] = "1"
-    python = venv_python(VENV_DIR)
-    command = [str(python), str(_SCRIPT), *args]
-    print(f"canary_desk: re-launching under {python}", file=sys.stderr, flush=True)
-    if sys.platform == "win32":
-        raise SystemExit(subprocess.call(command, env=env))  # noqa: S603 - our own script
-    os.execve(str(python), command, env)
-
+# Run under the repo's venv, creating it when missing: standard library only,
+# before any project import, and only when run as a script (scripts/venv_launch.py).
+from scripts.venv_launch import NO_BOOTSTRAP_FLAG, NO_BOOTSTRAP_HELP, ensure_venv  # noqa: E402
 
 if __name__ == "__main__":
-    ensure_venv()
+    ensure_venv(Path(__file__).resolve())
 
 import yaml  # noqa: E402
 
@@ -210,6 +74,9 @@ ROM_EDITOR_ITEM = "tuning-rom-editor"
 #: config (``daemon.control_token_env``). Not ``CANARY_CONTROL_TOKEN``, so the
 #: operator's real token can never be picked up by a desk daemon.
 TOKEN_ENV = "CANARY_DESK_CONTROL_TOKEN"
+#: Where the desk daemon reads the *Pi's* control token for companion mode:
+#: the operator's ``CANARY_CONTROL_TOKEN``, renamed on the way in (``daemon_env``).
+PI_TOKEN_ENV = "CANARY_PI_CONTROL_TOKEN"
 TOKEN_FILENAME = "desk.token"
 CONFIG_FILENAME = "canary.desk.yaml"
 LOG_FILENAME = "desk.log"
@@ -262,14 +129,19 @@ def build_config(
     port: int = DEFAULT_PORT,
     replay: Path | None = None,
     base: Path = SIM_CONFIG,
+    companion: bool = True,
+    library_root: Path | None = None,
 ) -> dict[str, Any]:
     """``canary.sim.example.yaml`` with the desk overrides, validated.
 
     Overrides, and only these: ``daemon.state_dir`` (with every explicit
     runtime path the sim file names dropped, so S03's re-rooting applies),
     ``collection.storage_path``, ``dashboard.host``/``port``, the replay
-    session (none unless given), and ``daemon.control_token_env``. Models stay
-    as the sim file has them (disabled). Returns the dict that is written."""
+    session (none unless given), ``daemon.control_token_env`` and, with
+    ``companion``, the ``companion`` block (enabled; ``library_root`` when
+    given, else the config's own default under the state dir, whose
+    ``sessions/`` then replaces ``collection.storage_path``). Models stay as
+    the sim file has them (disabled). Returns the dict that is written."""
     state = resolve_state_dir(state_dir)
     raw: dict[str, Any] = yaml.safe_load(base.read_text())
     daemon = raw.setdefault("daemon", {})
@@ -283,6 +155,13 @@ def build_config(
     dashboard = raw.setdefault("dashboard", {})
     dashboard["host"] = host
     dashboard["port"] = port
+    if companion:
+        block: dict[str, Any] = {"enabled": True, "pi_token_env": PI_TOKEN_ENV}
+        if library_root is not None:
+            block["library_root"] = str(library_root.expanduser().resolve())
+        raw["companion"] = block
+    else:
+        raw.pop("companion", None)
     assert_state_outside_checkout(CanaryConfig.model_validate(raw), state)
     return raw
 
@@ -291,16 +170,25 @@ def assert_state_outside_checkout(config: CanaryConfig, state: Path) -> None:
     """Every path the daemon writes is under ``state``; the refusal names it.
 
     The sim file's relative ``data/sim/...`` paths would otherwise land in the
-    checkout, so this runs on the validated result, not on the overrides."""
-    written: dict[str, Path] = {
-        f"daemon.{name}": getattr(config.daemon, name) for name in DAEMON_STATE_LAYOUT
-    }
+    checkout, so this runs on the validated result, not on the overrides. The
+    companion library may sit elsewhere (``--library-root``), but never in
+    the checkout; the session store follows it by the config's own rule."""
+    written: dict[str, Path] = {}
+    anywhere_outside: set[str] = set()
+    if config.companion.enabled and config.companion.library_root is not None:
+        # First, so a library in the checkout is named as the library, not as
+        # the session store that follows it.
+        written["companion.library_root"] = config.companion.library_root
+        anywhere_outside = {"companion.library_root", "collection.storage_path"}
+    written.update({f"daemon.{name}": getattr(config.daemon, name) for name in DAEMON_STATE_LAYOUT})
     written["collection.storage_path"] = config.collection.storage_path
     written["profiles.registry_overlay_path"] = config.profiles.registry_overlay_path
     written["llm_assist.cards_path"] = config.llm_assist.cards_path
     for name, path in written.items():
         resolved = path.resolve()
-        if not resolved.is_relative_to(state) or resolved.is_relative_to(REPO_ROOT):
+        if resolved.is_relative_to(REPO_ROOT):
+            raise DeskRefusalError("inside_checkout", f"{name} = {path} is in the checkout")
+        if name not in anywhere_outside and not resolved.is_relative_to(state):
             raise DeskRefusalError(
                 "inside_checkout", f"{name} = {path} is not under the state dir {state}"
             )
@@ -627,9 +515,14 @@ def daemon_command(config_path: Path, profile: str) -> list[str]:
 
 def daemon_env(token: str, environ: dict[str, str] | None = None) -> dict[str, str]:
     """The child's environment: the desk token under its own name, and the
-    operator's real control token removed."""
+    operator's real control token removed from that name. In companion mode
+    that real token is the *Pi's*, so it is handed on under ``PI_TOKEN_ENV``
+    (the generated config's ``companion.pi_token_env``) and never read as
+    the desk daemon's own."""
     env = dict(os.environ if environ is None else environ)
-    env.pop("CANARY_CONTROL_TOKEN", None)
+    real = env.pop("CANARY_CONTROL_TOKEN", None)
+    if real:
+        env[PI_TOKEN_ENV] = real
     env[TOKEN_ENV] = token
     env["PYTHONUNBUFFERED"] = "1"
     return env
@@ -663,6 +556,73 @@ def wait_until_up(
         "startup_timeout",
         f"the dashboard did not answer within {timeout:g} s (--timeout).\n{_log_tail(log_path)}",
     )
+
+
+#: How long the startup print waits for the daemon's network search to finish
+#: before reporting it as still running (the sweep is bounded to a few seconds).
+COMPANION_DISCOVERY_WAIT_SECONDS = 8.0
+
+
+def companion_line(
+    base_url: str,
+    *,
+    wait: float,
+    sleep: Callable[[float], None] = time.sleep,
+    clock: Callable[[], float] = time.monotonic,
+) -> str:
+    """One line on the companion link, from ``GET /companion/status``.
+
+    Waits up to ``wait`` for a running network search to finish, then says
+    which Pi is linked (and how it was found), that several were found and
+    the dashboard must choose, or that none was. With companion mode off
+    (404) it says so."""
+    deadline = clock() + wait
+    status: dict[str, Any] | None = None
+    while True:
+        try:
+            with urllib.request.urlopen(f"{base_url}/companion/status", timeout=2) as response:
+                status = json.loads(response.read())
+        except urllib.error.HTTPError as exc:
+            if exc.code == 404:
+                return "companion : off (--companion off)"
+            return f"companion : /companion/status answered {exc.code}"
+        except (urllib.error.URLError, OSError, ValueError) as exc:
+            return f"companion : /companion/status unreachable ({exc})"
+        discovery = status.get("discovery") or {}
+        if discovery.get("state") != "running" or clock() >= deadline:
+            break
+        sleep(0.25)
+    library = status.get("library_root")
+    pi = status.get("pi")
+    if pi:
+        identity = pi.get("identity") or {}
+        who = identity.get("hostname") or pi.get("base_url")
+        if identity.get("profile"):
+            who = f"{who} ({identity['profile']})"
+        how = {
+            "discovered": "found on the network",
+            "selected": "chosen in the dashboard",
+            "configured": "from the config",
+        }.get(str(pi.get("source")), str(pi.get("source")))
+        token = "Pi token present" if status.get("pi_token_present") else "no Pi token in the env"
+        return (
+            f"companion : linked to {who} at {pi.get('base_url')} ({how}; {token}); "
+            f"library {library}"
+        )
+    if discovery.get("state") == "running":
+        return f"companion : still searching the network for a Pi; library {library}"
+    found = discovery.get("found") or []
+    if len(found) > 1:
+        names = ", ".join(
+            f"{(item.get('identity') or {}).get('hostname') or item.get('host')} "
+            f"at {item.get('base_url')}"
+            for item in found
+        )
+        return (
+            f"companion : {len(found)} Pis found, choose one in the dashboard: {names}; "
+            f"library {library}"
+        )
+    return f"companion : no Pi found on the network (link one in the dashboard); library {library}"
 
 
 def _log_tail(log_path: Path, lines: int = 25) -> str:
@@ -759,11 +719,20 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         default=DEFAULT_TIMEOUT_SECONDS,
         help=f"seconds to wait for the dashboard to answer (default {DEFAULT_TIMEOUT_SECONDS:g})",
     )
+    parser.add_argument(NO_BOOTSTRAP_FLAG, action="store_true", help=NO_BOOTSTRAP_HELP)
     parser.add_argument(
-        NO_BOOTSTRAP_FLAG,
-        action="store_true",
-        help="never create .venv or install packages; refuse by name instead "
-        "(the script still re-launches under an existing .venv)",
+        "--companion",
+        choices=("auto", "off"),
+        default="auto",
+        help="auto (default): companion mode on, and the daemon searches the network for a "
+        "CANary Pi at startup and links to the one it finds; off: no library, no link",
+    )
+    parser.add_argument(
+        "--library-root",
+        type=Path,
+        default=None,
+        help="the companion library (synced sessions, published models); default "
+        "<state-dir>/library. Never inside the checkout.",
     )
     return parser.parse_args(argv)
 
@@ -772,7 +741,14 @@ def run(args: argparse.Namespace) -> int:
     state = resolve_state_dir(args.state_dir)
     files = rom_files(rom_dirs(args.rom_dir))
     require_free_port(args.host, args.port)
-    raw = build_config(state, host=args.host, port=args.port, replay=args.replay)
+    raw = build_config(
+        state,
+        host=args.host,
+        port=args.port,
+        replay=args.replay,
+        companion=args.companion != "off",
+        library_root=args.library_root,
+    )
     if not args.no_build:
         ensure_dashboard()
     token = ensure_token(state)
@@ -803,6 +779,7 @@ def run(args: argparse.Namespace) -> int:
                     print(outcome.line())
             else:
                 print("ROM Library: open a ROM from the dashboard (ROM Library upload).")
+            print(companion_line(base_url, wait=COMPANION_DISCOVERY_WAIT_SECONDS))
             url = editor_url(args.host, args.port)
             link = handoff_url(args.host, args.port, token)
             print(f"\nCANary desk mode is up: {url}")

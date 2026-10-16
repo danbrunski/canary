@@ -145,24 +145,52 @@ def _dashboard_app(tmp_path: Path) -> FastAPI:
 
 
 def _companion_app(tmp_path: Path) -> FastAPI:
-    from src.companion.api import create_app
-    from src.companion.library import CanaryLibrary
+    """The dashboard app with companion mode on (2026-10-16: the standalone
+    companion API is gone; ``/companion/*`` is registered on the daemon when
+    ``companion.enabled``, under the daemon's own control-token rule)."""
+    from src.config import CanaryConfig
+    from src.dashboard.api import create_app
 
+    raw = _config(tmp_path).model_dump(mode="json")
+    raw["companion"] = {
+        "enabled": True,
+        "library_root": str(tmp_path / "library"),
+        "pi_host": "http://127.0.0.1:1",
+        "discover": False,
+    }
+    config = CanaryConfig.model_validate(raw)
+    config.collection.storage_path.mkdir(parents=True, exist_ok=True)
     return create_app(
-        _config(tmp_path),
-        library=CanaryLibrary(tmp_path / "library"),
-        pi_host="http://127.0.0.1:1",
-        pi_token="pi-secret",
-        control_token="local-secret",
-        static_dir=None,
+        config,
+        anomalies_dir=tmp_path / "anomalies",
+        control_token="secret",
+        static_dir=tmp_path / "no-static",
     )
+
+
+def _companion_rows(tmp_path: Path) -> list[dict[str, Any]]:
+    """The routes companion mode adds, and only those."""
+    base = {(row["method"], row["path"]) for row in _route_rows(_dashboard_app(tmp_path / "base"))}
+    rows = _route_rows(_companion_app(tmp_path / "companion"))
+    return [row for row in rows if (row["method"], row["path"]) not in base]
 
 
 def _snapshot(tmp_path: Path) -> dict[str, list[dict[str, Any]]]:
     return {
         "dashboard": _route_rows(_dashboard_app(tmp_path / "dashboard")),
-        "companion": _route_rows(_companion_app(tmp_path / "companion")),
+        "companion": _companion_rows(tmp_path),
     }
+
+
+def test_companion_mode_adds_only_companion_routes_all_under_the_control_rule(
+    tmp_path: Path,
+) -> None:
+    rows = _companion_rows(tmp_path)
+    assert rows, "companion mode registered nothing"
+    assert all(row["path"].startswith("/companion/") for row in rows), rows
+    public = {(r["method"], r["path"]) for r in rows if r["auth"] is None}
+    assert public == {("GET", "/companion/status")}
+    assert {r["auth"] for r in rows if r["auth"] is not None} == {"control"}
 
 
 def test_route_table_matches_snapshot(tmp_path: Path) -> None:
