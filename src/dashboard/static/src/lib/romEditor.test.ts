@@ -58,6 +58,19 @@ describe("rawForValue", () => {
     expect(decodeParams({ ...AFR, numerator: 100 })?.numerator).toBe(100);
   });
 
+  it("falls back to the formula's own numbers when the declared ones are absent", () => {
+    // An older daemon sends only the formula string.
+    const { formula, kind, quantity, unit } = AFR;
+    expect(rawForValue({ formula, kind, quantity, unit }, 12.5)).toBe(151);
+    const comp = COMP;
+    expect(
+      rawForValue(
+        { formula: comp.formula, kind: comp.kind, quantity: comp.quantity, unit: comp.unit },
+        103,
+      ),
+    ).toBe(132);
+  });
+
   it("reads an offset off the formula", () => {
     const decode: RomEditorDecode = {
       kind: "linear",

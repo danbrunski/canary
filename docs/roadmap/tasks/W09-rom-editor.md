@@ -427,19 +427,30 @@ W09.6 is the orchestrator's own, on the ROM machine.
     matched base and names `base_not_a_recorded_revision` otherwise).
     `pnpm typecheck`, `pnpm lint` (no suppression changes), `pnpm format:check`
     clean; 24 related vitest files / 207 tests green.
-    Contract notes for the W09.2 reconciliation: (1) `GET …/tables` sends a
-    decode's `formula`/`kind`/`quantity`/`unit` but not `scale`/`offset`/
-    `numerator`/`mask`, so `lib/romEditor.decodeParams` reads them off the
-    formula when absent (formula prints `:g`, 6 significant digits). Adding the
-    four fields to `rom_image._decode_payload` would remove the parse; the
-    types already accept them. (2) The library page does not keep the sha in
-    the URL (the hash router rewrites anything after `#wb/<page>`), so the
-    editor keeps it in `?rom=<sha>`. (3) The 400 body is read as
-    `{reason, message}` at the top level or under `detail`. (4) Not run: `pnpm
-    e2e` (W09.6 owns `romEditor.spec.ts`); `emptyDaemon.spec.ts` now visits
-    this page because it is no longer `planned`.
+    Contract notes: (1) `GET …/tables` now sends each decode's `scale`/`offset`/
+    `numerator`/`mask` (`rom_image._decode_payload`), and the page tests use
+    fixtures with them; `lib/romEditor.decodeParams` still reads the formula
+    when they are absent (one unit test keeps that path). (2) The library page
+    does not keep the sha in the URL (the hash router rewrites anything after
+    `#wb/<page>`), so the editor keeps it in `?rom=<sha>`. (3) The 400 body is
+    read as `{reason, message}` at the top level or under `detail`; a page test
+    feeds it the daemon's real `{detail: {error, kind, reason, message}}`.
+    (4) `emptyDaemon.spec.ts` visits this page now that it is not `planned`; the
+    verifier ran it and it passed. `pnpm e2e` otherwise stays with W09.6
+    (`romEditor.spec.ts`).
+    *Click bug, found by the W09.4 agent in Chromium, fixed 2026-10-15:* with
+    the table partly below the fold one click on a cell selected 7–11 cells
+    (`CellGrid` focused the grid on mousedown, which scrolled the page under the
+    held button, and `mouseenter` then extended while the `dragging` flag was
+    stale). Reproduced with a scratch Playwright spec on a `vite build` +
+    `vite preview` of the page (mocked daemon): 1280×600 selected 7 cells
+    (rows 2–8) before the fix in 3 of 3 runs, and exactly 1 after, as at 1280×2400
+    (1 before and after). Fix: `focus({ preventScroll: true })`, and a drag
+    extends only while `event.buttons & 1`, a zero ending the drag. Test:
+    "never extends a drag unless the primary button is down, and focuses without
+    scrolling" fails with either half of the fix removed.
 
-- [ ] **W09.4 — Simulate form and results.**
+- [x] **W09.4 — Simulate form and results.**
   - **Form** (disabled with the reason unless the base is a matched revision,
     or while preview has a refusal): grid choice (Fuel Comp axes / Fuel
     Targets axes for aggregation), rpm and load edges (pre-filled from the
@@ -467,6 +478,101 @@ W09.6 is the orchestrator's own, on the ROM machine.
     status. Each status label renders, and the caveat block precedes the
     first grid in DOM order. A missing environment field blocks Run and is
     named. 409 deferred and 400 refused render their reasons.
+  - *Done 2026-10-15, mocked API only* (the real-daemon and real-image walk
+    is W09.6). Files: `panels/tuning/romEditor/{SimForm,SimResults,SimCaveats,SimMaps}.tsx`,
+    `lib/romSim.ts` (form values as text, `checkSimForm`, edge suggestion,
+    `localStorage`, `simFailure`), `lib/romSimView.ts` (a port of
+    `sim_report.py`'s marks, picks and hatches), `types/romEditor.ts` (the
+    request, `CellTable` and result), `api/workbench.ts` (`simulateRomEdits`
+    only), `RomEditorPage.tsx`, fixtures `test/romSimFixtures.ts` and
+    `test/romSimDoc.ts`. Tests: `lib/romSim.test.ts` 29, `lib/romSimView.test.ts`
+    23, `romEditor/SimResults.test.tsx` 20, `RomEditorSimulate.test.tsx` 23
+    (page level, the W09.3 "Simulate slot" test rewritten for the form):
+    112 tests green in those four plus `RomEditorPage.test.tsx` (after the
+    verifier's follow-ups, below; 140 across them, `romEditor.test.ts`,
+    `themeClasses` and `layering` before); `pnpm typecheck`, `pnpm lint` (no suppression
+    change), `pnpm format:check` clean; `vitest related` over every touched
+    source: 24 files, 22 green first time, the other two (my page test's 5 s
+    timeouts under load, since given a 30 s budget, and the W09.3 flake below)
+    green on re-run.
+    - **The 21 fields:** the Run request's keys equal the keys of the JSON
+      example in `docs/headless-api.md` (read from the doc by
+      `test/romSimDoc.ts`, in both `romSim.test.ts` and the page test) and the
+      body is asserted value for value.
+    - **Every status:** the hand-built payload (`romSimFixtures.ts`, a 3 x 4
+      grid) has all six `sim_cells.STATUSES` in the open-loop lambda map plus
+      other-loop and relative-undefined cells; each renders its label (`-1.52`,
+      `0`, `U`, `P+0.40`, `–`, `NR`, `CL`, `∅`) and a `data-status`; the
+      TS `STATUSES` is asserted equal to the list parsed out of
+      `src/analysis/sim_cells.py`; only `changed`/`unchanged` cells have a
+      background colour, every other mark a gradient hatch. The payload
+      validates against `sim_cells.CellTable` and renders through
+      `sim_report.render_report` (checked once, scratch).
+    - **Caveats first:** `compareDocumentPosition` puts the caveat region
+      before the first map, and nothing table-like precedes it; it prints the
+      plant qualification and why, `structural_error_not_sampled`,
+      `parameter_uncertainty_only`, every other caveat, every `assumptions`
+      string (result and design), unresolved, both image shas, the edit list,
+      coverage, draws, seed, candidate events, and the E08.7 line. E08.7 is `[~]`
+      in the E08 doc (2026-10-15): items 1-4 pass in the suite through
+      `tools/rom_sim.py` (`37fde9ba`), the post-flash truck scoring is owed.
+      The page says exactly that: known answers 1-4 are reproduced in the
+      test suite through the CLI path, have not been run through this page
+      on real images yet (W09.6 first), and item 5 is still owed.
+      `KNOWN_ANSWERS_REPRODUCED` in `lib/romSim.ts` is the one switch to flip
+      when E08.7 is fully ticked.
+    - **Form:** nothing defaulted (no radio checked, every field empty); one
+      missing field (baro) disables Run and is named, `fireEvent.submit` sends
+      nothing; edges suggested from Fuel Comp's breakpoints by decode quantity
+      (identical with rows and columns swapped), 16 x 16 = 256 of at most
+      1,024 shown, a load edge past 100 % (the model span) blocks Run until
+      the operator presses "Trim load edges to 0-100 %"; 33 x 33 refused as
+      `grid_too_large`; remembered values come back marked, lose the mark when
+      edited, can be cleared, and storage that throws does nothing.
+    - **Errors by reason:** 409 `analysis_deferred` (capture message, "Pull the
+      images and run the edit spec on the laptop", the server's
+      `laptop_path`), 409 `analysis_busy`, 400 `sim_refused` (reason and
+      class), 503 `analysis_unavailable`, 422 by field.
+    - **Browser:** the page was driven once in headless Chromium against a
+      stubbed daemon (scratch spec, not committed; `romEditor.spec.ts` is
+      W09.6's): form, run, caveats, three lambda maps with hatches, legend,
+      outlined edited cells and the moved-breakpoint marks all render.
+    - Decisions the doc did not settle: (1) the lambda view draws one map per
+      loop kind with pairs, as E08.6 does (open loop relative lambda, closed
+      loop `fuel_trim_total_pct` in percentage points, setpoint moved
+      relative target phi), each cell naming the other loop (`CL`, `OL`, `SP`)
+      where all its pairs are in another; a closed-loop lambda is never drawn
+      as a lambda effect. (2) The grid, the edges and `candidate_events` are
+      never remembered (they describe this experiment or this base); the
+      other fifteen stated values are, marked. (3) The suggested edges are
+      used exactly as the Decisions say; where the fill axis' top breakpoint
+      is 100 % the last edge is past the model and Run says so rather than
+      the page clamping. (4) "Moved-lookup marks" are `row_axis_moved` /
+      `col_axis_moved` (a ▲ on the axis tick and the cell, as E08.6) and the
+      overlay's `moved_lookups` listed in the caveat block and above the maps;
+      no cell-level mark exists in the payload. (5) Result JSON is the
+      response, compact, as `<label>.sim-result.json`; no image download
+      exists. (6) The W09.3 URL test
+      (`lists each image ... keeps the sha in the URL`) failed once under a
+      load average of 14 (the sha is written by an effect after the table
+      renders) and passes alone: W09.3's, not touched.
+    - **Found, not fixed (W09.3's `CellGrid.tsx`):** in a real browser a single
+      click on a Fuel Comp cell selected 11 cells when the table was partly
+      off screen: `onMouseDown` calls `element.current?.focus()`, the focus
+      scrolls the page under the held button, and `onMouseEnter` extends the
+      selection while `dragging` is true. With a tall viewport (2400 px) the
+      same click selects 1 cell. Fix: `focus({ preventScroll: true })`.
+    - **Verifier follow-ups (2026-10-15):** (1) the E08.7 line reworded as
+      above. (2) A typed integer beyond 2^53 - 1 (the seed) is refused by
+      name in `checkSimForm` (`parseNumber` refuses non-safe integers, "is
+      beyond 9007199254740991 ... can send exactly"), never rounded by
+      `Number()`: `9007199254740991` sends as typed, `...992`, `...993` and
+      `1e20` are refused. (3) The form is `aria-label="Simulate form"`; the
+      section keeps `Simulate` (`RomEditorPage.tsx` untouched; one query line
+      in `RomEditorPage.test.tsx`). (4) A `changed` cell whose median is
+      exactly 0 prints `0*`, not unchanged's `0`, its accessible name says
+      "changed, median exactly 0 (some pairs move)", and the legend of a map
+      with one has a "changed, median 0" entry.
 
 - [x] **W09.5 — MCP tools** (`docs/mcp-server.md` is the source of truth):
   `preview_rom_edit(sha, label, edits)` and `simulate_rom_edit(sha, request)`.

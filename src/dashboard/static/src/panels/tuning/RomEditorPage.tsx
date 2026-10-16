@@ -1,6 +1,11 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
-import { getRomLibrary, getRomTables, previewRomEdits } from "../../api/workbench";
+import {
+  getRomLibrary,
+  getRomTables,
+  previewRomEdits,
+  simulateRomEdits,
+} from "../../api/workbench";
 import { Notice } from "../../components/Notice";
 import { Panel } from "../../components/Panel";
 import { describeError, useControlResource } from "../../hooks/useControlResource";
@@ -18,6 +23,7 @@ import {
   specFileName,
 } from "../../lib/romEditor";
 import { describeEditorDisagreement } from "../../lib/romLibrary";
+import { SIM_BLOCK_TEXT, resultFileName, simFailure } from "../../lib/romSim";
 import { buttonClass, cn } from "../../styles";
 import type { StatusResponse } from "../../types";
 import type {
@@ -26,6 +32,10 @@ import type {
   RomEditOperation,
   RomEditPreview,
   RomEditRefusal,
+  RomSimRequest,
+  RomSimResult,
+  SimFailure,
+  SimRunContext,
 } from "../../types/romEditor";
 import type { RomLibraryEntry } from "../../types/romLibrary";
 import { downloadText } from "../../util/browser";
@@ -34,6 +44,8 @@ import { CellGrid } from "./romEditor/CellGrid";
 import { OperationPanel } from "./romEditor/OperationPanel";
 import { PendingEdits } from "./romEditor/PendingEdits";
 import { PreviewResult } from "./romEditor/PreviewResult";
+import { SimFailureAlert, SimForm, SimRunning } from "./romEditor/SimForm";
+import { SimResults } from "./romEditor/SimResults";
 
 /** The chosen image's sha lives in `?rom=<sha>`. The hash is the router's
  *  (`#wb/<page>`), which rewrites it, so the sha rides in the query. */
@@ -122,6 +134,12 @@ type PreviewState =
   | { kind: "refused"; refusal: RomEditRefusal }
   | { kind: "error"; text: string };
 
+type SimState =
+  | { kind: "idle" }
+  | { kind: "running"; startedAt: number }
+  | { kind: "ok"; result: RomSimResult; run: SimRunContext }
+  | { kind: "failed"; failure: SimFailure };
+
 function Workspace({ token, entry }: { token: string; entry: RomLibraryEntry }) {
   const sha = entry.sha256;
   const tables = useControlResource(
@@ -140,6 +158,19 @@ function Workspace({ token, entry }: { token: string; entry: RomLibraryEntry }) 
   const [preview, setPreview] = useState<PreviewState>({ kind: "idle" });
   const request = useRef(0);
   const counter = useRef(0);
+  const [sim, setSim] = useState<SimState>({ kind: "idle" });
+  const simRun = useRef(0);
+  const simAbort = useRef<AbortController | null>(null);
+  const edits = useMemo(() => pending.map((item) => item.edit), [pending]);
+
+  // Leaving the image (or the page) drops the wait; the daemon's job is its own.
+  useEffect(
+    () => () => {
+      simRun.current += 1;
+      simAbort.current?.abort();
+    },
+    [],
+  );
 
   useEffect(() => {
     saveEditorState(sha, { label, pending });
@@ -205,6 +236,41 @@ function Workspace({ token, entry }: { token: string; entry: RomLibraryEntry }) 
     }
   }
 
+  async function runSimulation(simRequest: RomSimRequest) {
+    const mine = simRun.current + 1;
+    simRun.current = mine;
+    simAbort.current?.abort();
+    const controller = new AbortController();
+    simAbort.current = controller;
+    const startedAt = Date.now();
+    setSim({ kind: "running", startedAt });
+    try {
+      const result = await simulateRomEdits(token, sha, simRequest, controller.signal);
+      if (simRun.current !== mine) return;
+      setSim({
+        kind: "ok",
+        result,
+        run: {
+          request: simRequest,
+          edits: pending.map((item) => ({
+            tableName: item.tableName,
+            summary: item.summary,
+            chain: item.chain,
+          })),
+          base: {
+            sha256: sha,
+            label: entry.label ?? entry.filename ?? sha.slice(0, 12),
+            revision: entry.revision_match.revision,
+          },
+          elapsedS: Math.round((Date.now() - startedAt) / 1000),
+        },
+      });
+    } catch (err) {
+      if (simRun.current !== mine) return;
+      setSim({ kind: "failed", failure: simFailure(err) });
+    }
+  }
+
   if (tables.loading || tables.stale) return <p className="text-fg-dim">Reading tables…</p>;
   if (tables.error) return <Notice notice={{ kind: "error", text: tables.error }} />;
   if (!table) {
@@ -227,8 +293,18 @@ function Workspace({ token, entry }: { token: string; entry: RomLibraryEntry }) 
     .join(" · ");
   const rowAxis = table.axes.rows;
   const colAxis = table.axes.cols;
-  const simBlocked =
-    preview.kind === "ok" ? preview.data.sim_base.reason : simulateReason(entry.revision_match);
+  const simBlockedReason =
+    preview.kind === "refused"
+      ? "preview_refused"
+      : preview.kind === "ok"
+        ? preview.data.sim_base.reason
+        : simulateReason(entry.revision_match);
+  const simBlocked = simBlockedReason
+    ? {
+        reason: simBlockedReason,
+        text: SIM_BLOCK_TEXT[simBlockedReason] ?? SIMULATE_REASON_TEXT[simBlockedReason] ?? "",
+      }
+    : null;
 
   return (
     <div className="space-y-4">
@@ -334,13 +410,36 @@ function Workspace({ token, entry }: { token: string; entry: RomLibraryEntry }) 
         </div>
       </Panel>
 
-      {/* W09.4: the Simulate form (SimForm) and results (SimResults) go in this
-          section. W09.3 builds only the slot and the reason it is disabled. */}
-      <section aria-label="Simulate" data-slot="simulate" className="space-y-2">
-        {simBlocked && (
-          <p role="note" className="text-sm text-warn">
-            Simulate is unavailable: {simBlocked}. {SIMULATE_REASON_TEXT[simBlocked] ?? ""}
-          </p>
+      <section aria-label="Simulate" data-slot="simulate" className="space-y-4">
+        <Panel title="Simulate">
+          <div className="space-y-4">
+            <SimForm
+              tables={baseTables}
+              label={label}
+              edits={edits}
+              blocked={simBlocked}
+              startedAt={sim.kind === "running" ? sim.startedAt : null}
+              onRun={(simRequest) => void runSimulation(simRequest)}
+            />
+            {sim.kind === "running" && <SimRunning startedAt={sim.startedAt} />}
+            {sim.kind === "failed" && <SimFailureAlert failure={sim.failure} />}
+          </div>
+        </Panel>
+        {sim.kind === "ok" && (
+          <Panel title="Simulation result">
+            <SimResults
+              result={sim.result}
+              run={sim.run}
+              stale={JSON.stringify(sim.run.request.edits) !== JSON.stringify(edits)}
+              onDownload={() =>
+                downloadText(
+                  JSON.stringify(sim.result),
+                  resultFileName(sim.run.request.label),
+                  "application/json",
+                )
+              }
+            />
+          </Panel>
         )}
       </section>
     </div>

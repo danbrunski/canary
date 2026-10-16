@@ -164,11 +164,15 @@ describe("ROM Editor page: base and table (W09.3)", () => {
     expect(within(rows[1]).getByText("can simulate")).toBeVisible();
     expect(within(rows[2]).getByText("unrecognised")).toBeVisible();
     expect(within(rows[2]).getByText("preview only")).toBeVisible();
-    expect(new URLSearchParams(window.location.search).get("rom")).toBe(SHA_TUNED);
+    await waitFor(() =>
+      expect(new URLSearchParams(window.location.search).get("rom")).toBe(SHA_TUNED),
+    );
     await screen.findByRole("grid");
 
     await userEvent.click(screen.getByRole("button", { name: /Edit from k106\.bin/ }));
-    expect(new URLSearchParams(window.location.search).get("rom")).toBe(SHA_K106);
+    await waitFor(() =>
+      expect(new URLSearchParams(window.location.search).get("rom")).toBe(SHA_K106),
+    );
     // The Simulate slot says why it is off for an image that is not a revision.
     expect(
       await screen.findByText(/Simulate is unavailable: base_not_a_recorded_revision/),
@@ -228,11 +232,39 @@ describe("ROM Editor page: selecting cells", () => {
     expect(cell(grid, 4, 4)).toHaveAttribute("aria-selected", "false");
 
     fireEvent.mouseUp(window);
-    fireEvent.mouseDown(cell(grid, 5, 5));
-    fireEvent.mouseEnter(cell(grid, 6, 6));
+    fireEvent.mouseDown(cell(grid, 5, 5), { buttons: 1 });
+    fireEvent.mouseEnter(cell(grid, 6, 6), { buttons: 1 });
     fireEvent.mouseUp(window);
     fireEvent.mouseEnter(cell(grid, 8, 8));
     expect(screen.getByText("Selected: 4 cells (row 5–6, column 5–6).")).toBeVisible();
+  });
+
+  it("never extends a drag unless the primary button is down, and focuses without scrolling", async () => {
+    route();
+    const grid = await openFuelComp();
+    const focus = vi.spyOn(HTMLElement.prototype, "focus");
+    try {
+      fireEvent.mouseDown(cell(grid, 2, 2), { buttons: 1 });
+      expect(focus).toHaveBeenCalledWith({ preventScroll: true });
+      // The page scrolled under the pointer, or the mouseup was missed: other
+      // cells enter with no button held. That must not extend the selection...
+      fireEvent.mouseEnter(cell(grid, 6, 2), { buttons: 0 });
+      expect(screen.getByText("Selected: 1 cell (row 2, column 2).")).toBeVisible();
+      // ...and it ends the drag for good: a later enter with the button
+      // reported down again does not resume it.
+      fireEvent.mouseEnter(cell(grid, 7, 2), { buttons: 1 });
+      expect(screen.getByText("Selected: 1 cell (row 2, column 2).")).toBeVisible();
+      // A real drag (button held, no mouseup) extends.
+      fireEvent.mouseDown(cell(grid, 3, 3), { buttons: 1 });
+      fireEvent.mouseEnter(cell(grid, 4, 4), { buttons: 1 });
+      expect(screen.getByText("Selected: 4 cells (row 3–4, column 3–4).")).toBeVisible();
+      // Releasing off the table (outside any cell) ends it too.
+      fireEvent.mouseUp(window);
+      fireEvent.mouseEnter(cell(grid, 9, 9), { buttons: 1 });
+      expect(screen.getByText("Selected: 4 cells (row 3–4, column 3–4).")).toBeVisible();
+    } finally {
+      focus.mockRestore();
+    }
   });
 
   it("moves with arrows and extends with shift+arrows", async () => {
@@ -330,6 +362,30 @@ describe("ROM Editor page: operation, pending edits and preview", () => {
     expect(alert).toHaveTextContent("Refused: value_out_of_range");
     expect(alert).toHaveTextContent("raw 255 x 1.02 is 260");
     expect(screen.queryByRole("region", { name: "Preview result" })).not.toBeInTheDocument();
+  });
+
+  it("renders the daemon's real 400 body: {detail: {error, kind, reason, message}}", async () => {
+    route(
+      () =>
+        new HttpError(
+          400,
+          JSON.stringify({
+            detail: {
+              error: "edit_refused",
+              kind: "edit_spec",
+              reason: "no_op_edit",
+              message: "edit 0 leaves every selected cell at its old value: (0, 0)",
+            },
+          }),
+        ),
+    );
+    const grid = await openFuelComp();
+    await applyScale(grid);
+    await userEvent.type(screen.getByLabelText("Label for this edit set"), "x");
+    await userEvent.click(screen.getByRole("button", { name: "Preview" }));
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("Refused: no_op_edit");
+    expect(alert).toHaveTextContent("leaves every selected cell at its old value");
   });
 
   it("refuses in the browser a value whose raw is outside u8, and sends nothing", async () => {
@@ -432,15 +488,18 @@ describe("ROM Editor page: spec download and no image", () => {
 });
 
 describe("ROM Editor page: the Simulate slot", () => {
-  it("is empty for a matched revision (W09.4 fills it) and gives the reason otherwise", async () => {
+  it("holds the Simulate form for a matched revision (W09.4) and gives the reason otherwise", async () => {
     route();
     render(<RomEditorPage token="t" status={null} />);
     await screen.findByRole("grid");
     const slot = screen.getByRole("region", { name: "Simulate" });
-    expect(slot).toBeEmptyDOMElement();
+    // A matched revision: the form is there, nothing says it is unavailable.
+    expect(within(slot).getByRole("form", { name: "Simulate form" })).toBeVisible();
+    expect(within(slot).queryByRole("note")).not.toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: /Edit from k106\.bin/ }));
     expect(await screen.findByRole("note")).toHaveTextContent(
       /Simulate is unavailable: base_not_a_recorded_revision\. The simulator needs a base recorded/,
     );
+    expect(within(slot).getByRole("button", { name: "Run simulation" })).toBeDisabled();
   });
 });

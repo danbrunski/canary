@@ -21,7 +21,12 @@ import type {
   VerifyMemoryRequest,
   VerifyMemoryResponse,
 } from "../types/workbench";
-import type { RomEditPreview, RomEditPreviewRequest } from "../types/romEditor";
+import type {
+  RomEditPreview,
+  RomEditPreviewRequest,
+  RomSimRequest,
+  RomSimResult,
+} from "../types/romEditor";
 import type {
   RomBackupState,
   RomCompareResponse,
@@ -242,6 +247,27 @@ export async function previewRomEdits(
     signal,
   });
   return requireFields(path, body, ["spec_yaml", "provenance", "tables", "sim_base"]);
+}
+
+/** `POST /control/rom/library/{sha}/simulate` — the edits run against the base
+ *  over a stated grid, as one bounded off-loop job (W09). Every request field
+ *  is required. A refusal is a 400 `sim_refused`, a recording capture a 409
+ *  `analysis_deferred`, another analysis a 409 `analysis_busy`, a child that
+ *  died or timed out a 503 `analysis_unavailable`. Can take minutes, so the
+ *  caller owns the `signal`. */
+export async function simulateRomEdits(
+  token: string,
+  sha: string,
+  request: RomSimRequest,
+  signal?: AbortSignal,
+) {
+  const path = `${librarySha(sha)}/simulate`;
+  const body = await controlJson<RomSimResult>(path, token, {
+    method: "POST",
+    body: jsonBody(request),
+    signal,
+  });
+  return requireFields(path, body, ["cells", "caveats", "provenance", "design"]);
 }
 
 /** `PATCH /control/rom/library/{sha}` — the label is the only mutable field;

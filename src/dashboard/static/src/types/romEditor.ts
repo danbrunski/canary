@@ -178,3 +178,297 @@ export interface PendingEdit {
 export type BuildResult =
   | { ok: true; edits: RomEdit[]; cells: PlannedCell[]; chain: string | null }
   | { ok: false; reason: string; message: string };
+
+// -- Simulate (W09.4) ---------------------------------------------------------------------
+// `POST /control/rom/library/{sha}/simulate`. The request is
+// `rom_editor.SimRequest` (21 fields, none defaulted, `extra="forbid"`); the
+// response is `rom_editor.simulate_edits`, whose `cells` is
+// `sim_cells.CellTable.to_dict()` (E08.4, `schema_version` 1). Field names
+// follow `docs/headless-api.md` "ROM Editor: preview and simulate (W09)".
+
+/** `sim_cells.Grid`: which table's axes the cells are aggregated on. */
+export type SimGrid = "fuel_comp" | "target_afr";
+
+/** `sim_design.LoadBasis`: today's only value. */
+export type SimLoadBasis = "fill_fraction_as_manifold_ratio";
+
+/** `none`: both ROMs start from the same learned state; `ecu_reflash`: the
+ *  flash resets what the contract says it resets on the candidate. */
+export type SimCandidateEvents = "none" | "ecu_reflash";
+
+/** A stated rail pressure, or the plant's own working value, said so. */
+export type SimRail = number | "working_assumption";
+
+/** The body of the simulate route. Every field is required. */
+export interface RomSimRequest {
+  label: string;
+  edits: RomEdit[];
+  grid: SimGrid;
+  rpm_edges: number[];
+  /** In Fuel Comp's load axis units (% of the fill model's ceiling), 0-100. */
+  load_edges: number[];
+  load_basis: SimLoadBasis;
+  baro_kpa: number;
+  iat_c: number;
+  coolant_c: number;
+  battery_v: number;
+  rail_kpa: SimRail;
+  throttle_pct: number;
+  /** An integer 0-255. */
+  pedal_flag: number;
+  stft_pct: number;
+  ltft_pct: number;
+  throttle_closed_learned: number;
+  idle_air_learned: number;
+  evap_purge_area: number;
+  candidate_events: SimCandidateEvents;
+  /** An integer >= 1, at most `MAX_DRAWS`. */
+  draws: number;
+  /** An integer >= 0. */
+  seed: number;
+}
+
+/** `sim_cells.STATUSES`: the status of one output in one cell. */
+export type SimStatus =
+  "changed" | "unchanged" | "unsupported" | "partly_supported" | "no_points" | "not_reached";
+
+export interface SimQuantiles {
+  p05: number;
+  p50: number;
+  p95: number;
+}
+
+/** Weighted quantiles over the pairs `over` names. */
+export interface SimQuantileBlock {
+  over: "all_pairs" | "supported_pairs" | "computed_unsupported_pairs";
+  pairs: number;
+  weight: number;
+  delta: SimQuantiles;
+  /** Null for an output with no relative delta (the trim), or when no pair
+   *  has a nonzero base. */
+  relative_delta: SimQuantiles | null;
+  relative_undefined_pairs: number;
+}
+
+export interface SimSupportEntry {
+  status: "supported" | "unsupported";
+  reasons: string[];
+  pairs: number;
+  weight_share: number;
+}
+
+/** One output in one cell (or one loop kind of a cell). */
+export interface SimOutputCell {
+  status: SimStatus;
+  pairs: number;
+  supported_share: number | null;
+  unsupported_share: number | null;
+  support: SimSupportEntry[];
+  quantiles: SimQuantileBlock | null;
+  /** Share of the supported weight whose delta is not exactly 0. */
+  changed_share: number | null;
+  /** `partly_supported`: what the supported pairs show. */
+  supported_effect?: "changed" | "unchanged" | null;
+}
+
+/** One loop kind's pairs in a cell, and its headline output. */
+export interface SimLoopBlock {
+  loop: string;
+  weight_share: number;
+  pairs: number;
+  output: string;
+  cell: SimOutputCell;
+}
+
+export interface SimCell {
+  row: number;
+  col: number;
+  row_breakpoint: number;
+  col_breakpoint: number;
+  row_value: number | null;
+  col_value: number | null;
+  n_points: number;
+  /** Design point indices; the page does not render them. */
+  points?: number[];
+  pairs: number;
+  weight: number;
+  /** Shares of the cell's weight by the design's regime label. */
+  regime_shares: Record<string, number>;
+  /** Shares by the simulated loop (`open_loop`, `closed_loop`, ...). */
+  loop_shares: Record<string, number>;
+  outputs: Record<string, SimOutputCell>;
+  by_loop: SimLoopBlock[];
+  /** This table cell is edited (raw old -> new). */
+  edited: { old: number; new: number } | null;
+  row_axis_moved: boolean;
+  col_axis_moved: boolean;
+}
+
+export interface SimAxisInfo {
+  table: string;
+  coordinate: string;
+  raw: number[];
+  breakpoints: number[];
+  values: (number | null)[];
+  unit: string | null;
+  domain: string;
+  /** Whole coordinate values each index holds, inclusive (null: unbounded). */
+  cell_ranges: [number | null, number | null][];
+}
+
+/** Whether the change can reach an output. */
+export interface SimReach {
+  status: "reached" | "not_reached" | "no_change";
+  basis: string[];
+}
+
+export interface SimOverlay {
+  edited_cells: { row: number; col: number; old: number; new: number }[];
+  axis_edits: { axis: "rows" | "cols"; table: string; index: number; old: number; new: number }[];
+  other_edits: { table: string; slot: number | null; cells: number }[];
+  moved_lookups: { node: string; tables: string[]; on_this_grid: boolean }[];
+}
+
+/** `sim_cells.CellTable.to_dict()`. Every cell of the grid is present,
+ *  row-major, visited or not. */
+export interface SimCellTable {
+  schema_version: 1;
+  tool: string;
+  tool_version: string;
+  grid: SimGrid;
+  table: string;
+  slot: number | null;
+  membership: string;
+  membership_rule: string;
+  quantiles: number[];
+  quantile_method: string;
+  weight_basis: string;
+  base_image_sha256: string;
+  candidate_image_sha256: string;
+  design_sha256: string;
+  design_kind: string;
+  result_digest: string;
+  draws: number;
+  n_points: number;
+  outputs: string[];
+  /** Loop kind -> the output that is its headline. */
+  headline_by_loop: Record<string, string>;
+  rows: SimAxisInfo;
+  cols: SimAxisInfo;
+  reach: Record<string, SimReach>;
+  caveats: string[];
+  unresolved: string[];
+  rom_outcome: string;
+  weight_total: number;
+  unplaced: Record<string, { pairs: number; weight: number }>;
+  /** Output -> status -> number of cells. */
+  status_counts: Record<string, Record<string, number>>;
+  overlay: SimOverlay;
+  cells: SimCell[];
+}
+
+/** `sim_design.summary(design)` plus its grid and assumptions. */
+export interface SimDesignSummary {
+  sha256: string;
+  kind: string;
+  base_revision: string;
+  points: number;
+  weight: number;
+  weight_basis: string;
+  eligible_dwell_s?: number;
+  reads?: number;
+  plant_states?: Record<string, number>;
+  placement?: Record<string, number>;
+  unplaced_dwell_s?: Record<string, number>;
+  weight_by_regime?: Record<string, number>;
+  points_by_throttle_source?: Record<string, number>;
+  points_by_battery_source?: Record<string, number>;
+  battery_unmeasured_points?: number;
+  battery_v_when_unmeasured?: number | null;
+  fill_byte_width?: { max: number; median: number } | null;
+  grid?: {
+    rpm_edges: number[];
+    load_edges: number[];
+    load_axis: string;
+    load_unit: string;
+    load_basis: string;
+    environment: Record<string, number | string>;
+  };
+  assumptions?: string[];
+}
+
+/** The result's provenance: hashes, plant, seed and draws. Free-form beyond
+ *  the fields the page names. */
+export interface SimProvenance {
+  base_image_sha256?: string;
+  candidate_image_sha256?: string;
+  candidate_events?: string[];
+  design_sha256?: string;
+  uncertainty_sha256?: string;
+  plant_version?: string;
+  baseline_sha256?: string | null;
+  contract_sha256?: string;
+  application_model_sha256?: string;
+  seed?: number;
+  draws?: number;
+  rng?: string;
+  [key: string]: unknown;
+}
+
+/** A 200 from the simulate route (`rom_editor.simulate_edits`). `label` here
+ *  is the result's; the request's is `candidate.label`. */
+export interface RomSimResult {
+  tool: string;
+  tool_version: string;
+  label: string;
+  synthetic: boolean;
+  /** The result's caveats, first and unchanged. */
+  caveats: string[];
+  assumptions: string[];
+  unresolved: string[];
+  inert_parameters: string[];
+  coverage: Record<string, number>;
+  outcome: string;
+  learned_state?: Record<string, unknown>;
+  provenance: SimProvenance;
+  design: SimDesignSummary;
+  /** The preview's provenance: what the edits changed in the candidate. */
+  candidate: RomEditProvenance;
+  cells: SimCellTable;
+  spec_yaml: string | null;
+  spec_sha256?: string;
+}
+
+/** Why a simulate did not return a result, by the route's own error name. */
+export type SimFailureKind =
+  | "refused"
+  | "deferred"
+  | "busy"
+  | "unavailable"
+  | "invalid"
+  | "not_found"
+  | "unauthorized"
+  | "error";
+
+export interface SimFailure {
+  kind: SimFailureKind;
+  /** The route's `reason` (`capture_active`, `grid_too_large`, ...), or null. */
+  reason: string | null;
+  message: string;
+  /** `sim_refused` only: `edit_spec`, `rom_effect`, `sim_design` or `simulation`. */
+  refusalKind?: string | null;
+  /** `analysis_deferred` only: the route's pointer to the laptop path. */
+  laptopPath?: string | null;
+  profile?: string | null;
+}
+
+/** What the page remembers about a run, next to its result: the request as
+ *  sent, the edits as the operator read them, and the base. The result's own
+ *  caveat block prints these, so a result never loses what it was run on. */
+export interface SimRunContext {
+  request: RomSimRequest;
+  edits: { tableName: string; summary: string; chain: string | null }[];
+  base: { sha256: string; label: string; revision: string | null };
+  /** Wall-clock seconds the request took, as the page measured them. */
+  elapsedS: number;
+}

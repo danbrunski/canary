@@ -151,7 +151,9 @@ export function CellGrid({
                       interactive
                         ? (event) => {
                             event.preventDefault();
-                            element.current?.focus();
+                            // Focus must not scroll: a scroll under the held button makes a
+                            // different cell enter the pointer and extend the selection.
+                            element.current?.focus({ preventScroll: true });
                             dragging.current = true;
                             onSelect(
                               event.shiftKey && selection
@@ -163,7 +165,14 @@ export function CellGrid({
                     }
                     onMouseEnter={
                       interactive
-                        ? () => {
+                        ? (event) => {
+                            // A drag extends only while the primary button is really down:
+                            // a stale flag (mouseup missed, or the page scrolled under a
+                            // click) must never extend a selection.
+                            if (!(event.buttons & 1)) {
+                              dragging.current = false;
+                              return;
+                            }
                             if (dragging.current && selection) {
                               onSelect({ anchor: selection.anchor, focus: [r, c] });
                             }

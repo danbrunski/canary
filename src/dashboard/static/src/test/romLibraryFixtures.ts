@@ -208,6 +208,11 @@ const FUEL_DECODE = {
   kind: "reciprocal" as const,
   quantity: "afr",
   unit: "AFR",
+  // The numbers behind the formula, as rom_image._decode_payload sends them.
+  scale: null,
+  offset: 0,
+  numerator: 1881.6,
+  mask: null,
   confidence: "verified" as const,
   evidence: "AFR = 14.7 x 128 / raw reproduces every transcribed AFR in afr_calibration.yaml.",
 };
@@ -224,6 +229,10 @@ const FUEL_AXES = {
       kind: "linear" as const,
       quantity: "rpm",
       unit: "rpm",
+      scale: 50,
+      offset: 0,
+      numerator: null,
+      mask: null,
       confidence: "verified" as const,
       evidence: "raw x 50 reproduces the transcribed rpm breakpoints.",
     },
@@ -324,6 +333,19 @@ export const UPREV_FUEL_COMP_LABELS: RomEditorDisagreement = {
 const FUEL_COMP_RPM_RAW = Array.from({ length: 16 }, (_, i) => 8 + 8 * i);
 const FUEL_COMP_LOAD_RAW = [...Array.from({ length: 15 }, (_, i) => 16 + 16 * i), 255];
 
+const FUEL_COMP_DECODE = {
+  formula: "fuel compensation = raw × 0.78125",
+  kind: "linear" as const,
+  quantity: "fuel compensation",
+  unit: "%",
+  scale: 0.78125,
+  offset: 0,
+  numerator: null,
+  mask: null,
+  confidence: "verified" as const,
+  evidence: "100 x raw / 128.",
+};
+
 /** Fuel Compensation in `slot`, with the code-correct axes and UpRev's
  *  swapped-label record, as the daemon lists every slot copy. */
 export function fuelCompTable(slot: number): RomTableValues {
@@ -335,14 +357,7 @@ export function fuelCompTable(slot: number): RomTableValues {
     slot,
     kind: "fuel_compensation",
     role: "table",
-    decode: {
-      formula: "fuel compensation = raw × 0.78125",
-      kind: "linear",
-      quantity: "fuel compensation",
-      unit: "%",
-      confidence: "verified",
-      evidence: "100 x raw / 128.",
-    },
+    decode: FUEL_COMP_DECODE,
     offset: 0x0e0660 + (slot - 1) * 0x800,
     end: 0x0e075f + (slot - 1) * 0x800,
     rows: 16,
