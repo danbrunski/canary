@@ -1719,6 +1719,62 @@ refusal carries a stable `reason` string that tests assert by name.
       the README's one command is `scripts/canary_desk.py`, ROMs open from
       the GUI. `tests/test_canary_desk.py`: 45 passed.
 
+- [ ] **E08.10 — Name every held working assumption; BFS stops inheriting
+  the target-lookup gate.** Found 2026-10-15 by W09.6's real-image runs
+  (`tests/test_rom_editor_private_rom.py`, `a00dfb99`; W09 doc, W09.6
+  "Laptop half", logged under W09.7). The operator agreed to this plan.
+  1. **The VE that sets the result is not named.**
+     - The sim kit's plant is fuel-mv-1, the only version the contract admits
+       (E08.3). Its VE is the registry's working assumption: 0.7, bracket
+       [0.4, 1.0], `requires_measurement` (`fuel_plant.yaml` ~194-198).
+     - A grid design solves MAF from the stated load at that VE (E08.2's
+       `load_basis`). At 100 % fill that is ~103 g/s (BFS ~29k), against the
+       truck's ~38–42k at WOT; fuel-mv-3 identifies 0.9055 at 4,000–5,000 rpm
+       (~133 g/s).
+     - So BFS and pulse deltas at the top of a grid are understated by ~30 %.
+       Relative λ is roughly unaffected.
+     - Nothing in the result names VE. The only plant caveat present is
+       `plant:manifold_pressure_unmeasured`.
+     - **Fix at source.** Every result carries, in `assumptions`, each plant
+       working assumption a computed output rests on: parameter, value,
+       source file and bracket, and whether this run drew it or held it.
+       Derive this from the registry the run resolved, never from a
+       hand-kept list.
+     - A design's own `assumptions`, such as the grid's "MAF solved at VE
+       0.7", flow into the result too. E08.6's report shows both in its
+       caveat block, ahead of the first chart. That also closes E08.6's
+       reported gap that the design's `assumptions` were not in `summary()`.
+     - A grid's MAF depends on VE but is frozen when the design is built.
+       Name that in the result too. The VE draw does not move a grid
+       point's MAF.
+  2. **BFS inherits a gate it does not depend on.**
+     `paired_scenarios.run_paired` (~1017) adds the run-level `gate` to every
+     output's reasons. A target-lookup gate (e.g.
+     `target_lookup:enrichment_gate_state_unknown`) therefore marks
+     `base_fuel_schedule` unsupported, although steady BFS is computed before
+     the Target AFR lookup.
+     - Scope each gate reason to the outputs downstream of the node it names,
+       through the application model's `depends_on`, not a hand list.
+     - The real 20260920 → 20261004 run's one unsupported ΔBFS cell, (8, 15),
+       is this case.
+     - The W09.6 test marks it `KNOWN OVER-REFUSAL`. Flip that one assertion
+       deliberately, and tell the W09 session.
+  - **Accept:**
+    - A grid run on fuel-mv-1 names VE 0.7 [0.4, 1.0] (held or drawn) and
+      the frozen-MAF fact in `assumptions` and in the report's caveat block.
+      A test fails if the registry entry changes and the result does not
+      follow.
+    - The ΔBFS cell (8, 15) of the real run becomes supported. Its pulse, λ
+      and target φ keep the gate reason.
+    - `cmp_head.py`'s HEAD equality is re-stated: the cases where only these
+      reason or assumption strings changed are listed; values are unchanged
+      everywhere.
+  - **Not here (needs an operator decision):** switching the kit to an
+    identified VE (fuel-mv-2/3). The contract admits only fuel-mv-1, and
+    fuel-mv-2/3's refusing MAP conflicts with drawing VE over plant-model
+    MAP (`manifold_refusal_varies_by_draw`). It is a new plant choice for
+    the simulator, recorded here so it is not implied.
+
 ## Not in scope (named so they are not implied)
 
 - **Spark, torque, knock, power:** `compare_roms` traces ignition edits but
