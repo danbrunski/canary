@@ -22,6 +22,7 @@ import yaml
 from pydantic import ValidationError
 
 from src.analysis.fuel_plant import (
+    KELVIN,
     MAP_ABOVE_AMBIENT,
     MAP_OUTSIDE_VE_FIT,
     PLANT_FILE,
@@ -583,7 +584,7 @@ def test_the_revised_map_refuses_above_ambient_where_fuel_mv_1_caps(
     p2 = resolve_parameters(plant_mv2, delay)
     curve = plant_mv2.baseline.ve_curve if plant_mv2.baseline else None
     assert curve is not None
-    ve_4500 = float(curve.ve([4500.0], 0.7)[0])
+    ve_4500 = float(curve.ve([4500.0], 0.7, fitted_at=0.7)[0])
     assert ve_4500 == pytest.approx(0.905535, abs=1e-6)
     # Charge fraction 0.8 at 4500 rpm: above VE 0.7, below VE(4500).
     part = _inputs(rpm=4500.0, maf_gps=_maf_at_charge_fraction(0.8, 4500.0))
@@ -651,9 +652,9 @@ def test_ve_is_fitted_on_identification_drives_only_as_a_lower_envelope(
     assert curve.envelope[2] == pytest.approx(0.88)  # 2000-3000: the steady warm max
     assert curve.envelope[0] == pytest.approx(0.2)
     assert curve.envelope[4] is None  # 2 reads < min_reads
-    assert float(curve.ve([2500.0], 0.7)[0]) == pytest.approx(0.88)
-    assert float(curve.ve([800.0], 0.7)[0]) == 0.7  # never filled: the floor
-    assert float(curve.ve([4500.0], 0.7)[0]) == 0.7
+    assert float(curve.ve([2500.0], 0.7, fitted_at=0.7)[0]) == pytest.approx(0.88)
+    assert float(curve.ve([800.0], 0.7, fitted_at=0.7)[0]) == 0.7  # never filled: the floor
+    assert float(curve.ve([4500.0], 0.7, fitted_at=0.7)[0]) == 0.7
     assert curve.baro_kpa == (81.0, 81.0)
     held = samples.assign(session="_capture-tuning-2026-09-22T170459")
     with pytest.raises(FuelPlantRefusalError) as err:
@@ -794,3 +795,78 @@ def test_versions_are_compared_per_sample_on_spent_drives_only(
     with pytest.raises(FuelPlantRefusalError) as err:
         compare_versions([fixture_samples], [mv1], delay)
     assert err.value.reason == "one_version"
+
+
+def test_one_plenum_feeds_both_banks_so_map_reads_the_total_air_at_any_split() -> None:
+    """E08.11 (operator, 2026-10-16): the VQ40 has one plenum for both banks,
+    so MAP comes from the engine's total air (the mean cylinder charge), and
+    the bank split acts on per-bank fuelling and lambda only. Hand-worked at
+    100 g/s, 3,000 rpm, 30 C, baro 81 kPa on fuel-mv-1's VE 0.7: 150 intake
+    events/s (3,000/60 x 6 cylinders / 2 revolutions), mean charge 0.666667 g;
+    bank shares at split 0.52 and 0.48 are 0.693333 g and 0.64 g, summing to
+    twice the mean; MAP = m R T / (VE V_cyl) = 0.666667e-3 x 287.05 x 303.15 /
+    (0.7 x 0.659e-3) = 125.8 kPa -> capped at 81, so the check runs at 40 g/s
+    too (0.266667 g, MAP 50.30 kPa)."""
+    profile, _ = load_fuel_plant(PROFILE)
+    delay = load_b06(PROFILE, profile.delay)
+    geom = profile.geometry
+    assert (geom.cylinders, geom.banks) == (6, 2)
+    v_cyl_m3 = 3.954 / 6 / 1000.0
+
+    def at(split: float, maf: float) -> Any:
+        params = resolve_parameters(profile, delay, overrides={"bank_air_split": split})
+        return predict(
+            PlantInputs(
+                pulse_ms=np.array([4.0]),
+                ecu_dead_time_ms=np.array([0.5]),
+                rpm=np.array([3000.0]),
+                maf_gps=np.array([maf]),
+                baro_kpa=np.array([81.0]),
+                iat_c=np.array([30.0]),
+                rail_kpa=np.array([350.0]),
+            ),
+            params,
+            geom,
+        )
+
+    for maf, mean in ((100.0, 100.0 / 150.0), (40.0, 40.0 / 150.0)):
+        hi, lo, even = at(0.52, maf), at(0.48, maf), at(0.5, maf)
+        # Each bank's cylinder gets split x banks of the mean; the two shares
+        # sum to the total (two banks' worth of the mean) at any split.
+        assert float(hi.air_g[0]) == pytest.approx(mean * 1.04, rel=1e-12)
+        assert float(lo.air_g[0]) == pytest.approx(mean * 0.96, rel=1e-12)
+        assert float(hi.air_g[0] + lo.air_g[0]) == pytest.approx(2.0 * mean, rel=1e-12)
+        assert float(even.air_g[0]) == pytest.approx(mean, rel=1e-12)
+        # MAP is the plenum's: the same at every split, from the mean charge.
+        expected = mean / 1000.0 * R_AIR * (30.0 + KELVIN) / (0.7 * v_cyl_m3) / 1000.0
+        assert float(even.map_kpa[0]) == pytest.approx(min(expected, 81.0), rel=1e-9)
+        assert hi.map_kpa[0] == lo.map_kpa[0] == even.map_kpa[0]
+        # The split still moves this bank's lambda, as the bank's own air.
+        assert float(hi.lambda_delivered[0]) == pytest.approx(
+            float(even.lambda_delivered[0]) * 1.04, rel=1e-12
+        )
+    assert float(at(0.5, 40.0).map_kpa[0]) == pytest.approx(50.30, abs=0.01)
+    # On the refusing plants too: 131 g/s at 4,800 rpm is a charge fraction
+    # of ~0.88, MAP ~0.97 x baro at fuel-mv-2's VE 0.9055. A bank's share at
+    # split 0.52 (x 1.04) would have read ~1.005 x baro and refused; the plenum
+    # sees the total, so the split cannot push MAP above ambient.
+    for version in ("fuel-mv-2", "fuel-mv-3"):
+        prof, _ = load_fuel_plant(PROFILE, version)
+        maps = []
+        for split in (0.48, 0.5, 0.52):
+            out = predict(
+                PlantInputs(
+                    pulse_ms=np.array([12.0]),
+                    ecu_dead_time_ms=np.array([0.5]),
+                    rpm=np.array([4800.0]),
+                    maf_gps=np.array([131.0]),
+                    baro_kpa=np.array([81.0]),
+                    iat_c=np.array([25.0]),
+                    rail_kpa=np.array([350.0]),
+                ),
+                resolve_parameters(prof, delay, overrides={"bank_air_split": split}),
+                prof.geometry,
+            )
+            assert out.manifold_refusal is not None and out.manifold_refusal[0] == ""
+            maps.append(float(out.map_kpa[0]))
+        assert len(set(maps)) == 1, (version, maps)

@@ -78,7 +78,6 @@ from src.analysis.paired_scenarios import (
     LearnedState,
     PairedScenario,
     SimKit,
-    load_kit,
 )
 from src.analysis.rom_edit_spec import (
     BaseImage,
@@ -116,10 +115,9 @@ from src.analysis.sim_design import (
 )
 from src.analysis.sim_montecarlo import (
     MODE,
-    UNCERTAINTY_FILE,
+    LoadedUncertainty,
     MonteCarloDesign,
-    kit_for_plant,
-    load_uncertainty,
+    load_sim_kit,
     run_monte_carlo,
 )
 from src.analysis.sim_montecarlo import TOOL_VERSION as MONTECARLO_TOOL_VERSION
@@ -130,8 +128,10 @@ from src.signals.derived import FUEL_PROPERTIES
 from src.vehicle.tune_revisions import load_tune_revisions
 
 TOOL = "rom_sim"
-#: Bump when the result file's shape or meaning changes.
-TOOL_VERSION = "1"
+#: Bump when the result file's shape or meaning changes. 2: runs the
+#: simulator's declared plant (sim_kit.yaml, fuel-mv-2) by default, with that
+#: plant's own uncertainty declaration (E08.11).
+TOOL_VERSION = "2"
 
 DEFAULT_PROFILE = REPO_ROOT / "data" / "nissan-xterra-2008"
 DEFAULT_SESSIONS = Path.home() / "canary-data" / "sessions" / "nissan-xterra-2008"
@@ -259,8 +259,9 @@ def _add_common(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--plant-version",
         default=None,
-        help="a frozen plant declaration among the profile's fuel_plant*.yaml "
-        "(default: the version the contract runs)",
+        help="a frozen plant declaration among the profile's fuel_plant*.yaml that "
+        "sim_kit.yaml lists an uncertainty declaration for (default: the simulator's "
+        "declared plant, sim_kit.yaml's plant_version; designs default to it too)",
     )
 
 
@@ -292,7 +293,11 @@ class _World:
 
     def __init__(self, args: argparse.Namespace, *, need_candidate: bool = True) -> None:
         self.profile = _profile(args)
-        self.kit: SimKit = kit_for_plant(load_kit(self.profile), self.profile, args.plant_version)
+        # The simulator's own declared plant (sim_kit.yaml, E08.11), never the
+        # contract's default, with that plant's uncertainty declaration.
+        loaded = load_sim_kit(self.profile, args.plant_version)
+        self.kit: SimKit = loaded.kit
+        self.uncertainty: LoadedUncertainty = loaded.uncertainty
         declaration = load_fuel_comp_declaration(self.profile)
         self.slot = declaration.program.map_slot
         registry = load_tune_revisions(self.profile / "tune_revisions.yaml")
@@ -666,16 +671,7 @@ def cmd_run(args: argparse.Namespace) -> dict[str, Any]:
     kit, base = world.kit, world.base
     design = load_design(args.design)
     require_base(design, base.image_sha256)
-    try:
-        uncertainty = load_uncertainty(world.profile / UNCERTAINTY_FILE)
-    except FileNotFoundError as exc:
-        raise SimulationRefusalError(
-            "uncertainty_missing", f"{world.profile} has no {UNCERTAINTY_FILE}"
-        ) from exc
-    except ValidationError as exc:
-        raise SimulationRefusalError(
-            "uncertainty_invalid", f"{UNCERTAINTY_FILE}: {exc.error_count()} error(s)"
-        ) from exc
+    uncertainty = world.uncertainty
     template = _template(world, args, events, candidate.image_sha256)
     result = run_monte_carlo(
         kit,

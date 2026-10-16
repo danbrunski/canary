@@ -56,9 +56,10 @@ import pandas as pd
 import yaml
 from numpy.random import PCG64, Generator
 from numpy.typing import NDArray
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
 from src.analysis.fuel_plant import (
+    DELAY_PARAMETER,
     MANIFOLD_MODELS,
     REFUSING_MODELS,
     PlantInputs,
@@ -101,8 +102,8 @@ from src.analysis.paired_scenarios import (
     _side,
     _twin_gate,
     _with_contract_mode,
-    format_plant_assumption,
-    plant_assumptions,
+    load_kit,
+    plant_assumption_lines,
     plant_parameters,
     plant_rail_kpa,
     run_paired,
@@ -120,11 +121,14 @@ from src.analysis.rom_effects import compare_roms
 from src.analysis.rom_image import sha256_hex
 from src.analysis.sim_contract import SimulationRefusalError
 from src.analysis.sim_design import MAF_FROM_MANIFOLD_MODEL, SimDesign
+from src.analysis.sim_kit import SIM_KIT_FILE, load_sim_kit_declaration
 from src.session import SYNTHETIC_SESSION_PREFIX
 
 #: Bump when what a result means changes. 2: per-output blanking under a
 #: scoped gate, and held working and design assumptions named (E08.10).
-TOOL_VERSION = "2"
+#: 3: runs a VE(rpm) plant (E08.11): a VE draw moves only the floor bands, the
+#: held fit is named, and a model-MAP refusal is refused per draw, not per plant.
+TOOL_VERSION = "3"
 UNCERTAINTY_FILE = "sim_uncertainty.yaml"
 #: The standing caveat: the plant's structural error is not a parameter.
 STRUCTURAL_ERROR_NOT_SAMPLED = "structural_error_not_sampled"
@@ -237,7 +241,7 @@ def bracketed_parameters(
     baseline = kit.plant.baseline
     for pid in plant_reads(kit.plant.manifold_model):
         p = kit.plant.registry.get(pid)
-        if pid == "lambda_observation_delay":
+        if pid == DELAY_PARAMETER:
             lo, hi = kit.delay.bracket
             out[pid] = ("working_assumption", (float(lo), float(hi)))
         elif p.working_assumption is not None:
@@ -656,6 +660,52 @@ def kit_for_plant(kit: SimKit, profile_dir: Path, plant_version: str | None) -> 
     )
 
 
+@dataclass(frozen=True)
+class LoadedSimKit:
+    """The simulator's kit (E08.11): the contract's kit on the plant
+    ``sim_kit.yaml`` declares, with that plant's uncertainty declaration."""
+
+    kit: SimKit
+    uncertainty: LoadedUncertainty
+    #: sha256 of ``sim_kit.yaml`` (provenance).
+    declaration_sha256: str
+
+
+def load_sim_kit(profile_dir: Path, plant_version: str | None = None) -> LoadedSimKit:
+    """The one loader of the ROM-edit simulator's kit.
+
+    The plant is the one ``<profile>/sim_kit.yaml`` declares, never the
+    contract's default (which E07.4/E07.6 run); ``plant_version`` names
+    another the declaration lists (e.g. ``fuel-mv-1`` to re-run a run recorded
+    on it). The uncertainty declaration is that version's file, checked
+    against the plant here (:func:`check_uncertainty`), so a kit and a
+    declaration for different plants cannot leave this function together. The
+    contract still decides which versions a scenario may run."""
+    loaded = load_sim_kit_declaration(profile_dir)
+    declared = loaded.declaration
+    version = declared.plant_version if plant_version is None else plant_version
+    if version not in declared.uncertainty:
+        raise SimulationRefusalError(
+            "uncertainty_undeclared",
+            f"{SIM_KIT_FILE} declares uncertainty for {sorted(declared.uncertainty)}, not "
+            f"{version}",
+        )
+    kit = kit_for_plant(load_kit(profile_dir), profile_dir, version)
+    name = declared.uncertainty[version]
+    try:
+        uncertainty = load_uncertainty(Path(profile_dir) / name)
+    except FileNotFoundError as exc:
+        raise SimulationRefusalError(
+            "uncertainty_missing", f"{Path(profile_dir).name} has no {name}"
+        ) from exc
+    except ValidationError as exc:
+        raise SimulationRefusalError(
+            "uncertainty_invalid", f"{name}: {exc.error_count()} error(s)"
+        ) from exc
+    check_uncertainty(uncertainty.declaration, kit)
+    return LoadedSimKit(kit, uncertainty, loaded.sha256)
+
+
 @dataclass
 class _Cache:
     """The ECU side per (point, fill byte) combination, and what the plant reads."""
@@ -977,6 +1027,45 @@ def _plant(
     return {name: v.reshape((2, *combos.shape)) for name, v in result.items()}
 
 
+def _refuse_manifold_refusal(
+    kit: SimKit, points: _PointArrays, params: ResolvedParameters, draw: int, sampled: Draws
+) -> None:
+    """The backstop for a plant whose manifold model refuses MAP per sample
+    (fuel-mv-2/3): MAP at a ``plant_model`` point is recomputed at each draw,
+    so a refusal there (above ambient, outside the VE fit) would make the
+    point's support depend on the draw. Refused at the first such draw, by
+    name (``manifold_refusal_varies_by_draw``). Designs place a point only
+    where the frozen plant gives a MAP, and drawing the VE floor at warm idle
+    (charge fraction ~0.15) cannot reach ambient, so it is not expected to fire."""
+    if kit.plant.manifold_model not in REFUSING_MODELS or not points.map_from_model.any():
+        return
+    at = np.flatnonzero(points.map_from_model)
+    out = predict(
+        PlantInputs(
+            pulse_ms=np.full(at.size, 2.0),
+            ecu_dead_time_ms=np.zeros(at.size),
+            rpm=points.rpm[at],
+            maf_gps=points.maf_gps[at],
+            baro_kpa=points.baro_kpa[at],
+            iat_c=points.iat_c[at],
+            rail_kpa=points.rail_kpa[at],
+        ),
+        params,
+        kit.plant.geometry,
+    )
+    assert out.manifold_refusal is not None
+    refused = np.flatnonzero(out.manifold_refusal != "")
+    if refused.size:
+        k = int(refused[0])
+        raise SimulationRefusalError(
+            "manifold_refusal_varies_by_draw",
+            f"{kit.plant.manifold_model} refuses MAP at point {int(at[k])} "
+            f"({out.manifold_refusal[k]}, {refused.size} of {at.size} model-MAP points) at draw "
+            f"{draw} ({sampled.overrides(draw)}): with MAP computed per draw a point's support "
+            "would depend on the draw",
+        )
+
+
 def _same(a: float | None, b: float) -> bool:
     if a is None:
         return bool(np.isnan(b))
@@ -1134,14 +1223,6 @@ def run_monte_carlo(
             f"design {design.sha256[:12]} was built on plant {design.plant_version}; the run's "
             f"is {kit.plant.plant_version}",
         )
-    if kit.plant.manifold_model in REFUSING_MODELS and any(
-        dp.point.map_kpa_source == "plant_model" for dp in design.points
-    ):
-        raise SimulationRefusalError(
-            "manifold_refusal_varies_by_draw",
-            f"{kit.plant.manifold_model} refuses MAP per sample; with MAP computed per VE draw "
-            "a point's support would depend on the draw",
-        )
     for label, image, identity in (
         ("base", base_image, template.base),
         ("candidate", candidate_image, template.candidate),
@@ -1189,9 +1270,9 @@ def run_monte_carlo(
             base[name][:] = cache.base[name][combo_of]
             cand[name][:] = cache.candidate[name][combo_of]
     for d in range(n_draws):
-        plant = _plant(
-            kit, cache, points, combo_of[:, d], plant_parameters(kit, sampled.overrides(d))
-        )
+        params = plant_parameters(kit, sampled.overrides(d))
+        _refuse_manifold_refusal(kit, points, params, d, sampled)
+        plant = _plant(kit, cache, points, combo_of[:, d], params)
         for name in _PLANT_OUTPUTS:
             base[name][:, d] = plant[name][0]
             cand[name][:, d] = plant[name][1]
@@ -1230,8 +1311,7 @@ def run_monte_carlo(
     # The plant's working assumptions over the whole design (a checked subset
     # may miss a point that reads one), then the design's own (E08.10).
     assumptions.extend(
-        format_plant_assumption(a)
-        for a in plant_assumptions(kit, [dp.point for dp in design.points], drawn=varied)
+        plant_assumption_lines(kit, [dp.point for dp in design.points], drawn=varied)
     )
     assumptions.extend(_design_assumptions(design, ve_drawn=_VE_PARAMETER in varied))
     inert = _inert(kit, cache, points, uncertainty.declaration, varied)
@@ -1328,7 +1408,9 @@ __all__ = [
     "UncertaintyDeclaration",
     "bracketed_parameters",
     "check_uncertainty",
+    "LoadedSimKit",
     "kit_for_plant",
+    "load_sim_kit",
     "load_uncertainty",
     "run_monte_carlo",
     "sample_draws",

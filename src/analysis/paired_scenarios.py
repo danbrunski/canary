@@ -76,12 +76,17 @@ from src.analysis.ecu_application import (
     load_application_model,
 )
 from src.analysis.fuel_plant import (
+    DELAY_PARAMETER,
+    MANIFOLD_READS,
+    MAP_OUTSIDE_VE_FIT,
     PLANT_FILE,
+    VE_PARAMETER,
     B06Rules,
     FuelPlantProfile,
     FuelPlantRefusalError,
     PlantInputs,
     ResolvedParameters,
+    VeCurve,
     load_b06,
     load_fuel_plant,
     plant_qualification,
@@ -975,7 +980,7 @@ PLANT_ASSUMPTION_PREFIX = "plant working assumption: "
 #: points: the rail where no rail reading was given, VE where the plant's own
 #: manifold model sets MAP (a stated or measured MAP does not read it).
 _RAIL_PARAMETER = "rail_pressure"
-_VE_PARAMETER = "manifold_pressure"
+_VE_PARAMETER = VE_PARAMETER
 
 
 @dataclass(frozen=True)
@@ -1012,45 +1017,102 @@ def plant_assumptions(
 ) -> list[PlantAssumption]:
     """Every working assumption :func:`~src.analysis.fuel_plant.resolve_parameters`
     resolves for ``kit``'s plant and some point reads, from the registry
-    itself (never a hand list): a parameter not ``known`` whose number is its
-    registry ``working_assumption`` (and B06's restated delay). The rail
-    counts only when a point has no rail reading, VE only when a point's MAP
-    is the plant's own model. ``drawn`` names the parameters the run varies."""
+    itself (never a hand list): a parameter not ``known`` whose resolved number
+    is its registry ``working_assumption.value`` (B06's restated delay among
+    them: the registry restates it, and resolution checks it equal). The rail
+    counts only when a point has no rail reading; the manifold model's
+    parameters (:data:`~src.analysis.fuel_plant.MANIFOLD_READS`: VE, and
+    fuel-mv-3's residual-gas form) only when a point's MAP is the plant's own
+    model, since a stated MAP reads none of them. ``drawn`` names the
+    parameters the run varies."""
     resolved = resolve_parameters(kit.plant, kit.delay)
     source = f"{kit.plant_file} registry, plant {kit.plant.plant_version}"
+    reads_rail = any(pt.rail_kpa_source == "working_assumption" for pt in points)
+    reads_model = any(pt.map_kpa_source == "plant_model" for pt in points)
     out: list[PlantAssumption] = []
-    for pid in resolved.values:
+    for pid, value in resolved.values.items():
         p = kit.plant.registry.get(pid)
         wa = p.working_assumption
-        if wa is None or (p.status == "known" and pid != "lambda_observation_delay"):
+        if wa is None or p.status == "known" or value != float(wa.value):
             continue
-        if pid == _RAIL_PARAMETER and not any(
-            pt.rail_kpa_source == "working_assumption" for pt in points
-        ):
+        if pid == _RAIL_PARAMETER and not reads_rail:
             continue
-        if pid == _VE_PARAMETER and not any(pt.map_kpa_source == "plant_model" for pt in points):
+        if pid in MANIFOLD_READS and not reads_model:
             continue
         where = source
-        if pid == "lambda_observation_delay":
+        if pid == DELAY_PARAMETER:
             where = f"{source}, restating {kit.plant.delay.file}"
-        lo, hi = kit.delay.bracket if pid == "lambda_observation_delay" else tuple(wa.bracket)
+        role = ""
+        if pid == _VE_PARAMETER and resolved.ve_curve is not None:
+            assert resolved.ve_fitted_at is not None
+            floors = _floor_band_names(resolved.ve_curve, resolved.ve_fitted_at)
+            role = (
+                f"the floor under the frozen baseline's VE(rpm) fit: the VE of rpm bands "
+                f"{floors}, each at least its own envelope (the fitted bands are held at the fit)"
+            )
         out.append(
             PlantAssumption(
                 parameter=pid,
                 units=p.units,
-                value=float(resolved.values[pid]),
-                bracket=(float(lo), float(hi)),
+                value=float(value),
+                bracket=(float(wa.bracket[0]), float(wa.bracket[1])),
                 source=where,
                 effect=wa.effect,
                 drawn=pid in drawn,
-                role=(
-                    "the floor under the frozen baseline's VE(rpm) fit (the fit itself is held)"
-                    if pid == _VE_PARAMETER and resolved.ve_curve is not None
-                    else ""
-                ),
+                role=role,
             )
         )
     return out
+
+
+def _floor_band_names(curve: VeCurve, fitted_at: float) -> str:
+    e = curve.rpm_edges
+    return ", ".join(
+        f"[{e[k]:g}, {e[k + 1]:g}{']' if k == len(e) - 2 else ')'}"
+        for k, is_floor in enumerate(curve.floor_bands(fitted_at))
+        if is_floor
+    )
+
+
+def held_ve_fit(kit: SimKit, points: Sequence[OperatingPoint]) -> str | None:
+    """The frozen VE(rpm) fit a result rests on, as one string (E08.11), or
+    ``None`` on a plant with one working VE or where no point's MAP is the
+    plant's own model. The fit is a ``log_fit`` (the contract's
+    ``parameter_fits``), not a bracket: it is held in every run, never drawn,
+    and named with its bands, the VE each band runs at, and its baseline."""
+    resolved = resolve_parameters(kit.plant, kit.delay)
+    curve, baseline = resolved.ve_curve, kit.plant.baseline
+    if curve is None or baseline is None:
+        return None
+    if not any(pt.map_kpa_source == "plant_model" for pt in points):
+        return None
+    assert resolved.ve_fitted_at is not None
+    floor = resolved.values[_VE_PARAMETER]
+    lo_b, hi_b = curve.baro_kpa
+    lo_t, hi_t = curve.iat_c
+    return (
+        f"{PLANT_ASSUMPTION_PREFIX}volumetric_efficiency(rpm) is the frozen fit of baseline "
+        f"{baseline.id} (sha256 {resolved.baseline_sha256[:12]}), held at the fit in this run, "
+        f"never drawn: {curve.describe(floor, fitted_at=resolved.ve_fitted_at)}; a floor band "
+        f"runs at {_VE_PARAMETER} (named above); part-load VE equals full-breathing VE at the "
+        f"same rpm by assumption; outside rpm {curve.rpm_edges[0]:g}-{curve.rpm_edges[-1]:g}, "
+        f"baro {lo_b:g}-{hi_b:g} kPa or IAT {lo_t:g}-{hi_t:g} C a MAP is "
+        f"{MAP_OUTSIDE_VE_FIT} ({kit.plant_file}, plant {kit.plant.plant_version})"
+    )
+
+
+def plant_assumption_lines(
+    kit: SimKit, points: Sequence[OperatingPoint], *, drawn: Collection[str]
+) -> list[str]:
+    """Every plant assumption a result over ``points`` names, as strings: each
+    working assumption (:func:`plant_assumptions`), then a VE(rpm) plant's
+    held fit (:func:`held_ve_fit`). The one list ``run_paired`` and the Monte
+    Carlo both state."""
+    lines = [format_plant_assumption(a) for a in plant_assumptions(kit, points, drawn=drawn)]
+    fit = held_ve_fit(kit, points)
+    if fit is not None:
+        lines.append(fit)
+    return lines
 
 
 def run_paired(
@@ -1312,9 +1374,7 @@ def run_paired(
             "carries the change; trim authority, the STFT/LTFT split and settling are not "
             "modelled"
         )
-    assumptions.extend(
-        format_plant_assumption(a) for a in plant_assumptions(kit, scenario.points, drawn=overrides)
-    )
+    assumptions.extend(plant_assumption_lines(kit, scenario.points, drawn=overrides))
     n = max(len(scenario.points), 1)
     unresolved = set(gate)
     for p in points_out:
@@ -1433,7 +1493,9 @@ __all__ = [
     "affected_cells",
     "computed_node",
     "format_plant_assumption",
+    "held_ve_fit",
     "load_kit",
+    "plant_assumption_lines",
     "plant_assumptions",
     "optimise",
     "plant_parameters",

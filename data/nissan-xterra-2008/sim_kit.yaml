@@ -1,0 +1,34 @@
+# The ROM-edit simulator's own plant (E08.11, operator decision 2026-10-15).
+# Read by src/analysis/sim_montecarlo.load_sim_kit, the one loader the
+# simulator's CLI (tools/rom_sim.py), its design builders' defaults
+# (src/analysis/sim_design.py) and the ROM editor use.
+#
+# This is not the contract's plant. engine_sim_contract.yaml keeps
+# plant_version: fuel-mv-1, which E07.4's intervention case and its sealed
+# records name (baseline na-stock-2026-10-05.1, sha 6aec1db5...), and E07.6's
+# paired runs; its conditional_rom_comparison mode admits fuel-mv-1 and
+# fuel-mv-2, and refuses anything else (plant_version_mismatch).
+#
+# Why a file beside sim_uncertainty.yaml rather than a field in it: "which
+# plant the simulator runs" and "how one plant's parameters are drawn" are
+# two facts. Each uncertainty declaration describes exactly one plant version
+# (its plant_version is checked against the run's), so fuel-mv-1's stays
+# byte-identical for the runs recorded on it (the 10-04 prediction of record,
+# uncertainty sha in its provenance), and switching the simulator's plant is
+# one line here, never an edit to a declaration a recorded run names.
+schema_version: 1
+plant_version: fuel-mv-2
+# One uncertainty declaration per plant version the simulator can run; a run
+# on a version with no entry here is refused (uncertainty_undeclared).
+uncertainty:
+  fuel-mv-1: sim_uncertainty.yaml
+  fuel-mv-2: sim_uncertainty_mv2.yaml
+evidence: >-
+  fuel-mv-1's constant VE 0.7 is contradicted by the truck's own data above
+  2,000 rpm (steady charge-fraction envelope 0.888-0.906). A grid solves MAF
+  from load at the plant's VE, so on fuel-mv-1 full fill puts BFS near 29k
+  against the truck's 38-42k at WOT. fuel-mv-2 is frozen
+  (na-stock-2026-10-08.mv2) with VE(rpm) identified on the same drives and
+  fits at least as well in-sample (|err| p90 11.61 % vs 12.01 %). fuel-mv-3
+  fits the same (11.69 %) and was not chosen: its part-load factor is
+  unvalidated and no MAP sensor will exist on the NA intake (E08.11).

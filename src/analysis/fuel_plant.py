@@ -94,6 +94,13 @@ LOAD_DEPENDENT_READS: tuple[str, ...] = (
     "residual_expansion_exponent",
     "exhaust_pressure_ratio",
 )
+#: The registry parameter that is the plant's working VE (the floor of a
+#: VE(rpm) curve), and the one that restates B06's frozen lambda delay.
+VE_PARAMETER = "manifold_pressure"
+DELAY_PARAMETER = "lambda_observation_delay"
+#: The parameters only the manifold model reads: a stated (or measured) MAP
+#: reads none of them, so a result on stated MAP rests on none of them.
+MANIFOLD_READS: tuple[str, ...] = (VE_PARAMETER, *LOAD_DEPENDENT_READS)
 
 FloatArray = NDArray[np.float64]
 
@@ -339,14 +346,56 @@ class VeCurve(_Strict):
             "intake_air_temperature": (float(self.iat_c[0]), float(self.iat_c[1])),
         }
 
-    def ve(self, rpm: ArrayLike, floor: float) -> FloatArray:
-        """VE per sample; NaN outside the fitted rpm range (never extrapolated)."""
+    def ve(self, rpm: ArrayLike, floor: float, *, fitted_at: float) -> FloatArray:
+        """VE per sample; NaN outside the fitted rpm range (never extrapolated).
+
+        ``fitted_at`` is the registry's working VE, which decides which bands
+        are the floor's (no envelope, or one below it) and which are fitted.
+        A fitted band runs at its envelope whatever ``floor`` is, so a floor
+        moved inside its bracket (a sensitivity case, a Monte Carlo draw)
+        moves only the floor's bands; it never lifts the frozen fit (E08.11).
+        Required: a caller that has only a floor must say that the floor is
+        also where the bands split."""
         r = _f(rpm)
         edges = np.asarray(self.rpm_edges, dtype=float)
         band = np.clip(np.searchsorted(edges, r, side="right") - 1, 0, len(edges) - 2)
-        per_band = np.array([floor if v is None else max(v, floor) for v in self.envelope])
+        per_band = np.array(self.band_values(floor, fitted_at=fitted_at))
         inside = (r >= edges[0]) & (r <= edges[-1])
         return np.where(inside, per_band[band], np.nan)
+
+    def floor_bands(self, fitted_at: float) -> list[bool]:
+        """Per band, whether it is the floor's: no envelope, or an envelope
+        below the registry's working VE ``fitted_at`` (the drives never filled
+        it above that). The others are the fit."""
+        return [v is None or v < fitted_at for v in self.envelope]
+
+    def band_values(self, floor: float, *, fitted_at: float) -> list[float]:
+        """The VE each band runs at: a fitted band at its envelope, a floor
+        band at ``floor`` but never below its own envelope (charge fraction <=
+        VE on every read of an NA engine)."""
+        return [
+            floor if v is None else (max(v, floor) if is_floor else v)
+            for v, is_floor in zip(self.envelope, self.floor_bands(fitted_at), strict=True)
+        ]
+
+    def describe(self, floor: float, *, fitted_at: float) -> str:
+        """The bands and the VE each runs at, e.g. ``[500, 1000) 0.7 floor,
+        ..., [5000, 6500] 0.872824 fit`` (one string form, for every result
+        that names the curve)."""
+        e = self.rpm_edges
+        parts = []
+        for k, (value, is_floor) in enumerate(
+            zip(
+                self.band_values(floor, fitted_at=fitted_at),
+                self.floor_bands(fitted_at),
+                strict=True,
+            )
+        ):
+            close = "]" if k == len(e) - 2 else ")"
+            parts.append(
+                f"[{e[k]:g}, {e[k + 1]:g}{close} {value!r} {'floor' if is_floor else 'fit'}"
+            )
+        return ", ".join(parts)
 
 
 class VeFitRule(_Strict):
@@ -955,6 +1004,8 @@ def manifold_pressure_ve_curve(
     geometry: Geometry,
     curve: VeCurve,
     floor: float,
+    *,
+    fitted_at: float | None = None,
 ) -> tuple[FloatArray, NDArray[np.str_]]:
     """Steady speed-density MAP at VE(rpm), kPa, and a per-sample refusal.
 
@@ -965,7 +1016,7 @@ def manifold_pressure_ve_curve(
     a sample with a MAP."""
     if not floor > 0:
         raise FuelPlantRefusalError("ve_nonpositive", "volumetric efficiency must be > 0")
-    ve = curve.ve(rpm, floor)
+    ve = curve.ve(rpm, floor, fitted_at=floor if fitted_at is None else fitted_at)
     v_m3 = geometry.cylinder_volume_l / 1000.0
     with np.errstate(invalid="ignore"):
         p_kpa = _f(air_g) / 1000.0 * R_AIR * (_f(iat_c) + KELVIN) / (ve * v_m3) / 1000.0
@@ -1043,6 +1094,7 @@ def manifold_pressure_load_dependent(
     compression_ratio: float,
     exhaust_ratio: float,
     exponent: float,
+    fitted_at: float | None = None,
 ) -> tuple[FloatArray, NDArray[np.str_]]:
     """Steady speed-density MAP with a load-dependent VE, kPa, and a per-sample refusal.
 
@@ -1058,7 +1110,7 @@ def manifold_pressure_load_dependent(
         raise FuelPlantRefusalError("ve_nonpositive", "volumetric efficiency must be > 0")
     form = dict(compression_ratio=compression_ratio, exhaust_ratio=exhaust_ratio, exponent=exponent)
     part_load_breathing_factor([1.0], **form)  # refuses an undefined form
-    ve = curve.ve(rpm, floor)
+    ve = curve.ve(rpm, floor, fitted_at=floor if fitted_at is None else fitted_at)
     v_m3 = geometry.cylinder_volume_l / 1000.0
     baro = _f(baro_kpa)
     iat = _f(iat_c)
@@ -1127,6 +1179,10 @@ class ResolvedParameters:
     #: The frozen VE(rpm) of a ``speed_density_refusing`` plant; its floor is
     #: ``values["manifold_pressure"]`` (the registry's working VE).
     ve_curve: VeCurve | None = None
+    #: The registry's working VE, which splits the curve's bands into the
+    #: floor's and the fitted ones (:meth:`VeCurve.ve`): an override of the
+    #: floor moves only the floor's bands.
+    ve_fitted_at: float | None = None
 
 
 def resolve_parameters(
@@ -1159,7 +1215,7 @@ def resolve_parameters(
     rail_effect = ""
     for pid in plant_reads(profile.manifold_model):
         p = profile.registry.get(pid)
-        if pid == "lambda_observation_delay":
+        if pid == DELAY_PARAMETER:
             wa = p.working_assumption
             if wa is None or (wa.value, tuple(wa.bracket)) != (delay.seconds, delay.bracket):
                 raise FuelPlantRefusalError(
@@ -1212,8 +1268,13 @@ def resolve_parameters(
             )
     elif ve_curve is not None:
         raise FuelPlantRefusalError("ve_curve_unused", f"{profile.manifold_model} has no VE curve")
+    fitted_at: float | None = None
+    if curve is not None:
+        wa = profile.registry.get(VE_PARAMETER).working_assumption
+        assert wa is not None  # the registry check requires it of a VE-reading plant
+        fitted_at = float(wa.value)
     return ResolvedParameters(
-        values, tuple(effects), rail_effect, sha, profile.manifold_model, curve
+        values, tuple(effects), rail_effect, sha, profile.manifold_model, curve, fitted_at
     )
 
 
@@ -1261,18 +1322,21 @@ def predict(inputs: PlantInputs, params: ResolvedParameters, geometry: Geometry)
     # *offset* by the declared value (0 = the injector is as the ECM believes).
     dead = inputs.ecu_dead_time_ms + v["injector_dead_time"]
     te = effective_open_ms(inputs.pulse_ms, dead)
-    # Equal air per cylinder is bank_air_split = 1/banks; a bank's cylinder
-    # gets split x banks of the mean.
-    air = air_per_event_g(inputs.maf_gps, inputs.rpm, geometry) * (
-        v["bank_air_split"] * geometry.banks
-    )
+    # One plenum feeds both banks (E08.11, operator 2026-10-16; the contract's
+    # "one manifold for both banks"): MAP is set by the engine's total air, the
+    # mean cylinder charge, whatever the split. The split is a per-bank
+    # fuelling fact: a bank's cylinder gets split x banks of the mean, which
+    # is what its injector meters against and its lambda sees. At the working
+    # split 1/banks the factor is exactly 1.0, so the two are the same array.
+    mean_air = air_per_event_g(inputs.maf_gps, inputs.rpm, geometry)
+    air = mean_air * (v["bank_air_split"] * geometry.banks)
     refusal: NDArray[np.str_] | None = None
     if inputs.map_kpa is not None:
         map_kpa = _f(inputs.map_kpa)
     elif params.manifold_model == "speed_density_load_dependent":
         assert params.ve_curve is not None
         map_kpa, refusal = manifold_pressure_load_dependent(
-            air,
+            mean_air,
             inputs.rpm,
             inputs.iat_c,
             inputs.baro_kpa,
@@ -1282,21 +1346,23 @@ def predict(inputs: PlantInputs, params: ResolvedParameters, geometry: Geometry)
             compression_ratio=v["compression_ratio"],
             exhaust_ratio=v["exhaust_pressure_ratio"],
             exponent=v["residual_expansion_exponent"],
+            fitted_at=params.ve_fitted_at,
         )
     elif params.manifold_model == "speed_density_refusing":
         assert params.ve_curve is not None
         map_kpa, refusal = manifold_pressure_ve_curve(
-            air,
+            mean_air,
             inputs.rpm,
             inputs.iat_c,
             inputs.baro_kpa,
             geometry,
             params.ve_curve,
             v["manifold_pressure"],
+            fitted_at=params.ve_fitted_at,
         )
     else:
         map_kpa = manifold_pressure_speed_density(
-            air, inputs.iat_c, inputs.baro_kpa, geometry, v["manifold_pressure"]
+            mean_air, inputs.iat_c, inputs.baro_kpa, geometry, v["manifold_pressure"]
         )
     measured = np.isfinite(inputs.rail_kpa)
     rail = np.where(measured, inputs.rail_kpa, v["rail_pressure"])

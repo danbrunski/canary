@@ -29,7 +29,12 @@ from src.analysis.paired_scenarios import (
     rpm_word,
     run_paired,
 )
-from src.analysis.sim_montecarlo import DESIGN_ASSUMPTION_PREFIX, FILL_BYTE, LoadedUncertainty
+from src.analysis.sim_montecarlo import (
+    DESIGN_ASSUMPTION_PREFIX,
+    FILL_BYTE,
+    LoadedUncertainty,
+    kit_for_plant,
+)
 from src.analysis.sim_report import render_report
 from src.vehicle.tune_revisions import TuneRevisionRegistry
 from tests import test_rom_editor, test_rom_sim_cli, test_sim_montecarlo
@@ -256,20 +261,27 @@ def _strings(value: Any) -> bool:
 def test_a_grid_run_names_ve_and_the_frozen_maf_through_the_cli_and_its_report(
     spec_run: dict[str, Any],
 ) -> None:
-    """``tools/rom_sim.py run`` on a fuel-mv-1 grid: assumptions stay a list
-    of strings, name VE 0.7 [0.4, 1.0] and the frozen MAF, and the report's
-    caveat block shows both before the first chart."""
+    """``tools/rom_sim.py run`` on a grid, now on the simulator's fuel-mv-2
+    (E08.11): assumptions stay a list of strings, name the drawn VE floor 0.7
+    [0.4, 1.0] and the bands it is the floor of, the held VE(rpm) fit with its
+    bands and baseline, and the frozen MAF; the report's caveat block shows
+    them before the first chart."""
     result = spec_run["result"]
     assert _strings(result["assumptions"]) and _strings(result["caveats"])
     ve = _named(result["assumptions"])[VE]
-    assert "manifold_pressure (volumetric_efficiency) = 0.7, bracket [0.4, 1.0]" in ve
+    assert "manifold_pressure (volumetric_efficiency) = 0.7, the floor under" in ve
+    assert "rpm bands [500, 1000), [1000, 2000)" in ve and "bracket [0.4, 1.0], drawn" in ve
+    fit = next(a for a in result["assumptions"] if "volumetric_efficiency(rpm) is the frozen" in a)
+    assert fit.startswith(PLANT_ASSUMPTION_PREFIX)
+    assert "na-stock-2026-10-08.mv2" in fit and "held at the fit in this run, never drawn" in fit
+    assert "[2000, 3000) 0.888395 fit" in fit and "[500, 1000) 0.7 floor" in fit
     design = [a for a in result["assumptions"] if a.startswith(DESIGN_ASSUMPTION_PREFIX)]
-    solved = next(a for a in design if "MAF solved at VE 0.7" in a)
+    solved = next(a for a in design if "MAF solved on the frozen baseline" in a)
     frozen = next(a for a in design if "frozen there" in a)
-    assert "bracket [0.4, 1.0]" in solved
+    assert "na-stock-2026-10-08.mv2" in solved and "bracket [0.4, 1.0]" in solved
     page = (Path(spec_run["out"]) / "report.html").read_text()
     first_svg = page.index("<svg")
-    for text in (ve, solved, frozen):
+    for text in (ve, fit, solved, frozen):
         escaped = text.replace("&", "&amp;").replace("'", "&#x27;")
         assert 0 <= page.index(escaped) < first_svg
     assert page.index('id="working-assumptions"') < first_svg
@@ -291,5 +303,108 @@ def test_assumptions_stay_strings_through_the_rom_editor(
     assert _strings(out["assumptions"]) and _strings(out["caveats"])
     assert "= 0.7, bracket [0.4, 1.0]" in _named(out["assumptions"])[VE]
     assert any("frozen there" in a for a in out["assumptions"])
-    # ae534b60: the design's assumptions appear once, in ``assumptions``.
-    assert any(a.startswith("design: ") for a in out["assumptions"])
+    # The design's own ride in ``assumptions`` with their prefix (W09, ae534b60).
+    assert any(a.startswith(DESIGN_ASSUMPTION_PREFIX) for a in out["assumptions"])
+
+
+# -- E08.11: a VE(rpm) plant, and the verifier's minors ---------------------------------------
+
+
+def test_a_ve_rpm_plant_names_its_held_fit_and_its_drawn_or_held_floor(
+    kit_and_image: tuple[SimKit, bytes],
+) -> None:
+    """On fuel-mv-2 a model-MAP result names the held VE(rpm) fit (band
+    edges, the VE each band runs at, the baseline id) and the floor, as drawn
+    or held, with the bands it is the floor of. A stated MAP names neither."""
+    kit, _ = kit_and_image
+    mv2 = kit_for_plant(kit, PROFILE, "fuel-mv-2")
+    for drawn, how in (({VE}, "drawn inside its bracket"), (set(), "held at that value")):
+        lines = paired_scenarios.plant_assumption_lines(mv2, [P_MODEL], drawn=drawn)
+        floor = _named(lines)[VE]
+        assert how in floor and "bracket [0.4, 1.0]" in floor
+        assert "rpm bands [500, 1000), [1000, 2000)" in floor
+        assert "fuel_plant_mv2.yaml registry, plant fuel-mv-2" in floor
+        fit = _named(lines)["volumetric_efficiency(rpm)"]
+        assert "frozen fit of baseline na-stock-2026-10-08.mv2" in fit
+        assert "held at the fit in this run, never drawn" in fit
+        assert (
+            "[500, 1000) 0.7 floor, [1000, 2000) 0.7 floor, [2000, 3000) 0.888395 fit, "
+            "[3000, 4000) 0.894657 fit, [4000, 5000) 0.905535 fit, [5000, 6500] 0.872824 fit"
+        ) in fit
+        assert "baro 79-82 kPa or IAT 23-50 C" in fit
+    stated = paired_scenarios.plant_assumption_lines(mv2, [P_WOT], drawn={VE})
+    assert VE not in _named(stated) and "volumetric_efficiency(rpm)" not in _named(stated)
+    # fuel-mv-1 has one working VE and no fit to name.
+    mv1 = paired_scenarios.plant_assumption_lines(kit, [P_MODEL], drawn={VE})
+    assert "volumetric_efficiency(rpm)" not in _named(mv1)
+    assert "floor" not in _named(mv1)[VE]
+
+
+def test_the_manifold_models_parameters_are_named_only_where_map_is_the_models(
+    kit_and_image: tuple[SimKit, bytes],
+) -> None:
+    """A stated MAP reads none of the manifold model's parameters, so a
+    fuel-mv-3 result on stated MAP names neither VE nor exhaust_pressure_ratio;
+    on model MAP it names both (verifier minor, E08.11)."""
+    kit, _ = kit_and_image
+    mv3 = kit_for_plant(kit, PROFILE, "fuel-mv-3")
+    at_stated = dataclasses.replace(P_MODEL, map_kpa_source="stated", map_kpa=79.0)
+    stated = {a.parameter for a in paired_scenarios.plant_assumptions(mv3, [at_stated], drawn=())}
+    model = {a.parameter for a in paired_scenarios.plant_assumptions(mv3, [P_MODEL], drawn=())}
+    assert "exhaust_pressure_ratio" not in stated and VE not in stated
+    assert {"exhaust_pressure_ratio", VE} <= model
+    assert model - stated == {"exhaust_pressure_ratio", VE}
+
+
+def test_a_parameter_is_a_working_assumption_only_at_its_registry_value(
+    kit_and_image: tuple[SimKit, bytes], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``plant_assumptions`` labels a parameter a working assumption only when
+    the number the run resolved is the registry's ``working_assumption.value``
+    (verifier minor, E08.11); B06's restated delay is named from the registry
+    like any other, not by a hand-kept exception."""
+    kit, _ = kit_and_image
+    named = {a.parameter for a in paired_scenarios.plant_assumptions(kit, [P_WOT], drawn=())}
+    assert "lambda_observation_delay" in named and "bank_air_split" in named
+    real = paired_scenarios.resolve_parameters
+
+    def moved(*args: Any, **kw: Any) -> Any:
+        out = real(*args, **kw)
+        return dataclasses.replace(out, values={**out.values, "bank_air_split": 0.51})
+
+    monkeypatch.setattr(paired_scenarios, "resolve_parameters", moved)
+    after = {a.parameter for a in paired_scenarios.plant_assumptions(kit, [P_WOT], drawn=())}
+    assert after == named - {"bank_air_split"}
+
+
+def test_a_run_level_gate_withholds_only_the_outputs_it_reaches(
+    kit_and_image: tuple[SimKit, bytes], uncertainty: LoadedUncertainty
+) -> None:
+    """The verifier's case: a Load Point Scaler edit. The scaler turns BFS into
+    the X byte the Target AFR lookup reads, so its run-level gate reasons
+    (``rom:observed_not_predicted:load_input_x`` and the rest) reach target phi
+    and everything downstream, whose candidate is withheld, and not BFS, which
+    is computed before it: BFS stays supported with its candidate, in
+    run_paired and in the Monte Carlo's fast path alike."""
+    from src.analysis.rom_effects import CellEdit, make_candidate
+
+    kit, image = kit_and_image
+    scaler = int.from_bytes(image[0x9416:0x9418], "big")
+    cand = make_candidate(
+        image, kit.rom_map, [CellEdit("load_point_scaler", 0, 0, scaler + 2000)], base_label="s"
+    ).image
+    plain = run_paired(kit, _scenario(kit, image, cand, WOT, CRUISE), image, cand)
+    gate = "rom:observed_not_predicted:load_input_x"
+    for point in plain.points:
+        bfs = point["outputs"]["base_fuel_schedule"]
+        assert bfs["status"] == "supported" and bfs["candidate"] is not None
+        assert gate not in bfs["reasons"]
+        for name in set(OUTPUTS) - {"base_fuel_schedule"}:
+            out = point["outputs"][name]
+            assert gate in out["reasons"] and out["candidate"] is None, name
+    result = _run(kit, image, cand, _design(image, (P_WOT, 190, 200)), uncertainty, draws=3)
+    assert result.supported("base_fuel_schedule").all()
+    assert np.isfinite(result.candidate["base_fuel_schedule"]).all()
+    for name in set(OUTPUTS) - {"base_fuel_schedule"}:
+        assert np.isnan(result.candidate[name]).all(), name
+        assert all(gate in result.reasons(name, 0, d) for d in range(result.draws))

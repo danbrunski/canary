@@ -372,6 +372,11 @@ supercharger is a hardware intervention with a new plant parameter set.
 
     - Sensitivity of the median: dead-time ±0.1 ms gives −4.4/+5.4 %; rail
       bracket +6.4/−2.6 %; VE +1.5/−1.2 %; bank split ±4.1 %.
+      Re-measured 2026-10-16 after E08.11's shared plenum (MAP from the
+      engine's total air, the split acting on per-bank fuelling only):
+      bank split −4.07/+4.07 % (was −4.17/+4.12 %). Every other figure
+      here is unchanged, because the plenum is the same array at the
+      working split 0.5.
     - Coverage is 15 % of fuelled warm reads.
     - The 10-04 ram-study contributed nothing: 188 reads are
       `not_co_observed` (Mode 22 and Mode 01 polled apart) and 5 are

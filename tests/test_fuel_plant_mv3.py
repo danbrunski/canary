@@ -162,7 +162,7 @@ def test_the_map_solves_its_own_equation_and_never_exceeds_ambient() -> None:
     p, why = manifold_pressure_load_dependent(air, rpm, iat, baro, GEOM, CURVE, 0.7, **FORM)
     assert np.all(why == "") and np.all(np.diff(p) > 0) and np.all(p <= 81.0 * (1 + 1e-9))
     # The solved MAP reproduces the charge fraction it was solved from.
-    ve = CURVE.ve(rpm, 0.7)
+    ve = CURVE.ve(rpm, 0.7, fitted_at=0.7)
     x = p / baro
     np.testing.assert_allclose(ve * part_load_breathing_factor(x, **FORM) * x, cf, rtol=1e-12)
     # Load dependence only raises MAP against the full-breathing VE (f <= 1).

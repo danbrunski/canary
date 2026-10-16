@@ -246,7 +246,11 @@ def test_a_synthetic_pair_and_a_grid_design_write_all_three_files(
 def test_the_run_facts_the_report_needs_come_from_the_provenance(spec_run: dict[str, Any]) -> None:
     run = spec_run["result"]["run"]
     assert run["seed"] == 7 and run["edit_route"] == "edit_spec"
-    assert run["plant_version"] == "fuel-mv-1"
+    # The simulator's declared plant (sim_kit.yaml, E08.11), and its own
+    # uncertainty declaration, not fuel-mv-1's.
+    assert run["plant_version"] == "fuel-mv-2"
+    mv2 = hashlib.sha256((PROFILE / "sim_uncertainty_mv2.yaml").read_bytes()).hexdigest()
+    assert run["uncertainty_sha256"] == mv2
     assert run["base"]["label"] == "base.bin" and run["candidate"]["label"] == "cli test spec.yaml"
     assert run["spec_sha256"] == spec_run["result"]["candidate"]["spec_sha256"]
     assert run["edits"] == [
