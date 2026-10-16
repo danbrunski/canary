@@ -917,8 +917,14 @@ refusal carries a stable `reason` string that tests assert by name.
     with the B08.6 pattern. That figure is from the commit message. It was
     not re-run when this box was ticked: the machine that ticked it has no
     ROM images.
+    *Re-run 2026-10-15 on the laptop that has the images, through E08.5's
+    CLI (200 draws, seed 1, design `322e4cab…`): 53 of 256 cells visited;
+    ΔBFS 46 changed, 6 unchanged, 1 unsupported, 203 no_points; result
+    digest `956d7bbed7cb…`, stable across runs. The full-load point at
+    800 rpm, cell (1, 15), is real reads paired across a tip-in: E07.3's
+    steady-rule pairing leak, recorded there.*
 
-- [ ] **E08.5 — CLI: `tools/rom_sim.py`.** Offline, laptop or desk, prints
+- [x] **E08.5 — CLI: `tools/rom_sim.py`.** Offline, laptop or desk, prints
   JSON and writes artifacts under a caller-given `--out`, refusing
   `inside_checkout` (scratch or `/data/canary/sim/…` later in E08.8).
   - `design drives --base-revision R --sessions S... [--sessions-root DIR] --out D`
@@ -938,8 +944,154 @@ refusal carries a stable `reason` string that tests assert by name.
     - Each refusal surfaces with its reason and exit code 2.
     - The clean-process no-ECU-import test covers the CLI.
     - `--help` documents every subcommand.
+  *Done 2026-10-15:*
+  - **Tool.** `tools/rom_sim.py` (`.venv/bin/python -m tools.rom_sim`), one
+    argparse tree: `design drives`, `design grid`, `inspect`, `run`. It reads
+    through `load_kit`, `RevisionImageResolver` (`--rom-dir` or
+    `$CANARY_ROM_DIRS`), `resolve_base`, `build_candidate` /
+    `load_candidate_file`, `load_design`, `run_monte_carlo`, `compare_roms`,
+    `aggregate_cells` and `render_report`; it implements nothing of its own
+    but argument handling, the run mapping and the file writing. Every
+    refusal of any layer prints `{"refused": <reason>, "message": ...}` and
+    exits 2. No `src/` module was edited.
+  - **Required, no default.** `--draws`, `--seed`, `--design`, `--fuel-type`
+    (drives), `--out`, and the grid environment (the library's own
+    `environment_unstated` / `load_basis_unstated`) were asked for. Missing,
+    these are `argument_missing` naming the flag (argparse is permissive so
+    the refusal is data). **Beyond the text, because `PairedScenario` needs
+    them and the CLI must not invent them:** `--stft-pct`, `--ltft-pct` (the
+    base's learned trims) and `--candidate-events` (`ecu_reflash`, or `none`
+    as a stated answer; `none` with others is `candidate_events_ambiguous`).
+    The contract's other learned boundaries are held at 0.0 under both ROMs
+    and recorded in `result.json` (`inputs.learned.held`). `--grid
+    fuel_comp|target_afr` picks E08.4's grid (default Fuel Comp's own).
+    `--base` is an accepted marker flag (the checklist writes `run --base
+    (--revision R | ...)`); `--edits` alone takes the spec's own base.
+  - **`run` outputs**, all under `--out`, which is refused inside or around
+    the checkout (`inside_checkout`, checked before any work, `design` too):
+    `result.json` holds the tool and stage versions, `result_digest`,
+    `inputs`, `caveats`, `unresolved`, `assumptions`, `inert_parameters`,
+    `coverage`, the Monte Carlo provenance, E08.1's candidate provenance
+    (cells old -> new, ranges, effect), the `run` mapping and the whole
+    `cell_table`. `traces.parquet` is `MonteCarloResult.traces()` (session
+    `_sim-<digest>`). `report.html` is `render_report(cell_table, run=run)`,
+    and `render_report(result['cell_table'], run=result['run'])` rebuilds it
+    byte for byte (asserted). The `run` mapping closes E08.6's gaps: label,
+    seed, both image labels and plain sha256s, the route, `spec_sha256`, the
+    edit rows (spec route: selector and operation as written, cells changed
+    and left alone; file route: one row per table the image changed),
+    `summary(design)`, plant version and uncertainty sha256.
+  - **`inspect`** prints the changed cells (table, slot, row, col, address,
+    old, new, delta, % of the old value, on `raw & mask` for a masked trim),
+    the provenance's changed ranges, and two `compare_roms` traces: the
+    structural reach and the same under the run's contract mode. It builds no
+    design, draws nothing and writes nothing.
+  - **Tests.** `tests/test_rom_sim_cli.py`, 33 passing (`pytest -n0`; about
+    20 s on a quiet laptop, 80 s under the load of three other sessions, so
+    the file will land in the slow tier). The world is E07.6's synthetic
+    image written beside a copy of the Xterra profile in `tmp_path` whose
+    application model is re-pinned to it and whose `tune_revisions.yaml` has a
+    `SYNTH-base` revision with its sha256. **Coupling:**
+    `tests.test_sim_montecarlo.build_kit_and_image` (and through it
+    `tests.test_paired_scenarios`), and the shape of `program.identity.sha256`
+    and `revisions` in two profile files, edited as data.
+    - `test_a_synthetic_pair_and_a_grid_design_write_all_three_files`: `design
+      grid` (rpm 2000 / 2500 / 3000 x load 28.5 / 46 / 65 %, nine points,
+      design sha in the path) then `run --edits` with a (4, 4) 128 -> 148
+      edit. The three files exist and nothing else; the cell table validates
+      through `CellTable` and carries the design, base and candidate shas; the
+      caveat block precedes the first `<svg>`; the page equals the re-render;
+      the first centre is the edited cell, so ΔBFS is `changed` there and
+      `unchanged` in the other eight, with relative p05 above 5 %;
+      traces carry one `_sim-*` session and `points x draws x outputs` rows.
+    - The run mapping (`test_the_run_facts_...`), the ROM-file route making the
+      same cell table as the spec route with its table-grouped edit row
+      (`test_the_rom_file_route_...`), byte-identical results for one seed and
+      a different file for another, and a spec run with no base flags.
+    - `inspect`: (4, 4) 128 -> 148, delta 20, `pct` 15.625 (20 / 128), the
+      candidate sha, no file written, BFS reached and `fuel_comp_lookup`
+      among the changed nodes; a masked `timing_trim_a` edit is judged on
+      `raw & 0x7F`, reaches `ignition_trim_selected` and leaves
+      `base_fuel_schedule_word` unchanged.
+    - **Refusals, each exit 2 with its reason:** `argument_missing` for each
+      of `--draws`, `--seed`, `--stft-pct`, `--ltft-pct`,
+      `--candidate-events`, `--design` and `--fuel-type`;
+      `environment_unstated` for each of the seven grid values and
+      `load_basis_unstated`; `inside_checkout` for `run`, `design grid` and
+      `design drives` (the checkout moved to scratch so a regression cannot
+      write into the repo, plus the real paths on `_out_dir`, including the
+      checkout's parent); `drive_not_on_base_revision`, `session_missing`,
+      `base_revision_unknown`; `design_revision_mismatch` (a design on the
+      real registry's 20260920 image, a run on the synthetic one),
+      `design_missing`, `design_hash_mismatch`; `candidate_unstated` (both and
+      neither), `base_unstated`, `base_ambiguous`, `candidate_events_ambiguous`;
+      `image_hash_mismatch`, `base_mismatch`, `no_op_edit`,
+      `edit_spec_not_found`, `image_unreadable` (the UpRev backup lookalike),
+      `image_not_found` (candidate file, and a revision with no image in the
+      ROM dirs or `$CANARY_ROM_DIRS`), `profile_not_found`.
+    - `test_the_command_line_imports_nothing_that_talks_to_the_ecu`: in a
+      fresh interpreter, `design grid`, both `inspect` routes and `run`
+      through `tools.rom_sim.main`; no `src.control`, daemon, dashboard, MCP,
+      `can`, `serial` or non-allowed `src.collection` module is loaded.
+    - `--help`: the top level lists all four subcommands (`design drives` and
+      `design grid` included) and the refusal and checkout rules; each
+      subcommand's help names every flag, and a parser walk requires help text
+      on every option (`%` in help had crashed `--help` once).
+    - Mutation checks, each reverted: the checkout refusal off fails both
+      checkout tests; the `argument_missing` check off fails the missing
+      argument test; `render_report` without `run=` fails the end-to-end test.
+  - **Review fixes (verifier, same day).**
+    - `--out` is refused inside, around or through a symlink to any
+      `--rom-dir` or `$CANARY_ROM_DIRS` entry, as `inside_rom_library`
+      (`write_candidate`'s name), in all three writing subcommands; the
+      verifier had written `result.json` into the operator's `Tuned ROMs`
+      directory with an unguarded `--out`.
+    - A non-finite number (`nan`, `inf`) in any numeric argument is
+      `argument_invalid`. `run` writes its three files to `.tmp` names and
+      moves them into place only when all are staged, so a failure leaves
+      nothing of the run (a result that cannot be serialised is
+      `result_not_finite`; a move that fails takes back the earlier ones).
+    - `--out`, `--base-revision`, `--sessions`, `--rpm-edges` and
+      `--load-edges` are no longer argparse-required: a missing one is the
+      JSON `argument_missing`, naming all that are missing.
+    - A file-route `run.edits` also lists changed bytes outside any table
+      (the checksum words, unmapped bytes) as a row `checksum bytes
+      0x<start>-0x<end>`, so the report says the image changed there too.
+    - The clean-process test also runs `design drives` on the committed
+      slice. New tests: `test_the_out_directory_is_refused_inside_or_around_a_rom_directory`
+      (flag, environment, parent, symlink; nothing written),
+      `test_a_non_finite_number_is_refused_...` (both trims and two grid
+      arguments), `test_a_failure_while_publishing_leaves_no_partial_outputs`,
+      `test_a_missing_required_argument_is_json_not_usage_text` and
+      `test_a_file_route_lists_the_changed_bytes_outside_any_table`.
+      Mutations (library check off, finite check off, range row off) each
+      fail their test.
+  - **Gate.** `ruff check .`, `ruff format --check .`, `mypy src
+    tools/rom_sim.py` clean; `pytest tests/test_rom_sim_cli.py
+    tests/test_layering.py`: 44 passed.
+  - **Real case** (laptop, scratch only, `.../scratchpad/e085/`; ROM dir =
+    the parent of `OPERATOR_ROMS["r20260920"]`):
+    - `design drives --base-revision ZS44A-20260920 --sessions
+      _capture-tuning-2026-09-23T142926 --fuel-type gasoline
+      --battery-v-when-unmeasured 14.0`: design `322e4cab...` (the same
+      sha256 E08.2 and E08.4 recorded), 298 points, 10.9 s on a quiet laptop.
+    - `inspect --edits tests/fixtures/rom_edit_spec/fuel_comp_light_load.yaml`:
+      5 cells, e.g. (2, 2) 130 -> 133 (+2.31 %), (3, 3) 128 -> 131
+      (+2.34 %), (0, 0) 128 -> 126 (-1.56 %), 2 s. All four traced outputs
+      are `unevaluable` (reached, not computable), as E08.4 recorded.
+    - `run --base --revision ZS44A-20260920 --candidate-rom
+      ZS44A-Tuned-20261004.OsirisROM --design 322e4cab... --draws 200 --seed 1
+      --stft-pct 0 --ltft-pct 0 --candidate-events ecu_reflash`: 7.7 s of work
+      (9.5 s wall), ΔBFS 46 `changed`, 6 `unchanged`, 1 `unsupported`, 203
+      `no_points` and 210.01 s of weight, the counts E08.4 recorded at 50
+      draws; `result.json` 0.9 MB, `traces.parquet` 357,600 rows, one
+      `_sim-956d7bbed7cb` session, `report.html` 0.8 MB; the run's edit rows
+      are 195 cells of `fuel_compensation` and 15 of `fuel_comp_flow_axis`.
+      The trims 0 / 0 with `ecu_reflash` were chosen for this case from the
+      note that the 2026-09-23 drives ran with LTFT 0.00; they are the
+      operator's to confirm.
 
-- [ ] **E08.6 — Report page: self-contained HTML.**
+- [x] **E08.6 — Report page: self-contained HTML.**
   `render_report(result_json) -> str`, no network, inline CSS/SVG, light and
   dark.
   - **At the top, before any chart:** the caveats (plant not qualified and
@@ -957,8 +1109,203 @@ refusal carries a stable `reason` string that tests assert by name.
       caveat block before the first `<svg>`.
     - No external URL appears in the output (asserted).
     - Rendering is a pure function of the JSON: same JSON, same bytes.
+  *Done 2026-10-15:*
+  - **Module.** `src/analysis/sim_report.py` (layer 5).
+    `render_report(cell_table_json, *, run=None) -> str`.
+    - **Input.** The input is E08.4's cell table (`CellTable.to_json()`, its
+      bytes, or the parsed mapping). It is validated through `CellTable`, so
+      `schema_version` must be 1 and NaN is refused (`cell_table_invalid`).
+    - **Standing caveats.** A table without `structural_error_not_sampled`
+      and `parameter_uncertainty_only` is refused (`standing_caveat_missing`).
+      E08.3 always writes both.
+    - **Run facts.** The table does not carry the seed, the image labels, the
+      edit list or the design summary. They come in `run` (`ReportRun`,
+      `extra="forbid"`). `RUN_KEYS` lists its keys: `label`, `seed`, `base` /
+      `candidate` (`{label, sha256}`), `edit_route`, `spec_sha256`, `edits`,
+      `design`, `plant_version` and `uncertainty_sha256`.
+      - `edits` rows are `{table, slot, selector, operation, changed,
+        unchanged}`, with every key stated.
+      - `design` is `sim_design.summary()`, key for key.
+      - An unknown key is `run_key_unknown`, and a bad value is `run_invalid`.
+      - An image sha, design sha, kind, point count or weight that is not the
+        table's is `run_identity_mismatch`.
+      - Every key is optional. A missing one is printed as "not stated by the
+        caller (run.seed)", never guessed.
+    - **Purity.** Mappings are walked in sorted order, and nothing reads a
+      clock or the environment.
+  - **Page order.** The order is fixed:
+    1. the caveat block: the plant's qualification and why, the two
+       standing caveats explained, every other caveat as given, and every
+       `unresolved` string;
+    2. both image identities and `rom_outcome`;
+    3. the edits: the route, the spec sha, the `run.edits` table, the
+       table's overlay (edited cells, moved breakpoints, off-grid tables,
+       moved lookups) and the reach per output;
+    4. the design and coverage: kind, sha, points, cells visited, weight
+       placed and unplaced, and the `summary()` counts when given;
+    5. draws and seed, plant version, uncertainty sha, result digest, the
+       quantile method and the membership rule;
+    6. the maps;
+    7. the per-cell detail.
+  - **Maps.** Each map is the table's own grid. Ticks are the decoded
+    breakpoint values, and axis titles are the axis table and unit
+    (`fuel_comp_engine_speed_axis (rpm)`, `fuel_comp_flow_axis (%)`).
+    - **Headline maps.** There is one map per loop in `headline_by_loop`,
+      drawn from each cell's `by_loop` block:
+      - open loop: relative Δλ p50;
+      - its p05–p95 width, unsigned, on a single-hue ramp;
+      - closed loop: Δ total trim p50, in % points.
+      A loop with no pairs in the run gets no map, and the page says so.
+    - **Output maps.** Relative ΔBFS p50 and Δpulse p50 (ms), over all
+      pairs.
+    - **Colour.** The diverging ramp is the dashboard's
+      (`lib/colorScale.ts`: blue, pale neutral, red), symmetric about 0, and
+      the same in both themes.
+    - **Status marks.** Only `changed` / `unchanged` are coloured. Every
+      other state has its own pattern and label:
+      - `unsupported`: diagonal hatch, `U`;
+      - `partly_supported`: a cross-hatch with no fill colour (verifier,
+        2026-10-15: a colour reads as the cell's value). The label is the
+        supported pairs' value and the supported share, `P+1.23` over
+        `· 50%`;
+      - `no_points`: dots;
+      - `not_reached`: horizontal hatch, `NR`;
+      - `other_loop` (pairs only in another loop): a grid, labelled with
+        the loop it does have (`CL` / `OL`);
+      - `undefined` (relative delta with every base 0): a cross, `∅`.
+      An unsupported cell with computed pairs (the closed-loop trim) shows
+      the number as text on the hatch, never as a colour. A map with nothing
+      to colour says so instead of drawing a scale.
+    - **Refusals added after verification:**
+      - **Loop names.** A loop name the producer does not write
+        (`HEADLINE_BY_LOOP`'s keys) in `headline_by_loop`, a `by_loop` block
+        or `loop_shares` is `loop_unknown`, and a headline output that is not
+        the producer's for that loop is `headline_unknown`. Every element id
+        and `url(#…)` is also built from `_ident(key)`
+        (`[^A-Za-z0-9_-]` → `_`); the ids of a real page are unchanged.
+      - **Quantile basis.** A cell whose quantiles are over other pairs than
+        its status names (changed / unchanged over `all_pairs`,
+        partly_supported over `supported_pairs`, unsupported over none or
+        `computed_unsupported_pairs`) is `quantile_basis_mismatch`, so a
+        forged table cannot colour pairs it calls unsupported.
+    - **Overlay.** Edited cells are outlined on every map. Moved
+      breakpoints get a ▲ and a highlighted tick, whose hover gives raw
+      old → new.
+  - **Detail.** Every cell's hover also has a "same cell, other outputs
+    (all pairs)" line: ΔBFS p50, Δλ p50, and Δtarget φ p50 (absolute and
+    relative) when any of its quantiles is non-zero, so a λ effect that is
+    really a target-φ column shift is visible from the hover. "regimes" is
+    glossed as the design's recorded label of each point and "loops" as the
+    simulated loop of each pair. Every cell's `<title>` gives the cell and its breakpoints, n
+    points, pairs, weight and its share of the run, the regime and loop mix,
+    the edit, and that map's output: status, quantile block (`over`), Δ and
+    relative p05/p50/p95, the support shares and the reasons with their
+    shares. A table holds one row per visited or edited cell, with every
+    output and every loop headline. Weight is in s for a drive design and
+    "grid weight" for a grid.
+  - **Themes and network.** Light and dark come from `prefers-color-scheme`.
+    The page has inline CSS and inline SVG with no `xmlns`. Patterns are
+    referenced by fragment only (`url(#m-…)`). There is no link, script,
+    image or font. Every JSON string goes through `html.escape`. At phone
+    width a map scrolls sideways (min-width 560 px) instead of shrinking its
+    text.
+  - **Tests.** `tests/test_sim_report.py`, 19 passing (`pytest -n0`, 4 s).
+    The hand-built table is a 3 × 4 Fuel Comp grid validated through
+    `CellTable`. It holds changed (0, 0), edited 128 → 131; unchanged (0, 1);
+    unsupported (0, 2); partly supported (1, 0) at 0.5/0.5; closed loop
+    (1, 1); a pulse output that is `not_reached`; a moved column breakpoint
+    2 (67 → 70); and markup in a caveat, a reason, an axis domain and the
+    labels.
+    - `test_every_status_has_its_label_and_the_caveats_come_before_the_first_svg`:
+      - Before the first `<svg>`, in order: caveats, images, edits, design,
+        sampling. That block holds the qualification reason (escaped), both
+        standing caveats, every unresolved string (including
+        `battery_voltage_unmeasured` and `plant:rail_pressure_unmeasured`),
+        both shas, the design sha, the edit, the seed, the draws and "5 of
+        12" cells visited.
+      - All six statuses are drawn. Each non-value mark's fill is its own
+        `url(#…)` pattern, and each value mark's fill is a colour.
+      - Labels are asserted: `CL`, `NR`, `U`, `P+1.23`, `-1.58`, `0`.
+      - Each legend line is drawn.
+    - `test_closed_loop_cells_show_the_trim_headline_as_text_on_a_hatch`
+      (−2.19 on the unsupported hatch, `computed_unsupported_pairs`, with the
+      reason; open-loop cells are `OL`; no setpoint-moved map, named).
+    - `test_the_width_map_is_the_p05_to_p95_span_unsigned` (−3.1 … +0.2 %
+      gives `3.30`).
+    - `test_axes_carry_decoded_breakpoints_and_units_and_moved_breakpoints_are_marked`.
+    - `test_edited_cells_are_outlined_on_every_map`: the outline coordinates
+      in all 5 maps equal the overlay's edited cells, and there is none when
+      nothing is edited.
+    - `test_per_cell_detail_is_in_the_hover_and_the_table`.
+    - `test_rendering_is_a_pure_function_of_the_json`: str, bytes, mapping
+      and key-reversed JSON give identical bytes, and one changed p50 changes
+      them.
+    - `test_every_string_from_the_json_is_escaped`: no `<script`, `<b>` or
+      `<stock>` survives, and the escaped forms are present.
+    - `test_no_external_url_appears_in_the_output`: no `http(s):`, `//host`,
+      `src=` / `href=` / `action=`, `@import`, non-fragment `url(`, or
+      `<link|script|img|iframe|object|embed|base`.
+    - `test_run_keys_are_named_and_checked_against_the_table`: every
+      refusal by name, and the "not stated" lines without `run`.
+    - `test_a_real_aggregated_run_renders_with_its_design_summary`: E07.6's
+      synthetic image, a Fuel Comp (4, 4) +20 edit, 4 points × 6 draws,
+      through `aggregate_cells`. `run.design = summary(design)` is accepted.
+      The outline is at (4, 4) on every map, and the BFS mark there is
+      `changed`, as in the table.
+    - `test_rendering_a_report_imports_nothing_that_talks_to_the_ecu`
+      (clean process).
+    - **Verifier fixes (2026-10-15):**
+      - `test_a_loop_name_the_producer_does_not_write_never_reaches_an_id`:
+        the hostile loop `x"><svg onload=alert(9)>` in `headline_by_loop`, a
+        `by_loop` block and `loop_shares` is `loop_unknown`; a wrong headline
+        output is `headline_unknown`.
+      - `test_every_id_and_fragment_reference_is_sanitised_even_for_a_hostile_panel_key`:
+        a panel with that key, drawn directly, gives one `<svg>` and no
+        `on*` attribute (read with an HTML parser, not a regex), and every id
+        and `url(#…)` matches `[A-Za-z0-9_-]+`; so does every id on a real
+        page.
+      - `test_a_forged_quantile_basis_cannot_colour_unsupported_pairs`: 4
+        cases, `quantile_basis_mismatch`.
+      - `test_partly_supported_is_a_hatch_with_value_and_share_never_a_fill`:
+        the cell's one `fill` is its pattern, and a partly-supported value
+        far above the changed cells does not move the scale.
+      - `test_an_undefined_relative_change_and_a_partly_supported_pulse_have_their_own_marks`:
+        `∅` on its pattern, and the `_delta_pick` branch (`P+0.40` over
+        `· 25%`).
+      - `test_a_cell_hover_names_what_else_moves_in_the_same_cell`.
+      - `test_run_identity_checks_each_catch_their_own_mismatch`:
+        `design.sha256`, `kind`, `points` and `weight`, one case each, each
+        named in the refusal.
+    - **Mutation checks**, each reverted, each failing at least one test:
+      - no escaping: 4 fail;
+      - caveat block dropped: 2;
+      - unsupported cells coloured: 1;
+      - outlines dropped: 2;
+      - headline maps read without `by_loop`: 2;
+      - unsorted share dicts: 2;
+      - whole identity block off: 2; each of its four checks alone: 1 each;
+      - `_ident` not applied: 1; loop check off: 1; quantile-basis check
+        off: 1;
+      - `partly_supported` coloured: 3; other-outputs line dropped: 1;
+        undefined mark dropped: 1.
+  - **Real report** (laptop, scratch only): E08.4's end-to-end table
+    (ZS44A-20260920 → ZS44A-20261004, 298 points, 50 draws, seed 1). `run`
+    is built from the pickled result's provenance, `summary(design)` and its
+    affected cells grouped by table (`candidate_file`: 195 cells of
+    `fuel_compensation`, 15 of `fuel_comp_flow_axis`).
+    - The page is 833,969 bytes, rendered in 0.02 s. The caveat block is at
+      byte 3,656 and the first `<svg>` at 13,794.
+    - ΔBFS: 46 changed, 6 unchanged, 1 unsupported, 203 no points, the same
+      counts as E08.4. The open-loop λ map has 4 changed, 1 unsupported and
+      48 `CL`. The closed-loop trim map has 48 unsupported with computed
+      values and 5 `OL`. The pulse is unsupported in all 53.
+    - 195 outlines and 15 moved ticks on each map. The hover of cell (7, 15),
+      whose open-loop λ is +4.99 % against ΔBFS −1.53 %, now carries "ΔBFS p50
+      −1.534 % · Δtarget φ p50 −0.03125 (−2.899 %)": the target-φ column shift.
+    - Headless Chromium (light at 1,000 px, dark at 390 px) made no request
+      other than the file itself.
 
-- [ ] **E08.7 — Known answers before novel ones.** The workbench is trusted
+- [~] **E08.7 — Known answers before novel ones.** The workbench is trusted
   only after it reproduces answers obtained independently.
   1. **Negative control:** identical base and candidate gives `unchanged` in
      every visited cell, at every draw.
@@ -980,6 +1327,271 @@ refusal carries a stable `reason` string that tests assert by name.
      the order evidence; do not re-date it.
   - **Accept:** 1–4 pass in the suite (3 in the private-ROM file); 5 stays
     open, with the prediction artifact's path recorded here.
+  *Items 1–4 done 2026-10-15, and item 5's prediction artifact written
+  (below). Scoring the post-flash drives is still owed, so the item is `[~]`:*
+  - **Route.** Every answer goes in through `tools/rom_sim.py` (`design
+    grid` / `design drives`, then `run` with `--edits` or `--candidate-rom`)
+    and is read back from what the run wrote: `traces.parquet` per point ×
+    draw × output, and `result.json`'s cell table. Every numeric assertion is
+    per (point, draw). The synthetic world is E07.6's image
+    (`tests.test_sim_montecarlo.build_kit_and_image`) beside a profile copy in
+    `tmp_path`, built the way `tests/test_rom_sim_cli.py` builds it but
+    without importing that file.
+  - **1. Negative control** (`tests/test_rom_sim_known_answers.py`). The grid
+    is 5 rpm × 10 load cells (50 points, 2,000–4,800 rpm, 24–96 % fill), so
+    it has closed-loop cells and 11 open-loop ones.
+    - `test_an_identical_candidate_file_is_unchanged_in_every_visited_cell_at_every_draw`:
+      an identical `--candidate-rom`, at seeds 1 and 2 with 4 draws each.
+      Provenance has no cells and no ranges, and every reach is `no_change`.
+      Every computed value is equal on both sides, with delta exactly 0.0.
+      Every visited cell is `unchanged` for every supported output. Outputs
+      with no supported pair are `unsupported` (closed-loop λ, fuel and trim:
+      `closed_loop_trim_authority_undecoded`), and their computed quantiles
+      are 0.0 too. λ is `unchanged` in the open-loop cells.
+    - The spec route cannot express an identical candidate:
+      `test_the_spec_route_cannot_express_an_identical_candidate` (`set_raw`
+      to the cell's own value) exits 2 with `no_op_edit`. Its control is
+      `test_a_spec_edit_no_point_reads_moves_no_ecu_output_at_any_draw`, Fuel
+      Comp (13, 8) 128 → 148 at 5,600 rpm × byte 128, which no point's
+      bilinear corners read. BFS is `reached` structurally, yet BFS is
+      computed at every (point, draw) with Δ exactly 0. So is every other
+      computed output, and every visited cell's BFS is `unchanged`.
+    - **Off the diagonal on purpose** (verifier finding: the first version
+      edited (15, 15), so a row/column swap was invisible). The transpose
+      (8, 13), 3,600 rpm × byte 208, is read by the 3,900 rpm points; a
+      scratch copy editing (8, 13) fails.
+  - **2. K +5 %**:
+    `test_a_k_edit_of_five_percent_moves_bfs_five_percent_at_every_point_until_the_ceiling`.
+    - **Setup.** The spec is `k_constant` `cells [[0, 0]]`, `scale 1.05`,
+      `rounding floor`: 28715 → 30150, E07.6's own `28715 * 105 // 100`
+      (ratio 1.049974). The base is the synthetic image with `bfs_ceiling`
+      set flat at 90 (clamp 90 << 8 = 23,040). The synthetic image's 255 is
+      never reached by a steady grid point: base BFS spans 6,632–26,560 on
+      this grid. A flat curve makes the clamp a constant the test states
+      without the twin's interpolation.
+    - **Tolerance, derived** (verifier finding: it had been a chosen 8
+      counts). Tp's quotient is q = ⌊K·A⌋ with A shared, so
+      q_new − r·q_old ∈ (−1, r), r = K_new/K_old. Tp = ⌊q·c⌋ with
+      c = 9163/65536 (`TP_SCALE`), so Tp_new − r·Tp_old ∈ (−1−c, r(1+c)).
+      Fuel Comp is flat 128, and BFS = 4·⌊Tp·FC/128⌋ = 4·Tp, so the
+      candidate lies within (−4.56, +4.80) counts of r × base. The test uses
+      4·r·(1+c) + 0.2 = 4.99 counts, the 0.2 stated slack for q's own
+      sub-count truncation (the low byte's `× m >> 8`, divided by d·N ≥ 192).
+      The verifier's sweep of 32,861 kernel inputs found +4.54 / −4.25 at
+      worst.
+    - **Expectation.** Per (point, draw), with 50 points × 3 draws: the
+      candidate is base × K ratio capped at the ceiling, within that bound
+      (the measured worst is 3.48). Of the 150 pairs, 105 are
+      free: ratio 1.04973–1.05027, inside one quantum of that point's base.
+      45 are clamped and equal 23,040 exactly; 30 of them are clamped on the
+      base too. BFS is the same at every draw of a point.
+  - **3. Fuel Comp restore on the real images**
+    (`tests/test_rom_sim_private_rom.py`, `pytestmark = slow`).
+    - **Skips.** It skips by name when an image is absent
+      (`image_not_found`) or the drive is absent.
+    - **Drive.** It runs `_capture-tuning-2026-09-23T142926` from
+      `~/canary-data/sessions/nissan-xterra-2008`, not a committed slice.
+      The committed `tests/fixtures/fuel_plant/` slice of that drive has no
+      throttle read (PID 0x11 or DID 0x120F) and no FUEL_STATUS, so E08.2
+      places none of its 152 eligible reads (`throttle_unpaired`). The
+      `tests/fixtures/fuel_comp/` ram-study slice polls no MAF and has no
+      eligible read.
+    - **Run.** `design drives` (ZS44A-20260920, `--battery-v-when-unmeasured
+      14.0`) gives 298 points. Then `run --base --revision ZS44A-20260920
+      --candidate-rom ZS44A-Tuned-20261004.OsirisROM --draws 3 --seed 1
+      --stft-pct 0 --ltft-pct 0 --candidate-events ecu_reflash`.
+    - `test_simulated_bfs_moves_by_each_points_fuel_comp_multiplier_ratio`:
+      - **Method.** For each of the 894 (point, draw) pairs it calls
+        `multiplier_change(old, new, InputPoint(...))` at that point's rpm
+        word (N02's `fuel_comp_inputs.rpm_word`, asserted equal to
+        `paired_scenarios.rpm_word`) and the pair's drawn fill byte.
+      - **Bound.** `|BFS_new − BFS_old × FC_new/FC_old| < 4 × max(1,
+        FC_new/FC_old)` holds at every pair. This is exact, not fitted: K,
+        airflow and speed are equal (`check_comparable`), so
+        BFS = 4 × ⌊Tp × FC / 128⌋ (`fuel_comp_product` `>> 7`, then
+        `steady_state_bfs` `<< 2`) with one Tp. The measured worst is 3.97
+        counts.
+      - **Ceiling.** Both images' `bfs_ceiling` is flat 255, read directly:
+        clamp 65,280, against a highest BFS of 52,396. No pair is clamped, so
+        the identity is asserted on all of them, enrichment-labelled points
+        included. The multiplier moves at more than half the pairs, and BFS
+        is unchanged exactly where it does not.
+    - **"Share no BFS code", checked by reading both.**
+      - `multiplier_change` reads cells and axes through `fuel_comp_rom` and
+        computes no Tp, product or ceiling.
+      - The workbench's BFS is `air_charge_twin` → `src.decode.air_charge`.
+      - Both interpolate through `src.decode.ecm_lookup.lookup_2d` (the twin
+        via `air_charge.rpm_load_lookup`). A fault inside that lookup would
+        move both sides alike, and the identity cannot see it. Everything
+        else is on one side only.
+      - So the lookup is checked on its own:
+        `test_the_shared_lookup_returns_the_raw_cell_at_every_node`. Each
+        image's axes are read straight from the image bytes through `rom_map`
+        (rpm as byte << 2) and must equal `FuelCompCalibration`'s. Then every
+        node (16 × 16 per image) is evaluated through `multiplier_change`.
+        Each must equal the raw byte at the `fuel_compensation` slot-1
+        address + r·16 + c.
+      - No drawn pair of this run lands exactly on a node (0 of 894), which
+        is why the nodes are evaluated directly. The between-node
+        interpolation stays shared and unchecked. A scratch copy reading
+        `c·16 + r` fails at (0, 2), 126 against 128.
+    - `test_the_cell_pattern_is_b08_6s_restore_result`, per pair and then on
+      the cell table's relative ΔBFS p50:
+      - **Idle** (≤ 800 rpm, bytes 48–57, 107 pairs): every pair −2.39 to
+        −1.56 %, median −1.607 % (one count, 126/128 = −1.5625 %). Cells
+        (800, 48) p50 −1.57 % and (800, 56) −2.27 %.
+      - **Light load off idle** (1,000–3,200 rpm, bytes 20–60): every pair
+        0 to +2.32 %, never leaner, most ≥ +0.75 %. Cells (1,600, 48)
+        +2.32 % and (2,400, 32) +2.31 %.
+        - **This evidence is thin:** 15 pairs from 5 points (1,600,
+          2,212.5, 2,287.5, 2,312.5 and 2,550 rpm).
+        - B08.6's own window (2,000–3,000 rpm, bytes 32–41) holds 3 pairs, one
+          draw each of 3 points (+1.54, +1.59 and +2.31 %). The verifier
+          counted 1 point by its own definition.
+        - So this agrees with B08.6's sign and size; it is not an
+          independent confirmation of that row.
+      - **Full throttle** (bytes ≥ 190, ≥ 4,000 rpm): +2.29 % at 4,400 rpm;
+        +3.82 to +4.62 % at 5,200–5,600 rpm, every pair of the upper band
+        above the lower. Cells (4,400, 144) +2.29 % < (5,200, 144) +3.85 %.
+      - **Also seen, not asserted.** At 800 rpm, bytes 28–39 go +0.8 %
+        (richer at idle speed on a light byte). At 3,200 rpm, bytes ≥ 190 go
+        −0.77 to −1.53 %, B08.6's part-load −0.8 to −2.3 %.
+  - **4. Target AFR +4 counts**:
+    `test_a_target_afr_edit_of_four_counts_reproduces_e076s_wot_figures`.
+    - **Spec.** `fuel_targets` slot 1, `all: true`, `add_raw: 4`. The
+      candidate sha256 equals E07.6's `_edit_all(..., 4)` candidate.
+    - **Conditions.** E07.6's `LEARNED` (STFT 0, LTFT 2.34) and E07.6's
+      `WOT` at fill byte 200, every value `stated`. A grid sets MAP from fill
+      × baro and solves MAF, so it cannot hold MAF 150 g/s with MAP 79 kPa.
+      The two points are written into the CLI-built grid design, with the
+      hash recomputed by `write_design`.
+    - **Did not reproduce as written; the cause is found.** E07.6's figures
+      (commit 84061a65) were measured with BFS stated at 42,000. E07.6 now
+      computes BFS (`paired_steady`) and refuses a stated one, so its own WOT
+      point today gives BFS 39,604, pulse +0.39 ms and λ −2.531 %
+      (−2.547…−2.515 %).
+    - **Point 0 (MAF 150).** The E08 path reproduces today's E07.6
+      exactly: BFS, φ and pulse are equal to `run_paired` at every draw.
+      Relative Δλ over 200 draws is p05/p50/p95 −2.545 / −2.531 / −2.517 %,
+      against run_paired's central −2.531 % and range −2.547…−2.515 %.
+    - **Point 1** (MAF 159.06 g/s, PID word 15906, where the steady BFS is
+      42,000; 15905 gives 41,996 and a 0.40 ms pulse) reproduces the
+      written figures. φ is +0.03125 at every draw and the pulse
+      +0.41 ms (16.40 → 16.81) at every draw. run_paired's λ is −2.509 %
+      (range −2.5246…−2.4939 %, i.e. −2.52…−2.49). Monte Carlo p05/p50/p95
+      is −2.523 / −2.510 / −2.496 %, inside the range. All 200 draws happen
+      to fall inside it too (−2.5246…−2.4944 %). This is not asserted: a
+      joint draw may legitimately leave a one-at-a-time range.
+    - **Assertions.** p50 is within 2e-4 of the central value and p05–p95
+      lies inside the range, at both points. The pulse step is one 0.01 ms
+      quantum, so the written +0.41 ms holds only at BFS ≥ ~41,997 on this
+      image.
+  - **Mutation checks** (scratch copies under the session scratchpad, never
+    the repo; each fails):
+    - **Item 2.** Each of these fails the per-point check:
+      - expected ratio 1.04 (worst error 200 counts);
+      - expected ratio 1.051, a 0.1 % error (24 counts), and 1.0485 (31
+        counts), both re-run against the derived 4.99-count bound;
+      - kernel `air_charge_tp` given half the K change (499 counts);
+      - kernel `steady_state_bfs` with the ceiling lifted (4,848 counts).
+      A (K+1)/K ratio error (3.5e-5) is below the word and passes, as
+      expected.
+    - **Item 3.** Each of these fails the identity:
+      - expected `(FC_new + 1)/FC_old`;
+      - `multiplier_change(new, old, …)`;
+      - the sim-side `rpm_load_lookup` reading byte + 8.
+      An idle expectation of two counts (125/128) fails the pattern test
+      (median −1.607 vs −2.34 %).
+    - **Item 1.** A candidate file with every Fuel Comp cell +1, with the
+      provenance check removed, fails on the traces (Δ 48 counts).
+    - **Item 4.** Pulse +0.41 at point 0, φ 0.0234375 and λ −2.4 % each
+      fail.
+  - **Runtimes** (`pytest -n0`, laptop shared with other sessions):
+    - `test_rom_sim_known_answers.py`: 5 tests, 6.8 s quiet and about 10 s
+      loaded.
+      - Over 1.5 s: the identical-file control, 1.6–3.9 s call plus
+        1.1–3.1 s of module setup.
+      - Near 1.5 s: the spec control (0.8–1.7 s).
+      - None is marked slow, and `tests/slow_tests.txt` is not edited.
+    - `test_rom_sim_private_rom.py`: 17–34 s for the drive design and the
+      per-pair frame (module setup), then 2.1–2.5 s, 0.5 s, and 24–25 s for
+      the node check (it decodes both `.OsirisROM` files). The whole file is
+      marked `pytest.mark.slow`.
+  - **Gate.** `ruff check .`, `ruff format --check .`, `mypy src` and mypy
+    on both files are clean. `pytest tests/test_rom_sim_known_answers.py
+    tests/test_rom_sim_private_rom.py tests/test_layering.py -n0`: 19
+    passed, with the images and the drive present.
+  - **Item 5: prediction artifact, written 2026-10-16T00:56Z (before any
+    post-flash drive is scored).** A verifier finding corrected the first
+    version of this evidence, which said no post-flash drive existed. That
+    was false.
+    - **Directory.**
+      `~/canary-data/sim/predictions/fuel-comp-restore-2026-10-04/`. It is
+      outside the checkout and the ROM dirs. The design is under `designs/`,
+      the run under `run/`, and each command's stdout is in
+      `design_stdout.json` / `run_stdout.json`.
+    - **Commands** (the item-3 run, with the same flags):
+      ```
+      .venv/bin/python -m tools.rom_sim design drives \
+        --base-revision ZS44A-20260920 --sessions _capture-tuning-2026-09-23T142926 \
+        --sessions-root ~/canary-data/sessions/nissan-xterra-2008 --fuel-type gasoline \
+        --battery-v-when-unmeasured 14.0 --rom-dir "/mnt/c/Users/thebo/Desktop/Uprev/Tuned ROMs" \
+        --out ~/canary-data/sim/predictions/fuel-comp-restore-2026-10-04/designs
+      .venv/bin/python -m tools.rom_sim run --base --revision ZS44A-20260920 \
+        --candidate-rom "/mnt/c/Users/thebo/Desktop/Uprev/Tuned ROMs/ZS44A-Tuned-20261004.OsirisROM" \
+        --design <out>/designs/322e4cab… --draws 3 --seed 1 --stft-pct 0 --ltft-pct 0 \
+        --candidate-events ecu_reflash --rom-dir "/mnt/c/Users/thebo/Desktop/Uprev/Tuned ROMs" \
+        --out ~/canary-data/sim/predictions/fuel-comp-restore-2026-10-04/run
+      ```
+    - **Identities:**
+      - design sha256
+        `322e4cabadfbdcffefa54662eff3b5a7b721586ebef51a30c9037e0e71517d6e`
+        (298 points);
+      - `result_digest`
+        `389fa0beb846c95b3f4f44f94606ed0a6fa71b0feac859994d8be59e5a89bd98`
+        (traces session `_sim-389fa0beb846`);
+      - base image
+        `a46baa248f16db8d5ed9854913e614dd7d77b7579bb6c36bddb792741531be50`,
+        candidate
+        `5587f7e1e6dbd0fcb9ffe0c857cc0cafebbe11bf306636c0f3265b903254d253`;
+      - seed 1, 3 draws;
+      - `result.json` sha256
+        `0e1294711018511faa9ac4bc6cb258ccd35dacae2c9ae27093c9638aba8d34be`;
+      - `report.html` sha256
+        `cd99ebcb3ca013d4e9ed5d557961ce50a974dff0cf8a997a24a45ee0c8bf1477`;
+      - `traces.parquet` sha256
+        `92d35caa610b1f34b897fabc0398bc4eaf36f66b46307afe16b578505a772066`.
+    - **A denser companion, also written before any scoring**
+      (2026-10-16T01:04Z). Same design and flags with `--draws 200`,
+      `--out …/fuel-comp-restore-2026-10-04/run-200draws`. Three draws give
+      only a coarse per-cell spread, so cell quantiles should be read from
+      this run:
+      - `result_digest`
+        `956d7bbed7cb053c544c2c1e0fb5d07542a5a157a56fdcc9d1564cbceec0e8c0`.
+        This is the same digest as every earlier 200-draw run of this pair,
+        so the prediction is deterministic.
+      - `result.json` sha256
+        `71267e1633b467603bdce31cf6d09b63f5595e8f8c8d5d5690e5ca0e4ee57917`;
+      - `report.html` sha256
+        `5173dadd56ec584fbcd15f120e12c1a0565d296ea12fbc9ea99c2457c0c67cf4`;
+      - `traces.parquet` sha256
+        `f05b5c2d3bfa7e94bc370f051670f6cdee2ae0de90f712a545a616b00e4cc5c5`.
+    - **Post-flash recordings that exist now.** These are the sessions under
+      `~/canary-data/sessions/nissan-xterra-2008` that
+      `tune_revisions.for_session` (dated by first sample) puts on
+      ZS44A-20261004:
+      - `2026-10-08T172943`;
+      - `2026-10-08T182550` (first sample 20:50:12Z);
+      - `_capture-fuel-pulsation-2026-10-08T210012`;
+      - `2026-10-10T153117`;
+      - `2026-10-10T165941`.
+      Only their start times were read. **None of them has been scored
+      against this prediction.**
+    - **Order evidence.** The order evidence is the git commit recording
+      this block, never a re-dated file.
+    - **Still owed (truck and E07.4).** Score those drives (and later ones)
+      per rpm × byte cell against this prediction with E07.4's case
+      machinery. Until then the item stays `[~]`.
 
 - [ ] **E08.8 — Later: dashboard and Pi.** Deferred until E08.1–E08.7 pass.
   - An Engine Tuning page that takes an edit spec, runs a bounded job, and

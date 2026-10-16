@@ -1141,6 +1141,12 @@ supercharger is a hardware intervention with a new plant parameter set.
       a +4-count edit to every slot-1 cell moves WOT φ by +0.03125, the pulse
       by +0.41 ms and λ by −2.5 % (−2.52…−2.49 % over the assumptions). It is
       still not rankable.
+      *Re-checked 2026-10-15 (E08.7, by running 84061a65 itself): those
+      figures hold at BFS 42,000, which was **stated** then. Since BFS became
+      computed (2026-10-13), the WOT point (150 g/s) gives BFS 39,604: pulse
+      +0.39 ms and λ −2.531 % (−2.547…−2.515 %). The written figures come
+      back at 159.06 g/s, the lowest 0.01 g/s step whose computed BFS is
+      42,000. The pulse figure sits on a 0.01 ms quantum.*
     - `test_a_fuel_comp_edit_leaves_its_downstream_unresolved_and_unrankable`.
     - `test_the_flash_resets_the_learned_trim_on_the_candidate_only`.
     - `test_recorded_or_computed_values_cannot_be_fed_back`.
