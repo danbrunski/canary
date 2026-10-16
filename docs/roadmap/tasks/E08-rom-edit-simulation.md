@@ -1775,6 +1775,69 @@ refusal carries a stable `reason` string that tests assert by name.
     MAP (`manifold_refusal_varies_by_draw`). It is a new plant choice for
     the simulator, recorded here so it is not implied.
 
+- [ ] **E08.11 — The simulator runs fuel-mv-2 (identified VE), not
+  fuel-mv-1.** Operator decision 2026-10-15, after E08.10's finding. Do it
+  after E08.10 lands; the two touch the same code.
+  - **Why.**
+    - fuel-mv-1's constant VE 0.7 is contradicted by the truck's own data
+      above 2,000 rpm, where the envelope is 0.888–0.906.
+    - A grid design solves MAF from load at the plant's VE. At full fill,
+      VE 0.7 puts BFS near 29k against the truck's 38–42k at WOT, so a grid
+      evaluates the ECU at operating points the truck does not reach at that
+      fill: wrong Target AFR columns and wrong distance to the BFS ceiling.
+    - fuel-mv-2 is frozen (`na-stock-2026-10-08.mv2`) with VE(rpm)
+      identified on the same drives. It fits at least as well: in-sample
+      |err| p90 11.61 % vs 12.01 %.
+    - fuel-mv-3 was considered and not chosen. It fits the same (11.69 %),
+      and its part-load factor is unvalidated, since no MAP sensor will exist
+      on the NA intake.
+  - **The simulator's plant is its own declaration, not the contract
+    default.** The contract's `plant_version: fuel-mv-1` is what E07.4's
+    case and its sealed records name (`baseline_sha256 6aec1db5…`). It does
+    not change.
+    - Add the E08 simulator's plant as data:
+      `data/nissan-xterra-2008/sim_uncertainty.yaml` (or a small sim-kit
+      file beside it) names `plant_version: fuel-mv-2`.
+    - The contract's `conditional_rom_comparison` mode lists the plant
+      versions it admits (`fuel-mv-1`, `fuel-mv-2`). `check_scenario` checks
+      the scenario's plant against that list, refusing anything else with
+      the existing `plant_version_mismatch`. E07.6 on fuel-mv-1 keeps
+      running byte-identical.
+    - One loader, e.g. `load_sim_kit(profile_dir)`, gives the simulator's
+      kit. `tools/rom_sim.py` and the design builders default to it. The
+      W09 GUI (`rom_editor.py`) switches to it: tell the W09 session the
+      name, and don't edit its file.
+  - **VE in the Monte Carlo.**
+    - Above the floor bands, fuel-mv-2's VE is a frozen fit (`log_fit`
+      parameter_fits), so it is held at the fit. The held value is named
+      through E08.10's assumptions.
+    - The 0.7 floor below 2,000 rpm stays a bracketed working assumption
+      [0.4, 1.0], drawn with a declared distribution. The uncertainty file
+      for fuel-mv-2 is new and its brackets are checked against fuel-mv-2's
+      registry.
+    - fuel-mv-2 refuses MAP above ambient. Keep `manifold_refusal_varies_by_draw`
+      as the backstop. The expectation is that it never fires, because
+      drawing the floor at idle (charge fraction ~0.15) cannot reach ambient.
+      Test that.
+  - **Grid designs** take VE from the design's plant, now fuel-mv-2. Points
+    whose solved MAP would be above ambient, or outside the VE fit's bounds
+    (`outside_ve_fit`: baro 79–82 kPa, IAT 23–50 °C), are counted and not
+    placed. A grid at 63 kPa baro is therefore refused by name: the fit has
+    not seen that altitude.
+  - **Prediction of record.** The 10-04 restore prediction stays as
+    recorded, on fuel-mv-1, and is never re-run in place. New runs carry
+    `plant_version: fuel-mv-2`.
+  - **Accept:**
+    - A grid at full fill and 4,800 rpm on fuel-mv-2 gives BFS within the
+      truck's observed WOT band, checked against a real drive's BFS DID at a
+      matched rpm and fill, per pair. With fuel-mv-1 it does not.
+    - E07.6's tests and `cmp_head.py` are byte-identical on fuel-mv-1.
+    - The real restore run on fuel-mv-2 still reproduces B08.6's per-pair
+      Fuel Comp ratios (E08.7 item 3's identity holds on any plant, since
+      BFS does not depend on VE given MAF).
+    - Uncertainty brackets match the fuel-mv-2 registry.
+    - The W09 session is told the loader name and has switched.
+
 ## Not in scope (named so they are not implied)
 
 - **Spark, torque, knock, power:** `compare_roms` traces ignition edits but
