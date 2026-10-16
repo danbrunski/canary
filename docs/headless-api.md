@@ -123,6 +123,13 @@ Precedence: `--host/--token` flags > exported env vars > `~/.canary/env`.
 Point elsewhere with `CANARY_ENV_FILE`. The older `CANARY_TOKEN` name is
 still accepted as a fallback for existing env files.
 
+The dashboard accepts the token in the URL fragment so the desk launcher
+(`scripts/canary_desk.py`) can open it already authenticated:
+`http://127.0.0.1:<port>/#wb/<item>?token=<percent-encoded token>`. A fragment
+is never sent to the server, and `src/lib/tokenHandoff.ts` moves the token into
+the browser's storage and rewrites the address to `#wb/<item>` before the app
+renders.
+
 Then use `canaryctl`:
 
 ```bash
