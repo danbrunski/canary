@@ -98,8 +98,16 @@ computed output.
 W09.6 real-image update are committed. The simulator session (`sim_*`,
 `paired_scenarios.py`, `tools/rom_sim.py`) takes E09.12 (started
 2026-10-15, Deep), E09.2a/b/c after E08.11 lands, and E09.14a. The review
-session takes E09.13. Unclaimed: E09.1, E09.3–E09.6, E09.11 (truck or Pi
-for acceptance) and the listing items E09.7–E09.10. Constraint from W09:
+session takes E09.13. *Updated 2026-10-16 (simulator session, overnight,
+operator's judgement call):* E09.2 and E09.14 landed; E09.12 stays `[~]`
+because neither 10-04 prediction can reach a verdict (no co-sampled BFS,
+no logged φ), so the next flash is scored instead, designed from a
+twin-profile pre-change drive. That makes E09.1 the critical path, and the
+simulator session takes its desk half (the derivation function in
+`ecu_application.py`, the `twin` profile, the coverage test); the truck
+acceptance stays with the operator. Unclaimed: E09.3–E09.6, E09.11
+(truck or Pi for acceptance) and the listing items E09.7–E09.10.
+Constraint from W09:
 if E09.2a changes the simulate result shape, the W09 session is told the
 shape before it lands, since the page and MCP tools render it.
 
