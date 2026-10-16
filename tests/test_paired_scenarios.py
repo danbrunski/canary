@@ -35,7 +35,7 @@ from src.analysis.paired_scenarios import (
     run_paired,
 )
 from src.analysis.paired_steady import steady_coverage
-from src.analysis.plant_validation import InterventionVerdict
+from src.analysis.plant_validation import EcuOutputVerdict, InterventionVerdict
 from src.analysis.rom_effects import CellEdit, make_candidate
 from src.analysis.rom_image import sha256_hex
 from src.analysis.rom_map import load_rom_map
@@ -613,3 +613,31 @@ def test_a_closed_loop_only_qualification_cannot_rank_wot_deltas(
     )
     assert not out["rankable"]
     assert any("regime_not_qualified:enrichment" in r for r in out["reasons"])
+
+
+def test_ranking_refuses_anything_but_an_intervention_verdict_by_name(
+    kit_and_image: tuple[SimKit, bytes],
+) -> None:
+    """A sealed ECU-output verdict (E09.14) is a verdict on decoded logic, not
+    on a plant effect: handed to the ranker it is refused by name, never an
+    AttributeError halfway through the checks."""
+    kit, image = kit_and_image
+    result = run_paired(kit, _scenario(kit, image, image), image, image)
+    ecu = EcuOutputVerdict._mint(
+        case="test",
+        outcomes=(),
+        synthetic=False,
+        base_image_sha256=result.base_image_sha256,
+        candidate_image_sha256=result.candidate_image_sha256,
+        traces_sha256="0" * 64,
+        rules_version=1,
+        rules_sha256="0" * 64,
+        recordings=(),
+        scope="all",
+        candidates_not_scored=(),
+    )
+    assert ecu.verify()
+    with pytest.raises(SimulationRefusalError) as refused:
+        rank_as_improvement(result, intervention=ecu)  # type: ignore[arg-type]
+    assert refused.value.reason == "intervention_not_a_verdict"
+    assert "EcuOutputVerdict" in str(refused.value)

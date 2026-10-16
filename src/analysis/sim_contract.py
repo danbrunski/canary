@@ -118,6 +118,11 @@ class SimulationRefusalError(ValueError):
         self.reason = reason
         self.message = message
 
+    def __reduce__(self) -> tuple[type, tuple[str, str]]:
+        # Rebuilt from (reason, message), so it crosses a process boundary
+        # (the workbench's spawn child) intact.
+        return (type(self), (self.reason, self.message))
+
 
 # -- units and clocks ---------------------------------------------------------------
 

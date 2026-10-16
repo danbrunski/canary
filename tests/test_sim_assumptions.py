@@ -18,7 +18,7 @@ from typing import Any
 import numpy as np
 import pytest
 
-from src.analysis import paired_scenarios, rom_editor
+from src.analysis import paired_scenarios, rom_editor, twin_runner
 from src.analysis.fuel_plant import ParameterRegistry, plant_reads
 from src.analysis.paired_scenarios import (
     OUTPUTS,
@@ -213,7 +213,9 @@ def test_a_target_lookup_gate_leaves_bfs_supported_in_run_paired_and_the_fast_pa
     reason. The fast path's own run_paired self-check passes."""
     kit, image = kit_and_image
     cand = _edit_all(image, kit, "fuel_compensation", 1, 3)
-    real_predict = paired_scenarios.predict_phi
+    # The lookup is the twin runner's target-phi stage (E09.2c): one patch
+    # reaches run_paired and the fast path alike.
+    real_predict = twin_runner.predict_phi
     gated_rpm = rpm_word(P_WOT.rpm, kit.contract)
 
     def in_the_band(*args: Any, **kw: Any) -> Any:
@@ -224,7 +226,7 @@ def test_a_target_lookup_gate_leaves_bfs_supported_in_run_paired_and_the_fast_pa
             )
         return out
 
-    monkeypatch.setattr(paired_scenarios, "predict_phi", in_the_band)
+    monkeypatch.setattr(twin_runner, "predict_phi", in_the_band)
     design = _design(image, (P_WOT, 190, 200), (P_CRUISE, 50, 70))
     result = _run(kit, image, cand, design, uncertainty, draws=4)
     assert result.supported("base_fuel_schedule")[0].all()

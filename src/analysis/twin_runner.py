@@ -61,7 +61,15 @@ What it makes impossible rather than documented:
   (``fuel_plant_eval.STATES``) maps to an empty kind, or the run refuses.
   Fuel per event and MAP have no observation on this hardware: their
   predictions are ``unobserved``, a kind, never ``eligible``.
-* **The paired comparison as a caller (E09.2c) is not here.**
+* **The paired comparison is a caller, on stated inputs (E09.2c).**
+  ``paired_scenarios.run_paired`` (and the Monte Carlo fast path through it)
+  resolves each ROM by :func:`resolve_image`, walks :func:`stage_order` with
+  :func:`stated_ecu` per point and :func:`stated_pulse` over the points, and
+  runs :func:`plant_predict` on a frame of its predicted pulses in the
+  replay's own sample columns (:data:`PLANT_FRAME_COLUMNS`). A stated sample
+  is a value the scenario prescribes, never a read: the paired run names its
+  outputs its own way (``steady_bfs:<reason>``, ``target_lookup:<reason>``)
+  by mapping the stage refusals here, not by renaming either side.
 
 Nothing here, or anything it imports, can reach the ECU
 (``tests/test_twin_runner.py``'s clean-process import test).
@@ -73,7 +81,7 @@ import hashlib
 import json
 import math
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any, Literal, Protocol
 
@@ -103,6 +111,8 @@ from src.analysis.fuel_plant import (
     B06Rules,
     FuelPlantProfile,
     FuelPlantRefusalError,
+    PlantOutput,
+    ResolvedParameters,
     load_b06,
     load_fuel_plant,
     predict,
@@ -122,11 +132,19 @@ from src.analysis.fuel_plant_eval import (
     pulse_chain_states,
     ve_samples,
 )
-from src.analysis.injector_pulse import PULSE_COUNT_MS, PulseChainCalibration
+from src.analysis.injector_pulse import (
+    PULSE_COUNT_MS,
+    PulseChainCalibration,
+    predict_pulse,
+    trim_word,
+    vb_counts_from_volts,
+)
+from src.analysis.paired_steady import SteadyBfs, steady_bfs
 from src.analysis.rom_effects import LoadedRom
 from src.analysis.rom_map import RomMap, load_rom_map
 from src.analysis.rom_trace import ViewerDefinition, load_viewer_definition
 from src.analysis.target_phi import (
+    Prediction,
     ResolvedTable,
     TwinDefinition,
     TwinRefusalError,
@@ -137,7 +155,7 @@ from src.analysis.target_phi import (
     x_formula_check,
     x_from_bfs,
 )
-from src.decode.dids import load_did_map
+from src.analysis.target_phi import predict as predict_phi
 from src.paths import DIDS_YAML
 from src.preprocessing.loader import read_session
 from src.signals.pairing import PairingPolicy, match_ordered
@@ -190,6 +208,11 @@ class TwinRunnerRefusalError(ValueError):
         super().__init__(f"{reason}: {message}")
         self.reason = reason
         self.message = message
+
+    def __reduce__(self) -> tuple[type, tuple[str, str]]:
+        # Rebuilt from (reason, message), so it crosses a process boundary
+        # (the workbench's spawn child) intact.
+        return (type(self), (self.reason, self.message))
 
 
 # -- the kit and the resolved ECU ---------------------------------------------------------
@@ -286,37 +309,49 @@ def resolve_ecu(kit: RunnerKit, rom: LoadedRom) -> ResolvedEcu:
     the evaluators' own constructors. A constructor's refusal is kept by name
     and makes that stage's samples ``calibration_unresolved``; it never stops
     the stages that did resolve."""
+    return resolve_image(kit, rom.image, image_sha256=rom.image_sha256, slot=rom.slot)
+
+
+#: The calibrations :func:`resolve_image` resolves, in the order it tries them.
+CALIBRATIONS: tuple[str, ...] = ("target_table", "air_charge", "pulse_chain")
+
+
+def resolve_image(kit: RunnerKit, image: bytes, *, image_sha256: str, slot: int) -> ResolvedEcu:
+    """:func:`resolve_ecu` on an image's bytes, its sha256 and its slot: the
+    one ECU constructor of the replay run and the paired comparison
+    (``paired_scenarios``, whose scenario names the image and slot itself).
+    ``image_sha256`` is what the target table checks the bytes against."""
     refusals: dict[str, str] = {}
     table: ResolvedTable | None = None
     air: AirChargeCalibration | None = None
     pulse: PulseChainCalibration | None = None
     try:
         table = resolve_table(
-            rom.image,
+            image,
             kit.rom_map,
             kit.twin,
             viewer=kit.viewer,
             application_model=(kit.model, kit.model_sha256),
-            expected_sha256=rom.image_sha256,
-            slot=rom.slot,
+            expected_sha256=image_sha256,
+            slot=slot,
         )
     except TwinRefusalError as exc:
         refusals["target_table"] = exc.reason
     try:
         air = AirChargeCalibration.from_image(
-            rom.image,
+            image,
             model=kit.model,
             rom_map=kit.rom_map,
-            slot=rom.slot,
-            image_sha256=rom.image_sha256,
+            slot=slot,
+            image_sha256=image_sha256,
         )
     except (AirChargeRefusalError, ApplicationModelRefusalError) as exc:
         refusals["air_charge"] = exc.reason
     try:
-        pulse = calibration_from_image(rom.image, kit.plant.pulse_chain)
+        pulse = calibration_from_image(image, kit.plant.pulse_chain)
     except FuelPlantRefusalError as exc:
         refusals["pulse_chain"] = exc.reason
-    return ResolvedEcu(table, air, pulse, refusals, rom.image_sha256, rom.slot)
+    return ResolvedEcu(table, air, pulse, refusals, image_sha256, slot)
 
 
 # -- stages and their order -----------------------------------------------------------------
@@ -649,23 +684,19 @@ def _run_bfs(session: Path | pd.DataFrame, ecu: ResolvedEcu) -> _StageResult:
 # -- load input X (the observed node's formula) -----------------------------------------
 
 
-def _x_reads(
-    session: Path | pd.DataFrame, kit: RunnerKit
-) -> tuple[Any, np.ndarray, Any, np.ndarray]:
-    """X and BFS reads in raw counts, read exactly as ``x_formula_check``
-    reads them (its own series and catalog-decode helpers)."""
-    load_spec = kit.twin.inputs.load.channel
-    bfs_spec = kit.twin.x_formula.bfs_channel
-    long = read_channels(session, [load_spec, bfs_spec], dids_path=DIDS_YAML, acquired_time=True)
-    x = target_phi._series(long, load_spec)
-    bfs = target_phi._series(long, bfs_spec)
-    catalog = load_did_map(DIDS_YAML)
-    return (
-        x,
-        target_phi._raw(x, load_spec, DIDS_YAML, catalog),
-        bfs,
-        target_phi._raw(bfs, bfs_spec, DIDS_YAML, catalog),
-    )
+#: The X relation's load point scaler, absent or not a divisor:
+#: ``X = BFS << shift / scaler`` cannot be formed with either.
+SCALER_UNRESOLVED = "calibration_unresolved:load_point_scaler"
+SCALER_INVALID = "calibration_unresolved:load_point_scaler_invalid"
+
+
+def _scaler_refusal(table: ResolvedTable) -> str | None:
+    """Why the X relation cannot run on ``table``'s load point scaler, or None."""
+    if table.load_point_scaler is None:
+        return SCALER_UNRESOLVED
+    if table.load_point_scaler <= 0:
+        return SCALER_INVALID
+    return None
 
 
 def _run_x(session: Path | pd.DataFrame, kit: RunnerKit, ecu: ResolvedEcu) -> _StageResult:
@@ -675,29 +706,28 @@ def _run_x(session: Path | pd.DataFrame, kit: RunnerKit, ecu: ResolvedEcu) -> _S
     output = "load_input_x"
     load_spec = kit.twin.inputs.load.channel
     bfs_spec = kit.twin.x_formula.bfs_channel
-    x, x_raw, bfs, bfs_raw = _x_reads(session, kit)
-    reads = {load_spec: len(x.times), bfs_spec: len(bfs.times)}
-    if ecu.table is None or ecu.table.load_point_scaler is None:
-        reason = (
-            ecu.missing("target_table")
-            if ecu.table is None
-            else "calibration_unresolved:load_point_scaler"
-        )
+    xr = target_phi.x_reads(session, kit.twin, dids_path=DIDS_YAML)
+    x_times, x_raw, bfs_times, bfs_raw = xr.x_times, xr.x_raw, xr.bfs_times, xr.bfs_raw
+    reads = {load_spec: len(x_times), bfs_spec: len(bfs_times)}
+    scaler_refusal = None if ecu.table is None else _scaler_refusal(ecu.table)
+    if ecu.table is None or scaler_refusal is not None:
+        reason = ecu.missing("target_table") if scaler_refusal is None else scaler_refusal
         records = [
             _record(output, load_spec, t, v, state=reason, kind="calibration_unresolved")
-            for t, v in zip(x.times, x_raw, strict=True)
+            for t, v in zip(x_times, x_raw, strict=True)
         ]
         return _StageResult(records, None, reads, {}, (load_spec,))
     scaler = ecu.table.load_point_scaler
+    assert scaler is not None
     matched = match_ordered(
-        x.times,
-        bfs.times,
+        x_times,
+        bfs_times,
         PairingPolicy.within(pd.Timedelta(seconds=kit.twin.gates.max_acquisition_skew_s)),
     )
     partner = dict(zip(matched.index_a.tolist(), matched.index_b.tolist(), strict=True))
-    unpaired_kind: EmptyKind = "input_not_captured" if not len(bfs.times) else "not_co_sampled"
+    unpaired_kind: EmptyKind = "input_not_captured" if not len(bfs_times) else "not_co_sampled"
     records = []
-    for i, (t, observed) in enumerate(zip(x.times, x_raw, strict=True)):
+    for i, (t, observed) in enumerate(zip(x_times, x_raw, strict=True)):
         j = partner.get(i)
         if j is None:
             records.append(
@@ -1108,6 +1138,53 @@ def _plant_kind(state: str, *, input_captured: bool) -> EmptyKind:
     return kind
 
 
+#: The plant stage's input columns (``fuel_plant_eval.plant_inputs``), in the
+#: order a stated frame carries them. The pulse stage's samples hold them as
+#: read; a stated caller (the paired comparison) puts its predicted pulse and
+#: dead time in the same columns (:func:`stated_plant_samples`).
+PLANT_FRAME_COLUMNS: tuple[str, ...] = (
+    "pulse_ms",
+    "ecu_dead_time_ms",
+    "rpm",
+    "maf_gps",
+    "baro_kpa",
+    "iat_c",
+    "rail_kpa",
+)
+
+
+def stated_plant_samples(**columns: Any) -> pd.DataFrame:
+    """A plant sample frame from stated values: every
+    :data:`PLANT_FRAME_COLUMNS` entry, one value per sample (``rail_kpa`` NaN
+    where no rail reading was stated: the plant's working value applies)."""
+    if set(columns) != set(PLANT_FRAME_COLUMNS):
+        raise TwinRunnerRefusalError(
+            "plant_columns_mismatch",
+            f"a stated plant frame carries {list(PLANT_FRAME_COLUMNS)}, not {sorted(columns)}",
+        )
+    return pd.DataFrame(
+        {c: np.asarray(columns[c], dtype=float) for c in PLANT_FRAME_COLUMNS},
+        columns=list(PLANT_FRAME_COLUMNS),
+    )
+
+
+def plant_predict(
+    samples: pd.DataFrame,
+    params: ResolvedParameters,
+    plant: FuelPlantProfile,
+    *,
+    map_kpa: np.ndarray | None = None,
+) -> PlantOutput:
+    """The plant stage's kernel (:data:`PLANT_KERNEL`) on a sample frame: the
+    replay run's eligible reads, or a stated caller's predicted pulses.
+    ``map_kpa`` states the manifold pressure per sample; ``None`` runs the
+    plant's own manifold model (a replay always does: MAP is not read)."""
+    inputs = plant_inputs(samples)
+    if map_kpa is not None:
+        inputs = replace(inputs, map_kpa=np.asarray(map_kpa, dtype=float))
+    return predict(inputs, params, plant.geometry)
+
+
 def plant_state_kinds() -> dict[str, tuple[EmptyKind, ...]]:
     """Every state ``fuel_plant_eval.STATES`` declares, with the kinds it can
     be counted under (two for the capture states, decided per sample); a
@@ -1191,7 +1268,7 @@ def _run_plant(samples: _PulseSamples, kit: RunnerKit) -> dict[str, _StageResult
     scored = apply_manifold_refusals(frame, plant, params)
     states = scored["state"].to_numpy(dtype=object)
     eligible = states == "eligible"
-    out = predict(plant_inputs(scored[eligible]), params, plant.geometry)
+    out = plant_predict(scored[eligible], params, plant)
     predicted: dict[str, np.ndarray] = {}
     for s in PLANT_STAGES:
         values = np.full(len(scored), np.nan)
@@ -1285,6 +1362,143 @@ def identify_plant(runs: list[TwinRun], kit: RunnerKit, *, sessions_root: Path) 
     )
     result["volumetric_efficiency"] = ve
     return result
+
+
+# -- stated inputs: the paired comparison's source (E09.2c) ---------------------------------
+
+
+@dataclass(frozen=True)
+class StatedSample:
+    """One sample's stage inputs, stated rather than read from a channel: a
+    paired comparison's operating point. ``rpm_word`` is the ECM's speed word
+    for ``rpm`` (the caller's contract quantization, ``paired_scenarios.rpm_word``);
+    ``load_byte`` the stated throttle-model fill byte BFS's Fuel Comp lookup
+    reads; ``flag`` the raw pedal flag the Target AFR lookup reads."""
+
+    rpm: float
+    rpm_word: int
+    maf_gps: float
+    load_byte: int
+    flag: int
+    battery_v: float
+    baro_kpa: float
+    iat_c: float
+
+
+@dataclass(frozen=True)
+class StatedEcu:
+    """The ECU stages' values for one stated sample, in stage order: BFS at
+    its steady fixed point, X from it by the ECM's formula, the Target AFR
+    lookup at X. ``refused`` is the first stage that could not run and why,
+    ``(stage output, reason)``; the stages before it keep their values."""
+
+    bfs: SteadyBfs | None = None
+    x: int | None = None
+    phi: Prediction | None = None
+    refused: tuple[str, str] | None = None
+
+
+#: A stage's calibration on a :class:`ResolvedEcu`, by :attr:`Stage.calibration`.
+_CALIBRATION_OF: dict[str, Callable[[ResolvedEcu], object]] = {
+    "target_table": lambda e: e.table,
+    "air_charge": lambda e: e.air,
+    "pulse_chain": lambda e: e.pulse,
+}
+
+
+def stated_ecu(
+    stages: tuple[Stage, ...], kit: RunnerKit, ecu: ResolvedEcu, sample: StatedSample
+) -> StatedEcu:
+    """The ECU stages (:func:`stage_order`'s, the replay run's order) on one
+    stated sample, by the kernels the model names: BFS by
+    ``air_charge.steady_state_bfs`` at the steady fixed point
+    (:func:`~src.analysis.paired_steady.steady_bfs`; a replay scores the same
+    kernel on paired reads), X by ``x_from_bfs`` and the phi word by
+    ``target_phi.predict``. The pulse stage runs over every sample at once
+    (:func:`stated_pulse`).
+
+    A stated sample runs whole or not at all: every stage's calibration is
+    checked before any stage runs (``calibration_unresolved:<cal>:<reason>``,
+    first missing in stage order), then the X relation's load point scaler
+    (``calibration_unresolved:load_point_scaler``, or ``..._invalid`` for a
+    zero scaler, which X divides by)."""
+    for stage in stages:
+        if _CALIBRATION_OF[stage.calibration](ecu) is None:
+            return StatedEcu(refused=(stage.output, ecu.missing(stage.calibration)))
+    table, air = ecu.table, ecu.air
+    assert table is not None and air is not None
+    scaler_refusal = _scaler_refusal(table)
+    if scaler_refusal is not None:
+        return StatedEcu(refused=("load_input_x", scaler_refusal))
+    scaler = table.load_point_scaler
+    assert scaler is not None
+    bfs: SteadyBfs | None = None
+    x: int | None = None
+    for stage in stages:
+        if stage.output == "base_fuel_schedule_word":
+            try:
+                bfs = steady_bfs(
+                    air,
+                    maf_gps=sample.maf_gps,
+                    rpm_word=sample.rpm_word,
+                    load_byte=sample.load_byte,
+                )
+            except AirChargeRefusalError as exc:
+                return StatedEcu(refused=(stage.output, exc.reason))
+        elif stage.output == "load_input_x":
+            assert bfs is not None, "stage order: X after BFS"
+            x = x_from_bfs(bfs.word, scaler, kit.twin)
+        elif stage.output == "target_equiv_ratio":
+            assert x is not None, "stage order: target phi after X"
+            phi = predict_phi(
+                table, kit.twin, load_raw=x, rpm_raw=sample.rpm_word, flag_raw=sample.flag
+            )
+            refused = None if phi.word is not None else (stage.output, str(phi.reason))
+            return StatedEcu(bfs=bfs, x=x, phi=phi, refused=refused)
+    raise TwinRunnerRefusalError(  # pragma: no cover - STAGES carries the target phi stage
+        "stage_unbound", "no target phi stage"
+    )
+
+
+@dataclass(frozen=True)
+class StatedPulse:
+    """The pulse stage over stated samples: the injector pulse chain's G, the
+    ECM's dead time and the pulse word, in counts, one per sample."""
+
+    g: np.ndarray
+    dead: np.ndarray
+    counts: np.ndarray
+
+
+def stated_pulse(
+    ecu: ResolvedEcu,
+    samples: list[StatedSample],
+    *,
+    bfs: list[int],
+    phi_q14: list[int],
+    stft_pct: float,
+    ltft_pct: float,
+) -> StatedPulse | None:
+    """The pulse stage's kernel (``injector_pulse.predict_pulse``, the decoded
+    integer chain) over every stated sample at once, at one stated STFT/LTFT
+    pair; ``None`` without a pulse-chain calibration or samples. The chain is
+    element-wise integer arithmetic, so one sample or many give the same
+    words."""
+    if ecu.pulse is None or not samples:
+        return None
+    pulse = predict_pulse(
+        bfs=bfs,
+        phi_q14=phi_q14,
+        stft_word=trim_word([stft_pct]),
+        ltft_word=trim_word([ltft_pct]),
+        vb_counts=vb_counts_from_volts([s.battery_v for s in samples]),
+        rpm=[s.rpm for s in samples],
+        baro_kpa=[s.baro_kpa for s in samples],
+        iat_c=[s.iat_c for s in samples],
+        cal=ecu.pulse,
+    )
+    assert pulse.g is not None
+    return StatedPulse(pulse.g, pulse.dead_time, pulse.pulse)
 
 
 # -- the run --------------------------------------------------------------------------------
@@ -1461,6 +1675,8 @@ def run_digest(run: TwinRun) -> str:
 __all__ = [
     "BFS_CHANNEL_SETS",
     "EMPTY_KINDS",
+    "CALIBRATIONS",
+    "PLANT_FRAME_COLUMNS",
     "PLANT_KERNEL",
     "PLANT_STAGES",
     "RECORD_COLUMNS",
@@ -1469,6 +1685,9 @@ __all__ = [
     "ResolvedEcu",
     "RunnerKit",
     "Stage",
+    "StatedEcu",
+    "StatedPulse",
+    "StatedSample",
     "TwinKit",
     "TwinRun",
     "TwinRunnerRefusalError",
@@ -1477,9 +1696,14 @@ __all__ = [
     "identify_plant",
     "load_twin_kit",
     "node_order",
+    "plant_predict",
     "plant_state_kinds",
     "resolve_ecu",
+    "resolve_image",
     "run_digest",
     "run_twin",
     "stage_order",
+    "stated_ecu",
+    "stated_plant_samples",
+    "stated_pulse",
 ]

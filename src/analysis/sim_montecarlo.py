@@ -62,30 +62,21 @@ from src.analysis.fuel_plant import (
     DELAY_PARAMETER,
     MANIFOLD_MODELS,
     REFUSING_MODELS,
-    PlantInputs,
     ResolvedParameters,
     load_b06,
     load_fuel_plant,
     plant_files,
     plant_qualification,
     plant_reads,
-    predict,
     resolve_parameters,
 )
-from src.analysis.injector_pulse import (
-    PULSE_COUNT_MS,
-    predict_pulse,
-    trim_word,
-    vb_counts_from_volts,
-)
 from src.analysis.paired_scenarios import (
-    _ECU_OUTPUTS,
     _LOAD_BYTE,
     _PLANT_OUTPUTS,
-    BATTERY_UNMEASURED,
     OUTPUTS,
     PLANT_ASSUMPTION_PREFIX,
     BatterySource,
+    FuelFn,
     GateReason,
     MapSource,
     OperatingPoint,
@@ -95,34 +86,36 @@ from src.analysis.paired_scenarios import (
     ReasonScope,
     SimKit,
     _ecu_chain,
-    _plant_regime,
+    _fuel_side,
+    _pair_loop,
     _refuse_recorded_sources,
-    _regime,
     _resets,
+    _Side,
     _side,
     _with_contract_mode,
+    compare_scenario_roms,
     load_kit,
+    output_reasons,
     plant_assumption_lines,
     plant_parameters,
     plant_rail_kpa,
+    refusing_as_simulation,
+    rom_gate,
     run_paired,
-    twin_gate,
+    stated_sample,
 )
 from src.analysis.paired_scenarios import TOOL_VERSION as PAIRED_TOOL_VERSION
-from src.analysis.paired_steady import (
-    SETPOINT_MOVED,
-    TRIM_AUTHORITY_UNDECODED,
-    closed_loop_k,
-    closed_loop_trim_pending,
-    steady_coverage,
-    total_trim_pct,
-    trim_k,
-)
-from src.analysis.rom_effects import compare_roms
 from src.analysis.rom_image import sha256_hex
 from src.analysis.sim_contract import SimulationRefusalError
 from src.analysis.sim_design import MAF_FROM_MANIFOLD_MODEL, SimDesign
 from src.analysis.sim_kit import SIM_KIT_FILE, load_sim_kit_declaration
+from src.analysis.twin_runner import (
+    StatedPulse,
+    plant_predict,
+    stage_order,
+    stated_plant_samples,
+    stated_pulse,
+)
 from src.session import SYNTHETIC_SESSION_PREFIX
 
 #: Bump when what a result means changes. 2: per-output blanking under a
@@ -735,104 +728,37 @@ def _with_byte(point: OperatingPoint, byte: int) -> OperatingPoint:
 def _gate(
     kit: SimKit, template: PairedScenario, base_image: bytes, candidate_image: bytes
 ) -> list[GateReason]:
-    """run_paired's run-level gate, each reason with the node it names: what
-    the change reaches that a point is conditioned on, the twin's ROM gates
-    and unknown changed bytes."""
-    report = compare_roms(
-        base_image,
-        candidate_image,
-        kit.rom_map,
-        kit.model,
-        kit.model_sha256,
-        base_slot=template.base.slot,
-        candidate_slot=template.candidate.slot,
-        slot_source=template.base.slot_source,
-        contract=kit.contract,
-        mode=template.mode,
-    )
+    """run_paired's run-level gate (``paired_scenarios.rom_gate``), each reason
+    with the node it names, on the one quantity a design conditions every
+    point on: the fill byte."""
+    report = compare_scenario_roms(kit, template, base_image, candidate_image)
     if report.outcome == "unevaluable" and report.reason is not None:
         raise SimulationRefusalError(
             "rom_unevaluable", f"rom:{report.reason}: no point can be computed on either ROM"
         )
-    reached = set(report.changed_nodes) | {n for o in report.outputs for n in o.path}
-    unknown_changed = any(r.byte_class in ("unknown", "mapped_unmodelled") for r in report.ranges)
-    coverage = steady_coverage(kit.contract, template.mode, report.changed_nodes)
-    gate: list[GateReason] = []
-    fill_node = kit.contract.quantity(FILL_BYTE).manifest_node
-    if fill_node in reached:
-        gate.append((f"conditioned_on_changed_path:{FILL_BYTE}", fill_node))
-    gate.extend(twin_gate(report, coverage, [], kit.model))
-    if unknown_changed:
-        gate.append(("rom:unknown_bytes_changed", None))
+    fill = (FILL_BYTE, kit.contract.quantity(FILL_BYTE).manifest_node)
+    gate, _, _ = rom_gate(kit, report, template.mode, [fill])
     return gate
 
 
-@dataclass(frozen=True)
-class _Pulses:
-    """One side's pulse chain over many combinations, element-wise exactly as
-    ``paired_scenarios._fuel_chain`` forms it for one (the chain is integer
-    arithmetic, :func:`~src.analysis.injector_pulse.predict_pulse`)."""
-
-    g: IntArray
-    dead: IntArray
-    counts: IntArray
-
-
 def _pulses(
-    side: Any, ecus: Sequence[dict[str, Any]], points: Sequence[OperatingPoint], stft_pct: float
-) -> _Pulses | None:
-    if side.cal is None or not ecus:
-        return None
-    pulse = predict_pulse(
+    kit: SimKit,
+    side: _Side,
+    ecus: Sequence[dict[str, Any]],
+    points: Sequence[OperatingPoint],
+    stft_pct: float,
+) -> StatedPulse | None:
+    """One side's pulse stage over every combination at once
+    (``twin_runner.stated_pulse``, the chain run_paired runs per point; a
+    combination with no phi word takes a placeholder whose words are unused)."""
+    return stated_pulse(
+        side.ecu,
+        [stated_sample(kit, p, p.conditioned[FILL_BYTE]) for p in points],
         bfs=[e["base_fuel_schedule"] if e["target_phi_word"] is not None else 0 for e in ecus],
         phi_q14=[e["target_phi_word"] if e["target_phi_word"] is not None else 0 for e in ecus],
-        stft_word=trim_word([stft_pct]),
-        ltft_word=trim_word([side.ltft_pct]),
-        vb_counts=vb_counts_from_volts([p.battery_v for p in points]),
-        rpm=[p.rpm for p in points],
-        baro_kpa=[p.baro_kpa for p in points],
-        iat_c=[p.iat_c for p in points],
-        cal=side.cal,
+        stft_pct=stft_pct,
+        ltft_pct=side.ltft_pct,
     )
-    assert pulse.g is not None
-    return _Pulses(pulse.g, pulse.dead_time, pulse.pulse)
-
-
-def _fuel_side(
-    side: Any,
-    ecu: dict[str, Any],
-    pulses: _Pulses | None,
-    c: int,
-    stft_pct: float,
-    hold: tuple[int, int] | None = None,
-) -> dict[str, Any]:
-    """``_fuel_chain`` without the plant (which runs per draw): the pulse, the
-    total trim and what the plant reads. The plant outputs are marked
-    computed (NaN here, filled per draw)."""
-    out = dict(ecu)
-    out["reasons"] = list(ecu["reasons"])
-    if ecu["target_phi_word"] is None or side.cal is None or pulses is None:
-        return out
-    g = int(pulses.g[c])
-    dead = int(pulses.dead[c])
-    if hold is None:
-        k: float = trim_k(stft_pct, side.ltft_pct)
-        counts = int(pulses.counts[c])
-    else:
-        g_base, k_base = hold
-        k = closed_loop_k(g_base, k_base, g)
-        counts = ((g_base * k_base) >> 16) + dead
-    out["g_word"] = g
-    out["k_word"] = k
-    out["fuel_trim_total_pct"] = total_trim_pct(k)
-    pulse_ms = counts * PULSE_COUNT_MS
-    dead_ms = dead * PULSE_COUNT_MS
-    out["injector_pulse_ms"] = pulse_ms
-    out["effective_ms"] = pulse_ms - dead_ms
-    out["dead_ms"] = dead_ms
-    out["delivered_lambda"] = math.nan
-    out["fuel_per_event_g"] = math.nan
-    return out
 
 
 def _build_cache(
@@ -846,10 +772,12 @@ def _build_cache(
     learned: dict[str, Any],
 ) -> tuple[_Cache, IntArray, list[tuple[str, ...]]]:
     """Every (point, fill byte) the draws visit, and the (point, draw) ->
-    combination index. The ECU chain runs per combination through
-    ``paired_scenarios._ecu_chain``; the pulse chain runs once per ROM over
-    every combination; the loop logic and the reasons are ``_pair_point``'s
-    and ``run_paired``'s, re-checked against ``run_paired`` on every run."""
+    combination index. Every piece is run_paired's own, none a copy (E09.2c):
+    the ECU stages per combination through ``paired_scenarios._ecu_chain``
+    (the twin runner's ``stated_ecu``), the pulse stage once per ROM over
+    every combination (``twin_runner.stated_pulse``), the loop through
+    ``_pair_loop`` and the reasons through ``output_reasons``; the assembled
+    result is still re-checked against ``run_paired`` on every run."""
     base_side = _side(kit, base_image, template.base, learned["base"]["ltft_pct"], "base")
     cand_side = _side(
         kit, candidate_image, template.candidate, learned["candidate"]["ltft_pct"], "candidate"
@@ -871,10 +799,14 @@ def _build_cache(
         bytes_.extend(int(v) for v in uniq)
     n = len(at)
     points = [_with_byte(design.points[at[c]].point, bytes_[c]) for c in range(n)]
-    b_ecus = [_ecu_chain(kit, base_side, p) for p in points]
-    c_ecus = [_ecu_chain(kit, cand_side, p) for p in points]
-    b_pulses = _pulses(base_side, b_ecus, points, stfts[0])
-    c_pulses = _pulses(cand_side, c_ecus, points, stfts[1])
+    stages = stage_order(kit.model)
+    b_ecus = [_ecu_chain(kit, stages, base_side, p) for p in points]
+    c_ecus = [_ecu_chain(kit, stages, cand_side, p) for p in points]
+    pulses = (
+        _pulses(kit, base_side, b_ecus, points, stfts[0]),
+        _pulses(kit, cand_side, c_ecus, points, stfts[1]),
+    )
+    sides = (base_side, cand_side)
 
     base = {name: np.full(n, np.nan) for name in OUTPUTS}
     cand = {name: np.full(n, np.nan) for name in OUTPUTS}
@@ -885,54 +817,24 @@ def _build_cache(
     computed = np.zeros((2, n), dtype=bool)
     pulse = np.full((2, n), np.nan)
     dead = np.full((2, n), np.nan)
-    min_effective = kit.plant.steady.min_effective_pulse_ms
+
+    def fuel_at(c: int) -> FuelFn:
+        def fuel(s: int, ecu: dict[str, Any], hold: tuple[int, int] | None) -> dict[str, Any]:
+            return _fuel_side(sides[s], ecu, pulses[s], c, stfts[s], hold)
+
+        return fuel
+
     for c in range(n):
-        point, b_ecu, c_ecu = points[c], b_ecus[c], c_ecus[c]
-        # _pair_point, with the plant deferred to the per-draw pass.
-        b = _fuel_side(base_side, b_ecu, b_pulses, c, stfts[0])
-        loop: str | None
-        closed = any(_plant_regime(e["target_phi"], kit) == "closed_loop" for e in (b_ecu, c_ecu))
-        if not closed:
-            cd, loop = _fuel_side(cand_side, c_ecu, c_pulses, c, stfts[1]), None
-        elif (
-            b_ecu["target_phi_word"] is None or b_ecu["target_phi_word"] != c_ecu["target_phi_word"]
-        ):
-            cd, loop = c_ecu, SETPOINT_MOVED
-        elif b.get("g_word") is None:
-            cd, loop = c_ecu, "closed_loop"
-        else:
-            hold = (int(b["g_word"]), int(b["k_word"]))
-            cd, loop = _fuel_side(cand_side, c_ecu, c_pulses, c, stfts[1], hold), "closed_loop"
+        point = points[c]
+
+        # _pair_point's loop, with the plant deferred to the per-draw pass.
+        pair = _pair_loop(kit, b_ecus[c], c_ecus[c], fuel_at(c))
+        b, cd, loop = pair.base, pair.candidate, pair.loop
         loops.append(loop or "open_loop")
         # run_paired's per-output reasons.
-        regime = _regime(point, kit)
-        plant_regimes = {
-            r
-            for r in (_plant_regime(b["target_phi"], kit), _plant_regime(cd["target_phi"], kit))
-            if r
-        }
-        unqualified = (
-            sorted(plant_regimes - set(qualification.regimes)) if qualification.qualified else []
-        )
+        point_reasons = output_reasons(kit, scope, gate, qualification, point, pair)
         for name in OUTPUTS:
-            reasons = scope.keep(name, [*gate, *b["reasons"], *cd["reasons"]])
-            if name not in _ECU_OUTPUTS:
-                if regime is not None:
-                    reasons.append(regime)
-                if loop == SETPOINT_MOVED:
-                    reasons.append(SETPOINT_MOVED)
-                elif loop == "closed_loop" and closed_loop_trim_pending(kit.model):
-                    reasons.append(TRIM_AUTHORITY_UNDECODED)
-                if name in _PLANT_OUTPUTS:
-                    reasons.extend(f"regime_not_qualified:{r}" for r in unqualified)
-                eff = [s["effective_ms"] for s in (b, cd) if s.get("effective_ms") is not None]
-                if any(e < min_effective for e in eff):
-                    reasons.append("short_pulse_undecoded")
-            if name == "injector_pulse_ms" and point.battery_v_source == "unmeasured":
-                reasons.append(BATTERY_UNMEASURED)
-            if b[name] is None or cd[name] is None:
-                reasons.append("not_computed")
-            key = tuple(sorted(set(reasons)))
+            key = tuple(point_reasons[name])
             if key not in interned:
                 interned[key] = len(reason_sets)
                 reason_sets.append(key)
@@ -1009,8 +911,9 @@ def _plant(
         if not group.any():
             continue
         g_at, g_idx, g_sides = at[group], idx[group], sides[group]
-        out = predict(
-            PlantInputs(
+        # The plant stage on the predicted pulses, in the replay's columns.
+        out = plant_predict(
+            stated_plant_samples(
                 pulse_ms=cache.pulse_ms[g_sides, g_idx],
                 ecu_dead_time_ms=cache.dead_ms[g_sides, g_idx],
                 rpm=points.rpm[g_at],
@@ -1018,10 +921,10 @@ def _plant(
                 baro_kpa=points.baro_kpa[g_at],
                 iat_c=points.iat_c[g_at],
                 rail_kpa=points.rail_kpa[g_at],
-                map_kpa=None if group is model else points.map_kpa[g_at],
             ),
             params,
-            kit.plant.geometry,
+            kit.plant,
+            map_kpa=None if group is model else points.map_kpa[g_at],
         )
         result["delivered_lambda"][g_sides, where[group]] = out.lambda_delivered
         result["fuel_per_event_g"][g_sides, where[group]] = out.fuel_g
@@ -1041,8 +944,8 @@ def _refuse_manifold_refusal(
     if kit.plant.manifold_model not in REFUSING_MODELS or not points.map_from_model.any():
         return
     at = np.flatnonzero(points.map_from_model)
-    out = predict(
-        PlantInputs(
+    out = plant_predict(
+        stated_plant_samples(
             pulse_ms=np.full(at.size, 2.0),
             ecu_dead_time_ms=np.zeros(at.size),
             rpm=points.rpm[at],
@@ -1052,7 +955,7 @@ def _refuse_manifold_refusal(
             rail_kpa=points.rail_kpa[at],
         ),
         params,
-        kit.plant.geometry,
+        kit.plant,
     )
     assert out.manifold_refusal is not None
     refused = np.flatnonzero(out.manifold_refusal != "")
@@ -1189,6 +1092,7 @@ def _design_assumptions(design: MonteCarloDesign, *, ve_drawn: bool) -> list[str
     return out
 
 
+@refusing_as_simulation
 def run_monte_carlo(
     kit: SimKit,
     template: PairedScenario,

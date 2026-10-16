@@ -129,7 +129,14 @@ Pi; E09.13 Light. Items marked **listing** need the firmware session
   E02's accounting, > 0 `load_input` pairs in E07.4's case, and a fill-byte
   read within 0.1 s of every pulse read.
 
-- [ ] **E09.2 — One replay runner over the node graph.**
+- [x] **E09.2 — One replay runner over the node graph.** (2026-10-16: 2a, 2b,
+  2c below. Fixtures green through the runner, `-m "slow or not slow"`:
+  `test_twin_runner.py` (36) with the other importers of the touched
+  modules 468 passed; the 16 files that call `run_paired`/`run_monte_carlo`
+  404 passed; `cmp_head`
+  equality to 6ad4ca3 on 522 + 592 calls; shared-kernel mutations move
+  both front ends; the clean-process test passes with `paired_steady`
+  imported.)
   `src/analysis/twin_runner.py` (layer 5): given a resolved ROM and kit and
   a session (or a bounded window of reads), walk the application model in
   `schedule` order, execute each `implemented` node's kernel, take each
@@ -273,7 +280,95 @@ Pi; E09.13 Light. Items marked **listing** need the firmware session
     captured, so the kind is `not_co_sampled`), unlike target phi's
     `captured_by`. Open for 2c: the paired comparison feeds stated
     (predicted) pulses, not observed ones, into the same plant stage.
-    Remaining for E09.2: 2c (`run_paired` on it, `cmp_head` equality).
+  - [x] **2c — `run_paired` on the runner (2026-10-16).** One ECU path:
+    `_side` is `twin_runner.resolve_image` (what `resolve_ecu` now calls;
+    `SimKit` carries `twin_sha256`, so it is a `RunnerKit`), its refusals
+    mapped to the paired names `<label>_<calibration>:<reason>`;
+    `_ecu_chain` runs `stage_order(model)` through `twin_runner.stated_ecu`
+    on a `StatedSample` (every stage's calibration first, then the X
+    scaler; stage refusals mapped to `steady_bfs:` / `target_lookup:` /
+    `load_point_scaler_unresolved`, not renamed); the pulse stage is
+    `stated_pulse` (one point, or every Monte Carlo combination at once); the
+    plant stage is `twin_runner.plant_predict` on `stated_plant_samples`,
+    the predicted pulse and dead time in the replay's own sample columns
+    (`PLANT_FRAME_COLUMNS`, `plant_inputs`), which `_run_plant` calls too.
+    The Monte Carlo fast path keeps no copy: `_fuel_side`, `_pair_loop`
+    (loop and closed-loop hold), `output_reasons` (per-output support),
+    `rom_gate` and `compare_scenario_roms` are `paired_scenarios`' and both
+    call them; `fast_path_diverged` kept (its test green). Plant: the kit's
+    (`SimKit.plant`, the sim_kit plant under `load_sim_kit`), named by the
+    scenario's `PlantIdentity` and checked (`plant_mismatch`), never defaulted.
+    Folded in: `target_phi.x_reads()` (`XReads`; `x_formula_check` and the
+    runner's X stage both read through it, the runner's `target_phi._series`
+    / `_raw` copy gone); `target_phi.REASONS` (reason → state, `:`-templates)
+    plus `excluded_mode_reasons(definition)`, every reason minted by
+    `_reason` / `_excluded_mode`, which refuse an unregistered one
+    (`reason_unregistered`), and `test_every_reason_target_phi_can_emit_classifies`
+    reads the registry, not the source; `rank_as_improvement` refuses a
+    non-`InterventionVerdict` by name (`intervention_not_a_verdict`, an
+    `EcuOutputVerdict` in the test). **`cmp_head` equality, HEAD 6ad4ca3
+    loaded from a `git archive` tree** (a pytest plugin wraps `run_paired`
+    and `run_monte_carlo` wherever bound, pickles `asdict(result)` or the
+    refusal per call, and prints each module's `__file__`; a leaf walker
+    compares key order, types, float bits and array bytes): the 16 test
+    files that call them (`-m "slow or not slow"`, private ROM files
+    included), 522 calls (413 paired results, 12 paired refusals, 82 Monte
+    Carlo results, 15 Monte Carlo refusals; 23,260 float leaves, 2,260
+    arrays), 0 differing (4 calls a module-scoped private-ROM fixture makes
+    land under another test id as xdist schedules it; compared across ids,
+    identical); an explicit case file, 592 calls (580 paired, 12
+    Monte Carlo), 0 differing: 14 edits (identical, Fuel Comp ±3, one cell,
+    Target AFR, fill_curve_low, timing trims A/B, K, Load Point Scaler,
+    fill_time_constant_rising, the Fuel Comp flow axis, the 0xE27E flip, the
+    checksum flip) × 6 point sets (conditioned, unconditioned, cold, closed
+    loop, model MAP, no battery read) × the contract plant, fuel-mv-1 and
+    fuel-mv-2 × with and without `plant_overrides`; Monte Carlo on mv-1 and
+    mv-2 over 5 edits; the operator's 20260920 → 20261004 on an 8-point grid
+    and a 3-point Monte Carlo, both plants. The W09 form grid on fuel-mv-2
+    (`test_rom_editor_private_rom`) is among the 522. The harness needs HEAD,
+    so it stays in scratch; its committed reduced forms are
+    `test_run_paired_and_the_fast_path_run_the_twin_runners_one_ecu_path`
+    (one mutation in `twin_runner.steady_bfs` / `plant_inputs` moves
+    `run_paired` and the fast path alike, self-check green) and
+    `test_a_mutated_lookup_kernel_moves_the_replay_and_the_paired_comparison`
+    (`target_command` +1: replay residual −1, paired phi word +1). Kernel
+    patches in `test_sim_cells` / `test_sim_assumptions` now target
+    `twin_runner` (where the kernels are bound). No TOOL_VERSION or
+    RUNNER_VERSION bump: no result's meaning changed. **Verifier FAIL, fixed
+    (refusals on the paired path):** `stage_order` on a model whose stage
+    node moved (`node_undeclared` / `stage_role_changed` / `kernel_mismatch`)
+    raised `TwinRunnerRefusalError` out of `run_paired` and the Monte Carlo
+    `_build_cache`, which W09's `REFUSALS` does not hold and which did not
+    pickle, so a workbench job raised (in the spawn child, a broken pool).
+    Now `paired_scenarios.refusing_as_simulation` wraps `run_paired` and
+    `run_monte_carlo`, re-raising any runner refusal as
+    `SimulationRefusalError(reason, message)`; and `TwinRunnerRefusalError`,
+    `SimulationRefusalError` and `TwinRefusalError` pickle (`__reduce__` from
+    `(reason, message)`). `tests/test_paired_refusals.py`: a pickle
+    round-trip per class; `run_paired` on a re-kerneled kit refuses
+    `kernel_mismatch` as a `SimulationRefusalError`; the verifier's case
+    through `rom_editor.run_job("rom_sim", …)` returns
+    `refused: {kind: simulation, reason: kernel_mismatch}`. **Pre-existing,
+    fixed (HEAD behaviour changes for this case only):** a Load Point Scaler
+    of 0 raised `ZeroDivisionError` from `run_paired` (in `x_from_bfs`). The
+    stated ECU stage now refuses it before any stage runs, and the replay's
+    X stage too: `calibration_unresolved:load_point_scaler_invalid`, paired
+    name `load_point_scaler_invalid` (beside `load_point_scaler_unresolved`);
+    tests in `test_paired_refusals.py` (base side computed, candidate named)
+    and `test_twin_runner.py` (194 X reads `calibration_unresolved`). After
+    the fix the case file is still 592 calls identical to HEAD; the paired,
+    Monte Carlo, rom_editor/levers/sim and runner files, `-m "slow or not
+    slow"`, 534 passed, 1 xfailed. **Every `src` exception pickles (made
+    impossible, not one class at a time):** 30 classes whose constructor
+    takes required arguments (`(reason, message)` and others) and whose
+    `super().__init__` gets one formatted string could not be unpickled, so
+    each gained a `__reduce__` from its constructor's arguments (its
+    subclasses inherit it). `tests/test_exceptions_pickle.py` imports every
+    `src` module, builds every exception class defined there (strings for
+    required arguments, a typed table for the 15 that need more) and asserts
+    type, `args`, `str`, `.reason` and `vars` survive `pickle`: 165 passed;
+    the same file run in the HEAD tree, 38 failed. Gate after it (the 21 files
+    above, the new test, `test_layering.py`): 699 passed, 1 xfailed.
 
 - [ ] **E09.3 — Stateful ECU replay at the tick.**
   The airflow pipeline (`w20A8` low-pass, `L20AC`, `w1056`, the `w273E`

@@ -59,7 +59,7 @@ from src.analysis.fuel_plant_eval import (
 )
 from src.analysis.rom_effects import load_rom
 from src.analysis.sim_kit import sim_plant_version
-from src.analysis.target_phi import evaluate_session, x_formula_check
+from src.analysis.target_phi import TwinRefusalError, evaluate_session, x_formula_check
 from src.analysis.twin_runner import (
     EMPTY_KINDS,
     RECORD_COLUMNS,
@@ -220,50 +220,27 @@ def test_a_reason_no_kind_names_refuses_rather_than_counting() -> None:
     assert _phi_kind("unevaluable", unbracketed, identity_captured=False) == "input_not_captured"
 
 
-#: The reason expressions target_phi emits that are not string literals,
-#: each with every value it can take (verifier, 2026-10-16: three were missed).
-_PHI_VARIABLE_REASONS = {
-    "names[0]": None,  # an excluded fuel-system mode name: classified by state
-    "prediction.reason": [GATE_STATE_UNKNOWN],
-    "resolution.reason": "resolve_slot",
-    "identity_reason": None,  # the _identity tuple, enumerated from its returns
-    "(state, reason)": None,  # the gates' list, enumerated from _gates' appends
-}
-
-
-def _target_phi_reasons() -> list[tuple[str, str]]:
+def _target_phi_reasons(definition: Any) -> list[tuple[str, str]]:
     """Every ``(state, reason)`` target_phi can put on a record, read from its
-    source: literal tuples, f-string templates (with a placeholder) and the
-    slot resolver's reasons. A reason expression of another shape fails here."""
-    source = inspect.getsource(target_phi)
-    found: list[tuple[str, str]] = []
-    pattern = re.compile(r'\("(unevaluable|excluded|pending)", ([^)]*)\)')
-    for state, expression in pattern.findall(source):
-        literal = re.fullmatch(r'"([a-z_:]+)"', expression)
-        template = re.fullmatch(r'f"([a-z_]+:)\{[^}]+\}"', expression)
-        if literal:
-            found.append((state, literal.group(1)))
-        elif template:
-            found.append((state, template.group(1) + "x"))
-        else:
-            assert expression in _PHI_VARIABLE_REASONS, f"unenumerated reason {expression}"
-            values = _PHI_VARIABLE_REASONS[expression]
-            if values == "resolve_slot":
-                slot_source = inspect.getsource(target_phi.resolve_slot)
-                reasons = re.findall(r'SlotResolution\(\s*None,\s*"([a-z_]+)"', slot_source)
-                assert reasons, "resolve_slot names no reason"
-                found += [(state, r) for r in reasons]
-            elif isinstance(values, list):
-                found += [(state, v) for v in values]
+    registry (``target_phi.REASONS``: a template stands as ``<prefix>x``) and
+    the excluded fuel-system mode names its mode gate declares. The registry
+    is the source: ``_reason`` refuses a reason it lacks, so a split tuple, a
+    list or a variable cannot carry one past it."""
+    found: list[tuple[str, str]] = [
+        (state, reason + "x" if reason.endswith(":") else reason)
+        for reason, state in target_phi.REASONS.items()
+    ]
+    found += [("excluded", name) for name in target_phi.excluded_mode_reasons(definition)]
     return found
 
 
-def test_every_reason_target_phi_can_emit_classifies() -> None:
-    reasons = _target_phi_reasons()
+def test_every_reason_target_phi_can_emit_classifies(kit: TwinKit) -> None:
+    reasons = _target_phi_reasons(kit.twin)
     names = {r for _, r in reasons}
     # The enumeration reaches the three the first runner missed, and the rest.
     assert {"map_uninitialised", "slot_ambiguous", "map_switching"} <= names
     assert {"sentinel", "map_identity_unbracketed", "input_stale:x", "awaiting_input:x"} <= names
+    assert GATE_STATE_UNKNOWN in names
     assert len(reasons) >= 25
     for state, reason in reasons:
         for captured in (True, False):
@@ -271,6 +248,43 @@ def test_every_reason_target_phi_can_emit_classifies() -> None:
     assert _phi_kind("unevaluable", ["map_uninitialised"], identity_captured=True) == (
         "outside_model"
     )
+
+
+def test_target_phi_mints_every_reason_through_its_registry() -> None:
+    """No reason tuple is written outside ``_reason`` / ``_excluded_mode``,
+    and either refuses what the registry does not hold (or holds under
+    another state)."""
+    source = inspect.getsource(target_phi)
+    raw = re.findall(r'(?<!_reason)\(\s*"(?:unevaluable|excluded|pending)"\s*,', source)
+    assert raw == []
+    assert target_phi._reason("unevaluable", "input_stale:load") == (
+        "unevaluable",
+        "input_stale:load",
+    )
+    for state, reason in (
+        ("unevaluable", "not_a_reason"),
+        ("excluded", "sentinel"),
+        ("unevaluable", "input_stale:"),
+        ("unevaluable", None),
+    ):
+        with pytest.raises(TwinRefusalError) as refused:
+            target_phi._reason(state, reason)  # type: ignore[arg-type]
+        assert refused.value.reason == "reason_unregistered"
+    with pytest.raises(TwinRefusalError):
+        target_phi._excluded_mode({1: "closed_loop"}, "made_up_mode")
+
+
+def test_x_reads_are_the_x_formula_checks_reads(kit: TwinKit) -> None:
+    """The runner's X stage and ``x_formula_check`` read X through one public
+    reader: its reads, paired, are the check's pairs."""
+    frame = fixture_frame()
+    reads = target_phi.x_reads(frame, kit.twin)
+    check = x_formula_check(frame, kit.twin, scaler=1)
+    assert (reads.x_spec, reads.bfs_spec) == (X_SPEC, kit.twin.x_formula.bfs_channel)
+    assert len(reads.x_times) == len(reads.x_raw) == 194
+    pairs = zip(reads.x_times, reads.x_raw, strict=True)
+    by_time = {target_phi._iso(float(t)): int(v) for t, v in pairs}
+    assert all(by_time[p["acquired_at"]] == p["x"] for p in check["pairs"])
 
 
 def test_an_uninitialised_map_magic_is_counted_not_refused(kit: TwinKit) -> None:
@@ -423,6 +437,54 @@ def test_a_mutated_lookup_kernel_moves_both_front_ends(
 
     monkeypatch.setattr(target_phi, "target_command", off_by_one)
     assert both() == (-1.0, -1.0)
+
+
+def test_a_mutated_lookup_kernel_moves_the_replay_and_the_paired_comparison(
+    kit: TwinKit, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """E09.2c: ``run_paired`` runs the runner's own ECU stages on stated
+    points (``twin_runner.stated_ecu``), so one count of error in the shared
+    lookup kernel moves a replay residual and a paired phi word alike."""
+    from src.analysis.paired_scenarios import run_paired
+    from tests.test_paired_scenarios import WOT, _scenario
+    from tests.test_sim_montecarlo import build_kit_and_image
+
+    sim_kit, image = build_kit_and_image()
+    frame = _session()
+    ecu = _committed_ecu(kit)
+    q = 1 << kit.twin.reference.q_bits
+
+    def both() -> tuple[float, int]:
+        run = run_twin(frame, kit, ecu, name="synthetic", plant_version=PLANT)
+        (row,) = run.eligible("target_equiv_ratio").itertuples()
+        paired = run_paired(sim_kit, _scenario(sim_kit, image, image, WOT), image, image)
+        phi = paired.points[0]["outputs"]["target_phi"]["base"]
+        assert phi is not None
+        return float(row.residual), round(phi * q)
+
+    residual, word = both()
+    real = target_phi.target_command
+
+    def off_by_one(*args: Any, **kwargs: Any) -> Any:
+        command = real(*args, **kwargs)
+        word = None if command.word is None else command.word + 1
+        return dataclasses.replace(command, word=word)
+
+    monkeypatch.setattr(target_phi, "target_command", off_by_one)
+    assert both() == (residual - 1.0, word + 1)
+
+
+def test_a_zero_load_point_scaler_is_a_named_calibration_refusal(kit: TwinKit) -> None:
+    """X divides by the scaler: a zero one is ``calibration_unresolved``,
+    named, on every X read (it raised ZeroDivisionError before E09.2c)."""
+    ecu = _committed_ecu(kit)
+    assert ecu.table is not None
+    zero = dataclasses.replace(ecu, table=dataclasses.replace(ecu.table, load_point_scaler=0))
+    run = run_twin(fixture_frame(), kit, zero, name=RAM_STUDY, plant_version=PLANT)
+    assert run.accounting()["load_input_x"][X_SPEC] == {
+        "calibration_unresolved:load_point_scaler_invalid": 194
+    }
+    assert run.native["load_input_x"] is None
 
 
 def test_a_mutated_x_kernel_moves_both_front_ends(

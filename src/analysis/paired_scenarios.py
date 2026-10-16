@@ -57,24 +57,20 @@ What it makes impossible rather than documented:
 
 from __future__ import annotations
 
+import functools
 import hashlib
 import json
 import math
 import re
-from collections.abc import Collection, Iterable, Mapping, Sequence
+from collections.abc import Callable, Collection, Iterable, Mapping, Sequence
 from dataclasses import asdict, dataclass, field, replace
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Literal, TypeVar, cast
 
 import numpy as np
 import pandas as pd
 
-from src.analysis.air_charge_twin import AirChargeCalibration, AirChargeRefusalError
-from src.analysis.ecu_application import (
-    ApplicationModel,
-    ApplicationModelRefusalError,
-    load_application_model,
-)
+from src.analysis.ecu_application import ApplicationModel, load_application_model
 from src.analysis.fuel_plant import (
     DELAY_PARAMETER,
     MANIFOLD_READS,
@@ -84,25 +80,17 @@ from src.analysis.fuel_plant import (
     B06Rules,
     FuelPlantProfile,
     FuelPlantRefusalError,
-    PlantInputs,
+    Qualification,
     ResolvedParameters,
     VeCurve,
     load_b06,
     load_fuel_plant,
     plant_qualification,
     plant_reads,
-    predict,
     resolve_parameters,
     sensitivity_cases,
 )
-from src.analysis.fuel_plant_eval import calibration_from_image
-from src.analysis.injector_pulse import (
-    PULSE_COUNT_MS,
-    PulseChainCalibration,
-    predict_pulse,
-    trim_word,
-    vb_counts_from_volts,
-)
+from src.analysis.injector_pulse import PULSE_COUNT_MS
 from src.analysis.paired_steady import (
     BFS_OUTPUT,
     COMPUTED_HERE,
@@ -116,7 +104,6 @@ from src.analysis.paired_steady import (
     closed_loop_trim_pending,
     conditionable_node,
     ecu_output_gate,
-    steady_bfs,
     steady_coverage,
     total_trim_pct,
     trim_k,
@@ -137,16 +124,25 @@ from src.analysis.sim_contract import (
     check_scenario,
     load_contract,
 )
-from src.analysis.target_phi import (
-    ResolvedTable,
-    TwinDefinition,
-    TwinRefusalError,
-    load_twin_definition,
-    resolve_table,
-    x_from_bfs,
+from src.analysis.target_phi import TwinDefinition, load_twin_definition
+from src.analysis.twin_runner import (
+    SCALER_INVALID,
+    SCALER_UNRESOLVED,
+    ResolvedEcu,
+    Stage,
+    StatedPulse,
+    StatedSample,
+    TwinRunnerRefusalError,
+    plant_predict,
+    resolve_image,
+    stage_order,
+    stated_ecu,
+    stated_plant_samples,
+    stated_pulse,
 )
-from src.analysis.target_phi import predict as predict_phi
 from src.session import SYNTHETIC_SESSION_PREFIX
+
+_F = TypeVar("_F", bound=Callable[..., Any])
 
 #: Bump when what a result means changes. 2: BFS is computed per ROM at its
 #: steady fixed point, and closed-loop points run at the trim's fixed point.
@@ -193,6 +189,9 @@ class SimKit:
     model_sha256: str
     rom_map: RomMap
     twin: TwinDefinition
+    #: sha256 of the twin definition: with it the kit is a
+    #: :class:`~src.analysis.twin_runner.RunnerKit`, the runner's ECU path.
+    twin_sha256: str
     viewer: ViewerDefinition
     plant: FuelPlantProfile
     delay: B06Rules
@@ -204,7 +203,7 @@ class SimKit:
 def load_kit(profile_dir: Path) -> SimKit:
     contract, contract_sha = load_contract(profile_dir)
     model, model_sha = load_application_model(profile_dir)
-    twin, _ = load_twin_definition(profile_dir)
+    twin, twin_sha = load_twin_definition(profile_dir)
     plant, _ = load_fuel_plant(profile_dir)
     return SimKit(
         contract=contract,
@@ -213,6 +212,7 @@ def load_kit(profile_dir: Path) -> SimKit:
         model_sha256=model_sha,
         rom_map=load_rom_map(profile_dir),
         twin=twin,
+        twin_sha256=twin_sha,
         viewer=load_viewer_definition(profile_dir),
         plant=plant,
         delay=load_b06(profile_dir, plant.delay),
@@ -522,46 +522,28 @@ def plant_parameters(
 
 @dataclass(frozen=True)
 class _Side:
-    table: ResolvedTable | None
-    cal: PulseChainCalibration | None
-    air: AirChargeCalibration | None
+    """One ROM of the pair: its ECU as the twin runner resolves it, the paired
+    reasons its refusals carry, and the LTFT it runs at."""
+
+    ecu: ResolvedEcu
     reasons: tuple[str, ...]
     ltft_pct: float
 
 
+#: The order a side names its calibration refusals in (sorted on the way out).
+_SIDE_CALIBRATIONS: tuple[str, ...] = ("target_table", "pulse_chain", "air_charge")
+
+
 def _side(kit: SimKit, image: bytes, identity: EcuIdentity, ltft_pct: float, label: str) -> _Side:
-    reasons: list[str] = []
-    table: ResolvedTable | None = None
-    cal: PulseChainCalibration | None = None
-    air: AirChargeCalibration | None = None
+    """One ROM by the twin runner's own constructor
+    (:func:`~src.analysis.twin_runner.resolve_image`); a refusal is named
+    ``<label>_<calibration>:<reason>``, the paired result's name for it."""
     assert identity.slot is not None
-    try:
-        table = resolve_table(
-            image,
-            kit.rom_map,
-            kit.twin,
-            viewer=kit.viewer,
-            application_model=(kit.model, kit.model_sha256),
-            expected_sha256=identity.image_sha256,
-            slot=identity.slot,
-        )
-    except TwinRefusalError as exc:
-        reasons.append(f"{label}_target_table:{exc.reason}")
-    try:
-        cal = calibration_from_image(image, kit.plant.pulse_chain)
-    except FuelPlantRefusalError as exc:
-        reasons.append(f"{label}_pulse_chain:{exc.reason}")
-    try:
-        air = AirChargeCalibration.from_image(
-            image,
-            model=kit.model,
-            rom_map=kit.rom_map,
-            slot=identity.slot,
-            image_sha256=identity.image_sha256,
-        )
-    except (AirChargeRefusalError, ApplicationModelRefusalError) as exc:
-        reasons.append(f"{label}_air_charge:{exc.reason}")
-    return _Side(table, cal, air, tuple(reasons), ltft_pct)
+    ecu = resolve_image(kit, image, image_sha256=identity.image_sha256, slot=identity.slot)
+    reasons = tuple(
+        f"{label}_{cal}:{ecu.refusals[cal]}" for cal in _SIDE_CALIBRATIONS if cal in ecu.refusals
+    )
+    return _Side(ecu, reasons, ltft_pct)
 
 
 def _rpm_quantum(contract: SimContract) -> float:
@@ -577,8 +559,49 @@ def rpm_word(rpm: float, contract: SimContract) -> int:
     return int(round(rpm / _rpm_quantum(contract)))
 
 
-def _ecu_chain(kit: SimKit, side: _Side, point: OperatingPoint) -> dict[str, Any]:
-    """One ROM at one point, ECU side: steady BFS, X and the phi word, or why not."""
+def stated_sample(kit: SimKit, point: OperatingPoint, load_byte: float) -> StatedSample:
+    """A prescribed point as the twin runner's stated-input source: the
+    values each stage reads, at the stated fill byte."""
+    return StatedSample(
+        rpm=point.rpm,
+        rpm_word=rpm_word(point.rpm, kit.contract),
+        maf_gps=point.maf_gps,
+        load_byte=int(load_byte),
+        flag=point.pedal_flag,
+        battery_v=point.battery_v,
+        baro_kpa=point.baro_kpa,
+        iat_c=point.iat_c,
+    )
+
+
+#: The runner's stated-stage refusals under the names a paired result has
+#: always carried (W09 renders them): mapped here, never renamed on either side.
+_STAGE_REASON_PREFIX: dict[str, str] = {
+    "base_fuel_schedule_word": "steady_bfs",
+    "target_equiv_ratio": "target_lookup",
+}
+_SCALER_REASONS: dict[str, str] = {
+    SCALER_UNRESOLVED: "load_point_scaler_unresolved",
+    SCALER_INVALID: "load_point_scaler_invalid",
+}
+
+
+def _paired_reason(stage: str, reason: str) -> str | None:
+    """The paired name of a stated stage's refusal; ``None`` for a missing
+    calibration, which the side's own reasons already name."""
+    if reason in _SCALER_REASONS:
+        return _SCALER_REASONS[reason]
+    if reason.startswith("calibration_unresolved:"):
+        return None
+    return f"{_STAGE_REASON_PREFIX[stage]}:{reason}"
+
+
+def _ecu_chain(
+    kit: SimKit, stages: tuple[Stage, ...], side: _Side, point: OperatingPoint
+) -> dict[str, Any]:
+    """One ROM at one point, ECU side: the twin runner's ECU stages on the
+    point (:func:`~src.analysis.twin_runner.stated_ecu`), steady BFS, X and
+    the phi word, or why not."""
     out: dict[str, Any] = {name: None for name in OUTPUTS}
     out["reasons"] = list(side.reasons)
     out["target_phi_word"] = None
@@ -586,28 +609,64 @@ def _ecu_chain(kit: SimKit, side: _Side, point: OperatingPoint) -> dict[str, Any
     if load is None:
         out["reasons"].append(f"conditioning_missing:{_LOAD_BYTE}")
         return out
-    if side.table is None or side.cal is None or side.air is None:
+    ecu = stated_ecu(stages, kit, side.ecu, stated_sample(kit, point, load))
+    if ecu.bfs is not None:
+        out["base_fuel_schedule"] = ecu.bfs.word
+        out["bfs_interval"] = (ecu.bfs.lo, ecu.bfs.hi)
+        out["fuel_comp"] = ecu.bfs.fuel_comp
+    if ecu.x is not None:
+        out["load_input_x"] = ecu.x
+    if ecu.refused is not None:
+        reason = _paired_reason(*ecu.refused)
+        if reason is not None:
+            out["reasons"].append(reason)
         return out
-    if side.table.load_point_scaler is None:
-        out["reasons"].append("load_point_scaler_unresolved")
+    assert ecu.phi is not None
+    out["target_phi"] = ecu.phi.phi
+    out["target_phi_word"] = ecu.phi.word
+    return out
+
+
+def _fuel_side(
+    side: _Side,
+    ecu: dict[str, Any],
+    pulses: StatedPulse | None,
+    c: int,
+    stft_pct: float,
+    hold: tuple[int, int] | None = None,
+) -> dict[str, Any]:
+    """The pulse and total trim for one ROM at sample ``c`` of ``pulses`` (a
+    copy of ``ecu`` with them filled in), and what the plant reads
+    (``dead_ms``); the plant outputs are NaN until the plant runs.
+
+    Open loop (``hold`` None): the stated trims. Closed loop: ``hold`` is the
+    base's ``(G, k)``; the trim settles where this ROM meters the same open
+    time, ``k = G_b x k_b / G`` (:func:`~src.analysis.paired_steady.closed_loop_k`),
+    so the pulse is the base's metered part plus this ROM's own dead time.
+    The paired run and the Monte Carlo fast path both call this."""
+    out = dict(ecu)
+    out["reasons"] = list(ecu["reasons"])
+    if ecu["target_phi_word"] is None or side.ecu.pulse is None or pulses is None:
         return out
-    rpm_raw = rpm_word(point.rpm, kit.contract)
-    try:
-        bfs = steady_bfs(side.air, maf_gps=point.maf_gps, rpm_word=rpm_raw, load_byte=int(load))
-    except AirChargeRefusalError as exc:
-        out["reasons"].append(f"steady_bfs:{exc.reason}")
-        return out
-    out["base_fuel_schedule"] = bfs.word
-    out["bfs_interval"] = (bfs.lo, bfs.hi)
-    out["fuel_comp"] = bfs.fuel_comp
-    x = x_from_bfs(bfs.word, side.table.load_point_scaler, kit.twin)
-    phi = predict_phi(side.table, kit.twin, load_raw=x, rpm_raw=rpm_raw, flag_raw=point.pedal_flag)
-    out["load_input_x"] = x
-    if phi.word is None:
-        out["reasons"].append(f"target_lookup:{phi.reason}")
-        return out
-    out["target_phi"] = phi.phi
-    out["target_phi_word"] = phi.word
+    g = int(pulses.g[c])
+    dead = int(pulses.dead[c])
+    if hold is None:
+        k: float = trim_k(stft_pct, side.ltft_pct)
+        counts = int(pulses.counts[c])
+    else:
+        g_base, k_base = hold
+        k = closed_loop_k(g_base, k_base, g)
+        counts = ((g_base * k_base) >> 16) + dead
+    out["g_word"] = g
+    out["k_word"] = k
+    out["fuel_trim_total_pct"] = total_trim_pct(k)
+    pulse_ms = counts * PULSE_COUNT_MS
+    dead_ms = dead * PULSE_COUNT_MS
+    out["injector_pulse_ms"] = pulse_ms
+    out["effective_ms"] = pulse_ms - dead_ms
+    out["dead_ms"] = dead_ms
+    out["delivered_lambda"] = math.nan
+    out["fuel_per_event_g"] = math.nan
     return out
 
 
@@ -622,58 +681,37 @@ def _fuel_chain(
     hold: tuple[int, int] | None = None,
 ) -> dict[str, Any]:
     """Pulse, total trim, lambda and fuel for one ROM at one point (a copy of
-    ``ecu`` with them filled in).
-
-    Open loop (``hold`` None): the stated trims. Closed loop: ``hold`` is the
-    base's ``(G, k)``; the trim settles where this ROM meters the same open
-    time, ``k = G_b x k_b / G`` (:func:`~src.analysis.paired_steady.closed_loop_k`),
-    so the pulse is the base's metered part plus this ROM's own dead time."""
-    out = dict(ecu)
-    out["reasons"] = list(ecu["reasons"])
-    if ecu["target_phi_word"] is None or side.cal is None:
+    ``ecu`` with them filled in): the twin runner's pulse stage on the point
+    (:func:`~src.analysis.twin_runner.stated_pulse`), :func:`_fuel_side`, and
+    its plant stage on the predicted pulse in the replay's sample columns
+    (:func:`~src.analysis.twin_runner.plant_predict`)."""
+    if ecu["target_phi_word"] is None or side.ecu.pulse is None:
+        out = dict(ecu)
+        out["reasons"] = list(ecu["reasons"])
         return out
-    pulse = predict_pulse(
+    sample = stated_sample(kit, point, point.conditioned[_LOAD_BYTE])
+    pulses = stated_pulse(
+        side.ecu,
+        [sample],
         bfs=[ecu["base_fuel_schedule"]],
         phi_q14=[ecu["target_phi_word"]],
-        stft_word=trim_word([stft_pct]),
-        ltft_word=trim_word([side.ltft_pct]),
-        vb_counts=vb_counts_from_volts([point.battery_v]),
-        rpm=[point.rpm],
-        baro_kpa=[point.baro_kpa],
-        iat_c=[point.iat_c],
-        cal=side.cal,
+        stft_pct=stft_pct,
+        ltft_pct=side.ltft_pct,
     )
-    assert pulse.g is not None
-    g = int(pulse.g[0])
-    dead = int(pulse.dead_time[0])
-    if hold is None:
-        k: float = trim_k(stft_pct, side.ltft_pct)
-        counts = int(pulse.pulse[0])
-    else:
-        g_base, k_base = hold
-        k = closed_loop_k(g_base, k_base, g)
-        counts = ((g_base * k_base) >> 16) + dead
-    out["g_word"] = g
-    out["k_word"] = k
-    out["fuel_trim_total_pct"] = total_trim_pct(k)
-    pulse_ms = counts * PULSE_COUNT_MS
-    dead_ms = dead * PULSE_COUNT_MS
-    out["injector_pulse_ms"] = pulse_ms
-    out["effective_ms"] = pulse_ms - dead_ms
-    params = plant_parameters(kit, overrides)
-    plant = predict(
-        PlantInputs(
-            pulse_ms=np.array([pulse_ms]),
-            ecu_dead_time_ms=np.array([dead_ms]),
-            rpm=np.array([point.rpm]),
-            maf_gps=np.array([point.maf_gps]),
-            baro_kpa=np.array([point.baro_kpa]),
-            iat_c=np.array([point.iat_c]),
-            rail_kpa=np.array([plant_rail_kpa(point)]),
-            map_kpa=None if point.map_kpa_source == "plant_model" else np.array([point.map_kpa]),
+    out = _fuel_side(side, ecu, pulses, 0, stft_pct, hold)
+    plant = plant_predict(
+        stated_plant_samples(
+            pulse_ms=[out["injector_pulse_ms"]],
+            ecu_dead_time_ms=[out["dead_ms"]],
+            rpm=[point.rpm],
+            maf_gps=[point.maf_gps],
+            baro_kpa=[point.baro_kpa],
+            iat_c=[point.iat_c],
+            rail_kpa=[plant_rail_kpa(point)],
         ),
-        params,
-        kit.plant.geometry,
+        plant_parameters(kit, overrides),
+        kit.plant,
+        map_kpa=None if point.map_kpa_source == "plant_model" else np.array([point.map_kpa]),
     )
     out["delivered_lambda"] = float(plant.lambda_delivered[0])
     out["fuel_per_event_g"] = float(plant.fuel_g[0])
@@ -696,32 +734,49 @@ class _PairPoint:
     loop: str | None
 
 
-def _pair_point(
-    kit: SimKit,
-    sides: tuple[_Side, _Side],
-    point: OperatingPoint,
-    stfts: tuple[float, float],
-    overrides: Mapping[str, float],
+#: One side's fuel chain for :func:`_pair_loop`: side 0 (base) or 1
+#: (candidate), its ECU values, and the base's ``(G, k)`` hold or None.
+FuelFn = Callable[[int, dict[str, Any], "tuple[int, int] | None"], dict[str, Any]]
+
+
+def _pair_loop(
+    kit: SimKit, b_ecu: dict[str, Any], c_ecu: dict[str, Any], fuel: FuelFn
 ) -> _PairPoint:
-    """Both ROMs at one point. A closed-loop point holds the base's metered
-    open time on the candidate while the target phi word is the same on both
-    sides; a moved word moves the setpoint, whose relation to phi is not
-    decoded, so the candidate's fuel side is not computed."""
-    base_side, cand_side = sides
-    b_ecu = _ecu_chain(kit, base_side, point)
-    c_ecu = _ecu_chain(kit, cand_side, point)
-    b = _fuel_chain(kit, base_side, point, b_ecu, stft_pct=stfts[0], overrides=overrides)
+    """Both ROMs' fuel sides at one point. A closed-loop point holds the base's
+    metered open time on the candidate while the target phi word is the same
+    on both sides; a moved word moves the setpoint, whose relation to phi is
+    not decoded, so the candidate's fuel side is not computed. The paired run
+    and the Monte Carlo fast path both decide the loop here."""
+    b = fuel(0, b_ecu, None)
     closed = any(_plant_regime(e["target_phi"], kit) == "closed_loop" for e in (b_ecu, c_ecu))
     if not closed:
-        c = _fuel_chain(kit, cand_side, point, c_ecu, stft_pct=stfts[1], overrides=overrides)
-        return _PairPoint(b, c, None)
+        return _PairPoint(b, fuel(1, c_ecu, None), None)
     if b_ecu["target_phi_word"] is None or b_ecu["target_phi_word"] != c_ecu["target_phi_word"]:
         return _PairPoint(b, c_ecu, SETPOINT_MOVED)
     hold = (int(b["g_word"]), int(b["k_word"])) if b.get("g_word") is not None else None
     if hold is None:
         return _PairPoint(b, c_ecu, "closed_loop")
-    c = _fuel_chain(kit, cand_side, point, c_ecu, stft_pct=stfts[1], overrides=overrides, hold=hold)
-    return _PairPoint(b, c, "closed_loop")
+    return _PairPoint(b, fuel(1, c_ecu, hold), "closed_loop")
+
+
+def _pair_point(
+    kit: SimKit,
+    stages: tuple[Stage, ...],
+    sides: tuple[_Side, _Side],
+    point: OperatingPoint,
+    stfts: tuple[float, float],
+    overrides: Mapping[str, float],
+) -> _PairPoint:
+    """Both ROMs at one point: the ECU stages, then :func:`_pair_loop`."""
+    b_ecu = _ecu_chain(kit, stages, sides[0], point)
+    c_ecu = _ecu_chain(kit, stages, sides[1], point)
+
+    def fuel(s: int, ecu: dict[str, Any], hold: tuple[int, int] | None) -> dict[str, Any]:
+        return _fuel_chain(
+            kit, sides[s], point, ecu, stft_pct=stfts[s], overrides=overrides, hold=hold
+        )
+
+    return _pair_loop(kit, b_ecu, c_ecu, fuel)
 
 
 Status = Literal["supported", "unsupported"]
@@ -1120,6 +1175,139 @@ def plant_assumption_lines(
     return lines
 
 
+def compare_scenario_roms(
+    kit: SimKit, scenario: PairedScenario, base_image: bytes, candidate_image: bytes
+) -> EffectReport:
+    """``compare_roms`` on the scenario's two images, slots and mode: the one
+    ROM comparison the paired run and the Monte Carlo fast path gate on."""
+    return compare_roms(
+        base_image,
+        candidate_image,
+        kit.rom_map,
+        kit.model,
+        kit.model_sha256,
+        base_slot=scenario.base.slot,
+        candidate_slot=scenario.candidate.slot,
+        slot_source=scenario.base.slot_source,
+        contract=kit.contract,
+        mode=scenario.mode,
+    )
+
+
+def _conditioned_nodes(kit: SimKit, scenario: PairedScenario) -> Iterable[tuple[str, str]]:
+    """Every stated conditioning quantity of every point with its manifest
+    node, refusing one this slice computes or the mode does not let a
+    scenario state (``conditioning_not_allowed``)."""
+    for point in scenario.points:
+        for quantity in point.conditioned:
+            if quantity in COMPUTED_HERE:
+                raise SimulationRefusalError(
+                    "conditioning_not_allowed",
+                    f"{quantity} is computed here, per ROM, at its steady fixed point; a stated "
+                    "value cannot stand in for it",
+                )
+            node = conditionable_node(kit.contract, scenario.mode, quantity)
+            if node is None:
+                raise SimulationRefusalError(
+                    "conditioning_not_allowed",
+                    f"{quantity} is not a computed ECU quantity on the manifest; supply it as "
+                    "a boundary if the mode takes it, or not at all",
+                )
+            yield quantity, node
+
+
+def rom_gate(
+    kit: SimKit,
+    report: EffectReport,
+    mode: str,
+    conditioned: Iterable[tuple[str, str | None]],
+) -> tuple[list[GateReason], SteadyCoverage, list[str]]:
+    """The run-level gate, each reason with the node it names: what the change
+    reaches that a point is conditioned on (``conditioned``: quantity and
+    node, read after the coverage is known), the twin's ROM gates
+    (:func:`twin_gate`) and unknown changed bytes. Returns the gate, the
+    steady coverage and the assumptions the twin gate states. The paired run
+    and the Monte Carlo fast path both gate here."""
+    reached = set(report.changed_nodes) | {n for o in report.outputs for n in o.path}
+    unknown_changed = any(r.byte_class in ("unknown", "mapped_unmodelled") for r in report.ranges)
+    coverage = steady_coverage(kit.contract, mode, report.changed_nodes)
+    gated: list[GateReason] = [
+        (f"conditioned_on_changed_path:{quantity}", node)
+        for quantity, node in conditioned
+        if node in reached
+    ]
+    assumptions: list[str] = []
+    gated.extend(twin_gate(report, coverage, assumptions, kit.model))
+    if unknown_changed:
+        gated.append(("rom:unknown_bytes_changed", None))
+    return gated, coverage, assumptions
+
+
+def output_reasons(
+    kit: SimKit,
+    scope: ReasonScope,
+    gate: Sequence[str],
+    qualification: Qualification,
+    point: OperatingPoint,
+    pair: _PairPoint,
+) -> dict[str, list[str]]:
+    """Every output's reasons at one point, sorted: the gate and both sides'
+    reasons that reach it, then the regime, loop, plant qualification, short
+    pulse, voltage and not-computed reasons. The paired run and the Monte
+    Carlo fast path both read a point's support here."""
+    b, c = pair.base, pair.candidate
+    regime = _regime(point, kit)
+    plant_regimes = {
+        r for r in (_plant_regime(b["target_phi"], kit), _plant_regime(c["target_phi"], kit)) if r
+    }
+    # A qualified plant answers only in the regimes it passed in: a
+    # closed-loop-only pass says nothing about WOT deltas.
+    unqualified_regimes = (
+        sorted(plant_regimes - set(qualification.regimes)) if qualification.qualified else []
+    )
+    out: dict[str, list[str]] = {}
+    for name in OUTPUTS:
+        reasons = scope.keep(name, [*gate, *b["reasons"], *c["reasons"]])
+        if name not in _ECU_OUTPUTS:
+            if regime is not None:
+                reasons.append(regime)
+            if pair.loop == SETPOINT_MOVED:
+                reasons.append(SETPOINT_MOVED)
+            elif pair.loop == "closed_loop" and closed_loop_trim_pending(kit.model):
+                reasons.append(TRIM_AUTHORITY_UNDECODED)
+            if name in _PLANT_OUTPUTS:
+                reasons.extend(f"regime_not_qualified:{r}" for r in unqualified_regimes)
+            eff = [s["effective_ms"] for s in (b, c) if s.get("effective_ms") is not None]
+            if any(e < kit.plant.steady.min_effective_pulse_ms for e in eff):
+                reasons.append("short_pulse_undecoded")
+        if name == "injector_pulse_ms" and point.battery_v_source == "unmeasured":
+            # The dead time reads the voltage; the metered part does not,
+            # so lambda, fuel and their deltas stand without it.
+            reasons.append(BATTERY_UNMEASURED)
+        if b[name] is None or c[name] is None:
+            reasons.append("not_computed")
+        out[name] = sorted(set(reasons))
+    return out
+
+
+def refusing_as_simulation(fn: _F) -> _F:
+    """Only the simulator's refusal type leaves a paired entry point: a twin
+    runner refusal on the paired path (``stage_order``'s ``node_undeclared``,
+    ``stage_role_changed``, ``kernel_mismatch``, a stated stage's own) is
+    re-raised as :class:`SimulationRefusalError` with its reason and message,
+    which every caller (the workbench's ``REFUSALS``) returns as data."""
+
+    @functools.wraps(fn)
+    def wrapper(*args: Any, **kwargs: Any) -> Any:
+        try:
+            return fn(*args, **kwargs)
+        except TwinRunnerRefusalError as exc:
+            raise SimulationRefusalError(exc.reason, exc.message) from exc
+
+    return cast(_F, wrapper)
+
+
+@refusing_as_simulation
 def run_paired(
     kit: SimKit,
     scenario: PairedScenario,
@@ -1158,18 +1346,7 @@ def run_paired(
             f"{kit.plant.hardware_configuration}",
         )
     resets = _resets(kit.contract, scenario.candidate_events)
-    report: EffectReport = compare_roms(
-        base_image,
-        candidate_image,
-        kit.rom_map,
-        kit.model,
-        kit.model_sha256,
-        base_slot=scenario.base.slot,
-        candidate_slot=scenario.candidate.slot,
-        slot_source=scenario.base.slot_source,
-        contract=kit.contract,
-        mode=scenario.mode,
-    )
+    report = compare_scenario_roms(kit, scenario, base_image, candidate_image)
     qualification = plant_qualification(kit.plant)
     base_ltft = scenario.learned.ltft_pct
     cand_ltft = NEUTRAL_TRIM_PCT if "ltft_b1" in resets else base_ltft
@@ -1227,42 +1404,23 @@ def run_paired(
             traced_outputs={},
             provenance=provenance,
         )
-    reached = set(report.changed_nodes) | {n for o in report.outputs for n in o.path}
-    unknown_changed = any(r.byte_class in ("unknown", "mapped_unmodelled") for r in report.ranges)
-    coverage = steady_coverage(kit.contract, scenario.mode, report.changed_nodes)
-    gated: list[GateReason] = []
-    for point in scenario.points:
-        for quantity in point.conditioned:
-            if quantity in COMPUTED_HERE:
-                raise SimulationRefusalError(
-                    "conditioning_not_allowed",
-                    f"{quantity} is computed here, per ROM, at its steady fixed point; a stated "
-                    "value cannot stand in for it",
-                )
-            node = conditionable_node(kit.contract, scenario.mode, quantity)
-            if node is None:
-                raise SimulationRefusalError(
-                    "conditioning_not_allowed",
-                    f"{quantity} is not a computed ECU quantity on the manifest; supply it as "
-                    "a boundary if the mode takes it, or not at all",
-                )
-            if node in reached:
-                gated.append((f"conditioned_on_changed_path:{quantity}", node))
+    gated, coverage, twin_assumptions = rom_gate(
+        kit, report, scenario.mode, _conditioned_nodes(kit, scenario)
+    )
     assumptions: list[str] = [
         "LTFT acts in open loop: the decoded pulse formula adds STFT and LTFT into k_b with "
         "no open-loop gate (docs/ecu-firmware-analysis.md:629)",
         "STFT is neutral (the stated value) in open loop: assumed, not decoded",
         *_steady_assumptions(coverage),
+        *twin_assumptions,
     ]
-    gated.extend(twin_gate(report, coverage, assumptions, kit.model))
-    if unknown_changed:
-        gated.append(("rom:unknown_bytes_changed", None))
     gate = sorted({r for r, _ in gated})
     # Each reason reaches only the outputs downstream of the node it names
     # (E08.10): a Target AFR lookup gate does not withhold steady BFS.
     scope = ReasonScope.of(kit, gated)
     withheld = {name: bool(scope.keep(name, gate)) for name in OUTPUTS}
 
+    stages = stage_order(kit.model)
     base_side = _side(kit, base_image, scenario.base, base_ltft, "base")
     cand_side = _side(kit, candidate_image, scenario.candidate, cand_ltft, "candidate")
     sides = (base_side, cand_side)
@@ -1281,43 +1439,14 @@ def run_paired(
     supported_counts = dict.fromkeys(OUTPUTS, 0)
     loops: set[str] = set()
     for index, point in enumerate(scenario.points):
-        pair = _pair_point(kit, sides, point, stfts, overrides)
+        pair = _pair_point(kit, stages, sides, point, stfts, overrides)
         b, c = pair.base, pair.candidate
         if pair.loop is not None:
             loops.add(pair.loop)
-        regime = _regime(point, kit)
-        plant_regimes = {
-            r
-            for r in (_plant_regime(b["target_phi"], kit), _plant_regime(c["target_phi"], kit))
-            if r
-        }
-        # A qualified plant answers only in the regimes it passed in: a
-        # closed-loop-only pass says nothing about WOT deltas.
-        unqualified_regimes = (
-            sorted(plant_regimes - set(qualification.regimes)) if qualification.qualified else []
-        )
+        point_reasons = output_reasons(kit, scope, gate, qualification, point, pair)
         outputs: dict[str, dict[str, Any]] = {}
         for name in OUTPUTS:
-            reasons = scope.keep(name, [*gate, *b["reasons"], *c["reasons"]])
-            if name not in _ECU_OUTPUTS:
-                if regime is not None:
-                    reasons.append(regime)
-                if pair.loop == SETPOINT_MOVED:
-                    reasons.append(SETPOINT_MOVED)
-                elif pair.loop == "closed_loop" and closed_loop_trim_pending(kit.model):
-                    reasons.append(TRIM_AUTHORITY_UNDECODED)
-                if name in _PLANT_OUTPUTS:
-                    reasons.extend(f"regime_not_qualified:{r}" for r in unqualified_regimes)
-                eff = [s["effective_ms"] for s in (b, c) if s.get("effective_ms") is not None]
-                if any(e < kit.plant.steady.min_effective_pulse_ms for e in eff):
-                    reasons.append("short_pulse_undecoded")
-            if name == "injector_pulse_ms" and point.battery_v_source == "unmeasured":
-                # The dead time reads the voltage; the metered part does not,
-                # so lambda, fuel and their deltas stand without it.
-                reasons.append(BATTERY_UNMEASURED)
-            if b[name] is None or c[name] is None:
-                reasons.append("not_computed")
-            reasons = sorted(set(reasons))
+            reasons = point_reasons[name]
             status: Status = "unsupported" if reasons else "supported"
             if status == "supported":
                 supported_counts[name] += 1
@@ -1343,7 +1472,7 @@ def run_paired(
             lam["parameter_band"] = (lam["base"] * s_val / s_hi, lam["base"] * s_val / s_lo)
             spread = []
             for case in cases.values():
-                cp = _pair_point(kit, sides, point, stfts, {**overrides, **case})
+                cp = _pair_point(kit, stages, sides, point, stfts, {**overrides, **case})
                 cb, cc = cp.base["delivered_lambda"], cp.candidate["delivered_lambda"]
                 if cb is not None and cc is not None:
                     spread.append(cc / cb - 1.0)
@@ -1428,7 +1557,16 @@ def rank_as_improvement(
     verify, pass, be on recorded data, name the same two images as ``result``
     and the same frozen plant baseline. ``result`` itself must come from a
     recorded (not synthetic) plant that qualified, with every output at every
-    point supported. Every failing condition is named."""
+    point supported. Every failing condition is named. Anything but an
+    :class:`InterventionVerdict` (e.g. a sealed ``EcuOutputVerdict``, the
+    ECU-output test, which says nothing about a plant effect) is refused by
+    name (``intervention_not_a_verdict``)."""
+    if intervention is not None and not isinstance(intervention, InterventionVerdict):
+        raise SimulationRefusalError(
+            "intervention_not_a_verdict",
+            f"{type(intervention).__name__} is not an InterventionVerdict: only "
+            "evaluate_intervention's sealed verdict can rank a tuning effect",
+        )
     reasons: list[str] = []
     if result.plant.get("synthetic"):
         reasons.append("synthetic_plant: a labelled synthetic plant never ranks a tuning effect")
@@ -1494,6 +1632,7 @@ __all__ = [
     "ReasonScope",
     "SimKit",
     "affected_cells",
+    "compare_scenario_roms",
     "computed_node",
     "format_plant_assumption",
     "held_ve_fit",
@@ -1501,10 +1640,14 @@ __all__ = [
     "plant_assumption_lines",
     "plant_assumptions",
     "optimise",
+    "output_reasons",
     "plant_parameters",
     "plant_rail_kpa",
     "rank_as_improvement",
+    "refusing_as_simulation",
+    "rom_gate",
     "rpm_word",
     "run_paired",
+    "stated_sample",
     "twin_gate",
 ]

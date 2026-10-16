@@ -879,14 +879,16 @@ def test_a_refusing_manifold_model_names_its_refusal_and_is_refused_where_a_draw
     (``manifold_refusal_varies_by_draw``, the backstop); a run whose every
     draw stays below ambient runs. The contract admits fuel-mv-2 (E08.11)."""
     from src.analysis.paired_scenarios import _ecu_chain, _fuel_chain, _side
+    from src.analysis.twin_runner import stage_order
 
     kit, image = kit_and_image
     mv2, declared = _mv2(kit)
     side = _side(mv2, image, _identity(image), 0.0, "base")
+    stages = stage_order(mv2.model)
     for maf, reasons in ((150.0, ["plant:manifold_above_ambient"]), (20.0, [])):
         point = dataclasses.replace(P_MODEL, maf_gps=maf, conditioned={FILL_BYTE: 200.0})
         out = _fuel_chain(
-            mv2, side, point, _ecu_chain(mv2, side, point), stft_pct=0.0, overrides={}
+            mv2, side, point, _ecu_chain(mv2, stages, side, point), stft_pct=0.0, overrides={}
         )
         assert out["reasons"] == reasons
         assert np.isnan(out["delivered_lambda"]) == bool(reasons)
@@ -1104,3 +1106,53 @@ def test_a_default_draw_monte_carlo_on_a_built_fuel_mv_2_grid_never_refuses(
     for name in OUTPUTS:
         ok = result.supported(name)
         assert np.isfinite(result.base[name][ok]).all(), (label, name)
+
+
+def test_run_paired_and_the_fast_path_run_the_twin_runners_one_ecu_path(
+    kit_and_image: tuple[SimKit, bytes],
+    uncertainty: LoadedUncertainty,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """E09.2c: run_paired and the Monte Carlo fast path call the twin runner's
+    stage kernels (``twin_runner.stated_ecu``'s steady BFS, its plant stage's
+    ``plant_inputs``), not copies. One mutation there moves run_paired, and
+    the fast path moves with it: its ``fast_path_diverged`` self-check, which
+    re-runs run_paired, still agrees, and its arrays carry the mutation."""
+    from src.analysis import twin_runner
+
+    kit, image = kit_and_image
+    candidate = _edit_all(image, kit, "fuel_compensation", 1, 3)
+    design = _design(image, (P_WOT, 190, 200), (P_CRUISE, 50, 70))
+    template = _template(kit, image, candidate)
+    points = tuple(
+        dataclasses.replace(dp.point, conditioned={FILL_BYTE: float(dp.fill_byte_lo)})
+        for dp in design.points
+    )
+    scenario = dataclasses.replace(template, points=points)
+    before = run_paired(kit, scenario, image, candidate)
+    mc_before = _run(kit, image, candidate, design, uncertainty, draws=4)
+
+    real_bfs, real_inputs = twin_runner.steady_bfs, twin_runner.plant_inputs
+
+    def bfs_plus(air: Any, **kw: Any) -> Any:
+        out = real_bfs(air, **kw)
+        return dataclasses.replace(out, word=out.word + 64)
+
+    def leaner(frame: Any) -> Any:
+        inputs = real_inputs(frame)
+        return dataclasses.replace(inputs, maf_gps=inputs.maf_gps * 1.05)
+
+    monkeypatch.setattr(twin_runner, "steady_bfs", bfs_plus)
+    monkeypatch.setattr(twin_runner, "plant_inputs", leaner)
+    after = run_paired(kit, scenario, image, candidate)
+    mc_after = _run(kit, image, candidate, design, uncertainty, draws=4)
+    for i, (b, a) in enumerate(zip(before.points, after.points, strict=True)):
+        bfs_b, bfs_a = b["outputs"]["base_fuel_schedule"], a["outputs"]["base_fuel_schedule"]
+        assert bfs_a["base"] == bfs_b["base"] + 64
+        assert bfs_a["candidate"] == bfs_b["candidate"] + 64
+        lam_b, lam_a = b["outputs"]["delivered_lambda"], a["outputs"]["delivered_lambda"]
+        assert lam_a["base"] != lam_b["base"]
+        assert (
+            mc_after.base["base_fuel_schedule"][i] == mc_before.base["base_fuel_schedule"][i] + 64
+        ).all()
+        assert (mc_after.base["delivered_lambda"][i] != mc_before.base["delivered_lambda"][i]).all()
