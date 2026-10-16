@@ -441,11 +441,27 @@ W09.6 is the orchestrator's own, on the ROM machine.
     first grid in DOM order. A missing environment field blocks Run and is
     named. 409 deferred and 400 refused render their reasons.
 
-- [ ] **W09.5 — MCP tools** (`docs/mcp-server.md` is the source of truth):
+- [x] **W09.5 — MCP tools** (`docs/mcp-server.md` is the source of truth):
   `preview_rom_edit(sha, label, edits)` and `simulate_rom_edit(sha, request)`.
   Both are thin wrappers over the HTTP routes, so an agent can run the same
   experiment the page does. **Accept:** tool tests as the existing ROM
   library tools have, with the doc entry.
+  Evidence: `src/mcp_server/tools/rom_editor.py` (read delegations in
+  `server.py`, no audit: nothing the daemon keeps changes, and a simulate
+  response is ~370 KB); `tests/test_mcp_rom_editor.py` (verbatim
+  bodies, bearer token, a daemon refusal per status 400 edit_refused / 400
+  sim_refused / 404 / 409 map, deferred, busy / 422 / 503 reaching the caller
+  with status and body, simulate timeout > 900 s, sha confined to its path
+  segment, and the docstring and fixture both pinned to
+  `SimRequest.model_fields`, all 21, no default); tool snapshot regenerated
+  (+2 tools); docs/mcp-server.md rows. `simulate_rom_edit(visited_only=True)`
+  (default) cuts `cells.cells` to `n_points > 0` via the pure
+  `visited_cells_only`, stating `cells_omitted` and `cells_filter`; nothing else
+  in the body is touched, and `visited_only=False` is byte-identical to the
+  daemon's. Tests: kept = exactly the visited cells, omitted + kept = 256,
+  other keys and `status_counts` untouched, input not mutated; measured on a
+  256-cell / 6-visited fixture with full outputs: 394,541 bytes full, 31,992
+  filtered (< 60 KB). 23 tests in `tests/test_mcp_rom_editor.py`.
 
 - [ ] **W09.6 — Real-ROM acceptance (on the machine with the images).**
   - `tests/test_rom_editor_private_rom.py`, skipping by name when the images

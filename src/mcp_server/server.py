@@ -74,6 +74,9 @@ from src.mcp_server.tools import (
     replay as replay_tool,
 )
 from src.mcp_server.tools import (
+    rom_editor as rom_editor_tool,
+)
+from src.mcp_server.tools import (
     search as search_tool,
 )
 from src.mcp_server.tools import (
@@ -219,6 +222,8 @@ READ_DELEGATIONS: tuple[Delegation, ...] = (
     Delegation(brain_tool.get_ecu_application_model),
     Delegation(brain_tool.list_brain_jobs),
     Delegation(brain_tool.get_brain_job),
+    Delegation(rom_editor_tool.preview_rom_edit),
+    Delegation(rom_editor_tool.simulate_rom_edit),
 )
 
 #: Write-side tools that are pure delegations; ``needs_audit`` injects the audit logger.

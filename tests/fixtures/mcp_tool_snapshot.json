@@ -1459,6 +1459,42 @@
       "type": "object"
     }
   },
+  "preview_rom_edit": {
+    "description": "Preview edits to a ROM library image: the edit spec and the edited tables.\n\n    Nothing is stored, added to the library or offered for download, and a\n    candidate is ``flashable: false`` on purpose. What to keep is the response's\n    ``spec_yaml`` (hash: ``spec_sha256``): the same input the simulator takes on\n    the laptop. A flash stays the Flash page's own explicit, per-operation act.\n\n    ``sha`` is a library entry's sha256 (``GET /control/rom/library``). ``edits``\n    is a list of E08.1 ``Edit`` objects, each ``{table, slot, <selector>,\n    <operation>}``: one selector of ``cells: [[row, col], ...]``, ``all: true``\n    or ``region: {rpm: [lo, hi], load: [lo, hi], units: {rpm: \"rpm\", load:\n    \"%\"}}``, and one operation of ``set_raw: int``, ``add_raw: int`` or\n    ``scale: float`` with ``rounding: \"nearest\" | \"floor\" | \"ceil\"`` (no default\n    rounding). Editable: Map 1 only (``slot: 1``) of ``fuel_targets``,\n    ``fuel_compensation`` and ``k_constant``; anything else is refused by name.\n\n    The response carries ``spec``, ``spec_yaml``, ``spec_sha256``,\n    ``candidate_sha256``, ``provenance`` (old -> new raw values per cell, the\n    changed ranges, ``effect.changed_nodes`` and ``moved_lookups``), ``tables``\n    (the candidate's edited tables) and ``sim_base``. ``sim_base.ok`` is whether\n    ``simulate_rom_edit`` is offered: false unless the image is a recorded\n    revision (``reason: \"base_not_a_recorded_revision\"``).\n\n    Refusals are raised as :class:`~src.mcp_server.client.DaemonError` with the\n    daemon's body in the message; read the status. **400** ``edit_refused`` with\n    ``kind`` (``edit_spec`` / ``rom_effect``), ``reason`` (``table_not_editable``,\n    ``slot_not_simulated``, ``no_edits``, ``duplicate_edit``, ``no_op_edit``,\n    ``value_out_of_range``, ``rounding_undeclared``, ``selector_ambiguous``,\n    ``region_unbounded``, ``wrong_program``, ...) and ``message``. **404**: unknown\n    or malformed sha. **409**: no ROM map or Editor definition for this vehicle.\n    **422**: a missing or unknown body field.\n    ",
+    "inputSchema": {
+      "properties": {
+        "edits": {
+          "items": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "title": "Edits",
+          "type": "array"
+        },
+        "label": {
+          "title": "Label",
+          "type": "string"
+        },
+        "sha": {
+          "title": "Sha",
+          "type": "string"
+        }
+      },
+      "required": [
+        "sha",
+        "label",
+        "edits"
+      ],
+      "title": "preview_rom_editArguments",
+      "type": "object"
+    },
+    "name": "preview_rom_edit",
+    "outputSchema": {
+      "additionalProperties": true,
+      "title": "preview_rom_editDictOutput",
+      "type": "object"
+    }
+  },
   "query_memory": {
     "description": "Query the vehicle's investigation memory (evidence, investigations,\n    predictions, interventions, outcomes, references, retractions).\n\n    ``kind`` is a comma list of record kinds; ``calibration``/``program_id``\n    take ``unknown`` for records that state them unknown; times are ISO with a\n    UTC offset; ``as_of`` answers \"what was believed then\"; ``history``\n    includes superseded and retracted records. Every set filter must hold.",
     "inputSchema": {
@@ -2501,6 +2537,39 @@
     "outputSchema": {
       "additionalProperties": true,
       "title": "signal_lookupDictOutput",
+      "type": "object"
+    }
+  },
+  "simulate_rom_edit": {
+    "description": "Simulate edits to a ROM library image: paired Monte Carlo over a stated grid.\n\n    The base must be a recorded revision (``preview_rom_edit``'s\n    ``sim_base.ok``). Runs in the workbench child (up to 900 s); the call waits\n    it out. Nothing is stored or written. The daemon's response is large (about\n    370 KB: every cell of the table, row-major), so by default\n    (``visited_only=True``) ``cells.cells`` keeps only the cells a design point\n    visited (``n_points > 0``): ``cells.cells_omitted`` counts the dropped cells\n    and ``cells.cells_filter`` says so. Nothing else is touched: ``cells`` is\n    ``sim_cells.CellTable.to_dict()`` with its axes, ``status_counts``,\n    ``overlay``, ``reach`` and ``unplaced`` whole, and ``caveats``,\n    ``assumptions``, ``unresolved``, ``coverage`` and ``outcome`` ride beside it\n    as the daemon returns them (read the caveats first). Pass\n    ``visited_only=False`` for the daemon's body byte for byte, every cell.\n\n    ``request`` is one object and **has no defaults**: this tool invents none,\n    and the daemon answers a missing field with a 422 naming it and an unknown\n    one with ``extra_forbidden``. All 21 fields are required:\n\n    - ``label`` (non-empty str) and ``edits`` (list of E08.1 ``Edit`` objects,\n      as in ``preview_rom_edit``);\n    - ``grid``: ``\"fuel_comp\"`` or ``\"target_afr\"`` (the aggregation axes);\n    - ``rpm_edges``, ``load_edges``: strictly rising cell edges (one design\n      point at each cell centre); ``load_edges`` are in Fuel Comp's load axis\n      units, % of the fill model's ceiling, within 0-100;\n    - ``load_basis``: ``\"fill_fraction_as_manifold_ratio\"``;\n    - ``baro_kpa``, ``iat_c``, ``coolant_c``, ``battery_v``: the environment;\n    - ``rail_kpa``: a number, or the string ``\"working_assumption\"`` (the\n      plant's own, said so);\n    - ``throttle_pct`` (float), ``pedal_flag`` (int 0-255);\n    - ``stft_pct``, ``ltft_pct``: fuel trims, percent;\n    - ``throttle_closed_learned``, ``idle_air_learned``, ``evap_purge_area``:\n      the learned state, each stated;\n    - ``candidate_events``: ``\"none\"`` (both ROMs start from the same learned\n      state) or ``\"ecu_reflash\"`` (the flash resets what the contract says it\n      resets on the candidate);\n    - ``draws`` (int >= 1, at most 2000) and ``seed`` (int >= 0).\n\n    The grid is at most 1024 cells. Refusals are raised as\n    :class:`~src.mcp_server.client.DaemonError` with the daemon's body in the\n    message; read the status. **400** ``sim_refused`` with ``kind``\n    (``edit_spec`` / ``rom_effect`` / ``sim_design`` / ``simulation``),\n    ``reason`` (any ``preview_rom_edit`` reason, ``grid_edges_invalid``,\n    ``load_outside_model``, ``grid_too_large``, ``draws_too_many``,\n    ``base_not_a_recorded_revision``, ``uncertainty_missing``) and ``message``.\n    **404**: unknown or malformed sha. **409** ``analysis_deferred`` (a capture\n    is recording; ``laptop_path`` says how to run the spec on the laptop) or\n    ``analysis_busy`` (another analysis is running; retry later), or no ROM map.\n    **422**: a missing, unknown or mistyped field. **503** ``analysis_unavailable``\n    (``child_timed_out`` / ``child_failed`` / ``child_out_of_memory``).\n    ",
+    "inputSchema": {
+      "properties": {
+        "request": {
+          "additionalProperties": true,
+          "title": "Request",
+          "type": "object"
+        },
+        "sha": {
+          "title": "Sha",
+          "type": "string"
+        },
+        "visited_only": {
+          "default": true,
+          "title": "Visited Only",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "sha",
+        "request"
+      ],
+      "title": "simulate_rom_editArguments",
+      "type": "object"
+    },
+    "name": "simulate_rom_edit",
+    "outputSchema": {
+      "additionalProperties": true,
+      "title": "simulate_rom_editDictOutput",
       "type": "object"
     }
   },
