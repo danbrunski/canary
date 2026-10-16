@@ -26,7 +26,7 @@ acceptance runs on the real images.
 | `rom_image.table_values` / `tables_payload` | The before and after tables, in the payload shape `RomTablesView` already renders |
 | `sim_design.build_grid_design` / `summary` (E08.2) | The operating points: a stated rpm × load grid |
 | `sim_montecarlo.run_monte_carlo` / `MonteCarloDesign.from_sim_design` / `load_uncertainty` (E08.3) | Base vs candidate, paired draws |
-| `sim_cells.aggregate_cells` / `axes_for` (E08.4) | Per-cell statuses and quantiles. **In progress 2026-10-15** (see W09.0) |
+| `sim_cells.aggregate_cells` / `fuel_comp_axes` / `target_afr_axes` (E08.4, `474c0267`) | Per-cell statuses and quantiles (calling notes in W09.0) |
 | `control.workbench_jobs.run_off_loop` / `capture_deferral` | The bounded, single-flight spawn child, refused while a capture records |
 | `control.rom_library.RomLibrary` (`app.state.rom_library`) | Base images by sha256, and `revision_match` |
 
@@ -127,15 +127,38 @@ W09.6 is the orchestrator's own, on the ROM machine.
 
 ## Checklist
 
-- [ ] **W09.0 — Prerequisite: E08.4 per-cell aggregation.** Started
-  2026-10-15 on the laptop by an implementer. Check E08.4's box and the
-  working tree before starting: if it is not committed, finish it to E08.4's
-  own Accept list first. The contract W09.4 renders is `CellAggregation.as_dict()`:
-  `grid {name, row {quantity, unit, breakpoints}, col {…}}`, `outputs`,
-  `cells[] {row, col, n_points, n_pairs, weight, regime_share, edited,
-  moved_lookup, outputs {<name>: {status, supported_share, delta {p05, p50,
-  p95}, relative_delta {…}, quantiles_over, reasons[]}}}`, `edited_cells`,
-  `caveats`. If E08.4 changed any field name, follow E08.4 and note it here.
+- [ ] **W09.0 — Prerequisite: E08.4 per-cell aggregation.** Landed as
+  `474c0267` (`src/analysis/sim_cells.py`, 28 tests, real 20260920 → 20261004
+  run). E08.4's box in the E08 doc was still unticked when this was written:
+  tick it with that commit's evidence if no one has. W09 builds on that
+  module as it stands. A second, independent implementation made on the
+  laptop the same day was dropped in its favour, and no W09 item depends on
+  it. Calling it:
+  - **Axes:** `fuel_comp_axes(kit, base_image, slot=1)` (the default; grid
+    cell (r, c) *is* table cell (r, c) by nearest-breakpoint membership in
+    the lookup's own comparison domain) or `target_afr_axes(kit, base_image,
+    slot=1)`. `sim_cells.Grid` is `Literal["fuel_comp", "target_afr"]`.
+  - **Aggregate:** `aggregate_cells(result, sim_design, axes,
+    effects=compare_roms(base, candidate, rom_map, kit.model, kit.model_sha256,
+    base_slot=1, candidate_slot=1, slot_source="default_slot"))`. It takes the
+    E08.2 `SimDesign` (not the `MonteCarloDesign`), and the effect trace must
+    be the run's (`effects_mismatch` otherwise). E08.1's `build_candidate`
+    already computes that trace, so reuse it rather than computing it twice.
+  - **Payload:** `CellTable.to_dict()` (`schema_version: 1`; JSON Schema from
+    `cell_table_schema()`, which `types/romEditor.ts` should mirror). Every
+    cell is present, row-major. A cell has `row_value` / `col_value`, `n_points`,
+    `pairs`, `weight`, `regime_shares`, `loop_shares`, `outputs {<name>:
+    {status, pairs, supported_share, unsupported_share, support[],
+    quantiles {over, pairs, weight, delta {p05, p50, p95}, relative_delta,
+    relative_undefined_pairs} | null, changed_share, supported_effect}}`,
+    `by_loop[]`, `edited` (raw old → new, or null), `row_axis_moved` and
+    `col_axis_moved`. Top level: `rows` / `cols` axis info, `reach`,
+    `caveats`, `unresolved`, `status_counts`, `overlay`, `unplaced`, the
+    hashes and `headline_by_loop` (`open_loop` → `delivered_lambda`,
+    `closed_loop` → `fuel_trim_total_pct`, setpoint moved → `target_phi`).
+  - Measure the payload size of a 16 × 16 run in W09.6. If it is large,
+    trim on the route (for example, drop `points` lists), never by dropping
+    cells: `no_points` ≠ `unchanged`.
 
 - [ ] **W09.1 — `src/analysis/rom_editor.py`: preview and simulate as pure functions.**
   - `EDITABLE_TABLES = ("fuel_targets", "fuel_compensation", "k_constant")`,
@@ -156,8 +179,8 @@ W09.6 is the orchestrator's own, on the ROM machine.
     (`table_values(candidate)` for the edited `(id, slot)` pairs only), and
     `sim_base {ok, revision, reason}`.
   - `SimRequest` (pydantic, `extra="forbid"`, every field required as in
-    "Decisions"). `grid: Literal["fuel_comp", "fuel_targets"]` picks the
-    aggregation axes (E08.4 `axes_for`). `load_basis` is `sim_design.LoadBasis`.
+    "Decisions"). `grid: sim_cells.Grid` (`fuel_comp` | `target_afr`) picks
+    the aggregation axes (W09.0). `load_basis` is `sim_design.LoadBasis`.
   - `simulate_edits(image, revision_match, request, profile_dir) -> dict`:
     1. refuse a non-matched base (`base_not_a_recorded_revision`);
     2. refuse `grid_too_large` / `draws_too_many` before any work;
@@ -173,8 +196,9 @@ W09.6 is the orchestrator's own, on the ROM machine.
        synthetic tests use;
     6. `run_monte_carlo(kit, template, design, base, candidate,
        load_uncertainty(profile_dir / UNCERTAINTY_FILE), draws=, seed=)`;
-    7. `aggregate_cells(result, design, axes_for(grid, base.image, rom_map,
-       slot=1)).as_dict()`.
+    7. `aggregate_cells(result, grid_design, fuel_comp_axes(kit, base.image,
+       slot=1)` (or `target_afr_axes`), `effects=<the candidate's trace>)
+       .to_dict()` (W09.0).
 
     Return `caveats` (result's, unchanged and first), `assumptions`,
     `unresolved`, `inert_parameters`, `coverage`, `outcome`, `provenance`
@@ -290,7 +314,9 @@ W09.6 is the orchestrator's own, on the ROM machine.
     the laptop"), `analysis_busy` and `sim_refused` by reason.
   - **Results:** the caveat block first (see "Decisions"), then grids for
     relative Δλ p50 (diverging, centred at 0), p05–p95 width, ΔBFS and
-    Δpulse. Closed-loop cells show `fuel_trim_total_pct` per E08.4. Each
+    Δpulse. Each cell's main figure follows `headline_by_loop` and the cell's
+    `loop_shares` (closed loop shows `fuel_trim_total_pct`, per E08.4), and
+    `by_loop` is in the cell detail. Each
     status is a label or hatch. Edited cells are outlined, and
     `moved_lookup` cells are marked. Clicking a cell shows n points, pairs,
     weight, quantiles, regime mix, support share and reasons. Design summary
