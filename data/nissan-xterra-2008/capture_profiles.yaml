@@ -250,14 +250,18 @@ profiles:
   bus_budget_override: 90.0
   priority_channels: null
   expected_total_demand_hz: 62.0
-  capacity_evidence: 'Demand: 7 Mode 01 PIDs x 4 Hz + 4 trims x 2 Hz + 4 context PIDs
-    x 1 Hz + 9 DIDs x 2 Hz = 58 channel reads/s, plus 2 session requests per 0.5 s
-    cycle, about 62 req/s unbatched, against the 90 req/s budget. Worst-case cycle
-    with batching off: (15 Mode 01 + 9 DID + 2 session) / 90 + 0.05 s grace = 0.34
-    s of a 0.5 s cycle (the ninth DID, 0x1110, and the fourth context PID, 0x42,
-    added 2026-10-15). Parent evidence: fuel-target-research on 2026-09-21 ran 20
-    min at 4 Hz Mode 01 / 2 Hz per DID with memory windows. No capture of this exact
-    revision exists yet; replace this text with the first one.'
+  capacity_evidence: 'Demand (preview_polling_plan, 2026-10-16): 8 Mode 01 PIDs planned
+    at 4 Hz, fuel status and four trims at 2 Hz, 4 context PIDs at 1 Hz, 9 DIDs and
+    the memory windows at 2 Hz: 75.5 channel reads/s, 79.5 req/s unbatched (44.5
+    batched) against the 90 req/s budget. Cycle (hybrid_cycle.plan_cycle): 18
+    in-window requests + 2 session requests + 0.05 s exit grace leave about 0.23 s
+    of each 0.5 s cycle for Mode 01, so the 0.25 s round grid fits one full round
+    per cycle: the 4 Hz PIDs are NOT held at 4 Hz. On the fake clock (90 req/s,
+    10 ms answers) the core batch reads about 3.5 Hz and 0x44 / FUEL_STATUS 2.0 Hz;
+    trims, context PIDs, DIDs and memory channels read their plan. Read achieved
+    rates per channel off the capture, never the planned 4 Hz. Parent evidence:
+    fuel-target-research on 2026-09-21 ran 20 min with memory windows. No capture of
+    this exact revision exists yet; replace this text with the first one.'
   required_tuple: []
   min_achieved_rate_hz: null
   max_tuple_skew_s: null
