@@ -930,9 +930,14 @@ SYSTEM_PYTHON = Path("/usr/bin/python3")
 @pytest.mark.skipif(not SYSTEM_PYTHON.exists(), reason="needs a system python3")
 def test_run_with_the_system_python_it_re_launches_under_the_venv() -> None:
     # The venv's python may be a symlink to this very binary; what differs is
-    # sys.prefix, which is what the prologue reads.
+    # sys.prefix, which is what the prologue reads. The push gate runs this
+    # file in a throwaway worktree that has no .venv of its own: there the
+    # script must refuse by name, never create one, so --no-bootstrap is
+    # passed and a missing venv is a skip, not an install.
+    if not venv_launch.venv_python().exists():
+        pytest.skip(f"no venv at {venv_launch.VENV_DIR} (a throwaway worktree)")
     out = subprocess.run(
-        [str(SYSTEM_PYTHON), str(SCRIPT), "--help"],
+        [str(SYSTEM_PYTHON), str(SCRIPT), "--no-bootstrap", "--help"],
         cwd=REPO_ROOT,
         capture_output=True,
         text=True,

@@ -893,14 +893,6 @@
     {
       "auth": "control",
       "body": false,
-      "method": "GET",
-      "path": "/control/rom/editor/typical-values",
-      "query": [],
-      "status_code": null
-    },
-    {
-      "auth": "control",
-      "body": false,
       "method": "POST",
       "path": "/control/rom/inspect",
       "query": [],

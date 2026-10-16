@@ -405,7 +405,7 @@ def test_every_model_resolves_its_annotations_in_the_module_that_owns_it() -> No
         and issubclass(value, BaseModel)
         and value.__module__.startswith(f"{FACADE}.")
     }
-    assert len(models) == 39
+    assert len(models) == 40  # +CompanionConfig (2026-10-16)
     for name, cls in models.items():
         assert cls.__pydantic_complete__, name
         typing.get_type_hints(cls)
