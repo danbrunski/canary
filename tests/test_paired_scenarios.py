@@ -630,6 +630,7 @@ def test_ranking_refuses_anything_but_an_intervention_verdict_by_name(
         base_image_sha256=result.base_image_sha256,
         candidate_image_sha256=result.candidate_image_sha256,
         traces_sha256="0" * 64,
+        block="ecu_outputs",
         rules_version=1,
         rules_sha256="0" * 64,
         recordings=(),
