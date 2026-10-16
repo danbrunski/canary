@@ -215,13 +215,26 @@ def _specs(profile: FuelPlantProfile) -> list[str]:
     )
 
 
-def build_samples(session: Path, profile: FuelPlantProfile, delay: B06Rules) -> pd.DataFrame:
-    """One row per bank-1 pulse read, every input paired, every state named."""
+def build_samples(
+    session: Path | pd.DataFrame,
+    profile: FuelPlantProfile,
+    delay: B06Rules,
+    *,
+    name: str | None = None,
+) -> pd.DataFrame:
+    """One row per bank-1 pulse read, every input paired, every state named.
+
+    ``session`` is a session directory or a frame of its raw reads (a bounded
+    window); a frame carries no directory name, so it must be given ``name``."""
+    if name is None:
+        if not isinstance(session, Path):
+            raise ValueError("build_samples: a frame of reads needs its session name")
+        name = session.name
     long = read_channels(session, _specs(profile), acquired_time=True)
     s, rule, chain = profile.specs, profile.steady, profile.pulse_chain
     pulse = _series(long, s.pulse)
     t = pulse.times
-    frame = pd.DataFrame({"session": session.name, "t": t, "pulse_ms": pulse.values})
+    frame = pd.DataFrame({"session": name, "t": t, "pulse_ms": pulse.values})
     if not len(t):
         return frame
     counts = np.rint(pulse.values / PULSE_COUNT_MS)
@@ -1027,6 +1040,48 @@ def without_pressure_correction(cal: PulseChainCalibration) -> PulseChainCalibra
     return replace(cal, vacuum_load_curve=(255,) * 16, vacuum_rpm_curve=(0,) * 16)
 
 
+#: The inputs the pulse-chain check reads per pulse read, in the order a
+#: missing one is named (``input_missing:<column>``).
+PULSE_CHAIN_INPUTS: tuple[str, ...] = (
+    "bfs",
+    "bfs_before",
+    "rpm",
+    "reference_phi",
+    "stft_pct",
+    "baro_kpa",
+    "iat_c",
+    "ecu_dead_time_counts",
+)
+
+
+def pulse_chain_states(frame: pd.DataFrame, chain: PulseChain) -> np.ndarray:
+    """Per pulse read of ``frame`` (:func:`build_samples`): ``eligible`` for the
+    pulse-chain check, or the first reason it is not, in this order:
+    ``input_missing:<column>`` (:data:`PULSE_CHAIN_INPUTS`), ``not_fuelled``,
+    ``not_steady`` (the plant's rpm/MAF/pulse window), ``bfs_not_steady``
+    (``chain.check_bfs_span`` over ``chain.check_bfs_lag_s``) and
+    ``reference_phi_not_positive``. :func:`pulse_chain_ratios` scores exactly
+    the ``eligible`` reads."""
+    with np.errstate(divide="ignore", invalid="ignore"):
+        bfs_steady = (frame["bfs"] - frame["bfs_before"]).abs() / frame["bfs"] <= (
+            chain.check_bfs_span
+        )
+    state = np.full(len(frame), "eligible", dtype=object)
+    checks: list[tuple[str, np.ndarray]] = [
+        ("reference_phi_not_positive", ~np.asarray(frame["reference_phi"] > 0)),
+        ("bfs_not_steady", ~np.asarray(bfs_steady)),
+        ("not_steady", ~frame["steady_window"].astype(bool).to_numpy()),
+        ("not_fuelled", ~frame["fuelled"].astype(bool).to_numpy()),
+    ]
+    checks += [
+        (f"input_missing:{column}", ~np.isfinite(frame[column].to_numpy(dtype=float)))
+        for column in reversed(PULSE_CHAIN_INPUTS)
+    ]
+    for name, mask in checks:  # last assignment wins: the docstring's order is precedence
+        state[np.asarray(mask, dtype=bool)] = name
+    return state
+
+
 def pulse_chain_ratios(
     frame: pd.DataFrame, cal: PulseChainCalibration, chain: PulseChain
 ) -> pd.DataFrame:
@@ -1037,19 +1092,7 @@ def pulse_chain_ratios(
     within the ECU pairing tolerance and the phi word bracketed. Lambda is not
     needed: this checks the ECM's arithmetic, not the plant.
     """
-    needed = ["bfs", "bfs_before", "rpm", "reference_phi", "stft_pct", "baro_kpa", "iat_c"]
-    finite = np.isfinite(frame[[*needed, "ecu_dead_time_counts"]].to_numpy(dtype=float)).all(axis=1)
-    with np.errstate(divide="ignore", invalid="ignore"):
-        bfs_steady = (frame["bfs"] - frame["bfs_before"]).abs() / frame["bfs"] <= (
-            chain.check_bfs_span
-        )
-    usable = frame[
-        frame["steady_window"].astype(bool)
-        & frame["fuelled"].astype(bool)
-        & finite
-        & bfs_steady
-        & (frame["reference_phi"] > 0)
-    ].copy()
+    usable = frame[pulse_chain_states(frame, chain) == "eligible"].copy()
     if not len(usable):
         empty: pd.DataFrame = usable.assign(ratio=pd.Series(dtype=float))
         return empty

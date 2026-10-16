@@ -24,7 +24,9 @@ inputs' ends. With no logged ``0xFFFF118A`` Fuel Comp is the band of that rpm
 row pair, which this calibration keeps within a few percent of 128.
 
 :func:`evaluate_steady_bfs` pairs the raw telemetry itself (a pre-aggregated
-frame cannot be handed to it), applies the frozen steadiness gates
+frame cannot be handed to it) one-to-one on the acquisition clock
+(:func:`pair_bfs_inputs`, :func:`src.signals.pairing.match_ordered`, BFS reads
+as reference), applies the frozen steadiness gates
 (:class:`SteadyGates`, declared before any scoring), and reports every BFS
 read: scored with its per-sample ratio, or excluded with the reason. The
 observed BFS is never an input: feeding it would validate only the X byte
@@ -60,9 +62,12 @@ from src.analysis.ecu_application import (
 from src.analysis.ecu_state_models import byte_curve16
 from src.analysis.rom_map import RomMap, check_program_constants, read_program_constant
 from src.decode import air_charge as kernel
+from src.signals.pairing import PairingPolicy, match_ordered
 
-#: Bumped when a gate, a pairing rule or the prediction changes.
-EVALUATOR_VERSION = 1
+#: Bumped when a gate, a pairing rule or the prediction changes. 2: inputs
+#: are paired one-to-one with ``match_ordered`` (was: nearest read, reuse
+#: allowed; identical on the seven E05.2 drives and the 2026-10-04 RAM study).
+EVALUATOR_VERSION = 2
 
 #: Calibration bytes the Tp span and the MAF report read (cited on the
 #: application model's nodes, which a test holds to this list).
@@ -432,12 +437,125 @@ class SteadyBfsReport:
         )
 
 
-def _nearest(times: np.ndarray, at: float) -> int | None:
-    if times.size == 0:
-        return None
-    i = int(np.searchsorted(times, at))
-    best = min((j for j in (i - 1, i) if 0 <= j < times.size), key=lambda j: abs(times[j] - at))
-    return best
+@dataclass(frozen=True)
+class BfsSeries:
+    """The raw words one BFS evaluation reads, each channel in acquisition
+    order (:func:`raw_series`). ``load_*`` are empty when no load channel is
+    read; ``has_load`` says which."""
+
+    bfs_t: np.ndarray
+    bfs_w: np.ndarray
+    maf_t: np.ndarray
+    maf_w: np.ndarray
+    rpm_t: np.ndarray
+    rpm_w: np.ndarray
+    load_t: np.ndarray
+    load_w: np.ndarray
+    has_load: bool
+
+
+def bfs_series(
+    rows: pd.DataFrame,
+    *,
+    bfs_channel: str = "DID_1208",
+    maf_channel: str = "DID_1209",
+    rpm_channel: str = "RPM",
+    load_channel: str | None = None,
+) -> BfsSeries:
+    """The raw words of ``rows`` for one BFS evaluation, after each channel is
+    checked to carry the quantity it is read as (``channel_unsupported``)."""
+    for channel, quantity in (
+        (bfs_channel, "bfs"),
+        (maf_channel, "maf"),
+        (rpm_channel, "rpm"),
+        (load_channel, "load"),
+    ):
+        if channel is not None and EXTRACTORS.get(channel, ("", None))[0] != quantity:
+            raise AirChargeRefusalError(
+                "channel_unsupported", f"{channel!r} is not a {quantity} channel"
+            )
+    bfs_t, bfs_w = raw_series(rows, bfs_channel)
+    maf_t, maf_w = raw_series(rows, maf_channel)
+    rpm_t, rpm_w = raw_series(rows, rpm_channel)
+    load_t, load_w = raw_series(rows, load_channel) if load_channel else (np.empty(0), np.empty(0))
+    return BfsSeries(
+        bfs_t, bfs_w, maf_t, maf_w, rpm_t, rpm_w, load_t, load_w, has_load=load_channel is not None
+    )
+
+
+def score_bfs_read(
+    series: BfsSeries,
+    index: int,
+    cal: AirChargeCalibration,
+    *,
+    maf_index: int | None,
+    rpm_index: int | None,
+    load_index: int | None,
+    gates: SteadyGates = FROZEN_GATES,
+) -> BfsRecord | str:
+    """One BFS read (``series.bfs_t[index]``) scored, or the name of the gate
+    that excludes it. The pairing is the caller's: ``*_index`` is the input
+    read paired with it within the gate's skew, or ``None`` when none is.
+    Gates apply in a fixed order, so each read has exactly one reason."""
+    at, observed = series.bfs_t[index], series.bfs_w[index]
+    if maf_index is None:
+        return "maf_unpaired"
+    if rpm_index is None:
+        return "rpm_unpaired"
+    maf, rpm = int(series.maf_w[maf_index]), int(series.rpm_w[rpm_index])
+    if rpm * ECM_RPM_PER_COUNT < gates.min_rpm:
+        return "below_min_rpm"
+    near_maf = series.maf_w[np.abs(series.maf_t - at) <= gates.window_s]
+    if near_maf.size < gates.min_maf_reads_in_window:
+        return "maf_window_sparse"
+    if np.max(np.abs(near_maf - maf)) > gates.max_maf_spread * maf:
+        return "maf_not_steady"
+    near_rpm = series.rpm_w[np.abs(series.rpm_t - at) <= gates.window_s]
+    if np.max(np.abs(near_rpm - rpm)) > gates.max_rpm_spread * rpm:
+        return "rpm_not_steady"
+    load: int | None = None
+    if series.has_load:
+        if load_index is None:
+            return "load_unpaired"
+        load = int(series.load_w[load_index])
+    try:
+        prediction = predict_steady_bfs(cal, maf_word=maf, rpm_word=rpm, load_byte=load)
+    except AirChargeRefusalError as exc:
+        return exc.reason
+    if prediction.mid == 0:
+        return "predicted_zero"
+    return BfsRecord(float(at), int(observed), prediction, maf, rpm, load)
+
+
+@dataclass(frozen=True)
+class BfsPairs:
+    """Per BFS read (by index into ``series.bfs_t``), the index of the input
+    read paired with it; a read absent from a map has no partner in skew."""
+
+    maf: dict[int, int]
+    rpm: dict[int, int]
+    load: dict[int, int]
+
+
+def _match(reference: np.ndarray, other: np.ndarray, max_skew_s: float) -> dict[int, int]:
+    if not len(reference) or not len(other):
+        return {}
+    matched = match_ordered(
+        reference, other, PairingPolicy.within(pd.Timedelta(seconds=max_skew_s), reference="a")
+    )
+    return dict(zip(matched.index_a.tolist(), matched.index_b.tolist(), strict=True))
+
+
+def pair_bfs_inputs(series: BfsSeries, gates: SteadyGates = FROZEN_GATES) -> BfsPairs:
+    """Each input paired one-to-one with the BFS reads on the acquisition
+    clock (:func:`~src.signals.pairing.match_ordered`, BFS reads as reference,
+    each within its gate's skew): an input read is never placed in two
+    samples."""
+    return BfsPairs(
+        maf=_match(series.bfs_t, series.maf_t, gates.max_maf_skew_s),
+        rpm=_match(series.bfs_t, series.rpm_t, gates.max_rpm_skew_s),
+        load=_match(series.bfs_t, series.load_t, gates.max_load_skew_s),
+    )
 
 
 def evaluate_steady_bfs(
@@ -455,67 +573,34 @@ def evaluate_steady_bfs(
     :func:`predict_steady_bfs` from the paired MAF and rpm reads. Every scored
     record carries ``regions_assumed`` (module docstring): the cranking,
     MAF-fault and subtracting-filter flags are not read, so the score assumes
-    each sample is outside those regions and says so."""
-    for channel, quantity in (
-        (bfs_channel, "bfs"),
-        (maf_channel, "maf"),
-        (rpm_channel, "rpm"),
-        (load_channel, "load"),
-    ):
-        if channel is not None and EXTRACTORS.get(channel, ("", None))[0] != quantity:
-            raise AirChargeRefusalError(
-                "channel_unsupported", f"{channel!r} is not a {quantity} channel"
-            )
-    bfs_t, bfs_w = raw_series(rows, bfs_channel)
-    maf_t, maf_w = raw_series(rows, maf_channel)
-    rpm_t, rpm_w = raw_series(rows, rpm_channel)
-    load_t, load_w = raw_series(rows, load_channel) if load_channel else (np.empty(0), np.empty(0))
+    each sample is outside those regions and says so.
+
+    Inputs are paired by :func:`pair_bfs_inputs`, the pairing
+    :mod:`src.analysis.twin_runner` uses for the same reads."""
+    series = bfs_series(
+        rows,
+        bfs_channel=bfs_channel,
+        maf_channel=maf_channel,
+        rpm_channel=rpm_channel,
+        load_channel=load_channel,
+    )
+    pairs = pair_bfs_inputs(series, gates)
     records: list[BfsRecord] = []
     excluded: dict[str, int] = {}
-
-    def skip(reason: str) -> None:
-        excluded[reason] = excluded.get(reason, 0) + 1
-
-    for at, observed in zip(bfs_t, bfs_w, strict=True):
-        i = _nearest(maf_t, at)
-        if i is None or abs(maf_t[i] - at) > gates.max_maf_skew_s:
-            skip("maf_unpaired")
-            continue
-        j = _nearest(rpm_t, at)
-        if j is None or abs(rpm_t[j] - at) > gates.max_rpm_skew_s:
-            skip("rpm_unpaired")
-            continue
-        maf, rpm = int(maf_w[i]), int(rpm_w[j])
-        if rpm * ECM_RPM_PER_COUNT < gates.min_rpm:
-            skip("below_min_rpm")
-            continue
-        near_maf = maf_w[np.abs(maf_t - at) <= gates.window_s]
-        if near_maf.size < gates.min_maf_reads_in_window:
-            skip("maf_window_sparse")
-            continue
-        if np.max(np.abs(near_maf - maf)) > gates.max_maf_spread * maf:
-            skip("maf_not_steady")
-            continue
-        near_rpm = rpm_w[np.abs(rpm_t - at) <= gates.window_s]
-        if np.max(np.abs(near_rpm - rpm)) > gates.max_rpm_spread * rpm:
-            skip("rpm_not_steady")
-            continue
-        load: int | None = None
-        if load_channel is not None:
-            k = _nearest(load_t, at)
-            if k is None or abs(load_t[k] - at) > gates.max_load_skew_s:
-                skip("load_unpaired")
-                continue
-            load = int(load_w[k])
-        try:
-            prediction = predict_steady_bfs(cal, maf_word=maf, rpm_word=rpm, load_byte=load)
-        except AirChargeRefusalError as exc:
-            skip(exc.reason)
-            continue
-        if prediction.mid == 0:
-            skip("predicted_zero")
-            continue
-        records.append(BfsRecord(float(at), int(observed), prediction, maf, rpm, load))
+    for index in range(len(series.bfs_t)):
+        scored = score_bfs_read(
+            series,
+            index,
+            cal,
+            maf_index=pairs.maf.get(index),
+            rpm_index=pairs.rpm.get(index),
+            load_index=pairs.load.get(index),
+            gates=gates,
+        )
+        if isinstance(scored, str):
+            excluded[scored] = excluded.get(scored, 0) + 1
+        else:
+            records.append(scored)
     return SteadyBfsReport(records=tuple(records), excluded=excluded, gates=gates)
 
 
@@ -528,11 +613,16 @@ __all__ = [
     "AirChargeRefusalError",
     "ApplicationModelRefusalError",
     "BfsPrediction",
+    "BfsPairs",
     "BfsRecord",
+    "BfsSeries",
     "SteadyBfsReport",
     "SteadyGates",
+    "bfs_series",
     "evaluate_steady_bfs",
     "fuel_comp_interval",
+    "pair_bfs_inputs",
     "predict_steady_bfs",
     "raw_series",
+    "score_bfs_read",
 ]

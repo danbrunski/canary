@@ -147,6 +147,67 @@ Pi; E09.13 Light. Items marked **listing** need the firmware session
   equality for every paired case. A mutation in a shared kernel fails both
   front ends. Clean-process test: no ECU-facing import. Split for dispatch
   as 2a (runner + ECU outputs), 2b (plant stages), 2c (`run_paired` on it).
+  - [x] **2a — runner + ECU outputs (2026-10-16; verifier FAIL on empty-result
+    accounting, fixed, re-verified PASS: 275 passed; seams byte-identical to
+    HEAD on the 7 drives + RAM study; 10 ms-duplicate case now 106 scored in
+    both front ends, the intended one-to-one unification).** Open for 2c:
+    a public `target_phi.x_reads()` so the runner stops copying
+    `x_formula_check`'s X pairing; a reason registry in `target_phi` so the
+    reason-enumeration test cannot miss split-tuple or list-form reasons.
+    `src/analysis/twin_runner.py`:
+    `load_twin_kit`, `resolve_ecu(kit, LoadedRom)` (the evaluators' own
+    constructors; a refusal makes that stage `calibration_unresolved:<cal>:<reason>`),
+    `stage_order` (model `depends_on` topologically, `schedule` breaking ties:
+    BFS → X → target φ → pulse word, the pulse stage after
+    `final_command_word`), `run_twin(session | frame of reads, kit, ecu)` →
+    `TwinRun`: one record per output per sample (observation, observed_spec,
+    acquired_at, observed, predicted, residual, ratio, state, kind);
+    `accounting()` and `empty()` per output **per observation channel**
+    (BFS: DID 0x1208 round and the 0x103A RAM window, each declared, so one
+    channel's eligible reads never hide another's empty). Kernels: φ
+    `evaluate_session`; X `x_from_bfs` on the runner's own `match_ordered`
+    pairs (every X read is a record with its time and value); BFS
+    `score_bfs_read` on `air_charge_twin.pair_bfs_inputs`; pulse
+    `build_samples` + `pulse_chain_ratios`. `native` holds each evaluator's
+    own result. Refuses `stage_role_changed`, `kernel_mismatch`, `graph_cycle`,
+    `reason_unclassified`; kinds `input_not_captured`, `not_co_sampled`,
+    `gated`, `outside_model`, `calibration_unresolved`, `pending`, plus
+    `output_not_captured`. `map_uninitialised`/`slot_ambiguous`/`map_switching`
+    are `outside_model`; `map_identity_unbracketed` is `input_not_captured`
+    when an identity channel had no read by the sample's decision time
+    (`target_phi.captured_by`), else `not_co_sampled`; a test enumerates every
+    reason `target_phi` emits from its source and classifies each. The
+    docstring names the pairing exceptions (pulse slow context as-of, rail
+    window median, reference-φ bracket; φ identity bracket/argmin and gates).
+    **One BFS pairing (operator-delegated):** `evaluate_steady_bfs` now pairs
+    with `match_ordered` (`EVALUATOR_VERSION` 2); every field of every record
+    and every exclusion count is byte-identical to HEAD on the seven E05.2
+    drives and the RAM study (both channel sets), JSON dumps compared with
+    `cmp`; the 10 ms-duplicate case is a test. Seams: `air_charge_twin.bfs_series`,
+    `score_bfs_read`, `pair_bfs_inputs`; `fuel_plant_eval.build_samples(..., name=)`
+    (a named frame equals the directory, `assert_frame_equal`),
+    `pulse_chain_states`. `tests/test_twin_runner.py` 22 tests,
+    `-m "slow or not slow"` green; each pin through runner and evaluator,
+    per-record observed/predicted compared for φ, X and pulse:
+    E02 174 = 120 `input_stale:load` + 18 `input_stale:rpm` + 15
+    `map_identity_unbracketed` + 21 `sentinel`, `record_lines` == fixture,
+    both 0x4A80 commands at the recorded instants; X 194 pairs, 168 exact;
+    E05.2 458 of 14,843, median 0.99912; Oct 4 RAM window `maf_unpaired: 194`;
+    E07.3 slice n 218 median 1.0084; six captures n 2,361, median 1.0084,
+    p10–p90 0.958–1.025, negative control 0.936. Kernel mutations move both
+    front ends (four monkeypatch tests; a scratch plugin fails the old tests
+    and the runner's alike). Clean-process test: no ECU-facing import.
+    **Runner accounting, Oct 4 RAM study (full session):** BFS DID 0x1208
+    193 `input_not_captured` (DID 0x1209 never polled), RAM window 194
+    `not_co_sampled`; X 194 eligible; φ 174, 0 eligible: `not_co_sampled` 153
+    (X/rpm/flag read 194/180/191 times, paired 19/9/0 within the skew),
+    `outside_model` 21 — empty because of co-sampling; pulse 193
+    `not_co_sampled` (`input_missing:bfs`). **2026-09-21T223734:** BFS DID 106
+    eligible, RAM window `output_not_captured`; X `output_not_captured`; φ 1,078,
+    0 eligible: `input_not_captured` 927 (X, flag and the three identity
+    channels never polled), `outside_model` 151; pulse 655 eligible.
+    Remaining for E09.2: 2b (plant stages, `na-stock-2026-10-05.1` numbers),
+    2c (`run_paired` on it, `cmp_head` equality).
 
 - [ ] **E09.3 — Stateful ECU replay at the tick.**
   The airflow pipeline (`w20A8` low-pass, `L20AC`, `w1056`, the `w273E`
