@@ -265,3 +265,125 @@ profiles:
   corpus_eligible: false
   behavior_model_recipes: []
   storage_prefix: _capture-tuning
+- name: twin
+  description: 'Engine twin scoring: every channel the twin runner pairs, in the round
+    or 0x23 window it pairs them in'
+  notes: 'E09.1 (2026-10-16). The channel list is not chosen here: it is
+    ecu_application.twin_observation_channels over ecu_application_model.yaml plus
+    the pairings the twin runner declares (twin_runner.BFS_CHANNEL_SETS, the
+    target-phi definition''s gates and X relation, every fuel plant''s specs, the
+    E07.4 case''s load_input). tests/test_twin_profile.py fails when the model
+    gains an observation this profile lacks.
+
+
+    Grouping. Every DID and memory window the twin pairs is read in every 0.5 s
+    Mode 22 window, so the DIDs and windows one output needs always share one.
+    Mode 01 values the kernels pair (rpm, MAF, throttle, lambda, PID 0x44) share
+    one weight, so one round; fuel status, trims, baro, IAT, coolant, battery and
+    purge are context, read as of a declared age.
+
+
+    The fill byte and the pulse DID (E07.4, 0.1 s; operator 2026-10-13: do not
+    widen it). A window reads its DIDs first and its memory reads last, back to
+    back (B08.4), in the catalog''s window order: fuel_target, spark, fuel_axis,
+    uprev_state, fuel_comp_x (the fill byte), flags_2841. So the gap is the reads
+    in between: on the fake clock (tests/test_twin_profile.py, 10 ms answers)
+    0.069 s on every pulse read, inside 0.1 s by more than one request slot
+    (1/90 s). Each DID added to the window moves it a slot later: 0.091 s with
+    DIDs 0x120F and 0x1110, 0.102 s with 0x1101 as well. So those three are not
+    in this profile: throttle is PID 0x11 and purge PID 0x2E (the Fuel Comp
+    fit''s first purge source), coolant PID 0x05 (the phi gate''s second
+    source). The tuning profile still reads all three DIDs.
+
+
+    Mode 01 and Mode 22 are exclusive on this ECM: no Mode 01 read lands inside
+    a session window, so a memory read is at least its distance to the window''s
+    edges from any MAF read. The steady-BFS RAM channel set pairs obd:MAF within
+    0.1 s of the 0x103A read (SteadyGates.max_maf_skew_s, frozen); on the fake
+    clock, with 0x103A added, that read is 0.100 s from the nearest MAF, within a
+    request slot of the limit, which decides nothing either way. On
+    _capture-tuning-2026-09-23T142926 DID 0x1208 had obd:MAF within 0.1 s on 372
+    of 3,089 reads. The set cannot be in this profile anyway: 0x103A is
+    hypothesized.
+
+
+    Awaited, though the derivation names them: ECM_AIR_CHARGE_SLOT_103A and
+    ECM_UPREV_MAP_SELECTOR (hypothesized: 0x103A is one of three air-charge slots
+    not yet told apart, and the selector read a constant 0 on all 196 reads of
+    _capture-ram-study-2026-10-04T204557) and ECM_FUEL_TRANSIENT_FLAGS
+    (hypothesized, never read). A memory channel enters a profile only once it
+    is not hypothesized and carries live-read evidence
+    (tests/test_memory_catalog_knock_lambda.py). Neither adds a window when it
+    lands (0x103A widens the fuel_axis read, the selector the uprev_state read),
+    so the fill byte stays at 0.069 s. Without 0x103A the X relation stage has
+    no BFS word; target phi''s lookup has its X input (the X trace) and E07.4
+    its fill byte.'
+  experimental: true
+  mode01:
+    RPM: 1.0
+    MAF: 1.0
+    THROTTLE_POS: 1.0
+    O2_WR_LAMBDA_S1: 1.0
+    COMMANDED_EQUIV_RATIO: 1.0
+    FUEL_STATUS: 0.5
+    SHORT_FUEL_TRIM_1: 0.5
+    SHORT_FUEL_TRIM_2: 0.5
+    LONG_FUEL_TRIM_1: 0.5
+    LONG_FUEL_TRIM_2: 0.5
+    BAROMETRIC_PRESSURE: 0.25
+    INTAKE_TEMP: 0.25
+    COOLANT_TEMP: 0.25
+    CONTROL_MODULE_VOLTAGE: 0.25
+    EVAPORATIVE_PURGE: 0.25
+  mode01_batch_groups: []
+  mode22:
+  - ECM_MAF_GPS
+  - ECM_AIR_CHARGE
+  - ECM_INJECTOR_PULSE_1
+  mode22_rate_weights: {}
+  memory:
+  - ECM_TARGET_EQUIV_RATIO
+  - ECM_ENGINE_SPEED_RAM
+  - ECM_PEDAL_ENRICH_FLAGS
+  - ECM_HIGH_DET_FLAGS
+  - ECM_UPREV_MAGIC
+  - ECM_ACTIVE_MAP
+  - ECM_FUEL_TARGET_MAP_X_TRACE
+  - ECM_FUEL_COMP_X_INPUT
+  memory_rate_weights: {}
+  mode01_enabled: true
+  mode22_enabled: true
+  did_interval_seconds: null
+  did_cycle_seconds: 0.5
+  round_timestamps: true
+  target_rate_hz: 4.0
+  did_continuous: false
+  bus_budget_override: 90.0
+  priority_channels: null
+  expected_total_demand_hz: 57.0
+  capacity_evidence: 'Demand (preview_polling_plan, the live plan asked early): 5
+    Mode 01 PIDs at 4 Hz, 5 at 2 Hz (fuel status, four trims) and 5 at 1 Hz, 3
+    DIDs and 6 memory windows at 2 Hz: 53 channel reads/s, plus entry and exit
+    every 0.5 s cycle (4 req/s): 57 req/s unbatched, 29 batched six PIDs to a
+    request, against the 90 req/s budget. Cycle (hybrid_cycle.plan_cycle, the plan
+    the loop reports as /status.obd_scheduler.did_profile.cycle.plan): 18 Mode
+    01-side requests (15 PIDs and the three DTC polls) in 3 batches, 9 in-window
+    requests and 2 session requests at 90 req/s plus the 0.05 s exit grace:
+    required_seconds 0.2056 of the 0.5 s cycle; 0.3722 with batching refused.
+    worst_case_seconds 1.2056 (1.3722 unbatched) is that plus one request
+    timeout (1.0 s): one unanswered request makes a cycle of about 1.2 s and the
+    boundaries it overruns are skipped, not burst. On the fake clock the loop
+    reports that plan, every channel runs at its planned rate, a window takes
+    0.11 s entry to exit, and the three cycles that held an unanswered DTC poll
+    ran 1.18-1.21 s. Parent evidence: the tuning profile ran 62 req/s at the same
+    budget and cycle on six drives (2026-09-21..23; DID 0x1208 to 0x1209 p50
+    0.011 s on 09-23T142926). No capture of this profile exists yet; replace this
+    text with the first one, and watch storage queue_depth (the 2026-07-29
+    overload was the writer, not the bus).'
+  required_tuple: []
+  min_achieved_rate_hz: null
+  max_tuple_skew_s: null
+  requires_tune_revision: true
+  corpus_eligible: false
+  behavior_model_recipes: []
+  storage_prefix: _capture-twin

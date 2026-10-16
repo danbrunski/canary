@@ -2723,6 +2723,22 @@ memory:
           residual 0.006 on 405 rows. The load (BFS-axis) coordinate the ECM
           is using into the fuel-target map; its Y coordinate is rpm, which
           UpRev reads from 0xFFFF11D8 (ECM_ENGINE_SPEED_RAM).
+      - session: _capture-ram-study-2026-10-04T204557
+        method: live_read
+        transport: can
+        finding: >
+          Read through service 0x23 in the fuel_axis window, and checked
+          against the firmware's X relation on the same read:
+          min(255, floor(word 0xFFFF103A x 128 / 44019)), 44019 the image's
+          load_point_scaler. 168 of 194 same-read pairs exact, the other 26
+          within 1-4 raw counts, both signs; the byte took 66 distinct values
+          (9-100) over the drive, so it is not a constant matching a constant.
+          The relation can fail: the wrong scaler (x 1.1) matches under 100
+          pairs and the display-scaled value under 10
+          (tests/test_target_phi.py, the x_relation checks over the committed
+          target-phi slice). The reference word's slot (0x103A against
+          0x1038/0x103C) stays hypothesized; the relation pins this address,
+          not that one.
 
   - name: ECM_THROTTLE_MAP_X_TRACE
     address: 0xFFFF1C2C

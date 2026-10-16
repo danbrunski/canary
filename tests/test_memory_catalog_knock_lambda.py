@@ -211,6 +211,11 @@ LIVE_READ_METHODS = frozenset(
         "same_reply_piecewise_identity_vs_did_0x1134",
         "can_transport_parity",
         "fuel_cut_coincidence",
+        # A chain reproduction on a live capture is a read too: the address
+        # was read through service 0x23 on the truck, and its value checked
+        # against an independent computation from other channels (and wrong
+        # variants of that computation shown to miss), which is a known answer.
+        "chain_reproduction",
     }
 )
 

@@ -33,7 +33,7 @@ from __future__ import annotations
 
 import hashlib
 import re
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal
@@ -797,6 +797,209 @@ def check_observations(model: ApplicationModel, memory: Iterable[tuple[str, int]
     return wrong
 
 
+# -- what a twin capture must poll (E09.1) ---------------------------------------------
+
+#: How a channel has to be read for the sample it belongs to to count.
+#: ``mode01_round``: in the same Mode 01 poll round as the output's other
+#: round members (a shared round stamp, one cadence). ``mode22_round``: in the
+#: same Mode 22 session window as the output's other DIDs and memory windows;
+#: on this ECM two DIDs are always two requests, so "same round" is the
+#: tightest a DID pair can be. ``memory_window``: in one service-0x23 read
+#: with every channel naming the same catalog ``window`` (the only
+#: same-instant read this ECM offers), inside that session window.
+#: ``context``: slow or state context its kernel takes as the nearest read
+#: within a declared age, never paired as a value (baro, coolant, trims).
+CoSampling = Literal["mode01_round", "mode22_round", "memory_window", "context"]
+#: Where a capture profile selects the channel. ``external``: a sensor the
+#: diagnostic scheduler does not poll (the AEM rail gauge), named so it is not
+#: silently dropped.
+PollService = Literal["mode01", "mode22", "memory", "external"]
+
+_SERVICES: dict[str, PollService] = {
+    "obd": "mode01",
+    "did": "mode22",
+    "mem": "memory",
+    "sensor": "external",
+}
+_UNITS: dict[PollService, CoSampling] = {
+    "mode01": "mode01_round",
+    "mode22": "mode22_round",
+    "memory": "memory_window",
+}
+
+
+#: ``output``: the output's own observation (its identity or an alias);
+#: ``input``: a value the prediction is computed from, paired with the output
+#: sample; ``context``: see :data:`CoSampling`.
+TwinRoleOfChannel = Literal["output", "input", "context"]
+
+
+@dataclass(frozen=True)
+class TwinChannel:
+    """One channel a twin output needs, and how it must be read."""
+
+    spec: str
+    role: TwinRoleOfChannel
+    #: ``output:<id>`` or ``node:<id>`` (the manifest's ``observed_as``), or
+    #: ``kernel`` (an input the output's kernel pairs that the manifest does
+    #: not carry as an observation: the MAF and rpm words of steady BFS).
+    declared_by: str
+    service: PollService
+    unit: CoSampling
+    #: The catalog window of a memory channel (its own name when it has none).
+    window: str | None = None
+
+    @property
+    def name(self) -> str:
+        return self.spec.split(":", 1)[1]
+
+
+@dataclass(frozen=True)
+class TwinObservationGroup:
+    """Channels of one output that one read, round or session window must
+    carry together. ``key`` is ``mode01``, ``mode22``, the memory window's
+    name, or ``context``."""
+
+    unit: CoSampling
+    key: str
+    specs: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class TwinObservations:
+    """Everything one twin output is scored from, grouped by co-sampling."""
+
+    output: str
+    #: For a stage the model does not carry as a node (the injector pulse
+    #: word): the model node it runs after. ``None`` for a model output.
+    after: str | None
+    channels: tuple[TwinChannel, ...]
+
+    @property
+    def groups(self) -> tuple[TwinObservationGroup, ...]:
+        keyed: dict[tuple[CoSampling, str], list[str]] = {}
+        for c in self.channels:
+            if c.service == "external":
+                continue
+            if c.role == "context":
+                key: tuple[CoSampling, str] = ("context", "context")
+            elif c.unit == "memory_window":
+                assert c.window is not None
+                key = (c.unit, c.window)
+            else:
+                key = (c.unit, c.service)
+            keyed.setdefault(key, []).append(c.spec)
+        return tuple(TwinObservationGroup(u, k, tuple(s)) for (u, k), s in keyed.items())
+
+    def specs(self, *, role: str | None = None) -> tuple[str, ...]:
+        return tuple(c.spec for c in self.channels if role is None or c.role == role)
+
+
+def evaluable_outputs(model: ApplicationModel) -> list[Output]:
+    """Outputs a twin can be scored on: a twin definition and a channel to
+    compare it with. An intermediate without an observation, or an output the
+    twin does not predict yet, has nothing a capture could add."""
+    return [o for o in model.outputs if o.twin is not None and o.observed_as]
+
+
+def twin_observation_channels(
+    model: ApplicationModel,
+    memory: Iterable[tuple[str, str | None]],
+    *,
+    kernel_inputs: Mapping[str, Iterable[str]] | None = None,
+    kernel_context: Mapping[str, Iterable[str]] | None = None,
+    downstream: Mapping[str, str] | None = None,
+) -> tuple[TwinObservations, ...]:
+    """Every observed input and every observable output channel of each
+    evaluable output (:func:`evaluable_outputs`), with the co-sampling unit
+    each needs: what a capture profile for the twin must poll (E09.1).
+
+    From the manifest: each output's ``observed_as`` (identity and aliases,
+    role ``output``) and the ``observed_as`` of every node on the path of the
+    node its twin predicts (:meth:`ApplicationModel.path`, role ``input``).
+    The kernels' own pairings are passed in by the caller, from the
+    declarations the twin runner reads (``twin_runner.BFS_CHANNEL_SETS``, the
+    target-phi definition, the fuel plant's ``specs``): ``kernel_inputs`` are
+    paired as values, ``kernel_context`` taken as of a declared age.
+    ``downstream`` names a runner stage the model does not carry as a node
+    (stage -> the node it runs after); its channels are all the caller's.
+
+    A spec keeps the first role it is declared with, and an ``input`` beats
+    ``context``: a caller cannot demote what the manifest pairs. ``memory`` is
+    ``(name, window)`` from the memory catalog. Refuses a ``mem:`` spec the
+    catalog lacks (``observation_not_catalogued``), a prefix no capture can
+    read (``observation_not_pollable``), kernel channels for an output that
+    is not evaluable (``kernel_output_undeclared``) and a downstream stage
+    anchored on an undeclared node (``node_undeclared``)."""
+    windows = dict(memory)
+    kernel_inputs = dict(kernel_inputs or {})
+    kernel_context = dict(kernel_context or {})
+    downstream = dict(downstream or {})
+    evaluable = evaluable_outputs(model)
+    known = {o.id for o in evaluable} | set(downstream)
+    stray = sorted((set(kernel_inputs) | set(kernel_context)) - known)
+    if stray:
+        raise ApplicationModelRefusalError(
+            "kernel_output_undeclared",
+            f"kernel channels for {stray}: neither an evaluable output nor a declared "
+            "downstream stage",
+        )
+    nodes = {n.id for n in model.nodes}
+    for stage, after in downstream.items():
+        if after not in nodes:
+            raise ApplicationModelRefusalError(
+                "node_undeclared", f"downstream stage {stage} runs after undeclared node {after!r}"
+            )
+
+    def channel(spec: str, role: TwinRoleOfChannel, declared_by: str) -> TwinChannel:
+        prefix, name = spec.split(":", 1) if ":" in spec else ("", spec)
+        service = _SERVICES.get(prefix)
+        if service is None:
+            raise ApplicationModelRefusalError(
+                "observation_not_pollable",
+                f"{spec} ({declared_by}): no capture profile reads a {prefix or 'bare'!r} channel",
+            )
+        window = None
+        if service == "memory":
+            if name not in windows:
+                raise ApplicationModelRefusalError(
+                    "observation_not_catalogued",
+                    f"{spec} ({declared_by}): not in the memory catalog, so no profile can poll it",
+                )
+            window = windows[name] or name
+        unit: CoSampling = "context" if role == "context" else _UNITS.get(service, "context")
+        return TwinChannel(spec, role, declared_by, service, unit, window)
+
+    def collect(declared: list[tuple[str, TwinRoleOfChannel, str]]) -> tuple[TwinChannel, ...]:
+        chosen: dict[str, TwinChannel] = {}
+        for spec, role, by in declared:
+            held = chosen.get(spec)
+            if held is None or (held.role == "context" and role == "input"):
+                chosen[spec] = channel(spec, role, by)
+        return tuple(chosen.values())
+
+    def kernel(output_id: str) -> list[tuple[str, TwinRoleOfChannel, str]]:
+        return [(s, "input", "kernel") for s in kernel_inputs.get(output_id, ())] + [
+            (s, "context", "kernel") for s in kernel_context.get(output_id, ())
+        ]
+
+    result: list[TwinObservations] = []
+    for output in evaluable:
+        assert output.twin is not None
+        declared: list[tuple[str, TwinRoleOfChannel, str]] = [
+            (o.spec, "output", f"output:{output.id}") for o in output.observed_as
+        ]
+        declared += [
+            (o.spec, "input", f"node:{node.id}")
+            for node in model.path(output.twin.predicts)
+            for o in node.observed_as
+        ]
+        result.append(TwinObservations(output.id, None, collect(declared + kernel(output.id))))
+    for stage, after in downstream.items():
+        result.append(TwinObservations(stage, after, collect(kernel(stage))))
+    return tuple(result)
+
+
 # -- the read model -------------------------------------------------------------------
 
 
@@ -923,8 +1126,14 @@ __all__ = [
     "check_image",
     "check_image_sha",
     "check_observations",
+    "CoSampling",
+    "TwinChannel",
+    "TwinObservationGroup",
+    "TwinObservations",
     "coverage_report",
+    "evaluable_outputs",
     "load_application_model",
     "observed_specs",
     "program_sha256",
+    "twin_observation_channels",
 ]

@@ -119,7 +119,10 @@ Pi; E09.13 Light. Items marked **listing** need the firmware session
 
 ## Checklist — use case 1: the twin against the running engine
 
-- [ ] **E09.1 — A `twin` capture profile, derived from the manifest.**
+- [~] **E09.1 — A `twin` capture profile, derived from the manifest.**
+  *(Desk half 2026-10-16, revised the same day for the scheduler fix, the
+  fill byte and the X trace; the drive remains, and three catalog
+  identifications the acceptance does not need: see Remaining below.)*
   One capture profile that polls every observed input and every observable
   output of each evaluable application-model output in the same poll round
   or the same `0x23` window, so the twin can be scored at all. Derive the
@@ -136,6 +139,208 @@ Pi; E09.13 Light. Items marked **listing** need the firmware session
   lacks. One drive on the profile (**truck**) gives > 0 eligible samples in
   E02's accounting, > 0 `load_input` pairs in E07.4's case, and a fill-byte
   read within 0.1 s of every pulse read.
+  - **Desk, done 2026-10-16.**
+    - *Derivation.* `ecu_application.twin_observation_channels(model, memory,
+      *, kernel_inputs, kernel_context, downstream)` returns, per evaluable
+      output (`evaluable_outputs`: a twin definition and an observation, so
+      `target_equiv_ratio` and `base_fuel_schedule_word`; ignition timing has
+      no twin, the selected trim no channel) and per runner stage the model
+      does not carry (`injector_pulse_word`, after `final_command_word`), each
+      channel with its role (`output` / `input` / `context`), who declared it
+      (`output:` / `node:` from `observed_as`, or `kernel`) and its unit:
+      `mode01_round`, `mode22_round`, `memory_window` (the catalog window) or
+      `context`. The manifest gives the outputs' observations and the
+      `observed_as` of every node on the predicted node's path; the kernels'
+      pairings are passed in from what the runner reads
+      (`twin_runner.BFS_CHANNEL_SETS`, the target-phi gates and X relation,
+      every `fuel_plant*.yaml` `specs`, the E07.4 case's `load_input`), so no
+      list is written by hand. An `input` beats `context`, so a caller cannot
+      demote what the manifest pairs. Refuses `observation_not_catalogued`,
+      `observation_not_pollable`, `kernel_output_undeclared`, `node_undeclared`.
+    - *Derived groups.* Target phi: outputs `mem:ECM_TARGET_EQUIV_RATIO`
+      (fuel_target) + alias `obd:COMMANDED_EQUIV_RATIO`; inputs in windows
+      fuel_axis (X, and 0x103A for the X relation), spark (rpm word),
+      flags_2841 (pedal flag), uprev_state (magic, active map, selector), which
+      equal `target_phi_twin.yaml` `acquisition.windows` (tested); context
+      `obd:COOLANT_TEMP`, `obd:FUEL_STATUS`, `obd:RPM`/`obd:MAF` steadiness.
+      Steady BFS: outputs 0x103A (fuel_axis) + `did:ECM_AIR_CHARGE`; inputs
+      spark, flags_2841 (0x283C), uprev_state, `mode22` {0x1208, 0x1209},
+      `mode01` {RPM, MAF}, fuel_comp_x (0x118A). Pulse word: `mode22` {0x1206,
+      0x1208}, `mode01` {RPM, MAF, O2_WR_LAMBDA_S1}, fuel_comp_x (E07.4's fill
+      byte, 0.1 s); context trims, baro, IAT, coolant, battery, φ reference,
+      PID 0x44, `sensor:FUEL_PRESSURE` (external).
+    - *Profile `twin`* in `data/nissan-xterra-2008/capture_profiles.yaml`:
+      `target_rate_hz` 4, `did_cycle_seconds` 0.5, `bus_budget_override` 90,
+      `round_timestamps`, `requires_tune_revision`, `corpus_eligible: false`,
+      `_capture-twin`, `experimental: true`. Mode 01 at 4 Hz: RPM, MAF,
+      THROTTLE_POS, O2_WR_LAMBDA_S1, COMMANDED_EQUIV_RATIO; 2 Hz: FUEL_STATUS,
+      STFT/LTFT both banks; 1 Hz: baro, IAT, coolant, PID 0x42, PID 0x2E.
+      Mode 22 every window (2 Hz): 0x1209, 0x1208, 0x1206. Memory every window
+      (2 Hz), six windows: fuel_target, spark, fuel_axis (the X trace),
+      uprev_state (magic, active map), fuel_comp_x (the fill byte), flags_2841
+      (pedal + HI DET).
+    - *Capacity.* Demand from `preview_polling_plan`: 53 channel reads/s,
+      57 req/s unbatched (with 4 req/s of entry/exit), 29 batched six PIDs to
+      a request, against 90 (`expected_total_demand_hz` 57). Cycle from the
+      scheduler's own `hybrid_cycle.plan_cycle`, the plan the loop reports at
+      `/status.obd_scheduler.did_profile.cycle.plan` (the fake-clock run
+      asserts the loop reports exactly it): 18 Mode 01-side requests (15 PIDs
+      and the three DTC polls) in 3 batches, 9 in-window requests, 2 session
+      requests at 90 req/s plus the 0.05 s exit grace: **`required_seconds`
+      0.2056** of the 0.5 s cycle, 0.3722 with batching refused
+      (`plan_cycle` with `batch_max_pids=1`). **`worst_case_seconds` 1.2056**
+      (1.3722 unbatched) is that plus one request timeout (1.0 s): the cycle
+      one unanswered request costs; the boundaries it overruns are skipped,
+      not burst. On the fake clock the three cycles that held an unanswered
+      DTC poll (the scripted ECM answers no Mode 03/07/0A) ran 1.18–1.21 s,
+      4 cycles missed in 120 s, all in the first 5.1 s; the rest 0.500 s. (An earlier version of this text quoted a
+      hand-computed 0.37 s "worst case" as `preview_polling_plan`'s; the
+      preview reports no cycle.)
+    - *Fill byte and X trace in (2026-10-16).* The live-read rule
+      (`LIVE_READ_METHODS`, `tests/test_memory_catalog_knock_lambda.py`) now
+      accepts `chain_reproduction`: a chain reproduction on a live capture is
+      a read whose value is checked against an independent computation, here
+      N02's chain reproducing `ECM_FUEL_COMP_X_INPUT` at 60 steady points on
+      `_capture-ram-study-2026-10-04T204557` with the wrong variants missing.
+      It is the only `chain_reproduction` entry in `data/dids.yaml`.
+      `ECM_FUEL_TARGET_MAP_X_TRACE` gained a `live_read` evidence entry on
+      the same capture: the X relation `min(255, floor(w103A × 128 / 44019))`
+      on the same read is a known answer, 168/194 exact and 26 within 1–4
+      counts both signs, over 66 distinct X values (9–100), and it can fail
+      (wrong scaler under 100 exact, display-scaled X under 10:
+      `test_the_x_relation_exposes_an_x_scale_mistake`). That pins the X
+      trace's address; 0x103A's slot stays hypothesized. Both are in
+      `twin.memory` and out of `AWAITING_LIVE_READ`.
+    - *Fake-clock figures* (`tests/test_twin_profile.py`, 10 ms answers,
+      90 req/s, measured from the first session entry, which now opens on
+      the cycle 0.011 s in; every pairing kept inside its tolerance by
+      `PAIRING_MARGIN_S` = one request slot, 1/90 s, so a phase shift of a
+      read cannot flip a verdict): 236 windows in 120 s, each 0.11 s entry to
+      exit; pulse↔BFS DID 0.011 s (0.1); BFS↔MAF DID 0.022 s (0.1); BFS DID↔
+      Mode 01 rpm 0.160 s (0.25); pulse↔Mode 01 rpm and MAF 0.149 s (0.3);
+      the lookup's windows within 0.050 s of the command (0.25; X trace
+      0.020 s); **fill byte 0.069 s after the pulse DID on every read**
+      (0.1); fill byte↔PID 0x0C 0.080 s on every read (0 of 192 within 0.1 s
+      on the ram-study).
+    - *Findings.* (1) **The fill byte trails the pulse DID by every read
+      between them.** A window reads DIDs first and memory last, back to
+      back (B08.4), in catalog window order (fuel_target, spark, fuel_axis,
+      uprev_state, fuel_comp_x, flags_2841). Each DID added to the window
+      moves the fill byte one slot later: 0.091 s with 0x120F and 0x1110
+      (inside 0.1 s, but within a slot of it), 0.102 s on every read with
+      0x1101 as well (was 0.125 s under the old scheduler). So the profile
+      leaves those DIDs to `tuning` and reads throttle as PID 0x11, purge as
+      PID 0x2E (`fuel_comp_fit.yaml`'s first purge source) and the phi
+      coolant gate from PID 0x05. (2) **The steady-BFS RAM set's MAF pairing
+      is undecided on the fake clock.** It pairs `obd:MAF` within 0.1 s of
+      the 0x103A read (`SteadyGates.max_maf_skew_s`, frozen). What holds
+      whatever the phase: no Mode 01 read lands inside a session window, so
+      a memory read is at least its distance to the window's edges from the
+      nearest MAF (asserted). With 0x103A added the read is 0.100 s from
+      MAF, within a slot of the limit, so the fake clock decides nothing
+      (an earlier version said "0.102 s, 1 of 280, not achievable": that
+      was the clock's phase). On `_capture-tuning-2026-09-23T142926` DID
+      0x1208 had `obd:MAF` within 0.1 s on 372 of 3,089 reads (p50
+      0.125 s). The set cannot be in a profile anyway while 0x103A is
+      hypothesized.
+    - *Behaviour change, recorded.* The first `twin` widened `tuning`'s
+      `flags_2841` read: memory reads were planned over the union of every
+      profile's members, so `tuning` read three bytes instead of one and
+      recorded `mem:ECM_PEDAL_ENRICH_FLAGS`. The scheduler fix (narrowed
+      reads, `requests.narrow_memory_reads`; separate change, verified on
+      its own) removes it. With it present and this `twin` in the tracked
+      catalog, `tuning`'s sent frames (with their fake-clock times), decoded
+      channels and resolved plan are identical with and without `twin`:
+      `tests/test_capture_catalog_independence.py`
+      (`test_no_other_profile_changes_what_the_active_one_records[tuning-None]`,
+      `[tuning-10.0]`, `[default-None]`,
+      `test_a_wider_window_elsewhere_is_not_read_or_decoded_under_tuning`),
+      6 passed.
+    - *Tests.* `tests/test_twin_profile.py` (11; two `slow`, the fake-clock
+      runs): the accept test (every derived channel in its section, every
+      paired DID and window due in every session window, each Mode 01 round
+      group at one weight; the live-read-refused set equal to the pin
+      `AWAITING_LIVE_READ`, now 0x103A, the selector and 0x283C); two
+      scratch-model mutations loaded by the real loader (a node gains
+      `did:ECM_RPM_COARSE`: two named gaps; an output gains hypothesized
+      `mem:ECM_AIR_CHARGE_SLOT_1038`: the refused set no longer equals the
+      pin); the four refusals; the derived groups against the runner's
+      declarations; the planned demand and `plan_cycle`'s cycle; the
+      fake-clock runs (every channel at its planned rate ±5 %, every pairing
+      inside its tolerance by the margin, the loop's reported cycle plan;
+      the awaited variant adds no window, keeps the fill byte inside 0.1 s
+      by the margin, and bounds the RAM set's MAF gap by the window edges).
+      `test_capture_profiles.py`'s catalog list includes `twin`.
+  - **Remaining.**
+    1. **Catalog identifications (desk, not needed for the acceptance).**
+       Three channels the derivation names stay refused by the live-read
+       rule, so no profile polls them: `ECM_AIR_CHARGE_SLOT_103A` (one of
+       three air-charge slots, 0x1038/0x103A/0x103C, all within 1 % of DID
+       0x1208; nobody has told them apart; read 194 times on the
+       ram-study), `ECM_UPREV_MAP_SELECTOR` (hypothesized; constant 0 on all
+       196 ram-study reads, so the reads cannot test the disassembly) and
+       `ECM_FUEL_TRANSIENT_FLAGS` (0x283C, hypothesized, never read; needs
+       one live read on the Pi). Without 0x103A the runner's X relation
+       stage and the steady-BFS RAM channel set have no BFS word; target
+       phi's lookup has its X input and E07.4 its fill byte, so a drive now
+       can meet the acceptance. When one lands it adds no window (0x103A
+       widens fuel_axis, the selector uprev_state, 0x283C flags_2841).
+    2. **BFS already scores without this profile.** On
+       `_capture-tuning-2026-09-23T142926`, `run_twin(...,
+       plant_version="fuel-mv-1")` against the ZS44A-20260920 image gives
+       `base_fuel_schedule_word` on `DID_1208` **98 eligible** samples
+       (2,273 `maf_not_steady`, 442 `rpm_not_steady`, 157
+       `maf_window_sparse`, 107 `maf_unpaired`, 10 `below_min_rpm`, 2
+       `rpm_unpaired`; measured 2026-10-16), and `target_equiv_ratio` 0
+       (1,475 `map_identity_unbracketed`, 194 `sentinel`). The drive's new
+       evidence is target phi and E07.4's fill-byte pairing; BFS's > 0 is
+       not in doubt.
+    3. **The E05 RAM windows.** E05.2(b), E05.3(a)(b) and E05.4(b)(c) name
+       about forty addresses; the catalog has channels for 0x1038–0x103E,
+       0x118A, 0x283C–0x2842, 0x2332 and 0x232E only, the rest none. Each
+       needs a catalog channel and then a live read before a profile may
+       poll it. A window read before fuel_comp_x moves the fill byte one
+       memory read later (10 ms on the fake clock): from 0.069 s, one more
+       keeps it inside 0.1 s by more than a slot (0.079 s, hand arithmetic),
+       two put it within a slot of the limit. The rest belong in a second,
+       non-pulse profile or behind a scheduler change that reads the fill
+       byte straight after the pulse DID. The RAM steady-BFS / DID 0x1209
+       channel-set idea (pair 0x103A with 0x1209 rather than PID 0x10) is
+       dropped for now: 0x103A is hypothesized, so it cannot be in any
+       profile.
+    4. **The drive (truck).** Profile `twin`; start it at `vehicle_state`
+       `engine_running` with the flashed revision recorded, and keep it
+       running until parked (memory `feedback_tuning_run_whole_drive`).
+       Warm up past 80 °C coolant (the φ coolant gate). Then: steady
+       part-throttle holds of ≥ 5 s at 1,500, 2,000, 2,500, 3,000 and
+       3,500 rpm (BFS steady gates: MAF ±2 %, rpm ±1 % over ±1 s); at least
+       three open-loop enrichment holds, high load in a high gear up a grade
+       so rpm stays within 150 for 2 s (φ is eligible only in
+       `open_loop_driving` with a 2 s steady dwell); and two or more pulls
+       above 4,000 rpm (E07.4 wants WOT above 4,000 and part-throttle
+       cruise). Pull the session as a tar stream. Check on the laptop:
+       `kit = twin_runner.load_twin_kit(Path("data/nissan-xterra-2008"),
+       plant_version="fuel-mv-1")`;
+       `rom = rom_effects.load_rom(image, kit.rom_map, kit.model,
+       kit.model_sha256, slot=1, slot_source="default_slot")` for the
+       flashed image; `run = twin_runner.run_twin(session_dir, kit,
+       twin_runner.resolve_ecu(kit, rom), plant_version="fuel-mv-1")`;
+       `run.accounting()` must show `eligible` > 0 for
+       `target_equiv_ratio` (E02) and for `base_fuel_schedule_word` on
+       `DID_1208`, and `run.empty()` names any channel that came back
+       empty. E07.4: `plant_validation.load_input_pairing(build_case_samples(
+       session_dir, kit.plant, kit.delay, case), case)` with `case =
+       load_interventions(...).case("fuel-comp-restore-2026-10-04")` must
+       report paired > 0; and every `did:ECM_INJECTOR_PULSE_1` read must
+       have a `mem:ECM_FUEL_COMP_X_INPUT` read within 0.1 s on the
+       acquisition clock (`read_channels(..., acquired_time=True)`), the
+       property `test_one_session_window_carries_every_did_and_window_the_twin_pairs`
+       holds on the fake clock (0.069 s). Replace the profile's
+       `capacity_evidence` with the drive's measured rates, cycle durations
+       and storage `queue_depth`.
+    5. **Operator decision** (reported, not taken here): whether a scheduler
+       change should read the fill byte directly after the pulse DID, which
+       would let 0x120F and 0x1110 back into the twin profile.
 
 - [x] **E09.2 — One replay runner over the node graph.** (2026-10-16: 2a, 2b,
   2c below. Fixtures green through the runner, `-m "slow or not slow"`:

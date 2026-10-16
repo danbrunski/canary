@@ -95,6 +95,8 @@ def test_vehicle_tuning_profile_is_the_one_research_capture() -> None:
 
     Eight single-question research profiles were retired into
     capture_profiles.archive.yaml on 2026-09-21; nothing may load that file.
+    `twin` (E09.1) is not a research capture: its channels are derived from
+    the application model (tests/test_twin_profile.py).
     """
     config = CanaryConfig.from_yaml(EXAMPLE_YAML)
     catalog = load_capture_profiles(
@@ -103,7 +105,7 @@ def test_vehicle_tuning_profile_is_the_one_research_capture() -> None:
     )
     # Only `default` is built in code, and nothing re-seeds a saved catalog, so
     # the truck's catalog is exactly what the file holds.
-    assert [profile.name for profile in catalog.profiles] == ["default", "tuning"]
+    assert [profile.name for profile in catalog.profiles] == ["default", "tuning", "twin"]
     tuning = catalog.by_name("tuning")
     assert tuning is not None
     assert tuning.target_rate_hz == 4.0
