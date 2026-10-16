@@ -48,11 +48,19 @@ import pytest
 from fastapi.testclient import TestClient
 
 from src.analysis import rom_editor, sim_montecarlo
-from src.analysis.paired_scenarios import PairedScenario, SimKit, load_kit, run_paired
+from src.analysis.paired_scenarios import (
+    LearnedState,
+    OperatingPoint,
+    PairedScenario,
+    SimKit,
+    load_kit,
+    run_paired,
+)
 from src.analysis.paired_scenarios import rpm_word as sim_rpm_word
 from src.analysis.paired_steady import TRIM_AUTHORITY_UNDECODED
 from src.analysis.rom_edit_spec import load_edit_spec
 from src.analysis.rom_image import revision_match, sha256_hex, table_values
+from src.analysis.sim_contract import EcuIdentity, PlantIdentity
 from src.analysis.sim_design import SimDesign, SimDesignRefusalError
 from src.analysis.sim_montecarlo import MonteCarloResult
 from src.control import workbench_jobs
@@ -118,15 +126,30 @@ E076_LEARNED: dict[str, Any] = {**LEARNED_ZERO, "ltft_pct": 2.34}
 WOT_RPM_EDGES = [4600.0, 5000.0]
 WOT_LOAD_EDGES = FORM_LOAD_EDGES[-4:]
 
-#: E07.6's WOT figures (E07 doc, E07.6 tests; re-checked by E08.7 item 4).
+#: E07.6's WOT figures (E07 doc; re-checked by E08.7 item 4). They were stated
+#: on E07.6's SYNTHETIC image (flat Fuel Comp 128, every slot-1 Target AFR
+#: cell +4, pedal flag 0, BFS stated at 42,000); E07.6's own test asserts only
+#: their signs.
 E076_PHI_DELTA = 0.03125
 E076_PULSE_DELTA_MS = 0.41
 E076_LAMBDA_REL = -0.025
-#: E07.6's stated tolerance: lambda "-2.52...-2.49 % over the assumptions".
+#: The "-2.52...-2.49 %" written beside them: that synthetic run's one-point
+#: spread over the plant's assumptions, not a tolerance. It is a property of the
+#: synthetic image and the 0.01 ms pulse quantum (E08.7 item 4 shows lambda
+#: stepping with the quantum), checked literally here because W09.6 names it.
 E076_LAMBDA_RANGE = (-0.0252, -0.0249)
-#: E08.7: the written +0.41 ms holds only at steady BFS >= ~41,997 (one 0.01 ms
-#: pulse quantum); E07.6's figures were measured with BFS stated at 42,000.
-E076_BFS_FOR_PULSE = 41_997
+#: E07.6's own WOT point (4,800 rpm, MAF 150 g/s, MAP 79 kPa, fill byte 200)
+#: on THIS image, with the forced-column flag set, through ``run_paired``
+#: (2026-10-15, ``test_at_e076s_own_points_on_this_image_...``): steady BFS
+#: 41,768, X 121, pulse +0.41 ms, lambda -2.483 % (range -2.498...-2.468 %).
+#: The pulse is BFS-proportional, so the written +0.41 ms needs about this BFS
+#: here (E08.7's ~41,997 threshold is the synthetic image's, not this one's).
+E076_POINT_BFS_1004 = 41_768
+#: The airflow at which this image's steady BFS at E07.6's point is exactly
+#: 42,000 (the BFS E07.6's figures were stated at): lambda there is -2.529 %
+#: (-2.544...-2.514 %) and the pulse +0.42 ms. Neither point is inside
+#: E076_LAMBDA_RANGE.
+E076_BFS_42000_MAF_GPS = 150.83
 #: E08.7 item 4's tolerance for a Monte Carlo against E07.6's own central run:
 #: p50 within this of ``run_paired``'s relative delta, p05-p95 inside its range.
 P50_VS_CENTRAL = 2e-4
@@ -377,6 +400,11 @@ def test_the_negative_control_is_unchanged_in_every_visited_cell(negative: Run) 
         # The ECU side (BFS, phi) is unchanged wherever the target lookup
         # resolved; one cell's lookup sits in the enrichment gate's hysteresis
         # band (4,000 rpm, fill bytes 191-192 here) and names that instead.
+        # KNOWN OVER-REFUSAL (cautious, not false confidence): BFS there is
+        # computed before the target lookup and is finite, but
+        # src/analysis/paired_scenarios.py run_paired (``reasons = list(gate) +
+        # ...``, ~line 1017) gives every output, BFS included, the lookup's
+        # gate reason. Locked in so that fixing it flips this deliberately.
         for name in ("base_fuel_schedule", "target_phi"):
             o = cell["outputs"][name]
             if o["status"] == "unsupported":
@@ -448,7 +476,10 @@ def test_a_k_edit_moves_bfs_by_the_realised_raw_ratio_at_every_open_loop_pair(
         if cell["loop_shares"] != {"open_loop": 1.0}:
             continue
         bfs = cell["outputs"]["base_fuel_schedule"]
-        if bfs["status"] == "unsupported":  # the gate-ambiguous cell (negative control)
+        if bfs["status"] == "unsupported":
+            # The gate-ambiguous cell: a KNOWN OVER-REFUSAL of BFS (computed,
+            # but given the target lookup's gate reason at paired_scenarios.py
+            # run_paired ~1017; see the negative control). Locked in on purpose.
             assert {r for e in bfs["support"] for r in e["reasons"]} >= {GATE_UNKNOWN}
             gated += 1
             continue
@@ -500,11 +531,26 @@ def test_a_target_afr_plus_4_moves_wot_phi_by_e076s_figure_through_e076s_own_pat
     statuses = {name: o["status"] for name, o in cell["outputs"].items()}
     assert statuses["target_phi"] == statuses["delivered_lambda"] == "changed"
     assert statuses["base_fuel_schedule"] == "not_reached"
-    # E07.6's own path at each point and fill byte.
+    # The editor's template and design carry the stated values, read here
+    # against the constants, not against each other.
+    learned = wot_run.template.learned
+    assert {k: getattr(learned, k) for k in E076_LEARNED} == E076_LEARNED
+    assert wot_run.template.candidate_events == ()
+    env = {k: v for k, v in E076_WOT_ENV.items() if k != "load_basis"}
+    for dp in design.points:
+        assert dp.rpm == 4800.0
+        assert {k: getattr(dp, k) for k in env} == env
+    # E07.6's own path at each point and fill byte, on a scenario built here
+    # from the stated constants (never the editor's template), so a learned
+    # state or environment the editor dropped would show.
     for i in range(result.n_points):
         for byte in sorted(set(result.fill_bytes[i].tolist())):
-            point = design.operating_point(i, fill_byte=int(byte))
-            scenario = dataclasses.replace(wot_run.template, points=(point,))
+            point = dataclasses.replace(
+                design.operating_point(i, fill_byte=int(byte)),
+                **env,
+                conditioned={"fuel_comp_load_byte": float(byte)},
+            )
+            scenario = _reference_scenario(real, wot_run.candidate, point)
             ref = run_paired(real.kit, scenario, real.image, wot_run.candidate).points[0]["outputs"]
             at = result.fill_bytes[i] == byte
             for name in ("base_fuel_schedule", "target_phi", "injector_pulse_ms"):
@@ -516,6 +562,31 @@ def test_a_target_afr_plus_4_moves_wot_phi_by_e076s_figure_through_e076s_own_pat
             lo, hi = lam["relative_delta_range_over_assumptions"]
             assert abs(p50 - lam["relative_delta"]) < P50_VS_CENTRAL, (i, byte, p50)
             assert lo <= p05 <= p95 <= hi, (i, byte, lo, p05, p95, hi)
+
+
+def _reference_scenario(real: Real, candidate: bytes, point: OperatingPoint) -> PairedScenario:
+    """E07.6's paired scenario at one point, built from the stated constants."""
+
+    def identity(image: bytes) -> EcuIdentity:
+        return EcuIdentity(
+            program_id=real.kit.model.program.id,
+            image_sha256=sha256_hex(image),
+            slot=1,
+            slot_source="default_slot",
+        )
+
+    return PairedScenario(
+        mode=sim_montecarlo.MODE,
+        base=identity(real.image),
+        candidate=identity(candidate),
+        plant=PlantIdentity(
+            version=real.kit.plant.plant_version,
+            hardware_configuration=real.kit.plant.hardware_configuration,
+        ),
+        points=(point,),
+        learned=LearnedState(**E076_LEARNED, source="stated: W09.6 reference"),
+        candidate_events=(),
+    )
 
 
 def _wot_figures(wot_run: Run) -> dict[str, Any]:
@@ -535,17 +606,19 @@ def _wot_figures(wot_run: Run) -> dict[str, Any]:
 @pytest.mark.xfail(
     strict=True,
     reason=(
-        "W09.6 finding 2026-10-15: at the form's top fill cell (98.2 %, 4,800 rpm, baro 81) "
-        "the steady BFS on ZS44A-20261004 is 29,080, not E07.6's 42,000: pulse +0.28 ms "
-        "(not +0.41), lambda p05/p50/p95 -2.507/-2.486/-2.468 % (outside -2.52...-2.49). "
-        "E07.6's own run_paired gives the same at that point (the test above); the "
-        "figures are BFS-conditional (E08.7 item 4) and no grid point reaches that BFS "
-        "(test below)."
+        "W09.6 finding 2026-10-15. Pulse: a BFS/airflow condition. It is BFS-proportional; "
+        "the grid's top fill cell (98.2 %, 4,800 rpm, baro 81) runs at BFS 29,080 and gives "
+        "+0.28 ms, while +0.41 ms needs ~41.8k BFS here (E07.6's own point on this image: "
+        "41,768, +0.41 ms). Lambda: -2.507/-2.486/-2.468 % (p05/p50/p95), outside "
+        "-2.52...-2.49 %, and that range is NOT reproducible on 20261004 at any BFS near "
+        "42k: it is the synthetic image's spread plus the 0.01 ms pulse quantum (E07.6's "
+        "point here: -2.483 %, -2.498...-2.468; BFS exactly 42,000: -2.529 %, "
+        "-2.544...-2.514). The editor equals E07.6's run_paired at these points (above)."
     ),
 )
 def test_e076s_written_wot_figures_at_the_grids_wot_point(wot_run: Run) -> None:
-    """E07.6's WOT figures as written, within E07.6's stated tolerance, at the
-    grid's highest-BFS WOT point. Kept literal; see the xfail reason."""
+    """E07.6's WOT figures as written, with the range written beside them, at
+    the grid's highest-BFS WOT point. Kept literal; see the xfail reason."""
     got = _wot_figures(wot_run)
     p05, p50, p95 = got["lambda_rel"]
     lo, hi = E076_LAMBDA_RANGE
@@ -557,13 +630,64 @@ def test_e076s_written_wot_figures_at_the_grids_wot_point(wot_run: Run) -> None:
     assert all(checks.values()), (checks, got)
 
 
+def test_at_e076s_own_points_on_this_image_the_pulse_holds_and_the_lambda_range_does_not(
+    real: Real, wot_run: Run
+) -> None:
+    """Why the lambda range is not a known answer for this image: at E07.6's
+    own WOT point (``tests/test_paired_scenarios.py`` ``WOT``, forced-column
+    flag set so the WOT column is read) and at the airflow where BFS is
+    exactly 42,000, E07.6's own ``run_paired`` puts lambda outside it, while
+    phi and (at ~41.8k BFS) the pulse land on the written figures."""
+    env = {k: v for k, v in E076_WOT_ENV.items() if k != "load_basis"}
+    got = {}
+    for maf in (150.0, E076_BFS_42000_MAF_GPS):
+        point = OperatingPoint(
+            maf_gps=maf,
+            map_kpa=79.0,
+            rpm=4800.0,
+            conditioned={"fuel_comp_load_byte": 200.0},
+            source="design: E07.6's WOT point, stated (W09.6)",
+            **env,
+        )
+        scenario = _reference_scenario(real, wot_run.candidate, point)
+        outputs = run_paired(real.kit, scenario, real.image, wot_run.candidate).points[0]["outputs"]
+        lam = outputs["delivered_lambda"]
+        got[maf] = {
+            "bfs": outputs["base_fuel_schedule"]["base"],
+            "phi": outputs["target_phi"]["delta"],
+            "pulse": round(outputs["injector_pulse_ms"]["delta"], 2),
+            "lambda": lam["relative_delta"],
+            "range": tuple(lam["relative_delta_range_over_assumptions"]),
+        }
+    at_point, at_42k = got[150.0], got[E076_BFS_42000_MAF_GPS]
+    assert at_point["bfs"] == E076_POINT_BFS_1004 and at_42k["bfs"] == 42_000
+    for g in got.values():
+        assert g["phi"] == E076_PHI_DELTA
+    assert at_point["pulse"] == E076_PULSE_DELTA_MS and at_42k["pulse"] == 0.42
+    # Pinned (2026-10-15): lambda and its range over the assumptions.
+    assert at_point["lambda"] == pytest.approx(-0.024833, abs=1e-6)
+    assert at_point["range"] == pytest.approx((-0.024985, -0.024684), abs=1e-6)
+    assert at_42k["lambda"] == pytest.approx(-0.025286, abs=1e-6)
+    assert at_42k["range"] == pytest.approx((-0.025439, -0.025135), abs=1e-6)
+    lo, hi = E076_LAMBDA_RANGE
+    for g in got.values():
+        assert not lo <= g["range"][0] <= g["range"][1] <= hi, g
+
+
 def test_no_grid_point_reaches_e076s_wot_bfs_or_the_wot_column_by_x(real: Real) -> None:
-    """Why the written figures cannot be reproduced on a grid: a grid takes
-    fill as MAP / baro and solves the airflow through the plant's manifold
-    model, so even the top of the fill model (99.9-100 %) at E07.6's 4,800 rpm
-    and baro 81 stays far below the BFS E07.6's figures were measured at. And
-    without the forced-column flag, the Target AFR WOT column is reached by no
-    point of the form's grid: X never gets there."""
+    """Why the pulse figure cannot be reached on a grid, and its cause: a grid
+    takes fill as MAP / baro and solves the airflow through the sim kit's
+    plant, fuel-mv-1, whose manifold model runs at volumetric efficiency 0.7,
+    a working assumption (``fuel_plant.yaml`` ``manifold_pressure``,
+    ``requires_measurement``, bracket 0.4-1.0). That gives ~103 g/s at the
+    grid's 100 % fill at 4,800 rpm and baro 81, so BFS stays far below the
+    ~41.8k the +0.41 ms pulse needs here. fuel-mv-3's identified VE at
+    4,000-5,000 rpm, 0.9055 (``fuel_plant_mv3.yaml`` ``ve_curve``), would
+    give ~133 g/s: the limit is the plant version's VE, not the grid's
+    structure. And without the forced-column flag, the Target AFR WOT column
+    is reached by no point of the form's grid: X never gets there."""
+    assert real.kit.plant.plant_version == "fuel-mv-1"
+    assert real.kit.plant.manifold_model == "speed_density_capped"
     top = simulate(
         real,
         request(
@@ -575,7 +699,8 @@ def test_no_grid_point_reaches_e076s_wot_bfs_or_the_wot_column_by_x(real: Real) 
             **E076_LEARNED,
         ),
     )
-    assert top.result.base["base_fuel_schedule"].max() < E076_BFS_FOR_PULSE
+    assert top.result.base["base_fuel_schedule"].max() < E076_POINT_BFS_1004
+    assert all(p.maf_gps < 110.0 for p in top.design.points)
     no_flag = simulate(real, request([TARGET_PLUS_4_WOT], grid="target_afr"))
     result = no_flag.result
     phi_b, phi_c = result.base["target_phi"], result.candidate["target_phi"]
