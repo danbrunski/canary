@@ -23,7 +23,7 @@ import-time exception. Deliberately lazy backend registries are not targets.
 | [R15](archive/R15-detector-evaluation.md) | Library scoring and a phased evaluation CLI | L / scoring, cache and spawn | R14 before feature caller migration |
 | [R16](archive/R16-dyno-modules.md) | Separate dyno contracts, calibration, power, comparison and persistence | M–L / numerical | none |
 | [R17](archive/R17-recipe-definitions.md) | Recipe definitions independent of the fitting engine | M / artifact contracts | before R20 refit caller migration |
-| [R18](R18-memory-burst-scheduler.md) | Burst planning and accounting have one owner | L / collection timing | none |
+| [R18](archive/R18-memory-burst-scheduler.md) | Burst planning and accounting have one owner | L / collection timing | none |
 | [R19](R19-dashboard-page-modules.md) | Logs and Analysis pages composed from focused views | M / UI behavior | none |
 | [R20](R20-behavior-validation.md) | Validation schema, pairing, evaluation, metrics and evidence separated | L / evidence and publication | R17; coordinate with R15 |
 | [R21](R21-config-schemas.md) | Configuration schemas organized behind compatible imports | M–L / broad import surface | last, after overlapping moves |
