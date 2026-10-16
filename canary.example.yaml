@@ -253,7 +253,7 @@ preprocessing:
     # mapping order, first full match wins) — a near-stop, high-accel_lon
     # row is claimed by launch first, so hard_brake's accel_lon_min only
     # ever matches a hard accel_lon spike while already moving. Magnitude
-    # matches AutoTagConfig.hard_brake_g's 0.40 convention (src/config.py).
+    # matches AutoTagConfig.hard_brake_g's 0.40 convention (src/config/).
     hard_brake:
       accel_lon_min: 0.4
     cornering:

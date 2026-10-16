@@ -280,7 +280,7 @@ canary/
 │   └── canary.service        # Headless daemon unit
 ├── src/
 │   ├── main.py               # Entry point
-│   ├── config.py             # YAML → Pydantic
+│   ├── config/               # YAML → Pydantic (one module per section group; src.config re-exports)
 │   ├── vehicle/              # Per-VIN profiles, tune revisions, vehicle ledger
 │   ├── collection/           # OBD + CAN + GPS ingestion
 │   ├── daemon/               # Live capture + inference runtime
