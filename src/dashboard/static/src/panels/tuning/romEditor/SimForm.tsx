@@ -34,6 +34,24 @@ import {
   type NumberFieldSpec,
   type SimFormValues,
 } from "../../../lib/romSim";
+import {
+  COST_FIT,
+  PRESET_DESCRIPTION,
+  PRESET_LABEL,
+  PRESET_SOURCE,
+  SERVER_JOB_LIMIT_S,
+  cancelWording,
+  coarseVerdict,
+  costText,
+  describeFill,
+  estimateCost,
+  fineReference,
+  formatDuration,
+  presetFill,
+  type PresetFill,
+  type SimPreset,
+  type TimedRun,
+} from "../../../lib/romSimSize";
 import { buttonClass, cn, inputClass, selectClass } from "../../../styles";
 import type { RomEdit, RomSimRequest, SimFailure } from "../../../types/romEditor";
 import type { RomTableValues } from "../../../types/romLibrary";
@@ -127,39 +145,101 @@ function Choice<T extends string>({
   );
 }
 
-/** Seconds since `startedAt`, ticking while the component is mounted. */
-function useElapsedSeconds(startedAt: number): number {
+/** The time, ticking while the component is mounted. */
+function useNow(intervalMs: number): number {
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
-    const timer = window.setInterval(() => setNow(Date.now()), 500);
+    const timer = window.setInterval(() => setNow(Date.now()), intervalMs);
     return () => window.clearInterval(timer);
-  }, []);
-  return Math.max(0, Math.floor((now - startedAt) / 1000));
+  }, [intervalMs]);
+  return now;
 }
 
-/** One request in flight: a spinner and the time it has taken. */
-export function SimRunning({ startedAt }: { startedAt: number }) {
+/** Seconds since `startedAt`, ticking while the component is mounted. */
+function useElapsedSeconds(startedAt: number): number {
+  return Math.max(0, Math.floor((useNow(500) - startedAt) / 1000));
+}
+
+/** One request in flight: a spinner, the time it has taken, and Cancel. Cancel
+ *  stops waiting and says so: the daemon keeps the job (see `cancelWording`). */
+export function SimRunning({
+  startedAt,
+  expected,
+  onCancel,
+}: {
+  startedAt: number;
+  expected: { seconds: number; measured: boolean };
+  onCancel: () => void;
+}) {
   const elapsed = useElapsedSeconds(startedAt);
   return (
-    <div
-      role="status"
-      className="flex items-center gap-3 rounded-lg border border-border p-3 text-sm"
-    >
-      <span
-        aria-hidden="true"
-        className="inline-block size-4 animate-spin rounded-full border-2 border-fg-faint border-t-accent-2"
-      />
-      <span>
-        Simulating… <span className="font-num">{elapsed} s</span> elapsed. One request, one job on
-        the daemon; it can take minutes.
-      </span>
+    <div role="status" className="space-y-2 rounded-lg border border-border p-3 text-sm">
+      <div className="flex items-center gap-3">
+        <span
+          aria-hidden="true"
+          className="inline-block size-4 animate-spin rounded-full border-2 border-fg-faint border-t-accent-2"
+        />
+        <span>
+          Simulating… <span className="font-num">{elapsed} s</span> elapsed. One request, one job on
+          the daemon; it can take minutes.
+        </span>
+        <button type="button" className={buttonClass} onClick={onCancel}>
+          Cancel (stop waiting)
+        </button>
+      </div>
+      <p className="text-xs text-fg-dim">{cancelWording(expected)}</p>
     </div>
   );
 }
 
+/** What the page tells you after Cancel: the request is dropped, the job is not. */
+export function SimCancelled({
+  startedAt,
+  cancelledAt,
+  expected,
+}: {
+  startedAt: number;
+  cancelledAt: number;
+  expected: { seconds: number; measured: boolean };
+}) {
+  const remaining = remainingSeconds(startedAt, expected.seconds, useNow(1000));
+  return (
+    <div role="status" className="space-y-1 rounded-lg border border-warn/60 p-3 text-sm">
+      <p className="font-semibold">
+        You stopped waiting after {Math.max(0, Math.round((cancelledAt - startedAt) / 1000))} s.
+      </p>
+      <p>
+        The daemon is still running that simulation: nothing here can stop it, and it runs one at a
+        time. {remaining}
+      </p>
+      <p className="text-xs text-fg-dim">
+        Until it finishes, a different simulation is refused as busy (409 analysis_busy). Running
+        the identical request again re-attaches to the job already running (the daemon shares a
+        single-flight job by its request) instead of starting another.
+      </p>
+    </div>
+  );
+}
+
+/** How long the abandoned run is still expected to take, in words. */
+function remainingSeconds(startedAt: number, expectedS: number, now: number): string {
+  const left = expectedS - (now - startedAt) / 1000;
+  if (left > 1)
+    return `About ${formatDuration(left)} more (estimated ${formatDuration(expectedS)} in all).`;
+  return `Its estimate (${formatDuration(expectedS)}) has passed, so it may be about to finish; the daemon stops any such job at ${SERVER_JOB_LIMIT_S} s.`;
+}
+
 /** A failed run by its reason: a refusal names the reason, a deferred run says
  *  to take the images to the laptop. */
-export function SimFailureAlert({ failure }: { failure: SimFailure }) {
+export function SimFailureAlert({
+  failure,
+  cancelled,
+}: {
+  failure: SimFailure;
+  /** A run this page stopped waiting for: the busy refusal is that run. */
+  cancelled?: { startedAt: number; expectedS: number } | null;
+}) {
+  const now = useNow(1000);
   return (
     <div role="alert" className="space-y-1 rounded-lg border border-bad/55 p-3 text-sm">
       <p className="font-semibold text-bad">
@@ -174,6 +254,12 @@ export function SimFailureAlert({ failure }: { failure: SimFailure }) {
       {failure.kind === "busy" && (
         <p className="text-fg-dim">
           Another analysis or digest holds the single workbench slot. Run again when it is done.
+        </p>
+      )}
+      {failure.kind === "busy" && cancelled && (
+        <p className="text-fg-dim">
+          That is probably the run you cancelled: Cancel stops waiting, the daemon kept running it.{" "}
+          {remainingSeconds(cancelled.startedAt, cancelled.expectedS, now)}
         </p>
       )}
       {failure.refusalKind && (
@@ -193,6 +279,7 @@ export function SimForm({
   edits,
   blocked,
   startedAt,
+  timings,
   onRun,
 }: {
   tables: RomTableValues[];
@@ -201,6 +288,8 @@ export function SimForm({
   blocked: { reason: string; text: string } | null;
   /** Set while a request is in flight. */
   startedAt: number | null;
+  /** This server's earlier runs (`romSimSize.loadTimings`), for the estimate. */
+  timings: TimedRun[];
   onRun: (request: RomSimRequest) => void;
 }) {
   const suggestion = useMemo(() => suggestEdges(tables), [tables]);
@@ -223,6 +312,29 @@ export function SimForm({
     rpm: false,
     load: false,
   });
+
+  // The preset last clicked and what it filled. Not stored: a preset is a
+  // button press on this page, never a remembered default.
+  const [applied, setApplied] = useState<PresetFill | null>(null);
+
+  function applyPreset(preset: SimPreset) {
+    const fill = presetFill(preset, suggestion);
+    if (!fill) return;
+    setValues((current) => ({
+      ...current,
+      rpmEdges: formatEdges(fill.rpmEdges),
+      loadEdges: formatEdges(fill.loadEdges),
+      draws: String(fill.draws),
+    }));
+    setRemembered((current) => {
+      if (!current.has("draws")) return current;
+      const next = new Set(current);
+      next.delete("draws");
+      return next;
+    });
+    setTypedEdges({ rpm: preset === "coarse", load: preset === "coarse" });
+    setApplied(fill);
+  }
 
   function change(key: FormKey, value: string) {
     setValues((current) => ({ ...current, [key]: value }));
@@ -253,6 +365,29 @@ export function SimForm({
   const drawsParsed = parseNumber(values.draws, { integer: true, min: 1, max: null });
   const drawsStated = drawsParsed.kind === "ok" ? String(drawsParsed.value) : "not stated";
   const uniform = suggestion.offCentre.rpm <= 0.05 && suggestion.offCentre.load <= 0.05;
+  const fine = useMemo(() => fineReference(suggestion), [suggestion]);
+  const fills = {
+    coarse: useMemo(() => presetFill("coarse", suggestion), [suggestion]),
+    fine: useMemo(() => presetFill("fine", suggestion), [suggestion]),
+  };
+  // Custom: a preset filled these fields and they no longer read as it filled them.
+  const unchanged =
+    applied !== null &&
+    values.rpmEdges === formatEdges(applied.rpmEdges) &&
+    values.loadEdges === formatEdges(applied.loadEdges) &&
+    values.draws === String(applied.draws);
+  const mode: SimPreset | "custom" | null = applied
+    ? unchanged
+      ? applied.preset
+      : "custom"
+    : null;
+  // This server's earlier runs, re-read when a run starts or ends.
+  const sized =
+    !rpm.error && !load.error && !rpm.empty && !load.empty && drawsParsed.kind === "ok"
+      ? { points: cells, draws: drawsParsed.value }
+      : null;
+  const cost = sized ? costText(estimateCost(sized.points, sized.draws, timings)) : null;
+  const sizeVerdict = sized ? coarseVerdict(sized.draws, sized.points, fine) : null;
 
   function run() {
     if (!check.request || disabled || running) return;
@@ -317,6 +452,56 @@ export function SimForm({
           value={values.grid}
           onChange={(id) => change("grid", id)}
         />
+
+        <fieldset
+          aria-label="Quick check or thorough run"
+          className="space-y-3 rounded-lg border border-border p-3"
+        >
+          <legend className="px-1 text-sm font-semibold">Quick check or thorough run</legend>
+          <p className="text-xs text-fg-dim">
+            A preset fills the grid edges and the draws below, visibly, and nothing else. It is not
+            a default and is not remembered: press one each time, or state the fields yourself.{" "}
+            {PRESET_SOURCE}
+          </p>
+          <div className="grid gap-3 sm:grid-cols-2">
+            {(["coarse", "fine"] as const).map((preset) => (
+              <div key={preset} className="flex flex-col items-start gap-1">
+                <button
+                  type="button"
+                  className={cn(buttonClass, mode === preset && "border-accent-2")}
+                  aria-pressed={mode === preset}
+                  aria-describedby={`sim-preset-${preset}`}
+                  disabled={fills[preset] === null}
+                  onClick={() => applyPreset(preset)}
+                >
+                  {PRESET_LABEL[preset]}
+                </button>
+                <span id={`sim-preset-${preset}`} className="text-xs text-fg-dim">
+                  {PRESET_DESCRIPTION[preset]}
+                  {fills[preset]
+                    ? ` On this base: ${fills[preset]?.points.toLocaleString("en-US")} points × ${fills[preset]?.draws.toLocaleString("en-US")} draws.`
+                    : " This image gives no Fuel Comp breakpoints to build the edges from."}
+                </span>
+              </div>
+            ))}
+          </div>
+          <p role="status" aria-label="Preset state" className="text-xs">
+            {mode === null && (
+              <span className="text-fg-faint">
+                No preset pressed: the edges and draws are as you stated or remembered them.
+              </span>
+            )}
+            {mode === "custom" && applied && (
+              <span className="text-warn">
+                <span className="font-semibold">Custom:</span> you edited a field{" "}
+                {PRESET_LABEL[applied.preset]} filled, so the edges and draws below are yours.
+              </span>
+            )}
+            {(mode === "coarse" || mode === "fine") && applied && (
+              <span>{describeFill(applied)}</span>
+            )}
+          </p>
+        </fieldset>
 
         <fieldset className="space-y-3 rounded-lg border border-border p-3">
           <legend className="px-1 text-sm font-semibold">Grid edges</legend>
@@ -532,6 +717,26 @@ export function SimForm({
           >
             Run simulation
           </button>
+          <div aria-label="Cost estimate" role="group" className="space-y-1 text-sm">
+            {cost ? (
+              <>
+                <p className="font-num">{cost.headline}</p>
+                <p className="text-xs text-fg-dim">{cost.detail}</p>
+                {sizeVerdict?.coarse && (
+                  <p className="text-xs text-warn">
+                    Below the Fine preset ({sizeVerdict.reasons.join("; ")}): the result will carry
+                    a coarse-run banner.
+                  </p>
+                )}
+              </>
+            ) : (
+              <p className="text-xs text-fg-dim">
+                Cost: state the edges and the draws to see points × draws and the time. The fit is{" "}
+                {COST_FIT.overheadS.toFixed(1)} s + {COST_FIT.secondsPerPointDraw.toExponential(1)}{" "}
+                s × points × draws on the dev laptop.
+              </p>
+            )}
+          </div>
           {missing.length > 0 && (
             <p role="status" aria-label="What blocks Run" className="text-sm text-fg-dim">
               Run needs: {missing.map((item) => item.label).join(", ")}.

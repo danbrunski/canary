@@ -29,7 +29,14 @@ import {
   entryTitle,
   refusalText,
 } from "../../lib/romLibrary";
-import { SIM_BLOCK_TEXT, resultFileName, simFailure } from "../../lib/romSim";
+import {
+  SIM_BLOCK_TEXT,
+  gridPoints,
+  resultFileName,
+  simFailure,
+  suggestEdges,
+} from "../../lib/romSim";
+import { expectedRun, fineReference, loadTimings, recordTiming } from "../../lib/romSimSize";
 import { buttonClass, cn } from "../../styles";
 import type { StatusResponse } from "../../types";
 import type {
@@ -51,7 +58,7 @@ import { OpenRom } from "./romEditor/OpenRom";
 import { OperationPanel } from "./romEditor/OperationPanel";
 import { PendingEdits } from "./romEditor/PendingEdits";
 import { PreviewResult } from "./romEditor/PreviewResult";
-import { SimFailureAlert, SimForm, SimRunning } from "./romEditor/SimForm";
+import { SimCancelled, SimFailureAlert, SimForm, SimRunning } from "./romEditor/SimForm";
 import { SimResults } from "./romEditor/SimResults";
 import { RevisionChip } from "./romLibraryParts";
 
@@ -241,9 +248,17 @@ type PreviewState =
   | { kind: "refused"; refusal: RomEditRefusal }
   | { kind: "error"; text: string };
 
+/** What a run in flight is expected to take (the Cancel wording). */
+interface Expected {
+  seconds: number;
+  measured: boolean;
+}
+
 type SimState =
   | { kind: "idle" }
-  | { kind: "running"; startedAt: number }
+  | { kind: "running"; startedAt: number; expected: Expected }
+  /** The page stopped waiting; the daemon did not stop. */
+  | { kind: "cancelled"; startedAt: number; cancelledAt: number; expected: Expected }
   | { kind: "ok"; result: RomSimResult; run: SimRunContext }
   | { kind: "failed"; failure: SimFailure };
 
@@ -265,9 +280,15 @@ function Workspace({ token, entry }: { token: string; entry: RomLibraryEntry }) 
   const [preview, setPreview] = useState<PreviewState>({ kind: "idle" });
   const request = useRef(0);
   const counter = useRef(0);
+  const baseTables = tables.data?.tables ?? [];
   const [sim, setSim] = useState<SimState>({ kind: "idle" });
+  // This server's earlier runs, kept by the browser: the cost estimate's basis.
+  const [timings, setTimings] = useState(loadTimings);
   const simRun = useRef(0);
   const simAbort = useRef<AbortController | null>(null);
+  // A run this page stopped waiting for, so a later `analysis_busy` can be
+  // explained as that run. Cleared by the next run that returns.
+  const [abandoned, setAbandoned] = useState<{ startedAt: number; expectedS: number } | null>(null);
   const edits = useMemo(() => pending.map((item) => item.edit), [pending]);
 
   // Leaving the image (or the page) drops the wait; the daemon's job is its own.
@@ -350,10 +371,16 @@ function Workspace({ token, entry }: { token: string; entry: RomLibraryEntry }) 
     const controller = new AbortController();
     simAbort.current = controller;
     const startedAt = Date.now();
-    setSim({ kind: "running", startedAt });
+    const points = gridPoints(simRequest.rpm_edges, simRequest.load_edges);
+    const expected = expectedRun(points, simRequest.draws, timings);
+    setSim({ kind: "running", startedAt, expected });
     try {
       const result = await simulateRomEdits(token, sha, simRequest, controller.signal);
       if (simRun.current !== mine) return;
+      // This server's own wall time for this size: the next estimate's basis.
+      recordTiming({ points, draws: simRequest.draws, seconds: (Date.now() - startedAt) / 1000 });
+      setTimings(loadTimings());
+      setAbandoned(null);
       setSim({
         kind: "ok",
         result,
@@ -370,12 +397,28 @@ function Workspace({ token, entry }: { token: string; entry: RomLibraryEntry }) 
             revision: entry.revision_match.revision,
           },
           elapsedS: Math.round((Date.now() - startedAt) / 1000),
+          fineReference: fineReference(suggestEdges(baseTables)),
         },
       });
     } catch (err) {
       if (simRun.current !== mine) return;
       setSim({ kind: "failed", failure: simFailure(err) });
     }
+  }
+
+  function cancelSimulation() {
+    if (sim.kind !== "running") return;
+    // Drop the wait (the result, if it ever comes, is not shown); the daemon's
+    // job is its own and no route stops it.
+    simRun.current += 1;
+    simAbort.current?.abort();
+    setAbandoned({ startedAt: sim.startedAt, expectedS: sim.expected.seconds });
+    setSim({
+      kind: "cancelled",
+      startedAt: sim.startedAt,
+      cancelledAt: Date.now(),
+      expected: sim.expected,
+    });
   }
 
   if (tables.loading || tables.stale) return <p className="text-fg-dim">Reading tables…</p>;
@@ -390,7 +433,6 @@ function Workspace({ token, entry }: { token: string; entry: RomLibraryEntry }) 
     );
   }
 
-  const baseTables = tables.data?.tables ?? [];
   const decodeLine = [
     table.dtype,
     table.decoded ? (table.decode?.formula ?? null) : "raw: decode unconfirmed",
@@ -526,10 +568,26 @@ function Workspace({ token, entry }: { token: string; entry: RomLibraryEntry }) 
               edits={edits}
               blocked={simBlocked}
               startedAt={sim.kind === "running" ? sim.startedAt : null}
+              timings={timings}
               onRun={(simRequest) => void runSimulation(simRequest)}
             />
-            {sim.kind === "running" && <SimRunning startedAt={sim.startedAt} />}
-            {sim.kind === "failed" && <SimFailureAlert failure={sim.failure} />}
+            {sim.kind === "running" && (
+              <SimRunning
+                startedAt={sim.startedAt}
+                expected={sim.expected}
+                onCancel={cancelSimulation}
+              />
+            )}
+            {sim.kind === "cancelled" && (
+              <SimCancelled
+                startedAt={sim.startedAt}
+                cancelledAt={sim.cancelledAt}
+                expected={sim.expected}
+              />
+            )}
+            {sim.kind === "failed" && (
+              <SimFailureAlert failure={sim.failure} cancelled={abandoned} />
+            )}
           </div>
         </Panel>
         {sim.kind === "ok" && (

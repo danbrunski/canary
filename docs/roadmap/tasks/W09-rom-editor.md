@@ -864,6 +864,114 @@ W09.6 is the orchestrator's own, on the ROM machine.
     `test/romLibraryFixtures.ts` (`ENTRY_UNRECORDED`).
     Not run: `pnpm e2e` (no browser walkthrough of the dialog).
 
+- [x] **W09.9 — Coarse and fine runs, a tunable Monte Carlo, a cost estimate and
+  Cancel on the Simulate form.** Requested 2026-10-15 by the operator: "for the
+  ROM simulation, make sure we can tune the monte carlo runs and have a coarse
+  and fine simulation, so a user doesn't have to run an hour long analysis every
+  time they want to check something". Frontend and documentation only; the
+  backend already takes `draws`, `seed` and the edges as required fields
+  (`tools/rom_sim.py` has no coarse/fine concept to align with: its flags are
+  `--draws` and `--design`).
+  - **Presets are buttons that fill the form, never defaults.** *Coarse (quick
+    check)* fills the RPM and load edges with **every other Fuel Comp
+    breakpoint** of each axis (edges rebuilt from those, so each grid point
+    still sits on a breakpoint; about a quarter of the points) and **200
+    draws**. *Fine* fills the full suggested edges (as the form suggests them)
+    and **1,000 draws**. Both cut a load edge past 100 % to the model's span,
+    as the Trim button does, and say so. After a click the form prints what it
+    filled ("Coarse (quick check) filled RPM edges (9 edges, 8 cells), load
+    edges ... and draws (200): 64 points x 200 draws. Nothing else was
+    touched."). Editing a filled field flips the state to **Custom** (derived
+    from the field values, so typing the preset's value back restores it).
+    The preset is page state: not stored, and the seed, environment, learned
+    state, grid choice and candidate events are never touched. Pressing a
+    preset clears the "remembered from your last run" mark on `draws` (the
+    existing remembered-values behaviour is unchanged).
+  - **The draw numbers and their basis** (`lib/romSimSize.ts`, `PRESET_DRAWS`,
+    both below `MAX_DRAWS` = 2,000): Coarse 200 is the count E08 reads cell
+    quantiles from (E08.3's Fuel-Comp-restore entry: "three draws give only a
+    coarse per-cell spread, so cell quantiles should be read from" the 200-draw
+    run; E08.5 and E08.7 use 200) and W09.6's low row. At 224 points W09.6
+    measured 4.5 s for 200 draws against 8.5 s for 1,000: start-up dominates a
+    small run, so fewer than 200 saves almost nothing. Fine 1,000 is E08.3's
+    stated speed target and W09.6's reference row. 2,000 is the cap, not a
+    recommendation. E08 states no minimum draw count or quantile-resolution
+    limit; none is invented.
+  - **Coarse means `no_points`, not `unchanged`.** The Coarse preset's
+    description says so on the button's page text, and a result below the Fine
+    preset's draws OR points (judged from the result's own `cells.draws` and
+    `design.points` against the Fine grid's size for this base, so a hand-set
+    low run is flagged like a clicked one) carries a **Coarse run** banner above
+    the caveat block and the maps: the draws and points, why it is below Fine,
+    the `no_points` sentence with the result's own count of such cells (when
+    points are the reason), and "quantiles over few draws are noisy" worded from
+    E08.3 (three draws give only a coarse per-cell spread). No other statistical
+    claim is made.
+  - **Cost estimate beside Run:** "N points x M draws = K point-draws", then
+    either "About T s from your last R runs on this server" or "Not yet measured
+    on this server" with the labelled reference ("the dev laptop took 8.5 s for
+    224 points x 1,000 draws (W09.6)", the measured row nearest the size, and
+    the fit's value for it). The model is `t = overhead + rate x points x
+    draws`, fitted (least squares on relative error) to W09.6's seven laptop
+    rows only: **3.3 s + 2.3e-5 s x points x draws**, off by -20 % to +16 %
+    against those rows, with no run under 224 points timed. The page shows that
+    fit. This browser stores its own runs (`canary.romSim.timings`, version 1,
+    last 8, `try`/`catch`; per origin, so per server): a successful run's size
+    and the page's elapsed timer, never a failed or cancelled one. The server
+    estimate is the fit scaled by the **median of observed / modelled** over
+    those runs, a ratio against the model rather than a seconds-per-point-draw,
+    so a coarse run (mostly start-up) and a fine one (mostly draws) calibrate
+    the same number. Checked: one coarse row (224 x 200, 4.5 s) alone estimates
+    224 x 1,000 at 8.85 s against the measured 8.5 s (+4 %), and the fine row
+    alone estimates 224 x 200 at 4.32 s against 4.5 s (-4 %).
+  - **Cancel stops waiting; it cannot stop the server.** Read
+    `workbench_jobs.run_off_loop`: the child's task is held behind
+    `asyncio.shield`, no route cancels a `rom_sim` job (the only cancel route is
+    the ECU backup's), and it ends only when it finishes or at the 900 s
+    timeout. So the button is "Cancel (stop waiting)" and says "the server
+    finishes this run (about N s, from your earlier runs here | the dev-laptop
+    fit; not yet measured on this server) before another can start". It aborts
+    the request (the `signal` `simulateRomEdits` already took), drops any later
+    result, records no timing, and the page then says the daemon is still
+    running it. A different request meanwhile is `409 analysis_busy`
+    (`child_busy`), and when that follows a cancel on this page the busy alert
+    says it is probably the cancelled run, with the estimated time left. An
+    identical request re-attaches to the running job (`_IN_FLIGHT` is keyed by
+    the request), which the page and `docs/headless-api.md` say. No backend
+    route was added.
+  - **Evidence 2026-10-15.** Tests, all in `src/dashboard/static`:
+    `lib/romSimSize.test.ts` 23 (presets within `MAX_DRAWS`, Coarse = a quarter
+    of Fine and centred on breakpoints, the fit equals its rows within the stated
+    error, localStorage validation and blocked storage, scale and the
+    coarse/fine non-distortion above, wording); `SimResults.test.tsx` +7
+    (banner for few draws and points, for draws alone, for points alone, not for
+    a fine run, above the maps, `no_points` cells keep `–` and their "no points"
+    name, unknown Fine size judges draws only); `RomEditorSimulate.test.tsx` +19
+    (presets fill exactly edges and draws and nothing else, Custom flips and
+    returns, preset not remembered and the draws mark clears, disabled without
+    breakpoints; banner after a Coarse-preset run, a hand-set run, a
+    hand-cut-grid run and not after Fine, the request still the 21 documented
+    fields; estimate with and without stored runs, learned from the elapsed timer
+    and stored as points x draws, not stored on a failure; Cancel aborts the
+    signal, says what it does, shows no result, records nothing, explains the
+    following 409, and does not claim a 409 it did not cause). The existing
+    21-field parity test, `RomEditorPage.test.tsx` 31, `romSim.test.ts` 29 and
+    `romSimView.test.ts` 23 stay green: `vitest run --no-file-parallelism` over
+    those six files, 175 passed. `pnpm typecheck`, `pnpm lint` (no suppression
+    change), `pnpm format:check` clean. `pnpm exec playwright test
+    e2e/romEditor.spec.ts --project=chromium`: 6 passed, one new (Coarse
+    pressed, edges and draws filled and counted, Custom on an edit, Run, the
+    banner; the request carries 21 fields and 9 rpm edges). Files:
+    `lib/romSimSize.ts` (new), `romEditor/SimForm.tsx`, `romEditor/SimResults.tsx`,
+    `RomEditorPage.tsx`, `types/romEditor.ts` (`SimRunContext.fineReference`),
+    the tests above, `e2e/romEditor.spec.ts`; docs `headless-api.md` ("Coarse vs
+    fine" under the simulate route) and the `simulate_rom_edit` row in
+    `mcp-server.md`.
+  - **Not done, on purpose:** the `simulate_rom_edit` docstring is the tool's
+    description and is pinned by `tests/fixtures/mcp_tool_snapshot.json`, so the
+    note is in the docs only. The Pi's own timings are still unmeasured (W09.6
+    owes them); the reference line is the laptop's and is labelled so.
+
 ## Not in scope
 
 - **Writing the ECU or producing a flashable file.** See "Decisions"; the

@@ -98,14 +98,15 @@ test("open a file, select one cell then a range, scale +2 %, preview, download t
   });
 
   await chooseFile(page, TUNED_FILE);
-  // The file went up as the page sends it: raw bytes, its own name.
+  // One step: loaded, named by the file, with the sha, the revision and what it can do.
+  const loaded = page.getByLabel("Loaded ROM");
+  await expect(loaded).toContainText(TUNED_FILE);
+  // The file went up as the page sends it: raw bytes, its own name. Read the recorded call
+  // only after the header shows the upload's answer, so it cannot be missing (a race).
   const upload = api.calls.find((call) => call.method === "POST");
   expect(upload?.query).toBe(`?filename=${encodeURIComponent(TUNED_FILE)}`);
   expect(upload?.contentType).toBe("application/octet-stream");
   expect(upload?.body?.equals(FILE_BYTES)).toBe(true);
-  // One step: loaded, named by the file, with the sha, the revision and what it can do.
-  const loaded = page.getByLabel("Loaded ROM");
-  await expect(loaded).toContainText(TUNED_FILE);
   await expect(loaded).toContainText(ENTRY_TUNED.sha256.slice(0, 12));
   await expect(loaded.getByText("can simulate")).toBeVisible();
   await expect(page).toHaveURL(new RegExp(`\\?rom=${ENTRY_TUNED.sha256}`));
@@ -357,6 +358,57 @@ test("simulate: a missing field blocks Run and is named; the result puts the cav
   expect(download.suggestedFilename()).toBe("light_load_2_richer.sim-result.json");
   expect(JSON.parse(await readFile(await download.path(), "utf8"))).toEqual(result);
   await expect(page.getByRole("link", { name: /image|candidate|\.bin|osirisrom/i })).toHaveCount(0);
+  expect(api.unexpected).toEqual([]);
+});
+
+test("simulate: the Coarse preset fills the edges and draws visibly, and the result carries the coarse-run banner", async ({
+  page,
+}) => {
+  const api = await open(page, {
+    library: [],
+    uploads: { [TUNED_FILE]: { ...ENTRY_TUNED, created: true } },
+    simulate: buildSimResult(),
+  });
+  await openAndEdit(page, "light load 2 % richer");
+  const form = page.getByRole("form", { name: "Simulate form" });
+  // Nothing pressed, nothing remembered: no preset, no draws.
+  await expect(form.getByRole("status", { name: "Preset state" })).toContainText(
+    "No preset pressed",
+  );
+  await expect(form.getByLabel("Draws", { exact: true })).toHaveValue("");
+
+  await form.getByRole("button", { name: "Coarse (quick check)" }).click();
+  await expect(form.getByLabel("Draws", { exact: true })).toHaveValue("200");
+  await expect(
+    form
+      .getByLabel("RPM edges (rpm)")
+      .inputValue()
+      .then((v) => v.split(", ").length),
+  ).resolves.toBe(9);
+  await expect(form.getByLabel("Grid size")).toContainText("8 × 8 = 64");
+  await expect(form.getByRole("status", { name: "Preset state" })).toContainText(
+    "filled RPM edges (9 edges, 8 cells)",
+  );
+  await expect(form.getByRole("group", { name: "Cost estimate" })).toContainText(
+    "64 points × 200 draws",
+  );
+  // Editing a filled field makes it Custom.
+  await form.getByLabel("Draws", { exact: true }).fill("300");
+  await expect(form.getByRole("status", { name: "Preset state" })).toContainText("Custom");
+  await form.getByLabel("Draws", { exact: true }).fill("200");
+
+  await stateForm(form, ["RPM edges (rpm)", "Load edges (% fill)", "Draws"]);
+  await form.getByRole("button", { name: "Run simulation" }).click();
+  const results = page.getByRole("region", { name: "Simulation result" });
+  await expect(results).toBeVisible();
+  const banner = results.getByRole("note", { name: "Coarse run" });
+  await expect(banner).toBeVisible();
+  await expect(banner).toContainText("200 draws");
+  await expect(banner).toContainText("not unchanged");
+  const [sent] = api.posted("/simulate") as RomSimRequest[];
+  expect(sent.draws).toBe(200);
+  expect(sent.rpm_edges).toHaveLength(9);
+  expect(Object.keys(sent)).toHaveLength(21);
   expect(api.unexpected).toEqual([]);
 });
 

@@ -471,4 +471,7 @@ export interface SimRunContext {
   base: { sha256: string; label: string; revision: string | null };
   /** Wall-clock seconds the request took, as the page measured them. */
   elapsedS: number;
+  /** The Fine preset's size for this base (W09.9): what a coarse run is
+   *  judged against. Absent: only the draw count is judged. */
+  fineReference?: { points: number | null; draws: number };
 }
