@@ -642,7 +642,12 @@ delta {p05, p50, p95}, relative_delta, relative_undefined_pairs} | null,
 changed_share, supported_effect}}, by_loop[], edited, row_axis_moved,
 col_axis_moved}`. A cell nobody visited has `pairs: 0` and is not
 `unchanged`. A 16 x 16 table with six points measured about 370 KB of JSON on
-the synthetic image.
+the synthetic image; the form's 224-point grid about 705 KB (W09.6; 750 KB on
+the synthetic image), because 224 of the 256 cells are visited and each carries
+six outputs. The route's body and the dashboard's payload are always this whole
+body; the MCP tool `simulate_rom_edit` cuts it in the tool layer by `detail`
+(`headline`, the default, `summary`, `cells` or `full`) and states what it
+dropped in the result (docs/mcp-server.md).
 
 Errors (each a `{"detail": ...}`):
 

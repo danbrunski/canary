@@ -590,14 +590,74 @@ W09.6 is the orchestrator's own, on the ROM machine.
   with status and body, simulate timeout > 900 s, sha confined to its path
   segment, and the docstring and fixture both pinned to
   `SimRequest.model_fields`, all 21, no default); tool snapshot regenerated
-  (+2 tools); docs/mcp-server.md rows. `simulate_rom_edit(visited_only=True)`
-  (default) cuts `cells.cells` to `n_points > 0` via the pure
-  `visited_cells_only`, stating `cells_omitted` and `cells_filter`; nothing else
-  in the body is touched, and `visited_only=False` is byte-identical to the
-  daemon's. Tests: kept = exactly the visited cells, omitted + kept = 256,
-  other keys and `status_counts` untouched, input not mutated; measured on a
-  256-cell / 6-visited fixture with full outputs: 394,541 bytes full, 31,992
-  filtered (< 60 KB). 23 tests in `tests/test_mcp_rom_editor.py`.
+  (+2 tools); docs/mcp-server.md rows.
+  **Follow-up (2026-10-15, `detail`): the tool is usable on a realistic grid
+  only at the default `headline` level, and that level is still over a ~100 KB
+  cap as the client sees it.**
+  `visited_only` (saves ~6 % on the form's grid, W09.6) is replaced by
+  `simulate_rom_edit(detail="headline"|"summary"|"cells"|"full")`, default
+  `headline`, one pure function `shape_simulate_result` (no other caller; the
+  daemon route and the dashboard payload are unchanged). `full` is the
+  daemon's body byte for byte; `cells` is the old visited-only cut
+  (`cells_omitted`, `cells_filter`); `summary` is one compact row per visited
+  cell with every output's status, supported_share, reasons and quantiles
+  (relative_delta p50 only); `headline` is one compact row per visited cell
+  with, per loop kind in the cell, only that loop's headline output (loop,
+  output, status, reasons, over, delta_p50, relative_delta_p50). All levels
+  keep every top-level key in the daemon's order (caveats first) and the
+  table's own fields; `cells.detail`, `cells.detail_note` (built from the
+  data, names what was dropped and the other levels) and `cells.cells_omitted`
+  come first in the table. A bad `detail` is a `ValueError` naming the four
+  values, raised before the daemon is called. **Measured on a real
+  224-visited-cell run** (the synthetic image through the real simulator,
+  16 x 14 grid, 20 draws, scratch script), compact JSON / FastMCP's `indent=2`
+  text: `headline` 105,233 / 174,906 B, `summary` 301,229 / 588,901 B, `cells`
+  708,058 / 1,448,831 B, `full` 750,280 / 1,523,137 B. The cell rows are
+  86 KB of the headline (384 B each), the top-level keys 10.7 KB, the table
+  skeleton 8 KB. **The ~100 KB cap is not met:** 105 KB
+  compact is just over it and the 175 KB text FastMCP sends (every tool here
+  returns a dict, which FastMCP emits as `indent=2` text AND as
+  `structuredContent`, `mcp.server.fastmcp.func_metadata.convert_result`) is
+  well over; the <= 50 KB compact aim is not met. Next levers, measured on the
+  same payload (compact): drop the per-entry `output` name (derivable from
+  `headline_by_loop`) and null `relative_delta_p50` 95 KB; also drop
+  row_value/col_value (derivable from the axes) 85 KB; none gets under
+  100 KB indent=2 (160 / 145 KB). What would: return the result as a compact
+  JSON string (no `indent=2`, no structuredContent), a return type no other
+  tool here uses, so not done; or a coarse grid.
+  **`changed_only` (2026-10-15, opt-in, default false):** applied after the
+  level, drops visited cells whose every `by_loop` headline output is
+  `unchanged` (never an edited cell, a cell with `row/col_axis_moved`, one with
+  any other status, or one with no `by_loop` to read); states
+  `cells.changed_only`, `cells.unchanged_omitted`, a `detail_note` sentence
+  (real computed zeros, `changed_only=False` shows them); `cells_omitted` stays
+  the no-points count and `status_counts` is untouched, so listed +
+  unchanged_omitted + cells_omitted = 256. `full` is byte-identical only with it
+  off. Measured on the real 224-visited-cell payload: the K-scale edit has no
+  unchanged headline cell (it drops nothing); with all but six cells' headline
+  statuses set to unchanged, headline + changed_only is 22,133 B compact /
+  30,609 B as FastMCP text, of which 19 KB / 25.7 KB is the daemon's own
+  top-level keys and table skeleton, so the ~20 KB hoped for is not reachable;
+  the fixture (leaner top level) measures 8,341 / 13,801 B. 15 more tests
+  (kept/dropped sets with edited, axis-moved, unsupported, partly_supported,
+  changed and half-changed mixed cells kept, counts add up at every level,
+  note content, `full` filtering, unclassifiable cell kept, non-bool refused,
+  default False, pass-through).
+  Tests: kept/dropped keys per level (each dropped key named in
+  `detail_note`, derived from a fixture cell), `cells_omitted` + len(cells)
+  == 256 for 224- and 6-visited grids, `status_counts` and all other keys
+  untouched and in order, statuses, unsupported reasons and the trim's
+  `delta_p50` preserved, mixed-loop cells give two headline entries, bad
+  `detail` refused before any request is sent, default is `headline`, input
+  not mutated, `full` identical; the 224-cell fixture is built in the real
+  payload's shape (851,808 B full against 750,280 B real, asserted within
+  600-900 KB; headline 96,450 / 166,115 B, summary 362,293 B; headline <
+  summary < cells < full, headline < 0.2 x full). 59 tests in
+  `tests/test_mcp_rom_editor.py`; tool snapshot regenerated additively
+  (`detail` replaces `visited_only`, new description); docs/mcp-server.md row
+  and docs/headless-api.md note updated.
+  Earlier (visited_only) measure, kept for the record: 394,541 bytes full,
+  31,992 filtered on a 256-cell / 6-visited fixture.
 
 - [ ] **W09.6 — Real-ROM acceptance (on the machine with the images).**
   - `tests/test_rom_editor_private_rom.py`, skipping by name when the images
@@ -808,7 +868,7 @@ W09.6 is the orchestrator's own, on the ROM machine.
           WSL2 kernel 5.15.167.4, Python 3.12.3. 1-min load 0.6–1.0
           throughout.
 
-        | grid | points | draws | wall (child, incl. spawn) | child peak RSS | VmPeak (inproc) | response JSON | `visited_only` |
+        | grid | points | draws | wall (child, incl. spawn) | child peak RSS | VmPeak (inproc) | response JSON | `detail="cells"` (was `visited_only`) |
         |---|---|---|---|---|---|---|---|
         | form 16 × 14 | 224 | 200 | 4.5 s | 188 MiB | 871 MiB | 705,543 B | 663,116 B |
         | form 16 × 14 | 224 | 1,000 | 8.5 s | 277 MiB | 961 MiB | 710,118 B | 667,691 B |
@@ -823,8 +883,9 @@ W09.6 is the orchestrator's own, on the ROM machine.
           imports.
         - **Response size:** about 0.7 MB whatever the draws (the 256 Fuel
           Comp cells, 224 of them visited, even for 256 or 1,024 points).
-          W09.5's `visited_only` filter saves only ~6 % on a full grid; its
-          "< 60 KB" holds for sparse grids only.
+          W09.5's visited-cells cut (now `detail="cells"`) saves only ~6 % on a
+          full grid; its "< 60 KB" holds for sparse grids only (see the
+          W09.5 follow-up for `detail="summary"`).
         - **Limits:** `DIGEST_TIMEOUT_SECONDS` = 900 s; the child's
           `RLIMIT_AS` is 50 % of RAM clamped to 1,024–4,096 MiB.
         - **Pi estimate (a guess, not measured):** if the Pi is 3–6× slower,
