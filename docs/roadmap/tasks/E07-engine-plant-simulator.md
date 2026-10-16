@@ -585,7 +585,9 @@ supercharger is a hardware intervention with a new plant parameter set.
       - Measurement now declared: `evap_purge_drive` (contract, `planned`;
         operator 2026-10-15). The `tuning` capture profile polls DID 0x1110 at
         2 Hz on the pulse DID's cycle from 2026-10-15.
-  - **Remaining:**
+  - **Remaining:** *(item 1's revised structure is specified as E09.11,
+    fuel-mv-4: purge, MAF transfer error, PID 0x42, the short-pulse decode
+    and the pairing fix, on E09.1's capture.)*
     1. A revised plant structure, with a new `plant_version`, a new baseline
        and newly declared bounds. The in-sample failure points at the
        idle/short-pulse region and the 10–40 g/s tail. It must then pass
@@ -772,7 +774,9 @@ supercharger is a hardware intervention with a new plant parameter set.
     within 0.1 s (median gap 0.87 s), and that recording has no pulse anchors
     (E07.3: 188 `not_co_observed`), so today the case forms no load-input pair
     on either recording type. The frozen tolerance was not changed.
-  - **Remaining:**
+  - **Remaining:** *(E09.12 scores the plant-free outputs, ΔBFS and Δφ, on
+    the five post-flash drives that exist; that verdict does not wait on
+    item 1.)*
     1. A qualified plant: E07.3's remaining items 1–3, with never-scored
        held-out drives (truck). Until then the verdict stays
        `pending: plant_not_qualified`.
@@ -1016,7 +1020,10 @@ supercharger is a hardware intervention with a new plant parameter set.
     - Reading the stage's integrated trace was not chosen. In steady regions
       it equals speed density at the same VE, and the stage still runs the
       fuel plant's constant 0.7 (load_kit loads fuel-mv-1).
-  - **Remaining, by stage, and what each needs:**
+  - **Remaining, by stage, and what each needs:** *(E09.13 declares the
+    minimum torque model and orders H07.10/H07.5/H07.12 ahead of stage 4;
+    E09.5 adds measured MAP and rail as inputs and the boosted plant as a
+    new hardware configuration.)*
     1. *Stage 1 validation* (hardware): a MAP sensor logged at ≥ 100 Hz with
        MAF and rpm over idle, cruise, tip-ins/outs and WOT; and the manifold
        volume (water fill or CAD). Then a held-out scoring recorded in the

@@ -942,7 +942,9 @@ W09.6 is the orchestrator's own, on the ROM machine.
           numbers.
   - Tick E08.8 in the E08 doc with a pointer here.
 
-- [ ] **W09.7 — Later, named so they are not implied:** persisted runs under
+- [ ] **W09.7 — Later, named so they are not implied** *(timing-trim editing
+  is now E09.7, injector constants E09.9, the MAF curve E09.8, and the
+  per-lever "what blocks a number" preview E09.14)*: persisted runs under
   `/data/canary/sim/<run>/` (declared in `tests/test_state_dir.py`) with a
   run list. Drive designs from pre-change sessions (E08.2 `build_drive_design`)
   as a second point source. Slots 2–5 with a stated active slot. Timing-trim
