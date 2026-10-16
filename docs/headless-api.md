@@ -622,11 +622,13 @@ analysis_busy` until it finishes (an identical one re-attaches to it).
 
 `200`: `{"tool": "rom_editor", "tool_version": "1", "label": "simulation",
 "synthetic": bool, "caveats": [...] (the result's, first, unchanged),
-"assumptions": [...], "unresolved": [...], "inert_parameters": [...],
+"assumptions": [...] (plant working assumptions prefixed "plant working assumption: ",
+the design's own prefixed "design: ", and others; caveats repeats every one;
+the design's are not in design, E08.10), "unresolved": [...], "inert_parameters": [...],
 "coverage": {output: share}, "outcome": str, "learned_state": {...},
 "provenance": {hashes, plant_version, seed, draws, candidate_events, ...},
 "design": {points, weight, base_revision, ..., "grid": {rpm_edges, load_edges,
-load_axis, load_unit, load_basis, environment}, "assumptions": [...]},
+load_axis, load_unit, load_basis, environment}},
 "candidate": <the preview's provenance>, "cells": <CellTable>, "spec_yaml":
 str, "spec_sha256": str}`. Note `label` here is the result's, the request's is
 `candidate.label`. `cells` is `sim_cells.CellTable.to_dict()` (E08.4;
@@ -642,7 +644,7 @@ delta {p05, p50, p95}, relative_delta, relative_undefined_pairs} | null,
 changed_share, supported_effect}}, by_loop[], edited, row_axis_moved,
 col_axis_moved}`. A cell nobody visited has `pairs: 0` and is not
 `unchanged`. A 16 x 16 table with six points measured about 370 KB of JSON on
-the synthetic image; the form's 224-point grid about 705 KB (W09.6; 750 KB on
+the synthetic image; the form's 224-point grid about 705 KB (W09.6; 757 KB on
 the synthetic image), because 224 of the 256 cells are visited and each carries
 six outputs. The route's body and the dashboard's payload are always this whole
 body; the MCP tool `simulate_rom_edit` cuts it in the tool layer by `detail`

@@ -30,7 +30,7 @@ from src.analysis.rom_edit_spec import build_candidate, load_edit_spec
 from src.analysis.rom_effects import RomEffectRefusalError
 from src.analysis.rom_image import ImageFormatError, revision_match, sha256_hex
 from src.analysis.sim_contract import SimulationRefusalError
-from src.analysis.sim_montecarlo import MonteCarloResult
+from src.analysis.sim_montecarlo import DESIGN_ASSUMPTION_PREFIX, MonteCarloResult
 from src.vehicle.tune_revisions import ReferenceImage, TuneRevision, TuneRevisionRegistry
 from tests.rom_fixtures import PROFILE
 from tests.test_sim_montecarlo import build_kit_and_image
@@ -458,6 +458,12 @@ def test_a_k_edit_moves_bfs_by_the_realised_raw_ratio_in_every_open_loop_pair(
     assert keys[:lead] == ["tool", "tool_version", "label", "synthetic"]
     for later in ("assumptions", "unresolved", "inert_parameters", "coverage", "design", "cells"):
         assert keys.index(later) > lead, later
+    # The design's own assumptions are stated once: in `assumptions`, "design: "-prefixed
+    # (E08.10), with the plant's, and `caveats` repeats them. `design` carries no second copy.
+    assert "assumptions" not in out["design"]
+    designed = [a for a in out["assumptions"] if a.startswith(DESIGN_ASSUMPTION_PREFIX)]
+    assert designed and len(set(out["assumptions"])) == len(out["assumptions"])
+    assert all(a in out["caveats"] for a in out["assumptions"])
     assert out["provenance"]["seed"] == 20261015 and out["provenance"]["draws"] == 6
     assert out["design"]["grid"]["rpm_edges"] == [4000.0, 4800.0, 5600.0]
     assert load_spec_sha(out["spec_yaml"]) == out["spec_sha256"]

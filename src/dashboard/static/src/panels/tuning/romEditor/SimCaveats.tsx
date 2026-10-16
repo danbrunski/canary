@@ -1,5 +1,5 @@
 import { knownAnswersLine, pedalFlagBit0Clear, wotColumnCaveat } from "../../../lib/romSim";
-import { g, pct, weightUnit } from "../../../lib/romSimView";
+import { g, groupAssumptions, pct, weightUnit } from "../../../lib/romSimView";
 import type { RomSimResult, SimRunContext } from "../../../types/romEditor";
 
 /** The prefix of the plant's qualification reason (`fuel_plant.plant_qualification`). */
@@ -42,13 +42,15 @@ export function SimCaveats({ result, run }: { result: RomSimResult; run: SimRunC
   const why = qualification?.includes(":")
     ? qualification.slice(qualification.indexOf(":") + 1).trim()
     : qualification;
-  const shown = new Set([STRUCTURAL, PARAMETER_ONLY, qualification]);
-  const others = result.caveats.filter((item) => !shown.has(item));
+  // `caveats` repeats every assumption (E08.10): the assumption lists below show
+  // them, so the caveat list does not, and a string never shows twice.
+  const assumptions = groupAssumptions(result.assumptions);
+  const shown = new Set([STRUCTURAL, PARAMETER_ONLY, qualification, ...result.assumptions]);
+  const others = [...new Set(result.caveats.filter((item) => !shown.has(item)))];
   const visited = table.cells.filter((cell) => cell.pairs > 0).length;
   const placed = table.cells.reduce((sum, cell) => sum + cell.weight, 0);
   const unit = weightUnit(table);
   const provenance = result.provenance;
-  const designAssumptions = result.design.assumptions ?? [];
   const coverage = Object.entries(result.coverage).sort(([a], [b]) => a.localeCompare(b));
   const unplaced = Object.entries(table.unplaced).sort(([a], [b]) => a.localeCompare(b));
   const moved = table.overlay.moved_lookups;
@@ -93,8 +95,11 @@ export function SimCaveats({ result, run }: { result: RomSimResult; run: SimRunC
       </ul>
 
       <List label="Every other caveat the run states" items={others} />
-      <List label="Assumptions the result states" items={result.assumptions} />
-      <List label="Assumptions the design states" items={designAssumptions} />
+      <List label="Plant working assumptions the numbers rest on" items={assumptions.plant} />
+      <List label="The design's own assumptions" items={assumptions.design} />
+      {assumptions.other.length > 0 && (
+        <List label="Other assumptions the result states" items={assumptions.other} />
+      )}
       <List
         label="Unresolved: what the result rests on but does not know"
         items={result.unresolved}

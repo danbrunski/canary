@@ -22,6 +22,20 @@ export const BASE_SHA = "a".repeat(64);
 export const CANDIDATE_SHA = "c".repeat(64);
 export const DESIGN_SHA = "d".repeat(64);
 
+/** `paired_scenarios.format_plant_assumption`'s string for the held VE (E08.10). */
+export const VE_ASSUMPTION =
+  "plant working assumption: manifold_pressure (volumetric_efficiency) = 0.7, bracket [0.4, 1.0], held at that value (xterra/fuel_plant.yaml registry, plant fuel-mv-1; unresolved effect manifold_pressure_unmeasured)";
+const RAIL_ASSUMPTION =
+  "plant working assumption: rail_pressure (kPa) = 350.0, bracket [305.0, 371.0], drawn inside its bracket in this run (xterra/fuel_plant.yaml registry, plant fuel-mv-1; unresolved effect rail_pressure_unmeasured)";
+const DESIGN_ASSUMPTION = "design: grid load: the fill fraction is taken as MAP / baro";
+/** The result's `assumptions`: unprefixed, plant working, design. */
+export const SIM_ASSUMPTIONS = [
+  "the pedal-enrichment flag is stated, not logged",
+  VE_ASSUMPTION,
+  RAIL_ASSUMPTION,
+  DESIGN_ASSUMPTION,
+];
+
 import { TABLES, TABLES_WITH_FUEL_COMP, fuelCompTable } from "./romLibraryFixtures";
 
 type Over = SimQuantileBlock["over"];
@@ -377,6 +391,8 @@ export function buildCellTable(): SimCellTable {
       "structural_error_not_sampled",
       "parameter_uncertainty_only",
       "synthetic_example_not_a_measurement",
+      // As the run states them: `caveats` repeats every assumption (E08.10).
+      ...SIM_ASSUMPTIONS,
     ],
     unresolved: ["closed_loop_trim_authority_undecoded", "plant:rail_pressure_working_assumption"],
     rom_outcome: "traced",
@@ -405,10 +421,7 @@ export function buildSimResult(): RomSimResult {
     label: "simulation",
     synthetic: false,
     caveats: buildCellTable().caveats,
-    assumptions: [
-      "the pedal-enrichment flag is stated, not logged",
-      "rail pressure is the plant's working assumption",
-    ],
+    assumptions: [...SIM_ASSUMPTIONS],
     unresolved: buildCellTable().unresolved,
     inert_parameters: ["injector_dead_time_offset"],
     coverage: { delivered_lambda: 0.82, injector_pulse_ms: 0.4 },
@@ -464,7 +477,6 @@ export function buildSimResult(): RomSimResult {
           pedal_flag: 0,
         },
       },
-      assumptions: ["grid load: the fill fraction is taken as MAP / baro"],
     },
     candidate: {
       kind: "simulation_candidate",

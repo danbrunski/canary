@@ -429,6 +429,8 @@ def test_simulate_runs_the_child_and_returns_the_cells(
     cells = body["cells"]
     assert cells["schema_version"] == 1 and cells["grid"] == "fuel_comp"
     assert body["design"]["points"] == 6
+    assert "assumptions" not in body["design"]  # the design's are in body["assumptions"], E08.10
+    assert any(a.startswith("design: ") for a in body["assumptions"])
     assert len(cells["cells"]) == 16 * 16
     assert sum(1 for cell in cells["cells"] if cell["pairs"]) == 6
     assert body["provenance"]["seed"] == 20261015 and body["provenance"]["draws"] == 6

@@ -733,8 +733,8 @@ def test_measured_size_of_a_region_edit_headline_changed_only() -> None:
     )
     # The fixture's own top-level keys are lean (9.5 KB with no cells). Derived from the
     # real 224-cell payload (all but six cells' headline statuses set to unchanged) the
-    # same call measured 22,133 B compact / 30,609 B as FastMCP text: the real
-    # caveats, provenance and table skeleton alone are 19 KB / 25.7 KB.
+    # same call measured 28,912 B compact / 37,540 B as FastMCP text (E08.10 grew the
+    # assumptions and caveats): the real top-level keys and table skeleton are 24.5 KB compact.
     assert wire < 40_000
     assert wire < 0.25 * _wire_bytes(_headline(body))
 
@@ -775,7 +775,8 @@ def test_a_response_without_cells_is_returned_as_it_came() -> None:
 
 def test_the_dense_fixture_is_the_size_of_the_real_payload() -> None:
     """W09.6 measured 705,543 B on the form's grid; the same grid through the real
-    simulator on the synthetic image (scratch run, 2026-10-15) is 750,280 B compact
+    simulator on the synthetic image (scratch run, 2026-10-15; 750,280 B before E08.10 grew
+    the assumptions, 757,401 B after) is 757,401 B compact
     with 224 visited cells. The fixture must be that size or the measurements
     below say nothing about a real call."""
     body = _sim_body(DENSE)
@@ -797,7 +798,7 @@ def test_measured_sizes_on_the_dense_grid() -> None:
     full, cells, summary, headline = (sizes[d][0] for d in ("full", "cells", "summary", "headline"))
     assert headline < summary < cells < full
     # What each level buys, as regression bounds (not the ~100 KB client cap, which the
-    # headline does not meet on 224 visited cells: 105 KB compact, 175 KB as FastMCP text
+    # headline does not meet on 224 visited cells: 112 KB compact, 182 KB as FastMCP text
     # on the real run).
     assert summary < 0.5 * full
     assert headline < 0.2 * full

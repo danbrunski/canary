@@ -507,6 +507,8 @@ def _simulate(
         "synthetic": result.synthetic,
         # The result's caveats, unchanged and first.
         "caveats": list(result.caveats),
+        # The design's own assumptions are in here, "design: "-prefixed (E08.10);
+        # `design` carries no second copy of them.
         "assumptions": list(result.assumptions),
         "unresolved": list(result.unresolved),
         "inert_parameters": list(result.inert_parameters),
@@ -517,7 +519,6 @@ def _simulate(
         "design": {
             **summary(design),
             "grid": design.grid.model_dump(mode="json"),
-            "assumptions": list(design.assumptions),
         },
         "candidate": dict(candidate_provenance),
         "cells": cells.to_dict(),

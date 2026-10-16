@@ -658,6 +658,50 @@ W09.6 is the orchestrator's own, on the ROM machine.
   and docs/headless-api.md note updated.
   Earlier (visited_only) measure, kept for the record: 394,541 bytes full,
   31,992 filtered on a 256-cell / 6-visited fixture.
+  **E08.10 follow-up (2026-10-15):**
+  - *One copy of the design's assumptions.* `rom_editor.simulate_edits` no
+    longer writes `design.assumptions`; E08.10 puts them in the result's
+    `assumptions` as `design: `-prefixed strings, and `caveats` repeats every
+    assumption. Swept: `types/romEditor.ts` (the field is gone from
+    `SimDesignSummary`), `SimCaveats.tsx`, the fixtures, `SimResults.test.tsx`,
+    `docs/headless-api.md`. The caveat block groups `assumptions` by prefix
+    (`groupAssumptions` in `lib/romSimView.ts`: plant working assumptions,
+    the design's own, and an "Other assumptions" list only if any string is
+    unprefixed) and no longer lists in "Every other caveat" anything that is
+    an assumption, so each string shows once (lists are also de-duplicated by
+    exact string). The two prefixes are read from the Python modules by
+    `romSimView.test.ts`. Tests: `test_rom_editor.py` (key gone, design
+    assumptions present and prefixed, each once, all in `caveats`),
+    `test_rom_editor_api.py`, and in `SimResults.test.tsx` the held VE string
+    (`plant working assumption: manifold_pressure (volumetric_efficiency) =
+    0.7, bracket [0.4, 1.0], held at that value (...)`) once in its group, a
+    string in both `caveats` and `assumptions` once, the unprefixed fallback.
+    The VE test fails with the old block (checked).
+  - *MCP sizes re-measured* on a real payload (the route driven through
+    `tests/test_rom_editor_api.py`'s fixtures, synthetic image, 16 x 14 grid,
+    20 draws, K +5 %, 224 visited cells), compact / FastMCP text: `headline`
+    112,028 / 181,856 B (was 105,233 / 174,906), `summary` 308,144 / 596,241
+    (301,229 / 588,901), `cells` 715,179 / 1,456,529 (708,058 / 1,448,831),
+    `full` 757,401 / 1,530,835 (750,280 / 1,523,137). `assumptions` is 19
+    strings (4,359 B, was 7 / 1,896), `caveats` 4,555 B (was 2,092) and
+    `cells.caveats` repeats it (4,555 B): 13,469 B of repeated text, kept
+    whole. Headline: cell rows 86,195 B, top-level keys 15,037 B (was
+    10,689), table skeleton 9,437 B (was 6,990), so rows still dominate the
+    dense grid (77 %). Where the edit changes few cells they do not:
+    headline + `changed_only` with six cells changed is 28,912 / 37,540 B
+    (was 22,133 / 30,609), 24.5 KB (85 %) of it non-cell content. A real
+    region edit (Fuel Comp +2 %, 1,500-3,000 rpm, 20-50 % load; 224 visited)
+    keeps 147 cells, drops 77: 87,516 / 142,671 B. The K edit drops none:
+    112,656 / 182,496 B. `shape_simulate_result` and the test thresholds are
+    unchanged (none pinned a size that moved: fixture `full` 600-900 KB,
+    headline < 0.2 x full, changed_only wire < 40 KB all still hold); the
+    tool docstring and `docs/mcp-server.md` carry the new numbers, and the
+    tool snapshot's `simulate_rom_edit` description is regenerated (that one
+    line only).
+  - *W09.6's K-run test* tightened to `gated == 0` and its dead
+    `unsupported` branch and stale comment removed (E08.10 scoped the gate;
+    `tests/test_rom_editor_private_rom.py -m slow`: 9 passed, 1 xfailed, the
+    existing strict xfail).
 
 - [ ] **W09.6 — Real-ROM acceptance (on the machine with the images).**
   - `tests/test_rom_editor_private_rom.py`, skipping by name when the images

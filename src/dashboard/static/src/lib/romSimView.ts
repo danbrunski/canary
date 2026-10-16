@@ -542,3 +542,27 @@ export function supportLines(oc: SimOutputCell): string[] {
 export function movedAxes(table: SimCellTable): Set<string> {
   return new Set(table.overlay.axis_edits.map((edit) => `${edit.axis}:${edit.index}`));
 }
+
+/** `paired_scenarios.PLANT_ASSUMPTION_PREFIX` and `sim_montecarlo.DESIGN_ASSUMPTION_PREFIX`:
+ *  how the result's `assumptions` say whose they are (E08.10). */
+export const PLANT_ASSUMPTION_PREFIX = "plant working assumption: ";
+export const DESIGN_ASSUMPTION_PREFIX = "design: ";
+
+/** The result's `assumptions` in groups, derived from the prefixes: the plant's
+ *  working assumptions, the design's own, and anything unprefixed. Each string
+ *  once, whole (the prefix stays), in the order given. */
+export function groupAssumptions(assumptions: readonly string[]): {
+  plant: string[];
+  design: string[];
+  other: string[];
+} {
+  const unique = [...new Set(assumptions)];
+  return {
+    plant: unique.filter((item) => item.startsWith(PLANT_ASSUMPTION_PREFIX)),
+    design: unique.filter((item) => item.startsWith(DESIGN_ASSUMPTION_PREFIX)),
+    other: unique.filter(
+      (item) =>
+        !item.startsWith(PLANT_ASSUMPTION_PREFIX) && !item.startsWith(DESIGN_ASSUMPTION_PREFIX),
+    ),
+  };
+}

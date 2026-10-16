@@ -367,7 +367,8 @@ export interface SimCellTable {
   cells: SimCell[];
 }
 
-/** `sim_design.summary(design)` plus its grid and assumptions. */
+/** `sim_design.summary(design)` plus its grid. The design's own assumptions are in
+ *  the result's `assumptions`, "design: "-prefixed (E08.10), not here. */
 export interface SimDesignSummary {
   sha256: string;
   kind: string;
@@ -394,7 +395,6 @@ export interface SimDesignSummary {
     load_basis: string;
     environment: Record<string, number | string>;
   };
-  assumptions?: string[];
 }
 
 /** The result's provenance: hashes, plant, seed and draws. Free-form beyond
@@ -424,6 +424,8 @@ export interface RomSimResult {
   synthetic: boolean;
   /** The result's caveats, first and unchanged. */
   caveats: string[];
+  /** Plant working assumptions ("plant working assumption: ..."), the design's
+   *  ("design: ...") and others; `caveats` repeats every one of them. */
   assumptions: string[];
   unresolved: string[];
   inert_parameters: string[];

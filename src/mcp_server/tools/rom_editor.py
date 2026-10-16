@@ -379,7 +379,7 @@ async def simulate_rom_edit(
 
     The base must be a recorded revision (``preview_rom_edit``'s
     ``sim_base.ok``). Runs in the workbench child (up to 900 s); the call waits
-    it out. Nothing is stored or written. The daemon's body is large (750 KB
+    it out. Nothing is stored or written. The daemon's body is large (757 KB
     on the form's 224-point grid: every cell of the 16 x 16 table, six outputs
     each), so ``detail`` chooses how much of ``cells.cells`` comes back. Every
     level keeps every top-level key whole and in the daemon's order (read
@@ -392,7 +392,7 @@ async def simulate_rom_edit(
     read ``no_points``, not ``unchanged``. Sizes are measured on a real
     224-visited-cell run, compact JSON / as the indented text FastMCP sends:
 
-    - ``"headline"`` (the default, 105 KB / 175 KB): one compact row per
+    - ``"headline"`` (the default, 112 KB / 182 KB): one compact row per
       **visited** cell: row, col, row_value, col_value, n_points, edited, the
       two ``*_axis_moved`` flags, loop_shares and ``headline``, one entry per
       loop kind in the cell for that loop's headline output
@@ -402,12 +402,12 @@ async def simulate_rom_edit(
       supported result), ``delta_p50`` and ``relative_delta_p50`` (null for the
       trim, which has none). The other outputs of a cell are not listed;
       ``status_counts`` has every output's counts.
-    - ``"summary"`` (301 KB / 589 KB): the same rows plus every output's
+    - ``"summary"`` (308 KB / 596 KB): the same rows plus every output's
       ``status``, ``supported_share``, ``reasons`` and ``quantiles`` {``over``,
       ``delta`` p05/p50/p95, ``relative_delta`` p50}.
-    - ``"cells"`` (708 KB / 1,449 KB): every visited cell whole; unvisited ones
+    - ``"cells"`` (715 KB / 1,457 KB): every visited cell whole; unvisited ones
       counted in ``cells.cells_omitted`` / ``cells.cells_filter``.
-    - ``"full"`` (750 KB / 1,523 KB): the daemon's body byte for byte.
+    - ``"full"`` (757 KB / 1,531 KB): the daemon's body byte for byte.
 
     No visited cell is dropped at any level unless you ask for ``changed_only``.
     A coarse grid is smaller still.
@@ -426,10 +426,14 @@ async def simulate_rom_edit(
     ``changed_only`` is False; with it on, the cells list is filtered the same
     way and ``detail_note`` says so. **For a dense grid prefer
     ``changed_only=True`` or a coarse grid** (the Coarse preset is about a
-    quarter of the points): headline alone is 105 KB (175 KB as FastMCP text)
+    quarter of the points): headline alone is 112 KB (182 KB as FastMCP text)
     on 224 visited cells, and an edit that changes few cells drops to the
-    daemon's own non-cell content plus a few rows (30.6 KB as FastMCP text,
-    derived from the real payload with six cells changed). An edit that
+    daemon's own non-cell content plus a few rows (37.5 KB as FastMCP text,
+    derived from the real payload with six cells changed; 24.5 KB of its 28.9 KB
+    compact is the non-cell content, so there the top-level keys and table
+    skeleton dominate). That content grew with E08.10: ``assumptions`` is 19
+    strings (4.4 KB) and ``caveats`` repeats them (4.6 KB), as does
+    ``cells.caveats``, 13.5 KB in all; all three stay whole. An edit that
     changes every visited cell (a K scale) loses nothing to it.
     Any other ``detail`` is a ``ValueError`` naming the allowed values, raised
     before the run starts. ``cells`` is ``sim_cells.CellTable.to_dict()``;

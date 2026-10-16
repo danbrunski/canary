@@ -476,18 +476,20 @@ def test_a_k_edit_moves_bfs_by_the_realised_raw_ratio_at_every_open_loop_pair(
         if cell["loop_shares"] != {"open_loop": 1.0}:
             continue
         bfs = cell["outputs"]["base_fuel_schedule"]
-        if bfs["status"] == "unsupported":
-            # The gate-ambiguous cell: a KNOWN OVER-REFUSAL of BFS (computed,
-            # but given the target lookup's gate reason at paired_scenarios.py
-            # run_paired ~1017; see the negative control). Locked in on purpose.
-            assert {r for e in bfs["support"] for r in e["reasons"]} >= {GATE_UNKNOWN}
-            gated += 1
-            continue
-        assert bfs["status"] == "changed" and bfs["supported_share"] == 1.0
+        # E08.10: a gate reason reaches only the outputs downstream of the node it
+        # names, so the target lookup's gate no longer marks BFS unsupported (the
+        # cell that used to be the one known over-refusal is supported now).
+        gated += bfs["status"] == "unsupported"
+        assert bfs["status"] == "changed" and bfs["supported_share"] == 1.0, (
+            cell["row"],
+            cell["col"],
+            bfs["status"],
+            bfs["supported_share"],
+        )
         for q in ("p05", "p50", "p95"):
             assert abs(bfs["quantiles"]["relative_delta"][q] - (r - 1)) <= rel_tol
         checked += 1
-    assert checked >= 20 and gated <= 1
+    assert checked >= 20 and gated == 0
 
 
 # -- 3. Target AFR +4 counts, the WOT column --------------------------------------------------
