@@ -127,7 +127,7 @@ W09.6 is the orchestrator's own, on the ROM machine.
 
 ## Checklist
 
-- [ ] **W09.0 — Prerequisite: E08.4 per-cell aggregation.** Landed as
+- [x] **W09.0 — Prerequisite: E08.4 per-cell aggregation.** Landed as
   `474c0267` (`src/analysis/sim_cells.py`, 28 tests, real 20260920 → 20261004
   run). E08.4's box in the E08 doc was still unticked when this was written:
   tick it with that commit's evidence if no one has. W09 builds on that
@@ -142,8 +142,11 @@ W09.6 is the orchestrator's own, on the ROM machine.
     effects=compare_roms(base, candidate, rom_map, kit.model, kit.model_sha256,
     base_slot=1, candidate_slot=1, slot_source="default_slot"))`. It takes the
     E08.2 `SimDesign` (not the `MonteCarloDesign`), and the effect trace must
-    be the run's (`effects_mismatch` otherwise). E08.1's `build_candidate`
-    already computes that trace, so reuse it rather than computing it twice.
+    be the run's (`effects_mismatch` otherwise). *Done 2026-10-15:* `build_candidate`'s
+    trace cannot be reused (it runs without the contract and mode and is not
+    returned as an `EffectReport`), so `rom_editor` recomputes it with
+    `compare_roms(..., contract=, mode=)` (see W09.1's evidence). E08.4 is
+    ticked in the E08 doc.
   - **Payload:** `CellTable.to_dict()` (`schema_version: 1`; JSON Schema from
     `cell_table_schema()`, which `types/romEditor.ts` should mirror). Every
     cell is present, row-major. A cell has `row_value` / `col_value`, `n_points`,
