@@ -160,7 +160,7 @@ W09.6 is the orchestrator's own, on the ROM machine.
     trim on the route (for example, drop `points` lists), never by dropping
     cells: `no_points` ≠ `unchanged`.
 
-- [ ] **W09.1 — `src/analysis/rom_editor.py`: preview and simulate as pure functions.**
+- [x] **W09.1 — `src/analysis/rom_editor.py`: preview and simulate as pure functions.**
   - `EDITABLE_TABLES = ("fuel_targets", "fuel_compensation", "k_constant")`,
     `SIM_SLOT = 1`, `MAX_GRID_POINTS`, `MAX_DRAWS`.
   - `library_base(image, revision_match) -> BaseImage`. A `matched` entry gives
@@ -234,8 +234,40 @@ W09.6 is the orchestrator's own, on the ROM machine.
     - `run_job` returns `refused` for each refusal class, and the returned
       dict pickles.
     - Clean-process import test: no ECU-facing package loaded.
+  - *Done 2026-10-15, synthetic image only* (no `.OsirisROM` on this machine;
+    the real-image runs are W09.6). `tests/test_rom_editor.py`, 24 tests
+    green (`pytest tests/test_rom_editor.py tests/test_layering.py`: 35
+    passed): `test_a_preview_is_build_candidate_on_the_equivalent_yaml_spec`
+    (whole provenance equal, 20 cells 128 → 131), `test_edit_refusals_come_back_by_name`
+    (the five named plus `k_constant` slot 3, `rounding_undeclared`,
+    `no_edits`), `test_the_downloaded_spec_yaml_round_trips`,
+    `test_the_negative_control_is_unchanged_in_every_visited_cell` (default
+    4,000-5,600 rpm x 30-100 % grid, 6 visited cells: all 6 outputs exactly
+    `unchanged` with supported share 1.0 and zero deltas in the 5 open-loop
+    cells; in the one closed-loop cell (10, 6) BFS and target phi are
+    `unchanged` and the 4 plant outputs are `unsupported`, by
+    `closed_loop_trim_authority_undecoded` only; and, from the run itself,
+    every computed pair is equal at every draw), `test_a_k_edit_moves_bfs_by_the_realised_raw_ratio_in_every_open_loop_pair`
+    (ratio 30151/28715; each open-loop pair within one BFS step (4 counts) of
+    r × base, cell p05/p50/p95 = r − 1 ± 5e-4 in all 5 open-loop cells; the
+    sixth point runs closed loop; caveats lead the payload, after only `tool`,
+    `tool_version`, `label`, `synthetic`), `test_no_request_field_has_a_default_and_each_missing_one_is_named`,
+    `test_bounds_and_the_base_are_refused_before_any_work`,
+    `test_run_job_returns_each_refusal_class_as_data_that_pickles` (all four
+    classes plus `request_invalid`), `test_the_rom_editor_imports_nothing_that_talks_to_the_ecu`.
+    Contract additions W09.2 must know: keyword seams `sha256=`, `kit=`,
+    `registry=` on `preview_edits` / `simulate_edits` / `run_job`; `run_job`
+    params also need `profile_dir`; kinds `rom_sim` and `rom_preview`;
+    `candidate_events` is `"none" | "ecu_reflash"`; the route must catch
+    `RomEffectRefusalError` (E08.1's `value_out_of_range` comes from
+    `make_candidate` as that base class, not `EditSpecRefusalError`).
+    `effects` are recomputed with `compare_roms(..., contract=kit.contract,
+    mode=MODE)` instead of reusing `build_candidate`'s trace: `Candidate`
+    exposes no `EffectReport`, and that trace runs without contract and mode,
+    so its output statuses would not be the run's `rom_report`
+    (`effects_mismatch`).
 
-- [ ] **W09.2 — Job kind and routes.**
+- [x] **W09.2 — Job kind and routes.**
   - `workbench_jobs`: add `"rom_sim"` to `JOB_KINDS` and `_CONFIG_ONLY_KINDS`.
     `run_workbench_job` dispatches it to `rom_editor.run_job` before the
     bindings check. Params carry `image_path`, `sha256`, `revision_match` and
@@ -264,8 +296,61 @@ W09.6 is the orchestrator's own, on the ROM machine.
       (this is the pickling trap, tested end to end).
     - `tests/test_layering.py` and `tests/test_state_dir.py` stay green (no
       runtime writes: nothing is persisted in this checklist).
+  - *Done 2026-10-15, synthetic image only* (real-image runs are W09.6).
+    `tests/test_rom_editor_api.py`, 32 tests green (`pytest` over it,
+    `test_rom_editor`, `test_route_table_snapshot`, `test_layering`,
+    `test_state_dir`, `test_workbench_analysis`, `test_rom_library_api`,
+    `test_dyno_workbench`, `test_control_classification`, `test_rom_trace`,
+    `test_dashboard_api`, `test_pairing_routes`, `test_brain_routes`,
+    `test_mcp_auth`: 281 passed). The fixture copies the Xterra profile into
+    `tmp_path`, patches the application model's program hash to the synthetic
+    image's and records the image in that copy's `tune_revisions.yaml`; the
+    library is the real `register_rom_library_routes` and the image goes in
+    through its upload route. Preview: `test_preview_is_the_pure_function_and_adds_nothing_of_its_own`
+    (response equals `preview_edits`, 20 cells 128 → 131),
+    `test_preview_refusals_are_a_400_with_their_reason` (`table_not_editable`,
+    `slot_not_simulated`, `no_op_edit`, `rounding_undeclared`, and
+    `value_out_of_range` as `kind: rom_effect`: the route catches
+    `RomEffectRefusalError`), `duplicate_edit` / `no_edits`, another program
+    (`wrong_program`/`patch_missing`, not a 500), 404 (unknown, malformed,
+    traversal sha), 409 with no map (also for simulate; 404 wins over 409),
+    422. Simulate: `test_simulate_runs_the_child_and_returns_the_cells`
+    (in-process executor via the `executor=` seam; response equals `run_job`;
+    all 256 Fuel Comp cells present, 6 visited), 409 `analysis_deferred`
+    while `tuning_profile` is active (no child submitted; preview still 200),
+    409 `analysis_busy`, 503 `child_timed_out`, 400 `sim_refused` for
+    `table_not_editable`, `value_out_of_range`, `grid_edges_invalid`,
+    `draws_too_many`, `grid_too_large` and `base_not_a_recorded_revision`,
+    422 for each of the 21 request fields missing, and for an extra or mistyped field.
+    The pickling trap end to end: `test_the_refusal_trap_end_to_end_through_a_real_spawn_child`
+    runs a **real `spawn` child** (three refusal kinds, each a 400 with its
+    reason); checked that it bites by letting the child call `simulate_edits`
+    directly, which answered 503 `child_failed` (`BrokenProcessPool`).
+    `test_a_whole_simulate_crosses_the_real_spawn_boundary` (200 from a real
+    child). `test_nothing_is_persisted_and_the_candidate_is_never_offered`
+    (`tmp_path` tree and `repo_guard` snapshot unchanged, the library still
+    holds the one base image, download returns it). Both routes 401 without
+    or with a wrong token, before the body is read. Registering the editor
+    without the library raises.
+    Found and fixed on the way: the library matches an image against
+    `active_registry(config)` (tracked + dashboard-recorded flashes) but
+    `build_grid_design(registry=None)` reads only the tracked file, so a base
+    the page offers to simulate could be refused `base_revision_unknown` in the
+    child. `run_workbench_job` now passes `registry=active_registry(config)`;
+    `test_a_revision_recorded_from_the_dashboard_is_simulated_as_the_library_sees_it`
+    failed before and passes after.
+    Decisions the doc did not settle: no separate `rom_preview` job kind
+    (preview is the thread pool); 400 bodies also carry `kind`; a deferred
+    simulate keeps the workbench's detail but its `laptop_path` says to
+    download the image (the workbench's text tar-streams a session this job
+    never reads); a `FileNotFoundError` for any other vehicle definition
+    (contract, application model, uncertainty) is 409 `"ROM Editor definition
+    unavailable for this vehicle: ..."`; `tests/fixtures/route_table_snapshot.json`
+    regenerated (two rows). A 16 × 16 table with six visited points is
+    ~370 KB of JSON: W09.6 measures a full grid, and trims on the route if
+    needed (never by dropping cells).
 
-- [ ] **W09.3 — ROM Editor page: choose, edit, preview, download the spec.**
+- [x] **W09.3 — ROM Editor page: choose, edit, preview, download the spec.**
   - Replace the placeholder in `Workbench.tsx` and drop `planned` from
     `nav.ts`. Props `{token, status}` as `RomLibraryPage`.
   - **Base:** a library entry picker (`getRomLibrary`), showing each entry's
@@ -297,6 +382,35 @@ W09.6 is the orchestrator's own, on the ROM machine.
     → preview shows the after values; a refusal reason is rendered; no
     download of image bytes exists (assert no `downloadRomImage` call or
     candidate link). `pnpm typecheck`, `pnpm lint`, `pnpm format` clean.
+  - *Done 2026-10-15, mocked API only* (the W09.2 route was being written in
+    parallel; its real response shape is unreconciled). Files: `lib/romEditor.ts`,
+    `types/romEditor.ts`, `panels/tuning/RomEditorPage.tsx`,
+    `panels/tuning/romEditor/{BasePicker,CellGrid,OperationPanel,PendingEdits,PreviewResult}.tsx`,
+    `api/workbench.ts` (`previewRomEdits` only), `Workbench.tsx`, `nav.ts`.
+    `lib/romEditor.test.ts` 25 tests (12.5 AFR → raw 151 → 12.46; 5 AFR and
+    0.1 AFR refused as `value_out_of_range` before sending; no default
+    rounding; float-noise case 1.1 × 100 = 110; be16 K range; Map 2 refused
+    `slot_not_simulated`; `previewRefusal`; localStorage round trip, corrupt
+    and blocked storage). `RomEditorPage.test.tsx` 15 tests (select by
+    click/shift-click/drag/arrows; scale 2 % nearest → POST body has the exact
+    `cells`, `scale: 1.02`, `rounding: "nearest"` → after table shows 95.31
+    with `+1.7 %` and outline; a server refusal renders by reason; reload
+    keeps pending edits per sha; no `controlBlob` call, no link, the only
+    download button is "Download spec"; the Simulate slot is empty for a
+    matched base and names `base_not_a_recorded_revision` otherwise).
+    `pnpm typecheck`, `pnpm lint` (no suppression changes), `pnpm format:check`
+    clean; 24 related vitest files / 207 tests green.
+    Contract notes for the W09.2 reconciliation: (1) `GET …/tables` sends a
+    decode's `formula`/`kind`/`quantity`/`unit` but not `scale`/`offset`/
+    `numerator`/`mask`, so `lib/romEditor.decodeParams` reads them off the
+    formula when absent (formula prints `:g`, 6 significant digits). Adding the
+    four fields to `rom_image._decode_payload` would remove the parse; the
+    types already accept them. (2) The library page does not keep the sha in
+    the URL (the hash router rewrites anything after `#wb/<page>`), so the
+    editor keeps it in `?rom=<sha>`. (3) The 400 body is read as
+    `{reason, message}` at the top level or under `detail`. (4) Not run: `pnpm
+    e2e` (W09.6 owns `romEditor.spec.ts`); `emptyDaemon.spec.ts` now visits
+    this page because it is no longer `planned`.
 
 - [ ] **W09.4 — Simulate form and results.**
   - **Form** (disabled with the reason unless the base is a matched revision,

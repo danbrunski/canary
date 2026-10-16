@@ -244,6 +244,12 @@ def _decode_payload(decode: Decode | None) -> dict[str, Any] | None:
         "kind": decode.kind,
         "quantity": decode.quantity,
         "unit": decode.unit,
+        # The numbers behind the formula string, so a client inverts an engineering
+        # value exactly rather than parsing a rounded rendering of them (W09.3).
+        "scale": decode.scale,
+        "offset": decode.offset,
+        "numerator": decode.numerator,
+        "mask": decode.mask,
         "confidence": decode.confidence,
         "evidence": decode.evidence,
     }

@@ -66,6 +66,7 @@ from src.dashboard.routes import (
 )
 from src.dashboard.routes.calibration import register_calibration_routes
 from src.dashboard.routes.pairing import register_pairing_routes
+from src.dashboard.routes.rom_editor import register_rom_editor_routes
 from src.dashboard.routes.rom_library import register_rom_library_routes
 from src.dashboard.routes.rom_maps import register_rom_routes
 from src.dashboard.routes.workbench import register_workbench_routes
@@ -319,6 +320,8 @@ def create_app(
         capture_controller=capture_controller,
         publish_control_event=publish_control_event,
     )
+    # After the library: the editor's images are its (app.state.rom_library).
+    register_rom_editor_routes(app, config=config, resolved_control_token=resolved_control_token)
     register_calibration_routes(
         app,
         config=config,

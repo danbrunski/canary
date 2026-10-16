@@ -328,6 +328,12 @@ def test_tables_synthetic_slot_tables_decode_at_their_addresses() -> None:
         trim = _table(payload, trim_id, slot)
         assert (trim["raw"][2][5], trim["decoded"][2][5]) == (0xBD, 0x3D)
         assert trim["decode"]["formula"] == "timing trim = (raw & 0x7F) × 1"
+        # The numbers a client inverts with ride beside the formula string (W09.3).
+        assert trim["decode"]["mask"] == 0x7F and trim["decode"]["scale"] == 1
+        assert (fuel_comp["decode"]["scale"], fuel_comp["decode"]["offset"]) == (
+            pytest.approx(0.78125),
+            0.0,
+        )
     scaler = _table(payload, "load_point_scaler", None)
     assert scaler["raw"] == [[44019]]
     assert scaler["decoded"][0][0] == pytest.approx(21.56931)

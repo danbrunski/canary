@@ -250,9 +250,11 @@ Control endpoints:
 | `PATCH /control/rom/library/{sha}` / `DELETE /control/rom/library/{sha}` | set the label (`{"label": str \| null}`, the only editable field) / remove the entry |
 | `GET /control/rom/library/{sha}/tables` | every mapped table in every map slot: raw cells, decoded cells where a decode is declared, axes, confidence and evidence (W08.4) |
 | `GET /control/rom/compare?a=<sha>&b=<sha>` | changed byte ranges a -> b merged with a 16-byte gap, each labelled with the regions and tables it overlaps; table ranges carry per-cell old/new values, decoded where declared (W08.5) |
+| `POST /control/rom/library/{sha}/edits/preview` | ROM Editor preview (W09.2): body `{label, edits}`, `edits` being E08.1 edit dicts on the fuel chain's Map 1 (`fuel_targets`, `fuel_compensation`, `k_constant`, slot 1). Returns the edit spec (JSON, YAML, sha256), the candidate's sha256, its E08.1 provenance (cells old -> new, changed ranges, reach) and the edited tables' after values. Runs in the thread pool, never deferred; nothing is stored. 404 unknown sha, 409 no map, 400 `edit_refused`, 422 body. See [ROM Editor](#rom-editor-preview-and-simulate-w09). |
+| `POST /control/rom/library/{sha}/simulate` | ROM Editor simulate (W09.2): body is one `SimRequest`, every field required (nothing is defaulted). Runs the edits on a recorded base over a stated rpm x load grid, base vs candidate, paired Monte Carlo draws, aggregated per cell. In the workbench child (job `rom_sim`): `409 analysis_deferred` while a capture records, `409 analysis_busy` while another child runs, `503 analysis_unavailable`; a refusal is `400 sim_refused`; 404 unknown sha, 409 no map, 422 body. Nothing is stored; the candidate never leaves the simulator. See [ROM Editor](#rom-editor-preview-and-simulate-w09). |
 | `GET /control/rom/backup` / `POST /control/rom/backup` / `POST /control/rom/backup/cancel` | ECU flash backup job (W08.7), read-only: state + live preconditions / start (202, or 409 naming every refusing precondition) / cancel a running read (409 when none runs) |
 
-The frame and every `/analysis/*` route in this table (W04) run in the digest's bounded single-flight child and refuse while a capture is recording: `409 {"error": "analysis_deferred", "profile", "message", "laptop_path"}`. A second, different analysis (or a running digest) is `409 analysis_busy`; a child failure is `503 analysis_unavailable`. Calculated load is refused as an axis.
+The frame, every `/analysis/*` route in this table (W04) and the ROM Editor's `simulate` (W09.2) run in the digest's bounded single-flight child and refuse while a capture is recording: `409 {"error": "analysis_deferred", "profile", "message", "laptop_path"}`. A second, different analysis (or a running digest) is `409 analysis_busy`; a child failure is `503 analysis_unavailable`. Calculated load is refused as an axis.
 
 `GET /control/sessions?captures=true` lists only `_capture-*` sessions and
 tags each from its `capture_profile.json` sidecar; the default listing remains
@@ -465,6 +467,160 @@ into the library as `source: ecu_read` with `read_meta`:
                "ecu": "1ZS44A00000", "ok": true}, "reread": {"blocks": 64, "mismatches": []}},
  "revision_match": {"revision": "ZS44A-20260920", "status": "matched", "reference": null}}
 ```
+
+## ROM Editor: preview and simulate (W09)
+
+Two routes under the ROM library, both behind the control token. They edit
+nothing the daemon keeps: no candidate image is stored, added to the library or
+offered for download, and nothing is written (a candidate is `flashable: false`
+with stale checksums on purpose). What a caller keeps is the **edit spec YAML**
+in the preview's `spec_yaml`: reviewable, hashable, and the same input the
+simulator takes on the laptop. A flash stays the Flash page's own, explicit,
+per-operation act. Both routes need a map for the vehicle (`rom_map.yaml`) and
+the vehicle's simulator definitions; without the map they answer `409` with the
+words of `GET .../tables` (`"ROM map definition unavailable for this vehicle:
+..."`), without any other definition `409 "ROM Editor definition unavailable for
+this vehicle: ..."`. An unknown or malformed `{sha}` is `404`, checked before the
+map. Every error body below is FastAPI's `{"detail": <value>}`: `detail` is a
+string for 404/409-no-map, an object with `error` for the named ones, and
+pydantic's list for 422.
+
+**Editable:** the fuel chain, Map 1 only: `fuel_targets`, `fuel_compensation`,
+`k_constant`, `slot: 1` (the slot the ECM runs after a cold boot, the one the
+simulator runs). Anything else is refused by name: `table_not_editable`,
+`slot_not_simulated`. E08.1's refusals keep their names: `no_edits`,
+`duplicate_edit`, `no_op_edit`, `value_out_of_range`, `rounding_undeclared`,
+`rounding_without_scale`, `selector_ambiguous`, `operation_ambiguous`,
+`region_unbounded`, `region_inverted`, `unit_undeclared`, `spec_invalid`, plus
+the image's own (`map_does_not_apply`, `wrong_program`, `patch_missing`).
+
+**Edit** (E08.1 `Edit`, validated by `rom_edit_spec.parse_edit_spec`, never a
+second schema): `{table, slot, <selector>, <operation>}`, one selector of
+`cells: [[row, col], ...]`, `all: true`, or `region: {rpm: [lo, hi], load: [lo,
+hi], units: {rpm: "rpm", load: "%"}}`, and one operation of `set_raw: int`,
+`add_raw: int`, or `scale: float` with `rounding: "nearest" | "floor" | "ceil"`
+(no default rounding). "Set to an engineering value" is inverted to a raw value
+by the client and sent as `set_raw`.
+
+### `POST /control/rom/library/{sha}/edits/preview`
+
+Body (`extra` fields are a 422): `{"label": "light load 2 % richer", "edits": [Edit, ...]}`.
+
+`200`:
+
+```json
+{
+  "tool": "rom_editor", "tool_version": "1",
+  "spec": {"schema_version": 1,
+           "base": {"revision": "ZS44A-20261004", "file": null, "sha256": null},
+           "label": "light load 2 % richer", "edits": [{"table": "fuel_compensation", "slot": 1,
+             "cells": null, "all": null, "region": {"rpm": [1500.0, 3000.0], "load": [20.0, 50.0],
+             "units": {"rpm": "rpm", "load": "%"}}, "set_raw": null, "add_raw": null,
+             "scale": 1.02, "rounding": "nearest"}]},
+  "spec_yaml": "# CANary ROM Editor edit spec (E08.1). ...\nschema_version: 1\nbase: ...",
+  "spec_sha256": "18d1a048...", "candidate_sha256": "dd0c9394...",
+  "provenance": {"tool": "rom_edit_spec", "kind": "simulation_candidate", "flashable": false,
+                 "route": "edit_spec", "label": "...", "base": {"source": "revision", "revision": "...",
+                 "file": "<sha>.bin", "image_sha256": "...", "image_format": "plain", "container_sha256": null},
+                 "base_sha256": "...", "candidate_sha256": "...", "spec_sha256": "...",
+                 "cells": [{"table": "fuel_compensation", "slot": 1, "row": 3, "col": 3,
+                            "address": 919187, "old": 128, "new": 131}],
+                 "ranges": [{"start": 919187, "end": 919239, "byte_class": "consumed",
+                             "nodes": ["fuel_comp_lookup"], "what": ["fuel_compensation (slot 1)"], "changed": 20}],
+                 "effect": {"outcome": "unevaluable", "slot": 1, "slot_source": "default_slot",
+                            "changed_bytes": 20, "changed_nodes": ["fuel_comp_lookup"],
+                            "moved_lookups": [{"node": "target_afr_lookup", "tables": ["fuel_targets", "..."]}],
+                            "rom_effects": {"...": "..."}}},
+  "tables": [ <one entry per edited (table, slot), the candidate's values, in the GET .../tables shape:
+               id, kind, name, label, slot, offset, end, rows, cols, dtype, role, unit, raw, decoded,
+               decode, axes, confidence, evidence, and for fuel_compensation editor_disagreement> ],
+  "sim_base": {"ok": true, "status": "matched", "revision": "ZS44A-20261004", "reason": null}
+}
+```
+
+`spec.base` is `{"revision": R, ...}` when the library entry's `revision_match`
+is `matched` (the YAML then resolves through `tune_revisions.yaml` on any
+machine) and `{"revision": null, "file": "<sha>.bin", "sha256": "<sha>"}`
+otherwise. `provenance.cells` are raw old -> new (decode them from `tables`);
+`effect.changed_nodes` is the reach and `moved_lookups` the other lookups the
+edit moves. `sim_base.ok` is whether a simulate is offered: `false` with
+`reason: "base_not_a_recorded_revision"` unless `revision_match.status` is
+`matched` (a `reference` image, a tuner's base that was never flashed, is not a
+revision); the preview still works.
+
+Errors: `400` `{"detail": {"error": "edit_refused", "kind": "edit_spec" |
+"rom_effect", "reason": "<name above>", "message": "..."}}`; `404`; `409`;
+`422`.
+
+### `POST /control/rom/library/{sha}/simulate`
+
+Body: one `SimRequest`, **every field required** (a missing one is a 422 naming
+it, an unknown one a 422 `extra_forbidden`):
+
+```json
+{"label": "K +5 %", "edits": [Edit, ...],
+ "grid": "fuel_comp",
+ "rpm_edges": [4000.0, 4800.0, 5600.0], "load_edges": [30.0, 60.0, 80.0, 100.0],
+ "load_basis": "fill_fraction_as_manifold_ratio",
+ "baro_kpa": 80.0, "iat_c": 25.0, "coolant_c": 88.0, "battery_v": 14.0,
+ "rail_kpa": "working_assumption", "throttle_pct": 20.0, "pedal_flag": 0,
+ "stft_pct": 0.0, "ltft_pct": 0.0, "throttle_closed_learned": 0.0,
+ "idle_air_learned": 0.0, "evap_purge_area": 0.0,
+ "candidate_events": "none", "draws": 200, "seed": 20261015}
+```
+
+`grid` is `"fuel_comp"` or `"target_afr"` (the aggregation axes). `rpm_edges`
+and `load_edges` are the grid's cell edges (strictly rising; `load_edges` in
+Fuel Comp's load axis units, % of the fill model's ceiling, within 0-100); one
+design point sits at each cell centre. `rail_kpa` is a number or the string
+`"working_assumption"` (the plant's own, said so). `candidate_events` is
+`"none"` (both ROMs start from the same learned state) or `"ecu_reflash"` (the
+flash resets what the contract says it resets on the candidate). `pedal_flag`
+is an integer 0-255, `draws` an integer >= 1 and `seed` an integer >= 0, never
+defaulted. Bounds, refused before any work: `grid_too_large` (more than
+`MAX_GRID_POINTS = 1024` cells) and `draws_too_many` (more than `MAX_DRAWS =
+2000`). The base must be a recorded revision (`base_not_a_recorded_revision`).
+
+`200`: `{"tool": "rom_editor", "tool_version": "1", "label": "simulation",
+"synthetic": bool, "caveats": [...] (the result's, first, unchanged),
+"assumptions": [...], "unresolved": [...], "inert_parameters": [...],
+"coverage": {output: share}, "outcome": str, "learned_state": {...},
+"provenance": {hashes, plant_version, seed, draws, candidate_events, ...},
+"design": {points, weight, base_revision, ..., "grid": {rpm_edges, load_edges,
+load_axis, load_unit, load_basis, environment}, "assumptions": [...]},
+"candidate": <the preview's provenance>, "cells": <CellTable>, "spec_yaml":
+str, "spec_sha256": str}`. Note `label` here is the result's, the request's is
+`candidate.label`. `cells` is `sim_cells.CellTable.to_dict()` (E08.4;
+`schema_version: 1`, JSON Schema from `sim_cells.cell_table_schema()`): `grid`,
+`table`, `slot`, `rows` / `cols` axis info (`raw`, `breakpoints`, `values`,
+`unit`), `reach`, `caveats`, `unresolved`, `status_counts`, `overlay`
+(`edited_cells`, `axis_edits`, `other_edits`, `moved_lookups`), `unplaced`,
+`headline_by_loop`, the hashes, and `cells`: **every** table cell, row-major
+(256 for Fuel Comp), each `{row, col, row_value, col_value, n_points, pairs,
+weight, regime_shares, loop_shares, outputs: {name: {status, pairs,
+supported_share, unsupported_share, support[], quantiles {over, pairs, weight,
+delta {p05, p50, p95}, relative_delta, relative_undefined_pairs} | null,
+changed_share, supported_effect}}, by_loop[], edited, row_axis_moved,
+col_axis_moved}`. A cell nobody visited has `pairs: 0` and is not
+`unchanged`. A 16 x 16 table with six points measured about 370 KB of JSON on
+the synthetic image.
+
+Errors (each a `{"detail": ...}`):
+
+| Status | `detail` | When |
+|---|---|---|
+| `400` | `{"error": "sim_refused", "kind": "edit_spec" \| "rom_effect" \| "sim_design" \| "simulation", "reason": "...", "message": "..."}` | the child refused: any edit reason above, `grid_edges_invalid`, `load_outside_model`, `grid_too_large`, `draws_too_many`, `base_not_a_recorded_revision`, `uncertainty_missing`, `image_hash_mismatch` / `image_not_found` (the library changed under the request) |
+| `404` | `"no ROM library entry '<sha>'"` | unknown or malformed sha |
+| `409` | `"ROM map definition unavailable for this vehicle: ..."` | no map |
+| `409` | `{"error": "analysis_deferred", "reason": "capture_active", "profile", "message", "laptop_path"}` | a capture is recording (`laptop_path` says to download the image and run the spec on the laptop) |
+| `409` | `{"error": "analysis_busy", "reason": "child_busy" \| "brain_child_yielding", "message"}` | another analysis, digest or brain child is running; an identical request already in flight is shared instead |
+| `422` | pydantic's list | a missing, unknown or mistyped body field |
+| `503` | `{"error": "analysis_unavailable", "reason": "child_timed_out" \| "child_failed" \| "child_out_of_memory", "message"}` | the child did not finish (900 s), died, or hit its address-space ceiling |
+
+A refusal raised inside the child crosses the process boundary as data
+(`src.analysis.rom_editor.run_job` returns `{"refused": {...}}`): the
+simulator's refusal classes do not survive pickling, and one raised out of a
+`spawn` child would arrive as `503 child_failed`.
 
 ## WebSockets
 

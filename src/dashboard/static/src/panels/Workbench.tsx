@@ -68,6 +68,7 @@ import { AnalysisPage } from "./tuning/AnalysisPage";
 import { LoggingPage } from "./tuning/LoggingPage";
 import { LogsPage } from "./tuning/LogsPage";
 import { CalibrationPage } from "./tuning/CalibrationPage";
+import { RomEditorPage } from "./tuning/RomEditorPage";
 import { RomLibraryPage } from "./tuning/RomLibraryPage";
 import { TuningContextBar } from "./tuning/TuningContextBar";
 
@@ -305,13 +306,7 @@ function renderItem(
     case "tuning-calibration":
       return <CalibrationPage token={d.token} status={d.status} />;
     case "tuning-rom-editor":
-      return (
-        <PlaceholderPanel
-          title="ROM Editor"
-          task="planned"
-          summary="ROM editing is reserved for a later implementation."
-        />
-      );
+      return <RomEditorPage token={d.token} status={d.status} />;
     case "tuning-flash":
       return (
         <PlaceholderPanel

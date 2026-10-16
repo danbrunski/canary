@@ -26,7 +26,7 @@ export const NAV: NavGroupDef[] = [
       { id: "tuning-rom-maps", label: "ROM Maps", group: "tuning" },
       { id: "tuning-rom-library", label: "ROM Library", group: "tuning" },
       { id: "tuning-calibration", label: "Calibration", group: "tuning" },
-      { id: "tuning-rom-editor", label: "ROM Editor", group: "tuning", planned: true },
+      { id: "tuning-rom-editor", label: "ROM Editor", group: "tuning" },
       { id: "tuning-flash", label: "Flash", group: "tuning", planned: true },
     ],
   },

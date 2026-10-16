@@ -80,11 +80,14 @@ JOB_KINDS = (
     # writes (the classification + fingerprint sidecars); it needs neither
     # the bindings nor the DID catalog.
     "classify",
+    # W09.2: the ROM Editor's simulate (POST /control/rom/library/{sha}/simulate).
+    # It reads a ROM Library image, not a session, and writes nothing.
+    "rom_sim",
 )
 
 #: Kinds that compute from the session and ``config`` alone, without the
 #: profile's workbench inputs.
-_CONFIG_ONLY_KINDS = frozenset({"classify"})
+_CONFIG_ONLY_KINDS = frozenset({"classify", "rom_sim"})
 
 
 class WorkbenchRefusedError(Exception):
@@ -311,6 +314,15 @@ def run_workbench_job(
         from src.control.classification import classify_and_write
 
         return classify_and_write(config, str(params["session_id"]))
+    if kind == "rom_sim":
+        # Refusals come back as data ({"refused": ...}): the simulator's
+        # refusal classes do not survive pickling out of this child. The grid
+        # design names its base revision in the flash history the library
+        # matched the image against (tracked + dashboard-recorded), not only
+        # the tracked file the design would otherwise read.
+        from src.analysis.rom_editor import run_job
+
+        return run_job(kind, params, registry=active_registry(config))
     if bindings_path is None or dids_path is None:
         raise ValueError(f"workbench job {kind!r} needs bindings_path and dids_path")
     inputs = workbench_inputs(config, bindings_path=bindings_path, dids_path=dids_path)

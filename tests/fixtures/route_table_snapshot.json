@@ -1158,6 +1158,22 @@
     },
     {
       "auth": "control",
+      "body": true,
+      "method": "POST",
+      "path": "/control/rom/library/{sha}/edits/preview",
+      "query": [],
+      "status_code": null
+    },
+    {
+      "auth": "control",
+      "body": true,
+      "method": "POST",
+      "path": "/control/rom/library/{sha}/simulate",
+      "query": [],
+      "status_code": null
+    },
+    {
+      "auth": "control",
       "body": false,
       "method": "GET",
       "path": "/control/rom/library/{sha}/tables",

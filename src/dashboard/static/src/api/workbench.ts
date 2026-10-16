@@ -21,6 +21,7 @@ import type {
   VerifyMemoryRequest,
   VerifyMemoryResponse,
 } from "../types/workbench";
+import type { RomEditPreview, RomEditPreviewRequest } from "../types/romEditor";
 import type {
   RomBackupState,
   RomCompareResponse,
@@ -222,6 +223,25 @@ export function getRomDescription(token: string, sha: string, signal?: AbortSign
 /** `GET /control/rom/library/{sha}/tables` — every table, every slot. */
 export function getRomTables(token: string, sha: string, signal?: AbortSignal) {
   return controlJson<RomTablesResponse>(`${librarySha(sha)}/tables`, token, { signal });
+}
+
+/** `POST /control/rom/library/{sha}/edits/preview` — the edits applied to the
+ *  image in memory (W09). Answers the spec, its YAML, the candidate's hash
+ *  and the edited tables; never the candidate's bytes. A refusal is a 400
+ *  `{error: "edit_refused", reason, message}`. */
+export async function previewRomEdits(
+  token: string,
+  sha: string,
+  request: RomEditPreviewRequest,
+  signal?: AbortSignal,
+) {
+  const path = `${librarySha(sha)}/edits/preview`;
+  const body = await controlJson<RomEditPreview>(path, token, {
+    method: "POST",
+    body: jsonBody(request),
+    signal,
+  });
+  return requireFields(path, body, ["spec_yaml", "provenance", "tables", "sim_base"]);
 }
 
 /** `PATCH /control/rom/library/{sha}` — the label is the only mutable field;
