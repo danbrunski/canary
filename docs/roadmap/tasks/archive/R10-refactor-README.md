@@ -1,5 +1,9 @@
 # R10 — Refactor review and implementation order, 2026-10-14
 
+**Closed 2026-10-15: R11–R21 are all implemented, verified and archived.**
+The index below is kept as the record; the boxes in each archived file are
+the source of truth.
+
 This set implements the October 14 codebase review. It covers the nine main
 findings and both secondary candidates, behavior validation and configuration.
 The review inventoried source size, inspected dependency graphs and repeated
@@ -16,17 +20,17 @@ import-time exception. Deliberately lazy backend registries are not targets.
 
 | Task | Outcome | Size / risk | Prerequisite |
 |---|---|---|---|
-| [R11](archive/R11-explicit-time-lookup.md) | Shared previous, nearest and bracket lookup with explicit semantics | S–M / numerical | none |
-| [R12](archive/R12-library-replay.md) | Library replay no longer imports a CLI | S–M / offline scoring | none |
-| [R13](archive/R13-preprocessing-boundaries.md) | Readers, transforms and orchestration have one dependency direction | L / data ordering and memory | none |
-| [R14](archive/R14-feature-pipeline.md) | Feature assembly separated into cohesive modules | L / training and serving | R13 before loading moves |
-| [R15](archive/R15-detector-evaluation.md) | Library scoring and a phased evaluation CLI | L / scoring, cache and spawn | R14 before feature caller migration |
-| [R16](archive/R16-dyno-modules.md) | Separate dyno contracts, calibration, power, comparison and persistence | M–L / numerical | none |
-| [R17](archive/R17-recipe-definitions.md) | Recipe definitions independent of the fitting engine | M / artifact contracts | before R20 refit caller migration |
-| [R18](archive/R18-memory-burst-scheduler.md) | Burst planning and accounting have one owner | L / collection timing | none |
-| [R19](archive/R19-dashboard-page-modules.md) | Logs and Analysis pages composed from focused views | M / UI behavior | none |
-| [R20](archive/R20-behavior-validation.md) | Validation schema, pairing, evaluation, metrics and evidence separated | L / evidence and publication | R17; coordinate with R15 |
-| [R21](archive/R21-config-schemas.md) | Configuration schemas organized behind compatible imports | M–L / broad import surface | last, after overlapping moves |
+| [R11](R11-explicit-time-lookup.md) | Shared previous, nearest and bracket lookup with explicit semantics | S–M / numerical | none |
+| [R12](R12-library-replay.md) | Library replay no longer imports a CLI | S–M / offline scoring | none |
+| [R13](R13-preprocessing-boundaries.md) | Readers, transforms and orchestration have one dependency direction | L / data ordering and memory | none |
+| [R14](R14-feature-pipeline.md) | Feature assembly separated into cohesive modules | L / training and serving | R13 before loading moves |
+| [R15](R15-detector-evaluation.md) | Library scoring and a phased evaluation CLI | L / scoring, cache and spawn | R14 before feature caller migration |
+| [R16](R16-dyno-modules.md) | Separate dyno contracts, calibration, power, comparison and persistence | M–L / numerical | none |
+| [R17](R17-recipe-definitions.md) | Recipe definitions independent of the fitting engine | M / artifact contracts | before R20 refit caller migration |
+| [R18](R18-memory-burst-scheduler.md) | Burst planning and accounting have one owner | L / collection timing | none |
+| [R19](R19-dashboard-page-modules.md) | Logs and Analysis pages composed from focused views | M / UI behavior | none |
+| [R20](R20-behavior-validation.md) | Validation schema, pairing, evaluation, metrics and evidence separated | L / evidence and publication | R17; coordinate with R15 |
+| [R21](R21-config-schemas.md) | Configuration schemas organized behind compatible imports | M–L / broad import surface | last, after overlapping moves |
 
 Size is a relative planning estimate, not a promised duration. The two final
 items are lower priority than the first nine. Counts in the individual files
@@ -41,7 +45,7 @@ are review snapshots; locate code by symbol, not historical line number.
 5. R18 and R19: collector scheduling and dashboard view decomposition.
 6. R20, then R21: lower-priority broad splits after their callers settle.
 
-This order does not modify [OVERNIGHT-QUEUE.md](../OVERNIGHT-QUEUE.md).
+This order does not modify [OVERNIGHT-QUEUE.md](../../OVERNIGHT-QUEUE.md).
 Writing these plans is not evidence that any implementation has landed.
 
 ## Shared implementation and acceptance rules
@@ -92,7 +96,7 @@ Writing these plans is not evidence that any implementation has landed.
 
 ## Decisions carried forward
 
-Read [R00](archive/R00-refactor-README.md) and the affected archived task before
+Read [R00](R00-refactor-README.md) and the affected archived task before
 changing its boundary. In particular:
 
 - `isolation_forest.py` is not a whole-file split target.
