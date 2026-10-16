@@ -21,6 +21,7 @@ exit status; the library never prints or exits. Extracted from
 
 from __future__ import annotations
 
+import functools
 import json
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
@@ -57,6 +58,15 @@ class EvaluationRefusedError(Exception):
         super().__init__("; ".join(lines))
         self.lines = tuple(lines)
         self.exit_code = exit_code
+
+    def __reduce__(self) -> tuple[object, ...]:
+        # Rebuilt from its constructor's arguments, so it survives a process
+        # boundary (pickle); tests/test_exceptions_pickle.py holds every class to it.
+        return (
+            functools.partial(type(self), exit_code=self.exit_code),
+            (self.lines,),
+            self.__dict__,
+        )
 
 
 @dataclass(frozen=True)

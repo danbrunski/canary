@@ -181,6 +181,11 @@ class SimDesignRefusalError(ValueError):
         super().__init__(f"{reason}: {message}")
         self.reason = reason
 
+    def __reduce__(self) -> tuple[object, ...]:
+        # Rebuilt from its constructor's arguments, so it survives a process
+        # boundary (pickle); tests/test_exceptions_pickle.py holds every class to it.
+        return (type(self), (self.reason, str(self)[len(self.reason) + 2 :]), self.__dict__)
+
 
 class _Strict(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)

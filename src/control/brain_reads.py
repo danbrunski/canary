@@ -62,6 +62,11 @@ class BrainReadError(Exception):
         self.status = status
         self.detail = detail
 
+    def __reduce__(self) -> tuple[object, ...]:
+        # Rebuilt from its constructor's arguments, so it survives a process
+        # boundary (pickle); tests/test_exceptions_pickle.py holds every class to it.
+        return (type(self), (self.status, self.detail), self.__dict__)
+
 
 def _ledger(config: CanaryConfig) -> MemoryLedger:
     try:

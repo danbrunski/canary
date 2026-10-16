@@ -263,6 +263,11 @@ class RegistryConflictError(ValueError):
         self.paths = (first, second)
         self.fields = fields
 
+    def __reduce__(self) -> tuple[object, ...]:
+        # Rebuilt from its constructor's arguments, so it survives a process
+        # boundary (pickle); tests/test_exceptions_pickle.py holds every class to it.
+        return (type(self), (self.revision, *self.paths, self.fields), self.__dict__)
+
 
 def _aware(moment: datetime) -> datetime:
     return moment if moment.tzinfo is not None else moment.replace(tzinfo=UTC)

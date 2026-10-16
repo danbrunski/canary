@@ -125,6 +125,11 @@ class TripEndDigestUnavailableError(RuntimeError):
         super().__init__(message)
         self.reason = reason
 
+    def __reduce__(self) -> tuple[object, ...]:
+        # Rebuilt from its constructor's arguments, so it survives a process
+        # boundary (pickle); tests/test_exceptions_pickle.py holds every class to it.
+        return (type(self), (self.reason, str(self)), self.__dict__)
+
 
 def limit_address_space(nbytes: int) -> tuple[int, int]:
     """Cap this process's address space at ``nbytes`` and return the limit.

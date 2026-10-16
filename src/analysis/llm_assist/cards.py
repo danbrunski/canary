@@ -317,6 +317,11 @@ class EvidenceResolutionError(ValueError):
         super().__init__("; ".join(problems))
         self.problems = problems
 
+    def __reduce__(self) -> tuple[object, ...]:
+        # Rebuilt from its constructor's arguments, so it survives a process
+        # boundary (pickle); tests/test_exceptions_pickle.py holds every class to it.
+        return (type(self), (self.problems,), self.__dict__)
+
 
 @dataclass(frozen=True)
 class CardResolution:

@@ -121,6 +121,11 @@ class CommandChangeRefusalError(ValueError):
         self.reason = reason
         self.message = message
 
+    def __reduce__(self) -> tuple[object, ...]:
+        # Rebuilt from its constructor's arguments, so it survives a process
+        # boundary (pickle); tests/test_exceptions_pickle.py holds every class to it.
+        return (type(self), (self.reason, self.message), self.__dict__)
+
 
 @dataclass(frozen=True)
 class ProposedChange:

@@ -33,6 +33,7 @@ cannot carry the tolerance it asked for.
 
 from __future__ import annotations
 
+import functools
 from dataclasses import dataclass
 from typing import Literal
 
@@ -84,6 +85,11 @@ class InputNotCapturedError(ComparisonRefusedError):
     def __init__(self, message: str, *, spec: str) -> None:
         super().__init__(message)
         self.spec = spec
+
+    def __reduce__(self) -> tuple[object, ...]:
+        # Rebuilt from its constructor's arguments, so it survives a process
+        # boundary (pickle); tests/test_exceptions_pickle.py holds every class to it.
+        return (functools.partial(type(self), spec=self.spec), (str(self),), self.__dict__)
 
 
 @dataclass(frozen=True)

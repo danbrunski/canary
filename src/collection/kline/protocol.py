@@ -161,6 +161,11 @@ class NegativeResponseError(Exception):
         name = NEGATIVE_RESPONSE_CODES.get(code, "unknown")
         super().__init__(f"ECU refused service 0x{service:02x}: NRC 0x{code:02x} ({name})")
 
+    def __reduce__(self) -> tuple[object, ...]:
+        # Rebuilt from its constructor's arguments, so it survives a process
+        # boundary (pickle); tests/test_exceptions_pickle.py holds every class to it.
+        return (type(self), (self.service, self.code), self.__dict__)
+
 
 # --------------------------------------------------------------------------- frames
 

@@ -56,6 +56,11 @@ class UpRevNegativeResponseError(UpRevSessionError):
         self.payload = payload
         super().__init__(f"negative response to 0x{service:02x}: NRC 0x{code:02x}")
 
+    def __reduce__(self) -> tuple[object, ...]:
+        # Rebuilt from its constructor's arguments, so it survives a process
+        # boundary (pickle); tests/test_exceptions_pickle.py holds every class to it.
+        return (type(self), (self.service, self.code, self.payload), self.__dict__)
+
 
 @dataclass(frozen=True)
 class UpRevBootstrapResult:

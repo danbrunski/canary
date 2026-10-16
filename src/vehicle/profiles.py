@@ -355,6 +355,11 @@ class ProfileEditError(ValueError):
         super().__init__(message)
         self.field = field
 
+    def __reduce__(self) -> tuple[object, ...]:
+        # Rebuilt from its constructor's arguments, so it survives a process
+        # boundary (pickle); tests/test_exceptions_pickle.py holds every class to it.
+        return (type(self), (self.field, str(self)), self.__dict__)
+
 
 class EvidenceRequiredError(ProfileEditError):
     """A vehicle fact changed without new evidence for it."""
