@@ -104,6 +104,15 @@ acceptance runs on the real images.
   (2026-10-15), so the page also says that until E08.7 is ticked. W09.6 is
   where they are first run through this path.
 
+- **Simulate is not gated on a preview (operator, 2026-10-16; do not re-open).**
+  The Simulate form needs only the pending edits, so it stays offered whether or
+  not the operator has previewed them. The limits block (`levers.messages`,
+  W09.10) sits above Simulate in the normal flow, and every result's own
+  caveats state the same limits after the run (plant not qualified, closed
+  loop, working assumptions). Gating Simulate on an "ok" preview was the
+  alternative and was declined: it would change the W09.4 flow for a limit the
+  result already carries.
+
 ## File ownership (for parallel implementation)
 
 | Item | New files | May edit |
