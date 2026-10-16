@@ -19,14 +19,14 @@ self-contained report. It reproduces known answers first (negative control,
 K +5 %, the 10-04 Fuel Comp restore on the real images) and states that the
 plant is unqualified and structural error unsampled on every result.
 
-**Status 2026-10-14: R11–R21, the next refactor checklists.**
-[`R10-refactor-README.md`](R10-refactor-README.md) indexes eleven implementation
-plans from the October 14 review: explicit time lookup, library replay,
+**Status 2026-10-15: R11–R21 implemented and archived.**
+[`R10-refactor-README.md`](archive/R10-refactor-README.md) indexes eleven refactor
+checklists from the October 14 review: explicit time lookup, library replay,
 preprocessing dependencies, feature assembly, detector evaluation, dyno,
 recipe definitions, collector burst scheduling, dashboard pages, behavior
-validation, and configuration schemas. Each plan specifies preserved contracts,
-caller migration, verification, and acceptance evidence. All implementation
-items start unchecked; this set does not change the overnight queue.
+validation, and configuration schemas. Every box is ticked with evidence, each
+landed as one commit that also moved its file to [`archive/`](archive/), and
+each is a pure move: behaviour pinned by goldens captured from the pre-move code.
 
 **Status 2026-10-13: sixteen finished checklists archived.** D05, P01,
 R01–R09, S03, W05 and W08 had every box ticked; they moved to

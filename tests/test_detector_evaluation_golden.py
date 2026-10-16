@@ -317,7 +317,22 @@ def _markdown(path: Path, run: Path) -> list[str] | None:
 
 
 def run_all(base: Path) -> dict[str, Any]:
-    """The pinned runs, reduced to JSON-able data (works against the pre-split script too)."""
+    """The pinned runs, reduced to JSON-able data (works against the pre-split script too).
+
+    ``afr`` warns about each withheld-target reason once per process. The pinned log-line
+    count was taken in a fresh process, so a worker that already ran another test would
+    log one line fewer; this run starts from, and leaves, an empty record."""
+    from src.signals import afr
+
+    saved = afr._logged_refusals
+    afr._logged_refusals = set()
+    try:
+        return _run_all(base)
+    finally:
+        afr._logged_refusals = saved
+
+
+def _run_all(base: Path) -> dict[str, Any]:
     from scripts.evaluate_detectors import DriveScorer, main
     from tests.pinned_checkout_harness import pin_in_process
 
