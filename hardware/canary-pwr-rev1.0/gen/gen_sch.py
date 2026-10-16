@@ -350,6 +350,18 @@ def assign_refs(libs, parts):
             p["ref"] = f"{pre}{counters[pre]}"
 
 
+def kicad_net_names(parts):
+    """Design net -> the name KiCad gives it. A net on more than one sheet gets global labels and
+    keeps its bare name (+12V_BUS); a net on one sheet gets local labels, which KiCad prefixes with
+    the sheet path (/Holdup/VCAP). Net-class patterns must use these names."""
+    sheets = defaultdict(set)
+    for p in parts:
+        for net in p["pins"].values():
+            if net:
+                sheets[net].add(p["sheet"])
+    return {n: n if len(s) > 1 else f"/{next(iter(s))}/{n}" for n, s in sheets.items()}
+
+
 def main(projdir):
     libs = Libs(projdir)
     parts = design.PARTS
@@ -375,8 +387,10 @@ def main(projdir):
                 f"{p['ref']} {p['lib_id']}: unmapped pins {sorted(missing)} unknown {sorted(extra)}"
             )
 
+    net_names = kicad_net_names(parts)
+
     def label_kind(net):
-        return "global" if len(net_sheets[net]) > 1 else "local"
+        return "local" if net_names[net].startswith("/") else "global"
 
     flag_nets = sorted(
         n for n, ts in net_types.items() if "power_in" in ts and "power_out" not in ts
