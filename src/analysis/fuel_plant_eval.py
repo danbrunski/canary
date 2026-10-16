@@ -96,6 +96,18 @@ STATES: tuple[str, ...] = (
     MAP_ABOVE_AMBIENT,
     "eligible",
 )
+#: The columns every plant sample needs; a read missing any is ``missing_input``.
+PLANT_SAMPLE_INPUTS: tuple[str, ...] = (
+    "rpm",
+    "maf_gps",
+    "lambda_obs",
+    "baro_kpa",
+    "iat_c",
+    "coolant_c",
+    "ecu_dead_time_ms",
+)
+#: The fast partners: a pulse read with none of them is ``not_co_observed``.
+CO_OBSERVED_INPUTS: tuple[str, ...] = ("rpm", "maf_gps", "lambda_obs")
 #: MAF bands for coverage, g/s.
 MAF_BANDS: tuple[float, ...] = (0.0, 5.0, 10.0, 20.0, 40.0, 80.0, math.inf)
 
@@ -317,7 +329,7 @@ def build_samples(
             & (pn >= rule.min_pulse_reads)
         )
     effective = pulse.values - frame["ecu_dead_time_ms"].to_numpy()
-    needed = ["rpm", "maf_gps", "lambda_obs", "baro_kpa", "iat_c", "coolant_c", "ecu_dead_time_ms"]
+    needed = list(PLANT_SAMPLE_INPUTS)
     missing = ~np.all(np.isfinite(frame[needed].to_numpy(dtype=float)), axis=1)
     lam = frame["lambda_obs"].to_numpy()
     lam_edges = np.fmax(frame["lambda_obs_lo"].to_numpy(), frame["lambda_obs_hi"].to_numpy())
@@ -334,7 +346,7 @@ def build_samples(
         # polled Mode 22 and Mode 01 apart (session 0xC0), not a gap in one input.
         (
             "not_co_observed",
-            ~np.isfinite(frame[["rpm", "maf_gps", "lambda_obs"]].to_numpy(dtype=float)).any(axis=1),
+            ~np.isfinite(frame[list(CO_OBSERVED_INPUTS)].to_numpy(dtype=float)).any(axis=1),
         ),
     ]
     for name, mask in checks:  # last assignment wins, so STATES order is precedence

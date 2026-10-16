@@ -206,8 +206,74 @@ Pi; E09.13 Light. Items marked **listing** need the firmware session
     eligible, RAM window `output_not_captured`; X `output_not_captured`; φ 1,078,
     0 eligible: `input_not_captured` 927 (X, flag and the three identity
     channels never polled), `outside_model` 151; pulse 655 eligible.
-    Remaining for E09.2: 2b (plant stages, `na-stock-2026-10-05.1` numbers),
-    2c (`run_paired` on it, `cmp_head` equality).
+  - [x] **2b — plant stages (2026-10-16).** `run_twin` runs
+    `delivered_lambda` (observed `obd:O2_WR_LAMBDA_S1` at B06's 0.10 s via
+    `build_samples`), `fuel_per_event` and `manifold_pressure` after the four
+    ECU stages, on the pulse stage's own `build_samples` frame (built once,
+    `TwinRun.samples`; one sample source). Kernel `fuel_plant.predict` on the
+    reads `apply_manifold_refusals` leaves `eligible`. **Plant version named,
+    never defaulted (orchestrator decision):** `load_twin_kit` and `run_twin`
+    take `plant_version` with no default; `None` refuses `plant_version_missing`,
+    a kit with another plant `plant_version_mismatch`; the simulator's is
+    `sim_kit.sim_plant_version()`. State → kind: `transient`, `post_fuel_cut`,
+    `cold` → `gated`; `fuel_cut`, `lambda_rail`, `short_pulse`,
+    `outside_ve_fit`, `manifold_above_ambient` → `outside_model`;
+    `missing_input`, `not_co_observed` → `input_not_captured` when a missing
+    input was never read in the run, else `not_co_sampled`; no frozen baseline
+    → `calibration_unresolved:plant:<reason>`. Fuel and MAP predictions are
+    the new kind `unobserved`, never `eligible`; a run with no pulse read says
+    `input_not_captured:did:ECM_INJECTOR_PULSE_1` for each plant output.
+    `RUNNER_VERSION` 2. `test_every_state_the_plant_names_classifies`
+    enumerates `fuel_plant_eval.STATES` (and the check names in
+    `build_samples`' source, and the manifold refusals in `fuel_plant`).
+    Seam: `fuel_plant_eval.PLANT_SAMPLE_INPUTS` / `CO_OBSERVED_INPUTS` (the
+    `missing_input` / `not_co_observed` column lists, now named); CLI
+    `identify` mv1/mv2, `compare` mv1 mv2 and `chain`, and `evaluate` +
+    `build_samples` on the seven drives (scratch profile), all `cmp`-identical
+    to HEAD. `twin_runner.identify_plant(runs, kit, sessions_root=)` =
+    `identify` on the runs' samples (VE(rpm) fitted first, as the CLI does).
+    **Reproduced, through the runner and the evaluator in the same test**
+    (`-m "slow or not slow"`, 32 runner tests green):
+    `identify_plant` JSON == `tools.fuel_plant_check identify --plant-version
+    fuel-mv-1` stdout, byte for byte: s 0.051063, interval 0.050591–0.051501,
+    766 samples, 89 regions, in-sample |err| p90 12.17 %, region pass 0.584,
+    null λ≡1 3.35 %; fuel-mv-2 likewise: s 0.050792, 0.050357–0.051198, 764,
+    89, 2 `manifold_above_ambient`, in-sample p90 11.61 %, pass 0.618.
+    Per record, the runner's eligible λ reads, observed and predicted, equal
+    `predict` on the evaluator's eligible rows. **Held out (fuel-mv-1,
+    nothing spent: `evaluate` only on a `tmp_path` copy of the profile, real
+    `fuel_plant*.yaml` sha-checked unchanged):** the runner's per-record
+    errors give `evaluate`'s `lambda` stats and MAF-band table exactly — 845
+    reads, 137 regions, pooled median +1.69 %, |err| p90 11.7 %, pass 0.62,
+    null 2.33 %, per drive +4.96/+0.69/+1.79 %, bands 614 +1.70 / 24 +1.04 /
+    14 +22.2 / 25 +7.0 / 157 +0.85 / 11 −0.55 %; RAM study 0 eligible, by kind.
+    **fuel-mv-2 against fuel-mv-1, per sample:** both runs' records on the
+    same pulse reads reproduce `compare_versions` exactly (stats per version,
+    change summaries and per-band changes): 1,490 common reads, mv2 refuses
+    117 `outside_ve_fit` + 4 `manifold_above_ambient`; in-sample 764/89, p90
+    12.01 → 11.61 %, pass 0.573 → 0.618; spent 726/101, p90 11.74 → 12.21 %,
+    pass 0.564 → 0.554; per-record errors equal `predict` on compare's rows.
+    Kernel mutation (`fuel_plant.flow_factor` ×1.1) moves runner and
+    `_errors` identically. **Verifier FAIL, fixed:** a dead time is captured
+    only if `build_samples` could derive one (PID 0x42 read, or the run has
+    fuel-cut pulse reads), in the pulse stage's `_pulse_kind` and the plant
+    alike (`_input_captured`). Before the fix, any `COMMANDED_EQUIV_RATIO`
+    read made it `not_co_sampled`. Test
+    `test_a_dead_time_nothing_could_derive_is_not_captured`: the slice minus
+    its 196 `COMMANDED_EQUIV_RATIO == 0` reads gives `dead_time_source`
+    none ×1596 and `missing_input`/`input_not_captured` ×1596. Corpus
+    unaffected: the six tuning captures carry 58–361 fuel-cut reads each and
+    the RAM study 548 PID 0x42 reads, so 0 reads change kind, and the slow
+    pins re-ran green (89 passed). **Limits, noted:** `identify_plant` fits
+    VE(rpm) on each whole recording (`ve_samples`), even for a bounded window;
+    the enumerating test finds `MAP_*` refusals by the `reason[...] = MAP_*`
+    pattern, so one written as `np.where(...)` would escape it (it would
+    still refuse at run time as `reason_unclassified`); capture is not
+    time-aware here (a spec read only before the first pulse read counts as
+    captured, so the kind is `not_co_sampled`), unlike target phi's
+    `captured_by`. Open for 2c: the paired comparison feeds stated
+    (predicted) pulses, not observed ones, into the same plant stage.
+    Remaining for E09.2: 2c (`run_paired` on it, `cmp_head` equality).
 
 - [ ] **E09.3 — Stateful ECU replay at the tick.**
   The airflow pipeline (`w20A8` low-pass, `L20AC`, `w1056`, the `w273E`

@@ -46,9 +46,22 @@ What it makes impossible rather than documented:
   relation), or whose ``implemented_by`` names another kernel, refuses
   (``stage_role_changed``, ``kernel_mismatch``): the runner cannot run a
   kernel the model has moved on from.
-* **ECU outputs only, here.** BFS, X, the target-phi word and the injector
-  pulse word depend on decoded integer logic, not on the plant. The plant
-  stages (E09.2b) and the paired comparison as a caller (E09.2c) are not here.
+* **ECU outputs first, then the plant, on the same samples.** BFS, X, the
+  target-phi word and the injector pulse word depend on decoded integer logic,
+  not on the plant. The plant stages (E09.2b: delivered lambda against PID
+  0x24 at B06's delay, fuel per event, MAP from the plant's manifold model)
+  run after them on the pulse stage's own samples
+  (``fuel_plant_eval.build_samples``, built once per run and kept as
+  :attr:`TwinRun.samples`): one sample source, never a second pairing.
+* **The plant is named, never defaulted.** :func:`load_twin_kit` and
+  :func:`run_twin` take ``plant_version`` with no default (E07.3's pins are
+  fuel-mv-1, the simulator's plant is ``sim_kit.sim_plant_version()``);
+  ``None`` refuses ``plant_version_missing`` and a kit carrying another plant
+  refuses ``plant_version_mismatch``. Every state the plant can name
+  (``fuel_plant_eval.STATES``) maps to an empty kind, or the run refuses.
+  Fuel per event and MAP have no observation on this hardware: their
+  predictions are ``unobserved``, a kind, never ``eligible``.
+* **The paired comparison as a caller (E09.2c) is not here.**
 
 Nothing here, or anything it imports, can reach the ECU
 (``tests/test_twin_runner.py``'s clean-process import test).
@@ -85,18 +98,29 @@ from src.analysis.ecu_application import (
     observed_specs,
 )
 from src.analysis.fuel_plant import (
+    MAP_ABOVE_AMBIENT,
+    MAP_OUTSIDE_VE_FIT,
     B06Rules,
     FuelPlantProfile,
     FuelPlantRefusalError,
     load_b06,
     load_fuel_plant,
+    predict,
+    resolve_parameters,
 )
 from src.analysis.fuel_plant_eval import (
+    PLANT_SAMPLE_INPUTS,
     PULSE_CHAIN_INPUTS,
+    STATES,
+    apply_manifold_refusals,
     build_samples,
     calibration_from_image,
+    identify,
+    identify_ve,
+    plant_inputs,
     pulse_chain_ratios,
     pulse_chain_states,
+    ve_samples,
 )
 from src.analysis.injector_pulse import PULSE_COUNT_MS, PulseChainCalibration
 from src.analysis.rom_effects import LoadedRom
@@ -118,10 +142,13 @@ from src.paths import DIDS_YAML
 from src.preprocessing.loader import read_session
 from src.signals.pairing import PairingPolicy, match_ordered
 
-#: Bumped when a stage, the order, a state or the record shape changes.
-RUNNER_VERSION = 1
+#: Bumped when a stage, the order, a state or the record shape changes
+#: (2: the plant stages, E09.2b).
+RUNNER_VERSION = 2
 
 #: The kinds an unevaluable sample can be, in the order a report lists them.
+#: ``unobserved``: the plant predicted the quantity, and nothing on this
+#: hardware measures it (fuel per event; MAP on the NA engine).
 EmptyKind = Literal[
     "input_not_captured",
     "not_co_sampled",
@@ -129,6 +156,7 @@ EmptyKind = Literal[
     "outside_model",
     "calibration_unresolved",
     "pending",
+    "unobserved",
 ]
 EMPTY_KINDS: tuple[EmptyKind, ...] = (
     "input_not_captured",
@@ -137,6 +165,7 @@ EMPTY_KINDS: tuple[EmptyKind, ...] = (
     "outside_model",
     "calibration_unresolved",
     "pending",
+    "unobserved",
 )
 
 #: The record columns, in order.
@@ -200,13 +229,26 @@ class TwinKit:
     delay: B06Rules
 
 
-def load_twin_kit(profile_dir: Path, *, plant_version: str | None = None) -> TwinKit:
+def _require_plant_version(plant_version: str | None) -> str:
+    if not plant_version:
+        raise TwinRunnerRefusalError(
+            "plant_version_missing",
+            "name the fuel plant the plant stages run: E07.3's pins are fuel-mv-1, the "
+            "simulator's is sim_kit.sim_plant_version(); there is no default",
+        )
+    return plant_version
+
+
+def load_twin_kit(profile_dir: Path, *, plant_version: str | None) -> TwinKit:
     """The runner's kit from one vehicle profile, by the loaders every
-    evaluator uses (the fuel plant is ``fuel_plant.yaml`` unless named: the
-    pulse chain and its sample rules are the E07.3 declaration's)."""
+    evaluator uses. ``plant_version`` is required and has no default
+    (``plant_version_missing``): it picks the fuel plant among the profile's
+    ``fuel_plant*.yaml``, whose pulse chain and sample rules the pulse stage
+    reads and whose frozen baseline the plant stages run."""
+    version = _require_plant_version(plant_version)
     model, model_sha = load_application_model(profile_dir)
     twin, twin_sha = load_twin_definition(profile_dir)
-    plant, _ = load_fuel_plant(profile_dir, plant_version)
+    plant, _ = load_fuel_plant(profile_dir, version)
     return TwinKit(
         model=model,
         model_sha256=model_sha,
@@ -863,11 +905,33 @@ _PULSE_GATED = {"not_steady", "bfs_not_steady"}
 _PULSE_OUTSIDE = {"not_fuelled", "reference_phi_not_positive"}
 
 
-def _pulse_kind(reason: str, reads: Mapping[str, int], plant: FuelPlantProfile) -> EmptyKind:
+#: The dead-time columns. ``build_samples`` derives the ECM's dead time from
+#: the battery voltage (PID 0x42) where read, else from the run's own fuel-cut
+#: pulse reads: with neither, no sample can have one, whatever else was read.
+_DEAD_TIME_COLUMNS = frozenset({"ecu_dead_time_counts", "ecu_dead_time_ms"})
+
+
+def _input_captured(
+    column: str, reads: Mapping[str, int], plant: FuelPlantProfile, *, fuel_cut_reads: int
+) -> bool:
+    """Whether the run holds what ``build_samples`` derives ``column`` from.
+    Not time-aware: a spec read only before the first pulse read counts as
+    captured (target phi's ``captured_by`` is time-aware; this is not)."""
+    if column in _DEAD_TIME_COLUMNS:
+        return reads[plant.specs.battery_voltage] > 0 or fuel_cut_reads > 0
+    specs = (_PULSE_INPUT_SPECS.get(column) or _PLANT_INPUT_SPECS[column])(plant)
+    return any(reads[s] for s in specs)
+
+
+def _pulse_kind(
+    reason: str, reads: Mapping[str, int], plant: FuelPlantProfile, *, fuel_cut_reads: int
+) -> EmptyKind:
+    """``fuel_cut_reads``: the run's fuel-cut pulse reads (``build_samples``'
+    ``fuel_cut_reads``), the dead time's fallback source."""
     if reason.startswith("input_missing:"):
         column = reason.split(":", 1)[1]
-        specs = _PULSE_INPUT_SPECS[column](plant)
-        return "input_not_captured" if not any(reads[s] for s in specs) else "not_co_sampled"
+        captured = _input_captured(column, reads, plant, fuel_cut_reads=fuel_cut_reads)
+        return "not_co_sampled" if captured else "input_not_captured"
     if reason in _PULSE_GATED:
         return "gated"
     if reason in _PULSE_OUTSIDE:
@@ -888,17 +952,48 @@ def _session_name(session: Path | pd.DataFrame, name: str | None) -> str:
     return str(names[0])
 
 
-def _run_pulse(
-    session: Path | pd.DataFrame, kit: RunnerKit, ecu: ResolvedEcu, name: str
-) -> _StageResult:
+#: The fuel-plant spec each plant sample input column is read from
+#: (``fuel_plant_eval.PLANT_SAMPLE_INPUTS``; a test holds the keys to it).
+_PLANT_INPUT_SPECS: dict[str, Callable[[FuelPlantProfile], list[str]]] = {
+    "rpm": lambda p: [p.specs.rpm],
+    "maf_gps": lambda p: [p.specs.maf],
+    "lambda_obs": lambda p: [p.specs.lambda_observed],
+    "baro_kpa": lambda p: [p.specs.baro],
+    "iat_c": lambda p: [p.specs.intake_temp],
+    "coolant_c": lambda p: [p.specs.coolant],
+    "ecu_dead_time_ms": lambda p: [p.specs.battery_voltage, p.specs.fuel_cut_reference],
+}
+
+
+@dataclass(frozen=True)
+class _PulseSamples:
+    """The one sample source of the pulse and plant stages: one row per
+    pulse read (``build_samples``), and the reads of every spec either reads."""
+
+    frame: pd.DataFrame
+    reads: dict[str, int]
+
+
+def _pulse_samples(session: Path | pd.DataFrame, kit: RunnerKit, name: str) -> _PulseSamples:
+    plant = kit.plant
+    columns = [_PULSE_INPUT_SPECS[c] for c in PULSE_CHAIN_INPUTS]
+    columns += [_PLANT_INPUT_SPECS[c] for c in PLANT_SAMPLE_INPUTS]
+    specs = sorted({plant.specs.pulse, *(s for column in columns for s in column(plant))})
+    long = read_channels(session, specs)
+    counts = long["spec"].value_counts()
+    return _PulseSamples(
+        build_samples(session, plant, kit.delay, name=name),
+        {s: int(counts.get(s, 0)) for s in specs},
+    )
+
+
+def _run_pulse(samples: _PulseSamples, kit: RunnerKit, ecu: ResolvedEcu) -> _StageResult:
     output = "injector_pulse_word"
     plant = kit.plant
     spec = plant.specs.pulse
     specs = sorted({s for column in PULSE_CHAIN_INPUTS for s in _PULSE_INPUT_SPECS[column](plant)})
-    long = read_channels(session, [spec, *specs])
-    counts = long["spec"].value_counts()
-    reads = {s: int(counts.get(s, 0)) for s in [spec, *specs]}
-    frame = build_samples(session, plant, kit.delay, name=name)
+    reads = {s: samples.reads[s] for s in [spec, *specs]}
+    frame = samples.frame
     if not len(frame):
         return _StageResult([], None, reads, {"spec": spec}, (spec,))
     measured = np.rint(frame["pulse_ms"].to_numpy(dtype=float) / PULSE_COUNT_MS)
@@ -911,12 +1006,20 @@ def _run_pulse(
         return _StageResult(records, None, reads, {"spec": spec}, (spec,))
     chain = plant.pulse_chain
     states = pulse_chain_states(frame, chain)
+    fuel_cut_reads = int(frame["fuel_cut_reads"].iloc[0])
     native = pulse_chain_ratios(frame, ecu.pulse, chain)
     records = []
     for index, t, m, state in zip(frame.index, frame["t"], measured, states, strict=True):
         if state != "eligible":
             records.append(
-                _record(output, spec, t, m, state=str(state), kind=_pulse_kind(state, reads, plant))
+                _record(
+                    output,
+                    spec,
+                    t,
+                    m,
+                    state=str(state),
+                    kind=_pulse_kind(state, reads, plant, fuel_cut_reads=fuel_cut_reads),
+                )
             )
             continue
         row = native.loc[index]
@@ -942,6 +1045,248 @@ def _run_pulse(
     )
 
 
+# -- the plant stages (E07.3's fuel plant, E09.2b) -------------------------------------------
+
+#: The observation of a plant output nothing on this hardware measures.
+UNOBSERVED = "unobserved"
+
+
+@dataclass(frozen=True)
+class PlantStage:
+    """One plant output, computed by ``fuel_plant.predict`` on the pulse
+    stage's samples. ``column`` is the :class:`~src.analysis.fuel_plant.PlantOutput`
+    field; ``observed`` the sample column it is scored against (``None``:
+    unobserved, its predictions are kind ``unobserved``)."""
+
+    output: str
+    column: str
+    observed: str | None
+    unit: str
+
+
+#: In the order they run, after every ECU stage.
+PLANT_STAGES: tuple[PlantStage, ...] = (
+    # Bank 1's A/F sensor (PID 0x24) at anchor + B06's frozen delay, paired
+    # one-to-one on the acquisition clock by build_samples.
+    PlantStage("delivered_lambda", "lambda_delivered", "lambda_obs", "lambda"),
+    PlantStage("fuel_per_event", "fuel_g", None, "g per cylinder event"),
+    # The plant's own manifold model (capped speed density in fuel-mv-1, the
+    # refusing VE(rpm) model from fuel-mv-2); the NA engine has no MAP sensor.
+    PlantStage("manifold_pressure", "map_kpa", None, "kPa"),
+)
+PLANT_KERNEL = "src.analysis.fuel_plant.predict"
+
+#: Every plant state (``fuel_plant_eval.STATES``) by kind. The two capture
+#: states are decided per sample: ``input_not_captured`` when a missing input
+#: was never read in the run, else ``not_co_sampled``.
+_PLANT_CAPTURE = frozenset({"not_co_observed", "missing_input"})
+_PLANT_KINDS: dict[str, EmptyKind] = {
+    "cold": "gated",
+    "post_fuel_cut": "gated",
+    "transient": "gated",
+    # The plant meters a fuelled pulse; a cut read is outside it (the pulse
+    # stage's not_fuelled likewise).
+    "fuel_cut": "outside_model",
+    # A sensor on its rail is a state, not a lambda (as target phi's sentinel).
+    "lambda_rail": "outside_model",
+    # Below the minimum effective pulse the injector is not the orifice law.
+    "short_pulse": "outside_model",
+    # The refusing manifold model's own refusals (fuel-mv-2 on).
+    MAP_OUTSIDE_VE_FIT: "outside_model",
+    MAP_ABOVE_AMBIENT: "outside_model",
+}
+
+
+def _plant_kind(state: str, *, input_captured: bool) -> EmptyKind:
+    """The kind of one plant state. ``input_captured``: every input the sample
+    lacks was read somewhere in the run."""
+    if state in _PLANT_CAPTURE:
+        return "not_co_sampled" if input_captured else "input_not_captured"
+    kind = _PLANT_KINDS.get(state)
+    if kind is None:
+        raise _unclassified("delivered_lambda", state)
+    return kind
+
+
+def plant_state_kinds() -> dict[str, tuple[EmptyKind, ...]]:
+    """Every state ``fuel_plant_eval.STATES`` declares, with the kinds it can
+    be counted under (two for the capture states, decided per sample); a
+    state without one refuses (``reason_unclassified``)."""
+    kinds: dict[str, tuple[EmptyKind, ...]] = {}
+    for state in STATES:
+        if state == "eligible":
+            continue
+        kinds[state] = tuple(
+            dict.fromkeys(_plant_kind(state, input_captured=c) for c in (True, False))
+        )
+    return kinds
+
+
+def _plant_provenance(kit: RunnerKit) -> dict[str, Any]:
+    plant = kit.plant
+    baseline = plant.baseline
+    return {
+        "plant_version": plant.plant_version,
+        "kernel": PLANT_KERNEL,
+        "samples": "fuel_plant_eval.build_samples (the pulse stage's, one per pulse read)",
+        "baseline_id": baseline.id if baseline is not None else None,
+        "baseline_sha256": baseline.sha256() if baseline is not None and baseline.frozen else None,
+        "manifold_model": plant.manifold_model,
+        "lambda_delay_s": kit.delay.seconds,
+        "lambda_observation": plant.specs.lambda_observed,
+    }
+
+
+def _run_plant(samples: _PulseSamples, kit: RunnerKit) -> dict[str, _StageResult]:
+    """Every plant output per pulse read: ``predict`` on the reads the plant
+    calls ``eligible`` (after a refusing plant's MAP refusals), every other
+    read under its plant state. ``native`` is the sample frame with those
+    states (what ``identify`` / ``evaluate`` / ``compare_versions`` score)."""
+    plant, frame = kit.plant, samples.frame
+    observations = {
+        s.output: (plant.specs.lambda_observed,) if s.observed else (UNOBSERVED,)
+        for s in PLANT_STAGES
+    }
+    provenance = _plant_provenance(kit)
+    reads = {
+        s: samples.reads[s]
+        for column in PLANT_SAMPLE_INPUTS
+        for s in _PLANT_INPUT_SPECS[column](plant)
+    }
+    reads[plant.specs.pulse] = samples.reads[plant.specs.pulse]
+    if not len(frame):
+        return {
+            s.output: _StageResult([], None, reads, provenance, observations[s.output])
+            for s in PLANT_STAGES
+        }
+    t = frame["t"].to_numpy(dtype=float)
+    observed_values = {
+        s.output: frame[s.observed].to_numpy(dtype=float)
+        if s.observed
+        else np.full(len(frame), np.nan)
+        for s in PLANT_STAGES
+    }
+    try:
+        params = resolve_parameters(plant, kit.delay)
+    except FuelPlantRefusalError as exc:
+        reason = f"calibration_unresolved:plant:{exc.reason}"
+        unresolved: dict[str, _StageResult] = {}
+        for s in PLANT_STAGES:
+            spec = observations[s.output][0]
+            records = [
+                _record(
+                    s.output,
+                    spec,
+                    at,
+                    obs,
+                    state=reason,
+                    kind="calibration_unresolved",
+                )
+                for at, obs in zip(t, observed_values[s.output], strict=True)
+            ]
+            unresolved[s.output] = _StageResult(
+                records, None, reads, provenance, observations[s.output]
+            )
+        return unresolved
+    scored = apply_manifold_refusals(frame, plant, params)
+    states = scored["state"].to_numpy(dtype=object)
+    eligible = states == "eligible"
+    out = predict(plant_inputs(scored[eligible]), params, plant.geometry)
+    predicted: dict[str, np.ndarray] = {}
+    for s in PLANT_STAGES:
+        values = np.full(len(scored), np.nan)
+        values[eligible] = getattr(out, s.column)
+        predicted[s.output] = values
+    fuel_cut_reads = int(frame["fuel_cut_reads"].iloc[0])
+    uncaptured = [
+        c
+        for c in PLANT_SAMPLE_INPUTS
+        if not _input_captured(c, reads, plant, fuel_cut_reads=fuel_cut_reads)
+    ]
+    lacks_uncaptured = (
+        ~np.isfinite(scored[uncaptured].to_numpy(dtype=float)).all(axis=1)
+        if uncaptured
+        else np.zeros(len(scored), dtype=bool)
+    )
+    kinds = [
+        "eligible"
+        if state == "eligible"
+        else _plant_kind(str(state), input_captured=not bool(lacking))
+        for state, lacking in zip(states, lacks_uncaptured, strict=True)
+    ]
+    provenance = {
+        **provenance,
+        "dead_time_source": sorted(set(frame["dead_time_source"])),
+        "effects": list(params.effects),
+        "rail_effect": params.rail_effect,
+    }
+    results: dict[str, _StageResult] = {}
+    for s in PLANT_STAGES:
+        spec = observations[s.output][0]
+        records = []
+        for at, obs, pred, state, kind in zip(
+            t, observed_values[s.output], predicted[s.output], states, kinds, strict=True
+        ):
+            if s.observed is None and kind == "eligible":
+                state, kind = UNOBSERVED, UNOBSERVED
+            records.append(
+                _record(
+                    s.output,
+                    spec,
+                    at,
+                    obs,
+                    predicted=None if math.isnan(pred) else pred,
+                    ratio=obs / pred if s.observed and kind == "eligible" else None,
+                    state=str(state),
+                    kind=kind,
+                )
+            )
+        results[s.output] = _StageResult(records, scored, reads, provenance, observations[s.output])
+    return results
+
+
+def identify_plant(runs: list[TwinRun], kit: RunnerKit, *, sessions_root: Path) -> dict[str, Any]:
+    """``fuel_plant_eval.identify`` on the runs' own samples (:attr:`TwinRun.samples`),
+    as ``tools.fuel_plant_check identify`` runs it on ``build_samples``: a
+    plant that fits VE(rpm) fits it first (``identify_ve`` on ``ve_samples``,
+    E07.5's MAF-read breathing samples: an identification input, not a plant
+    stage pairing). Every run must have run the kit's plant
+    (``plant_version_mismatch``); identify's own refusals stand (a run outside
+    ``split.identification`` is ``not_identification``)."""
+    plant = kit.plant
+    for run in runs:
+        ran = run.provenance.get("plant_version")
+        if ran != plant.plant_version:
+            raise TwinRunnerRefusalError(
+                "plant_version_mismatch",
+                f"{run.session} ran plant {ran}, the kit carries {plant.plant_version}",
+            )
+    # The split's declared order, as the CLI reads it: the bootstrap resamples
+    # regions in the order they are concatenated.
+    declared = list(plant.split.identification)
+    names = [run.session for run in runs]
+    if len(set(names)) != len(names):
+        raise TwinRunnerRefusalError("duplicate_run", f"{names}: one run per recording")
+    runs = sorted(runs, key=lambda r: declared.index(r.session) if r.session in declared else -1)
+    frames = [run.samples for run in runs]
+    if plant.volumetric_efficiency is None:
+        return identify(frames, plant, kit.delay, sessions_root=sessions_root)
+    missing = [run.session for run in runs if not (sessions_root / run.session).is_dir()]
+    if missing:
+        raise TwinRunnerRefusalError(
+            "session_not_on_disk",
+            f"{missing}: VE(rpm) is fitted on each recording's MAF reads, read from its directory",
+        )
+    ve = identify_ve(
+        pd.concat([ve_samples(sessions_root / run.session, plant) for run in runs]), plant
+    )
+    result = identify(
+        frames, plant, kit.delay, sessions_root=sessions_root, ve_curve=ve["ve_curve"]
+    )
+    result["volumetric_efficiency"] = ve
+    return result
+
+
 # -- the run --------------------------------------------------------------------------------
 
 
@@ -963,6 +1308,13 @@ class TwinRun:
     #: Per output: the channels it is observed through, each accounted
     #: separately (BFS has two: the DID round and the RAM window).
     observations: Mapping[str, tuple[str, ...]]
+    #: The one sample frame the pulse and plant stages both consumed
+    #: (``fuel_plant_eval.build_samples``: one row per pulse read).
+    samples: pd.DataFrame = field(default_factory=pd.DataFrame)
+    #: Per output anchored on another channel's reads (the plant outputs, on
+    #: the pulse word): the anchor spec, so an output with no anchor read says
+    #: ``input_not_captured:<spec>`` rather than ``output_not_captured``.
+    anchors: Mapping[str, str] = field(default_factory=dict)
 
     def accounting(self) -> dict[str, dict[str, dict[str, int]]]:
         """Per output, per observation channel, samples by state; every
@@ -992,7 +1344,10 @@ class TwinRun:
             for channel in self.observations[name]:
                 rows = records[(records["output"] == name) & (records["observation"] == channel)]
                 if not len(rows):
-                    per[channel] = "output_not_captured"
+                    anchor = self.anchors.get(name)
+                    per[channel] = (
+                        "output_not_captured" if anchor is None else f"input_not_captured:{anchor}"
+                    )
                 elif (rows["kind"] == "eligible").any():
                     per[channel] = None
                 else:
@@ -1026,6 +1381,10 @@ def _provenance(kit: RunnerKit, ecu: ResolvedEcu, stages: tuple[Stage, ...]) -> 
             }
             for s in stages
         ],
+        "plant_stages": [
+            {"output": s.output, "column": s.column, "unit": s.unit, "kernel": PLANT_KERNEL}
+            for s in PLANT_STAGES
+        ],
     }
 
 
@@ -1034,18 +1393,29 @@ def run_twin(
     kit: RunnerKit,
     ecu: ResolvedEcu,
     *,
+    plant_version: str | None,
     name: str | None = None,
     session_complete: bool = True,
 ) -> TwinRun:
-    """Every ECU output of ``session``, in the model's node order.
+    """Every ECU output of ``session``, in the model's node order, then every
+    plant output (:data:`PLANT_STAGES`) on the pulse stage's samples.
 
     ``session`` is a session directory or a frame of its raw reads: a bounded
     window is a frame, handed whole to every stage, so no stage can be
     bounded differently from another. ``session_complete=False`` (a capture
     still recording) leaves target-phi samples awaiting later reads
-    ``pending``."""
+    ``pending``. ``plant_version`` is required, with no default
+    (``plant_version_missing``), and must be the kit's plant
+    (``plant_version_mismatch``)."""
+    version = _require_plant_version(plant_version)
+    if kit.plant.plant_version != version:
+        raise TwinRunnerRefusalError(
+            "plant_version_mismatch",
+            f"the run names plant {version}, the kit carries {kit.plant.plant_version}",
+        )
     stages = stage_order(kit.model)
     label = _session_name(session, name)
+    samples = _pulse_samples(session, kit, label)
     results: dict[str, _StageResult] = {}
     for stage in stages:
         if stage.output == "base_fuel_schedule_word":
@@ -1055,10 +1425,11 @@ def run_twin(
         elif stage.output == "target_equiv_ratio":
             results[stage.output] = _run_phi(session, kit, ecu, session_complete=session_complete)
         elif stage.output == "injector_pulse_word":
-            results[stage.output] = _run_pulse(session, kit, ecu, label)
+            results[stage.output] = _run_pulse(samples, kit, ecu)
         else:  # pragma: no cover - STAGES and this dispatch are one list
             raise TwinRunnerRefusalError("stage_unbound", stage.output)
-    order = tuple(s.output for s in stages)
+    results.update(_run_plant(samples, kit))
+    order = (*(s.output for s in stages), *(s.output for s in PLANT_STAGES))
     rows = [r for output in order for r in results[output].records]
     records = pd.DataFrame(rows, columns=list(RECORD_COLUMNS))
     provenance = _provenance(kit, ecu, stages)
@@ -1071,6 +1442,8 @@ def run_twin(
         input_reads={o: results[o].input_reads for o in order},
         provenance=provenance,
         observations={o: results[o].observations for o in order},
+        samples=samples.frame,
+        anchors={s.output: kit.plant.specs.pulse for s in PLANT_STAGES},
     )
 
 
@@ -1088,6 +1461,8 @@ def run_digest(run: TwinRun) -> str:
 __all__ = [
     "BFS_CHANNEL_SETS",
     "EMPTY_KINDS",
+    "PLANT_KERNEL",
+    "PLANT_STAGES",
     "RECORD_COLUMNS",
     "RUNNER_VERSION",
     "STAGES",
@@ -1097,8 +1472,12 @@ __all__ = [
     "TwinKit",
     "TwinRun",
     "TwinRunnerRefusalError",
+    "UNOBSERVED",
+    "PlantStage",
+    "identify_plant",
     "load_twin_kit",
     "node_order",
+    "plant_state_kinds",
     "resolve_ecu",
     "run_digest",
     "run_twin",
