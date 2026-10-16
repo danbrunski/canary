@@ -476,7 +476,7 @@ for name, side, rects in copper.POURS:
     for outline in union(rects):  # one zone per outline: a zone's extra outlines did not survive
         zone(SIDE[side], NET[name], [outline], prio=2, connect=pcbnew.ZONE_CONNECTION_FULL)
 zone(pcbnew.In2_Cu, NET["+5V_PI"], [copper.IN2_PI_5V], prio=1, connect=pcbnew.ZONE_CONNECTION_FULL)
-for name, side, width, pts in copper.TRACKS:
+for name, side, width, pts in copper.TRACKS + copper.ESCAPES:
     for (xa, ya), (xb, yb) in zip(pts, pts[1:], strict=False):
         t = pcbnew.PCB_TRACK(b)
         t.SetStart(V(xa, ya))

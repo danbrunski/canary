@@ -146,13 +146,17 @@ y 44–100 from the header edge.
   FETs stack below it, with the switch node toward L1 and C20/C21 across the
   bus and ground. R15, Q5 and the VCAP capacitors sit at the cap-bank power
   pins. RSNSI and the input FET are to its right, and the analogue dividers
-  are above it.
+  are above it in two rows, 2 mm clear of its pins so the top-row escapes
+  (laid by hand) fan out beneath them.
 - **Input protection, top, lower right:** Q1's tab faces *Vehicle in*, with
   the TVS and the protected-node bulk beside it. The two bus electrolytics
   are at the top right.
 - **Bottom:**
   - the I²C buffer and the Pi-crossing parts in a row under J1;
-  - the MCU under the buck and LTC3350 analogue area;
+  - the MCU under the empty top area left of the LTC3350, with its
+    decoupling, reset cap and VIN divider in a column on its left. It sat
+    under the LTC3350's analogue rows until 2026-10-15, where its escapes and
+    the LTC3350's fought over the same B.Cu;
   - the always-on LDO beside the fan keep-out;
   - the CAN wake transceiver between the HAT-out and Vehicle-in CAN pins;
   - the ballast resistors stacked beside the cap-bank sense pins. Each takes
@@ -218,6 +222,14 @@ never routes them.
   - R25, R9 and C12 were turned so their bus ends face the copper that feeds
     them.
   - D5/D6 were swapped and turned.
+  - C30/C31 turned so their 5 V pads face the buck output pour; C23 (the
+    LM61460's BIAS cap) moved beside U2's pin 1, from 12 mm away; C12 and R7
+    swapped so the OUTFB and CAPFB columns do not cross.
+- **No vias in pads.** Plugged vias raise the board's cost a lot (operator,
+  2026-10-15). KiCad's DRC does not flag a via inside a same-net pad, so
+  `hardware/tools/via_in_pad.py` checks it and `autoroute.sh` refuses a result
+  that has one. The two GND vias in the LM61460's input loop moved clear of
+  C27, U6's pad and U2's pin 9 for this.
 - **Routing the rest.** `hardware/tools/autoroute.sh` routes the signals and
   the low-current taps of the power nets (dividers, decoupling caps, IC supply
   pins) with Freerouting. Its `dsn_export.py` hands the router each pour as
@@ -623,7 +635,7 @@ Nothing on this board changes for rev 3.0.
 | 12 | The Vehicle-in plug's order number (KiCad's footprint confirms 1803293 for the header) and the Micro-Fit housings and crimps (43025-0600, 43025-1000, 43030) | BOM |
 | 13 | Copper weight: TI recommends 2 oz outer layers for the LM61460 | Fab order |
 | 14 | Alternator ripple at `+12V_HAT` against `VIN_SENSE`'s input, engine running | Whether the HAT coprocessor can measure ripple from `V12_SENSE` through the hold-up path (HAT §13.3.3b) |
-| 15 | Routing. **Done 2026-10-15** (`gen/copper.py`, §P2 Power copper): every current path as a pour; +12V_BUS pours stitched to the In2 island; 5 V into J1 pins 2/4 through an In2 +5V_PI island; Kelvin pairs to RSNSI, RSNSC and R28; TG/BG through via pairs; the starved-thermal GND pads (the outer GND pours now join SMD pads solidly). The committed board is that copper with the signals still unrouted: DRC shows only the 161 unrouted connections, with parity clean. **Left:** the signals and the power nets' low-current taps. The best autoroute so far (`hardware/tools/autoroute.sh`, Freerouting a773a70ec, `-mp 1 --router.scoring.start_ripup_costs=1500`, taps at 0.3 mm) leaves 48 connections, all crowded round the LTC3350's analog pins and the I²C/MCU lines crossing beside it. KiCadRoutingTools leaves fewer (36) but only by breaking the fab rules and putting vias in pads. Next: lay U1's analog neighbourhood by hand, then route the rest; keep In1/In2 free of tracks and signal vias out of the switch-node and hot-loop areas | Layout |
+| 15 | Routing. **Done 2026-10-15** (`gen/copper.py`, §P2 Power copper): every current path as a pour; +12V_BUS pours stitched to the In2 island; 5 V into J1 pins 2/4 through an In2 +5V_PI island; Kelvin pairs to RSNSI, RSNSC and R28; TG/BG through via pairs; U1's top-row escapes; the starved-thermal GND pads (the outer GND pours now join SMD pads solidly). The committed board is that copper with the signals still unrouted: DRC shows only the 153 unrouted connections, with parity clean and no vias in pads. **Left:** the signals and the power nets' low-current taps. The best autoroute reproduces exactly (Freerouting 46bf9e2ef is deterministic): `autoroute.sh` with `-mp 1 --router.scoring.start_ripup_costs=1500 --router.min_trace_width_um=150`, taps at 0.3 mm, then a second run on its result with `dsn_export.py --fix-existing` (add-only, 2 passes). That leaves 36 connections, with no vias in pads: 6 GND pads cut off from the pour, short taps blocked by earlier routes, and long MCU signals (CAN, LEDs, BUTTON). Further Freerouting passes add nothing, and KiCadRoutingTools only gets further by putting vias in pads. The rest needs push-and-shove routing (KiCad's interactive router) or a better autorouter (freerouting-rs). Keep In1/In2 free of tracks: opening In2 to routing leaves 30, but cuts its GND and the +12V_BUS island | Layout |
 
 ## P11. Hardware project
 

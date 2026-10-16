@@ -71,11 +71,11 @@ POURS: list[tuple[str, str, list[Rect]]] = [
         "F",
         [(108.4, 82.3, 111.2, 94.0), (108.4, 88.3, 117.55, 94.0), (114.4, 81.1, 116.15, 88.5)],
     ),
-    # Buck output: L2, RSNSI's input end, and down the side of C30/C31's GND pads to their outputs.
+    # Buck output: L2, the INA226 shunt's input end and C30/C31's output pads.
     (
         "+5V_BUCK",
         "F",
-        [(119.55, 52.3, 126.1, 58.15), (122.15, 58.0, 125.0, 62.37), (115.45, 61.1, 122.2, 62.85)],
+        [(119.55, 52.3, 126.1, 58.15), (115.45, 58.15, 122.2, 59.9)],
     ),
     ("+5V_SHUNT", "F", [(108.82, 55.4, 113.6, 57.55)]),
     # Pi 5 V: Q7's drain tab, C34, and the vias to the In2 island that feeds J1 pins 2 and 4.
@@ -101,8 +101,13 @@ TRACKS: list[tuple[str, str, float, list[tuple[float, float]]]] = [
     ("+12V_BUS", "B", KELVIN_W, [(141.85, 76.25), (141.85, 75.85), (141.2, 75.2), (132.2, 75.2)]),
     ("+12V_BUS", "F", KELVIN_W, [(132.2, 75.2), (131.95, 75.4), (130.25, 75.4), (130.25, 74.45)]),
     # R28 (INA226 shunt) to INA226 IN+ (pin 10) and IN- (pin 9): IN+ under the board, IN- beside the shunt.
-    ("+5V_BUCK", "F", KELVIN_W, [(118.645, 55.9), (118.3, 56.25), (118.3, 57.9)]),
-    ("+5V_BUCK", "B", KELVIN_W, [(118.3, 57.9), (117.6, 58.6), (111.75, 58.6), (111.6, 58.75)]),
+    ("+5V_BUCK", "F", KELVIN_W, [(118.645, 55.9), (118.2, 56.3), (117.8, 56.3)]),
+    (
+        "+5V_BUCK",
+        "B",
+        KELVIN_W,
+        [(117.8, 56.3), (117.8, 57.9), (117.1, 58.6), (111.75, 58.6), (111.6, 58.75)],
+    ),
     ("+5V_BUCK", "F", KELVIN_W, [(111.6, 58.75), (112.4, 58.95)]),
     (
         "+5V_SHUNT",
@@ -160,6 +165,31 @@ TRACKS: list[tuple[str, str, float, list[tuple[float, float]]]] = [
     ("LTC_BG", "F", 0.3, [(130.0, 81.9), (129.88, 82.83)]),
 ]
 
+# U1's top-row escapes (0.2 mm; 0.15 where the CAPFB lane passes a bus-class pad). The pins fan out in a
+# staircase under the two rows: ITST, GPI, RT and OUTFB turn left at 0.4 mm steps, GPI climbs between R6 and R5
+# to C13/R13, OUTFB drops between R10 and R8 to R9/C12, CAPFB climbs between R8 and C11 to R7. Pin 8 joins the
+# exposed pad. The bus tap feeds R9/C12 (OUTFB divider top, feed-forward) from the buck's input pour.
+ESC_W = 0.2
+ESCAPES: list[tuple[str, str, float, list[tuple[float, float]]]] = [
+    ("LTC_ITST", "F", ESC_W, [(125.75, 69.55), (125.75, 68.75), (123.0, 68.75), (123.0, 66.725)]),
+    (
+        "LTC_GPI",
+        "F",
+        ESC_W,
+        [(126.25, 69.55), (126.25, 68.35), (123.8, 68.35), (123.8, 61.775), (124.6, 61.775)],
+    ),
+    ("LTC_GPI", "F", ESC_W, [(123.8, 63.375), (123.0, 63.375)]),
+    ("LTC_RT", "F", ESC_W, [(126.75, 69.55), (126.75, 67.95), (124.6, 67.95), (124.6, 66.725)]),
+    ("LTC_OUTFB", "F", ESC_W, [(127.75, 69.55), (127.75, 67.55), (126.2, 67.55), (126.2, 66.725)]),
+    ("LTC_OUTFB", "F", ESC_W, [(127.0, 67.55), (127.0, 64.25), (126.2, 64.25), (126.2, 63.425)]),
+    ("LTC_OUTFB", "F", ESC_W, [(127.0, 64.25), (127.8, 64.25), (127.8, 63.375)]),
+    ("LTC_CAPFB", "F", ESC_W, [(128.25, 69.55), (128.25, 66.725), (128.6, 66.725)]),
+    ("LTC_CAPFB", "F", 0.15, [(128.6, 66.725), (128.6, 61.775), (129.4, 61.775)]),
+    ("GND", "F", ESC_W, [(127.25, 69.55), (127.25, 70.5)]),
+    ("+12V_BUS", "F", 0.3, [(135.4, 60.75), (126.2, 60.75), (126.2, 61.775)]),
+    ("+12V_BUS", "F", 0.3, [(127.8, 60.75), (127.8, 61.825)]),
+]
+
 SIGNAL_VIA = (0.6, 0.3)
 POWER_VIA = (0.8, 0.4)
 # Same-net vias stay >= 0.25 mm apart: Freerouting counts closer ones as violations.
@@ -169,7 +199,7 @@ VIAS: list[tuple[str, float, float, tuple[float, float]]] = [
     ("LTC_VOUTSP", 131.5, 74.45, SIGNAL_VIA),
     ("+12V_BUS", 141.85, 76.25, SIGNAL_VIA),
     ("+12V_BUS", 132.2, 75.2, SIGNAL_VIA),
-    ("+5V_BUCK", 118.3, 57.9, SIGNAL_VIA),
+    ("+5V_BUCK", 117.8, 56.3, SIGNAL_VIA),  # under R28's body
     ("+5V_BUCK", 111.6, 58.75, SIGNAL_VIA),
     ("LTC_ICAP", 125.65, 76.05, SIGNAL_VIA),
     ("LTC_ICAP", 120.05, 86.8, SIGNAL_VIA),
@@ -190,7 +220,7 @@ VIAS: list[tuple[str, float, float, tuple[float, float]]] = [
     *[("+12V_BUS", x, y, SIGNAL_VIA) for x in (116.8, 117.7) for y in (76.2, 77.3)],
     # +5V_PI pour to the In2 island under J1 pins 2 and 4.
     *[("+5V_PI", x, 51.0, POWER_VIA) for x in (107.8, 108.9, 110.0, 111.1)],
-    # LM61460 input loop returns: beside GND pin 9 and C29/C27.
-    ("GND", 134.4, 56.35, SIGNAL_VIA),
-    ("GND", 133.5, 62.45, SIGNAL_VIA),
+    # LM61460 input loop returns: beside C28 and GND pin 9, and beside C27 (clear of every pad: no via-in-pad).
+    ("GND", 133.35, 56.2, SIGNAL_VIA),
+    ("GND", 132.5, 62.45, SIGNAL_VIA),
 ]

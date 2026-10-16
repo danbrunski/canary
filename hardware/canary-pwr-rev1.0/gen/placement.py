@@ -27,8 +27,8 @@ PLACEMENT: dict[str, tuple[float, float, int, str]] = {
     "U4": (109.0, 58.1, 0, "F"),
     "C33": (109.4, 61.6, 90, "F"),
     "U3": (113.4, 61.1, 90, "F"),
-    "C31": (117.1, 60.5, 90, "F"),
-    "C30": (120.5, 60.5, 90, "F"),
+    "C31": (117.1, 60.5, -90, "F"),  # 5 V pads up, into the buck output pour
+    "C30": (120.5, 60.5, -90, "F"),
     # LM61460 buck, top: SW faces L2 (left); VIN1/VIN2 input pairs straddled above and below; FB/RT/EN parts to the right
     "L2": (127.0, 55.8, 180, "F"),
     "U2": (136.0, 58.5, 180, "F"),
@@ -47,19 +47,21 @@ PLACEMENT: dict[str, tuple[float, float, int, str]] = {
     "R26": (146.4, 55.3, 90, "F"),
     "Q6": (146.0, 59.6, 0, "F"),
     "R27": (146.0, 62.6, 0, "F"),
-    "C23": (125.0, 61.5, 0, "F"),
+    "C23": (140.0, 62.9, -90, "F"),  # BIAS decoupling, beside U2 pin 1
     # LTC3350, top, rotated -90: analog/I2C pins up, VIN/INFET right, power pins down, cell taps left
     "U1": (128.0, 72.0, -90, "F"),
-    "C11": (129.4, 67.2, 90, "F"),
-    "R8": (127.8, 67.2, 90, "F"),
-    "R10": (126.2, 67.2, 90, "F"),
-    "R5": (124.6, 67.2, 90, "F"),
-    "R6": (123.0, 67.2, 90, "F"),
-    "C12": (129.4, 63.9, -90, "F"),  # bus ends up (top trace), OUTFB ends toward U1
-    "R7": (127.8, 63.9, 90, "F"),
-    "R9": (126.2, 63.9, -90, "F"),
-    "R13": (124.6, 63.9, 90, "F"),
-    "C13": (123.0, 63.9, 90, "F"),
+    # Two rows above U1's top row, 2 mm clear of its pins so the escapes (copper.py) fan out beneath them. Signal
+    # pads face U1; the OUTFB parts (R10, R9, C12) and the CAPFB parts (R8, R7) sit in columns that do not cross.
+    "C11": (129.4, 65.9, 90, "F"),
+    "R8": (127.8, 65.9, 90, "F"),
+    "R10": (126.2, 65.9, 90, "F"),
+    "R5": (124.6, 65.9, 90, "F"),
+    "R6": (123.0, 65.9, 90, "F"),
+    "R7": (129.4, 62.6, 90, "F"),
+    "C12": (127.8, 62.6, -90, "F"),  # bus end up (the top-side bus tap), OUTFB end toward U1
+    "R9": (126.2, 62.6, -90, "F"),
+    "R13": (124.6, 62.6, 90, "F"),
+    "C13": (123.0, 62.6, 90, "F"),
     "C6": (122.9, 72.9, 90, "F"),
     "C7": (121.3, 72.9, 90, "F"),
     # U1's right column (PFO, PFI, VCC2P5 x2, VIN, INFET, VOUTM5 from the top) leaves in lanes: PFO and PFI turn up,
@@ -113,18 +115,19 @@ PLACEMENT: dict[str, tuple[float, float, int, str]] = {
     "FID6": (102.0, 60.8, 0, "B"),
     "FID5": (161.5, 91.0, 0, "B"),
     "R37": (146.5, 52.1, 0, "B"),
-    # Bottom: STM32G031, its always-on LDO and the sense dividers
-    "U5": (126.5, 63.5, 0, "B"),
-    "R3": (115.6, 61.0, 90, "B"),
-    "R4": (117.2, 61.0, 90, "B"),
-    "C3": (118.8, 61.0, 90, "B"),
-    "C38": (120.4, 61.0, 90, "B"),
-    "C36": (120.4, 64.6, 90, "B"),
-    "C32": (113.4, 61.0, 90, "B"),
+    # Bottom: STM32G031 with its decoupling, reset cap and VIN divider in a column on its left (C32 is the INA226's);
+    # the always-on LDO stays east
+    "U5": (118.5, 64.0, 0, "B"),  # under the empty top area left of U1, not under U1's analog rows
+    "R3": (109.2, 64.9, 90, "B"),
+    "R4": (109.2, 61.6, 90, "B"),
+    "C3": (111.7, 61.4, 180, "B"),
+    "C38": (111.7, 62.95, 180, "B"),
+    "C36": (111.7, 64.5, 180, "B"),
+    "C32": (111.7, 59.85, 180, "B"),
     "U6": (134.3, 63.4, -90, "B"),
     "C39": (134.3, 68.2, 0, "B"),
     "C40": (134.3, 58.9, 0, "B"),
-    "C37": (120.2, 68.3, 90, "B"),
+    "C37": (112.2, 67.8, 90, "B"),
     "D5": (135.3, 71.0, -90, "B"),  # AON_IN ends up toward C39; supply ends down
     "D6": (133.0, 71.0, -90, "B"),
     "R30": (128.4, 70.4, 90, "B"),

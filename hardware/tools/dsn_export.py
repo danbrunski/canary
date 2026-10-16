@@ -222,11 +222,24 @@ def main() -> None:
     ap.add_argument("--fixed-classes", default="Power_High,Switch_Node")
     ap.add_argument("--drop-nets", default="GND")
     ap.add_argument("--width", action="append", default=[], help="CLASS=mm, repeatable")
+    ap.add_argument(
+        "--fix-existing",
+        action="store_true",
+        help="export every track and via as fixed, so a further run only adds to an earlier one",
+    )
+    ap.add_argument(
+        "--signal-layers",
+        default="",
+        help="inner plane layers the router may also route on (DSN names, e.g. Power.Cu)",
+    )
     args = ap.parse_args()
     fixed_classes = set(filter(None, args.fixed_classes.split(",")))
     drop_nets = set(filter(None, args.drop_nets.split(",")))
 
     board = pcbnew.LoadBoard(args.board)
+    if args.fix_existing:  # in memory only; the board file is not saved
+        for t in board.GetTracks():
+            t.SetLocked(True)
     if not pcbnew.ExportSpecctraDSN(board, args.out):
         raise SystemExit("KiCad's DSN export failed")
     dsn = open(args.out).read()
@@ -295,6 +308,14 @@ def main() -> None:
     if extra:  # after the layer definitions, which the shapes name
         m = re.search(r"\n\s*\(via\s", dsn)
         dsn = dsn[: m.start()] + "\n" + "".join(extra).rstrip("\n") + dsn[m.start() :]
+
+    # 6. plane layers opened to routing: their planes stay conduction areas, so the fill gives way
+    for name in filter(None, args.signal_layers.split(",")):
+        dsn, n = re.subn(
+            r"(\(layer\s+" + re.escape(name) + r"\s*\(type\s+)power\)", r"\1signal)", dsn
+        )
+        if not n:
+            raise SystemExit(f"no power layer {name} in the DSN")
 
     if fixed_wires:
         m = re.search(r"\(wiring\b", dsn)
