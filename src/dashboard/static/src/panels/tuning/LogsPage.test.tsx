@@ -2,11 +2,16 @@ import { fireEvent, render, screen, waitFor, within } from "@testing-library/rea
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { HttpError, controlJson } from "../../api/core";
-import type { TuningContext } from "../../hooks/useTuningContext";
 import { describeRefusal, gateSentence } from "../../lib/workbenchApi";
-import type { FrameResponse, LogsResponse } from "../../types/workbench";
+import { CAPTURE_ID, LOGS, frame, tuningContext as context } from "../../test/workbenchFixtures";
+import type { FrameResponse } from "../../types/workbench";
 import { toCsv } from "../../util/csv";
 import { formatClockDuration } from "../../util/time";
+import { FrameTable } from "./FrameTable";
+import { FrameVisual } from "./FrameVisual";
+import { LogBrowser } from "./LogBrowser";
+import { LogViewer } from "./LogViewer";
+import * as page from "./LogsPage";
 import { LogsPage } from "./LogsPage";
 
 vi.mock("../../api/core", async (importOriginal) => {
@@ -14,88 +19,6 @@ vi.mock("../../api/core", async (importOriginal) => {
   return { ...actual, controlJson: vi.fn() };
 });
 const control = vi.mocked(controlJson);
-
-const LOGS: LogsResponse = {
-  include_sessions: false,
-  total: 2,
-  limit: 100,
-  capped: false,
-  logs: [
-    {
-      session_id: "_capture-tuning-2026-09-20T120000",
-      is_capture: true,
-      profile: "tuning",
-      started_at: "2026-09-20T12:00:00+00:00",
-      duration_s: 754,
-      duration_source: "capture_manifest",
-      row_count: 123456,
-      revision: { revision: "ZS44A-20260920", source: "capture_manifest", conflict: false },
-      revision_boundaries: [],
-      quality: { verdict: "pass", scope: "stop" },
-      end_reason: "operator_stop",
-      tag_count: 2,
-    },
-    {
-      session_id: "_capture-tuning-2026-09-10T120000",
-      is_capture: true,
-      profile: "tuning-did",
-      started_at: "2026-09-10T12:00:00+00:00",
-      duration_s: 60,
-      duration_source: "parquet_span",
-      row_count: 900,
-      revision: { revision: "ZS44A-20260727", source: "registry", conflict: false },
-      revision_boundaries: [
-        { revision: "ZS44A-20260910", flashed_at: "2026-09-10T12:00:30+00:00" },
-      ],
-      quality: null,
-      end_reason: "daemon_shutdown",
-      tag_count: 0,
-    },
-  ],
-};
-
-function frame(overrides: Partial<FrameResponse> = {}): FrameResponse {
-  return {
-    session_id: "_capture-tuning-2026-09-20T120000",
-    profile: "tuning",
-    grid: "1s",
-    columns: [
-      { spec: "obd:RPM", unit: "rpm" },
-      { spec: "obd:MAF", unit: "g/s" },
-    ],
-    missing: [],
-    timestamps: [
-      "2026-09-20T12:00:00+00:00",
-      "2026-09-20T12:00:01+00:00",
-      "2026-09-20T12:00:02+00:00",
-    ],
-    values: { "obd:RPM": [800, 3000, 1500], "obd:MAF": [4, 60, 20] },
-    regime_flags: {},
-    regimes: {},
-    regime_report: { regime: "all", before: 3, after: 3 },
-    freshness: { cells_with_any: 5, kept: 3, dropped: 2, rule: "every channel" },
-    rows_total: 3,
-    offset: 0,
-    rows_returned: 3,
-    row_cap: 20000,
-    capped: false,
-    tags: [{ t: "2026-09-20T12:00:01+00:00", label: "pull_start" }],
-    revision: { revision: "ZS44A-20260920", source: "capture_manifest", conflict: false },
-    revision_boundaries: [],
-    span: { first: null, last: null },
-    ...overrides,
-  };
-}
-
-function context(overrides: Partial<TuningContext> = {}): TuningContext {
-  return {
-    selectedLogId: null,
-    setSelectedLogId: () => {},
-    loadedRom: null,
-    setLoadedRom: () => {},
-    ...overrides,
-  };
-}
 
 function route(frameResponse: FrameResponse | Error) {
   control.mockImplementation((path: string) => {
@@ -241,6 +164,65 @@ describe("LogsPage viewer (direct route with a persisted log)", () => {
         true,
       ),
     );
+  });
+});
+
+describe("LogsPage composition (R19)", () => {
+  const selected = context({ selectedLogId: CAPTURE_ID });
+
+  it("re-exports the components it was split into from their old path", () => {
+    expect(page.LogBrowser).toBe(LogBrowser);
+    expect(page.LogViewer).toBe(LogViewer);
+    expect(page.FrameTable).toBe(FrameTable);
+    expect(page.FrameVisual).toBe(FrameVisual);
+  });
+
+  it("without a token asks for nothing and mounts no viewer", async () => {
+    route(frame());
+    render(<LogsPage token="" context={selected} />);
+    expect(screen.getByText("Enter the control token to browse logs.")).toBeInTheDocument();
+    await new Promise((r) => setTimeout(r, 20));
+    expect(control).not.toHaveBeenCalled();
+    expect(screen.queryByRole("table", { name: "Log table" })).not.toBeInTheDocument();
+    expect(screen.queryByLabelText(/Channels/)).not.toBeInTheDocument();
+  });
+
+  it("opens the viewer for the selected capture and follows a new selection", async () => {
+    route(frame());
+    const view = render(<LogsPage token="t" context={selected} />);
+    await screen.findByRole("table", { name: "Log table" });
+    expect(screen.getByRole("heading", { name: CAPTURE_ID })).toBeInTheDocument();
+    view.rerender(
+      <LogsPage
+        token="t"
+        context={context({ selectedLogId: "_capture-tuning-2026-09-10T120000" })}
+      />,
+    );
+    expect(
+      await screen.findByRole("heading", { name: "_capture-tuning-2026-09-10T120000" }),
+    ).toBeInTheDocument();
+    const rows = within(screen.getByRole("table", { name: "Capture browser" })).getAllByRole("row");
+    expect(rows.slice(1).map((row) => row.getAttribute("aria-selected"))).toEqual([
+      "false",
+      "true",
+    ]);
+  });
+
+  it("says a refused token in the shared words, for the browser and the viewer", async () => {
+    control.mockRejectedValue(new HttpError(401, ""));
+    render(<LogsPage token="t" context={selected} />);
+    await waitFor(() =>
+      expect(
+        screen.getAllByText("Not authorized — enter or check the control token."),
+      ).toHaveLength(2),
+    );
+    expect(screen.queryByText(/HTTP 401/)).not.toBeInTheDocument();
+  });
+
+  it("shows the daemon's own sentence when it explains a refusal", async () => {
+    control.mockRejectedValue(new HttpError(401, '{"detail":"control token required"}'));
+    render(<LogsPage token="t" context={selected} />);
+    await waitFor(() => expect(screen.getAllByText("control token required")).toHaveLength(2));
   });
 });
 
