@@ -291,4 +291,5 @@ def test_assumptions_stay_strings_through_the_rom_editor(
     assert _strings(out["assumptions"]) and _strings(out["caveats"])
     assert "= 0.7, bracket [0.4, 1.0]" in _named(out["assumptions"])[VE]
     assert any("frozen there" in a for a in out["assumptions"])
-    assert _strings(out["design"]["assumptions"])
+    # ae534b60: the design's assumptions appear once, in ``assumptions``.
+    assert any(a.startswith("design: ") for a in out["assumptions"])
