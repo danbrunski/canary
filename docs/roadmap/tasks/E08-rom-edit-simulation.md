@@ -1601,6 +1601,75 @@ refusal carries a stable `reason` string that tests assert by name.
     `/data/canary/sim/`, declared in `tests/test_state_dir.py`.
   - Shares E07.7's Pi integration rather than a second runtime.
 
+- [ ] **E08.9 — Desk launcher: one script brings up the GUI on a laptop.**
+  Requested 2026-10-15 by the operator: "a single python script that a user
+  can run that will launch the gui tool", to edit a ROM and run the simulator
+  without the truck. The pieces exist. `canary.sim.example.yaml` runs the
+  whole daemon on a virtual CAN bus with OBD disabled, so it never transmits.
+  The ROM Editor page (W09) reads base images from the ROM Library. What is
+  missing is the glue, with state kept out of the checkout. Today the sim
+  config writes control state under `data/sim/`, which is not git-ignored, and
+  ROM Library uploads would put proprietary images in the repo tree.
+  - **Script:** `scripts/canary_desk.py`, run as
+    `.venv/bin/python scripts/canary_desk.py`. Standard library plus the repo's
+    own modules; no new dependency.
+  - **State outside the checkout.** `--state-dir`, default
+    `~/canary-data/desk`, becomes `daemon.state_dir`, with
+    `collection.storage_path` under it. A state dir inside the checkout is
+    refused (`inside_checkout`). The generated config is written there too
+    (`<state>/canary.desk.yaml`). It is built from `canary.sim.example.yaml`
+    so the two cannot drift: load it, override only the named fields, and
+    validate through `CanaryConfig`. Overrides:
+    - `daemon.state_dir`, with every explicit `data/sim/...` daemon path
+      dropped so S03's re-rooting applies;
+    - storage path;
+    - dashboard host `127.0.0.1`, never `0.0.0.0` (`--host` to widen);
+    - `--port`, default 8000;
+    - no replay session unless `--replay <session>` is given;
+    - models stay disabled.
+  - **Dashboard bundle.** If `src/dashboard/static/dist` is missing or older
+    than the frontend sources, run `pnpm install --frozen-lockfile` (only when
+    `node_modules` is missing) and `pnpm build`. Reuse S02's staleness rule if
+    one exists. A missing `pnpm` is refused with what to install; never
+    install it.
+  - **Control token.** Generated once (`secrets.token_urlsafe`) and kept at
+    `<state>/control/desk.token`, mode 0600. It is passed to the daemon child
+    through `daemon.control_token_env`, never on a command line, and printed
+    once with "paste it into the dashboard's token field". If the frontend
+    already accepts a token some other way, use that instead and say so. Don't
+    change the frontend for this item.
+  - **ROMs.** `--rom-dir` (repeatable), or `$CANARY_ROM_DIRS`: each file is
+    imported into the ROM Library with `RomLibrary.add_upload`, idempotent by
+    sha256, before the daemon starts or through its own upload route. An UpRev
+    encrypted backup `.bin` is reported by `rom_image`'s refusal name and
+    skipped, not fatal. Print each image's library sha and `revision_match`,
+    so the operator can see which bases can simulate (W09: only `matched`
+    revisions).
+  - **Launch.**
+    - Start `.venv/bin/python -m src.main --config <generated> --profile
+      nissan-xterra-2008` (`--profile` overridable) as a child process.
+    - Wait for the dashboard to answer, with a stated timeout.
+    - Open the ROM Editor's hash route in a browser. On WSL use the Windows
+      browser (`cmd.exe /c start`, or `wslview` if present), elsewhere
+      `webbrowser`; `--no-browser` skips this.
+    - Ctrl+C stops the child cleanly.
+    - A port already in use is refused by name before launch.
+    - Never `sudo`; never touch `/etc/canary` or `/data/canary`.
+  - **Accept:**
+    - Unit tests of the config builder: the overrides are applied, it
+      validates, nothing lands under the checkout, and `inside_checkout` is
+      refused.
+    - Token persistence and permissions.
+    - ROM import idempotence on a synthetic image, and the `.bin` skip.
+    - Browser-command selection (WSL vs not).
+    - Port-in-use refusal.
+    - A smoke test: launch with `--no-browser` on a free port, get the
+      dashboard's index and a control route with the token, stop the child,
+      and confirm `git status` shows nothing new in the checkout.
+    - A real run on this laptop with the operator's ROM dir: the ROM Editor
+      lists the images and a simulate job completes.
+    - A README section "Desk mode (no truck)" with the one command.
+
 ## Not in scope (named so they are not implied)
 
 - **Spark, torque, knock, power:** `compare_roms` traces ignition edits but
