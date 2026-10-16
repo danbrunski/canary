@@ -25,7 +25,7 @@ import-time exception. Deliberately lazy backend registries are not targets.
 | [R17](archive/R17-recipe-definitions.md) | Recipe definitions independent of the fitting engine | M / artifact contracts | before R20 refit caller migration |
 | [R18](archive/R18-memory-burst-scheduler.md) | Burst planning and accounting have one owner | L / collection timing | none |
 | [R19](archive/R19-dashboard-page-modules.md) | Logs and Analysis pages composed from focused views | M / UI behavior | none |
-| [R20](R20-behavior-validation.md) | Validation schema, pairing, evaluation, metrics and evidence separated | L / evidence and publication | R17; coordinate with R15 |
+| [R20](archive/R20-behavior-validation.md) | Validation schema, pairing, evaluation, metrics and evidence separated | L / evidence and publication | R17; coordinate with R15 |
 | [R21](R21-config-schemas.md) | Configuration schemas organized behind compatible imports | M–L / broad import surface | last, after overlapping moves |
 
 Size is a relative planning estimate, not a promised duration. The two final

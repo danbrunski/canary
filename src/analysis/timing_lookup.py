@@ -60,10 +60,8 @@ from typing import Any, Literal
 import numpy as np
 import pandas as pd
 
-from src.analysis.behavior_validation import (
-    evaluate_rows,
-    stamp_profile_exclusions,
-)
+from src.analysis.behavior_validation_evaluation import evaluate_rows
+from src.analysis.behavior_validation_inputs import stamp_profile_exclusions
 from src.analysis.ecu_state_models import TRIM_VALUE_MASK, trim_lookup
 from src.analysis.operating_context import (
     ACQUIRED,

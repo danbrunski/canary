@@ -18,7 +18,7 @@ import pandas as pd
 import pytest
 
 import scripts.evaluate_behavior_models as eval_cli
-from src.analysis import behavior_validation
+from src.analysis import behavior_validation_inputs
 from src.analysis.behavior_validation import (
     AXIS_PAIRING_COLUMN,
     AXIS_PAIRING_POLICY_COLUMN,
@@ -446,7 +446,9 @@ def test_a_recipe_without_axis_pairing_is_graded_on_the_grid_unchanged(
     def no_reads(*_args: object, **_kwargs: object) -> None:
         raise AssertionError("a grid-graded recipe read its sessions")
 
-    monkeypatch.setattr(behavior_validation, "read_model_reads", no_reads)
+    # graded_frame reads read_model_reads from its owner (R20): a patch on the
+    # facade would replace a name nothing calls.
+    monkeypatch.setattr(behavior_validation_inputs, "read_model_reads", no_reads)
     reads = SessionReads((tmp_path / "2026-08-01T120000",))
     supplied = fit_recipe(recipe, corpus, validation_context=ValidationContext(reads=reads))
     _, bare_evidence = _evidence(bare)

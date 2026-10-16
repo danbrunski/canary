@@ -27,7 +27,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from src.analysis.behavior_validation import file_sha256, validation_document_path
+from src.analysis.behavior_validation_schema import file_sha256, validation_document_path
 from src.behavior.accepted_baselines import load_accepted_baselines
 from src.behavior.behavior_decoder import deviation_model_name
 from src.behavior.behavior_models import (

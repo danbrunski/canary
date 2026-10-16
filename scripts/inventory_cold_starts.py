@@ -112,7 +112,7 @@ def sidecar(session: Path) -> dict[str, Any]:
         data = json.loads(path.read_text())
     except ValueError:
         return {"cold_start": None, "classified_at": "unreadable", "stale": None}
-    from src.analysis.behavior_validation import mode_labels_predate_fix
+    from src.analysis.behavior_validation_schema import mode_labels_predate_fix
 
     classified_at = str(data.get("classified_at") or "")
     kinds = {event.get("kind") for event in data.get("events", [])}

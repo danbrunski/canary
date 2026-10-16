@@ -52,15 +52,13 @@ from src.analysis.behavior_input_inventory import (
     trim_unit_checks,
     with_contract_context,
 )
-from src.analysis.behavior_validation import (
-    PieceRanges,
-    build_evaluation_frame,
-    group_drives,
+from src.analysis.behavior_validation_frame import build_evaluation_frame
+from src.analysis.behavior_validation_schema import (
     load_validation_document,
-    piece_time_ranges,
     validation_document_path,
 )
 from src.analysis.recipes.catalog import default_recipes
+from src.analysis.splits import PieceRanges, group_drives, piece_time_ranges
 from src.behavior.behavior_models import CURRENT_SCHEMA_VERSION, BehaviorModels
 from src.features.feature_paths import DEFAULT_DIDS_PATH
 from src.log import configure_logging
