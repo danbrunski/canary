@@ -1592,6 +1592,48 @@ refusal carries a stable `reason` string that tests assert by name.
     - **Still owed (truck and E07.4).** Score those drives (and later ones)
       per rpm × byte cell against this prediction with E07.4's case
       machinery. Until then the item stays `[~]`.
+    - **A second prediction for the same flash, written 2026-10-16
+      (07:01–07:08Z) before any post-flash pair exists.** E09.12 found that
+      no point of the first prediction resolves beyond the 2.44 % ΔBFS floor:
+      its design came from one mostly idle drive. A new prediction is a new
+      artifact with its own commit; the first is kept as recorded and is not
+      re-run or re-dated. At this moment none of the five post-flash
+      recordings above holds a co-observed BFS read (0 of 33 within 0.3 s)
+      or any `mem:ECM_TARGET_EQUIV_RATIO` read. So this prediction cannot
+      have been fitted to post-flash data.
+      - **Directory:** `~/canary-data/sim/predictions/fuel-comp-restore-2026-10-04-wot/`.
+      - **Design:** `design drives` on four WOT-rich pre-flash drives on
+        ZS44A-20260920: `_capture-tuning-2026-09-21T223734`,
+        `_capture-tuning-2026-09-21T232153`, `_capture-tuning-2026-09-22T170459`
+        and `_capture-tuning-2026-09-22T235224`.
+        - Plant: the simulator's declared fuel-mv-2 (E08.11, `212eadf`).
+        - Battery stated at 14.0 V (unmeasured), gasoline.
+        - 917 points, 597.6 s of weight; enrichment 16.9 s, closed loop
+          541.4 s.
+        - Design sha256
+          `f4332b8d0890c2de9805fb35e01c895a8a0c6621752e743399d95193dc5688fa`;
+          `design.json` `20e516956daa5b2a…2cdf`; `design.parquet`
+          `b648148c4857c018…000e`.
+      - **Run:** 20260920 → `ZS44A-Tuned-20261004.OsirisROM`, 200 draws,
+        seed 1, trims 0/0, `ecu_reflash`, 79 s.
+        - `result_digest`
+          `6180dbcd0f6e05ce63b2caa1333890f24105e9d69734c4c659e74cd114efef71`.
+        - `result.json` `4f5db38a735a6fa3570c56f6bd2b06ac8266748f7654b99bbe9d27f477b81309`.
+        - `report.html` `4cde07b016eb972f838adfd1eab6eb010c1d0bbb423cf43920f1ff056b983fbd`.
+        - `traces.parquet` `760bcea01ef22fb1256a8855779b0d79eaaf516970e5b362fa79c7020b95381f`.
+      - **What it can test.**
+        - ΔBFS: only 3 of 917 points predict |p50| above the 2.44 % floor
+          (+3.82 to +3.85 %). The flash's BFS effect sits mostly below what
+          a cross-drive comparison resolves, and the large changes occur
+          only in brief WOT pulls, which the steady rule rarely keeps.
+        - Δφ: 27 points predict a nonzero change (the first prediction has
+          5), from −0.71 % to +1.29 %. Closed-loop φ's floor is 0 %, so these
+          resolve, and 27 clears E07.4's 20-pair minimum, provided the
+          post-flash drive logs `mem:ECM_TARGET_EQUIV_RATIO` at those
+          operating points. The `tuning` profile does.
+        - So this is the prediction to score Δφ against. Wiring E09.12's
+          scoring to a second artifact is owed there.
+      - **Order evidence:** the git commit recording this block.
 
 - [ ] **E08.8 — Later: dashboard and Pi.** Deferred until E08.1–E08.7 pass.
   - An Engine Tuning page that takes an edit spec, runs a bounded job, and
@@ -1934,7 +1976,7 @@ refusal carries a stable `reason` string that tests assert by name.
       test_rom_editor_private_rom: 12 passed, 1 xfailed (W09.6's WOT xfail,
       unchanged).
 
-- [~] **E08.11 — The simulator runs fuel-mv-2 (identified VE), not
+- [x] **E08.11 — The simulator runs fuel-mv-2 (identified VE), not
   fuel-mv-1.** Operator decision 2026-10-15, after E08.10's finding. Do it
   after E08.10 lands; the two touch the same code.
   - **Why.**
@@ -2176,13 +2218,13 @@ refusal carries a stable `reason` string that tests assert by name.
       on fuel-mv-2 that drive keeps 3 light-load pairs and no WOT ones.
   - **Accept 4:** brackets match fuel-mv-2's registry
     (`test_fuel_mv_2s_uncertainty_brackets_are_its_registrys`, above).
-  - **Accept 5 (W09)** `[~]`: the W09 session has switched `rom_editor.py`
+  - **Accept 5 (W09)** `[x]` (`212eadf`, pushed 2026-10-16): the W09 session has switched `rom_editor.py`
     to `load_sim_kit`. It re-measured on the real ZS44A-20261004 image after
     the rework below: the form grid places 201, with 14 `outside_ve_fit` and
     9 `manifold_above_ambient_in_bracket`. It re-pinned
     `tests/test_rom_editor_private_rom.py` (10 passed, 1 strict xfail) and
     measured the default Simulate at 7.8 s for 200 draws and 13.1 s for
-    1,000. This box is ticked when that commit lands on top of E08.11's.
+    1,000. That commit landed on top of E08.11's (`3720c16a` → `212eadf7`).
   - `~/canary-data/sim/predictions/` was not touched. The 10-04 prediction
     stays as recorded on fuel-mv-1.
   - **Rework 2026-10-16 (verifier FAIL; operator decision: fix both).**
