@@ -1,7 +1,7 @@
 import { TableScroll } from "../../../components/TableScroll";
 import { formatDecoded } from "../../../lib/romEditor";
 import { buttonClass } from "../../../styles";
-import type { RomEditPreview } from "../../../types/romEditor";
+import type { RomEditPreview, RomLevers } from "../../../types/romEditor";
 import type { RomTableValues } from "../../../types/romLibrary";
 import { CellGrid } from "./CellGrid";
 
@@ -9,10 +9,44 @@ function sameTable(a: RomTableValues, id: string, slot: number | null) {
   return a.id === id && (a.slot ?? null) === slot;
 }
 
-/** What a preview returned: the after tables with changed cells outlined and
- *  their change in percent, the old -> new cell list in raw and decoded, what
- *  the change reaches, and the spec download. No candidate image is offered
- *  or linked anywhere: only its hash, and the spec that reproduces it. */
+/** What this edit can and cannot show: the classifier's `messages`, verbatim
+ *  and in order, one per line. The lines are made once, in
+ *  `src/analysis/rom_levers.py`, from the ROM map and the comparison of the two
+ *  images, and `tools/rom_sim.py inspect` prints the same ones, so nothing is
+ *  reworded, grouped, coloured or tabulated here: a string the page wrote
+ *  itself is a second answer to the same question.
+ *
+ *  The block is absent only when `messages` is empty. The classifier never
+ *  sends that (its floor is "the edit reaches no output"), so an empty list is
+ *  a payload that did not come from it, and the absence is not an all-clear. */
+function LeverMessages({ levers }: { levers: RomLevers }) {
+  if (levers.messages.length === 0) return null;
+  return (
+    <section
+      aria-label="What this edit can and cannot show"
+      className="space-y-1 rounded-lg border border-border p-3"
+    >
+      <h3 className="text-base font-semibold">What this edit can and cannot show</h3>
+      <p className="text-xs text-fg-dim">
+        The lines <span className="font-num">rom_sim inspect</span> prints for this edit: for each
+        output, whether Simulate (below) can give a number and, if not, what blocks it.
+      </p>
+      <ul className="space-y-1 text-sm">
+        {levers.messages.map((message) => (
+          <li key={message} className="break-words">
+            {message}
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
+}
+
+/** What a preview returned: what the edit can and cannot show, the after
+ *  tables with changed cells outlined and their change in percent, the old ->
+ *  new cell list in raw and decoded, what the change reaches, and the spec
+ *  download. No candidate image is offered or linked anywhere: only its hash,
+ *  and the spec that reproduces it. */
 export function PreviewResult({
   preview,
   baseTables,
@@ -36,6 +70,8 @@ export function PreviewResult({
         not flashable and stays in the simulator: there is no image to download. Only the spec is
         offered.
       </p>
+
+      <LeverMessages levers={preview.levers} />
 
       {preview.tables.map((table) => {
         const base = baseTables.find((item) => sameTable(item, table.id ?? "", table.slot ?? null));

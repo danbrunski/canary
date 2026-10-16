@@ -347,7 +347,11 @@ async def preview_rom_edit(
     The response carries ``spec``, ``spec_yaml``, ``spec_sha256``,
     ``candidate_sha256``, ``provenance`` (old -> new raw values per cell, the
     changed ranges, ``effect.changed_nodes`` and ``moved_lookups``), ``tables``
-    (the candidate's edited tables) and ``sim_base``. ``sim_base.ok`` is whether
+    (the candidate's edited tables), ``levers`` and ``sim_base``. ``levers`` says
+    which lever the edit pulls and, per output, whether a number can be given or
+    what blocks it (no torque plant, not mapped, plant not qualified, closed
+    loop: trim authority undecoded): read ``levers.messages``, one line each,
+    the same text ``rom_sim inspect`` prints. ``sim_base.ok`` is whether
     ``simulate_rom_edit`` is offered: false unless the image is a recorded
     revision (``reason: "base_not_a_recorded_revision"``).
 

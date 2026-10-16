@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import pickle
+import shutil
 import subprocess
 import sys
 import textwrap
@@ -23,12 +24,13 @@ from pydantic import ValidationError
 
 from src.analysis import rom_editor, sim_montecarlo
 from src.analysis.ecu_application import ApplicationModelRefusalError
-from src.analysis.fuel_plant import FuelPlantRefusalError
+from src.analysis.fuel_plant import FuelPlantRefusalError, plant_qualification
 from src.analysis.paired_scenarios import OUTPUTS, SimKit
 from src.analysis.paired_steady import TRIM_AUTHORITY_UNDECODED
 from src.analysis.rom_edit_spec import build_candidate, load_edit_spec
-from src.analysis.rom_effects import RomEffectRefusalError
+from src.analysis.rom_effects import RomEffectRefusalError, compare_roms
 from src.analysis.rom_image import ImageFormatError, revision_match, sha256_hex
+from src.analysis.rom_levers import classify_edit
 from src.analysis.sim_contract import SimulationRefusalError
 from src.analysis.sim_montecarlo import DESIGN_ASSUMPTION_PREFIX, MonteCarloResult
 from src.vehicle.tune_revisions import ReferenceImage, TuneRevision, TuneRevisionRegistry
@@ -184,6 +186,115 @@ def test_a_preview_is_build_candidate_on_the_equivalent_yaml_spec(
         "reason": None,
     }
     json.dumps(preview)
+
+
+def _classified(kit: SimKit, image: bytes, candidate: bytes, cells: Any) -> dict[str, Any]:
+    """``classify_edit`` called the way ``tools/rom_sim.py inspect`` calls it,
+    on the kit's own plant: the answer the preview must equal."""
+    report = compare_roms(
+        image,
+        candidate,
+        kit.rom_map,
+        kit.model,
+        kit.model_sha256,
+        base_slot=1,
+        candidate_slot=1,
+        slot_source="default_slot",
+        contract=kit.contract,
+        mode="conditional_rom_comparison",
+    )
+    return classify_edit(
+        report,
+        rom_map=kit.rom_map,
+        model=kit.model,
+        contract=kit.contract,
+        qualification=plant_qualification(kit.plant),
+        cells=cells,
+    ).to_dict()
+
+
+@pytest.mark.parametrize(
+    ("edit", "lever", "cells"),
+    [
+        (FC_EDIT, "fuel_compensation", 20),
+        (K_EDIT, "k_constant", 1),
+        (
+            {"table": "fuel_targets", "slot": 1, "cells": [[7, 7], [7, 6]], "set_raw": 151},
+            "fuel_targets",
+            2,
+        ),
+    ],
+)
+def test_a_preview_names_the_lever_and_says_what_blocks_a_number(
+    kit_and_image: tuple[SimKit, bytes],
+    matched: dict[str, Any],
+    edit: dict[str, Any],
+    lever: str,
+    cells: int,
+) -> None:
+    """E09.14b: ``levers`` is ``classify_edit`` on the run's comparison, whole
+    and unreworded; the page lists ``levers["messages"]``."""
+    kit, image = kit_and_image
+    preview = rom_editor.preview_edits(image, matched, "levers", [edit], PROFILE, kit=kit)
+    levers = preview["levers"]
+    assert [e["lever"] for e in levers["levers"]] == [lever]
+    assert levers["levers"][0]["changed_cells"] == cells
+    assert levers["schema_version"] == 1 and levers["regime"] is None
+    assert levers["messages"] and all(isinstance(m, str) for m in levers["messages"])
+    candidate = build_candidate(
+        rom_editor.editor_spec(rom_editor.library_base(image, matched), "levers", [edit]),
+        kit.rom_map,
+        rom_editor.library_base(image, matched),
+        model=kit.model,
+        model_sha256=kit.model_sha256,
+        slot=1,
+        slot_source="default_slot",
+    )
+    assert levers == _classified(kit, image, candidate.image, preview["provenance"]["cells"])
+    # A preview is data: JSON-clean, and it never carries image bytes.
+    assert json.loads(json.dumps(preview)) == preview
+    assert not _bytes_in(preview)
+
+
+def _bytes_in(value: Any) -> bool:
+    if isinstance(value, (bytes, bytearray, memoryview)):
+        return True
+    if isinstance(value, dict):
+        return any(_bytes_in(v) for v in value.values())
+    if isinstance(value, (list, tuple)):
+        return any(_bytes_in(v) for v in value)
+    return False
+
+
+def test_an_edit_across_two_tables_names_both_levers_and_travels_through_the_job(
+    kit_and_image: tuple[SimKit, bytes], matched: dict[str, Any], tmp_path: Path
+) -> None:
+    kit, image = kit_and_image
+    params = _params(image, tmp_path, matched, label="two", edits=[FC_EDIT, K_EDIT])
+    job = rom_editor.run_job("rom_preview", params, kit=kit)
+    assert [e["lever"] for e in job["levers"]["levers"]] == ["fuel_compensation", "k_constant"]
+    # The child's answer crosses the process boundary: it pickles, and the strings survive.
+    assert pickle.loads(pickle.dumps(job))["levers"]["messages"] == job["levers"]["messages"]
+    assert any(
+        m.startswith("Fuel Comp + K -> base_fuel_schedule_word: a number can be given")
+        for m in job["levers"]["messages"]
+    ), job["levers"]["messages"]
+
+
+def test_a_vehicle_with_no_declared_simulator_plant_is_refused_a_preview_by_name(
+    kit_and_image: tuple[SimKit, bytes], matched: dict[str, Any], tmp_path: Path
+) -> None:
+    """The classification qualifies the plant ``sim_kit.yaml`` declares, never
+    the contract's default, so a profile without one cannot be previewed: the
+    refusal names it (a preview that said nothing about the plant would read as
+    "nothing blocks")."""
+    _, image = kit_and_image
+    profile = tmp_path / "no_sim_kit"
+    shutil.copytree(PROFILE, profile, ignore=shutil.ignore_patterns("_candidates", "_prior"))
+    (profile / "sim_kit.yaml").unlink()
+    params = _params(image, tmp_path, matched, profile_dir=str(profile), label="x", edits=[FC_EDIT])
+    refused = rom_editor.run_job("rom_preview", params)["refused"]
+    assert (refused["kind"], refused["reason"]) == ("simulation", "sim_kit_undeclared")
 
 
 def test_an_unrecorded_base_previews_by_file_and_says_why_it_cannot_simulate(

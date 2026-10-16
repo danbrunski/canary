@@ -257,7 +257,7 @@ Control endpoints:
 | `PATCH /control/rom/library/{sha}` / `DELETE /control/rom/library/{sha}` | set the label (`{"label": str \| null}`, the only editable field) / remove the entry |
 | `GET /control/rom/library/{sha}/tables` | every mapped table in every map slot: raw cells, decoded cells where a decode is declared, axes, confidence and evidence (W08.4) |
 | `GET /control/rom/compare?a=<sha>&b=<sha>` | changed byte ranges a -> b merged with a 16-byte gap, each labelled with the regions and tables it overlaps; table ranges carry per-cell old/new values, decoded where declared (W08.5) |
-| `POST /control/rom/library/{sha}/edits/preview` | ROM Editor preview (W09.2): body `{label, edits}`, `edits` being E08.1 edit dicts on the fuel chain's Map 1 (`fuel_targets`, `fuel_compensation`, `k_constant`, slot 1). Returns the edit spec (JSON, YAML, sha256), the candidate's sha256, its E08.1 provenance (cells old -> new, changed ranges, reach) and the edited tables' after values. Runs in the thread pool, never deferred; nothing is stored. 404 unknown sha, 409 no map, 400 `edit_refused`, 422 body. See [ROM Editor](#rom-editor-preview-and-simulate-w09). |
+| `POST /control/rom/library/{sha}/edits/preview` | ROM Editor preview (W09.2): body `{label, edits}`, `edits` being E08.1 edit dicts on the fuel chain's Map 1 (`fuel_targets`, `fuel_compensation`, `k_constant`, slot 1). Returns the edit spec (JSON, YAML, sha256), the candidate's sha256, its E08.1 provenance (cells old -> new, changed ranges, reach), the edited tables' after values and `levers` (which lever the edit pulls and what blocks a number per output, E09.14b). Runs in the thread pool, never deferred; nothing is stored. 404 unknown sha, 409 no map, 400 `edit_refused`, 422 body. See [ROM Editor](#rom-editor-preview-and-simulate-w09). |
 | `POST /control/rom/library/{sha}/simulate` | ROM Editor simulate (W09.2): body is one `SimRequest`, every field required (nothing is defaulted). Runs the edits on a recorded base over a stated rpm x load grid, base vs candidate, paired Monte Carlo draws, aggregated per cell. In the workbench child (job `rom_sim`): `409 analysis_deferred` while a capture records, `409 analysis_busy` while another child runs, `503 analysis_unavailable`; a refusal is `400 sim_refused`; 404 unknown sha, 409 no map, 422 body. Nothing is stored; the candidate never leaves the simulator. See [ROM Editor](#rom-editor-preview-and-simulate-w09). |
 | `GET /control/rom/backup` / `POST /control/rom/backup` / `POST /control/rom/backup/cancel` | ECU flash backup job (W08.7), read-only: state + live preconditions / start (202, or 409 naming every refusing precondition) / cancel a running read (409 when none runs) |
 
@@ -543,9 +543,35 @@ Body (`extra` fields are a 422): `{"label": "light load 2 % richer", "edits": [E
   "tables": [ <one entry per edited (table, slot), the candidate's values, in the GET .../tables shape:
                id, kind, name, label, slot, offset, end, rows, cols, dtype, role, unit, raw, decoded,
                decode, axes, confidence, evidence, and for fuel_compensation editor_disagreement> ],
+  "levers": {"schema_version": 1, "tool": "rom_levers", "tool_version": "1",
+             "outcome": "unevaluable", "reason": null, "regime": null,
+             "levers": [{"lever": "fuel_compensation", "label": "Fuel Comp", "tables": ["fuel_compensation"],
+                         "slots": [1], "byte_class": "consumed", "start": 919187, "end": 919239,
+                         "changed_bytes": 20, "changed_cells": 20, "nodes": ["fuel_comp_lookup"], "blockers": []}],
+             "outputs": [{"output": "base_fuel_schedule_word", "source": "application_model", "status": "changed",
+                          "levers": ["Fuel Comp"], "blockers": [], "assumes_conditioned": ["fuel_comp_load_byte"],
+                          "refused_if_conditioned": [], "reached": true, "number": true, "design_dependent": true},
+                         "..."],
+             "messages": ["Fuel Comp -> base_fuel_schedule_word: a number can be given (for points that state only the fill byte)",
+                          "Fuel Comp -> injector_pulse_ms: plant not qualified: ...; closed loop: trim authority undecoded",
+                          "..."]},
   "sim_base": {"ok": true, "status": "matched", "revision": "ZS44A-20261004", "reason": null}
 }
 ```
+
+`levers` is `rom_levers.classify_edit(...).to_dict()` (E09.14b) on the comparison the
+simulator would use (`compare_roms` under the simulation contract's mode), qualified on
+the plant `sim_kit.yaml` declares and with no regime stated (so the closed-loop blocker
+is listed). **`levers.messages` is the text to show**: one line per lever and per
+reached output, in a stable order, and the very strings
+`python -m tools.rom_sim inspect` prints for the same edit (`levers` there is the same
+object). Nothing in the daemon, the dashboard or the MCP tool words one of them; a
+consumer lists them verbatim. An output reads either `a number can be given (...)` (the
+parenthesis names what a design point must state) or what blocks one: `no torque plant`
+(ignition outputs; no plant exists for them), `not mapped` (changed bytes outside
+`rom_map.yaml`), `plant not qualified: <why>`, `closed loop: trim authority undecoded`,
+`unmodelled: <nodes>`. The classifier's floor is one line (`the edit reaches no output`),
+so `messages` is never empty. The page and the MCP tool read the same body.
 
 `spec.base` is `{"revision": R, ...}` when the library entry's `revision_match`
 is `matched` (the YAML then resolves through `tune_revisions.yaml` on any
@@ -564,7 +590,9 @@ for an edit or the image (the reasons above, including the image's own
 `wrong_program`), and the other classes the code beneath can raise:
 `application_model`, `image_format` (reason `image_format`), `fuel_plant`,
 `sim_design`, `simulation`. The `reason` list is open-ended; every class in the
-table is a 400, never a 500.
+table is a 400, never a 500. The preview classifies the edit on the plant the
+vehicle's `sim_kit.yaml` declares, so a vehicle without one is refused here as
+`simulation` / `sim_kit_undeclared` rather than previewed unclassified.
 
 ### `POST /control/rom/library/{sha}/simulate`
 

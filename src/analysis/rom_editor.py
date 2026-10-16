@@ -7,8 +7,12 @@ edits), so the route (W09.2), the workbench child and the tests run the same
 code:
 
 * :func:`preview_edits` -- the E08.1 edit spec the page's edits make, the
-  candidate's provenance (cells old -> new, changed ranges, reach) and the
-  edited tables' after values. Cheap: the order of ``GET .../tables``.
+  candidate's provenance (cells old -> new, changed ranges, reach), the
+  edited tables' after values, and ``levers`` (E09.14b): which lever the edit
+  pulls and what blocks a number for each output, from
+  :func:`src.analysis.rom_levers.classify_edit` (the strings
+  ``tools/rom_sim.py inspect`` prints; this module words none of them). Cheap:
+  the order of ``GET .../tables``, plus the simulator kit's load.
 * :func:`simulate_edits` -- a stated rpm x load grid (E08.2), paired Monte
   Carlo draws (E08.3) and per-cell aggregation (E08.4), base vs candidate.
 * :func:`run_job` -- the workbench child's entry point.
@@ -53,12 +57,8 @@ from typing import Annotated, Any, Literal
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, StrictInt, ValidationError
 
-from src.analysis.ecu_application import (
-    ApplicationModel,
-    ApplicationModelRefusalError,
-    load_application_model,
-)
-from src.analysis.fuel_plant import FuelPlantRefusalError
+from src.analysis.ecu_application import ApplicationModel, ApplicationModelRefusalError
+from src.analysis.fuel_plant import FuelPlantRefusalError, plant_qualification
 from src.analysis.paired_scenarios import LearnedState, PairedScenario, SimKit
 from src.analysis.rom_edit_spec import (
     BaseImage,
@@ -67,9 +67,10 @@ from src.analysis.rom_edit_spec import (
     build_candidate,
     parse_edit_spec,
 )
-from src.analysis.rom_effects import RomEffectRefusalError, compare_roms
+from src.analysis.rom_effects import EffectReport, RomEffectRefusalError, compare_roms
 from src.analysis.rom_image import ImageFormatError, sha256_hex, table_values
-from src.analysis.rom_map import RomMap, load_rom_map
+from src.analysis.rom_levers import classify_edit
+from src.analysis.rom_map import RomMap
 from src.analysis.sim_cells import Grid, aggregate_cells, fuel_comp_axes, target_afr_axes
 from src.analysis.sim_contract import EcuIdentity, PlantIdentity, SimulationRefusalError
 from src.analysis.sim_design import (
@@ -252,14 +253,35 @@ class _EditContext:
     model: ApplicationModel
     model_sha256: str
 
+    @classmethod
+    def of(cls, kit: SimKit) -> _EditContext:
+        return cls(kit.rom_map, kit.model, kit.model_sha256)
 
-def _edit_context(profile_dir: Path, kit: SimKit | None) -> _EditContext:
-    """The map and application model an edit resolves and traces through:
-    the kit's, else the profile's (without loading the rest of a kit)."""
-    if kit is not None:
-        return _EditContext(kit.rom_map, kit.model, kit.model_sha256)
-    model, model_sha = load_application_model(profile_dir)
-    return _EditContext(load_rom_map(profile_dir), model, model_sha)
+
+def _sim_kit(profile_dir: Path, kit: SimKit | None) -> SimKit:
+    """The kit an edit resolves, traces and is classified through: the
+    caller's (tests on a synthetic image), else the simulator's own, the one
+    ``sim_kit.yaml`` declares (:func:`load_sim_kit`, the loader
+    ``tools/rom_sim.py`` and :func:`simulate_edits` use)."""
+    return kit if kit is not None else load_sim_kit(profile_dir).kit
+
+
+def _effects(base_image: bytes, candidate_image: bytes, kit: SimKit) -> EffectReport:
+    """``compare_roms`` on the two images under the run's contract mode, as the
+    simulator's ``rom_report`` has it. Where a quantity the mode holds fixed
+    makes an output ``unevaluable``, this is the report that says so."""
+    return compare_roms(
+        base_image,
+        candidate_image,
+        kit.rom_map,
+        kit.model,
+        kit.model_sha256,
+        base_slot=SIM_SLOT,
+        candidate_slot=SIM_SLOT,
+        slot_source=SLOT_SOURCE,
+        contract=kit.contract,
+        mode=MODE,
+    )
 
 
 def _candidate(base: BaseImage, spec: EditSpec, ctx: _EditContext) -> tuple[bytes, dict[str, Any]]:
@@ -288,14 +310,28 @@ def preview_edits(
     sha256: str | None = None,
     kit: SimKit | None = None,
 ) -> dict[str, Any]:
-    """The spec, the candidate's provenance and the edited tables' after
-    values. ``kit`` replaces the profile's map and application model (tests
-    on a synthetic image)."""
+    """The spec, the candidate's provenance, the edited tables' after values,
+    and ``levers``: which lever the edit pulls and what blocks a number for
+    each output (E09.14b). ``levers`` is
+    :meth:`~src.analysis.rom_levers.LeverClassification.to_dict` of
+    :func:`~src.analysis.rom_levers.classify_edit` on the comparison the run
+    would use, built the way ``tools/rom_sim.py inspect`` builds it, so
+    ``levers["messages"]`` is the CLI's text for the same edit and nothing
+    here words it. ``kit`` replaces the profile's simulator kit (tests on a
+    synthetic image)."""
     base = library_base(image, revision_match, sha256=sha256)
     spec = editor_spec(base, label, edits)
-    ctx = _edit_context(Path(profile_dir), kit)
-    candidate_image, provenance = _candidate(base, spec, ctx)
+    kit = _sim_kit(Path(profile_dir), kit)
+    candidate_image, provenance = _candidate(base, spec, _EditContext.of(kit))
     edited = {(e.table, e.slot) for e in spec.edits}
+    levers = classify_edit(
+        _effects(base.image, candidate_image, kit),
+        rom_map=kit.rom_map,
+        model=kit.model,
+        contract=kit.contract,
+        qualification=plant_qualification(kit.plant),
+        cells=provenance["cells"],
+    )
     return {
         "tool": TOOL,
         "tool_version": TOOL_VERSION,
@@ -305,8 +341,9 @@ def preview_edits(
         "candidate_sha256": sha256_hex(candidate_image),
         "provenance": provenance,
         "tables": [
-            t for t in table_values(candidate_image, ctx.rom_map) if (t["id"], t["slot"]) in edited
+            t for t in table_values(candidate_image, kit.rom_map) if (t["id"], t["slot"]) in edited
         ],
+        "levers": levers.to_dict(),
         "sim_base": sim_base(revision_match),
     }
 
@@ -475,18 +512,7 @@ def _simulate(
         draws=request.draws,
         seed=request.seed,
     )
-    effects = compare_roms(
-        base.image,
-        candidate_image,
-        kit.rom_map,
-        kit.model,
-        kit.model_sha256,
-        base_slot=SIM_SLOT,
-        candidate_slot=SIM_SLOT,
-        slot_source=SLOT_SOURCE,
-        contract=kit.contract,
-        mode=MODE,
-    )
+    effects = _effects(base.image, candidate_image, kit)
     axes = (
         fuel_comp_axes(kit, base.image, slot=SIM_SLOT)
         if request.grid == "fuel_comp"
@@ -546,10 +572,8 @@ def simulate_edits(
     _recorded(base)
     _bounded(request)
     spec = editor_spec(base, request.label, request.edits)
-    kit = kit if kit is not None else load_sim_kit(profile_dir).kit
-    candidate_image, provenance = _candidate(
-        base, spec, _EditContext(kit.rom_map, kit.model, kit.model_sha256)
-    )
+    kit = _sim_kit(profile_dir, kit)
+    candidate_image, provenance = _candidate(base, spec, _EditContext.of(kit))
     out = _simulate(
         base,
         candidate_image,

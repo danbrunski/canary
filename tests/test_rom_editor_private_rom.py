@@ -37,8 +37,10 @@ fuel-mv-2 (E08.11, ``sim_kit.yaml``), the design places 210 of those cells: the
 
 from __future__ import annotations
 
+import contextlib
 import dataclasses
 import functools
+import io
 import json
 import pickle
 from collections import Counter
@@ -72,6 +74,7 @@ from src.vehicle.tune_revisions import TuneRevisionRegistry, load_tune_revisions
 from tests.configs import isolated_config
 from tests.rom_fixtures import OPERATOR_ROMS, PROFILE, operator_image
 from tests.test_rom_editor_api import AUTH, OCTET, CountingExecutor, make_app
+from tools import rom_sim
 
 pytestmark = pytest.mark.slow
 
@@ -887,6 +890,56 @@ def test_the_fuel_comp_region_edit_marks_its_cells_and_moves_only_what_reads_the
                 assert reached[i].any(), (cell["row"], cell["col"], name, status)
             if not reached[i].any():
                 assert status in ("unchanged", "unsupported", "not_reached"), (cell, name)
+
+
+def test_the_fuel_comp_preview_says_what_a_number_can_be_given_for_and_what_blocks_one(
+    real: Real,
+) -> None:
+    """E09.14b on the real image: the page's preview of E08.1's Fuel Comp edit
+    names its lever, gives the two ECU outputs a number, and says the plant's
+    outputs wait on the plant and on the closed loop; and ``inspect`` on the
+    same spec, through the CLI, prints the same strings."""
+    spec = load_edit_spec(FIXTURE_SPEC)
+    edits = [e.model_dump(mode="json", exclude_none=True) for e in spec.edits]
+    preview = rom_editor.preview_edits(
+        real.image, real.revision_match, spec.label, edits, PROFILE, sha256=real.sha256
+    )
+    levers = preview["levers"]
+    assert [e["lever"] for e in levers["levers"]] == ["fuel_compensation"]
+    assert levers["levers"][0]["changed_cells"] == len(FC_EDITED_CELLS)
+    messages = levers["messages"]
+    said = {
+        m.split(" -> ", 1)[1].split(": ", 1)[0]: m.split(": ", 1)[1]
+        for m in messages
+        if " -> " in m
+    }
+    for output in ("base_fuel_schedule_word", "target_equiv_ratio"):
+        assert said[output] == "a number can be given (for points that state only the fill byte)"
+        assert f"Fuel Comp -> {output}: {said[output]}" in messages
+    # The simulator's own plant (sim_kit.yaml), whose qualification is the plant's
+    # to say; the closed loop's trim authority is undecoded.
+    plant = real.kit.plant
+    why = fuel_plant.plant_qualification(plant).reason or ""
+    assert why, "the plant is qualified: the strings below no longer apply"
+    for output in (
+        "injector_pulse_ms",
+        "fuel_trim_total_pct",
+        "delivered_lambda",
+        "fuel_per_event_g",
+    ):
+        assert said[output].startswith("plant not qualified: "), said
+        assert said[output].endswith("; closed loop: trim authority undecoded"), said
+    # The same edit through the CLI, the base resolved from the operator's ROM directory.
+    out = io.StringIO()
+    with contextlib.redirect_stdout(out):
+        code = rom_sim.main(
+            ["inspect", "--profile", str(PROFILE), "--edits", str(FIXTURE_SPEC)]
+            + ["--rom-dir", str(OPERATOR_ROMS[IMAGE_KEY].parent)]
+        )
+    cli = json.loads(out.getvalue())
+    assert code == 0, cli
+    assert cli["candidate_sha256"] == preview["candidate_sha256"]
+    assert cli["levers"] == levers
 
 
 def test_a_real_result_crosses_run_job_and_pickles(

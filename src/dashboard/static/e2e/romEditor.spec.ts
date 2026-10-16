@@ -3,6 +3,7 @@ import { readFile } from "node:fs/promises";
 import { expect, test, type Locator, type Page } from "@playwright/test";
 
 import { STATUSES } from "../src/lib/romSimView";
+import { LEVERS_FUEL_COMP } from "../src/test/romLeverFixtures";
 import { ENTRY_K106, ENTRY_TUNED, ENTRY_UNRECORDED } from "../src/test/romLibraryFixtures";
 import { buildRequest, buildSimResult } from "../src/test/romSimFixtures";
 import type { RomEditPreviewRequest, RomSimRequest } from "../src/types/romEditor";
@@ -197,6 +198,14 @@ test("open a file, select one cell then a range, scale +2 %, preview, download t
   await expect(page.getByRole("region", { name: "Reached outputs" })).toContainText(
     "fuel_comp_lookup",
   );
+  // What the edit can and cannot show: the classifier's lines, verbatim and in
+  // order, drawn above the Simulate form (E09.14b).
+  const levers = page.getByRole("region", { name: "What this edit can and cannot show" });
+  await expect(levers.getByRole("listitem")).toHaveText(LEVERS_FUEL_COMP.messages);
+  await expect(levers).toContainText("closed loop: trim authority undecoded");
+  const leversBox = await levers.boundingBox();
+  const simulateBox = await page.getByRole("region", { name: "Simulate" }).boundingBox();
+  expect(leversBox?.y).toBeLessThan(simulateBox?.y ?? 0);
   await page.screenshot({ path: testInfo.outputPath("rom-editor-preview.png"), fullPage: true });
 
   // Download spec: a file named for the label, holding the spec the daemon returned.

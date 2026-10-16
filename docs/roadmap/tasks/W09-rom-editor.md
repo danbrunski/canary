@@ -115,6 +115,7 @@ acceptance runs on the real images.
 | W09.4 | `…/tuning/romEditor/SimForm.tsx`, `…/romEditor/SimResults.tsx`, tests | `RomEditorPage.tsx` |
 | W09.5 | — | `src/mcp_server/…`, `docs/mcp-server.md` |
 | W09.6 | `tests/test_rom_editor_private_rom.py`, `src/dashboard/static/e2e/romEditor.spec.ts` | this doc |
+| W09.10 | `tests/test_rom_levers_parity.py`, `src/dashboard/static/src/test/romLeverFixtures.ts`, `romLeverFixtures.test.ts`, `romLevers.fixture.json` | `rom_editor.py` (`preview_edits`), `PreviewResult.tsx`, `types/romEditor.ts`, `api/workbench.ts`, `docs/headless-api.md`, `docs/mcp-server.md`, the `preview_rom_edit` docstring |
 
 `src/analysis/rom_editor.py` is layer 5 (`tests/test_layering.py`). Like
 every E08 module, it imports no `src.control`, daemon, dashboard, MCP, `can` or
@@ -1301,6 +1302,128 @@ W09.6 is the orchestrator's own, on the ROM machine.
     `SimResults.test.tsx` +3 (hint, warning for flag 0 and 2, not for 1 / 3 /
     empty / 1.5, not for a middle column, Fuel Comp or K edits; caveat likewise;
     the 21-field request test unchanged). No e2e assertion added.
+
+- [x] **W09.10 — The preview names the lever and what blocks a number
+  (E09.14b, 2026-10-16).** The page half of
+  [E09](E09-engine-twin-runner-and-levers.md) item E09.14; the classifier is
+  E09.14a's `rom_levers.classify_edit` (`0631530b`). Neither the route nor the
+  page words a string of it.
+  - **Backend.** `rom_editor.preview_edits` returns a new key `levers` =
+    `classify_edit(...).to_dict()` (the page reads `levers["messages"]`; no
+    second `lever_messages` key). It builds the call the way `tools/rom_sim.py
+    inspect` does: `compare_roms` under `contract=kit.contract, mode=MODE`,
+    `qualification=plant_qualification(kit.plant)`, `regime` unstated (so the
+    closed-loop blocker is listed), `cells=provenance["cells"]`. The CLI exposes
+    no shared helper (its `_compare` / `cmd_inspect` are private and
+    `tools/` is the simulator session's), so preview builds the same call; the
+    comparison is one private `_effects(base, candidate, kit)` that `_simulate`
+    now also uses (the run's `rom_report`, unchanged). The kit is the one the
+    CLI and `simulate_edits` load, `load_sim_kit(profile_dir).kit` (the plant
+    `sim_kit.yaml` declares, not the contract's default: a test pins it);
+    `kit=` still replaces it. `_edit_context` is gone (preview needs the
+    contract and plant, so it loads the whole kit: 0.42 s against 0.23 s for
+    the narrower load; a real-image Fuel Comp preview is 0.4 s and `levers` is
+    7.9 KB of a 21 KB body). A refusal from `classify_edit` is a `ValueError`
+    and surfaces (a candidate that resolved cannot be refused by the
+    comparison); `simulate_edits` is unchanged. Preview carries no image bytes
+    (asserted). `docs/headless-api.md` (route row, 200 body and a `levers`
+    paragraph), `docs/mcp-server.md`, and the `preview_rom_edit` docstring say so;
+    its snapshot line is regenerated (that one description only; the
+    title/tires reorder hunk reverted).
+  - **The exact strings.** Synthetic image and the real ZS44A-20261004 give the
+    same lines for the same edit.
+    Fuel Comp (the light-load region, 20 cells): `Fuel Comp -> target_equiv_ratio:
+    a number can be given (for points that state only the fill byte)`, the same
+    for `base_fuel_schedule_word`, and for each of `injector_pulse_ms`,
+    `fuel_trim_total_pct`, `delivered_lambda`, `fuel_per_event_g`: `Fuel Comp ->
+    <output>: plant not qualified: baseline na-stock-2026-10-08.mv2 has no
+    held-out recording (held_out_pending); closed loop: trim authority
+    undecoded`, plus `ignition_timing` / `ignition_trim_selected` lines ending
+    `no torque plant`. Timing trim A: `Timing trim A -> ignition_trim_selected: no
+    torque plant`. A changed byte at 0xE27E: `unmapped bytes in Calibration
+    0xE27E: not mapped (outside rom_map.yaml)` and `... -> <output>: not mapped`
+    for all eight outputs. The page cannot make the last two (it edits only
+    Fuel Targets / Fuel Comp / K, Map 1; the page refuses the trim as
+    `table_not_editable`), so those two are the CLI half, as E09.14 allows.
+  - **Python tests.** `tests/test_rom_levers_parity.py` (new, 12 tests, ~22 s):
+    for four edits the page can send (Fuel Comp, K, Fuel Targets, Fuel Comp + K)
+    the spec the page previewed is run through `rom_sim.main(["inspect", ...])`
+    and `levers` is **equal whole** (messages included) to the preview's, on the
+    same candidate sha (the CLI gets the page's spec with the base named by file
+    and hash: it resolves a revision base only from real ROM directories); the
+    Fuel Comp accept strings above; the page refuses a trim by name while
+    `inspect` says `no torque plant`, and says `not mapped` for 0xE27E; **the
+    test bites**: wrapping `classify_edit` to reword one string on the page side,
+    on the CLI side, or to drop a message each fails the comparison; a preview
+    qualified on the contract's plant (`load_kit`) instead of the simulator's
+    fails it; no front-end source (`rom_editor.py`, every `romEditor` / `romSim`
+    `.ts(x)` outside tests) carries one of the classifier's phrases. Mutation
+    checked on `rom_editor.py` itself (restored after each): appending a
+    hand-written line failed 7 of 8 selected tests, rewording `no torque plant`
+    6, passing `cells=None` 5, qualifying `load_kit(...).plant` 7.
+    `tests/test_rom_editor.py` +5 (Fuel Comp, K and Fuel Targets name their
+    lever and equal `classify_edit` called directly on the same comparison, JSON
+    clean and no bytes; a two-table edit through `run_job("rom_preview")` names
+    both levers and pickles; a profile with no `sim_kit.yaml` is refused a
+    preview as `simulation` / `sim_kit_undeclared`, a 400 `edit_refused`, where it
+    used to preview unclassified: the plant is declared, never defaulted), `tests/test_rom_editor_api.py` (the 200 body has
+    `levers`), `tests/test_rom_editor_private_rom.py` +1 (the real image:
+    Fuel Comp preview strings above, and the CLI's `inspect` on E08.1's fixture
+    spec resolved from the operator's ROM directory gives an equal `levers`).
+  - **Page.** `PreviewResult.tsx` draws a "What this edit can and cannot show"
+    region right under the summary line, above the after tables and above the
+    Simulate panel: `levers.messages` as a list, verbatim and in order, nothing
+    reworded, grouped, coloured or tabulated. It is absent only when `messages`
+    is empty, which the classifier never sends (its floor is "the edit reaches no
+    output"), so an absent block is not an all-clear. `previewRomEdits` now
+    requires `levers` (`requireFields`): a daemon too old to send it shows the
+    existing "dashboard and daemon may be different versions" error rather than
+    an unclassified preview. `types/romEditor.ts` types it (`RomLevers`,
+    `RomLeverEntry`, `RomLeverOutput`, `RomLeverBlocker`). Vitest
+    (`RomEditorPage.test.tsx` 37 tests, 6 added): messages equal the fixture's,
+    in order, one list item each; a Fuel Comp payload shows `a number can be
+    given (...)` and `plant not qualified: ...; closed loop: trim authority
+    undecoded`; a timing-trim payload shows `Timing trim A ->
+    ignition_trim_selected: no torque plant` and a MAF payload `0xE27E: not
+    mapped`; odd strings (markup, double spaces) come back unaltered; empty
+    `messages` draws no block and the rest of the preview is unchanged; a
+    preview without `levers` is the version error; the block precedes the Simulate
+    region in the document, with the form below it; no image download or link
+    remains (existing assertion, rerun with the block drawn). Four mutations of
+    `PreviewResult.tsx` fail them (reversed order: 3 tests, a reworded string: 2,
+    block drawn when empty: 1, only the first three lines: 2). One e2e assertion
+    in `romEditor.spec.ts` (the lines `toHaveText` the fixture's, the closed-loop
+    line present, the block above the Simulate region): `pnpm exec playwright
+    test e2e/romEditor.spec.ts --project=chromium`: 6 passed.
+  - **Fixtures are real classifier output, not invented.**
+    `src/test/romLevers.fixture.json` holds the three accept cases (`fuel_comp`
+    from the page's preview, `timing_trim` and `maf_curve` from `inspect`), read by
+    `romLeverFixtures.ts` for the vitest page tests and the e2e stub
+    (`previewFor`). `test_the_front_end_fixture_is_real_classifier_output`
+    regenerates the three payloads from the code and checks every key at every
+    level against the pydantic models (`CANARY_UPDATE_LEVERS_FIXTURE=1` rewrites
+    the file; then `pnpm exec prettier --write` it, since `format:check` covers
+    it); values are not compared (a new manifest changes the strings, and the page
+    renders whatever it is given). `romLeverFixtures.test.ts` checks the same files
+    against the TypeScript interfaces through `satisfies Record<keyof T, true>`
+    key lists, so the Python and TypeScript types cannot drift apart unseen.
+  - **Gate.** `ruff check .`, `ruff format --check .`, `mypy src` clean; pytest
+    over `test_rom_editor*`, `test_mcp_rom_editor`, `test_mcp_tool_snapshot`,
+    `test_layering`, `test_rom_sim_cli`, `test_rom_levers*`,
+    `test_route_table_snapshot`: 227 passed; `pytest -n0 -m slow
+    tests/test_rom_editor_private_rom.py`: 11 passed, 1 xfailed (the existing
+    strict xfail); `pnpm typecheck`, `pnpm lint` (no suppression change),
+    `pnpm format:check` clean; vitest `--no-file-parallelism` over
+    `RomEditorPage`, `RomEditorSimulate`, `SimResults`, `romEditor.test.ts` and
+    `romLeverFixtures.test.ts` 148 passed, and `vitest related` over the touched
+    sources 22 files / 320 tests.
+  - **Not done, on purpose.** Simulate is still offered without a Preview of the
+    current edits (the form needs only the edits), so an operator can run it
+    without first seeing the block; the result's own caveats carry the same
+    limits afterwards. Making the form wait for a preview would change W09.4's
+    flow and is an operator call. The timing trim and the MAF curve cannot be
+    edited through the page (W09.7 owns editable timing trims); the MAF case is
+    the CLI's.
 
 ## Not in scope
 

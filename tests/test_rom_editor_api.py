@@ -237,6 +237,12 @@ def test_preview_is_the_pure_function_and_adds_nothing_of_its_own(
     assert body["spec"]["base"] == {"revision": REVISION, "file": None, "sha256": None}
     assert body["spec_yaml"].startswith("# CANary ROM Editor edit spec")
     assert body["spec_sha256"] and body["candidate_sha256"] != sha
+    # E09.14b: which lever, and what blocks a number, in the classifier's own words.
+    levers = body["levers"]
+    assert levers["schema_version"] == 1
+    assert [e["lever"] for e in levers["levers"]] == ["fuel_compensation"]
+    assert levers["messages"] == direct["levers"]["messages"] and levers["messages"]
+    assert any("closed loop: trim authority undecoded" in m for m in levers["messages"])
     (table,) = body["tables"]
     assert (table["id"], table["slot"]) == ("fuel_compensation", 1)
     assert body["sim_base"] == {

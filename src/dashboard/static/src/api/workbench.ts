@@ -246,7 +246,7 @@ export async function previewRomEdits(
     body: jsonBody(request),
     signal,
   });
-  return requireFields(path, body, ["spec_yaml", "provenance", "tables", "sim_base"]);
+  return requireFields(path, body, ["spec_yaml", "provenance", "tables", "levers", "sim_base"]);
 }
 
 /** `POST /control/rom/library/{sha}/simulate` — the edits run against the base

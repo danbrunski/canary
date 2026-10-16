@@ -2,6 +2,7 @@ import type { Page, Route } from "@playwright/test";
 
 import type { RomEdit, RomEditPreview, RomSimResult } from "../../src/types/romEditor";
 import type { RomLibraryEntry, RomTablesResponse } from "../../src/types/romLibrary";
+import { LEVERS_FUEL_COMP } from "../../src/test/romLeverFixtures";
 import { buildSimResult, fuelCompWithAxes, tablesWithAxes } from "../../src/test/romSimFixtures";
 
 /**
@@ -141,6 +142,7 @@ export function previewFor(
     candidate_sha256: candidate,
     provenance,
     tables: [after],
+    levers: LEVERS_FUEL_COMP,
     sim_base: matched
       ? { ok: true, status: "matched", revision: "ZS44A-20260920", reason: null }
       : {

@@ -101,6 +101,69 @@ export interface RomSimBase {
   reason: string | null;
 }
 
+/** One reason a number is withheld (`rom_levers.Blocker`). `text` is what
+ *  the classifier's `messages` carry; the page shows `messages`, not these. */
+export interface RomLeverBlocker {
+  code: string;
+  text: string;
+  node: string | null;
+  detail: string | null;
+}
+
+/** One lever the edit pulls, with the bytes and tables behind it
+ *  (`rom_levers.LeverEntry`). */
+export interface RomLeverEntry {
+  /** The rom map's table `kind` (`fuel_compensation`, `timing_trim_a`, …),
+   *  or `unmapped` / `checksum` / `constant`. */
+  lever: string;
+  label: string;
+  tables: string[];
+  slots: number[];
+  byte_class: string;
+  start: number;
+  end: number;
+  changed_bytes: number;
+  /** Cells the edit resolved to; null for an image saved elsewhere. */
+  changed_cells: number | null;
+  nodes: string[];
+  blockers: RomLeverBlocker[];
+}
+
+/** One output: whether the edit reaches it and what blocks a number
+ *  (`rom_levers.OutputBlockers`, with the three values `to_dict` adds). */
+export interface RomLeverOutput {
+  output: string;
+  source: "application_model" | "simulated";
+  status: string;
+  levers: string[];
+  blockers: RomLeverBlocker[];
+  assumes_conditioned: string[];
+  refused_if_conditioned: string[];
+  reached: boolean;
+  /** A number can be given: reached, and nothing blocks it. */
+  number: boolean;
+  design_dependent: boolean;
+}
+
+/** `rom_levers.LeverClassification.to_dict()`: which lever an edit pulls and,
+ *  per output, what stops a number. `messages` is the text `tools/rom_sim.py
+ *  inspect` prints for the same edit, one fact per line, in a stable order.
+ *  The classifier's floor is one line ("the edit reaches no output"), so an
+ *  empty `messages` is not something it sends: it is never an all-clear. */
+export interface RomLevers {
+  schema_version: 1;
+  tool: string;
+  tool_version: string;
+  /** The comparison's outcome: `identical`, `evaluable`, `partial`, `unevaluable`. */
+  outcome: string;
+  /** For an image the comparison could not use: the refusal. */
+  reason: string | null;
+  regime: string | null;
+  levers: RomLeverEntry[];
+  outputs: RomLeverOutput[];
+  messages: string[];
+}
+
 /** A 200 from the preview route (`rom_editor.preview_edits`). The candidate
  *  image is never part of it, by design: only its sha256. */
 export interface RomEditPreview {
@@ -115,6 +178,8 @@ export interface RomEditPreview {
   provenance: RomEditProvenance;
   /** The edited tables after the edits, in the `GET …/tables` shape. */
   tables: RomTableValues[];
+  /** Which lever the edit pulls and what blocks a number (E09.14b). */
+  levers: RomLevers;
   sim_base: RomSimBase;
 }
 
