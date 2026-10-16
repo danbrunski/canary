@@ -17,6 +17,7 @@ import {
   RAIL_FIELD,
   SEED_FIELD,
   checkSimForm,
+  editsTouchWotColumn,
   EMPTY_FORM,
   forgetRemembered,
   formatEdges,
@@ -26,10 +27,12 @@ import {
   newSeed,
   parseEdges,
   parseNumber,
+  pedalFlagBit0Clear,
   saveRemembered,
   seedForm,
   suggestEdges,
   trimLoadEdges,
+  wotColumnWarning,
   type FormKey,
   type NumberFieldSpec,
   type SimFormValues,
@@ -360,6 +363,9 @@ export function SimForm({
   const missing = check.problems.filter((item) => item.kind === "missing");
   const invalid = check.problems.filter((item) => item.kind === "invalid");
   const running = startedAt !== null;
+  const wotFlag = pedalFlagBit0Clear(values.pedalFlag);
+  const wotWarning =
+    wotFlag !== null && editsTouchWotColumn(edits, tables) ? wotColumnWarning(wotFlag) : null;
   const disabled = blocked !== null;
   const loadOutside = !load.error && load.edges.length > 1 && loadEdgesError(load.edges) !== null;
   const drawsParsed = parseNumber(values.draws, { integer: true, min: 1, max: null });
@@ -705,6 +711,11 @@ export function SimForm({
             {edits.length} pending {edits.length === 1 ? "edit" : "edits"}
             {label.trim() ? ` as "${label.trim()}"` : ""}.
           </p>
+          {wotWarning && (
+            <p role="note" aria-label="WOT column warning" className="text-sm text-warn">
+              {wotWarning}
+            </p>
+          )}
           <button
             type="submit"
             className={buttonClass}

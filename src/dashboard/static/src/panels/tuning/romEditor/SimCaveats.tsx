@@ -1,4 +1,4 @@
-import { knownAnswersLine } from "../../../lib/romSim";
+import { knownAnswersLine, pedalFlagBit0Clear, wotColumnCaveat } from "../../../lib/romSim";
 import { g, pct, weightUnit } from "../../../lib/romSimView";
 import type { RomSimResult, SimRunContext } from "../../../types/romEditor";
 
@@ -52,6 +52,7 @@ export function SimCaveats({ result, run }: { result: RomSimResult; run: SimRunC
   const coverage = Object.entries(result.coverage).sort(([a], [b]) => a.localeCompare(b));
   const unplaced = Object.entries(table.unplaced).sort(([a], [b]) => a.localeCompare(b));
   const moved = table.overlay.moved_lookups;
+  const wotFlag = run.wotColumnEdited ? pedalFlagBit0Clear(String(run.request.pedal_flag)) : null;
 
   return (
     <section
@@ -81,6 +82,11 @@ export function SimCaveats({ result, run }: { result: RomSimResult; run: SimRunC
           over the declared parameter brackets and the drawn fill bytes; base and candidate share
           every draw, so the deltas are the product, not absolute values.
         </li>
+        {wotFlag !== null && (
+          <li>
+            <strong>{wotColumnCaveat(wotFlag)}</strong>
+          </li>
+        )}
         <li>
           <strong>Known answers.</strong> {knownAnswersLine()}
         </li>

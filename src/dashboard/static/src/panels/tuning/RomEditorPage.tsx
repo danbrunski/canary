@@ -36,6 +36,7 @@ import {
   simFailure,
   suggestEdges,
 } from "../../lib/romSim";
+import { editsTouchWotColumn } from "../../lib/romSim";
 import { expectedRun, fineReference, loadTimings, recordTiming } from "../../lib/romSimSize";
 import { buttonClass, cn } from "../../styles";
 import type { StatusResponse } from "../../types";
@@ -396,6 +397,7 @@ function Workspace({ token, entry }: { token: string; entry: RomLibraryEntry }) 
             label: entry.label ?? entry.filename ?? sha.slice(0, 12),
             revision: entry.revision_match.revision,
           },
+          wotColumnEdited: editsTouchWotColumn(simRequest.edits, baseTables),
           elapsedS: Math.round((Date.now() - startedAt) / 1000),
           fineReference: fineReference(suggestEdges(baseTables)),
         },

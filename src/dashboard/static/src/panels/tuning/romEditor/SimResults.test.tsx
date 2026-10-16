@@ -505,3 +505,31 @@ describe("the coarse-run banner (W09.9)", () => {
     expect(banner()).not.toBeInTheDocument();
   });
 });
+
+describe("the WOT column caveat", () => {
+  const withFlag = (wotColumnEdited: boolean, pedal_flag: number): SimRunContext => {
+    const run = buildRunContext();
+    return { ...run, wotColumnEdited, request: { ...run.request, pedal_flag } };
+  };
+  const caveats = () => screen.getByRole("region", { name: "Read this first" });
+  const LINE =
+    "The WOT column was edited with pedal flag 0: this run cannot show that edit's effect.";
+
+  it("is a line in the caveat block when the last column was edited with bit 0 clear", () => {
+    show({ run: withFlag(true, 0) });
+    expect(within(caveats()).getByText(LINE)).toBeVisible();
+  });
+
+  it("states the flag it was run with", () => {
+    show({ run: withFlag(true, 6) });
+    expect(within(caveats()).getByText(LINE.replace("flag 0", "flag 6"))).toBeVisible();
+  });
+
+  it("is absent when bit 0 was set, or the last column was not edited", () => {
+    const { unmount } = show({ run: withFlag(true, 1) });
+    expect(caveats()).not.toHaveTextContent("The WOT column was edited");
+    unmount();
+    show({ run: withFlag(false, 0) });
+    expect(caveats()).not.toHaveTextContent("The WOT column was edited");
+  });
+});

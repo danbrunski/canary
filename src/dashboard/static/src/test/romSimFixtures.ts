@@ -549,6 +549,7 @@ export function buildRunContext(): SimRunContext {
       },
     ],
     base: { sha256: BASE_SHA, label: "Running tune", revision: "ZS44A-20260920" },
+    wotColumnEdited: false,
     elapsedS: 12,
   };
 }

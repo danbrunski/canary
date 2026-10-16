@@ -653,7 +653,7 @@ W09.6 is the orchestrator's own, on the ROM machine.
     - *Laptop half done 2026-10-15. Still open: the Pi measurement and the Pi
       browser walkthrough.* `tests/test_rom_editor_private_rom.py`
       (`pytestmark = slow`). It skips by name when `OPERATOR_ROMS["r20261004"]`
-      is absent. Result: 8 passed, 1 xfailed (strict) in 13.7–21.8 s with
+      is absent. Result: 9 passed, 1 xfailed (strict) in 11–22 s with
       `-n0 -m slow`. The 20261004 image's decoded sha256 equals its
       `tune_revisions.yaml` `image_sha256` (`5587f7e1…`). `revision_match`
       against the tracked registry returns `matched`, and so does the
@@ -679,6 +679,13 @@ W09.6 is the orchestrator's own, on the ROM machine.
         `target_lookup:enrichment_gate_state_unknown` + `not_computed` (one
         cell: 4,000 rpm, fill bytes 191–192, inside the enrichment gate's
         hysteresis band). BFS and φ are `unchanged` in the other 223 cells.
+        **Known over-refusal, locked in on purpose:** in that cell BFS is
+        computed (finite) before the target lookup, yet reads `unsupported`.
+        `paired_scenarios.run_paired` (`reasons = list(gate) + …`, ~line 1017)
+        gives the lookup's gate reason to every output, BFS included. That is
+        cautious rather than falsely confident. The test asserts it with a
+        comment pointing at that line, so fixing it flips the test
+        deliberately. `src/analysis` is not edited here.
       - **2. K +5 %** (`scale 1.05 nearest`): 28,715 → 30,151, so
         r = 1.0500087. All 308 supported open-loop pairs satisfy
         BFS_c − r·BFS_b ∈ (−9.17, +9.62) counts. That bound is E08.7's,
@@ -686,7 +693,8 @@ W09.6 is the orchestrator's own, on the ROM machine.
         The measured spread was −4.59…+4.82 counts, with base BFS 1,984–29,508,
         and every pair moved. 77 all-open-loop cells read `changed`. Their
         relative ΔBFS p50 lies within −5.5e-4…+2.4e-3 of r − 1 (the wider end
-        is the lowest-BFS cells). The gate-ambiguous cell reads `unsupported`.
+        is the lowest-BFS cells). The gate-ambiguous cell reads `unsupported`
+        (the known over-refusal above).
       - **3. Target AFR +4 on the WOT column** (col 7, the top X breakpoint
         and the column the forced-column flag reads; 146/149/149/149/149/153/
         155/159 → +4). The WOT row/column has to be reached through the
@@ -699,25 +707,58 @@ W09.6 is the orchestrator's own, on the ROM machine.
           own `run_paired` exactly. λ p50 is within 2e-4 of its central value,
           and p05–p95 lies inside its range over assumptions (E08.7's
           tolerance).
+        - The reference `PairedScenario` is built **by hand** from the stated
+          `E076_LEARNED` / `E076_WOT_ENV`, never the editor's template. The
+          template's learned state and each design point's environment are
+          asserted equal to those constants. So a mutation forcing LTFT 0 in
+          `rom_editor._template` fails twice: on the learned-state assertion,
+          and, with that assertion removed, on the `run_paired` pulse
+          comparison.
         - Measured: BFS 24,636/24,820, 27,296/27,496 and 29,080; pulse
           +0.23, +0.26 and +0.28 ms; λ p50 −2.423, −2.455 and −2.486 %.
       - **Finding (strict `xfail`, assertion kept literal):** E07.6's written
-        WOT figures do not reproduce at the grid's WOT point.
-        - At the top fill cell (98.2 %, BFS 29,080) the pulse is +0.28 ms,
-          not +0.41.
-        - λ p05/p50/p95 is −2.507/−2.486/−2.468 %, outside E07.6's stated
-          −2.52…−2.49 %. Only p50 rounds to −2.5 %.
-        - The cause is not the editor: E07.6's own path gives the same
-          numbers there (the bullet above). The figures are conditional on
-          BFS 42,000 (E08.7 item 4).
-        - No grid can reach that BFS.
-          `test_no_grid_point_reaches_e076s_wot_bfs_or_the_wot_column_by_x`
-          puts load edges [99.9, 100] at 4,800 rpm and baro 81, and BFS stays
-          < 41,997. That is because a grid takes fill as MAP/baro and solves
-          MAF through the manifold model: 102.9 g/s at MAP 79.6 kPa, against
-          E07.6's stated 150 g/s at 79 kPa.
-        - With the pedal flag 0, the WOT column is reached by **no** point of
-          the form's grid: the visited X columns are 0–2, and Δφ = 0
+        WOT figures do not reproduce at the grid's WOT point. The pulse and λ
+        miss for different reasons.
+        - **What the figures are.** E07.6 stated them on its *synthetic*
+          image: flat Fuel Comp 128, every slot-1 Target AFR cell +4, pedal
+          flag 0, BFS stated at 42,000. E07.6's own test asserts only their
+          signs. The "−2.52…−2.49 %" beside them is that run's one-point
+          spread over the plant's assumptions, not a tolerance.
+        - **At the grid's top fill cell** (98.2 %, BFS 29,080): pulse
+          +0.28 ms; λ p05/p50/p95 −2.507/−2.486/−2.468 %.
+        - **The pulse is a BFS/airflow condition.** The pulse step is
+          BFS-proportional. E07.6's own point (4,800 rpm, 150 g/s, MAP 79,
+          fill byte 200, forced-column flag set) on this image gives BFS
+          41,768, X 121, Δφ +0.03125 and pulse +0.41 ms. So the written pulse
+          needs about 41.8k BFS here. E08.7's ~41,997 threshold belongs to the
+          synthetic image.
+        - **The λ range is not reproducible on 20261004 at any BFS near
+          42k.** It is a property of the synthetic image plus the 0.01 ms
+          pulse quantum.
+          - E07.6's own point here: λ −2.483 % (range −2.498…−2.468).
+          - At BFS exactly 42,000 (MAF 150.83 g/s): λ −2.529 %
+            (−2.544…−2.514) and pulse +0.42 ms.
+          - Both ranges fall outside −2.52…−2.49. λ steps with the pulse
+            quantum as MAF moves by 0.01 g/s.
+          - These are pinned by
+            `test_at_e076s_own_points_on_this_image_the_pulse_holds_and_the_lambda_range_does_not`
+            (hand-built scenario through `run_paired`).
+        - **Why no grid reaches ~41.8k BFS here.** The cause is the plant
+          version's volumetric efficiency, not the grid's structure.
+          - A grid takes fill as MAP/baro and solves MAF through the sim kit's
+            plant, `fuel-mv-1` (`speed_density_capped`). Its VE is the working
+            assumption 0.7 (`data/nissan-xterra-2008/fuel_plant.yaml`
+            `manifold_pressure`, `requires_measurement`, bracket 0.4–1.0).
+          - That gives ~103 g/s at the grid's 100 % fill (102.9 g/s at MAP
+            79.6 kPa, 4,800 rpm, baro 81).
+          - fuel-mv-3's identified VE at 4,000–5,000 rpm is 0.9055
+            (`fuel_plant_mv3.yaml` `ve_curve`), which would give ~133 g/s.
+          - `test_no_grid_point_reaches_e076s_wot_bfs_or_the_wot_column_by_x`
+            asserts that the plant is fuel-mv-1, that load edges
+            [99.9, 100] at 4,800 rpm keep MAF < 110 g/s, and that BFS stays
+            < 41,768.
+        - **With the pedal flag 0, the WOT column is reached by no point of
+          the form's grid.** The visited X columns are 0–2, and Δφ = 0
           wherever it is computed. An operator who edits the WOT column and
           states pedal flag 0 sees nothing anywhere.
       - **4. Fuel Comp region** (`fuel_comp_light_load.yaml`; `spec_sha256`
@@ -744,9 +785,14 @@ W09.6 is the orchestrator's own, on the ROM machine.
         `matched`), then `POST …/simulate` through `run_off_loop`
         (in-process executor, the child's own `load_kit`). The response is
         200 and equals `simulate_edits` through JSON, 224 points.
-      - **Mutation checks** (scratch copies; each fails): dropping the upper
-        interpolation corner (case 4: an unreached pair's BFS moves);
-        r = 1.04 (case 2: errors of 196–300 counts); Δφ 0.0234375 (case 3).
+      - **Mutation checks** (scratch copies outside the tree; each fails):
+        - dropping the upper interpolation corner (case 4: an unreached
+          pair's BFS moves);
+        - r = 1.04 (case 2: errors of 196–300 counts);
+        - Δφ 0.0234375 (case 3);
+        - `rom_editor._template` forced to LTFT 0 (case 3: fails on the
+          learned-state assertion, and without it on the hand-built
+          `run_paired` pulse comparison at (0, byte 191)).
       - **Measured on the laptop** (offline, `.venv/bin/python -I
         <scratchpad>/measure.py child|inproc <grid> <draws>`). The edit is
         the light-load spec above with the environment of case 1 and seed
@@ -797,6 +843,19 @@ W09.6 is the orchestrator's own, on the ROM machine.
   as a second point source. Slots 2–5 with a stated active slot. Timing-trim
   editing (traced but `unsupported` until a torque plant exists, E07.5). The
   E08.6 HTML report as a download.
+  Found by the independent verifier on the real ZS44A-20261004 image
+  (2026-10-15), to be done in the simulator, not the page:
+  - Name the working-assumption VE in the simulation caveats/assumptions
+    (fuel-mv-1 ve 0.7, `requires_measurement`, bracket 0.4-1.0; fuel-mv-3
+    identifies 0.9055 at 4,000-5,000 rpm). Today only
+    `plant:manifold_pressure_unmeasured` appears, and the grid's 100 % fill
+    sits at ~103 g/s (BFS ~29k) against the truck's ~38-42k, so pulse and BFS
+    deltas at the grid top are understated by about 30 % (relative lambda is
+    roughly unaffected). Lives in `sim_design` / the plant, E08 domain.
+  - `run_paired` applies the target-lookup gate reason to `base_fuel_schedule`
+    (`paired_scenarios.py` ~1017) although BFS is computed before the lookup:
+    an over-refusal, cautious not false.
+    `tests/test_rom_editor_private_rom.py` marks it as a known over-refusal.
 
 - [x] **W09.8 — "Open ROM…" on the ROM Editor page.** Requested 2026-10-15
   by the operator via the E08 desk-launcher session: "we shouldn't have to run
@@ -971,6 +1030,25 @@ W09.6 is the orchestrator's own, on the ROM machine.
     description and is pinned by `tests/fixtures/mcp_tool_snapshot.json`, so the
     note is in the docs only. The Pi's own timings are still unmeasured (W09.6
     owes them); the reference line is the laptop's and is labelled so.
+  - **The WOT column is stated, not silent (2026-10-15, found by the
+    verifier on the real ZS44A-20261004 image).** The pedal flag's bit 0 forces
+    the last Fuel Targets (Target AFR) column (`rom_map.yaml` `fuel_targets`;
+    `target_phi_twin.yaml` `forced_column_flag`), so with the flag stated 0 no
+    simulated point reads it and an edit to that column shows no change
+    anywhere (`no_points` on the target_afr grid, `unchanged` elsewhere). Not
+    silent-wrong, but it read as "no effect". Frontend only: the flag field's
+    hint now says what bit 0 does (`PEDAL_FLAG_HINT`); `SimForm` shows a
+    non-blocking `role="note"` before Run when a pending edit writes the last
+    column of a Fuel Targets table (`editsTouchWotColumn`, the column derived
+    from the loaded table's own width, `cells` and `all` selectors; a `region`
+    selector is not resolved) and the stated flag is a whole number with bit 0
+    clear; nothing when the flag is empty (Run names it) or bit 0 is set, and
+    it never offers or sets a flag. `SimRunContext.wotColumnEdited` (computed
+    by the page at Run) puts the matching line in the result's caveat block.
+    Vitest: `romSim.test.ts` +5, `RomEditorSimulate.test.tsx` +5,
+    `SimResults.test.tsx` +3 (hint, warning for flag 0 and 2, not for 1 / 3 /
+    empty / 1.5, not for a middle column, Fuel Comp or K edits; caveat likewise;
+    the 21-field request test unchanged). No e2e assertion added.
 
 ## Not in scope
 

@@ -92,12 +92,19 @@ function cell(grid: HTMLElement, row: number, col: number) {
 }
 
 /** Open the page, pick Fuel Comp, scale cells (1,1)-(1,2) by 2 % and name the set. */
-async function withPendingEdit(label = "idle richer") {
+async function withPendingEdit(
+  label = "idle richer",
+  target: { table: string; from: [number, number]; to: [number, number] } = {
+    table: "Fuel Compensation (Map 1)",
+    from: [1, 1],
+    to: [1, 2],
+  },
+) {
   renderEditor();
-  fireEvent.click(await screen.findByRole("button", { name: "Fuel Compensation (Map 1)" }));
-  const grid = screen.getByRole("grid", { name: "Fuel Compensation (Map 1) cells" });
-  fireEvent.mouseDown(cell(grid, 1, 1));
-  fireEvent.mouseDown(cell(grid, 1, 2), { shiftKey: true });
+  fireEvent.click(await screen.findByRole("button", { name: target.table }));
+  const grid = screen.getByRole("grid", { name: `${target.table} cells` });
+  fireEvent.mouseDown(cell(grid, ...target.from));
+  fireEvent.mouseDown(cell(grid, ...target.to), { shiftKey: true });
   fireEvent.mouseUp(window);
   const operation = screen.getByRole("form", { name: "Operation" });
   fireEvent.change(within(operation).getByLabelText("Operation"), { target: { value: "scale" } });
@@ -294,6 +301,95 @@ describe("the grid edges", () => {
     // Reset puts the base's breakpoints back.
     await click(within(form).getByRole("button", { name: "Reset to the base's breakpoints" }));
     expect(within(form).getByLabelText("Grid size")).toHaveTextContent("16 × 16 = 256");
+  });
+});
+
+const FUEL_TARGETS = "Fuel Targets (Map 1)";
+const wotNote = (form: HTMLElement) =>
+  within(form).queryByRole("note", { name: "WOT column warning" });
+const WOT_WARNING =
+  "Your edit touches the WOT column. With pedal flag 0 the simulated points never read it, " +
+  "so this run will show no change from this edit. Set pedal flag to 1 (bit 0) to simulate " +
+  "wide-open throttle.";
+
+describe("the WOT column (pedal flag bit 0)", () => {
+  it("says on the field what bit 0 does", async () => {
+    route();
+    const form = await withPendingEdit();
+    expect(
+      within(form).getByText(/Bit 0 forces the last Target AFR column \(the WOT column\)/),
+    ).toBeVisible();
+    expect(within(form).getByText(/no simulated point reads that column/)).toBeVisible();
+  });
+
+  it("warns before Run for a last-column Fuel Targets edit with the flag stated 0, and defaults nothing", async () => {
+    route();
+    const form = await withPendingEdit("wot richer", {
+      table: FUEL_TARGETS,
+      from: [3, 8],
+      to: [4, 8],
+    });
+    state(form);
+    expect(wotNote(form)).toHaveTextContent(WOT_WARNING);
+    expect(runButton(form)).toBeEnabled();
+    // Not blocking, and the field is still the operator's: it keeps the 0 they typed.
+    expect(within(form).getByLabelText("Pedal flag (0-255)")).toHaveValue("0");
+    await click(runButton(form));
+    await screen.findByRole("region", { name: "Simulation result" });
+    expect(sentRequest().pedal_flag).toBe(0);
+    // And the result says the same, in its caveat block.
+    expect(
+      within(screen.getByRole("region", { name: "Read this first" })).getByText(
+        "The WOT column was edited with pedal flag 0: this run cannot show that edit's effect.",
+      ),
+    ).toBeVisible();
+  });
+
+  it("is quiet for an empty flag, a flag with bit 0 set, and a middle column", async () => {
+    route();
+    const form = await withPendingEdit("wot richer", {
+      table: FUEL_TARGETS,
+      from: [3, 8],
+      to: [4, 8],
+    });
+    state(form, ["Pedal flag (0-255)"]);
+    expect(wotNote(form)).not.toBeInTheDocument();
+    type(within(form).getByLabelText("Pedal flag (0-255)"), "1");
+    expect(wotNote(form)).not.toBeInTheDocument();
+    type(within(form).getByLabelText("Pedal flag (0-255)"), "3");
+    expect(wotNote(form)).not.toBeInTheDocument();
+    type(within(form).getByLabelText("Pedal flag (0-255)"), "2");
+    expect(wotNote(form)).toHaveTextContent("With pedal flag 2 ");
+    type(within(form).getByLabelText("Pedal flag (0-255)"), "1.5");
+    expect(wotNote(form)).not.toBeInTheDocument();
+  });
+
+  it("is quiet for a Fuel Targets edit that stops short of the last column", async () => {
+    route();
+    const form = await withPendingEdit("mid", { table: FUEL_TARGETS, from: [3, 7], to: [4, 7] });
+    state(form);
+    expect(wotNote(form)).not.toBeInTheDocument();
+  });
+
+  it("is quiet for a Fuel Comp edit, and a result without a WOT edit has no WOT caveat", async () => {
+    route();
+    const form = await withPendingEdit();
+    state(form);
+    expect(wotNote(form)).not.toBeInTheDocument();
+    await click(runButton(form));
+    const caveats = await screen.findByRole("region", { name: "Read this first" });
+    expect(caveats).not.toHaveTextContent("The WOT column was edited");
+  });
+
+  it("is quiet for a last-column Fuel Targets edit when the flag has bit 0 set, in the result too", async () => {
+    route();
+    const form = await withPendingEdit("wot", { table: FUEL_TARGETS, from: [3, 8], to: [3, 8] });
+    state(form, ["Pedal flag (0-255)"]);
+    type(within(form).getByLabelText("Pedal flag (0-255)"), "1");
+    expect(wotNote(form)).not.toBeInTheDocument();
+    await click(runButton(form));
+    const caveats = await screen.findByRole("region", { name: "Read this first" });
+    expect(caveats).not.toHaveTextContent("The WOT column was edited");
   });
 });
 
