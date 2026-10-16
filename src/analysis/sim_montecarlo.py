@@ -100,19 +100,20 @@ from src.analysis.paired_scenarios import (
     _regime,
     _resets,
     _side,
-    _twin_gate,
     _with_contract_mode,
     load_kit,
     plant_assumption_lines,
     plant_parameters,
     plant_rail_kpa,
     run_paired,
+    twin_gate,
 )
 from src.analysis.paired_scenarios import TOOL_VERSION as PAIRED_TOOL_VERSION
 from src.analysis.paired_steady import (
     SETPOINT_MOVED,
     TRIM_AUTHORITY_UNDECODED,
     closed_loop_k,
+    closed_loop_trim_pending,
     steady_coverage,
     total_trim_pct,
     trim_k,
@@ -760,7 +761,7 @@ def _gate(
     fill_node = kit.contract.quantity(FILL_BYTE).manifest_node
     if fill_node in reached:
         gate.append((f"conditioned_on_changed_path:{FILL_BYTE}", fill_node))
-    gate.extend(_twin_gate(report, coverage, [], kit.model))
+    gate.extend(twin_gate(report, coverage, [], kit.model))
     if unknown_changed:
         gate.append(("rom:unknown_bytes_changed", None))
     return gate
@@ -920,7 +921,7 @@ def _build_cache(
                     reasons.append(regime)
                 if loop == SETPOINT_MOVED:
                     reasons.append(SETPOINT_MOVED)
-                elif loop == "closed_loop":
+                elif loop == "closed_loop" and closed_loop_trim_pending(kit.model):
                     reasons.append(TRIM_AUTHORITY_UNDECODED)
                 if name in _PLANT_OUTPUTS:
                     reasons.extend(f"regime_not_qualified:{r}" for r in unqualified)

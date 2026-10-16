@@ -104,11 +104,18 @@ from src.analysis.injector_pulse import (
     vb_counts_from_volts,
 )
 from src.analysis.paired_steady import (
+    BFS_OUTPUT,
     COMPUTED_HERE,
+    ECU_RUNNER_OUTPUTS,
+    FILL_BYTE,
     SETPOINT_MOVED,
     TRIM_AUTHORITY_UNDECODED,
+    TWIN_OUTPUT,
     SteadyCoverage,
     closed_loop_k,
+    closed_loop_trim_pending,
+    conditionable_node,
+    ecu_output_gate,
     steady_bfs,
     steady_coverage,
     total_trim_pct,
@@ -157,15 +164,15 @@ OUTPUTS: tuple[str, ...] = (
     "fuel_per_event_g",
 )
 #: ECU-side outputs: no plant regime or trim fixed point gates them.
-_ECU_OUTPUTS: frozenset[str] = frozenset({"base_fuel_schedule", "target_phi"})
+_ECU_OUTPUTS: frozenset[str] = frozenset(ECU_RUNNER_OUTPUTS)
 #: The application-model output each computed one is gated on.
-_TWIN_OUTPUT = "target_equiv_ratio"
+_TWIN_OUTPUT = TWIN_OUTPUT
 #: The application-model output the steady BFS computes.
-_BFS_OUTPUT = "base_fuel_schedule_word"
+_BFS_OUTPUT = BFS_OUTPUT
 #: Application-model outputs this slice computes (the rest are traced only).
 _COMPUTED_TWIN_OUTPUTS: frozenset[str] = frozenset({_TWIN_OUTPUT, _BFS_OUTPUT})
 #: The stated fill byte BFS's Fuel Comp lookup reads.
-_LOAD_BYTE = "fuel_comp_load_byte"
+_LOAD_BYTE = FILL_BYTE
 #: The value a trim is reset to by an event that resets it: its neutral value.
 NEUTRAL_TRIM_PCT = 0.0
 #: Learned ECU states this slice carries, by contract quantity id.
@@ -825,7 +832,7 @@ def computed_node(model: ApplicationModel, output_id: str, *, written: bool = Fa
     return found.twin.predicts
 
 
-def _twin_gate(
+def twin_gate(
     report: EffectReport,
     coverage: SteadyCoverage,
     assumptions: list[str],
@@ -837,11 +844,12 @@ def _twin_gate(
     gate: list[GateReason] = []
     bfs_node = computed_node(model, _BFS_OUTPUT, written=True)
     twin_node = computed_node(model, _TWIN_OUTPUT, written=True)
+    verdicts = ecu_output_gate(report, coverage)
     bfs = next((o for o in report.outputs if o.output == _BFS_OUTPUT), None)
     if bfs is None:
         gate.append((f"rom:{_BFS_OUTPUT}_not_traced", bfs_node))
     elif bfs.status != "unchanged":
-        rest = coverage.uncovered(bfs.reasons)
+        rest, _ = verdicts[_BFS_OUTPUT]
         if rest:
             gate.extend((f"rom:{r}", bfs_node) for r in rest)
             gate.append((f"rom:{_BFS_OUTPUT}_{bfs.status}", bfs_node))
@@ -851,27 +859,21 @@ def _twin_gate(
                 f"fixed point, rom_effects reasons {list(bfs.reasons)} absorbed"
             )
     twin = next((o for o in report.outputs if o.output == _TWIN_OUTPUT), None)
-    node = twin.twin_node if twin is not None else None
-    evaluable = bool(
-        node
-        and (
-            node.get("evaluable_at_equal_inputs")
-            or (node.get("reached") and not coverage.uncovered(node.get("reasons", [])))
-        )
-    )
     if twin is None:
         gate.append((f"rom:{_TWIN_OUTPUT}_not_traced", twin_node))
-    elif twin.status != "unchanged" and not evaluable:
-        gate.extend((f"rom:{r}", twin_node) for r in twin.reasons)
-        gate.append((f"rom:{_TWIN_OUTPUT}_{twin.status}", twin_node))
     elif twin.status != "unchanged":
-        # The twin computes the gated Target AFR lookup; the final word adds a
-        # slew and a cap (not modelled). At a steady point neither binds (the
-        # contract's steady_state init for target_phi_word): stated, not hidden.
-        assumptions.append(
-            "steady: the final command equals the gated lookup (slew and cap not binding); "
-            f"rom_effects reasons {list(twin.reasons)}"
-        )
+        held, evaluable = verdicts[_TWIN_OUTPUT]
+        if not evaluable:
+            gate.extend((f"rom:{r}", twin_node) for r in held)
+            gate.append((f"rom:{_TWIN_OUTPUT}_{twin.status}", twin_node))
+        else:
+            # The twin computes the gated Target AFR lookup; the final word adds a
+            # slew and a cap (not modelled). At a steady point neither binds (the
+            # contract's steady_state init for target_phi_word): stated, not hidden.
+            assumptions.append(
+                "steady: the final command equals the gated lookup (slew and cap not binding); "
+                f"rom_effects reasons {list(twin.reasons)}"
+            )
     return gate
 
 
@@ -926,12 +928,15 @@ class ReasonScope:
 
     @classmethod
     def of(cls, kit: SimKit, gate: Iterable[GateReason]) -> ReasonScope:
+        return cls.for_model(kit.model, gate)
+
+    @classmethod
+    def for_model(cls, model: ApplicationModel, gate: Iterable[GateReason]) -> ReasonScope:
+        """The scope for a model alone (``rom_levers`` has no kit)."""
         rests_on: dict[str, frozenset[str] | None] = {}
-        for name, sinks in _output_sinks(kit.model).items():
+        for name, sinks in _output_sinks(model).items():
             rests_on[name] = (
-                None
-                if sinks is None
-                else frozenset(n for s in sinks for n in _ancestors(kit.model, s))
+                None if sinks is None else frozenset(n for s in sinks for n in _ancestors(model, s))
             )
         nodes: dict[str, set[str | None]] = {}
         for reason, node in gate:
@@ -940,10 +945,10 @@ class ReasonScope:
             rests_on=rests_on,
             gate={r: frozenset(n) for r, n in nodes.items()},
             prefixes={
-                prefix: computed_node(kit.model, output)
+                prefix: computed_node(model, output)
                 for prefix, output in _REASON_OUTPUT_BY_PREFIX.items()
             },
-            model_nodes=frozenset(n.id for n in kit.model.nodes),
+            model_nodes=frozenset(n.id for n in model.nodes),
         )
 
     def _nodes(self, reason: str) -> frozenset[str | None]:
@@ -1234,11 +1239,8 @@ def run_paired(
                     f"{quantity} is computed here, per ROM, at its steady fixed point; a stated "
                     "value cannot stand in for it",
                 )
-            node = kit.contract.quantity(quantity).manifest_node
-            if node is None or kit.contract.mode(scenario.mode).role(quantity) not in (
-                "predicted_output",
-                "inferred_state",
-            ):
+            node = conditionable_node(kit.contract, scenario.mode, quantity)
+            if node is None:
                 raise SimulationRefusalError(
                     "conditioning_not_allowed",
                     f"{quantity} is not a computed ECU quantity on the manifest; supply it as "
@@ -1252,7 +1254,7 @@ def run_paired(
         "STFT is neutral (the stated value) in open loop: assumed, not decoded",
         *_steady_assumptions(coverage),
     ]
-    gated.extend(_twin_gate(report, coverage, assumptions, kit.model))
+    gated.extend(twin_gate(report, coverage, assumptions, kit.model))
     if unknown_changed:
         gated.append(("rom:unknown_bytes_changed", None))
     gate = sorted({r for r, _ in gated})
@@ -1302,7 +1304,7 @@ def run_paired(
                     reasons.append(regime)
                 if pair.loop == SETPOINT_MOVED:
                     reasons.append(SETPOINT_MOVED)
-                elif pair.loop == "closed_loop":
+                elif pair.loop == "closed_loop" and closed_loop_trim_pending(kit.model):
                     reasons.append(TRIM_AUTHORITY_UNDECODED)
                 if name in _PLANT_OUTPUTS:
                     reasons.extend(f"regime_not_qualified:{r}" for r in unqualified_regimes)
@@ -1479,6 +1481,7 @@ def optimise(*_: Any, **__: Any) -> None:
 
 __all__ = [
     "BATTERY_UNMEASURED",
+    "ECU_RUNNER_OUTPUTS",
     "OUTPUTS",
     "OVERRIDES_NOT_FROZEN",
     "PLANT_ASSUMPTION_PREFIX",
@@ -1503,4 +1506,5 @@ __all__ = [
     "rank_as_improvement",
     "rpm_word",
     "run_paired",
+    "twin_gate",
 ]

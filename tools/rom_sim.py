@@ -10,8 +10,9 @@ Subcommands::
 
     design drives  pre-change drives -> a frozen, hashed point design (E08.2)
     design grid    a stated rpm x load grid -> the same kind of design
-    inspect        the resolved cell edits (old -> new raw, +/- %) and what
-                   compare_roms says they reach; runs nothing
+    inspect        the resolved cell edits (old -> new raw, +/- %), what
+                   compare_roms says they reach, and the lever and what
+                   blocks a number (rom_levers); runs nothing
     run            a paired Monte Carlo over a design -> result.json,
                    traces.parquet (a ``_sim-*`` session) and report.html
 
@@ -60,12 +61,12 @@ import math
 import time
 from collections.abc import Mapping, Sequence
 from pathlib import Path
-from typing import Any
+from typing import Any, get_args
 
 import pandas as pd
 from pydantic import ValidationError
 
-from src.analysis.ecu_application import ApplicationModelRefusalError
+from src.analysis.ecu_application import ApplicationModelRefusalError, OverrideRegime
 from src.analysis.fuel_comp_inputs import load_fuel_comp_declaration
 from src.analysis.fuel_comp_rom import (
     ROM_DIRS_ENV,
@@ -73,7 +74,7 @@ from src.analysis.fuel_comp_rom import (
     RevisionImageResolver,
     rom_dirs_from_env,
 )
-from src.analysis.fuel_plant import FuelPlantRefusalError
+from src.analysis.fuel_plant import FuelPlantRefusalError, plant_qualification
 from src.analysis.paired_scenarios import (
     LearnedState,
     PairedScenario,
@@ -89,7 +90,13 @@ from src.analysis.rom_edit_spec import (
     load_edit_spec,
     resolve_base,
 )
-from src.analysis.rom_effects import Candidate, RomEffectRefusalError, compare_roms
+from src.analysis.rom_effects import (
+    Candidate,
+    EffectReport,
+    RomEffectRefusalError,
+    compare_roms,
+)
+from src.analysis.rom_levers import classify_edit
 from src.analysis.sim_cells import (
     TOOL_VERSION as CELLS_TOOL_VERSION,
 )
@@ -455,12 +462,12 @@ def _cell_rows(world: _World) -> list[dict[str, Any]]:
     return rows
 
 
-def _trace(world: _World, candidate: Candidate, *, in_mode: bool) -> dict[str, Any]:
+def _compare(world: _World, candidate: Candidate, *, in_mode: bool) -> EffectReport:
     """``compare_roms`` on the two images: with ``in_mode`` under the run's
     contract mode (where a quantity the mode holds fixed makes an output
     ``unevaluable``), else the plain structural reach."""
     extra: dict[str, Any] = {"contract": world.kit.contract, "mode": MODE} if in_mode else {}
-    report = compare_roms(
+    return compare_roms(
         world.base.image,
         candidate.image,
         world.kit.rom_map,
@@ -471,7 +478,10 @@ def _trace(world: _World, candidate: Candidate, *, in_mode: bool) -> dict[str, A
         slot_source=SLOT_SOURCE,
         **extra,
     )
-    plain = report.to_dict()
+
+
+def _trace(world: _World, candidate: Candidate, *, in_mode: bool) -> dict[str, Any]:
+    plain = _compare(world, candidate, in_mode=in_mode).to_dict()
     return {
         "mode": MODE if in_mode else None,
         "outcome": plain["outcome"],
@@ -497,6 +507,18 @@ def cmd_inspect(args: argparse.Namespace) -> dict[str, Any]:
     assert candidate is not None
     prov = candidate.provenance
     cells = _cell_rows(world)
+    # The lever and what blocks a number: classified once, in
+    # src.analysis.rom_levers, on the report a run would use. The ROM Editor
+    # shows the same ``messages`` (E09.14).
+    levers = classify_edit(
+        _compare(world, candidate, in_mode=True),
+        rom_map=world.kit.rom_map,
+        model=world.kit.model,
+        contract=world.kit.contract,
+        qualification=plant_qualification(world.kit.plant),
+        regime=args.regime,
+        cells=prov["cells"],
+    )
     return {
         "command": "inspect",
         "ran": "nothing: no design, no draws, no plant",
@@ -512,6 +534,7 @@ def cmd_inspect(args: argparse.Namespace) -> dict[str, Any]:
         "ranges": prov["ranges"],
         "reached": _trace(world, candidate, in_mode=False),
         "in_run_mode": _trace(world, candidate, in_mode=True),
+        "levers": levers.to_dict(),
     }
 
 
@@ -797,8 +820,8 @@ def _parser() -> argparse.ArgumentParser:
         epilog="subcommands:\n"
         "  design drives  pre-change drives -> a frozen, hashed point design\n"
         "  design grid    a stated rpm x load grid -> the same kind of design\n"
-        "  inspect        resolved cell edits (old -> new raw, +/- %) and the outputs they\n"
-        "                 reach; runs nothing\n"
+        "  inspect        resolved cell edits (old -> new raw, +/- %), the outputs they reach,\n"
+        "                 and what blocks a number per output; runs nothing\n"
         "  run            paired Monte Carlo -> result.json, traces.parquet, report.html\n\n"
         "Run `rom_sim <subcommand> --help` (`rom_sim design drives --help`) for arguments.\n"
         "Refusals print JSON with a stable `reason` and exit 2. Output goes under --out,\n"
@@ -883,6 +906,15 @@ def _parser() -> argparse.ArgumentParser:
     )
     _add_common(inspect)
     _add_candidate(inspect)
+    inspect.add_argument(
+        "--regime",
+        choices=list(get_args(OverrideRegime)),
+        default=None,
+        help="the operating regime the edit is judged in (optional). Only the closed-loop "
+        "blocker (trim authority undecoded) is regime-aware: it is listed for closed_loop, "
+        "and when no regime is stated since most of a drive is closed loop. Other regimes' "
+        "unqualified overrides and the plant's regime_not_qualified are not consulted.",
+    )
     inspect.set_defaults(handler=cmd_inspect)
 
     run = commands.add_parser(

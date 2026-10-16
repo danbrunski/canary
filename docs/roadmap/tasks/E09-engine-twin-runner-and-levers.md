@@ -613,7 +613,7 @@ Pi; E09.13 Light. Items marked **listing** need the firmware session
   `OVERNIGHT-QUEUE.md` Q27 records the order with the truck items marked
   blocked overnight. No code.
 
-- [ ] **E09.14 — `inspect` and the page name the lever and its blockers.**
+- [~] **E09.14 — `inspect` and the page name the lever and its blockers.**
   One function, `src/analysis/rom_levers.py` (layer 5), classifies an edit
   by lever (the table above) and lists, per output, what blocks a number:
   unmapped, unmodelled node, plant unqualified, closed loop. It reads the
@@ -625,6 +625,58 @@ Pi; E09.13 Light. Items marked **listing** need the firmware session
   before E09.8 says "not mapped"; a Fuel Comp cruise edit before E09.10
   says "closed loop: trim authority undecoded"; the CLI and the page show
   the same strings for the same edit (one test calls both).
+  *14a done 2026-10-16 (simulator session); 14b open (W09 session).*
+  `src/analysis/rom_levers.py` holds `classify_edit(report, *, rom_map,
+  model, contract, qualification, regime=None, cells=None) ->
+  LeverClassification` (pydantic, `extra="forbid"`, stable `to_dict()`,
+  plain-string `messages`). Levers are the rom map's table `kind` (an axis
+  follows the table that names it); blockers come from `compare_roms`'s
+  per-output reasons, the contract (`no_torque_plant`: no quantity carries the
+  output and the torque subsystem is `unbuilt`), `plant_qualification`, and
+  the manifest's closed-loop overrides not yet `vehicle`-qualified
+  (`TRIM_AUTHORITY_UNDECODED`). `tools/rom_sim.py inspect` adds a `levers` key
+  (additive) and `--regime`. Evidence: `tests/test_rom_levers.py` (18 tests:
+  the three accept strings; scratch-profile mutations that lift each blocker
+  (node made `implemented`, override qualified, torque subsystem built,
+  contract quantity joined, plant qualified); runner names pinned to
+  `paired_scenarios`; clean-process no-ECU-import) and
+  `tests/test_rom_sim_cli.py` (3 added: CLI messages equal
+  `classify_edit(...).messages` for the same Fuel Comp, timing-trim and
+  0xE27E edits).
+  *Verifier fix 2026-10-16:* the two ECU outputs the run computes (BFS, the
+  Target AFR word) no longer show reasons the run absorbs. One rule:
+  `paired_steady.ecu_output_gate` (called by `paired_scenarios.twin_gate`, the
+  Monte Carlo fast path through it, and `rom_levers` through `twin_gate` and
+  the run's `ReasonScope`), so a Fuel Comp edit says "a number can be given"
+  for both, while an edit to a filter node itself keeps its uncovered
+  blocker; ignition outputs keep every reason. The closed-loop blocker is
+  `paired_steady.closed_loop_trim_pending`, called by the run, the fast path and
+  the classifier: it holds until **all three** E05.3 closed-loop overrides are
+  `vehicle`-qualified (E09.10). `classify_edit` refuses a report not made under
+  the run's contract mode. `tests/test_rom_levers.py` cross-checks each ECU
+  output's blockers against `run_paired` on the same edit (Fuel Comp, an axis,
+  a fill curve, a filter's own table) and drives the run and the classifier from
+  one qualified-override model. `run_paired` is byte-identical over 13 edits x
+  3 points.
+  *Re-verification 2026-10-16 (verifier, recorded here):* `run_paired`
+  identical to HEAD on 46 results; the mv-2 Monte Carlo identical (the fast
+  path's `fast_path_diverged` self-check green); a real Fuel Comp edit agrees
+  with the run; the 51-flip cross-check agrees; the closed-loop blocker
+  behaves with 0/1/2/3 of the three overrides qualified (lifts only at 3).
+  *Wording fixes the same day:* "a number can be given" now carries "(for
+  points that state only the fill byte)", with structured
+  `assumes_conditioned` (`paired_steady.FILL_BYTE`), `refused_if_conditioned`
+  (per output, from the contract mode's conditionable quantities through the
+  run's `ReasonScope`: `paired_steady.conditionable_node`/`conditionable_quantities`,
+  which `run_paired` now also uses for `conditioning_not_allowed`) and
+  `design_dependent` on each such output in `to_dict()`. A mapped table no node
+  reads says "unknown bytes changed: a mapped table no node reads (<table>)"
+  and keeps its lever label, instead of "not mapped". Tests: a hand-built
+  point conditioned on `target_phi_word` (the run refuses the Target AFR word,
+  not BFS, as the caveat says) and an unconditioned point
+  (`conditioning_missing`); `load_point_scaler_slot_copy`.
+  **Remaining (14b):** `rom_editor.preview_edits` and the page
+  call `classify_edit` and show `messages`; one test calls both front ends.
 
 ## Where Rust would pay, and where it would not
 
