@@ -61,7 +61,7 @@ from src.session import session_sort_key
 from src.storage.session_files import count_session_rows, session_time_span_seconds
 from src.storage.sessions import is_session_dir_name, resolve_session, session_started_at
 from src.vehicle.profiles import active_registry, profile_dir
-from src.vehicle.tune_revisions import resolve_session_revision
+from src.vehicle.tune_revisions import TuneRevisionRegistry, resolve_session_revision
 
 #: Most sessions one pooled request may name. Each is read in turn in the
 #: child, so this bounds wall time rather than memory.
@@ -293,6 +293,35 @@ def _over_budget(
     return None
 
 
+def _run_rom_sim(kind: str, params: dict[str, Any], config: CanaryConfig) -> dict[str, Any]:
+    """The ROM Editor's simulate, in the child.
+
+    A refusal comes back as data (``{"refused": ...}``): the simulator's
+    refusal classes, and the flash-history errors below, take ``(reason,
+    message)`` and do not survive pickling out of this child. The grid design
+    names its base revision in the flash history the library matched the image
+    against (tracked + dashboard-recorded), not only the tracked file it would
+    otherwise read, so that history is loaded here -- but only for a matched
+    base (the only one that reaches the design), and an unreadable history is
+    a refusal, never an exception past this function.
+    """
+    from src.analysis.rom_editor import run_job
+
+    registry: TuneRevisionRegistry | None = None
+    if dict(params.get("revision_match") or {}).get("status") == "matched":
+        try:
+            registry = active_registry(config)
+        except Exception as exc:  # noqa: BLE001 - the library reports the same as "unknown"
+            return {
+                "refused": {
+                    "kind": "simulation",
+                    "reason": "flash_history_unreadable",
+                    "message": f"{type(exc).__name__}: {exc}",
+                }
+            }
+    return run_job(kind, params, registry=registry)
+
+
 def run_workbench_job(
     kind: str,
     params: dict[str, Any],
@@ -315,14 +344,7 @@ def run_workbench_job(
 
         return classify_and_write(config, str(params["session_id"]))
     if kind == "rom_sim":
-        # Refusals come back as data ({"refused": ...}): the simulator's
-        # refusal classes do not survive pickling out of this child. The grid
-        # design names its base revision in the flash history the library
-        # matched the image against (tracked + dashboard-recorded), not only
-        # the tracked file the design would otherwise read.
-        from src.analysis.rom_editor import run_job
-
-        return run_job(kind, params, registry=active_registry(config))
+        return _run_rom_sim(kind, params, config)
     if bindings_path is None or dids_path is None:
         raise ValueError(f"workbench job {kind!r} needs bindings_path and dids_path")
     inputs = workbench_inputs(config, bindings_path=bindings_path, dids_path=dids_path)

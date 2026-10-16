@@ -18,7 +18,13 @@ refusal classes take ``(reason, message)`` and do not survive pickling, so
 :func:`src.analysis.rom_editor.run_job` returns them as
 ``{"refused": {"kind", "reason", "message"}}`` and this route answers 400
 ``sim_refused``. Left to raise, the same refusal would reach here as a broken
-pool and answer 503.
+pool and answer 503. The preview goes through the same ``run_job`` in the
+thread pool, so one converter serves both routes and every class in
+:data:`src.analysis.rom_editor.REFUSALS` is a 400 ``edit_refused``, never a 500.
+
+Order of checks on simulate: 404 / 409-no-map, then the base (an unrecorded one
+is a 400 before anything is deferred or spawned: it is a fact about the request,
+not about the load), then the capture deferral, then the child.
 
 Nothing is persisted and the candidate image never leaves the simulator: what
 a caller keeps is the edit spec YAML. Nothing here reaches the ECU.
@@ -34,7 +40,6 @@ from starlette.concurrency import run_in_threadpool
 
 from src.analysis import rom_editor
 from src.analysis.rom_editor import SimRequest
-from src.analysis.rom_effects import RomEffectRefusalError
 from src.config import CanaryConfig
 from src.control.rom_library import RomLibrary, RomNotFoundError, valid_sha
 from src.control.workbench_jobs import WorkbenchRefusedError, capture_deferral, run_off_loop
@@ -69,6 +74,18 @@ def _definition_unavailable(exc: FileNotFoundError) -> HTTPException:
     return HTTPException(409, f"ROM Editor definition unavailable for this vehicle: {exc}")
 
 
+def _unrecorded_message(revision_match: dict[str, Any]) -> str:
+    """Why this base cannot be simulated, in the words ``simulate_edits`` uses,
+    plus the library's own reason (an unreadable flash history says why)."""
+    why = revision_match.get("reason")
+    return (
+        f"revision_match is {revision_match.get('status')!r}"
+        + (f" ({why})" if why else "")
+        + ": only a flashed revision in tune_revisions.yaml can be simulated "
+        "(the page still previews the edits)"
+    )
+
+
 def _laptop_path(sha: str) -> str:
     """What a deferred simulate carries in ``laptop_path``. The workbench's own
     text tar-streams a session, which this job never reads."""
@@ -95,58 +112,58 @@ def register_rom_editor_routes(
         )
     authorize = control_auth_dependency(resolved_control_token)
 
-    def entry_state(sha: str) -> tuple[bytes, dict[str, Any]]:
-        """The library image and its ``revision_match``; 404 unknown sha, 409
-        when the vehicle has no map (as ``GET .../tables``). Blocking."""
+    def entry_state(sha: str) -> dict[str, Any]:
+        """The library entry's ``revision_match``; 404 unknown sha, 409 when the
+        vehicle has no map (as ``GET .../tables``). Blocking."""
         if not valid_sha(sha):
             raise _not_found(sha)
         try:
-            image = library.image(sha)
+            library.image(sha)
         except (RomNotFoundError, FileNotFoundError) as exc:
             raise _not_found(sha) from exc
         try:
             library.rom_map()
         except FileNotFoundError as exc:
             raise _map_unavailable(exc) from exc
-        return image, library.revision_match(sha)
+        return library.revision_match(sha)
 
-    def preview(sha: str, body: PreviewRequest) -> dict[str, Any]:
-        image, revision_match = entry_state(sha)
-        try:
-            return rom_editor.preview_edits(
-                image,
-                revision_match,
-                body.label,
-                body.edits,
-                library.profile_dir,
-                sha256=sha,
-            )
-        except RomEffectRefusalError as exc:
-            # EditSpecRefusalError is one, but E08.1's value_out_of_range
-            # comes from make_candidate as the base class itself.
-            raise HTTPException(
-                400,
-                {
-                    "error": "edit_refused",
-                    "kind": rom_editor.refusal_kind(exc),
-                    "reason": exc.reason,
-                    "message": exc.message,
-                },
-            ) from exc
-        except FileNotFoundError as exc:
-            raise _definition_unavailable(exc) from exc
-
-    def job_params(sha: str, body: SimRequest) -> dict[str, Any]:
-        """What the child needs, as plain data (``_job_key`` hashes it, so an
-        identical click in flight is shared)."""
-        _, revision_match = entry_state(sha)
+    def job_params(sha: str, revision_match: dict[str, Any], **extra: Any) -> dict[str, Any]:
+        """What ``rom_editor.run_job`` needs, as plain data (``_job_key`` hashes
+        it, so an identical click in flight is shared)."""
         return {
             "image_path": str(library.root / f"{sha}.bin"),
             "sha256": sha,
             "revision_match": revision_match,
             "profile_dir": str(library.profile_dir),
-            "request": body.model_dump(mode="json"),
+            **extra,
         }
+
+    def preview(sha: str, body: PreviewRequest) -> dict[str, Any]:
+        params = job_params(sha, entry_state(sha), label=body.label, edits=body.edits)
+        try:
+            result = rom_editor.run_job("rom_preview", params)
+        except FileNotFoundError as exc:
+            raise _definition_unavailable(exc) from exc
+        refused = result.get("refused")
+        if refused is not None:
+            raise HTTPException(400, {"error": "edit_refused", **refused})
+        return result
+
+    def simulate_params(sha: str, body: SimRequest) -> dict[str, Any]:
+        """Blocking: the entry checks, the base check, the child's params."""
+        revision_match = entry_state(sha)
+        base = rom_editor.sim_base(revision_match)
+        if not base["ok"]:
+            raise HTTPException(
+                400,
+                {
+                    "error": "sim_refused",
+                    "kind": "simulation",
+                    "reason": base["reason"],
+                    "message": _unrecorded_message(revision_match),
+                },
+            )
+        return job_params(sha, revision_match, request=body.model_dump(mode="json"))
 
     @app.post("/control/rom/library/{sha}/edits/preview", dependencies=[Depends(authorize)])
     async def post_rom_edit_preview(sha: str, body: PreviewRequest) -> dict[str, Any]:
@@ -158,7 +175,7 @@ def register_rom_editor_routes(
     async def post_rom_simulate(sha: str, body: SimRequest) -> dict[str, Any]:
         """The edits on a recorded base, over a stated grid. Every field of the
         body is required: nothing is defaulted (422 names what is missing)."""
-        params = await run_in_threadpool(job_params, sha, body)
+        params = await run_in_threadpool(simulate_params, sha, body)
         try:
             try:
                 capture_deferral(config)

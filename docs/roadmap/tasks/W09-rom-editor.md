@@ -297,7 +297,7 @@ W09.6 is the orchestrator's own, on the ROM machine.
     - `tests/test_layering.py` and `tests/test_state_dir.py` stay green (no
       runtime writes: nothing is persisted in this checklist).
   - *Done 2026-10-15, synthetic image only* (real-image runs are W09.6).
-    `tests/test_rom_editor_api.py`, 32 tests green (`pytest` over it,
+    `tests/test_rom_editor_api.py`, 42 tests green after the verifier's fixes (`pytest` over it,
     `test_rom_editor`, `test_route_table_snapshot`, `test_layering`,
     `test_state_dir`, `test_workbench_analysis`, `test_rom_library_api`,
     `test_dyno_workbench`, `test_control_classification`, `test_rom_trace`,
@@ -310,8 +310,8 @@ W09.6 is the orchestrator's own, on the ROM machine.
     (response equals `preview_edits`, 20 cells 128 → 131),
     `test_preview_refusals_are_a_400_with_their_reason` (`table_not_editable`,
     `slot_not_simulated`, `no_op_edit`, `rounding_undeclared`, and
-    `value_out_of_range` as `kind: rom_effect`: the route catches
-    `RomEffectRefusalError`), `duplicate_edit` / `no_edits`, another program
+    `value_out_of_range` as `kind: rom_effect`: E08.1's range check is the
+    base class), `duplicate_edit` / `no_edits`, another program
     (`wrong_program`/`patch_missing`, not a 500), 404 (unknown, malformed,
     traversal sha), 409 with no map (also for simulate; 404 wins over 409),
     422. Simulate: `test_simulate_runs_the_child_and_returns_the_cells`
@@ -330,8 +330,10 @@ W09.6 is the orchestrator's own, on the ROM machine.
     child). `test_nothing_is_persisted_and_the_candidate_is_never_offered`
     (`tmp_path` tree and `repo_guard` snapshot unchanged, the library still
     holds the one base image, download returns it). Both routes 401 without
-    or with a wrong token, before the body is read. Registering the editor
-    without the library raises.
+    or with a wrong token (the dependency wins over field validation, but
+    FastAPI parses the body first, so a body that is not JSON is a 422 even
+    without a token: `test_both_routes_require_the_token` pins both).
+    Registering the editor without the library raises.
     Found and fixed on the way: the library matches an image against
     `active_registry(config)` (tracked + dashboard-recorded flashes) but
     `build_grid_design(registry=None)` reads only the tracked file, so a base
@@ -339,6 +341,31 @@ W09.6 is the orchestrator's own, on the ROM machine.
     child. `run_workbench_job` now passes `registry=active_registry(config)`;
     `test_a_revision_recorded_from_the_dashboard_is_simulated_as_the_library_sees_it`
     failed before and passes after.
+    Verifier fixes (2026-10-15): (1) that eager `active_registry(config)` in the
+    child raised `RegistryConflictError` (does not pickle) for an unreadable or
+    conflicting operational registry: 503 `child_failed`. Fixed at two layers.
+    The route refuses a base that is not `matched` **before** the capture
+    deferral and before any child (400 `sim_refused`, `kind: simulation`,
+    `reason: base_not_a_recorded_revision`, message carrying the library's
+    reason; so the answer does not depend on whether a capture records), and
+    the child (`workbench_jobs._run_rom_sim`) reads the history only for a
+    matched base and returns an unreadable one as data
+    (`flash_history_unreadable`). Tests:
+    `test_a_conflicting_flash_history_is_a_400_and_spawns_nothing` (real-spawn
+    harness, conflicting operational `tune_revisions.yaml`: 400, no dispatch)
+    and `test_a_flash_history_that_breaks_after_the_check_is_a_400_from_the_real_child`
+    (history changed between the route's match and the child's read: 400
+    `flash_history_unreadable` from a real child). Checked by restoring the
+    committed sources: the first answers 503 `child_failed` (BrokenProcessPool)
+    at 1b72db60, and the second does when only the child fix is reverted.
+    (2) The preview now runs `rom_editor.run_job("rom_preview")` in the thread
+    pool, the one converter the child uses, so every class in
+    `rom_editor.REFUSALS` is a 400 `edit_refused` (`test_preview_answers_every_refusal_class_as_a_400_not_a_500`,
+    one case per class; five of the seven were a 500 before) and a
+    `FileNotFoundError` is 409; `test_a_missing_vehicle_definition_is_a_409_on_both_routes`
+    (no `ecu_application_model.yaml`; simulate raises it in a real child).
+    (3) `docs/headless-api.md` lists every `kind` and says the `reason` list is
+    open-ended.
     Decisions the doc did not settle: no separate `rom_preview` job kind
     (preview is the thread pool); 400 bodies also carry `kind`; a deferred
     simulate keeps the workbench's detail but its `laptop_path` says to

@@ -18,7 +18,7 @@ from __future__ import annotations
 import functools
 import json
 import shutil
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from concurrent.futures import Future, ThreadPoolExecutor
 from pathlib import Path
 from typing import Any
@@ -30,7 +30,7 @@ from fastapi.testclient import TestClient
 from src.analysis import rom_editor
 from src.analysis.ecu_application import program_sha256
 from src.analysis.paired_scenarios import SimKit
-from src.analysis.rom_image import revision_match, sha256_hex
+from src.analysis.rom_image import ImageFormatError, revision_match, sha256_hex
 from src.config import CanaryConfig
 from src.control import workbench_jobs
 from src.dashboard.routes import rom_editor as rom_editor_routes
@@ -195,8 +195,15 @@ def test_both_routes_require_the_token(client: TestClient, sha: str) -> None:
         assert client.post(url, json=body).status_code == 401, url
         wrong = client.post(url, json=body, headers={"Authorization": "Bearer nope"})
         assert wrong.status_code == 401, url
-        # Refused before the body is read: an empty one is not a 422.
+        # The token wins over field validation (the dependency raises first) ...
         assert client.post(url).status_code == 401, url
+        assert client.post(url, json={"bogus": 1}).status_code == 401, url
+        # ... but FastAPI parses the body before it runs dependencies, so a body
+        # that is not JSON at all is a 422 even without a token.
+        not_json = client.post(
+            url, content=b"not json", headers={"Content-Type": "application/json"}
+        )
+        assert not_json.status_code == 422, url
 
 
 def test_the_editor_registers_only_after_the_library(config: CanaryConfig) -> None:
@@ -308,6 +315,33 @@ def test_preview_refuses_duplicates_and_an_empty_list_by_name(client: TestClient
         response = client.post(preview_url(sha), json={"label": "x", "edits": edits}, headers=AUTH)
         assert response.status_code == 400, response.text
         assert detail(response)["reason"] == reason
+
+
+@pytest.mark.parametrize(
+    ("cls", "kind"), rom_editor.REFUSALS, ids=[k for _, k in rom_editor.REFUSALS]
+)
+def test_preview_answers_every_refusal_class_as_a_400_not_a_500(
+    client: TestClient,
+    sha: str,
+    monkeypatch: pytest.MonkeyPatch,
+    cls: type[ValueError],
+    kind: str,
+) -> None:
+    """The classes take (reason, message) -- except ImageFormatError, a plain
+    ValueError with only a message -- and a route that caught only some of them
+    answered the rest with a 500. The table is rom_editor.REFUSALS itself."""
+
+    def boom(*args: Any, **kwargs: Any) -> dict[str, Any]:
+        raise cls("some message") if cls is ImageFormatError else cls("some_reason", "some message")
+
+    monkeypatch.setattr(rom_editor, "preview_edits", boom)
+    response = client.post(preview_url(sha), json=preview_body(FC_EDIT), headers=AUTH)
+    assert response.status_code == 400, response.text
+    body = detail(response)
+    assert body["error"] == "edit_refused" and body["kind"] == kind
+    assert body["reason"] == ("image_format" if cls is ImageFormatError else "some_reason")
+    assert body["message"] == "some message"
+    assert set(body) == {"error", "kind", "reason", "message"}
 
 
 def test_preview_of_another_program_is_refused_by_name_not_a_500(
@@ -540,17 +574,33 @@ def test_a_revision_recorded_from_the_dashboard_is_simulated_as_the_library_sees
     pool.shutdown(wait=True)
 
 
-def test_an_unrecorded_base_cannot_be_simulated(
-    client: TestClient, unrecorded: str, in_process: CountingExecutor
+def test_an_unrecorded_base_is_refused_before_anything_is_deferred_or_spawned(
+    client: TestClient,
+    unrecorded: str,
+    in_process: CountingExecutor,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    response = client.post(simulate_url(unrecorded), json=sim_request(), headers=AUTH)
-    assert response.status_code == 400, response.text
-    body = detail(response)
-    assert (body["error"], body["kind"], body["reason"]) == (
-        "sim_refused",
-        "simulation",
-        "base_not_a_recorded_revision",
-    )
+    """A fact about the request, not about the load: it is a 400 whether or not a
+    capture records, and no child is spawned for it."""
+    for recording in (False, True):
+        if recording:
+            monkeypatch.setattr(workbench_jobs.tuning_profile, "is_active", lambda: True)
+            monkeypatch.setattr(
+                workbench_jobs.tuning_profile,
+                "active_profile",
+                lambda: type("P", (), {"name": "tuning"})(),
+            )
+        response = client.post(simulate_url(unrecorded), json=sim_request(), headers=AUTH)
+        assert response.status_code == 400, (recording, response.text)
+        body = detail(response)
+        assert (body["error"], body["kind"], body["reason"]) == (
+            "sim_refused",
+            "simulation",
+            "base_not_a_recorded_revision",
+        )
+        assert "'unrecognised'" in body["message"] and "previews" in body["message"]
+        assert set(body) == {"error", "kind", "reason", "message"}
+    assert in_process.submitted == 0
 
 
 def test_every_request_field_is_required_and_a_missing_one_is_a_422(
@@ -571,15 +621,30 @@ def test_every_request_field_is_required_and_a_missing_one_is_a_422(
     assert in_process.submitted == 0
 
 
+class RealChild:
+    """``run_off_loop`` with the real ``spawn`` child (no executor) and a bounded
+    wait, so a hung child fails a test in 90 s rather than at the digest's
+    timeout. Records each dispatch; ``before`` runs just before the child starts
+    (to change the world between the route's checks and the child's)."""
+
+    def __init__(self) -> None:
+        self.calls: list[str] = []
+        self.before: Callable[[], None] | None = None
+
+    async def __call__(
+        self, kind: str, params: dict[str, Any], config: CanaryConfig, **kw: Any
+    ) -> dict[str, Any]:
+        self.calls.append(kind)
+        if self.before is not None:
+            self.before()
+        return await workbench_jobs.run_off_loop(kind, params, config, timeout=90.0, **kw)
+
+
 @pytest.fixture
-def real_child(monkeypatch: pytest.MonkeyPatch) -> None:
-    """The real ``spawn`` child (no executor), with a bounded wait so a hung
-    child fails the test in 90 s rather than at the digest's timeout."""
-    monkeypatch.setattr(
-        rom_editor_routes,
-        "run_off_loop",
-        functools.partial(workbench_jobs.run_off_loop, timeout=90.0),
-    )
+def real_child(monkeypatch: pytest.MonkeyPatch) -> RealChild:
+    child = RealChild()
+    monkeypatch.setattr(rom_editor_routes, "run_off_loop", child)
+    return child
 
 
 @pytest.mark.usefixtures("real_child")
@@ -614,6 +679,105 @@ def test_a_whole_simulate_crosses_the_real_spawn_boundary(client: TestClient, sh
     assert response.status_code == 200, response.text
     body = response.json()
     assert body["cells"]["schema_version"] == 1 and body["provenance"]["draws"] == 2
+
+
+def write_operational_history(config: CanaryConfig, image: bytes, *, flashed_at: str) -> None:
+    """The dashboard's own flash record (R05.17): the operational registry."""
+    operational = operational_dir(config)
+    operational.mkdir(parents=True, exist_ok=True)
+    text = REVISIONS_YAML.format(revision=REVISION, sha=sha256_hex(image))
+    (operational / "tune_revisions.yaml").write_text(
+        text.replace("2026-10-01T00:00:00Z", flashed_at)
+    )
+
+
+def test_a_conflicting_flash_history_is_a_400_and_spawns_nothing(
+    config: CanaryConfig,
+    kit_and_image: tuple[SimKit, bytes],
+    real_child: RealChild,
+) -> None:
+    """One revision name recorded as two different flashes (tracked vs
+    operational) is a RegistryConflictError, which does not pickle: in a child
+    it was a 503. The library reports that history as ``unknown``, and a base
+    that is not a recorded revision is refused before a child is spawned."""
+    _, image = kit_and_image
+    write_operational_history(config, image, flashed_at="2026-10-02T00:00:00Z")
+    with TestClient(make_app(config)) as client:
+        sha = upload(client, image, "synthetic.bin")
+        match = client.get(f"/control/rom/library/{sha}", headers=AUTH).json()["entry"][
+            "revision_match"
+        ]
+        assert match["status"] == "unknown" and "RegistryConflictError" in match["reason"]
+        response = client.post(simulate_url(sha), json=sim_request(), headers=AUTH)
+        assert response.status_code == 400, response.text
+        body = detail(response)
+        assert (body["error"], body["kind"], body["reason"]) == (
+            "sim_refused",
+            "simulation",
+            "base_not_a_recorded_revision",
+        )
+        assert "flash history unreadable" in body["message"]
+        # The preview does not need the history: it still works, by file.
+        previewed = client.post(preview_url(sha), json=preview_body(FC_EDIT), headers=AUTH)
+        assert previewed.status_code == 200, previewed.text
+        assert previewed.json()["sim_base"]["reason"] == "base_not_a_recorded_revision"
+    assert real_child.calls == []
+
+
+def test_a_flash_history_that_breaks_after_the_check_is_a_400_from_the_real_child(
+    client: TestClient,
+    sha: str,
+    config: CanaryConfig,
+    kit_and_image: tuple[SimKit, bytes],
+    real_child: RealChild,
+) -> None:
+    """The route matched the image against a readable history; by the time the
+    child reads it the operational registry conflicts with the tracked one. The
+    child returns that as data (``flash_history_unreadable``): raised, the
+    RegistryConflictError would not unpickle and the route would answer 503."""
+    _, image = kit_and_image
+    real_child.before = lambda: write_operational_history(
+        config, image, flashed_at="2026-10-02T00:00:00Z"
+    )
+    response = client.post(simulate_url(sha), json=sim_request(draws=2), headers=AUTH)
+    assert real_child.calls == ["rom_sim"]
+    assert response.status_code == 400, response.text
+    body = detail(response)
+    assert (body["error"], body["kind"], body["reason"]) == (
+        "sim_refused",
+        "simulation",
+        "flash_history_unreadable",
+    )
+    assert "RegistryConflictError" in body["message"]
+    assert workbench_jobs._IN_FLIGHT == {}
+
+
+def test_a_missing_vehicle_definition_is_a_409_on_both_routes(
+    tmp_path: Path,
+    profile: Path,
+    kit_and_image: tuple[SimKit, bytes],
+    real_child: RealChild,
+) -> None:
+    """The map is there (the library works) but the vehicle has no application
+    model: preview and simulate say which definition is missing, as a 409. The
+    simulate error is raised in a real child and crosses the process boundary."""
+    _, image = kit_and_image
+    bare = tmp_path / "no-model"
+    shutil.copytree(profile, bare)
+    (bare / "ecu_application_model.yaml").unlink()
+    config = isolated_config(tmp_path, daemon={"afr_calibration": bare / "afr_calibration.yaml"})
+    with TestClient(make_app(config)) as client:
+        sha = upload(client, image, "synthetic.bin")
+        for url, body in (
+            (preview_url(sha), preview_body(FC_EDIT)),
+            (simulate_url(sha), sim_request(draws=2)),
+        ):
+            response = client.post(url, json=body, headers=AUTH)
+            assert response.status_code == 409, (url, response.text)
+            message = response.json()["detail"]
+            assert message.startswith("ROM Editor definition unavailable for this vehicle:")
+            assert "ecu_application_model.yaml" in message
+    assert real_child.calls == ["rom_sim"]
 
 
 # -- nothing is persisted, nothing leaves --------------------------------------------------------

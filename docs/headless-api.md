@@ -470,7 +470,9 @@ into the library as `source: ecu_read` with `read_meta`:
 
 ## ROM Editor: preview and simulate (W09)
 
-Two routes under the ROM library, both behind the control token. They edit
+Two routes under the ROM library, both behind the control token (a request
+without one is 401, ahead of field validation; but FastAPI parses the body before it runs
+dependencies, so a body that is not JSON at all is a 422 even without a token). They edit
 nothing the daemon keeps: no candidate image is stored, added to the library or
 offered for download, and nothing is written (a candidate is `flashable: false`
 with stale checksums on purpose). What a caller keeps is the **edit spec YAML**
@@ -548,9 +550,14 @@ edit moves. `sim_base.ok` is whether a simulate is offered: `false` with
 `matched` (a `reference` image, a tuner's base that was never flashed, is not a
 revision); the preview still works.
 
-Errors: `400` `{"detail": {"error": "edit_refused", "kind": "edit_spec" |
-"rom_effect", "reason": "<name above>", "message": "..."}}`; `404`; `409`;
-`422`.
+Errors: `400` `{"detail": {"error": "edit_refused", "kind": <kind>, "reason":
+"<name>", "message": "..."}}`; `404`; `409`; `422`. `kind` is the refusal class
+(the table of `src.analysis.rom_editor.REFUSALS`): `edit_spec` and `rom_effect`
+for an edit or the image (the reasons above, including the image's own
+`wrong_program`), and the other classes the code beneath can raise:
+`application_model`, `image_format` (reason `image_format`), `fuel_plant`,
+`sim_design`, `simulation`. The `reason` list is open-ended; every class in the
+table is a 400, never a 500.
 
 ### `POST /control/rom/library/{sha}/simulate`
 
@@ -609,13 +616,25 @@ Errors (each a `{"detail": ...}`):
 
 | Status | `detail` | When |
 |---|---|---|
-| `400` | `{"error": "sim_refused", "kind": "edit_spec" \| "rom_effect" \| "sim_design" \| "simulation", "reason": "...", "message": "..."}` | the child refused: any edit reason above, `grid_edges_invalid`, `load_outside_model`, `grid_too_large`, `draws_too_many`, `base_not_a_recorded_revision`, `uncertainty_missing`, `image_hash_mismatch` / `image_not_found` (the library changed under the request) |
+| `400` | `{"error": "sim_refused", "kind": <kind>, "reason": "...", "message": "..."}` | the child (or the route, for the base) refused. `kind` is one of `edit_spec`, `rom_effect`, `sim_design`, `simulation`, `fuel_plant`, `application_model`, `image_format`, `request` (`request` only for a `run_job` caller that skipped the route's validation: the route answers a bad body 422 first). `reason` is open-ended. The route's tests produce any edit reason above, `grid_edges_invalid`, `grid_too_large`, `draws_too_many`, `base_not_a_recorded_revision` and `flash_history_unreadable`; the code also names `load_outside_model`, `design_empty`, `uncertainty_missing`, `uncertainty_invalid` and `image_hash_mismatch` / `image_not_found` (the library changed under the request), and a new refusal is a new `reason`, not a new shape |
 | `404` | `"no ROM library entry '<sha>'"` | unknown or malformed sha |
 | `409` | `"ROM map definition unavailable for this vehicle: ..."` | no map |
+| `409` | `"ROM Editor definition unavailable for this vehicle: ..."` | the map is there but another definition is not (application model, simulator contract, plant); the message names the file |
 | `409` | `{"error": "analysis_deferred", "reason": "capture_active", "profile", "message", "laptop_path"}` | a capture is recording (`laptop_path` says to download the image and run the spec on the laptop) |
 | `409` | `{"error": "analysis_busy", "reason": "child_busy" \| "brain_child_yielding", "message"}` | another analysis, digest or brain child is running; an identical request already in flight is shared instead |
 | `422` | pydantic's list | a missing, unknown or mistyped body field |
 | `503` | `{"error": "analysis_unavailable", "reason": "child_timed_out" \| "child_failed" \| "child_out_of_memory", "message"}` | the child did not finish (900 s), died, or hit its address-space ceiling |
+
+**Order of checks:** 404 (unknown sha), 409 (no map), then the base: an image
+whose `revision_match.status` is not `matched` (a `reference`, an `unrecognised`
+image, or `unknown` when the flash history is unreadable, in which case the
+message says why) is a 400 `base_not_a_recorded_revision` **before** anything is
+deferred or spawned, so it is the same answer whether or not a capture records.
+Then the capture deferral (409), then the child (409 busy, 503, 400). The
+child reads the flash history itself (tracked file merged with the dashboard's
+operational one) only for a matched base; if it has become unreadable since the
+route matched the image, the child returns it as data: 400
+`flash_history_unreadable`.
 
 A refusal raised inside the child crosses the process boundary as data
 (`src.analysis.rom_editor.run_job` returns `{"refused": {...}}`): the
