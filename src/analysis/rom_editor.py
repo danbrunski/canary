@@ -59,7 +59,7 @@ from src.analysis.ecu_application import (
     load_application_model,
 )
 from src.analysis.fuel_plant import FuelPlantRefusalError
-from src.analysis.paired_scenarios import LearnedState, PairedScenario, SimKit, load_kit
+from src.analysis.paired_scenarios import LearnedState, PairedScenario, SimKit
 from src.analysis.rom_edit_spec import (
     BaseImage,
     EditSpec,
@@ -82,10 +82,9 @@ from src.analysis.sim_design import (
 )
 from src.analysis.sim_montecarlo import (
     MODE,
-    UNCERTAINTY_FILE,
     LoadedUncertainty,
     MonteCarloDesign,
-    load_uncertainty,
+    load_sim_kit,
     run_monte_carlo,
 )
 from src.vehicle.tune_revisions import TuneRevisionRegistry
@@ -384,17 +383,10 @@ def _recorded(base: BaseImage) -> str:
     return str(base.identity["revision"])
 
 
-def _uncertainty(profile_dir: Path) -> LoadedUncertainty:
-    try:
-        return load_uncertainty(profile_dir / UNCERTAINTY_FILE)
-    except FileNotFoundError as exc:
-        raise SimulationRefusalError(
-            "uncertainty_missing", f"{profile_dir.name} has no {UNCERTAINTY_FILE}"
-        ) from exc
-    except ValidationError as exc:
-        raise SimulationRefusalError(
-            "uncertainty_invalid", f"{UNCERTAINTY_FILE}: {exc.error_count()} error(s)"
-        ) from exc
+def _uncertainty(profile_dir: Path, kit: SimKit) -> LoadedUncertainty:
+    """The uncertainty declaration of the kit's plant (E08.11: sim_kit.yaml
+    names one per plant version; load_sim_kit checks it against the plant)."""
+    return load_sim_kit(profile_dir, kit.plant.plant_version).uncertainty
 
 
 def _template(
@@ -434,6 +426,7 @@ def _grid_design(
     revision: str,
     profile_dir: Path,
     registry: TuneRevisionRegistry | None,
+    plant_version: str | None = None,
 ) -> SimDesign:
     return build_grid_design(
         request.rpm_edges,
@@ -448,6 +441,7 @@ def _grid_design(
         rail_kpa=request.rail_kpa,
         throttle_pct=request.throttle_pct,
         pedal_flag=request.pedal_flag,
+        plant_version=plant_version,
         registry=registry,
     )
 
@@ -468,7 +462,7 @@ def _simulate(
     the same path :func:`simulate_edits` uses."""
     revision = _recorded(base)
     _bounded(request)
-    design = _grid_design(request, revision, profile_dir, registry)
+    design = _grid_design(request, revision, profile_dir, registry, kit.plant.plant_version)
     require_base(design, base.image_sha256)
     candidate_sha = sha256_hex(candidate_image)
     result = run_monte_carlo(
@@ -477,7 +471,7 @@ def _simulate(
         MonteCarloDesign.from_sim_design(design),
         base.image,
         candidate_image,
-        _uncertainty(profile_dir),
+        _uncertainty(profile_dir, kit),
         draws=request.draws,
         seed=request.seed,
     )
@@ -552,7 +546,7 @@ def simulate_edits(
     _recorded(base)
     _bounded(request)
     spec = editor_spec(base, request.label, request.edits)
-    kit = kit if kit is not None else load_kit(profile_dir)
+    kit = kit if kit is not None else load_sim_kit(profile_dir).kit
     candidate_image, provenance = _candidate(
         base, spec, _EditContext(kit.rom_map, kit.model, kit.model_sha256)
     )
