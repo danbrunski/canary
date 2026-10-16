@@ -68,6 +68,19 @@ acceptance runs on the real images.
   defaulted). The browser may remember the operator's last stated values in
   `localStorage` (wrapped in try/catch). They are shown in the form, never
   applied silently.
+
+  *Added with W09.11 (operator request 2026-10-16; the text above is
+  unchanged):* the Simulate form has a **Fill typical values** button. It is
+  consistent with this decision only because it is an explicit operator click
+  that puts the vehicle's declared typical values
+  (`data/<vehicle>/sim_typical_values.yaml`, each with a required `source`) into
+  the visible form fields and marks each `typical: <source>`. Nothing is applied
+  silently or sent without being shown, the `SimRequest` still has no defaults,
+  and the button never fills the grid, the candidate events, the edges, the
+  draws, the seed or the label. Two of its values are declared `kind:
+  placeholder` (numbers the simulator reads nowhere): the page tags them
+  `placeholder`, never `typical`, and a test fails the moment any code reads
+  them.
 - **The grid defaults to Fuel Comp's own breakpoints, made visible.** The
   rpm and load edges the form pre-fills are the midpoints between
   `fuel_comp_engine_speed_axis` / `fuel_comp_flow_axis` breakpoints on the base
@@ -125,6 +138,7 @@ acceptance runs on the real images.
 | W09.5 | — | `src/mcp_server/…`, `docs/mcp-server.md` |
 | W09.6 | `tests/test_rom_editor_private_rom.py`, `src/dashboard/static/e2e/romEditor.spec.ts` | this doc |
 | W09.10 | `tests/test_rom_levers_parity.py`, `src/dashboard/static/src/test/romLeverFixtures.ts`, `romLeverFixtures.test.ts`, `romLevers.fixture.json` | `rom_editor.py` (`preview_edits`), `PreviewResult.tsx`, `types/romEditor.ts`, `api/workbench.ts`, `docs/headless-api.md`, `docs/mcp-server.md`, the `preview_rom_edit` docstring |
+| W09.11 | `data/<vehicle>/sim_typical_values.yaml`, `src/dashboard/static/src/lib/romSimTypical.ts` (+ test), `src/test/romTypicalFixtures.ts`, `src/test/romTypicalValues.fixture.json` | `rom_editor.py` (`typical_values`), `routes/rom_editor.py` (one GET), `SimForm.tsx`, `RomEditorPage.tsx` (one prop), `RomEditorSimulate.test.tsx`, `types/romEditor.ts`, `api/workbench.ts` (one function), `e2e/romEditor.spec.ts`, `e2e/fixtures/romEditorApi.ts`, `tests/test_rom_editor.py`, `tests/test_rom_editor_api.py`, `tests/fixtures/route_table_snapshot.json`, `docs/headless-api.md` |
 
 `src/analysis/rom_editor.py` is layer 5 (`tests/test_layering.py`). Like
 every E08 module, it imports no `src.control`, daemon, dashboard, MCP, `can` or
@@ -1433,6 +1447,176 @@ W09.6 is the orchestrator's own, on the ROM machine.
     flow and is an operator call. The timing trim and the MAF curve cannot be
     edited through the page (W09.7 owns editable timing trims); the MAF case is
     the CLI's.
+
+- [x] **W09.11 — "Fill typical values" on the Simulate form (2026-10-16).**
+  Operator request, verbatim: "in the dashboard, under ROM Editor where the
+  simulation is, can there be an option to fill all default values", then "for
+  example Baro, IAT, coolant, battery, throttle, pedal flag, etc.". Consistent
+  with "Nothing is defaulted" only because it is an explicit click that puts
+  visible, sourced values into the form (see the note under that decision); the
+  21-field `SimRequest` is unchanged.
+  - **The values are vehicle data, each with a required source.**
+    `data/nissan-xterra-2008/sim_typical_values.yaml` (new; `sim_kit.yaml` is the
+    simulator session's and untouched). `rom_editor.typical_values(profile_dir)`
+    loads it (pydantic, `extra="forbid"`): a `values` entry is `{value, kind,
+    source}` with a required `kind` (`typical` or `placeholder`; a placeholder's
+    source must say it is one), a non-blank `source` and a strict number (a quoted `"81"` or a bare
+    `true` is refused; `rail_kpa` alone may be `"working_assumption"`; each value
+    is checked against its own `SimRequest` field, so `pedal_flag: 256` or `1.5`
+    is refused). Every one of the twelve fillable fields
+    (`rom_editor.TYPICAL_FIELDS`: the environment and the learned state) is
+    either a `values` entry or a `left_empty` entry with a required `reason`;
+    one that is neither cannot be loaded, and a file naming a field in
+    `NEVER_TYPICAL_FIELDS` (grid, candidate events, edges, draws, seed, label,
+    edits, load basis) or an unknown name (a typo) is refused. Refusals are
+    `SimulationRefusalError` by name: `typical_values_undeclared` (no file) and
+    `typical_values_invalid`.
+  - **Declared (value, source).** `baro_kpa` 81 and `iat_c` 25, `coolant_c` 88,
+    `battery_v` 14: E07.6's stated WOT point (`tests/test_paired_scenarios.py`
+    `WOT`) and W09.6's grid environment (`tests/test_rom_editor_private_rom.py`
+    `ENV`); baro's source adds that home is ~80 kPa and trips reach 63 kPa
+    (state your own for a trip). `rail_kpa` 350: the returnless rail's service
+    manual figure (`fuel_plant_mv2.yaml` `reference_delta_p`, EC-494/EC-499), the
+    same as E07.6 and W09.6. `throttle_pct` 20 and `pedal_flag` 0: W09.6's grid
+    environment (a part throttle, flag clear; E07.6's WOT and CRUISE points also
+    state 0; E07.6's 90 % throttle and W09.6's `E076_WOT_ENV` flag 1 are the WOT
+    case, a different experiment). `stft_pct` 0 and `ltft_pct` 2.34: E07.6's
+    `LEARNED` (W09.6 `E076_LEARNED`, E08.7 item 4), said to be a stated scenario
+    value, not a read of the truck. `evap_purge_area` 0: the simulator contract's
+    `conditional_rom_comparison` assumption "Purge off: purge scheduling is not
+    modelled" (`engine_sim_contract.yaml`), and E07.6's `LEARNED` states 0.
+  - **Placeholders, nothing left empty (operator decision 2026-10-16, option
+    b).** `throttle_closed_learned` 0 and `idle_air_learned` 0 are declared
+    `kind: placeholder`: E07.6 (`LEARNED`) and W09.6 (`LEARNED_ZERO`) pass 0.0,
+    and no source states a typical value (the contract calls the first a
+    per-truck learned closed throttle position, "Read from a key-on checkpoint",
+    and says of the second "not captured on 2026-10-04"). Their source text says
+    "PLACEHOLDER, not a measurement", that the paired run reads the number
+    nowhere, and to replace it with the truck's key-on checkpoint value when a
+    node starts reading it. So the Xterra leaves 0 of the twelve fields empty
+    (`left_empty: {}`), and Run needs only the grid, the candidate events and,
+    unless a preset filled them, the draws and the seed. `kind` is required, so a
+    placeholder is a declared kind, not a convention, and the page's tag comes
+    from it (`placeholder: <source>`, bold; `typical: <source>` otherwise).
+  - **Guard: it cannot go stale.** `tests/test_rom_editor.py`
+    `test_the_placeholders_are_the_two_learned_fields_no_code_reads` walks the
+    Python in `src/` (AST: attribute, string, keyword, name and import
+    mentions; a class's own field declaration is not one) for every field the
+    shipped file marks `placeholder`, and compares the mentions with an exact
+    allowlist of the plumbing: `paired_scenarios._LEARNED_FIELDS` (the contract
+    quantity to `LearnedState` field, 2 strings per name), `rom_editor`'s
+    `LearnedState(<name>=request.<name>)` (1 attribute, 1 keyword) and
+    `TYPICAL_FIELDS` (1 string). A new mention fails with "a node now reads a
+    placeholder: replace the typical value with a sourced one or require the
+    operator to state it"; an allowed mention that disappears fails too (stale
+    list), and so does an allowlist entry for a field that is no longer a
+    placeholder. A read by a computed name is invisible to any scan; the mapping's
+    strings are the only way these names reach a scenario's boundaries. Run on a
+    scratch copy of `src/` with `boundaries['idle_air_learned']` added to
+    `paired_steady.py`: `{('src/analysis/paired_steady.py', 'string',
+    'idle_air_learned'): 1}` is reported (and nothing on the copy as shipped).
+  - **Route.** `GET /control/rom/editor/typical-values` (control token; no sha,
+    no body): 200 `{profile, file, file_sha256, values: {field: {value, kind, source}},
+    left_empty: {field: {reason}}}`; 409 `{error: "typical_values_undeclared" |
+    "typical_values_invalid", message}`. `route_table_snapshot.json` has the entry (the
+    snapshot test passes: 6 tests); `docs/headless-api.md` has the table row and a
+    section.
+  - **Page.** `lib/romSimTypical.ts` (`TYPICAL_TARGETS`, `typicalFill`,
+    `typicalFailure`), `getRomTypicalValues(token)` in `api/workbench.ts` (only
+    that), `types/romEditor.ts`, `SimForm.tsx` (a "Typical values for this
+    vehicle" fieldset after the presets; a `token` prop, passed by
+    `RomEditorPage.tsx`). Pressing it fetches once and caches (a failure is not
+    cached), fills exactly the declared fields into the visible text fields, tags
+    each `<kind>: <source>`, `typical:` or `placeholder:` (the `data-typical` twin
+    of `data-remembered`: same warn styling, `border-warn` on the field; a
+    placeholder's tag is bold and carries `data-typical-kind="placeholder"`), drops a `remembered` mark it
+    replaces, and reports what it filled, which value of yours it replaced, what
+    it called a placeholder ("2 of them are placeholders, not measurements: ..."),
+    what it left empty with the file's reasons (none on the Xterra), and anything
+    it skipped (a value with
+    no source or kind, a non-number or one the form refuses, a field this dashboard
+    has no input for), then "Nothing else was touched: the grid, the candidate events,
+    the edges, the draws, the seed and the label stay as they were." When it fills
+    the pedal flag it adds one line saying what bit 0 does; the W09.9 WOT-column
+    warning still fires on the filled value (tested). Editing a filled field
+    clears only its tag. A 409/401/404/network failure fills nothing and shows
+    its reason by name ("This vehicle declares no typical values
+    (typical_values_undeclared)", "Not authorized", "Can't reach the daemon", ...);
+    the button stays enabled.
+  - **Decisions the brief left open.** (1) A click **overwrites only the fields
+    the vehicle declares and lists each value of yours it replaced** (a typed
+    `25.0` against a declared `25` is the same number and not listed); a field the
+    vehicle left empty keeps what you typed (tested). (2) The values arrive on the
+    click, not on mount, so the form's existing request count is unchanged and a
+    vehicle with none shows its reason after a press, not a missing button. (3) A
+    run's `saveRemembered` still remembers typical-filled values like any stated
+    value (they are what was run), and they come back marked "remembered", not
+    "typical". (4) The rail is filled as `stated` + 350, so the result does not
+    carry the working-assumption rail line; `working_assumption` is declarable.
+    (5) A placeholder replaces what you typed in its field like any other fill
+    (listed as "(replaced your 150)"), and stating the field yourself takes its
+    placeholder tag off.
+  - **Tests.** Python: `tests/test_rom_editor.py` +35 (the shipped file loads,
+    every value has a kind and a source, a placeholder's says so; each fillable
+    field is a value or a reasoned omission and a `SimRequest` field; a new
+    `SimRequest` field must be classified typical or never; the shipped values
+    plus the other fields validate as a `SimRequest`; each value, the two
+    placeholders included, equals the constant its source names (`WOT`, `LEARNED`,
+    `ENV` read by `ast`, the plant's `reference_delta_p`) and every file a source
+    cites exists; absent file refused by name; 24 invalid files each refused by
+    name: unsourced, empty, blank, typo, draws, grid, 256, 1.5, `0.0`, quoted,
+    bool, nan, `working_assumption` on baro, rail `stated`, neither declared nor
+    left empty, both, no reason, no kind, kind `measured`, a placeholder whose
+    source does not say so, extra key, schema 2, empty, not YAML; the front-end
+    fixture equals the loader's output; the guard above, the scan's own test (an
+    attribute, a dict key, `.get`, `getattr`, a bare name and a keyword are each
+    seen; a declaration, a docstring and a comment are not; `static` is not
+    walked), the guard biting on scratch copies of the two plumbing files (a read
+    in a new file, a read added to an allowlisted file, an allowed mention
+    removed), and the loader's kinds equal the page's two),
+    `tests/test_rom_editor_api.py` +4 (401, 200 equals the loader and writes
+    nothing, 409 undeclared, 409 invalid) and the wiring test's new path.
+    Vitest: `lib/romSimTypical.test.ts` 16 (the twelve targets equal the file's
+    declared fields and none is a never-filled one; exact fill with the two
+    placeholders marked, a vehicle that leaves two empty, rail both ways, replaced
+    vs same number, skipped by reason or for a missing or unknown kind, the
+    pedal-flag line, the headline and placeholder line, failures by reason),
+    `RomEditorSimulate.test.tsx` +21 (nothing fetched before the click; exactly
+    the declared fields, 13 tags: 11 `typical:` and 2 `placeholder:`, the
+    placeholder line and "(placeholder)" in the list, no left-empty list; a
+    vehicle that leaves fields empty names them with its reason and Run waits;
+    grid, events, edges, draws, seed and label untouched; a filled form with
+    grid/events unchosen still blocks Run and names only them; the Run request is
+    the 21 documented fields with the filled values; overwrite/replaced listing
+    incl. a placeholder's field; a left-empty field, the draws and the seed keep
+    yours; edit clears its tag, a placeholder's too; remembered taken over; WOT
+    warning still fires with flag 0 and the line says what it does; flag 1 quiets
+    it; unfillable and unsourced values named; off when Simulate is; five
+    failures and an unreachable daemon leave every field and radio as it was;
+    retry then cache). e2e: one block in `romEditor.spec.ts` (13 tags, the two
+    `placeholder:` tags, "2 of them are placeholders", nothing left empty, the
+    request carries the two zeros), the route mocked in
+    `e2e/fixtures/romEditorApi.ts`. The fixture
+    (`romTypicalValues.fixture.json`) was regenerated with
+    `CANARY_UPDATE_TYPICAL_FIXTURE=1` and prettier.
+  - **Mutation checks** (scratch copies, restored and diffed after each): the
+    page's `change()` no longer clears the tag: 1 test fails; `typicalFill` also
+    setting `draws`: 7 fail (4 lib, 3 page); `source` made optional in
+    `TypicalValue`: 2 fail (the unsourced file, the 409 invalid); the
+    never-typical check removed: 2 fail (draws, grid). For the placeholder work:
+    `typicalTag` always printing `typical:`: 2 fail (lib, page); the placeholder
+    "says so" validator removed: 1 fails; `kind` defaulting to `typical`: 1
+    fails (the no-kind file); a fake read of `idle_air_learned` added to a scratch
+    copy of `src/`: the guard reports exactly that site.
+  - **Gate.** `ruff check .`, `ruff format --check .`, `mypy src` clean;
+    `pytest -n 4` over `test_rom_editor`, `test_rom_editor_api`,
+    `test_mcp_rom_editor`, `test_route_table_snapshot`, `test_layering`,
+    `test_state_dir`: 200 passed; `pnpm typecheck`, `pnpm lint` (no suppression
+    change), `pnpm format:check` clean; `vitest run --no-file-parallelism` over
+    `romSim`, `romSimSize`, `romSimView`, `romEditor`, `romSimTypical`,
+    `RomEditorSimulate`, `SimResults`, `RomEditorPage`: 263 passed; `pnpm exec
+    playwright test e2e/romEditor.spec.ts --project=chromium`: 7 passed, one new.
+    The private-ROM file was not touched.
 
 ## Not in scope
 

@@ -55,7 +55,17 @@ from pathlib import Path
 from typing import Annotated, Any, Literal
 
 import yaml
-from pydantic import BaseModel, ConfigDict, Field, StrictInt, ValidationError
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    StrictFloat,
+    StrictInt,
+    TypeAdapter,
+    ValidationError,
+    field_validator,
+    model_validator,
+)
 
 from src.analysis.ecu_application import ApplicationModel, ApplicationModelRefusalError
 from src.analysis.fuel_plant import FuelPlantRefusalError, plant_qualification
@@ -588,6 +598,197 @@ def simulate_edits(
     return out
 
 
+# -- typical values -------------------------------------------------------------------------
+
+#: ``<profile>/sim_typical_values.yaml``: the vehicle's typical stated values (W09.11).
+TYPICAL_VALUES_FILE = "sim_typical_values.yaml"
+#: The SimRequest fields the form's "Fill typical values" button may fill: the stated
+#: environment and the learned state, vehicle facts. Twelve of the twenty-one.
+TYPICAL_FIELDS: tuple[str, ...] = (
+    "baro_kpa",
+    "iat_c",
+    "coolant_c",
+    "battery_v",
+    "rail_kpa",
+    "throttle_pct",
+    "pedal_flag",
+    "stft_pct",
+    "ltft_pct",
+    "throttle_closed_learned",
+    "idle_air_learned",
+    "evap_purge_area",
+)
+#: The rest describe this experiment, this base or this run, never the vehicle: the
+#: button never fills them, and a typical-values file naming one is refused.
+NEVER_TYPICAL_FIELDS: tuple[str, ...] = (
+    "label",
+    "edits",
+    "grid",
+    "rpm_edges",
+    "load_edges",
+    "load_basis",
+    "candidate_events",
+    "draws",
+    "seed",
+)
+
+
+def _field_check(name: str) -> TypeAdapter[Any]:
+    """The SimRequest field's own type and bounds, as a validator for one value."""
+    info = SimRequest.model_fields[name]
+    annotation: Any = info.annotation
+    if info.metadata:
+        annotation = Annotated[(annotation, *info.metadata)]
+    return TypeAdapter(annotation)
+
+
+_FIELD_CHECKS: dict[str, TypeAdapter[Any]] = {name: _field_check(name) for name in TYPICAL_FIELDS}
+
+
+#: What a declared value is. ``typical``: a sourced figure for the vehicle.
+#: ``placeholder``: a number the simulator reads nowhere today, filled only so the
+#: form can run; the page tags it ``placeholder``, never ``typical``, so it cannot
+#: pass for a measurement, and a test fails the moment any code reads it.
+TypicalKind = Literal["typical", "placeholder"]
+TYPICAL_KINDS: tuple[str, ...] = ("typical", "placeholder")
+
+
+class TypicalValue(BaseModel):
+    """One typical value, what kind it is, and where it comes from. No source, no
+    value; no declared kind, no value."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    #: Strict: a quoted "81" or a bare `true` is not a number a form can be filled with.
+    value: StrictFloat | StrictInt | Literal["working_assumption"]
+    kind: TypicalKind
+    source: str = Field(min_length=1)
+
+    @field_validator("source")
+    @classmethod
+    def _source_is_text(cls, source: str) -> str:
+        if not source.strip():
+            raise ValueError("is blank")
+        return source
+
+    @model_validator(mode="after")
+    def _placeholder_says_so(self) -> TypicalValue:
+        if self.kind == "placeholder" and "placeholder" not in self.source.lower():
+            raise ValueError("a placeholder's source must say it is a placeholder")
+        return self
+
+
+class TypicalLeftEmpty(BaseModel):
+    """A fillable field the vehicle declares no typical value for, and why."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    reason: str = Field(min_length=1)
+
+    @field_validator("reason")
+    @classmethod
+    def _reason_is_text(cls, reason: str) -> str:
+        if not reason.strip():
+            raise ValueError("is blank")
+        return reason
+
+
+class TypicalValuesDeclaration(BaseModel):
+    """``sim_typical_values.yaml``: every fillable field is a sourced value or an
+    explicit, reasoned omission, so the page can always say what it left empty."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    schema_version: Literal[1]
+    values: dict[str, TypicalValue]
+    left_empty: dict[str, TypicalLeftEmpty]
+
+    @model_validator(mode="after")
+    def _declared(self) -> TypicalValuesDeclaration:
+        for name in (*self.values, *self.left_empty):
+            if name in NEVER_TYPICAL_FIELDS:
+                raise ValueError(
+                    f"{name} is never filled by the typical-values button (it describes this "
+                    "experiment, not the vehicle)"
+                )
+            if name not in TYPICAL_FIELDS:
+                raise ValueError(f"{name!r} is not a SimRequest field a typical value may fill")
+        for name in self.values.keys() & self.left_empty.keys():
+            raise ValueError(f"{name} is declared both as a value and as left empty")
+        for name in TYPICAL_FIELDS:
+            if name not in self.values and name not in self.left_empty:
+                raise ValueError(
+                    f"{name} is neither a sourced value nor listed under left_empty with a reason"
+                )
+        for name, declared in self.values.items():
+            value = declared.value
+            if isinstance(value, bool):
+                raise ValueError(f"{name}: {value!r} is not a number")
+            try:
+                _FIELD_CHECKS[name].validate_python(value, strict=True)
+            except ValidationError as exc:
+                raise ValueError(
+                    f"{name}: {value!r} is not a valid {name} ({exc.errors()[0]['msg']})"
+                ) from exc
+        return self
+
+
+def typical_values(profile_dir: Path) -> dict[str, Any]:
+    """The vehicle's typical stated values, for the Simulate form's "Fill typical
+    values" button: ``{profile, file, file_sha256, values: {field: {value, kind,
+    source}}, left_empty: {field: {reason}}}``, fields in :data:`TYPICAL_FIELDS`
+    order. ``kind`` is ``typical`` or ``placeholder`` (:data:`TYPICAL_KINDS`).
+
+    Refused by name as :class:`SimulationRefusalError` (data in the child, a 409 on
+    the route): ``typical_values_undeclared`` when the profile has no file, and
+    ``typical_values_invalid`` when it fails the schema (an unsourced value, an
+    unknown or never-typical field, a value the SimRequest would refuse, a fillable
+    field neither declared nor reasoned away). Nothing is assumed in their place."""
+    profile_dir = Path(profile_dir)
+    path = profile_dir / TYPICAL_VALUES_FILE
+    try:
+        raw = path.read_bytes()
+    except FileNotFoundError as exc:
+        raise SimulationRefusalError(
+            "typical_values_undeclared",
+            f"{profile_dir.name} has no {TYPICAL_VALUES_FILE}: this vehicle declares no typical "
+            "values, and none are assumed",
+        ) from exc
+    try:
+        declared = TypicalValuesDeclaration.model_validate(yaml.safe_load(raw))
+    except (yaml.YAMLError, ValidationError) as exc:
+        problems = (
+            [
+                f"{'.'.join(str(p) for p in e['loc'])}: {e['msg']}" if e["loc"] else e["msg"]
+                for e in exc.errors()
+            ]
+            if isinstance(exc, ValidationError)
+            else [str(exc)]
+        )
+        raise SimulationRefusalError(
+            "typical_values_invalid", f"{TYPICAL_VALUES_FILE}: " + "; ".join(problems)
+        ) from exc
+    return {
+        "profile": profile_dir.name,
+        "file": TYPICAL_VALUES_FILE,
+        "file_sha256": sha256_hex(raw),
+        "values": {
+            name: {
+                "value": declared.values[name].value,
+                "kind": declared.values[name].kind,
+                "source": declared.values[name].source,
+            }
+            for name in TYPICAL_FIELDS
+            if name in declared.values
+        },
+        "left_empty": {
+            name: {"reason": declared.left_empty[name].reason}
+            for name in TYPICAL_FIELDS
+            if name in declared.left_empty
+        },
+    }
+
+
 # -- the workbench child --------------------------------------------------------------------
 
 
@@ -685,10 +886,14 @@ __all__ = [
     "LEARNED_SOURCE",
     "MAX_DRAWS",
     "MAX_GRID_POINTS",
+    "NEVER_TYPICAL_FIELDS",
     "REFUSALS",
     "SIM_SLOT",
     "SLOT_SOURCE",
     "TOOL_VERSION",
+    "TYPICAL_FIELDS",
+    "TYPICAL_KINDS",
+    "TYPICAL_VALUES_FILE",
     "SimRequest",
     "editor_spec",
     "library_base",
@@ -698,4 +903,5 @@ __all__ = [
     "sim_base",
     "simulate_edits",
     "spec_yaml",
+    "typical_values",
 ]

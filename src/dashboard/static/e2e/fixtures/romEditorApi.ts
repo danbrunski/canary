@@ -1,9 +1,15 @@
 import type { Page, Route } from "@playwright/test";
 
-import type { RomEdit, RomEditPreview, RomSimResult } from "../../src/types/romEditor";
+import type {
+  RomEdit,
+  RomEditPreview,
+  RomSimResult,
+  RomTypicalValues,
+} from "../../src/types/romEditor";
 import type { RomLibraryEntry, RomTablesResponse } from "../../src/types/romLibrary";
 import { LEVERS_FUEL_COMP } from "../../src/test/romLeverFixtures";
 import { buildSimResult, fuelCompWithAxes, tablesWithAxes } from "../../src/test/romSimFixtures";
+import { SHIPPED_TYPICAL } from "../../src/test/romTypicalFixtures";
 
 /**
  * The ROM library, tables, preview and simulate routes of the daemon, stubbed
@@ -32,6 +38,9 @@ export interface RomApiOptions {
   tables?: (sha: string) => RomTablesResponse;
   /** The simulate answer. */
   simulate?: RomSimResult | Failure;
+  /** `GET /control/rom/editor/typical-values`: the Xterra's real declared values
+   *  (`romTypicalValues.fixture.json`) unless a spec says otherwise. */
+  typical?: RomTypicalValues | Failure;
 }
 
 /** One request the stub saw. */
@@ -207,6 +216,9 @@ export async function mockRomApi(page: Page, options: RomApiOptions): Promise<Ro
         return reply(route, { status: 500, body: { detail: "no upload expected" } });
       }
       return reply(route, answer);
+    }
+    if (method === "GET" && path === "/control/rom/editor/typical-values") {
+      return reply(route, options.typical ?? SHIPPED_TYPICAL);
     }
     const tables = /^\/control\/rom\/library\/([0-9a-f]{64})\/tables$/.exec(path);
     if (method === "GET" && tables) {

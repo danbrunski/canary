@@ -1,7 +1,7 @@
 """The ROM Editor's routes: preview an edit, simulate it (W09.2).
 
-Both sit under the ROM library (``app.state.rom_library``, so they register
-after it) and require the control token. Both are bodies of
+Three routes, all under the ROM library's registration (``app.state.rom_library``,
+so they register after it) and all requiring the control token. Each is a body of
 :mod:`src.analysis.rom_editor`; the route adds a status code and nothing else:
 
 * ``POST /control/rom/library/{sha}/edits/preview`` -- the E08.1 edit spec the
@@ -12,6 +12,12 @@ after it) and require the control token. Both are bodies of
   Carlo draws and per-cell aggregation. Heavy, so it is the workbench child's
   job kind ``rom_sim`` (:func:`src.control.workbench_jobs.run_off_loop`):
   refused while a capture is recording, busy while another child runs.
+* ``GET /control/rom/editor/typical-values`` -- the vehicle's declared typical
+  values for the Simulate form's "Fill typical values" button (W09.11), each with
+  its source; ``409 typical_values_undeclared`` / ``typical_values_invalid`` when the
+  vehicle declares none or the file is broken. A read of one small file: it runs in
+  the thread pool and changes no request field (the 21-field ``SimRequest`` has no
+  defaults, and the page only fills its form with these).
 
 A refusal inside the child is **data**, not an exception: the simulator's
 refusal classes take ``(reason, message)`` and do not survive pickling, so
@@ -40,6 +46,7 @@ from starlette.concurrency import run_in_threadpool
 
 from src.analysis import rom_editor
 from src.analysis.rom_editor import SimRequest
+from src.analysis.sim_contract import SimulationRefusalError
 from src.config import CanaryConfig
 from src.control.rom_library import RomLibrary, RomNotFoundError, valid_sha
 from src.control.workbench_jobs import WorkbenchRefusedError, capture_deferral, run_off_loop
@@ -164,6 +171,15 @@ def register_rom_editor_routes(
                 },
             )
         return job_params(sha, revision_match, request=body.model_dump(mode="json"))
+
+    @app.get("/control/rom/editor/typical-values", dependencies=[Depends(authorize)])
+    async def get_rom_typical_values() -> dict[str, Any]:
+        """The vehicle's typical stated values, each with its source, and the
+        fillable fields it leaves empty with the reason. Fills nothing by itself."""
+        try:
+            return await run_in_threadpool(rom_editor.typical_values, library.profile_dir)
+        except SimulationRefusalError as exc:
+            raise HTTPException(409, {"error": exc.reason, "message": exc.message}) from exc
 
     @app.post("/control/rom/library/{sha}/edits/preview", dependencies=[Depends(authorize)])
     async def post_rom_edit_preview(sha: str, body: PreviewRequest) -> dict[str, Any]:

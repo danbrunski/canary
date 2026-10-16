@@ -261,7 +261,7 @@ Control endpoints:
 | `GET /control/rom/compare?a=<sha>&b=<sha>` | changed byte ranges a -> b merged with a 16-byte gap, each labelled with the regions and tables it overlaps; table ranges carry per-cell old/new values, decoded where declared (W08.5) |
 | `POST /control/rom/library/{sha}/edits/preview` | ROM Editor preview (W09.2): body `{label, edits}`, `edits` being E08.1 edit dicts on the fuel chain's Map 1 (`fuel_targets`, `fuel_compensation`, `k_constant`, slot 1). Returns the edit spec (JSON, YAML, sha256), the candidate's sha256, its E08.1 provenance (cells old -> new, changed ranges, reach), the edited tables' after values and `levers` (which lever the edit pulls and what blocks a number per output, E09.14b). Runs in the thread pool, never deferred; nothing is stored. 404 unknown sha, 409 no map, 400 `edit_refused`, 422 body. See [ROM Editor](#rom-editor-preview-and-simulate-w09). |
 | `POST /control/rom/library/{sha}/simulate` | ROM Editor simulate (W09.2): body is one `SimRequest`, every field required (nothing is defaulted). Runs the edits on a recorded base over a stated rpm x load grid, base vs candidate, paired Monte Carlo draws, aggregated per cell. In the workbench child (job `rom_sim`): `409 analysis_deferred` while a capture records, `409 analysis_busy` while another child runs, `503 analysis_unavailable`; a refusal is `400 sim_refused`; 404 unknown sha, 409 no map, 422 body. Nothing is stored; the candidate never leaves the simulator. See [ROM Editor](#rom-editor-preview-and-simulate-w09). |
-| `GET /control/rom/editor/typical-values` | ROM Editor typical values (W09.11): the vehicle's declared typical values for the Simulate form's stated environment and learned state (`data/<vehicle>/sim_typical_values.yaml`), each with its `source`, plus the fillable fields it leaves empty with a `reason`. No image needed, nothing stored, and it changes no request field: the page only fills its form with these, visibly, when the operator presses *Fill typical values*. 409 `typical_values_undeclared` when the vehicle has no file, 409 `typical_values_invalid` when it fails its schema. See [ROM Editor](#rom-editor-preview-and-simulate-w09). |
+| `GET /control/rom/editor/typical-values` | ROM Editor typical values (W09.11): the vehicle's declared typical values for the Simulate form's stated environment and learned state (`data/<vehicle>/sim_typical_values.yaml`), each with its `kind` (`typical`, or `placeholder` for a number the simulator reads nowhere) and its `source`, plus any fillable field it leaves empty with a `reason`. No image needed, nothing stored, and it changes no request field: the page only fills its form with these, visibly, when the operator presses *Fill typical values*. 409 `typical_values_undeclared` when the vehicle has no file, 409 `typical_values_invalid` when it fails its schema. See [ROM Editor](#rom-editor-preview-and-simulate-w09). |
 | `GET /control/rom/backup` / `POST /control/rom/backup` / `POST /control/rom/backup/cancel` | ECU flash backup job (W08.7), read-only: state + live preconditions / start (202, or 409 naming every refusing precondition) / cancel a running read (409 when none runs) |
 
 The frame, every `/analysis/*` route in this table (W04) and the ROM Editor's `simulate` (W09.2) run in the digest's bounded single-flight child and refuse while a capture is recording: `409 {"error": "analysis_deferred", "profile", "message", "laptop_path"}`. A second, different analysis (or a running digest) is `409 analysis_busy`; a child failure is `503 analysis_unavailable`. Calculated load is refused as an axis.
@@ -754,10 +754,11 @@ no body: nothing here depends on an image, and nothing is stored.
 ```json
 {"profile": "nissan-xterra-2008", "file": "sim_typical_values.yaml",
  "file_sha256": "<sha256 of the file>",
- "values": {"baro_kpa": {"value": 81.0, "source": "E07.6's stated point (...)"},
-            "pedal_flag": {"value": 0, "source": "W09.6's grid environment (...)"},
-            "rail_kpa": {"value": 350.0, "source": "..."}},
- "left_empty": {"throttle_closed_learned": {"reason": "no source states a typical value: ..."}}}
+ "values": {"baro_kpa": {"value": 81.0, "kind": "typical", "source": "E07.6's stated point (...)"},
+            "pedal_flag": {"value": 0, "kind": "typical", "source": "W09.6's grid environment (...)"},
+            "idle_air_learned": {"value": 0.0, "kind": "placeholder", "source": "PLACEHOLDER, not a measurement: ..."},
+            "rail_kpa": {"value": 350.0, "kind": "typical", "source": "..."}},
+ "left_empty": {}}
 ```
 
 Only the twelve environment and learned-state fields of the `SimRequest` can
@@ -765,15 +766,21 @@ appear (`rom_editor.TYPICAL_FIELDS`: `baro_kpa`, `iat_c`, `coolant_c`,
 `battery_v`, `rail_kpa`, `throttle_pct`, `pedal_flag`, `stft_pct`, `ltft_pct`,
 `throttle_closed_learned`, `idle_air_learned`, `evap_purge_area`). Every one is
 either a `values` entry (a number, or `"working_assumption"` for `rail_kpa`
-only, and a **required** non-blank `source`) or a `left_empty` entry that says
-why no typical value is declared; a file where one is neither, where a value has
-no source or is one the `SimRequest` would refuse, or that names any other
+only; a **required** `kind`, `typical` or `placeholder`; and a **required**
+non-blank `source`) or a `left_empty` entry (`{reason}`) that says why no value
+is declared (the Xterra's is `{}`: all twelve are declared). A `placeholder` is a
+number the simulator reads nowhere today, filled only so the form can run; its
+source must say it is one (`a placeholder's source must say it is a placeholder`),
+and `tests/test_rom_editor.py` fails the moment any code in `src/` reads the
+field. A file where a field is neither a value nor left empty, where a value has
+no source or kind or is one the `SimRequest` would refuse, or that names any other
 field (the grid, the candidate events, the edges, the draws, the seed and the
 label are never typical) is invalid, so the page can always say what it left
 for the operator. **The 21-field `SimRequest` is unchanged and still has no
 defaults:** a client that wants these values sends them in the simulate body
 itself. The dashboard fills them into the visible form on a click, marks each
-`typical: <source>`, and sends nothing it did not show.
+`typical: <source>` or `placeholder: <source>` from `kind`, and sends nothing it
+did not show.
 
 | Status | `detail` | When |
 |---|---|---|

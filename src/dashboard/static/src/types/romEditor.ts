@@ -293,6 +293,38 @@ export interface RomSimRequest {
   seed: number;
 }
 
+/** What a declared value is (`rom_editor.TYPICAL_KINDS`). */
+export type RomTypicalKind = "typical" | "placeholder";
+
+/** `GET /control/rom/editor/typical-values` (W09.11): the vehicle's declared
+ *  typical value for one request field. `source` is required server-side: an
+ *  unsourced value cannot be loaded, so none reaches the page. */
+export interface RomTypicalValue {
+  value: SimRail;
+  /** `typical`: a sourced figure for the vehicle. `placeholder`: a number the
+   *  simulator reads nowhere, filled only so the form can run; the page tags it
+   *  `placeholder`, never `typical`. */
+  kind: RomTypicalKind;
+  source: string;
+}
+
+/** A fillable field the vehicle declares no typical value for, and why. */
+export interface RomTypicalLeftEmpty {
+  reason: string;
+}
+
+/** The typical-values route's body. Keyed by `RomSimRequest` field name; the
+ *  keys are strings, not `keyof RomSimRequest`, because a newer daemon may
+ *  name a field this dashboard cannot fill (the page says so). The twelve it
+ *  can fill are `lib/romSimTypical.ts` `TYPICAL_TARGETS`. */
+export interface RomTypicalValues {
+  profile: string;
+  file: string;
+  file_sha256: string;
+  values: Record<string, RomTypicalValue>;
+  left_empty: Record<string, RomTypicalLeftEmpty>;
+}
+
 /** `sim_cells.STATUSES`: the status of one output in one cell. */
 export type SimStatus =
   "changed" | "unchanged" | "unsupported" | "partly_supported" | "no_points" | "not_reached";

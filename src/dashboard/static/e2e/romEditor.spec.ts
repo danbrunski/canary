@@ -421,6 +421,89 @@ test("simulate: the Coarse preset fills the edges and draws visibly, and the res
   expect(api.unexpected).toEqual([]);
 });
 
+/** The number fields "Fill typical values" fills on the Xterra, beside Baro and the rail
+ *  (the last two are its placeholders). */
+const TYPICAL_FILLED = [
+  "IAT (°C)",
+  "Coolant (°C)",
+  "Battery (V)",
+  "Throttle (%)",
+  "Pedal flag (0-255)",
+  "STFT (%)",
+  "LTFT (%)",
+  "EVAP purge area (counts)",
+  "Throttle closed learned (counts)",
+  "Idle air learned (counts)",
+];
+
+test("simulate: Fill typical values fills the stated environment with its sources, tags the two placeholders as such, leaves the choices to the operator, and a run sends 21 fields", async ({
+  page,
+}) => {
+  const api = await open(page, {
+    library: [],
+    uploads: { [TUNED_FILE]: { ...ENTRY_TUNED, created: true } },
+    simulate: buildSimResult(),
+  });
+  await openAndEdit(page, "light load 2 % richer");
+  const form = page.getByRole("form", { name: "Simulate form" });
+  const tags = form.locator("[data-typical]");
+  const rpmEdges = await form.getByLabel("RPM edges (rpm)").inputValue();
+  // Nothing is fetched or filled until the button is pressed.
+  await expect(tags).toHaveCount(0);
+  expect(api.calls.some((call) => call.path.endsWith("/typical-values"))).toBe(false);
+
+  await form.getByRole("button", { name: "Fill typical values" }).click();
+  const report = form.getByRole("status", { name: "Typical values state" });
+  await expect(report).toContainText(
+    "Filled 12 values (10 typical, 2 placeholders) from nissan-xterra-2008",
+  );
+  // Twelve values in thirteen fields (the rail is a choice and a number), each tagged with
+  // its kind and source: eleven `typical`, two `placeholder`.
+  await expect(tags).toHaveCount(13);
+  await expect(tags.first()).toContainText("typical: E07.6's stated point");
+  const placeholders = form.locator('[data-typical-kind="placeholder"]');
+  await expect(placeholders).toHaveCount(2);
+  await expect(placeholders.first()).toContainText("placeholder: PLACEHOLDER, not a measurement");
+  await expect(form.getByLabel("Baro (kPa)", { exact: true })).toHaveValue("81");
+  await expect(form.getByLabel("Pedal flag (0-255)", { exact: true })).toHaveValue("0");
+  await expect(form.getByLabel("Rail pressure", { exact: true })).toHaveValue("stated");
+  await expect(form.getByLabel("Rail pressure (kPa)", { exact: true })).toHaveValue("350");
+  // The placeholders are filled and named as placeholders, and nothing is left empty.
+  await expect(form.getByLabel("Throttle closed learned (counts)", { exact: true })).toHaveValue(
+    "0",
+  );
+  await expect(report).toContainText("2 of them are placeholders, not measurements");
+  await expect(report).not.toContainText("Left empty for you to state");
+  await expect(report).toContainText("Pedal flag 0: bit 0 is clear");
+  // The experiment and the run are untouched.
+  for (const radio of await form.getByRole("radio").all()) await expect(radio).not.toBeChecked();
+  await expect(form.getByLabel("RPM edges (rpm)")).toHaveValue(rpmEdges);
+  await expect(form.getByLabel("Draws", { exact: true })).toHaveValue("");
+  await expect(form.getByLabel("Seed", { exact: true })).toHaveValue("");
+  await expect(form.getByRole("button", { name: "Run simulation" })).toBeDisabled();
+
+  // Editing a filled field is the operator's: its tag goes, and it is what is sent.
+  await form.getByLabel("Baro (kPa)", { exact: true }).fill("78");
+  await expect(tags).toHaveCount(12);
+  await stateForm(form, ["Baro (kPa)", ...TYPICAL_FILLED]);
+  await form.getByLabel("Rail pressure", { exact: true }).selectOption("stated");
+  await form.getByLabel("Rail pressure (kPa)", { exact: true }).fill("350");
+  await form.getByRole("button", { name: "Run simulation" }).click();
+  await expect(page.getByRole("region", { name: "Simulation result" })).toBeVisible();
+  const [sent] = api.posted("/simulate") as RomSimRequest[];
+  expect(Object.keys(sent)).toHaveLength(21);
+  expect(sent).toMatchObject({
+    baro_kpa: 78,
+    rail_kpa: 350,
+    pedal_flag: 0,
+    ltft_pct: 2.34,
+    throttle_closed_learned: 0,
+    idle_air_learned: 0,
+  });
+  expect(api.calls.filter((call) => call.path.endsWith("/typical-values"))).toHaveLength(1);
+  expect(api.unexpected).toEqual([]);
+});
+
 test("an unrecorded base is preview only: Simulate is off and gives the reason", async ({
   page,
 }) => {

@@ -565,6 +565,7 @@ function Workspace({ token, entry }: { token: string; entry: RomLibraryEntry }) 
         <Panel title="Simulate">
           <div className="space-y-4">
             <SimForm
+              token={token}
               tables={baseTables}
               label={label}
               edits={edits}
