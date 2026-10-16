@@ -99,4 +99,17 @@ describe("DeliveryChart", () => {
     expect(labels).toContain("1.00% · n 1");
     expect(labels).toContain("b2");
   });
+
+  it("scrolls inside its own box, so a wide chart cannot widen the page", () => {
+    const base = delivery();
+    const bands = Array.from({ length: 6 }, (_, i) => ({
+      ...base.bands[0],
+      band: `band ${i}`,
+    }));
+    const { container } = render(<DeliveryChart result={delivery({ bands })} />);
+    const svg = container.querySelector("svg") as SVGSVGElement;
+    // Six bands are 6 * 70 = 420 px wide, wider than a 412 px phone.
+    expect(svg).toHaveAttribute("width", "420");
+    expect(svg.parentElement).toHaveClass("overflow-x-auto");
+  });
 });
