@@ -70,6 +70,51 @@ drawn twice in one place is reported, not removed: fix it in the library.
 Removing footprint items from pcbnew's python left KiCad 10.0.5's wrappers
 returning raw pointers.
 
+## Autorouting with hand-laid power copper
+
+`autoroute.sh` routes a board with Freerouting while keeping the copper laid by hand:
+
+```bash
+hardware/tools/autoroute.sh <scratch_project_dir> <freerouting.jar> [passes] \
+    [-- --width Power_High=0.3 --width Switch_Node=0.3 --width Power=0.3 --width GND=0.4]
+```
+
+It edits the board in that directory, so give it a scratch copy of the project. The steps:
+
+1. Refill the zones.
+2. Export the DSN with `dsn_export.py`.
+3. Route headless.
+4. Add the router's tracks and vias with `ses_import.py`.
+5. Refill again, then run DRC with schematic parity.
+
+Use the router builds frozen under `~/code/freerouting/logs/jars/` and quote the jar's sha
+with any result. For CANary-PWR the best settings so far (2026-10-15, a773a70ec) are one pass
+with a higher rip-up cost: `FREEROUTING_ARGS=--router.scoring.start_ripup_costs=1500` and
+passes `1`. Later passes never beat the first on this board.
+
+**`dsn_export.py`** (KiCad python) fixes four things in KiCad's Specctra export:
+
+- **Keep-outs.** A rule area that bans only parts comes out as a full keep-out. CANary-PWR's
+  fan inlet would cost the router 26 x 26 mm of B.Cu, so those keep-outs are dropped.
+- **Pours.** Freerouting reads a `plane` as copper that does not block other nets, so it
+  would route signals through the power pours. Each outer-layer pour of a `--fixed-classes`
+  net goes in as fixed wires covering its fill. Same-net taps can still connect at the edge.
+- **Outer GND pours.** These are dropped, so GND pads fan out to the inner planes.
+- **Widths.** `--width CLASS=mm` sets a class's routed width. The pours carry the current,
+  so the router only adds low-current taps to the power nets.
+- **Clearances.** The board-edge clearance and the fiducials' 0.6 mm clearance go in as
+  keepouts, since the export leaves both out.
+
+**`ses_import.py`** (KiCad python) adds only the router's work. KiCad's own SES import
+deletes every track first. This script skips the wires and vias Freerouting marks `fix` or
+`protect`: the hand-laid copper and the pour stand-ins.
+
+A pad the router cannot reach is often boxed in by fixed copper rather than by geometry.
+`~/code/KiCadRoutingTools/py_tools/check_reachability.py <board> --pad REF.N` measures
+reachability on the board itself, where a pour gives way to a trace. So "PASSABLE" there,
+with the pad still unrouted here, points at the fixed pours. That is how CANary-PWR's TG gate
+was found: it is now laid by hand.
+
 **Pieces.** `kicad_placement.py` runs under KiCad's own python (it needs
 `pcbnew`; here that is the Windows KiCad 10 install, so paths go through
 `wslpath -w`). `placement_review.py` runs under the repo venv (Pillow).

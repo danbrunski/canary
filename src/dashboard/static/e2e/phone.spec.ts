@@ -293,13 +293,9 @@ test.describe("Logs and Analysis at 412px", () => {
     await sideways(page);
   });
 
-  // A known defect, found by these checks and left alone (R19 changes no
-  // layout): the chart is `bands * 70` px wide and sits in no horizontal
-  // scroller, so six bands (420 px) reach 445 px on this 412 px screen and the
-  // shell clips the rest. When the chart is wrapped this starts passing, and
-  // Playwright reports that: delete `test.fail()` then.
+  // Six bands are 420 px of chart on a 412 px screen: the chart scrolls inside its own
+  // box instead of widening the page.
   test("the delivery chart of six bands fits the screen", async ({ page }) => {
-    test.fail();
     await mockWorkbench(page, { bands: 6 });
     await page.goto("/#wb/tuning-analysis");
     await page.getByRole("button", { name: /All on the running calibration/ }).click();

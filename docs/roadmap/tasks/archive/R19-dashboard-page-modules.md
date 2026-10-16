@@ -323,6 +323,10 @@ results are identical.
   (the shell clips the rest). Measured in `phone.spec.ts`; recorded as a
   `test.fail()` that starts failing the run, with the instruction to delete it,
   when the chart is wrapped.
+  **Fixed 2026-10-15** in its own commit: `DeliveryChart` now wraps the svg in an
+  `overflow-x-auto` box, the `test.fail()` is a plain test that fails without the
+  wrapper (`svg right=445`) and passes with it, and `DeliveryChart.test.tsx` pins
+  the scroller.
 - `public/sw.js` `isDynamic()` lists `/status /config /anomalies /telemetry /obd
   /bindings /models /control /ws` but not `/analysis`, so the service worker
   treats `GET /analysis/*` as a cacheable asset (cache-first, stored when `ok`).

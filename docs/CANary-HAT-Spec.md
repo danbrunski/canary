@@ -623,7 +623,7 @@ None of this is blocking for fabrication.
   despite reading as free on this header — `ups_shutdown_watch.py` claims it as
   the X1202's power-loss-detect input, the same collision that moved the BMP384
   interrupt to GPIO17 in §8.1.
-- **IMU:** add `lsm6dsox` to the `ImuConfig.source` Literal in `src/config.py`
+- **IMU:** add `lsm6dsox` to the `ImuConfig.source` Literal in `src/config/hardware.py`
   (currently `bno055 | mpu6050 | icm20948 | disabled`) and write
   `imu_collector.py` (roadmap task 2b.2) against I2C address **0x6B** with INT1 on
   **GPIO16**. The frame-resolution math in `imu_frame.py` already covers the

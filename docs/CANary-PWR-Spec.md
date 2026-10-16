@@ -1,7 +1,7 @@
 # CANary-PWR — Power Board Spec
 
-> **Status: first-pass capture done 2026-10-13, functional placement
-> 2026-10-15 (§P2), unrouted.** The
+> **Status: first-pass capture done 2026-10-13; functional placement and
+> hand-laid power copper 2026-10-15 (§P2); signals not yet routed.** The
 > KiCad project is [`hardware/canary-pwr-rev1.0/`](../hardware/canary-pwr-rev1.0/)
 > (§P11). Opened 2026-10-04, when the operator retired the X1202 and moved every
 > power function off the CANary HAT; [`CANary-HAT-Revisions.md`](CANary-HAT-Revisions.md)
@@ -177,17 +177,52 @@ that decides what each plane carries.
   bottom-side MCU, I²C buffer and Pi-crossing parts therefore sit 0.1 mm above
   GND rather than above the bus and its ripple. The island holds every
   +12V_BUS pad except R9 and C12 (the OUTFB divider top and its feed-forward
-  capacitor), which take a short top-side trace.
-- **5 V stays on the outer layers.** It runs as a wide F.Cu pour from L2 to Q7:
-  about 4–5 mm for 5 A on 1 oz copper, half that on 2 oz. A B.Cu pour joins it
-  at J1, where pins 2/4 are reachable only through the gaps between pins 1, 3
-  and 5.
+  capacitor), which the autorouter reaches with a narrow tap.
+- **5 V runs on F.Cu, then In2 at J1.** It is a wide F.Cu pour from L2 to Q7:
+  about 4–5 mm for 5 A on 1 oz copper, half that on 2 oz. On the outer layers
+  J1 pins 2 and 4 are reachable only through the gaps between pins 1, 3 and 5.
+  So In2 also has a +5V_PI island under them (x 107.3–112.2, y 45.2–55.0). Four
+  vias from Q7's drain pour feed it, and the island takes both pins at their
+  barrels.
 - **Vias.**
   - Stitch In1 and In2 GND together around the island's edge and across the
     supervisor area.
   - Keep the bottom-to-top signal vias out from under the two switch nodes and
     the two hot loops, where In1 must stay unbroken. That covers I²C, PFO,
     SMBALERT, BUCK_PG, PI_5V_OFF and the cell-tap lines.
+
+**Power copper (2026-10-15).** The current paths are laid by hand in
+`gen/copper.py`, and `gen_pcb.py` adds them after placement. The autorouter
+never routes them.
+- **Pours.** Every current path is a pour: unions of rectangles, joined
+  solidly to their pads, above the GND pours. That covers vehicle in, the
+  protected input with the TVS and C1, the input ideal diode to RSNSI, both
+  +12V_BUS buck input loops, the bulk capacitors, the charger FETs and C20/C21,
+  both switch nodes, L1 to RSNSC, the cap bank, the buck output, the INA226
+  shunt to Q7, and Q7 to the In2 island.
+- **Bus vias.** Groups of 0.8 mm vias tie the +12V_BUS pours to the In2
+  island.
+- **Kelvin pairs.** Each pair leaves its shunt at the inner edge of its pads
+  and keeps clear of the pours:
+  - RSNSI (R14) to LTC3350 pins 30/31, on B.Cu.
+  - RSNSC (R15) to pins 21/22, on B.Cu, between the ballast resistors' pads.
+  - R28 to INA226 pins 9/10: IN− beside the shunt on top, IN+ under the board.
+- **Gate drives.** TG and BG each drop through a via under U1's bottom row and
+  come up beside their FET's gate. Q3's gate is boxed in by the switch-node and
+  bus pours, and nothing else reaches it.
+- **Placement changes for this:**
+  - C4, C5 and C8 were re-placed so U1's right-hand pins leave in lanes.
+  - C14 and C10 moved 0.7 mm down, with Q3, Q4, C20 and C21, to make room for
+    the gate and Kelvin vias.
+  - C2 moved off the bus band, and C9 moved on B.Cu.
+  - R25, R9 and C12 were turned so their bus ends face the copper that feeds
+    them.
+  - D5/D6 were swapped and turned.
+- **Routing the rest.** `hardware/tools/autoroute.sh` routes the signals and
+  the low-current taps of the power nets (dividers, decoupling caps, IC supply
+  pins) with Freerouting. Its `dsn_export.py` hands the router each pour as
+  fixed copper, drops the fan-inlet keep-out that KiCad's export wrongly makes
+  solid, and narrows the power classes to 0.3 mm for the taps.
 
 The table is `gen/placement.py`, and `gen_pcb.py` applies it after packing,
 so a regenerated board reproduces it. `hardware/tools/review_placement.sh`
@@ -588,7 +623,7 @@ Nothing on this board changes for rev 3.0.
 | 12 | The Vehicle-in plug's order number (KiCad's footprint confirms 1803293 for the header) and the Micro-Fit housings and crimps (43025-0600, 43025-1000, 43030) | BOM |
 | 13 | Copper weight: TI recommends 2 oz outer layers for the LM61460 | Fab order |
 | 14 | Alternator ripple at `+12V_HAT` against `VIN_SENSE`'s input, engine running | Whether the HAT coprocessor can measure ripple from `V12_SENSE` through the hold-up path (HAT §13.3.3b) |
-| 15 | Routing pass on the 2026-10-15 placement and layer plan (§P2): 5 V into J1 pins 2/4 through the pin-field gaps on F.Cu and B.Cu; vias from the +12V_BUS pads into the In2 island (DRC calls the island isolated copper until then); In1/In2 GND stitching; no signal vias under the switch nodes or hot loops; the LTC3350 BG gate trace around Q3 (or through a via pair); Kelvin pairs to RSNSI, RSNSC and R28; R9/C12's top trace from the island; the 6 GND pads DRC reports as starved thermals (a trace or via each). Silkscreen is done (2026-10-15): DRC's remaining errors are these 6 and the 220 unrouted connections | Layout |
+| 15 | Routing. **Done 2026-10-15** (`gen/copper.py`, §P2 Power copper): every current path as a pour; +12V_BUS pours stitched to the In2 island; 5 V into J1 pins 2/4 through an In2 +5V_PI island; Kelvin pairs to RSNSI, RSNSC and R28; TG/BG through via pairs; the starved-thermal GND pads (the outer GND pours now join SMD pads solidly). The committed board is that copper with the signals still unrouted: DRC shows only the 161 unrouted connections, with parity clean. **Left:** the signals and the power nets' low-current taps. The best autoroute so far (`hardware/tools/autoroute.sh`, Freerouting a773a70ec, `-mp 1 --router.scoring.start_ripup_costs=1500`, taps at 0.3 mm) leaves 48 connections, all crowded round the LTC3350's analog pins and the I²C/MCU lines crossing beside it. KiCadRoutingTools leaves fewer (36) but only by breaking the fab rules and putting vias in pads. Next: lay U1's analog neighbourhood by hand, then route the rest; keep In1/In2 free of tracks and signal vias out of the switch-node and hot-loop areas | Layout |
 
 ## P11. Hardware project
 
@@ -597,9 +632,9 @@ Nothing on this board changes for rev 3.0.
 (the HAT rev 2.1 stackup and rules). State at 2026-10-13: ERC clean at every
 severity; the exported netlist checked pin-for-pin against the design data
 (the checker was shown to fail on a deliberately broken label); placement done
-on both sides (functional placement 2026-10-15, §P2), **unrouted**; DRC clean
-of clearance, courtyard and parity errors, with silkscreen overlap and
-zone-spoke items left for layout (§P10 item 15).
+on both sides (functional placement 2026-10-15, §P2); power copper laid by
+hand (2026-10-15), signals **unrouted**; DRC clean apart from the unrouted
+connections (§P10 item 15).
 
 **Libraries** (`lib/`). Every vendor footprint was checked pad-by-pad against
 its datasheet land pattern, and two of five were wrong:
@@ -625,7 +660,8 @@ it, because DRC does not check a track against its class width. `verify_netlist.
 builds the board on the HAT rev 2.1 template (run with KiCad's own Python) and
 places it from `placement.py`, then labels it with `hardware/tools/silk_refs.py`
 (0.8 mm designators, each clear of pads and silk; 20 small passives in the
-densest rows have no room and keep only their fab-layer label).
+densest rows have no room and keep only their fab-layer label). It then adds
+the hand-laid power copper from `copper.py`.
 `placement_review.json` configures `hardware/tools/review_placement.sh` for
 this board. Since 2026-10-15 a
 regenerated board matches the committed one footprint for footprint.
