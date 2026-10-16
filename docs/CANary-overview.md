@@ -438,7 +438,7 @@ canary/
 ├── tools/                       # RE + analysis one-shots (job runners)
 ├── src/
 │   ├── main.py                  # Entry point
-│   ├── config.py                # Pydantic config (all sections)
+│   ├── config/                  # Pydantic config, one module per section group (src.config re-exports)
 │   ├── telemetry.py             # TelemetryRecord + sources (obd/can/decoded/gps)
 │   ├── session.py               # Session dirs
 │   ├── vehicle/                 # VIN-keyed profiles, tune revisions, ledger

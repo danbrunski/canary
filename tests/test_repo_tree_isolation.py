@@ -64,7 +64,10 @@ def test_path_or_none_fields_are_rebased_and_other_path_shapes_refused(
 ) -> None:
     from pydantic import create_model
 
-    import src.config as config_module
+    # The helpers read ``DaemonConfig`` from the module that owns them (R21),
+    # so that is the name to replace: patching the ``src.config`` facade would
+    # leave ``_daemon_path_fields`` looking at the real class.
+    import src.config.scoping as config_module
 
     optional = create_model(
         "DaemonWithOptional",
