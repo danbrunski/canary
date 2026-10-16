@@ -827,7 +827,7 @@ refusal carries a stable `reason` string that tests assert by name.
     tests/test_engine_dynamics.py`: 141 passed. The verifier's 10-case HEAD
     comparison (`cmp_head.py`) is still equal.
 
-- [ ] **E08.4 — Per-cell aggregation that keeps each kind of empty distinct.**
+- [x] **E08.4 — Per-cell aggregation that keeps each kind of empty distinct.**
   `aggregate_cells(result, design, axes)` → one row per cell of a stated grid.
   Default: the **Fuel Comp table's own rpm × load breakpoints on the base
   image**, so a result lines up with the table being edited; Target AFR's
@@ -867,6 +867,56 @@ refusal carries a stable `reason` string that tests assert by name.
       nothing else.
     - An aggregate-first path cannot be written: the function takes the
       `MonteCarloResult`, never a pre-reduced frame (type-checked).
+  *Done 2026-10-15 (`474c0267`):*
+  - **Module.** `src/analysis/sim_cells.py` (layer 5).
+    - **Grids:** `fuel_comp_axes(kit, base_image, slot=)` (the default) and
+      `target_afr_axes(kit, base_image, slot=)`. `Grid` is `fuel_comp` |
+      `target_afr`.
+    - **Aggregation:** `aggregate_cells(result, design, axes, effects=)` →
+      `CellTable`, a pydantic model with `schema_version: 1`
+      (`cell_table_schema()`, `to_dict()` / `to_json()`). Every cell is
+      present, row-major, and the validator checks each one against its
+      axes.
+  - **Departures from the text, each a constraint:**
+    - **It takes the E08.2 `SimDesign`**, for the regimes, plus the run's
+      `compare_roms` trace as `effects` (for the moved-lookup overlay).
+      Inputs that are not the run's are refused: `design_mismatch`,
+      `axes_image_mismatch`, `effects_mismatch`.
+    - **Membership is the nearest breakpoint in the lookup's own comparison
+      domain,** through the firmware's `search_axis`, with ties low. Grid cell
+      (r, c) is therefore table cell (r, c), the one the bilinear lookup weighs
+      most.
+    - **Each (point, draw) pair is placed by the fill byte that draw used,**
+      never by the interval's midpoint. On the Target AFR grid, the column is
+      the base ROM's X, taken from that pair's base BFS. A pair with no base
+      BFS is counted as `unplaced`, never dropped.
+    - **`paired_scenarios.rpm_word`** is now the single rpm-word conversion
+      the run and the cells share.
+    - **`changed`** means any supported pair moved, even where the median is
+      zero.
+    - **Reach is checked, not trusted:** a nonzero delta on an output
+      `compare_roms` calls unreached refuses the table
+      (`reach_contradicted`).
+    - **The headline follows the loop** (`headline_by_loop`): open loop
+      `delivered_lambda`, closed loop `fuel_trim_total_pct` with
+      `closed_loop_trim_authority_undecoded` as given, setpoint moved
+      `target_phi`.
+  - **Tests.** `tests/test_sim_cells.py`, 28 passing (re-run 2026-10-15,
+    `pytest -n0`, 3.2 s). The Accept list by name:
+    - `test_every_status_on_one_grid_and_no_kind_of_empty_collapses`
+    - `test_quantiles_are_dwell_weighted_over_pairs_against_brute_force`
+    - `test_moving_one_point_across_a_breakpoint_moves_only_that_point`
+    - `test_an_aggregate_first_path_cannot_be_written`
+
+    Others:
+    - E08.7's negative control:
+      `test_an_identical_candidate_is_unchanged_in_every_visited_cell`.
+    - Overlay, Target AFR placement and closed-loop trim tests.
+    - The clean-process no-ECU-import test.
+  - **Real images:** a 20260920 → 20261004 run visited 53 of 256 cells,
+    with the B08.6 pattern. That figure is from the commit message. It was
+    not re-run when this box was ticked: the machine that ticked it has no
+    ROM images.
 
 - [ ] **E08.5 — CLI: `tools/rom_sim.py`.** Offline, laptop or desk, prints
   JSON and writes artifacts under a caller-given `--out`, refusing
