@@ -73,38 +73,36 @@ except ImportError:  # loaded as `scripts.evaluate_behavior_models`: repo root o
         load_config,
     )
 
-from src.analysis.behavior_validation import (
-    EVALUATOR_VERSION,
-    BehaviorValidationDocument,
+from src.analysis.behavior_validation_criteria import apply_criteria
+from src.analysis.behavior_validation_evaluation import (
     EventPolicy,
     RowEvaluation,
-    SessionReads,
-    apply_criteria,
     axis_separation_summary,
+    evaluate_rows,
+)
+from src.analysis.behavior_validation_frame import build_evaluation_frame
+from src.analysis.behavior_validation_inputs import SessionReads, graded_frame, profile_exclusions
+from src.analysis.behavior_validation_metrics import (
     breakdown,
     breakdown_by_labels,
-    build_evaluation_frame,
-    evaluate_rows,
-    file_identity,
     fit_baseline,
     fold_metrics,
-    graded_frame,
-    group_drives,
-    load_validation_document,
-    parent_session,
-    piece_time_ranges,
-    profile_exclusions,
     qualifying_drive_count,
     regime_labels,
+)
+from src.analysis.behavior_validation_schema import (
+    EVALUATOR_VERSION,
+    BehaviorValidationDocument,
+    file_identity,
+    load_validation_document,
     session_content_identity,
-    synthetic_sensitivity,
-    training_leaks,
-    transient_controls,
     validation_document_path,
 )
+from src.analysis.behavior_validation_sensitivity import synthetic_sensitivity, transient_controls
 from src.analysis.recipe_contract import recipe_serving_spec
 from src.analysis.recipes.catalog import default_recipes
 from src.analysis.refit import legacy_reproduction_spec
+from src.analysis.splits import group_drives, parent_session, piece_time_ranges, training_leaks
 from src.behavior.behavior_eligibility import ServingSpec, required_channel_groups, serving_spec
 from src.behavior.behavior_models import (
     BehaviorModel1D,

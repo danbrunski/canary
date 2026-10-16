@@ -38,7 +38,7 @@ from typing import Any
 
 import pandas as pd
 
-from src.analysis.behavior_validation import load_validation_document
+from src.analysis.behavior_validation_schema import load_validation_document
 from src.analysis.channels import read_channels
 from src.analysis.ecu_application import load_application_model
 from src.analysis.operating_context import (

@@ -31,24 +31,19 @@ from typing import Literal
 import numpy as np
 import pandas as pd
 
-from src.analysis.behavior_validation import (
-    AxisPairingRefusedError,
-    BehaviorValidationDocument,
-    DriveSplit,
-    UnorderedSessionsError,
-    UnverifiedProfileError,
+from src.analysis.behavior_validation_evaluation import evaluate_rows, fit_band_excess_persistence
+from src.analysis.behavior_validation_evidence import (
     ValidationContext,
     build_evidence,
     carry_over_flags,
-    chronological_split,
-    evaluate_rows,
-    fit_band_excess_persistence,
-    fit_baseline,
-    group_drives,
-    parent_session,
-    piece_time_ranges,
+)
+from src.analysis.behavior_validation_inputs import (
+    AxisPairingRefusedError,
+    UnverifiedProfileError,
     profile_refusals,
 )
+from src.analysis.behavior_validation_metrics import fit_baseline
+from src.analysis.behavior_validation_schema import BehaviorValidationDocument
 from src.analysis.recipe_builders import (
     CATALOG_1D_DEFAULTS,
     CATALOG_2D_DEFAULTS,
@@ -78,6 +73,14 @@ from src.analysis.recipes.shared import (
     WARM_IDLE_LOCAL_RANGES,
     WARM_IDLE_STEADY_RATES,
     shared_recipes,
+)
+from src.analysis.splits import (
+    DriveSplit,
+    UnorderedSessionsError,
+    chronological_split,
+    group_drives,
+    parent_session,
+    piece_time_ranges,
 )
 from src.analysis.surface_1d import fit_binned_lookup, fit_polynomial, fit_robust_baseline
 from src.analysis.surface_2d import fit_grid_binned_mean

@@ -634,7 +634,7 @@ def _refuse_dependent_drive(
         return
     # Lazy: behavior_validation pulls the whole serving stack, and this module
     # is imported by the lightweight tuning analysis path.
-    from src.analysis.behavior_validation import LeakedDriveError
+    from src.analysis.splits import LeakedDriveError
 
     if delay is not None and drive_id in delay.fitted_on:
         raise LeakedDriveError(

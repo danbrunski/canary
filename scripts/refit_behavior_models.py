@@ -55,23 +55,24 @@ except ImportError:  # loaded as `scripts.refit_behavior_models` — repo root o
         resolve_sessions,
     )
 
-from src.analysis.behavior_validation import (
-    BehaviorValidationDocument,
+from src.analysis.behavior_validation_evidence import ValidationContext
+from src.analysis.behavior_validation_inputs import (
     SessionReads,
-    ValidationContext,
-    decoder_identity,
-    file_identity,
-    group_drives,
-    load_validation_document,
-    mode_labels_predate_fix,
-    piece_time_ranges,
     profile_exclusions,
     stamp_profile_exclusions,
+)
+from src.analysis.behavior_validation_schema import (
+    BehaviorValidationDocument,
+    decoder_identity,
+    file_identity,
+    load_validation_document,
+    mode_labels_predate_fix,
     validation_document_path,
 )
 from src.analysis.recipe_contract import Recipe
 from src.analysis.recipes.catalog import default_recipes
 from src.analysis.refit import attach_criteria, refit_all
+from src.analysis.splits import group_drives, piece_time_ranges
 from src.behavior.behavior_models import (
     apply_behavior_policy,
     behavior_policy_path,
