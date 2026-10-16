@@ -674,7 +674,14 @@ Pi; E09.13 Light. Items marked **listing** need the firmware session
   `OVERNIGHT-QUEUE.md` Q27 records the order with the truck items marked
   blocked overnight. No code.
 
-- [~] **E09.14 — `inspect` and the page name the lever and its blockers.**
+- [x] **E09.14 — `inspect` and the page name the lever and its blockers.**
+  *Done 2026-10-16: 14a `0631530` (CLI + `rom_levers.classify_edit`), 14b
+  `0ed1ea1e` (W09.10: `rom_editor.preview_edits` returns `levers` =
+  `classify_edit(...).to_dict()`, the page lists `levers.messages` verbatim
+  above Simulate). `tests/test_rom_levers_parity.py` calls CLI `inspect` and the
+  preview for the same edit and requires identical strings (mutation-checked);
+  real-image case in `tests/test_rom_editor_private_rom.py`. Evidence: W09.10
+  in `docs/roadmap/tasks/W09-rom-editor.md`.*
   One function, `src/analysis/rom_levers.py` (layer 5), classifies an edit
   by lever (the table above) and lists, per output, what blocks a number:
   unmapped, unmodelled node, plant unqualified, closed loop. It reads the
