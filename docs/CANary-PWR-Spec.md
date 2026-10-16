@@ -617,7 +617,11 @@ were corrected (UL marked the LM61460's ground pins as power outputs).
 
 **`gen/`** generated the first pass: `design.py` is the netlist with every
 value's rationale in each part's Note field; `gen_proj.py` writes the project and
-schematic, `verify_netlist.py` checks KiCad's netlist against it, `gen_pcb.py`
+schematic, including the net classes. Each class lists design nets, which are written as the exact
+names KiCad gives them: a net on one sheet is `/<sheet>/<net>`. Generation refuses a name the design
+lacks and a `+` rail with no class. Until 2026-10-15 the patterns were bare names, and KiCad anchors
+patterns, so `VCAP`, `+12V_RAW` and `+5V_SHUNT` fell into the 0.2 mm default class. Nothing flagged
+it, because DRC does not check a track against its class width. `verify_netlist.py` checks KiCad's netlist against it, `gen_pcb.py`
 builds the board on the HAT rev 2.1 template (run with KiCad's own Python) and
 places it from `placement.py`, then labels it with `hardware/tools/silk_refs.py`
 (0.8 mm designators, each clear of pads and silk; 20 small passives in the

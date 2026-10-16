@@ -652,7 +652,7 @@
     "netclass_patterns": [
       {
         "netclass": "Power_High",
-        "pattern": "+12V_RAW"
+        "pattern": "/Input/+12V_RAW"
       },
       {
         "netclass": "Power_High",
@@ -660,15 +660,11 @@
       },
       {
         "netclass": "Power_High",
-        "pattern": "+12V_CHG"
-      },
-      {
-        "netclass": "Power_High",
         "pattern": "+12V_BUS"
       },
       {
         "netclass": "Power_High",
-        "pattern": "VCAP"
+        "pattern": "/Holdup/VCAP"
       },
       {
         "netclass": "Power_High",
@@ -676,7 +672,7 @@
       },
       {
         "netclass": "Power_High",
-        "pattern": "+5V_SHUNT"
+        "pattern": "/Pi_Supply/+5V_SHUNT"
       },
       {
         "netclass": "Power_High",
@@ -684,19 +680,15 @@
       },
       {
         "netclass": "Power_High",
-        "pattern": "*LTC_VOUTSP"
+        "pattern": "/Holdup/LTC_VOUTSP"
       },
       {
         "netclass": "Power_High",
-        "pattern": "*LTC_ICAP"
-      },
-      {
-        "netclass": "Power_High",
-        "pattern": "*BANK_DIS"
+        "pattern": "/Holdup/LTC_ICAP"
       },
       {
         "netclass": "Power",
-        "pattern": "+12V_HAT"
+        "pattern": "/Input/+12V_HAT"
       },
       {
         "netclass": "Power",
@@ -704,31 +696,67 @@
       },
       {
         "netclass": "Power",
-        "pattern": "*AON_IN"
+        "pattern": "/Supervisor/AON_IN"
       },
       {
         "netclass": "Power",
-        "pattern": "PI_3V3"
+        "pattern": "/Pi_Interface/PI_3V3"
       },
       {
         "netclass": "Power",
-        "pattern": "*LTC_INTVCC"
+        "pattern": "/Holdup/LTC_INTVCC"
       },
       {
         "netclass": "Power",
-        "pattern": "*BANK_*"
+        "pattern": "/Holdup/BANK_POS_S"
       },
       {
         "netclass": "Power",
-        "pattern": "*LTC_CAP*"
+        "pattern": "/Holdup/BANK_NEG_S"
+      },
+      {
+        "netclass": "Power",
+        "pattern": "/Holdup/BANK_TAP1"
+      },
+      {
+        "netclass": "Power",
+        "pattern": "/Holdup/BANK_TAP2"
+      },
+      {
+        "netclass": "Power",
+        "pattern": "/Holdup/BANK_TAP3"
+      },
+      {
+        "netclass": "Power",
+        "pattern": "/Holdup/LTC_CAP1"
+      },
+      {
+        "netclass": "Power",
+        "pattern": "/Holdup/LTC_CAP2"
+      },
+      {
+        "netclass": "Power",
+        "pattern": "/Holdup/LTC_CAP3"
+      },
+      {
+        "netclass": "Power",
+        "pattern": "/Holdup/LTC_CAP4"
+      },
+      {
+        "netclass": "Power",
+        "pattern": "/Holdup/LTC_CAPFB"
+      },
+      {
+        "netclass": "Power",
+        "pattern": "/Holdup/LTC_CAPRTN"
       },
       {
         "netclass": "Switch_Node",
-        "pattern": "*LTC_SW"
+        "pattern": "/Holdup/LTC_SW"
       },
       {
         "netclass": "Switch_Node",
-        "pattern": "*LM_SW"
+        "pattern": "/Pi_Supply/LM_SW"
       },
       {
         "netclass": "CAN",
