@@ -2,120 +2,35 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { HttpError, controlJson } from "../../api/core";
-import type { TuningContext } from "../../hooks/useTuningContext";
+import {
+  CAPTURE_ID,
+  CONDITIONS,
+  FLOOR,
+  LOGS,
+  RUNNING,
+  delivery,
+  deferred,
+  logsResponse,
+  ordinarySession,
+  timingResponse,
+  trimSurface,
+  tuningContext as context,
+} from "../../test/workbenchFixtures";
 import type {
-  Conditions,
-  DeliveryErrorResponse,
   LogsResponse,
   PullComparisonResponse,
   TrimSurfaceResponse,
 } from "../../types/workbench";
-import type { StatusResponse } from "../../types";
+import * as page from "./AnalysisPage";
 import { AnalysisPage } from "./AnalysisPage";
+import { DeliveryChart } from "./DeliveryChart";
+import { MEASURED_SOURCES } from "./DeliveryView";
 
 vi.mock("../../api/core", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../../api/core")>();
   return { ...actual, controlJson: vi.fn() };
 });
 const control = vi.mocked(controlJson);
-
-const LOGS: LogsResponse = {
-  include_sessions: false,
-  total: 0,
-  limit: 100,
-  capped: false,
-  logs: [],
-};
-
-const CONDITIONS: Conditions = {
-  sessions: ["2026-09-18T120000", "2026-09-19T120000"],
-  n_sessions: 2,
-  revisions: { "ZS44A-20260920": ["2026-09-18T120000", "2026-09-19T120000"] },
-  mixed_revisions: false,
-  revision_boundaries: {},
-  baro: { spec: "obd:BAROMETRIC_PRESSURE", min_kpa: 63.1, max_kpa: 80.4, sessions_without: [] },
-  gates: { started: 120, filtered: { closed_loop: 90, fuel_cut: 10 }, remaining: 20 },
-};
-
-const FLOOR = {
-  available: true,
-  channel: "delivery_error_pct",
-  unit: "percent",
-  sd: 1.49,
-  mean: -0.36,
-  n_cells: 5,
-  min: -2.38,
-  max: 1.38,
-  conditions: "WOT: throttle>=85, 3000-5000 rpm",
-};
-
-function delivery(overrides: Partial<DeliveryErrorResponse> = {}): DeliveryErrorResponse {
-  return {
-    available: true,
-    unavailable_kind: null,
-    measured: "obd:O2_WR_LAMBDA_S1",
-    min_load: null,
-    n: 20,
-    band_averaged_pct: 1.9,
-    pooled_pct: 2.1,
-    engine_version: 2,
-    pairing: {
-      method: "acquisition-time match_ordered",
-      max_separation_s: 0.25,
-      target_source: "mode01_pid_0x44",
-      target_spec: "obd:COMMANDED_EQUIV_RATIO",
-      measured_source: "ecm_lambda_pid_0x24",
-      measured_spec: "obd:O2_WR_LAMBDA_S1",
-      regime: "enrichment",
-      steady_target_dwell_s: 0.6,
-      target_step_tolerance: 0.01,
-      post_fuel_cut_holdoff_s: 6,
-      transport_delay_modelled: false,
-      transport_delay_s: null,
-      transport_delay_bracket_s: null,
-      transport_delay_note: "transport delay is not modelled on this route",
-      constants_informed_by: ["_capture-tuning-2026-09-21T232153"],
-    },
-    delay_sensitivity: null,
-    bands: [
-      {
-        rpm_band: "(2500.0, 3000.0]",
-        n: 12,
-        commanded: 12.5,
-        measured: 12.7,
-        error_pct: 2.0,
-        p05_pct: 0.5,
-        p95_pct: 3.5,
-      },
-      {
-        rpm_band: "(3000.0, 3500.0]",
-        n: 8,
-        commanded: 12.4,
-        measured: 12.6,
-        error_pct: 1.8,
-        p05_pct: 0.4,
-        p95_pct: 3.1,
-      },
-    ],
-    per_session: [],
-    gates: CONDITIONS.gates,
-    unavailable: [],
-    noise_floor: FLOOR,
-    conditions: CONDITIONS,
-    ...overrides,
-  };
-}
-
-const RUNNING = { registry_revision: "ZS44A-20260920" } as StatusResponse;
-
-function context(): TuningContext {
-  return {
-    selectedLogId: null,
-    setSelectedLogId: () => {},
-    loadedRom: null,
-    setLoadedRom: () => {},
-  };
-}
 
 function route(handlers: Record<string, unknown>) {
   control.mockImplementation((path: string) => {
@@ -449,16 +364,6 @@ describe("AnalysisPage", () => {
 });
 
 describe("AnalysisPage request state (R08.2)", () => {
-  function deferred<T>() {
-    let resolve!: (value: T) => void;
-    let reject!: (err: unknown) => void;
-    const promise = new Promise<T>((res, rej) => {
-      resolve = res;
-      reject = rej;
-    });
-    return { promise, resolve, reject };
-  }
-
   const WITH_SESSION: LogsResponse = {
     ...LOGS,
     include_sessions: true,
@@ -542,5 +447,106 @@ describe("AnalysisPage request state (R08.2)", () => {
     render(<AnalysisPage token="t" status={RUNNING} context={context()} />);
     await chooseRunningAndSource();
     expect(await screen.findByText(/Can't reach the daemon/)).toBeInTheDocument();
+  });
+});
+
+// ---------------------------------------------------------------- R19
+
+const analysisCalls = (prefix: string) =>
+  control.mock.calls.filter(([path]) => String(path).startsWith(prefix));
+const pickRunning = () =>
+  fireEvent.click(screen.getByRole("button", { name: /All on the running calibration/ }));
+const view = (name: string) => fireEvent.click(screen.getByRole("button", { name }));
+
+describe("AnalysisPage composition (R19)", () => {
+  it("re-exports the components it was split into from their old path", () => {
+    expect(page.DeliveryChart).toBe(DeliveryChart);
+    expect(page.MEASURED_SOURCES).toBe(MEASURED_SOURCES);
+  });
+
+  it("asks for the token, and keeps every Run disabled without one", async () => {
+    route({});
+    render(<AnalysisPage token="" status={RUNNING} context={context()} />);
+    expect(screen.getByText("Enter the control token to run analyses.")).toBeInTheDocument();
+    pickRunning();
+    expect(screen.getByRole("button", { name: "Run" })).toBeDisabled();
+    view("Trim surface");
+    expect(screen.getByRole("button", { name: "Run" })).toBeDisabled();
+    view("Timing");
+    expect(screen.getByRole("button", { name: "Run" })).toBeDisabled();
+    await new Promise((r) => setTimeout(r, 20));
+    expect(control).not.toHaveBeenCalled();
+  });
+
+  it("sends the chosen sessions, comma-joined, and no revision", async () => {
+    control.mockImplementation((path: string) => {
+      if (path.startsWith("/control/logs")) {
+        return Promise.resolve(
+          logsResponse({ include_sessions: true, logs: [...LOGS.logs, ordinarySession()] }),
+        );
+      }
+      return Promise.resolve(delivery());
+    });
+    render(<AnalysisPage token="t" status={RUNNING} context={context()} />);
+    await screen.findByText(CAPTURE_ID);
+    fireEvent.click(screen.getByLabelText(new RegExp(CAPTURE_ID)));
+    fireEvent.click(screen.getByLabelText(/2026-09-19T120000/));
+    fireEvent.change(screen.getByLabelText("Measured-AFR source"), {
+      target: { value: "obd:O2_WR_LAMBDA_S1" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Run" }));
+    await screen.findByLabelText("Delivery error by rpm band");
+    const query = new URL(String(analysisCalls("/analysis/delivery-error")[0][0]), "http://d");
+    expect(query.searchParams.get("sessions")).toBe(`${CAPTURE_ID},2026-09-19T120000`);
+    expect(query.searchParams.has("revision")).toBe(false);
+  });
+
+  it("carries one choice of sessions into every view", async () => {
+    route({
+      "/analysis/trim-surface": trimSurface(),
+      "/analysis/timing": timingResponse(),
+    });
+    render(<AnalysisPage token="t" status={RUNNING} context={context()} />);
+    pickRunning();
+    view("Trim surface");
+    fireEvent.click(screen.getByRole("button", { name: "Run" }));
+    await screen.findByRole("table", { name: "Trim surface" });
+    view("Timing");
+    fireEvent.click(screen.getByRole("button", { name: "Run" }));
+    await screen.findByRole("table", { name: "Timing cells" });
+    expect(analysisCalls("/analysis/trim-surface")[0][0]).toBe(
+      "/analysis/trim-surface?revision=ZS44A-20260920",
+    );
+    expect(analysisCalls("/analysis/timing")[0][0]).toBe(
+      "/analysis/timing?revision=ZS44A-20260920",
+    );
+  });
+
+  it("drops a run in flight when the view changes, and starts clean on return", async () => {
+    const late = deferred<unknown>();
+    control.mockImplementation((path: string) =>
+      path.startsWith("/control/logs") ? Promise.resolve(LOGS) : late.promise,
+    );
+    render(<AnalysisPage token="t" status={RUNNING} context={context()} />);
+    pickRunning();
+    fireEvent.change(screen.getByLabelText("Measured-AFR source"), {
+      target: { value: "obd:O2_WR_LAMBDA_S1" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Run" }));
+    await screen.findByRole("button", { name: "Running…" });
+    const signal = (analysisCalls("/analysis/delivery-error")[0][2] as { signal: AbortSignal })
+      .signal;
+    expect(signal.aborted).toBe(false);
+
+    view("Trim surface");
+    expect(signal.aborted).toBe(true);
+    late.resolve(delivery());
+    await new Promise((r) => setTimeout(r, 20));
+    view("Delivery error");
+    expect(screen.queryByLabelText("Delivery error by rpm band")).not.toBeInTheDocument();
+    expect(screen.getByLabelText("Measured-AFR source")).toHaveValue("");
+    // The sessions chosen above the views are kept; the view's own run is not.
+    expect(screen.getByText("all on ZS44A-20260920")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Run" })).toBeDisabled();
   });
 });

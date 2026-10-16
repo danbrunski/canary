@@ -9,6 +9,7 @@ import {
 } from "../src/test/romLibraryFixtures";
 import type { DtcReportResponse, PowerStatusResponse } from "../src/types";
 import { mockDaemon } from "./fixtures/mockDaemon";
+import { mockWorkbench } from "./fixtures/workbenchRoutes";
 
 /**
  * P2.6 — the phone layout's regression net (docs/roadmap/phone-ui.md). Runs
@@ -231,4 +232,80 @@ test("the Drive screen shows two large tiles a row with finger-sized pins", asyn
   await unpinned.tap();
   await expect(page.getByRole("button", { name: `unpin ${name}` })).toBeVisible();
   await expect.poll(pinnedCount).toBe(before + 1);
+});
+
+/**
+ * R19: the Logs and Analysis pages at 412 px, with real-shaped data. The
+ * service worker is blocked because it answers `/analysis/*` GETs itself
+ * (that prefix is missing from its dynamic list), which hides them from the
+ * route stubs.
+ */
+test.describe("Logs and Analysis at 412px", () => {
+  test.use({ serviceWorkers: "block" });
+
+  const sideways = async (page: Page) => {
+    const report = await overflowReport(page);
+    expect(report.documentWidth).toBeLessThanOrEqual(report.viewport);
+    expect(report.offenders).toEqual([]);
+  };
+
+  test("a long log is windowed, scrolls inside its own box, and the page does not scroll sideways", async ({
+    page,
+  }) => {
+    await mockWorkbench(page, { rows: 2000 });
+    await page.goto("/#wb/tuning-logs");
+    const table = page.getByRole("table", { name: "Log table" });
+    await expect(table).toBeVisible();
+    await page.waitForLoadState("networkidle");
+    expect(pageErrors).toEqual([]);
+
+    // A window of rows, never the 2000.
+    const rows = table.locator("tr[data-row]");
+    expect(await rows.count()).toBeLessThanOrEqual(58);
+    const box = page.locator("[data-table-scroll]").filter({ has: table });
+    await box.evaluate((el) => {
+      el.scrollTop = el.scrollHeight;
+    });
+    await expect(rows.last()).toContainText("20990");
+    expect(await rows.count()).toBeLessThanOrEqual(58);
+    await sideways(page);
+  });
+
+  test("the visual presentation fits the screen", async ({ page }) => {
+    await mockWorkbench(page, { rows: 300 });
+    await page.goto("/#wb/tuning-logs");
+    await expect(page.getByRole("table", { name: "Log table" })).toBeVisible();
+    await page.getByRole("button", { name: "Visual" }).click();
+    await expect(page.getByLabel("Scatter")).toBeVisible();
+    await sideways(page);
+    await page.getByRole("button", { name: "Heat map" }).click();
+    await expect(page.getByLabel("Heat map")).toBeVisible();
+    await sideways(page);
+  });
+
+  test("the delivery chart of a few bands fits the screen", async ({ page }) => {
+    await mockWorkbench(page, { bands: 2 });
+    await page.goto("/#wb/tuning-analysis");
+    await page.getByRole("button", { name: /All on the running calibration/ }).click();
+    await page.getByLabel("Measured-AFR source").selectOption("obd:O2_WR_LAMBDA_S1");
+    await page.getByRole("button", { name: "Run" }).click();
+    await expect(page.getByLabel("Delivery error by rpm band")).toBeVisible();
+    await sideways(page);
+  });
+
+  // A known defect, found by these checks and left alone (R19 changes no
+  // layout): the chart is `bands * 70` px wide and sits in no horizontal
+  // scroller, so six bands (420 px) reach 445 px on this 412 px screen and the
+  // shell clips the rest. When the chart is wrapped this starts passing, and
+  // Playwright reports that: delete `test.fail()` then.
+  test("the delivery chart of six bands fits the screen", async ({ page }) => {
+    test.fail();
+    await mockWorkbench(page, { bands: 6 });
+    await page.goto("/#wb/tuning-analysis");
+    await page.getByRole("button", { name: /All on the running calibration/ }).click();
+    await page.getByLabel("Measured-AFR source").selectOption("obd:O2_WR_LAMBDA_S1");
+    await page.getByRole("button", { name: "Run" }).click();
+    await expect(page.getByLabel("Delivery error by rpm band")).toBeVisible();
+    await sideways(page);
+  });
 });
