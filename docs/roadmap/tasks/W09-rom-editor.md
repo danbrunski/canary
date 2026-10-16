@@ -650,6 +650,145 @@ W09.6 is the orchestrator's own, on the ROM machine.
       `cells` validates against `sim_cells.CellTable` (rechecked 2026-10-15).
       Not covered: phone project, drag-select, keyboard selection (vitest has
       them), a real daemon, real images.
+    - *Laptop half done 2026-10-15. Still open: the Pi measurement and the Pi
+      browser walkthrough.* `tests/test_rom_editor_private_rom.py`
+      (`pytestmark = slow`). It skips by name when `OPERATOR_ROMS["r20261004"]`
+      is absent. Result: 8 passed, 1 xfailed (strict) in 13.7–21.8 s with
+      `-n0 -m slow`. The 20261004 image's decoded sha256 equals its
+      `tune_revisions.yaml` `image_sha256` (`5587f7e1…`). `revision_match`
+      against the tracked registry returns `matched`, and so does the
+      library's own match after an `.OsirisROM` upload.
+      - **The grid the form suggests is not 16 × 16 on this image.** Fuel
+        Comp's fill axis is raw 16..255, which decodes to 7.14–113.84 %.
+        `edgesFromBreakpoints` therefore ends at 117.19 %, and the design
+        refuses it as `load_outside_model`. After "Trim load edges to 0-100 %",
+        the edges are rpm 200…6,600 step 400 × load 3.571429…96.42857, 100.
+        That is 16 × 14 = **224 points**. This is
+        `test_the_form_suggests_these_edges_and_only_the_trimmed_grid_can_run`,
+        a Python port of `suggestEdges`/`trimLoadEdges` checked against those
+        literal numbers. Every value is stated: baro 81, IAT 25, coolant 88,
+        battery 14, rail 350, throttle 20, pedal flag 0, all learned values 0,
+        seed 20261015, 4 draws.
+      - **1. Negative control** (`_simulate`, base bytes as the candidate):
+        outcome `identical`, every reach `no_change`, 224/224 cells visited.
+        No output in any visited cell is `changed` or `partly_supported`, and
+        every computed delta is 0. Every pair is equal on both sides. 146
+        cells are closed loop and 78 open loop. Unsupported outputs name only
+        these reasons: `closed_loop_trim_authority_undecoded`,
+        `short_pulse_undecoded` (16 cells), and
+        `target_lookup:enrichment_gate_state_unknown` + `not_computed` (one
+        cell: 4,000 rpm, fill bytes 191–192, inside the enrichment gate's
+        hysteresis band). BFS and φ are `unchanged` in the other 223 cells.
+      - **2. K +5 %** (`scale 1.05 nearest`): 28,715 → 30,151, so
+        r = 1.0500087. All 308 supported open-loop pairs satisfy
+        BFS_c − r·BFS_b ∈ (−9.17, +9.62) counts. That bound is E08.7's,
+        re-derived here with f = max Fuel Comp 139/128 in place of a flat 128.
+        The measured spread was −4.59…+4.82 counts, with base BFS 1,984–29,508,
+        and every pair moved. 77 all-open-loop cells read `changed`. Their
+        relative ΔBFS p50 lies within −5.5e-4…+2.4e-3 of r − 1 (the wider end
+        is the lowest-BFS cells). The gate-ambiguous cell reads `unsupported`.
+      - **3. Target AFR +4 on the WOT column** (col 7, the top X breakpoint
+        and the column the forced-column flag reads; 146/149/149/149/149/153/
+        155/159 → +4). The WOT row/column has to be reached through the
+        pedal flag (bit 0 set), because no grid point reaches it by X (below).
+        Setup: one rpm cell 4,600–5,000 (centre 4,800, as E07.6), the form's
+        three highest fill cells, and E07.6's environment and learned state
+        (LTFT 2.34), 200 draws.
+        - Δφ is exactly **+0.03125 at every pair** (157/128 → 161/128).
+        - At each point and drawn fill byte, BFS, φ and the pulse equal E07.6's
+          own `run_paired` exactly. λ p50 is within 2e-4 of its central value,
+          and p05–p95 lies inside its range over assumptions (E08.7's
+          tolerance).
+        - Measured: BFS 24,636/24,820, 27,296/27,496 and 29,080; pulse
+          +0.23, +0.26 and +0.28 ms; λ p50 −2.423, −2.455 and −2.486 %.
+      - **Finding (strict `xfail`, assertion kept literal):** E07.6's written
+        WOT figures do not reproduce at the grid's WOT point.
+        - At the top fill cell (98.2 %, BFS 29,080) the pulse is +0.28 ms,
+          not +0.41.
+        - λ p05/p50/p95 is −2.507/−2.486/−2.468 %, outside E07.6's stated
+          −2.52…−2.49 %. Only p50 rounds to −2.5 %.
+        - The cause is not the editor: E07.6's own path gives the same
+          numbers there (the bullet above). The figures are conditional on
+          BFS 42,000 (E08.7 item 4).
+        - No grid can reach that BFS.
+          `test_no_grid_point_reaches_e076s_wot_bfs_or_the_wot_column_by_x`
+          puts load edges [99.9, 100] at 4,800 rpm and baro 81, and BFS stays
+          < 41,997. That is because a grid takes fill as MAP/baro and solves
+          MAF through the manifold model: 102.9 g/s at MAP 79.6 kPa, against
+          E07.6's stated 150 g/s at 79 kPa.
+        - With the pedal flag 0, the WOT column is reached by **no** point of
+          the form's grid: the visited X columns are 0–2, and Δφ = 0
+          wherever it is computed. An operator who edits the WOT column and
+          states pedal flag 0 sees nothing anywhere.
+      - **4. Fuel Comp region** (`fuel_comp_light_load.yaml`; `spec_sha256`
+        equals the fixture's): the edited cells are exactly (2,2), (2,3) and
+        (3,2) 130 → 133, (3,3) 128 → 131 (rpm rows 2–3 × fill cols 2–3, as
+        E08.1), and (0,0) 128 → 126.
+        - The `fuel_comp` overlay marks exactly those 5 cells.
+        - Per pair, "reached" is computed from the axes alone: an edited
+          interpolation corner with non-zero weight, with the rpm word against
+          the axis byte × 4 and the fill byte byte-for-byte. 27 of 896 pairs
+          (8 points at 400/1,200/1,600 rpm) reach it.
+        - The other 869 pairs have Δ = 0 in every output. BFS moved at 20
+          pairs, all of them reached, and the 5 edited cells are the only
+          cells where BFS reads `changed`.
+        - Every reaching pair runs **closed loop** under this environment, so
+          Δλ is 0 at all 896 pairs. The change is carried by
+          `fuel_trim_total_pct` at 16 reached pairs, `unsupported` because
+          the trim authority is undecoded. The page's open-loop λ map shows
+          nothing for this edit.
+      - **GUI path:** `run_job("rom_sim")` on a `<sha>.bin` in `tmp_path`
+        equals `simulate_edits`, survives `pickle` round-trip, and serialises
+        to JSON. `test_the_route_simulates_the_uploaded_osiris_file`: the
+        `.OsirisROM` goes through `POST /control/rom/library` (plain sha back,
+        `matched`), then `POST …/simulate` through `run_off_loop`
+        (in-process executor, the child's own `load_kit`). The response is
+        200 and equals `simulate_edits` through JSON, 224 points.
+      - **Mutation checks** (scratch copies; each fails): dropping the upper
+        interpolation corner (case 4: an unreached pair's BFS moves);
+        r = 1.04 (case 2: errors of 196–300 counts); Δφ 0.0234375 (case 3).
+      - **Measured on the laptop** (offline, `.venv/bin/python -I
+        <scratchpad>/measure.py child|inproc <grid> <draws>`). The edit is
+        the light-load spec above with the environment of case 1 and seed
+        20261015.
+        - **Paths:** `child` is `asyncio.run(workbench_jobs.run_off_loop(
+          "rom_sim", …))`, the real `spawn` child under
+          `digest_address_space_bytes` = 4,096 MiB here. Peak RSS is
+          `getrusage(RUSAGE_CHILDREN).ru_maxrss` after the children are
+          joined. `inproc` is `run_workbench_job` in the same fresh process
+          under the same `RLIMIT_AS`, for `VmPeak`, the virtual peak that
+          `RLIMIT_AS` actually bounds.
+        - **Machine:** Intel Core Ultra 9 185H, 12 logical CPUs, 15,997 MiB,
+          WSL2 kernel 5.15.167.4, Python 3.12.3. 1-min load 0.6–1.0
+          throughout.
+
+        | grid | points | draws | wall (child, incl. spawn) | child peak RSS | VmPeak (inproc) | response JSON | `visited_only` |
+        |---|---|---|---|---|---|---|---|
+        | form 16 × 14 | 224 | 200 | 4.5 s | 188 MiB | 871 MiB | 705,543 B | 663,116 B |
+        | form 16 × 14 | 224 | 1,000 | 8.5 s | 277 MiB | 961 MiB | 710,118 B | 667,691 B |
+        | form 16 × 14 | 224 | 2,000 | 11.9 s | 390 MiB | — | 710,084 B | 667,657 B |
+        | 16 × 16 (fill 0–100 % in 16) | 256 | 200 | 4.5 s | 190 MiB | — | 705,749 B | 663,322 B |
+        | 16 × 16 | 256 | 1,000 | 9.1 s | 294 MiB | 977 MiB | 710,290 B | 667,863 B |
+        | 32 × 32 (the cap) | 1,024 | 1,000 | 34.1 s | 682 MiB | — | 755,301 B | 712,874 B |
+        | 32 × 32 (the cap) | 1,024 | 2,000 | 51.1 s | 1,196 MiB | 1,891 MiB | 757,089 B | 714,662 B |
+
+        - **Scaling:** RSS is about 180 MiB plus ~0.5 KB per point × draw.
+          `inproc` wall time is 1.3–7 s below `child`, which is spawn and
+          imports.
+        - **Response size:** about 0.7 MB whatever the draws (the 256 Fuel
+          Comp cells, 224 of them visited, even for 256 or 1,024 points).
+          W09.5's `visited_only` filter saves only ~6 % on a full grid; its
+          "< 60 KB" holds for sparse grids only.
+        - **Limits:** `DIGEST_TIMEOUT_SECONDS` = 900 s; the child's
+          `RLIMIT_AS` is 50 % of RAM clamped to 1,024–4,096 MiB.
+        - **Pi estimate (a guess, not measured):** if the Pi is 3–6× slower,
+          the form grid at 1,000 draws takes ~25–50 s, at 2,000 draws ~35–70 s,
+          and the cap (1,024 × 2,000) ~150–310 s. All are under 900 s. RSS
+          and VmPeak do not scale with CPU speed but may differ on aarch64.
+          The cap's 1.2 GiB RSS / 1.9 GiB virtual fit an 8 GB Pi's 4,096 MiB
+          ceiling, but not a 2 GB Pi's 1,024 MiB floor.
+        - `MAX_DRAWS` is unchanged (2,000); the operator decides after the Pi
+          numbers.
   - Tick E08.8 in the E08 doc with a pointer here.
 
 - [ ] **W09.7 — Later, named so they are not implied:** persisted runs under
