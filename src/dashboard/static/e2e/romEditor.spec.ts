@@ -1,0 +1,420 @@
+import { readFile } from "node:fs/promises";
+
+import { expect, test, type Locator, type Page } from "@playwright/test";
+
+import { STATUSES } from "../src/lib/romSimView";
+import { ENTRY_K106, ENTRY_TUNED, ENTRY_UNRECORDED } from "../src/test/romLibraryFixtures";
+import { buildRequest, buildSimResult } from "../src/test/romSimFixtures";
+import type { RomEditPreviewRequest, RomSimRequest } from "../src/types/romEditor";
+import { mockDaemon } from "./fixtures/mockDaemon";
+import { mockRomApi, specYaml, type RomApi, type RomApiOptions } from "./fixtures/romEditorApi";
+
+/**
+ * The ROM Editor (W09.3, W09.4, W09.8) in a real Chromium, the daemon stubbed
+ * at the network layer (`fixtures/romEditorApi.ts`), as `romMaps.spec.ts` does
+ * for the ROM Maps page. Real-image runs are W09.6's and stay open.
+ *
+ * The viewport is short on purpose: with the 16 x 16 table partly below the
+ * fold, one click on a cell once selected 7-11 cells (focus scrolled the page
+ * under the held button); jsdom cannot show that.
+ */
+test.use({ viewport: { width: 1280, height: 600 } });
+
+const TUNED_FILE = "ZS44A-Tuned-20260920.OsirisROM";
+const FILE_BYTES = Buffer.from("synthetic ROM bytes: the stub does not read them");
+
+async function open(page: Page, options: RomApiOptions): Promise<RomApi> {
+  await mockDaemon(page);
+  const api = await mockRomApi(page, options);
+  await page.addInitScript(() => localStorage.setItem("canary.controlToken", "ui-test"));
+  await page.goto("/#wb/tuning-rom-editor");
+  return api;
+}
+
+/** Click Open ROM… and answer the browser's own file chooser. */
+async function chooseFile(page: Page, name: string, buffer: Buffer = FILE_BYTES) {
+  const chooser = page.waitForEvent("filechooser");
+  await page.getByRole("button", { name: /^Open (another )?ROM…$/ }).click();
+  await (await chooser).setFiles({ name, mimeType: "application/octet-stream", buffer });
+}
+
+/** A cell of the editable grid (gridcells); the after table's are plain cells. */
+const cellAt = (grid: Locator, row: number, col: number) =>
+  grid.getByRole("gridcell", { name: new RegExp(`^Row ${row + 1}, column ${col + 1}:`) });
+const afterCell = (table: Locator, row: number, col: number) =>
+  table.getByRole("cell", { name: new RegExp(`^Row ${row + 1}, column ${col + 1}:`) });
+
+/** Open the tuned ROM, pick Fuel Compensation, scale cells (1,1)-(2,3) by 2 %
+ *  nearest and name the set. Returns the grid. */
+async function openAndEdit(page: Page, label: string) {
+  await chooseFile(page, TUNED_FILE);
+  await expect(page.getByLabel("Loaded ROM")).toBeVisible();
+  await page.getByRole("button", { name: "Fuel Compensation (Map 1)" }).click();
+  const grid = page.getByRole("grid", { name: "Fuel Compensation (Map 1) cells" });
+  await cellAt(grid, 1, 1).click();
+  await cellAt(grid, 2, 3).click({ modifiers: ["Shift"] });
+  const operation = page.getByRole("form", { name: "Operation" });
+  await operation.getByLabel("Operation").selectOption("scale");
+  await operation.getByLabel("Scale (%)").fill("2");
+  await operation.getByLabel("Rounding").selectOption("nearest");
+  await operation.getByRole("button", { name: "Apply to selection" }).click();
+  await page.getByLabel("Label for this edit set").fill(label);
+  return grid;
+}
+
+test("starts unloaded: one Open ROM… button, Recent ROMs newest first, nothing fetched or edited", async ({
+  page,
+}) => {
+  // The API answers oldest first; the page sorts by `added_at`.
+  const api = await open(page, { library: [ENTRY_K106, ENTRY_TUNED] });
+
+  await expect(page.getByRole("button", { name: "Open ROM…" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Recent ROMs" })).toBeVisible();
+  const rows = page.getByRole("table", { name: "Base images" }).getByRole("row");
+  await expect(rows).toHaveCount(3); // header + two images
+  await expect(rows.nth(1)).toContainText("Running tune");
+  await expect(rows.nth(2)).toContainText("k106.bin");
+
+  // Unloaded: no base, no editor, no table request, nothing in the URL.
+  await expect(page.getByLabel("Loaded ROM")).toHaveCount(0);
+  await expect(page.getByRole("grid")).toHaveCount(0);
+  await expect(page.getByRole("form", { name: "Operation" })).toHaveCount(0);
+  await expect(page.getByRole("form", { name: "Simulate form" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Preview" })).toHaveCount(0);
+  expect(new URL(page.url()).searchParams.has("rom")).toBe(false);
+  expect(api.calls.map((call) => `${call.method} ${call.path}`)).toEqual([
+    "GET /control/rom/library",
+  ]);
+  expect(api.unexpected).toEqual([]);
+});
+
+test("open a file, select one cell then a range, scale +2 %, preview, download the spec; no image is offered", async ({
+  page,
+}, testInfo) => {
+  const label = "light load 2 % richer";
+  const api = await open(page, {
+    library: [ENTRY_K106],
+    uploads: { [TUNED_FILE]: { ...ENTRY_TUNED, created: true } },
+  });
+
+  await chooseFile(page, TUNED_FILE);
+  // The file went up as the page sends it: raw bytes, its own name.
+  const upload = api.calls.find((call) => call.method === "POST");
+  expect(upload?.query).toBe(`?filename=${encodeURIComponent(TUNED_FILE)}`);
+  expect(upload?.contentType).toBe("application/octet-stream");
+  expect(upload?.body?.equals(FILE_BYTES)).toBe(true);
+  // One step: loaded, named by the file, with the sha, the revision and what it can do.
+  const loaded = page.getByLabel("Loaded ROM");
+  await expect(loaded).toContainText(TUNED_FILE);
+  await expect(loaded).toContainText(ENTRY_TUNED.sha256.slice(0, 12));
+  await expect(loaded.getByText("can simulate")).toBeVisible();
+  await expect(page).toHaveURL(new RegExp(`\\?rom=${ENTRY_TUNED.sha256}`));
+
+  await page.getByRole("button", { name: "Fuel Compensation (Map 1)" }).click();
+  const grid = page.getByRole("grid", { name: "Fuel Compensation (Map 1) cells" });
+  await expect(grid.getByRole("gridcell")).toHaveCount(256);
+
+  // One click selects exactly one cell, with the table partly below the fold.
+  const box = await grid.boundingBox();
+  expect(box!.y + box!.height).toBeGreaterThan(page.viewportSize()!.height);
+  await cellAt(grid, 1, 1).click();
+  await expect(grid.getByRole("gridcell", { selected: true })).toHaveCount(1);
+  await expect(cellAt(grid, 1, 1)).toHaveAttribute("aria-selected", "true");
+  await expect(page.getByRole("form", { name: "Operation" }).getByRole("status")).toHaveText(
+    "Selected: 1 cell (row 2, column 2).",
+  );
+
+  // Shift-click makes a rectangle: rows 2-3 x columns 2-4.
+  await cellAt(grid, 2, 3).click({ modifiers: ["Shift"] });
+  await expect(grid.getByRole("gridcell", { selected: true })).toHaveCount(6);
+  await expect(page.getByRole("form", { name: "Operation" }).getByRole("status")).toHaveText(
+    "Selected: 6 cells (row 2–3, column 2–4).",
+  );
+
+  const operation = page.getByRole("form", { name: "Operation" });
+  await operation.getByLabel("Operation").selectOption("scale");
+  await operation.getByLabel("Scale (%)").fill("2");
+  // No default rounding: applying without one is refused by name, and adds nothing.
+  await operation.getByRole("button", { name: "Apply to selection" }).click();
+  await expect(operation.getByRole("alert")).toContainText("Refused (rounding_undeclared)");
+  await expect(page.getByRole("list", { name: "Pending edits" })).toHaveCount(0);
+  await operation.getByLabel("Rounding").selectOption("nearest");
+  await operation.getByRole("button", { name: "Apply to selection" }).click();
+  const pending = page.getByRole("list", { name: "Pending edits" });
+  await expect(pending.getByRole("listitem")).toHaveCount(1);
+  await expect(pending).toContainText("Fuel Compensation");
+  await expect(pending).toContainText("6 cells");
+  await expect(grid.locator("[data-pending]")).toHaveCount(6);
+
+  // Preview needs a name for the set.
+  const previewButton = page.getByRole("button", { name: "Preview", exact: true });
+  await expect(previewButton).toBeDisabled();
+  await page.getByLabel("Label for this edit set").fill(label);
+  await previewButton.click();
+
+  // The request carries the exact cells, the scale and the rounding.
+  const [sent] = api.posted("/edits/preview") as RomEditPreviewRequest[];
+  expect(sent).toEqual({
+    label,
+    edits: [
+      {
+        table: "fuel_compensation",
+        slot: 1,
+        cells: [
+          [1, 1],
+          [1, 2],
+          [1, 3],
+          [2, 1],
+          [2, 2],
+          [2, 3],
+        ],
+        scale: 1.02,
+        rounding: "nearest",
+      },
+    ],
+  });
+
+  // After values: raw 122 x 1.02 = 124.44 -> 124 (decoded 96.88), +1.6 %, outlined.
+  const after = page.getByRole("table", { name: "Fuel Compensation (Map 1) after the edits" });
+  await expect(after).toBeVisible();
+  const changed = after.locator('[data-changed="true"]');
+  await expect(changed).toHaveCount(6);
+  const first = afterCell(after, 1, 1);
+  await expect(first).toHaveAttribute("data-changed", "true");
+  await expect(first).toHaveAttribute("aria-label", "Row 2, column 2: 96.88 (changed)");
+  await expect(first).toContainText("+1.6 %");
+  await expect(first).toHaveAttribute("title", "raw 124 (was 122)");
+  await expect(first).toHaveCSS("outline-style", "solid");
+  await expect(first).toHaveCSS("outline-width", "2px");
+  // A neighbour the edit did not touch is not outlined.
+  const untouched = afterCell(after, 0, 0);
+  await expect(untouched).not.toHaveAttribute("data-changed", "true");
+  await expect(untouched).toHaveCSS("outline-style", "none");
+  const cellList = page.getByRole("table", { name: "Changed cells list" });
+  await expect(cellList.getByRole("row")).toHaveCount(7); // header + six cells
+  await expect(cellList).toContainText("122 → 124");
+  await expect(page.getByRole("region", { name: "Reached outputs" })).toContainText(
+    "fuel_comp_lookup",
+  );
+  await page.screenshot({ path: testInfo.outputPath("rom-editor-preview.png"), fullPage: true });
+
+  // Download spec: a file named for the label, holding the spec the daemon returned.
+  const [download] = await Promise.all([
+    page.waitForEvent("download"),
+    page.getByRole("button", { name: "Download spec" }).click(),
+  ]);
+  expect(download.suggestedFilename()).toBe("light_load_2_richer.edit-spec.yaml");
+  const saved = await download.path();
+  expect(await readFile(saved, "utf8")).toBe(specYaml(label));
+
+  // No way to get an image out: no image or candidate link, and the spec is the only download.
+  await expect(page.getByRole("link", { name: /image|candidate|\.bin|osirisrom/i })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: /image|candidate/i })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: /download/i })).toHaveText("Download spec");
+  await expect(page.locator("a[download], a[href^='blob:']")).toHaveCount(0);
+  // Everything the page asked of the daemon: the list, the upload, the tables, the preview.
+  const asked = new Set(
+    api.calls.map((call) => `${call.method} ${call.path.replace(/[0-9a-f]{64}/, "<sha>")}`),
+  );
+  expect([...asked].sort()).toEqual([
+    "GET /control/rom/library",
+    "GET /control/rom/library/<sha>/tables",
+    "POST /control/rom/library",
+    "POST /control/rom/library/<sha>/edits/preview",
+  ]);
+  expect(api.unexpected).toEqual([]);
+});
+
+/** State every field of the Simulate form, as an operator would; `skip` leaves
+ *  the named labels alone. The values are `buildRequest()`'s. */
+async function stateForm(form: Locator, skip: string[] = []) {
+  const stated: Record<string, string> = {
+    "RPM edges (rpm)": "200, 600, 1000, 1400",
+    "Load edges (% fill)": "3.5, 10.7, 17.8, 25, 32.2",
+    "Baro (kPa)": "80",
+    "IAT (°C)": "25",
+    "Coolant (°C)": "88",
+    "Battery (V)": "14",
+    "Throttle (%)": "20",
+    "Pedal flag (0-255)": "0",
+    "STFT (%)": "0",
+    "LTFT (%)": "0",
+    "Throttle closed learned (counts)": "0",
+    "Idle air learned (counts)": "0",
+    "EVAP purge area (counts)": "0",
+    Draws: "200",
+    Seed: "20261015",
+  };
+  for (const [name, value] of Object.entries(stated)) {
+    if (!skip.includes(name)) await form.getByLabel(name, { exact: true }).fill(value);
+  }
+  await form.getByRole("radio", { name: /Fuel Comp axes/ }).check();
+  await form.getByLabel("Rail pressure", { exact: true }).selectOption("working_assumption");
+  await form.getByRole("radio", { name: /Fresh flash resets trims/ }).check();
+}
+
+test("simulate: a missing field blocks Run and is named; the result puts the caveats first, labels every status and downloads", async ({
+  page,
+}, testInfo) => {
+  const label = "light load 2 % richer";
+  const result = buildSimResult();
+  const api = await open(page, {
+    library: [],
+    uploads: { [TUNED_FILE]: { ...ENTRY_TUNED, created: true } },
+    simulate: result,
+  });
+  await openAndEdit(page, label);
+
+  const form = page.getByRole("form", { name: "Simulate form" });
+  const run = form.getByRole("button", { name: "Run simulation" });
+  // Nothing is defaulted: a fresh form cannot run, and says what it needs.
+  await expect(run).toBeDisabled();
+  await expect(form.getByRole("radio", { checked: true })).toHaveCount(0);
+  // The edges are suggested from the base's Fuel Comp breakpoints, shown with the grid size.
+  await expect(form.getByLabel("RPM edges (rpm)")).not.toHaveValue("");
+  await expect(form.getByLabel("Grid size")).toContainText("of at most");
+
+  // Everything but Baro: Run stays blocked and names exactly that field.
+  await stateForm(form, ["Baro (kPa)"]);
+  await expect(run).toBeDisabled();
+  const blocks = form.getByRole("status", { name: "What blocks Run" });
+  await expect(blocks).toHaveText("Run needs: Baro (kPa).");
+  await form.getByLabel("Baro (kPa)", { exact: true }).fill("80");
+  await expect(blocks).toHaveCount(0);
+  await expect(run).toBeEnabled();
+
+  await run.click();
+  const results = page.getByRole("region", { name: "Simulation result" });
+  await expect(results).toBeVisible();
+
+  // The request states all 21 fields, the cells and scale as selected.
+  const [sent] = api.posted("/simulate") as RomSimRequest[];
+  expect(sent).toEqual({
+    ...buildRequest(),
+    label,
+    edits: [
+      {
+        table: "fuel_compensation",
+        slot: 1,
+        cells: [
+          [1, 1],
+          [1, 2],
+          [1, 3],
+          [2, 1],
+          [2, 2],
+          [2, 3],
+        ],
+        scale: 1.02,
+        rounding: "nearest",
+      },
+    ],
+  });
+
+  // The caveat block is the first thing in the result, before any map, table or status cell.
+  const caveats = results.getByRole("region", { name: "Read this first" });
+  await expect(caveats).toContainText("The plant is not qualified.");
+  await expect(caveats).toContainText("structural_error_not_sampled");
+  await expect(caveats).toContainText("parameter_uncertainty_only");
+  const before = await caveats.evaluate((element) => {
+    const root = element.closest('[role="region"][aria-label="Simulation result"]');
+    return [...(root?.querySelectorAll("table, figure, [data-status]") ?? [])].filter(
+      (other) => element.compareDocumentPosition(other) & Node.DOCUMENT_POSITION_PRECEDING,
+    ).length;
+  });
+  expect(before).toBe(0);
+  // ...and there is a map after it for it to precede.
+  const firstMap = await caveats.evaluate((element) => {
+    const figure = element
+      .closest('[role="region"][aria-label="Simulation result"]')
+      ?.querySelector("figure");
+    return (
+      !!figure && !!(element.compareDocumentPosition(figure) & Node.DOCUMENT_POSITION_FOLLOWING)
+    );
+  });
+  expect(firstMap).toBe(true);
+
+  // Every status has its own label.
+  const map = results.getByRole("table", { name: /^Map: relative Δλ p50, open_loop pairs/ });
+  await expect(map).toBeVisible();
+  for (const status of STATUSES) {
+    expect(await map.locator(`[data-status="${status}"]`).count(), status).toBeGreaterThan(0);
+  }
+  await expect(map.getByText("-1.52", { exact: true })).toHaveCount(2); // changed
+  await expect(map.getByText("0", { exact: true })).toHaveCount(1); // unchanged
+  await expect(map.getByText("U", { exact: true })).toBeVisible(); // unsupported
+  await expect(map.getByText("P+0.40", { exact: true })).toBeVisible(); // partly supported
+  await expect(map.getByText("–", { exact: true })).toHaveCount(2); // no points
+  await expect(map.getByText("NR", { exact: true })).toBeVisible(); // not reached
+  await expect(map.getByText("CL", { exact: true }).first()).toBeVisible(); // other loop
+  await expect(map.getByText("∅", { exact: true })).toBeVisible(); // relative change undefined
+  await page.screenshot({ path: testInfo.outputPath("rom-editor-result.png"), fullPage: true });
+
+  // Download result JSON: the response, as a file named for the run.
+  const [download] = await Promise.all([
+    page.waitForEvent("download"),
+    results.getByRole("button", { name: "Download result JSON" }).click(),
+  ]);
+  expect(download.suggestedFilename()).toBe("light_load_2_richer.sim-result.json");
+  expect(JSON.parse(await readFile(await download.path(), "utf8"))).toEqual(result);
+  await expect(page.getByRole("link", { name: /image|candidate|\.bin|osirisrom/i })).toHaveCount(0);
+  expect(api.unexpected).toEqual([]);
+});
+
+test("an unrecorded base is preview only: Simulate is off and gives the reason", async ({
+  page,
+}) => {
+  const api = await open(page, {
+    library: [ENTRY_TUNED],
+    uploads: { "tuner-base.bin": { ...ENTRY_UNRECORDED, created: true } },
+  });
+  await chooseFile(page, "tuner-base.bin");
+  const loaded = page.getByLabel("Loaded ROM");
+  await expect(loaded).toContainText("tuner-base.bin");
+  await expect(loaded.getByText("preview only")).toBeVisible();
+  await expect(loaded.getByText("can simulate")).toHaveCount(0);
+
+  const form = page.getByRole("form", { name: "Simulate form" });
+  await expect(form.getByRole("note")).toContainText(
+    "Simulate is unavailable: base_not_a_recorded_revision.",
+  );
+  await expect(form.getByRole("button", { name: "Run simulation" })).toBeDisabled();
+  await expect(form.getByLabel("Baro (kPa)", { exact: true })).toBeDisabled();
+
+  // It still previews: preview-only is not unusable, and the reason survives it.
+  await page.getByRole("button", { name: "Fuel Compensation (Map 1)" }).click();
+  const grid = page.getByRole("grid", { name: "Fuel Compensation (Map 1) cells" });
+  await cellAt(grid, 0, 0).click();
+  const operation = page.getByRole("form", { name: "Operation" });
+  await operation.getByLabel("Operation").selectOption("scale");
+  await operation.getByLabel("Scale (%)").fill("2");
+  await operation.getByLabel("Rounding").selectOption("nearest");
+  await operation.getByRole("button", { name: "Apply to selection" }).click();
+  await page.getByLabel("Label for this edit set").fill("tuner base probe");
+  await page.getByRole("button", { name: "Preview", exact: true }).click();
+  await expect(page.getByRole("button", { name: "Download spec" })).toBeVisible();
+  await expect(form.getByRole("note")).toContainText("base_not_a_recorded_revision");
+  await expect(form.getByRole("button", { name: "Run simulation" })).toBeDisabled();
+  expect(api.posted("/simulate")).toEqual([]);
+  expect(api.unexpected).toEqual([]);
+});
+
+test("UpRev's encrypted backup is refused by name and nothing is loaded", async ({ page }) => {
+  const detail =
+    "UpRev encrypted backup (1,048,592 bytes, starts 32bec582): it cannot be decoded. Upload the .OsirisROM or a plain 1 MiB image instead.";
+  const api = await open(page, {
+    library: [ENTRY_TUNED],
+    uploads: { "Xterra-backup.bin": { status: 422, body: { detail } } },
+  });
+  await chooseFile(page, "Xterra-backup.bin");
+
+  await expect(page.getByText(`Xterra-backup.bin: ${detail}`, { exact: true })).toBeVisible();
+  await expect(page.getByLabel("Loaded ROM")).toHaveCount(0);
+  await expect(page.getByRole("grid")).toHaveCount(0);
+  await expect(page.getByRole("form", { name: "Operation" })).toHaveCount(0);
+  expect(new URL(page.url()).searchParams.has("rom")).toBe(false);
+  // The page is still the unloaded one: the primary button, and the stored image to fall back on.
+  await expect(page.getByRole("button", { name: "Open ROM…" })).toBeEnabled();
+  await expect(page.getByRole("table", { name: "Base images" })).toContainText("Running tune");
+  expect(api.calls.filter((call) => call.path.endsWith("/tables"))).toEqual([]);
+  expect(api.unexpected).toEqual([]);
+});

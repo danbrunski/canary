@@ -622,6 +622,34 @@ W09.6 is the orchestrator's own, on the ROM machine.
     light-load Fuel Comp region +2 %, preview, download the spec, simulate,
     and screenshot the result. `pnpm e2e` gets `romEditor.spec.ts` with the
     API mocked (as `romMaps.spec.ts`).
+    - *Mocked e2e done 2026-10-15 (the real-image walkthrough above stays
+      open):* `e2e/romEditor.spec.ts` + `e2e/fixtures/romEditorApi.ts`, desktop
+      chromium only, 1280x600 so the 16 x 16 table is partly below the fold
+      (asserted). 5 tests, 5 passed in ~25 s (20/20 on `--repeat-each=4`);
+      `romMaps.spec.ts` and `emptyDaemon.spec.ts` still green. Covers: starts
+      unloaded (one Open ROM… button, Recent ROMs newest first although the
+      API answers oldest first, no grid/form/table request/`?rom=`); open a
+      file through the real file chooser (upload POST body, name, octet-stream;
+      header shows the file name, sha prefix, `can simulate`, `?rom=` written);
+      Fuel Compensation, ONE click selects exactly one cell (regression for the
+      click bug), shift-click makes a 6-cell range, a scale without rounding is
+      refused `rounding_undeclared`, scale +2 % nearest, Preview sends the exact
+      cells/scale/rounding, the after table outlines the six changed cells with
+      `+1.6 %`, Download spec is `<label>.edit-spec.yaml` holding the mocked
+      `spec_yaml`, and no image/candidate link or button exists (only
+      "Download spec", no blob anchors, no request beyond list/upload/tables/
+      preview); Simulate form (nothing defaulted, Baro empty blocks Run and is
+      named by "What blocks Run", the request carries all 21 fields), Run with
+      the mocked result (caveat block before any table/figure/status cell, all
+      six statuses plus `CL`/`∅` labels, Download result JSON equals the mocked
+      response); an unrecorded base shows `preview only`, Simulate disabled
+      with `base_not_a_recorded_revision` (also after a preview); UpRev's
+      encrypted backup refused by its server text with nothing loaded. The
+      mocks reuse the vitest fixtures (`src/test/romLibraryFixtures.ts`,
+      `romSimFixtures.ts`) by import, so there is one copy; the sim result's
+      `cells` validates against `sim_cells.CellTable` (rechecked 2026-10-15).
+      Not covered: phone project, drag-select, keyboard selection (vitest has
+      them), a real daemon, real images.
   - Tick E08.8 in the E08 doc with a pointer here.
 
 - [ ] **W09.7 — Later, named so they are not implied:** persisted runs under
