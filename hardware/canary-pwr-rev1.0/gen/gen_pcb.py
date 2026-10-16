@@ -20,6 +20,7 @@ MM = pcbnew.FromMM
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 sys.path.insert(1, os.path.join(HERE, "..", "..", "tools"))
+import copper  # noqa: E402
 import design  # noqa: E402
 import gen_sch  # noqa: E402
 import placement  # noqa: E402
@@ -37,7 +38,8 @@ tb.SetRevision("1.0")
 tb.SetDate("2026-10-13")
 tb.SetCompany("CANary")
 tb.SetComment(
-    0, "Functional placement 2026-10-15, unrouted. Design record: docs/CANary-PWR-Spec.md"
+    0,
+    "Power copper laid by hand 2026-10-15; signals not yet routed. Design record: docs/CANary-PWR-Spec.md",
 )
 tb.SetComment(
     1,
@@ -417,25 +419,83 @@ print(f"silk references: {silk_refs.place_refs(b)}")
 BOARD = [(X0, Y0), (X1, Y0), (X1, Y1), (X0, Y1)]
 
 
-def zone(layer, net, pts, prio=0):
+def zone(layer, net, outlines, prio=0, connect=None):
     z = pcbnew.ZONE(b)
     z.SetLayer(layer)
     o = z.Outline()
-    o.NewOutline()
-    for px, py in pts:
-        o.Append(MM(px), MM(py))
+    for pts in outlines:
+        o.NewOutline()
+        for px, py in pts:
+            o.Append(MM(px), MM(py))
     z.SetNet(nets[net])
     z.SetLocalClearance(MM(0.3))
     z.SetMinThickness(MM(0.2))
     z.SetAssignedPriority(prio)
+    if connect is not None:
+        z.SetPadConnection(connect)
     b.Add(z)
+
+
+def union(rects):
+    """Outlines of a union of rectangles, for one zone."""
+    sps = pcbnew.SHAPE_POLY_SET()
+    for x0, y0, x1, y1 in rects:
+        r = pcbnew.SHAPE_POLY_SET()
+        r.NewOutline()
+        for px, py in ((x0, y0), (x1, y0), (x1, y1), (x0, y1)):
+            r.Append(MM(px), MM(py))
+        sps.BooleanAdd(r)
+    sps.Simplify()
+    out = []
+    for i in range(sps.OutlineCount()):
+        ch = sps.Outline(i)
+        out.append(
+            [
+                (pcbnew.ToMM(ch.CPoint(j).x), pcbnew.ToMM(ch.CPoint(j).y))
+                for j in range(ch.PointCount())
+            ]
+        )
+    return out
 
 
 # Every layer is GND; In2 also carries the +12V_BUS island (placement.py), which wins where they overlap.
 # In1 sits 0.1 mm under the top power stage, In2 0.1 mm over the bottom-side supervisor (spec P2, Layers).
-for layer in (pcbnew.F_Cu, pcbnew.In1_Cu, pcbnew.In2_Cu, pcbnew.B_Cu):
-    zone(layer, "GND", BOARD)
-zone(pcbnew.In2_Cu, "+12V_BUS", placement.IN2_ZONE, prio=1)
+# The outer GND pours join SMD pads solidly (thermal spokes starved on the dense rows) and TH pins by spokes.
+for layer in (pcbnew.F_Cu, pcbnew.B_Cu):
+    zone(layer, "GND", [BOARD], connect=pcbnew.ZONE_CONNECTION_THT_THERMAL)
+for layer in (pcbnew.In1_Cu, pcbnew.In2_Cu):
+    zone(layer, "GND", [BOARD])
+zone(pcbnew.In2_Cu, "+12V_BUS", [placement.IN2_ZONE], prio=1)
+
+# ---------------------------------------------------------------- power copper (copper.py)
+# Pours above the GND pours, joined solidly to their pads; In2 islands; Kelvin pairs and stitching vias, locked
+# so the autorouter keeps them.
+NET = gen_sch.kicad_net_names(design.PARTS)
+SIDE = {"F": pcbnew.F_Cu, "B": pcbnew.B_Cu}
+for name, side, rects in copper.POURS:
+    for outline in union(rects):  # one zone per outline: a zone's extra outlines did not survive
+        zone(SIDE[side], NET[name], [outline], prio=2, connect=pcbnew.ZONE_CONNECTION_FULL)
+zone(pcbnew.In2_Cu, NET["+5V_PI"], [copper.IN2_PI_5V], prio=1, connect=pcbnew.ZONE_CONNECTION_FULL)
+for name, side, width, pts in copper.TRACKS:
+    for (xa, ya), (xb, yb) in zip(pts, pts[1:], strict=False):
+        t = pcbnew.PCB_TRACK(b)
+        t.SetStart(V(xa, ya))
+        t.SetEnd(V(xb, yb))
+        t.SetWidth(MM(width))
+        t.SetLayer(SIDE[side])
+        t.SetNet(nets[NET[name]])
+        t.SetLocked(True)
+        b.Add(t)
+for name, x, y, (dia, drill) in copper.VIAS:
+    v = pcbnew.PCB_VIA(b)
+    b.Add(v)
+    v.SetViaType(pcbnew.VIATYPE_THROUGH)
+    v.SetLayerPair(pcbnew.F_Cu, pcbnew.B_Cu)
+    v.SetPosition(V(x, y))
+    v.SetWidth(MM(dia))
+    v.SetDrill(MM(drill))
+    v.SetNet(nets[NET[name]])
+    v.SetLocked(True)
 pcbnew.ZONE_FILLER(b).Fill(b.Zones())
 
 FINE = (

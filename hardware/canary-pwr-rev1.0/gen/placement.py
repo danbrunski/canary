@@ -43,7 +43,7 @@ PLACEMENT: dict[str, tuple[float, float, int, str]] = {
     "R22": (143.2, 55.3, 90, "F"),
     "R24": (141.6, 59.3, 90, "F"),
     "C25": (143.2, 59.3, 90, "F"),
-    "R25": (144.8, 55.3, 90, "F"),
+    "R25": (144.8, 55.3, -90, "F"),  # bus end up, into the bus band
     "R26": (146.4, 55.3, 90, "F"),
     "Q6": (146.0, 59.6, 0, "F"),
     "R27": (146.0, 62.6, 0, "F"),
@@ -55,29 +55,32 @@ PLACEMENT: dict[str, tuple[float, float, int, str]] = {
     "R10": (126.2, 67.2, 90, "F"),
     "R5": (124.6, 67.2, 90, "F"),
     "R6": (123.0, 67.2, 90, "F"),
-    "C12": (129.4, 63.9, 90, "F"),
+    "C12": (129.4, 63.9, -90, "F"),  # bus ends up (top trace), OUTFB ends toward U1
     "R7": (127.8, 63.9, 90, "F"),
-    "R9": (126.2, 63.9, 90, "F"),
+    "R9": (126.2, 63.9, -90, "F"),
     "R13": (124.6, 63.9, 90, "F"),
     "C13": (123.0, 63.9, 90, "F"),
     "C6": (122.9, 72.9, 90, "F"),
     "C7": (121.3, 72.9, 90, "F"),
-    "C8": (133.2, 70.4, 90, "F"),
-    "C5": (133.2, 73.6, 90, "F"),
-    "C4": (134.8, 72.0, 90, "F"),
-    "C14": (127.9, 76.25, 180, "F"),
-    "C10": (131.0, 76.25, 0, "F"),
+    # U1's right column (PFO, PFI, VCC2P5 x2, VIN, INFET, VOUTM5 from the top) leaves in lanes: PFO and PFI turn up,
+    # C8 and C4 sit above the VIN and INFET lanes, C5 below them
+    "C8": (133.05, 70.85, 90, "F"),
+    "C5": (133.8, 74.05, 0, "F"),
+    "C4": (134.65, 70.6, 90, "F"),
+    # 0.7 mm below U1's bottom row: room for the TG and BG gate vias and the RSNSI Kelvin vias
+    "C14": (127.9, 76.95, 180, "F"),
+    "C10": (131.0, 76.95, 0, "F"),
     "D4": (135.0, 76.4, 0, "F"),
     "R12": (134.0, 67.7, 0, "F"),
     "R11": (137.6, 67.7, 0, "F"),
     "Q2": (137.65, 71.5, 0, "F"),
     "R14": (141.85, 74.5, -90, "F"),
-    "C2": (138.45, 76.6, 90, "F"),
+    "C2": (138.6, 75.3, 90, "F"),  # clear of the bus band that joins RSNSI to the charger
     # Charger stage, top: Q3/Q4 stacked with the SW node toward L1 and C21/C20 bridging VBUS-GND; R15, Q5 and the VCAP caps at the cap-bank pins
-    "Q3": (128.44, 79.0, 0, "F"),
-    "Q4": (128.44, 83.1, 180, "F"),
-    "C21": (131.25, 81.0, -90, "F"),
-    "C20": (133.85, 81.0, -90, "F"),
+    "Q3": (128.44, 79.7, 0, "F"),
+    "Q4": (128.44, 83.8, 180, "F"),
+    "C21": (131.25, 81.7, -90, "F"),
+    "C20": (133.85, 81.7, -90, "F"),
     "L1": (121.9, 80.3, 180, "F"),
     "Q5": (115.75, 80.0, 90, "F"),
     "R15": (118.4, 86.8, 180, "F"),
@@ -122,11 +125,11 @@ PLACEMENT: dict[str, tuple[float, float, int, str]] = {
     "C39": (134.3, 68.2, 0, "B"),
     "C40": (134.3, 58.9, 0, "B"),
     "C37": (120.2, 68.3, 90, "B"),
-    "D5": (133.0, 71.0, 90, "B"),
-    "D6": (135.3, 71.0, 90, "B"),
+    "D5": (135.3, 71.0, -90, "B"),  # AON_IN ends up toward C39; supply ends down
+    "D6": (133.0, 71.0, -90, "B"),
     "R30": (128.4, 70.4, 90, "B"),
     "R31": (130.0, 70.4, 90, "B"),
-    "C9": (130.1, 76.4, 0, "B"),  # LTC3350 INTVCC bulk, under C10
+    "C9": (131.1, 76.7, 0, "B"),  # LTC3350 INTVCC bulk, under C10, clear of the gate vias
     # Bottom: CAN wake transceiver between the HAT-out and Vehicle-in CAN pins; HAT-out polyfuse
     "U7": (141.0, 84.6, -90, "B"),
     "C41": (146.5, 86.2, 90, "B"),
