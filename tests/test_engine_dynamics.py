@@ -462,7 +462,13 @@ def test_the_fuel_plants_own_map_is_a_declared_exception(kit: Any) -> None:
     # fuel-mv-1, the version the contract runs, also computes an unstated MAP
     # in the paired comparison (E08.3: a design point at the plant's manifold model).
     assert owed.modes == ["plant_replay", "conditional_rom_comparison"]
-    assert reconciled.modes == ["plant_replay"]
+    # fuel-mv-2 is the ROM-edit simulator's plant (E08.11), which the paired
+    # comparison admits beside fuel-mv-1: it computes the unstated MAP there too.
+    assert reconciled.modes == ["plant_replay", "conditional_rom_comparison"]
+    assert contract.admitted_plant_versions(contract.mode("conditional_rom_comparison")) == [
+        "fuel-mv-1",
+        "fuel-mv-2",
+    ]
     assert "caps MAP at baro" in owed.differs and owed.owed_by and "plant_version" in owed.owed_by
     assert owed.reconciled_by is None and owed.invariants == []
     assert reconciled.owed_by is None and reconciled.reconciled_by
@@ -527,6 +533,12 @@ def test_a_reconciliation_is_held_by_the_plant_not_stated(kit: Any) -> None:
         SimContract.model_validate(raw)
     raw = _raw()
     del _sub(raw, "fuel_delivery")["internal_models"][1]
+    # The paired comparison admits fuel-mv-2 (E08.11) and leaves MAP unstated,
+    # so its MAP model cannot go missing while the mode admits it.
+    with pytest.raises(ValidationError, match="no internal model of it is declared for "):
+        SimContract.model_validate(raw)
+    rom_mode = next(m for m in raw["modes"] if m["id"] == "conditional_rom_comparison")
+    rom_mode["plant_versions"] = ["fuel-mv-1"]
     assert check_internal_models(SimContract.model_validate(raw)) == [
         "fuel_delivery: fuel-mv-2 has 0 internal-model entries for manifold_pressure (exactly one)"
     ]

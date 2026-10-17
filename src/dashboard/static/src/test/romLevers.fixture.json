@@ -1,0 +1,695 @@
+{
+  "fuel_comp": {
+    "schema_version": 1,
+    "tool": "rom_levers",
+    "tool_version": "1",
+    "outcome": "unevaluable",
+    "reason": null,
+    "regime": null,
+    "levers": [
+      {
+        "lever": "fuel_compensation",
+        "label": "Fuel Comp",
+        "tables": ["fuel_compensation"],
+        "slots": [1],
+        "byte_class": "consumed",
+        "start": 919187,
+        "end": 919239,
+        "changed_bytes": 20,
+        "changed_cells": 20,
+        "nodes": ["fuel_comp_lookup"],
+        "blockers": []
+      }
+    ],
+    "outputs": [
+      {
+        "output": "target_equiv_ratio",
+        "source": "application_model",
+        "status": "changed",
+        "levers": ["Fuel Comp"],
+        "blockers": [],
+        "assumes_conditioned": ["fuel_comp_load_byte"],
+        "refused_if_conditioned": ["target_phi_word"],
+        "reached": true,
+        "number": true,
+        "design_dependent": true
+      },
+      {
+        "output": "ignition_timing",
+        "source": "application_model",
+        "status": "unevaluable",
+        "levers": ["Fuel Comp"],
+        "blockers": [
+          {
+            "code": "observed_not_predicted",
+            "text": "observed, not predicted: load_input_x",
+            "node": "load_input_x",
+            "detail": null
+          },
+          {
+            "code": "unmodelled",
+            "text": "unmodelled: manifold_fill_filter",
+            "node": "manifold_fill_filter",
+            "detail": null
+          },
+          {
+            "code": "unmodelled",
+            "text": "unmodelled: near_wot_flag",
+            "node": "near_wot_flag",
+            "detail": null
+          },
+          {
+            "code": "unmodelled",
+            "text": "unmodelled: fill_transient",
+            "node": "fill_transient",
+            "detail": null
+          },
+          {
+            "code": "unmodelled",
+            "text": "unmodelled: fill_blend",
+            "node": "fill_blend",
+            "detail": null
+          },
+          {
+            "code": "unmodelled",
+            "text": "unmodelled: knock_trim_difference",
+            "node": "knock_trim_difference",
+            "detail": null
+          },
+          {
+            "code": "unmodelled",
+            "text": "unmodelled: timing_trim_terms",
+            "node": "timing_trim_terms",
+            "detail": null
+          },
+          {
+            "code": "unmodelled",
+            "text": "unmodelled: base_timing_sum",
+            "node": "base_timing_sum",
+            "detail": null
+          },
+          {
+            "code": "unmodelled",
+            "text": "unmodelled: base_timing_select",
+            "node": "base_timing_select",
+            "detail": null
+          },
+          {
+            "code": "unmodelled",
+            "text": "unmodelled: timing_cycle_copy",
+            "node": "timing_cycle_copy",
+            "detail": null
+          },
+          {
+            "code": "unmodelled",
+            "text": "unmodelled: timing_retard_combine",
+            "node": "timing_retard_combine",
+            "detail": null
+          },
+          {
+            "code": "unmodelled",
+            "text": "unmodelled: timing_rate_limit",
+            "node": "timing_rate_limit",
+            "detail": null
+          },
+          {
+            "code": "unmodelled",
+            "text": "unmodelled: timing_final_byte",
+            "node": "timing_final_byte",
+            "detail": null
+          },
+          {
+            "code": "no_torque_plant",
+            "text": "no torque plant",
+            "node": "timing_final_byte",
+            "detail": "no simulation-contract quantity carries this output and the torque subsystem is unbuilt (E07.5)"
+          }
+        ],
+        "assumes_conditioned": [],
+        "refused_if_conditioned": [],
+        "reached": true,
+        "number": false,
+        "design_dependent": false
+      },
+      {
+        "output": "ignition_trim_selected",
+        "source": "application_model",
+        "status": "unevaluable",
+        "levers": ["Fuel Comp"],
+        "blockers": [
+          {
+            "code": "observed_not_predicted",
+            "text": "observed, not predicted: load_input_x",
+            "node": "load_input_x",
+            "detail": null
+          },
+          {
+            "code": "unmodelled",
+            "text": "unmodelled: manifold_fill_filter",
+            "node": "manifold_fill_filter",
+            "detail": null
+          },
+          {
+            "code": "unmodelled",
+            "text": "unmodelled: near_wot_flag",
+            "node": "near_wot_flag",
+            "detail": null
+          },
+          {
+            "code": "unmodelled",
+            "text": "unmodelled: fill_transient",
+            "node": "fill_transient",
+            "detail": null
+          },
+          {
+            "code": "unmodelled",
+            "text": "unmodelled: fill_blend",
+            "node": "fill_blend",
+            "detail": null
+          },
+          {
+            "code": "no_torque_plant",
+            "text": "no torque plant",
+            "node": "timing_trim_lookup",
+            "detail": "no simulation-contract quantity carries this output and the torque subsystem is unbuilt (E07.5)"
+          }
+        ],
+        "assumes_conditioned": [],
+        "refused_if_conditioned": [],
+        "reached": true,
+        "number": false,
+        "design_dependent": false
+      },
+      {
+        "output": "base_fuel_schedule_word",
+        "source": "application_model",
+        "status": "changed",
+        "levers": ["Fuel Comp"],
+        "blockers": [],
+        "assumes_conditioned": ["fuel_comp_load_byte"],
+        "refused_if_conditioned": [],
+        "reached": true,
+        "number": true,
+        "design_dependent": true
+      },
+      {
+        "output": "injector_pulse_ms",
+        "source": "simulated",
+        "status": "reached",
+        "levers": ["Fuel Comp"],
+        "blockers": [
+          {
+            "code": "plant_not_qualified",
+            "text": "plant not qualified: baseline na-stock-2026-10-08.mv2 has no held-out recording (held_out_pending)",
+            "node": null,
+            "detail": "plant fuel-mv-2"
+          },
+          {
+            "code": "closed_loop_trim_authority_undecoded",
+            "text": "closed loop: trim authority undecoded",
+            "node": null,
+            "detail": "closed-loop overrides not qualified on the vehicle: closed_loop_phi_one, closed_loop_curve_term, closed_loop_feedback_stft"
+          }
+        ],
+        "assumes_conditioned": [],
+        "refused_if_conditioned": [],
+        "reached": true,
+        "number": false,
+        "design_dependent": false
+      },
+      {
+        "output": "fuel_trim_total_pct",
+        "source": "simulated",
+        "status": "reached",
+        "levers": ["Fuel Comp"],
+        "blockers": [
+          {
+            "code": "plant_not_qualified",
+            "text": "plant not qualified: baseline na-stock-2026-10-08.mv2 has no held-out recording (held_out_pending)",
+            "node": null,
+            "detail": "plant fuel-mv-2"
+          },
+          {
+            "code": "closed_loop_trim_authority_undecoded",
+            "text": "closed loop: trim authority undecoded",
+            "node": null,
+            "detail": "closed-loop overrides not qualified on the vehicle: closed_loop_phi_one, closed_loop_curve_term, closed_loop_feedback_stft"
+          }
+        ],
+        "assumes_conditioned": [],
+        "refused_if_conditioned": [],
+        "reached": true,
+        "number": false,
+        "design_dependent": false
+      },
+      {
+        "output": "delivered_lambda",
+        "source": "simulated",
+        "status": "reached",
+        "levers": ["Fuel Comp"],
+        "blockers": [
+          {
+            "code": "plant_not_qualified",
+            "text": "plant not qualified: baseline na-stock-2026-10-08.mv2 has no held-out recording (held_out_pending)",
+            "node": null,
+            "detail": "plant fuel-mv-2"
+          },
+          {
+            "code": "closed_loop_trim_authority_undecoded",
+            "text": "closed loop: trim authority undecoded",
+            "node": null,
+            "detail": "closed-loop overrides not qualified on the vehicle: closed_loop_phi_one, closed_loop_curve_term, closed_loop_feedback_stft"
+          }
+        ],
+        "assumes_conditioned": [],
+        "refused_if_conditioned": [],
+        "reached": true,
+        "number": false,
+        "design_dependent": false
+      },
+      {
+        "output": "fuel_per_event_g",
+        "source": "simulated",
+        "status": "reached",
+        "levers": ["Fuel Comp"],
+        "blockers": [
+          {
+            "code": "plant_not_qualified",
+            "text": "plant not qualified: baseline na-stock-2026-10-08.mv2 has no held-out recording (held_out_pending)",
+            "node": null,
+            "detail": "plant fuel-mv-2"
+          },
+          {
+            "code": "closed_loop_trim_authority_undecoded",
+            "text": "closed loop: trim authority undecoded",
+            "node": null,
+            "detail": "closed-loop overrides not qualified on the vehicle: closed_loop_phi_one, closed_loop_curve_term, closed_loop_feedback_stft"
+          }
+        ],
+        "assumes_conditioned": [],
+        "refused_if_conditioned": [],
+        "reached": true,
+        "number": false,
+        "design_dependent": false
+      }
+    ],
+    "messages": [
+      "Fuel Comp -> target_equiv_ratio: a number can be given (for points that state only the fill byte)",
+      "Fuel Comp -> ignition_timing: observed, not predicted: load_input_x; unmodelled: manifold_fill_filter, near_wot_flag, fill_transient, fill_blend, knock_trim_difference, timing_trim_terms, base_timing_sum, base_timing_select, timing_cycle_copy, timing_retard_combine, timing_rate_limit, timing_final_byte; no torque plant",
+      "Fuel Comp -> ignition_trim_selected: observed, not predicted: load_input_x; unmodelled: manifold_fill_filter, near_wot_flag, fill_transient, fill_blend; no torque plant",
+      "Fuel Comp -> base_fuel_schedule_word: a number can be given (for points that state only the fill byte)",
+      "Fuel Comp -> injector_pulse_ms: plant not qualified: baseline na-stock-2026-10-08.mv2 has no held-out recording (held_out_pending); closed loop: trim authority undecoded",
+      "Fuel Comp -> fuel_trim_total_pct: plant not qualified: baseline na-stock-2026-10-08.mv2 has no held-out recording (held_out_pending); closed loop: trim authority undecoded",
+      "Fuel Comp -> delivered_lambda: plant not qualified: baseline na-stock-2026-10-08.mv2 has no held-out recording (held_out_pending); closed loop: trim authority undecoded",
+      "Fuel Comp -> fuel_per_event_g: plant not qualified: baseline na-stock-2026-10-08.mv2 has no held-out recording (held_out_pending); closed loop: trim authority undecoded"
+    ]
+  },
+  "timing_trim": {
+    "levers": [
+      {
+        "blockers": [],
+        "byte_class": "consumed",
+        "changed_bytes": 1,
+        "changed_cells": 1,
+        "end": 917536,
+        "label": "Timing trim A",
+        "lever": "timing_trim_a",
+        "nodes": ["timing_trim_lookup"],
+        "slots": [1],
+        "start": 917536,
+        "tables": ["timing_trim_a"]
+      }
+    ],
+    "messages": [
+      "Timing trim A -> ignition_timing: unmodelled: timing_trim_terms, base_timing_sum, base_timing_select, timing_cycle_copy, timing_retard_combine, timing_rate_limit, timing_final_byte; no torque plant",
+      "Timing trim A -> ignition_trim_selected: no torque plant"
+    ],
+    "outcome": "partial",
+    "outputs": [
+      {
+        "assumes_conditioned": [],
+        "blockers": [],
+        "design_dependent": false,
+        "levers": [],
+        "number": false,
+        "output": "target_equiv_ratio",
+        "reached": false,
+        "refused_if_conditioned": [],
+        "source": "application_model",
+        "status": "unchanged"
+      },
+      {
+        "assumes_conditioned": [],
+        "blockers": [
+          {
+            "code": "unmodelled",
+            "detail": null,
+            "node": "timing_trim_terms",
+            "text": "unmodelled: timing_trim_terms"
+          },
+          {
+            "code": "unmodelled",
+            "detail": null,
+            "node": "base_timing_sum",
+            "text": "unmodelled: base_timing_sum"
+          },
+          {
+            "code": "unmodelled",
+            "detail": null,
+            "node": "base_timing_select",
+            "text": "unmodelled: base_timing_select"
+          },
+          {
+            "code": "unmodelled",
+            "detail": null,
+            "node": "timing_cycle_copy",
+            "text": "unmodelled: timing_cycle_copy"
+          },
+          {
+            "code": "unmodelled",
+            "detail": null,
+            "node": "timing_retard_combine",
+            "text": "unmodelled: timing_retard_combine"
+          },
+          {
+            "code": "unmodelled",
+            "detail": null,
+            "node": "timing_rate_limit",
+            "text": "unmodelled: timing_rate_limit"
+          },
+          {
+            "code": "unmodelled",
+            "detail": null,
+            "node": "timing_final_byte",
+            "text": "unmodelled: timing_final_byte"
+          },
+          {
+            "code": "no_torque_plant",
+            "detail": "no simulation-contract quantity carries this output and the torque subsystem is unbuilt (E07.5)",
+            "node": "timing_final_byte",
+            "text": "no torque plant"
+          }
+        ],
+        "design_dependent": false,
+        "levers": ["Timing trim A"],
+        "number": false,
+        "output": "ignition_timing",
+        "reached": true,
+        "refused_if_conditioned": [],
+        "source": "application_model",
+        "status": "unevaluable"
+      },
+      {
+        "assumes_conditioned": [],
+        "blockers": [
+          {
+            "code": "no_torque_plant",
+            "detail": "no simulation-contract quantity carries this output and the torque subsystem is unbuilt (E07.5)",
+            "node": "timing_trim_lookup",
+            "text": "no torque plant"
+          }
+        ],
+        "design_dependent": false,
+        "levers": ["Timing trim A"],
+        "number": false,
+        "output": "ignition_trim_selected",
+        "reached": true,
+        "refused_if_conditioned": [],
+        "source": "application_model",
+        "status": "changed"
+      },
+      {
+        "assumes_conditioned": [],
+        "blockers": [],
+        "design_dependent": false,
+        "levers": [],
+        "number": false,
+        "output": "base_fuel_schedule_word",
+        "reached": false,
+        "refused_if_conditioned": [],
+        "source": "application_model",
+        "status": "unchanged"
+      },
+      {
+        "assumes_conditioned": [],
+        "blockers": [],
+        "design_dependent": false,
+        "levers": [],
+        "number": false,
+        "output": "injector_pulse_ms",
+        "reached": false,
+        "refused_if_conditioned": [],
+        "source": "simulated",
+        "status": "unchanged"
+      },
+      {
+        "assumes_conditioned": [],
+        "blockers": [],
+        "design_dependent": false,
+        "levers": [],
+        "number": false,
+        "output": "fuel_trim_total_pct",
+        "reached": false,
+        "refused_if_conditioned": [],
+        "source": "simulated",
+        "status": "unchanged"
+      },
+      {
+        "assumes_conditioned": [],
+        "blockers": [],
+        "design_dependent": false,
+        "levers": [],
+        "number": false,
+        "output": "delivered_lambda",
+        "reached": false,
+        "refused_if_conditioned": [],
+        "source": "simulated",
+        "status": "unchanged"
+      },
+      {
+        "assumes_conditioned": [],
+        "blockers": [],
+        "design_dependent": false,
+        "levers": [],
+        "number": false,
+        "output": "fuel_per_event_g",
+        "reached": false,
+        "refused_if_conditioned": [],
+        "source": "simulated",
+        "status": "unchanged"
+      }
+    ],
+    "reason": null,
+    "regime": null,
+    "schema_version": 1,
+    "tool": "rom_levers",
+    "tool_version": "1"
+  },
+  "maf_curve": {
+    "levers": [
+      {
+        "blockers": [
+          {
+            "code": "not_mapped",
+            "detail": "bytes 0xE27E are outside rom_map.yaml: no node reads them",
+            "node": null,
+            "text": "not mapped"
+          }
+        ],
+        "byte_class": "unknown",
+        "changed_bytes": 1,
+        "changed_cells": null,
+        "end": 57982,
+        "label": "unmapped bytes in Calibration",
+        "lever": "unmapped",
+        "nodes": [],
+        "slots": [],
+        "start": 57982,
+        "tables": []
+      }
+    ],
+    "messages": [
+      "unmapped bytes in Calibration 0xE27E: not mapped (outside rom_map.yaml)",
+      "unmapped bytes in Calibration -> target_equiv_ratio: not mapped",
+      "unmapped bytes in Calibration -> ignition_timing: not mapped; no torque plant",
+      "unmapped bytes in Calibration -> ignition_trim_selected: not mapped; no torque plant",
+      "unmapped bytes in Calibration -> base_fuel_schedule_word: not mapped",
+      "unmapped bytes in Calibration -> injector_pulse_ms: not mapped",
+      "unmapped bytes in Calibration -> fuel_trim_total_pct: not mapped",
+      "unmapped bytes in Calibration -> delivered_lambda: not mapped",
+      "unmapped bytes in Calibration -> fuel_per_event_g: not mapped"
+    ],
+    "outcome": "unevaluable",
+    "outputs": [
+      {
+        "assumes_conditioned": [],
+        "blockers": [
+          {
+            "code": "not_mapped",
+            "detail": "changed bytes outside rom_map.yaml: every output is unknown",
+            "node": null,
+            "text": "not mapped"
+          }
+        ],
+        "design_dependent": false,
+        "levers": ["unmapped bytes in Calibration"],
+        "number": false,
+        "output": "target_equiv_ratio",
+        "reached": true,
+        "refused_if_conditioned": [],
+        "source": "application_model",
+        "status": "unknown"
+      },
+      {
+        "assumes_conditioned": [],
+        "blockers": [
+          {
+            "code": "not_mapped",
+            "detail": "changed bytes outside rom_map.yaml: every output is unknown",
+            "node": null,
+            "text": "not mapped"
+          },
+          {
+            "code": "no_torque_plant",
+            "detail": "no simulation-contract quantity carries this output and the torque subsystem is unbuilt (E07.5)",
+            "node": "timing_final_byte",
+            "text": "no torque plant"
+          }
+        ],
+        "design_dependent": false,
+        "levers": ["unmapped bytes in Calibration"],
+        "number": false,
+        "output": "ignition_timing",
+        "reached": true,
+        "refused_if_conditioned": [],
+        "source": "application_model",
+        "status": "unknown"
+      },
+      {
+        "assumes_conditioned": [],
+        "blockers": [
+          {
+            "code": "not_mapped",
+            "detail": "changed bytes outside rom_map.yaml: every output is unknown",
+            "node": null,
+            "text": "not mapped"
+          },
+          {
+            "code": "no_torque_plant",
+            "detail": "no simulation-contract quantity carries this output and the torque subsystem is unbuilt (E07.5)",
+            "node": "timing_trim_lookup",
+            "text": "no torque plant"
+          }
+        ],
+        "design_dependent": false,
+        "levers": ["unmapped bytes in Calibration"],
+        "number": false,
+        "output": "ignition_trim_selected",
+        "reached": true,
+        "refused_if_conditioned": [],
+        "source": "application_model",
+        "status": "unknown"
+      },
+      {
+        "assumes_conditioned": [],
+        "blockers": [
+          {
+            "code": "not_mapped",
+            "detail": "changed bytes outside rom_map.yaml: every output is unknown",
+            "node": null,
+            "text": "not mapped"
+          }
+        ],
+        "design_dependent": false,
+        "levers": ["unmapped bytes in Calibration"],
+        "number": false,
+        "output": "base_fuel_schedule_word",
+        "reached": true,
+        "refused_if_conditioned": [],
+        "source": "application_model",
+        "status": "unknown"
+      },
+      {
+        "assumes_conditioned": [],
+        "blockers": [
+          {
+            "code": "not_mapped",
+            "detail": "changed bytes outside rom_map.yaml: every output is unknown",
+            "node": null,
+            "text": "not mapped"
+          }
+        ],
+        "design_dependent": false,
+        "levers": ["unmapped bytes in Calibration"],
+        "number": false,
+        "output": "injector_pulse_ms",
+        "reached": true,
+        "refused_if_conditioned": [],
+        "source": "simulated",
+        "status": "unknown"
+      },
+      {
+        "assumes_conditioned": [],
+        "blockers": [
+          {
+            "code": "not_mapped",
+            "detail": "changed bytes outside rom_map.yaml: every output is unknown",
+            "node": null,
+            "text": "not mapped"
+          }
+        ],
+        "design_dependent": false,
+        "levers": ["unmapped bytes in Calibration"],
+        "number": false,
+        "output": "fuel_trim_total_pct",
+        "reached": true,
+        "refused_if_conditioned": [],
+        "source": "simulated",
+        "status": "unknown"
+      },
+      {
+        "assumes_conditioned": [],
+        "blockers": [
+          {
+            "code": "not_mapped",
+            "detail": "changed bytes outside rom_map.yaml: every output is unknown",
+            "node": null,
+            "text": "not mapped"
+          }
+        ],
+        "design_dependent": false,
+        "levers": ["unmapped bytes in Calibration"],
+        "number": false,
+        "output": "delivered_lambda",
+        "reached": true,
+        "refused_if_conditioned": [],
+        "source": "simulated",
+        "status": "unknown"
+      },
+      {
+        "assumes_conditioned": [],
+        "blockers": [
+          {
+            "code": "not_mapped",
+            "detail": "changed bytes outside rom_map.yaml: every output is unknown",
+            "node": null,
+            "text": "not mapped"
+          }
+        ],
+        "design_dependent": false,
+        "levers": ["unmapped bytes in Calibration"],
+        "number": false,
+        "output": "fuel_per_event_g",
+        "reached": true,
+        "refused_if_conditioned": [],
+        "source": "simulated",
+        "status": "unknown"
+      }
+    ],
+    "reason": null,
+    "regime": null,
+    "schema_version": 1,
+    "tool": "rom_levers",
+    "tool_version": "1"
+  }
+}

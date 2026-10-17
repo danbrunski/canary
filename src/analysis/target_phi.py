@@ -61,7 +61,12 @@ from src.analysis.rom_trace import (
 )
 from src.decode.dids import DidMap, load_did_map
 from src.decode.ecm_lookup import KERNEL_VERSION, LookupResult
-from src.decode.target_phi_command import Branch, GateConstants, target_command
+from src.decode.target_phi_command import (
+    GATE_STATE_UNKNOWN,
+    Branch,
+    GateConstants,
+    target_command,
+)
 from src.decode.target_phi_command import x_from_bfs as _x_from_bfs
 from src.paths import DIDS_YAML
 from src.signals.pairing import PairingPolicy, match_ordered, to_seconds
@@ -74,6 +79,43 @@ EVALUATOR_VERSION = 3
 TWIN_FILE = "target_phi_twin.yaml"
 
 State = Literal["pending", "unevaluable", "excluded", "eligible"]
+
+#: Every reason a record can carry, with the one state it is given under. A
+#: key ending in ``:`` is a template: what follows names an input (``load``,
+#: ``rpm``, ``flag``, or ``tuple_spread``), a gate (``coolant``, ``mode``) or
+#: a steadiness channel. Besides these, an ``excluded`` record can name a
+#: fuel-system mode the mode gate does not admit (:func:`excluded_mode_reasons`).
+#: Every reason is minted through :func:`_reason`, which refuses one missing
+#: here, so a consumer that classifies every entry (the twin runner's
+#: ``_phi_kind``) cannot meet one it never saw.
+REASONS: dict[str, State] = {
+    # The command sample itself.
+    "unsupported_clock": "unevaluable",
+    "sentinel": "unevaluable",
+    # The map identity (``_identity``; ``resolve_slot``'s own two reasons).
+    "awaiting_identity_read": "pending",
+    "map_identity_unbracketed": "unevaluable",
+    "map_uninitialised": "unevaluable",
+    "slot_ambiguous": "unevaluable",
+    "map_switching": "unevaluable",
+    "slot_unresolved": "unevaluable",
+    # The lookup inputs.
+    "input_not_captured:": "unevaluable",
+    "awaiting_input:": "pending",
+    "input_stale:": "unevaluable",
+    # The prediction (``target_phi_command.target_command``) and its region.
+    GATE_STATE_UNKNOWN: "unevaluable",
+    "uncovered_region": "unevaluable",
+    # The gates.
+    "gate_missing:": "unevaluable",
+    "gate_stale:": "unevaluable",
+    "cold": "excluded",
+    "awaiting_mode_read": "pending",
+    "mode_unknown": "unevaluable",
+    "mode_transition": "excluded",
+    "steadiness_unobserved:": "unevaluable",
+    "transient": "excluded",
+}
 
 
 class _Strict(BaseModel):
@@ -389,6 +431,11 @@ class TwinRefusalError(ValueError):
         super().__init__(f"{reason}: {message}")
         self.reason = reason
         self.message = message
+
+    def __reduce__(self) -> tuple[type, tuple[str, str]]:
+        # Rebuilt from (reason, message), so it crosses a process boundary
+        # (the workbench's spawn child) intact.
+        return (type(self), (self.reason, self.message))
 
 
 # -- the resolved table -------------------------------------------------------
@@ -837,6 +884,43 @@ class _Candidate:
     prediction: Prediction | None = None
 
 
+def _registered(reason: str) -> State | None:
+    """The state :data:`REASONS` gives ``reason`` (by its template's prefix
+    for a templated one), or None when it is not registered."""
+    if reason in REASONS and not reason.endswith(":"):
+        return REASONS[reason]
+    prefix, sep, rest = reason.partition(":")
+    return REASONS.get(prefix + sep) if sep and rest else None
+
+
+def _reason(state: State, reason: str | None) -> tuple[State, str]:
+    """One record reason, refused unless :data:`REASONS` registers it under
+    ``state`` (``reason_unregistered``)."""
+    if reason is None or _registered(reason) != state:
+        raise TwinRefusalError(
+            "reason_unregistered",
+            f"({state}, {reason}) is not in target_phi.REASONS; register it before emitting it",
+        )
+    return state, reason
+
+
+def _excluded_mode(states: dict[int, str], name: str) -> tuple[State, str]:
+    """An ``excluded`` reason naming a fuel-system mode the gate does not
+    admit: one of the mode gate's declared state names, never another string."""
+    if name not in states.values() or name in REASONS:
+        raise TwinRefusalError(
+            "reason_unregistered", f"{name} is not a declared fuel-system mode name"
+        )
+    return "excluded", name
+
+
+def excluded_mode_reasons(definition: TwinDefinition) -> list[str]:
+    """The fuel-system mode names an ``excluded`` record can carry: every
+    declared mode state the gate does not admit."""
+    mode = definition.gates.mode
+    return sorted({name for name in mode.states.values() if name not in mode.eligible})
+
+
 def _within(series: _Series, start: float | None, end: float | None) -> _Series:
     keep = np.ones(len(series.times), dtype=bool)
     if start is not None:
@@ -945,9 +1029,9 @@ def new_candidate(
         reasons=[],
     )
     if basis != definition.gates.clock:
-        candidate.reasons.append(("unevaluable", "unsupported_clock"))
+        candidate.reasons.append(_reason("unevaluable", "unsupported_clock"))
     if sentinel:
-        candidate.reasons.append(("unevaluable", "sentinel"))
+        candidate.reasons.append(_reason("unevaluable", "sentinel"))
     return candidate
 
 
@@ -1127,14 +1211,14 @@ def _identity(
         reads.append(resolution)
     if detail.get("after") is None and detail.get("before") is not None:
         if not session_complete and session_end - candidate.time < rules.max_age_s:
-            return None, ("pending", "awaiting_identity_read"), detail
+            return None, _reason("pending", "awaiting_identity_read"), detail
     if len(reads) < 2:
-        return None, ("unevaluable", "map_identity_unbracketed"), detail
+        return None, _reason("unevaluable", "map_identity_unbracketed"), detail
     for resolution in reads:
         if resolution.reason is not None:
-            return None, ("unevaluable", resolution.reason), detail
+            return None, _reason("unevaluable", resolution.reason), detail
     if reads[0].slot != reads[1].slot:
-        return None, ("unevaluable", "map_switching"), detail
+        return None, _reason("unevaluable", "map_switching"), detail
     return reads[0], None, detail
 
 
@@ -1176,7 +1260,7 @@ def _assess(
     if identity_reason is not None:
         reasons.append(identity_reason)
     elif slot is not None and slot.slot != table.slot:
-        reasons.append(("unevaluable", "slot_unresolved"))
+        reasons.append(_reason("unevaluable", "slot_unresolved"))
 
     # Lookup inputs, each within the skew of the command and of each other.
     refs = _input_refs(candidate, inputs=inputs, series=series, raw=raw, pairs=pairs)
@@ -1186,19 +1270,19 @@ def _assess(
         if refs[name] is not None:
             continue
         if not captured_by(definition, first_read, spec, t):
-            reasons.append(("unevaluable", f"input_not_captured:{name}"))
+            reasons.append(_reason("unevaluable", f"input_not_captured:{name}"))
         elif not session_complete and session_end - t < skew:
-            reasons.append(("pending", f"awaiting_input:{name}"))
+            reasons.append(_reason("pending", f"awaiting_input:{name}"))
         else:
-            reasons.append(("unevaluable", f"input_stale:{name}"))
+            reasons.append(_reason("unevaluable", f"input_stale:{name}"))
     tuple_times = [t, *(t + ref["skew_s"] for ref in present)]
     spread = max(tuple_times) - min(tuple_times)
     record["tuple_skew_s"] = round(spread, 6)
     if len(present) == len(inputs) and spread > skew:
-        reasons.append(("unevaluable", "input_stale:tuple_spread"))
+        reasons.append(_reason("unevaluable", "input_stale:tuple_spread"))
     for ref in present:
         if ref["spec"] and series[ref["spec"]].basis[ref["row"]] != gates.clock:
-            reasons.append(("unevaluable", "unsupported_clock"))
+            reasons.append(_reason("unevaluable", "unsupported_clock"))
 
     # The prediction itself, whenever its inputs exist (a diagnostic
     # difference is kept for excluded and transient samples too).
@@ -1213,7 +1297,7 @@ def _assess(
         )
         candidate.prediction = prediction
         if prediction.reason is not None:
-            reasons.append(("unevaluable", prediction.reason))
+            reasons.append(_reason("unevaluable", prediction.reason))
         region = getattr(definition.regions, prediction.branch)
         rpm_raw = refs["rpm"]["raw"]
         load_raw = refs["load"]["raw"]
@@ -1221,7 +1305,7 @@ def _assess(
             region.load_raw is None or region.load_raw[0] <= load_raw <= region.load_raw[1]
         )
         if not inside:
-            reasons.append(("unevaluable", "uncovered_region"))
+            reasons.append(_reason("unevaluable", "uncovered_region"))
 
     # Gates: warmth, mode, steadiness — from inputs and mode, never the residual.
     record["gates"] = _gates(
@@ -1276,7 +1360,7 @@ def _gates(
     coolant = gates.coolant
     coolant_spec = coolant_source(definition, first_read, t)
     if coolant_spec is None:
-        reasons.append(("unevaluable", "gate_missing:coolant"))
+        reasons.append(_reason("unevaluable", "gate_missing:coolant"))
         out["coolant"] = None
     else:
         s = series[coolant_spec]
@@ -1284,14 +1368,14 @@ def _gates(
         values = [float(s.values[i]) for i in (prior, nxt) if i is not None]
         out["coolant"] = {"spec": coolant_spec, "values": values}
         if not values:
-            reasons.append(("unevaluable", "gate_stale:coolant"))
+            reasons.append(_reason("unevaluable", "gate_stale:coolant"))
         elif min(values) < coolant.min_c:
-            reasons.append(("excluded", "cold"))
+            reasons.append(_reason("excluded", "cold"))
 
     mode = gates.mode
     s = series[mode.channel]
     if not captured_by(definition, first_read, mode.channel, t):
-        reasons.append(("unevaluable", "gate_missing:mode"))
+        reasons.append(_reason("unevaluable", "gate_missing:mode"))
         out["mode"] = None
     else:
         prior, nxt = _bracket(s, t, mode.max_age_s)
@@ -1303,15 +1387,15 @@ def _gates(
         out["mode"] = {"spec": mode.channel, "states": names}
         if prior is None or nxt is None:
             if nxt is None and not session_complete and session_end - t < mode.max_age_s:
-                reasons.append(("pending", "awaiting_mode_read"))
+                reasons.append(_reason("pending", "awaiting_mode_read"))
             else:
-                reasons.append(("unevaluable", "gate_stale:mode"))
+                reasons.append(_reason("unevaluable", "gate_stale:mode"))
         elif len(names) < 2 or any(name.startswith("unknown_") for name in names):
-            reasons.append(("unevaluable", "mode_unknown"))
+            reasons.append(_reason("unevaluable", "mode_unknown"))
         elif names[0] != names[1]:
-            reasons.append(("excluded", "mode_transition"))
+            reasons.append(_reason("excluded", "mode_transition"))
         elif names[0] not in mode.eligible:
-            reasons.append(("excluded", names[0]))
+            reasons.append(_excluded_mode(mode.states, names[0]))
 
     steady = gates.steadiness
     steady_out: dict[str, dict[str, Any]] = {}
@@ -1322,7 +1406,7 @@ def _gates(
         dwell = dwell[np.isfinite(dwell)]
         if len(dwell) < steady.min_samples:
             steady_out[channel.channel] = {"n": int(len(dwell)), "span": None}
-            reasons.append(("unevaluable", f"steadiness_unobserved:{channel.channel}"))
+            reasons.append(_reason("unevaluable", f"steadiness_unobserved:{channel.channel}"))
             continue
         span = float(dwell.max() - dwell.min())
         steady_out[channel.channel] = {"n": int(len(dwell)), "span": round(span, 6)}
@@ -1333,7 +1417,7 @@ def _gates(
             mid = float(np.median(np.abs(dwell)))
             limit_exceeded = mid == 0 or span / mid > channel.max_relative_span
         if limit_exceeded:
-            reasons.append(("excluded", "transient"))
+            reasons.append(_reason("excluded", "transient"))
     out["steadiness"] = steady_out
     out["_reasons"] = reasons
     return out
@@ -1606,6 +1690,42 @@ def capture_requirement(
 # -- the independent X-formula check ---------------------------------------------
 
 
+@dataclass(frozen=True)
+class XReads:
+    """The load input X and the BFS word it is formed from, each read on the
+    acquisition clock and returned to raw counts by the catalog decode."""
+
+    x_spec: str
+    bfs_spec: str
+    x_times: np.ndarray
+    x_raw: np.ndarray
+    bfs_times: np.ndarray
+    bfs_raw: np.ndarray
+
+
+def x_reads(
+    session: Path | pd.DataFrame, definition: TwinDefinition, *, dids_path: Path = DIDS_YAML
+) -> XReads:
+    """Every X and BFS read of ``session`` in raw counts: the reads
+    :func:`x_formula_check` pairs, and the twin runner's X stage too (one
+    reader, so the two cannot read X differently). A channel stored under
+    another decode refuses ``wrong_units``."""
+    load_spec = definition.inputs.load.channel
+    bfs_spec = definition.x_formula.bfs_channel
+    long = read_channels(session, [load_spec, bfs_spec], dids_path=dids_path, acquired_time=True)
+    x = _series(long, load_spec)
+    bfs = _series(long, bfs_spec)
+    catalog = load_did_map(dids_path)
+    return XReads(
+        x_spec=load_spec,
+        bfs_spec=bfs_spec,
+        x_times=x.times,
+        x_raw=_raw(x, load_spec, dids_path, catalog),
+        bfs_times=bfs.times,
+        bfs_raw=_raw(bfs, bfs_spec, dids_path, catalog),
+    )
+
+
 def x_formula_check(
     session: Path | pd.DataFrame,
     definition: TwinDefinition,
@@ -1618,17 +1738,11 @@ def x_formula_check(
 
     A regression check of the load input's formula, not a tolerance for the
     lookup: misses are counted and kept, never absorbed."""
-    load_spec = definition.inputs.load.channel
-    bfs_spec = definition.x_formula.bfs_channel
-    long = read_channels(session, [load_spec, bfs_spec], dids_path=dids_path, acquired_time=True)
-    x = _series(long, load_spec)
-    bfs = _series(long, bfs_spec)
-    catalog = load_did_map(dids_path)
-    x_raw = _raw(x, load_spec, dids_path, catalog)
-    bfs_raw = _raw(bfs, bfs_spec, dids_path, catalog)
+    reads = x_reads(session, definition, dids_path=dids_path)
+    x_raw, bfs_raw = reads.x_raw, reads.bfs_raw
     matched = match_ordered(
-        x.times,
-        bfs.times,
+        reads.x_times,
+        reads.bfs_times,
         PairingPolicy.within(pd.Timedelta(seconds=definition.gates.max_acquisition_skew_s)),
     )
     pairs: list[dict[str, Any]] = []
@@ -1640,7 +1754,7 @@ def x_formula_check(
         expected = x_from_bfs(int(bfs_raw[b]), scaler, definition)
         pairs.append(
             {
-                "acquired_at": _iso(float(x.times[a])),
+                "acquired_at": _iso(float(reads.x_times[a])),
                 "separation_s": float(separation),
                 "bfs": int(bfs_raw[b]),
                 "x": observed,
@@ -1670,6 +1784,7 @@ __all__ = [
     "Accounting",
     "Prediction",
     "Qualification",
+    "REASONS",
     "ResolvedTable",
     "SlotResolution",
     "TwinDefinition",
@@ -1683,6 +1798,7 @@ __all__ = [
     "duplicate_use",
     "evaluate_session",
     "evaluated_specs",
+    "excluded_mode_reasons",
     "first_reads",
     "coolant_source",
     "load_twin_definition",
@@ -1695,6 +1811,8 @@ __all__ = [
     "resolve_slot",
     "resolve_table",
     "table_from_calibration",
+    "XReads",
     "x_formula_check",
     "x_from_bfs",
+    "x_reads",
 ]

@@ -302,6 +302,10 @@ does no bus, disk or network I/O, and has no dependency on Python objects.
        backend.
 
 - [ ] **E06.4 — Record the adoption decision and deployment implications.**
+  *(Input, 2026-10-15: [E09](E09-engine-twin-runner-and-levers.md) "Where
+  Rust would pay" lists which simulator parts a port would help, per
+  measured numbers: the per-tick ECU kernels and the live observer, later
+  the continuous plant under a coupled rollout; not the steady Monte Carlo.)*
   Compare the measured headroom, arithmetic clarity and replay benefit with
   maintenance, Python/native conversion and ARM64 packaging cost. Decide
   adopt, defer or reject with evidence. If adopted, pin the Rust/binding/build

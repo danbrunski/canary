@@ -33,6 +33,7 @@ from __future__ import annotations
 
 from src.config.auxiliary import AutoTagConfig as AutoTagConfig
 from src.config.auxiliary import CommitteesConfig as CommitteesConfig
+from src.config.auxiliary import CompanionConfig as CompanionConfig
 from src.config.auxiliary import LLMAssistConfig as LLMAssistConfig
 from src.config.auxiliary import NonvolatileWriteConfig as NonvolatileWriteConfig
 from src.config.auxiliary import NotificationsConfig as NotificationsConfig

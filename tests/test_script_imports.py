@@ -23,6 +23,11 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 SCRIPTS_DIR = REPO_ROOT / "scripts"
 TESTS_DIR = REPO_ROOT / "tests"
 SCRIPT_NAMES = frozenset(p.stem for p in SCRIPTS_DIR.glob("*.py"))
+#: The two modules under scripts/ that are helpers, not scripts, and may be
+#: imported by one: ``_cli`` (the config-loading preamble) and ``venv_launch``
+#: (standard-library only: the launchers import it *before* ``_cli`` can be,
+#: to re-launch under ``.venv`` on a machine where nothing is installed).
+SHARED_HELPERS = frozenset({"_cli", "venv_launch"})
 
 #: Test files allowed to touch ``sys.path``, and why.
 SYS_PATH_ALLOWED = {
@@ -56,7 +61,7 @@ def test_no_script_imports_another_script_except_cli(path: Path) -> None:
     for line, module in _imported_modules(ast.parse(path.read_text())):
         parts = module.split(".")
         name = parts[1] if parts[0] == "scripts" and len(parts) > 1 else parts[0]
-        if (parts[0] == "scripts" or name in SCRIPT_NAMES) and name != "_cli":
+        if (parts[0] == "scripts" or name in SCRIPT_NAMES) and name not in SHARED_HELPERS:
             if module == "scripts":
                 continue  # `from scripts import x` is recorded as scripts.x above
             offenders.append(f"{path.name}:{line} imports {module}")

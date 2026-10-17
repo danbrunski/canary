@@ -7,8 +7,12 @@ edits), so the route (W09.2), the workbench child and the tests run the same
 code:
 
 * :func:`preview_edits` -- the E08.1 edit spec the page's edits make, the
-  candidate's provenance (cells old -> new, changed ranges, reach) and the
-  edited tables' after values. Cheap: the order of ``GET .../tables``.
+  candidate's provenance (cells old -> new, changed ranges, reach), the
+  edited tables' after values, and ``levers`` (E09.14b): which lever the edit
+  pulls and what blocks a number for each output, from
+  :func:`src.analysis.rom_levers.classify_edit` (the strings
+  ``tools/rom_sim.py inspect`` prints; this module words none of them). Cheap:
+  the order of ``GET .../tables``, plus the simulator kit's load.
 * :func:`simulate_edits` -- a stated rpm x load grid (E08.2), paired Monte
   Carlo draws (E08.3) and per-cell aggregation (E08.4), base vs candidate.
 * :func:`run_job` -- the workbench child's entry point.
@@ -51,15 +55,21 @@ from pathlib import Path
 from typing import Annotated, Any, Literal
 
 import yaml
-from pydantic import BaseModel, ConfigDict, Field, StrictInt, ValidationError
-
-from src.analysis.ecu_application import (
-    ApplicationModel,
-    ApplicationModelRefusalError,
-    load_application_model,
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    StrictFloat,
+    StrictInt,
+    TypeAdapter,
+    ValidationError,
+    field_validator,
+    model_validator,
 )
-from src.analysis.fuel_plant import FuelPlantRefusalError
-from src.analysis.paired_scenarios import LearnedState, PairedScenario, SimKit, load_kit
+
+from src.analysis.ecu_application import ApplicationModel, ApplicationModelRefusalError
+from src.analysis.fuel_plant import FuelPlantRefusalError, plant_qualification
+from src.analysis.paired_scenarios import LearnedState, PairedScenario, SimKit
 from src.analysis.rom_edit_spec import (
     BaseImage,
     EditSpec,
@@ -67,9 +77,10 @@ from src.analysis.rom_edit_spec import (
     build_candidate,
     parse_edit_spec,
 )
-from src.analysis.rom_effects import RomEffectRefusalError, compare_roms
+from src.analysis.rom_effects import EffectReport, RomEffectRefusalError, compare_roms
 from src.analysis.rom_image import ImageFormatError, sha256_hex, table_values
-from src.analysis.rom_map import RomMap, load_rom_map
+from src.analysis.rom_levers import classify_edit
+from src.analysis.rom_map import RomMap
 from src.analysis.sim_cells import Grid, aggregate_cells, fuel_comp_axes, target_afr_axes
 from src.analysis.sim_contract import EcuIdentity, PlantIdentity, SimulationRefusalError
 from src.analysis.sim_design import (
@@ -82,10 +93,9 @@ from src.analysis.sim_design import (
 )
 from src.analysis.sim_montecarlo import (
     MODE,
-    UNCERTAINTY_FILE,
     LoadedUncertainty,
     MonteCarloDesign,
-    load_uncertainty,
+    load_sim_kit,
     run_monte_carlo,
 )
 from src.vehicle.tune_revisions import TuneRevisionRegistry
@@ -253,14 +263,35 @@ class _EditContext:
     model: ApplicationModel
     model_sha256: str
 
+    @classmethod
+    def of(cls, kit: SimKit) -> _EditContext:
+        return cls(kit.rom_map, kit.model, kit.model_sha256)
 
-def _edit_context(profile_dir: Path, kit: SimKit | None) -> _EditContext:
-    """The map and application model an edit resolves and traces through:
-    the kit's, else the profile's (without loading the rest of a kit)."""
-    if kit is not None:
-        return _EditContext(kit.rom_map, kit.model, kit.model_sha256)
-    model, model_sha = load_application_model(profile_dir)
-    return _EditContext(load_rom_map(profile_dir), model, model_sha)
+
+def _sim_kit(profile_dir: Path, kit: SimKit | None) -> SimKit:
+    """The kit an edit resolves, traces and is classified through: the
+    caller's (tests on a synthetic image), else the simulator's own, the one
+    ``sim_kit.yaml`` declares (:func:`load_sim_kit`, the loader
+    ``tools/rom_sim.py`` and :func:`simulate_edits` use)."""
+    return kit if kit is not None else load_sim_kit(profile_dir).kit
+
+
+def _effects(base_image: bytes, candidate_image: bytes, kit: SimKit) -> EffectReport:
+    """``compare_roms`` on the two images under the run's contract mode, as the
+    simulator's ``rom_report`` has it. Where a quantity the mode holds fixed
+    makes an output ``unevaluable``, this is the report that says so."""
+    return compare_roms(
+        base_image,
+        candidate_image,
+        kit.rom_map,
+        kit.model,
+        kit.model_sha256,
+        base_slot=SIM_SLOT,
+        candidate_slot=SIM_SLOT,
+        slot_source=SLOT_SOURCE,
+        contract=kit.contract,
+        mode=MODE,
+    )
 
 
 def _candidate(base: BaseImage, spec: EditSpec, ctx: _EditContext) -> tuple[bytes, dict[str, Any]]:
@@ -289,14 +320,28 @@ def preview_edits(
     sha256: str | None = None,
     kit: SimKit | None = None,
 ) -> dict[str, Any]:
-    """The spec, the candidate's provenance and the edited tables' after
-    values. ``kit`` replaces the profile's map and application model (tests
-    on a synthetic image)."""
+    """The spec, the candidate's provenance, the edited tables' after values,
+    and ``levers``: which lever the edit pulls and what blocks a number for
+    each output (E09.14b). ``levers`` is
+    :meth:`~src.analysis.rom_levers.LeverClassification.to_dict` of
+    :func:`~src.analysis.rom_levers.classify_edit` on the comparison the run
+    would use, built the way ``tools/rom_sim.py inspect`` builds it, so
+    ``levers["messages"]`` is the CLI's text for the same edit and nothing
+    here words it. ``kit`` replaces the profile's simulator kit (tests on a
+    synthetic image)."""
     base = library_base(image, revision_match, sha256=sha256)
     spec = editor_spec(base, label, edits)
-    ctx = _edit_context(Path(profile_dir), kit)
-    candidate_image, provenance = _candidate(base, spec, ctx)
+    kit = _sim_kit(Path(profile_dir), kit)
+    candidate_image, provenance = _candidate(base, spec, _EditContext.of(kit))
     edited = {(e.table, e.slot) for e in spec.edits}
+    levers = classify_edit(
+        _effects(base.image, candidate_image, kit),
+        rom_map=kit.rom_map,
+        model=kit.model,
+        contract=kit.contract,
+        qualification=plant_qualification(kit.plant),
+        cells=provenance["cells"],
+    )
     return {
         "tool": TOOL,
         "tool_version": TOOL_VERSION,
@@ -306,8 +351,9 @@ def preview_edits(
         "candidate_sha256": sha256_hex(candidate_image),
         "provenance": provenance,
         "tables": [
-            t for t in table_values(candidate_image, ctx.rom_map) if (t["id"], t["slot"]) in edited
+            t for t in table_values(candidate_image, kit.rom_map) if (t["id"], t["slot"]) in edited
         ],
+        "levers": levers.to_dict(),
         "sim_base": sim_base(revision_match),
     }
 
@@ -384,17 +430,10 @@ def _recorded(base: BaseImage) -> str:
     return str(base.identity["revision"])
 
 
-def _uncertainty(profile_dir: Path) -> LoadedUncertainty:
-    try:
-        return load_uncertainty(profile_dir / UNCERTAINTY_FILE)
-    except FileNotFoundError as exc:
-        raise SimulationRefusalError(
-            "uncertainty_missing", f"{profile_dir.name} has no {UNCERTAINTY_FILE}"
-        ) from exc
-    except ValidationError as exc:
-        raise SimulationRefusalError(
-            "uncertainty_invalid", f"{UNCERTAINTY_FILE}: {exc.error_count()} error(s)"
-        ) from exc
+def _uncertainty(profile_dir: Path, kit: SimKit) -> LoadedUncertainty:
+    """The uncertainty declaration of the kit's plant (E08.11: sim_kit.yaml
+    names one per plant version; load_sim_kit checks it against the plant)."""
+    return load_sim_kit(profile_dir, kit.plant.plant_version).uncertainty
 
 
 def _template(
@@ -434,6 +473,7 @@ def _grid_design(
     revision: str,
     profile_dir: Path,
     registry: TuneRevisionRegistry | None,
+    plant_version: str | None = None,
 ) -> SimDesign:
     return build_grid_design(
         request.rpm_edges,
@@ -448,6 +488,7 @@ def _grid_design(
         rail_kpa=request.rail_kpa,
         throttle_pct=request.throttle_pct,
         pedal_flag=request.pedal_flag,
+        plant_version=plant_version,
         registry=registry,
     )
 
@@ -468,7 +509,7 @@ def _simulate(
     the same path :func:`simulate_edits` uses."""
     revision = _recorded(base)
     _bounded(request)
-    design = _grid_design(request, revision, profile_dir, registry)
+    design = _grid_design(request, revision, profile_dir, registry, kit.plant.plant_version)
     require_base(design, base.image_sha256)
     candidate_sha = sha256_hex(candidate_image)
     result = run_monte_carlo(
@@ -477,22 +518,11 @@ def _simulate(
         MonteCarloDesign.from_sim_design(design),
         base.image,
         candidate_image,
-        _uncertainty(profile_dir),
+        _uncertainty(profile_dir, kit),
         draws=request.draws,
         seed=request.seed,
     )
-    effects = compare_roms(
-        base.image,
-        candidate_image,
-        kit.rom_map,
-        kit.model,
-        kit.model_sha256,
-        base_slot=SIM_SLOT,
-        candidate_slot=SIM_SLOT,
-        slot_source=SLOT_SOURCE,
-        contract=kit.contract,
-        mode=MODE,
-    )
+    effects = _effects(base.image, candidate_image, kit)
     axes = (
         fuel_comp_axes(kit, base.image, slot=SIM_SLOT)
         if request.grid == "fuel_comp"
@@ -507,6 +537,8 @@ def _simulate(
         "synthetic": result.synthetic,
         # The result's caveats, unchanged and first.
         "caveats": list(result.caveats),
+        # The design's own assumptions are in here, "design: "-prefixed (E08.10);
+        # `design` carries no second copy of them.
         "assumptions": list(result.assumptions),
         "unresolved": list(result.unresolved),
         "inert_parameters": list(result.inert_parameters),
@@ -517,7 +549,6 @@ def _simulate(
         "design": {
             **summary(design),
             "grid": design.grid.model_dump(mode="json"),
-            "assumptions": list(design.assumptions),
         },
         "candidate": dict(candidate_provenance),
         "cells": cells.to_dict(),
@@ -551,10 +582,8 @@ def simulate_edits(
     _recorded(base)
     _bounded(request)
     spec = editor_spec(base, request.label, request.edits)
-    kit = kit if kit is not None else load_kit(profile_dir)
-    candidate_image, provenance = _candidate(
-        base, spec, _EditContext(kit.rom_map, kit.model, kit.model_sha256)
-    )
+    kit = _sim_kit(profile_dir, kit)
+    candidate_image, provenance = _candidate(base, spec, _EditContext.of(kit))
     out = _simulate(
         base,
         candidate_image,
@@ -567,6 +596,197 @@ def simulate_edits(
     out["spec_yaml"] = spec_yaml(spec)
     out["spec_sha256"] = spec.sha256()
     return out
+
+
+# -- typical values -------------------------------------------------------------------------
+
+#: ``<profile>/sim_typical_values.yaml``: the vehicle's typical stated values (W09.11).
+TYPICAL_VALUES_FILE = "sim_typical_values.yaml"
+#: The SimRequest fields the form's "Fill typical values" button may fill: the stated
+#: environment and the learned state, vehicle facts. Twelve of the twenty-one.
+TYPICAL_FIELDS: tuple[str, ...] = (
+    "baro_kpa",
+    "iat_c",
+    "coolant_c",
+    "battery_v",
+    "rail_kpa",
+    "throttle_pct",
+    "pedal_flag",
+    "stft_pct",
+    "ltft_pct",
+    "throttle_closed_learned",
+    "idle_air_learned",
+    "evap_purge_area",
+)
+#: The rest describe this experiment, this base or this run, never the vehicle: the
+#: button never fills them, and a typical-values file naming one is refused.
+NEVER_TYPICAL_FIELDS: tuple[str, ...] = (
+    "label",
+    "edits",
+    "grid",
+    "rpm_edges",
+    "load_edges",
+    "load_basis",
+    "candidate_events",
+    "draws",
+    "seed",
+)
+
+
+def _field_check(name: str) -> TypeAdapter[Any]:
+    """The SimRequest field's own type and bounds, as a validator for one value."""
+    info = SimRequest.model_fields[name]
+    annotation: Any = info.annotation
+    if info.metadata:
+        annotation = Annotated[(annotation, *info.metadata)]
+    return TypeAdapter(annotation)
+
+
+_FIELD_CHECKS: dict[str, TypeAdapter[Any]] = {name: _field_check(name) for name in TYPICAL_FIELDS}
+
+
+#: What a declared value is. ``typical``: a sourced figure for the vehicle.
+#: ``placeholder``: a number the simulator reads nowhere today, filled only so the
+#: form can run; the page tags it ``placeholder``, never ``typical``, so it cannot
+#: pass for a measurement, and a test fails the moment any code reads it.
+TypicalKind = Literal["typical", "placeholder"]
+TYPICAL_KINDS: tuple[str, ...] = ("typical", "placeholder")
+
+
+class TypicalValue(BaseModel):
+    """One typical value, what kind it is, and where it comes from. No source, no
+    value; no declared kind, no value."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    #: Strict: a quoted "81" or a bare `true` is not a number a form can be filled with.
+    value: StrictFloat | StrictInt | Literal["working_assumption"]
+    kind: TypicalKind
+    source: str = Field(min_length=1)
+
+    @field_validator("source")
+    @classmethod
+    def _source_is_text(cls, source: str) -> str:
+        if not source.strip():
+            raise ValueError("is blank")
+        return source
+
+    @model_validator(mode="after")
+    def _placeholder_says_so(self) -> TypicalValue:
+        if self.kind == "placeholder" and "placeholder" not in self.source.lower():
+            raise ValueError("a placeholder's source must say it is a placeholder")
+        return self
+
+
+class TypicalLeftEmpty(BaseModel):
+    """A fillable field the vehicle declares no typical value for, and why."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    reason: str = Field(min_length=1)
+
+    @field_validator("reason")
+    @classmethod
+    def _reason_is_text(cls, reason: str) -> str:
+        if not reason.strip():
+            raise ValueError("is blank")
+        return reason
+
+
+class TypicalValuesDeclaration(BaseModel):
+    """``sim_typical_values.yaml``: every fillable field is a sourced value or an
+    explicit, reasoned omission, so the page can always say what it left empty."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    schema_version: Literal[1]
+    values: dict[str, TypicalValue]
+    left_empty: dict[str, TypicalLeftEmpty]
+
+    @model_validator(mode="after")
+    def _declared(self) -> TypicalValuesDeclaration:
+        for name in (*self.values, *self.left_empty):
+            if name in NEVER_TYPICAL_FIELDS:
+                raise ValueError(
+                    f"{name} is never filled by the typical-values button (it describes this "
+                    "experiment, not the vehicle)"
+                )
+            if name not in TYPICAL_FIELDS:
+                raise ValueError(f"{name!r} is not a SimRequest field a typical value may fill")
+        for name in self.values.keys() & self.left_empty.keys():
+            raise ValueError(f"{name} is declared both as a value and as left empty")
+        for name in TYPICAL_FIELDS:
+            if name not in self.values and name not in self.left_empty:
+                raise ValueError(
+                    f"{name} is neither a sourced value nor listed under left_empty with a reason"
+                )
+        for name, declared in self.values.items():
+            value = declared.value
+            if isinstance(value, bool):
+                raise ValueError(f"{name}: {value!r} is not a number")
+            try:
+                _FIELD_CHECKS[name].validate_python(value, strict=True)
+            except ValidationError as exc:
+                raise ValueError(
+                    f"{name}: {value!r} is not a valid {name} ({exc.errors()[0]['msg']})"
+                ) from exc
+        return self
+
+
+def typical_values(profile_dir: Path) -> dict[str, Any]:
+    """The vehicle's typical stated values, for the Simulate form's "Fill typical
+    values" button: ``{profile, file, file_sha256, values: {field: {value, kind,
+    source}}, left_empty: {field: {reason}}}``, fields in :data:`TYPICAL_FIELDS`
+    order. ``kind`` is ``typical`` or ``placeholder`` (:data:`TYPICAL_KINDS`).
+
+    Refused by name as :class:`SimulationRefusalError` (data in the child, a 409 on
+    the route): ``typical_values_undeclared`` when the profile has no file, and
+    ``typical_values_invalid`` when it fails the schema (an unsourced value, an
+    unknown or never-typical field, a value the SimRequest would refuse, a fillable
+    field neither declared nor reasoned away). Nothing is assumed in their place."""
+    profile_dir = Path(profile_dir)
+    path = profile_dir / TYPICAL_VALUES_FILE
+    try:
+        raw = path.read_bytes()
+    except FileNotFoundError as exc:
+        raise SimulationRefusalError(
+            "typical_values_undeclared",
+            f"{profile_dir.name} has no {TYPICAL_VALUES_FILE}: this vehicle declares no typical "
+            "values, and none are assumed",
+        ) from exc
+    try:
+        declared = TypicalValuesDeclaration.model_validate(yaml.safe_load(raw))
+    except (yaml.YAMLError, ValidationError) as exc:
+        problems = (
+            [
+                f"{'.'.join(str(p) for p in e['loc'])}: {e['msg']}" if e["loc"] else e["msg"]
+                for e in exc.errors()
+            ]
+            if isinstance(exc, ValidationError)
+            else [str(exc)]
+        )
+        raise SimulationRefusalError(
+            "typical_values_invalid", f"{TYPICAL_VALUES_FILE}: " + "; ".join(problems)
+        ) from exc
+    return {
+        "profile": profile_dir.name,
+        "file": TYPICAL_VALUES_FILE,
+        "file_sha256": sha256_hex(raw),
+        "values": {
+            name: {
+                "value": declared.values[name].value,
+                "kind": declared.values[name].kind,
+                "source": declared.values[name].source,
+            }
+            for name in TYPICAL_FIELDS
+            if name in declared.values
+        },
+        "left_empty": {
+            name: {"reason": declared.left_empty[name].reason}
+            for name in TYPICAL_FIELDS
+            if name in declared.left_empty
+        },
+    }
 
 
 # -- the workbench child --------------------------------------------------------------------
@@ -666,10 +886,14 @@ __all__ = [
     "LEARNED_SOURCE",
     "MAX_DRAWS",
     "MAX_GRID_POINTS",
+    "NEVER_TYPICAL_FIELDS",
     "REFUSALS",
     "SIM_SLOT",
     "SLOT_SOURCE",
     "TOOL_VERSION",
+    "TYPICAL_FIELDS",
+    "TYPICAL_KINDS",
+    "TYPICAL_VALUES_FILE",
     "SimRequest",
     "editor_spec",
     "library_base",
@@ -679,4 +903,5 @@ __all__ = [
     "sim_base",
     "simulate_edits",
     "spec_yaml",
+    "typical_values",
 ]

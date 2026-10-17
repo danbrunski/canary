@@ -132,6 +132,278 @@ cases:
     frozen_rules:
       sha256: f522ff5366b9c2ae903cf0ec0bfdbdd2237f7fae713bf57008dd0dcc79ae6ad9
       frozen_at: 2026-10-05T09:19:40Z
+    # E09.12 -- the plant-free outputs. ECU-side BFS (DID 0x1208) and the
+    # final commanded phi (mem:ECM_TARGET_EQUIV_RATIO) of the workbench's
+    # prediction of record (E08.7 item 5), scored per matched pair against the
+    # post-flash recordings with this case's matching, floor and acceptance.
+    # The plant is not used, so plant_not_qualified does not gate it. The
+    # prediction's files are checked against the hashes E08.7 recorded before
+    # any post-change read is taken (prediction_artifact_changed). Declared
+    # 2026-10-16 before any post-change BFS or phi value was read; the
+    # recordings in post existed then (E08.7 lists them), so the order
+    # evidence for the prediction is E08.7's artifact and commit, and these
+    # rules are frozen against later edits (rules_changed).
+    ecu_outputs:
+      declared_on: 2026-10-16
+      prediction:
+        artifact: fuel-comp-restore-2026-10-04
+        recorded_in: 'docs/roadmap/tasks/E08-rom-edit-simulation.md (E08.7 item 5)'
+        design_sha256: 322e4cabadfbdcffefa54662eff3b5a7b721586ebef51a30c9037e0e71517d6e
+        result_digest: 956d7bbed7cb053c544c2c1e0fb5d07542a5a157a56fdcc9d1564cbceec0e8c0
+        result: run-200draws/result.json
+        traces: run-200draws/traces.parquet
+        design: designs/322e4cabadfbdcffefa54662eff3b5a7b721586ebef51a30c9037e0e71517d6e/design.parquet
+        design_record: designs/322e4cabadfbdcffefa54662eff3b5a7b721586ebef51a30c9037e0e71517d6e/design.json
+        # As E08.7 recorded them (2026-10-16T00:56Z and 01:04Z).
+        files:
+          run/result.json: 0e1294711018511faa9ac4bc6cb258ccd35dacae2c9ae27093c9638aba8d34be
+          run/report.html: cd99ebcb3ca013d4e9ed5d557961ce50a974dff0cf8a997a24a45ee0c8bf1477
+          run/traces.parquet: 92d35caa610b1f34b897fabc0398bc4eaf36f66b46307afe16b578505a772066
+          run-200draws/result.json: 71267e1633b467603bdce31cf6d09b63f5595e8f8c8d5d5690e5ca0e4ee57917
+          run-200draws/report.html: 5173dadd56ec584fbcd15f120e12c1a0565d296ea12fbc9ea99c2457c0c67cf4
+          run-200draws/traces.parquet: f05b5c2d3bfa7e94bc370f051670f6cdee2ae0de90f712a545a616b00e4cc5c5
+        # E08.7 recorded the design's canonical sha256 only; its two files,
+        # hashed 2026-10-16T06:09Z before any scoring (design.json carries
+        # that canonical hash, checked too).
+        design_files:
+          designs/322e4cabadfbdcffefa54662eff3b5a7b721586ebef51a30c9037e0e71517d6e/design.json: bccf7f73addc230ce39bea962b0c628040e607c13843cb9b76ce6cb0f7467fbf
+          designs/322e4cabadfbdcffefa54662eff3b5a7b721586ebef51a30c9037e0e71517d6e/design.parquet: 119bf48a49157ffc1e651ba9cfa665d6f65d56501bff681f44c4c6cefc77f0bb
+      interval_quantiles: [0.05, 0.95]
+      unsigned_prediction: within_only
+      outputs:
+        - id: base_fuel_schedule
+          trace_output: base_fuel_schedule
+          observed: 'did:ECM_AIR_CHARGE'
+          model_output: base_fuel_schedule_word
+        - id: target_phi
+          trace_output: target_phi
+          observed: 'mem:ECM_TARGET_EQUIV_RATIO'
+          model_output: target_equiv_ratio
+      # Every recording that tune_revisions.for_session (dated by first
+      # sample) puts on ZS44A-20261004: E08.7's five, and none later on the
+      # laptop (score_ecu_outputs refuses an undeclared one).
+      post:
+        - 2026-10-08T172943
+        - 2026-10-08T182550
+        - _capture-fuel-pulsation-2026-10-08T210012
+        - 2026-10-10T153117
+        - 2026-10-10T165941
+      frozen_rules:
+        sha256: 15eaa48b5d05db87987604ef8dafc62505bea88527b28f03833f8066351cd365
+        frozen_at: 2026-10-16T06:09:20Z
+      evidence: >-
+        Pre-change side: the prediction's 298 design points on
+        _capture-tuning-2026-09-23T142926 (E08.2, base image), each output's
+        read there paired within the plant's ecu_pair_tolerance_s (0.1 s).
+        Predicted change at a point: the 200 draws' relative change (p05,
+        p50, p95, inverted CDF as the prediction's cell table). Post-change
+        side: each output's own reads, with rpm/MAF within pair_tolerance_s,
+        baro/IAT/coolant within slow_max_age_s, the regime from the bracketed
+        commanded phi, steady by the plant's rpm and MAF windows, warm, and
+        N02's closed-loop fill interval on the candidate image paired within
+        pair_tolerance_s: a post read is built as a design point is. Both ends
+        of the two fill intervals must lie within matching.load_input_abs.
+        Trims: BFS and target phi read no trim word in the application model
+        (trim_independence), so the LTFT reset does not move them.
+    # Versioned amendments to ecu_outputs. The block above, its frozen sha and
+    # its verdict stay as they are; an amendment is a new frozen block that
+    # names the sha it amends.
+    ecu_amendments:
+      - version: 2
+        declared_on: 2026-10-16
+        amends: 15eaa48b5d05db87987604ef8dafc62505bea88527b28f03833f8066351cd365
+        quantities:
+          base_fuel_schedule: air_normalised
+        # Both images' bfs_ceiling is flat 255 (read directly, E08.7 item 3):
+        # the clamp is 255 << 8 at every rpm.
+        bfs_ceiling_counts: 65280
+        reason: >-
+          The pre-flash null control (E09.12): with the same ROM on both
+          sides, raw BFS on _capture-tuning-2026-09-22T235224 sits +8.56 %
+          (median, 114 pairs, within 0.035) above the design points at the
+          case's matched conditions, and _capture-tuning-2026-09-22T170459
+          -0.21 % with within 0.73 (93 pairs), so raw BFS between drives
+          moves by more than the within-recording floor without any ROM
+          change. BFS is K x Qa / N x FC / 128 at the steady fixed point, and
+          rpm and the reconstructed fill interval (about 46 counts wide) do
+          not pin Qa / N. Under version 1 and under this amendment no
+          post-flash pair exists (0 of 33 BFS reads co-observed with rpm or
+          MAF within 0.3 s; no phi read at all), so the amendment cannot
+          have been chosen to fit post-flash data. Operator-delegated
+          decision, 2026-10-16 (option a).
+        frozen_rules:
+          sha256: c458d1a663b655e29543030fad5f791e66754454b12774c13c322221d3c3443e
+          frozen_at: 2026-10-16T06:33:31Z
+        evidence: >-
+          Decoded chain (ecu_application_model.yaml, src.decode.air_charge):
+          Tp = floor(floor(K x Qa x m / 256) / (d x N)) x 0x23CB >> 16 with Qa
+          = 0xFFFF2100, N = max(0x40, 0xFFFF1204) (1.5625 rpm per count, so
+          the floor binds below 100 rpm only); 0xFFFF105C = min(0xFFFF, (Tp x
+          FC) >> 7); steady BFS = min(0xFFFF, 4 x 0xFFFF105C, ceiling << 8).
+          So BFS x rpm / MAF = c x K x FC / 128 where (1) BFS is below the
+          ceiling: a read at or above 65,280 is *_at_ceiling and a draw with
+          base or candidate there is left out of the predicted interval
+          (draws_at_ceiling); (2) the fill filter is at its fixed point, the
+          transient term 0xFFFF105A is 0 and the airflow low-pass (0xFFFF20A8,
+          and the 0xFFFF233C speed branch while 0xFFFF283B bit 6) has settled:
+          post reads must pass the plant's rpm and MAF steady windows
+          (transient) and the design points are E07.3-steady; (3) the
+          after-start hot-wire term is zeroed once warm (cold); (4) MAF and
+          rpm are paired (*_maf_unpaired). Not excluded, carried by the floor
+          on both sides: N from PID 0x0C is the 12.5 rpm word w1210, which
+          bounds w1204 to eight counts (up to 1.7 % at 750 rpm), and PID 0x10
+          MAF stands for Qa (the curve 0xE27E output after the low-pass and
+          the purge hold, unmodelled). The MAF-fault and cranking branches are
+          assumed absent, as in E05.2. The predicted change is unchanged: at a
+          design point base and candidate share its rpm and airflow, so the
+          normalised change is the traces' candidate / base - 1. target_phi
+          keeps raw.
+      - version: 3
+        declared_on: 2026-10-16
+        amends: c458d1a663b655e29543030fad5f791e66754454b12774c13c322221d3c3443e
+        quantities:
+          base_fuel_schedule: air_normalised
+        bfs_ceiling_counts: 65280
+        resolvable: predicted_beyond_floor
+        exclude_unknown_regime: true
+        reason: >-
+          Under version 2 a no-change drive passes against the real
+          prediction: _capture-tuning-2026-09-22T235224 (pre-flash, the base
+          image on both sides) scores direction 0.762 on 21 signed pairs and
+          within 0.904, because pairs at design points whose predicted change
+          is about zero dominate (cell 800x48 alone gives 73 pairs) and a
+          zero observed change sits inside them. A pair now counts only where
+          the point's predicted |change| exceeds the output's
+          condition-matched floor, so the test has power at every counted
+          pair; direction and within-uncertainty are computed over those
+          pairs only, with E07.4's min_pairs (20) as their minimum (E07.4
+          declares no per-cell or per-regime minimum). Fewer is
+          insufficient_evidence named prediction_unresolvable. unknown-regime
+          reads are excluded by name: E07.4's effect tests score named
+          regimes only (match_pairs compares the label, so unknown would
+          otherwise pair with unknown). Declared before any co-observed
+          post-flash pair exists: under version 1 and version 2 the five
+          post-flash recordings give 0 pairs for both outputs (BFS 33 reads,
+          all not_co_observed; phi never captured), so the rule cannot have
+          been chosen to fit post-flash data. Version 2's block and verdict
+          stand as recorded. Operator-delegated decision, 2026-10-16.
+        frozen_rules:
+          sha256: 7a9f4279ea966eeda4621a51a76fa0033074ab4285ad45b21d1b61f56c75f2d6
+          frozen_at: 2026-10-16T06:56:08Z
+        evidence: >-
+          Version 2's decoded-chain evidence holds unchanged (same quantities
+          and ceiling). Resolvable: |p50 of the draws' relative change| >
+          the floor (p90 |pre-vs-pre change|) of that output under the same
+          quantity; design points at or below it are pre_unresolvable and are
+          not paired, so a post read is never consumed by a point the test
+          cannot resolve. pairs_before_resolvable reports what every
+          predicted point would have paired.
+    # Further predictions of this flash, each a new frozen block with its own
+    # artifact and rules (E09.12 follow-up). Not an amendment: ecu_outputs'
+    # artifact is frozen inside 15eaa48b... and is never re-pointed. Each block
+    # shares this case's flash, images, E07.4 matching, floor and acceptance
+    # (frozen by f522ff53...), and its declared post-change recordings
+    # (ecu_outputs.post + ecu_post_appended): those belong to the
+    # intervention, not to one prediction.
+    ecu_predictions:
+      - id: fuel-comp-restore-2026-10-04-wot
+        declared_on: 2026-10-16
+        prediction:
+          artifact: fuel-comp-restore-2026-10-04-wot
+          recorded_in: 'docs/roadmap/tasks/E08-rom-edit-simulation.md (E08.7, second prediction, commit b870e80f)'
+          design_sha256: f4332b8d0890c2de9805fb35e01c895a8a0c6621752e743399d95193dc5688fa
+          result_digest: 6180dbcd0f6e05ce63b2caa1333890f24105e9d69734c4c659e74cd114efef71
+          result: run-200draws/result.json
+          traces: run-200draws/traces.parquet
+          design: designs/f4332b8d0890c2de9805fb35e01c895a8a0c6621752e743399d95193dc5688fa/design.parquet
+          design_record: designs/f4332b8d0890c2de9805fb35e01c895a8a0c6621752e743399d95193dc5688fa/design.json
+          # As E08.7 recorded them (b870e80f); re-hashed 2026-10-16 before
+          # this block was written, all equal.
+          files:
+            run-200draws/result.json: 4f5db38a735a6fa3570c56f6bd2b06ac8266748f7654b99bbe9d27f477b81309
+            run-200draws/report.html: 4cde07b016eb972f838adfd1eab6eb010c1d0bbb423cf43920f1ff056b983fbd
+            run-200draws/traces.parquet: 760bcea01ef22fb1256a8855779b0d79eaaf516970e5b362fa79c7020b95381f
+          # E08.7 recorded these by prefix and suffix (20e516956daa5b2a...2cdf,
+          # b648148c4857c018...000e); the full values match both.
+          design_files:
+            designs/f4332b8d0890c2de9805fb35e01c895a8a0c6621752e743399d95193dc5688fa/design.json: 20e516956daa5b2a2cca91524e0c4a01e23267c0a49faaf831c60223613b2cdf
+            designs/f4332b8d0890c2de9805fb35e01c895a8a0c6621752e743399d95193dc5688fa/design.parquet: b648148c4857c01851d72bc18a9c33f5a6cfb4378aa05251846aa9f360df000e
+        # The drives the design was built from (design.json sessions; checked
+        # before scoring, design_recordings_mismatch). None may be a null drive.
+        design_recordings:
+          - _capture-tuning-2026-09-21T223734
+          - _capture-tuning-2026-09-21T232153
+          - _capture-tuning-2026-09-22T170459
+          - _capture-tuning-2026-09-22T235224
+        # Pre-flash tuning drives on ZS44A-20260920 NOT in the design: scored
+        # as "post" on the base image against this real prediction
+        # (ecu_null_control). A test with power does not pass there.
+        null_control:
+          - _capture-tuning-2026-09-23T142926
+          - _capture-tuning-2026-09-23T164007
+        interval_quantiles: [0.05, 0.95]
+        unsigned_prediction: within_only
+        outputs:
+          - id: base_fuel_schedule
+            trace_output: base_fuel_schedule
+            observed: 'did:ECM_AIR_CHARGE'
+            model_output: base_fuel_schedule_word
+          - id: target_phi
+            trace_output: target_phi
+            observed: 'mem:ECM_TARGET_EQUIV_RATIO'
+            model_output: target_equiv_ratio
+        quantities:
+          base_fuel_schedule: air_normalised
+        bfs_ceiling_counts: 65280
+        resolvable: predicted_beyond_floor
+        exclude_unknown_regime: true
+        # Co-observed post-flash pairs when this block froze, per output.
+        co_observed_at_freeze:
+          base_fuel_schedule: 0
+          target_phi: 0
+        reason: >-
+          The first prediction (ecu_outputs, amendments 2 and 3) has no design
+          point resolvable in a named regime: its design is one mostly idle
+          drive. E08.7 (b870e80f) recorded a second prediction of the same
+          flash on a WOT-rich design of four pre-flash drives; its artifact is
+          not inside 15eaa48b..., so it is scored under this new block, never
+          by re-pointing the first. Rules are amendment 3's: BFS
+          air-normalised (BFS x rpm / MAF, ceiling 65,280), phi raw; a pair
+          counts only where the point's predicted |p50| exceeds the output's
+          condition-matched floor; E07.4's min_pairs (20) on those pairs;
+          unknown-regime reads excluded by name. Expected before any post or
+          null read, from the prediction and its pre side only: BFS:
+          prediction_unresolvable -- the air-normalised floor on this design is
+          3.19 % (330 pairs) and only 3 of 917 points predict beyond it
+          (points 365-367, +3.82 to +3.85 %), all unknown regime. Phi: 26
+          points have a nonzero p50 under the scoring quantile (inverted CDF;
+          E08.7's 27 used the interpolated median), the floor is 0.0 % (171
+          pairs), but only 9 of them have a phi read within 0.1 s on their own
+          drive in a named regime, so phi is bounded at 9 pairs, below 20,
+          however well a post-flash drive is co-sampled: insufficient_evidence
+          is expected for phi too. Both are kept and scored rather than
+          dropped. Null control: the design uses
+          _capture-tuning-2026-09-21T223734, -21T232153, -22T170459 and
+          -22T235224, so none of them is an independent no-change drive; the
+          pre-flash tuning drives -23T142926 and -23T164007 are. Order
+          evidence: frozen while 0 co-observed post-flash pairs exist for
+          either output -- the five post-flash recordings hold 33 BFS reads,
+          all not_co_observed (no rpm or MAF read within 0.3 s), and no
+          mem:ECM_TARGET_EQUIV_RATIO read; no null-control drive had been
+          scored against this prediction.
+        frozen_rules:
+          sha256: bfc4e6ee7a560997512a19e2bfda36f4aa4fc6940d15fcf042964b3494ffb8b4
+          frozen_at: 2026-10-16T11:14:00Z
+        evidence: >-
+          Amendment 2's decoded-chain evidence holds unchanged (same quantity
+          and ceiling). The design is fuel-mv-2's (design.json plant_version),
+          whose pair_tolerance_s (0.3 s) and ecu_pair_tolerance_s (0.1 s) equal
+          fuel-mv-1's, so the post-side co-observation counts measured under
+          ecu_outputs carry over. Pre-side counts (no post or null read):
+          917 points, closed_loop 859, unknown 39, enrichment 19; BFS
+          pre_observed_unpaired 3, draws_at_ceiling 0, pre_unresolvable 875,
+          pre_regime_unknown 39; phi pre_observed_unpaired 421,
+          pre_regime_unknown 31, pre_not_predicted 2, pre_unresolvable 454.
     evidence: >-
       B08.6's October 4 Fuel Comp restore. Changes: the Fuel Comp load axis
       0xCB29 and slot 1's Fuel Comp cells, plus checksums (rom_effects:

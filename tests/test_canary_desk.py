@@ -30,6 +30,7 @@ import pytest
 import yaml
 
 from scripts import canary_desk as desk
+from scripts import venv_launch
 from src.config import DAEMON_STATE_LAYOUT, CanaryConfig
 from src.control.rom_library import RomLibrary, RomLibraryError
 from src.paths import REPO_ROOT
@@ -798,3 +799,294 @@ def test_a_second_ctrl_c_while_stopping_escalates_to_kill_without_a_traceback() 
     code = desk.stop_child(daemon, grace=5)  # type: ignore[arg-type]
     assert daemon.terminated and daemon.killed
     assert code == -9
+
+
+# -- running under the venv, creating it when missing (scripts/venv_launch.py, shared with the
+#    companion launcher that was folded into this one) ------------------------------------------
+
+
+def desk_script() -> Path:
+    return (REPO_ROOT / "scripts" / "canary_desk.py").resolve()
+
+
+def plan(
+    argv: list[str],
+    *,
+    venv: Path,
+    inside: bool,
+    present: bool = True,
+    version: tuple[int, int] = (3, 12),
+    bootstrapped: bool = False,
+) -> venv_launch.Launch:
+    return venv_launch.launch_plan(
+        argv,
+        script=desk_script(),
+        venv=venv,
+        prefix=str(venv) if inside else "/usr",
+        version=version,
+        executable="/usr/bin/python3",
+        environ={venv_launch.BOOTSTRAPPED_ENV: "1"} if bootstrapped else {},
+        module_present=lambda _name: present,
+    )
+
+
+def make_venv(tmp_path: Path) -> Path:
+    venv = tmp_path / ".venv"
+    venv_launch.venv_python(venv).parent.mkdir(parents=True)
+    venv_launch.venv_python(venv).write_text("")
+    return venv
+
+
+def test_inside_a_complete_venv_the_launcher_simply_runs(tmp_path: Path) -> None:
+    assert plan([], venv=make_venv(tmp_path), inside=True) == venv_launch.Launch("run")
+
+
+def test_outside_the_venv_the_script_re_launches_under_it_with_its_arguments(
+    tmp_path: Path,
+) -> None:
+    venv = make_venv(tmp_path)
+    launch = plan(["--port", "8123", "--no-browser"], venv=venv, inside=False)
+    assert launch.action == "exec"
+    assert launch.command == (
+        str(venv_launch.venv_python(venv)),
+        str(desk_script()),
+        "--port",
+        "8123",
+        "--no-browser",
+    )
+
+
+def test_with_no_venv_the_installer_creates_one_without_torch(tmp_path: Path) -> None:
+    venv = tmp_path / ".venv"
+    launch = plan([], venv=venv, inside=False)
+    assert launch.action == "install"
+    assert launch.command == (
+        "/usr/bin/python3",
+        str(venv_launch.INSTALLER),
+        "--venv",
+        str(venv),
+        "--torch",
+        "none",
+    )
+    assert venv_launch.INSTALLER.exists()
+
+
+def test_a_venv_without_its_packages_is_installed_into_then_refused_if_still_empty(
+    tmp_path: Path,
+) -> None:
+    venv = make_venv(tmp_path)
+    first = plan([], venv=venv, inside=True, present=False)
+    assert first.action == "install"
+    assert first.command[0] == str(venv_launch.venv_python(venv))
+    assert "--torch" in first.command and "none" in first.command
+    again = plan([], venv=venv, inside=True, present=False, bootstrapped=True)
+    assert again.action == "refuse" and again.reason == "venv_incomplete"
+    assert "pydantic" in again.message and venv_launch.MANUAL_INSTALL in again.message
+
+
+def test_no_bootstrap_refuses_by_name_instead_of_installing(tmp_path: Path) -> None:
+    missing = plan(["--no-bootstrap"], venv=tmp_path / ".venv", inside=False)
+    assert (missing.action, missing.reason) == ("refuse", "venv_missing")
+    assert venv_launch.MANUAL_INSTALL in missing.message
+    empty = plan(["--no-bootstrap"], venv=make_venv(tmp_path), inside=True, present=False)
+    assert (empty.action, empty.reason) == ("refuse", "venv_incomplete")
+    # An existing venv is still used: no install is needed to re-launch.
+    existing = plan(["--no-bootstrap"], venv=make_venv(tmp_path / "b"), inside=False)
+    assert existing.action == "exec"
+
+
+def test_an_old_python_cannot_create_the_venv_and_says_which_to_install(tmp_path: Path) -> None:
+    launch = plan([], venv=tmp_path / ".venv", inside=False, version=(3, 11))
+    assert (launch.action, launch.reason) == ("refuse", "python_too_old")
+    assert "3.12" in launch.message and "3.11" in launch.message
+
+
+def test_importing_the_module_never_re_launches() -> None:
+    # The prologue runs only under ``__main__``; this test file imported the module.
+    assert desk.__name__ != "__main__"
+    assert "yaml" in sys.modules
+    assert desk.ensure_venv is venv_launch.ensure_venv
+
+
+def test_ensure_venv_refuses_with_exit_2_and_execs_nothing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    def forbidden(*_: Any, **__: Any) -> Any:
+        raise AssertionError("must not exec or install on a refusal")
+
+    monkeypatch.setattr(os, "execve", forbidden)
+    monkeypatch.setattr(subprocess, "call", forbidden)
+    monkeypatch.setattr(venv_launch, "VENV_DIR", tmp_path / ".venv")
+    monkeypatch.setattr(sys, "prefix", "/usr")
+    with pytest.raises(SystemExit) as exc:
+        venv_launch.ensure_venv(desk_script(), ["--no-bootstrap"])
+    assert exc.value.code == 2
+    assert "venv_missing" in capsys.readouterr().err
+
+
+SYSTEM_PYTHON = Path("/usr/bin/python3")
+
+
+@pytest.mark.skipif(not SYSTEM_PYTHON.exists(), reason="needs a system python3")
+def test_run_with_the_system_python_it_re_launches_under_the_venv() -> None:
+    # The venv's python may be a symlink to this very binary; what differs is
+    # sys.prefix, which is what the prologue reads. The push gate runs this
+    # file in a throwaway worktree that has no .venv of its own: there the
+    # script must refuse by name, never create one, so --no-bootstrap is
+    # passed and a missing venv is a skip, not an install.
+    if not venv_launch.venv_python().exists():
+        pytest.skip(f"no venv at {venv_launch.VENV_DIR} (a throwaway worktree)")
+    out = subprocess.run(
+        [str(SYSTEM_PYTHON), str(SCRIPT), "--no-bootstrap", "--help"],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+        timeout=60,
+        env={**os.environ, venv_launch.BOOTSTRAPPED_ENV: ""},
+    )
+    assert out.returncode == 0, out.stderr
+    assert f"re-launching under {venv_launch.venv_python()}" in out.stderr
+    assert "--state-dir" in out.stdout and "--no-bootstrap" in out.stdout
+
+
+# -- companion mode: the daemon linked to a Pi -----------------------------------------------
+
+
+def test_the_desk_config_turns_companion_mode_on_with_the_library_under_the_state_dir(
+    tmp_path: Path,
+) -> None:
+    state = tmp_path / "state"
+    raw = desk.build_config(state)
+    assert raw["companion"] == {"enabled": True, "pi_token_env": desk.PI_TOKEN_ENV}
+    config = CanaryConfig.model_validate(raw)
+    assert config.companion.library_root == state.resolve() / "library"
+    assert config.collection.storage_path == state.resolve() / "library" / "sessions"
+    off = desk.build_config(state, companion=False)
+    assert "companion" not in off
+    assert CanaryConfig.model_validate(off).collection.storage_path == state.resolve() / "sessions"
+
+
+def test_a_library_root_may_sit_outside_the_state_dir_but_never_in_the_checkout(
+    tmp_path: Path,
+) -> None:
+    elsewhere = tmp_path / "elsewhere"
+    raw = desk.build_config(tmp_path / "state", library_root=elsewhere)
+    assert raw["companion"]["library_root"] == str(elsewhere.resolve())
+    config = CanaryConfig.model_validate(raw)
+    assert config.collection.storage_path == elsewhere.resolve() / "sessions"
+    with pytest.raises(desk.DeskRefusalError) as exc:
+        desk.build_config(tmp_path / "state", library_root=REPO_ROOT / "data" / "lib")
+    assert exc.value.reason == "inside_checkout"
+    assert "companion.library_root" in str(exc.value)
+
+
+def test_the_operators_token_reaches_the_daemon_only_as_the_pis(tmp_path: Path) -> None:
+    env = desk.daemon_env("desk-token", {"CANARY_CONTROL_TOKEN": "real", "PATH": "/bin"})
+    assert "CANARY_CONTROL_TOKEN" not in env
+    assert env[desk.PI_TOKEN_ENV] == "real"
+    assert env[desk.TOKEN_ENV] == "desk-token"
+    without = desk.daemon_env("desk-token", {"PATH": "/bin"})
+    assert desk.PI_TOKEN_ENV not in without
+
+
+def test_the_companion_flag_is_auto_or_off() -> None:
+    assert desk.parse_args([]).companion == "auto"
+    assert desk.parse_args(["--companion", "off"]).companion == "off"
+    with pytest.raises(SystemExit):
+        desk.parse_args(["--companion", "on"])
+
+
+class _StatusServer:
+    """A ``/companion/status`` double: a sequence of answers, then the last one forever."""
+
+    def __init__(self, monkeypatch: pytest.MonkeyPatch, answers: list[Any]) -> None:
+        self.answers = list(answers)
+        self.calls = 0
+
+        def fake_urlopen(url: str, timeout: float = 0) -> Any:
+            assert url.endswith("/companion/status")
+            self.calls += 1
+            answer = self.answers.pop(0) if len(self.answers) > 1 else self.answers[0]
+            if isinstance(answer, int):
+                raise urllib.error.HTTPError(url, answer, "x", {}, None)  # type: ignore[arg-type]
+            body = json.dumps(answer).encode()
+
+            class _Response:
+                status = 200
+
+                def read(self) -> bytes:
+                    return body
+
+                def __enter__(self) -> _Response:
+                    return self
+
+                def __exit__(self, *_: Any) -> None:
+                    return None
+
+            return _Response()
+
+        monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+
+
+def _status(**over: Any) -> dict[str, Any]:
+    base: dict[str, Any] = {
+        "library_root": "/lib",
+        "pi": None,
+        "pi_token_present": False,
+        "discovery": {"state": "done", "found": [], "ran_at": "t", "error": None},
+    }
+    base.update(over)
+    return base
+
+
+def test_the_companion_line_says_off_linked_several_or_none(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    sleeps: list[float] = []
+    clock = iter([0.0, 0.0, 0.3, 0.6, 100.0])
+    _StatusServer(monkeypatch, [404])
+    assert desk.companion_line("http://h", wait=1) == "companion : off (--companion off)"
+
+    linked = _status(
+        pi={
+            "base_url": "http://192.168.0.42:8000",
+            "source": "discovered",
+            "identity": {"hostname": "canary-8974", "profile": "nissan-xterra-2008"},
+        },
+        pi_token_present=True,
+    )
+    _StatusServer(monkeypatch, [linked])
+    line = desk.companion_line("http://h", wait=1)
+    assert line == (
+        "companion : linked to canary-8974 (nissan-xterra-2008) at http://192.168.0.42:8000 "
+        "(found on the network; Pi token present); library /lib"
+    )
+
+    two = _status(
+        discovery={
+            "state": "done",
+            "ran_at": "t",
+            "error": None,
+            "found": [
+                {"base_url": "http://a:8000", "host": "a", "identity": {"hostname": "canary-a"}},
+                {"base_url": "http://b:8000", "host": "b", "identity": {}},
+            ],
+        }
+    )
+    _StatusServer(monkeypatch, [two])
+    assert desk.companion_line("http://h", wait=1) == (
+        "companion : 2 Pis found, choose one in the dashboard: canary-a at http://a:8000, "
+        "b at http://b:8000; library /lib"
+    )
+
+    _StatusServer(monkeypatch, [_status()])
+    assert desk.companion_line("http://h", wait=1).startswith("companion : no Pi found")
+
+    # A running search is waited for, up to the deadline, then reported as such.
+    running = _status(discovery={"state": "running", "found": [], "ran_at": None, "error": None})
+    server = _StatusServer(monkeypatch, [running, running, _status()])
+    line = desk.companion_line("http://h", wait=1, sleep=sleeps.append, clock=lambda: next(clock))
+    assert line.startswith("companion : no Pi found") and server.calls == 3 and len(sleeps) == 2
+    server = _StatusServer(monkeypatch, [running])
+    line = desk.companion_line("http://h", wait=0, sleep=sleeps.append)
+    assert line == "companion : still searching the network for a Pi; library /lib"

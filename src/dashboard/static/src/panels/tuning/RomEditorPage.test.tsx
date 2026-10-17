@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { HttpError, controlBlob, controlJson } from "../../api/core";
@@ -12,7 +12,12 @@ import {
   TABLES_WITH_FUEL_COMP,
   fuelCompTable,
 } from "../../test/romLibraryFixtures";
-import type { RomEditPreview, RomEditPreviewRequest } from "../../types/romEditor";
+import {
+  LEVERS_FUEL_COMP,
+  LEVERS_MAF_CURVE,
+  LEVERS_TIMING_TRIM,
+} from "../../test/romLeverFixtures";
+import type { RomEditPreview, RomEditPreviewRequest, RomLevers } from "../../types/romEditor";
 import { downloadText } from "../../util/browser";
 import { Workbench, type DashboardData } from "../Workbench";
 import { RomEditorPage } from "./RomEditorPage";
@@ -105,6 +110,7 @@ function previewFor(request: RomEditPreviewRequest): RomEditPreview {
       },
     },
     tables: [after],
+    levers: LEVERS_FUEL_COMP,
     sim_base: { ok: true, status: "matched", revision: "ZS44A-20260920", reason: null },
   };
 }
@@ -500,6 +506,122 @@ describe("ROM Editor page: spec download and no image", () => {
       .filter((text) => /download/i.test(text));
     expect(downloads).toEqual(["Download spec"]);
     expect(screen.queryByText(/download (the )?(image|candidate|rom)/i)).not.toBeInTheDocument();
+  });
+});
+
+const LEVERS_HEADING = "What this edit can and cannot show";
+
+/** Select, scale, label and preview, with `levers` as the daemon sent them. */
+async function previewWithLevers(levers: RomLevers | null) {
+  route((init) => {
+    const body = previewFor(JSON.parse(bodyOf(init)));
+    return levers === null ? { ...body, levers: undefined } : { ...body, levers };
+  });
+  const grid = await openFuelComp();
+  await applyScale(grid);
+  await userEvent.type(screen.getByLabelText("Label for this edit set"), "idle richer");
+  await userEvent.click(screen.getByRole("button", { name: "Preview" }));
+}
+
+const shown = (block: HTMLElement) =>
+  within(block)
+    .getAllByRole("listitem")
+    .map((item) => item.textContent);
+
+describe("ROM Editor page: what the edit can and cannot show (E09.14b)", () => {
+  it("lists the classifier's messages verbatim and in order, one per line, before Simulate", async () => {
+    await previewWithLevers(LEVERS_FUEL_COMP);
+    const result = await screen.findByRole("region", { name: "Preview result" });
+    const block = within(result).getByRole("region", { name: LEVERS_HEADING });
+    expect(within(block).getByRole("heading", { name: LEVERS_HEADING })).toBeVisible();
+    // Exactly the strings, in the order the daemon sent them: not reworded,
+    // grouped, filtered or counted.
+    expect(LEVERS_FUEL_COMP.messages.length).toBeGreaterThan(4);
+    expect(shown(block)).toEqual(LEVERS_FUEL_COMP.messages);
+    // A Fuel Comp edit: the two ECU outputs get a number, the plant's wait on
+    // the plant and on the closed loop (E09.14's Accept).
+    expect(block).toHaveTextContent(
+      "Fuel Comp -> base_fuel_schedule_word: a number can be given (for points that state only the fill byte)",
+    );
+    expect(block).toHaveTextContent(
+      /plant not qualified: .*; closed loop: trim authority undecoded/,
+    );
+    // It is on the page before Simulate is offered: above the Simulate region
+    // in the document, and the form is there below it.
+    const simulate = screen.getByRole("region", { name: "Simulate" });
+    expect(block.compareDocumentPosition(simulate) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(within(simulate).getByRole("form", { name: "Simulate form" })).toBeVisible();
+  });
+
+  it("says 'no torque plant' for a timing trim and 'not mapped' for bytes outside the map", async () => {
+    await previewWithLevers(LEVERS_TIMING_TRIM);
+    let block = within(await screen.findByRole("region", { name: "Preview result" })).getByRole(
+      "region",
+      { name: LEVERS_HEADING },
+    );
+    expect(block).toHaveTextContent("Timing trim A -> ignition_trim_selected: no torque plant");
+    expect(shown(block)).toEqual(LEVERS_TIMING_TRIM.messages);
+    cleanup();
+    vi.clearAllMocks();
+
+    await previewWithLevers(LEVERS_MAF_CURVE);
+    block = within(await screen.findByRole("region", { name: "Preview result" })).getByRole(
+      "region",
+      { name: LEVERS_HEADING },
+    );
+    expect(block).toHaveTextContent(/0xE27E: not mapped \(outside rom_map\.yaml\)/);
+    expect(shown(block)).toEqual(LEVERS_MAF_CURVE.messages);
+  });
+
+  it("shows whatever strings it is given, unaltered", async () => {
+    // Not the classifier's wording: if the page wrote any text of its own for
+    // a message, or tidied this one, it would not come back equal.
+    const odd = [
+      "Zed -> out_b: first  (two  spaces)",
+      "Alpha -> out_a: <b>markup</b> & ampersand; semicolons; and a 'quote'",
+      "no change: the candidate is the baseline image",
+    ];
+    await previewWithLevers({ ...LEVERS_FUEL_COMP, messages: odd });
+    const block = within(await screen.findByRole("region", { name: "Preview result" })).getByRole(
+      "region",
+      { name: LEVERS_HEADING },
+    );
+    expect(shown(block)).toEqual(odd);
+    expect(block.querySelector("b")).toBeNull();
+  });
+
+  it("is absent only when messages is empty, and the rest of the preview is unchanged", async () => {
+    // The classifier's floor is one line ("the edit reaches no output"), so an
+    // empty list is not an all-clear it sent: the block is not drawn, and
+    // nothing else of the preview depends on it.
+    await previewWithLevers({ ...LEVERS_FUEL_COMP, messages: [] });
+    const result = await screen.findByRole("region", { name: "Preview result" });
+    expect(within(result).queryByRole("region", { name: LEVERS_HEADING })).not.toBeInTheDocument();
+    expect(within(result).queryByText(LEVERS_HEADING)).not.toBeInTheDocument();
+    expect(within(result).getByRole("button", { name: "Download spec" })).toBeVisible();
+    expect(
+      within(result).getByRole("table", { name: "Fuel Compensation (Map 1) after the edits" }),
+    ).toBeVisible();
+  });
+
+  it("refuses a preview that carries no levers, naming the version mismatch, rather than showing an edit unclassified", async () => {
+    await previewWithLevers(null);
+    const alert = await screen.findByText(/response has no levers/);
+    expect(alert).toHaveTextContent(/different versions/);
+    expect(screen.queryByRole("region", { name: "Preview result" })).not.toBeInTheDocument();
+  });
+
+  it("still offers no image download or candidate link with the block drawn", async () => {
+    await previewWithLevers(LEVERS_FUEL_COMP);
+    await screen.findByRole("region", { name: LEVERS_HEADING });
+    expect(blob).not.toHaveBeenCalled();
+    expect(screen.queryAllByRole("link")).toEqual([]);
+    expect(document.querySelector("a[href], a[download]")).toBeNull();
+    const downloads = screen
+      .getAllByRole("button")
+      .map((button) => button.textContent ?? "")
+      .filter((text) => /download/i.test(text));
+    expect(downloads).toEqual(["Download spec"]);
   });
 });
 

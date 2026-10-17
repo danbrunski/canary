@@ -543,7 +543,12 @@ def test_did_shortfall_counts_dids_the_window_could_not_serve(clock: FakeClock) 
     assert cycle["did_shortfall"] > 0
     assert cycle["cycles_started"] > 0
     log = request_log(bus)
-    for earlier, later in pairwise(entries(log)):
+    # The loop's first window opens as soon as its members are due under a
+    # cycle (E09.1), not a config interval later, while Mode 01 is still
+    # spending every slot: nothing banked, and a 0.02 s window cannot reach the
+    # next 1/32 s slot, so it reads nothing (counted above). Every later window
+    # opens on a boundary the idle Mode 01 phase banked a slot for.
+    for earlier, later in pairwise(entries(log)[1:]):
         assert "did" in kinds_between(log, earlier, later)
 
 

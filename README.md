@@ -129,8 +129,25 @@ To edit a ROM and run the simulator on a laptop, with no truck and no CAN
 adapter, run one command:
 
 ```bash
-.venv/bin/python scripts/canary_desk.py
+python3 scripts/canary_desk.py
 ```
+
+Any Python 3.12+ will do to start it: the script re-launches itself under the
+repo's `.venv`, and on a fresh checkout it first creates that venv with
+`scripts/install_deps.py` (without Torch; desk mode runs no model). Pass
+`--no-bootstrap` to have it refuse instead of installing anything.
+
+It also runs in **companion mode** (`--companion auto`, the default): the
+daemon keeps a library under `<state-dir>/library` (`--library-root` to put it
+elsewhere), searches the network once at startup for a CANary Pi (the
+conventional names, the wired `192.168.137.2`, then a sweep of your LAN), and
+links to the one it finds. The launcher prints the result on one `companion :`
+line; the dashboard's Companion card shows the linked Pi, lets you pick one
+when several were found, and syncs sessions or publishes models to it. Your
+`CANARY_CONTROL_TOKEN` is handed to the daemon as the *Pi's* token only. The
+Pi's own dashboard is still at `http://<pi>:8000`. `--companion off` leaves
+all of this out. (The former `scripts/canary_companion.py` is gone; this
+is it.)
 
 It starts the whole daemon on a virtual CAN bus with OBD disabled (it never
 transmits) and opens the ROM Editor in your browser, already signed in: the

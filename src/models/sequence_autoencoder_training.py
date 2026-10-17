@@ -101,6 +101,11 @@ class CalibrationCoverageError(ValueError):
             "manifest's calibration_holdout)."
         )
 
+    def __reduce__(self) -> tuple[object, ...]:
+        # Rebuilt from its constructor's arguments, so it survives a process
+        # boundary (pickle); tests/test_exceptions_pickle.py holds every class to it.
+        return (type(self), (self.violations,), self.__dict__)
+
 
 def _calibration_drive_count(calibration: SequenceWindowDataset, sessions: Sequence[str]) -> int:
     """Physical drives the calibration windows come from

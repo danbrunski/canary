@@ -6,8 +6,6 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from src.dashboard.schemas import TrainingRunApprovalRequest as TrainingRunApprovalRequest
-
 
 class _ApiRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -17,6 +15,12 @@ class ImportSessionRequest(_ApiRequest):
     archive_b64: str
     source_host: str | None = None
     index_with_config: bool = True
+
+
+class SelectPiRequest(_ApiRequest):
+    """``POST /companion/pi``: the daemon to link to, as a host or a base URL."""
+
+    base_url: str
 
 
 class SyncSessionRequest(_ApiRequest):
@@ -62,7 +66,7 @@ __all__ = [
     "ModelUploadRequest",
     "PublishModelRequest",
     "SessionMetadataRequest",
+    "SelectPiRequest",
     "SessionPinRequest",
     "SyncSessionRequest",
-    "TrainingRunApprovalRequest",
 ]

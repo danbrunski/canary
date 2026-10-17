@@ -10,8 +10,9 @@ Subcommands::
 
     design drives  pre-change drives -> a frozen, hashed point design (E08.2)
     design grid    a stated rpm x load grid -> the same kind of design
-    inspect        the resolved cell edits (old -> new raw, +/- %) and what
-                   compare_roms says they reach; runs nothing
+    inspect        the resolved cell edits (old -> new raw, +/- %), what
+                   compare_roms says they reach, and the lever and what
+                   blocks a number (rom_levers); runs nothing
     run            a paired Monte Carlo over a design -> result.json,
                    traces.parquet (a ``_sim-*`` session) and report.html
 
@@ -60,12 +61,12 @@ import math
 import time
 from collections.abc import Mapping, Sequence
 from pathlib import Path
-from typing import Any
+from typing import Any, get_args
 
 import pandas as pd
 from pydantic import ValidationError
 
-from src.analysis.ecu_application import ApplicationModelRefusalError
+from src.analysis.ecu_application import ApplicationModelRefusalError, OverrideRegime
 from src.analysis.fuel_comp_inputs import load_fuel_comp_declaration
 from src.analysis.fuel_comp_rom import (
     ROM_DIRS_ENV,
@@ -73,12 +74,11 @@ from src.analysis.fuel_comp_rom import (
     RevisionImageResolver,
     rom_dirs_from_env,
 )
-from src.analysis.fuel_plant import FuelPlantRefusalError
+from src.analysis.fuel_plant import FuelPlantRefusalError, plant_qualification
 from src.analysis.paired_scenarios import (
     LearnedState,
     PairedScenario,
     SimKit,
-    load_kit,
 )
 from src.analysis.rom_edit_spec import (
     BaseImage,
@@ -90,7 +90,13 @@ from src.analysis.rom_edit_spec import (
     load_edit_spec,
     resolve_base,
 )
-from src.analysis.rom_effects import Candidate, RomEffectRefusalError, compare_roms
+from src.analysis.rom_effects import (
+    Candidate,
+    EffectReport,
+    RomEffectRefusalError,
+    compare_roms,
+)
+from src.analysis.rom_levers import classify_edit
 from src.analysis.sim_cells import (
     TOOL_VERSION as CELLS_TOOL_VERSION,
 )
@@ -116,10 +122,9 @@ from src.analysis.sim_design import (
 )
 from src.analysis.sim_montecarlo import (
     MODE,
-    UNCERTAINTY_FILE,
+    LoadedUncertainty,
     MonteCarloDesign,
-    kit_for_plant,
-    load_uncertainty,
+    load_sim_kit,
     run_monte_carlo,
 )
 from src.analysis.sim_montecarlo import TOOL_VERSION as MONTECARLO_TOOL_VERSION
@@ -130,8 +135,10 @@ from src.signals.derived import FUEL_PROPERTIES
 from src.vehicle.tune_revisions import load_tune_revisions
 
 TOOL = "rom_sim"
-#: Bump when the result file's shape or meaning changes.
-TOOL_VERSION = "1"
+#: Bump when the result file's shape or meaning changes. 2: runs the
+#: simulator's declared plant (sim_kit.yaml, fuel-mv-2) by default, with that
+#: plant's own uncertainty declaration (E08.11).
+TOOL_VERSION = "2"
 
 DEFAULT_PROFILE = REPO_ROOT / "data" / "nissan-xterra-2008"
 DEFAULT_SESSIONS = Path.home() / "canary-data" / "sessions" / "nissan-xterra-2008"
@@ -259,8 +266,9 @@ def _add_common(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--plant-version",
         default=None,
-        help="a frozen plant declaration among the profile's fuel_plant*.yaml "
-        "(default: the version the contract runs)",
+        help="a frozen plant declaration among the profile's fuel_plant*.yaml that "
+        "sim_kit.yaml lists an uncertainty declaration for (default: the simulator's "
+        "declared plant, sim_kit.yaml's plant_version; designs default to it too)",
     )
 
 
@@ -292,7 +300,11 @@ class _World:
 
     def __init__(self, args: argparse.Namespace, *, need_candidate: bool = True) -> None:
         self.profile = _profile(args)
-        self.kit: SimKit = kit_for_plant(load_kit(self.profile), self.profile, args.plant_version)
+        # The simulator's own declared plant (sim_kit.yaml, E08.11), never the
+        # contract's default, with that plant's uncertainty declaration.
+        loaded = load_sim_kit(self.profile, args.plant_version)
+        self.kit: SimKit = loaded.kit
+        self.uncertainty: LoadedUncertainty = loaded.uncertainty
         declaration = load_fuel_comp_declaration(self.profile)
         self.slot = declaration.program.map_slot
         registry = load_tune_revisions(self.profile / "tune_revisions.yaml")
@@ -450,12 +462,12 @@ def _cell_rows(world: _World) -> list[dict[str, Any]]:
     return rows
 
 
-def _trace(world: _World, candidate: Candidate, *, in_mode: bool) -> dict[str, Any]:
+def _compare(world: _World, candidate: Candidate, *, in_mode: bool) -> EffectReport:
     """``compare_roms`` on the two images: with ``in_mode`` under the run's
     contract mode (where a quantity the mode holds fixed makes an output
     ``unevaluable``), else the plain structural reach."""
     extra: dict[str, Any] = {"contract": world.kit.contract, "mode": MODE} if in_mode else {}
-    report = compare_roms(
+    return compare_roms(
         world.base.image,
         candidate.image,
         world.kit.rom_map,
@@ -466,7 +478,10 @@ def _trace(world: _World, candidate: Candidate, *, in_mode: bool) -> dict[str, A
         slot_source=SLOT_SOURCE,
         **extra,
     )
-    plain = report.to_dict()
+
+
+def _trace(world: _World, candidate: Candidate, *, in_mode: bool) -> dict[str, Any]:
+    plain = _compare(world, candidate, in_mode=in_mode).to_dict()
     return {
         "mode": MODE if in_mode else None,
         "outcome": plain["outcome"],
@@ -492,6 +507,18 @@ def cmd_inspect(args: argparse.Namespace) -> dict[str, Any]:
     assert candidate is not None
     prov = candidate.provenance
     cells = _cell_rows(world)
+    # The lever and what blocks a number: classified once, in
+    # src.analysis.rom_levers, on the report a run would use. The ROM Editor
+    # shows the same ``messages`` (E09.14).
+    levers = classify_edit(
+        _compare(world, candidate, in_mode=True),
+        rom_map=world.kit.rom_map,
+        model=world.kit.model,
+        contract=world.kit.contract,
+        qualification=plant_qualification(world.kit.plant),
+        regime=args.regime,
+        cells=prov["cells"],
+    )
     return {
         "command": "inspect",
         "ran": "nothing: no design, no draws, no plant",
@@ -507,6 +534,7 @@ def cmd_inspect(args: argparse.Namespace) -> dict[str, Any]:
         "ranges": prov["ranges"],
         "reached": _trace(world, candidate, in_mode=False),
         "in_run_mode": _trace(world, candidate, in_mode=True),
+        "levers": levers.to_dict(),
     }
 
 
@@ -666,16 +694,7 @@ def cmd_run(args: argparse.Namespace) -> dict[str, Any]:
     kit, base = world.kit, world.base
     design = load_design(args.design)
     require_base(design, base.image_sha256)
-    try:
-        uncertainty = load_uncertainty(world.profile / UNCERTAINTY_FILE)
-    except FileNotFoundError as exc:
-        raise SimulationRefusalError(
-            "uncertainty_missing", f"{world.profile} has no {UNCERTAINTY_FILE}"
-        ) from exc
-    except ValidationError as exc:
-        raise SimulationRefusalError(
-            "uncertainty_invalid", f"{UNCERTAINTY_FILE}: {exc.error_count()} error(s)"
-        ) from exc
+    uncertainty = world.uncertainty
     template = _template(world, args, events, candidate.image_sha256)
     result = run_monte_carlo(
         kit,
@@ -801,8 +820,8 @@ def _parser() -> argparse.ArgumentParser:
         epilog="subcommands:\n"
         "  design drives  pre-change drives -> a frozen, hashed point design\n"
         "  design grid    a stated rpm x load grid -> the same kind of design\n"
-        "  inspect        resolved cell edits (old -> new raw, +/- %) and the outputs they\n"
-        "                 reach; runs nothing\n"
+        "  inspect        resolved cell edits (old -> new raw, +/- %), the outputs they reach,\n"
+        "                 and what blocks a number per output; runs nothing\n"
         "  run            paired Monte Carlo -> result.json, traces.parquet, report.html\n\n"
         "Run `rom_sim <subcommand> --help` (`rom_sim design drives --help`) for arguments.\n"
         "Refusals print JSON with a stable `reason` and exit 2. Output goes under --out,\n"
@@ -887,6 +906,15 @@ def _parser() -> argparse.ArgumentParser:
     )
     _add_common(inspect)
     _add_candidate(inspect)
+    inspect.add_argument(
+        "--regime",
+        choices=list(get_args(OverrideRegime)),
+        default=None,
+        help="the operating regime the edit is judged in (optional). Only the closed-loop "
+        "blocker (trim authority undecoded) is regime-aware: it is listed for closed_loop, "
+        "and when no regime is stated since most of a drive is closed loop. Other regimes' "
+        "unqualified overrides and the plant's regime_not_qualified are not consulted.",
+    )
     inspect.set_defaults(handler=cmd_inspect)
 
     run = commands.add_parser(

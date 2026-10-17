@@ -44,6 +44,8 @@ Endpoint summary:
 
 | Endpoint | Purpose |
 | --- | --- |
+| `GET /identity` | who this daemon is, for discovery on the network (no token, no state): `product` (`canary`), `api` (`identity/1`), `hostname`, `host_kind` (`raspberry_pi` from the device tree, else `host`), `profile` (the active vehicle slug or `null`), `version`, `git_sha`, `dashboard_port`. A laptop in companion mode sweeps a LAN with this (`src/companion/discovery.py`) |
+| `GET /companion/status` | companion mode only (`companion.enabled`; 404 otherwise): the library (`library_root`, `sessions`, `models`, `datasets`, `queued_actions`), the linked Pi (`pi`: `{base_url, identity, source, selected_at}` or `null`; `source` is `discovered` / `selected` / `configured`), `pi_token_present`, and `discovery` (`state` `idle`/`running`/`done`, `ran_at`, `found[]`, `error`). See "Companion mode" below |
 | `GET /status` | storage path/free space, latest session, loaded model versions, vehicle, anomaly counters; running calibration (`ecu_calibration_id`, `ecu_calibration_read_at`, `calibration_matches_registry` true/false/null, `calibration_alert`) and `tuning_readiness` chips `{ok, value, detail, fix}` (W02); `startup` — when this daemon started recording (S01.1, below); `network` — the joined SSID, addresses and `dashboard_url` by IP (P2.3; a cached read up to 30 s old with its `age_s`, `null` until the first read, never waits on nmcli). `?view=compact` is the pollable projection and carries `startup` too |
 | `GET /config` | JSON view of the loaded `canary.yaml` |
 | `GET /telemetry/latest?n=N` | newest `N` telemetry rows from disk; `decoded:` rows are decoded on read from the raw CAN frames (P02.8: none is stored since 2026-09-26), exactly as a session recorded before then stored them. `per_channel=true` gives the latest row per channel (the dashboard seed and the Parquet `vehicle_state`) |
@@ -257,8 +259,9 @@ Control endpoints:
 | `PATCH /control/rom/library/{sha}` / `DELETE /control/rom/library/{sha}` | set the label (`{"label": str \| null}`, the only editable field) / remove the entry |
 | `GET /control/rom/library/{sha}/tables` | every mapped table in every map slot: raw cells, decoded cells where a decode is declared, axes, confidence and evidence (W08.4) |
 | `GET /control/rom/compare?a=<sha>&b=<sha>` | changed byte ranges a -> b merged with a 16-byte gap, each labelled with the regions and tables it overlaps; table ranges carry per-cell old/new values, decoded where declared (W08.5) |
-| `POST /control/rom/library/{sha}/edits/preview` | ROM Editor preview (W09.2): body `{label, edits}`, `edits` being E08.1 edit dicts on the fuel chain's Map 1 (`fuel_targets`, `fuel_compensation`, `k_constant`, slot 1). Returns the edit spec (JSON, YAML, sha256), the candidate's sha256, its E08.1 provenance (cells old -> new, changed ranges, reach) and the edited tables' after values. Runs in the thread pool, never deferred; nothing is stored. 404 unknown sha, 409 no map, 400 `edit_refused`, 422 body. See [ROM Editor](#rom-editor-preview-and-simulate-w09). |
+| `POST /control/rom/library/{sha}/edits/preview` | ROM Editor preview (W09.2): body `{label, edits}`, `edits` being E08.1 edit dicts on the fuel chain's Map 1 (`fuel_targets`, `fuel_compensation`, `k_constant`, slot 1). Returns the edit spec (JSON, YAML, sha256), the candidate's sha256, its E08.1 provenance (cells old -> new, changed ranges, reach), the edited tables' after values and `levers` (which lever the edit pulls and what blocks a number per output, E09.14b). Runs in the thread pool, never deferred; nothing is stored. 404 unknown sha, 409 no map, 400 `edit_refused`, 422 body. See [ROM Editor](#rom-editor-preview-and-simulate-w09). |
 | `POST /control/rom/library/{sha}/simulate` | ROM Editor simulate (W09.2): body is one `SimRequest`, every field required (nothing is defaulted). Runs the edits on a recorded base over a stated rpm x load grid, base vs candidate, paired Monte Carlo draws, aggregated per cell. In the workbench child (job `rom_sim`): `409 analysis_deferred` while a capture records, `409 analysis_busy` while another child runs, `503 analysis_unavailable`; a refusal is `400 sim_refused`; 404 unknown sha, 409 no map, 422 body. Nothing is stored; the candidate never leaves the simulator. See [ROM Editor](#rom-editor-preview-and-simulate-w09). |
+| `GET /control/rom/editor/typical-values` | ROM Editor typical values (W09.11): the vehicle's declared typical values for the Simulate form's stated environment and learned state (`data/<vehicle>/sim_typical_values.yaml`), each with its `kind` (`typical`, or `placeholder` for a number the simulator reads nowhere) and its `source`, plus any fillable field it leaves empty with a `reason`. No image needed, nothing stored, and it changes no request field: the page only fills its form with these, visibly, when the operator presses *Fill typical values*. 409 `typical_values_undeclared` when the vehicle has no file, 409 `typical_values_invalid` when it fails its schema. See [ROM Editor](#rom-editor-preview-and-simulate-w09). |
 | `GET /control/rom/backup` / `POST /control/rom/backup` / `POST /control/rom/backup/cancel` | ECU flash backup job (W08.7), read-only: state + live preconditions / start (202, or 409 naming every refusing precondition) / cancel a running read (409 when none runs) |
 
 The frame, every `/analysis/*` route in this table (W04) and the ROM Editor's `simulate` (W09.2) run in the digest's bounded single-flight child and refuse while a capture is recording: `409 {"error": "analysis_deferred", "profile", "message", "laptop_path"}`. A second, different analysis (or a running digest) is `409 analysis_busy`; a child failure is `503 analysis_unavailable`. Calculated load is refused as an axis.
@@ -305,6 +308,36 @@ comparison workflow.
 Job state is append-only in `daemon.jobs_dir/jobs.jsonl`, so recent job history
 survives daemon restarts. Control mutations are appended to
 `daemon.audit_log` as JSONL audit events and are also broadcast live.
+
+## Companion mode (a laptop linked to a Pi)
+
+With `companion.enabled` in the config (`scripts/canary_desk.py` sets it, with
+`--companion off` to leave it out), the daemon keeps a **library**
+(`companion.library_root`, default `<state_dir>/library`) whose `sessions/`
+is its own session store, and serves these routes beside the dashboard. They
+replace the standalone companion API and `scripts/canary_companion.py`
+(retired 2026-10-16): one process, one port, one site. Every mutating route
+takes the control token like the rest of `/control/*`.
+
+At startup, with `companion.discover` on and no Pi configured
+(`companion.pi_host`) or remembered, the daemon searches the network once in
+the background: `CANARY_HOST`, the conventional names, the wired address
+`192.168.137.2`, then a sweep of each attached /24 (`companion.discover_sweep`),
+each candidate probed with `GET /identity`. A lone daemon found is linked
+(`source: discovered`); several are listed for the dashboard to choose from.
+The link is remembered in `<library>/pi.json` and wins over `companion.pi_host`.
+
+| Route | What it does |
+|---|---|
+| `GET /companion/status` | Public; the library counts, the linked `pi` and the last `discovery` (above) |
+| `GET /companion/discover?sweep=` | Search again now (a few seconds) and return `found[]` and the `pi` in use |
+| `POST /companion/pi` `{base_url}` | Link to one daemon by host or URL; it must answer `GET /identity` (or `/status`) now, else 400 |
+| `DELETE /companion/pi` | Unlink (back to `companion.pi_host`, if any) |
+| `POST /companion/sync/sessions/{id}` | Pull a session export from the linked Pi into the library, resumable and checksum-verified; `pi_host` / `token` in the body override the link and the token from `companion.pi_token_env` |
+| `POST /companion/sessions/import` | Import a session archive (base64) into the library |
+| `POST /companion/models/{type}/publish` | Push a local model artifact and manifest to the linked Pi, with a compatibility report and accepted/active confirmation |
+| `GET /companion/actions`, `POST /companion/actions/{id}/retry` | The queued/failed round trips and their retry |
+| `GET /companion/sync/state` | Source hosts, queued actions, publish history and the `pi` in use |
 
 ## ROM library and ECU backup (W08)
 
@@ -477,7 +510,7 @@ into the library as `source: ecu_read` with `read_meta`:
 
 ## ROM Editor: preview and simulate (W09)
 
-Two routes under the ROM library, both behind the control token (a request
+Three routes (two under the ROM library, and the vehicle's typical values), all behind the control token (a request
 without one is 401, ahead of field validation; but FastAPI parses the body before it runs
 dependencies, so a body that is not JSON at all is a 422 even without a token). They edit
 nothing the daemon keeps: no candidate image is stored, added to the library or
@@ -543,9 +576,35 @@ Body (`extra` fields are a 422): `{"label": "light load 2 % richer", "edits": [E
   "tables": [ <one entry per edited (table, slot), the candidate's values, in the GET .../tables shape:
                id, kind, name, label, slot, offset, end, rows, cols, dtype, role, unit, raw, decoded,
                decode, axes, confidence, evidence, and for fuel_compensation editor_disagreement> ],
+  "levers": {"schema_version": 1, "tool": "rom_levers", "tool_version": "1",
+             "outcome": "unevaluable", "reason": null, "regime": null,
+             "levers": [{"lever": "fuel_compensation", "label": "Fuel Comp", "tables": ["fuel_compensation"],
+                         "slots": [1], "byte_class": "consumed", "start": 919187, "end": 919239,
+                         "changed_bytes": 20, "changed_cells": 20, "nodes": ["fuel_comp_lookup"], "blockers": []}],
+             "outputs": [{"output": "base_fuel_schedule_word", "source": "application_model", "status": "changed",
+                          "levers": ["Fuel Comp"], "blockers": [], "assumes_conditioned": ["fuel_comp_load_byte"],
+                          "refused_if_conditioned": [], "reached": true, "number": true, "design_dependent": true},
+                         "..."],
+             "messages": ["Fuel Comp -> base_fuel_schedule_word: a number can be given (for points that state only the fill byte)",
+                          "Fuel Comp -> injector_pulse_ms: plant not qualified: ...; closed loop: trim authority undecoded",
+                          "..."]},
   "sim_base": {"ok": true, "status": "matched", "revision": "ZS44A-20261004", "reason": null}
 }
 ```
+
+`levers` is `rom_levers.classify_edit(...).to_dict()` (E09.14b) on the comparison the
+simulator would use (`compare_roms` under the simulation contract's mode), qualified on
+the plant `sim_kit.yaml` declares and with no regime stated (so the closed-loop blocker
+is listed). **`levers.messages` is the text to show**: one line per lever and per
+reached output, in a stable order, and the very strings
+`python -m tools.rom_sim inspect` prints for the same edit (`levers` there is the same
+object). Nothing in the daemon, the dashboard or the MCP tool words one of them; a
+consumer lists them verbatim. An output reads either `a number can be given (...)` (the
+parenthesis names what a design point must state) or what blocks one: `no torque plant`
+(ignition outputs; no plant exists for them), `not mapped` (changed bytes outside
+`rom_map.yaml`), `plant not qualified: <why>`, `closed loop: trim authority undecoded`,
+`unmodelled: <nodes>`. The classifier's floor is one line (`the edit reaches no output`),
+so `messages` is never empty. The page and the MCP tool read the same body.
 
 `spec.base` is `{"revision": R, ...}` when the library entry's `revision_match`
 is `matched` (the YAML then resolves through `tune_revisions.yaml` on any
@@ -564,7 +623,9 @@ for an edit or the image (the reasons above, including the image's own
 `wrong_program`), and the other classes the code beneath can raise:
 `application_model`, `image_format` (reason `image_format`), `fuel_plant`,
 `sim_design`, `simulation`. The `reason` list is open-ended; every class in the
-table is a 400, never a 500.
+table is a 400, never a 500. The preview classifies the edit on the plant the
+vehicle's `sim_kit.yaml` declares, so a vehicle without one is refused here as
+`simulation` / `sim_kit_undeclared` rather than previewed unclassified.
 
 ### `POST /control/rom/library/{sha}/simulate`
 
@@ -622,11 +683,13 @@ analysis_busy` until it finishes (an identical one re-attaches to it).
 
 `200`: `{"tool": "rom_editor", "tool_version": "1", "label": "simulation",
 "synthetic": bool, "caveats": [...] (the result's, first, unchanged),
-"assumptions": [...], "unresolved": [...], "inert_parameters": [...],
+"assumptions": [...] (plant working assumptions prefixed "plant working assumption: ",
+the design's own prefixed "design: ", and others; caveats repeats every one;
+the design's are not in design, E08.10), "unresolved": [...], "inert_parameters": [...],
 "coverage": {output: share}, "outcome": str, "learned_state": {...},
 "provenance": {hashes, plant_version, seed, draws, candidate_events, ...},
 "design": {points, weight, base_revision, ..., "grid": {rpm_edges, load_edges,
-load_axis, load_unit, load_basis, environment}, "assumptions": [...]},
+load_axis, load_unit, load_basis, environment}},
 "candidate": <the preview's provenance>, "cells": <CellTable>, "spec_yaml":
 str, "spec_sha256": str}`. Note `label` here is the result's, the request's is
 `candidate.label`. `cells` is `sim_cells.CellTable.to_dict()` (E08.4;
@@ -642,7 +705,12 @@ delta {p05, p50, p95}, relative_delta, relative_undefined_pairs} | null,
 changed_share, supported_effect}}, by_loop[], edited, row_axis_moved,
 col_axis_moved}`. A cell nobody visited has `pairs: 0` and is not
 `unchanged`. A 16 x 16 table with six points measured about 370 KB of JSON on
-the synthetic image.
+the synthetic image; the form's 224-point grid about 705 KB (W09.6; 757 KB on
+the synthetic image), because 224 of the 256 cells are visited and each carries
+six outputs. The route's body and the dashboard's payload are always this whole
+body; the MCP tool `simulate_rom_edit` cuts it in the tool layer by `detail`
+(`headline`, the default, `summary`, `cells` or `full`) and states what it
+dropped in the result (docs/mcp-server.md).
 
 Errors (each a `{"detail": ...}`):
 
@@ -672,6 +740,53 @@ A refusal raised inside the child crosses the process boundary as data
 (`src.analysis.rom_editor.run_job` returns `{"refused": {...}}`): the
 simulator's refusal classes do not survive pickling, and one raised out of a
 `spawn` child would arrive as `503 child_failed`.
+
+### `GET /control/rom/editor/typical-values`
+
+The vehicle's **typical stated values** for the Simulate form's *Fill typical
+values* button (W09.11). They are vehicle facts, so they are data
+(`data/<vehicle>/sim_typical_values.yaml`, `rom_editor.typical_values`), never
+page or code constants, and each value names where it comes from. No `{sha}` and
+no body: nothing here depends on an image, and nothing is stored.
+
+`200`:
+
+```json
+{"profile": "nissan-xterra-2008", "file": "sim_typical_values.yaml",
+ "file_sha256": "<sha256 of the file>",
+ "values": {"baro_kpa": {"value": 81.0, "kind": "typical", "source": "E07.6's stated point (...)"},
+            "pedal_flag": {"value": 0, "kind": "typical", "source": "W09.6's grid environment (...)"},
+            "idle_air_learned": {"value": 0.0, "kind": "placeholder", "source": "PLACEHOLDER, not a measurement: ..."},
+            "rail_kpa": {"value": 350.0, "kind": "typical", "source": "..."}},
+ "left_empty": {}}
+```
+
+Only the twelve environment and learned-state fields of the `SimRequest` can
+appear (`rom_editor.TYPICAL_FIELDS`: `baro_kpa`, `iat_c`, `coolant_c`,
+`battery_v`, `rail_kpa`, `throttle_pct`, `pedal_flag`, `stft_pct`, `ltft_pct`,
+`throttle_closed_learned`, `idle_air_learned`, `evap_purge_area`). Every one is
+either a `values` entry (a number, or `"working_assumption"` for `rail_kpa`
+only; a **required** `kind`, `typical` or `placeholder`; and a **required**
+non-blank `source`) or a `left_empty` entry (`{reason}`) that says why no value
+is declared (the Xterra's is `{}`: all twelve are declared). A `placeholder` is a
+number the simulator reads nowhere today, filled only so the form can run; its
+source must say it is one (`a placeholder's source must say it is a placeholder`),
+and `tests/test_rom_editor.py` fails the moment any code in `src/` reads the
+field. A file where a field is neither a value nor left empty, where a value has
+no source or kind or is one the `SimRequest` would refuse, or that names any other
+field (the grid, the candidate events, the edges, the draws, the seed and the
+label are never typical) is invalid, so the page can always say what it left
+for the operator. **The 21-field `SimRequest` is unchanged and still has no
+defaults:** a client that wants these values sends them in the simulate body
+itself. The dashboard fills them into the visible form on a click, marks each
+`typical: <source>` or `placeholder: <source>` from `kind`, and sends nothing it
+did not show.
+
+| Status | `detail` | When |
+|---|---|---|
+| `401` | | no or wrong control token |
+| `409` | `{"error": "typical_values_undeclared", "message": "..."}` | the vehicle's profile has no `sim_typical_values.yaml`: it declares no typical values, and none are assumed |
+| `409` | `{"error": "typical_values_invalid", "message": "..."}` | the file fails its schema (the message lists each problem by field) |
 
 ## WebSockets
 

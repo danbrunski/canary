@@ -26,6 +26,7 @@ import type {
   RomEditPreviewRequest,
   RomSimRequest,
   RomSimResult,
+  RomTypicalValues,
 } from "../types/romEditor";
 import type {
   RomBackupState,
@@ -246,7 +247,7 @@ export async function previewRomEdits(
     body: jsonBody(request),
     signal,
   });
-  return requireFields(path, body, ["spec_yaml", "provenance", "tables", "sim_base"]);
+  return requireFields(path, body, ["spec_yaml", "provenance", "tables", "levers", "sim_base"]);
 }
 
 /** `POST /control/rom/library/{sha}/simulate` — the edits run against the base
@@ -268,6 +269,17 @@ export async function simulateRomEdits(
     signal,
   });
   return requireFields(path, body, ["cells", "caveats", "provenance", "design"]);
+}
+
+/** `GET /control/rom/editor/typical-values` — the vehicle's declared typical
+ *  values for the Simulate form's stated environment and learned state, each
+ *  with its source (W09.11). Fills nothing by itself. A vehicle that declares
+ *  none is a 409 `typical_values_undeclared`, a broken file a 409
+ *  `typical_values_invalid`. */
+export async function getRomTypicalValues(token: string, signal?: AbortSignal) {
+  const path = "/control/rom/editor/typical-values";
+  const body = await controlJson<RomTypicalValues>(path, token, { signal });
+  return requireFields(path, body, ["profile", "file_sha256", "values", "left_empty"]);
 }
 
 /** `PATCH /control/rom/library/{sha}` — the label is the only mutable field;

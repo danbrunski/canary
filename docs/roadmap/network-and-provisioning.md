@@ -135,6 +135,18 @@ Rejected, with reasons, so they are not re-proposed:
   - A DHCP reservation on the home router plus a bookmarked IP covers the
     garage case on any phone. The Starlink router cannot make reservations.
 
+- [x] **N1.6 A laptop finds the Pi on its own (companion mode).** *Done
+  2026-10-16.* The daemon answers `GET /identity` (no token: product, hostname,
+  `host_kind` from the device tree, profile, version, port), and
+  `src/companion/discovery.py` finds daemons from the laptop side in priority
+  order: `CANARY_HOST`, the conventional names where resolvable (not on WSL,
+  N4.3), the wired `192.168.137.2`, then a bounded sweep of each attached
+  /24. The desk daemon runs it once at startup and links to a lone find;
+  `GET /companion/discover` runs it again. `install_pi.sh` now also writes
+  `/etc/avahi/services/canary.service` (`_canary._tcp`, port 8000) so a
+  Bonjour-capable client can browse for a CANary by service. Not done: a
+  laptop-side mDNS browse (needs `zeroconf` or avahi tools, neither
+  installed; the sweep covers WSL) and N1.5's phone paths.
 - [x] **N1.4 Document the iOS limitation.** `docs/ble-provisioning.md`
   "iPhone" (2026-10-12). Safari implements no Web
   Bluetooth, so an iPhone needs a native client or a third-party browser

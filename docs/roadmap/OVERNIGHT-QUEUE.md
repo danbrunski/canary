@@ -340,6 +340,15 @@ backend features), plus the unchecked tail of
   high-value site, and 3.1 was re-scoped downward (the discovery walk is
   conditional and multi-responder, so batching it saves less than claimed).
 
+- [ ] **Q27 — H07 torque reference ahead of E07.5 stage 4** (E09.13,
+  2026-10-15). Order: H07.10 (mass; scale ticket) → H07.5 (road load from
+  coast-downs) → H07.12 (NA baseline pulls) → E07.5 stage 4's minimum
+  torque model (declared in E07.5 remaining item 4) → spark sweeps. **All
+  three H07 items are blocked overnight (truck).** The desk part an
+  overnight run may do: E07.5 stage 4's parameter registry and claim
+  refusals wired to `compare_roms` (E07.5 remaining item 8), nothing that
+  fits a parameter.
+
 ## Round-2 morning backlog
 
 Hardware purchases + wiring (BNO055/BMP390/10 Hz GPS w/ PPS — Q22's 2b;

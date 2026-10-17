@@ -40,6 +40,11 @@ class AuthorizationRefusedError(RuntimeError):
         self.code = code
         self.detail = detail
 
+    def __reduce__(self) -> tuple[object, ...]:
+        # Rebuilt from its constructor's arguments, so it survives a process
+        # boundary (pickle); tests/test_exceptions_pickle.py holds every class to it.
+        return (type(self), (self.code, self.detail), self.__dict__)
+
 
 #: Where the vehicle's supply voltage is read from, in order of preference
 #: (H03.2). The HAT's 12 V sense (``sensor:SUPPLY_VOLTAGE``, H03.1) reads with

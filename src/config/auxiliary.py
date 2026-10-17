@@ -13,6 +13,37 @@ from src.config.base import _Strict
 from src.paths import ANALYSES_DIR, CONTROL_DIR
 
 
+class CompanionConfig(_Strict):
+    """Companion mode: this daemon keeps a library synced from a CANary Pi.
+
+    A laptop runs the whole daemon with no bus (``scripts/canary_desk.py``)
+    and, with this on, also acts as the companion of a Pi on the network:
+    sessions are pulled into the library, models are published back, and
+    the ``/companion/*`` routes (``src.dashboard.routes.companion_link``)
+    are served beside the dashboard. The library's ``sessions/`` becomes
+    ``collection.storage_path``, so the Sessions panel lists what was synced.
+    Off by default: a Pi in the truck is nobody's companion.
+    """
+
+    enabled: bool = False
+    #: Where the library lives. Unset: ``<daemon.state_dir>/library`` (S03),
+    #: or ``~/.canary/library`` with no state dir. ``~`` is expanded.
+    library_root: Path | None = None
+    #: The Pi to link to, as a host or base URL. Unset: the one found on the
+    #: network (``discover``), or the one chosen in the dashboard, which is
+    #: remembered in the library (``pi.json``) and wins over this value.
+    pi_host: str | None = None
+    #: The environment variable holding the Pi's control token, when set.
+    pi_token_env: str = "CANARY_CONTROL_TOKEN"
+    #: Search the network for a Pi at startup when none is configured or
+    #: remembered; exactly one found is linked, more are listed for a choice.
+    discover: bool = True
+    #: Whether the search sweeps every address of each attached network
+    #: (254 connects on a home LAN), beyond the conventional names and the
+    #: wired address. Off, only those are tried.
+    discover_sweep: bool = True
+
+
 class TrendsConfig(_Strict):
     """Task 4.4 trend-test parameters (``src.analysis.trends``). All defaulted
     to the textbook values so configs predating this task keep loading."""

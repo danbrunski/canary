@@ -480,7 +480,7 @@ def test_provenance_caveats_and_synthetic_traces(
     assert prov["plant_version"] == "fuel-mv-1"
     assert prov["baseline_sha256"] == result.plant["baseline_sha256"] != ""
     assert prov["contract_sha256"] == kit.contract_sha256
-    assert (prov["seed"], prov["draws"], prov["tool_version"]) == (11, 4, "1")
+    assert (prov["seed"], prov["draws"], prov["tool_version"]) == (11, 4, "3")
     assert result.caveats[0] == STRUCTURAL_ERROR_NOT_SAMPLED
     assert result.caveats[1].startswith("plant_not_qualified")
     assert any(a.startswith("LTFT acts in open loop") for a in result.caveats)
@@ -825,51 +825,334 @@ def test_the_rail_working_assumption_is_named_in_every_result_that_rests_on_it(
     assert rail not in held.unresolved
 
 
-def test_a_refusing_manifold_model_names_its_refusal_and_cannot_be_drawn_over(
-    kit_and_image: tuple[SimKit, bytes], uncertainty: LoadedUncertainty
+def _mv2(kit: SimKit) -> tuple[SimKit, LoadedUncertainty]:
+    """The synthetic-image kit on the simulator's fuel-mv-2, and fuel-mv-2's
+    own uncertainty declaration (``sim_kit.yaml`` names both, E08.11)."""
+    loaded = sim_montecarlo.load_sim_kit(PROFILE)
+    assert loaded.kit.plant.plant_version == "fuel-mv-2"
+    mv2 = kit_for_plant(kit, PROFILE, "fuel-mv-2")
+    check_uncertainty(loaded.uncertainty.declaration, mv2)
+    return mv2, loaded.uncertainty
+
+
+#: Warm idle on fuel-mv-2's identification drives: charge fraction p50 0.151
+#: (762 rpm, 3.46 g/s, baro 81 kPa; fuel_plant_mv2.yaml), MAP from the model.
+P_IDLE_MODEL = _point(
+    WOT,
+    rpm=762.0,
+    maf_gps=3.46,
+    baro_kpa=81.0,
+    iat_c=30.0,
+    throttle_pct=2.0,
+    map_kpa_source="plant_model",
+    rail_kpa_source="working_assumption",
+    map_kpa=0.0,
+)
+
+
+def _map_at(kit: SimKit, rpm: float, maf: float, overrides: dict[str, float]) -> tuple[float, str]:
+    from src.analysis.fuel_plant import PlantInputs, predict
+
+    out = predict(
+        PlantInputs(
+            pulse_ms=np.array([2.0]),
+            ecu_dead_time_ms=np.array([0.0]),
+            rpm=np.array([rpm]),
+            maf_gps=np.array([maf]),
+            baro_kpa=np.array([81.0]),
+            iat_c=np.array([30.0]),
+            rail_kpa=np.array([350.0]),
+        ),
+        plant_parameters(kit, overrides),
+        kit.plant.geometry,
+    )
+    refusal = "" if out.manifold_refusal is None else str(out.manifold_refusal[0])
+    return float(out.map_kpa[0]), refusal
+
+
+def test_a_refusing_manifold_model_names_its_refusal_and_is_refused_where_a_draw_reaches_it(
+    kit_and_image: tuple[SimKit, bytes],
 ) -> None:
     """fuel-mv-2 refuses MAP above ambient per sample. In the paired chain the
-    refusal is a named reason; in a Monte Carlo it would come and go with the
-    VE draw, so a model-MAP design on it is refused outright."""
+    refusal is a named reason. In a Monte Carlo MAP is recomputed per draw, so
+    a model-MAP point refused at any draw is refused outright
+    (``manifold_refusal_varies_by_draw``, the backstop); a run whose every
+    draw stays below ambient runs. The contract admits fuel-mv-2 (E08.11)."""
     from src.analysis.paired_scenarios import _ecu_chain, _fuel_chain, _side
+    from src.analysis.twin_runner import stage_order
 
     kit, image = kit_and_image
-    mv2 = kit_for_plant(kit, PROFILE, "fuel-mv-2")
+    mv2, declared = _mv2(kit)
     side = _side(mv2, image, _identity(image), 0.0, "base")
+    stages = stage_order(mv2.model)
     for maf, reasons in ((150.0, ["plant:manifold_above_ambient"]), (20.0, [])):
         point = dataclasses.replace(P_MODEL, maf_gps=maf, conditioned={FILL_BYTE: 200.0})
         out = _fuel_chain(
-            mv2, side, point, _ecu_chain(mv2, side, point), stft_pct=0.0, overrides={}
+            mv2, side, point, _ecu_chain(mv2, stages, side, point), stft_pct=0.0, overrides={}
         )
         assert out["reasons"] == reasons
         assert np.isnan(out["delivered_lambda"]) == bool(reasons)
 
-    def for_mv2(raw: dict[str, Any]) -> None:
-        raw["plant_version"] = "fuel-mv-2"
-        assert mv2.plant.baseline is not None
-        lo, hi = mv2.plant.baseline.intervals[LUMPED_SCALE]
-        raw["parameters"][LUMPED_SCALE] = {
-            "distribution": "uniform",
-            "bracket_from": "baseline_interval",
-            "bracket": [lo, hi],
-            "evidence": "test",
-        }
-
-    declared = LoadedUncertainty(_with_declaration(uncertainty, for_mv2), "0" * 64, "test")
-    check_uncertainty(declared.declaration, mv2)
     template = _template(mv2, image, bytes(image))
     model = _design(image, (P_MODEL, 200, 200))
-    assert (
-        _refusal(
-            run_monte_carlo, mv2, template, model, image, bytes(image), declared, draws=2, seed=1
+    with pytest.raises(SimulationRefusalError) as refused:
+        run_monte_carlo(mv2, template, model, image, bytes(image), declared, draws=2, seed=1)
+    assert refused.value.reason == "manifold_refusal_varies_by_draw"
+    assert "manifold_above_ambient" in str(refused.value) and "at draw 0" in str(refused.value)
+    # The backstop is for hand-built designs only. A point below ambient on
+    # the frozen plant that a VE-floor draw lifts above it (800 rpm, a floor
+    # band, MAP 0.875 x baro) is refused when handed in directly; the design
+    # builders never place it (``manifold_above_ambient_in_bracket``, E08.11,
+    # tests/test_sim_design.py).
+    maf = 3.46 * (0.875 * 0.7 / 0.151) * (800.0 / 762.0)
+    assert _map_at(mv2, 800.0, maf, {})[1] == ""
+    assert _map_at(mv2, 800.0, maf, {"manifold_pressure": 0.4})[1] == "manifold_above_ambient"
+    lifted = _point(P_IDLE_MODEL, rpm=800.0, maf_gps=maf)
+    with pytest.raises(SimulationRefusalError) as refused:
+        run_monte_carlo(
+            mv2,
+            template,
+            _design(image, (lifted, 120, 120)),
+            image,
+            bytes(image),
+            declared,
+            draws=50,
+            seed=3,
+            vary=["manifold_pressure"],
         )
-        == "manifold_refusal_varies_by_draw"
+    assert refused.value.reason == "manifold_refusal_varies_by_draw"
+    # Stated MAP: the model refuses nothing, and the contract admits fuel-mv-2.
+    stated = _run(mv2, image, bytes(image), _design(image, (P_WOT, 200, 200)), declared, draws=2)
+    assert stated.provenance["plant_version"] == "fuel-mv-2"
+    assert stated.provenance["uncertainty_sha256"] == declared.sha256
+
+
+def test_drawing_the_ve_floor_at_warm_idle_cannot_reach_ambient(
+    kit_and_image: tuple[SimKit, bytes],
+) -> None:
+    """E08.11's expectation for the backstop: at warm idle (charge fraction
+    ~0.15) even the floor's lower bracket 0.4, with the bank split at its
+    upper 0.52, keeps MAP far below baro, so a 400-draw run over every
+    declared parameter never trips ``manifold_refusal_varies_by_draw``."""
+    kit, image = kit_and_image
+    mv2, declared = _mv2(kit)
+    worst, refusal = _map_at(mv2, 762.0, 3.46, {"manifold_pressure": 0.4, "bank_air_split": 0.52})
+    assert refusal == "" and worst < 0.45 * 81.0
+    result = _run(
+        mv2,
+        image,
+        bytes(image),
+        _design(image, (P_IDLE_MODEL, 40, 60)),
+        declared,
+        draws=400,
+        seed=11,
     )
-    # A stated MAP is not refused by the model: the contract decides (mv-2 is not its plant).
-    stated = _design(image, (P_WOT, 200, 200))
-    assert (
-        _refusal(
-            run_monte_carlo, mv2, template, stated, image, bytes(image), declared, draws=2, seed=1
-        )
-        == "plant_version_mismatch"
+    assert "manifold_pressure" in result.provenance["varied"]
+    assert "manifold_pressure" not in result.inert_parameters
+    assert np.isfinite(result.base["delivered_lambda"]).all()
+
+
+def test_a_ve_floor_draw_moves_only_the_floor_bands_never_the_fit(
+    kit_and_image: tuple[SimKit, bytes],
+) -> None:
+    """Above the floor bands fuel-mv-2's VE is the frozen fit, held: drawing
+    the floor anywhere in [0.4, 1.0] leaves MAP at 4,800 rpm bit-identical,
+    and moves it at 1,500 rpm (a floor band), never below that band's own
+    envelope."""
+    kit, _ = kit_and_image
+    mv2, _ = _mv2(kit)
+    draws = (0.4, 0.55, 0.7, 0.85, 1.0)
+    assert len({_map_at(mv2, 4800.0, 60.0, {"manifold_pressure": ve}) for ve in draws}) == 1
+    floor = [_map_at(mv2, 1500.0, 10.0, {"manifold_pressure": ve})[0] for ve in draws]
+    # 1000-2000 rpm: envelope 0.67674, so 0.4 and 0.55 both run at it.
+    assert floor[0] == floor[1] > floor[2] > floor[3] > floor[4]
+    curve = mv2.plant.baseline.ve_curve if mv2.plant.baseline else None
+    assert curve is not None
+    assert curve.band_values(0.4, fitted_at=0.7)[:2] == [0.4, curve.envelope[1]]
+    assert curve.band_values(1.0, fitted_at=0.7) == [1.0, 1.0, *curve.envelope[2:]]
+    assert curve.floor_bands(0.7) == [True, True, False, False, False, False]
+
+
+def test_the_sim_kit_is_declared_data_with_its_own_uncertainty(
+    uncertainty: LoadedUncertainty, tmp_path: Path
+) -> None:
+    """``load_sim_kit`` (E08.11): the plant ``sim_kit.yaml`` declares
+    (fuel-mv-2) with fuel-mv-2's declaration; fuel-mv-1 and its untouched
+    declaration on request (old runs); a version with no declaration, a
+    profile with no sim_kit.yaml, and a declaration naming another plant are
+    each refused by name. The contract's default stays fuel-mv-1."""
+    import shutil
+
+    loaded = sim_montecarlo.load_sim_kit(PROFILE)
+    assert loaded.kit.plant.plant_version == "fuel-mv-2"
+    assert loaded.kit.plant_file == "nissan-xterra-2008/fuel_plant_mv2.yaml"
+    assert Path(loaded.uncertainty.path).name == "sim_uncertainty_mv2.yaml"
+    assert loaded.kit.contract.plant_version == "fuel-mv-1"
+    assert load_kit(PROFILE).plant.plant_version == "fuel-mv-1"
+    old = sim_montecarlo.load_sim_kit(PROFILE, "fuel-mv-1")
+    assert old.kit.plant.plant_version == "fuel-mv-1"
+    assert old.uncertainty.sha256 == uncertainty.sha256
+    assert _refusal(sim_montecarlo.load_sim_kit, PROFILE, "fuel-mv-3") == "uncertainty_undeclared"
+    bare = tmp_path / "bare"
+    shutil.copytree(PROFILE, bare, ignore=shutil.ignore_patterns("_*", "sim_kit.yaml"))
+    assert _refusal(sim_montecarlo.load_sim_kit, bare) == "sim_kit_undeclared"
+    crossed = tmp_path / "crossed"
+    shutil.copytree(PROFILE, crossed, ignore=shutil.ignore_patterns("_*"))
+    kit_file = crossed / "sim_kit.yaml"
+    raw = yaml.safe_load(kit_file.read_text())
+    raw["uncertainty"]["fuel-mv-2"] = "sim_uncertainty.yaml"
+    kit_file.write_text(yaml.safe_dump(raw))
+    assert _refusal(sim_montecarlo.load_sim_kit, crossed) == "uncertainty_plant_mismatch"
+
+
+def test_fuel_mv_2s_uncertainty_brackets_are_its_registrys(
+    kit_and_image: tuple[SimKit, bytes],
+) -> None:
+    """Every bracket in sim_uncertainty_mv2.yaml is fuel-mv-2's registry
+    bracket (or its frozen baseline's interval for the lumped scale), checked
+    entry by entry, and the declaration covers exactly what the plant
+    brackets; moving one bracket is refused (bracket_mismatch)."""
+    kit, _ = kit_and_image
+    mv2, declared = _mv2(kit)
+    decl = declared.declaration
+    assert decl.plant_version == "fuel-mv-2"
+    assert set(decl.parameters) == set(bracketed_parameters(mv2))
+    assert mv2.plant.baseline is not None
+    for pid, entry in decl.parameters.items():
+        if pid == LUMPED_SCALE:
+            assert tuple(entry.bracket) == tuple(mv2.plant.baseline.intervals[pid])
+            assert entry.mean == mv2.plant.baseline.values[pid]
+        else:
+            wa = mv2.plant.registry.get(pid).working_assumption
+            assert wa is not None and tuple(entry.bracket) == tuple(wa.bracket)
+    assert tuple(decl.parameters["manifold_pressure"].bracket) == (0.4, 1.0)
+
+    def moved(raw: dict[str, Any]) -> None:
+        raw["parameters"]["manifold_pressure"]["bracket"] = [0.45, 1.0]
+
+    assert _refusal(check_uncertainty, _with_declaration(declared, moved), mv2) == (
+        "bracket_mismatch"
     )
+    # fuel-mv-1's declaration is not fuel-mv-2's.
+    old = load_uncertainty(PROFILE / UNCERTAINTY_FILE)
+    assert _refusal(check_uncertainty, old.declaration, mv2) == "uncertainty_plant_mismatch"
+
+
+#: The W09 form grid (tests/test_rom_editor_private_rom.py, ``FORM_*``, ``ENV``,
+#: ``SEED``, ``DRAWS``: read, not imported, so this file needs no private ROM).
+FORM_RPM_EDGES = [200.0 + 400.0 * i for i in range(17)]
+FORM_LOAD_EDGES = [
+    3.571429, 10.71429, 17.85714, 25.0, 32.14286, 39.28571, 46.42857, 53.57143,
+    60.71429, 67.85714, 75.0, 82.14286, 89.28571, 96.42857, 100.0,
+]  # fmt: skip
+FORM_ENV: dict[str, Any] = dict(
+    load_basis="fill_fraction_as_manifold_ratio",
+    baro_kpa=81.0,
+    iat_c=25.0,
+    coolant_c=88.0,
+    battery_v=14.0,
+    rail_kpa=350.0,
+    throttle_pct=20.0,
+    pedal_flag=0,
+)
+
+
+def _built(image: bytes, rpm_edges: list[float], load_edges: list[float]) -> MonteCarloDesign:
+    """A fuel-mv-2 grid built by the real builder on the profile, re-pinned to
+    the synthetic image (the builder names the real base revision's image)."""
+    from src.analysis.sim_design import build_grid_design
+
+    grid = build_grid_design(
+        rpm_edges, load_edges, profile_dir=PROFILE, base_revision="ZS44A-20260920", **FORM_ENV
+    )
+    assert grid.plant_version == "fuel-mv-2"
+    design = MonteCarloDesign.from_sim_design(grid)
+    return dataclasses.replace(design, base_image_sha256=sha256_hex(image))
+
+
+@pytest.mark.parametrize(
+    ("label", "rpm_edges", "load_edges", "placed", "draws", "seed"),
+    [
+        # E07.6's 4,800 rpm at the form's top fill cell (the verifier's repro):
+        # a drawn bank split used to push it above ambient past split ~0.509.
+        ("full_fill_4800", [4600.0, 5000.0], [96.42857, 100.0], 1, 200, 20261015),
+        # The form's own grid and seed; its 400 rpm row is outside the VE fit,
+        # 9 cells (800 rpm above ~57 % fill, 1,200-1,600 rpm at the top cell)
+        # are above ambient at the VE floor's low end and are counted.
+        ("form_grid", FORM_RPM_EDGES, FORM_LOAD_EDGES, 201, 4, 20261015),
+        ("form_grid_more_draws", FORM_RPM_EDGES, FORM_LOAD_EDGES, 201, 60, 1),
+    ],
+)
+def test_a_default_draw_monte_carlo_on_a_built_fuel_mv_2_grid_never_refuses(
+    kit_and_image: tuple[SimKit, bytes],
+    label: str,
+    rpm_edges: list[float],
+    load_edges: list[float],
+    placed: int,
+    draws: int,
+    seed: int,
+) -> None:
+    """E08.11 rework: with one plenum (MAP from the total air, the split acting
+    on per-bank fuelling only) and bracket-safe placement, no draw of any
+    declared parameter can refuse a point a builder placed, so neither the
+    backstop nor ``support_varies_by_draw`` fires, and every supported output
+    is a number at every draw."""
+    kit, image = kit_and_image
+    mv2, declared = _mv2(kit)
+    design = _built(image, rpm_edges, load_edges)
+    assert len(design.points) == placed, label
+    result = _run(mv2, image, bytes(image), design, declared, draws=draws, seed=seed)
+    assert set(result.provenance["varied"]) >= {"manifold_pressure", "bank_air_split"}
+    for name in OUTPUTS:
+        ok = result.supported(name)
+        assert np.isfinite(result.base[name][ok]).all(), (label, name)
+
+
+def test_run_paired_and_the_fast_path_run_the_twin_runners_one_ecu_path(
+    kit_and_image: tuple[SimKit, bytes],
+    uncertainty: LoadedUncertainty,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """E09.2c: run_paired and the Monte Carlo fast path call the twin runner's
+    stage kernels (``twin_runner.stated_ecu``'s steady BFS, its plant stage's
+    ``plant_inputs``), not copies. One mutation there moves run_paired, and
+    the fast path moves with it: its ``fast_path_diverged`` self-check, which
+    re-runs run_paired, still agrees, and its arrays carry the mutation."""
+    from src.analysis import twin_runner
+
+    kit, image = kit_and_image
+    candidate = _edit_all(image, kit, "fuel_compensation", 1, 3)
+    design = _design(image, (P_WOT, 190, 200), (P_CRUISE, 50, 70))
+    template = _template(kit, image, candidate)
+    points = tuple(
+        dataclasses.replace(dp.point, conditioned={FILL_BYTE: float(dp.fill_byte_lo)})
+        for dp in design.points
+    )
+    scenario = dataclasses.replace(template, points=points)
+    before = run_paired(kit, scenario, image, candidate)
+    mc_before = _run(kit, image, candidate, design, uncertainty, draws=4)
+
+    real_bfs, real_inputs = twin_runner.steady_bfs, twin_runner.plant_inputs
+
+    def bfs_plus(air: Any, **kw: Any) -> Any:
+        out = real_bfs(air, **kw)
+        return dataclasses.replace(out, word=out.word + 64)
+
+    def leaner(frame: Any) -> Any:
+        inputs = real_inputs(frame)
+        return dataclasses.replace(inputs, maf_gps=inputs.maf_gps * 1.05)
+
+    monkeypatch.setattr(twin_runner, "steady_bfs", bfs_plus)
+    monkeypatch.setattr(twin_runner, "plant_inputs", leaner)
+    after = run_paired(kit, scenario, image, candidate)
+    mc_after = _run(kit, image, candidate, design, uncertainty, draws=4)
+    for i, (b, a) in enumerate(zip(before.points, after.points, strict=True)):
+        bfs_b, bfs_a = b["outputs"]["base_fuel_schedule"], a["outputs"]["base_fuel_schedule"]
+        assert bfs_a["base"] == bfs_b["base"] + 64
+        assert bfs_a["candidate"] == bfs_b["candidate"] + 64
+        lam_b, lam_a = b["outputs"]["delivered_lambda"], a["outputs"]["delivered_lambda"]
+        assert lam_a["base"] != lam_b["base"]
+        assert (
+            mc_after.base["base_fuel_schedule"][i] == mc_before.base["base_fuel_schedule"][i] + 64
+        ).all()
+        assert (mc_after.base["delivered_lambda"][i] != mc_before.base["delivered_lambda"][i]).all()

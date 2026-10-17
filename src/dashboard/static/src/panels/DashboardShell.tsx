@@ -23,8 +23,10 @@ interface DashboardShellProps {
   anomalyState: ConnectionState;
   controlState: ConnectionState;
   controlReady: boolean;
-  /** Task 6.35 — `Live Pi` / `Local Library` / `Queued Offline`. */
+  /** Task 6.35 — `Live Pi` / `Desk` / `Local Library` / `Queued Offline`. */
   connectivity: ConnectivityMode;
+  /** The Pi a desk daemon is linked to (companion mode), named in the badge. */
+  linkedPi?: string | null;
   events: AnomalyEvent[];
   liveMode?: string | null;
   status: StatusResponse | null;
@@ -44,15 +46,23 @@ interface DashboardShellProps {
 
 const CONNECTIVITY_LABEL: Record<ConnectivityMode, string> = {
   "live-pi": "live pi",
+  desk: "desk",
   "local-library": "local library",
   "queued-offline": "queued offline",
 };
 
 const CONNECTIVITY_CLASS: Record<ConnectivityMode, string> = {
   "live-pi": "border-ok/40 text-ok",
+  desk: "border-ok/40 text-ok",
   "local-library": "border-accent-2/40 text-accent-2",
   "queued-offline": "border-warn/40 text-warn",
 };
+
+/** The badge text: the mode, and on a desk the Pi it is linked to. */
+function connectivityLabel(connectivity: ConnectivityMode, linkedPi: string | null): string {
+  const label = CONNECTIVITY_LABEL[connectivity];
+  return connectivity === "desk" && linkedPi ? `${label} · linked to ${linkedPi}` : label;
+}
 
 /** Page chrome: header (brand, operating mode, connection state, the
  *  Drive↔Workbench toggle) + the always-visible StatusStrip + the active
@@ -71,6 +81,7 @@ export function DashboardShell({
   controlState,
   controlReady,
   connectivity,
+  linkedPi = null,
   events,
   liveMode,
   status,
@@ -88,9 +99,9 @@ export function DashboardShell({
         "inline-flex min-h-6 items-center rounded-full border bg-black/25 px-2 text-[0.68rem] uppercase tracking-[0.06em]",
         CONNECTIVITY_CLASS[connectivity],
       )}
-      title="Task 6.35 — Live Pi / Local Library / Queued Offline"
+      title="Task 6.35 — Live Pi / Desk / Local Library / Queued Offline"
     >
-      {CONNECTIVITY_LABEL[connectivity]}
+      {connectivityLabel(connectivity, linkedPi)}
     </span>
   );
   const streams = (

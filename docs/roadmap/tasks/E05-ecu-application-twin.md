@@ -342,7 +342,8 @@ ECU replica.
       classed as read.
     - *More refusals.* An image that differs at any newly pinned calibration
       byte refuses `unmodelled_logic`.
-  - **Remaining (vehicle):**
+  - **Remaining (vehicle):** *(the capture for (b)–(d) is E09.1's `twin`
+    profile; the time-stepped implementation of (b) is E09.3.)*
     - **(a) RAM copies.** Read `0xFFFFB6A0`–`0xFFFFB7A3` (260 bytes, five
       0x23 windows) once at key-on and compare with the resolved slot. That
       closes `air_charge_ram_copy_unverified`.
@@ -645,7 +646,9 @@ ECU replica.
       +1/+2, and none in B. Three off-grid points match values hand-worked
       from the cells, including truncation toward the first operand.
     - The Main/High Det labels stay inferred (tables are named A/B).
-  - **Remaining (vehicle).**
+  - **Remaining (vehicle).** *(E09.7 maps the base timing table, implements
+    the seven nodes to the final byte and exposes Δtiming to the editor;
+    (b)–(c) ride on E09.1's capture.)*
     - **(a)** Read `0xFFFFB060`/`0xFFFFB160` (512 bytes, 0x23 windows) once
       at key-on and compare with the resolved slot. That closes
       `trim_ram_copy_unverified`.

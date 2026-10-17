@@ -56,68 +56,73 @@ import pandas as pd
 import yaml
 from numpy.random import PCG64, Generator
 from numpy.typing import NDArray
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
 from src.analysis.fuel_plant import (
+    DELAY_PARAMETER,
     MANIFOLD_MODELS,
     REFUSING_MODELS,
-    PlantInputs,
     ResolvedParameters,
     load_b06,
     load_fuel_plant,
+    plant_files,
     plant_qualification,
     plant_reads,
-    predict,
     resolve_parameters,
 )
-from src.analysis.injector_pulse import (
-    PULSE_COUNT_MS,
-    predict_pulse,
-    trim_word,
-    vb_counts_from_volts,
-)
 from src.analysis.paired_scenarios import (
-    _ECU_OUTPUTS,
     _LOAD_BYTE,
     _PLANT_OUTPUTS,
-    BATTERY_UNMEASURED,
     OUTPUTS,
+    PLANT_ASSUMPTION_PREFIX,
     BatterySource,
+    FuelFn,
+    GateReason,
     MapSource,
     OperatingPoint,
     PairedResult,
     PairedScenario,
     RailSource,
+    ReasonScope,
     SimKit,
     _ecu_chain,
-    _plant_regime,
+    _fuel_side,
+    _pair_loop,
     _refuse_recorded_sources,
-    _regime,
     _resets,
+    _Side,
     _side,
-    _twin_gate,
     _with_contract_mode,
+    compare_scenario_roms,
+    load_kit,
+    output_reasons,
+    plant_assumption_lines,
     plant_parameters,
     plant_rail_kpa,
+    refusing_as_simulation,
+    rom_gate,
     run_paired,
+    stated_sample,
 )
 from src.analysis.paired_scenarios import TOOL_VERSION as PAIRED_TOOL_VERSION
-from src.analysis.paired_steady import (
-    SETPOINT_MOVED,
-    TRIM_AUTHORITY_UNDECODED,
-    closed_loop_k,
-    steady_coverage,
-    total_trim_pct,
-    trim_k,
-)
-from src.analysis.rom_effects import compare_roms
 from src.analysis.rom_image import sha256_hex
 from src.analysis.sim_contract import SimulationRefusalError
-from src.analysis.sim_design import SimDesign
+from src.analysis.sim_design import MAF_FROM_MANIFOLD_MODEL, SimDesign
+from src.analysis.sim_kit import SIM_KIT_FILE, load_sim_kit_declaration
+from src.analysis.twin_runner import (
+    StatedPulse,
+    plant_predict,
+    stage_order,
+    stated_plant_samples,
+    stated_pulse,
+)
 from src.session import SYNTHETIC_SESSION_PREFIX
 
-#: Bump when what a result means changes.
-TOOL_VERSION = "1"
+#: Bump when what a result means changes. 2: per-output blanking under a
+#: scoped gate, and held working and design assumptions named (E08.10).
+#: 3: runs a VE(rpm) plant (E08.11): a VE draw moves only the floor bands, the
+#: held fit is named, and a model-MAP refusal is refused per draw, not per plant.
+TOOL_VERSION = "3"
 UNCERTAINTY_FILE = "sim_uncertainty.yaml"
 #: The standing caveat: the plant's structural error is not a parameter.
 STRUCTURAL_ERROR_NOT_SAMPLED = "structural_error_not_sampled"
@@ -129,6 +134,10 @@ FILL_BYTE = _LOAD_BYTE
 SELF_CHECK_COMBOS = 8
 #: The mode a paired Monte Carlo runs (the only one run_paired computes).
 MODE = "conditional_rom_comparison"
+#: A design's own assumptions reach the result with this prefix (E08.10).
+DESIGN_ASSUMPTION_PREFIX = "design: "
+#: The plant parameter a grid design solved its MAF at (fuel_plant's VE).
+_VE_PARAMETER = "manifold_pressure"
 
 FloatArray = NDArray[np.float64]
 IntArray = NDArray[np.int64]
@@ -226,7 +235,7 @@ def bracketed_parameters(
     baseline = kit.plant.baseline
     for pid in plant_reads(kit.plant.manifold_model):
         p = kit.plant.registry.get(pid)
-        if pid == "lambda_observation_delay":
+        if pid == DELAY_PARAMETER:
             lo, hi = kit.delay.bracket
             out[pid] = ("working_assumption", (float(lo), float(hi)))
         elif p.working_assumption is not None:
@@ -325,6 +334,12 @@ class MonteCarloDesign:
     #: The plant version the design placed its points with (its MAF and MAP
     #: model); ``None`` for a hand-built design. A run on another is refused.
     plant_version: str | None = None
+    #: The design's own stated assumptions (``SimDesign.assumptions``): every
+    #: result built on it carries them (E08.10).
+    assumptions: tuple[str, ...] = ()
+    #: Points whose MAF the design solved through the plant's manifold model
+    #: when it was built (a grid): frozen there, so a VE draw cannot move it.
+    maf_frozen_points: int = 0
 
     @classmethod
     def from_sim_design(cls, design: SimDesign) -> MonteCarloDesign:
@@ -357,6 +372,10 @@ class MonteCarloDesign:
             base_image_sha256=design.base_image_sha256,
             points=tuple(points),
             plant_version=design.plant_version,
+            assumptions=tuple(design.assumptions),
+            maf_frozen_points=sum(
+                p.maf_source.startswith(f"{MAF_FROM_MANIFOLD_MODEL}:") for p in design.points
+            ),
         )
 
 
@@ -627,7 +646,58 @@ def kit_for_plant(kit: SimKit, profile_dir: Path, plant_version: str | None) -> 
         raise SimulationRefusalError(
             "plant_not_frozen", f"{plant_version} has no frozen baseline parameter set"
         )
-    return replace(kit, plant=plant, delay=load_b06(profile_dir, plant.delay))
+    return replace(
+        kit,
+        plant=plant,
+        delay=load_b06(profile_dir, plant.delay),
+        plant_file=f"{profile_dir.name}/{plant_files(profile_dir)[plant_version].name}",
+    )
+
+
+@dataclass(frozen=True)
+class LoadedSimKit:
+    """The simulator's kit (E08.11): the contract's kit on the plant
+    ``sim_kit.yaml`` declares, with that plant's uncertainty declaration."""
+
+    kit: SimKit
+    uncertainty: LoadedUncertainty
+    #: sha256 of ``sim_kit.yaml`` (provenance).
+    declaration_sha256: str
+
+
+def load_sim_kit(profile_dir: Path, plant_version: str | None = None) -> LoadedSimKit:
+    """The one loader of the ROM-edit simulator's kit.
+
+    The plant is the one ``<profile>/sim_kit.yaml`` declares, never the
+    contract's default (which E07.4/E07.6 run); ``plant_version`` names
+    another the declaration lists (e.g. ``fuel-mv-1`` to re-run a run recorded
+    on it). The uncertainty declaration is that version's file, checked
+    against the plant here (:func:`check_uncertainty`), so a kit and a
+    declaration for different plants cannot leave this function together. The
+    contract still decides which versions a scenario may run."""
+    loaded = load_sim_kit_declaration(profile_dir)
+    declared = loaded.declaration
+    version = declared.plant_version if plant_version is None else plant_version
+    if version not in declared.uncertainty:
+        raise SimulationRefusalError(
+            "uncertainty_undeclared",
+            f"{SIM_KIT_FILE} declares uncertainty for {sorted(declared.uncertainty)}, not "
+            f"{version}",
+        )
+    kit = kit_for_plant(load_kit(profile_dir), profile_dir, version)
+    name = declared.uncertainty[version]
+    try:
+        uncertainty = load_uncertainty(Path(profile_dir) / name)
+    except FileNotFoundError as exc:
+        raise SimulationRefusalError(
+            "uncertainty_missing", f"{Path(profile_dir).name} has no {name}"
+        ) from exc
+    except ValidationError as exc:
+        raise SimulationRefusalError(
+            "uncertainty_invalid", f"{name}: {exc.error_count()} error(s)"
+        ) from exc
+    check_uncertainty(uncertainty.declaration, kit)
+    return LoadedSimKit(kit, uncertainty, loaded.sha256)
 
 
 @dataclass
@@ -657,103 +727,38 @@ def _with_byte(point: OperatingPoint, byte: int) -> OperatingPoint:
 
 def _gate(
     kit: SimKit, template: PairedScenario, base_image: bytes, candidate_image: bytes
-) -> list[str]:
-    """run_paired's run-level gate: what the change reaches that a point is
-    conditioned on, the twin's ROM gates and unknown changed bytes."""
-    report = compare_roms(
-        base_image,
-        candidate_image,
-        kit.rom_map,
-        kit.model,
-        kit.model_sha256,
-        base_slot=template.base.slot,
-        candidate_slot=template.candidate.slot,
-        slot_source=template.base.slot_source,
-        contract=kit.contract,
-        mode=template.mode,
-    )
+) -> list[GateReason]:
+    """run_paired's run-level gate (``paired_scenarios.rom_gate``), each reason
+    with the node it names, on the one quantity a design conditions every
+    point on: the fill byte."""
+    report = compare_scenario_roms(kit, template, base_image, candidate_image)
     if report.outcome == "unevaluable" and report.reason is not None:
         raise SimulationRefusalError(
             "rom_unevaluable", f"rom:{report.reason}: no point can be computed on either ROM"
         )
-    reached = set(report.changed_nodes) | {n for o in report.outputs for n in o.path}
-    unknown_changed = any(r.byte_class in ("unknown", "mapped_unmodelled") for r in report.ranges)
-    coverage = steady_coverage(kit.contract, template.mode, report.changed_nodes)
-    gate: list[str] = []
-    if kit.contract.quantity(FILL_BYTE).manifest_node in reached:
-        gate.append(f"conditioned_on_changed_path:{FILL_BYTE}")
-    gate.extend(_twin_gate(report, coverage, []))
-    if unknown_changed:
-        gate.append("rom:unknown_bytes_changed")
-    return sorted(set(gate))
-
-
-@dataclass(frozen=True)
-class _Pulses:
-    """One side's pulse chain over many combinations, element-wise exactly as
-    ``paired_scenarios._fuel_chain`` forms it for one (the chain is integer
-    arithmetic, :func:`~src.analysis.injector_pulse.predict_pulse`)."""
-
-    g: IntArray
-    dead: IntArray
-    counts: IntArray
+    fill = (FILL_BYTE, kit.contract.quantity(FILL_BYTE).manifest_node)
+    gate, _, _ = rom_gate(kit, report, template.mode, [fill])
+    return gate
 
 
 def _pulses(
-    side: Any, ecus: Sequence[dict[str, Any]], points: Sequence[OperatingPoint], stft_pct: float
-) -> _Pulses | None:
-    if side.cal is None or not ecus:
-        return None
-    pulse = predict_pulse(
+    kit: SimKit,
+    side: _Side,
+    ecus: Sequence[dict[str, Any]],
+    points: Sequence[OperatingPoint],
+    stft_pct: float,
+) -> StatedPulse | None:
+    """One side's pulse stage over every combination at once
+    (``twin_runner.stated_pulse``, the chain run_paired runs per point; a
+    combination with no phi word takes a placeholder whose words are unused)."""
+    return stated_pulse(
+        side.ecu,
+        [stated_sample(kit, p, p.conditioned[FILL_BYTE]) for p in points],
         bfs=[e["base_fuel_schedule"] if e["target_phi_word"] is not None else 0 for e in ecus],
         phi_q14=[e["target_phi_word"] if e["target_phi_word"] is not None else 0 for e in ecus],
-        stft_word=trim_word([stft_pct]),
-        ltft_word=trim_word([side.ltft_pct]),
-        vb_counts=vb_counts_from_volts([p.battery_v for p in points]),
-        rpm=[p.rpm for p in points],
-        baro_kpa=[p.baro_kpa for p in points],
-        iat_c=[p.iat_c for p in points],
-        cal=side.cal,
+        stft_pct=stft_pct,
+        ltft_pct=side.ltft_pct,
     )
-    assert pulse.g is not None
-    return _Pulses(pulse.g, pulse.dead_time, pulse.pulse)
-
-
-def _fuel_side(
-    side: Any,
-    ecu: dict[str, Any],
-    pulses: _Pulses | None,
-    c: int,
-    stft_pct: float,
-    hold: tuple[int, int] | None = None,
-) -> dict[str, Any]:
-    """``_fuel_chain`` without the plant (which runs per draw): the pulse, the
-    total trim and what the plant reads. The plant outputs are marked
-    computed (NaN here, filled per draw)."""
-    out = dict(ecu)
-    out["reasons"] = list(ecu["reasons"])
-    if ecu["target_phi_word"] is None or side.cal is None or pulses is None:
-        return out
-    g = int(pulses.g[c])
-    dead = int(pulses.dead[c])
-    if hold is None:
-        k: float = trim_k(stft_pct, side.ltft_pct)
-        counts = int(pulses.counts[c])
-    else:
-        g_base, k_base = hold
-        k = closed_loop_k(g_base, k_base, g)
-        counts = ((g_base * k_base) >> 16) + dead
-    out["g_word"] = g
-    out["k_word"] = k
-    out["fuel_trim_total_pct"] = total_trim_pct(k)
-    pulse_ms = counts * PULSE_COUNT_MS
-    dead_ms = dead * PULSE_COUNT_MS
-    out["injector_pulse_ms"] = pulse_ms
-    out["effective_ms"] = pulse_ms - dead_ms
-    out["dead_ms"] = dead_ms
-    out["delivered_lambda"] = math.nan
-    out["fuel_per_event_g"] = math.nan
-    return out
 
 
 def _build_cache(
@@ -763,20 +768,26 @@ def _build_cache(
     draws: Draws,
     base_image: bytes,
     candidate_image: bytes,
-    gate: list[str],
+    gated: Sequence[GateReason],
     learned: dict[str, Any],
 ) -> tuple[_Cache, IntArray, list[tuple[str, ...]]]:
     """Every (point, fill byte) the draws visit, and the (point, draw) ->
-    combination index. The ECU chain runs per combination through
-    ``paired_scenarios._ecu_chain``; the pulse chain runs once per ROM over
-    every combination; the loop logic and the reasons are ``_pair_point``'s
-    and ``run_paired``'s, re-checked against ``run_paired`` on every run."""
+    combination index. Every piece is run_paired's own, none a copy (E09.2c):
+    the ECU stages per combination through ``paired_scenarios._ecu_chain``
+    (the twin runner's ``stated_ecu``), the pulse stage once per ROM over
+    every combination (``twin_runner.stated_pulse``), the loop through
+    ``_pair_loop`` and the reasons through ``output_reasons``; the assembled
+    result is still re-checked against ``run_paired`` on every run."""
     base_side = _side(kit, base_image, template.base, learned["base"]["ltft_pct"], "base")
     cand_side = _side(
         kit, candidate_image, template.candidate, learned["candidate"]["ltft_pct"], "candidate"
     )
     stfts = (learned["base"]["stft_pct"], learned["candidate"]["stft_pct"])
     qualification = plant_qualification(kit.plant)
+    gate = sorted({r for r, _ in gated})
+    scope = ReasonScope.of(kit, gated)
+    withheld = {name: bool(scope.keep(name, gate)) for name in OUTPUTS}
+    plant_withheld = all(withheld[name] for name in _PLANT_OUTPUTS)
     n_points, n_draws = draws.fill_bytes.shape
     combo_of = np.empty((n_points, n_draws), dtype=np.int64)
     at: list[int] = []
@@ -788,10 +799,14 @@ def _build_cache(
         bytes_.extend(int(v) for v in uniq)
     n = len(at)
     points = [_with_byte(design.points[at[c]].point, bytes_[c]) for c in range(n)]
-    b_ecus = [_ecu_chain(kit, base_side, p) for p in points]
-    c_ecus = [_ecu_chain(kit, cand_side, p) for p in points]
-    b_pulses = _pulses(base_side, b_ecus, points, stfts[0])
-    c_pulses = _pulses(cand_side, c_ecus, points, stfts[1])
+    stages = stage_order(kit.model)
+    b_ecus = [_ecu_chain(kit, stages, base_side, p) for p in points]
+    c_ecus = [_ecu_chain(kit, stages, cand_side, p) for p in points]
+    pulses = (
+        _pulses(kit, base_side, b_ecus, points, stfts[0]),
+        _pulses(kit, cand_side, c_ecus, points, stfts[1]),
+    )
+    sides = (base_side, cand_side)
 
     base = {name: np.full(n, np.nan) for name in OUTPUTS}
     cand = {name: np.full(n, np.nan) for name in OUTPUTS}
@@ -802,54 +817,24 @@ def _build_cache(
     computed = np.zeros((2, n), dtype=bool)
     pulse = np.full((2, n), np.nan)
     dead = np.full((2, n), np.nan)
-    min_effective = kit.plant.steady.min_effective_pulse_ms
+
+    def fuel_at(c: int) -> FuelFn:
+        def fuel(s: int, ecu: dict[str, Any], hold: tuple[int, int] | None) -> dict[str, Any]:
+            return _fuel_side(sides[s], ecu, pulses[s], c, stfts[s], hold)
+
+        return fuel
+
     for c in range(n):
-        point, b_ecu, c_ecu = points[c], b_ecus[c], c_ecus[c]
-        # _pair_point, with the plant deferred to the per-draw pass.
-        b = _fuel_side(base_side, b_ecu, b_pulses, c, stfts[0])
-        loop: str | None
-        closed = any(_plant_regime(e["target_phi"], kit) == "closed_loop" for e in (b_ecu, c_ecu))
-        if not closed:
-            cd, loop = _fuel_side(cand_side, c_ecu, c_pulses, c, stfts[1]), None
-        elif (
-            b_ecu["target_phi_word"] is None or b_ecu["target_phi_word"] != c_ecu["target_phi_word"]
-        ):
-            cd, loop = c_ecu, SETPOINT_MOVED
-        elif b.get("g_word") is None:
-            cd, loop = c_ecu, "closed_loop"
-        else:
-            hold = (int(b["g_word"]), int(b["k_word"]))
-            cd, loop = _fuel_side(cand_side, c_ecu, c_pulses, c, stfts[1], hold), "closed_loop"
+        point = points[c]
+
+        # _pair_point's loop, with the plant deferred to the per-draw pass.
+        pair = _pair_loop(kit, b_ecus[c], c_ecus[c], fuel_at(c))
+        b, cd, loop = pair.base, pair.candidate, pair.loop
         loops.append(loop or "open_loop")
         # run_paired's per-output reasons.
-        regime = _regime(point, kit)
-        plant_regimes = {
-            r
-            for r in (_plant_regime(b["target_phi"], kit), _plant_regime(cd["target_phi"], kit))
-            if r
-        }
-        unqualified = (
-            sorted(plant_regimes - set(qualification.regimes)) if qualification.qualified else []
-        )
+        point_reasons = output_reasons(kit, scope, gate, qualification, point, pair)
         for name in OUTPUTS:
-            reasons = list(gate) + b["reasons"] + cd["reasons"]
-            if name not in _ECU_OUTPUTS:
-                if regime is not None:
-                    reasons.append(regime)
-                if loop == SETPOINT_MOVED:
-                    reasons.append(SETPOINT_MOVED)
-                elif loop == "closed_loop":
-                    reasons.append(TRIM_AUTHORITY_UNDECODED)
-                if name in _PLANT_OUTPUTS:
-                    reasons.extend(f"regime_not_qualified:{r}" for r in unqualified)
-                eff = [s["effective_ms"] for s in (b, cd) if s.get("effective_ms") is not None]
-                if any(e < min_effective for e in eff):
-                    reasons.append("short_pulse_undecoded")
-            if name == "injector_pulse_ms" and point.battery_v_source == "unmeasured":
-                reasons.append(BATTERY_UNMEASURED)
-            if b[name] is None or cd[name] is None:
-                reasons.append("not_computed")
-            key = tuple(sorted(set(reasons)))
+            key = tuple(point_reasons[name])
             if key not in interned:
                 interned[key] = len(reason_sets)
                 reason_sets.append(key)
@@ -858,10 +843,10 @@ def _build_cache(
                 continue
             if b[name] is not None:
                 base[name][c] = float(b[name])
-            if not gate and cd[name] is not None:
+            if not withheld[name] and cd[name] is not None:
                 cand[name][c] = float(cd[name])
         for s, fuel in enumerate((b, cd)):
-            if (s == 1 and gate) or fuel.get("dead_ms") is None:
+            if (s == 1 and plant_withheld) or fuel.get("dead_ms") is None:
                 continue
             computed[s, c] = True
             pulse[s, c] = fuel["injector_pulse_ms"]
@@ -926,8 +911,9 @@ def _plant(
         if not group.any():
             continue
         g_at, g_idx, g_sides = at[group], idx[group], sides[group]
-        out = predict(
-            PlantInputs(
+        # The plant stage on the predicted pulses, in the replay's columns.
+        out = plant_predict(
+            stated_plant_samples(
                 pulse_ms=cache.pulse_ms[g_sides, g_idx],
                 ecu_dead_time_ms=cache.dead_ms[g_sides, g_idx],
                 rpm=points.rpm[g_at],
@@ -935,14 +921,53 @@ def _plant(
                 baro_kpa=points.baro_kpa[g_at],
                 iat_c=points.iat_c[g_at],
                 rail_kpa=points.rail_kpa[g_at],
-                map_kpa=None if group is model else points.map_kpa[g_at],
             ),
             params,
-            kit.plant.geometry,
+            kit.plant,
+            map_kpa=None if group is model else points.map_kpa[g_at],
         )
         result["delivered_lambda"][g_sides, where[group]] = out.lambda_delivered
         result["fuel_per_event_g"][g_sides, where[group]] = out.fuel_g
     return {name: v.reshape((2, *combos.shape)) for name, v in result.items()}
+
+
+def _refuse_manifold_refusal(
+    kit: SimKit, points: _PointArrays, params: ResolvedParameters, draw: int, sampled: Draws
+) -> None:
+    """The backstop for a plant whose manifold model refuses MAP per sample
+    (fuel-mv-2/3): MAP at a ``plant_model`` point is recomputed at each draw,
+    so a refusal there (above ambient, outside the VE fit) would make the
+    point's support depend on the draw. Refused at the first such draw, by
+    name (``manifold_refusal_varies_by_draw``). Designs place a point only
+    where the frozen plant gives a MAP, and drawing the VE floor at warm idle
+    (charge fraction ~0.15) cannot reach ambient, so it is not expected to fire."""
+    if kit.plant.manifold_model not in REFUSING_MODELS or not points.map_from_model.any():
+        return
+    at = np.flatnonzero(points.map_from_model)
+    out = plant_predict(
+        stated_plant_samples(
+            pulse_ms=np.full(at.size, 2.0),
+            ecu_dead_time_ms=np.zeros(at.size),
+            rpm=points.rpm[at],
+            maf_gps=points.maf_gps[at],
+            baro_kpa=points.baro_kpa[at],
+            iat_c=points.iat_c[at],
+            rail_kpa=points.rail_kpa[at],
+        ),
+        params,
+        kit.plant,
+    )
+    assert out.manifold_refusal is not None
+    refused = np.flatnonzero(out.manifold_refusal != "")
+    if refused.size:
+        k = int(refused[0])
+        raise SimulationRefusalError(
+            "manifold_refusal_varies_by_draw",
+            f"{kit.plant.manifold_model} refuses MAP at point {int(at[k])} "
+            f"({out.manifold_refusal[k]}, {refused.size} of {at.size} model-MAP points) at draw "
+            f"{draw} ({sampled.overrides(draw)}): with MAP computed per draw a point's support "
+            "would depend on the draw",
+        )
 
 
 def _same(a: float | None, b: float) -> bool:
@@ -1052,6 +1077,22 @@ def _inert(
     return inert
 
 
+def _design_assumptions(design: MonteCarloDesign, *, ve_drawn: bool) -> list[str]:
+    """The design's own assumptions, and, for points whose MAF the design
+    solved through the plant's manifold model, that it is frozen there."""
+    out = [f"{DESIGN_ASSUMPTION_PREFIX}{a}" for a in design.assumptions]
+    if design.maf_frozen_points:
+        out.append(
+            f"{DESIGN_ASSUMPTION_PREFIX}the MAF of {design.maf_frozen_points} of "
+            f"{len(design.points)} points was solved through the plant's manifold model at the "
+            "design's VE when the design was built and is frozen there: this run's VE "
+            f"({'drawn' if ve_drawn else 'held'}) moves the plant's MAP and lambda at a point, "
+            "never its MAF, so BFS and the pulse rest on the design's VE"
+        )
+    return out
+
+
+@refusing_as_simulation
 def run_monte_carlo(
     kit: SimKit,
     template: PairedScenario,
@@ -1087,14 +1128,6 @@ def run_monte_carlo(
             f"design {design.sha256[:12]} was built on plant {design.plant_version}; the run's "
             f"is {kit.plant.plant_version}",
         )
-    if kit.plant.manifold_model in REFUSING_MODELS and any(
-        dp.point.map_kpa_source == "plant_model" for dp in design.points
-    ):
-        raise SimulationRefusalError(
-            "manifold_refusal_varies_by_draw",
-            f"{kit.plant.manifold_model} refuses MAP per sample; with MAP computed per VE draw "
-            "a point's support would depend on the draw",
-        )
     for label, image, identity in (
         ("base", base_image, template.base),
         ("candidate", candidate_image, template.candidate),
@@ -1126,9 +1159,11 @@ def run_monte_carlo(
             "ltft_pct": 0.0 if "ltft_b1" in resets else base_ltft,
         },
     }
-    gate = _gate(kit, template, base_image, candidate_image)
+    gated = _gate(kit, template, base_image, candidate_image)
+    gate = sorted({r for r, _ in gated})
+    scope = ReasonScope.of(kit, gated)
     cache, combo_of, reason_sets = _build_cache(
-        kit, template, design, sampled, base_image, candidate_image, gate, learned
+        kit, template, design, sampled, base_image, candidate_image, gated, learned
     )
     points = _PointArrays.of(design)
 
@@ -1140,12 +1175,16 @@ def run_monte_carlo(
             base[name][:] = cache.base[name][combo_of]
             cand[name][:] = cache.candidate[name][combo_of]
     for d in range(n_draws):
-        plant = _plant(
-            kit, cache, points, combo_of[:, d], plant_parameters(kit, sampled.overrides(d))
-        )
+        params = plant_parameters(kit, sampled.overrides(d))
+        _refuse_manifold_refusal(kit, points, params, d, sampled)
+        plant = _plant(kit, cache, points, combo_of[:, d], params)
         for name in _PLANT_OUTPUTS:
             base[name][:, d] = plant[name][0]
             cand[name][:, d] = plant[name][1]
+    for name in _PLANT_OUTPUTS:
+        if scope.keep(name, gate):
+            # A gate that reaches this output withholds the candidate, as run_paired.
+            cand[name][:] = np.nan
     support = {name: cache.reason_id[name][combo_of] for name in OUTPUTS}
     # The assembled arrays themselves, checked against run_paired.
     checks = _paired_at(
@@ -1166,10 +1205,20 @@ def run_monte_carlo(
 
     first = next(iter(checks.values()))[0]
     qualification = plant_qualification(kit.plant)
+    varied = sorted(sampled.parameters)
     assumptions: list[str] = []
     for paired, _ in checks.values():
-        assumptions.extend(a for a in paired.assumptions if a not in assumptions)
-    varied = sorted(sampled.parameters)
+        assumptions.extend(
+            a
+            for a in paired.assumptions
+            if a not in assumptions and not a.startswith(PLANT_ASSUMPTION_PREFIX)
+        )
+    # The plant's working assumptions over the whole design (a checked subset
+    # may miss a point that reads one), then the design's own (E08.10).
+    assumptions.extend(
+        plant_assumption_lines(kit, [dp.point for dp in design.points], drawn=varied)
+    )
+    assumptions.extend(_design_assumptions(design, ve_drawn=_VE_PARAMETER in varied))
     inert = _inert(kit, cache, points, uncertainty.declaration, varied)
     caveats = [STRUCTURAL_ERROR_NOT_SAMPLED]
     if not qualification.qualified:
@@ -1254,6 +1303,7 @@ __all__ = [
     "STRUCTURAL_ERROR_NOT_SAMPLED",
     "TOOL_VERSION",
     "UNCERTAINTY_FILE",
+    "DESIGN_ASSUMPTION_PREFIX",
     "DesignPoint",
     "Draws",
     "LoadedUncertainty",
@@ -1263,7 +1313,9 @@ __all__ = [
     "UncertaintyDeclaration",
     "bracketed_parameters",
     "check_uncertainty",
+    "LoadedSimKit",
     "kit_for_plant",
+    "load_sim_kit",
     "load_uncertainty",
     "run_monte_carlo",
     "sample_draws",

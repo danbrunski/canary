@@ -92,6 +92,11 @@ class TimingLookupRefusalError(ValueError):
         super().__init__(f"{reason}: {message}")
         self.reason = reason
 
+    def __reduce__(self) -> tuple[object, ...]:
+        # Rebuilt from its constructor's arguments, so it survives a process
+        # boundary (pickle); tests/test_exceptions_pickle.py holds every class to it.
+        return (type(self), (self.reason, str(self)[len(self.reason) + 2 :]), self.__dict__)
+
 
 def require_final_timing_target(provider: ContextProvider, spec: str) -> None:
     """Refuse a target that is not declared as observing final timing."""

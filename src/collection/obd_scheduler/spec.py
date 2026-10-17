@@ -393,6 +393,9 @@ class CanObdSpec:
     #: Service-0x23 channels, already filtered to those a capture profile
     #: names by the caller. Threaded through
     #: like ``custom_pids``; the scheduler never reads the catalog itself.
+    #: From ``from_config`` with a catalog this is every saved profile's
+    #: selection (``profile_memory_union``): the plan's windows, which the
+    #: loop cuts to the active profile's members before sending or decoding.
     memory: tuple[MemoryChannel, ...] = ()
     #: Channels that win a contended request slot while due, so they hold
     #: their tier rate instead of degrading with the rest of the plan. See
@@ -431,8 +434,11 @@ class CanObdSpec:
         is their union — every profile's Mode 01 channels (unless ``auto``
         already covers them), DIDs plus the catalogued inventory, and memory
         channels — and the process-wide active-profile gate filters it
-        (``capture_profiles_enabled``). Without one (the recorder) the plan is
-        the config's own selection, polled ungated.
+        (``capture_profiles_enabled``). The union is the plan only: the loop
+        sends, staggers and decodes the active profile's part of it, so no
+        other profile in the catalog changes what that one records
+        (``tests/test_capture_catalog_independence.py``). Without one (the
+        recorder) the plan is the config's own selection, polled ungated.
 
         ``pids``/``dids``/``did_request_id`` override the config's selection
         (the recorder's CLI flags). Everything else — batch sizes, DID
@@ -539,13 +545,24 @@ def profile_did_union(
 
 
 def profile_memory_union(profiles: Sequence[CaptureProfile]) -> tuple[MemoryChannel, ...]:
-    """Every catalog memory channel a saved profile selects, in catalog order.
+    """Every catalog memory channel a saved profile selects: the plan's windows.
 
-    Refuses a profile naming a channel the catalog does not hold, the way
+    This is the *plan*, never a request: it is what lets a profile switch
+    need no restart, and the loop cuts each window to the active profile's
+    members before anything is sent or decoded
+    (``requests.narrow_memory_reads``). Its other use is validation: it
+    refuses a profile naming a channel the catalog does not hold, the way
     ``parse_did_token`` refuses an unknown DID, so the daemon start, the
     capture-profile preview and capture start all fail on it by name. This
     used to filter the catalog by the selection, which dropped a stale name
     without a word: the profile ran with that channel never polled.
+
+    Channels come grouped by window, the windows in the catalog order of
+    their first *catalog* member and each window's members in catalog order.
+    Ordered by first *selected* member instead, a profile selecting an early
+    member of one window could move that window ahead of another, and the
+    plan's order is the scheduler's tie-break, so one profile could reorder
+    another's reads.
     """
     selected: set[str] = set()
     for profile in profiles:
@@ -554,7 +571,14 @@ def profile_memory_union(profiles: Sequence[CaptureProfile]) -> tuple[MemoryChan
         except ValueError as exc:
             raise ValueError(f"capture profile {profile.name!r}: {exc}") from exc
         selected.update(channel.name for channel in chosen)
-    return tuple(channel for channel in memory_channels() if channel.name in selected)
+    catalog = memory_channels()
+    first: dict[str, int] = {}
+    for position, channel in enumerate(catalog):
+        first.setdefault(channel.window or channel.name, position)
+    ordered = sorted(
+        enumerate(catalog), key=lambda item: (first[item[1].window or item[1].name], item[0])
+    )
+    return tuple(channel for _position, channel in ordered if channel.name in selected)
 
 
 def did_alias_table(tokens: Iterable[str]) -> dict[str, str]:

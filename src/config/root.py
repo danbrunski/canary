@@ -18,6 +18,7 @@ from pydantic import PrivateAttr, model_validator
 from src.config.auxiliary import (
     AutoTagConfig,
     CommitteesConfig,
+    CompanionConfig,
     LLMAssistConfig,
     NonvolatileWriteConfig,
     NotificationsConfig,
@@ -57,6 +58,7 @@ class CanaryConfig(_Strict):
     plausibility: PlausibilityConfig = PlausibilityConfig()
     committees: CommitteesConfig = CommitteesConfig()
     twin_live: TwinLiveConfig = TwinLiveConfig()
+    companion: CompanionConfig = CompanionConfig()
 
     #: The profile slug :func:`src.vehicle.profiles.scope_config` nested this config's
     #: vehicle paths under; ``None`` for a config as loaded. Private, so no YAML
@@ -88,6 +90,24 @@ class CanaryConfig(_Strict):
             self.llm_assist = self.llm_assist.model_copy(
                 update={"cards_path": state / "analyses" / "llm_assist_cards.jsonl"}
             )
+        return self
+
+    @model_validator(mode="after")
+    def _companion_library(self) -> Self:
+        """Companion mode's library follows ``daemon.state_dir``, and its
+        ``sessions/`` is the daemon's session store, so the synced drives are
+        the ones every session route and panel sees. Done here, not in a
+        launcher, so a hand-written ``canary.yaml`` with ``companion.enabled``
+        behaves the same."""
+        if not self.companion.enabled:
+            return self
+        root = self.companion.library_root
+        if root is None:
+            state = self.daemon.state_dir
+            root = state / "library" if state is not None else Path.home() / ".canary" / "library"
+        root = root.expanduser()
+        self.companion = self.companion.model_copy(update={"library_root": root})
+        self.collection = self.collection.model_copy(update={"storage_path": root / "sessions"})
         return self
 
     @model_validator(mode="after")

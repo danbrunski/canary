@@ -253,6 +253,11 @@ class FloorRefusedError(ValueError):
         super().__init__(refusal.reason)
         self.refusal = refusal
 
+    def __reduce__(self) -> tuple[object, ...]:
+        # Rebuilt from its constructor's arguments, so it survives a process
+        # boundary (pickle); tests/test_exceptions_pickle.py holds every class to it.
+        return (type(self), (self.refusal,), self.__dict__)
+
 
 def floor_reference(
     source_path: Path,

@@ -831,6 +831,30 @@ if [[ "${CANARY_DATA_DRIVE_ADOPT:-1}" != "0" ]]; then
 fi
 env "${DATA_DRIVE_ENV[@]}" bash "${CANARY_HOME}/scripts/data_drive.sh" guard
 
+# Advertise the dashboard over mDNS-SD (_canary._tcp) so a laptop or phone
+# that can browse Bonjour finds this Pi by service, not only by guessing its
+# hostname. A laptop that cannot (WSL) sweeps the LAN for GET /identity
+# instead (src/companion/discovery.py). Avahi ships with Raspberry Pi OS; a
+# system without it is left alone.
+if [[ -d "${ROOT}/etc/avahi/services" ]]; then
+  write_managed avahi-daemon "${ROOT}/etc/avahi/services/canary.service" <<EOF
+<?xml version="1.0" standalone='no'?>
+<!DOCTYPE service-group SYSTEM "avahi-service.dtd">
+<service-group>
+  <name replace-wildcards="yes">CANary on %h</name>
+  <service>
+    <type>_canary._tcp</type>
+    <port>8000</port>
+    <txt-record>product=canary</txt-record>
+    <txt-record>path=/identity</txt-record>
+  </service>
+</service-group>
+EOF
+  if [[ -z "${ROOT}" ]]; then
+    restart_if_changed avahi-daemon avahi-daemon.service || true
+  fi
+fi
+
 systemctl daemon-reload
 udevadm control --reload || true
 systemctl enable can0.service

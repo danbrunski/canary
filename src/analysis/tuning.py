@@ -29,6 +29,7 @@ See ``docs/roadmap/archive/tuning-analysis-toolkit.md`` Phase 2.
 
 from __future__ import annotations
 
+import functools
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -106,6 +107,15 @@ class InputsNotCapturedError(GateError):
         super().__init__(message)
         self.kind = kind
         self.missing = missing
+
+    def __reduce__(self) -> tuple[object, ...]:
+        # Rebuilt from its constructor's arguments, so it survives a process
+        # boundary (pickle); tests/test_exceptions_pickle.py holds every class to it.
+        return (
+            functools.partial(type(self), kind=self.kind, missing=self.missing),
+            (str(self),),
+            self.__dict__,
+        )
 
 
 @dataclass

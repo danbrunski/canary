@@ -399,6 +399,39 @@ def test_a_scenario_its_mode_cannot_evaluate_is_refused_by_name(
     assert refused.value.reason == reason
 
 
+def test_the_rom_comparison_admits_its_declared_plant_versions_and_no_other() -> None:
+    """E08.11: the paired comparison admits fuel-mv-1 (the contract's, which
+    E07.4/E07.6 run) and fuel-mv-2 (the simulator's); fuel-mv-3, declared by
+    the fuel stage but not admitted, is refused by name, as is an undeclared
+    version. A mode with no list admits the contract's version alone."""
+    contract, sha = load_contract(PROFILE)
+    assert contract.plant_version == "fuel-mv-1"
+    rom_mode = contract.mode("conditional_rom_comparison")
+    assert contract.admitted_plant_versions(rom_mode) == ["fuel-mv-1", "fuel-mv-2"]
+    hardware = contract.hardware_configurations[0].id
+    for version in ("fuel-mv-1", "fuel-mv-2"):
+        plant = PlantIdentity(version=version, hardware_configuration=hardware)
+        assert check_scenario(contract, sha, _comparison(contract, sha, plant=plant)) == rom_mode
+    for version in ("fuel-mv-3", "fuel-mv-9"):
+        plant = PlantIdentity(version=version, hardware_configuration=hardware)
+        with pytest.raises(SimulationRefusalError) as refused:
+            check_scenario(contract, sha, _comparison(contract, sha, plant=plant))
+        assert refused.value.reason == "plant_version_mismatch"
+        assert "['fuel-mv-1', 'fuel-mv-2']" in str(refused.value)
+    others = [m for m in contract.modes if m.id != rom_mode.id]
+    assert all(contract.admitted_plant_versions(m) == ["fuel-mv-1"] for m in others)
+    raw = _raw()
+    _mode(raw, "conditional_rom_comparison")["plant_versions"] = ["fuel-mv-1", "fuel-mv-9"]
+    _refused(raw, "admits plant versions .'fuel-mv-9'. that no stage implementation declares")
+    raw = _raw()
+    _mode(raw, "conditional_rom_comparison")["plant_versions"] = ["fuel-mv-2", "fuel-mv-2"]
+    _refused(raw, "duplicate mode conditional_rom_comparison plant version")
+    # Admitting fuel-mv-3 needs its MAP model declared for the comparison too.
+    raw = _raw()
+    _mode(raw, "conditional_rom_comparison")["plant_versions"] = ["fuel-mv-1", "fuel-mv-3"]
+    _refused(raw, "declared for conditional_rom_comparison in plant fuel-mv-3")
+
+
 def test_missing_history_never_defaults_to_a_state() -> None:
     """ECU replay starts X and the command from observed checkpoints; without
     them the scenario is refused rather than started cold or steady."""

@@ -1,0 +1,68 @@
+{
+  "profile": "nissan-xterra-2008",
+  "file": "sim_typical_values.yaml",
+  "file_sha256": "c05ea466ee8e63db0143eefa97536eec9154141e346dfae46f138eb2c2e3dae6",
+  "values": {
+    "baro_kpa": {
+      "value": 81.0,
+      "kind": "typical",
+      "source": "E07.6's stated point (tests/test_paired_scenarios.py WOT.baro_kpa) and W09.6's grid environment (tests/test_rom_editor_private_rom.py ENV); home is about 80 kPa and trips reach 63 kPa (W09 \"Nothing is defaulted\", E08.2 environment_unstated), so state your own for a trip"
+    },
+    "iat_c": {
+      "value": 25.0,
+      "kind": "typical",
+      "source": "E07.6's stated point (tests/test_paired_scenarios.py WOT.iat_c) and W09.6's grid environment (tests/test_rom_editor_private_rom.py ENV)"
+    },
+    "coolant_c": {
+      "value": 88.0,
+      "kind": "typical",
+      "source": "E07.6's stated point, a warm engine (tests/test_paired_scenarios.py WOT.coolant_c) and W09.6's grid environment (tests/test_rom_editor_private_rom.py ENV)"
+    },
+    "battery_v": {
+      "value": 14.0,
+      "kind": "typical",
+      "source": "E07.6's stated point (tests/test_paired_scenarios.py WOT.battery_v) and W09.6's grid environment (tests/test_rom_editor_private_rom.py ENV)"
+    },
+    "rail_kpa": {
+      "value": 350.0,
+      "kind": "typical",
+      "source": "the returnless rail's ~350 kPa from the service manual (data/nissan-xterra-2008/fuel_plant_mv2.yaml reference_delta_p, EC-494 and EC-499); E07.6 (tests/test_paired_scenarios.py WOT.rail_kpa) and W09.6 (tests/test_rom_editor_private_rom.py ENV) state the same"
+    },
+    "throttle_pct": {
+      "value": 20.0,
+      "kind": "typical",
+      "source": "W09.6's grid environment, a part throttle (tests/test_rom_editor_private_rom.py ENV); E07.6's WOT point is 90 % (tests/test_paired_scenarios.py WOT.throttle_pct) and is a different experiment"
+    },
+    "pedal_flag": {
+      "value": 0,
+      "kind": "typical",
+      "source": "W09.6's grid environment (tests/test_rom_editor_private_rom.py ENV pedal_flag 0; E07.6's WOT and CRUISE points state 0 too). Bit 0 clear: no simulated point reads the last Target AFR column (WOT); W09.6's E076_WOT_ENV sets 1 for the case that does"
+    },
+    "stft_pct": {
+      "value": 0.0,
+      "kind": "typical",
+      "source": "E07.6's stated learned state (tests/test_paired_scenarios.py LEARNED.stft_pct; W09.6 E076_LEARNED in tests/test_rom_editor_private_rom.py)"
+    },
+    "ltft_pct": {
+      "value": 2.34,
+      "kind": "typical",
+      "source": "E07.6's stated learned state (tests/test_paired_scenarios.py LEARNED.ltft_pct; W09.6 E076_LEARNED, E08.7 item 4): a stated scenario value, not a read of the truck's current LTFT"
+    },
+    "throttle_closed_learned": {
+      "value": 0.0,
+      "kind": "placeholder",
+      "source": "PLACEHOLDER, not a measurement: E07.6 (tests/test_paired_scenarios.py LEARNED.throttle_closed_learned) and W09.6 (LEARNED_ZERO in tests/test_rom_editor_private_rom.py) pass 0.0, and the paired run reads this number nowhere (tests/test_rom_editor.py fails if any code starts to). The contract calls it a per-truck learned closed throttle position (data/nissan-xterra-2008/engine_sim_contract.yaml); replace it with the truck's key-on checkpoint value when a node starts reading it"
+    },
+    "idle_air_learned": {
+      "value": 0.0,
+      "kind": "placeholder",
+      "source": "PLACEHOLDER, not a measurement: E07.6 (tests/test_paired_scenarios.py LEARNED.idle_air_learned) and W09.6 (LEARNED_ZERO in tests/test_rom_editor_private_rom.py) pass 0.0, and the paired run reads this number nowhere (tests/test_rom_editor.py fails if any code starts to). The contract says it was \"not captured on 2026-10-04\" (data/nissan-xterra-2008/engine_sim_contract.yaml); replace it with the truck's key-on checkpoint value when a node starts reading it"
+    },
+    "evap_purge_area": {
+      "value": 0.0,
+      "kind": "typical",
+      "source": "purge off: the simulator contract's conditional_rom_comparison mode states \"Purge off: purge scheduling is not modelled\" (data/nissan-xterra-2008/engine_sim_contract.yaml evap_purge_area); E07.6 states 0 (tests/test_paired_scenarios.py LEARNED.evap_purge_area)"
+    }
+  },
+  "left_empty": {}
+}

@@ -1,5 +1,17 @@
 # Implementation task index
 
+**Status 2026-10-15: E09, one engine twin.**
+[`E09-engine-twin-runner-and-levers.md`](E09-engine-twin-runner-and-levers.md)
+records a review of the simulator against the operator's two use cases (run
+the flashed ROM as a twin against the running engine; edit a ROM and see the
+effect) and adds the items the E05/E07/E08/W09 plans lack: a capture profile
+derived from the manifest so the twin can be scored, one replay runner that
+both the live twin and the editor call, stateful ECU replay, twin residuals
+as trend channels, external sensors and the boosted plant, and the editor
+levers that reach no output today (timing, the MAF curve, injector constants,
+closed-loop trim). It also scores the existing prediction of record on the
+plant-free outputs.
+
 **Status 2026-10-15: W09, ROM Editor page.**
 [`W09-rom-editor.md`](W09-rom-editor.md) brings E08.8 forward at the
 operator's request: edit Fuel Targets, Fuel Compensation and K (Map 1) in the

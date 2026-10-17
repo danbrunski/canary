@@ -8,29 +8,37 @@ entry that makes it a recorded revision stated here, never read from
 
 from __future__ import annotations
 
+import ast
+import copy
 import json
+import os
 import pickle
+import re
+import shutil
 import subprocess
 import sys
 import textwrap
+from collections import Counter
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
 import numpy as np
 import pytest
+import yaml
 from pydantic import ValidationError
 
 from src.analysis import rom_editor, sim_montecarlo
 from src.analysis.ecu_application import ApplicationModelRefusalError
-from src.analysis.fuel_plant import FuelPlantRefusalError
+from src.analysis.fuel_plant import FuelPlantRefusalError, plant_qualification
 from src.analysis.paired_scenarios import OUTPUTS, SimKit
 from src.analysis.paired_steady import TRIM_AUTHORITY_UNDECODED
 from src.analysis.rom_edit_spec import build_candidate, load_edit_spec
-from src.analysis.rom_effects import RomEffectRefusalError
+from src.analysis.rom_effects import RomEffectRefusalError, compare_roms
 from src.analysis.rom_image import ImageFormatError, revision_match, sha256_hex
+from src.analysis.rom_levers import classify_edit
 from src.analysis.sim_contract import SimulationRefusalError
-from src.analysis.sim_montecarlo import MonteCarloResult
+from src.analysis.sim_montecarlo import DESIGN_ASSUMPTION_PREFIX, MonteCarloResult
 from src.vehicle.tune_revisions import ReferenceImage, TuneRevision, TuneRevisionRegistry
 from tests.rom_fixtures import PROFILE
 from tests.test_sim_montecarlo import build_kit_and_image
@@ -184,6 +192,115 @@ def test_a_preview_is_build_candidate_on_the_equivalent_yaml_spec(
         "reason": None,
     }
     json.dumps(preview)
+
+
+def _classified(kit: SimKit, image: bytes, candidate: bytes, cells: Any) -> dict[str, Any]:
+    """``classify_edit`` called the way ``tools/rom_sim.py inspect`` calls it,
+    on the kit's own plant: the answer the preview must equal."""
+    report = compare_roms(
+        image,
+        candidate,
+        kit.rom_map,
+        kit.model,
+        kit.model_sha256,
+        base_slot=1,
+        candidate_slot=1,
+        slot_source="default_slot",
+        contract=kit.contract,
+        mode="conditional_rom_comparison",
+    )
+    return classify_edit(
+        report,
+        rom_map=kit.rom_map,
+        model=kit.model,
+        contract=kit.contract,
+        qualification=plant_qualification(kit.plant),
+        cells=cells,
+    ).to_dict()
+
+
+@pytest.mark.parametrize(
+    ("edit", "lever", "cells"),
+    [
+        (FC_EDIT, "fuel_compensation", 20),
+        (K_EDIT, "k_constant", 1),
+        (
+            {"table": "fuel_targets", "slot": 1, "cells": [[7, 7], [7, 6]], "set_raw": 151},
+            "fuel_targets",
+            2,
+        ),
+    ],
+)
+def test_a_preview_names_the_lever_and_says_what_blocks_a_number(
+    kit_and_image: tuple[SimKit, bytes],
+    matched: dict[str, Any],
+    edit: dict[str, Any],
+    lever: str,
+    cells: int,
+) -> None:
+    """E09.14b: ``levers`` is ``classify_edit`` on the run's comparison, whole
+    and unreworded; the page lists ``levers["messages"]``."""
+    kit, image = kit_and_image
+    preview = rom_editor.preview_edits(image, matched, "levers", [edit], PROFILE, kit=kit)
+    levers = preview["levers"]
+    assert [e["lever"] for e in levers["levers"]] == [lever]
+    assert levers["levers"][0]["changed_cells"] == cells
+    assert levers["schema_version"] == 1 and levers["regime"] is None
+    assert levers["messages"] and all(isinstance(m, str) for m in levers["messages"])
+    candidate = build_candidate(
+        rom_editor.editor_spec(rom_editor.library_base(image, matched), "levers", [edit]),
+        kit.rom_map,
+        rom_editor.library_base(image, matched),
+        model=kit.model,
+        model_sha256=kit.model_sha256,
+        slot=1,
+        slot_source="default_slot",
+    )
+    assert levers == _classified(kit, image, candidate.image, preview["provenance"]["cells"])
+    # A preview is data: JSON-clean, and it never carries image bytes.
+    assert json.loads(json.dumps(preview)) == preview
+    assert not _bytes_in(preview)
+
+
+def _bytes_in(value: Any) -> bool:
+    if isinstance(value, (bytes, bytearray, memoryview)):
+        return True
+    if isinstance(value, dict):
+        return any(_bytes_in(v) for v in value.values())
+    if isinstance(value, (list, tuple)):
+        return any(_bytes_in(v) for v in value)
+    return False
+
+
+def test_an_edit_across_two_tables_names_both_levers_and_travels_through_the_job(
+    kit_and_image: tuple[SimKit, bytes], matched: dict[str, Any], tmp_path: Path
+) -> None:
+    kit, image = kit_and_image
+    params = _params(image, tmp_path, matched, label="two", edits=[FC_EDIT, K_EDIT])
+    job = rom_editor.run_job("rom_preview", params, kit=kit)
+    assert [e["lever"] for e in job["levers"]["levers"]] == ["fuel_compensation", "k_constant"]
+    # The child's answer crosses the process boundary: it pickles, and the strings survive.
+    assert pickle.loads(pickle.dumps(job))["levers"]["messages"] == job["levers"]["messages"]
+    assert any(
+        m.startswith("Fuel Comp + K -> base_fuel_schedule_word: a number can be given")
+        for m in job["levers"]["messages"]
+    ), job["levers"]["messages"]
+
+
+def test_a_vehicle_with_no_declared_simulator_plant_is_refused_a_preview_by_name(
+    kit_and_image: tuple[SimKit, bytes], matched: dict[str, Any], tmp_path: Path
+) -> None:
+    """The classification qualifies the plant ``sim_kit.yaml`` declares, never
+    the contract's default, so a profile without one cannot be previewed: the
+    refusal names it (a preview that said nothing about the plant would read as
+    "nothing blocks")."""
+    _, image = kit_and_image
+    profile = tmp_path / "no_sim_kit"
+    shutil.copytree(PROFILE, profile, ignore=shutil.ignore_patterns("_candidates", "_prior"))
+    (profile / "sim_kit.yaml").unlink()
+    params = _params(image, tmp_path, matched, profile_dir=str(profile), label="x", edits=[FC_EDIT])
+    refused = rom_editor.run_job("rom_preview", params)["refused"]
+    assert (refused["kind"], refused["reason"]) == ("simulation", "sim_kit_undeclared")
 
 
 def test_an_unrecorded_base_previews_by_file_and_says_why_it_cannot_simulate(
@@ -458,6 +575,12 @@ def test_a_k_edit_moves_bfs_by_the_realised_raw_ratio_in_every_open_loop_pair(
     assert keys[:lead] == ["tool", "tool_version", "label", "synthetic"]
     for later in ("assumptions", "unresolved", "inert_parameters", "coverage", "design", "cells"):
         assert keys.index(later) > lead, later
+    # The design's own assumptions are stated once: in `assumptions`, "design: "-prefixed
+    # (E08.10), with the plant's, and `caveats` repeats them. `design` carries no second copy.
+    assert "assumptions" not in out["design"]
+    designed = [a for a in out["assumptions"] if a.startswith(DESIGN_ASSUMPTION_PREFIX)]
+    assert designed and len(set(out["assumptions"])) == len(out["assumptions"])
+    assert all(a in out["caveats"] for a in out["assumptions"])
     assert out["provenance"]["seed"] == 20261015 and out["provenance"]["draws"] == 6
     assert out["design"]["grid"]["rpm_edges"] == [4000.0, 4800.0, 5600.0]
     assert load_spec_sha(out["spec_yaml"]) == out["spec_sha256"]
@@ -658,3 +781,531 @@ def test_the_rom_editor_imports_nothing_that_talks_to_the_ecu() -> None:
         or (m.startswith("src.collection") and m not in _ALLOWED_COLLECTION)
     ]
     assert reached == []
+
+
+# -- typical values (W09.11) -----------------------------------------------------------------
+
+TYPICAL_FILE = PROFILE / rom_editor.TYPICAL_VALUES_FILE
+REPO_ROOT = Path(__file__).resolve().parents[1]
+
+
+def _typical_declaration() -> dict[str, Any]:
+    loaded = yaml.safe_load(TYPICAL_FILE.read_text())
+    assert isinstance(loaded, dict)
+    return loaded
+
+
+def _profile_with(tmp_path: Path, text: str | None) -> Path:
+    """A profile directory holding exactly this typical-values file (or none)."""
+    profile = tmp_path / "vehicle-x"
+    profile.mkdir()
+    if text is not None:
+        (profile / rom_editor.TYPICAL_VALUES_FILE).write_text(text)
+    return profile
+
+
+def _refusal(profile: Path) -> SimulationRefusalError:
+    with pytest.raises(SimulationRefusalError) as err:
+        rom_editor.typical_values(profile)
+    return err.value
+
+
+def test_the_shipped_typical_values_load_with_a_source_for_every_value() -> None:
+    body = rom_editor.typical_values(PROFILE)
+    assert body["profile"] == PROFILE.name
+    assert body["file"] == "sim_typical_values.yaml"
+    assert body["file_sha256"] == sha256_hex(TYPICAL_FILE.read_bytes())
+    assert body["values"], "a vehicle that ships the file declares at least one value"
+    for name, declared in body["values"].items():
+        assert set(declared) == {"value", "kind", "source"}, name
+        assert declared["kind"] in rom_editor.TYPICAL_KINDS, name
+        assert declared["source"].strip(), f"{name} has no source"
+        if declared["kind"] == "placeholder":
+            assert "placeholder" in declared["source"].lower(), name
+        # A number a form can be filled with, or the rail's one named alternative.
+        assert declared["value"] == "working_assumption" or isinstance(
+            declared["value"], (int, float)
+        )
+    for name, why in body["left_empty"].items():
+        assert set(why) == {"reason"} and why["reason"].strip(), name
+    json.dumps(body)  # JSON-clean: it is a route body
+    pickle.loads(pickle.dumps(body))
+
+
+def test_every_fillable_field_is_a_value_or_a_reasoned_omission_and_a_simrequest_field() -> None:
+    """A typo cannot ship, and no fillable field is silently absent."""
+    body = rom_editor.typical_values(PROFILE)
+    declared = list(body["values"]) + list(body["left_empty"])
+    assert sorted(declared) == sorted(rom_editor.TYPICAL_FIELDS)
+    assert set(declared) <= set(rom_editor.SimRequest.model_fields)
+    assert not set(declared) & set(rom_editor.NEVER_TYPICAL_FIELDS)
+    # The raw file says the same, so a key the model ignored would show here.
+    raw = _typical_declaration()
+    assert set(raw) == {"schema_version", "values", "left_empty"}
+    assert sorted([*raw["values"], *raw["left_empty"]]) == sorted(rom_editor.TYPICAL_FIELDS)
+    for name, entry in raw["values"].items():
+        assert set(entry) == {"value", "kind", "source"}, name
+        assert isinstance(entry["source"], str) and entry["source"].strip(), name
+
+
+def test_a_new_simrequest_field_must_be_classified_as_typical_or_never() -> None:
+    """The page's button fills only what the file may declare. A field added to
+    the request is neither until someone decides, and this test says so."""
+    fields = set(rom_editor.SimRequest.model_fields)
+    typical, never = set(rom_editor.TYPICAL_FIELDS), set(rom_editor.NEVER_TYPICAL_FIELDS)
+    assert not typical & never
+    assert typical | never == fields, f"unclassified: {sorted(fields - typical - never)}"
+    # The two experiment choices and the run's own size and identity are never filled.
+    assert {
+        "grid",
+        "candidate_events",
+        "rpm_edges",
+        "load_edges",
+        "draws",
+        "seed",
+        "label",
+    } <= never
+
+
+def test_the_shipped_values_and_the_remaining_fields_make_a_valid_request() -> None:
+    body = rom_editor.typical_values(PROFILE)
+    filled = {name: declared["value"] for name, declared in body["values"].items()}
+    stated_by_the_operator = {name: 0.0 for name in body["left_empty"]}
+    complete = request(**filled, **stated_by_the_operator)
+    # Only the typical fields differ from the stated request; the others are untouched.
+    assert set(complete) == set(rom_editor.SimRequest.model_fields)
+    parsed = rom_editor.SimRequest.model_validate(complete)
+    assert parsed.pedal_flag == body["values"]["pedal_flag"]["value"]
+
+
+def _call_keywords(path: Path, name: str) -> dict[str, Any]:
+    """The constant keyword arguments of ``NAME = dict(...)`` in a test module,
+    read from its source (importing the private-ROM module would run its imports
+    and mark nothing)."""
+    for node in ast.parse(path.read_text()).body:
+        target = node.target if isinstance(node, ast.AnnAssign) else None
+        if isinstance(node, ast.Assign) and len(node.targets) == 1:
+            target = node.targets[0]
+        if not (isinstance(target, ast.Name) and target.id == name):
+            continue
+        call = getattr(node, "value", None)
+        assert isinstance(call, ast.Call), f"{name} is not a dict(...) call"
+        return {k.arg: ast.literal_eval(k.value) for k in call.keywords if k.arg}
+    raise AssertionError(f"{path.name} has no {name}")
+
+
+def _find_parameter(node: Any, parameter_id: str) -> dict[str, Any] | None:
+    if isinstance(node, dict):
+        if node.get("id") == parameter_id:
+            return node
+        node = list(node.values())
+    if isinstance(node, list):
+        for item in node:
+            found = _find_parameter(item, parameter_id)
+            if found is not None:
+                return found
+    return None
+
+
+def test_each_typical_value_equals_the_constant_its_source_names() -> None:
+    """The sources are cited by file and symbol. A value that drifts from the
+    constant it cites, or a citation to a file that is gone, fails here."""
+    body = rom_editor.typical_values(PROFILE)
+    values = {name: declared["value"] for name, declared in body["values"].items()}
+
+    from tests.test_paired_scenarios import LEARNED, WOT
+
+    for field in ("baro_kpa", "iat_c", "coolant_c", "battery_v", "rail_kpa"):
+        assert values[field] == getattr(WOT, field), f"E07.6's WOT point states {field}"
+    for field in (
+        "stft_pct",
+        "ltft_pct",
+        "evap_purge_area",
+        "throttle_closed_learned",
+        "idle_air_learned",
+    ):
+        assert values[field] == getattr(LEARNED, field), f"E07.6's LEARNED states {field}"
+
+    env = _call_keywords(REPO_ROOT / "tests" / "test_rom_editor_private_rom.py", "ENV")
+    for field in ("baro_kpa", "iat_c", "coolant_c", "battery_v", "rail_kpa"):
+        assert values[field] == env[field], f"W09.6's ENV states {field}"
+    assert values["throttle_pct"] == env["throttle_pct"]
+    assert values["pedal_flag"] == env["pedal_flag"]
+
+    # The rail's value is the plant's own declared reference pressure.
+    plant = yaml.safe_load((PROFILE / "fuel_plant_mv2.yaml").read_text())
+    reference = _find_parameter(plant, "reference_delta_p")
+    assert reference is not None and reference["value"] == values["rail_kpa"]
+
+    # Every file a source cites exists, so a rename cannot leave a dead citation.
+    cited = {
+        match
+        for declared in (*body["values"].values(), *body["left_empty"].values())
+        for match in re.findall(
+            r"(?:tests|data|docs|src)/[\w./-]+?\.(?:py|yaml|md)",
+            " ".join(str(item) for item in declared.values()),
+        )
+    }
+    assert cited, "the sources cite no repo file"
+    assert [c for c in sorted(cited) if not (REPO_ROOT / c).is_file()] == []
+
+
+def test_a_vehicle_with_no_typical_values_file_is_refused_by_name(tmp_path: Path) -> None:
+    refused = _refusal(_profile_with(tmp_path, None))
+    assert refused.reason == "typical_values_undeclared"
+    assert "vehicle-x" in refused.message and "sim_typical_values.yaml" in refused.message
+    # It survives the process boundary, as every refusal class here must.
+    again = pickle.loads(pickle.dumps(refused))
+    assert (again.reason, again.message) == (refused.reason, refused.message)
+
+
+def _mutated(mutate: Any) -> str:
+    declaration = copy.deepcopy(_typical_declaration())
+    mutate(declaration)
+    return yaml.safe_dump(declaration, sort_keys=False)
+
+
+UNSOURCED = _mutated(lambda d: d["values"]["baro_kpa"].pop("source"))
+
+
+INVALID_TYPICAL_FILES: list[tuple[str, str, str]] = [
+    ("unsourced value", UNSOURCED, "values.baro_kpa.source"),
+    (
+        "empty source",
+        _mutated(lambda d: d["values"]["baro_kpa"].update(source="")),
+        "values.baro_kpa.source",
+    ),
+    (
+        "blank source",
+        _mutated(lambda d: d["values"]["baro_kpa"].update(source="   ")),
+        "values.baro_kpa.source: Value error, is blank",
+    ),
+    (
+        "typo in a field name",
+        _mutated(lambda d: d["values"].update(bar_kpa=d["values"].pop("baro_kpa"))),
+        "'bar_kpa' is not a SimRequest field",
+    ),
+    (
+        "an experiment field",
+        _mutated(
+            lambda d: d["values"].update(draws={"value": 200, "kind": "typical", "source": "x"})
+        ),
+        "draws is never filled",
+    ),
+    (
+        "the grid",
+        _mutated(lambda d: d["left_empty"].update(grid={"reason": "x"})),
+        "grid is never filled",
+    ),
+    (
+        "pedal flag past a byte",
+        _mutated(lambda d: d["values"]["pedal_flag"].update(value=256)),
+        "pedal_flag: 256",
+    ),
+    (
+        "pedal flag not whole",
+        _mutated(lambda d: d["values"]["pedal_flag"].update(value=1.5)),
+        "pedal_flag: 1.5",
+    ),
+    (
+        "pedal flag as a float",
+        _mutated(lambda d: d["values"]["pedal_flag"].update(value=0.0)),
+        "pedal_flag: 0.0",
+    ),
+    (
+        "a quoted number",
+        _mutated(lambda d: d["values"]["baro_kpa"].update(value="81")),
+        "values.baro_kpa.value",
+    ),
+    (
+        "a boolean",
+        _mutated(lambda d: d["values"]["baro_kpa"].update(value=True)),
+        "values.baro_kpa.value",
+    ),
+    (
+        "not a number",
+        _mutated(lambda d: d["values"]["baro_kpa"].update(value=float("nan"))),
+        "baro_kpa: nan",
+    ),
+    (
+        "working assumption for a field that is not the rail",
+        _mutated(lambda d: d["values"]["baro_kpa"].update(value="working_assumption")),
+        "baro_kpa: 'working_assumption'",
+    ),
+    (
+        "rail that is neither",
+        _mutated(lambda d: d["values"]["rail_kpa"].update(value="stated")),
+        "values.rail_kpa.value",
+    ),
+    (
+        "a fillable field neither declared nor reasoned away",
+        _mutated(lambda d: d["values"].pop("idle_air_learned")),
+        "idle_air_learned is neither a sourced value nor listed under left_empty",
+    ),
+    (
+        "declared and left empty",
+        _mutated(lambda d: d["left_empty"].update(baro_kpa={"reason": "x"})),
+        "baro_kpa is declared both",
+    ),
+    (
+        "an omission with no reason",
+        _mutated(
+            lambda d: (
+                d["values"].pop("idle_air_learned"),
+                d["left_empty"].update(idle_air_learned={"reason": ""}),
+            )
+        ),
+        "left_empty.idle_air_learned.reason",
+    ),
+    (
+        "a value with no declared kind",
+        _mutated(lambda d: d["values"]["baro_kpa"].pop("kind")),
+        "values.baro_kpa.kind",
+    ),
+    (
+        "a kind that is neither typical nor placeholder",
+        _mutated(lambda d: d["values"]["baro_kpa"].update(kind="measured")),
+        "values.baro_kpa.kind",
+    ),
+    (
+        "a placeholder whose source does not say so",
+        _mutated(lambda d: d["values"]["idle_air_learned"].update(source="E07.6 states 0.0")),
+        "a placeholder's source must say it is a placeholder",
+    ),
+    (
+        "an unknown key on a value",
+        _mutated(lambda d: d["values"]["baro_kpa"].update(note="x")),
+        "values.baro_kpa.note",
+    ),
+    (
+        "another schema version",
+        _mutated(lambda d: d.update(schema_version=2)),
+        "schema_version",
+    ),
+    ("an empty file", "", "valid dictionary"),
+    ("not YAML", "values: [unclosed", "sim_typical_values.yaml"),
+]
+
+
+@pytest.mark.parametrize(
+    ("text", "expect"),
+    [(text, expect) for _, text, expect in INVALID_TYPICAL_FILES],
+    ids=[label for label, _, _ in INVALID_TYPICAL_FILES],
+)
+def test_an_invalid_typical_values_file_is_refused_by_name(
+    tmp_path: Path, text: str, expect: str
+) -> None:
+    refused = _refusal(_profile_with(tmp_path, text))
+    assert refused.reason == "typical_values_invalid"
+    assert expect in refused.message, refused.message
+    pickle.loads(pickle.dumps(refused))
+
+
+TYPICAL_FIXTURE = (
+    REPO_ROOT / "src" / "dashboard" / "static" / "src" / "test" / "romTypicalValues.fixture.json"
+)
+
+
+def test_the_front_end_fixture_is_exactly_what_the_daemon_serves() -> None:
+    """The page's vitest and e2e tests fill their form from the real declared
+    values, not a hand-written copy: this file is ``typical_values(PROFILE)``.
+    Edit ``sim_typical_values.yaml`` and this fails until the fixture follows;
+    ``CANARY_UPDATE_TYPICAL_FIXTURE=1 pytest tests/test_rom_editor.py -k fixture``
+    rewrites it (then ``pnpm exec prettier --write
+    src/test/romTypicalValues.fixture.json`` in ``src/dashboard/static``)."""
+    real = rom_editor.typical_values(PROFILE)
+    if os.environ.get("CANARY_UPDATE_TYPICAL_FIXTURE") == "1":
+        TYPICAL_FIXTURE.write_text(json.dumps(real, indent=2) + "\n")
+    assert json.loads(TYPICAL_FIXTURE.read_text()) == real
+
+
+# -- a placeholder must stay unread (W09.11) --------------------------------------------------
+
+
+def _mentions(src_root: Path, names: frozenset[str], base: Path) -> Counter[tuple[str, str, str]]:
+    """Every mention of one of ``names`` in the Python under ``src_root``, as
+    ``(path relative to base, kind, name)``: an attribute (``x.name``), a string
+    (a dict key, ``.get("name")``, ``getattr(o, "name")``), a keyword argument, a
+    bare name, or an import. A class's own field declaration (``name: float``) is a
+    definition and is not counted. The dashboard's TypeScript is not Python and
+    ``static`` is not walked."""
+    found: Counter[tuple[str, str, str]] = Counter()
+    for dirpath, dirnames, files in os.walk(src_root):
+        dirnames[:] = sorted(
+            d for d in dirnames if d not in {"node_modules", "static", "__pycache__"}
+        )
+        for file in sorted(files):
+            if not file.endswith(".py"):
+                continue
+            path = Path(dirpath) / file
+            text = path.read_text()
+            if not any(name in text for name in names):
+                continue  # only a file that spells a name can mention it
+            tree = ast.parse(text, filename=str(path))
+            declarations = {
+                id(stmt.target)
+                for cls in ast.walk(tree)
+                if isinstance(cls, ast.ClassDef)
+                for stmt in cls.body
+                if isinstance(stmt, ast.AnnAssign)
+            }
+            relative = path.relative_to(base).as_posix()
+            for node in ast.walk(tree):
+                kind = hit = None
+                if isinstance(node, ast.Attribute) and node.attr in names:
+                    kind, hit = "attribute", node.attr
+                elif (
+                    isinstance(node, ast.Constant)
+                    and isinstance(node.value, str)
+                    and node.value in names
+                ):
+                    kind, hit = "string", node.value
+                elif isinstance(node, ast.keyword) and node.arg in names:
+                    kind, hit = "keyword", node.arg
+                elif (
+                    isinstance(node, ast.Name) and node.id in names and id(node) not in declarations
+                ):
+                    kind, hit = "name", node.id
+                elif isinstance(node, ast.alias) and (node.name in names or node.asname in names):
+                    kind, hit = "import", node.asname or node.name
+                if kind is not None and hit is not None:
+                    found[(relative, kind, hit)] += 1
+    return found
+
+
+#: The mentions of the two placeholder fields that are plumbing, not nodes. Exact
+#: counts: a new mention in an allowed file fails as surely as one in a new file,
+#: and an allowed mention that is gone fails too, so this list cannot go stale.
+_PLUMBING = {
+    # _LEARNED_FIELDS: the contract's boundary quantity -> the LearnedState field
+    # (key and value), the only way these names reach a scenario's boundaries.
+    ("src/analysis/paired_scenarios.py", "string"): 2,
+    # SimRequest -> LearnedState(<name>=request.<name>) in rom_editor._template.
+    ("src/analysis/rom_editor.py", "attribute"): 1,
+    ("src/analysis/rom_editor.py", "keyword"): 1,
+    # rom_editor.TYPICAL_FIELDS: the fields the typical-values button may fill.
+    ("src/analysis/rom_editor.py", "string"): 1,
+}
+PLACEHOLDER_ALLOWED: dict[tuple[str, str, str], int] = {
+    (path, kind, name): count
+    for name in ("throttle_closed_learned", "idle_air_learned")
+    for (path, kind), count in _PLUMBING.items()
+}
+
+
+def _placeholder_drift(
+    src_root: Path, base: Path, placeholders: set[str]
+) -> tuple[Counter[tuple[str, str, str]], Counter[tuple[str, str, str]]]:
+    """(mentions the allowlist does not cover, allowed mentions that are gone)."""
+    found = _mentions(src_root, frozenset(placeholders), base)
+    allowed = Counter(
+        {key: count for key, count in PLACEHOLDER_ALLOWED.items() if key[2] in placeholders}
+    )
+    return found - allowed, allowed - found
+
+
+def _placeholders() -> set[str]:
+    values = rom_editor.typical_values(PROFILE)["values"]
+    return {name for name, declared in values.items() if declared["kind"] == "placeholder"}
+
+
+def test_the_placeholders_are_the_two_learned_fields_no_code_reads() -> None:
+    """``throttle_closed_learned`` and ``idle_air_learned`` are filled with 0.0 as
+    PLACEHOLDERS. That is only honest while nothing computes from them. This lists
+    every mention in ``src/`` against the plumbing allowlist and fails the moment a
+    node starts to read one, rather than leaving a zero to pass as a measurement."""
+    placeholders = _placeholders()
+    assert {"throttle_closed_learned", "idle_air_learned"} <= placeholders
+    stale = {name for _, _, name in PLACEHOLDER_ALLOWED} - placeholders
+    assert not stale, (
+        f"the allowlist names {sorted(stale)}, which are no longer placeholders: delete those "
+        "entries"
+    )
+    new, gone = _placeholder_drift(REPO_ROOT / "src", REPO_ROOT, placeholders)
+    assert not new, (
+        "a node now reads a placeholder: replace the typical value with a sourced one or "
+        f"require the operator to state it. New mentions (path, kind, name): {dict(new)}"
+    )
+    assert not gone, (
+        "the placeholder allowlist is stale, an allowed mention is gone: update _PLUMBING. "
+        f"Missing: {dict(gone)}"
+    )
+
+
+NODE_READING_PLACEHOLDERS = """\
+class Declared:
+    idle_air_learned: float  # a declaration: not a read
+
+    def __init__(self, idle_air_learned: float = 0.0) -> None:
+        \"\"\"idle_air_learned in a docstring is prose, not a read.\"\"\"
+        # idle_air_learned in a comment is not a read either.
+
+
+def node(learned, boundaries, other):
+    a = learned.idle_air_learned
+    b = boundaries["idle_air_learned"]
+    c = boundaries.get("idle_air_learned")
+    d = getattr(other, "idle_air_learned")
+    e = idle_air_learned
+    return dict(idle_air_learned=a), b, c, d, e
+"""
+
+
+def test_the_scan_sees_every_way_of_reading_a_field_and_not_a_declaration(tmp_path: Path) -> None:
+    (tmp_path / "src").mkdir()
+    (tmp_path / "src" / "node.py").write_text(NODE_READING_PLACEHOLDERS)
+    (tmp_path / "src" / "static").mkdir()  # not Python's: never walked
+    (tmp_path / "src" / "static" / "ignored.py").write_text(NODE_READING_PLACEHOLDERS)
+    found = _mentions(tmp_path / "src", frozenset({"idle_air_learned"}), tmp_path)
+    assert found == Counter(
+        {
+            ("src/node.py", "attribute", "idle_air_learned"): 1,
+            ("src/node.py", "string", "idle_air_learned"): 3,
+            ("src/node.py", "name", "idle_air_learned"): 1,
+            ("src/node.py", "keyword", "idle_air_learned"): 1,
+        }
+    )
+
+
+def test_the_guard_bites_on_a_node_that_reads_a_placeholder(tmp_path: Path) -> None:
+    """On scratch copies of the two files that carry the plumbing: as shipped they
+    match the allowlist exactly, and a read added to a new file, or to an
+    allowlisted one, is reported."""
+    placeholders = {"throttle_closed_learned", "idle_air_learned"}
+    analysis = tmp_path / "src" / "analysis"
+    analysis.mkdir(parents=True)
+    for name in ("paired_scenarios.py", "rom_editor.py"):
+        shutil.copy(REPO_ROOT / "src" / "analysis" / name, analysis / name)
+    new, gone = _placeholder_drift(tmp_path / "src", tmp_path, placeholders)
+    assert not new and not gone
+
+    (analysis / "twin_node.py").write_text(
+        "def fill_byte(boundaries):\n    return boundaries['idle_air_learned'].value\n"
+    )
+    new, gone = _placeholder_drift(tmp_path / "src", tmp_path, placeholders)
+    assert dict(new) == {("src/analysis/twin_node.py", "string", "idle_air_learned"): 1}
+    assert not gone
+
+    # In an allowlisted file too: the count is exact, not "this file may mention it".
+    with (analysis / "rom_editor.py").open("a") as handle:
+        handle.write("\n_probe = {}['throttle_closed_learned']\n")
+    new, _ = _placeholder_drift(tmp_path / "src", tmp_path, placeholders)
+    assert new[("src/analysis/rom_editor.py", "string", "throttle_closed_learned")] == 1
+
+    # And an allowed mention that disappears is a stale list.
+    (analysis / "paired_scenarios.py").write_text("")
+    _, gone = _placeholder_drift(tmp_path / "src", tmp_path, placeholders)
+    assert gone[("src/analysis/paired_scenarios.py", "string", "idle_air_learned")] == 2
+
+
+def test_the_kinds_the_loader_accepts_are_the_two_the_page_draws() -> None:
+    import typing
+
+    assert (
+        typing.get_args(rom_editor.TypicalKind)
+        == rom_editor.TYPICAL_KINDS
+        == (
+            "typical",
+            "placeholder",
+        )
+    )

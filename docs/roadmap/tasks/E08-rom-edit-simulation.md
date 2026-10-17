@@ -1592,6 +1592,48 @@ refusal carries a stable `reason` string that tests assert by name.
     - **Still owed (truck and E07.4).** Score those drives (and later ones)
       per rpm × byte cell against this prediction with E07.4's case
       machinery. Until then the item stays `[~]`.
+    - **A second prediction for the same flash, written 2026-10-16
+      (07:01–07:08Z) before any post-flash pair exists.** E09.12 found that
+      no point of the first prediction resolves beyond the 2.44 % ΔBFS floor:
+      its design came from one mostly idle drive. A new prediction is a new
+      artifact with its own commit; the first is kept as recorded and is not
+      re-run or re-dated. At this moment none of the five post-flash
+      recordings above holds a co-observed BFS read (0 of 33 within 0.3 s)
+      or any `mem:ECM_TARGET_EQUIV_RATIO` read. So this prediction cannot
+      have been fitted to post-flash data.
+      - **Directory:** `~/canary-data/sim/predictions/fuel-comp-restore-2026-10-04-wot/`.
+      - **Design:** `design drives` on four WOT-rich pre-flash drives on
+        ZS44A-20260920: `_capture-tuning-2026-09-21T223734`,
+        `_capture-tuning-2026-09-21T232153`, `_capture-tuning-2026-09-22T170459`
+        and `_capture-tuning-2026-09-22T235224`.
+        - Plant: the simulator's declared fuel-mv-2 (E08.11, `212eadf`).
+        - Battery stated at 14.0 V (unmeasured), gasoline.
+        - 917 points, 597.6 s of weight; enrichment 16.9 s, closed loop
+          541.4 s.
+        - Design sha256
+          `f4332b8d0890c2de9805fb35e01c895a8a0c6621752e743399d95193dc5688fa`;
+          `design.json` `20e516956daa5b2a…2cdf`; `design.parquet`
+          `b648148c4857c018…000e`.
+      - **Run:** 20260920 → `ZS44A-Tuned-20261004.OsirisROM`, 200 draws,
+        seed 1, trims 0/0, `ecu_reflash`, 79 s.
+        - `result_digest`
+          `6180dbcd0f6e05ce63b2caa1333890f24105e9d69734c4c659e74cd114efef71`.
+        - `result.json` `4f5db38a735a6fa3570c56f6bd2b06ac8266748f7654b99bbe9d27f477b81309`.
+        - `report.html` `4cde07b016eb972f838adfd1eab6eb010c1d0bbb423cf43920f1ff056b983fbd`.
+        - `traces.parquet` `760bcea01ef22fb1256a8855779b0d79eaaf516970e5b362fa79c7020b95381f`.
+      - **What it can test.**
+        - ΔBFS: only 3 of 917 points predict |p50| above the 2.44 % floor
+          (+3.82 to +3.85 %). The flash's BFS effect sits mostly below what
+          a cross-drive comparison resolves, and the large changes occur
+          only in brief WOT pulls, which the steady rule rarely keeps.
+        - Δφ: 27 points predict a nonzero change (the first prediction has
+          5), from −0.71 % to +1.29 %. Closed-loop φ's floor is 0 %, so these
+          resolve, and 27 clears E07.4's 20-pair minimum, provided the
+          post-flash drive logs `mem:ECM_TARGET_EQUIV_RATIO` at those
+          operating points. The `tuning` profile does.
+        - So this is the prediction to score Δφ against. Wiring E09.12's
+          scoring to a second artifact is owed there.
+      - **Order evidence:** the git commit recording this block.
 
 - [ ] **E08.8 — Later: dashboard and Pi.** Deferred until E08.1–E08.7 pass.
   - An Engine Tuning page that takes an edit spec, runs a bounded job, and
@@ -1718,9 +1760,598 @@ refusal carries a stable `reason` string that tests assert by name.
       escalates to kill with no traceback (tested). `--rom-dir` is optional;
       the README's one command is `scripts/canary_desk.py`, ROMs open from
       the GUI. `tests/test_canary_desk.py`: 45 passed.
+    - **Runs from any Python (2026-10-16).** The operator ran
+      `python scripts/canary_desk.py` with the system interpreter and got
+      `ModuleNotFoundError: pydantic`. The script now has a standard-library
+      prologue, before any project import and only under `__main__`:
+      `launch_plan` (pure, tested on its facts) decides to run, re-launch
+      under `.venv/bin/python` (`os.execve`, arguments kept), install first
+      (`scripts/install_deps.py --venv .venv --torch none`, the project's own
+      installer; desk mode runs no model) when there is no `.venv` or the
+      venv lacks `pydantic`/`yaml`, or refuse by name: `venv_missing` /
+      `venv_incomplete` under `--no-bootstrap`, `python_too_old` below 3.12
+      (naming the interpreter to install), `install_failed`, and
+      `venv_incomplete` again after one install (`CANARY_DESK_BOOTSTRAPPED`
+      marks the re-launch, so an empty venv can never loop). README "Desk
+      mode" now gives `python3 scripts/canary_desk.py`. Tests: the plan for
+      each case, `ensure_venv` refusing with exit 2 and no exec, import never
+      re-launching, and an end-to-end run of `--help` through
+      `/usr/bin/python3` (3.12.3, no pydantic here) that re-launches and
+      prints the help.
+
+- [x] **E08.10 — Name every held working assumption; BFS stops inheriting
+  the target-lookup gate.** Found 2026-10-15 by W09.6's real-image runs
+  (`tests/test_rom_editor_private_rom.py`, `a00dfb99`; W09 doc, W09.6
+  "Laptop half", logged under W09.7). The operator agreed to this plan.
+  1. **The VE that sets the result is not named.**
+     - The sim kit's plant is fuel-mv-1, the only version the contract admits
+       (E08.3). Its VE is the registry's working assumption: 0.7, bracket
+       [0.4, 1.0], `requires_measurement` (`fuel_plant.yaml` ~194-198).
+     - A grid design solves MAF from the stated load at that VE (E08.2's
+       `load_basis`). At 100 % fill that is ~103 g/s (BFS ~29k), against the
+       truck's ~38–42k at WOT; fuel-mv-3 identifies 0.9055 at 4,000–5,000 rpm
+       (~133 g/s).
+     - So BFS and pulse deltas at the top of a grid are understated by ~30 %.
+       Relative λ is roughly unaffected.
+     - Nothing in the result names VE. The only plant caveat present is
+       `plant:manifold_pressure_unmeasured`.
+     - **Fix at source.** Every result carries, in `assumptions`, each plant
+       working assumption a computed output rests on: parameter, value,
+       source file and bracket, and whether this run drew it or held it.
+       Derive this from the registry the run resolved, never from a
+       hand-kept list.
+     - A design's own `assumptions`, such as the grid's "MAF solved at VE
+       0.7", flow into the result too. E08.6's report shows both in its
+       caveat block, ahead of the first chart. That also closes E08.6's
+       reported gap that the design's `assumptions` were not in `summary()`.
+     - A grid's MAF depends on VE but is frozen when the design is built.
+       Name that in the result too. The VE draw does not move a grid
+       point's MAF.
+  2. **BFS inherits a gate it does not depend on.**
+     `paired_scenarios.run_paired` (~1017) adds the run-level `gate` to every
+     output's reasons. A target-lookup gate (e.g.
+     `target_lookup:enrichment_gate_state_unknown`) therefore marks
+     `base_fuel_schedule` unsupported, although steady BFS is computed before
+     the Target AFR lookup.
+     - Scope each gate reason to the outputs downstream of the node it names,
+       through the application model's `depends_on`, not a hand list.
+     - The real 20260920 → 20261004 run's one unsupported ΔBFS cell, (8, 15),
+       is this case.
+     - The W09.6 test marks it `KNOWN OVER-REFUSAL`. Flip that one assertion
+       deliberately, and tell the W09 session.
+  - **Accept:**
+    - A grid run on fuel-mv-1 names VE 0.7 [0.4, 1.0] (held or drawn) and
+      the frozen-MAF fact in `assumptions` and in the report's caveat block.
+      A test fails if the registry entry changes and the result does not
+      follow.
+    - The ΔBFS cell (8, 15) of the real run becomes supported. Its pulse, λ
+      and target φ keep the gate reason.
+    - `cmp_head.py`'s HEAD equality is re-stated: the cases where only these
+      reason or assumption strings changed are listed; values are unchanged
+      everywhere.
+  - **Not here (needs an operator decision):** switching the kit to an
+    identified VE (fuel-mv-2/3). The contract admits only fuel-mv-1, and
+    fuel-mv-2/3's refusing MAP conflicts with drawing VE over plant-model
+    MAP (`manifold_refusal_varies_by_draw`). It is a new plant choice for
+    the simulator, recorded here so it is not implied.
+  *Done 2026-10-15 (not committed):*
+  - **Assumptions are strings, from the registry.** `assumptions` stays
+    `list[str]` end to end (W09's constraint: its GUI and MCP tool render
+    strings). No schema gained a field; nothing structured went into
+    `provenance`.
+    - `paired_scenarios.plant_assumptions(kit, points, drawn=)` walks
+      `resolve_parameters(...).values` and keeps each parameter whose number
+      is its registry `working_assumption` (status not `known`, plus B06's
+      restated delay). The rail counts only if some point has
+      `rail_kpa_source: working_assumption`. VE (`manifold_pressure`) counts
+      only if some point's MAP is `plant_model`: a stated MAP does not read
+      it.
+    - `format_plant_assumption` is the one formatter, e.g. `plant working
+      assumption: manifold_pressure (volumetric_efficiency) = 0.7, bracket
+      [0.4, 1.0], held at that value (nissan-xterra-2008/fuel_plant.yaml
+      registry, plant fuel-mv-1; unresolved effect
+      manifold_pressure_unmeasured)`. A drawn parameter reads "drawn inside its
+      bracket in this run", with no per-draw value, so `run_paired`'s string
+      and the Monte Carlo's are the same. On a VE(rpm) plant the value is
+      labelled as the floor under the held fit.
+    - `SimKit.plant_file` (`<profile>/<file>`) is set by `load_kit` and by
+      `kit_for_plant`.
+    - `run_paired` appends the strings to `assumptions`. `run_monte_carlo`
+      builds them over the whole design, not the self-checked subset. It then
+      adds the design's own assumptions (`design: ` prefix) and, for grid
+      points (`maf_source` `manifold_model_inverse:…`), `design: the MAF of N
+      of M points was solved … frozen there: this run's VE (drawn|held) moves
+      the plant's MAP and lambda at a point, never its MAF`.
+      `MonteCarloDesign` gains `assumptions` and `maf_frozen_points` (both
+      defaulted).
+    - `caveats` already carries every assumption, so `CellTable.caveats` and
+      the report get them unchanged. This closes E08.6's gap that the design's
+      `assumptions` were missing.
+    - `sim_design`'s grid assumptions gain `MAF solved at VE 0.7 (the
+      registry's manifold_pressure working assumption, bracket [0.4, 1.0]),
+      plant fuel-mv-1 speed_density_capped; the MAF is frozen in the design
+      …`, read from the registry the build resolved. Grid design hashes
+      change as a result; drive designs (`322e4cab…`) do not.
+    - `sim_report`'s caveat block gets two headed lists before "Every other
+      caveat": `#working-assumptions` (plant) and `#design-assumptions`. Each
+      says so by name when it is empty.
+  - **Gate scoping.** `paired_scenarios.ReasonScope` uses `rom_effects.
+    _ancestors`. Each output has sink nodes: BFS is the BFS word's writer
+    (`base_fuel_schedule`). Target phi is the final command's writer
+    (`final_command_word`). Pulse, trim, lambda and fuel take both, because
+    `predict_pulse` reads the BFS word and the phi word. A reason reaches an
+    output if its node is among the sinks' ancestors.
+    - `target_lookup:*` names the twin's node (`enrichment_gate`), and
+      `steady_bfs:*` names BFS.
+    - A run-level gate reason that names a model node itself (`rom:unmodelled:<node>`,
+      `rom:observed_not_predicted:<node>`, `conditioned_on_changed_path:<q>`'s
+      manifest node) is that node's.
+    - Any other gate reason belongs to the output that raised it. `_twin_gate`
+      now returns `(reason, node)` pairs.
+    - Reasons tied to no node (`rom:unknown_bytes_changed`, `plant:*`,
+      `<side>_target_table:*`, …) reach every output.
+    - A gate withholds the candidate only for the outputs it reaches.
+    - The fast path (`sim_montecarlo._build_cache`, `_gate`) uses the same
+      object. Gated plant outputs are blanked per output after the plant pass.
+  - **HEAD equality** (`scratchpad/e0810/cmp_head2.py`, `cmp_head.py` adapted:
+    HEAD's `paired_scenarios.py` against the tree, every leaf compared). The 5
+    edits × 2 event sets were each run with no overrides and with
+    `plant_overrides={}` (20 runs). **Every number is equal in all 20.**
+    What changed:
+    - All 10 cases: `assumptions` gains 4 strings: `bank_air_split`,
+      `fuel_stoich_afr`, `injector_dead_time` and `lambda_observation_delay`,
+      each held. These points state MAP and rail, so VE and rail are
+      correctly absent.
+    - `fill_curve` (both event sets) also drops these reasons from
+      `base_fuel_schedule` at all 5 points: `rom:target_equiv_ratio_unevaluable`,
+      `rom:observed_not_predicted:load_input_x` and
+      `rom:unmodelled:{correction_1736, correction_175c, correction_26e8,
+      correction_sum, curve_term, enrichment_multiplier, enrichment_state,
+      enrichment_state_request, final_command_word}`. BFS stays unsupported
+      under `conditioned_on_changed_path:fuel_comp_load_byte` and its own
+      `rom:` reasons (`unmodelled:fill_blend` and the rest stay), and its
+      candidate is still withheld.
+    - Nothing else changed: statuses, coverage, `unresolved` and every other
+      output's reasons are the same.
+  - **Real case** (laptop, scratch `…/scratchpad/e0810/real`;
+    `~/canary-data/sim/predictions/` untouched). Command: `run --base
+    --revision ZS44A-20260920 --candidate-rom ZS44A-Tuned-20261004.OsirisROM
+    --design 322e4cab… --draws 200 --seed 1 --stft-pct 0 --ltft-pct 0
+    --candidate-events ecu_reflash`.
+    - **ΔBFS (8, 15) is now `changed`** (supported share 1.0, relative
+      p05 = p50 = p95 −0.767 %). Its pulse, λ, fuel, trim and target φ keep
+      `target_lookup:enrichment_gate_state_unknown`.
+    - ΔBFS: 47 changed, 6 unchanged, 0 unsupported, 203 no points (was 46 /
+      6 / 1 / 203). BFS coverage went from 0.99664 to 1.0. No other cell
+      output differs.
+    - **The prediction of record's numbers are unaffected.** Its
+      `run-200draws/traces.parquet` and the new one each have 357,600 rows.
+      `fill_byte`, `base`, `candidate`, `delta` and `relative_delta` are
+      identical (NaN-equal). The only `status` change is BFS at point 271
+      over its 200 draws, unsupported → supported.
+    - `result_digest` changes, as expected: `956d7bbed7cb…` → `d66ad0189e87…`.
+      The digest hashes the reasons and the caveats, and those changed.
+      The new digest repeated across two runs on two code revisions. The
+      record's own `result.json` was not rewritten. The traces' `session`
+      column follows the digest (`_sim-956d7bbed7cb` → `_sim-d66ad0189e87`)
+      on every row; every value column is unchanged (verifier, 2026-10-15).
+    - `TOOL_VERSION` bumped, because a result's meaning changed:
+      `paired_scenarios` 2 → 3, `sim_montecarlo` 1 → 2, `sim_report` 1 → 2
+      (the two new caveat sub-lists). The pins in `tests/test_paired_scenarios.py`
+      and `tests/test_sim_montecarlo.py` were updated deliberately.
+    - `assumptions` went from 7 to 22 strings. The 6 plant ones, all drawn,
+      include `manifold_pressure (volumetric_efficiency) = 0.7, bracket [0.4,
+      1.0]` and the rail (this design's rail is a working assumption). The 9
+      are the drive design's own. A drive design has no frozen MAF, so there
+      is no frozen-MAF note. `unresolved` is unchanged.
+    - In `report.html` the plant list sits at byte 4,356 and the VE string at
+      4,929, before the first `<svg>`.
+  - **Grid case** (`design grid --base-revision ZS44A-20260920 --rpm-edges
+    1000 2000 3000 4000 5000 --load-edges 0 25 50 75 100 --load-basis
+    fill_fraction_as_manifold_ratio --baro-kpa 80 --iat-c 30 --coolant-c 90
+    --battery-v 14.0 --rail-kpa working_assumption --throttle-pct 30
+    --pedal-flag 0`, design `41c077af…`, 16 points). The run used the same
+    pair, 50 draws and seed 1. `result.json` names VE 0.7 [0.4, 1.0] (drawn),
+    `design: MAF solved at VE 0.7 …` and `design: the MAF of 16 of 16 points
+    was solved …`. All three are in `report.html` at bytes 4,929 / 6,298 /
+    6,856, before the first `<svg>` at 16,115.
+  - **Tests.** `tests/test_sim_assumptions.py` (new), 6 passing:
+    - `test_run_paired_names_each_working_assumption_the_registry_resolves`:
+      the named set equals the registry's own working-assumption set. VE and
+      rail drop out on stated MAP and rail. A drawn VE says "drawn" with no
+      value. Moving the registry's VE to 0.65 [0.45, 0.95] and making
+      `fuel_stoich_afr` `known` moves the result.
+    - `test_a_monte_carlo_names_the_drawn_and_held_assumptions_and_the_designs`:
+      drawn and held, the design's strings, the frozen-MAF note, and a
+      registry value change reaching the Monte Carlo.
+    - `test_a_reason_reaches_only_the_outputs_downstream_of_its_node`: 11
+      reasons, including `rom:unmodelled:fill_blend` reaching BFS and
+      `…:correction_sum` not.
+    - `test_a_target_lookup_gate_leaves_bfs_supported_in_run_paired_and_the_fast_path`:
+      `predict_phi` is patched into the band at the WOT point. BFS is
+      supported and finite at every draw, and the other five outputs carry
+      the reason. The fast path equals `run_paired` pair by pair, and its
+      self-check passes.
+    - `test_a_grid_run_names_ve_and_the_frozen_maf_through_the_cli_and_its_report`
+      (`tools/rom_sim.py run`) and
+      `test_assumptions_stay_strings_through_the_rom_editor`
+      (`rom_editor.simulate_edits` called, not edited): `list[str]`, VE and
+      frozen MAF present, before the first `<svg>`.
+    - Mutations, each reverted: scoping off fails 2; `plant_assumptions`
+      returning nothing fails 4; an unscoped fast path refuses
+      `fast_path_diverged`.
+    - `tests/test_paired_scenarios.py` is unmodified (16 pass). In
+      `tests/test_rom_editor_private_rom.py` only the negative control's
+      `KNOWN OVER-REFUSAL` assertion is flipped: BFS is `unchanged` in every
+      visited cell, and target φ keeps the gate reason.
+  - **Gate.** `ruff check .`, `ruff format --check .` and `mypy src` are
+    clean.
+    - `pytest -n 4` on test_paired_scenarios, test_sim_montecarlo,
+      test_sim_design, test_sim_cells, test_sim_report, test_rom_sim_cli,
+      test_rom_sim_known_answers, test_layering, test_rom_editor,
+      test_sim_assumptions and test_mcp_rom_editor: 265 passed.
+    - `-m "slow or not slow"` test_rom_sim_private_rom and
+      test_rom_editor_private_rom: 12 passed, 1 xfailed (W09.6's WOT xfail,
+      unchanged).
+
+- [x] **E08.11 — The simulator runs fuel-mv-2 (identified VE), not
+  fuel-mv-1.** Operator decision 2026-10-15, after E08.10's finding. Do it
+  after E08.10 lands; the two touch the same code.
+  - **Why.**
+    - fuel-mv-1's constant VE 0.7 is contradicted by the truck's own data
+      above 2,000 rpm, where the envelope is 0.888–0.906.
+    - A grid design solves MAF from load at the plant's VE. At full fill,
+      VE 0.7 puts BFS near 29k against the truck's 38–42k at WOT, so a grid
+      evaluates the ECU at operating points the truck does not reach at that
+      fill: wrong Target AFR columns and wrong distance to the BFS ceiling.
+    - fuel-mv-2 is frozen (`na-stock-2026-10-08.mv2`) with VE(rpm)
+      identified on the same drives. It fits at least as well: in-sample
+      |err| p90 11.61 % vs 12.01 %.
+    - fuel-mv-3 was considered and not chosen. It fits the same (11.69 %),
+      and its part-load factor is unvalidated, since no MAP sensor will exist
+      on the NA intake.
+  - **The simulator's plant is its own declaration, not the contract
+    default.** The contract's `plant_version: fuel-mv-1` is what E07.4's
+    case and its sealed records name (`baseline_sha256 6aec1db5…`). It does
+    not change.
+    - Add the E08 simulator's plant as data:
+      `data/nissan-xterra-2008/sim_uncertainty.yaml` (or a small sim-kit
+      file beside it) names `plant_version: fuel-mv-2`.
+    - The contract's `conditional_rom_comparison` mode lists the plant
+      versions it admits (`fuel-mv-1`, `fuel-mv-2`). `check_scenario` checks
+      the scenario's plant against that list, refusing anything else with
+      the existing `plant_version_mismatch`. E07.6 on fuel-mv-1 keeps
+      running byte-identical.
+    - One loader, e.g. `load_sim_kit(profile_dir)`, gives the simulator's
+      kit. `tools/rom_sim.py` and the design builders default to it. The
+      W09 GUI (`rom_editor.py`) switches to it: tell the W09 session the
+      name, and don't edit its file.
+  - **VE in the Monte Carlo.**
+    - Above the floor bands, fuel-mv-2's VE is a frozen fit (`log_fit`
+      parameter_fits), so it is held at the fit. The held value is named
+      through E08.10's assumptions.
+    - The 0.7 floor below 2,000 rpm stays a bracketed working assumption
+      [0.4, 1.0], drawn with a declared distribution. The uncertainty file
+      for fuel-mv-2 is new and its brackets are checked against fuel-mv-2's
+      registry.
+    - fuel-mv-2 refuses MAP above ambient. Keep `manifold_refusal_varies_by_draw`
+      as the backstop. The expectation is that it never fires, because
+      drawing the floor at idle (charge fraction ~0.15) cannot reach ambient.
+      Test that.
+  - **Grid designs** take VE from the design's plant, now fuel-mv-2. Points
+    whose solved MAP would be above ambient, or outside the VE fit's bounds
+    (`outside_ve_fit`: baro 79–82 kPa, IAT 23–50 °C), are counted and not
+    placed. A grid at 63 kPa baro is therefore refused by name: the fit has
+    not seen that altitude.
+  - **Prediction of record.** The 10-04 restore prediction stays as
+    recorded, on fuel-mv-1, and is never re-run in place. New runs carry
+    `plant_version: fuel-mv-2`.
+  - **Accept:**
+    - A grid at full fill and 4,800 rpm on fuel-mv-2 gives BFS within the
+      truck's observed WOT band, checked against a real drive's BFS DID at a
+      matched rpm and fill, per pair. With fuel-mv-1 it does not.
+    - E07.6's tests and `cmp_head.py` are byte-identical on fuel-mv-1.
+    - The real restore run on fuel-mv-2 still reproduces B08.6's per-pair
+      Fuel Comp ratios (E08.7 item 3's identity holds on any plant, since
+      BFS does not depend on VE given MAF).
+    - Uncertainty brackets match the fuel-mv-2 registry.
+    - The W09 session is told the loader name and has switched.
+  *Done 2026-10-15 (not committed; the W09 switch is the orchestrator's to
+  confirm):*
+  - **The simulator's plant is data.** `data/nissan-xterra-2008/sim_kit.yaml`
+    (new) names `plant_version: fuel-mv-2` and one uncertainty file per
+    runnable version (`fuel-mv-1: sim_uncertainty.yaml`, `fuel-mv-2:
+    sim_uncertainty_mv2.yaml`). It is a file of its own rather than a field
+    in `sim_uncertainty.yaml`: which plant the simulator runs and how one
+    plant's parameters are drawn are two facts. Each declaration describes
+    exactly one plant, so fuel-mv-1's stays byte-identical for the runs
+    recorded on it, and switching the plant is one line here.
+    - `src/analysis/sim_kit.py` (new) reads it (`SimKitDeclaration`,
+      `extra="forbid"`; `sim_kit_undeclared`, `sim_kit_invalid`). The design
+      builders import only this, below the Monte Carlo.
+    - **The one loader:** `sim_montecarlo.load_sim_kit(profile_dir: Path,
+      plant_version: str | None = None) -> LoadedSimKit` (`kit`,
+      `uncertainty`, `declaration_sha256`). It returns the contract's kit on
+      the declared plant (`kit_for_plant`), plus that plant's uncertainty
+      file, checked against it (`check_uncertainty`). Refusals:
+      `uncertainty_undeclared` (e.g. `fuel-mv-3`), `uncertainty_missing`,
+      `uncertainty_invalid` and `uncertainty_plant_mismatch`.
+      `plant_version="fuel-mv-1"` re-runs an old run.
+    - `tools/rom_sim.py` uses it (`_World`: `kit` and `uncertainty`).
+      `--plant-version` defaults to the declared plant.
+      `build_drive_design` and `build_grid_design` default to
+      `sim_plant_version(profile_dir)`, never the contract's.
+      `scripts/canary_desk.py` makes no plant choice and is unchanged.
+    - **The contract's default stays fuel-mv-1.**
+      `conditional_rom_comparison` gains `plant_versions: [fuel-mv-1,
+      fuel-mv-2]` (schema: `Mode.plant_versions`, with
+      `SimContract.admitted_plant_versions(mode)`; empty means the
+      contract's version alone).
+      - `check_scenario` refuses anything else as `plant_version_mismatch`,
+        naming the admitted list.
+      - Validation refuses a listed version that no stage implements, and a
+        duplicate. `_check_unstated` now needs the unstated MAP's internal
+        model for every admitted version, so fuel-mv-2's MAP model lists
+        `conditional_rom_comparison`.
+      - `tests/test_sim_contract.py::test_the_rom_comparison_admits_its_declared_plant_versions_and_no_other`:
+        mv-1 and mv-2 are accepted; mv-3 and mv-9 are refused by name.
+        `tests/test_engine_dynamics.py`'s two internal-model assertions
+        are updated to match.
+  - **VE.** `fuel_plant.VeCurve.ve(rpm, floor, *, fitted_at=None)` (also
+    `floor_bands`, `band_values` and `describe`).
+    - A band whose envelope reached the registry's working VE is the fit,
+      held whatever the floor is. A floor band runs at max(envelope, floor).
+    - `resolve_parameters` sets `ResolvedParameters.ve_fitted_at` to the
+      registry's working value, and `predict` passes it on. So a floor draw
+      or sensitivity case moves only the bands below 2,000 rpm.
+    - Before this, a floor draw of 1.0 lifted 2000–6500 rpm from
+      0.888–0.906 to 1.0. At the working value the curve is unchanged.
+    - `test_a_ve_floor_draw_moves_only_the_floor_bands_never_the_fit`:
+      MAP at 4,800 rpm is bit-identical over floor draws 0.4–1.0. At
+      1,500 rpm it moves, and never below its band's envelope 0.67674.
+    - **Uncertainty.** `sim_uncertainty_mv2.yaml` (new) has fuel-mv-2's 6
+      working assumptions, uniform (bracket only), and the lumped scale.
+      The scale is `truncated_normal` on `na-stock-2026-10-08.mv2`'s
+      interval [0.050357, 0.051198], mean 0.050792, σ 0.0002556 =
+      0.0004205 / 1.645, as fuel-mv-1's is built.
+      `test_fuel_mv_2s_uncertainty_brackets_are_its_registrys` checks each
+      bracket against fuel-mv-2's registry and baseline. A moved bracket is
+      `bracket_mismatch`, and fuel-mv-1's file on fuel-mv-2 is
+      `uncertainty_plant_mismatch`.
+    - **The backstop** `manifold_refusal_varies_by_draw` is now per draw,
+      not per plant (`_refuse_manifold_refusal`). At each draw it
+      recomputes MAP at every model-MAP point and refuses at the first
+      refusal, naming the point, the reason and the draw.
+      - `test_drawing_the_ve_floor_at_warm_idle_cannot_reach_ambient`: idle
+        (762 rpm, 3.46 g/s) at floor 0.4 and split 0.52 gives MAP < 0.45 ×
+        baro. A 400-draw run over every declared parameter does not fire.
+      - `test_a_refusing_manifold_model_names_its_refusal_and_is_refused_where_a_draw_reaches_it`:
+        it does fire at 150 g/s at 4,800 rpm (above ambient at draw 0). It
+        also fires at 800 rpm with MAP 0.875 × baro when the floor is drawn,
+        a point placed on the frozen plant. A stated-MAP run on fuel-mv-2
+        now passes the contract.
+  - **Grid designs.** The VE comes from the design's plant, which is now
+    fuel-mv-2 by default.
+    - A stated baro or IAT outside the fit (79–82 kPa, 23–50 °C) refuses
+      the grid by name, `outside_ve_fit`, naming the value and the range.
+      An rpm outside 500–6500 is still counted per cell.
+    - MAP above ambient is still counted (`manifold_above_ambient`). On a
+      grid the MAP target is at most baro, so no cell reaches it at the
+      frozen plant.
+    - `test_a_grid_outside_the_fitted_ve_range_is_refused_by_name_or_counted[fuel-mv-2|fuel-mv-3]`:
+      63 kPa and 15 °C are refused. 6000–7000 rpm gives
+      `{outside_ve_fit: 2, placed: 2}`. fuel-mv-1 at 63 kPa places 12.
+    - `test_designs_default_to_the_simulators_declared_plant`: the
+      committed slice on fuel-mv-2 counts its 20–22 °C reads
+      `outside_ve_fit`, and every read is still placed or counted. E08.2's
+      own tests name `plant_version="fuel-mv-1"` (`_drive`, `_grid`), so
+      their evidence is unchanged.
+  - **Assumptions on a VE(rpm) plant** (`paired_scenarios.plant_assumption_lines`,
+    used by both `run_paired` and the Monte Carlo):
+    - `held_ve_fit` names the held fit:
+      `volumetric_efficiency(rpm) is the frozen fit of baseline
+      na-stock-2026-10-08.mv2 (sha256 0180c207492b), held at the fit in this
+      run, never drawn: [500, 1000) 0.7 floor, [1000, 2000) 0.7 floor, [2000,
+      3000) 0.888395 fit, [3000, 4000) 0.894657 fit, [4000, 5000) 0.905535
+      fit, [5000, 6500] 0.872824 fit; …; outside rpm 500-6500, baro 79-82 kPa
+      or IAT 23-50 C a MAP is outside_ve_fit …`.
+      It is named only where some point's MAP is the model's.
+    - The floor string reads `= 0.7, the floor under the frozen baseline's
+      VE(rpm) fit: the VE of rpm bands [500, 1000), [1000, 2000), each at
+      least its own envelope …, bracket [0.4, 1.0], drawn|held …`.
+    - A grid's `design:` string names the baseline and the band values.
+    - **Verifier minors.** A parameter is named only when its resolved
+      value equals `working_assumption.value`. The delay is no longer
+      hard-coded: the code uses `fuel_plant.DELAY_PARAMETER`, and the
+      bracket comes from the registry. The manifold model's parameters
+      (`fuel_plant.MANIFOLD_READS`: VE and fuel-mv-3's
+      `exhaust_pressure_ratio`) are named only on model MAP.
+    - **Tests** (`tests/test_sim_assumptions.py`, 4 new):
+      `test_a_ve_rpm_plant_names_its_held_fit_and_its_drawn_or_held_floor`,
+      `test_the_manifold_models_parameters_are_named_only_where_map_is_the_models`,
+      `test_a_parameter_is_a_working_assumption_only_at_its_registry_value`,
+      and the missing per-output test,
+      `test_a_run_level_gate_withholds_only_the_outputs_it_reaches`.
+      That last one is the verifier's Load Point Scaler +2000 case:
+      `rom:observed_not_predicted:load_input_x` withholds target φ and every
+      output downstream, while BFS stays supported with its candidate, in
+      `run_paired` and the fast path.
+    - The grid-CLI test now asserts fuel-mv-2's strings. The rom_editor
+      test reads design assumptions from `assumptions`, after W09's
+      `ae534b60`.
+  - **TOOL_VERSION.** `sim_montecarlo` 2 → 3: floor-only VE draws, the
+    named held fit, and the per-draw backstop. `rom_sim` 1 → 2: the
+    declared plant and its uncertainty by default. Pins are updated in
+    `test_sim_montecarlo.py`. `paired_scenarios` stays 3, because a
+    fuel-mv-1 result means the same; the bytes below show it.
+  - **Accept 1: full fill at about 4,800 rpm against the truck's BFS DID,
+    per pair** (scratch `…/scratchpad/e0811/wot_check.py`,
+    `wot_pairs.csv`).
+    - Drive side: N02's closed-loop rows (one per STFT read; fill byte
+      reconstructed on the real ZS44A-20260920 image; `bfs_raw` is DID
+      0x1208 paired by N02). Rows were kept at 4,300–5,300 rpm with byte
+      ≥ 195. The drives were 09-21T223734, 09-21T232153, 09-22T170459,
+      09-22T235224 and 09-23T142926. IAT is `obd:INTAKE_TEMP` within 2 s.
+    - Sim side: one cell per read, centred on its rpm and fill byte
+      (`fill_fraction_as_manifold_ratio`), at its baro, IAT and coolant.
+      BFS is `run_paired` on the real image.
+    - 57 pairs. 2 were mis-paired by N02 at lift-off (09-22T170459 BFS 4565
+      at 126.7 g/s; 09-21T232153 MAF 18.1 g/s at BFS 35276) and are
+      dropped by that stated rule. The truck's band over the other 55 is
+      BFS 30,690–37,008.
+    - fuel-mv-2 refuses 12 pairs `outside_ve_fit`: every WOT read of
+      09-23T142926 is at IAT 21–22 °C.
+    - **fuel-mv-2: 43 of 43 pairs inside the band** (sim 32,448–34,908).
+      Per-pair sim/truck is 0.911–1.072, median 0.956; |err| p50 4.53 %,
+      p90 6.18 %. At 4,600–5,000 rpm, 14 of 14 are inside.
+    - **fuel-mv-1: 0 of 55 inside** (25,104–27,168). Per-pair ratio is
+      0.724–0.829, median 0.743; |err| p50 25.7 %.
+    - The remaining −4.5 % on fuel-mv-2 is in MAF (grid MAF / truck MAF
+      median 0.950). At byte 209 the stated load basis puts MAP at 0.933 ×
+      baro. See the observation below.
+  - **Accept 2: byte-identical on fuel-mv-1.**
+    - `scratchpad/e0810/cmp_head2.py`, with af32f98's
+      `paired_scenarios.py` against the tree: 20 of 20 runs have equal
+      values and 0 label diffs (`ALL VALUES EQUAL True`).
+    - The whole process at af32f98 (a worktree) against the tree, the same
+      20 runs, every leaf of `to_dict()`: only
+      `provenance.contract_sha256` (672462611a1e → 5a24f197f63d, from the
+      contract edit) and `scenario_sha256`, which hashes it, differ.
+    - `tools.plant_validation case` is identical except `seal`, an HMAC
+      under `secrets.token_bytes` per process, which differs on every run.
+      The record still names `baseline_sha256 6aec1db5…` and fuel-mv-1.
+    - `tests/test_paired_scenarios.py` is unmodified and passes. The
+      fuel-mv-1 restore design is still `322e4cab…`.
+  - **Accept 3: the real restore on fuel-mv-2.**
+    `tests/test_rom_sim_private_rom.py`'s `restore_run` is parametrised
+    over `fuel-mv-1` and `fuel-mv-2` (`--plant-version` on both CLI calls):
+    6 passed, `-m "slow or not slow"`, 59.9 s.
+    - On fuel-mv-2 the design places 189 points after the 2026-10-16 rework
+      (190 before; fuel-mv-1: 298), with 117 `outside_ve_fit` and 1
+      `manifold_above_ambient_in_bracket`.
+    - Every pair satisfies `|BFS_new − BFS_old × FC_new/FC_old| < 4 ×
+      max(1, ratio)`, and the multiplier moves more than half of them.
+    - Idle (bytes 48–57, ≤ 800 rpm) is leaner by −2.45 … −1.5 % at every
+      pair. The light-load and WOT pattern is asserted on fuel-mv-1 only:
+      on fuel-mv-2 that drive keeps 3 light-load pairs and no WOT ones.
+  - **Accept 4:** brackets match fuel-mv-2's registry
+    (`test_fuel_mv_2s_uncertainty_brackets_are_its_registrys`, above).
+  - **Accept 5 (W09)** `[x]` (`212eadf`, pushed 2026-10-16): the W09 session has switched `rom_editor.py`
+    to `load_sim_kit`. It re-measured on the real ZS44A-20261004 image after
+    the rework below: the form grid places 201, with 14 `outside_ve_fit` and
+    9 `manifold_above_ambient_in_bracket`. It re-pinned
+    `tests/test_rom_editor_private_rom.py` (10 passed, 1 strict xfail) and
+    measured the default Simulate at 7.8 s for 200 draws and 13.1 s for
+    1,000. That commit landed on top of E08.11's (`3720c16a` → `212eadf7`).
+  - `~/canary-data/sim/predictions/` was not touched. The 10-04 prediction
+    stays as recorded on fuel-mv-1.
+  - **Rework 2026-10-16 (verifier FAIL; operator decision: fix both).**
+    - **What failed.** The ROM Editor's default Simulate refused
+      `manifold_refusal_varies_by_draw` at almost every draw count. Two
+      drawn parameters pushed grid MAP above ambient on fuel-mv-2:
+      - `bank_air_split`: `predict` fed one bank's air (× split × banks)
+        into the MAP model, so any cell at fill ≳ 96 % refused past split
+        ~0.509;
+      - the VE floor in the bands below 2,000 rpm: at 800 rpm, fill ≳ 57 %.
+      The first version's test covered idle only.
+    - **1. One plenum.** The VQ40 has one plenum for both banks. In
+      `fuel_plant.predict`, MAP now comes from `mean_air` (the engine's mean
+      cylinder charge, its total air). The bank's air, mean × split × banks,
+      still sets that bank's metering and λ.
+      - At split 0.5 the factor is exactly 1.0, so the two are the same
+        array:
+        - `tools.fuel_plant_check identify` for fuel-mv-1, mv-2 and mv-3 is
+          byte-identical before and after;
+        - `tools.plant_validation case` is identical apart from its
+          per-process HMAC `seal`;
+        - the 10-04 prediction design is still `322e4cab…`;
+        - the frozen baseline shas are data (`test_fuel_plant.py` pins pass).
+      - `tests/test_fuel_plant.py::test_one_plenum_feeds_both_banks_so_map_reads_the_total_air_at_any_split`
+        works a case by hand. At 100 g/s and 3,000 rpm: 150 events/s, mean
+        0.666667 g; bank shares 0.693333 and 0.64 sum to twice the mean; MAP
+        is capped at 81. At 40 g/s MAP is 50.30 kPa. MAP is identical at
+        split 0.48, 0.5 and 0.52, and λ scales × 1.04 with the bank's air.
+      - On fuel-mv-2 and mv-3, 131 g/s at 4,800 rpm (MAP ~0.97 × baro) is
+        not refused at any split. At 0.52 it used to read ~1.005 × baro.
+      - The mutation (MAP from the bank's air again) fails this test and two
+        of the Monte Carlo cases below.
+    - **Figures that moved** (re-measured with `evaluate()`'s own steps on
+      fuel-mv-1's four held-out drives, nothing spent; scratch
+      `…/scratchpad/e0811/plenum/split_sens.py`). Only the split's
+      sensitivity moved:
+      - fuel-mv-1: −4.17/+4.12 → **−4.07/+4.07 %** (n 845; recorded in
+        E07.3, text updated there);
+      - fuel-mv-2: −4.18/+4.24 → −4.09/+4.09 %;
+      - fuel-mv-3: −4.23/+4.24 → −4.09/+4.09 %.
+      - Every other sensitivity is equal to 4 decimals (dead time
+        −4.36/+5.41, rail +6.37/−2.59, VE +1.49/−1.19, stoich 0, mv-3 exhaust
+        0/+0.04). This is the only recorded split figure in E07/E08.
+    - **HEAD equality, after.** The tree before the rework against the tree
+      after (`dump_cases.py`, the 20 `cmp_head.py` runs, every leaf):
+      **0 leaves differ.** Those points state MAP, so the split never
+      reached MAP there. A split-sensitivity range can move only where MAP
+      is the model's. Against af32f98 the diff is still only
+      `contract_sha256` and `scenario_sha256`.
+    - **2. Bracket-safe placement.**
+      - `sim_design._refused_in_bracket` re-runs the plant's MAP at every
+        corner of the declared brackets of the manifold model's inputs
+        (`MANIFOLD_READS` with a registry bracket: VE, and fuel-mv-3's
+        exhaust ratio).
+      - A grid cell or eligible drive read that some corner refuses is
+        counted, never placed: `manifold_above_ambient_in_bracket`, with its
+        dwell in `unplaced_dwell_s`. A capping plant never refuses, so
+        fuel-mv-1 designs are unchanged.
+      - New counts:
+        - W09 form grid (17 rpm × 15 load edges, 81 kPa, 25 °C, rail 350):
+          fuel-mv-2 `{placed: 201, outside_ve_fit: 14,
+          manifold_above_ambient_in_bracket: 9}` (800 rpm from the 57.14 %
+          cell up, plus 1,200 and 1,600 rpm at 98.2 %); fuel-mv-1 224;
+        - full fill at 4,800 rpm (96.43–100 %): 1 placed;
+        - 09-22T235224: fuel-mv-2 305 placed, 1 in bracket (2.0 s);
+          fuel-mv-1 307;
+        - 09-23T142926: fuel-mv-2 189, 1 in bracket (2.0 s); fuel-mv-1 298,
+          `322e4cab…`.
+      - `test_a_point_above_ambient_anywhere_in_the_manifold_brackets_is_counted_not_placed`
+        checks the 9 cells by position, and that every placed point stays
+        below ambient at VE 0.4 and 1.0.
+    - **3. Tests that would have caught it.**
+      - `test_a_default_draw_monte_carlo_on_a_built_fuel_mv_2_grid_never_refuses`
+        runs three cases on built fuel-mv-2 grids, re-pinned to the
+        synthetic image, with every declared parameter drawn:
+        - `full_fill_4800`: 200 draws;
+        - `form_grid`: seed 20261015, 4 draws;
+        - `form_grid_more_draws`: 60 draws.
+      - With the bank split reverted, `full_fill_4800` and
+        `form_grid_more_draws` fail. With placement off, both form cases
+        fail.
+      - Private
+        `test_a_default_draw_run_over_a_real_wot_drive_on_fuel_mv_2_never_refuses`
+        runs 09-22T235224 through the CLI at 4 and 100 draws with no
+        refusal. Its steady enrichment pull (2,562 rpm, MAP 0.977 × baro)
+        is placed.
+      - The 800 rpm backstop assertion in `test_sim_montecarlo.py` was
+        rewritten. It now covers only a hand-built design; the builders
+        never place that point.
+      - Real images through the CLI (09-22T235224, the form grid and the
+        full-fill cell, each at 4/50/200 draws): all run.
+    - **`support_varies_by_draw`.** Its only route was a model-MAP refusal:
+      a NaN plant output where the ECU side says supported. With the
+      backstop stubbed, the same 9 real runs all pass. So placement makes
+      it unreachable on a built design; it stays as a guard.
+    - **Default grids.** `scripts/canary_desk.py` builds no grid. The CLI
+      has none (edges are required). The GUI's default is the form grid
+      above.
+    - **Minors.** `VeCurve.ve(..., fitted_at=)` and `band_values(...)` now
+      require `fitted_at`. The module-level MAP functions pass the floor
+      when they are not given one. The fuel-mv-1 band above is corrected to
+      25,104–27,168.
 
 ## Not in scope (named so they are not implied)
 
+- **More levers.** The base timing table, the MAF curve (`0xE27E`), the
+  injector constants and the closed-loop trim authority are in
+  [E09](E09-engine-twin-runner-and-levers.md), items E09.7–E09.10. They need
+  the firmware listing session.
 - **Spark, torque, knock, power:** `compare_roms` traces ignition edits but
   no plant computes torque (E07.5 stage 3 needs spark sweeps and the H07
   dyno). The report shows them `unsupported`.

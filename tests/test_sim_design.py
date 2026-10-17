@@ -195,6 +195,9 @@ def _shift(session: Path, to: str) -> None:
 
 def _drive(sessions: list[Path], **kw: object) -> SimDesign:
     kw.setdefault("resolver", _resolver)
+    # E08.2's evidence on the committed slice is fuel-mv-1's; the builders'
+    # default is the simulator's declared plant (E08.11, tested below).
+    kw.setdefault("plant_version", "fuel-mv-1")
     return build_drive_design(sessions, PROFILE, BASE, fuel_type="gasoline", **kw)  # type: ignore[arg-type]
 
 
@@ -203,6 +206,7 @@ def _grid(**over: object) -> SimDesign:
         profile_dir=PROFILE,
         base_revision=BASE,
         load_basis="fill_fraction_as_manifold_ratio",
+        plant_version="fuel-mv-1",
         **GRID_ENV,
     )
     kw.update(over)
@@ -480,11 +484,57 @@ def test_grid_maf_is_solved_through_the_plants_own_manifold_model(plant_version:
     assert by_cell[(0, 0)] < by_cell[(0, 3)] < by_cell[(2, 3)]
 
 
-def test_a_grid_outside_the_fitted_ve_range_is_counted_not_placed() -> None:
-    # fuel-mv-3's VE(rpm) was fitted at baro 79-82 kPa; 63 kPa is a real trip's.
-    design = _grid(plant_version="fuel-mv-3", baro_kpa=63.0)
-    assert design.points == []
-    assert design.placement == {"outside_ve_fit": 12}
+@pytest.mark.parametrize("version", ["fuel-mv-2", "fuel-mv-3"])
+def test_a_grid_outside_the_fitted_ve_range_is_refused_by_name_or_counted(version: str) -> None:
+    """E08.11. A grid states one baro and one IAT: outside the frozen VE
+    fit's range (baro 79-82 kPa, IAT 23-50 C) every cell would be outside it,
+    so the grid is refused by name rather than built empty (63 kPa is a real
+    trip's altitude, which the fit has not seen). An rpm outside the fit's
+    bands is a per-cell count, never placed."""
+    for env, named in (
+        ({"baro_kpa": 63.0}, "baro_kpa 63 (fit 79-82)"),
+        ({"iat_c": 15.0}, "iat_c 15 (fit 23-50)"),
+    ):
+        with pytest.raises(SimDesignRefusalError) as refused:
+            _grid(plant_version=version, **env)
+        assert refused.value.reason == "outside_ve_fit"
+        assert named in str(refused.value)
+    edges = {"rpm": [6000, 6400, 7000], "load": [0, 50, 100]}
+    kw = {k: v for k, v in GRID_ENV.items()}
+    design = build_grid_design(
+        edges["rpm"],
+        edges["load"],
+        profile_dir=PROFILE,
+        base_revision=BASE,
+        load_basis="fill_fraction_as_manifold_ratio",
+        plant_version=version,
+        **kw,  # type: ignore[arg-type]
+    )
+    assert design.placement == {"outside_ve_fit": 2, "placed": 2}
+    assert {p.cell_row for p in design.points} == {0}
+    # fuel-mv-1 runs one working VE and has no fit range to be outside.
+    assert _grid(baro_kpa=63.0).placement == {"placed": 12}
+
+
+def test_designs_default_to_the_simulators_declared_plant() -> None:
+    """E08.11: with no plant named, both builders take the plant
+    ``sim_kit.yaml`` declares (fuel-mv-2), never the contract's fuel-mv-1, so a
+    design and the simulator's run agree by default. On fuel-mv-2 the
+    committed slice's 20-22 C reads are counted ``outside_ve_fit`` by name,
+    and every read is still placed or counted."""
+    from src.analysis.sim_kit import sim_plant_version
+
+    assert sim_plant_version(PROFILE) == "fuel-mv-2"
+    grid = _grid(plant_version=None)
+    assert (grid.plant_version, grid.manifold_model) == ("fuel-mv-2", "speed_density_refusing")
+    assert any("VE(rpm)" in a and "na-stock-2026-10-08.mv2" in a for a in grid.assumptions)
+    drive = _drive([FIXTURE], plant_version=None)
+    assert drive.plant_version == "fuel-mv-2"
+    assert drive.plant_states.get("outside_ve_fit", 0) > 0
+    assert sum(drive.plant_states.values()) == drive.reads
+    assert sum(drive.placement.values()) == drive.plant_states["eligible"]
+    mv1 = _drive([FIXTURE])
+    assert mv1.plant_version == "fuel-mv-1" and "outside_ve_fit" not in mv1.plant_states
 
 
 # -- storage -----------------------------------------------------------------------------------
@@ -867,3 +917,55 @@ def test_per_point_sources_are_in_the_points_table_and_the_hash(
         changed = list(design.points)
         changed[0] = changed[0].model_copy(update={field: value})
         assert design.model_copy(update={"points": changed}).sha256() != design.sha256()
+
+
+def test_a_point_above_ambient_anywhere_in_the_manifold_brackets_is_counted_not_placed() -> None:
+    """E08.11 rework: a model-MAP point is placed only if MAP stays at or below
+    ambient across the declared bracket of every manifold-model input (the VE
+    floor [0.4, 1.0] in the floor bands, in practice). On the W09 form grid
+    (fuel-mv-2, 81 kPa, 25 C) that counts 9 cells: 800 rpm from ~57 % fill
+    (VE 0.4 under a 0.7 floor) and 1,200/1,600 rpm at the top cell (that
+    band's envelope 0.677). fuel-mv-1 caps and counts none."""
+    from src.analysis.fuel_plant import PlantInputs, load_b06, load_fuel_plant, predict
+    from src.analysis.fuel_plant import resolve_parameters as resolve
+
+    rpm = [200.0 + 400.0 * i for i in range(17)]
+    load = [
+        3.571429, 10.71429, 17.85714, 25.0, 32.14286, 39.28571, 46.42857, 53.57143,
+        60.71429, 67.85714, 75.0, 82.14286, 89.28571, 96.42857, 100.0,
+    ]  # fmt: skip
+    env = {**GRID_ENV, "baro_kpa": 81.0, "rail_kpa": 350.0}
+    kw: dict[str, object] = dict(
+        profile_dir=PROFILE, base_revision=BASE, load_basis="fill_fraction_as_manifold_ratio"
+    )
+    mv2 = build_grid_design(rpm, load, plant_version="fuel-mv-2", **kw, **env)  # type: ignore[arg-type]
+    assert mv2.placement == {
+        "manifold_above_ambient_in_bracket": 9,
+        "outside_ve_fit": 14,
+        "placed": 201,
+    }
+    placed = {(p.cell_row, p.cell_col) for p in mv2.points}
+    counted = {(i, j) for i in range(16) for j in range(14)} - placed - {(0, j) for j in range(14)}
+    # 800 rpm from the 57.14 % cell (0.5714 x 0.7 / 0.4 = 1.0000 x baro, on the
+    # line) up; 1,200 and 1,600 rpm at the 98.2 % cell (x 0.7 / 0.67674 > 1).
+    assert counted == {(1, j) for j in range(7, 14)} | {(2, 13), (3, 13)}
+    mv1 = build_grid_design(rpm, load, plant_version="fuel-mv-1", **kw, **env)  # type: ignore[arg-type]
+    assert mv1.placement == {"placed": 224}
+    # Every placed point stays below ambient at both ends of the VE bracket.
+    plant, _ = load_fuel_plant(PROFILE, "fuel-mv-2")
+    delay = load_b06(PROFILE, plant.delay)
+    for ve in (0.4, 1.0):
+        out = predict(
+            PlantInputs(
+                pulse_ms=np.full(len(mv2.points), 2.0),
+                ecu_dead_time_ms=np.zeros(len(mv2.points)),
+                rpm=np.array([p.rpm for p in mv2.points]),
+                maf_gps=np.array([p.maf_gps for p in mv2.points]),
+                baro_kpa=np.full(len(mv2.points), 81.0),
+                iat_c=np.full(len(mv2.points), 25.0),
+                rail_kpa=np.full(len(mv2.points), 350.0),
+            ),
+            resolve(plant, delay, overrides={"manifold_pressure": ve}),
+            plant.geometry,
+        )
+        assert out.manifold_refusal is not None and (out.manifold_refusal == "").all(), ve

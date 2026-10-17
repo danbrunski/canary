@@ -211,6 +211,66 @@ def test_the_editor_registers_only_after_the_library(config: CanaryConfig) -> No
         register_rom_editor_routes(FastAPI(), config=config, resolved_control_token="secret")
 
 
+# -- typical values (W09.11) --------------------------------------------------------------------
+
+TYPICAL = "/control/rom/editor/typical-values"
+
+
+def test_typical_values_need_the_token(client: TestClient) -> None:
+    assert client.get(TYPICAL).status_code == 401
+    assert client.get(TYPICAL, headers={"Authorization": "Bearer nope"}).status_code == 401
+
+
+def test_typical_values_are_the_profiles_declared_values_with_their_sources(
+    client: TestClient, profile: Path, config: CanaryConfig
+) -> None:
+    """No library entry is needed: they describe the vehicle, not an image. The
+    route serves the loader's body whole and writes nothing."""
+    before = sorted(p.name for p in config.daemon.rom_library_dir.parent.rglob("*"))
+    response = client.get(TYPICAL, headers=AUTH)
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body == rom_editor.typical_values(profile)
+    assert set(body) == {"profile", "file", "file_sha256", "values", "left_empty"}
+    assert body["values"] and all(v["source"].strip() for v in body["values"].values())
+    assert set(body["values"]) | set(body["left_empty"]) == set(rom_editor.TYPICAL_FIELDS)
+    assert sorted(p.name for p in config.daemon.rom_library_dir.parent.rglob("*")) == before
+
+
+def _client_for(tmp_path: Path, profile: Path, text: str | None) -> TestClient:
+    """The app over a copy of the profile with this typical-values file (None: absent)."""
+    copy_of = tmp_path / "vehicle"
+    shutil.copytree(profile, copy_of)
+    target = copy_of / rom_editor.TYPICAL_VALUES_FILE
+    if text is None:
+        target.unlink()
+    else:
+        target.write_text(text)
+    config = isolated_config(tmp_path, daemon={"afr_calibration": copy_of / "afr_calibration.yaml"})
+    return TestClient(make_app(config))
+
+
+def test_a_vehicle_that_declares_no_typical_values_is_a_409_by_name(
+    tmp_path: Path, profile: Path
+) -> None:
+    with _client_for(tmp_path, profile, None) as client:
+        response = client.get(TYPICAL, headers=AUTH)
+    assert response.status_code == 409, response.text
+    assert detail(response)["error"] == "typical_values_undeclared"
+    assert "sim_typical_values.yaml" in detail(response)["message"]
+
+
+def test_a_broken_typical_values_file_is_a_409_by_name_not_a_500(
+    tmp_path: Path, profile: Path
+) -> None:
+    unsourced = (profile / rom_editor.TYPICAL_VALUES_FILE).read_text().replace("source:", "src:", 1)
+    with _client_for(tmp_path, profile, unsourced) as client:
+        response = client.get(TYPICAL, headers=AUTH)
+    assert response.status_code == 409, response.text
+    assert detail(response)["error"] == "typical_values_invalid"
+    assert "values.baro_kpa.source" in detail(response)["message"]
+
+
 # -- preview ------------------------------------------------------------------------------------
 
 
@@ -237,6 +297,12 @@ def test_preview_is_the_pure_function_and_adds_nothing_of_its_own(
     assert body["spec"]["base"] == {"revision": REVISION, "file": None, "sha256": None}
     assert body["spec_yaml"].startswith("# CANary ROM Editor edit spec")
     assert body["spec_sha256"] and body["candidate_sha256"] != sha
+    # E09.14b: which lever, and what blocks a number, in the classifier's own words.
+    levers = body["levers"]
+    assert levers["schema_version"] == 1
+    assert [e["lever"] for e in levers["levers"]] == ["fuel_compensation"]
+    assert levers["messages"] == direct["levers"]["messages"] and levers["messages"]
+    assert any("closed loop: trim authority undecoded" in m for m in levers["messages"])
     (table,) = body["tables"]
     assert (table["id"], table["slot"]) == ("fuel_compensation", 1)
     assert body["sim_base"] == {
@@ -429,6 +495,8 @@ def test_simulate_runs_the_child_and_returns_the_cells(
     cells = body["cells"]
     assert cells["schema_version"] == 1 and cells["grid"] == "fuel_comp"
     assert body["design"]["points"] == 6
+    assert "assumptions" not in body["design"]  # the design's are in body["assumptions"], E08.10
+    assert any(a.startswith("design: ") for a in body["assumptions"])
     assert len(cells["cells"]) == 16 * 16
     assert sum(1 for cell in cells["cells"] if cell["pairs"]) == 6
     assert body["provenance"]["seed"] == 20261015 and body["provenance"]["draws"] == 6
@@ -829,3 +897,4 @@ def test_the_editor_is_wired_into_the_dashboard_app(tmp_path: Path, profile: Pat
     paths = {getattr(r, "path", None) for r in app.routes}
     assert "/control/rom/library/{sha}/edits/preview" in paths
     assert "/control/rom/library/{sha}/simulate" in paths
+    assert "/control/rom/editor/typical-values" in paths

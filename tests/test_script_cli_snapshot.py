@@ -42,7 +42,7 @@ SCRIPTS_DIR = REPO_ROOT / "scripts"
 SNAPSHOT = Path(__file__).parent / "fixtures" / "script_cli_snapshot.json"
 
 #: Python files under scripts/ that are not command-line entry points.
-NOT_A_CLI = frozenset({"_cli.py"})
+NOT_A_CLI = frozenset({"_cli.py", "venv_launch.py"})
 
 #: Scripts whose CLI is hand-parsed rather than argparse. Listed so a new
 #: hand-parsed script is a decision, not an omission.

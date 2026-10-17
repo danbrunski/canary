@@ -24,6 +24,7 @@ import type {
   CaptureProfileWarning,
   CaptureTagResponse,
   CurrentCaptureResponse,
+  CompanionDiscoverResponse,
   CompanionStatusResponse,
   CustomPid,
   CustomPidImportResponse,
@@ -32,6 +33,8 @@ import type {
   DidMapResponse,
   DtcReportResponse,
   FeedbackResponse,
+  IdentityResponse,
+  PiLink,
   JobLogsResponse,
   JobResponse,
   JobResultResponse,
@@ -127,11 +130,46 @@ export function getStatus(signal?: AbortSignal): Promise<StatusResponse> {
   return fetchJson<StatusResponse>("/status", { signal });
 }
 
-/** Task 6.35 — only the companion app answers this (same-origin, no
- *  `baseUrl`/token): its reachability is the "am I running as the local
- *  library, not the live Pi dashboard" signal `useConnectivityMode` reads. */
+/** `GET /identity` (no token): who answers on this origin. `host_kind`
+ *  tells a Pi from a desk daemon, which `useConnectivityMode` reads. */
+export function getIdentity(signal?: AbortSignal): Promise<IdentityResponse> {
+  return fetchJson<IdentityResponse>("/identity", { signal });
+}
+
+/** `GET /companion/status` (no token), same origin as the dashboard. A daemon
+ *  with `companion.enabled` answers it alongside `/status`; it is a 404 when
+ *  companion mode is off. A daemon that answers only this (no `/status`) is
+ *  the offline local library, the `useConnectivityMode` fallback. */
 export function getCompanionStatus(signal?: AbortSignal): Promise<CompanionStatusResponse> {
   return fetchJson<CompanionStatusResponse>("/companion/status", { signal });
+}
+
+/** `GET /companion/discover`: search the network for Pis (a few seconds).
+ *  `sweep` widens the search to a subnet scan. */
+export function discoverPis(
+  token: string,
+  sweep = false,
+  signal?: AbortSignal,
+): Promise<CompanionDiscoverResponse> {
+  return controlJson<CompanionDiscoverResponse>(
+    `/companion/discover${queryString({ sweep: sweep ? "true" : "false" })}`,
+    token,
+    { signal },
+  );
+}
+
+/** `POST /companion/pi`: link the companion to the Pi at `baseUrl`. A 400
+ *  carries `detail` when nothing answers there. */
+export function selectPi(token: string, baseUrl: string): Promise<{ pi: PiLink }> {
+  return controlJson<{ pi: PiLink }>("/companion/pi", token, {
+    method: "POST",
+    body: jsonBody({ base_url: baseUrl }),
+  });
+}
+
+/** `DELETE /companion/pi`: unlink. */
+export function clearPi(token: string): Promise<{ pi: PiLink | null }> {
+  return controlJson<{ pi: PiLink | null }>("/companion/pi", token, { method: "DELETE" });
 }
 
 export function getAnomalies(since?: string, signal?: AbortSignal): Promise<AnomaliesResponse> {

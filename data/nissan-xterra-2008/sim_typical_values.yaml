@@ -1,0 +1,128 @@
+# Typical values for the ROM Editor's Simulate form (W09.11): what the form's
+# "Fill typical values" button puts in the stated environment and learned-state
+# fields when the operator presses it. Read by
+# src/analysis/rom_editor.typical_values, served by
+# GET /control/rom/editor/typical-values.
+#
+# These are VEHICLE FACTS, so they live here, not in the page or in code, and
+# every one names where it comes from (`source`, required: a value with none
+# cannot be loaded) and what kind it is (`kind`, required):
+#   typical      a sourced figure for this vehicle;
+#   placeholder  a number the simulator reads nowhere today, filled only so the
+#                form can run. The page tags it "placeholder", never "typical",
+#                so it cannot pass for a measurement, its source must say it is
+#                one, and tests/test_rom_editor.py fails the moment any code in
+#                src/ reads the field (a node that does needs a sourced value or
+#                an operator-stated one).
+# The button fills the form's visible fields, marks each "<kind>: <source>", and
+# applies nothing unseen; it never fills the grid, the candidate events, the
+# edges, the draws, the seed or the label. W09 "Nothing is defaulted" still
+# holds: the SimRequest has no defaults, and a click is the operator stating
+# these values.
+#
+# Every field the button may fill (rom_editor.TYPICAL_FIELDS, twelve of the
+# SimRequest's twenty-one) is either a `values` entry below or a `left_empty`
+# entry that says why no value is declared; one that is neither cannot be
+# loaded, so the button can always say what it left for the operator. A new
+# value needs a source that already exists in the repo.
+schema_version: 1
+schema_version: 1
+values:
+  baro_kpa:
+    value: 81.0
+    kind: typical
+    source: >-
+      E07.6's stated point (tests/test_paired_scenarios.py WOT.baro_kpa) and
+      W09.6's grid environment (tests/test_rom_editor_private_rom.py ENV);
+      home is about 80 kPa and trips reach 63 kPa (W09 "Nothing is defaulted",
+      E08.2 environment_unstated), so state your own for a trip
+  iat_c:
+    value: 25.0
+    kind: typical
+    source: >-
+      E07.6's stated point (tests/test_paired_scenarios.py WOT.iat_c) and
+      W09.6's grid environment (tests/test_rom_editor_private_rom.py ENV)
+  coolant_c:
+    value: 88.0
+    kind: typical
+    source: >-
+      E07.6's stated point, a warm engine (tests/test_paired_scenarios.py
+      WOT.coolant_c) and W09.6's grid environment
+      (tests/test_rom_editor_private_rom.py ENV)
+  battery_v:
+    value: 14.0
+    kind: typical
+    source: >-
+      E07.6's stated point (tests/test_paired_scenarios.py WOT.battery_v) and
+      W09.6's grid environment (tests/test_rom_editor_private_rom.py ENV)
+  rail_kpa:
+    value: 350.0
+    kind: typical
+    source: >-
+      the returnless rail's ~350 kPa from the service manual
+      (data/nissan-xterra-2008/fuel_plant_mv2.yaml reference_delta_p, EC-494 and
+      EC-499); E07.6 (tests/test_paired_scenarios.py WOT.rail_kpa) and W09.6
+      (tests/test_rom_editor_private_rom.py ENV) state the same
+  throttle_pct:
+    value: 20.0
+    kind: typical
+    source: >-
+      W09.6's grid environment, a part throttle
+      (tests/test_rom_editor_private_rom.py ENV); E07.6's WOT point is 90 %
+      (tests/test_paired_scenarios.py WOT.throttle_pct) and is a different
+      experiment
+  pedal_flag:
+    value: 0
+    kind: typical
+    source: >-
+      W09.6's grid environment (tests/test_rom_editor_private_rom.py ENV
+      pedal_flag 0; E07.6's WOT and CRUISE points state 0 too). Bit 0 clear:
+      no simulated point reads the last Target AFR column (WOT); W09.6's
+      E076_WOT_ENV sets 1 for the case that does
+  stft_pct:
+    value: 0.0
+    kind: typical
+    source: >-
+      E07.6's stated learned state (tests/test_paired_scenarios.py
+      LEARNED.stft_pct; W09.6 E076_LEARNED in
+      tests/test_rom_editor_private_rom.py)
+  ltft_pct:
+    value: 2.34
+    kind: typical
+    source: >-
+      E07.6's stated learned state (tests/test_paired_scenarios.py
+      LEARNED.ltft_pct; W09.6 E076_LEARNED, E08.7 item 4): a stated scenario
+      value, not a read of the truck's current LTFT
+  evap_purge_area:
+    value: 0.0
+    kind: typical
+    source: >-
+      purge off: the simulator contract's conditional_rom_comparison mode
+      states "Purge off: purge scheduling is not modelled"
+      (data/nissan-xterra-2008/engine_sim_contract.yaml evap_purge_area);
+      E07.6 states 0 (tests/test_paired_scenarios.py LEARNED.evap_purge_area)
+  throttle_closed_learned:
+    value: 0.0
+    kind: placeholder
+    source: >-
+      PLACEHOLDER, not a measurement: E07.6
+      (tests/test_paired_scenarios.py LEARNED.throttle_closed_learned) and W09.6
+      (LEARNED_ZERO in tests/test_rom_editor_private_rom.py) pass 0.0, and the
+      paired run reads this number nowhere (tests/test_rom_editor.py fails if any
+      code starts to). The contract calls it a per-truck learned closed throttle
+      position (data/nissan-xterra-2008/engine_sim_contract.yaml); replace it
+      with the truck's key-on checkpoint value when a node starts reading it
+  idle_air_learned:
+    value: 0.0
+    kind: placeholder
+    source: >-
+      PLACEHOLDER, not a measurement: E07.6
+      (tests/test_paired_scenarios.py LEARNED.idle_air_learned) and W09.6
+      (LEARNED_ZERO in tests/test_rom_editor_private_rom.py) pass 0.0, and the
+      paired run reads this number nowhere (tests/test_rom_editor.py fails if any
+      code starts to). The contract says it was "not captured on 2026-10-04"
+      (data/nissan-xterra-2008/engine_sim_contract.yaml); replace it with the
+      truck's key-on checkpoint value when a node starts reading it
+# Every fillable field above has a value; a vehicle that has none for one lists it
+# here with the reason, e.g. `idle_air_learned: {reason: ...}`.
+left_empty: {}

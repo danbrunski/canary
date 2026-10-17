@@ -68,6 +68,19 @@ acceptance runs on the real images.
   defaulted). The browser may remember the operator's last stated values in
   `localStorage` (wrapped in try/catch). They are shown in the form, never
   applied silently.
+
+  *Added with W09.11 (operator request 2026-10-16; the text above is
+  unchanged):* the Simulate form has a **Fill typical values** button. It is
+  consistent with this decision only because it is an explicit operator click
+  that puts the vehicle's declared typical values
+  (`data/<vehicle>/sim_typical_values.yaml`, each with a required `source`) into
+  the visible form fields and marks each `typical: <source>`. Nothing is applied
+  silently or sent without being shown, the `SimRequest` still has no defaults,
+  and the button never fills the grid, the candidate events, the edges, the
+  draws, the seed or the label. Two of its values are declared `kind:
+  placeholder` (numbers the simulator reads nowhere): the page tags them
+  `placeholder`, never `typical`, and a test fails the moment any code reads
+  them.
 - **The grid defaults to Fuel Comp's own breakpoints, made visible.** The
   rpm and load edges the form pre-fills are the midpoints between
   `fuel_comp_engine_speed_axis` / `fuel_comp_flow_axis` breakpoints on the base
@@ -104,6 +117,15 @@ acceptance runs on the real images.
   (2026-10-15), so the page also says that until E08.7 is ticked. W09.6 is
   where they are first run through this path.
 
+- **Simulate is not gated on a preview (operator, 2026-10-16; do not re-open).**
+  The Simulate form needs only the pending edits, so it stays offered whether or
+  not the operator has previewed them. The limits block (`levers.messages`,
+  W09.10) sits above Simulate in the normal flow, and every result's own
+  caveats state the same limits after the run (plant not qualified, closed
+  loop, working assumptions). Gating Simulate on an "ok" preview was the
+  alternative and was declined: it would change the W09.4 flow for a limit the
+  result already carries.
+
 ## File ownership (for parallel implementation)
 
 | Item | New files | May edit |
@@ -115,6 +137,8 @@ acceptance runs on the real images.
 | W09.4 | `…/tuning/romEditor/SimForm.tsx`, `…/romEditor/SimResults.tsx`, tests | `RomEditorPage.tsx` |
 | W09.5 | — | `src/mcp_server/…`, `docs/mcp-server.md` |
 | W09.6 | `tests/test_rom_editor_private_rom.py`, `src/dashboard/static/e2e/romEditor.spec.ts` | this doc |
+| W09.10 | `tests/test_rom_levers_parity.py`, `src/dashboard/static/src/test/romLeverFixtures.ts`, `romLeverFixtures.test.ts`, `romLevers.fixture.json` | `rom_editor.py` (`preview_edits`), `PreviewResult.tsx`, `types/romEditor.ts`, `api/workbench.ts`, `docs/headless-api.md`, `docs/mcp-server.md`, the `preview_rom_edit` docstring |
+| W09.11 | `data/<vehicle>/sim_typical_values.yaml`, `src/dashboard/static/src/lib/romSimTypical.ts` (+ test), `src/test/romTypicalFixtures.ts`, `src/test/romTypicalValues.fixture.json` | `rom_editor.py` (`typical_values`), `routes/rom_editor.py` (one GET), `SimForm.tsx`, `RomEditorPage.tsx` (one prop), `RomEditorSimulate.test.tsx`, `types/romEditor.ts`, `api/workbench.ts` (one function), `e2e/romEditor.spec.ts`, `e2e/fixtures/romEditorApi.ts`, `tests/test_rom_editor.py`, `tests/test_rom_editor_api.py`, `tests/fixtures/route_table_snapshot.json`, `docs/headless-api.md` |
 
 `src/analysis/rom_editor.py` is layer 5 (`tests/test_layering.py`). Like
 every E08 module, it imports no `src.control`, daemon, dashboard, MCP, `can` or
@@ -590,14 +614,118 @@ W09.6 is the orchestrator's own, on the ROM machine.
   with status and body, simulate timeout > 900 s, sha confined to its path
   segment, and the docstring and fixture both pinned to
   `SimRequest.model_fields`, all 21, no default); tool snapshot regenerated
-  (+2 tools); docs/mcp-server.md rows. `simulate_rom_edit(visited_only=True)`
-  (default) cuts `cells.cells` to `n_points > 0` via the pure
-  `visited_cells_only`, stating `cells_omitted` and `cells_filter`; nothing else
-  in the body is touched, and `visited_only=False` is byte-identical to the
-  daemon's. Tests: kept = exactly the visited cells, omitted + kept = 256,
-  other keys and `status_counts` untouched, input not mutated; measured on a
-  256-cell / 6-visited fixture with full outputs: 394,541 bytes full, 31,992
-  filtered (< 60 KB). 23 tests in `tests/test_mcp_rom_editor.py`.
+  (+2 tools); docs/mcp-server.md rows.
+  **Follow-up (2026-10-15, `detail`): the tool is usable on a realistic grid
+  only at the default `headline` level, and that level is still over a ~100 KB
+  cap as the client sees it.**
+  `visited_only` (saves ~6 % on the form's grid, W09.6) is replaced by
+  `simulate_rom_edit(detail="headline"|"summary"|"cells"|"full")`, default
+  `headline`, one pure function `shape_simulate_result` (no other caller; the
+  daemon route and the dashboard payload are unchanged). `full` is the
+  daemon's body byte for byte; `cells` is the old visited-only cut
+  (`cells_omitted`, `cells_filter`); `summary` is one compact row per visited
+  cell with every output's status, supported_share, reasons and quantiles
+  (relative_delta p50 only); `headline` is one compact row per visited cell
+  with, per loop kind in the cell, only that loop's headline output (loop,
+  output, status, reasons, over, delta_p50, relative_delta_p50). All levels
+  keep every top-level key in the daemon's order (caveats first) and the
+  table's own fields; `cells.detail`, `cells.detail_note` (built from the
+  data, names what was dropped and the other levels) and `cells.cells_omitted`
+  come first in the table. A bad `detail` is a `ValueError` naming the four
+  values, raised before the daemon is called. **Measured on a real
+  224-visited-cell run** (the synthetic image through the real simulator,
+  16 x 14 grid, 20 draws, scratch script), compact JSON / FastMCP's `indent=2`
+  text: `headline` 105,233 / 174,906 B, `summary` 301,229 / 588,901 B, `cells`
+  708,058 / 1,448,831 B, `full` 750,280 / 1,523,137 B. The cell rows are
+  86 KB of the headline (384 B each), the top-level keys 10.7 KB, the table
+  skeleton 8 KB. **The ~100 KB cap is not met:** 105 KB
+  compact is just over it and the 175 KB text FastMCP sends (every tool here
+  returns a dict, which FastMCP emits as `indent=2` text AND as
+  `structuredContent`, `mcp.server.fastmcp.func_metadata.convert_result`) is
+  well over; the <= 50 KB compact aim is not met. Next levers, measured on the
+  same payload (compact): drop the per-entry `output` name (derivable from
+  `headline_by_loop`) and null `relative_delta_p50` 95 KB; also drop
+  row_value/col_value (derivable from the axes) 85 KB; none gets under
+  100 KB indent=2 (160 / 145 KB). What would: return the result as a compact
+  JSON string (no `indent=2`, no structuredContent), a return type no other
+  tool here uses, so not done; or a coarse grid.
+  **`changed_only` (2026-10-15, opt-in, default false):** applied after the
+  level, drops visited cells whose every `by_loop` headline output is
+  `unchanged` (never an edited cell, a cell with `row/col_axis_moved`, one with
+  any other status, or one with no `by_loop` to read); states
+  `cells.changed_only`, `cells.unchanged_omitted`, a `detail_note` sentence
+  (real computed zeros, `changed_only=False` shows them); `cells_omitted` stays
+  the no-points count and `status_counts` is untouched, so listed +
+  unchanged_omitted + cells_omitted = 256. `full` is byte-identical only with it
+  off. Measured on the real 224-visited-cell payload: the K-scale edit has no
+  unchanged headline cell (it drops nothing); with all but six cells' headline
+  statuses set to unchanged, headline + changed_only is 22,133 B compact /
+  30,609 B as FastMCP text, of which 19 KB / 25.7 KB is the daemon's own
+  top-level keys and table skeleton, so the ~20 KB hoped for is not reachable;
+  the fixture (leaner top level) measures 8,341 / 13,801 B. 15 more tests
+  (kept/dropped sets with edited, axis-moved, unsupported, partly_supported,
+  changed and half-changed mixed cells kept, counts add up at every level,
+  note content, `full` filtering, unclassifiable cell kept, non-bool refused,
+  default False, pass-through).
+  Tests: kept/dropped keys per level (each dropped key named in
+  `detail_note`, derived from a fixture cell), `cells_omitted` + len(cells)
+  == 256 for 224- and 6-visited grids, `status_counts` and all other keys
+  untouched and in order, statuses, unsupported reasons and the trim's
+  `delta_p50` preserved, mixed-loop cells give two headline entries, bad
+  `detail` refused before any request is sent, default is `headline`, input
+  not mutated, `full` identical; the 224-cell fixture is built in the real
+  payload's shape (851,808 B full against 750,280 B real, asserted within
+  600-900 KB; headline 96,450 / 166,115 B, summary 362,293 B; headline <
+  summary < cells < full, headline < 0.2 x full). 59 tests in
+  `tests/test_mcp_rom_editor.py`; tool snapshot regenerated additively
+  (`detail` replaces `visited_only`, new description); docs/mcp-server.md row
+  and docs/headless-api.md note updated.
+  Earlier (visited_only) measure, kept for the record: 394,541 bytes full,
+  31,992 filtered on a 256-cell / 6-visited fixture.
+  **E08.10 follow-up (2026-10-15):**
+  - *One copy of the design's assumptions.* `rom_editor.simulate_edits` no
+    longer writes `design.assumptions`; E08.10 puts them in the result's
+    `assumptions` as `design: `-prefixed strings, and `caveats` repeats every
+    assumption. Swept: `types/romEditor.ts` (the field is gone from
+    `SimDesignSummary`), `SimCaveats.tsx`, the fixtures, `SimResults.test.tsx`,
+    `docs/headless-api.md`. The caveat block groups `assumptions` by prefix
+    (`groupAssumptions` in `lib/romSimView.ts`: plant working assumptions,
+    the design's own, and an "Other assumptions" list only if any string is
+    unprefixed) and no longer lists in "Every other caveat" anything that is
+    an assumption, so each string shows once (lists are also de-duplicated by
+    exact string). The two prefixes are read from the Python modules by
+    `romSimView.test.ts`. Tests: `test_rom_editor.py` (key gone, design
+    assumptions present and prefixed, each once, all in `caveats`),
+    `test_rom_editor_api.py`, and in `SimResults.test.tsx` the held VE string
+    (`plant working assumption: manifold_pressure (volumetric_efficiency) =
+    0.7, bracket [0.4, 1.0], held at that value (...)`) once in its group, a
+    string in both `caveats` and `assumptions` once, the unprefixed fallback.
+    The VE test fails with the old block (checked).
+  - *MCP sizes re-measured* on a real payload (the route driven through
+    `tests/test_rom_editor_api.py`'s fixtures, synthetic image, 16 x 14 grid,
+    20 draws, K +5 %, 224 visited cells), compact / FastMCP text: `headline`
+    112,028 / 181,856 B (was 105,233 / 174,906), `summary` 308,144 / 596,241
+    (301,229 / 588,901), `cells` 715,179 / 1,456,529 (708,058 / 1,448,831),
+    `full` 757,401 / 1,530,835 (750,280 / 1,523,137). `assumptions` is 19
+    strings (4,359 B, was 7 / 1,896), `caveats` 4,555 B (was 2,092) and
+    `cells.caveats` repeats it (4,555 B): 13,469 B of repeated text, kept
+    whole. Headline: cell rows 86,195 B, top-level keys 15,037 B (was
+    10,689), table skeleton 9,437 B (was 6,990), so rows still dominate the
+    dense grid (77 %). Where the edit changes few cells they do not:
+    headline + `changed_only` with six cells changed is 28,912 / 37,540 B
+    (was 22,133 / 30,609), 24.5 KB (85 %) of it non-cell content. A real
+    region edit (Fuel Comp +2 %, 1,500-3,000 rpm, 20-50 % load; 224 visited)
+    keeps 147 cells, drops 77: 87,516 / 142,671 B. The K edit drops none:
+    112,656 / 182,496 B. `shape_simulate_result` and the test thresholds are
+    unchanged (none pinned a size that moved: fixture `full` 600-900 KB,
+    headline < 0.2 x full, changed_only wire < 40 KB all still hold); the
+    tool docstring and `docs/mcp-server.md` carry the new numbers, and the
+    tool snapshot's `simulate_rom_edit` description is regenerated (that one
+    line only).
+  - *W09.6's K-run test* tightened to `gated == 0` and its dead
+    `unsupported` branch and stale comment removed (E08.10 scoped the gate;
+    `tests/test_rom_editor_private_rom.py -m slow`: 9 passed, 1 xfailed, the
+    existing strict xfail).
 
 - [ ] **W09.6 — Real-ROM acceptance (on the machine with the images).**
   - `tests/test_rom_editor_private_rom.py`, skipping by name when the images
@@ -658,19 +786,81 @@ W09.6 is the orchestrator's own, on the ROM machine.
       `tune_revisions.yaml` `image_sha256` (`5587f7e1…`). `revision_match`
       against the tracked registry returns `matched`, and so does the
       library's own match after an `.OsirisROM` upload.
+      - **Re-run on fuel-mv-2 (E08.11), 2026-10-16: the evidence below is
+        fuel-mv-1's, and the editor's Monte Carlo now refuses most of it.**
+        The simulator's plant moved from fuel-mv-1 (constant working VE 0.7)
+        to fuel-mv-2 (frozen VE(rpm) fit, `sim_kit.yaml`), and `rom_editor.py`
+        follows it (`load_sim_kit`). The file's `real` fixture now takes the
+        GUI's kit (`load_sim_kit(PROFILE).kit`), and its `_grid_design` calls
+        pass that plant.
+        - `-n0 -m slow`: **4 passed, 1 failed, 6 errors.** All 7 are one
+          refusal in E08.11's `sim_montecarlo._refuse_manifold_refusal`:
+          `manifold_refusal_varies_by_draw`. The form grid refuses at point
+          12 (800 rpm, 92.9 % fill) at draw 0, and the 3-point WOT grid at
+          point 2 (98.2 % fill) at draw 5. See "Blocker (E08.11)" below. The
+          strict xfail is among the errors: it now carries
+          `raises=AssertionError`. Before that, the refusal in its fixture
+          read as "xfailed", a pass for the wrong reason.
+        - Passing: the form-edges test (now also pinning
+          `placement == {placed: 210, outside_ve_fit: 14}`), E07.6's own
+          points (unchanged), the split-out plant test
+          `test_no_grid_point_reaches_e076s_wot_bfs` (flipped, below), and
+          the route (its 2 draws happen not to reach the refusal at seed
+          20261015; 1, 4, 8, 20 and 200 draws all refuse).
+        - **Diagnostic only, not evidence:** a scratch copy with the per-draw
+          backstop stubbed out passes the negative control, K +5 %, the Fuel
+          Comp region, `run_job` + pickle and the route with every assertion
+          unchanged (except the 210-point count). The editor-equivalence
+          claims are therefore plant-independent so far. The WOT cases then
+          hit the next guard, `support_varies_by_draw` (λ NaN at a draw), so
+          the stub proves nothing about them.
+      - **RESOLVED 2026-10-16 by the E08.11 rework (MAP from the engine's total air, plus
+        bracket-safe placement; the operator chose (a)+(b)).** Verified on the real image: the
+        form grid places 201 of 224 points (`outside_ve_fit` 14, `manifold_above_ambient_in_bracket`
+        9: the 800 rpm cells from 57.14 % fill up, and 1,200 and 1,600 rpm at 98.21 %; diffed
+        here against the full grid, not taken from the E08 report) and
+        `tests/test_rom_editor_private_rom.py` is 10 passed, 1 strict xfail. The text below is the
+        record of the finding as it stood before the rework.
+      - **Blocker (E08.11, `src/analysis/sim_montecarlo.py`, not this
+        file's to fix).** A grid design solves MAF so that MAP = fill × baro at
+        the plant's working values. A draw then recomputes MAP from that
+        frozen MAF ("a run that draws VE moves MAP and lambda at a point,
+        never its MAF or BFS", the design's own assumption line). Two drawn
+        parameters push MAP above ambient, and the backstop then refuses the
+        whole run:
+        - `bank_air_split` (bracket 0.48–0.52) scales a bank's charge by
+          split × 2. It enters MAP in `fuel_plant.predict`, so any point above
+          ~96.2 % fill refuses at a split above 0.5 / fill. The form's top fill
+          cell (98.2 %) is above that threshold.
+        - The VE floor (bracket 0.4–1.0) applies below 2,000 rpm. A floor
+          drawn at f scales MAP by 0.7 / f, so at 800 rpm any fill above
+          ~57 % can refuse.
+
+        E08.11's expectation was that it "never fires, because drawing the
+        floor at idle cannot reach ambient". That was checked at idle only.
+        The default form grid has a 98.2 % column and an 800 rpm row, so on
+        fuel-mv-2 **the page's default Simulate refuses**, at the default
+        draws and at most others.
       - **The grid the form suggests is not 16 × 16 on this image.** Fuel
         Comp's fill axis is raw 16..255, which decodes to 7.14–113.84 %.
         `edgesFromBreakpoints` therefore ends at 117.19 %, and the design
         refuses it as `load_outside_model`. After "Trim load edges to 0-100 %",
         the edges are rpm 200…6,600 step 400 × load 3.571429…96.42857, 100.
-        That is 16 × 14 = **224 points**. This is
+        That is 16 × 14 = **224 cells**. On fuel-mv-2 the design places 210 of
+        them: the 400 rpm row is below the VE fit's 500 rpm and is counted
+        `outside_ve_fit` (14). fuel-mv-1 placed all 224. This is
         `test_the_form_suggests_these_edges_and_only_the_trimmed_grid_can_run`,
         a Python port of `suggestEdges`/`trimLoadEdges` checked against those
         literal numbers. Every value is stated: baro 81, IAT 25, coolant 88,
         battery 14, rail 350, throttle 20, pedal flag 0, all learned values 0,
         seed 20261015, 4 draws.
+      - *Cases 1–4 and the GUI path below were measured on fuel-mv-1. On
+        fuel-mv-2 they refuse (Blocker above); the plant-bound numbers here
+        are mv-1's until the blocker is resolved and they are re-run.*
       - **1. Negative control** (`_simulate`, base bytes as the candidate):
         outcome `identical`, every reach `no_change`, 224/224 cells visited.
+        The test asserts every placed point is visited, which is 210 on
+        fuel-mv-2.
         No output in any visited cell is `changed` or `partly_supported`, and
         every computed delta is 0. Every pair is equal on both sides. 146
         cells are closed loop and 78 open loop. Unsupported outputs name only
@@ -714,18 +904,36 @@ W09.6 is the orchestrator's own, on the ROM machine.
           `rom_editor._template` fails twice: on the learned-state assertion,
           and, with that assertion removed, on the `run_paired` pulse
           comparison.
-        - Measured: BFS 24,636/24,820, 27,296/27,496 and 29,080; pulse
-          +0.23, +0.26 and +0.28 ms; λ p50 −2.423, −2.455 and −2.486 %.
-      - **Finding (strict `xfail`, assertion kept literal):** E07.6's written
-        WOT figures do not reproduce at the grid's WOT point. The pulse and λ
-        miss for different reasons.
+        - Measured on fuel-mv-1: BFS 24,636/24,820, 27,296/27,496 and
+          29,080; pulse +0.23, +0.26 and +0.28 ms; λ p50 −2.423, −2.455 and
+          −2.486 %.
+        - On fuel-mv-2 the same three points, through `run_paired` at the
+          working values (central; the 200-draw run refuses, Blocker above):
+          MAF 116.18, 125.87 and 133.13 g/s; BFS 31,872/32,112,
+          35,308/35,568 and 37,620; pulse +0.31, +0.34 and +0.37 ms; λ
+          −2.490/−2.472, −2.446/−2.429 and −2.488 % per fill byte.
+      - **Finding (strict `xfail`, assertion kept literal; re-run on
+        fuel-mv-2 2026-10-16, still not reproduced):** E07.6's written WOT
+        figures do not reproduce at the grid's WOT point. The pulse and λ miss
+        for different reasons. On fuel-mv-2 the strict xfail cannot run its
+        Monte Carlo (it errors on `manifold_refusal_varies_by_draw`), so its
+        verdict below comes from the central `run_paired` figures, not from
+        p05/p50/p95. The marker stays strict, now with
+        `raises=AssertionError`, and its reason carries the fuel-mv-2
+        numbers.
         - **What the figures are.** E07.6 stated them on its *synthetic*
           image: flat Fuel Comp 128, every slot-1 Target AFR cell +4, pedal
           flag 0, BFS stated at 42,000. E07.6's own test asserts only their
           signs. The "−2.52…−2.49 %" beside them is that run's one-point
           spread over the plant's assumptions, not a tolerance.
-        - **At the grid's top fill cell** (98.2 %, BFS 29,080): pulse
-          +0.28 ms; λ p05/p50/p95 −2.507/−2.486/−2.468 %.
+        - **At the grid's top fill cell** (98.2 %, 4,800 rpm):
+          - fuel-mv-2: MAF 133.13 g/s, BFS 37,620, pulse +0.37 ms, λ
+            −2.488 % (−2.505…−2.472 over the assumptions).
+          - fuel-mv-1: BFS 29,080, pulse +0.28 ms, λ p05/p50/p95
+            −2.507/−2.486/−2.468 %.
+          - On either plant the pulse misses +0.41 ms and the λ range misses
+            −2.52…−2.49. λ rounds to −2.5 % on both (fuel-mv-1's p50,
+            fuel-mv-2's central value).
         - **The pulse is a BFS/airflow condition.** The pulse step is
           BFS-proportional. E07.6's own point (4,800 rpm, 150 g/s, MAP 79,
           fill byte 200, forced-column flag set) on this image gives BFS
@@ -742,23 +950,49 @@ W09.6 is the orchestrator's own, on the ROM machine.
             quantum as MAF moves by 0.01 g/s.
           - These are pinned by
             `test_at_e076s_own_points_on_this_image_the_pulse_holds_and_the_lambda_range_does_not`
-            (hand-built scenario through `run_paired`).
-        - **Why no grid reaches ~41.8k BFS here.** The cause is the plant
-          version's volumetric efficiency, not the grid's structure.
-          - A grid takes fill as MAP/baro and solves MAF through the sim kit's
-            plant, `fuel-mv-1` (`speed_density_capped`). Its VE is the working
-            assumption 0.7 (`data/nissan-xterra-2008/fuel_plant.yaml`
-            `manifold_pressure`, `requires_measurement`, bracket 0.4–1.0).
-          - That gives ~103 g/s at the grid's 100 % fill (102.9 g/s at MAP
-            79.6 kPa, 4,800 rpm, baro 81).
-          - fuel-mv-3's identified VE at 4,000–5,000 rpm is 0.9055
-            (`fuel_plant_mv3.yaml` `ve_curve`), which would give ~133 g/s.
-          - `test_no_grid_point_reaches_e076s_wot_bfs_or_the_wot_column_by_x`
-            asserts that the plant is fuel-mv-1, that load edges
-            [99.9, 100] at 4,800 rpm keep MAF < 110 g/s, and that BFS stays
-            < 41,768.
+            (hand-built scenario through `run_paired`). The figures are
+            identical on fuel-mv-1 and fuel-mv-2, because MAP is stated and no
+            VE is read. That test now takes the candidate from a
+            `wot_candidate` fixture rather than the Monte Carlo run, so it
+            runs on fuel-mv-2.
+        - **Why no grid reaches ~41.8k BFS here (rewritten for fuel-mv-2).**
+          On fuel-mv-1 the cause was the plant's working-assumption VE 0.7
+          (~103 g/s at full fill). On fuel-mv-2 the VE is the identified fit,
+          and the grid still falls short. The cause is now E07.6's point
+          itself.
+          - The grid's 99.95 % fill (load edges [99.9, 100], 4,800 rpm, baro
+            81, IAT 25) solves to 135.48 g/s at MAP 80.96 kPa on fuel-mv-2
+            (fuel-mv-1: 104.73 g/s). That gives BFS 38,284 (fuel-mv-1:
+            29,596) and pulse +0.37 ms.
+          - E07.6's 150 g/s at MAP 79 kPa and 4,800 rpm needs VE ≈ 1.027
+            against the fit's 0.905535 for 4,000–5,000 rpm. On fuel-mv-2,
+            150 g/s there is above ambient (`manifold_above_ambient`; MAP
+            ≈ 89.6 kPa at baro 81).
+          - The truck agrees with the grid, not with E07.6's point. Its WOT
+            BFS at 4,300–5,300 rpm and fill byte ≥ 195 is 30,690–37,008
+            (E08.11 accept 1, 55 pairs). So +0.41 ms is a synthetic-image
+            figure at an airflow this engine does not reach at baro 81.
+          - `test_no_grid_point_reaches_e076s_wot_bfs` (split out of the old
+            `…_or_the_wot_column_by_x`) runs through the editor's own design
+            and `run_paired`, not the Monte Carlo: a point's MAF and BFS do not
+            depend on a draw. It asserts:
+            - plant fuel-mv-2 (`speed_density_refusing`);
+            - 150 g/s refused `manifold_above_ambient`;
+            - fill bytes 223–224;
+            - MAF 135.4807 g/s (±1e-4);
+            - BFS exactly {38,284}, and below 41,768.
+          - **Mutation checks** (scratch copies; each fails):
+            - kit pinned to fuel-mv-1: the placement pin
+              (`{placed: 224}`) and the plant assertion fail. With the plant
+              assertions removed, the MAF pin fails (104.7298) and so does the
+              BFS pin ({29,596}).
+            - every VE band × 0.99: the MAF pin fails (134.1259).
+            - E07.6's MAF 130 instead of 150: the above-ambient assertion
+              fails (`['']`).
         - **With the pedal flag 0, the WOT column is reached by no point of
-          the form's grid.** The visited X columns are 0–2, and Δφ = 0
+          the form's grid** (now its own test,
+          `test_the_wot_column_is_reached_by_x_at_no_point_of_the_form_grid`;
+          on fuel-mv-2 it fails on the Blocker, not on an assertion). The visited X columns are 0–2, and Δφ = 0
           wherever it is computed. An operator who edits the WOT column and
           states pedal flag 0 sees nothing anywhere.
       - **4. Fuel Comp region** (`fuel_comp_light_load.yaml`; `spec_sha256`
@@ -784,7 +1018,9 @@ W09.6 is the orchestrator's own, on the ROM machine.
         `.OsirisROM` goes through `POST /control/rom/library` (plain sha back,
         `matched`), then `POST …/simulate` through `run_off_loop`
         (in-process executor, the child's own `load_kit`). The response is
-        200 and equals `simulate_edits` through JSON, 224 points.
+        200 and equals `simulate_edits` through JSON, 224 points on
+        fuel-mv-1. On fuel-mv-2 it is 210 points (`FORM_POINTS`), and it
+        passes at 2 draws only because those draws miss the refusal.
       - **Mutation checks** (scratch copies outside the tree; each fails):
         - dropping the upper interpolation corner (case 4: an unreached
           pair's BFS moves);
@@ -793,7 +1029,31 @@ W09.6 is the orchestrator's own, on the ROM machine.
         - `rom_editor._template` forced to LTFT 0 (case 3: fails on the
           learned-state assertion, and without it on the hand-built
           `run_paired` pulse comparison at (0, byte 191)).
-      - **Measured on the laptop** (offline, `.venv/bin/python -I
+      - *Re-measured on fuel-mv-2 after the E08.11 rework (2026-10-16), default form
+        grid, 201 placed points, light-load Fuel Comp edit, seed 20261015, through the real
+        child (`measure.py`, `run_off_loop`):* 200 draws 7.8 s, child peak RSS 189 MiB,
+        VmPeak 868 MiB; 1,000 draws 13.1 s (two runs: 13.27 and 12.99 s), 265 MiB,
+        947 MiB. Compact response 686,308 B (200 draws) and 690,450 B (1,000 draws);
+        `detail="cells"` 613,280 / 617,422 B. The 1-minute load was 2.9-4.7 on 12 CPUs
+        (the E08 session was running tests), against 0.6-1.0 for the fuel-mv-1 table below,
+        so wall times are NOT comparable with it and are an upper bound for a quiet
+        machine; the RSS fits the table's ~180 MiB + ~0.5 KB per point x draw. The
+        cost model in `romSimSize.ts` (fuel-mv-1, quiet) predicts 4.2 s and 7.9 s for
+        these two points, so it underestimates by about 1.7x here; the page's per-host
+        calibration (W09.9) absorbs that, and the reference constants are left as
+        fuel-mv-1 history until a quiet-machine re-measure.
+      - *Earlier (superseded by the bullet above): not re-measured on fuel-mv-2 (2026-10-16).*
+        The default form grid refused at 200 and 1,000 draws (the Blocker, fixed by the
+        E08.11 rework), so there was no default-grid timing to take. As a proxy, a grid that runs (rpm
+        2,000–6,400 × fill 3.6–89.3 %, 132 points) was timed at 12.2 s for
+        200 draws and 16.3 s for 1,000. Child peak RSS was 180 and 232 MiB.
+        The 1-minute load was 15.7–16.4 on 12 CPUs (another session's work),
+        so these times are not comparable with the table's, taken at load
+        0.6–1.0. The RSS fits the table's ~180 MiB + ~0.5 KB per point × draw.
+        `romSimSize.ts` `LAPTOP_TIMINGS` / `COST_FIT` are unchanged: they
+        remain fuel-mv-1's measurements, and a re-measure belongs after the
+        blocker, on a quiet machine.
+      - **Measured on the laptop, fuel-mv-1** (offline, `.venv/bin/python -I
         <scratchpad>/measure.py child|inproc <grid> <draws>`). The edit is
         the light-load spec above with the environment of case 1 and seed
         20261015.
@@ -808,7 +1068,7 @@ W09.6 is the orchestrator's own, on the ROM machine.
           WSL2 kernel 5.15.167.4, Python 3.12.3. 1-min load 0.6–1.0
           throughout.
 
-        | grid | points | draws | wall (child, incl. spawn) | child peak RSS | VmPeak (inproc) | response JSON | `visited_only` |
+        | grid | points | draws | wall (child, incl. spawn) | child peak RSS | VmPeak (inproc) | response JSON | `detail="cells"` (was `visited_only`) |
         |---|---|---|---|---|---|---|---|
         | form 16 × 14 | 224 | 200 | 4.5 s | 188 MiB | 871 MiB | 705,543 B | 663,116 B |
         | form 16 × 14 | 224 | 1,000 | 8.5 s | 277 MiB | 961 MiB | 710,118 B | 667,691 B |
@@ -823,8 +1083,9 @@ W09.6 is the orchestrator's own, on the ROM machine.
           imports.
         - **Response size:** about 0.7 MB whatever the draws (the 256 Fuel
           Comp cells, 224 of them visited, even for 256 or 1,024 points).
-          W09.5's `visited_only` filter saves only ~6 % on a full grid; its
-          "< 60 KB" holds for sparse grids only.
+          W09.5's visited-cells cut (now `detail="cells"`) saves only ~6 % on a
+          full grid; its "< 60 KB" holds for sparse grids only (see the
+          W09.5 follow-up for `detail="summary"`).
         - **Limits:** `DIGEST_TIMEOUT_SECONDS` = 900 s; the child's
           `RLIMIT_AS` is 50 % of RAM clamped to 1,024–4,096 MiB.
         - **Pi estimate (a guess, not measured):** if the Pi is 3–6× slower,
@@ -837,7 +1098,9 @@ W09.6 is the orchestrator's own, on the ROM machine.
           numbers.
   - Tick E08.8 in the E08 doc with a pointer here.
 
-- [ ] **W09.7 — Later, named so they are not implied:** persisted runs under
+- [ ] **W09.7 — Later, named so they are not implied** *(timing-trim editing
+  is now E09.7, injector constants E09.9, the MAF curve E09.8, and the
+  per-lever "what blocks a number" preview E09.14)*: persisted runs under
   `/data/canary/sim/<run>/` (declared in `tests/test_state_dir.py`) with a
   run list. Drive designs from pre-change sessions (E08.2 `build_drive_design`)
   as a second point source. Slots 2–5 with a stated active slot. Timing-trim
@@ -845,17 +1108,30 @@ W09.6 is the orchestrator's own, on the ROM machine.
   E08.6 HTML report as a download.
   Found by the independent verifier on the real ZS44A-20261004 image
   (2026-10-15), to be done in the simulator, not the page:
-  - Name the working-assumption VE in the simulation caveats/assumptions
-    (fuel-mv-1 ve 0.7, `requires_measurement`, bracket 0.4-1.0; fuel-mv-3
-    identifies 0.9055 at 4,000-5,000 rpm). Today only
-    `plant:manifold_pressure_unmeasured` appears, and the grid's 100 % fill
-    sits at ~103 g/s (BFS ~29k) against the truck's ~38-42k, so pulse and BFS
-    deltas at the grid top are understated by about 30 % (relative lambda is
-    roughly unaffected). Lives in `sim_design` / the plant, E08 domain.
-  - `run_paired` applies the target-lookup gate reason to `base_fuel_schedule`
-    (`paired_scenarios.py` ~1017) although BFS is computed before the lookup:
-    an over-refusal, cautious not false.
-    `tests/test_rom_editor_private_rom.py` marks it as a known over-refusal.
+  - ~~Name the working-assumption VE in the simulation caveats/assumptions.~~
+    **Moot since E08.11 (2026-10-15), checked 2026-10-16.** The
+    simulator's plant is fuel-mv-2, not fuel-mv-1's working VE 0.7.
+    - Its VE(rpm) is the frozen fit of `na-stock-2026-10-08.mv2`: 0.888–0.906
+      above 2,000 rpm, held, never drawn. The run's assumptions name it
+      (`held_ve_fit`). Only the floor below 2,000 rpm remains a working
+      assumption, drawn in [0.4, 1.0].
+    - The grid's top fill cell at 4,800 rpm now sits at 133.13 g/s, BFS
+      37,620 (99.95 %: 135.48 g/s, 38,284). That is against the truck's
+      30,690–37,008 at WOT, and E08.11 matched 43 of 43 WOT pairs inside
+      that band.
+    - The "understated by about 30 %" was fuel-mv-1's. E07.6's 41.8k BFS
+      point is itself above what the engine breathes at baro 81 (W09.6
+      Finding).
+  - ~~`run_paired` applies the target-lookup gate reason to
+    `base_fuel_schedule`.~~ Fixed by E08.10 (`ReasonScope`): BFS is
+    `unchanged` in the gate-ambiguous cell, and the negative-control test
+    asserts it.
+  - **New, 2026-10-16 (E08.11's, in `sim_montecarlo` / `sim_design`):** on
+    fuel-mv-2 the editor's default form grid refuses with
+    `manifold_refusal_varies_by_draw`. The `bank_air_split` draw pushes MAP
+    above ambient at the 98.2 % fill column, and the VE-floor draw does the
+    same at 800 rpm above ~57 % fill. See W09.6 "Blocker (E08.11)". This is
+    a decision for E08, not the page.
 
 - [x] **W09.8 — "Open ROM…" on the ROM Editor page.** Requested 2026-10-15
   by the operator via the E08 desk-launcher session: "we shouldn't have to run
@@ -1049,6 +1325,298 @@ W09.6 is the orchestrator's own, on the ROM machine.
     `SimResults.test.tsx` +3 (hint, warning for flag 0 and 2, not for 1 / 3 /
     empty / 1.5, not for a middle column, Fuel Comp or K edits; caveat likewise;
     the 21-field request test unchanged). No e2e assertion added.
+
+- [x] **W09.10 — The preview names the lever and what blocks a number
+  (E09.14b, 2026-10-16).** The page half of
+  [E09](E09-engine-twin-runner-and-levers.md) item E09.14; the classifier is
+  E09.14a's `rom_levers.classify_edit` (`0631530b`). Neither the route nor the
+  page words a string of it.
+  - **Backend.** `rom_editor.preview_edits` returns a new key `levers` =
+    `classify_edit(...).to_dict()` (the page reads `levers["messages"]`; no
+    second `lever_messages` key). It builds the call the way `tools/rom_sim.py
+    inspect` does: `compare_roms` under `contract=kit.contract, mode=MODE`,
+    `qualification=plant_qualification(kit.plant)`, `regime` unstated (so the
+    closed-loop blocker is listed), `cells=provenance["cells"]`. The CLI exposes
+    no shared helper (its `_compare` / `cmd_inspect` are private and
+    `tools/` is the simulator session's), so preview builds the same call; the
+    comparison is one private `_effects(base, candidate, kit)` that `_simulate`
+    now also uses (the run's `rom_report`, unchanged). The kit is the one the
+    CLI and `simulate_edits` load, `load_sim_kit(profile_dir).kit` (the plant
+    `sim_kit.yaml` declares, not the contract's default: a test pins it);
+    `kit=` still replaces it. `_edit_context` is gone (preview needs the
+    contract and plant, so it loads the whole kit: 0.42 s against 0.23 s for
+    the narrower load; a real-image Fuel Comp preview is 0.4 s and `levers` is
+    7.9 KB of a 21 KB body). A refusal from `classify_edit` is a `ValueError`
+    and surfaces (a candidate that resolved cannot be refused by the
+    comparison); `simulate_edits` is unchanged. Preview carries no image bytes
+    (asserted). `docs/headless-api.md` (route row, 200 body and a `levers`
+    paragraph), `docs/mcp-server.md`, and the `preview_rom_edit` docstring say so;
+    its snapshot line is regenerated (that one description only; the
+    title/tires reorder hunk reverted).
+  - **The exact strings.** Synthetic image and the real ZS44A-20261004 give the
+    same lines for the same edit.
+    Fuel Comp (the light-load region, 20 cells): `Fuel Comp -> target_equiv_ratio:
+    a number can be given (for points that state only the fill byte)`, the same
+    for `base_fuel_schedule_word`, and for each of `injector_pulse_ms`,
+    `fuel_trim_total_pct`, `delivered_lambda`, `fuel_per_event_g`: `Fuel Comp ->
+    <output>: plant not qualified: baseline na-stock-2026-10-08.mv2 has no
+    held-out recording (held_out_pending); closed loop: trim authority
+    undecoded`, plus `ignition_timing` / `ignition_trim_selected` lines ending
+    `no torque plant`. Timing trim A: `Timing trim A -> ignition_trim_selected: no
+    torque plant`. A changed byte at 0xE27E: `unmapped bytes in Calibration
+    0xE27E: not mapped (outside rom_map.yaml)` and `... -> <output>: not mapped`
+    for all eight outputs. The page cannot make the last two (it edits only
+    Fuel Targets / Fuel Comp / K, Map 1; the page refuses the trim as
+    `table_not_editable`), so those two are the CLI half, as E09.14 allows.
+  - **Python tests.** `tests/test_rom_levers_parity.py` (new, 12 tests, ~22 s):
+    for four edits the page can send (Fuel Comp, K, Fuel Targets, Fuel Comp + K)
+    the spec the page previewed is run through `rom_sim.main(["inspect", ...])`
+    and `levers` is **equal whole** (messages included) to the preview's, on the
+    same candidate sha (the CLI gets the page's spec with the base named by file
+    and hash: it resolves a revision base only from real ROM directories); the
+    Fuel Comp accept strings above; the page refuses a trim by name while
+    `inspect` says `no torque plant`, and says `not mapped` for 0xE27E; **the
+    test bites**: wrapping `classify_edit` to reword one string on the page side,
+    on the CLI side, or to drop a message each fails the comparison; a preview
+    qualified on the contract's plant (`load_kit`) instead of the simulator's
+    fails it; no front-end source (`rom_editor.py`, every `romEditor` / `romSim`
+    `.ts(x)` outside tests) carries one of the classifier's phrases. Mutation
+    checked on `rom_editor.py` itself (restored after each): appending a
+    hand-written line failed 7 of 8 selected tests, rewording `no torque plant`
+    6, passing `cells=None` 5, qualifying `load_kit(...).plant` 7.
+    `tests/test_rom_editor.py` +5 (Fuel Comp, K and Fuel Targets name their
+    lever and equal `classify_edit` called directly on the same comparison, JSON
+    clean and no bytes; a two-table edit through `run_job("rom_preview")` names
+    both levers and pickles; a profile with no `sim_kit.yaml` is refused a
+    preview as `simulation` / `sim_kit_undeclared`, a 400 `edit_refused`, where it
+    used to preview unclassified: the plant is declared, never defaulted), `tests/test_rom_editor_api.py` (the 200 body has
+    `levers`), `tests/test_rom_editor_private_rom.py` +1 (the real image:
+    Fuel Comp preview strings above, and the CLI's `inspect` on E08.1's fixture
+    spec resolved from the operator's ROM directory gives an equal `levers`).
+  - **Page.** `PreviewResult.tsx` draws a "What this edit can and cannot show"
+    region right under the summary line, above the after tables and above the
+    Simulate panel: `levers.messages` as a list, verbatim and in order, nothing
+    reworded, grouped, coloured or tabulated. It is absent only when `messages`
+    is empty, which the classifier never sends (its floor is "the edit reaches no
+    output"), so an absent block is not an all-clear. `previewRomEdits` now
+    requires `levers` (`requireFields`): a daemon too old to send it shows the
+    existing "dashboard and daemon may be different versions" error rather than
+    an unclassified preview. `types/romEditor.ts` types it (`RomLevers`,
+    `RomLeverEntry`, `RomLeverOutput`, `RomLeverBlocker`). Vitest
+    (`RomEditorPage.test.tsx` 37 tests, 6 added): messages equal the fixture's,
+    in order, one list item each; a Fuel Comp payload shows `a number can be
+    given (...)` and `plant not qualified: ...; closed loop: trim authority
+    undecoded`; a timing-trim payload shows `Timing trim A ->
+    ignition_trim_selected: no torque plant` and a MAF payload `0xE27E: not
+    mapped`; odd strings (markup, double spaces) come back unaltered; empty
+    `messages` draws no block and the rest of the preview is unchanged; a
+    preview without `levers` is the version error; the block precedes the Simulate
+    region in the document, with the form below it; no image download or link
+    remains (existing assertion, rerun with the block drawn). Four mutations of
+    `PreviewResult.tsx` fail them (reversed order: 3 tests, a reworded string: 2,
+    block drawn when empty: 1, only the first three lines: 2). One e2e assertion
+    in `romEditor.spec.ts` (the lines `toHaveText` the fixture's, the closed-loop
+    line present, the block above the Simulate region): `pnpm exec playwright
+    test e2e/romEditor.spec.ts --project=chromium`: 6 passed.
+  - **Fixtures are real classifier output, not invented.**
+    `src/test/romLevers.fixture.json` holds the three accept cases (`fuel_comp`
+    from the page's preview, `timing_trim` and `maf_curve` from `inspect`), read by
+    `romLeverFixtures.ts` for the vitest page tests and the e2e stub
+    (`previewFor`). `test_the_front_end_fixture_is_real_classifier_output`
+    regenerates the three payloads from the code and checks every key at every
+    level against the pydantic models (`CANARY_UPDATE_LEVERS_FIXTURE=1` rewrites
+    the file; then `pnpm exec prettier --write` it, since `format:check` covers
+    it); values are not compared (a new manifest changes the strings, and the page
+    renders whatever it is given). `romLeverFixtures.test.ts` checks the same files
+    against the TypeScript interfaces through `satisfies Record<keyof T, true>`
+    key lists, so the Python and TypeScript types cannot drift apart unseen.
+  - **Gate.** `ruff check .`, `ruff format --check .`, `mypy src` clean; pytest
+    over `test_rom_editor*`, `test_mcp_rom_editor`, `test_mcp_tool_snapshot`,
+    `test_layering`, `test_rom_sim_cli`, `test_rom_levers*`,
+    `test_route_table_snapshot`: 227 passed; `pytest -n0 -m slow
+    tests/test_rom_editor_private_rom.py`: 11 passed, 1 xfailed (the existing
+    strict xfail); `pnpm typecheck`, `pnpm lint` (no suppression change),
+    `pnpm format:check` clean; vitest `--no-file-parallelism` over
+    `RomEditorPage`, `RomEditorSimulate`, `SimResults`, `romEditor.test.ts` and
+    `romLeverFixtures.test.ts` 148 passed, and `vitest related` over the touched
+    sources 22 files / 320 tests.
+  - **Not done, on purpose.** Simulate is still offered without a Preview of the
+    current edits (the form needs only the edits), so an operator can run it
+    without first seeing the block; the result's own caveats carry the same
+    limits afterwards. Making the form wait for a preview would change W09.4's
+    flow and is an operator call. The timing trim and the MAF curve cannot be
+    edited through the page (W09.7 owns editable timing trims); the MAF case is
+    the CLI's.
+
+- [x] **W09.11 — "Fill typical values" on the Simulate form (2026-10-16).**
+  Operator request, verbatim: "in the dashboard, under ROM Editor where the
+  simulation is, can there be an option to fill all default values", then "for
+  example Baro, IAT, coolant, battery, throttle, pedal flag, etc.". Consistent
+  with "Nothing is defaulted" only because it is an explicit click that puts
+  visible, sourced values into the form (see the note under that decision); the
+  21-field `SimRequest` is unchanged.
+  - **The values are vehicle data, each with a required source.**
+    `data/nissan-xterra-2008/sim_typical_values.yaml` (new; `sim_kit.yaml` is the
+    simulator session's and untouched). `rom_editor.typical_values(profile_dir)`
+    loads it (pydantic, `extra="forbid"`): a `values` entry is `{value, kind,
+    source}` with a required `kind` (`typical` or `placeholder`; a placeholder's
+    source must say it is one), a non-blank `source` and a strict number (a quoted `"81"` or a bare
+    `true` is refused; `rail_kpa` alone may be `"working_assumption"`; each value
+    is checked against its own `SimRequest` field, so `pedal_flag: 256` or `1.5`
+    is refused). Every one of the twelve fillable fields
+    (`rom_editor.TYPICAL_FIELDS`: the environment and the learned state) is
+    either a `values` entry or a `left_empty` entry with a required `reason`;
+    one that is neither cannot be loaded, and a file naming a field in
+    `NEVER_TYPICAL_FIELDS` (grid, candidate events, edges, draws, seed, label,
+    edits, load basis) or an unknown name (a typo) is refused. Refusals are
+    `SimulationRefusalError` by name: `typical_values_undeclared` (no file) and
+    `typical_values_invalid`.
+  - **Declared (value, source).** `baro_kpa` 81 and `iat_c` 25, `coolant_c` 88,
+    `battery_v` 14: E07.6's stated WOT point (`tests/test_paired_scenarios.py`
+    `WOT`) and W09.6's grid environment (`tests/test_rom_editor_private_rom.py`
+    `ENV`); baro's source adds that home is ~80 kPa and trips reach 63 kPa
+    (state your own for a trip). `rail_kpa` 350: the returnless rail's service
+    manual figure (`fuel_plant_mv2.yaml` `reference_delta_p`, EC-494/EC-499), the
+    same as E07.6 and W09.6. `throttle_pct` 20 and `pedal_flag` 0: W09.6's grid
+    environment (a part throttle, flag clear; E07.6's WOT and CRUISE points also
+    state 0; E07.6's 90 % throttle and W09.6's `E076_WOT_ENV` flag 1 are the WOT
+    case, a different experiment). `stft_pct` 0 and `ltft_pct` 2.34: E07.6's
+    `LEARNED` (W09.6 `E076_LEARNED`, E08.7 item 4), said to be a stated scenario
+    value, not a read of the truck. `evap_purge_area` 0: the simulator contract's
+    `conditional_rom_comparison` assumption "Purge off: purge scheduling is not
+    modelled" (`engine_sim_contract.yaml`), and E07.6's `LEARNED` states 0.
+  - **Placeholders, nothing left empty (operator decision 2026-10-16, option
+    b).** `throttle_closed_learned` 0 and `idle_air_learned` 0 are declared
+    `kind: placeholder`: E07.6 (`LEARNED`) and W09.6 (`LEARNED_ZERO`) pass 0.0,
+    and no source states a typical value (the contract calls the first a
+    per-truck learned closed throttle position, "Read from a key-on checkpoint",
+    and says of the second "not captured on 2026-10-04"). Their source text says
+    "PLACEHOLDER, not a measurement", that the paired run reads the number
+    nowhere, and to replace it with the truck's key-on checkpoint value when a
+    node starts reading it. So the Xterra leaves 0 of the twelve fields empty
+    (`left_empty: {}`), and Run needs only the grid, the candidate events and,
+    unless a preset filled them, the draws and the seed. `kind` is required, so a
+    placeholder is a declared kind, not a convention, and the page's tag comes
+    from it (`placeholder: <source>`, bold; `typical: <source>` otherwise).
+  - **Guard: it cannot go stale.** `tests/test_rom_editor.py`
+    `test_the_placeholders_are_the_two_learned_fields_no_code_reads` walks the
+    Python in `src/` (AST: attribute, string, keyword, name and import
+    mentions; a class's own field declaration is not one) for every field the
+    shipped file marks `placeholder`, and compares the mentions with an exact
+    allowlist of the plumbing: `paired_scenarios._LEARNED_FIELDS` (the contract
+    quantity to `LearnedState` field, 2 strings per name), `rom_editor`'s
+    `LearnedState(<name>=request.<name>)` (1 attribute, 1 keyword) and
+    `TYPICAL_FIELDS` (1 string). A new mention fails with "a node now reads a
+    placeholder: replace the typical value with a sourced one or require the
+    operator to state it"; an allowed mention that disappears fails too (stale
+    list), and so does an allowlist entry for a field that is no longer a
+    placeholder. A read by a computed name is invisible to any scan; the mapping's
+    strings are the only way these names reach a scenario's boundaries. Run on a
+    scratch copy of `src/` with `boundaries['idle_air_learned']` added to
+    `paired_steady.py`: `{('src/analysis/paired_steady.py', 'string',
+    'idle_air_learned'): 1}` is reported (and nothing on the copy as shipped).
+  - **Route.** `GET /control/rom/editor/typical-values` (control token; no sha,
+    no body): 200 `{profile, file, file_sha256, values: {field: {value, kind, source}},
+    left_empty: {field: {reason}}}`; 409 `{error: "typical_values_undeclared" |
+    "typical_values_invalid", message}`. `route_table_snapshot.json` has the entry (the
+    snapshot test passes: 6 tests); `docs/headless-api.md` has the table row and a
+    section.
+  - **Page.** `lib/romSimTypical.ts` (`TYPICAL_TARGETS`, `typicalFill`,
+    `typicalFailure`), `getRomTypicalValues(token)` in `api/workbench.ts` (only
+    that), `types/romEditor.ts`, `SimForm.tsx` (a "Typical values for this
+    vehicle" fieldset after the presets; a `token` prop, passed by
+    `RomEditorPage.tsx`). Pressing it fetches once and caches (a failure is not
+    cached), fills exactly the declared fields into the visible text fields, tags
+    each `<kind>: <source>`, `typical:` or `placeholder:` (the `data-typical` twin
+    of `data-remembered`: same warn styling, `border-warn` on the field; a
+    placeholder's tag is bold and carries `data-typical-kind="placeholder"`), drops a `remembered` mark it
+    replaces, and reports what it filled, which value of yours it replaced, what
+    it called a placeholder ("2 of them are placeholders, not measurements: ..."),
+    what it left empty with the file's reasons (none on the Xterra), and anything
+    it skipped (a value with
+    no source or kind, a non-number or one the form refuses, a field this dashboard
+    has no input for), then "Nothing else was touched: the grid, the candidate events,
+    the edges, the draws, the seed and the label stay as they were." When it fills
+    the pedal flag it adds one line saying what bit 0 does; the W09.9 WOT-column
+    warning still fires on the filled value (tested). Editing a filled field
+    clears only its tag. A 409/401/404/network failure fills nothing and shows
+    its reason by name ("This vehicle declares no typical values
+    (typical_values_undeclared)", "Not authorized", "Can't reach the daemon", ...);
+    the button stays enabled.
+  - **Decisions the brief left open.** (1) A click **overwrites only the fields
+    the vehicle declares and lists each value of yours it replaced** (a typed
+    `25.0` against a declared `25` is the same number and not listed); a field the
+    vehicle left empty keeps what you typed (tested). (2) The values arrive on the
+    click, not on mount, so the form's existing request count is unchanged and a
+    vehicle with none shows its reason after a press, not a missing button. (3) A
+    run's `saveRemembered` still remembers typical-filled values like any stated
+    value (they are what was run), and they come back marked "remembered", not
+    "typical". (4) The rail is filled as `stated` + 350, so the result does not
+    carry the working-assumption rail line; `working_assumption` is declarable.
+    (5) A placeholder replaces what you typed in its field like any other fill
+    (listed as "(replaced your 150)"), and stating the field yourself takes its
+    placeholder tag off.
+  - **Tests.** Python: `tests/test_rom_editor.py` +35 (the shipped file loads,
+    every value has a kind and a source, a placeholder's says so; each fillable
+    field is a value or a reasoned omission and a `SimRequest` field; a new
+    `SimRequest` field must be classified typical or never; the shipped values
+    plus the other fields validate as a `SimRequest`; each value, the two
+    placeholders included, equals the constant its source names (`WOT`, `LEARNED`,
+    `ENV` read by `ast`, the plant's `reference_delta_p`) and every file a source
+    cites exists; absent file refused by name; 24 invalid files each refused by
+    name: unsourced, empty, blank, typo, draws, grid, 256, 1.5, `0.0`, quoted,
+    bool, nan, `working_assumption` on baro, rail `stated`, neither declared nor
+    left empty, both, no reason, no kind, kind `measured`, a placeholder whose
+    source does not say so, extra key, schema 2, empty, not YAML; the front-end
+    fixture equals the loader's output; the guard above, the scan's own test (an
+    attribute, a dict key, `.get`, `getattr`, a bare name and a keyword are each
+    seen; a declaration, a docstring and a comment are not; `static` is not
+    walked), the guard biting on scratch copies of the two plumbing files (a read
+    in a new file, a read added to an allowlisted file, an allowed mention
+    removed), and the loader's kinds equal the page's two),
+    `tests/test_rom_editor_api.py` +4 (401, 200 equals the loader and writes
+    nothing, 409 undeclared, 409 invalid) and the wiring test's new path.
+    Vitest: `lib/romSimTypical.test.ts` 16 (the twelve targets equal the file's
+    declared fields and none is a never-filled one; exact fill with the two
+    placeholders marked, a vehicle that leaves two empty, rail both ways, replaced
+    vs same number, skipped by reason or for a missing or unknown kind, the
+    pedal-flag line, the headline and placeholder line, failures by reason),
+    `RomEditorSimulate.test.tsx` +21 (nothing fetched before the click; exactly
+    the declared fields, 13 tags: 11 `typical:` and 2 `placeholder:`, the
+    placeholder line and "(placeholder)" in the list, no left-empty list; a
+    vehicle that leaves fields empty names them with its reason and Run waits;
+    grid, events, edges, draws, seed and label untouched; a filled form with
+    grid/events unchosen still blocks Run and names only them; the Run request is
+    the 21 documented fields with the filled values; overwrite/replaced listing
+    incl. a placeholder's field; a left-empty field, the draws and the seed keep
+    yours; edit clears its tag, a placeholder's too; remembered taken over; WOT
+    warning still fires with flag 0 and the line says what it does; flag 1 quiets
+    it; unfillable and unsourced values named; off when Simulate is; five
+    failures and an unreachable daemon leave every field and radio as it was;
+    retry then cache). e2e: one block in `romEditor.spec.ts` (13 tags, the two
+    `placeholder:` tags, "2 of them are placeholders", nothing left empty, the
+    request carries the two zeros), the route mocked in
+    `e2e/fixtures/romEditorApi.ts`. The fixture
+    (`romTypicalValues.fixture.json`) was regenerated with
+    `CANARY_UPDATE_TYPICAL_FIXTURE=1` and prettier.
+  - **Mutation checks** (scratch copies, restored and diffed after each): the
+    page's `change()` no longer clears the tag: 1 test fails; `typicalFill` also
+    setting `draws`: 7 fail (4 lib, 3 page); `source` made optional in
+    `TypicalValue`: 2 fail (the unsourced file, the 409 invalid); the
+    never-typical check removed: 2 fail (draws, grid). For the placeholder work:
+    `typicalTag` always printing `typical:`: 2 fail (lib, page); the placeholder
+    "says so" validator removed: 1 fails; `kind` defaulting to `typical`: 1
+    fails (the no-kind file); a fake read of `idle_air_learned` added to a scratch
+    copy of `src/`: the guard reports exactly that site.
+  - **Gate.** `ruff check .`, `ruff format --check .`, `mypy src` clean;
+    `pytest -n 4` over `test_rom_editor`, `test_rom_editor_api`,
+    `test_mcp_rom_editor`, `test_route_table_snapshot`, `test_layering`,
+    `test_state_dir`: 200 passed; `pnpm typecheck`, `pnpm lint` (no suppression
+    change), `pnpm format:check` clean; `vitest run --no-file-parallelism` over
+    `romSim`, `romSimSize`, `romSimView`, `romEditor`, `romSimTypical`,
+    `RomEditorSimulate`, `SimResults`, `RomEditorPage`: 263 passed; `pnpm exec
+    playwright test e2e/romEditor.spec.ts --project=chromium`: 7 passed, one new.
+    The private-ROM file was not touched.
 
 ## Not in scope
 

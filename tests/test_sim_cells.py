@@ -24,7 +24,7 @@ import numpy as np
 import pytest
 from pydantic import ValidationError
 
-from src.analysis import paired_scenarios
+from src.analysis import twin_runner
 from src.analysis.paired_scenarios import OUTPUTS, SimKit, rpm_word, run_paired
 from src.analysis.paired_steady import TRIM_AUTHORITY_UNDECODED
 from src.analysis.rom_effects import (
@@ -899,13 +899,15 @@ def test_a_points_row_is_the_word_the_paired_run_read(
     which is row 4's tie edge."""
     kit, image = kit_and_image
     seen: list[int] = []
-    real = paired_scenarios.steady_bfs
+    # The steady-BFS call is the twin runner's ECU stage (E09.2c), which
+    # run_paired calls on its stated points.
+    real = twin_runner.steady_bfs
 
     def spy(*args: Any, **kw: Any) -> Any:
         seen.append(int(kw["rpm_word"]))
         return real(*args, **kw)
 
-    monkeypatch.setattr(paired_scenarios, "steady_bfs", spy)
+    monkeypatch.setattr(twin_runner, "steady_bfs", spy)
     point = dataclasses.replace(CRUISE, rpm=rpm)
     run_paired(kit, _scenario(kit, image, bytes(image), point), image, bytes(image))
     assert seen and set(seen) == {rpm_word(rpm, kit.contract)}

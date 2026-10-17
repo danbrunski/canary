@@ -673,6 +673,11 @@ modes:
   # ------------------------------------------- conditional ROM comparison (first slice)
   - id: conditional_rom_comparison
     kind: conditional_rom_comparison
+    # E08.11 (operator, 2026-10-15): the ROM-edit simulator runs its own
+    # declared plant (sim_kit.yaml: fuel-mv-2, the identified VE(rpm)); E07.4's
+    # case and E07.6's paired runs keep the contract's fuel-mv-1. Any other
+    # version is refused (plant_version_mismatch).
+    plant_versions: [fuel-mv-1, fuel-mv-2]
     claim: >-
       Tuning effect conditional on fixed operating conditions: the same
       prescribed rpm, airflow, throttle, thermal state and initial state for
@@ -917,7 +922,7 @@ subsystems:
       - quantity: manifold_pressure
         owner: manifold_breathing
         plant_versions: [fuel-mv-2]
-        modes: [plant_replay]
+        modes: [plant_replay, conditional_rom_comparison]
         model: >-
           fuel_plant.manifold_pressure_ve_curve: steady speed density from MAF,
           rpm and IAT at VE(rpm), the frozen baseline's ve_curve run at

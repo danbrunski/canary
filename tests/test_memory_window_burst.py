@@ -34,11 +34,12 @@ from src.collection.obd_scheduler import (
     CanObdSpec,
     DidSessionSpec,
     did_alias_table,
+    preview_polling_plan,
     profile_did_union,
 )
 from src.config import CanBusConfig, CollectionConfig
 from src.decode.dids import MEMORY_SOURCE, select_memory_channels
-from tests.capture_round_fakes import FakeClock, ScriptedEcu, install_clock
+from tests.capture_round_fakes import FakeClock, ScriptedEcu, install_clock, support_bits
 
 #: ``poll_rate_hz`` 1 derives the 8 req/s the Pi serves at.
 BUDGET_RPS = 8.0
@@ -385,6 +386,30 @@ XTERRA_CATALOG = (
 )
 
 
+#: The 23 Mode 06 MIDs the Xterra ECM answers, from walking its support
+#: groups 0x00-0xA0 (data/analyses/2026-07-28T0330-ecu-address-space.md
+#: "Mode 06"; the C06.12 hardware walk found the same 23 in 6 probes,
+#: docs/diagnostic-discovery.md). Each answers one test record (TID, UAS,
+#: value, min, max), the shape `test_default_profile_core_rate` uses.
+XTERRA_MODE06_MIDS = (
+    0x01, 0x02, 0x05, 0x06, 0x21, 0x22, 0x39, 0x3B, 0x3C, 0x3D, 0x41, 0x42,
+    0x45, 0x46, 0x81, 0x82, 0xA1, 0xA2, 0xA3, 0xA4, 0xA5, 0xA6, 0xA7,
+)  # fmt: skip
+XTERRA_MODE06: dict[str, Any] = {
+    "mode06_support": {
+        group: support_bits(
+            *(mid for mid in XTERRA_MODE06_MIDS if group < mid <= group + 0x20),
+            base=group,
+            more=group < 0xA0,
+        )
+        for group in (0x00, 0x20, 0x40, 0x60, 0x80, 0xA0)
+    },
+    "mode06_values": {
+        mid: bytes([0x01, 0x0A, 0, 0, 0, 0, 0xFF, 0xFF]) for mid in XTERRA_MODE06_MIDS
+    },
+}
+
+
 def _tuning_counts(monkeypatch: pytest.MonkeyPatch, seconds: float, *, paced: bool) -> Counter[str]:
     """Readings per channel for the tracked `tuning` profile at its 90 req/s
     override, under the Pi's collection settings. ``paced`` turns the burst
@@ -426,7 +451,18 @@ def _tuning_counts(monkeypatch: pytest.MonkeyPatch, seconds: float, *, paced: bo
     bus_budget.set_override(tuning.bus_budget_override, source="test", ttl_seconds=None)
     values = {pid: bytes([0x40]) * d.byte_length for pid, d in MODE01_REGISTRY.items()}
     values[0x0C] = b"\x0b\xb8"
-    bus = ScriptedEcu(clock, latency=LATENCY, session_gated=True, values=values)
+    # The ECM answers Mode 06 as the truck does (:data:`XTERRA_MODE06`) and the
+    # DTC polls with no codes. Left silent, each support probe waited out its
+    # 1 s timeout every discovery cycle and starved the loop: `tuning` read RPM
+    # 253 times in 300 s, and DIDs 185, where the paced plan gives 1,049 and 600.
+    bus = ScriptedEcu(
+        clock,
+        latency=LATENCY,
+        session_gated=True,
+        values=values,
+        dtc_responses={0x03: b"\x00", 0x07: b"\x00", 0x0A: b"\x00"},
+        **XTERRA_MODE06,
+    )
     readings: list[ObdReading] = []
     try:
         run_can_obd_loop(
@@ -443,6 +479,38 @@ def _tuning_counts(monkeypatch: pytest.MonkeyPatch, seconds: float, *, paced: bo
     return Counter(r.pid for r in readings)
 
 
+#: Run length, and how far a channel's count may sit from its planned rate:
+#: the one read a run's first or last partial window adds or drops, as a
+#: fraction of a 0.5 Hz channel's 150 reads.
+TUNING_SECONDS = 300.0
+RATE_TOLERANCE = 0.01
+
+
+def _planned_hz() -> dict[str, float]:
+    """Planned reads/s per decoded channel, from the capture preview: the
+    scheduler's own plan for `tuning`, not a figure written here."""
+    catalog = CaptureProfileCatalog.model_validate(yaml.safe_load(XTERRA_CATALOG.read_text()))
+    default, tuning = catalog.by_name("default"), catalog.by_name("tuning")
+    assert default is not None and tuning is not None
+    collection = CollectionConfig(
+        obd_source="canable",
+        obd_pids=tuple(default.mode01),
+        obd_dids=tuple(default.mode22),
+        obd_batch_max_pids=6,
+        obd_poll_rate_hz=1,
+        storage_path=Path("unused"),
+        session_retention_days=30,
+        storage_warning_mb=500,
+    )
+    planned: dict[str, float] = {}
+    for member in preview_polling_plan(collection, tuning)["members"]:
+        if member["kind"] not in {"pid", "did", "memory"}:
+            continue
+        for channel in member["decoded_channels"] or [member["channel"]]:
+            planned[channel] = float(member["rate_hz"])
+    return planned
+
+
 @pytest.mark.slow
 def test_tuning_at_90_req_s_keeps_every_channel_at_its_paced_rate() -> None:
     """Verification (2026-10-08) found commanded phi and FUEL_STATUS 5.5 %
@@ -456,15 +524,183 @@ def test_tuning_at_90_req_s_keeps_every_channel_at_its_paced_rate() -> None:
     pacing's last read ended (each read planned at the longer of its slot
     and its measured turnaround), and the exit goes there. Every channel
     keeps pacing's count over 300 s, give or take the one read a run's last
-    partial window may add or drop."""
+    partial window may add or drop.
+
+    Both runs are held to the plan, not only to each other (E09.1
+    verification, 2026-10-16: with Mode 06 unanswered both were starved
+    alike, and agreed). Every DID and memory channel, and every Mode 01 PID
+    planned at 2 Hz or less, runs at its planned rate. A Mode 01 PID planned
+    at 4 Hz runs at 2 Hz or more and never above its plan: Mode 01 and Mode 22
+    are exclusive here, the window (nine DIDs, eight or nine memory reads)
+    and its exit grace take 0.28 s of each 0.5 s cycle, and two uniform
+    0.25 s rounds do not fit in the 0.22 s left. One does (2.0 Hz: 0x44 and FUEL_STATUS ride
+    its later batches); the core batch also gets the round falling just before
+    the next entry three cycles in four (3.5 Hz). Which of the two a profile
+    gets is a scheduling choice not yet made (E09.1 report).
+    """
     with pytest.MonkeyPatch.context() as patch:
-        paced = _tuning_counts(patch, 300.0, paced=True)
+        paced = _tuning_counts(patch, TUNING_SECONDS, paced=True)
     with pytest.MonkeyPatch.context() as patch:
-        burst = _tuning_counts(patch, 300.0, paced=False)
-    assert paced["COMMANDED_EQUIV_RATIO"] > 50 and paced["FUEL_STATUS"] > 50
+        burst = _tuning_counts(patch, TUNING_SECONDS, paced=False)
     off = {
         channel: (paced[channel], burst[channel])
         for channel in set(paced) | set(burst)
         if abs(paced[channel] - burst[channel]) > 1
     }
+    assert not off, off
+    one_round_per_cycle_hz = 2.0
+    for channel, planned in _planned_hz().items():
+        for label, counts in (("paced", paced), ("burst", burst)):
+            hz = counts[channel] / TUNING_SECONDS
+            in_window = channel.startswith(("DID_", f"{MEMORY_SOURCE}:"))
+            if in_window or planned <= one_round_per_cycle_hz:
+                assert hz == pytest.approx(planned, rel=RATE_TOLERANCE), (label, channel, hz)
+            else:
+                lo = one_round_per_cycle_hz * (1 - RATE_TOLERANCE)
+                assert lo <= hz <= planned * (1 + RATE_TOLERANCE), (label, channel, hz)
+
+
+def _switch_rates(
+    switch_at: float, *, budget: float, latency: float, span: float = 40.0
+) -> dict[str, float]:
+    """Reads/s per channel for `tuning` armed by a profile switch ``switch_at``
+    seconds into a `default` loop, the way the Pi starts a capture.
+
+    Measured from each channel's own reads over ``span`` seconds starting 2 s
+    after the switch, as (reads - 1) / (last - first): a window that skips a
+    read moves it, where the edges of the span do not."""
+    catalog = CaptureProfileCatalog.model_validate(yaml.safe_load(XTERRA_CATALOG.read_text()))
+    default, tuning = catalog.by_name("default"), catalog.by_name("tuning")
+    assert default is not None and tuning is not None
+    collection = CollectionConfig(
+        obd_source="canable",
+        obd_pids=tuple(default.mode01),
+        obd_dids=tuple(default.mode22),
+        obd_batch_max_pids=6,
+        obd_did_batch_max_dids=1,
+        obd_request_timeout_seconds=1.0,
+        obd_poll_rate_hz=1,
+        storage_path=Path("unused"),
+        session_retention_days=30,
+        storage_warning_mb=500,
+    )
+    with pytest.MonkeyPatch.context() as patch:
+        clock = FakeClock()
+        install_clock(patch, clock)
+        spec = dataclasses.replace(
+            CanObdSpec.from_config(
+                collection,
+                CanBusConfig(interface="virtual", channel="switch", bitrate=500000),
+                catalog=catalog.profiles,
+            ),
+            calibration_id=None,
+        )
+        tuning_profile.configure_default(default)
+        tuning_profile.configure_did_aliases(
+            did_alias_table(profile_did_union(collection, catalog.profiles))
+        )
+        tuning_profile.activate(default, source="test")
+        values = {pid: bytes([0x40]) * d.byte_length for pid, d in MODE01_REGISTRY.items()}
+        values[0x0C] = b"\x0b\xb8"
+        bus = ScriptedEcu(
+            clock,
+            latency=latency,
+            session_gated=True,
+            values=values,
+            dtc_responses={0x03: b"\x00", 0x07: b"\x00", 0x0A: b"\x00"},
+            **XTERRA_MODE06,
+        )
+        start, wall = clock.monotonic(), clock.time()
+        armed: list[float] = []
+
+        def switch(_msg: can.Message) -> None:
+            if not armed and clock.monotonic() - start >= switch_at:
+                armed.append(clock.time() - wall)
+                tuning_profile.activate(tuning, source="test")
+                bus_budget.set_override(budget, source="test", ttl_seconds=None)
+
+        bus.on_send.append(switch)
+        readings: list[ObdReading] = []
+        try:
+            run_can_obd_loop(
+                bus,  # type: ignore[arg-type]
+                spec,
+                on_frame=lambda _m: None,
+                on_reading=readings.append,
+                stop_event=threading.Event(),
+                deadline_monotonic=start + switch_at + span + 3.0,
+            )
+        finally:
+            bus_budget.reset()
+            tuning_profile.set_active(False, source="test")
+    lo = armed[0] + 2.0
+    stamps: dict[str, list[float]] = {}
+    for reading in readings:
+        at = float(reading.acquired_at or reading.timestamp) - wall
+        if lo <= at < lo + span:
+            stamps.setdefault(reading.pid, []).append(at)
+    return {
+        channel: (len(times) - 1) / (max(times) - min(times))
+        for channel, times in stamps.items()
+        if len(times) > 1
+    }
+
+
+#: Switch instants across one 0.5 s `tuning` cycle (E09.1 verification,
+#: 2026-10-16): DIDs fell to half rate for the whole run when a member's grid
+#: phase was carried over from before the switch and landed just after the
+#: window entry, which only some instants of the cycle produce.
+SWITCH_SCAN = tuple(round(10.0 + 0.02 * i, 2) for i in range(26))
+
+
+#: A Mode 01 round lands anywhere in the Mode 01 share of a 0.5 s cycle, so a
+#: rate taken between a channel's first and last read over the 40 s span is
+#: good to one share in 40 s, about 1.3 % (HEAD's 1 Hz context PIDs read
+#: 1.012-1.013 there). Window members sit on the window grid and hold 1 %.
+SWITCH_MODE01_TOLERANCE = 0.02
+
+#: (budget req/s, answer latency s, switch instant s).
+SWITCH_CASES = (
+    *((90.0, LATENCY, at) for at in SWITCH_SCAN),
+    *((116.0, LATENCY, at) for at in SWITCH_SCAN[::5]),
+    *((90.0, 0.0015, at) for at in SWITCH_SCAN[::5]),
+)
+
+
+@pytest.mark.slow
+@pytest.mark.parametrize(
+    ("budget", "latency", "switch_at"),
+    SWITCH_CASES,
+    ids=[f"{b:g}rps-{lat * 1000:g}ms-at{at:.2f}" for b, lat, at in SWITCH_CASES],
+)
+def test_a_capture_started_by_a_switch_runs_at_its_plan_wherever_the_switch_falls(
+    budget: float, latency: float, switch_at: float
+) -> None:
+    """Every DID and memory channel within 1 % of its plan at every switch
+    instant, a Mode 01 PID planned at 2 Hz or less within 2 %, and a 4 Hz Mode
+    01 PID between one round per cycle (2 Hz) and its plan, for the reason the
+    test above gives. At 116 req/s (the measured ceiling, 2026-09-10) and at
+    1.5 ms answers as well as the 10 ms the other tests use.
+
+    On the fake clock, with the ECM answering Mode 06 as the truck does, the
+    previous scheduler (495936b0) failed here because a window member's due
+    time from before the switch kept its grid phase: at 10 ms answers two
+    DIDs ran at exactly half rate for the whole run; at 1.5 ms they ran at
+    0.75-0.87 of plan (90 req/s) or passed (116 req/s). With Mode 06 refused
+    it passed. Members now restart on the switch's grid
+    (``replan_for_generation``). No stored tuning capture ran post-D03.34
+    scheduler code, so whether the truck saw this is unconfirmed."""
+    rates = _switch_rates(switch_at, budget=budget, latency=latency)
+    off: dict[str, float] = {}
+    for channel, hz in _planned_hz().items():
+        got = rates.get(channel, 0.0)
+        in_window = channel.startswith(("DID_", f"{MEMORY_SOURCE}:"))
+        if in_window:
+            ok = got == pytest.approx(hz, rel=RATE_TOLERANCE)
+        elif hz <= 2.0:
+            ok = got == pytest.approx(hz, rel=SWITCH_MODE01_TOLERANCE)
+        else:
+            ok = 2.0 * (1 - RATE_TOLERANCE) <= got <= hz * (1 + RATE_TOLERANCE)
+        if not ok:
+            off[channel] = round(got / hz, 3)
     assert not off, off

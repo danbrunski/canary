@@ -6,9 +6,9 @@ instead of silently returning empty arrays) and drives the shared
 :class:`~src.storage.telemetry_query.TelemetryQuery` against it. ``root``
 is passed in rather than assumed from ``CanaryConfig`` so the identical
 function serves both the daemon's ``GET /control/sessions/{id}/chart``
-(``config.collection.storage_path``) and the companion app's route over its
-local library (``lib.root / "sessions"``) — the fix for the companion
-docstring's stale "chart" promise (``src/companion/routes.py``).
+(``config.collection.storage_path``), which in companion mode *is* the
+library's ``sessions/`` (``src/dashboard/routes/companion_link.py``; the
+standalone companion app and its separate route went in 2026-10-16).
 """
 
 from __future__ import annotations

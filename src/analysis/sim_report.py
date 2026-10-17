@@ -60,6 +60,7 @@ from typing import Any, Final, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
+from src.analysis.paired_scenarios import PLANT_ASSUMPTION_PREFIX
 from src.analysis.sim_cells import (
     HEADLINE_BY_LOOP,
     NO_RELATIVE_DELTA,
@@ -69,9 +70,11 @@ from src.analysis.sim_cells import (
     OutputCell,
 )
 from src.analysis.sim_contract import SimulationRefusalError
+from src.analysis.sim_montecarlo import DESIGN_ASSUMPTION_PREFIX
 
-#: Bump when the page's content or layout changes meaning.
-TOOL_VERSION = "1"
+#: Bump when the page's content or layout changes meaning. 2: working- and
+#: design-assumption lists in the caveat block (E08.10).
+TOOL_VERSION = "2"
 TOOL: Final = "sim_report"
 
 #: The two caveats every Monte Carlo result carries (E08.3) and the report
@@ -1095,13 +1098,27 @@ def _caveat_block(table: CellTable) -> str:
         "The spread is over the declared parameter brackets and the drawn fill bytes; base and "
         "candidate share every draw, so the deltas are the product, not absolute values.</li>"
     )
-    shown = {*STANDING_CAVEATS, qualification}
+    # The working assumptions the numbers rest on (E08.10): the plant
+    # registry's, then the design's own, each as the run states it.
+    held = [c for c in table.caveats if c.startswith(PLANT_ASSUMPTION_PREFIX)]
+    designed = [c for c in table.caveats if c.startswith(DESIGN_ASSUMPTION_PREFIX)]
+    held_html = "".join(f"<li>{_e(c)}</li>" for c in held) or (
+        "<li><strong>The run names no plant working assumption.</strong></li>"
+    )
+    design_html = "".join(f"<li>{_e(c)}</li>" for c in designed) or (
+        "<li>The run names no assumption of its design.</li>"
+    )
+    shown = {*STANDING_CAVEATS, qualification, *held, *designed}
     others = [c for c in table.caveats if c not in shown]
     other_html = "".join(f"<li>{_code(c)}</li>" for c in others) or "<li>none</li>"
     unresolved = "".join(f"<li>{_code(u)}</li>" for u in table.unresolved) or "<li>none</li>"
     return (
         '<section class="caveats" id="caveats"><h2>Read this first</h2>'
         f"<ul>{plant}{standing}</ul>"
+        f'<h3 id="working-assumptions">Plant working assumptions the numbers rest on '
+        f"({len(held)})</h3><ul>{held_html}</ul>"
+        f'<h3 id="design-assumptions">The design\'s own assumptions ({len(designed)})</h3>'
+        f"<ul>{design_html}</ul>"
         f"<h3>Every other caveat the run states ({len(others)})</h3><ul>{other_html}</ul>"
         f"<h3>Unresolved ({len(table.unresolved)}): what the result rests on but does not "
         f"know</h3><ul>{unresolved}</ul></section>"

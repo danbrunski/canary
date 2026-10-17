@@ -107,16 +107,24 @@ def images() -> tuple[FuelCompCalibration, FuelCompCalibration]:
     return old, new
 
 
-@pytest.fixture(scope="module")
+#: E08.7 item 3 was recorded on fuel-mv-1; the simulator now runs fuel-mv-2
+#: (E08.11). BFS does not read VE given MAF, so the identity holds on both.
+PLANTS = ("fuel-mv-1", "fuel-mv-2")
+
+
+@pytest.fixture(scope="module", params=PLANTS)
 def restore_run(
+    request: pytest.FixtureRequest,
     images: tuple[FuelCompCalibration, FuelCompCalibration],
     tmp_path_factory: pytest.TempPathFactory,
 ) -> dict[str, Any]:
+    plant = str(request.param)
     root = tmp_path_factory.mktemp("restore")
     _cli(
         "design", "drives", "--base-revision", OLD, "--sessions", SESSION,
         "--sessions-root", SESSIONS_ROOT, "--fuel-type", "gasoline",
         "--battery-v-when-unmeasured", "14.0", "--rom-dir", ROM_DIR, "--out", root / "designs",
+        "--plant-version", plant,
     )  # fmt: skip
     (design_dir,) = (root / "designs").iterdir()
     new_file = OPERATOR_ROMS["r20261004"]
@@ -126,10 +134,12 @@ def restore_run(
         "run", "--base", "--revision", OLD, "--candidate-rom", new_file, "--design", design_dir,
         "--draws", str(DRAWS), "--seed", str(SEED), "--stft-pct", "0", "--ltft-pct", "0",
         "--candidate-events", "ecu_reflash", "--rom-dir", ROM_DIR, "--out", root / "run",
+        "--plant-version", plant,
     )  # fmt: skip
     design = load_design(design_dir)
     traces = pd.read_parquet(root / "run" / "traces.parquet")
     return {
+        "plant": plant,
         "design": design,
         "pairs": per_pair_changes(design, traces, *images),
         "result": json.loads((root / "run" / "result.json").read_text()),
@@ -240,8 +250,17 @@ def test_simulated_bfs_moves_by_each_points_fuel_comp_multiplier_ratio(
     assert (moved["bfs_new"] != moved["bfs_old"]).all()
     unmoved = free[free["fc_new"] == free["fc_old"]]
     assert (unmoved["bfs_new"] == unmoved["bfs_old"]).all()
-    # Enrichment points (the design's open-loop label) are among them.
-    assert (free["regime"] == "enrichment").any()
+    result = restore_run["result"]
+    assert result["monte_carlo"]["plant_version"] == restore_run["plant"] == design.plant_version
+    if restore_run["plant"] == "fuel-mv-1":
+        # Enrichment points (the design's open-loop label) are among them.
+        assert (free["regime"] == "enrichment").any()
+    else:
+        # fuel-mv-2's VE fit has not seen this morning drive's 20-22 C intake
+        # (fit 23-50 C): those reads are counted outside_ve_fit by name, never
+        # placed, and the WOT pulls are among them; the identity above holds
+        # at every pair that is placed.
+        assert design.plant_states.get("outside_ve_fit", 0) > 0
 
 
 def test_the_cell_pattern_is_b08_6s_restore_result(
@@ -254,6 +273,14 @@ def test_the_cell_pattern_is_b08_6s_restore_result(
     old, new = images
     pairs = restore_run["pairs"]
     change = pairs["bfs_change_pct"]
+    if restore_run["plant"] != "fuel-mv-1":
+        # On fuel-mv-2 the drive keeps too few light-load and WOT reads (the
+        # 20-22 C ones are outside_ve_fit) for the pattern below; idle, where
+        # it does place reads, shows B08.6's leaner step per pair.
+        idle = (pairs["rpm"] <= 800) & pairs["byte"].between(48, 57)
+        assert idle.sum() >= 30
+        assert change[idle].between(-2.45, -1.5).all(), change[idle].describe()
+        return
     # Idle, bytes 48-57 (B08.6's ~760 rpm reads): leaner at every pair, by one
     # Fuel Comp count (126/128, -1.5625 %) or three (125/128 ... -2.34 %), each
     # to within the BFS word.
@@ -363,3 +390,45 @@ def test_the_shared_lookup_returns_the_raw_cell_at_every_node(
     # is evaluated directly above. The loop stays so a design that does land
     # on one is checked too.
     assert on_node >= 0
+
+
+WOT_SESSION = "_capture-tuning-2026-09-22T235224"
+
+
+def test_a_default_draw_run_over_a_real_wot_drive_on_fuel_mv_2_never_refuses(
+    images: tuple[FuelCompCalibration, FuelCompCalibration],
+    tmp_path: Path,
+) -> None:
+    """E08.11 rework: the verifier's real repro. A drive design of
+    09-22T235224 (a WOT drive) on the simulator's fuel-mv-2, then a run over every
+    declared parameter: it used to refuse ``manifold_refusal_varies_by_draw``
+    at point 250 (a drawn bank split lifted one bank's MAP above ambient).
+    With one plenum and bracket-safe placement it runs, and the one read that
+    a VE-floor draw would lift above ambient is counted, not placed."""
+    if not (SESSIONS_ROOT / WOT_SESSION).is_dir():
+        pytest.skip(f"private drive not on this machine: {SESSIONS_ROOT / WOT_SESSION}")
+    _cli(
+        "design", "drives", "--base-revision", OLD, "--sessions", WOT_SESSION,
+        "--sessions-root", SESSIONS_ROOT, "--fuel-type", "gasoline",
+        "--battery-v-when-unmeasured", "14.0", "--rom-dir", ROM_DIR, "--out", tmp_path / "d",
+    )  # fmt: skip
+    (design_dir,) = (tmp_path / "d").iterdir()
+    design = load_design(design_dir)
+    assert design.plant_version == "fuel-mv-2"
+    assert design.placement["manifold_above_ambient_in_bracket"] == 1
+    assert design.unplaced_dwell_s["manifold_above_ambient_in_bracket"] > 0
+    assert len(design.points) == design.placement["placed"] == 305
+    # The steady pull the split used to lift: 2,562 rpm, enrichment, MAP
+    # 0.977 x baro (x 1.04 at split 0.52 read 1.016 x baro and refused).
+    near = [p for p in design.points if p.map_kpa / p.baro_kpa > 0.96]
+    assert [p.regime for p in near] == ["enrichment"]
+    for draws, seed in ((4, 20261015), (100, 1)):
+        _cli(
+            "run", "--base", "--revision", OLD, "--candidate-rom", OPERATOR_ROMS["r20261004"],
+            "--design", design_dir, "--draws", str(draws), "--seed", str(seed),
+            "--stft-pct", "0", "--ltft-pct", "0", "--candidate-events", "ecu_reflash",
+            "--rom-dir", ROM_DIR, "--out", tmp_path / f"run{draws}",
+        )  # fmt: skip
+        result = json.loads((tmp_path / f"run{draws}" / "result.json").read_text())
+        assert result["monte_carlo"]["plant_version"] == "fuel-mv-2"
+        assert "bank_air_split" in result["monte_carlo"]["varied"]

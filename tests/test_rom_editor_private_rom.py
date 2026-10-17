@@ -25,8 +25,11 @@ say ``matched`` to that revision.
 half a step past each end. On 20261004 the fill axis runs 16..255 raw (7.1 % to
 113.8 %), so the suggested load edges pass the fill model's 100 % and the form
 blocks Run until the operator presses "Trim load edges to 0-100 %": the grid
-that can run is 16 rpm x 14 load = 224 points, not 16 x 16. Both are stated
-below as numbers, and the port must reproduce them.
+that can run is 16 rpm x 14 load = 224 cells, not 16 x 16. Both are stated
+below as numbers, and the port must reproduce them. On the simulator's plant,
+fuel-mv-2 (E08.11, ``sim_kit.yaml``), the design places 210 of those cells: the
+200-600 rpm row's centre, 400 rpm, is below the VE fit's 500 rpm
+(``outside_ve_fit``, counted, not placed).
 
 **Nothing is defaulted.** Every environmental and learned value is stated in
 :data:`ENV` / :data:`LEARNED_ZERO` / :data:`E076_WOT_ENV` / :data:`E076_LEARNED`.
@@ -34,8 +37,10 @@ below as numbers, and the port must reproduce them.
 
 from __future__ import annotations
 
+import contextlib
 import dataclasses
 import functools
+import io
 import json
 import pickle
 from collections import Counter
@@ -47,13 +52,12 @@ import numpy as np
 import pytest
 from fastapi.testclient import TestClient
 
-from src.analysis import rom_editor, sim_montecarlo
+from src.analysis import fuel_plant, rom_editor, sim_montecarlo
 from src.analysis.paired_scenarios import (
     LearnedState,
     OperatingPoint,
     PairedScenario,
     SimKit,
-    load_kit,
     run_paired,
 )
 from src.analysis.paired_scenarios import rpm_word as sim_rpm_word
@@ -70,13 +74,14 @@ from src.vehicle.tune_revisions import TuneRevisionRegistry, load_tune_revisions
 from tests.configs import isolated_config
 from tests.rom_fixtures import OPERATOR_ROMS, PROFILE, operator_image
 from tests.test_rom_editor_api import AUTH, OCTET, CountingExecutor, make_app
+from tools import rom_sim
 
 pytestmark = pytest.mark.slow
 
 REVISION = "ZS44A-20261004"
 IMAGE_KEY = "r20261004"
 SEED = 20261015
-#: Draws for the 224-point grid cases: per-pair checks need few, the suite needs speed.
+#: Draws for the form-grid cases: per-pair checks need few, the suite needs speed.
 DRAWS = 4
 #: Draws for the 3-point WOT case, as E08.7 item 4 (per-point quantiles).
 WOT_DRAWS = 200
@@ -91,7 +96,20 @@ FORM_LOAD_EDGES_SUGGESTED = [
     60.71429, 67.85714, 75.0, 82.14286, 89.28571, 96.42857, 103.5714, 110.4911, 117.1875,
 ]  # fmt: skip
 FORM_LOAD_EDGES = [*FORM_LOAD_EDGES_SUGGESTED[:14], 100.0]
-FORM_POINTS = 16 * 14
+#: Cells the trimmed form grid has (``SimRequest.grid_points``, the editor's own count).
+FORM_CELLS = 16 * 14
+#: Points the design places on fuel-mv-2 (measured 2026-10-16 on the real image through
+#: ``rom_editor._grid_design``, ``SimDesign.placement``: ``{"placed": 201,
+#: "outside_ve_fit": 14, "manifold_above_ambient_in_bracket": 9}``).
+#: * ``outside_ve_fit`` 14: the 400 rpm row is below the frozen VE(rpm) fit's 500-6,500 rpm
+#:   (``na-stock-2026-10-08.mv2``). On fuel-mv-1 (a constant VE, no fit range) it was placed.
+#: * ``manifold_above_ambient_in_bracket`` 9 (E08.11 rework): MAP from the engine's total air
+#:   would exceed ambient somewhere in the VE floor's whole bracket [0.4, 1.0]: the 800 rpm
+#:   cells from 57.14 % fill up (7), and 1,200 and 1,600 rpm at 98.21 % (1 each). Measured here
+#:   by diffing the placed (cell_row, cell_col) set against the 16 x 14 grid, not taken from
+#:   the E08 session's report. Plant facts, not the editor's.
+FORM_UNPLACED = {"outside_ve_fit": 14, "manifold_above_ambient_in_bracket": 9}
+FORM_POINTS = FORM_CELLS - sum(FORM_UNPLACED.values())
 
 #: A stated warm, home-altitude environment for the grid cases (E07.6's WOT
 #: values for baro, IAT, coolant, battery and rail; a part throttle).
@@ -117,7 +135,7 @@ LEARNED_ZERO: dict[str, Any] = dict(
 #: forced-column flag set: bit 0 of ``mem:ECM_PEDAL_ENRICH_FLAGS``
 #: (``target_phi_twin.yaml``) makes the Target AFR lookup read its last column,
 #: as the truck does at full pedal. A grid cannot reach that column by X on this
-#: image (see ``test_no_grid_point_reaches_e076s_wot_bfs_or_the_wot_column_by_x``).
+#: image (see ``test_the_wot_column_is_reached_by_x_at_no_point_of_the_form_grid``).
 E076_WOT_ENV: dict[str, Any] = {**ENV, "throttle_pct": 90.0, "pedal_flag": 1}
 #: E07.6's ``LEARNED`` (STFT 0, LTFT 2.34).
 E076_LEARNED: dict[str, Any] = {**LEARNED_ZERO, "ltft_pct": 2.34}
@@ -205,7 +223,9 @@ def real() -> Real:
     assert sha == recorded.image_sha256, "the decoded file is not the recorded flash"
     match = revision_match(sha, registry)
     assert match == {"revision": REVISION, "status": "matched", "reference": None}
-    return Real(image, sha, match, registry, load_kit(PROFILE))
+    # The kit the editor builds when none is passed (E08.11: the simulator's
+    # declared plant, ``sim_kit.yaml``), so every case here runs the GUI's plant.
+    return Real(image, sha, match, registry, sim_montecarlo.load_sim_kit(PROFILE).kit)
 
 
 def request(edits: list[dict[str, Any]], **over: Any) -> rom_editor.SimRequest:
@@ -271,7 +291,9 @@ def simulate(real: Real, req: rom_editor.SimRequest, *, negative_control: bool =
             )
     ((args, result),) = runs
     # The same design the run used (built the same way; the hash says so).
-    design = rom_editor._grid_design(req, REVISION, PROFILE, real.registry)
+    design = rom_editor._grid_design(
+        req, REVISION, PROFILE, real.registry, real.kit.plant.plant_version
+    )
     assert design.sha256() == out["design"]["sha256"]
     template, candidate = args[1], args[4]
     assert isinstance(template, PairedScenario) and isinstance(candidate, bytes)
@@ -358,10 +380,18 @@ def test_the_form_suggests_these_edges_and_only_the_trimmed_grid_can_run(real: R
     # Untrimmed, the design refuses past the fill model (the form blocks Run first).
     with pytest.raises(SimDesignRefusalError) as err:
         rom_editor._grid_design(
-            request([K_PLUS_5], load_edges=load), REVISION, PROFILE, real.registry
+            request([K_PLUS_5], load_edges=load),
+            REVISION,
+            PROFILE,
+            real.registry,
+            real.kit.plant.plant_version,
         )
     assert str(err.value).startswith("load_outside_model")
-    assert request([K_PLUS_5]).grid_points == FORM_POINTS
+    assert request([K_PLUS_5]).grid_points == FORM_CELLS
+    placement = rom_editor._grid_design(
+        request([K_PLUS_5]), REVISION, PROFILE, real.registry, real.kit.plant.plant_version
+    ).placement
+    assert placement == {"placed": FORM_POINTS, **FORM_UNPLACED}
 
 
 # -- 1. the negative control ------------------------------------------------------------------
@@ -400,19 +430,20 @@ def test_the_negative_control_is_unchanged_in_every_visited_cell(negative: Run) 
         # The ECU side (BFS, phi) is unchanged wherever the target lookup
         # resolved; one cell's lookup sits in the enrichment gate's hysteresis
         # band (4,000 rpm, fill bytes 191-192 here) and names that instead.
-        # KNOWN OVER-REFUSAL (cautious, not false confidence): BFS there is
-        # computed before the target lookup and is finite, but
-        # src/analysis/paired_scenarios.py run_paired (``reasons = list(gate) +
-        # ...``, ~line 1017) gives every output, BFS included, the lookup's
-        # gate reason. Locked in so that fixing it flips this deliberately.
-        for name in ("base_fuel_schedule", "target_phi"):
-            o = cell["outputs"][name]
-            if o["status"] == "unsupported":
-                assert {r for e in o["support"] for r in e["reasons"]} >= {GATE_UNKNOWN}
-            else:
-                assert o["status"] == "unchanged"
+        # Flipped by E08.10 (was KNOWN OVER-REFUSAL): BFS is computed before
+        # the target lookup, and a reason now reaches only the outputs
+        # downstream of the node it names (paired_scenarios.ReasonScope), so
+        # BFS is unchanged in every visited cell, the gate-ambiguous one
+        # included; target phi there keeps the lookup's gate reason.
+        assert cell["outputs"]["base_fuel_schedule"]["status"] == "unchanged"
+        o = cell["outputs"]["target_phi"]
+        if o["status"] == "unsupported":
+            assert {r for e in o["support"] for r in e["reasons"]} >= {GATE_UNKNOWN}
+        else:
+            assert o["status"] == "unchanged"
     assert statuses["unchanged"] > 0 and statuses["unsupported"] > 0
-    # What made an output unsupported, measured 2026-10-15 on this grid: the
+    # What made an output unsupported, measured 2026-10-15 on this grid (fuel-mv-1's
+    # counts; the set, not the counts, is asserted): the
     # closed-loop trim authority (146 closed-loop cells), the undecoded short
     # pulse (16 cells) and the one gate-ambiguous cell. Nothing else.
     assert reasons == {TRIM_AUTHORITY_UNDECODED, SHORT_PULSE, GATE_UNKNOWN, "not_computed"}
@@ -476,25 +507,40 @@ def test_a_k_edit_moves_bfs_by_the_realised_raw_ratio_at_every_open_loop_pair(
         if cell["loop_shares"] != {"open_loop": 1.0}:
             continue
         bfs = cell["outputs"]["base_fuel_schedule"]
-        if bfs["status"] == "unsupported":
-            # The gate-ambiguous cell: a KNOWN OVER-REFUSAL of BFS (computed,
-            # but given the target lookup's gate reason at paired_scenarios.py
-            # run_paired ~1017; see the negative control). Locked in on purpose.
-            assert {r for e in bfs["support"] for r in e["reasons"]} >= {GATE_UNKNOWN}
-            gated += 1
-            continue
-        assert bfs["status"] == "changed" and bfs["supported_share"] == 1.0
+        # E08.10: a gate reason reaches only the outputs downstream of the node it
+        # names, so the target lookup's gate no longer marks BFS unsupported (the
+        # cell that used to be the one known over-refusal is supported now).
+        gated += bfs["status"] == "unsupported"
+        assert bfs["status"] == "changed" and bfs["supported_share"] == 1.0, (
+            cell["row"],
+            cell["col"],
+            bfs["status"],
+            bfs["supported_share"],
+        )
         for q in ("p05", "p50", "p95"):
             assert abs(bfs["quantiles"]["relative_delta"][q] - (r - 1)) <= rel_tol
         checked += 1
-    assert checked >= 20 and gated <= 1
+    assert checked >= 20 and gated == 0
 
 
 # -- 3. Target AFR +4 counts, the WOT column --------------------------------------------------
 
 
 @pytest.fixture(scope="module")
-def wot_run(real: Real) -> Run:
+def wot_candidate(real: Real) -> bytes:
+    """The Target AFR +4 candidate, built as ``simulate_edits`` builds it but
+    without the Monte Carlo, so the ``run_paired`` cases below do not depend
+    on a run's draws (``wot_run`` asserts it is the candidate its run used)."""
+    base = rom_editor.library_base(real.image, real.revision_match, sha256=real.sha256)
+    spec = rom_editor.editor_spec(base, "Target AFR WOT column +4", [TARGET_PLUS_4_WOT])
+    candidate, _ = rom_editor._candidate(
+        base, spec, rom_editor._EditContext(real.kit.rom_map, real.kit.model, real.kit.model_sha256)
+    )
+    return candidate
+
+
+@pytest.fixture(scope="module")
+def wot_run(real: Real, wot_candidate: bytes) -> Run:
     req = request(
         [TARGET_PLUS_4_WOT],
         label="Target AFR WOT column +4",
@@ -505,7 +551,9 @@ def wot_run(real: Real) -> Run:
         **E076_LEARNED,
         draws=WOT_DRAWS,
     )
-    return simulate(real, req)
+    run = simulate(real, req)
+    assert run.candidate == wot_candidate
+    return run
 
 
 def test_a_target_afr_plus_4_moves_wot_phi_by_e076s_figure_through_e076s_own_path(
@@ -603,17 +651,24 @@ def _wot_figures(wot_run: Run) -> dict[str, Any]:
     }
 
 
+# ``raises=AssertionError``: only the literal check failing is the expected
+# failure. A refusal in ``wot_run`` (e.g. ``manifold_refusal_varies_by_draw``)
+# is an error, never this xfail (it read as "xfailed" before, 2026-10-15).
 @pytest.mark.xfail(
     strict=True,
+    raises=AssertionError,
     reason=(
-        "W09.6 finding 2026-10-15. Pulse: a BFS/airflow condition. It is BFS-proportional; "
-        "the grid's top fill cell (98.2 %, 4,800 rpm, baro 81) runs at BFS 29,080 and gives "
-        "+0.28 ms, while +0.41 ms needs ~41.8k BFS here (E07.6's own point on this image: "
-        "41,768, +0.41 ms). Lambda: -2.507/-2.486/-2.468 % (p05/p50/p95), outside "
-        "-2.52...-2.49 %, and that range is NOT reproducible on 20261004 at any BFS near "
-        "42k: it is the synthetic image's spread plus the 0.01 ms pulse quantum (E07.6's "
-        "point here: -2.483 %, -2.498...-2.468; BFS exactly 42,000: -2.529 %, "
-        "-2.544...-2.514). The editor equals E07.6's run_paired at these points (above)."
+        "W09.6 finding 2026-10-15, re-run on fuel-mv-2 (E08.11) the same day. Pulse: it is "
+        "BFS-proportional; the grid's top fill cell (98.2 %, 4,800 rpm, baro 81) now runs at "
+        "133.13 g/s, BFS 37,620 and gives +0.37 ms (fuel-mv-1: 102.91 g/s, 29,080, +0.28 ms), "
+        "while +0.41 ms needs ~41.8k BFS here (E07.6's own point on this image: 41,768, "
+        "+0.41 ms), i.e. 150 g/s at MAP 79, VE ~1.027 at 4,800 rpm against the fit's 0.9055: "
+        "no fill up to 100 % reaches it (99.95 %: BFS 38,284, +0.37 ms). Lambda: central "
+        "-2.488 % (over the assumptions -2.505...-2.472 %), outside -2.52...-2.49 %, and that "
+        "range is NOT reproducible on 20261004 at any BFS near 42k: it is the synthetic "
+        "image's spread plus the 0.01 ms pulse quantum (E07.6's point here: -2.483 %, "
+        "-2.498...-2.468; BFS exactly 42,000: -2.529 %, -2.544...-2.514). The editor equals "
+        "E07.6's run_paired at these points (above)."
     ),
 )
 def test_e076s_written_wot_figures_at_the_grids_wot_point(wot_run: Run) -> None:
@@ -631,13 +686,17 @@ def test_e076s_written_wot_figures_at_the_grids_wot_point(wot_run: Run) -> None:
 
 
 def test_at_e076s_own_points_on_this_image_the_pulse_holds_and_the_lambda_range_does_not(
-    real: Real, wot_run: Run
+    real: Real, wot_candidate: bytes
 ) -> None:
     """Why the lambda range is not a known answer for this image: at E07.6's
     own WOT point (``tests/test_paired_scenarios.py`` ``WOT``, forced-column
     flag set so the WOT column is read) and at the airflow where BFS is
     exactly 42,000, E07.6's own ``run_paired`` puts lambda outside it, while
-    phi and (at ~41.8k BFS) the pulse land on the written figures."""
+    phi and (at ~41.8k BFS) the pulse land on the written figures.
+
+    Plant-independent at these points: MAP is stated (79 kPa), so no VE is
+    read, and every figure below is the same on fuel-mv-1 and fuel-mv-2
+    (re-measured 2026-10-15 on both, to the 1e-6 pinned)."""
     env = {k: v for k, v in E076_WOT_ENV.items() if k != "load_basis"}
     got = {}
     for maf in (150.0, E076_BFS_42000_MAF_GPS):
@@ -649,8 +708,8 @@ def test_at_e076s_own_points_on_this_image_the_pulse_holds_and_the_lambda_range_
             source="design: E07.6's WOT point, stated (W09.6)",
             **env,
         )
-        scenario = _reference_scenario(real, wot_run.candidate, point)
-        outputs = run_paired(real.kit, scenario, real.image, wot_run.candidate).points[0]["outputs"]
+        scenario = _reference_scenario(real, wot_candidate, point)
+        outputs = run_paired(real.kit, scenario, real.image, wot_candidate).points[0]["outputs"]
         lam = outputs["delivered_lambda"]
         got[maf] = {
             "bfs": outputs["base_fuel_schedule"]["base"],
@@ -674,33 +733,82 @@ def test_at_e076s_own_points_on_this_image_the_pulse_holds_and_the_lambda_range_
         assert not lo <= g["range"][0] <= g["range"][1] <= hi, g
 
 
-def test_no_grid_point_reaches_e076s_wot_bfs_or_the_wot_column_by_x(real: Real) -> None:
-    """Why the pulse figure cannot be reached on a grid, and its cause: a grid
-    takes fill as MAP / baro and solves the airflow through the sim kit's
-    plant, fuel-mv-1, whose manifold model runs at volumetric efficiency 0.7,
-    a working assumption (``fuel_plant.yaml`` ``manifold_pressure``,
-    ``requires_measurement``, bracket 0.4-1.0). That gives ~103 g/s at the
-    grid's 100 % fill at 4,800 rpm and baro 81, so BFS stays far below the
-    ~41.8k the +0.41 ms pulse needs here. fuel-mv-3's identified VE at
-    4,000-5,000 rpm, 0.9055 (``fuel_plant_mv3.yaml`` ``ve_curve``), would
-    give ~133 g/s: the limit is the plant version's VE, not the grid's
-    structure. And without the forced-column flag, the Target AFR WOT column
-    is reached by no point of the form's grid: X never gets there."""
-    assert real.kit.plant.plant_version == "fuel-mv-1"
-    assert real.kit.plant.manifold_model == "speed_density_capped"
-    top = simulate(
-        real,
-        request(
-            [TARGET_PLUS_4_WOT],
-            grid="target_afr",
-            rpm_edges=WOT_RPM_EDGES,
-            load_edges=[99.9, 100.0],
-            **E076_WOT_ENV,
-            **E076_LEARNED,
+def test_no_grid_point_reaches_e076s_wot_bfs(real: Real, wot_candidate: bytes) -> None:
+    """Why the pulse figure cannot be reached on a grid, and its cause.
+
+    A grid takes fill as MAP / baro and solves the airflow through the
+    simulator's plant. Flipped by E08.11: that plant is now fuel-mv-2, whose
+    VE(rpm) is the frozen fit of ``na-stock-2026-10-08.mv2`` (0.905535 at
+    4,000-5,000 rpm), no longer fuel-mv-1's working-assumption VE 0.7. At the
+    grid's 99.95 % fill, 4,800 rpm, baro 81, IAT 25 that is 135.48 g/s (it was
+    104.73 g/s on fuel-mv-1) and BFS 38,284 (was 29,596), still below the
+    41,768 E07.6's own point gives on this image. The limit is no longer the
+    plant's VE assumption but E07.6's point itself: 150 g/s at MAP 79 kPa and
+    4,800 rpm needs VE ~1.027, above the fit, and on fuel-mv-2 150 g/s there
+    is above ambient (``manifold_above_ambient``). The truck agrees with the
+    grid, not with E07.6's point: its WOT BFS at 4,300-5,300 rpm and fill byte
+    >= 195 is 30,690-37,008 (E08.11 accept 1, 55 pairs). And without the
+    forced-column flag, the Target AFR WOT column is reached by no point of
+    the form's grid (the next test).
+
+    Through the editor's own design and E07.6's ``run_paired``, not the Monte
+    Carlo: a grid point's MAF and BFS do not depend on a draw (the design's
+    own assumption line says so), and the WOT case above asserts the editor's
+    BFS equals ``run_paired``'s at every point and fill byte."""
+    assert real.kit.plant.plant_version == "fuel-mv-2"
+    assert real.kit.plant.manifold_model == "speed_density_refusing"
+    # E07.6's airflow at 4,800 rpm is past what the plant breathes at baro 81.
+    e076 = fuel_plant.predict(
+        fuel_plant.PlantInputs(
+            pulse_ms=np.array([2.0]),
+            ecu_dead_time_ms=np.array([0.0]),
+            rpm=np.array([4800.0]),
+            maf_gps=np.array([150.0]),
+            baro_kpa=np.array([E076_WOT_ENV["baro_kpa"]]),
+            iat_c=np.array([E076_WOT_ENV["iat_c"]]),
+            rail_kpa=np.array([E076_WOT_ENV["rail_kpa"]]),
         ),
+        fuel_plant.resolve_parameters(real.kit.plant, real.kit.delay),
+        real.kit.plant.geometry,
     )
-    assert top.result.base["base_fuel_schedule"].max() < E076_POINT_BFS_1004
-    assert all(p.maf_gps < 110.0 for p in top.design.points)
+    assert e076.manifold_refusal is not None
+    assert e076.manifold_refusal.tolist() == [fuel_plant.MAP_ABOVE_AMBIENT]
+    req = request(
+        [TARGET_PLUS_4_WOT],
+        grid="target_afr",
+        rpm_edges=WOT_RPM_EDGES,
+        load_edges=[99.9, 100.0],
+        **E076_WOT_ENV,
+        **E076_LEARNED,
+    )
+    design = rom_editor._grid_design(
+        req, REVISION, PROFILE, real.registry, real.kit.plant.plant_version
+    )
+    (point,) = design.points
+    env = {k: v for k, v in E076_WOT_ENV.items() if k != "load_basis"}
+    bfs = set()
+    for byte in range(point.fill_byte_lo, point.fill_byte_hi + 1):
+        op = dataclasses.replace(
+            design.operating_point(0, fill_byte=byte),
+            **env,
+            conditioned={"fuel_comp_load_byte": float(byte)},
+        )
+        scenario = _reference_scenario(real, wot_candidate, op)
+        out = run_paired(real.kit, scenario, real.image, wot_candidate).points[0]["outputs"]
+        bfs.add(out["base_fuel_schedule"]["base"])
+    # Measured 2026-10-15 on fuel-mv-2 (the design is deterministic): MAF
+    # 135.4807 g/s at MAP 80.9595 kPa (99.95 % x baro 81); BFS 38,284 at fill
+    # bytes 223 and 224. On fuel-mv-1 the same cell was 104.7298 g/s, BFS 29,596.
+    assert (point.fill_byte_lo, point.fill_byte_hi) == (223, 224)
+    assert point.maf_gps == pytest.approx(135.4807, abs=1e-4)
+    assert bfs == {38_284}
+    assert max(bfs) < E076_POINT_BFS_1004
+
+
+def test_the_wot_column_is_reached_by_x_at_no_point_of_the_form_grid(real: Real) -> None:
+    """With the forced-column flag 0, the Target AFR WOT column is read at no
+    point of the form's grid (an editor result, through the Monte Carlo): an
+    operator who edits that column and states pedal flag 0 sees nothing."""
     no_flag = simulate(real, request([TARGET_PLUS_4_WOT], grid="target_afr"))
     result = no_flag.result
     phi_b, phi_c = result.base["target_phi"], result.candidate["target_phi"]
@@ -782,6 +890,56 @@ def test_the_fuel_comp_region_edit_marks_its_cells_and_moves_only_what_reads_the
                 assert reached[i].any(), (cell["row"], cell["col"], name, status)
             if not reached[i].any():
                 assert status in ("unchanged", "unsupported", "not_reached"), (cell, name)
+
+
+def test_the_fuel_comp_preview_says_what_a_number_can_be_given_for_and_what_blocks_one(
+    real: Real,
+) -> None:
+    """E09.14b on the real image: the page's preview of E08.1's Fuel Comp edit
+    names its lever, gives the two ECU outputs a number, and says the plant's
+    outputs wait on the plant and on the closed loop; and ``inspect`` on the
+    same spec, through the CLI, prints the same strings."""
+    spec = load_edit_spec(FIXTURE_SPEC)
+    edits = [e.model_dump(mode="json", exclude_none=True) for e in spec.edits]
+    preview = rom_editor.preview_edits(
+        real.image, real.revision_match, spec.label, edits, PROFILE, sha256=real.sha256
+    )
+    levers = preview["levers"]
+    assert [e["lever"] for e in levers["levers"]] == ["fuel_compensation"]
+    assert levers["levers"][0]["changed_cells"] == len(FC_EDITED_CELLS)
+    messages = levers["messages"]
+    said = {
+        m.split(" -> ", 1)[1].split(": ", 1)[0]: m.split(": ", 1)[1]
+        for m in messages
+        if " -> " in m
+    }
+    for output in ("base_fuel_schedule_word", "target_equiv_ratio"):
+        assert said[output] == "a number can be given (for points that state only the fill byte)"
+        assert f"Fuel Comp -> {output}: {said[output]}" in messages
+    # The simulator's own plant (sim_kit.yaml), whose qualification is the plant's
+    # to say; the closed loop's trim authority is undecoded.
+    plant = real.kit.plant
+    why = fuel_plant.plant_qualification(plant).reason or ""
+    assert why, "the plant is qualified: the strings below no longer apply"
+    for output in (
+        "injector_pulse_ms",
+        "fuel_trim_total_pct",
+        "delivered_lambda",
+        "fuel_per_event_g",
+    ):
+        assert said[output].startswith("plant not qualified: "), said
+        assert said[output].endswith("; closed loop: trim authority undecoded"), said
+    # The same edit through the CLI, the base resolved from the operator's ROM directory.
+    out = io.StringIO()
+    with contextlib.redirect_stdout(out):
+        code = rom_sim.main(
+            ["inspect", "--profile", str(PROFILE), "--edits", str(FIXTURE_SPEC)]
+            + ["--rom-dir", str(OPERATOR_ROMS[IMAGE_KEY].parent)]
+        )
+    cli = json.loads(out.getvalue())
+    assert code == 0, cli
+    assert cli["candidate_sha256"] == preview["candidate_sha256"]
+    assert cli["levers"] == levers
 
 
 def test_a_real_result_crosses_run_job_and_pickles(

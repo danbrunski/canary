@@ -1,7 +1,7 @@
 import { fireEvent, render, screen, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
-import { STATUSES } from "../../../lib/romSimView";
+import { groupAssumptions, STATUSES } from "../../../lib/romSimView";
 import {
   buildCellTable,
   buildRunContext,
@@ -9,6 +9,8 @@ import {
   buildSimResult,
   BASE_SHA,
   CANDIDATE_SHA,
+  SIM_ASSUMPTIONS,
+  VE_ASSUMPTION,
 } from "../../../test/romSimFixtures";
 import type { RomSimResult, SimCell, SimRunContext } from "../../../types/romEditor";
 import { SimResults } from "./SimResults";
@@ -81,13 +83,63 @@ describe("the caveat block", () => {
     show({ result });
     const caveats = screen.getByRole("region", { name: "Read this first" });
     expect(within(caveats).getByText("synthetic_example_not_a_measurement")).toBeVisible();
-    for (const text of [
-      ...result.assumptions,
-      ...(result.design.assumptions ?? []),
-      ...result.unresolved,
-    ]) {
+    for (const text of [...result.assumptions, ...result.unresolved]) {
       expect(within(caveats).getByText(text)).toBeVisible();
     }
+  });
+
+  it("groups the assumptions by their prefix and shows the held VE once", () => {
+    show();
+    const caveats = screen.getByRole("region", { name: "Read this first" });
+    expect(VE_ASSUMPTION).toMatch(
+      /^plant working assumption: manifold_pressure \(volumetric_efficiency\) = 0\.7, bracket \[0\.4, 1\.0\], held at that value \(/,
+    );
+    // `caveats` repeats it (E08.10); the page shows it once.
+    expect(buildSimResult().caveats.filter((item) => item === VE_ASSUMPTION)).toHaveLength(1);
+    expect(within(caveats).getAllByText(VE_ASSUMPTION)).toHaveLength(1);
+    const group = (name: RegExp) => within(caveats).getByRole("heading", { name }).parentElement!;
+    expect(within(group(/^Plant working assumptions/)).getByText(VE_ASSUMPTION)).toBeVisible();
+    expect(within(group(/^Plant working assumptions/)).getAllByRole("listitem")).toHaveLength(2);
+    expect(within(group(/^The design's own assumptions/)).getAllByRole("listitem")).toHaveLength(1);
+    expect(within(group(/^Other assumptions/)).getAllByRole("listitem")).toHaveLength(1);
+  });
+
+  it("shows a string that is in both the caveats and the assumptions once, and no other twice", () => {
+    const result = buildSimResult();
+    const twice = "design: stated twice by the run";
+    result.assumptions = [...result.assumptions, twice, twice];
+    result.caveats = [...result.caveats, twice, "a plain caveat", "a plain caveat"];
+    show({ result });
+    const caveats = screen.getByRole("region", { name: "Read this first" });
+    expect(within(caveats).getAllByText(twice)).toHaveLength(1);
+    expect(within(caveats).getAllByText("a plain caveat")).toHaveLength(1);
+    for (const text of SIM_ASSUMPTIONS) {
+      expect(within(caveats).getAllByText(text)).toHaveLength(1);
+    }
+    // Every list item in the block is a distinct string.
+    const items = within(caveats)
+      .getAllByRole("listitem")
+      .map((item) => item.textContent ?? "")
+      .filter((text) => text.length > 30);
+    expect(new Set(items).size).toBe(items.length);
+  });
+
+  it("falls back to a plain list for assumptions with no known prefix", () => {
+    const result = buildSimResult();
+    result.assumptions = ["rail pressure is stated", "pedal flag is stated"];
+    result.caveats = [...result.cells.caveats.slice(0, 4), ...result.assumptions];
+    show({ result });
+    const caveats = screen.getByRole("region", { name: "Read this first" });
+    expect(within(caveats).getByRole("heading", { name: /^Other assumptions/ })).toBeVisible();
+    expect(within(caveats).getAllByText("rail pressure is stated")).toHaveLength(1);
+    expect(
+      within(caveats).getByRole("heading", { name: /^Plant working assumptions.*\(0\)/ }),
+    ).toBeVisible();
+    expect(groupAssumptions(result.assumptions)).toEqual({
+      plant: [],
+      design: [],
+      other: result.assumptions,
+    });
   });
 
   it("states a plant that is qualified only by the absence of the caveat", () => {

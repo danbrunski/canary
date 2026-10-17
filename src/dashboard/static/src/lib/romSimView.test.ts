@@ -6,6 +6,8 @@ import { describe, expect, it } from "vitest";
 import { buildCellTable, output } from "../test/romSimFixtures";
 import {
   CHANGED_ZERO_LABEL,
+  DESIGN_ASSUMPTION_PREFIX,
+  PLANT_ASSUMPTION_PREFIX,
   COLOURED_MARKS,
   MARKS,
   MARK_LABELS,
@@ -14,6 +16,7 @@ import {
   cellLines,
   describePick,
   extentOf,
+  groupAssumptions,
   hasChangedZero,
   hatchStyle,
   inCell,
@@ -309,5 +312,30 @@ describe("a changed cell whose median is exactly 0", () => {
     expect(hasChangedZero(picks)).toBe(true);
     const plain = lambdaOf(table);
     expect(hasChangedZero(table.cells.map((cell) => plain.pick(cell)))).toBe(false);
+  });
+});
+
+describe("the assumption prefixes", () => {
+  const python = (file: string, name: string): string => {
+    const source = readFileSync(resolve(process.cwd(), "../../analysis", file), "utf8");
+    const found = new RegExp(`^${name} = "([^"]*)"`, "m").exec(source);
+    expect(found).not.toBeNull();
+    return found?.[1] ?? "";
+  };
+
+  it("are the ones the simulator writes, read from its modules", () => {
+    expect(PLANT_ASSUMPTION_PREFIX).toBe(python("paired_scenarios.py", "PLANT_ASSUMPTION_PREFIX"));
+    expect(DESIGN_ASSUMPTION_PREFIX).toBe(python("sim_montecarlo.py", "DESIGN_ASSUMPTION_PREFIX"));
+  });
+
+  it("split the list into groups, each string once, unprefixed ones last", () => {
+    const plant = `${PLANT_ASSUMPTION_PREFIX}rail_pressure = 350`;
+    const design = `${DESIGN_ASSUMPTION_PREFIX}MAF solved at VE 0.7`;
+    expect(groupAssumptions([design, "plain", plant, plant, "plain"])).toEqual({
+      plant: [plant],
+      design: [design],
+      other: ["plain"],
+    });
+    expect(groupAssumptions([])).toEqual({ plant: [], design: [], other: [] });
   });
 });

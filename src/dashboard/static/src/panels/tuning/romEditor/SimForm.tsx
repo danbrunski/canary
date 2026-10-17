@@ -1,4 +1,6 @@
-import { useEffect, useId, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react";
+
+import { getRomTypicalValues } from "../../../api/workbench";
 
 import {
   CANDIDATE_EVENT_CHOICES,
@@ -55,8 +57,25 @@ import {
   type SimPreset,
   type TimedRun,
 } from "../../../lib/romSimSize";
+import {
+  NOT_TOUCHED,
+  pedalFlagLine,
+  placeholderLine,
+  typicalFailure,
+  typicalFill,
+  typicalHeadline,
+  typicalTag,
+  type TypicalFailure,
+  type TypicalFill,
+  type TypicalMark,
+} from "../../../lib/romSimTypical";
 import { buttonClass, cn, inputClass, selectClass } from "../../../styles";
-import type { RomEdit, RomSimRequest, SimFailure } from "../../../types/romEditor";
+import type {
+  RomEdit,
+  RomSimRequest,
+  RomTypicalValues,
+  SimFailure,
+} from "../../../types/romEditor";
 import type { RomTableValues } from "../../../types/romLibrary";
 
 /** A short "remembered" tag next to a field whose value came back from the
@@ -69,10 +88,32 @@ function Remembered({ id }: { id: string }) {
   );
 }
 
+/** The tag next to a field the "Fill typical values" button filled: its kind
+ *  (`typical`, or `placeholder` for a number the simulator reads nowhere) and its
+ *  source, from the vehicle's data. Shown, so a typical value is never applied
+ *  unseen and a placeholder is never read as a measurement; it goes when the
+ *  operator edits the field. */
+function Typical({ id, mark }: { id: string; mark: TypicalMark }) {
+  return (
+    <span
+      id={id}
+      className={cn(
+        "max-w-prose break-words text-xs text-warn",
+        mark.kind === "placeholder" && "font-semibold",
+      )}
+      data-typical="true"
+      data-typical-kind={mark.kind}
+    >
+      {typicalTag(mark)}
+    </span>
+  );
+}
+
 function NumberInput({
   spec,
   values,
   remembered,
+  typical,
   problem,
   onChange,
   action,
@@ -80,13 +121,16 @@ function NumberInput({
   spec: NumberFieldSpec;
   values: SimFormValues;
   remembered: ReadonlySet<FormKey>;
+  /** Fields the typical-values button filled, with the kind and source each shows. */
+  typical: ReadonlyMap<FormKey, TypicalMark>;
   problem: string | null;
   onChange: (key: FormKey, value: string) => void;
   action?: ReactNode;
 }) {
   const id = useId();
   const name = spec.unit ? `${spec.label} (${spec.unit})` : spec.label;
-  const marked = remembered.has(spec.key);
+  const typicalMark = typical.get(spec.key);
+  const marked = remembered.has(spec.key) || typicalMark !== undefined;
   return (
     <div className="flex min-w-40 flex-1 flex-col gap-1 text-sm">
       <label htmlFor={id}>{name}</label>
@@ -99,12 +143,21 @@ function NumberInput({
           value={values[spec.key]}
           aria-required="true"
           aria-invalid={problem ? true : undefined}
-          aria-describedby={marked ? `${id}-remembered` : undefined}
+          aria-describedby={
+            typicalMark !== undefined
+              ? `${id}-typical`
+              : remembered.has(spec.key)
+                ? `${id}-remembered`
+                : undefined
+          }
           onChange={(event) => onChange(spec.key, event.target.value)}
         />
         {action}
       </div>
-      {marked && <Remembered id={`${id}-remembered`} />}
+      {remembered.has(spec.key) && typicalMark === undefined && (
+        <Remembered id={`${id}-remembered`} />
+      )}
+      {typicalMark !== undefined && <Typical id={`${id}-typical`} mark={typicalMark} />}
       {spec.hint && <span className="text-xs text-fg-faint">{spec.hint}</span>}
       {problem && <span className="text-xs text-bad">{problem}</span>}
     </div>
@@ -277,6 +330,7 @@ export function SimFailureAlert({
  *  shown with their source), values remembered from the last run come back
  *  marked, and Run names whatever is missing. */
 export function SimForm({
+  token,
   tables,
   label,
   edits,
@@ -285,6 +339,8 @@ export function SimForm({
   timings,
   onRun,
 }: {
+  /** The control token, for the typical-values request only. */
+  token: string;
   tables: RomTableValues[];
   label: string;
   edits: RomEdit[];
@@ -320,6 +376,69 @@ export function SimForm({
   // button press on this page, never a remembered default.
   const [applied, setApplied] = useState<PresetFill | null>(null);
 
+  // "Fill typical values" (W09.11): the form fields it filled and the source
+  // each shows (gone once the operator edits that field), the report of the
+  // last click, and the vehicle's values once they have been fetched. Not
+  // stored: a click is an explicit act on this page, never a remembered default.
+  const [typical, setTypical] = useState<ReadonlyMap<FormKey, TypicalMark>>(new Map());
+  const [typicalState, setTypicalState] = useState<
+    | { kind: "idle" }
+    | { kind: "loading" }
+    | { kind: "done"; fill: TypicalFill }
+    | { kind: "failed"; failure: TypicalFailure }
+  >({ kind: "idle" });
+  const typicalCache = useRef<RomTypicalValues | null>(null);
+  const typicalRequest = useRef<AbortController | null>(null);
+  useEffect(() => () => typicalRequest.current?.abort(), []);
+  // The form as last rendered, for the report of what a click replaced when the
+  // values arrive after the click.
+  const latest = useRef(values);
+  useEffect(() => {
+    latest.current = values;
+  });
+
+  function applyTypical(response: RomTypicalValues) {
+    // Reads the form as it is now, not as it was at the click: what the report
+    // says it replaced is what the operator has stated by the time values arrive.
+    const fill = typicalFill(latest.current, response);
+    setValues((current) => ({ ...current, ...fill.values }));
+    setTypical((current) => {
+      const next = new Map(current);
+      for (const [key, mark] of Object.entries(fill.marks)) next.set(key as FormKey, mark);
+      return next;
+    });
+    setRemembered((current) => {
+      const filled = Object.keys(fill.values).filter((key) => current.has(key as FormKey));
+      if (filled.length === 0) return current;
+      const next = new Set(current);
+      for (const key of filled) next.delete(key as FormKey);
+      return next;
+    });
+    setTypicalState({ kind: "done", fill });
+  }
+
+  async function fillTypical() {
+    if (typicalState.kind === "loading") return;
+    if (typicalCache.current) {
+      applyTypical(typicalCache.current);
+      return;
+    }
+    typicalRequest.current?.abort();
+    const controller = new AbortController();
+    typicalRequest.current = controller;
+    setTypicalState({ kind: "loading" });
+    try {
+      const response = await getRomTypicalValues(token, controller.signal);
+      if (controller.signal.aborted) return;
+      typicalCache.current = response;
+      applyTypical(response);
+    } catch (err) {
+      if (controller.signal.aborted) return;
+      // The form is left exactly as it was; only the reason is shown.
+      setTypicalState({ kind: "failed", failure: typicalFailure(err) });
+    }
+  }
+
   function applyPreset(preset: SimPreset) {
     const fill = presetFill(preset, suggestion);
     if (!fill) return;
@@ -347,6 +466,13 @@ export function SimForm({
       next.delete(key);
       return next;
     });
+    // An edited field is the operator's now: its typical tag goes.
+    setTypical((current) => {
+      if (!current.has(key)) return current;
+      const next = new Map(current);
+      next.delete(key);
+      return next;
+    });
     if (key === "rpmEdges") setTypedEdges((current) => ({ ...current, rpm: true }));
     if (key === "loadEdges") setTypedEdges((current) => ({ ...current, load: true }));
   }
@@ -367,6 +493,7 @@ export function SimForm({
   const wotWarning =
     wotFlag !== null && editsTouchWotColumn(edits, tables) ? wotColumnWarning(wotFlag) : null;
   const disabled = blocked !== null;
+  const railMark = typical.get("rail");
   const loadOutside = !load.error && load.edges.length > 1 && loadEdgesError(load.edges) !== null;
   const drawsParsed = parseNumber(values.draws, { integer: true, min: 1, max: null });
   const drawsStated = drawsParsed.kind === "ok" ? String(drawsParsed.value) : "not stated";
@@ -509,6 +636,99 @@ export function SimForm({
           </p>
         </fieldset>
 
+        <fieldset
+          aria-label="Typical values"
+          className="space-y-3 rounded-lg border border-border p-3"
+        >
+          <legend className="px-1 text-sm font-semibold">Typical values for this vehicle</legend>
+          <p className="text-xs text-fg-dim">
+            Fills the stated environment and the learned state below with the values this vehicle
+            declares as typical, each marked with its kind and where it comes from. A value marked
+            placeholder is a number filled so the form can run, not a measurement. It is a click,
+            not a default: it overwrites only the fields it fills (and lists any value of yours it
+            replaced), and never touches the grid, the candidate events, the edges, the draws, the
+            seed or the label. Edit any value afterwards, and its mark goes.
+          </p>
+          <button
+            type="button"
+            className={buttonClass}
+            disabled={typicalState.kind === "loading"}
+            onClick={() => void fillTypical()}
+          >
+            {typicalState.kind === "loading" ? "Fetching typical values…" : "Fill typical values"}
+          </button>
+          <div role="status" aria-label="Typical values state" className="space-y-1 text-xs">
+            {typicalState.kind === "failed" && (
+              <div className="space-y-1 text-warn">
+                <p className="font-semibold">
+                  {typicalState.failure.title}
+                  {typicalState.failure.reason ? ` (${typicalState.failure.reason})` : ""}.
+                </p>
+                <p>{typicalState.failure.message}</p>
+                <p className="text-fg-dim">The form was not changed.</p>
+              </div>
+            )}
+            {typicalState.kind === "done" && (
+              <div className="space-y-1">
+                <p>{typicalHeadline(typicalState.fill)}</p>
+                {typicalState.fill.filled.length > 0 && (
+                  <ul aria-label="Filled typical values" className="list-inside list-disc">
+                    {typicalState.fill.filled.map((item) => (
+                      <li key={item.field}>
+                        {item.label}: <span className="font-num">{item.shown}</span>
+                        {item.kind === "placeholder" && (
+                          <span className="font-semibold text-warn"> (placeholder)</span>
+                        )}
+                        {item.replaced !== null && (
+                          <span className="text-warn">
+                            {" "}
+                            (replaced your <span className="font-num">{item.replaced}</span>)
+                          </span>
+                        )}
+                      </li>
+                    ))}
+                  </ul>
+                )}
+                {placeholderLine(typicalState.fill) !== null && (
+                  <p className="text-warn">{placeholderLine(typicalState.fill)}</p>
+                )}
+                {typicalState.fill.pedalFlag !== null && (
+                  <p>{pedalFlagLine(typicalState.fill.pedalFlag)}</p>
+                )}
+                {typicalState.fill.left.length > 0 && (
+                  <div>
+                    <p className="font-semibold text-warn">
+                      Left empty for you to state ({typicalState.fill.left.length}):
+                    </p>
+                    <ul aria-label="Left empty" className="list-inside list-disc">
+                      {typicalState.fill.left.map((item) => (
+                        <li key={item.field}>
+                          {item.label}: {item.reason}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+                {typicalState.fill.skipped.length > 0 && (
+                  <div>
+                    <p className="font-semibold text-warn">
+                      Not filled ({typicalState.fill.skipped.length}):
+                    </p>
+                    <ul aria-label="Not filled" className="list-inside list-disc">
+                      {typicalState.fill.skipped.map((item) => (
+                        <li key={item.field}>
+                          {item.label}: {item.why}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+                <p className="text-fg-dim">{NOT_TOUCHED}</p>
+              </div>
+            )}
+          </div>
+        </fieldset>
+
         <fieldset className="space-y-3 rounded-lg border border-border p-3">
           <legend className="px-1 text-sm font-semibold">Grid edges</legend>
           <p className="text-xs text-fg-dim">
@@ -604,6 +824,7 @@ export function SimForm({
                 spec={spec}
                 values={values}
                 remembered={remembered}
+                typical={typical}
                 problem={invalidOf(spec.key)}
                 onChange={change}
               />
@@ -612,16 +833,29 @@ export function SimForm({
               <label htmlFor="sim-rail">Rail pressure</label>
               <select
                 id="sim-rail"
-                className={cn(selectClass, remembered.has("rail") && "border-warn")}
+                className={cn(
+                  selectClass,
+                  (remembered.has("rail") || typical.has("rail")) && "border-warn",
+                )}
                 value={values.rail}
                 aria-required="true"
+                aria-describedby={
+                  typical.has("rail")
+                    ? "sim-rail-typical"
+                    : remembered.has("rail")
+                      ? "sim-rail-remembered"
+                      : undefined
+                }
                 onChange={(event) => change("rail", event.target.value)}
               >
                 <option value="">Choose…</option>
                 <option value="working_assumption">The plant&apos;s working assumption</option>
                 <option value="stated">A stated value (kPa)</option>
               </select>
-              {remembered.has("rail") && <Remembered id="sim-rail-remembered" />}
+              {remembered.has("rail") && !typical.has("rail") && (
+                <Remembered id="sim-rail-remembered" />
+              )}
+              {railMark && <Typical id="sim-rail-typical" mark={railMark} />}
               {values.rail === "working_assumption" && (
                 <span className="text-xs text-fg-faint">
                   Runs the plant&apos;s own rail value, and the result says so.
@@ -633,6 +867,7 @@ export function SimForm({
                 spec={RAIL_FIELD}
                 values={values}
                 remembered={remembered}
+                typical={typical}
                 problem={invalidOf("railKpa")}
                 onChange={change}
               />
@@ -651,6 +886,7 @@ export function SimForm({
                 spec={spec}
                 values={values}
                 remembered={remembered}
+                typical={typical}
                 problem={invalidOf(spec.key)}
                 onChange={change}
               />
@@ -684,6 +920,7 @@ export function SimForm({
               }}
               values={values}
               remembered={remembered}
+              typical={typical}
               problem={invalidOf("draws")}
               onChange={change}
             />
@@ -691,6 +928,7 @@ export function SimForm({
               spec={{ ...SEED_FIELD, hint: "the same seed reproduces a run" }}
               values={values}
               remembered={remembered}
+              typical={typical}
               problem={invalidOf("seed")}
               onChange={change}
               action={

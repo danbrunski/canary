@@ -863,3 +863,17 @@ measurement in hand.
     text was not kept, so that this was the same error is an inference from
     the shared path and the same day. If it recurs with a different error,
     reopen it with the text and the load average.
+- [ ] **T01.28 `tests/test_evaluate_detectors_script.py::test_an_input_edited_mid_run_leaves_no_entry_under_either_key[2]`
+  failed once under load.**
+  - **Seen** 2026-10-16 in one full `pytest -m slow` run on the laptop (13 min,
+    566 passed), while several other agent sessions ran tests in parallel. Only
+    the summary line was kept: no error text, no load average.
+  - **Re-run:** passed alone, then 6 of 6 serial repeats of the `[2]` (two-worker)
+    variant. The `[1]` variant passed too.
+  - **Ruled out:** the two-worker variant ships a worker's refusal back through a
+    process pool, and the same commit (`7dedd10`) gave `EvaluationRefusedError` a
+    `__reduce__`. A pickling fault would fail every run, not one in seven, and
+    `tests/test_exceptions_pickle.py` round-trips that class. The test edits an
+    input mid-run, so a timing-dependent race under load is the likelier cause.
+  - **Next time:** keep the failure text and the load average (`uptime`), and
+    run the `[2]` variant under `-n auto` alongside the rest of the slow tier.

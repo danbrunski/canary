@@ -10,7 +10,7 @@ import {
   updateSessionMetadata,
 } from "../api/http";
 import type { RunAction } from "../hooks/useAsyncAction";
-import type { CompanionSettings } from "../hooks/useCompanionSettings";
+import { companionAccess, type CompanionSettings } from "../hooks/useCompanionSettings";
 import { buttonClass, cn, dangerButtonClass, inputClass } from "../styles";
 import type { SessionSummary } from "../types";
 import { currentPiHost, downloadBlob } from "../util/browser";
@@ -82,10 +82,13 @@ export function SessionsCard({
   const syncSelectedToLaptop = () =>
     run("session sync", async () => {
       if (!selectedSessionId) throw new Error("Select a session first.");
-      if (!companion.baseUrl) throw new Error("Enter the companion API URL.");
-      await syncSessionToCompanion(companion.baseUrl, companion.token, selectedSessionId, {
-        pi_host: currentPiHost(),
-        token: token || null,
+      const access = companionAccess(companion, token);
+      await syncSessionToCompanion(access.baseUrl, access.token, selectedSessionId, {
+        // Same origin, this page is served by the companion itself: it syncs
+        // from the Pi it is linked to, and the control token here is its own,
+        // not the Pi's. A remote companion is told where this page came from.
+        pi_host: access.sameOrigin ? null : currentPiHost(),
+        token: access.sameOrigin ? null : token || null,
         pin: syncPin,
         index_with_config: true,
       });

@@ -17,6 +17,7 @@ from src.control.replay_control import ReplayController
 from src.control.sequence_detector import SequenceDetectorController
 from src.daemon.behavior_live import BehaviorLiveState
 from src.daemon.ups import DEFAULT_UPS_STATUS_PATH
+from src.dashboard.identity import identity_payload
 from src.dashboard.readers import (
     echo_config,
     read_accepted_baselines,
@@ -77,6 +78,16 @@ def register_public_routes(
     # remember to wire it (and never shared *between* apps, which would leak
     # one test's truck state into the next).
     vehicle_state_cache = VehicleStateCache()
+
+    @app.get("/identity")
+    def get_identity() -> dict[str, Any]:
+        """Who this daemon is, for discovery on the network (no token, no state).
+
+        ``src.companion.discovery`` sweeps a LAN with this. It is a few
+        string fields built from the config and the host, never the full
+        ``/status``, so a sweep of 254 addresses stays cheap for the Pi.
+        """
+        return identity_payload(config)
 
     @app.get("/status")
     def get_status(view: StatusView = "full") -> dict[str, Any]:

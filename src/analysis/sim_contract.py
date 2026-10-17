@@ -118,6 +118,11 @@ class SimulationRefusalError(ValueError):
         self.reason = reason
         self.message = message
 
+    def __reduce__(self) -> tuple[type, tuple[str, str]]:
+        # Rebuilt from (reason, message), so it crosses a process boundary
+        # (the workbench's spawn child) intact.
+        return (type(self), (self.reason, self.message))
+
 
 # -- units and clocks ---------------------------------------------------------------
 
@@ -702,6 +707,11 @@ class Mode(_Strict):
     score_group: ScoreGroup = "open_loop"
     assimilates: list[Assimilation] = Field(default_factory=list)
     roles: dict[str, Assignment]
+    #: The plant versions a scenario of this mode may run (E08.11: the ROM
+    #: comparison admits the simulator's identified-VE plant beside the
+    #: contract's). Empty: the contract's ``plant_version`` only. Each must be
+    #: a version a subsystem's implementation declares.
+    plant_versions: list[str] = Field(default_factory=list)
 
     @model_validator(mode="after")
     def _group(self) -> Mode:
@@ -768,8 +778,14 @@ class SimContract(_Strict):
         for mode in self.modes:
             _check_mode(mode, by_id, events)
         _check_subsystems(self, by_id)
+        _check_mode_plant_versions(self)
         _check_unstated(self)
         return self
+
+    def admitted_plant_versions(self, mode: Mode) -> list[str]:
+        """The plant versions a scenario of ``mode`` may run: its own list, or
+        the contract's ``plant_version`` alone."""
+        return list(mode.plant_versions) or [self.plant_version]
 
     def subsystem(self, subsystem_id: str) -> Subsystem:
         found = next((s for s in self.subsystems if s.id == subsystem_id), None)
@@ -964,26 +980,43 @@ def _check_subsystems(contract: SimContract, by_id: dict[str, Quantity]) -> None
             _check_internal_model(contract, sub, im, by_id)
 
 
+def _check_mode_plant_versions(contract: SimContract) -> None:
+    """A mode admits only plant versions some stage implements, each once."""
+    declared = {
+        v
+        for sub in contract.subsystems
+        if sub.implementation is not None
+        for v in sub.implementation.plant_versions
+    } | {contract.plant_version}
+    for mode in contract.modes:
+        _unique(f"mode {mode.id} plant version", mode.plant_versions)
+        stray = sorted(set(mode.plant_versions) - declared)
+        if stray:
+            raise ValueError(
+                f"mode {mode.id}: admits plant versions {stray} that no stage implementation "
+                "declares"
+            )
+
+
 def _check_unstated(contract: SimContract) -> None:
     """A boundary left unstated is computed by a declared internal model of it
-    in that mode, for the plant version the contract runs: never by nothing."""
+    in that mode, for every plant version the mode admits: never by nothing."""
     for mode in contract.modes:
         for q_id, assignment in mode.roles.items():
             if assignment.unstated is None:
                 continue
-            found = [
-                im
-                for sub in contract.subsystems
-                for im in sub.internal_models
-                if im.quantity == q_id
-                and mode.id in im.modes
-                and contract.plant_version in im.plant_versions
-            ]
-            if not found:
-                raise ValueError(
-                    f"mode {mode.id}: {q_id} may be left unstated, but no internal model of it "
-                    f"is declared for {mode.id} in plant {contract.plant_version}"
-                )
+            for version in contract.admitted_plant_versions(mode):
+                found = [
+                    im
+                    for sub in contract.subsystems
+                    for im in sub.internal_models
+                    if im.quantity == q_id and mode.id in im.modes and version in im.plant_versions
+                ]
+                if not found:
+                    raise ValueError(
+                        f"mode {mode.id}: {q_id} may be left unstated, but no internal model of "
+                        f"it is declared for {mode.id} in plant {version}"
+                    )
 
 
 def _check_internal_model(
@@ -1315,10 +1348,12 @@ def check_scenario(contract: SimContract, contract_sha256: str, scenario: Scenar
     if needs_plant:
         if scenario.plant is None:
             raise SimulationRefusalError("plant_identity_missing", f"{mode.id} computes the plant")
-        if scenario.plant.version != contract.plant_version:
+        admitted = contract.admitted_plant_versions(mode)
+        if scenario.plant.version not in admitted:
             raise SimulationRefusalError(
                 "plant_version_mismatch",
-                f"scenario plant {scenario.plant.version}, contract {contract.plant_version}",
+                f"scenario plant {scenario.plant.version}; {mode.id} admits {admitted} "
+                f"(contract {contract.plant_version})",
             )
         hardware = contract.hardware(scenario.plant.hardware_configuration)
         declared = {p.id for p in hardware.parameters}

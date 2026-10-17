@@ -15,6 +15,15 @@ evidence is the loop itself on the fake clock: every scenario below runs
 ``tests/fixtures/memory_burst_traces.json`` holds each scenario's counts and
 the sha256 of each normalised trace, captured before the move at 38bb1b69
 (collection code identical to fda3c7b7), in a worktree of that commit.
+Recaptured once since, for deliberate changes (E09.1 verification,
+2026-10-16). Every scenario arms its cycle profile before the loop starts,
+which is a collector restart inside a capture, and that loop's first window
+now opens at once with every member due instead of a config interval (4 s
+here, 60 s on the Pi) later. With that reverted, 28 of the 30 pre-move
+digests still matched; ``generation_change`` and ``passive`` moved (same
+counts, other order) because a generation change now restarts every window
+member's grid at the change instead of keeping a due time from before it
+(``replan_for_generation``).
 A digest says *that* a trace changed, not where: :func:`trace` returns the
 full record, so ``python -c "from tests.test_memory_burst_traces import dump;
 dump('<dir>')"`` (with the fake clock installed by the function itself) writes

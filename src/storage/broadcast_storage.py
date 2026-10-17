@@ -45,6 +45,7 @@ per-sample readers apply it inside the reader
 
 from __future__ import annotations
 
+import functools
 import json
 import logging
 from collections import deque
@@ -505,6 +506,15 @@ class ChangeOnlyStorageError(ValueError):
         super().__init__(message)
         self.reader = reader
         self.sessions = tuple(sessions)
+
+    def __reduce__(self) -> tuple[object, ...]:
+        # Rebuilt from its constructor's arguments, so it survives a process
+        # boundary (pickle); tests/test_exceptions_pickle.py holds every class to it.
+        return (
+            functools.partial(type(self), reader=self.reader, sessions=self.sessions),
+            (str(self),),
+            self.__dict__,
+        )
 
 
 def change_only_refusal(reader: str, sessions: Sequence[str], timeout: float | None) -> str:

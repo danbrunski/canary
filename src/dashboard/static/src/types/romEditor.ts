@@ -101,6 +101,69 @@ export interface RomSimBase {
   reason: string | null;
 }
 
+/** One reason a number is withheld (`rom_levers.Blocker`). `text` is what
+ *  the classifier's `messages` carry; the page shows `messages`, not these. */
+export interface RomLeverBlocker {
+  code: string;
+  text: string;
+  node: string | null;
+  detail: string | null;
+}
+
+/** One lever the edit pulls, with the bytes and tables behind it
+ *  (`rom_levers.LeverEntry`). */
+export interface RomLeverEntry {
+  /** The rom map's table `kind` (`fuel_compensation`, `timing_trim_a`, …),
+   *  or `unmapped` / `checksum` / `constant`. */
+  lever: string;
+  label: string;
+  tables: string[];
+  slots: number[];
+  byte_class: string;
+  start: number;
+  end: number;
+  changed_bytes: number;
+  /** Cells the edit resolved to; null for an image saved elsewhere. */
+  changed_cells: number | null;
+  nodes: string[];
+  blockers: RomLeverBlocker[];
+}
+
+/** One output: whether the edit reaches it and what blocks a number
+ *  (`rom_levers.OutputBlockers`, with the three values `to_dict` adds). */
+export interface RomLeverOutput {
+  output: string;
+  source: "application_model" | "simulated";
+  status: string;
+  levers: string[];
+  blockers: RomLeverBlocker[];
+  assumes_conditioned: string[];
+  refused_if_conditioned: string[];
+  reached: boolean;
+  /** A number can be given: reached, and nothing blocks it. */
+  number: boolean;
+  design_dependent: boolean;
+}
+
+/** `rom_levers.LeverClassification.to_dict()`: which lever an edit pulls and,
+ *  per output, what stops a number. `messages` is the text `tools/rom_sim.py
+ *  inspect` prints for the same edit, one fact per line, in a stable order.
+ *  The classifier's floor is one line ("the edit reaches no output"), so an
+ *  empty `messages` is not something it sends: it is never an all-clear. */
+export interface RomLevers {
+  schema_version: 1;
+  tool: string;
+  tool_version: string;
+  /** The comparison's outcome: `identical`, `evaluable`, `partial`, `unevaluable`. */
+  outcome: string;
+  /** For an image the comparison could not use: the refusal. */
+  reason: string | null;
+  regime: string | null;
+  levers: RomLeverEntry[];
+  outputs: RomLeverOutput[];
+  messages: string[];
+}
+
 /** A 200 from the preview route (`rom_editor.preview_edits`). The candidate
  *  image is never part of it, by design: only its sha256. */
 export interface RomEditPreview {
@@ -115,6 +178,8 @@ export interface RomEditPreview {
   provenance: RomEditProvenance;
   /** The edited tables after the edits, in the `GET …/tables` shape. */
   tables: RomTableValues[];
+  /** Which lever the edit pulls and what blocks a number (E09.14b). */
+  levers: RomLevers;
   sim_base: RomSimBase;
 }
 
@@ -226,6 +291,38 @@ export interface RomSimRequest {
   draws: number;
   /** An integer >= 0. */
   seed: number;
+}
+
+/** What a declared value is (`rom_editor.TYPICAL_KINDS`). */
+export type RomTypicalKind = "typical" | "placeholder";
+
+/** `GET /control/rom/editor/typical-values` (W09.11): the vehicle's declared
+ *  typical value for one request field. `source` is required server-side: an
+ *  unsourced value cannot be loaded, so none reaches the page. */
+export interface RomTypicalValue {
+  value: SimRail;
+  /** `typical`: a sourced figure for the vehicle. `placeholder`: a number the
+   *  simulator reads nowhere, filled only so the form can run; the page tags it
+   *  `placeholder`, never `typical`. */
+  kind: RomTypicalKind;
+  source: string;
+}
+
+/** A fillable field the vehicle declares no typical value for, and why. */
+export interface RomTypicalLeftEmpty {
+  reason: string;
+}
+
+/** The typical-values route's body. Keyed by `RomSimRequest` field name; the
+ *  keys are strings, not `keyof RomSimRequest`, because a newer daemon may
+ *  name a field this dashboard cannot fill (the page says so). The twelve it
+ *  can fill are `lib/romSimTypical.ts` `TYPICAL_TARGETS`. */
+export interface RomTypicalValues {
+  profile: string;
+  file: string;
+  file_sha256: string;
+  values: Record<string, RomTypicalValue>;
+  left_empty: Record<string, RomTypicalLeftEmpty>;
 }
 
 /** `sim_cells.STATUSES`: the status of one output in one cell. */
@@ -367,7 +464,8 @@ export interface SimCellTable {
   cells: SimCell[];
 }
 
-/** `sim_design.summary(design)` plus its grid and assumptions. */
+/** `sim_design.summary(design)` plus its grid. The design's own assumptions are in
+ *  the result's `assumptions`, "design: "-prefixed (E08.10), not here. */
 export interface SimDesignSummary {
   sha256: string;
   kind: string;
@@ -394,7 +492,6 @@ export interface SimDesignSummary {
     load_basis: string;
     environment: Record<string, number | string>;
   };
-  assumptions?: string[];
 }
 
 /** The result's provenance: hashes, plant, seed and draws. Free-form beyond
@@ -424,6 +521,8 @@ export interface RomSimResult {
   synthetic: boolean;
   /** The result's caveats, first and unchanged. */
   caveats: string[];
+  /** Plant working assumptions ("plant working assumption: ..."), the design's
+   *  ("design: ...") and others; `caveats` repeats every one of them. */
   assumptions: string[];
   unresolved: string[];
   inert_parameters: string[];

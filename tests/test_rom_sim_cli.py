@@ -33,8 +33,11 @@ import pytest
 import yaml
 
 from src.analysis.ecu_application import program_sha256
-from src.analysis.rom_effects import CellEdit, RomEffectRefusalError, make_candidate
+from src.analysis.fuel_plant import plant_qualification
+from src.analysis.rom_effects import CellEdit, RomEffectRefusalError, compare_roms, make_candidate
+from src.analysis.rom_levers import classify_edit
 from src.analysis.sim_cells import CellTable
+from src.analysis.sim_montecarlo import load_sim_kit
 from src.analysis.sim_report import render_report
 from src.session import is_synthetic_session
 from tests.rom_fixtures import PROFILE, encrypted_backup_lookalike
@@ -246,7 +249,11 @@ def test_a_synthetic_pair_and_a_grid_design_write_all_three_files(
 def test_the_run_facts_the_report_needs_come_from_the_provenance(spec_run: dict[str, Any]) -> None:
     run = spec_run["result"]["run"]
     assert run["seed"] == 7 and run["edit_route"] == "edit_spec"
-    assert run["plant_version"] == "fuel-mv-1"
+    # The simulator's declared plant (sim_kit.yaml, E08.11), and its own
+    # uncertainty declaration, not fuel-mv-1's.
+    assert run["plant_version"] == "fuel-mv-2"
+    mv2 = hashlib.sha256((PROFILE / "sim_uncertainty_mv2.yaml").read_bytes()).hexdigest()
+    assert run["uncertainty_sha256"] == mv2
     assert run["base"]["label"] == "base.bin" and run["candidate"]["label"] == "cli test spec.yaml"
     assert run["spec_sha256"] == spec_run["result"]["candidate"]["spec_sha256"]
     assert run["edits"] == [
@@ -381,6 +388,119 @@ def test_inspect_judges_a_masked_trim_on_the_bits_the_ecm_reads(
     assert reached["ignition_trim_selected"] != "unchanged"
     old = cell["old"] & 0x7F
     assert cell["pct"] == pytest.approx(-1 / old * 100.0, abs=1e-5) if old else cell["pct"] is None
+
+
+# -- inspect names the lever and what blocks a number (E09.14a) ------------------------------
+
+
+def _expected_messages(world: dict[str, Any], candidate: bytes, **kwargs: Any) -> list[str]:
+    """What ``rom_levers.classify_edit`` says for the same edit: the strings
+    the CLI prints and the ROM Editor shows (E09.14b calls the same function)."""
+    kit = world["kit"]
+    # The plant the CLI runs: sim_kit.yaml's declaration, not the contract's.
+    report = compare_roms(
+        world["image"],
+        candidate,
+        kit.rom_map,
+        kit.model,
+        kit.model_sha256,
+        base_slot=1,
+        candidate_slot=1,
+        slot_source="default_slot",
+        contract=kit.contract,
+        mode="conditional_rom_comparison",
+    )
+    return list(
+        classify_edit(
+            report,
+            rom_map=kit.rom_map,
+            model=kit.model,
+            contract=kit.contract,
+            qualification=plant_qualification(load_sim_kit(world["profile"], None).kit.plant),
+            **kwargs,
+        ).messages
+    )
+
+
+def _trim_spec(world: dict[str, Any]) -> Path:
+    spec = world["root"] / "trim_lever.yaml"
+    spec.write_text(
+        yaml.safe_dump(
+            {
+                "schema_version": 1,
+                "base": {"file": "base.bin", "sha256": world["sha"]},
+                "label": "trim lever",
+                "edits": [{"table": "timing_trim_a", "slot": 1, "cells": [[0, 0]], "add_raw": -1}],
+            }
+        )
+    )
+    return spec
+
+
+def test_inspect_names_the_lever_and_the_strings_equal_the_librarys(
+    world: dict[str, Any], capsys: pytest.CaptureFixture[str]
+) -> None:
+    base = ["--rom", world["root"] / "base.bin", "--sha256", world["sha"]]
+    # A Fuel Comp edit: closed loop, trim authority undecoded.
+    code, payload, _ = _cli(
+        capsys, "inspect", *_profile_args(world), "--edits", world["spec"], *base
+    )
+    assert code == 0
+    levers = payload["levers"]
+    assert [e["lever"] for e in levers["levers"]] == ["fuel_compensation"]
+    assert levers["levers"][0]["changed_cells"] == 1
+    assert "closed loop: trim authority undecoded" in "\n".join(levers["messages"])
+    candidate = (world["root"] / "candidate.bin").read_bytes()
+    assert levers["messages"] == _expected_messages(world, candidate)
+    # Additive: the keys that were there still are.
+    assert {"cells", "reached", "in_run_mode", "ranges"} <= set(payload)
+    # A timing trim: no torque plant.
+    code, payload, _ = _cli(
+        capsys, "inspect", *_profile_args(world), "--edits", _trim_spec(world), *base
+    )
+    assert code == 0
+    assert "no torque plant" in "\n".join(payload["levers"]["messages"])
+    trimmed = make_candidate(
+        world["image"],
+        world["kit"].rom_map,
+        [CellEdit("timing_trim_a", 0, 0, payload["cells"][0]["new"], slot=1)],
+        base_label="x",
+    ).image
+    assert payload["levers"]["messages"] == _expected_messages(world, trimmed)
+
+
+def test_inspect_says_a_changed_byte_outside_the_map_is_not_mapped(
+    world: dict[str, Any], capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The MAF curve at 0xE27E is in no table of ``rom_map.yaml`` (E09.8 maps
+    it), so only an edited image can express it."""
+    image = bytearray(world["image"])
+    image[0xE27E] ^= 0x01
+    saved = world["root"] / "maf.bin"
+    saved.write_bytes(bytes(image))
+    code, payload, _ = _cli(
+        capsys, "inspect", *_profile_args(world), "--candidate-rom", saved,
+        "--rom", world["root"] / "base.bin", "--sha256", world["sha"],
+    )  # fmt: skip
+    assert code == 0
+    messages = payload["levers"]["messages"]
+    assert any("0xE27E" in m and "not mapped" in m for m in messages)
+    assert payload["levers"]["messages"] == _expected_messages(world, bytes(image))
+    assert {o["status"] for o in payload["levers"]["outputs"]} == {"unknown"}
+
+
+def test_inspect_regime_selects_whether_the_closed_loop_blocker_applies(
+    world: dict[str, Any], capsys: pytest.CaptureFixture[str]
+) -> None:
+    candidate = (world["root"] / "candidate.bin").read_bytes()
+    base = ["--rom", world["root"] / "base.bin", "--sha256", world["sha"]]
+    code, payload, _ = _cli(
+        capsys, "inspect", *_profile_args(world), "--edits", world["spec"], *base,
+        "--regime", "fuel_cut",
+    )  # fmt: skip
+    assert code == 0 and payload["levers"]["regime"] == "fuel_cut"
+    assert "closed loop" not in "\n".join(payload["levers"]["messages"])
+    assert payload["levers"]["messages"] == _expected_messages(world, candidate, regime="fuel_cut")
 
 
 # -- refusals -------------------------------------------------------------------------------

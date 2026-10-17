@@ -55,7 +55,7 @@ import json
 import math
 from collections import Counter
 from collections.abc import Callable, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Literal
@@ -84,6 +84,9 @@ from src.analysis.fuel_comp_rom import (
 )
 from src.analysis.fuel_comp_samples import SAMPLES_VERSION, session_samples
 from src.analysis.fuel_plant import (
+    MANIFOLD_READS,
+    MAP_OUTSIDE_VE_FIT,
+    REFUSING_MODELS,
     B06Rules,
     FuelPlantProfile,
     FuelPlantRefusalError,
@@ -103,6 +106,7 @@ from src.analysis.fuel_plant_eval import (
 from src.analysis.lambda_delivery import load_lambda_delivery
 from src.analysis.paired_scenarios import OperatingPoint
 from src.analysis.rom_map import RomMap, load_rom_map
+from src.analysis.sim_kit import sim_plant_version
 from src.atomic_write import atomic_write_text
 from src.paths import BINDINGS_YAML, DIDS_YAML, REPO_ROOT
 from src.signals.afr import load_afr_calibration
@@ -130,6 +134,12 @@ THROTTLE_UNPAIRED = "throttle_unpaired"
 THROTTLE_CLOSED_UNESTIMATED = "throttle_closed_position_unestimated"
 FILL_UNPAIRED = "fill_byte_unpaired"
 MAP_UNRESOLVED = "map_unresolved"
+#: A model-MAP point whose MAP is at or below ambient on the frozen plant but
+#: above it somewhere in the declared bracket of a drawn manifold-model input
+#: (the VE floor at its low end, in practice): a Monte Carlo drawing that input
+#: would refuse it at some draws (``manifold_refusal_varies_by_draw``), so it
+#: is counted, never placed (E08.11).
+MAP_ABOVE_AMBIENT_IN_BRACKET = "manifold_above_ambient_in_bracket"
 #: A grid cell whose target MAP the manifold model cannot reach (fuel-mv-3's
 #: residual-gas floor: the manifold never empties below it).
 LOAD_BELOW_MODEL_FLOOR = "load_below_model_floor"
@@ -141,6 +151,11 @@ THROTTLE_PID_SOURCE = "pid:0x11"
 THROTTLE_DID_SOURCE = "did:0x120F"
 #: The pedal-enrichment flag is not logged: stated, and said so.
 PEDAL_NOT_LOGGED = "stated_zero:not_logged"
+#: A grid point's ``maf_source`` prefix: MAF solved through the plant's
+#: manifold model when the design was built, so frozen in it (E08.10).
+MAF_FROM_MANIFOLD_MODEL = "manifold_model_inverse"
+#: The registry parameter that is the plant's volumetric efficiency.
+_VE_PARAMETER = "manifold_pressure"
 #: The only way a grid's fill-% load becomes airflow, stated by the caller.
 LoadBasis = Literal["fill_fraction_as_manifold_ratio"]
 _LOAD_BASIS_MEANING = {
@@ -165,6 +180,11 @@ class SimDesignRefusalError(ValueError):
     def __init__(self, reason: str, message: str) -> None:
         super().__init__(f"{reason}: {message}")
         self.reason = reason
+
+    def __reduce__(self) -> tuple[object, ...]:
+        # Rebuilt from its constructor's arguments, so it survives a process
+        # boundary (pickle); tests/test_exceptions_pickle.py holds every class to it.
+        return (type(self), (self.reason, str(self)[len(self.reason) + 2 :]), self.__dict__)
 
 
 class _Strict(BaseModel):
@@ -437,9 +457,81 @@ def _registry(profile_dir: Path, registry: TuneRevisionRegistry | None) -> TuneR
 def _plant(
     profile_dir: Path, plant_version: str | None
 ) -> tuple[FuelPlantProfile, str, B06Rules, ResolvedParameters]:
-    plant, plant_sha = load_fuel_plant(profile_dir, plant_version)
+    """The plant a design is built on: ``plant_version``, else the one the
+    simulator declares (``sim_kit.yaml``, E08.11), so a design and the run
+    that reads it agree by default. Never the contract's default."""
+    version = sim_plant_version(profile_dir) if plant_version is None else plant_version
+    plant, plant_sha = load_fuel_plant(profile_dir, version)
     delay = load_b06(profile_dir, plant.delay)
     return plant, plant_sha, delay, resolve_parameters(plant, delay)
+
+
+def _manifold_bracket_corners(plant: FuelPlantProfile) -> list[dict[str, float]]:
+    """Every corner of the declared brackets of the manifold model's
+    bracketed inputs (:data:`~src.analysis.fuel_plant.MANIFOLD_READS` with a
+    working-assumption bracket: VE, and fuel-mv-3's exhaust ratio), from the
+    registry. MAP is monotone in each, so the corners bound it."""
+    corners: list[dict[str, float]] = [{}]
+    for pid in MANIFOLD_READS:
+        if pid not in {p.id for p in plant.registry.parameters}:
+            continue
+        p = plant.registry.get(pid)
+        wa = p.working_assumption
+        if wa is None or p.status == "known" or wa.bracket[0] == wa.bracket[1]:
+            continue
+        lo, hi = (float(b) for b in wa.bracket)
+        corners = [{**c, pid: v} for c in corners for v in (lo, hi)]
+    return corners
+
+
+def _refused_in_bracket(
+    plant: FuelPlantProfile, delay: B06Rules, inputs: PlantInputs
+) -> np.ndarray:
+    """Per sample: True where the plant's own manifold model gives a MAP on
+    the frozen plant but refuses one at some corner of the manifold model's
+    declared brackets. Only a refusing plant (fuel-mv-2/3) can; a capping one
+    never refuses."""
+    n = len(inputs.rpm)
+    out = np.zeros(n, dtype=bool)
+    if plant.manifold_model not in REFUSING_MODELS or not n:
+        return out
+    model = replace(inputs, map_kpa=None)
+    for corner in _manifold_bracket_corners(plant):
+        refusal = predict(
+            model, resolve_parameters(plant, delay, overrides=corner), plant.geometry
+        ).manifold_refusal
+        assert refusal is not None
+        out |= refusal != ""
+    return out
+
+
+def _grid_ve_assumption(plant: FuelPlantProfile, params: ResolvedParameters) -> str:
+    """The VE a grid's MAF is solved at, from the registry the build resolved
+    (E08.10): a grid point's MAF rests on it and is frozen with the design."""
+    p = plant.registry.get(_VE_PARAMETER)
+    wa = p.working_assumption
+    held = (
+        f"the registry's {_VE_PARAMETER} working assumption, bracket "
+        f"[{wa.bracket[0]!r}, {wa.bracket[1]!r}]"
+        if wa is not None and p.status != "known"
+        else f"the registry's {_VE_PARAMETER} ({p.status})"
+    )
+    if params.ve_curve is not None:
+        floor = params.values[_VE_PARAMETER]
+        assert params.ve_fitted_at is not None
+        baseline = plant.baseline.id if plant.baseline is not None else "none"
+        at = (
+            f"on the frozen baseline {baseline}'s VE(rpm), the fit held: "
+            f"{params.ve_curve.describe(floor, fitted_at=params.ve_fitted_at)} (a floor band at "
+            f"{floor!r}, {held})"
+        )
+    else:
+        at = f"at VE {params.values[_VE_PARAMETER]!r} ({held})"
+    return (
+        f"MAF solved {at}, plant {plant.plant_version} {params.manifold_model}; the MAF is frozen "
+        "in the design when it is built: a run that draws VE moves MAP and lambda at a point, "
+        "never its MAF or BFS"
+    )
 
 
 def _inside(path: Path, root: Path) -> bool:
@@ -709,8 +801,10 @@ def build_drive_design(
             sub = frame.iloc[idx]
             dwell = _dwell(sub["t"].to_numpy(dtype=float), rule.window_s)
             eligible_dwell = math.fsum(dwell.tolist())
-            plant_out = predict(plant_inputs(sub), params, plant.geometry)
+            sub_inputs = plant_inputs(sub)
+            plant_out = predict(sub_inputs, params, plant.geometry)
             maps = np.asarray(plant_out.map_kpa, dtype=float)
+            in_bracket = _refused_in_bracket(plant, delay, sub_inputs)
             for k, i in enumerate(idx.tolist()):
                 row = frame.iloc[i]
                 why: str | None = None
@@ -729,6 +823,8 @@ def build_drive_design(
                     why = f"fill_byte:{fills[fill_i[i]].reason}"
                 elif not math.isfinite(float(maps[k])):
                     why = MAP_UNRESOLVED
+                elif in_bracket[k]:
+                    why = MAP_ABOVE_AMBIENT_IN_BRACKET
                 if why is not None or throttle_value is None:
                     assert why is not None
                     placement[why] += 1
@@ -887,6 +983,20 @@ def _edges(name: str, values: Sequence[float]) -> list[float]:
     return edges
 
 
+def _grid_inputs(maf: np.ndarray, rpm: np.ndarray, env: GridEnvironment) -> PlantInputs:
+    """The plant inputs of grid cells at airflow ``maf`` (MAP from the model)."""
+    n = len(rpm)
+    return PlantInputs(
+        pulse_ms=np.full(n, 2.0),
+        ecu_dead_time_ms=np.zeros(n),
+        rpm=rpm,
+        maf_gps=maf,
+        baro_kpa=np.full(n, env.baro_kpa),
+        iat_c=np.full(n, env.iat_c),
+        rail_kpa=np.full(n, env.rail_kpa),
+    )
+
+
 def _maf_for_map(
     target_kpa: np.ndarray,
     rpm: np.ndarray,
@@ -901,19 +1011,7 @@ def _maf_for_map(
     n = len(target_kpa)
 
     def plant_map(maf: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
-        out = predict(
-            PlantInputs(
-                pulse_ms=np.full(n, 2.0),
-                ecu_dead_time_ms=np.zeros(n),
-                rpm=rpm,
-                maf_gps=maf,
-                baro_kpa=np.full(n, env.baro_kpa),
-                iat_c=np.full(n, env.iat_c),
-                rail_kpa=np.full(n, env.rail_kpa),
-            ),
-            params,
-            plant.geometry,
-        )
+        out = predict(_grid_inputs(maf, rpm, env), params, plant.geometry)
         refusal = (
             out.manifold_refusal
             if out.manifold_refusal is not None
@@ -941,6 +1039,33 @@ def _maf_for_map(
     maf = (lo + hi) / 2.0
     m, refusal = plant_map(maf)
     return maf, m, refusal
+
+
+def _refuse_environment_outside_ve_fit(
+    plant: FuelPlantProfile, params: ResolvedParameters, baro_kpa: float, iat_c: float
+) -> None:
+    """A grid states one baro and one IAT for every cell. Outside the frozen
+    VE fit's range every cell would be ``outside_ve_fit``, so the grid is
+    refused by that name rather than built empty: the fit has not seen that
+    altitude or that intake temperature (e.g. a 63 kPa trip on a fit made at
+    79-82 kPa). An rpm outside the fit stays a per-cell count."""
+    curve = params.ve_curve
+    if curve is None:
+        return
+    outside = [
+        f"{name} {value:g} (fit {lo:g}-{hi:g})"
+        for name, value, (lo, hi) in (
+            ("baro_kpa", baro_kpa, curve.baro_kpa),
+            ("iat_c", iat_c, curve.iat_c),
+        )
+        if not lo <= value <= hi
+    ]
+    if outside:
+        raise SimDesignRefusalError(
+            MAP_OUTSIDE_VE_FIT,
+            f"plant {plant.plant_version}'s frozen VE(rpm) fit has not seen {', '.join(outside)}: "
+            "every cell of this grid would be outside it, and the fit is not extrapolated",
+        )
 
 
 def _grid_map_mismatch(map_kpa: float, target_kpa: float) -> str | None:
@@ -1013,7 +1138,8 @@ def build_grid_design(
     reg = _registry(profile_dir, registry)
     base = _base(reg, base_revision)
     assert base.image_sha256 is not None
-    plant, plant_sha, _, params = _plant(profile_dir, plant_version)
+    plant, plant_sha, delay, params = _plant(profile_dir, plant_version)
+    _refuse_environment_outside_ve_fit(plant, params, float(baro_kpa), float(iat_c))
     rom_map = load_rom_map(profile_dir)
     axis_id, unit, scale, offset = _fuel_comp_load_axis(rom_map, profile_dir)
     if unit != "%":
@@ -1048,10 +1174,13 @@ def build_grid_design(
     fraction = np.array([c[3] for c in cells]) / 100.0
     targets = fraction * env.baro_kpa
     maf, maps, refusal = _maf_for_map(targets, rpm, env, plant, params)
+    in_bracket = _refused_in_bracket(plant, delay, _grid_inputs(maf, rpm, env))
     placement: Counter[str] = Counter()
     points: list[DesignPoint] = []
     for k, (i, j, rpm_c, load_c) in enumerate(cells):
         why = str(refusal[k]) or _grid_map_mismatch(float(maps[k]), float(targets[k]))
+        if not why and in_bracket[k]:
+            why = MAP_ABOVE_AMBIENT_IN_BRACKET
         if why:
             placement[why] += 1
             continue
@@ -1067,7 +1196,7 @@ def build_grid_design(
                 cell_col=j,
                 rpm=float(rpm_c),
                 maf_gps=float(maf[k]),
-                maf_source=f"manifold_model_inverse:{params.manifold_model}:{load_basis}",
+                maf_source=f"{MAF_FROM_MANIFOLD_MODEL}:{params.manifold_model}:{load_basis}",
                 baro_kpa=env.baro_kpa,
                 iat_c=env.iat_c,
                 coolant_c=env.coolant_c,
@@ -1116,6 +1245,7 @@ def build_grid_design(
         unplaced_dwell_s={},
         assumptions=[
             _LOAD_BASIS_MEANING[load_basis],
+            _grid_ve_assumption(plant, params),
             "every environmental value, the throttle and the pedal flag are stated in the call",
             "regime unknown: a grid point has no read; the run labels it from its own target",
             "the fill byte at a cell centre is the whole counts either side of it",
@@ -1255,6 +1385,7 @@ def summary(design: SimDesign) -> dict[str, Any]:
 
 
 __all__ = [
+    "MAF_FROM_MANIFOLD_MODEL",
     "SCHEMA_VERSION",
     "SOURCE_PREFIX",
     "DesignPoint",
