@@ -88,6 +88,10 @@ It edits the board in that directory, so give it a scratch copy of the project. 
 5. Refill again, then run DRC with schematic parity.
 6. Refuse the result if any via sits in a pad (`via_in_pad.py`). KiCad's DRC does not flag a
    via in a pad of its own net, and plugged vias raise the board's cost a lot.
+7. Refuse the result if any track lies on an inner layer (`inner_tracks.py`). The inner layers
+   are planes, and DRC does not flag a track cutting one. Freerouting routed signals across
+   In1 although the DSN declares it `(type power)`: its maze search skips an inactive layer
+   only when that layer is a signal layer (found 2026-10-16).
 
 Use the router builds frozen under `~/code/freerouting/logs/jars/` and quote the jar's sha
 with any result. For CANary-PWR the best settings so far (2026-10-15, a773a70ec) are one pass
