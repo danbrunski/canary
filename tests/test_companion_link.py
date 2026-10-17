@@ -194,6 +194,7 @@ def test_status_names_the_configured_pi_and_an_idle_search(
         "selected_at": None,
     }
     assert status["discovery"]["state"] == "idle"
+    assert isinstance(status["discovery"]["mdns"], bool)
     assert status["pi_token_present"] is False
 
 

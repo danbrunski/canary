@@ -8,6 +8,11 @@ A test whose setup + call + teardown took at least ``--threshold`` seconds is
 listed; ``tests/conftest.py`` marks every listed test ``slow``, which the
 one-minute push gate (scripts/ci_gate.sh) skips and GitHub CI still runs.
 Re-run it when the gate creeps past a minute or a slow test gets faster.
+
+Measure on a quiet machine with few workers (``-n 4``): under ``-n auto`` with
+the slow tier running alongside, ordinary tests read 2-4x their own time
+(2026-10-17: 881 listed at -n 12, 433 at -n 4). Every node id passed must
+still exist -- one stale id makes pytest run nothing at all.
 """
 
 from __future__ import annotations

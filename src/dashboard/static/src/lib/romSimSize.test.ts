@@ -124,14 +124,14 @@ describe("whether a run is coarse", () => {
 
 describe("the cost model", () => {
   it("is fitted from the W09.6 laptop timings only, and says how far off it is", () => {
-    // The seven rows of W09.6's table.
-    expect(LAPTOP_TIMINGS).toHaveLength(7);
-    expect(LAPTOP_TIMINGS).toContainEqual({ points: 224, draws: 1000, seconds: 8.5 });
-    expect(LAPTOP_TIMINGS).toContainEqual({ points: 1024, draws: 2000, seconds: 51.1 });
-    expect(COST_FIT.overheadS).toBeGreaterThan(3);
-    expect(COST_FIT.overheadS).toBeLessThan(3.6);
-    expect(COST_FIT.secondsPerPointDraw).toBeGreaterThan(2.2e-5);
-    expect(COST_FIT.secondsPerPointDraw).toBeLessThan(2.5e-5);
+    // The nine rows of W09.6's re-measured table (fuel-mv-2).
+    expect(LAPTOP_TIMINGS).toHaveLength(9);
+    expect(LAPTOP_TIMINGS).toContainEqual({ points: 224, draws: 1000, seconds: 5.7 });
+    expect(LAPTOP_TIMINGS).toContainEqual({ points: 1024, draws: 2000, seconds: 34.2 });
+    expect(COST_FIT.overheadS).toBeGreaterThan(2.4);
+    expect(COST_FIT.overheadS).toBeLessThan(3.1);
+    expect(COST_FIT.secondsPerPointDraw).toBeGreaterThan(1.4e-5);
+    expect(COST_FIT.secondsPerPointDraw).toBeLessThan(1.8e-5);
     // The stated error is the real worst residual against its own rows.
     for (const row of LAPTOP_TIMINGS) {
       const error = (laptopSeconds(row.points, row.draws) - row.seconds) / row.seconds;
@@ -154,10 +154,10 @@ describe("the cost model", () => {
   });
 
   it("names the nearest measured row as a labelled reference, not a prediction", () => {
-    expect(nearestTiming(224, 1000)).toEqual({ points: 224, draws: 1000, seconds: 8.5 });
+    expect(nearestTiming(224, 1000)).toEqual({ points: 224, draws: 1000, seconds: 5.7 });
     const line = referenceLine(224, 1000);
     expect(line).toContain("Reference, not a prediction");
-    expect(line).toContain("the dev laptop took 8.5 s for 224 points × 1,000 draws (W09.6)");
+    expect(line).toContain("the dev laptop took 5.7 s for 224 points × 1,000 draws (W09.6)");
   });
 });
 
@@ -214,7 +214,7 @@ describe("this server's own timings", () => {
     expect(scale).toBeLessThan(2.3);
     const estimate = estimateCost(224, 1000, slow);
     expect(estimate.measured?.seconds).toBeCloseTo(laptopSeconds(224, 1000) * scale, 9);
-    expect(estimate.measured?.runs).toBe(7);
+    expect(estimate.measured?.runs).toBe(LAPTOP_TIMINGS.length);
   });
 
   it("have no scale before the first run, and the estimate then falls back to the reference", () => {
@@ -231,14 +231,14 @@ describe("this server's own timings", () => {
 
   it("use the stored rate when there is one, naming the runs it comes from", () => {
     const runs = [
-      { points: 224, draws: 1000, seconds: 17 },
-      { points: 224, draws: 1000, seconds: 17 },
+      { points: 224, draws: 1000, seconds: 11 },
+      { points: 224, draws: 1000, seconds: 11 },
     ];
     const estimate = estimateCost(224, 1000, runs);
-    // 17 s against the fit's ~8.5 s at this size: about twice the fit.
-    expect(estimate.measured?.seconds).toBeCloseTo(17, 9);
+    // 11 s against the fit's ~5.8 s at this size: about twice the fit.
+    expect(estimate.measured?.seconds).toBeCloseTo(11, 9);
     const text = costText(estimate);
-    expect(text.headline).toContain("About 17 s from your last 2 runs on this server");
+    expect(text.headline).toContain("About 11 s from your last 2 runs on this server");
     expect(text.headline).not.toContain("Not yet measured");
     expect(text.detail).toMatch(/This server ran \d\.\d\d× the dev-laptop fit/);
   });
@@ -246,26 +246,26 @@ describe("this server's own timings", () => {
   it("do not let a coarse run distort a fine estimate beyond the stated model error", () => {
     // The server is the dev laptop, and only a coarse run (a 200-draw row) has
     // been timed. The fine estimate must stay within the fit's own stated error
-    // of what the laptop measured for the fine run (8.5 s).
-    const coarseOnly = [{ points: 224, draws: 200, seconds: 4.5 }];
+    // of what the laptop measured for the fine run (5.7 s).
+    const coarseOnly = [{ points: 224, draws: 200, seconds: 3.3 }];
     const estimate = estimateCost(224, 1000, coarseOnly);
-    const measured = 8.5;
+    const measured = 5.7;
     const off = Math.abs((estimate.measured?.seconds ?? 0) - measured) / measured;
     expect(off).toBeLessThanOrEqual(COST_FIT.worstOver - COST_FIT.worstUnder);
     // And the other way round: a fine run does not distort the coarse estimate.
-    const fineOnly = [{ points: 224, draws: 1000, seconds: 8.5 }];
+    const fineOnly = [{ points: 224, draws: 1000, seconds: 5.7 }];
     const coarse = estimateCost(224, 200, fineOnly);
-    const offCoarse = Math.abs((coarse.measured?.seconds ?? 0) - 4.5) / 4.5;
+    const offCoarse = Math.abs((coarse.measured?.seconds ?? 0) - 3.3) / 3.3;
     expect(offCoarse).toBeLessThanOrEqual(COST_FIT.worstOver - COST_FIT.worstUnder);
     // A ratio, not a rate: a seconds-per-point-draw taken from the coarse run
-    // alone (4.5 s / 44,800) would put 224 x 1,000 at 100 s.
-    expect(estimate.measured?.seconds).toBeLessThan(20);
+    // alone (3.3 s / 44,800) would put 224 x 1,000 at 16.5 s, three times the measured 5.7 s.
+    expect(estimate.measured?.seconds).toBeLessThan(10);
   });
 
   it("the median shrugs off one odd run", () => {
-    const base = { points: 224, draws: 1000, seconds: 8.5 };
+    const base = { points: 224, draws: 1000, seconds: 5.7 };
     const runs = [base, base, base, { ...base, seconds: 80 }];
-    expect(hostScale(runs)).toBeCloseTo(8.5 / laptopSeconds(224, 1000), 9);
+    expect(hostScale(runs)).toBeCloseTo(5.7 / laptopSeconds(224, 1000), 9);
   });
 });
 
@@ -284,9 +284,9 @@ describe("cancel", () => {
       seconds: laptopSeconds(224, 1000),
       measured: false,
     });
-    const measured = expectedRun(224, 1000, [{ points: 224, draws: 1000, seconds: 17 }]);
+    const measured = expectedRun(224, 1000, [{ points: 224, draws: 1000, seconds: 11 }]);
     expect(measured.measured).toBe(true);
-    expect(measured.seconds).toBeCloseTo(17, 9);
+    expect(measured.seconds).toBeCloseTo(11, 9);
   });
 });
 

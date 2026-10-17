@@ -82,6 +82,13 @@ uprev-usb = [
     # lazily, so capture-backed protocol tests do not need this extra.
     "pyusb>=1.2.1",
 ]
+companion = [
+    # mDNS browse for a Pi advertising `_canary._tcp` (scripts/install_pi.sh
+    # writes the avahi service). Optional: without it discovery still finds a
+    # Pi by name, wired address and a LAN sweep (src/companion/discovery.py),
+    # which is all WSL can do anyway (no multicast under NAT networking).
+    "zeroconf>=0.131",
+]
 
 [project.scripts]
 # MCP server entry point — installed onto $PATH so the systemd unit and

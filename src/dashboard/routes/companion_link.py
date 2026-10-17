@@ -47,6 +47,7 @@ from src.companion.discovery import (
     DiscoveredPi,
     base_url_of,
     discover,
+    mdns_available,
     probe,
 )
 from src.companion.library import CanaryLibrary, LibrarySession
@@ -225,7 +226,7 @@ def register_companion_link_routes(
             "queued_actions": len(library.list_actions(status="queued")),
             "pi": link.pi(),
             "pi_token_present": pi_token is not None,
-            "discovery": link.discovery.to_dict(),
+            "discovery": {**link.discovery.to_dict(), "mdns": mdns_available()},
         }
 
     @app.get("/companion/discover")

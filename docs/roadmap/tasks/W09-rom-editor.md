@@ -776,7 +776,12 @@ W09.6 is the orchestrator's own, on the ROM machine.
       mocks reuse the vitest fixtures (`src/test/romLibraryFixtures.ts`,
       `romSimFixtures.ts`) by import, so there is one copy; the sim result's
       `cells` validates against `sim_cells.CellTable` (rechecked 2026-10-15).
-      Not covered: phone project, drag-select, keyboard selection (vitest has
+      The phone-width run (412 × 915, touch) covers the preview with its levers block, the
+      Simulate form after Fill typical values, and a result: no element past the right edge
+      outside a deliberate scroller (2026-10-17; it failed first on the result's design list,
+      where an unbreakable 40-character hash stretched the `1fr` column to x = 442, fixed with
+      `minmax(0, 1fr)` and word breaking in `SimResults`, `SimCaveats` and `SimMaps`).
+      Not covered: drag-select, keyboard selection (vitest has
       them), a real daemon, real images.
     - *Laptop half done 2026-10-15. Still open: the Pi measurement and the Pi
       browser walkthrough.* `tests/test_rom_editor_private_rom.py`
@@ -1029,6 +1034,38 @@ W09.6 is the orchestrator's own, on the ROM machine.
         - `rom_editor._template` forced to LTFT 0 (case 3: fails on the
           learned-state assertion, and without it on the hand-built
           `run_paired` pulse comparison at (0, byte 191)).
+      - **Quiet-machine re-measure on fuel-mv-2 (2026-10-17), the table the page now
+        quotes.** The same real `spawn` child and the same light-load Fuel Comp edit
+        (seed 20261015, 4,096 MiB `RLIMIT_AS`) as the fuel-mv-1 table, one `measure2.py`
+        run per row, twice (three times for the form grid at 200 draws); 1-minute load 0.6–1.6
+        on 12 CPUs, the laptop's own runs only. Wall time is the mean, child peak RSS the
+        largest of the runs. **Points** are the grid's nominal cells (what the form can state
+        before a run), and the design that ran is smaller because points outside the
+        identified VE fit are not placed.
+
+        | grid | nominal points | placed | draws | wall (mean) | child peak RSS |
+        |---|---|---|---|---|---|
+        | Coarse preset (8 × 7) | 56 | 53 | 200 | 2.8 s (2.5–3.1) | 173 MiB |
+        | Coarse preset | 56 | 53 | 1,000 | 3.9 s (3.6–4.2) | 178 MiB |
+        | form 16 × 14 | 224 | 201 | 200 | 3.3 s (3.1–3.6) | 180 MiB |
+        | form 16 × 14 | 224 | 201 | 1,000 | 5.7 s (5.6–5.7) | 269 MiB |
+        | form 16 × 14 | 224 | 201 | 2,000 | 9.6 s (9.0–10.2) | 369 MiB |
+        | 16 × 16 | 256 | 231 | 200 | 3.9 s (3.8–4.1) | 192 MiB |
+        | 16 × 16 | 256 | 231 | 1,000 | 7.6 s (7.1–8.0) | 282 MiB |
+        | 32 × 32 (the cap) | 1,024 | 945 | 1,000 | 21.9 s (21.8–21.9) | 645 MiB |
+        | 32 × 32 (the cap) | 1,024 | 945 | 2,000 | 34.2 s (34.2–34.3) | 1,119 MiB |
+
+        - **The fuel-mv-1 figures are gone, not kept as history.** Its form grid took 8.5 s at
+          1,000 draws and the cap 51 s; on fuel-mv-2 they are 5.7 s and 34 s. That is the plant,
+          not the machine: it places about 10 % fewer points, and VmPeak in the child is
+          1.9–2.8 GiB (inside the 4 GiB ceiling at the cap, 2.8 GiB at 2,000 draws).
+        - **The "tests got slower after E09.2c" worry was load.** The 2026-10-16 numbers
+          (7.8 s at 200 draws, 13.1 s at 1,000) were taken at load 2.9–4.7 and the 2026-10-16
+          proxy at 15.7–16.4. Quiet, the form grid takes 3.3 s and 5.7 s.
+        - `romSimSize.ts` `LAPTOP_TIMINGS` is these nine rows (previously seven) and `COST_FIT`
+          refits to **2.7 s + 1.6e-5 s × points × draws**, within −12 % to +12 % of its own rows
+          (was 3.3 s + 2.4e-5, ±25 %). The page's "no run under N points was timed" line now
+          says 56. `MAX_DRAWS` stays 2,000 until the Pi numbers.
       - *Re-measured on fuel-mv-2 after the E08.11 rework (2026-10-16), default form
         grid, 201 placed points, light-load Fuel Comp edit, seed 20261015, through the real
         child (`measure.py`, `run_off_loop`):* 200 draws 7.8 s, child peak RSS 189 MiB,

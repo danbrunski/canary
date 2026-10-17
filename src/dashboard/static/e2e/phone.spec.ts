@@ -9,6 +9,7 @@ import {
 } from "../src/test/romLibraryFixtures";
 import type { DtcReportResponse, PowerStatusResponse } from "../src/types";
 import { mockDaemon } from "./fixtures/mockDaemon";
+import { overflowReport } from "./fixtures/overflow";
 import { mockWorkbench } from "./fixtures/workbenchRoutes";
 
 /**
@@ -107,42 +108,6 @@ test.beforeEach(async ({ page }) => {
   );
   await page.route(/\/control\/power(\?|$)/, (route) => route.fulfill({ json: POWER }));
 });
-
-async function overflowReport(page: Page) {
-  return page.evaluate(() => {
-    const viewport = window.innerWidth;
-    const scrollsSideways = (el: Element) => {
-      const style = getComputedStyle(el);
-      return (
-        (style.overflowX === "auto" || style.overflowX === "scroll") &&
-        el.scrollWidth > el.clientWidth
-      );
-    };
-    const offenders: string[] = [];
-    for (const el of Array.from(document.body.querySelectorAll("*"))) {
-      const rect = el.getBoundingClientRect();
-      if (rect.width === 0 || rect.height === 0) continue;
-      if (rect.right <= viewport + 1) continue;
-      let parent = el.parentElement;
-      let contained = false;
-      while (parent) {
-        if (scrollsSideways(parent)) {
-          contained = true;
-          break;
-        }
-        parent = parent.parentElement;
-      }
-      if (contained) continue;
-      const label = el.getAttribute("aria-label") ?? el.textContent?.trim().slice(0, 40) ?? "";
-      offenders.push(`${el.tagName.toLowerCase()} right=${Math.round(rect.right)} "${label}"`);
-    }
-    return {
-      viewport,
-      documentWidth: document.scrollingElement?.scrollWidth ?? 0,
-      offenders: offenders.slice(0, 10),
-    };
-  });
-}
 
 for (const { tab, hash } of BOTTOM_BAR_PAGES) {
   test(`${tab} page has no horizontal page scroll at 412px`, async ({ page }) => {
