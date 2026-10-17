@@ -8,6 +8,7 @@
 #   4. ses_import.py: add the router's tracks and vias
 #   5. refill and DRC with schematic parity; prints the violation counts
 #   6. via_in_pad.py: exits 1 if any via sits in a pad
+#   7. inner_tracks.py: exits 1 if any track cuts an inner plane
 # KICAD_BIN overrides the KiCad bin directory (default: the Windows install, driven from WSL).
 # FREEROUTING_ARGS adds router options, e.g. --router.scoring.start_ripup_costs=1500.
 set -euo pipefail
@@ -42,5 +43,10 @@ EOF
 # Vias in pads need plugging at the fab and are not allowed (via_in_pad.py); KiCad's DRC misses them.
 if ! "$bin/python.exe" "$(win "$here/via_in_pad.py")" "$(win "$board")" 2>&1 | grep -v "memory leak"; then
     echo "autoroute: REFUSED, vias in pads (see above)"
+    exit 1
+fi
+# The inner layers are planes; DRC misses a track across one, and Freerouting routes signals there.
+if ! "$bin/python.exe" "$(win "$here/inner_tracks.py")" "$(win "$board")" 2>&1 | grep -v "memory leak"; then
+    echo "autoroute: REFUSED, tracks on inner layers (see above)"
     exit 1
 fi
