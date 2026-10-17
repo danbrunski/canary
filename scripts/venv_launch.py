@@ -44,7 +44,10 @@ NO_BOOTSTRAP_HELP = (
     "never create .venv or install packages; refuse by name instead "
     "(the script still re-launches under an existing .venv)"
 )
-MANUAL_INSTALL = "python3 scripts/install_deps.py"
+#: What the desk launcher installs: the dev toolchain plus the mDNS browse
+#: for companion mode (``zeroconf``), never Torch.
+INSTALL_EXTRAS = "dev,companion"
+MANUAL_INSTALL = f"python3 scripts/install_deps.py --extras {INSTALL_EXTRAS}"
 
 
 def venv_python(venv: Path = VENV_DIR) -> Path:
@@ -92,7 +95,16 @@ def launch_plan(
 ) -> Launch:
     """Decide how to run ``script``, from the facts alone."""
     python = venv_python(venv)
-    install = (executable, str(INSTALLER), "--venv", str(venv), "--torch", "none")
+    install = (
+        executable,
+        str(INSTALLER),
+        "--venv",
+        str(venv),
+        "--extras",
+        INSTALL_EXTRAS,
+        "--torch",
+        "none",
+    )
     if running_in(venv, prefix):
         missing = [name for name in VENV_MARKER_MODULES if not module_present(name)]
         if not missing:

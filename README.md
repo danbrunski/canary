@@ -139,9 +139,10 @@ repo's `.venv`, and on a fresh checkout it first creates that venv with
 
 It also runs in **companion mode** (`--companion auto`, the default): the
 daemon keeps a library under `<state-dir>/library` (`--library-root` to put it
-elsewhere), searches the network once at startup for a CANary Pi (the
-conventional names, the wired `192.168.137.2`, then a sweep of your LAN), and
-links to the one it finds. The launcher prints the result on one `companion :`
+elsewhere), searches the network once at startup for a CANary Pi (an mDNS
+browse for `_canary._tcp` where multicast reaches, the conventional names,
+the wired `192.168.137.2`, then a sweep of your LAN), and links to the one
+it finds. The launcher prints the result on one `companion :`
 line; the dashboard's Companion card shows the linked Pi, lets you pick one
 when several were found, and syncs sessions or publishes models to it. Your
 `CANARY_CONTROL_TOKEN` is handed to the daemon as the *Pi's* token only. The

@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import enum
 import ipaddress
+import sys
+import types
 from typing import Any
 
 import pytest
@@ -103,19 +106,97 @@ def test_sweep_candidates_are_bounded() -> None:
     assert out[254] == ("http://10.1.0.1:8000", "sweep")
 
 
-def test_candidates_are_env_then_names_then_wired_then_sweep_without_duplicates() -> None:
+def test_candidates_are_env_mdns_names_wired_then_sweep_without_duplicates() -> None:
     out = d.candidates(
         environ={"CANARY_HOST": "http://192.168.0.42:8000"},
+        browse=lambda: [("http://192.168.0.42:8000", "mdns"), ("http://192.168.0.7:8000", "mdns")],
         names=("canary.local", "nowhere.local"),
         resolve=lambda name: name == "canary.local",
         networks=[ipaddress.IPv4Network("192.168.0.40/30")],
     )
     assert out == [
         ("http://192.168.0.42:8000", "env"),
+        ("http://192.168.0.7:8000", "mdns"),
         ("http://canary.local:8000", "name"),
         ("http://192.168.137.2:8000", "wired"),
         ("http://192.168.0.41:8000", "sweep"),
     ]
+
+
+def test_mdns_browse_is_empty_without_zeroconf(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setitem(sys.modules, "zeroconf", None)  # makes the import raise
+    assert d.mdns_available() is False
+    assert d.mdns_candidates(sleep=lambda _: None) == []
+
+
+class _FakeZeroconf:
+    """Enough of the zeroconf API for a browse: one announced service."""
+
+    closed = False
+
+    def __init__(self, *, ip_version: object) -> None:
+        self.ip_version = ip_version
+
+    def get_service_info(self, service_type: str, name: str, timeout: int) -> Any:
+        assert service_type == d.MDNS_SERVICE and timeout > 0
+        if name == "ghost._canary._tcp.local.":
+            return None
+        return types.SimpleNamespace(
+            port=8000,
+            parsed_addresses=lambda version: ["192.168.0.7", "192.168.0.7"],
+        )
+
+    def close(self) -> None:
+        self.closed = True
+
+
+def _fake_zeroconf_module() -> types.ModuleType:
+    module = types.ModuleType("zeroconf")
+    change = enum.Enum("ServiceStateChange", "Added Removed Updated")
+
+    class ServiceBrowser:
+        def __init__(self, zc: _FakeZeroconf, service: str, handlers: list[Any]) -> None:
+            self.cancelled = False
+            for name, state in (
+                ("canary-8974._canary._tcp.local.", change.Added),
+                ("ghost._canary._tcp.local.", change.Added),
+                ("gone._canary._tcp.local.", change.Removed),
+            ):
+                for handler in handlers:
+                    handler(zc, service, name, state)
+
+        def cancel(self) -> None:
+            self.cancelled = True
+
+    module.IPVersion = enum.Enum("IPVersion", "V4Only V6Only All")  # type: ignore[attr-defined]
+    module.ServiceStateChange = change  # type: ignore[attr-defined]
+    module.ServiceBrowser = ServiceBrowser  # type: ignore[attr-defined]
+    module.Zeroconf = _FakeZeroconf  # type: ignore[attr-defined]
+    return module
+
+
+def test_mdns_browse_names_each_announced_daemon_once_by_ipv4(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setitem(sys.modules, "zeroconf", _fake_zeroconf_module())
+    waited: list[float] = []
+    assert d.mdns_available() is True
+    out = d.mdns_candidates(wait=0.25, sleep=waited.append)
+    assert out == [("http://192.168.0.7:8000", "mdns")]
+    assert waited == [0.25]
+
+
+def test_mdns_browse_is_empty_when_no_multicast_socket_can_be_opened(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = _fake_zeroconf_module()
+
+    def refuse(*, ip_version: object) -> _FakeZeroconf:
+        raise OSError("no multicast")
+
+    module.Zeroconf = refuse  # type: ignore[attr-defined]
+    monkeypatch.setitem(sys.modules, "zeroconf", module)
+    assert d.mdns_candidates(sleep=lambda _: None) == []
 
 
 def test_discover_probes_in_parallel_and_keeps_one_entry_per_daemon_best_source_first() -> None:

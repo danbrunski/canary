@@ -321,9 +321,13 @@ takes the control token like the rest of `/control/*`.
 
 At startup, with `companion.discover` on and no Pi configured
 (`companion.pi_host`) or remembered, the daemon searches the network once in
-the background: `CANARY_HOST`, the conventional names, the wired address
-`192.168.137.2`, then a sweep of each attached /24 (`companion.discover_sweep`),
-each candidate probed with `GET /identity`. A lone daemon found is linked
+the background: `CANARY_HOST`, an mDNS browse for `_canary._tcp` (the Pi
+installer has avahi advertise it; needs the `companion` extra, `zeroconf`, and
+a host that receives multicast, which WSL under NAT networking does not), the
+conventional names, the wired address `192.168.137.2`, then a sweep of each
+attached /24 (`companion.discover_sweep`), each candidate probed with
+`GET /identity`. `discovery.mdns` in `GET /companion/status` says whether the
+browse is available. A lone daemon found is linked
 (`source: discovered`); several are listed for the dashboard to choose from.
 The link is remembered in `<library>/pi.json` and wins over `companion.pi_host`.
 

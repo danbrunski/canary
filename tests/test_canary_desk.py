@@ -865,6 +865,8 @@ def test_with_no_venv_the_installer_creates_one_without_torch(tmp_path: Path) ->
         str(venv_launch.INSTALLER),
         "--venv",
         str(venv),
+        "--extras",
+        "dev,companion",
         "--torch",
         "none",
     )

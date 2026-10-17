@@ -1,8 +1,8 @@
 """Find CANary daemons on the network, from a laptop or another Pi.
 
-The companion (``scripts/canary_companion.py``) and the desk launcher
-(``scripts/canary_desk.py``) use this to run in companion mode without the
-operator typing the Pi's address. Standard library only.
+The desk daemon (``scripts/canary_desk.py``, ``companion.enabled``) uses this
+to run in companion mode without the operator typing the Pi's address.
+Standard library, plus ``zeroconf`` when the ``companion`` extra is installed.
 
 A daemon is recognised by its unauthenticated ``GET /identity``
 (``src.dashboard.identity``); a daemon older than that route is recognised by
@@ -14,12 +14,16 @@ same daemon found later (``hostname`` is the identity):
 
 1. ``CANARY_HOST`` / ``CANARY_URL`` in the environment (the operator's own
    ``~/.canary/env``);
-2. the conventional names (``canary.local``; the installer names a Pi
+2. an mDNS browse for ``_canary._tcp`` (``scripts/install_pi.sh`` has avahi
+   advertise it), when ``zeroconf`` is importable and this host receives
+   multicast at all (WSL under NAT networking does not: the browse is empty
+   there, not an error);
+3. the conventional names (``canary.local``; the installer names a Pi
    ``canary-<mac4>`` and mDNS adds ``.local``), when this host can resolve
    them at all (WSL cannot, see network-and-provisioning N4.3);
-3. the wired address every Pi answers on its Ethernet link
+4. the wired address every Pi answers on its Ethernet link
    (``192.168.137.2``, AGENTS.md);
-4. a sweep of each directly attached IPv4 network, bounded to
+5. a sweep of each directly attached IPv4 network, bounded to
    ``SWEEP_LIMIT`` addresses, skipping loopback, link-local, Docker and
    bridge interfaces. The sweep is 254 TCP connects on a home LAN; it is
    what works from WSL, where multicast DNS does not.
@@ -32,6 +36,8 @@ import json
 import os
 import socket
 import subprocess
+import threading
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -47,6 +53,10 @@ CONVENTIONAL_NAMES: tuple[str, ...] = ("canary.local",)
 IDENTITY_PATH = "/identity"
 STATUS_FALLBACK_PATH = "/status?view=compact"
 ENV_VARS: tuple[str, ...] = ("CANARY_HOST", "CANARY_URL")
+#: The DNS-SD service the Pi installer advertises through avahi.
+MDNS_SERVICE = "_canary._tcp.local."
+#: How long a browse listens; announcements answer within a few hundred ms.
+MDNS_BROWSE_SECONDS = 1.5
 #: Prefixes shorter than this are not swept (a /16 is 65k connects).
 SWEEP_MIN_PREFIX = 22
 SWEEP_LIMIT = 1024
@@ -54,7 +64,7 @@ SKIPPED_INTERFACE_PREFIXES: tuple[str, ...] = ("lo", "docker", "br-", "veth", "v
 #: What a probe returns: HTTP status (0 when nothing answered) and the JSON body.
 Fetch = Callable[[str, float], tuple[int, Any]]
 
-Source = str  # "env" | "name" | "wired" | "sweep" | "configured"
+Source = str  # "env" | "mdns" | "name" | "wired" | "sweep" | "configured"
 
 
 @dataclass(frozen=True)
@@ -146,6 +156,57 @@ def env_candidates(environ: Mapping[str, str] = os.environ) -> list[tuple[str, S
         if value:
             out.append((base_url_of(value), "env"))
     return out
+
+
+def mdns_available() -> bool:
+    """Whether the ``companion`` extra (``zeroconf``) is installed."""
+    try:
+        import zeroconf  # noqa: F401
+    except ImportError:
+        return False
+    return True
+
+
+def mdns_candidates(
+    *,
+    wait: float = MDNS_BROWSE_SECONDS,
+    service: str = MDNS_SERVICE,
+    port: int = DEFAULT_PORT,
+    sleep: Callable[[float], None] = time.sleep,
+) -> list[tuple[str, Source]]:
+    """Every address a ``_canary._tcp`` announcement names, by IPv4 (WSL cannot
+    resolve ``.local``); ``[]`` without ``zeroconf`` or without multicast."""
+    try:
+        from zeroconf import IPVersion, ServiceBrowser, ServiceStateChange, Zeroconf
+    except ImportError:
+        return []
+    found: list[str] = []
+    lock = threading.Lock()
+
+    def on_change(
+        zc: Zeroconf, service_type: str, name: str, state_change: ServiceStateChange
+    ) -> None:
+        if state_change is not ServiceStateChange.Added:
+            return
+        info = zc.get_service_info(service_type, name, timeout=int(wait * 1000))
+        if info is None:
+            return
+        with lock:
+            for address in info.parsed_addresses(IPVersion.V4Only):
+                found.append(base_url_of(address, info.port or port))
+
+    try:
+        zc = Zeroconf(ip_version=IPVersion.V4Only)
+    except OSError:  # no multicast socket on this host
+        return []
+    try:
+        browser = ServiceBrowser(zc, service, handlers=[on_change])
+        sleep(wait)
+        browser.cancel()
+    finally:
+        zc.close()
+    with lock:
+        return [(url, "mdns") for url in dict.fromkeys(found)]
 
 
 def name_candidates(
@@ -266,10 +327,16 @@ def candidates(
     sweep: bool = True,
     networks: Iterable[ipaddress.IPv4Network] | None = None,
     port: int = DEFAULT_PORT,
+    browse: Callable[[], Sequence[tuple[str, Source]]] | None = None,
 ) -> list[tuple[str, Source]]:
-    """Every address to try, in priority order, without duplicates."""
+    """Every address to try, in priority order, without duplicates.
+
+    ``browse`` is the mDNS step (``mdns_candidates`` by default, which listens
+    for ``MDNS_BROWSE_SECONDS``); pass ``lambda: []`` to skip it.
+    """
     ordered: list[tuple[str, Source]] = []
     ordered.extend(env_candidates(environ))
+    ordered.extend(mdns_candidates(port=port) if browse is None else browse())
     ordered.extend(name_candidates(names, resolve=resolve))
     if wired:
         ordered.append((base_url_of(wired, port), "wired"))
