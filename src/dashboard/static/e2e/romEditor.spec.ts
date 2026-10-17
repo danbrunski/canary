@@ -8,6 +8,7 @@ import { ENTRY_K106, ENTRY_TUNED, ENTRY_UNRECORDED } from "../src/test/romLibrar
 import { buildRequest, buildSimResult } from "../src/test/romSimFixtures";
 import type { RomEditPreviewRequest, RomSimRequest } from "../src/types/romEditor";
 import { mockDaemon } from "./fixtures/mockDaemon";
+import { overflowReport } from "./fixtures/overflow";
 import { mockRomApi, specYaml, type RomApi, type RomApiOptions } from "./fixtures/romEditorApi";
 
 /**
@@ -502,6 +503,54 @@ test("simulate: Fill typical values fills the stated environment with its source
   });
   expect(api.calls.filter((call) => call.path.endsWith("/typical-values"))).toHaveLength(1);
   expect(api.unexpected).toEqual([]);
+});
+
+test.describe("at phone width (412 x 915)", () => {
+  test.use({ viewport: { width: 412, height: 915 }, hasTouch: true });
+
+  test("the preview's levers, the Simulate form after Fill typical values, and a result have no horizontal page scroll", async ({
+    page,
+  }) => {
+    await open(page, {
+      library: [],
+      uploads: { [TUNED_FILE]: { ...ENTRY_TUNED, created: true } },
+      simulate: buildSimResult(),
+    });
+    // Everything the page shows is checked at each stage: nothing may poke past the right edge
+    // outside a box that scrolls sideways on purpose.
+    const noSidewaysPage = async (stage: string) => {
+      const report = await overflowReport(page);
+      expect(report.documentWidth, `${stage}: document width`).toBeLessThanOrEqual(report.viewport);
+      expect(report.offenders, `${stage}: elements past the right edge`).toEqual([]);
+    };
+    await openAndEdit(page, "light load 2 % richer");
+    await page.getByRole("button", { name: "Preview", exact: true }).click();
+    await expect(page.getByRole("region", { name: "Preview result" })).toBeVisible();
+    await expect(
+      page.getByRole("region", { name: "What this edit can and cannot show" }),
+    ).toBeVisible();
+    await noSidewaysPage("preview with levers");
+
+    const form = page.getByRole("form", { name: "Simulate form" });
+    await form.scrollIntoViewIfNeeded();
+    await form.getByRole("button", { name: "Fill typical values" }).click();
+    await expect(form.getByRole("status", { name: "Typical values state" })).toContainText(
+      "Filled 12 values",
+    );
+    await expect(form.locator("[data-typical]")).toHaveCount(13);
+    await noSidewaysPage("Simulate form after Fill typical values");
+
+    await form.getByRole("radio", { name: /Fuel Comp axes/ }).check();
+    await form.getByLabel("Rail pressure", { exact: true }).selectOption("working_assumption");
+    await form.getByRole("radio", { name: /Fresh flash resets trims/ }).check();
+    await form.getByLabel("RPM edges (rpm)").fill("200, 600, 1000, 1400");
+    await form.getByLabel("Load edges (% fill)").fill("3.5, 10.7, 17.8, 25, 32.2");
+    await form.getByLabel("Draws", { exact: true }).fill("200");
+    await form.getByLabel("Seed", { exact: true }).fill("20261015");
+    await form.getByRole("button", { name: "Run simulation" }).click();
+    await expect(page.getByRole("region", { name: "Simulation result" })).toBeVisible();
+    await noSidewaysPage("simulation result");
+  });
 });
 
 test("an unrecorded base is preview only: Simulate is off and gives the reason", async ({

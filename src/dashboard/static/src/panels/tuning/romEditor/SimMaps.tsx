@@ -303,7 +303,7 @@ function CellDetail({ table, cell }: { table: SimCellTable; cell: SimCell }) {
         {tick(cell.col_value, cell.col_breakpoint)} {cols}
       </h4>
       {cell.pairs > 0 ? (
-        <dl className="grid grid-cols-[max-content_1fr] gap-x-3 gap-y-1">
+        <dl className="grid grid-cols-[max-content_minmax(0,1fr)] gap-x-3 gap-y-1 break-words">
           <dt className="text-fg-dim">points, pairs, weight</dt>
           <dd>
             n {cell.n_points} {cell.n_points === 1 ? "point" : "points"} · {cell.pairs} pairs ·

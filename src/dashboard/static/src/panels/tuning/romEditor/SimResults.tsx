@@ -39,7 +39,7 @@ function Provenance({
   return (
     <section aria-label="Design and provenance" className="space-y-3">
       <h3 className="text-base font-semibold">Design and provenance</h3>
-      <dl className="grid grid-cols-[max-content_1fr] gap-x-3 gap-y-1 text-sm">
+      <dl className="grid grid-cols-[max-content_minmax(0,1fr)] gap-x-3 gap-y-1 break-words text-sm">
         <dt className="text-fg-dim">design sha256</dt>
         <dd>
           <Hash>{design.sha256}</Hash>

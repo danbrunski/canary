@@ -107,7 +107,7 @@ export function SimCaveats({ result, run }: { result: RomSimResult; run: SimRunC
 
       <div className="space-y-1">
         <h4 className="text-sm font-semibold">Images</h4>
-        <dl className="grid grid-cols-[max-content_1fr] gap-x-3 gap-y-1 text-sm">
+        <dl className="grid grid-cols-[max-content_minmax(0,1fr)] gap-x-3 gap-y-1 break-words text-sm">
           <dt className="text-fg-dim">base</dt>
           <dd>
             {run.base.label}
@@ -172,7 +172,7 @@ export function SimCaveats({ result, run }: { result: RomSimResult; run: SimRunC
 
       <div className="space-y-1">
         <h4 className="text-sm font-semibold">Design coverage, draws and seed</h4>
-        <dl className="grid grid-cols-[max-content_1fr] gap-x-3 gap-y-1 text-sm">
+        <dl className="grid grid-cols-[max-content_minmax(0,1fr)] gap-x-3 gap-y-1 break-words text-sm">
           <dt className="text-fg-dim">design</dt>
           <dd>
             {result.design.points} points on a {table.grid} grid (<Code>{table.design_kind}</Code>),{" "}

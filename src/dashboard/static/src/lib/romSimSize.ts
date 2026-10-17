@@ -34,12 +34,12 @@ export type SimPreset = "coarse" | "fine";
  *  Fuel-Comp-restore entry records that "three draws give only a coarse
  *  per-cell spread, so cell quantiles should be read from" the 200-draw run,
  *  and the E08.5/E08.7 real-image runs and W09.6's low row all use 200. At
- *  224 points W09.6 measured 4.5 s for 200 draws against 8.5 s for 1,000: the
+ *  224 points W09.6 measured 3.3 s for 200 draws against 5.7 s for 1,000: the
  *  child's start-up, not the draws, dominates a small run, so fewer than 200
  *  would save almost nothing.
  *
  *  Fine 1,000: E08.3's stated speed target (1,000 draws) and the draw count
- *  W09.6 measured as its reference row (224 points x 1,000 draws, 8.5 s on
+ *  W09.6 measured as its reference row (224 points x 1,000 draws, 5.7 s on
  *  the dev laptop). 2,000 is `MAX_DRAWS`, the cap, not a recommendation. */
 export const PRESET_DRAWS: Record<SimPreset, number> = { coarse: 200, fine: 1000 };
 
@@ -162,18 +162,27 @@ export interface TimedRun {
   seconds: number;
 }
 
-/** W09.6's "Laptop half done" table: the real `spawn` child (start-up
- *  included) on the dev laptop (Intel Core Ultra 9 185H, WSL2), the form's
- *  Fuel Comp grid and the 16 x 16 and 32 x 32 ones. The only timings the
- *  reference line may quote. */
+/** W09.6's re-measured table (2026-10-17, plant fuel-mv-2): the real `spawn`
+ *  child (start-up included) on the dev laptop (Intel Core Ultra 9 185H,
+ *  WSL2, 1-minute load 0.6-1.6), the mean of two or three runs per row. The
+ *  size is the grid's nominal cell count, which is what the form can state
+ *  before a run; the design that actually runs is smaller (201 of 224, 231 of
+ *  256, 945 of 1,024, 53 of 56), because points outside the identified fit
+ *  are not placed. The rows: a Coarse-preset grid (8 x 7), the form's Fuel
+ *  Comp grid (16 x 14) and the 16 x 16 and 32 x 32 ones. The only timings the
+ *  reference line may quote. The fuel-mv-1 table (8.5 s at the form grid and
+ *  1,000 draws, 51 s at the cap) was taken at the plant's 0.7 working
+ *  volumetric efficiency and is gone. */
 export const LAPTOP_TIMINGS: readonly TimedRun[] = [
-  { points: 224, draws: 200, seconds: 4.5 },
-  { points: 224, draws: 1000, seconds: 8.5 },
-  { points: 224, draws: 2000, seconds: 11.9 },
-  { points: 256, draws: 200, seconds: 4.5 },
-  { points: 256, draws: 1000, seconds: 9.1 },
-  { points: 1024, draws: 1000, seconds: 34.1 },
-  { points: 1024, draws: 2000, seconds: 51.1 },
+  { points: 56, draws: 200, seconds: 2.8 },
+  { points: 56, draws: 1000, seconds: 3.9 },
+  { points: 224, draws: 200, seconds: 3.3 },
+  { points: 224, draws: 1000, seconds: 5.7 },
+  { points: 224, draws: 2000, seconds: 9.6 },
+  { points: 256, draws: 200, seconds: 3.9 },
+  { points: 256, draws: 1000, seconds: 7.6 },
+  { points: 1024, draws: 1000, seconds: 21.9 },
+  { points: 1024, draws: 2000, seconds: 34.2 },
 ];
 
 export interface CostFit {
@@ -188,7 +197,7 @@ export interface CostFit {
 }
 
 /** t = overhead + rate x points x draws, least squares on the relative error
- *  (each row weighted 1 / t), so a 4.5 s row counts as much as a 51 s one. */
+ *  (each row weighted 1 / t), so a 3 s row counts as much as a 34 s one. */
 export function fitCost(rows: readonly TimedRun[]): CostFit {
   let sw = 0;
   let sx = 0;
@@ -227,7 +236,7 @@ export function laptopSeconds(points: number, draws: number, fit: CostFit = COST
 /** The fit, as the page states it. */
 export function describeFit(fit: CostFit = COST_FIT): string {
   const pct = (value: number) => `${value > 0 ? "+" : ""}${Math.round(value * 100)} %`;
-  return `${fit.overheadS.toFixed(1)} s + ${fit.secondsPerPointDraw.toExponential(1)} s × points × draws, fitted to the ${LAPTOP_TIMINGS.length} dev-laptop timings in W09.6 (least squares on relative error; against those rows it is off by ${pct(fit.worstUnder)} to ${pct(fit.worstOver)}, and no run under 224 points was timed)`;
+  return `${fit.overheadS.toFixed(1)} s + ${fit.secondsPerPointDraw.toExponential(1)} s × points × draws, fitted to the ${LAPTOP_TIMINGS.length} dev-laptop timings in W09.6 (least squares on relative error; against those rows it is off by ${pct(fit.worstUnder)} to ${pct(fit.worstOver)}, and no run under 56 points was timed)`;
 }
 
 /** The measured row closest to this size in points x draws (on a log scale). */
