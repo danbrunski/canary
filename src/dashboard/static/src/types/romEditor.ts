@@ -266,8 +266,11 @@ export type SimCandidateEvents = "none" | "ecu_reflash";
  *  trim B; `clear`: it reads trim A. Nothing logs it, so a run states it. */
 export type SimHighDet = "set" | "clear";
 
-/** `fallback`: the knock sensor fault state (0xFFFF479D bit 7). Neither it nor
- *  HI DET implies the other; a run states both. */
+/** `fallback`: the knock sensor fault state (0xFFFF479D bit 7). A run states
+ *  both, but `fallback` with HI DET `clear` is refused (`sim_refused`,
+ *  `high_det_forced_by_ks_fault`): with the KS fault present the firmware sets
+ *  HI DET every pass while the engine runs, so that pairing is not a running
+ *  steady state. The form cannot submit it. */
 export type SimKnockControl = "active" | "fallback";
 
 /** A stated rail pressure, or the plant's own working value, said so. */
@@ -528,12 +531,22 @@ export interface SimProvenance {
 // -- Ignition timing (E09.7) --------------------------------------------------------------
 
 /** `ecu_state_models.TimingStatus`: `delta_if_no_clamp` is the change if no
- *  clamp binds (the design has no logged timing to check headroom against). */
-export type TimingStatus = "computed" | "delta_if_no_clamp" | "unevaluable";
+ *  clamp binds (the design has no logged timing to check headroom against);
+ *  `range` is a change known only as an interval (`delta_min` .. `delta_max`,
+ *  `delta` null): the 1B24 charge word is not computed, so 0xFFFF27C6 is swept
+ *  over its plausible band (`charge_word_1b24_unresolved`). */
+export type TimingStatus = "computed" | "delta_if_no_clamp" | "range" | "unevaluable";
+
+/** Whether the 0xFFFF279A term is zero at the cell, held equal on both ROMs, or
+ *  not modelled (`term_279a_unmodelled`). */
+export type Term279a = "zero" | "held_equal" | "unmodelled";
 
 /** One cell of the trims' own 16 x 16 grid (`paired_scenarios.ignition_timing_cells`).
  *  `rpm_word` is the axis byte x 4 and `x` the load axis byte. `delta` is in degrees
- *  BTDC (one trim count is one degree); null when the cell is unevaluable. */
+ *  BTDC (one trim count is one degree); null when the cell is unevaluable, and null
+ *  in a `range` cell, where `delta_min` .. `delta_max` (and `candidate_min` ..
+ *  `candidate_max` when an absolute base is known) carry the interval. For an exact
+ *  answer the ends equal `delta`. */
 export interface TimingCell {
   row: number;
   col: number;
@@ -542,7 +555,19 @@ export interface TimingCell {
   base: number | null;
   candidate: number | null;
   delta: number | null;
+  delta_min?: number | null;
+  delta_max?: number | null;
+  candidate_min?: number | null;
+  candidate_max?: number | null;
   trim_term_delta: number | null;
+  /** 0xFFFF27C6's own change, [min, max] over the plausible band of the
+   *  1B24 charge word; null when it cannot be computed (`term_1512_unmodelled`). */
+  term_27c6_delta?: [number, number] | null;
+  term_279a?: Term279a | null;
+  /** The inputs of the charge word 0xFFFF1B24 this edit moves, e.g. "0xFFFF1736 via
+   *  X": `[]` when 1B24 is held equal (nothing moved), null when not known or not
+   *  applicable (a pair whose X is not computed). */
+  charge_word_routes?: string[] | null;
   status: TimingStatus;
   reasons: string[];
   /** The trim the ECM reads here with the stated latch; null in the coolant blend band. */
@@ -551,7 +576,10 @@ export interface TimingCell {
 
 export interface TimingSummary {
   cells: number;
+  /** Includes the `range` cells. */
   changed: number;
+  /** Cells whose change is known only as a range. */
+  ranged?: number;
   unevaluable: number;
   changed_trim_not_read: number;
   reasons: string[];
@@ -561,7 +589,13 @@ export interface TimingSummary {
 export interface TimingPointOutcome {
   status: TimingStatus;
   delta: number | null;
+  delta_min?: number | null;
+  delta_max?: number | null;
   trim_term_delta: number | null;
+  term_27c6_delta?: [number, number] | null;
+  term_279a?: Term279a | null;
+  /** As on `TimingCell`: the charge word's moved inputs, `[]`, or null. */
+  charge_word_routes?: string[] | null;
   reasons: string[];
   x_base: number | null;
   x_candidate: number | null;
@@ -593,6 +627,9 @@ export interface IgnitionTimingBlock {
   units: string;
   side: string;
   trims_changed: boolean;
+  /** An edit touched a table or calibration byte of 0xFFFF27C6's chain or of
+   *  0xFFFF279A's inputs (computed on the trim grid, no longer refused). */
+  base_timing_tables_changed?: boolean;
   /** `timing_input_changed:<node>` / `unknown_bytes_changed`: bytes outside the trims. */
   other_inputs_changed: string[];
   /** What the change assumes held equal on both ROMs. */

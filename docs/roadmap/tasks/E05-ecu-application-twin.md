@@ -735,7 +735,11 @@ ECU replica.
       itself stays unnamed (no node writes `11CB`/`27C4`/`1203`; the
       `0x04E5B0` slew and `1766`'s gating flags are unmodelled). The HI DET
       gate (`0xFFFF4782` bit 5, engine state machine `0x027CC4` state 1) is
-      recorded on `high_det_latch`. Still unnamed: `26E8` and the
+      recorded on `high_det_latch`; since E09.7 part B the simulator refuses
+      knock fallback with HI DET clear (`high_det_forced_by_ks_fault`), and
+      the 27C6 / 279A nodes are on `ignition_timing`'s path (27C6 computed per
+      ROM, `0xFFFF1B24` observed and swept over a band; the twin profile's
+      awaited set gains the chain's seven hypothesized words, no request). Still unnamed: `26E8` and the
       `175C`/`1736` corrections inside `26F6`, `26C0`'s Target AFR column
       dependence, `11CB`, `1D3E`, `174A`, `1344`, `1215` and the rest of the list.
       Owed (**truck**): one window set of `0xFFFF15DA`–`15DE`, `17C6`,

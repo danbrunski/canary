@@ -74,8 +74,10 @@ from src.analysis.sim_montecarlo import DESIGN_ASSUMPTION_PREFIX
 
 #: Bump when the page's content or layout changes meaning. 2: working- and
 #: design-assumption lists in the caveat block (E08.10). 3: an ECU-side
-#: ignition timing section when the run states a timing state (E09.7).
-TOOL_VERSION = "3"
+#: ignition timing section when the run states a timing state (E09.7). 4: a
+#: timing change known only as a range (``delta_min`` .. ``delta_max``, the
+#: swept 0xFFFF1B24) is shown as the range (E09.7 part B).
+TOOL_VERSION = "4"
 TOOL: Final = "sim_report"
 
 #: The two caveats every Monte Carlo result carries (E08.3) and the report
@@ -1406,6 +1408,16 @@ def _detail(table: CellTable) -> str:
     return "".join(out)
 
 
+def _timing_change(row: Mapping[str, Any]) -> str:
+    """A cell's or outcome's timing change: the number, the range ``lo..hi``
+    when only a range is known (status ``range``), or nothing."""
+    if row.get("delta") is not None:
+        return f"{row['delta']:+d}"
+    if row.get("status") == "range":
+        return f"{row['delta_min']:+d}..{row['delta_max']:+d}"
+    return ""
+
+
 def _timing(timing: Mapping[str, Any] | None) -> str:
     """E09.7's ECU-side timing: the cells where it changes or a changed trim
     is not read, with the reasons, the conditions it holds under, and the
@@ -1428,14 +1440,17 @@ def _timing(timing: Mapping[str, Any] | None) -> str:
         f"<p>HI DET latch {'set' if state.get('high_det') else 'clear'}, knock control "
         f"{_e(state.get('knock_control'))} ({_e(state.get('source'))}); cells read at "
         f"{_g(timing.get('cells_at', {}).get('coolant_c'))} degC. {summary.get('changed', 0)} of "
-        f"{summary.get('cells', 0)} trim cells change timing; {summary.get('unevaluable', 0)} "
+        f"{summary.get('cells', 0)} trim cells change timing ({summary.get('ranged', 0)} known "
+        f"only as a range); {summary.get('unevaluable', 0)} "
         f"unevaluable; {summary.get('changed_trim_not_read', 0)} carry a changed trim the ECM "
         "does not read in this state.</p>",
     ]
     rows = [
         c
         for c in timing.get("cells", [])
-        if c["delta"] not in (None, 0) or set(c["reasons"]) - {"clamp_headroom_unknown"}
+        if c["delta"] not in (None, 0)
+        or c.get("status") == "range"
+        or set(c["reasons"]) - {"clamp_headroom_unknown"}
     ]
     if rows:
         lines.append(
@@ -1443,7 +1458,7 @@ def _timing(timing: Mapping[str, Any] | None) -> str:
             "<th>change (deg)</th><th>status</th><th>reasons</th></tr></thead><tbody>"
         )
         for c in rows:
-            delta = "" if c["delta"] is None else f"{c['delta']:+d}"
+            delta = _timing_change(c)
             lines.append(
                 f"<tr><td>{c['row']}</td><td>{c['col']}</td><td>{c['rpm_word']}</td>"
                 f"<td>{c['x']}</td><td>{_e(delta)}</td><td>{_e(c['status'])}</td>"
@@ -1473,7 +1488,7 @@ def _timing_points(points: Sequence[Mapping[str, Any]]) -> str:
     ]
     for p in points:
         for o in p.get("outcomes", []):
-            delta = "" if o.get("delta") is None else f"{o['delta']:+d}"
+            delta = _timing_change(o)
             term = "" if o.get("trim_term_delta") is None else f"{o['trim_term_delta']:+d}"
             lines.append(
                 f"<tr><td>{p['point']}</td><td>{_g(p['rpm'])}</td><td>{_g(p['coolant_c'])}</td>"

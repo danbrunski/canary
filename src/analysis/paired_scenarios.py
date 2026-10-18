@@ -72,13 +72,25 @@ import pandas as pd
 
 from src.analysis.ecu_application import ApplicationModel, load_application_model
 from src.analysis.ecu_state_models import (
+    CHARGE_INDEX_SHIFT,
+    CHARGE_Q_DIVISOR,
+    CHARGE_Q_SHIFT,
     TRIM_COLD_AT_OR_BELOW,
     TRIM_RPM_AXIS_SCALE,
     TRIM_WARM_ABOVE,
+    BaseTimingCals,
+    BaseTimingTables,
     SelectedTrim,
+    Term279aTables,
+    byte_curve8,
+    byte_curve16,
     coolant_rescaled,
+    rpm_byte_11ce,
     selected_timing_trim,
     timing_delta,
+    timing_retard_map_3630,
+    timing_term_27c6_steady,
+    timing_term_1512,
     trim_lookup,
 )
 from src.analysis.fuel_plant import (
@@ -1629,14 +1641,59 @@ TIMING_OUTPUT = "ignition_timing_deg"
 #: The application-model output it is.
 TIMING_MODEL_OUTPUT = "ignition_timing"
 KnockControl = Literal["active", "fallback"]
-#: A change that moves X moves 0xFFFF27C6 (rom_map base_timing_rate_map and
-#: curve 0xCD9B read X), which is not computed: only the trim term's change is.
-LOAD_TERM_UNMODELLED = "base_timing_load_term_unmodelled"
-#: A change that moves the Target AFR lookup moves the enrichment retard
-#: 0xFFFF174A, which is not computed.
+#: The enrichment retard 0xFFFF174A (0x04C9D8) is not computed, and the change
+#: moves it: phi moved (the gated Target AFR byte 0xFFFF174B and the
+#: multiplier 0xFFFF26C0 feed g), or X moved (its cap 0xFFFF174C reads X)
+#: where either ROM's 174B is at or above the threshold (cal 0x8792 / 0x8793
+#: by the HI DET latch), the below-threshold gain (cal 0x8797 / 0x8798) is not
+#: 0, or 174B is not known (:class:`EnrichmentRetardCals`).
 ENRICHMENT_RETARD_UNMODELLED = "enrichment_retard_unmodelled"
+#: Cal 0x8538 is not 0 on an image whose 0xFFFF27C6 must be computed:
+#: 0xFFFF1512 = 0xFFFF26F2 x cal 0x8538 (0x04B96C), and 0xFFFF26F2 is
+#: unidentified. 0 on every listed image, so 0xFFFF1512 = 0 there.
+TERM_1512_UNMODELLED = "term_1512_unmodelled"
+#: 0xFFFF279A is not provably 0 on both ROMs at the point (map 0x9B09 or curve
+#: 0xCC33 reads non-zero there) and the change moves one of its inputs: BFS
+#: (0xFFFF1038 feeds 0xFFFF26D0 and 0xFFFF17FA) or one of its tables. Its
+#: ramps 0xFFFF1300 / 0xFFFF15E5 and 0xFFFF17FA are not computed.
+TERM_279A_UNMODELLED = "term_279a_unmodelled"
+#: 0xFFFF27C6's change moves across the swept 0xFFFF1B24 band
+#: (:data:`CHARGE_WORD_BAND`): the timing change is a range, not a number.
+CHARGE_WORD_UNRESOLVED = "charge_word_1b24_unresolved"
+#: The change moves an input of 0xFFFF1B24 at the point, so 1B24 is swept on
+#: each ROM independently, not held equal (:func:`charge_word_routes` names
+#: which route moved it).
+CHARGE_WORD_INPUTS_MOVED = "charge_word_inputs_moved"
+#: 0xFFFF1B24 is a q14 equivalence-ratio-like product (0x04B98A:
+#: max(0, 0xFFFF26F6 - 0xFFFF26E8) x the enrichment multiplier 0xFFFF26C0
+#: >> 14; 0x4000 = 1.0), and 0xFFFF26F6 - 0xFFFF26E8 = 0x4000 +
+#: 0xFFFF175C + 0xFFFF1736. 0xFFFF1736 reads X (map 0x9724) and 0xFFFF175C
+#: reads BFS 0xFFFF1038 (curves 0xD34D / 0xD345); both are stateful and not
+#: modelled, 0xFFFF26E8 is unidentified, and 0xFFFF26C0 follows the Target
+#: AFR lookup. So 1B24 is never computed, and it changes whenever a change
+#: moves X, BFS or phi while 0xFFFF175C / 0xFFFF1736 / the multiplier are
+#: not neutral. It is swept over this band of 0x4000: held EQUAL on both ROMs
+#: only when nothing moves it (a base-timing table edit at fixed X, BFS and
+#: phi), else swept on each ROM INDEPENDENTLY (``charge_word_inputs_moved``).
+#: Its only effects on 0xFFFF27C6 are the charge step b = (1B24 / 29) >> 5
+#: (0xFFFF15F7) and the curve index r. The band is a stated assumption, not a
+#: measured bound: 1B24 has not been read on the truck (the hypothesized
+#: ``mem:ECM_TIMING_CHARGE_WORD`` awaits a live read).
+CHARGE_WORD_NEUTRAL = 0x4000
+CHARGE_WORD_BAND = (0.7, 1.3)
+#: b steps every 29 x 32 = 928 counts of 0xFFFF1B24; r every 64.
+CHARGE_STEP_COUNTS = CHARGE_Q_DIVISOR << CHARGE_Q_SHIFT
+CHARGE_INDEX_STEP_COUNTS = 1 << CHARGE_INDEX_SHIFT
+#: 0xFFFF26F2 is unidentified; it is multiplied by cal 0x8538, which must be 0
+#: for 0xFFFF1512 to be computed (:data:`TERM_1512_UNMODELLED`), so any value
+#: gives the same 0.
+_UNIDENTIFIED_26F2 = 0
 #: No HI DET latch / knock-control state was stated: no timing is given.
 TIMING_STATE_UNSTATED = "timing_state_unstated"
+#: Knock control in fallback with HI DET clear: the KS fault sets the latch on
+#: every pass while its gate is open, in states 2-4 of the engine state machine
+#: 0x027CC4 ([inferred] engine running) (0x04A928), so it is refused.
+HIGH_DET_FORCED_BY_KS_FAULT = "high_det_forced_by_ks_fault"
 #: Coolant byte = degC + 50 (DID 0x1101; 0xFFFF1079 is its cycle copy).
 COOLANT_BYTE_OFFSET = 50
 BYTE_MAX_VALUE = 0xFF
@@ -1650,13 +1707,23 @@ class TimingState:
     - ``high_det``: 0xFFFF283F bit 6, the latch UpRev logs as HI DET. Warm, it
       makes 0xFFFF1777 read trim B (else A).
     - ``knock_control``: ``fallback`` is 0xFFFF479D bit 7 (retard target
-      0xFFFF13FE = cal 0x821F << 8 = 0xFB00, -5 deg). It sets HI DET only
-      inside the gate at 0x04A914-0x04A926 (0xFFFF2876 bit 6 set, 0xFFFF4782
-      bit 5 clear); outside it 0x04A956-0x04A96E writes bit 6 = cal 0x86DE
-      bit 7, which is 0 on the listed images. So every pairing of the two is
-      reachable and both are stated, neither implied by the other. The knock
-      retard itself is a held term; the trim-difference branch (0x04A512)
-      fires on one cycle and is not a steady state."""
+      0xFFFF13FE = cal 0x821F << 8 = 0xFB00, -5 deg).
+
+    Fallback with HI DET clear is refused (``high_det_forced_by_ks_fault``):
+    the latch logic runs while its gate is open (0xFFFF2876 bit 6, set by the
+    knock task on its first pass, and 0xFFFF4782 bit 5 clear), and inside it
+    0x04A928-0x04A990 sets bit 6 on every pass while 0xFFFF479D bit 7 (the KS
+    fault) is set. 0xFFFF4782 is the cycle copy of 0xFFFF4783, written only
+    by the engine state machine 0x027CC4: bit 5 set in state 1 (the run-down
+    after a stop), clear in states 2-4 (0xFFFF282A bit 5, the VTC and KS
+    diagnosis enable: the engine running or starting [inferred meaning, the
+    structure is read from the listing]). So with the engine running the
+    fallback forces HI DET; outside the gate 0x04A956-0x04A96E writes bit 6 =
+    cal 0x86DE bit 7 (0 on the listed images), which is not a running steady
+    state. HI DET set with knock control active, and both clear, stay
+    reachable (the latch holds after the fault clears). The knock retard
+    itself is a held term; the trim-difference branch (0x04A512) fires on
+    one cycle and is not a steady state."""
 
     high_det: bool
     knock_control: KnockControl
@@ -1669,16 +1736,70 @@ class TimingState:
             )
         if not self.source.strip():
             raise SimulationRefusalError("timing_state_unsourced", "say where the state comes from")
+        if self.knock_control == "fallback" and not self.high_det:
+            raise SimulationRefusalError(
+                HIGH_DET_FORCED_BY_KS_FAULT,
+                "knock control in fallback (0xFFFF479D bit 7, the KS fault) sets HI DET on every "
+                "pass of the latch logic (0x04A928-0x04A990) while its gate is open, and the "
+                "gate is open in states 2-4 of the engine state machine 0x027CC4 (0xFFFF4782 "
+                "bit 5 clear; [inferred] engine running), with cal 0x8ADC bit 7 set (pinned): "
+                "fallback with HI DET clear is not a running steady state. State high_det set "
+                "with fallback",
+            )
+
+
+@dataclass(frozen=True)
+class EnrichmentRetardCals:
+    """The calibration bytes that decide whether the enrichment retard
+    0xFFFF174A = max(0, min(0xFFFF174C, g)) (0x04C9D8) can be nonzero, by
+    rom_map id. 0xFFFF174C reads X ((X - 0xFFFF174D) x 0xFFFF174E /
+    (0x80 - 0xFFFF174D), capped at 174E), so an X move changes it wherever g
+    is not 0. g is 0 below the threshold only when the below-threshold gain
+    is 0: there it is ((0xFFFF174B << 7) - 0xFFFF26C0) x that gain. The HI
+    DET latch picks the pair (0x04C9EE)."""
+
+    #: Cal 0x8792 / 0x8793 (``enrichment_retard_threshold`` / ``_high_det``).
+    threshold_clear: int
+    threshold_set: int
+    #: Cal 0x8797 / 0x8798 (``enrichment_retard_below_gain`` / ``_high_det``).
+    below_gain_clear: int
+    below_gain_set: int
+
+    def may_retard(self, lookup_byte: int | None, *, high_det: bool) -> bool:
+        """Whether 0xFFFF174A may be nonzero at this gated Target AFR byte
+        0xFFFF174B (``None``: not known at the point, so it may)."""
+        threshold, gain = (
+            (self.threshold_set, self.below_gain_set)
+            if high_det
+            else (self.threshold_clear, self.below_gain_clear)
+        )
+        return lookup_byte is None or gain != 0 or lookup_byte >= threshold
+
+
+@dataclass(frozen=True)
+class BaseTimingImage:
+    """One image's 0xFFFF27C6 chain tables and calibration bytes, the tables
+    of 0xFFFF279A's inputs and the enrichment retard's thresholds, each read
+    by its rom_map id (:func:`base_timing_image`)."""
+
+    tables: BaseTimingTables
+    cals: BaseTimingCals
+    #: Cal 0x8538 (rom_map ``base_timing_1512_gain``).
+    cal_8538: int
+    retard: Term279aTables
+    enrichment: EnrichmentRetardCals
 
 
 @dataclass(frozen=True)
 class TimingTables:
-    """One image's timing trims (map ``slot``) and their axes, raw bytes."""
+    """One image's timing trims (map ``slot``) and their axes, raw bytes, and
+    the base-sum terms' tables (:class:`BaseTimingImage`)."""
 
     a: tuple[tuple[int, ...], ...]
     b: tuple[tuple[int, ...], ...]
     rpm_axis: tuple[int, ...]
     load_axis: tuple[int, ...]
+    base_term: BaseTimingImage
 
 
 def _raw_rows(
@@ -1694,10 +1815,111 @@ def _raw_rows(
     ]
 
 
+#: The rom_map ids of the 0xFFFF27C6 chain's tables and calibration bytes
+#: (:class:`BaseTimingTables`, :class:`BaseTimingCals`, cal 0x8538) and of
+#: 0xFFFF279A's input tables (:class:`Term279aTables`); their axes come from
+#: the map (:func:`base_timing_rom_ids`).
+BASE_TIMING_TABLE_IDS: tuple[str, ...] = (
+    "base_timing_rate_map",
+    "base_timing_charge_map",
+    "base_timing_load_curve",
+    "base_timing_coolant_curve",
+    "base_timing_charge_curve",
+    "base_timing_rate_coolant_curve",
+    "base_timing_rate_charge_curve",
+    "base_timing_time_gain",
+    "base_timing_rate_rpm_gain",
+    "base_timing_rate_factor_gain",
+    "base_timing_time_offset",
+    "base_timing_1512_gain",
+)
+TERM_279A_TABLE_IDS: tuple[str, ...] = (
+    "timing_retard_26d9_map",
+    "timing_retard_26d0_rpm_curve",
+    "timing_retard_26d0_bfs_curve",
+    "timing_retard_26d0_coolant_curve",
+    "timing_retard_17fa_rpm_curve",
+    "timing_retard_17fa_bfs_curve",
+)
+
+
+def base_timing_rom_ids(rom_map: RomMap) -> frozenset[str]:
+    """Every rom_map id :func:`base_timing_image` reads, axes included: the
+    tables whose change the timing computation itself accounts for."""
+    ids = set(BASE_TIMING_TABLE_IDS) | set(TERM_279A_TABLE_IDS)
+    for table_id in list(ids):
+        axes = rom_map.table(table_id).axes
+        ids |= {a for a in (axes.rows, axes.cols) if a is not None}
+    return frozenset(ids)
+
+
+def _flat(image: bytes, rom_map: RomMap, table_id: str) -> tuple[int, ...]:
+    return tuple(v for row in _raw_rows(image, rom_map, table_id, None) for v in row)
+
+
+def _cal(image: bytes, rom_map: RomMap, table_id: str) -> int:
+    (value,) = _flat(image, rom_map, table_id)
+    return value
+
+
+def _axes(rom_map: RomMap, table_id: str) -> tuple[str, str]:
+    axes = rom_map.table(table_id).axes
+    if axes.rows is None or axes.cols is None:
+        raise SimulationRefusalError("timing_axes_unmapped", f"{table_id}'s axes are not mapped")
+    return axes.rows, axes.cols
+
+
+def base_timing_image(image: bytes, rom_map: RomMap) -> BaseTimingImage:
+    """The 0xFFFF27C6 chain's and 0xFFFF279A's tables and calibration bytes
+    from ``image``, each by its rom_map id, never by a copied offset."""
+    rows, cols = _axes(rom_map, "base_timing_rate_map")
+    if _axes(rom_map, "base_timing_charge_map") != (rows, cols):
+        raise SimulationRefusalError(
+            "timing_axes_unmapped", "0x9B89 and 0x9AF9 do not share their axes in the map"
+        )
+    r_rows, r_cols = _axes(rom_map, "timing_retard_26d9_map")
+    return BaseTimingImage(
+        tables=BaseTimingTables(
+            rate_map_9af9=tuple(_raw_rows(image, rom_map, "base_timing_rate_map", None)),
+            charge_map_9b89=tuple(_raw_rows(image, rom_map, "base_timing_charge_map", None)),
+            rpm_axis_c890=_flat(image, rom_map, rows),
+            load_axis_c88c=_flat(image, rom_map, cols),
+            load_curve_cd9b=_flat(image, rom_map, "base_timing_load_curve"),
+            coolant_curve_cebb=_flat(image, rom_map, "base_timing_coolant_curve"),
+            charge_curve_ceab=_flat(image, rom_map, "base_timing_charge_curve"),
+            coolant_curve_d9af=_flat(image, rom_map, "base_timing_rate_coolant_curve"),
+            charge_curve_d60f=_flat(image, rom_map, "base_timing_rate_charge_curve"),
+        ),
+        cals=BaseTimingCals(
+            cal_880d=_cal(image, rom_map, "base_timing_time_gain"),
+            cal_880e=_cal(image, rom_map, "base_timing_rate_rpm_gain"),
+            cal_8440=_cal(image, rom_map, "base_timing_rate_factor_gain"),
+            cal_8b0c=_cal(image, rom_map, "base_timing_time_offset"),
+        ),
+        cal_8538=_cal(image, rom_map, "base_timing_1512_gain"),
+        retard=Term279aTables(
+            map_9b09=tuple(_raw_rows(image, rom_map, "timing_retard_26d9_map", None)),
+            rpm_axis_c8fc=_flat(image, rom_map, r_rows),
+            coolant_axis_c904=_flat(image, rom_map, r_cols),
+            curve_cc1b=_flat(image, rom_map, "timing_retard_26d0_rpm_curve"),
+            curve_cc2b=_flat(image, rom_map, "timing_retard_26d0_bfs_curve"),
+            curve_cc33=_flat(image, rom_map, "timing_retard_26d0_coolant_curve"),
+            curve_d335=_flat(image, rom_map, "timing_retard_17fa_rpm_curve"),
+            curve_d33d=_flat(image, rom_map, "timing_retard_17fa_bfs_curve"),
+        ),
+        enrichment=EnrichmentRetardCals(
+            threshold_clear=_cal(image, rom_map, "enrichment_retard_threshold"),
+            threshold_set=_cal(image, rom_map, "enrichment_retard_threshold_high_det"),
+            below_gain_clear=_cal(image, rom_map, "enrichment_retard_below_gain"),
+            below_gain_set=_cal(image, rom_map, "enrichment_retard_below_gain_high_det"),
+        ),
+    )
+
+
 def timing_tables(image: bytes, rom_map: RomMap, *, slot: int) -> TimingTables:
     """The trims the ECM reads in map ``slot`` (rom map kinds ``timing_trim_a``
     / ``timing_trim_b``) and their axes, from the map, never from a copy of
-    their offsets."""
+    their offsets, with the base-sum terms' tables (:func:`base_timing_image`)."""
 
     def placed(kind: str) -> str:
         found = [t.id for t in rom_map.tables if t.kind == kind and slot in rom_map.table_slots(t)]
@@ -1718,6 +1940,7 @@ def timing_tables(image: bytes, rom_map: RomMap, *, slot: int) -> TimingTables:
         b=tuple(_raw_rows(image, rom_map, b_id, slot)),
         rpm_axis=tuple(rpm_axis),
         load_axis=tuple(load_axis),
+        base_term=base_timing_image(image, rom_map),
     )
 
 
@@ -1797,6 +2020,149 @@ def _unread_changes(
     return out
 
 
+def _charge_band() -> tuple[int, int]:
+    lo, hi = CHARGE_WORD_BAND
+    return math.ceil(CHARGE_WORD_NEUTRAL * lo), math.floor(CHARGE_WORD_NEUTRAL * hi)
+
+
+def _charge_index(w1b24: int) -> int:
+    """``r`` of 0x04BA6C over the band (inside 0x2000..0x6000)."""
+    return (w1b24 - 0x2000) >> CHARGE_INDEX_SHIFT
+
+
+def charge_word_sweep(*images: BaseTimingTables) -> tuple[int, ...]:
+    """The 0xFFFF1B24 values that give every distinct 0xFFFF27C6 over
+    :data:`CHARGE_WORD_BAND`: both ends and every step of b (every
+    :data:`CHARGE_STEP_COUNTS`), and every step of the curve index r too
+    unless both r-indexed curves (0xCEAB, 0xD60F) read one value across the
+    band on every image. 27C6 reads 1B24 only through b and r, so between two
+    consecutive values here it is constant: no step is missed."""
+    lo, hi = _charge_band()
+    values = {lo, hi}
+    step = CHARGE_STEP_COUNTS
+    values |= set(range(lo - lo % step + step, hi + 1, step))
+    indices = range(_charge_index(lo), _charge_index(hi) + 1)
+    flat = all(
+        len({byte_curve8(curve, r) for r in indices}) == 1
+        for tables in images
+        for curve in (tables.charge_curve_ceab, tables.charge_curve_d60f)
+    )
+    if not flat:
+        index_step = CHARGE_INDEX_STEP_COUNTS
+        values |= set(range(lo - lo % index_step + index_step, hi + 1, index_step))
+    return tuple(sorted(values))
+
+
+@functools.lru_cache(maxsize=1 << 16)
+def _term_27c6(
+    rpm_word: int, x: int, coolant: int, w1b24: int, tables: BaseTimingTables, cals: BaseTimingCals
+) -> int:
+    return timing_term_27c6_steady(
+        rpm_word=rpm_word,
+        x=x,
+        coolant_1077=coolant,
+        w1b24=w1b24,
+        w1512=timing_term_1512(_UNIDENTIFIED_26F2, 0),
+        tables=tables,
+        cals=cals,
+    ).term
+
+
+def _279a_zero(retard: Term279aTables, *, rpm_word: int, coolant: int) -> bool:
+    """0xFFFF279A is 0 at the point: 0xFFFF26D9 = 0xFFFF3630 x ramp >> 8 is 0
+    when map 0x9B09 reads 0 there, 0xFFFF26D0 (a product with curve 0xCC33's
+    byte) is 0 when 0xCC33 reads 0, and 0xFFFF17FA only subtracts before the
+    clamp at 0 (0x04C952)."""
+    b3630 = timing_retard_map_3630(
+        retard.map_9b09,
+        retard.rpm_axis_c8fc,
+        retard.coolant_axis_c904,
+        rpm_byte_11ce(rpm_word),
+        coolant,
+    )
+    return b3630 == 0 and byte_curve16(retard.curve_cc33, coolant) == 0
+
+
+@dataclass(frozen=True)
+class _BaseSumChange:
+    """The base-sum terms the chain computes beside the trim term."""
+
+    #: 0xFFFF27C6's change ``(min, max)`` over the 1B24 sweep; ``None`` when
+    #: it cannot be computed (``reasons``).
+    term_27c6: tuple[int, int] | None
+    #: ``zero`` (0 on both ROMs), ``held_equal`` or ``unmodelled``.
+    term_279a: str
+    reasons: tuple[str, ...]
+    #: The routes that moved 0xFFFF1B24 (:func:`charge_word_routes`); empty
+    #: when it is held equal on both ROMs.
+    charge_word_routes: tuple[str, ...] = ()
+
+
+def charge_word_routes(*, x_moved: bool, bfs_moved: bool, phi_moved: bool) -> tuple[str, ...]:
+    """Which of 0xFFFF1B24's inputs a change moves at a point: 0xFFFF1736
+    reads X (map 0x9724), 0xFFFF175C reads BFS 0xFFFF1038 (curves 0xD34D /
+    0xD345), and the enrichment multiplier 0xFFFF26C0 follows the Target AFR
+    lookup (phi)."""
+    routes = []
+    if x_moved:
+        routes.append("0xFFFF1736 via X")
+    if bfs_moved:
+        routes.append("0xFFFF175C via BFS")
+    if phi_moved:
+        routes.append("0xFFFF26C0 via the Target AFR lookup")
+    return tuple(routes)
+
+
+def _base_sum_change(
+    base: BaseTimingImage,
+    candidate: BaseTimingImage,
+    *,
+    rpm_word: int,
+    x_base: int,
+    x_candidate: int,
+    coolant: int,
+    bfs_moved: bool,
+    phi_moved: bool,
+) -> _BaseSumChange:
+    reasons: list[str] = []
+    routes = charge_word_routes(
+        x_moved=x_base != x_candidate, bfs_moved=bfs_moved, phi_moved=phi_moved
+    )
+    if all(_279a_zero(i.retard, rpm_word=rpm_word, coolant=coolant) for i in (base, candidate)):
+        term_279a = "zero"
+    elif bfs_moved or base.retard != candidate.retard:
+        term_279a = "unmodelled"
+        reasons.append(TERM_279A_UNMODELLED)
+    else:
+        term_279a = "held_equal"
+    moves = bool(routes) or (base.tables, base.cals, base.cal_8538) != (
+        candidate.tables,
+        candidate.cals,
+        candidate.cal_8538,
+    )
+    if not moves:
+        return _BaseSumChange((0, 0), term_279a, tuple(reasons))
+    if base.cal_8538 or candidate.cal_8538:
+        return _BaseSumChange(None, term_279a, (TERM_1512_UNMODELLED, *reasons), routes)
+    sweep = charge_word_sweep(base.tables, candidate.tables)
+    if routes:
+        # 1B24 differs between the ROMs by an unknown amount: each ROM takes
+        # any value in the band, independently (every pair of steps).
+        on_base = [_term_27c6(rpm_word, x_base, coolant, a, base.tables, base.cals) for a in sweep]
+        on_candidate = [
+            _term_27c6(rpm_word, x_candidate, coolant, a, candidate.tables, candidate.cals)
+            for a in sweep
+        ]
+        span = (min(on_candidate) - max(on_base), max(on_candidate) - min(on_base))
+        return _BaseSumChange(span, term_279a, tuple(reasons), routes)
+    deltas = [
+        _term_27c6(rpm_word, x_candidate, coolant, a, candidate.tables, candidate.cals)
+        - _term_27c6(rpm_word, x_base, coolant, a, base.tables, base.cals)
+        for a in sweep
+    ]
+    return _BaseSumChange((min(deltas), max(deltas)), term_279a, tuple(reasons))
+
+
 def ignition_timing_at(
     base: TimingTables,
     candidate: TimingTables,
@@ -1808,18 +2174,43 @@ def ignition_timing_at(
     coolant_c: float,
     pedal_flag: bool,
     phi_moved: bool,
+    bfs_moved: bool,
+    lookup_bytes: tuple[int | None, int | None] | None = None,
     base_timing_deg: int | None = None,
 ) -> dict[str, Any]:
     """Both ROMs' ignition timing at one point (``ignition_timing_deg``):
     base, candidate, change, status and reasons
     (:func:`~src.analysis.ecu_state_models.timing_delta`). ``x_base`` /
     ``x_candidate`` are each ROM's own X (a K or Fuel Comp change moves it);
-    ``base_timing_deg`` is the base's logged timing where the design has it."""
+    ``bfs_moved`` says whether each ROM's own BFS word differs (0xFFFF279A's
+    inputs read BFS, not X); ``lookup_bytes`` is each ROM's gated Target AFR
+    byte 0xFFFF174B at the point (``None``, or a ``None`` byte: not known, so
+    an X move may move the enrichment retard 0xFFFF174A, held
+    ``enrichment_retard_unmodelled``); ``base_timing_deg`` is the base's
+    logged timing where the design has it.
+
+    0xFFFF27C6 is computed per ROM (:func:`timing_term_27c6_steady` on that
+    ROM's tables at its own X, the rescaled coolant byte, the same rpm word)
+    with 0xFFFF1B24 swept over :data:`CHARGE_WORD_BAND`: held equal on both
+    ROMs when the change moves none of its inputs, else swept on each ROM
+    independently (``charge_word_inputs_moved``, the routes in
+    ``charge_word_routes``: X, BFS or phi move it). An answer that moves
+    across the band is status ``range`` with ``delta_min`` / ``delta_max``
+    (``charge_word_1b24_unresolved``).
+    0xFFFF279A is 0 where its maps read 0 on both ROMs, else held equal unless
+    the change moves its inputs (``term_279a_unmodelled``)."""
     out: dict[str, Any] = {
         "base": None,
         "candidate": None,
         "delta": None,
+        "delta_min": None,
+        "delta_max": None,
+        "candidate_min": None,
+        "candidate_max": None,
         "trim_term_delta": None,
+        "term_27c6_delta": None,
+        "term_279a": None,
+        "charge_word_routes": None,
         "status": "unevaluable",
         "reasons": [TIMING_STATE_UNSTATED],
         "table_read": None,
@@ -1829,13 +2220,34 @@ def ignition_timing_at(
     coolant = coolant_byte(coolant_c)
     sel_b = _selection(base, state, rpm_word, x_base, coolant, pedal_flag)
     sel_c = _selection(candidate, state, rpm_word, x_candidate, coolant, pedal_flag)
-    held = []
-    if x_base != x_candidate:
-        held.append(LOAD_TERM_UNMODELLED)
-    if phi_moved:
-        held.append(ENRICHMENT_RETARD_UNMODELLED)
+    terms = _base_sum_change(
+        base.base_term,
+        candidate.base_term,
+        rpm_word=rpm_word,
+        x_base=x_base,
+        x_candidate=x_candidate,
+        coolant=coolant_rescaled_byte(coolant_c),
+        bfs_moved=bfs_moved,
+        phi_moved=phi_moved,
+    )
+    # 0xFFFF174A moves with phi, and with X wherever g is not ruled 0 on
+    # either ROM: its cap 0xFFFF174C reads X. An unknown byte may retard.
+    known = lookup_bytes if lookup_bytes is not None else (None, None)
+    retard_moves = phi_moved or (
+        x_base != x_candidate
+        and any(
+            image.enrichment.may_retard(byte, high_det=state.high_det)
+            for image, byte in zip((base.base_term, candidate.base_term), known, strict=True)
+        )
+    )
+    held = [ENRICHMENT_RETARD_UNMODELLED] if retard_moves else []
+    held += terms.reasons
     d = timing_delta(
-        sel_b.selected, sel_c.selected, base_timing_deg=base_timing_deg, held_reasons=held
+        sel_b.selected,
+        sel_c.selected,
+        base_timing_deg=base_timing_deg,
+        held_reasons=held,
+        other_delta=terms.term_27c6 if terms.term_27c6 is not None else (0, 0),
     )
     unread = _unread_changes(
         base,
@@ -1845,13 +2257,23 @@ def ignition_timing_at(
         load=BYTE_MAX_VALUE if pedal_flag else x_candidate,
         coolant=coolant,
     )
+    ranged = [CHARGE_WORD_UNRESOLVED] if d.status == "range" else []
+    if terms.charge_word_routes:
+        ranged.append(CHARGE_WORD_INPUTS_MOVED)
     out.update(
         base=d.base_deg,
         candidate=d.candidate_deg,
         delta=d.delta_deg,
+        delta_min=d.delta_min_deg,
+        delta_max=d.delta_max_deg,
+        candidate_min=d.candidate_min_deg,
+        candidate_max=d.candidate_max_deg,
         trim_term_delta=d.trim_term_delta,
+        term_27c6_delta=None if terms.term_27c6 is None else list(terms.term_27c6),
+        term_279a=terms.term_279a,
+        charge_word_routes=list(terms.charge_word_routes),
         status=d.status,
-        reasons=[*d.reasons, *unread],
+        reasons=[*d.reasons, *ranged, *unread],
         table_read=_table_read(state, coolant),
     )
     return out
@@ -1866,10 +2288,12 @@ def ignition_timing_cells(
     pedal_flag: bool = False,
 ) -> list[dict[str, Any]]:
     """:func:`ignition_timing_at` at every node of the trims' own grid (rpm
-    word = axis byte x 4, X = the load axis byte, the same X on both ROMs): one
-    row per trim cell, so a trim edit shows in exactly the cells it changed.
-    X is the grid's coordinate here, not computed from a ROM, which is why an
-    edit that moves X needs the per-point result instead."""
+    word = axis byte x 4, X = the load axis byte, the same X and BFS on both
+    ROMs): one row per trim cell, so a trim edit shows in exactly the cells it
+    changed, and an edit to the 0xFFFF27C6 tables in the cells whose rpm and
+    X read the edited cells. X is the grid's coordinate here, not computed
+    from a ROM, which is why an edit that moves X needs the per-point result
+    instead."""
     rows = []
     for r, rpm_byte in enumerate(base.rpm_axis):
         for c, load in enumerate(base.load_axis):
@@ -1883,6 +2307,7 @@ def ignition_timing_cells(
                 coolant_c=coolant_c,
                 pedal_flag=pedal_flag,
                 phi_moved=False,
+                bfs_moved=False,
             )
             rows.append(
                 {"row": r, "col": c, "rpm_word": rpm_byte * TRIM_RPM_AXIS_SCALE, "x": load, **at}
@@ -1891,14 +2316,16 @@ def ignition_timing_cells(
 
 
 def timing_cell_summary(cells: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
-    """Counts by kind of answer, and the cells where timing changes or a
-    changed trim is not read."""
-    changed = [c for c in cells if c["delta"] not in (None, 0)]
+    """Counts by kind of answer, and the cells where timing changes (a range
+    that is not exactly 0 counts) or a changed trim is not read."""
+    ranged = [c for c in cells if c["status"] == "range"]
+    changed = [c for c in cells if c["delta"] not in (None, 0) or c["status"] == "range"]
     unread = [c for c in cells if any(_TRIM_NOT_READ.match(r) for r in c["reasons"])]
     unevaluable = [c for c in cells if c["status"] == "unevaluable"]
     return {
         "cells": len(cells),
         "changed": len(changed),
+        "ranged": len(ranged),
         "unevaluable": len(unevaluable),
         "changed_trim_not_read": len(unread),
         "reasons": sorted({r for c in cells for r in c["reasons"]}),
@@ -1926,12 +2353,26 @@ __all__ = [
     "coolant_rescaled_byte",
     "TimingTables",
     "TimingState",
+    "BaseTimingImage",
+    "BASE_TIMING_TABLE_IDS",
+    "TERM_279A_TABLE_IDS",
+    "CHARGE_WORD_BAND",
+    "CHARGE_WORD_NEUTRAL",
+    "CHARGE_WORD_INPUTS_MOVED",
+    "CHARGE_WORD_UNRESOLVED",
+    "TERM_1512_UNMODELLED",
+    "TERM_279A_UNMODELLED",
+    "base_timing_image",
+    "base_timing_rom_ids",
+    "charge_word_routes",
+    "charge_word_sweep",
     "KnockControl",
     "TIMING_STATE_UNSTATED",
+    "HIGH_DET_FORCED_BY_KS_FAULT",
     "TIMING_OUTPUT",
     "TIMING_MODEL_OUTPUT",
-    "LOAD_TERM_UNMODELLED",
     "ENRICHMENT_RETARD_UNMODELLED",
+    "EnrichmentRetardCals",
     "COOLANT_BYTE_OFFSET",
     "BATTERY_UNMEASURED",
     "ECU_RUNNER_OUTPUTS",

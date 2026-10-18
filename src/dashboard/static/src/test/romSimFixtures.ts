@@ -630,7 +630,28 @@ function trimCell(
     trim_term_delta: delta,
     status: delta === null ? ("unevaluable" as const) : ("delta_if_no_clamp" as const),
     reasons,
+    // A grid cell is read at a fixed X: 1B24's inputs do not move.
+    charge_word_routes: [] as string[],
     table_read: tableRead,
+  };
+}
+
+/** A cell whose change is known only as `lo`..`hi` (the 1B24 charge word swept over
+ *  its band): `delta` null, the ends carrying the answer, as the backend gives it. */
+function rangeCell(row: number, col: number, lo: number, hi: number, reasons: string[]) {
+  return {
+    ...trimCell(row, col, null, [
+      "clamp_headroom_unknown",
+      "charge_word_1b24_unresolved",
+      ...reasons,
+    ]),
+    status: "range" as const,
+    delta_min: lo,
+    delta_max: hi,
+    candidate_min: null,
+    candidate_max: null,
+    term_27c6_delta: [lo, hi] as [number, number],
+    term_279a: "zero" as const,
   };
 }
 
@@ -638,7 +659,11 @@ function summary(cells: IgnitionTimingBlock["cells"]): IgnitionTimingBlock["summ
   const listed = cells ?? [];
   return {
     cells: 256,
-    changed: listed.filter((cell) => cell.delta !== null && cell.delta !== 0).length,
+    // The backend's rule (`paired_scenarios.timing_cell_summary`): a range counts as changed.
+    changed: listed.filter(
+      (cell) => cell.status === "range" || (cell.delta !== null && cell.delta !== 0),
+    ).length,
+    ranged: listed.filter((cell) => cell.status === "range").length,
     unevaluable: listed.filter((cell) => cell.status === "unevaluable").length,
     // The backend's rule (`paired_scenarios.timing_cell_summary`): only the
     // `trim_[ab]_not_read:` reasons, never `trim_term_floor_may_bind` (a trim the ECM reads).
@@ -646,6 +671,35 @@ function summary(cells: IgnitionTimingBlock["cells"]): IgnitionTimingBlock["summ
       cell.reasons.some((reason) => /^trim_[ab]_not_read:/.test(reason)),
     ).length,
     reasons: [...new Set(listed.flatMap((cell) => cell.reasons))].sort(),
+  };
+}
+
+/** The charge word inputs a Fuel Comp / K edit moves (`charge_word_routes`). */
+const FUEL_COMP_ROUTES = ["0xFFFF1736 via X", "0xFFFF175C via BFS"];
+
+type PointOutcome = NonNullable<IgnitionTimingBlock["points"]>[number]["outcomes"][number];
+
+/** One design point with the outcomes given (x_base / x_candidate filled in). */
+function pointRow(
+  point: number,
+  rpm: number,
+  outcomes: (Omit<PointOutcome, "trim_term_delta" | "x_base" | "x_candidate"> & {
+    trim_term_delta?: number | null;
+    x_candidate?: number | null;
+  })[],
+): NonNullable<IgnitionTimingBlock["points"]>[number] {
+  return {
+    point,
+    rpm,
+    rpm_word: rpm / 12.5,
+    coolant_c: 88,
+    pedal_flag: false,
+    outcomes: outcomes.map((outcome) => ({
+      trim_term_delta: 0,
+      x_base: 33,
+      x_candidate: 33,
+      ...outcome,
+    })),
   };
 }
 
@@ -662,6 +716,7 @@ function points(reasons: string[], delta: number | null = null): IgnitionTimingB
           status: delta === null ? "unevaluable" : "delta_if_no_clamp",
           delta,
           trim_term_delta: delta ?? 0,
+          charge_word_routes: [],
           reasons,
           x_base: 33,
           x_candidate: 33,
@@ -680,9 +735,10 @@ function points(reasons: string[], delta: number | null = null): IgnitionTimingB
           status: delta === null ? "unevaluable" : "delta_if_no_clamp",
           delta,
           trim_term_delta: delta ?? 0,
+          charge_word_routes: [],
           reasons,
           x_base: 41,
-          x_candidate: 42,
+          x_candidate: 41,
           draws: 50,
         },
       ],
@@ -698,9 +754,14 @@ function points(reasons: string[], delta: number | null = null): IgnitionTimingB
  *    trim A as edited but not read (real ZS44A-20261004, the verifier's repro),
  *  `floor` trim B set to 3 counts (below the floor of 7) with the latch set: the
  *    trim IS read, the cell is unevaluable and nothing is "edited but not read",
- *  `fuel_comp` an edit outside the trims (`timing_input_changed`, no cells). */
+ *  `fuel_comp` an edit outside the trims (`timing_input_changed`, no cells): its design
+ *    points are a range (150 pairs, 1B24 swept independently on the two ROMs) and an
+ *    unevaluable one (50 pairs, 279A not modelled),
+ *  `range` a base-timing table edit computed on the trim grid: one cell with a change
+ *    known only as -3..+1, one exact -2 cell, and points that are a range (150 pairs)
+ *    and a nonzero exact change (50 pairs). */
 export function buildTimingBlock(
-  kind: "trim_b" | "trim_a" | "both" | "floor" | "fuel_comp",
+  kind: "trim_b" | "trim_a" | "both" | "floor" | "fuel_comp" | "range",
 ): IgnitionTimingBlock {
   const base = {
     output: "ignition_timing_deg",
@@ -724,7 +785,94 @@ export function buildTimingBlock(
       status: "unevaluable",
       reasons,
       state: TIMING_STATE,
-      points: points([...reasons, "base_timing_load_term_unmodelled"]),
+      points: [
+        // A Fuel Comp edit moves X, and with it BFS: 1B24 is swept on each ROM.
+        pointRow(0, 1200, [
+          {
+            status: "range",
+            delta: null,
+            delta_min: -2,
+            delta_max: 1,
+            term_27c6_delta: [-2, 1],
+            term_279a: "zero",
+            charge_word_routes: FUEL_COMP_ROUTES,
+            reasons: [
+              "clamp_headroom_unknown",
+              "charge_word_1b24_unresolved",
+              "charge_word_inputs_moved",
+            ],
+            draws: 150,
+            x_candidate: 31,
+          },
+        ]),
+        // 279A is unmodelled only where BFS moved (cold coolant here).
+        pointRow(1, 1600, [
+          {
+            status: "unevaluable",
+            delta: null,
+            delta_min: null,
+            delta_max: null,
+            term_27c6_delta: [-1, 2],
+            term_279a: "unmodelled",
+            charge_word_routes: FUEL_COMP_ROUTES,
+            reasons: ["term_279a_unmodelled", "charge_word_inputs_moved"],
+            draws: 50,
+            x_candidate: 39,
+          },
+        ]),
+      ],
+    };
+  }
+  if (kind === "range") {
+    const cells = [
+      rangeCell(3, 3, -3, 1, []),
+      {
+        ...trimCell(4, 9, -2, ["clamp_headroom_unknown"]),
+        term_27c6_delta: [0, 0] as [number, number],
+      },
+    ];
+    return {
+      ...base,
+      trims_changed: false,
+      base_timing_tables_changed: true,
+      other_inputs_changed: [],
+      status: "evaluated",
+      state: TIMING_STATE,
+      cells_at: {
+        coolant_c: 88,
+        pedal_flag: false,
+        grid: "the trims' own nodes: rpm word = axis byte x 4, X = load axis byte",
+      },
+      summary: summary(cells),
+      cells,
+      points: [
+        pointRow(0, 1200, [
+          {
+            status: "range",
+            delta: null,
+            delta_min: -3,
+            delta_max: 1,
+            term_27c6_delta: [-3, 1],
+            term_279a: "zero",
+            charge_word_routes: [],
+            reasons: ["clamp_headroom_unknown", "charge_word_1b24_unresolved"],
+            draws: 150,
+          },
+        ]),
+        pointRow(1, 1600, [
+          {
+            status: "computed",
+            delta: -2,
+            delta_min: -2,
+            delta_max: -2,
+            term_27c6_delta: [-2, -2],
+            term_279a: "zero",
+            charge_word_routes: [],
+            reasons: [],
+            draws: 50,
+          },
+        ]),
+      ],
     };
   }
   const cells = {

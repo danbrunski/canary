@@ -1221,6 +1221,29 @@ class BaseTimingCals:
 
 
 @dataclass(frozen=True)
+class Term279aTables:
+    """The ROM tables of 0xFFFF279A's inputs (rom_map ids in comments), raw
+    bytes read from the image."""
+
+    #: ``timing_retard_26d9_map`` (0x9B09), 8 x 8, rows the rpm byte 0xFFFF11CE.
+    map_9b09: tuple[tuple[int, ...], ...]
+    #: ``timing_retard_26d9_rpm_axis`` (0xC8FC).
+    rpm_axis_c8fc: tuple[int, ...]
+    #: ``timing_retard_26d9_coolant_axis`` (0xC904): rescaled coolant bytes.
+    coolant_axis_c904: tuple[int, ...]
+    #: ``timing_retard_26d0_rpm_curve`` (0xCC1B), 16 entries.
+    curve_cc1b: tuple[int, ...]
+    #: ``timing_retard_26d0_bfs_curve`` (0xCC2B), 8 entries.
+    curve_cc2b: tuple[int, ...]
+    #: ``timing_retard_26d0_coolant_curve`` (0xCC33), 16 entries.
+    curve_cc33: tuple[int, ...]
+    #: ``timing_retard_17fa_rpm_curve`` (0xD335), 8 entries.
+    curve_d335: tuple[int, ...]
+    #: ``timing_retard_17fa_bfs_curve`` (0xD33D), 8 entries.
+    curve_d33d: tuple[int, ...]
+
+
+@dataclass(frozen=True)
 class BaseTimingTerm:
     """0xFFFF27C6 and every intermediate of its chain."""
 
@@ -1316,6 +1339,36 @@ def timing_term_27c6_steady(
         tables=tables,
         cals=cals,
     )
+
+
+#: ``0xFFFF11CE`` is the cycle copy of ``0xFFFF1206 = min(255, 0xFFFF1204 >>
+#: 3)`` and the rpm word ``0xFFFF1210 = 0xFFFF1204 >> 3`` (RPM_words_task
+#: 0x03907A, 0x038FEA), so in a steady state it is ``min(255, rpm word)``.
+def rpm_byte_11ce(rpm_word: int) -> int:
+    """The steady-state ``0xFFFF11CE``: ``min(255, rpm word)`` (12.5 rpm per
+    count)."""
+    return min(BYTE_MAX, _word("rpm word", rpm_word))
+
+
+def timing_retard_map_3630(
+    map_9b09: Sequence[Sequence[int]],
+    rpm_axis_c8fc: Sequence[int],
+    coolant_axis_c904: Sequence[int],
+    rpm_byte_11ce: int,
+    coolant_1077: int,
+) -> int:
+    """``0x04C580``: ``0xFFFF3630`` = map 0x9B09 (8 x 8) through 0x026974 at
+    the rpm byte 0xFFFF11CE (rows, axis 0xC8FC) and the RESCALED coolant byte
+    0xFFFF1077 (columns, axis 0xC904), both searched directly by 0x027114.
+    While 0xFFFF283D bit 7 is set the ECM keeps the last value instead; this
+    is the lookup, i.e. that bit clear."""
+    return lookup_2d(
+        [[_byte("0x9B09 cell", c) for c in row] for row in map_9b09],
+        list(rpm_axis_c8fc),
+        list(coolant_axis_c904),
+        _byte("0xFFFF11CE", rpm_byte_11ce),
+        _byte("0xFFFF1077 (rescaled coolant)", coolant_1077),
+    ).value
 
 
 def timing_term_26d9(b3630: int, b15e5: int) -> int:
@@ -1514,9 +1567,20 @@ def timing_degrees_btdc(w11ff: int) -> int:
 #: What :func:`timing_delta` holds equal on both ROMs, and the path it is on.
 #: A result carries these, so a delta is never read without them.
 TIMING_DELTA_CONDITIONS: tuple[str, ...] = (
-    "every chain term but the trim term 0xFFFF2793 is equal on both ROMs "
-    "(0xFFFF1D3E, 27C6, 279A, 134A, 174A, 1344, 11CB, 1215, 26D2, 272A, 2334, 46E6, "
-    "62B4, 9932): unidentified, never given a value",
+    "every chain term but the trim term 0xFFFF2793 and the base term 0xFFFF27C6 is "
+    "equal on both ROMs (0xFFFF1D3E, 134A, 174A, 1344, 11CB, 1215, 26D2, 272A, 2334, "
+    "46E6, 62B4, 9932): unidentified, never given a value",
+    "0xFFFF27C6 is computed per ROM at a steady state (snapshot copies equal their "
+    "sources) from that ROM's tables and its own X; 0xFFFF1B24, which it reads, is "
+    "never computed (0x4000 + 0xFFFF175C + 0xFFFF1736 - 0xFFFF26E8, times "
+    "0xFFFF26C0: 1736 reads X, 175C reads BFS, 26C0 follows the Target AFR lookup), "
+    "so it is swept over 0x4000 x [0.7, 1.3]: held equal on both ROMs only where "
+    "the change moves none of X, BFS and phi, else swept on each ROM independently "
+    "(charge_word_inputs_moved); a change that moves across the band is a range; "
+    "0xFFFF1512 = 0 (cal 0x8538 = 0)",
+    "0xFFFF279A is 0 on both ROMs where map 0x9B09 and curve 0xCC33 read 0 at the "
+    "point (0xFFFF283D bit 7 clear, so 0xFFFF3630 is the lookup), else held equal "
+    "where neither BFS nor its tables change",
     "trim path: 0xFFFF2833 bit 4 and 0xFFFF4785 bit 6 clear (else 0xFFFF27C3 or "
     "0xFFFF1A59 replaces the trim sum), no 0xFFFF28B4 bit 1 bypass",
     "rate limit at its fixed point with a nonzero rise allowance; final byte on "
@@ -1524,15 +1588,20 @@ TIMING_DELTA_CONDITIONS: tuple[str, ...] = (
     "intermediate signed-byte clamps (0xFFFF1A58, 0xFFFF1346) not binding",
 )
 
-TimingStatus = Literal["computed", "delta_if_no_clamp", "unevaluable"]
+TimingStatus = Literal["computed", "delta_if_no_clamp", "range", "unevaluable"]
 
 
 @dataclass(frozen=True)
 class TimingDelta:
-    """Base and candidate ignition timing at one point, degrees BTDC."""
+    """Base and candidate ignition timing at one point, degrees BTDC.
+
+    ``range``: the change is known only to lie in ``[delta_min_deg,
+    delta_max_deg]`` (a held term swept over a band moves it); ``delta_deg``
+    and ``candidate_deg`` are then ``None`` and the ends carry the answer. For
+    an exact answer both ends equal ``delta_deg``."""
 
     status: TimingStatus
-    #: Candidate minus base, degrees; ``None`` when unevaluable.
+    #: Candidate minus base, degrees; ``None`` when unevaluable or a range.
     delta_deg: int | None
     #: The trim term's own change (0xFFFF2793), counts; set whenever both
     #: selected trims are known, even where ``delta_deg`` cannot be.
@@ -1540,6 +1609,13 @@ class TimingDelta:
     base_deg: int | None
     candidate_deg: int | None
     reasons: tuple[str, ...]
+    #: The change's ends, clamps applied when the base is known; ``None``
+    #: when unevaluable.
+    delta_min_deg: int | None = None
+    delta_max_deg: int | None = None
+    #: The candidate's absolute ends (only with a known base).
+    candidate_min_deg: int | None = None
+    candidate_max_deg: int | None = None
 
 
 def timing_delta(
@@ -1548,6 +1624,7 @@ def timing_delta(
     *,
     base_timing_deg: int | None = None,
     held_reasons: Sequence[str] = (),
+    other_delta: tuple[int, int] = (0, 0),
 ) -> TimingDelta:
     """The ECU-side timing change from the two selected trims (``0xFFFF1777``)
     with every other term held equal (:data:`TIMING_DELTA_CONDITIONS`).
@@ -1561,9 +1638,17 @@ def timing_delta(
       applied; a base at a clamp leaves the change unknown. Without it, the
       change holds only if no clamp binds, and the result says so
       (``clamp_headroom_unknown``).
-    - ``held_reasons`` are what the caller knows moves a held term (an X
-      change moves 0xFFFF27C6): any one leaves the change unevaluable, the
-      trim term's change still reported."""
+    - ``held_reasons`` are what the caller knows moves a held term it cannot
+      compute (a Target AFR change moves 0xFFFF174A): any one leaves the
+      change unevaluable, the trim term's change still reported.
+    - ``other_delta`` is the ``(min, max)`` change, degrees, of the base-sum
+      terms the caller DID compute (0xFFFF27C6 across a swept 0xFFFF1B24),
+      added to the trim term's change. Unequal ends give status ``range``:
+      both ends go through the same clamps, and ends that clamp to one value
+      are exact again."""
+    lo_other, hi_other = (int(v) for v in other_delta)
+    if lo_other > hi_other:
+        raise ValueError(f"other_delta {other_delta!r} is not (min, max)")
     if base.value is None or candidate.value is None:
         reasons = tuple(dict.fromkeys(r for r in (base.reason, candidate.reason) if r))
         return TimingDelta("unevaluable", None, None, None, None, reasons)
@@ -1573,17 +1658,28 @@ def timing_delta(
     d = tc - tb
     if held_reasons:
         return TimingDelta("unevaluable", None, d, None, None, tuple(held_reasons))
+    lo, hi = d + lo_other, d + hi_other
     if base_timing_deg is None:
-        reasons = ("clamp_headroom_unknown",) if d else ()
-        return TimingDelta("delta_if_no_clamp", d, d, None, None, reasons)
+        if lo == hi:
+            reasons = ("clamp_headroom_unknown",) if lo else ()
+            return TimingDelta("delta_if_no_clamp", lo, d, None, None, reasons, lo, hi)
+        return TimingDelta("range", None, d, None, None, ("clamp_headroom_unknown",), lo, hi)
     b = int(base_timing_deg)
     if not TIMING_FLOOR < b < TIMING_CAP:
         return TimingDelta("unevaluable", None, d, b, None, ("base_timing_at_clamp",))
-    c = max(TIMING_FLOOR, min(TIMING_CAP, b + d))
-    reasons = ()
-    if c != b + d:
-        reasons = ("timing_cap_binds",) if c == TIMING_CAP else ("timing_floor_binds",)
-    return TimingDelta("computed", c - b, d, b, c, reasons)
+    c_lo = max(TIMING_FLOOR, min(TIMING_CAP, b + lo))
+    c_hi = max(TIMING_FLOOR, min(TIMING_CAP, b + hi))
+    clamped = [c for c, raw in ((c_lo, b + lo), (c_hi, b + hi)) if c != raw]
+    bound = [
+        name
+        for name, at in (("timing_cap_binds", TIMING_CAP), ("timing_floor_binds", TIMING_FLOOR))
+        if at in clamped
+    ]
+    if c_lo == c_hi:
+        return TimingDelta(
+            "computed", c_lo - b, d, b, c_lo, tuple(bound), c_lo - b, c_lo - b, c_lo, c_lo
+        )
+    return TimingDelta("range", None, d, b, None, tuple(bound), c_lo - b, c_hi - b, c_lo, c_hi)
 
 
 __all__ = [
@@ -1616,6 +1712,7 @@ __all__ = [
     "SelectedTrim",
     "Step",
     "Term26d0Curves",
+    "Term279aTables",
     "TimingDelta",
     "TimingStatus",
     "TrimLookup",
@@ -1651,7 +1748,9 @@ __all__ = [
     "timing_rate_limit",
     "timing_rate_limit_steady",
     "timing_rate_word_15de",
+    "rpm_byte_11ce",
     "timing_retard_combine",
+    "timing_retard_map_3630",
     "timing_term_1512",
     "timing_term_26d0",
     "timing_term_26d9",

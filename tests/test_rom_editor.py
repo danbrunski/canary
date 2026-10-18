@@ -640,15 +640,24 @@ def test_a_k_edit_states_the_timing_state_and_names_the_node_that_reaches_timing
         "source": rom_editor.TIMING_SOURCE,
     }
     assert timing["torque"]["status"] == "unsupported"
-    # Each design point is held for what the chain does not compute (a K change
-    # moves X and so 0xFFFF27C6), and every pair also names the node that reaches it.
+    # At the design points 27C6 is computed from each image's X, so the pairs
+    # are held only for what is still not computed. This synthetic image's
+    # seeded cal 0x8538 reads 88, not 0, so term 1512 (coolant x 0x8538) is
+    # unmodelled at every pair; the seeded 279A tables are not zero at these
+    # points and BFS moves, so 279A is too; four pairs are open loop, where phi
+    # moves. The node X carries (air_charge_tp) is not named per pair: the
+    # points compute X themselves, and name what X and BFS reach that they do
+    # not compute (charge word 1B24 through 0xFFFF1736 / 0xFFFF175C).
     pairs = [o for p in timing["points"] for o in p["outcomes"]]
-    assert {r for o in pairs for r in o["reasons"]} <= {
-        "load_input_x_not_computed",
-        "base_timing_load_term_unmodelled",
+    assert {r for o in pairs for r in o["reasons"]} == {
         "enrichment_retard_unmodelled",
-        "timing_input_changed:air_charge_tp",
+        "term_1512_unmodelled",
+        "term_279a_unmodelled",
+        "charge_word_inputs_moved",
     }
+    assert all("0xFFFF1736 via X" in o["charge_word_routes"] for o in pairs)
+    assert all("term_1512_unmodelled" in o["reasons"] for o in pairs)
+    assert {o["term_279a"] for o in pairs} == {"unmodelled"}
     assert {o["status"] for o in pairs} == {"unevaluable"}
     # The state is the request's: the other pairing is stated back as it was sent.
     clear = rom_editor.SimRequest.model_validate(
@@ -740,7 +749,12 @@ def test_a_trim_the_stated_latch_does_not_read_is_named_not_shown_as_zero(
         ("timing_trim_a", "set", "b", "trim_a_not_read:high_det_latch_set"),
         ("timing_trim_b", "clear", "a", "trim_b_not_read:high_det_latch_clear"),
     ):
-        timing = _trim_run(trim_world, table, high_det=latch)["ignition_timing"]
+        # A clear latch is only a steady state with knock control active: the
+        # KS fault (fallback) forces HI DET set.
+        knock = "fallback" if latch == "set" else "active"
+        timing = _trim_run(trim_world, table, high_det=latch, knock_control=knock)[
+            "ignition_timing"
+        ]
         assert timing["status"] == "evaluated"
         assert timing["summary"]["changed"] == 0
         assert timing["summary"]["changed_trim_not_read"] == 2

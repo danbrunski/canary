@@ -1042,7 +1042,10 @@ def _trim_edit(table: str, **op: int) -> dict[str, Any]:
 def _timing(
     real: Real, edits: list[dict[str, Any]], high_det: str
 ) -> tuple[dict[str, Any], dict[tuple[int, int], dict[str, Any]], Run]:
-    run = simulate(real, request(edits, high_det=high_det, **TRIM_GRID))
+    # A clear latch is a steady state only with knock control active: the KS
+    # fault (fallback) forces HI DET set, and that pairing is refused.
+    knock = "fallback" if high_det == "set" else "active"
+    run = simulate(real, request(edits, high_det=high_det, knock_control=knock, **TRIM_GRID))
     block = run.out["ignition_timing"]
     return block, {(c["row"], c["col"]): c for c in block["cells"]}, run
 
@@ -1072,6 +1075,7 @@ def test_a_trim_b_edit_shows_minus_two_in_its_eight_cells_when_the_latch_is_set(
     assert block["summary"] | {"reasons": None} == {
         "cells": 256,
         "changed": 8,
+        "ranged": 0,
         "unevaluable": 0,
         "changed_trim_not_read": 0,
         "reasons": None,

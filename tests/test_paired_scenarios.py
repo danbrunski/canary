@@ -247,7 +247,13 @@ def test_a_target_afr_edit_is_computed_through_the_pulse_and_the_plant(
     lo, hi = lam["parameter_band"]
     assert lo < lam["base"] < hi
     assert any("slew and cap" in a for a in result.assumptions)
-    # Ignition and BFS are traced, not computed: unchanged by this edit.
+    # Ignition and BFS are traced, not computed. BFS is unchanged by this edit;
+    # spark is reached through the enrichment multiplier, which scales charge
+    # word 1B24 (0x04B98A) indexing base timing term 27C6, and the twin
+    # observes 1B24 but does not predict it.
+    spark = result.traced_outputs.pop("ignition_timing")
+    assert spark["status"] == "unevaluable"
+    assert "observed_not_predicted:timing_charge_word" in spark["reasons"]
     assert {v["status"] for v in result.traced_outputs.values()} == {"unchanged"}
     # Still not rankable: the plant failed its bounds and no intervention passed.
     verdict = rank_as_improvement(result, intervention=None)
@@ -557,6 +563,10 @@ def _plant_with(verdict: str, *, synthetic: bool = False) -> FuelPlantProfile:
     return FuelPlantProfile.model_validate(raw)
 
 
+# A Target AFR edit's traced spark refusal (see the ranking test below).
+SPARK_TRACED = "unsupported:ignition_timing:unevaluable"
+
+
 def test_ranking_needs_a_sealed_matching_verdict_and_a_recorded_qualified_plant(
     kit_and_image: tuple[SimKit, bytes],
 ) -> None:
@@ -564,17 +574,21 @@ def test_ranking_needs_a_sealed_matching_verdict_and_a_recorded_qualified_plant(
     candidate = _edit_all(image, kit, "fuel_targets", 1, 4)
     qualified = dataclasses.replace(kit, plant=_plant_with("pass"))
     result = run_paired(qualified, _scenario(kit, image, candidate, WOT), image, candidate)
-    # Everything holds: a supported WOT edit, a qualified recorded plant and a
-    # passing test of this change on this baseline.
+    # Everything the fuel side needs holds: a supported WOT edit, a qualified
+    # recorded plant and a passing test of this change on this baseline. The
+    # one refusal left is spark: a Target AFR edit moves the enrichment
+    # multiplier, which scales charge word 1B24 into base timing term 27C6, and
+    # an edit whose spark change is not computed never ranks (E09.7 part B).
     assert rank_as_improvement(result, intervention=_minted(result, "pass")) == {
-        "rankable": True,
-        "reasons": [],
+        "rankable": False,
+        "reasons": [SPARK_TRACED],
     }
 
     def reasons(intervention: InterventionVerdict | None, r: Any = result) -> list[str]:
         out = rank_as_improvement(r, intervention=intervention)
         assert not out["rankable"]
-        return list(out["reasons"])
+        assert SPARK_TRACED in out["reasons"]
+        return [x for x in out["reasons"] if x != SPARK_TRACED]
 
     # The verdict is derived, never stated: an edited one fails its seal.
     forged = dataclasses.replace(_minted(result, "pending"), verdict="pass")

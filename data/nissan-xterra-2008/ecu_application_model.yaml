@@ -1649,11 +1649,17 @@ nodes:
     reads: [0xFFFF283F]
     arithmetic: >-
       Knock control (task 67) sets and clears bit 6 of 0xFFFF283F
-      (0x04A672, 0x04A954-0x04A990); a stored knock-sensor fault item also
-      latches it (firmware notes, not re-read here). UpRev's logs label it
-      "HI DET".
+      (0x04A672, 0x04A954-0x04A990); a stored knock-sensor fault (479D bit
+      7) sets it on every pass while the latch logic's gate is open, i.e.
+      while the engine runs [inferred: states 2-4 of 0x027CC4] (evidence:
+      Gate). That needs cal 0x8ADC bit 7 set: clear, 0x04A672 clears bit 6
+      and skips the latch logic (firmware notes 2026-10-08). UpRev's logs
+      label it "HI DET".
     rounding: none
     saturation: none
+    calibration_conditions:
+      - {offset: 0x8ADC, mask: 0x80, equals: 0x80,
+         why: 'bit 7 set: the HI DET latch logic runs (0x04A672); clear, HI DET is cleared and the fallback no longer forces it, so the refused fallback-with-HI-DET-clear pairing would be reachable'}
     outside_schedule: 'Task 67 of the 0x020EF2 loop, after the trim lookup (66): the lookup reads last cycle''s bit.'
     confidence: inferred
     twin: not_modelled
@@ -1663,7 +1669,7 @@ nodes:
     evidence:
       - 'listing 0x04A672, 0x04A954-0x04A990 (or.b/and.b 0x40)'
       - 'UpRev logs since 2026-07-26 read 0x40 throughout (local firmware notes)'
-      - 'Gate (firmware notes 2026-10-17): 0xFFFF2876 bit 6 is set by the knock task on its first pass, so the gate is effectively 0xFFFF4782 bit 5 clear; 4782 bit 5 is the cycle copy of 4783 bit 5 (0x021236), both written only by the engine state machine 0x027CC4 (b4090): set in state 1 (entered from 2 when b495D reaches 0, held while the 49A7 countdown runs), cleared in states 2-4 (the 282A bit 5 states), unchanged in 0. [inferred] 2-4 running/starting, 1 run-down after a stop, 0 stopped: HI DET is cleared at each engine stop and held clear until the next start, then the KS fault (479D bit 7) sets it again on the first pass. Recorded only: TimingState and the sim refusals are unchanged.'
+      - 'Gate (firmware notes 2026-10-17): 0xFFFF2876 bit 6 is set by the knock task on its first pass, so the gate is effectively 0xFFFF4782 bit 5 clear; 4782 bit 5 is the cycle copy of 4783 bit 5 (0x021236), both written only by the engine state machine 0x027CC4 (b4090): set in state 1 (entered from 2 when b495D reaches 0, held while the 49A7 countdown runs), cleared in states 2-4 (the 282A bit 5 states), unchanged in 0. [inferred] 2-4 running/starting, 1 run-down after a stop, 0 stopped: HI DET is cleared at each engine stop and held clear until the next start, then the KS fault (479D bit 7) sets it again on the first pass (0x04A928-0x04A990, every pass inside the gate). So knock control in fallback with HI DET clear is not a running steady state: paired_scenarios.TimingState refuses it (high_det_forced_by_ks_fault, E09.7 part B).'
 
   - id: timing_trim_lookup
     function: 0x04E6D8
@@ -1767,16 +1773,15 @@ nodes:
     evidence: ['listing 0x04BD24-0x04BD72', 'tests/test_ecu_state_models.py hand-worked vectors (E09.7); every unidentified word is a required argument']
 
   # E09.7: the base timing term 0xFFFF27C6 and the inputs of 0xFFFF279A,
-  # resolved from the listing (firmware notes 2026-10-17). Not on
-  # ignition_timing's path yet: base_timing_sum still takes 0xFFFF27C6 and
-  # 0xFFFF279A as observed arguments, so no blocker or twin capture moves;
-  # wiring them in is the sim dispatch's (E09.7). Divides: 0x021C48 signed
-  # (truncates toward zero), 0x021D6C unsigned (floor); dividend r1, divisor r0.
-  # No `rom:` refs until then: rom_effects reads a cited byte as consumed by
-  # its node, and a node on no output's path would make an edit to 0x9AF9 or
-  # cal 0x880D read as reaching nothing, where today it is an unknown byte
-  # that refuses (unknown_bytes_changed). The tables and cals are named in the
-  # arithmetic and in rom_map.yaml.
+  # resolved from the listing (firmware notes 2026-10-17). On
+  # ignition_timing's path since E09.7 part B: base_timing_sum depends on
+  # timing_term_27c6 and timing_term_279a, and each node cites the tables and
+  # calibration bytes it reads (`rom:`), so an edit to 0x9AF9, cal 0x880D or
+  # the 279A curves reaches ignition_timing instead of refusing as an unknown
+  # byte. The simulator computes the 27C6 change per ROM
+  # (paired_scenarios.ignition_timing_at) and holds 279A only where it is not
+  # provably 0. Divides: 0x021C48 signed (truncates toward zero), 0x021D6C
+  # unsigned (floor); dividend r1, divisor r0.
   - id: coolant_rescale
     function: 0x03A1F0
     kind: computation
@@ -1818,6 +1823,8 @@ nodes:
     confidence: code
     twin: implemented
     implemented_by: src.analysis.ecu_state_models.timing_charge_map_10eb
+    rom:
+      - {rom_map: base_timing_charge_map, role: 'map 0x9B89 (axes 0xC890 rows as byte x 4, 0xC88C columns)'}
     evidence: ['listing 0x03D0FE-0x03D118 (r4 = 0x9B89, r5 = 0xC890, r6 = 0xC88C, r7 = w1210, stack b104E; jsr 0x026934; store 0xFFFF1177)', 'listing 0x026934 (row search 0x027194, column 0x027114, 4 breakpoints, width 4)']
 
   - id: timing_term_1512
@@ -1832,6 +1839,8 @@ nodes:
     confidence: code
     twin: implemented
     implemented_by: src.analysis.ecu_state_models.timing_term_1512
+    rom:
+      - {rom_map: base_timing_1512_gain, role: 'cal 0x8538, the 0xFFFF26F2 multiplier (0 on every listed image)'}
     evidence: ['firmware notes 2026-10-17 (0x04B96C)', 'tests/test_timing_rate_term.py hand-worked vectors']
 
   - id: timing_charge_word
@@ -1848,8 +1857,14 @@ nodes:
     saturation: 'floor 0, cap 0xFFFF'
     outside_schedule: 'Base-timing task 0x04DE4C (task 74).'
     confidence: code
-    twin: implemented
-    implemented_by: src.analysis.ecu_state_models.timing_charge_word_1b24
+    # Observed, not implemented (E09.7 part B): its inputs (the correction sum,
+    # 0xFFFF26E8, the enrichment multiplier) are the target-phi path's
+    # unmodelled nodes, so the twin takes the word as a measured input and the
+    # simulator sweeps it over a stated band (paired_scenarios.CHARGE_WORD_BAND).
+    # The decoded arithmetic is the reference until the inputs are computed.
+    twin: observed
+    reference_model: src.analysis.ecu_state_models.timing_charge_word_1b24
+    reference_validation: [synthetic]
     observed_as:
       - {spec: 'mem:ECM_TIMING_CHARGE_WORD', address: 0xFFFF1B24, relation: identity, confidence: code}
     evidence: ['firmware notes 2026-10-17 (0x04B98A)', 'tests/test_timing_rate_term.py hand-worked vectors']
@@ -1867,6 +1882,8 @@ nodes:
     confidence: code
     twin: implemented
     implemented_by: src.analysis.ecu_state_models.timing_load_curve_19cb
+    rom:
+      - {rom_map: base_timing_load_curve, role: 'curve 0xCD9B at X'}
     observed_as:
       - {spec: 'mem:ECM_TIMING_LOAD_CURVE', address: 0xFFFF19CB, relation: identity, confidence: code}
     evidence: ['firmware notes 2026-10-17 (0x04BA52, 0x026BA4 tail 0x027250)', 'tests/test_timing_rate_term.py hand-worked vectors']
@@ -1917,6 +1934,14 @@ nodes:
     confidence: code
     twin: implemented
     implemented_by: src.analysis.ecu_state_models.timing_rate_word_15de
+    rom:
+      - {rom_map: base_timing_rate_map, role: 'map 0x9AF9 at (rpm/50, X)'}
+      - {rom_map: base_timing_coolant_curve, role: 'curve 0xCEBB (0xFFFF15DC) at the rescaled coolant byte'}
+      - {rom_map: base_timing_charge_curve, role: 'curve 0xCEAB (0xFFFF15D7) at the 0xFFFF1B24 band'}
+      - {rom_map: base_timing_rate_coolant_curve, role: 'curve 0xD9AF (0xFFFF1CC9) at the rescaled coolant byte'}
+      - {rom_map: base_timing_rate_charge_curve, role: 'curve 0xD60F (0xFFFF19B6) at the 0xFFFF1B24 band'}
+      - {rom_map: base_timing_rate_factor_gain, role: 'cal 0x8440 in F'}
+      - {rom_map: base_timing_rate_rpm_gain, role: 'cal 0x880E in the rpm term'}
     observed_as:
       - {spec: 'mem:ECM_TIMING_RATE_PRODUCT', address: 0xFFFF15DA, relation: identity, confidence: code}
       - {spec: 'mem:ECM_TIMING_RATE_MAP', address: 0xFFFF15DB, relation: identity, confidence: code}
@@ -1946,6 +1971,9 @@ nodes:
     confidence: code
     twin: implemented
     implemented_by: src.analysis.ecu_state_models.timing_term_27c6
+    rom:
+      - {rom_map: base_timing_time_gain, role: 'cal 0x880D in t'}
+      - {rom_map: base_timing_time_offset, role: 'cal 0x8B0C in u'}
     observed_as:
       - {spec: 'mem:ECM_TIMING_TERM_27C6', address: 0xFFFF27C6, relation: identity, confidence: code}
     evidence: ['firmware notes 2026-10-17 (0x04BC5A, x 120 at 0x04BC7C-0x04BC8A)', 'tests/test_timing_rate_term.py hand-worked vectors: 24 / 33 / 22 deg at 700 / 2,500 / 4,400 rpm, hot, phi 1']
@@ -1956,17 +1984,26 @@ nodes:
     kind: computation
     writes: [0xFFFF3630]
     reads: [0xFFFF283D, 0xFFFF11CE, 0xFFFF1077]
+    depends_on: [cycle_snapshot, engine_speed_word, coolant_rescale]
     arithmetic: >-
       Unless bit 7 of 0xFFFF283D is set (then 0xFFFF3630 holds its last
       value): map 0x9B09 (8 x 8) through 0x026974 at (0xFFFF11CE against
       0xC8FC, the rescaled coolant byte 0xFFFF1077 against 0xC904), both by
-      0x027114. All zero on every listed image.
+      0x027114. 0xFFFF11CE is the cycle copy of the rpm task's byte
+      min(255, rpm word) (RPM_words_task 0x03907A and 0x038FEA; addresses in
+      the evidence), so in a steady state min(255, rpm word), 12.5 rpm per
+      count. All zero on every listed image.
     rounding: 'Q16 fraction, 0x026F10 truncation'
     saturation: 'axes clamp'
+    branches:
+      - {when: 'bit 7 of 0xFFFF283D set', then: '0xFFFF3630 holds its last value: the twin''s lookup assumes it clear'}
     outside_schedule: 'Base-timing task 0x04DE4C (task 74).'
     confidence: code
-    twin: not_modelled
-    evidence: ['listing 0x04C580-0x04C5AC (r4 = 0x9B09, r5 = 0xC8FC, r6 = 0xC904; jsr 0x026974)', 'listing 0x026974 (8 breakpoints each, width 8)']
+    twin: implemented
+    implemented_by: src.analysis.ecu_state_models.timing_retard_map_3630
+    rom:
+      - {rom_map: timing_retard_26d9_map, role: 'map 0x9B09 (axes 0xC8FC rpm byte, 0xC904 rescaled coolant)'}
+    evidence: ['listing 0x04C580-0x04C5AC (r4 = 0x9B09, r5 = 0xC8FC, r6 = 0xC904; jsr 0x026974)', 'listing 0x026974 (8 breakpoints each, width 8)', 'listing 0x03907A-0x039108 and 0x038FEA-0x039034 (b1206 = min(255, w1204 >> 3); w1210 = w1204 >> 3)']
 
   - id: timing_term_26d9
     function: 0x04C580
@@ -1989,7 +2026,7 @@ nodes:
     kind: computation
     writes: [0xFFFF1302, 0xFFFF1301, 0xFFFF1303, 0xFFFF26D0, 0xFFFF284E]
     reads: [0xFFFF1038, 0xFFFF11CF, 0xFFFF1077, 0xFFFF1300]
-    depends_on: [coolant_rescale]
+    depends_on: [coolant_rescale, cycle_snapshot]
     arithmetic: >-
       0xFFFF1302 = 8-entry curve 0xCC2B (0x026BA4) at min(255, 0xFFFF1038 >>
       7); 0xFFFF1301 = 16-entry curve 0xCC1B (0x026BBC) at the rpm/25 byte
@@ -2003,6 +2040,10 @@ nodes:
     confidence: code
     twin: implemented
     implemented_by: 'src.analysis.ecu_state_models.timing_term_26d0 (curve reads: timing_26d0_curves)'
+    rom:
+      - {rom_map: timing_retard_26d0_rpm_curve, role: 'curve16 0xCC1B (0xFFFF1301) at rpm/25'}
+      - {rom_map: timing_retard_26d0_bfs_curve, role: 'curve8 0xCC2B (0xFFFF1302) at min(255, BFS >> 7)'}
+      - {rom_map: timing_retard_26d0_coolant_curve, role: 'curve16 0xCC33 (0xFFFF1303) at the rescaled coolant byte'}
     evidence: ['listing 0x04C7A0-0x04C824: 0xCC2B -> jsr 0x026BA4, 0xCC1B and 0xCC33 (0xCC2B + 8) -> jsr 0x026BBC', 'tests/test_timing_rate_term.py hand-worked vectors']
 
   - id: timing_term_279a
@@ -2010,7 +2051,7 @@ nodes:
     kind: computation
     writes: [0xFFFF279A]
     reads: [0xFFFF26D9, 0xFFFF26D0, 0xFFFF17FA]
-    depends_on: [timing_term_26d9, timing_term_26d0]
+    depends_on: [timing_term_26d9, timing_term_26d0, cycle_snapshot, engine_speed_word]
     arithmetic: >-
       0xFFFF279A = clamp(0xFFFF26D9 + 0xFFFF26D0 - (0xFFFF17FA >> 4), 0, 255).
       0xFFFF17FA (0x04C832, from the w1760 - w1762 difference and two curves)
@@ -2022,6 +2063,9 @@ nodes:
     confidence: code
     twin: implemented
     implemented_by: src.analysis.ecu_state_models.timing_term_279a
+    rom:
+      - {rom_map: timing_retard_17fa_rpm_curve, role: 'curve 0xD335 (0xFFFF17FB) in 0xFFFF17FA (0x04C832; 17FA is an argument)'}
+      - {rom_map: timing_retard_17fa_bfs_curve, role: 'curve 0xD33D (0xFFFF17FC) in 0xFFFF17FA (0x04C832; 17FA is an argument)'}
     observed_as:
       - {spec: 'mem:ECM_TIMING_TERM_279A', address: 0xFFFF279A, relation: identity, confidence: code}
     evidence: ['firmware notes 2026-10-17 (0x04C952, 0x04C832)', 'tests/test_timing_rate_term.py hand-worked vectors']
@@ -2032,7 +2076,7 @@ nodes:
     writes: [0xFFFF1A58]
     reads: [0xFFFF2833, 0xFFFF27C6, 0xFFFF2793, 0xFFFF279A, 0xFFFF134A, 0xFFFF174A, 0xFFFF1D3E, 0xFFFF1344,
             0xFFFF27C3]
-    depends_on: [timing_trim_terms]
+    depends_on: [timing_trim_terms, timing_term_27c6, timing_term_279a]
     arithmetic: >-
       With bit 4 of 0xFFFF2833 clear: 0xFFFF1D3E + 0xFFFF27C6 + 0xFFFF2793 -
       0xFFFF279A - 0xFFFF134A - 0xFFFF174A - 0x80 + 0xFFFF1344, clamped to a
@@ -2289,6 +2333,15 @@ outputs:
           0x04A8B6 branch. Then verify per segment against same-window reads of
           0xFFFF2793, 0xFFFF1A58, 0xFFFF27DA, 0xFFFF2332, 0xFFFF1346, 0xFFFF232E
           and 0xFFFF11FF (E05.4 (c)).
+      # E09.7 part B: 0xFFFF27C6 and 0xFFFF279A are on the path; their
+      # nodes read snapshot copies. (0xFFFF1B24 is observed: node timing_charge_word.)
+      - name: timing_snapshot_steady
+        nodes: [cycle_snapshot]
+        closes_with: >-
+          The 27C6 and 279A nodes read snapshot copies (0xFFFF10EB, 0xFFFF11CA,
+          0xFFFF11CE, 0xFFFF1038); the simulator takes a steady state, where each
+          copy equals its source (timing_term_27c6_steady, rpm_byte_11ce).
+          Off steady state, read the copies.
     regions:
       - id: rate_limited
         status: conditional
@@ -2449,8 +2502,10 @@ uncovered:
       0xFFFF9932; the flags 0xFFFF2833 bit 4, 0xFFFF4785 bit 6, 0xFFFF28B4
       bit 1, 0xFFFF28B1 bit 5, 0xFFFF4858 bit 5 and the 0x08E498 fault test;
       the knock control's 0x04A8B6 branch. 0xFFFF134A is settled: 0 on every
-      listed image (curves 0xCC63/0xCC73). The new 27C6/279A nodes are not yet
-      on ignition_timing's path (the sim dispatch wires them in).
+      listed image (curves 0xCC63/0xCC73). The 27C6/279A nodes are on
+      ignition_timing's path (E09.7 part B): the simulator computes 27C6 per
+      ROM with 0xFFFF1B24 swept over a band, and holds 279A only where it is
+      not provably 0.
     blocks: 'the absolute ignition_timing (E05.4); a trim edit''s change is computed with these held equal (E09.7); an X change''s base-term part is now computable from the nodes, the rest is not'
     next_evidence: >-
       The firmware part is done. Vehicle: read 0xFFFF15DA..0xFFFF15DE,

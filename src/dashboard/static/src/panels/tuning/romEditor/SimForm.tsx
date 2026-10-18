@@ -10,6 +10,7 @@ import {
   FAILURE_TITLE,
   GRID_CHOICES,
   HIGH_DET_CHOICES,
+  highDetRuledOut,
   KNOCK_CONTROL_CHOICES,
   LEARNED_FIELDS,
   LOAD_BASIS,
@@ -36,6 +37,7 @@ import {
   seedForm,
   suggestEdges,
   trimLoadEdges,
+  withChoice,
   wotColumnWarning,
   type FormKey,
   type NumberFieldSpec,
@@ -172,32 +174,43 @@ function Choice<T extends string>({
   choices,
   value,
   onChange,
+  ruledOut = {},
 }: {
   legend: string;
   name: string;
   choices: readonly { id: T; label: string; meaning: string }[];
   value: "" | T;
   onChange: (id: T) => void;
+  /** Choices another answer rules out, each with the one-line why; disabled. */
+  ruledOut?: Partial<Record<T, string>>;
 }) {
   return (
     <fieldset className="space-y-1.5 rounded-lg border border-border p-3">
       <legend className="px-1 text-sm font-semibold">{legend}</legend>
-      {choices.map((choice) => (
-        <label key={choice.id} className="flex cursor-pointer items-start gap-2 text-sm">
-          <input
-            type="radio"
-            name={name}
-            className="mt-1"
-            value={choice.id}
-            checked={value === choice.id}
-            onChange={() => onChange(choice.id)}
-          />
-          <span>
-            {choice.label}
-            <span className="block text-xs text-fg-dim">{choice.meaning}</span>
-          </span>
-        </label>
-      ))}
+      {choices.map((choice) => {
+        const why = ruledOut[choice.id];
+        return (
+          <label
+            key={choice.id}
+            className={`flex items-start gap-2 text-sm ${why ? "opacity-60" : "cursor-pointer"}`}
+          >
+            <input
+              type="radio"
+              name={name}
+              className="mt-1"
+              value={choice.id}
+              checked={value === choice.id}
+              disabled={why !== undefined}
+              onChange={() => onChange(choice.id)}
+            />
+            <span>
+              {choice.label}
+              <span className="block text-xs text-fg-dim">{choice.meaning}</span>
+              {why !== undefined && <span className="block text-xs text-fg-faint">{why}</span>}
+            </span>
+          </label>
+        );
+      })}
       {value === "" && <p className="text-xs text-fg-faint">Choose one: there is no default.</p>}
     </fieldset>
   );
@@ -461,7 +474,7 @@ export function SimForm({
   }
 
   function change(key: FormKey, value: string) {
-    setValues((current) => ({ ...current, [key]: value }));
+    setValues((current) => withChoice(current, key, value));
     setRemembered((current) => {
       if (!current.has(key)) return current;
       const next = new Set(current);
@@ -907,7 +920,8 @@ export function SimForm({
             knock control in fallback, the KS1 fault). So they have no default, no typical value,
             and are not remembered: state the condition you are asking about. The latch picks the
             trim the ECM reads warm, so it decides whether an edit to trim A or to trim B shows in
-            the timing result.
+            the timing result. Fallback with the latch clear is not a running state (the fault sets
+            the latch), so choosing fallback sets the latch and clear is unavailable with it.
           </p>
           <div className="grid gap-3 sm:grid-cols-2">
             <Choice
@@ -916,6 +930,7 @@ export function SimForm({
               choices={HIGH_DET_CHOICES}
               value={values.highDet}
               onChange={(id) => change("highDet", id)}
+              ruledOut={highDetRuledOut(values.knockControl)}
             />
             <Choice
               legend="Knock control"

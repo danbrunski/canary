@@ -5,6 +5,8 @@ import type { IgnitionTimingBlock } from "../types/romEditor";
 import {
   claimLine,
   pointSummary,
+  rangeEnds,
+  rangeText,
   reasonCounts,
   signed,
   stateText,
@@ -83,6 +85,96 @@ describe("timingMark", () => {
   });
 });
 
+describe("a range", () => {
+  const rangeBlock = buildTimingBlock("range");
+  const [ranged, exact] = rangeBlock.cells ?? [];
+
+  it("draws a cell known only as a range as its two ends, never as U", () => {
+    expect(ranged?.status).toBe("range");
+    expect(ranged?.delta).toBeNull();
+    const mark = timingMark(ranged ?? null);
+    expect(mark).toMatchObject({ kind: "range", text: "-3..+1" });
+    expect(mark.text).not.toBe("U");
+    expect(mark.title).toBe(
+      "between -3 and +1 deg; known only as a range: clamp_headroom_unknown, charge_word_1b24_unresolved",
+    );
+    // The exact cell beside it is still a number.
+    expect(timingMark(exact ?? null)).toMatchObject({ kind: "changed", text: "-2" });
+  });
+
+  it("names the charge word inputs a range cell's edit moved in its hover text", () => {
+    const moved = ranged
+      ? {
+          ...ranged,
+          reasons: [...ranged.reasons, "charge_word_inputs_moved"],
+          charge_word_routes: ["0xFFFF26C0 via the Target AFR lookup"],
+        }
+      : null;
+    expect(timingMark(moved).title).toContain(
+      "charge word inputs moved: 0xFFFF26C0 via the Target AFR lookup",
+    );
+    // Held equal (`[]`): nothing to name.
+    expect(timingMark(ranged ?? null).title).not.toContain("inputs moved");
+  });
+
+  it("says the candidate's absolute ends when the daemon gives them", () => {
+    const mark = timingMark(ranged ? { ...ranged, candidate_min: 10, candidate_max: 14 } : null);
+    expect(mark.title).toContain("candidate between 10 and 14 deg");
+  });
+
+  it("draws a range whose ends are equal as the value, and 0..0 as 0", () => {
+    expect(rangeText([2, 2])).toBe("+2");
+    expect(rangeText([-4, 0])).toBe("-4..0");
+    expect(rangeText([0, 3])).toBe("0..+3");
+    expect(timingMark(ranged ? { ...ranged, delta_min: -2, delta_max: -2 } : null)).toMatchObject({
+      kind: "changed",
+      text: "-2",
+    });
+    expect(timingMark(ranged ? { ...ranged, delta_min: 0, delta_max: 0 } : null)).toMatchObject({
+      kind: "unchanged",
+      text: "0",
+    });
+  });
+
+  it("does not invent ends: a range without them is unevaluable", () => {
+    const bare = ranged ? { ...ranged, delta_min: null, delta_max: null } : null;
+    expect(rangeEnds(bare ?? { status: "computed" })).toBeNull();
+    expect(timingMark(bare)).toMatchObject({ kind: "unevaluable", text: "U" });
+  });
+
+  it("counts a range as changed in the block's summary and the grid carries it", () => {
+    expect(rangeBlock.summary).toMatchObject({ changed: 2, ranged: 1, unevaluable: 0 });
+    const grid = timingGrid(rangeBlock, TABLES);
+    expect(grid?.cells[3]?.[3]?.status).toBe("range");
+  });
+
+  it("counts range pairs apart from the pairs that show a change", () => {
+    expect(pointSummary(rangeBlock.points)).toEqual({
+      pairs: 200,
+      points: 2,
+      byStatus: { computed: 50, range: 150 },
+      numeric: 50,
+      changed: 50,
+      ranged: 150,
+    });
+    // A range whose ends are equal is a number: counted with the numbers.
+    const [first, second] = rangeBlock.points ?? [];
+    const flat = first
+      ? [
+          {
+            ...first,
+            outcomes: first.outcomes.map((o) => ({ ...o, delta_min: 0, delta_max: 0 })),
+          },
+        ]
+      : [];
+    expect(pointSummary([...flat, ...(second ? [second] : [])])).toMatchObject({
+      numeric: 200,
+      changed: 50,
+      ranged: 0,
+    });
+  });
+});
+
 describe("timingGrid", () => {
   it("labels the 16 x 16 grid from the base's own trim axes and places each listed cell", () => {
     const grid = timingGrid(buildTimingBlock("trim_b"), TABLES);
@@ -144,17 +236,33 @@ describe("the reasons", () => {
         cells: 2,
         pairs: 0,
         text: expect.stringContaining("50-degree cap"),
+        routes: [],
       },
     ]);
     const k = reasonCounts(buildTimingBlock("fuel_comp"));
     expect(k.map((item) => item.reason)).toEqual([
-      "base_timing_load_term_unmodelled",
+      "charge_word_1b24_unresolved",
+      "charge_word_inputs_moved",
+      "clamp_headroom_unknown",
+      "term_279a_unmodelled",
       "timing_input_changed:fuel_comp_lookup",
     ]);
-    expect(k.find((item) => item.reason.startsWith("timing_input"))).toMatchObject({
+    expect(k.find((item) => item.reason === "charge_word_inputs_moved")).toMatchObject({
       cells: 0,
       pairs: 200,
+      // The inputs the edit moves come from the pairs that name the reason, not the text.
+      routes: ["0xFFFF1736 via X", "0xFFFF175C via BFS"],
     });
+    expect(k.filter((item) => item.reason !== "charge_word_inputs_moved")).toSatisfy(
+      (rest: { routes: string[] }[]) => rest.every((item) => item.routes.length === 0),
+    );
+    expect(k.find((item) => item.reason === "term_279a_unmodelled")).toMatchObject({
+      cells: 0,
+      pairs: 50,
+    });
+    // Every reason the block names has a sentence; the removed one has none.
+    expect(k.every((item) => item.text !== null)).toBe(true);
+    expect(timingReasonText("base_timing_load_term_unmodelled")).toBeNull();
   });
 
   it("has a sentence for the families the block names, and none for a stranger", () => {
@@ -171,14 +279,32 @@ describe("the reasons", () => {
     expect(timingReasonText("a_reason_from_a_newer_daemon")).toBeNull();
   });
 
+  it("has plain-English text for each reason of the base timing chain", () => {
+    expect(timingReasonText("charge_word_1b24_unresolved")).toMatch(
+      /0xFFFF1B24.*not computed.*swept.*known only as a range/s,
+    );
+    const moved = timingReasonText("charge_word_inputs_moved") ?? "";
+    // Generic: which inputs moved is the routes' to say, and an exact or unevaluable pair
+    // is not "a range".
+    expect(moved).toContain("independently on each");
+    expect(moved).not.toContain("0xFFFF1736");
+    expect(moved).not.toContain("range");
+    expect(timingReasonText("term_279a_unmodelled")).toMatch(/0xFFFF279A.*cold coolant/s);
+    expect(timingReasonText("term_1512_unmodelled")).toMatch(/0x8538.*0xFFFF26F2/s);
+    expect(timingReasonText("high_det_forced_by_ks_fault")).toMatch(
+      /fallback.*HI DET latch clear.*0x027CC4/s,
+    );
+  });
+
   it("counts the design's pairs by status and how many show a change", () => {
     const block = buildTimingBlock("fuel_comp");
     expect(pointSummary(block.points)).toEqual({
       pairs: 200,
       points: 2,
-      byStatus: { unevaluable: 200 },
+      byStatus: { range: 150, unevaluable: 50 },
       numeric: 0,
       changed: 0,
+      ranged: 150,
     });
     // An evaluated block's pairs carry a number (0 here), so "how many change" has an answer.
     expect(pointSummary(buildTimingBlock("trim_b").points)).toMatchObject({
@@ -192,6 +318,7 @@ describe("the reasons", () => {
       byStatus: {},
       numeric: 0,
       changed: 0,
+      ranged: 0,
     });
   });
 });

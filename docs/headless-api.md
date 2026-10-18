@@ -672,8 +672,12 @@ logs, so the request states both and a missing one is a 422 naming it.
 `high_det` is the knock controller's HI DET latch (0xFFFF283F bit 6): warm,
 the ECM reads trim B while it is `set` and trim A while it is `clear`.
 `knock_control` `"fallback"` is the knock sensor fault state (0xFFFF479D bit 7,
-retard target 0xFFFF13FE = 0xFB00); it does not imply `high_det` and neither
-implies the other. Both change with the truck (the 2026-10-08 RAM read was
+retard target 0xFFFF13FE = 0xFB00). `"fallback"` with `"clear"` is refused
+(`sim_refused`, reason `high_det_forced_by_ks_fault`): in states 2-4 of the
+engine state machine 0x027CC4 ([inferred] engine running) the KS fault sets the
+latch on every pass (0x04A928; with cal 0x8ADC bit 7 set, pinned), so that
+pairing is not a running steady state; the other three are
+states. Both change with the truck (the 2026-10-08 RAM read was
 `set` / `fallback`, KS1 fault; both clear when KS1 is repaired), so **neither is
 ever a typical value**: the dashboard offers no preselection and remembers
 nothing, and the typical-values route refuses a file that names either. State
@@ -751,22 +755,49 @@ dropped in the result (docs/mcp-server.md).
 **`ignition_timing`** (E09.7) is on every result, from
 `sim_cells.ignition_timing_block` (the block `tools/rom_sim.py` prints) and
 `ignition_timing_points`. ECU side only: the timing byte's chain with every
-term but the selected trim held equal, no torque and no knock claim.
+term but the selected trim and the base term 0xFFFF27C6 held equal (27C6 is
+computed per ROM; see "ranges" below), no torque and no knock claim.
 `status` is `evaluated` or `unevaluable`; `state` echoes the stated
 `{high_det, knock_control, source}`; `trims_changed` says whether an edit
-touched a trim; `other_inputs_changed` lists `timing_input_changed:<node>` for
-every changed byte outside the trims that reaches `ignition_timing` (a K or
-Fuel Comp edit: `air_charge_tp`, `fuel_comp_lookup`) and
-`unknown_bytes_changed` for one no node reads. Any of those makes the block
+touched a trim and `base_timing_tables_changed` whether it touched a table or
+calibration byte of the 27C6 chain or of 0xFFFF279A's inputs (either one
+without a stated state is refused `timing_state_unstated`);
+`other_inputs_changed` lists `timing_input_changed:<node>` for every other
+changed byte that reaches `ignition_timing` (a K or Fuel Comp edit:
+`air_charge_tp`, `fuel_comp_lookup`) and `unknown_bytes_changed` for one no
+node reads. Any of those makes the block
 `unevaluable` with those `reasons` and no cells (the trims' grid holds that
 change's terms equal, so its "0 changed" would be a claim the chain cannot
 make). Otherwise `cells_at` names the coolant the cells are read at (the
 request's `coolant_c`), `summary` counts `{cells, changed, unevaluable,
 changed_trim_not_read, reasons}` and `cells` lists the cells of the trims' own
 16 x 16 grid that change or name a reason beyond `clamp_headroom_unknown`
-(every other cell is unchanged): `{row, col, rpm_word, x, delta, trim_term_delta,
-status, reasons, table_read}`, `delta` in degrees (1 trim count = 1 degree),
-`table_read` `a` / `b` / null (the blend band). An edit to the trim the stated
+(every other cell is unchanged): `{row, col, rpm_word, x, base, candidate,
+delta, delta_min, delta_max, candidate_min, candidate_max, trim_term_delta,
+term_27c6_delta, term_279a, charge_word_routes, status, reasons, table_read}`,
+`delta` in degrees
+(1 trim count = 1 degree), `table_read` `a` / `b` / null (the blend band).
+**Ranges (E09.7 part B):** 0xFFFF27C6 reads 0xFFFF1B24, which nothing
+computes (0x4000 + 0xFFFF175C + 0xFFFF1736 - 0xFFFF26E8, times 0xFFFF26C0:
+1736 reads X, 175C reads BFS, 26C0 follows the Target AFR lookup). It is swept
+over 0x4000 x [0.7, 1.3]: held equal on both ROMs when the change moves none of
+X, BFS and phi (the trim grid, which holds X equal), else swept on each ROM
+independently, with `charge_word_inputs_moved` in `reasons` and the routes in
+`charge_word_routes` (`"0xFFFF1736 via X"`, `"0xFFFF175C via BFS"`,
+`"0xFFFF26C0 via the Target AFR lookup"`). `charge_word_routes` is `[]` when
+1B24 was held equal because no route moved it, and `null` when the routes are
+not known or do not apply: no timing state stated, or a pair whose X could not
+be computed (`load_input_x_not_computed`).
+Where 27C6's change differs across that band `status` is `range`, `delta` and
+`candidate` are null, `delta_min` / `delta_max` carry the answer (clamps
+applied to both ends when a base is known) and `reasons` include
+`charge_word_1b24_unresolved`; an exact answer has `delta_min == delta_max ==
+delta`. `term_27c6_delta` is `[min, max]` of 27C6's own change (null when it
+cannot be computed: `term_1512_unmodelled`, an image whose cal 0x8538 is not
+0). `term_279a` is `zero` (map 0x9B09 and curve 0xCC33 read 0 at the point on
+both ROMs), `held_equal`, or `unmodelled` (not provably 0 and the edit moves
+BFS or one of its tables: `term_279a_unmodelled`, unevaluable). `summary` also
+counts `ranged`, and `changed` includes them. An edit to the trim the stated
 latch does not read has `delta: 0` and `trim_a_not_read:high_det_latch_set` /
 `trim_b_not_read:high_det_latch_clear` on each edited cell. `changed_trim_not_read`
 counts the cells that name a `trim_[ab]_not_read:` reason and only those: a trim
@@ -776,10 +807,23 @@ gives `delta` and the other is named in `reasons` beside it, so one cell is both
 `changed` and counted in `changed_trim_not_read`. `torque` is
 `unsupported` with `spark_response_unmeasured...` and `knock` carries its own
 refusals. `points` is one row per design point with its outcomes grouped by
-`{status, delta, trim_term_delta, reasons, x_base, x_candidate, draws}`; a K or
-Fuel Comp change reports the trim term's change and no timing change
-(`base_timing_load_term_unmodelled`), a Target AFR change that moves phi
-`enrichment_retard_unmodelled`.
+`{status, delta, delta_min, delta_max, trim_term_delta, term_27c6_delta,
+term_279a, charge_word_routes, reasons, x_base, x_candidate, draws}`; a K or
+Fuel Comp change gives the timing change at each ROM's own X (27C6 computed per
+ROM with 1B24 swept independently, `charge_word_inputs_moved`, usually a
+`range`; `term_279a_unmodelled` where 279A is not provably 0, e.g. cold), a
+Target AFR change that moves phi `enrichment_retard_unmodelled`. The
+enrichment retard 0xFFFF174A is also held (`enrichment_retard_unmodelled`) when
+X moves at a point where either ROM's gated Target AFR byte 0xFFFF174B is at or
+above the threshold (cal 0x8792 with HI DET clear, 0x8793 set; read from each
+image), the below-threshold gain (cal 0x8797 / 0x8798) is not 0, or the byte is
+not known there: its cap 0xFFFF174C reads X. With the pedal flag set the lookup
+reads its last column, so a K edit at WOT moves X and not phi and is held
+there. The
+`timing_input_changed:<node>` reasons of a change that reaches timing only
+through BFS and X (K, Fuel Comp, the Load Point Scaler) are not on the points:
+the points compute that route themselves, and name what of it they do not
+(`charge_word_inputs_moved`, `term_279a_unmodelled`).
 
 Errors (each a `{"detail": ...}`):
 

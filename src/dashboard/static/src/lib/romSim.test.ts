@@ -20,6 +20,7 @@ import {
   editsTouchWotColumn,
   forgetRemembered,
   gridPoints,
+  highDetRuledOut,
   knownAnswersLine,
   loadEdgesError,
   loadRemembered,
@@ -28,6 +29,7 @@ import {
   parseNumber,
   pedalFlagBit0Clear,
   resultFileName,
+  withChoice,
   saveRemembered,
   seedForm,
   simFailure,
@@ -129,11 +131,37 @@ describe("the simulate request", () => {
       ["set", "fallback", "set", "fallback"],
       ["clear", "active", "clear", "active"],
       ["set", "active", "set", "active"],
-      ["clear", "fallback", "clear", "fallback"],
     ] as const) {
       const built = checkSimForm({ ...FILLED, highDet, knockControl }, "x", EDITS);
       expect(built.request).toMatchObject({ high_det: highWord, knock_control: knockWord });
     }
+  });
+
+  it("refuses fallback with the latch clear, which is not a running state", () => {
+    const built = checkSimForm(
+      { ...FILLED, highDet: "clear", knockControl: "fallback" },
+      "x",
+      EDITS,
+    );
+    expect(built.request).toBeNull();
+    expect(built.problems.map((item) => [item.field, item.kind])).toEqual([["highDet", "invalid"]]);
+    expect(built.problems[0]?.message).toContain("the KS fault sets HI DET");
+    // The form rules clear out under fallback, and nothing else.
+    expect(Object.keys(highDetRuledOut("fallback"))).toEqual(["clear"]);
+    expect(highDetRuledOut("active")).toEqual({});
+    expect(highDetRuledOut("")).toEqual({});
+  });
+
+  it("choosing fallback sets the latch, whatever it was; choosing active leaves it", () => {
+    for (const highDet of ["", "set", "clear"] as const) {
+      expect(withChoice({ ...FILLED, highDet }, "knockControl", "fallback").highDet).toBe("set");
+    }
+    expect(withChoice({ ...FILLED, highDet: "clear" }, "knockControl", "active").highDet).toBe(
+      "clear",
+    );
+    expect(withChoice({ ...FILLED, knockControl: "fallback" }, "highDet", "set").highDet).toBe(
+      "set",
+    );
   });
 
   it("never remembers the latch or knock control, and never offers a choice preselected", () => {

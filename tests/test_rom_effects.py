@@ -239,12 +239,20 @@ def test_a_fuel_comp_axis_edit_is_the_same_path(setup: Setup) -> None:
     assert report.output("ignition_trim_selected").status == "unevaluable"
 
 
-def test_a_target_afr_cell_edit_reaches_only_the_command(setup: Setup) -> None:
+def test_a_target_afr_cell_edit_reaches_the_command_and_spark_through_the_charge_word(
+    setup: Setup,
+) -> None:
     image, rom_map, _, _ = setup
     candidate = _edit(setup, _bump(image, rom_map, "fuel_targets", 1, 6, 7))
     report = _compare(setup, candidate)
     assert report.changed_nodes == ("target_afr_lookup",)
-    assert report.output("ignition_timing").status == "unchanged"
+    # The command moves the enrichment multiplier 26C0, which scales the charge
+    # word 1B24 that indexes base timing term 27C6 (0x04B98A): spark is reached
+    # through a node the twin observes but does not predict, never "unchanged".
+    spark = report.output("ignition_timing")
+    assert spark.status == "unevaluable"
+    assert "observed_not_predicted:timing_charge_word" in spark.reasons
+    assert "enrichment_multiplier" in spark.path
     assert report.output("ignition_trim_selected").status == "unchanged"
     command = report.output("target_equiv_ratio")
     assert command.status == "unevaluable"

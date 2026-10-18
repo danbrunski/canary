@@ -92,13 +92,14 @@ from src.analysis.paired_scenarios import (
     SimKit,
     TimingState,
     _rpm_quantum,
+    base_timing_rom_ids,
     ignition_timing_at,
     ignition_timing_cells,
     rpm_word,
     timing_cell_summary,
     timing_tables,
 )
-from src.analysis.paired_steady import SETPOINT_MOVED, TRIM_AUTHORITY_UNDECODED
+from src.analysis.paired_steady import COMPUTED_HERE, SETPOINT_MOVED, TRIM_AUTHORITY_UNDECODED
 from src.analysis.rom_effects import EffectReport, compare_roms
 from src.analysis.rom_image import sha256_hex
 from src.analysis.sim_contract import SimContract, SimulationRefusalError
@@ -1188,13 +1189,17 @@ _TIMING_SLOT_SOURCE = "timing_block_caller_slot"
 def timing_reach_reasons(
     kit: SimKit, base_image: bytes, candidate_image: bytes, *, slot: int
 ) -> list[str]:
-    """Why ``ignition_timing_deg`` cannot be given for this edit beyond the
-    trims: every changed byte outside the two timing trims is traced with
-    :func:`~src.analysis.rom_effects.compare_roms`, and one that reaches the
-    ``ignition_timing`` output names its node (``timing_input_changed:<node>``);
-    a byte no node reads is ``unknown_bytes_changed``, since nothing says it
-    cannot. Checksum words and inactive slot copies reach nothing. Empty when
-    only the trims (or nothing) changed."""
+    """Why ``ignition_timing_deg`` cannot be given for this edit beyond what
+    the timing computation reads itself: every changed byte outside the two
+    timing trims and the base-sum terms' tables
+    (:func:`~src.analysis.paired_scenarios.base_timing_rom_ids`: the 0xFFFF27C6
+    chain and 0xFFFF279A's inputs, computed or refused per point) is traced
+    with :func:`~src.analysis.rom_effects.compare_roms`, and one that reaches
+    the ``ignition_timing`` output names its node
+    (``timing_input_changed:<node>``); a byte no node reads is
+    ``unknown_bytes_changed``, since nothing says it cannot. Checksum words and
+    inactive slot copies reach nothing. Empty when only those tables (or
+    nothing) changed."""
     report = compare_roms(
         base_image,
         candidate_image,
@@ -1210,6 +1215,7 @@ def timing_reach_reasons(
     if report.reason is not None:
         return [f"effects_unevaluable:{report.reason}"]
     trims = {t.id for t in kit.rom_map.tables if t.kind in ("timing_trim_a", "timing_trim_b")}
+    trims |= base_timing_rom_ids(kit.rom_map)
     path = set(report.output(TIMING_MODEL_OUTPUT).path)
     reasons: list[str] = []
     for r in report.ranges:
@@ -1222,6 +1228,39 @@ def timing_reach_reasons(
             continue
         reasons += [f"{TIMING_INPUT_CHANGED}:{n}" for n in r.nodes if n in path]
     return list(dict.fromkeys(reasons))
+
+
+def _carried_by_points(kit: SimKit, node: str) -> bool:
+    """Whether a changed node reaches ``ignition_timing`` only through what
+    :func:`ignition_timing_points` computes per ROM: the contract quantities
+    the slice computes (``COMPUTED_HERE``: BFS, and X from it through each
+    ROM's Load Point Scaler). Such a change (K, Fuel Comp, the scaler) is in
+    each ROM's own X and BFS. The points compute the trims and 0xFFFF27C6 from
+    those, but not everything downstream of them: the charge word 0xFFFF1B24
+    reads X (through 0xFFFF1736) and BFS (through 0xFFFF175C), neither
+    modelled, so :func:`ignition_timing_at` sweeps it on each ROM
+    independently and names ``charge_word_inputs_moved``; 0xFFFF279A reads BFS
+    and is ``term_279a_unmodelled`` unless provably 0. That is why dropping
+    ``timing_input_changed`` for such a node is sound: its unmodelled routes
+    are named per pair instead. Any other route to the timing writer is still
+    named."""
+    computed = {n for n, q in kit.contract.by_manifest_node().items() if q.id in COMPUTED_HERE}
+    if node in computed:
+        return True
+    children: dict[str, set[str]] = {}
+    for n in kit.model.nodes:
+        for dep in n.depends_on:
+            children.setdefault(dep, set()).add(n.id)
+    writer = kit.model.output(TIMING_MODEL_OUTPUT).written_by
+    seen, todo = {node}, [node]
+    while todo:
+        for child in children.get(todo.pop(), ()):
+            if child == writer:
+                return False
+            if child not in seen and child not in computed:
+                seen.add(child)
+                todo.append(child)
+    return True
 
 
 def ignition_timing_block(
@@ -1247,14 +1286,17 @@ def ignition_timing_block(
     check_image(candidate_image, kit.model)
     base_t = timing_tables(base_image, kit.rom_map, slot=slot)
     cand_t = timing_tables(candidate_image, kit.rom_map, slot=slot)
-    edited = (base_t.a, base_t.b) != (cand_t.a, cand_t.b)
+    trims = (base_t.a, base_t.b) != (cand_t.a, cand_t.b)
+    base_terms = base_t.base_term != cand_t.base_term
+    edited = trims or base_terms
     reach = timing_reach_reasons(kit, base_image, candidate_image, slot=slot)
     block: dict[str, Any] = {
         "output": TIMING_OUTPUT,
         "model_output": TIMING_MODEL_OUTPUT,
         "units": "deg_btdc",
         "side": "ecu: the timing byte's chain, no plant",
-        "trims_changed": edited,
+        "trims_changed": trims,
+        "base_timing_tables_changed": base_terms,
         "other_inputs_changed": reach,
         "conditions": list(TIMING_DELTA_CONDITIONS),
         **_torque_and_knock(kit),
@@ -1263,8 +1305,9 @@ def ignition_timing_block(
         if edited:
             raise SimulationRefusalError(
                 TIMING_STATE_UNSTATED,
-                "the edit changes a timing trim: state the HI DET latch (set|clear) and knock "
-                "control (active|fallback); nothing reads 0xFFFF283F bit 6, so there is no default",
+                "the edit changes a timing trim or a base timing table: state the HI DET latch "
+                "(set|clear) and knock control (active|fallback); nothing reads 0xFFFF283F bit 6, "
+                "so there is no default",
             )
         return {**block, "status": "unevaluable", "reasons": [TIMING_STATE_UNSTATED, *reach]}
     if coolant_c is None:
@@ -1295,6 +1338,31 @@ def ignition_timing_block(
     }
 
 
+def _lookup_byte(kit: SimKit, phi: float) -> int | None:
+    """The gated Target AFR byte 0xFFFF174B behind a twin phi: phi is
+    ``(174B << cell_to_word_shift) / 2**q_bits``. ``None`` when phi is not
+    known (the gate's hysteresis band) or is not a whole byte."""
+    if not math.isfinite(phi):
+        return None
+    scale = 1 << (kit.twin.reference.q_bits - kit.twin.table.cell_to_word_shift)
+    byte = phi * scale
+    return int(byte) if byte.is_integer() and 0 <= byte <= 0xFF else None
+
+
+#: What each design-point outcome carries from :func:`ignition_timing_at`.
+_POINT_KEYS: tuple[str, ...] = (
+    "status",
+    "delta",
+    "delta_min",
+    "delta_max",
+    "trim_term_delta",
+    "term_27c6_delta",
+    "term_279a",
+    "charge_word_routes",
+    "reasons",
+)
+
+
 def ignition_timing_points(
     kit: SimKit,
     result: MonteCarloResult,
@@ -1310,14 +1378,22 @@ def ignition_timing_points(
 
     Each ROM's own X comes from that pair's own BFS through that ROM's Load
     Point Scaler (as the twin computes it), so a K or Fuel Comp change reaches
-    the trims' load column; it also moves 0xFFFF27C6, which is not computed,
-    so such a pair reports the trim term's change and no timing change
-    (``base_timing_load_term_unmodelled``). A pair whose Target AFR phi moved
-    is held the same way (``enrichment_retard_unmodelled``). Any other change
-    that reaches ``ignition_timing`` (:func:`timing_reach_reasons`) leaves
-    every pair ``unevaluable`` with its reasons, the trim term's change still
-    shown. Design points carry no logged timing, so the absolute is never
-    given here."""
+    the trims' load column and 0xFFFF27C6, which is computed per ROM at its
+    own X (a range across the swept 0xFFFF1B24, ``charge_word_1b24_unresolved``).
+    A pair whose X, BFS or phi moved moves 1B24's inputs (0xFFFF1736 reads X,
+    0xFFFF175C reads BFS, 0xFFFF26C0 follows the Target AFR lookup; none is
+    modelled), so 1B24 is swept on each ROM independently and the pair names
+    ``charge_word_inputs_moved`` with its ``charge_word_routes``; a moved BFS
+    makes a 0xFFFF279A that is not provably 0 unevaluable
+    (``term_279a_unmodelled``). A pair whose Target AFR phi moved, or whose X
+    moved where either ROM's gated Target AFR byte may enrich
+    (:func:`_lookup_byte`; :class:`EnrichmentRetardCals`), is held
+    (``enrichment_retard_unmodelled``): the retard's cap 0xFFFF174C reads X. A change whose route to
+    ``ignition_timing`` runs only through BFS and X (:func:`_carried_by_points`)
+    is accounted for that way; any other change that reaches it
+    (:func:`timing_reach_reasons`) leaves every pair ``unevaluable`` with its
+    reasons, the trim term's change still shown. Design points carry no
+    logged timing, so the absolute is never given here."""
     if not isinstance(result, MonteCarloResult) or not isinstance(design, SimDesign):
         raise SimulationRefusalError(
             "not_a_monte_carlo_result", "the timing points take the run's result and design"
@@ -1332,7 +1408,13 @@ def ignition_timing_points(
             raise SimulationRefusalError(
                 "design_mismatch", f"{name} {got[:12]} is not the run's {prov.get(name)}"
             )
-    reach = timing_reach_reasons(kit, base_image, candidate_image, slot=slot)
+    reach = [
+        r
+        for r in timing_reach_reasons(kit, base_image, candidate_image, slot=slot)
+        if not (
+            r.startswith(f"{TIMING_INPUT_CHANGED}:") and _carried_by_points(kit, r.split(":", 1)[1])
+        )
+    ]
     tb, tc = (
         timing_tables(base_image, kit.rom_map, slot=slot),
         timing_tables(candidate_image, kit.rom_map, slot=slot),
@@ -1356,7 +1438,12 @@ def ignition_timing_points(
                 at: dict[str, Any] = {
                     "status": "unevaluable",
                     "delta": None,
+                    "delta_min": None,
+                    "delta_max": None,
                     "trim_term_delta": None,
+                    "term_27c6_delta": None,
+                    "term_279a": None,
+                    "charge_word_routes": None,
                     "reasons": [X_NOT_COMPUTED],
                     "x_base": None,
                     "x_candidate": None,
@@ -1376,13 +1463,17 @@ def ignition_timing_points(
                     coolant_c=p.coolant_c,
                     pedal_flag=pedal,
                     phi_moved=moved,
+                    bfs_moved=int(words[0]) != int(words[1]),
+                    lookup_bytes=(_lookup_byte(kit, pb), _lookup_byte(kit, pc)),
                 )
-                at = {key: full[key] for key in ("status", "delta", "trim_term_delta", "reasons")}
+                at = {key: full[key] for key in _POINT_KEYS}
                 at.update(x_base=xb, x_candidate=xc)
                 if reach:
                     at.update(
                         status="unevaluable",
                         delta=None,
+                        delta_min=None,
+                        delta_max=None,
                         reasons=list(dict.fromkeys([*at["reasons"], *reach])),
                     )
             key = json.dumps(at, sort_keys=True)

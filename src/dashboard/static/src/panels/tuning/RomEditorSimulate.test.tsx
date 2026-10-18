@@ -157,14 +157,16 @@ function state(form: HTMLElement, skip: string[] = []) {
 
 /** State the ignition chain's two ECU states, as an operator would (no default exists). */
 function stateTiming(form: HTMLElement, highDet = /^Set\b/, knock = /^Fallback\b/) {
-  fireEvent.click(
-    within(within(form).getByRole("group", { name: "HI DET latch" })).getByRole("radio", {
-      name: highDet,
-    }),
-  );
+  // Knock control first: with fallback chosen the latch's "clear" is unavailable (an
+  // operator who wants clear / active picks active first).
   fireEvent.click(
     within(within(form).getByRole("group", { name: "Knock control" })).getByRole("radio", {
       name: knock,
+    }),
+  );
+  fireEvent.click(
+    within(within(form).getByRole("group", { name: "HI DET latch" })).getByRole("radio", {
+      name: highDet,
     }),
   );
 }
@@ -1686,6 +1688,33 @@ describe("the ignition timing state and the timing trims (E09.7)", () => {
     await click(runButton(form));
     await screen.findByRole("region", { name: "Simulation result" });
     expect(sentRequest()).toMatchObject({ high_det: "clear", knock_control: "active" });
+  });
+
+  it("makes fallback with the latch clear impossible to submit, and says why", async () => {
+    route();
+    const form = await withPendingEdit();
+    state(form, []);
+    const latch = () => group(form, "HI DET latch");
+    const knock = () => group(form, "Knock control");
+    const clear = () => within(latch()).getByRole("radio", { name: /^Clear\b/ });
+    // state() chose set / fallback: clear is off, with the one-line why.
+    expect(clear()).toBeDisabled();
+    expect(latch()).toHaveTextContent(/Not available with knock control in fallback/);
+    expect(within(latch()).getByRole("radio", { name: /^Set\b/ })).toBeChecked();
+    // Active makes clear available again.
+    fireEvent.click(within(knock()).getByRole("radio", { name: /^Active\b/ }));
+    expect(clear()).toBeEnabled();
+    expect(latch()).not.toHaveTextContent(/Not available with knock control in fallback/);
+    fireEvent.click(clear());
+    expect(clear()).toBeChecked();
+    // Choosing fallback with clear chosen moves the latch to set rather than keep the pairing.
+    fireEvent.click(within(knock()).getByRole("radio", { name: /^Fallback\b/ }));
+    expect(within(latch()).getByRole("radio", { name: /^Set\b/ })).toBeChecked();
+    expect(clear()).not.toBeChecked();
+    expect(clear()).toBeDisabled();
+    await click(runButton(form));
+    await screen.findByRole("region", { name: "Simulation result" });
+    expect(sentRequest()).toMatchObject({ high_det: "set", knock_control: "fallback" });
   });
 
   it("remembers neither across a visit, whatever the last run chose", async () => {

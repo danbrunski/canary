@@ -381,9 +381,8 @@ def test_inspect_lists_the_resolved_cells_and_what_they_reach_and_runs_nothing(
             {"table": "fuel_compensation", "slot": 1, "cells": [[4, 4]], "add_raw": 5},
             "timing_input_changed:",
         ),
-        ({"table": "base_timing_rate_map", "all": True, "add_raw": 5}, "unknown_bytes_changed"),
     ],
-    ids=["k", "fuel_comp", "base_timing_rate_map"],
+    ids=["k", "fuel_comp"],
 )
 def test_an_edit_that_reaches_timing_outside_the_trims_is_not_zero_on_the_trim_grid(
     world: dict[str, Any],
@@ -391,9 +390,10 @@ def test_an_edit_that_reaches_timing_outside_the_trims_is_not_zero_on_the_trim_g
     edit: dict[str, Any],
     reason: str,
 ) -> None:
-    """E09.7: the trims' grid holds every other term equal, so a K, Fuel Comp
-    or base-timing-map edit (each reaches ``ignition_timing`` per
-    ``compare_roms``) is unevaluable there by name, never "0 changed"."""
+    """E09.7: the trims' grid holds X equal, so a K or Fuel Comp edit (each
+    reaches ``ignition_timing`` per ``compare_roms`` through BFS and X) is
+    unevaluable there by name, never "0 changed". A base-timing table edit is
+    computed instead (the next test)."""
     spec = world["root"] / "reach.yaml"
     spec.write_text(
         yaml.safe_dump(
@@ -417,6 +417,97 @@ def test_an_edit_that_reaches_timing_outside_the_trims_is_not_zero_on_the_trim_g
     code, payload, _ = _cli(capsys, "inspect", *_profile_args(world), "--edits", spec)
     assert code == 0, payload
     assert payload["ignition_timing"]["reasons"] == ["timing_state_unstated", *timing["reasons"]]
+
+
+def _with_listed_timing_tables(world: dict[str, Any]) -> bytes:
+    """The synthetic image with the trims' axes monotonic (8 .. 128), both
+    trims a flat 50 and the 0xFFFF27C6 / 0xFFFF279A tables and calibration
+    bytes at the listed images' values (tests/test_timing_rate_term.py,
+    tests/test_ignition_timing.py RETARD), each placed by its rom_map id."""
+    from tests.test_ignition_timing import RETARD
+    from tests.test_timing_rate_term import CALS, TABLES
+
+    rom_map = world["kit"].rom_map
+    image = bytearray(world["image"])
+
+    def place(table_id: str, values: Any, slot: int | None = None) -> None:
+        table = rom_map.table(table_id)
+        start = rom_map.table_address(table, slot if table.slot_offset is not None else None)
+        flat = [v for row in values for v in row] if isinstance(values[0], tuple) else values
+        assert len(flat) == table.size, table_id
+        image[start : start + table.size] = bytes(flat)
+
+    place("timing_trim_rpm_axis", [8 * (i + 1) for i in range(16)])
+    place("timing_trim_load_axis", [8 * (i + 1) for i in range(16)])
+    for trim in ("timing_trim_a", "timing_trim_b"):
+        place(trim, [50] * 256, slot=1)
+    for table_id, values in {
+        "base_timing_rate_map": TABLES.rate_map_9af9,
+        "base_timing_charge_map": TABLES.charge_map_9b89,
+        "base_timing_rate_rpm_axis": list(TABLES.rpm_axis_c890),
+        "base_timing_rate_load_axis": list(TABLES.load_axis_c88c),
+        "base_timing_load_curve": list(TABLES.load_curve_cd9b),
+        "base_timing_coolant_curve": list(TABLES.coolant_curve_cebb),
+        "base_timing_charge_curve": list(TABLES.charge_curve_ceab),
+        "base_timing_rate_coolant_curve": list(TABLES.coolant_curve_d9af),
+        "base_timing_rate_charge_curve": list(TABLES.charge_curve_d60f),
+        "base_timing_time_gain": [CALS.cal_880d],
+        "base_timing_rate_rpm_gain": [CALS.cal_880e],
+        "base_timing_rate_factor_gain": [CALS.cal_8440],
+        "base_timing_time_offset": [CALS.cal_8b0c],
+        "base_timing_1512_gain": [0],
+        "timing_retard_26d9_map": RETARD.map_9b09,
+        "timing_retard_26d9_rpm_axis": list(RETARD.rpm_axis_c8fc),
+        "timing_retard_26d9_coolant_axis": list(RETARD.coolant_axis_c904),
+        "timing_retard_26d0_rpm_curve": list(RETARD.curve_cc1b),
+        "timing_retard_26d0_bfs_curve": list(RETARD.curve_cc2b),
+        "timing_retard_26d0_coolant_curve": list(RETARD.curve_cc33),
+        "timing_retard_17fa_rpm_curve": list(RETARD.curve_d335),
+        "timing_retard_17fa_bfs_curve": list(RETARD.curve_d33d),
+    }.items():
+        place(table_id, values)
+    return bytes(image)
+
+
+def test_a_base_timing_table_edit_is_computed_on_the_trim_grid(
+    world: dict[str, Any], capsys: pytest.CaptureFixture[str]
+) -> None:
+    """E09.7 part B: 0x9AF9 is on ``ignition_timing``'s path (node
+    ``base_timing_rate_word``), so a one-cell edit (rpm/50 56, X 64: 0x3C ->
+    0x50) is neither ``unknown_bytes_changed`` nor a reach refusal: the block
+    computes 0xFFFF27C6 per ROM at every trim-grid node. Hand-worked in
+    tests/test_ignition_timing.py
+    ``test_a_one_cell_rate_map_edit_moves_the_cells_that_read_it``: 80 cells
+    move (the edited cell's bilinear support), the node (rpm word 224, X 64)
+    is a range -5 .. -3 across the 1B24 band, (224, 56) exactly -3."""
+    image = _with_listed_timing_tables(world)
+    (world["root"] / "listed_timing.bin").write_bytes(image)
+    spec = world["root"] / "rate_map.yaml"
+    spec.write_text(
+        yaml.safe_dump(
+            {
+                "schema_version": 1,
+                "base": {"file": "listed_timing.bin", "sha256": hashlib.sha256(image).hexdigest()},
+                "label": "rate map",
+                "edits": [{"table": "base_timing_rate_map", "cells": [[1, 2]], "add_raw": 20}],
+            }
+        )
+    )
+    code, payload, _ = _cli(capsys, "inspect", *_profile_args(world), "--edits", spec, *TIMING_ARGS)
+    assert code == 0, payload
+    timing = payload["ignition_timing"]
+    assert (timing["trims_changed"], timing["base_timing_tables_changed"]) == (False, True)
+    assert (timing["status"], timing["other_inputs_changed"]) == ("evaluated", [])
+    assert (timing["summary"]["changed"], timing["summary"]["unevaluable"]) == (80, 0)
+    by = {(c["rpm_word"], c["x"]): c for c in timing["cells"]}
+    assert (by[(224, 64)]["delta_min"], by[(224, 64)]["delta_max"]) == (-5, -3)
+    assert (by[(224, 56)]["status"], by[(224, 56)]["delta"]) == ("delta_if_no_clamp", -3)
+    reached = {o["output"]: o["status"] for o in payload["reached"]["outputs"]}
+    assert reached["ignition_timing"] == "changed"
+    assert reached["base_fuel_schedule_word"] == "unchanged"
+    # Without a stated state the edit is refused, as a trim edit is.
+    code, payload, _ = _cli(capsys, "inspect", *_profile_args(world), "--edits", spec)
+    assert (code, payload["refused"]) == (2, "timing_state_unstated")
 
 
 def test_inspect_judges_a_masked_trim_on_the_bits_the_ecm_reads(
