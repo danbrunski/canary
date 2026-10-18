@@ -477,6 +477,9 @@ def test_the_d03_38_hand_checks_are_declared_on_their_channels() -> None:
         ("ECM_KNOCK_RETARD_APPLIED", "memory"),
         ("ECM_TIMING_TRIM_TERM", "memory"),
         ("ECM_TIMING_TRIM_SUBTRAHEND", "invariant"),
+        # E09.7, the base timing term (2026-10-17): 0xFFFF15DA <= 0xFFFF15DB
+        # in one reply.
+        ("ECM_TIMING_RATE_PRODUCT", "memory"),
     }
 
 

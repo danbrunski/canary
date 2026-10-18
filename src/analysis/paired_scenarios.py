@@ -76,6 +76,7 @@ from src.analysis.ecu_state_models import (
     TRIM_RPM_AXIS_SCALE,
     TRIM_WARM_ABOVE,
     SelectedTrim,
+    coolant_rescaled,
     selected_timing_trim,
     timing_delta,
     trim_lookup,
@@ -1725,6 +1726,15 @@ def coolant_byte(coolant_c: float) -> int:
     return max(0, min(BYTE_MAX_VALUE, round(coolant_c) + COOLANT_BYTE_OFFSET))
 
 
+def coolant_rescaled_byte(coolant_c: float) -> int:
+    """The ECM's RESCALED coolant byte 0xFFFF1077 for a stated temperature:
+    :func:`coolant_byte` (0xFFFF1083, degC + 50) through the firmware's
+    rescale ``0x03A1F0`` (:func:`coolant_rescaled`; degC = byte x 0.625 -
+    40, 90 degC is 208). The base timing term reads this byte, the trim
+    selection the degC + 50 one: never pass one for the other."""
+    return coolant_rescaled(coolant_byte(coolant_c))
+
+
 def _selection(
     t: TimingTables, state: TimingState, rpm_word: int, x: int, coolant: int, pedal: bool
 ) -> SelectedTrim:
@@ -1913,6 +1923,7 @@ __all__ = [
     "ignition_timing_cells",
     "ignition_timing_at",
     "coolant_byte",
+    "coolant_rescaled_byte",
     "TimingTables",
     "TimingState",
     "KnockControl",

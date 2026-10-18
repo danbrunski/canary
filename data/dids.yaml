@@ -4769,7 +4769,9 @@ memory:
           u8 counts: the cycle-start copy of 0xFFFF1203, which 0x04E5B0 slews
           +/-5 per segment toward 0xFFFF2738 (min(cal 0x8B05 = 7, ...)). The
           trim term is 0xFFFF2793 = max(0, (0xFFFF1777 & 0x7F) - this byte).
-          Its source 0xFFFF2BD0 is not identified (E09.7).
+          Its source 0xFFFF2BD0 is the cycle copy of the intake temperature
+          byte 0xFFFF2CB8 (IAT + 50, inferred; firmware notes 2026-10-17);
+          the 0xFFFF1766 gating flags and the slew stay unmodelled.
       - session: _capture-ram-study-2026-10-04T204557
         method: window_byte_constant
         finding: >
@@ -4954,9 +4956,15 @@ memory:
         method: disassembly
         finding: >
           u8, subtracted in the base timing sum: clamp(0xFFFF26D9 + 0xFFFF26D0
-          - (0xFFFF17FA >> 4), 0, 255) (0x04C952); its inputs are not
-          identified.
-    notes: 'No known answer expressible.'
+          - (0xFFFF17FA >> 4), 0, 255) (0x04C952; manifest node
+          timing_term_279a). Inputs identified 2026-10-17: 26D9 = map 0x9B09
+          term x a fade ramp >> 8, 26D0 = a product of an rpm, a BFS and a
+          coolant curve and a ramp >> 24, 17FA from the w1760 - w1762
+          difference. 0x9B09 is all zero and curve 0xCC33 zero from entry 10
+          on every listed image, so it reads 0 on a warm engine.
+    notes: >-
+      No known answer expressible (the relation schema has no sum); expect 0
+      once the engine is warm (rescaled coolant byte >= 160, 60 degC).
   - name: ECM_TIMING_TERM_27C6
     address: 0xFFFF27C6
     length: 1
@@ -4975,9 +4983,16 @@ memory:
           s8, the term carrying most of the base advance: a time converted to
           crank angle at the current rpm over rom_map base_timing_rate_map
           (0x9AF9) and X, capped 127. Added unscaled to 0xFFFF1A58, hence
-          degrees (manifest timing_term_27c6); how it is formed from its
-          inputs is unresolved until the 0x021C48 / 0x021D6C operands are known.
-    notes: 'No known answer expressible: its computation is owed to the firmware session.'
+          degrees (manifest timing_term_27c6). Resolved 2026-10-17 (node
+          timing_term_27c6, 0x04BC5A): t = cal 0x880D x 120 x 0xFFFF17C6 /
+          (0xFFFF15DE x 0xFFFF19CB), u = t + cal 0x8B0C x 5 / 2, this byte =
+          (rpm word x u >> 10) x 3 / 5 - 14, capped 127. Hand values (hot, phi
+          1): 24 at 700 rpm X 32, 33 at 2,500 rpm X 64, 22 at 4,400 rpm X 112.
+    notes: >-
+      No known answer expressible in the relation schema (it is a quotient of
+      four channels); src.analysis.ecu_state_models.timing_term_27c6 computed
+      from same-window reads of mem:ECM_TIMING_CHARGE_TERM,
+      mem:ECM_TIMING_RATE_WORD and mem:ECM_TIMING_LOAD_CURVE is the check.
   - name: ECM_BASE_TIMING
     address: 0xFFFF27DA
     length: 1
@@ -5000,3 +5015,138 @@ memory:
       schema has no two-channel equality, and the two are separate reads
       (0xFFFF1A58 is 0xD82 bytes away). The twin's base_timing_select node is
       the check.
+  # E09.7: the base timing term's inputs (firmware notes 2026-10-17;
+  # manifest nodes base_timing_rate_word .. timing_term_27c6). Hypothesized
+  # until a one-off read checks timing_term_27c6_chain against them; in no
+  # capture profile.
+  - name: ECM_TIMING_RATE_PRODUCT
+    address: 0xFFFF15DA
+    length: 1
+    byte_length: 1
+    unit: counts
+    confidence: hypothesized
+    verified_tune_revision: ZS44A-20261004
+    window: timing_rate
+    relations:
+      - kind: memory
+        op: ordering
+        read: same_reply
+        operands: [ECM_TIMING_RATE_MAP]
+        compare: le
+        min_agreement: 1.0
+        notes: >
+          This byte is min(255, 0xFFFF15D7 x 0xFFFF15DC x 0xFFFF15DB >> 14),
+          and on every listed image 15D7 (curve 0xCEAB, flat 0x80) times 15DC
+          (curve 0xCEBB, at most 0x80) is at most 0x4000, so it never exceeds
+          0xFFFF15DB. Same reply, so exact. A calibration whose two curves
+          exceed 0x80 breaks the bound: re-derive it there.
+    evidence:
+      - session: firmware-ZS44A-20260920 (E09.7 base_timing_rate_word, 0x04BA6C)
+        method: disassembly
+        finding: >
+          u8 counts: min(255, 15D7 x 15DC x 15DB >> 14), the map term of the
+          rate word 0xFFFF15DE.
+  - name: ECM_TIMING_RATE_MAP
+    address: 0xFFFF15DB
+    length: 1
+    byte_length: 1
+    unit: counts
+    confidence: hypothesized
+    verified_tune_revision: ZS44A-20261004
+    window: timing_rate
+    evidence:
+      - session: firmware-ZS44A-20260920 (E09.7 base_timing_rate_word, 0x04BA6C)
+        method: disassembly
+        finding: >
+          u8 counts: rom_map base_timing_rate_map (0x9AF9) at the rpm/50 byte
+          0xFFFF11CA and X 0xFFFF103E through 0x0268B8.
+    notes: >-
+      Checked through the ordering declared on mem:ECM_TIMING_RATE_PRODUCT;
+      the map lookup itself needs rpm/50 and X from the same cycle, which no
+      single read gives.
+  - name: ECM_TIMING_RATE_WORD
+    address: 0xFFFF15DE
+    length: 2
+    byte_length: 2
+    byte_order: big
+    unit: counts
+    confidence: hypothesized
+    verified_tune_revision: ZS44A-20261004
+    window: timing_rate
+    evidence:
+      - session: firmware-ZS44A-20260920 (E09.7 base_timing_rate_word, 0x04BA6C)
+        method: disassembly
+        finding: >
+          u16 counts (big-endian, as the SH-2 stores words): min(0xFFFF, S x
+          19B6 x 1CC9 >> 14), the divisor's first factor in 0xFFFF27C6.
+    notes: 'No known answer expressible; timing_rate_word_15de on same-window reads is the check.'
+  - name: ECM_TIMING_CHARGE_TERM
+    address: 0xFFFF17C6
+    length: 2
+    byte_length: 2
+    byte_order: big
+    unit: counts
+    confidence: hypothesized
+    verified_tune_revision: ZS44A-20261004
+    window: timing_charge_term
+    evidence:
+      - session: firmware-ZS44A-20260920 (E09.7 base_timing_charge_term, 0x04B9D0)
+        method: disassembly
+        finding: >
+          u16 counts: X x ((0xFFFF1512 >> 7) + (0xFFFF1B24 / 29 >> 5) + 0x8000
+          / 0xFFFF10EB) / 25, capped 0xFFFF; 0xFFFF when 0xFFFF10EB is 0.
+    notes: 'No known answer expressible; timing_charge_term_17c6 on reads of X, 1B24 and 10EB is the check.'
+  - name: ECM_TIMING_LOAD_CURVE
+    address: 0xFFFF19CB
+    length: 1
+    byte_length: 1
+    unit: counts
+    confidence: hypothesized
+    verified_tune_revision: ZS44A-20261004
+    window: timing_load_curve
+    evidence:
+      - session: firmware-ZS44A-20260920 (E09.7 base_timing_load_curve, 0x04BA52)
+        method: disassembly
+        finding: >
+          u8 counts: the 8-entry curve 0xCD9B at X, the divisor's second
+          factor in 0xFFFF27C6.
+    notes: >-
+      min(X, 224) on every listed image, but no relation is declared: an
+      ordering against mem:ECM_FUEL_TARGET_MAP_X_TRACE would make that
+      channel checkable through this hypothesized one, so a restamp would
+      vouch for X on the strength of an unread address.
+  - name: ECM_TIMING_CHARGE_WORD
+    address: 0xFFFF1B24
+    length: 2
+    byte_length: 2
+    byte_order: big
+    unit: counts
+    confidence: hypothesized
+    verified_tune_revision: ZS44A-20261004
+    window: timing_charge_word
+    evidence:
+      - session: firmware-ZS44A-20260920 (E09.7 timing_charge_word, 0x04B98A)
+        method: disassembly
+        finding: >
+          u16, Q14 (0x4000 = 1.0): min(0xFFFF, max(0, 0xFFFF26F6 - 0xFFFF26E8)
+          x 0xFFFF26C0 >> 14), the correction sum less 26E8 times the
+          enrichment multiplier.
+    notes: >-
+      No known answer expressible: 0xFFFF26E8 is not catalogued, and the
+      relation schema has no product. Near 0x4000 on a warm closed-loop
+      cruise.
+  - name: ECM_TIMING_CHARGE_FACTOR
+    address: 0xFFFF10EB
+    length: 1
+    byte_length: 1
+    unit: counts
+    confidence: hypothesized
+    verified_tune_revision: ZS44A-20261004
+    window: timing_charge_factor
+    evidence:
+      - session: firmware-ZS44A-20260920 (E09.7 timing_charge_factor, 0x03D110)
+        method: disassembly
+        finding: >
+          u8, q7 (0x80 = 1.0) [inferred]: the cycle copy of 0xFFFF1177 = map
+          0x9B89 at the rpm word and X; read only by the base timing term.
+    notes: 'No known answer expressible; timing_charge_map_10eb at the same cycle''s rpm word and X is the check.'

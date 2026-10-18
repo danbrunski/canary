@@ -656,8 +656,14 @@ ECU replica.
     absolute still needs the words under `uncovered: timing_final_chain`.
     The base timing is a sum whose main term `0xFFFF27C6` is a time-to-angle
     conversion over the map `0x9AF9` (`rom_map.yaml`
-    `base_timing_rate_map`). The 0x021C48/0x021D6C operands are owed to the
-    firmware session; detail in E09.7.
+    `base_timing_rate_map`). Resolved from the listing 2026-10-17: the
+    divide helpers' operands are known (`0x021C48` signed, truncating toward
+    zero; `0x021D6C` unsigned, floor), and `0xFFFF27C6` is computed by the
+    manifest nodes `base_timing_load_curve`, `base_timing_charge_term`,
+    `base_timing_rate_word` and `timing_term_27c6` (with `coolant_rescale`,
+    `timing_charge_factor`, `timing_term_1512`, `timing_charge_word`; the
+    copy to `0xFFFF10EB` is on `cycle_snapshot`);
+    detail in E09.7.
   - **Remaining (vehicle).** *((b)–(c) ride on E09.1's capture; E09.7 has
     the simulator side.)*
     - **(a)** Read `0xFFFFB060`/`0xFFFFB160` (512 bytes, 0x23 windows) once
@@ -720,6 +726,20 @@ ECU replica.
         0x23 read of the eight windows and `knock_chain` to promote them,
         then a timing-only profile and the drive.
     - **(d)** Identify the unnamed terms (`uncovered: timing_final_chain`).
+      *Partly done 2026-10-17 (listing):* `0xFFFF27C6` is computed (nodes
+      above; hand vectors 24° / 33° / 22° at 700 / 2,500 / 4,400 rpm, hot,
+      φ 1, `tests/test_timing_rate_term.py`); `0xFFFF279A`'s inputs are
+      identified (`timing_term_26d9`, `timing_term_26d0`, `timing_term_279a`:
+      0 on a warm engine on every listed image); `0xFFFF11CB`'s source
+      `0xFFFF2BD0` is the intake temperature + 50 [inferred], but `11CB`
+      itself stays unnamed (no node writes `11CB`/`27C4`/`1203`; the
+      `0x04E5B0` slew and `1766`'s gating flags are unmodelled). The HI DET
+      gate (`0xFFFF4782` bit 5, engine state machine `0x027CC4` state 1) is
+      recorded on `high_det_latch`. Still unnamed: `26E8` and the
+      `175C`/`1736` corrections inside `26F6`, `26C0`'s Target AFR column
+      dependence, `11CB`, `1D3E`, `174A`, `1344`, `1215` and the rest of the list.
+      Owed (**truck**): one window set of `0xFFFF15DA`–`15DE`, `17C6`,
+      `19CB`, `1B24`, `10EB` with `27C6` and `1A58` at hot idle and cruise.
     - **(e)** Slot `+0x260` and the unnamed curves are untouched.
 
 - [ ] **E05.5 — Verify connected computations on the Pi.**

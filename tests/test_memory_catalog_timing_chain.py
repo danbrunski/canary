@@ -55,6 +55,15 @@ PINNED: dict[str, tuple[int, int, bool, float | None, str]] = {
     "ECM_TIMING_TERM_279A": (0xFFFF279A, 1, False, None, "timing_trim_term"),
     "ECM_TIMING_TERM_27C6": (0xFFFF27C6, 1, True, 1.0, "base_timing_term"),
     "ECM_BASE_TIMING": (0xFFFF27DA, 1, True, 1.0, "base_timing_term"),
+    # E09.7: the base timing term's inputs (nodes base_timing_rate_word ..
+    # timing_term_27c6), catalogued so a one-off read can check the formula.
+    "ECM_TIMING_RATE_PRODUCT": (0xFFFF15DA, 1, False, None, "timing_rate"),
+    "ECM_TIMING_RATE_MAP": (0xFFFF15DB, 1, False, None, "timing_rate"),
+    "ECM_TIMING_RATE_WORD": (0xFFFF15DE, 2, False, None, "timing_rate"),
+    "ECM_TIMING_CHARGE_TERM": (0xFFFF17C6, 2, False, None, "timing_charge_term"),
+    "ECM_TIMING_LOAD_CURVE": (0xFFFF19CB, 1, False, None, "timing_load_curve"),
+    "ECM_TIMING_CHARGE_WORD": (0xFFFF1B24, 2, False, None, "timing_charge_word"),
+    "ECM_TIMING_CHARGE_FACTOR": (0xFFFF10EB, 1, False, None, "timing_charge_factor"),
 }
 
 #: window -> (first address, read length) with every member selected.
@@ -67,6 +76,11 @@ WINDOWS = {
     "valve_timing_term": (0xFFFF1D3E, 1),
     "timing_trim_term": (0xFFFF2793, 8),
     "base_timing_term": (0xFFFF27C6, 21),
+    "timing_rate": (0xFFFF15DA, 6),
+    "timing_charge_term": (0xFFFF17C6, 2),
+    "timing_load_curve": (0xFFFF19CB, 1),
+    "timing_charge_word": (0xFFFF1B24, 2),
+    "timing_charge_factor": (0xFFFF10EB, 1),
 }
 
 #: How each channel can be checked, as the catalog declares it. Everything
@@ -78,6 +92,8 @@ CHECKS = {
     "ECM_TIMING_TRIM_SUBTRAHEND": "invariant max 7",
     "ECM_TIMING_TRIM_TERM": "memory ordering <= ECM_TIMING_TRIM_SELECTED & 0x7F",
     "ECM_TIMING_TRIM_SELECTED": "memory ordering (declared on ECM_TIMING_TRIM_TERM)",
+    "ECM_TIMING_RATE_PRODUCT": "memory ordering <= ECM_TIMING_RATE_MAP, same reply",
+    "ECM_TIMING_RATE_MAP": "memory ordering (declared on ECM_TIMING_RATE_PRODUCT)",
 }
 
 
@@ -145,6 +161,10 @@ def test_the_declared_checks_are_the_ones_the_window_plan_states() -> None:
     assert ("ECM_KNOCK_RETARD_APPLIED", "memory", "ECM_TIMING_OTHER_RETARD") in relations
     assert ("ECM_TIMING_TRIM_TERM", "memory", "ECM_TIMING_TRIM_SELECTED") in relations
     assert ("ECM_TIMING_TRIM_SUBTRAHEND", "invariant") in relations
+    assert ("ECM_TIMING_RATE_PRODUCT", "memory", "ECM_TIMING_RATE_MAP") in relations
+    # No ordering against X: it would make the X trace checkable through an
+    # unread channel (tests/test_verify_memory_channels.py).
+    assert not any(name == "ECM_TIMING_LOAD_CURVE" for name, *_ in relations)
     checkable = {name for name in PINNED if BY_NAME[name].known_answer is not None}
     checkable |= {n for c in CATALOG.memory for r in c.relations for n in (c.name, *r.channels())}
     assert checkable & set(PINNED) == set(CHECKS)
@@ -243,3 +263,51 @@ def test_the_subtrahend_invariant_refuses_eight(w11cb: int, holds: bool) -> None
     relation = _relation("ECM_TIMING_TRIM_SUBTRAHEND", "invariant")
     assert isinstance(relation, InvariantRelation)
     assert relation.holds(w11cb) is holds
+
+
+@pytest.mark.parametrize(
+    ("w15da", "w15db", "holds"),
+    [
+        (57, 57, True),  # 15D7 x 15DC = 0x4000: equal (the hot, phi 1 vectors)
+        (14, 57, True),  # a smaller charge or coolant factor
+        (58, 57, False),  # a product above its map term: wrong address
+        (255, 0, False),
+    ],
+)
+def test_the_rate_product_ordering_can_fail(w15da: int, w15db: int, holds: bool) -> None:
+    relation = _relation("ECM_TIMING_RATE_PRODUCT", "memory")
+    assert isinstance(relation, MemoryArithmeticRelation)
+    assert relation.read == "same_reply" and relation.min_agreement == 1.0
+    assert relation.holds(w15da, [w15db]) is holds
+
+
+def test_the_base_timing_term_channels_enter_no_capture_profile() -> None:
+    """Hypothesized until a one-off read checks the formula (the live-read
+    rule in tests/test_memory_catalog_knock_lambda.py): no profile, saved or
+    starter, names them."""
+    added = {
+        "ECM_TIMING_RATE_PRODUCT",
+        "ECM_TIMING_RATE_MAP",
+        "ECM_TIMING_RATE_WORD",
+        "ECM_TIMING_CHARGE_TERM",
+        "ECM_TIMING_LOAD_CURVE",
+        "ECM_TIMING_CHARGE_WORD",
+        "ECM_TIMING_CHARGE_FACTOR",
+    }
+    for path in (REPO / "data").rglob("capture_profiles*.yaml"):
+        text = path.read_text()
+        assert not {name for name in added if name in text}, path
+
+
+def test_a_big_endian_word_decodes_as_the_sh2_stores_it() -> None:
+    rate = next(r for r in plan_memory_reads(CATALOG.memory) if r.name == "timing_rate")
+    payload = bytes([57, 57, 0, 0, 0x02, 0xD8])  # 15DE = 0x02D8 = 728
+    raws = {
+        c.name: decode_memory_window(c, payload, offset)
+        for c, offset in zip(rate.channels, rate.offsets, strict=True)
+    }
+    assert raws == {
+        "ECM_TIMING_RATE_PRODUCT": 57,
+        "ECM_TIMING_RATE_MAP": 57,
+        "ECM_TIMING_RATE_WORD": 728,
+    }

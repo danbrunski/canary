@@ -729,8 +729,8 @@ Pi; E09.13 Light. Items marked **listing** need the firmware session
       converted to crank angle at the current rpm: `(cal 0x880D × 120 ×
       0xFFFF17C6) / (0xFFFF15DE × 0xFFFF19CB)`, plus `cal 0x8B0C × 5 / 2`,
       times `rpm >> 10 × 3 / 5`, minus 14, capped at 127. The × 120 is the
-      listing's (`0x04BC7C`–`0x04BC8A`: × 15, `shll2`, `shll`); the overall
-      scale stays unresolved until the divide helpers' operands are known.
+      listing's (`0x04BC7C`–`0x04BC8A`: × 15, `shll2`, `shll`). Resolved
+      2026-10-17 (see the next block).
     - `0xFFFF19CB` is X itself (curve `0xCD9B`). `0xFFFF15DE` carries the 4 × 4
       map `0x9AF9` (rpm/50 byte vs axis `0xC890`; X vs axis `0xC88C`; rows are
       rpm, from the `0x0268B8` → `0x026F40` stride). That map is now in
@@ -747,11 +747,35 @@ Pi; E09.13 Light. Items marked **listing** need the firmware session
     - `0xFFFF11CB` is `0xFFFF27C4` slewed ±5 per segment, ≤ cal `0x8B05` = 7.
     - `0xFFFF27C3` is idle timing (the `0xFFFF2833` bit 4 sum).
 
-    **Owed to the firmware session:** the operands of `0x021C48` /
-    `0x021D6C` inside `0x04BA6C`, `0x04BC5A` and `0x04B9D0` (the exports
-    drop call arguments), and the writers of `0xFFFF2BD0`, `0xFFFF26D9`,
-    `0xFFFF26D0` and `0xFFFF17FA`. Until then `0xFFFF27C6` cannot be
-    computed, and the absolute timing is unknown.
+    **Resolved by the firmware session, 2026-10-17** (`~/ecu-re/NOTES.md`,
+    "base timing term 0xFFFF27C6 fully resolved"): the divide helpers take
+    the dividend in r1 and the divisor in r0 (`0x021C48` signed, truncating
+    toward zero; `0x021D6C` unsigned, floor), and `0xFFFF27C6` is computable.
+    It is a burn-time model: u = cal `0x880D` × 120 × `17C6` / (`15DE` ×
+    `19CB`) + cal `0x8B0C` × 5 / 2 is a time in 1/128 ms, and the term is the
+    crank angle swept in it at the current rpm [inferred]. `15DE` carries
+    the rate map `0x9AF9` × coolant and mixture curves plus an rpm term;
+    `17C6` the q7 factor map `0x9B89` (computed inside Fuel Comp, read only
+    here) and the charge word `0xFFFF1B24`. X largely cancels between `17C6`
+    and `19CB` and acts through `0x9AF9` and `0x9B89`. Manifest nodes
+    `coolant_rescale`, `timing_charge_factor` (its copy to `10EB` is on
+    `cycle_snapshot`),
+    `timing_term_1512`, `timing_charge_word`, `base_timing_load_curve`,
+    `base_timing_charge_term`, `base_timing_rate_word`, `timing_term_27c6`
+    (code: `timing_term_27c6_chain` / `timing_term_27c6_steady`), all
+    `twin: implemented` but not yet on `ignition_timing`'s path (the sim
+    dispatch wires them in). Hand vectors (hot, φ 1,
+    `tests/test_timing_rate_term.py`): 24° at 700 rpm X 32, 33° at 2,500
+    rpm X 64, 22° at 4,400 rpm X 112. The tables are in `rom_map.yaml`
+    (`base_timing_charge_map`, `base_timing_load_curve` and four 8-entry
+    curves). `0xFFFF279A`'s inputs (`timing_term_26d9`, `timing_term_26d0`,
+    `timing_term_279a`): on every listed image map `0x9B09` is all zero and
+    curve `0xCC33` is zero from entry 10, so `279A` = 0 on a warm engine.
+    `0xFFFF11CB`'s source `0xFFFF2BD0` is the intake temperature + 50
+    [inferred]; `11CB` itself is still unmodelled (the `0x04E5B0` slew,
+    `27C4`, and `1766`'s gating flags). The absolute timing still needs the
+    words the `timing_final_chain` known-unknown lists (`11CB`, `26E8` and
+    the corrections in `26F6`, `1D3E`, `174A`, `1344`, `1215`, …).
   - **The seven nodes** are implemented integer-exact in
     `src.analysis.ecu_state_models` (`timing_trim_terms` …
     `timing_final_byte`, plus `timing_rate_limit_steady` and `timing_delta`).
@@ -928,7 +952,11 @@ Pi; E09.13 Light. Items marked **listing** need the firmware session
         page against a live daemon.
     - **Truck:** E05.4 (c)'s capture is needed to locate the earliest
       disagreement and to declare a final-byte tolerance.
-    - **Listing:** the owed operands above.
+    - **Listing:** done (2026-10-17, above). **Truck:** one window set
+      reading `0xFFFF15DA`–`0xFFFF15DE`, `0xFFFF17C6`, `0xFFFF19CB`,
+      `0xFFFF1B24`, `0xFFFF10EB` with `0xFFFF27C6` and `0xFFFF1A58` at hot
+      idle and at steady cruise (the hypothesized `mem:ECM_TIMING_RATE_*`,
+      `…_CHARGE_*`, `…_LOAD_CURVE` channels; in no profile).
 
 - [ ] **E09.8 — The MAF curve, mapped and modelled.** **listing**
   Add `0xE27E` (the MAF transfer curve the airflow pipeline reads) to

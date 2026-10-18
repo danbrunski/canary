@@ -132,4 +132,5 @@ implementation does not choose an answer for any of these:
   decoded, so the enrichment request/commit machine stays Python-only and
   outside this contract version.
 - `coolant_blend_divide`: the signed divide `0x021C48` used by the timing-trim
-  blend has unknown rounding.
+  blend truncates toward zero (resolved 2026-10-17), but the blend itself is
+  not implemented yet.
