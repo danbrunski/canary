@@ -111,6 +111,12 @@ passes `1`. Later passes never beat the first on this board.
 - **Clearances.** The board-edge clearance and the fiducials' 0.6 mm clearance go in as
   keepouts, since the export leaves both out.
 
+**`grade.sh`** grades a routing result made elsewhere (another router, another session):
+`grade.sh <project_dir> <routes.ses | routed.kicad_pcb> [workdir]`. It takes the project from git
+HEAD into a scratch directory, imports the SES (or takes the routed board as it is), and runs DRC
+with schematic parity, `via_in_pad.py` and `inner_tracks.py`. A result counts when the only errors
+are unconnected items and starved thermals, and both checkers report 0.
+
 **`ses_import.py`** (KiCad python) adds only the router's work. KiCad's own SES import
 deletes every track first. This script skips the wires and vias Freerouting marks `fix` or
 `protect`: the hand-laid copper and the pour stand-ins.
