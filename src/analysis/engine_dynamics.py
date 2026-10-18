@@ -80,6 +80,7 @@ from src.analysis.fuel_plant import (
     FuelPlantProfile,
     Geometry,
     PlantParameter,
+    Qualification,
     load_fuel_plant,
     plant_qualification,
 )
@@ -110,6 +111,8 @@ _CLAIM_QUANTITY: dict[str, str] = {
     "torque": "engine_torque",
     "power": "engine_torque",
 }
+#: Public view of the same map, for producers that join a stage to its claims.
+CLAIM_QUANTITY: Mapping[str, str] = _CLAIM_QUANTITY
 
 EnergyBalance = Literal["adiabatic", "isothermal"]
 SolverMethod = Literal["fixed_step_euler", "rk4"]
@@ -1168,9 +1171,10 @@ def subsystem_standing(
     contract: SimContract,
     sub: Subsystem,
     *,
-    profile_dir: Path,
+    profile_dir: Path | None = None,
     convergence: ConvergenceReport | None = None,
     plant_version: str | None = None,
+    qualification: Qualification | None = None,
 ) -> SubsystemStanding:
     """A subsystem's standing, derived: built, its numerics verified by running
     the study (or the given report), and validated only by a recorded passing
@@ -1179,7 +1183,11 @@ def subsystem_standing(
 
     ``plant_version`` asks about one of the implementation's declared versions
     (default: the one the contract runs); only internal models of that version
-    are owed by it."""
+    are owed by it. ``qualification`` is the fuel stage's
+    :func:`plant_qualification` when the caller already holds it (its version
+    must be the one asked about); ``profile_dir`` is needed only for what is
+    read from the profile (the study, the fuel plant), and refused
+    (``profile_required``) when such a stage is asked without it."""
     reasons: list[str] = []
     missing = [m.id for m in sub.required_measurements if m.status != "available"]
     if sub.status == "unbuilt":
@@ -1200,6 +1208,7 @@ def subsystem_standing(
                 "numerics_unimplemented", f"no convergence study is implemented for {sub.id}"
             )
         if convergence is None:
+            profile_dir = _profile_required(profile_dir, sub, "its convergence study")
             manifold, _ = load_manifold_plant(profile_dir)
             fuel, _ = load_fuel_plant(profile_dir)
             convergence = convergence_study(contract, manifold, fuel)
@@ -1216,8 +1225,17 @@ def subsystem_standing(
     for ref in sub.references:
         reasons += check_reference(contract, sub, ref)
     if sub.implementation.profile_file == "fuel_plant.yaml":
-        fuel, _ = load_fuel_plant(profile_dir, version)
-        q = plant_qualification(fuel)
+        if qualification is None:
+            profile_dir = _profile_required(profile_dir, sub, "its plant's held-out verdicts")
+            fuel, _ = load_fuel_plant(profile_dir, version)
+            q = plant_qualification(fuel)
+        elif qualification.plant_version != version:
+            raise SimulationRefusalError(
+                "plant_version_mismatch",
+                f"a qualification of {qualification.plant_version} cannot stand for {version}",
+            )
+        else:
+            q = qualification
         if not q.qualified:
             reasons.append(str(q.reason))
         passed = q.qualified
@@ -1233,6 +1251,25 @@ def subsystem_standing(
     if validated:
         reasons = []
     return SubsystemStanding(sub.id, True, numerics, validated, tuple(dict.fromkeys(reasons)))
+
+
+def _profile_required(profile_dir: Path | None, sub: Subsystem, what: str) -> Path:
+    if profile_dir is None:
+        raise SimulationRefusalError(
+            "profile_required", f"{sub.id}'s standing reads {what} from the profile"
+        )
+    return profile_dir
+
+
+def claim_chain(contract: SimContract, mode_id: str, claim: str) -> list[Subsystem]:
+    """The subsystems a ``claim`` from ``mode_id`` rests on, nearest first (the
+    ones :func:`claim_refusals` asks to be validated); empty for knock, which
+    no stage computes."""
+    if claim not in CLAIMS:
+        raise SimulationRefusalError("claim_undeclared", f"{claim!r} is not one of {CLAIMS}")
+    if claim not in _CLAIM_QUANTITY:
+        return []
+    return _upstream_subsystems(contract, mode_id, _CLAIM_QUANTITY[claim])
 
 
 def standings(
@@ -1490,6 +1527,7 @@ def load_kit(profile_dir: Path) -> tuple[SimContract, ManifoldPlantProfile, Fuel
 
 __all__ = [
     "CLAIMS",
+    "CLAIM_QUANTITY",
     "MANIFOLD_FILE",
     "MANIFOLD_SUBSYSTEM",
     "ConvergenceReport",
@@ -1505,6 +1543,7 @@ __all__ = [
     "check_applicability",
     "check_reference",
     "check_internal_models",
+    "claim_chain",
     "claim_refusals",
     "convergence_study",
     "hold_on_grid",

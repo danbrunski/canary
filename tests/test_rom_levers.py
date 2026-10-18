@@ -4,8 +4,13 @@ The world is E07.2's synthetic image (``tests.test_rom_effects.modelled_image``,
 which every node's decode describes) against the committed Xterra profile.
 Nothing real is read. What these pin:
 
-- the three accepted strings (timing trim: "no torque plant"; a MAF-curve byte:
-  "not mapped"; a Fuel Comp edit: "closed loop: trim authority undecoded");
+- the three accepted strings (timing trim: the torque stage's blockers, "no
+  torque plant" while it is unbuilt and, built, "torque production built, not
+  validated (owed H07.10, ...)" with "spark response unmeasured"; a MAF-curve
+  byte: "not mapped"; a Fuel Comp edit: "closed loop: trim authority
+  undecoded");
+- the edit's own torque/power claim (E07.5 item 8): the controls are derived
+  from the comparison, and the claim is refused by name;
 - that every blocker is *derived*: change the manifest, the contract or the
   plant's qualification and the blocker goes, so no hand-kept table can hide
   behind a passing test;
@@ -17,6 +22,7 @@ Coupling created here: ``tests.test_rom_effects.modelled_image`` and ``_bump``.
 
 from __future__ import annotations
 
+import dataclasses
 import json
 import subprocess
 import sys
@@ -47,10 +53,13 @@ from src.analysis.rom_levers import (
     TEXT_NO_TORQUE_PLANT,
     TEXT_NOT_MAPPED,
     LeverClassification,
+    changed_controls,
     classify_edit,
+    edit_claim_refusals,
+    require_edit_claim,
 )
 from src.analysis.rom_map import RomMap
-from src.analysis.sim_contract import SimContract, load_contract
+from src.analysis.sim_contract import SimContract, SimulationRefusalError, load_contract
 from tests.rom_fixtures import PROFILE, xterra_map
 from tests.test_rom_effects import _bump, modelled_image
 
@@ -58,6 +67,25 @@ MODE = "conditional_rom_comparison"
 #: An image offset the application model does not read and ``rom_map.yaml``
 #: does not map: the MAF curve (E09.8 maps it).
 MAF_CURVE = 0xE27E
+#: What the built, unvalidated torque stage says (E07.5 stage 4, 2026-10-17).
+TEXT_TORQUE_UNVALIDATED = (
+    "torque production built, not validated (owed H07.10, H07.5, H07.12, H07.8, N01.2"
+)
+TORQUE_CODES = {
+    "engine_torque_not_computed",
+    "subsystem_not_validated",
+    "spark_response_unmeasured",
+}
+
+
+def _raw_contract() -> dict[str, Any]:
+    raw: dict[str, Any] = yaml.safe_load((PROFILE / "engine_sim_contract.yaml").read_text())
+    return raw
+
+
+def _torque(raw: dict[str, Any]) -> dict[str, Any]:
+    sub: dict[str, Any] = next(s for s in raw["subsystems"] if s["id"] == "torque_production")
+    return sub
 
 
 class World:
@@ -136,13 +164,20 @@ def _maf_image(world: World) -> bytes:
 # -- the three accepted strings -----------------------------------------------------------------
 
 
-def test_a_timing_trim_edit_says_there_is_no_torque_plant(world: World) -> None:
+def test_a_timing_trim_edit_names_the_torque_stage_and_what_it_owes(world: World) -> None:
     result = world.classify(world.candidate("timing_trim_a"))
     assert [e.lever for e in result.levers] == ["timing_trim_a"]
-    assert TEXT_NO_TORQUE_PLANT == "no torque plant"
-    assert TEXT_NO_TORQUE_PLANT in _joined(result)
-    assert "no_torque_plant" in _blockers(result, "ignition_trim_selected")
-    assert "no_torque_plant" in _blockers(result, "ignition_timing")
+    assert TEXT_TORQUE_UNVALIDATED in _joined(result)
+    assert TEXT_NO_TORQUE_PLANT not in _joined(result)  # the stage is built
+    for output in ("ignition_trim_selected", "ignition_timing"):
+        assert TORQUE_CODES <= _blockers(result, output)
+        assert "no_torque_plant" not in _blockers(result, output)
+    assert (
+        "Timing trim A -> ignition_trim_selected: engine torque not computed in "
+        "conditional_rom_comparison; " + TEXT_TORQUE_UNVALIDATED
+    ) in _joined(result)
+    assert "spark response unmeasured" in _joined(result)
+    assert result.messages[-1].startswith("torque/power claim for this edit (spark): refused;")
     # The timing trim reaches no fuel output, so none is blamed.
     reached = {o.output for o in result.outputs if o.reached}
     assert reached == {"ignition_timing", "ignition_trim_selected"}
@@ -199,31 +234,35 @@ def test_a_regime_other_than_closed_loop_does_not_carry_the_closed_loop_blocker(
 
 def test_a_node_the_manifest_calls_implemented_stops_blocking(world: World, tmp_path: Path) -> None:
     """A scratch copy of the application model with one node flipped to
-    ``implemented``: the blocker naming it is gone from the same edit."""
-    candidate = world.candidate("timing_trim_a")
+    ``implemented``: the blocker naming it is gone from the same edit. Since
+    E09.7 implemented the timing chain a trim edit names no unmodelled node,
+    so a K edit (which reaches ignition timing through X) carries it."""
+    candidate = world.candidate("k_constant")
     before = world.classify(candidate)
     assert "unmodelled: " in _joined(before)
-    assert "timing_final_byte" in _joined(before)
+    assert "knock_trim_difference" in _joined(before)
 
     text = (PROFILE / "ecu_application_model.yaml").read_text()
     data = yaml.safe_load(text)
-    (node,) = [n for n in data["nodes"] if n["id"] == "timing_final_byte"]
+    (node,) = [n for n in data["nodes"] if n["id"] == "knock_trim_difference"]
     assert node["twin"] == "not_modelled"
     node["twin"] = "implemented"
     node["implemented_by"] = "src.decode.air_charge.rpm_load_lookup"
     # The loader holds each output's blockers to its unresolved nodes.
     for output in data["outputs"]:
         for blocker in output.get("blockers", []):
-            blocker["nodes"] = [n for n in blocker["nodes"] if n != "timing_final_byte"]
+            blocker["nodes"] = [n for n in blocker["nodes"] if n != "knock_trim_difference"]
+        # A blocker left naming no node is closed.
+        output["blockers"] = [b for b in output.get("blockers", []) if b["nodes"]]
     scratch = tmp_path / "profile"
     scratch.mkdir()
     (scratch / "ecu_application_model.yaml").write_text(yaml.safe_dump(data, sort_keys=False))
     mutated, _ = load_application_model(scratch)
     mutated = mutated.model_copy(update={"program": world.model.program})
     after = world.classify(candidate, model=mutated)
-    assert "timing_final_byte" not in _joined(after)
-    # The rest of the chain still blocks, and the torque plant is still absent.
-    assert "timing_rate_limit" in _joined(after) and TEXT_NO_TORQUE_PLANT in _joined(after)
+    assert "knock_trim_difference" not in _joined(after)
+    # The rest of the chain still blocks, and the torque stage is still unvalidated.
+    assert "fill_blend" in _joined(after) and TEXT_TORQUE_UNVALIDATED in _joined(after)
 
 
 def test_a_closed_loop_override_qualified_on_the_vehicle_lifts_the_closed_loop_blocker(
@@ -241,18 +280,60 @@ def test_a_closed_loop_override_qualified_on_the_vehicle_lifts_the_closed_loop_b
     assert TEXT_CLOSED_LOOP not in _joined(world.classify(candidate, model=qualified))
 
 
-def test_a_built_torque_subsystem_lifts_no_torque_plant(world: World) -> None:
+def test_the_torque_blocker_follows_the_stages_derived_standing(world: World) -> None:
+    """Unbuilt: "no torque plant". Built (the profile): not validated, naming
+    what it owes. A recorded pass against an available, independent reference
+    lifts the stage's blocker; the spark sweep lifts the spark one; the ROM
+    comparison still computes no torque."""
     candidate = world.candidate("timing_trim_a")
-    assert TEXT_NO_TORQUE_PLANT in _joined(world.classify(candidate))
-    subsystems = [
-        s.model_copy(update={"status": "built"}) if s.id == "torque_production" else s
-        for s in world.contract.subsystems
+    raw = _raw_contract()
+    sub = _torque(raw)
+    for key in ("implementation", "applicability"):
+        sub.pop(key)
+    sub["status"] = "unbuilt"
+    unbuilt = SimContract.model_validate(raw)
+    result = world.classify(candidate, contract=unbuilt)
+    assert TEXT_NO_TORQUE_PLANT in _joined(result)
+    assert "no_torque_plant" in _blockers(result, "ignition_trim_selected")
+    assert "no_torque_plant" in _blockers(result, "ignition_timing")
+
+    raw = _raw_contract()
+    sub = _torque(raw)
+    for ref in sub["references"]:
+        if ref["id"] == "h07_wheel_torque":
+            ref["status"], ref["requires"] = "available", None
+    sub["validations"] = [
+        {
+            "reference": "h07_wheel_torque",
+            "recordings": ["_capture-h07-2026-11-01T120000"],
+            "verdict": "pass",
+            "scored_on": "2026-11-01",
+            "evidence": "a stand-in pass for the test",
+        }
     ]
-    built = world.contract.model_copy(update={"subsystems": subsystems})
-    result = world.classify(candidate, contract=built)
-    assert TEXT_NO_TORQUE_PLANT not in _joined(result)
-    # The output is still not carried by any plant quantity, and says so by name.
+    for m in sub["required_measurements"]:
+        m["status"] = "available" if m["id"] == "controlled_spark_sweep" else m["status"]
+    validated = SimContract.model_validate(raw)
+    result = world.classify(candidate, contract=validated)
+    codes = _blockers(result, "ignition_timing")
+    assert "spark_response_unmeasured" not in codes
+    assert TEXT_TORQUE_UNVALIDATED not in _joined(result)
+    assert "torque production" not in _joined(result)
+    # Still blocked: the fuel stage the mode computes lambda with is not
+    # validated, and the comparison does not compute torque at all.
+    assert {"engine_torque_not_computed", "subsystem_not_validated"} <= codes
+    assert "fuel delivery built, not validated (plant not qualified)" in _joined(result)
+
+
+def test_an_output_no_contract_quantity_carries_says_no_plant_consumes_it(world: World) -> None:
+    quantities = [
+        q.model_copy(update={"manifest_node": None}) if q.id == "ignition_timing_byte" else q
+        for q in world.contract.quantities
+    ]
+    uncarried = world.contract.model_copy(update={"quantities": quantities})
+    result = world.classify(world.candidate("timing_trim_a"), contract=uncarried)
     assert "no_plant_consumer" in _blockers(result, "ignition_trim_selected")
+    assert "no_plant_consumer" in _blockers(result, "ignition_timing")
 
 
 def test_a_contract_quantity_that_carries_an_output_lifts_its_plant_blocker(
@@ -389,7 +470,7 @@ def test_classifying_an_edit_imports_nothing_that_talks_to_the_ecu() -> None:
         from tests.test_rom_levers import World
         w = World()
         result = w.classify(w.candidate("timing_trim_a"))
-        assert "no torque plant" in "\\n".join(result.messages)
+        assert "spark response unmeasured" in "\\n".join(result.messages)
         print(json.dumps(sorted(sys.modules)))
         """
     )
@@ -654,3 +735,75 @@ def test_a_number_is_only_claimed_for_points_that_state_the_fill_byte_and_nothin
             gave = f"conditioned_on_changed_path:{quantity}" in refused[runner_output]["reasons"]
             assert said == gave, (model_output, quantity)
             assert (refused[runner_output]["status"] == "unsupported") == said
+
+
+# -- the edit's claim (E07.5 item 8) -----------------------------------------------------------
+
+
+def test_the_controls_an_edit_changes_are_read_from_the_comparison(world: World) -> None:
+    """A timing edit is spark; Fuel Targets is lambda; Fuel Comp and K move BFS,
+    which indexes the timing tables (load input X), so they are both; bytes no
+    node reads leave the controls unresolved."""
+
+    def controls(image: bytes) -> tuple[tuple[str, ...], tuple[str, ...]]:
+        edit = changed_controls(world.report(image), world.model, world.contract)
+        return edit.controls, edit.unresolved
+
+    assert controls(world.candidate("timing_trim_a")) == (("spark",), ())
+    assert controls(world.candidate("fuel_targets")) == (("lambda",), ())
+    assert controls(world.candidate("fuel_compensation")) == (("lambda", "spark"), ())
+    assert controls(world.candidate("k_constant")) == (("lambda", "spark"), ())
+    _, unresolved = controls(_maf_image(world))
+    assert "unknown_bytes_changed" in unresolved
+    assert controls(world.image) == ((), ())
+    # Bytes changed but no output and no contract quantity reached: nothing
+    # says what the edit moves, so the controls are unresolved, not empty.
+    report = world.report(world.candidate("timing_trim_a"))
+    silent = dataclasses.replace(
+        report,
+        changed_nodes=(),
+        outputs=tuple(
+            dataclasses.replace(o, status="unchanged", path=(), reasons=()) for o in report.outputs
+        ),
+    )
+    edit = changed_controls(silent, world.model, world.contract)
+    assert edit.controls == () and edit.unresolved == ("no_contract_quantity_reached",)
+
+
+def test_a_torque_or_power_claim_for_an_edit_is_refused_by_name(world: World) -> None:
+    def refusals(image: bytes, claim: str = "power") -> list[str]:
+        return edit_claim_refusals(
+            world.report(image),
+            model=world.model,
+            contract=world.contract,
+            qualification=world.plant_q,
+            claim=claim,
+        )
+
+    timing = refusals(world.candidate("timing_trim_a"))
+    assert timing[0].startswith("engine_torque_not_computed")
+    assert "subsystem_not_validated:torque_production" in timing
+    assert any(r.startswith("spark_response_unmeasured") for r in timing)
+    fuel = refusals(world.candidate("fuel_targets"), "torque")
+    assert any(r.startswith("lambda_response_unmeasured") for r in fuel)
+    assert not any(r.startswith("spark_response_unmeasured") for r in fuel)
+    assert refusals(_maf_image(world))[0].startswith("controls_unresolved: unknown_bytes_changed")
+    assert refusals(world.candidate("timing_trim_a"), "knock")[-1].startswith("knock_unmodelled")
+    with pytest.raises(SimulationRefusalError) as refused:
+        require_edit_claim(
+            world.report(world.candidate("timing_trim_a")),
+            model=world.model,
+            contract=world.contract,
+            qualification=world.plant_q,
+        )
+    assert refused.value.reason == "engine_torque_not_computed"
+    assert "spark_response_unmeasured" in str(refused.value)
+    # The error names what the torque stage still owes, by task item.
+    for owed in ("vehicle_mass (H07.10)", "h07_road_load (H07.5)", "h07_na_baseline (H07.12)"):
+        assert owed in str(refused.value)
+    assert "h07_repeatability (H07.8)" in str(refused.value)
+    assert "spark_trim_unit (N01.2)" in str(refused.value)
+    # The line every front end shows names the controls and the blockers.
+    line = world.classify(world.candidate("fuel_targets")).messages[-1]
+    assert line.startswith("torque/power claim for this edit (lambda): refused;")
+    assert "lambda response unmeasured" in line and TEXT_TORQUE_UNVALIDATED in line

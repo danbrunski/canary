@@ -26,10 +26,25 @@ lands, never from a table kept here:
   edit to a filter node itself) stays. The report must have been made under the
   run's contract mode. Ignition outputs, which no run computes, keep every
   reason. The plant's outputs inherit what still blocks the ECU outputs.
-- ``no_torque_plant``: an application-model output no simulation-contract
-  quantity carries (ignition: the contract names no quantity whose
-  ``manifest_node`` is the timing writer) while the contract's torque subsystem
-  is ``unbuilt``. When a plant is built for it the blocker is not produced.
+- the torque claim's refusals, for an output whose contract quantity commands
+  an actuator a claim-computing stage reads (ignition: ``ignition_timing_byte``
+  carries the timing writer and commands ``spark_advance``, which
+  ``torque_production`` reads; an intermediate is joined through the output it
+  ``feeds``): :func:`engine_dynamics.claim_refusals` for that claim from the
+  report's mode, with the actuator's control changed. Each is a blocker:
+  ``no_torque_plant`` while the torque stage is ``unbuilt``; once built, its
+  derived standing, ``subsystem_not_validated`` naming the measurements still
+  owed (by task item: H07.10, H07.5, H07.12, H07.8, N01.2); ``<control>_
+  response_unmeasured`` while no available measurement excites the control;
+  ``engine_torque_not_computed`` where the mode does not compute torque. An
+  output no contract quantity carries is ``no_plant_consumer``.
+- the edit's own claim (E07.5 item 8): :func:`changed_controls` derives what
+  the edit changes from the comparison (the contract quantities on its reached
+  path, closed downstream through ECU quantities to the actuators they command:
+  a timing edit is ``spark``, a Fuel Targets / Fuel Comp / K edit ``lambda``,
+  and Fuel Comp and K also ``spark`` because BFS indexes the timing tables),
+  and :func:`edit_claim_refusals` / :func:`require_edit_claim` refuse a torque
+  or power claim for the edit by name. ``messages`` ends with that refusal.
 - ``plant_not_qualified``: :func:`fuel_plant.plant_qualification`'s reason,
   passed in by the caller.
 - ``closed_loop_trim_authority_undecoded``: :func:`paired_steady.
@@ -60,7 +75,14 @@ from typing import Any, Literal, get_args
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from src.analysis.ecu_application import ApplicationModel, OverrideRegime
+from src.analysis.ecu_application import ApplicationModel, Output, OverrideRegime
+from src.analysis.engine_dynamics import (
+    CLAIM_QUANTITY,
+    SubsystemStanding,
+    claim_chain,
+    claim_refusals,
+    subsystem_standing,
+)
 from src.analysis.fuel_plant import Qualification
 from src.analysis.paired_scenarios import OUTPUTS as RUNNER_OUTPUTS
 from src.analysis.paired_scenarios import ReasonScope, twin_gate
@@ -74,11 +96,11 @@ from src.analysis.paired_steady import (
 )
 from src.analysis.rom_effects import ChangedRange, EffectReport
 from src.analysis.rom_map import RomMap, Table
-from src.analysis.sim_contract import SimContract
+from src.analysis.sim_contract import Quantity, SimContract, SimulationRefusalError, Subsystem
 
 TOOL = "rom_levers"
 #: Bump when a code, a text or the result's shape changes meaning.
-TOOL_VERSION = "1"
+TOOL_VERSION = "2"
 
 #: Short names for the map's table ``kind`` ids. Presentation only.
 LEVER_LABELS: dict[str, str] = {
@@ -113,6 +135,9 @@ INACTIVE_SLOT = "inactive_slot"
 
 TEXT_NOT_MAPPED = "not mapped"
 TEXT_NO_TORQUE_PLANT = "no torque plant"
+#: The claim an edit's torque/power line is about (power rests on the same
+#: quantity, so its refusals are the same).
+EDIT_CLAIM = "power"
 TEXT_CLOSED_LOOP = "closed loop: trim authority undecoded"
 
 _SLOT = re.compile(r"^(?P<what>.*?)(?: \(slot (?P<slot>\d+)\))?$")
@@ -390,9 +415,266 @@ def _ecu_output_reasons(
     return out
 
 
-def _torque_unbuilt(contract: SimContract) -> bool:
-    subsystem = contract.subsystem_of("engine_torque")
-    return subsystem is not None and subsystem.status == "unbuilt"
+def _carrier(
+    model: ApplicationModel, spec: Output, carriers: Mapping[str, Quantity]
+) -> Quantity | None:
+    """The contract quantity that carries an output: its writer's, or for an
+    intermediate the final output's it feeds."""
+    found = carriers.get(spec.written_by)
+    if found is None and spec.feeds is not None:
+        found = carriers.get(model.output(spec.feeds).written_by)
+    return found
+
+
+def _actuators(contract: SimContract, quantity_id: str) -> list[Quantity]:
+    return [
+        q
+        for q in contract.quantities
+        if q.actuator is not None and q.actuator.commanded_by == quantity_id
+    ]
+
+
+def _readers(contract: SimContract, quantity_id: str) -> list[Subsystem]:
+    """The stages computing a quantity that reads ``quantity_id``."""
+    out: list[Subsystem] = []
+    for q in contract.quantities:
+        if any(d.quantity == quantity_id for d in q.depends_on):
+            sub = contract.subsystem_of(q.id)
+            if sub is not None and sub not in out:
+                out.append(sub)
+    return out
+
+
+def chain_standing(
+    contract: SimContract, mode: str, claim: str, qualification: Qualification
+) -> dict[str, SubsystemStanding]:
+    """The derived standing of each stage the claim rests on, as far as it can
+    be derived without the profile: the fuel stage from ``qualification`` (for
+    its plant version), a stage whose standing reads the profile (a convergence
+    study) is left out and so counts as not validated."""
+    out: dict[str, SubsystemStanding] = {}
+    for sub in claim_chain(contract, mode, claim):
+        impl = sub.implementation
+        fuel = impl is not None and qualification.plant_version in impl.plant_versions
+        try:
+            out[sub.id] = subsystem_standing(
+                contract,
+                sub,
+                plant_version=qualification.plant_version if fuel else None,
+                qualification=qualification if fuel else None,
+            )
+        except SimulationRefusalError as refused:
+            if refused.reason != "profile_required":
+                raise
+    return out
+
+
+def _owed(sub: Subsystem) -> str:
+    """The measurements a stage still waits on, by task item where one is named."""
+    missing = [m for m in sub.required_measurements if m.status != "available"]
+    tasks = list(dict.fromkeys(m.task for m in missing if m.task))
+    rest = len([m for m in missing if not m.task])
+    named = ", ".join(tasks)
+    if rest:
+        more = f"{rest} more" if tasks else f"{rest} measurements"
+        named = f"{named} and {more}" if named else more
+    return named
+
+
+def _claim_blocker(
+    reason: str, contract: SimContract, standing: Mapping[str, SubsystemStanding], mode: str
+) -> Blocker:
+    code, _, rest = reason.partition(":")
+    rest = rest.strip()
+    if code == "subsystem_not_validated":
+        sub = contract.subsystem(rest)
+        label = sub.id.replace("_", " ")
+        if sub.status == "unbuilt":
+            torque = CLAIM_QUANTITY["torque"] in sub.computes
+            return Blocker(
+                code=NO_TORQUE_PLANT if torque else "subsystem_unbuilt",
+                text=TEXT_NO_TORQUE_PLANT if torque else f"{label} unbuilt",
+                detail=f"the {sub.id} stage is unbuilt (E07.5)",
+            )
+        st = standing.get(sub.id)
+        why = [r for r in (st.reasons if st else ()) if not r.startswith("requires_measurement:")]
+        # A stage judged by its own held-out verdicts (the fuel plant) says
+        # that; any other names the measurements it waits on.
+        verdict = next((r for r in why if r.startswith("plant_not_qualified")), None)
+        owed = "plant not qualified" if verdict else _owed(sub)
+        missing = [m.id for m in sub.required_measurements if m.status != "available"]
+        detail = "; ".join([*why, *([f"owed: {', '.join(missing)}"] if missing else [])]) or (
+            "standing not derivable without the profile" if st is None else None
+        )
+        return Blocker(
+            code=code,
+            text=f"{label} built, not validated"
+            + (f" ({owed})" if verdict else f" (owed {owed})" if owed else ""),
+            detail=detail,
+        )
+    if code.endswith("_response_unmeasured"):
+        return Blocker(code=code, text=code.replace("_", " "), detail=rest or None)
+    if code.endswith("_not_computed"):
+        quantity = code.removesuffix("_not_computed").replace("_", " ")
+        return Blocker(code=code, text=f"{quantity} not computed in {mode}", detail=rest or None)
+    if code == "controls_unresolved":
+        return Blocker(code=code, text="changed controls unresolved", detail=rest or None)
+    return Blocker(code=code, text=reason)
+
+
+def _actuated_blockers(
+    contract: SimContract, carrier: Quantity, mode: str, qualification: Qualification
+) -> list[Blocker]:
+    """What blocks a claim through the actuators ``carrier`` commands: per
+    claim-computing stage that reads one, the claim's refusals with that
+    actuator's control changed."""
+    out: list[Blocker] = []
+    claims = {q: c for c, q in reversed(list(CLAIM_QUANTITY.items()))}
+    for actuator in _actuators(contract, carrier.id):
+        assert actuator.actuator is not None
+        for sub in _readers(contract, actuator.id):
+            for q in sub.computes:
+                claim = claims.get(q)
+                if claim is None:
+                    continue
+                standing = chain_standing(contract, mode, claim, qualification)
+                for reason in claim_refusals(
+                    contract,
+                    standing,
+                    mode,
+                    claim,
+                    changed_controls=[actuator.actuator.control],
+                ):
+                    out.append(_claim_blocker(reason, contract, standing, mode))
+    return out
+
+
+# -- the edit's controls and its claim (E07.5 item 8) ------------------------------------------
+
+
+class EditControls(_Strict):
+    """What an edit changes on the plant side: the controls of the actuators
+    its reached contract quantities command (closed downstream through ECU
+    quantities), and why the set may be incomplete."""
+
+    controls: tuple[str, ...] = ()
+    #: Non-empty when the comparison cannot say what the edit moves: bytes no
+    #: node reads, or a reached output no contract quantity carries.
+    unresolved: tuple[str, ...] = ()
+
+
+def changed_controls(
+    report: EffectReport, model: ApplicationModel, contract: SimContract
+) -> EditControls:
+    """The controls an edit changes, from the comparison: the contract
+    quantities whose manifest node the change reaches, followed downstream
+    through ECU quantities to the actuators they command. A timing-table edit
+    reaches the timing byte (``spark``); a fuel edit the pulse (``lambda``)."""
+    if report.reason is not None or report.outcome == "identical":
+        return EditControls()
+    carriers = contract.by_manifest_node()
+    unresolved: list[str] = []
+    if any("unknown_bytes_changed" in o.reasons for o in report.outputs):
+        unresolved.append("unknown_bytes_changed")
+    for effect in report.outputs:
+        if (
+            effect.status != "unchanged"
+            and _carrier(model, model.output(effect.output), carriers) is None
+        ):
+            unresolved.append(f"output_not_in_contract:{effect.output}")
+    reached = set(report.changed_nodes) | {n for o in report.outputs for n in o.path}
+    stack = [q.id for node, q in carriers.items() if node in reached]
+    dependents: dict[str, list[Quantity]] = {}
+    for q in contract.quantities:
+        for d in q.depends_on:
+            if d.quantity != q.id:
+                dependents.setdefault(d.quantity, []).append(q)
+    seen: set[str] = set()
+    controls: set[str] = set()
+    while stack:
+        q_id = stack.pop()
+        if q_id in seen:
+            continue
+        seen.add(q_id)
+        for dep in dependents.get(q_id, ()):
+            if dep.actuator is not None and dep.actuator.commanded_by == q_id:
+                controls.add(dep.actuator.control)
+            elif dep.kind == "ecu":
+                stack.append(dep.id)
+    if not controls and not unresolved:
+        # The edit changed bytes but reaches no contract quantity, so nothing
+        # says what it moves: refused, never read as "changes nothing".
+        unresolved.append("no_contract_quantity_reached")
+    return EditControls(controls=tuple(sorted(controls)), unresolved=tuple(unresolved))
+
+
+def edit_claim_refusals(
+    report: EffectReport,
+    *,
+    model: ApplicationModel,
+    contract: SimContract,
+    qualification: Qualification,
+    claim: str = EDIT_CLAIM,
+    standing: Mapping[str, SubsystemStanding] | None = None,
+) -> list[str]:
+    """Why ``claim`` (torque, power, knock, acceleration) cannot be made for
+    this edit; empty when it can. The controls are :func:`changed_controls`'s,
+    never the caller's; an edit whose controls cannot be resolved is refused
+    (``controls_unresolved``). ``standing`` defaults to
+    :func:`chain_standing`."""
+    if report.reason is not None:
+        return [f"comparison_refused: {report.reason}"]
+    if report.mode is None:
+        raise ValueError("a claim is made under a contract mode: compare_roms(..., mode=mode)")
+    edit = changed_controls(report, model, contract)
+    reasons: list[str] = []
+    if edit.unresolved:
+        reasons.append(f"controls_unresolved: {', '.join(edit.unresolved)}")
+    if standing is None:
+        standing = chain_standing(contract, report.mode, claim, qualification)
+    reasons += claim_refusals(
+        contract, standing, report.mode, claim, changed_controls=edit.controls
+    )
+    return reasons
+
+
+def require_edit_claim(
+    report: EffectReport,
+    *,
+    model: ApplicationModel,
+    contract: SimContract,
+    qualification: Qualification,
+    claim: str = EDIT_CLAIM,
+    standing: Mapping[str, SubsystemStanding] | None = None,
+) -> None:
+    """Raise :class:`SimulationRefusalError` naming every reason ``claim``
+    cannot be made for this edit (the first reason's code is the error's); a
+    stage that is not validated is followed by the measurements it still owes,
+    by task item."""
+    reasons = edit_claim_refusals(
+        report,
+        model=model,
+        contract=contract,
+        qualification=qualification,
+        claim=claim,
+        standing=standing,
+    )
+    if reasons:
+        raise SimulationRefusalError(
+            reasons[0].split(":")[0], "; ".join(_with_owed(r, contract) for r in reasons)
+        )
+
+
+def _with_owed(reason: str, contract: SimContract) -> str:
+    code, _, sub_id = reason.partition(":")
+    if code != "subsystem_not_validated":
+        return reason
+    missing = [
+        f"{m.id} ({m.task})" if m.task else m.id
+        for m in contract.subsystem(sub_id).required_measurements
+        if m.status != "available"
+    ]
+    return f"{reason} (owed: {', '.join(missing)})" if missing else reason
 
 
 def _unknown_blockers(entries: Sequence[LeverEntry]) -> list[Blocker]:
@@ -527,8 +809,7 @@ def classify_edit(
         )
     entries = _levers(report.ranges, rom_map, cells)
     ecu_reasons = _ecu_output_reasons(report, model, contract)
-    consumers = set(contract.by_manifest_node())
-    torque_unbuilt = _torque_unbuilt(contract)
+    carriers = contract.by_manifest_node()
 
     outputs: list[OutputBlockers] = []
     by_name: dict[str, OutputBlockers] = {}
@@ -544,22 +825,18 @@ def classify_edit(
         else:
             reasons = list(effect.reasons)
         blockers = _reason_blockers(reasons, entries)
-        if reached and spec.written_by not in consumers:
+        carrier = _carrier(model, spec, carriers) if reached else None
+        if reached and carrier is None:
             blockers.append(
                 Blocker(
-                    code=NO_TORQUE_PLANT if torque_unbuilt else NO_PLANT_CONSUMER,
-                    text=TEXT_NO_TORQUE_PLANT
-                    if torque_unbuilt
-                    else f"no plant consumes {effect.output}",
+                    code=NO_PLANT_CONSUMER,
+                    text=f"no plant consumes {effect.output}",
                     node=spec.written_by,
-                    detail=(
-                        "no simulation-contract quantity carries this output and the torque "
-                        "subsystem is unbuilt (E07.5)"
-                        if torque_unbuilt
-                        else None
-                    ),
+                    detail="no simulation-contract quantity carries this output",
                 )
             )
+        elif carrier is not None:
+            blockers.extend(_actuated_blockers(contract, carrier, report.mode, qualification))
         row = OutputBlockers(
             output=effect.output,
             source="application_model",
@@ -643,13 +920,34 @@ def classify_edit(
         else o
         for o in outputs
     ]
+    claim = _claim_line(report, model, contract, qualification)
     return LeverClassification(
         outcome=report.outcome,
         regime=regime,
         levers=tuple(entries),
         outputs=tuple(outputs),
-        messages=_messages(entries, outputs),
+        messages=(*_messages(entries, outputs), *claim),
     )
+
+
+def _claim_line(
+    report: EffectReport,
+    model: ApplicationModel,
+    contract: SimContract,
+    qualification: Qualification,
+) -> tuple[str, ...]:
+    """The edit's torque/power claim, refused by name (E07.5 item 8)."""
+    assert report.mode is not None
+    reasons = edit_claim_refusals(
+        report, model=model, contract=contract, qualification=qualification
+    )
+    if not reasons:
+        return ()
+    edit = changed_controls(report, model, contract)
+    standing = chain_standing(contract, report.mode, EDIT_CLAIM, qualification)
+    blockers = _dedupe([_claim_blocker(r, contract, standing, report.mode) for r in reasons])
+    controls = ", ".join(edit.controls) or "no control resolved"
+    return (f"torque/power claim for this edit ({controls}): refused; {_blocker_text(blockers)}",)
 
 
 # -- the text -------------------------------------------------------------------------------
@@ -712,8 +1010,13 @@ __all__ = [
     "TEXT_NOT_MAPPED",
     "TEXT_NO_TORQUE_PLANT",
     "Blocker",
+    "EditControls",
     "LeverClassification",
     "LeverEntry",
     "OutputBlockers",
+    "chain_standing",
+    "changed_controls",
     "classify_edit",
+    "edit_claim_refusals",
+    "require_edit_claim",
 ]

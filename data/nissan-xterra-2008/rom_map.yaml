@@ -516,6 +516,91 @@ tables:
       08 10 18 ... 80; 0x80 is that axis's last point too). Shown raw, as that
       axis is: one X count is load_point_scaler / 128 BFS counts, so a fixed
       ms scale here would go wrong the moment the scaler is edited.
+  # E09.7: the base ignition timing the trims are added to. It is not one
+  # table: 0xFFFF1A58 = 0xFFFF1D3E + 0xFFFF27C6 + 0xFFFF2793 - 0xFFFF279A -
+  # 0xFFFF134A - 0xFFFF174A - 0x80 + 0xFFFF1344 (0x04CB9E), and the trim term
+  # 0xFFFF2793 is the only one an edit to the trims moves. The term that
+  # carries most of the advance, 0xFFFF27C6 (0x04BC5A), is a time converted to
+  # crank angle at the current rpm, and this map is the rpm x load factor in
+  # that time. The divides between it and 0xFFFF27C6 are not resolved from
+  # the exported listing, so the map is listed with its axes and shown raw.
+  - id: base_timing_rate_map
+    name: Base timing rate map (rpm x X, feeds 0xFFFF27C6)
+    offset: 0x9AF9
+    rows: 4
+    cols: 4
+    dtype: u8
+    axes: {rows: base_timing_rate_rpm_axis, cols: base_timing_rate_load_axis}
+    confidence: inferred
+    evidence: >-
+      FUN_0004ba6c reads it through the 4 x 4 wrapper 0x0268B8 (r4 = 0x9AF9,
+      r5 = 0xC890 searched against the rpm/50 byte 0xFFFF11CA, then 0xC88C
+      against the X byte 0xFFFF103E, both by 0x027114; the first search's index
+      is the row, times the width 4 passed to the bilinear 0x026F40) into
+      0xFFFF15DB. 0xFFFF15DA = 15DB x 15D7 (curve 0xCEAB, flat 0x80) x 15DC
+      (coolant curve 0xCEBB) >> 14 feeds 0xFFFF15DE; FUN_0004bc5a forms
+      0xFFFF27C6 = (cal 0x880D x 120 x 0xFFFF17C6) / (0xFFFF15DE x 0xFFFF19CB)
+      (x 120 from the listing 0x04BC7C-0x04BC8A: x 15, shll2, shll; the overall
+      scale is unresolved until the divide helpers' operands are known)
+      plus cal 0x8B0C x 5 / 2, times the rpm word 0xFFFF11D8 >> 10 x 3 / 5,
+      minus 14, capped 127 (0x04BC5E-0x04BD22): a time turned into crank
+      angle. 0xFFFF19CB is the curve 0xCD9B at X (00 20 40 ... E0 on its
+      implicit 0, 32 ... 224 axis: X itself), so the advance rises with rpm
+      and falls with load through this term, which is why a change that
+      moves X moves base timing outside the trims. Values on ROM Store
+      ZS44A, k106, 20260920 and 20261004 are identical: 11 1A 28 3A / 19 27
+      3C 55 / 1B 2A 42 5E / 1D 2D 46 64, rising with both axes. Inferred, not
+      verified: the operands of the divide helpers 0x021C48 / 0x021D6C
+      between 0xFFFF15DA and 0xFFFF15DE are not visible in the exports (owed
+      to the firmware session), and no capture has read 0xFFFF15DB.
+  - id: base_timing_rate_rpm_axis
+    name: Base timing rate map rpm axis
+    offset: 0xC890
+    rows: 4
+    cols: 1
+    dtype: u8
+    decode:
+      kind: linear
+      quantity: rpm
+      unit: rpm
+      scale: 50
+      confidence: inferred
+      evidence: >-
+        Compared directly (0x027114) with 0xFFFF11CA, the cycle copy of
+        0xFFFF1202 = the rpm word >> 5 at 12.5 rpm per word count, i.e. 50 rpm
+        per count (RPM_words_task 0x03907A, local firmware notes). Raw 08 38 58
+        78 is 400, 2,800, 4,400 and 6,000 rpm.
+    confidence: inferred
+    evidence: >-
+      r5 to the wrapper 0x0268B8 from FUN_0004ba6c; the fuelling map at 0x9B89
+      uses the same pair of axes (0x03D110).
+  - id: base_timing_rate_load_axis
+    name: Base timing rate map load axis (X counts)
+    offset: 0xC88C
+    rows: 1
+    cols: 4
+    dtype: u8
+    confidence: inferred
+    evidence: >-
+      r6 to the wrapper 0x0268B8 from FUN_0004ba6c, compared directly with the
+      X byte 0xFFFF103E (raw 10 20 40 70); shown raw as the trims' load axis is.
+  - id: base_timing_alternate_curve
+    name: Alternate base timing by coolant (0xFFFF1A59)
+    offset: 0xCD6B
+    rows: 8
+    cols: 1
+    dtype: u8
+    confidence: inferred
+    evidence: >-
+      FUN_0004ce04 reads it at the coolant byte 0xFFFF1077 through the 8-entry
+      curve 0x026BA4 (implicit axis 0, 32 ... 224) and writes 0xFFFF1A59 =
+      min(127, (cell x 0xFFFF172A) >> 15) (0xFFFF172A is 0x8000 or 0x6676),
+      with a further limit below a 0xFFFF10DA threshold. base_timing_select
+      (0x04CF0C) takes 0xFFFF1A59 instead of the trim sum 0xFFFF1A58 while
+      0xFFFF4785 bit 6 or 0xFFFF2833 bit 4 is set and the mode byte
+      0xFFFF127D is not 1 or 2, so on that path no trim edit reaches timing.
+      Raw 1E 1E 1E 1A 14 14 0A 0A on every listed image. Which engine state
+      sets those bits is not identified.
   - id: fuel_compensation
     kind: fuel_compensation
     name: Fuel Compensation

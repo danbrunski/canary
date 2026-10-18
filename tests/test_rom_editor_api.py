@@ -332,7 +332,7 @@ def test_preview_of_an_unrecorded_base_is_a_file_spec_that_cannot_simulate(
     ("edit", "reason", "kind"),
     [
         (
-            {"table": "timing_trim_a", "slot": 1, "all": True, "add_raw": 1},
+            {"table": "base_timing_rate_map", "all": True, "add_raw": 1},
             "table_not_editable",
             "edit_spec",
         ),
@@ -565,7 +565,7 @@ def test_a_child_that_times_out_is_the_workbenchs_503(
     ("over", "kind", "reason"),
     [
         (
-            dict(edits=[{"table": "timing_trim_a", "slot": 1, "all": True, "add_raw": 1}]),
+            dict(edits=[{"table": "base_timing_rate_map", "all": True, "add_raw": 1}]),
             "edit_spec",
             "table_not_editable",
         ),
@@ -726,7 +726,7 @@ def test_the_refusal_trap_end_to_end_through_a_real_spawn_child(
     them escape: an in-process executor never pickles."""
     for over, kind, reason in (
         (
-            dict(edits=[{"table": "timing_trim_a", "slot": 1, "all": True, "add_raw": 1}]),
+            dict(edits=[{"table": "base_timing_rate_map", "all": True, "add_raw": 1}]),
             "edit_spec",
             "table_not_editable",
         ),

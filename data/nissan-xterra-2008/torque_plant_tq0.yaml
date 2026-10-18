@@ -1,0 +1,248 @@
+# E07.5 stage 4 -- torque-tq-0, the minimum torque model E09.13 declared, as a
+# declared structure with its parameter registry (2026-10-17, the desk part of
+# queue entry Q27: "nothing that fits a parameter").
+#
+#   brake     = indicated - friction - pumping
+#   indicated = air per cylinder event x (LHV / AFR_stoich) x eta_i0
+#               x eta(lambda) x eta(spark), summed over the events of a cycle
+#   eta(spark) = 1 - c (MBT - spark)^2           (MBT-relative, symmetric)
+#   eta(lambda): peak 1 + G at lambda_peak, 1 at stoich (shape below)
+#   friction  = FMEP(rpm) Vd / 4 pi, FMEP = f0 + f1 N + f2 N^2, N in krpm
+#   pumping   = (baro + dp_exhaust - MAP) Vd / 4 pi
+#
+# Schema and evaluator: src/analysis/torque_plant.py (TorquePlantProfile,
+# evaluate). Contract: engine_sim_contract.yaml subsystem torque_production
+# names this file and version; every requires_measurement parameter below names
+# the contract measurement that identifies it (measured_by), and that
+# measurement lists the parameter in its `identifies`
+# (torque_plant.check_registry holds both directions). The file's sha256 rides
+# on every result (TorqueResult.plant_sha256).
+#
+# Registry rules (E07.3's): `known` parameters carry a value and an independent
+# source; every other parameter carries a bracket, the source of that bracket,
+# the measurement that would identify it and the effect a result resting on the
+# bracket leaves unresolved. A literature bracket is marked
+# `literature_prior` and names its citation; it is a range for sensitivity
+# cases, never this engine's number. No parameter is `identifiable`: nothing on
+# this truck is a torque measurement yet (H07.12 owed), and nothing is fitted
+# to derived:ESTIMATED_TORQUE_NM, which shares the stage's inputs.
+#
+# MBT is a parameter like any other: spark retard from MBT cannot be computed
+# from the commanded timing alone, so an evaluation that does not state MBT is
+# refused (spark_mbt_unstated), never run at an assumed MBT.
+schema_version: 1
+plant_version: torque-tq-0
+hardware_configuration: na_stock_injectors_2026_10
+
+structure:
+  # Declared shape choices, not parameters.
+  spark_efficiency: mbt_relative_quadratic
+  lambda_efficiency: peak_quadratic_rich_fuel_limited_lean
+  friction: quadratic_in_krpm
+  pumping: exhaust_minus_manifold
+  # The quadratic holds near MBT only; a sample further from MBT than this is
+  # refused (spark_outside_shape), never extrapolated into a negative
+  # efficiency.
+  spark_shape_valid_within_deg: 20.0
+  evidence: >-
+    E07.5 remaining item 4 (E09.13, 2026-10-15). The spark curve is the
+    standard MBT-relative form: torque is flat at MBT and falls with the square
+    of the distance from it, on either side (Guzzella and Onder, Introduction
+    to Modeling and Control of Internal Combustion Engine Systems, 2nd ed.
+    2010, ch. 2, mean-value torque generation; Heywood, Internal Combustion Engine
+    Fundamentals, 1988, ch. 15). Lambda: torque at fixed air rises rich of
+    stoich to a peak near lambda 0.85-0.9 and falls again richer (a quadratic
+    about the peak, through 1 at stoich); lean of stoich the charge is fuel
+    limited, so eta(lambda) = 1 / lambda (the fuel energy delivered, efficiency
+    gain from leaning ignored). Friction: the Barnes-Moss form for SI engines
+    (Heywood 1988 ch. 13), warm. Pumping: the gas-exchange loop's mean
+    pressure difference, exhaust minus intake.
+
+registry:
+  # What a torque pull sees only multiplied together: the fuel energy per gram
+  # of air at stoich times the indicated efficiency. h07_na_baseline lists the
+  # product in its `identifies`, never a component.
+  products:
+    - id: indicated_energy_per_air
+      components: [fuel_lower_heating_value, indicated_efficiency_peak, fuel_stoich_afr]
+      measured_by: [h07_na_baseline]
+      evidence: >-
+        Indicated torque = air x (LHV / AFR_stoich) x eta_i0 x eta(lambda) x
+        eta(spark) / 4 pi per cycle: with air measured, a torque reference
+        fixes LHV x eta_i0 / AFR_stoich and nothing finer.
+  parameters:
+    # ---- geometry: known
+    - id: displacement
+      units: L
+      status: known
+      source: profile_fact
+      value: 3.954
+      evidence: 'VQ40DE 3,954 cc (EM-134); the fuel plant states the same.'
+    - id: cylinders
+      units: count
+      status: known
+      source: profile_fact
+      value: 6.0
+      evidence: 'VQ40DE V6; one intake event per cylinder per two revolutions.'
+
+    # ---- fuel energy: only their product with eta_i0 is seen by torque
+    - id: fuel_lower_heating_value
+      units: MJ_per_kg
+      status: requires_measurement
+      bracket: [41.0, 44.0]
+      bracket_source: literature_prior
+      citation: >-
+        Heywood 1988, appendix D (gasoline ~44 MJ/kg); E10 blends ~41.5-42.7
+        MJ/kg by volume-weighted ethanol (26.8 MJ/kg). A range for pump fuel,
+        not this tank.
+      measured_by: [fuel_blend_test]
+      effect: fuel_energy_unmeasured
+      evidence: >-
+        Ethanol content is not measured. A torque reference identifies only
+        the product indicated_energy_per_air (below); this part needs the fuel.
+    - id: fuel_stoich_afr
+      units: ratio
+      status: requires_measurement
+      bracket: [14.0, 14.7]
+      bracket_source: plant_registry
+      measured_by: [fuel_blend_test]
+      effect: fuel_blend_unmeasured
+      evidence: >-
+        The fuel plant's working assumption (E10 assumed, E0 14.7), the same
+        bracket (torque_plant.check_registry refuses a different one). Air per
+        event over it is the fuel the charge could burn at stoich.
+    - id: indicated_efficiency_peak
+      units: ratio
+      status: requires_measurement
+      bracket: [0.30, 0.40]
+      bracket_source: literature_prior
+      citation: >-
+        Heywood 1988 ch. 9 and 15: gross indicated fuel conversion efficiency
+        of naturally aspirated SI engines at stoich and MBT, roughly 0.3-0.4
+        across load and speed. Not this engine's number.
+      measured_by: [h07_na_baseline]
+      effect: indicated_efficiency_unmeasured
+      evidence: >-
+        eta_i0: indicated efficiency at stoich and MBT. One number for the
+        whole envelope in tq-0 (no load or speed dependence is declared). H07.12
+        pulls see only the product indicated_energy_per_air, at WOT only; eta_i0
+        separates from it only once fuel_blend_test gives LHV and AFR_stoich.
+
+    # ---- eta(lambda)
+    - id: lambda_peak
+      units: lambda
+      status: requires_measurement
+      bracket: [0.85, 0.95]
+      bracket_source: literature_prior
+      citation: >-
+        Heywood 1988 ch. 15 / Guzzella and Onder 2010 ch. 2: maximum
+        torque at fixed air near lambda 0.85-0.9 for gasoline SI engines.
+      measured_by: [lambda_sweep]
+      effect: lambda_efficiency_unmeasured
+      evidence: 'Enrichment on this truck happens only with load; no fixed-load lambda step exists.'
+    - id: lambda_peak_gain
+      units: ratio
+      status: requires_measurement
+      bracket: [0.02, 0.08]
+      bracket_source: literature_prior
+      citation: >-
+        Heywood 1988 ch. 15: best-power mixtures give a few percent more
+        torque than stoich at the same air (order 2-8 %).
+      measured_by: [lambda_sweep]
+      effect: lambda_efficiency_unmeasured
+      evidence: 'G: eta(lambda_peak) = 1 + G, eta(1) = 1 by construction.'
+    - id: lambda_rich_curvature
+      units: per_lambda2
+      status: requires_measurement
+      bracket: [0.5, 3.0]
+      bracket_source: literature_prior
+      citation: >-
+        Heywood 1988 ch. 15: torque at fixed air falls slowly rich of the
+        best-power mixture, a few percent by lambda 0.75.
+      measured_by: [lambda_sweep]
+      effect: lambda_efficiency_unmeasured
+      evidence: >-
+        Rich of lambda_peak: eta = 1 + G - k (lambda - lambda_peak)^2. Between
+        the peak and stoich the quadratic through (lambda_peak, 1 + G) and
+        (1, 1) is fixed by G; its curvature is not this one, so a peak near
+        stoich cannot drive the rich side negative.
+
+    # ---- eta(spark)
+    - id: spark_mbt_advance
+      units: deg_btdc
+      status: requires_measurement
+      bracket: [10.0, 45.0]
+      bracket_source: declared_range
+      measured_by: [controlled_spark_sweep]
+      effect: spark_mbt_unmeasured
+      evidence: >-
+        Deliberately wide: MBT moves with rpm, load, charge temperature and
+        fuel, and the ECM computes its own base from a formula this table only
+        trims (UpRev guide, N01.2). One number in tq-0; a sweep identifies it
+        per operating point. Never inferred from the commanded timing: the
+        commanded timing is where the calibration put spark, not MBT (it may be
+        knock-limited, retarded for emissions, or in the KS fallback).
+    - id: spark_efficiency_curvature
+      units: per_deg2
+      status: requires_measurement
+      bracket: [0.0002, 0.0012]
+      bracket_source: literature_prior
+      citation: >-
+        Guzzella and Onder 2010 ch. 2 (quadratic ignition efficiency about
+        MBT); Heywood 1988 ch. 15 (spark timing): roughly 1 % torque at 3-7 deg and
+        2-12 % at 10 deg from MBT. c = loss / deg^2.
+      measured_by: [controlled_spark_sweep]
+      effect: spark_efficiency_unmeasured
+      evidence: 'Natural closed-loop logs never vary spark at fixed conditions.'
+
+    # ---- friction (warm), FMEP = f0 + f1 N + f2 N^2, N in krpm
+    - id: friction_fmep_0
+      units: kPa
+      status: requires_measurement
+      bracket: [40.0, 120.0]
+      bracket_source: literature_prior
+      citation: >-
+        Barnes-Moss SI total friction (Heywood 1988 ch. 13): tfmep = 97 + 15 N
+        + 5 N^2 kPa (N krpm) for small four-cylinder engines.
+      measured_by: [h07_road_load]
+      effect: friction_unmeasured
+      evidence: >-
+        Fuel-cut in-gear coast-downs less H07.5 road load; owed. Barnes-Moss
+        tfmep INCLUDES the WOT pumping loop, while this model subtracts pumping
+        separately: a case at the literature centre double-counts WOT pumping
+        (baro + dp_exhaust - MAP, a few kPa to ~15 kPa). The bracket's low end
+        (40 kPa) is there so a case can state mechanical friction alone.
+    - id: friction_fmep_1
+      units: kPa_per_krpm
+      status: requires_measurement
+      bracket: [5.0, 25.0]
+      bracket_source: literature_prior
+      citation: 'As friction_fmep_0 (Barnes-Moss, Heywood 1988 ch. 13).'
+      measured_by: [h07_road_load]
+      effect: friction_unmeasured
+      evidence: 'As friction_fmep_0.'
+    - id: friction_fmep_2
+      units: kPa_per_krpm2
+      status: requires_measurement
+      bracket: [2.0, 8.0]
+      bracket_source: literature_prior
+      citation: 'As friction_fmep_0 (Barnes-Moss, Heywood 1988 ch. 13).'
+      measured_by: [h07_road_load]
+      effect: friction_unmeasured
+      evidence: 'As friction_fmep_0.'
+
+    # ---- pumping: a named working assumption on the NA engine, forever
+    - id: exhaust_back_pressure
+      units: kPa
+      status: requires_measurement
+      bracket: [0.0, 15.0]
+      bracket_source: declared_range
+      measured_by: [exhaust_back_pressure_tap]
+      effect: pumping_from_unmeasured_map
+      evidence: >-
+        Exhaust pressure above baro, one number (it rises with flow; not
+        declared). Pumping = (baro + this - MAP) Vd / 4 pi, and MAP is the
+        manifold stage's, never measured on the NA intake (operator decision
+        2026-10-08: no MAP sensor on the NA intake, ever; the boosted plant
+        gets one with the supercharger). So pumping is a working assumption
+        twice over and every result names pumping_from_unmeasured_map.

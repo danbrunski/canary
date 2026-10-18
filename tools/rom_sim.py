@@ -49,8 +49,9 @@ What it makes impossible rather than documented:
 - **A run cannot be written into the checkout** (``inside_checkout``), and a
   run refuses a design built on another image (``design_revision_mismatch``).
 - **The report and the result agree.** ``report.html`` is rendered from the
-  cell table embedded in ``result.json`` plus the run facts it records, so
-  ``render_report(result['cell_table'], run=result['run'])`` rebuilds it.
+  cell table embedded in ``result.json`` plus the run facts and the ignition
+  timing block it records, so ``render_report(result['cell_table'],
+  run=result['run'], timing=result['ignition_timing'])`` rebuilds it.
 """
 
 from __future__ import annotations
@@ -79,6 +80,7 @@ from src.analysis.paired_scenarios import (
     LearnedState,
     PairedScenario,
     SimKit,
+    TimingState,
 )
 from src.analysis.rom_edit_spec import (
     BaseImage,
@@ -103,6 +105,8 @@ from src.analysis.sim_cells import (
 from src.analysis.sim_cells import (
     aggregate_cells,
     fuel_comp_axes,
+    ignition_timing_block,
+    ignition_timing_points,
     target_afr_axes,
 )
 from src.analysis.sim_contract import (
@@ -138,7 +142,9 @@ TOOL = "rom_sim"
 #: Bump when the result file's shape or meaning changes. 2: runs the
 #: simulator's declared plant (sim_kit.yaml, fuel-mv-2) by default, with that
 #: plant's own uncertainty declaration (E08.11).
-TOOL_VERSION = "2"
+#: 3: an ``ignition_timing`` block (E09.7): ECU-side timing per trim cell and
+#: per design point, given a stated HI DET latch and knock-control state.
+TOOL_VERSION = "3"
 
 DEFAULT_PROFILE = REPO_ROOT / "data" / "nissan-xterra-2008"
 DEFAULT_SESSIONS = Path.home() / "canary-data" / "sessions" / "nissan-xterra-2008"
@@ -158,6 +164,8 @@ LEARNED_SOURCE = "cli: trims stated by --stft-pct and --ltft-pct"
 SLOT_SOURCE = "default_slot"
 
 GRIDS = ("fuel_comp", "target_afr")
+#: The source a command-line timing state carries.
+TIMING_SOURCE = "cli: stated by --high-det and --knock-control"
 
 
 class CliRefusalError(ValueError):
@@ -269,6 +277,24 @@ def _add_common(parser: argparse.ArgumentParser) -> None:
         help="a frozen plant declaration among the profile's fuel_plant*.yaml that "
         "sim_kit.yaml lists an uncertainty declaration for (default: the simulator's "
         "declared plant, sim_kit.yaml's plant_version; designs default to it too)",
+    )
+
+
+def _add_timing(parser: argparse.ArgumentParser) -> None:
+    group = parser.add_argument_group(
+        "ignition timing (E09.7)",
+        "the ECU-side timing output needs both; an edit that changes a timing trim refuses "
+        "without them (nothing reads the HI DET latch, so there is no default)",
+    )
+    group.add_argument(
+        "--high-det",
+        choices=("set", "clear"),
+        help="0xFFFF283F bit 6 (UpRev's HI DET): set, warm timing reads trim B",
+    )
+    group.add_argument(
+        "--knock-control",
+        choices=("active", "fallback"),
+        help="fallback: the knock-sensor fallback (0xFFFF479D bit 7); it does not imply HI DET",
     )
 
 
@@ -501,6 +527,23 @@ def _trace(world: _World, candidate: Candidate, *, in_mode: bool) -> dict[str, A
     }
 
 
+# -- ignition timing (E09.7) ----------------------------------------------------------------
+
+
+def _timing_state(args: argparse.Namespace) -> TimingState | None:
+    """The stated HI DET latch and knock-control state, both or neither."""
+    given = (args.high_det, args.knock_control)
+    if given == (None, None):
+        return None
+    if None in given:
+        raise CliRefusalError(
+            "timing_state_incomplete", "--high-det and --knock-control go together"
+        )
+    return TimingState(
+        high_det=args.high_det == "set", knock_control=args.knock_control, source=TIMING_SOURCE
+    )
+
+
 def cmd_inspect(args: argparse.Namespace) -> dict[str, Any]:
     world = _World(args)
     candidate = world.candidate
@@ -535,6 +578,15 @@ def cmd_inspect(args: argparse.Namespace) -> dict[str, Any]:
         "reached": _trace(world, candidate, in_mode=False),
         "in_run_mode": _trace(world, candidate, in_mode=True),
         "levers": levers.to_dict(),
+        "ignition_timing": ignition_timing_block(
+            world.kit,
+            world.base.image,
+            candidate.image,
+            _timing_state(args),
+            slot=world.slot,
+            coolant_c=args.timing_coolant_c,
+            all_cells=False,
+        ),
     }
 
 
@@ -724,6 +776,22 @@ def cmd_run(args: argparse.Namespace) -> dict[str, Any]:
         else target_afr_axes(kit, base.image, slot=world.slot)
     )
     table = aggregate_cells(result, design, axes, effects=effects)
+    state = _timing_state(args)
+    # The cells are read at the design's coldest point: every point the
+    # plant accepts is warm, and a design with a point in the trims' blend
+    # band shows it per cell.
+    timing = ignition_timing_block(
+        kit,
+        base.image,
+        candidate.image,
+        state,
+        slot=world.slot,
+        coolant_c=min(p.coolant_c for p in design.points),
+        all_cells=True,
+    )
+    timing["points"] = ignition_timing_points(
+        kit, result, design, base.image, candidate.image, state, slot=world.slot
+    )
     prov = candidate.provenance
     run_facts: dict[str, Any] = {
         "label": prov["label"],
@@ -782,8 +850,9 @@ def cmd_run(args: argparse.Namespace) -> dict[str, Any]:
         "candidate": prov,
         "run": run_facts,
         "cell_table": table.to_dict(),
+        "ignition_timing": timing,
     }
-    html = render_report(table.to_json(), run=run_facts)
+    html = render_report(table.to_json(), run=run_facts, timing=timing)
     try:
         text = _json(document) + "\n"
     except ValueError as exc:
@@ -805,6 +874,18 @@ def cmd_run(args: argparse.Namespace) -> dict[str, Any]:
         "status_counts": table.status_counts,
         "weight_total": table.weight_total,
         "caveats": result.caveats,
+        "ignition_timing": {
+            k: timing[k]
+            for k in (
+                "output",
+                "trims_changed",
+                "other_inputs_changed",
+                "summary",
+                "status",
+                "reasons",
+            )
+            if k in timing
+        },
         "wall_seconds": round(time.monotonic() - started, 2),
     }
 
@@ -915,6 +996,12 @@ def _parser() -> argparse.ArgumentParser:
         "and when no regime is stated since most of a drive is closed loop. Other regimes' "
         "unqualified overrides and the plant's regime_not_qualified are not consulted.",
     )
+    _add_timing(inspect)
+    inspect.add_argument(
+        "--timing-coolant-c",
+        type=float,
+        help="coolant temperature the timing cells are read at (required with --high-det)",
+    )
     inspect.set_defaults(handler=cmd_inspect)
 
     run = commands.add_parser(
@@ -947,6 +1034,7 @@ def _parser() -> argparse.ArgumentParser:
         default="fuel_comp",
         help="the cell grid: Fuel Comp's own axes (default) or Target AFR's",
     )
+    _add_timing(run)
     run.add_argument("--out", type=Path, help="scratch directory, not the repo (required)")
     run.set_defaults(handler=cmd_run)
     return parser

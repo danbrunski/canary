@@ -28,6 +28,7 @@ from src.analysis.engine_dynamics import (
     charge_fraction,
     check_internal_models,
     check_reference,
+    claim_chain,
     claim_refusals,
     consistency,
     contract_step_s,
@@ -44,7 +45,9 @@ from src.analysis.engine_dynamics import (
 from src.analysis.fuel_plant import (
     KELVIN,
     air_per_event_g,
+    load_fuel_plant,
     manifold_pressure_speed_density,
+    plant_qualification,
 )
 from src.analysis.sim_contract import (
     CONTRACT_FILE,
@@ -714,6 +717,12 @@ def test_only_a_pass_against_an_available_independent_reference_validates() -> N
     for m in sub["required_measurements"]:
         m["status"] = "available"
         m.pop("plan", None)
+    # One measurement is one fact: the sensor arrives for every stage naming it.
+    for other in raw["subsystems"]:
+        for m in other["required_measurements"]:
+            if m["id"] == "map_sensor":
+                m["status"] = "available"
+                m.pop("plan", None)
     sub["validations"][0]["reference"] = "map_sensor"
     contract = SimContract.model_validate(raw)
     st = subsystem_standing(
@@ -788,6 +797,31 @@ def test_spark_edits_cannot_produce_qualified_power_or_knock(kit: Any) -> None:
     assert claim_refusals(swept, ok, "coupled_rollout", "knock", changed_controls=["spark"])
     with pytest.raises(SimulationRefusalError, match="claim_undeclared"):
         claim_refusals(contract, ok, "coupled_rollout", "economy")
+
+
+def test_a_standing_reads_the_profile_only_where_it_must(kit: Any) -> None:
+    """E07.5 stage 4 (2026-10-17): the torque stage's standing comes from the
+    contract alone; the fuel stage's from a qualification the caller holds (of
+    the version asked about); a stage that runs a study refuses without the
+    profile rather than guessing."""
+    contract, _, fuel = kit
+    torque = subsystem_standing(contract, contract.subsystem("torque_production"))
+    assert torque.built and not torque.validated and torque.numerically_verified is None
+    q = plant_qualification(fuel)
+    held = subsystem_standing(contract, contract.subsystem("fuel_delivery"), qualification=q)
+    read = subsystem_standing(contract, contract.subsystem("fuel_delivery"), profile_dir=PROFILE)
+    assert held == read
+    other = plant_qualification(load_fuel_plant(PROFILE, "fuel-mv-2")[0])
+    with pytest.raises(SimulationRefusalError, match="plant_version_mismatch"):
+        subsystem_standing(contract, contract.subsystem("fuel_delivery"), qualification=other)
+    for sub_id in ("fuel_delivery", "manifold_breathing"):
+        with pytest.raises(SimulationRefusalError, match="profile_required"):
+            subsystem_standing(contract, contract.subsystem(sub_id))
+    # The chain a claim rests on: the ROM comparison computes lambda, not speed.
+    chain = [s.id for s in claim_chain(contract, "conditional_rom_comparison", "power")]
+    assert chain == ["torque_production", "fuel_delivery"]
+    assert claim_chain(contract, "coupled_rollout", "knock") == []
+    assert "actuator_response" in [s.id for s in claim_chain(contract, "coupled_rollout", "torque")]
 
 
 # -- the corpus bound ------------------------------------------------------------------------

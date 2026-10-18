@@ -646,9 +646,20 @@ ECU replica.
       +1/+2, and none in B. Three off-grid points match values hand-worked
       from the cells, including truncation toward the first operand.
     - The Main/High Det labels stay inferred (tables are named A/B).
-  - **Remaining (vehicle).** *(E09.7 maps the base timing table, implements
-    the seven nodes to the final byte and exposes Δtiming to the editor;
-    (b)–(c) ride on E09.1's capture.)*
+  - **The seven nodes, implemented (E09.7, 2026-10-17).** Each is
+    `twin: implemented` by its function in `src.analysis.ecu_state_models`.
+    Every unidentified word is a required argument, and the hand-worked
+    vectors are in `tests/test_ecu_state_models.py`. The chain adds the trim
+    term unscaled through to `0xFFFF232E`, which predicts 1 count = 1°
+    wherever no clamp binds; this is a prediction, see N01.2.
+    `ignition_chain_unmodelled` now names only `knock_trim_difference`; the
+    absolute still needs the words under `uncovered: timing_final_chain`.
+    The base timing is a sum whose main term `0xFFFF27C6` is a time-to-angle
+    conversion over the map `0x9AF9` (`rom_map.yaml`
+    `base_timing_rate_map`). The 0x021C48/0x021D6C operands are owed to the
+    firmware session; detail in E09.7.
+  - **Remaining (vehicle).** *((b)–(c) ride on E09.1's capture; E09.7 has
+    the simulator side.)*
     - **(a)** Read `0xFFFFB060`/`0xFFFFB160` (512 bytes, 0x23 windows) once
       at key-on and compare with the resolved slot. That closes
       `trim_ram_copy_unverified`.

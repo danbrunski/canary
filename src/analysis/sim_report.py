@@ -73,8 +73,9 @@ from src.analysis.sim_contract import SimulationRefusalError
 from src.analysis.sim_montecarlo import DESIGN_ASSUMPTION_PREFIX
 
 #: Bump when the page's content or layout changes meaning. 2: working- and
-#: design-assumption lists in the caveat block (E08.10).
-TOOL_VERSION = "2"
+#: design-assumption lists in the caveat block (E08.10). 3: an ECU-side
+#: ignition timing section when the run states a timing state (E09.7).
+TOOL_VERSION = "3"
 TOOL: Final = "sim_report"
 
 #: The two caveats every Monte Carlo result carries (E08.3) and the report
@@ -1405,8 +1406,90 @@ def _detail(table: CellTable) -> str:
     return "".join(out)
 
 
+def _timing(timing: Mapping[str, Any] | None) -> str:
+    """E09.7's ECU-side timing: the cells where it changes or a changed trim
+    is not read, with the reasons, the conditions it holds under, and the
+    torque/knock refusals beside it, never a torque number."""
+    if timing is None:
+        return ""
+    head = "<section><h2>Ignition timing (ECU side, degrees BTDC)</h2>"
+    points = _timing_points(timing.get("points", []))
+    if timing.get("status") == "unevaluable":
+        return (
+            head
+            + f"<p>Not given on the trims' grid: {_e(', '.join(timing.get('reasons', [])))}.</p>"
+            + points
+            + "</section>"
+        )
+    summary = timing.get("summary", {})
+    state = timing.get("state", {})
+    lines = [
+        head,
+        f"<p>HI DET latch {'set' if state.get('high_det') else 'clear'}, knock control "
+        f"{_e(state.get('knock_control'))} ({_e(state.get('source'))}); cells read at "
+        f"{_g(timing.get('cells_at', {}).get('coolant_c'))} degC. {summary.get('changed', 0)} of "
+        f"{summary.get('cells', 0)} trim cells change timing; {summary.get('unevaluable', 0)} "
+        f"unevaluable; {summary.get('changed_trim_not_read', 0)} carry a changed trim the ECM "
+        "does not read in this state.</p>",
+    ]
+    rows = [
+        c
+        for c in timing.get("cells", [])
+        if c["delta"] not in (None, 0) or set(c["reasons"]) - {"clamp_headroom_unknown"}
+    ]
+    if rows:
+        lines.append(
+            "<table><thead><tr><th>row</th><th>col</th><th>rpm word</th><th>X</th>"
+            "<th>change (deg)</th><th>status</th><th>reasons</th></tr></thead><tbody>"
+        )
+        for c in rows:
+            delta = "" if c["delta"] is None else f"{c['delta']:+d}"
+            lines.append(
+                f"<tr><td>{c['row']}</td><td>{c['col']}</td><td>{c['rpm_word']}</td>"
+                f"<td>{c['x']}</td><td>{_e(delta)}</td><td>{_e(c['status'])}</td>"
+                f"<td>{_e(', '.join(c['reasons']))}</td></tr>"
+            )
+        lines.append("</tbody></table>")
+    lines.append(points)
+    for claim in ("torque", "knock"):
+        reasons = timing.get(claim, {}).get("reasons", [])
+        if reasons:
+            lines.append(f"<p>{claim.capitalize()}: unsupported ({_e(reasons[0])}).</p>")
+    conditions = "".join(f"<li>{_e(c)}</li>" for c in timing.get("conditions", []))
+    lines.append(f"<p>Holds under:</p><ul>{conditions}</ul></section>")
+    return "".join(lines)
+
+
+def _timing_points(points: Sequence[Mapping[str, Any]]) -> str:
+    """The timing outcome at each design point, one row per distinct outcome
+    with its draw count (``sim_cells.ignition_timing_points``)."""
+    if not points:
+        return ""
+    lines = [
+        "<p>At the design points (each ROM's own X from its own BFS):</p>",
+        "<table><thead><tr><th>point</th><th>rpm</th><th>coolant (degC)</th><th>X base</th>"
+        "<th>X candidate</th><th>change (deg)</th><th>trim term change</th><th>status</th>"
+        "<th>reasons</th><th>draws</th></tr></thead><tbody>",
+    ]
+    for p in points:
+        for o in p.get("outcomes", []):
+            delta = "" if o.get("delta") is None else f"{o['delta']:+d}"
+            term = "" if o.get("trim_term_delta") is None else f"{o['trim_term_delta']:+d}"
+            lines.append(
+                f"<tr><td>{p['point']}</td><td>{_g(p['rpm'])}</td><td>{_g(p['coolant_c'])}</td>"
+                f"<td>{_e(o.get('x_base'))}</td><td>{_e(o.get('x_candidate'))}</td>"
+                f"<td>{_e(delta)}</td><td>{_e(term)}</td><td>{_e(o.get('status'))}</td>"
+                f"<td>{_e(', '.join(o.get('reasons', [])))}</td><td>{o.get('draws')}</td></tr>"
+            )
+    lines.append("</tbody></table>")
+    return "".join(lines)
+
+
 def render_report(
-    cell_table_json: str | bytes | Mapping[str, Any], *, run: Mapping[str, Any] | None = None
+    cell_table_json: str | bytes | Mapping[str, Any],
+    *,
+    run: Mapping[str, Any] | None = None,
+    timing: Mapping[str, Any] | None = None,
 ) -> str:
     """The report page for one cell table (module docstring).
 
@@ -1432,6 +1515,7 @@ def render_report(
         + _sampling(table, facts)
         + _maps(table)
         + _detail(table)
+        + _timing(timing)
         + f"<footer>{_e(TOOL)} {_e(TOOL_VERSION)} · cell table {_e(table.tool)} "
         f"{_e(table.tool_version)}, schema {table.schema_version}</footer>"
         "</main></body></html>\n"

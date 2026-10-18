@@ -41,7 +41,7 @@ computed output.
 | Lever | Expressible as an edit | Reaches an output | Blocked by |
 |---|---|---|---|
 | Fuel Comp, Fuel Targets, K | yes | BFS, φ, pulse, λ | plant unqualified (E07.3); closed loop unsupported (E09.10) |
-| Timing trims A/B | CLI only | none | base timing table unmapped; chain untraced (E09.7); no torque plant |
+| Timing trims A/B | CLI only | none | base timing table unmapped; chain untraced (E09.7); no torque plant *(2026-10-17: CLI + API; reaches `ignition_timing_deg` (Δ, ECU side, E09.7); page owed; torque stage built, not validated (E07.5 stage 4: H07.10/H07.5/H07.12/H07.8/N01.2 and spark sweeps owed))* |
 | MAF curve `0xE27E` | no | none | not in `rom_map.yaml`; airflow pipeline unmodelled (E09.8) |
 | Injector scaler `0x9254`, dead time, short pulse | no | none | constants not mapped as tables (E09.9) |
 | Load Point Scaler | yes | X | not editable on the page |
@@ -633,7 +633,7 @@ Pi; E09.13 Light. Items marked **listing** need the firmware session
 
 ## Checklist — use case 2: edit a ROM and see the effect
 
-- [ ] **E09.7 — ECU-only timing predictions.** **listing**, **truck**
+- [~] **E09.7 — ECU-only timing predictions.** **listing**, **truck**
   Map the base ignition timing table(s) the chain reads (`base_timing_sum`
   `0x04CB9E`, `base_timing_select` `0x04CF0C`) with their axes into
   `rom_map.yaml`; implement E05.4's seven nodes through
@@ -647,6 +647,136 @@ Pi; E09.13 Light. Items marked **listing** need the firmware session
   of −3 counts shows Δtiming per cell on the page and in the CLI, with
   torque `unsupported: spark_response_unmeasured`; k106's ten trim edits
   are the known answer.
+  *Partial 2026-10-17 (desk; the capture, the page and part of the listing
+  remain):*
+  - **Base timing, from the exported listing (`~/ecu-re/out`, read only).**
+    The base timing is a sum, not one table. Its terms:
+    - `0xFFFF1A58 = 1D3E + 27C6 + 2793 − 279A − 134A − 174A − 0x80 + 1344`.
+    - `0xFFFF27C6` (`0x04BC5A`) carries most of the advance. It is a time
+      converted to crank angle at the current rpm: `(cal 0x880D × 120 ×
+      0xFFFF17C6) / (0xFFFF15DE × 0xFFFF19CB)`, plus `cal 0x8B0C × 5 / 2`,
+      times `rpm >> 10 × 3 / 5`, minus 14, capped at 127. The × 120 is the
+      listing's (`0x04BC7C`–`0x04BC8A`: × 15, `shll2`, `shll`); the overall
+      scale stays unresolved until the divide helpers' operands are known.
+    - `0xFFFF19CB` is X itself (curve `0xCD9B`). `0xFFFF15DE` carries the 4 × 4
+      map `0x9AF9` (rpm/50 byte vs axis `0xC890`; X vs axis `0xC88C`; rows are
+      rpm, from the `0x0268B8` → `0x026F40` stride). That map is now in
+      `rom_map.yaml` as `base_timing_rate_map` with both axes, `inferred`.
+      Its values (identical on ROM Store, k106, 20260920 and 20261004) rise
+      with both axes.
+    - `0xFFFF1A59`, the alternate selected by `0x04CF0C`, is curve `0xCD6B`
+      by coolant: `base_timing_alternate_curve`.
+    - `0xFFFF134A` = 0 on every image: curves `0xCC63` and `0xCC73` are all
+      zero.
+    - `0xFFFF174A` is an enrichment retard read off the Target AFR lookup
+      `0xFFFF174B`.
+    - `0xFFFF1D3E` is a valve-timing term, 0x40 when neutral.
+    - `0xFFFF11CB` is `0xFFFF27C4` slewed ±5 per segment, ≤ cal `0x8B05` = 7.
+    - `0xFFFF27C3` is idle timing (the `0xFFFF2833` bit 4 sum).
+
+    **Owed to the firmware session:** the operands of `0x021C48` /
+    `0x021D6C` inside `0x04BA6C`, `0x04BC5A` and `0x04B9D0` (the exports
+    drop call arguments), and the writers of `0xFFFF2BD0`, `0xFFFF26D9`,
+    `0xFFFF26D0` and `0xFFFF17FA`. Until then `0xFFFF27C6` cannot be
+    computed, and the absolute timing is unknown.
+  - **The seven nodes** are implemented integer-exact in
+    `src.analysis.ecu_state_models` (`timing_trim_terms` …
+    `timing_final_byte`, plus `timing_rate_limit_steady` and `timing_delta`).
+    Every unidentified word is a required argument. The manifest nodes are
+    `twin: implemented`, and the blocker `ignition_chain_unmodelled` now
+    names only `knock_trim_difference`. Hand-worked vectors are in
+    `tests/test_ecu_state_models.py`. One of them,
+    `test_one_trim_count_is_one_degree_through_all_seven_nodes`, checks
+    that the chain adds the trim term unscaled, which makes 1 count = 1°
+    the code's prediction for N01.2 (recorded there).
+  - **Simulator output `ignition_timing_deg`** (ECU side only). Every other
+    term is held equal on both ROMs (`TIMING_DELTA_CONDITIONS`):
+    - `paired_scenarios.ignition_timing_at` / `ignition_timing_cells` (per
+      trim cell) and `sim_cells.ignition_timing_points` (per design point
+      and draw).
+    - Each ROM's own X comes from its own BFS and LPS. A K or Fuel Comp
+      change therefore reaches the trims' column, but it also moves
+      `0xFFFF27C6`, so it reports the trim term's change and no timing
+      change (`base_timing_load_term_unmodelled`). A Target AFR change that
+      moves φ gets `enrichment_retard_unmodelled`.
+    - Any changed byte outside the two trims that `compare_roms` says
+      reaches `ignition_timing` (`sim_cells.timing_reach_reasons`) makes the
+      trim-grid block `unevaluable` with no cells, naming the node
+      (`timing_input_changed:<node>`), or `unknown_bytes_changed` for a byte
+      no node reads; every design-point pair carries the same reasons. On
+      ZS44A-20261004 with HI DET set: K +10 % gives
+      `timing_input_changed:air_charge_tp`, a Fuel Comp cell
+      `timing_input_changed:fuel_comp_lookup`, and `base_timing_rate_map`
+      `add_raw 5` gives `unknown_bytes_changed`. Tests:
+      `tests/test_rom_sim_cli.py::test_an_edit_that_reaches_timing_outside_the_trims_is_not_zero_on_the_trim_grid`
+      (k, fuel_comp, base_timing_rate_map), and k106 against ROM Store
+      (K +6 %) through the block in the k106 test. `report.html` renders
+      each design point's outcomes.
+    - Calibration facts the twin rests on are pinned as manifest
+      `calibration_conditions`, so an image that differs is refused
+      `unmodelled_logic`: cal `0x8B05` = 7 on `timing_trim_terms` (the
+      0..7 subtrahend bound behind `timing_delta`'s "exact when both trims
+      ≥ 7") and cal `0x8294` = 0 on `timing_retard_combine` (it skips the
+      held-step branch: `0x04DF72` `tst r5,r5; bt 0x4dfb6`). All five
+      operator images pass. `0xFFFF1215` is a signed byte (`0x04DF4C`
+      `mov.b`, then `neg` with no `extu.b`) and `0xFFFF46E6` an unsigned
+      byte (`0x04E05E` `mov.b`, `extu.b`), with vectors in
+      `test_the_retard_combine_takes_the_larger_retard_and_its_two_paths`.
+    - The HI DET latch and knock control are stated inputs with no default
+      (`--high-det`, `--knock-control`), stated independently: the
+      fallback (`0xFFFF479D` bit 7) sets HI DET only inside the gate at
+      `0x04A914`–`0x04A926` (`2876` bit 6 set, `4782` bit 5 clear); outside
+      it `0x04A956`–`0x04A96E` writes bit 6 from cal `0x86DE` bit 7 (0 here),
+      so fallback with HI DET clear is reachable. A trim edit without them
+      is refused (`timing_state_unstated`).
+    - With no logged timing (grid designs) a change is reported with
+      `clamp_headroom_unknown`. A trim the ECM does not read in the stated
+      state gives 0 with a named reason (`trim_a_not_read:high_det_latch_set`).
+      The 56–60 °C blend stays `coolant_blend_band`.
+    - Torque and knock carry E07.5's `claim_refusals`, headed by
+      `spark_response_unmeasured`, plus `knock_unmodelled`.
+    - Where it appears: `rom_sim inspect`/`run` (`result.json`
+      `ignition_timing`, `report.html` section) and the ROM Editor's
+      simulate result.
+  - **Known answers** (`tests/test_ignition_timing.py`):
+    - k106 against ROM Store ZS44A, with HI DET clear: Δ = the masked trim-A
+      change in exactly the ten cells, rows 7–9 × cols 12–15, +1/+2. With
+      HI DET set: 0 everywhere, the ten cells naming
+      `trim_a_not_read:high_det_latch_set`.
+    - −3 counts on all of trim B on ZS44A-20261004, through the edit spec
+      and `rom_sim inspect`: −3° in all 256 cells with HI DET set; 0 with a
+      named reason when clear. The same edit through `rom_sim run` on a 9-point
+      grid gives −3 at every (point, draw).
+    - A K +10 % `rom_sim run` (9-point grid, 2 draws), checked by hand,
+      moved X 29→32 … 66→73 and the trim term by −2…+1. Every pair is
+      `unevaluable` (`base_timing_load_term_unmodelled`,
+      `timing_input_changed:air_charge_tp`), and so is the block.
+  - **Logged-timing sanity check** (not validation; the base terms are not
+    observed). `_capture-rom-trace-2026-09-21T142926` is on ZS44A-20260920,
+    with HI DET taken as set (UpRev logs read 0x40 throughout). It has
+    1,416 BFS (0x1208) + timing (0x110A) reads with broadcast rpm within
+    60 ms.
+    - Over 1,415 consecutive pairs (< 1.5 s apart), the predicted trim term
+      moved in 334. Logged timing moved the same way in 49 % of those, and
+      by exactly the trim change in 12 %.
+    - Where the trim term held (1,081 pairs), timing held in 67 % and moved
+      at most 1° in 84 %.
+    - So the trim term alone does not explain logged timing changes, as
+      expected when `0xFFFF27C6` moves with rpm and X.
+    - The 09-21..09-23 tuning drives co-sample BFS with Mode 01 timing too
+      rarely to add anything (4–85 pairs).
+  - **Editable:** `rom_editor.EDITABLE_TABLES` gains `timing_trim_a`/`_b`, so
+    the ROM Editor previews a trim edit. `docs/headless-api.md` and
+    `docs/mcp-server.md` list them.
+  - **Remaining:**
+    - **Page:** `SimRequest` carries no HI DET / knock state yet (W09's
+      no-default request contract), so simulating a trim edit from the page
+      or MCP refuses `timing_state_unstated`. The page's own
+      `EDITABLE_TABLES` copy (`src/dashboard/static/src/lib/romEditor.ts`)
+      still lists the fuel chain only, and nothing renders the timing block.
+    - **Truck:** E05.4 (c)'s capture is needed to locate the earliest
+      disagreement and to declare a final-byte tolerance.
+    - **Listing:** the owed operands above.
 
 - [ ] **E09.8 — The MAF curve, mapped and modelled.** **listing**
   Add `0xE27E` (the MAF transfer curve the airflow pipeline reads) to
@@ -1164,6 +1294,12 @@ Pi; E09.13 Light. Items marked **listing** need the firmware session
   before E09.8 says "not mapped"; a Fuel Comp cruise edit before E09.10
   says "closed loop: trim authority undecoded"; the CLI and the page show
   the same strings for the same edit (one test calls both).
+  *(2026-10-17, E07.5 stage 4: the torque stage is now built and not
+  validated, so a timing-trim edit says "torque production built, not
+  validated (owed H07.10, H07.5, H07.12, H07.8, N01.2 and 6 more)" and
+  "spark response unmeasured"; "no torque plant" is produced only while the
+  stage is unbuilt. `rom_levers` `TOOL_VERSION` 2; the parity test and
+  fixture assert the new string.)*
   *14a done 2026-10-16 (simulator session); 14b open (W09 session).*
   `src/analysis/rom_levers.py` holds `classify_edit(report, *, rom_map,
   model, contract, qualification, regime=None, cells=None) ->

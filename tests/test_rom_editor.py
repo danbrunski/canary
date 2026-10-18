@@ -339,7 +339,7 @@ def test_the_library_key_must_be_the_bytes(kit_and_image: tuple[SimKit, bytes]) 
 @pytest.mark.parametrize(
     ("edits", "reason"),
     [
-        ([{"table": "timing_trim_a", "slot": 1, "all": True, "add_raw": 1}], "table_not_editable"),
+        ([{"table": "base_timing_rate_map", "all": True, "add_raw": 1}], "table_not_editable"),
         (
             [{"table": "fuel_targets_maps_2_5", "slot": 2, "all": True, "add_raw": 1}],
             "slot_not_simulated",
@@ -614,6 +614,42 @@ def test_the_target_afr_grid_and_a_reflash_event_are_carried(
     assert out["learned_state"]["base"]["ltft_pct"] == 3.0
 
 
+def test_the_timing_output_is_not_stated_and_a_trim_simulate_refuses_by_name(
+    kit_and_image: tuple[SimKit, bytes],
+    matched: dict[str, Any],
+    registry: TuneRevisionRegistry,
+) -> None:
+    """E09.7: the request carries no HI DET / knock state yet, so the timing
+    block says so, and a trim edit (editable: it previews) refuses to simulate
+    before any draw instead of defaulting the latch."""
+    kit, image = kit_and_image
+    req = rom_editor.SimRequest.model_validate(request(draws=2))
+    out = rom_editor.simulate_edits(image, matched, req, PROFILE, kit=kit, registry=registry)
+    timing = out["ignition_timing"]
+    # The default edit is K, which also reaches timing outside the trims.
+    assert (timing["status"], timing["reasons"]) == (
+        "unevaluable",
+        ["timing_state_unstated", "timing_input_changed:air_charge_tp"],
+    )
+    assert timing["torque"]["status"] == "unsupported"
+    assert {r for p in timing["points"] for o in p["outcomes"] for r in o["reasons"]} <= {
+        "timing_state_unstated",
+        "load_input_x_not_computed",
+        "timing_input_changed:air_charge_tp",
+    }
+    trim = [{"table": "timing_trim_b", "slot": 1, "cells": [[3, 3]], "add_raw": -1}]
+    with pytest.raises(SimulationRefusalError) as refused:
+        rom_editor.simulate_edits(
+            image,
+            matched,
+            rom_editor.SimRequest.model_validate(request(draws=2, edits=trim)),
+            PROFILE,
+            kit=kit,
+            registry=registry,
+        )
+    assert refused.value.reason == "timing_state_unstated"
+
+
 # -- the child entry ----------------------------------------------------------------------------
 
 
@@ -636,7 +672,7 @@ def _params(image: bytes, tmp_path: Path, status: dict[str, Any], **over: Any) -
     ("over", "kind", "reason"),
     [
         (
-            dict(edits=[{"table": "timing_trim_a", "slot": 1, "all": True, "add_raw": 1}]),
+            dict(edits=[{"table": "base_timing_rate_map", "all": True, "add_raw": 1}]),
             "edit_spec",
             "table_not_editable",
         ),

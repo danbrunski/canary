@@ -553,13 +553,15 @@ describe("ROM Editor page: what the edit can and cannot show (E09.14b)", () => {
     expect(within(simulate).getByRole("form", { name: "Simulate form" })).toBeVisible();
   });
 
-  it("says 'no torque plant' for a timing trim and 'not mapped' for bytes outside the map", async () => {
+  it("names the unvalidated torque stage for a timing trim and 'not mapped' for bytes outside the map", async () => {
     await previewWithLevers(LEVERS_TIMING_TRIM);
     let block = within(await screen.findByRole("region", { name: "Preview result" })).getByRole(
       "region",
       { name: LEVERS_HEADING },
     );
-    expect(block).toHaveTextContent("Timing trim A -> ignition_trim_selected: no torque plant");
+    expect(block).toHaveTextContent(
+      "Timing trim A -> ignition_trim_selected: engine torque not computed in conditional_rom_comparison; torque production built, not validated",
+    );
     expect(shown(block)).toEqual(LEVERS_TIMING_TRIM.messages);
     cleanup();
     vi.clearAllMocks();

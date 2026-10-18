@@ -66,6 +66,10 @@ GRID_ARGS = [
 LEARNED = ["--stft-pct", "0", "--ltft-pct", "2.34", "--candidate-events", "none"]
 
 
+#: A stated timing state (E09.7): HI DET clear, knock control active, warm.
+TIMING_ARGS = ("--high-det", "clear", "--knock-control", "active", "--timing-coolant-c", "90")
+
+
 def _yaml(path: Path) -> Any:
     return yaml.safe_load(path.read_text())
 
@@ -240,7 +244,9 @@ def test_a_synthetic_pair_and_a_grid_design_write_all_three_files(
     html = (out / "report.html").read_text()
     assert html.index("structural_error_not_sampled") < html.index("<svg")
     assert html.index("parameter_uncertainty_only") < html.index("<svg")
-    assert html == render_report(json.dumps(result["cell_table"]), run=result["run"])
+    assert html == render_report(
+        json.dumps(result["cell_table"]), run=result["run"], timing=result["ignition_timing"]
+    )
     for needle in (world["sha"], world["candidate_sha"], "cli test spec.yaml"):
         assert needle in html
     assert "http://" not in html and "https://" not in html
@@ -364,6 +370,55 @@ def test_inspect_lists_the_resolved_cells_and_what_they_reach_and_runs_nothing(
     assert sorted(p.name for p in tmp_path.iterdir()) == before
 
 
+@pytest.mark.parametrize(
+    ("edit", "reason"),
+    [
+        (
+            {"table": "k_constant", "slot": 1, "all": True, "scale": 1.1, "rounding": "nearest"},
+            "timing_input_changed:",
+        ),
+        (
+            {"table": "fuel_compensation", "slot": 1, "cells": [[4, 4]], "add_raw": 5},
+            "timing_input_changed:",
+        ),
+        ({"table": "base_timing_rate_map", "all": True, "add_raw": 5}, "unknown_bytes_changed"),
+    ],
+    ids=["k", "fuel_comp", "base_timing_rate_map"],
+)
+def test_an_edit_that_reaches_timing_outside_the_trims_is_not_zero_on_the_trim_grid(
+    world: dict[str, Any],
+    capsys: pytest.CaptureFixture[str],
+    edit: dict[str, Any],
+    reason: str,
+) -> None:
+    """E09.7: the trims' grid holds every other term equal, so a K, Fuel Comp
+    or base-timing-map edit (each reaches ``ignition_timing`` per
+    ``compare_roms``) is unevaluable there by name, never "0 changed"."""
+    spec = world["root"] / "reach.yaml"
+    spec.write_text(
+        yaml.safe_dump(
+            {
+                "schema_version": 1,
+                "base": {"file": "base.bin", "sha256": world["sha"]},
+                "label": "reach",
+                "edits": [edit],
+            }
+        )
+    )
+    code, payload, _ = _cli(capsys, "inspect", *_profile_args(world), "--edits", spec, *TIMING_ARGS)
+    assert code == 0, payload
+    timing = payload["ignition_timing"]
+    assert timing["trims_changed"] is False
+    assert timing["status"] == "unevaluable"
+    assert "summary" not in timing and "cells" not in timing
+    assert timing["reasons"] and all(r.startswith(reason) for r in timing["reasons"])
+    assert timing["other_inputs_changed"] == timing["reasons"]
+    # Without a stated state the block still names the reach after the state.
+    code, payload, _ = _cli(capsys, "inspect", *_profile_args(world), "--edits", spec)
+    assert code == 0, payload
+    assert payload["ignition_timing"]["reasons"] == ["timing_state_unstated", *timing["reasons"]]
+
+
 def test_inspect_judges_a_masked_trim_on_the_bits_the_ecm_reads(
     world: dict[str, Any], tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -379,7 +434,17 @@ def test_inspect_judges_a_masked_trim_on_the_bits_the_ecm_reads(
         )
     )
     code, payload, _ = _cli(capsys, "inspect", *_profile_args(world), "--edits", spec)
+    # A trim edit names the HI DET latch and knock control: there is no default.
+    assert (code, payload["refused"]) == (2, "timing_state_unstated")
+    code, payload, _ = _cli(capsys, "inspect", *_profile_args(world), "--edits", spec, *TIMING_ARGS)
     assert code == 0
+    timing = payload["ignition_timing"]
+    assert timing["trims_changed"] and timing["summary"]["cells"] == 256
+    # The synthetic image's trim axes are seeded noise, so which node reads the
+    # edited cell is not pinned here (the private-ROM tests pin it); every row
+    # shown is a change or names why it is not one.
+    assert all(c["delta"] or c["reasons"] for c in timing["cells"])
+    assert timing["torque"]["status"] == "unsupported"
     (cell,) = payload["cells"]
     assert cell["mask"] == 0x7F and cell["delta_raw"] == -1
     # A timing trim reaches the ignition outputs and leaves the fuel schedule alone.
@@ -454,12 +519,14 @@ def test_inspect_names_the_lever_and_the_strings_equal_the_librarys(
     assert levers["messages"] == _expected_messages(world, candidate)
     # Additive: the keys that were there still are.
     assert {"cells", "reached", "in_run_mode", "ranges"} <= set(payload)
-    # A timing trim: no torque plant.
+    # A timing trim: the torque stage, built and not validated (E07.5 stage 4).
     code, payload, _ = _cli(
-        capsys, "inspect", *_profile_args(world), "--edits", _trim_spec(world), *base
+        capsys, "inspect", *_profile_args(world), "--edits", _trim_spec(world), *base, *TIMING_ARGS
     )
     assert code == 0
-    assert "no torque plant" in "\n".join(payload["levers"]["messages"])
+    said = "\n".join(payload["levers"]["messages"])
+    assert "torque production built, not validated" in said
+    assert "spark response unmeasured" in said
     trimmed = make_candidate(
         world["image"],
         world["kit"].rom_map,

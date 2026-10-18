@@ -75,6 +75,10 @@ ModeKind = Literal["ecu_replay", "plant_replay", "conditional_rom_comparison", "
 ScoreGroup = Literal["open_loop", "state_estimation"]
 ClockKind = Literal["ecu_time_task", "ecu_crank_event", "solver", "acquisition"]
 InitMethod = Literal["observed_checkpoint", "decoded_reset", "prescribed", "steady_state"]
+#: What a scenario can vary on purpose through an actuator. Each actuator names
+#: the one it is (``ActuatorSpec.control``), so the controls an edit changes are
+#: read from the contract graph, never from a table of table names (E07.5 item 8).
+Control = Literal["spark", "cam", "lambda", "throttle"]
 
 #: Roles whose value the mode computes.
 COMPUTED: frozenset[str] = frozenset({"inferred_state", "predicted_output"})
@@ -241,6 +245,9 @@ class ActuatorSpec(_Strict):
     """How an ECU command becomes a physical actuation, and its limits."""
 
     commanded_by: str
+    #: The control this actuation is: a claim about changing it needs a
+    #: measurement that excites it (``RequiredMeasurement.excites``).
+    control: Control
     minimum: float
     maximum: float
     #: Engineering units per second; ``None`` when the response is not rate-limited
@@ -418,7 +425,10 @@ class RequiredMeasurement(_Strict):
     #: Controls it varies on purpose (``spark``, ``cam``, ``lambda``). A claim
     #: about changing a control needs an available measurement that excites
     #: it: natural closed-loop logs do not.
-    excites: list[Literal["spark", "cam", "lambda", "throttle"]] = Field(default_factory=list)
+    excites: list[Control] = Field(default_factory=list)
+    #: The roadmap item that delivers it (``H07.10``, ``N01.2``), so an owed
+    #: measurement is named where a refusal names it.
+    task: str | None = Field(default=None, pattern=r"^[A-Z]\d{2}\.\d+[a-z]?$")
     #: ``planned``: not available, and an operator decision says when it will
     #: be (``plan``); still unavailable for every standing and claim.
     status: Literal["missing", "planned", "partial", "available"]
@@ -554,7 +564,7 @@ class InternalModel(_Strict):
 
 class SubsystemImplementation(_Strict):
     module: str = Field(pattern=r"^src\.analysis\.[a-z_]+$")
-    profile_file: str = Field(pattern=r"^[a-z_]+\.yaml$")
+    profile_file: str = Field(pattern=r"^[a-z][a-z0-9_]*\.yaml$")
     #: The version scenarios run (the contract's ``plant_version`` for the fuel stage).
     plant_version: str = Field(min_length=1)
     #: Further versions of the same module declared beside it (a revised plant
@@ -956,6 +966,19 @@ def _check_subsystems(contract: SimContract, by_id: dict[str, Quantity]) -> None
         stray = sorted({n for n in named if n not in by_id})
         if stray:
             raise ValueError(f"subsystem {sub.id}: names undeclared quantities {stray}")
+    # One measurement named by several stages (the scale ticket, the coast-downs,
+    # the MAP sensor) is one thing: its availability, task and plan cannot
+    # differ between them, or a standing would read whichever copy is stale.
+    seen: dict[str, tuple[str, Subsystem, RequiredMeasurement]] = {}
+    for sub in subsystems:
+        for m in sub.required_measurements:
+            key = m.model_dump_json(include={"status", "task", "plan"})
+            first = seen.setdefault(m.id, (key, sub, m))
+            if first[0] != key:
+                raise ValueError(
+                    f"measurement {m.id}: {first[1].id} and {sub.id} disagree on its status, "
+                    "task or plan; one measurement is one fact"
+                )
     orphans = sorted(
         q.id for q in contract.quantities if q.kind in ("plant", "actuator") and q.id not in owner
     )

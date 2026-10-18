@@ -825,6 +825,14 @@ supercharger is a hardware intervention with a new plant parameter set.
   declared, unbuilt, with the measurements it needs named. The claim
   refusals are declared and tested as a library gate; no producer calls it
   yet.*
+  *Partial 2026-10-17 (desk part of queue entry Q27): stage 4 (torque
+  production) is built as a declared structure with its parameter registry,
+  and nothing is fitted; it is **not validated**, and every parameter but the
+  geometry is `requires_measurement` until H07.10/H07.5/H07.12/H07.8, N01.2
+  and the spark sweeps are driven (truck). The claim refusals now have a
+  producer: `rom_levers` derives an edit's changed controls from the
+  `compare_roms` diff and refuses a torque/power claim by name (item 8). See
+  "Stage 4" below.*
   - **Code.** `src/analysis/engine_dynamics.py` (layer 5, generic);
     `data/nissan-xterra-2008/manifold_plant.yaml` (`plant_version:
     manifold-mv-1`); `python -m tools.manifold_check study|breathing-bound|
@@ -973,13 +981,12 @@ supercharger is a hardware intervention with a new plant parameter set.
       comparison, even with every stage validated
       (`test_prescribed_rpm_is_never_an_acceleration_prediction`); a rollout
       may claim acceleration only when every stage on its path is validated.
-    - Spark: declared and tested as a library gate; no producer exists yet.
-      A power/torque claim with `changed_controls=["spark"]` is
+    - Spark: a power/torque claim with `changed_controls=["spark"]` is
       `spark_response_unmeasured` (needs `controlled_spark_sweep`) even with
       every stage validated; knock is always `knock_unmodelled`
-      (`test_spark_edits_cannot_produce_qualified_power_or_knock`). The first
-      producer must derive `changed_controls` from the ROM diff
-      (`compare_roms`) and call `require_claim`; that derivation is owed.
+      (`test_spark_edits_cannot_produce_qualified_power_or_knock`). Since
+      2026-10-17 a producer derives `changed_controls` from the ROM diff
+      (item 8, below).
     - Torque: `derived:ESTIMATED_TORQUE_NM` is refused as a torque reference
       (`reference_not_independent`: `mass_air_flow`, `delivered_lambda`,
       `throttle_position_actual`) even if marked available; H07's
@@ -1059,7 +1066,8 @@ supercharger is a hardware intervention with a new plant parameter set.
     3. *Actuator response* (unbuilt): requested throttle word 0xFFFF2D28 with
        sensor A at ≥ 50 Hz; VTC commanded/actual cam channels (not
        catalogued).
-    4. *Torque production* (unbuilt): a validated H07 torque reference
+    4. *Torque production* (**desk part built 2026-10-17, not validated**;
+       below): a validated H07 torque reference
        (H07.12 NA baseline, H07.8 repeatability, H07.10 mass), controlled
        spark, lambda and cam sweeps on it, and MAP for pumping.
        **Minimum model and order (E09.13, 2026-10-15).** The first torque
@@ -1083,9 +1091,138 @@ supercharger is a hardware intervention with a new plant parameter set.
        across the load range; cold-start warm-ups.
     7. E07.6's coupled rollout stays refused (`dynamic_plant_unbuilt`) until
        these exist; `rollout_blockers` lists all eight stages today.
-    8. A producer of claims: derive `changed_controls` from the
+    8. ~~A producer of claims: derive `changed_controls` from the
        `compare_roms` diff (a timing-table edit means spark) and call
-       `require_claim`. The refusals are a library gate until then.
+       `require_claim`.~~ *Done 2026-10-17* (`rom_levers.changed_controls` /
+       `edit_claim_refusals` / `require_edit_claim`; below). Owed by the
+       E09.7 session's files: `sim_cells.OUTPUTS` torque/brake-power rows as
+       `unsupported` with these reasons, and `rom_sim run` printing the claim
+       line (`inspect` already prints it).
+  - **Stage 4, the desk part (2026-10-17, queue entry Q27: "nothing that
+    fits a parameter").** E09.13's minimum model, built as a declared
+    structure; its standing is derived like every stage's and is not
+    validated.
+    - *Code.* `src/analysis/torque_plant.py` (layer 5, generic);
+      `data/nissan-xterra-2008/torque_plant_tq0.yaml` (`plant_version:
+      torque-tq-0`, strict schema, the file's sha256 on every result).
+      brake = indicated − friction − pumping; indicated = air per cylinder
+      event × LHV / AFR_stoich × η_i0 × η(λ) × η(spark), over the events of a
+      cycle; η(spark) = 1 − c·(MBT − spark)², valid within a declared 20° of
+      MBT (`spark_outside_shape` beyond, never a negative efficiency);
+      η(λ) = 1 + G at λ_peak, 1 at stoich (the quadratic through both between
+      them), 1 + G − k·(λ − λ_peak)² richer, fuel-limited 1/λ lean;
+      friction FMEP = f0 + f1·N + f2·N² (N krpm, the Barnes–Moss form);
+      pumping = (baro + Δp_exhaust − MAP)·Vd/4π, MAP being the manifold
+      stage's (no MAP on the NA intake, ever: operator 2026-10-08), so pumping
+      is a named working assumption (`pumping_from_unmeasured_map`).
+    - *MBT is never assumed.* It is a `requires_measurement` parameter with a
+      deliberately wide bracket (10–45° BTDC). `evaluate` runs only a
+      **bracket case** and takes the caller's stated values, building the
+      case itself with `parameter_case`; a hand-built `TorqueParameters` is
+      refused (`parameters_not_from_registry`, verifier repro 2026-10-17:
+      MBT 5° and η_i0 0.9 had run naming nothing). `parameter_case` refuses an
+      unstated MBT
+      (`spark_mbt_unstated`), any other unstated parameter
+      (`parameter_unstated`), a value outside its bracket (`outside_bracket`)
+      and a restated known one. A result is `kind: bracket_case` and names
+      every parameter it rests on and every unresolved effect. Outside the
+      contract's applicability, a sample is NaN and named
+      (`outside_applicability:<quantity>`, `manifold_above_ambient`).
+    - *Registry* (E07.3's rules; a literature bracket names its citation and
+      is a range for cases, never this engine's number; `identifiable` is
+      refused: nothing is fitted):
+
+      | parameter | status | bracket | source | measured by |
+      |---|---|---|---|---|
+      | displacement | known 3.954 L | — | profile fact | — |
+      | cylinders | known 6 | — | profile fact | — |
+      | fuel_lower_heating_value | requires_measurement | 41–44 MJ/kg | literature (Heywood App. D) | fuel_blend_test |
+      | fuel_stoich_afr | requires_measurement | 14.0–14.7 | the fuel plant's (must equal) | fuel_blend_test |
+      | indicated_efficiency_peak | requires_measurement | 0.30–0.40 | literature (Heywood ch. 9, 15) | h07_na_baseline (H07.12), only as the product below |
+      | lambda_peak | requires_measurement | 0.85–0.95 | literature | lambda_sweep |
+      | lambda_peak_gain | requires_measurement | 0.02–0.08 | literature | lambda_sweep |
+      | lambda_rich_curvature | requires_measurement | 0.5–3.0 /λ² | literature | lambda_sweep |
+      | spark_mbt_advance | requires_measurement | 10–45° BTDC | declared range | controlled_spark_sweep |
+      | spark_efficiency_curvature | requires_measurement | 2e-4–1.2e-3 /deg² | literature (Guzzella & Onder ch. 2) | controlled_spark_sweep |
+      | friction_fmep_0/1/2 | requires_measurement | 40–120 kPa, 5–25 kPa/krpm, 2–8 kPa/krpm² | literature (Barnes–Moss) | h07_road_load (H07.5) |
+      | exhaust_back_pressure | requires_measurement | 0–15 kPa | declared range | exhaust_back_pressure_tap |
+
+      A pull sees fuel energy and efficiency only multiplied together: the
+      registry declares the product `indicated_energy_per_air` (LHV × η_i0 /
+      AFR_stoich), and `h07_na_baseline` lists the product in `identifies`,
+      never a part (`check_registry` refuses a part listed there). The
+      friction bracket's literature centre (Barnes–Moss tfmep) includes WOT
+      pumping, which this model subtracts separately; its evidence says so,
+      and the bracket's low end lets a case state mechanical friction alone.
+
+      `check_registry` holds it to the contract and the fuel plant: every
+      `measured_by` is a required measurement of `torque_production` that
+      lists the parameter in `identifies`, a parameter a fuel plant also
+      declares says the same there, and the evaluator's inputs are exactly
+      `engine_torque`'s inputs and the stage's bounds.
+    - *Contract.* Spark is now an actuator, `spark_advance` (deg BTDC,
+      `control: spark`, owned by `actuator_response` with a new
+      `spark_timing_check` measurement), commanded by the ECU quantity
+      `ignition_timing_byte` (0xFFFF11FF, 8-bit, `110 − raw`, manifest node
+      `timing_final_byte`; the same decode as DID 0x110A in `dids.yaml`,
+      pinned by a test). `engine_torque` reads it. Every actuator now names
+      its `control` (spark / lambda / throttle), and every required
+      measurement may name its `task` item. `torque_production` is `built`
+      (module, file, version), bounded (NA hardware only; rpm 500–6500,
+      λ 0.75–1.2, spark −10–60° BTDC, MAP 10–105 kPa, baro 60–105 kPa, IAT
+      −30–70 °C; invariant `manifold_at_or_below_ambient`; one engine cycle),
+      and owes, by name: `vehicle_mass` (H07.10), `h07_road_load` (H07.5),
+      `h07_na_baseline` (H07.12), `h07_repeatability` (H07.8),
+      `spark_trim_unit` (N01.2), `controlled_spark_sweep`, `lambda_sweep`,
+      `cam_sweep`, `fuel_blend_test`, `exhaust_back_pressure_tap` and the
+      planned `map_sensor`. A measurement several stages name
+      (`vehicle_mass`, `h07_road_load`, `map_sensor`) must agree on status,
+      task and plan everywhere, or the contract does not load. `subsystem_standing` reads the profile only where
+      it must (the fuel stage takes the caller's `qualification`; a study
+      without the profile is `profile_required`); `claim_chain` names the
+      stages a claim rests on.
+    - *Claims (item 8).* `rom_levers.changed_controls(report, model,
+      contract)` takes the contract quantities on the comparison's reached
+      path and follows them downstream through ECU quantities to the
+      actuators they command: a timing trim is `spark`, Fuel Targets
+      `lambda`, Fuel Comp and K both (BFS indexes the timing tables through
+      load input X); bytes no node reads, or an edit that reaches no contract
+      quantity (`no_contract_quantity_reached`), leave them `unresolved`, which
+      the claim refuses (`controls_unresolved`). `require_edit_claim`'s error
+      names what each unvalidated stage owes, by task item. `edit_claim_refusals` /
+      `require_edit_claim` call `claim_refusals` with them. In the ROM
+      comparison a torque/power claim is refused with
+      `engine_torque_not_computed` (the mode does not compute torque),
+      `subsystem_not_validated` for `torque_production` and `fuel_delivery`,
+      and `<control>_response_unmeasured`. `classify_edit` (so `rom_sim
+      inspect` and the ROM Editor preview) shows it: `no_torque_plant` is
+      now produced only while the stage is unbuilt; built, the ignition
+      outputs carry "torque production built, not validated (owed H07.10,
+      H07.5, H07.12, H07.8, N01.2 and 6 more)" and "spark response
+      unmeasured", and `messages` ends with "torque/power claim for this edit
+      (spark): refused; …". `rom_levers` `TOOL_VERSION` 2.
+    - *Tests.* `tests/test_torque_plant.py` (15: η(spark) = 1 at MBT,
+      symmetric, zero slope at MBT; η(λ) peak and stoich; torque ∝ air; a
+      hand-computed case; MBT refused; registry rules; registry ↔ contract ↔
+      fuel plant; spark actuator ↔ DID 0x110A decode; built, bounded, not
+      validated with the owed task items; a pass against
+      `derived:ESTIMATED_TORQUE_NM` does not validate; a hand-built case is
+      refused; the pull identifies the product, never a part; a measurement
+      two stages name is one fact);
+      `test_a_standing_reads_the_profile_only_where_it_must`
+      (`test_engine_dynamics.py`); `test_rom_levers.py`
+      (`test_a_timing_trim_edit_names_the_torque_stage_and_what_it_owes`,
+      `test_the_torque_blocker_follows_the_stages_derived_standing`,
+      `test_an_output_no_contract_quantity_carries_says_no_plant_consumes_it`,
+      `test_the_controls_an_edit_changes_are_read_from_the_comparison`,
+      `test_a_torque_or_power_claim_for_an_edit_is_refused_by_name`).
+      `test_torque_is_never_calibrated_against_the_fuel_energy_estimate`
+      stays green. The ROM Editor fixture was regenerated
+      (`CANARY_UPDATE_LEVERS_FIXTURE=1`) on HEAD plus this change.
+    - *Owed (truck):* H07.10 → H07.5 → H07.12 → this stage's identification
+      (a recorded pass in `validations` against `h07_wheel_torque` once it is
+      `available`) → N01.2 → spark sweeps. Until then no torque or power
+      number exists for any edit.
     9. *Done for fuel-mv-2, 2026-10-08:* the fuel plant's own MAP and the VE
        finding. fuel-mv-2 fits VE(rpm) and refuses MAP above ambient (E07.3,
        "fuel-mv-2"). fuel-mv-1 is frozen and stays owed, by name, for itself

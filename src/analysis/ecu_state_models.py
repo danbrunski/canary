@@ -718,23 +718,368 @@ def selected_timing_trim(
     return SelectedTrim(Step(chosen), Step(a))
 
 
+# -- E05.4 / E09.7: the ignition chain from the trim to the timing byte ------------------
+#
+# Seven manifest nodes, each one firmware routine's arithmetic on the words it
+# reads. Every word no node identifies is a required argument: nothing here
+# holds a typical value for an unidentified term. The chain is additive in
+# whole degrees from the trim term to the rate-limited word 0xFFFF232E, which
+# is the timing in degrees BTDC (0xFFFF11FF = 110 - 0xFFFF232E, read by PID
+# 0x0E and DID 0x110A as 110 - raw), so one trim count moves timing one degree
+# wherever no clamp binds: :func:`timing_delta` predicts that, it does not
+# measure it.
+
+#: Cal ``0x8B05``: ``0xFFFF27C4`` = min(it, ...) (``0x04D9E4``), and
+#: ``0xFFFF11CB`` is ``0xFFFF27C4`` slewed +/-5 per segment (``0x04E5B0``)
+#: through the cycle copy, so the trim term's subtrahend is at most this.
+#: Pinned by the manifest's ``calibration_conditions`` on ``timing_trim_terms``
+#: (an image with another value is refused ``unmodelled_logic``).
+TRIM_TERM_SUBTRAHEND_MAX = 7
+S8_MIN = -0x80
+S8_MAX = 0x7F
+#: ``base_timing_sum`` constants (``0x04CB9E``): the trim path subtracts 0x80,
+#: the 0xFFFF2833 bit 4 path (0xFFFF27C3, no trim term) 0x40.
+BASE_SUM_BIAS = 0x80
+ALTERNATE_SUM_BIAS = 0x40
+#: ``timing_rate_limit`` (``0x04E0E0``): per-segment rise +4 (+15 with
+#: 0xFFFF4785 bit 6, 0 under 0xFFFF28B2 bit 6 or 0xFFFF29E6), fall -15, then
+#: cap 50, floor -7, cap 70 (the last never binds after the first).
+RATE_STEP_UP = 4
+RATE_STEP_UP_FAST = 15
+RATE_STEP_DOWN = 15
+TIMING_CAP = 50
+TIMING_FLOOR = -7
+TIMING_LATE_CAP = 70
+#: ``0xFFFF99D0`` bit 2's retard, clamped to -10..0 before it is added.
+RATE_EXTRA_RETARD_MIN = -10
+#: ``timing_final_byte`` (``0x04E4AC``).
+FINAL_BYTE_ZERO = 110
+FINAL_FLAG_OFFSET = 30
+FINAL_FLAG_CAP = 80
+FAULT_BYTE_ZERO = 120
+FORCED_TIMING_BYTE = 0x5A
+
+
+def _s8(value: int) -> int:
+    return max(S8_MIN, min(S8_MAX, value))
+
+
+def _signed(name: str, value: int, lo: int, hi: int) -> int:
+    if int(value) != value or not lo <= value <= hi:
+        raise ValueError(f"{name} {value!r} is outside {lo}..{hi}")
+    return int(value)
+
+
+@dataclass(frozen=True)
+class TrimTerms:
+    """``timing_trim_terms`` (``0x04BD24``)."""
+
+    #: ``0xFFFF1350``: the selected trim, masked.
+    selected: int
+    #: ``0xFFFF1351``: max(0, main - selected) with cal ``0x8ADE`` bit 1, else 0.
+    pair: int
+    #: ``0xFFFF1352``: the main (always trim A) byte, masked.
+    main: int
+    #: ``0xFFFF2793``: the trim's term in the base timing sum.
+    term: int
+
+
+def timing_trim_terms(
+    *, selected: int, main: int, subtrahend_11cb: int, pair_term_enabled: bool
+) -> TrimTerms:
+    """``0x04BD24`` (called by the base-timing task 74): ``0xFFFF2793 =
+    max(0, (0xFFFF1777 & 0x7F) - 0xFFFF11CB)``. ``pair_term_enabled`` is cal
+    ``0x8ADE`` bit 1 (clear on every listed image)."""
+    sel = _byte("selected trim", selected) & TRIM_VALUE_MASK
+    m = _byte("main trim", main) & TRIM_VALUE_MASK
+    sub = _byte("0xFFFF11CB", subtrahend_11cb)
+    pair = max(0, m - sel) if pair_term_enabled else 0
+    return TrimTerms(sel, pair, m, max(0, sel - sub))
+
+
+def base_timing_sum(
+    *,
+    alternate_path: bool,
+    w1d3e: int,
+    w27c6: int,
+    w2793: int,
+    w279a: int,
+    w134a: int,
+    w174a: int,
+    w1344: int,
+    w27c3: int,
+) -> int:
+    """``0x04CB9E`` into ``0xFFFF1A58`` (signed byte). With 0xFFFF2833 bit 4
+    clear: ``1D3E + 27C6 + 2793 - 279A - 134A - 174A - 0x80 + 1344``; with it
+    set (``alternate_path``): ``1D3E + 27C3 - 279A - 0x40``, no trim term.
+    ``27C6``/``27C3`` are signed bytes, the rest unsigned; clamped -128..127."""
+    d3e = _byte("0xFFFF1D3E", w1d3e)
+    r79a = _byte("0xFFFF279A", w279a)
+    if alternate_path:
+        return _s8(d3e + _signed("0xFFFF27C3", w27c3, S8_MIN, S8_MAX) - r79a - ALTERNATE_SUM_BIAS)
+    total = (
+        d3e
+        + _signed("0xFFFF27C6", w27c6, S8_MIN, S8_MAX)
+        + _byte("0xFFFF2793", w2793)
+        - r79a
+        - _byte("0xFFFF134A", w134a)
+        - _byte("0xFFFF174A", w174a)
+        - BASE_SUM_BIAS
+        + _byte("0xFFFF1344", w1344)
+    )
+    return _s8(total)
+
+
+def base_timing_select(
+    *, w1a58: int, w1a59: int, flag_4785_bit6: bool, flag_2833_bit4: bool, mode_127d: int
+) -> int:
+    """``0x04CF0C`` into ``0xFFFF27DA``: the trim sum ``0xFFFF1A58``, or the
+    coolant-curve value ``0xFFFF1A59`` while 0xFFFF4785 bit 6 or 0xFFFF2833 bit
+    4 is set and the mode byte 0xFFFF127D is neither 1 nor 2."""
+    mode = _byte("0xFFFF127D", mode_127d)
+    if mode not in (1, 2) and (flag_4785_bit6 or flag_2833_bit4):
+        return _signed("0xFFFF1A59", w1a59, 0, S8_MAX)
+    return _signed("0xFFFF1A58", w1a58, S8_MIN, S8_MAX)
+
+
+def timing_cycle_copy(w27da: int) -> int:
+    """``0x0212C4``: the end-of-cycle block copy ``0xFFFF2792..`` ->
+    ``0xFFFF2706..`` puts ``0xFFFF27DA`` in ``0xFFFF274E`` (one cycle later)."""
+    return _signed("0xFFFF27DA", w27da, S8_MIN, S8_MAX)
+
+
+@dataclass(frozen=True)
+class RetardCombine:
+    """``timing_retard_combine`` (``0x04DF38``)."""
+
+    #: ``0xFFFF2332``: the retard applied.
+    retard: int
+    #: ``0xFFFF2338``: written only on the plain path (else ``None``).
+    w2338: int | None
+    #: ``0xFFFF1346``: the combined timing, signed byte.
+    combined: int
+
+
+def timing_retard_combine(
+    *,
+    w274e: int,
+    w1215: int,
+    w26d2: int,
+    knock_active: bool,
+    w272a: int,
+    w2334: int,
+    w46e6: int,
+    flag_28ab_bit4: bool,
+    bypass_28b4_bit1: bool,
+) -> RetardCombine:
+    """``0x04DF38`` (per 120 deg crank segment):
+
+    - ``0xFFFF2332 = min(0xFFFF26D2, -0xFFFF1215)`` while knock control is
+      active (0xFFFF28AD bit 5 or 0xFFFF28B3 bit 1), else ``-0xFFFF1215``.
+      Both are signed bytes: 0x04DF4C reads 1215 with ``mov.b`` (sign
+      extending) and negates it with no ``extu.b``;
+    - bypass (0xFFFF28B4 bit 1): ``0xFFFF1346 = min(274E, 127)``;
+    - ``0xFFFF46E6`` zero or 0xFFFF28AB bit 4 set: ``2338 = 274E + 2332``,
+      ``1346 = s8(2338 + 272A - 2334)``;
+    - else ``1346 = s8(274E + min(2332 + 272A, -46E6) - 2334)``.
+
+    The held-step branch (0x04DF78 on, through 0xFFFF28A8 bit 6) is skipped
+    because cal 0x8294 is 0 (0x04DF72 ``tst r5,r5; bt 0x4dfb6``); the
+    manifest's ``calibration_conditions`` pin that byte, so an image where it
+    is not 0 is refused rather than computed here. ``0xFFFF46E6`` is a byte
+    (0x04E05E ``mov.b`` then ``extu.b``)."""
+    e274 = _signed("0xFFFF274E", w274e, S8_MIN, S8_MAX)
+    base_retard = -_signed("0xFFFF1215", w1215, S8_MIN, S8_MAX)
+    knock = _signed("0xFFFF26D2", w26d2, S8_MIN, S8_MAX)
+    retard = min(knock, base_retard) if knock_active else base_retard
+    if bypass_28b4_bit1:
+        return RetardCombine(retard, None, min(e274, S8_MAX))
+    a72a = _signed("0xFFFF272A", w272a, S8_MIN, S8_MAX)
+    w334 = _word("0xFFFF2334", w2334)
+    e6 = _byte("0xFFFF46E6", w46e6)
+    if e6 == 0 or flag_28ab_bit4:
+        w2338 = e274 + retard
+        return RetardCombine(retard, w2338, _s8(w2338 + a72a - w334))
+    return RetardCombine(retard, None, _s8(e274 + min(retard + a72a, -e6) - w334))
+
+
+def timing_rate_limit(
+    *,
+    w1346: int,
+    previous_232e: int,
+    trim_62b4: int,
+    retard_9932: int | None,
+    step_up: int,
+    first_run: bool,
+) -> int:
+    """``0x04E0E0`` into ``0xFFFF232E``, one segment. ``trim_62b4`` is
+    ``0xFFFF62B4`` when the rpm/load/coolant hysteresis flags (0xFFFF695A
+    bits 1-5) are clear, else 0; ``retard_9932`` is ``0xFFFF9932`` while
+    0xFFFF99D0 bit 2 is set (clamped to -10..0 here), else ``None``.
+    ``step_up`` is the rise allowed this segment (4, 15 with 0xFFFF4785 bit
+    6, or 0). Before 0xFFFF28A8 bit 7 is set (``first_run``) the word is 0."""
+    if first_run:
+        return 0
+    if step_up not in (0, RATE_STEP_UP, RATE_STEP_UP_FAST):
+        raise ValueError(f"step_up {step_up!r} is none of 0, 4, 15")
+    v = _signed("0xFFFF1346", w1346, S8_MIN, S8_MAX) + int(trim_62b4)
+    if retard_9932 is not None:
+        v += max(RATE_EXTRA_RETARD_MIN, min(0, int(retard_9932)))
+    prev = _signed("0xFFFF232E", previous_232e, TIMING_FLOOR, TIMING_LATE_CAP)
+    v = min(v, prev + step_up)
+    v = max(v, prev - RATE_STEP_DOWN)
+    v = min(v, TIMING_CAP)
+    return min(max(v, TIMING_FLOOR), TIMING_LATE_CAP)
+
+
+def timing_rate_limit_steady(value: int, *, step_up: int) -> Step[int]:
+    """The fixed point of :func:`timing_rate_limit` at a held input ``value``
+    (``0xFFFF1346`` plus its two added terms): the per-segment step does not
+    bind there, the caps and the floor do. With a zero rise allowance the
+    word keeps whatever history left it below ``value``: unknown."""
+    if step_up == 0:
+        return Step(None, "rate_limit_rise_disabled")
+    return Step(max(TIMING_FLOOR, min(TIMING_CAP, int(value))))
+
+
+FinalBranch = Literal["normal", "flag_28b1_bit5", "fault_plain", "fault_offset"]
+
+
+def timing_final_byte(*, w232e: int, branch: FinalBranch, forced_4858_bit5: bool) -> int:
+    """``0x04E4AC`` into ``0xFFFF11FF``, the byte that schedules the coil:
+
+    - ``normal``: ``110 - 232E``;
+    - ``flag_28b1_bit5``: ``clamp(110 - 232E - 30, 0, 80)``;
+    - fault mode (``0x08E498`` non-zero) with 0xFFFF2834 bit 4, 0xFFFF282C
+      bit 7 and 0xFFFF2888 bit 0 all clear (``fault_plain``): ``110 - 232E``;
+      otherwise (``fault_offset``): ``clamp(120 - 232E, 0, 255)``;
+    - 0xFFFF4858 bit 5 then forces ``0x5A``."""
+    v = _signed("0xFFFF232E", w232e, TIMING_FLOOR, TIMING_LATE_CAP)
+    if forced_4858_bit5:
+        return FORCED_TIMING_BYTE
+    if branch in ("normal", "fault_plain"):
+        return FINAL_BYTE_ZERO - v
+    if branch == "flag_28b1_bit5":
+        return max(0, min(FINAL_FLAG_CAP, FINAL_BYTE_ZERO - v - FINAL_FLAG_OFFSET))
+    if branch == "fault_offset":
+        return max(0, min(BYTE_MAX, FAULT_BYTE_ZERO - v))
+    raise ValueError(f"final branch {branch!r} is not modelled")
+
+
+def timing_degrees_btdc(w11ff: int) -> int:
+    """The timing byte as PID 0x0E and DID 0x110A report it: 110 - raw."""
+    return FINAL_BYTE_ZERO - _byte("0xFFFF11FF", w11ff)
+
+
+#: What :func:`timing_delta` holds equal on both ROMs, and the path it is on.
+#: A result carries these, so a delta is never read without them.
+TIMING_DELTA_CONDITIONS: tuple[str, ...] = (
+    "every chain term but the trim term 0xFFFF2793 is equal on both ROMs "
+    "(0xFFFF1D3E, 27C6, 279A, 134A, 174A, 1344, 11CB, 1215, 26D2, 272A, 2334, 46E6, "
+    "62B4, 9932): unidentified, never given a value",
+    "trim path: 0xFFFF2833 bit 4 and 0xFFFF4785 bit 6 clear (else 0xFFFF27C3 or "
+    "0xFFFF1A59 replaces the trim sum), no 0xFFFF28B4 bit 1 bypass",
+    "rate limit at its fixed point with a nonzero rise allowance; final byte on "
+    "the 110 - 0xFFFF232E branch, 0xFFFF4858 bit 5 clear",
+    "intermediate signed-byte clamps (0xFFFF1A58, 0xFFFF1346) not binding",
+)
+
+TimingStatus = Literal["computed", "delta_if_no_clamp", "unevaluable"]
+
+
+@dataclass(frozen=True)
+class TimingDelta:
+    """Base and candidate ignition timing at one point, degrees BTDC."""
+
+    status: TimingStatus
+    #: Candidate minus base, degrees; ``None`` when unevaluable.
+    delta_deg: int | None
+    #: The trim term's own change (0xFFFF2793), counts; set whenever both
+    #: selected trims are known, even where ``delta_deg`` cannot be.
+    trim_term_delta: int | None
+    base_deg: int | None
+    candidate_deg: int | None
+    reasons: tuple[str, ...]
+
+
+def timing_delta(
+    base: Step[TrimLookup],
+    candidate: Step[TrimLookup],
+    *,
+    base_timing_deg: int | None = None,
+    held_reasons: Sequence[str] = (),
+) -> TimingDelta:
+    """The ECU-side timing change from the two selected trims (``0xFFFF1777``)
+    with every other term held equal (:data:`TIMING_DELTA_CONDITIONS`).
+
+    - The trim term is ``max(0, trim - 0xFFFF11CB)`` with ``0xFFFF11CB`` in
+      0..7 (cal ``0x8B05``): its change is the trims' change exactly when both
+      trims are at least 7, whatever ``0xFFFF11CB`` is; otherwise the floor
+      may bind and nothing is claimed.
+    - ``base_timing_deg`` (the base ROM's logged timing at the point, where a
+      design has it) gives both absolutes, with the 50 cap and -7 floor
+      applied; a base at a clamp leaves the change unknown. Without it, the
+      change holds only if no clamp binds, and the result says so
+      (``clamp_headroom_unknown``).
+    - ``held_reasons`` are what the caller knows moves a held term (an X
+      change moves 0xFFFF27C6): any one leaves the change unevaluable, the
+      trim term's change still reported."""
+    if base.value is None or candidate.value is None:
+        reasons = tuple(dict.fromkeys(r for r in (base.reason, candidate.reason) if r))
+        return TimingDelta("unevaluable", None, None, None, None, reasons)
+    tb, tc = base.value.trim, candidate.value.trim
+    if min(tb, tc) < TRIM_TERM_SUBTRAHEND_MAX:
+        return TimingDelta("unevaluable", None, None, None, None, ("trim_term_floor_may_bind",))
+    d = tc - tb
+    if held_reasons:
+        return TimingDelta("unevaluable", None, d, None, None, tuple(held_reasons))
+    if base_timing_deg is None:
+        reasons = ("clamp_headroom_unknown",) if d else ()
+        return TimingDelta("delta_if_no_clamp", d, d, None, None, reasons)
+    b = int(base_timing_deg)
+    if not TIMING_FLOOR < b < TIMING_CAP:
+        return TimingDelta("unevaluable", None, d, b, None, ("base_timing_at_clamp",))
+    c = max(TIMING_FLOOR, min(TIMING_CAP, b + d))
+    reasons = ()
+    if c != b + d:
+        reasons = ("timing_cap_binds",) if c == TIMING_CAP else ("timing_floor_binds",)
+    return TimingDelta("computed", c - b, d, b, c, reasons)
+
+
 __all__ = [
+    "ALTERNATE_SUM_BIAS",
+    "BASE_SUM_BIAS",
+    "FINAL_BYTE_ZERO",
     "MODEL_VERSION",
+    "RATE_STEP_DOWN",
+    "RATE_STEP_UP",
+    "RATE_STEP_UP_FAST",
+    "TIMING_CAP",
+    "TIMING_DELTA_CONDITIONS",
+    "TIMING_FLOOR",
     "TIMING_REQUIREMENT",
+    "TRIM_TERM_SUBTRAHEND_MAX",
     "Checkpoint",
     "EnrichmentCycle",
     "EnrichmentInputs",
     "EnrichmentLatches",
     "EnrichmentState",
+    "FinalBranch",
     "FlagRead",
     "PedalFlagModel",
+    "RetardCombine",
     "SelectedTrim",
     "Step",
+    "TimingDelta",
+    "TimingStatus",
     "TrimLookup",
+    "TrimTerms",
     "UpRevCycle",
     "UpRevState",
     "account_pedal_flag",
     "account_uprev_reads",
+    "base_timing_select",
+    "base_timing_sum",
     "byte_curve16",
     "enrichment_commit",
     "enrichment_request",
@@ -746,6 +1091,14 @@ __all__ = [
     "pedal_flag_next",
     "pedal_threshold",
     "selected_timing_trim",
+    "timing_cycle_copy",
+    "timing_degrees_btdc",
+    "timing_delta",
+    "timing_final_byte",
+    "timing_rate_limit",
+    "timing_rate_limit_steady",
+    "timing_retard_combine",
+    "timing_trim_terms",
     "trim_lookup",
     "uprev_power_on",
     "uprev_step",
