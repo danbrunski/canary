@@ -471,7 +471,8 @@ zone(pcbnew.In2_Cu, "+12V_BUS", [placement.IN2_ZONE], prio=1)
 # Pours above the GND pours, joined solidly to their pads; In2 islands; Kelvin pairs and stitching vias, locked
 # so the autorouter keeps them.
 NET = gen_sch.kicad_net_names(design.PARTS)
-SIDE = {"F": pcbnew.F_Cu, "B": pcbnew.B_Cu}
+# In2 is for hand tracks only (it is a mixed layer); no pour in copper.POURS uses it.
+SIDE = {"F": pcbnew.F_Cu, "B": pcbnew.B_Cu, "In2": pcbnew.In2_Cu}
 for name, side, rects in copper.POURS:
     for outline in union(rects):  # one zone per outline: a zone's extra outlines did not survive
         zone(SIDE[side], NET[name], [outline], prio=2, connect=pcbnew.ZONE_CONNECTION_FULL)

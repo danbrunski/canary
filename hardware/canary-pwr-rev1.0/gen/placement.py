@@ -102,9 +102,10 @@ PLACEMENT: dict[str, tuple[float, float, int, str]] = {
     "D1": (152.5, 79.5, 90, "F"),
     "R1": (155.0, 79.5, 90, "F"),
     "D3": (153.3, 86.2, 0, "F"),
-    # Bottom: I2C buffer and the Pi-crossing parts in a row under J1
+    # Bottom: I2C buffer and the Pi-crossing parts in a row under J1; C45 0.5 mm east of centre, clear of the
+    # OR_GATE via
     "U8": (112.6, 54.4, 180, "B"),
-    "C45": (112.6, 57.6, 0, "B"),
+    "C45": (113.1, 57.6, 0, "B"),
     "R34": (117.0, 54.4, 90, "B"),
     "R35": (118.6, 54.4, 90, "B"),
     "R36": (120.2, 54.4, 90, "B"),

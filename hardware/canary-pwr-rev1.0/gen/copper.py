@@ -113,9 +113,9 @@ TRACKS: list[tuple[str, str, float, list[tuple[float, float]]]] = [
         "+5V_BUCK",
         "B",
         KELVIN_W,
-        [(117.8, 56.3), (117.8, 57.9), (117.1, 58.6), (111.75, 58.6), (111.6, 58.75)],
+        [(117.8, 56.3), (117.8, 57.9), (117.1, 58.6), (112.0, 58.6), (111.75, 58.85)],
     ),
-    ("+5V_BUCK", "F", KELVIN_W, [(111.6, 58.75), (112.4, 58.95)]),
+    ("+5V_BUCK", "F", KELVIN_W, [(111.75, 58.85), (112.4, 58.95)]),
     (
         "+5V_SHUNT",
         "F",
@@ -220,12 +220,27 @@ TRACKS: list[tuple[str, str, float, list[tuple[float, float]]]] = [
     ("LTC_CAP4", "F", 0.2, [(124.55, 72.0), (123.5, 72.05)]),
     ("LTC_CAP4", "B", 0.25, [(123.5, 72.05), (121.75, 72.05), (121.3, 72.5)]),
     ("LTC_CFP", "F", 0.2, [(124.4, 72.5), (124.3, 72.6), (122.6, 72.6)]),
+    # LM61460 PGND (pin 11) straight down to C29's GND pad, the VIN2 input loop, and on to C29's via (datasheet
+    # 12.1); before the bus tap moved, routed tracks left pin 11 alone in a scrap of pour.
+    ("GND", "F", 0.3, [(134.2, 60.3), (134.2, 61.4), (133.9, 61.6), (132.64, 61.48)]),
+    # Other IC GND pins tied to their own vias, so a routed track cannot leave them in a scrap of pour: INA226
+    # (pin 7 under the body, boxed in by the IN- Kelvin trace) and LM61460 AGND.
+    ("GND", "F", 0.2, [(113.9, 59.5), (113.9, 60.5)]),
+    ("GND", "F", 0.2, [(137.85, 58.5), (138.65, 58.5)]),
+    # LM74700 ANODE (pin 3) under the body to the shunt-side pour, and its GATE (pin 5) to Q7 through vias and
+    # In2: a gate trace on top would cut the 5 V path, which runs from R28 to Q7's sources past the gate pin.
+    ("+5V_SHUNT", "F", 0.25, [(107.86, 59.05), (108.6, 59.05), (109.0, 58.65), (109.0, 57.3)]),
+    ("OR_GATE", "F", 0.2, [(110.97, 55.34), (111.95, 55.2)]),
+    ("OR_GATE", "In2", 0.15, [(111.95, 55.2), (111.95, 55.6), (111.3, 56.25), (111.3, 58.1)]),
+    ("OR_GATE", "F", 0.2, [(110.14, 58.1), (111.3, 58.1)]),
 ]
 
 # U1's top-row escapes (0.2 mm; 0.15 where the CAPFB lane passes a bus-class pad). The pins fan out in a
 # staircase under the two rows: ITST, GPI, RT and OUTFB turn left at 0.4 mm steps, GPI climbs between R6 and R5
 # to C13/R13, OUTFB drops between R10 and R8 to R9/C12, CAPFB climbs between R8 and C11 to R7. Pin 8 joins the
-# exposed pad. The bus tap feeds R9/C12 (OUTFB divider top, feed-forward) from the buck's input pour.
+# exposed pad and drops through a via between RT and OUTFB, which leave their pins 0.1 mm apart to make room: the
+# exposed pad's only other way to GND was the top pour, which routed tracks cut on three of six plugin runs.
+# OUTFB reaches R9/C12 straight up, not round R8's GND pad, so R8 gets a via above it (2026-10-18).
 ESC_W = 0.2
 ESCAPES: list[tuple[str, str, float, list[tuple[float, float]]]] = [
     ("LTC_ITST", "F", ESC_W, [(125.75, 69.55), (125.75, 68.75), (123.0, 68.75), (123.0, 66.725)]),
@@ -236,15 +251,19 @@ ESCAPES: list[tuple[str, str, float, list[tuple[float, float]]]] = [
         [(126.25, 69.55), (126.25, 68.35), (123.8, 68.35), (123.8, 61.775), (124.6, 61.775)],
     ),
     ("LTC_GPI", "F", ESC_W, [(123.8, 63.375), (123.0, 63.375)]),
-    ("LTC_RT", "F", ESC_W, [(126.75, 69.55), (126.75, 67.95), (124.6, 67.95), (124.6, 66.725)]),
-    ("LTC_OUTFB", "F", ESC_W, [(127.75, 69.55), (127.75, 67.55), (126.2, 67.55), (126.2, 66.725)]),
-    ("LTC_OUTFB", "F", ESC_W, [(127.0, 67.55), (127.0, 64.25), (126.2, 64.25), (126.2, 63.425)]),
-    ("LTC_OUTFB", "F", ESC_W, [(127.0, 64.25), (127.8, 64.25), (127.8, 63.375)]),
+    ("LTC_RT", "F", ESC_W, [(126.65, 69.55), (126.65, 67.95), (124.6, 67.95), (124.6, 66.725)]),
+    ("LTC_OUTFB", "F", ESC_W, [(127.85, 69.55), (127.85, 67.55), (126.2, 67.55), (126.2, 66.725)]),
+    ("LTC_OUTFB", "F", ESC_W, [(127.0, 67.55), (127.0, 63.4)]),
+    ("LTC_OUTFB", "F", ESC_W, [(126.2, 63.425), (127.0, 63.4), (127.8, 63.375)]),
     ("LTC_CAPFB", "F", ESC_W, [(128.25, 69.55), (128.25, 66.725), (128.6, 66.725)]),
     ("LTC_CAPFB", "F", 0.15, [(128.6, 66.725), (128.6, 61.775), (129.4, 61.775)]),
     ("GND", "F", ESC_W, [(127.25, 69.55), (127.25, 70.5)]),
-    ("+12V_BUS", "F", 0.3, [(135.4, 60.75), (126.2, 60.75), (126.2, 61.775)]),
-    ("+12V_BUS", "F", 0.3, [(127.8, 60.75), (127.8, 61.825)]),
+    ("GND", "F", ESC_W, [(127.25, 69.55), (127.25, 68.6)]),
+    ("GND", "F", 0.3, [(127.8, 64.28), (127.8, 65.08)]),
+    # The bus tap feeds R9/C12 (OUTFB divider top, feed-forward) from the In2 +12V_BUS island under the board. A
+    # top trace from the buck's input pour ran between U2's PGND pin 11 and C29's GND pad and cut them apart.
+    ("+12V_BUS", "F", 0.3, [(126.2, 61.775), (126.2, 61.0), (127.8, 61.0), (127.8, 61.825)]),
+    ("+12V_BUS", "B", 0.25, [(127.0, 61.0), (128.0, 62.0), (131.0, 62.0), (132.3, 63.3)]),
 ]
 
 SIGNAL_VIA = (0.6, 0.3)
@@ -257,7 +276,7 @@ VIAS: list[tuple[str, float, float, tuple[float, float]]] = [
     ("+12V_BUS", 141.85, 76.25, SIGNAL_VIA),
     ("+12V_BUS", 132.2, 75.2, SIGNAL_VIA),
     ("+5V_BUCK", 117.8, 56.3, SIGNAL_VIA),  # under R28's body
-    ("+5V_BUCK", 111.6, 58.75, SIGNAL_VIA),
+    ("+5V_BUCK", 111.75, 58.85, SIGNAL_VIA),
     ("LTC_ICAP", 125.65, 76.05, SIGNAL_VIA),
     ("LTC_ICAP", 120.05, 86.8, SIGNAL_VIA),
     ("VCAP", 124.75, 75.65, SIGNAL_VIA),
@@ -269,6 +288,11 @@ VIAS: list[tuple[str, float, float, tuple[float, float]]] = [
     ("LTC_BG", 130.0, 81.9, SIGNAL_VIA),
     ("LTC_INTVCC", 129.95, 75.6, SIGNAL_VIA),
     ("LTC_CAP4", 123.5, 72.05, SIGNAL_VIA),
+    # R9/C12 bus tap: beside R9/C12, and in the In2 island.
+    ("+12V_BUS", 127.0, 61.0, SIGNAL_VIA),
+    ("+12V_BUS", 132.3, 63.3, SIGNAL_VIA),
+    ("OR_GATE", 111.95, 55.2, SIGNAL_VIA),
+    ("OR_GATE", 111.3, 58.1, SIGNAL_VIA),
     # +12V_BUS pours to the In2 island (and the B.Cu pour under the charger).
     *[("+12V_BUS", x, 78.3, POWER_VIA) for x in (130.7, 131.85, 133.0, 134.15)],
     ("+12V_BUS", 138.6, 77.7, POWER_VIA),
@@ -322,4 +346,17 @@ VIAS: list[tuple[str, float, float, tuple[float, float]]] = [
     ("GND", 111.05, 65.44, SIGNAL_VIA),  # C36.2
     ("GND", 108.26, 60.9, SIGNAL_VIA),  # R4.2
     ("GND", 114.88, 57.6, SIGNAL_VIA),  # C45.2
+    # The same for the pads routed tracks cut off on the 2026-10-18 plugin runs (U1's exposed pad on three of six,
+    # R8 on all six, U2 PGND, the INA226), and for the other IC GND pins with a spot beside them.
+    ("GND", 127.25, 68.6, SIGNAL_VIA),  # U1.8 / U1.39, between RT and OUTFB
+    ("GND", 127.8, 64.28, SIGNAL_VIA),  # R8.2, under C12
+    ("GND", 113.9, 60.5, SIGNAL_VIA),  # U3.7, under the body
+    ("GND", 138.65, 58.5, SIGNAL_VIA),  # U2.3
+    ("GND", 106.75, 58.4, SIGNAL_VIA),  # U4.2
+    ("GND", 137.92, 80.83, SIGNAL_VIA),  # U7.2
+    ("GND", 145.06, 61.3, SIGNAL_VIA),  # Q6.2
+    ("GND", 130.97, 52.75, SIGNAL_VIA),  # Q8.2
+    ("GND", 155.44, 86.2, SIGNAL_VIA),  # D3.3
+    ("GND", 111.8, 63.71, SIGNAL_VIA),  # U3.1
+    ("GND", 114.95, 56.3, SIGNAL_VIA),  # U8.4, under R28's body
 ]
