@@ -2736,30 +2736,7 @@
 		)
 		(uuid "fc46dcd3-77a2-4b43-b69e-d71f26ca91f2")
 	)
-	(global_label "+5V_PI"
-		(shape passive)
-		(at 69.85 40.64 180)
-		(fields_autoplaced yes)
-		(effects
-			(font
-				(size 1.27 1.27)
-			)
-			(justify right)
-		)
-		(uuid "270fe4ce-3ab0-4a33-ac72-22f8b86e5913")
-		(property "Intersheetrefs" "${INTERSHEET_REFS}"
-			(at 69.85 40.64 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify right)
-			)
-		)
-	)
+	
 	(global_label "SWCLK_BOOT0"
 		(shape passive)
 		(at 278.13 40.64 0)
@@ -3548,96 +3525,7 @@
 			)
 		)
 	)
-	(symbol
-		(lib_id "Device:C")
-		(at 73.66 40.64 90)
-		(unit 1)
-		(body_style 1)
-		(exclude_from_sim no)
-		(in_bom yes)
-		(on_board yes)
-		(in_pos_files yes)
-		(dnp no)
-		(uuid "1c467593-a50e-434c-ab9e-0cc043e14321")
-		(property "Reference" "C44"
-			(at 70.76 37.008 0)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Value" "100n"
-			(at 70.76 44.872 0)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Footprint" "Capacitor_SMD:C_0603_1608Metric"
-			(at 73.66 40.64 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Datasheet" ""
-			(at 73.66 40.64 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Description" "Capacitor 100n 50V X7R/X5R 0603"
-			(at 73.66 40.64 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "MPN" "CL10B104KB8NNNC"
-			(at 73.66 40.64 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(pin "1"
-			(uuid "de1353c6-eae7-4e18-85dc-96dcb45b1fe4")
-		)
-		(pin "2"
-			(uuid "a9920501-e1df-49a3-9502-d142aba99cb7")
-		)
-		(instances
-			(project "canary-pwr"
-				(path "/e63e39d7-6ac0-4ffd-8aa3-1841a4541b55/bea078c0-dcfe-4068-9acb-f216f38abac7"
-					(reference "C44")
-					(unit 1)
-				)
-			)
-		)
-	)
+	
 	(symbol
 		(lib_id "power:GND")
 		(at 45.72 81.28 90)
@@ -4570,83 +4458,7 @@
 			)
 		)
 	)
-	(symbol
-		(lib_id "power:GND")
-		(at 77.47 40.64 90)
-		(unit 1)
-		(body_style 1)
-		(exclude_from_sim no)
-		(in_bom yes)
-		(on_board yes)
-		(in_pos_files yes)
-		(dnp no)
-		(uuid "9ba4ad02-13fa-491e-9ce6-6ae7025fd518")
-		(property "Reference" "#PWR092"
-			(at 77.47 45.64 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Value" "GND"
-			(at 77.47 44.44 0)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Footprint" ""
-			(at 77.47 40.64 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Datasheet" ""
-			(at 77.47 40.64 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Description" ""
-			(at 77.47 40.64 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(pin "1"
-			(uuid "1454b2b3-e888-4193-9f61-dbcb3837f4ab")
-		)
-		(instances
-			(project "canary-pwr"
-				(path "/e63e39d7-6ac0-4ffd-8aa3-1841a4541b55/bea078c0-dcfe-4068-9acb-f216f38abac7"
-					(reference "#PWR092")
-					(unit 1)
-				)
-			)
-		)
-	)
+	
 	(symbol
 		(lib_id "Device:R")
 		(at 172.72 40.64 90)

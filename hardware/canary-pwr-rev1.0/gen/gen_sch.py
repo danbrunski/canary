@@ -330,7 +330,7 @@ def pack(items, max_w, gap_x=5.08, gap_y=5.08):
 
 def assign_refs(libs, parts):
     """Prefix from the library Reference field, numbered in sheet order; fixed refs are honoured and skipped."""
-    fixed = {p["fixed_ref"] for p in parts if p.get("fixed_ref")}
+    fixed = {p["fixed_ref"] for p in parts if p.get("fixed_ref")} | design.RETIRED_REFS
     counters = defaultdict(int)
     for sheet in design.SHEETS:
         for p in parts:

@@ -101,7 +101,6 @@ PLACEMENT: dict[str, tuple[float, float, int, str]] = {
     # Bottom: I2C buffer and the Pi-crossing parts in a row under J1
     "U8": (112.6, 54.4, 180, "B"),
     "C45": (112.6, 57.6, 0, "B"),
-    "C44": (107.6, 52.6, 0, "B"),
     "R34": (117.0, 54.4, 90, "B"),
     "R35": (118.6, 54.4, 90, "B"),
     "R36": (120.2, 54.4, 90, "B"),
@@ -140,7 +139,6 @@ PLACEMENT: dict[str, tuple[float, float, int, str]] = {
     "C42": (140.0, 79.9, 0, "B"),
     "C43": (143.6, 79.9, 0, "B"),
     "F1": (133.3, 82.4, 0, "B"),
-    "R2": (134.6, 87.8, 90, "B"),
     # Bottom: LED resistors; the five cell-ballast resistors stacked beside the cap-bank sense pins
     "R32": (110.5, 95.5, 0, "B"),
     "R33": (114.0, 95.5, 0, "B"),

@@ -1,0 +1,22 @@
+{
+  "schema": 4,
+  "profile": "enhanced",
+  "max_passes": 1,
+  "min_trace_width_um": 150.0,
+  "class_widths": {
+    "GND": 0.4,
+    "Power": 0.3,
+    "Power_High": 0.3,
+    "Switch_Node": 0.3
+  },
+  "fixed_pour_classes": [
+    "Power_High",
+    "Switch_Node"
+  ],
+  "drop_pour_nets": [
+    "GND"
+  ],
+  "start_ripup_costs": 1500,
+  "sweep": "free",
+  "sweep_passes": 2
+}

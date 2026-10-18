@@ -160,9 +160,16 @@ TRACKS: list[tuple[str, str, float, list[tuple[float, float]]]] = [
     ("LTC_TG", "F", 0.3, [(127.75, 74.45), (127.75, 75.6)]),
     ("LTC_TG", "B", 0.3, [(127.75, 75.6), (127.0, 76.35), (127.0, 81.55)]),
     ("LTC_TG", "F", 0.3, [(127.0, 81.55), (127.0, 80.67)]),
-    ("LTC_BG", "F", 0.3, [(128.75, 74.45), (128.75, 75.6)]),
-    ("LTC_BG", "B", 0.3, [(128.75, 75.6), (128.75, 79.7), (130.0, 80.95), (130.0, 81.9)]),
+    ("LTC_BG", "F", 0.3, [(128.75, 74.45), (128.75, 75.2), (129.0, 75.45), (129.0, 75.5)]),
+    ("LTC_BG", "B", 0.3, [(129.0, 75.5), (128.75, 79.7), (130.0, 80.95), (130.0, 81.9)]),
     ("LTC_BG", "F", 0.3, [(130.0, 81.9), (129.88, 82.83)]),
+    # Spread the BG via to leave a 0.2 mm bootstrap escape to C14 (2026-10-18).
+    (
+        "LTC_BST",
+        "F",
+        0.2,
+        [(128.25, 74.4524), (128.25, 75.0), (128.36, 75.11), (128.36, 76.635), (128.675, 76.95)],
+    ),
 ]
 
 # U1's top-row escapes (0.2 mm; 0.15 where the CAPFB lane passes a bus-class pad). The pins fan out in a
@@ -208,7 +215,7 @@ VIAS: list[tuple[str, float, float, tuple[float, float]]] = [
     # Gate drives: TG and BG drop under the board beside U1 and come up at their FET's gate.
     ("LTC_TG", 127.75, 75.6, SIGNAL_VIA),
     ("LTC_TG", 127.0, 81.55, SIGNAL_VIA),
-    ("LTC_BG", 128.75, 75.6, SIGNAL_VIA),
+    ("LTC_BG", 129.0, 75.5, SIGNAL_VIA),
     ("LTC_BG", 130.0, 81.9, SIGNAL_VIA),
     # +12V_BUS pours to the In2 island (and the B.Cu pour under the charger).
     *[("+12V_BUS", x, 78.3, POWER_VIA) for x in (130.7, 131.85, 133.0, 134.15)],

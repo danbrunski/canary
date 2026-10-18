@@ -276,7 +276,7 @@ RS lists its 4-way plug as discontinued.
 
 **HAT out: Molex Micro-Fit 3.0, 2 × 3, right-angle (43045-0600)** (2026-10-13,
 replacing a 5-way Phoenix MC). Every wire in the jumper is light-duty — 12 V at
-≤ 0.5 A behind the polyfuse, CAN, the GNSS backup supply — so 20 AWG on
+≤ 0.5 A behind the polyfuse and CAN — so 20 AWG on
 Micro-Fit's 18–24 AWG contacts is plenty. It is 14.2 mm along the edge against
 21.6 mm, latches, and shares the cap-bank connector's family and crimp tool; a
 2 × 3 plug cannot go into the bank's 2 × 5 header. The jumper is crimped at this
@@ -285,7 +285,7 @@ row and 4–6 on the other:
 
 | Pin | Net | Pin | Net |
 |---|---|---|---|
-| 1 | `+12V_HAT` | 4 | `V_BCKP_AON` (rev 2.2/3.0; unused on rev 2.1) |
+| 1 | `+12V_HAT` | 4 | Unused (GNSS backup removed 2026-10-18) |
 | 2 | GND | 5 | GND |
 | 3 | `CANH` | 6 | `CANL` |
 
@@ -572,8 +572,8 @@ history at each boot.
   unused.
 - **Header.** The HAT's J1 plugs onto PWR's stacking header; nothing on the
   HAT's header changes.
-- **GNSS backup.** Unchanged (BT1). `V_BCKP_AON` waits for rev 2.2/3.0; the
-  terminal position is there already.
+- **GNSS backup.** The HAT retains its own BT1. PWR supplies no GNSS backup
+  rail (decided 2026-10-18); R2 and the J3 pin-4 connection are removed.
 - **Rev 2.0 is not supported** (operator, 2026-10-13): it uses GPIO24 for its
   K-line pull-up, which PWR now uses for the MCU reset.
 
@@ -584,9 +584,8 @@ rules. In short:
 - The rev 3.0 header map uses none of this board's signal pins (1/17, 3/5, 13,
   18, 31).
 - The HAT leaves GPIO2/3, 6, 24 and 27 unconnected, with no I²C1 pull-ups.
-- HAT out pin 4, `V_BCKP_AON`, lands on rev 3.0's 12-position J2 and feeds the
-  GNSS V_BCKP (BT1 retired). The HAT adds its own series 1 kΩ and a clamp
-  against a harness short to `+12V`.
+- HAT out pin 4 is unused (decided 2026-10-18). The HAT must provide its own
+  GNSS retention supply; PWR no longer exports `V_BCKP_AON`.
 - The HAT keeps rev 2.1's outline, holes and J1 position, holds its B.Cu parts
   to ≤ 2 mm, and keeps B.Cu clear above this board's far-edge connectors until
   §P10 item 8 is measured.
@@ -679,3 +678,19 @@ this board. Since 2026-10-15 a
 regenerated board matches the committed one footprint for footprint.
 **Once the KiCad files are edited by hand they are the source of truth;
 regenerating overwrites them.**
+
+## Routing review changes, 2026-10-18
+
+Removed R2 and the GNSS backup output; J3 pin 4 is unused. Removed C44, the
+extra 100 nF capacitor on +5V_PI; C34/C35 remain at the header feed and C45
+remains on the Pi-side I2C buffer's 3.3 V supply. Existing designators are
+preserved, with R2 and C44 retired in the bootstrap generator.
+
+Kept the existing component placement. Moved the LTC3350 BG via from
+(128.75, 75.6) to (129.0, 75.5) mm and added a 0.2 mm F.Cu bootstrap
+escape from U1 pin 26 to C14. KiCad 10.0.7 after refill: 41 -> 40
+unconnected, eight starved thermals, 17 dangling vias, no other copper errors,
+zero schematic-parity issues, zero vias in pads, zero inner-layer tracks.
+The broader C6/C7 and C24/C23 placement trial with fanout disabled finished
+at 43 unconnected and was rejected. Do not treat the smaller edit as a
+validation of those moves or of disabling fanout by default.

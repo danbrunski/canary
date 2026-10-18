@@ -8,6 +8,8 @@ the Note field on a part says where a number came from when it is not obvious.
 """
 
 PARTS = []
+# Keep the placed board's designators after retiring parts.
+RETIRED_REFS = {"R2", "C44"}
 SHEETS = ["Input", "Holdup", "Pi_Supply", "Supervisor", "Pi_Interface"]
 SHEET_TITLES = {
     "Input": "Vehicle input, protection, switched 12 V to the HAT and to the charger",
@@ -257,20 +259,12 @@ part(
     g,
     "Connector_Generic:Conn_02x03_Top_Bottom",
     "HAT out",
-    {"1": "+12V_HAT", "2": "GND", "3": "CANH", "4": "V_BCKP_AON", "5": "GND", "6": "CANL"},
+    {"1": "+12V_HAT", "2": "GND", "3": "CANH", "4": None, "5": "GND", "6": "CANL"},
     fp="Connector_Molex:Molex_Micro-Fit_3.0_43045-0600_2x03_P3.00mm_Horizontal",
     mpn="43045-0600",
     mfr="Molex",
     desc="Micro-Fit 3.0 2x3 right-angle header; mating 43025-0600 + 43030 crimps (18-24 AWG)",
-    note="Changed 2026-10-13 from a 5-way Phoenix MC (21.6 mm) to save ~7 mm of edge: latching, keyed, and the same family and crimp tool as the cap-bank connector. Molex numbering, 1-3 on one row, 4-6 on the other: CANH (3) and CANL (6) share a column; 12 V (1) sits beside GND (2). Jumper to rev 2.1 J2: +12V_HAT -> pin 1 (+12V_RAW), GND -> pin 2, CANH/CANL -> the HAT's CAN pair; V_BCKP_AON unused on rev 2.1.",
-)
-R(
-    S,
-    g,
-    "1k",
-    "+3V3_AON",
-    "V_BCKP_AON",
-    note="Always-on GNSS backup supply for rev 2.2/3.0 (spec P6); limits a harness short",
+    note="Changed 2026-10-13 from a 5-way Phoenix MC (21.6 mm) to save ~7 mm of edge: latching, keyed, and the same family and crimp tool as the cap-bank connector. Molex numbering, 1-3 on one row, 4-6 on the other: CANH (3) and CANL (6) share a column; 12 V (1) sits beside GND (2). Jumper to rev 2.1 J2: +12V_HAT -> pin 1 (+12V_RAW), GND -> pin 2, CANH/CANL -> the HAT's CAN pair; Pin 4 unused; GNSS backup removed 2026-10-18.",
 )
 
 g = "Battery sense"
@@ -889,7 +883,7 @@ part(
     desc="Pi 40-pin stacking header, 13.5 mm body, on B.Cu",
     note="Operator-sourced and fitted, as on HAT rev 2.1 (S13.5.6). Every pin passes through to the HAT; PWR touches only the ones with nets. GPIO27 (pin 13) = MCU BOOT0, GPIO24 (pin 18) = MCU reset, GPIO6 (pin 31) = power fail. GPIO24 is free on rev 2.1 (PWR supports rev 2.1 and later).",
 )
-C(S, g, "100n", "+5V_PI", "GND")
+# Header bypass is provided by C34/C35.
 
 g = "I2C hot-swap buffer (Pi side powered)"
 part(
