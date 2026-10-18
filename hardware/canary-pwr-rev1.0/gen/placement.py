@@ -34,9 +34,10 @@ PLACEMENT: dict[str, tuple[float, float, int, str]] = {
     "U2": (136.0, 58.5, 180, "F"),
     "C28": (135.0, 55.35, 180, "F"),
     "C26": (135.0, 52.9, 180, "F"),
-    "C29": (135.0, 61.65, 180, "F"),
+    "C29": (134.7, 61.65, 180, "F"),  # 0.3 mm west: room for the SW lane to C24
     "C27": (135.0, 64.1, 180, "F"),
-    "C24": (138.4, 62.9, 90, "F"),
+    # CBOOT under the RBOOT/CBOOT pins, its SW end fed through the gap between VIN2 and RBOOT (datasheet 12.1)
+    "C24": (137.7, 61.65, 180, "F"),
     "C22": (139.9, 59.3, 90, "F"),
     "R21": (139.9, 55.3, 90, "F"),
     "R23": (141.6, 55.3, 90, "F"),
@@ -71,8 +72,9 @@ PLACEMENT: dict[str, tuple[float, float, int, str]] = {
     "C4": (134.65, 70.6, 90, "F"),
     # 0.7 mm below U1's bottom row: room for the TG and BG gate vias and the RSNSI Kelvin vias
     "C14": (127.9, 76.95, 180, "F"),
-    "C10": (131.0, 76.95, 0, "F"),
-    "D4": (135.0, 76.4, 0, "F"),
+    # C10 (DRVCC 100 nF) under U1 beside the INTVCC via, so BST runs straight from C14 to D4 along the row it
+    # left: on top, BST and INTVCC had to cross (2026-10-18). D4 sits 0.3 mm east to clear the RSNSI Kelvin via.
+    "D4": (135.3, 76.4, 0, "F"),
     "R12": (134.0, 67.7, 0, "F"),
     "R11": (137.6, 67.7, 0, "F"),
     "Q2": (137.65, 71.5, 0, "F"),
@@ -131,7 +133,8 @@ PLACEMENT: dict[str, tuple[float, float, int, str]] = {
     "D6": (133.0, 71.0, -90, "B"),
     "R30": (128.4, 70.4, 90, "B"),
     "R31": (130.0, 70.4, 90, "B"),
-    "C9": (131.1, 76.7, 0, "B"),  # LTC3350 INTVCC bulk, under C10, clear of the gate vias
+    "C9": (131.1, 76.7, 0, "B"),  # LTC3350 INTVCC bulk, clear of the gate vias
+    "C10": (129.6, 73.9, 180, "B"),  # DRVCC 100 nF, under U1's pins 28/29
     # Bottom: CAN wake transceiver between the HAT-out and Vehicle-in CAN pins; HAT-out polyfuse
     "U7": (141.0, 84.6, -90, "B"),
     "C41": (146.5, 86.2, 90, "B"),

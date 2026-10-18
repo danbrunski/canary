@@ -25,9 +25,12 @@ pro["schematic"]["top_level_sheets"] = [
 pro["schematic"]["used_designators"] = ""  # the HAT's list otherwise
 pro["text_variables"] = {}
 base = next(c for c in pro["net_settings"]["classes"] if c["name"] == "Default")
+# Signal clearance 0.15 mm: standard at no extra cost on the 1 oz outer layers (operator, 2026-10-18), and the
+# room U1's and U2's pin rows need. Power_High and Switch_Node keep 0.25.
+base["clearance"] = 0.15
 
 
-def nc(name, track, clearance=0.2, via_d=0.6, via_drill=0.3):
+def nc(name, track, clearance=0.15, via_d=0.6, via_drill=0.3):
     c = copy.deepcopy(base)
     c.update(
         name=name,

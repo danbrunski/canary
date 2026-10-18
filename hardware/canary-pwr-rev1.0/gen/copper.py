@@ -39,8 +39,9 @@ POURS: list[tuple[str, str, list[Rect]]] = [
             # Buck input: C26/C28 down to VIN1, C29/C27 up to VIN2, both necks between the GND and EN/CBOOT pins.
             (135.0, 51.3, 137.4, 56.25),
             (135.3, 56.0, 136.19, 56.75),
-            (134.97, 60.75, 137.6, 65.75),
-            (135.3, 60.25, 136.19, 61.0),
+            (134.97, 60.75, 135.85, 62.6),
+            (134.97, 62.45, 137.6, 65.75),
+            (135.3, 60.25, 135.75, 61.0),
             # Bands to the bulk electrolytics, and the EN pull-up.
             (137.4, 51.3, 150.0, 53.75),
             (144.3, 53.5, 145.3, 54.5),
@@ -99,7 +100,13 @@ TRACKS: list[tuple[str, str, float, list[tuple[float, float]]]] = [
     ("LTC_VOUTSP", "F", KELVIN_W, [(131.5, 74.45), (130.75, 74.45)]),
     ("+12V_BUS", "F", KELVIN_W, [(141.85, 76.85), (141.85, 76.25)]),
     ("+12V_BUS", "B", KELVIN_W, [(141.85, 76.25), (141.85, 75.85), (141.2, 75.2), (132.2, 75.2)]),
-    ("+12V_BUS", "F", KELVIN_W, [(132.2, 75.2), (131.95, 75.4), (130.25, 75.4), (130.25, 74.45)]),
+    # Pin 30 turns east at once, leaving room beside pin 29 for the INTVCC via.
+    (
+        "+12V_BUS",
+        "F",
+        KELVIN_W,
+        [(132.2, 75.2), (131.95, 75.4), (130.75, 75.4), (130.25, 74.9), (130.25, 74.45)],
+    ),
     # R28 (INA226 shunt) to INA226 IN+ (pin 10) and IN- (pin 9): IN+ under the board, IN- beside the shunt.
     ("+5V_BUCK", "F", KELVIN_W, [(118.645, 55.9), (118.2, 56.3), (117.8, 56.3)]),
     (
@@ -170,6 +177,34 @@ TRACKS: list[tuple[str, str, float, list[tuple[float, float]]]] = [
         0.2,
         [(128.25, 74.4524), (128.25, 75.0), (128.36, 75.11), (128.36, 76.635), (128.675, 76.95)],
     ),
+    # INTVCC/DRVCC (pins 28, 29): one via beside pin 29 feeds C10 and C9 underneath, and a top lane under the RSNSI
+    # Kelvin pair feeds D4. BST then runs straight from C14 to D4 (2026-10-18).
+    ("LTC_INTVCC", "F", 0.2, [(129.25, 74.452), (129.75, 74.452), (129.75, 75.4), (129.95, 75.6)]),
+    (
+        "LTC_INTVCC",
+        "F",
+        0.25,
+        [
+            (129.95, 75.6),
+            (130.5, 76.15),
+            (132.3, 76.15),
+            (132.95, 75.5),
+            (136.95, 75.5),
+            (136.95, 76.4),
+        ],
+    ),
+    ("LTC_INTVCC", "B", 0.25, [(129.95, 75.6), (130.375, 75.175), (130.375, 74.3)]),
+    ("LTC_INTVCC", "B", 0.25, [(129.95, 75.6), (130.15, 76.3)]),
+    ("LTC_BST", "F", 0.25, [(128.675, 76.95), (133.4, 76.95)]),
+    # LM61460 bootstrap: SW leaves pin 10 under the device through the VIN2/RBOOT gap to C24, RBOOT is tied to
+    # CBOOT at the pins, and CBOOT steps under pin 1 to C24 (datasheet 12.1).
+    ("LM_SW", "F", 0.22, [(136.125, 58.5), (136.125, 60.75), (136.6, 61.225)]),
+    (
+        "LM_CBOOT",
+        "F",
+        0.2,
+        [(136.625, 60.1), (137.125, 60.1), (137.125, 60.8), (138.3, 60.8), (138.3, 61.3)],
+    ),
 ]
 
 # U1's top-row escapes (0.2 mm; 0.15 where the CAPFB lane passes a bus-class pad). The pins fan out in a
@@ -217,6 +252,7 @@ VIAS: list[tuple[str, float, float, tuple[float, float]]] = [
     ("LTC_TG", 127.0, 81.55, SIGNAL_VIA),
     ("LTC_BG", 129.0, 75.5, SIGNAL_VIA),
     ("LTC_BG", 130.0, 81.9, SIGNAL_VIA),
+    ("LTC_INTVCC", 129.95, 75.6, SIGNAL_VIA),
     # +12V_BUS pours to the In2 island (and the B.Cu pour under the charger).
     *[("+12V_BUS", x, 78.3, POWER_VIA) for x in (130.7, 131.85, 133.0, 134.15)],
     ("+12V_BUS", 138.6, 77.7, POWER_VIA),
@@ -230,4 +266,44 @@ VIAS: list[tuple[str, float, float, tuple[float, float]]] = [
     # LM61460 input loop returns: beside C28 and GND pin 9, and beside C27 (clear of every pad: no via-in-pad).
     ("GND", 133.35, 56.2, SIGNAL_VIA),
     ("GND", 132.5, 62.45, SIGNAL_VIA),
+    # A GND via beside each passive's GND pad, so routed tracks cannot cut it off from In1: seven such pads
+    # were left in outer-pour fragments on the 29-unconnected plugin run (2026-10-18). Spots found by search:
+    # 0.15 mm from every pad (0.25 from power-high copper), outside the part and the +5V_PI island.
+    ("GND", 139.9, 57.62, SIGNAL_VIA),  # C22.2
+    ("GND", 125.41, 65.68, SIGNAL_VIA),  # R10.2
+    ("GND", 119.52, 92.6, SIGNAL_VIA),  # C16.2
+    ("GND", 133.99, 84.22, SIGNAL_VIA),  # C20.2
+    ("GND", 132.64, 61.48, SIGNAL_VIA),  # C29.2
+    ("GND", 132.48, 53.04, SIGNAL_VIA),  # C26.2
+    ("GND", 147.35, 54.48, SIGNAL_VIA),  # R26.2
+    ("GND", 157.6, 65.85, SIGNAL_VIA),  # C18.2
+    ("GND", 105.26, 51.43, SIGNAL_VIA),  # C34.2
+    ("GND", 120.64, 63.02, SIGNAL_VIA),  # C30.2
+    ("GND", 132.11, 69.95, SIGNAL_VIA),  # C8.2
+    ("GND", 151.7, 73.45, SIGNAL_VIA),  # C1.2
+    ("GND", 119.66, 91.7, SIGNAL_VIA),  # C17.2
+    ("GND", 132.48, 64.24, SIGNAL_VIA),  # C27.2
+    ("GND", 130.35, 65.12, SIGNAL_VIA),  # C11.2
+    ("GND", 106.35, 57.23, SIGNAL_VIA),  # C35.2
+    ("GND", 117.24, 63.02, SIGNAL_VIA),  # C31.2
+    ("GND", 119.52, 90.1, SIGNAL_VIA),  # C15.2
+    ("GND", 134.27, 68.9, SIGNAL_VIA),  # C4.2
+    ("GND", 147.72, 62.6, SIGNAL_VIA),  # R27.2
+    ("GND", 154.77, 77.81, SIGNAL_VIA),  # R1.2
+    ("GND", 123.88, 60.94, SIGNAL_VIA),  # C13.2
+    ("GND", 142.39, 55.08, SIGNAL_VIA),  # R23.2
+    ("GND", 137.82, 73.75, SIGNAL_VIA),  # C2.2
+    ("GND", 140.95, 63.67, SIGNAL_VIA),  # C23.2
+    ("GND", 134.7, 66.76, SIGNAL_VIA),  # R12.2
+    ("GND", 138.96, 54.6, SIGNAL_VIA),  # R21.2
+    ("GND", 132.36, 82.18, SIGNAL_VIA),  # C21.2
+    ("GND", 157.6, 58.25, SIGNAL_VIA),  # C19.2
+    ("GND", 112.2, 65.9, SIGNAL_VIA),  # C37.2
+    ("GND", 111.7, 60.63, SIGNAL_VIA),  # C32.2
+    ("GND", 135.57, 66.99, SIGNAL_VIA),  # C39.2
+    ("GND", 110.01, 63.2, SIGNAL_VIA),  # C38.2
+    ("GND", 127.72, 52.75, SIGNAL_VIA),  # R41.2
+    ("GND", 111.05, 65.44, SIGNAL_VIA),  # C36.2
+    ("GND", 108.26, 60.9, SIGNAL_VIA),  # R4.2
+    ("GND", 114.88, 57.6, SIGNAL_VIA),  # C45.2
 ]
