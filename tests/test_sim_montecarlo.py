@@ -59,6 +59,7 @@ from tests.rom_fixtures import PROFILE
 from tests.test_paired_scenarios import (
     CRUISE,
     LEARNED,
+    SPARK_TRACED,
     WOT,
     _edit_all,
     _identity,
@@ -647,10 +648,14 @@ def test_a_run_on_overridden_parameters_is_its_own_run_and_never_ranks(
     two = run_paired(qualified, scenario, image, candidate, plant_overrides={LUMPED_SCALE: 0.0509})
     assert len({frozen.scenario_sha256, one.scenario_sha256, two.scenario_sha256}) == 3
     assert len({frozen.session, one.session, two.session}) == 3
-    assert rank_as_improvement(frozen, intervention=_minted(frozen, "pass"))["rankable"]
+    # The frozen run is refused only for the traced spark change (a Target AFR
+    # edit reaches 27C6 through charge word 1B24); the override adds its own.
+    frozen_verdict = rank_as_improvement(frozen, intervention=_minted(frozen, "pass"))
+    assert frozen_verdict["reasons"] == [SPARK_TRACED]
     verdict = rank_as_improvement(one, intervention=_minted(one, "pass"))
     assert not verdict["rankable"]
-    assert [r.split(":")[0] for r in verdict["reasons"]] == [OVERRIDES_NOT_FROZEN]
+    assert [r.split(":")[0] for r in verdict["reasons"]] == [OVERRIDES_NOT_FROZEN, "unsupported"]
+    assert verdict["reasons"][1] == SPARK_TRACED
 
 
 def test_a_wrong_assembly_is_refused_by_the_run_paired_check(

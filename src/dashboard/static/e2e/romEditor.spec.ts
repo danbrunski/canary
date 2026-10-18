@@ -274,13 +274,14 @@ async function stateForm(form: Locator, skip: string[] = []) {
 /** State the ignition chain's two ECU states, which nothing logs and the form never
  *  preselects: the truck's 2026-10-08 pairing by default (`buildRequest()`'s). */
 async function stateTiming(form: Locator, highDet = /^Set\b/, knock = /^Fallback\b/) {
-  await form
-    .getByRole("group", { name: "HI DET latch" })
-    .getByRole("radio", { name: highDet })
-    .check();
+  // Knock control first: with fallback chosen the latch's "clear" is unavailable.
   await form
     .getByRole("group", { name: "Knock control" })
     .getByRole("radio", { name: knock })
+    .check();
+  await form
+    .getByRole("group", { name: "HI DET latch" })
+    .getByRole("radio", { name: highDet })
     .check();
 }
 

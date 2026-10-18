@@ -474,7 +474,9 @@ async def simulate_rom_edit(
       ``set`` and trim A while it is ``clear``, so an edit to the trim the
       stated latch does not read shows 0 with ``trim_a_not_read:...`` /
       ``trim_b_not_read:...``. ``knock_control`` ``fallback`` is the knock
-      sensor fault state; neither implies the other. Both change with the
+      sensor fault state; ``fallback`` with ``clear`` is refused
+      (``high_det_forced_by_ks_fault``: the fault sets the latch in states
+      2-4 of 0x027CC4, [inferred] engine running). Both change with the
       truck (the 2026-10-08 read was ``set`` / ``fallback``, KS1 fault), so
       state what you are asking about, not what you last saw. The result's
       ``ignition_timing`` block echoes them (``state``);

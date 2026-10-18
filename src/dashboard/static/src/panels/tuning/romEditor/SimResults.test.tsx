@@ -665,11 +665,38 @@ describe("the ignition timing section (E09.7)", () => {
     const reasons = within(section()).getByRole("list", { name: "Timing reasons" });
     expect(reasons).toHaveTextContent("timing_input_changed:fuel_comp_lookup");
     expect(reasons).toHaveTextContent(/reaches ignition timing through fuel_comp_lookup/);
-    expect(reasons).toHaveTextContent("base_timing_load_term_unmodelled");
+    expect(reasons).not.toHaveTextContent("base_timing_load_term_unmodelled");
+    expect(reasons).toHaveTextContent("charge_word_1b24_unresolved");
+    expect(reasons).toHaveTextContent("charge_word_inputs_moved");
+    expect(reasons).toHaveTextContent("inputs moved: 0xFFFF1736 via X, 0xFFFF175C via BFS");
     expect(reasons).toHaveTextContent("200 design pairs");
-    expect(section()).toHaveTextContent("200 (point, draw) pairs on 2 points: unevaluable 200");
-    // No pair has a number, so "how many show a change" has no answer and is not asked.
-    expect(section()).not.toHaveTextContent("show a change");
+    expect(reasons).toHaveTextContent("term_279a_unmodelled");
+    expect(reasons).toHaveTextContent("150 design pairs");
+    expect(reasons).toHaveTextContent("50 design pairs");
+    expect(section()).toHaveTextContent(
+      "200 (point, draw) pairs on 2 points: range 150, unevaluable 50",
+    );
+    // The ranged pairs are said apart; no pair has an exact number, so 0 show a change.
+    expect(section()).toHaveTextContent("0 show a change, 150 known only as a range");
+  });
+
+  it("draws a range cell as its ends, counts it, and says what makes it a range", () => {
+    show({ result: withTiming("range"), tables: tablesWithAxes().tables });
+    expect(marks("range").map((cell) => cell.textContent)).toEqual(["-3..+1"]);
+    expect(marks("changed").map((cell) => cell.textContent)).toEqual(["-2"]);
+    expect(marks("unevaluable")).toHaveLength(0);
+    const cell = within(grid()).getByRole("cell", { name: /^Row 4, column 4: -3\.\.\+1/ });
+    expect(cell).toHaveAttribute("data-timing-mark", "range");
+    expect(section()).toHaveTextContent(
+      "256 in the grid: 2 changed (1 known only as a range), 0 edited but not read, 0 unevaluable",
+    );
+    expect(section()).toHaveTextContent("50 show a change, 150 known only as a range");
+    const legend = within(section()).getByRole("list", { name: "Legend: ignition timing" });
+    expect(legend.querySelector('[data-mark="range"]')).not.toBeNull();
+    const reasons = within(section()).getByRole("list", { name: "Timing reasons" });
+    expect(reasons).toHaveTextContent(/swept over its plausible band/);
+    // A base-table edit leaves 1B24's inputs alone: no moved inputs to name.
+    expect(reasons).not.toHaveTextContent("inputs moved");
   });
 
   it("asks how many design pairs show a change only when pairs carry a number", () => {

@@ -666,6 +666,107 @@ tables:
       0x04BA6C reads it through 0x026BA4 at the rescaled coolant byte
       0xFFFF1077 into 0xFFFF1CC9, a Q14 factor of 0xFFFF15DE. 67 6C 76 78 78 7B
       80 80 on every listed image (the same bytes as base_timing_coolant_curve).
+  # E09.7 part B: the 0xFFFF27C6 chain's calibration bytes, mapped as 1 x 1
+  # tables (as k_constant is) so the simulator reads each by id and an edit to
+  # one is a mapped table change, never an unknown byte.
+  - id: base_timing_time_gain
+    name: Base timing burn-time gain (cal 0x880D)
+    offset: 0x880D
+    rows: 1
+    cols: 1
+    dtype: u8
+    confidence: inferred
+    evidence: >-
+      0x04BC5A: t = cal 0x880D x 120 x 0xFFFF17C6 / (0xFFFF15DE x 0xFFFF19CB)
+      (udiv 0x021D6C; firmware notes 2026-10-17). 179 on every listed image.
+  - id: base_timing_rate_rpm_gain
+    name: Base timing rate rpm gain (cal 0x880E)
+    offset: 0x880E
+    rows: 1
+    cols: 1
+    dtype: u8
+    confidence: inferred
+    evidence: >-
+      0x04BA6C: S = clamp(15DA x F / 1000 + (cal 0x880E x 0xFFFF11D8 << 6) / 625,
+      0, 0xFFFF). 25 on every listed image.
+  - id: base_timing_rate_factor_gain
+    name: Base timing charge-factor gain (cal 0x8440)
+    offset: 0x8440
+    rows: 1
+    cols: 1
+    dtype: u8
+    confidence: inferred
+    evidence: >-
+      0x04BA6C: F = s16(0x1000 - (cal 0x8440 x (0x4000 - R) >>a 8)), R from
+      0xFFFF10EB (base_timing_charge_map). 32 on every listed image.
+  - id: base_timing_time_offset
+    name: Base timing burn-time offset (cal 0x8B0C)
+    offset: 0x8B0C
+    rows: 1
+    cols: 1
+    dtype: u8
+    confidence: inferred
+    evidence: >-
+      0x04BC5A: u = t + (cal 0x8B0C x 5 >> 1). 14 on every listed image (+35).
+  - id: base_timing_1512_gain
+    name: Base timing 0xFFFF1512 gain (cal 0x8538)
+    offset: 0x8538
+    rows: 1
+    cols: 1
+    dtype: u8
+    confidence: inferred
+    evidence: >-
+      0x04B96C: 0xFFFF1512 = 0xFFFF26F2 x cal 0x8538 (mulu.w). 0 on every listed
+      image, so 0xFFFF1512 = 0 whatever the unidentified 0xFFFF26F2 holds; the
+      simulator refuses an image where it is not 0 (term_1512_unmodelled).
+  # E09.7: the enrichment retard 0xFFFF174A = max(0, min(0xFFFF174C, g))
+  # (0x04C9D8), subtracted in the base timing sum. The latch 0xFFFF283F bit 6
+  # (HI DET) picks one of each pair: 0x8792 / 0x8797 clear, 0x8793 / 0x8798 set.
+  - id: enrichment_retard_threshold
+    name: Enrichment retard threshold, HI DET clear (cal 0x8792)
+    offset: 0x8792
+    rows: 1
+    cols: 1
+    dtype: u8
+    confidence: inferred
+    evidence: >-
+      0x04CA1A (HI DET clear): r12 = cal 0x8792; 0x04CAF8 compares the gated
+      Target AFR byte 0xFFFF174B against it. At or above it g is (174B - cal)
+      x cal 0x8799 plus a 0xFFFF26C0 term; below it g = ((174B << 7) -
+      0xFFFF26C0) x cal 0x8797. 0x82 on every listed image (the enrichment
+      gate's 130, so 174B reaches it exactly when the gate is latched).
+  - id: enrichment_retard_threshold_high_det
+    name: Enrichment retard threshold, HI DET set (cal 0x8793)
+    offset: 0x8793
+    rows: 1
+    cols: 1
+    dtype: u8
+    confidence: inferred
+    evidence: >-
+      0x04CA9A (HI DET set): r12 = cal 0x8793, the same comparison as cal
+      0x8792. 0x82 on every listed image.
+  - id: enrichment_retard_below_gain
+    name: Enrichment retard gain below threshold, HI DET clear (cal 0x8797)
+    offset: 0x8797
+    rows: 1
+    cols: 1
+    dtype: u8
+    confidence: inferred
+    evidence: >-
+      0x04CA18 (HI DET clear): r11 = cal 0x8797, the multiplier of
+      (174B << 7) - 0xFFFF26C0 below the threshold (0x04CB0E). 0 on every
+      listed image, so g = 0 there; not 0, the retard is not ruled out below
+      the threshold.
+  - id: enrichment_retard_below_gain_high_det
+    name: Enrichment retard gain below threshold, HI DET set (cal 0x8798)
+    offset: 0x8798
+    rows: 1
+    cols: 1
+    dtype: u8
+    confidence: inferred
+    evidence: >-
+      0x04CA9E (HI DET set): r11 = cal 0x8798, as cal 0x8797. 0 on every
+      listed image.
   # E09.7: the inputs of 0xFFFF279A = clamp(0xFFFF26D9 + 0xFFFF26D0 -
   # (0xFFFF17FA >> 4), 0, 255) (0x04C952), subtracted in the base timing sum.
   - id: timing_retard_26d9_map

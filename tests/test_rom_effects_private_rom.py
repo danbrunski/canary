@@ -134,13 +134,18 @@ def test_the_fuel_comp_restore_reaches_bfs_x_target_afr_and_timing(library: RomL
     assert twin is not None and twin["reached"] and not twin["evaluable_at_equal_inputs"]
 
 
-def test_the_k106_target_cell_edit_reaches_only_the_command(library: RomLibrary) -> None:
+def test_the_k106_target_cell_edit_reaches_the_command_and_spark_through_the_charge_word(
+    library: RomLibrary,
+) -> None:
     report = _compare(library, "ZS44A-k106", "ZS44A-20260920")
     assert report.changed_nodes == ("target_afr_lookup",)
     consumed = [r for r in report.ranges if r.byte_class == "consumed"]
     assert sum(r.changed for r in consumed) == 1
     assert {r.byte_class for r in report.ranges} == {"consumed", "checksum"}
-    assert report.output("ignition_timing").status == "unchanged"
+    # Through the enrichment multiplier into charge word 1B24 and term 27C6.
+    spark = report.output("ignition_timing")
+    assert spark.status == "unevaluable"
+    assert "observed_not_predicted:timing_charge_word" in spark.reasons
     assert report.output("ignition_trim_selected").status == "unchanged"
     command = report.output("target_equiv_ratio")
     assert command.twin_node is not None

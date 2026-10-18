@@ -144,7 +144,10 @@ TOOL = "rom_sim"
 #: plant's own uncertainty declaration (E08.11).
 #: 3: an ``ignition_timing`` block (E09.7): ECU-side timing per trim cell and
 #: per design point, given a stated HI DET latch and knock-control state.
-TOOL_VERSION = "3"
+#: 4: 0xFFFF27C6 computed per ROM (a K / Fuel Comp change and an edit to its
+#: tables give a timing change, a range across the swept 0xFFFF1B24), 279A
+#: held only where justified, fallback with HI DET clear refused (E09.7 part B).
+TOOL_VERSION = "4"
 
 DEFAULT_PROFILE = REPO_ROOT / "data" / "nissan-xterra-2008"
 DEFAULT_SESSIONS = Path.home() / "canary-data" / "sessions" / "nissan-xterra-2008"
@@ -294,7 +297,9 @@ def _add_timing(parser: argparse.ArgumentParser) -> None:
     group.add_argument(
         "--knock-control",
         choices=("active", "fallback"),
-        help="fallback: the knock-sensor fallback (0xFFFF479D bit 7); it does not imply HI DET",
+        help="fallback: the knock-sensor fallback (0xFFFF479D bit 7); it sets HI DET in states "
+        "2-4 of 0x027CC4 ([inferred] engine running), so fallback with --high-det clear is "
+        "refused (high_det_forced_by_ks_fault)",
     )
 
 

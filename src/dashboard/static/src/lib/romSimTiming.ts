@@ -9,7 +9,7 @@
 // - a cell the block does not list is "no change" only because the block lists
 //   every cell that changes or names a reason; a cell that names a reason is
 //   never drawn as 0 (a trim the stated latch does not read, with no change in
-//   the cell, is `NR`; an unevaluable cell is `U`), a number the block gives is
+//   the cell, is `NR`; an unevaluable cell is `U`; a range is its two ends), a number the block gives is
 //   never drawn over by a note, and every reason on screen carries what it means;
 // - the grid's labels come from the base's own trim axes and are checked
 //   against the coordinates the cells carry: a mismatch is said, never drawn;
@@ -24,13 +24,24 @@ import type {
 import type { RomTableValues } from "../types/romLibrary";
 import { formatCell } from "./romLibrary";
 
+/** The reason that carries `charge_word_routes`. */
+const CHARGE_MOVED = "charge_word_inputs_moved";
+
 /** Reasons the block can name, in words. The key is the whole reason, or its
  *  prefix up to the first `:` for the families below. */
 const REASON_TEXT: Record<string, string> = {
   clamp_headroom_unknown:
     "A design has no logged timing, so the 50-degree cap and the -7 floor cannot be checked: the change holds if no clamp binds.",
-  base_timing_load_term_unmodelled:
-    "The edit moves the load input X, which also moves the base timing's rate term (0xFFFF27C6, not computed): only the trim term's change is given, not a timing change.",
+  charge_word_1b24_unresolved:
+    "The base timing term 0xFFFF27C6 reads the charge word 0xFFFF1B24, which is not computed. It is swept over its plausible band (0x4000 x 0.7 to 1.3), held equal on both ROMs when the edit leaves its inputs alone, so the change is known only as a range.",
+  charge_word_inputs_moved:
+    "The edit moves inputs of the charge word 0xFFFF1B24 (the inputs it moves are listed beside this reason), so 1B24 is not the same on both ROMs: it is swept over its plausible band independently on each.",
+  term_279a_unmodelled:
+    "The edit moves the inputs of the base timing term 0xFFFF279A, and 279A is not provably 0 here (for example at cold coolant) and is not modelled: no timing change is given.",
+  term_1512_unmodelled:
+    "Calibration 0x8538 is nonzero, which brings 0xFFFF26F2 (unidentified) into the base timing term 0xFFFF27C6 through 0xFFFF1512: that term is not computed, so no timing change is given.",
+  high_det_forced_by_ks_fault:
+    "Refused: knock control in fallback with the HI DET latch clear is not a running steady state. With the KS fault present the firmware sets HI DET on every pass while the engine runs (states 2 to 4 of 0x027CC4; engine running inferred).",
   enrichment_retard_unmodelled:
     "The edit moves the target phi, which moves the enrichment retard (0xFFFF174A, not computed): only the trim term's change is given, not a timing change.",
   trim_term_floor_may_bind:
@@ -83,11 +94,11 @@ export function stateText(state: NonNullable<IgnitionTimingBlock["state"]>): str
 
 // -- the grid ---------------------------------------------------------------------------------
 
-export type MarkKind = "changed" | "unchanged" | "not_read" | "unevaluable";
+export type MarkKind = "changed" | "range" | "unchanged" | "not_read" | "unevaluable";
 
 export interface TimingMark {
   kind: MarkKind;
-  /** What the cell shows: `-3`, `+2`, `·`, `NR`, `U`. */
+  /** What the cell shows: `-3`, `+2`, `-3..+1` (a range), `·`, `NR`, `U`. */
   text: string;
   /** The hover and screen-reader sentence. */
   title: string;
@@ -104,7 +115,26 @@ export function signed(delta: number): string {
   return delta > 0 ? `+${delta}` : String(delta);
 }
 
-/** One cell's mark. A number the block gives is the cell's mark: a non-zero
+/** The interval a `range` outcome carries, or null when it is not one (or carries
+ *  no ends, which the page then does not invent). */
+export function rangeEnds(item: {
+  status: string;
+  delta_min?: number | null;
+  delta_max?: number | null;
+}): [number, number] | null {
+  if (item.status !== "range") return null;
+  const lo = item.delta_min;
+  const hi = item.delta_max;
+  return typeof lo === "number" && typeof hi === "number" ? [lo, hi] : null;
+}
+
+/** `lo..hi` in signed degrees; an interval whose ends are equal is the value. */
+export function rangeText([lo, hi]: [number, number]): string {
+  return lo === hi ? signed(lo) : `${signed(lo)}..${signed(hi)}`;
+}
+
+/** One cell's mark. A range is drawn as its ends (`-3..+1`), never as `U`: the
+ *  cell has an answer, an interval. A number the block gives is the cell's mark: a non-zero
  *  `delta` is shown as signed degrees whatever else the cell names (a trim edited
  *  beside the one the ECM reads is said in the hover text, never drawn over the
  *  number). A reason is never drawn as 0: a cell whose edited trim the stated
@@ -113,6 +143,22 @@ export function signed(delta: number): string {
  *  that changes or names a reason). */
 export function timingMark(cell: TimingCell | null): TimingMark {
   if (cell === null) return NO_MARK;
+  const ends = rangeEnds(cell);
+  if (ends) {
+    const [lo, hi] = ends;
+    if (lo === hi && lo === 0) return { kind: "unchanged", text: "0", title: "0 deg" };
+    const above =
+      typeof cell.candidate_min === "number" && typeof cell.candidate_max === "number"
+        ? `; candidate between ${cell.candidate_min} and ${cell.candidate_max} deg`
+        : "";
+    const moved = cell.reasons.includes(CHARGE_MOVED) ? (cell.charge_word_routes ?? []) : [];
+    const via = moved.length > 0 ? `; charge word inputs moved: ${moved.join(", ")}` : "";
+    return {
+      kind: lo === hi ? "changed" : "range",
+      text: rangeText(ends),
+      title: `${lo === hi ? signed(lo) : `between ${signed(lo)} and ${signed(hi)}`} deg${above}; known only as a range: ${cell.reasons.join(", ") || "no reason given"}${via}`,
+    };
+  }
   if (cell.status === "unevaluable" || cell.delta === null) {
     return {
       kind: "unevaluable",
@@ -247,6 +293,9 @@ export interface ReasonCount {
   pairs: number;
   /** What it means, or null when this page has no sentence for it. */
   text: string | null;
+  /** For `charge_word_inputs_moved`: the charge word inputs the edit moves, as
+   *  the cells and outcomes that name the reason give them (in first-seen order). */
+  routes: string[];
 }
 
 /** Every reason on the block, with how many trim cells and design pairs name it. */
@@ -257,9 +306,19 @@ export function reasonCounts(block: IgnitionTimingBlock): ReasonCount[] {
     map.set(reason, (map.get(reason) ?? 0) + by);
   for (const reason of block.reasons ?? []) bump(cells, reason, 0);
   for (const reason of block.other_inputs_changed) bump(cells, reason, 0);
-  for (const cell of block.cells ?? []) for (const reason of cell.reasons) bump(cells, reason, 1);
+  const routes = new Set<string>();
+  const collect = (item: { reasons: string[]; charge_word_routes?: string[] | null }) => {
+    if (item.reasons.includes(CHARGE_MOVED)) {
+      for (const route of item.charge_word_routes ?? []) routes.add(route);
+    }
+  };
+  for (const cell of block.cells ?? []) {
+    collect(cell);
+    for (const reason of cell.reasons) bump(cells, reason, 1);
+  }
   for (const point of block.points ?? []) {
     for (const outcome of point.outcomes) {
+      collect(outcome);
       for (const reason of outcome.reasons) bump(pairs, reason, outcome.draws);
     }
   }
@@ -271,6 +330,7 @@ export function reasonCounts(block: IgnitionTimingBlock): ReasonCount[] {
       cells: cells.get(reason) ?? 0,
       pairs: pairs.get(reason) ?? 0,
       text: timingReasonText(reason),
+      routes: reason === CHARGE_MOVED ? [...routes] : [],
     }));
 }
 
@@ -284,6 +344,8 @@ export interface PointSummary {
   numeric: number;
   /** Pairs whose timing change is a nonzero number of degrees. */
   changed: number;
+  /** Pairs whose timing change is known only as an interval (`range`). */
+  ranged: number;
 }
 
 /** The design's points, counted: pairs by status, and how many show a change. */
@@ -294,14 +356,21 @@ export function pointSummary(points: readonly TimingPointRow[] | undefined): Poi
     byStatus: {},
     numeric: 0,
     changed: 0,
+    ranged: 0,
   };
   for (const point of points ?? []) {
     for (const outcome of point.outcomes) {
       out.pairs += outcome.draws;
       out.byStatus[outcome.status] = (out.byStatus[outcome.status] ?? 0) + outcome.draws;
-      if (outcome.delta === null) continue;
+      const ends = rangeEnds(outcome);
+      if (ends && ends[0] !== ends[1]) {
+        out.ranged += outcome.draws;
+        continue;
+      }
+      const delta = ends ? ends[0] : outcome.delta;
+      if (delta === null) continue;
       out.numeric += outcome.draws;
-      if (outcome.delta !== 0) out.changed += outcome.draws;
+      if (delta !== 0) out.changed += outcome.draws;
     }
   }
   return out;

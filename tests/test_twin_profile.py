@@ -98,7 +98,7 @@ FUEL_AWAITING_LIVE_READ = frozenset(
 #: ram-study, which cannot identify it). A live read of each window (as on
 #: 2026-10-08 for the knock bytes) is what moves one out of this set, and the
 #: accept test then asks for it in a profile.
-TIMING_AWAITING_LIVE_READ = frozenset(
+TIMING_CHAIN_AWAITING_LIVE_READ = frozenset(
     f"mem:{name}"
     for name in (
         "ECM_TIMING_TRIM_SELECTED",
@@ -119,6 +119,24 @@ TIMING_AWAITING_LIVE_READ = frozenset(
         "ECM_IGNITION_TIMING_BYTE",
     )
 )
+#: The 0xFFFF27C6 chain's seven words (five windows), on ignition_timing's
+#: path since its nodes were wired in (E09.7 part B, 2026-10-17):
+#: hypothesized like the chain's, so the live-read rule keeps them out and the
+#: profile does not grow. They would add five more reads per session window
+#: beside the nine the capacity test below measures.
+TIMING_27C6_AWAITING_LIVE_READ = frozenset(
+    f"mem:{name}"
+    for name in (
+        "ECM_TIMING_CHARGE_WORD",
+        "ECM_TIMING_CHARGE_FACTOR",
+        "ECM_TIMING_CHARGE_TERM",
+        "ECM_TIMING_LOAD_CURVE",
+        "ECM_TIMING_RATE_PRODUCT",
+        "ECM_TIMING_RATE_MAP",
+        "ECM_TIMING_RATE_WORD",
+    )
+)
+TIMING_AWAITING_LIVE_READ = TIMING_CHAIN_AWAITING_LIVE_READ | TIMING_27C6_AWAITING_LIVE_READ
 AWAITING_LIVE_READ = FUEL_AWAITING_LIVE_READ | TIMING_AWAITING_LIVE_READ
 
 
@@ -837,7 +855,7 @@ FOUR_HZ_GROUP = ("RPM", "MAF", "THROTTLE_POS", "O2_WR_LAMBDA_S1", "COMMANDED_EQU
 def test_the_awaited_timing_windows_do_not_fit_beside_the_fuel_pairings(
     clock: FakeClock, twin_profile: CaptureProfile
 ) -> None:
-    """The measured reason :data:`TIMING_AWAITING_LIVE_READ` cannot simply
+    """The measured reason :data:`TIMING_CHAIN_AWAITING_LIVE_READ` cannot simply
     join this profile when its live reads land (E09.1 Remaining). The chain
     adds eight windows and knock_chain, nine reads in every session window:
     the window grows from 0.13 s to 0.25 s, the 4 Hz Mode 01 group falls to
@@ -848,7 +866,7 @@ def test_the_awaited_timing_windows_do_not_fit_beside_the_fuel_pairings(
     cadence the window leaves room for. So the chain needs a second,
     timing-only profile, or a scheduler change. If a scheduler change makes
     them fit, this test fails and says so."""
-    timing = sorted(s.split(":", 1)[1] for s in TIMING_AWAITING_LIVE_READ)
+    timing = sorted(s.split(":", 1)[1] for s in TIMING_CHAIN_AWAITING_LIVE_READ)
     profile = twin_profile.model_copy(update={"memory": twin_profile.memory + tuple(timing)})
     plan = plan_cycle(
         cycle_seconds=0.5,

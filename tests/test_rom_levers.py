@@ -741,16 +741,18 @@ def test_a_number_is_only_claimed_for_points_that_state_the_fill_byte_and_nothin
 
 
 def test_the_controls_an_edit_changes_are_read_from_the_comparison(world: World) -> None:
-    """A timing edit is spark; Fuel Targets is lambda; Fuel Comp and K move BFS,
-    which indexes the timing tables (load input X), so they are both; bytes no
-    node reads leave the controls unresolved."""
+    """A timing edit is spark; Fuel Comp and K move BFS, which indexes the timing
+    tables (load input X), so they are both; Fuel Targets is both too, since the
+    command moves the enrichment multiplier that scales charge word 1B24, which
+    indexes base timing term 27C6; bytes no node reads leave the controls
+    unresolved."""
 
     def controls(image: bytes) -> tuple[tuple[str, ...], tuple[str, ...]]:
         edit = changed_controls(world.report(image), world.model, world.contract)
         return edit.controls, edit.unresolved
 
     assert controls(world.candidate("timing_trim_a")) == (("spark",), ())
-    assert controls(world.candidate("fuel_targets")) == (("lambda",), ())
+    assert controls(world.candidate("fuel_targets")) == (("lambda", "spark"), ())
     assert controls(world.candidate("fuel_compensation")) == (("lambda", "spark"), ())
     assert controls(world.candidate("k_constant")) == (("lambda", "spark"), ())
     _, unresolved = controls(_maf_image(world))
@@ -786,7 +788,8 @@ def test_a_torque_or_power_claim_for_an_edit_is_refused_by_name(world: World) ->
     assert any(r.startswith("spark_response_unmeasured") for r in timing)
     fuel = refusals(world.candidate("fuel_targets"), "torque")
     assert any(r.startswith("lambda_response_unmeasured") for r in fuel)
-    assert not any(r.startswith("spark_response_unmeasured") for r in fuel)
+    # Fuel Targets reaches spark through the charge word, so both are unmeasured.
+    assert any(r.startswith("spark_response_unmeasured") for r in fuel)
     assert refusals(_maf_image(world))[0].startswith("controls_unresolved: unknown_bytes_changed")
     assert refusals(world.candidate("timing_trim_a"), "knock")[-1].startswith("knock_unmodelled")
     with pytest.raises(SimulationRefusalError) as refused:
@@ -805,5 +808,5 @@ def test_a_torque_or_power_claim_for_an_edit_is_refused_by_name(world: World) ->
     assert "spark_trim_unit (N01.2)" in str(refused.value)
     # The line every front end shows names the controls and the blockers.
     line = world.classify(world.candidate("fuel_targets")).messages[-1]
-    assert line.startswith("torque/power claim for this edit (lambda): refused;")
+    assert line.startswith("torque/power claim for this edit (lambda, spark): refused;")
     assert "lambda response unmeasured" in line and TEXT_TORQUE_UNVALIDATED in line

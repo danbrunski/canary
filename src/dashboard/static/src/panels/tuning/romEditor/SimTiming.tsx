@@ -15,6 +15,7 @@ import type { RomTableValues } from "../../../types/romLibrary";
 
 const MARK_CLASS: Record<MarkKind, string> = {
   changed: "bg-accent-2/35 font-semibold",
+  range: "bg-accent-2/15 font-semibold italic",
   unchanged: "bg-elev-2/60 text-fg-faint",
   not_read: "bg-warn/20 text-warn",
   unevaluable: "bg-elev-2/60 text-fg-dim underline decoration-dotted",
@@ -22,6 +23,11 @@ const MARK_CLASS: Record<MarkKind, string> = {
 
 const LEGEND: { kind: MarkKind; text: string; meaning: string }[] = [
   { kind: "changed", text: "-3", meaning: "timing changes by that many degrees BTDC" },
+  {
+    kind: "range",
+    text: "-3..+1",
+    meaning: "known only as a range: the change lies between those degrees (see the reasons)",
+  },
   { kind: "unchanged", text: "·", meaning: "no change (the cell is not in the result)" },
   {
     kind: "not_read",
@@ -82,7 +88,8 @@ export function SimTiming({
           <>
             <dt className="text-fg-dim">trim cells</dt>
             <dd className="font-num text-xs">
-              {summary.cells} in the grid: {summary.changed} changed,{" "}
+              {summary.cells} in the grid: {summary.changed} changed
+              {summary.ranged ? ` (${summary.ranged} known only as a range)` : ""},{" "}
               {summary.changed_trim_not_read} edited but not read, {summary.unevaluable} unevaluable
             </dd>
           </>
@@ -96,7 +103,7 @@ export function SimTiming({
                   .sort(([a], [b]) => a.localeCompare(b))
                   .map(([status, n]) => `${status} ${formatCount(n)}`)
                   .join(", ") || "none"
-              }${points.numeric > 0 ? `; ${formatCount(points.changed)} show a change` : ""}`}
+              }${points.numeric > 0 || points.ranged > 0 ? `; ${formatCount(points.changed)} show a change${points.ranged > 0 ? `, ${formatCount(points.ranged)} known only as a range` : ""}` : ""}`}
         </dd>
         <dt className="text-fg-dim">torque</dt>
         <dd className="font-num text-xs">{claimLine(timing.torque)}</dd>
@@ -208,6 +215,11 @@ export function SimTiming({
                       .filter(Boolean)
                       .join(", ")}
                     )
+                  </span>
+                )}
+                {item.routes.length > 0 && (
+                  <span className="block text-xs text-fg-dim">
+                    inputs moved: <span className="font-num">{item.routes.join(", ")}</span>
                   </span>
                 )}
                 <span className="block text-fg-dim">

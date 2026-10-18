@@ -217,7 +217,7 @@ supercharger is a hardware intervention with a new plant parameter set.
     - `test_identical_roms_and_states_give_identical_results`;
     - `test_a_fuel_comp_edit_reaches_bfs_x_target_afr_and_the_timing_trims`;
     - `test_a_fuel_comp_axis_edit_is_the_same_path`;
-    - `test_a_target_afr_cell_edit_reaches_only_the_command`;
+    - `test_a_target_afr_cell_edit_reaches_the_command_and_spark_through_the_charge_word` (renamed by E09.7 part B, when term 27C6 joined the timing path);
     - `test_another_slots_copy_is_inactive_unless_it_is_the_active_slot`;
     - `test_unknown_bytes_are_never_assumed_to_have_no_effect`;
     - `test_a_mapped_table_no_node_reads_is_unmodelled_not_inert` (the Load

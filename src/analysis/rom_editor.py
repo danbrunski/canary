@@ -421,7 +421,10 @@ class SimRequest(BaseModel):
     #: The ignition chain's two stated states (E09.7), which nothing logs:
     #: ``set`` is the HI DET latch 0xFFFF283F bit 6 (warm timing reads trim B,
     #: else A) and ``fallback`` is the knock controller's sensor-fault fallback
-    #: 0xFFFF479D bit 7. Neither implies the other
+    #: 0xFFFF479D bit 7. ``fallback`` with ``clear`` is refused
+    #: (``high_det_forced_by_ks_fault``: the KS fault sets the latch every pass
+    #: in states 2-4 of 0x027CC4, [inferred] engine running); the other three
+    #: pairings are states
     #: (:class:`~src.analysis.paired_scenarios.TimingState`).
     high_det: Literal["set", "clear"]
     knock_control: KnockControl

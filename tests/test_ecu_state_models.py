@@ -617,7 +617,7 @@ def test_the_timing_delta_says_which_kind_of_answer_it_is() -> None:
     cap = timing_delta(_sel(50), _sel(53), base_timing_deg=48)
     assert (cap.delta_deg, cap.candidate_deg, cap.reasons) == (2, 50, ("timing_cap_binds",))
     assert timing_delta(_sel(50), _sel(53), base_timing_deg=50).reasons == ("base_timing_at_clamp",)
-    held = timing_delta(_sel(50), _sel(53), held_reasons=["base_timing_load_term_unmodelled"])
+    held = timing_delta(_sel(50), _sel(53), held_reasons=["term_279a_unmodelled"])
     assert (held.status, held.delta_deg, held.trim_term_delta) == ("unevaluable", None, 3)
     blend = timing_delta(Step(None, "coolant_blend_band"), _sel(50))
     assert (blend.status, blend.reasons) == ("unevaluable", ("coolant_blend_band",))

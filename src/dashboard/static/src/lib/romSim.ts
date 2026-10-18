@@ -264,9 +264,32 @@ export const KNOCK_CONTROL_CHOICES: { id: SimKnockControl; label: string; meanin
     id: "fallback",
     label: "Fallback",
     meaning:
-      "The knock sensor fault state: a fixed retard target (-5 deg). It does not imply HI DET, and HI DET does not imply it.",
+      "The knock sensor fault state: a fixed retard target (-5 deg). With the fault present the firmware sets HI DET every pass while the engine runs, so choosing this sets HI DET.",
   },
 ];
+
+/** Why HI DET `clear` cannot be chosen with knock control in `fallback`: the
+ *  daemon refuses that pairing (`high_det_forced_by_ks_fault`), because with the KS
+ *  fault present the firmware sets HI DET every pass while the engine runs (engine
+ *  states 2-4 of 0x027CC4, inferred), so it is not a running steady state. */
+export const FALLBACK_FORCES_HIGH_DET =
+  "Not available with knock control in fallback: the KS fault sets HI DET on every pass while the engine runs.";
+
+/** HI DET choices the stated knock control rules out, with why. The form disables
+ *  them, and `checkSimForm` refuses the pairing if one is submitted anyway. */
+export function highDetRuledOut(
+  knockControl: "" | SimKnockControl,
+): Partial<Record<SimHighDet, string>> {
+  return knockControl === "fallback" ? { clear: FALLBACK_FORCES_HIGH_DET } : {};
+}
+
+/** The form after `key` is set to `value`; choosing knock control `fallback` sets
+ *  HI DET (the one HI DET state that pairs with it), whatever it was. */
+export function withChoice(values: SimFormValues, key: FormKey, value: string): SimFormValues {
+  const next = { ...values, [key]: value };
+  if (key === "knockControl" && value === "fallback") next.highDet = "set";
+  return next;
+}
 
 export const GRID_CHOICES: { id: SimGrid; label: string; meaning: string }[] = [
   {
@@ -455,6 +478,13 @@ export function checkSimForm(values: SimFormValues, label: string, edits: RomEdi
       "knockControl",
       "Knock control",
       "choose active or fallback: nothing logs it, so there is no default",
+    );
+  }
+  if (values.knockControl === "fallback" && values.highDet === "clear") {
+    invalid(
+      "highDet",
+      "HI DET latch",
+      `clear with knock control in fallback: ${FALLBACK_FORCES_HIGH_DET}`,
     );
   }
   if (values.candidateEvents === "") {

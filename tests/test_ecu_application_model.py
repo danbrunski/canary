@@ -290,6 +290,8 @@ def test_the_trim_lookup_is_an_intermediate_of_ignition_timing_never_timing_itse
         "trim_ram_copy_unverified",
         "high_det_latch_unobserved",
         "ignition_chain_unmodelled",
+        # E09.7 part B: the 27C6 / 279A nodes read snapshot copies.
+        "timing_snapshot_steady",
     ]
 
 

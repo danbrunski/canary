@@ -763,8 +763,10 @@ Pi; E09.13 Light. Items marked **listing** need the firmware session
     `timing_term_1512`, `timing_charge_word`, `base_timing_load_curve`,
     `base_timing_charge_term`, `base_timing_rate_word`, `timing_term_27c6`
     (code: `timing_term_27c6_chain` / `timing_term_27c6_steady`), all
-    `twin: implemented` but not yet on `ignition_timing`'s path (the sim
-    dispatch wires them in). Hand vectors (hot, φ 1,
+    `twin: implemented` (`timing_charge_word` is `twin: observed` with the
+    decode as its `reference_model` since part B: its inputs are the
+    target-phi path's unmodelled corrections) and on `ignition_timing`'s
+    path since part B (below). Hand vectors (hot, φ 1,
     `tests/test_timing_rate_term.py`): 24° at 700 rpm X 32, 33° at 2,500
     rpm X 64, 22° at 4,400 rpm X 112. The tables are in `rom_map.yaml`
     (`base_timing_charge_map`, `base_timing_load_curve` and four 8-entry
@@ -792,10 +794,11 @@ Pi; E09.13 Light. Items marked **listing** need the firmware session
       trim cell) and `sim_cells.ignition_timing_points` (per design point
       and draw).
     - Each ROM's own X comes from its own BFS and LPS. A K or Fuel Comp
-      change therefore reaches the trims' column, but it also moves
-      `0xFFFF27C6`, so it reports the trim term's change and no timing
-      change (`base_timing_load_term_unmodelled`). A Target AFR change that
-      moves φ gets `enrichment_retard_unmodelled`.
+      change therefore reaches the trims' column and `0xFFFF27C6`, which is
+      computed per ROM since part B (below; it was
+      `base_timing_load_term_unmodelled` until then). A Target AFR change
+      that moves φ gets `enrichment_retard_unmodelled`, and since part B
+      `compare_roms` traces it into spark through charge word 1B24.
     - Any changed byte outside the two trims that `compare_roms` says
       reaches `ignition_timing` (`sim_cells.timing_reach_reasons`) makes the
       trim-grid block `unevaluable` with no cells, naming the node
@@ -803,10 +806,11 @@ Pi; E09.13 Light. Items marked **listing** need the firmware session
       no node reads; every design-point pair carries the same reasons. On
       ZS44A-20261004 with HI DET set: K +10 % gives
       `timing_input_changed:air_charge_tp`, a Fuel Comp cell
-      `timing_input_changed:fuel_comp_lookup`, and `base_timing_rate_map`
-      `add_raw 5` gives `unknown_bytes_changed`. Tests:
+      `timing_input_changed:fuel_comp_lookup`; `base_timing_rate_map`
+      `add_raw 5` gave `unknown_bytes_changed` until part B, which computes
+      it on the grid. Tests:
       `tests/test_rom_sim_cli.py::test_an_edit_that_reaches_timing_outside_the_trims_is_not_zero_on_the_trim_grid`
-      (k, fuel_comp, base_timing_rate_map), and k106 against ROM Store
+      (k, fuel_comp), and k106 against ROM Store
       (K +6 %) through the block in the k106 test. `report.html` renders
       each design point's outcomes.
     - Calibration facts the twin rests on are pinned as manifest
@@ -820,12 +824,14 @@ Pi; E09.13 Light. Items marked **listing** need the firmware session
       byte (`0x04E05E` `mov.b`, `extu.b`), with vectors in
       `test_the_retard_combine_takes_the_larger_retard_and_its_two_paths`.
     - The HI DET latch and knock control are stated inputs with no default
-      (`--high-det`, `--knock-control`), stated independently: the
-      fallback (`0xFFFF479D` bit 7) sets HI DET only inside the gate at
-      `0x04A914`–`0x04A926` (`2876` bit 6 set, `4782` bit 5 clear); outside
-      it `0x04A956`–`0x04A96E` writes bit 6 from cal `0x86DE` bit 7 (0 here),
-      so fallback with HI DET clear is reachable. A trim edit without them
-      is refused (`timing_state_unstated`).
+      (`--high-det`, `--knock-control`). A trim edit without them is refused
+      (`timing_state_unstated`). Since part B, fallback with HI DET clear is
+      refused (`high_det_forced_by_ks_fault`): the gate (`4782` bit 5 clear)
+      is open in the engine state machine `0x027CC4`'s states 2–4 (`282A`
+      bit 5, engine running [inferred meaning]), and inside it
+      `0x04A928`–`0x04A990` sets HI DET on every pass while `479D` bit 7 is
+      set (firmware notes 2026-10-17, "HI DET gate"). It was described as
+      reachable before that finding.
     - With no logged timing (grid designs) a change is reported with
       `clamp_headroom_unknown`. A trim the ECM does not read in the stated
       state gives 0 with a named reason (`trim_a_not_read:high_det_latch_set`).
@@ -845,9 +851,10 @@ Pi; E09.13 Light. Items marked **listing** need the firmware session
       named reason when clear. The same edit through `rom_sim run` on a 9-point
       grid gives −3 at every (point, draw).
     - A K +10 % `rom_sim run` (9-point grid, 2 draws), checked by hand,
-      moved X 29→32 … 66→73 and the trim term by −2…+1. Every pair is
+      moved X 29→32 … 66→73 and the trim term by −2…+1. Every pair was
       `unevaluable` (`base_timing_load_term_unmodelled`,
-      `timing_input_changed:air_charge_tp`), and so is the block.
+      `timing_input_changed:air_charge_tp`) until part B, and so is the
+      trim-grid block still (the grid holds X equal).
   - **Logged-timing sanity check** (not validation; the base terms are not
     observed). `_capture-rom-trace-2026-09-21T142926` is on ZS44A-20260920,
     with HI DET taken as set (UpRev logs read 0x40 throughout). It has
@@ -952,6 +959,93 @@ Pi; E09.13 Light. Items marked **listing** need the firmware session
         page against a live daemon.
     - **Truck:** E05.4 (c)'s capture is needed to locate the earliest
       disagreement and to declare a final-byte tolerance.
+    - **Part B (desk, 2026-10-17): 0xFFFF27C6 and 0xFFFF279A wired into the
+      simulator.** `paired_scenarios.ignition_timing_at` computes the
+      27C6 change from each ROM's own X with `timing_term_27c6_steady` on its
+      own tables and cals (read by `rom_map` id: `base_timing_charge_map`,
+      the rate map and four curves, `base_timing_load_curve`, and the 1×1
+      cals `0x880D`, `0x880E`, `0x8440`, `0x8B0C`, `0x8538`, new in
+      `rom_map.yaml`). Coolant is the rescaled byte. 1512 is 0 when cal
+      `0x8538` is 0 on both images, else `term_1512_unmodelled`. The charge
+      word 1B24 is never computed: `26F6 − 26E8` = 0x4000 + `175C` + `1736`,
+      times the enrichment multiplier `26C0` (`0x04B98A`), where `1736` reads
+      X (map `0x9724`) and `175C` reads BFS `0xFFFF1038` (curves
+      `0xD34D`/`0xD345`), both stateful and not modelled, and `26C0` follows
+      the Target AFR lookup. So 1B24 changes whenever an edit moves X, BFS or
+      φ while `175C`/`1736` are nonzero (or the multiplier is not neutral).
+      It is swept over 0x4000 × [0.7, 1.3] at every b step (928 counts) plus
+      both ends (and every 64 counts if `0xCEAB`/`0xD60F` bend in the band):
+      held equal on both ROMs only when nothing moves it (a base-timing
+      table edit at fixed X, BFS and φ: the trim grid), else swept on each
+      ROM independently, the change running over every (base step,
+      candidate step) pair, with `charge_word_inputs_moved` and
+      `charge_word_routes` naming the route (`0xFFFF1736 via X`,
+      `0xFFFF175C via BFS`, `0xFFFF26C0 via the Target AFR lookup`;
+      verifier finding and coordinator decision, 2026-10-18). An answer that
+      does not collapse is a range (`status: range`, `delta_min`/`delta_max`,
+      `charge_word_1b24_unresolved`), clamped at both ends. 279A is zero when
+      `0x9B09` reads 0 at (min(255, rpm word), rescaled coolant) and `0xCC33`
+      at the coolant reads 0 on both images (`11CE` = min(255, `w1210`),
+      listing `0x03907A`, `0x038FEA`–`0x039034`); otherwise
+      `term_279a_unmodelled` when BFS moved or the 279A tables differ, else
+      held equal. The manifest wires `timing_term_27c6` and
+      `timing_term_279a` into `base_timing_sum` with `rom:` refs;
+      `timing_retard_map_3630` is implemented; `timing_charge_word` is
+      `observed` (the correction sum and enrichment multiplier behind it are
+      not modelled), so the twin profile does not grow: the seven
+      `mem:ECM_TIMING_CHARGE_*`/`RATE_*`/`LOAD_CURVE` channels it reads are
+      hypothesized and pinned as awaiting a live read. A consequence: a
+      Target AFR edit now reaches `ignition_timing` through the enrichment
+      multiplier (`observed_not_predicted:timing_charge_word`), so its
+      controls are lambda and spark and it no longer ranks
+      (`unsupported:ignition_timing:unevaluable`). The trim grid computes 27C6
+      per cell, so an edit to the base timing tables is evaluated there.
+      Fallback with HI DET clear is refused (`high_det_forced_by_ks_fault`;
+      the gate is open in states 2–4 of `0x027CC4`, [inferred] engine
+      running), and cal `0x8ADC` bit 7, which the latch logic needs
+      (`0x04A672` clears HI DET and skips it when clear), is pinned as a
+      `high_det_latch` calibration condition (0x86 on all five operator
+      images).
+      Hand-worked tests in `tests/test_ignition_timing.py`: an X move that
+      collapses even swept independently (rpm word 40, X 91→85: 27C6 is 10
+      at every 1B24 on the base and 11 on the candidate, Δ +1 exact), ones
+      that are ranges (rpm word 200, X 104→98: [0, 2], +1..+3 with a trim
+      change; X 64→61: [0, 3], base 47 reaches exactly 50, base 48/49 clamp
+      to [0, 2]/[0, 1] with `timing_cap_binds`), the X move wider than the
+      held-equal sweep at the same point (104→98 [1, 1] held vs [0, 2];
+      64→61 [0, 2] vs [0, 3]; BFS-only [−2, 2]), the charge sweep, 279A hot zero and cold
+      `term_279a_unmodelled`, cal `0x8538` = 3 → `term_1512_unmodelled`, a
+      `0x9AF9` one-cell edit (+20 at [1][2]) changing 80 trim-grid cells, a
+      range [−5, −3] at (56, 64) and −3 exact at (56, 56), and fallback+clear
+      refused; through `rom_sim run` in
+      `tests/test_rom_sim_cli.py::test_a_base_timing_table_edit_is_computed_on_the_trim_grid`.
+      End to end on the real K −5 % spec (ZS44A-20261004, 8 draws, seed 1,
+      HI DET set, fallback): before part B, all 936 pairs `unevaluable`
+      (`base_timing_load_term_unmodelled`); with 1B24 held equal, 656
+      ranges, 80 exact, 200 `enrichment_retard_unmodelled`; with 1B24 swept
+      independently, 736 ranges (Δ ends from −3 to +4), no exact pair, 200
+      `enrichment_retard_unmodelled`, `charge_word_inputs_moved` on all
+      936 (720 via X and BFS, 16 via BFS alone, 200 via X, BFS and the
+      Target AFR lookup); 279A zero at every pair. With the enrichment
+      retard 0xFFFF174A also held where X moves at an enriched point (its cap
+      0xFFFF174C reads X; enriched = either ROM's gated byte 0xFFFF174B at or
+      above cal 0x8792 / 0x8793 by the latch, below-threshold gain cal
+      0x8797 / 0x8798 not 0, or the byte unknown; all four cals new in
+      `rom_map.yaml`, 0x82 / 0x82 / 0 / 0 on all five operator images;
+      listing `0x04C9D8`–`0x04CB7E`; verifier finding 2026-10-18), final:
+      576 ranges (most often [−1, 2] 128, [−2, 2] 88, [0, 2] 80, [0, 3] 72)
+      and 360 `enrichment_retard_unmodelled`. On the WOT pedal-flag design
+      (`61f25fab…`, 30 points, 3 draws), where the lookup reads its last
+      column so K moves X and not φ, all 90 pairs are
+      `enrichment_retard_unmodelled` (they were silently ranges before the
+      fix). Test:
+      `tests/test_ignition_timing.py::test_an_x_move_at_an_enriched_point_holds_the_enrichment_retard`.
+      The trim grid holds X and φ equal, so 174A is equal there and nothing
+      is held. The trim grid block for K
+      stays `unevaluable` (`timing_input_changed:air_charge_tp`: the grid
+      holds X equal). Not verified: the 0.7–1.3 band for 1B24 (a stated
+      assumption until `mem:ECM_TIMING_CHARGE_WORD` is read live), and that
+      `0x283D` bit 7 holds in the steady state.
     - **Listing:** done (2026-10-17, above). **Truck:** one window set
       reading `0xFFFF15DA`–`0xFFFF15DE`, `0xFFFF17C6`, `0xFFFF19CB`,
       `0xFFFF1B24`, `0xFFFF10EB` with `0xFFFF27C6` and `0xFFFF1A58` at hot
