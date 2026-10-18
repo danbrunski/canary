@@ -2,7 +2,7 @@
 # Grade a routing result against a KiCad project's committed rules, on a scratch copy:
 #   grade.sh <project_dir> <routes.ses | routed.kicad_pcb> [workdir]
 # The project's files come from git HEAD (git archive), so local edits and KiCad's open-project saves
-# cannot leak into the grade. An SES is added with ses_import.py; a .kicad_pcb replaces the board as is.
+# cannot leak into the grade. GRADE_REV grades against another commit (a result routed from an older board). An SES is added with ses_import.py; a .kicad_pcb replaces the board as is.
 # Then DRC with schematic parity and refilled zones, via_in_pad.py and inner_tracks.py. A result counts
 # when the only errors are unconnected items and starved thermals, and both checkers report 0.
 # KICAD_BIN overrides the KiCad bin directory (default: the Windows install, driven from WSL).
@@ -14,7 +14,7 @@ win() { wslpath -w "$1"; }
 top=$(git -C "$proj" rev-parse --show-toplevel); rel=$(realpath --relative-to="$top" "$proj")
 work=${3:-$(mktemp -d)}
 rm -rf "$work/$rel"; mkdir -p "$work"
-git -C "$top" archive HEAD "$rel" | tar -x -C "$work"
+git -C "$top" archive "${GRADE_REV:-HEAD}" "$rel" | tar -x -C "$work"
 board=$(ls "$work/$rel"/*.kicad_pcb | head -1)
 if [[ $src == *.kicad_pcb ]]; then
     cp "$src" "$board"; echo "board: $(basename "$src") (no ses_import)"
@@ -36,4 +36,4 @@ EOF
 for check in via_in_pad inner_tracks; do
     "$bin/python.exe" "$(win "$here/$check.py")" "$(win "$board")" 2>&1 | grep -v -E "memory leak|image handler"
 done
-echo "graded board: $board"
+echo "graded board: $board (project at ${GRADE_REV:-HEAD})"

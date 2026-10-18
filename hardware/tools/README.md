@@ -112,7 +112,7 @@ passes `1`. Later passes never beat the first on this board.
 
 **`grade.sh`** grades a routing result made elsewhere (another router, another session):
 `grade.sh <project_dir> <routes.ses | routed.kicad_pcb> [workdir]`. It takes the project from git
-HEAD into a scratch directory, imports the SES (or takes the routed board as it is), and runs DRC
+HEAD (or `GRADE_REV=<commit>`) into a scratch directory, imports the SES (or takes the routed board as it is), and runs DRC
 with schematic parity, `via_in_pad.py` and `inner_tracks.py`. A result counts when the only errors
 are unconnected items and starved thermals, and both checkers report 0.
 
