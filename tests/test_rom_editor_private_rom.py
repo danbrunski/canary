@@ -51,6 +51,7 @@ from typing import Any
 import numpy as np
 import pytest
 from fastapi.testclient import TestClient
+from pydantic import ValidationError
 
 from src.analysis import fuel_plant, rom_editor, sim_montecarlo
 from src.analysis.paired_scenarios import (
@@ -59,6 +60,7 @@ from src.analysis.paired_scenarios import (
     PairedScenario,
     SimKit,
     run_paired,
+    timing_tables,
 )
 from src.analysis.paired_scenarios import rpm_word as sim_rpm_word
 from src.analysis.paired_steady import TRIM_AUTHORITY_UNDECODED
@@ -238,6 +240,8 @@ def request(edits: list[dict[str, Any]], **over: Any) -> rom_editor.SimRequest:
         load_edges=FORM_LOAD_EDGES,
         **ENV,
         **LEARNED_ZERO,
+        high_det="set",
+        knock_control="fallback",
         candidate_events="none",
         draws=DRAWS,
         seed=SEED,
@@ -1009,3 +1013,134 @@ def test_the_route_simulates_the_uploaded_osiris_file(
     )
     assert response.json() == json.loads(json.dumps(expected))
     assert response.json()["design"]["points"] == FORM_POINTS
+
+
+# -- E09.7: the ignition timing trims on the real image ----------------------------------------
+#
+# The page's trim path on ZS44A-20261004: a trim edit simulates with the HI DET latch stated,
+# and the block shows the change in exactly the edited cells. Trim row 7 (the page's "row 8")
+# columns 3..10 cross the flag edge: bit 7 is set from column 5 on both trims here, so the
+# edit adds to cells that carry the flag and cells that do not. The block is the ECU side only
+# (``ignition_timing_deg``), so these assert the chain's counts, not an engine response.
+
+TRIM_ROW = 7
+TRIM_COLS = tuple(range(3, 11))
+TRIM_FLAG_FROM = 5
+#: A small grid: the timing block reads the trims' own nodes, not the grid.
+TRIM_GRID: dict[str, Any] = dict(rpm_edges=WOT_RPM_EDGES, load_edges=WOT_LOAD_EDGES, draws=2)
+
+
+def _trim_edit(table: str, **op: int) -> dict[str, Any]:
+    return {
+        "table": table,
+        "slot": 1,
+        "cells": [[TRIM_ROW, col] for col in TRIM_COLS],
+        **op,
+    }
+
+
+def _timing(
+    real: Real, edits: list[dict[str, Any]], high_det: str
+) -> tuple[dict[str, Any], dict[tuple[int, int], dict[str, Any]], Run]:
+    run = simulate(real, request(edits, high_det=high_det, **TRIM_GRID))
+    block = run.out["ignition_timing"]
+    return block, {(c["row"], c["col"]): c for c in block["cells"]}, run
+
+
+def test_the_trim_cells_cross_the_flag_edge_on_this_image(real: Real) -> None:
+    """The premise of the cases below: the flag is clear before the edge and set after it, on
+    both trims, so a value-bits edit across it has to keep each cell's own flag."""
+    tables = timing_tables(real.image, real.kit.rom_map, slot=1)
+    for trim in (tables.a, tables.b):
+        flags = [trim[TRIM_ROW][col] >> 7 for col in TRIM_COLS]
+        assert flags == [int(col >= TRIM_FLAG_FROM) for col in TRIM_COLS]
+        assert min(trim[TRIM_ROW][col] & 0x7F for col in TRIM_COLS) >= 7  # above the term's floor
+
+
+def test_a_trim_b_edit_shows_minus_two_in_its_eight_cells_when_the_latch_is_set(
+    real: Real,
+) -> None:
+    block, cells, run = _timing(real, [_trim_edit("timing_trim_b", add_raw=-2)], "set")
+    assert block["status"] == "evaluated" and block["trims_changed"] is True
+    assert set(cells) == {(TRIM_ROW, col) for col in TRIM_COLS}
+    for cell in cells.values():
+        assert (cell["delta"], cell["table_read"], cell["reasons"]) == (
+            -2,
+            "b",
+            ["clamp_headroom_unknown"],
+        )
+    assert block["summary"] | {"reasons": None} == {
+        "cells": 256,
+        "changed": 8,
+        "unevaluable": 0,
+        "changed_trim_not_read": 0,
+        "reasons": None,
+    }
+    assert block["torque"]["status"] == "unsupported"
+    assert any(r.startswith("spark_response_unmeasured") for r in block["torque"]["reasons"])
+    # The candidate moved the value bits by 2 and kept each cell's own flag.
+    base = timing_tables(real.image, real.kit.rom_map, slot=1)
+    cand = timing_tables(run.candidate, real.kit.rom_map, slot=1)
+    for col in TRIM_COLS:
+        assert cand.b[TRIM_ROW][col] == base.b[TRIM_ROW][col] - 2
+        assert cand.b[TRIM_ROW][col] >> 7 == base.b[TRIM_ROW][col] >> 7
+    assert cand.a == base.a
+
+
+def test_a_trim_b_edit_with_the_latch_clear_is_read_nowhere_and_says_so(real: Real) -> None:
+    block, cells, _ = _timing(real, [_trim_edit("timing_trim_b", add_raw=-2)], "clear")
+    assert set(cells) == {(TRIM_ROW, col) for col in TRIM_COLS}
+    for cell in cells.values():
+        assert (cell["delta"], cell["table_read"]) == (0, "a")
+        assert "trim_b_not_read:high_det_latch_clear" in cell["reasons"]
+    assert (block["summary"]["changed"], block["summary"]["changed_trim_not_read"]) == (0, 8)
+
+
+@pytest.mark.parametrize(
+    ("high_det", "read", "unread_reason"),
+    [
+        ("set", "b", "trim_a_not_read:high_det_latch_set"),
+        ("clear", "a", "trim_b_not_read:high_det_latch_clear"),
+    ],
+)
+def test_both_trims_edited_change_the_one_the_latch_reads_and_name_the_other(
+    real: Real, high_det: str, read: str, unread_reason: str
+) -> None:
+    """The verifier's repro: trim A and trim B both -2 on row 8, columns 4..11. The backend
+    gives -2 with the unread trim named in the reasons; the page must draw the -2."""
+    edits = [_trim_edit("timing_trim_a", add_raw=-2), _trim_edit("timing_trim_b", add_raw=-2)]
+    block, cells, _ = _timing(real, edits, high_det)
+    assert set(cells) == {(TRIM_ROW, col) for col in TRIM_COLS}
+    for cell in cells.values():
+        assert (cell["delta"], cell["table_read"]) == (-2, read)
+        assert cell["reasons"] == ["clamp_headroom_unknown", unread_reason]
+    assert block["summary"]["changed"] == 8
+    assert block["summary"]["changed_trim_not_read"] == 8
+    assert block["summary"]["unevaluable"] == 0
+
+
+def test_a_trim_the_ecm_reads_set_below_the_floor_is_unevaluable_not_unread(real: Real) -> None:
+    """``changed_trim_not_read`` counts a changed trim the ECM does not read. A read trim set
+    to 3 counts (flag kept) is below the trim term's floor of 7: no number, and not unread."""
+    cell_row, cell_col = TRIM_ROW, TRIM_FLAG_FROM
+    edit = {
+        "table": "timing_trim_b",
+        "slot": 1,
+        "cells": [[cell_row, cell_col]],
+        "set_raw": 0x80 | 3,
+    }
+    block, cells, _ = _timing(real, [edit], "set")
+    assert cells[(cell_row, cell_col)]["status"] == "unevaluable"
+    assert "trim_term_floor_may_bind" in cells[(cell_row, cell_col)]["reasons"]
+    assert (
+        block["summary"]["changed"],
+        block["summary"]["unevaluable"],
+        block["summary"]["changed_trim_not_read"],
+    ) == (0, 1, 0)
+
+
+def test_a_trim_edit_without_the_latch_state_is_refused_by_name() -> None:
+    body = request([_trim_edit("timing_trim_b", add_raw=-2)]).model_dump()
+    for name in ("high_det", "knock_control"):
+        with pytest.raises(ValidationError, match=name):
+            rom_editor.SimRequest.model_validate({k: v for k, v in body.items() if k != name})

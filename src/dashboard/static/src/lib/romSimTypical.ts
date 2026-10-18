@@ -260,7 +260,7 @@ export function pedalFlagLine(flag: number): string {
 
 /** After a click, the fields it did not touch. */
 export const NOT_TOUCHED =
-  "Nothing else was touched: the grid, the candidate events, the edges, the draws, the seed and the label stay as they were.";
+  "Nothing else was touched: the grid, the HI DET latch, knock control, the candidate events, the edges, the draws, the seed and the label stay as they were.";
 
 export interface TypicalFailure {
   title: string;

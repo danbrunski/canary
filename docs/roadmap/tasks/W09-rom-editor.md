@@ -38,7 +38,10 @@ acceptance runs on the real images.
   (`rom_map.yaml` `map_slots`). An edit to slots 2–5 would show `not_reached`
   everywhere, so the page does not offer it. Anything else is refused
   server-side (`table_not_editable`, `slot_not_simulated`). Timing trims and
-  the other slots are a later item, not this one.
+  the other slots are a later item, not this one. *(2026-10-17: the timing
+  trims A/B are now editable and simulatable, E09.7. `SimRequest` gained the
+  required `high_det` and `knock_control`, 23 fields, both never typical; the
+  masked cells are edited on their value bits and the flag is kept.)*
 - **A GUI edit is an E08.1 edit, never a second schema.** The request body's
   `edits` are `rom_edit_spec.Edit` dicts (`cells` / `all` / `region` with
   `set_raw` / `add_raw` / `scale`+`rounding`), wrapped in an `EditSpec` by the
@@ -1140,8 +1143,10 @@ W09.6 is the orchestrator's own, on the ROM machine.
   per-lever "what blocks a number" preview E09.14)*: persisted runs under
   `/data/canary/sim/<run>/` (declared in `tests/test_state_dir.py`) with a
   run list. Drive designs from pre-change sessions (E08.2 `build_drive_design`)
-  as a second point source. Slots 2–5 with a stated active slot. Timing-trim
-  editing (traced but `unsupported` until a torque plant exists, E07.5). The
+  as a second point source. Slots 2–5 with a stated active slot. ~~Timing-trim
+  editing~~ **Landed with E09.7, 2026-10-17** (editable trim grids, two required
+  state inputs, the Δ° grid and its reasons on the page; the torque and knock
+  claims stay `unsupported` until E07.5's plant is validated). The
   E08.6 HTML report as a download.
   Found by the independent verifier on the real ZS44A-20261004 image
   (2026-10-15), to be done in the simulator, not the page:

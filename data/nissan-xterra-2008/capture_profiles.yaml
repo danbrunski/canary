@@ -292,12 +292,14 @@ profiles:
     back (B08.4), in the catalog''s window order: fuel_target, spark, fuel_axis,
     uprev_state, fuel_comp_x (the fill byte), flags_2841. So the gap is the reads
     in between: on the fake clock (tests/test_twin_profile.py, 10 ms answers)
-    0.069 s on every pulse read, inside 0.1 s by more than one request slot
-    (1/90 s). Each DID added to the window moves it a slot later: 0.091 s with
-    DIDs 0x120F and 0x1110, 0.102 s with 0x1101 as well. So those three are not
-    in this profile: throttle is PID 0x11 and purge PID 0x2E (the Fuel Comp
-    fit''s first purge source), coolant PID 0x05 (the phi gate''s second
-    source). The tuning profile still reads all three DIDs.
+    0.083 s on every pulse read, inside 0.1 s by more than one request slot
+    (1/90 s). Each DID added to the window moves it a slot later: DID 0x1101
+    (the coolant byte the timing trim lookup reads, a derived input since
+    E09.1''s ignition timing, 2026-10-17) took it from 0.069 s to 0.083 s, and
+    0x120F and 0x1110 as well would put it past the margin (0.102 s with all
+    three before 0x1101 was derived). So 0x120F and 0x1110 are not in this
+    profile: throttle is PID 0x11 and purge PID 0x2E (the Fuel Comp fit''s first
+    purge source). The tuning profile still reads both.
 
 
     Mode 01 and Mode 22 are exclusive on this ECM: no Mode 01 read lands inside
@@ -319,9 +321,24 @@ profiles:
     is not hypothesized and carries live-read evidence
     (tests/test_memory_catalog_knock_lambda.py). Neither adds a window when it
     lands (0x103A widens the fuel_axis read, the selector the uprev_state read),
-    so the fill byte stays at 0.069 s. Without 0x103A the X relation stage has
+    so the fill byte stays at 0.083 s. Without 0x103A the X relation stage has
     no BFS word; target phi''s lookup has its X input (the X trace) and E07.4
-    its fill byte.'
+    its fill byte.
+
+
+    Ignition timing (E05.4 (b)/(c), 2026-10-17). The seven chain nodes are the
+    twin of ignition_timing and the trim lookup of ignition_trim_selected, so
+    the derivation names PID 0x0E, the timing byte''s cycle copy (spark
+    window), DID 0x1101, the HI DET byte and the knock retard target (knock
+    target window), all polled here, and sixteen chain words in eight new
+    windows plus knock_chain, all hypothesized until a live read
+    (tests/test_twin_profile.py AWAITING_LIVE_READ). They do not fit beside the
+    fuel pairings: with all of them the session window is 0.25 s, the 4 Hz
+    Mode 01 group runs at 1.96 Hz, DID 0x1208 to PID 0x0C reaches 0.298 s
+    (limit 0.25) and the fill byte 0.093 s (inside 0.1 s by less than a slot),
+    on the fake clock (test_the_awaited_timing_windows_do_not_fit_beside_the_fuel_pairings).
+    When their live reads land they need a second, timing-only profile (E09.1
+    Remaining).'
   experimental: true
   mode01:
     RPM: 1.0
@@ -329,6 +346,7 @@ profiles:
     THROTTLE_POS: 1.0
     O2_WR_LAMBDA_S1: 1.0
     COMMANDED_EQUIV_RATIO: 1.0
+    TIMING_ADVANCE: 1.0
     FUEL_STATUS: 0.5
     SHORT_FUEL_TRIM_1: 0.5
     SHORT_FUEL_TRIM_2: 0.5
@@ -344,16 +362,19 @@ profiles:
   - ECM_MAF_GPS
   - ECM_AIR_CHARGE
   - ECM_INJECTOR_PULSE_1
+  - ECM_COOLANT_TEMP
   mode22_rate_weights: {}
   memory:
   - ECM_TARGET_EQUIV_RATIO
   - ECM_ENGINE_SPEED_RAM
+  - ECM_IGNITION_TIMING_RAM
   - ECM_PEDAL_ENRICH_FLAGS
   - ECM_HIGH_DET_FLAGS
   - ECM_UPREV_MAGIC
   - ECM_ACTIVE_MAP
   - ECM_FUEL_TARGET_MAP_X_TRACE
   - ECM_FUEL_COMP_X_INPUT
+  - ECM_KNOCK_RETARD_TARGET
   memory_rate_weights: {}
   mode01_enabled: true
   mode22_enabled: true
@@ -364,26 +385,31 @@ profiles:
   did_continuous: false
   bus_budget_override: 90.0
   priority_channels: null
-  expected_total_demand_hz: 57.0
-  capacity_evidence: 'Demand (preview_polling_plan, the live plan asked early): 5
-    Mode 01 PIDs at 4 Hz, 5 at 2 Hz (fuel status, four trims) and 5 at 1 Hz, 3
-    DIDs and 6 memory windows at 2 Hz: 53 channel reads/s, plus entry and exit
-    every 0.5 s cycle (4 req/s): 57 req/s unbatched, 29 batched six PIDs to a
-    request, against the 90 req/s budget. Cycle (hybrid_cycle.plan_cycle, the plan
-    the loop reports as /status.obd_scheduler.did_profile.cycle.plan): 18 Mode
-    01-side requests (15 PIDs and the three DTC polls) in 3 batches, 9 in-window
-    requests and 2 session requests at 90 req/s plus the 0.05 s exit grace:
-    required_seconds 0.2056 of the 0.5 s cycle; 0.3722 with batching refused.
-    worst_case_seconds 1.2056 (1.3722 unbatched) is that plus one request
-    timeout (1.0 s): one unanswered request makes a cycle of about 1.2 s and the
-    boundaries it overruns are skipped, not burst. On the fake clock the loop
-    reports that plan, every channel runs at its planned rate, a window takes
-    0.11 s entry to exit, and the three cycles that held an unanswered DTC poll
-    ran 1.18-1.21 s. Parent evidence: the tuning profile ran 62 req/s at the same
-    budget and cycle on six drives (2026-09-21..23; DID 0x1208 to 0x1209 p50
-    0.011 s on 09-23T142926). No capture of this profile exists yet; replace this
-    text with the first one, and watch storage queue_depth (the 2026-07-29
-    overload was the writer, not the bus).'
+  expected_total_demand_hz: 65.0
+  capacity_evidence: 'Demand (preview_polling_plan, the live plan asked early): 6
+    Mode 01 PIDs at 4 Hz (PID 0x0E since 2026-10-17), 5 at 2 Hz (fuel status,
+    four trims) and 5 at 1 Hz, 4 DIDs and 7 memory windows at 2 Hz: 61 channel
+    reads/s, plus entry and exit every 0.5 s cycle (4 req/s): 65 req/s
+    unbatched, 33 batched six PIDs to a request, against the 90 req/s budget.
+    Cycle (hybrid_cycle.plan_cycle, the plan the loop reports as
+    /status.obd_scheduler.did_profile.cycle.plan): 19 Mode 01-side requests (16
+    PIDs and the three DTC polls) in 4 batches, 11 in-window requests and 2
+    session requests at 90 req/s plus the 0.05 s exit grace: required_seconds
+    0.2389 of the 0.5 s cycle (0.2056 before the timing channels); 0.4056 with
+    batching refused (0.3722 before). worst_case_seconds 1.2389 (1.4056
+    unbatched) is that plus one request timeout (1.0 s): one unanswered request
+    makes a cycle of about 1.2 s and the boundaries it overruns are skipped, not
+    burst. On the fake clock the loop reports that plan, every channel runs at
+    its planned rate, and a window takes 0.133-0.135 s entry to exit (0.11 s
+    before). Before the timing channels the three cycles that held an
+    unanswered DTC poll ran 1.18-1.21 s. Parent evidence: the tuning profile ran
+    62 req/s at the same budget and cycle on six drives (2026-09-21..23; DID
+    0x1208 to 0x1209 p50 0.011 s on 09-23T142926). 65 req/s is under the
+    116.8 req/s the event loop sustained on the truck (2026-09-10), so the
+    request rate is not the risk; the storage writer is: the 2026-07-29
+    overload (records dropped at 25 req/s) was the writer, not the bus, and
+    predates that measurement. No capture of this profile exists yet; replace
+    this text with the first one and its storage queue_depth.'
   required_tuple: []
   min_achieved_rate_hz: null
   max_tuple_skew_s: null

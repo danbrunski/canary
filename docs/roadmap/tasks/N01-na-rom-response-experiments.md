@@ -136,6 +136,17 @@ block wider than where the truck operates, not by knowing which cell it sits in.
 
 - [ ] **Prerequisite:** N01.1 measured, or deliberately skipped. Never flash both
   at once.
+- [ ] **Prerequisite, capture recipe (E05.4 (b)/(c), E09.1; added 2026-10-17):**
+  read `0xFFFF283F` before choosing N01.2's trim table (`mem:ECM_HIGH_DET_FLAGS`:
+  bit 6 set means warm timing reads trim B, clear means trim A; edit the table
+  in force). Drive profile `twin`, which polls PID 0x0E,
+  `mem:ECM_IGNITION_TIMING_RAM`, that byte, the rpm word, the X byte, DID
+  0x1101 and the knock retard target in every 0.5 s window. Warm past 60 °C
+  coolant (raw 110) for part-throttle rpm × load holds, plus one warm-up pass
+  through 56–60 °C (the trim blend). The chain's own words (`0xFFFF1777`/`177A`
+  through `0xFFFF11FF`) are catalogued but unread: a key-on and idle 0x23 read
+  of their eight windows and `knock_chain` comes first (as on 2026-10-08), and
+  then a timing-only profile (they do not fit in `twin`; E09.1).
 - [ ] **The edit:** retard only (knock-safe), a few counts, over the same cruise
   block as N01.1 with the same margin and controls. Record it.
 - [ ] **What it measures:** the table's unit. Nobody here knows what one count is

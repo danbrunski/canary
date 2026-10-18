@@ -35,10 +35,12 @@ What it makes impossible rather than documented:
 * **Nothing is defaulted.** :class:`SimRequest` has no field with a default:
   environment, learned state, candidate events, load basis, draws and seed
   are all stated (E08.2's ``environment_unstated``, E08.3's draws and seed).
-  The timing output (E09.7) needs the HI DET latch and knock-control state,
-  which the request does not carry yet (the page's half of E09.7): it says
-  ``timing_state_unstated``, and simulating a timing-trim edit is refused by
-  that name. Previewing one works.
+  The timing output (E09.7) reads the HI DET latch and knock-control state,
+  which nothing logs, so the request carries both (``high_det``,
+  ``knock_control``) and a missing one is a 422 naming it. They are never
+  typical values either (:data:`NEVER_TYPICAL_FIELDS`): a latch state is a
+  condition of this run, and one filled in as "typical" would outlive the
+  fault that set it.
 * **Bounded before any work:** a grid over :data:`MAX_GRID_POINTS` cells
   (``grid_too_large``) or more than :data:`MAX_DRAWS` draws
   (``draws_too_many``) is refused before a design is built.
@@ -73,7 +75,13 @@ from pydantic import (
 
 from src.analysis.ecu_application import ApplicationModel, ApplicationModelRefusalError
 from src.analysis.fuel_plant import FuelPlantRefusalError, plant_qualification
-from src.analysis.paired_scenarios import LearnedState, PairedScenario, SimKit
+from src.analysis.paired_scenarios import (
+    KnockControl,
+    LearnedState,
+    PairedScenario,
+    SimKit,
+    TimingState,
+)
 from src.analysis.rom_edit_spec import (
     BaseImage,
     EditSpec,
@@ -133,6 +141,8 @@ MAX_DRAWS = 2000
 
 #: Every :class:`LearnedState` the editor builds says where it came from.
 LEARNED_SOURCE = "stated: ROM Editor"
+#: So does the :class:`TimingState` (``tools/rom_sim.py`` says ``cli: ...``).
+TIMING_SOURCE = "stated: ROM Editor"
 #: Why a base that is not a flashed revision cannot be simulated.
 BASE_NOT_RECORDED = "base_not_a_recorded_revision"
 
@@ -408,6 +418,13 @@ class SimRequest(BaseModel):
     throttle_closed_learned: _Finite
     idle_air_learned: _Finite
     evap_purge_area: _Finite
+    #: The ignition chain's two stated states (E09.7), which nothing logs:
+    #: ``set`` is the HI DET latch 0xFFFF283F bit 6 (warm timing reads trim B,
+    #: else A) and ``fallback`` is the knock controller's sensor-fault fallback
+    #: 0xFFFF479D bit 7. Neither implies the other
+    #: (:class:`~src.analysis.paired_scenarios.TimingState`).
+    high_det: Literal["set", "clear"]
+    knock_control: KnockControl
     #: ``none``: both ROMs start from the same learned state; ``ecu_reflash``:
     #: the flash resets what the contract says it resets on the candidate.
     candidate_events: Literal["none", "ecu_reflash"]
@@ -421,6 +438,14 @@ class SimRequest(BaseModel):
     @property
     def events(self) -> tuple[str, ...]:
         return () if self.candidate_events == "none" else (self.candidate_events,)
+
+    @property
+    def timing_state(self) -> TimingState:
+        return TimingState(
+            high_det=self.high_det == "set",
+            knock_control=self.knock_control,
+            source=TIMING_SOURCE,
+        )
 
 
 def _bounded(request: SimRequest) -> None:
@@ -529,9 +554,10 @@ def _simulate(
     _bounded(request)
     design = _grid_design(request, revision, profile_dir, registry, kit.plant.plant_version)
     require_base(design, base.image_sha256)
-    # The request carries no timing state yet (module docstring): a trim edit
-    # refuses here, by name and before any draw, and other edits show timing as not stated.
-    state = None
+    # The request states the HI DET latch and knock control (module docstring),
+    # so a trim edit simulates; the cells are read at the request's coolant, the
+    # one every design point carries.
+    state = request.timing_state
     timing = ignition_timing_block(
         kit,
         base.image,
@@ -637,7 +663,7 @@ def simulate_edits(
 #: ``<profile>/sim_typical_values.yaml``: the vehicle's typical stated values (W09.11).
 TYPICAL_VALUES_FILE = "sim_typical_values.yaml"
 #: The SimRequest fields the form's "Fill typical values" button may fill: the stated
-#: environment and the learned state, vehicle facts. Twelve of the twenty-one.
+#: environment and the learned state, vehicle facts. Twelve of the twenty-three.
 TYPICAL_FIELDS: tuple[str, ...] = (
     "baro_kpa",
     "iat_c",
@@ -654,6 +680,17 @@ TYPICAL_FIELDS: tuple[str, ...] = (
 )
 #: The rest describe this experiment, this base or this run, never the vehicle: the
 #: button never fills them, and a typical-values file naming one is refused.
+#:
+#: ``high_det`` and ``knock_control`` (E09.7) are in this group on purpose, and the
+#: evidence is the reason. They are live ECU states, not constants of the vehicle: on
+#: 2026-10-08 a RAM read found HI DET set (0xFFFF283F = 0x40) and knock control in
+#: fallback (0xFFFF13FE = 0xFB00, the KS1 fault, P0328), and both clear when KS1 is
+#: repaired. A typical value would keep answering "set / fallback" after that, and a
+#: ``set`` default makes every trim A edit read as "no change" (the ECM reads trim B
+#: while the latch is set). They are also the experiment's own condition: trim A is
+#: only read with the latch clear and trim B only with it set, so "what would this
+#: edit do after the KS1 repair?" is a run with ``clear`` / ``active``. The operator
+#: states both every run, and the page remembers neither.
 NEVER_TYPICAL_FIELDS: tuple[str, ...] = (
     "label",
     "edits",
@@ -661,6 +698,8 @@ NEVER_TYPICAL_FIELDS: tuple[str, ...] = (
     "rpm_edges",
     "load_edges",
     "load_basis",
+    "high_det",
+    "knock_control",
     "candidate_events",
     "draws",
     "seed",

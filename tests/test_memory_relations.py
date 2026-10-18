@@ -472,6 +472,11 @@ def test_the_d03_38_hand_checks_are_declared_on_their_channels() -> None:
         ("ECM_AF_LAMBDA_B2", "mode01_pid"),
         ("ECM_AF_LEARNED_OFFSET_B1", "invariant"),
         ("ECM_AF_LEARNED_OFFSET_B2", "invariant"),
+        # E05.4 (c), the ignition timing chain (2026-10-17): 0xFFFF2332 <=
+        # -0xFFFF1215, 0xFFFF2793 <= 0xFFFF1777, 0xFFFF11CB in 0..7.
+        ("ECM_KNOCK_RETARD_APPLIED", "memory"),
+        ("ECM_TIMING_TRIM_TERM", "memory"),
+        ("ECM_TIMING_TRIM_SUBTRAHEND", "invariant"),
     }
 
 

@@ -20,8 +20,19 @@
 # holds: the SimRequest has no defaults, and a click is the operator stating
 # these values.
 #
+# NOT declared here, on purpose, and refused if named (rom_editor.
+# NEVER_TYPICAL_FIELDS): `high_det` and `knock_control` (E09.7). They are live ECU
+# states, not constants of this truck. The RAM read of 2026-10-08 found the HI DET
+# latch set (0xFFFF283F = 0x40) and knock control in fallback (0xFFFF13FE =
+# 0xFB00, the KS1 fault, P0328); both clear when KS1 is repaired, so a "typical"
+# set / fallback would keep answering for a truck that no longer is, and a set
+# latch makes every trim A edit read as no change (the ECM reads trim B while it
+# is set). They are also the experiment's own condition (trim A is read only with
+# the latch clear, trim B only with it set), so the operator states both on every
+# run and the page remembers neither.
+#
 # Every field the button may fill (rom_editor.TYPICAL_FIELDS, twelve of the
-# SimRequest's twenty-one) is either a `values` entry below or a `left_empty`
+# SimRequest's twenty-three) is either a `values` entry below or a `left_empty`
 # entry that says why no value is declared; one that is neither cannot be
 # loaded, so the button can always say what it left for the operator. A new
 # value needs a source that already exists in the repo.

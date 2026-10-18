@@ -7,6 +7,7 @@
 
 import type { RomTableAxis, RomTableValues, RomTablesResponse } from "../types/romLibrary";
 import type {
+  IgnitionTimingBlock,
   RomSimRequest,
   RomSimResult,
   SimCell,
@@ -516,12 +517,248 @@ export function buildSimResult(): RomSimResult {
       },
     },
     cells: buildCellTable(),
+    // A Fuel Comp edit reaches ignition timing outside the trims.
+    ignition_timing: buildTimingBlock("fuel_comp"),
     spec_yaml: "schema_version: 1\nlabel: light load 2 % richer\n",
     spec_sha256: "5".repeat(64),
   };
 }
 
-/** A request with every one of the 21 fields stated. */
+// -- ignition timing (E09.7) --------------------------------------------------------------
+
+/** The trims' axes in the fixture: rpm = raw x 50 (400..6,400), X = raw (8..128). The
+ *  ECM's rpm word is the axis byte x 4 (`paired_scenarios.TRIM_RPM_AXIS_SCALE`). */
+export const TRIM_AXIS_RAW = Array.from({ length: 16 }, (_, i) => 8 * (i + 1));
+
+const TRIM_DECODE = {
+  formula: "timing trim = (raw & 0x7F) × 1",
+  kind: "linear" as const,
+  quantity: "timing trim",
+  unit: "count",
+  scale: 1,
+  offset: 0,
+  numerator: null,
+  mask: 0x7f,
+  confidence: "verified" as const,
+  evidence: "The trim interpolator masks every cell with 0x7F.",
+};
+
+/** One timing trim in Map 1, as the daemon lists it: a u8 grid whose bit 7 is a
+ *  flag (set from column 8 on here), decoded on the low seven bits. Trim B reads
+ *  three counts above A. */
+export function timingTrimTable(which: "a" | "b"): RomTableValues {
+  const lift = which === "b" ? 3 : 0;
+  const raw = TRIM_AXIS_RAW.map((_, r) =>
+    TRIM_AXIS_RAW.map((_, c) => (c >= 8 ? 0x80 : 0) | (40 + r + lift)),
+  );
+  const letter = which.toUpperCase();
+  return {
+    id: `timing_trim_${which}`,
+    name: `Ignition timing trim ${letter}`,
+    label: `Ignition timing trim ${letter} (Map 1)`,
+    slot: 1,
+    kind: `timing_trim_${which}`,
+    role: "table",
+    decode: TRIM_DECODE,
+    offset: which === "a" ? 0xe0040 : 0xe0140,
+    end: which === "a" ? 0xe013f : 0xe023f,
+    rows: 16,
+    cols: 16,
+    dtype: "u8",
+    unit: "count",
+    raw,
+    decoded: raw.map((row) => row.map((value) => value & 0x7f)),
+    axes: {
+      rows: {
+        id: "timing_trim_rpm_axis",
+        name: "Timing trim rpm axis",
+        offset: 0xcc93,
+        raw: TRIM_AXIS_RAW,
+        decoded: TRIM_AXIS_RAW.map((value) => value * 50),
+        unit: "rpm",
+        decode: null,
+        confidence: "verified",
+      },
+      cols: {
+        id: "timing_trim_load_axis",
+        name: "Timing trim load axis (BFS X counts)",
+        offset: 0xcc83,
+        raw: TRIM_AXIS_RAW,
+        decoded: null,
+        unit: null,
+        decode: null,
+        confidence: "verified",
+      },
+    },
+    confidence: "verified",
+    evidence: "Read from its RAM copy by 0x04A18C.",
+  };
+}
+
+const CONDITIONS = [
+  "every chain term but the trim term 0xFFFF2793 is equal on both ROMs: unidentified, never given a value",
+  "trim path: 0xFFFF2833 bit 4 and 0xFFFF4785 bit 6 clear, no 0xFFFF28B4 bit 1 bypass",
+  "rate limit at its fixed point with a nonzero rise allowance",
+  "intermediate signed-byte clamps (0xFFFF1A58, 0xFFFF1346) not binding",
+];
+const TORQUE_REFUSALS = [
+  "spark_response_unmeasured: spark has no measured torque response",
+  "torque_plant_not_validated",
+];
+const KNOCK_REFUSALS = ["knock_unmodelled: no knock model"];
+const TIMING_STATE = {
+  high_det: true,
+  knock_control: "fallback" as const,
+  source: "stated: ROM Editor",
+};
+
+function trimCell(
+  row: number,
+  col: number,
+  delta: number | null,
+  reasons: string[],
+  tableRead: "a" | "b" | null = "b",
+) {
+  return {
+    row,
+    col,
+    rpm_word: (TRIM_AXIS_RAW[row] ?? 0) * 4,
+    x: TRIM_AXIS_RAW[col] ?? 0,
+    base: null,
+    candidate: null,
+    delta,
+    trim_term_delta: delta,
+    status: delta === null ? ("unevaluable" as const) : ("delta_if_no_clamp" as const),
+    reasons,
+    table_read: tableRead,
+  };
+}
+
+function summary(cells: IgnitionTimingBlock["cells"]): IgnitionTimingBlock["summary"] {
+  const listed = cells ?? [];
+  return {
+    cells: 256,
+    changed: listed.filter((cell) => cell.delta !== null && cell.delta !== 0).length,
+    unevaluable: listed.filter((cell) => cell.status === "unevaluable").length,
+    // The backend's rule (`paired_scenarios.timing_cell_summary`): only the
+    // `trim_[ab]_not_read:` reasons, never `trim_term_floor_may_bind` (a trim the ECM reads).
+    changed_trim_not_read: listed.filter((cell) =>
+      cell.reasons.some((reason) => /^trim_[ab]_not_read:/.test(reason)),
+    ).length,
+    reasons: [...new Set(listed.flatMap((cell) => cell.reasons))].sort(),
+  };
+}
+
+function points(reasons: string[], delta: number | null = null): IgnitionTimingBlock["points"] {
+  return [
+    {
+      point: 0,
+      rpm: 1200,
+      rpm_word: 96,
+      coolant_c: 88,
+      pedal_flag: false,
+      outcomes: [
+        {
+          status: delta === null ? "unevaluable" : "delta_if_no_clamp",
+          delta,
+          trim_term_delta: delta ?? 0,
+          reasons,
+          x_base: 33,
+          x_candidate: 33,
+          draws: 150,
+        },
+      ],
+    },
+    {
+      point: 1,
+      rpm: 1600,
+      rpm_word: 128,
+      coolant_c: 88,
+      pedal_flag: false,
+      outcomes: [
+        {
+          status: delta === null ? "unevaluable" : "delta_if_no_clamp",
+          delta,
+          trim_term_delta: delta ?? 0,
+          reasons,
+          x_base: 41,
+          x_candidate: 42,
+          draws: 50,
+        },
+      ],
+    },
+  ];
+}
+
+/** The `ignition_timing` block for the cases the page shows:
+ *  `trim_b` -3 counts on two cells of trim B with the latch set (a number per cell),
+ *  `trim_a` the same edit to trim A with the latch set (read nowhere: `NR`),
+ *  `both` -2 counts on eight cells of row 8 (columns 4-11, across the flag edge) of
+ *    BOTH trims with the latch set: trim B is read, so each cell shows -2 and names
+ *    trim A as edited but not read (real ZS44A-20261004, the verifier's repro),
+ *  `floor` trim B set to 3 counts (below the floor of 7) with the latch set: the
+ *    trim IS read, the cell is unevaluable and nothing is "edited but not read",
+ *  `fuel_comp` an edit outside the trims (`timing_input_changed`, no cells). */
+export function buildTimingBlock(
+  kind: "trim_b" | "trim_a" | "both" | "floor" | "fuel_comp",
+): IgnitionTimingBlock {
+  const base = {
+    output: "ignition_timing_deg",
+    model_output: "ignition_timing",
+    units: "deg_btdc",
+    side: "ecu: the timing byte's chain, no plant",
+    conditions: CONDITIONS,
+    torque: {
+      status: "unsupported" as const,
+      reason: TORQUE_REFUSALS[0],
+      reasons: TORQUE_REFUSALS,
+    },
+    knock: { status: "unsupported" as const, reasons: KNOCK_REFUSALS },
+  };
+  if (kind === "fuel_comp") {
+    const reasons = ["timing_input_changed:fuel_comp_lookup"];
+    return {
+      ...base,
+      trims_changed: false,
+      other_inputs_changed: reasons,
+      status: "unevaluable",
+      reasons,
+      state: TIMING_STATE,
+      points: points([...reasons, "base_timing_load_term_unmodelled"]),
+    };
+  }
+  const cells = {
+    trim_b: [
+      trimCell(3, 3, -3, ["clamp_headroom_unknown"]),
+      trimCell(4, 9, -3, ["clamp_headroom_unknown"]),
+    ],
+    trim_a: [
+      trimCell(3, 3, 0, ["trim_a_not_read:high_det_latch_set"]),
+      trimCell(4, 9, 0, ["trim_a_not_read:high_det_latch_set"]),
+    ],
+    both: Array.from({ length: 8 }, (_, i) =>
+      trimCell(7, 3 + i, -2, ["clamp_headroom_unknown", "trim_a_not_read:high_det_latch_set"]),
+    ),
+    floor: [trimCell(3, 5, null, ["trim_term_floor_may_bind"])],
+  }[kind];
+  return {
+    ...base,
+    trims_changed: true,
+    other_inputs_changed: [],
+    status: "evaluated",
+    state: TIMING_STATE,
+    cells_at: {
+      coolant_c: 88,
+      pedal_flag: false,
+      grid: "the trims' own nodes: rpm word = axis byte x 4, X = load axis byte",
+    },
+    summary: summary(cells),
+    cells,
+    points: kind === "floor" ? points(["trim_term_floor_may_bind"]) : points([], 0),
+  };
+}
+
+/** A request with every one of the 23 fields stated. */
 export function buildRequest(): RomSimRequest {
   return {
     label: "light load 2 % richer",
@@ -544,6 +781,8 @@ export function buildRequest(): RomSimRequest {
     throttle_closed_learned: 0,
     idle_air_learned: 0,
     evap_purge_area: 0,
+    high_det: "set",
+    knock_control: "fallback",
     candidate_events: "ecu_reflash",
     draws: 200,
     seed: 20261015,
@@ -614,6 +853,12 @@ export function fuelCompWithAxes(swap = false): RomTableValues {
 export function tablesWithAxes(swap = false): RomTablesResponse {
   return {
     ...TABLES_WITH_FUEL_COMP,
-    tables: [...TABLES.tables, fuelCompWithAxes(swap), fuelCompTable(2)],
+    tables: [
+      ...TABLES.tables,
+      fuelCompWithAxes(swap),
+      fuelCompTable(2),
+      timingTrimTable("a"),
+      timingTrimTable("b"),
+    ],
   };
 }

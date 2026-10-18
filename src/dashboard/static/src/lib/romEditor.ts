@@ -10,8 +10,12 @@
 // - a raw outside the cell's dtype is refused (`value_out_of_range`), never
 //   clamped;
 // - an edit that changes no selected cell is refused (`no_op_edit`);
-// - only the fuel chain in Map 1 is offered (`table_not_editable`,
-//   `slot_not_simulated`).
+// - only the fuel chain and the ignition timing trims in Map 1 are offered
+//   (`table_not_editable`, `slot_not_simulated`);
+// - a masked cell (the trims' flag bit 7, decode mask 0x7F) is edited on its
+//   masked value and keeps its other bits, as `rom_edit_spec` does: a result
+//   outside 0..mask is `value_out_of_range`, never carried into the flag, and
+//   an absolute value that would change a flag bit is `masked_bits_changed`.
 
 import { HttpError } from "../api/http";
 import type {
@@ -28,8 +32,15 @@ import type {
 } from "../types/romEditor";
 import type { RomTableValues } from "../types/romLibrary";
 
-/** `rom_editor.EDITABLE_TABLES` and `SIM_SLOT`: the fuel chain, Map 1. */
-export const EDITABLE_TABLES = ["fuel_targets", "fuel_compensation", "k_constant"] as const;
+/** `rom_editor.EDITABLE_TABLES` and `SIM_SLOT`: the fuel chain and the
+ *  ignition timing trims (E09.7), Map 1. */
+export const EDITABLE_TABLES = [
+  "fuel_targets",
+  "fuel_compensation",
+  "k_constant",
+  "timing_trim_a",
+  "timing_trim_b",
+] as const;
 export const SIM_SLOT = 1;
 
 /** The largest raw each dtype stores. */
@@ -126,10 +137,35 @@ export function rawForValue(
   if (!decode || !Number.isFinite(value)) return null;
   const params = decodeParams(decode);
   if (!params || params.mask !== null) return null;
+  return invert(params, value);
+}
+
+function invert(params: DecodeParams, value: number): number | null {
   if (params.kind === "linear") return roundHalfUp((value - params.offset) / params.scale);
   if (value === 0) return null;
   return roundHalfUp(params.numerator / value);
 }
+
+/** The cell's value bits for `value` under a masked decode (`raw & mask`
+ *  decodes to `value`), flag bits left to the cell. Null as `rawForValue`, and
+ *  for an unmasked decode (use `rawForValue`). */
+export function maskedRawForValue(
+  decode: RomEditorDecode | null | undefined,
+  value: number,
+): number | null {
+  if (!decode || !Number.isFinite(value)) return null;
+  const params = decodeParams(decode);
+  if (!params || params.mask === null) return null;
+  return invert(params, value);
+}
+
+/** The decode's value mask, or null for an unmasked (or unreadable) decode. */
+export function valueMask(decode: RomEditorDecode | null | undefined): number | null {
+  if (!decode) return null;
+  return decodeParams(decode)?.mask ?? null;
+}
+
+const hex = (n: number) => `0x${n.toString(16).toUpperCase()}`;
 
 /** A decoded value for the page: four significant digits (`12.46`). */
 export function formatDecoded(value: number | null | undefined): string {
@@ -252,10 +288,46 @@ export function buildEdits(
   const decode = table.decode ?? null;
   const max = DTYPE_MAX[table.dtype ?? "u8"] ?? 0xff;
   const cells = selectionCells(selection);
+  const mask = valueMask(decode);
+  const flagsOf = (raw: number) => (mask === null ? 0 : raw & ~mask & max);
+  // The flag bits the selected cells carry, when the table has a value mask.
+  const flagSets = new Set(cells.map(([row, col]) => flagsOf(table.raw[row]?.[col] ?? 0)));
 
   let nextRaw: (old: number) => number;
   let operation: Pick<RomEdit, "set_raw" | "add_raw" | "scale" | "rounding">;
   let chain: string | null = null;
+  const arithmeticMasked = (): BuildResult | null =>
+    mask !== null && (mask & (mask + 1)) !== 0
+      ? refuse(
+          "arithmetic_on_masked_cells",
+          `${table.name}'s value mask ${hex(mask)} is not contiguous low bits, so arithmetic on it has no meaning`,
+        )
+      : null;
+  /** An absolute value on a masked table must leave every flag bit as it is:
+   *  one `set_raw` cannot keep two cells' different flags. */
+  const sharedFlags = (): BuildResult | number => {
+    if (mask === null || flagSets.size <= 1) return [...flagSets][0] ?? 0;
+    // The backend's name for it: `rom_edit_spec` refuses `masked_bits_changed` at the first
+    // cell whose flag bits the one `set_raw` would change.
+    return refuse(
+      "masked_bits_changed",
+      `the selected cells carry different flag bits (${[...flagSets].map(hex).join(", ")} outside the value mask ${hex(mask)}), and one absolute value cannot keep both. Select cells that share them, or use Add or Scale, which keep each cell's flag bits.`,
+    );
+  };
+  const absoluteMasked = (raw: number): BuildResult | null => {
+    if (mask === null) return null;
+    const flags = sharedFlags();
+    if (typeof flags !== "number") return flags;
+    if ((raw & ~mask) === flags) return null;
+    // A raw outside the dtype changes the bits outside the mask too: the backend calls that
+    // `masked_bits_changed` as well (it checks the mask before the dtype).
+    return refuse(
+      "masked_bits_changed",
+      `${table.name}'s value mask is ${hex(mask)}: the selected cells hold flag bits ${hex(flags)}, and raw ${raw}${
+        raw < 0 || raw > max ? ` (outside a ${table.dtype ?? "u8"} cell's 0..${max})` : ""
+      } would change them. Use Set to value, which keeps the flag bits, or include them in the raw count.`,
+    );
+  };
   switch (op.kind) {
     case "set_value": {
       if (!decode) {
@@ -264,28 +336,46 @@ export function buildEdits(
           `${table.name} has no confirmed decode, so it has no engineering value to set; set a raw value`,
         );
       }
-      const raw = rawForValue(decode, op.value);
+      let raw = mask === null ? rawForValue(decode, op.value) : maskedRawForValue(decode, op.value);
       if (raw === null) {
         return refuse(
           "value_not_invertible",
           `no raw count decodes to ${op.value} ${decode.unit} (${decode.formula ?? decode.kind})`,
         );
       }
-      if (raw < 0 || raw > max) {
+      if (mask !== null) {
+        if (raw < 0 || raw > mask) {
+          return refuse(
+            "value_out_of_range",
+            `${op.value} ${decode.unit} is ${raw}; the value bits of a ${table.dtype ?? "u8"} cell under mask ${hex(mask)} hold 0..${mask}. Nothing is clamped, and nothing is carried into the flag bits.`,
+          );
+        }
+        // The flag bits stay what the selected cells hold: the edit sets the value bits only.
+        const flags = sharedFlags();
+        if (typeof flags !== "number") return flags;
+        raw |= flags;
+      } else if (raw < 0 || raw > max) {
         return refuse(
           "value_out_of_range",
           `${op.value} ${decode.unit} is raw ${raw}; a ${table.dtype ?? "u8"} cell holds 0..${max}. Nothing is clamped.`,
         );
       }
       const back = valueForRaw(decode, raw);
-      chain = `${formatDecoded(op.value)} ${decode.unit} → raw ${raw} → ${formatDecoded(back)} ${decode.unit}`;
-      nextRaw = () => raw;
+      chain = `${formatDecoded(op.value)} ${decode.unit} → raw ${raw}${
+        mask !== null && flagsOf(raw) ? ` (flag bits ${hex(flagsOf(raw))} kept)` : ""
+      } → ${formatDecoded(back)} ${decode.unit}`;
+      const fixed = raw;
+      nextRaw = () => fixed;
       operation = { set_raw: raw };
       break;
     }
     case "set_raw": {
       if (!Number.isInteger(op.raw))
         return refuse("not_an_integer", "a raw value is a whole number");
+      // An unmasked table's out-of-dtype raw is refused per cell below (`value_out_of_range`);
+      // a masked table's is a flag-bit change first (`masked_bits_changed`), as in the backend.
+      const refused = absoluteMasked(op.raw);
+      if (refused) return refused;
       nextRaw = () => op.raw;
       operation = { set_raw: op.raw };
       break;
@@ -294,6 +384,8 @@ export function buildEdits(
       if (!Number.isInteger(op.delta)) {
         return refuse("not_an_integer", "the raw amount to add is a whole number");
       }
+      const refused = arithmeticMasked();
+      if (refused) return refused;
       nextRaw = (old) => old + op.delta;
       operation = { add_raw: op.delta };
       break;
@@ -310,6 +402,8 @@ export function buildEdits(
           "a scale needs rounding: nearest, floor or ceil (no default)",
         );
       }
+      const refused = arithmeticMasked();
+      if (refused) return refused;
       const rounding = op.rounding;
       nextRaw = (old) => scaledRaw(old, factor, rounding);
       operation = { scale: factor, rounding };
@@ -326,13 +420,21 @@ export function buildEdits(
         `row ${row + 1}, column ${col + 1} is not in the table`,
       );
     }
-    const newRaw = nextRaw(oldRaw);
-    if (newRaw < 0 || newRaw > max) {
+    // A masked table's arithmetic acts on the value bits and keeps the flag bits
+    // (`rom_edit_spec`); an absolute value was checked against them above.
+    const arithmetic = op.kind === "add_raw" || op.kind === "scale";
+    const onValue = mask !== null && arithmetic;
+    const next = nextRaw(onValue ? oldRaw & mask : oldRaw);
+    const limit = onValue ? mask : max;
+    if (next < 0 || next > limit) {
       return refuse(
         "value_out_of_range",
-        `row ${row + 1}, column ${col + 1}: raw ${oldRaw} becomes ${newRaw}; a ${table.dtype ?? "u8"} cell holds 0..${max}. Nothing is clamped.`,
+        onValue
+          ? `row ${row + 1}, column ${col + 1}: the value bits ${oldRaw & mask} become ${next}, outside 0..${mask} (mask ${hex(mask)}). Nothing is clamped, and nothing is carried into the flag bits.`
+          : `row ${row + 1}, column ${col + 1}: raw ${oldRaw} becomes ${next}; a ${table.dtype ?? "u8"} cell holds 0..${max}. Nothing is clamped.`,
       );
     }
+    const newRaw = onValue ? (oldRaw & ~mask) | next : next;
     planned.push({
       row,
       col,

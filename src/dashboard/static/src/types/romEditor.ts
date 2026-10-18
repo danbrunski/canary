@@ -36,7 +36,8 @@ export interface RomEditRegion {
  *  builds `cells` edits only, and exactly one of `set_raw` / `add_raw` /
  *  `scale`; `rounding` goes with `scale` and with nothing else. */
 export interface RomEdit {
-  /** A `rom_map.yaml` table id (`fuel_targets`, `fuel_compensation`, `k_constant`). */
+  /** A `rom_map.yaml` table id (`fuel_targets`, `fuel_compensation`, `k_constant`,
+   *  `timing_trim_a`, `timing_trim_b`). */
   table: string;
   slot?: number | null;
   cells?: CellIndex[];
@@ -246,7 +247,7 @@ export type BuildResult =
 
 // -- Simulate (W09.4) ---------------------------------------------------------------------
 // `POST /control/rom/library/{sha}/simulate`. The request is
-// `rom_editor.SimRequest` (21 fields, none defaulted, `extra="forbid"`); the
+// `rom_editor.SimRequest` (23 fields, none defaulted, `extra="forbid"`); the
 // response is `rom_editor.simulate_edits`, whose `cells` is
 // `sim_cells.CellTable.to_dict()` (E08.4, `schema_version` 1). Field names
 // follow `docs/headless-api.md` "ROM Editor: preview and simulate (W09)".
@@ -260,6 +261,14 @@ export type SimLoadBasis = "fill_fraction_as_manifold_ratio";
 /** `none`: both ROMs start from the same learned state; `ecu_reflash`: the
  *  flash resets what the contract says it resets on the candidate. */
 export type SimCandidateEvents = "none" | "ecu_reflash";
+
+/** `set`: the HI DET latch (0xFFFF283F bit 6) is set, so warm timing reads
+ *  trim B; `clear`: it reads trim A. Nothing logs it, so a run states it. */
+export type SimHighDet = "set" | "clear";
+
+/** `fallback`: the knock sensor fault state (0xFFFF479D bit 7). Neither it nor
+ *  HI DET implies the other; a run states both. */
+export type SimKnockControl = "active" | "fallback";
 
 /** A stated rail pressure, or the plant's own working value, said so. */
 export type SimRail = number | "working_assumption";
@@ -286,6 +295,10 @@ export interface RomSimRequest {
   throttle_closed_learned: number;
   idle_air_learned: number;
   evap_purge_area: number;
+  /** The ignition chain's two ECU states (E09.7): live facts that change when
+   *  the knock sensor is repaired, so never a typical value, never remembered. */
+  high_det: SimHighDet;
+  knock_control: SimKnockControl;
   candidate_events: SimCandidateEvents;
   /** An integer >= 1, at most `MAX_DRAWS`. */
   draws: number;
@@ -512,6 +525,92 @@ export interface SimProvenance {
   [key: string]: unknown;
 }
 
+// -- Ignition timing (E09.7) --------------------------------------------------------------
+
+/** `ecu_state_models.TimingStatus`: `delta_if_no_clamp` is the change if no
+ *  clamp binds (the design has no logged timing to check headroom against). */
+export type TimingStatus = "computed" | "delta_if_no_clamp" | "unevaluable";
+
+/** One cell of the trims' own 16 x 16 grid (`paired_scenarios.ignition_timing_cells`).
+ *  `rpm_word` is the axis byte x 4 and `x` the load axis byte. `delta` is in degrees
+ *  BTDC (one trim count is one degree); null when the cell is unevaluable. */
+export interface TimingCell {
+  row: number;
+  col: number;
+  rpm_word: number;
+  x: number;
+  base: number | null;
+  candidate: number | null;
+  delta: number | null;
+  trim_term_delta: number | null;
+  status: TimingStatus;
+  reasons: string[];
+  /** The trim the ECM reads here with the stated latch; null in the coolant blend band. */
+  table_read: "a" | "b" | null;
+}
+
+export interface TimingSummary {
+  cells: number;
+  changed: number;
+  unevaluable: number;
+  changed_trim_not_read: number;
+  reasons: string[];
+}
+
+/** One (point, draw) outcome class at a design point, with how many draws share it. */
+export interface TimingPointOutcome {
+  status: TimingStatus;
+  delta: number | null;
+  trim_term_delta: number | null;
+  reasons: string[];
+  x_base: number | null;
+  x_candidate: number | null;
+  draws: number;
+}
+
+export interface TimingPointRow {
+  point: number;
+  rpm: number;
+  rpm_word: number;
+  coolant_c: number;
+  pedal_flag: boolean;
+  outcomes: TimingPointOutcome[];
+}
+
+/** E07.5's own refusals about what a timing change says (never a claim). */
+export interface TimingClaim {
+  status: "supported" | "unsupported";
+  reasons: string[];
+  /** Torque only: the refusal about the change itself, before the standing ones. */
+  reason?: string | null;
+}
+
+/** `sim_cells.ignition_timing_block` plus `points` (`ignition_timing_points`):
+ *  `rom_editor.simulate_edits`' `ignition_timing`. ECU side only. */
+export interface IgnitionTimingBlock {
+  output: string;
+  model_output: string;
+  units: string;
+  side: string;
+  trims_changed: boolean;
+  /** `timing_input_changed:<node>` / `unknown_bytes_changed`: bytes outside the trims. */
+  other_inputs_changed: string[];
+  /** What the change assumes held equal on both ROMs. */
+  conditions: string[];
+  torque: TimingClaim;
+  knock: TimingClaim;
+  status: "evaluated" | "unevaluable";
+  /** Why it is unevaluable (no cells then). */
+  reasons?: string[];
+  /** The stated latch and knock control, as the run used them. */
+  state?: { high_det: boolean; knock_control: SimKnockControl; source: string };
+  cells_at?: { coolant_c: number; pedal_flag: boolean; grid: string };
+  summary?: TimingSummary;
+  /** The cells that change or name a reason; every other cell is unchanged. */
+  cells?: TimingCell[];
+  points?: TimingPointRow[];
+}
+
 /** A 200 from the simulate route (`rom_editor.simulate_edits`). `label` here
  *  is the result's; the request's is `candidate.label`. */
 export interface RomSimResult {
@@ -534,6 +633,8 @@ export interface RomSimResult {
   /** The preview's provenance: what the edits changed in the candidate. */
   candidate: RomEditProvenance;
   cells: SimCellTable;
+  /** The ECU-side ignition timing change (E09.7), on every result. */
+  ignition_timing: IgnitionTimingBlock;
   spec_yaml: string | null;
   spec_sha256?: string;
 }

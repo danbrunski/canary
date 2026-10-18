@@ -5,8 +5,13 @@
 //
 // What this makes impossible rather than documented:
 // - nothing is defaulted: an empty field is `missing` and blocks the request,
-//   and every request field is named (`SIM_REQUEST_FIELDS`, 21 of them, the
+//   and every request field is named (`SIM_REQUEST_FIELDS`, 23 of them, the
 //   whole of `rom_editor.SimRequest`);
+// - the HI DET latch and knock control (E09.7) are stated every run: nothing
+//   logs them, they change when the knock sensor is repaired, so they start
+//   unchosen, are never filled by the typical-values button and are not in
+//   `REMEMBERED_KEYS` (a remembered "set" would answer for a truck that no
+//   longer is);
 // - a remembered value is never applied without being shown: the form seeds
 //   its fields from `loadRemembered` and marks them, and `candidate_events`,
 //   `grid` and the edges are never remembered at all (a choice about *this*
@@ -28,6 +33,8 @@ import type {
   SimCandidateEvents,
   SimFailure,
   SimGrid,
+  SimHighDet,
+  SimKnockControl,
   SimLoadBasis,
 } from "../types/romEditor";
 import type { RomTableAxis, RomTableValues } from "../types/romLibrary";
@@ -47,7 +54,7 @@ export const LOAD_BASIS: SimLoadBasis = "fill_fraction_as_manifold_ratio";
 export const LOAD_BASIS_MEANING =
   "The throttle-model fill fraction (Fuel Comp's load axis, % of the model's ceiling) is taken as MAP / baro, and MAF is the airflow at which the plant's manifold model gives that MAP. The fill byte has no absolute unit in code (rom_map.yaml fuel_comp_flow_axis); this mapping is stated, not decoded.";
 
-/** Every field of the simulate body. The test pins this to the 21 in
+/** Every field of the simulate body. The test pins this to the 23 in
  *  `docs/headless-api.md`. */
 const REQUEST_FIELD_MAP: Record<keyof RomSimRequest, true> = {
   label: true,
@@ -68,6 +75,8 @@ const REQUEST_FIELD_MAP: Record<keyof RomSimRequest, true> = {
   throttle_closed_learned: true,
   idle_air_learned: true,
   evap_purge_area: true,
+  high_det: true,
+  knock_control: true,
   candidate_events: true,
   draws: true,
   seed: true,
@@ -100,6 +109,9 @@ export interface SimFormValues extends Record<NumberKey, string> {
   /** `stated` takes `railKpa`; `working_assumption` is the plant's own value,
    *  said so. */
   rail: "" | "working_assumption" | "stated";
+  /** The HI DET latch and knock control: stated every run, never remembered. */
+  highDet: "" | SimHighDet;
+  knockControl: "" | SimKnockControl;
   candidateEvents: "" | SimCandidateEvents;
 }
 
@@ -122,6 +134,8 @@ export const EMPTY_FORM: SimFormValues = {
   throttleClosedLearned: "",
   idleAirLearned: "",
   evapPurgeArea: "",
+  highDet: "",
+  knockControl: "",
   candidateEvents: "",
   draws: "",
   seed: "",
@@ -219,6 +233,38 @@ export const CANDIDATE_EVENT_CHOICES: {
     label: "Fresh flash resets trims",
     meaning:
       "The candidate starts from what a flash resets (the contract says what), as the truck would after the flash; the base keeps its own.",
+  },
+];
+
+/** The ignition chain's two ECU states (E09.7). Nothing logs either, and both change with
+ *  the truck (the 2026-10-08 RAM read was set / fallback, the KS1 fault, and both clear once
+ *  the sensor is repaired), so the form offers no preselection and remembers neither. */
+export const HIGH_DET_CHOICES: { id: SimHighDet; label: string; meaning: string }[] = [
+  {
+    id: "set",
+    label: "Set",
+    meaning:
+      "Warm, the ECM reads timing trim B (the high-detonation table). An edit to trim A shows no change.",
+  },
+  {
+    id: "clear",
+    label: "Clear",
+    meaning:
+      "Warm, the ECM reads timing trim A (the normal table). An edit to trim B shows no change.",
+  },
+];
+
+export const KNOCK_CONTROL_CHOICES: { id: SimKnockControl; label: string; meaning: string }[] = [
+  {
+    id: "active",
+    label: "Active",
+    meaning: "The knock controller runs normally.",
+  },
+  {
+    id: "fallback",
+    label: "Fallback",
+    meaning:
+      "The knock sensor fault state: a fixed retard target (-5 deg). It does not imply HI DET, and HI DET does not imply it.",
   },
 ];
 
@@ -397,6 +443,20 @@ export function checkSimForm(values: SimFormValues, label: string, edits: RomEdi
     else rail = parsed.value;
   }
 
+  if (values.highDet === "") {
+    missing(
+      "highDet",
+      "HI DET latch",
+      "choose set or clear: nothing logs it, so there is no default",
+    );
+  }
+  if (values.knockControl === "") {
+    missing(
+      "knockControl",
+      "Knock control",
+      "choose active or fallback: nothing logs it, so there is no default",
+    );
+  }
   if (values.candidateEvents === "") {
     missing(
       "candidateEvents",
@@ -429,6 +489,8 @@ export function checkSimForm(values: SimFormValues, label: string, edits: RomEdi
     throttle_closed_learned: n.throttleClosedLearned,
     idle_air_learned: n.idleAirLearned,
     evap_purge_area: n.evapPurgeArea,
+    high_det: values.highDet as SimHighDet,
+    knock_control: values.knockControl as SimKnockControl,
     candidate_events: values.candidateEvents as SimCandidateEvents,
     draws: n.draws,
     seed: n.seed,
@@ -587,8 +649,9 @@ export function suggestEdges(tables: RomTableValues[]): BreakpointSuggestion {
 // -- what the browser remembers -------------------------------------------------------------
 
 /** The last-used values that come back, shown and marked in the form. Not
- *  the grid, the edges or the candidate events: those describe *this*
- *  experiment or *this* base image, so they are stated every time. */
+ *  the grid, the edges, the candidate events, the HI DET latch or knock control:
+ *  those describe *this* experiment, *this* base image or a live ECU state that
+ *  changes with the truck, so they are stated every time. */
 export const REMEMBERED_KEYS: readonly FormKey[] = [
   "baro",
   "iat",

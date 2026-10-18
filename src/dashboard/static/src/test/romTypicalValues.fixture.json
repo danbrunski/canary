@@ -1,7 +1,7 @@
 {
   "profile": "nissan-xterra-2008",
   "file": "sim_typical_values.yaml",
-  "file_sha256": "c05ea466ee8e63db0143eefa97536eec9154141e346dfae46f138eb2c2e3dae6",
+  "file_sha256": "270aba4c45675e8814e203b57b1f4bbe0feec65e5f9d0006cb504bce69a027c7",
   "values": {
     "baro_kpa": {
       "value": 81.0,

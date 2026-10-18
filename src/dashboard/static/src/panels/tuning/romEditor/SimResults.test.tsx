@@ -5,14 +5,17 @@ import { groupAssumptions, STATUSES } from "../../../lib/romSimView";
 import {
   buildCellTable,
   buildRunContext,
+  buildTimingBlock,
   output,
   buildSimResult,
+  tablesWithAxes,
   BASE_SHA,
   CANDIDATE_SHA,
   SIM_ASSUMPTIONS,
   VE_ASSUMPTION,
 } from "../../../test/romSimFixtures";
 import type { RomSimResult, SimCell, SimRunContext } from "../../../types/romEditor";
+import type { RomTableValues } from "../../../types/romLibrary";
 import { SimResults } from "./SimResults";
 
 function show(
@@ -20,6 +23,7 @@ function show(
     result?: RomSimResult;
     run?: SimRunContext;
     stale?: boolean;
+    tables?: RomTableValues[];
     onDownload?: () => void;
   } = {},
 ) {
@@ -28,6 +32,7 @@ function show(
       result={options.result ?? buildSimResult()}
       run={options.run ?? buildRunContext()}
       stale={options.stale ?? false}
+      tables={options.tables}
       onDownload={options.onDownload ?? (() => {})}
     />,
   );
@@ -583,5 +588,144 @@ describe("the WOT column caveat", () => {
     unmount();
     show({ run: withFlag(false, 0) });
     expect(caveats()).not.toHaveTextContent("The WOT column was edited");
+  });
+});
+
+describe("the ignition timing section (E09.7)", () => {
+  const withTiming = (kind: Parameters<typeof buildTimingBlock>[0]): RomSimResult => ({
+    ...buildSimResult(),
+    ignition_timing: buildTimingBlock(kind),
+  });
+  const section = () => screen.getByRole("region", { name: "Ignition timing" });
+  const grid = () => within(section()).getByRole("table", { name: /per trim cell/ });
+  const marks = (kind: string) =>
+    Array.from(grid().querySelectorAll(`[data-timing-mark="${kind}"]`));
+
+  it("comes after the caveats and the maps, never before them", () => {
+    show({ result: withTiming("trim_b"), tables: tablesWithAxes().tables });
+    const caveats = screen.getByRole("region", { name: "Read this first" });
+    expect(
+      caveats.compareDocumentPosition(section()) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    expect(
+      screen.getAllByRole("figure")[0]?.compareDocumentPosition(section()) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+  });
+
+  it("shows the stated state, the change per edited cell on the trims' axes, and 'no change' elsewhere", () => {
+    show({ result: withTiming("trim_b"), tables: tablesWithAxes().tables });
+    expect(section()).toHaveTextContent(
+      "HI DET latch set (warm timing reads trim B), knock control in fallback (knock sensor fault)",
+    );
+    expect(section()).toHaveTextContent(
+      "coolant 88 °C (your stated coolant), pedal flag bit 0 clear",
+    );
+    expect(section()).toHaveTextContent("256 in the grid: 2 changed, 0 edited but not read");
+    expect(marks("changed").map((cell) => cell.textContent)).toEqual(["-3", "-3"]);
+    expect(marks("unchanged")).toHaveLength(254);
+    expect(marks("not_read")).toHaveLength(0);
+    // The cell is named by its place and what it says, with its axes beside it.
+    expect(within(grid()).getByRole("cell", { name: /^Row 4, column 4: -3/ })).toBeVisible();
+    expect(within(grid()).getByRole("rowheader", { name: "1,600" })).toBeVisible();
+    expect(within(grid()).getByRole("columnheader", { name: "32" })).toBeVisible();
+    expect(section()).toHaveTextContent("unsupported: spark_response_unmeasured");
+    expect(section()).toHaveTextContent("It is no torque claim and no knock claim.");
+  });
+
+  it("explains every reason it names, in the block's own words and a sentence", () => {
+    show({ result: withTiming("trim_b"), tables: tablesWithAxes().tables });
+    const reasons = within(section()).getByRole("list", { name: "Timing reasons" });
+    expect(within(reasons).getAllByRole("listitem")).toHaveLength(1);
+    expect(reasons).toHaveTextContent("clamp_headroom_unknown");
+    expect(reasons).toHaveTextContent("2 trim cells");
+    expect(reasons).toHaveTextContent(/50-degree cap and the -7 floor/);
+  });
+
+  it("draws an edited trim the stated latch does not read as NR with its reason, never as 0", () => {
+    show({ result: withTiming("trim_a"), tables: tablesWithAxes().tables });
+    expect(marks("not_read").map((cell) => cell.textContent)).toEqual(["NR", "NR"]);
+    expect(marks("changed")).toHaveLength(0);
+    expect(Array.from(grid().querySelectorAll("td")).some((cell) => cell.textContent === "0")).toBe(
+      false,
+    );
+    const reasons = within(section()).getByRole("list", { name: "Timing reasons" });
+    expect(reasons).toHaveTextContent("trim_a_not_read:high_det_latch_set");
+    expect(reasons).toHaveTextContent(
+      "Trim A was edited here, but the HI DET latch is set, so the ECM reads trim B warm",
+    );
+    expect(section()).toHaveTextContent("2 edited but not read");
+  });
+
+  it("gives no grid for an edit outside the trims: unevaluable, with the node that reaches timing", () => {
+    show({ result: withTiming("fuel_comp"), tables: tablesWithAxes().tables });
+    expect(within(section()).queryByRole("table", { name: /per trim cell/ })).toBeNull();
+    expect(section()).toHaveTextContent("unevaluable");
+    expect(section()).toHaveTextContent("no number for this edit; reasons below");
+    const reasons = within(section()).getByRole("list", { name: "Timing reasons" });
+    expect(reasons).toHaveTextContent("timing_input_changed:fuel_comp_lookup");
+    expect(reasons).toHaveTextContent(/reaches ignition timing through fuel_comp_lookup/);
+    expect(reasons).toHaveTextContent("base_timing_load_term_unmodelled");
+    expect(reasons).toHaveTextContent("200 design pairs");
+    expect(section()).toHaveTextContent("200 (point, draw) pairs on 2 points: unevaluable 200");
+    // No pair has a number, so "how many show a change" has no answer and is not asked.
+    expect(section()).not.toHaveTextContent("show a change");
+  });
+
+  it("asks how many design pairs show a change only when pairs carry a number", () => {
+    show({ result: withTiming("trim_b"), tables: tablesWithAxes().tables });
+    expect(section()).toHaveTextContent("200 (point, draw) pairs on 2 points");
+    expect(section()).toHaveTextContent("0 show a change");
+  });
+
+  it("draws a real change as its degrees when a trim edited beside it is not read, and says so on hover", () => {
+    // Trim A and trim B both -2 on row 8, columns 4-11, the latch set: the ECM reads
+    // trim B, so every cell changes by -2; trim A's edit is named, not drawn over it.
+    show({ result: withTiming("both"), tables: tablesWithAxes().tables });
+    expect(marks("changed").map((cell) => cell.textContent)).toEqual(Array(8).fill("-2"));
+    expect(marks("not_read")).toHaveLength(0);
+    const cell = within(grid()).getByRole("cell", { name: /^Row 8, column 4: -2/ });
+    expect(cell).toHaveAttribute("data-timing-mark", "changed");
+    expect(cell).toHaveAttribute(
+      "title",
+      "-2 deg if no clamp binds; also edited here but not read: trim_a_not_read:high_det_latch_set",
+    );
+    // The summary and the grid now say the same thing.
+    expect(section()).toHaveTextContent("256 in the grid: 8 changed, 8 edited but not read");
+    const reasons = within(section()).getByRole("list", { name: "Timing reasons" });
+    expect(reasons).toHaveTextContent("trim_a_not_read:high_det_latch_set");
+    expect(reasons).toHaveTextContent("clamp_headroom_unknown");
+  });
+
+  it("does not call a trim the ECM reads, set below the term's floor, edited but not read", () => {
+    show({ result: withTiming("floor"), tables: tablesWithAxes().tables });
+    expect(marks("unevaluable").map((cell) => cell.textContent)).toEqual(["U"]);
+    expect(section()).toHaveTextContent(
+      "256 in the grid: 0 changed, 0 edited but not read, 1 unevaluable",
+    );
+    const reasons = within(section()).getByRole("list", { name: "Timing reasons" });
+    expect(reasons).toHaveTextContent("trim_term_floor_may_bind");
+  });
+
+  it("labels the grid from the cells when the base's trims are not at hand, and says it did", () => {
+    show({ result: withTiming("trim_b"), tables: [] });
+    expect(within(grid()).getByRole("rowheader", { name: "rpm word 128" })).toBeVisible();
+    expect(within(grid()).getByRole("columnheader", { name: "X 32" })).toBeVisible();
+    expect(section()).toHaveTextContent("rpm words");
+  });
+
+  it("scrolls the grid inside its own box and wraps the facts in the result's own list style", () => {
+    show({ result: withTiming("trim_b"), tables: tablesWithAxes().tables });
+    expect(grid().closest("[data-table-scroll]")).not.toBeNull();
+    const facts = section().querySelector("dl");
+    expect(facts?.className).toContain("grid-cols-[max-content_minmax(0,1fr)]");
+  });
+
+  it("lists what is held equal, folded away", () => {
+    show({ result: withTiming("trim_b"), tables: tablesWithAxes().tables });
+    const folded = section().querySelector("details");
+    expect(folded).not.toBeNull();
+    expect(folded).toHaveTextContent("What is held equal on both ROMs (4)");
+    expect(folded).toHaveTextContent("every chain term but the trim term 0xFFFF2793");
   });
 });

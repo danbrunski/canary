@@ -83,13 +83,43 @@ PULSE_STAGE = "injector_pulse_word"
 #: and the selector read a constant 0. 0xFFFF283C has never been read. The
 #: fill byte (a chain reproduction) and the X trace (the X relation, 168 of
 #: 194 exact) left this set on 2026-10-16 with their known-answer reads.
-AWAITING_LIVE_READ = frozenset(
+FUEL_AWAITING_LIVE_READ = frozenset(
     {
         "mem:ECM_AIR_CHARGE_SLOT_103A",
         "mem:ECM_UPREV_MAP_SELECTOR",
         "mem:ECM_FUEL_TRANSIENT_FLAGS",
     }
 )
+#: The ignition timing chain's words (E05.4 (b)/(c), 2026-10-17): the trim
+#: lookup's two bytes, every chain node's result from the trim term to the
+#: timing byte, and the unidentified terms the nodes take as required
+#: arguments. All catalogued from the listing and hypothesized, never read
+#: (0xFFFF11CB read a constant 0 inside the spark window's reply on the
+#: ram-study, which cannot identify it). A live read of each window (as on
+#: 2026-10-08 for the knock bytes) is what moves one out of this set, and the
+#: accept test then asks for it in a profile.
+TIMING_AWAITING_LIVE_READ = frozenset(
+    f"mem:{name}"
+    for name in (
+        "ECM_TIMING_TRIM_SELECTED",
+        "ECM_TIMING_TRIM_A",
+        "ECM_TIMING_ENRICH_RETARD",
+        "ECM_TIMING_TRIM_SUBTRAHEND",
+        "ECM_TIMING_TRIM_TERM",
+        "ECM_TIMING_TERM_279A",
+        "ECM_TIMING_TERM_27C6",
+        "ECM_TIMING_TERM_1D3E",
+        "ECM_TIMING_TERM_1344",
+        "ECM_BASE_TIMING_SUM",
+        "ECM_BASE_TIMING",
+        "ECM_KNOCK_RETARD_APPLIED",
+        "ECM_TIMING_OTHER_RETARD",
+        "ECM_TIMING_PRELIMIT",
+        "ECM_IGNITION_TIMING_FINAL",
+        "ECM_IGNITION_TIMING_BYTE",
+    )
+)
+AWAITING_LIVE_READ = FUEL_AWAITING_LIVE_READ | TIMING_AWAITING_LIVE_READ
 
 
 def _runner_spec(channel: str, dids: DidMap = DIDS) -> str:
@@ -248,9 +278,16 @@ def test_the_derivation_names_each_evaluable_output_and_the_pulse_stage(
     model: ApplicationModel,
 ) -> None:
     derived = {o.output: o for o in derive(model)}
-    # Evaluable: a twin definition and an observation. Ignition timing has no
-    # twin yet; the selected trim is an intermediate with no channel.
-    assert list(derived) == ["target_equiv_ratio", "base_fuel_schedule_word", PULSE_STAGE]
+    # Evaluable: a twin definition and an observation. Since 2026-10-17 that
+    # includes ignition timing (the seven chain nodes, E09.7) and the trim
+    # lookup (an intermediate, now with a channel at 0xFFFF1777).
+    assert list(derived) == [
+        "target_equiv_ratio",
+        "ignition_timing",
+        "ignition_trim_selected",
+        "base_fuel_schedule_word",
+        PULSE_STAGE,
+    ]
     phi = derived["target_equiv_ratio"]
     assert phi.specs(role="output") == ("mem:ECM_TARGET_EQUIV_RATIO", "obd:COMMANDED_EQUIV_RATIO")
     # The lookup's memory windows are exactly the ones the target-phi twin
@@ -271,10 +308,80 @@ def test_the_derivation_names_each_evaluable_output_and_the_pulse_stage(
     assert "sensor:FUEL_PRESSURE" in pulse.specs(role="context")
 
 
+#: E05.4 (c): the chain's words from the trim term to the timing byte, by the
+#: node that writes each (the earliest disagreement is located along these).
+TIMING_CHAIN = {
+    "timing_trim_terms": "mem:ECM_TIMING_TRIM_TERM",  # 0xFFFF2793
+    "base_timing_sum": "mem:ECM_BASE_TIMING_SUM",  # 0xFFFF1A58
+    "base_timing_select": "mem:ECM_BASE_TIMING",  # 0xFFFF27DA
+    "timing_retard_combine": "mem:ECM_TIMING_PRELIMIT",  # 0xFFFF1346 (and 2332)
+    "timing_rate_limit": "mem:ECM_IGNITION_TIMING_FINAL",  # 0xFFFF232E
+    "timing_final_byte": "mem:ECM_IGNITION_TIMING_BYTE",  # 0xFFFF11FF
+}
+
+
+def test_ignition_timing_is_derived_from_the_implemented_chain(model: ApplicationModel) -> None:
+    """E05.4 (b)/(c) through E09.1: the timing output's observations, every
+    chain node's result, the unidentified terms the nodes read, the trim
+    lookup with its HI DET byte, rpm word, X byte and coolant, each declared
+    by its node, never listed here by hand."""
+    derived = {o.output: o for o in derive(model)}
+    timing = derived["ignition_timing"]
+    assert timing.after is None
+    assert timing.specs(role="output") == ("obd:TIMING_ADVANCE", "mem:ECM_IGNITION_TIMING_RAM")
+    declared = {c.spec: c.declared_by for c in timing.channels}
+    for node, spec in TIMING_CHAIN.items():
+        assert declared[spec] == f"node:{node}", spec
+    assert declared["mem:ECM_KNOCK_RETARD_APPLIED"] == "node:timing_retard_combine"
+    # (b): the trim bytes, the HI DET byte, the X byte, the rpm word, coolant.
+    for spec, node in {
+        "mem:ECM_TIMING_TRIM_SELECTED": "timing_trim_lookup",
+        "mem:ECM_TIMING_TRIM_A": "timing_trim_lookup",
+        "mem:ECM_HIGH_DET_FLAGS": "high_det_latch",
+        "mem:ECM_FUEL_TARGET_MAP_X_TRACE": "load_input_x",
+        "mem:ECM_ENGINE_SPEED_RAM": "engine_speed_word",
+        "did:ECM_COOLANT_TEMP": "coolant_byte",
+    }.items():
+        assert declared[spec] == f"node:{node}", spec
+    # The unidentified terms are observed, so the nodes' required arguments
+    # are measured (uncovered timing_final_chain).
+    for spec in (
+        "mem:ECM_TIMING_TERM_27C6",
+        "mem:ECM_TIMING_TERM_279A",
+        "mem:ECM_TIMING_ENRICH_RETARD",
+        "mem:ECM_TIMING_TERM_1D3E",
+        "mem:ECM_TIMING_TERM_1344",
+        "mem:ECM_TIMING_TRIM_SUBTRAHEND",
+        "mem:ECM_TIMING_OTHER_RETARD",
+        "mem:ECM_KNOCK_RETARD_TARGET",
+    ):
+        assert spec in timing.specs(role="input"), spec
+    windows = {g.key for g in timing.groups if g.unit == "memory_window"}
+    assert {
+        "timing_trim",
+        "trim_subtrahend",
+        "timing_trim_term",
+        "base_timing",
+        "base_timing_term",
+        "valve_timing_term",
+        "timing_terms",
+        "knock_chain",
+        "knock_target",
+        "timing_byte",
+        "spark",
+        "flags_2841",
+    } <= windows
+    trim = derived["ignition_trim_selected"]
+    assert trim.specs(role="output") == ("mem:ECM_TIMING_TRIM_SELECTED",)
+    assert "mem:ECM_HIGH_DET_FLAGS" in trim.specs(role="input")
+    # The trim lookup is upstream of the chain only: none of the chain's words.
+    assert not set(trim.specs()) & set(TIMING_CHAIN.values())
+
+
 def test_the_derivation_refuses_what_no_capture_can_read(model: ApplicationModel) -> None:
     memory = [(c.name, c.window) for c in DIDS.memory]
     with pytest.raises(ApplicationModelRefusalError, match="kernel_output_undeclared"):
-        twin_observation_channels(model, memory, kernel_inputs={"ignition_timing": ["obd:RPM"]})
+        twin_observation_channels(model, memory, kernel_inputs={"not_an_output": ["obd:RPM"]})
     with pytest.raises(ApplicationModelRefusalError, match="node_undeclared"):
         twin_observation_channels(model, memory, downstream={"pulse": "no_such_node"})
     with pytest.raises(ApplicationModelRefusalError, match="observation_not_pollable"):
@@ -337,9 +444,39 @@ def test_a_node_gaining_an_observation_the_profile_lacks_fails(
     gaps, blocked = profile_gaps(derive(mutated), twin_profile)
     assert blocked == AWAITING_LIVE_READ
     assert gaps == [
-        "target_equiv_ratio: did:ECM_RPM_COARSE (node:engine_speed_word, mode22_round) "
-        "not in mode22",
-        "base_fuel_schedule_word: did:ECM_RPM_COARSE (node:engine_speed_word, mode22_round) "
+        f"{output}: did:ECM_RPM_COARSE (node:engine_speed_word, mode22_round) not in mode22"
+        # The rpm word is on the timing trim lookup's path too (2026-10-17).
+        for output in (
+            "target_equiv_ratio",
+            "ignition_timing",
+            "ignition_trim_selected",
+            "base_fuel_schedule_word",
+        )
+    ]
+
+
+TIMING_BYTE_OBSERVATION = (
+    "      - {spec: 'mem:ECM_IGNITION_TIMING_BYTE', address: 0xFFFF11FF, relation: identity,"
+    " confidence: code}\n"
+)
+
+
+def test_a_timing_node_gaining_an_observation_the_profile_lacks_fails(
+    tmp_path: Path, twin_profile: CaptureProfile
+) -> None:
+    """The accept test covers the timing chain too: DID 0x110A reads the
+    timing byte, and declaring it on the final node asks for it in every
+    session window."""
+    mutated = _mutated_model(
+        tmp_path,
+        TIMING_BYTE_OBSERVATION,
+        TIMING_BYTE_OBSERVATION
+        + "      - {spec: 'did:ECM_IGNITION_TIMING', address: 0xFFFF11FF, relation: alias}\n",
+    )
+    gaps, blocked = profile_gaps(derive(mutated), twin_profile)
+    assert blocked == AWAITING_LIVE_READ
+    assert gaps == [
+        "ignition_timing: did:ECM_IGNITION_TIMING (node:timing_final_byte, mode22_round) "
         "not in mode22",
     ]
 
@@ -375,27 +512,45 @@ def test_the_twin_profile_is_a_corpus_ineligible_capture(twin_profile: CapturePr
     assert not twin_profile.did_continuous
 
 
+#: The profile's in-window reads: the paired DIDs (DID 0x1101 is the coolant
+#: byte the timing trim lookup reads, derived since 2026-10-17) and memory
+#: windows, in the catalog's window order (knock_target is the knock retard
+#: target the knock controller reads).
+TWIN_DIDS = ("DID_1101", "DID_1206", "DID_1208", "DID_1209")
+TWIN_WINDOWS = (
+    "fuel_target",
+    "spark",
+    "fuel_axis",
+    "uprev_state",
+    "fuel_comp_x",
+    "flags_2841",
+    "knock_target",
+)
+
+
 def _plan(profile: CaptureProfile) -> dict[str, object]:
     return preview_polling_plan(CanaryConfig.from_yaml(EXAMPLE_YAML).collection, profile)
 
 
 #: The cycle plan the loop reports for this profile on the Pi's collection
 #: settings (``/status.obd_scheduler.did_profile.cycle.plan``, built by
-#: ``hybrid_cycle.plan_cycle``): 15 PIDs and the three DTC polls in three
-#: six-PID batches, 3 DIDs and 6 memory windows, entry and exit, at 90 req/s,
+#: ``hybrid_cycle.plan_cycle``): 16 PIDs and the three DTC polls in four
+#: six-PID batches, 4 DIDs and 7 memory windows, entry and exit, at 90 req/s,
 #: plus the 0.05 s exit grace. ``worst_case_seconds`` is that plus one request
-#: timeout (1.0 s), the cycle one unanswered request costs.
+#: timeout (1.0 s), the cycle one unanswered request costs. Before ignition
+#: timing was derived (2026-10-17): 18 / 3 / 9, 0.2056 s and 1.2056 s.
 CYCLE_PLAN = {
-    "mode01_channels": 18,
-    "mode01_requests": 3,
-    "did_requests": 9,
+    "mode01_channels": 19,
+    "mode01_requests": 4,
+    "did_requests": 11,
     "session_requests": 2,
-    "required_seconds": 0.2056,
-    "worst_case_seconds": 1.2056,
+    "required_seconds": 0.2389,
+    "worst_case_seconds": 1.2389,
     "feasible": True,
 }
-#: ``plan_cycle`` for the same work with batching refused (one PID a request).
-UNBATCHED_CYCLE_PLAN = {"required_seconds": 0.3722, "worst_case_seconds": 1.3722}
+#: ``plan_cycle`` for the same work with batching refused (one PID a request);
+#: 0.3722 / 1.3722 before the timing channels.
+UNBATCHED_CYCLE_PLAN = {"required_seconds": 0.4056, "worst_case_seconds": 1.4056}
 
 
 def _cycle_plan(batch_max_pids: int) -> dict[str, object]:
@@ -423,19 +578,18 @@ def test_the_planned_demand_is_the_capacity_evidence(twin_profile: CaptureProfil
     assert target == 4.0
     for pid, weight in twin_profile.mode01.items():
         assert rates[pid] == pytest.approx(target * weight)
-    assert rates["DID_1206"] == rates["DID_1208"] == rates["DID_1209"] == pytest.approx(2.0)
-    assert not any(
-        c.startswith("DID_") and c not in ("DID_1206", "DID_1208", "DID_1209") for c in rates
-    )
-    windows = ("fuel_target", "spark", "fuel_axis", "uprev_state", "fuel_comp_x", "flags_2841")
+    assert set(TWIN_DIDS) == {c for c in rates if c.startswith("DID_")}
+    for did in TWIN_DIDS:
+        assert rates[did] == pytest.approx(2.0)
+    windows = TWIN_WINDOWS
     assert sorted(c for c in rates if c.startswith("mem:")) == sorted(f"mem:{w}" for w in windows)
     for window in windows:
         assert rates[f"mem:{window}"] == pytest.approx(2.0)
     requests = plan["diagnostic_requests_per_second"]
-    assert plan["channel_reads_per_second"] == pytest.approx(53.0, abs=0.05)
-    assert requests["single_request_fallback"] == pytest.approx(57.0, abs=0.05)  # type: ignore[index]
-    assert requests["best_case_batched"] == pytest.approx(29.0, abs=0.05)  # type: ignore[index]
-    assert twin_profile.expected_total_demand_hz == 57.0
+    assert plan["channel_reads_per_second"] == pytest.approx(61.0, abs=0.05)
+    assert requests["single_request_fallback"] == pytest.approx(65.0, abs=0.05)  # type: ignore[index]
+    assert requests["best_case_batched"] == pytest.approx(33.0, abs=0.05)  # type: ignore[index]
+    assert twin_profile.expected_total_demand_hz == 65.0
     assert plan["bus_budget_requests_per_second"] == 90.0
     assert plan["fallback_feasible"] is True
     # The cycle's work, counted as the loop counts it (_cycle_plan_for): every
@@ -581,27 +735,29 @@ def test_one_session_window_carries_every_did_and_window_the_twin_pairs(
     clock: FakeClock, twin_profile: CaptureProfile
 ) -> None:
     """On the fake clock (10 ms answers, 90 req/s), every 0.5 s window from
-    the first reads the three paired DIDs and the six memory windows, memory
+    the first reads the four paired DIDs and the seven memory windows, memory
     last and back to back (B08.4), every channel runs at its planned rate, and
     the loop reports the cycle plan :data:`CYCLE_PLAN` states. Each kernel
     pairing sits inside its tolerance by :data:`PAIRING_MARGIN_S` on every
     read: pulse to BFS DID 0.011 s (0.1), BFS to MAF DID 0.022 s (0.1), BFS
-    DID to Mode 01 rpm 0.160 s (0.25), pulse to Mode 01 rpm and MAF 0.149 s
-    (0.3), the lookup's windows within 0.050 s (0.25), and the fill byte
-    0.069 s after the pulse DID (E07.4, 0.1)."""
+    DID to Mode 01 rpm 0.184 s (0.25), pulse to Mode 01 rpm and MAF 0.173 s
+    (0.3), the lookup's windows within 0.052 s (0.25), and the fill byte
+    0.083 s after the pulse DID (E07.4, 0.1). Before ignition timing was
+    derived (DID 0x1101, PID 0x0E, the knock_target window; 2026-10-17) those
+    were 0.160, 0.149 and 0.069 s."""
     metrics: list[ObdSchedulerMetrics] = []
     requests, readings = simulate(clock, twin_profile, SIMULATED_S, metrics)
     after = _first_entry(requests)
     windows = session_windows(requests)
     assert len(windows) >= 0.95 * SIMULATED_S / 0.5
     for window, _ in windows:
-        dids = sorted(d[2:4].hex().upper() for _at, d in window if d[1] == 0x22)
-        assert dids == ["1206", "1208", "1209"], dids
-        assert sum(1 for _at, d in window if d[1] == 0x23) == 6
+        dids = sorted(f"DID_{d[2:4].hex().upper()}" for _at, d in window if d[1] == 0x22)
+        assert dids == sorted(TWIN_DIDS), dids
+        assert sum(1 for _at, d in window if d[1] == 0x23) == len(TWIN_WINDOWS)
     span = max(r.acquired_at or 0 for r in readings) - after
     counts = Counter(r.pid for r in readings if (r.acquired_at or 0) > after)
     plan = {m["channel"]: m["rate_hz"] for m in _plan(twin_profile)["members"]}  # type: ignore[attr-defined]
-    for pid in [*twin_profile.mode01, "DID_1206", "DID_1208", "DID_1209"]:
+    for pid in [*twin_profile.mode01, *TWIN_DIDS]:
         assert counts[pid] / span == pytest.approx(plan[pid], rel=0.05), pid
     limits = {
         ("DID_1206", "DID_1208"): 0.1,
@@ -617,9 +773,12 @@ def test_one_session_window_carries_every_did_and_window_the_twin_pairs(
     }
     for (anchor, other), limit in limits.items():
         assert _within(nearest_gaps(readings, anchor, other, after), limit), (anchor, other)
-    # E07.4's comparison on the ram-study: 0 of 192 fill-byte reads had PID
-    # 0x0C within 0.1 s. Here every one does (0.080 s).
-    assert _within(nearest_gaps(readings, "mem:ECM_FUEL_COMP_X_INPUT", "RPM", after), 0.1)
+    # E07.4's comparison on the ram-study (0 of 192 fill-byte reads had PID
+    # 0x0C within 0.1 s) is not asserted here any more: with DID 0x1101 in
+    # the window the fake clock puts it at 0.090 s, within one request slot
+    # of 0.1 s, which by PAIRING_MARGIN_S decides nothing (0.080 s before).
+    # No kernel pairs the two: E07.4 pairs the fill byte with the pulse read,
+    # asserted above.
     reported = [m.did_profile["cycle"]["plan"] for m in metrics if m.did_profile]
     assert reported and reported[-1].items() >= CYCLE_PLAN.items()
     assert reported[-1] == _cycle_plan(6)
@@ -629,13 +788,13 @@ def test_one_session_window_carries_every_did_and_window_the_twin_pairs(
 def test_the_awaited_channels_add_no_window_and_bound_the_ram_maf_pairing(
     clock: FakeClock, twin_profile: CaptureProfile
 ) -> None:
-    """The profile as it becomes once :data:`AWAITING_LIVE_READ` (bar the
-    never-read 0x283C) may be polled. 0x103A widens the fuel_axis read the X
-    trace already makes and the selector the uprev_state read, so no window is
-    added and the fill byte stays 0.069 s after the pulse DID on every read,
-    inside the operator's 0.1 s (2026-10-13) by the margin. (DIDs 0x120F,
-    0x1110 and 0x1101 in the window put it at 0.102 s on every read, so none
-    of them is in the profile.)
+    """The profile as it becomes once :data:`FUEL_AWAITING_LIVE_READ` (bar
+    the never-read 0x283C) may be polled. 0x103A widens the fuel_axis read the
+    X trace already makes and the selector the uprev_state read, so no window
+    is added and the fill byte stays 0.083 s after the pulse DID on every read,
+    inside the operator's 0.1 s (2026-10-13) by the margin. (DIDs 0x120F and
+    0x1110 in the window as well would put it past the margin, so neither is in
+    the profile.)
 
     The steady-BFS RAM channel set pairs Mode 01 MAF within 0.1 s of the
     0x103A read (``SteadyGates.max_maf_skew_s``, frozen). What holds whatever
@@ -645,14 +804,14 @@ def test_the_awaited_channels_add_no_window_and_bound_the_ram_maf_pairing(
     place in the window: 0.100 s here, within a request slot of the limit, so
     the fake clock decides nothing. On the truck DID 0x1208 had MAF within
     0.1 s on 372 of 3,089 reads (_capture-tuning-2026-09-23T142926)."""
-    awaited = sorted(s.split(":", 1)[1] for s in AWAITING_LIVE_READ)
+    awaited = sorted(s.split(":", 1)[1] for s in FUEL_AWAITING_LIVE_READ)
     awaited.remove("ECM_FUEL_TRANSIENT_FLAGS")
     profile = twin_profile.model_copy(update={"memory": twin_profile.memory + tuple(awaited)})
     requests, readings = simulate(clock, profile, SIMULATED_S)
     after = _first_entry(requests)
     windows = session_windows(requests)
     for window, _ in windows:
-        assert sum(1 for _at, d in window if d[1] == 0x23) == 6
+        assert sum(1 for _at, d in window if d[1] == 0x23) == len(TWIN_WINDOWS)
         assert not any(d[1] == 0x01 for _at, d in window)
     fill = nearest_gaps(readings, "DID_1206", "mem:ECM_FUEL_COMP_X_INPUT", after)
     assert _within(fill, 0.1)
@@ -670,17 +829,64 @@ def test_the_awaited_channels_add_no_window_and_bound_the_ram_maf_pairing(
     assert (nearest_gaps(readings, bfs, "MAF", after) >= to_edge).all()
 
 
+#: The 4 Hz Mode 01 group the fuel kernels pair (weight 1.0 at 4 Hz).
+FOUR_HZ_GROUP = ("RPM", "MAF", "THROTTLE_POS", "O2_WR_LAMBDA_S1", "COMMANDED_EQUIV_RATIO")
+
+
+@pytest.mark.slow
+def test_the_awaited_timing_windows_do_not_fit_beside_the_fuel_pairings(
+    clock: FakeClock, twin_profile: CaptureProfile
+) -> None:
+    """The measured reason :data:`TIMING_AWAITING_LIVE_READ` cannot simply
+    join this profile when its live reads land (E09.1 Remaining). The chain
+    adds eight windows and knock_chain, nine reads in every session window:
+    the window grows from 0.13 s to 0.25 s, the 4 Hz Mode 01 group falls to
+    about 1.96 Hz, DID 0x1208 to PID 0x0C reaches 0.298 s (the steady-BFS
+    pairing allows 0.25), and the fill byte trails the pulse DID by 0.093 s,
+    inside 0.1 s by less than a request slot. ``plan_cycle`` still calls the
+    cycle feasible (0.3389 s of 0.5 s): it counts requests, not the Mode 01
+    cadence the window leaves room for. So the chain needs a second,
+    timing-only profile, or a scheduler change. If a scheduler change makes
+    them fit, this test fails and says so."""
+    timing = sorted(s.split(":", 1)[1] for s in TIMING_AWAITING_LIVE_READ)
+    profile = twin_profile.model_copy(update={"memory": twin_profile.memory + tuple(timing)})
+    plan = plan_cycle(
+        cycle_seconds=0.5,
+        budget_rps=90.0,
+        mode01_channels=CYCLE_PLAN["mode01_channels"],  # type: ignore[arg-type]
+        batch_max_pids=6,
+        did_requests=CYCLE_PLAN["did_requests"] + 9,  # type: ignore[operator]
+        fast_exit=True,
+        exit_grace_seconds=0.05,
+        lapse_seconds=5.0,
+        request_timeout_seconds=1.0,
+    ).to_dict()
+    assert plan["feasible"] is True
+    assert plan["required_seconds"] == pytest.approx(0.3389, abs=1e-4)
+    requests, readings = simulate(clock, profile, SIMULATED_S)
+    after = _first_entry(requests)
+    windows = session_windows(requests)
+    for window, _ in windows:
+        assert sum(1 for _at, d in window if d[1] == 0x23) == len(TWIN_WINDOWS) + 9
+    span = max(r.acquired_at or 0 for r in readings) - after
+    counts = Counter(r.pid for r in readings if (r.acquired_at or 0) > after)
+    for pid in FOUR_HZ_GROUP:
+        assert counts[pid] / span < 0.6 * 4.0, pid
+    assert nearest_gaps(readings, "DID_1208", "RPM", after).max() > 0.25
+    assert not _within(nearest_gaps(readings, "DID_1206", "mem:ECM_FUEL_COMP_X_INPUT", after), 0.1)
+
+
 def test_the_profile_lists_only_what_the_derivation_or_a_named_study_needs(
     model: ApplicationModel, twin_profile: CaptureProfile
 ) -> None:
     """Beyond the derivation, the profile carries the Fuel Comp fit's
     sources (``fuel_comp_fit.yaml``): throttle as PID 0x11 and purge as PID
-    0x2E, its first purge source; the HI DET byte the flags window already
-    reads (E05.4(b)); and bank 2's trims. DIDs 0x120F and 0x1110 stay out
-    of this profile (the tuning profile reads them): each DID in the pulse
-    DID's window moves the fill byte a request slot later, 0.091 s with those
-    two (inside 0.1 s but within a slot of it) and 0.102 s with DID 0x1101 as
-    well, on the fake clock."""
+    0x2E, its first purge source; and bank 2's trims. The HI DET byte left
+    this list on 2026-10-17: the timing trim lookup's high_det_latch node now
+    declares it. DIDs 0x120F and 0x1110 stay out of this profile (the tuning
+    profile reads them): each DID in the pulse DID's window moves the fill
+    byte a request slot later, and DID 0x1101 (derived) already took it from
+    0.069 s to 0.083 s on the fake clock."""
     derived = {s for obs in derive(model) for s in obs.specs()}
     polled = {f"obd:{p}" for p in twin_profile.mode01}
     polled |= {f"did:{d}" for d in twin_profile.mode22}
@@ -688,7 +894,6 @@ def test_the_profile_lists_only_what_the_derivation_or_a_named_study_needs(
     extra: Mapping[str, str] = {
         "obd:THROTTLE_POS": "fuel_comp_fit throttle_pid",
         "obd:EVAPORATIVE_PURGE": "fuel_comp_fit purge",
-        "mem:ECM_HIGH_DET_FLAGS": "E05.4(b) flags window from 0xFFFF283F",
         "obd:SHORT_FUEL_TRIM_2": "bank 2",
         "obd:LONG_FUEL_TRIM_2": "bank 2",
     }

@@ -9,6 +9,8 @@ import {
   ENVIRONMENT_FIELDS,
   FAILURE_TITLE,
   GRID_CHOICES,
+  HIGH_DET_CHOICES,
+  KNOCK_CONTROL_CHOICES,
   LEARNED_FIELDS,
   LOAD_BASIS,
   LOAD_BASIS_MEANING,
@@ -891,6 +893,37 @@ export function SimForm({
                 onChange={change}
               />
             ))}
+          </div>
+        </fieldset>
+
+        <fieldset
+          aria-label="Ignition timing state"
+          className="space-y-3 rounded-lg border border-border p-3"
+        >
+          <legend className="px-1 text-sm font-semibold">Ignition timing state (stated)</legend>
+          <p className="text-xs text-fg-dim">
+            Nothing logs the knock controller&apos;s HI DET latch or its fallback state, and both
+            change when the knock sensor is repaired (on 2026-10-08 the truck read the latch set and
+            knock control in fallback, the KS1 fault). So they have no default, no typical value,
+            and are not remembered: state the condition you are asking about. The latch picks the
+            trim the ECM reads warm, so it decides whether an edit to trim A or to trim B shows in
+            the timing result.
+          </p>
+          <div className="grid gap-3 sm:grid-cols-2">
+            <Choice
+              legend="HI DET latch"
+              name="sim-high-det"
+              choices={HIGH_DET_CHOICES}
+              value={values.highDet}
+              onChange={(id) => change("highDet", id)}
+            />
+            <Choice
+              legend="Knock control"
+              name="sim-knock-control"
+              choices={KNOCK_CONTROL_CHOICES}
+              value={values.knockControl}
+              onChange={(id) => change("knockControl", id)}
+            />
           </div>
         </fieldset>
 

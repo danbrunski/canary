@@ -67,15 +67,17 @@ const FILLED: SimFormValues = {
   throttleClosedLearned: "0",
   idleAirLearned: "0",
   evapPurgeArea: "0",
+  highDet: "clear",
+  knockControl: "active",
   candidateEvents: "none",
   draws: "200",
   seed: "20261015",
 };
 
 describe("the simulate request", () => {
-  it("names exactly the 21 fields the doc's request lists", () => {
+  it("names exactly the 23 fields the doc's request lists", () => {
     const documented = documentedSimFields();
-    expect(documented).toHaveLength(21);
+    expect(documented).toHaveLength(23);
     expect([...SIM_REQUEST_FIELDS].sort()).toEqual([...documented].sort());
   });
 
@@ -103,10 +105,60 @@ describe("the simulate request", () => {
       throttle_closed_learned: 0,
       idle_air_learned: 0,
       evap_purge_area: 0,
+      high_det: "clear",
+      knock_control: "active",
       candidate_events: "none",
       draws: 200,
       seed: 20261015,
     });
+  });
+
+  it("states the HI DET latch and knock control every run: unchosen they block Run, by name", () => {
+    const { request, problems } = checkSimForm(
+      { ...FILLED, highDet: "", knockControl: "" },
+      "light load",
+      EDITS,
+    );
+    expect(request).toBeNull();
+    expect(problems.map((item) => [item.field, item.label, item.kind])).toEqual([
+      ["highDet", "HI DET latch", "missing"],
+      ["knockControl", "Knock control", "missing"],
+    ]);
+    expect(problems[0]?.message).toContain("nothing logs it");
+    for (const [highDet, knockControl, highWord, knockWord] of [
+      ["set", "fallback", "set", "fallback"],
+      ["clear", "active", "clear", "active"],
+      ["set", "active", "set", "active"],
+      ["clear", "fallback", "clear", "fallback"],
+    ] as const) {
+      const built = checkSimForm({ ...FILLED, highDet, knockControl }, "x", EDITS);
+      expect(built.request).toMatchObject({ high_det: highWord, knock_control: knockWord });
+    }
+  });
+
+  it("never remembers the latch or knock control, and never offers a choice preselected", () => {
+    // A remembered "set" would answer for a truck whose knock sensor has since been repaired.
+    expect(REMEMBERED_KEYS).not.toContain("highDet");
+    expect(REMEMBERED_KEYS).not.toContain("knockControl");
+    expect(EMPTY_FORM.highDet).toBe("");
+    expect(EMPTY_FORM.knockControl).toBe("");
+    saveRemembered({ ...FILLED, highDet: "set", knockControl: "fallback" });
+    const stored = JSON.parse(window.localStorage.getItem(SIM_STORAGE_KEY) ?? "{}") as {
+      values: Record<string, string>;
+    };
+    expect(Object.keys(stored.values)).not.toContain("highDet");
+    expect(Object.keys(stored.values)).not.toContain("knockControl");
+    window.localStorage.setItem(
+      SIM_STORAGE_KEY,
+      JSON.stringify({
+        version: 1,
+        savedAt: "2026-10-17T00:00:00Z",
+        values: { ...stored.values, highDet: "set", knockControl: "fallback" },
+      }),
+    );
+    const seeded = seedForm(EMPTY_FORM, loadRemembered());
+    expect(seeded.values.highDet).toBe("");
+    expect(seeded.values.knockControl).toBe("");
   });
 
   it("sends a stated rail pressure as a number", () => {

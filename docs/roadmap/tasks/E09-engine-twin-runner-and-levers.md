@@ -41,7 +41,7 @@ computed output.
 | Lever | Expressible as an edit | Reaches an output | Blocked by |
 |---|---|---|---|
 | Fuel Comp, Fuel Targets, K | yes | BFS, φ, pulse, λ | plant unqualified (E07.3); closed loop unsupported (E09.10) |
-| Timing trims A/B | CLI only | none | base timing table unmapped; chain untraced (E09.7); no torque plant *(2026-10-17: CLI + API; reaches `ignition_timing_deg` (Δ, ECU side, E09.7); page owed; torque stage built, not validated (E07.5 stage 4: H07.10/H07.5/H07.12/H07.8/N01.2 and spark sweeps owed))* |
+| Timing trims A/B | CLI only | none | base timing table unmapped; chain untraced (E09.7); no torque plant *(2026-10-17: CLI + API; reaches `ignition_timing_deg` (Δ, ECU side, E09.7); page too (editable trim grids, HI DET / knock state inputs, per-cell Δ° grid); torque stage built, not validated (E07.5 stage 4: H07.10/H07.5/H07.12/H07.8/N01.2 and spark sweeps owed))* |
 | MAF curve `0xE27E` | no | none | not in `rom_map.yaml`; airflow pipeline unmodelled (E09.8) |
 | Injector scaler `0x9254`, dead time, short pulse | no | none | constants not mapped as tables (E09.9) |
 | Load Point Scaler | yes | X | not editable on the page |
@@ -143,8 +143,9 @@ Pi; E09.13 Light. Items marked **listing** need the firmware session
     - *Derivation.* `ecu_application.twin_observation_channels(model, memory,
       *, kernel_inputs, kernel_context, downstream)` returns, per evaluable
       output (`evaluable_outputs`: a twin definition and an observation, so
-      `target_equiv_ratio` and `base_fuel_schedule_word`; ignition timing has
-      no twin, the selected trim no channel) and per runner stage the model
+      `target_equiv_ratio` and `base_fuel_schedule_word`; ignition timing had
+      no twin and the selected trim no channel until 2026-10-17, see
+      *Ignition timing in* below) and per runner stage the model
       does not carry (`injector_pulse_word`, after `final_command_word`), each
       channel with its role (`output` / `input` / `context`), who declared it
       (`output:` / `node:` from `observed_as`, or `kernel`) and its unit:
@@ -220,7 +221,8 @@ Pi; E09.13 Light. Items marked **listing** need the firmware session
       Mode 01 rpm 0.160 s (0.25); pulse↔Mode 01 rpm and MAF 0.149 s (0.3);
       the lookup's windows within 0.050 s of the command (0.25; X trace
       0.020 s); **fill byte 0.069 s after the pulse DID on every read**
-      (0.1); fill byte↔PID 0x0C 0.080 s on every read (0 of 192 within 0.1 s
+      (0.1; 0.083 s since 2026-10-17, see *Ignition timing in*); fill
+      byte↔PID 0x0C 0.080 s on every read (0 of 192 within 0.1 s
       on the ram-study).
     - *Findings.* (1) **The fill byte trails the pulse DID by every read
       between them.** A window reads DIDs first and memory last, back to
@@ -256,6 +258,70 @@ Pi; E09.13 Light. Items marked **listing** need the firmware session
       `[tuning-10.0]`, `[default-None]`,
       `test_a_wider_window_elsewhere_is_not_read_or_decoded_under_tuning`),
       6 passed.
+    - *Ignition timing in (2026-10-17, E05.4 (b)/(c) desk part).*
+      `ignition_timing` gained `twin:` (the seven implemented chain nodes,
+      predicting `timing_final_byte`) and `ignition_trim_selected` an
+      observation (`mem:ECM_TIMING_TRIM_SELECTED`), so both are evaluable.
+      The chain nodes declare `observed_as` for their results and for the
+      unidentified terms they read: fourteen new catalog channels in eight
+      windows, after `fuel_comp_x` in catalog order (E05.4 has the table).
+      Derived for timing: PID 0x0E, `mem:ECM_IGNITION_TIMING_RAM`, the rpm
+      word, X, uprev_state, flags_2841 (pedal, HI DET), DID 0x1101 (the
+      coolant byte the trim lookup reads), knock_target (0xFFFF13FE, which
+      the knock controller reads), plus the chain words. The live-read rule
+      lets in PID 0x0E, DID 0x1101, `ECM_IGNITION_TIMING_RAM` and
+      `ECM_KNOCK_RETARD_TARGET`; `twin` now polls them. The other sixteen
+      (the fourteen, plus knock_chain's 0x232E and 0x2332) are pinned as
+      `TIMING_AWAITING_LIVE_READ`.
+      - *Capacity before → after* (`preview_polling_plan`; `plan_cycle` at
+        0.5 s, 90 req/s, batch 6):
+        - reads: 53 → 61 channel reads/s;
+        - requests: 57 → 65 req/s unbatched, 29 → 33 batched;
+        - cycle: Mode 01-side requests 18 in 3 batches → 19 in 4,
+          in-window requests 9 → 11;
+        - `required_seconds` 0.2056 → 0.2389, unbatched 0.3722 → 0.4056;
+        - `worst_case_seconds` 1.2056 → 1.2389.
+
+        On the fake clock (`test_one_session_window_carries_every_did_and_window_the_twin_pairs`):
+        - every channel ran at its planned rate, and the window grew from
+          0.110 to 0.133–0.135 s;
+        - fill byte after the pulse DID 0.069 → 0.083 s (0.1 limit; DID
+          0x1101 is one more read between them, and DIDs are read
+          0x1208, 0x1206, 0x1209, 0x1101 whatever the profile's order);
+        - BFS DID to PID 0x0C 0.160 → 0.184 s (0.25); pulse to PID 0x0C/MAF
+          0.149 → 0.173 s (0.3);
+        - fill byte to PID 0x0C 0.080 → 0.090 s, within a slot of 0.1 s, so
+          it is reported, no longer asserted (no kernel pairs the two).
+
+        65 req/s is under the 116.8 req/s the event loop sustained
+        (2026-09-10); the old 25 req/s overload was the storage writer, so
+        watch storage `queue_depth` on the drive.
+      - *The chain does not fit in `twin`* (`test_the_awaited_timing_windows_do_not_fit_beside_the_fuel_pairings`,
+        slow). With the sixteen awaited channels polled, there are 20
+        in-window requests and the window takes 0.243–0.249 s.
+        `plan_cycle` still says feasible (0.3389 s; 0.5056 s and infeasible
+        unbatched), but on the fake clock:
+        - the 4 Hz Mode 01 group falls to 1.96 Hz;
+        - BFS DID to PID 0x0C reaches 0.298 s (limit 0.25);
+        - pulse to PID 0x0C reaches 0.287 s (0.3; inside the margin by 2 ms);
+        - the fill byte trails the pulse DID by 0.093 s (inside 0.1 by less
+          than a slot).
+
+        A timing-only candidate (the ignition outputs' derived channels:
+        DID 0x1101 and 14 windows) runs 0.187–0.194 s windows, its 4 Hz
+        group at 2.93 Hz. Same-window gaps:
+        - selected trim to HI DET 0.063 s;
+        - trim to timing byte 0.033 s;
+        - trim to rpm word 0.095 s, to X 0.083 s;
+        - trim term to timing byte 0.070 s.
+
+        So a second profile with its Mode 01 group at 2 Hz fits (scratch
+        simulation, not committed). Splitting is an operator decision.
+      - *Tests* added: `test_ignition_timing_is_derived_from_the_implemented_chain`,
+        `test_a_timing_node_gaining_an_observation_the_profile_lacks_fails`
+        (DID 0x110A declared on `timing_final_byte` → one gap),
+        `test_the_awaited_timing_windows_do_not_fit_beside_the_fuel_pairings`;
+        the fuel awaited test now uses `FUEL_AWAITING_LIVE_READ`.
     - *Tests.* `tests/test_twin_profile.py` (11; two `slow`, the fake-clock
       runs): the accept test (every derived channel in its section, every
       paired DID and window due in every session window, each Mode 01 round
@@ -297,12 +363,18 @@ Pi; E09.13 Light. Items marked **listing** need the firmware session
        not in doubt.
     3. **The E05 RAM windows.** E05.2(b), E05.3(a)(b) and E05.4(b)(c) name
        about forty addresses; the catalog has channels for 0x1038–0x103E,
-       0x118A, 0x283C–0x2842, 0x2332 and 0x232E only, the rest none. Each
+       0x118A, 0x283C–0x2842, 0x2332 and 0x232E only, the rest none.
+       *(2026-10-17: E05.4 (b)/(c)'s addresses now have channels, all
+       hypothesized; see *Ignition timing in*. They need the key-on/idle
+       live read, then their own profile.)* Each
        needs a catalog channel and then a live read before a profile may
        poll it. A window read before fuel_comp_x moves the fill byte one
-       memory read later (10 ms on the fake clock): from 0.069 s, one more
-       keeps it inside 0.1 s by more than a slot (0.079 s, hand arithmetic),
-       two put it within a slot of the limit. The rest belong in a second,
+       memory read later (10 ms on the fake clock): from 0.083 s (since DID
+       0x1101 joined the window, 2026-10-17) one more puts it at about
+       0.093 s, inside 0.1 s by less than a slot (1/90 s), which the margin
+       treats as no evidence; the awaited timing windows measured 0.093 s
+       (`test_the_awaited_timing_windows_do_not_fit_beside_the_fuel_pairings`).
+       So no window may be added before fuel_comp_x. The rest belong in a second,
        non-pulse profile or behind a scheduler change that reads the fill
        byte straight after the pulse DID. The RAM steady-BFS / DID 0x1209
        channel-set idea (pair 0x103A with 0x1209 rather than PID 0x10) is
@@ -335,7 +407,8 @@ Pi; E09.13 Light. Items marked **listing** need the firmware session
        have a `mem:ECM_FUEL_COMP_X_INPUT` read within 0.1 s on the
        acquisition clock (`read_channels(..., acquired_time=True)`), the
        property `test_one_session_window_carries_every_did_and_window_the_twin_pairs`
-       holds on the fake clock (0.069 s). Replace the profile's
+       holds on the fake clock (0.083 s since DID 0x1101 joined the window,
+       2026-10-17; 0.069 s before). Replace the profile's
        `capacity_evidence` with the drive's measured rates, cycle durations
        and storage `queue_depth`.
     5. **Operator decision** (reported, not taken here): whether a scheduler
@@ -769,11 +842,90 @@ Pi; E09.13 Light. Items marked **listing** need the firmware session
     the ROM Editor previews a trim edit. `docs/headless-api.md` and
     `docs/mcp-server.md` list them.
   - **Remaining:**
-    - **Page:** `SimRequest` carries no HI DET / knock state yet (W09's
-      no-default request contract), so simulating a trim edit from the page
-      or MCP refuses `timing_state_unstated`. The page's own
-      `EDITABLE_TABLES` copy (`src/dashboard/static/src/lib/romEditor.ts`)
-      still lists the fuel chain only, and nothing renders the timing block.
+    - ~~**Page:** `SimRequest` carries no HI DET / knock state yet~~
+      **Done 2026-10-17 (operator-approved option (a): the state is two
+      required request fields).**
+      - **Request:** `SimRequest` gains `high_det` (`set` | `clear`) and
+        `knock_control` (`active` | `fallback`), both required, no default
+        (23 fields; `ValidationError` names a missing one). They build the
+        `TimingState` (`source: "stated: ROM Editor"`) the simulate job hands
+        the timing block, so a trim edit no longer refuses
+        `timing_state_unstated`; a K or Fuel Comp edit still gives
+        `timing_input_changed:<node>` and an unevaluable block.
+      - **Typical or never:** both are in `rom_editor.NEVER_TYPICAL_FIELDS`
+        (so "Fill typical values" cannot fill them and a YAML that names one
+        is refused; `sim_typical_values.yaml` documents why). Evidence: the
+        2026-10-08 RAM read found the latch set (`0xFFFF283F` = 0x40) and
+        knock control in fallback (`0xFFFF13FE` = 0xFB00, KS1 / P0328); both
+        clear when KS1 is repaired, a set latch makes every trim A edit read
+        as no change, and they are the experiment's own condition. The page
+        remembers neither.
+      - **Page:** `EDITABLE_TABLES` lists `timing_trim_a` / `timing_trim_b`
+        (cell grid, same affordances as the fuel tables). The cells carry a
+        0x7F decode mask and a flag in bit 7, so the page does what the
+        server's spec does: `add_raw` / `scale` act on the low 7 bits and keep
+        the flag, a result outside 0..127 is `value_out_of_range`, `set_value`
+        sets flag | value, and a `set_raw` that changes a flag bit is
+        `masked_bits_changed`, the server's own name, for a raw outside the
+        dtype too (the server checks the mask first) and for a selection of
+        mixed flags (no one raw keeps both; the message says so). Page-only
+        pre-flight refusals, which the server never sees because the page
+        sends `set_raw`: `value_not_invertible` and, for `set_value`, a value
+        whose value bits fall outside 0..127 (`value_out_of_range`). The
+        Simulate form gains two required, unchosen
+        choices (HI DET latch, Knock control) named in "What blocks Run". The
+        result gets an "Ignition timing (ECU side)" section: status, the
+        stated state, a 16 x 16 per-cell Δ° grid on the trims' own axes
+        (a number the block gives is drawn as its signed degrees whatever
+        else the cell names, so with both trims edited the trim the latch
+        reads shows its Δ and the other is named in the hover text; `NR` only
+        where the edited trim is unread and the cell's Δ is 0; `U` for
+        unevaluable; `·` for no change), each reason with its count and a
+        sentence (`timing_input_changed:*`, `trim_a_not_read:high_det_latch_set`
+        and the rest), the torque and knock refusals as the block carries
+        them, and the conditions held equal. The grid scrolls inside its own
+        box at 412 px.
+      - **Backend fix found by the verifier, 2026-10-17:**
+        `timing_cell_summary.changed_trim_not_read` matched every reason
+        starting `trim_`, so `trim_term_floor_may_bind` (a trim the ECM DOES
+        read, set below the floor of 7) counted as an edit it does not read.
+        It now matches `trim_[ab]_not_read:` only
+        (`tests/test_ignition_timing.py`
+        `test_the_unread_count_counts_only_a_trim_the_state_does_not_read`;
+        the old rule gives 1 where the new one gives 0). The page drew `NR`
+        over a real change when both trims were edited (Δ −2 on trim B, read,
+        with `trim_a_not_read` beside it); fixed as above.
+      - **Evidence (laptop, offline):** `tests/test_rom_editor.py` (76,
+        `-m ""`): a trim simulate shows Δ −3 in exactly the edited cells (the
+        flagged cell 0x80|47 -> 0x80|44 included), torque
+        `spark_response_unmeasured`; the trim the latch does not read is named
+        `trim_a_not_read:high_det_latch_set`, not shown as 0; a missing
+        `high_det` / `knock_control` is refused by name; neither is a typical
+        value. **On the real ZS44A-20261004 image**
+        (`tests/test_rom_editor_private_rom.py`, slow, skips by name without
+        the image; 8 new cases, 8.5 s): trim B `add_raw` −2 on row 8, columns
+        4–11 (the flag, bit 7, is clear before column 6 and set from it, so
+        the edit crosses the edge and each cell keeps its own flag) gives Δ −2
+        in exactly those eight cells with the latch set, torque
+        `unsupported: spark_response_unmeasured`, candidate trim B = base −2
+        and trim A untouched; with the latch clear the same edit is Δ 0, each
+        cell naming `trim_b_not_read:high_det_latch_clear` (8 unread); trims A
+        and B both −2: Δ −2 in the eight cells under either latch (table read
+        `b` / `a`) with the other trim named beside it (8 changed, 8 unread);
+        trim B set to 3 counts (flag kept) with the latch set: one
+        `unevaluable` cell, `trim_term_floor_may_bind`, 0 unread. With the API,
+        MCP, snapshot, layering, paired-scenario, timing and sim tests:
+        302 passed, 1 xfailed (`-m ""`). Vitest 258 passed over
+        `RomEditorSimulate`, `RomEditorPage`, `SimResults`, `romSimTiming`,
+        `romEditor`, `romSim`, `romSimTypical`; Playwright
+        `e2e/romEditor.spec.ts` 9 passed (the whole e2e suite earlier: 40
+        passed, 1 skipped), including a trim-B edit through preview and
+        simulate to the Δ grid, and the phone-width test with the timing grid
+        on screen (no horizontal page scroll).
+      - **Not yet done:** a walk-through of the live page on the Pi/laptop
+        daemon with the real image in the library (the operator's). The
+        daemon's code on the real image is covered above; what remains is the
+        page against a live daemon.
     - **Truck:** E05.4 (c)'s capture is needed to locate the earliest
       disagreement and to declare a final-byte tolerance.
     - **Listing:** the owed operands above.

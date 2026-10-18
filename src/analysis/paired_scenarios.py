@@ -1750,6 +1750,13 @@ def _table_read(state: TimingState, coolant: int) -> Literal["a", "b"] | None:
     return "b" if state.high_det else "a"
 
 
+# The reason `_unread_changes` names, and the only one `timing_cell_summary` counts as
+# "a changed trim the ECM does not read". A prefix match on "trim_" also caught
+# `trim_term_floor_may_bind` (a trim the ECM DOES read, below the term's floor), which
+# counted a read cell as an edit that changes nothing.
+_TRIM_NOT_READ = re.compile(r"trim_[ab]_not_read:")
+
+
 def _unread_changes(
     base: TimingTables,
     cand: TimingTables,
@@ -1877,7 +1884,7 @@ def timing_cell_summary(cells: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
     """Counts by kind of answer, and the cells where timing changes or a
     changed trim is not read."""
     changed = [c for c in cells if c["delta"] not in (None, 0)]
-    unread = [c for c in cells if any(r.startswith("trim_") for r in c["reasons"])]
+    unread = [c for c in cells if any(_TRIM_NOT_READ.match(r) for r in c["reasons"])]
     unevaluable = [c for c in cells if c["status"] == "unevaluable"]
     return {
         "cells": len(cells),

@@ -668,9 +668,57 @@ ECU replica.
       warm, across part-throttle rpm/load. This adds a catalog channel for
       the intermediate and tests "B when bit 6". Add a warm-up pass through
       56–60 °C for the blend.
+      - [~] *Desk part done 2026-10-17; the live read and the drive are owed
+        (**Pi**, **truck**).* Catalog channels `ECM_TIMING_TRIM_SELECTED`
+        (`0xFFFF1777`) and `ECM_TIMING_TRIM_A` (`0xFFFF177A`), raw bytes with
+        no scale (bits 0–6 the trim, bit 7 the cell flag), in window
+        `timing_trim` (`0xFFFF174A`–`177A`, 49 bytes) with
+        `ECM_TIMING_ENRICH_RETARD`. The flags window from `0xFFFF283F` is
+        `flags_2841`, whose `ECM_HIGH_DET_FLAGS` already carries a live read
+        (2026-10-08). Output `ignition_trim_selected` now observes
+        `mem:ECM_TIMING_TRIM_SELECTED`; node `high_det_latch` observes the HI
+        DET byte. The derivation adds both trim bytes, HI DET, the X byte,
+        the rpm word and DID 0x1101 (coolant) to the twin capture
+        (`test_ignition_timing_is_derived_from_the_implemented_chain`). The
+        trim bytes are hypothesized, so no profile polls them yet
+        (`TIMING_AWAITING_LIVE_READ`). No relation can check them: "B when
+        bit 6" is equality between two channels under a flag, which the
+        relation schema lacks, so the trim lookup node is the check.
     - **(c)** Capture `0xFFFF2793`, `0xFFFF1A58`, `0xFFFF27DA`,
       `0xFFFF2332`, `0xFFFF1346`, `0xFFFF232E` and `0xFFFF11FF` together to
       locate the earliest disagreement.
+      - [~] *Desk part done 2026-10-17; the live read and the drive are owed
+        (**Pi**, **truck**).* Each chain node observes its result:
+        `timing_trim_terms` 2793, `base_timing_sum` 1A58, `base_timing_select`
+        27DA, `timing_retard_combine` 2332 and 1346, `timing_rate_limit` 232E,
+        `timing_final_byte` 11FF. The unidentified terms are observed on the
+        node that reads them: 27C6, 279A, 174A, 1D3E and 1344 on the sum,
+        11CB on the trim terms, 1215 on the combine, 13FE on the knock
+        controller. That is fourteen new catalog channels in eight windows,
+        all after `fuel_comp_x` in catalog order
+        (`tests/test_memory_catalog_timing_chain.py`, 21 tests). Widths and
+        signedness follow the manifest's `ram` entries, and raw-count words
+        have no scale. Checks the catalog can declare:
+        - 11FF: `equals_did` 0x110A, a firmware fact, held on a synthetic
+          running ECU (`test_engine_running_the_correct_addresses_pass`);
+        - 2332 ≤ −1215: cross-read ordering. 1215 is s8 (writer 0x0638A0,
+          `exts.b`, capped above at 0x7F), so 2332 can be positive; the
+          knock_chain entry's old "u8, ≤ 0" and `plausible_max: 0.0` are
+          corrected;
+        - 2793 ≤ (1777 & 0x7F): cross-read ordering with the new
+          `operand_mask`. Unmasked it was vacuous: bit 7 (the cell flag) is
+          set on 143 of 256 cells of each trim on ZS44A-20261004, and a
+          flagged byte ≥ 128 bounds any trim term;
+        - 11CB ≤ 7: an invariant.
+
+        The rest are checked by the chain nodes on a capture. 11CB read a
+        constant 0 on all 180 spark replies of the 10-04 ram-study. That
+        cannot identify it, so it stays hypothesized. Output
+        `ignition_timing` is now evaluable (twin: the implemented chain,
+        predicting `timing_final_byte`). E09.1 has the profile, the capacity
+        and why the chain does not fit in `twin`. Owed: a key-on and idle
+        0x23 read of the eight windows and `knock_chain` to promote them,
+        then a timing-only profile and the drive.
     - **(d)** Identify the unnamed terms (`uncovered: timing_final_chain`).
     - **(e)** Slot `+0x260` and the unnamed curves are untouched.
 

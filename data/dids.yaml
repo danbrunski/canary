@@ -3265,9 +3265,26 @@ memory:
     offset: 0.0
     unit: deg
     confidence: hypothesized
-    plausible_max: 0.0
+    # From code: -0xFFFF1215 with 0xFFFF1215 an s8 (-128..127), or the
+    # smaller s8 knock retard. Not <= 0: see the correcting evidence below.
+    plausible_min: -128.0
+    plausible_max: 128.0
     verified_tune_revision: ZS44A-20260920
     window: knock_chain
+    relations:
+      - kind: memory
+        op: ordering
+        read: cross_read
+        operands: [ECM_TIMING_OTHER_RETARD]
+        compare: le
+        operand_sign: -1
+        min_agreement: 0.9
+        notes: >
+          E05.4 (c): this word is -0xFFFF1215, or min(mem:ECM_KNOCK_RETARD_DEG,
+          -0xFFFF1215) while knock control is active, so it never exceeds
+          -0xFFFF1215 (s8 per the listing, 0x04DF4C: mov.b, neg, no extu.b).
+          Checks both addresses; cross-read, so 0.9 for a retard that moves
+          between the two requests.
     evidence:
       - session: firmware-ZS44A-20260920
         method: disassembly
@@ -3276,6 +3293,16 @@ memory:
           bit 5 or 0xFFFF28B3 bit 1) it is min(mem:ECM_KNOCK_RETARD_DEG,
           -0xFFFF1215); otherwise -0xFFFF1215, where 0xFFFF1215 is a
           separate non-knock retard (u8 degrees).
+      - session: firmware-ZS44A-20261004 (E09.7 timing_retard_combine; E05.4 (c) verification, 2026-10-17)
+        method: disassembly
+        finding: >
+          Corrects the entry above: 0xFFFF1215 is s8, not u8. 0x04DF4C reads
+          it with mov.b and negates it with no extu.b, and its writer at
+          0x0638A0 stores an exts.b value capped only above, at 0x7F
+          (0x063842-0x06384A). So -0xFFFF1215 runs -127..128 and this word
+          can be positive (an advance, not only a retard): "<= 0" and
+          plausible_max 0.0 were wrong, and the bounds are now the code's.
+          The ordering above (this word <= -0xFFFF1215) is what holds.
   - name: ECM_TIMING_SUBTRACT_TERM
     address: 0xFFFF2334
     length: 2
@@ -4640,3 +4667,336 @@ memory:
     notes: >
       Known answer (cross-read, not expressible, inferred mapping, as for
       bank 1): raw = 25600 whenever DID 0x1110 reads 0, purge off.
+  # --- Ignition timing chain (E05.4 (b)/(c), E09.1) ---------------------------
+  # The words the seven timing nodes of ecu_application_model.yaml read and
+  # write, from the trim lookup to the timing byte, so a twin capture can locate
+  # the earliest disagreement along the chain. Widths, signedness and units are
+  # the manifest's `ram` entries; a word the manifest keeps in raw counts has no
+  # scale here (none is invented). Code-verified from the listing (E05.4 trace,
+  # E09.7 nodes); `confidence: hypothesized` and out of every capture profile
+  # until a live read shows each (tests/test_memory_catalog_knock_lambda.py).
+  # Every window sits after fuel_comp_x in catalog order, so a profile adding
+  # them reads them after the fill byte and E07.4's 0.1 s pairing is untouched.
+  # Windows (contiguous spans, <= 63 bytes): timing_byte 0xFFFF11FF-1215 (23),
+  # trim_subtrahend 0xFFFF11CB (1), timing_terms 0xFFFF1344-1346 (3),
+  # timing_trim 0xFFFF174A-177A (49), base_timing 0xFFFF1A58 (1),
+  # valve_timing_term 0xFFFF1D3E (1), timing_trim_term 0xFFFF2793-279A (8),
+  # base_timing_term 0xFFFF27C6-27DA (21). The chain's 0xFFFF232E and 0xFFFF2332
+  # are knock_chain's, and 0xFFFF13FE is knock_target's.
+  - name: ECM_IGNITION_TIMING_BYTE
+    address: 0xFFFF11FF
+    length: 1
+    byte_length: 1
+    scale: -1.0
+    offset: 110.0
+    unit: degBTDC
+    confidence: hypothesized
+    plausible_min: -20.0
+    plausible_max: 60.0
+    verified_tune_revision: ZS44A-20261004
+    window: timing_byte
+    known_answer:
+      did: 0x110A
+      relation: equals_did
+      min_agreement: 0.90
+      notes: >
+        A firmware fact, not a sweep: the CAN Mode 22 pointer table maps DIDs
+        0x110A, 0x1108, 0x1109 and 0x113C to this byte, and the Mode 01
+        handler 0x0D3AFC reports PID 0x0E from it (docs/ecu-firmware-analysis.md,
+        DID audit 2026-10-05). 0.90 for the same acquisition skew as
+        mem:ECM_IGNITION_TIMING_RAM (two requests about 1.5 ms apart while
+        timing moves).
+    evidence:
+      - session: firmware-ZS44A-20261004 (E05.4 trace, E09.7 timing_final_byte)
+        method: disassembly
+        finding: >
+          u8, 110 - degrees BTDC: written by 0x04E4AC as 110 - 0xFFFF232E on
+          the normal path (bit 5 of 0xFFFF28B1: clamp(80 - v, 0, 80); a fault
+          mode: clamp(120 - v, 0, 255); bit 5 of 0xFFFF4858 forces 0x5A). The
+          byte schedules the coil (0x02B82E). mem:ECM_IGNITION_TIMING_RAM
+          (0xFFFF11C7) is its cycle-start copy.
+    notes: >
+      The chain's final output in the same 0x23 read as 0xFFFF1215, the
+      non-knock retard the combine step negates. For timing alone, DID 0x110A
+      (or PID 0x0E) is the calibration-independent route; this exists so the
+      chain's words are read in one session window.
+  - name: ECM_TIMING_OTHER_RETARD
+    address: 0xFFFF1215
+    length: 1
+    byte_length: 1
+    signed: true
+    scale: 1.0
+    offset: 0.0
+    unit: deg
+    confidence: hypothesized
+    verified_tune_revision: ZS44A-20261004
+    window: timing_byte
+    evidence:
+      - session: firmware-ZS44A-20261004 (E09.7 timing_retard_combine)
+        method: disassembly
+        finding: >
+          s8 whole degrees (0x04DF4C mov.b, then neg with no extu.b): the
+          non-knock retard written at 0x0637C2. 0xFFFF2332 = -this byte while
+          knock control is inactive, else min(0xFFFF26D2, -this byte). Its
+          meaning is inferred; it is one of the unidentified terms the chain
+          takes as a required argument (uncovered timing_final_chain).
+    notes: >
+      Known answer: the cross-read ordering declared on
+      mem:ECM_KNOCK_RETARD_APPLIED (0xFFFF2332 <= -this byte), which checks
+      this address too. Signed per the listing; the knock_chain entry's
+      first evidence called it u8 and now carries the correction.
+  - name: ECM_TIMING_TRIM_SUBTRAHEND
+    address: 0xFFFF11CB
+    length: 1
+    byte_length: 1
+    unit: counts
+    confidence: hypothesized
+    verified_tune_revision: ZS44A-20261004
+    window: trim_subtrahend
+    relations:
+      - kind: invariant
+        max: 7
+        min_agreement: 1.0
+        notes: >
+          cal 0x8B05 = 7 caps 0xFFFF27C4 (0x04D9E4), which this cycle copy
+          slews toward, so it is 0..7 (ecu_application_model.yaml
+          timing_trim_terms calibration_conditions). Counts only with two or
+          more distinct values (InvariantRelation): a constant 0 proves nothing.
+    evidence:
+      - session: firmware-ZS44A-20261004 (E05.4 trace, E09.7 timing_trim_terms)
+        method: disassembly
+        finding: >
+          u8 counts: the cycle-start copy of 0xFFFF1203, which 0x04E5B0 slews
+          +/-5 per segment toward 0xFFFF2738 (min(cal 0x8B05 = 7, ...)). The
+          trim term is 0xFFFF2793 = max(0, (0xFFFF1777 & 0x7F) - this byte).
+          Its source 0xFFFF2BD0 is not identified (E09.7).
+      - session: _capture-ram-study-2026-10-04T204557
+        method: window_byte_constant
+        finding: >
+          Byte 4 of the 19-byte spark window reply (0xFFFF11C7-11D9) on all 180
+          full reads: 0 every time, while the timing byte at 0xFFFF11C7 took
+          40 values. Inside the code's 0..7 range, but a constant cannot tell
+          this byte from its neighbours (four others in the reply also read a
+          constant), so it is recorded and not a live-read identification.
+    notes: >
+      Its own 1-byte window: the spark window's members are stamped ZS44A-k106
+      and one reply cannot carry two calibrations' stamps.
+  - name: ECM_TIMING_TERM_1344
+    address: 0xFFFF1344
+    length: 1
+    byte_length: 1
+    unit: counts
+    confidence: hypothesized
+    verified_tune_revision: ZS44A-20261004
+    window: timing_terms
+    evidence:
+      - session: firmware-ZS44A-20261004 (E09.7 base_timing_sum)
+        method: disassembly
+        finding: >
+          u8, added to the base timing sum 0xFFFF1A58; 0 unless 0xFFFF47A6
+          bit 6 and a speed condition hold. Writer not identified (uncovered
+          timing_final_chain).
+    notes: 'No known answer: no relation the firmware guarantees.'
+  - name: ECM_TIMING_PRELIMIT
+    address: 0xFFFF1346
+    length: 1
+    byte_length: 1
+    signed: true
+    scale: 1.0
+    offset: 0.0
+    unit: deg
+    confidence: hypothesized
+    verified_tune_revision: ZS44A-20261004
+    window: timing_terms
+    evidence:
+      - session: firmware-ZS44A-20261004 (E09.7 timing_retard_combine)
+        method: disassembly
+        finding: >
+          s8 degrees: sat_s8(0xFFFF2338 + 0xFFFF272A - 0xFFFF2334), the timing
+          before the rate limiter (0x04DF38). 0xFFFF232E follows it at most +4
+          / -15 per segment, capped 50, floored -7.
+    notes: >
+      No expressible known answer: 0xFFFF232E equals it only where the limiter
+      does not bind (a steady state), and 0xFFFF272A is not identified. The
+      twin's timing_rate_limit node is the check.
+  - name: ECM_TIMING_ENRICH_RETARD
+    address: 0xFFFF174A
+    length: 1
+    byte_length: 1
+    unit: counts
+    confidence: hypothesized
+    verified_tune_revision: ZS44A-20261004
+    window: timing_trim
+    evidence:
+      - session: firmware-ZS44A-20261004 (E09.7 base_timing_sum)
+        method: disassembly
+        finding: >
+          u8, subtracted in the base timing sum: max(0, min(0xFFFF174C, g)),
+          g = 0 while the Target AFR lookup byte 0xFFFF174B is below 0x82
+          (0x04C9D8). Name from that use; units kept as counts (manifest
+          timing_term_174a).
+    notes: 'No known answer expressible; 0 whenever the Target AFR lookup is below 0x82.'
+  - name: ECM_TIMING_TRIM_SELECTED
+    address: 0xFFFF1777
+    length: 1
+    byte_length: 1
+    unit: counts
+    confidence: hypothesized
+    verified_tune_revision: ZS44A-20261004
+    window: timing_trim
+    evidence:
+      - session: firmware-ZS44A-20261004 (E05.4 trace, timing_trim_lookup 0x04E6D8)
+        method: disassembly
+        finding: >
+          u8: the trim lookup the timing sum consumes. Bits 0-6 the trim in
+          counts, bit 7 the lower-left cell's flag (0x026F9C masks & 0x7F
+          before the interpolation and ORs bit 7 back). Coolant byte above 110:
+          trim B while 0xFFFF283F bit 6 (HI DET) is set, else trim A; at or
+          below 106: trim A; between: a blend.
+    notes: >
+      Raw byte, deliberately unscaled: the trim is raw & 0x7F, and the flag is
+      bit 7, so a scale would mix the two. With HI DET clear and warm it equals
+      mem:ECM_TIMING_TRIM_A (same reply); the relation schema has no equality
+      between two channels under a flag, so the twin's timing_trim_lookup node
+      is the check ("B when bit 6", E05.4 (b)).
+  - name: ECM_TIMING_TRIM_A
+    address: 0xFFFF177A
+    length: 1
+    byte_length: 1
+    unit: counts
+    confidence: hypothesized
+    verified_tune_revision: ZS44A-20261004
+    window: timing_trim
+    evidence:
+      - session: firmware-ZS44A-20261004 (E05.4 trace, timing_trim_lookup 0x04E6D8)
+        method: disassembly
+        finding: >
+          u8: trim A's lookup, always (bits 0-6 the trim, bit 7 the cell flag,
+          as for 0xFFFF1777).
+    notes: 'Raw byte, unscaled, as mem:ECM_TIMING_TRIM_SELECTED.'
+  - name: ECM_BASE_TIMING_SUM
+    address: 0xFFFF1A58
+    length: 1
+    byte_length: 1
+    signed: true
+    scale: 1.0
+    offset: 0.0
+    unit: deg
+    confidence: hypothesized
+    verified_tune_revision: ZS44A-20261004
+    window: base_timing
+    evidence:
+      - session: firmware-ZS44A-20261004 (E09.7 base_timing_sum 0x04CB9E)
+        method: disassembly
+        finding: >
+          s8 degrees: 0xFFFF1D3E + 0xFFFF27C6 + 0xFFFF2793 - 0xFFFF279A -
+          0xFFFF134A - 0xFFFF174A - 0x80 + 0xFFFF1344, clamped -128..127 (with
+          0xFFFF2833 bit 4 clear).
+    notes: >
+      No expressible known answer: the sum's terms come back in four other
+      reads. The twin's base_timing_sum node is the check.
+  - name: ECM_TIMING_TERM_1D3E
+    address: 0xFFFF1D3E
+    length: 1
+    byte_length: 1
+    unit: counts
+    confidence: hypothesized
+    verified_tune_revision: ZS44A-20261004
+    window: valve_timing_term
+    evidence:
+      - session: firmware-ZS44A-20261004 (E09.7 base_timing_sum)
+        method: disassembly
+        finding: >
+          u8, the valve-timing term of the base timing sum (0x04DA02): 0x40
+          (neutral) on most branches, else 0xFFFF1ED4 + 0xFFFF1DFB - 0x40
+          clamped 0..255.
+    notes: 'No known answer expressible; 0x40 on the neutral branches.'
+  - name: ECM_TIMING_TRIM_TERM
+    address: 0xFFFF2793
+    length: 1
+    byte_length: 1
+    unit: counts
+    confidence: hypothesized
+    verified_tune_revision: ZS44A-20261004
+    window: timing_trim_term
+    relations:
+      - kind: memory
+        op: ordering
+        read: cross_read
+        operands: [ECM_TIMING_TRIM_SELECTED]
+        compare: le
+        operand_mask: 0x7F
+        min_agreement: 0.9
+        notes: >
+          This byte is max(0, (0xFFFF1777 & 0x7F) - 0xFFFF11CB), so it never
+          exceeds the selected trim with its cell flag masked off. The mask is
+          required: bit 7 is set on 143 of 256 cells of each trim on
+          ZS44A-20261004 (rows 800-5600 rpm, X >= 48, most of part load), and
+          a flagged raw byte >= 128 would bound any trim term, whatever the
+          address held. Cross-read: the trim moves with rpm and load between
+          the two requests, hence 0.9.
+    evidence:
+      - session: firmware-ZS44A-20261004 (E09.7 timing_trim_terms 0x04BD24)
+        method: disassembly
+        finding: >
+          u8 counts: max(0, (0xFFFF1777 & 0x7F) - 0xFFFF11CB), the trim's term
+          in the base timing sum, added unscaled.
+  - name: ECM_TIMING_TERM_279A
+    address: 0xFFFF279A
+    length: 1
+    byte_length: 1
+    unit: counts
+    confidence: hypothesized
+    verified_tune_revision: ZS44A-20261004
+    window: timing_trim_term
+    evidence:
+      - session: firmware-ZS44A-20261004 (E09.7 base_timing_sum)
+        method: disassembly
+        finding: >
+          u8, subtracted in the base timing sum: clamp(0xFFFF26D9 + 0xFFFF26D0
+          - (0xFFFF17FA >> 4), 0, 255) (0x04C952); its inputs are not
+          identified.
+    notes: 'No known answer expressible.'
+  - name: ECM_TIMING_TERM_27C6
+    address: 0xFFFF27C6
+    length: 1
+    byte_length: 1
+    signed: true
+    scale: 1.0
+    offset: 0.0
+    unit: deg
+    confidence: hypothesized
+    verified_tune_revision: ZS44A-20261004
+    window: base_timing_term
+    evidence:
+      - session: firmware-ZS44A-20261004 (E09.7 base_timing_sum, 0x04BC5A)
+        method: disassembly
+        finding: >
+          s8, the term carrying most of the base advance: a time converted to
+          crank angle at the current rpm over rom_map base_timing_rate_map
+          (0x9AF9) and X, capped 127. Added unscaled to 0xFFFF1A58, hence
+          degrees (manifest timing_term_27c6); how it is formed from its
+          inputs is unresolved until the 0x021C48 / 0x021D6C operands are known.
+    notes: 'No known answer expressible: its computation is owed to the firmware session.'
+  - name: ECM_BASE_TIMING
+    address: 0xFFFF27DA
+    length: 1
+    byte_length: 1
+    signed: true
+    scale: 1.0
+    offset: 0.0
+    unit: deg
+    confidence: hypothesized
+    verified_tune_revision: ZS44A-20261004
+    window: base_timing_term
+    evidence:
+      - session: firmware-ZS44A-20261004 (E09.7 base_timing_select 0x04CF0C)
+        method: disassembly
+        finding: >
+          s8 degrees: 0xFFFF1A58, or the alternate 0xFFFF1A59 when bit 6 of
+          0xFFFF4785 or bit 4 of 0xFFFF2833 is set.
+    notes: >
+      Equals mem:ECM_BASE_TIMING_SUM on the normal path, but the relation
+      schema has no two-channel equality, and the two are separate reads
+      (0xFFFF1A58 is 0xD82 bytes away). The twin's base_timing_select node is
+      the check.

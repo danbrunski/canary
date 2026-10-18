@@ -1592,6 +1592,9 @@ nodes:
     outside_schedule: 'Task 67 of the 0x020EF2 loop, after the trim lookup (66): the lookup reads last cycle''s bit.'
     confidence: inferred
     twin: not_modelled
+    observed_as:
+      - {spec: 'mem:ECM_HIGH_DET_FLAGS', address: 0xFFFF283F, relation: identity, confidence: code,
+         note: 'Bit 6 is the latch; the byte rides the flags_2841 read with the pedal flag (E05.4 (b)).'}
     evidence: ['listing 0x04A672, 0x04A954-0x04A990 (or.b/and.b 0x40)', 'UpRev logs since 2026-07-26 read 0x40 throughout (local firmware notes)']
 
   - id: timing_trim_lookup
@@ -1635,6 +1638,9 @@ nodes:
     confidence: code
     twin: implemented
     implemented_by: src.analysis.ecu_state_models.selected_timing_trim
+    observed_as:
+      - {spec: 'mem:ECM_TIMING_TRIM_SELECTED', address: 0xFFFF1777, relation: identity, confidence: code}
+      - {spec: 'mem:ECM_TIMING_TRIM_A', address: 0xFFFF177A, relation: identity, confidence: code}
     evidence:
       - 'listing 0x04E6D8-0x04EA2A, 0x026A64, 0x026F9C-0x02700E; task table 0x0219D0 entry 66'
       - 'tests/test_ecu_state_models.py hand-worked vectors (synthetic tables)'
@@ -1662,6 +1668,9 @@ nodes:
     outside_schedule: 'Task 67 of the 0x020EF2 loop.'
     confidence: code
     twin: not_modelled
+    observed_as:
+      - {spec: 'mem:ECM_KNOCK_RETARD_TARGET', address: 0xFFFF13FE, relation: identity, confidence: inferred,
+         note: 'A word this node reads, not its result: observed so the twin has it (E05.4 (c)).'}
     evidence: ['listing 0x04A4C6-0x04A5FE (tst 0x04 at 0x04A514, tst 0x40 at 0x04A51E)', '2026-10-04 capture: flags window 0x0004 on all 191 reads (0xFFFF2842 = 0x04)']
 
   - id: timing_trim_terms
@@ -1683,6 +1692,10 @@ nodes:
     confidence: code
     twin: implemented
     implemented_by: src.analysis.ecu_state_models.timing_trim_terms
+    observed_as:
+      - {spec: 'mem:ECM_TIMING_TRIM_TERM', address: 0xFFFF2793, relation: identity, confidence: code}
+      - {spec: 'mem:ECM_TIMING_TRIM_SUBTRAHEND', address: 0xFFFF11CB, relation: identity, confidence: code,
+         note: 'A word this node reads (uncovered timing_final_chain), not its result.'}
     evidence: ['listing 0x04BD24-0x04BD72', 'tests/test_ecu_state_models.py hand-worked vectors (E09.7); every unidentified word is a required argument']
 
   - id: base_timing_sum
@@ -1706,6 +1719,15 @@ nodes:
     confidence: code
     twin: implemented
     implemented_by: src.analysis.ecu_state_models.base_timing_sum
+    observed_as:
+      - {spec: 'mem:ECM_BASE_TIMING_SUM', address: 0xFFFF1A58, relation: identity, confidence: code}
+      # The unidentified terms it reads (uncovered timing_final_chain): read so
+      # the node's required arguments are measured, not results of this node.
+      - {spec: 'mem:ECM_TIMING_TERM_27C6', address: 0xFFFF27C6, relation: identity, confidence: code}
+      - {spec: 'mem:ECM_TIMING_TERM_279A', address: 0xFFFF279A, relation: identity, confidence: code}
+      - {spec: 'mem:ECM_TIMING_ENRICH_RETARD', address: 0xFFFF174A, relation: identity, confidence: code}
+      - {spec: 'mem:ECM_TIMING_TERM_1D3E', address: 0xFFFF1D3E, relation: identity, confidence: code}
+      - {spec: 'mem:ECM_TIMING_TERM_1344', address: 0xFFFF1344, relation: identity, confidence: code}
     evidence: ['decompile text of 0x04CB9E (firmware session, 2026-10-05)', 'tests/test_ecu_state_models.py hand-worked vectors (E09.7); every unidentified word is a required argument']
 
   - id: base_timing_select
@@ -1723,6 +1745,8 @@ nodes:
     confidence: code
     twin: implemented
     implemented_by: src.analysis.ecu_state_models.base_timing_select
+    observed_as:
+      - {spec: 'mem:ECM_BASE_TIMING', address: 0xFFFF27DA, relation: identity, confidence: code}
     evidence: ['decompile text of 0x04CF0C (firmware session)', 'tests/test_ecu_state_models.py hand-worked vectors (E09.7); every unidentified word is a required argument']
 
   - id: timing_cycle_copy
@@ -1764,6 +1788,11 @@ nodes:
     confidence: code
     twin: implemented
     implemented_by: src.analysis.ecu_state_models.timing_retard_combine
+    observed_as:
+      - {spec: 'mem:ECM_KNOCK_RETARD_APPLIED', address: 0xFFFF2332, relation: identity, confidence: code}
+      - {spec: 'mem:ECM_TIMING_PRELIMIT', address: 0xFFFF1346, relation: identity, confidence: code}
+      - {spec: 'mem:ECM_TIMING_OTHER_RETARD', address: 0xFFFF1215, relation: identity, confidence: code,
+         note: 'A word this node reads (uncovered timing_final_chain), not its result.'}
     evidence: ['decompile text of 0x04DF38 (firmware session)', 'listing 0x04DF38-0x04DF76 (signedness of 0xFFFF1215, cal 0x8294 gate) and 0x04E05A-0x04E064 (0xFFFF46E6 byte)', 'tests/test_ecu_state_models.py hand-worked vectors (E09.7); every unidentified word is a required argument']
 
   - id: timing_rate_limit
@@ -1785,6 +1814,8 @@ nodes:
     confidence: code
     twin: implemented
     implemented_by: src.analysis.ecu_state_models.timing_rate_limit
+    observed_as:
+      - {spec: 'mem:ECM_IGNITION_TIMING_FINAL', address: 0xFFFF232E, relation: identity, confidence: code}
     evidence: ['decompile text of 0x04E0E0 (firmware session)', 'tests/test_ecu_state_models.py hand-worked vectors (E09.7); every unidentified word is a required argument']
 
   - id: timing_final_byte
@@ -1804,6 +1835,8 @@ nodes:
     confidence: code
     twin: implemented
     implemented_by: src.analysis.ecu_state_models.timing_final_byte
+    observed_as:
+      - {spec: 'mem:ECM_IGNITION_TIMING_BYTE', address: 0xFFFF11FF, relation: identity, confidence: code}
     evidence: ['decompile text of 0x04E4AC (firmware session)', 'PID 0x0E and DID 0x110A read 0xFFFF11FF (Mode 01 handler 0x0D3AFC)', 'tests/test_ecu_state_models.py hand-worked vectors (E09.7); every unidentified word is a required argument']
 
 outputs:
@@ -1903,6 +1936,12 @@ outputs:
         address: 0xFFFF11C7
         relation: alias
         note: 'The cycle-start copy of the same byte: agreement checks the mapping, not the chain.'
+    # E09.1: the seven chain nodes (E09.7, each implemented_by its function in
+    # src.analysis.ecu_state_models) are the twin; the final byte is what it
+    # predicts. Evaluable, so twin_observation_channels derives the capture.
+    twin:
+      definition: src.analysis.ecu_state_models.timing_final_byte
+      predicts: timing_final_byte
     blockers:
       - name: trim_ram_copy_unverified
         nodes: [timing_trim_ram_copy]
@@ -1931,6 +1970,8 @@ outputs:
     units: trim_counts_7bit_plus_flag
     role: intermediate
     feeds: ignition_timing
+    observed_as:
+      - {spec: 'mem:ECM_TIMING_TRIM_SELECTED', address: 0xFFFF1777, relation: identity, confidence: code}
     twin:
       definition: src.analysis.ecu_state_models.selected_timing_trim
       predicts: timing_trim_lookup

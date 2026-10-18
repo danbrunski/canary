@@ -534,11 +534,14 @@ pydantic's list for 422.
 **Editable:** Map 1 only: the fuel chain (`fuel_targets`, `fuel_compensation`,
 `k_constant`) and the ignition timing trims (`timing_trim_a`, `timing_trim_b`,
 E09.7), `slot: 1` (the slot the ECM runs after a cold boot, the one the
-simulator runs). A trim edit previews; simulating one is refused as
-`timing_state_unstated` until the request states the HI DET latch and knock
-control (the page's half of E09.7; `rom_sim run --high-det --knock-control`
-gives the ECU-side `ignition_timing` block now). Anything else is refused by
-name: `table_not_editable`,
+simulator runs). A trim edit previews and simulates: the simulate request
+states the HI DET latch and knock control (`high_det`, `knock_control`, both
+required), and the result's `ignition_timing` block gives the ECU-side change
+per trim cell (below; `rom_sim run --high-det --knock-control` gives the same
+block). A trim cell is a byte whose bit 7 is a flag the ECM strips (decode mask
+`0x7F`): `add_raw` and `scale` act on `raw & 0x7F` and keep bit 7, a result
+outside 0..127 is `value_out_of_range`, and a `set_raw` that would change bit 7
+is `masked_bits_changed`. Anything else is refused by name: `table_not_editable`,
 `slot_not_simulated`. E08.1's refusals keep their names: `no_edits`,
 `duplicate_edit`, `no_op_edit`, `value_out_of_range`, `rounding_undeclared`,
 `rounding_without_scale`, `selector_ambiguous`, `operation_ambiguous`,
@@ -659,8 +662,23 @@ it, an unknown one a 422 `extra_forbidden`):
  "rail_kpa": "working_assumption", "throttle_pct": 20.0, "pedal_flag": 0,
  "stft_pct": 0.0, "ltft_pct": 0.0, "throttle_closed_learned": 0.0,
  "idle_air_learned": 0.0, "evap_purge_area": 0.0,
+ "high_det": "set", "knock_control": "fallback",
  "candidate_events": "none", "draws": 200, "seed": 20261015}
 ```
+
+`high_det` (`"set"` or `"clear"`) and `knock_control` (`"active"` or
+`"fallback"`) are the ignition chain's two ECU states (E09.7), which nothing
+logs, so the request states both and a missing one is a 422 naming it.
+`high_det` is the knock controller's HI DET latch (0xFFFF283F bit 6): warm,
+the ECM reads trim B while it is `set` and trim A while it is `clear`.
+`knock_control` `"fallback"` is the knock sensor fault state (0xFFFF479D bit 7,
+retard target 0xFFFF13FE = 0xFB00); it does not imply `high_det` and neither
+implies the other. Both change with the truck (the 2026-10-08 RAM read was
+`set` / `fallback`, KS1 fault; both clear when KS1 is repaired), so **neither is
+ever a typical value**: the dashboard offers no preselection and remembers
+nothing, and the typical-values route refuses a file that names either. State
+the pairing you are asking about, not the one you last saw. They are read only
+by `ignition_timing`; the fuel outputs do not depend on them.
 
 `grid` is `"fuel_comp"` or `"target_afr"` (the aggregation axes). `rpm_edges`
 and `load_edges` are the grid's cell edges (strictly rising; `load_edges` in
@@ -708,8 +726,8 @@ the design's are not in design, E08.10), "unresolved": [...], "inert_parameters"
 "provenance": {hashes, plant_version, seed, draws, candidate_events, ...},
 "design": {points, weight, base_revision, ..., "grid": {rpm_edges, load_edges,
 load_axis, load_unit, load_basis, environment}},
-"candidate": <the preview's provenance>, "cells": <CellTable>, "spec_yaml":
-str, "spec_sha256": str}`. Note `label` here is the result's, the request's is
+"candidate": <the preview's provenance>, "cells": <CellTable>,
+"ignition_timing": <timing block>, "spec_yaml": str, "spec_sha256": str}`. Note `label` here is the result's, the request's is
 `candidate.label`. `cells` is `sim_cells.CellTable.to_dict()` (E08.4;
 `schema_version: 1`, JSON Schema from `sim_cells.cell_table_schema()`): `grid`,
 `table`, `slot`, `rows` / `cols` axis info (`raw`, `breakpoints`, `values`,
@@ -729,6 +747,39 @@ six outputs. The route's body and the dashboard's payload are always this whole
 body; the MCP tool `simulate_rom_edit` cuts it in the tool layer by `detail`
 (`headline`, the default, `summary`, `cells` or `full`) and states what it
 dropped in the result (docs/mcp-server.md).
+
+**`ignition_timing`** (E09.7) is on every result, from
+`sim_cells.ignition_timing_block` (the block `tools/rom_sim.py` prints) and
+`ignition_timing_points`. ECU side only: the timing byte's chain with every
+term but the selected trim held equal, no torque and no knock claim.
+`status` is `evaluated` or `unevaluable`; `state` echoes the stated
+`{high_det, knock_control, source}`; `trims_changed` says whether an edit
+touched a trim; `other_inputs_changed` lists `timing_input_changed:<node>` for
+every changed byte outside the trims that reaches `ignition_timing` (a K or
+Fuel Comp edit: `air_charge_tp`, `fuel_comp_lookup`) and
+`unknown_bytes_changed` for one no node reads. Any of those makes the block
+`unevaluable` with those `reasons` and no cells (the trims' grid holds that
+change's terms equal, so its "0 changed" would be a claim the chain cannot
+make). Otherwise `cells_at` names the coolant the cells are read at (the
+request's `coolant_c`), `summary` counts `{cells, changed, unevaluable,
+changed_trim_not_read, reasons}` and `cells` lists the cells of the trims' own
+16 x 16 grid that change or name a reason beyond `clamp_headroom_unknown`
+(every other cell is unchanged): `{row, col, rpm_word, x, delta, trim_term_delta,
+status, reasons, table_read}`, `delta` in degrees (1 trim count = 1 degree),
+`table_read` `a` / `b` / null (the blend band). An edit to the trim the stated
+latch does not read has `delta: 0` and `trim_a_not_read:high_det_latch_set` /
+`trim_b_not_read:high_det_latch_clear` on each edited cell. `changed_trim_not_read`
+counts the cells that name a `trim_[ab]_not_read:` reason and only those: a trim
+the ECM does read, set below the term's floor, is `trim_term_floor_may_bind` and
+`unevaluable`, not "not read". With both trims edited the trim the latch reads
+gives `delta` and the other is named in `reasons` beside it, so one cell is both
+`changed` and counted in `changed_trim_not_read`. `torque` is
+`unsupported` with `spark_response_unmeasured...` and `knock` carries its own
+refusals. `points` is one row per design point with its outcomes grouped by
+`{status, delta, trim_term_delta, reasons, x_base, x_candidate, draws}`; a K or
+Fuel Comp change reports the trim term's change and no timing change
+(`base_timing_load_term_unmodelled`), a Target AFR change that moves phi
+`enrichment_retard_unmodelled`.
 
 Errors (each a `{"detail": ...}`):
 
@@ -793,8 +844,10 @@ and `tests/test_rom_editor.py` fails the moment any code in `src/` reads the
 field. A file where a field is neither a value nor left empty, where a value has
 no source or kind or is one the `SimRequest` would refuse, or that names any other
 field (the grid, the candidate events, the edges, the draws, the seed and the
-label are never typical) is invalid, so the page can always say what it left
-for the operator. **The 21-field `SimRequest` is unchanged and still has no
+label are never typical, and neither are `high_det` and `knock_control`: they
+are live ECU states, and a typical value would outlive the fault that set
+them) is invalid, so the page can always say what it left
+for the operator. **The 23-field `SimRequest` still has no
 defaults:** a client that wants these values sends them in the simulate body
 itself. The dashboard fills them into the visible form on a click, marks each
 `typical: <source>` or `placeholder: <source>` from `kind`, and sends nothing it
