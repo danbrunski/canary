@@ -40,13 +40,18 @@ def nc(name, track, clearance=0.2, via_d=0.6, via_drill=0.3):
     return c
 
 
+# Track widths are the routed taps' widths, not the current paths': every high-current path is a
+# hand-laid pour (gen/copper.py), so a router or a hand-drawn track only adds low-current taps,
+# whose pins are 0.25-0.5 mm wide. Class widths of 1.5 and 0.5 mm reached KiCad's Specctra export
+# and starved the freerouting-rs plugin (68 unconnected against 33 at these widths, 2026-10-17).
+# DRC never checks a track against its class width, so a new current path must still be a pour.
 pro["net_settings"]["classes"] = [
     base,
-    nc("Power_High", 1.5, 0.25, 0.8, 0.4),
-    nc("Power", 0.5),
-    nc("Switch_Node", 1.5, 0.25),
+    nc("Power_High", 0.3, 0.25, 0.8, 0.4),
+    nc("Power", 0.3),
+    nc("Switch_Node", 0.3, 0.25),
     nc("CAN", 0.3),
-    nc("GND", 0.5),
+    nc("GND", 0.4),
 ]
 # Design net names, written as the exact names KiCad gives them. Bare patterns once missed every
 # single-sheet net (KiCad anchors patterns, so "VCAP" never matched "/Holdup/VCAP"): VCAP,

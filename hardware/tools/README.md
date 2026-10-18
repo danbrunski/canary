@@ -75,8 +75,7 @@ returning raw pointers.
 `autoroute.sh` routes a board with Freerouting while keeping the copper laid by hand:
 
 ```bash
-hardware/tools/autoroute.sh <scratch_project_dir> <freerouting.jar> [passes] \
-    [-- --width Power_High=0.3 --width Switch_Node=0.3 --width Power=0.3 --width GND=0.4]
+hardware/tools/autoroute.sh <scratch_project_dir> <freerouting.jar> [passes] [-- dsn_export.py options]
 ```
 
 It edits the board in that directory, so give it a scratch copy of the project. The steps:
@@ -106,8 +105,8 @@ passes `1`. Later passes never beat the first on this board.
   would route signals through the power pours. Each outer-layer pour of a `--fixed-classes`
   net goes in as fixed wires covering its fill. Same-net taps can still connect at the edge.
 - **Outer GND pours.** These are dropped, so GND pads fan out to the inner planes.
-- **Widths.** `--width CLASS=mm` sets a class's routed width. The pours carry the current,
-  so the router only adds low-current taps to the power nets.
+- **Widths.** `--width CLASS=mm` overrides a class's routed width. CANary-PWR no longer needs
+  it: its classes carry the taps' widths (0.3 mm, GND 0.4) because the pours carry the current.
 - **Clearances.** The board-edge clearance and the fiducials' 0.6 mm clearance go in as
   keepouts, since the export leaves both out.
 

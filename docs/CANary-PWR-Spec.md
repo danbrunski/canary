@@ -668,7 +668,7 @@ schematic, including the net classes. Each class lists design nets, which are wr
 names KiCad gives them: a net on one sheet is `/<sheet>/<net>`. Generation refuses a name the design
 lacks and a `+` rail with no class. Until 2026-10-15 the patterns were bare names, and KiCad anchors
 patterns, so `VCAP`, `+12V_RAW` and `+5V_SHUNT` fell into the 0.2 mm default class. Nothing flagged
-it, because DRC does not check a track against its class width. `verify_netlist.py` checks KiCad's netlist against it, `gen_pcb.py`
+it, because DRC does not check a track against its class width. Since 2026-10-17 the class track widths are the routed taps' widths: 0.3 mm (GND 0.4), not 1.5 and 0.5 mm. Every current path is a hand-laid pour, and the wide classes reached KiCad's Specctra export, so the freerouting-rs plugin tried to land 1.5 mm tracks on 0.25 mm pins. A new current path must still be a pour, since DRC will not catch a thin one. `verify_netlist.py` checks KiCad's netlist against it, `gen_pcb.py`
 builds the board on the HAT rev 2.1 template (run with KiCad's own Python) and
 places it from `placement.py`, then labels it with `hardware/tools/silk_refs.py`
 (0.8 mm designators, each clear of pads and silk; 20 small passives in the
