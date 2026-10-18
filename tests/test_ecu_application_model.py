@@ -406,6 +406,10 @@ def test_every_constant_a_reference_model_implements_is_checked_on_the_image() -
         (0x8781, "enrichment_state"),
         (0x8796, "enrichment_state"),
         (0xCEDB + 7, "pedal_enrichment_flag"),
+        # E09.7: the trim term's 0..7 subtrahend bound and the skipped
+        # held-step branch of the retard combine.
+        (0x8B05, "timing_trim_terms"),
+        (0x8294, "timing_retard_combine"),
     ]:
         edited = bytearray(image)
         edited[offset] ^= 0x01

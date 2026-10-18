@@ -36,6 +36,7 @@ units:
   - {id: s, dimension: time, meaning: 'second'}
   - {id: percent, dimension: ratio, meaning: 'percent of full scale'}
   - {id: N_m, dimension: torque, meaning: 'newton metre'}
+  - {id: deg_btdc, dimension: crank_angle, meaning: 'crank degrees before top dead centre (ignition advance)'}
   - {id: L, dimension: volume, meaning: 'litre'}
   - {id: raw_counts, dimension: ecu_integer, meaning: 'the ECU word as stored; scale on the quantity'}
   - {id: q14_phi, dimension: ecu_integer, meaning: 'equivalence ratio x 16384'}
@@ -238,11 +239,15 @@ quantities:
     units: N_m
     meaning: 'Brake torque at the crank.'
     # From the charge the cylinders drew (not the throttle flow), the mixture,
-    # speed and manifold pressure (pumping); spark is the ECU's and has no
-    # actuator quantity yet, which is why a spark claim is refused (E07.5).
+    # the spark advance at the coil, speed and manifold pressure (pumping).
+    # Spark is an actuator commanded by the ECU's timing byte (E07.5 stage 4,
+    # 2026-10-17); a spark claim is refused because no measurement that
+    # excites spark (controlled_spark_sweep) is available, not for want of a
+    # quantity.
     depends_on:
       - {quantity: cylinder_air_flow, timing: same_step}
       - {quantity: delivered_lambda, timing: same_step}
+      - {quantity: spark_advance, timing: same_step}
       - {quantity: engine_speed, timing: same_step}
       - {quantity: manifold_pressure, timing: same_step}
 
@@ -256,6 +261,7 @@ quantities:
       - {quantity: battery_voltage, timing: same_step}
     actuator:
       commanded_by: injector_pulse_index0
+      control: lambda
       minimum: 0.0
       maximum: 655.35
       evidence: >-
@@ -272,11 +278,30 @@ quantities:
       - {quantity: throttle_position_actual, timing: previous_step}
     actuator:
       commanded_by: requested_throttle_position
+      control: throttle
       minimum: 0.0
       maximum: 100.0
       evidence: >-
         0xFFFF2D28 is 0..819 counts above closed (819 = 100 %); the plate's
         response rate is not measured, so no rate limit is declared.
+  - id: spark_advance
+    kind: actuator
+    units: deg_btdc
+    meaning: 'Ignition advance at which the coil fires, crank degrees BTDC.'
+    depends_on:
+      - {quantity: ignition_timing_byte, timing: same_step}
+    actuator:
+      commanded_by: ignition_timing_byte
+      control: spark
+      minimum: -145.0
+      maximum: 110.0
+      evidence: >-
+        deg BTDC = 110 - raw of 0xFFFF11FF, the byte that schedules the coil
+        (0x02B82E); PID 0x0E and DID 0x110A read it (data/dids.yaml). The
+        limits are the u8's span (110 - 255 .. 110 - 0): the writer's branches
+        clamp tighter but no physical window is decoded. That the coil fires
+        at the commanded angle (crank-sensor latency, dwell) is not measured
+        (actuator_response: spark_timing_check), so no delay is declared.
 
   # -- sensors (physical quantity -> ECU integer)
   - id: rpm_word
@@ -541,6 +566,35 @@ quantities:
       - {quantity: fuel_pressure_correction, timing: same_step}
       - {quantity: stft_b1, timing: same_step}
       - {quantity: ltft_b1, timing: same_step}
+  # E07.5 stage 4 (2026-10-17): the ECU command the torque stage's spark
+  # actuator reads. Its chain (base timing, trims, retards, the per-segment
+  # rate limit) is the application model's timing_* nodes; the twin does not
+  # model it (E09.7). Declared here so a ROM edit that reaches the timing
+  # writer is joined to the spark control through the contract graph.
+  - id: ignition_timing_byte
+    kind: ecu
+    units: raw_counts
+    meaning: 'Final ignition timing byte: degrees BTDC = 110 - raw; schedules the coil.'
+    integer:
+      width: 8
+      signed: false
+      ram: 0xFFFF11FF
+      scale: '110 - raw degrees BTDC'
+      confidence: observed
+      note: >-
+        PID 0x0E and DID 0x110A read this byte (identity, Mode 01 handler
+        0x0D3AFC); 0xFFFF11C7 is its cycle-start copy
+        (mem:ECM_IGNITION_TIMING_RAM).
+    manifest_node: timing_final_byte
+    observed_as: ['obd:TIMING_ADVANCE', 'did:ECM_IGNITION_TIMING']
+    leak_aliases: ['mem:ECM_IGNITION_TIMING_RAM']
+    # The rate limiter reads the previous output; base timing and the trims
+    # are looked up on rpm and load input X, blended on coolant.
+    depends_on:
+      - {quantity: ignition_timing_byte, timing: previous_step}
+      - {quantity: rpm_word, timing: same_step}
+      - {quantity: target_afr_x, timing: same_step}
+      - {quantity: coolant_byte, timing: same_step}
 
 modes:
   # ---------------------------------------------------------------- ECU replay
@@ -567,6 +621,8 @@ modes:
       fuel_mass_flow: {role: unused}
       delivered_lambda: {role: unused}
       engine_torque: {role: unused}
+      spark_advance: {role: unused}
+      ignition_timing_byte: {role: unused}
       injector_open_time_b1: {role: unused}
       throttle_position_actual: {role: unused}
       rpm_word: {role: measured_input, source: 'mem:ECM_ENGINE_SPEED_RAM'}
@@ -643,6 +699,8 @@ modes:
       fuel_mass_flow: {role: predicted_output}
       delivered_lambda: {role: predicted_output}
       engine_torque: {role: unused}
+      spark_advance: {role: unused}
+      ignition_timing_byte: {role: unused}
       injector_open_time_b1: {role: predicted_output}
       throttle_position_actual: {role: unused}
       rpm_word: {role: unused}
@@ -716,6 +774,8 @@ modes:
       fuel_mass_flow: {role: predicted_output}
       delivered_lambda: {role: predicted_output}
       engine_torque: {role: unused}
+      spark_advance: {role: unused}
+      ignition_timing_byte: {role: unused}
       injector_open_time_b1: {role: predicted_output}
       throttle_position_actual:
         role: prescribed_boundary
@@ -821,6 +881,10 @@ modes:
       engine_torque:
         role: predicted_output
         init: {method: steady_state, note: 'Settled at the initial operating point.'}
+      spark_advance: {role: predicted_output}
+      ignition_timing_byte:
+        role: predicted_output
+        init: {method: steady_state, note: 'Settled at the initial point: the rate limiter is not binding.'}
       injector_open_time_b1: {role: predicted_output}
       throttle_position_actual:
         role: predicted_output
@@ -1254,9 +1318,9 @@ subsystems:
 
   - id: actuator_response
     stage: 1
-    meaning: 'Physical throttle plate (and later cam phaser) response to the ECU command, separate from the command.'
-    computes: [throttle_position_actual]
-    components: [throttle_plate, cam_phaser]
+    meaning: 'Physical throttle plate, ignition and (later) cam phaser response to the ECU command, separate from the command.'
+    computes: [throttle_position_actual, spark_advance]
+    components: [throttle_plate, ignition, cam_phaser]
     status: unbuilt
     references:
       - id: throttle_sensor_a
@@ -1278,13 +1342,57 @@ subsystems:
         excites: [cam]
         status: missing
         evidence: 'No cam quantity exists in the contract yet.'
+      - id: spark_timing_check
+        what: >-
+          A timing light (or crank and coil signals on a scope) at steady idle
+          and a fixed raised speed, with the timing byte (PID 0x0E) logged:
+          the crank angle the coil fires at, against 110 - raw.
+        identifies: [spark_advance_offset, spark_delay]
+        status: missing
+        evidence: >-
+          The byte is the ECU's command. The degrees at the crank have not
+          been checked against it, so the actuator declares no offset or delay.
 
   - id: torque_production
     stage: 2
-    meaning: 'Brake torque from the cylinder charge, mixture, spark and speed, less friction and pumping.'
+    meaning: >-
+      Brake torque from the cylinder charge, mixture and spark advance, less
+      friction and pumping: E09.13's minimum model (brake = indicated -
+      friction - pumping; indicated = air per cylinder event x fuel energy at
+      stoich x eta(lambda) x eta(spark), eta(spark) quadratic in retard from
+      MBT). Built 2026-10-17 as a declared structure with its parameter
+      registry (torque_plant_tq0.yaml): every parameter but the geometry is
+      requires_measurement with a bracket, nothing is fitted (Q27), and a
+      result is a bracket case, never a prediction.
     computes: [engine_torque]
     components: [spark_efficiency, lambda_efficiency, friction, pumping]
-    status: unbuilt
+    status: built
+    implementation: {module: src.analysis.torque_plant, profile_file: torque_plant_tq0.yaml, plant_version: torque-tq-0}
+    applicability:
+      hardware_configurations: [na_stock_injectors_2026_10]
+      bounds:
+        - {quantity: engine_speed, minimum: 500.0, maximum: 6500.0,
+           evidence: 'Below 500 rpm the engine is cranking or stalling; 6500 rpm is the VQ40DE redline (tuning_providers.yaml). The friction polynomial is declared over this range only.'}
+        - {quantity: delivered_lambda, minimum: 0.75, maximum: 1.2,
+           evidence: 'eta(lambda) is declared from lambda 0.75 (rich of the WOT targets) to 1.2 (lean of any closed-loop excursion); misfire-limited lean burn and over-rich quench are outside it.'}
+        - {quantity: spark_advance, minimum: -10.0, maximum: 60.0,
+           evidence: 'Logged timing spans about 0-45 deg BTDC (DID 0x110A plausible range -20..60); the quadratic is further limited to its declared distance from MBT (torque_plant_tq0.yaml spark_shape_valid_within_deg).'}
+        - {quantity: manifold_pressure, minimum: 10.0, maximum: 105.0,
+           evidence: 'Pumping reads MAP; NA, so at or below ambient (the manifold stage refuses above it). No MAP sensor on the NA intake (operator, 2026-10-08): MAP here is the manifold stage''s, never measured.'}
+        - {quantity: barometric_pressure, minimum: 60.0, maximum: 105.0,
+           evidence: 'Sessions read 63-101 kPa (home ~80 kPa, trips to 63).'}
+        - {quantity: intake_air_temperature, minimum: -30.0, maximum: 70.0,
+           evidence: 'The manifold stage''s range; charge temperature enters only through the cylinder charge.'}
+      invariants: [manifold_at_or_below_ambient]
+      time_resolution: engine_cycle
+      evidence: >-
+        Mean-value and cycle-averaged: one torque per engine cycle (120/rpm s),
+        all cylinders alike. Warm engine only (friction declared warm). No
+        knock (knock_unmodelled), no cylinder-to-cylinder or bank imbalance,
+        no cam input: intake cam phase is scheduled by the ECU with rpm and
+        load and is never varied here, so its effect sits inside the cylinder
+        charge and eta. Naturally aspirated only: the supercharged engine is a
+        new hardware configuration and a new plant.
     shared_inputs:
       - quantity: engine_speed
         justification: >-
@@ -1314,24 +1422,62 @@ subsystems:
           omega) built from MAF, lambda and rpm: the same signals the torque
           stage reads. Declared so calibrating against it is refused by name.
     required_measurements:
-      - id: h07_na_baseline
-        what: 'H07.12: coast-downs both ways and WOT pulls in two gears on one flat road, plus H07.8 repeatability and H07.10 weighing.'
-        identifies: [engine_torque, friction, rotational_inertia]
+      - id: vehicle_mass
+        what: 'H07.10: a public-scale weight with driver and fuel recorded.'
+        identifies: [vehicle_mass]
+        task: H07.10
         status: missing
-        evidence: 'H07.5/H07.6/H07.7 are desk-done only; no real road-load coefficients, inertia or noise floor exist.'
+        evidence: >-
+          The itemised estimate (2,185 kg, about +-1.3 %) scales the H07
+          torque reference by the same; a scale ticket is owed.
+      - id: h07_road_load
+        what: >-
+          H07.5 coast-down road load from H07.12's clutch-in coast-downs both
+          ways; friction is the in-gear, fuel-cut coast-down deceleration less
+          that road load (no indicated work in fuel cut).
+        identifies: [road_load, friction_fmep_0, friction_fmep_1, friction_fmep_2]
+        task: H07.5
+        status: missing
+        evidence: >-
+          Desk-done only: no real road-load coefficients exist. An in-gear
+          coast-down sees friction plus closed-throttle pumping together; the
+          pumping working assumption separates them, so friction inherits it.
+      - id: h07_na_baseline
+        what: 'H07.12: coast-downs both directions and three WOT pull pairs in 3rd on one flat road, before the supercharger goes on.'
+        identifies: [engine_torque, indicated_energy_per_air, rotational_inertia]
+        task: H07.12
+        status: missing
+        evidence: >-
+          The torque reference itself. Indicated efficiency, LHV and the
+          stoichiometric ratio enter indicated torque only as one product, so
+          a pull identifies the product, never the parts.
+      - id: h07_repeatability
+        what: 'H07.8: the same-day, same-ROM noise floor of the torque reference, per rpm band, from at least three pull pairs.'
+        identifies: [torque_noise_floor]
+        task: H07.8
+        status: missing
+        evidence: 'The floor loader and refusal are desk-done; the Xterra''s floor is owed by H07.12.'
+      - id: spark_trim_unit
+        what: 'N01.2: a few counts of timing-trim retard over the cruise block; degrees per count, additive or not.'
+        identifies: [timing_trim_degrees_per_count]
+        task: N01.2
+        status: missing
+        evidence: >-
+          A timing-trim edit is in counts; nobody here knows one count in
+          degrees, so the spark change an edit makes is not yet a number.
       - id: controlled_spark_sweep
         what: >-
           Steady pulls or cruise holds at fixed rpm and load with stepped
           ignition offsets (a calibration edit per run), on the validated
           torque reference, with the knock flags (RAM 479D b7, 1254, 28AA b2)
-          logged.
-        identifies: [spark_efficiency]
+          logged. After N01.2 gives degrees per count.
+        identifies: [spark_efficiency, spark_mbt_advance, spark_efficiency_curvature]
         excites: [spark]
         status: missing
         evidence: 'Natural closed-loop driving never varies spark at fixed conditions.'
       - id: lambda_sweep
         what: 'Steady holds at fixed rpm and load with stepped commanded lambda on the torque reference.'
-        identifies: [lambda_efficiency]
+        identifies: [lambda_efficiency, lambda_peak, lambda_peak_gain, lambda_rich_curvature]
         excites: [lambda]
         status: missing
         evidence: 'Enrichment only occurs where load changes too; it does not separate lambda from load.'
@@ -1341,12 +1487,25 @@ subsystems:
         excites: [cam]
         status: missing
         evidence: 'VTC is scheduled by the ECU with rpm and load; never varied independently.'
+      - id: fuel_blend_test
+        what: 'An ethanol-content test of the tank fuel at the drives that score torque.'
+        identifies: [fuel_stoich_afr, fuel_lower_heating_value]
+        status: missing
+        evidence: 'Pump gasoline, E10 assumed (the fuel plant''s working assumption); E0 to E10 moves LHV by ~3 %.'
+      - id: exhaust_back_pressure_tap
+        what: 'An exhaust pressure tap ahead of the catalysts, logged with rpm and MAF over the load range.'
+        identifies: [exhaust_back_pressure]
+        status: missing
+        evidence: 'Pumping work is exhaust pressure minus MAP; neither is measured on the NA engine.'
       - id: map_sensor
         what: 'Manifold pressure for the pumping loss.'
         identifies: [pumping]
         status: planned
         plan: *map_sensor_plan
-        evidence: 'See manifold_breathing.'
+        evidence: >-
+          See manifold_breathing. Never on the NA intake (operator,
+          2026-10-08): the NA plant's pumping stays a working assumption on
+          the manifold stage's MAP.
 
   - id: rotational_dynamics
     stage: 3
@@ -1365,16 +1524,19 @@ subsystems:
       - id: h07_road_load
         what: 'H07.5 coast-down coefficients on the truck (both directions).'
         identifies: [road_load]
+        task: H07.5
         status: missing
         evidence: 'Desk-done; real coefficients owed by H07.12.'
       - id: h07_inertia
         what: 'H07.6 two-gear pulls over one rpm band.'
         identifies: [rotational_inertia]
+        task: H07.6
         status: missing
         evidence: 'dyno.yaml inertia values are labelled estimates.'
       - id: vehicle_mass
         what: 'H07.10: a public-scale weight with driver and fuel recorded.'
         identifies: [vehicle_mass]
+        task: H07.10
         status: missing
         evidence: 'H07.10 is partial.'
 

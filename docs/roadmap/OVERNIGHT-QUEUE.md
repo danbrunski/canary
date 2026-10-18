@@ -340,7 +340,7 @@ backend features), plus the unchecked tail of
   high-value site, and 3.1 was re-scoped downward (the discovery walk is
   conditional and multi-responder, so batching it saves less than claimed).
 
-- [ ] **Q27 — H07 torque reference ahead of E07.5 stage 4** (E09.13,
+- [~] **Q27 — H07 torque reference ahead of E07.5 stage 4** (E09.13,
   2026-10-15). Order: H07.10 (mass; scale ticket) → H07.5 (road load from
   coast-downs) → H07.12 (NA baseline pulls) → E07.5 stage 4's minimum
   torque model (declared in E07.5 remaining item 4) → spark sweeps. **All
@@ -348,6 +348,14 @@ backend features), plus the unchecked tail of
   overnight run may do: E07.5 stage 4's parameter registry and claim
   refusals wired to `compare_roms` (E07.5 remaining item 8), nothing that
   fits a parameter.
+  *Desk part done 2026-10-17:* E07.5 stage 4 is built as a declared structure
+  (`src/analysis/torque_plant.py`, `torque_plant_tq0.yaml`: every parameter but
+  the geometry `requires_measurement` with a bracket, nothing fitted, MBT
+  refused when unstated), the contract has spark as an actuator and the stage
+  built, bounded and not validated with H07.10/H07.5/H07.12/H07.8/N01.2 and the
+  sweeps owed by name, and `rom_levers` derives an edit's controls from the
+  `compare_roms` diff and refuses torque/power claims by name (E07.5 item 8).
+  The truck items (H07.10, H07.5, H07.12, N01.2, spark sweeps) remain.
 
 ## Round-2 morning backlog
 

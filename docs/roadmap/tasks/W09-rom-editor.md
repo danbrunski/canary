@@ -1405,6 +1405,19 @@ W09.6 is the orchestrator's own, on the ROM machine.
     for all eight outputs. The page cannot make the last two (it edits only
     Fuel Targets / Fuel Comp / K, Map 1; the page refuses the trim as
     `table_not_editable`), so those two are the CLI half, as E09.14 allows.
+    *Changed 2026-10-17 (E07.5 stage 4, queue Q27; E07-engine-plant-simulator.md
+    "Stage 4, the desk part"):* the torque stage is now built and not
+    validated, so `no torque plant` is produced only while it is unbuilt. The
+    timing-trim line is now `Timing trim A -> ignition_trim_selected: engine
+    torque not computed in conditional_rom_comparison; torque production
+    built, not validated (owed H07.10, H07.5, H07.12, H07.8, N01.2 and 6
+    more); fuel delivery built, not validated (plant not qualified); spark
+    response unmeasured`; the ignition lines of a Fuel Comp or K edit end the
+    same way; and every classified edit gains a last line, `torque/power
+    claim for this edit (<controls>): refused; ...`. `rom_levers`
+    `TOOL_VERSION` is 2. `romLevers.fixture.json` was regenerated and the
+    parity, CLI and vitest strings updated; the mutation counts below were
+    measured against the old string.
   - **Python tests.** `tests/test_rom_levers_parity.py` (new, 12 tests, ~22 s):
     for four edits the page can send (Fuel Comp, K, Fuel Targets, Fuel Comp + K)
     the spec the page previewed is run through `rom_sim.main(["inspect", ...])`

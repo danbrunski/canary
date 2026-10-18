@@ -2,7 +2,7 @@
   "fuel_comp": {
     "schema_version": 1,
     "tool": "rom_levers",
-    "tool_version": "1",
+    "tool_version": "2",
     "outcome": "unevaluable",
     "reason": null,
     "regime": null,
@@ -119,10 +119,28 @@
             "detail": null
           },
           {
-            "code": "no_torque_plant",
-            "text": "no torque plant",
-            "node": "timing_final_byte",
-            "detail": "no simulation-contract quantity carries this output and the torque subsystem is unbuilt (E07.5)"
+            "code": "engine_torque_not_computed",
+            "text": "engine torque not computed in conditional_rom_comparison",
+            "node": null,
+            "detail": "conditional_rom_comparison gives engine_torque the role unused"
+          },
+          {
+            "code": "subsystem_not_validated",
+            "text": "torque production built, not validated (owed H07.10, H07.5, H07.12, H07.8, N01.2 and 6 more)",
+            "node": null,
+            "detail": "reference_not_validated:h07_wheel_torque:h07_na_baseline; reference_not_independent:fuel_energy_torque:delivered_lambda,mass_air_flow,throttle_position_actual; no_passing_validation:torque_production; owed: vehicle_mass, h07_road_load, h07_na_baseline, h07_repeatability, spark_trim_unit, controlled_spark_sweep, lambda_sweep, cam_sweep, fuel_blend_test, exhaust_back_pressure_tap, map_sensor"
+          },
+          {
+            "code": "subsystem_not_validated",
+            "text": "fuel delivery built, not validated (plant not qualified)",
+            "node": null,
+            "detail": "plant_not_qualified: baseline na-stock-2026-10-08.mv2 has no held-out recording (held_out_pending); owed: rail_pressure_drive, injector_flow, evap_purge_drive, map_sensor"
+          },
+          {
+            "code": "spark_response_unmeasured",
+            "text": "spark response unmeasured",
+            "node": null,
+            "detail": "no available measurement excites spark (needed: ['controlled_spark_sweep'])"
           }
         ],
         "assumes_conditioned": [],
@@ -168,10 +186,28 @@
             "detail": null
           },
           {
-            "code": "no_torque_plant",
-            "text": "no torque plant",
-            "node": "timing_trim_lookup",
-            "detail": "no simulation-contract quantity carries this output and the torque subsystem is unbuilt (E07.5)"
+            "code": "engine_torque_not_computed",
+            "text": "engine torque not computed in conditional_rom_comparison",
+            "node": null,
+            "detail": "conditional_rom_comparison gives engine_torque the role unused"
+          },
+          {
+            "code": "subsystem_not_validated",
+            "text": "torque production built, not validated (owed H07.10, H07.5, H07.12, H07.8, N01.2 and 6 more)",
+            "node": null,
+            "detail": "reference_not_validated:h07_wheel_torque:h07_na_baseline; reference_not_independent:fuel_energy_torque:delivered_lambda,mass_air_flow,throttle_position_actual; no_passing_validation:torque_production; owed: vehicle_mass, h07_road_load, h07_na_baseline, h07_repeatability, spark_trim_unit, controlled_spark_sweep, lambda_sweep, cam_sweep, fuel_blend_test, exhaust_back_pressure_tap, map_sensor"
+          },
+          {
+            "code": "subsystem_not_validated",
+            "text": "fuel delivery built, not validated (plant not qualified)",
+            "node": null,
+            "detail": "plant_not_qualified: baseline na-stock-2026-10-08.mv2 has no held-out recording (held_out_pending); owed: rail_pressure_drive, injector_flow, evap_purge_drive, map_sensor"
+          },
+          {
+            "code": "spark_response_unmeasured",
+            "text": "spark response unmeasured",
+            "node": null,
+            "detail": "no available measurement excites spark (needed: ['controlled_spark_sweep'])"
           }
         ],
         "assumes_conditioned": [],
@@ -295,13 +331,14 @@
     ],
     "messages": [
       "Fuel Comp -> target_equiv_ratio: a number can be given (for points that state only the fill byte)",
-      "Fuel Comp -> ignition_timing: observed, not predicted: load_input_x; unmodelled: manifold_fill_filter, near_wot_flag, fill_transient, fill_blend, knock_trim_difference, timing_trim_terms, base_timing_sum, base_timing_select, timing_cycle_copy, timing_retard_combine, timing_rate_limit, timing_final_byte; no torque plant",
-      "Fuel Comp -> ignition_trim_selected: observed, not predicted: load_input_x; unmodelled: manifold_fill_filter, near_wot_flag, fill_transient, fill_blend; no torque plant",
+      "Fuel Comp -> ignition_timing: observed, not predicted: load_input_x; unmodelled: manifold_fill_filter, near_wot_flag, fill_transient, fill_blend, knock_trim_difference, timing_trim_terms, base_timing_sum, base_timing_select, timing_cycle_copy, timing_retard_combine, timing_rate_limit, timing_final_byte; engine torque not computed in conditional_rom_comparison; torque production built, not validated (owed H07.10, H07.5, H07.12, H07.8, N01.2 and 6 more); fuel delivery built, not validated (plant not qualified); spark response unmeasured",
+      "Fuel Comp -> ignition_trim_selected: observed, not predicted: load_input_x; unmodelled: manifold_fill_filter, near_wot_flag, fill_transient, fill_blend; engine torque not computed in conditional_rom_comparison; torque production built, not validated (owed H07.10, H07.5, H07.12, H07.8, N01.2 and 6 more); fuel delivery built, not validated (plant not qualified); spark response unmeasured",
       "Fuel Comp -> base_fuel_schedule_word: a number can be given (for points that state only the fill byte)",
       "Fuel Comp -> injector_pulse_ms: plant not qualified: baseline na-stock-2026-10-08.mv2 has no held-out recording (held_out_pending); closed loop: trim authority undecoded",
       "Fuel Comp -> fuel_trim_total_pct: plant not qualified: baseline na-stock-2026-10-08.mv2 has no held-out recording (held_out_pending); closed loop: trim authority undecoded",
       "Fuel Comp -> delivered_lambda: plant not qualified: baseline na-stock-2026-10-08.mv2 has no held-out recording (held_out_pending); closed loop: trim authority undecoded",
-      "Fuel Comp -> fuel_per_event_g: plant not qualified: baseline na-stock-2026-10-08.mv2 has no held-out recording (held_out_pending); closed loop: trim authority undecoded"
+      "Fuel Comp -> fuel_per_event_g: plant not qualified: baseline na-stock-2026-10-08.mv2 has no held-out recording (held_out_pending); closed loop: trim authority undecoded",
+      "torque/power claim for this edit (lambda, spark): refused; engine torque not computed in conditional_rom_comparison; torque production built, not validated (owed H07.10, H07.5, H07.12, H07.8, N01.2 and 6 more); fuel delivery built, not validated (plant not qualified); lambda response unmeasured; spark response unmeasured"
     ]
   },
   "timing_trim": {
@@ -321,8 +358,9 @@
       }
     ],
     "messages": [
-      "Timing trim A -> ignition_timing: unmodelled: timing_trim_terms, base_timing_sum, base_timing_select, timing_cycle_copy, timing_retard_combine, timing_rate_limit, timing_final_byte; no torque plant",
-      "Timing trim A -> ignition_trim_selected: no torque plant"
+      "Timing trim A -> ignition_timing: unmodelled: timing_trim_terms, base_timing_sum, base_timing_select, timing_cycle_copy, timing_retard_combine, timing_rate_limit, timing_final_byte; engine torque not computed in conditional_rom_comparison; torque production built, not validated (owed H07.10, H07.5, H07.12, H07.8, N01.2 and 6 more); fuel delivery built, not validated (plant not qualified); spark response unmeasured",
+      "Timing trim A -> ignition_trim_selected: engine torque not computed in conditional_rom_comparison; torque production built, not validated (owed H07.10, H07.5, H07.12, H07.8, N01.2 and 6 more); fuel delivery built, not validated (plant not qualified); spark response unmeasured",
+      "torque/power claim for this edit (spark): refused; engine torque not computed in conditional_rom_comparison; torque production built, not validated (owed H07.10, H07.5, H07.12, H07.8, N01.2 and 6 more); fuel delivery built, not validated (plant not qualified); spark response unmeasured"
     ],
     "outcome": "partial",
     "outputs": [
@@ -384,10 +422,28 @@
             "text": "unmodelled: timing_final_byte"
           },
           {
-            "code": "no_torque_plant",
-            "detail": "no simulation-contract quantity carries this output and the torque subsystem is unbuilt (E07.5)",
-            "node": "timing_final_byte",
-            "text": "no torque plant"
+            "code": "engine_torque_not_computed",
+            "detail": "conditional_rom_comparison gives engine_torque the role unused",
+            "node": null,
+            "text": "engine torque not computed in conditional_rom_comparison"
+          },
+          {
+            "code": "subsystem_not_validated",
+            "detail": "reference_not_validated:h07_wheel_torque:h07_na_baseline; reference_not_independent:fuel_energy_torque:delivered_lambda,mass_air_flow,throttle_position_actual; no_passing_validation:torque_production; owed: vehicle_mass, h07_road_load, h07_na_baseline, h07_repeatability, spark_trim_unit, controlled_spark_sweep, lambda_sweep, cam_sweep, fuel_blend_test, exhaust_back_pressure_tap, map_sensor",
+            "node": null,
+            "text": "torque production built, not validated (owed H07.10, H07.5, H07.12, H07.8, N01.2 and 6 more)"
+          },
+          {
+            "code": "subsystem_not_validated",
+            "detail": "plant_not_qualified: baseline na-stock-2026-10-08.mv2 has no held-out recording (held_out_pending); owed: rail_pressure_drive, injector_flow, evap_purge_drive, map_sensor",
+            "node": null,
+            "text": "fuel delivery built, not validated (plant not qualified)"
+          },
+          {
+            "code": "spark_response_unmeasured",
+            "detail": "no available measurement excites spark (needed: ['controlled_spark_sweep'])",
+            "node": null,
+            "text": "spark response unmeasured"
           }
         ],
         "design_dependent": false,
@@ -403,10 +459,28 @@
         "assumes_conditioned": [],
         "blockers": [
           {
-            "code": "no_torque_plant",
-            "detail": "no simulation-contract quantity carries this output and the torque subsystem is unbuilt (E07.5)",
-            "node": "timing_trim_lookup",
-            "text": "no torque plant"
+            "code": "engine_torque_not_computed",
+            "detail": "conditional_rom_comparison gives engine_torque the role unused",
+            "node": null,
+            "text": "engine torque not computed in conditional_rom_comparison"
+          },
+          {
+            "code": "subsystem_not_validated",
+            "detail": "reference_not_validated:h07_wheel_torque:h07_na_baseline; reference_not_independent:fuel_energy_torque:delivered_lambda,mass_air_flow,throttle_position_actual; no_passing_validation:torque_production; owed: vehicle_mass, h07_road_load, h07_na_baseline, h07_repeatability, spark_trim_unit, controlled_spark_sweep, lambda_sweep, cam_sweep, fuel_blend_test, exhaust_back_pressure_tap, map_sensor",
+            "node": null,
+            "text": "torque production built, not validated (owed H07.10, H07.5, H07.12, H07.8, N01.2 and 6 more)"
+          },
+          {
+            "code": "subsystem_not_validated",
+            "detail": "plant_not_qualified: baseline na-stock-2026-10-08.mv2 has no held-out recording (held_out_pending); owed: rail_pressure_drive, injector_flow, evap_purge_drive, map_sensor",
+            "node": null,
+            "text": "fuel delivery built, not validated (plant not qualified)"
+          },
+          {
+            "code": "spark_response_unmeasured",
+            "detail": "no available measurement excites spark (needed: ['controlled_spark_sweep'])",
+            "node": null,
+            "text": "spark response unmeasured"
           }
         ],
         "design_dependent": false,
@@ -483,7 +557,7 @@
     "regime": null,
     "schema_version": 1,
     "tool": "rom_levers",
-    "tool_version": "1"
+    "tool_version": "2"
   },
   "maf_curve": {
     "levers": [
@@ -511,13 +585,14 @@
     "messages": [
       "unmapped bytes in Calibration 0xE27E: not mapped (outside rom_map.yaml)",
       "unmapped bytes in Calibration -> target_equiv_ratio: not mapped",
-      "unmapped bytes in Calibration -> ignition_timing: not mapped; no torque plant",
-      "unmapped bytes in Calibration -> ignition_trim_selected: not mapped; no torque plant",
+      "unmapped bytes in Calibration -> ignition_timing: not mapped; engine torque not computed in conditional_rom_comparison; torque production built, not validated (owed H07.10, H07.5, H07.12, H07.8, N01.2 and 6 more); fuel delivery built, not validated (plant not qualified); spark response unmeasured",
+      "unmapped bytes in Calibration -> ignition_trim_selected: not mapped; engine torque not computed in conditional_rom_comparison; torque production built, not validated (owed H07.10, H07.5, H07.12, H07.8, N01.2 and 6 more); fuel delivery built, not validated (plant not qualified); spark response unmeasured",
       "unmapped bytes in Calibration -> base_fuel_schedule_word: not mapped",
       "unmapped bytes in Calibration -> injector_pulse_ms: not mapped",
       "unmapped bytes in Calibration -> fuel_trim_total_pct: not mapped",
       "unmapped bytes in Calibration -> delivered_lambda: not mapped",
-      "unmapped bytes in Calibration -> fuel_per_event_g: not mapped"
+      "unmapped bytes in Calibration -> fuel_per_event_g: not mapped",
+      "torque/power claim for this edit (no control resolved): refused; changed controls unresolved; engine torque not computed in conditional_rom_comparison; torque production built, not validated (owed H07.10, H07.5, H07.12, H07.8, N01.2 and 6 more); fuel delivery built, not validated (plant not qualified)"
     ],
     "outcome": "unevaluable",
     "outputs": [
@@ -550,10 +625,28 @@
             "text": "not mapped"
           },
           {
-            "code": "no_torque_plant",
-            "detail": "no simulation-contract quantity carries this output and the torque subsystem is unbuilt (E07.5)",
-            "node": "timing_final_byte",
-            "text": "no torque plant"
+            "code": "engine_torque_not_computed",
+            "detail": "conditional_rom_comparison gives engine_torque the role unused",
+            "node": null,
+            "text": "engine torque not computed in conditional_rom_comparison"
+          },
+          {
+            "code": "subsystem_not_validated",
+            "detail": "reference_not_validated:h07_wheel_torque:h07_na_baseline; reference_not_independent:fuel_energy_torque:delivered_lambda,mass_air_flow,throttle_position_actual; no_passing_validation:torque_production; owed: vehicle_mass, h07_road_load, h07_na_baseline, h07_repeatability, spark_trim_unit, controlled_spark_sweep, lambda_sweep, cam_sweep, fuel_blend_test, exhaust_back_pressure_tap, map_sensor",
+            "node": null,
+            "text": "torque production built, not validated (owed H07.10, H07.5, H07.12, H07.8, N01.2 and 6 more)"
+          },
+          {
+            "code": "subsystem_not_validated",
+            "detail": "plant_not_qualified: baseline na-stock-2026-10-08.mv2 has no held-out recording (held_out_pending); owed: rail_pressure_drive, injector_flow, evap_purge_drive, map_sensor",
+            "node": null,
+            "text": "fuel delivery built, not validated (plant not qualified)"
+          },
+          {
+            "code": "spark_response_unmeasured",
+            "detail": "no available measurement excites spark (needed: ['controlled_spark_sweep'])",
+            "node": null,
+            "text": "spark response unmeasured"
           }
         ],
         "design_dependent": false,
@@ -575,10 +668,28 @@
             "text": "not mapped"
           },
           {
-            "code": "no_torque_plant",
-            "detail": "no simulation-contract quantity carries this output and the torque subsystem is unbuilt (E07.5)",
-            "node": "timing_trim_lookup",
-            "text": "no torque plant"
+            "code": "engine_torque_not_computed",
+            "detail": "conditional_rom_comparison gives engine_torque the role unused",
+            "node": null,
+            "text": "engine torque not computed in conditional_rom_comparison"
+          },
+          {
+            "code": "subsystem_not_validated",
+            "detail": "reference_not_validated:h07_wheel_torque:h07_na_baseline; reference_not_independent:fuel_energy_torque:delivered_lambda,mass_air_flow,throttle_position_actual; no_passing_validation:torque_production; owed: vehicle_mass, h07_road_load, h07_na_baseline, h07_repeatability, spark_trim_unit, controlled_spark_sweep, lambda_sweep, cam_sweep, fuel_blend_test, exhaust_back_pressure_tap, map_sensor",
+            "node": null,
+            "text": "torque production built, not validated (owed H07.10, H07.5, H07.12, H07.8, N01.2 and 6 more)"
+          },
+          {
+            "code": "subsystem_not_validated",
+            "detail": "plant_not_qualified: baseline na-stock-2026-10-08.mv2 has no held-out recording (held_out_pending); owed: rail_pressure_drive, injector_flow, evap_purge_drive, map_sensor",
+            "node": null,
+            "text": "fuel delivery built, not validated (plant not qualified)"
+          },
+          {
+            "code": "spark_response_unmeasured",
+            "detail": "no available measurement excites spark (needed: ['controlled_spark_sweep'])",
+            "node": null,
+            "text": "spark response unmeasured"
           }
         ],
         "design_dependent": false,
@@ -690,6 +801,6 @@
     "regime": null,
     "schema_version": 1,
     "tool": "rom_levers",
-    "tool_version": "1"
+    "tool_version": "2"
   }
 }

@@ -79,17 +79,27 @@ from numpy.typing import NDArray
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from src.analysis.air_charge_twin import AirChargeCalibration, AirChargeRefusalError
-from src.analysis.ecu_application import ApplicationModelRefusalError
+from src.analysis.ecu_application import ApplicationModelRefusalError, check_image
+from src.analysis.ecu_state_models import TIMING_DELTA_CONDITIONS
+from src.analysis.engine_dynamics import claim_refusals
 from src.analysis.paired_scenarios import (
     _BFS_OUTPUT,
     _ECU_OUTPUTS,
     _TWIN_OUTPUT,
+    TIMING_MODEL_OUTPUT,
+    TIMING_OUTPUT,
+    TIMING_STATE_UNSTATED,
     SimKit,
+    TimingState,
     _rpm_quantum,
+    ignition_timing_at,
+    ignition_timing_cells,
     rpm_word,
+    timing_cell_summary,
+    timing_tables,
 )
 from src.analysis.paired_steady import SETPOINT_MOVED, TRIM_AUTHORITY_UNDECODED
-from src.analysis.rom_effects import EffectReport
+from src.analysis.rom_effects import EffectReport, compare_roms
 from src.analysis.rom_image import sha256_hex
 from src.analysis.sim_contract import SimContract, SimulationRefusalError
 from src.analysis.sim_design import SimDesign
@@ -1126,7 +1136,276 @@ def aggregate_cells(
     )
 
 
+# -- E09.7: ignition timing at the design's points --------------------------------------
+
+
+def _load_point_scaler(kit: SimKit, image: bytes, *, slot: int) -> int:
+    try:
+        table = resolve_table(
+            image,
+            kit.rom_map,
+            kit.twin,
+            viewer=kit.viewer,
+            application_model=(kit.model, kit.model_sha256),
+            expected_sha256=sha256_hex(image),
+            slot=slot,
+        )
+    except TwinRefusalError as exc:
+        raise SimulationRefusalError(f"target_table:{exc.reason}", str(exc)) from exc
+    if table.load_point_scaler is None:
+        raise SimulationRefusalError(
+            "load_point_scaler_unresolved", "an image's Load Point Scaler was not read"
+        )
+    return int(table.load_point_scaler)
+
+
+def _torque_and_knock(kit: SimKit) -> dict[str, Any]:
+    """What a timing change says about torque and knock: E07.5's own refusals
+    (no subsystem standing is supplied, so none is validated), never a claim."""
+    rollout = next(m.id for m in kit.contract.modes if m.kind == "coupled_rollout")
+    torque = claim_refusals(kit.contract, {}, rollout, "torque", changed_controls=["spark"])
+    knock = claim_refusals(kit.contract, {}, rollout, "knock", changed_controls=["spark"])
+    spark = [r for r in torque if r.startswith("spark_response_unmeasured")]
+    return {
+        "torque": {
+            "status": "unsupported" if torque else "supported",
+            # The refusal about the change itself, before the standing ones.
+            "reason": next(iter(spark or torque), None),
+            "reasons": torque,
+        },
+        "knock": {"status": "unsupported" if knock else "supported", "reasons": knock},
+    }
+
+
+#: A changed byte other than the timing trims reaches ``ignition_timing``
+#: (``compare_roms``): suffixed with the node it changes. The trims' own grid
+#: holds every other term equal, so such an edit gives no timing there.
+TIMING_INPUT_CHANGED = "timing_input_changed"
+#: ``compare_roms`` provenance for the timing reach: the caller's map slot.
+_TIMING_SLOT_SOURCE = "timing_block_caller_slot"
+
+
+def timing_reach_reasons(
+    kit: SimKit, base_image: bytes, candidate_image: bytes, *, slot: int
+) -> list[str]:
+    """Why ``ignition_timing_deg`` cannot be given for this edit beyond the
+    trims: every changed byte outside the two timing trims is traced with
+    :func:`~src.analysis.rom_effects.compare_roms`, and one that reaches the
+    ``ignition_timing`` output names its node (``timing_input_changed:<node>``);
+    a byte no node reads is ``unknown_bytes_changed``, since nothing says it
+    cannot. Checksum words and inactive slot copies reach nothing. Empty when
+    only the trims (or nothing) changed."""
+    report = compare_roms(
+        base_image,
+        candidate_image,
+        kit.rom_map,
+        kit.model,
+        kit.model_sha256,
+        base_slot=slot,
+        candidate_slot=slot,
+        slot_source=_TIMING_SLOT_SOURCE,
+    )
+    if report.outcome == "identical":
+        return []
+    if report.reason is not None:
+        return [f"effects_unevaluable:{report.reason}"]
+    trims = {t.id for t in kit.rom_map.tables if t.kind in ("timing_trim_a", "timing_trim_b")}
+    path = set(report.output(TIMING_MODEL_OUTPUT).path)
+    reasons: list[str] = []
+    for r in report.ranges:
+        if r.byte_class in ("checksum", "inactive_for_scenario"):
+            continue
+        if r.byte_class in ("unknown", "mapped_unmodelled"):
+            reasons.append("unknown_bytes_changed")
+            continue
+        if {w.split(" (slot ", 1)[0] for w in r.what} <= trims:
+            continue
+        reasons += [f"{TIMING_INPUT_CHANGED}:{n}" for n in r.nodes if n in path]
+    return list(dict.fromkeys(reasons))
+
+
+def ignition_timing_block(
+    kit: SimKit,
+    base_image: bytes,
+    candidate_image: bytes,
+    state: TimingState | None,
+    *,
+    slot: int,
+    coolant_c: float | None,
+    all_cells: bool,
+) -> dict[str, Any]:
+    """``ignition_timing_deg`` on the trims' own grid (E09.7), the one block
+    the CLI and the ROM Editor both show. An edit that changes a trim refuses
+    without a stated timing state (``timing_state_unstated``): which trim the
+    ECM reads warm is 0xFFFF283F bit 6, which nothing reads, so there is no
+    default. An edit with any other change that reaches ``ignition_timing``
+    (:func:`timing_reach_reasons`) is ``unevaluable`` with those reasons and
+    no cells: the trims' grid holds that change's terms equal, so its "0
+    changed" would be a claim the chain cannot make. ``all_cells`` False keeps
+    the cells that change or name a reason beyond ``clamp_headroom_unknown``."""
+    check_image(base_image, kit.model)
+    check_image(candidate_image, kit.model)
+    base_t = timing_tables(base_image, kit.rom_map, slot=slot)
+    cand_t = timing_tables(candidate_image, kit.rom_map, slot=slot)
+    edited = (base_t.a, base_t.b) != (cand_t.a, cand_t.b)
+    reach = timing_reach_reasons(kit, base_image, candidate_image, slot=slot)
+    block: dict[str, Any] = {
+        "output": TIMING_OUTPUT,
+        "model_output": TIMING_MODEL_OUTPUT,
+        "units": "deg_btdc",
+        "side": "ecu: the timing byte's chain, no plant",
+        "trims_changed": edited,
+        "other_inputs_changed": reach,
+        "conditions": list(TIMING_DELTA_CONDITIONS),
+        **_torque_and_knock(kit),
+    }
+    if state is None:
+        if edited:
+            raise SimulationRefusalError(
+                TIMING_STATE_UNSTATED,
+                "the edit changes a timing trim: state the HI DET latch (set|clear) and knock "
+                "control (active|fallback); nothing reads 0xFFFF283F bit 6, so there is no default",
+            )
+        return {**block, "status": "unevaluable", "reasons": [TIMING_STATE_UNSTATED, *reach]}
+    if coolant_c is None:
+        raise SimulationRefusalError(
+            "timing_coolant_unstated", "the timing cells need a stated coolant temperature"
+        )
+    stated = {
+        "high_det": state.high_det,
+        "knock_control": state.knock_control,
+        "source": state.source,
+    }
+    if reach:
+        return {**block, "status": "unevaluable", "reasons": reach, "state": stated}
+    cells = ignition_timing_cells(base_t, cand_t, state, coolant_c=coolant_c)
+    quiet = {"clamp_headroom_unknown"}
+    shown = [c for c in cells if c["delta"] not in (None, 0) or set(c["reasons"]) - quiet]
+    return {
+        **block,
+        "status": "evaluated",
+        "state": stated,
+        "cells_at": {
+            "coolant_c": coolant_c,
+            "pedal_flag": False,
+            "grid": "the trims' own nodes: rpm word = axis byte x 4, X = load axis byte",
+        },
+        "summary": timing_cell_summary(cells),
+        "cells": cells if all_cells else shown,
+    }
+
+
+def ignition_timing_points(
+    kit: SimKit,
+    result: MonteCarloResult,
+    design: SimDesign,
+    base_image: bytes,
+    candidate_image: bytes,
+    state: TimingState | None,
+    *,
+    slot: int,
+) -> list[dict[str, Any]]:
+    """``ignition_timing_deg`` at every design point (E09.7), per (point, draw)
+    pair and grouped per point by outcome.
+
+    Each ROM's own X comes from that pair's own BFS through that ROM's Load
+    Point Scaler (as the twin computes it), so a K or Fuel Comp change reaches
+    the trims' load column; it also moves 0xFFFF27C6, which is not computed,
+    so such a pair reports the trim term's change and no timing change
+    (``base_timing_load_term_unmodelled``). A pair whose Target AFR phi moved
+    is held the same way (``enrichment_retard_unmodelled``). Any other change
+    that reaches ``ignition_timing`` (:func:`timing_reach_reasons`) leaves
+    every pair ``unevaluable`` with its reasons, the trim term's change still
+    shown. Design points carry no logged timing, so the absolute is never
+    given here."""
+    if not isinstance(result, MonteCarloResult) or not isinstance(design, SimDesign):
+        raise SimulationRefusalError(
+            "not_a_monte_carlo_result", "the timing points take the run's result and design"
+        )
+    prov = result.provenance
+    for name, got in (
+        ("design_sha256", design.sha256()),
+        ("base_image_sha256", sha256_hex(base_image)),
+        ("candidate_image_sha256", sha256_hex(candidate_image)),
+    ):
+        if prov.get(name) != got:
+            raise SimulationRefusalError(
+                "design_mismatch", f"{name} {got[:12]} is not the run's {prov.get(name)}"
+            )
+    reach = timing_reach_reasons(kit, base_image, candidate_image, slot=slot)
+    tb, tc = (
+        timing_tables(base_image, kit.rom_map, slot=slot),
+        timing_tables(candidate_image, kit.rom_map, slot=slot),
+    )
+    lps = (
+        _load_point_scaler(kit, base_image, slot=slot),
+        _load_point_scaler(kit, candidate_image, slot=slot),
+    )
+    bit = kit.twin.inputs.forced_column_flag.bit
+    bfs = (result.base["base_fuel_schedule"], result.candidate["base_fuel_schedule"])
+    phi = (result.base["target_phi"], result.candidate["target_phi"])
+    rows: list[dict[str, Any]] = []
+    for i, p in enumerate(design.points):
+        word = rpm_word(p.rpm, kit.contract)
+        pedal = bool((p.pedal_flag >> bit) & 1)
+        outcomes: Counter[str] = Counter()
+        detail: dict[str, dict[str, Any]] = {}
+        for k in range(result.draws):
+            words = (bfs[0][i, k], bfs[1][i, k])
+            if not all(math.isfinite(w) for w in words):
+                at: dict[str, Any] = {
+                    "status": "unevaluable",
+                    "delta": None,
+                    "trim_term_delta": None,
+                    "reasons": [X_NOT_COMPUTED],
+                    "x_base": None,
+                    "x_candidate": None,
+                }
+            else:
+                xb = x_from_bfs(int(words[0]), lps[0], kit.twin)
+                xc = x_from_bfs(int(words[1]), lps[1], kit.twin)
+                pb, pc = float(phi[0][i, k]), float(phi[1][i, k])
+                moved = math.isfinite(pb) != math.isfinite(pc) or (math.isfinite(pb) and pb != pc)
+                full = ignition_timing_at(
+                    tb,
+                    tc,
+                    state,
+                    rpm_word=word,
+                    x_base=xb,
+                    x_candidate=xc,
+                    coolant_c=p.coolant_c,
+                    pedal_flag=pedal,
+                    phi_moved=moved,
+                )
+                at = {key: full[key] for key in ("status", "delta", "trim_term_delta", "reasons")}
+                at.update(x_base=xb, x_candidate=xc)
+                if reach:
+                    at.update(
+                        status="unevaluable",
+                        delta=None,
+                        reasons=list(dict.fromkeys([*at["reasons"], *reach])),
+                    )
+            key = json.dumps(at, sort_keys=True)
+            outcomes[key] += 1
+            detail[key] = at
+        rows.append(
+            {
+                "point": i,
+                "rpm": p.rpm,
+                "rpm_word": word,
+                "coolant_c": p.coolant_c,
+                "pedal_flag": pedal,
+                "outcomes": [{**detail[key], "draws": n} for key, n in sorted(outcomes.items())],
+            }
+        )
+    return rows
+
+
 __all__ = [
+    "TIMING_INPUT_CHANGED",
+    "ignition_timing_block",
+    "ignition_timing_points",
+    "timing_reach_reasons",
     "HEADLINE_BY_LOOP",
     "MEMBERSHIP",
     "NO_RELATIVE_DELTA",

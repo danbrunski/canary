@@ -150,6 +150,19 @@ block wider than where the truck operates, not by knowing which cell it sits in.
   - The controls do not move. STFT does not move.
   - The fuel-economy cost of a few degrees near MBT is probably below what road
     load noise lets us see. Do not report it as a result.
+  - *The code's prediction (E09.7, 2026-10-17; a prediction, not a
+    measurement):* one count is one degree, and the trim is additive. The
+    decoded chain adds the trim term `0xFFFF2793 = max(0, trim −
+    0xFFFF11CB)` (`0xFFFF11CB` is 0–7) to the base sum and carries it
+    unscaled through to `0xFFFF232E`, the timing in degrees BTDC (`110 −
+    0xFFFF11FF`, PID 0x0E / DID 0x110A). That holds wherever no clamp binds
+    (50° cap, −7° floor) and the trim path is selected. Warm, the ECM reads
+    trim **B** while HI DET (`0xFFFF283F` bit 6) is set, as it is on this truck
+    since the knock-sensor fallback. A trim-A-only edit is therefore predicted
+    to change nothing warm. `rom_sim inspect --edits <spec> --high-det set
+    --knock-control fallback --timing-coolant-c 90` prints it per cell: −3
+    counts on trim B of ZS44A-20261004 gives −3° in all 256 cells
+    (`tests/test_ignition_timing.py`).
 - [ ] **Outcome:** degrees per count, additive or not, with n.
 
 ## Later candidates (not designed yet)

@@ -24,6 +24,8 @@ import yaml
 
 from src.analysis.ecu_state_models import (
     MODEL_VERSION,
+    TIMING_CAP,
+    TIMING_FLOOR,
     UPREV_MAGIC,
     Checkpoint,
     EnrichmentInputs,
@@ -31,9 +33,12 @@ from src.analysis.ecu_state_models import (
     EnrichmentState,
     FlagRead,
     PedalFlagModel,
+    Step,
     UpRevState,
     account_pedal_flag,
     account_uprev_reads,
+    base_timing_select,
+    base_timing_sum,
     byte_curve16,
     enrichment_step,
     loaded_slot,
@@ -41,6 +46,14 @@ from src.analysis.ecu_state_models import (
     pedal_curve_input,
     pedal_flag_next,
     selected_timing_trim,
+    timing_cycle_copy,
+    timing_degrees_btdc,
+    timing_delta,
+    timing_final_byte,
+    timing_rate_limit,
+    timing_rate_limit_steady,
+    timing_retard_combine,
+    timing_trim_terms,
     trim_lookup,
     uprev_power_on,
     uprev_step,
@@ -431,3 +444,181 @@ def test_the_lookup_reads_k106s_edit_where_the_axis_roles_put_it() -> None:
         got_k106 = trim_lookup(a_k106, rpm_axis, load_axis, word, load)
         assert (got_base.trim, got_k106.trim) == (want_base, want_k106), (word, load)
         assert got_base.flag and got_k106.flag
+
+
+# -- E05.4 / E09.7: the ignition chain, node by node (synthetic, code) ------------------
+
+
+def test_the_trim_term_masks_the_flag_and_floors_at_zero() -> None:
+    # 0x04BD24: 1350 = 1777 & 0x7F, 1352 = 177A & 0x7F, 2793 = max(0, 1350 - 11CB).
+    terms = timing_trim_terms(
+        selected=0x80 | 50, main=52, subtrahend_11cb=3, pair_term_enabled=False
+    )
+    assert (terms.selected, terms.pair, terms.main, terms.term) == (50, 0, 52, 47)
+    assert (
+        timing_trim_terms(selected=50, main=52, subtrahend_11cb=3, pair_term_enabled=True).pair == 2
+    )  # cal 0x8ADE bit 1: max(0, 52 - 50)
+    assert (
+        timing_trim_terms(selected=5, main=5, subtrahend_11cb=7, pair_term_enabled=False).term == 0
+    )
+
+
+def test_the_base_sum_adds_the_trim_term_and_clamps_to_a_signed_byte() -> None:
+    plain = dict(w1d3e=0x40, w27c6=30, w2793=47, w279a=2, w134a=0, w174a=0, w1344=0, w27c3=15)
+    # 64 + 30 + 47 - 2 - 0 - 0 - 128 + 0 = 11
+    assert base_timing_sum(alternate_path=False, **plain) == 11
+    # The 0xFFFF2833 bit 4 sum: 64 + 15 - 2 - 64 = 13, no trim term.
+    assert base_timing_sum(alternate_path=True, **plain) == 13
+    assert base_timing_sum(alternate_path=True, **{**plain, "w2793": 0}) == 13
+    high = {**plain, "w1d3e": 255, "w27c6": 127, "w2793": 68}
+    assert base_timing_sum(alternate_path=False, **high) == 127  # 322 clamped
+    low = {**plain, "w1d3e": 0, "w27c6": -128, "w279a": 255}
+    assert base_timing_sum(alternate_path=False, **low) == -128
+    with pytest.raises(ValueError):
+        base_timing_sum(alternate_path=False, **{**plain, "w27c6": 128})
+
+
+def test_the_select_takes_the_coolant_value_on_its_flags_unless_the_mode_byte_holds() -> None:
+    args = dict(w1a58=11, w1a59=30, mode_127d=0)
+    assert base_timing_select(flag_4785_bit6=False, flag_2833_bit4=False, **args) == 11
+    assert base_timing_select(flag_4785_bit6=True, flag_2833_bit4=False, **args) == 30
+    assert base_timing_select(flag_4785_bit6=False, flag_2833_bit4=True, **args) == 30
+    for mode in (1, 2):
+        held = {**args, "mode_127d": mode}
+        assert base_timing_select(flag_4785_bit6=True, flag_2833_bit4=True, **held) == 11
+    assert timing_cycle_copy(11) == 11
+
+
+def test_the_retard_combine_takes_the_larger_retard_and_its_two_paths() -> None:
+    args = dict(
+        w274e=25, w1215=0, w26d2=-5, w272a=0, w2334=0, w46e6=0,
+        flag_28ab_bit4=False, bypass_28b4_bit1=False,
+    )  # fmt: skip
+    active = timing_retard_combine(knock_active=True, **args)
+    assert (active.retard, active.w2338, active.combined) == (-5, 20, 20)
+    assert timing_retard_combine(knock_active=False, **args).combined == 25
+    # min(26D2, -1215): the larger retard wins.
+    assert (
+        timing_retard_combine(knock_active=True, **{**args, "w1215": 3, "w26d2": -1}).retard == -3
+    )
+    # 46E6 path: 274E + min(2332 + 272A, -46E6) - 2334 = 25 + min(-3, -4) - 1 = 20.
+    capped = timing_retard_combine(
+        knock_active=True, **{**args, "w46e6": 4, "w272a": 2, "w2334": 1}
+    )
+    assert (capped.w2338, capped.combined) == (None, 20)
+    # 28AB bit 4 takes the plain path even with 46E6 set: 25 - 5 + 2 - 1 = 21.
+    plain = {**args, "w46e6": 4, "w272a": 2, "w2334": 1, "flag_28ab_bit4": True}
+    assert timing_retard_combine(knock_active=True, **plain).combined == 21
+    bypass = timing_retard_combine(knock_active=True, **{**args, "bypass_28b4_bit1": True})
+    assert (bypass.w2338, bypass.combined) == (None, 25)
+    assert (
+        timing_retard_combine(knock_active=False, **{**args, "w274e": 127, "w272a": 127}).combined
+        == 127
+    )
+    # 0xFFFF1215 is a signed byte (0x04DF4C mov.b, neg, no extu.b): raw 0xFE
+    # is -2, so -1215 is +2 of advance, and the knock min still applies.
+    raw_fe = 0xFE - 0x100
+    assert timing_retard_combine(knock_active=False, **{**args, "w1215": raw_fe}).retard == 2
+    assert timing_retard_combine(knock_active=False, **{**args, "w1215": -128}).combined == 127
+    assert timing_retard_combine(knock_active=True, **{**args, "w1215": raw_fe}).retard == -5
+    with pytest.raises(ValueError):
+        timing_retard_combine(knock_active=False, **{**args, "w1215": 0xFE})
+    # 0xFFFF46E6 is a byte (0x04E05E mov.b, extu.b): 0x80 is 128, not -128.
+    late = timing_retard_combine(knock_active=False, **{**args, "w46e6": 0x80})
+    assert (late.w2338, late.combined) == (None, 25 - 128)
+    with pytest.raises(ValueError):
+        timing_retard_combine(knock_active=False, **{**args, "w46e6": 0x100})
+
+
+def test_the_rate_limit_steps_then_caps_and_its_fixed_point_ignores_the_step() -> None:
+    def seg(v: int, prev: int, **kw: Any) -> int:
+        args: dict[str, Any] = dict(trim_62b4=0, retard_9932=None, step_up=4, first_run=False)
+        return timing_rate_limit(w1346=v, previous_232e=prev, **{**args, **kw})
+
+    assert seg(30, 10) == 14  # rise at most +4
+    assert seg(30, 10, step_up=15) == 25
+    assert seg(10, 40) == 25  # fall at most -15
+    assert seg(60, 50) == 50  # the 50 cap
+    assert seg(-30, -7) == -7  # -22 after the step, then the -7 floor
+    assert seg(30, 20, retard_9932=-20) == 20  # retard clamped to -10
+    assert seg(30, 30, retard_9932=5) == 30  # and never an advance
+    assert seg(30, 30, trim_62b4=2) == 32
+    assert seg(30, 30, first_run=True) == 0
+    for value, want in ((30, 30), (60, TIMING_CAP), (-30, TIMING_FLOOR), (-7, -7)):
+        assert timing_rate_limit_steady(value, step_up=4).value == want
+        prev = TIMING_FLOOR
+        for _ in range(40):
+            prev = seg(value, prev)
+        assert prev == want, value  # iterating the segment reaches the same point
+    assert timing_rate_limit_steady(30, step_up=0).reason == "rate_limit_rise_disabled"
+
+
+def test_the_final_byte_branches() -> None:
+    assert timing_final_byte(w232e=30, branch="normal", forced_4858_bit5=False) == 80
+    assert timing_degrees_btdc(80) == 30
+    assert timing_final_byte(w232e=30, branch="flag_28b1_bit5", forced_4858_bit5=False) == 50
+    assert timing_final_byte(w232e=-7, branch="flag_28b1_bit5", forced_4858_bit5=False) == 80
+    assert timing_final_byte(w232e=30, branch="fault_plain", forced_4858_bit5=False) == 80
+    assert timing_final_byte(w232e=30, branch="fault_offset", forced_4858_bit5=False) == 90
+    assert timing_final_byte(w232e=30, branch="normal", forced_4858_bit5=True) == 0x5A
+
+
+def _chain_degrees(selected_trim: int) -> int:
+    """All seven nodes at one stated state (every unidentified word a stated
+    number), steady, to degrees BTDC."""
+    terms = timing_trim_terms(
+        selected=0x80 | selected_trim, main=52, subtrahend_11cb=2, pair_term_enabled=False
+    )
+    s = base_timing_sum(
+        alternate_path=False, w1d3e=0x40, w27c6=24, w2793=terms.term, w279a=1,
+        w134a=0, w174a=0, w1344=0, w27c3=0,
+    )  # fmt: skip
+    e274 = timing_cycle_copy(
+        base_timing_select(
+            w1a58=s, w1a59=30, flag_4785_bit6=False, flag_2833_bit4=False, mode_127d=0
+        )
+    )
+    combined = timing_retard_combine(
+        w274e=e274, w1215=0, w26d2=-5, knock_active=True, w272a=0, w2334=0, w46e6=0,
+        flag_28ab_bit4=False, bypass_28b4_bit1=False,
+    ).combined  # fmt: skip
+    w232e = timing_rate_limit_steady(combined + 1, step_up=4).value
+    assert w232e is not None
+    return timing_degrees_btdc(
+        timing_final_byte(w232e=w232e, branch="normal", forced_4858_bit5=False)
+    )
+
+
+def test_one_trim_count_is_one_degree_through_all_seven_nodes() -> None:
+    """The code's prediction for N01.2's "degrees per count": every node from
+    0xFFFF2793 to 0xFFFF232E adds without scaling, so with no clamp binding a
+    trim change of n counts is n degrees BTDC."""
+    # 64 + 24 + (50 - 2) - 1 - 128 = 7; - 5 knock retard = 2; + 1 = 3 deg.
+    assert _chain_degrees(50) == 3
+    for n in (-3, -1, 1, 2):
+        assert _chain_degrees(50 + n) - _chain_degrees(50) == n
+
+
+def _sel(trim: int) -> Any:
+    table = [[0x80 | trim] * 16 for _ in range(16)]
+    return Step(trim_lookup(table, RPM_AXIS, LOAD_AXIS, 200, 64))
+
+
+def test_the_timing_delta_says_which_kind_of_answer_it_is() -> None:
+    d = timing_delta(_sel(50), _sel(47))
+    assert (d.status, d.delta_deg, d.reasons) == (
+        "delta_if_no_clamp",
+        -3,
+        ("clamp_headroom_unknown",),
+    )
+    assert timing_delta(_sel(50), _sel(50)).reasons == ()  # no change, no clamp question
+    at = timing_delta(_sel(50), _sel(53), base_timing_deg=30)
+    assert (at.status, at.base_deg, at.candidate_deg, at.delta_deg) == ("computed", 30, 33, 3)
+    cap = timing_delta(_sel(50), _sel(53), base_timing_deg=48)
+    assert (cap.delta_deg, cap.candidate_deg, cap.reasons) == (2, 50, ("timing_cap_binds",))
+    assert timing_delta(_sel(50), _sel(53), base_timing_deg=50).reasons == ("base_timing_at_clamp",)
+    held = timing_delta(_sel(50), _sel(53), held_reasons=["base_timing_load_term_unmodelled"])
+    assert (held.status, held.delta_deg, held.trim_term_delta) == ("unevaluable", None, 3)
+    blend = timing_delta(Step(None, "coolant_blend_band"), _sel(50))
+    assert (blend.status, blend.reasons) == ("unevaluable", ("coolant_blend_band",))
+    assert timing_delta(_sel(5), _sel(6)).reasons == ("trim_term_floor_may_bind",)

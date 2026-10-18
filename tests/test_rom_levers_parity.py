@@ -40,7 +40,6 @@ import yaml
 from src.analysis import rom_editor, rom_levers
 from src.analysis.ecu_application import program_sha256
 from src.analysis.fuel_plant import plant_qualification
-from src.analysis.rom_edit_spec import EditSpecRefusalError
 from src.analysis.rom_image import revision_match, sha256_hex
 from src.analysis.rom_levers import Blocker, LeverClassification, LeverEntry, OutputBlockers
 from src.vehicle.tune_revisions import load_tune_revisions
@@ -69,8 +68,8 @@ FT_EDIT: dict[str, Any] = {
     "cells": [[7, 7], [7, 6]],
     "set_raw": 151,
 }
-#: What the page can send, by name. The timing trim and the MAF curve cannot be
-#: edited through it (``table_not_editable``); the CLI covers them.
+#: What the page can send, by name. The timing trims became editable with
+#: E09.7 (their preview); the MAF curve cannot be edited through the page.
 TRIM_EDIT: dict[str, Any] = {"table": "timing_trim_a", "slot": 1, "cells": [[0, 0]], "add_raw": -1}
 PAGE_EDITS: dict[str, list[dict[str, Any]]] = {
     "fuel_comp": [FC_EDIT],
@@ -207,15 +206,17 @@ def test_a_fuel_comp_edit_says_what_a_number_can_and_cannot_be_given_for(
 def test_a_timing_trim_and_the_maf_curve_are_the_clis_alone(
     world: dict[str, Any], capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """The page edits only the fuel chain's Map 1, so a timing trim and the
-    MAF curve (0xE27E, in no table until E09.8) reach the classifier only
-    through ``inspect``. The page refuses the trim by name; what ``inspect``
-    says for each is pinned here and in ``tests/test_rom_levers.py``."""
-    with pytest.raises(EditSpecRefusalError) as refused:
-        _preview(world, [TRIM_EDIT])
-    assert refused.value.reason == "table_not_editable"
+    """The MAF curve (0xE27E, in no table until E09.8) reaches the classifier
+    only through ``inspect``. A timing trim is editable on the page since
+    E09.7, and its preview says what ``inspect`` says, word for word; what
+    each says is pinned here and in ``tests/test_rom_levers.py``."""
     trim = _trim_levers(world, capsys)["messages"]
-    assert any("Timing trim A -> ignition_trim_selected: no torque plant" in m for m in trim), trim
+    assert _preview(world, [TRIM_EDIT])["levers"]["messages"] == trim
+    assert any(
+        "Timing trim A -> ignition_trim_selected: engine torque not computed in "
+        "conditional_rom_comparison; torque production built, not validated" in m
+        for m in trim
+    ), trim
     maf = _maf_levers(world, capsys)["messages"]
     assert any("0xE27E" in m and "not mapped" in m for m in maf), maf
 
@@ -232,7 +233,8 @@ def _trim_levers(world: dict[str, Any], capsys: pytest.CaptureFixture[str]) -> d
             }
         )
     )
-    levers: dict[str, Any] = _inspect(world, capsys, "--edits", spec)["levers"]
+    timing = ("--high-det", "clear", "--knock-control", "active", "--timing-coolant-c", "90")
+    levers: dict[str, Any] = _inspect(world, capsys, "--edits", spec, *timing)["levers"]
     return levers
 
 
@@ -408,7 +410,8 @@ def test_the_front_end_fixture_is_real_classifier_output(
         assert levers["messages"]
     # The three cases say what E09.14 requires of them.
     said = {name: "\n".join(levers["messages"]) for name, levers in fixture.items()}
-    assert "no torque plant" in said["timing_trim"]
+    assert "torque production built, not validated" in said["timing_trim"]
+    assert "spark response unmeasured" in said["timing_trim"]
     assert "not mapped" in said["maf_curve"]
     assert "closed loop: trim authority undecoded" in said["fuel_comp"]
     assert "plant not qualified" in said["fuel_comp"]

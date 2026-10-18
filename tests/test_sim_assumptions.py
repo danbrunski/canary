@@ -288,7 +288,10 @@ def test_a_grid_run_names_ve_and_the_frozen_maf_through_the_cli_and_its_report(
         assert 0 <= page.index(escaped) < first_svg
     assert page.index('id="working-assumptions"') < first_svg
     # The cell table carries them as caveats: the page is rebuilt from it alone.
-    assert render_report(result["cell_table"], run=result["run"]) == page
+    rebuilt = render_report(
+        result["cell_table"], run=result["run"], timing=result["ignition_timing"]
+    )
+    assert rebuilt == page
     assert json.loads(json.dumps(result["assumptions"])) == result["assumptions"]
 
 

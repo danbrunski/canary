@@ -296,7 +296,7 @@ ram:
   - {address: 0xFFFF26D2, width: 8, signed: true, name: knock_retard_deg, units: deg, confidence: inferred,
      meaning: 'Whole degrees of 0xFFFF1254, truncated.'}
   - {address: 0xFFFF11CB, width: 8, signed: false, name: unidentified_11cb, units: raw_counts, confidence: unknown,
-     meaning: 'Cycle-start copy of 0xFFFF1203 (written in the per-segment chain); subtracted from the trim.'}
+     meaning: 'Cycle-start copy of 0xFFFF1203, which 0x04E5B0 slews +/-5 per segment toward 0xFFFF2738 (the cycle copy of 0xFFFF27C4 = min(cal 0x8B05 = 7, (max(0, 0xFFFF2BD0 - cal 0x8B02) x 0xFFFF1766) / 640), 0x04D9B6-0x04D9F4; 0xFFFF1766 is 0 or cal 0x87BD = 70 on flags not identified): 0..7, subtracted from the trim. 0xFFFF2BD0 is not identified (E09.7).'}
   - {address: 0xFFFF1350, width: 8, signed: false, name: timing_trim_selected_masked, units: raw_counts, confidence: code,
      meaning: '0xFFFF1777 & 0x7F.'}
   - {address: 0xFFFF1351, width: 8, signed: false, name: timing_trim_difference, units: raw_counts, confidence: code,
@@ -305,18 +305,20 @@ ram:
      meaning: '0xFFFF177A & 0x7F.'}
   - {address: 0xFFFF2793, width: 8, signed: false, name: timing_trim_term, units: raw_counts, confidence: code,
      meaning: 'max(0, selected trim - 0xFFFF11CB): the trim''s term in the base timing sum.'}
-  - {address: 0xFFFF27C6, width: 8, signed: false, name: timing_term_27c6, units: raw_counts, confidence: unknown,
-     meaning: 'Base timing sum term from 0x04BC5A (rpm-derived); not identified.'}
+  - {address: 0xFFFF27C6, width: 8, signed: true, name: timing_term_27c6, units: deg, confidence: unknown,
+     meaning: 'Base timing sum term from 0x04BC5A: (cal 0x880D x 120 x 0xFFFF17C6, the x 120 from the listing at 0x04BC7C-0x04BC8A: x 15, shll2, shll) / (0xFFFF15DE x 0xFFFF19CB) + cal 0x8B0C x 5 / 2, times the rpm word >> 10 x 3 / 5, minus 14, capped 127: a time turned into crank angle. The overall scale is unresolved until the operands of the divide helpers 0x021C48 / 0x021D6C are known (owed to the firmware session). 0xFFFF19CB is X (curve 0xCD9B), 0xFFFF15DE carries rom_map base_timing_rate_map (0x9AF9, rpm x X) through divides the exported listing does not resolve, 0xFFFF17C6 (0x04B9D0) is not identified. Moves with X, so a change that moves X moves it (E09.7).'}
   - {address: 0xFFFF279A, width: 8, signed: false, name: timing_term_279a, units: raw_counts, confidence: unknown,
-     meaning: 'Subtracted term of the base timing sum; not identified.'}
-  - {address: 0xFFFF134A, width: 8, signed: false, name: timing_term_134a, units: raw_counts, confidence: unknown,
-     meaning: 'Subtracted term of the base timing sum; not identified.'}
+     meaning: 'Subtracted term of the base timing sum: clamp(0xFFFF26D9 + 0xFFFF26D0 - (0xFFFF17FA >> 4), 0, 255) (0x04C952); its three inputs are not identified.'}
+  - {address: 0xFFFF134A, width: 8, signed: false, name: timing_term_134a, units: raw_counts, confidence: code,
+     meaning: 'max(0, curve 0xCC73 at the rpm/25 byte 0xFFFF11CF - curve 0xCC63 at the coolant byte 0xFFFF1077) (0x04C998). Both curves are all zero on every listed image, so it is 0.'}
   - {address: 0xFFFF174A, width: 8, signed: false, name: timing_term_174a, units: raw_counts, confidence: unknown,
-     meaning: 'Subtracted term of the base timing sum; not identified.'}
+     meaning: 'Enrichment retard (0x04C9D8): max(0, min(0xFFFF174C, g)), g = 0 while the Target AFR lookup byte 0xFFFF174B is below 0x82, else from 174B and the multiplier 0xFFFF26C0; 174C from curves 0xD177/0xD19F (0xD187/0xD1AF with 0xFFFF283F bit 6) at rpm and the X byte (a divide the exports do not resolve). A Target AFR edit at an enriched cell moves it (E09.7).'}
   - {address: 0xFFFF1D3E, width: 8, signed: false, name: timing_term_1d3e, units: raw_counts, confidence: unknown,
-     meaning: 'Base term of the timing sum; not identified.'}
+     meaning: 'Valve-timing term of the base timing sum (0x04DA02, from 0xFFFF2700 against the cam words 0xFFFF281A/281B): 0x40 (neutral) on most branches, else 0xFFFF1ED4 + 0xFFFF1DFB - 0x40 clamped 0..255.'}
   - {address: 0xFFFF1344, width: 8, signed: false, name: timing_term_1344, units: raw_counts, confidence: unknown,
      meaning: 'Added term of the base timing sum (0 unless 0xFFFF47A6 bit 6 and a speed condition hold).'}
+  - {address: 0xFFFF27C3, width: 8, signed: true, name: idle_timing_term_27c3, units: deg, confidence: unknown,
+     meaning: 'Written by the idle-timing routine 0x04BDC4; replaces 0xFFFF27C6 and the trim term in the base timing sum while 0xFFFF2833 bit 4 is set.'}
   - {address: 0xFFFF1A58, width: 8, signed: true, name: base_timing_normal, units: deg, confidence: code,
      meaning: 'Base timing sum, clamped -128..127.'}
   - {address: 0xFFFF1A59, width: 8, signed: true, name: base_timing_alternate, units: deg, confidence: unknown,
@@ -325,8 +327,10 @@ ram:
      meaning: 'Selected base timing (0x04CF0C).'}
   - {address: 0xFFFF274E, width: 8, signed: true, name: base_timing_snapshot, units: deg, confidence: code,
      meaning: 'Copy of 0xFFFF27DA made after the main loop (0x0212C4); read by the per-segment chain.'}
-  - {address: 0xFFFF1215, width: 8, signed: false, name: other_retard, units: deg, confidence: inferred,
-     meaning: 'Non-knock retard, whole degrees (0x0637C2).'}
+  - {address: 0xFFFF1215, width: 8, signed: true, name: other_retard, units: deg, confidence: inferred,
+     meaning: 'Non-knock retard, whole degrees (0x0637C2); a signed byte where 0x04DF4C reads it (mov.b, neg, no extu.b).'}
+  - {address: 0xFFFF46E6, width: 8, signed: false, name: combine_retard_floor, units: deg, confidence: code,
+     meaning: 'In 0x04DF38, when non-zero and 0xFFFF28AB bit 4 is clear, 0xFFFF2332 + 0xFFFF272A is held at or below -0xFFFF46E6; an unsigned byte (0x04E05E mov.b, extu.b, cmp/pl). Writer not identified.'}
   - {address: 0xFFFF2332, width: 16, signed: true, name: retard_applied, units: deg, confidence: code,
      meaning: 'min(knock retard, -0xFFFF1215) while knock control is active, else -0xFFFF1215.'}
   - {address: 0xFFFF2338, width: 16, signed: true, name: base_plus_retard, units: deg, confidence: code,
@@ -1674,28 +1678,35 @@ nodes:
     saturation: 'floors at 0'
     calibration_conditions:
       - {offset: 0x8ADE, mask: 0x02, equals: 0, why: 'bit 1 clear: 0xFFFF1351 is 0'}
+      - {offset: 0x8B05, mask: 0xFF, equals: 7, why: 'cal 0x8B05 caps 0xFFFF27C4 (0x04D9E4), so 0xFFFF11CB is 0..7; TRIM_TERM_SUBTRAHEND_MAX and timing_delta''s "exact when both trims are at least 7" rest on this value'}
     outside_schedule: 'Called by the base-timing task 0x04DE4C (task 74).'
     confidence: code
-    twin: not_modelled
-    evidence: ['listing 0x04BD24-0x04BD72']
+    twin: implemented
+    implemented_by: src.analysis.ecu_state_models.timing_trim_terms
+    evidence: ['listing 0x04BD24-0x04BD72', 'tests/test_ecu_state_models.py hand-worked vectors (E09.7); every unidentified word is a required argument']
 
   - id: base_timing_sum
     function: 0x04CB9E
     kind: computation
     writes: [0xFFFF1A58]
-    reads: [0xFFFF2833, 0xFFFF27C6, 0xFFFF2793, 0xFFFF279A, 0xFFFF134A, 0xFFFF174A, 0xFFFF1D3E, 0xFFFF1344]
+    reads: [0xFFFF2833, 0xFFFF27C6, 0xFFFF2793, 0xFFFF279A, 0xFFFF134A, 0xFFFF174A, 0xFFFF1D3E, 0xFFFF1344,
+            0xFFFF27C3]
     depends_on: [timing_trim_terms]
     arithmetic: >-
       With bit 4 of 0xFFFF2833 clear: 0xFFFF1D3E + 0xFFFF27C6 + 0xFFFF2793 -
       0xFFFF279A - 0xFFFF134A - 0xFFFF174A - 0x80 + 0xFFFF1344, clamped to a
-      signed byte, to 0xFFFF1A58. With it set, a different sum without the
-      trim term.
+      signed byte, to 0xFFFF1A58. With it set: 0xFFFF1D3E + 0xFFFF27C3 -
+      0xFFFF279A - 0x40 (0xFFFF27C3 from the idle-timing routine 0x04BDC4),
+      no trim term. The term carrying most of the advance, 0xFFFF27C6, reads
+      X (rom_map base_timing_rate_map and curve 0xCD9B), so a change that
+      moves X moves base timing outside the trim term (E09.7).
     rounding: none
     saturation: '-128..127'
     outside_schedule: 'Called by the base-timing task 0x04DE4C (task 74).'
     confidence: code
-    twin: not_modelled
-    evidence: ['decompile text of 0x04CB9E (firmware session, 2026-10-05)']
+    twin: implemented
+    implemented_by: src.analysis.ecu_state_models.base_timing_sum
+    evidence: ['decompile text of 0x04CB9E (firmware session, 2026-10-05)', 'tests/test_ecu_state_models.py hand-worked vectors (E09.7); every unidentified word is a required argument']
 
   - id: base_timing_select
     function: 0x04CF0C
@@ -1710,8 +1721,9 @@ nodes:
     saturation: none
     outside_schedule: 'Base-timing task 0x04DE4C (task 74).'
     confidence: code
-    twin: not_modelled
-    evidence: ['decompile text of 0x04CF0C (firmware session)']
+    twin: implemented
+    implemented_by: src.analysis.ecu_state_models.base_timing_select
+    evidence: ['decompile text of 0x04CF0C (firmware session)', 'tests/test_ecu_state_models.py hand-worked vectors (E09.7); every unidentified word is a required argument']
 
   - id: timing_cycle_copy
     function: 0x020EF2
@@ -1725,27 +1737,34 @@ nodes:
     saturation: none
     outside_schedule: 'End of each 0x020EF2 cycle, after the task loop.'
     confidence: code
-    twin: not_modelled
-    evidence: ['listing 0x0212C4 (copy 0xFFFF2792.. to 0xFFFF2706.., n = 0x8C)']
+    twin: implemented
+    implemented_by: src.analysis.ecu_state_models.timing_cycle_copy
+    evidence: ['listing 0x0212C4 (copy 0xFFFF2792.. to 0xFFFF2706.., n = 0x8C)', 'tests/test_ecu_state_models.py hand-worked vectors (E09.7); every unidentified word is a required argument']
 
   - id: timing_retard_combine
     function: 0x04DF38
     kind: computation
     writes: [0xFFFF2332, 0xFFFF2338, 0xFFFF1346]
-    reads: [0xFFFF274E, 0xFFFF1215, 0xFFFF26D2, 0xFFFF2334, 0xFFFF272A]
+    reads: [0xFFFF274E, 0xFFFF1215, 0xFFFF26D2, 0xFFFF2334, 0xFFFF272A, 0xFFFF46E6]
     depends_on: [timing_cycle_copy, knock_trim_difference]
     arithmetic: >-
       0xFFFF2332 = min(0xFFFF26D2, -0xFFFF1215) while knock control is active
       (flag bits 0x28AD.5 / 0x28B3.1), else -0xFFFF1215; 0xFFFF2338 =
-      0xFFFF274E + 0xFFFF2332 on the normal path (a held-step variant
-      exists); 0xFFFF1346 = clamp_s8(0xFFFF2338 + 0xFFFF272A - 0xFFFF2334).
-      A bypass flag copies 0xFFFF274E (capped 127) instead.
+      0xFFFF274E + 0xFFFF2332 on the normal path (the held-step variant from
+      0x04DF78 is skipped while cal 0x8294 is 0: 0x04DF72 tst r5,r5; bt
+      0x4dfb6); 0xFFFF1346 = clamp_s8(0xFFFF2338 + 0xFFFF272A - 0xFFFF2334).
+      0xFFFF1215 and 0xFFFF26D2 are signed bytes (0x04DF4C mov.b, then neg
+      with no extu.b); 0xFFFF46E6 is an unsigned byte (0x04E05E mov.b,
+      extu.b). A bypass flag copies 0xFFFF274E (capped 127) instead.
     rounding: none
     saturation: '-128..127'
+    calibration_conditions:
+      - {offset: 0x8294, mask: 0xFF, equals: 0, why: 'zero skips the held-step branch at 0x04DF72 (tst r5,r5; bt 0x4dfb6), which the twin does not compute'}
     outside_schedule: 'Per-segment chain 0x04E6AE (every 120 deg crank, dispatch 0x02092E).'
     confidence: code
-    twin: not_modelled
-    evidence: ['decompile text of 0x04DF38 (firmware session)']
+    twin: implemented
+    implemented_by: src.analysis.ecu_state_models.timing_retard_combine
+    evidence: ['decompile text of 0x04DF38 (firmware session)', 'listing 0x04DF38-0x04DF76 (signedness of 0xFFFF1215, cal 0x8294 gate) and 0x04E05A-0x04E064 (0xFFFF46E6 byte)', 'tests/test_ecu_state_models.py hand-worked vectors (E09.7); every unidentified word is a required argument']
 
   - id: timing_rate_limit
     function: 0x04E0E0
@@ -1764,8 +1783,9 @@ nodes:
     saturation: 'step +4 / -15; 50 cap; -7 floor'
     outside_schedule: 'Per-segment chain 0x04E6AE.'
     confidence: code
-    twin: not_modelled
-    evidence: ['decompile text of 0x04E0E0 (firmware session)']
+    twin: implemented
+    implemented_by: src.analysis.ecu_state_models.timing_rate_limit
+    evidence: ['decompile text of 0x04E0E0 (firmware session)', 'tests/test_ecu_state_models.py hand-worked vectors (E09.7); every unidentified word is a required argument']
 
   - id: timing_final_byte
     function: 0x04E4AC
@@ -1782,8 +1802,9 @@ nodes:
     saturation: 'as stated per branch'
     outside_schedule: 'Per-segment chain 0x04E6AE.'
     confidence: code
-    twin: not_modelled
-    evidence: ['decompile text of 0x04E4AC (firmware session)', 'PID 0x0E and DID 0x110A read 0xFFFF11FF (Mode 01 handler 0x0D3AFC)']
+    twin: implemented
+    implemented_by: src.analysis.ecu_state_models.timing_final_byte
+    evidence: ['decompile text of 0x04E4AC (firmware session)', 'PID 0x0E and DID 0x110A read 0xFFFF11FF (Mode 01 handler 0x0D3AFC)', 'tests/test_ecu_state_models.py hand-worked vectors (E09.7); every unidentified word is a required argument']
 
 outputs:
   - id: target_equiv_ratio
@@ -1890,12 +1911,14 @@ outputs:
         nodes: [high_det_latch]
         closes_with: 'Read 0xFFFF283F with the trim bytes (flags window from 0xFFFF283F).'
       - name: ignition_chain_unmodelled
-        nodes: [knock_trim_difference, timing_trim_terms, base_timing_sum, base_timing_select,
-                timing_cycle_copy, timing_retard_combine, timing_rate_limit, timing_final_byte]
+        nodes: [knock_trim_difference]
         closes_with: >-
-          Implement each node, then verify per segment against same-window
-          reads of 0xFFFF2793, 0xFFFF1A58, 0xFFFF27DA, 0xFFFF2332, 0xFFFF1346,
-          0xFFFF232E and 0xFFFF11FF; identify the unnamed terms first.
+          The seven chain nodes are implemented (E09.7), each taking every
+          unidentified word as a required argument, so the absolute needs those
+          words (uncovered timing_final_chain) and the knock controller's
+          0x04A8B6 branch. Then verify per segment against same-window reads of
+          0xFFFF2793, 0xFFFF1A58, 0xFFFF27DA, 0xFFFF2332, 0xFFFF1346, 0xFFFF232E
+          and 0xFFFF11FF (E05.4 (c)).
     regions:
       - id: rate_limited
         status: conditional
@@ -2035,12 +2058,17 @@ uncovered:
     next_evidence: 'Vehicle: read 0xFFFF289C, 0xFFFF4786, 0xFFFF2C91 and 0xFFFF283B..0xFFFF283C with BFS at key-on and crank, and time 0xFFFF84B9-paced counters against acquisition time to confirm the 1.024 ms tick.'
   - id: timing_final_chain
     where: >-
-      Ignition terms the chain reads but no node identifies: 0xFFFF11CB,
-      0xFFFF27C6, 0xFFFF279A, 0xFFFF134A, 0xFFFF174A, 0xFFFF1D3E, 0xFFFF1344,
-      0xFFFF2334, 0xFFFF272A, 0xFFFF62B4, 0xFFFF1215; the knock control's
-      0x04A8B6 branch
-    blocks: 'computing ignition_timing beyond the trim intermediate (E05.4)'
-    next_evidence: 'Trace each writer; read them with 0xFFFF1A58 and 0xFFFF11FF in one window set.'
+      Ignition terms the chain reads whose values no node computes (the seven
+      chain nodes take each as a required argument, E09.7): 0xFFFF11CB (0..7,
+      from 0xFFFF2BD0), 0xFFFF27C6 (time-to-angle over rom_map
+      base_timing_rate_map; the 0x021C48/0x021D6C operands are not in the
+      exports), 0xFFFF279A, 0xFFFF174A, 0xFFFF1D3E, 0xFFFF1344, 0xFFFF2334,
+      0xFFFF272A, 0xFFFF62B4, 0xFFFF1215, 0xFFFF9932; the flags 0xFFFF2833
+      bit 4, 0xFFFF4785 bit 6, 0xFFFF28B4 bit 1, 0xFFFF28B1 bit 5, 0xFFFF4858
+      bit 5 and the 0x08E498 fault test; the knock control's 0x04A8B6 branch.
+      0xFFFF134A is settled: 0 on every listed image (curves 0xCC63/0xCC73)
+    blocks: 'the absolute ignition_timing (E05.4); a trim edit''s change is computed with these held equal (E09.7), an X change''s is not'
+    next_evidence: 'Firmware session: the 0x021C48/0x021D6C operands in 0x04BA6C/0x04BC5A/0x04B9D0 and the writers of 0xFFFF2BD0, 0xFFFF26D9, 0xFFFF26D0, 0xFFFF17FA. Vehicle: read them with 0xFFFF1A58 and 0xFFFF11FF in one window set (E05.4 (c)).'
   - id: enrichment_tick_rate
     where: '0xFFFF84C3 bit 7 (the tick every enrichment timer steps on) and the 0x020EF2 cycle period'
     blocks: 'predicting enrichment transition timing (E05.3); a measured requirement, never fitted'

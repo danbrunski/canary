@@ -349,9 +349,14 @@ async def preview_rom_edit(
     changed ranges, ``effect.changed_nodes`` and ``moved_lookups``), ``tables``
     (the candidate's edited tables), ``levers`` and ``sim_base``. ``levers`` says
     which lever the edit pulls and, per output, whether a number can be given or
-    what blocks it (no torque plant, not mapped, plant not qualified, closed
-    loop: trim authority undecoded): read ``levers.messages``, one line each,
-    the same text ``rom_sim inspect`` prints. ``sim_base.ok`` is whether
+    what blocks it (not mapped, plant not qualified, closed loop: trim
+    authority undecoded, and for the ignition outputs the torque stage's
+    blockers: "torque production built, not validated (owed H07.10, ...)",
+    "spark response unmeasured", "no torque plant" while that stage is
+    unbuilt). The last line refuses a torque/power claim for the edit by name
+    ("torque/power claim for this edit (<controls>): refused; ..."). Read
+    ``levers.messages``, one line each, the same text ``rom_sim inspect``
+    prints. ``sim_base.ok`` is whether
     ``simulate_rom_edit`` is offered: false unless the image is a recorded
     revision (``reason: "base_not_a_recorded_revision"``).
 

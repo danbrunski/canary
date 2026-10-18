@@ -22,8 +22,8 @@ What it makes impossible rather than documented:
 * **A GUI edit is an E08.1 edit.** The request's ``edits`` are
   :class:`~src.analysis.rom_edit_spec.Edit` dicts, wrapped in an
   :class:`~src.analysis.rom_edit_spec.EditSpec` by :func:`editor_spec`;
-  every E08.1 refusal keeps its reason. Only the fuel chain's Map 1 is
-  editable (:data:`EDITABLE_TABLES`, :data:`SIM_SLOT`): the simulator runs
+  every E08.1 refusal keeps its reason. Only Map 1's fuel chain and timing
+  trims are editable (:data:`EDITABLE_TABLES`, :data:`SIM_SLOT`): the simulator runs
   slot 1 as the ECM does after a cold boot, so an edit elsewhere is refused
   (``table_not_editable``, ``slot_not_simulated``) instead of showing
   ``not_reached`` everywhere.
@@ -35,6 +35,10 @@ What it makes impossible rather than documented:
 * **Nothing is defaulted.** :class:`SimRequest` has no field with a default:
   environment, learned state, candidate events, load basis, draws and seed
   are all stated (E08.2's ``environment_unstated``, E08.3's draws and seed).
+  The timing output (E09.7) needs the HI DET latch and knock-control state,
+  which the request does not carry yet (the page's half of E09.7): it says
+  ``timing_state_unstated``, and simulating a timing-trim edit is refused by
+  that name. Previewing one works.
 * **Bounded before any work:** a grid over :data:`MAX_GRID_POINTS` cells
   (``grid_too_large``) or more than :data:`MAX_DRAWS` draws
   (``draws_too_many``) is refused before a design is built.
@@ -81,7 +85,14 @@ from src.analysis.rom_effects import EffectReport, RomEffectRefusalError, compar
 from src.analysis.rom_image import ImageFormatError, sha256_hex, table_values
 from src.analysis.rom_levers import classify_edit
 from src.analysis.rom_map import RomMap
-from src.analysis.sim_cells import Grid, aggregate_cells, fuel_comp_axes, target_afr_axes
+from src.analysis.sim_cells import (
+    Grid,
+    aggregate_cells,
+    fuel_comp_axes,
+    ignition_timing_block,
+    ignition_timing_points,
+    target_afr_axes,
+)
 from src.analysis.sim_contract import EcuIdentity, PlantIdentity, SimulationRefusalError
 from src.analysis.sim_design import (
     LoadBasis,
@@ -104,8 +115,15 @@ from src.vehicle.tune_revisions import TuneRevisionRegistry
 TOOL_VERSION = "1"
 TOOL = "rom_editor"
 
-#: The fuel chain, Map 1 (W09 "Decisions"): every other table is refused.
-EDITABLE_TABLES: tuple[str, ...] = ("fuel_targets", "fuel_compensation", "k_constant")
+#: The fuel chain and the timing trims, Map 1 (W09 "Decisions"; trims E09.7):
+#: every other table is refused.
+EDITABLE_TABLES: tuple[str, ...] = (
+    "fuel_targets",
+    "fuel_compensation",
+    "k_constant",
+    "timing_trim_a",
+    "timing_trim_b",
+)
 #: The slot the simulator runs: the one the ECM runs after a cold boot.
 SIM_SLOT = 1
 SLOT_SOURCE: Literal["default_slot"] = "default_slot"
@@ -511,6 +529,18 @@ def _simulate(
     _bounded(request)
     design = _grid_design(request, revision, profile_dir, registry, kit.plant.plant_version)
     require_base(design, base.image_sha256)
+    # The request carries no timing state yet (module docstring): a trim edit
+    # refuses here, by name and before any draw, and other edits show timing as not stated.
+    state = None
+    timing = ignition_timing_block(
+        kit,
+        base.image,
+        candidate_image,
+        state,
+        slot=SIM_SLOT,
+        coolant_c=request.coolant_c,
+        all_cells=False,
+    )
     candidate_sha = sha256_hex(candidate_image)
     result = run_monte_carlo(
         kit,
@@ -529,6 +559,9 @@ def _simulate(
         else target_afr_axes(kit, base.image, slot=SIM_SLOT)
     )
     cells = aggregate_cells(result, design, axes, effects=effects)
+    timing["points"] = ignition_timing_points(
+        kit, result, design, base.image, candidate_image, state, slot=SIM_SLOT
+    )
     assert design.grid is not None
     return {
         "tool": TOOL,
@@ -552,6 +585,7 @@ def _simulate(
         },
         "candidate": dict(candidate_provenance),
         "cells": cells.to_dict(),
+        "ignition_timing": timing,
         "spec_yaml": None,
     }
 

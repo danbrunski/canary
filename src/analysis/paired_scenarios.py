@@ -71,6 +71,15 @@ import numpy as np
 import pandas as pd
 
 from src.analysis.ecu_application import ApplicationModel, load_application_model
+from src.analysis.ecu_state_models import (
+    TRIM_COLD_AT_OR_BELOW,
+    TRIM_RPM_AXIS_SCALE,
+    TRIM_WARM_ABOVE,
+    SelectedTrim,
+    selected_timing_trim,
+    timing_delta,
+    trim_lookup,
+)
 from src.analysis.fuel_plant import (
     DELAY_PARAMETER,
     MANIFOLD_READS,
@@ -1605,6 +1614,280 @@ def rank_as_improvement(
     return {"rankable": not reasons, "reasons": reasons}
 
 
+# -- E09.7: ignition timing, ECU side only ----------------------------------------------
+#
+# The decoded chain from the selected timing trim to the timing byte
+# (src.analysis.ecu_state_models) with every unidentified term held equal on
+# both ROMs. It is no torque and no knock claim: those stay with E07.5's
+# claim refusals. A grid design has no logged timing, so the absolute is
+# unknown and a change is reported as the change if no clamp binds
+# (``clamp_headroom_unknown``).
+
+#: The simulator's timing output, degrees BTDC (0xFFFF232E = 110 - 0xFFFF11FF).
+TIMING_OUTPUT = "ignition_timing_deg"
+#: The application-model output it is.
+TIMING_MODEL_OUTPUT = "ignition_timing"
+KnockControl = Literal["active", "fallback"]
+#: A change that moves X moves 0xFFFF27C6 (rom_map base_timing_rate_map and
+#: curve 0xCD9B read X), which is not computed: only the trim term's change is.
+LOAD_TERM_UNMODELLED = "base_timing_load_term_unmodelled"
+#: A change that moves the Target AFR lookup moves the enrichment retard
+#: 0xFFFF174A, which is not computed.
+ENRICHMENT_RETARD_UNMODELLED = "enrichment_retard_unmodelled"
+#: No HI DET latch / knock-control state was stated: no timing is given.
+TIMING_STATE_UNSTATED = "timing_state_unstated"
+#: Coolant byte = degC + 50 (DID 0x1101; 0xFFFF1079 is its cycle copy).
+COOLANT_BYTE_OFFSET = 50
+BYTE_MAX_VALUE = 0xFF
+
+
+@dataclass(frozen=True)
+class TimingState:
+    """What the ignition chain reads that no run computes, stated, never
+    defaulted (as the pedal flag is).
+
+    - ``high_det``: 0xFFFF283F bit 6, the latch UpRev logs as HI DET. Warm, it
+      makes 0xFFFF1777 read trim B (else A).
+    - ``knock_control``: ``fallback`` is 0xFFFF479D bit 7 (retard target
+      0xFFFF13FE = cal 0x821F << 8 = 0xFB00, -5 deg). It sets HI DET only
+      inside the gate at 0x04A914-0x04A926 (0xFFFF2876 bit 6 set, 0xFFFF4782
+      bit 5 clear); outside it 0x04A956-0x04A96E writes bit 6 = cal 0x86DE
+      bit 7, which is 0 on the listed images. So every pairing of the two is
+      reachable and both are stated, neither implied by the other. The knock
+      retard itself is a held term; the trim-difference branch (0x04A512)
+      fires on one cycle and is not a steady state."""
+
+    high_det: bool
+    knock_control: KnockControl
+    source: str
+
+    def __post_init__(self) -> None:
+        if self.knock_control not in ("active", "fallback"):
+            raise SimulationRefusalError(
+                "knock_control_invalid", f"{self.knock_control!r} is not active or fallback"
+            )
+        if not self.source.strip():
+            raise SimulationRefusalError("timing_state_unsourced", "say where the state comes from")
+
+
+@dataclass(frozen=True)
+class TimingTables:
+    """One image's timing trims (map ``slot``) and their axes, raw bytes."""
+
+    a: tuple[tuple[int, ...], ...]
+    b: tuple[tuple[int, ...], ...]
+    rpm_axis: tuple[int, ...]
+    load_axis: tuple[int, ...]
+
+
+def _raw_rows(
+    image: bytes, rom_map: RomMap, table_id: str, slot: int | None
+) -> list[tuple[int, ...]]:
+    table = rom_map.table(table_id)
+    if table.dtype != "u8":
+        raise SimulationRefusalError("timing_table_dtype", f"{table_id} is {table.dtype}, not u8")
+    start = rom_map.table_address(table, slot if table.slot_offset is not None else None)
+    return [
+        tuple(image[start + r * table.cols : start + (r + 1) * table.cols])
+        for r in range(table.rows)
+    ]
+
+
+def timing_tables(image: bytes, rom_map: RomMap, *, slot: int) -> TimingTables:
+    """The trims the ECM reads in map ``slot`` (rom map kinds ``timing_trim_a``
+    / ``timing_trim_b``) and their axes, from the map, never from a copy of
+    their offsets."""
+
+    def placed(kind: str) -> str:
+        found = [t.id for t in rom_map.tables if t.kind == kind and slot in rom_map.table_slots(t)]
+        if len(found) != 1:
+            raise SimulationRefusalError(
+                "timing_table_unmapped", f"{kind} in map {slot}: {found or 'none'}"
+            )
+        return found[0]
+
+    a_id, b_id = placed("timing_trim_a"), placed("timing_trim_b")
+    axes = rom_map.table(a_id).axes
+    if axes.rows is None or axes.cols is None or rom_map.table(b_id).axes != axes:
+        raise SimulationRefusalError("timing_axes_unmapped", "the trims' axes are not both mapped")
+    (rpm_axis,) = zip(*_raw_rows(image, rom_map, axes.rows, None), strict=True)
+    (load_axis,) = _raw_rows(image, rom_map, axes.cols, None)
+    return TimingTables(
+        a=tuple(_raw_rows(image, rom_map, a_id, slot)),
+        b=tuple(_raw_rows(image, rom_map, b_id, slot)),
+        rpm_axis=tuple(rpm_axis),
+        load_axis=tuple(load_axis),
+    )
+
+
+def coolant_byte(coolant_c: float) -> int:
+    """The ECM's coolant byte for a stated temperature (degC + 50, 0..255)."""
+    return max(0, min(BYTE_MAX_VALUE, round(coolant_c) + COOLANT_BYTE_OFFSET))
+
+
+def _selection(
+    t: TimingTables, state: TimingState, rpm_word: int, x: int, coolant: int, pedal: bool
+) -> SelectedTrim:
+    return selected_timing_trim(
+        table_a=t.a,
+        table_b=t.b,
+        rpm_axis=t.rpm_axis,
+        load_axis=t.load_axis,
+        rpm_word=rpm_word,
+        load_byte=x,
+        coolant=coolant,
+        pedal_flag=pedal,
+        high_det=state.high_det,
+    )
+
+
+def _table_read(state: TimingState, coolant: int) -> Literal["a", "b"] | None:
+    """Which trim 0xFFFF1777 reads: ``None`` in the blend band."""
+    if coolant <= TRIM_COLD_AT_OR_BELOW:
+        return "a"
+    if coolant <= TRIM_WARM_ABOVE:
+        return None
+    return "b" if state.high_det else "a"
+
+
+def _unread_changes(
+    base: TimingTables,
+    cand: TimingTables,
+    state: TimingState,
+    *,
+    rpm_word: int,
+    load: int,
+    coolant: int,
+) -> list[str]:
+    """A trim the edit changed at this point that the selection does not read:
+    named, so a zero change is never silent about an edit. Both images' table
+    is read at the candidate's coordinates, so an X move alone (a K edit) is
+    not mistaken for an edit to the table."""
+    read = _table_read(state, coolant)
+    out = []
+    for name in ("a", "b"):
+        if read is None or read == name:
+            continue
+        before = trim_lookup(getattr(base, name), base.rpm_axis, base.load_axis, rpm_word, load)
+        after = trim_lookup(getattr(cand, name), cand.rpm_axis, cand.load_axis, rpm_word, load)
+        if before.trim != after.trim:
+            why = (
+                "coolant_at_or_below_56c"
+                if coolant <= TRIM_COLD_AT_OR_BELOW
+                else ("high_det_latch_set" if state.high_det else "high_det_latch_clear")
+            )
+            out.append(f"trim_{name}_not_read:{why}")
+    return out
+
+
+def ignition_timing_at(
+    base: TimingTables,
+    candidate: TimingTables,
+    state: TimingState | None,
+    *,
+    rpm_word: int,
+    x_base: int,
+    x_candidate: int,
+    coolant_c: float,
+    pedal_flag: bool,
+    phi_moved: bool,
+    base_timing_deg: int | None = None,
+) -> dict[str, Any]:
+    """Both ROMs' ignition timing at one point (``ignition_timing_deg``):
+    base, candidate, change, status and reasons
+    (:func:`~src.analysis.ecu_state_models.timing_delta`). ``x_base`` /
+    ``x_candidate`` are each ROM's own X (a K or Fuel Comp change moves it);
+    ``base_timing_deg`` is the base's logged timing where the design has it."""
+    out: dict[str, Any] = {
+        "base": None,
+        "candidate": None,
+        "delta": None,
+        "trim_term_delta": None,
+        "status": "unevaluable",
+        "reasons": [TIMING_STATE_UNSTATED],
+        "table_read": None,
+    }
+    if state is None:
+        return out
+    coolant = coolant_byte(coolant_c)
+    sel_b = _selection(base, state, rpm_word, x_base, coolant, pedal_flag)
+    sel_c = _selection(candidate, state, rpm_word, x_candidate, coolant, pedal_flag)
+    held = []
+    if x_base != x_candidate:
+        held.append(LOAD_TERM_UNMODELLED)
+    if phi_moved:
+        held.append(ENRICHMENT_RETARD_UNMODELLED)
+    d = timing_delta(
+        sel_b.selected, sel_c.selected, base_timing_deg=base_timing_deg, held_reasons=held
+    )
+    unread = _unread_changes(
+        base,
+        candidate,
+        state,
+        rpm_word=rpm_word,
+        load=BYTE_MAX_VALUE if pedal_flag else x_candidate,
+        coolant=coolant,
+    )
+    out.update(
+        base=d.base_deg,
+        candidate=d.candidate_deg,
+        delta=d.delta_deg,
+        trim_term_delta=d.trim_term_delta,
+        status=d.status,
+        reasons=[*d.reasons, *unread],
+        table_read=_table_read(state, coolant),
+    )
+    return out
+
+
+def ignition_timing_cells(
+    base: TimingTables,
+    candidate: TimingTables,
+    state: TimingState,
+    *,
+    coolant_c: float,
+    pedal_flag: bool = False,
+) -> list[dict[str, Any]]:
+    """:func:`ignition_timing_at` at every node of the trims' own grid (rpm
+    word = axis byte x 4, X = the load axis byte, the same X on both ROMs): one
+    row per trim cell, so a trim edit shows in exactly the cells it changed.
+    X is the grid's coordinate here, not computed from a ROM, which is why an
+    edit that moves X needs the per-point result instead."""
+    rows = []
+    for r, rpm_byte in enumerate(base.rpm_axis):
+        for c, load in enumerate(base.load_axis):
+            at = ignition_timing_at(
+                base,
+                candidate,
+                state,
+                rpm_word=rpm_byte * TRIM_RPM_AXIS_SCALE,
+                x_base=load,
+                x_candidate=load,
+                coolant_c=coolant_c,
+                pedal_flag=pedal_flag,
+                phi_moved=False,
+            )
+            rows.append(
+                {"row": r, "col": c, "rpm_word": rpm_byte * TRIM_RPM_AXIS_SCALE, "x": load, **at}
+            )
+    return rows
+
+
+def timing_cell_summary(cells: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
+    """Counts by kind of answer, and the cells where timing changes or a
+    changed trim is not read."""
+    changed = [c for c in cells if c["delta"] not in (None, 0)]
+    unread = [c for c in cells if any(r.startswith("trim_") for r in c["reasons"])]
+    unevaluable = [c for c in cells if c["status"] == "unevaluable"]
+    return {
+        "cells": len(cells),
+        "changed": len(changed),
+        "unevaluable": len(unevaluable),
+        "changed_trim_not_read": len(unread),
+        "reasons": sorted({r for c in cells for r in c["reasons"]}),
+    }
+
+
 def optimise(*_: Any, **__: Any) -> None:
     """Refused: optimising against the simulator waits for qualified effect
     predictions (E07.4 and E07.6 acceptance) and still needs later physical
@@ -1618,6 +1901,20 @@ def optimise(*_: Any, **__: Any) -> None:
 
 
 __all__ = [
+    "timing_tables",
+    "timing_cell_summary",
+    "ignition_timing_cells",
+    "ignition_timing_at",
+    "coolant_byte",
+    "TimingTables",
+    "TimingState",
+    "KnockControl",
+    "TIMING_STATE_UNSTATED",
+    "TIMING_OUTPUT",
+    "TIMING_MODEL_OUTPUT",
+    "LOAD_TERM_UNMODELLED",
+    "ENRICHMENT_RETARD_UNMODELLED",
+    "COOLANT_BYTE_OFFSET",
     "BATTERY_UNMEASURED",
     "ECU_RUNNER_OUTPUTS",
     "OUTPUTS",

@@ -79,7 +79,7 @@ describe("the lever fixtures (real classifier payloads)", () => {
 
   it("covers the three accept cases", () => {
     expect(LEVERS_TIMING_TRIM.messages.join("\n")).toContain(
-      "Timing trim A -> ignition_trim_selected: no torque plant",
+      "Timing trim A -> ignition_trim_selected: engine torque not computed in conditional_rom_comparison; torque production built, not validated",
     );
     expect(LEVERS_MAF_CURVE.messages.join("\n")).toMatch(/0xE27E: not mapped/);
     expect(LEVERS_FUEL_COMP.messages.join("\n")).toContain("closed loop: trim authority undecoded");
