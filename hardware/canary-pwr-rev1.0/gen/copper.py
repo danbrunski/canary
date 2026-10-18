@@ -205,6 +205,21 @@ TRACKS: list[tuple[str, str, float, list[tuple[float, float]]]] = [
         0.2,
         [(136.625, 60.1), (137.125, 60.1), (137.125, 60.8), (138.3, 60.8), (138.3, 61.3)],
     ),
+    # LTC3350 VCC2P5: pin 23 has no way out between ICAP, SW and the TG via, so it runs inside U1's courtyard, in
+    # the 0.43 mm between the exposed pad and the pin rows, to pins 35/36 and C8 (0.15 mm, 0.13 mm clearance by the
+    # U1 land pattern rule).
+    (
+        "LTC_VCC2P5",
+        "F",
+        0.15,
+        [(126.75, 74.2), (126.75, 73.84), (130.84, 73.84), (130.84, 72.0), (131.2, 72.0)],
+    ),
+    # LTC3350 VIN (pin 34) east under C8 to the +12V_PROT pour at C4.
+    ("+12V_PROT", "F", 0.25, [(131.45, 72.5), (134.35, 72.5), (134.6, 72.25), (134.6, 71.9)]),
+    # CAP4 (pin 16) drops through a via between C6 and the pin column, then B.Cu to R20; CFP runs under the via.
+    ("LTC_CAP4", "F", 0.2, [(124.55, 72.0), (123.5, 72.05)]),
+    ("LTC_CAP4", "B", 0.25, [(123.5, 72.05), (121.75, 72.05), (121.3, 72.5)]),
+    ("LTC_CFP", "F", 0.2, [(124.4, 72.5), (124.3, 72.6), (122.6, 72.6)]),
 ]
 
 # U1's top-row escapes (0.2 mm; 0.15 where the CAPFB lane passes a bus-class pad). The pins fan out in a
@@ -253,6 +268,7 @@ VIAS: list[tuple[str, float, float, tuple[float, float]]] = [
     ("LTC_BG", 129.0, 75.5, SIGNAL_VIA),
     ("LTC_BG", 130.0, 81.9, SIGNAL_VIA),
     ("LTC_INTVCC", 129.95, 75.6, SIGNAL_VIA),
+    ("LTC_CAP4", 123.5, 72.05, SIGNAL_VIA),
     # +12V_BUS pours to the In2 island (and the B.Cu pour under the charger).
     *[("+12V_BUS", x, 78.3, POWER_VIA) for x in (130.7, 131.85, 133.0, 134.15)],
     ("+12V_BUS", 138.6, 77.7, POWER_VIA),

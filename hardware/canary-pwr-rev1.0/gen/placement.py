@@ -63,8 +63,10 @@ PLACEMENT: dict[str, tuple[float, float, int, str]] = {
     "R9": (126.2, 62.6, -90, "F"),
     "R13": (124.6, 62.6, 90, "F"),
     "C13": (123.0, 62.6, 90, "F"),
-    "C6": (122.9, 72.9, 90, "F"),
-    "C7": (121.3, 72.9, 90, "F"),
+    # C6 turned so CFP (pin 17) and CFN (pin 18) reach it without crossing; C6 and C7 0.5 mm west to fit the CAP4
+    # via between C6 and U1's left pins (2026-10-18)
+    "C6": (122.4, 72.9, 270, "F"),
+    "C7": (120.8, 72.9, 90, "F"),
     # U1's right column (PFO, PFI, VCC2P5 x2, VIN, INFET, VOUTM5 from the top) leaves in lanes: PFO and PFI turn up,
     # C8 and C4 sit above the VIN and INFET lanes, C5 below them
     "C8": (133.05, 70.85, 90, "F"),
