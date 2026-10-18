@@ -144,6 +144,8 @@ module = [
     "serial.*",
     "usb",
     "usb.*",
+    "zeroconf",
+    "zeroconf.*",
 ]
 ignore_missing_imports = true
 
