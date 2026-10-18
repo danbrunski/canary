@@ -158,8 +158,8 @@ ram:
      meaning: 'The byte CAN DID 0x1101 reports (ECM_COOLANT_TEMP, degC = raw - 50).'}
   - {address: 0xFFFF1079, width: 8, signed: false, name: coolant_snapshot, units: raw_counts, confidence: inferred,
      meaning: 'Cycle-start copy of the coolant byte.'}
-  - {address: 0xFFFF1077, width: 8, signed: false, name: unidentified_1077, units: raw_counts, confidence: unknown,
-     meaning: 'Curve input to two corrections.'}
+  - {address: 0xFFFF1077, width: 8, signed: false, name: coolant_rescaled_snapshot, units: raw_counts, confidence: code,
+     meaning: 'Cycle-start copy of the rescaled coolant byte 0xFFFF1081 (degC = byte x 0.625 - 40; 208 is 90 degC), NOT the degC + 50 byte 0xFFFF1079 the trim selection reads. Curve input to two corrections and to the base timing term (E09.7).'}
   - {address: 0xFFFF3CDC, width: 8, signed: false, name: pedal_comparand, units: raw_counts, confidence: code,
      meaning: 'min(255, (0xFFFF2D28 x 20571) >> 16), written by 0x05535C; compared with the pedal flag threshold.'}
   - {address: 0xFFFF2D28, width: 16, signed: false, name: requested_throttle_position, units: raw_counts, confidence: code,
@@ -174,7 +174,7 @@ ram:
   - {address: 0xFFFF2849, width: 8, signed: false, name: fuel_flags_2849, units: flags, confidence: unknown,
      meaning: 'Bit 0 compared with 0xFFFF2845 bit 0 by the final writer.'}
   - {address: 0xFFFF283F, width: 8, signed: false, name: fuel_flags_283f, units: flags, confidence: inferred,
-     meaning: 'Bit 6: the knock-control latch UpRev logs as "HI DET" (name inferred). Enables the enrichment excess scaling and selects timing trim B.'}
+     meaning: 'Bit 6: the knock-control latch UpRev logs as "HI DET" (name inferred). Enables the enrichment excess scaling and selects timing trim B. Gate (firmware notes 2026-10-17): 2876 bit 6 is set by the knock task on its first pass, so the gate is effectively 4782 bit 5 clear; 4782 bit 5 is the cycle copy of 4783 bit 5, written only by the engine state machine 0x027CC4 (set in state 1, the run-down after a stop [inferred]; cleared in states 2-4). HI DET is cleared at each engine stop and held clear until the next start, then the KS fault (479D bit 7) sets it again on the first pass.'}
   - {address: 0xFFFF2886, width: 8, signed: false, name: fuel_flags_2886, units: flags, confidence: code,
      meaning: 'Bit 3: enrichment gate latched. Bit 2: final-writer hold path.'}
   - {address: 0xFFFF2867, width: 8, signed: false, name: fuel_flags_2867, units: flags, confidence: code,
@@ -192,7 +192,7 @@ ram:
   - {address: 0xFFFF2833, width: 8, signed: false, name: fuel_flags_2833, units: flags, confidence: unknown,
      meaning: 'Bit 4 inhibits 0xFFFF1736 and gates the floor path.'}
   - {address: 0xFFFF284E, width: 8, signed: false, name: fuel_flags_284e, units: flags, confidence: unknown,
-     meaning: 'Bit 7 gates the floor path.'}
+     meaning: 'Bit 7 gates the floor path. Bit 2: 0xFFFF26D0 is not 0 (0x04C81C, E09.7).'}
   - {address: 0xFFFF2915, width: 8, signed: false, name: unidentified_2915, units: raw_counts, confidence: unknown,
      meaning: 'Floor-path state.'}
   - {address: 0xFFFF111C, width: 8, signed: false, name: unidentified_111c, units: raw_counts, confidence: unknown,
@@ -296,7 +296,7 @@ ram:
   - {address: 0xFFFF26D2, width: 8, signed: true, name: knock_retard_deg, units: deg, confidence: inferred,
      meaning: 'Whole degrees of 0xFFFF1254, truncated.'}
   - {address: 0xFFFF11CB, width: 8, signed: false, name: unidentified_11cb, units: raw_counts, confidence: unknown,
-     meaning: 'Cycle-start copy of 0xFFFF1203, which 0x04E5B0 slews +/-5 per segment toward 0xFFFF2738 (the cycle copy of 0xFFFF27C4 = min(cal 0x8B05 = 7, (max(0, 0xFFFF2BD0 - cal 0x8B02) x 0xFFFF1766) / 640), 0x04D9B6-0x04D9F4; 0xFFFF1766 is 0 or cal 0x87BD = 70 on flags not identified): 0..7, subtracted from the trim. 0xFFFF2BD0 is not identified (E09.7).'}
+     meaning: 'Cycle-start copy of 0xFFFF1203, which 0x04E5B0 slews +/-5 per segment toward 0xFFFF2738 (the cycle copy of 0xFFFF27C4 = min(cal 0x8B05 = 7, (max(0, 0xFFFF2BD0 - cal 0x8B02) x 0xFFFF1766) / 640), 0x04D9B6-0x04D9F4; 0xFFFF1766 is 0 or cal 0x87BD = 70 on flags not identified): 0..7, subtracted from the trim. Resolved (firmware notes 2026-10-17, 0x04D8FC): 0xFFFF2BD0 is the cycle copy of 0xFFFF2CB8 = curve16 0xD9CF at the IAT input 0xFFFF2CB4 >> 2, i.e. intake air temperature + 50 [inferred]; 0xFFFF1766 = cal 0x87BD (70) when ((0xFFFF287A bit 7 and 0xFFFF2887 bit 2) or 0xFFFF2876 bit 4) and 0xFFFF4806 bit 1 (0xFFFF2BD0 above cal 0x8B06 = 95, hysteresis 2) and fault item 0x11A is not faulted and rpm/50 >= cal 0x88C8 = 16, else 0; 0xFFFF27C4 = min(7, 0xFFFF1766 x max(0, 0xFFFF2BD0 - cal 0x8B02 (80)) / 640): a hot-intake retard of up to 7 counts.'}
   - {address: 0xFFFF1350, width: 8, signed: false, name: timing_trim_selected_masked, units: raw_counts, confidence: code,
      meaning: '0xFFFF1777 & 0x7F.'}
   - {address: 0xFFFF1351, width: 8, signed: false, name: timing_trim_difference, units: raw_counts, confidence: code,
@@ -305,12 +305,75 @@ ram:
      meaning: '0xFFFF177A & 0x7F.'}
   - {address: 0xFFFF2793, width: 8, signed: false, name: timing_trim_term, units: raw_counts, confidence: code,
      meaning: 'max(0, selected trim - 0xFFFF11CB): the trim''s term in the base timing sum.'}
-  - {address: 0xFFFF27C6, width: 8, signed: true, name: timing_term_27c6, units: deg, confidence: unknown,
-     meaning: 'Base timing sum term from 0x04BC5A: (cal 0x880D x 120 x 0xFFFF17C6, the x 120 from the listing at 0x04BC7C-0x04BC8A: x 15, shll2, shll) / (0xFFFF15DE x 0xFFFF19CB) + cal 0x8B0C x 5 / 2, times the rpm word >> 10 x 3 / 5, minus 14, capped 127: a time turned into crank angle. The overall scale is unresolved until the operands of the divide helpers 0x021C48 / 0x021D6C are known (owed to the firmware session). 0xFFFF19CB is X (curve 0xCD9B), 0xFFFF15DE carries rom_map base_timing_rate_map (0x9AF9, rpm x X) through divides the exported listing does not resolve, 0xFFFF17C6 (0x04B9D0) is not identified. Moves with X, so a change that moves X moves it (E09.7).'}
-  - {address: 0xFFFF279A, width: 8, signed: false, name: timing_term_279a, units: raw_counts, confidence: unknown,
-     meaning: 'Subtracted term of the base timing sum: clamp(0xFFFF26D9 + 0xFFFF26D0 - (0xFFFF17FA >> 4), 0, 255) (0x04C952); its three inputs are not identified.'}
+  - {address: 0xFFFF27C6, width: 8, signed: true, name: timing_term_27c6, units: deg, confidence: code,
+     meaning: 'Base timing sum term, resolved (node timing_term_27c6, 0x04BC5A; firmware notes 2026-10-17): t = cal 0x880D x 120 x 0xFFFF17C6 / (0xFFFF15DE x 0xFFFF19CB) (0xFFFF when the divisor is 0), u = t + cal 0x8B0C x 5 / 2, v = (rpm word x u >> 10) x 3 / 5, 27C6 = v - 14 capped 127. u is a time in 1/128 ms and degrees = rpm x time [inferred]: a burn-time model (rate map 0x9AF9 x coolant and mixture curves, the q7 factor 0x9B89, an rpm term) turned into advance. X largely cancels between 0xFFFF17C6 (x X) and 0xFFFF19CB (= X), so X acts through 0x9AF9 and 0x9B89 [inferred]. Hand vectors, hot, phi 1: 24 deg at 700 rpm X 32, 33 at 2,500 X 64, 22 at 4,400 X 112.'}
+  - {address: 0xFFFF279A, width: 8, signed: false, name: timing_term_279a, units: raw_counts, confidence: code,
+     meaning: 'Subtracted term of the base timing sum: clamp(0xFFFF26D9 + 0xFFFF26D0 - (0xFFFF17FA >> 4), 0, 255) (node timing_term_279a, 0x04C952). Inputs identified (firmware notes 2026-10-17): on every listed image map 0x9B09 is all zero, so 0xFFFF26D9 = 0, and curve 0xCC33 is zero from entry 10, so 0xFFFF26D0 = 0 once the rescaled coolant byte reaches 160 (60 degC): 279A = 0 on a warm engine.'}
+  # -- E09.7: the base timing term 0xFFFF27C6 and the inputs of 0xFFFF279A
+  - {address: 0xFFFF26F2, width: 8, signed: false, name: unidentified_26f2, units: raw_counts, confidence: unknown,
+     meaning: 'Multiplied by cal 0x8538 into 0xFFFF1512 (0x04B96C); cal 0x8538 is 0 on every listed image, so it does not reach timing there.'}
+  - {address: 0xFFFF1512, width: 16, signed: false, name: timing_term_1512, units: raw_counts, confidence: code,
+     meaning: '0xFFFF26F2 x cal 0x8538 (mulu.w, 0x04B96C): 0 on every listed image.'}
+  - {address: 0xFFFF1B24, width: 16, signed: false, name: timing_charge_word, units: q14_phi, confidence: code,
+     meaning: 'min(0xFFFF, max(0, 0xFFFF26F6 - 0xFFFF26E8) x 0xFFFF26C0 >> 14) (0x04B98A): the correction sum less 26E8 times the enrichment multiplier; 0x4000 = 1.0.'}
+  - {address: 0xFFFF1177, width: 8, signed: false, name: timing_charge_factor_source, units: q7_ratio, confidence: code,
+     meaning: 'Map 0x9B89 at (0xFFFF1210, 0xFFFF104E), written by 0x03D110 inside the Fuel Comp routine; 0x80 = 1.0 [inferred].'}
+  - {address: 0xFFFF10EB, width: 8, signed: false, name: timing_charge_factor, units: q7_ratio, confidence: code,
+     meaning: 'Cycle copy of 0xFFFF1177 (0xFFFF1124.. -> 0xFFFF1098.., n 0x8C). Read only by 0x04B9D0 and 0x04BA6C: a timing input, not a fuelling one.'}
+  - {address: 0xFFFF17C6, width: 16, signed: false, name: timing_charge_term, units: raw_counts, confidence: code,
+     meaning: 'X x ((0xFFFF1512 >> 7) + 0xFFFF15F7 + 0x8000 / 0xFFFF10EB) / 25, capped 0xFFFF; 0xFFFF when 0xFFFF10EB is 0 (0x04B9D0).'}
+  - {address: 0xFFFF15F7, width: 8, signed: false, name: timing_charge_band, units: raw_counts, confidence: code,
+     meaning: '(0xFFFF1B24 / 29) >> 5 (0x04B9D0, signed divide).'}
+  - {address: 0xFFFF15DC, width: 8, signed: false, name: timing_rate_coolant_factor, units: raw_counts, confidence: code,
+     meaning: 'Curve 0xCEBB (8-entry) at the rescaled coolant byte 0xFFFF1077 (0x04BA6C); Q14 factor of 0xFFFF15DA with 0xFFFF15D7.'}
+  - {address: 0xFFFF15D7, width: 8, signed: false, name: timing_rate_charge_factor, units: raw_counts, confidence: code,
+     meaning: 'Curve 0xCEAB at r = 0 / 255 / (0xFFFF1B24 - 0x2000) >> 6 (0x04BA6C). Flat 0x80 on every listed image.'}
+  - {address: 0xFFFF15DB, width: 8, signed: false, name: timing_rate_map_value, units: raw_counts, confidence: code,
+     meaning: 'Map 0x9AF9 at (rpm/50 0xFFFF11CA, X 0xFFFF103E) through 0x0268B8 (0x04BA6C).'}
+  - {address: 0xFFFF15DA, width: 8, signed: false, name: timing_rate_product, units: raw_counts, confidence: code,
+     meaning: 'min(255, 0xFFFF15D7 x 0xFFFF15DC x 0xFFFF15DB >> 14) (0x04BA6C).'}
+  - {address: 0xFFFF19DA, width: 8, signed: false, name: unidentified_19da, units: raw_counts, confidence: code,
+     meaning: 'Written 0x40 by 0x04BA6C; readers not traced.'}
+  - {address: 0xFFFF1CC9, width: 8, signed: false, name: timing_rate_coolant_factor_2, units: raw_counts, confidence: code,
+     meaning: 'Curve 0xD9AF at the rescaled coolant byte 0xFFFF1077 (0x04BA6C).'}
+  - {address: 0xFFFF19B6, width: 8, signed: false, name: timing_rate_charge_factor_2, units: raw_counts, confidence: code,
+     meaning: 'Curve 0xD60F at the 0xFFFF1B24 band r (0x04BA6C). Flat 0x80 on every listed image.'}
+  - {address: 0xFFFF15DE, width: 16, signed: false, name: timing_rate_word, units: raw_counts, confidence: code,
+     meaning: 'min(0xFFFF, S x 0xFFFF19B6 x 0xFFFF1CC9 >> 14), S = clamp(15DA x F / 1000 + (cal 0x880E x 0xFFFF11D8 << 6) / 625, 0, 0xFFFF), F from 0xFFFF10EB and 0xFFFF1512 (0x04BA6C).'}
+  - {address: 0xFFFF19CB, width: 8, signed: false, name: timing_load_curve_value, units: raw_counts, confidence: code,
+     meaning: 'Curve 0xCD9B (8-entry) at X 0xFFFF103E (0x04BA52): min(X, 224) on every listed image.'}
+  - {address: 0xFFFF283D, width: 8, signed: false, name: flags_283d, units: flags, confidence: code,
+     meaning: 'Bit 7: 0x04C580 keeps the last 0xFFFF3630 instead of reading map 0x9B09. Writer not traced.'}
+  - {address: 0xFFFF11CE, width: 8, signed: false, name: engine_speed_12rpm, units: raw_counts, confidence: inferred,
+     meaning: 'Rpm byte the 0x9B09 search reads (12.5 rpm per count per the firmware notes [inferred]); cycle-start copy, writer not cited here.'}
+  - {address: 0xFFFF3630, width: 8, signed: false, name: timing_retard_map_3630, units: raw_counts, confidence: code,
+     meaning: 'Map 0x9B09 (8 x 8) at (0xFFFF11CE, the rescaled coolant byte 0xFFFF1077) via 0x026974, unless 0xFFFF283D bit 7 (0x04C580). 0 on every listed image.'}
+  - {address: 0xFFFF15E5, width: 8, signed: false, name: timing_retard_fade_15e5, units: raw_counts, confidence: code,
+     meaning: 'Ramp 0..255 (0x04C49E): +20 (cal 0x85D4/0x85D6) while 0xFFFF2865 bit 5, else -20, on each 0xFFFF84C3 bit 7 tick: the fade of the 0x9B09 term. State; the twin takes it as an argument.'}
+  - {address: 0xFFFF26D9, width: 8, signed: false, name: timing_retard_26d9, units: raw_counts, confidence: code,
+     meaning: '0xFFFF3630 x 0xFFFF15E5 >> 8 (0x04C580). 0 on every listed image.'}
+  - {address: 0xFFFF1300, width: 8, signed: false, name: timing_retard_ramp_1300, units: raw_counts, confidence: code,
+     meaning: 'Ramp 0..255, +/-2 per call (0x04C5D8): falls unless 0xFFFF4785 bit 7, 0xFFFF282A bit 5, 0xFFFF1076 >= 0x41 and not 0xFFFF2833 bit 4; with those, rises only while 0xFFFF284B bits 7:6 are clear (BFS >> 8 >= 0x70, 0xFFFF1075 >= 0x39) and the coolant has not risen 200 over 0xFFFF1076. State; the twin takes it as an argument.'}
+  - {address: 0xFFFF1301, width: 8, signed: false, name: timing_retard_rpm_factor, units: raw_counts, confidence: code,
+     meaning: 'Curve16 0xCC1B (0x026BBC) at the rpm/25 byte 0xFFFF11CF (0x04C7A0).'}
+  - {address: 0xFFFF1302, width: 8, signed: false, name: timing_retard_bfs_factor, units: raw_counts, confidence: code,
+     meaning: 'Curve 0xCC2B (8-entry, 0x026BA4) at min(255, 0xFFFF1038 >> 7) (0x04C7A0).'}
+  - {address: 0xFFFF1303, width: 8, signed: false, name: timing_retard_coolant_factor, units: raw_counts, confidence: code,
+     meaning: 'Curve16 0xCC33 (0x026BBC) at the rescaled coolant byte 0xFFFF1077 (0x04C7A0). 0 once the byte reaches 160 on every listed image.'}
+  - {address: 0xFFFF26D0, width: 8, signed: false, name: timing_retard_26d0, units: raw_counts, confidence: code,
+     meaning: '0xFFFF1300 x 0xFFFF1303 x 0xFFFF1301 x 0xFFFF1302 >> 24 (0x04C7A0).'}
+  - {address: 0xFFFF17FA, width: 8, signed: false, name: timing_retard_17fa, units: raw_counts, confidence: code,
+     meaning: '0x04C832: decays by 2 per call while 0xFFFF2854 bit 7; else d = max(0, w1760 - w1762); at idle (0xFFFF2833 bit 4) min(255, d x 400 >> 14); off idle min(255, ((d x 100 & 0xFFFF) x 17FB x 17FC >> 16 + min(0xFFFF, (d x 100 >> 16) x 17FB x 17FC)) >> 5), 17FB = curve 0xD335 at clamp(0xFFFF11D8 - 0x20, 0, 255), 17FC = curve 0xD33D at min(255, 0xFFFF1038 >> 7). Subtracted (>> 4) in 0xFFFF279A before its clamp at 0. The twin takes it as an argument.'}
+  - {address: 0xFFFF2CB8, width: 8, signed: false, name: intake_temp_byte_source, units: raw_counts, confidence: inferred,
+     meaning: 'Curve16 0xD9CF at the IAT input 0xFFFF2CB4 >> 2 (0x03E174): intake air temperature + 50 [inferred].'}
+  - {address: 0xFFFF2BD0, width: 8, signed: false, name: intake_temp_byte, units: raw_counts, confidence: inferred,
+     meaning: 'Cycle copy of 0xFFFF2CB8 (0xFFFF2C00.. -> 0xFFFF2B18.., n 0xE8): intake air temperature + 50 [inferred].'}
+  - {address: 0xFFFF1766, width: 8, signed: false, name: hot_intake_gain, units: raw_counts, confidence: code,
+     meaning: 'cal 0x87BD (70) when ((0xFFFF287A bit 7 and 0xFFFF2887 bit 2) or 0xFFFF2876 bit 4) and 0xFFFF4806 bit 1 (0xFFFF2BD0 > cal 0x8B06 = 95, hysteresis 2) and fault item 0x11A not faulted and rpm/50 >= cal 0x88C8 (16); else 0 (0x04D8FC).'}
+  - {address: 0xFFFF27C4, width: 8, signed: false, name: hot_intake_retard, units: raw_counts, confidence: code,
+     meaning: 'min(cal 0x8B05 = 7, 0xFFFF1766 x max(0, 0xFFFF2BD0 - cal 0x8B02 (80)) / 640) (0x04D9B6-0x04D9F4): the hot-intake retard 0xFFFF11CB slews toward.'}
   - {address: 0xFFFF134A, width: 8, signed: false, name: timing_term_134a, units: raw_counts, confidence: code,
-     meaning: 'max(0, curve 0xCC73 at the rpm/25 byte 0xFFFF11CF - curve 0xCC63 at the coolant byte 0xFFFF1077) (0x04C998). Both curves are all zero on every listed image, so it is 0.'}
+     meaning: 'max(0, curve 0xCC73 at the rpm/25 byte 0xFFFF11CF - curve 0xCC63 at the rescaled coolant byte 0xFFFF1077) (0x04C998). Both curves are all zero on every listed image, so it is 0.'}
   - {address: 0xFFFF174A, width: 8, signed: false, name: timing_term_174a, units: raw_counts, confidence: unknown,
      meaning: 'Enrichment retard (0x04C9D8): max(0, min(0xFFFF174C, g)), g = 0 while the Target AFR lookup byte 0xFFFF174B is below 0x82, else from 174B and the multiplier 0xFFFF26C0; 174C from curves 0xD177/0xD19F (0xD187/0xD1AF with 0xFFFF283F bit 6) at rpm and the X byte (a divide the exports do not resolve). A Target AFR edit at an enriched cell moves it (E09.7).'}
   - {address: 0xFFFF1D3E, width: 8, signed: false, name: timing_term_1d3e, units: raw_counts, confidence: unknown,
@@ -432,8 +495,8 @@ ram:
      meaning: 'Reloaded from cal 0x8C25 while 0xFFFF4786 bit 7 is clear; non-zero with bit 7 keeps cranking Tp.'}
   - {address: 0xFFFF233C, width: 16, signed: false, name: engine_speed_lowpass, units: raw_counts, confidence: code,
      meaning: '(old + 255 x 0xFFFF1204) >> 8, plus one when it stalls below (0x03907A).'}
-  - {address: 0xFFFF1081, width: 8, signed: false, name: coolant_for_cranking, units: raw_counts, confidence: inferred,
-     meaning: 'Coolant byte the cranking curve 0xEEBA reads (inferred from the curve).'}
+  - {address: 0xFFFF1081, width: 8, signed: false, name: coolant_for_cranking, units: raw_counts, confidence: code,
+     meaning: 'Rescaled coolant byte (0x03A1F0, node coolant_rescale): 0 below 0xFFFF1083 = 10, 255 from 170, else (c - 10) x 240 / 150 (degC = byte x 0.625 - 40). The cranking curve 0xEEBA reads it; its cycle copy is 0xFFFF1077.'}
   - {address: 0xFFFF2CB6, width: 8, signed: false, name: fuel_comp_alternative, units: raw_counts, confidence: unknown,
      meaning: 'Fuel Comp factor source when cal 0x8AE1 bit 5 is clear (dead here).'}
   - {address: 0xFFFF2205, width: 8, signed: false, name: fill_blend_weight, units: raw_counts, confidence: code,
@@ -514,16 +577,18 @@ nodes:
     function: 0x020EF2
     kind: copy
     writes: [0xFFFF26CC, 0xFFFF26CE, 0xFFFF26C6, 0xFFFF1079, 0xFFFF11CA, 0xFFFF11CF, 0xFFFF11D8,
-             0xFFFF103E, 0xFFFF1038, 0xFFFF84C3, 0xFFFF84C4]
+             0xFFFF103E, 0xFFFF1038, 0xFFFF84C3, 0xFFFF84C4, 0xFFFF10EB]
     reads: [0xFFFF26BE, 0xFFFF26C0, 0xFFFF26B8, 0xFFFF1083, 0xFFFF1202, 0xFFFF1207, 0xFFFF1210,
-            0xFFFF104E, 0xFFFF103A, 0xFFFF84C4, 0xFFFF84BB]
+            0xFFFF104E, 0xFFFF103A, 0xFFFF84C4, 0xFFFF84BB, 0xFFFF1177]
     arithmetic: >-
       Block copies at the start of each cycle, element by element as used
       here: 0xFFFF26BE -> 0xFFFF26CC, 0xFFFF26C0 -> 0xFFFF26CE and
       0xFFFF26B8 -> 0xFFFF26C6 (one 14-byte copy); 0xFFFF1083 -> 0xFFFF1079
       (10 bytes); 0xFFFF1202 -> 0xFFFF11CA, 0xFFFF1207 -> 0xFFFF11CF and
       0xFFFF1210 -> 0xFFFF11D8 (one 0x38-byte copy); 0xFFFF104E -> 0xFFFF103E;
-      0xFFFF103A -> 0xFFFF1038; 0xFFFF84BB -> 0xFFFF84C4 -> 0xFFFF84C3.
+      0xFFFF103A -> 0xFFFF1038; 0xFFFF84BB -> 0xFFFF84C4 -> 0xFFFF84C3;
+      0xFFFF1177 -> 0xFFFF10EB (the 0x8C-byte block 0x53 bytes below each,
+      E09.7: the base timing term's charge factor).
     rounding: none
     saturation: none
     outside_schedule: 'Runs before the fuel-command task each cycle (the snapshot routine).'
@@ -1592,7 +1657,13 @@ nodes:
     outside_schedule: 'Task 67 of the 0x020EF2 loop, after the trim lookup (66): the lookup reads last cycle''s bit.'
     confidence: inferred
     twin: not_modelled
-    evidence: ['listing 0x04A672, 0x04A954-0x04A990 (or.b/and.b 0x40)', 'UpRev logs since 2026-07-26 read 0x40 throughout (local firmware notes)']
+    observed_as:
+      - {spec: 'mem:ECM_HIGH_DET_FLAGS', address: 0xFFFF283F, relation: identity, confidence: code,
+         note: 'Bit 6 is the latch; the byte rides the flags_2841 read with the pedal flag (E05.4 (b)).'}
+    evidence:
+      - 'listing 0x04A672, 0x04A954-0x04A990 (or.b/and.b 0x40)'
+      - 'UpRev logs since 2026-07-26 read 0x40 throughout (local firmware notes)'
+      - 'Gate (firmware notes 2026-10-17): 0xFFFF2876 bit 6 is set by the knock task on its first pass, so the gate is effectively 0xFFFF4782 bit 5 clear; 4782 bit 5 is the cycle copy of 4783 bit 5 (0x021236), both written only by the engine state machine 0x027CC4 (b4090): set in state 1 (entered from 2 when b495D reaches 0, held while the 49A7 countdown runs), cleared in states 2-4 (the 282A bit 5 states), unchanged in 0. [inferred] 2-4 running/starting, 1 run-down after a stop, 0 stopped: HI DET is cleared at each engine stop and held clear until the next start, then the KS fault (479D bit 7) sets it again on the first pass. Recorded only: TimingState and the sim refusals are unchanged.'
 
   - id: timing_trim_lookup
     function: 0x04E6D8
@@ -1613,10 +1684,10 @@ nodes:
       trim A. Between: each byte is A + (coolant - 106) x (other - A) / 4
       through the signed divide 0x021C48, clamped 0..255, with bit 7 of both
       lookups ORed in.
-    rounding: 'Q16 fraction and 0x026F10 truncation (toward the first cell); the blend divide is unverified'
+    rounding: 'Q16 fraction and 0x026F10 truncation (toward the first cell); the blend divide truncates toward zero (0x021C48), not yet implemented'
     saturation: 'axes clamp at both ends with fraction 0; blend 0..255'
     branches:
-      - {when: 'coolant between 106 and 110', then: 'blend: the twin returns unevaluable (rounding of 0x021C48 unverified)'}
+      - {when: 'coolant between 106 and 110', then: 'blend: the twin returns unevaluable (0x021C48 truncates toward zero, resolved 2026-10-17; the blend is not implemented yet)'}
       - {when: 'warm and bit 6 of 0xFFFF283F unknown', then: 'selected byte unevaluable; trim A byte still evaluable'}
     rom:
       - {rom_map: timing_trim_a, role: 'trim A (via its RAM copy)'}
@@ -1635,6 +1706,9 @@ nodes:
     confidence: code
     twin: implemented
     implemented_by: src.analysis.ecu_state_models.selected_timing_trim
+    observed_as:
+      - {spec: 'mem:ECM_TIMING_TRIM_SELECTED', address: 0xFFFF1777, relation: identity, confidence: code}
+      - {spec: 'mem:ECM_TIMING_TRIM_A', address: 0xFFFF177A, relation: identity, confidence: code}
     evidence:
       - 'listing 0x04E6D8-0x04EA2A, 0x026A64, 0x026F9C-0x02700E; task table 0x0219D0 entry 66'
       - 'tests/test_ecu_state_models.py hand-worked vectors (synthetic tables)'
@@ -1662,6 +1736,9 @@ nodes:
     outside_schedule: 'Task 67 of the 0x020EF2 loop.'
     confidence: code
     twin: not_modelled
+    observed_as:
+      - {spec: 'mem:ECM_KNOCK_RETARD_TARGET', address: 0xFFFF13FE, relation: identity, confidence: inferred,
+         note: 'A word this node reads, not its result: observed so the twin has it (E05.4 (c)).'}
     evidence: ['listing 0x04A4C6-0x04A5FE (tst 0x04 at 0x04A514, tst 0x40 at 0x04A51E)', '2026-10-04 capture: flags window 0x0004 on all 191 reads (0xFFFF2842 = 0x04)']
 
   - id: timing_trim_terms
@@ -1683,7 +1760,271 @@ nodes:
     confidence: code
     twin: implemented
     implemented_by: src.analysis.ecu_state_models.timing_trim_terms
+    observed_as:
+      - {spec: 'mem:ECM_TIMING_TRIM_TERM', address: 0xFFFF2793, relation: identity, confidence: code}
+      - {spec: 'mem:ECM_TIMING_TRIM_SUBTRAHEND', address: 0xFFFF11CB, relation: identity, confidence: code,
+         note: 'A word this node reads (uncovered timing_final_chain), not its result.'}
     evidence: ['listing 0x04BD24-0x04BD72', 'tests/test_ecu_state_models.py hand-worked vectors (E09.7); every unidentified word is a required argument']
+
+  # E09.7: the base timing term 0xFFFF27C6 and the inputs of 0xFFFF279A,
+  # resolved from the listing (firmware notes 2026-10-17). Not on
+  # ignition_timing's path yet: base_timing_sum still takes 0xFFFF27C6 and
+  # 0xFFFF279A as observed arguments, so no blocker or twin capture moves;
+  # wiring them in is the sim dispatch's (E09.7). Divides: 0x021C48 signed
+  # (truncates toward zero), 0x021D6C unsigned (floor); dividend r1, divisor r0.
+  # No `rom:` refs until then: rom_effects reads a cited byte as consumed by
+  # its node, and a node on no output's path would make an edit to 0x9AF9 or
+  # cal 0x880D read as reaching nothing, where today it is an unknown byte
+  # that refuses (unknown_bytes_changed). The tables and cals are named in the
+  # arithmetic and in rom_map.yaml.
+  - id: coolant_rescale
+    function: 0x03A1F0
+    kind: computation
+    writes: [0xFFFF1081]
+    reads: [0xFFFF1083]
+    depends_on: [coolant_byte]
+    arithmetic: >-
+      0xFFFF1081 = 0 when 0xFFFF1083 < 10, 255 when it is 170 or more, else
+      (c - 10) x 240 / 150 through the signed divide 0x021C48 (positive: a
+      floor). degC = byte x 0.625 - 40. The cycle snapshot copies it to the
+      byte the timing and correction curves read (ram coolant_rescaled_snapshot).
+    rounding: 'floor (positive signed divide)'
+    saturation: '0 below 10, 255 from 170'
+    outside_schedule: 'Coolant processing; copied by the cycle snapshot.'
+    confidence: code
+    twin: implemented
+    implemented_by: src.analysis.ecu_state_models.coolant_rescaled
+    evidence: ['listing 0x03A1F0-0x03A22C (cmp/ge #10, cmp/ge 0xAA, x 240 by shifts, jsr 0x021C48 with r0 = 0x96)', 'tests/test_timing_rate_term.py hand-worked vectors']
+
+  - id: timing_charge_factor
+    function: 0x03CC3C
+    span: [0x03D0FE, 0x03D118]
+    kind: computation
+    writes: [0xFFFF1177]
+    reads: [0xFFFF1210, 0xFFFF104E]
+    depends_on: [engine_speed_word, load_input_x]
+    arithmetic: >-
+      0xFFFF1177 = map 0x9B89 (4 x 4) through 0x026934: the rpm word
+      0xFFFF1210 searched by 0x027194 against the axis 0xC890 as byte x 4, the
+      X byte 0xFFFF104E by 0x027114 against 0xC88C, then the bilinear 0x026F40.
+      Inside the Fuel Comp routine, but read only (through its cycle copy,
+      made by cycle_snapshot) by the base timing term: a timing table, q7
+      (0x80 = 1.0) [inferred]. In a steady state the copy equals this lookup at the snapshot's rpm word and X (timing_term_27c6_steady);
+      off steady state the caller passes the read byte to
+      timing_term_27c6_chain.
+    rounding: 'Q16 fraction, 0x026F10 truncation toward the first cell'
+    saturation: 'axes clamp at both ends with fraction 0'
+    outside_schedule: 'Inside FuelComp_lookup_and_fill_tau (0x03CC3C; group 0x10, task table 0x02189C entry 40), as fuel_comp_lookup.'
+    confidence: code
+    twin: implemented
+    implemented_by: src.analysis.ecu_state_models.timing_charge_map_10eb
+    evidence: ['listing 0x03D0FE-0x03D118 (r4 = 0x9B89, r5 = 0xC890, r6 = 0xC88C, r7 = w1210, stack b104E; jsr 0x026934; store 0xFFFF1177)', 'listing 0x026934 (row search 0x027194, column 0x027114, 4 breakpoints, width 4)']
+
+  - id: timing_term_1512
+    function: 0x04B96C
+    kind: computation
+    writes: [0xFFFF1512]
+    reads: [0xFFFF26F2]
+    arithmetic: '0xFFFF1512 = 0xFFFF26F2 x cal 0x8538 (mulu.w, low 16 bits).'
+    rounding: none
+    saturation: 'low 16 bits'
+    outside_schedule: 'Base-timing task 0x04DE4C (task 74).'
+    confidence: code
+    twin: implemented
+    implemented_by: src.analysis.ecu_state_models.timing_term_1512
+    evidence: ['firmware notes 2026-10-17 (0x04B96C)', 'tests/test_timing_rate_term.py hand-worked vectors']
+
+  - id: timing_charge_word
+    function: 0x04B98A
+    kind: computation
+    writes: [0xFFFF1B24]
+    reads: [0xFFFF26F6, 0xFFFF26E8, 0xFFFF26C0]
+    depends_on: [correction_sum, correction_26e8, enrichment_multiplier]
+    arithmetic: >-
+      0xFFFF1B24 = min(0xFFFF, max(0, 0xFFFF26F6 - 0xFFFF26E8) x 0xFFFF26C0
+      >> 14): the correction sum less 26E8, times the enrichment multiplier
+      (Q14, 0x4000 = 1.0).
+    rounding: 'truncating shift'
+    saturation: 'floor 0, cap 0xFFFF'
+    outside_schedule: 'Base-timing task 0x04DE4C (task 74).'
+    confidence: code
+    twin: implemented
+    implemented_by: src.analysis.ecu_state_models.timing_charge_word_1b24
+    observed_as:
+      - {spec: 'mem:ECM_TIMING_CHARGE_WORD', address: 0xFFFF1B24, relation: identity, confidence: code}
+    evidence: ['firmware notes 2026-10-17 (0x04B98A)', 'tests/test_timing_rate_term.py hand-worked vectors']
+
+  - id: base_timing_load_curve
+    function: 0x04BA52
+    kind: computation
+    writes: [0xFFFF19CB]
+    reads: [0xFFFF103E]
+    depends_on: [load_input_x]
+    arithmetic: '0xFFFF19CB = the 8-entry curve 0xCD9B (0x026BA4) at X 0xFFFF103E: min(X, 224) on every listed image.'
+    rounding: 'Q16 fraction, 0x026F10 truncation'
+    saturation: 'last entry from 224'
+    outside_schedule: 'Base-timing task 0x04DE4C (task 74).'
+    confidence: code
+    twin: implemented
+    implemented_by: src.analysis.ecu_state_models.timing_load_curve_19cb
+    observed_as:
+      - {spec: 'mem:ECM_TIMING_LOAD_CURVE', address: 0xFFFF19CB, relation: identity, confidence: code}
+    evidence: ['firmware notes 2026-10-17 (0x04BA52, 0x026BA4 tail 0x027250)', 'tests/test_timing_rate_term.py hand-worked vectors']
+
+  - id: base_timing_charge_term
+    function: 0x04B9D0
+    kind: computation
+    writes: [0xFFFF17C6, 0xFFFF15F7]
+    reads: [0xFFFF103E, 0xFFFF1B24, 0xFFFF10EB, 0xFFFF1512]
+    depends_on: [load_input_x, timing_charge_word, cycle_snapshot, timing_term_1512]
+    arithmetic: >-
+      q = 0xFFFF1B24 / 29 (signed); 0xFFFF15F7 = q >> 5. 0xFFFF17C6 = 0xFFFF
+      when 0xFFFF10EB is 0, else min(0xFFFF, X 0xFFFF103E x ((0xFFFF1512 >> 7)
+      + (q >> 5 & 0xFF) + 0x8000 / 0xFFFF10EB) / 25), both divides signed.
+    rounding: 'signed divides truncate toward zero (0x021C48)'
+    saturation: 'cap 0xFFFF; 0xFFFF on a zero divisor'
+    outside_schedule: 'Base-timing task 0x04DE4C (task 74).'
+    confidence: code
+    twin: implemented
+    implemented_by: src.analysis.ecu_state_models.timing_charge_term_17c6
+    observed_as:
+      - {spec: 'mem:ECM_TIMING_CHARGE_TERM', address: 0xFFFF17C6, relation: identity, confidence: code}
+      - {spec: 'mem:ECM_TIMING_CHARGE_FACTOR', address: 0xFFFF10EB, relation: identity, confidence: code,
+         note: 'A word this node reads (the cycle copy of 0xFFFF1177), not its result.'}
+    evidence: ['firmware notes 2026-10-17 (0x04B9D0, scripts/DecompDiv.java)', 'tests/test_timing_rate_term.py hand-worked vectors']
+
+  - id: base_timing_rate_word
+    function: 0x04BA6C
+    kind: computation
+    writes: [0xFFFF15DC, 0xFFFF15D7, 0xFFFF15DB, 0xFFFF15DA, 0xFFFF19DA, 0xFFFF1CC9, 0xFFFF19B6, 0xFFFF15DE]
+    reads: [0xFFFF1077, 0xFFFF1B24, 0xFFFF11CA, 0xFFFF103E, 0xFFFF11D8, 0xFFFF10EB, 0xFFFF1512]
+    depends_on: [coolant_rescale, timing_charge_word, engine_speed_word, load_input_x,
+                 cycle_snapshot, timing_term_1512]
+    arithmetic: >-
+      c = the rescaled coolant byte 0xFFFF1077, A = 0xFFFF1B24. 0xFFFF15DC =
+      curve8 0xCEBB(c); r = 0 if A < 0x2000, 0xFF if A >= 0x6000, else (A -
+      0x2000) >> 6; 0xFFFF15D7 = curve8 0xCEAB(r); 0xFFFF15DB = map 0x9AF9 at
+      (0xFFFF11CA, 0xFFFF103E) via 0x0268B8 (0x027114 on both axes);
+      0xFFFF15DA = min(255, 15D7 x 15DC x 15DB >> 14). R = udiv(0xFFFF10EB <<
+      20, ((0xFFFF1512 x 10EB) >> 9) + 0x2000), low 16 bits signed; F =
+      s16(0x1000 - (cal 0x8440 x (0x4000 - R) >>a 8)); S = clamp(sdiv(15DA x
+      F, 1000) + sdiv((cal 0x880E x 0xFFFF11D8) << 6, 625), 0, 0xFFFF);
+      0xFFFF19DA = 0x40; 0xFFFF1CC9 = curve8 0xD9AF(c); 0xFFFF19B6 = curve8
+      0xD60F(r); 0xFFFF15DE = min(0xFFFF, S x 19B6 x 1CC9 >> 14).
+    rounding: 'signed divides truncate toward zero; the unsigned one floors; >> 8 on F is arithmetic; Q16 curve/map interpolation truncates toward the first cell'
+    saturation: '15DA cap 255; S 0..0xFFFF; 15DE cap 0xFFFF'
+    outside_schedule: 'Base-timing task 0x04DE4C (task 74).'
+    confidence: code
+    twin: implemented
+    implemented_by: src.analysis.ecu_state_models.timing_rate_word_15de
+    observed_as:
+      - {spec: 'mem:ECM_TIMING_RATE_PRODUCT', address: 0xFFFF15DA, relation: identity, confidence: code}
+      - {spec: 'mem:ECM_TIMING_RATE_MAP', address: 0xFFFF15DB, relation: identity, confidence: code}
+      - {spec: 'mem:ECM_TIMING_RATE_WORD', address: 0xFFFF15DE, relation: identity, confidence: code}
+    evidence: ['firmware notes 2026-10-17 (0x04BA6C; 0x022586/0x022594 arithmetic shifts)', 'tests/test_timing_rate_term.py hand-worked vectors']
+
+  - id: timing_term_27c6
+    function: 0x04BC5A
+    kind: computation
+    writes: [0xFFFF27C6]
+    reads: [0xFFFF17C6, 0xFFFF15DE, 0xFFFF19CB, 0xFFFF11D8]
+    depends_on: [base_timing_charge_term, base_timing_rate_word, base_timing_load_curve, engine_speed_word]
+    arithmetic: >-
+      t = 0xFFFF when 0xFFFF15DE x 0xFFFF19CB is 0, else udiv(cal 0x880D x 120
+      x 0xFFFF17C6, 15DE x 19CB); u = t + (cal 0x8B0C x 5 >> 1); v =
+      udiv(((0xFFFF11D8 x u) >> 10) x 3, 5) when u < 0x10000, else
+      sdiv(((11D8 x 0xFFFF) >>a 10) x 3, 5); 0xFFFF27C6 = v - 14 when v <= 141,
+      else 127 (14 and 141 are immediates). u is a time in 1/128 ms and
+      degrees = rpm x time [inferred]; X largely cancels between 17C6 and 19CB
+      and acts through 0x9AF9 and 0x9B89 [inferred].
+    rounding: 'unsigned divides floor; signed truncate toward zero'
+    saturation: 'cap 127 above v = 141; floor -14'
+    branches:
+      - {when: '15DE x 19CB = 0 (X = 0 gives 19CB = 0)', then: 't = 0xFFFF, so u >= 0x10000: the second branch, 127 at any running rpm'}
+      - {when: 'v negative in the second branch (rpm word > 0x8000)', then: 'the compare with 141 is unsigned (cmp/hi at 0x04BD0A): 127'}
+    outside_schedule: 'Base-timing task 0x04DE4C (task 74), before the base timing sum.'
+    confidence: code
+    twin: implemented
+    implemented_by: src.analysis.ecu_state_models.timing_term_27c6
+    observed_as:
+      - {spec: 'mem:ECM_TIMING_TERM_27C6', address: 0xFFFF27C6, relation: identity, confidence: code}
+    evidence: ['firmware notes 2026-10-17 (0x04BC5A, x 120 at 0x04BC7C-0x04BC8A)', 'tests/test_timing_rate_term.py hand-worked vectors: 24 / 33 / 22 deg at 700 / 2,500 / 4,400 rpm, hot, phi 1']
+
+  - id: timing_retard_map_3630
+    function: 0x04C580
+    span: [0x04C580, 0x04C5AC]
+    kind: computation
+    writes: [0xFFFF3630]
+    reads: [0xFFFF283D, 0xFFFF11CE, 0xFFFF1077]
+    arithmetic: >-
+      Unless bit 7 of 0xFFFF283D is set (then 0xFFFF3630 holds its last
+      value): map 0x9B09 (8 x 8) through 0x026974 at (0xFFFF11CE against
+      0xC8FC, the rescaled coolant byte 0xFFFF1077 against 0xC904), both by
+      0x027114. All zero on every listed image.
+    rounding: 'Q16 fraction, 0x026F10 truncation'
+    saturation: 'axes clamp'
+    outside_schedule: 'Base-timing task 0x04DE4C (task 74).'
+    confidence: code
+    twin: not_modelled
+    evidence: ['listing 0x04C580-0x04C5AC (r4 = 0x9B09, r5 = 0xC8FC, r6 = 0xC904; jsr 0x026974)', 'listing 0x026974 (8 breakpoints each, width 8)']
+
+  - id: timing_term_26d9
+    function: 0x04C580
+    span: [0x04C5AE, 0x04C5CC]
+    kind: computation
+    writes: [0xFFFF26D9]
+    reads: [0xFFFF3630, 0xFFFF15E5]
+    depends_on: [timing_retard_map_3630]
+    arithmetic: '0xFFFF26D9 = 0xFFFF3630 x 0xFFFF15E5 >> 8; 0xFFFF15E5 is a 0..255 fade ramp the twin takes as an argument.'
+    rounding: 'truncating shift'
+    saturation: none
+    outside_schedule: 'Base-timing task 0x04DE4C (task 74).'
+    confidence: code
+    twin: implemented
+    implemented_by: src.analysis.ecu_state_models.timing_term_26d9
+    evidence: ['listing 0x04C5AE-0x04C5CC', 'tests/test_timing_rate_term.py hand-worked vectors']
+
+  - id: timing_term_26d0
+    function: 0x04C7A0
+    kind: computation
+    writes: [0xFFFF1302, 0xFFFF1301, 0xFFFF1303, 0xFFFF26D0, 0xFFFF284E]
+    reads: [0xFFFF1038, 0xFFFF11CF, 0xFFFF1077, 0xFFFF1300]
+    depends_on: [coolant_rescale]
+    arithmetic: >-
+      0xFFFF1302 = 8-entry curve 0xCC2B (0x026BA4) at min(255, 0xFFFF1038 >>
+      7); 0xFFFF1301 = 16-entry curve 0xCC1B (0x026BBC) at the rpm/25 byte
+      0xFFFF11CF; 0xFFFF1303 = 16-entry curve 0xCC33 (0x026BBC) at the
+      rescaled coolant byte 0xFFFF1077; 0xFFFF26D0 = 1300 x 1303 x 1301 x 1302
+      >> 24 (mul.l); bit 2 of 0xFFFF284E = (26D0 != 0). 0xFFFF1300 is a ramp
+      the twin takes as an argument.
+    rounding: 'Q16 curve interpolation, truncating shift'
+    saturation: none
+    outside_schedule: 'Base-timing task 0x04DE4C (task 74).'
+    confidence: code
+    twin: implemented
+    implemented_by: 'src.analysis.ecu_state_models.timing_term_26d0 (curve reads: timing_26d0_curves)'
+    evidence: ['listing 0x04C7A0-0x04C824: 0xCC2B -> jsr 0x026BA4, 0xCC1B and 0xCC33 (0xCC2B + 8) -> jsr 0x026BBC', 'tests/test_timing_rate_term.py hand-worked vectors']
+
+  - id: timing_term_279a
+    function: 0x04C952
+    kind: computation
+    writes: [0xFFFF279A]
+    reads: [0xFFFF26D9, 0xFFFF26D0, 0xFFFF17FA]
+    depends_on: [timing_term_26d9, timing_term_26d0]
+    arithmetic: >-
+      0xFFFF279A = clamp(0xFFFF26D9 + 0xFFFF26D0 - (0xFFFF17FA >> 4), 0, 255).
+      0xFFFF17FA (0x04C832, from the w1760 - w1762 difference and two curves)
+      is an argument. 0 on a warm engine on every listed image (26D9 = 0, 26D0
+      = 0 from rescaled coolant 160).
+    rounding: 'truncating shift'
+    saturation: '0..255'
+    outside_schedule: 'Base-timing task 0x04DE4C (task 74), before the base timing sum.'
+    confidence: code
+    twin: implemented
+    implemented_by: src.analysis.ecu_state_models.timing_term_279a
+    observed_as:
+      - {spec: 'mem:ECM_TIMING_TERM_279A', address: 0xFFFF279A, relation: identity, confidence: code}
+    evidence: ['firmware notes 2026-10-17 (0x04C952, 0x04C832)', 'tests/test_timing_rate_term.py hand-worked vectors']
 
   - id: base_timing_sum
     function: 0x04CB9E
@@ -1698,14 +2039,26 @@ nodes:
       signed byte, to 0xFFFF1A58. With it set: 0xFFFF1D3E + 0xFFFF27C3 -
       0xFFFF279A - 0x40 (0xFFFF27C3 from the idle-timing routine 0x04BDC4),
       no trim term. The term carrying most of the advance, 0xFFFF27C6, reads
-      X (rom_map base_timing_rate_map and curve 0xCD9B), so a change that
-      moves X moves base timing outside the trim term (E09.7).
+      X (rom_map base_timing_rate_map and base_timing_charge_map), so a change
+      that moves X moves base timing outside the trim term (E09.7; node
+      timing_term_27c6). Warm and not enriched (0xFFFF174A = 0), with
+      0xFFFF134A = 0 and 0xFFFF1344 = 0 and 0xFFFF279A = 0 (warm, every listed
+      image): 0xFFFF1A58 = 0xFFFF1D3E + 0xFFFF27C6 + 0xFFFF2793 - 0x80.
     rounding: none
     saturation: '-128..127'
     outside_schedule: 'Called by the base-timing task 0x04DE4C (task 74).'
     confidence: code
     twin: implemented
     implemented_by: src.analysis.ecu_state_models.base_timing_sum
+    observed_as:
+      - {spec: 'mem:ECM_BASE_TIMING_SUM', address: 0xFFFF1A58, relation: identity, confidence: code}
+      # The unidentified terms it reads (uncovered timing_final_chain): read so
+      # the node's required arguments are measured, not results of this node.
+      - {spec: 'mem:ECM_TIMING_TERM_27C6', address: 0xFFFF27C6, relation: identity, confidence: code}
+      - {spec: 'mem:ECM_TIMING_TERM_279A', address: 0xFFFF279A, relation: identity, confidence: code}
+      - {spec: 'mem:ECM_TIMING_ENRICH_RETARD', address: 0xFFFF174A, relation: identity, confidence: code}
+      - {spec: 'mem:ECM_TIMING_TERM_1D3E', address: 0xFFFF1D3E, relation: identity, confidence: code}
+      - {spec: 'mem:ECM_TIMING_TERM_1344', address: 0xFFFF1344, relation: identity, confidence: code}
     evidence: ['decompile text of 0x04CB9E (firmware session, 2026-10-05)', 'tests/test_ecu_state_models.py hand-worked vectors (E09.7); every unidentified word is a required argument']
 
   - id: base_timing_select
@@ -1723,6 +2076,8 @@ nodes:
     confidence: code
     twin: implemented
     implemented_by: src.analysis.ecu_state_models.base_timing_select
+    observed_as:
+      - {spec: 'mem:ECM_BASE_TIMING', address: 0xFFFF27DA, relation: identity, confidence: code}
     evidence: ['decompile text of 0x04CF0C (firmware session)', 'tests/test_ecu_state_models.py hand-worked vectors (E09.7); every unidentified word is a required argument']
 
   - id: timing_cycle_copy
@@ -1764,6 +2119,11 @@ nodes:
     confidence: code
     twin: implemented
     implemented_by: src.analysis.ecu_state_models.timing_retard_combine
+    observed_as:
+      - {spec: 'mem:ECM_KNOCK_RETARD_APPLIED', address: 0xFFFF2332, relation: identity, confidence: code}
+      - {spec: 'mem:ECM_TIMING_PRELIMIT', address: 0xFFFF1346, relation: identity, confidence: code}
+      - {spec: 'mem:ECM_TIMING_OTHER_RETARD', address: 0xFFFF1215, relation: identity, confidence: code,
+         note: 'A word this node reads (uncovered timing_final_chain), not its result.'}
     evidence: ['decompile text of 0x04DF38 (firmware session)', 'listing 0x04DF38-0x04DF76 (signedness of 0xFFFF1215, cal 0x8294 gate) and 0x04E05A-0x04E064 (0xFFFF46E6 byte)', 'tests/test_ecu_state_models.py hand-worked vectors (E09.7); every unidentified word is a required argument']
 
   - id: timing_rate_limit
@@ -1785,6 +2145,8 @@ nodes:
     confidence: code
     twin: implemented
     implemented_by: src.analysis.ecu_state_models.timing_rate_limit
+    observed_as:
+      - {spec: 'mem:ECM_IGNITION_TIMING_FINAL', address: 0xFFFF232E, relation: identity, confidence: code}
     evidence: ['decompile text of 0x04E0E0 (firmware session)', 'tests/test_ecu_state_models.py hand-worked vectors (E09.7); every unidentified word is a required argument']
 
   - id: timing_final_byte
@@ -1804,6 +2166,8 @@ nodes:
     confidence: code
     twin: implemented
     implemented_by: src.analysis.ecu_state_models.timing_final_byte
+    observed_as:
+      - {spec: 'mem:ECM_IGNITION_TIMING_BYTE', address: 0xFFFF11FF, relation: identity, confidence: code}
     evidence: ['decompile text of 0x04E4AC (firmware session)', 'PID 0x0E and DID 0x110A read 0xFFFF11FF (Mode 01 handler 0x0D3AFC)', 'tests/test_ecu_state_models.py hand-worked vectors (E09.7); every unidentified word is a required argument']
 
 outputs:
@@ -1903,6 +2267,12 @@ outputs:
         address: 0xFFFF11C7
         relation: alias
         note: 'The cycle-start copy of the same byte: agreement checks the mapping, not the chain.'
+    # E09.1: the seven chain nodes (E09.7, each implemented_by its function in
+    # src.analysis.ecu_state_models) are the twin; the final byte is what it
+    # predicts. Evaluable, so twin_observation_channels derives the capture.
+    twin:
+      definition: src.analysis.ecu_state_models.timing_final_byte
+      predicts: timing_final_byte
     blockers:
       - name: trim_ram_copy_unverified
         nodes: [timing_trim_ram_copy]
@@ -1931,6 +2301,8 @@ outputs:
     units: trim_counts_7bit_plus_flag
     role: intermediate
     feeds: ignition_timing
+    observed_as:
+      - {spec: 'mem:ECM_TIMING_TRIM_SELECTED', address: 0xFFFF1777, relation: identity, confidence: code}
     twin:
       definition: src.analysis.ecu_state_models.selected_timing_trim
       predicts: timing_trim_lookup
@@ -2037,7 +2409,7 @@ uncovered:
     blocks: 'gating of the three corrections and the curve term'
     next_evidence: 'Trace each writer; read them in the fuel window alongside the corrections.'
   - id: correction_inputs
-    where: '0xFFFF1114, 0xFFFF1077, 0xFFFF10C6, 0xFFFF2D10/2D14, w1762/w1726/w14DA'
+    where: '0xFFFF1114, 0xFFFF10C6, 0xFFFF2D10/2D14, w1762/w1726/w14DA (0xFFFF1077 is now identified: the rescaled coolant byte, node coolant_rescale)'
     blocks: 'computing 0xFFFF26F6 and 0xFFFF27DC'
     next_evidence: 'Trace writers; until then observe 0xFFFF26F6 and 0xFFFF27DC directly.'
   - id: other_174b_readers
@@ -2058,17 +2430,33 @@ uncovered:
     next_evidence: 'Vehicle: read 0xFFFF289C, 0xFFFF4786, 0xFFFF2C91 and 0xFFFF283B..0xFFFF283C with BFS at key-on and crank, and time 0xFFFF84B9-paced counters against acquisition time to confirm the 1.024 ms tick.'
   - id: timing_final_chain
     where: >-
-      Ignition terms the chain reads whose values no node computes (the seven
-      chain nodes take each as a required argument, E09.7): 0xFFFF11CB (0..7,
-      from 0xFFFF2BD0), 0xFFFF27C6 (time-to-angle over rom_map
-      base_timing_rate_map; the 0x021C48/0x021D6C operands are not in the
-      exports), 0xFFFF279A, 0xFFFF174A, 0xFFFF1D3E, 0xFFFF1344, 0xFFFF2334,
-      0xFFFF272A, 0xFFFF62B4, 0xFFFF1215, 0xFFFF9932; the flags 0xFFFF2833
-      bit 4, 0xFFFF4785 bit 6, 0xFFFF28B4 bit 1, 0xFFFF28B1 bit 5, 0xFFFF4858
-      bit 5 and the 0x08E498 fault test; the knock control's 0x04A8B6 branch.
-      0xFFFF134A is settled: 0 on every listed image (curves 0xCC63/0xCC73)
-    blocks: 'the absolute ignition_timing (E05.4); a trim edit''s change is computed with these held equal (E09.7), an X change''s is not'
-    next_evidence: 'Firmware session: the 0x021C48/0x021D6C operands in 0x04BA6C/0x04BC5A/0x04B9D0 and the writers of 0xFFFF2BD0, 0xFFFF26D9, 0xFFFF26D0, 0xFFFF17FA. Vehicle: read them with 0xFFFF1A58 and 0xFFFF11FF in one window set (E05.4 (c)).'
+      Ignition terms the chain reads whose values no node computes (the chain
+      nodes take each as a required argument, E09.7). 0xFFFF27C6 and
+      0xFFFF279A are no longer among them: 27C6 is computed (nodes
+      coolant_rescale .. timing_term_27c6) and 279A's inputs are identified
+      (timing_term_279a; 0 on a warm engine). Still unidentified:
+      0xFFFF11CB: its source 0xFFFF2BD0 is now known (the cycle copy of the
+      intake temperature byte 0xFFFF2CB8, IAT + 50 [inferred]), but no node
+      writes 11CB, 0xFFFF27C4 or 0xFFFF1203, the 0x04E5B0 slew (+/-5 per
+      segment) is unmodelled, and 0xFFFF1766's gating flags (0xFFFF287A bit 7,
+      0xFFFF2887 bit 2, 0xFFFF2876 bit 4, 0xFFFF4806 bit 1, fault item 0x11A)
+      are unidentified;
+      inside 27C6, 0xFFFF26E8 and the 0xFFFF175C / 0xFFFF1736 corrections in
+      0xFFFF26F6, and how 0xFFFF26C0 depends on the Target AFR column (so
+      0xFFFF1B24 is read, not predicted, off phi 1); the 279A ramps 0xFFFF1300
+      and 0xFFFF15E5 and its 0xFFFF17FA input (w1760/w1762); 0xFFFF174A,
+      0xFFFF1D3E, 0xFFFF1344, 0xFFFF2334, 0xFFFF272A, 0xFFFF62B4, 0xFFFF1215,
+      0xFFFF9932; the flags 0xFFFF2833 bit 4, 0xFFFF4785 bit 6, 0xFFFF28B4
+      bit 1, 0xFFFF28B1 bit 5, 0xFFFF4858 bit 5 and the 0x08E498 fault test;
+      the knock control's 0x04A8B6 branch. 0xFFFF134A is settled: 0 on every
+      listed image (curves 0xCC63/0xCC73). The new 27C6/279A nodes are not yet
+      on ignition_timing's path (the sim dispatch wires them in).
+    blocks: 'the absolute ignition_timing (E05.4); a trim edit''s change is computed with these held equal (E09.7); an X change''s base-term part is now computable from the nodes, the rest is not'
+    next_evidence: >-
+      The firmware part is done. Vehicle: read 0xFFFF15DA..0xFFFF15DE,
+      0xFFFF17C6, 0xFFFF19CB, 0xFFFF1B24 and 0xFFFF10EB with 0xFFFF27C6 and
+      0xFFFF1A58 in one window set (0x23) at hot idle and at a steady cruise,
+      and check timing_term_27c6_chain against each read (E05.4 (c)).
   - id: enrichment_tick_rate
     where: '0xFFFF84C3 bit 7 (the tick every enrichment timer steps on) and the 0x020EF2 cycle period'
     blocks: 'predicting enrichment transition timing (E05.3); a measured requirement, never fitted'
@@ -2205,7 +2593,7 @@ overrides:
       - '0xFFFF26B9 read 0x03 (bits 0 and 1 set, so the second term''s gate open) on 173 of 174 command reads of the 2026-10-04 slice, while the command read exactly 0x4000 on 149 of 153: the term was zero or cancelled there. Its factors were not read (tests/test_ecu_overrides.py::test_the_correction_gate_byte_is_set_on_almost_every_october_4_read).'
     gaps:
       - 'that this is the coolant / after-start enrichment is inferred: the firmware notes place that enrichment in the correction terms without assigning it to one'
-      - '0xFFFF1077, 0xFFFF10C6, 0xFFFF1764 and 0xFFFF1E55 are unidentified (uncovered correction_inputs)'
+      - '0xFFFF10C6, 0xFFFF1764 and 0xFFFF1E55 are unidentified (uncovered correction_inputs); 0xFFFF1077 is the rescaled coolant byte (node coolant_rescale, 2026-10-17)'
       - 'decompile text only, not line-checked against the listing'
     verify_with: 'Cold start: read 0xFFFF26E8, 0xFFFF1770, 0xFFFF1794, 0xFFFF1079 and the gate bytes 0xFFFF26B9, 0xFFFF2867, 0xFFFF1796 from key-on through warm-up.'
 

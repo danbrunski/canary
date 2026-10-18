@@ -5,7 +5,7 @@ import { HttpError, NetworkError, controlBlob, controlJson } from "../../api/cor
 import { SIM_STORAGE_KEY } from "../../lib/romSim";
 import { ENTRY_K106, ENTRY_TUNED, SHA_K106, SHA_TUNED } from "../../test/romLibraryFixtures";
 import { documentedSimFields } from "../../test/romSimDoc";
-import { buildSimResult, tablesWithAxes } from "../../test/romSimFixtures";
+import { buildSimResult, buildTimingBlock, tablesWithAxes } from "../../test/romSimFixtures";
 import { SHIPPED_TYPICAL, leftEmptyOf, typicalWith } from "../../test/romTypicalFixtures";
 import type { RomSimRequest, RomSimResult } from "../../types/romEditor";
 import { downloadText } from "../../util/browser";
@@ -152,6 +152,21 @@ function state(form: HTMLElement, skip: string[] = []) {
     target: { value: "working_assumption" },
   });
   fireEvent.click(within(form).getByRole("radio", { name: /Fresh flash resets trims/ }));
+  stateTiming(form);
+}
+
+/** State the ignition chain's two ECU states, as an operator would (no default exists). */
+function stateTiming(form: HTMLElement, highDet = /^Set\b/, knock = /^Fallback\b/) {
+  fireEvent.click(
+    within(within(form).getByRole("group", { name: "HI DET latch" })).getByRole("radio", {
+      name: highDet,
+    }),
+  );
+  fireEvent.click(
+    within(within(form).getByRole("group", { name: "Knock control" })).getByRole("radio", {
+      name: knock,
+    }),
+  );
 }
 
 const runButton = (form: HTMLElement) =>
@@ -219,6 +234,8 @@ describe("the Simulate form: off, empty, and honest about it", () => {
       "Throttle closed learned (counts)",
       "Idle air learned (counts)",
       "EVAP purge area (counts)",
+      "HI DET latch",
+      "Knock control",
       "Candidate events",
       "Draws",
       "Seed",
@@ -418,7 +435,7 @@ describe("Run", () => {
     expect(within(form).queryByRole("status", { name: "What blocks Run" })).not.toBeInTheDocument();
   });
 
-  it("sends every one of the 21 fields the doc lists, as stated", async () => {
+  it("sends every one of the 23 fields the doc lists, as stated", async () => {
     route();
     const form = await withPendingEdit();
     state(form);
@@ -430,7 +447,7 @@ describe("Run", () => {
     expect(call[2]?.method).toBe("POST");
     const request = sentRequest() as unknown as RomSimRequest;
     const documented = documentedSimFields();
-    expect(documented).toHaveLength(21);
+    expect(documented).toHaveLength(23);
     expect(Object.keys(request).sort()).toEqual([...documented].sort());
     expect(request).toEqual({
       label: "idle richer",
@@ -462,6 +479,8 @@ describe("Run", () => {
       throttle_closed_learned: 0,
       idle_air_learned: 0,
       evap_purge_area: 0,
+      high_det: "set",
+      knock_control: "fallback",
       candidate_events: "ecu_reflash",
       draws: 200,
       seed: 20261015,
@@ -686,11 +705,12 @@ describe("remembered values", () => {
     for (const radio of within(form).getAllByRole("radio")) expect(radio).not.toBeChecked();
     expect(runButton(form)).toBeDisabled();
     expect(within(form).getByRole("status", { name: "What blocks Run" })).toHaveTextContent(
-      "Run needs: Grid, Candidate events.",
+      "Run needs: Grid, HI DET latch, Knock control, Candidate events.",
     );
     // Choose them, and what is sent is exactly what the form showed.
     fireEvent.click(within(form).getByRole("radio", { name: /Fuel Comp axes/ }));
     fireEvent.click(within(form).getByRole("radio", { name: /Same learned state on both/ }));
+    stateTiming(form);
     type(within(form).getByLabelText("RPM edges (rpm)"), "200, 600, 1000, 1400");
     type(within(form).getByLabelText("Load edges (% fill)"), "3.5, 10.7, 17.8, 25");
     await click(runButton(form));
@@ -960,7 +980,7 @@ describe("the coarse-run banner on a returned run", () => {
     expect(sentRequest()).toMatchObject({ draws: 1000 });
   });
 
-  it("keeps every other request field and the 21-field shape under a preset", async () => {
+  it("keeps every other request field and the 23-field shape under a preset", async () => {
     await runAfter(async (form) => click(presetButton(form, "Coarse (quick check)")));
     const request = sentRequest();
     expect(Object.keys(request).sort()).toEqual([...documentedSimFields()].sort());
@@ -1251,7 +1271,9 @@ describe("Fill typical values", () => {
     );
     expect(within(report).queryByRole("list", { name: "Left empty" })).toBeNull();
     expect(report).not.toHaveTextContent(/Left empty for you to state/);
-    expect(report).toHaveTextContent(/Nothing else was touched: the grid, the candidate events/);
+    expect(report).toHaveTextContent(
+      /Nothing else was touched: the grid, the HI DET latch, knock control, the candidate events/,
+    );
 
     // Nothing the click does not own moved: choices, edges, draws, seed and the label.
     for (const radio of within(form).getAllByRole("radio")) expect(radio).not.toBeChecked();
@@ -1306,15 +1328,16 @@ describe("Fill typical values", () => {
     type(field(form, "Draws"), "200");
     type(field(form, "Seed"), "20261015");
     expect(within(form).getByRole("status", { name: "What blocks Run" })).toHaveTextContent(
-      "Run needs: Grid, Candidate events.",
+      "Run needs: Grid, HI DET latch, Knock control, Candidate events.",
     );
     expect(runButton(form)).toBeDisabled();
     fireEvent.click(within(form).getByRole("radio", { name: /Fuel Comp axes/ }));
     fireEvent.click(within(form).getByRole("radio", { name: /Same learned state on both/ }));
+    stateTiming(form);
     expect(runButton(form)).toBeEnabled();
   });
 
-  it("sends exactly the 21 documented fields after a fill, the filled values as shown", async () => {
+  it("sends exactly the 23 documented fields after a fill, the filled values as shown", async () => {
     route({ typical: SHIPPED_TYPICAL });
     const form = await withPendingEdit();
     await pressFill(form);
@@ -1326,6 +1349,7 @@ describe("Fill typical values", () => {
     type(field(form, "Seed"), "20261015");
     fireEvent.click(within(form).getByRole("radio", { name: /Fuel Comp axes/ }));
     fireEvent.click(within(form).getByRole("radio", { name: /Fresh flash resets trims/ }));
+    stateTiming(form);
     await click(runButton(form));
     await screen.findByRole("region", { name: "Simulation result" });
     const request = sentRequest();
@@ -1626,5 +1650,128 @@ describe("Fill typical values: when the values cannot be had, the form is left a
     expect(field(form, "Baro (kPa)").value).toBe(valueOf("baro_kpa"));
     expect(typicalCalls()).toHaveLength(2);
     expect(typicalStatus(form)).toHaveTextContent(/Baro \(kPa\): 81 \(replaced your 78\)/);
+  });
+});
+
+describe("the ignition timing state and the timing trims (E09.7)", () => {
+  const TRIM_B = "Ignition timing trim B (Map 1)";
+  const group = (form: HTMLElement, name: string) => within(form).getByRole("group", { name });
+
+  it("offers the HI DET latch and knock control unchosen, with the facts that make them a choice", async () => {
+    route();
+    const form = await withPendingEdit();
+    for (const name of ["HI DET latch", "Knock control"]) {
+      const radios = within(group(form, name)).getAllByRole("radio");
+      expect(radios).toHaveLength(2);
+      for (const radio of radios) expect(radio).not.toBeChecked();
+      expect(group(form, name)).toHaveTextContent("Choose one: there is no default.");
+    }
+    const state = within(form).getByRole("group", { name: "Ignition timing state" });
+    expect(state).toHaveTextContent(/2026-10-08 the truck read the latch set/);
+    expect(state).toHaveTextContent(/no default, no typical value, and are not remembered/);
+    expect(within(form).getByRole("status", { name: "What blocks Run" })).toHaveTextContent(
+      /HI DET latch, Knock control/,
+    );
+  });
+
+  it("blocks Run on one missing, naming it, and sends the pairing chosen, both ways", async () => {
+    route();
+    const form = await withPendingEdit();
+    state(form, []);
+    // state() chose set / fallback; the other pairing is the operator's to pick instead.
+    stateTiming(form, /^Clear\b/, /^Active\b/);
+    expect(
+      within(group(form, "HI DET latch")).getByRole("radio", { name: /^Clear\b/ }),
+    ).toBeChecked();
+    await click(runButton(form));
+    await screen.findByRole("region", { name: "Simulation result" });
+    expect(sentRequest()).toMatchObject({ high_det: "clear", knock_control: "active" });
+  });
+
+  it("remembers neither across a visit, whatever the last run chose", async () => {
+    route();
+    const form = await withPendingEdit();
+    state(form);
+    await click(runButton(form));
+    await screen.findByRole("region", { name: "Simulation result" });
+    const stored = JSON.parse(window.localStorage.getItem(SIM_STORAGE_KEY) ?? "{}") as {
+      values: Record<string, string>;
+    };
+    expect(Object.keys(stored.values)).not.toContain("highDet");
+    expect(Object.keys(stored.values)).not.toContain("knockControl");
+    cleanup();
+    vi.clearAllMocks();
+    const again = await withPendingEdit("again");
+    for (const radio of within(again).getAllByRole("radio")) expect(radio).not.toBeChecked();
+    expect(within(again).getByRole("status", { name: "What blocks Run" })).toHaveTextContent(
+      /HI DET latch, Knock control/,
+    );
+  });
+
+  it("edits a timing trim like a fuel table: a masked grid, the flag kept, the request exact", async () => {
+    route({ simulate: { ...buildSimResult(), ignition_timing: buildTimingBlock("trim_b") } });
+    renderEditor();
+    fireEvent.click(await screen.findByRole("button", { name: TRIM_B }));
+    const grid = screen.getByRole("grid", { name: `${TRIM_B} cells` });
+    // The grid shows the value bits; the flag is in the raw count on hover.
+    expect(cell(grid, 5, 10)).toHaveTextContent("47");
+    expect(cell(grid, 5, 10)).toHaveAttribute("title", `raw ${0x80 | 47}`);
+    expect(screen.getByText(/The ECM reads the low 7 bits of each cell/)).toBeVisible();
+    fireEvent.mouseDown(cell(grid, 5, 10));
+    fireEvent.mouseUp(window);
+    const operation = screen.getByRole("form", { name: "Operation" });
+    fireEvent.change(within(operation).getByLabelText("Operation"), {
+      target: { value: "add_raw" },
+    });
+    type(within(operation).getByLabelText("Raw counts to add"), "-3");
+    await click(within(operation).getByRole("button", { name: "Apply to selection" }));
+    const pending = screen.getByRole("list", { name: "Pending edits" });
+    expect(pending).toHaveTextContent("Ignition timing trim B: add raw -3 on 1 cell");
+    type(screen.getByLabelText("Label for this edit set"), "trim B -3");
+    const form = screen.getByRole("form", { name: "Simulate form" });
+    state(form);
+    await click(runButton(form));
+    await screen.findByRole("region", { name: "Simulation result" });
+    expect(sentRequest()).toMatchObject({
+      edits: [{ table: "timing_trim_b", slot: 1, cells: [[4, 9]], add_raw: -3 }],
+      high_det: "set",
+      knock_control: "fallback",
+    });
+    // The result: the change on the trims' own grid, at row 5 (2,000 rpm), column 10 (X 80).
+    const timing = screen.getByRole("region", { name: "Simulation result" });
+    const section = within(timing).getByRole("region", { name: "Ignition timing" });
+    expect(section).toHaveTextContent("HI DET latch set (warm timing reads trim B)");
+    const changes = within(section).getByRole("table", {
+      name: "Ignition timing change per trim cell",
+    });
+    expect(within(changes).getByRole("cell", { name: /^Row 5, column 10: -3/ })).toHaveAttribute(
+      "data-timing-mark",
+      "changed",
+    );
+    expect(within(changes).getByRole("rowheader", { name: "2,000" })).toBeVisible();
+    expect(within(changes).getByRole("columnheader", { name: "80" })).toBeVisible();
+  });
+
+  it("says a trim edit is read nowhere under the stated latch, not that it changed nothing", async () => {
+    route({ simulate: { ...buildSimResult(), ignition_timing: buildTimingBlock("trim_a") } });
+    renderEditor();
+    fireEvent.click(await screen.findByRole("button", { name: "Ignition timing trim A (Map 1)" }));
+    const grid = screen.getByRole("grid", { name: "Ignition timing trim A (Map 1) cells" });
+    fireEvent.mouseDown(cell(grid, 4, 4));
+    fireEvent.mouseUp(window);
+    const operation = screen.getByRole("form", { name: "Operation" });
+    fireEvent.change(within(operation).getByLabelText("Operation"), {
+      target: { value: "add_raw" },
+    });
+    type(within(operation).getByLabelText("Raw counts to add"), "-3");
+    await click(within(operation).getByRole("button", { name: "Apply to selection" }));
+    type(screen.getByLabelText("Label for this edit set"), "trim A -3");
+    const form = screen.getByRole("form", { name: "Simulate form" });
+    state(form);
+    await click(runButton(form));
+    const section = await screen.findByRole("region", { name: "Ignition timing" });
+    expect(within(section).getAllByText("NR")).toHaveLength(2 + 1); // two cells, one legend swatch
+    expect(section).toHaveTextContent("trim_a_not_read:high_det_latch_set");
+    expect(section).toHaveTextContent("the HI DET latch is set, so the ECM reads trim B warm");
   });
 });

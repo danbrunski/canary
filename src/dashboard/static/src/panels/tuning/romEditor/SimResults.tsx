@@ -3,8 +3,10 @@ import { coarseVerdict, formatCount, PRESET_DRAWS } from "../../../lib/romSimSiz
 import { g, pct } from "../../../lib/romSimView";
 import { buttonClass } from "../../../styles";
 import type { RomSimResult, SimRunContext } from "../../../types/romEditor";
+import type { RomTableValues } from "../../../types/romLibrary";
 import { SimCaveats } from "./SimCaveats";
 import { SimMaps } from "./SimMaps";
+import { SimTiming } from "./SimTiming";
 
 function Hash({ children }: { children: string | null | undefined }) {
   return <code className="break-all font-num text-xs">{children ?? "not stated"}</code>;
@@ -244,12 +246,15 @@ export function SimResults({
   result,
   run,
   stale,
+  tables = [],
   onDownload,
 }: {
   result: RomSimResult;
   run: SimRunContext;
   /** The pending edits have changed since this run. */
   stale: boolean;
+  /** The base's tables: the ignition timing grid's axis labels come from its trims. */
+  tables?: readonly RomTableValues[];
   onDownload: () => void;
 }) {
   return (
@@ -262,6 +267,7 @@ export function SimResults({
       <CoarseBanner result={result} run={run} />
       <SimCaveats result={result} run={run} />
       <SimMaps table={result.cells} />
+      <SimTiming timing={result.ignition_timing} tables={tables} />
       <Provenance result={result} run={run} onDownload={onDownload} />
     </div>
   );

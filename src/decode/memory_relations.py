@@ -117,7 +117,11 @@ class MemoryArithmeticRelation(_Strict):
     * ``trunc_divide`` — ``raw == trunc(a / divisor)`` (whole degrees of a
       1/256-degree word).
     * ``ordering`` — ``raw >= operand_sign * a`` (``compare: ge``) or ``<=``
-      (``le``); ``operand_sign: -1`` states "limit >= -retard".
+      (``le``); ``operand_sign: -1`` states "limit >= -retard". With
+      ``operand_mask`` the operand is ``a & operand_mask`` first: a timing
+      trim byte carries a cell flag in bit 7 (set on 143 of 256 cells of
+      ZS44A-20261004), and unmasked a flagged byte >= 128 bounds any trim
+      term, so the ordering would pass whatever the address held.
 
     ``read`` says whether every operand comes back in the declaring channel's
     own reply (``same_reply``: they share its ``window``, so there is no
@@ -133,6 +137,7 @@ class MemoryArithmeticRelation(_Strict):
     divisor: int | None = None
     compare: Literal["ge", "le"] | None = None
     operand_sign: Literal[1, -1] | None = None
+    operand_mask: int | None = Field(default=None, ge=1)
     min_agreement: float = Field(default=1.0, gt=0.0, le=1.0)
     notes: str | None = None
 
@@ -151,6 +156,8 @@ class MemoryArithmeticRelation(_Strict):
             raise ValueError("compare is required by ordering and refused elsewhere")
         if self.operand_sign is not None and self.op != "ordering":
             raise ValueError("operand_sign applies only to ordering")
+        if self.operand_mask is not None and self.op != "ordering":
+            raise ValueError("operand_mask applies only to ordering")
         if self.read == "cross_read" and "min_agreement" not in self.model_fields_set:
             raise ValueError(
                 "a cross_read relation must state min_agreement: the operand is read "
@@ -175,7 +182,10 @@ class MemoryArithmeticRelation(_Strict):
         truncates to 0 and "matches" a whole-degree byte that reads 0
         whatever it is.
         """
-        return operands[0] if self.op == "ordering" else own
+        return self._operand(operands[0]) if self.op == "ordering" else own
+
+    def _operand(self, raw: int) -> int:
+        return raw if self.operand_mask is None else raw & self.operand_mask
 
     def holds(self, own: int, operands: Sequence[int]) -> bool:
         if self.op == "sum_of_halves":
@@ -183,7 +193,7 @@ class MemoryArithmeticRelation(_Strict):
         if self.op == "trunc_divide":
             assert self.divisor is not None
             return own == trunc_div(operands[0], self.divisor)
-        bound = (self.operand_sign or 1) * operands[0]
+        bound = (self.operand_sign or 1) * self._operand(operands[0])
         return own >= bound if self.compare == "ge" else own <= bound
 
 

@@ -41,6 +41,8 @@ SIM_REQUEST: dict[str, Any] = {
     "throttle_closed_learned": 0.0,
     "idle_air_learned": 0.0,
     "evap_purge_area": 0.0,
+    "high_det": "set",
+    "knock_control": "fallback",
     "candidate_events": "none",
     "draws": 200,
     "seed": 20261015,
@@ -855,7 +857,7 @@ def test_sim_request_fixture_is_the_whole_contract() -> None:
     """The fixture states every SimRequest field, so a field added to the model
     fails here until the tool's docstring and this fixture learn it."""
     assert set(SIM_REQUEST) == set(SimRequest.model_fields)
-    assert len(SIM_REQUEST) == 21
+    assert len(SIM_REQUEST) == 23
     SimRequest.model_validate(SIM_REQUEST)
 
 

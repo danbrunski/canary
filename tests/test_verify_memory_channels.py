@@ -532,6 +532,8 @@ def _running_words(k: int) -> dict[str, int]:
         "ECM_AIR_CHARGE_SLOT_103A": bfs,
         "ECM_AIR_CHARGE_SLOT_103C": bfs,
         "ECM_IGNITION_TIMING_FINAL": 110 - timing,
+        # The byte DID 0x110A reads (E05.4 (c)), 110 - degrees as the DID.
+        "ECM_IGNITION_TIMING_BYTE": timing,
     }
 
 

@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import { HttpError } from "../api/http";
 import { TABLES, TABLES_WITH_FUEL_COMP } from "../test/romLibraryFixtures";
+import { timingTrimTable } from "../test/romSimFixtures";
 import type { CellSelection, PendingEdit, RomEditorDecode } from "../types/romEditor";
 import type { RomTableValues } from "../types/romLibrary";
 import {
@@ -10,6 +11,7 @@ import {
   duplicateCells,
   isEditableTable,
   loadEditorState,
+  maskedRawForValue,
   moveSelection,
   previewRefusal,
   rawForValue,
@@ -21,6 +23,7 @@ import {
   specFileName,
   storageKey,
   valueForRaw,
+  valueMask,
 } from "./romEditor";
 
 const fuelTargets = TABLES.tables[0];
@@ -235,11 +238,17 @@ describe("buildEdits", () => {
     ).toMatchObject({ ok: false, reason: "selection_outside_table" });
   });
 
-  it("offers only the fuel chain in Map 1", () => {
+  it("offers only the fuel chain and the timing trims in Map 1", () => {
     const map2 = TABLES.tables[2];
     expect(isEditableTable(fuelTargets)).toBe(true);
     expect(isEditableTable(fuelComp)).toBe(true);
     expect(isEditableTable(kConstant)).toBe(true);
+    expect(isEditableTable(timingTrimTable("a"))).toBe(true);
+    expect(isEditableTable(timingTrimTable("b"))).toBe(true);
+    // The trims in Maps 2-5 are not simulated (`rom_map` timing_trim_a_maps_2_5).
+    expect(
+      isEditableTable({ ...timingTrimTable("a"), id: "timing_trim_a_maps_2_5", slot: 2 }),
+    ).toBe(false);
     expect(isEditableTable(map2)).toBe(false);
     expect(buildEdits(map2, sel([0, 0], [0, 0]), { kind: "set_raw", raw: 130 })).toMatchObject({
       ok: false,
@@ -370,5 +379,142 @@ describe("persistence and names", () => {
     for (const status of ["reference", "unrecognised", "unknown"]) {
       expect(simulateReason({ status, revision: null })).toBe("base_not_a_recorded_revision");
     }
+  });
+});
+
+describe("a masked table: the timing trims' flag bit 7 (E09.7)", () => {
+  // Trim B: row r holds 43 + r in the low seven bits, and bit 7 is set from column 8 on.
+  const trim = timingTrimTable("b");
+  const first = trim.raw[0]?.[0];
+  const flagged = trim.raw[0]?.[9];
+
+  it("reads the mask from the declared decode, and decodes the value bits only", () => {
+    expect(valueMask(trim.decode)).toBe(0x7f);
+    expect(valueMask(fuelComp.decode)).toBeNull();
+    expect(first).toBe(43);
+    expect(flagged).toBe(0x80 | 43);
+    expect(valueForRaw(trim.decode, 0x80 | 43)).toBe(43);
+    // The value bits of a count have no single raw (the flag is the cell's): the
+    // unmasked inverse still refuses, the masked one gives the value bits.
+    expect(rawForValue(trim.decode, 50)).toBeNull();
+    expect(maskedRawForValue(trim.decode, 50)).toBe(50);
+    expect(maskedRawForValue(fuelComp.decode, 50)).toBeNull();
+  });
+
+  it("adds counts to the value bits and keeps the flag bit, cell by cell", () => {
+    const built = buildEdits(trim, sel([0, 7], [0, 10]), { kind: "add_raw", delta: -3 });
+    expect(built.ok).toBe(true);
+    if (!built.ok) return;
+    expect(built.edits).toEqual([
+      {
+        table: "timing_trim_b",
+        slot: 1,
+        cells: [
+          [0, 7],
+          [0, 8],
+          [0, 9],
+          [0, 10],
+        ],
+        add_raw: -3,
+      },
+    ]);
+    // 43 -> 40 in the cells below the flag block, 0xAB -> 0xA8 in it: bit 7 never moves.
+    expect(built.cells.map((cell) => [cell.oldRaw, cell.newRaw])).toEqual([
+      [43, 40],
+      [0x80 | 43, 0x80 | 40],
+      [0x80 | 43, 0x80 | 40],
+      [0x80 | 43, 0x80 | 40],
+    ]);
+    expect(built.cells.map((cell) => [cell.oldDecoded, cell.newDecoded])).toEqual([
+      [43, 40],
+      [43, 40],
+      [43, 40],
+      [43, 40],
+    ]);
+  });
+
+  it("scales the value bits and keeps the flag bit", () => {
+    const built = buildEdits(trim, sel([0, 9], [0, 9]), {
+      kind: "scale",
+      percent: 10,
+      rounding: "nearest",
+    });
+    expect(built.ok && built.cells[0]).toMatchObject({ oldRaw: 0x80 | 43, newRaw: 0x80 | 47 });
+  });
+
+  it("refuses a result outside the value bits, never carrying it into the flag", () => {
+    // 43 + 90 = 133 is a legal raw count (below 255) and an illegal value (above 127).
+    expect(buildEdits(trim, sel([0, 0], [0, 0]), { kind: "add_raw", delta: 90 })).toMatchObject({
+      ok: false,
+      reason: "value_out_of_range",
+      message: expect.stringContaining("outside 0..127"),
+    });
+    // Below zero too: the carry is not borrowed from the flag.
+    expect(buildEdits(trim, sel([0, 9], [0, 9]), { kind: "add_raw", delta: -44 })).toMatchObject({
+      ok: false,
+      reason: "value_out_of_range",
+    });
+  });
+
+  it("sets a value on the value bits, keeping the flag the selected cells share", () => {
+    const built = buildEdits(trim, sel([2, 8], [3, 9]), { kind: "set_value", value: 50 });
+    expect(built.ok).toBe(true);
+    if (!built.ok) return;
+    expect(built.edits[0]).toMatchObject({ table: "timing_trim_b", set_raw: 0x80 | 50 });
+    expect(built.chain).toBe("50 count → raw 178 (flag bits 0x80 kept) → 50 count");
+    expect(built.cells.every((cell) => cell.newRaw === (0x80 | 50))).toBe(true);
+    // A selection with no flag bit sets the plain value.
+    const plain = buildEdits(trim, sel([2, 0], [3, 1]), { kind: "set_value", value: 50 });
+    expect(plain.ok && plain.edits[0]).toMatchObject({ set_raw: 50 });
+  });
+
+  it("refuses one absolute value across cells whose flags differ, by name", () => {
+    const mixed = buildEdits(trim, sel([2, 7], [2, 8]), { kind: "set_value", value: 50 });
+    // The server's own name for it (`rom_edit_spec` refuses `masked_bits_changed` at the
+    // first cell whose flag one set_raw would change); the message says why.
+    expect(mixed).toMatchObject({ ok: false, reason: "masked_bits_changed" });
+    expect(mixed.ok === false && mixed.message).toContain("different flag bits");
+    expect(mixed.ok === false && mixed.message).toContain("use Add or Scale");
+    expect(buildEdits(trim, sel([2, 7], [2, 8]), { kind: "set_raw", raw: 50 })).toMatchObject({
+      ok: false,
+      reason: "masked_bits_changed",
+    });
+  });
+
+  it("refuses a raw count that would change the flag, as the server does", () => {
+    // Raw 50 on a flagged cell would clear bit 7.
+    expect(buildEdits(trim, sel([2, 9], [2, 9]), { kind: "set_raw", raw: 50 })).toMatchObject({
+      ok: false,
+      reason: "masked_bits_changed",
+    });
+    // Raw 178 keeps it.
+    const kept = buildEdits(trim, sel([2, 9], [2, 9]), { kind: "set_raw", raw: 0x80 | 50 });
+    expect(kept.ok && kept.cells[0]).toMatchObject({ oldRaw: 0x80 | 45, newRaw: 0x80 | 50 });
+    // A raw outside the dtype changes the bits beyond the mask too: the server checks the
+    // mask first (`masked_bits_changed`), so the page names it the same way.
+    const outside = buildEdits(trim, sel([2, 0], [2, 0]), { kind: "set_raw", raw: 300 });
+    expect(outside).toMatchObject({ ok: false, reason: "masked_bits_changed" });
+    expect(outside.ok === false && outside.message).toContain("outside a u8 cell's 0..255");
+  });
+
+  it("refuses arithmetic on a mask that is not contiguous low bits", () => {
+    const gapped: RomTableValues = {
+      ...trim,
+      decode: {
+        ...(trim.decode as RomEditorDecode),
+        mask: 0x5a,
+        formula: "x = (raw & 0x5A) × 1",
+      } as RomTableValues["decode"],
+    };
+    expect(buildEdits(gapped, sel([0, 0], [0, 0]), { kind: "add_raw", delta: 1 })).toMatchObject({
+      ok: false,
+      reason: "arithmetic_on_masked_cells",
+    });
+  });
+
+  it("an unmasked table is exactly as before: the whole raw moves", () => {
+    const built = buildEdits(fuelComp, sel([0, 0], [0, 0]), { kind: "add_raw", delta: 200 });
+    expect(built).toMatchObject({ ok: false, reason: "value_out_of_range" });
+    expect(built.ok === false && built.message).toContain("holds 0..255");
   });
 });

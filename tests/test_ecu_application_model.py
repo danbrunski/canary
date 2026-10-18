@@ -273,9 +273,16 @@ def test_the_trim_lookup_is_an_intermediate_of_ignition_timing_never_timing_itse
     assert (trim.role, trim.feeds, timing.role) == ("intermediate", "ignition_timing", "final")
     assert trim.ram != timing.ram and trim.units != timing.units
     assert trim.twin is not None and model.node(trim.twin.predicts).twin == "implemented"
-    # No channel reads 0xFFFF1777 yet: it cannot qualify even unblocked.
-    assert trim.observed_as == []
-    assert trim.model_copy(update={"blockers": []}).status == "unobserved"
+    # E05.4 (b): 0xFFFF1777 has a catalog channel (hypothesized until a live
+    # read, so no profile polls it yet); without one it could not qualify
+    # even unblocked.
+    assert [(o.spec, o.address) for o in trim.observed_as] == [
+        ("mem:ECM_TIMING_TRIM_SELECTED", 0xFFFF1777)
+    ]
+    assert trim.model_copy(update={"blockers": [], "observed_as": []}).status == "unobserved"
+    # Timing's twin is the implemented chain, predicting the byte it is.
+    assert timing.twin is not None and timing.twin.predicts == timing.written_by
+    assert model.node(timing.twin.predicts).twin == "implemented"
     report = {o["id"]: o for o in coverage_report(model, sha)["outputs"]}
     assert report["ignition_trim_selected"]["role"] == "intermediate"
     assert report["ignition_timing"]["status"] == "conditional"

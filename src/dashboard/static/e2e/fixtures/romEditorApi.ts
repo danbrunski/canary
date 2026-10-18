@@ -6,9 +6,19 @@ import type {
   RomSimResult,
   RomTypicalValues,
 } from "../../src/types/romEditor";
-import type { RomLibraryEntry, RomTablesResponse } from "../../src/types/romLibrary";
-import { LEVERS_FUEL_COMP } from "../../src/test/romLeverFixtures";
-import { buildSimResult, fuelCompWithAxes, tablesWithAxes } from "../../src/test/romSimFixtures";
+import type {
+  RomLibraryEntry,
+  RomTableValues,
+  RomTablesResponse,
+} from "../../src/types/romLibrary";
+import { LEVERS_FUEL_COMP, LEVERS_TIMING_TRIM } from "../../src/test/romLeverFixtures";
+import {
+  buildSimResult,
+  buildTimingBlock,
+  fuelCompWithAxes,
+  tablesWithAxes,
+  timingTrimTable,
+} from "../../src/test/romSimFixtures";
 import { SHIPPED_TYPICAL } from "../../src/test/romTypicalFixtures";
 
 /**
@@ -69,42 +79,89 @@ export function tablesFor(sha: string): RomTablesResponse {
   return { ...tablesWithAxes(), sha256: sha };
 }
 
-/** What `rom_editor.preview_edits` answers for `scale` / `set_raw` / `add_raw`
- *  edits on Fuel Compensation (Map 1): the after table, the cell list old ->
- *  new, the spec as YAML. Only scale + nearest edits are computed here; the
- *  stub refuses anything else, so a page that sent something else fails loudly. */
+/** A simulate answer for a trim edit (E09.7): the default result with the
+ *  `ignition_timing` block of a trim B edit under HI DET set (a number per cell),
+ *  or of the same edit to trim A (read nowhere under that latch). */
+export function trimSimResult(trim: "trim_b" | "trim_a" = "trim_b"): RomSimResult {
+  return { ...buildSimResult(), ignition_timing: buildTimingBlock(trim) };
+}
+
+/** What `rom_editor.preview_edits` answers for edits on Fuel Compensation
+ *  (Map 1) -- `scale` + `nearest` -- and on the timing trims (Map 1) --
+ *  `add_raw`, on the value bits with the flag bit kept (`rom_edit_spec`): the
+ *  after tables, the cell list old -> new, the spec as YAML. The stub refuses
+ *  anything else, so a page that sent something else fails loudly. */
 export function previewFor(
   sha: string,
   request: { label: string; edits: RomEdit[] },
   matched: boolean,
 ): RomEditPreview {
-  const before = fuelCompWithAxes();
-  const after = { ...before, raw: before.raw.map((row) => [...row]) };
+  const after: RomTableValues[] = [];
   const cells: RomEditPreview["provenance"]["cells"] = [];
+  const touched = (id: string, before: RomTableValues): RomTableValues => {
+    let found = after.find((table) => table.id === id);
+    if (!found) {
+      found = { ...before, raw: before.raw.map((row) => [...row]) };
+      after.push(found);
+    }
+    return found;
+  };
   for (const edit of request.edits) {
-    if (edit.table !== "fuel_compensation" || edit.slot !== 1) {
-      throw new Error(`stub previews only Fuel Compensation (Map 1), got ${edit.table}`);
-    }
-    if (edit.scale === undefined || edit.rounding !== "nearest") {
-      throw new Error("stub previews only `scale` with `rounding: nearest`");
-    }
-    for (const [row, col] of edit.cells ?? []) {
-      const old = before.raw[row]?.[col] ?? 0;
-      const next = Math.round(old * edit.scale);
-      after.raw[row][col] = next;
-      cells.push({
-        table: "fuel_compensation",
-        slot: 1,
-        row,
-        col,
-        address: 0xe0660 + row * 16 + col,
-        old,
-        new: next,
-      });
+    if (edit.table === "fuel_compensation" && edit.slot === 1) {
+      if (edit.scale === undefined || edit.rounding !== "nearest") {
+        throw new Error("stub previews only `scale` with `rounding: nearest`");
+      }
+      const before = fuelCompWithAxes();
+      const table = touched("fuel_compensation", before);
+      for (const [row, col] of edit.cells ?? []) {
+        const old = before.raw[row]?.[col] ?? 0;
+        const next = Math.round(old * edit.scale);
+        table.raw[row][col] = next;
+        cells.push({
+          table: "fuel_compensation",
+          slot: 1,
+          row,
+          col,
+          address: 0xe0660 + row * 16 + col,
+          old,
+          new: next,
+        });
+      }
+    } else if (
+      (edit.table === "timing_trim_a" || edit.table === "timing_trim_b") &&
+      edit.slot === 1
+    ) {
+      if (edit.add_raw === undefined) throw new Error("stub previews only `add_raw` on a trim");
+      const before = timingTrimTable(edit.table === "timing_trim_a" ? "a" : "b");
+      const table = touched(edit.table, before);
+      for (const [row, col] of edit.cells ?? []) {
+        const old = before.raw[row]?.[col] ?? 0;
+        // The value bits move and the flag bit stays; a result outside 0..127 is refused.
+        const value = (old & 0x7f) + edit.add_raw;
+        if (value < 0 || value > 0x7f) throw new Error(`stub: ${value} is outside 0..127`);
+        const next = (old & 0x80) | value;
+        table.raw[row][col] = next;
+        cells.push({
+          table: edit.table,
+          slot: 1,
+          row,
+          col,
+          address: (edit.table === "timing_trim_a" ? 0xe0040 : 0xe0140) + row * 16 + col,
+          old,
+          new: next,
+        });
+      }
+    } else {
+      throw new Error(
+        `stub previews only Fuel Compensation and the timing trims (Map 1), got ${edit.table}`,
+      );
     }
   }
-  const scale = 0.78125;
-  after.decoded = after.raw.map((row) => row.map((value) => value * scale));
+  for (const table of after) {
+    table.decoded = table.raw.map((row) =>
+      row.map((value) => (table.id === "fuel_compensation" ? value * 0.78125 : value & 0x7f)),
+    );
+  }
   const candidate = "c".repeat(64);
   const specSha = "5".repeat(64);
   const provenance = {
@@ -131,8 +188,12 @@ export function previewFor(
       slot: 1,
       slot_source: "default_slot",
       changed_bytes: cells.length,
-      changed_nodes: ["fuel_comp_lookup"],
-      moved_lookups: [{ node: "target_afr_lookup", tables: ["fuel_targets"] }],
+      changed_nodes: after.some((table) => table.id === "fuel_compensation")
+        ? ["fuel_comp_lookup"]
+        : ["timing_trim_lookup"],
+      moved_lookups: after.some((table) => table.id === "fuel_compensation")
+        ? [{ node: "target_afr_lookup", tables: ["fuel_targets"] }]
+        : [],
     },
   };
   return {
@@ -150,8 +211,10 @@ export function previewFor(
     spec_sha256: specSha,
     candidate_sha256: candidate,
     provenance,
-    tables: [after],
-    levers: LEVERS_FUEL_COMP,
+    tables: after,
+    levers: after.some((table) => table.id === "fuel_compensation")
+      ? LEVERS_FUEL_COMP
+      : LEVERS_TIMING_TRIM,
     sim_base: matched
       ? { ok: true, status: "matched", revision: "ZS44A-20260920", reason: null }
       : {

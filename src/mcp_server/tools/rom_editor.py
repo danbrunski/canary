@@ -451,7 +451,7 @@ async def simulate_rom_edit(
 
     ``request`` is one object and **has no defaults**: this tool invents none,
     and the daemon answers a missing field with a 422 naming it and an unknown
-    one with ``extra_forbidden``. All 21 fields are required:
+    one with ``extra_forbidden``. All 23 fields are required:
 
     - ``label`` (non-empty str) and ``edits`` (list of E08.1 ``Edit`` objects,
       as in ``preview_rom_edit``);
@@ -467,6 +467,17 @@ async def simulate_rom_edit(
     - ``stft_pct``, ``ltft_pct``: fuel trims, percent;
     - ``throttle_closed_learned``, ``idle_air_learned``, ``evap_purge_area``:
       the learned state, each stated;
+    - ``high_det`` (``"set"`` or ``"clear"``) and ``knock_control``
+      (``"active"`` or ``"fallback"``): the ignition chain's two ECU states,
+      which nothing logs, so the call states both (E09.7). ``high_det`` is the
+      HI DET latch (0xFFFF283F bit 6): warm timing reads trim B while it is
+      ``set`` and trim A while it is ``clear``, so an edit to the trim the
+      stated latch does not read shows 0 with ``trim_a_not_read:...`` /
+      ``trim_b_not_read:...``. ``knock_control`` ``fallback`` is the knock
+      sensor fault state; neither implies the other. Both change with the
+      truck (the 2026-10-08 read was ``set`` / ``fallback``, KS1 fault), so
+      state what you are asking about, not what you last saw. The result's
+      ``ignition_timing`` block echoes them (``state``);
     - ``candidate_events``: ``"none"`` (both ROMs start from the same learned
       state) or ``"ecu_reflash"`` (the flash resets what the contract says it
       resets on the candidate);

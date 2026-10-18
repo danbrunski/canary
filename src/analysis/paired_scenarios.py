@@ -76,6 +76,7 @@ from src.analysis.ecu_state_models import (
     TRIM_RPM_AXIS_SCALE,
     TRIM_WARM_ABOVE,
     SelectedTrim,
+    coolant_rescaled,
     selected_timing_trim,
     timing_delta,
     trim_lookup,
@@ -1725,6 +1726,15 @@ def coolant_byte(coolant_c: float) -> int:
     return max(0, min(BYTE_MAX_VALUE, round(coolant_c) + COOLANT_BYTE_OFFSET))
 
 
+def coolant_rescaled_byte(coolant_c: float) -> int:
+    """The ECM's RESCALED coolant byte 0xFFFF1077 for a stated temperature:
+    :func:`coolant_byte` (0xFFFF1083, degC + 50) through the firmware's
+    rescale ``0x03A1F0`` (:func:`coolant_rescaled`; degC = byte x 0.625 -
+    40, 90 degC is 208). The base timing term reads this byte, the trim
+    selection the degC + 50 one: never pass one for the other."""
+    return coolant_rescaled(coolant_byte(coolant_c))
+
+
 def _selection(
     t: TimingTables, state: TimingState, rpm_word: int, x: int, coolant: int, pedal: bool
 ) -> SelectedTrim:
@@ -1748,6 +1758,13 @@ def _table_read(state: TimingState, coolant: int) -> Literal["a", "b"] | None:
     if coolant <= TRIM_WARM_ABOVE:
         return None
     return "b" if state.high_det else "a"
+
+
+# The reason `_unread_changes` names, and the only one `timing_cell_summary` counts as
+# "a changed trim the ECM does not read". A prefix match on "trim_" also caught
+# `trim_term_floor_may_bind` (a trim the ECM DOES read, below the term's floor), which
+# counted a read cell as an edit that changes nothing.
+_TRIM_NOT_READ = re.compile(r"trim_[ab]_not_read:")
 
 
 def _unread_changes(
@@ -1877,7 +1894,7 @@ def timing_cell_summary(cells: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
     """Counts by kind of answer, and the cells where timing changes or a
     changed trim is not read."""
     changed = [c for c in cells if c["delta"] not in (None, 0)]
-    unread = [c for c in cells if any(r.startswith("trim_") for r in c["reasons"])]
+    unread = [c for c in cells if any(_TRIM_NOT_READ.match(r) for r in c["reasons"])]
     unevaluable = [c for c in cells if c["status"] == "unevaluable"]
     return {
         "cells": len(cells),
@@ -1906,6 +1923,7 @@ __all__ = [
     "ignition_timing_cells",
     "ignition_timing_at",
     "coolant_byte",
+    "coolant_rescaled_byte",
     "TimingTables",
     "TimingState",
     "KnockControl",

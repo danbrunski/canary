@@ -473,8 +473,12 @@ blockers:
     needs: The measurement TIMING_REQUIREMENT names.
   - id: coolant_blend_divide
     affects: [selected_timing_trim (not in this contract version)]
-    what: The coolant-weighted blend uses the signed divide 0x021C48, whose rounding is not established; the reference returns coolant_blend_band.
-    needs: 0x021C48's rounding from the listing.
+    what: >-
+      The coolant-weighted blend uses the signed divide 0x021C48. Its rounding
+      is now known (it divides magnitudes and negates on a sign mismatch:
+      truncation toward zero; firmware notes 2026-10-17), but the reference
+      still returns coolant_blend_band.
+    needs: The blend implemented with that truncating divide, and hand vectors for it.
   - id: air_charge_not_in_contract
     affects: [air_charge_tp (not in this contract version), steady_state_bfs (not in this contract version)]
     what: >-

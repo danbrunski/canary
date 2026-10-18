@@ -521,9 +521,11 @@ tables:
   # 0xFFFF134A - 0xFFFF174A - 0x80 + 0xFFFF1344 (0x04CB9E), and the trim term
   # 0xFFFF2793 is the only one an edit to the trims moves. The term that
   # carries most of the advance, 0xFFFF27C6 (0x04BC5A), is a time converted to
-  # crank angle at the current rpm, and this map is the rpm x load factor in
-  # that time. The divides between it and 0xFFFF27C6 are not resolved from
-  # the exported listing, so the map is listed with its axes and shown raw.
+  # crank angle at the current rpm, and this map is the rpm x load rate in
+  # that time. The chain is resolved from the listing (firmware notes
+  # 2026-10-17; manifest nodes base_timing_rate_word .. timing_term_27c6,
+  # src.analysis.ecu_state_models.timing_term_27c6_chain); every table it
+  # reads is mapped below, shown raw.
   - id: base_timing_rate_map
     name: Base timing rate map (rpm x X, feeds 0xFFFF27C6)
     offset: 0x9AF9
@@ -537,22 +539,24 @@ tables:
       r5 = 0xC890 searched against the rpm/50 byte 0xFFFF11CA, then 0xC88C
       against the X byte 0xFFFF103E, both by 0x027114; the first search's index
       is the row, times the width 4 passed to the bilinear 0x026F40) into
-      0xFFFF15DB. 0xFFFF15DA = 15DB x 15D7 (curve 0xCEAB, flat 0x80) x 15DC
-      (coolant curve 0xCEBB) >> 14 feeds 0xFFFF15DE; FUN_0004bc5a forms
-      0xFFFF27C6 = (cal 0x880D x 120 x 0xFFFF17C6) / (0xFFFF15DE x 0xFFFF19CB)
-      (x 120 from the listing 0x04BC7C-0x04BC8A: x 15, shll2, shll; the overall
-      scale is unresolved until the divide helpers' operands are known)
-      plus cal 0x8B0C x 5 / 2, times the rpm word 0xFFFF11D8 >> 10 x 3 / 5,
-      minus 14, capped 127 (0x04BC5E-0x04BD22): a time turned into crank
-      angle. 0xFFFF19CB is the curve 0xCD9B at X (00 20 40 ... E0 on its
-      implicit 0, 32 ... 224 axis: X itself), so the advance rises with rpm
-      and falls with load through this term, which is why a change that
-      moves X moves base timing outside the trims. Values on ROM Store
-      ZS44A, k106, 20260920 and 20261004 are identical: 11 1A 28 3A / 19 27
-      3C 55 / 1B 2A 42 5E / 1D 2D 46 64, rising with both axes. Inferred, not
-      verified: the operands of the divide helpers 0x021C48 / 0x021D6C
-      between 0xFFFF15DA and 0xFFFF15DE are not visible in the exports (owed
-      to the firmware session), and no capture has read 0xFFFF15DB.
+      0xFFFF15DB. Resolved from the listing (firmware notes 2026-10-17, divide
+      helpers 0x021C48 signed / 0x021D6C unsigned, dividend r1, divisor r0):
+      0xFFFF15DA = min(255, 15D7 (curve 0xCEAB at the 0xFFFF1B24 band) x 15DC
+      (curve 0xCEBB at the rescaled coolant byte 0xFFFF1077) x 15DB >> 14); S =
+      clamp(15DA x F / 1000 + (cal 0x880E x rpm word << 6) / 625, 0, 0xFFFF)
+      with F from base_timing_charge_map; 0xFFFF15DE = S x 19B6 x 1CC9 >> 14
+      (curves 0xD60F, 0xD9AF). FUN_0004bc5a then forms t = cal 0x880D x 120 x
+      0xFFFF17C6 / (0xFFFF15DE x 0xFFFF19CB), u = t + cal 0x8B0C x 5 / 2, and
+      0xFFFF27C6 = (rpm word x u >> 10) x 3 / 5 - 14, capped 127: a burn time in
+      1/128 ms turned into crank angle [inferred]. A larger cell is a faster
+      rate, a shorter time and less advance. 0xFFFF19CB is the curve 0xCD9B at X
+      (X itself on these images) and largely cancels X in 0xFFFF17C6, so X
+      acts through this map and base_timing_charge_map [inferred]. Values on
+      ROM Store ZS44A, k106, 20260920 and 20261004 are identical: 11 1A 28 3A
+      / 19 27 3C 55 / 1B 2A 42 5E / 1D 2D 46 64, rising with both axes. Hand
+      vectors (tests/test_timing_rate_term.py): 27C6 = 24 at 700 rpm X 32, 33
+      at 2,500 rpm X 64, 22 at 4,400 rpm X 112 (hot, phi 1). Inferred, not
+      verified: no capture has read 0xFFFF15DB or 0xFFFF27C6 against it yet.
   - id: base_timing_rate_rpm_axis
     name: Base timing rate map rpm axis
     offset: 0xC890
@@ -572,8 +576,9 @@ tables:
         78 is 400, 2,800, 4,400 and 6,000 rpm.
     confidence: inferred
     evidence: >-
-      r5 to the wrapper 0x0268B8 from FUN_0004ba6c; the fuelling map at 0x9B89
-      uses the same pair of axes (0x03D110).
+      r5 to the wrapper 0x0268B8 from FUN_0004ba6c; base_timing_charge_map
+      (0x9B89) uses the same pair of axes (0x03D110), comparing this one as
+      byte x 4 with the rpm word instead.
   - id: base_timing_rate_load_axis
     name: Base timing rate map load axis (X counts)
     offset: 0xC88C
@@ -584,6 +589,179 @@ tables:
     evidence: >-
       r6 to the wrapper 0x0268B8 from FUN_0004ba6c, compared directly with the
       X byte 0xFFFF103E (raw 10 20 40 70); shown raw as the trims' load axis is.
+  - id: base_timing_charge_map
+    name: Base timing charge factor (rpm x X, q7, feeds 0xFFFF27C6)
+    offset: 0x9B89
+    rows: 4
+    cols: 4
+    dtype: u8
+    axes: {rows: base_timing_rate_rpm_axis, cols: base_timing_rate_load_axis}
+    confidence: inferred
+    evidence: >-
+      0x03D110, inside the Fuel Comp routine FuelComp_lookup_and_fill_tau, reads
+      it through 0x026934 (= 0x0268B8 with the row search 0x027194: the rpm
+      word 0xFFFF1210 against the axis 0xC890 as byte x 4; the column the X
+      byte 0xFFFF104E against 0xC88C by 0x027114) into 0xFFFF1177, whose cycle
+      copy is 0xFFFF10EB (0xFFFF1124.. -> 0xFFFF1098.., n 0x8C). Computed in
+      the fuelling code but not a fuelling table: the only readers of
+      0xFFFF10EB are 0x04B9D0 (0xFFFF17C6 = X x ((1512 >> 7) + (1B24 / 29 >>
+      5) + 0x8000 / 10EB) / 25) and 0x04BA6C (R = 10EB x 128 while 0xFFFF1512
+      = 0; F = 0x1000 - cal 0x8440 x (0x4000 - R) >> 8), both in the base
+      timing term 0xFFFF27C6. A q7 factor, 0x80 = 1.0 (R = 0x4000 there)
+      [inferred from the arithmetic]. 6C 6C 67 64 / 64 64 6E 7F / 84 84 8D A0
+      / 76 76 8E 9C, identical on ROM Store ZS44A, k106, 20260920 and 20261004.
+  - id: base_timing_load_curve
+    name: Base timing X curve (0xFFFF19CB)
+    offset: 0xCD9B
+    rows: 8
+    cols: 1
+    dtype: u8
+    confidence: inferred
+    evidence: >-
+      0x04BA52 reads it at the X byte 0xFFFF103E through the 8-entry curve
+      0x026BA4 (implicit axis 0, 32 ... 224) into 0xFFFF19CB, the divisor's
+      second factor in 0x04BC5A. 00 20 40 60 80 A0 C0 E0 on every listed
+      image: 0xFFFF19CB = min(X, 224).
+  - id: base_timing_charge_curve
+    name: Base timing rate charge curve (0xFFFF15D7)
+    offset: 0xCEAB
+    rows: 8
+    cols: 1
+    dtype: u8
+    confidence: inferred
+    evidence: >-
+      0x04BA6C reads it through 0x026BA4 at r = 0 below 0xFFFF1B24 = 0x2000,
+      255 from 0x6000, else (1B24 - 0x2000) >> 6, into 0xFFFF15D7, a Q14
+      factor of 0xFFFF15DA with 15DC. Flat 0x80 on every listed image.
+  - id: base_timing_coolant_curve
+    name: Base timing rate coolant curve (0xFFFF15DC)
+    offset: 0xCEBB
+    rows: 8
+    cols: 1
+    dtype: u8
+    confidence: inferred
+    evidence: >-
+      0x04BA6C reads it through 0x026BA4 at the rescaled coolant byte
+      0xFFFF1077 (degC = byte x 0.625 - 40) into 0xFFFF15DC, a Q14 factor of
+      0xFFFF15DA. 67 6C 76 78 78 7B 80 80 on every listed image.
+  - id: base_timing_rate_charge_curve
+    name: Base timing rate charge curve 2 (0xFFFF19B6)
+    offset: 0xD60F
+    rows: 8
+    cols: 1
+    dtype: u8
+    confidence: inferred
+    evidence: >-
+      0x04BA6C reads it through 0x026BA4 at the same 0xFFFF1B24 band as
+      base_timing_charge_curve, into 0xFFFF19B6, a Q14 factor of 0xFFFF15DE.
+      Flat 0x80 on every listed image.
+  - id: base_timing_rate_coolant_curve
+    name: Base timing rate coolant curve 2 (0xFFFF1CC9)
+    offset: 0xD9AF
+    rows: 8
+    cols: 1
+    dtype: u8
+    confidence: inferred
+    evidence: >-
+      0x04BA6C reads it through 0x026BA4 at the rescaled coolant byte
+      0xFFFF1077 into 0xFFFF1CC9, a Q14 factor of 0xFFFF15DE. 67 6C 76 78 78 7B
+      80 80 on every listed image (the same bytes as base_timing_coolant_curve).
+  # E09.7: the inputs of 0xFFFF279A = clamp(0xFFFF26D9 + 0xFFFF26D0 -
+  # (0xFFFF17FA >> 4), 0, 255) (0x04C952), subtracted in the base timing sum.
+  - id: timing_retard_26d9_map
+    name: Timing retard map 0xFFFF3630 (rpm x coolant, feeds 0xFFFF279A)
+    offset: 0x9B09
+    rows: 8
+    cols: 8
+    dtype: u8
+    axes: {rows: timing_retard_26d9_rpm_axis, cols: timing_retard_26d9_coolant_axis}
+    confidence: inferred
+    evidence: >-
+      0x04C580 passes r4 = 0x9B09, r5 = 0xC8FC, r6 = 0xC904 (0xC8FC + 8), r7
+      = the byte 0xFFFF11CE and the rescaled coolant byte 0xFFFF1077 on the
+      stack to 0x026974, which searches both axes with 0x027114 over 8
+      breakpoints (r4 = 7) and passes the width 8 to the bilinear 0x026F40: 8
+      x 8, rows 0xC8FC. The result is 0xFFFF3630 (held while 0xFFFF283D bit 7
+      is set), and 0xFFFF26D9 = 3630 x 0xFFFF15E5 >> 8, 0xFFFF15E5 a 0..255
+      fade ramp. All 64 bytes are zero on every listed image, so 0xFFFF26D9 = 0.
+  - id: timing_retard_26d9_rpm_axis
+    name: Timing retard map 0xFFFF3630 rpm axis
+    offset: 0xC8FC
+    rows: 8
+    cols: 1
+    dtype: u8
+    confidence: inferred
+    evidence: >-
+      r5 to 0x026974 from 0x04C580, compared directly (0x027114) with the byte
+      0xFFFF11CE, an rpm byte (12.5 rpm per count per the firmware notes
+      [inferred]; 0xFFFF11CE's writer is not cited here). Raw 30 38 40 48 60 80
+      90 A4.
+  - id: timing_retard_26d9_coolant_axis
+    name: Timing retard map 0xFFFF3630 coolant axis (rescaled coolant byte)
+    offset: 0xC904
+    rows: 1
+    cols: 8
+    dtype: u8
+    confidence: inferred
+    evidence: >-
+      r6 to 0x026974 from 0x04C580, compared directly with the rescaled coolant
+      byte 0xFFFF1077 (degC = byte x 0.625 - 40). Raw 40 48 50 58 60 68 70 80.
+  - id: timing_retard_26d0_rpm_curve
+    name: Timing retard 0xFFFF26D0 rpm curve (0xFFFF1301)
+    offset: 0xCC1B
+    rows: 16
+    cols: 1
+    dtype: u8
+    confidence: inferred
+    evidence: >-
+      0x04C7DA-0x04C7DE: the 16-entry curve 0x026BBC at the rpm/25 byte
+      0xFFFF11CF, into 0xFFFF1301; 0xFFFF26D0 = 1300 x 1303 x 1301 x 1302 >> 24.
+      00 00 00 60 C4 D0 FF 88 50 00 ... on every listed image.
+  - id: timing_retard_26d0_bfs_curve
+    name: Timing retard 0xFFFF26D0 BFS curve (0xFFFF1302)
+    offset: 0xCC2B
+    rows: 8
+    cols: 1
+    dtype: u8
+    confidence: inferred
+    evidence: >-
+      0x04C7C8-0x04C7D0: the 8-entry curve 0x026BA4 at min(255, 0xFFFF1038 >>
+      7) (the previous BFS word), into 0xFFFF1302. 00 02 0B 0C 0A 08 03 00 on
+      every listed image.
+  - id: timing_retard_26d0_coolant_curve
+    name: Timing retard 0xFFFF26D0 coolant curve (0xFFFF1303)
+    offset: 0xCC33
+    rows: 16
+    cols: 1
+    dtype: u8
+    confidence: inferred
+    evidence: >-
+      0x04C7E4-0x04C7EC (r4 = 0xCC2B + 8): the 16-entry curve 0x026BBC at the
+      rescaled coolant byte 0xFFFF1077, into 0xFFFF1303. 0 except entries 6..9
+      (0xFF) on every listed image, so 0xFFFF26D0 = 0 once the byte reaches 160
+      (60 degC): 0xFFFF279A is 0 on a warm engine.
+  - id: timing_retard_17fa_rpm_curve
+    name: Timing retard 0xFFFF17FA rpm curve (0xFFFF17FB)
+    offset: 0xD335
+    rows: 8
+    cols: 1
+    dtype: u8
+    confidence: inferred
+    evidence: >-
+      0x04C832 (off idle): 0xFFFF17FB = the 8-entry curve 0x026BA4 at
+      clamp(0xFFFF11D8 - 0x20, 0, 255). 00 20 20 20 20 20 00 00 on every listed
+      image (firmware notes 2026-10-17).
+  - id: timing_retard_17fa_bfs_curve
+    name: Timing retard 0xFFFF17FA BFS curve (0xFFFF17FC)
+    offset: 0xD33D
+    rows: 8
+    cols: 1
+    dtype: u8
+    confidence: inferred
+    evidence: >-
+      0x04C832 (off idle): 0xFFFF17FC = the 8-entry curve 0x026BA4 at min(255,
+      0xFFFF1038 >> 7). 10 10 10 10 10 10 00 00 on every listed image. 17FA
+      only subtracts (>> 4) before 0xFFFF279A's clamp at 0.
   - id: base_timing_alternate_curve
     name: Alternate base timing by coolant (0xFFFF1A59)
     offset: 0xCD6B

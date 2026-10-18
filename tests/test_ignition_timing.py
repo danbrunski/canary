@@ -152,6 +152,46 @@ def test_the_cells_show_an_edit_in_exactly_its_cells() -> None:
     assert (summary["cells"], summary["changed"], summary["unevaluable"]) == (256, 1, 0)
 
 
+def _both(by: int) -> TimingTables:
+    """Trim A and trim B both edited by ``by`` counts at the same cell."""
+    one = _tables(edit=("a", 3, 5, by))
+    two = _tables(edit=("b", 3, 5, by))
+    return TimingTables(a=one.a, b=two.b, rpm_axis=RPM_AXIS, load_axis=LOAD_AXIS)
+
+
+def test_the_unread_count_counts_only_a_trim_the_state_does_not_read() -> None:
+    """``changed_trim_not_read`` is "a changed trim the ECM does not read". It
+    once matched every reason that began ``trim_``, so a trim the ECM DOES read,
+    set below the term's floor (``trim_term_floor_may_bind``), counted as an
+    unread edit. Each case is one cell of the 256 at the latch's state."""
+
+    def summary(base: TimingTables, cand: TimingTables, high_det: bool) -> dict[str, Any]:
+        cells = ignition_timing_cells(base, cand, _state(high_det), coolant_c=WARM_C)
+        return timing_cell_summary(cells)
+
+    def counts(s: dict[str, Any]) -> tuple[int, int, int]:
+        return s["changed"], s["unevaluable"], s["changed_trim_not_read"]
+
+    # Trim B set to 3 (below the floor of 7) with the latch set: trim B IS read, the
+    # answer is unevaluable, and nothing is "edited but not read".
+    floor = summary(_tables(), _tables(edit=("b", 3, 5, 3 - 45)), True)
+    assert counts(floor) == (0, 1, 0)
+    assert "trim_term_floor_may_bind" in floor["reasons"]
+    # The same edit with the latch clear is the unread case, and is counted.
+    assert counts(summary(_tables(), _tables(edit=("b", 3, 5, -3)), False)) == (0, 0, 1)
+    assert counts(summary(_tables(), _tables(edit=("a", 3, 5, 2)), True)) == (0, 0, 1)
+    # Both trims edited with the latch set: B is read, so the cell changes, and the A
+    # edit beside it is still named as unread.
+    assert counts(summary(_tables(), _both(-2), True)) == (1, 0, 1)
+    cell = next(
+        c
+        for c in ignition_timing_cells(_tables(), _both(-2), _state(True), coolant_c=WARM_C)
+        if c["delta"]
+    )
+    assert cell["delta"] == -2
+    assert cell["reasons"] == ["clamp_headroom_unknown", "trim_a_not_read:high_det_latch_set"]
+
+
 # -- private ROM ----------------------------------------------------------------------
 
 

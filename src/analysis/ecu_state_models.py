@@ -135,6 +135,27 @@ def byte_curve16(table: Sequence[int], value: int) -> int:
     return interpolate_q16(int(table[index]), int(table[index + 1]), fraction)
 
 
+#: ``0x026BA4``: an 8-entry byte curve on the implicit axis 0, 32, ..., 224.
+CURVE8_ENTRIES = 8
+CURVE8_LAST_ENTRY_FROM = 0xE0
+CURVE8_INDEX_SHIFT = 5
+
+
+def byte_curve8(table: Sequence[int], value: int) -> int:
+    """``0x026BA4`` (tail ``0x027250``, ``0x027254`` with one more shift):
+    index ``value >> 5``, fraction the low five bits as Q16
+    (``(value & 31) << 11``), :func:`interpolate_q16` between the entry and the
+    next; from 224 up the last entry outright."""
+    if len(table) != CURVE8_ENTRIES:
+        raise ValueError(f"0x026BA4 reads a {CURVE8_ENTRIES}-entry curve, not {len(table)}")
+    x = _byte("curve input", value)
+    if x >= CURVE8_LAST_ENTRY_FROM:
+        return int(table[-1])
+    index = x >> CURVE8_INDEX_SHIFT
+    fraction = (x & ((1 << CURVE8_INDEX_SHIFT) - 1)) << (FRACTION_BITS - CURVE8_INDEX_SHIFT)
+    return interpolate_q16(int(table[index]), int(table[index + 1]), fraction)
+
+
 # -- E05.3 (1): the pedal enrichment flag, 0xFFFF2841 bit 0 ------------------------------
 
 #: Added to the comparand while the flag is already set (``0x055DEC``).
@@ -699,7 +720,8 @@ def selected_timing_trim(
       (``+0x120``) while ``0xFFFF283F`` bit 6 is set, else A; ``0xFFFF177A``
       reads A;
     - between: a coolant-weighted blend through the signed divide
-      ``0x021C48``, whose rounding is not established: unevaluable.
+      ``0x021C48`` (truncation toward zero, resolved 2026-10-17; the blend
+      is not implemented yet): unevaluable.
 
     Which table is UpRev's Main and which High Det stays inferred."""
     coolant = _byte("coolant", coolant)
@@ -846,6 +868,524 @@ def timing_cycle_copy(w27da: int) -> int:
     """``0x0212C4``: the end-of-cycle block copy ``0xFFFF2792..`` ->
     ``0xFFFF2706..`` puts ``0xFFFF27DA`` in ``0xFFFF274E`` (one cycle later)."""
     return _signed("0xFFFF27DA", w27da, S8_MIN, S8_MAX)
+
+
+# -- E09.7: the base timing term 0xFFFF27C6 and the inputs of 0xFFFF279A ------------------
+#
+# The term that carries most of the base advance, resolved from the listing
+# (firmware notes 2026-10-17). A burn-time model: the rate map 0x9AF9 (rpm x X)
+# times a coolant curve and a mixture curve, plus an rpm term, divides a
+# charge term, and the quotient (a time in 1/128 ms) is turned into crank
+# angle at the current rpm. Every RAM input is a required argument and every
+# calibration value is passed in, read from the image by the caller; only the
+# immediates of the code are constants here.
+#
+# Divides: the signed helper 0x021C48 divides magnitudes and negates when the
+# signs differ (truncates toward zero, :func:`_sdiv`); the unsigned helper
+# 0x021D6C floors (:func:`_udiv`). Both take the dividend in r1 and the
+# divisor in r0.
+
+#: ``0x04BA6C``: the ``0xFFFF1B24`` band that indexes the two mixture curves.
+CHARGE_INDEX_FROM = 0x2000
+CHARGE_INDEX_FULL_FROM = 0x6000
+CHARGE_INDEX_SHIFT = 6
+#: ``0x04B9D0``: immediates of the charge term (divisor 29 on 0xFFFF1B24, the
+#: ``>> 5`` that makes 0xFFFF15F7, the 0x8000 reciprocal of 0xFFFF10EB, the
+#: divisor 25 on the product, the ``>> 7`` of 0xFFFF1512).
+CHARGE_Q_DIVISOR = 29
+CHARGE_Q_SHIFT = 5
+CHARGE_RECIPROCAL = 0x8000
+CHARGE_PRODUCT_DIVISOR = 25
+CHARGE_1512_SHIFT = 7
+#: ``0x04BA6C`` immediates: the ratio's ``<< 20`` / ``>> 9`` / ``+ 0x2000``, the
+#: factor ``0x1000 - (cal x (0x4000 - R) >>a 8)``, the divisors 1000 and 625 and
+#: the ``<< 6`` of the rpm term.
+RATE_RATIO_SHIFT = 20
+RATE_RATIO_PRODUCT_SHIFT = 9
+RATE_RATIO_BIAS = 0x2000
+RATE_FACTOR_ONE = 0x1000
+RATE_FACTOR_REFERENCE = 0x4000
+RATE_FACTOR_SHIFT = 8
+RATE_MAP_DIVISOR = 1000
+RATE_RPM_SHIFT = 6
+RATE_RPM_DIVISOR = 625
+#: Q14 products (``>> 14``) in 0x04B98A and 0x04BA6C.
+Q14_SHIFT = 14
+#: ``0x04BC5A`` immediates: ``x 120`` (``x 15``, ``shll2``, ``shll``), ``x 5 >> 1``
+#: on cal 0x8B0C, ``>> 10``, ``x 3 / 5``, and the ``v - 14`` / cap 127 at 141.
+TERM_TIME_FACTOR = 120
+TERM_OFFSET_FACTOR = 5
+TERM_RPM_SHIFT = 10
+TERM_ANGLE_NUMERATOR = 3
+TERM_ANGLE_DENOMINATOR = 5
+TERM_BIAS = 14
+TERM_CAP_ABOVE = 141
+TERM_CAP = 127
+#: ``0x04C7A0``: 0xFFFF26D0 is the four-byte product ``>> 24``; ``0x04C580``:
+#: 0xFFFF26D9 the two-byte product ``>> 8``; ``0x04C952``: 0xFFFF17FA ``>> 4``.
+TERM_26D0_SHIFT = 24
+TERM_26D9_SHIFT = 8
+TERM_17FA_SHIFT = 4
+#: ``0x04C7A0``: 0xFFFF1302's curve input is ``min(255, w1038 >> 7)``.
+BFS_CURVE_SHIFT = 7
+#: ``0x03A1F0``: 0xFFFF1081 (cycle copy 0xFFFF1077) rescales the coolant byte
+#: 0xFFFF1083 (degC + 50): 0 below 10, 255 from 170, else (c - 10) x 240 / 150.
+COOLANT_RESCALE_FROM = 10
+COOLANT_RESCALE_FULL_FROM = 170
+COOLANT_RESCALE_NUMERATOR = 240
+COOLANT_RESCALE_DENOMINATOR = 150
+
+U32 = 0xFFFFFFFF
+
+
+def _sdiv(dividend: int, divisor: int) -> int:
+    """``0x021C48``: signed divide, truncating toward zero."""
+    quotient = abs(dividend) // abs(divisor)
+    return -quotient if (dividend < 0) != (divisor < 0) else quotient
+
+
+def _udiv(dividend: int, divisor: int) -> int:
+    """``0x021D6C``: unsigned divide (floor) of two non-negative words."""
+    return (dividend & U32) // (divisor & U32)
+
+
+def _s16(value: int) -> int:
+    """The low 16 bits, sign-extended (``exts.w``)."""
+    return ((value + 0x8000) & WORD_MAX) - 0x8000
+
+
+def _s32(value: int) -> int:
+    return ((value + 0x80000000) & U32) - 0x80000000
+
+
+def coolant_rescaled(raw_1083: int) -> int:
+    """``0x03A1F0``: the rescaled coolant byte 0xFFFF1081 (cycle copy
+    0xFFFF1077, degC = byte x 0.625 - 40) from the degC + 50 byte 0xFFFF1083:
+    0 below 10, 255 from 170, else ``(c - 10) x 240 / 150`` through the signed
+    divide 0x021C48 (positive, so a floor). Not 0xFFFF1079, the degC + 50 copy
+    the trim selection reads."""
+    c = _byte("0xFFFF1083", raw_1083)
+    if c < COOLANT_RESCALE_FROM:
+        return 0
+    if c >= COOLANT_RESCALE_FULL_FROM:
+        return BYTE_MAX
+    return _sdiv(
+        (c - COOLANT_RESCALE_FROM) * COOLANT_RESCALE_NUMERATOR, COOLANT_RESCALE_DENOMINATOR
+    )
+
+
+def timing_term_1512(b26f2: int, cal_8538: int) -> int:
+    """``0x04B96C``: ``0xFFFF1512 = 0xFFFF26F2 x cal 0x8538`` (``mulu.w``, low
+    16 bits). Cal 0x8538 is 0 on every listed image, so the word is 0 there."""
+    return (_byte("0xFFFF26F2", b26f2) * _byte("cal 0x8538", cal_8538)) & WORD_MAX
+
+
+def timing_charge_word_1b24(w26f6: int, w26e8: int, w26c0: int) -> int:
+    """``0x04B98A``: ``0xFFFF1B24 = min(0xFFFF, max(0, 0xFFFF26F6 -
+    0xFFFF26E8) x 0xFFFF26C0 >> 14)``: the correction sum less 26E8, times the
+    enrichment multiplier (Q14, 0x4000 = 1.0)."""
+    base = max(0, _word("0xFFFF26F6", w26f6) - _word("0xFFFF26E8", w26e8))
+    return min(WORD_MAX, (base * _word("0xFFFF26C0", w26c0)) >> Q14_SHIFT)
+
+
+def timing_charge_map_10eb(
+    table_9b89: Sequence[Sequence[int]],
+    rpm_axis_c890: Sequence[int],
+    load_axis_c88c: Sequence[int],
+    rpm_word: int,
+    load_byte: int,
+) -> int:
+    """``0x03D110`` through ``0x026934``: map 0x9B89 (4 x 4, q7: 0x80 = 1.0)
+    at the rpm word 0xFFFF1210 (searched by 0x027194 against the axis 0xC890
+    as byte x 4) and the X byte 0xFFFF104E (0x027114 against 0xC88C), into
+    0xFFFF1177. 0xFFFF10EB is its cycle copy (0xFFFF1124.. -> 0xFFFF1098..,
+    n 0x8C), so in a steady state 0xFFFF10EB is this lookup at the snapshot's
+    rpm word and X. Computed inside the Fuel Comp routine; its only readers
+    (via 0xFFFF10EB) are 0x04B9D0 and 0x04BA6C, so it is a timing table."""
+    result = lookup_2d(
+        [[_byte("0x9B89 cell", c) for c in row] for row in table_9b89],
+        [b * TRIM_RPM_AXIS_SCALE for b in rpm_axis_c890],
+        list(load_axis_c88c),
+        _word("rpm word", rpm_word),
+        _byte("X byte", load_byte),
+    )
+    return result.value
+
+
+def timing_load_curve_19cb(curve_cd9b: Sequence[int], x_103e: int) -> int:
+    """``0x04BA52``: ``0xFFFF19CB`` = the 8-entry curve 0xCD9B at the X byte
+    0xFFFF103E. The curve is 00 20 .. E0 on every listed image, so it is
+    ``min(X, 224)`` there."""
+    return byte_curve8(curve_cd9b, x_103e)
+
+
+@dataclass(frozen=True)
+class ChargeTerm:
+    """``0x04B9D0``."""
+
+    #: ``0xFFFF17C6``.
+    w17c6: int
+    #: ``0xFFFF15F7``: ``(0xFFFF1B24 / 29) >> 5`` as a byte.
+    b15f7: int
+
+
+def timing_charge_term_17c6(*, x_103e: int, w1b24: int, b10eb: int, w1512: int) -> ChargeTerm:
+    """``0x04B9D0``: ``q = 0xFFFF1B24 / 29`` (signed divide);
+    ``0xFFFF15F7 = q >> 5``; ``0xFFFF17C6 = 0xFFFF`` when 0xFFFF10EB is 0,
+    else ``min(0xFFFF, X x ((0xFFFF1512 >> 7) + (q >> 5 & 0xFF) + 0x8000 /
+    0xFFFF10EB) / 25)``, both divides signed (truncating toward zero)."""
+    x = _byte("0xFFFF103E", x_103e)
+    q = _sdiv(_word("0xFFFF1B24", w1b24), CHARGE_Q_DIVISOR)
+    b15f7 = (q >> CHARGE_Q_SHIFT) & BYTE_MAX
+    b10 = _byte("0xFFFF10EB", b10eb)
+    w12 = _word("0xFFFF1512", w1512)
+    if b10 == 0:
+        return ChargeTerm(WORD_MAX, b15f7)
+    total = (w12 >> CHARGE_1512_SHIFT) + b15f7 + _sdiv(CHARGE_RECIPROCAL, b10)
+    return ChargeTerm(min(WORD_MAX, _sdiv(x * total, CHARGE_PRODUCT_DIVISOR)), b15f7)
+
+
+@dataclass(frozen=True)
+class RateTerm:
+    """``0x04BA6C``: 0xFFFF15DE and every intermediate it stores or forms, so
+    a read of any of them can be checked."""
+
+    #: ``0xFFFF15DE``.
+    w15de: int
+    #: ``0xFFFF15DA = min(255, 15D7 x 15DC x 15DB >> 14)``.
+    b15da: int
+    #: ``0xFFFF15DB``: map 0x9AF9 at (rpm/50, X).
+    b15db: int
+    #: ``0xFFFF15D7``: curve 0xCEAB at the charge index.
+    b15d7: int
+    #: ``0xFFFF15DC``: curve 0xCEBB at the rescaled coolant byte.
+    b15dc: int
+    #: ``0xFFFF1CC9``: curve 0xD9AF at the rescaled coolant byte.
+    b1cc9: int
+    #: ``0xFFFF19B6``: curve 0xD60F at the charge index.
+    b19b6: int
+    #: ``r``: 0 below 0x2000, 255 from 0x6000, else ``(0xFFFF1B24 - 0x2000) >> 6``.
+    charge_index: int
+    #: ``R = (10EB << 20) / (((1512 x 10EB) >> 9) + 0x2000)`` (unsigned), low 16 bits signed.
+    ratio: int
+    #: ``F = s16(0x1000 - (cal 0x8440 x (0x4000 - R) >>a 8))``.
+    factor: int
+    #: ``S = clamp(15DA x F / 1000 + (cal 0x880E x rpm word << 6) / 625, 0, 0xFFFF)``.
+    rate: int
+
+
+def timing_rate_word_15de(
+    *,
+    coolant_1077: int,
+    w1b24: int,
+    rpm50_11ca: int,
+    x_103e: int,
+    rpm_word_11d8: int,
+    b10eb: int,
+    w1512: int,
+    rate_map_9af9: Sequence[Sequence[int]],
+    rpm_axis_c890: Sequence[int],
+    load_axis_c88c: Sequence[int],
+    coolant_curve_cebb: Sequence[int],
+    charge_curve_ceab: Sequence[int],
+    coolant_curve_d9af: Sequence[int],
+    charge_curve_d60f: Sequence[int],
+    cal_8440: int,
+    cal_880e: int,
+) -> RateTerm:
+    """``0x04BA6C``, with ``c`` the RESCALED coolant byte 0xFFFF1077
+    (:func:`coolant_rescaled`; not degC + 50) and ``A`` = 0xFFFF1B24:
+
+    - ``15DC = curve8(0xCEBB, c)``; ``r`` = 0 if ``A < 0x2000``, 255 if
+      ``A >= 0x6000``, else ``(A - 0x2000) >> 6``; ``15D7 = curve8(0xCEAB, r)``;
+    - ``15DB`` = map 0x9AF9 at (rpm/50 byte 0xFFFF11CA, X 0xFFFF103E) through
+      0x0268B8, which searches BOTH axes with 0x027114 (the rpm axis 0xC890
+      compared with the rpm/50 byte directly, unlike 0x9B89);
+    - ``15DA = min(255, 15D7 x 15DC x 15DB >> 14)``;
+    - ``R = udiv(10EB << 20, ((1512 x 10EB) >> 9) + 0x2000)``, sign-extended
+      from 16 bits; ``F = s16(0x1000 - (cal 0x8440 x (0x4000 - R) >>a 8))``
+      (an arithmetic shift);
+    - ``S = clamp(sdiv(15DA x F, 1000) + sdiv((cal 0x880E x 11D8) << 6, 625),
+      0, 0xFFFF)``;
+    - ``1CC9 = curve8(0xD9AF, c)``; ``19B6 = curve8(0xD60F, r)``;
+      ``15DE = min(0xFFFF, S x 19B6 x 1CC9 >> 14)``."""
+    c = _byte("0xFFFF1077 (rescaled coolant)", coolant_1077)
+    a = _word("0xFFFF1B24", w1b24)
+    b10 = _byte("0xFFFF10EB", b10eb)
+    w12 = _word("0xFFFF1512", w1512)
+    rpm_word = _word("0xFFFF11D8", rpm_word_11d8)
+    if a < CHARGE_INDEX_FROM:
+        r = 0
+    elif a >= CHARGE_INDEX_FULL_FROM:
+        r = BYTE_MAX
+    else:
+        r = (a - CHARGE_INDEX_FROM) >> CHARGE_INDEX_SHIFT
+    b15dc = byte_curve8(coolant_curve_cebb, c)
+    b15d7 = byte_curve8(charge_curve_ceab, r)
+    b15db = lookup_2d(
+        [[_byte("0x9AF9 cell", v) for v in row] for row in rate_map_9af9],
+        list(rpm_axis_c890),
+        list(load_axis_c88c),
+        _byte("0xFFFF11CA", rpm50_11ca),
+        _byte("0xFFFF103E", x_103e),
+    ).value
+    b15da = min(BYTE_MAX, (b15d7 * b15dc * b15db) >> Q14_SHIFT)
+    ratio = _s16(
+        _udiv(
+            b10 << RATE_RATIO_SHIFT,
+            ((w12 * b10) >> RATE_RATIO_PRODUCT_SHIFT) + RATE_RATIO_BIAS,
+        )
+    )
+    product = _s32(_byte("cal 0x8440", cal_8440) * (RATE_FACTOR_REFERENCE - ratio))
+    factor = _s16(RATE_FACTOR_ONE - (product >> RATE_FACTOR_SHIFT))
+    rpm_term = _sdiv((_byte("cal 0x880E", cal_880e) * rpm_word) << RATE_RPM_SHIFT, RATE_RPM_DIVISOR)
+    rate = max(0, min(WORD_MAX, _sdiv(b15da * factor, RATE_MAP_DIVISOR) + rpm_term))
+    b1cc9 = byte_curve8(coolant_curve_d9af, c)
+    b19b6 = byte_curve8(charge_curve_d60f, r)
+    w15de = min(WORD_MAX, (rate * b19b6 * b1cc9) >> Q14_SHIFT)
+    return RateTerm(w15de, b15da, b15db, b15d7, b15dc, b1cc9, b19b6, r, ratio, factor, rate)
+
+
+def timing_term_27c6(
+    *, w17c6: int, w15de: int, b19cb: int, rpm_word: int, cal_880d: int, cal_8b0c: int
+) -> int:
+    """``0x04BC5A``, into the signed byte 0xFFFF27C6 (degrees):
+
+    - ``t = 0xFFFF`` when ``15DE x 19CB`` is 0, else
+      ``udiv(cal 0x880D x 120 x 17C6, 15DE x 19CB)``;
+    - ``u = t + (cal 0x8B0C x 5 >> 1)``: a time in 1/128 ms [inferred];
+    - below 0x10000, ``v = udiv(((11D8 x u) >> 10) x 3, 5)``; from 0x10000,
+      ``v = sdiv(((11D8 x 0xFFFF) >>a 10) x 3, 5)``;
+    - ``v - 14`` while ``v <= 141``, else 127 (immediates, not calibration).
+      The compare is unsigned (``cmp/hi`` at 0x04BD0A), so a negative ``v``
+      (only from the second branch, with an rpm word above 0x8000) reads as
+      a large unsigned value and gives 127.
+
+    Degrees = rpm x time: ``v`` is the crank angle swept in ``u x 7.8125 us``
+    [inferred]."""
+    t17 = _word("0xFFFF17C6", w17c6)
+    divisor = _word("0xFFFF15DE", w15de) * _byte("0xFFFF19CB", b19cb)
+    rpm = _word("0xFFFF11D8", rpm_word)
+    if divisor == 0:
+        t = WORD_MAX
+    else:
+        t = _udiv(_byte("cal 0x880D", cal_880d) * TERM_TIME_FACTOR * t17, divisor)
+    u = t + ((_byte("cal 0x8B0C", cal_8b0c) * TERM_OFFSET_FACTOR) >> 1)
+    if u <= WORD_MAX:
+        v = _udiv(((rpm * u) >> TERM_RPM_SHIFT) * TERM_ANGLE_NUMERATOR, TERM_ANGLE_DENOMINATOR)
+    else:
+        v = _sdiv(
+            (_s32(rpm * WORD_MAX) >> TERM_RPM_SHIFT) * TERM_ANGLE_NUMERATOR,
+            TERM_ANGLE_DENOMINATOR,
+        )
+    return v - TERM_BIAS if (v & U32) <= TERM_CAP_ABOVE else TERM_CAP
+
+
+@dataclass(frozen=True)
+class BaseTimingTables:
+    """The ROM tables the 0xFFFF27C6 chain reads (rom_map ids in comments),
+    as raw bytes read from the image."""
+
+    #: ``base_timing_rate_map`` (0x9AF9), 4 x 4, rows the rpm axis.
+    rate_map_9af9: tuple[tuple[int, ...], ...]
+    #: ``base_timing_charge_map`` (0x9B89), 4 x 4, the same axes.
+    charge_map_9b89: tuple[tuple[int, ...], ...]
+    #: ``base_timing_rate_rpm_axis`` (0xC890): rpm/50 bytes.
+    rpm_axis_c890: tuple[int, ...]
+    #: ``base_timing_rate_load_axis`` (0xC88C): X bytes.
+    load_axis_c88c: tuple[int, ...]
+    #: ``base_timing_load_curve`` (0xCD9B), 8 entries, at X.
+    load_curve_cd9b: tuple[int, ...]
+    #: ``base_timing_coolant_curve`` (0xCEBB), 8 entries, at the rescaled coolant byte.
+    coolant_curve_cebb: tuple[int, ...]
+    #: ``base_timing_charge_curve`` (0xCEAB), 8 entries, at the charge index.
+    charge_curve_ceab: tuple[int, ...]
+    #: ``base_timing_rate_coolant_curve`` (0xD9AF), 8 entries.
+    coolant_curve_d9af: tuple[int, ...]
+    #: ``base_timing_rate_charge_curve`` (0xD60F), 8 entries.
+    charge_curve_d60f: tuple[int, ...]
+
+
+@dataclass(frozen=True)
+class BaseTimingCals:
+    """The calibration bytes of the 0xFFFF27C6 chain, read from the image."""
+
+    #: 179 on every listed image.
+    cal_880d: int
+    #: 25.
+    cal_880e: int
+    #: 32.
+    cal_8440: int
+    #: 14.
+    cal_8b0c: int
+
+
+@dataclass(frozen=True)
+class BaseTimingTerm:
+    """0xFFFF27C6 and every intermediate of its chain."""
+
+    #: ``0xFFFF27C6``, signed degrees.
+    term: int
+    charge: ChargeTerm
+    rate: RateTerm
+    #: ``0xFFFF19CB``.
+    b19cb: int
+    #: ``0xFFFF10EB`` as used.
+    b10eb: int
+    #: ``0xFFFF11CA`` as used.
+    rpm50: int
+
+
+def timing_term_27c6_chain(
+    *,
+    rpm_word_11d8: int,
+    rpm50_11ca: int,
+    x_103e: int,
+    coolant_1077: int,
+    w1b24: int,
+    w1512: int,
+    b10eb: int,
+    tables: BaseTimingTables,
+    cals: BaseTimingCals,
+) -> BaseTimingTerm:
+    """0x04BA52, 0x04B9D0, 0x04BA6C and 0x04BC5A in order, on the snapshot
+    bytes each reads. ``coolant_1077`` is the RESCALED coolant byte
+    (:func:`coolant_rescaled`)."""
+    b19cb = timing_load_curve_19cb(tables.load_curve_cd9b, x_103e)
+    charge = timing_charge_term_17c6(x_103e=x_103e, w1b24=w1b24, b10eb=b10eb, w1512=w1512)
+    rate = timing_rate_word_15de(
+        coolant_1077=coolant_1077,
+        w1b24=w1b24,
+        rpm50_11ca=rpm50_11ca,
+        x_103e=x_103e,
+        rpm_word_11d8=rpm_word_11d8,
+        b10eb=b10eb,
+        w1512=w1512,
+        rate_map_9af9=tables.rate_map_9af9,
+        rpm_axis_c890=tables.rpm_axis_c890,
+        load_axis_c88c=tables.load_axis_c88c,
+        coolant_curve_cebb=tables.coolant_curve_cebb,
+        charge_curve_ceab=tables.charge_curve_ceab,
+        coolant_curve_d9af=tables.coolant_curve_d9af,
+        charge_curve_d60f=tables.charge_curve_d60f,
+        cal_8440=cals.cal_8440,
+        cal_880e=cals.cal_880e,
+    )
+    term = timing_term_27c6(
+        w17c6=charge.w17c6,
+        w15de=rate.w15de,
+        b19cb=b19cb,
+        rpm_word=rpm_word_11d8,
+        cal_880d=cals.cal_880d,
+        cal_8b0c=cals.cal_8b0c,
+    )
+    return BaseTimingTerm(term, charge, rate, b19cb, b10eb, rpm50_11ca)
+
+
+#: ``0xFFFF11CA`` is ``min(255, accumulator >> 8)`` and the rpm word
+#: ``accumulator >> 6``, so in a steady state it is ``min(255, rpm word >> 2)``.
+RPM50_FROM_WORD_SHIFT = 2
+
+
+def timing_term_27c6_steady(
+    *,
+    rpm_word: int,
+    x: int,
+    coolant_1077: int,
+    w1b24: int,
+    w1512: int,
+    tables: BaseTimingTables,
+    cals: BaseTimingCals,
+) -> BaseTimingTerm:
+    """:func:`timing_term_27c6_chain` in a STEADY state: rpm and X have held
+    for at least a cycle, so the snapshot copies equal their sources and
+    ``0xFFFF10EB`` is :func:`timing_charge_map_10eb` at the same rpm word and
+    X, and ``0xFFFF11CA = min(255, rpm word >> 2)``. Off steady state pass
+    the snapshot bytes to :func:`timing_term_27c6_chain` instead."""
+    b10eb = timing_charge_map_10eb(
+        tables.charge_map_9b89, tables.rpm_axis_c890, tables.load_axis_c88c, rpm_word, x
+    )
+    return timing_term_27c6_chain(
+        rpm_word_11d8=rpm_word,
+        rpm50_11ca=min(BYTE_MAX, _word("rpm word", rpm_word) >> RPM50_FROM_WORD_SHIFT),
+        x_103e=x,
+        coolant_1077=coolant_1077,
+        w1b24=w1b24,
+        w1512=w1512,
+        b10eb=b10eb,
+        tables=tables,
+        cals=cals,
+    )
+
+
+def timing_term_26d9(b3630: int, b15e5: int) -> int:
+    """``0x04C580``: ``0xFFFF26D9 = 0xFFFF3630 x 0xFFFF15E5 >> 8``. 0xFFFF3630
+    is map 0x9B09 (8 x 8, through 0x026974) at (the rpm byte 0xFFFF11CE, the
+    rescaled coolant byte 0xFFFF1077) unless 0xFFFF283D bit 7 holds the last
+    value; 0xFFFF15E5 is a 0..255 fade ramp (0x04C49E). 0x9B09 is all zero on
+    every listed image, so 0xFFFF26D9 is 0 there."""
+    return (_byte("0xFFFF3630", b3630) * _byte("0xFFFF15E5", b15e5)) >> TERM_26D9_SHIFT
+
+
+@dataclass(frozen=True)
+class Term26d0Curves:
+    """``0x04C7A0``'s three curve reads."""
+
+    #: ``0xFFFF1301``: 16-entry curve 0xCC1B (0x026BBC) at the rpm/25 byte 0xFFFF11CF.
+    b1301: int
+    #: ``0xFFFF1302``: 8-entry curve 0xCC2B (0x026BA4) at ``min(255, w1038 >> 7)``.
+    b1302: int
+    #: ``0xFFFF1303``: 16-entry curve 0xCC33 (0x026BBC) at the rescaled coolant byte.
+    b1303: int
+
+
+def timing_26d0_curves(
+    *,
+    curve_cc1b: Sequence[int],
+    curve_cc2b: Sequence[int],
+    curve_cc33: Sequence[int],
+    rpm25_11cf: int,
+    w1038: int,
+    coolant_1077: int,
+) -> Term26d0Curves:
+    """``0x04C7A0`` (listing 0x04C7C8-0x04C7F2): 0xFFFF1302 = 8-entry curve
+    0xCC2B at ``min(255, 0xFFFF1038 >> 7)`` (the previous BFS word); 0xFFFF1301
+    = 16-entry curve 0xCC1B at the rpm/25 byte 0xFFFF11CF; 0xFFFF1303 =
+    16-entry curve 0xCC33 at the rescaled coolant byte 0xFFFF1077. 0xCC33 is
+    0 from entry 10 on every listed image, so 0xFFFF1303 is 0 once the
+    rescaled coolant byte reaches 160 (60 degC)."""
+    bfs = min(BYTE_MAX, _word("0xFFFF1038", w1038) >> BFS_CURVE_SHIFT)
+    return Term26d0Curves(
+        b1301=byte_curve16(curve_cc1b, rpm25_11cf),
+        b1302=byte_curve8(curve_cc2b, bfs),
+        b1303=byte_curve16(curve_cc33, coolant_1077),
+    )
+
+
+def timing_term_26d0(b1300: int, b1301: int, b1302: int, b1303: int) -> int:
+    """``0x04C7A0``: ``0xFFFF26D0 = 1300 x 1303 x 1301 x 1302 >> 24`` (32-bit
+    ``mul.l`` products; four bytes never wrap). 0xFFFF1300 is a 0..255 ramp
+    (0x04C5D8, +/-2 per call) the twin takes as an argument."""
+    product = (
+        _byte("0xFFFF1300", b1300)
+        * _byte("0xFFFF1303", b1303)
+        * _byte("0xFFFF1301", b1301)
+        * _byte("0xFFFF1302", b1302)
+    )
+    return (product & U32) >> TERM_26D0_SHIFT
+
+
+def timing_term_279a(b26d9: int, b26d0: int, b17fa: int) -> int:
+    """``0x04C952``: ``0xFFFF279A = clamp(0xFFFF26D9 + 0xFFFF26D0 -
+    (0xFFFF17FA >> 4), 0, 255)``, subtracted in the base timing sum. With
+    0xFFFF26D9 = 0 (map 0x9B09 all zero) and 0xFFFF26D0 = 0 (warm engine) it
+    is 0 whatever 0xFFFF17FA holds."""
+    total = (
+        _byte("0xFFFF26D9", b26d9)
+        + _byte("0xFFFF26D0", b26d0)
+        - (_byte("0xFFFF17FA", b17fa) >> TERM_17FA_SHIFT)
+    )
+    return max(0, min(BYTE_MAX, total))
 
 
 @dataclass(frozen=True)
@@ -1059,6 +1599,10 @@ __all__ = [
     "TIMING_FLOOR",
     "TIMING_REQUIREMENT",
     "TRIM_TERM_SUBTRAHEND_MAX",
+    "BaseTimingCals",
+    "BaseTimingTables",
+    "BaseTimingTerm",
+    "ChargeTerm",
     "Checkpoint",
     "EnrichmentCycle",
     "EnrichmentInputs",
@@ -1067,9 +1611,11 @@ __all__ = [
     "FinalBranch",
     "FlagRead",
     "PedalFlagModel",
+    "RateTerm",
     "RetardCombine",
     "SelectedTrim",
     "Step",
+    "Term26d0Curves",
     "TimingDelta",
     "TimingStatus",
     "TrimLookup",
@@ -1081,6 +1627,8 @@ __all__ = [
     "base_timing_select",
     "base_timing_sum",
     "byte_curve16",
+    "byte_curve8",
+    "coolant_rescaled",
     "enrichment_commit",
     "enrichment_request",
     "enrichment_step",
@@ -1091,13 +1639,26 @@ __all__ = [
     "pedal_flag_next",
     "pedal_threshold",
     "selected_timing_trim",
+    "timing_26d0_curves",
+    "timing_charge_map_10eb",
+    "timing_charge_term_17c6",
+    "timing_charge_word_1b24",
     "timing_cycle_copy",
     "timing_degrees_btdc",
     "timing_delta",
     "timing_final_byte",
+    "timing_load_curve_19cb",
     "timing_rate_limit",
     "timing_rate_limit_steady",
+    "timing_rate_word_15de",
     "timing_retard_combine",
+    "timing_term_1512",
+    "timing_term_26d0",
+    "timing_term_26d9",
+    "timing_term_279a",
+    "timing_term_27c6",
+    "timing_term_27c6_chain",
+    "timing_term_27c6_steady",
     "timing_trim_terms",
     "trim_lookup",
     "uprev_power_on",

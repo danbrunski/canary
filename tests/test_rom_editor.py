@@ -128,6 +128,10 @@ def request(**over: Any) -> dict[str, Any]:
         throttle_closed_learned=0.0,
         idle_air_learned=0.0,
         evap_purge_area=0.0,
+        # The truck's state on 2026-10-08 (RAM read): HI DET set, knock control in
+        # fallback. A scenario here, never a default: the request has none.
+        high_det="set",
+        knock_control="fallback",
         candidate_events="none",
         draws=6,
         seed=20261015,
@@ -614,40 +618,159 @@ def test_the_target_afr_grid_and_a_reflash_event_are_carried(
     assert out["learned_state"]["base"]["ltft_pct"] == 3.0
 
 
-def test_the_timing_output_is_not_stated_and_a_trim_simulate_refuses_by_name(
+def test_a_k_edit_states_the_timing_state_and_names_the_node_that_reaches_timing(
     kit_and_image: tuple[SimKit, bytes],
     matched: dict[str, Any],
     registry: TuneRevisionRegistry,
 ) -> None:
-    """E09.7: the request carries no HI DET / knock state yet, so the timing
-    block says so, and a trim edit (editable: it previews) refuses to simulate
-    before any draw instead of defaulting the latch."""
+    """E09.7: the request states the HI DET latch and knock control, the block
+    echoes them with where they came from, and a K edit (which reaches timing
+    outside the trims) is unevaluable by the node, never by a missing state."""
     kit, image = kit_and_image
     req = rom_editor.SimRequest.model_validate(request(draws=2))
     out = rom_editor.simulate_edits(image, matched, req, PROFILE, kit=kit, registry=registry)
     timing = out["ignition_timing"]
-    # The default edit is K, which also reaches timing outside the trims.
     assert (timing["status"], timing["reasons"]) == (
         "unevaluable",
-        ["timing_state_unstated", "timing_input_changed:air_charge_tp"],
+        ["timing_input_changed:air_charge_tp"],
     )
+    assert timing["state"] == {
+        "high_det": True,
+        "knock_control": "fallback",
+        "source": rom_editor.TIMING_SOURCE,
+    }
     assert timing["torque"]["status"] == "unsupported"
-    assert {r for p in timing["points"] for o in p["outcomes"] for r in o["reasons"]} <= {
-        "timing_state_unstated",
+    # Each design point is held for what the chain does not compute (a K change
+    # moves X and so 0xFFFF27C6), and every pair also names the node that reaches it.
+    pairs = [o for p in timing["points"] for o in p["outcomes"]]
+    assert {r for o in pairs for r in o["reasons"]} <= {
         "load_input_x_not_computed",
+        "base_timing_load_term_unmodelled",
+        "enrichment_retard_unmodelled",
         "timing_input_changed:air_charge_tp",
     }
-    trim = [{"table": "timing_trim_b", "slot": 1, "cells": [[3, 3]], "add_raw": -1}]
-    with pytest.raises(SimulationRefusalError) as refused:
-        rom_editor.simulate_edits(
-            image,
-            matched,
-            rom_editor.SimRequest.model_validate(request(draws=2, edits=trim)),
-            PROFILE,
-            kit=kit,
-            registry=registry,
-        )
-    assert refused.value.reason == "timing_state_unstated"
+    assert {o["status"] for o in pairs} == {"unevaluable"}
+    # The state is the request's: the other pairing is stated back as it was sent.
+    clear = rom_editor.SimRequest.model_validate(
+        request(draws=2, high_det="clear", knock_control="active")
+    )
+    other = rom_editor.simulate_edits(image, matched, clear, PROFILE, kit=kit, registry=registry)
+    assert other["ignition_timing"]["state"]["high_det"] is False
+    assert other["ignition_timing"]["state"]["knock_control"] == "active"
+
+
+@pytest.fixture(scope="module")
+def trim_world(
+    kit_and_image: tuple[SimKit, bytes],
+) -> tuple[SimKit, bytes, dict[str, Any], TuneRevisionRegistry]:
+    """The synthetic image with its trims' axes made monotonic (the seeded noise
+    makes the lookup land anywhere) and both trims set to a surface above the
+    floor: rows 40..55, trim B three counts higher, bit 7 set from column 8 on."""
+    kit, base = kit_and_image
+    rom_map = kit.rom_map
+
+    def at(table_id: str, slot: int | None = None) -> int:
+        table = rom_map.table(table_id)
+        return rom_map.table_address(table, slot if table.slot_offset is not None else None)
+
+    image = bytearray(base)
+    for i in range(16):
+        image[at("timing_trim_rpm_axis") + i] = 8 * (i + 1)
+        image[at("timing_trim_load_axis") + i] = 8 * (i + 1)
+    for name, lift in (("timing_trim_a", 0), ("timing_trim_b", 3)):
+        for r in range(16):
+            for c in range(16):
+                image[at(name, 1) + r * 16 + c] = (0x80 if c >= 8 else 0) | (40 + r + lift)
+    plain = bytes(image)
+    registry = TuneRevisionRegistry(
+        revisions=[
+            TuneRevision(
+                revision=REVISION,
+                flashed_at=datetime(2026, 10, 1, tzinfo=UTC),
+                image_sha256=sha256_hex(plain),
+            )
+        ]
+    )
+    return kit, plain, revision_match(sha256_hex(plain), registry), registry
+
+
+def _trim_run(
+    world: tuple[SimKit, bytes, dict[str, Any], TuneRevisionRegistry], table: str, **over: Any
+) -> dict[str, Any]:
+    kit, image, match, registry = world
+    edits = [{"table": table, "slot": 1, "cells": [[3, 3], [4, 9]], "add_raw": -3}]
+    req = rom_editor.SimRequest.model_validate(request(draws=2, edits=edits, **over))
+    return rom_editor.simulate_edits(image, match, req, PROFILE, kit=kit, registry=registry)
+
+
+def test_a_trim_edit_simulates_and_shows_delta_in_exactly_the_cells_it_edited(
+    trim_world: tuple[SimKit, bytes, dict[str, Any], TuneRevisionRegistry],
+) -> None:
+    """The trim the ECM reads with the latch set is B: -3 counts on two of its
+    cells is -3 degrees on those two cells of the trims' own grid, torque stays
+    unsupported, and the flag bit of the edited cell is kept."""
+    out = _trim_run(trim_world, "timing_trim_b", high_det="set")
+    timing = out["ignition_timing"]
+    assert (timing["status"], timing["trims_changed"], timing["other_inputs_changed"]) == (
+        "evaluated",
+        True,
+        [],
+    )
+    assert timing["summary"]["cells"] == 256 and timing["summary"]["changed"] == 2
+    assert [
+        (c["row"], c["col"], c["delta"], c["trim_term_delta"], c["table_read"])
+        for c in timing["cells"]
+    ] == [(3, 3, -3, -3, "b"), (4, 9, -3, -3, "b")]
+    assert {r for c in timing["cells"] for r in c["reasons"]} == {"clamp_headroom_unknown"}
+    assert timing["torque"]["status"] == "unsupported"
+    assert timing["torque"]["reason"].startswith("spark_response_unmeasured")
+    # Column 9 carries bit 7: 0x80 | 43 -> 0x80 | 40, the flag untouched.
+    flagged = next(c for c in out["candidate"]["cells"] if c["col"] == 9)
+    assert (flagged["old"], flagged["new"]) == (0x80 | 47, 0x80 | 44)
+    assert flagged["old"] & 0x80 and flagged["new"] & 0x80
+
+
+def test_a_trim_the_stated_latch_does_not_read_is_named_not_shown_as_zero(
+    trim_world: tuple[SimKit, bytes, dict[str, Any], TuneRevisionRegistry],
+) -> None:
+    """Trim A with the latch set (the truck's state on 2026-10-08), and trim B
+    with it clear: the edit is real and changes nothing the ECM reads, so every
+    edited cell says which trim it is and why it does not count."""
+    for table, latch, read, reason in (
+        ("timing_trim_a", "set", "b", "trim_a_not_read:high_det_latch_set"),
+        ("timing_trim_b", "clear", "a", "trim_b_not_read:high_det_latch_clear"),
+    ):
+        timing = _trim_run(trim_world, table, high_det=latch)["ignition_timing"]
+        assert timing["status"] == "evaluated"
+        assert timing["summary"]["changed"] == 0
+        assert timing["summary"]["changed_trim_not_read"] == 2
+        assert [(c["delta"], c["table_read"], c["reasons"]) for c in timing["cells"]] == [
+            (0, read, [reason]),
+            (0, read, [reason]),
+        ]
+    # Knock control does not choose the table: the cells are the same either way.
+    one = _trim_run(trim_world, "timing_trim_b", high_det="set", knock_control="active")
+    two = _trim_run(trim_world, "timing_trim_b", high_det="set", knock_control="fallback")
+    assert one["ignition_timing"]["cells"] == two["ignition_timing"]["cells"]
+    assert one["ignition_timing"]["state"]["knock_control"] == "active"
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "error"),
+    [
+        ("high_det", True, "literal_error"),
+        ("high_det", "latched", "literal_error"),
+        ("high_det", None, "literal_error"),
+        ("knock_control", "off", "literal_error"),
+        ("knock_control", False, "literal_error"),
+    ],
+)
+def test_the_timing_state_takes_the_two_words_the_cli_does_and_nothing_else(
+    field: str, value: Any, error: str
+) -> None:
+    with pytest.raises(ValidationError) as err:
+        rom_editor.SimRequest.model_validate(request(**{field: value}))
+    assert [(e["type"], e["loc"]) for e in err.value.errors()] == [(error, (field,))]
 
 
 # -- the child entry ----------------------------------------------------------------------------
@@ -901,6 +1024,27 @@ def test_a_new_simrequest_field_must_be_classified_as_typical_or_never() -> None
         "seed",
         "label",
     } <= never
+
+
+def test_the_latch_and_knock_states_are_never_typical_values() -> None:
+    """E09.7: HI DET and knock control are live ECU states, not constants of the
+    vehicle. On 2026-10-08 the RAM read showed the latch set and knock control in
+    fallback (KS1 fault); a typical value would keep saying so after the repair,
+    and a vehicle file naming either is refused by the schema, not by review."""
+    assert {"high_det", "knock_control"} <= set(rom_editor.NEVER_TYPICAL_FIELDS)
+    assert not {"high_det", "knock_control"} & set(rom_editor.TYPICAL_FIELDS)
+    raw = _typical_declaration()
+    assert not {"high_det", "knock_control"} & {*raw["values"], *raw["left_empty"]}
+    for name in ("high_det", "knock_control"):
+        offered = {
+            **raw,
+            "values": {
+                **raw["values"],
+                name: {"value": 1, "kind": "typical", "source": "a made-up source"},
+            },
+        }
+        with pytest.raises(ValidationError, match="never filled by the typical-values button"):
+            rom_editor.TypicalValuesDeclaration.model_validate(offered)
 
 
 def test_the_shipped_values_and_the_remaining_fields_make_a_valid_request() -> None:

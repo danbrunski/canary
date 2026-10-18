@@ -3,13 +3,19 @@ import { readFile } from "node:fs/promises";
 import { expect, test, type Locator, type Page } from "@playwright/test";
 
 import { STATUSES } from "../src/lib/romSimView";
-import { LEVERS_FUEL_COMP } from "../src/test/romLeverFixtures";
+import { LEVERS_FUEL_COMP, LEVERS_TIMING_TRIM } from "../src/test/romLeverFixtures";
 import { ENTRY_K106, ENTRY_TUNED, ENTRY_UNRECORDED } from "../src/test/romLibraryFixtures";
 import { buildRequest, buildSimResult } from "../src/test/romSimFixtures";
 import type { RomEditPreviewRequest, RomSimRequest } from "../src/types/romEditor";
 import { mockDaemon } from "./fixtures/mockDaemon";
 import { overflowReport } from "./fixtures/overflow";
-import { mockRomApi, specYaml, type RomApi, type RomApiOptions } from "./fixtures/romEditorApi";
+import {
+  mockRomApi,
+  specYaml,
+  trimSimResult,
+  type RomApi,
+  type RomApiOptions,
+} from "./fixtures/romEditorApi";
 
 /**
  * The ROM Editor (W09.3, W09.4, W09.8) in a real Chromium, the daemon stubbed
@@ -262,6 +268,20 @@ async function stateForm(form: Locator, skip: string[] = []) {
   await form.getByRole("radio", { name: /Fuel Comp axes/ }).check();
   await form.getByLabel("Rail pressure", { exact: true }).selectOption("working_assumption");
   await form.getByRole("radio", { name: /Fresh flash resets trims/ }).check();
+  await stateTiming(form);
+}
+
+/** State the ignition chain's two ECU states, which nothing logs and the form never
+ *  preselects: the truck's 2026-10-08 pairing by default (`buildRequest()`'s). */
+async function stateTiming(form: Locator, highDet = /^Set\b/, knock = /^Fallback\b/) {
+  await form
+    .getByRole("group", { name: "HI DET latch" })
+    .getByRole("radio", { name: highDet })
+    .check();
+  await form
+    .getByRole("group", { name: "Knock control" })
+    .getByRole("radio", { name: knock })
+    .check();
 }
 
 test("simulate: a missing field blocks Run and is named; the result puts the caveats first, labels every status and downloads", async ({
@@ -298,7 +318,7 @@ test("simulate: a missing field blocks Run and is named; the result puts the cav
   const results = page.getByRole("region", { name: "Simulation result" });
   await expect(results).toBeVisible();
 
-  // The request states all 21 fields, the cells and scale as selected.
+  // The request states all 23 fields, the cells and scale as selected.
   const [sent] = api.posted("/simulate") as RomSimRequest[];
   expect(sent).toEqual({
     ...buildRequest(),
@@ -371,6 +391,81 @@ test("simulate: a missing field blocks Run and is named; the result puts the cav
   expect(api.unexpected).toEqual([]);
 });
 
+test("timing trims: edit trim B on its value bits with the flag kept, state the latch and knock control, and the result shows the change per cell on the trims' own axes", async ({
+  page,
+}, testInfo) => {
+  const label = "trim B -3 counts";
+  const api = await open(page, {
+    library: [],
+    uploads: { [TUNED_FILE]: { ...ENTRY_TUNED, created: true } },
+    simulate: trimSimResult("trim_b"),
+  });
+  await chooseFile(page, TUNED_FILE);
+  await expect(page.getByLabel("Loaded ROM")).toBeVisible();
+  await page.getByRole("button", { name: "Ignition timing trim B (Map 1)" }).click();
+  const grid = page.getByRole("grid", { name: "Ignition timing trim B (Map 1) cells" });
+  await expect(grid.getByRole("gridcell")).toHaveCount(256);
+  await expect(page.getByRole("note").filter({ hasText: "decode mask 0x7F" })).toBeVisible();
+  // Column 10 is in the flag block: the grid shows the value, the raw count is on hover.
+  await expect(cellAt(grid, 4, 9)).toContainText("47");
+  await expect(cellAt(grid, 4, 9)).toHaveAttribute("title", "raw 175");
+  await cellAt(grid, 4, 9).click();
+  const operation = page.getByRole("form", { name: "Operation" });
+  await operation.getByLabel("Operation").selectOption("add_raw");
+  await operation.getByLabel("Raw counts to add").fill("-3");
+  await operation.getByRole("button", { name: "Apply to selection" }).click();
+  await expect(page.getByRole("list", { name: "Pending edits" })).toContainText(
+    "Ignition timing trim B: add raw -3 on 1 cell",
+  );
+  await page.getByLabel("Label for this edit set").fill(label);
+  await page.getByRole("button", { name: "Preview", exact: true }).click();
+
+  const [previewed] = api.posted("/edits/preview") as RomEditPreviewRequest[];
+  expect(previewed).toEqual({
+    label,
+    edits: [{ table: "timing_trim_b", slot: 1, cells: [[4, 9]], add_raw: -3 }],
+  });
+  // The value bits moved 47 -> 44 and bit 7 stayed set: raw 175 -> 172.
+  const after = page.getByRole("table", { name: "Ignition timing trim B (Map 1) after the edits" });
+  await expect(afterCell(after, 4, 9)).toHaveAttribute("title", "raw 172 (was 175)");
+  await expect(afterCell(after, 4, 9)).toHaveAttribute(
+    "aria-label",
+    "Row 5, column 10: 44 (changed)",
+  );
+  const levers = page.getByRole("region", { name: "What this edit can and cannot show" });
+  await expect(levers.getByRole("listitem")).toHaveText(LEVERS_TIMING_TRIM.messages);
+
+  // Simulate: nothing is preselected, and the two ECU states are named while missing.
+  const form = page.getByRole("form", { name: "Simulate form" });
+  const run = form.getByRole("button", { name: "Run simulation" });
+  await expect(form.getByRole("group", { name: "HI DET latch" }).getByRole("radio")).toHaveCount(2);
+  for (const radio of await form.getByRole("radio").all()) await expect(radio).not.toBeChecked();
+  await stateForm(form);
+  await expect(run).toBeEnabled();
+  await run.click();
+  const results = page.getByRole("region", { name: "Simulation result" });
+  await expect(results).toBeVisible();
+  const [sent] = api.posted("/simulate") as RomSimRequest[];
+  expect(Object.keys(sent)).toHaveLength(23);
+  expect(sent).toMatchObject({
+    edits: [{ table: "timing_trim_b", slot: 1, cells: [[4, 9]], add_raw: -3 }],
+    high_det: "set",
+    knock_control: "fallback",
+  });
+
+  const timing = results.getByRole("region", { name: "Ignition timing" });
+  await expect(timing).toContainText("HI DET latch set (warm timing reads trim B)");
+  const changes = timing.getByRole("table", { name: "Ignition timing change per trim cell" });
+  const cell = changes.getByRole("cell", { name: /^Row 5, column 10: -3/ });
+  await expect(cell).toHaveAttribute("data-timing-mark", "changed");
+  await expect(changes.locator('[data-timing-mark="changed"]')).toHaveCount(2);
+  await expect(changes.getByRole("rowheader", { name: "2,000" })).toBeVisible();
+  await expect(changes.getByRole("columnheader", { name: "80" })).toBeVisible();
+  await expect(timing).toContainText("unsupported: spark_response_unmeasured");
+  await page.screenshot({ path: testInfo.outputPath("rom-editor-timing.png"), fullPage: true });
+  expect(api.unexpected).toEqual([]);
+});
+
 test("simulate: the Coarse preset fills the edges and draws visibly, and the result carries the coarse-run banner", async ({
   page,
 }) => {
@@ -418,7 +513,7 @@ test("simulate: the Coarse preset fills the edges and draws visibly, and the res
   const [sent] = api.posted("/simulate") as RomSimRequest[];
   expect(sent.draws).toBe(200);
   expect(sent.rpm_edges).toHaveLength(9);
-  expect(Object.keys(sent)).toHaveLength(21);
+  expect(Object.keys(sent)).toHaveLength(23);
   expect(api.unexpected).toEqual([]);
 });
 
@@ -437,7 +532,7 @@ const TYPICAL_FILLED = [
   "Idle air learned (counts)",
 ];
 
-test("simulate: Fill typical values fills the stated environment with its sources, tags the two placeholders as such, leaves the choices to the operator, and a run sends 21 fields", async ({
+test("simulate: Fill typical values fills the stated environment with its sources, tags the two placeholders as such, leaves the choices to the operator, and a run sends 23 fields", async ({
   page,
 }) => {
   const api = await open(page, {
@@ -492,7 +587,7 @@ test("simulate: Fill typical values fills the stated environment with its source
   await form.getByRole("button", { name: "Run simulation" }).click();
   await expect(page.getByRole("region", { name: "Simulation result" })).toBeVisible();
   const [sent] = api.posted("/simulate") as RomSimRequest[];
-  expect(Object.keys(sent)).toHaveLength(21);
+  expect(Object.keys(sent)).toHaveLength(23);
   expect(sent).toMatchObject({
     baro_kpa: 78,
     rail_kpa: 350,
@@ -514,7 +609,8 @@ test.describe("at phone width (412 x 915)", () => {
     await open(page, {
       library: [],
       uploads: { [TUNED_FILE]: { ...ENTRY_TUNED, created: true } },
-      simulate: buildSimResult(),
+      // A trim edit's result, so the 16-column timing grid is on screen at this width.
+      simulate: trimSimResult("trim_b"),
     });
     // Everything the page shows is checked at each stage: nothing may poke past the right edge
     // outside a box that scrolls sideways on purpose.
@@ -543,6 +639,8 @@ test.describe("at phone width (412 x 915)", () => {
     await form.getByRole("radio", { name: /Fuel Comp axes/ }).check();
     await form.getByLabel("Rail pressure", { exact: true }).selectOption("working_assumption");
     await form.getByRole("radio", { name: /Fresh flash resets trims/ }).check();
+    await stateTiming(form);
+    await noSidewaysPage("Simulate form with the ignition timing state chosen");
     await form.getByLabel("RPM edges (rpm)").fill("200, 600, 1000, 1400");
     await form.getByLabel("Load edges (% fill)").fill("3.5, 10.7, 17.8, 25, 32.2");
     await form.getByLabel("Draws", { exact: true }).fill("200");
@@ -550,6 +648,14 @@ test.describe("at phone width (412 x 915)", () => {
     await form.getByRole("button", { name: "Run simulation" }).click();
     await expect(page.getByRole("region", { name: "Simulation result" })).toBeVisible();
     await noSidewaysPage("simulation result");
+    // The ignition timing section: its facts wrap like the other result lists, and the
+    // 16-column grid scrolls inside its own box instead of widening the page.
+    const timing = page.getByRole("region", { name: "Ignition timing" });
+    await timing.scrollIntoViewIfNeeded();
+    await expect(timing.getByRole("table", { name: /per trim cell/ })).toBeVisible();
+    const scroller = timing.locator("[data-table-scroll]").first();
+    expect(await scroller.evaluate((el) => el.scrollWidth > el.clientWidth)).toBe(true);
+    await noSidewaysPage("simulation result with the ignition timing grid");
   });
 });
 

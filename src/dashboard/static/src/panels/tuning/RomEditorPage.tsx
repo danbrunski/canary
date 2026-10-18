@@ -22,6 +22,7 @@ import {
   saveEditorState,
   simulateReason,
   specFileName,
+  valueMask,
 } from "../../lib/romEditor";
 import {
   ROM_UPLOAD_LIMIT,
@@ -171,10 +172,10 @@ export function RomEditorPage({ token }: { token: string; status: StatusResponse
       >
         <div className="space-y-4">
           <p className="text-sm text-fg-dim">
-            Edit the fuel chain (Fuel Targets, Fuel Compensation and K, Map 1) of a ROM and see the
-            tables after the edits. The edited image is never stored or offered: you get an edit
-            spec, a reviewable file that reproduces the edit from its base. Nothing here writes the
-            ECU.
+            Edit the fuel chain (Fuel Targets, Fuel Compensation and K) and the ignition timing
+            trims (A and B) in Map 1 of a ROM and see the tables after the edits. The edited image
+            is never stored or offered: you get an edit spec, a reviewable file that reproduces the
+            edit from its base. Nothing here writes the ECU.
           </p>
           {!token && <p role="status">Enter the control token to use the ROM Editor.</p>}
           {library.error && <Notice notice={{ kind: "error", text: library.error }} />}
@@ -444,6 +445,8 @@ function Workspace({ token, entry }: { token: string; entry: RomLibraryEntry }) 
     .join(" · ");
   const rowAxis = table.axes.rows;
   const colAxis = table.axes.cols;
+  const mask = valueMask(table.decode);
+  const maskBits = mask === null ? null : `the low ${mask.toString(2).length} bits`;
   const simBlockedReason =
     preview.kind === "refused"
       ? "preview_refused"
@@ -498,6 +501,15 @@ function Workspace({ token, entry }: { token: string; entry: RomLibraryEntry }) 
             Click a cell, shift-click or drag for a range; arrows move, shift+arrows extend. Dashed
             cells are in a pending edit.
           </p>
+          {maskBits !== null && (
+            <p role="note" className="text-xs text-fg-dim">
+              The ECM reads {maskBits} of each cell and strips the rest as a flag (decode mask{" "}
+              <span className="font-num">0x{mask?.toString(16).toUpperCase()}</span>). The grid
+              shows the value; the raw count, flag included, is on hover. Add and Scale act on the
+              value and keep each cell&apos;s flag; Set to value keeps it too. A raw count may not
+              change it.
+            </p>
+          )}
           <CellGrid
             key={`grid-${table.id}`}
             table={table}
@@ -598,6 +610,7 @@ function Workspace({ token, entry }: { token: string; entry: RomLibraryEntry }) 
             <SimResults
               result={sim.result}
               run={sim.run}
+              tables={baseTables}
               stale={JSON.stringify(sim.run.request.edits) !== JSON.stringify(edits)}
               onDownload={() =>
                 downloadText(

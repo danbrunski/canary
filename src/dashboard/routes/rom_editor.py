@@ -16,7 +16,7 @@ so they register after it) and all requiring the control token. Each is a body o
   values for the Simulate form's "Fill typical values" button (W09.11), each with
   its source; ``409 typical_values_undeclared`` / ``typical_values_invalid`` when the
   vehicle declares none or the file is broken. A read of one small file: it runs in
-  the thread pool and changes no request field (the 21-field ``SimRequest`` has no
+  the thread pool and changes no request field (the 23-field ``SimRequest`` has no
   defaults, and the page only fills its form with these).
 
 A refusal inside the child is **data**, not an exception: the simulator's
