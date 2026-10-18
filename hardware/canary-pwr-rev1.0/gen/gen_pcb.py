@@ -476,6 +476,27 @@ for name, side, rects in copper.POURS:
     for outline in union(rects):  # one zone per outline: a zone's extra outlines did not survive
         zone(SIDE[side], NET[name], [outline], prio=2, connect=pcbnew.ZONE_CONNECTION_FULL)
 zone(pcbnew.In2_Cu, NET["+5V_PI"], [copper.IN2_PI_5V], prio=1, connect=pcbnew.ZONE_CONNECTION_FULL)
+
+# In2 is a mixed layer: signals may cross its GND, never its islands. Routed freely, In2 left 29 unconnected
+# against 39 with it a plane, but cut the +12V_BUS island into 6 pieces and +5V_PI into 2; these track
+# keep-outs held both whole at 33 (freerouting-rs plugin path, 2026-10-18). In1 stays a solid GND plane.
+b.SetLayerName(pcbnew.In2_Cu, "In2.Cu")
+b.SetLayerType(pcbnew.In2_Cu, pcbnew.LT_MIXED)
+for name, pts in (("+12V_BUS", placement.IN2_ZONE), ("+5V_PI", copper.IN2_PI_5V)):
+    ra = pcbnew.ZONE(b)
+    ra.SetIsRuleArea(True)
+    ra.SetZoneName(f"No tracks in the In2 {name} island")
+    ra.SetLayer(pcbnew.In2_Cu)
+    o = ra.Outline()
+    o.NewOutline()
+    for px, py in pts:
+        o.Append(MM(px), MM(py))
+    ra.SetDoNotAllowTracks(True)
+    ra.SetDoNotAllowVias(False)
+    ra.SetDoNotAllowZoneFills(False)
+    ra.SetDoNotAllowPads(False)
+    ra.SetDoNotAllowFootprints(False)
+    b.Add(ra)
 for name, side, width, pts in copper.TRACKS + copper.ESCAPES:
     for (xa, ya), (xb, yb) in zip(pts, pts[1:], strict=False):
         t = pcbnew.PCB_TRACK(b)
