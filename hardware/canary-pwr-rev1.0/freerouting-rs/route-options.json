@@ -17,6 +17,5 @@
     "GND"
   ],
   "start_ripup_costs": 1500,
-  "sweep": "free",
   "sweep_passes": 2
 }

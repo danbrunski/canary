@@ -1,0 +1,24 @@
+{
+  "args": [
+    "--max-passes",
+    "1",
+    "--router.min_trace_width_um=150",
+    "--router.scoring.start_ripup_costs=1500",
+    "--router.autorouter.sweep=free",
+    "--router.autorouter.sweep_passes=2"
+  ],
+  "log": [
+    "zones refilled before routing export",
+    "rule area 'Fan inlet keep-out (ASSUMED position - verify on the Pi)' on B.Cu: keepout -> place_keepout (bans: pads, footprints)",
+    "WARNING: rule area 'No tracks in the In2 +12V_BUS island' on In2.Cu: tracks-only area is written as wire_keepout, which the router reads as a full keepout: it blocks vias too, unless the route passes --router.wire_keepout=traces_only",
+    "WARNING: rule area 'No tracks in the In2 +5V_PI island' on In2.Cu: tracks-only area is written as wire_keepout, which the router reads as a full keepout: it blocks vias too, unless the route passes --router.wire_keepout=traces_only",
+    "pours: 119 fixed wires for 12 pour(s) of Power_High, Switch_Node; 16 outer plane(s) removed (dropped nets: GND)",
+    "class GND: width 400 -> 400 um",
+    "class Power: width 300 -> 300 um",
+    "class Power_High: width 300 -> 300 um",
+    "class Switch_Node: width 300 -> 300 um",
+    "keepouts: 192 edge strip(s) (edge clearance 0.3 mm), 6 pad circle(s)"
+  ],
+  "kicad": "10.0.5",
+  "input_sha256": "1d8c44c67f980a2c333d55f896c8ecf89d178bee41f5d84fbcb1c11af540b134"
+}
