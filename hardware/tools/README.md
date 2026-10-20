@@ -1,5 +1,24 @@
 # Hardware tools
 
+## Which KiCad
+
+`grade.sh` takes its KiCad from `kicad_env.sh`. That is the native install when there is
+one: `kicad-cli` on PATH and a `python3` that imports `pcbnew`, which Ubuntu gets from
+`ppa:kicad/kicad-10.0-releases`. Otherwise, or when `KICAD_BIN` names a Windows install's bin
+directory, it is that Windows install, driven from WSL and handed Windows paths. The other
+scripts here still call the Windows install directly.
+
+- **Windows KiCad cannot save into the WSL filesystem.** `pcb drc --save-board` fails there
+  with "Cannot copy permissions", so `kicad_tmp` puts scratch copies under Windows `%TEMP%`.
+  Until 2026-10-20 `grade.sh` hid that failure, so the refilled boards it reported were never
+  saved; its DRC verdicts were still right.
+- **A native install needs the global library tables** that the GUI copies on its first run:
+  `cp /usr/share/kicad/template/{fp,sym}-lib-table ~/.config/kicad/10.0/`. Without them DRC
+  reports a `lib_footprint_issues` warning per footprint instead of the real mismatches.
+  `kicad_env.sh` says so.
+- **Native KiCad saves boards with LF line endings.** The committed boards were saved by Windows
+  KiCad with CRLF, so the first native save of one changes every line.
+
 ## Placement review
 
 Scores a KiCad board's footprint placement and draws it, so a placement can be
@@ -138,7 +157,8 @@ passes `1`. Later passes never beat the first on this board.
 `grade.sh <project_dir> <routes.ses | routed.kicad_pcb> [workdir]`. It takes the project from git
 HEAD (or `GRADE_REV=<commit>`) into a scratch directory, imports the SES (or takes the routed board as it is), and runs DRC
 with schematic parity, `via_in_pad.py` and `inner_tracks.py`. A result counts when the only errors
-are unconnected items and starved thermals, and both checkers report 0.
+are unconnected items and starved thermals, and both checkers report 0. The graded board is
+saved refilled in the scratch directory; a DRC that fails, or cannot save, stops the grade.
 
 **`cut_off.py`** (KiCad python) says where each unconnected item is: `cut_off.py <board> [NET ...]`.
 kicad-cli's DRC names a pour piece by its zone's anchor (the outline's first corner), so a GND pad cut

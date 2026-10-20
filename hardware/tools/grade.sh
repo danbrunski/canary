@@ -6,14 +6,15 @@
 # Then DRC with schematic parity and refilled zones, via_in_pad.py and inner_tracks.py. A result counts
 # when the only errors are unconnected items and starved thermals, and both checkers report 0.
 # cut_off.py then says where each unconnected item is: DRC names a cut-off pour piece by its zone's anchor.
-# KICAD_BIN overrides the KiCad bin directory (default: the Windows install, driven from WSL).
+# The graded board is saved refilled. A DRC that fails, or cannot save, stops the grade.
+# KiCad is the native install when there is one, else KICAD_BIN's Windows install (kicad_env.sh).
 set -uo pipefail
 proj=$(cd "$1" && pwd); src=$(realpath "$2")
 here=$(cd "$(dirname "$0")" && pwd)
-bin=${KICAD_BIN:-"/mnt/c/Program Files/KiCad/10.0/bin"}
-win() { wslpath -w "$1"; }
+# shellcheck source=hardware/tools/kicad_env.sh
+source "$here/kicad_env.sh"
 top=$(git -C "$proj" rev-parse --show-toplevel); rel=$(realpath --relative-to="$top" "$proj")
-work=${3:-$(mktemp -d)}
+work=${3:-$(kicad_tmp)}
 rm -rf "$work/$rel"; mkdir -p "$work"
 git -C "$top" archive "${GRADE_REV:-HEAD}" "$rel" | tar -x -C "$work"
 board=$(ls "$work/$rel"/*.kicad_pcb | head -1)
@@ -21,11 +22,14 @@ if [[ $src == *.kicad_pcb ]]; then
     cp "$src" "$board"; echo "board: $(basename "$src") (no ses_import)"
 else
     cp "$src" "$work/$rel/in.ses"
-    "$bin/python.exe" "$(win "$here/ses_import.py")" "$(win "$board")" "$(win "$work/$rel/in.ses")" \
-        2>&1 | grep -v -E "memory leak|image handler"
+    kicad_py "$(kpath "$here/ses_import.py")" "$(kpath "$board")" "$(kpath "$work/$rel/in.ses")" 2>&1 | kicad_quiet
 fi
-"$bin/kicad-cli.exe" pcb drc --schematic-parity --refill-zones --save-board --severity-all \
-    --format json -o "$(win "$work/$rel/drc.json")" "$(win "$board")" >/dev/null 2>&1 || true
+if ! kicad_cli pcb drc --schematic-parity --refill-zones --save-board --severity-all \
+    --format json -o "$(kpath "$work/$rel/drc.json")" "$(kpath "$board")" >"$work/$rel/drc.log" 2>&1; then
+    echo "grade.sh: kicad-cli pcb drc failed, nothing graded:" >&2
+    kicad_quiet <"$work/$rel/drc.log" >&2
+    exit 1
+fi
 python3 - "$work/$rel/drc.json" <<'EOF'
 import collections, json, sys
 r = json.load(open(sys.argv[1]))
@@ -34,8 +38,7 @@ c["error:unconnected"] = len(r.get("unconnected_items", []))
 c.update(f"parity:{v['type']}" for v in r.get("schematic_parity", []))
 print("DRC:", dict(sorted(c.items())))
 EOF
-for check in via_in_pad inner_tracks; do
-    "$bin/python.exe" "$(win "$here/$check.py")" "$(win "$board")" 2>&1 | grep -v -E "memory leak|image handler"
+for check in via_in_pad inner_tracks cut_off; do
+    kicad_py "$(kpath "$here/$check.py")" "$(kpath "$board")" 2>&1 | kicad_quiet
 done
-"$bin/python.exe" "$(win "$here/cut_off.py")" "$(win "$board")" 2>&1 | grep -v -E "memory leak|image handler"
 echo "graded board: $board (project at ${GRADE_REV:-HEAD})"
