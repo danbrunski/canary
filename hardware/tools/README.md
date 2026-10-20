@@ -143,9 +143,11 @@ It edits the board in that directory, so give it a scratch copy of the project. 
    only when that layer is a signal layer (found 2026-10-16).
 
 **Freerouting (Java) is retired** (operator, 2026-10-20): the router is freerouting-rs's
-`freerouting` binary, found as its KiCad plugin finds it: `FREEROUTING_RS_BIN` (a directory),
-then PATH, then `~/.cargo/bin`. `autoroute.sh` refuses a `.jar` argument and prints the build it
-ran (`freerouting --version`, with its git commit); quote that with any result. The binary takes
+`freerouting-rs` binary, found as its KiCad plugin finds it: `FREEROUTING_RS_BIN` (a directory),
+then PATH, then `~/.cargo/bin`. It is never a bare `freerouting`, which can be Java's launcher.
+`autoroute.sh` refuses a `.jar` argument and any binary whose `--version` does not start with
+`freerouting-rs`, and prints the build it ran (`freerouting-rs <version> (git <commit>)`); quote
+that with any result. The binary takes
 Java's `-de`/`-do` and `--router.*` option names, so `FREEROUTING_ARGS` passes them on, e.g.
 `--router.scoring.start_ripup_costs=1500 --router.autorouter.sweep=free
 --router.autorouter.sweep_passes=2`. Java Freerouting's results above and in the CANary-PWR spec

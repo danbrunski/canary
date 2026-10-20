@@ -11,8 +11,10 @@
 #   7. inner_tracks.py: exits 1 if any track cuts an inner plane (a layer of type power)
 # KiCad is the native install when there is one, else KICAD_BIN's Windows install (kicad_env.sh).
 # A refill that fails, or cannot save, stops the run.
-# The router is freerouting-rs's `freerouting`, found as its KiCad plugin finds it: FREEROUTING_RS_BIN
-# (a directory), then PATH, then ~/.cargo/bin. Freerouting (Java) is retired (operator, 2026-10-20).
+# The router is freerouting-rs's `freerouting-rs`, found as its KiCad plugin finds it: FREEROUTING_RS_BIN
+# (a directory), then PATH, then ~/.cargo/bin. Never a bare `freerouting`: that name can be Java's
+# launcher, so a binary whose --version is not freerouting-rs's is refused too. Freerouting (Java) is
+# retired (operator, 2026-10-20).
 # FREEROUTING_ARGS adds router options, e.g. --router.scoring.start_ripup_costs=1500.
 set -euo pipefail
 if [[ ${2:-} == *.jar ]]; then
@@ -27,16 +29,21 @@ here=$(cd "$(dirname "$0")" && pwd)
 # shellcheck source=hardware/tools/kicad_env.sh
 source "$here/kicad_env.sh"
 router=
-for candidate in ${FREEROUTING_RS_BIN:+"$FREEROUTING_RS_BIN/freerouting"} "$(command -v freerouting || true)" \
-    "$HOME/.cargo/bin/freerouting"; do
+for candidate in ${FREEROUTING_RS_BIN:+"$FREEROUTING_RS_BIN/freerouting-rs"} \
+    "$(command -v freerouting-rs || true)" "$HOME/.cargo/bin/freerouting-rs"; do
     if [[ -n $candidate && -f $candidate && -x $candidate ]]; then router=$candidate; break; fi
 done
 if [[ -z $router ]]; then
     echo "autoroute.sh: no freerouting-rs binary: set FREEROUTING_RS_BIN to the directory holding" \
-        "\`freerouting\`, or put it on PATH or in ~/.cargo/bin" >&2
+        "\`freerouting-rs\`, or put it on PATH or in ~/.cargo/bin" >&2
     exit 1
 fi
-echo "router: $router ($("$router" --version 2>&1 | head -1))"
+version=$(timeout 30 "$router" --version 2>&1 | head -1) || true
+if [[ $version != "freerouting-rs "* ]]; then
+    echo "autoroute.sh: $router is not freerouting-rs (--version printed: ${version:-nothing})" >&2
+    exit 1
+fi
+echo "router: $router ($version)"
 board=$(ls "$proj"/*.kicad_pcb | head -1)
 stem=${board%.kicad_pcb}
 
