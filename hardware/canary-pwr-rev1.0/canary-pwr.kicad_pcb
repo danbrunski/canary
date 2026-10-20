@@ -11945,7 +11945,7 @@
 			(uuid "5dacb289-087e-4b4a-b71e-18fc52212e0c")
 		)
 		(embedded_fonts no)
-		(model "${KICAD10_3DMODEL_DIR}/Connector_Molex.3dshapes/Molex_Micro-Fit_3.0_43045-0600_2x03_P3.00mm_Horizontal.step"
+		(model "${KIPRJMOD}/lib/3dmodels/Molex_Micro-Fit_3.0_43045-0600_2x03_P3.00mm_Horizontal.step"
 			(offset
 				(xyz 0 0 0)
 			)
@@ -15247,6 +15247,17 @@
 			(uuid "41faf1f7-c7f2-42a7-9723-201ac7d1af2d")
 		)
 		(embedded_fonts no)
+		(model "${KICAD10_3DMODEL_DIR}/Package_DFN_QFN.3dshapes/WQFN-38-1EP_5x7mm_P0.5mm_EP3.15x5.15mm.step"
+			(offset
+				(xyz 0 0 0)
+			)
+			(scale
+				(xyz 1 1 1)
+			)
+			(rotate
+				(xyz 0 0 0)
+			)
+		)
 	)
 	(footprint "MountingHole:MountingHole_2.7mm_M2.5"
 		(layer "F.Cu")
@@ -18386,7 +18397,7 @@
 			(uuid "1bd19b79-c050-474a-bb83-26cb954b326b")
 		)
 		(embedded_fonts no)
-		(model "${KICAD10_3DMODEL_DIR}/Connector_Molex.3dshapes/Molex_Micro-Fit_3.0_43045-1000_2x05_P3.00mm_Horizontal.step"
+		(model "${KIPRJMOD}/lib/3dmodels/Molex_Micro-Fit_3.0_43045-1000_2x05_P3.00mm_Horizontal.step"
 			(offset
 				(xyz 0 0 0)
 			)
@@ -25325,6 +25336,17 @@
 			(uuid "6f9ff1b0-e933-4c46-ad08-45bc4fc178fa")
 		)
 		(embedded_fonts no)
+		(model "${KICAD10_3DMODEL_DIR}/Package_SO.3dshapes/VSSOP-8_3x3mm_P0.65mm.step"
+			(offset
+				(xyz 0 0 0)
+			)
+			(scale
+				(xyz 1 1 1)
+			)
+			(rotate
+				(xyz 0 0 0)
+			)
+		)
 	)
 	(footprint "Resistor_SMD:R_2512_6332Metric"
 		(layer "B.Cu")
@@ -26215,6 +26237,17 @@
 			(uuid "87749c71-774c-46c8-b575-62fdf12c0254")
 		)
 		(embedded_fonts no)
+		(model "${KICAD10_3DMODEL_DIR}/Package_SO.3dshapes/MSOP-8-1EP_3x3mm_P0.65mm_EP1.68x1.88mm.step"
+			(offset
+				(xyz 0 0 0)
+			)
+			(scale
+				(xyz 1 1 1)
+			)
+			(rotate
+				(xyz 0 0 0)
+			)
+		)
 	)
 	(footprint "Resistor_SMD:R_0603_1608Metric"
 		(layer "B.Cu")
@@ -31415,7 +31448,7 @@
 			(uuid "d3651e7e-b719-4929-92e7-d20ad729a909")
 		)
 		(embedded_fonts no)
-		(model "${KICAD10_3DMODEL_DIR}/Fuse.3dshapes/Fuse_1812_4532Metric.step"
+		(model "${KICAD10_3DMODEL_DIR}/Resistor_SMD.3dshapes/R_1812_4532Metric.step"
 			(offset
 				(xyz 0 0 0)
 			)

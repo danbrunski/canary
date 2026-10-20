@@ -2,7 +2,7 @@
 	(version 20260306)
 	(generator "eeschema")
 	(generator_version "10.0")
-	(uuid "2947ac05-97f4-4289-b0f1-302a153cd089")
+	(uuid "d2fc649d-2d6c-49b4-96ba-f8e6008b949b")
 	(paper "A4")
 	(title_block
 		(title "CANary cap bank")
@@ -1262,7 +1262,7 @@
 			)
 			(justify left bottom)
 		)
-		(uuid "c03b2767-15e4-4287-ba61-02961858805e")
+		(uuid "90acd021-4840-4a34-a375-11b8638aa4e4")
 	)
 	(text "Four 25 F cells in series, run at 2.5 V each (10 V stack), charged and balanced by CANary-PWR's LTC3350.\nCell 1 is the bottom cell (LTC3350 CAPRTN..CAP1), cell 4 the top (CAP3..CAP4). GND is the stack's bottom plate.\nInter-cell joins carry the full 4 A (7.25 A peak): pours on both layers. The taps to J1 carry only the shunt current (<= 0.5 A).\nKelvin sense: NT1 and NT2 join BANK_POS_S / BANK_NEG_S to the stack at the cell leads themselves.\nThe lead: gold Micro-Fit at both ends (172952-1001 + 43030-0009), wired pin n to pin n; pin map in hardware/tools/capbank_lead.py, shared with CANary-PWR J4.\nDISCHARGE BEFORE UNPLUGGING: lower vshunt on CANary-PWR (bench button held, or I2C) until the red LED goes out."
 		(exclude_from_sim no)
@@ -1273,7 +1273,7 @@
 			)
 			(justify left bottom)
 		)
-		(uuid "de9484ce-d399-4c92-ae75-21c2f71de578")
+		(uuid "af741724-c2c6-4126-9778-a681b5e52058")
 	)
 	(symbol
 		(lib_id "Connector_Generic:Conn_02x05_Odd_Even")
@@ -1285,7 +1285,7 @@
 		(on_board yes)
 		(in_pos_files yes)
 		(dnp no)
-		(uuid "d694a2bf-b67a-4e56-a390-134a415fd952")
+		(uuid "896fabdb-ffbf-4a48-851e-893b1e0a47a1")
 		(property "Reference" "J1"
 			(at 63.5 88.71 0)
 			(show_name no)
@@ -1373,38 +1373,38 @@
 			)
 		)
 		(pin "1"
-			(uuid "7f4d71ed-2111-4c8d-b3d4-f580c60fd722")
+			(uuid "b3599c18-f8a8-4b35-a817-4ebeec00261f")
 		)
 		(pin "2"
-			(uuid "3b1ae982-de50-4b20-86e1-f974b3eb19ac")
+			(uuid "2e72c691-805c-487e-8143-27764e3f403b")
 		)
 		(pin "3"
-			(uuid "a14e8260-0808-436e-9b24-d26befaf7277")
+			(uuid "6845fd3a-e20b-4f5a-a955-40ad3243e2d5")
 		)
 		(pin "4"
-			(uuid "55a8ad17-4266-430f-863c-9a8f9a6db61e")
+			(uuid "3a307a09-795f-48d8-b778-ab2fc7cbc4ba")
 		)
 		(pin "5"
-			(uuid "7b133071-6fad-4d35-aed2-535886d3c606")
+			(uuid "70c9d1e7-6a10-4f71-b729-a3af4faf807b")
 		)
 		(pin "6"
-			(uuid "827984f3-2f96-4a50-8f4b-060fa531dce8")
+			(uuid "eb49ed47-b184-48a7-a8d5-6938764d9304")
 		)
 		(pin "7"
-			(uuid "73a6f7f3-f256-47ff-a848-ab14b4300fcc")
+			(uuid "85a7d47a-3e15-448c-b5ea-ebc2ef6fd1bf")
 		)
 		(pin "8"
-			(uuid "a1a694ac-ad8f-41bf-9a22-ce18f1bf425d")
+			(uuid "739f8ac0-0bea-47e0-a85a-ba488bd2dd35")
 		)
 		(pin "9"
-			(uuid "5a3b5e5e-0b77-4966-8d1e-35f3b5988436")
+			(uuid "e2ab7b66-bab6-4225-8d13-b8917eadfe23")
 		)
 		(pin "10"
-			(uuid "cc298e9f-ba74-466b-83fd-c6e2121ef3ce")
+			(uuid "b6fcea1f-6b75-433d-a823-dacfbda0d558")
 		)
 		(instances
 			(project "canary-capbank"
-				(path "/2947ac05-97f4-4289-b0f1-302a153cd089"
+				(path "/d2fc649d-2d6c-49b4-96ba-f8e6008b949b"
 					(reference "J1")
 					(unit 1)
 				)
@@ -1421,7 +1421,7 @@
 			)
 			(justify right)
 		)
-		(uuid "75722517-fe24-4e60-9f34-9efdaabe7967")
+		(uuid "64f5f4b7-095f-416a-a0d5-00678b90e91d")
 		(property "Intersheetrefs" "${INTERSHEET_REFS}"
 			(at 58.42 93.98 0)
 			(show_name no)
@@ -1445,7 +1445,7 @@
 			)
 			(justify left)
 		)
-		(uuid "ea4c7a2f-90b9-4b43-9d8b-8580771b7dd1")
+		(uuid "145dc06e-6b56-4ecb-990f-7dc2824b00f6")
 		(property "Intersheetrefs" "${INTERSHEET_REFS}"
 			(at 71.12 93.98 0)
 			(show_name no)
@@ -1469,7 +1469,7 @@
 		(on_board yes)
 		(in_pos_files yes)
 		(dnp no)
-		(uuid "2409bff4-924c-40d3-8e9b-a85e5f73a50a")
+		(uuid "14d3672e-35c0-4b26-a8d4-50ecea29bfec")
 		(property "Reference" "#PWR001"
 			(at 58.42 101.52 0)
 			(show_name no)
@@ -1525,11 +1525,11 @@
 			)
 		)
 		(pin "1"
-			(uuid "91156757-36c6-476b-8e72-b49186a0d961")
+			(uuid "44313e21-5278-401f-bacf-d7224e82e89d")
 		)
 		(instances
 			(project "canary-capbank"
-				(path "/2947ac05-97f4-4289-b0f1-302a153cd089"
+				(path "/d2fc649d-2d6c-49b4-96ba-f8e6008b949b"
 					(reference "#PWR001")
 					(unit 1)
 				)
@@ -1546,7 +1546,7 @@
 		(on_board yes)
 		(in_pos_files yes)
 		(dnp no)
-		(uuid "4cad3c47-8e52-44f9-b717-d3c06d4ee99e")
+		(uuid "ca279231-e171-4611-bc6f-fd0fa7e9f276")
 		(property "Reference" "#PWR002"
 			(at 71.12 101.52 0)
 			(show_name no)
@@ -1602,11 +1602,11 @@
 			)
 		)
 		(pin "1"
-			(uuid "ea2bd262-3206-4577-a60a-e3f3ccb3abfb")
+			(uuid "d08a2aa8-25e6-4642-9740-9b0fadafed72")
 		)
 		(instances
 			(project "canary-capbank"
-				(path "/2947ac05-97f4-4289-b0f1-302a153cd089"
+				(path "/d2fc649d-2d6c-49b4-96ba-f8e6008b949b"
 					(reference "#PWR002")
 					(unit 1)
 				)
@@ -1623,7 +1623,7 @@
 			)
 			(justify right)
 		)
-		(uuid "b0445ded-070a-4414-a910-7384d6f9f2e0")
+		(uuid "db702369-bdf3-462d-be0c-cf46c28434e5")
 		(property "Intersheetrefs" "${INTERSHEET_REFS}"
 			(at 58.42 99.06 0)
 			(show_name no)
@@ -1647,7 +1647,7 @@
 			)
 			(justify left)
 		)
-		(uuid "04ffea8f-0575-421c-aa88-4a6194bdce32")
+		(uuid "c4f2abaf-07f2-47a8-ae08-544181a45cb0")
 		(property "Intersheetrefs" "${INTERSHEET_REFS}"
 			(at 71.12 99.06 0)
 			(show_name no)
@@ -1671,7 +1671,7 @@
 			)
 			(justify right)
 		)
-		(uuid "fd5a4c54-2a4b-479e-9015-da1b9f2cd3fd")
+		(uuid "83f91861-a71c-4aab-bb14-3f584f5b301c")
 		(property "Intersheetrefs" "${INTERSHEET_REFS}"
 			(at 58.42 101.6 0)
 			(show_name no)
@@ -1695,7 +1695,7 @@
 			)
 			(justify left)
 		)
-		(uuid "99cbf280-6431-49a1-acb7-b5a5595eed66")
+		(uuid "ec9dc322-0821-4a0e-a209-7b6640a71691")
 		(property "Intersheetrefs" "${INTERSHEET_REFS}"
 			(at 71.12 101.6 0)
 			(show_name no)
@@ -1719,7 +1719,7 @@
 			)
 			(justify right)
 		)
-		(uuid "1cb9be88-dd18-4c0c-90ca-0a1ce7d90a9a")
+		(uuid "65cd947b-82a3-40f9-866f-7f214c107e8f")
 		(property "Intersheetrefs" "${INTERSHEET_REFS}"
 			(at 58.42 104.14 0)
 			(show_name no)
@@ -1743,7 +1743,7 @@
 			)
 			(justify left)
 		)
-		(uuid "acd0e4cc-3d29-4346-81cd-9c82c39060bc")
+		(uuid "65a82307-4cdc-46fa-a447-3c8aebaf9fd5")
 		(property "Intersheetrefs" "${INTERSHEET_REFS}"
 			(at 71.12 104.14 0)
 			(show_name no)
@@ -1767,7 +1767,7 @@
 		(on_board yes)
 		(in_pos_files yes)
 		(dnp no)
-		(uuid "ec366664-f337-4348-a716-a36a8862c6d1")
+		(uuid "8c4bf9ef-b199-45d9-a1cf-d96606eb092d")
 		(property "Reference" "C1"
 			(at 175.006 120.65 0)
 			(show_name no)
@@ -1855,14 +1855,14 @@
 			)
 		)
 		(pin "1"
-			(uuid "33442ab9-7c9b-441e-b62a-41c269bdb88f")
+			(uuid "a0748bf6-7629-4505-86a6-fc216c2478e2")
 		)
 		(pin "2"
-			(uuid "e12962f3-1dc0-4994-ab17-274692029343")
+			(uuid "278662a5-492b-4d8c-be54-444f61f4b673")
 		)
 		(instances
 			(project "canary-capbank"
-				(path "/2947ac05-97f4-4289-b0f1-302a153cd089"
+				(path "/d2fc649d-2d6c-49b4-96ba-f8e6008b949b"
 					(reference "C1")
 					(unit 1)
 				)
@@ -1879,7 +1879,7 @@
 		(on_board yes)
 		(in_pos_files yes)
 		(dnp no)
-		(uuid "35d28d71-a166-4c04-82d0-bd85903d3115")
+		(uuid "e93f1d05-d7fd-4d3c-b59d-f1f07aae2c80")
 		(property "Reference" "#PWR003"
 			(at 165.1 130.73 0)
 			(show_name no)
@@ -1935,11 +1935,11 @@
 			)
 		)
 		(pin "1"
-			(uuid "277bf002-15c3-42f4-9688-dcc8de59a5af")
+			(uuid "8df5874c-8564-4d47-a7ab-851f2016b050")
 		)
 		(instances
 			(project "canary-capbank"
-				(path "/2947ac05-97f4-4289-b0f1-302a153cd089"
+				(path "/d2fc649d-2d6c-49b4-96ba-f8e6008b949b"
 					(reference "#PWR003")
 					(unit 1)
 				)
@@ -1956,7 +1956,7 @@
 		(on_board yes)
 		(in_pos_files yes)
 		(dnp no)
-		(uuid "4d4e0acc-8f2a-4667-be25-88ca523fa5d8")
+		(uuid "b3d6e658-6a1d-4ed4-b999-9e6b2bbbd829")
 		(property "Reference" "C2"
 			(at 175.006 105.41 0)
 			(show_name no)
@@ -2044,14 +2044,14 @@
 			)
 		)
 		(pin "1"
-			(uuid "8759eb3c-0a82-4c7c-a9c5-48c6ab2696ba")
+			(uuid "5323b18e-49fe-4ee0-b04c-0a80be6f2e28")
 		)
 		(pin "2"
-			(uuid "02708b14-c908-4d1a-b9dd-d10cae043da6")
+			(uuid "6877c04a-701a-4605-8448-47f145aafa53")
 		)
 		(instances
 			(project "canary-capbank"
-				(path "/2947ac05-97f4-4289-b0f1-302a153cd089"
+				(path "/d2fc649d-2d6c-49b4-96ba-f8e6008b949b"
 					(reference "C2")
 					(unit 1)
 				)
@@ -2068,7 +2068,7 @@
 		(on_board yes)
 		(in_pos_files yes)
 		(dnp no)
-		(uuid "7ab8ba99-9117-4b2b-902b-0a5505a3c3f1")
+		(uuid "a91ff3cd-8235-4a1c-9e16-791d25e8fd7d")
 		(property "Reference" "C3"
 			(at 175.006 90.17 0)
 			(show_name no)
@@ -2156,14 +2156,14 @@
 			)
 		)
 		(pin "1"
-			(uuid "2a920f01-bbd1-4b91-be44-6a0533dd604c")
+			(uuid "56d72f91-a183-4f0a-ba76-4d30bd3c9e70")
 		)
 		(pin "2"
-			(uuid "169c1800-35a8-41ad-9bad-d83cfc5a356b")
+			(uuid "95990e7c-790c-4104-ae15-dec8c09fcaf6")
 		)
 		(instances
 			(project "canary-capbank"
-				(path "/2947ac05-97f4-4289-b0f1-302a153cd089"
+				(path "/d2fc649d-2d6c-49b4-96ba-f8e6008b949b"
 					(reference "C3")
 					(unit 1)
 				)
@@ -2180,7 +2180,7 @@
 		(on_board yes)
 		(in_pos_files yes)
 		(dnp no)
-		(uuid "c419b78d-2569-4a7d-9258-b6d3048b38c0")
+		(uuid "48829c50-9679-468b-9b72-eb0e9f175027")
 		(property "Reference" "C4"
 			(at 175.006 74.93 0)
 			(show_name no)
@@ -2268,14 +2268,14 @@
 			)
 		)
 		(pin "1"
-			(uuid "787a612f-e2d9-42c6-b6ef-097af2c053ba")
+			(uuid "f95273c2-1ae5-450d-a62a-16869b6fcfd3")
 		)
 		(pin "2"
-			(uuid "7e2fe556-68e1-4517-b8ae-5a3926f1db24")
+			(uuid "c3aa865a-88dc-4850-b206-6e3b405efd53")
 		)
 		(instances
 			(project "canary-capbank"
-				(path "/2947ac05-97f4-4289-b0f1-302a153cd089"
+				(path "/d2fc649d-2d6c-49b4-96ba-f8e6008b949b"
 					(reference "C4")
 					(unit 1)
 				)
@@ -2292,7 +2292,7 @@
 			)
 			(justify left)
 		)
-		(uuid "cb5bc706-5893-49b8-a485-90ca1291e75b")
+		(uuid "305d4656-7b2c-4a7b-be58-134006665aa3")
 		(property "Intersheetrefs" "${INTERSHEET_REFS}"
 			(at 165.1 72.39 0)
 			(show_name no)
@@ -2316,7 +2316,7 @@
 		(on_board yes)
 		(in_pos_files yes)
 		(dnp no)
-		(uuid "26939e82-4d1a-4c33-9e6f-06b0c48071c5")
+		(uuid "ecf5dc2b-937f-4ac7-8674-10c8a7d63ae8")
 		(property "Reference" "TH1"
 			(at 124.714 120.65 0)
 			(show_name no)
@@ -2404,14 +2404,14 @@
 			)
 		)
 		(pin "1"
-			(uuid "c65695d5-2d69-47a6-8a73-0fde6818bc94")
+			(uuid "ac59b318-684a-46e3-8e76-3a3ebae97a34")
 		)
 		(pin "2"
-			(uuid "a063c868-6e0b-43b1-9d6a-c90f472060ce")
+			(uuid "34518095-507e-4011-9a3d-7549d4b3a045")
 		)
 		(instances
 			(project "canary-capbank"
-				(path "/2947ac05-97f4-4289-b0f1-302a153cd089"
+				(path "/d2fc649d-2d6c-49b4-96ba-f8e6008b949b"
 					(reference "TH1")
 					(unit 1)
 				)
@@ -2428,7 +2428,7 @@
 			)
 			(justify left)
 		)
-		(uuid "8e5909c3-0b42-48e4-9e38-11099cf1f002")
+		(uuid "f47e5cfd-f637-43e4-ad0a-c84a2d9d1cf9")
 		(property "Intersheetrefs" "${INTERSHEET_REFS}"
 			(at 114.3 118.11 0)
 			(show_name no)
@@ -2452,7 +2452,7 @@
 		(on_board yes)
 		(in_pos_files yes)
 		(dnp no)
-		(uuid "6dcabb00-1613-4fa7-b801-b58450a8f5f6")
+		(uuid "432739ca-2957-4b02-bfdc-71c665db1603")
 		(property "Reference" "#PWR004"
 			(at 114.3 130.73 0)
 			(show_name no)
@@ -2508,11 +2508,11 @@
 			)
 		)
 		(pin "1"
-			(uuid "a324f3a3-73a7-4391-8a51-9b4524cb8250")
+			(uuid "808a397d-9efe-4597-919e-932a59508b06")
 		)
 		(instances
 			(project "canary-capbank"
-				(path "/2947ac05-97f4-4289-b0f1-302a153cd089"
+				(path "/d2fc649d-2d6c-49b4-96ba-f8e6008b949b"
 					(reference "#PWR004")
 					(unit 1)
 				)
@@ -2529,7 +2529,7 @@
 		(on_board yes)
 		(in_pos_files yes)
 		(dnp no)
-		(uuid "6b773ae8-33dc-475e-a54e-e887a884846f")
+		(uuid "4ef0afe1-8e04-4ec4-8bbf-9bfb3ff0a46d")
 		(property "Reference" "NT1"
 			(at 228.6 72.2 0)
 			(show_name no)
@@ -2584,14 +2584,14 @@
 			)
 		)
 		(pin "1"
-			(uuid "576fd9fe-99c2-43be-a402-d7d5e64529c3")
+			(uuid "7aa689a2-675d-4c1f-9373-5301e4960e92")
 		)
 		(pin "2"
-			(uuid "c9934b21-b976-4680-8587-38d511562beb")
+			(uuid "a933da96-9ef0-493d-aa4c-af498d6b826e")
 		)
 		(instances
 			(project "canary-capbank"
-				(path "/2947ac05-97f4-4289-b0f1-302a153cd089"
+				(path "/d2fc649d-2d6c-49b4-96ba-f8e6008b949b"
 					(reference "NT1")
 					(unit 1)
 				)
@@ -2608,7 +2608,7 @@
 			)
 			(justify right)
 		)
-		(uuid "075a162b-43d5-4e8b-acfa-ddb3df549646")
+		(uuid "02d23c92-7e5f-4a28-badb-4c2e53d9ec30")
 		(property "Intersheetrefs" "${INTERSHEET_REFS}"
 			(at 226.06 76.2 0)
 			(show_name no)
@@ -2632,7 +2632,7 @@
 			)
 			(justify left)
 		)
-		(uuid "6318c893-e6b9-4c75-bd27-9dc224d4aeca")
+		(uuid "bace83e0-13f5-4b65-a689-01eabdc7626c")
 		(property "Intersheetrefs" "${INTERSHEET_REFS}"
 			(at 231.14 76.2 0)
 			(show_name no)
@@ -2656,7 +2656,7 @@
 		(on_board yes)
 		(in_pos_files yes)
 		(dnp no)
-		(uuid "7124c7bf-2f0f-44b3-8e26-738b35415d97")
+		(uuid "50ab1475-a670-407c-895c-5d158739508f")
 		(property "Reference" "NT2"
 			(at 228.6 117.92 0)
 			(show_name no)
@@ -2711,14 +2711,14 @@
 			)
 		)
 		(pin "1"
-			(uuid "08457635-6956-4fa7-9c9d-fb343f6ed3f8")
+			(uuid "5009db18-4f39-4174-8f50-32c6f30822f0")
 		)
 		(pin "2"
-			(uuid "9b43f0f8-1e13-453d-b63d-eafe124d4b6f")
+			(uuid "444bc038-0765-4f66-b0f9-e715c714de06")
 		)
 		(instances
 			(project "canary-capbank"
-				(path "/2947ac05-97f4-4289-b0f1-302a153cd089"
+				(path "/d2fc649d-2d6c-49b4-96ba-f8e6008b949b"
 					(reference "NT2")
 					(unit 1)
 				)
@@ -2735,7 +2735,7 @@
 			)
 			(justify right)
 		)
-		(uuid "b50a5f82-e2b7-4a8d-9889-632e4aaa10c9")
+		(uuid "26846e61-2213-4b90-838b-3e7def8d9ebe")
 		(property "Intersheetrefs" "${INTERSHEET_REFS}"
 			(at 226.06 121.92 0)
 			(show_name no)
@@ -2759,7 +2759,7 @@
 		(on_board yes)
 		(in_pos_files yes)
 		(dnp no)
-		(uuid "98261edd-3621-4ad8-ae9b-7d93e9f15381")
+		(uuid "fa18b84e-8115-4212-8df9-81637bdc6ee0")
 		(property "Reference" "#PWR005"
 			(at 231.14 126.92 0)
 			(show_name no)
@@ -2815,11 +2815,11 @@
 			)
 		)
 		(pin "1"
-			(uuid "f1e43559-8282-491a-adb3-fe6e5dd4eaa9")
+			(uuid "7113f382-b599-43d0-be63-fe307113b6bc")
 		)
 		(instances
 			(project "canary-capbank"
-				(path "/2947ac05-97f4-4289-b0f1-302a153cd089"
+				(path "/d2fc649d-2d6c-49b4-96ba-f8e6008b949b"
 					(reference "#PWR005")
 					(unit 1)
 				)
@@ -2834,7 +2834,7 @@
 			(width 0)
 			(type default)
 		)
-		(uuid "dcbd0c58-98fa-454a-ba0d-2dc5b86a9383")
+		(uuid "4f407bd1-eb57-4795-83a5-c1cbb777cfca")
 	)
 	(global_label "BANK_TAP3"
 		(shape passive)
@@ -2846,7 +2846,7 @@
 			)
 			(justify left)
 		)
-		(uuid "0ce960d4-7ae7-4e8d-bf5a-1f193c6a7e56")
+		(uuid "74efc2ad-fae4-479e-bbf0-e3fd008fc9ab")
 		(property "Intersheetrefs" "${INTERSHEET_REFS}"
 			(at 165.1 83.82 0)
 			(show_name no)
@@ -2868,7 +2868,7 @@
 			(width 0)
 			(type default)
 		)
-		(uuid "c0625ba0-4fec-4ad5-b5ef-48b58b217e34")
+		(uuid "6ee43fd4-8865-4487-a345-c45be1cc4125")
 	)
 	(global_label "BANK_TAP2"
 		(shape passive)
@@ -2880,7 +2880,7 @@
 			)
 			(justify left)
 		)
-		(uuid "b356b74d-0e3e-4305-8c90-34780107cf42")
+		(uuid "af448e68-809e-430c-80d3-8ec266e80638")
 		(property "Intersheetrefs" "${INTERSHEET_REFS}"
 			(at 165.1 99.06 0)
 			(show_name no)
@@ -2902,7 +2902,7 @@
 			(width 0)
 			(type default)
 		)
-		(uuid "41448c2d-c8e4-4322-949a-37fd1a5b76b5")
+		(uuid "7769e773-d953-46b8-9110-1c170cdfd03a")
 	)
 	(global_label "BANK_TAP1"
 		(shape passive)
@@ -2914,7 +2914,7 @@
 			)
 			(justify left)
 		)
-		(uuid "0101a8cc-285b-4f7c-a9d0-fe227e02bf76")
+		(uuid "59030427-3c39-4b2d-8337-43cc618e71e4")
 		(property "Intersheetrefs" "${INTERSHEET_REFS}"
 			(at 165.1 114.3 0)
 			(show_name no)
@@ -2938,7 +2938,7 @@
 		(on_board yes)
 		(in_pos_files yes)
 		(dnp no)
-		(uuid "830cf1a4-e473-4a06-9287-aaf20d30f68e")
+		(uuid "8dc7fac2-a4e1-48d2-bb6a-4b40dfe2cf7f")
 		(property "Reference" "#FLG001"
 			(at 114.3 142.32 0)
 			(show_name no)
@@ -2995,11 +2995,11 @@
 			)
 		)
 		(pin "1"
-			(uuid "9f34440f-af60-48e2-9cc8-25b8e722de5c")
+			(uuid "65f1596b-6949-45aa-85b5-0c6a56252fef")
 		)
 		(instances
 			(project "canary-capbank"
-				(path "/2947ac05-97f4-4289-b0f1-302a153cd089"
+				(path "/d2fc649d-2d6c-49b4-96ba-f8e6008b949b"
 					(reference "#FLG001")
 					(unit 1)
 				)
@@ -3016,7 +3016,7 @@
 		(on_board yes)
 		(in_pos_files yes)
 		(dnp no)
-		(uuid "6b345e4d-7b04-49e1-96ad-30d646c70378")
+		(uuid "55723899-bd6a-419b-a7ba-e978e64a0551")
 		(property "Reference" "#PWR006"
 			(at 114.3 152.32 0)
 			(show_name no)
@@ -3072,11 +3072,11 @@
 			)
 		)
 		(pin "1"
-			(uuid "23784b1a-398b-476e-9cc8-60947fad1641")
+			(uuid "6c9387df-1fa4-4941-a0f4-7415377d698c")
 		)
 		(instances
 			(project "canary-capbank"
-				(path "/2947ac05-97f4-4289-b0f1-302a153cd089"
+				(path "/d2fc649d-2d6c-49b4-96ba-f8e6008b949b"
 					(reference "#PWR006")
 					(unit 1)
 				)

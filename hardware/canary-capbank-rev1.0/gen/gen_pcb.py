@@ -121,6 +121,13 @@ def load_fp(fpid):
     if fp is None:
         raise SystemExit(f"cannot load {fpid} from {path}")
     fp.SetFPID(pcbnew.LIB_ID(lib, name))
+    # A stock model that KiCad's 3D library lacks (the Micro-Fit headers) comes from the project's own
+    # lib/3dmodels, written by hardware/tools/gen_3dmodels.py under the same file name.
+    for i in range(len(fp.Models())):
+        m = fp.Models()[i]  # by index: iterating the vector yields copies
+        base = m.m_Filename.rsplit("/", 1)[-1]
+        if os.path.exists(os.path.join(projdir, "lib", "3dmodels", base)):
+            m.m_Filename = "${KIPRJMOD}/lib/3dmodels/" + base
     return fp
 
 

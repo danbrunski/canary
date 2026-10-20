@@ -18,6 +18,7 @@ match its pin map (`hardware/tools/check_capbank_lead.py`).
 | `BOM.csv` | The board's parts, exported from the schematic |
 | `BOM-offboard.csv` | The lead (from `hardware/tools/capbank_lead.py`, shared with CANary-PWR J4) and the fixings |
 | `lib/footprints.pretty/` | The cell laid flat, written by `gen/footprints.py` |
+| `lib/3dmodels/` | STEP models of the cell and the Micro-Fit header for KiCad's 3D viewer, written by `hardware/tools/gen_3dmodels.py` |
 | `gen/` | `bank.py` parts and nets, `layout.py` placement and copper, `build.sh` runs it all and the checks |
 
 `gen/build.sh` overwrites the KiCad files. Once the board is edited in KiCad,

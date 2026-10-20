@@ -116,6 +116,10 @@ def cell():
         ),
         pad("1", 0, 0, "roundrect"),
         pad("2", 0, PITCH, "circle"),
+        # Written by hardware/tools/gen_3dmodels.py from this file's constants.
+        f'\t(model "${{KIPRJMOD}}/lib/3dmodels/{NAME}.step"\n'
+        "\t\t(offset\n\t\t\t(xyz 0 0 0)\n\t\t)\n\t\t(scale\n\t\t\t(xyz 1 1 1)\n\t\t)\n"
+        "\t\t(rotate\n\t\t\t(xyz 0 0 0)\n\t\t)\n\t)",
         "\t(embedded_fonts no)\n)\n",
     ]
     return "\n".join(parts)

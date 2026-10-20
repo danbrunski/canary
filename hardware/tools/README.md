@@ -70,6 +70,29 @@ drawn twice in one place is reported, not removed: fix it in the library.
 Removing footprint items from pcbnew's python left KiCad 10.0.5's wrappers
 returning raw pointers.
 
+## 3D models
+
+KiCad's 3D library has no Micro-Fit 3.0 header models, although its Micro-Fit
+footprints reference them. They are missing from 10.0 and from upstream
+kicad-packages3D. `gen_3dmodels.py` writes those headers (2 × 3 and 2 × 5,
+right-angle), and the cap bank's flat cell, as STEP files into each project's
+`lib/3dmodels/`. Boards reference them as `${KIPRJMOD}/lib/3dmodels/<name>.step`.
+The script needs cadquery, which the repo venv does not carry; its docstring
+has the commands.
+
+- Plan geometry comes from the footprints. The header's **height is an
+  estimate** (8.4 mm body, 9.4 mm at the latch ramp), because Molex's drawing
+  could not be fetched. Check it against Molex's own 43045-1002 STEP before
+  relying on it for an enclosure clearance.
+- PWR's custom IC footprints (U1 QFN-38, U6 DGN, U8 DGK) use KiCad's stock
+  package models. Their pads match the stock footprints' origin and pin-1
+  corner, so the models need no offset. F1 renders as a stock 1812 chip
+  resistor until its fuse MPN is chosen.
+- KiCad's *Update footprints from library* puts a Micro-Fit header's stock
+  model path back on the board, and that file does not exist. The cap bank's
+  `gen_pcb.py` re-points it on every build. On CANary-PWR the fix is to edit
+  J3 and J4 by hand again.
+
 ## Autorouting with hand-laid power copper
 
 `autoroute.sh` routes a board with Freerouting while keeping the copper laid by hand:
