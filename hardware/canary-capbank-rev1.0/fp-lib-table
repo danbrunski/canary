@@ -1,0 +1,4 @@
+(fp_lib_table
+	(version 7)
+	(lib (name "canary-capbank") (type "KiCad") (uri "${KIPRJMOD}/lib/footprints.pretty") (options "") (descr "Cap bank footprints: the cells laid flat"))
+)

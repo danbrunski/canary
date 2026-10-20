@@ -1,0 +1,4 @@
+"Refs","Qty","Value","Manufacturer","MPN","Footprint","Description"
+"C1-C4","4","25F 3.0V","Eaton","TVA1625-3R0256-R","canary-capbank:EDLC_Radial_D16.0mm_P7.50mm_Horizontal","EDLC cell, 25 F 3.0 V, 16.5 x 28.9 mm max radial, AEC-Q200; laid flat and tied down"
+"J1","1","Cap bank lead","Molex","43045-1002","Connector_Molex:Molex_Micro-Fit_3.0_43045-1000_2x05_P3.00mm_Horizontal","Micro-Fit 3.0 2x5 right-angle header, gold; the lead is 172952-1001 TPA housings with 43030-0009 gold crimps, wired pin n to pin n"
+"TH1","1","10k NTC","Vishay","NTCS0603E3103FLT","Resistor_SMD:R_0603_1608Metric","NTC thermistor 10 k 1 % at 25 C, B25/85 3435 K, AEC-Q200; on cell 1's - lead copper"

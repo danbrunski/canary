@@ -5882,7 +5882,7 @@
 				)
 			)
 		)
-		(property "Description" "Micro-Fit 3.0 2x5 right-angle header; mating 43025-1000 + 43030 crimps"
+		(property "Description" "Micro-Fit 3.0 2x5 right-angle header, 0.76 um gold; mating 172952-1001 TPA housing + 43030-0009 gold crimps"
 			(at 38.1 190.5 0)
 			(hide yes)
 			(show_name no)
@@ -5893,7 +5893,7 @@
 				)
 			)
 		)
-		(property "MPN" "43045-1000"
+		(property "MPN" "43045-1002"
 			(at 38.1 190.5 0)
 			(hide yes)
 			(show_name no)

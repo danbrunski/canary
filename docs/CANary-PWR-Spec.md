@@ -364,15 +364,26 @@ LTC3350 is never off; that is the 4 mA (§P1). It also answers the old
 gate-versus-latency question: the bank is charged at every key-on, so the
 supervisor need not hold the Pi off waiting for a recharge.
 
-**The bank is a separate board on a lead.** Four 25 F/2.7 V cells
-(~16 × 26 mm each), the NTC and a connector; no active parts. It lets the caps
-sit somewhere cooler than between two boards over a Pi, and placed where the
-enclosure wants them.
+**The bank is a separate board on a lead.** Four 25 F cells, the NTC and a
+connector; no active parts. It lets the caps sit somewhere cooler than between
+two boards over a Pi, and placed where the enclosure wants them.
 
-- **Connector: Molex Micro-Fit 3.0, 2 × 5, right-angle (43045-1000), keyed and
+- **KiCad project: [`hardware/canary-capbank-rev1.0/`](../hardware/canary-capbank-rev1.0/)**
+  (2026-10-20). Its README has the part choices, layout and assembly. Cells:
+  Eaton TVA1625-3R0256-R, 3.0 V rated, laid flat. Every 2.7 V cell is derated
+  to 2.3 V at 85 °C; this one holds 2.5 V there, is AEC-Q200, and is rated
+  4.2 A continuous. The lead's pin map lives in `hardware/tools/capbank_lead.py`,
+  which both boards' generators read. `hardware/tools/check_capbank_lead.py`
+  checks both KiCad schematics against it.
+
+- **Connector: Molex Micro-Fit 3.0, 2 × 5, right-angle, keyed and
   latching.** Ten pins, not the seven first planned, because the stack's top
   and bottom get **Kelvin sense wires**: otherwise the cell-4 and cell-1
-  measurements include the drop along the power wires at 4 A.
+  measurements include the drop along the power wires at 4 A. **Gold:
+  43045-1002** on both boards, the same footprint as the tin 43045-1000. The
+  lead uses 172952-1001 housings with TPA and 43030-0009 gold crimps
+  (2026-10-20). The tin header was out of stock at DigiKey that day, and gold also resists fretting under vibration. Gold never mates
+  tin, so `check_capbank_lead.py` checks both ends' part numbers too.
 
   Molex numbering: pins 1–5 on one row, 6–10 on the other.
 
@@ -631,12 +642,12 @@ Nothing on this board changes for rev 3.0.
 | 7 | Crank-dip window: longest dip the bank should ride before `~PWR_FAIL` | DIP vs HOLDUP timing |
 | 8 | Right-angle connector heights (Phoenix MC 1,5 G, Micro-Fit 43045 2 × 3 and 2 × 5, SWD) against the ~13 mm gap under the HAT | Edge placement |
 | 9 | Side-view LED and side-actuated button orientation on the footprints | They face the edge |
-| 10 | Part choices still open: the polyfuse (0.5 A hold, ≥ 40 V), the right-angle SWD header, the 25 F cells | BOM |
+| 10 | Part choices still open: the polyfuse (0.5 A hold, ≥ 40 V), the right-angle SWD header. The 25 F cells are Eaton TVA1625-3R0256-R (2026-10-20, the cap bank's README); it and every cap-bank and lead part are in stock at DigiKey (operator, 2026-10-20), as is the HAT-out 43045-0600 | BOM |
 | 11 | The cap-bank lead's resistance at bring-up | Calibrates the ESR readout |
-| 12 | The Vehicle-in plug's order number (KiCad's footprint confirms 1803293 for the header) and the Micro-Fit housings and crimps (43025-0600, 43025-1000, 43030) | BOM |
+| 12 | The Vehicle-in plug's order number (KiCad's footprint confirms 1803293 for the header) and the HAT-out Micro-Fit's housing and crimps (43025-0600, 43030). The cap-bank lead's are settled in `hardware/tools/capbank_lead.py` | BOM |
 | 13 | Copper weight: TI recommends 2 oz outer layers for the LM61460. **Settled 2026-10-18 (operator): the outer layers stay 1 oz.** Every current path is a wide pour sized for 1 oz, and 0.15 mm signal clearance costs nothing extra at that weight | Fab order |
 | 14 | Alternator ripple at `+12V_HAT` against `VIN_SENSE`'s input, engine running | Whether the HAT coprocessor can measure ripple from `V12_SENSE` through the hold-up path (HAT §13.3.3b) |
-| 15 | Routing. **Done 2026-10-15** (`gen/copper.py`, §P2 Power copper): every current path as a pour; +12V_BUS pours stitched to the In2 island; 5 V into J1 pins 2/4 through an In2 +5V_PI island; Kelvin pairs to RSNSI, RSNSC and R28; TG/BG through via pairs; U1's top-row escapes; the starved-thermal GND pads (the outer GND pours now join SMD pads solidly). The committed board is that copper with the signals still unrouted: DRC shows only the unrouted connections (153 then, 149 after the 2026-10-18 placement edits, 133 since the routing aids below), with parity clean and no vias in pads. **Left:** the signals and the power nets' low-current taps. The best autoroute reproduces exactly (Freerouting 46bf9e2ef is deterministic): `autoroute.sh` with `-mp 1 --router.scoring.start_ripup_costs=1500 --router.min_trace_width_um=150`, taps at 0.3 mm, then a second run on its result with `dsn_export.py --fix-existing` (add-only, 2 passes). That reports 36 connections left, with no vias in pads, but the result is not valid: it routes CAN_WAKE across In1 and has one clearance error (PWR_FAIL 0.22 mm from a router-placed +12V_BUS via), and without the In1 track it leaves 37 (2026-10-16). Both routers put signals on In1 although the DSN declares it a power layer: their maze search skips an inactive layer only when it is a signal layer (freerouting-rs Q01.7). Freerouting 7f56b062d fixes that bug. With it, the same two runs leave 45 and then 37 connections, with no errors besides 4 starved thermals, no vias in pads and no inner-layer tracks. Two add-only runs on 2026-10-17 wrote byte-identical sessions; the first add-only run, on 2026-10-16, gave 40, and its inputs are gone. The fix still lets an In2 plane net leave its island: +5V_PI tracks crossed the +12V_BUS pour, and `inner_tracks.py` refuses them. Two placement moves made no difference (2026-10-17, same flow): reordering the balancer column so CAPRTN, CAP2 and CAP3 sit nearest U1 gave 41 then 38, and moving U7 above U1 gave 55 then 50. The R15 Kelvin pair on B.Cu runs down x 124.0/124.6 and turns west at y 85.0 and 89.4, so it splits the balancer column and closes R19's CAP3 pad in, with L1, R15 and J3 above it on F.Cu. Rerouting it round the bottom of the column, with VCAP hopping over ICAP on F.Cu, routed clean but no better: 47 then 40, reverted 2026-10-17. All four CAP nets still failed, now at U1's end. The bottleneck is U1's west pins (CAPRTN, CAP1-CAP4 at x 124.55): C6's pad lines up with CAP3 and CAP4, so they cannot leave west on F.Cu, and the rows above leave only the gap over C6 and C7. Laying C6 and C7 on their sides below the CAP rows (C6 at (119.1, 74.7) rot 0, C7 at (122.2, 74.7) rot 180) fixed that locally: CAP3, CAP4 and CFN connected and only CAP2 failed. Freerouting lost about a dozen unrelated connections elsewhere, though, and both positions tried gave 41 after add-only, so the placement stays as committed (2026-10-17). Hand-laid escapes for those pins remain untried. What is left: 6 GND pads cut off from the pour, short taps blocked by earlier routes, and long MCU signals (CAN, LEDs, BUTTON). Further Freerouting passes add nothing, and KiCadRoutingTools only gets further by putting vias in pads. **On hold (operator, 2026-10-15) for freerouting-rs**, the Rust port of Freerouting: this board is its test bed, so nobody finishes it by hand or with another router meanwhile. A route counts when, after `ses_import.py`, KiCad's DRC at the committed rules shows no errors besides the unconnected ones, `via_in_pad.py` and `inner_tracks.py` both report 0. Starved thermals are counted but do not disqualify a route. The number to beat is 33: freerouting-rs with its add-only completion sweep (`--router.autorouter.sweep=free --router.autorouter.sweep_passes=2`, one run, Q10) on the 9511d9a DSN, clean, with 9 starved thermals (2026-10-17). Every starved thermal so far is a GND through-hole connector pin that also joins the In1 plane, which is why they do not disqualify a route. The test that counts, though, is a default-options freerouting-rs plugin run inside KiCad, graded from the board it saves (operator, 2026-10-17). The command-line flow above shows what the router can do. On 2026-10-17 the plugin run (freerouting-rs 9c97117, `enhanced`) left 68 unconnected, with two GND vias 0.297 mm from the board edge and +5V_PI on In2 outside its island. Its export has none of `dsn_export.py`'s fixes, and the sweep is not in its default profile. freerouting-rs tracks bringing the plugin to 33 or better as K09.9. The first Rust run (freerouting-rs 4336133, 2026-10-16, one run, not add-only) leaves 46 with its In1 tracks removed. In2 is a mixed layer since 2026-10-18 (operator): signals may cross its GND, and track keep-outs hold its +12V_BUS and +5V_PI islands whole. On the f778dc14 placement, routed fresh through the plugin's export (freerouting-rs b93bcd0, the operator's options, one run each), In2 as a plane left 39; mixed with no keep-outs left 29 but cut the +12V_BUS island into 6 pieces and +5V_PI into 2; mixed with the keep-outs left 33 with both islands whole, whether the keep-outs also barred foreign vias or not (`--router.wire_keepout=traces_only`). In1 stays free of tracks, which `inner_tracks.py` now checks on plane-type layers only; DRC refuses a track in an island keep-out. The +12V_BUS keep-out has one notch, at its top edge under C6/C7 (x 119.0-125.3, y 72.5-76.1, `copper.IN2_BUS_NOTCH`): C7's VCAP pad sits 0.4 mm outside the island and U1's VCAP via 2.65 mm inside it, and on the routed board F.Cu and B.Cu had no way between them, so the tap crosses In2 there, from a 0.6 mm via beside C7 (2026-10-19). The island stays whole. **Routing aids (operator, 2026-10-18):** the hold now allows the hand copper of "Routing aids, 2026-10-18" below. Through the same plugin path (two rip-up costs each, 1500 and 1400), the board before them left 29 and 28; 0.15 mm signal clearance with the U1/U2 hand copper left 25 and 25; adding 37 GND vias beside the passives' GND pads left 19 and 19; U1's VCC2P5, VIN and CAP4 escapes by hand, with C6 turned, left 18 and 18 (the two rip-up costs gave identical sessions). All were clean, with both islands whole and no vias in pads. The last step connected every pin it laid, but the router lost OUTFET, VOUTSP, SMBALERT, PFI and CAP3 elsewhere round U1 instead. A via of its own for every GND pad that routes had cut off (four on the 18 run: U1's exposed pad, R8, U2 PGND and the INA226), with U2's bus tap moved off PGND, and OR_GATE and the LM74700 anode by hand, left 14 (one run): GND in one piece and both islands whole, but VCAP, GPI, CAP2, CAN_RXD and a +12V_PROT tap failed instead. Every run also leaves 6 to 11 dangling vias, DRC warnings that do not count; most sit mid-track with the same layer on both sides. The number to beat is 14 | Layout |
+| 15 | Routing. **Done 2026-10-15** (`gen/copper.py`, §P2 Power copper): every current path as a pour; +12V_BUS pours stitched to the In2 island; 5 V into J1 pins 2/4 through an In2 +5V_PI island; Kelvin pairs to RSNSI, RSNSC and R28; TG/BG through via pairs; U1's top-row escapes; the starved-thermal GND pads (the outer GND pours now join SMD pads solidly). The committed board is that copper with the signals still unrouted: DRC shows only the unrouted connections (153 then, 149 after the 2026-10-18 placement edits, 133 since the routing aids below), with parity clean and no vias in pads. **Left:** the signals and the power nets' low-current taps. The best autoroute reproduces exactly (Freerouting 46bf9e2ef is deterministic): `autoroute.sh` with `-mp 1 --router.scoring.start_ripup_costs=1500 --router.min_trace_width_um=150`, taps at 0.3 mm, then a second run on its result with `dsn_export.py --fix-existing` (add-only, 2 passes). That reports 36 connections left, with no vias in pads, but the result is not valid: it routes CAN_WAKE across In1 and has one clearance error (PWR_FAIL 0.22 mm from a router-placed +12V_BUS via), and without the In1 track it leaves 37 (2026-10-16). Both routers put signals on In1 although the DSN declares it a power layer: their maze search skips an inactive layer only when it is a signal layer (freerouting-rs Q01.7). Freerouting 7f56b062d fixes that bug. With it, the same two runs leave 45 and then 37 connections, with no errors besides 4 starved thermals, no vias in pads and no inner-layer tracks. Two add-only runs on 2026-10-17 wrote byte-identical sessions; the first add-only run, on 2026-10-16, gave 40, and its inputs are gone. The fix still lets an In2 plane net leave its island: +5V_PI tracks crossed the +12V_BUS pour, and `inner_tracks.py` refuses them. Two placement moves made no difference (2026-10-17, same flow): reordering the balancer column so CAPRTN, CAP2 and CAP3 sit nearest U1 gave 41 then 38, and moving U7 above U1 gave 55 then 50. The R15 Kelvin pair on B.Cu runs down x 124.0/124.6 and turns west at y 85.0 and 89.4, so it splits the balancer column and closes R19's CAP3 pad in, with L1, R15 and J3 above it on F.Cu. Rerouting it round the bottom of the column, with VCAP hopping over ICAP on F.Cu, routed clean but no better: 47 then 40, reverted 2026-10-17. All four CAP nets still failed, now at U1's end. The bottleneck is U1's west pins (CAPRTN, CAP1-CAP4 at x 124.55): C6's pad lines up with CAP3 and CAP4, so they cannot leave west on F.Cu, and the rows above leave only the gap over C6 and C7. Laying C6 and C7 on their sides below the CAP rows (C6 at (119.1, 74.7) rot 0, C7 at (122.2, 74.7) rot 180) fixed that locally: CAP3, CAP4 and CFN connected and only CAP2 failed. Freerouting lost about a dozen unrelated connections elsewhere, though, and both positions tried gave 41 after add-only, so the placement stays as committed (2026-10-17). Hand-laid escapes for those pins remain untried. What is left: 6 GND pads cut off from the pour, short taps blocked by earlier routes, and long MCU signals (CAN, LEDs, BUTTON). Further Freerouting passes add nothing, and KiCadRoutingTools only gets further by putting vias in pads. **On hold (operator, 2026-10-15) for freerouting-rs**, the Rust port of Freerouting: this board is its test bed, so nobody finishes it by hand or with another router meanwhile. A route counts when, after `ses_import.py`, KiCad's DRC at the committed rules shows no errors besides the unconnected ones, `via_in_pad.py` and `inner_tracks.py` both report 0. Starved thermals are counted but do not disqualify a route. The number to beat is 33: freerouting-rs with its add-only completion sweep (`--router.autorouter.sweep=free --router.autorouter.sweep_passes=2`, one run, Q10) on the 9511d9a DSN, clean, with 9 starved thermals (2026-10-17). Every starved thermal so far is a GND through-hole connector pin that also joins the In1 plane, which is why they do not disqualify a route. The test that counts, though, is a default-options freerouting-rs plugin run inside KiCad, graded from the board it saves (operator, 2026-10-17). The command-line flow above shows what the router can do. On 2026-10-17 the plugin run (freerouting-rs 9c97117, `enhanced`) left 68 unconnected, with two GND vias 0.297 mm from the board edge and +5V_PI on In2 outside its island. Its export has none of `dsn_export.py`'s fixes, and the sweep is not in its default profile. freerouting-rs tracks bringing the plugin to 33 or better as K09.9. The first Rust run (freerouting-rs 4336133, 2026-10-16, one run, not add-only) leaves 46 with its In1 tracks removed. In2 is a mixed layer since 2026-10-18 (operator): signals may cross its GND, and track keep-outs hold its +12V_BUS and +5V_PI islands whole. On the f778dc14 placement, routed fresh through the plugin's export (freerouting-rs b93bcd0, the operator's options, one run each), In2 as a plane left 39; mixed with no keep-outs left 29 but cut the +12V_BUS island into 6 pieces and +5V_PI into 2; mixed with the keep-outs left 33 with both islands whole, whether the keep-outs also barred foreign vias or not (`--router.wire_keepout=traces_only`). In1 stays free of tracks, which `inner_tracks.py` now checks on plane-type layers only; DRC refuses a track in an island keep-out. The +12V_BUS keep-out has one notch, at its top edge under C6/C7 (x 119.0-125.3, y 72.5-76.1, `copper.IN2_BUS_NOTCH`): C7's VCAP pad sits 0.4 mm outside the island and U1's VCAP via 2.65 mm inside it, and on the routed board F.Cu and B.Cu had no way between them, so the tap crosses In2 there, from a 0.6 mm via beside C7 (2026-10-19). The island stays whole. **Routing aids (operator, 2026-10-18):** the hold now allows the hand copper of "Routing aids, 2026-10-18" below. Through the same plugin path (two rip-up costs each, 1500 and 1400), the board before them left 29 and 28; 0.15 mm signal clearance with the U1/U2 hand copper left 25 and 25; adding 37 GND vias beside the passives' GND pads left 19 and 19; U1's VCC2P5, VIN and CAP4 escapes by hand, with C6 turned, left 18 and 18 (the two rip-up costs gave identical sessions). All were clean, with both islands whole and no vias in pads. The last step connected every pin it laid, but the router lost OUTFET, VOUTSP, SMBALERT, PFI and CAP3 elsewhere round U1 instead. A via of its own for every GND pad that routes had cut off (four on the 18 run: U1's exposed pad, R8, U2 PGND and the INA226), with U2's bus tap moved off PGND, and OR_GATE and the LM74700 anode by hand, left 14 (one run): GND in one piece and both islands whole, but VCAP, GPI, CAP2, CAN_RXD and a +12V_PROT tap failed instead. Every run also leaves 6 to 11 dangling vias, DRC warnings that do not count; most sit mid-track with the same layer on both sides. The number to beat is 14. **Hand-routed since 2026-10-19 (operator): 1 unconnected since the merge of 2026-10-20**, waiting on a part change; VCAP joined through the In2 notch above ("Hand routing, 2026-10-19" below) | Layout |
 
 ## P11. Hardware project
 
@@ -744,8 +755,56 @@ measured as above (§P10 item 15).
   checks only In1). C45 moves 0.5 mm east and the INA226 IN+ Kelvin via moves to
   make room under U4.
 
-Still open: the +5V_PI sense (U4 CATHODE and the INA226 VBUS to the Pi's 5 V pour;
-B.Cu under U4 is full of the MCU's C32, C3 and R4, so no via fits), U2's two
-+5V_BUCK sense taps, the long MCU signals (BUCK_EN, BUCK_PG, PI_5V_OFF), and the
-taps the router drops round U1 (VCAP to R7, VOUTSP, GPI, CAP2, INTVCC to R13 on the
-last run).
+## Hand routing, 2026-10-19
+
+The operator unlocked the copper and routed by hand on top of the 2026-10-18 21:02
+plugin run (c2020a48); the routing hold is now theirs to call. With the pours that
+routing had cut repaired, 6 connections were left. Track edits on 2026-10-20 took it
+to 2, with nothing else new in DRC, no vias in pads and no In1 tracks:
+
+- **Nothing runs under U2's body on F.Cu.** BUCK_EN leaves pin 7 northwards and runs
+  along y 53.8 above R21–R23 to R25. LM_RT moves north to y 56.0 to make room.
+  BUCK_PG drops through a via beside pin 5 and runs west on B.Cu to its via at
+  (122.2, 57.1).
+- **~PWR_FAIL** runs from U5 pin 18 to the J1/R37 run with three vias: In2 west of
+  the buck, F.Cu at x 123.05, then B.Cu under L2 and north-east to J1. No via sits in
+  the LM_SW pour, where the switch node's edges would couple into the fault line.
+- **C42/C43 GND** gets a via on their shared B.Cu track at (143.55, 79.15). On F.Cu
+  it sits in the branch of the +12V_PROT pour that feeds D2.
+- **+5V_PI sense.** U4's CATHODE reaches C35 on B.Cu through two vias. That frees
+  F.Cu for the INA226 VBUS (U3 pin 8) to join U4 pin 4 directly. C33's anode-side
+  pad now joins U4 pin 3 (EN, tied to ANODE) instead of hanging off the INA226's IN−
+  trace, so U3 pin 9 is a Kelvin line to R28 alone.
+
+The two left each need a part change, waiting for the operator:
+
+- **R29/C41 GND island.** CAN_WAKE runs from U7 pin 9 round R29 and C41 to R29 pin
+  1, the +12V_PROT feed to C41 closes the other side, and Q1's drain pad above leaves
+  no via site. Proposal: remove R29 and tie WAKE (U7 pin 9) straight to GND. The
+  TCAN1043 datasheet (§8.4.6.2) asks for an unused WAKE pin to be "pulled to ground
+  or VSUP". Its series resistor protects a WAKE line to an off-board switch from
+  ground loss, and this pin's ground is the transceiver's own, millimetres away. With
+  the loop gone, pin 9 reaches GND at 0.15 mm along the old CAN_WAKE path, and C41's
+  GND pad gets one via.
+- **VCAP at C7.** C7 is boxed in on F.Cu by CAP2, OUTFET and VCAPP5, with R20's pad
+  under it on B.Cu. All 120 routing orders of those five nets leave CAP2 or CAP3
+  unrouted. Proposal: C7 to (122.5, 75.25), horizontal below the CAP rows with pad 1
+  (VCAPP5) east. VCAPP5 and VCAP then reach it on F.Cu with no vias, about 5 mm of
+  loop from pin 19 to pin 21, and OUTFET re-routes to Q5 with four vias. L1's
+  reference text moves off the new pad.
+
+Both together reach 0 unconnected on a scratch copy, still with no vias in pads and
+no In1 tracks.
+
+**VCAP connected at the merge, 2026-10-20.** `b7a82cd`, made on 2026-10-19 alongside
+this routing and not seen by it, reached VCAP without moving C7. It has a 0.6 mm via
+beside C7 at (119.6, 72.9) and a 0.3 mm In2 track to the Kelvin via at U1 pin 21,
+through a notch in the +12V_BUS island's track keep-out (§P10 item 15,
+`copper.IN2_BUS_NOTCH`). The operator had routed nothing there, so the merge laid those
+five items and the notched keep-out onto this board unchanged and refilled it. Graded
+against the merged project, 1 is left (the R29/C41 GND island) and DRC has nothing else
+new: 1 silk overlap, 2 starved thermals and 6 footprint-library warnings, as before.
+Parity is clean, with no vias in pads and no In1 tracks. The C7 move above is now a
+choice, not a need. It gives an all-F.Cu loop with no vias, where the tap adds two vias
+and about 6.4 mm of In2. Taking it means deleting the tap (its via, the F.Cu stub to
+C7 and three In2 segments) and the notch.

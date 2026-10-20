@@ -2345,4 +2345,15 @@
 		(uuid "ac47707c-93ca-4fa1-9152-12a22aa256e1")
 	)
 	(embedded_fonts no)
+	(model "${KICAD10_3DMODEL_DIR}/Package_DFN_QFN.3dshapes/WQFN-38-1EP_5x7mm_P0.5mm_EP3.15x5.15mm.step"
+		(offset
+			(xyz 0 0 0)
+		)
+		(scale
+			(xyz 1 1 1)
+		)
+		(rotate
+			(xyz 0 0 0)
+		)
+	)
 )
