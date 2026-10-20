@@ -220,8 +220,44 @@ def test_a_disk_that_keeps_failing_is_not_retried_on_every_record(
     for i in range(500):
         writer.write(_rpm(3 + i))
 
+    assert writer.publish_stats.rows_in_flight == 0
     assert calls == 1
     assert writer.publish_stats.errors == 1
+
+
+def test_a_failure_found_while_waiting_at_the_cap_still_waits_its_interval(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The ``b7a82cd`` gate, under load: the failing write had not raised by
+    the time the buffer reached its cap, so the writer waited on it, counted
+    the error and resubmitted at once, 42 rows straight back at the bad disk.
+    This write raises only once the writer is waiting on it."""
+    calls = 0
+
+    def fails_once_waited_on(table: Any, path: Path, *, compression: str) -> None:
+        nonlocal calls
+        calls += 1
+        deadline = time.monotonic() + 10
+        while writer.publish_stats.waits == 0 and time.monotonic() < deadline:
+            time.sleep(0.001)
+        raise OSError(5, "Input/output error")
+
+    monkeypatch.setattr(parquet_writer, "_write_table_atomic", fails_once_waited_on)
+    writer = _writer(tmp_path)
+    cap = writer.max_rows * parquet_writer.BACKGROUND_BUFFER_CHUNKS
+    filled = writer.max_rows + cap  # the first chunk, then a full buffer
+    for i in range(filled):
+        writer.write(_rpm(i))
+
+    assert writer.publish_stats.waits == 1
+    assert writer.publish_stats.errors == 1
+    # Not resubmitted: a count of calls alone passes on a resubmit whose
+    # thread the GIL has not yet run.
+    assert writer.publish_stats.rows_in_flight == 0
+    for i in range(500):
+        writer.write(_rpm(filled + i))
+    assert writer.publish_stats.rows_in_flight == 0
+    assert calls == 1
 
 
 def test_the_inline_writer_is_unchanged(tmp_path: Path) -> None:

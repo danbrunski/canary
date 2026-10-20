@@ -287,14 +287,16 @@ class ParquetTelemetryWriter:
         finished = self._collect(wait=False)
         if not self._buffer or not (len(self._buffer) >= self.max_rows or self.flush_due()):
             return finished
-        if self._retry_at is not None and self._clock() < self._retry_at:
-            return finished
         if self._in_flight is not None:
             if len(self._buffer) < self.max_rows * BACKGROUND_BUFFER_CHUNKS:
                 self.publish_stats.deferred += 1
                 return finished
             self.publish_stats.waits += 1
             finished = self._collect(wait=True) or finished
+        # After the wait: a chunk that failed while waited on starts its
+        # retry interval too (the b7a82cd gate resubmitted it at once).
+        if self._retry_at is not None and self._clock() < self._retry_at:
+            return finished
         self._submit()
         return finished
 

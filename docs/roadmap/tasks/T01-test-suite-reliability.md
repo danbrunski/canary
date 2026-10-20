@@ -34,6 +34,7 @@ measurement in hand.
 | R09.3 implementer, `-n 4` | `5f6717b` + R09.3 diff | not recorded | the same test again, passed alone and in the slow run |
 | R09.4 implementer, inner loop, beside a 31-min replay | `c9d11ab` + R09.4 diff | not recorded | `tests/test_daemon.py::test_run_live_inference_scores_during_replay_despite_engine_off_reading` (30 s hang-guard `CancelledError`), passed alone in 5.9 s |
 | R09.5 verifier, inner loop | `1df5e66` | not recorded | `tests/test_can_collector.py::test_collect_can_counts_malformed_frames_without_aborting` (`assert 3 == 4`), 3 of 3 alone — T01.14 |
+| `scripts/ci_gate.sh`, `-n auto` | `b7a82cd` | 11.02 (1-min, at the serial re-run) | `tests/test_background_chunk_publish.py::test_a_disk_that_keeps_failing_is_not_retried_on_every_record` (`assert 2 == 1`), passed serially in 1.4 s; a production bug, not a timing flake — T01.29 |
 
   The pre-push hook now re-runs parallel-run failures serially once, and names
   a failure that passes serially as flaky. That keeps the gate usable. It is
@@ -877,3 +878,36 @@ measurement in hand.
     input mid-run, so a timing-dependent race under load is the likelier cause.
   - **Next time:** keep the failure text and the load average (`uptime`), and
     run the `[2]` variant under `-n auto` alongside the rest of the slow tier.
+- [x] **T01.29 `tests/test_background_chunk_publish.py::test_a_disk_that_keeps_failing_is_not_retried_on_every_record`
+  failed under load: `assert 2 == 1`, a second write to a failing disk.**
+  - **Seen** 2026-10-19 in the push gate for `b7a82cd` (a board-layout commit
+    that touched no Python), parallel run, load average 11.02 at the serial
+    re-run. It passed serially (FLAKY UNDER LOAD). Log:
+    `.git/ci-gate/failed-logs/20261019T163601Z-b7a82cd-pytest.log`. It logged
+    two failed writes, of 2 rows and then 42.
+  - **Cause, production code:** `ParquetTelemetryWriter.publish_due` checked
+    the retry interval (`_retry_at`) *before* the backpressure wait. When the
+    buffer reached its cap (`max_rows` × `BACKGROUND_BUFFER_CHUNKS`, 2 × 20
+    in the test) with a chunk still in flight, it waited for that chunk.
+    `_collect` counted the failure and set `_retry_at`, and `_submit()` then
+    ran anyway: the 2 failed rows plus the 40 buffered went straight back to
+    the failing disk. On the Pi that is a card that stalls and *then* raises,
+    the 2026-10-11 card's failure mode, retried at once rather than one flush
+    interval later.
+  - **Why it passed serially:** it took that path every time. The trace showed
+    `deferred=38, waits=1` serially too, because the GIL lets the main thread
+    fill the buffer before the worker raises. `calls == 1` held only because
+    the 500 writes that followed finished before the worker ran the
+    resubmitted chunk. Under load the worker got scheduled in time and
+    exposed it.
+  - **Fixed 2026-10-19:** the retry-interval check moved after the
+    backpressure wait, so a failure found there waits its interval like any
+    other. Nothing else changes: `_retry_at` is only ever in the future with
+    nothing in flight.
+  - **Tests:** the original test also asserts `publish_stats.rows_in_flight ==
+    0`, which sees a resubmit at once, whatever the scheduler does. The new
+    `test_a_failure_found_while_waiting_at_the_cap_still_waits_its_interval`
+    makes the write raise only once the writer is waiting on it, the gate's
+    order on purpose. Before the fix both failed 3 of 3 serially
+    (`rows_in_flight` 42, not 0). After it the file passes 10 of 10, three
+    times.
