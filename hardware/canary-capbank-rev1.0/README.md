@@ -34,17 +34,25 @@ on it, as with CANary-PWR.
 
   It is long: 16.5 × 28.9 mm max. The footprint's envelope is Ø17 × 29 mm,
   so the alternate fits the same board: UCAP BCAP0025 P300 X11, 3.0 V,
-  4.1 A, not AEC-Q200. **Stock is unconfirmed**: the only TVA1625 figure seen
-  was a DigiKey snippet of 80.
+  4.1 A, not AEC-Q200. The operator confirmed the cell and the NTC in
+  stock at DigiKey (2026-10-20).
 - **NTC: Vishay NTCS0603E3103FLT**, 10 k 1 %, B25/85 3435 K, AEC-Q200. Murata
   NCU18XH103F6SRB and TDK NTCG163JF103FT1S follow the same curve within 0.3 %
   above 0 °C, so one GPI table in the firmware covers all three. TH1 sits on
   cell 1's − lead copper; Maxwell notes that a sensor on a terminal reads the
   cell accurately.
-- **Lead:** 43025-1000 at both ends, 43030-0007 tin crimps, 20 AWG,
-  ≤ 300 mm, wired pin n to pin n. Molex's ready-made 214755-110x
-  female-to-female assemblies are 18 AWG and might do, but their pin mapping
-  has not been checked against the drawing.
+- **Connector: Molex 43045-1002**, the gold version of 43045-1000 on the same
+  footprint, on both boards (2026-10-20, when the tin -1000 went out of stock).
+  Gold also resists fretting under vibration better than tin.
+- **Lead:** 172952-1001 housings with TPA (two 172953-1001 retainers each)
+  and 43030-0009 gold crimps, 20 AWG, ≤ 300 mm, wired pin n to pin n.
+  The plain 43025-1000 housing also fits (in stock at DigiKey, WM1787-ND), at
+  the cost of the TPA's second lock. **Every contact must be gold**, because
+  gold never mates tin. `check_capbank_lead.py` therefore checks the part
+  number at both ends as well as the pins.
+- **Ready-made leads are not suitable for the cab.** Molex's 214755
+  female-to-female assemblies use 18 AWG UL 1061 wire, a style usually rated
+  80 °C, and their pin mapping is unverified.
 
 ## Layout
 
@@ -90,17 +98,13 @@ board's left and right edges.
 (bench button held, or I²C) until the red LED goes out. 6 F at 10 V across a
 screwdriver is a welding event.
 
-## Open
+## Decisions and open items
 
-- **Swap lead pins 5 and 6 (operator decision).** Putting − sense on pin 5
-  and + sense on pin 6 would leave both sense lines on their own side of J1,
-  on both boards. Each layer here would then have an uncut power path, and
-  CANary-PWR's J4 end would stop crossing too. The change is one line in
-  `hardware/tools/capbank_lead.py`. Then CANary-PWR's J4 needs its schematic
-  labels changed in KiCad (its files are hand-edited) and both boards'
-  sense copper redone.
-- **Confirm DigiKey stock** for the TVA1625 cell, the NTC and the Molex
-  parts. The research could not reach DigiKey, so every stock figure in it
-  came from search snippets.
+- **The lead's pin map stays as it is (operator, 2026-10-20).** Swapping
+  pins 5 and 6 would uncross the sense lines here but create a crossing on
+  CANary-PWR. Its + sense ballast (R20) sits beside J4 pin 5 and its − sense
+  ballast (R16) beside pin 6, so PWR's sense routing is uncrossed today. The
+  question would reopen only if PWR's J4 area had to be redone; the gold
+  header is a footprint drop-in, so it doesn't.
 - **Firmware:** the GPI table needs the NTC's R–T curve (Vishay's online
   calculator, or Murata R44E for XH103).

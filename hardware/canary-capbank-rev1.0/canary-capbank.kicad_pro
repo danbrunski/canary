@@ -734,7 +734,7 @@
       {
         "filename": "canary-capbank.kicad_sch",
         "name": "canary-capbank",
-        "uuid": "2853aa19-96a6-4f35-b768-5b5cddd4ab71"
+        "uuid": "2947ac05-97f4-4289-b0f1-302a153cd089"
       }
     ],
     "used_designators": "",
@@ -742,7 +742,7 @@
   },
   "sheets": [
     [
-      "2853aa19-96a6-4f35-b768-5b5cddd4ab71",
+      "2947ac05-97f4-4289-b0f1-302a153cd089",
       "canary-capbank"
     ]
   ],

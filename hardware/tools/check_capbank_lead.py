@@ -5,7 +5,9 @@
 
 Defaults to the two projects in this repository. Each schematic is exported to a netlist with kicad-cli
 (KICAD_CLI, else the Windows install seen from WSL, else kicad-cli on PATH), and every pin of CANary-PWR's
-J4 and the bank's J1 must carry the lead's net, with the lead's header footprint. The KiCad files are the
+J4 and the bank's J1 must carry the lead's net, with the lead's header footprint, part number and maker.
+The part number matters as much as the pins: a tin header at one end and a gold one at the other would
+leave the lead mating gold with tin. The KiCad files are the
 source of truth once a board is edited by hand, so this reads them rather than the generators. Exits 1 on
 any mismatch.
 """
@@ -79,6 +81,12 @@ def check_end(name, root, ref):
         bad.append(
             f"{name} {ref}: footprint {fp}, the lead's header is {capbank_lead.HEADER['fp']}"
         )
+    fields = {f.get("name"): f.text or "" for f in comp.iter("field")}
+    for field, key in (("MPN", "mpn"), ("Manufacturer", "mfr")):
+        if fields.get(field) != capbank_lead.HEADER[key]:
+            bad.append(
+                f"{name} {ref}: {field} {fields.get(field)!r}, the lead's header is {capbank_lead.HEADER[key]!r}"
+            )
     pins = {}
     for net in root.iter("net"):
         for node in net.iter("node"):

@@ -59,7 +59,7 @@ NOTES = (
     "Cell 1 is the bottom cell (LTC3350 CAPRTN..CAP1), cell 4 the top (CAP3..CAP4). GND is the stack's bottom plate.\n"
     "Inter-cell joins carry the full 4 A (7.25 A peak): pours on both layers. The taps to J1 carry only the shunt current (<= 0.5 A).\n"
     "Kelvin sense: NT1 and NT2 join BANK_POS_S / BANK_NEG_S to the stack at the cell leads themselves.\n"
-    "The lead: 43025-1000 at both ends, wired pin n to pin n; pin map in hardware/tools/capbank_lead.py, shared with CANary-PWR J4.\n"
+    "The lead: gold Micro-Fit at both ends (172952-1001 + 43030-0009), wired pin n to pin n; pin map in hardware/tools/capbank_lead.py, shared with CANary-PWR J4.\n"
     "DISCHARGE BEFORE UNPLUGGING: lower vshunt on CANary-PWR (bench button held, or I2C) until the red LED goes out."
 )
 

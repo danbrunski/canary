@@ -60,7 +60,7 @@ PARTS = [
         capbank_lead.HEADER["fp"],
         mpn=capbank_lead.HEADER["mpn"],
         mfr=capbank_lead.HEADER["mfr"],
-        desc="Micro-Fit 3.0 2x5 right-angle header; the lead is 43025-1000 at both ends, wired pin n to pin n",
+        desc="Micro-Fit 3.0 2x5 right-angle header, gold; the lead is 172952-1001 TPA housings with 43030-0009 gold crimps, wired pin n to pin n",
         note="Same header and pin map as CANary-PWR J4 (hardware/tools/capbank_lead.py)",
     ),
     *(

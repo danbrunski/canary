@@ -495,7 +495,7 @@ part(
     fp=capbank_lead.HEADER["fp"],
     mpn=capbank_lead.HEADER["mpn"],
     mfr=capbank_lead.HEADER["mfr"],
-    desc="Micro-Fit 3.0 2x5 right-angle header; mating 43025-1000 + 43030 crimps",
+    desc="Micro-Fit 3.0 2x5 right-angle header, 0.76 um gold; mating 172952-1001 TPA housing + 43030-0009 gold crimps",
     note="Spec said 7-way; 10-way adds Kelvin sense for the stack top/bottom (CAP4/CAPRTN measure across the lead otherwise) and doubles the power pins. Bank board: 4 x 25 F cells, NTC from pin 10 to stack minus.",
 )
 

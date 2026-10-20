@@ -33,7 +33,7 @@ HOLES = [(110.5, 98.0), (189.5, 98.0), (110.5, 145.5), (189.5, 145.5)]
 TEXT = [
     ("CANary cap bank rev 1.0", 150.0, 96.6, "F", 1.5),
     ("DISCHARGE BEFORE UNPLUGGING", 150.0, 99.3, "F", 1.0),
-    ("J1 to CANary-PWR J4: 43025-1000 both ends, pin n to pin n", 150.0, 119.2, "B", 1.0),
+    ("J1 to CANary-PWR J4: gold Micro-Fit 2x5 both ends, pin n to pin n", 150.0, 119.2, "B", 1.0),
     ("Discharge first: vshunt low until the red LED is out", 150.0, 121.4, "B", 1.0),
 ]
 SILK = []
