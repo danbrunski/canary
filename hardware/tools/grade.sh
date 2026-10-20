@@ -5,6 +5,7 @@
 # cannot leak into the grade. GRADE_REV grades against another commit (a result routed from an older board). An SES is added with ses_import.py; a .kicad_pcb replaces the board as is.
 # Then DRC with schematic parity and refilled zones, via_in_pad.py and inner_tracks.py. A result counts
 # when the only errors are unconnected items and starved thermals, and both checkers report 0.
+# cut_off.py then says where each unconnected item is: DRC names a cut-off pour piece by its zone's anchor.
 # KICAD_BIN overrides the KiCad bin directory (default: the Windows install, driven from WSL).
 set -uo pipefail
 proj=$(cd "$1" && pwd); src=$(realpath "$2")
@@ -36,4 +37,5 @@ EOF
 for check in via_in_pad inner_tracks; do
     "$bin/python.exe" "$(win "$here/$check.py")" "$(win "$board")" 2>&1 | grep -v -E "memory leak|image handler"
 done
+"$bin/python.exe" "$(win "$here/cut_off.py")" "$(win "$board")" 2>&1 | grep -v -E "memory leak|image handler"
 echo "graded board: $board (project at ${GRADE_REV:-HEAD})"

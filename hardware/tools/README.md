@@ -140,6 +140,15 @@ HEAD (or `GRADE_REV=<commit>`) into a scratch directory, imports the SES (or tak
 with schematic parity, `via_in_pad.py` and `inner_tracks.py`. A result counts when the only errors
 are unconnected items and starved thermals, and both checkers report 0.
 
+**`cut_off.py`** (KiCad python) says where each unconnected item is: `cut_off.py <board> [NET ...]`.
+kicad-cli's DRC names a pour piece by its zone's anchor (the outline's first corner), so a GND pad cut
+off in a scrap of pour reads as "Zone [GND] <-> Zone [GND]" at the board's corner. It refills the zones,
+joins each net's copper wherever two pieces overlap on a layer, and prints every group but the largest:
+fill pieces with their extents, pads, vias, and the nearest point of the rest of the net. A net in k
+groups is k - 1 unconnected items; it matched DRC net for net on CANary-PWR's unrouted board (149 in 77
+nets) and its routed one (2026-10-19). Joining by anchors alone does not: a track ending 0.05 mm short
+of a pour still overlaps its fill, and DRC counts it joined. `grade.sh` runs it last.
+
 **`ses_import.py`** (KiCad python) adds only the router's work. KiCad's own SES import
 deletes every track first. This script skips the wires and vias Freerouting marks `fix` or
 `protect`: the hand-laid copper and the pour stand-ins.
