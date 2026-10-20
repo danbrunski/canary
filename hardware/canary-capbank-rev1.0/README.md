@@ -34,8 +34,8 @@ on it, as with CANary-PWR.
 
   It is long: 16.5 × 28.9 mm max. The footprint's envelope is Ø17 × 29 mm,
   so the alternate fits the same board: UCAP BCAP0025 P300 X11, 3.0 V,
-  4.1 A, not AEC-Q200. The operator confirmed the cell and the NTC in
-  stock at DigiKey (2026-10-20).
+  4.1 A, not AEC-Q200. The operator confirmed every part here in stock at
+  DigiKey, lead parts included (2026-10-20).
 - **NTC: Vishay NTCS0603E3103FLT**, 10 k 1 %, B25/85 3435 K, AEC-Q200. Murata
   NCU18XH103F6SRB and TDK NTCG163JF103FT1S follow the same curve within 0.3 %
   above 0 °C, so one GPI table in the firmware covers all three. TH1 sits on
