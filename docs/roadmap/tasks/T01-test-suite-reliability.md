@@ -35,6 +35,7 @@ measurement in hand.
 | R09.4 implementer, inner loop, beside a 31-min replay | `c9d11ab` + R09.4 diff | not recorded | `tests/test_daemon.py::test_run_live_inference_scores_during_replay_despite_engine_off_reading` (30 s hang-guard `CancelledError`), passed alone in 5.9 s |
 | R09.5 verifier, inner loop | `1df5e66` | not recorded | `tests/test_can_collector.py::test_collect_can_counts_malformed_frames_without_aborting` (`assert 3 == 4`), 3 of 3 alone — T01.14 |
 | `scripts/ci_gate.sh`, `-n auto` | `b7a82cd` | 11.02 (1-min, at the serial re-run) | `tests/test_background_chunk_publish.py::test_a_disk_that_keeps_failing_is_not_retried_on_every_record` (`assert 2 == 1`), passed serially in 1.4 s; a production bug, not a timing flake — T01.29 |
+| `scripts/ci_gate.sh`, `-n auto` | `6707fc7` | not kept (1-min 4.3, 5-min 7.3 at the serial repeats) | `tests/test_daemon.py::test_run_live_inference_scores_during_replay_despite_engine_off_reading` (`TimeoutError` at its 30 s guard), passed serially in the gate; then failed 2 of 5 alone at 32 s, passed 15 of 15 at load 2.3-3.7 in 1.5 s. A hang, not a slowdown — T01.30 |
 
   The pre-push hook now re-runs parallel-run failures serially once, and names
   a failure that passes serially as flaky. That keeps the gate usable. It is
@@ -911,3 +912,19 @@ measurement in hand.
     order on purpose. Before the fix both failed 3 of 3 serially
     (`rows_in_flight` 42, not 0). After it the file passes 10 of 10, three
     times.
+- [ ] **T01.30 `tests/test_daemon.py::test_run_live_inference_scores_during_replay_despite_engine_off_reading`
+  hangs to its 30 s guard on a busy host, serially too.**
+  - **Seen** 2026-10-20 in the push gate for `6707fc7` (a KiCad-tooling commit, no daemon code):
+    `asyncio` `TimeoutError` at the test's 30 s guard, passed serially (FLAKY UNDER LOAD). Log:
+    `.git/ci-gate/failed-logs/20261020T220847Z-6707fc7-pytest.log`. The R09.4 row above is the
+    same test and the same 30 s guard (2026-10-03).
+  - **Re-run alone** (`-n0`), minutes later while another session worked (1-min load 4.3, 5-min
+    7.3): failed 2 of 5, each at 32 s; passed 15 of 15 once the load fell to 2.3-3.7, each in
+    1.5 s. So it either finishes in 1.5 s or waits out the whole guard. That is a missed wake-up
+    or a race, not the proportional slowdown T01.1 fixed. The log shows `live inference overran 1
+    deadline(s); skipping to the next future tick` just before the timeout.
+  - **Noise, not the cause:** every run, passing ones included, logs `AttributeError:
+    'FakeIsolationForest' object has no attribute 'feature_contributions'` from
+    `_rank_feature_contributors`, which catches it.
+  - **Next:** read what the test waits for after a skipped tick; reproduce beside a CPU burner
+    (T01.1's method) and keep the failure text and load average.
