@@ -15,7 +15,7 @@ import capbank_lead  # noqa: E402  (the cap-bank lead's pin map, shared with the
 
 PARTS = []
 # Keep the placed board's designators after retiring parts.
-RETIRED_REFS = {"R2", "C44"}
+RETIRED_REFS = {"R2", "C44", "R29"}
 SHEETS = ["Input", "Holdup", "Pi_Supply", "Supervisor", "Pi_Interface"]
 SHEET_TITLES = {
     "Input": "Vehicle input, protection, switched 12 V to the HAT and to the charger",
@@ -765,7 +765,7 @@ part(
         "6": "CAN_EN",
         "7": None,
         "8": "CAN_FAULT_N",
-        "9": "CAN_WAKE",
+        "9": "GND",  # unused local WAKE, tied low (datasheet 8.4.6.2; R29 retired 2026-10-20)
         "10": "+12V_PROT",
         "11": None,
         "12": "CANL",
@@ -782,7 +782,6 @@ part(
 C(S, g, "100n", "+12V_PROT", "GND")
 C(S, g, "100n", "+5V_BUCK", "GND")
 C(S, g, "100n", "+3V3_AON", "GND")
-R(S, g, "10k", "CAN_WAKE", "GND", note="Unused local WAKE pulled to ground (datasheet 8.4.6.2)")
 
 g = "Private I2C pull-ups"
 R(S, g, "4.7k", "PRIV_SDA", "+3V3_AON")

@@ -3134,16 +3134,6 @@
 		)
 		(uuid "4ea7c061-4995-4d1d-86bd-b2fd843dd49d")
 	)
-	(label "CAN_WAKE"
-		(at 33.02 190.5 180)
-		(effects
-			(font
-				(size 1.27 1.27)
-			)
-			(justify right bottom)
-		)
-		(uuid "5f0f27bc-d20d-4d20-8abe-4722e8b0238b")
-	)
 	(label "LED1_A"
 		(at 361.95 152.4 0)
 		(effects
@@ -3273,16 +3263,6 @@
 			(justify right bottom)
 		)
 		(uuid "e0c36c76-738a-4e65-8954-729ab86eb877")
-	)
-	(label "CAN_WAKE"
-		(at 29.21 215.9 180)
-		(effects
-			(font
-				(size 1.27 1.27)
-			)
-			(justify right bottom)
-		)
-		(uuid "f119c48f-e5d3-47b3-ba25-44ac3d4e37ab")
 	)
 	(label "CAN_RXD"
 		(at 35.56 86.36 180)
@@ -5302,7 +5282,7 @@
 	)
 	(symbol
 		(lib_id "power:GND")
-		(at 36.83 215.9 90)
+		(at 33.02 190.5 270)
 		(unit 1)
 		(body_style 1)
 		(exclude_from_sim no)
@@ -5312,7 +5292,7 @@
 		(dnp no)
 		(uuid "3eab5ba7-9696-4cc0-9a62-51f8ac4ca6c9")
 		(property "Reference" "#PWR077"
-			(at 36.83 220.9 0)
+			(at 27.94 191.7 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -5323,7 +5303,7 @@
 			)
 		)
 		(property "Value" "GND"
-			(at 36.83 219.7 0)
+			(at 27.94 190.5 0)
 			(show_name no)
 			(do_not_autoplace no)
 			(effects
@@ -5333,7 +5313,7 @@
 			)
 		)
 		(property "Footprint" ""
-			(at 36.83 215.9 0)
+			(at 33.02 190.5 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -5344,7 +5324,7 @@
 			)
 		)
 		(property "Datasheet" ""
-			(at 36.83 215.9 0)
+			(at 33.02 190.5 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -5355,7 +5335,7 @@
 			)
 		)
 		(property "Description" ""
-			(at 36.83 215.9 0)
+			(at 33.02 190.5 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -5372,118 +5352,6 @@
 			(project "canary-pwr"
 				(path "/e63e39d7-6ac0-4ffd-8aa3-1841a4541b55/5427379f-4398-4052-803a-d0ab54250639"
 					(reference "#PWR077")
-					(unit 1)
-				)
-			)
-		)
-	)
-	(symbol
-		(lib_id "Device:R")
-		(at 33.02 215.9 90)
-		(unit 1)
-		(body_style 1)
-		(exclude_from_sim no)
-		(in_bom yes)
-		(on_board yes)
-		(in_pos_files yes)
-		(dnp no)
-		(uuid "3efe8b8f-b7ff-46e7-bd6c-f63417127ea8")
-		(property "Reference" "R29"
-			(at 30.32 212.8 0)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Value" "10k"
-			(at 30.32 219.6 0)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Footprint" "Resistor_SMD:R_0603_1608Metric"
-			(at 33.02 215.9 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Datasheet" ""
-			(at 33.02 215.9 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Description" "Resistor 10k 0603"
-			(at 33.02 215.9 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "MPN" "RC0603FR-0710KL"
-			(at 33.02 215.9 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Manufacturer" "Yageo"
-			(at 33.02 215.9 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Note" "Unused local WAKE pulled to ground (datasheet 8.4.6.2)"
-			(at 33.02 215.9 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(pin "1"
-			(uuid "1c639300-c2e1-44a4-baf1-54d5583898a8")
-		)
-		(pin "2"
-			(uuid "c2c63fbd-2cc6-42c2-b565-8407d07c3d34")
-		)
-		(instances
-			(project "canary-pwr"
-				(path "/e63e39d7-6ac0-4ffd-8aa3-1841a4541b55/5427379f-4398-4052-803a-d0ab54250639"
-					(reference "R29")
 					(unit 1)
 				)
 			)

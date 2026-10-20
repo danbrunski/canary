@@ -66,7 +66,7 @@ PLACEMENT: dict[str, tuple[float, float, int, str]] = {
     # C6 turned so CFP (pin 17) and CFN (pin 18) reach it without crossing; C6 and C7 0.5 mm west to fit the CAP4
     # via between C6 and U1's left pins (2026-10-18)
     "C6": (122.4, 72.9, 270, "F"),
-    "C7": (120.8, 72.9, 90, "F"),
+    "C7": (122.5, 75.25, 180, "F"),
     # U1's right column (PFO, PFI, VCC2P5 x2, VIN, INFET, VOUTM5 from the top) leaves in lanes: PFO and PFI turn up,
     # C8 and C4 sit above the VIN and INFET lanes, C5 below them
     "C8": (133.05, 70.85, 90, "F"),
@@ -141,7 +141,6 @@ PLACEMENT: dict[str, tuple[float, float, int, str]] = {
     # Bottom: CAN wake transceiver between the HAT-out and Vehicle-in CAN pins; HAT-out polyfuse
     "U7": (141.0, 84.6, -90, "B"),
     "C41": (146.5, 86.2, 90, "B"),
-    "R29": (148.1, 86.2, 90, "B"),
     "C42": (140.0, 79.9, 0, "B"),
     "C43": (143.6, 79.9, 0, "B"),
     "F1": (133.3, 82.4, 0, "B"),
