@@ -54,8 +54,9 @@ POURS: list[tuple[str, str, list[Rect]]] = [
             (113.6, 75.2, 118.2, 80.8),
         ],
     ),
-    # HAT-out polyfuse input, under the charger.
-    ("+12V_BUS", "B", [(130.2, 77.75, 134.6, 80.3), (130.2, 80.3, 132.0, 84.4)]),
+    # HAT-out polyfuse input, under the charger. F1 stands vertical (2026-10-20), so its pad 1 overlaps this
+    # band's lower edge and the leg that ran down to the old horizontal pad is gone.
+    ("+12V_BUS", "B", [(130.2, 77.75, 134.6, 80.3)]),
     # LM61460 switch node: pin 10 to L2, as small as the path allows.
     ("LM_SW", "F", [(129.9, 57.3, 133.75, 59.85), (133.6, 58.15, 134.0, 58.85)]),
     # LTC3350 switch node: Q3 source, Q4 drain, L1, the boost cap.
@@ -312,7 +313,7 @@ VIAS: list[tuple[str, float, float, tuple[float, float]]] = [
     ("GND", 139.9, 57.62, SIGNAL_VIA),  # C22.2
     ("GND", 125.41, 65.68, SIGNAL_VIA),  # R10.2
     ("GND", 119.52, 92.6, SIGNAL_VIA),  # C16.2
-    ("GND", 133.99, 84.22, SIGNAL_VIA),  # C20.2
+    ("GND", 135.6, 83.2, SIGNAL_VIA),  # C20.2, right of the pad: F1's pad 2 is under it on B.Cu
     ("GND", 132.64, 61.48, SIGNAL_VIA),  # C29.2
     ("GND", 132.48, 53.04, SIGNAL_VIA),  # C26.2
     ("GND", 147.35, 54.48, SIGNAL_VIA),  # R26.2

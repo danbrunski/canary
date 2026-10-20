@@ -143,7 +143,8 @@ PLACEMENT: dict[str, tuple[float, float, int, str]] = {
     "C41": (146.5, 86.2, 90, "B"),
     "C42": (140.0, 79.9, 0, "B"),
     "C43": (143.6, 79.9, 0, "B"),
-    "F1": (133.3, 82.4, 0, "B"),
+    # F1 stands vertical: Bourns' 6.5 mm land overran the 5.8 mm between the BG via and U7
+    "F1": (133.3, 82.6, -90, "B"),
     # Bottom: LED resistors; the five cell-ballast resistors stacked beside the cap-bank sense pins
     "R32": (110.5, 95.5, 0, "B"),
     "R33": (114.0, 95.5, 0, "B"),
@@ -152,6 +153,15 @@ PLACEMENT: dict[str, tuple[float, float, int, str]] = {
     "R18": (118.3, 82.8, 180, "B"),
     "R19": (118.3, 87.2, 180, "B"),
     "R16": (118.3, 91.6, 180, "B"),
+    # Bottom: the tap ladder, added after routing on what copper there was. R43-R45 lie flat in the gaps of the
+    # cap-bank pins' right column: beside the pins, the far-side pin margin leaves 1.025 mm, and a standing
+    # 0402's courtyard is 1.03 mm. R46 sits on the CAP3/CAP4 tracks right of R20; R47 ties CAPRTN to GND left
+    # of the pins.
+    "R43": (113.46, 76.7, 0, "B"),
+    "R44": (113.46, 79.7, 180, "B"),
+    "R45": (113.46, 82.7, 180, "B"),
+    "R46": (122.68, 72.6, 90, "B"),
+    "R47": (106.9, 81.2, 180, "B"),
 }
 
 # Bottom-silk board label: inside the fan-inlet keep-out, which bars parts but not silk.

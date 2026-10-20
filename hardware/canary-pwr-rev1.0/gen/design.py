@@ -26,6 +26,7 @@ SHEET_TITLES = {
 }
 
 FP = {
+    "0402": ("Resistor_SMD:R_0402_1005Metric", "Capacitor_SMD:C_0402_1005Metric"),
     "0603": ("Resistor_SMD:R_0603_1608Metric", "Capacitor_SMD:C_0603_1608Metric"),
     "0805": ("Resistor_SMD:R_0805_2012Metric", "Capacitor_SMD:C_0805_2012Metric"),
     "1206": ("Resistor_SMD:R_1206_3216Metric", "Capacitor_SMD:C_1206_3216Metric"),
@@ -100,7 +101,7 @@ def part(
     )
 
 
-def R(sheet, group, value, a, b, size="0603", mpn=None, note="", desc="", mfr=None):
+def R(sheet, group, value, a, b, size="0603", mpn=None, note="", desc="", mfr=None, ref=None):
     if mpn is None:
         mpn, mfr = (_yageo(value), "Yageo") if size == "0603" else ("", "")
     part(
@@ -115,6 +116,7 @@ def R(sheet, group, value, a, b, size="0603", mpn=None, note="", desc="", mfr=No
         desc=desc or f"Resistor {value} {size}",
         note=note,
         rot=90,
+        ref=ref,
     )
 
 
@@ -255,8 +257,11 @@ part(
     "Device:Polyfuse",
     "PTC 0.5A",
     {"1": "+12V_BUS", "2": "+12V_HAT"},
-    fp="Fuse:Fuse_1812_4532Metric",
-    desc="Resettable fuse, 1812, 0.5 A hold, rated >= 40 V (MPN to choose)",
+    fp="canary-pwr:Fuse_1812_Bourns_MF-MSMF",
+    mpn="MF-MSMF050/40X-2",
+    mfr="Bourns",
+    ds="https://www.bourns.com/docs/Product-Datasheets/mf-msmf.pdf",
+    desc="Resettable fuse, 1812, 0.5 A hold, 1.0 A trip, 40 V",
     note="HAT-out comes off the backed-up bus, so the HAT's K-line transceiver and TMAP supply stay in spec through a crank dip (the LTC3350 holds the bus >= 9 V). Replaces the switched TPS1HB35 (trimmed 2026-10-13). The HAT's own V12_SENSE then reads the bus, not the battery; PWR measures the battery (VIN_SENSE, LTC3350 meas_vin).",
     rot=90,
 )
@@ -486,6 +491,43 @@ R(S, g, "2.7R", "LTC_CAP1", "BANK_TAP1", size="2512", mpn="CRCW25122R70FKEG", mf
 R(S, g, "2.7R", "LTC_CAP2", "BANK_TAP2", size="2512", mpn="CRCW25122R70FKEG", mfr="Vishay")
 R(S, g, "2.7R", "LTC_CAP3", "BANK_TAP3", size="2512", mpn="CRCW25122R70FKEG", mfr="Vishay")
 R(S, g, "2.7R", "LTC_CAP4", "BANK_POS_S", size="2512", mpn="CRCW25122R70FKEG", mfr="Vishay")
+# Tap ladder, added after routing, so its refs are fixed. A rung's ends are the nets its pads land on.
+R(
+    S,
+    g,
+    "100k",
+    "LTC_CAPRTN",
+    "BANK_TAP1",
+    size="0402",
+    mpn="RC0402FR-07100KL",
+    mfr="Yageo",
+    ref="R43",
+    note="Tap ladder R43-R47 (2026-10-20): with the bank unplugged the CAP pins would float, and neighbouring CAP pins are rated -0.3 to 5.5 V. Four 100k across the taps and 100k from CAPRTN to GND hold every CAP pin at 0 V, so an absent bank reads as empty cells; with the bank in, the ladder draws 25 uA, the same from every cell. Each rung lands on whichever side of its 2.7R ballast is nearer on the board.",
+)
+R(
+    S,
+    g,
+    "100k",
+    "BANK_TAP1",
+    "BANK_TAP2",
+    size="0402",
+    mpn="RC0402FR-07100KL",
+    mfr="Yageo",
+    ref="R44",
+)
+R(
+    S,
+    g,
+    "100k",
+    "BANK_TAP2",
+    "BANK_TAP3",
+    size="0402",
+    mpn="RC0402FR-07100KL",
+    mfr="Yageo",
+    ref="R45",
+)
+R(S, g, "100k", "LTC_CAP3", "LTC_CAP4", size="0402", mpn="RC0402FR-07100KL", mfr="Yageo", ref="R46")
+R(S, g, "100k", "LTC_CAPRTN", "GND", ref="R47")
 part(
     S,
     g,

@@ -3298,7 +3298,7 @@
 				)
 			)
 		)
-		(property "Footprint" "Fuse:Fuse_1812_4532Metric"
+		(property "Footprint" "canary-pwr:Fuse_1812_Bourns_MF-MSMF"
 			(at 215.9 40.64 0)
 			(hide yes)
 			(show_name no)
@@ -3309,7 +3309,7 @@
 				)
 			)
 		)
-		(property "Datasheet" ""
+		(property "Datasheet" "https://www.bourns.com/docs/Product-Datasheets/mf-msmf.pdf"
 			(at 215.9 40.64 0)
 			(hide yes)
 			(show_name no)
@@ -3320,7 +3320,29 @@
 				)
 			)
 		)
-		(property "Description" "Resettable fuse, 1812, 0.5 A hold, rated >= 40 V (MPN to choose)"
+		(property "Description" "Resettable fuse, 1812, 0.5 A hold, 1.0 A trip, 40 V"
+			(at 215.9 40.64 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "MPN" "MF-MSMF050/40X-2"
+			(at 215.9 40.64 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Manufacturer" "Bourns"
 			(at 215.9 40.64 0)
 			(hide yes)
 			(show_name no)

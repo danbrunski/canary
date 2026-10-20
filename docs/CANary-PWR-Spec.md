@@ -119,8 +119,9 @@ sides:
   tails), enough for the tallest parts (7.7 mm electrolytics, 7 mm inductors)
   and the right-angle connectors.
 - **Bottom (B.Cu):** the supervisor, the CAN wake transceiver, the I²C buffer,
-  the crossing-net parts, the five cell-ballast resistors, the HAT-out polyfuse
-  F1 and two passives — all ≤ 1.75 mm, so F1's part (§P10) must be too.
+  the crossing-net parts, the five cell-ballast resistors and their tap ladder,
+  the HAT-out polyfuse F1 and two passives — all ≤ 1.75 mm. F1, a Bourns
+  MF-MSMF050/40X-2, is 0.85 mm at most.
   The gap down to the cooler is **~6.3 mm** (measured under a 13.5 mm header,
   2026-10-03; operator confirms "a quarter inch", 2026-10-13).
 - **Fan-inlet keep-out on B.Cu.** §13.3.13's rule moves to this board: no
@@ -300,7 +301,10 @@ wires and everything else still go straight to the HAT. CAN passes through PWR
 so the wake transceiver (§P7) sees it without a splice; NUP2105L clamps the pair.
 
 **`+12V_HAT` comes off the backed-up bus through a 0.5 A polyfuse**
-(2026-10-13). The 2026-10-13 first pass switched it with a TPS1HB35 smart
+(2026-10-13): F1, a Bourns MF-MSMF050/40X-2 (1.0 A trip, 40 V, 1812) since
+2026-10-20, the only 1812 part with a 0.5 A hold that is both rated ≥ 40 V and
+≤ 1.75 mm tall. Its 40 V is 1.1 V above D1's 38.9 V clamp, which matters only if
+it is tripped during a load dump. The 2026-10-13 first pass switched it with a TPS1HB35 smart
 switch (11 parts); the trim replaced that with one PTC. It is fed from
 `+12V_BUS`, not the raw input, on purpose: the HAT's *logic* already rides
 through a crank (it runs on the Pi's rails), but its 12 V front ends — the
@@ -405,6 +409,23 @@ two boards over a Pi, and placed where the enclosure wants them.
   before unplugging the bank** — 6 F at 10 V into a screwdriver is a welding
   event. The bench button held, or an I²C command, starts it; the red LED shows
   the bank is live.
+- **Tap ladder: the cell pins never float** (2026-10-20). Four 100 kΩ across
+  the taps and 100 kΩ from CAPRTN to GND (R43–R47), each rung on whichever side
+  of its 2.7 Ω ballast is nearer on the board. With the bank unplugged every
+  CAP pin sits at 0 V. The datasheet allows −0.3 to 5.5 V between neighbouring
+  CAP pins and has unused ones tied, never floating. With the bank in, the
+  ladder draws 25 µA from every cell alike, so it does not unbalance them.
+  **Plugging in a charged bank needs PWR powered, or the bank discharged
+  first:** the Micro-Fit has no mating order, and into an unpowered PWR the
+  half-mated states reach −3.75 V between CAP pins (100 kΩ-limited).
+- **Bank unplugged, the rig still runs, without hold-up.** The input ideal
+  diode feeds the bus from VIN whatever the stack does, so the buck, *HAT out*
+  and the supervisor keep running, and the charger holds the empty board-side
+  VCAP node at ~10 V. There is nothing to boost from: an unplug is an instant
+  power loss with no shutdown window. In a crank the PFI comparator turns the
+  input FET off and the bus is fed through its body diode, ~0.8 V lower, so
+  the Pi rides dips to about 6.5 V input and browns out below that. The
+  supervisor flags it (§P7, *No bank*).
 
 **Alternative considered: LTC4041** (2026-10-13). A 2.5 A supercap backup
 manager for 2.9–5.5 V rails: it would sit between the 5 V buck and the Pi with
@@ -569,6 +590,14 @@ resistor added.
 - **Watchdog.** Heartbeat over I²C; on timeout, power-cycle the Pi.
 - **Low-battery refusal.** Do not power the Pi from a resting VIN below
   ~11.8 V. A no-start is the one failure this rig could inflict on the truck.
+- **No bank** (a flag, not a state; §P4). The NTC comes through the cap-bank
+  lead, so an unplugged bank reads as an open thermistor: GPI pulled to the bias
+  rail, colder than anything real. Two checks confirm it: a capacitance test
+  near 0 F (an open NTC with real capacitance is a broken NTC), and four 0 V
+  cells under a ~10 V `meas_vcap` (the tap ladder). With it set, report it, skip
+  capacitance/ESR runs and the discharge command, and don't take a Pi 3V3 drop
+  while VIN is low for a halt. A crank browns the Pi out with no bank. Power it
+  back up when VIN recovers, rather than leaving it dark for the drive.
 - **Default-on.** In reset, in the bootloader or hung, the MCU's pins float and
   the pull-downs leave the buck enabled: a dead supervisor degrades to an
   always-on Pi, never a dark rig.
@@ -646,7 +675,7 @@ Nothing on this board changes for rev 3.0.
 | 7 | Crank-dip window: longest dip the bank should ride before `~PWR_FAIL` | DIP vs HOLDUP timing |
 | 8 | Right-angle connector heights (Phoenix MC 1,5 G, Micro-Fit 43045 2 × 3 and 2 × 5, SWD) against the ~13 mm gap under the HAT | Edge placement |
 | 9 | Side-view LED and side-actuated button orientation on the footprints | They face the edge |
-| 10 | Part choices still open: the polyfuse (0.5 A hold, ≥ 40 V), the right-angle SWD header. The 25 F cells are Eaton TVA1625-3R0256-R (2026-10-20, the cap bank's README); it and every cap-bank and lead part are in stock at DigiKey (operator, 2026-10-20), as is the HAT-out 43045-0600 | BOM |
+| 10 | Part choices still open: the right-angle SWD header. The polyfuse is the Bourns MF-MSMF050/40X-2 on Bourns' land (2026-10-20, §P3). The 25 F cells are Eaton TVA1625-3R0256-R (2026-10-20, the cap bank's README); it and every cap-bank and lead part are in stock at DigiKey (operator, 2026-10-20), as is the HAT-out 43045-0600 | BOM |
 | 11 | The cap-bank lead's resistance at bring-up | Calibrates the ESR readout |
 | 12 | The Vehicle-in plug's order number (KiCad's footprint confirms 1803293 for the header) and the HAT-out Micro-Fit's housing and crimps (43025-0600, 43030). The cap-bank lead's are settled in `hardware/tools/capbank_lead.py` | BOM |
 | 13 | Copper weight: TI recommends 2 oz outer layers for the LM61460. **Settled 2026-10-18 (operator): the outer layers stay 1 oz.** Every current path is a wide pour sized for 1 oz, and 0.15 mm signal clearance costs nothing extra at that weight | Fab order |
@@ -803,3 +832,29 @@ pads, no In1 tracks.
   (between tab and pins), out of the VCAP pour that feeds Q5's sources from the south,
   from under L1, and out of the LTC_SW pour. The gate only switches on power failure,
   so the via count costs nothing.
+
+## Changes after routing, 2026-10-20
+
+Two changes the operator approved before PWR goes to fab, made on the routed board.
+Neither left anything new: DRC is as before (the R42/R35 silk overlap and J1's two
+starved thermals), parity 0, ERC clean, 0 unconnected, no vias in pads, no In1
+tracks. `review_placement.sh` reports only the three top-side courtyard overlaps
+that predate this (C24/C29, L1/C7 and U1/C7, from C7's move).
+
+- **F1 is the Bourns MF-MSMF050/40X-2 on Bourns' land** (§P3), a footprint of the
+  board's own (`lib/footprints.pretty/Fuse_1812_Bourns_MF-MSMF`): 1.68 × 2.95 mm
+  pads at ±2.39 mm (datasheet p. 7, style 2). That land is 6.46 mm long, and the
+  gap it lay in between the BG via and U7 is 5.8 mm, so F1 now stands vertical at
+  (133.3, 82.6) with pad 1 (+12V_BUS) up in the bus band. The band's leg down to
+  the old pad 1 is gone. CAN_RXD's via moves 1.7 mm west, out from under pad 2,
+  and runs that 1.7 mm on F.Cu. C20's GND via moves to (135.6, 83.2).
+- **The tap ladder R43–R47** (§P4) went in on B.Cu where the copper allowed.
+  The far-side pin margin `review_placement.sh` keeps round J4's pins leaves
+  1.025 mm beside them, and a standing 0402's courtyard is 1.03 mm. So R43–R45
+  are 0402s lying flat in the gaps of J4's right column: R43 joins CAPRTN to
+  TAP1 between pins 10 and 9, R44 TAP1 to TAP2 between 9 and 8, and R45 TAP2 to
+  TAP3 between 8 and 7. CAPRTN steps up 0.28 mm to y 76.05 to pass R43's TAP1 pad,
+  and OUTFET's via drops from (112.7, 79.45) to (113.47, 80.55), under R44. R46
+  (CAP3 to CAP4, 0402) stands on the CAP4 track right of R20 and drops to the
+  CAP3 track. R47 (CAPRTN to GND, 0603) lies left of pin 3, its GND pad in the
+  B.Cu pour. These four 0402s are the board's only parts smaller than 0603.
