@@ -364,10 +364,17 @@ LTC3350 is never off; that is the 4 mA (§P1). It also answers the old
 gate-versus-latency question: the bank is charged at every key-on, so the
 supervisor need not hold the Pi off waiting for a recharge.
 
-**The bank is a separate board on a lead.** Four 25 F/2.7 V cells
-(~16 × 26 mm each), the NTC and a connector; no active parts. It lets the caps
-sit somewhere cooler than between two boards over a Pi, and placed where the
-enclosure wants them.
+**The bank is a separate board on a lead.** Four 25 F cells, the NTC and a
+connector; no active parts. It lets the caps sit somewhere cooler than between
+two boards over a Pi, and placed where the enclosure wants them.
+
+- **KiCad project: [`hardware/canary-capbank-rev1.0/`](../hardware/canary-capbank-rev1.0/)**
+  (2026-10-20). Its README has the part choices, layout and assembly. Cells:
+  Eaton TVA1625-3R0256-R, 3.0 V rated, laid flat. Every 2.7 V cell is derated
+  to 2.3 V at 85 °C; this one holds 2.5 V there, is AEC-Q200, and is rated
+  4.2 A continuous. The lead's pin map lives in `hardware/tools/capbank_lead.py`,
+  which both boards' generators read. `hardware/tools/check_capbank_lead.py`
+  checks both KiCad schematics against it.
 
 - **Connector: Molex Micro-Fit 3.0, 2 × 5, right-angle (43045-1000), keyed and
   latching.** Ten pins, not the seven first planned, because the stack's top
@@ -631,7 +638,7 @@ Nothing on this board changes for rev 3.0.
 | 7 | Crank-dip window: longest dip the bank should ride before `~PWR_FAIL` | DIP vs HOLDUP timing |
 | 8 | Right-angle connector heights (Phoenix MC 1,5 G, Micro-Fit 43045 2 × 3 and 2 × 5, SWD) against the ~13 mm gap under the HAT | Edge placement |
 | 9 | Side-view LED and side-actuated button orientation on the footprints | They face the edge |
-| 10 | Part choices still open: the polyfuse (0.5 A hold, ≥ 40 V), the right-angle SWD header, the 25 F cells | BOM |
+| 10 | Part choices still open: the polyfuse (0.5 A hold, ≥ 40 V), the right-angle SWD header. The 25 F cells are Eaton TVA1625-3R0256-R (2026-10-20, the cap bank's README), pending a DigiKey stock check | BOM |
 | 11 | The cap-bank lead's resistance at bring-up | Calibrates the ESR readout |
 | 12 | The Vehicle-in plug's order number (KiCad's footprint confirms 1803293 for the header) and the Micro-Fit housings and crimps (43025-0600, 43025-1000, 43030) | BOM |
 | 13 | Copper weight: TI recommends 2 oz outer layers for the LM61460. **Settled 2026-10-18 (operator): the outer layers stay 1 oz.** Every current path is a wide pour sized for 1 oz, and 0.15 mm signal clearance costs nothing extra at that weight | Fab order |

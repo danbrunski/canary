@@ -7,6 +7,12 @@ gets a no-connect flag. Values are first-pass, taken from each datasheet's desig
 the Note field on a part says where a number came from when it is not obvious.
 """
 
+import os
+import sys
+
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "tools"))
+import capbank_lead  # noqa: E402  (the cap-bank lead's pin map, shared with the bank's own project)
+
 PARTS = []
 # Keep the placed board's designators after retiring parts.
 RETIRED_REFS = {"R2", "C44"}
@@ -483,23 +489,12 @@ R(S, g, "2.7R", "LTC_CAP4", "BANK_POS_S", size="2512", mpn="CRCW25122R70FKEG", m
 part(
     S,
     g,
-    "Connector_Generic:Conn_02x05_Odd_Even",
+    capbank_lead.HEADER["lib_id"],
     "Cap bank",
-    {
-        "1": "VCAP",
-        "2": "VCAP",
-        "3": "GND",
-        "4": "GND",
-        "5": "BANK_POS_S",
-        "6": "BANK_NEG_S",
-        "7": "BANK_TAP3",
-        "8": "BANK_TAP2",
-        "9": "BANK_TAP1",
-        "10": "LTC_GPI",
-    },
-    fp="Connector_Molex:Molex_Micro-Fit_3.0_43045-1000_2x05_P3.00mm_Horizontal",
-    mpn="43045-1000",
-    mfr="Molex",
+    dict(capbank_lead.PINS),
+    fp=capbank_lead.HEADER["fp"],
+    mpn=capbank_lead.HEADER["mpn"],
+    mfr=capbank_lead.HEADER["mfr"],
     desc="Micro-Fit 3.0 2x5 right-angle header; mating 43025-1000 + 43030 crimps",
     note="Spec said 7-way; 10-way adds Kelvin sense for the stack top/bottom (CAP4/CAPRTN measure across the lead otherwise) and doubles the power pins. Bank board: 4 x 25 F cells, NTC from pin 10 to stack minus.",
 )
