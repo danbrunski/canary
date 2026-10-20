@@ -483,10 +483,7 @@ zone(pcbnew.In2_Cu, NET["+5V_PI"], [copper.IN2_PI_5V], prio=1, connect=pcbnew.ZO
 # keep-outs held both whole at 33 (freerouting-rs plugin path, 2026-10-18). In1 stays a solid GND plane.
 b.SetLayerName(pcbnew.In2_Cu, "In2.Cu")
 b.SetLayerType(pcbnew.In2_Cu, pcbnew.LT_MIXED)
-for name, pts, notches in (
-    ("+12V_BUS", placement.IN2_ZONE, [copper.IN2_BUS_NOTCH]),
-    ("+5V_PI", copper.IN2_PI_5V, []),
-):
+for name, pts in (("+12V_BUS", placement.IN2_ZONE), ("+5V_PI", copper.IN2_PI_5V)):
     ra = pcbnew.ZONE(b)
     ra.SetIsRuleArea(True)
     ra.SetZoneName(f"No tracks in the In2 {name} island")
@@ -495,12 +492,6 @@ for name, pts, notches in (
     o.NewOutline()
     for px, py in pts:
         o.Append(MM(px), MM(py))
-    for x0, y0, x1, y1 in notches:
-        cut = pcbnew.SHAPE_POLY_SET()
-        cut.NewOutline()
-        for px, py in ((x0, y0), (x1, y0), (x1, y1), (x0, y1)):
-            cut.Append(MM(px), MM(py))
-        o.BooleanSubtract(cut)
     ra.SetDoNotAllowTracks(True)
     ra.SetDoNotAllowVias(False)
     ra.SetDoNotAllowZoneFills(False)

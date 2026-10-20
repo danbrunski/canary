@@ -85,11 +85,6 @@ POURS: list[tuple[str, str, list[Rect]]] = [
 
 # In2 islands (priority over In2's GND). The +12V_BUS island is placement.IN2_ZONE.
 IN2_PI_5V = [(107.3, 45.2), (112.2, 45.2), (112.2, 55.0), (107.3, 55.0)]
-# The +12V_BUS island's track keep-out gives way under C6/C7 (x0, y0, x1, y1): C7's VCAP pad (VCAPP5 to VCAP)
-# sits 0.4 mm outside the island and U1's VCAP via 2.65 mm inside it, and on the routed board F.Cu and B.Cu had
-# no way between them, so the tap crosses In2 here. The notch is at the island's edge, which stays whole
-# (2026-10-19).
-IN2_BUS_NOTCH = (119.0, 72.5, 125.3, 76.1)
 
 # Kelvin pairs and gate drives: (net, layer, width, points). Vias are in VIAS.
 KELVIN_W = 0.25
