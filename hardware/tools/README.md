@@ -2,16 +2,22 @@
 
 ## Which KiCad
 
-`grade.sh` takes its KiCad from `kicad_env.sh`. That is the native install when there is
+The scripts here (`grade.sh`, `autoroute.sh`, `review_placement.sh`, the cap bank's
+`gen/build.sh`) take their KiCad from `kicad_env.sh`. That is the native install when there is
 one: `kicad-cli` on PATH and a `python3` that imports `pcbnew`, which Ubuntu gets from
 `ppa:kicad/kicad-10.0-releases`. Otherwise, or when `KICAD_BIN` names a Windows install's bin
-directory, it is that Windows install, driven from WSL and handed Windows paths. The other
-scripts here still call the Windows install directly.
+directory, it is that Windows install, driven from WSL and handed Windows paths. A "KiCad
+python" tool below runs under that python: `python3` natively.
 
-- **Windows KiCad cannot save into the WSL filesystem.** `pcb drc --save-board` fails there
-  with "Cannot copy permissions", so `kicad_tmp` puts scratch copies under Windows `%TEMP%`.
-  Until 2026-10-20 `grade.sh` hid that failure, so the refilled boards it reported were never
-  saved; its DRC verdicts were still right.
+- **Windows KiCad may not overwrite a board in the WSL filesystem.** On this laptop
+  (2026-10-20) `pcb drc --save-board` fails there with "Cannot copy permissions" and pcbnew's
+  `SaveBoard` hangs, even with 755 directories; a new file saves. Another setup's cap-bank
+  builds did overwrite boards there, so the scripts detect it rather than refuse: `kicad_drc`
+  stops on the error, a Windows `kicad_py` stops after `KICAD_PY_TIMEOUT` (600 s) with the
+  reason, and `kicad_tmp` puts scratch copies under Windows `%TEMP%`, where both work. Until
+  2026-10-20 the scripts hid the failure: the refilled boards `grade.sh` reported were never
+  saved (its DRC verdicts were still right), and `autoroute.sh` exported its DSN from fills that
+  were never refilled.
 - **A native install needs the global library tables** that the GUI copies on its first run:
   `cp /usr/share/kicad/template/{fp,sym}-lib-table ~/.config/kicad/10.0/`. Without them DRC
   reports a `lib_footprint_issues` warning per footprint instead of the real mismatches.
@@ -68,9 +74,10 @@ and `checks`. CANary-PWR's is `hardware/canary-pwr-rev1.0/gen/placement_review.j
 nothing, so DRC's silkscreen checks pass on a densely placed board:
 
 ```bash
-"/mnt/c/Program Files/KiCad/10.0/bin/python.exe" "$(wslpath -w hardware/tools/silk_refs.py)" \
-    "$(wslpath -w path/to/board.kicad_pcb)" [--out other.kicad_pcb] [--size 0.8]
+python3 hardware/tools/silk_refs.py path/to/board.kicad_pcb [--out other.kicad_pcb] [--size 0.8]
 ```
+
+(KiCad python: with the Windows install it is `"$KICAD_BIN/python.exe"`, given `wslpath -w` paths.)
 
 - **Sizing.** Each label is set to 0.8 mm text with a 0.15 mm stroke, which
   is the board's minimum.
@@ -114,10 +121,10 @@ has the commands.
 
 ## Autorouting with hand-laid power copper
 
-`autoroute.sh` routes a board with Freerouting while keeping the copper laid by hand:
+`autoroute.sh` routes a board with freerouting-rs while keeping the copper laid by hand:
 
 ```bash
-hardware/tools/autoroute.sh <scratch_project_dir> <freerouting.jar> [passes] [-- dsn_export.py options]
+hardware/tools/autoroute.sh <scratch_project_dir> [passes] [-- dsn_export.py options]
 ```
 
 It edits the board in that directory, so give it a scratch copy of the project. The steps:
@@ -135,10 +142,14 @@ It edits the board in that directory, so give it a scratch copy of the project. 
    In1 although the DSN declares it `(type power)`: its maze search skips an inactive layer
    only when that layer is a signal layer (found 2026-10-16).
 
-Use the router builds frozen under `~/code/freerouting/logs/jars/` and quote the jar's sha
-with any result. For CANary-PWR the best settings so far (2026-10-15, a773a70ec) are one pass
-with a higher rip-up cost: `FREEROUTING_ARGS=--router.scoring.start_ripup_costs=1500` and
-passes `1`. Later passes never beat the first on this board.
+**Freerouting (Java) is retired** (operator, 2026-10-20): the router is freerouting-rs's
+`freerouting` binary, found as its KiCad plugin finds it: `FREEROUTING_RS_BIN` (a directory),
+then PATH, then `~/.cargo/bin`. `autoroute.sh` refuses a `.jar` argument and prints the build it
+ran (`freerouting --version`, with its git commit); quote that with any result. The binary takes
+Java's `-de`/`-do` and `--router.*` option names, so `FREEROUTING_ARGS` passes them on, e.g.
+`--router.scoring.start_ripup_costs=1500 --router.autorouter.sweep=free
+--router.autorouter.sweep_passes=2`. Java Freerouting's results above and in the CANary-PWR spec
+are history.
 
 **`dsn_export.py`** (KiCad python) fixes four things in KiCad's Specctra export:
 
@@ -180,6 +191,5 @@ with the pad still unrouted here, points at the fixed pours. That is how CANary-
 was found: it is now laid by hand.
 
 **Pieces.** `kicad_placement.py` runs under KiCad's own python (it needs
-`pcbnew`; here that is the Windows KiCad 10 install, so paths go through
-`wslpath -w`). `placement_review.py` runs under the repo venv (Pillow).
-`KICAD_PYTHON` overrides the KiCad python the wrapper uses.
+`pcbnew`; `kicad_env.sh` picks it, see Which KiCad). `placement_review.py` runs
+under the repo venv (Pillow).

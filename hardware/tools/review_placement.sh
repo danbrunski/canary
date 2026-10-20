@@ -1,17 +1,18 @@
 #!/bin/bash
-# Score and draw a board's footprint placement from WSL, optionally trying a placement table first.
+# Score and draw a board's footprint placement, optionally trying a placement table first.
 #   hardware/tools/review_placement.sh <board.kicad_pcb> <config.json> <out.png> [table.json]
-# The board is only read. KICAD_PYTHON overrides the Windows KiCad 10 python used for pcbnew.
+# The board is only read. KiCad is the native install when there is one, else KICAD_BIN's
+# Windows install (kicad_env.sh).
 set -euo pipefail
 board=$1 config=$2 png=$3 table=${4:-}
 here=$(cd "$(dirname "$0")" && pwd)
 root=$(cd "$here/../.." && pwd)
-kpy=${KICAD_PYTHON:-"/mnt/c/Program Files/KiCad/10.0/bin/python.exe"}
+# shellcheck source=hardware/tools/kicad_env.sh
+source "$here/kicad_env.sh"
 report=$(mktemp --suffix=.json)
 trap 'rm -f "$report"' EXIT
-win() { wslpath -w "$(realpath "$1")"; }
 place=()
-if [[ -n $table ]]; then place=(--place "$(win "$table")"); fi
-# KiCad's python is a Windows program, so it writes the report through a Windows path.
-"$kpy" "$(win "$here/kicad_placement.py")" "$(win "$board")" "$(wslpath -w "$report")" "${place[@]}"
+if [[ -n $table ]]; then place=(--place "$(kpath "$(realpath "$table")")"); fi
+kicad_py "$(kpath "$here/kicad_placement.py")" "$(kpath "$(realpath "$board")")" "$(kpath "$report")" \
+    "${place[@]}" 2>&1 | kicad_quiet
 "$root/.venv/bin/python" "$here/placement_review.py" "$report" "$config" --png "$png"

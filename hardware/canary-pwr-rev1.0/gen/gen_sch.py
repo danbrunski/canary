@@ -18,9 +18,12 @@ sys.path.insert(0, os.path.dirname(HERE))
 import design  # noqa: E402
 from sexp import Sym, dumps, find, findall, parse  # noqa: E402
 
+NATIVE_SYSLIB = "/usr/share/kicad/symbols"
 SYSLIB = (
     r"C:\Program Files\KiCad\10.0\share\kicad\symbols"
     if os.name == "nt"
+    else NATIVE_SYSLIB
+    if os.path.isdir(NATIVE_SYSLIB)
     else "/mnt/c/Program Files/KiCad/10.0/share/kicad/symbols"
 )
 PROJECT = "canary-pwr"

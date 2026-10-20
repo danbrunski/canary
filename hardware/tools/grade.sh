@@ -22,14 +22,13 @@ if [[ $src == *.kicad_pcb ]]; then
     cp "$src" "$board"; echo "board: $(basename "$src") (no ses_import)"
 else
     cp "$src" "$work/$rel/in.ses"
-    kicad_py "$(kpath "$here/ses_import.py")" "$(kpath "$board")" "$(kpath "$work/$rel/in.ses")" 2>&1 | kicad_quiet
+    if ! kicad_py "$(kpath "$here/ses_import.py")" "$(kpath "$board")" "$(kpath "$work/$rel/in.ses")" 2>&1 |
+        kicad_quiet; then
+        echo "grade.sh: ses_import.py failed, nothing graded" >&2
+        exit 1
+    fi
 fi
-if ! kicad_cli pcb drc --schematic-parity --refill-zones --save-board --severity-all \
-    --format json -o "$(kpath "$work/$rel/drc.json")" "$(kpath "$board")" >"$work/$rel/drc.log" 2>&1; then
-    echo "grade.sh: kicad-cli pcb drc failed, nothing graded:" >&2
-    kicad_quiet <"$work/$rel/drc.log" >&2
-    exit 1
-fi
+kicad_drc "$work/$rel/drc.json" "$board" --schematic-parity --severity-all
 python3 - "$work/$rel/drc.json" <<'EOF'
 import collections, json, sys
 r = json.load(open(sys.argv[1]))

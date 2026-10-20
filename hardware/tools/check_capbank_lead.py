@@ -4,7 +4,7 @@
     check_capbank_lead.py [<canary-pwr.kicad_sch> [<canary-capbank.kicad_sch>]]
 
 Defaults to the two projects in this repository. Each schematic is exported to a netlist with kicad-cli
-(KICAD_CLI, else the Windows install seen from WSL, else kicad-cli on PATH), and every pin of CANary-PWR's
+(KICAD_CLI, else kicad-cli on PATH, else the Windows install seen from WSL), and every pin of CANary-PWR's
 J4 and the bank's J1 must carry the lead's net, with the lead's header footprint, part number and maker.
 The part number matters as much as the pins: a tin header at one end and a gold one at the other would
 leave the lead mating gold with tin. The KiCad files are the
@@ -34,12 +34,12 @@ WIN_CLI = "/mnt/c/Program Files/KiCad/10.0/bin/kicad-cli.exe"
 def kicad_cli():
     if os.environ.get("KICAD_CLI"):
         return os.environ["KICAD_CLI"]
+    found = shutil.which("kicad-cli")
+    if found:
+        return found
     if os.path.exists(WIN_CLI):
         return WIN_CLI
-    found = shutil.which("kicad-cli")
-    if not found:
-        raise SystemExit("kicad-cli not found: set KICAD_CLI")
-    return found
+    raise SystemExit("kicad-cli not found: set KICAD_CLI")
 
 
 def host_path(path):

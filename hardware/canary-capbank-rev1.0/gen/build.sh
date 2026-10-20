@@ -1,30 +1,30 @@
 #!/bin/bash
 # Regenerate the cap bank from gen/: project + schematic, cell footprint, netlist, board, ERC, BOM, then DRC.
-#   gen/build.sh            (from anywhere; WSL with the Windows KiCad 10 install)
+#   gen/build.sh            (from anywhere; KiCad 10 from hardware/tools/kicad_env.sh)
 # Overwrites canary-capbank.kicad_{pro,sch,pcb}: run it only while the board has no hand edits.
 set -euo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
 proj=$(dirname "$here")
-bin="/mnt/c/Program Files/KiCad/10.0/bin"
-w() { wslpath -w "$1"; }
-py=/home/thebo/code/canary/.venv/bin/python
+root=$(cd "$proj/../.." && pwd)
+# shellcheck source=hardware/tools/kicad_env.sh
+source "$root/hardware/tools/kicad_env.sh"
+py=$root/.venv/bin/python
 [[ -x $py ]] || py=python3
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
 
 $py "$here/footprints.py" "$proj/lib/footprints.pretty"
 $py "$here/gen_proj.py" "$proj" "$proj/../canary-pwr-rev1.0/canary-pwr.kicad_pro"
-"$bin/kicad-cli.exe" sch export netlist --format kicadxml -o "$(w "$tmp/net.xml")" "$(w "$proj/canary-capbank.kicad_sch")" >/dev/null
-"$bin/python.exe" "$(w "$here/gen_pcb.py")" "$(w "$tmp/net.xml")" "$(w "$proj/canary-capbank.kicad_pcb")" "$(w "$proj")" \
-    "C:\\Program Files\\KiCad\\10.0\\share\\kicad\\footprints" 2>&1 | grep -v -E "memory leak|image handler|assert"
-"$bin/kicad-cli.exe" sch erc --severity-all --exit-code-violations -o "$(w "$tmp/erc.rpt")" "$(w "$proj/canary-capbank.kicad_sch")" >/dev/null \
+kicad_cli sch export netlist --format kicadxml -o "$(kpath "$tmp/net.xml")" "$(kpath "$proj/canary-capbank.kicad_sch")" >/dev/null
+kicad_py "$(kpath "$here/gen_pcb.py")" "$(kpath "$tmp/net.xml")" "$(kpath "$proj/canary-capbank.kicad_pcb")" "$(kpath "$proj")" \
+    "$(kpath "$kicad_share/footprints")" 2>&1 | kicad_quiet
+kicad_cli sch erc --severity-all --exit-code-violations -o "$(kpath "$tmp/erc.rpt")" "$(kpath "$proj/canary-capbank.kicad_sch")" >/dev/null \
     && echo "ERC clean" || { grep -E "^\[|;" "$tmp/erc.rpt"; exit 1; }
-"$bin/kicad-cli.exe" sch export bom --fields "Reference,QUANTITY,Value,Manufacturer,MPN,Footprint,Description" \
+kicad_cli sch export bom --fields "Reference,QUANTITY,Value,Manufacturer,MPN,Footprint,Description" \
     --labels "Refs,Qty,Value,Manufacturer,MPN,Footprint,Description" --group-by "Value,MPN,Footprint" \
-    -o "$(w "$proj/BOM.csv")" "$(w "$proj/canary-capbank.kicad_sch")" >/dev/null && echo "BOM.csv written"
+    -o "$(kpath "$proj/BOM.csv")" "$(kpath "$proj/canary-capbank.kicad_sch")" >/dev/null && echo "BOM.csv written"
 $py "$here/offboard.py" "$proj/BOM-offboard.csv"
-"$bin/kicad-cli.exe" pcb drc --schematic-parity --refill-zones --save-board --severity-all --format json \
-    -o "$(w "$tmp/drc.json")" "$(w "$proj/canary-capbank.kicad_pcb")" >/dev/null || true
+kicad_drc "$tmp/drc.json" "$proj/canary-capbank.kicad_pcb" --schematic-parity --severity-all
 $py - "$tmp/drc.json" <<'PY'
 import collections, json, sys
 r = json.load(open(sys.argv[1]))
