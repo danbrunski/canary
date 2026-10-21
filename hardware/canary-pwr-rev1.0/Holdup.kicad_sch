@@ -8736,7 +8736,7 @@
 				)
 			)
 		)
-		(property "Value" "4.7uH"
+		(property "Value" "4.7uH Isat 14.4A"
 			(at 190.5 87.63 90)
 			(show_name no)
 			(do_not_autoplace no)
@@ -8746,7 +8746,7 @@
 				)
 			)
 		)
-		(property "Footprint" "Inductor_SMD:L_Coilcraft_XAL7070-XXX"
+		(property "Footprint" "Inductor_SMD:L_Wuerth_XHMI-6060"
 			(at 190.5 91.44 0)
 			(hide yes)
 			(show_name no)
@@ -8757,7 +8757,7 @@
 				)
 			)
 		)
-		(property "Datasheet" ""
+		(property "Datasheet" "https://www.we-online.com/components/products/datasheet/744393465047.pdf"
 			(at 190.5 91.44 0)
 			(hide yes)
 			(show_name no)
@@ -8768,7 +8768,7 @@
 				)
 			)
 		)
-		(property "Description" "Shielded power inductor 4.7uH 20%, 7x7mm (XAL7070)"
+		(property "Description" "Shielded power inductor 4.7uH 20%, Isat 14.4A, 6.6x6.4mm (WE-XHMI Performance 6060)"
 			(at 190.5 91.44 0)
 			(hide yes)
 			(show_name no)
@@ -8779,7 +8779,7 @@
 				)
 			)
 		)
-		(property "MPN" "XAL7070-472MEB"
+		(property "MPN" "744393465047"
 			(at 190.5 91.44 0)
 			(hide yes)
 			(show_name no)
@@ -8790,7 +8790,7 @@
 				)
 			)
 		)
-		(property "Manufacturer" "Coilcraft"
+		(property "Manufacturer" "Wurth Elektronik"
 			(at 190.5 91.44 0)
 			(hide yes)
 			(show_name no)
@@ -8801,7 +8801,7 @@
 				)
 			)
 		)
-		(property "Package" "7.0x7.0mm SMD (XAL7070)"
+		(property "Package" "6.6x6.4mm SMD (WE-XHMI 6060)"
 			(at 190.5 91.44 0)
 			(hide yes)
 			(show_name no)

@@ -30,7 +30,7 @@ PLACEMENT: dict[str, tuple[float, float, int, str]] = {
     "C31": (117.1, 60.5, -90, "F"),  # 5 V pads up, into the buck output pour
     "C30": (120.5, 60.5, -90, "F"),
     # LM61460 buck, top: SW faces L2 (left); VIN1/VIN2 input pairs straddled above and below; FB/RT/EN parts to the right
-    "L2": (127.0, 55.8, 180, "F"),
+    "L2": (127.15, 55.8, 180, "F"),  # 0.15 mm east, clear of BUTTON's vias
     "U2": (136.0, 58.5, 180, "F"),
     "C28": (135.0, 55.35, 180, "F"),
     "C26": (135.0, 52.9, 180, "F"),

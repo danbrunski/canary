@@ -64,7 +64,7 @@ They are board-only footprints, excluded from the BOM. MH1–MH4 are mounting ho
 
 - **Bottom side:** U5 (LQFP-32), U6 (HVSSOP-8 with exposed pad), U7 (SOIC-14), U8 (VSSOP-8),
   F1 (1812), the 2512 resistors R16–R20, and small diodes, a SOT-23 and 0603/0402 passives.
-- **Top side:** the tall and heavy parts: L1 and L2 (7 × 7 mm inductors), the C1, C18 and C19
+- **Top side:** the tall and heavy parts: L1 and L2 (6.6 × 6.4 mm inductors), the C1, C18 and C19
   electrolytics (6.3 × 7.7 mm) and Q1 (DPAK).
 - **The electrolytics are EEE-FK1H470XP,** the 6.3 × 7.7 mm can. EEE-FK1H470P, without the X, is
   the same value in an 8 × 6.2 mm can and does not fit the pads.
@@ -126,7 +126,7 @@ If any of these is unavailable, please contact us before substituting.
 ## Ratings are deliberate
 
 Please do not down-rate any line to a cheaper equivalent. Each passive's BOM Value states its
-rating, for example `100nF 50V X7R`, `10k 0.1%` or `8mOhm 1% 1W`.
+rating, for example `100nF 50V X7R`, `10k 0.1%`, `8mOhm 1% 1W` or `4.7uH Isat 14.4A`.
 
 - **The 12 V side is rated for the input clamp.** D2 (SMBJ24A) clamps at up to 38.9 V, so every
   capacitor on a 12 V net is 50 V, and the CSD18543Q3A FETs are 60 V. The 25 V and 10 V
@@ -134,7 +134,9 @@ rating, for example `100nF 50V X7R`, `10k 0.1%` or `8mOhm 1% 1W`.
 - **R14, R15 (8 mΩ) and R28 (5 mΩ) are Vishay WSL2512 metal-strip current-sense resistors, 1 W.**
   The LTC3350's 4 A limits and the INA226's reading scale with them.
 - **R16–R20 are 2.7 Ω, 1 W, 2512.** Each carries 0.5 W while the cell shunts run.
-- **L1 and L2 are Coilcraft XAL7070-472MEB.** L1's saturation current must exceed 7.2 A.
+- **L1 and L2 are Würth 744393465047** (WE-XHMI Performance 6060), 4.7 µH with a 14.4 A
+  saturation current. L2's must be at least 11.5 A, the buck's high-side current limit, and
+  L1's must exceed 7.2 A.
 - **C12 (120 pF) and C25 (22 pF) are C0G.**
 
 ## Order-form note

@@ -196,6 +196,27 @@ def CP(sheet, group, value, a, b, mpn="EEE-FK1H470XP", note=""):
     )
 
 
+# Both inductors are Wurth's WE-XHMI Performance 6060 (2026-10-20): DigiKey does not stock the
+# Coilcraft XAL7070-472 that TI's design table names. Its 14.4 A saturation current (30% drop)
+# covers the larger of the two requirements, L2's 11.5 A.
+def L(sheet, group, a, b, note=""):
+    part(
+        sheet,
+        group,
+        "Device:L",
+        "4.7uH Isat 14.4A",
+        {"1": a, "2": b},
+        fp="Inductor_SMD:L_Wuerth_XHMI-6060",
+        mpn="744393465047",
+        mfr="Wurth Elektronik",
+        ds="https://www.we-online.com/components/products/datasheet/744393465047.pdf",
+        desc="Shielded power inductor 4.7uH 20%, Isat 14.4A, 6.6x6.4mm (WE-XHMI Performance 6060)",
+        pkg="6.6x6.4mm SMD (WE-XHMI 6060)",
+        note=note,
+        rot=90,
+    )
+
+
 def NFET(sheet, group, g, d, s, mpn="CSD18543Q3A", note=""):
     if mpn == "CSD18543Q3A":
         part(
@@ -475,19 +496,12 @@ R(
 )
 NFET(S, g, "LTC_TG", "+12V_BUS", "LTC_SW", note="Top switch")
 NFET(S, g, "LTC_BG", "LTC_SW", "GND", note="Bottom switch")
-part(
+L(
     S,
     g,
-    "Device:L",
-    "4.7uH",
-    {"1": "LTC_SW", "2": "LTC_ICAP"},
-    fp="Inductor_SMD:L_Coilcraft_XAL7070-XXX",
-    mpn="XAL7070-472MEB",
-    mfr="Coilcraft",
-    desc="Shielded power inductor 4.7uH 20%, 7x7mm (XAL7070)",
-    pkg="7.0x7.0mm SMD (XAL7070)",
+    "LTC_SW",
+    "LTC_ICAP",
     note="L = VIN(max)/(ICHG(max) fSW) = 16/(4 A x 0.75 MHz) = 5.3 uH; Isat must exceed 1.8 x ICHG = 7.2 A",
-    rot=90,
 )
 R(
     S,
@@ -635,18 +649,12 @@ R(S, g, "33.2k", "LM_RT", "GND", note="RT = (1/400 kHz - 3.3e-5) x 1.346e4 = 33.
 C(S, g, "1u", "LM_VCC", "GND", volt="25V")
 C(S, g, "100n", "+5V_BUCK", "GND", note="BIAS decoupling")
 C(S, g, "100n", "LM_CBOOT", "LM_SW", note="CBOOT")
-part(
+L(
     S,
     g,
-    "Device:L",
-    "4.7uH",
-    {"1": "LM_SW", "2": "+5V_BUCK"},
-    fp="Inductor_SMD:L_Coilcraft_XAL7070-XXX",
-    mpn="XAL7070-472MEB",
-    mfr="Coilcraft",
-    desc="Shielded power inductor 4.7uH 20%, 7x7mm (XAL7070)",
-    pkg="7.0x7.0mm SMD (XAL7070)",
-    rot=90,
+    "LM_SW",
+    "+5V_BUCK",
+    note="Isat must reach the LM61460's high-side current limit, 11.5 A max, so a shorted 5 V output does not saturate it (SNVSB70F 10.2.2.3)",
 )
 R(S, g, "100k", "+5V_BUCK", "LM_FB", note="RFBT 100k")
 R(

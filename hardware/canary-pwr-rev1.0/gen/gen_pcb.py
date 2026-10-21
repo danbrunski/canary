@@ -277,7 +277,7 @@ BOTTOM_GROUPS = {
     ("Holdup", "Cell shunts and the cap-bank connector"),
     ("Holdup", "Bank discharge (button or I2C, parked only)"),
 }
-TOP_ONLY = ("CP_Elec", "XAL7070", "TO-252", "D_SMB", "HTSSOP-16", "QFN-38", "IC_LM61460", "VSON-8")
+TOP_ONLY = ("CP_Elec", "XHMI", "TO-252", "D_SMB", "HTSSOP-16", "QFN-38", "IC_LM61460", "VSON-8")
 
 edge_parts, top, bottom = [], [], []
 for c in comps:

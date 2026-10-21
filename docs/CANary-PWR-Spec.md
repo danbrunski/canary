@@ -116,7 +116,7 @@ sides:
 - **Top (F.Cu):** the power stage — input protection, LTC3350 and its FETs,
   inductors and electrolytics, the 5 V buck, the ideal diode, the edge parts.
   The gap up to the HAT is ~13 mm (the HAT's 13.5 mm J1 socket sits on PWR's
-  tails), enough for the tallest parts (7.7 mm electrolytics, 7 mm inductors)
+  tails), enough for the tallest parts (7.7 mm electrolytics, 6.1 mm inductors)
   and the right-angle connectors.
 - **Bottom (B.Cu):** the supervisor, the CAN wake transceiver, the I²C buffer,
   the crossing-net parts, the five cell-ballast resistors and their tap ladder,
@@ -357,7 +357,7 @@ Application Circuit 2, 11–20 V in / 10 V backup):
 | Backup bus (OUTFB) | 649k/100k → 9.0 V, 120 pF lead | the buck and the HAT's 12 V loads stay in regulation |
 | Power-fail (PFI) | 665k/100k → 8.95 V falling | PFO goes to the **MCU**, not the Pi (§P7) |
 | Switching frequency (RT) | 71.5k → 748 kHz | |
-| Inductor | 4.7 µH XAL7070 (Isat > 7.2 A) | L = VIN(max)/(ICHG·fSW); same part as the buck's |
+| Inductor | 4.7 µH Würth 744393465047, Isat 14.4 A (needs > 7.2 A) | L = VIN(max)/(ICHG·fSW); same part as the buck's (§P5) |
 | Bootstrap diode | 1N4148W, not Schottky | datasheet: BST–SW pumps past 5.5 V with a Schottky beside the output ideal diode |
 | Capacitance test (RTST) | 121 Ω; `ctl_cap_scale = 1` | ≈ 2 mF per LSB on a 6.25 F stack |
 | Cell ballast | 5 × 2.7 Ω 2512 | 500 mA shunt at VSHUNT 2.7 V; ~0.5 W each while shunting |
@@ -452,12 +452,19 @@ saves ~25 parts and the 4 mA.
 ## P5. 5 V to the Pi — LM61460 through the header
 
 **Buck: TI LM61460AASQRJRRQ1** (36 V, 6 A, auto mode, spread spectrum), fed
-from `+12V_BUS`. Datasheet Table 10-2, 400 kHz / 5 V row: 4.7 µH (XAL7070),
+from `+12V_BUS`. Datasheet Table 10-2, 400 kHz / 5 V row: 4.7 µH,
 RFBT 100k / RFBB 24.3k → 5.115 V, CFF 22 pF + RFF 1k, RT 33.2k, CBOOT 100 nF with
 RBOOT tied straight to CBOOT, 2 × 47 µF out, split 10 µF + 100 nF at each
 VIN/PGND pair. Its enable is the Pi's power switch: a 100k/27k divider from the
 bus (on above ~5.9 V) pulled down by a BSS138 the MCU drives — **MCU high = Pi
 off**, so a supervisor in reset, in its bootloader or hung leaves the Pi powered.
+
+**Inductor: Würth 744393465047** (WE-XHMI Performance 6060: 4.7 µH, 14.4 A
+saturation at a 30 % drop, 10.1 mΩ max, AEC-Q200, 6.6 × 6.4 × 6.1 mm), the same
+part as L1's (§P4). The table names Coilcraft's XAL7070-472, which DigiKey does
+not stock (2026-10-20). The datasheet asks for a saturation current at least the
+high-side switch's current limit, IL-HS, 11.5 A max (SNVSB70F §10.2.2.3), so that a
+shorted output cannot saturate the inductor.
 
 **Delivery: header pins 2 and 4** (decided 2026-10-13). The Raspberry Pi HAT+
 spec defines this as a Power HAT+, requires ≥ 3 A at 5.1 V and recommends 5 A;
@@ -678,7 +685,7 @@ Nothing on this board changes for rev 3.0.
 | 7 | Crank-dip window: longest dip the bank should ride before `~PWR_FAIL` | DIP vs HOLDUP timing |
 | 8 | Right-angle connector heights (Phoenix MC 1,5 G, Micro-Fit 43045 2 × 3 and 2 × 5, SWD) against the ~13 mm gap under the HAT | Edge placement |
 | 9 | Side-view LED and side-actuated button orientation on the footprints | They face the edge |
-| 10 | Part choices still open: the right-angle SWD header. The polyfuse is the Bourns MF-MSMF050/40X-2 on Bourns' land (2026-10-20, §P3). The 25 F cells are Eaton TVA1625-3R0256-R (2026-10-20, the cap bank's README); it and every cap-bank and lead part are in stock at DigiKey (operator, 2026-10-20), as is the HAT-out 43045-0600. So are MF-MSMF050/40X-2, RC0402FR-07100KL, EEE-FK1H470XP, SUD50P06-15-GE3, BZT52C15-7-F, 1N4148W-7-F and TPS7A1633QDGNRQ1 (operator, 2026-10-20) | BOM |
+| 10 | Part choices still open: the right-angle SWD header. The polyfuse is the Bourns MF-MSMF050/40X-2 on Bourns' land (2026-10-20, §P3). The 25 F cells are Eaton TVA1625-3R0256-R (2026-10-20, the cap bank's README); it and every cap-bank and lead part are in stock at DigiKey (operator, 2026-10-20), as is the HAT-out 43045-0600. So are MF-MSMF050/40X-2, RC0402FR-07100KL, EEE-FK1H470XP, SUD50P06-15-GE3, BZT52C15-7-F, 1N4148W-7-F, TPS7A1633QDGNRQ1 and the 744393465047 inductor (operator, 2026-10-20) | BOM |
 | 11 | The cap-bank lead's resistance at bring-up | Calibrates the ESR readout |
 | 12 | The Vehicle-in plug's order number (KiCad's footprint confirms 1803293 for the header) and the HAT-out Micro-Fit's housing and crimps (43025-0600, 43030). The cap-bank lead's are settled in `hardware/tools/capbank_lead.py` | BOM |
 | 13 | Copper weight: TI recommends 2 oz outer layers for the LM61460. **Settled 2026-10-18 (operator): the outer layers stay 1 oz.** Every current path is a wide pour sized for 1 oz, and 0.15 mm signal clearance costs nothing extra at that weight | Fab order |
@@ -859,8 +866,8 @@ pads, no In1 tracks.
 ## Changes after routing, 2026-10-20
 
 Changes the operator approved before PWR goes to fab, made on the routed board.
-After them DRC's only errors are J1's two starved thermals (the R42/R35 silk
-overlap is gone too), parity 0, ERC clean, 0 unconnected, no vias in pads, no In1
+After them DRC shows no errors (J1's two starved thermals and the R42/R35 silk
+overlap are gone), parity 0, ERC clean, 0 unconnected, no vias in pads, no In1
 tracks, and `review_placement.sh` reports no problems. The three top-side
 courtyard overlaps it used to report (C24/C29, L1/C7 and U1/C7) never existed. It
 compared boxes round the courtyards, and KiCad's box adds the courtyard line's
@@ -898,3 +905,21 @@ courtyards themselves collide, touching included, the same test as DRC's
   the ballasts 1.54 mm from J4, U7 1.61 mm from J2, and C26 1.93 mm from J1.
 - **R42's and R35's designators** moved apart, to (120.55, 52.0) and
   (117.77, 52.0).
+- **L1 and L2 are Würth 744393465047** (§P5) on KiCad's `L_Wuerth_XHMI-6060`,
+  Würth's recommended land: 1.45 × 5.5 mm pads at ±2.0 mm. DigiKey does not stock
+  the XAL7070-472 they replace. Their BOM Value, `4.7uH Isat 14.4A`, carries the
+  rating, because PCBWay buys from Value and MPN alone. At L2's old place the new
+  land put its LM_SW pad 0.15 mm from BUTTON's vias at (127.83, 56.76) and
+  (127.83, 58.33), which have nowhere to go: VCAP holds In2 beside them, and
+  BUCK_PG and LTC_INTVCC hold B.Cu. L2 moves 0.15 mm east, to (127.15, 55.8),
+  which leaves 0.30 mm. C7's designator moves off L1's silk, to (119.9, 75.9).
+- **J1's starved thermals are fixed by rerouting, not by rules.** Pin 6 (GND)
+  had one F.Cu spoke, because BUTTON came down between pins 4 and 6 and ran under
+  pin 6. It now drops between pins 2 and 4 and runs along the channel between the
+  rows. That frees the strip along the board's top edge, and pin 6's two upper
+  spokes reach the pour through it. The channel needed PI_3V3's F.Cu track out of
+  it, so that track now leaves pin 1 under pin 3, as its B.Cu twin does. Pin 25
+  (GND) had one B.Cu spoke: +5V_BUCK holds the channel above it, and ~PWR_FAIL ran
+  close beneath it to get past PI_3V3's via at (141.97, 50.74). PI_3V3 now stays
+  on F.Cu to a via beside R37, at (147.33, 50.74). ~PWR_FAIL runs at y 51.3, and
+  pin 25's two lower spokes reach the pour.
