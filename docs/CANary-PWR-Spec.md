@@ -697,11 +697,21 @@ on both sides (functional placement 2026-10-15, §P2); power copper laid by
 hand (2026-10-15), signals **unrouted**; DRC clean apart from the unrouted
 connections (§P10 item 15).
 
-**BOM** (2026-10-20). PCBWay's KiCad plugin builds the BOM from the footprints' fields, so every
-part carries the fields it needs: a Description giving the part's type and ratings, the MPN, the
-Manufacturer, a Package, and a Note where one applies. Do-not-populate and do-not-substitute
-instructions open the Note. `gen/verify_netlist.py` checks those fields and the DNP flags against
-`design.py`, as well as the pins. DRC's schematic parity checks the footprints against the
+**BOM** (2026-10-20). PCBWay's KiCad plugin builds the BOM from the footprints' fields. PCBWay
+works from each line's Value and MPN and does not read the notes (operator, 2026-10-20), so those
+two columns carry everything the assembler must get right:
+
+- **A passive's Value states what a substitute must match.** For a capacitor that is voltage and
+  dielectric (`100nF 50V X7R`). For a resistor it is tolerance (`10k 0.1%`), plus power on a 2512
+  (`8mOhm 1% 1W`). Milliohms are spelled out because `8m` reads easily as 8 MΩ.
+- **J1–J5, which the operator fits, are excluded from the BOM and the position files** on both the
+  symbol and the footprint. The plugin then leaves them out, so PCBWay sees no line it could buy or
+  place.
+
+Every part also carries a Description, the Manufacturer, a Package, and a Note where one applies.
+The Notes keep the reasons and the do-not-substitute warnings for whoever reads them.
+`gen/verify_netlist.py` checks those fields, the DNP flags and the BOM and position exclusions
+against `design.py`, as well as the pins. DRC's schematic parity checks the footprints against the
 schematic. `BOM.csv` is the plugin's BOM, written by `hardware/tools/pcbway_bom.py`.
 `FAB-NOTES.md` goes with the gerbers: double-sided SMD, J1–J5 not fitted, U5 supplied blank, the
 parts that must not be substituted, and pin 1.

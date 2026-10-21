@@ -69,6 +69,16 @@ def _ohms(value):
     return f"{value} Ohm"
 
 
+# PCBWay buys from each BOM line's Value and MPN and does not read the notes (operator,
+# 2026-10-20). So a passive's Value names what a substitute must match: a resistor's tolerance,
+# and its power on a 2512; a capacitor's voltage and dielectric.
+def _res_value(value, tol, power):
+    """100k -> "100k 1%". A milliohm value is spelled out, because KiCad's 8m reads easily as 8M."""
+    if value.endswith("m"):
+        value = value[:-1] + "mOhm"
+    return " ".join(v for v in (value, tol, power) if v)
+
+
 def _yageo(value):
     v = value.replace("R", ".").upper()
     if v.endswith("K"):
@@ -114,6 +124,9 @@ def part(
             note=note,
             rot=rot,
             dnp=dnp,
+            # A do-not-populate part is the operator's to fit, so it is left out of the BOM and
+            # position file: PCBWay goes by Value and MPN, and a DNP column alone is not enough.
+            in_bom=not dnp,
             ref_prefix=ref_prefix,
             fixed_ref=ref,
         )
@@ -130,7 +143,7 @@ def R(sheet, group, value, a, b, size="0603", mpn=None, note="", mfr=None, ref=N
         sheet,
         group,
         "Device:R",
-        value,
+        _res_value(value, tol, power if size == "2512" else ""),
         {"1": a, "2": b},
         fp=FP[size][0],
         mpn=mpn,
@@ -153,7 +166,7 @@ def C(sheet, group, value, a, b, volt="50V", size="0603", note=""):
         sheet,
         group,
         "Device:C",
-        value,
+        f"{value}F {volt} {dielectric}",
         {"1": a, "2": b},
         fp=FP[size][1],
         mpn=mpn,
@@ -171,7 +184,7 @@ def CP(sheet, group, value, a, b, mpn="EEE-FK1H470XP", note=""):
         sheet,
         group,
         "Device:C_Polarized",
-        value,
+        f"{value}F 50V",
         {"1": a, "2": b},
         fp="Capacitor_SMD:CP_Elec_6.3x7.7",
         mpn=mpn,
@@ -293,7 +306,7 @@ part(
     S,
     g,
     "Device:Polyfuse",
-    "PTC 0.5A",
+    "PTC 0.5A 40V",
     {"1": "+12V_BUS", "2": "+12V_HAT"},
     fp="canary-pwr:Fuse_1812_Bourns_MF-MSMF",
     mpn="MF-MSMF050/40X-2",
@@ -466,7 +479,7 @@ part(
     S,
     g,
     "Device:L",
-    "4.7u",
+    "4.7uH",
     {"1": "LTC_SW", "2": "LTC_ICAP"},
     fp="Inductor_SMD:L_Coilcraft_XAL7070-XXX",
     mpn="XAL7070-472MEB",
@@ -626,7 +639,7 @@ part(
     S,
     g,
     "Device:L",
-    "4.7u",
+    "4.7uH",
     {"1": "LM_SW", "2": "+5V_BUCK"},
     fp="Inductor_SMD:L_Coilcraft_XAL7070-XXX",
     mpn="XAL7070-472MEB",

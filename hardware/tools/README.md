@@ -118,7 +118,11 @@ is updated from the schematic. Schematic parity in DRC checks that the two agree
   when no footprint has that field. Every other non-empty field is a column, except Reference,
   Value, Datasheet and Footprint.
 - **Lines.** There is one line per value, footprint, package and MPN, and one per do-not-populate
-  part.
+  part. A footprint excluded from both the BOM and the position files is left out of both. One
+  excluded from the BOM only still has a placement.
+- **PCBWay works from Value and MPN** (operator, 2026-10-20), not from the DNP column or the notes.
+  A part they must not buy or fit is therefore excluded from both files, as CANary-PWR's J1–J5 are,
+  rather than only marked DNP.
 - **A field that differs inside a line** reads `[C1]text; [C2,C3]other`.
 - **A field set on only one part of a line** reads as if it applied to the whole line.
 

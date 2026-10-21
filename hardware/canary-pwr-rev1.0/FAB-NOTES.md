@@ -70,7 +70,8 @@ They are board-only footprints, excluded from the BOM. MH1–MH4 are mounting ho
   the same value in an 8 × 6.2 mm can and does not fit the pads.
 
 **No through-hole assembly.** J1–J5 are the board's only through-hole parts, and none is fitted
-at the assembler (below). No wave or selective soldering is needed.
+at the assembler (below). None of them is in the BOM or the position file. No wave or selective
+soldering is needed.
 
 **Not fitted at the assembler.** The operator sources and fits all five after assembly:
 
@@ -124,7 +125,8 @@ If any of these is unavailable, please contact us before substituting.
 
 ## Ratings are deliberate
 
-Please do not down-rate any line to a cheaper equivalent.
+Please do not down-rate any line to a cheaper equivalent. Each passive's BOM Value states its
+rating, for example `100nF 50V X7R`, `10k 0.1%` or `8mOhm 1% 1W`.
 
 - **The 12 V side is rated for the input clamp.** D2 (SMBJ24A) clamps at up to 38.9 V, so every
   capacitor on a 12 V net is 50 V, and the CSD18543Q3A FETs are 60 V. The 25 V and 10 V
@@ -150,9 +152,11 @@ anything inconsistent. ENIG preferred. Full notes in FAB-NOTES.md.
 
 ## Files
 
-- **BOM and position file.** The BOM is `BOM.csv`: 59 lines, 122 parts, 5 of them not fitted
-  (J1–J5). It and the position file are exactly what PCBWay's KiCad plugin uploads, and
-  `hardware/tools/pcbway_bom.py` writes both from the board. The `KiLib_Generator` column is KiCad
-  library metadata, not a part attribute.
+- **BOM and position file.** The BOM is `BOM.csv`: 54 lines and 117 parts, every one of them
+  fitted at the assembler. J1–J5 are excluded from it and from the position file, which lists the
+  117 parts and the six fiducials. Both files are exactly what PCBWay's KiCad plugin uploads, and
+  `hardware/tools/pcbway_bom.py` writes both from the board. The Value and MPN columns carry
+  everything a line needs. The `KiLib_Generator` column is KiCad library metadata, not a part
+  attribute.
 - **Not on the board BOM.** The operator supplies J1–J5 and their mating parts. Spec §P10 items 10
   and 12 have the open ones. The cap-bank lead is in `hardware/tools/capbank_lead.py`.

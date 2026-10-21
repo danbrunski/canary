@@ -57,10 +57,15 @@ for p in design.PARTS:
         if fields.get(name, "") != p[key]:
             print("FIELD", p["ref"], name, repr(fields.get(name, "")), "!=", repr(p[key]))
             bad += 1
-    dnp = any(prop.get("name") == "dnp" for prop in c.findall("property"))
-    if dnp != p["dnp"]:
-        print("DNP", p["ref"], dnp, "!=", p["dnp"])
+    flags = {prop.get("name") for prop in c.findall("property")}
+    if ("dnp" in flags) != p["dnp"]:
+        print("DNP", p["ref"], "dnp" in flags, "!=", p["dnp"])
         bad += 1
+    # PCBWay's plugin leaves a part out of the BOM and position file only when both flags are set.
+    for flag in ("exclude_from_bom", "exclude_from_pos_files"):
+        if (flag in flags) == p["in_bom"]:
+            print("BOM FLAG", p["ref"], flag, flag in flags, "but in_bom is", p["in_bom"])
+            bad += 1
     for pin, want in p["pins"].items():
         have = got.get((p["ref"], pin))
         if want is None:

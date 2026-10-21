@@ -228,11 +228,12 @@ def symbol_instance(
     val_pos=None,
     in_bom=True,
     on_board=True,
+    in_pos_files=True,
 ):
     out = [
         f'\t(symbol\n\t\t(lib_id "{lib_id}")\n\t\t(at {fmt(x)} {fmt(y)} {fmt(r)})\n\t\t(unit {unit})\n'
         f"\t\t(body_style 1)\n\t\t(exclude_from_sim no)\n\t\t(in_bom {'yes' if in_bom else 'no'})\n"
-        f"\t\t(on_board {'yes' if on_board else 'no'})\n\t\t(in_pos_files yes)\n\t\t(dnp {'yes' if dnp else 'no'})\n"
+        f"\t\t(on_board {'yes' if on_board else 'no'})\n\t\t(in_pos_files {'yes' if in_pos_files else 'no'})\n\t\t(dnp {'yes' if dnp else 'no'})\n"
         f'\t\t(uuid "{U()}")'
     ]
     rp = ref_pos or (x, y - 3)
@@ -480,6 +481,8 @@ def main(projdir):
                         dnp=p["dnp"],
                         ref_pos=ref_pos,
                         val_pos=val_pos,
+                        in_bom=p["in_bom"],
+                        in_pos_files=p["in_bom"],
                     )
                 )
                 done = set()
