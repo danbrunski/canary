@@ -3,9 +3,9 @@
     placement_review.py <report.json> <config.json> [--png out.png]
 
 Prints, then exits non-zero if any problem was found:
-- problems: courtyard overlaps on one side, a part sitting over another part's through-hole pins
-  on the far side, courtyards outside the outline (edge parts get a tolerance), parts inside a
-  keep-out;
+- problems: courtyard overlaps on one side (the pairs kicad_placement.py found colliding, touching
+  included, as DRC does), a part sitting over another part's through-hole pins on the far side,
+  courtyards outside the outline (edge parts get a tolerance), parts inside a keep-out;
 - ratsnest: the minimum-spanning-tree length of every net (what the router has to connect), as
   signal, power and GND totals, with the longest nets named;
 - pin distances: for each configured [part, target ref, target pin], how far the part's pad on the
@@ -33,7 +33,7 @@ Point = tuple[float, float]
 Footprint = dict[str, Any]
 Nets = dict[str, tuple[float, list[tuple[Point, Point]]]]  # net -> (tree length, tree edges)
 
-MIN_OVERLAP_MM = 0.02  # courtyards may touch; anything more is an overlap
+MIN_OVERLAP_MM = 0.02  # a courtyard may touch a keep-out or pin margin; more is a problem
 PIN_MARGIN_MM = 0.25  # clearance kept around a through-hole pin on the far side
 PX_PER_MM = 13
 MARGIN_MM = 2.0
@@ -43,12 +43,10 @@ def overlaps(a: Rect, b: Rect, margin: float = MIN_OVERLAP_MM) -> bool:
     return min(a[2], b[2]) - max(a[0], b[0]) > margin and min(a[3], b[3]) - max(a[1], b[1]) > margin
 
 
-def placement_problems(fps: list[Footprint], cfg: dict[str, Any]) -> list[str]:
-    found = set()
-    for i, a in enumerate(fps):
-        for b in fps[i + 1 :]:
-            if a["side"] == b["side"] and overlaps(a["crt"], b["crt"]):
-                found.add(f"overlap {a['ref']}/{b['ref']} ({a['side']})")
+def placement_problems(
+    fps: list[Footprint], collisions: list[dict[str, Any]], cfg: dict[str, Any]
+) -> list[str]:
+    found = {f"overlap {'/'.join(c['refs'])} ({c['side']})" for c in collisions}
     for a in fps:
         for pad in (p for p in a["pads"] if p["pth"]):
             x0, y0, x1, y1 = pad["bb"]
@@ -197,7 +195,8 @@ def main() -> int:
     ap.add_argument("--png")
     args = ap.parse_args()
     with open(args.report) as f:
-        fps = json.load(f)["fps"]
+        report = json.load(f)
+    fps = report["fps"]
     with open(args.config) as f:
         cfg = json.load(f)
     nets = ratsnest(fps)
@@ -206,7 +205,7 @@ def main() -> int:
     distances = pin_distances(fps, cfg.get("checks", []))
     if distances:
         print("pin distances (worst first): " + "; ".join(t for _, t in distances[:14]))
-    problems = placement_problems(fps, cfg)
+    problems = placement_problems(fps, report["overlaps"], cfg)
     print(f"problems ({len(problems)}): " + ("; ".join(problems) if problems else "none"))
     if args.png:
         render(fps, nets, cfg, args.png)

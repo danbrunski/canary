@@ -41,7 +41,11 @@ It prints, and exits 1 if there is any problem:
 
 - **problems**: courtyard overlaps on one side, a part over another part's
   through-hole pins on the far side, a courtyard outside the outline (edge
-  parts get a tolerance), a part inside a keep-out;
+  parts get a tolerance), a part inside a keep-out. Overlaps are the courtyard
+  pairs KiCad finds colliding, touching included, the same test as DRC's
+  `courtyards_overlap`. Boxes round the courtyards reported overlaps that
+  weren't there (2026-10-20): KiCad's box adds the courtyard line's width on
+  every side, and a QFN's courtyard steps in at its corners;
 - **ratsnest**: the minimum-spanning-tree length of every net, totalled as
   signal, power and GND, with the longest nets named. It is what the router
   has to connect, so a better placement makes it shorter;
