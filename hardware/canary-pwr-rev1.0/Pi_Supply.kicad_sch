@@ -6589,7 +6589,7 @@
 				)
 			)
 		)
-		(property "Value" "INA226AQDGSRQ1"
+		(property "Value" "INA226AIDGSR"
 			(at 43.18 182.96 0)
 			(show_name no)
 			(do_not_autoplace no)
@@ -6610,7 +6610,7 @@
 				)
 			)
 		)
-		(property "Datasheet" "https://www.ti.com/lit/ds/symlink/ina226-q1.pdf"
+		(property "Datasheet" "https://www.ti.com/lit/ds/symlink/ina226.pdf"
 			(at 43.18 162.56 0)
 			(hide yes)
 			(show_name no)
@@ -6632,7 +6632,7 @@
 				)
 			)
 		)
-		(property "MPN" "INA226AQDGSRQ1"
+		(property "MPN" "INA226AIDGSR"
 			(at 43.18 162.56 0)
 			(hide yes)
 			(show_name no)
@@ -6665,7 +6665,7 @@
 				)
 			)
 		)
-		(property "Note" "VBUS reads the Pi's 5 V after the ideal diode. Firmware puts it in power-down while parked (0.5 uA)."
+		(property "Note" "VBUS reads the Pi's 5 V after the ideal diode. Firmware puts it in power-down while parked (0.5 uA). Industrial grade of the INA226-Q1: the same die and pinout."
 			(at 43.18 162.56 0)
 			(hide yes)
 			(show_name no)
@@ -8111,7 +8111,7 @@
 				)
 			)
 		)
-		(property "Value" "LM74700QDBVRQ1"
+		(property "Value" "LM74700QDBVTQ1"
 			(at 84.945 175.34 0)
 			(show_name no)
 			(do_not_autoplace no)
@@ -8154,7 +8154,7 @@
 				)
 			)
 		)
-		(property "MPN" "LM74700QDBVRQ1"
+		(property "MPN" "LM74700QDBVTQ1"
 			(at 91.44 157.48 0)
 			(hide yes)
 			(show_name no)

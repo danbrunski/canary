@@ -6053,7 +6053,7 @@
 				)
 			)
 		)
-		(property "Value" "INA226AQDGSRQ1"
+		(property "Value" "INA226AIDGSR"
 			(at 0 2.45 90)
 			(layer "F.Fab")
 			(uuid "a771fc8f-c66b-4867-b579-04a25b79d474")
@@ -6064,7 +6064,7 @@
 				)
 			)
 		)
-		(property "Datasheet" "https://www.ti.com/lit/ds/symlink/ina226-q1.pdf"
+		(property "Datasheet" "https://www.ti.com/lit/ds/symlink/ina226.pdf"
 			(at 0 0 90)
 			(layer "F.Fab")
 			(hide yes)
@@ -6098,7 +6098,7 @@
 				)
 			)
 		)
-		(property "MPN" "INA226AQDGSRQ1"
+		(property "MPN" "INA226AIDGSR"
 			(at 0 0 90)
 			(layer "F.SilkS")
 			(hide yes)
@@ -6122,7 +6122,7 @@
 				)
 			)
 		)
-		(property "Note" "VBUS reads the Pi's 5 V after the ideal diode. Firmware puts it in power-down while parked (0.5 uA)."
+		(property "Note" "VBUS reads the Pi's 5 V after the ideal diode. Firmware puts it in power-down while parked (0.5 uA). Industrial grade of the INA226-Q1: the same die and pinout."
 			(at 0 0 90)
 			(layer "F.SilkS")
 			(hide yes)
@@ -21065,7 +21065,7 @@
 				)
 			)
 		)
-		(property "Value" "LM74700QDBVRQ1"
+		(property "Value" "LM74700QDBVTQ1"
 			(at 0 2.4 0)
 			(layer "F.Fab")
 			(uuid "6e3b96e6-cd41-475f-96f3-4af6387e61bb")
@@ -21110,7 +21110,7 @@
 				)
 			)
 		)
-		(property "MPN" "LM74700QDBVRQ1"
+		(property "MPN" "LM74700QDBVTQ1"
 			(at 0 0 0)
 			(layer "F.SilkS")
 			(hide yes)
@@ -26032,7 +26032,7 @@
 				(justify mirror)
 			)
 		)
-		(property "Value" "TCA4307DGKR"
+		(property "Value" "TCA9511ADGKR"
 			(at 0 0 0)
 			(unlocked yes)
 			(layer "B.Fab")
@@ -26045,7 +26045,7 @@
 				(justify mirror)
 			)
 		)
-		(property "Datasheet" "https://www.ti.com/lit/ds/symlink/tca4307.pdf"
+		(property "Datasheet" "https://www.ti.com/lit/ds/symlink/tca9511a.pdf"
 			(at 0 0 0)
 			(layer "B.Fab")
 			(hide yes)
@@ -26069,7 +26069,7 @@
 				(justify mirror)
 			)
 		)
-		(property "MPN" "TCA4307DGKR"
+		(property "MPN" "TCA9511ADGKR"
 			(at 0 0 0)
 			(layer "B.SilkS")
 			(hide yes)
@@ -26095,7 +26095,7 @@
 				(justify mirror)
 			)
 		)
-		(property "Note" "The footprint is TI's DGK (VSSOP-8) land pattern despite its SOIC8 name. Powered-off high-impedance I/O (datasheet p.1): the always-on board can never load or back-feed the Pi's I2C1 while the Pi is dark (spec P6). Pi side uses the Pi's own 1.8k pull-ups."
+		(property "Note" "The footprint is TI's DGK (VSSOP-8) land pattern despite its SOIC8 name. Powered-off high-impedance I/O (datasheet p.1): the always-on board can never load or back-feed the Pi's I2C1 while the Pi is dark (spec P6). Pi side uses the Pi's own 1.8k pull-ups. The TCA4307's pinout without its stuck-bus recovery: a supervisor holding SDA low is cleared by resetting it (PI_NRST)."
 			(at 0 0 0)
 			(layer "B.SilkS")
 			(hide yes)
@@ -29626,7 +29626,7 @@
 				(justify mirror)
 			)
 		)
-		(property "Value" "BAT46WJ"
+		(property "Value" "BAT46WS-AQ"
 			(at 0.1 -1.9 90)
 			(layer "B.Fab")
 			(uuid "e15e1ab7-1354-414e-90bd-c605e32030f7")
@@ -29638,7 +29638,7 @@
 				(justify mirror)
 			)
 		)
-		(property "Datasheet" ""
+		(property "Datasheet" "https://diotec.com/request/datasheet/bat46ws.pdf"
 			(at 0 0 90)
 			(unlocked yes)
 			(layer "B.Fab")
@@ -29652,7 +29652,7 @@
 				(justify mirror)
 			)
 		)
-		(property "Description" "Schottky diode 100V 250mA, SOD-323F"
+		(property "Description" "Schottky diode 100V 150mA, SOD-323F, AEC-Q101"
 			(at 0 0 90)
 			(unlocked yes)
 			(layer "B.Fab")
@@ -29666,7 +29666,7 @@
 				(justify mirror)
 			)
 		)
-		(property "MPN" "BAT46WJ,115"
+		(property "MPN" "BAT46WS-AQ"
 			(at 0 0 90)
 			(layer "B.SilkS")
 			(hide yes)
@@ -29679,7 +29679,7 @@
 				(justify mirror)
 			)
 		)
-		(property "Manufacturer" "Nexperia"
+		(property "Manufacturer" "Diotec Semiconductor"
 			(at 0 0 90)
 			(layer "B.SilkS")
 			(hide yes)
@@ -30335,7 +30335,7 @@
 				(justify mirror)
 			)
 		)
-		(property "Value" "BAT46WJ"
+		(property "Value" "BAT46WS-AQ"
 			(at 0.1 -1.9 90)
 			(layer "B.Fab")
 			(uuid "b468ec73-00ba-477a-afc7-826ba1e37db6")
@@ -30347,7 +30347,7 @@
 				(justify mirror)
 			)
 		)
-		(property "Datasheet" ""
+		(property "Datasheet" "https://diotec.com/request/datasheet/bat46ws.pdf"
 			(at 0 0 90)
 			(unlocked yes)
 			(layer "B.Fab")
@@ -30361,7 +30361,7 @@
 				(justify mirror)
 			)
 		)
-		(property "Description" "Schottky diode 100V 250mA, SOD-323F"
+		(property "Description" "Schottky diode 100V 150mA, SOD-323F, AEC-Q101"
 			(at 0 0 90)
 			(unlocked yes)
 			(layer "B.Fab")
@@ -30375,7 +30375,7 @@
 				(justify mirror)
 			)
 		)
-		(property "MPN" "BAT46WJ,115"
+		(property "MPN" "BAT46WS-AQ"
 			(at 0 0 90)
 			(layer "B.SilkS")
 			(hide yes)
@@ -30388,7 +30388,7 @@
 				(justify mirror)
 			)
 		)
-		(property "Manufacturer" "Nexperia"
+		(property "Manufacturer" "Diotec Semiconductor"
 			(at 0 0 90)
 			(layer "B.SilkS")
 			(hide yes)
@@ -31084,7 +31084,7 @@
 				(justify mirror)
 			)
 		)
-		(property "Value" "TCAN1043DRQ1"
+		(property "Value" "TCAN1043HDQ1"
 			(at 0 -5.28 90)
 			(layer "B.Fab")
 			(uuid "a7ab3c90-3129-47c3-a23f-2a8ef39e7f7b")
@@ -31133,7 +31133,7 @@
 				(justify mirror)
 			)
 		)
-		(property "MPN" "TCAN1043DRQ1"
+		(property "MPN" "TCAN1043HDQ1"
 			(at 0 0 90)
 			(layer "B.SilkS")
 			(hide yes)
@@ -31159,7 +31159,7 @@
 				(justify mirror)
 			)
 		)
-		(property "Note" "TXD tied to VIO = permanently recessive: physically incapable of transmitting (S13.3.5). VCC is off while parked, which puts it in sleep; a bus wake pattern raises INH and pulls RXD low (datasheet 8.4.6.1)."
+		(property "Note" "TXD tied to VIO = permanently recessive: physically incapable of transmitting (S13.3.5). VCC is off while parked, which puts it in sleep; a bus wake pattern raises INH and pulls RXD low (datasheet 8.4.6.1). The H variant: bus, VSUP, INH and WAKE rated 70 V instead of 58 V, otherwise the TCAN1043."
 			(at 0 0 90)
 			(layer "B.SilkS")
 			(hide yes)

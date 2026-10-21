@@ -702,7 +702,7 @@ part(
     S,
     g,
     "Sensor_Energy:INA226",
-    "INA226AQDGSRQ1",
+    "INA226AIDGSR",
     {
         "1": "GND",
         "2": "GND",
@@ -716,22 +716,23 @@ part(
         "10": "+5V_BUCK",
     },
     fp="Package_SO:TSSOP-10_3x3mm_P0.5mm",
-    mpn="INA226AQDGSRQ1",
+    mpn="INA226AIDGSR",
     mfr="Texas Instruments",
-    ds="https://www.ti.com/lit/ds/symlink/ina226-q1.pdf",
+    ds="https://www.ti.com/lit/ds/symlink/ina226.pdf",
     desc="I2C current/voltage monitor, address 0x40",
     pkg="VSSOP-10 (DGS)",
-    note="VBUS reads the Pi's 5 V after the ideal diode. Firmware puts it in power-down while parked (0.5 uA).",
+    note="VBUS reads the Pi's 5 V after the ideal diode. Firmware puts it in power-down while parked (0.5 uA)."
+    " Industrial grade of the INA226-Q1: the same die and pinout.",
 )
 C(S, g, "100n", "+3V3_AON", "GND")
 part(
     S,
     g,
     "Power_Management:LM74700",
-    "LM74700QDBVRQ1",
+    "LM74700QDBVTQ1",
     {"1": "OR_VCAP", "2": "GND", "3": "+5V_SHUNT", "4": "+5V_PI", "5": "OR_GATE", "6": "+5V_SHUNT"},
     fp="Package_TO_SOT_SMD:SOT-23-6",
-    mpn="LM74700QDBVRQ1",
+    mpn="LM74700QDBVTQ1",
     mfr="Texas Instruments",
     ds="https://www.ti.com/lit/ds/symlink/lm74700-q1.pdf",
     desc="Ideal-diode controller, EN tied to ANODE (always on)",
@@ -817,12 +818,13 @@ part(
     S,
     g,
     "Device:D_Schottky",
-    "BAT46WJ",
+    "BAT46WS-AQ",
     {"1": "AON_IN", "2": "+12V_PROT"},
     fp="Diode_SMD:D_SOD-323F",
-    mpn="BAT46WJ,115",
-    mfr="Nexperia",
-    desc="Schottky diode 100V 250mA, SOD-323F",
+    mpn="BAT46WS-AQ",
+    mfr="Diotec Semiconductor",
+    ds="https://diotec.com/request/datasheet/bat46ws.pdf",
+    desc="Schottky diode 100V 150mA, SOD-323F, AEC-Q101",
     pkg="SOD-323F",
     note="DO NOT SUBSTITUTE a lower-voltage Schottky. Diode-OR leg from the input; 100 V because the other leg can sit at 0 V while this one sees the 38.9 V clamp",
 )
@@ -830,12 +832,13 @@ part(
     S,
     g,
     "Device:D_Schottky",
-    "BAT46WJ",
+    "BAT46WS-AQ",
     {"1": "AON_IN", "2": "+12V_BUS"},
     fp="Diode_SMD:D_SOD-323F",
-    mpn="BAT46WJ,115",
-    mfr="Nexperia",
-    desc="Schottky diode 100V 250mA, SOD-323F",
+    mpn="BAT46WS-AQ",
+    mfr="Diotec Semiconductor",
+    ds="https://diotec.com/request/datasheet/bat46ws.pdf",
+    desc="Schottky diode 100V 150mA, SOD-323F, AEC-Q101",
     pkg="SOD-323F",
     note="DO NOT SUBSTITUTE a lower-voltage Schottky (100 V, as D5). Diode-OR leg from the backed-up bus: keeps the supervisor alive on hold-up after the input is lost",
 )
@@ -871,7 +874,7 @@ part(
     S,
     g,
     "Interface_CAN_LIN:TCAN1043xDxQ1",
-    "TCAN1043DRQ1",
+    "TCAN1043HDQ1",
     {
         "1": "+3V3_AON",
         "2": "GND",
@@ -889,12 +892,13 @@ part(
         "14": "CAN_STB_N",
     },
     fp="Package_SO:SOIC-14_3.9x8.7mm_P1.27mm",
-    mpn="TCAN1043DRQ1",
+    mpn="TCAN1043HDQ1",
     mfr="Texas Instruments",
     ds="https://www.ti.com/lit/ds/symlink/tcan1043-q1.pdf",
     desc="CAN FD transceiver with sleep and wake",
     pkg="SOIC-14 (D)",
-    note="TXD tied to VIO = permanently recessive: physically incapable of transmitting (S13.3.5). VCC is off while parked, which puts it in sleep; a bus wake pattern raises INH and pulls RXD low (datasheet 8.4.6.1).",
+    note="TXD tied to VIO = permanently recessive: physically incapable of transmitting (S13.3.5). VCC is off while parked, which puts it in sleep; a bus wake pattern raises INH and pulls RXD low (datasheet 8.4.6.1)."
+    " The H variant: bus, VSUP, INH and WAKE rated 70 V instead of 58 V, otherwise the TCAN1043.",
 )
 C(S, g, "100n", "+12V_PROT", "GND")
 C(S, g, "100n", "+5V_BUCK", "GND")
@@ -1007,7 +1011,7 @@ part(
     S,
     g,
     "canary-pwr:TCA4307",
-    "TCA4307DGKR",
+    "TCA9511ADGKR",
     {
         "6": "PI_SDA",
         "3": "PI_SCL",
@@ -1019,12 +1023,14 @@ part(
         "4": "GND",
     },
     fp="canary-pwr:SOIC8_DGK_TEX",
-    mpn="TCA4307DGKR",
+    mpn="TCA9511ADGKR",
     mfr="Texas Instruments",
-    ds="https://www.ti.com/lit/ds/symlink/tca4307.pdf",
+    ds="https://www.ti.com/lit/ds/symlink/tca9511a.pdf",
     desc="I2C hot-swap buffer, powered from the Pi's 3.3 V",
     pkg="VSSOP-8 (DGK)",
-    note="The footprint is TI's DGK (VSSOP-8) land pattern despite its SOIC8 name. Powered-off high-impedance I/O (datasheet p.1): the always-on board can never load or back-feed the Pi's I2C1 while the Pi is dark (spec P6). Pi side uses the Pi's own 1.8k pull-ups.",
+    note="The footprint is TI's DGK (VSSOP-8) land pattern despite its SOIC8 name. Powered-off high-impedance I/O (datasheet p.1): the always-on board can never load or back-feed the Pi's I2C1 while the Pi is dark (spec P6). Pi side uses the Pi's own 1.8k pull-ups."
+    " The TCA4307's pinout without its stuck-bus recovery: a supervisor holding SDA low is cleared by"
+    " resetting it (PI_NRST).",
 )
 C(S, g, "100n", "PI_3V3", "GND")
 R(

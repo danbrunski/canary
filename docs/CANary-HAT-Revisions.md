@@ -2273,7 +2273,7 @@ rest through untouched:
 |---|---|
 | 1, 17 | Pi 3V3 sense |
 | 2, 4 | `+5V_PI` in |
-| 3, 5 | I²C1, behind a TCA4307 |
+| 3, 5 | I²C1, behind a TCA9511A |
 | 13 | GPIO27 `PI_BOOT0` |
 | 18 | GPIO24 `PI_NRST` |
 | 31 | GPIO6 `~PWR_FAIL` |

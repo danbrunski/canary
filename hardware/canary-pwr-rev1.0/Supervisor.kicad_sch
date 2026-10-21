@@ -6624,7 +6624,7 @@
 				)
 			)
 		)
-		(property "Value" "BAT46WJ"
+		(property "Value" "BAT46WS-AQ"
 			(at 248.68 44.34 0)
 			(show_name no)
 			(do_not_autoplace no)
@@ -6645,7 +6645,7 @@
 				)
 			)
 		)
-		(property "Datasheet" ""
+		(property "Datasheet" "https://diotec.com/request/datasheet/bat46ws.pdf"
 			(at 246.38 40.64 0)
 			(hide yes)
 			(show_name no)
@@ -6656,7 +6656,7 @@
 				)
 			)
 		)
-		(property "Description" "Schottky diode 100V 250mA, SOD-323F"
+		(property "Description" "Schottky diode 100V 150mA, SOD-323F, AEC-Q101"
 			(at 246.38 40.64 0)
 			(hide yes)
 			(show_name no)
@@ -6667,7 +6667,7 @@
 				)
 			)
 		)
-		(property "MPN" "BAT46WJ,115"
+		(property "MPN" "BAT46WS-AQ"
 			(at 246.38 40.64 0)
 			(hide yes)
 			(show_name no)
@@ -6678,7 +6678,7 @@
 				)
 			)
 		)
-		(property "Manufacturer" "Nexperia"
+		(property "Manufacturer" "Diotec Semiconductor"
 			(at 246.38 40.64 0)
 			(hide yes)
 			(show_name no)
@@ -7123,7 +7123,7 @@
 				)
 			)
 		)
-		(property "Value" "BAT46WJ"
+		(property "Value" "BAT46WS-AQ"
 			(at 216.185 44.34 0)
 			(show_name no)
 			(do_not_autoplace no)
@@ -7144,7 +7144,7 @@
 				)
 			)
 		)
-		(property "Datasheet" ""
+		(property "Datasheet" "https://diotec.com/request/datasheet/bat46ws.pdf"
 			(at 213.36 40.64 0)
 			(hide yes)
 			(show_name no)
@@ -7155,7 +7155,7 @@
 				)
 			)
 		)
-		(property "Description" "Schottky diode 100V 250mA, SOD-323F"
+		(property "Description" "Schottky diode 100V 150mA, SOD-323F, AEC-Q101"
 			(at 213.36 40.64 0)
 			(hide yes)
 			(show_name no)
@@ -7166,7 +7166,7 @@
 				)
 			)
 		)
-		(property "MPN" "BAT46WJ,115"
+		(property "MPN" "BAT46WS-AQ"
 			(at 213.36 40.64 0)
 			(hide yes)
 			(show_name no)
@@ -7177,7 +7177,7 @@
 				)
 			)
 		)
-		(property "Manufacturer" "Nexperia"
+		(property "Manufacturer" "Diotec Semiconductor"
 			(at 213.36 40.64 0)
 			(hide yes)
 			(show_name no)
@@ -7795,7 +7795,7 @@
 				)
 			)
 		)
-		(property "Value" "TCAN1043DRQ1"
+		(property "Value" "TCAN1043HDQ1"
 			(at 43.295 205.82 0)
 			(show_name no)
 			(do_not_autoplace no)
@@ -7838,7 +7838,7 @@
 				)
 			)
 		)
-		(property "MPN" "TCAN1043DRQ1"
+		(property "MPN" "TCAN1043HDQ1"
 			(at 45.72 182.88 0)
 			(hide yes)
 			(show_name no)
@@ -7871,7 +7871,7 @@
 				)
 			)
 		)
-		(property "Note" "TXD tied to VIO = permanently recessive: physically incapable of transmitting (S13.3.5). VCC is off while parked, which puts it in sleep; a bus wake pattern raises INH and pulls RXD low (datasheet 8.4.6.1)."
+		(property "Note" "TXD tied to VIO = permanently recessive: physically incapable of transmitting (S13.3.5). VCC is off while parked, which puts it in sleep; a bus wake pattern raises INH and pulls RXD low (datasheet 8.4.6.1). The H variant: bus, VSUP, INH and WAKE rated 70 V instead of 58 V, otherwise the TCAN1043."
 			(at 45.72 182.88 0)
 			(hide yes)
 			(show_name no)

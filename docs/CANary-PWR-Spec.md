@@ -474,7 +474,7 @@ current crosses one connector and no HAT copper.
 
 Between the buck and the header:
 
-- **5 mΩ shunt + INA226-Q1** (private I²C, 0x40): the Pi's 5 V current and the
+- **5 mΩ shunt + INA226** (private I²C, 0x40; the industrial INA226AIDGSR, §P10 #10): the Pi's 5 V current and the
   voltage at the header — the number that diagnoses undervoltage with NVMe and
   USB loads, and the measurement that decides the LTC4041 question (§P4). Put it
   in power-down while parked.
@@ -498,7 +498,7 @@ instead (§P9).
 |---|---|---|---|
 | `+5V` | 2, 4 | PWR → Pi | Pi and HAT 5 V, through the ideal diode |
 | GND | 6, 9, 14, 20, 25, 30, 34, 39 | | |
-| I²C1 SDA/SCL | 3, 5 (GPIO2/3) | Pi master, PWR target | through a **TCA4307** powered from the Pi's 3V3 |
+| I²C1 SDA/SCL | 3, 5 (GPIO2/3) | Pi master, PWR target | through a **TCA9511A** powered from the Pi's 3V3 |
 | `~PWR_FAIL` | 31 (GPIO6) | PWR → Pi | **HIGH = power OK**, the X1202's polarity, so existing software keeps its pin. MCU open-drain, 10k pull-up to the Pi's 3V3 |
 | `PI_BOOT0` | 13 (GPIO27) | Pi → PWR | Holds the MCU's BOOT0 high for a reflash (10k pull-down on PWR) |
 | `PI_NRST` | 18 (GPIO24) | Pi → PWR | Resets the MCU, through a BSS138: a resistor would let an unpowered Pi pin clamp NRST and hold the supervisor in reset |
@@ -530,7 +530,7 @@ HAT's logic stays on the Pi's 3V3 so it powers up and down with the Pi (§3.7.5)
 ## P7. Supervisor
 
 **MCU: STM32G031K8T6** (Cortex-M0+, 64 KB, LQFP-32) on an always-on 3.3 V
-rail: a TPS7A1633-Q1 (60 V, ~5 µA Iq) fed by two BAT46WJ diodes from the
+rail: a TPS7A1633-Q1 (60 V, ~5 µA Iq) fed by two BAT46WS-AQ diodes from the
 protected input and from `+12V_BUS`, so it stays up through hold-up after the
 input is lost. 100 V diodes because one leg can sit at 0 V while the other sees
 the 38.9 V clamp.
@@ -559,7 +559,7 @@ pin — AN2606 "Pattern 11") and the hardware IWDG on (the bootloader refreshes
 it). During a reflash the 5 V stays on by the default-on rule, so the Pi cannot
 cut its own power by updating the supervisor.
 
-**Wake.** A **TCAN1043-Q1** on the CAN pass-through, TXD tied to VIO so it is
+**Wake.** A **TCAN1043H-Q1** on the CAN pass-through, TXD tied to VIO so it is
 **physically incapable of transmitting** (§13.3.5's receive-only rule, enforced
 by wiring). Its VCC comes from the buck, so while parked it sits in sleep; a
 bus wake-up pattern pulls RXD low (datasheet 8.4.6.1), which wakes the MCU.
@@ -686,7 +686,7 @@ Nothing on this board changes for rev 3.0.
 | 7 | Crank-dip window: longest dip the bank should ride before `~PWR_FAIL` | DIP vs HOLDUP timing |
 | 8 | Right-angle connector heights (Phoenix MC 1,5 G, Micro-Fit 43045 2 × 3 and 2 × 5, SWD) against the ~13 mm gap under the HAT | Edge placement |
 | 9 | Side-view LED and side-actuated button orientation on the footprints | They face the edge |
-| 10 | Part choices still open: the right-angle SWD header. The polyfuse is the Bourns MF-MSMF050/40X-2 on Bourns' land (2026-10-20, §P3). The 25 F cells are Eaton TVA1625-3R0256-R (2026-10-20, the cap bank's README); it and every cap-bank and lead part are in stock at DigiKey (operator, 2026-10-20), as is the HAT-out 43045-0600. So are MF-MSMF050/40X-2, RC0402FR-07100KL, EEE-FK1H470XP, SUD50P06-15-GE3, BZT52C15-7-F, 1N4148W-7-F, TPS7A1633QDGNRQ1 and the 744393465047 inductor (operator, 2026-10-20). On 2026-10-21 the operator found LM61460AASQRJRRQ1, RT0603BRD0710KL, LTC3350EUHF#PBF, STM32G031K8T6, the APA1606 LEDs and EVQ-P7A01P in stock, and five parts at zero: BAT46WJ,115 (D5, D6), INA226AQDGSRQ1 (U3), LM74700QDBVRQ1 (U4), TCAN1043DRQ1 (U7) and TCA4307DGKR (U8), whose replacements are open | BOM |
+| 10 | Part choices still open: the right-angle SWD header. The polyfuse is the Bourns MF-MSMF050/40X-2 on Bourns' land (2026-10-20, §P3). The 25 F cells are Eaton TVA1625-3R0256-R (2026-10-20, the cap bank's README); it and every cap-bank and lead part are in stock at DigiKey (operator, 2026-10-20), as is the HAT-out 43045-0600. So are MF-MSMF050/40X-2, RC0402FR-07100KL, EEE-FK1H470XP, SUD50P06-15-GE3, BZT52C15-7-F, 1N4148W-7-F, TPS7A1633QDGNRQ1 and the 744393465047 inductor (operator, 2026-10-20). On 2026-10-21 the operator found LM61460AASQRJRRQ1, RT0603BRD0710KL, LTC3350EUHF#PBF, STM32G031K8T6, the APA1606 LEDs and EVQ-P7A01P in stock, and six parts at zero. Five were replaced the same day by parts in stock on the same footprints ("Changes after routing"): BAT46WS-AQ for BAT46WJ,115 (D5, D6), INA226AIDGSR for INA226AQDGSRQ1 (U3), LM74700QDBVTQ1 for LM74700QDBVRQ1 (U4), TCAN1043HDQ1 for TCAN1043DRQ1 (U7) and TCA9511ADGKR for TCA4307DGKR (U8). **Open: CSD18543Q3A** (Q2–Q5, Q7), also at zero | BOM |
 | 11 | The cap-bank lead's resistance at bring-up | Calibrates the ESR readout |
 | 12 | The Vehicle-in plug's order number (KiCad's footprint confirms 1803293 for the header) and the HAT-out Micro-Fit's housing and crimps (43025-0600, 43030). The cap-bank lead's are settled in `hardware/tools/capbank_lead.py` | BOM |
 | 13 | Copper weight: TI recommends 2 oz outer layers for the LM61460. **Settled 2026-10-18 (operator): the outer layers stay 1 oz.** Every current path is a wide pour sized for 1 oz, and 0.15 mm signal clearance costs nothing extra at that weight | Fab order |
@@ -731,7 +731,7 @@ its datasheet land pattern, and two of five were wrong:
 |---|---|---|
 | LTC3350 | Ultra Librarian | Matches ADI's UHF land pattern (toe +0.1 mm, EP at max size). Pin-1 `*` drawn twice; deduplicated |
 | LM61460 | SnapMagic, with STEP | Matches TI RJR0014A exactly, incl. the L-shaped corner pins. The Ultra Librarian version landed only the foot of those L pads and was discarded |
-| TCA4307 | Ultra Librarian | Standard VSSOP-8. Pin-1 `*` drawn twice; deduplicated and moved beside pin 1 at 0.8 mm |
+| TCA4307 | Ultra Librarian | Standard VSSOP-8. Pin-1 `*` drawn twice; deduplicated and moved beside pin 1 at 0.8 mm. U8 is the pin-compatible TCA9511A since 2026-10-21 |
 | TPS7A1633A | Ultra Librarian (DGN0008C) | Exposed pad renumbered `EPAD` → `9` so it joins GND. Pin-1 `*` drawn twice, 0.6 mm outside the part, where it landed on the MCU's pin; deduplicated and moved beside pin 1 at 0.8 mm |
 | TPS1HB35 (since trimmed) | — | Both UL versions wrong (stencil-sized EP; thermal vias off the EP net) |
 
@@ -924,3 +924,16 @@ courtyards themselves collide, touching included, the same test as DRC's
   close beneath it to get past PI_3V3's via at (141.97, 50.74). PI_3V3 now stays
   on F.Cu to a via beside R37, at (147.33, 50.74). ~PWR_FAIL runs at y 51.3, and
   pin 25's two lower spokes reach the pour.
+- **Five out-of-stock parts replaced** (2026-10-21; DigiKey had none of the
+  originals). Each replacement keeps its footprint and pinout, so only the parts'
+  fields changed, and ERC, DRC and parity are as before:
+  - D5, D6: **Diotec BAT46WS-AQ** for the BAT46WJ,115. SOD-323F, 100 V repetitive
+    and 75 V DC at 125 °C (twice the 38.9 V clamp), 150 mA, AEC-Q101.
+  - U3: **INA226AIDGSR**, the INA226-Q1's industrial grade: the same die and pinout.
+  - U4: **LM74700QDBVTQ1**, the same part on a 250-piece reel.
+  - U7: **TCAN1043HDQ1**, the H variant in a tube: bus, VSUP, INH and WAKE rated
+    70 V instead of 58 V, the same 2 Mbps, otherwise the TCAN1043.
+  - U8: **TCA9511ADGKR**, the TCA4307 without its stuck-bus recovery. It keeps the
+    powered-off high-impedance pins §P6 depends on. What is lost: a supervisor
+    that holds SDA low now hangs I²C1, which the HAT shares, until the Pi resets
+    it through `PI_NRST`; the TCA4307 cut it loose after about 40 ms.

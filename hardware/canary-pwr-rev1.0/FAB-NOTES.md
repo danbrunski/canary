@@ -115,7 +115,7 @@ These parts fail silently: the board assembles, looks correct and works on the b
 | Ref | Part | Why |
 |---|---|---|
 | **D4** | Diodes Inc 1N4148W-7-F, PN switching diode | The LTC3350's bootstrap diode. **Must not be Schottky:** the datasheet warns that with a Schottky, BST–SW pumps past 5.5 V when the step-up runs non-synchronously |
-| **D5, D6** | Nexperia BAT46WJ,115, 100 V Schottky | Diode-OR into the always-on regulator. One leg can sit at 0 V while the other sees the input clamp's 38.9 V, so a 30 or 40 V Schottky fails at the first load dump |
+| **D5, D6** | Diotec BAT46WS-AQ, 100 V Schottky | Diode-OR into the always-on regulator. One leg can sit at 0 V while the other sees the input clamp's 38.9 V, so a 30 or 40 V Schottky fails at the first load dump |
 | **F1** | Bourns MF-MSMF050/40X-2, 40 V | Resettable fuse on the 12 V bus, which can reach 38.9 V. Lower-voltage 0.5 A 1812 fuses fit the same pads |
 | **R13** | Yageo RT0603BRD0710KL, 0.1 % thin film | Bias resistor for the cap bank's NTC. A 1 % part shifts the temperature reading |
 | **U2** | TI LM61460AASQRJRRQ1 | AAS is auto mode with spread spectrum. The AFS (forced PWM) and AAN (no spread spectrum) variants fit the same footprint |

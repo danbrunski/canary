@@ -594,7 +594,7 @@ def main(projdir):
         "            +12V_BUS -> LM61460 5.1 V -> INA226 shunt -> LM74700 ideal diode -> Pi header pins 2/4 (Power HAT+ style, no USB-C)\n"
         "            +12V_BUS -> TPS1HB35 -> HAT out terminal -> jumper to the HAT's J2\n"
         "Every switch defaults ON: a dead or resetting supervisor degrades to an always-on Pi, never a dark rig.\n"
-        "Supervisor <-> Pi: I2C1 through a Pi-powered TCA4307, GPIO6 = power fail (HIGH = OK), GPIO27 = MCU BOOT0, GPIO24 = MCU reset, Pi 3V3 sense.\n"
+        "Supervisor <-> Pi: I2C1 through a Pi-powered TCA9511A, GPIO6 = power fail (HIGH = OK), GPIO27 = MCU BOOT0, GPIO24 = MCU reset, Pi 3V3 sense.\n"
         "Nets are connected by labels on this first pass; global labels cross sheets."
     )
     body.append(text_note(notes, 20.32, 45.72, 1.524))

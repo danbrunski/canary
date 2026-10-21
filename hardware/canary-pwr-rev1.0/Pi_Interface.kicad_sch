@@ -3046,7 +3046,7 @@
 				)
 			)
 		)
-		(property "Value" "TCA4307DGKR"
+		(property "Value" "TCA9511ADGKR"
 			(at 110.995 73.74 0)
 			(show_name no)
 			(do_not_autoplace no)
@@ -3067,7 +3067,7 @@
 				)
 			)
 		)
-		(property "Datasheet" "https://www.ti.com/lit/ds/symlink/tca4307.pdf"
+		(property "Datasheet" "https://www.ti.com/lit/ds/symlink/tca9511a.pdf"
 			(at 109.22 55.88 0)
 			(hide yes)
 			(show_name no)
@@ -3089,7 +3089,7 @@
 				)
 			)
 		)
-		(property "MPN" "TCA4307DGKR"
+		(property "MPN" "TCA9511ADGKR"
 			(at 109.22 55.88 0)
 			(hide yes)
 			(show_name no)
@@ -3122,7 +3122,7 @@
 				)
 			)
 		)
-		(property "Note" "The footprint is TI's DGK (VSSOP-8) land pattern despite its SOIC8 name. Powered-off high-impedance I/O (datasheet p.1): the always-on board can never load or back-feed the Pi's I2C1 while the Pi is dark (spec P6). Pi side uses the Pi's own 1.8k pull-ups."
+		(property "Note" "The footprint is TI's DGK (VSSOP-8) land pattern despite its SOIC8 name. Powered-off high-impedance I/O (datasheet p.1): the always-on board can never load or back-feed the Pi's I2C1 while the Pi is dark (spec P6). Pi side uses the Pi's own 1.8k pull-ups. The TCA4307's pinout without its stuck-bus recovery: a supervisor holding SDA low is cleared by resetting it (PI_NRST)."
 			(at 109.22 55.88 0)
 			(hide yes)
 			(show_name no)
