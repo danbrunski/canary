@@ -129,7 +129,8 @@ sides:
   Cooler brief gives a 63.5 × 42.5 × 13.7 mm cooler with a 30 × 30 mm fan block
   at one end but not its position on the Pi; the board carries a B.Cu rule area
   at x 136.5–162.5, y 53–79 (the USB end, header side, where the fan cable
-  reaches the FAN header) **marked as an assumption to verify** (§P10).
+  reaches the FAN header). The position is an assumption, **accepted without
+  measuring** (operator, 2026-10-21, §P10 #1).
 
 **Heat.** The 5 V buck dissipates ~2 W at full load; keep it and the LTC3350
 FETs away from the cap-bank connector and the HAT's barometer/IMU above.
@@ -676,7 +677,7 @@ Nothing on this board changes for rev 3.0.
 
 | # | What | Decides |
 |---|---|---|
-| 1 | Fan-inlet position on the Pi 5 (centre and diameter relative to a mounting hole) | The B.Cu keep-out, now an assumption (§P2) |
+| 1 | Fan-inlet position on the Pi 5 (centre and diameter relative to a mounting hole). **Closed 2026-10-21 (operator): the assumed position is accepted, unmeasured.** Bottom-side parts sit 0.15–0.25 mm outside the keep-out on three sides (U6 and D5 west, R37 north, C42 and C43 south), so an inlet off the assumed spot would put their edges over it. Every part clears a circle of 13.2 mm radius about the assumed centre, which is 12.0 mm from MH2 toward the SD-card end and 18.5 mm from it away from the header | The B.Cu keep-out (§P2) |
 | 2 | Crank dip profile at OBD pin 16 (§13.1 measurement 16) | Bank size; whether 8.95 V PFI is right |
 | 3 | Shutdown time and peak power on NVMe, `~PWR_FAIL` to Pi 3V3 down | The ≥ 15 s / ≤ 10 W budget |
 | 4 | Pi 5 V current through cranks on real drives (INA226) | Whether the LTC4041 would do (§P4) |
@@ -685,7 +686,7 @@ Nothing on this board changes for rev 3.0.
 | 7 | Crank-dip window: longest dip the bank should ride before `~PWR_FAIL` | DIP vs HOLDUP timing |
 | 8 | Right-angle connector heights (Phoenix MC 1,5 G, Micro-Fit 43045 2 × 3 and 2 × 5, SWD) against the ~13 mm gap under the HAT | Edge placement |
 | 9 | Side-view LED and side-actuated button orientation on the footprints | They face the edge |
-| 10 | Part choices still open: the right-angle SWD header. The polyfuse is the Bourns MF-MSMF050/40X-2 on Bourns' land (2026-10-20, §P3). The 25 F cells are Eaton TVA1625-3R0256-R (2026-10-20, the cap bank's README); it and every cap-bank and lead part are in stock at DigiKey (operator, 2026-10-20), as is the HAT-out 43045-0600. So are MF-MSMF050/40X-2, RC0402FR-07100KL, EEE-FK1H470XP, SUD50P06-15-GE3, BZT52C15-7-F, 1N4148W-7-F, TPS7A1633QDGNRQ1 and the 744393465047 inductor (operator, 2026-10-20) | BOM |
+| 10 | Part choices still open: the right-angle SWD header. The polyfuse is the Bourns MF-MSMF050/40X-2 on Bourns' land (2026-10-20, §P3). The 25 F cells are Eaton TVA1625-3R0256-R (2026-10-20, the cap bank's README); it and every cap-bank and lead part are in stock at DigiKey (operator, 2026-10-20), as is the HAT-out 43045-0600. So are MF-MSMF050/40X-2, RC0402FR-07100KL, EEE-FK1H470XP, SUD50P06-15-GE3, BZT52C15-7-F, 1N4148W-7-F, TPS7A1633QDGNRQ1 and the 744393465047 inductor (operator, 2026-10-20). On 2026-10-21 the operator found LM61460AASQRJRRQ1, RT0603BRD0710KL, LTC3350EUHF#PBF, STM32G031K8T6, the APA1606 LEDs and EVQ-P7A01P in stock, and five parts at zero: BAT46WJ,115 (D5, D6), INA226AQDGSRQ1 (U3), LM74700QDBVRQ1 (U4), TCAN1043DRQ1 (U7) and TCA4307DGKR (U8), whose replacements are open | BOM |
 | 11 | The cap-bank lead's resistance at bring-up | Calibrates the ESR readout |
 | 12 | The Vehicle-in plug's order number (KiCad's footprint confirms 1803293 for the header) and the HAT-out Micro-Fit's housing and crimps (43025-0600, 43030). The cap-bank lead's are settled in `hardware/tools/capbank_lead.py` | BOM |
 | 13 | Copper weight: TI recommends 2 oz outer layers for the LM61460. **Settled 2026-10-18 (operator): the outer layers stay 1 oz.** Every current path is a wide pour sized for 1 oz, and 0.15 mm signal clearance costs nothing extra at that weight | Fab order |

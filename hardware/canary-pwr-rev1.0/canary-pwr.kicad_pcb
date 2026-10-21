@@ -35797,7 +35797,7 @@
 			(justify mirror)
 		)
 	)
-	(gr_text "Fan inlet keep-out on B.Cu: position ASSUMED from the Active Cooler brief, verify"
+	(gr_text "Fan inlet keep-out on B.Cu: position assumed from the Active Cooler brief, accepted 2026-10-21"
 		(at 101 43 0)
 		(layer "Dwgs.User")
 		(uuid "fe930cab-4169-456d-b0ed-f98bd20864f7")
@@ -56523,7 +56523,7 @@
 	(zone
 		(layer "B.Cu")
 		(uuid "bbadcf50-5d5c-45a6-aba4-9c20355165b3")
-		(name "Fan inlet keep-out (ASSUMED position - verify on the Pi)")
+		(name "Fan inlet keep-out (assumed position, accepted 2026-10-21)")
 		(hatch edge 0.5)
 		(connect_pads
 			(clearance 0)

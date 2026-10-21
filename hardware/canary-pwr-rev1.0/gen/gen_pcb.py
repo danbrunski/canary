@@ -76,11 +76,12 @@ edge("arc", (X0 + R, Y1), (X0 + k, Y1 - k), (X0, Y1 - R))
 edge("seg", (X0, Y1 - R), (X0, Y0 + R))
 edge("arc", (X0, Y0 + R), (X0 + k, Y0 + k), (X0 + R, Y0))
 
-# Active Cooler fan inlet, ASSUMED position: 30 x 30 fan block at the USB end, header side (product brief p.5).
+# Active Cooler fan inlet: 30 x 30 fan block at the USB end, header side (product brief p.5).
+# The position is assumed, and accepted without measuring (operator, 2026-10-21).
 FAN = (136.5, 53.0, 162.5, 79.0)
 ra = pcbnew.ZONE(b)
 ra.SetIsRuleArea(True)
-ra.SetZoneName("Fan inlet keep-out (ASSUMED position - verify on the Pi)")
+ra.SetZoneName("Fan inlet keep-out (assumed position, accepted 2026-10-21)")
 ra.SetLayer(pcbnew.B_Cu)
 o = ra.Outline()
 o.NewOutline()
@@ -94,7 +95,7 @@ ra.SetDoNotAllowPads(True)
 b.Add(ra)
 for txt, x, y, layer, size in [
     (
-        "Fan inlet keep-out on B.Cu: position ASSUMED from the Active Cooler brief, verify",
+        "Fan inlet keep-out on B.Cu: position assumed from the Active Cooler brief, accepted 2026-10-21",
         101.0,
         43.0,
         pcbnew.Dwgs_User,
