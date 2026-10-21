@@ -41,6 +41,8 @@ prepreg / 0.035 mm.
 - **The narrowest dam is 0.14 mm,** between gate and source on Q2–Q5 and Q7. If that is below
   your minimum, tell us before the dams are ganged.
 - **Fiducials:** 1 mm copper, 2 mm mask opening.
+- **Green mask.** U3's pads are 0.200 mm apart and U6's and U8's 0.218 mm. Green keeps a dam at
+  those gaps; white, black and the matte colours need at least 0.22 mm.
 
 ## Fiducials
 
@@ -68,6 +70,11 @@ They are board-only footprints, excluded from the BOM. MH1–MH4 are mounting ho
   electrolytics (6.3 × 7.7 mm) and Q1 (DPAK).
 - **The electrolytics are EEE-FK1H470XP,** the 6.3 × 7.7 mm can. EEE-FK1H470P, without the X, is
   the same value in an 8 × 6.2 mm can and does not fit the pads.
+
+**Rails.** SW1 sits at the left edge and D7 and D8 at the bottom edge (seen from the top), so
+the board needs break-away rails for assembly. Please tab-route them, not V-score: copper comes
+within 0.30 mm of the edge. Keep the tabs clear of SW1, D7 and D8, and of J2–J5, which are
+fitted at the left and bottom edges after assembly. The right edge has nothing near it.
 
 **No through-hole assembly.** J1–J5 are the board's only through-hole parts, and none is fitted
 at the assembler (below). None of them is in the BOM or the position file. No wave or selective
@@ -154,7 +161,8 @@ through-hole soldering. U5 (STM32) is supplied blank: no programming. Do not sub
 diode, not Schottky), D5/D6 (100 V Schottky), F1 (40 V PTC), R13 (0.1% thin film), U2 (LM61460
 AAS, footprint named AFS) or U6 (TPS7A1633Q, not the A variant its footprint is named after). Do
 not down-rate capacitor voltages. Every IC footprint has pin 1 top-left at 0 deg; please query
-anything inconsistent. ENIG preferred. Full notes in FAB-NOTES.md.
+anything inconsistent. No-clean paste, no washing (SW1). Rails: tab-route, no V-score. Full notes
+in FAB-NOTES.md.
 ```
 
 ## Files
