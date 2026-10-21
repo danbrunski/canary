@@ -3675,7 +3675,7 @@
 		)
 		(uuid "8037c9d9-1ca9-4d3e-a9c1-2f7d692d103a")
 	)
-	(label "BANK_TAP1"
+	(label "LTC_CAP1"
 		(at 36.83 228.6 0)
 		(effects
 			(font
@@ -3685,7 +3685,7 @@
 		)
 		(uuid "9b1e0af9-eaed-4b17-b352-7773ec8ae08c")
 	)
-	(label "BANK_TAP1"
+	(label "LTC_CAP1"
 		(at 64.77 228.6 180)
 		(effects
 			(font
@@ -3695,7 +3695,7 @@
 		)
 		(uuid "514c2741-dd9c-42f6-a727-e92cc8075a56")
 	)
-	(label "BANK_TAP2"
+	(label "LTC_CAP2"
 		(at 72.39 228.6 0)
 		(effects
 			(font
@@ -3705,7 +3705,7 @@
 		)
 		(uuid "4fd4ad23-87bf-4c1d-9952-6c0ca53162fa")
 	)
-	(label "BANK_TAP2"
+	(label "LTC_CAP2"
 		(at 100.33 228.6 180)
 		(effects
 			(font
@@ -3715,7 +3715,7 @@
 		)
 		(uuid "54248a3a-4fbb-4b13-a482-14eebe2f4426")
 	)
-	(label "BANK_TAP3"
+	(label "LTC_CAP3"
 		(at 107.95 228.6 0)
 		(effects
 			(font
@@ -5939,7 +5939,7 @@
 		(in_bom yes)
 		(on_board yes)
 		(in_pos_files yes)
-		(dnp no)
+		(dnp yes)
 		(uuid "579330d8-cfb1-4b62-a1a8-247ca0d7788d")
 		(property "Reference" "J4"
 			(at 39.37 182.32 0)
@@ -6016,7 +6016,7 @@
 				)
 			)
 		)
-		(property "Note" "Spec said 7-way; 10-way adds Kelvin sense for the stack top/bottom (CAP4/CAPRTN measure across the lead otherwise) and doubles the power pins. Bank board: 4 x 25 F cells, NTC from pin 10 to stack minus."
+		(property "Note" "Spec said 7-way; 10-way adds Kelvin sense for the stack top/bottom (CAP4/CAPRTN measure across the lead otherwise) and doubles the power pins. Bank board: 4 x 25 F cells, NTC from pin 10 to stack minus. DNP: through-hole, fitted by the operator (2026-10-20)."
 			(at 38.1 190.5 0)
 			(hide yes)
 			(show_name no)
@@ -10656,7 +10656,7 @@
 				)
 			)
 		)
-		(property "Note" "Tap ladder R43-R47 (2026-10-20): with the bank unplugged the CAP pins would float, and neighbouring CAP pins are rated -0.3 to 5.5 V. Four 100k across the taps and 100k from CAPRTN to GND hold every CAP pin at 0 V, so an absent bank reads as empty cells; with the bank in, the ladder draws 25 uA, the same from every cell. Each rung lands on whichever side of its 2.7R ballast is nearer on the board."
+		(property "Note" "Tap ladder R43-R47 (2026-10-20): with the bank unplugged the CAP pins would float, and neighbouring CAP pins are rated -0.3 to 5.5 V. Four 100k across the taps and 100k from CAPRTN to GND hold every CAP pin at 0 V, so an absent bank reads as empty cells; with the bank in, the ladder draws 25 uA, the same from every cell. Every rung is on the LTC side of the 2.7R ballasts, so a bridged rung shorts a cell through two ballasts (0.46 A) rather than straight through the lead, and no rung sits beside J4's hand-soldered pins."
 			(at 33.02 228.6 0)
 			(hide yes)
 			(show_name no)

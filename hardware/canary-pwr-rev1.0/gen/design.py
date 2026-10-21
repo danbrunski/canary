@@ -196,7 +196,8 @@ part(
     mpn="1803293",
     mfr="Phoenix Contact",
     desc="MC 1,5/4-G-3,81 pluggable header; mating plug MC 1,5/4-ST-3,81 (1803594)",
-    note="OBD 16 = +12V_RAW, OBD 4 = GND, OBD 6/14 = CANH/CANL, all 20 AWG (operator 2026-10-14). Spec P3. Verify Phoenix order numbers before ordering.",
+    note="OBD 16 = +12V_RAW, OBD 4 = GND, OBD 6/14 = CANH/CANL, all 20 AWG (operator 2026-10-14). Spec P3. Verify Phoenix order numbers before ordering. DNP: through-hole, so the operator fits it after the fab's SMD assembly (2026-10-20), as for J1 and J3-J5.",
+    dnp=True,
 )
 part(
     S,
@@ -275,7 +276,8 @@ part(
     mpn="43045-0600",
     mfr="Molex",
     desc="Micro-Fit 3.0 2x3 right-angle header; mating 43025-0600 + 43030 crimps (18-24 AWG)",
-    note="Changed 2026-10-13 from a 5-way Phoenix MC (21.6 mm) to save ~7 mm of edge: latching, keyed, and the same family and crimp tool as the cap-bank connector. Molex numbering, 1-3 on one row, 4-6 on the other: CANH (3) and CANL (6) share a column; 12 V (1) sits beside GND (2). Jumper to rev 2.1 J2: +12V_HAT -> pin 1 (+12V_RAW), GND -> pin 2, CANH/CANL -> the HAT's CAN pair; Pin 4 unused; GNSS backup removed 2026-10-18.",
+    note="Changed 2026-10-13 from a 5-way Phoenix MC (21.6 mm) to save ~7 mm of edge: latching, keyed, and the same family and crimp tool as the cap-bank connector. Molex numbering, 1-3 on one row, 4-6 on the other: CANH (3) and CANL (6) share a column; 12 V (1) sits beside GND (2). Jumper to rev 2.1 J2: +12V_HAT -> pin 1 (+12V_RAW), GND -> pin 2, CANH/CANL -> the HAT's CAN pair; Pin 4 unused; GNSS backup removed 2026-10-18. DNP: through-hole, fitted by the operator (2026-10-20).",
+    dnp=True,
 )
 
 g = "Battery sense"
@@ -497,19 +499,19 @@ R(
     g,
     "100k",
     "LTC_CAPRTN",
-    "BANK_TAP1",
+    "LTC_CAP1",
     size="0402",
     mpn="RC0402FR-07100KL",
     mfr="Yageo",
     ref="R43",
-    note="Tap ladder R43-R47 (2026-10-20): with the bank unplugged the CAP pins would float, and neighbouring CAP pins are rated -0.3 to 5.5 V. Four 100k across the taps and 100k from CAPRTN to GND hold every CAP pin at 0 V, so an absent bank reads as empty cells; with the bank in, the ladder draws 25 uA, the same from every cell. Each rung lands on whichever side of its 2.7R ballast is nearer on the board.",
+    note="Tap ladder R43-R47 (2026-10-20): with the bank unplugged the CAP pins would float, and neighbouring CAP pins are rated -0.3 to 5.5 V. Four 100k across the taps and 100k from CAPRTN to GND hold every CAP pin at 0 V, so an absent bank reads as empty cells; with the bank in, the ladder draws 25 uA, the same from every cell. Every rung is on the LTC side of the 2.7R ballasts, so a bridged rung shorts a cell through two ballasts (0.46 A) rather than straight through the lead, and no rung sits beside J4's hand-soldered pins.",
 )
 R(
     S,
     g,
     "100k",
-    "BANK_TAP1",
-    "BANK_TAP2",
+    "LTC_CAP1",
+    "LTC_CAP2",
     size="0402",
     mpn="RC0402FR-07100KL",
     mfr="Yageo",
@@ -519,8 +521,8 @@ R(
     S,
     g,
     "100k",
-    "BANK_TAP2",
-    "BANK_TAP3",
+    "LTC_CAP2",
+    "LTC_CAP3",
     size="0402",
     mpn="RC0402FR-07100KL",
     mfr="Yageo",
@@ -538,7 +540,8 @@ part(
     mpn=capbank_lead.HEADER["mpn"],
     mfr=capbank_lead.HEADER["mfr"],
     desc="Micro-Fit 3.0 2x5 right-angle header, 0.76 um gold; mating 172952-1001 TPA housing + 43030-0009 gold crimps",
-    note="Spec said 7-way; 10-way adds Kelvin sense for the stack top/bottom (CAP4/CAPRTN measure across the lead otherwise) and doubles the power pins. Bank board: 4 x 25 F cells, NTC from pin 10 to stack minus.",
+    note="Spec said 7-way; 10-way adds Kelvin sense for the stack top/bottom (CAP4/CAPRTN measure across the lead otherwise) and doubles the power pins. Bank board: 4 x 25 F cells, NTC from pin 10 to stack minus. DNP: through-hole, fitted by the operator (2026-10-20).",
+    dnp=True,
 )
 
 S = "Pi_Supply"
@@ -885,7 +888,8 @@ part(
     mpn="",
     mfr="",
     desc="Cortex 10-pin SWD, right-angle on the board edge, bench only (MPN to choose)",
-    note="Edge-mounted so a probe reaches it from the side of the stack. Field reflash goes over I2C instead.",
+    note="Edge-mounted so a probe reaches it from the side of the stack. Field reflash goes over I2C instead. DNP: through-hole, fitted by the operator (2026-10-20).",
+    dnp=True,
 )
 
 # ---------------------------------------------------------------- Pi_Interface

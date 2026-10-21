@@ -410,11 +410,13 @@ two boards over a Pi, and placed where the enclosure wants them.
   event. The bench button held, or an I²C command, starts it; the red LED shows
   the bank is live.
 - **Tap ladder: the cell pins never float** (2026-10-20). Four 100 kΩ across
-  the taps and 100 kΩ from CAPRTN to GND (R43–R47), each rung on whichever side
-  of its 2.7 Ω ballast is nearer on the board. With the bank unplugged every
-  CAP pin sits at 0 V. The datasheet allows −0.3 to 5.5 V between neighbouring
-  CAP pins and has unused ones tied, never floating. With the bank in, the
-  ladder draws 25 µA from every cell alike, so it does not unbalance them.
+  the taps and 100 kΩ from CAPRTN to GND (R43–R47), every rung on the LTC side
+  of the 2.7 Ω ballasts. A bridged rung then shorts its cell through two
+  ballasts (0.46 A at 2.5 V, 0.58 W in each) rather than straight through the
+  lead. With the bank unplugged every CAP pin sits at 0 V. The datasheet
+  allows −0.3 to 5.5 V between neighbouring CAP pins and has unused ones tied,
+  never floating. With the bank in, the ladder draws 25 µA from every cell
+  alike, so it does not unbalance them.
   **Plugging in a charged bank needs PWR powered, or the bank discharged
   first:** the Micro-Fit has no mating order, and into an unpowered PWR the
   half-mated states reach −3.75 V between CAP pins (100 kΩ-limited).
@@ -511,7 +513,8 @@ answers at 0x56 on the same pins (§P7).
 
 **Edge connectors:** *Vehicle in* (Phoenix MC), *HAT out* (Micro-Fit 2 × 3)
 (§P3), cap bank (Micro-Fit 2 × 5, §P4), SWD (Cortex 10-pin, right-angle, bench
-only).
+only). All four are through-hole and, like J1, do-not-populate at the fab: the
+operator fits them after the SMD assembly (2026-10-20).
 
 **Rule: no 3.3 V or 5 V logic rail goes to the HAT except through the Pi.** The
 HAT's logic stays on the Pi's 3V3 so it powers up and down with the Pi (§3.7.5).
@@ -835,11 +838,16 @@ pads, no In1 tracks.
 
 ## Changes after routing, 2026-10-20
 
-Two changes the operator approved before PWR goes to fab, made on the routed board.
-Neither left anything new: DRC is as before (the R42/R35 silk overlap and J1's two
-starved thermals), parity 0, ERC clean, 0 unconnected, no vias in pads, no In1
-tracks. `review_placement.sh` reports only the three top-side courtyard overlaps
-that predate this (C24/C29, L1/C7 and U1/C7, from C7's move).
+Changes the operator approved before PWR goes to fab, made on the routed board.
+After them DRC's only errors are J1's two starved thermals (the R42/R35 silk
+overlap is gone too), parity 0, ERC clean, 0 unconnected, no vias in pads, no In1
+tracks, and `review_placement.sh` reports no problems. The three top-side
+courtyard overlaps it used to report (C24/C29, L1/C7 and U1/C7) never existed. It
+compared boxes round the courtyards, and KiCad's box adds the courtyard line's
+width (0.05 mm on those parts) on every side, while U1's courtyard steps in at
+the corner where C7 sits. `kicad_placement.py` now asks KiCad whether the
+courtyards themselves collide, touching included, the same test as DRC's
+`courtyards_overlap`.
 
 - **F1 is the Bourns MF-MSMF050/40X-2 on Bourns' land** (§P3), a footprint of the
   board's own (`lib/footprints.pretty/Fuse_1812_Bourns_MF-MSMF`): 1.68 × 2.95 mm
@@ -847,14 +855,26 @@ that predate this (C24/C29, L1/C7 and U1/C7, from C7's move).
   gap it lay in between the BG via and U7 is 5.8 mm, so F1 now stands vertical at
   (133.3, 82.6) with pad 1 (+12V_BUS) up in the bus band. The band's leg down to
   the old pad 1 is gone. CAN_RXD's via moves 1.7 mm west, out from under pad 2,
-  and runs that 1.7 mm on F.Cu. C20's GND via moves to (135.6, 83.2).
-- **The tap ladder R43–R47** (§P4) went in on B.Cu where the copper allowed.
-  The far-side pin margin `review_placement.sh` keeps round J4's pins leaves
-  1.025 mm beside them, and a standing 0402's courtyard is 1.03 mm. So R43–R45
-  are 0402s lying flat in the gaps of J4's right column: R43 joins CAPRTN to
-  TAP1 between pins 10 and 9, R44 TAP1 to TAP2 between 9 and 8, and R45 TAP2 to
-  TAP3 between 8 and 7. CAPRTN steps up 0.28 mm to y 76.05 to pass R43's TAP1 pad,
-  and OUTFET's via drops from (112.7, 79.45) to (113.47, 80.55), under R44. R46
-  (CAP3 to CAP4, 0402) stands on the CAP4 track right of R20 and drops to the
-  CAP3 track. R47 (CAPRTN to GND, 0603) lies left of pin 3, its GND pad in the
-  B.Cu pour. These four 0402s are the board's only parts smaller than 0603.
+  and runs that 1.7 mm on F.Cu. C20's GND via moves to (135.6, 83.2), and the
+  F.Cu stub that led to its old place is gone.
+- **The tap ladder R43–R47** (§P4): every rung on the LTC side of the 2.7 Ω
+  ballasts and at least 3.1 mm from any through-hole pin. R43 (CAPRTN to CAP1,
+  0402) stands on B.Cu under U1's corner, a short track from each of the CAPRTN
+  and CAP1 vias. R44 (CAP1 to CAP2, 0402) stands on F.Cu on CAP2's diagonal, its
+  CAP1 end on a new via down to CAP1's In2 track. R45 (CAP2 to CAP3, 0402) stands
+  on B.Cu right of R20 and R17, between the CAP3 and CAP2 tracks. R46 (CAP3 to
+  CAP4, 0402) stands on the CAP4 track right of R20 and drops to the CAP3 track.
+  R47 (CAPRTN to GND, 0603) lies at the corner of CAPRTN's B.Cu track above R20,
+  its GND pad in the pour. These four 0402s are the board's only parts smaller
+  than 0603. The first placement, the same day, put R43–R45 flat in the gaps of
+  J4's right column on the bank side of the ballasts, 0.48 mm from pins soldered
+  by hand, where a bridged rung shorted a cell straight through the lead, and
+  R47 left of J4's pin 3. CAPRTN's 0.28 mm step to y 76.05 and OUTFET's via at
+  (113.47, 80.55), made for that placement, stay; neither is in anything's way.
+- **J2–J5 are do-not-populate** (operator, 2026-10-20), like J1: the operator
+  fits every through-hole part after the fab's SMD assembly. The SMD pads
+  nearest the hand-soldered pins are R3 0.92 mm and R4 1.09 mm from J5 (whose own
+  pins are 0.27 mm apart), F1 0.98 mm from J3's unconnected pin 4, Q5 1.34 mm and
+  the ballasts 1.54 mm from J4, U7 1.61 mm from J2, and C26 1.93 mm from J1.
+- **R42's and R35's designators** moved apart, to (120.55, 52.0) and
+  (117.77, 52.0).

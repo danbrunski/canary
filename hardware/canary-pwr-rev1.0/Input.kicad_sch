@@ -3388,7 +3388,7 @@
 		(in_bom yes)
 		(on_board yes)
 		(in_pos_files yes)
-		(dnp no)
+		(dnp yes)
 		(uuid "6670d9b1-b66b-4ce5-b233-4472fe993ca2")
 		(property "Reference" "J2"
 			(at 28.955 37.54 0)
@@ -3465,7 +3465,7 @@
 				)
 			)
 		)
-		(property "Note" "OBD 16 = +12V_RAW, OBD 4 = GND, OBD 6/14 = CANH/CANL, all 20 AWG (operator 2026-10-14). Spec P3. Verify Phoenix order numbers before ordering."
+		(property "Note" "OBD 16 = +12V_RAW, OBD 4 = GND, OBD 6/14 = CANH/CANL, all 20 AWG (operator 2026-10-14). Spec P3. Verify Phoenix order numbers before ordering. DNP: through-hole, so the operator fits it after the fab's SMD assembly (2026-10-20), as for J1 and J3-J5."
 			(at 35.56 43.18 0)
 			(hide yes)
 			(show_name no)
@@ -4040,7 +4040,7 @@
 		(in_bom yes)
 		(on_board yes)
 		(in_pos_files yes)
-		(dnp no)
+		(dnp yes)
 		(uuid "a60a7784-930f-4ee0-a3a7-95457b8d57c0")
 		(property "Reference" "J3"
 			(at 177.58 37.54 0)
@@ -4117,7 +4117,7 @@
 				)
 			)
 		)
-		(property "Note" "Changed 2026-10-13 from a 5-way Phoenix MC (21.6 mm) to save ~7 mm of edge: latching, keyed, and the same family and crimp tool as the cap-bank connector. Molex numbering, 1-3 on one row, 4-6 on the other: CANH (3) and CANL (6) share a column; 12 V (1) sits beside GND (2). Jumper to rev 2.1 J2: +12V_HAT -> pin 1 (+12V_RAW), GND -> pin 2, CANH/CANL -> the HAT's CAN pair; Pin 4 is unused; GNSS backup removed 2026-10-18."
+		(property "Note" "Changed 2026-10-13 from a 5-way Phoenix MC (21.6 mm) to save ~7 mm of edge: latching, keyed, and the same family and crimp tool as the cap-bank connector. Molex numbering, 1-3 on one row, 4-6 on the other: CANH (3) and CANL (6) share a column; 12 V (1) sits beside GND (2). Jumper to rev 2.1 J2: +12V_HAT -> pin 1 (+12V_RAW), GND -> pin 2, CANH/CANL -> the HAT's CAN pair; Pin 4 unused; GNSS backup removed 2026-10-18. DNP: through-hole, fitted by the operator (2026-10-20)."
 			(at 175.26 43.18 0)
 			(hide yes)
 			(show_name no)

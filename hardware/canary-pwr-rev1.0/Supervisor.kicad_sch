@@ -6210,7 +6210,7 @@
 		(in_bom yes)
 		(on_board yes)
 		(in_pos_files yes)
-		(dnp no)
+		(dnp yes)
 		(uuid "94349b92-4a93-46e4-86ec-07a715ba83de")
 		(property "Reference" "J5"
 			(at 266.875 150.1 0)
@@ -6265,7 +6265,7 @@
 				)
 			)
 		)
-		(property "Note" "Edge-mounted so a probe reaches it from the side of the stack. Field reflash goes over I2C instead."
+		(property "Note" "Edge-mounted so a probe reaches it from the side of the stack. Field reflash goes over I2C instead. DNP: through-hole, fitted by the operator (2026-10-20)."
 			(at 259.08 180.34 0)
 			(hide yes)
 			(show_name no)

@@ -109,7 +109,7 @@ PLACEMENT: dict[str, tuple[float, float, int, str]] = {
     "R34": (117.0, 54.4, 90, "B"),
     "R35": (118.6, 54.4, 90, "B"),
     "R36": (120.2, 54.4, 90, "B"),
-    "R42": (121.8, 54.4, 90, "B"),
+    "R42": (121.8, 54.4, -90, "B"),  # turned end for end in the operator's hand routing (c2020a48)
     "R38": (123.4, 54.4, 90, "B"),
     "R39": (125.0, 54.4, 90, "B"),
     "R40": (126.6, 54.4, 90, "B"),
@@ -153,15 +153,16 @@ PLACEMENT: dict[str, tuple[float, float, int, str]] = {
     "R18": (118.3, 82.8, 180, "B"),
     "R19": (118.3, 87.2, 180, "B"),
     "R16": (118.3, 91.6, 180, "B"),
-    # Bottom: the tap ladder, added after routing on what copper there was. R43-R45 lie flat in the gaps of the
-    # cap-bank pins' right column: beside the pins, the far-side pin margin leaves 1.025 mm, and a standing
-    # 0402's courtyard is 1.03 mm. R46 sits on the CAP3/CAP4 tracks right of R20; R47 ties CAPRTN to GND left
-    # of the pins.
-    "R43": (113.46, 76.7, 0, "B"),
-    "R44": (113.46, 79.7, 180, "B"),
-    "R45": (113.46, 82.7, 180, "B"),
+    # The tap ladder, added after routing on what copper there was, every rung on the LTC side of the ballasts
+    # and clear of J4's hand-soldered pins (moved 2026-10-20 from the gaps of its right column, 0.48 mm off
+    # the pins). R43 bridges the CAPRTN and CAP1 vias under U1's corner; R44 stands on top on CAP2's diagonal,
+    # its CAP1 end on a via dropped to CAP1's In2 track; R45 bridges CAP3 and CAP2 right of R20/R17; R46 sits
+    # on the CAP3/CAP4 tracks right of R20; R47 ties CAPRTN to GND at the corner of its track above R20.
+    "R43": (124.35, 69.8, -90, "B"),
+    "R44": (120.15, 72.15, 90, "F"),
+    "R45": (122.6, 76.3, 90, "B"),
     "R46": (122.68, 72.6, 90, "B"),
-    "R47": (106.9, 81.2, 180, "B"),
+    "R47": (115.0, 71.15, 180, "B"),
 }
 
 # Bottom-silk board label: inside the fan-inlet keep-out, which bars parts but not silk.
