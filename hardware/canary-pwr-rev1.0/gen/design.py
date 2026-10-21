@@ -822,7 +822,7 @@ part(
     S,
     g,
     "canary-pwr:TPS7A1633-Q1",
-    "TPS7A1633AQDGNRQ1",
+    "TPS7A1633QDGNRQ1",
     {
         "8": "AON_IN",
         "5": "AON_IN",
@@ -835,12 +835,12 @@ part(
         "9": "GND",
     },
     fp="canary-pwr:DGN0008C_TPS7A1633AQDGNRQ1_TEX",
-    mpn="TPS7A1633AQDGNRQ1",
+    mpn="TPS7A1633QDGNRQ1",
     mfr="Texas Instruments",
-    ds="https://www.ti.com/lit/ds/symlink/tps7a16a-q1.pdf",
+    ds="https://www.ti.com/lit/ds/symlink/tps7a16-q1.pdf",
     desc="60V 5uA-Iq LDO, 3.3V fixed",
     pkg="HVSSOP-8 (DGN)",
-    note="The always-on regulator sets the parked current (spec P7), not the MCU. FB/NC tied to GND as on the HAT's U9.",
+    note="DO NOT SUBSTITUTE the A variant, TPS7A1633AQDGNRQ1: pin 2 is tied to GND, which this part's datasheet allows (SBVS188E) and the A part's forbids (SBVS342A). The footprint is named after the A part, which shares the land pattern; the MPN is right. The always-on regulator sets the parked current (spec P7), not the MCU. FB/NC tied to GND as on the HAT's U9.",
 )
 C(S, g, "1u", "AON_IN", "GND", size="0805")
 C(S, g, "4.7u", "+3V3_AON", "GND", volt="25V", size="0805")

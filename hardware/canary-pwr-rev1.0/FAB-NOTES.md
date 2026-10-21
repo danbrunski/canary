@@ -98,9 +98,11 @@ at the assembler (below). No wave or selective soldering is needed.
 
 - **U2:** the footprint is named after TI's LM61460**AFS**. The BOM's LM61460**AAS** is the
   intended part, and the two share a land pattern.
+- **U6:** the footprint is named after TI's TPS7A1633**A**QDGNRQ1. The BOM's TPS7A1633QDGNRQ1,
+  without the A, is the intended part, and the two share a land pattern.
 - **U8:** the footprint `SOIC8_DGK_TEX` is TI's DGK (VSSOP-8) land pattern.
 
-Please do not change either MPN to match its footprint name.
+Please do not change any of these MPNs to match its footprint name.
 
 **Cleaning.** Please use no-clean paste and do not wash the board. SW1 is a tactile switch, and
 nothing else here needs washing.
@@ -116,6 +118,7 @@ These parts fail silently: the board assembles, looks correct and works on the b
 | **F1** | Bourns MF-MSMF050/40X-2, 40 V | Resettable fuse on the 12 V bus, which can reach 38.9 V. Lower-voltage 0.5 A 1812 fuses fit the same pads |
 | **R13** | Yageo RT0603BRD0710KL, 0.1 % thin film | Bias resistor for the cap bank's NTC. A 1 % part shifts the temperature reading |
 | **U2** | TI LM61460AASQRJRRQ1 | AAS is auto mode with spread spectrum. The AFS (forced PWM) and AAN (no spread spectrum) variants fit the same footprint |
+| **U6** | TI TPS7A1633QDGNRQ1 | The always-on 3.3 V regulator. Its pin 2 is tied to GND, which this part allows. The A variant, TPS7A1633AQDGNRQ1, fits the same footprint, and its datasheet forbids it |
 
 If any of these is unavailable, please contact us before substituting.
 
@@ -139,10 +142,10 @@ For the assembly-notes box on the order form (under 600 characters):
 ```text
 Double-sided SMD: 72 parts top, 45 bottom. DO NOT FIT J1-J5 (through-hole; we fit them), so no
 through-hole soldering. U5 (STM32) is supplied blank: no programming. Do not substitute D4 (PN
-diode, not Schottky), D5/D6 (100 V Schottky), F1 (40 V PTC), R13 (0.1% thin film) or U2 (LM61460
-AAS; its footprint is named after the AFS part). Do not down-rate capacitor voltages. Every IC
-footprint has pin 1 top-left at 0 deg; please query anything inconsistent. ENIG preferred. Full
-notes in FAB-NOTES.md.
+diode, not Schottky), D5/D6 (100 V Schottky), F1 (40 V PTC), R13 (0.1% thin film), U2 (LM61460
+AAS, footprint named AFS) or U6 (TPS7A1633Q, not the A variant its footprint is named after). Do
+not down-rate capacitor voltages. Every IC footprint has pin 1 top-left at 0 deg; please query
+anything inconsistent. ENIG preferred. Full notes in FAB-NOTES.md.
 ```
 
 ## Files

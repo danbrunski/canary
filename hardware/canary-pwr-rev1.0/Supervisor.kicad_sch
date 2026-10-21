@@ -6824,7 +6824,7 @@
 				)
 			)
 		)
-		(property "Value" "TPS7A1633AQDGNRQ1"
+		(property "Value" "TPS7A1633QDGNRQ1"
 			(at 177.56 63.58 0)
 			(show_name no)
 			(do_not_autoplace no)
@@ -6845,7 +6845,7 @@
 				)
 			)
 		)
-		(property "Datasheet" "https://www.ti.com/lit/ds/symlink/tps7a16a-q1.pdf"
+		(property "Datasheet" "https://www.ti.com/lit/ds/symlink/tps7a16-q1.pdf"
 			(at 175.26 45.72 0)
 			(hide yes)
 			(show_name no)
@@ -6867,7 +6867,7 @@
 				)
 			)
 		)
-		(property "MPN" "TPS7A1633AQDGNRQ1"
+		(property "MPN" "TPS7A1633QDGNRQ1"
 			(at 175.26 45.72 0)
 			(hide yes)
 			(show_name no)
@@ -6900,7 +6900,7 @@
 				)
 			)
 		)
-		(property "Note" "The always-on regulator sets the parked current (spec P7), not the MCU. FB/NC tied to GND as on the HAT's U9."
+		(property "Note" "DO NOT SUBSTITUTE the A variant, TPS7A1633AQDGNRQ1: pin 2 is tied to GND, which this part's datasheet allows (SBVS188E) and the A part's forbids (SBVS342A). The footprint is named after the A part, which shares the land pattern; the MPN is right. The always-on regulator sets the parked current (spec P7), not the MCU. FB/NC tied to GND as on the HAT's U9."
 			(at 175.26 45.72 0)
 			(hide yes)
 			(show_name no)
