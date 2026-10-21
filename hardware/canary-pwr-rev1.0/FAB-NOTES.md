@@ -71,10 +71,20 @@ They are board-only footprints, excluded from the BOM. MH1–MH4 are mounting ho
 - **The electrolytics are EEE-FK1H470XP,** the 6.3 × 7.7 mm can. EEE-FK1H470P, without the X, is
   the same value in an 8 × 6.2 mm can and does not fit the pads.
 
-**Rails.** SW1 sits at the left edge and D7 and D8 at the bottom edge (seen from the top), so
-the board needs break-away rails for assembly. Please tab-route them, not V-score: copper comes
-within 0.30 mm of the edge. Keep the tabs clear of SW1, D7 and D8, and of J2–J5, which are
-fitted at the left and bottom edges after assembly. The right edge has nothing near it.
+**Rails.** SW1 sits at the left edge and D7 and D8 at the bottom edge (seen from the top), about
+0.25 mm in, so the board needs break-away rails for assembly. Please panel the boards in a single
+column, 65 mm edges facing each other, with a 5 mm rail along each long side of the panel: each
+board's 56 mm edges, the SW1 edge and the opposite one. Tab-route with stamp holes, not V-score:
+copper comes within 0.30 mm of the board edge, so keep the stamp holes off the board outline.
+Tabs go only where nothing sits at the edge, measured from the top edge (J1's):
+
+| Edge | Tabs |
+|---|---|
+| Left (SW1, J5, J4) | 12–18 mm and 48–53 mm only |
+| Right | anywhere 7–49 mm |
+| Between boards (the J1 edge against the D7/D8 edge) | Optional. If used, only 3–6 mm in from the corners |
+
+J2–J5 are fitted at the left and bottom edges after assembly, so keep tab nubs clear of them.
 
 **No through-hole assembly.** J1–J5 are the board's only through-hole parts, and none is fitted
 at the assembler (below). None of them is in the BOM or the position file. No wave or selective
