@@ -207,7 +207,7 @@
 				)
 			)
 		)
-		(property "Description" "Capacitor 1u 25V X7R/X5R 0603"
+		(property "Description" "MLCC 1uF 10% 25V X5R 0603"
 			(at 0 0 90)
 			(layer "F.Fab")
 			(hide yes)
@@ -235,6 +235,30 @@
 			(layer "F.SilkS")
 			(hide yes)
 			(uuid "ef423e8f-c95c-4164-ab0a-917b84bec63d")
+			(effects
+				(font
+					(size 1.27 1.27)
+					(thickness 0.15)
+				)
+			)
+		)
+		(property "Manufacturer" "Samsung Electro-Mechanics"
+			(at 0 0 90)
+			(layer "F.SilkS")
+			(hide yes)
+			(uuid "d299928d-d95e-46cd-9d3a-9f66fa6bc5af")
+			(effects
+				(font
+					(size 1.27 1.27)
+					(thickness 0.15)
+				)
+			)
+		)
+		(property "Package" "0603"
+			(at 0 0 90)
+			(layer "F.SilkS")
+			(hide yes)
+			(uuid "bee87c85-ec00-4c50-baca-b6a98149e280")
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -366,7 +390,7 @@
 				)
 			)
 		)
-		(property "Description" "Capacitor 10u 50V X7R/X5R 1210"
+		(property "Description" "MLCC 10uF 10% 50V X7R 1210"
 			(at 0 0 180)
 			(layer "F.Fab")
 			(hide yes)
@@ -406,6 +430,30 @@
 			(layer "F.SilkS")
 			(hide yes)
 			(uuid "81a75f2b-bdbd-4697-8fca-2f76d4a715cf")
+			(effects
+				(font
+					(size 1.27 1.27)
+					(thickness 0.15)
+				)
+			)
+		)
+		(property "Manufacturer" "Murata"
+			(at 0 0 180)
+			(layer "F.SilkS")
+			(hide yes)
+			(uuid "2103a91d-bc69-4b14-a434-0ef352c59968")
+			(effects
+				(font
+					(size 1.27 1.27)
+					(thickness 0.15)
+				)
+			)
+		)
+		(property "Package" "1210"
+			(at 0 0 180)
+			(layer "F.SilkS")
+			(hide yes)
+			(uuid "5dcfc20a-6094-449c-a692-1601a7003a41")
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -537,7 +585,7 @@
 				)
 			)
 		)
-		(property "Description" "Aluminium electrolytic 47u 50V, 6.3x7.7 SMD"
+		(property "Description" "Aluminium electrolytic 47uF 20% 50V 105C, 6.3x7.7mm SMD can"
 			(at 0 0 0)
 			(layer "F.Fab")
 			(hide yes)
@@ -560,7 +608,7 @@
 				)
 			)
 		)
-		(property "MPN" "EEE-FK1H470P"
+		(property "MPN" "EEE-FK1H470XP"
 			(at 0 0 0)
 			(layer "F.SilkS")
 			(hide yes)
@@ -589,6 +637,18 @@
 			(layer "F.SilkS")
 			(hide yes)
 			(uuid "2b371b87-baef-4e05-b272-cc5126cc87b1")
+			(effects
+				(font
+					(size 1.27 1.27)
+					(thickness 0.15)
+				)
+			)
+		)
+		(property "Package" "6.3x7.7mm SMD can"
+			(at 0 0 0)
+			(layer "F.SilkS")
+			(hide yes)
+			(uuid "55ae6c4d-de60-472f-b34c-91511d0e06ee")
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -1009,7 +1069,7 @@
 				)
 			)
 		)
-		(property "Description" "Resistor 100k 0402"
+		(property "Description" "Resistor 100 kOhm 1% 1/16W 0402, thick film"
 			(at 0 0 90)
 			(layer "F.Fab")
 			(hide yes)
@@ -1049,6 +1109,18 @@
 			(layer "F.SilkS")
 			(hide yes)
 			(uuid "24bc7cdd-78ad-4a10-8905-fb027a5cbbee")
+			(effects
+				(font
+					(size 1.27 1.27)
+					(thickness 0.15)
+				)
+			)
+		)
+		(property "Package" "0402"
+			(at 0 0 90)
+			(layer "F.SilkS")
+			(hide yes)
+			(uuid "8a1108ed-6139-4659-8a76-d02793ddb61e")
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -1213,11 +1285,23 @@
 				)
 			)
 		)
-		(property "Note" "Datasheet Table 10-2 row 400 kHz / 5 V. EN is the Pi's power switch (spec P5). Footprint: SnapMagic RJR0014A, checked against TI's land pattern."
+		(property "Note" "DO NOT SUBSTITUTE another LM61460 variant: AAS is auto mode with spread spectrum. The footprint is named after the AFS part, which shares its land pattern; the MPN is right. Datasheet Table 10-2 row 400 kHz / 5 V. EN is the Pi's power switch (spec P5). Footprint: SnapMagic RJR0014A, checked against TI's land pattern."
 			(at 0 0 180)
 			(layer "F.SilkS")
 			(hide yes)
 			(uuid "be052a50-a601-4e67-8961-ee9172682f12")
+			(effects
+				(font
+					(size 1.27 1.27)
+					(thickness 0.15)
+				)
+			)
+		)
+		(property "Package" "VQFN-HR-14 4x3.5mm (RJR)"
+			(at 0 0 180)
+			(layer "F.SilkS")
+			(hide yes)
+			(uuid "1544a9fc-427c-48af-a532-391f7173941e")
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -2392,7 +2476,7 @@
 				)
 			)
 		)
-		(property "Description" "Resistor 24.3k 0603"
+		(property "Description" "Resistor 24.3 kOhm 1% 1/10W 0603, thick film"
 			(at 0 0 90)
 			(layer "F.Fab")
 			(hide yes)
@@ -2444,6 +2528,18 @@
 			(layer "F.SilkS")
 			(hide yes)
 			(uuid "12e96df2-bcfe-4bdf-b1ef-3b34b7eeae7f")
+			(effects
+				(font
+					(size 1.27 1.27)
+					(thickness 0.15)
+				)
+			)
+		)
+		(property "Package" "0603"
+			(at 0 0 90)
+			(layer "F.SilkS")
+			(hide yes)
+			(uuid "5330f57b-0746-4db7-8b6e-f0dfe4fcc745")
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -2575,7 +2671,7 @@
 				)
 			)
 		)
-		(property "Description" "Resistor 100k 0603"
+		(property "Description" "Resistor 100 kOhm 1% 1/10W 0603, thick film"
 			(at 0 0 90)
 			(layer "F.Fab")
 			(hide yes)
@@ -2615,6 +2711,18 @@
 			(layer "F.SilkS")
 			(hide yes)
 			(uuid "ce1a7fe7-d1b9-4000-806a-5cfae4acdd3a")
+			(effects
+				(font
+					(size 1.27 1.27)
+					(thickness 0.15)
+				)
+			)
+		)
+		(property "Package" "0603"
+			(at 0 0 90)
+			(layer "F.SilkS")
+			(hide yes)
+			(uuid "4ebe5238-2b76-421e-9592-11c6d758ce6e")
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -2746,7 +2854,7 @@
 				)
 			)
 		)
-		(property "Description" "Resistor 100k 0603"
+		(property "Description" "Resistor 100 kOhm 1% 1/10W 0603, thick film"
 			(at 0 0 90)
 			(layer "F.Fab")
 			(hide yes)
@@ -2798,6 +2906,18 @@
 			(layer "F.SilkS")
 			(hide yes)
 			(uuid "0630003e-72d4-4abb-bbb2-4ee586733684")
+			(effects
+				(font
+					(size 1.27 1.27)
+					(thickness 0.15)
+				)
+			)
+		)
+		(property "Package" "0603"
+			(at 0 0 90)
+			(layer "F.SilkS")
+			(hide yes)
+			(uuid "780902b1-341d-4b84-8ab4-e15a905ab4c8")
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -2929,7 +3049,7 @@
 				)
 			)
 		)
-		(property "Description" "Resistor 100k 0603"
+		(property "Description" "Resistor 100 kOhm 1% 1/10W 0603, thick film"
 			(at 0 0 270)
 			(layer "F.Fab")
 			(hide yes)
@@ -2981,6 +3101,18 @@
 			(layer "F.SilkS")
 			(hide yes)
 			(uuid "b951e47f-43f6-4b0f-a4e7-cf052ebd435d")
+			(effects
+				(font
+					(size 1.27 1.27)
+					(thickness 0.15)
+				)
+			)
+		)
+		(property "Package" "0603"
+			(at 0 0 270)
+			(layer "F.SilkS")
+			(hide yes)
+			(uuid "68651621-c22c-45eb-b287-4d909a48aacd")
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -3219,7 +3351,7 @@
 				)
 			)
 		)
-		(property "Description" "Capacitor 120p 50V X7R/X5R 0603"
+		(property "Description" "MLCC 120pF 5% 50V C0G 0603"
 			(at 0 0 270)
 			(layer "F.Fab")
 			(hide yes)
@@ -3259,6 +3391,30 @@
 			(layer "F.SilkS")
 			(hide yes)
 			(uuid "4602784c-7309-4440-a6f6-681143cbe8d6")
+			(effects
+				(font
+					(size 1.27 1.27)
+					(thickness 0.15)
+				)
+			)
+		)
+		(property "Manufacturer" "Murata"
+			(at 0 0 270)
+			(layer "F.SilkS")
+			(hide yes)
+			(uuid "69b3e14f-68cd-42b6-8761-cde5c6fc985f")
+			(effects
+				(font
+					(size 1.27 1.27)
+					(thickness 0.15)
+				)
+			)
+		)
+		(property "Package" "0603"
+			(at 0 0 270)
+			(layer "F.SilkS")
+			(hide yes)
+			(uuid "b6204df2-5339-4f4a-99d2-9c12abc6d0f1")
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -3391,7 +3547,7 @@
 				)
 			)
 		)
-		(property "Description" "Capacitor 10u 50V X7R/X5R 1210"
+		(property "Description" "MLCC 10uF 10% 50V X7R 1210"
 			(at 0 0 180)
 			(layer "F.Fab")
 			(hide yes)
@@ -3431,6 +3587,30 @@
 			(layer "F.SilkS")
 			(hide yes)
 			(uuid "e82c9324-96a6-479f-a559-66b0697904b7")
+			(effects
+				(font
+					(size 1.27 1.27)
+					(thickness 0.15)
+				)
+			)
+		)
+		(property "Manufacturer" "Murata"
+			(at 0 0 180)
+			(layer "F.SilkS")
+			(hide yes)
+			(uuid "d1bd4e80-c80e-4790-b28a-1b6be9bdf905")
+			(effects
+				(font
+					(size 1.27 1.27)
+					(thickness 0.15)
+				)
+			)
+		)
+		(property "Package" "1210"
+			(at 0 0 180)
+			(layer "F.SilkS")
+			(hide yes)
+			(uuid "51080016-a38c-45af-b8e7-1cb70c6b005f")
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -3562,7 +3742,7 @@
 				)
 			)
 		)
-		(property "Description" "Capacitor 22u 25V X7R/X5R 1206"
+		(property "Description" "MLCC 22uF 10% 25V X5R 1206"
 			(at 0 0 0)
 			(layer "F.Fab")
 			(hide yes)
@@ -3590,6 +3770,30 @@
 			(layer "F.SilkS")
 			(hide yes)
 			(uuid "e16848f3-525f-4ca8-b109-c069b0b224bd")
+			(effects
+				(font
+					(size 1.27 1.27)
+					(thickness 0.15)
+				)
+			)
+		)
+		(property "Manufacturer" "Murata"
+			(at 0 0 0)
+			(layer "F.SilkS")
+			(hide yes)
+			(uuid "a98f7e2a-05c1-4fc0-91d8-781dd1f9ffc6")
+			(effects
+				(font
+					(size 1.27 1.27)
+					(thickness 0.15)
+				)
+			)
+		)
+		(property "Package" "1206"
+			(at 0 0 0)
+			(layer "F.SilkS")
+			(hide yes)
+			(uuid "93635681-6469-428f-9fc5-3e4b45d7fbfe")
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -3721,7 +3925,7 @@
 				)
 			)
 		)
-		(property "Description" "Resistor 100k 0603"
+		(property "Description" "Resistor 100 kOhm 1% 1/10W 0603, thick film"
 			(at 0 0 90)
 			(layer "F.Fab")
 			(hide yes)
@@ -3773,6 +3977,18 @@
 			(layer "F.SilkS")
 			(hide yes)
 			(uuid "75e7dd5e-dc73-4b6c-9eed-de53388cc785")
+			(effects
+				(font
+					(size 1.27 1.27)
+					(thickness 0.15)
+				)
+			)
+		)
+		(property "Package" "0603"
+			(at 0 0 90)
+			(layer "F.SilkS")
+			(hide yes)
+			(uuid "b819e90a-8206-41b5-83bc-1456faeed9b0")
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -3906,7 +4122,7 @@
 				)
 			)
 		)
-		(property "Description" "Bootstrap diode"
+		(property "Description" "Fast switching diode 75V 150mA, SOD-123 (LTC3350 bootstrap)"
 			(at 0 0 0)
 			(unlocked yes)
 			(layer "F.Fab")
@@ -3919,7 +4135,7 @@
 				)
 			)
 		)
-		(property "MPN" "1N4148W"
+		(property "MPN" "1N4148W-7-F"
 			(at 0 0 0)
 			(layer "F.SilkS")
 			(hide yes)
@@ -3943,11 +4159,23 @@
 				)
 			)
 		)
-		(property "Note" "Fast PN, not Schottky: the datasheet warns BST-SW pumps past 5.5 V with a Schottky when the step-up runs non-synchronously beside the output ideal diode."
+		(property "Note" "DO NOT SUBSTITUTE a Schottky. Fast PN, not Schottky: the datasheet warns BST-SW pumps past 5.5 V with a Schottky when the step-up runs non-synchronously beside the output ideal diode."
 			(at 0 0 0)
 			(layer "F.SilkS")
 			(hide yes)
 			(uuid "01d97c9d-c0dd-45d5-977e-468cb0d045e8")
+			(effects
+				(font
+					(size 1.27 1.27)
+					(thickness 0.15)
+				)
+			)
+		)
+		(property "Package" "SOD-123"
+			(at 0 0 0)
+			(layer "F.SilkS")
+			(hide yes)
+			(uuid "82d7a1a0-d528-4260-85ad-529b5d578f95")
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -4217,7 +4445,7 @@
 				)
 			)
 		)
-		(property "Description" "Capacitor 47u 10V X7R/X5R 1210"
+		(property "Description" "MLCC 47uF 10% 10V X5R 1210"
 			(at 0 0 270)
 			(layer "F.Fab")
 			(hide yes)
@@ -4245,6 +4473,30 @@
 			(layer "F.SilkS")
 			(hide yes)
 			(uuid "9f5bcbe4-ddbe-4f19-82c7-3c1c9829c120")
+			(effects
+				(font
+					(size 1.27 1.27)
+					(thickness 0.15)
+				)
+			)
+		)
+		(property "Manufacturer" "Murata"
+			(at 0 0 270)
+			(layer "F.SilkS")
+			(hide yes)
+			(uuid "ebd1bc7a-4514-485b-bb90-0d0446952216")
+			(effects
+				(font
+					(size 1.27 1.27)
+					(thickness 0.15)
+				)
+			)
+		)
+		(property "Package" "1210"
+			(at 0 0 270)
+			(layer "F.SilkS")
+			(hide yes)
+			(uuid "9b324e9f-e555-4ddd-b3f1-ef8ddefb2b3c")
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -4376,7 +4628,7 @@
 				)
 			)
 		)
-		(property "Description" "Capacitor 22p 50V X7R/X5R 0603"
+		(property "Description" "MLCC 22pF 5% 50V C0G 0603"
 			(at 0 0 90)
 			(layer "F.Fab")
 			(hide yes)
@@ -4416,6 +4668,30 @@
 			(layer "F.SilkS")
 			(hide yes)
 			(uuid "0b13b11d-d43a-4bba-9c1f-367704f695c5")
+			(effects
+				(font
+					(size 1.27 1.27)
+					(thickness 0.15)
+				)
+			)
+		)
+		(property "Manufacturer" "Murata"
+			(at 0 0 90)
+			(layer "F.SilkS")
+			(hide yes)
+			(uuid "02b673ac-2039-4522-b4df-65df2910862b")
+			(effects
+				(font
+					(size 1.27 1.27)
+					(thickness 0.15)
+				)
+			)
+		)
+		(property "Package" "0603"
+			(at 0 0 90)
+			(layer "F.SilkS")
+			(hide yes)
+			(uuid "4ea2716e-00e4-40de-afc7-56df515315a5")
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -4547,7 +4823,7 @@
 				)
 			)
 		)
-		(property "Description" "4.7 uH, same part as the LTC3350's"
+		(property "Description" "Shielded power inductor 4.7uH 20%, 7x7mm (XAL7070)"
 			(at 0 0 180)
 			(layer "F.Fab")
 			(hide yes)
@@ -4587,6 +4863,18 @@
 			(layer "F.SilkS")
 			(hide yes)
 			(uuid "76bc33fe-70d0-4fe7-8267-09f8a5590fe2")
+			(effects
+				(font
+					(size 1.27 1.27)
+					(thickness 0.15)
+				)
+			)
+		)
+		(property "Package" "7.0x7.0mm SMD (XAL7070)"
+			(at 0 0 180)
+			(layer "F.SilkS")
+			(hide yes)
+			(uuid "bb9670d8-3aa6-4c95-838a-608cacb75584")
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -4739,7 +5027,7 @@
 				)
 			)
 		)
-		(property "Description" "Capacitor 220n 25V X7R/X5R 0603"
+		(property "Description" "MLCC 220nF 10% 25V X7R 0603"
 			(at 0 0 180)
 			(layer "F.Fab")
 			(hide yes)
@@ -4779,6 +5067,30 @@
 			(layer "F.SilkS")
 			(hide yes)
 			(uuid "8dba2cf0-71c5-4742-a3a1-4b8f30fbe2ca")
+			(effects
+				(font
+					(size 1.27 1.27)
+					(thickness 0.15)
+				)
+			)
+		)
+		(property "Manufacturer" "Samsung Electro-Mechanics"
+			(at 0 0 180)
+			(layer "F.SilkS")
+			(hide yes)
+			(uuid "74262cd8-ace0-4cf6-8401-6e1df04b56f9")
+			(effects
+				(font
+					(size 1.27 1.27)
+					(thickness 0.15)
+				)
+			)
+		)
+		(property "Package" "0603"
+			(at 0 0 180)
+			(layer "F.SilkS")
+			(hide yes)
+			(uuid "b2b073af-e43f-47f1-af5e-f0c7e607f262")
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -4910,7 +5222,7 @@
 				)
 			)
 		)
-		(property "Description" "Resistor 100k 0603"
+		(property "Description" "Resistor 100 kOhm 1% 1/10W 0603, thick film"
 			(at 0 0 0)
 			(layer "F.Fab")
 			(hide yes)
@@ -4950,6 +5262,18 @@
 			(layer "F.SilkS")
 			(hide yes)
 			(uuid "394946f4-aaef-44bc-a507-a6da7c60025a")
+			(effects
+				(font
+					(size 1.27 1.27)
+					(thickness 0.15)
+				)
+			)
+		)
+		(property "Package" "0603"
+			(at 0 0 0)
+			(layer "F.SilkS")
+			(hide yes)
+			(uuid "b2694b31-473f-4fb2-9c6e-9e7d9f4859f3")
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -5081,7 +5405,7 @@
 				)
 			)
 		)
-		(property "Description" "Resistor 8m 2512"
+		(property "Description" "Resistor 8 mOhm 1% 1W 2512, metal-strip current sense"
 			(at 0 0 180)
 			(layer "F.Fab")
 			(hide yes)
@@ -5133,6 +5457,18 @@
 			(layer "F.SilkS")
 			(hide yes)
 			(uuid "da2836d9-63ae-42d6-a246-38122c25fbac")
+			(effects
+				(font
+					(size 1.27 1.27)
+					(thickness 0.15)
+				)
+			)
+		)
+		(property "Package" "2512"
+			(at 0 0 180)
+			(layer "F.SilkS")
+			(hide yes)
+			(uuid "33803492-592e-4c99-9412-87c2953e6cd0")
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -5415,6 +5751,18 @@
 			(layer "F.SilkS")
 			(hide yes)
 			(uuid "7d5fac71-dcb0-4ada-b4f9-8974bd1b444a")
+			(effects
+				(font
+					(size 1.27 1.27)
+					(thickness 0.15)
+				)
+			)
+		)
+		(property "Package" "VSON-8 3.3x3.3mm"
+			(at 0 0 0)
+			(layer "F.SilkS")
+			(hide yes)
+			(uuid "6a6ca4b4-f354-4ffd-91e1-b49de6172f73")
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -5747,7 +6095,7 @@
 				)
 			)
 		)
-		(property "Description" "Capacitor 100n 50V X7R/X5R 0603"
+		(property "Description" "MLCC 100nF 10% 50V X7R 0603"
 			(at 0 0 90)
 			(layer "F.Fab")
 			(hide yes)
@@ -5775,6 +6123,30 @@
 			(layer "F.SilkS")
 			(hide yes)
 			(uuid "5d34cb7d-33ef-442b-9c3c-7aa0fe429286")
+			(effects
+				(font
+					(size 1.27 1.27)
+					(thickness 0.15)
+				)
+			)
+		)
+		(property "Manufacturer" "Samsung Electro-Mechanics"
+			(at 0 0 90)
+			(layer "F.SilkS")
+			(hide yes)
+			(uuid "c718f0a4-dd6d-4c1d-acd0-4358ac3fbc39")
+			(effects
+				(font
+					(size 1.27 1.27)
+					(thickness 0.15)
+				)
+			)
+		)
+		(property "Package" "0603"
+			(at 0 0 90)
+			(layer "F.SilkS")
+			(hide yes)
+			(uuid "790d9138-d96e-4fd1-bbf2-8eb3a8f38d20")
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -5953,11 +6325,23 @@
 				)
 			)
 		)
-		(property "Note" "VBUS reads the Pi's 5 V after the ideal diode. Put it in power-down while parked (0.5 uA)."
+		(property "Note" "VBUS reads the Pi's 5 V after the ideal diode. Firmware puts it in power-down while parked (0.5 uA)."
 			(at 0 0 90)
 			(layer "F.SilkS")
 			(hide yes)
 			(uuid "1c289019-42cc-40bd-81c3-75b55b2b2b01")
+			(effects
+				(font
+					(size 1.27 1.27)
+					(thickness 0.15)
+				)
+			)
+		)
+		(property "Package" "VSSOP-10 (DGS)"
+			(at 0 0 90)
+			(layer "F.SilkS")
+			(hide yes)
+			(uuid "a4ec2ee3-eeb0-4673-a81f-cedf01f68fed")
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -6315,7 +6699,7 @@
 				)
 			)
 		)
-		(property "Description" "Resistor 665k 0603"
+		(property "Description" "Resistor 665 kOhm 1% 1/10W 0603, thick film"
 			(at 0 0 0)
 			(layer "F.Fab")
 			(hide yes)
@@ -6367,6 +6751,18 @@
 			(layer "F.SilkS")
 			(hide yes)
 			(uuid "74970ad8-58b8-4035-b052-ab29410fa25e")
+			(effects
+				(font
+					(size 1.27 1.27)
+					(thickness 0.15)
+				)
+			)
+		)
+		(property "Package" "0603"
+			(at 0 0 0)
+			(layer "F.SilkS")
+			(hide yes)
+			(uuid "790272e5-824f-4434-a2fd-994690c307be")
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -6498,7 +6894,7 @@
 				)
 			)
 		)
-		(property "Description" "Capacitor 1u 25V X7R/X5R 0603"
+		(property "Description" "MLCC 1uF 10% 25V X5R 0603"
 			(at 0 0 0)
 			(layer "F.Fab")
 			(hide yes)
@@ -6538,6 +6934,30 @@
 			(layer "F.SilkS")
 			(hide yes)
 			(uuid "8e991e81-1473-4b3d-8b95-325359c4897d")
+			(effects
+				(font
+					(size 1.27 1.27)
+					(thickness 0.15)
+				)
+			)
+		)
+		(property "Manufacturer" "Samsung Electro-Mechanics"
+			(at 0 0 0)
+			(layer "F.SilkS")
+			(hide yes)
+			(uuid "8c23ae2c-c006-47d4-83a2-3f06a6cefc34")
+			(effects
+				(font
+					(size 1.27 1.27)
+					(thickness 0.15)
+				)
+			)
+		)
+		(property "Package" "0603"
+			(at 0 0 0)
+			(layer "F.SilkS")
+			(hide yes)
+			(uuid "1d377871-686f-45be-99b5-ec39b3af3761")
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -6671,7 +7091,7 @@
 				)
 			)
 		)
-		(property "Description" "600W TVS, 24V standoff, 38.9V max clamp (HAT D1)"
+		(property "Description" "TVS diode 600W unidirectional, 24V standoff, 38.9V max clamp, SMB (HAT D1)"
 			(at 0 0 270)
 			(unlocked yes)
 			(layer "F.Fab")
@@ -6713,6 +7133,18 @@
 			(layer "F.SilkS")
 			(hide yes)
 			(uuid "a397bdd8-a341-4908-b41f-a146ed84f780")
+			(effects
+				(font
+					(size 1.27 1.27)
+					(thickness 0.15)
+				)
+			)
+		)
+		(property "Package" "SMB (DO-214AA)"
+			(at 0 0 270)
+			(layer "F.SilkS")
+			(hide yes)
+			(uuid "ae5b8c55-4d45-422a-a9e9-b4bd02eb8912")
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -6973,7 +7405,7 @@
 				)
 			)
 		)
-		(property "Description" "Capacitor 10n 50V X7R/X5R 0603"
+		(property "Description" "MLCC 10nF 10% 50V X7R 0603"
 			(at 0 0 90)
 			(layer "F.Fab")
 			(hide yes)
@@ -7013,6 +7445,30 @@
 			(layer "F.SilkS")
 			(hide yes)
 			(uuid "193a186a-10fc-4244-9494-2a512bf41eb1")
+			(effects
+				(font
+					(size 1.27 1.27)
+					(thickness 0.15)
+				)
+			)
+		)
+		(property "Manufacturer" "Samsung Electro-Mechanics"
+			(at 0 0 90)
+			(layer "F.SilkS")
+			(hide yes)
+			(uuid "ff6fb9f6-fc4f-4567-8547-7f8f94228f32")
+			(effects
+				(font
+					(size 1.27 1.27)
+					(thickness 0.15)
+				)
+			)
+		)
+		(property "Package" "0603"
+			(at 0 0 90)
+			(layer "F.SilkS")
+			(hide yes)
+			(uuid "8033f5dd-c9d0-4ab0-96be-8e888e456c52")
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -7144,7 +7600,7 @@
 				)
 			)
 		)
-		(property "Description" "Aluminium electrolytic 47u 50V, 6.3x7.7 SMD"
+		(property "Description" "Aluminium electrolytic 47uF 20% 50V 105C, 6.3x7.7mm SMD can"
 			(at 0 0 0)
 			(layer "F.Fab")
 			(hide yes)
@@ -7167,7 +7623,7 @@
 				)
 			)
 		)
-		(property "MPN" "EEE-FK1H470P"
+		(property "MPN" "EEE-FK1H470XP"
 			(at 0 0 0)
 			(layer "F.SilkS")
 			(hide yes)
@@ -7184,6 +7640,18 @@
 			(layer "F.SilkS")
 			(hide yes)
 			(uuid "783e6002-4392-4b02-a17b-0344328e3e2f")
+			(effects
+				(font
+					(size 1.27 1.27)
+					(thickness 0.15)
+				)
+			)
+		)
+		(property "Package" "6.3x7.7mm SMD can"
+			(at 0 0 0)
+			(layer "F.SilkS")
+			(hide yes)
+			(uuid "5447bd55-f1c0-4d77-a609-49a3f9e6b257")
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -7604,7 +8072,7 @@
 				)
 			)
 		)
-		(property "Description" "Capacitor 100n 50V X7R/X5R 0603"
+		(property "Description" "MLCC 100nF 10% 50V X7R 0603"
 			(at 0 0 270)
 			(layer "F.Fab")
 			(hide yes)
@@ -7644,6 +8112,30 @@
 			(layer "F.SilkS")
 			(hide yes)
 			(uuid "a7754201-3f14-4d72-bec4-014685a75235")
+			(effects
+				(font
+					(size 1.27 1.27)
+					(thickness 0.15)
+				)
+			)
+		)
+		(property "Manufacturer" "Samsung Electro-Mechanics"
+			(at 0 0 270)
+			(layer "F.SilkS")
+			(hide yes)
+			(uuid "b0726f89-e9cd-45c5-bd4f-6ffbfdfe29d1")
+			(effects
+				(font
+					(size 1.27 1.27)
+					(thickness 0.15)
+				)
+			)
+		)
+		(property "Package" "0603"
+			(at 0 0 270)
+			(layer "F.SilkS")
+			(hide yes)
+			(uuid "435669dd-5b50-4bab-8808-9f9a6d480383")
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -7798,7 +8290,7 @@
 				)
 			)
 		)
-		(property "Note" "Edge-mounted so a probe reaches it from the side of the stack. Field reflash goes over I2C instead. DNP: through-hole, fitted by the operator (2026-10-20)."
+		(property "Note" "DO NOT POPULATE at the assembler: through-hole, fitted by the operator after SMD assembly (2026-10-20). Its part is still open (spec P10 item 10). Edge-mounted so a probe reaches it from the side of the stack. Field reflash goes over I2C instead."
 			(at 0 0 180)
 			(layer "F.SilkS")
 			(hide yes)
@@ -7807,6 +8299,17 @@
 				(font
 					(size 1.27 1.27)
 					(thickness 0.15)
+				)
+			)
+		)
+		(property "Package" "THT 2x5 1.27mm right-angle"
+			(at 0 0 180)
+			(layer "F.Fab")
+			(hide yes)
+			(uuid "df8a2456-698d-4317-b934-6c512d18dc2c")
+			(effects
+				(font
+					(size 1.27 1.27)
 				)
 			)
 		)
@@ -8548,7 +9051,7 @@
 				)
 			)
 		)
-		(property "Description" "Capacitor 100n 50V X7R/X5R 0603"
+		(property "Description" "MLCC 100nF 10% 50V X7R 0603"
 			(at 0 0 180)
 			(layer "F.Fab")
 			(hide yes)
@@ -8588,6 +9091,30 @@
 			(layer "F.SilkS")
 			(hide yes)
 			(uuid "3337af3e-1c9e-4f3b-b66d-0f567fd4d674")
+			(effects
+				(font
+					(size 1.27 1.27)
+					(thickness 0.15)
+				)
+			)
+		)
+		(property "Manufacturer" "Samsung Electro-Mechanics"
+			(at 0 0 180)
+			(layer "F.SilkS")
+			(hide yes)
+			(uuid "85b3a366-78d0-4d26-94e3-36f857d7e7be")
+			(effects
+				(font
+					(size 1.27 1.27)
+					(thickness 0.15)
+				)
+			)
+		)
+		(property "Package" "0603"
+			(at 0 0 180)
+			(layer "F.SilkS")
+			(hide yes)
+			(uuid "3a43edcd-978d-4154-9407-114975a45a2d")
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -8720,7 +9247,7 @@
 				)
 			)
 		)
-		(property "Description" "Resistor 649k 0603"
+		(property "Description" "Resistor 649 kOhm 1% 1/10W 0603, thick film"
 			(at 0 0 270)
 			(layer "F.Fab")
 			(hide yes)
@@ -8772,6 +9299,18 @@
 			(layer "F.SilkS")
 			(hide yes)
 			(uuid "57d9ef60-f910-4b14-8df9-0ba6fcec2712")
+			(effects
+				(font
+					(size 1.27 1.27)
+					(thickness 0.15)
+				)
+			)
+		)
+		(property "Package" "0603"
+			(at 0 0 270)
+			(layer "F.SilkS")
+			(hide yes)
+			(uuid "a59195ff-259e-41ad-bffa-4cb611c81b6a")
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -8903,7 +9442,7 @@
 				)
 			)
 		)
-		(property "Description" "Resistor 33.2k 0603"
+		(property "Description" "Resistor 33.2 kOhm 1% 1/10W 0603, thick film"
 			(at 0 0 90)
 			(layer "F.Fab")
 			(hide yes)
@@ -8955,6 +9494,18 @@
 			(layer "F.SilkS")
 			(hide yes)
 			(uuid "aff3fcaf-26bb-446c-8218-db41633781a7")
+			(effects
+				(font
+					(size 1.27 1.27)
+					(thickness 0.15)
+				)
+			)
+		)
+		(property "Package" "0603"
+			(at 0 0 90)
+			(layer "F.SilkS")
+			(hide yes)
+			(uuid "f411d680-6e33-4790-bda3-87e5f4850112")
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -9086,7 +9637,7 @@
 				)
 			)
 		)
-		(property "Description" "Capacitor 100n 50V X7R/X5R 0603"
+		(property "Description" "MLCC 100nF 10% 50V X7R 0603"
 			(at 0 0 180)
 			(layer "F.Fab")
 			(hide yes)
@@ -9126,6 +9677,30 @@
 			(layer "F.SilkS")
 			(hide yes)
 			(uuid "ff5adbea-ac0e-4897-ac22-073e72b8e08f")
+			(effects
+				(font
+					(size 1.27 1.27)
+					(thickness 0.15)
+				)
+			)
+		)
+		(property "Manufacturer" "Samsung Electro-Mechanics"
+			(at 0 0 180)
+			(layer "F.SilkS")
+			(hide yes)
+			(uuid "3a4bb280-4fff-4037-8c96-73bdde6b86da")
+			(effects
+				(font
+					(size 1.27 1.27)
+					(thickness 0.15)
+				)
+			)
+		)
+		(property "Package" "0603"
+			(at 0 0 180)
+			(layer "F.SilkS")
+			(hide yes)
+			(uuid "9c2186dc-39e2-4837-86e1-2dde1cdbfbf2")
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -9257,7 +9832,7 @@
 				)
 			)
 		)
-		(property "Description" "Resistor 5m 2512"
+		(property "Description" "Resistor 5 mOhm 1% 1W 2512, metal-strip current sense"
 			(at 0 0 180)
 			(layer "F.Fab")
 			(hide yes)
@@ -9309,6 +9884,18 @@
 			(layer "F.SilkS")
 			(hide yes)
 			(uuid "738999e7-96f3-4710-9548-cc3ad36cbb75")
+			(effects
+				(font
+					(size 1.27 1.27)
+					(thickness 0.15)
+				)
+			)
+		)
+		(property "Package" "2512"
+			(at 0 0 180)
+			(layer "F.SilkS")
+			(hide yes)
+			(uuid "18ec027d-1362-4bfa-948e-f89c2f0be107")
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -9546,7 +10133,7 @@
 				)
 			)
 		)
-		(property "Description" "4.7 uH shielded power inductor"
+		(property "Description" "Shielded power inductor 4.7uH 20%, 7x7mm (XAL7070)"
 			(at 0 0 180)
 			(layer "F.Fab")
 			(hide yes)
@@ -9598,6 +10185,18 @@
 			(layer "F.SilkS")
 			(hide yes)
 			(uuid "4711eabb-165a-4d93-b0f3-f1edfba52393")
+			(effects
+				(font
+					(size 1.27 1.27)
+					(thickness 0.15)
+				)
+			)
+		)
+		(property "Package" "7.0x7.0mm SMD (XAL7070)"
+			(at 0 0 180)
+			(layer "F.SilkS")
+			(hide yes)
+			(uuid "08add3e8-a35f-4e8f-9e80-fe5975d66407")
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -9750,7 +10349,7 @@
 				)
 			)
 		)
-		(property "Description" "Capacitor 1u 25V X7R/X5R 0603"
+		(property "Description" "MLCC 1uF 10% 25V X5R 0603"
 			(at 0 0 90)
 			(layer "F.Fab")
 			(hide yes)
@@ -9778,6 +10377,30 @@
 			(layer "F.SilkS")
 			(hide yes)
 			(uuid "92f36e54-683d-41df-a19a-b3d9f2779c6d")
+			(effects
+				(font
+					(size 1.27 1.27)
+					(thickness 0.15)
+				)
+			)
+		)
+		(property "Manufacturer" "Samsung Electro-Mechanics"
+			(at 0 0 90)
+			(layer "F.SilkS")
+			(hide yes)
+			(uuid "ca8d9220-94af-4c0c-a2f3-bd27dab71a19")
+			(effects
+				(font
+					(size 1.27 1.27)
+					(thickness 0.15)
+				)
+			)
+		)
+		(property "Package" "0603"
+			(at 0 0 90)
+			(layer "F.SilkS")
+			(hide yes)
+			(uuid "944bd4ea-1063-498f-a4f7-54dbd7bffc96")
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -9911,7 +10534,7 @@
 				)
 			)
 		)
-		(property "Description" "'Bank live' LED: lit only while the button is held or discharge runs"
+		(property "Description" "LED red, side-view 1.6x0.6mm ('bank live': lit only while the button is held or discharge runs)"
 			(at 0 0 180)
 			(unlocked yes)
 			(layer "F.Fab")
@@ -9941,6 +10564,18 @@
 			(layer "F.SilkS")
 			(hide yes)
 			(uuid "4f1e0f69-6c04-4748-9c09-412bf26e2ffd")
+			(effects
+				(font
+					(size 1.27 1.27)
+					(thickness 0.15)
+				)
+			)
+		)
+		(property "Package" "1.6x0.6mm side-view (APA1606)"
+			(at 0 0 180)
+			(layer "F.SilkS")
+			(hide yes)
+			(uuid "d55b79cf-116c-4a70-9f15-4c5ec816b478")
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -10145,7 +10780,7 @@
 				)
 			)
 		)
-		(property "Description" "Capacitor 22u 25V X7R/X5R 1206"
+		(property "Description" "MLCC 22uF 10% 25V X5R 1206"
 			(at 0 0 0)
 			(layer "F.Fab")
 			(hide yes)
@@ -10173,6 +10808,30 @@
 			(layer "F.SilkS")
 			(hide yes)
 			(uuid "5a5da4f4-4578-4339-acb8-a1406f032b59")
+			(effects
+				(font
+					(size 1.27 1.27)
+					(thickness 0.15)
+				)
+			)
+		)
+		(property "Manufacturer" "Murata"
+			(at 0 0 0)
+			(layer "F.SilkS")
+			(hide yes)
+			(uuid "0baa0d8d-4306-48f5-9a16-6c78100a8c9a")
+			(effects
+				(font
+					(size 1.27 1.27)
+					(thickness 0.15)
+				)
+			)
+		)
+		(property "Package" "1206"
+			(at 0 0 0)
+			(layer "F.SilkS")
+			(hide yes)
+			(uuid "3dbf0f83-7131-44d4-a73d-502d67a3270c")
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -10351,11 +11010,23 @@
 				)
 			)
 		)
-		(property "Note" "OBD 16 = +12V_RAW, OBD 4 = GND, OBD 6/14 = CANH/CANL, all 20 AWG (operator 2026-10-14). Spec P3. Verify Phoenix order numbers before ordering. DNP: through-hole, so the operator fits it after the fab's SMD assembly (2026-10-20), as for J1 and J3-J5."
+		(property "Note" "DO NOT POPULATE at the assembler: through-hole, fitted by the operator after SMD assembly (2026-10-20). OBD 16 = +12V_RAW, OBD 4 = GND, OBD 6/14 = CANH/CANL, all 20 AWG (operator 2026-10-14). Spec P3; the plug's order number is still open (spec P10 item 12)."
 			(at 0 0 0)
 			(layer "F.SilkS")
 			(hide yes)
 			(uuid "41c3565d-4c28-4d73-92be-1322139fad89")
+			(effects
+				(font
+					(size 1.27 1.27)
+					(thickness 0.15)
+				)
+			)
+		)
+		(property "Package" "THT 1x4 3.81mm right-angle"
+			(at 0 0 0)
+			(layer "F.SilkS")
+			(hide yes)
+			(uuid "9c76f03e-72e6-4c27-86a8-a665afceb964")
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -10628,7 +11299,7 @@
 				)
 			)
 		)
-		(property "Description" "Resistor 732k 0603"
+		(property "Description" "Resistor 732 kOhm 1% 1/10W 0603, thick film"
 			(at 0 0 90)
 			(layer "F.Fab")
 			(hide yes)
@@ -10680,6 +11351,18 @@
 			(layer "F.SilkS")
 			(hide yes)
 			(uuid "fd86f62f-3ef0-4141-8025-29ffb353065e")
+			(effects
+				(font
+					(size 1.27 1.27)
+					(thickness 0.15)
+				)
+			)
+		)
+		(property "Package" "0603"
+			(at 0 0 90)
+			(layer "F.SilkS")
+			(hide yes)
+			(uuid "bed2e6ae-d73b-470c-9b22-488b124c00d1")
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -10811,7 +11494,7 @@
 				)
 			)
 		)
-		(property "Description" "Capacitor 100n 50V X7R/X5R 0603"
+		(property "Description" "MLCC 100nF 10% 50V X7R 0603"
 			(at 0 0 270)
 			(layer "F.Fab")
 			(hide yes)
@@ -10839,6 +11522,30 @@
 			(layer "F.SilkS")
 			(hide yes)
 			(uuid "bc0bc857-9cc3-4cff-9811-24341929f3a4")
+			(effects
+				(font
+					(size 1.27 1.27)
+					(thickness 0.15)
+				)
+			)
+		)
+		(property "Manufacturer" "Samsung Electro-Mechanics"
+			(at 0 0 270)
+			(layer "F.SilkS")
+			(hide yes)
+			(uuid "bdf608d6-6751-480a-8cce-b8b93a6fc787")
+			(effects
+				(font
+					(size 1.27 1.27)
+					(thickness 0.15)
+				)
+			)
+		)
+		(property "Package" "0603"
+			(at 0 0 270)
+			(layer "F.SilkS")
+			(hide yes)
+			(uuid "6d4c4cc3-ae05-4520-b16e-d89c042c3641")
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -10970,7 +11677,7 @@
 				)
 			)
 		)
-		(property "Description" "Aluminium electrolytic 47u 50V, 6.3x7.7 SMD"
+		(property "Description" "Aluminium electrolytic 47uF 20% 50V 105C, 6.3x7.7mm SMD can"
 			(at 0 0 0)
 			(layer "F.Fab")
 			(hide yes)
@@ -10993,7 +11700,7 @@
 				)
 			)
 		)
-		(property "MPN" "EEE-FK1H470P"
+		(property "MPN" "EEE-FK1H470XP"
 			(at 0 0 0)
 			(layer "F.SilkS")
 			(hide yes)
@@ -11022,6 +11729,18 @@
 			(layer "F.SilkS")
 			(hide yes)
 			(uuid "f8946bf3-4fa7-49a7-9b18-02ddb30862f3")
+			(effects
+				(font
+					(size 1.27 1.27)
+					(thickness 0.15)
+				)
+			)
+		)
+		(property "Package" "6.3x7.7mm SMD can"
+			(at 0 0 0)
+			(layer "F.SilkS")
+			(hide yes)
+			(uuid "e3bda9b9-242e-47a3-9121-fa29d72de5eb")
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -11442,7 +12161,7 @@
 				)
 			)
 		)
-		(property "Description" "Capacitor 22u 10V X7R/X5R 1206"
+		(property "Description" "MLCC 22uF 10% 10V X5R 1206"
 			(at 0 0 90)
 			(layer "F.Fab")
 			(hide yes)
@@ -11470,6 +12189,30 @@
 			(layer "F.SilkS")
 			(hide yes)
 			(uuid "267453cc-98df-4248-9f97-2776ead03f66")
+			(effects
+				(font
+					(size 1.27 1.27)
+					(thickness 0.15)
+				)
+			)
+		)
+		(property "Manufacturer" "Murata"
+			(at 0 0 90)
+			(layer "F.SilkS")
+			(hide yes)
+			(uuid "2e1df91f-6705-406c-89c0-4fbecc5f63f7")
+			(effects
+				(font
+					(size 1.27 1.27)
+					(thickness 0.15)
+				)
+			)
+		)
+		(property "Package" "1206"
+			(at 0 0 90)
+			(layer "F.SilkS")
+			(hide yes)
+			(uuid "9696a25a-881b-4107-b857-2ec0d3098f14")
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -11601,7 +12344,7 @@
 				)
 			)
 		)
-		(property "Description" "Capacitor 100n 50V X7R/X5R 0603"
+		(property "Description" "MLCC 100nF 10% 50V X7R 0603"
 			(at 0 0 90)
 			(layer "F.Fab")
 			(hide yes)
@@ -11629,6 +12372,30 @@
 			(layer "F.SilkS")
 			(hide yes)
 			(uuid "0e90de8d-b33d-4977-bd4d-369852310e47")
+			(effects
+				(font
+					(size 1.27 1.27)
+					(thickness 0.15)
+				)
+			)
+		)
+		(property "Manufacturer" "Samsung Electro-Mechanics"
+			(at 0 0 90)
+			(layer "F.SilkS")
+			(hide yes)
+			(uuid "83a38dac-da53-4bc1-b419-7d021633de05")
+			(effects
+				(font
+					(size 1.27 1.27)
+					(thickness 0.15)
+				)
+			)
+		)
+		(property "Package" "0603"
+			(at 0 0 90)
+			(layer "F.SilkS")
+			(hide yes)
+			(uuid "7cd00bc4-6383-4a99-8e02-c5b1f3f4ea5e")
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -11807,11 +12574,23 @@
 				)
 			)
 		)
-		(property "Note" "Changed 2026-10-13 from a 5-way Phoenix MC (21.6 mm) to save ~7 mm of edge: latching, keyed, and the same family and crimp tool as the cap-bank connector. Molex numbering, 1-3 on one row, 4-6 on the other: CANH (3) and CANL (6) share a column; 12 V (1) sits beside GND (2). Jumper to rev 2.1 J2: +12V_HAT -> pin 1 (+12V_RAW), GND -> pin 2, CANH/CANL -> the HAT's CAN pair; Pin 4 unused; GNSS backup removed 2026-10-18. DNP: through-hole, fitted by the operator (2026-10-20)."
+		(property "Note" "DO NOT POPULATE at the assembler: through-hole, fitted by the operator after SMD assembly (2026-10-20). Changed 2026-10-13 from a 5-way Phoenix MC (21.6 mm) to save ~7 mm of edge: latching, keyed, and the same family and crimp tool as the cap-bank connector. Molex numbering, 1-3 on one row, 4-6 on the other: CANH (3) and CANL (6) share a column; 12 V (1) sits beside GND (2). Jumper to rev 2.1 J2: +12V_HAT -> pin 1 (+12V_RAW), GND -> pin 2, CANH/CANL -> the HAT's CAN pair; Pin 4 unused; GNSS backup removed 2026-10-18."
 			(at 0 0 180)
 			(layer "F.SilkS")
 			(hide yes)
 			(uuid "797947ae-9131-4903-8c75-f5ec097086e6")
+			(effects
+				(font
+					(size 1.27 1.27)
+					(thickness 0.15)
+				)
+			)
+		)
+		(property "Package" "THT 2x3 3.00mm right-angle"
+			(at 0 0 180)
+			(layer "F.SilkS")
+			(hide yes)
+			(uuid "8896ed0b-c692-40e3-97a9-5717f0ebf820")
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -12167,7 +12946,7 @@
 				)
 			)
 		)
-		(property "Description" "Capacitor 10u 50V X7R/X5R 1210"
+		(property "Description" "MLCC 10uF 10% 50V X7R 1210"
 			(at 0 0 270)
 			(layer "F.Fab")
 			(hide yes)
@@ -12195,6 +12974,30 @@
 			(layer "F.SilkS")
 			(hide yes)
 			(uuid "42c2fd50-827a-4de6-b5ad-6726b8a28520")
+			(effects
+				(font
+					(size 1.27 1.27)
+					(thickness 0.15)
+				)
+			)
+		)
+		(property "Manufacturer" "Murata"
+			(at 0 0 270)
+			(layer "F.SilkS")
+			(hide yes)
+			(uuid "577d8c39-934d-4476-bafb-f103dea3f8ab")
+			(effects
+				(font
+					(size 1.27 1.27)
+					(thickness 0.15)
+				)
+			)
+		)
+		(property "Package" "1210"
+			(at 0 0 270)
+			(layer "F.SilkS")
+			(hide yes)
+			(uuid "ef5bde2a-d1d0-4de7-a337-441236ed190a")
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -12326,7 +13129,7 @@
 				)
 			)
 		)
-		(property "Description" "Resistor 71.5k 0603"
+		(property "Description" "Resistor 71.5 kOhm 1% 1/10W 0603, thick film"
 			(at 0 0 90)
 			(layer "F.Fab")
 			(hide yes)
@@ -12378,6 +13181,18 @@
 			(layer "F.SilkS")
 			(hide yes)
 			(uuid "2fee8792-f1d6-47cd-91f6-833181b10197")
+			(effects
+				(font
+					(size 1.27 1.27)
+					(thickness 0.15)
+				)
+			)
+		)
+		(property "Package" "0603"
+			(at 0 0 90)
+			(layer "F.SilkS")
+			(hide yes)
+			(uuid "862392d0-009e-40a7-96c8-c2ac42adef9b")
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -12510,7 +13325,7 @@
 				)
 			)
 		)
-		(property "Description" "Capacitor 100n 50V X7R/X5R 0603"
+		(property "Description" "MLCC 100nF 10% 50V X7R 0603"
 			(at 0 0 90)
 			(layer "F.Fab")
 			(hide yes)
@@ -12550,6 +13365,30 @@
 			(layer "F.SilkS")
 			(hide yes)
 			(uuid "5d46f857-6b09-4658-9c09-d0c63825ca75")
+			(effects
+				(font
+					(size 1.27 1.27)
+					(thickness 0.15)
+				)
+			)
+		)
+		(property "Manufacturer" "Samsung Electro-Mechanics"
+			(at 0 0 90)
+			(layer "F.SilkS")
+			(hide yes)
+			(uuid "58fdc447-6d3a-41ff-a65b-c133c369c96d")
+			(effects
+				(font
+					(size 1.27 1.27)
+					(thickness 0.15)
+				)
+			)
+		)
+		(property "Package" "0603"
+			(at 0 0 90)
+			(layer "F.SilkS")
+			(hide yes)
+			(uuid "77b838cf-9ae8-4c98-934d-30e3e05858ef")
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -12681,7 +13520,7 @@
 				)
 			)
 		)
-		(property "Description" "Resistor 8m 2512"
+		(property "Description" "Resistor 8 mOhm 1% 1W 2512, metal-strip current sense"
 			(at 0 0 270)
 			(layer "F.Fab")
 			(hide yes)
@@ -12733,6 +13572,18 @@
 			(layer "F.SilkS")
 			(hide yes)
 			(uuid "781e9c59-c304-4bd5-b144-99c074a653f8")
+			(effects
+				(font
+					(size 1.27 1.27)
+					(thickness 0.15)
+				)
+			)
+		)
+		(property "Package" "2512"
+			(at 0 0 270)
+			(layer "F.SilkS")
+			(hide yes)
+			(uuid "a36fecd4-a528-4dff-84db-e7e5c03ba05c")
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -12865,7 +13716,7 @@
 				)
 			)
 		)
-		(property "Description" "Resistor 1k 0603"
+		(property "Description" "Resistor 1 kOhm 1% 1/10W 0603, thick film"
 			(at 0 0 90)
 			(layer "F.Fab")
 			(hide yes)
@@ -12905,6 +13756,18 @@
 			(layer "F.SilkS")
 			(hide yes)
 			(uuid "49754a64-b87c-4e69-909f-a6981dd16957")
+			(effects
+				(font
+					(size 1.27 1.27)
+					(thickness 0.15)
+				)
+			)
+		)
+		(property "Package" "0603"
+			(at 0 0 90)
+			(layer "F.SilkS")
+			(hide yes)
+			(uuid "d62fdca4-ef19-48bf-b7d2-2bd767f02f79")
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -13072,11 +13935,23 @@
 				)
 			)
 		)
-		(property "Note" "Values follow datasheet Application Circuit 2 (11-20 V in, 10 V backup). VIN straight from the protected input: the 4 mA quiescent draw (no shutdown pin) is accepted parked (2026-10-13), which also keeps the bank topped up so key-on needs no recharge. Bank discharge for unplugging is firmware: lower vshunt and the cell shunts bleed ~0.5 A each (datasheet). CAPGD left open: chrg_status over I2C carries it. EP and SGND both GND; route SGND to the stack's bottom plate."
+		(property "Note" "Values follow datasheet Application Circuit 2 (11-20 V in, 10 V backup). VIN straight from the protected input: the 4 mA quiescent draw (no shutdown pin) is accepted parked (2026-10-13), which also keeps the bank topped up so key-on needs no recharge. Bank discharge for unplugging is firmware: lower vshunt and the cell shunts bleed ~0.5 A each (datasheet). CAPGD left open: chrg_status over I2C carries it. EP and SGND both GND (layout: SGND to the stack's bottom plate)."
 			(at 0 0 270)
 			(layer "F.SilkS")
 			(hide yes)
 			(uuid "a6b84289-0048-4bba-a61b-4bf5d04b8f7d")
+			(effects
+				(font
+					(size 1.27 1.27)
+					(thickness 0.15)
+				)
+			)
+		)
+		(property "Package" "QFN-38 5x7mm (UHF)"
+			(at 0 0 270)
+			(layer "F.SilkS")
+			(hide yes)
+			(uuid "e06c8cc3-41b8-4654-b63d-f596741ec81b")
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -15576,7 +16451,7 @@
 				)
 			)
 		)
-		(property "Description" "Resistor 121R 0603"
+		(property "Description" "Resistor 121 Ohm 1% 1/10W 0603, thick film"
 			(at 0 0 90)
 			(layer "F.Fab")
 			(hide yes)
@@ -15623,11 +16498,23 @@
 				)
 			)
 		)
-		(property "Note" "Capacitance-test current; 121 Ohm is the datasheet minimum. Set ctl_cap_scale=1: C = RT/RTST x 3.36 uF/LSB = ~2 mF/LSB"
+		(property "Note" "Capacitance-test current; 121 Ohm is the datasheet minimum. Firmware sets ctl_cap_scale=1: C = RT/RTST x 3.36 uF/LSB = ~2 mF/LSB"
 			(at 0 0 90)
 			(layer "F.SilkS")
 			(hide yes)
 			(uuid "a9a8ea6d-2fd2-4085-90bc-9c87af50f539")
+			(effects
+				(font
+					(size 1.27 1.27)
+					(thickness 0.15)
+				)
+			)
+		)
+		(property "Package" "0603"
+			(at 0 0 90)
+			(layer "F.SilkS")
+			(hide yes)
+			(uuid "f6344fc7-c1f5-4e66-9875-40d6b911de32")
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -15759,7 +16646,7 @@
 				)
 			)
 		)
-		(property "Description" "Capacitor 100n 50V X7R/X5R 0603"
+		(property "Description" "MLCC 100nF 10% 50V X7R 0603"
 			(at 0 0 270)
 			(layer "F.Fab")
 			(hide yes)
@@ -15799,6 +16686,30 @@
 			(layer "F.SilkS")
 			(hide yes)
 			(uuid "e08723fd-c06a-415f-8eba-f861ee522295")
+			(effects
+				(font
+					(size 1.27 1.27)
+					(thickness 0.15)
+				)
+			)
+		)
+		(property "Manufacturer" "Samsung Electro-Mechanics"
+			(at 0 0 270)
+			(layer "F.SilkS")
+			(hide yes)
+			(uuid "3ba2eed2-474c-468d-a6f0-b4d48ba1592d")
+			(effects
+				(font
+					(size 1.27 1.27)
+					(thickness 0.15)
+				)
+			)
+		)
+		(property "Package" "0603"
+			(at 0 0 270)
+			(layer "F.SilkS")
+			(hide yes)
+			(uuid "bbb64a09-bbad-4db2-a7a1-d72210712d31")
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -15974,6 +16885,18 @@
 			(layer "F.SilkS")
 			(hide yes)
 			(uuid "2717cbf1-8ab1-457b-8ac3-c257c514393d")
+			(effects
+				(font
+					(size 1.27 1.27)
+					(thickness 0.15)
+				)
+			)
+		)
+		(property "Package" "VSON-8 3.3x3.3mm"
+			(at 0 0 90)
+			(layer "F.SilkS")
+			(hide yes)
+			(uuid "3c6b2573-5871-4820-8a28-b7d46d579536")
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -16306,7 +17229,7 @@
 				)
 			)
 		)
-		(property "Description" "Capacitor 100n 50V X7R/X5R 0603"
+		(property "Description" "MLCC 100nF 10% 50V X7R 0603"
 			(at 0 0 180)
 			(layer "F.Fab")
 			(hide yes)
@@ -16346,6 +17269,30 @@
 			(layer "F.SilkS")
 			(hide yes)
 			(uuid "957f7ba2-34a5-432e-abe6-9c62c26447f4")
+			(effects
+				(font
+					(size 1.27 1.27)
+					(thickness 0.15)
+				)
+			)
+		)
+		(property "Manufacturer" "Samsung Electro-Mechanics"
+			(at 0 0 180)
+			(layer "F.SilkS")
+			(hide yes)
+			(uuid "40d56512-df77-40d0-a489-4d0002fb6586")
+			(effects
+				(font
+					(size 1.27 1.27)
+					(thickness 0.15)
+				)
+			)
+		)
+		(property "Package" "0603"
+			(at 0 0 180)
+			(layer "F.SilkS")
+			(hide yes)
+			(uuid "50f1557f-9762-4ce6-9c59-ef08aaed80cf")
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -16477,7 +17424,7 @@
 				)
 			)
 		)
-		(property "Description" "Capacitor 10n 50V X7R/X5R 0603"
+		(property "Description" "MLCC 10nF 10% 50V X7R 0603"
 			(at 0 0 90)
 			(layer "F.Fab")
 			(hide yes)
@@ -16505,6 +17452,30 @@
 			(layer "F.SilkS")
 			(hide yes)
 			(uuid "a2ecde20-220d-428b-acec-3e1a33f7ae1b")
+			(effects
+				(font
+					(size 1.27 1.27)
+					(thickness 0.15)
+				)
+			)
+		)
+		(property "Manufacturer" "Samsung Electro-Mechanics"
+			(at 0 0 90)
+			(layer "F.SilkS")
+			(hide yes)
+			(uuid "48a022e3-b348-4c34-92a4-a821204daa77")
+			(effects
+				(font
+					(size 1.27 1.27)
+					(thickness 0.15)
+				)
+			)
+		)
+		(property "Package" "0603"
+			(at 0 0 90)
+			(layer "F.SilkS")
+			(hide yes)
+			(uuid "4ea8c958-738b-4ed6-9611-9a95ee5500ad")
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -16638,7 +17609,7 @@
 				)
 			)
 		)
-		(property "Description" "Side-view status LED on the board edge"
+		(property "Description" "LED green, side-view 1.6x0.6mm (status, on the board edge)"
 			(at 0 0 180)
 			(unlocked yes)
 			(layer "F.Fab")
@@ -16668,6 +17639,18 @@
 			(layer "F.SilkS")
 			(hide yes)
 			(uuid "a23218b2-10fb-448d-9289-31d22ab98953")
+			(effects
+				(font
+					(size 1.27 1.27)
+					(thickness 0.15)
+				)
+			)
+		)
+		(property "Package" "1.6x0.6mm side-view (APA1606)"
+			(at 0 0 180)
+			(layer "F.SilkS")
+			(hide yes)
+			(uuid "e48bbab3-9b5c-4890-8ba6-e5fed1ce85c4")
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -16916,6 +17899,18 @@
 			(layer "F.SilkS")
 			(hide yes)
 			(uuid "5ed5cff3-76b3-4bc8-85e0-81e5af6ede40")
+			(effects
+				(font
+					(size 1.27 1.27)
+					(thickness 0.15)
+				)
+			)
+		)
+		(property "Package" "VSON-8 3.3x3.3mm"
+			(at 0 0 180)
+			(layer "F.SilkS")
+			(hide yes)
+			(uuid "88628440-e299-446f-b636-cb19c185ac0a")
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -17292,6 +18287,18 @@
 			(layer "F.SilkS")
 			(hide yes)
 			(uuid "d436c014-1f15-4eb7-8fac-82a38aae0c68")
+			(effects
+				(font
+					(size 1.27 1.27)
+					(thickness 0.15)
+				)
+			)
+		)
+		(property "Package" "VSON-8 3.3x3.3mm"
+			(at 0 0 90)
+			(layer "F.SilkS")
+			(hide yes)
+			(uuid "34391924-b81f-4b80-a713-099e299caae6")
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -17731,7 +18738,7 @@
 				)
 			)
 		)
-		(property "Description" "Resistor 100k 0603"
+		(property "Description" "Resistor 100 kOhm 1% 1/10W 0603, thick film"
 			(at 0 0 90)
 			(layer "F.Fab")
 			(hide yes)
@@ -17771,6 +18778,18 @@
 			(layer "F.SilkS")
 			(hide yes)
 			(uuid "9b12614e-c691-4abe-859a-675e6df86c7a")
+			(effects
+				(font
+					(size 1.27 1.27)
+					(thickness 0.15)
+				)
+			)
+		)
+		(property "Package" "0603"
+			(at 0 0 90)
+			(layer "F.SilkS")
+			(hide yes)
+			(uuid "7213dcc5-0eeb-4805-9b4f-0c0966f19495")
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -17902,7 +18921,7 @@
 				)
 			)
 		)
-		(property "Description" "Capacitor 47u 10V X7R/X5R 1210"
+		(property "Description" "MLCC 47uF 10% 10V X5R 1210"
 			(at 0 0 270)
 			(layer "F.Fab")
 			(hide yes)
@@ -17930,6 +18949,30 @@
 			(layer "F.SilkS")
 			(hide yes)
 			(uuid "e3f63294-5129-4252-be47-0d2af7525c03")
+			(effects
+				(font
+					(size 1.27 1.27)
+					(thickness 0.15)
+				)
+			)
+		)
+		(property "Manufacturer" "Murata"
+			(at 0 0 270)
+			(layer "F.SilkS")
+			(hide yes)
+			(uuid "b60e6764-9549-499e-900d-99bfd52e89e7")
+			(effects
+				(font
+					(size 1.27 1.27)
+					(thickness 0.15)
+				)
+			)
+		)
+		(property "Package" "1210"
+			(at 0 0 270)
+			(layer "F.SilkS")
+			(hide yes)
+			(uuid "c1567630-3d7f-4b63-8458-33f1960506d1")
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -18216,11 +19259,23 @@
 				)
 			)
 		)
-		(property "Note" "Spec said 7-way; 10-way adds Kelvin sense for the stack top/bottom (CAP4/CAPRTN measure across the lead otherwise) and doubles the power pins. Bank board: 4 x 25 F cells, NTC from pin 10 to stack minus. DNP: through-hole, fitted by the operator (2026-10-20)."
+		(property "Note" "DO NOT POPULATE at the assembler: through-hole, fitted by the operator after SMD assembly (2026-10-20). Spec said 7-way; 10-way adds Kelvin sense for the stack top/bottom (CAP4/CAPRTN measure across the lead otherwise) and doubles the power pins. Bank board: 4 x 25 F cells, NTC from pin 10 to stack minus."
 			(at 0 0 90)
 			(layer "F.SilkS")
 			(hide yes)
 			(uuid "20d0611d-4f2d-4ed1-a3c5-336c6b9044d8")
+			(effects
+				(font
+					(size 1.27 1.27)
+					(thickness 0.15)
+				)
+			)
+		)
+		(property "Package" "THT 2x5 3.00mm right-angle"
+			(at 0 0 90)
+			(layer "F.SilkS")
+			(hide yes)
+			(uuid "f5c904f2-41d6-4598-84ba-9b9dc72bd548")
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -18619,7 +19674,7 @@
 				)
 			)
 		)
-		(property "Description" "Capacitor 100n 25V X7R/X5R 0603"
+		(property "Description" "MLCC 100nF 10% 25V X7R 0603"
 			(at 0 0 90)
 			(layer "F.Fab")
 			(hide yes)
@@ -18659,6 +19714,30 @@
 			(layer "F.SilkS")
 			(hide yes)
 			(uuid "abf3739f-801e-424e-a690-672cf5c71efc")
+			(effects
+				(font
+					(size 1.27 1.27)
+					(thickness 0.15)
+				)
+			)
+		)
+		(property "Manufacturer" "Samsung Electro-Mechanics"
+			(at 0 0 90)
+			(layer "F.SilkS")
+			(hide yes)
+			(uuid "a6414d46-2c6d-444c-a95b-099ce833147e")
+			(effects
+				(font
+					(size 1.27 1.27)
+					(thickness 0.15)
+				)
+			)
+		)
+		(property "Package" "0603"
+			(at 0 0 90)
+			(layer "F.SilkS")
+			(hide yes)
+			(uuid "f6bb9117-ac4a-4598-b5d6-d74d5596a5a0")
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -18897,7 +19976,7 @@
 				)
 			)
 		)
-		(property "Description" "N-channel MOSFET, SOT-23"
+		(property "Description" "N-channel MOSFET 50V 220mA, logic-level, SOT-23"
 			(at 0 0 0)
 			(layer "F.Fab")
 			(hide yes)
@@ -18949,6 +20028,18 @@
 			(layer "F.SilkS")
 			(hide yes)
 			(uuid "00243030-93b4-42ef-af3a-ddf76f3f3bd8")
+			(effects
+				(font
+					(size 1.27 1.27)
+					(thickness 0.15)
+				)
+			)
+		)
+		(property "Package" "SOT-23"
+			(at 0 0 0)
+			(layer "F.SilkS")
+			(hide yes)
+			(uuid "588ac10b-94e6-48d5-b701-d0b66467000d")
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -19300,7 +20391,7 @@
 				)
 			)
 		)
-		(property "Description" "-60V P-channel MOSFET, reverse-polarity block"
+		(property "Description" "P-channel MOSFET -60V -50A 15mOhm, TO-252 (reverse-polarity block)"
 			(at 0 0 270)
 			(layer "F.Fab")
 			(hide yes)
@@ -19323,7 +20414,7 @@
 				)
 			)
 		)
-		(property "MPN" "SUD50P06-15"
+		(property "MPN" "SUD50P06-15-GE3"
 			(at 0 0 270)
 			(layer "F.SilkS")
 			(hide yes)
@@ -19352,6 +20443,18 @@
 			(layer "F.SilkS")
 			(hide yes)
 			(uuid "3bc63da0-8949-4456-a8c3-95fda04b051d")
+			(effects
+				(font
+					(size 1.27 1.27)
+					(thickness 0.15)
+				)
+			)
+		)
+		(property "Package" "TO-252 (DPAK)"
+			(at 0 0 270)
+			(layer "F.SilkS")
+			(hide yes)
+			(uuid "9438c443-6a23-4735-8077-22e07fcef11c")
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -19644,7 +20747,7 @@
 				)
 			)
 		)
-		(property "Description" "Side-actuated bench button on the board edge: wake / force-on; hold = discharge the bank (parked only)"
+		(property "Description" "Tactile switch SPST-NO 50mA 12V, side push, 3.5x2.9mm SMD (bench button on the board edge: wake / force-on; hold = discharge the bank, parked only)"
 			(at 0 0 270)
 			(unlocked yes)
 			(layer "F.Fab")
@@ -19674,6 +20777,18 @@
 			(layer "F.SilkS")
 			(hide yes)
 			(uuid "58671202-96a5-4e32-968f-5bba288b785e")
+			(effects
+				(font
+					(size 1.27 1.27)
+					(thickness 0.15)
+				)
+			)
+		)
+		(property "Package" "SMD side-actuated"
+			(at 0 0 270)
+			(layer "F.SilkS")
+			(hide yes)
+			(uuid "06d81ab7-a111-4e14-86e9-3b31c8f4bdb0")
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -20018,6 +21133,18 @@
 				)
 			)
 		)
+		(property "Package" "SOT-23-6 (DBV)"
+			(at 0 0 0)
+			(layer "F.SilkS")
+			(hide yes)
+			(uuid "22aafea7-f359-4072-871f-8a5c16f772ad")
+			(effects
+				(font
+					(size 1.27 1.27)
+					(thickness 0.15)
+				)
+			)
+		)
 		(path "/d128d183-3009-472b-b62b-3d546d2df9b5/cbef809c-0f1c-4c13-a2ba-a1fc9e48b867")
 		(attr smd)
 		(duplicate_pad_numbers_are_jumpers no)
@@ -20336,7 +21463,7 @@
 				)
 			)
 		)
-		(property "Description" "Resistor 100k 0603"
+		(property "Description" "Resistor 100 kOhm 1% 1/10W 0603, thick film"
 			(at 0 0 0)
 			(layer "F.Fab")
 			(hide yes)
@@ -20376,6 +21503,18 @@
 			(layer "F.SilkS")
 			(hide yes)
 			(uuid "9dc266a1-9bfe-4e50-bc4c-c4c9364f5d32")
+			(effects
+				(font
+					(size 1.27 1.27)
+					(thickness 0.15)
+				)
+			)
+		)
+		(property "Package" "0603"
+			(at 0 0 0)
+			(layer "F.SilkS")
+			(hide yes)
+			(uuid "80f6d97c-d83b-4859-bece-b8cebc2a8f0a")
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -20509,7 +21648,7 @@
 				)
 			)
 		)
-		(property "Description" "15V zener, Q_REV gate-source clamp (HAT D3)"
+		(property "Description" "Zener diode 15V 500mW, SOD-123 (Q_REV gate-source clamp, HAT D3)"
 			(at 0 0 90)
 			(unlocked yes)
 			(layer "F.Fab")
@@ -20522,7 +21661,7 @@
 				)
 			)
 		)
-		(property "MPN" "BZT52C15"
+		(property "MPN" "BZT52C15-7-F"
 			(at 0 0 90)
 			(layer "F.SilkS")
 			(hide yes)
@@ -20539,6 +21678,18 @@
 			(layer "F.SilkS")
 			(hide yes)
 			(uuid "d5e39a70-0865-45b6-b5a8-7fa68c3df0d8")
+			(effects
+				(font
+					(size 1.27 1.27)
+					(thickness 0.15)
+				)
+			)
+		)
+		(property "Package" "SOD-123"
+			(at 0 0 90)
+			(layer "F.SilkS")
+			(hide yes)
+			(uuid "acd08cd7-2899-47e7-9190-2fe966b4714f")
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -20808,7 +21959,7 @@
 				)
 			)
 		)
-		(property "Description" "Dual-line CAN bus ESD protector, 24V standoff"
+		(property "Description" "Dual-line CAN bus ESD protector, 24V standoff, SOT-23"
 			(at 0 0 0)
 			(layer "F.Fab")
 			(hide yes)
@@ -20848,6 +21999,18 @@
 			(layer "F.SilkS")
 			(hide yes)
 			(uuid "14ef185c-a0ca-4e0e-acaf-1fbf5093fb10")
+			(effects
+				(font
+					(size 1.27 1.27)
+					(thickness 0.15)
+				)
+			)
+		)
+		(property "Package" "SOT-23"
+			(at 0 0 0)
+			(layer "F.SilkS")
+			(hide yes)
+			(uuid "eddf8002-0bc5-4e69-a3dd-08a29e36fc0e")
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -21199,7 +22362,7 @@
 				)
 			)
 		)
-		(property "Description" "Resistor 27k 0603"
+		(property "Description" "Resistor 27 kOhm 1% 1/10W 0603, thick film"
 			(at 0 0 90)
 			(layer "F.Fab")
 			(hide yes)
@@ -21239,6 +22402,18 @@
 			(layer "F.SilkS")
 			(hide yes)
 			(uuid "6d751cc2-333c-4c6f-9d9c-a5a38883157c")
+			(effects
+				(font
+					(size 1.27 1.27)
+					(thickness 0.15)
+				)
+			)
+		)
+		(property "Package" "0603"
+			(at 0 0 90)
+			(layer "F.SilkS")
+			(hide yes)
+			(uuid "79857a04-af47-4899-b3f2-bf20a0492671")
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -21370,7 +22545,7 @@
 				)
 			)
 		)
-		(property "Description" "Capacitor 100n 50V X7R/X5R 0603"
+		(property "Description" "MLCC 100nF 10% 50V X7R 0603"
 			(at 0 0 180)
 			(layer "F.Fab")
 			(hide yes)
@@ -21410,6 +22585,30 @@
 			(layer "F.SilkS")
 			(hide yes)
 			(uuid "50dd3143-66e0-42be-8efc-4383ba0c6528")
+			(effects
+				(font
+					(size 1.27 1.27)
+					(thickness 0.15)
+				)
+			)
+		)
+		(property "Manufacturer" "Samsung Electro-Mechanics"
+			(at 0 0 180)
+			(layer "F.SilkS")
+			(hide yes)
+			(uuid "b816c99e-3cb9-401e-a2e1-96978ca7f315")
+			(effects
+				(font
+					(size 1.27 1.27)
+					(thickness 0.15)
+				)
+			)
+		)
+		(property "Package" "0603"
+			(at 0 0 180)
+			(layer "F.SilkS")
+			(hide yes)
+			(uuid "9929b663-9cff-4683-9bb0-ff2c6191b84e")
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -21542,7 +22741,7 @@
 				)
 			)
 		)
-		(property "Description" "Resistor 10k 0603"
+		(property "Description" "Resistor 10 kOhm 0.1% 1/10W 0603, thin film"
 			(at 0 0 90)
 			(layer "F.Fab")
 			(hide yes)
@@ -21589,11 +22788,23 @@
 				)
 			)
 		)
-		(property "Note" "NTC bias, 0.1% low drift (datasheet). Thermistor is on the cap bank."
+		(property "Note" "DO NOT SUBSTITUTE a 1% part. NTC bias, 0.1% low drift (datasheet). Thermistor is on the cap bank."
 			(at 0 0 90)
 			(layer "F.SilkS")
 			(hide yes)
 			(uuid "f4f25a51-b9c5-4cfb-aaf9-5a77c68dfecf")
+			(effects
+				(font
+					(size 1.27 1.27)
+					(thickness 0.15)
+				)
+			)
+		)
+		(property "Package" "0603"
+			(at 0 0 90)
+			(layer "F.SilkS")
+			(hide yes)
+			(uuid "f9647d75-a26d-4ee2-9fe1-e687422e6283")
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -21769,6 +22980,18 @@
 			(layer "F.SilkS")
 			(hide yes)
 			(uuid "2374cb7e-863d-4f37-a6f6-5ffa09c078ae")
+			(effects
+				(font
+					(size 1.27 1.27)
+					(thickness 0.15)
+				)
+			)
+		)
+		(property "Package" "VSON-8 3.3x3.3mm"
+			(at 0 0 0)
+			(layer "F.SilkS")
+			(hide yes)
+			(uuid "4920d359-0193-4053-bc70-53d4b772f12b")
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -22101,7 +23324,7 @@
 				)
 			)
 		)
-		(property "Description" "Capacitor 100n 50V X7R/X5R 0603"
+		(property "Description" "MLCC 100nF 10% 50V X7R 0603"
 			(at 0 0 90)
 			(layer "F.Fab")
 			(hide yes)
@@ -22129,6 +23352,30 @@
 			(layer "F.SilkS")
 			(hide yes)
 			(uuid "4a11e014-ef6f-4bba-b5b8-93cd15b916c1")
+			(effects
+				(font
+					(size 1.27 1.27)
+					(thickness 0.15)
+				)
+			)
+		)
+		(property "Manufacturer" "Samsung Electro-Mechanics"
+			(at 0 0 90)
+			(layer "F.SilkS")
+			(hide yes)
+			(uuid "4c459c13-3beb-4694-b036-854cfc358a13")
+			(effects
+				(font
+					(size 1.27 1.27)
+					(thickness 0.15)
+				)
+			)
+		)
+		(property "Package" "0603"
+			(at 0 0 90)
+			(layer "F.SilkS")
+			(hide yes)
+			(uuid "446a4fe1-1344-49ea-8898-fa9d30dd0fe0")
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -22263,7 +23510,7 @@
 				(justify mirror)
 			)
 		)
-		(property "Description" "Capacitor 1u 50V X7R/X5R 0805"
+		(property "Description" "MLCC 1uF 10% 50V X7R 0805"
 			(at 0 0 180)
 			(layer "B.Fab")
 			(hide yes)
@@ -22293,6 +23540,32 @@
 			(layer "B.SilkS")
 			(hide yes)
 			(uuid "533247ec-3fc2-497a-a4cc-f5ab4eea4c20")
+			(effects
+				(font
+					(size 1.27 1.27)
+					(thickness 0.15)
+				)
+				(justify mirror)
+			)
+		)
+		(property "Manufacturer" "Samsung Electro-Mechanics"
+			(at 0 0 180)
+			(layer "B.SilkS")
+			(hide yes)
+			(uuid "e8c2d17f-b2c8-4594-874a-343020bd478e")
+			(effects
+				(font
+					(size 1.27 1.27)
+					(thickness 0.15)
+				)
+				(justify mirror)
+			)
+		)
+		(property "Package" "0805"
+			(at 0 0 180)
+			(layer "B.SilkS")
+			(hide yes)
+			(uuid "2b471904-d397-49e2-b547-24afbe947641")
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -22454,7 +23727,7 @@
 				(justify mirror)
 			)
 		)
-		(property "Note" "Operator-sourced and fitted, as on HAT rev 2.1 (S13.5.6). Every pin passes through to the HAT; PWR touches only the ones with nets. GPIO27 (pin 13) = MCU BOOT0, GPIO24 (pin 18) = MCU reset, GPIO6 (pin 31) = power fail. GPIO24 is free on rev 2.1 (PWR supports rev 2.1 and later)."
+		(property "Note" "DO NOT POPULATE at the assembler: the operator sources and fits J1, a 2x20 2.54 mm stacking header with a 13.5 mm body, on the bottom side, as on HAT rev 2.1 (S13.5.6). Every pin passes through to the HAT; PWR touches only the ones with nets. GPIO27 (pin 13) = MCU BOOT0, GPIO24 (pin 18) = MCU reset, GPIO6 (pin 31) = power fail. GPIO24 is free on rev 2.1 (PWR supports rev 2.1 and later)."
 			(at 0 0 90)
 			(layer "B.SilkS")
 			(hide yes)
@@ -22463,6 +23736,18 @@
 				(font
 					(size 1.27 1.27)
 					(thickness 0.15)
+				)
+				(justify mirror)
+			)
+		)
+		(property "Package" "THT 2x20 2.54mm"
+			(at 0 0 90)
+			(layer "B.Fab")
+			(hide yes)
+			(uuid "34ee76a3-7b86-4dd0-8339-0609b3cad549")
+			(effects
+				(font
+					(size 1.27 1.27)
 				)
 				(justify mirror)
 			)
@@ -23067,7 +24352,7 @@
 				(justify mirror)
 			)
 		)
-		(property "Description" "Resistor 2.7R 2512"
+		(property "Description" "Resistor 2.7 Ohm 1% 1W 2512, thick film"
 			(at 0 0 0)
 			(layer "B.Fab")
 			(hide yes)
@@ -23123,6 +24408,19 @@
 			(layer "B.SilkS")
 			(hide yes)
 			(uuid "89794742-825c-4220-8088-9f25367beca2")
+			(effects
+				(font
+					(size 1.27 1.27)
+					(thickness 0.15)
+				)
+				(justify mirror)
+			)
+		)
+		(property "Package" "2512"
+			(at 0 0 0)
+			(layer "B.SilkS")
+			(hide yes)
+			(uuid "9aa4c250-a65c-420d-a5f8-2b340f8f0d5e")
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -23259,7 +24557,7 @@
 				(justify mirror)
 			)
 		)
-		(property "Description" "Capacitor 100n 50V X7R/X5R 0603"
+		(property "Description" "MLCC 100nF 10% 50V X7R 0603"
 			(at 0 0 0)
 			(layer "B.Fab")
 			(hide yes)
@@ -23289,6 +24587,32 @@
 			(layer "B.SilkS")
 			(hide yes)
 			(uuid "985225fd-205e-46e9-afed-31fce7a0de2e")
+			(effects
+				(font
+					(size 1.27 1.27)
+					(thickness 0.15)
+				)
+				(justify mirror)
+			)
+		)
+		(property "Manufacturer" "Samsung Electro-Mechanics"
+			(at 0 0 0)
+			(layer "B.SilkS")
+			(hide yes)
+			(uuid "ab971b9d-edbe-4032-8e82-0ea974d49806")
+			(effects
+				(font
+					(size 1.27 1.27)
+					(thickness 0.15)
+				)
+				(justify mirror)
+			)
+		)
+		(property "Package" "0603"
+			(at 0 0 0)
+			(layer "B.SilkS")
+			(hide yes)
+			(uuid "aff1625a-aad8-4d62-9d72-9fe0c751bd10")
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -23426,7 +24750,7 @@
 				(justify mirror)
 			)
 		)
-		(property "Description" "Capacitor 100n 50V X7R/X5R 0603"
+		(property "Description" "MLCC 100nF 10% 50V X7R 0603"
 			(at 0 0 0)
 			(layer "B.Fab")
 			(hide yes)
@@ -23456,6 +24780,32 @@
 			(layer "B.SilkS")
 			(hide yes)
 			(uuid "8c7f47da-fa81-40ee-8cd2-abf7768b5b65")
+			(effects
+				(font
+					(size 1.27 1.27)
+					(thickness 0.15)
+				)
+				(justify mirror)
+			)
+		)
+		(property "Manufacturer" "Samsung Electro-Mechanics"
+			(at 0 0 0)
+			(layer "B.SilkS")
+			(hide yes)
+			(uuid "ce058a9d-ea42-4c8c-9338-fd6618b68a26")
+			(effects
+				(font
+					(size 1.27 1.27)
+					(thickness 0.15)
+				)
+				(justify mirror)
+			)
+		)
+		(property "Package" "0603"
+			(at 0 0 0)
+			(layer "B.SilkS")
+			(hide yes)
+			(uuid "ea332002-3b23-4b1c-a20e-a6de5749ddfa")
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -23592,7 +24942,7 @@
 				(justify mirror)
 			)
 		)
-		(property "Description" "Resistor 150k 0603"
+		(property "Description" "Resistor 150 kOhm 1% 1/10W 0603, thick film"
 			(at 0 0 270)
 			(layer "B.Fab")
 			(hide yes)
@@ -23635,6 +24985,19 @@
 			(layer "B.SilkS")
 			(hide yes)
 			(uuid "3753cfdb-6bf6-4332-8037-12c77de6f3cd")
+			(effects
+				(font
+					(size 1.27 1.27)
+					(thickness 0.15)
+				)
+				(justify mirror)
+			)
+		)
+		(property "Package" "0603"
+			(at 0 0 270)
+			(layer "B.SilkS")
+			(hide yes)
+			(uuid "7b06a806-1320-4215-9daf-05fcf50895b0")
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -23771,7 +25134,7 @@
 				(justify mirror)
 			)
 		)
-		(property "Description" "Capacitor 4.7u 25V X7R/X5R 0805"
+		(property "Description" "MLCC 4.7uF 10% 25V X5R 0805"
 			(at 0 0 180)
 			(layer "B.Fab")
 			(hide yes)
@@ -23814,6 +25177,32 @@
 			(layer "B.SilkS")
 			(hide yes)
 			(uuid "1ca50a7a-8e91-46a6-8c64-47f9eebc6eb6")
+			(effects
+				(font
+					(size 1.27 1.27)
+					(thickness 0.15)
+				)
+				(justify mirror)
+			)
+		)
+		(property "Manufacturer" "Samsung Electro-Mechanics"
+			(at 0 0 180)
+			(layer "B.SilkS")
+			(hide yes)
+			(uuid "3027c3eb-902d-49e4-9e29-d98cf8cab712")
+			(effects
+				(font
+					(size 1.27 1.27)
+					(thickness 0.15)
+				)
+				(justify mirror)
+			)
+		)
+		(property "Package" "0805"
+			(at 0 0 180)
+			(layer "B.SilkS")
+			(hide yes)
+			(uuid "72185429-cc71-4bee-b6b7-fc06ef87d691")
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -23950,7 +25339,7 @@
 				(justify mirror)
 			)
 		)
-		(property "Description" "Resistor 1k 0603"
+		(property "Description" "Resistor 1 kOhm 1% 1/10W 0603, thick film"
 			(at 0 0 270)
 			(layer "B.Fab")
 			(hide yes)
@@ -23993,6 +25382,19 @@
 			(layer "B.SilkS")
 			(hide yes)
 			(uuid "e1f46ef3-9eea-4efd-a1b8-60e220590435")
+			(effects
+				(font
+					(size 1.27 1.27)
+					(thickness 0.15)
+				)
+				(justify mirror)
+			)
+		)
+		(property "Package" "0603"
+			(at 0 0 270)
+			(layer "B.SilkS")
+			(hide yes)
+			(uuid "14c3c14f-f882-4d09-9e59-043ecfb74880")
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -24129,7 +25531,7 @@
 				(justify mirror)
 			)
 		)
-		(property "Description" "Resistor 4.7k 0603"
+		(property "Description" "Resistor 4.7 kOhm 1% 1/10W 0603, thick film"
 			(at 0 0 270)
 			(layer "B.Fab")
 			(hide yes)
@@ -24172,6 +25574,19 @@
 			(layer "B.SilkS")
 			(hide yes)
 			(uuid "d060fc5a-2e04-4f4c-9305-a84907aca4fa")
+			(effects
+				(font
+					(size 1.27 1.27)
+					(thickness 0.15)
+				)
+				(justify mirror)
+			)
+		)
+		(property "Package" "0603"
+			(at 0 0 270)
+			(layer "B.SilkS")
+			(hide yes)
+			(uuid "6d0f751d-1fc9-4a00-bcdb-4d0e62ccfa3f")
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -24309,7 +25724,7 @@
 				(justify mirror)
 			)
 		)
-		(property "Description" "Resistor 10k 0603"
+		(property "Description" "Resistor 10 kOhm 1% 1/10W 0603, thick film"
 			(at 0 0 270)
 			(layer "B.Fab")
 			(hide yes)
@@ -24365,6 +25780,19 @@
 			(layer "B.SilkS")
 			(hide yes)
 			(uuid "89f090dc-e40c-42d2-b9cb-39b83d573393")
+			(effects
+				(font
+					(size 1.27 1.27)
+					(thickness 0.15)
+				)
+				(justify mirror)
+			)
+		)
+		(property "Package" "0603"
+			(at 0 0 270)
+			(layer "B.SilkS")
+			(hide yes)
+			(uuid "4d43b366-73b7-454c-a9f4-6356091f8c19")
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -24615,7 +26043,7 @@
 				(justify mirror)
 			)
 		)
-		(property "Description" "I2C buffer, powered from the Pi's 3.3 V"
+		(property "Description" "I2C hot-swap buffer, powered from the Pi's 3.3 V"
 			(at 0 0 0)
 			(layer "B.Fab")
 			(hide yes)
@@ -24653,11 +26081,24 @@
 				(justify mirror)
 			)
 		)
-		(property "Note" "Powered-off high-impedance I/O (datasheet p.1): the always-on board can never load or back-feed the Pi's I2C1 while the Pi is dark (spec P6). Pi side uses the Pi's own 1.8k pull-ups."
+		(property "Note" "The footprint is TI's DGK (VSSOP-8) land pattern despite its SOIC8 name. Powered-off high-impedance I/O (datasheet p.1): the always-on board can never load or back-feed the Pi's I2C1 while the Pi is dark (spec P6). Pi side uses the Pi's own 1.8k pull-ups."
 			(at 0 0 0)
 			(layer "B.SilkS")
 			(hide yes)
 			(uuid "f66fe5e9-184f-4843-bff0-7f088ae41909")
+			(effects
+				(font
+					(size 1.27 1.27)
+					(thickness 0.15)
+				)
+				(justify mirror)
+			)
+		)
+		(property "Package" "VSSOP-8 (DGK)"
+			(at 0 0 0)
+			(layer "B.SilkS")
+			(hide yes)
+			(uuid "8a4711f9-3ee7-4b41-87e6-77686837a1e7")
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -25369,7 +26810,7 @@
 				(justify mirror)
 			)
 		)
-		(property "Description" "Resistor 2.7R 2512"
+		(property "Description" "Resistor 2.7 Ohm 1% 1W 2512, thick film"
 			(at 0 0 0)
 			(layer "B.Fab")
 			(hide yes)
@@ -25412,6 +26853,19 @@
 			(layer "B.SilkS")
 			(hide yes)
 			(uuid "1bebd95a-0b6d-43ac-bcba-e42eacbace48")
+			(effects
+				(font
+					(size 1.27 1.27)
+					(thickness 0.15)
+				)
+				(justify mirror)
+			)
+		)
+		(property "Package" "2512"
+			(at 0 0 0)
+			(layer "B.SilkS")
+			(hide yes)
+			(uuid "f948276d-d2f2-4f16-a969-ed2bc5d7c823")
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -25537,7 +26991,7 @@
 				(justify mirror)
 			)
 		)
-		(property "Datasheet" "https://www.ti.com/lit/ds/symlink/tps7a16-q1.pdf"
+		(property "Datasheet" "https://www.ti.com/lit/ds/symlink/tps7a16a-q1.pdf"
 			(at 0 0 90)
 			(layer "B.Fab")
 			(hide yes)
@@ -25592,6 +27046,19 @@
 			(layer "B.SilkS")
 			(hide yes)
 			(uuid "5564c8f0-47a1-4e59-b98b-0e8e4f69ffdb")
+			(effects
+				(font
+					(size 1.27 1.27)
+					(thickness 0.15)
+				)
+				(justify mirror)
+			)
+		)
+		(property "Package" "HVSSOP-8 (DGN)"
+			(at 0 0 90)
+			(layer "B.SilkS")
+			(hide yes)
+			(uuid "5d47f7de-3d32-4c7d-aff8-c367b2f3199f")
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -26270,7 +27737,7 @@
 				(justify mirror)
 			)
 		)
-		(property "Description" "Resistor 10k 0603"
+		(property "Description" "Resistor 10 kOhm 1% 1/10W 0603, thick film"
 			(at 0 0 270)
 			(layer "B.Fab")
 			(hide yes)
@@ -26313,6 +27780,19 @@
 			(layer "B.SilkS")
 			(hide yes)
 			(uuid "0bf2dad8-4ed5-46c3-a13d-78d59a159ef4")
+			(effects
+				(font
+					(size 1.27 1.27)
+					(thickness 0.15)
+				)
+				(justify mirror)
+			)
+		)
+		(property "Package" "0603"
+			(at 0 0 270)
+			(layer "B.SilkS")
+			(hide yes)
+			(uuid "a1a739d3-e697-4873-a6f8-3b1d58a937cd")
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -26449,7 +27929,7 @@
 				(justify mirror)
 			)
 		)
-		(property "Description" "Resistor 10k 0603"
+		(property "Description" "Resistor 10 kOhm 1% 1/10W 0603, thick film"
 			(at 0 0 180)
 			(layer "B.Fab")
 			(hide yes)
@@ -26505,6 +27985,19 @@
 			(layer "B.SilkS")
 			(hide yes)
 			(uuid "a2b6ab3c-0b25-47c6-991c-f3b61b5d864c")
+			(effects
+				(font
+					(size 1.27 1.27)
+					(thickness 0.15)
+				)
+				(justify mirror)
+			)
+		)
+		(property "Package" "0603"
+			(at 0 0 180)
+			(layer "B.SilkS")
+			(hide yes)
+			(uuid "6a7ff14b-6d95-42a8-bb63-c459d6c409ad")
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -26641,7 +28134,7 @@
 				(justify mirror)
 			)
 		)
-		(property "Description" "Resistor 1k 0603"
+		(property "Description" "Resistor 1 kOhm 1% 1/10W 0603, thick film"
 			(at 0 0 180)
 			(layer "B.Fab")
 			(hide yes)
@@ -26684,6 +28177,19 @@
 			(layer "B.SilkS")
 			(hide yes)
 			(uuid "668a69f7-dfeb-4d33-8ed2-434acaf2aacc")
+			(effects
+				(font
+					(size 1.27 1.27)
+					(thickness 0.15)
+				)
+				(justify mirror)
+			)
+		)
+		(property "Package" "0603"
+			(at 0 0 180)
+			(layer "B.SilkS")
+			(hide yes)
+			(uuid "520c9b78-3030-4613-8d12-92e0fb2bdb26")
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -26820,7 +28326,7 @@
 				(justify mirror)
 			)
 		)
-		(property "Description" "Capacitor 100n 50V X7R/X5R 0603"
+		(property "Description" "MLCC 100nF 10% 50V X7R 0603"
 			(at 0 0 270)
 			(layer "B.Fab")
 			(hide yes)
@@ -26850,6 +28356,32 @@
 			(layer "B.SilkS")
 			(hide yes)
 			(uuid "5df4766e-34cd-4ada-8c11-be048691ddbe")
+			(effects
+				(font
+					(size 1.27 1.27)
+					(thickness 0.15)
+				)
+				(justify mirror)
+			)
+		)
+		(property "Manufacturer" "Samsung Electro-Mechanics"
+			(at 0 0 270)
+			(layer "B.SilkS")
+			(hide yes)
+			(uuid "6743e4da-7111-49f7-a898-940e4d1caf44")
+			(effects
+				(font
+					(size 1.27 1.27)
+					(thickness 0.15)
+				)
+				(justify mirror)
+			)
+		)
+		(property "Package" "0603"
+			(at 0 0 270)
+			(layer "B.SilkS")
+			(hide yes)
+			(uuid "eb8292df-cdc0-439d-809d-65f69b12aa1e")
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -26986,7 +28518,7 @@
 				(justify mirror)
 			)
 		)
-		(property "Description" "Cortex-M0+ 64 KB, LQFP-32"
+		(property "Description" "MCU, Cortex-M0+ 64 KB flash, LQFP-32"
 			(at 0 0 180)
 			(layer "B.Fab")
 			(hide yes)
@@ -27037,11 +28569,24 @@
 				(justify mirror)
 			)
 		)
-		(property "Note" "I2C1 PB6/PB7 = the Pi-facing bus, also the system bootloader's I2C1 (AN2606 Table 105, target 0x56). PA14 = SWCLK and BOOT0. Program option bytes once over SWD: nBOOT_SEL=0 (BOOT0 pin honoured), hardware IWDG on. Internal pull-ups replace external ones (trimmed 2026-10-13) on PB9 SMBALERT, PB8 PFO, PA5 BUTTON, PB4 CAN RXD (the wake signal) and PC14 BUCK_PG; drop the PC14 pull-up while parked, because PGOOD sits low with the buck off. PA8 drives GPIO6 open-drain. Spare pins: PA1-PA3, PB1, PB2, PC6, PC15."
+		(property "Note" "Supplied blank: no programming at assembly. I2C1 PB6/PB7 = the Pi-facing bus, also the system bootloader's I2C1 (AN2606 Table 105, target 0x56). PA14 = SWCLK and BOOT0. The option bytes are set once over SWD at bring-up: nBOOT_SEL=0 (BOOT0 pin honoured), hardware IWDG on. Internal pull-ups replace external ones (trimmed 2026-10-13) on PB9 SMBALERT, PB8 PFO, PA5 BUTTON, PB4 CAN RXD (the wake signal) and PC14 BUCK_PG; firmware drops the PC14 pull-up while parked, because PGOOD sits low with the buck off. PA8 drives GPIO6 open-drain. Spare pins: PA1-PA3, PB1, PB2, PC6, PC15."
 			(at 0 0 180)
 			(layer "B.SilkS")
 			(hide yes)
 			(uuid "f09808d2-b7bb-496f-91d9-295f272705e0")
+			(effects
+				(font
+					(size 1.27 1.27)
+					(thickness 0.15)
+				)
+				(justify mirror)
+			)
+		)
+		(property "Package" "LQFP-32 7x7mm"
+			(at 0 0 180)
+			(layer "B.SilkS")
+			(hide yes)
+			(uuid "76eb307a-c2c8-4cde-8119-de4183e47fcc")
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -27680,7 +29225,7 @@
 				(justify mirror)
 			)
 		)
-		(property "Description" "Resistor 1M 0603"
+		(property "Description" "Resistor 1 MOhm 1% 1/10W 0603, thick film"
 			(at 0 0 270)
 			(layer "B.Fab")
 			(hide yes)
@@ -27736,6 +29281,19 @@
 			(layer "B.SilkS")
 			(hide yes)
 			(uuid "05fe63df-1cc8-40dc-8b29-1dc1e09570db")
+			(effects
+				(font
+					(size 1.27 1.27)
+					(thickness 0.15)
+				)
+				(justify mirror)
+			)
+		)
+		(property "Package" "0603"
+			(at 0 0 270)
+			(layer "B.SilkS")
+			(hide yes)
+			(uuid "f465c02b-ddbe-486f-b071-09ad27b4045d")
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -27873,7 +29431,7 @@
 				(justify mirror)
 			)
 		)
-		(property "Description" "Capacitor 100n 50V X7R/X5R 0603"
+		(property "Description" "MLCC 100nF 10% 50V X7R 0603"
 			(at 0 0 0)
 			(layer "B.Fab")
 			(hide yes)
@@ -27916,6 +29474,32 @@
 			(layer "B.SilkS")
 			(hide yes)
 			(uuid "4ad694d1-9dfd-4927-bdd1-fb79b3bfecfe")
+			(effects
+				(font
+					(size 1.27 1.27)
+					(thickness 0.15)
+				)
+				(justify mirror)
+			)
+		)
+		(property "Manufacturer" "Samsung Electro-Mechanics"
+			(at 0 0 0)
+			(layer "B.SilkS")
+			(hide yes)
+			(uuid "a7650476-7971-415b-a6e0-3181273feede")
+			(effects
+				(font
+					(size 1.27 1.27)
+					(thickness 0.15)
+				)
+				(justify mirror)
+			)
+		)
+		(property "Package" "0603"
+			(at 0 0 0)
+			(layer "B.SilkS")
+			(hide yes)
+			(uuid "e6bc038b-b09a-44ee-a0db-c631ed11327f")
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -28054,7 +29638,7 @@
 				(justify mirror)
 			)
 		)
-		(property "Description" "100V Schottky, diode-OR leg from the input"
+		(property "Description" "Schottky diode 100V 250mA, SOD-323F"
 			(at 0 0 90)
 			(unlocked yes)
 			(layer "B.Fab")
@@ -28094,11 +29678,24 @@
 				(justify mirror)
 			)
 		)
-		(property "Note" "100 V because the other leg can sit at 0 V while this one sees the 38.9 V clamp"
+		(property "Note" "DO NOT SUBSTITUTE a lower-voltage Schottky. Diode-OR leg from the input; 100 V because the other leg can sit at 0 V while this one sees the 38.9 V clamp"
 			(at 0 0 90)
 			(layer "B.SilkS")
 			(hide yes)
 			(uuid "0f463cde-ff1e-480e-9c42-818c5428f8ec")
+			(effects
+				(font
+					(size 1.27 1.27)
+					(thickness 0.15)
+				)
+				(justify mirror)
+			)
+		)
+		(property "Package" "SOD-323F"
+			(at 0 0 90)
+			(layer "B.SilkS")
+			(hide yes)
+			(uuid "efd0ed64-6474-4206-8c04-50dd90d118d9")
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -28363,7 +29960,7 @@
 				(justify mirror)
 			)
 		)
-		(property "Description" "Capacitor 100n 50V X7R/X5R 0603"
+		(property "Description" "MLCC 100nF 10% 50V X7R 0603"
 			(at 0 0 180)
 			(layer "B.Fab")
 			(hide yes)
@@ -28393,6 +29990,32 @@
 			(layer "B.SilkS")
 			(hide yes)
 			(uuid "295451de-bfa1-4413-8ffd-55ebe09d5a88")
+			(effects
+				(font
+					(size 1.27 1.27)
+					(thickness 0.15)
+				)
+				(justify mirror)
+			)
+		)
+		(property "Manufacturer" "Samsung Electro-Mechanics"
+			(at 0 0 180)
+			(layer "B.SilkS")
+			(hide yes)
+			(uuid "eefcd34a-f86d-4a48-b1ae-3bafacf97a9c")
+			(effects
+				(font
+					(size 1.27 1.27)
+					(thickness 0.15)
+				)
+				(justify mirror)
+			)
+		)
+		(property "Package" "0603"
+			(at 0 0 180)
+			(layer "B.SilkS")
+			(hide yes)
+			(uuid "0a3dbcf9-a375-44e6-ae75-60571fa4cadc")
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -28530,7 +30153,7 @@
 				(justify mirror)
 			)
 		)
-		(property "Description" "Capacitor 100n 50V X7R/X5R 0603"
+		(property "Description" "MLCC 100nF 10% 50V X7R 0603"
 			(at 0 0 0)
 			(layer "B.Fab")
 			(hide yes)
@@ -28560,6 +30183,32 @@
 			(layer "B.SilkS")
 			(hide yes)
 			(uuid "006fdb3b-2f44-41be-85b0-d80dd86ea47d")
+			(effects
+				(font
+					(size 1.27 1.27)
+					(thickness 0.15)
+				)
+				(justify mirror)
+			)
+		)
+		(property "Manufacturer" "Samsung Electro-Mechanics"
+			(at 0 0 0)
+			(layer "B.SilkS")
+			(hide yes)
+			(uuid "946e70f5-3a93-4d1f-8b17-8e0646805708")
+			(effects
+				(font
+					(size 1.27 1.27)
+					(thickness 0.15)
+				)
+				(justify mirror)
+			)
+		)
+		(property "Package" "0603"
+			(at 0 0 0)
+			(layer "B.SilkS")
+			(hide yes)
+			(uuid "a19fb49f-5c6a-4936-8d6d-8778b8043209")
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -28698,7 +30347,7 @@
 				(justify mirror)
 			)
 		)
-		(property "Description" "100V Schottky, diode-OR leg from the backed-up bus"
+		(property "Description" "Schottky diode 100V 250mA, SOD-323F"
 			(at 0 0 90)
 			(unlocked yes)
 			(layer "B.Fab")
@@ -28738,11 +30387,24 @@
 				(justify mirror)
 			)
 		)
-		(property "Note" "Keeps the supervisor alive on hold-up after the input is lost"
+		(property "Note" "DO NOT SUBSTITUTE a lower-voltage Schottky (100 V, as D5). Diode-OR leg from the backed-up bus: keeps the supervisor alive on hold-up after the input is lost"
 			(at 0 0 90)
 			(layer "B.SilkS")
 			(hide yes)
 			(uuid "525f0946-45c6-4074-9c39-70517692ded4")
+			(effects
+				(font
+					(size 1.27 1.27)
+					(thickness 0.15)
+				)
+				(justify mirror)
+			)
+		)
+		(property "Package" "SOD-323F"
+			(at 0 0 90)
+			(layer "B.SilkS")
+			(hide yes)
+			(uuid "9d4b93b9-98da-4b48-8321-fd654eadb078")
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -29007,7 +30669,7 @@
 				(justify mirror)
 			)
 		)
-		(property "Description" "N-channel MOSFET, SOT-23"
+		(property "Description" "N-channel MOSFET 50V 220mA, logic-level, SOT-23"
 			(at 0 0 180)
 			(layer "B.Fab")
 			(hide yes)
@@ -29063,6 +30725,19 @@
 			(layer "B.SilkS")
 			(hide yes)
 			(uuid "b770497b-6aac-43b1-8865-d9705af8c4ff")
+			(effects
+				(font
+					(size 1.27 1.27)
+					(thickness 0.15)
+				)
+				(justify mirror)
+			)
+		)
+		(property "Package" "SOT-23"
+			(at 0 0 180)
+			(layer "B.SilkS")
+			(hide yes)
+			(uuid "dee69086-38ff-4d83-97ce-837c03d6c4e9")
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -29483,6 +31158,19 @@
 				(justify mirror)
 			)
 		)
+		(property "Package" "SOIC-14 (D)"
+			(at 0 0 90)
+			(layer "B.SilkS")
+			(hide yes)
+			(uuid "8e67a3d9-22f6-4a01-bff7-b3ac0c09d9f2")
+			(effects
+				(font
+					(size 1.27 1.27)
+					(thickness 0.15)
+				)
+				(justify mirror)
+			)
+		)
 		(path "/5427379f-4398-4052-803a-d0ab54250639/e0e69739-f4ba-4de2-8561-1ae033f203ff")
 		(attr smd)
 		(duplicate_pad_numbers_are_jumpers no)
@@ -29869,7 +31557,7 @@
 				(justify mirror)
 			)
 		)
-		(property "Description" "Capacitor 100n 50V X7R/X5R 0603"
+		(property "Description" "MLCC 100nF 10% 50V X7R 0603"
 			(at 0 0 180)
 			(layer "B.Fab")
 			(hide yes)
@@ -29899,6 +31587,32 @@
 			(layer "B.SilkS")
 			(hide yes)
 			(uuid "57adb7cc-80cc-4522-ab75-ba61ebf507bf")
+			(effects
+				(font
+					(size 1.27 1.27)
+					(thickness 0.15)
+				)
+				(justify mirror)
+			)
+		)
+		(property "Manufacturer" "Samsung Electro-Mechanics"
+			(at 0 0 180)
+			(layer "B.SilkS")
+			(hide yes)
+			(uuid "1635c373-e8c4-48ac-a9d3-3846b4a03ea3")
+			(effects
+				(font
+					(size 1.27 1.27)
+					(thickness 0.15)
+				)
+				(justify mirror)
+			)
+		)
+		(property "Package" "0603"
+			(at 0 0 180)
+			(layer "B.SilkS")
+			(hide yes)
+			(uuid "1ca280f9-1ebd-4271-89ef-22303857a429")
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -30035,7 +31749,7 @@
 				(justify mirror)
 			)
 		)
-		(property "Description" "Resistor 1k 0603"
+		(property "Description" "Resistor 1 kOhm 1% 1/10W 0603, thick film"
 			(at 0 0 270)
 			(layer "B.Fab")
 			(hide yes)
@@ -30078,6 +31792,19 @@
 			(layer "B.SilkS")
 			(hide yes)
 			(uuid "504aec58-6e94-49e4-b8b6-bd41f31afc71")
+			(effects
+				(font
+					(size 1.27 1.27)
+					(thickness 0.15)
+				)
+				(justify mirror)
+			)
+		)
+		(property "Package" "0603"
+			(at 0 0 270)
+			(layer "B.SilkS")
+			(hide yes)
+			(uuid "f1dddb7d-665b-4ced-a228-c61c2cf62c00")
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -30214,7 +31941,7 @@
 				(justify mirror)
 			)
 		)
-		(property "Description" "Resettable fuse, 1812, 0.5 A hold, 1.0 A trip, 40 V"
+		(property "Description" "Resettable fuse (PTC) 0.5A hold, 1.0A trip, 40V, 1812"
 			(at 0 0 90)
 			(layer "B.Fab")
 			(hide yes)
@@ -30252,11 +31979,24 @@
 				(justify mirror)
 			)
 		)
-		(property "Note" "HAT-out comes off the backed-up bus, so the HAT's K-line transceiver and TMAP supply stay in spec through a crank dip (the LTC3350 holds the bus >= 9 V). Replaces the switched TPS1HB35 (trimmed 2026-10-13). The HAT's own V12_SENSE then reads the bus, not the battery; PWR measures the battery (VIN_SENSE, LTC3350 meas_vin)."
+		(property "Note" "DO NOT SUBSTITUTE a lower-voltage PTC: 40 V, because the 12 V bus can reach the input clamp's 38.9 V. HAT-out comes off the backed-up bus, so the HAT's K-line transceiver and TMAP supply stay in spec through a crank dip (the LTC3350 holds the bus >= 9 V). Replaces the switched TPS1HB35 (trimmed 2026-10-13). The HAT's own V12_SENSE then reads the bus, not the battery; PWR measures the battery (VIN_SENSE, LTC3350 meas_vin)."
 			(at 0 0 90)
 			(layer "B.SilkS")
 			(hide yes)
 			(uuid "9d05ed3f-7702-4e52-a0a3-bafd0db7def0")
+			(effects
+				(font
+					(size 1.27 1.27)
+					(thickness 0.15)
+				)
+				(justify mirror)
+			)
+		)
+		(property "Package" "1812"
+			(at 0 0 90)
+			(layer "B.SilkS")
+			(hide yes)
+			(uuid "5fcc4390-1104-457b-ba33-b9969bb729f7")
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -30393,7 +32133,7 @@
 				(justify mirror)
 			)
 		)
-		(property "Description" "Resistor 2.7R 2512"
+		(property "Description" "Resistor 2.7 Ohm 1% 1W 2512, thick film"
 			(at 0 0 0)
 			(layer "B.Fab")
 			(hide yes)
@@ -30436,6 +32176,19 @@
 			(layer "B.SilkS")
 			(hide yes)
 			(uuid "656ac54a-9cf6-4d76-b228-4a7a42ea04c6")
+			(effects
+				(font
+					(size 1.27 1.27)
+					(thickness 0.15)
+				)
+				(justify mirror)
+			)
+		)
+		(property "Package" "2512"
+			(at 0 0 0)
+			(layer "B.SilkS")
+			(hide yes)
+			(uuid "c5edfb58-47ae-4f5e-9273-6f9a2821b67c")
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -30572,7 +32325,7 @@
 				(justify mirror)
 			)
 		)
-		(property "Description" "Resistor 2.7R 2512"
+		(property "Description" "Resistor 2.7 Ohm 1% 1W 2512, thick film"
 			(at 0 0 0)
 			(layer "B.Fab")
 			(hide yes)
@@ -30615,6 +32368,19 @@
 			(layer "B.SilkS")
 			(hide yes)
 			(uuid "51b1127c-38cd-4290-a929-20d9f6e5e0ed")
+			(effects
+				(font
+					(size 1.27 1.27)
+					(thickness 0.15)
+				)
+				(justify mirror)
+			)
+		)
+		(property "Package" "2512"
+			(at 0 0 0)
+			(layer "B.SilkS")
+			(hide yes)
+			(uuid "90673c61-ef2d-400c-9e4f-0d75f26f9f8f")
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -30751,7 +32517,7 @@
 				(justify mirror)
 			)
 		)
-		(property "Description" "Resistor 10k 0603"
+		(property "Description" "Resistor 10 kOhm 1% 1/10W 0603, thick film"
 			(at 0 0 90)
 			(layer "B.Fab")
 			(hide yes)
@@ -30807,6 +32573,19 @@
 			(layer "B.SilkS")
 			(hide yes)
 			(uuid "19d4be3e-093a-4ed6-b869-451ee90532ec")
+			(effects
+				(font
+					(size 1.27 1.27)
+					(thickness 0.15)
+				)
+				(justify mirror)
+			)
+		)
+		(property "Package" "0603"
+			(at 0 0 90)
+			(layer "B.SilkS")
+			(hide yes)
+			(uuid "23d10a38-20df-465b-ad2c-2e93490bab3c")
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -30943,7 +32722,7 @@
 				(justify mirror)
 			)
 		)
-		(property "Description" "Resistor 100k 0402"
+		(property "Description" "Resistor 100 kOhm 1% 1/16W 0402, thick film"
 			(at 0 0 270)
 			(layer "B.Fab")
 			(hide yes)
@@ -30986,6 +32765,19 @@
 			(layer "B.SilkS")
 			(hide yes)
 			(uuid "c9e98b59-1549-47fc-9b5a-5dc0fa3da067")
+			(effects
+				(font
+					(size 1.27 1.27)
+					(thickness 0.15)
+				)
+				(justify mirror)
+			)
+		)
+		(property "Package" "0402"
+			(at 0 0 270)
+			(layer "B.SilkS")
+			(hide yes)
+			(uuid "88a1e226-b028-42f9-b467-b45bc7e9321d")
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -31122,7 +32914,7 @@
 				(justify mirror)
 			)
 		)
-		(property "Description" "Resistor 1k 0603"
+		(property "Description" "Resistor 1 kOhm 1% 1/10W 0603, thick film"
 			(at 0 0 180)
 			(layer "B.Fab")
 			(hide yes)
@@ -31165,6 +32957,19 @@
 			(layer "B.SilkS")
 			(hide yes)
 			(uuid "5fb075ce-6709-42c7-9c95-384b5fec36c3")
+			(effects
+				(font
+					(size 1.27 1.27)
+					(thickness 0.15)
+				)
+				(justify mirror)
+			)
+		)
+		(property "Package" "0603"
+			(at 0 0 180)
+			(layer "B.SilkS")
+			(hide yes)
+			(uuid "1dbf414a-d494-4ddd-b1d1-b9e2e8f783da")
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -31301,7 +33106,7 @@
 				(justify mirror)
 			)
 		)
-		(property "Description" "Capacitor 100n 50V X7R/X5R 0603"
+		(property "Description" "MLCC 100nF 10% 50V X7R 0603"
 			(at 0 0 0)
 			(layer "B.Fab")
 			(hide yes)
@@ -31344,6 +33149,32 @@
 			(layer "B.SilkS")
 			(hide yes)
 			(uuid "b0b3767b-ce65-444a-8899-ab3b1ea9bcb8")
+			(effects
+				(font
+					(size 1.27 1.27)
+					(thickness 0.15)
+				)
+				(justify mirror)
+			)
+		)
+		(property "Manufacturer" "Samsung Electro-Mechanics"
+			(at 0 0 0)
+			(layer "B.SilkS")
+			(hide yes)
+			(uuid "fcde92f1-cf18-4199-be0a-f71179c93679")
+			(effects
+				(font
+					(size 1.27 1.27)
+					(thickness 0.15)
+				)
+				(justify mirror)
+			)
+		)
+		(property "Package" "0603"
+			(at 0 0 0)
+			(layer "B.SilkS")
+			(hide yes)
+			(uuid "338e0f02-6a9d-4f14-935a-97fc89ed9148")
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -31481,7 +33312,7 @@
 				(justify mirror)
 			)
 		)
-		(property "Description" "Resistor 10k 0603"
+		(property "Description" "Resistor 10 kOhm 1% 1/10W 0603, thick film"
 			(at 0 0 270)
 			(layer "B.Fab")
 			(hide yes)
@@ -31537,6 +33368,19 @@
 			(layer "B.SilkS")
 			(hide yes)
 			(uuid "9e4e756a-78a5-43f9-a6da-0285d656fcf9")
+			(effects
+				(font
+					(size 1.27 1.27)
+					(thickness 0.15)
+				)
+				(justify mirror)
+			)
+		)
+		(property "Package" "0603"
+			(at 0 0 270)
+			(layer "B.SilkS")
+			(hide yes)
+			(uuid "bf40370b-921c-4a23-ae38-808c8eceb5db")
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -31673,7 +33517,7 @@
 				(justify mirror)
 			)
 		)
-		(property "Description" "Resistor 100k 0402"
+		(property "Description" "Resistor 100 kOhm 1% 1/16W 0402, thick film"
 			(at 0 0 270)
 			(layer "B.Fab")
 			(hide yes)
@@ -31716,6 +33560,19 @@
 			(layer "B.SilkS")
 			(hide yes)
 			(uuid "67787698-ed16-4270-b807-57dad46f68a6")
+			(effects
+				(font
+					(size 1.27 1.27)
+					(thickness 0.15)
+				)
+				(justify mirror)
+			)
+		)
+		(property "Package" "0402"
+			(at 0 0 270)
+			(layer "B.SilkS")
+			(hide yes)
+			(uuid "d13e78ea-b454-4d07-86ba-7ae3a01d4809")
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -31852,7 +33709,7 @@
 				(justify mirror)
 			)
 		)
-		(property "Description" "Resistor 2.7R 2512"
+		(property "Description" "Resistor 2.7 Ohm 1% 1W 2512, thick film"
 			(at 0 0 0)
 			(layer "B.Fab")
 			(hide yes)
@@ -31895,6 +33752,19 @@
 			(layer "B.SilkS")
 			(hide yes)
 			(uuid "efa592ec-f109-472f-b0ea-dd60e7807c70")
+			(effects
+				(font
+					(size 1.27 1.27)
+					(thickness 0.15)
+				)
+				(justify mirror)
+			)
+		)
+		(property "Package" "2512"
+			(at 0 0 0)
+			(layer "B.SilkS")
+			(hide yes)
+			(uuid "7a1693d7-4594-44f5-aed6-eb8990b52fcc")
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -32031,7 +33901,7 @@
 				(justify mirror)
 			)
 		)
-		(property "Description" "Resistor 100k 0603"
+		(property "Description" "Resistor 100 kOhm 1% 1/10W 0603, thick film"
 			(at 0 0 270)
 			(layer "B.Fab")
 			(hide yes)
@@ -32074,6 +33944,19 @@
 			(layer "B.SilkS")
 			(hide yes)
 			(uuid "5e28843a-6ede-45b6-83c1-7481e1944edd")
+			(effects
+				(font
+					(size 1.27 1.27)
+					(thickness 0.15)
+				)
+				(justify mirror)
+			)
+		)
+		(property "Package" "0603"
+			(at 0 0 270)
+			(layer "B.SilkS")
+			(hide yes)
+			(uuid "43df4858-c95d-4b20-9d7d-6558987dcb3e")
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -32210,7 +34093,7 @@
 				(justify mirror)
 			)
 		)
-		(property "Description" "Capacitor 4.7u 25V X7R/X5R 0805"
+		(property "Description" "MLCC 4.7uF 10% 25V X5R 0805"
 			(at 0 0 180)
 			(layer "B.Fab")
 			(hide yes)
@@ -32240,6 +34123,32 @@
 			(layer "B.SilkS")
 			(hide yes)
 			(uuid "b558123b-ae75-4c00-90ea-851aecd9c9d3")
+			(effects
+				(font
+					(size 1.27 1.27)
+					(thickness 0.15)
+				)
+				(justify mirror)
+			)
+		)
+		(property "Manufacturer" "Samsung Electro-Mechanics"
+			(at 0 0 180)
+			(layer "B.SilkS")
+			(hide yes)
+			(uuid "4fee2afd-5165-467e-8017-baad4403c326")
+			(effects
+				(font
+					(size 1.27 1.27)
+					(thickness 0.15)
+				)
+				(justify mirror)
+			)
+		)
+		(property "Package" "0805"
+			(at 0 0 180)
+			(layer "B.SilkS")
+			(hide yes)
+			(uuid "88548df9-d6b6-4b36-a951-fa1410d86974")
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -32376,7 +34285,7 @@
 				(justify mirror)
 			)
 		)
-		(property "Description" "Resistor 10k 0603"
+		(property "Description" "Resistor 10 kOhm 1% 1/10W 0603, thick film"
 			(at 0 0 270)
 			(layer "B.Fab")
 			(hide yes)
@@ -32419,6 +34328,19 @@
 			(layer "B.SilkS")
 			(hide yes)
 			(uuid "46d1c676-9926-4f71-b4fb-ff48b2c13397")
+			(effects
+				(font
+					(size 1.27 1.27)
+					(thickness 0.15)
+				)
+				(justify mirror)
+			)
+		)
+		(property "Package" "0603"
+			(at 0 0 270)
+			(layer "B.SilkS")
+			(hide yes)
+			(uuid "1269447f-5044-47f7-a269-3a4695b32595")
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -32555,7 +34477,7 @@
 				(justify mirror)
 			)
 		)
-		(property "Description" "Capacitor 4.7u 25V X7R/X5R 0805"
+		(property "Description" "MLCC 4.7uF 10% 25V X5R 0805"
 			(at 0 0 270)
 			(layer "B.Fab")
 			(hide yes)
@@ -32585,6 +34507,32 @@
 			(layer "B.SilkS")
 			(hide yes)
 			(uuid "1f3f8a8f-dd23-4e95-a04d-4d0fae1a357a")
+			(effects
+				(font
+					(size 1.27 1.27)
+					(thickness 0.15)
+				)
+				(justify mirror)
+			)
+		)
+		(property "Manufacturer" "Samsung Electro-Mechanics"
+			(at 0 0 270)
+			(layer "B.SilkS")
+			(hide yes)
+			(uuid "433f4f16-3252-4483-9cef-467460b711bd")
+			(effects
+				(font
+					(size 1.27 1.27)
+					(thickness 0.15)
+				)
+				(justify mirror)
+			)
+		)
+		(property "Package" "0805"
+			(at 0 0 270)
+			(layer "B.SilkS")
+			(hide yes)
+			(uuid "6d43f1ac-2e2f-49fe-b090-42c2d224027c")
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -32721,7 +34669,7 @@
 				(justify mirror)
 			)
 		)
-		(property "Description" "Resistor 100k 0402"
+		(property "Description" "Resistor 100 kOhm 1% 1/16W 0402, thick film"
 			(at 0 0 90)
 			(layer "B.Fab")
 			(hide yes)
@@ -32777,6 +34725,19 @@
 			(layer "B.SilkS")
 			(hide yes)
 			(uuid "4e65e6e5-5ef9-4e2d-acc8-a9b8424f4be6")
+			(effects
+				(font
+					(size 1.27 1.27)
+					(thickness 0.15)
+				)
+				(justify mirror)
+			)
+		)
+		(property "Package" "0402"
+			(at 0 0 90)
+			(layer "B.SilkS")
+			(hide yes)
+			(uuid "ba83a4fa-11df-4ed0-bf9b-64a35669025e")
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -33026,7 +34987,7 @@
 				(justify mirror)
 			)
 		)
-		(property "Description" "Capacitor 100n 50V X7R/X5R 0603"
+		(property "Description" "MLCC 100nF 10% 50V X7R 0603"
 			(at 0 0 180)
 			(layer "B.Fab")
 			(hide yes)
@@ -33056,6 +35017,32 @@
 			(layer "B.SilkS")
 			(hide yes)
 			(uuid "268bf67c-0f3f-484a-9939-7fb641e2a90e")
+			(effects
+				(font
+					(size 1.27 1.27)
+					(thickness 0.15)
+				)
+				(justify mirror)
+			)
+		)
+		(property "Manufacturer" "Samsung Electro-Mechanics"
+			(at 0 0 180)
+			(layer "B.SilkS")
+			(hide yes)
+			(uuid "782a80e2-37c1-487f-a257-c7b18033e453")
+			(effects
+				(font
+					(size 1.27 1.27)
+					(thickness 0.15)
+				)
+				(justify mirror)
+			)
+		)
+		(property "Package" "0603"
+			(at 0 0 180)
+			(layer "B.SilkS")
+			(hide yes)
+			(uuid "4f10c500-3fee-406e-93e1-d5489cebc5f8")
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -33192,7 +35179,7 @@
 				(justify mirror)
 			)
 		)
-		(property "Description" "Resistor 100k 0603"
+		(property "Description" "Resistor 100 kOhm 1% 1/10W 0603, thick film"
 			(at 0 0 0)
 			(layer "B.Fab")
 			(hide yes)
@@ -33235,6 +35222,19 @@
 			(layer "B.SilkS")
 			(hide yes)
 			(uuid "0aa558d8-a1a0-4a56-8093-e2233bd525a9")
+			(effects
+				(font
+					(size 1.27 1.27)
+					(thickness 0.15)
+				)
+				(justify mirror)
+			)
+		)
+		(property "Package" "0603"
+			(at 0 0 0)
+			(layer "B.SilkS")
+			(hide yes)
+			(uuid "ad5ad29e-3e54-4220-814f-3b8c297f8266")
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -33371,7 +35371,7 @@
 				(justify mirror)
 			)
 		)
-		(property "Description" "Resistor 4.7k 0603"
+		(property "Description" "Resistor 4.7 kOhm 1% 1/10W 0603, thick film"
 			(at 0 0 270)
 			(layer "B.Fab")
 			(hide yes)
@@ -33414,6 +35414,19 @@
 			(layer "B.SilkS")
 			(hide yes)
 			(uuid "44d6086b-1f62-4786-8087-f8c3f13d3de9")
+			(effects
+				(font
+					(size 1.27 1.27)
+					(thickness 0.15)
+				)
+				(justify mirror)
+			)
+		)
+		(property "Package" "0603"
+			(at 0 0 270)
+			(layer "B.SilkS")
+			(hide yes)
+			(uuid "fa76ac28-0886-411d-a434-1c50b93200cd")
 			(effects
 				(font
 					(size 1.27 1.27)

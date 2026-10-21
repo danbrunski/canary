@@ -4245,7 +4245,7 @@
 				)
 			)
 		)
-		(property "Description" "Resistor 4.7k 0603"
+		(property "Description" "Resistor 4.7 kOhm 1% 1/10W 0603, thick film"
 			(at 218.44 152.4 0)
 			(hide yes)
 			(show_name no)
@@ -4268,6 +4268,17 @@
 			)
 		)
 		(property "Manufacturer" "Yageo"
+			(at 218.44 152.4 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Package" "0603"
 			(at 218.44 152.4 0)
 			(hide yes)
 			(show_name no)
@@ -4423,7 +4434,7 @@
 				)
 			)
 		)
-		(property "Description" "Capacitor 100n 50V X7R/X5R 0603"
+		(property "Description" "MLCC 100nF 10% 50V X7R 0603"
 			(at 116.84 154.94 0)
 			(hide yes)
 			(show_name no)
@@ -4435,6 +4446,28 @@
 			)
 		)
 		(property "MPN" "CL10B104KB8NNNC"
+			(at 116.84 154.94 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Manufacturer" "Samsung Electro-Mechanics"
+			(at 116.84 154.94 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Package" "0603"
 			(at 116.84 154.94 0)
 			(hide yes)
 			(show_name no)
@@ -4590,7 +4623,7 @@
 				)
 			)
 		)
-		(property "Description" "Capacitor 100n 50V X7R/X5R 0603"
+		(property "Description" "MLCC 100nF 10% 50V X7R 0603"
 			(at 144.78 154.94 0)
 			(hide yes)
 			(show_name no)
@@ -4602,6 +4635,28 @@
 			)
 		)
 		(property "MPN" "CL10B104KB8NNNC"
+			(at 144.78 154.94 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Manufacturer" "Samsung Electro-Mechanics"
+			(at 144.78 154.94 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Package" "0603"
 			(at 144.78 154.94 0)
 			(hide yes)
 			(show_name no)
@@ -4911,7 +4966,7 @@
 				)
 			)
 		)
-		(property "Description" "Capacitor 1u 50V X7R/X5R 0805"
+		(property "Description" "MLCC 1uF 10% 50V X7R 0805"
 			(at 279.4 40.64 0)
 			(hide yes)
 			(show_name no)
@@ -4923,6 +4978,28 @@
 			)
 		)
 		(property "MPN" "CL21B105KBFNNNE"
+			(at 279.4 40.64 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Manufacturer" "Samsung Electro-Mechanics"
+			(at 279.4 40.64 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Package" "0805"
 			(at 279.4 40.64 0)
 			(hide yes)
 			(show_name no)
@@ -5001,7 +5078,7 @@
 				)
 			)
 		)
-		(property "Description" "Side-actuated bench button on the board edge: wake / force-on; hold = discharge the bank (parked only)"
+		(property "Description" "Tactile switch SPST-NO 50mA 12V, side push, 3.5x2.9mm SMD (bench button on the board edge: wake / force-on; hold = discharge the bank, parked only)"
 			(at 302.26 154.94 0)
 			(hide yes)
 			(show_name no)
@@ -5024,6 +5101,17 @@
 			)
 		)
 		(property "Manufacturer" "Panasonic"
+			(at 302.26 154.94 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Package" "SMD side-actuated"
 			(at 302.26 154.94 0)
 			(hide yes)
 			(show_name no)
@@ -5410,7 +5498,7 @@
 				)
 			)
 		)
-		(property "Description" "Resistor 1k 0603"
+		(property "Description" "Resistor 1 kOhm 1% 1/10W 0603, thick film"
 			(at 332.74 152.4 0)
 			(hide yes)
 			(show_name no)
@@ -5433,6 +5521,17 @@
 			)
 		)
 		(property "Manufacturer" "Yageo"
+			(at 332.74 152.4 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Package" "0603"
 			(at 332.74 152.4 0)
 			(hide yes)
 			(show_name no)
@@ -5511,7 +5610,7 @@
 				)
 			)
 		)
-		(property "Description" "Capacitor 100n 50V X7R/X5R 0603"
+		(property "Description" "MLCC 100nF 10% 50V X7R 0603"
 			(at 35.56 124.46 0)
 			(hide yes)
 			(show_name no)
@@ -5523,6 +5622,28 @@
 			)
 		)
 		(property "MPN" "CL10B104KB8NNNC"
+			(at 35.56 124.46 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Manufacturer" "Samsung Electro-Mechanics"
+			(at 35.56 124.46 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Package" "0603"
 			(at 35.56 124.46 0)
 			(hide yes)
 			(show_name no)
@@ -5689,7 +5810,7 @@
 				)
 			)
 		)
-		(property "Description" "Capacitor 100n 50V X7R/X5R 0603"
+		(property "Description" "MLCC 100nF 10% 50V X7R 0603"
 			(at 109.22 40.64 0)
 			(hide yes)
 			(show_name no)
@@ -5701,6 +5822,28 @@
 			)
 		)
 		(property "MPN" "CL10B104KB8NNNC"
+			(at 109.22 40.64 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Manufacturer" "Samsung Electro-Mechanics"
+			(at 109.22 40.64 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Package" "0603"
 			(at 109.22 40.64 0)
 			(hide yes)
 			(show_name no)
@@ -5779,7 +5922,7 @@
 				)
 			)
 		)
-		(property "Description" "Capacitor 4.7u 25V X7R/X5R 0805"
+		(property "Description" "MLCC 4.7uF 10% 25V X5R 0805"
 			(at 172.72 73.66 0)
 			(hide yes)
 			(show_name no)
@@ -5791,6 +5934,28 @@
 			)
 		)
 		(property "MPN" "CL21A475KAQNNNE"
+			(at 172.72 73.66 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Manufacturer" "Samsung Electro-Mechanics"
+			(at 172.72 73.66 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Package" "0805"
 			(at 172.72 73.66 0)
 			(hide yes)
 			(show_name no)
@@ -6265,7 +6430,18 @@
 				)
 			)
 		)
-		(property "Note" "Edge-mounted so a probe reaches it from the side of the stack. Field reflash goes over I2C instead. DNP: through-hole, fitted by the operator (2026-10-20)."
+		(property "Package" "THT 2x5 1.27mm right-angle"
+			(at 259.08 180.34 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Note" "DO NOT POPULATE at the assembler: through-hole, fitted by the operator after SMD assembly (2026-10-20). Its part is still open (spec P10 item 10). Edge-mounted so a probe reaches it from the side of the stack. Field reflash goes over I2C instead."
 			(at 259.08 180.34 0)
 			(hide yes)
 			(show_name no)
@@ -6368,7 +6544,7 @@
 				)
 			)
 		)
-		(property "Description" "Resistor 4.7k 0603"
+		(property "Description" "Resistor 4.7 kOhm 1% 1/10W 0603, thick film"
 			(at 180.34 152.4 0)
 			(hide yes)
 			(show_name no)
@@ -6391,6 +6567,17 @@
 			)
 		)
 		(property "Manufacturer" "Yageo"
+			(at 180.34 152.4 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Package" "0603"
 			(at 180.34 152.4 0)
 			(hide yes)
 			(show_name no)
@@ -6469,7 +6656,7 @@
 				)
 			)
 		)
-		(property "Description" "100V Schottky, diode-OR leg from the backed-up bus"
+		(property "Description" "Schottky diode 100V 250mA, SOD-323F"
 			(at 246.38 40.64 0)
 			(hide yes)
 			(show_name no)
@@ -6502,7 +6689,18 @@
 				)
 			)
 		)
-		(property "Note" "Keeps the supervisor alive on hold-up after the input is lost"
+		(property "Package" "SOD-323F"
+			(at 246.38 40.64 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Note" "DO NOT SUBSTITUTE a lower-voltage Schottky (100 V, as D5). Diode-OR leg from the backed-up bus: keeps the supervisor alive on hold-up after the input is lost"
 			(at 246.38 40.64 0)
 			(hide yes)
 			(show_name no)
@@ -6647,7 +6845,7 @@
 				)
 			)
 		)
-		(property "Datasheet" "https://www.ti.com/lit/ds/symlink/tps7a16-q1.pdf"
+		(property "Datasheet" "https://www.ti.com/lit/ds/symlink/tps7a16a-q1.pdf"
 			(at 175.26 45.72 0)
 			(hide yes)
 			(show_name no)
@@ -6681,6 +6879,17 @@
 			)
 		)
 		(property "Manufacturer" "Texas Instruments"
+			(at 175.26 45.72 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Package" "HVSSOP-8 (DGN)"
 			(at 175.26 45.72 0)
 			(hide yes)
 			(show_name no)
@@ -6946,7 +7155,7 @@
 				)
 			)
 		)
-		(property "Description" "100V Schottky, diode-OR leg from the input"
+		(property "Description" "Schottky diode 100V 250mA, SOD-323F"
 			(at 213.36 40.64 0)
 			(hide yes)
 			(show_name no)
@@ -6979,7 +7188,18 @@
 				)
 			)
 		)
-		(property "Note" "100 V because the other leg can sit at 0 V while this one sees the 38.9 V clamp"
+		(property "Package" "SOD-323F"
+			(at 213.36 40.64 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Note" "DO NOT SUBSTITUTE a lower-voltage Schottky. Diode-OR leg from the input; 100 V because the other leg can sit at 0 V while this one sees the 38.9 V clamp"
 			(at 213.36 40.64 0)
 			(hide yes)
 			(show_name no)
@@ -7058,7 +7278,7 @@
 				)
 			)
 		)
-		(property "Description" "Capacitor 100n 50V X7R/X5R 0603"
+		(property "Description" "MLCC 100nF 10% 50V X7R 0603"
 			(at 88.9 154.94 0)
 			(hide yes)
 			(show_name no)
@@ -7070,6 +7290,28 @@
 			)
 		)
 		(property "MPN" "CL10B104KB8NNNC"
+			(at 88.9 154.94 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Manufacturer" "Samsung Electro-Mechanics"
+			(at 88.9 154.94 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Package" "0603"
 			(at 88.9 154.94 0)
 			(hide yes)
 			(show_name no)
@@ -7148,7 +7390,7 @@
 				)
 			)
 		)
-		(property "Description" "Cortex-M0+ 64 KB, LQFP-32"
+		(property "Description" "MCU, Cortex-M0+ 64 KB flash, LQFP-32"
 			(at 53.34 81.28 0)
 			(hide yes)
 			(show_name no)
@@ -7181,7 +7423,18 @@
 				)
 			)
 		)
-		(property "Note" "I2C1 PB6/PB7 = the Pi-facing bus, also the system bootloader's I2C1 (AN2606 Table 105, target 0x56). PA14 = SWCLK and BOOT0. Program option bytes once over SWD: nBOOT_SEL=0 (BOOT0 pin honoured), hardware IWDG on. Internal pull-ups replace external ones (trimmed 2026-10-13) on PB9 SMBALERT, PB8 PFO, PA5 BUTTON, PB4 CAN RXD (the wake signal) and PC14 BUCK_PG; drop the PC14 pull-up while parked, because PGOOD sits low with the buck off. PA8 drives GPIO6 open-drain. Spare pins: PA1-PA3, PB1, PB2, PC6, PC15."
+		(property "Package" "LQFP-32 7x7mm"
+			(at 53.34 81.28 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Note" "Supplied blank: no programming at assembly. I2C1 PB6/PB7 = the Pi-facing bus, also the system bootloader's I2C1 (AN2606 Table 105, target 0x56). PA14 = SWCLK and BOOT0. The option bytes are set once over SWD at bring-up: nBOOT_SEL=0 (BOOT0 pin honoured), hardware IWDG on. Internal pull-ups replace external ones (trimmed 2026-10-13) on PB9 SMBALERT, PB8 PFO, PA5 BUTTON, PB4 CAN RXD (the wake signal) and PC14 BUCK_PG; firmware drops the PC14 pull-up while parked, because PGOOD sits low with the buck off. PA8 drives GPIO6 open-drain. Spare pins: PA1-PA3, PB1, PB2, PC6, PC15."
 			(at 53.34 81.28 0)
 			(hide yes)
 			(show_name no)
@@ -7350,7 +7603,7 @@
 				)
 			)
 		)
-		(property "Description" "Side-view status LED on the board edge"
+		(property "Description" "LED green, side-view 1.6x0.6mm (status, on the board edge)"
 			(at 358.14 152.4 0)
 			(hide yes)
 			(show_name no)
@@ -7373,6 +7626,17 @@
 			)
 		)
 		(property "Manufacturer" "Kingbright"
+			(at 358.14 152.4 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Package" "1.6x0.6mm side-view (APA1606)"
 			(at 358.14 152.4 0)
 			(hide yes)
 			(show_name no)
@@ -7451,7 +7715,7 @@
 				)
 			)
 		)
-		(property "Description" "Capacitor 4.7u 25V X7R/X5R 0805"
+		(property "Description" "MLCC 4.7uF 10% 25V X5R 0805"
 			(at 137.16 40.64 0)
 			(hide yes)
 			(show_name no)
@@ -7463,6 +7727,28 @@
 			)
 		)
 		(property "MPN" "CL21A475KAQNNNE"
+			(at 137.16 40.64 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Manufacturer" "Samsung Electro-Mechanics"
+			(at 137.16 40.64 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Package" "0805"
 			(at 137.16 40.64 0)
 			(hide yes)
 			(show_name no)
@@ -7564,6 +7850,17 @@
 			)
 		)
 		(property "Manufacturer" "Texas Instruments"
+			(at 45.72 182.88 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Package" "SOIC-14 (D)"
 			(at 45.72 182.88 0)
 			(hide yes)
 			(show_name no)
@@ -7843,7 +8140,7 @@
 				)
 			)
 		)
-		(property "Description" "'Bank live' LED: lit only while the button is held or discharge runs"
+		(property "Description" "LED red, side-view 1.6x0.6mm ('bank live': lit only while the button is held or discharge runs)"
 			(at 284.48 213.36 0)
 			(hide yes)
 			(show_name no)
@@ -7866,6 +8163,17 @@
 			)
 		)
 		(property "Manufacturer" "Kingbright"
+			(at 284.48 213.36 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Package" "1.6x0.6mm side-view (APA1606)"
 			(at 284.48 213.36 0)
 			(hide yes)
 			(show_name no)
@@ -7944,7 +8252,7 @@
 				)
 			)
 		)
-		(property "Description" "Resistor 1k 0603"
+		(property "Description" "Resistor 1 kOhm 1% 1/10W 0603, thick film"
 			(at 259.08 213.36 0)
 			(hide yes)
 			(show_name no)
@@ -7967,6 +8275,17 @@
 			)
 		)
 		(property "Manufacturer" "Yageo"
+			(at 259.08 213.36 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Package" "0603"
 			(at 259.08 213.36 0)
 			(hide yes)
 			(show_name no)

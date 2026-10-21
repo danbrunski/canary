@@ -3078,7 +3078,7 @@
 				)
 			)
 		)
-		(property "Description" "I2C buffer, powered from the Pi's 3.3 V"
+		(property "Description" "I2C hot-swap buffer, powered from the Pi's 3.3 V"
 			(at 109.22 55.88 0)
 			(hide yes)
 			(show_name no)
@@ -3111,7 +3111,18 @@
 				)
 			)
 		)
-		(property "Note" "Powered-off high-impedance I/O (datasheet p.1): the always-on board can never load or back-feed the Pi's I2C1 while the Pi is dark (spec P6). Pi side uses the Pi's own 1.8k pull-ups."
+		(property "Package" "VSSOP-8 (DGK)"
+			(at 109.22 55.88 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Note" "The footprint is TI's DGK (VSSOP-8) land pattern despite its SOIC8 name. Powered-off high-impedance I/O (datasheet p.1): the always-on board can never load or back-feed the Pi's I2C1 while the Pi is dark (spec P6). Pi side uses the Pi's own 1.8k pull-ups."
 			(at 109.22 55.88 0)
 			(hide yes)
 			(show_name no)
@@ -3285,7 +3296,7 @@
 				)
 			)
 		)
-		(property "Description" "N-channel MOSFET, SOT-23"
+		(property "Description" "N-channel MOSFET 50V 220mA, logic-level, SOT-23"
 			(at 271.78 73.66 0)
 			(hide yes)
 			(show_name no)
@@ -3308,6 +3319,17 @@
 			)
 		)
 		(property "Manufacturer" "onsemi"
+			(at 271.78 73.66 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Package" "SOT-23"
 			(at 271.78 73.66 0)
 			(hide yes)
 			(show_name no)
@@ -3477,7 +3499,7 @@
 				)
 			)
 		)
-		(property "Description" "Resistor 100k 0603"
+		(property "Description" "Resistor 100 kOhm 1% 1/10W 0603, thick film"
 			(at 241.3 55.88 0)
 			(hide yes)
 			(show_name no)
@@ -3500,6 +3522,17 @@
 			)
 		)
 		(property "Manufacturer" "Yageo"
+			(at 241.3 55.88 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Package" "0603"
 			(at 241.3 55.88 0)
 			(hide yes)
 			(show_name no)
@@ -4052,7 +4085,18 @@
 				)
 			)
 		)
-		(property "Note" "Operator-sourced and fitted, as on HAT rev 2.1 (S13.5.6). Every pin passes through to the HAT; PWR touches only the ones with nets. GPIO27 (pin 13) = MCU BOOT0, GPIO24 (pin 18) = MCU reset, GPIO6 (pin 31) = power fail. GPIO24 is free on rev 2.1 (PWR supports rev 2.1 and later)."
+		(property "Package" "THT 2x20 2.54mm"
+			(at 38.1 63.5 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Note" "DO NOT POPULATE at the assembler: the operator sources and fits J1, a 2x20 2.54 mm stacking header with a 13.5 mm body, on the bottom side, as on HAT rev 2.1 (S13.5.6). Every pin passes through to the HAT; PWR touches only the ones with nets. GPIO27 (pin 13) = MCU BOOT0, GPIO24 (pin 18) = MCU reset, GPIO6 (pin 31) = power fail. GPIO24 is free on rev 2.1 (PWR supports rev 2.1 and later)."
 			(at 38.1 63.5 0)
 			(hide yes)
 			(show_name no)
@@ -4322,7 +4366,7 @@
 				)
 			)
 		)
-		(property "Description" "Resistor 10k 0603"
+		(property "Description" "Resistor 10 kOhm 1% 1/10W 0603, thick film"
 			(at 292.1 55.88 0)
 			(hide yes)
 			(show_name no)
@@ -4345,6 +4389,17 @@
 			)
 		)
 		(property "Manufacturer" "Yageo"
+			(at 292.1 55.88 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Package" "0603"
 			(at 292.1 55.88 0)
 			(hide yes)
 			(show_name no)
@@ -4512,7 +4567,7 @@
 				)
 			)
 		)
-		(property "Description" "Resistor 10k 0603"
+		(property "Description" "Resistor 10 kOhm 1% 1/10W 0603, thick film"
 			(at 172.72 40.64 0)
 			(hide yes)
 			(show_name no)
@@ -4535,6 +4590,17 @@
 			)
 		)
 		(property "Manufacturer" "Yageo"
+			(at 172.72 40.64 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Package" "0603"
 			(at 172.72 40.64 0)
 			(hide yes)
 			(show_name no)
@@ -4624,7 +4690,7 @@
 				)
 			)
 		)
-		(property "Description" "Resistor 10k 0603"
+		(property "Description" "Resistor 10 kOhm 1% 1/10W 0603, thick film"
 			(at 314.96 40.64 0)
 			(hide yes)
 			(show_name no)
@@ -4647,6 +4713,17 @@
 			)
 		)
 		(property "Manufacturer" "Yageo"
+			(at 314.96 40.64 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Package" "0603"
 			(at 314.96 40.64 0)
 			(hide yes)
 			(show_name no)
@@ -4813,7 +4890,7 @@
 				)
 			)
 		)
-		(property "Description" "Resistor 10k 0603"
+		(property "Description" "Resistor 10 kOhm 1% 1/10W 0603, thick film"
 			(at 203.2 40.64 0)
 			(hide yes)
 			(show_name no)
@@ -4836,6 +4913,17 @@
 			)
 		)
 		(property "Manufacturer" "Yageo"
+			(at 203.2 40.64 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Package" "0603"
 			(at 203.2 40.64 0)
 			(hide yes)
 			(show_name no)
@@ -4991,7 +5079,7 @@
 				)
 			)
 		)
-		(property "Description" "Resistor 10k 0603"
+		(property "Description" "Resistor 10 kOhm 1% 1/10W 0603, thick film"
 			(at 243.84 40.64 0)
 			(hide yes)
 			(show_name no)
@@ -5014,6 +5102,17 @@
 			)
 		)
 		(property "Manufacturer" "Yageo"
+			(at 243.84 40.64 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Package" "0603"
 			(at 243.84 40.64 0)
 			(hide yes)
 			(show_name no)
@@ -5180,7 +5279,7 @@
 				)
 			)
 		)
-		(property "Description" "Resistor 1k 0603"
+		(property "Description" "Resistor 1 kOhm 1% 1/10W 0603, thick film"
 			(at 274.32 40.64 0)
 			(hide yes)
 			(show_name no)
@@ -5203,6 +5302,17 @@
 			)
 		)
 		(property "Manufacturer" "Yageo"
+			(at 274.32 40.64 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Package" "0603"
 			(at 274.32 40.64 0)
 			(hide yes)
 			(show_name no)
@@ -5281,7 +5391,7 @@
 				)
 			)
 		)
-		(property "Description" "Resistor 1k 0603"
+		(property "Description" "Resistor 1 kOhm 1% 1/10W 0603, thick film"
 			(at 340.36 40.64 0)
 			(hide yes)
 			(show_name no)
@@ -5304,6 +5414,17 @@
 			)
 		)
 		(property "Manufacturer" "Yageo"
+			(at 340.36 40.64 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Package" "0603"
 			(at 340.36 40.64 0)
 			(hide yes)
 			(show_name no)
@@ -5460,7 +5581,7 @@
 				)
 			)
 		)
-		(property "Description" "Capacitor 100n 50V X7R/X5R 0603"
+		(property "Description" "MLCC 100nF 10% 50V X7R 0603"
 			(at 144.78 40.64 0)
 			(hide yes)
 			(show_name no)
@@ -5472,6 +5593,28 @@
 			)
 		)
 		(property "MPN" "CL10B104KB8NNNC"
+			(at 144.78 40.64 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Manufacturer" "Samsung Electro-Mechanics"
+			(at 144.78 40.64 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Package" "0603"
 			(at 144.78 40.64 0)
 			(hide yes)
 			(show_name no)
@@ -5550,7 +5693,7 @@
 				)
 			)
 		)
-		(property "Description" "Resistor 10k 0603"
+		(property "Description" "Resistor 10 kOhm 1% 1/10W 0603, thick film"
 			(at 109.22 83.82 0)
 			(hide yes)
 			(show_name no)
@@ -5573,6 +5716,17 @@
 			)
 		)
 		(property "Manufacturer" "Yageo"
+			(at 109.22 83.82 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Package" "0603"
 			(at 109.22 83.82 0)
 			(hide yes)
 			(show_name no)

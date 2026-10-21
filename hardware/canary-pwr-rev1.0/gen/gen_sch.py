@@ -459,6 +459,8 @@ def main(projdir):
                     fields.append(("MPN", p["mpn"]))
                 if p["mfr"]:
                     fields.append(("Manufacturer", p["mfr"]))
+                if p["pkg"]:
+                    fields.append(("Package", p["pkg"]))
                 if p["note"]:
                     fields.append(("Note", p["note"]))
                 ref_pos = (X + (bx[0] + bx[2]) / 2, Y + bx[1] + 1.6)

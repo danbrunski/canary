@@ -33,23 +33,40 @@ FP = {
     "1210": ("Resistor_SMD:R_1210_3225Metric", "Capacitor_SMD:C_1210_3225Metric"),
     "2512": ("Resistor_SMD:R_2512_6332Metric", None),
 }
-CAP_MPN = {
-    ("100n", "50V"): "CL10B104KB8NNNC",
-    ("10n", "50V"): "CL10B103KB8NNNC",
-    ("1n", "50V"): "GRM1885C1H102JA01D",
-    ("1u", "50V"): "CL21B105KBFNNNE",
-    ("4.7u", "50V"): "CL31B475KBHNNNE",
-    ("10u", "50V"): "GRM32ER71H106KA12L",
-    ("47u", "10V"): "GRM32ER61A476KE20L",
-    ("22u", "25V"): "GRM31CR61E226KE15L",
-    ("22p", "50V"): "GRM1885C1H220JA01D",
-    ("120p", "50V"): "GRM1885C1H121JA01D",
-    ("220n", "25V"): "CL10B224KA8NNNC",
-    ("1u", "25V"): "CL10A105KA8NNNC",
-    ("4.7u", "25V"): "CL21A475KAQNNNE",
-    ("22u", "10V"): "GRM31CR61A226KE19L",
-    ("2.2u", "10V"): "CL10A225KP8NNNC",
+# Every MLCC: MPN -> (value, voltage, size, tolerance, dielectric), read from the maker's
+# part-number key. C() takes the MPN from the value, voltage and size it is given.
+MLCC = {
+    "CL10B104KB8NNNC": ("100n", "50V", "0603", "10%", "X7R"),
+    "CL10B104KA8NNNC": ("100n", "25V", "0603", "10%", "X7R"),
+    "CL10B103KB8NNNC": ("10n", "50V", "0603", "10%", "X7R"),
+    "CL10B224KA8NNNC": ("220n", "25V", "0603", "10%", "X7R"),
+    "CL10A105KA8NNNC": ("1u", "25V", "0603", "10%", "X5R"),
+    "CL21B105KBFNNNE": ("1u", "50V", "0805", "10%", "X7R"),
+    "CL21A475KAQNNNE": ("4.7u", "25V", "0805", "10%", "X5R"),
+    "GRM1885C1H220JA01D": ("22p", "50V", "0603", "5%", "C0G"),
+    "GRM1885C1H121JA01D": ("120p", "50V", "0603", "5%", "C0G"),
+    "GRM31CR61E226KE15L": ("22u", "25V", "1206", "10%", "X5R"),
+    "GRM31CR61A226KE19L": ("22u", "10V", "1206", "10%", "X5R"),
+    "GRM32ER71H106KA12L": ("10u", "50V", "1210", "10%", "X7R"),
+    "GRM32ER61A476KE20L": ("47u", "10V", "1210", "10%", "X5R"),
 }
+MLCC_MAKER = {"CL": "Samsung Electro-Mechanics", "GRM": "Murata"}
+# Resistor families by MPN prefix: (maker, construction, tolerance, power), from the datasheets.
+RES_FAMILY = {
+    "RC0603FR-07": ("Yageo", "thick film", "1%", "1/10W"),
+    "RC0402FR-07": ("Yageo", "thick film", "1%", "1/16W"),
+    "RT0603BRD07": ("Yageo", "thin film", "0.1%", "1/10W"),
+    "WSL2512": ("Vishay", "metal-strip current sense", "1%", "1W"),
+    "CRCW2512": ("Vishay", "thick film", "1%", "1W"),
+}
+
+
+def _ohms(value):
+    """KiCad's value notation spelled out: 100k -> 100 kOhm, 2.7R -> 2.7 Ohm, 8m -> 8 mOhm."""
+    for suffix, unit in (("k", "kOhm"), ("M", "MOhm"), ("m", "mOhm"), ("R", "Ohm")):
+        if value.endswith(suffix):
+            return f"{value[:-1]} {unit}"
+    return f"{value} Ohm"
 
 
 def _yageo(value):
@@ -79,6 +96,7 @@ def part(
     dnp=False,
     ref_prefix=None,
     ref=None,
+    pkg="",
 ):
     PARTS.append(
         dict(
@@ -92,6 +110,7 @@ def part(
             mfr=mfr,
             ds=ds,
             desc=desc,
+            pkg=pkg,
             note=note,
             rot=rot,
             dnp=dnp,
@@ -101,9 +120,12 @@ def part(
     )
 
 
-def R(sheet, group, value, a, b, size="0603", mpn=None, note="", desc="", mfr=None, ref=None):
+def R(sheet, group, value, a, b, size="0603", mpn=None, note="", mfr=None, ref=None):
     if mpn is None:
-        mpn, mfr = (_yageo(value), "Yageo") if size == "0603" else ("", "")
+        assert size == "0603", f"a {size} resistor needs its MPN"
+        mpn = _yageo(value)
+    maker, kind, tol, power = next(f for p, f in RES_FAMILY.items() if mpn.startswith(p))
+    assert mfr in (None, maker), (mpn, mfr)
     part(
         sheet,
         group,
@@ -112,17 +134,21 @@ def R(sheet, group, value, a, b, size="0603", mpn=None, note="", desc="", mfr=No
         {"1": a, "2": b},
         fp=FP[size][0],
         mpn=mpn,
-        mfr=mfr or "",
-        desc=desc or f"Resistor {value} {size}",
+        mfr=maker,
+        desc=f"Resistor {_ohms(value)} {tol} {power} {size}, {kind}",
+        pkg=size,
         note=note,
         rot=90,
         ref=ref,
     )
 
 
-def C(sheet, group, value, a, b, volt="50V", size="0603", mpn=None, note="", desc=""):
-    if mpn is None:
-        mpn = CAP_MPN.get((value, volt), "")
+MLCC_BY_SPEC = {spec[:3]: mpn for mpn, spec in MLCC.items()}
+
+
+def C(sheet, group, value, a, b, volt="50V", size="0603", note=""):
+    mpn = MLCC_BY_SPEC[(value, volt, size)]
+    tol, dielectric = MLCC[mpn][3:]
     part(
         sheet,
         group,
@@ -131,13 +157,16 @@ def C(sheet, group, value, a, b, volt="50V", size="0603", mpn=None, note="", des
         {"1": a, "2": b},
         fp=FP[size][1],
         mpn=mpn,
-        desc=desc or f"Capacitor {value} {volt} X7R/X5R {size}",
+        mfr=next(m for p, m in MLCC_MAKER.items() if mpn.startswith(p)),
+        desc=f"MLCC {value}F {tol} {volt} {dielectric} {size}",
+        pkg=size,
         note=note,
         rot=90,
     )
 
 
-def CP(sheet, group, value, a, b, mpn="EEE-FK1H470P", note=""):
+# EEE-FK1H470XP is the 6.3x7.7 mm can; EEE-FK1H470P, without the X, is the 8x6.2 mm one.
+def CP(sheet, group, value, a, b, mpn="EEE-FK1H470XP", note=""):
     part(
         sheet,
         group,
@@ -147,7 +176,8 @@ def CP(sheet, group, value, a, b, mpn="EEE-FK1H470P", note=""):
         fp="Capacitor_SMD:CP_Elec_6.3x7.7",
         mpn=mpn,
         mfr="Panasonic",
-        desc=f"Aluminium electrolytic {value} 50V, 6.3x7.7 SMD",
+        desc=f"Aluminium electrolytic {value}F 20% 50V 105C, 6.3x7.7mm SMD can",
+        pkg="6.3x7.7mm SMD can",
         note=note,
         rot=90,
     )
@@ -166,6 +196,7 @@ def NFET(sheet, group, g, d, s, mpn="CSD18543Q3A", note=""):
             mfr="Texas Instruments",
             ds="https://www.ti.com/lit/ds/symlink/csd18543q3a.pdf",
             desc="60V N-channel NexFET, 8.1mOhm @10V, logic-level, VSON-8 3.3x3.3",
+            pkg="VSON-8 3.3x3.3mm",
             note=note,
         )
     else:
@@ -178,7 +209,8 @@ def NFET(sheet, group, g, d, s, mpn="CSD18543Q3A", note=""):
             fp="Package_TO_SOT_SMD:SOT-23",
             mpn=mpn,
             mfr="onsemi" if mpn == "BSS138" else "Alpha & Omega",
-            desc="N-channel MOSFET, SOT-23",
+            desc="N-channel MOSFET 50V 220mA, logic-level, SOT-23",
+            pkg="SOT-23",
             note=note,
         )
 
@@ -196,7 +228,8 @@ part(
     mpn="1803293",
     mfr="Phoenix Contact",
     desc="MC 1,5/4-G-3,81 pluggable header; mating plug MC 1,5/4-ST-3,81 (1803594)",
-    note="OBD 16 = +12V_RAW, OBD 4 = GND, OBD 6/14 = CANH/CANL, all 20 AWG (operator 2026-10-14). Spec P3. Verify Phoenix order numbers before ordering. DNP: through-hole, so the operator fits it after the fab's SMD assembly (2026-10-20), as for J1 and J3-J5.",
+    pkg="THT 1x4 3.81mm right-angle",
+    note="DO NOT POPULATE at the assembler: through-hole, fitted by the operator after SMD assembly (2026-10-20). OBD 16 = +12V_RAW, OBD 4 = GND, OBD 6/14 = CANH/CANL, all 20 AWG (operator 2026-10-14). Spec P3; the plug's order number is still open (spec P10 item 12).",
     dnp=True,
 )
 part(
@@ -206,10 +239,11 @@ part(
     "SUD50P06-15",
     {"1": "Q_REV_G", "2": "+12V_RAW", "3": "+12V_PROT"},
     fp="Package_TO_SOT_SMD:TO-252-2",
-    mpn="SUD50P06-15",
+    mpn="SUD50P06-15-GE3",
     mfr="Vishay",
     ds="https://www.vishay.com/docs/68940/sud50p06.pdf",
-    desc="-60V P-channel MOSFET, reverse-polarity block",
+    desc="P-channel MOSFET -60V -50A 15mOhm, TO-252 (reverse-polarity block)",
+    pkg="TO-252 (DPAK)",
     note="Carried from the HAT (S3.7.1): drain (tab) faces +12V_RAW, source faces +12V_PROT; the body diode conducts input->output.",
 )
 R(S, g, "100k", "Q_REV_G", "GND", note="Q_REV gate pull-down (HAT R10)")
@@ -220,9 +254,10 @@ part(
     "BZT52C15",
     {"1": "+12V_PROT", "2": "Q_REV_G"},
     fp="Diode_SMD:D_SOD-123",
-    mpn="BZT52C15",
+    mpn="BZT52C15-7-F",
     mfr="Diodes Inc",
-    desc="15V zener, Q_REV gate-source clamp (HAT D3)",
+    desc="Zener diode 15V 500mW, SOD-123 (Q_REV gate-source clamp, HAT D3)",
+    pkg="SOD-123",
     rot=0,
 )
 part(
@@ -234,7 +269,8 @@ part(
     fp="Diode_SMD:D_SMB",
     mpn="SMBJ24A",
     mfr="Littelfuse",
-    desc="600W TVS, 24V standoff, 38.9V max clamp (HAT D1)",
+    desc="TVS diode 600W unidirectional, 24V standoff, 38.9V max clamp, SMB (HAT D1)",
+    pkg="SMB (DO-214AA)",
     note="Every 50V capacitor rating on this board follows from this clamp.",
 )
 CP(S, g, "47u", "+12V_PROT", "GND", note="Bulk on the protected input (HAT C2)")
@@ -248,7 +284,8 @@ part(
     fp="Package_TO_SOT_SMD:SOT-23",
     mpn="NUP2105LT1G",
     mfr="onsemi",
-    desc="Dual-line CAN bus ESD protector, 24V standoff",
+    desc="Dual-line CAN bus ESD protector, 24V standoff, SOT-23",
+    pkg="SOT-23",
 )
 
 g = "HAT out (pluggable terminal, jumper to the HAT's J2)"
@@ -262,8 +299,9 @@ part(
     mpn="MF-MSMF050/40X-2",
     mfr="Bourns",
     ds="https://www.bourns.com/docs/Product-Datasheets/mf-msmf.pdf",
-    desc="Resettable fuse, 1812, 0.5 A hold, 1.0 A trip, 40 V",
-    note="HAT-out comes off the backed-up bus, so the HAT's K-line transceiver and TMAP supply stay in spec through a crank dip (the LTC3350 holds the bus >= 9 V). Replaces the switched TPS1HB35 (trimmed 2026-10-13). The HAT's own V12_SENSE then reads the bus, not the battery; PWR measures the battery (VIN_SENSE, LTC3350 meas_vin).",
+    desc="Resettable fuse (PTC) 0.5A hold, 1.0A trip, 40V, 1812",
+    pkg="1812",
+    note="DO NOT SUBSTITUTE a lower-voltage PTC: 40 V, because the 12 V bus can reach the input clamp's 38.9 V. HAT-out comes off the backed-up bus, so the HAT's K-line transceiver and TMAP supply stay in spec through a crank dip (the LTC3350 holds the bus >= 9 V). Replaces the switched TPS1HB35 (trimmed 2026-10-13). The HAT's own V12_SENSE then reads the bus, not the battery; PWR measures the battery (VIN_SENSE, LTC3350 meas_vin).",
     rot=90,
 )
 part(
@@ -276,7 +314,8 @@ part(
     mpn="43045-0600",
     mfr="Molex",
     desc="Micro-Fit 3.0 2x3 right-angle header; mating 43025-0600 + 43030 crimps (18-24 AWG)",
-    note="Changed 2026-10-13 from a 5-way Phoenix MC (21.6 mm) to save ~7 mm of edge: latching, keyed, and the same family and crimp tool as the cap-bank connector. Molex numbering, 1-3 on one row, 4-6 on the other: CANH (3) and CANL (6) share a column; 12 V (1) sits beside GND (2). Jumper to rev 2.1 J2: +12V_HAT -> pin 1 (+12V_RAW), GND -> pin 2, CANH/CANL -> the HAT's CAN pair; Pin 4 unused; GNSS backup removed 2026-10-18. DNP: through-hole, fitted by the operator (2026-10-20).",
+    pkg="THT 2x3 3.00mm right-angle",
+    note="DO NOT POPULATE at the assembler: through-hole, fitted by the operator after SMD assembly (2026-10-20). Changed 2026-10-13 from a 5-way Phoenix MC (21.6 mm) to save ~7 mm of edge: latching, keyed, and the same family and crimp tool as the cap-bank connector. Molex numbering, 1-3 on one row, 4-6 on the other: CANH (3) and CANL (6) share a column; 12 V (1) sits beside GND (2). Jumper to rev 2.1 J2: +12V_HAT -> pin 1 (+12V_RAW), GND -> pin 2, CANH/CANL -> the HAT's CAN pair; Pin 4 unused; GNSS backup removed 2026-10-18.",
     dnp=True,
 )
 
@@ -339,7 +378,8 @@ part(
     mfr="Analog Devices",
     ds="https://www.analog.com/media/en/technical-documentation/data-sheets/LTC3350.pdf",
     desc="Supercapacitor backup controller, 1-4 cells, I2C monitor (0x09)",
-    note="Values follow datasheet Application Circuit 2 (11-20 V in, 10 V backup). VIN straight from the protected input: the 4 mA quiescent draw (no shutdown pin) is accepted parked (2026-10-13), which also keeps the bank topped up so key-on needs no recharge. Bank discharge for unplugging is firmware: lower vshunt and the cell shunts bleed ~0.5 A each (datasheet). CAPGD left open: chrg_status over I2C carries it. EP and SGND both GND; route SGND to the stack's bottom plate.",
+    pkg="QFN-38 5x7mm (UHF)",
+    note="Values follow datasheet Application Circuit 2 (11-20 V in, 10 V backup). VIN straight from the protected input: the 4 mA quiescent draw (no shutdown pin) is accepted parked (2026-10-13), which also keeps the bank topped up so key-on needs no recharge. Bank discharge for unplugging is firmware: lower vshunt and the cell shunts bleed ~0.5 A each (datasheet). CAPGD left open: chrg_status over I2C carries it. EP and SGND both GND (layout: SGND to the stack's bottom plate).",
 )
 C(S, g, "100n", "+12V_PROT", "GND", note="VIN decoupling")
 C(S, g, "1u", "LTC_VOUTM5", "LTC_VOUTSP", volt="25V", note="VOUTM5 is 5 V below VOUT; cap sees 5 V")
@@ -365,7 +405,7 @@ R(
     "GND",
     mpn="RC0603FR-07121RL",
     mfr="Yageo",
-    note="Capacitance-test current; 121 Ohm is the datasheet minimum. Set ctl_cap_scale=1: C = RT/RTST x 3.36 uF/LSB = ~2 mF/LSB",
+    note="Capacitance-test current; 121 Ohm is the datasheet minimum. Firmware sets ctl_cap_scale=1: C = RT/RTST x 3.36 uF/LSB = ~2 mF/LSB",
 )
 R(
     S,
@@ -396,7 +436,7 @@ R(
     "LTC_GPI",
     mpn="RT0603BRD0710KL",
     mfr="Yageo",
-    note="NTC bias, 0.1% low drift (datasheet). Thermistor is on the cap bank.",
+    note="DO NOT SUBSTITUTE a 1% part. NTC bias, 0.1% low drift (datasheet). Thermistor is on the cap bank.",
 )
 C(S, g, "10n", "LTC_GPI", "GND")
 
@@ -431,7 +471,8 @@ part(
     fp="Inductor_SMD:L_Coilcraft_XAL7070-XXX",
     mpn="XAL7070-472MEB",
     mfr="Coilcraft",
-    desc="4.7 uH shielded power inductor",
+    desc="Shielded power inductor 4.7uH 20%, 7x7mm (XAL7070)",
+    pkg="7.0x7.0mm SMD (XAL7070)",
     note="L = VIN(max)/(ICHG(max) fSW) = 16/(4 A x 0.75 MHz) = 5.3 uH; Isat must exceed 1.8 x ICHG = 7.2 A",
     rot=90,
 )
@@ -456,10 +497,11 @@ part(
     "1N4148W",
     {"1": "LTC_BST", "2": "LTC_INTVCC"},
     fp="Diode_SMD:D_SOD-123",
-    mpn="1N4148W",
+    mpn="1N4148W-7-F",
     mfr="Diodes Inc",
-    desc="Bootstrap diode",
-    note="Fast PN, not Schottky: the datasheet warns BST-SW pumps past 5.5 V with a Schottky when the step-up runs non-synchronously beside the output ideal diode.",
+    desc="Fast switching diode 75V 150mA, SOD-123 (LTC3350 bootstrap)",
+    pkg="SOD-123",
+    note="DO NOT SUBSTITUTE a Schottky. Fast PN, not Schottky: the datasheet warns BST-SW pumps past 5.5 V with a Schottky when the step-up runs non-synchronously beside the output ideal diode.",
 )
 C(S, g, "220n", "LTC_BST", "LTC_SW", volt="25V", note="CB >= 20 x top-FET Ciss")
 C(S, g, "22u", "VCAP", "GND", volt="25V", size="1206")
@@ -540,7 +582,8 @@ part(
     mpn=capbank_lead.HEADER["mpn"],
     mfr=capbank_lead.HEADER["mfr"],
     desc="Micro-Fit 3.0 2x5 right-angle header, 0.76 um gold; mating 172952-1001 TPA housing + 43030-0009 gold crimps",
-    note="Spec said 7-way; 10-way adds Kelvin sense for the stack top/bottom (CAP4/CAPRTN measure across the lead otherwise) and doubles the power pins. Bank board: 4 x 25 F cells, NTC from pin 10 to stack minus. DNP: through-hole, fitted by the operator (2026-10-20).",
+    pkg="THT 2x5 3.00mm right-angle",
+    note="DO NOT POPULATE at the assembler: through-hole, fitted by the operator after SMD assembly (2026-10-20). Spec said 7-way; 10-way adds Kelvin sense for the stack top/bottom (CAP4/CAPRTN measure across the lead otherwise) and doubles the power pins. Bank board: 4 x 25 F cells, NTC from pin 10 to stack minus.",
     dnp=True,
 )
 
@@ -572,7 +615,8 @@ part(
     mfr="Texas Instruments",
     ds="https://www.ti.com/lit/ds/symlink/lm61460-q1.pdf",
     desc="36V 6A synchronous buck, auto mode, spread spectrum (AAS variant; same pinout as the AFS symbol)",
-    note="Datasheet Table 10-2 row 400 kHz / 5 V. EN is the Pi's power switch (spec P5). Footprint: SnapMagic RJR0014A, checked against TI's land pattern.",
+    pkg="VQFN-HR-14 4x3.5mm (RJR)",
+    note="DO NOT SUBSTITUTE another LM61460 variant: AAS is auto mode with spread spectrum. The footprint is named after the AFS part, which shares its land pattern; the MPN is right. Datasheet Table 10-2 row 400 kHz / 5 V. EN is the Pi's power switch (spec P5). Footprint: SnapMagic RJR0014A, checked against TI's land pattern.",
 )
 R(S, g, "33.2k", "LM_RT", "GND", note="RT = (1/400 kHz - 3.3e-5) x 1.346e4 = 33.2k")
 C(S, g, "1u", "LM_VCC", "GND", volt="25V")
@@ -587,7 +631,8 @@ part(
     fp="Inductor_SMD:L_Coilcraft_XAL7070-XXX",
     mpn="XAL7070-472MEB",
     mfr="Coilcraft",
-    desc="4.7 uH, same part as the LTC3350's",
+    desc="Shielded power inductor 4.7uH 20%, 7x7mm (XAL7070)",
+    pkg="7.0x7.0mm SMD (XAL7070)",
     rot=90,
 )
 R(S, g, "100k", "+5V_BUCK", "LM_FB", note="RFBT 100k")
@@ -654,7 +699,8 @@ part(
     mfr="Texas Instruments",
     ds="https://www.ti.com/lit/ds/symlink/ina226-q1.pdf",
     desc="I2C current/voltage monitor, address 0x40",
-    note="VBUS reads the Pi's 5 V after the ideal diode. Put it in power-down while parked (0.5 uA).",
+    pkg="VSSOP-10 (DGS)",
+    note="VBUS reads the Pi's 5 V after the ideal diode. Firmware puts it in power-down while parked (0.5 uA).",
 )
 C(S, g, "100n", "+3V3_AON", "GND")
 part(
@@ -668,6 +714,7 @@ part(
     mfr="Texas Instruments",
     ds="https://www.ti.com/lit/ds/symlink/lm74700-q1.pdf",
     desc="Ideal-diode controller, EN tied to ANODE (always on)",
+    pkg="SOT-23-6 (DBV)",
     note="HAT+ spec: a Power HAT+ must only source current and tolerate USB-C connected at the same time (spec P5 rule 1).",
 )
 C(
@@ -677,7 +724,6 @@ C(
     "OR_VCAP",
     "+5V_SHUNT",
     volt="25V",
-    mpn="CL10B104KA8NNNC",
     note="Charge-pump cap, VCAP to ANODE",
 )
 NFET(
@@ -737,8 +783,9 @@ part(
     mpn="STM32G031K8T6",
     mfr="STMicroelectronics",
     ds="https://www.st.com/resource/en/datasheet/stm32g031k8.pdf",
-    desc="Cortex-M0+ 64 KB, LQFP-32",
-    note="I2C1 PB6/PB7 = the Pi-facing bus, also the system bootloader's I2C1 (AN2606 Table 105, target 0x56). PA14 = SWCLK and BOOT0. Program option bytes once over SWD: nBOOT_SEL=0 (BOOT0 pin honoured), hardware IWDG on. Internal pull-ups replace external ones (trimmed 2026-10-13) on PB9 SMBALERT, PB8 PFO, PA5 BUTTON, PB4 CAN RXD (the wake signal) and PC14 BUCK_PG; drop the PC14 pull-up while parked, because PGOOD sits low with the buck off. PA8 drives GPIO6 open-drain. Spare pins: PA1-PA3, PB1, PB2, PC6, PC15.",
+    desc="MCU, Cortex-M0+ 64 KB flash, LQFP-32",
+    pkg="LQFP-32 7x7mm",
+    note="Supplied blank: no programming at assembly. I2C1 PB6/PB7 = the Pi-facing bus, also the system bootloader's I2C1 (AN2606 Table 105, target 0x56). PA14 = SWCLK and BOOT0. The option bytes are set once over SWD at bring-up: nBOOT_SEL=0 (BOOT0 pin honoured), hardware IWDG on. Internal pull-ups replace external ones (trimmed 2026-10-13) on PB9 SMBALERT, PB8 PFO, PA5 BUTTON, PB4 CAN RXD (the wake signal) and PC14 BUCK_PG; firmware drops the PC14 pull-up while parked, because PGOOD sits low with the buck off. PA8 drives GPIO6 open-drain. Spare pins: PA1-PA3, PB1, PB2, PC6, PC15.",
 )
 C(S, g, "100n", "+3V3_AON", "GND")
 C(S, g, "4.7u", "+3V3_AON", "GND", volt="25V", size="0805")
@@ -754,8 +801,9 @@ part(
     fp="Diode_SMD:D_SOD-323F",
     mpn="BAT46WJ,115",
     mfr="Nexperia",
-    desc="100V Schottky, diode-OR leg from the input",
-    note="100 V because the other leg can sit at 0 V while this one sees the 38.9 V clamp",
+    desc="Schottky diode 100V 250mA, SOD-323F",
+    pkg="SOD-323F",
+    note="DO NOT SUBSTITUTE a lower-voltage Schottky. Diode-OR leg from the input; 100 V because the other leg can sit at 0 V while this one sees the 38.9 V clamp",
 )
 part(
     S,
@@ -766,8 +814,9 @@ part(
     fp="Diode_SMD:D_SOD-323F",
     mpn="BAT46WJ,115",
     mfr="Nexperia",
-    desc="100V Schottky, diode-OR leg from the backed-up bus",
-    note="Keeps the supervisor alive on hold-up after the input is lost",
+    desc="Schottky diode 100V 250mA, SOD-323F",
+    pkg="SOD-323F",
+    note="DO NOT SUBSTITUTE a lower-voltage Schottky (100 V, as D5). Diode-OR leg from the backed-up bus: keeps the supervisor alive on hold-up after the input is lost",
 )
 part(
     S,
@@ -788,8 +837,9 @@ part(
     fp="canary-pwr:DGN0008C_TPS7A1633AQDGNRQ1_TEX",
     mpn="TPS7A1633AQDGNRQ1",
     mfr="Texas Instruments",
-    ds="https://www.ti.com/lit/ds/symlink/tps7a16-q1.pdf",
+    ds="https://www.ti.com/lit/ds/symlink/tps7a16a-q1.pdf",
     desc="60V 5uA-Iq LDO, 3.3V fixed",
+    pkg="HVSSOP-8 (DGN)",
     note="The always-on regulator sets the parked current (spec P7), not the MCU. FB/NC tied to GND as on the HAT's U9.",
 )
 C(S, g, "1u", "AON_IN", "GND", size="0805")
@@ -822,6 +872,7 @@ part(
     mfr="Texas Instruments",
     ds="https://www.ti.com/lit/ds/symlink/tcan1043-q1.pdf",
     desc="CAN FD transceiver with sleep and wake",
+    pkg="SOIC-14 (D)",
     note="TXD tied to VIO = permanently recessive: physically incapable of transmitting (S13.3.5). VCC is off while parked, which puts it in sleep; a bus wake pattern raises INH and pulls RXD low (datasheet 8.4.6.1).",
 )
 C(S, g, "100n", "+12V_PROT", "GND")
@@ -841,7 +892,8 @@ part(
     fp="Button_Switch_SMD:SW_SPST_EVQP7A",
     mpn="EVQ-P7A01P",
     mfr="Panasonic",
-    desc="Side-actuated bench button on the board edge: wake / force-on; hold = discharge the bank (parked only)",
+    desc="Tactile switch SPST-NO 50mA 12V, side push, 3.5x2.9mm SMD (bench button on the board edge: wake / force-on; hold = discharge the bank, parked only)",
+    pkg="SMD side-actuated",
 )
 R(S, g, "1k", "LED_STATUS", "LED1_A")
 part(
@@ -853,7 +905,8 @@ part(
     fp="LED_SMD:LED_Kingbright_APA1606_1.6x0.6mm_Horizontal",
     mpn="APA1606SGC",
     mfr="Kingbright",
-    desc="Side-view status LED on the board edge",
+    desc="LED green, side-view 1.6x0.6mm (status, on the board edge)",
+    pkg="1.6x0.6mm side-view (APA1606)",
 )
 R(S, g, "1k", "LED_BANK", "LED2_A")
 part(
@@ -865,7 +918,8 @@ part(
     fp="LED_SMD:LED_Kingbright_APA1606_1.6x0.6mm_Horizontal",
     mpn="APA1606SURCK",
     mfr="Kingbright",
-    desc="'Bank live' LED: lit only while the button is held or discharge runs",
+    desc="LED red, side-view 1.6x0.6mm ('bank live': lit only while the button is held or discharge runs)",
+    pkg="1.6x0.6mm side-view (APA1606)",
 )
 part(
     S,
@@ -888,7 +942,8 @@ part(
     mpn="",
     mfr="",
     desc="Cortex 10-pin SWD, right-angle on the board edge, bench only (MPN to choose)",
-    note="Edge-mounted so a probe reaches it from the side of the stack. Field reflash goes over I2C instead. DNP: through-hole, fitted by the operator (2026-10-20).",
+    pkg="THT 2x5 1.27mm right-angle",
+    note="DO NOT POPULATE at the assembler: through-hole, fitted by the operator after SMD assembly (2026-10-20). Its part is still open (spec P10 item 10). Edge-mounted so a probe reaches it from the side of the stack. Field reflash goes over I2C instead.",
     dnp=True,
 )
 
@@ -921,7 +976,8 @@ part(
     dnp=True,
     ref="J1",
     desc="Pi 40-pin stacking header, 13.5 mm body, on B.Cu",
-    note="Operator-sourced and fitted, as on HAT rev 2.1 (S13.5.6). Every pin passes through to the HAT; PWR touches only the ones with nets. GPIO27 (pin 13) = MCU BOOT0, GPIO24 (pin 18) = MCU reset, GPIO6 (pin 31) = power fail. GPIO24 is free on rev 2.1 (PWR supports rev 2.1 and later).",
+    pkg="THT 2x20 2.54mm",
+    note="DO NOT POPULATE at the assembler: the operator sources and fits J1, a 2x20 2.54 mm stacking header with a 13.5 mm body, on the bottom side, as on HAT rev 2.1 (S13.5.6). Every pin passes through to the HAT; PWR touches only the ones with nets. GPIO27 (pin 13) = MCU BOOT0, GPIO24 (pin 18) = MCU reset, GPIO6 (pin 31) = power fail. GPIO24 is free on rev 2.1 (PWR supports rev 2.1 and later).",
 )
 # Header bypass is provided by C34/C35.
 
@@ -945,8 +1001,9 @@ part(
     mpn="TCA4307DGKR",
     mfr="Texas Instruments",
     ds="https://www.ti.com/lit/ds/symlink/tca4307.pdf",
-    desc="I2C buffer, powered from the Pi's 3.3 V",
-    note="Powered-off high-impedance I/O (datasheet p.1): the always-on board can never load or back-feed the Pi's I2C1 while the Pi is dark (spec P6). Pi side uses the Pi's own 1.8k pull-ups.",
+    desc="I2C hot-swap buffer, powered from the Pi's 3.3 V",
+    pkg="VSSOP-8 (DGK)",
+    note="The footprint is TI's DGK (VSSOP-8) land pattern despite its SOIC8 name. Powered-off high-impedance I/O (datasheet p.1): the always-on board can never load or back-feed the Pi's I2C1 while the Pi is dark (spec P6). Pi side uses the Pi's own 1.8k pull-ups.",
 )
 C(S, g, "100n", "PI_3V3", "GND")
 R(

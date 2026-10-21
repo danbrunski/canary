@@ -4317,7 +4317,7 @@
 				)
 			)
 		)
-		(property "Description" "Capacitor 1u 25V X7R/X5R 0603"
+		(property "Description" "MLCC 1uF 10% 25V X5R 0603"
 			(at 35.56 111.76 0)
 			(hide yes)
 			(show_name no)
@@ -4329,6 +4329,28 @@
 			)
 		)
 		(property "MPN" "CL10A105KA8NNNC"
+			(at 35.56 111.76 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Manufacturer" "Samsung Electro-Mechanics"
+			(at 35.56 111.76 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Package" "0603"
 			(at 35.56 111.76 0)
 			(hide yes)
 			(show_name no)
@@ -4441,6 +4463,17 @@
 			)
 		)
 		(property "Manufacturer" "Texas Instruments"
+			(at 215.9 58.42 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Package" "VSON-8 3.3x3.3mm"
 			(at 215.9 58.42 0)
 			(hide yes)
 			(show_name no)
@@ -4693,7 +4726,7 @@
 				)
 			)
 		)
-		(property "Description" "Resistor 100k 0603"
+		(property "Description" "Resistor 100 kOhm 1% 1/10W 0603, thick film"
 			(at 35.56 142.24 0)
 			(hide yes)
 			(show_name no)
@@ -4716,6 +4749,17 @@
 			)
 		)
 		(property "Manufacturer" "Yageo"
+			(at 35.56 142.24 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Package" "0603"
 			(at 35.56 142.24 0)
 			(hide yes)
 			(show_name no)
@@ -4794,7 +4838,7 @@
 				)
 			)
 		)
-		(property "Description" "Resistor 71.5k 0603"
+		(property "Description" "Resistor 71.5 kOhm 1% 1/10W 0603, thick film"
 			(at 83.82 127 0)
 			(hide yes)
 			(show_name no)
@@ -4817,6 +4861,17 @@
 			)
 		)
 		(property "Manufacturer" "Yageo"
+			(at 83.82 127 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Package" "0603"
 			(at 83.82 127 0)
 			(hide yes)
 			(show_name no)
@@ -4906,7 +4961,7 @@
 				)
 			)
 		)
-		(property "Description" "Aluminium electrolytic 47u 50V, 6.3x7.7 SMD"
+		(property "Description" "Aluminium electrolytic 47uF 20% 50V 105C, 6.3x7.7mm SMD can"
 			(at 266.7 106.68 0)
 			(hide yes)
 			(show_name no)
@@ -4917,7 +4972,7 @@
 				)
 			)
 		)
-		(property "MPN" "EEE-FK1H470P"
+		(property "MPN" "EEE-FK1H470XP"
 			(at 266.7 106.68 0)
 			(hide yes)
 			(show_name no)
@@ -4929,6 +4984,17 @@
 			)
 		)
 		(property "Manufacturer" "Panasonic"
+			(at 266.7 106.68 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Package" "6.3x7.7mm SMD can"
 			(at 266.7 106.68 0)
 			(hide yes)
 			(show_name no)
@@ -5007,7 +5073,7 @@
 				)
 			)
 		)
-		(property "Description" "Capacitor 120p 50V X7R/X5R 0603"
+		(property "Description" "MLCC 120pF 5% 50V C0G 0603"
 			(at 124.46 142.24 0)
 			(hide yes)
 			(show_name no)
@@ -5019,6 +5085,28 @@
 			)
 		)
 		(property "MPN" "GRM1885C1H121JA01D"
+			(at 124.46 142.24 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Manufacturer" "Murata"
+			(at 124.46 142.24 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Package" "0603"
 			(at 124.46 142.24 0)
 			(hide yes)
 			(show_name no)
@@ -5372,6 +5460,17 @@
 				)
 			)
 		)
+		(property "Package" "VSON-8 3.3x3.3mm"
+			(at 238.76 53.34 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
 		(property "Note" "Bottom switch"
 			(at 238.76 53.34 0)
 			(hide yes)
@@ -5537,7 +5636,7 @@
 				)
 			)
 		)
-		(property "Description" "Resistor 649k 0603"
+		(property "Description" "Resistor 649 kOhm 1% 1/10W 0603, thick film"
 			(at 63.5 142.24 0)
 			(hide yes)
 			(show_name no)
@@ -5560,6 +5659,17 @@
 			)
 		)
 		(property "Manufacturer" "Yageo"
+			(at 63.5 142.24 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Package" "0603"
 			(at 63.5 142.24 0)
 			(hide yes)
 			(show_name no)
@@ -5649,7 +5759,7 @@
 				)
 			)
 		)
-		(property "Description" "Resistor 732k 0603"
+		(property "Description" "Resistor 732 kOhm 1% 1/10W 0603, thick film"
 			(at 132.08 127 0)
 			(hide yes)
 			(show_name no)
@@ -5672,6 +5782,17 @@
 			)
 		)
 		(property "Manufacturer" "Yageo"
+			(at 132.08 127 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Package" "0603"
 			(at 132.08 127 0)
 			(hide yes)
 			(show_name no)
@@ -5794,6 +5915,17 @@
 				)
 			)
 		)
+		(property "Package" "VSON-8 3.3x3.3mm"
+			(at 264.16 58.42 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
 		(property "Note" "Output ideal diode: source at VCAP, drain at VOUT"
 			(at 264.16 58.42 0)
 			(hide yes)
@@ -5882,7 +6014,7 @@
 				)
 			)
 		)
-		(property "Description" "Resistor 2.7R 2512"
+		(property "Description" "Resistor 2.7 Ohm 1% 1W 2512, thick film"
 			(at 66.04 210.82 0)
 			(hide yes)
 			(show_name no)
@@ -5905,6 +6037,17 @@
 			)
 		)
 		(property "Manufacturer" "Vishay"
+			(at 66.04 210.82 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Package" "2512"
 			(at 66.04 210.82 0)
 			(hide yes)
 			(show_name no)
@@ -6016,7 +6159,18 @@
 				)
 			)
 		)
-		(property "Note" "Spec said 7-way; 10-way adds Kelvin sense for the stack top/bottom (CAP4/CAPRTN measure across the lead otherwise) and doubles the power pins. Bank board: 4 x 25 F cells, NTC from pin 10 to stack minus. DNP: through-hole, fitted by the operator (2026-10-20)."
+		(property "Package" "THT 2x5 3.00mm right-angle"
+			(at 38.1 190.5 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Note" "DO NOT POPULATE at the assembler: through-hole, fitted by the operator after SMD assembly (2026-10-20). Spec said 7-way; 10-way adds Kelvin sense for the stack top/bottom (CAP4/CAPRTN measure across the lead otherwise) and doubles the power pins. Bank board: 4 x 25 F cells, NTC from pin 10 to stack minus."
 			(at 38.1 190.5 0)
 			(hide yes)
 			(show_name no)
@@ -6119,7 +6273,7 @@
 				)
 			)
 		)
-		(property "Description" "Resistor 100k 0603"
+		(property "Description" "Resistor 100 kOhm 1% 1/10W 0603, thick film"
 			(at 66.04 157.48 0)
 			(hide yes)
 			(show_name no)
@@ -6142,6 +6296,17 @@
 			)
 		)
 		(property "Manufacturer" "Yageo"
+			(at 66.04 157.48 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Package" "0603"
 			(at 66.04 157.48 0)
 			(hide yes)
 			(show_name no)
@@ -6220,7 +6385,7 @@
 				)
 			)
 		)
-		(property "Description" "Capacitor 10n 50V X7R/X5R 0603"
+		(property "Description" "MLCC 10nF 10% 50V X7R 0603"
 			(at 58.42 127 0)
 			(hide yes)
 			(show_name no)
@@ -6232,6 +6397,28 @@
 			)
 		)
 		(property "MPN" "CL10B103KB8NNNC"
+			(at 58.42 127 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Manufacturer" "Samsung Electro-Mechanics"
+			(at 58.42 127 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Package" "0603"
 			(at 58.42 127 0)
 			(hide yes)
 			(show_name no)
@@ -6321,7 +6508,7 @@
 				)
 			)
 		)
-		(property "Description" "Capacitor 1u 25V X7R/X5R 0603"
+		(property "Description" "MLCC 1uF 10% 25V X5R 0603"
 			(at 129.54 111.76 0)
 			(hide yes)
 			(show_name no)
@@ -6333,6 +6520,28 @@
 			)
 		)
 		(property "MPN" "CL10A105KA8NNNC"
+			(at 129.54 111.76 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Manufacturer" "Samsung Electro-Mechanics"
+			(at 129.54 111.76 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Package" "0603"
 			(at 129.54 111.76 0)
 			(hide yes)
 			(show_name no)
@@ -6411,7 +6620,7 @@
 				)
 			)
 		)
-		(property "Description" "Resistor 8m 2512"
+		(property "Description" "Resistor 8 mOhm 1% 1W 2512, metal-strip current sense"
 			(at 220.98 91.44 0)
 			(hide yes)
 			(show_name no)
@@ -6434,6 +6643,17 @@
 			)
 		)
 		(property "Manufacturer" "Vishay"
+			(at 220.98 91.44 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Package" "2512"
 			(at 220.98 91.44 0)
 			(hide yes)
 			(show_name no)
@@ -6523,7 +6743,7 @@
 				)
 			)
 		)
-		(property "Description" "Capacitor 220n 25V X7R/X5R 0603"
+		(property "Description" "MLCC 220nF 10% 25V X7R 0603"
 			(at 279.4 91.44 0)
 			(hide yes)
 			(show_name no)
@@ -6535,6 +6755,28 @@
 			)
 		)
 		(property "MPN" "CL10B224KA8NNNC"
+			(at 279.4 91.44 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Manufacturer" "Samsung Electro-Mechanics"
+			(at 279.4 91.44 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Package" "0603"
 			(at 279.4 91.44 0)
 			(hide yes)
 			(show_name no)
@@ -6734,7 +6976,18 @@
 				)
 			)
 		)
-		(property "Note" "Values follow datasheet Application Circuit 2 (11-20 V in, 10 V backup). VIN straight from the protected input: the 4 mA quiescent draw (no shutdown pin) is accepted parked (2026-10-13), which also keeps the bank topped up so key-on needs no recharge. Bank discharge for unplugging is firmware: lower vshunt and the cell shunts bleed ~0.5 A each (datasheet). CAPGD left open: chrg_status over I2C carries it. EP and SGND both GND; route SGND to the stack's bottom plate."
+		(property "Package" "QFN-38 5x7mm (UHF)"
+			(at 35.56 45.72 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Note" "Values follow datasheet Application Circuit 2 (11-20 V in, 10 V backup). VIN straight from the protected input: the 4 mA quiescent draw (no shutdown pin) is accepted parked (2026-10-13), which also keeps the bank topped up so key-on needs no recharge. Bank discharge for unplugging is firmware: lower vshunt and the cell shunts bleed ~0.5 A each (datasheet). CAPGD left open: chrg_status over I2C carries it. EP and SGND both GND (layout: SGND to the stack's bottom plate)."
 			(at 35.56 45.72 0)
 			(hide yes)
 			(show_name no)
@@ -7001,7 +7254,7 @@
 				)
 			)
 		)
-		(property "Description" "Capacitor 10n 50V X7R/X5R 0603"
+		(property "Description" "MLCC 10nF 10% 50V X7R 0603"
 			(at 124.46 157.48 0)
 			(hide yes)
 			(show_name no)
@@ -7013,6 +7266,28 @@
 			)
 		)
 		(property "MPN" "CL10B103KB8NNNC"
+			(at 124.46 157.48 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Manufacturer" "Samsung Electro-Mechanics"
+			(at 124.46 157.48 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Package" "0603"
 			(at 124.46 157.48 0)
 			(hide yes)
 			(show_name no)
@@ -7091,7 +7366,7 @@
 				)
 			)
 		)
-		(property "Description" "Resistor 2.7R 2512"
+		(property "Description" "Resistor 2.7 Ohm 1% 1W 2512, thick film"
 			(at 76.2 185.42 0)
 			(hide yes)
 			(show_name no)
@@ -7114,6 +7389,17 @@
 			)
 		)
 		(property "Manufacturer" "Vishay"
+			(at 76.2 185.42 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Package" "2512"
 			(at 76.2 185.42 0)
 			(hide yes)
 			(show_name no)
@@ -7280,7 +7566,7 @@
 				)
 			)
 		)
-		(property "Description" "Capacitor 4.7u 25V X7R/X5R 0805"
+		(property "Description" "MLCC 4.7uF 10% 25V X5R 0805"
 			(at 157.48 111.76 0)
 			(hide yes)
 			(show_name no)
@@ -7292,6 +7578,28 @@
 			)
 		)
 		(property "MPN" "CL21A475KAQNNNE"
+			(at 157.48 111.76 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Manufacturer" "Samsung Electro-Mechanics"
+			(at 157.48 111.76 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Package" "0805"
 			(at 157.48 111.76 0)
 			(hide yes)
 			(show_name no)
@@ -7491,6 +7799,17 @@
 				)
 			)
 		)
+		(property "Package" "VSON-8 3.3x3.3mm"
+			(at 195.58 58.42 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
 		(property "Note" "Input ideal diode: source at VIN, drain at VOUTSP"
 			(at 195.58 58.42 0)
 			(hide yes)
@@ -7579,7 +7898,7 @@
 				)
 			)
 		)
-		(property "Description" "Aluminium electrolytic 47u 50V, 6.3x7.7 SMD"
+		(property "Description" "Aluminium electrolytic 47uF 20% 50V 105C, 6.3x7.7mm SMD can"
 			(at 238.76 106.68 0)
 			(hide yes)
 			(show_name no)
@@ -7590,7 +7909,7 @@
 				)
 			)
 		)
-		(property "MPN" "EEE-FK1H470P"
+		(property "MPN" "EEE-FK1H470XP"
 			(at 238.76 106.68 0)
 			(hide yes)
 			(show_name no)
@@ -7602,6 +7921,17 @@
 			)
 		)
 		(property "Manufacturer" "Panasonic"
+			(at 238.76 106.68 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Package" "6.3x7.7mm SMD can"
 			(at 238.76 106.68 0)
 			(hide yes)
 			(show_name no)
@@ -7845,7 +8175,7 @@
 				)
 			)
 		)
-		(property "Description" "Resistor 121R 0603"
+		(property "Description" "Resistor 121 Ohm 1% 1/10W 0603, thick film"
 			(at 109.22 127 0)
 			(hide yes)
 			(show_name no)
@@ -7878,7 +8208,18 @@
 				)
 			)
 		)
-		(property "Note" "Capacitance-test current; 121 Ohm is the datasheet minimum. Set ctl_cap_scale=1: C = RT/RTST x 3.36 uF/LSB = ~2 mF/LSB"
+		(property "Package" "0603"
+			(at 109.22 127 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Note" "Capacitance-test current; 121 Ohm is the datasheet minimum. Firmware sets ctl_cap_scale=1: C = RT/RTST x 3.36 uF/LSB = ~2 mF/LSB"
 			(at 109.22 127 0)
 			(hide yes)
 			(show_name no)
@@ -7957,7 +8298,7 @@
 				)
 			)
 		)
-		(property "Description" "Resistor 2.7R 2512"
+		(property "Description" "Resistor 2.7 Ohm 1% 1W 2512, thick film"
 			(at 142.24 185.42 0)
 			(hide yes)
 			(show_name no)
@@ -7980,6 +8321,17 @@
 			)
 		)
 		(property "Manufacturer" "Vishay"
+			(at 142.24 185.42 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Package" "2512"
 			(at 142.24 185.42 0)
 			(hide yes)
 			(show_name no)
@@ -8058,7 +8410,7 @@
 				)
 			)
 		)
-		(property "Description" "Capacitor 10u 50V X7R/X5R 1210"
+		(property "Description" "MLCC 10uF 10% 50V X7R 1210"
 			(at 294.64 106.68 0)
 			(hide yes)
 			(show_name no)
@@ -8070,6 +8422,28 @@
 			)
 		)
 		(property "MPN" "GRM32ER71H106KA12L"
+			(at 294.64 106.68 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Manufacturer" "Murata"
+			(at 294.64 106.68 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Package" "1210"
 			(at 294.64 106.68 0)
 			(hide yes)
 			(show_name no)
@@ -8148,7 +8522,7 @@
 				)
 			)
 		)
-		(property "Description" "Resistor 665k 0603"
+		(property "Description" "Resistor 665 kOhm 1% 1/10W 0603, thick film"
 			(at 38.1 157.48 0)
 			(hide yes)
 			(show_name no)
@@ -8171,6 +8545,17 @@
 			)
 		)
 		(property "Manufacturer" "Yageo"
+			(at 38.1 157.48 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Package" "0603"
 			(at 38.1 157.48 0)
 			(hide yes)
 			(show_name no)
@@ -8260,7 +8645,7 @@
 				)
 			)
 		)
-		(property "Description" "Resistor 8m 2512"
+		(property "Description" "Resistor 8 mOhm 1% 1W 2512, metal-strip current sense"
 			(at 289.56 40.64 0)
 			(hide yes)
 			(show_name no)
@@ -8283,6 +8668,17 @@
 			)
 		)
 		(property "Manufacturer" "Vishay"
+			(at 289.56 40.64 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Package" "2512"
 			(at 289.56 40.64 0)
 			(hide yes)
 			(show_name no)
@@ -8372,7 +8768,7 @@
 				)
 			)
 		)
-		(property "Description" "4.7 uH shielded power inductor"
+		(property "Description" "Shielded power inductor 4.7uH 20%, 7x7mm (XAL7070)"
 			(at 190.5 91.44 0)
 			(hide yes)
 			(show_name no)
@@ -8395,6 +8791,17 @@
 			)
 		)
 		(property "Manufacturer" "Coilcraft"
+			(at 190.5 91.44 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Package" "7.0x7.0mm SMD (XAL7070)"
 			(at 190.5 91.44 0)
 			(hide yes)
 			(show_name no)
@@ -8484,7 +8891,7 @@
 				)
 			)
 		)
-		(property "Description" "Capacitor 22u 25V X7R/X5R 1206"
+		(property "Description" "MLCC 22uF 10% 25V X5R 1206"
 			(at 187.96 106.68 0)
 			(hide yes)
 			(show_name no)
@@ -8496,6 +8903,28 @@
 			)
 		)
 		(property "MPN" "GRM31CR61E226KE15L"
+			(at 187.96 106.68 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Manufacturer" "Murata"
+			(at 187.96 106.68 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Package" "1206"
 			(at 187.96 106.68 0)
 			(hide yes)
 			(show_name no)
@@ -8574,7 +9003,7 @@
 				)
 			)
 		)
-		(property "Description" "Resistor 2.7R 2512"
+		(property "Description" "Resistor 2.7 Ohm 1% 1W 2512, thick film"
 			(at 33.02 210.82 0)
 			(hide yes)
 			(show_name no)
@@ -8597,6 +9026,17 @@
 			)
 		)
 		(property "Manufacturer" "Vishay"
+			(at 33.02 210.82 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Package" "2512"
 			(at 33.02 210.82 0)
 			(hide yes)
 			(show_name no)
@@ -8752,7 +9192,7 @@
 				)
 			)
 		)
-		(property "Description" "Capacitor 22u 25V X7R/X5R 1206"
+		(property "Description" "MLCC 22uF 10% 25V X5R 1206"
 			(at 304.8 91.44 0)
 			(hide yes)
 			(show_name no)
@@ -8764,6 +9204,28 @@
 			)
 		)
 		(property "MPN" "GRM31CR61E226KE15L"
+			(at 304.8 91.44 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Manufacturer" "Murata"
+			(at 304.8 91.44 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Package" "1206"
 			(at 304.8 91.44 0)
 			(hide yes)
 			(show_name no)
@@ -8842,7 +9304,7 @@
 				)
 			)
 		)
-		(property "Description" "Capacitor 100n 50V X7R/X5R 0603"
+		(property "Description" "MLCC 100nF 10% 50V X7R 0603"
 			(at 68.58 111.76 0)
 			(hide yes)
 			(show_name no)
@@ -8854,6 +9316,28 @@
 			)
 		)
 		(property "MPN" "CL10B104KB8NNNC"
+			(at 68.58 111.76 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Manufacturer" "Samsung Electro-Mechanics"
+			(at 68.58 111.76 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Package" "0603"
 			(at 68.58 111.76 0)
 			(hide yes)
 			(show_name no)
@@ -8943,7 +9427,7 @@
 				)
 			)
 		)
-		(property "Description" "Resistor 2.7R 2512"
+		(property "Description" "Resistor 2.7 Ohm 1% 1W 2512, thick film"
 			(at 109.22 185.42 0)
 			(hide yes)
 			(show_name no)
@@ -8966,6 +9450,17 @@
 			)
 		)
 		(property "Manufacturer" "Vishay"
+			(at 109.22 185.42 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Package" "2512"
 			(at 109.22 185.42 0)
 			(hide yes)
 			(show_name no)
@@ -9044,7 +9539,7 @@
 				)
 			)
 		)
-		(property "Description" "Capacitor 100n 50V X7R/X5R 0603"
+		(property "Description" "MLCC 100nF 10% 50V X7R 0603"
 			(at 210.82 106.68 0)
 			(hide yes)
 			(show_name no)
@@ -9056,6 +9551,28 @@
 			)
 		)
 		(property "MPN" "CL10B104KB8NNNC"
+			(at 210.82 106.68 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Manufacturer" "Samsung Electro-Mechanics"
+			(at 210.82 106.68 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Package" "0603"
 			(at 210.82 106.68 0)
 			(hide yes)
 			(show_name no)
@@ -9134,7 +9651,7 @@
 				)
 			)
 		)
-		(property "Description" "Resistor 100k 0603"
+		(property "Description" "Resistor 100 kOhm 1% 1/10W 0603, thick film"
 			(at 96.52 142.24 0)
 			(hide yes)
 			(show_name no)
@@ -9157,6 +9674,17 @@
 			)
 		)
 		(property "Manufacturer" "Yageo"
+			(at 96.52 142.24 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Package" "0603"
 			(at 96.52 142.24 0)
 			(hide yes)
 			(show_name no)
@@ -9235,7 +9763,7 @@
 				)
 			)
 		)
-		(property "Description" "Capacitor 100n 50V X7R/X5R 0603"
+		(property "Description" "MLCC 100nF 10% 50V X7R 0603"
 			(at 101.6 111.76 0)
 			(hide yes)
 			(show_name no)
@@ -9247,6 +9775,28 @@
 			)
 		)
 		(property "MPN" "CL10B104KB8NNNC"
+			(at 101.6 111.76 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Manufacturer" "Samsung Electro-Mechanics"
+			(at 101.6 111.76 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Package" "0603"
 			(at 101.6 111.76 0)
 			(hide yes)
 			(show_name no)
@@ -9567,7 +10117,7 @@
 				)
 			)
 		)
-		(property "Description" "Resistor 10k 0603"
+		(property "Description" "Resistor 10 kOhm 0.1% 1/10W 0603, thin film"
 			(at 93.98 157.48 0)
 			(hide yes)
 			(show_name no)
@@ -9600,7 +10150,18 @@
 				)
 			)
 		)
-		(property "Note" "NTC bias, 0.1% low drift (datasheet). Thermistor is on the cap bank."
+		(property "Package" "0603"
+			(at 93.98 157.48 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Note" "DO NOT SUBSTITUTE a 1% part. NTC bias, 0.1% low drift (datasheet). Thermistor is on the cap bank."
 			(at 93.98 157.48 0)
 			(hide yes)
 			(show_name no)
@@ -9679,7 +10240,7 @@
 				)
 			)
 		)
-		(property "Description" "Capacitor 100n 50V X7R/X5R 0603"
+		(property "Description" "MLCC 100nF 10% 50V X7R 0603"
 			(at 35.56 127 0)
 			(hide yes)
 			(show_name no)
@@ -9691,6 +10252,28 @@
 			)
 		)
 		(property "MPN" "CL10B104KB8NNNC"
+			(at 35.56 127 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Manufacturer" "Samsung Electro-Mechanics"
+			(at 35.56 127 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Package" "0603"
 			(at 35.56 127 0)
 			(hide yes)
 			(show_name no)
@@ -9857,7 +10440,7 @@
 				)
 			)
 		)
-		(property "Description" "Capacitor 100n 50V X7R/X5R 0603"
+		(property "Description" "MLCC 100nF 10% 50V X7R 0603"
 			(at 195.58 121.92 0)
 			(hide yes)
 			(show_name no)
@@ -9869,6 +10452,28 @@
 			)
 		)
 		(property "MPN" "CL10B104KB8NNNC"
+			(at 195.58 121.92 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Manufacturer" "Samsung Electro-Mechanics"
+			(at 195.58 121.92 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Package" "0603"
 			(at 195.58 121.92 0)
 			(hide yes)
 			(show_name no)
@@ -10410,7 +11015,7 @@
 				)
 			)
 		)
-		(property "Description" "Capacitor 100n 50V X7R/X5R 0603"
+		(property "Description" "MLCC 100nF 10% 50V X7R 0603"
 			(at 152.4 40.64 0)
 			(hide yes)
 			(show_name no)
@@ -10422,6 +11027,28 @@
 			)
 		)
 		(property "MPN" "CL10B104KB8NNNC"
+			(at 152.4 40.64 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Manufacturer" "Samsung Electro-Mechanics"
+			(at 152.4 40.64 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Package" "0603"
 			(at 152.4 40.64 0)
 			(hide yes)
 			(show_name no)
@@ -10511,7 +11138,7 @@
 				)
 			)
 		)
-		(property "Description" "Bootstrap diode"
+		(property "Description" "Fast switching diode 75V 150mA, SOD-123 (LTC3350 bootstrap)"
 			(at 248.92 91.44 0)
 			(hide yes)
 			(show_name no)
@@ -10522,7 +11149,7 @@
 				)
 			)
 		)
-		(property "MPN" "1N4148W"
+		(property "MPN" "1N4148W-7-F"
 			(at 248.92 91.44 0)
 			(hide yes)
 			(show_name no)
@@ -10544,7 +11171,18 @@
 				)
 			)
 		)
-		(property "Note" "Fast PN, not Schottky: the datasheet warns BST-SW pumps past 5.5 V with a Schottky when the step-up runs non-synchronously beside the output ideal diode."
+		(property "Package" "SOD-123"
+			(at 248.92 91.44 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Note" "DO NOT SUBSTITUTE a Schottky. Fast PN, not Schottky: the datasheet warns BST-SW pumps past 5.5 V with a Schottky when the step-up runs non-synchronously beside the output ideal diode."
 			(at 248.92 91.44 0)
 			(hide yes)
 			(show_name no)
@@ -10623,7 +11261,7 @@
 				)
 			)
 		)
-		(property "Description" "Resistor 100k 0402"
+		(property "Description" "Resistor 100 kOhm 1% 1/16W 0402, thick film"
 			(at 33.02 228.6 0)
 			(hide yes)
 			(show_name no)
@@ -10646,6 +11284,17 @@
 			)
 		)
 		(property "Manufacturer" "Yageo"
+			(at 33.02 228.6 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Package" "0402"
 			(at 33.02 228.6 0)
 			(hide yes)
 			(show_name no)
@@ -10735,7 +11384,7 @@
 				)
 			)
 		)
-		(property "Description" "Resistor 100k 0402"
+		(property "Description" "Resistor 100 kOhm 1% 1/16W 0402, thick film"
 			(at 68.58 228.6 0)
 			(hide yes)
 			(show_name no)
@@ -10758,6 +11407,17 @@
 			)
 		)
 		(property "Manufacturer" "Yageo"
+			(at 68.58 228.6 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Package" "0402"
 			(at 68.58 228.6 0)
 			(hide yes)
 			(show_name no)
@@ -10836,7 +11496,7 @@
 				)
 			)
 		)
-		(property "Description" "Resistor 100k 0402"
+		(property "Description" "Resistor 100 kOhm 1% 1/16W 0402, thick film"
 			(at 104.14 228.6 0)
 			(hide yes)
 			(show_name no)
@@ -10859,6 +11519,17 @@
 			)
 		)
 		(property "Manufacturer" "Yageo"
+			(at 104.14 228.6 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Package" "0402"
 			(at 104.14 228.6 0)
 			(hide yes)
 			(show_name no)
@@ -10937,7 +11608,7 @@
 				)
 			)
 		)
-		(property "Description" "Resistor 100k 0402"
+		(property "Description" "Resistor 100 kOhm 1% 1/16W 0402, thick film"
 			(at 139.7 228.6 0)
 			(hide yes)
 			(show_name no)
@@ -10960,6 +11631,17 @@
 			)
 		)
 		(property "Manufacturer" "Yageo"
+			(at 139.7 228.6 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Package" "0402"
 			(at 139.7 228.6 0)
 			(hide yes)
 			(show_name no)
@@ -11038,7 +11720,7 @@
 				)
 			)
 		)
-		(property "Description" "Resistor 100k 0603"
+		(property "Description" "Resistor 100 kOhm 1% 1/10W 0603, thick film"
 			(at 175.26 228.6 0)
 			(hide yes)
 			(show_name no)
@@ -11061,6 +11743,17 @@
 			)
 		)
 		(property "Manufacturer" "Yageo"
+			(at 175.26 228.6 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Package" "0603"
 			(at 175.26 228.6 0)
 			(hide yes)
 			(show_name no)

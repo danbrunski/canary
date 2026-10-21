@@ -3131,7 +3131,7 @@
 				)
 			)
 		)
-		(property "Description" "600W TVS, 24V standoff, 38.9V max clamp (HAT D1)"
+		(property "Description" "TVS diode 600W unidirectional, 24V standoff, 38.9V max clamp, SMB (HAT D1)"
 			(at 139.7 40.64 0)
 			(hide yes)
 			(show_name no)
@@ -3154,6 +3154,17 @@
 			)
 		)
 		(property "Manufacturer" "Littelfuse"
+			(at 139.7 40.64 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Package" "SMB (DO-214AA)"
 			(at 139.7 40.64 0)
 			(hide yes)
 			(show_name no)
@@ -3320,7 +3331,7 @@
 				)
 			)
 		)
-		(property "Description" "Resettable fuse, 1812, 0.5 A hold, 1.0 A trip, 40 V"
+		(property "Description" "Resettable fuse (PTC) 0.5A hold, 1.0A trip, 40V, 1812"
 			(at 215.9 40.64 0)
 			(hide yes)
 			(show_name no)
@@ -3353,7 +3364,18 @@
 				)
 			)
 		)
-		(property "Note" "HAT-out comes off the backed-up bus, so the HAT's K-line transceiver and TMAP supply stay in spec through a crank dip (the LTC3350 holds the bus >= 9 V). Replaces the switched TPS1HB35 (trimmed 2026-10-13). The HAT's own V12_SENSE then reads the bus, not the battery; PWR measures the battery (VIN_SENSE, LTC3350 meas_vin)."
+		(property "Package" "1812"
+			(at 215.9 40.64 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Note" "DO NOT SUBSTITUTE a lower-voltage PTC: 40 V, because the 12 V bus can reach the input clamp's 38.9 V. HAT-out comes off the backed-up bus, so the HAT's K-line transceiver and TMAP supply stay in spec through a crank dip (the LTC3350 holds the bus >= 9 V). Replaces the switched TPS1HB35 (trimmed 2026-10-13). The HAT's own V12_SENSE then reads the bus, not the battery; PWR measures the battery (VIN_SENSE, LTC3350 meas_vin)."
 			(at 215.9 40.64 0)
 			(hide yes)
 			(show_name no)
@@ -3465,7 +3487,18 @@
 				)
 			)
 		)
-		(property "Note" "OBD 16 = +12V_RAW, OBD 4 = GND, OBD 6/14 = CANH/CANL, all 20 AWG (operator 2026-10-14). Spec P3. Verify Phoenix order numbers before ordering. DNP: through-hole, so the operator fits it after the fab's SMD assembly (2026-10-20), as for J1 and J3-J5."
+		(property "Package" "THT 1x4 3.81mm right-angle"
+			(at 35.56 43.18 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Note" "DO NOT POPULATE at the assembler: through-hole, fitted by the operator after SMD assembly (2026-10-20). OBD 16 = +12V_RAW, OBD 4 = GND, OBD 6/14 = CANH/CANL, all 20 AWG (operator 2026-10-14). Spec P3; the plug's order number is still open (spec P10 item 12)."
 			(at 35.56 43.18 0)
 			(hide yes)
 			(show_name no)
@@ -3550,7 +3583,7 @@
 				)
 			)
 		)
-		(property "Description" "Resistor 1M 0603"
+		(property "Description" "Resistor 1 MOhm 1% 1/10W 0603, thick film"
 			(at 294.64 40.64 0)
 			(hide yes)
 			(show_name no)
@@ -3573,6 +3606,17 @@
 			)
 		)
 		(property "Manufacturer" "Yageo"
+			(at 294.64 40.64 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Package" "0603"
 			(at 294.64 40.64 0)
 			(hide yes)
 			(show_name no)
@@ -3895,7 +3939,7 @@
 				)
 			)
 		)
-		(property "Description" "Aluminium electrolytic 47u 50V, 6.3x7.7 SMD"
+		(property "Description" "Aluminium electrolytic 47uF 20% 50V 105C, 6.3x7.7mm SMD can"
 			(at 38.1 88.9 0)
 			(hide yes)
 			(show_name no)
@@ -3906,7 +3950,7 @@
 				)
 			)
 		)
-		(property "MPN" "EEE-FK1H470P"
+		(property "MPN" "EEE-FK1H470XP"
 			(at 38.1 88.9 0)
 			(hide yes)
 			(show_name no)
@@ -3918,6 +3962,17 @@
 			)
 		)
 		(property "Manufacturer" "Panasonic"
+			(at 38.1 88.9 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Package" "6.3x7.7mm SMD can"
 			(at 38.1 88.9 0)
 			(hide yes)
 			(show_name no)
@@ -4117,7 +4172,18 @@
 				)
 			)
 		)
-		(property "Note" "Changed 2026-10-13 from a 5-way Phoenix MC (21.6 mm) to save ~7 mm of edge: latching, keyed, and the same family and crimp tool as the cap-bank connector. Molex numbering, 1-3 on one row, 4-6 on the other: CANH (3) and CANL (6) share a column; 12 V (1) sits beside GND (2). Jumper to rev 2.1 J2: +12V_HAT -> pin 1 (+12V_RAW), GND -> pin 2, CANH/CANL -> the HAT's CAN pair; Pin 4 unused; GNSS backup removed 2026-10-18. DNP: through-hole, fitted by the operator (2026-10-20)."
+		(property "Package" "THT 2x3 3.00mm right-angle"
+			(at 175.26 43.18 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Note" "DO NOT POPULATE at the assembler: through-hole, fitted by the operator after SMD assembly (2026-10-20). Changed 2026-10-13 from a 5-way Phoenix MC (21.6 mm) to save ~7 mm of edge: latching, keyed, and the same family and crimp tool as the cap-bank connector. Molex numbering, 1-3 on one row, 4-6 on the other: CANH (3) and CANL (6) share a column; 12 V (1) sits beside GND (2). Jumper to rev 2.1 J2: +12V_HAT -> pin 1 (+12V_RAW), GND -> pin 2, CANH/CANL -> the HAT's CAN pair; Pin 4 unused; GNSS backup removed 2026-10-18."
 			(at 175.26 43.18 0)
 			(hide yes)
 			(show_name no)
@@ -4208,7 +4274,7 @@
 				)
 			)
 		)
-		(property "Description" "Dual-line CAN bus ESD protector, 24V standoff"
+		(property "Description" "Dual-line CAN bus ESD protector, 24V standoff, SOT-23"
 			(at 86.36 101.6 0)
 			(hide yes)
 			(show_name no)
@@ -4231,6 +4297,17 @@
 			)
 		)
 		(property "Manufacturer" "onsemi"
+			(at 86.36 101.6 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Package" "SOT-23"
 			(at 86.36 101.6 0)
 			(hide yes)
 			(show_name no)
@@ -4312,7 +4389,7 @@
 				)
 			)
 		)
-		(property "Description" "15V zener, Q_REV gate-source clamp (HAT D3)"
+		(property "Description" "Zener diode 15V 500mW, SOD-123 (Q_REV gate-source clamp, HAT D3)"
 			(at 106.68 40.64 0)
 			(hide yes)
 			(show_name no)
@@ -4323,7 +4400,7 @@
 				)
 			)
 		)
-		(property "MPN" "BZT52C15"
+		(property "MPN" "BZT52C15-7-F"
 			(at 106.68 40.64 0)
 			(hide yes)
 			(show_name no)
@@ -4335,6 +4412,17 @@
 			)
 		)
 		(property "Manufacturer" "Diodes Inc"
+			(at 106.68 40.64 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Package" "SOD-123"
 			(at 106.68 40.64 0)
 			(hide yes)
 			(show_name no)
@@ -4413,7 +4501,7 @@
 				)
 			)
 		)
-		(property "Description" "-60V P-channel MOSFET, reverse-polarity block"
+		(property "Description" "P-channel MOSFET -60V -50A 15mOhm, TO-252 (reverse-polarity block)"
 			(at 53.34 55.88 0)
 			(hide yes)
 			(show_name no)
@@ -4424,7 +4512,7 @@
 				)
 			)
 		)
-		(property "MPN" "SUD50P06-15"
+		(property "MPN" "SUD50P06-15-GE3"
 			(at 53.34 55.88 0)
 			(hide yes)
 			(show_name no)
@@ -4436,6 +4524,17 @@
 			)
 		)
 		(property "Manufacturer" "Vishay"
+			(at 53.34 55.88 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Package" "TO-252 (DPAK)"
 			(at 53.34 55.88 0)
 			(hide yes)
 			(show_name no)
@@ -4682,7 +4781,7 @@
 				)
 			)
 		)
-		(property "Description" "Resistor 100k 0603"
+		(property "Description" "Resistor 100 kOhm 1% 1/10W 0603, thick film"
 			(at 76.2 40.64 0)
 			(hide yes)
 			(show_name no)
@@ -4705,6 +4804,17 @@
 			)
 		)
 		(property "Manufacturer" "Yageo"
+			(at 76.2 40.64 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Package" "0603"
 			(at 76.2 40.64 0)
 			(hide yes)
 			(show_name no)
@@ -4872,7 +4982,7 @@
 				)
 			)
 		)
-		(property "Description" "Resistor 150k 0603"
+		(property "Description" "Resistor 150 kOhm 1% 1/10W 0603, thick film"
 			(at 332.74 40.64 0)
 			(hide yes)
 			(show_name no)
@@ -4895,6 +5005,17 @@
 			)
 		)
 		(property "Manufacturer" "Yageo"
+			(at 332.74 40.64 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Package" "0603"
 			(at 332.74 40.64 0)
 			(hide yes)
 			(show_name no)
@@ -4973,7 +5094,7 @@
 				)
 			)
 		)
-		(property "Description" "Capacitor 100n 50V X7R/X5R 0603"
+		(property "Description" "MLCC 100nF 10% 50V X7R 0603"
 			(at 360.68 40.64 0)
 			(hide yes)
 			(show_name no)
@@ -4985,6 +5106,28 @@
 			)
 		)
 		(property "MPN" "CL10B104KB8NNNC"
+			(at 360.68 40.64 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Manufacturer" "Samsung Electro-Mechanics"
+			(at 360.68 40.64 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Package" "0603"
 			(at 360.68 40.64 0)
 			(hide yes)
 			(show_name no)
@@ -5063,7 +5206,7 @@
 				)
 			)
 		)
-		(property "Description" "Capacitor 100n 50V X7R/X5R 0603"
+		(property "Description" "MLCC 100nF 10% 50V X7R 0603"
 			(at 66.04 88.9 0)
 			(hide yes)
 			(show_name no)
@@ -5075,6 +5218,28 @@
 			)
 		)
 		(property "MPN" "CL10B104KB8NNNC"
+			(at 66.04 88.9 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Manufacturer" "Samsung Electro-Mechanics"
+			(at 66.04 88.9 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Package" "0603"
 			(at 66.04 88.9 0)
 			(hide yes)
 			(show_name no)
