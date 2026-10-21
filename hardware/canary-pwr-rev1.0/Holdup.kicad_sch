@@ -4408,7 +4408,7 @@
 				)
 			)
 		)
-		(property "Value" "CSD18543Q3A"
+		(property "Value" "NTTFS5C673NLTAG"
 			(at 211.9325 74.5 0)
 			(show_name no)
 			(do_not_autoplace no)
@@ -4429,7 +4429,7 @@
 				)
 			)
 		)
-		(property "Datasheet" "https://www.ti.com/lit/ds/symlink/csd18543q3a.pdf"
+		(property "Datasheet" "https://www.onsemi.com/pdf/datasheet/nttfs5c673nl-d.pdf"
 			(at 215.9 58.42 0)
 			(hide yes)
 			(show_name no)
@@ -4440,7 +4440,7 @@
 				)
 			)
 		)
-		(property "Description" "60V N-channel NexFET, 8.1mOhm @10V, logic-level, VSON-8 3.3x3.3"
+		(property "Description" "60V N-channel MOSFET, 13.3mOhm max @4.5V, logic-level, WDFN8 3.3x3.3 (u8FL)"
 			(at 215.9 58.42 0)
 			(hide yes)
 			(show_name no)
@@ -4451,7 +4451,7 @@
 				)
 			)
 		)
-		(property "MPN" "CSD18543Q3A"
+		(property "MPN" "NTTFS5C673NLTAG"
 			(at 215.9 58.42 0)
 			(hide yes)
 			(show_name no)
@@ -4462,7 +4462,7 @@
 				)
 			)
 		)
-		(property "Manufacturer" "Texas Instruments"
+		(property "Manufacturer" "onsemi"
 			(at 215.9 58.42 0)
 			(hide yes)
 			(show_name no)
@@ -4473,7 +4473,7 @@
 				)
 			)
 		)
-		(property "Package" "VSON-8 3.3x3.3mm"
+		(property "Package" "WDFN8 3.3x3.3mm (u8FL)"
 			(at 215.9 58.42 0)
 			(hide yes)
 			(show_name no)
@@ -4484,7 +4484,7 @@
 				)
 			)
 		)
-		(property "Note" "Top switch"
+		(property "Note" "Top switch. On TI's NexFET SON 3.3x3.3 land; onsemi's own adds only a band soldering the package's two side tabs."
 			(at 215.9 58.42 0)
 			(hide yes)
 			(show_name no)
@@ -5395,7 +5395,7 @@
 				)
 			)
 		)
-		(property "Value" "CSD18543Q3A"
+		(property "Value" "NTTFS5C673NLTAG"
 			(at 234.7925 66.12 0)
 			(show_name no)
 			(do_not_autoplace no)
@@ -5416,7 +5416,7 @@
 				)
 			)
 		)
-		(property "Datasheet" "https://www.ti.com/lit/ds/symlink/csd18543q3a.pdf"
+		(property "Datasheet" "https://www.onsemi.com/pdf/datasheet/nttfs5c673nl-d.pdf"
 			(at 238.76 53.34 0)
 			(hide yes)
 			(show_name no)
@@ -5427,7 +5427,7 @@
 				)
 			)
 		)
-		(property "Description" "60V N-channel NexFET, 8.1mOhm @10V, logic-level, VSON-8 3.3x3.3"
+		(property "Description" "60V N-channel MOSFET, 13.3mOhm max @4.5V, logic-level, WDFN8 3.3x3.3 (u8FL)"
 			(at 238.76 53.34 0)
 			(hide yes)
 			(show_name no)
@@ -5438,7 +5438,7 @@
 				)
 			)
 		)
-		(property "MPN" "CSD18543Q3A"
+		(property "MPN" "NTTFS5C673NLTAG"
 			(at 238.76 53.34 0)
 			(hide yes)
 			(show_name no)
@@ -5449,7 +5449,7 @@
 				)
 			)
 		)
-		(property "Manufacturer" "Texas Instruments"
+		(property "Manufacturer" "onsemi"
 			(at 238.76 53.34 0)
 			(hide yes)
 			(show_name no)
@@ -5460,7 +5460,7 @@
 				)
 			)
 		)
-		(property "Package" "VSON-8 3.3x3.3mm"
+		(property "Package" "WDFN8 3.3x3.3mm (u8FL)"
 			(at 238.76 53.34 0)
 			(hide yes)
 			(show_name no)
@@ -5471,7 +5471,7 @@
 				)
 			)
 		)
-		(property "Note" "Bottom switch"
+		(property "Note" "Bottom switch. On TI's NexFET SON 3.3x3.3 land; onsemi's own adds only a band soldering the package's two side tabs."
 			(at 238.76 53.34 0)
 			(hide yes)
 			(show_name no)
@@ -5850,7 +5850,7 @@
 				)
 			)
 		)
-		(property "Value" "CSD18543Q3A"
+		(property "Value" "NTTFS5C673NLTAG"
 			(at 258.0925 72.4 0)
 			(show_name no)
 			(do_not_autoplace no)
@@ -5871,7 +5871,7 @@
 				)
 			)
 		)
-		(property "Datasheet" "https://www.ti.com/lit/ds/symlink/csd18543q3a.pdf"
+		(property "Datasheet" "https://www.onsemi.com/pdf/datasheet/nttfs5c673nl-d.pdf"
 			(at 264.16 58.42 0)
 			(hide yes)
 			(show_name no)
@@ -5882,7 +5882,7 @@
 				)
 			)
 		)
-		(property "Description" "60V N-channel NexFET, 8.1mOhm @10V, logic-level, VSON-8 3.3x3.3"
+		(property "Description" "60V N-channel MOSFET, 13.3mOhm max @4.5V, logic-level, WDFN8 3.3x3.3 (u8FL)"
 			(at 264.16 58.42 0)
 			(hide yes)
 			(show_name no)
@@ -5893,7 +5893,7 @@
 				)
 			)
 		)
-		(property "MPN" "CSD18543Q3A"
+		(property "MPN" "NTTFS5C673NLTAG"
 			(at 264.16 58.42 0)
 			(hide yes)
 			(show_name no)
@@ -5904,7 +5904,7 @@
 				)
 			)
 		)
-		(property "Manufacturer" "Texas Instruments"
+		(property "Manufacturer" "onsemi"
 			(at 264.16 58.42 0)
 			(hide yes)
 			(show_name no)
@@ -5915,7 +5915,7 @@
 				)
 			)
 		)
-		(property "Package" "VSON-8 3.3x3.3mm"
+		(property "Package" "WDFN8 3.3x3.3mm (u8FL)"
 			(at 264.16 58.42 0)
 			(hide yes)
 			(show_name no)
@@ -5926,7 +5926,7 @@
 				)
 			)
 		)
-		(property "Note" "Output ideal diode: source at VCAP, drain at VOUT"
+		(property "Note" "Output ideal diode: source at VCAP, drain at VOUT. On TI's NexFET SON 3.3x3.3 land; onsemi's own adds only a band soldering the package's two side tabs."
 			(at 264.16 58.42 0)
 			(hide yes)
 			(show_name no)
@@ -7734,7 +7734,7 @@
 				)
 			)
 		)
-		(property "Value" "CSD18543Q3A"
+		(property "Value" "NTTFS5C673NLTAG"
 			(at 190.0375 80.15 0)
 			(show_name no)
 			(do_not_autoplace no)
@@ -7755,7 +7755,7 @@
 				)
 			)
 		)
-		(property "Datasheet" "https://www.ti.com/lit/ds/symlink/csd18543q3a.pdf"
+		(property "Datasheet" "https://www.onsemi.com/pdf/datasheet/nttfs5c673nl-d.pdf"
 			(at 195.58 58.42 0)
 			(hide yes)
 			(show_name no)
@@ -7766,7 +7766,7 @@
 				)
 			)
 		)
-		(property "Description" "60V N-channel NexFET, 8.1mOhm @10V, logic-level, VSON-8 3.3x3.3"
+		(property "Description" "60V N-channel MOSFET, 13.3mOhm max @4.5V, logic-level, WDFN8 3.3x3.3 (u8FL)"
 			(at 195.58 58.42 0)
 			(hide yes)
 			(show_name no)
@@ -7777,7 +7777,7 @@
 				)
 			)
 		)
-		(property "MPN" "CSD18543Q3A"
+		(property "MPN" "NTTFS5C673NLTAG"
 			(at 195.58 58.42 0)
 			(hide yes)
 			(show_name no)
@@ -7788,7 +7788,7 @@
 				)
 			)
 		)
-		(property "Manufacturer" "Texas Instruments"
+		(property "Manufacturer" "onsemi"
 			(at 195.58 58.42 0)
 			(hide yes)
 			(show_name no)
@@ -7799,7 +7799,7 @@
 				)
 			)
 		)
-		(property "Package" "VSON-8 3.3x3.3mm"
+		(property "Package" "WDFN8 3.3x3.3mm (u8FL)"
 			(at 195.58 58.42 0)
 			(hide yes)
 			(show_name no)
@@ -7810,7 +7810,7 @@
 				)
 			)
 		)
-		(property "Note" "Input ideal diode: source at VIN, drain at VOUTSP"
+		(property "Note" "Input ideal diode: source at VIN, drain at VOUTSP. On TI's NexFET SON 3.3x3.3 land; onsemi's own adds only a band soldering the package's two side tabs."
 			(at 195.58 58.42 0)
 			(hide yes)
 			(show_name no)

@@ -351,7 +351,7 @@ Application Circuit 2, 11–20 V in / 10 V backup):
 
 | Item | Value | Why |
 |---|---|---|
-| FETs (input, output, top, bottom) | 4 × CSD18543Q3A, 60 V, 8 mΩ, logic-level | D1's 38.9 V clamp |
+| FETs (input, output, top, bottom) | 4 × onsemi NTTFS5C673NLTAG, 60 V, 13.3 mΩ max at 4.5 V, 4.5 nC, logic-level | D1's 38.9 V clamp; every gate is driven to 5 V; the LTC3350 dissipates the switches' gate charge |
 | Input current limit (RSNSI) | 8 mΩ → 4 A, load + charger | the charger yields to the load |
 | Charge / backup current (RSNSC) | 8 mΩ → 4 A (peak 7.25 A) | backup power from a low stack; ESR readout scales with it |
 | Stack voltage (CAPFB) | 732k/100k → 9.98 V at full-scale DAC | 4 × 2.5 V; the DAC lowers it in firmware (e.g. when hot) |
@@ -478,12 +478,13 @@ Between the buck and the header:
   voltage at the header — the number that diagnoses undervoltage with NVMe and
   USB loads, and the measurement that decides the LTC4041 question (§P4). Put it
   in power-down while parked.
-- **LM74700-Q1 + CSD18543Q3A ideal diode.** A Power HAT+ "must only source
+- **LM74700-Q1 + NTTFS5C673NLTAG ideal diode.** A Power HAT+ "must only source
   current and tolerate accidental use while connected to USB-C power": the Pi's
   own USB-C is the bench fallback, and this keeps it from pushing into the buck.
 
-About 50 mV is lost across the shunt and the ideal diode at 5 A, which the
-5.115 V setpoint covers against the Pi's 4.63 V undervoltage threshold.
+About 65 mV is lost at 5 A: 25 mV across R28 (5 mΩ) and 40 mV across the ideal
+diode (8 mΩ typical; the LM74700 drives its gate 8 V or more above the source).
+The 5.115 V setpoint covers that against the Pi's 4.63 V undervoltage threshold.
 
 **No ID EEPROM.** The Power HAT+ classes (EEPROM 0x52/0x53) must not connect to
 GPIOs 2–27, and PWR uses I²C1 and three GPIOs; the Standard class (0x50) belongs
@@ -686,7 +687,7 @@ Nothing on this board changes for rev 3.0.
 | 7 | Crank-dip window: longest dip the bank should ride before `~PWR_FAIL` | DIP vs HOLDUP timing |
 | 8 | Right-angle connector heights (Phoenix MC 1,5 G, Micro-Fit 43045 2 × 3 and 2 × 5, SWD) against the ~13 mm gap under the HAT | Edge placement |
 | 9 | Side-view LED and side-actuated button orientation on the footprints | They face the edge |
-| 10 | Part choices still open: the right-angle SWD header. The polyfuse is the Bourns MF-MSMF050/40X-2 on Bourns' land (2026-10-20, §P3). The 25 F cells are Eaton TVA1625-3R0256-R (2026-10-20, the cap bank's README); it and every cap-bank and lead part are in stock at DigiKey (operator, 2026-10-20), as is the HAT-out 43045-0600. So are MF-MSMF050/40X-2, RC0402FR-07100KL, EEE-FK1H470XP, SUD50P06-15-GE3, BZT52C15-7-F, 1N4148W-7-F, TPS7A1633QDGNRQ1 and the 744393465047 inductor (operator, 2026-10-20). On 2026-10-21 the operator found LM61460AASQRJRRQ1, RT0603BRD0710KL, LTC3350EUHF#PBF, STM32G031K8T6, the APA1606 LEDs and EVQ-P7A01P in stock, and six parts at zero. Five were replaced the same day by parts in stock on the same footprints ("Changes after routing"): BAT46WS-AQ for BAT46WJ,115 (D5, D6), INA226AIDGSR for INA226AQDGSRQ1 (U3), LM74700QDBVTQ1 for LM74700QDBVRQ1 (U4), TCAN1043HDQ1 for TCAN1043DRQ1 (U7) and TCA9511ADGKR for TCA4307DGKR (U8). **Open: CSD18543Q3A** (Q2–Q5, Q7), also at zero | BOM |
+| 10 | Part choices still open: the right-angle SWD header. The polyfuse is the Bourns MF-MSMF050/40X-2 on Bourns' land (2026-10-20, §P3). The 25 F cells are Eaton TVA1625-3R0256-R (2026-10-20, the cap bank's README); it and every cap-bank and lead part are in stock at DigiKey (operator, 2026-10-20), as is the HAT-out 43045-0600. So are MF-MSMF050/40X-2, RC0402FR-07100KL, EEE-FK1H470XP, SUD50P06-15-GE3, BZT52C15-7-F, 1N4148W-7-F, TPS7A1633QDGNRQ1 and the 744393465047 inductor (operator, 2026-10-20). On 2026-10-21 the operator found LM61460AASQRJRRQ1, RT0603BRD0710KL, LTC3350EUHF#PBF, STM32G031K8T6, the APA1606 LEDs and EVQ-P7A01P in stock, and six parts at zero. All six were replaced the same day by parts in stock on the same footprints ("Changes after routing"): BAT46WS-AQ for BAT46WJ,115 (D5, D6), INA226AIDGSR for INA226AQDGSRQ1 (U3), LM74700QDBVTQ1 for LM74700QDBVRQ1 (U4), TCAN1043HDQ1 for TCAN1043DRQ1 (U7), TCA9511ADGKR for TCA4307DGKR (U8) and onsemi NTTFS5C673NLTAG for CSD18543Q3A (Q2–Q5, Q7). For the FETs, CSD18543Q3AT and BSZ099N06LS5ATMA1 were also at zero; NTTFS5C673NLTAG and DMT6007LFG-7 were in stock | BOM |
 | 11 | The cap-bank lead's resistance at bring-up | Calibrates the ESR readout |
 | 12 | The Vehicle-in plug's order number (KiCad's footprint confirms 1803293 for the header) and the HAT-out Micro-Fit's housing and crimps (43025-0600, 43030). The cap-bank lead's are settled in `hardware/tools/capbank_lead.py` | BOM |
 | 13 | Copper weight: TI recommends 2 oz outer layers for the LM61460. **Settled 2026-10-18 (operator): the outer layers stay 1 oz.** Every current path is a wide pour sized for 1 oz, and 0.15 mm signal clearance costs nothing extra at that weight | Fab order |
@@ -937,3 +938,23 @@ courtyards themselves collide, touching included, the same test as DRC's
     powered-off high-impedance pins §P6 depends on. What is lost: a supervisor
     that holds SDA low now hangs I²C1, which the HAT shares, until the Pi resets
     it through `PI_NRST`; the TCA4307 cut it loose after about 40 ms.
+- **Q2–Q5 and Q7 are onsemi NTTFS5C673NLTAG** (2026-10-21), for the
+  CSD18543Q3A. DigiKey had none of it, its 250-piece reel (CSD18543Q3AT) or
+  Infineon's BSZ099N06LS5ATMA1. It has the same pins (S 1–3, G 4, D 5–8 and the
+  pad), keeps the CSD18543Q3A's symbol and land, and matches or beats it on each
+  number this board uses (the TI part's in brackets):
+  - 60 V; 13.3 mΩ max at 4.5 V (15.6). Every gate here is driven to 5 V: DRVCC
+    for the switches, and the ideal diodes' charge pumps.
+  - Gate charge 4.5 nC at 4.5 V (5.6), gate–drain 0.8 nC (1.7).
+  - VGS(th) 2.0 V max (2.7). The LM74700 datasheet asks for 2–2.5 V at most.
+  - The land: onsemi's μ8FL pattern matches KiCad's NexFET land to within
+    0.08 mm, except for a 3.46 mm band across the drain pad that solders the two
+    tie-bar tabs on the package's sides. Here those tabs stay unsoldered. They
+    are not terminals, and no other net's exposed copper is within 0.5 mm of
+    them (C14's pad beside Q3 is the nearest, at 0.53 mm).
+  - Diodes' DMT6007LFG-7, also in stock, was rejected. It is AEC-Q101 and has a
+    lower RDS(on), but its 19.3 nC of gate charge would cost (19.3 + 19.3) nC ×
+    748 kHz × 12 V ≈ 0.35 W inside the LTC3350, against 0.08 W for the onsemi
+    part. The LTC3350 datasheet asks for the least gate charge for that reason.
+  - NTTFS5C673NLTAG (1,500-piece reel) is onsemi's active code; the 5,000-piece
+    NTTFS5C673NLTWG is discontinued. Like the CSD18543Q3A, it is not AEC-Q101.

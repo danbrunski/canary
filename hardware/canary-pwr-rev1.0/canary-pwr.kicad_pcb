@@ -5482,7 +5482,7 @@
 				)
 			)
 		)
-		(property "Value" "CSD18543Q3A"
+		(property "Value" "NTTFS5C673NLTAG"
 			(at 0 2.8 0)
 			(layer "F.Fab")
 			(uuid "0b657b16-2ed3-482e-8017-c4189f195508")
@@ -5493,7 +5493,7 @@
 				)
 			)
 		)
-		(property "Datasheet" "https://www.ti.com/lit/ds/symlink/csd18543q3a.pdf"
+		(property "Datasheet" "https://www.onsemi.com/pdf/datasheet/nttfs5c673nl-d.pdf"
 			(at 0 0 0)
 			(unlocked yes)
 			(layer "F.Fab")
@@ -5506,7 +5506,7 @@
 				)
 			)
 		)
-		(property "Description" "60V N-channel NexFET, 8.1mOhm @10V, logic-level, VSON-8 3.3x3.3"
+		(property "Description" "60V N-channel MOSFET, 13.3mOhm max @4.5V, logic-level, WDFN8 3.3x3.3 (u8FL)"
 			(at 0 0 0)
 			(unlocked yes)
 			(layer "F.Fab")
@@ -5519,7 +5519,7 @@
 				)
 			)
 		)
-		(property "MPN" "CSD18543Q3A"
+		(property "MPN" "NTTFS5C673NLTAG"
 			(at 0 0 0)
 			(layer "F.SilkS")
 			(hide yes)
@@ -5531,7 +5531,7 @@
 				)
 			)
 		)
-		(property "Manufacturer" "Texas Instruments"
+		(property "Manufacturer" "onsemi"
 			(at 0 0 0)
 			(layer "F.SilkS")
 			(hide yes)
@@ -5543,7 +5543,7 @@
 				)
 			)
 		)
-		(property "Note" "Input ideal diode: source at VIN, drain at VOUTSP"
+		(property "Note" "Input ideal diode: source at VIN, drain at VOUTSP. On TI's NexFET SON 3.3x3.3 land; onsemi's own adds only a band soldering the package's two side tabs."
 			(at 0 0 0)
 			(layer "F.SilkS")
 			(hide yes)
@@ -5555,7 +5555,7 @@
 				)
 			)
 		)
-		(property "Package" "VSON-8 3.3x3.3mm"
+		(property "Package" "WDFN8 3.3x3.3mm (u8FL)"
 			(at 0 0 0)
 			(layer "F.SilkS")
 			(hide yes)
@@ -16832,7 +16832,7 @@
 				)
 			)
 		)
-		(property "Value" "CSD18543Q3A"
+		(property "Value" "NTTFS5C673NLTAG"
 			(at 0 2.8 90)
 			(layer "F.Fab")
 			(uuid "f4ef55de-9051-4c0b-ac7b-192c3876e701")
@@ -16843,7 +16843,7 @@
 				)
 			)
 		)
-		(property "Datasheet" "https://www.ti.com/lit/ds/symlink/csd18543q3a.pdf"
+		(property "Datasheet" "https://www.onsemi.com/pdf/datasheet/nttfs5c673nl-d.pdf"
 			(at 0 0 90)
 			(unlocked yes)
 			(layer "F.Fab")
@@ -16856,7 +16856,7 @@
 				)
 			)
 		)
-		(property "Description" "60V N-channel NexFET, 8.1mOhm @10V, logic-level, VSON-8 3.3x3.3"
+		(property "Description" "60V N-channel MOSFET, 13.3mOhm max @4.5V, logic-level, WDFN8 3.3x3.3 (u8FL)"
 			(at 0 0 90)
 			(unlocked yes)
 			(layer "F.Fab")
@@ -16869,7 +16869,7 @@
 				)
 			)
 		)
-		(property "MPN" "CSD18543Q3A"
+		(property "MPN" "NTTFS5C673NLTAG"
 			(at 0 0 90)
 			(layer "F.SilkS")
 			(hide yes)
@@ -16881,7 +16881,7 @@
 				)
 			)
 		)
-		(property "Manufacturer" "Texas Instruments"
+		(property "Manufacturer" "onsemi"
 			(at 0 0 90)
 			(layer "F.SilkS")
 			(hide yes)
@@ -16893,7 +16893,7 @@
 				)
 			)
 		)
-		(property "Note" "Output ideal diode: source at VCAP, drain at VOUT"
+		(property "Note" "Output ideal diode: source at VCAP, drain at VOUT. On TI's NexFET SON 3.3x3.3 land; onsemi's own adds only a band soldering the package's two side tabs."
 			(at 0 0 90)
 			(layer "F.SilkS")
 			(hide yes)
@@ -16905,7 +16905,7 @@
 				)
 			)
 		)
-		(property "Package" "VSON-8 3.3x3.3mm"
+		(property "Package" "WDFN8 3.3x3.3mm (u8FL)"
 			(at 0 0 90)
 			(layer "F.SilkS")
 			(hide yes)
@@ -17846,7 +17846,7 @@
 				)
 			)
 		)
-		(property "Value" "CSD18543Q3A"
+		(property "Value" "NTTFS5C673NLTAG"
 			(at 0 2.8 180)
 			(layer "F.Fab")
 			(uuid "7c40ba4b-d867-4830-a620-4ec44a63c02a")
@@ -17857,7 +17857,7 @@
 				)
 			)
 		)
-		(property "Datasheet" "https://www.ti.com/lit/ds/symlink/csd18543q3a.pdf"
+		(property "Datasheet" "https://www.onsemi.com/pdf/datasheet/nttfs5c673nl-d.pdf"
 			(at 0 0 180)
 			(unlocked yes)
 			(layer "F.Fab")
@@ -17870,7 +17870,7 @@
 				)
 			)
 		)
-		(property "Description" "60V N-channel NexFET, 8.1mOhm @10V, logic-level, VSON-8 3.3x3.3"
+		(property "Description" "60V N-channel MOSFET, 13.3mOhm max @4.5V, logic-level, WDFN8 3.3x3.3 (u8FL)"
 			(at 0 0 180)
 			(unlocked yes)
 			(layer "F.Fab")
@@ -17883,7 +17883,7 @@
 				)
 			)
 		)
-		(property "MPN" "CSD18543Q3A"
+		(property "MPN" "NTTFS5C673NLTAG"
 			(at 0 0 180)
 			(layer "F.SilkS")
 			(hide yes)
@@ -17895,7 +17895,7 @@
 				)
 			)
 		)
-		(property "Manufacturer" "Texas Instruments"
+		(property "Manufacturer" "onsemi"
 			(at 0 0 180)
 			(layer "F.SilkS")
 			(hide yes)
@@ -17907,7 +17907,7 @@
 				)
 			)
 		)
-		(property "Note" "Bottom switch"
+		(property "Note" "Bottom switch. On TI's NexFET SON 3.3x3.3 land; onsemi's own adds only a band soldering the package's two side tabs."
 			(at 0 0 180)
 			(layer "F.SilkS")
 			(hide yes)
@@ -17919,7 +17919,7 @@
 				)
 			)
 		)
-		(property "Package" "VSON-8 3.3x3.3mm"
+		(property "Package" "WDFN8 3.3x3.3mm (u8FL)"
 			(at 0 0 180)
 			(layer "F.SilkS")
 			(hide yes)
@@ -18234,7 +18234,7 @@
 				)
 			)
 		)
-		(property "Value" "CSD18543Q3A"
+		(property "Value" "NTTFS5C673NLTAG"
 			(at 0 2.8 90)
 			(layer "F.Fab")
 			(uuid "b045146f-e591-467c-806b-6074d8e139ad")
@@ -18245,7 +18245,7 @@
 				)
 			)
 		)
-		(property "Datasheet" "https://www.ti.com/lit/ds/symlink/csd18543q3a.pdf"
+		(property "Datasheet" "https://www.onsemi.com/pdf/datasheet/nttfs5c673nl-d.pdf"
 			(at 0 0 90)
 			(unlocked yes)
 			(layer "F.Fab")
@@ -18258,7 +18258,7 @@
 				)
 			)
 		)
-		(property "Description" "60V N-channel NexFET, 8.1mOhm @10V, logic-level, VSON-8 3.3x3.3"
+		(property "Description" "60V N-channel MOSFET, 13.3mOhm max @4.5V, logic-level, WDFN8 3.3x3.3 (u8FL)"
 			(at 0 0 90)
 			(unlocked yes)
 			(layer "F.Fab")
@@ -18271,7 +18271,7 @@
 				)
 			)
 		)
-		(property "MPN" "CSD18543Q3A"
+		(property "MPN" "NTTFS5C673NLTAG"
 			(at 0 0 90)
 			(layer "F.SilkS")
 			(hide yes)
@@ -18283,7 +18283,7 @@
 				)
 			)
 		)
-		(property "Manufacturer" "Texas Instruments"
+		(property "Manufacturer" "onsemi"
 			(at 0 0 90)
 			(layer "F.SilkS")
 			(hide yes)
@@ -18295,7 +18295,7 @@
 				)
 			)
 		)
-		(property "Note" "Ideal-diode FET: source at the buck side, drain at the Pi"
+		(property "Note" "Ideal-diode FET: source at the buck side, drain at the Pi. On TI's NexFET SON 3.3x3.3 land; onsemi's own adds only a band soldering the package's two side tabs."
 			(at 0 0 90)
 			(layer "F.SilkS")
 			(hide yes)
@@ -18307,7 +18307,7 @@
 				)
 			)
 		)
-		(property "Package" "VSON-8 3.3x3.3mm"
+		(property "Package" "WDFN8 3.3x3.3mm (u8FL)"
 			(at 0 0 90)
 			(layer "F.SilkS")
 			(hide yes)
@@ -22927,7 +22927,7 @@
 				)
 			)
 		)
-		(property "Value" "CSD18543Q3A"
+		(property "Value" "NTTFS5C673NLTAG"
 			(at 0 2.8 0)
 			(layer "F.Fab")
 			(uuid "071d3229-141e-4db9-8d9c-dca5f51ff22d")
@@ -22938,7 +22938,7 @@
 				)
 			)
 		)
-		(property "Datasheet" "https://www.ti.com/lit/ds/symlink/csd18543q3a.pdf"
+		(property "Datasheet" "https://www.onsemi.com/pdf/datasheet/nttfs5c673nl-d.pdf"
 			(at 0 0 0)
 			(unlocked yes)
 			(layer "F.Fab")
@@ -22951,7 +22951,7 @@
 				)
 			)
 		)
-		(property "Description" "60V N-channel NexFET, 8.1mOhm @10V, logic-level, VSON-8 3.3x3.3"
+		(property "Description" "60V N-channel MOSFET, 13.3mOhm max @4.5V, logic-level, WDFN8 3.3x3.3 (u8FL)"
 			(at 0 0 0)
 			(unlocked yes)
 			(layer "F.Fab")
@@ -22964,7 +22964,7 @@
 				)
 			)
 		)
-		(property "MPN" "CSD18543Q3A"
+		(property "MPN" "NTTFS5C673NLTAG"
 			(at 0 0 0)
 			(layer "F.SilkS")
 			(hide yes)
@@ -22976,7 +22976,7 @@
 				)
 			)
 		)
-		(property "Manufacturer" "Texas Instruments"
+		(property "Manufacturer" "onsemi"
 			(at 0 0 0)
 			(layer "F.SilkS")
 			(hide yes)
@@ -22988,7 +22988,7 @@
 				)
 			)
 		)
-		(property "Note" "Top switch"
+		(property "Note" "Top switch. On TI's NexFET SON 3.3x3.3 land; onsemi's own adds only a band soldering the package's two side tabs."
 			(at 0 0 0)
 			(layer "F.SilkS")
 			(hide yes)
@@ -23000,7 +23000,7 @@
 				)
 			)
 		)
-		(property "Package" "VSON-8 3.3x3.3mm"
+		(property "Package" "WDFN8 3.3x3.3mm (u8FL)"
 			(at 0 0 0)
 			(layer "F.SilkS")
 			(hide yes)

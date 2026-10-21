@@ -217,21 +217,24 @@ def L(sheet, group, a, b, note=""):
     )
 
 
-def NFET(sheet, group, g, d, s, mpn="CSD18543Q3A", note=""):
-    if mpn == "CSD18543Q3A":
+def NFET(sheet, group, g, d, s, mpn="NTTFS5C673NLTAG", note=""):
+    if mpn == "NTTFS5C673NLTAG":
+        # Replaced the CSD18543Q3A, which DigiKey had none of (spec P10 #10). It keeps that
+        # part's symbol and land: the pins are the same (S 1-3, G 4, D 5-8 and the pad).
         part(
             sheet,
             group,
             "Transistor_FET:CSD18543Q3A",
-            "CSD18543Q3A",
+            "NTTFS5C673NLTAG",
             {"1": s, "2": s, "3": s, "4": g, "5": d},
             fp="Package_SON:VSON-8_3.3x3.3mm_P0.65mm_NexFET",
-            mpn="CSD18543Q3A",
-            mfr="Texas Instruments",
-            ds="https://www.ti.com/lit/ds/symlink/csd18543q3a.pdf",
-            desc="60V N-channel NexFET, 8.1mOhm @10V, logic-level, VSON-8 3.3x3.3",
-            pkg="VSON-8 3.3x3.3mm",
-            note=note,
+            mpn="NTTFS5C673NLTAG",
+            mfr="onsemi",
+            ds="https://www.onsemi.com/pdf/datasheet/nttfs5c673nl-d.pdf",
+            desc="60V N-channel MOSFET, 13.3mOhm max @4.5V, logic-level, WDFN8 3.3x3.3 (u8FL)",
+            pkg="WDFN8 3.3x3.3mm (u8FL)",
+            note=f"{note}. On TI's NexFET SON 3.3x3.3 land; onsemi's own adds only a band soldering"
+            " the package's two side tabs.",
         )
     else:
         part(

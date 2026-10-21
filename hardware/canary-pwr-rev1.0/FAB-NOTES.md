@@ -17,7 +17,7 @@ position file do not show.
 | Layer order | F.Cu / **In1.Cu = GND plane** / In2.Cu = GND with +12 V and +5 V islands, and some signals / B.Cu |
 | Vias | Through-hole only: 0.60 mm pad / 0.30 mm drill, and 0.80 / 0.40 mm on the 12 V power nets. No blind, buried or micro vias. **No via sits in a pad, so no plugged or filled vias are needed.** All vias tented |
 | Min track | 0.15 mm |
-| Min spacing | 0.15 mm. **0.13 mm is allowed inside the land patterns of Q2–Q5, Q7, U1–U4 and U8.** The narrowest gap between two pads is 0.14 mm, gate to source on the VSON-8 FETs |
+| Min spacing | 0.15 mm. **0.13 mm is allowed inside the land patterns of Q2–Q5, Q7, U1–U4 and U8.** The narrowest gap between two pads is 0.14 mm, gate to source on the five 3.3 × 3.3 mm FETs |
 | Min hole-to-hole | 0.25 mm |
 | Copper to edge | 0.30 mm |
 | Copper to hole | 0.25 mm |
@@ -32,7 +32,7 @@ prepreg / 0.035 mm.
 **ENIG preferred.** Several parts need flat pads, which HASL does not give:
 
 - U1, U2 and U3 have 0.5 mm pitch.
-- U1, U2 and the five VSON-8 FETs (Q2–Q5, Q7) are leadless.
+- U1, U2 and the five 3.3 × 3.3 mm FETs (Q2–Q5, Q7) are leadless.
 - U6 has an exposed pad.
 
 ## Solder mask
@@ -102,6 +102,11 @@ soldering is needed.
 - **U6:** the footprint is named after TI's TPS7A1633**A**QDGNRQ1. The BOM's TPS7A1633QDGNRQ1,
   without the A, is the intended part, and the two share a land pattern.
 - **U8:** the footprint `SOIC8_DGK_TEX` is TI's DGK (VSSOP-8) land pattern.
+- **Q2–Q5, Q7:** the footprint `VSON-8_3.3x3.3mm_P0.65mm_NexFET` is TI's SON 3.3 × 3.3 land
+  pattern. The BOM's onsemi NTTFS5C673NLTAG (WDFN8 3.3 × 3.3, μ8FL) is the intended part, with
+  the same pinout. onsemi's own footprint differs only by a band that solders the two tie-bar
+  tabs on the package's sides. Those tabs are left unsoldered here; no other net's copper is
+  exposed near them.
 
 Please do not change any of these MPNs to match its footprint name.
 
@@ -129,7 +134,7 @@ Please do not down-rate any line to a cheaper equivalent. Each passive's BOM Val
 rating, for example `100nF 50V X7R`, `10k 0.1%`, `8mOhm 1% 1W` or `4.7uH Isat 14.4A`.
 
 - **The 12 V side is rated for the input clamp.** D2 (SMBJ24A) clamps at up to 38.9 V, so every
-  capacitor on a 12 V net is 50 V, and the CSD18543Q3A FETs are 60 V. The 25 V and 10 V
+  capacitor on a 12 V net is 50 V, and the NTTFS5C673NL FETs are 60 V. The 25 V and 10 V
   capacitors are on rails of 10 V or less.
 - **R14, R15 (8 mΩ) and R28 (5 mΩ) are Vishay WSL2512 metal-strip current-sense resistors, 1 W.**
   The LTC3350's 4 A limits and the INA226's reading scale with them.
