@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { HttpError, controlJson } from "../../api/core";
@@ -252,6 +252,45 @@ describe("ECU backup card (W08.8)", () => {
       ),
     ).toBeVisible();
     expect(screen.queryByText(/Backup failed/)).not.toBeInTheDocument();
+  });
+
+  it("done with a map: shows the image's own size check once", async () => {
+    const summary =
+      "nothing points past 0x0FFFFF: 260 vector-table entries (tables at 0x000000, 0x020004) and 4,159 call targets land inside the image or in RAM";
+    const extent = {
+      verdict: "no_sign" as const,
+      summary,
+      image_size: 1048576,
+      ram_from: "0xFFFF0000",
+      tables: [],
+      calls: null,
+    };
+    const integrity = {
+      checksum: null,
+      calibration_id: { image: "1ZS44A00000", ecu: "1ZS44A00000", ok: true },
+      reread: { blocks: 64, mismatches: [] },
+      extent,
+    };
+    route(
+      backupState({ state: "done", stored: true, sha256: SHA_TUNED, verified: true, integrity }),
+    );
+    renderCard();
+    expect(await screen.findByText(`Flash size: ${summary}`)).toBeVisible();
+    cleanup();
+    // Without a map the reason already carries the summary: not repeated.
+    route(
+      backupState({
+        state: "done",
+        stored: true,
+        sha256: SHA_TUNED,
+        verified: false,
+        reason: `unverified: with no map, only the image's own pointers check its size: ${summary}; a sign, not proof`,
+        integrity,
+      }),
+    );
+    renderCard();
+    expect(await screen.findByText(/Kept, not fully checked/)).toBeVisible();
+    expect(screen.queryByText(/^Flash size:/)).not.toBeInTheDocument();
   });
 
   it("done before the library list has the entry: says so and asks for a refresh", async () => {

@@ -498,6 +498,30 @@ describe("ROM Library page — list, memory map, regions and tables", () => {
     );
   });
 
+  it("flags an image whose own vector table points past its end, and explains it", async () => {
+    const summary =
+      "the image points past its end (0x0FFFFF): the vector table at 0x020004 to 0x00120000, so the flash is larger than the 1,048,576 bytes read";
+    const larger: RomLibraryEntry = {
+      ...ENTRY_TUNED,
+      extent: {
+        verdict: "larger",
+        summary,
+        image_size: 1048576,
+        ram_from: "0xFFFF0000",
+        tables: [],
+        calls: null,
+      },
+    };
+    withEntries([larger, { ...ENTRY_K106, extent: { ...larger.extent!, verdict: "no_sign" } }]);
+    render(<RomLibraryPage token="t" status={null} />);
+    const list = within(await screen.findByRole("table", { name: "ROM images" }));
+    // Only the image that points past its end carries a chip in the list.
+    expect(list.getAllByText("flash larger than image")).toHaveLength(1);
+    expect(list.queryByText("no sign of more flash")).not.toBeInTheDocument();
+    expect(screen.getByText("Whole flash?")).toBeVisible();
+    expect(screen.getByText(summary)).toBeVisible();
+  });
+
   it("selecting another entry loads its description", async () => {
     withEntries([ENTRY_TUNED, ENTRY_K106]);
     render(<RomLibraryPage token="t" status={null} />);

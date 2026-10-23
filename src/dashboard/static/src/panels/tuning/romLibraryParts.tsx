@@ -5,6 +5,7 @@ import { badgeClass, cn } from "../../styles";
 import type {
   RomChecksumVerdict,
   RomConfidence,
+  RomExtentReading,
   RomLibraryEntry,
   RomRevisionMatch,
 } from "../../types/romLibrary";
@@ -135,6 +136,22 @@ export function ChecksumChip({ checksum }: { checksum: RomChecksumVerdict | null
   ) : (
     <Chip tone="bad" title={checksumWords(checksum)}>
       checksum fails
+    </Chip>
+  );
+}
+
+const EXTENT: Record<RomExtentReading["verdict"], { tone: "warn" | "faint"; text: string }> = {
+  larger: { tone: "warn", text: "flash larger than image" },
+  no_sign: { tone: "faint", text: "no sign of more flash" },
+  unknown: { tone: "faint", text: "size unchecked" },
+};
+
+/** What the image's own pointers say about its size; the summary on hover. */
+export function ExtentChip({ extent }: { extent: RomExtentReading }) {
+  const item = EXTENT[extent.verdict] ?? { tone: "faint", text: String(extent.verdict) };
+  return (
+    <Chip tone={item.tone} title={extent.summary}>
+      {item.text}
     </Chip>
   );
 }

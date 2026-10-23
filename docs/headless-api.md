@@ -379,6 +379,7 @@ the plain image).
                "algorithm": "be32_sum_xor"},
   "revision_match": {"revision": "ZS44A-20260920", "status": "matched", "reference": null},
   "map_reason": null,
+  "extent": {"verdict": "no_sign", "summary": "nothing points past 0x0FFFFF: ...", "...": "..."},
   "read_meta": null
 }
 ```
@@ -389,8 +390,10 @@ the plain image).
 UpRev base, named in `reference`), `unrecognised`, or `unknown` when the flash
 history could not be read (`reason` says why; the image was never compared). `checksum` is `null`, and
 `map_reason` says why, when no map definition covers the image's calibration
-ID. A failing checksum is reported, never refused. `read_meta` is the latest
-ECU read's metadata (below), `null` for uploads.
+ID. A failing checksum is reported, never refused. `extent` is the image's own
+size check, the backup job's `integrity.extent` (below), computed for every
+image; `null` when the vehicle's backup recipe names no vector tables.
+`read_meta` is the latest ECU read's metadata (below), `null` for uploads.
 
 **Description** (`GET /control/rom/library/{sha}`): `sha256`, `crc32`,
 `container_sha256`, `calibration_id`, `size`, `checksum`, `revision_match`,
@@ -412,7 +415,9 @@ then
 - `map_reason`: `null`, or e.g. `"no map definition for calibration 1ZS04C00000"`
   (then `map`, `map_slots` and `checksum` are `null`, `regions`/`tables` empty;
   identity and `blocks` are still there);
-- `entry`: the library entry above.
+- `entry`: the library entry above, whose `extent` is the image's own size
+  check (the backup job's `integrity.extent`, below; `null` when the vehicle's
+  backup recipe names no vector tables).
 
 **Tables** (`GET /control/rom/library/{sha}/tables`): `{sha256, calibration_id,
 map_slots: [1, 2, 3, 4, 5], tables: [...], reason}`. Each table:
@@ -472,10 +477,24 @@ could not be written is
 kept". `send_errors` counts frames the bus itself refused (`can.CanError`);
 they are retried like timeouts and named "CAN send failed", never confused
 with the transmit gate suppressing a frame. `integrity` is
-`{checksum, calibration_id: {image, ecu, ok, offset}, reread: {blocks, mismatches}}`,
-or `null` if the checks themselves failed. `offset` is where the ID sits: the
-map's, or, with no map that describes the image, where the ECM-reported ID
-was found as ASCII. While not
+`{checksum, calibration_id: {image, ecu, ok, offset}, reread: {blocks, mismatches},
+extent}`, or `null` if the checks themselves failed. `offset` is where the ID
+sits: the map's, or, with no map that describes the image, where the
+ECM-reported ID was found as ASCII.
+
+`extent` is what the image's own program says about its size, read offline
+from the bytes (the recipe's `extent` section, `src/analysis/rom_extent.py`;
+`null` when the recipe has none): `{verdict, summary, image_size, ram_from,
+tables: [{offset, entries, valid, reason, inside, ram, erased, beyond,
+beyond_count}], calls: {pairs, inside, ram, beyond, beyond_count,
+beyond_pairs} | null}`. `verdict` is `larger` (a valid vector table points
+past the image's end and below RAM: the flash is bigger than the recipe
+reads), `no_sign` (nothing points past it; a sign, not proof) or `unknown`
+(no table could be read). Call targets are evidence only, never the verdict.
+The read checks the tables as soon as their bytes are in and stops `failed`
+("stopped at block N of M: ...", nothing stored) on `larger`; nothing past
+the recipe's range is ever requested. Without a map, `no_sign` still leaves
+the size unchecked, and the `unverified:` reason quotes the summary. While not
 running, `preconditions` lists every start check `{id, ok, detail}` — ids
 `backup`, `recipe`, `obd_source`, `vehicle_state`, `engine_watch`, `passive`,
 `foreign_tester`, `ecm_session`, `capture` — with `can_start` and `blocked_by`.

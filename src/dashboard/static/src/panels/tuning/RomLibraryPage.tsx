@@ -41,7 +41,13 @@ import { EcuBackupCard } from "./EcuBackupCard";
 import { RomBlockGrid, RomRegionTable } from "./RomMemoryMap";
 import { RomCompare } from "./RomCompare";
 import { RomTablesView } from "./RomTablesView";
-import { ChecksumChip, RevisionChip, UnverifiedChip, checksumWords } from "./romLibraryParts";
+import {
+  ChecksumChip,
+  ExtentChip,
+  RevisionChip,
+  UnverifiedChip,
+  checksumWords,
+} from "./romLibraryParts";
 
 /** Engine Tuning ▸ ROM Library (W08.6, W08.8): stored ROM images, the memory
  *  map of the selected one, its tables, compare, and the ECU backup.
@@ -357,6 +363,7 @@ function EntryRow({
           <span className="flex flex-wrap gap-1">
             <RevisionChip match={entry.revision_match} />
             <UnverifiedChip entry={entry} />
+            {entry.extent?.verdict === "larger" && <ExtentChip extent={entry.extent} />}
           </span>
         </td>
         <td className="py-2 pr-3">
@@ -473,6 +480,14 @@ function RomImageView({ token, entry }: { token: string; entry: RomLibraryEntry 
             {entry.size.toLocaleString()} bytes ({hexAddress(0)}–
             {hexAddress(Math.max(0, entry.size - 1))})
           </Fact>
+          {entry.extent && (
+            <Fact term="Whole flash?">
+              <span className="inline-flex flex-wrap items-center justify-end gap-2">
+                <ExtentChip extent={entry.extent} />
+                <span className="text-xs text-fg-dim">{entry.extent.summary}</span>
+              </span>
+            </Fact>
+          )}
           <Fact term="Image sha256">
             <span className="break-all text-xs">{entry.sha256}</span>
           </Fact>

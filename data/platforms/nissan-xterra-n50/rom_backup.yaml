@@ -57,6 +57,33 @@ verify:
 # 1,729, and every ECM broadcast, 0x23D, 0x231 and 0x551 named among them,
 # stopped at 21:59:36Z while 0x2D1/0x2DE/0x280 carried on (W08.9).
 ecm_broadcast_ids: [0x1F9, 0x231, 0x23D, 0x551]
+# Does the image hold the whole flash? Read offline from the bytes already
+# read, never by reading past read.end (src/analysis/rom_extent.py). A vector
+# table entry past 0x0FFFFF and below RAM would mean a larger flash than this
+# recipe reads; the backup stops as soon as the tables are in. Checked on the
+# 2013's ECU read (sha256 437ba37e...3eaf, boot code naming SH7058): no_sign,
+# both tables valid, 4,159 call targets all inside the image or in RAM. Not
+# yet run on the 2008's image (tests/test_rom_extent.py skips where it is
+# absent).
+extent:
+  # The SH7058's on-chip RAM starts here (docs/ecu-firmware-analysis.md,
+  # "Assumed blocks"); both programs' stacks are 0xFFFF7FFC.
+  ram_from: 0xFFFF0000
+  vector_tables:
+    - offset: 0x000000
+      entries: 4
+      evidence: >-
+        The boot reset pair (PC, SP, PC, SP): 0x261C / 0xFFFF7FFC on the 2008,
+        0x2470 / 0xFFFF7FFC on the 2013. Only 4: the 2013's boot table holds
+        230 valid entries and then code, so a longer count reads code as
+        addresses.
+    - offset: 0x020004
+      entries: 256
+      evidence: >-
+        The application vector table behind the header word at 0x020000
+        (reset 0x21C24 on the 2008, 0x21A08 on the 2013). All 256 entries are
+        valid on the 2013's read; the 2008's are not yet checked.
+  call_scan: sh2
 provenance:
   capture: docs/skunkworks/uprev-backup-20261004.md
   evidence: >-

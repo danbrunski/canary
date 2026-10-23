@@ -30,6 +30,7 @@ from src.control.rom_backup import (
     BackupRefusedError,
     RomBackupJob,
     VehicleReading,
+    recipe_extent,
 )
 from src.control.rom_library import (
     MAX_ROM_UPLOAD,
@@ -40,7 +41,7 @@ from src.control.rom_library import (
 )
 from src.dashboard.security import control_auth_dependency
 from src.dashboard.status import derive_vehicle_state_from_storage
-from src.vehicle.platforms import config_data_file
+from src.vehicle.platforms import VehicleDataFile, config_data_file
 from src.vehicle.profiles import active_registry
 from src.vehicle.profiles import profile_dir as vehicle_profile_dir
 from src.vehicle.tune_revisions import TuneRevisionRegistry
@@ -142,9 +143,17 @@ def register_rom_library_routes(
         # reports that as revision_match status "unknown" with the reason.
         return active_registry(config)
 
-    library = RomLibrary(config.daemon.rom_library_dir, profile_dir=profile, registry=registry)
+    def recipe_file() -> VehicleDataFile:
+        return config_data_file(config, ROM_BACKUP_FILE)
+
+    library = RomLibrary(
+        config.daemon.rom_library_dir,
+        profile_dir=profile,
+        registry=registry,
+        extent_spec=lambda: recipe_extent(recipe_file),
+    )
     job = RomBackupJob(
-        recipe_file=lambda: config_data_file(config, ROM_BACKUP_FILE),
+        recipe_file=recipe_file,
         library=library,
         open_bus=lambda: bus_factory(config.hardware.can),
         vehicle=lambda: vehicle_reading(

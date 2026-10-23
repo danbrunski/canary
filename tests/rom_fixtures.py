@@ -42,6 +42,10 @@ OPERATOR_BACKUP_DIR = UPREV / "ROM Backup"
 #: sha256 of the 2026-10-04 ECU read (docs/skunkworks/uprev-backup-20261004.md),
 #: equal to the decoded 20260920 file.
 ECU_READ_20261004_SHA256 = "a46baa248f16db8d5ed9854913e614dd7d77b7579bb6c36bddb792741531be50"
+#: The 2013 Xterra's first CANary ECU read (profile nissan-xterra-2013), sent
+#: by the operator on 2026-10-23: a plain image, outside Git like the others.
+XTERRA_2013_READ = Path.home() / "image_437ba37efa77-437ba37e.bin"
+XTERRA_2013_SHA256 = "437ba37efa779287459b5e0a92fba4f7370dba64f8fe88018d46c5ad701f3eaf"
 
 #: An arbitrary synthetic Osiris key, never an extracted production value.
 SYNTHETIC_KEY = 0x12345678

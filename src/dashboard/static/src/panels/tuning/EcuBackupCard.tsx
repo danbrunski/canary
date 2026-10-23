@@ -228,8 +228,13 @@ function BackupState({
   const kept = storedSha(job);
   const entry = kept ? entries.find((item) => item.sha256 === kept) : undefined;
   const nrcs = Object.entries(job.negative_responses ?? {});
+  // The image's own size check, unless the reason already carries it.
+  const extent = job.integrity?.extent;
   const details = (
     <>
+      {extent && !(job.reason ?? "").includes(extent.summary) && (
+        <p className="text-xs text-fg-dim">Flash size: {extent.summary}</p>
+      )}
       {nrcs.length > 0 && (
         <p className="font-num text-xs text-fg-dim">
           Negative responses: {nrcs.map(([code, count]) => `${code} ×${count}`).join(", ")}

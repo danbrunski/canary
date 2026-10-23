@@ -53,6 +53,14 @@ reported its calibration ID) also keeps it unverified with the reason, but the
 job ends ``done``: that is absence of evidence, not evidence against the read.
 Without a map the calibration ID is looked for in the image as the ASCII the
 ECM reports. An unverified image is never stored as good.
+
+**Size.** The recipe's ``extent`` names vector tables the image's own program
+holds (:mod:`src.analysis.rom_extent`). Once the read has their bytes it reads
+them, offline, and stops with the reason when one points past the range: the
+flash is larger than the recipe says, and the rest could only produce a short
+image. The finished image is read again with its call targets; ``larger`` is a
+failure, and without a map ``no_sign`` is still unchecked (a sign, not proof).
+Nothing is ever read beyond the recipe's range.
 """
 
 from __future__ import annotations
@@ -70,6 +78,7 @@ import can
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from src.analysis.rom_extent import ExtentReading, ExtentSpec, early_extent, read_extent
 from src.analysis.rom_image import (
     checksum_verdict,
     map_applies,
@@ -188,6 +197,9 @@ class BackupRecipe(_Strict):
     #: one of them faster than ``pacing.request_timeout_seconds``. Empty: a
     #: timeout is reported without saying whether the ECM went silent.
     ecm_broadcast_ids: list[int] = Field(default_factory=list)
+    #: What the image says about its own size, read offline from the bytes
+    #: (:mod:`src.analysis.rom_extent`). ``None``: the size goes unchecked.
+    extent: ExtentSpec | None = None
 
     @model_validator(mode="after")
     def _broadcast_ids(self) -> BackupRecipe:
@@ -222,7 +234,30 @@ def load_backup_recipe(path: Path, rom_map: RomMap | None) -> BackupRecipe:
             f"{ROM_BACKUP_FILE} reads from 0x{recipe.read.start:06X}; an image starts at "
             "0x000000, so that its offsets are flash addresses"
         )
+    extent = recipe.extent
+    if extent is not None and extent.tables_end > span:
+        raise ValueError(
+            f"{ROM_BACKUP_FILE} extent: a vector table runs to 0x{extent.tables_end:06X}, past "
+            f"the {span:,} bytes the recipe reads"
+        )
+    if extent is not None and extent.ram_from <= recipe.read.end:
+        raise ValueError(
+            f"{ROM_BACKUP_FILE} extent: ram_from 0x{extent.ram_from:08X} is inside the read "
+            f"range, which ends at 0x{recipe.read.end:06X}"
+        )
     return recipe
+
+
+def recipe_extent(recipe_file: Callable[[], VehicleDataFile]) -> ExtentSpec | None:
+    """The vehicle recipe's ``extent``, or ``None`` when no recipe loads.
+
+    For the library, which reads every image's extent: a missing or broken
+    recipe is the backup card's refusal to name, not a reason a listing fails.
+    """
+    try:
+        return load_backup_recipe(recipe_file().path, None).extent
+    except (FileNotFoundError, ValueError, yaml.YAMLError):
+        return None
 
 
 @dataclass(frozen=True)
@@ -949,6 +984,9 @@ class RomBackupJob:
         next_check = 0.0
         last_cycle = 0.0
         done_bytes = 0
+        # The vector tables are read once their bytes are in (minutes before
+        # the end): an image that points past the range stops the read there.
+        extent_pending = recipe.extent is not None
         for index, (address, length) in enumerate(blocks):
             now = time.monotonic()
             problem = self._midread_problem(check_vehicle=now >= next_check)
@@ -965,8 +1003,12 @@ class RomBackupJob:
             offset = address - recipe.read.start
             image[offset : offset + length] = data
             done_bytes += length
-            elapsed = time.monotonic() - started
             done = index + 1
+            if extent_pending and recipe.extent is not None:
+                if done_bytes >= recipe.extent.tables_end:
+                    extent_pending = False
+                    self._check_extent_early(image, recipe, done, len(blocks))
+            elapsed = time.monotonic() - started
             rate = done / elapsed if elapsed > 0 else 0.0
             self._update(
                 blocks_done=done,
@@ -975,6 +1017,26 @@ class RomBackupJob:
                 eta_s=round((len(blocks) - done) / rate, 1) if rate > 0 else None,
             )
         return image
+
+    @staticmethod
+    def _check_extent_early(image: bytearray, recipe: BackupRecipe, done: int, total: int) -> None:
+        """Abort when the vector tables already read point past the range.
+
+        Offline: the bytes are the ones just read. A read of the rest could
+        only produce an image known to be short, so it stops here and says
+        what the recipe needs.
+        """
+        spec = recipe.extent
+        if spec is None:
+            return
+        reading = early_extent(bytes(image[: spec.tables_end]), spec, image_size=len(image))
+        if reading.verdict != "larger":
+            return
+        raise _AbortError(
+            f"stopped at block {done:,} of {total:,}: {reading.summary()}. The recipe reads "
+            f"0x{recipe.read.start:06X}-0x{recipe.read.end:06X}; this ECM needs a "
+            f"{ROM_BACKUP_FILE} in its own profile with the flash's real size. Nothing was stored"
+        )
 
     def _reread(
         self,
@@ -1123,11 +1185,11 @@ class RomBackupJob:
             checksum = checksum_verdict(image, rom_map.checksums)
             if not checksum["ok"]:
                 failures.append(checksum["reason"] or "checksum mismatch")
-        if rom_map is None:
-            unchecked.append(
-                f"with no map, nothing confirms the recipe's {recipe.read.size:,} bytes are the "
-                "whole flash"
-            )
+        extent = read_extent(image, recipe.extent) if recipe.extent is not None else None
+        if extent is not None and extent.verdict == "larger":
+            failures.append(extent.summary())
+        elif rom_map is None:
+            unchecked.append(self._size_caveat(recipe, extent))
         # Blank is as good as unreported: an empty string is found anywhere.
         ecu_id = (self._ecu_calibration_id() or "").strip() or None
         offset: int | None = None
@@ -1168,8 +1230,21 @@ class RomBackupJob:
                 "blocks": min(recipe.verify.reread_blocks, len(recipe.read.blocks())),
                 "mismatches": reread_mismatches,
             },
+            "extent": None if extent is None else extent.to_dict(),
         }
         return integrity, failures, unchecked
+
+    @staticmethod
+    def _size_caveat(recipe: BackupRecipe, extent: ExtentReading | None) -> str:
+        """Without a map, what (if anything) checked the image's size."""
+        size = f"{recipe.read.size:,}"
+        if extent is not None and extent.verdict == "no_sign":
+            return (
+                f"with no map, only the image's own pointers check its size: {extent.summary()}; "
+                f"a sign, not proof, that the recipe's {size} bytes are the whole flash"
+            )
+        caveat = f"with no map, nothing confirms the recipe's {size} bytes are the whole flash"
+        return caveat if extent is None else f"{caveat} ({extent.summary()})"
 
     def _wait_for_polling(self, released: float) -> tuple[float | None, str]:
         """Seconds until an OBD observation newer than the release, or why none came.
@@ -1211,4 +1286,5 @@ __all__ = [
     "RomBackupJob",
     "VehicleReading",
     "load_backup_recipe",
+    "recipe_extent",
 ]

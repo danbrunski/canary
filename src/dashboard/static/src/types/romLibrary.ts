@@ -69,6 +69,43 @@ export interface RomSourceRecord {
   read_meta?: RomReadMeta | null;
 }
 
+/** What an image's own vector tables say about its size (`rom_extent`).
+ *  `larger`: a valid table points past the image's end, below RAM, so the
+ *  flash is bigger than the read. `no_sign`: nothing points past it, which is
+ *  a sign, not proof. `unknown`: no table could be read. Call targets are
+ *  evidence only, never the verdict. */
+export type RomExtentVerdict = "larger" | "no_sign" | "unknown";
+
+export interface RomExtentTable {
+  offset: string;
+  entries: number;
+  valid: boolean;
+  reason: string | null;
+  inside: number;
+  ram: number;
+  erased: number;
+  beyond: string[];
+  beyond_count: number;
+}
+
+export interface RomExtentReading {
+  verdict: RomExtentVerdict;
+  /** One plain sentence naming what was seen, and where. */
+  summary: string;
+  image_size: number;
+  ram_from: string;
+  tables: RomExtentTable[];
+  /** Null when the vehicle's recipe counts no call targets. */
+  calls: {
+    pairs: number;
+    inside: number;
+    ram: number;
+    beyond: string[];
+    beyond_count: number;
+    beyond_pairs: number;
+  } | null;
+}
+
 /** One stored image: `GET /control/rom/library` entries, the
  *  `POST /control/rom/library` response, and the `PATCH` response. */
 export interface RomLibraryEntry {
@@ -96,6 +133,8 @@ export interface RomLibraryEntry {
   revision_match: RomRevisionMatch;
   /** Why the vehicle's map does not apply to this image, when it does not. */
   map_reason?: string | null;
+  /** Null when the vehicle's backup recipe names no vector tables to read. */
+  extent?: RomExtentReading | null;
   size: number;
   /** The latest ECU read's metadata; null when never read from the ECU. */
   read_meta: RomReadMeta | null;
@@ -375,6 +414,8 @@ export interface RomBackupIntegrity {
     offset?: string | null;
   };
   reread: { blocks: number; mismatches: string[] };
+  /** Null when the recipe has no `extent`. */
+  extent?: RomExtentReading | null;
 }
 
 /** One start precondition as the daemon evaluates it. `id` is one of

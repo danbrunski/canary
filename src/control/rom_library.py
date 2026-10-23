@@ -33,6 +33,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Literal
 
+from src.analysis.rom_extent import ExtentSpec, read_extent
 from src.analysis.rom_image import (
     ImageFormatError,
     checksum_verdict,
@@ -90,10 +91,14 @@ class RomLibrary:
         *,
         profile_dir: Path,
         registry: Callable[[], TuneRevisionRegistry | None],
+        extent_spec: Callable[[], ExtentSpec | None] | None = None,
     ) -> None:
         self.root = Path(root)
         self.profile_dir = Path(profile_dir)
         self._registry = registry
+        #: What an image says about its own size (the backup recipe's
+        #: ``extent``); ``None`` or a ``None`` answer leaves ``extent`` null.
+        self._extent_spec = extent_spec
         self._lock = threading.RLock()
 
     # -- definitions --------------------------------------------------------
@@ -111,6 +116,12 @@ class RomLibrary:
 
     def registry(self) -> TuneRevisionRegistry | None:
         return self._registry()
+
+    def extent(self, image: bytes) -> dict[str, Any] | None:
+        """Whether ``image`` points past its own end, or ``None`` when the
+        vehicle names no vector tables to read (:mod:`src.analysis.rom_extent`)."""
+        spec = self._extent_spec() if self._extent_spec is not None else None
+        return None if spec is None else read_extent(image, spec).to_dict()
 
     def revision_match(self, sha: str) -> dict[str, Any]:
         """Which recorded calibration ``sha`` is. Never raises.
@@ -293,6 +304,7 @@ class RomLibrary:
             ),
             "revision_match": self.revision_match(meta["sha256"]),
             "map_reason": reason,
+            "extent": self.extent(image),
             "read_meta": reads[-1] if reads else None,
         }
 

@@ -40,6 +40,7 @@ from src.control.rom_backup import (
     RomBackupJob,
     VehicleReading,
     load_backup_recipe,
+    recipe_extent,
 )
 from src.control.rom_library import RomLibrary
 from src.dashboard.routes.rom_library import (
@@ -55,6 +56,14 @@ from tests.rom_fixtures import PROFILE, xterra_map
 
 SMALL_SIZE = 2048
 CAL_ID = b"1ZS44A00000"
+#: A synthetic vector table: reset PC, stack, PC, stack (src/analysis/rom_extent.py).
+VECTORS_AT = 0x40
+STACK = 0xFFFF7FFC
+VECTORS = (0x400, STACK, 0x400, STACK)
+EXTENT = {
+    "ram_from": 0xFFFF0000,
+    "vector_tables": [{"offset": VECTORS_AT, "entries": 4, "evidence": "synthetic"}],
+}
 REQUEST_ID, RESPONSE_ID = 0x7E0, 0x7E8
 
 
@@ -87,6 +96,7 @@ def _write_profile(
     block: int = 63,
     ecm_broadcast_ids: list[int] | None = None,
     rom_map: bool = True,
+    extent: dict[str, Any] | None = None,
 ) -> Path:
     profile = root / "profile"
     profile.mkdir(parents=True, exist_ok=True)
@@ -106,15 +116,21 @@ def _write_profile(
     }
     if ecm_broadcast_ids is not None:
         recipe["ecm_broadcast_ids"] = ecm_broadcast_ids
+    if extent is not None:
+        recipe["extent"] = extent
     if rom_map:
         (profile / "rom_map.yaml").write_text(yaml.safe_dump(_rom_map_data()))
     (profile / "rom_backup.yaml").write_text(yaml.safe_dump(recipe))
     return profile
 
 
-def _small_image(*, cal: bytes = CAL_ID, good_checksum: bool = True) -> bytes:
+def _small_image(
+    *, cal: bytes = CAL_ID, good_checksum: bool = True, vectors: tuple[int, ...] = ()
+) -> bytes:
     image = bytearray(np.random.default_rng(11).integers(0, 255, SMALL_SIZE, np.uint8).tobytes())
     struct.pack_into(">I", image, 0x10, 0x12345678)
+    for index, value in enumerate(vectors):
+        struct.pack_into(">I", image, VECTORS_AT + 4 * index, value)
     image[0x100 : 0x100 + 11] = cal
     rom_map = RomMap.model_validate(_rom_map_data())
     total, xor = rom_map.checksums.values(bytes(image))
@@ -1131,6 +1147,122 @@ def test_without_a_map_a_reread_mismatch_still_fails(rig_factory: Callable[..., 
     state = rig.run()
     assert state["state"] == "failed" and state["stored"] is True
     assert state["reason"].startswith("unverified: 1 re-read block(s) differ: 0x000000")
+
+
+# -- the image's own size ---------------------------------------------------------
+
+
+def test_without_a_map_the_images_own_pointers_check_its_size(
+    rig_factory: Callable[..., Rig],
+) -> None:
+    """Still unchecked, and the reason says what did check it: a sign, not proof."""
+    rig = rig_factory(_small_image(vectors=VECTORS), rom_map=False, extent=EXTENT)
+    state = rig.run()
+    assert state["state"] == "done" and state["verified"] is False, state
+    assert state["reason"].endswith(
+        "with no map, only the image's own pointers check its size: nothing points past "
+        "0x0007FF: 4 vector-table entries (tables at 0x000040) land inside the image, in RAM "
+        "or erased; a sign, not proof, that the recipe's 2,048 bytes are the whole flash"
+    )
+    assert state["integrity"]["extent"]["verdict"] == "no_sign"
+    assert "nothing confirms" not in state["reason"]
+
+
+def test_a_vector_table_that_is_not_one_keeps_the_plain_caveat(
+    rig_factory: Callable[..., Rig],
+) -> None:
+    rig = rig_factory(_small_image(vectors=(0x401, STACK)), rom_map=False, extent=EXTENT)
+    state = rig.run()
+    assert state["state"] == "done" and state["verified"] is False
+    assert (
+        "with no map, nothing confirms the recipe's 2,048 bytes are the whole flash (no vector "
+        "table could be read (0x000040: entry 0 is 0x00000401"
+    ) in state["reason"]
+    assert state["integrity"]["extent"]["verdict"] == "unknown"
+
+
+def test_with_a_map_a_sound_extent_leaves_the_read_verified(
+    rig_factory: Callable[..., Rig],
+) -> None:
+    rig = rig_factory(_small_image(vectors=VECTORS), extent=EXTENT)
+    state = rig.run()
+    assert state["state"] == "done" and state["verified"] is True, state
+    assert state["integrity"]["extent"]["verdict"] == "no_sign"
+
+
+def test_a_table_pointing_past_the_range_stops_the_read_early(
+    rig_factory: Callable[..., Rig],
+) -> None:
+    """The tables are in after two blocks; the rest is never asked for, and
+    nothing past the recipe's range ever is."""
+    rig = rig_factory(
+        _small_image(vectors=(0x400, STACK, 0x1000, STACK)), rom_map=False, extent=EXTENT
+    )
+    state = rig.run()
+    assert state["state"] == "failed" and state["stored"] is False, state
+    assert state["reason"] == (
+        "stopped at block 2 of 33: the image points past its end (0x0007FF): the vector table "
+        "at 0x000040 to 0x00001000, so the flash is larger than the 2,048 bytes read. The "
+        "recipe reads 0x000000-0x0007FF; this ECM needs a rom_backup.yaml in its own profile "
+        "with the flash's real size. Nothing was stored"
+    )
+    assert rig.ecu.reads == [0, 63]
+    assert rig.ecu.sessions[-1] == 0x81  # the exit sequence still went out
+    assert rig.library.entries() == []
+    _assert_released()
+
+
+def test_a_finished_image_pointing_past_its_end_fails(rig_factory: Callable[..., Rig]) -> None:
+    """The post-read verdict, should the early one ever not have run."""
+    rig = rig_factory(rom_map=False, extent=EXTENT)
+    recipe = load_backup_recipe(rig.library.profile_dir / ROM_BACKUP_FILE, None)
+    image = _small_image(vectors=(0x400, STACK, 0x1000, STACK))
+    integrity, failures, unchecked = rig.job._integrity(image, recipe, None, [])
+    assert failures == [
+        "the image points past its end (0x0007FF): the vector table at 0x000040 to "
+        "0x00001000, so the flash is larger than the 2,048 bytes read"
+    ]
+    assert not any("whole flash" in item for item in unchecked)
+    assert integrity["extent"]["tables"][0]["beyond"] == ["0x00001000"]
+
+
+def test_without_an_extent_the_integrity_payload_says_so(rig_factory: Callable[..., Rig]) -> None:
+    state = rig_factory(rom_map=False).run()
+    assert state["integrity"]["extent"] is None
+    assert "nothing confirms the recipe's 2,048 bytes are the whole flash" in state["reason"]
+
+
+@pytest.mark.parametrize(
+    ("extent", "match"),
+    [
+        (
+            {**EXTENT, "vector_tables": [{"offset": 0x7F8, "entries": 4, "evidence": "x"}]},
+            "a vector table runs to 0x000808, past the 2,048 bytes the recipe reads",
+        ),
+        ({**EXTENT, "ram_from": 0x400}, "ram_from 0x00000400 is inside the read range"),
+    ],
+)
+def test_an_extent_the_read_cannot_satisfy_is_refused(
+    tmp_path: Path, extent: dict[str, Any], match: str
+) -> None:
+    profile = _write_profile(tmp_path, rom_map=False, extent=extent)
+    with pytest.raises(ValueError, match=match):
+        load_backup_recipe(profile / ROM_BACKUP_FILE, None)
+
+
+def test_a_missing_or_broken_recipe_gives_the_library_no_extent(tmp_path: Path) -> None:
+    profile = _write_profile(tmp_path, rom_map=False, extent=EXTENT)
+
+    def recipe() -> Any:
+        return vehicle_data_file(
+            profile, ROM_BACKUP_FILE, make="", model="", year=None, platforms_dir=tmp_path / "np"
+        )
+
+    assert recipe_extent(recipe) is not None
+    (profile / ROM_BACKUP_FILE).write_text("read: [unclosed\n")
+    assert recipe_extent(recipe) is None
+    (profile / ROM_BACKUP_FILE).unlink()
+    assert recipe_extent(recipe) is None
 
 
 def test_a_platform_recipe_serves_a_profile_without_one(
