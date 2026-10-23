@@ -1,6 +1,12 @@
 import { useCallback, useState } from "react";
 
-import { getProfiles, revertProfile, updateProfileName } from "../api/http";
+import {
+  deleteProfile,
+  getProfiles,
+  restoreProfile,
+  revertProfile,
+  updateProfileName,
+} from "../api/http";
 import { Notice } from "../components/Notice";
 import { Panel } from "../components/Panel";
 import { ResourceGate } from "../components/ResourceGate";
@@ -10,10 +16,12 @@ import type {
   ProfileResolution,
   VehicleParameterField,
   VehicleProfile,
+  VehicleProfileDeleteResponse,
   VehicleProfileEditResponse,
 } from "../types";
 import { buttonClass, cn, inputClass, placeholderClass } from "../styles";
 import { ProfileEditor, parameterText } from "./ProfileEditor";
+import { DeleteConfirm, DeletedResult, HiddenProfiles } from "./ProfileDeleteParts";
 
 interface ProfilesPanelProps {
   token: string;
@@ -102,7 +110,10 @@ function ParameterRows({
  *  blank display name; the operator names it here ("2008 Xterra") and edits
  *  its identity and vehicle parameters (2026-10-10). The `slug` keys the data
  *  tree, so nothing here moves data. Edits land in this machine's overlay over
- *  the tracked `profiles.yaml`, and reach the daemon at its next start. */
+ *  the tracked `profiles.yaml`, and reach the daemon at its next start.
+ *  Delete (2026-10-23) hides a tracked profile on this machine, or removes a
+ *  machine-only one; recorded data is never deleted and the folders holding it
+ *  are listed afterwards. Hidden tracked profiles can be restored. */
 export function ProfilesPanel({ token }: ProfilesPanelProps) {
   const fetcher = useCallback((signal: AbortSignal) => getProfiles(token, signal), [token]);
   const { data, error, loading, refresh } = useControlResource(fetcher, {
@@ -113,6 +124,8 @@ export function ProfilesPanel({ token }: ProfilesPanelProps) {
   const [editingSlug, setEditingSlug] = useState<string | null>(null);
   const [draftName, setDraftName] = useState("");
   const [editorSlug, setEditorSlug] = useState<string | null>(null);
+  const [confirmingSlug, setConfirmingSlug] = useState<string | null>(null);
+  const [lastDeleted, setLastDeleted] = useState<VehicleProfileDeleteResponse | null>(null);
   const { notice, setNotice, busy, run } = useAsyncAction();
 
   const startEdit = (slug: string, name: string) => {
@@ -146,6 +159,30 @@ export function ProfilesPanel({ token }: ProfilesPanelProps) {
       { okText: null },
     );
 
+  const onDelete = (slug: string) =>
+    run(
+      "delete",
+      async () => {
+        const result = await deleteProfile(token, slug);
+        setConfirmingSlug(null);
+        setLastDeleted(result);
+        refresh();
+      },
+      { okText: null },
+    );
+
+  const onRestore = (slug: string) =>
+    run(
+      "restore",
+      async () => {
+        await restoreProfile(token, slug);
+        setLastDeleted(null);
+        setNotice({ kind: "ok", text: `Restored ${slug}: it is back as the tracked file has it.` });
+        refresh();
+      },
+      { okText: null },
+    );
+
   const onEdited = (result: VehicleProfileEditResponse) => {
     setEditorSlug(null);
     setNotice({ kind: "ok", text: describeEdit(result, "Saved") });
@@ -171,6 +208,9 @@ export function ProfilesPanel({ token }: ProfilesPanelProps) {
           return (
             <>
               <Notice notice={notice} className="mb-2" />
+              {lastDeleted && (
+                <DeletedResult result={lastDeleted} onDismiss={() => setLastDeleted(null)} />
+              )}
               {data.restart_required && (
                 <div
                   className="mb-2 rounded-[8px] border border-warn/50 bg-warn/10 px-3 py-2 text-[0.82rem]"
@@ -272,9 +312,29 @@ export function ProfilesPanel({ token }: ProfilesPanelProps) {
                                   Revert all
                                 </button>
                               )}
+                              <button
+                                type="button"
+                                className={cn(buttonClass, "text-xs")}
+                                onClick={() => setConfirmingSlug(profile.slug)}
+                                disabled={busy !== null || Boolean(profile.delete_refusal)}
+                                title={
+                                  profile.delete_refusal ??
+                                  "Remove this profile from this machine (recorded data is kept)"
+                                }
+                              >
+                                Delete
+                              </button>
                             </div>
                           )}
                         </div>
+                        {confirmingSlug === profile.slug && !editing && !inEditor && (
+                          <DeleteConfirm
+                            profile={profile}
+                            busy={busy !== null}
+                            onConfirm={() => void onDelete(profile.slug)}
+                            onCancel={() => setConfirmingSlug(null)}
+                          />
+                        )}
                         {editing && (
                           <div className="mt-2 flex items-center gap-2">
                             <input
@@ -334,6 +394,11 @@ export function ProfilesPanel({ token }: ProfilesPanelProps) {
                   })}
                 </ul>
               )}
+              <HiddenProfiles
+                profiles={data.deleted ?? []}
+                busy={busy !== null}
+                onRestore={(slug) => void onRestore(slug)}
+              />
             </>
           );
         }}

@@ -38,16 +38,23 @@ from src.vehicle.profiles import (
     ActiveVinMismatchError,
     DuplicateVinError,
     NoTrackedProfileError,
+    ProfileDeleteRefusedError,
     ProfileEdit,
     ProfileEditError,
+    delete_profile,
+    delete_refusal,
+    deleted_profiles,
     last_resolution,
     load_registry,
     parameter_schema,
     pending_restart,
+    profile_data_paths,
     profile_overrides,
+    restore_profile,
     revert_profile,
     update_profile,
     update_profile_name,
+    vehicle_block_slug,
 )
 from src.vehicle.vin import inspect_vin
 
@@ -131,6 +138,11 @@ def build_router(ctx: ControlContext) -> APIRouter:
             "applies": APPLIES_AT_RESTART if active else APPLIES_WHEN_ACTIVE,
         }
 
+    def _delete_refusal(slug: str) -> str | None:
+        return delete_refusal(
+            slug, active_slug=active_slug, fallback_slug=vehicle_block_slug(config)
+        )
+
     @router.get("/control/profiles")
     def get_control_profiles() -> dict[str, Any]:
         profiles = load_registry(config.profiles)
@@ -143,8 +155,22 @@ def build_router(ctx: ControlContext) -> APIRouter:
                     **profile.to_dict(),
                     "tracked": overrides.get(profile.slug, {"tracked": False})["tracked"],
                     "overrides": overrides.get(profile.slug, {"fields": []})["fields"],
+                    # Why Delete would refuse now (the reason the button shows), else null.
+                    "delete_refusal": _delete_refusal(profile.slug),
                 }
                 for profile in profiles
+            ],
+            # Tracked profiles this machine has deleted: hidden here, in git for
+            # everyone else, restorable.
+            "deleted": [
+                {
+                    "slug": profile.slug,
+                    "name": profile.name,
+                    "make": profile.make,
+                    "model": profile.model,
+                    "year": profile.year,
+                }
+                for profile in deleted_profiles(config.profiles)
             ],
             "active_slug": active_slug,
             "count": len(profiles),
@@ -185,6 +211,43 @@ def build_router(ctx: ControlContext) -> APIRouter:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
         payload = _edit_payload(edit)
         publish_control_event("profile.revert", "ok", payload)
+        return payload
+
+    @router.delete("/control/profiles/{slug}")
+    def delete_control_profile(slug: str) -> dict[str, Any]:
+        """Remove a profile from this machine's registry. A tracked profile is
+        hidden here (a tombstone in the overlay) and stays in git; recorded data
+        is never deleted, and ``data_left`` says where it is."""
+        try:
+            deletion = delete_profile(
+                config.profiles,
+                slug,
+                active_slug=active_slug,
+                fallback_slug=vehicle_block_slug(config),
+            )
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail=f"no profile with slug {slug!r}") from exc
+        except ProfileDeleteRefusedError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        payload = {
+            "deleted": deletion.slug,
+            "tracked": deletion.tracked,
+            "data_left": [str(path) for path in profile_data_paths(config, slug)],
+        }
+        publish_control_event("profile.delete", "ok", payload)
+        return payload
+
+    @router.post("/control/profiles/{slug}/restore")
+    def post_control_profile_restore(slug: str) -> dict[str, Any]:
+        """Bring back a tracked profile this machine deleted, as the tracked file has it."""
+        try:
+            profile = restore_profile(config.profiles, slug)
+        except KeyError as exc:
+            raise HTTPException(
+                status_code=404, detail=f"profile {slug!r} is not deleted on this machine"
+            ) from exc
+        payload = {"profile": profile.to_dict()}
+        publish_control_event("profile.restore", "ok", payload)
         return payload
 
     def _vin_refusal() -> vin_read.VinReadOutcome | None:
@@ -250,7 +313,9 @@ def build_router(ctx: ControlContext) -> APIRouter:
             check, problem = inspect_vin(outcome.vin)
             result["check"] = check.to_dict() if check is not None else None
             result["check_problem"] = problem
-            holder = next((p for p in load_registry(config.profiles) if p.vin == outcome.vin), None)
+            # A profile this machine hides still keys that VIN: the next start restores it.
+            everyone = load_registry(config.profiles, include_deleted=True)
+            holder = next((p for p in everyone if p.vin == outcome.vin), None)
             result["held_by"] = holder.slug if holder is not None else None
         payload = {"vin_read": result}
         publish_control_event("vin.read", "ok" if outcome.ok else str(outcome.refusal), payload)

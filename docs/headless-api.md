@@ -223,8 +223,9 @@ Control endpoints:
 | `GET /control/classifications/events` | sessions containing a given derived event kind |
 | `GET /control/sequence-detector` / `POST /control/sequence-detector` | inspect / switch the live sequence backbone (lstm\|tcn) |
 | `POST /control/replay` / `POST /control/replay/stop` / `GET /control/replay` | run a stored session through the live pipeline with isolated `_replay-*` outputs. A `loop: false` replay ends on its own when its pass runs out (writer back to live, live input reopened); the idle status keeps that replay's id and final counters with `ended` = `completed` / `stopped` / `failed`. Stop after a replay already ended returns that final status (200) and publishes another `replay.stop` control event; 409 only when no replay has run since the daemon started. A stop lands within one chunk load. Start answers 422 when a change-only session (P02.10) cannot be replayed faithfully: slower than real time, or recorded with a longer `collection.broadcast_stale_timeout_seconds` than the daemon's |
-| `GET /control/profiles` / `POST /control/profiles/{slug}/name` | list vehicle profiles / set a profile display name. The listing also carries each profile's `tracked` flag and `overrides` (fields this machine's overlay sets, `parameters.<name>` for parameters), `in_use` (the `vehicle:` block the daemon is running, copied at startup), `pending_restart` (active-profile fields whose registry value the daemon does not run yet), `resolution` (how this start chose its profile: `how`, `vin_read`) and `parameter_fields` (label, unit, kind, evidence field per vehicle parameter) — see [Vehicle profile editing](#vehicle-profile-editing) |
+| `GET /control/profiles` / `POST /control/profiles/{slug}/name` | list vehicle profiles / set a profile display name. The listing also carries each profile's `tracked` flag and `overrides` (fields this machine's overlay sets, `parameters.<name>` for parameters), `in_use` (the `vehicle:` block the daemon is running, copied at startup), `pending_restart` (active-profile fields whose registry value the daemon does not run yet), `resolution` (how this start chose its profile: `how`, `vin_read`) and `parameter_fields` (label, unit, kind, evidence field per vehicle parameter), plus per profile `delete_refusal` (why Delete would refuse now, else `null`) and a top-level `deleted` list (tracked profiles this machine hid) — see [Vehicle profile editing](#vehicle-profile-editing) |
 | `PATCH /control/profiles/{slug}` / `POST /control/profiles/{slug}/revert` | edit a profile's `name`, `make`, `model`, `year`, `vin` and partial `parameters` / put `fields` (or every override) back to the tracked registry's values — see [Vehicle profile editing](#vehicle-profile-editing) |
+| `DELETE /control/profiles/{slug}` / `POST /control/profiles/{slug}/restore` | remove a profile from this machine's registry (a tracked one is hidden here by a tombstone and stays in git; recorded data is kept and `data_left` names where) / bring a hidden tracked profile back — see [Vehicle profile editing](#vehicle-profile-editing) |
 | `POST /control/vin/read` | read the connected vehicle's VIN (Mode 09 0x02) through the running OBD collector; returned for confirmation, never saved — see [Vehicle profile editing](#vehicle-profile-editing) |
 | `GET /control/power` / `POST /control/power/keepalive` | UPS watchdog status / set or cancel the keep-alive hold |
 | `GET /control/update` | software update: `installed` (`version`, `sha`), `status` (the root runner's `/run/canary/update_status`: `state` `idle`/`checking`/`updating`/`done`/`failed`/`refused`, or `lost` when its heartbeat is over 3 min old; `phase`, `phases`, `before`/`after`/`target`, `exit_code` with `exit_meaning`, `outcome`, `message`, `summary`, `log_tail`), `last_check` (`current`, `upstream`, `behind`, `commits` with subjects, `dirty`, or `ok: false` with `reason` `no_internet`/`remote_refused`/`no_upstream`), `pending_request`, `trigger_installed`, `internet.default_route` and `blocked_by` (what an update would end) — see [docs/pi-setup.md](pi-setup.md#updating-from-the-dashboard) |
@@ -960,7 +961,8 @@ The dashboard's Profiles page edits the registry (operator request
 2026-10-10). Every write lands in the machine overlay
 (`profiles.registry_overlay_path`, under `daemon.state_dir`); the tracked
 `profiles.yaml` is never written. Each successful edit, revert and VIN read is
-audit-logged (`profile.update`, `profile.revert`, `vin.read`).
+audit-logged (`profile.update`, `profile.revert`, `profile.delete`,
+`profile.restore`, `vin.read`).
 
 **`PATCH /control/profiles/{slug}`** takes only the fields being edited:
 `name`, `make`, `model`, `year` (`null` clears it), `vin`, and `parameters`, a
@@ -1003,6 +1005,48 @@ not read `parameters.displacement_l`.
 Omitted reverts every override and keeps the VIN, calibration ID and CVN, which
 this machine read off the vehicle and cannot be reverted. 409 for a profile the
 tracked registry does not hold.
+
+**`DELETE /control/profiles/{slug}`** removes a profile from this machine's
+registry (operator request 2026-10-23: a user who does not own the shipped
+vehicle should not have to carry its profile). It returns `{deleted, tracked,
+data_left}`. The tracked `profiles.yaml` is never written at runtime, so what
+"delete" does depends on where the profile lives:
+
+- **Tracked profile** (`tracked: true`): this machine's edits to it are dropped
+  and its slug goes into a `deleted:` list in the overlay (a tombstone). It is
+  hidden from `GET /control/profiles` here only; it stays in git, and other
+  machines are unaffected. `POST /control/profiles/{slug}/restore` removes the
+  tombstone and returns the profile as the tracked file has it (the edits it
+  had are gone).
+- **Machine-only profile** (`tracked: false`): its overlay row is removed. There
+  is nothing to restore.
+
+The tombstone survives every later write to the overlay (rename, edit, revert,
+auto-register, the calibration-ID refresh). Profile resolution still sees a
+hidden profile, but never runs on one: a start whose VIN read, `--profile`
+override or `vehicle:` block resolves to a deleted profile restores it and logs a
+warning, rather than registering a duplicate of that vehicle.
+
+**Recorded data is never deleted or moved**: sessions, models, anomalies, jobs,
+calibration, the ROM library and the profile's ledgers stay where they are.
+`data_left` lists the existing directories that hold them (empty when profiles
+are disabled or nothing was recorded), so they can be removed by hand or kept for
+an offline refit.
+
+Refusals (409, with the reason; the listing carries the same text as
+`delete_refusal`, so the dashboard disables the button with it, and nothing is
+written):
+
+- **the active profile**: the daemon is running on it; restart it on another
+  profile first.
+- **the profile `canary.yaml`'s `vehicle:` block names** (the slug derived from
+  its make/model/year): a start that reads no VIN falls back to it and would
+  register it again. Change the `vehicle:` block first.
+
+404 for a slug the registry does not show (an already-deleted one included).
+`restore` is 404 for a profile that is not currently hidden. A VIN held by a
+hidden profile still counts as taken: giving it to another profile is refused
+(409) naming the hidden holder.
 
 **`POST /control/vin/read`** returns `{"vin_read": {ok, vin, refusal, detail,
 raw, negative_response_code, check?, held_by?}}`. The request goes out on the

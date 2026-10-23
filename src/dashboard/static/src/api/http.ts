@@ -62,6 +62,7 @@ import type {
   TuningEstimate,
   TuningResponse,
   VehicleProfile,
+  VehicleProfileDeleteResponse,
   VehicleProfileEditResponse,
   VehicleProfilesResponse,
   VehicleProfileUpdate,
@@ -794,6 +795,26 @@ export function revertProfile(
     `/control/profiles/${encodeURIComponent(slug)}/revert`,
     token,
     { method: "POST", body: jsonBody({ fields: fields ?? null }) },
+  );
+}
+
+/** Delete a profile from this machine's registry. A tracked profile is hidden
+ *  here only (it stays in git); recorded data is never deleted. 409 carries the
+ *  reason for the active profile and the `vehicle:` block's. */
+export function deleteProfile(token: string, slug: string): Promise<VehicleProfileDeleteResponse> {
+  return controlJson<VehicleProfileDeleteResponse>(
+    `/control/profiles/${encodeURIComponent(slug)}`,
+    token,
+    { method: "DELETE" },
+  );
+}
+
+/** Bring back a tracked profile this machine deleted. */
+export function restoreProfile(token: string, slug: string): Promise<{ profile: VehicleProfile }> {
+  return controlJson<{ profile: VehicleProfile }>(
+    `/control/profiles/${encodeURIComponent(slug)}/restore`,
+    token,
+    { method: "POST" },
   );
 }
 

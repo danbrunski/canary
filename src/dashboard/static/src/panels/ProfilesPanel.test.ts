@@ -1,6 +1,6 @@
 import { createElement } from "react";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { describe, expect, it, vi } from "vitest";
 
 import type { VehicleParameterField, VehicleProfilesResponse } from "../types";
 import { HttpErrorStub, mockHttp } from "../test/harness";
@@ -10,6 +10,8 @@ const mocks = mockHttp([
   "updateProfileName",
   "updateProfile",
   "revertProfile",
+  "deleteProfile",
+  "restoreProfile",
   "readVin",
 ]);
 
@@ -285,5 +287,185 @@ describe("ProfilesPanel parameters", () => {
     expect(await screen.findByText(/read VIN 1M8GDM9AXKP042788 and matched/)).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Edit" }));
     expect(screen.getByText(/the daemon refuses it/)).toBeInTheDocument();
+  });
+});
+
+const ACTIVE_REFUSAL =
+  "the daemon is running on it (the active profile); restart it elsewhere first";
+const BLOCK_REFUSAL =
+  "canary.yaml's vehicle: block names this profile; change the vehicle: block first";
+
+function profileRow(
+  slug: string,
+  over: Partial<VehicleProfilesResponse["profiles"][number]> = {},
+): VehicleProfilesResponse["profiles"][number] {
+  return {
+    slug,
+    vin: "",
+    name: slug,
+    make: "Nissan",
+    model: "Xterra",
+    year: 2013,
+    parameters: {},
+    calibration_id: "",
+    cvn: "",
+    tracked: true,
+    overrides: [],
+    delete_refusal: null,
+    ...over,
+  };
+}
+
+const DELETABLE: VehicleProfilesResponse = {
+  active_slug: "xterra-2013",
+  count: 4,
+  profiles: [
+    profileRow("xterra-2013", { delete_refusal: ACTIVE_REFUSAL }),
+    profileRow("nissan-xterra-2008", { name: "2008 Xterra" }),
+    profileRow("block-truck", { delete_refusal: BLOCK_REFUSAL }),
+    profileRow("nissan-2013", { name: "", tracked: false }),
+  ],
+  deleted: [],
+};
+
+function deleteButton(slug: string): HTMLElement {
+  return within(screen.getByTestId(`profile-${slug}`)).getByRole("button", { name: "Delete" });
+}
+
+describe("ProfilesPanel delete", () => {
+  it("disables Delete with the daemon's reason for the active and the vehicle: block profiles", async () => {
+    mocks.getProfiles.mockResolvedValue(DELETABLE);
+    render(createElement(ProfilesPanel, { token: "secret" }));
+    await screen.findByTestId("profile-xterra-2013");
+    expect(deleteButton("xterra-2013")).toBeDisabled();
+    expect(deleteButton("xterra-2013")).toHaveAttribute("title", ACTIVE_REFUSAL);
+    expect(deleteButton("block-truck")).toBeDisabled();
+    expect(deleteButton("block-truck")).toHaveAttribute("title", BLOCK_REFUSAL);
+    expect(deleteButton("nissan-xterra-2008")).toBeEnabled();
+    expect(deleteButton("nissan-2013")).toBeEnabled();
+  });
+
+  it("confirms in the page, never with window.confirm, and says what a tracked delete does", async () => {
+    const confirm = vi.spyOn(window, "confirm");
+    mocks.getProfiles.mockResolvedValue(DELETABLE);
+    render(createElement(ProfilesPanel, { token: "secret" }));
+    await screen.findByTestId("profile-nissan-xterra-2008");
+    fireEvent.click(deleteButton("nissan-xterra-2008"));
+    const group = screen.getByRole("group", { name: "Confirm delete nissan-xterra-2008" });
+    expect(group).toHaveTextContent("hidden on this machine only");
+    expect(group).toHaveTextContent("stays in git");
+    expect(group).toHaveTextContent("edits to it (name, VIN, parameters) are dropped");
+    expect(group).toHaveTextContent("restore it");
+    expect(group).toHaveTextContent("Recorded data (sessions, models, ledgers) is not deleted");
+    expect(mocks.deleteProfile).not.toHaveBeenCalled();
+    expect(confirm).not.toHaveBeenCalled();
+    fireEvent.click(within(group).getByRole("button", { name: "Not now" }));
+    expect(screen.queryByRole("group", { name: /Confirm delete/ })).not.toBeInTheDocument();
+    expect(mocks.deleteProfile).not.toHaveBeenCalled();
+    confirm.mockRestore();
+  });
+
+  it("says a machine-only profile cannot be restored", async () => {
+    mocks.getProfiles.mockResolvedValue(DELETABLE);
+    render(createElement(ProfilesPanel, { token: "secret" }));
+    await screen.findByTestId("profile-nissan-2013");
+    fireEvent.click(deleteButton("nissan-2013"));
+    const group = screen.getByRole("group", { name: "Confirm delete nissan-2013" });
+    expect(group).toHaveTextContent("exists only on this machine");
+    expect(group).toHaveTextContent("cannot be restored");
+    expect(group).not.toHaveTextContent("stays in git");
+    expect(group).toHaveTextContent("Recorded data (sessions, models, ledgers) is not deleted");
+  });
+
+  it("deletes after confirmation, refreshes, and lists the data it left", async () => {
+    mocks.getProfiles.mockResolvedValue(DELETABLE);
+    mocks.deleteProfile.mockResolvedValue({
+      deleted: "nissan-xterra-2008",
+      tracked: true,
+      data_left: ["/data/canary/sessions/nissan-xterra-2008", "/repo/data/nissan-xterra-2008"],
+    });
+    render(createElement(ProfilesPanel, { token: "secret" }));
+    await screen.findByTestId("profile-nissan-xterra-2008");
+    expect(mocks.getProfiles).toHaveBeenCalledTimes(1);
+    fireEvent.click(deleteButton("nissan-xterra-2008"));
+    fireEvent.click(screen.getByRole("button", { name: "Delete profile" }));
+    await waitFor(() =>
+      expect(mocks.deleteProfile).toHaveBeenCalledWith("secret", "nissan-xterra-2008"),
+    );
+    const result = await screen.findByTestId("profile-deleted-result");
+    expect(result).toHaveTextContent("still in git");
+    expect(result).toHaveTextContent("/data/canary/sessions/nissan-xterra-2008");
+    expect(result).toHaveTextContent("/repo/data/nissan-xterra-2008");
+    expect(result).toHaveTextContent("not deleted");
+    await waitFor(() => expect(mocks.getProfiles).toHaveBeenCalledTimes(2));
+    expect(screen.queryByRole("group", { name: /Confirm delete/ })).not.toBeInTheDocument();
+    fireEvent.click(within(result).getByRole("button", { name: "Dismiss" }));
+    expect(screen.queryByTestId("profile-deleted-result")).not.toBeInTheDocument();
+  });
+
+  it("says when a deleted profile left no data", async () => {
+    mocks.getProfiles.mockResolvedValue(DELETABLE);
+    mocks.deleteProfile.mockResolvedValue({
+      deleted: "nissan-2013",
+      tracked: false,
+      data_left: [],
+    });
+    render(createElement(ProfilesPanel, { token: "secret" }));
+    await screen.findByTestId("profile-nissan-2013");
+    fireEvent.click(deleteButton("nissan-2013"));
+    fireEvent.click(screen.getByRole("button", { name: "Delete profile" }));
+    expect(await screen.findByTestId("profile-deleted-result")).toHaveTextContent(
+      "No recorded data was found",
+    );
+  });
+
+  it("shows the daemon's refusal and keeps the profile when the delete is refused", async () => {
+    mocks.getProfiles.mockResolvedValue(DELETABLE);
+    mocks.deleteProfile.mockRejectedValue(
+      Object.assign(new HttpErrorStub("HTTP 409"), {
+        status: 409,
+        body: JSON.stringify({ detail: BLOCK_REFUSAL }),
+      }),
+    );
+    render(createElement(ProfilesPanel, { token: "secret" }));
+    await screen.findByTestId("profile-nissan-xterra-2008");
+    fireEvent.click(deleteButton("nissan-xterra-2008"));
+    fireEvent.click(screen.getByRole("button", { name: "Delete profile" }));
+    expect(await screen.findByText(/change the vehicle: block first/)).toBeInTheDocument();
+    expect(screen.queryByTestId("profile-deleted-result")).not.toBeInTheDocument();
+    expect(screen.getByTestId("profile-nissan-xterra-2008")).toBeInTheDocument();
+  });
+
+  it("lists the profiles hidden on this machine and restores one", async () => {
+    mocks.getProfiles.mockResolvedValue({
+      ...DELETABLE,
+      deleted: [
+        {
+          slug: "nissan-xterra-2008",
+          name: "2008 Xterra",
+          make: "Nissan",
+          model: "Xterra",
+          year: 2008,
+        },
+      ],
+    });
+    mocks.restoreProfile.mockResolvedValue({ profile: profileRow("nissan-xterra-2008") });
+    render(createElement(ProfilesPanel, { token: "secret" }));
+    const hidden = await screen.findByTestId("profiles-hidden");
+    expect(hidden).toHaveTextContent("Hidden on this machine");
+    expect(screen.getByTestId("hidden-nissan-xterra-2008")).toHaveTextContent("2008 Xterra");
+    fireEvent.click(within(hidden).getByRole("button", { name: "Restore nissan-xterra-2008" }));
+    await waitFor(() =>
+      expect(mocks.restoreProfile).toHaveBeenCalledWith("secret", "nissan-xterra-2008"),
+    );
+    expect(await screen.findByText(/Restored nissan-xterra-2008/)).toBeInTheDocument();
+    await waitFor(() => expect(mocks.getProfiles).toHaveBeenCalledTimes(2));
+  });
+
+  it("shows no hidden list when nothing is hidden", async () => {
+    mocks.getProfiles.mockResolvedValue(DELETABLE);
+    render(createElement(ProfilesPanel, { token: "secret" }));
+    await screen.findByTestId("profile-xterra-2013");
+    expect(screen.queryByTestId("profiles-hidden")).not.toBeInTheDocument();
   });
 });

@@ -49,6 +49,28 @@ export interface VehicleProfile {
   /** Fields this machine's overlay sets over the tracked registry
    *  (`parameters.<name>` for parameters). */
   overrides?: string[];
+  /** Why Delete would refuse right now (the active profile, or the one the
+   *  `vehicle:` block names), else null. Absent from a profile returned by an edit. */
+  delete_refusal?: string | null;
+}
+
+/** A tracked profile this machine deleted: hidden here, still in git. */
+export interface DeletedVehicleProfile {
+  slug: string;
+  name: string;
+  make: string;
+  model: string;
+  year: number | null;
+}
+
+/** `DELETE /control/profiles/{slug}`. Recorded data is never deleted:
+ *  `data_left` names the directories that still hold this profile's. */
+export interface VehicleProfileDeleteResponse {
+  deleted: string;
+  /** True: a tracked profile, hidden on this machine only. False: a profile
+   *  only this machine knew, gone from its registry. */
+  tracked: boolean;
+  data_left: string[];
 }
 
 /** One vehicle parameter's display metadata (`parameter_fields`). */
@@ -83,6 +105,8 @@ export interface VehicleInUse {
 
 export interface VehicleProfilesResponse {
   profiles: VehicleProfile[];
+  /** Tracked profiles hidden on this machine, restorable. */
+  deleted?: DeletedVehicleProfile[];
   active_slug: string;
   count: number;
   in_use?: VehicleInUse;

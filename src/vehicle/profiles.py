@@ -34,7 +34,7 @@ from __future__ import annotations
 
 import logging
 import re
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
@@ -246,7 +246,24 @@ def _merge_entry(base: dict[str, Any], overlay: dict[str, Any]) -> dict[str, Any
     return merged
 
 
-def load_registry(profiles: ProfilesConfig) -> list[VehicleProfile]:
+def deleted_slugs(profiles: ProfilesConfig) -> list[str]:
+    """The slugs this machine's overlay hides (its ``deleted:`` list), sorted.
+
+    Only a *tracked* profile needs one: the tracked registry is never written at
+    runtime, so "delete" there is a per-machine tombstone (:func:`delete_profile`).
+    A machine-only profile is deleted by removing its overlay row.
+    """
+    path = profiles.registry_overlay_path
+    if not path.exists():
+        return []
+    raw = yaml.safe_load(path.read_text()) or {}
+    listed = raw.get("deleted", []) if isinstance(raw, dict) else []
+    return sorted({str(slug) for slug in listed or []})
+
+
+def load_registry(
+    profiles: ProfilesConfig, *, include_deleted: bool = False
+) -> list[VehicleProfile]:
     """The VIN → profile registry: the tracked file with this machine's overlay
     merged over it by slug (S03.2).
 
@@ -258,12 +275,18 @@ def load_registry(profiles: ProfilesConfig) -> list[VehicleProfile]:
     ``parameters`` merges field by field (:func:`_merge_entry`), so a later
     laptop edit to a vehicle's parameters still takes effect here unless this
     machine has changed that same parameter, or another in its evidence unit.
+
+    A tracked profile this machine deleted (:func:`deleted_slugs`) is left out
+    unless ``include_deleted``. Only profile *resolution* and the VIN
+    uniqueness check ask for it: they must see a hidden profile to restore it
+    or refuse to duplicate its VIN, never to run on it.
     """
     merged = {entry["slug"]: entry for entry in _registry_entries(profiles.registry_path)}
+    hidden = set() if include_deleted else set(deleted_slugs(profiles)) & merged.keys()
     for entry in _registry_entries(profiles.registry_overlay_path):
         slug = entry["slug"]
         merged[slug] = _merge_entry(merged.get(slug, {}), entry)
-    return [VehicleProfile.from_dict(entry) for entry in merged.values()]
+    return [VehicleProfile.from_dict(e) for slug, e in merged.items() if slug not in hidden]
 
 
 def _parameter_overrides(base: dict[str, Any], current: dict[str, Any]) -> dict[str, Any]:
@@ -281,11 +304,22 @@ def _parameter_overrides(base: dict[str, Any], current: dict[str, Any]) -> dict[
     return {name: value for name, value in current.items() if name in keep}
 
 
-def save_registry(profiles: ProfilesConfig, entries: list[VehicleProfile]) -> None:
+def save_registry(
+    profiles: ProfilesConfig,
+    entries: list[VehicleProfile],
+    *,
+    deleted: Iterable[str] | None = None,
+) -> None:
     """Persist ``entries`` as the overlay over the tracked registry (atomic).
 
     Stores only what differs from the tracked registry (see
     :func:`load_registry`); the tracked file is never written.
+
+    ``deleted`` is the overlay's tombstone list (:func:`deleted_slugs`). ``None``
+    keeps the overlay's existing list: every rename, edit, revert, auto-register
+    and calibration-probe save passes the *filtered* entry list, and none of
+    them may un-delete a profile by omission. Only :func:`delete_profile` and
+    :func:`restore_profile` pass a list.
     """
     tracked = {p.slug: p.to_dict() for p in read_registry_file(profiles.registry_path)}
     overlay: list[dict[str, Any]] = []
@@ -305,7 +339,10 @@ def save_registry(profiles: ProfilesConfig, entries: list[VehicleProfile]) -> No
             changed["parameters"] = parameters
         if changed:
             overlay.append({"slug": profile.slug, **changed})
-    payload = {"schema_version": REGISTRY_SCHEMA_VERSION, "profiles": overlay}
+    payload: dict[str, Any] = {"schema_version": REGISTRY_SCHEMA_VERSION, "profiles": overlay}
+    kept = sorted({str(slug) for slug in (deleted_slugs(profiles) if deleted is None else deleted)})
+    if kept:
+        payload["deleted"] = kept
     atomic_write_text(
         profiles.registry_overlay_path, yaml.safe_dump(payload, sort_keys=False), mkdir=True
     )
@@ -377,6 +414,21 @@ class NoTrackedProfileError(ProfileEditError):
     """A revert on a profile the tracked registry does not hold."""
 
 
+class ProfileDeleteRefusedError(ProfileEditError):
+    """A delete that would pull a profile out from under the daemon or recreate it.
+
+    ``str(error)`` is the named reason; the listing shows it beside the
+    disabled Delete button (:func:`delete_refusal`).
+    """
+
+    def __init__(self, slug: str, reason: str) -> None:
+        super().__init__("slug", reason)
+        self.slug = slug
+
+    def __reduce__(self) -> tuple[object, ...]:
+        return (type(self), (self.slug, str(self)), self.__dict__)
+
+
 @dataclass(frozen=True)
 class ProfileResolution:
     """How this process chose its active profile, for the edit rules and the UI.
@@ -388,6 +440,12 @@ class ProfileResolution:
     slug: str
     how: str
     vin_read: str | None
+    #: The slug the ``vehicle:`` block of ``canary.yaml`` names, read before
+    #: :func:`scope_config` overwrote that block with the profile's own. A scoped
+    #: config can no longer say it, and :func:`delete_refusal` needs it. Not in
+    #: :meth:`to_dict`: it is bookkeeping for the edit rules, not part of the answer
+    #: to "how was this profile chosen".
+    fallback_slug: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {"slug": self.slug, "how": self.how, "vin_read": self.vin_read}
@@ -531,8 +589,14 @@ def _apply_vin(
     value: Any,
     *,
     active_slug: str | None,
+    hidden: frozenset[str] = frozenset(),
 ) -> tuple[str, tuple[str, ...]]:
-    """Validate a new VIN for ``profile``; the VIN and any warning."""
+    """Validate a new VIN for ``profile``; the VIN and any warning.
+
+    ``registry`` must include the profiles this machine hides: one VIN keys one
+    profile, and the next start would restore a hidden holder (``hidden`` names
+    them in the refusal).
+    """
     from src.vehicle.vin import InvalidVinError, normalize_vin, validate_vin
 
     if not isinstance(value, str):
@@ -551,7 +615,9 @@ def _apply_vin(
             raise DuplicateVinError(
                 "vin",
                 f"VIN {vin} already identifies profile {holder.slug!r}"
-                f"{f' ({holder.name})' if holder.name else ''}; one VIN keys one profile",
+                f"{f' ({holder.name})' if holder.name else ''}"
+                f"{' (hidden on this machine)' if holder.slug in hidden else ''}; "
+                "one VIN keys one profile",
             )
     resolution = last_resolution()
     read = resolution.vin_read if resolution is not None else None
@@ -602,7 +668,11 @@ def update_profile(
         profile.year = _year(changes["year"])
     if "vin" in changes:
         profile.vin, warnings = _apply_vin(
-            registry, profile, changes["vin"], active_slug=active_slug
+            load_registry(profiles, include_deleted=True),
+            profile,
+            changes["vin"],
+            active_slug=active_slug,
+            hidden=frozenset(_hidden_slugs(profiles)),
         )
         vin_note = _vin_resolution_note(profile.vin, slug, active_slug)
     if "parameters" in changes:
@@ -698,6 +768,118 @@ def revert_profile(
     ]
     save_registry(profiles, registry)
     return ProfileEdit(profile=profile, changed=tuple(changed))
+
+
+# ---------------------------------------------------------------------------
+# Deleting a profile (operator request 2026-10-23)
+# ---------------------------------------------------------------------------
+#
+# "Delete a profile from git" cannot write git: the tracked registry is never
+# written at runtime (S03). A tracked profile is hidden on this machine by a
+# tombstone in the overlay; a profile only this machine knows loses its overlay
+# row. Recorded data (sessions, models, ledgers) is never deleted or moved:
+# :func:`profile_data_paths` names where it stays.
+
+
+@dataclass(frozen=True)
+class ProfileDeletion:
+    """A saved delete: the slug, and whether it was a tracked profile (hidden
+    here, still in git) or one only this machine knew (gone from its registry)."""
+
+    slug: str
+    tracked: bool
+
+
+def vehicle_block_slug(config: CanaryConfig) -> str:
+    """The slug ``canary.yaml``'s ``vehicle:`` block names (the no-VIN fallback).
+
+    Read from this process's resolution record when there is one: a scoped
+    config's ``vehicle`` block is the active profile's own, so deriving it from
+    that would name the active profile whatever the file says. Without a record
+    (a process that never resolved) the config's block is all there is.
+    """
+    resolution = last_resolution()
+    if resolution is not None and resolution.fallback_slug is not None:
+        return resolution.fallback_slug
+    return _default_profile(config).slug
+
+
+def delete_refusal(slug: str, *, active_slug: str | None, fallback_slug: str | None) -> str | None:
+    """Why ``slug`` cannot be deleted now, or ``None``.
+
+    The active profile is what the running daemon's paths and manifests are
+    built from. The ``vehicle:`` block's slug is what a start that reads no VIN
+    falls back to (:func:`_registered_default`), registering it again if it is
+    missing, so deleting it would only last until the next key-off start.
+    """
+    if slug == active_slug:
+        return (
+            "the daemon is running on it (the active profile); restart it on another "
+            "profile first (connect that vehicle, or change canary.yaml's vehicle: block)"
+        )
+    if slug == fallback_slug:
+        return (
+            "canary.yaml's vehicle: block (make/model/year) names this profile, so a "
+            "start that reads no VIN would recreate it; change the vehicle: block first"
+        )
+    return None
+
+
+def delete_profile(
+    profiles: ProfilesConfig,
+    slug: str,
+    *,
+    active_slug: str | None,
+    fallback_slug: str | None,
+) -> ProfileDeletion:
+    """Remove ``slug`` from this machine's registry (data is left where it is).
+
+    A machine-only profile loses its overlay row. A tracked one loses its
+    overlay row too (this machine's edits to it are dropped) and gains a
+    tombstone, so it is hidden here while staying in git for other machines;
+    :func:`restore_profile` brings back the tracked profile.
+
+    Raises ``KeyError`` for a slug the registry does not show and
+    :class:`ProfileDeleteRefusedError` (the reason) for the active profile and
+    the ``vehicle:`` block's; nothing is written then.
+    """
+    registry = load_registry(profiles)
+    _find(registry, slug)
+    reason = delete_refusal(slug, active_slug=active_slug, fallback_slug=fallback_slug)
+    if reason is not None:
+        raise ProfileDeleteRefusedError(slug, reason)
+    tracked = any(entry["slug"] == slug for entry in _registry_entries(profiles.registry_path))
+    tombstones = [*deleted_slugs(profiles), slug] if tracked else None
+    save_registry(profiles, [p for p in registry if p.slug != slug], deleted=tombstones)
+    return ProfileDeletion(slug=slug, tracked=tracked)
+
+
+def _hidden_slugs(profiles: ProfilesConfig) -> set[str]:
+    """Tombstones that hide a profile the tracked registry holds."""
+    tracked = {entry["slug"] for entry in _registry_entries(profiles.registry_path)}
+    return set(deleted_slugs(profiles)) & tracked
+
+
+def deleted_profiles(profiles: ProfilesConfig) -> list[VehicleProfile]:
+    """The tracked profiles this machine currently hides, as the tracked file has them."""
+    hidden = _hidden_slugs(profiles)
+    return [p for p in load_registry(profiles, include_deleted=True) if p.slug in hidden]
+
+
+def restore_profile(profiles: ProfilesConfig, slug: str) -> VehicleProfile:
+    """Un-hide a deleted tracked profile; it returns exactly as the tracked file
+    has it (the edits it had were dropped by :func:`delete_profile`).
+
+    Raises ``KeyError`` when ``slug`` is not currently hidden.
+    """
+    if slug not in _hidden_slugs(profiles):
+        raise KeyError(slug)
+    save_registry(
+        profiles,
+        load_registry(profiles),
+        deleted=[s for s in deleted_slugs(profiles) if s != slug],
+    )
+    return _find(load_registry(profiles), slug)
 
 
 def pending_restart(in_use: VehicleConfig, profile: VehicleProfile) -> list[str]:
@@ -866,6 +1048,32 @@ def _record_calibration_boundary(
     )
 
 
+def _restore_if_hidden(
+    config: CanaryConfig,
+    profiles: list[VehicleProfile],
+    profile: VehicleProfile,
+    *,
+    how: str,
+) -> None:
+    """Un-delete ``profile`` when this machine hid it, and add it to ``profiles``.
+
+    A start that resolves to a deleted profile (its VIN read, or the
+    ``vehicle:`` block naming it, or ``--profile``) is the daemon running on it
+    whatever the registry says, so the registry is made to say so. ``how`` is
+    the log line's account of why.
+    """
+    if profile.slug not in _hidden_slugs(config.profiles):
+        return
+    restore_profile(config.profiles, profile.slug)
+    profiles.append(profile)
+    log.warning(
+        "this start resolved to vehicle profile %r, which was deleted on this machine "
+        "(%s), so it was restored",
+        profile.slug,
+        how,
+    )
+
+
 def _resolve_active_profile(
     config: CanaryConfig,
     *,
@@ -886,38 +1094,52 @@ def _resolve_active_profile(
     if not already present, so the dashboard can always show and rename it.
     A registered profile's calibration ID/CVN (Task 3.4) is refreshed from the
     same probe; a changed calibration ID is logged as a corpus-boundary event.
+
+    Matching looks at every profile, including the tracked ones this machine
+    deleted: resolution never runs on a hidden profile, so one that matches is
+    restored (:func:`_restore_if_hidden`) rather than skipped, which would
+    register a duplicate of the vehicle under a new slug.
     """
-    profiles = load_registry(config.profiles)
-    by_slug = {p.slug: p for p in profiles}
-    by_vin = {p.vin: p for p in profiles if p.vin}
+    registry = load_registry(config.profiles, include_deleted=True)
+    hidden = _hidden_slugs(config.profiles)
+    profiles = [p for p in registry if p.slug not in hidden]
+    by_slug = {p.slug: p for p in registry}
+    by_vin = {p.vin: p for p in registry if p.vin}
+    fallback = _default_profile(config).slug
 
     if override_slug is not None:
-        record_resolution(ProfileResolution(override_slug, "override", None))
+        record_resolution(ProfileResolution(override_slug, "override", None, fallback))
         if override_slug in by_slug:
-            return by_slug[override_slug]
+            profile = by_slug[override_slug]
+            _restore_if_hidden(config, profiles, profile, how="the --profile override named it")
+            return profile
         profile = _default_profile(config, slug=override_slug)
         _maybe_persist(config, profiles, profile)
         return profile
 
     if not config.profiles.enabled:
         profile = _default_profile(config)
-        record_resolution(ProfileResolution(profile.slug, "profiles_disabled", None))
+        record_resolution(ProfileResolution(profile.slug, "profiles_disabled", None, fallback))
         return profile
 
     vin_probe = probe(config)
     vin = vin_probe.vin
     if vin is None:
         profile = _registered_default(config, by_slug)
-        record_resolution(ProfileResolution(profile.slug, "no_vin_read", None))
+        record_resolution(ProfileResolution(profile.slug, "no_vin_read", None, fallback))
+        _restore_if_hidden(
+            config, profiles, profile, how="no VIN was read and the vehicle: block names it"
+        )
         _maybe_persist(config, profiles, profile)
         return profile
 
     if vin in by_vin:
         profile = by_vin[vin]
-        record_resolution(ProfileResolution(profile.slug, "vin_matched", vin))
+        record_resolution(ProfileResolution(profile.slug, "vin_matched", vin, fallback))
+        _restore_if_hidden(config, profiles, profile, how=f"the vehicle reported its VIN {vin}")
     else:
         profile = _new_profile_for_vin(vin, taken=set(by_slug))
-        record_resolution(ProfileResolution(profile.slug, "vin_registered", vin))
+        record_resolution(ProfileResolution(profile.slug, "vin_registered", vin, fallback))
         _maybe_persist(config, profiles, profile)
 
     # Only touch calibration bookkeeping for a profile that's actually in the
@@ -1011,20 +1233,54 @@ def resolve_profile_for_tooling(config: CanaryConfig, slug: str | None) -> Vehic
     config already scoped (P02.11) resolves to the profile it was scoped to, so
     re-resolving downstream of an entry point's ``scope_config`` is a no-op.
     """
+    # Hidden profiles are read too, never restored (a dry run stays read-only):
+    # their data is still on disk, and the daemon restores one at the start
+    # that resolves to it, so this is the profile that start would use.
+    registry = load_registry(config.profiles, include_deleted=True)
     slug = slug if slug is not None else config.scoped_profile
     if slug is not None:
-        for profile in load_registry(config.profiles):
+        for profile in registry:
             if profile.slug == slug:
                 return profile
         return _default_profile(config, slug=slug)
     if not config.profiles.enabled:
         return _default_profile(config)
-    return _registered_default(config, {p.slug: p for p in load_registry(config.profiles)})
+    return _registered_default(config, {p.slug: p for p in registry})
 
 
 # ---------------------------------------------------------------------------
 # Config scoping
 # ---------------------------------------------------------------------------
+
+
+#: Every ``daemon`` directory field :func:`scope_config` nests under the slug,
+#: and every ``daemon`` file field. One list for scoping and for finding what a
+#: profile left behind (:func:`profile_data_paths`), so a newly scoped path
+#: cannot be scoped and then missed by the delete's "data stays here" report.
+#: ``calibration_dir`` (:func:`_calibration_base`) and ``collection.storage_path``
+#: are scoped on their own beside these.
+SCOPED_DAEMON_DIRS: tuple[str, ...] = ("models_dir", "anomalies_dir", "jobs_dir", "rom_library_dir")
+SCOPED_DAEMON_FILES: tuple[str, ...] = (
+    "audit_log",
+    "feedback_log",
+    "vehicle_ledger",
+    "reference_epoch",
+    "training_ledger",
+    "tuning_config",
+    "tuning_audit",
+    "trip_state",
+    "trend_alert_state",
+    "behavior_models",
+    "accepted_baselines",
+    "custom_pids",
+    "capture_profiles",
+    "capture_profile_overrides",
+    "afr_calibration",
+    "kline_profile",
+    "catalog_db",
+    "memory_ledger",
+    "retention_footer_ledger",
+)
 
 
 def _scope_dir(path: Path, slug: str) -> Path:
@@ -1063,34 +1319,14 @@ def scope_config(config: CanaryConfig, profile: VehicleProfile) -> CanaryConfig:
     collection = config.collection.model_copy(
         update={"storage_path": _scope_dir(config.collection.storage_path, slug)}
     )
-    daemon = config.daemon.model_copy(
-        update={
-            "models_dir": _scope_dir(config.daemon.models_dir, slug),
-            "anomalies_dir": _scope_dir(config.daemon.anomalies_dir, slug),
-            "jobs_dir": _scope_dir(config.daemon.jobs_dir, slug),
-            "audit_log": _scope_file(config.daemon.audit_log, slug),
-            "feedback_log": _scope_file(config.daemon.feedback_log, slug),
-            "vehicle_ledger": _scope_file(config.daemon.vehicle_ledger, slug),
-            "reference_epoch": _scope_file(config.daemon.reference_epoch, slug),
-            "training_ledger": _scope_file(config.daemon.training_ledger, slug),
-            "tuning_config": _scope_file(config.daemon.tuning_config, slug),
-            "tuning_audit": _scope_file(config.daemon.tuning_audit, slug),
-            "trip_state": _scope_file(config.daemon.trip_state, slug),
-            "trend_alert_state": _scope_file(config.daemon.trend_alert_state, slug),
-            "behavior_models": _scope_file(config.daemon.behavior_models, slug),
-            "accepted_baselines": _scope_file(config.daemon.accepted_baselines, slug),
-            "custom_pids": _scope_file(config.daemon.custom_pids, slug),
-            "capture_profiles": _scope_file(config.daemon.capture_profiles, slug),
-            "capture_profile_overrides": _scope_file(config.daemon.capture_profile_overrides, slug),
-            "afr_calibration": _scope_file(config.daemon.afr_calibration, slug),
-            "kline_profile": _scope_file(config.daemon.kline_profile, slug),
-            "catalog_db": _scope_file(config.daemon.catalog_db, slug),
-            "calibration_dir": _scope_dir(_calibration_base(config), slug),
-            "rom_library_dir": _scope_dir(config.daemon.rom_library_dir, slug),
-            "memory_ledger": _scope_file(config.daemon.memory_ledger, slug),
-            "retention_footer_ledger": _scope_file(config.daemon.retention_footer_ledger, slug),
-        }
+    scoped_paths: dict[str, Path] = {
+        name: _scope_dir(getattr(config.daemon, name), slug) for name in SCOPED_DAEMON_DIRS
+    }
+    scoped_paths.update(
+        {name: _scope_file(getattr(config.daemon, name), slug) for name in SCOPED_DAEMON_FILES}
     )
+    scoped_paths["calibration_dir"] = _scope_dir(_calibration_base(config), slug)
+    daemon = config.daemon.model_copy(update=scoped_paths)
     vehicle = config.vehicle.model_copy(
         update={
             "make": profile.make,
@@ -1123,6 +1359,33 @@ def rescope_like(config: CanaryConfig, reference: CanaryConfig) -> CanaryConfig:
     if not isinstance(profile, VehicleProfile):
         raise TypeError(f"scoped config carries {type(profile).__name__}, not a VehicleProfile")
     return scope_config(config, profile)
+
+
+def profile_data_paths(config: CanaryConfig, slug: str) -> list[Path]:
+    """The existing directories that hold ``slug``'s data, found from ``config``.
+
+    ``config`` is scoped to one profile, so each scoped directory ``X/<active>``
+    has its sibling ``X/<slug>`` and each scoped file ``X/Y/<active>/f`` its
+    sibling directory ``X/Y/<slug>``. The same field lists :func:`scope_config`
+    scopes by (:data:`SCOPED_DAEMON_DIRS`, :data:`SCOPED_DAEMON_FILES`,
+    ``calibration_dir``, ``collection.storage_path``), so a path cannot be
+    scoped without being found here. Includes the tracked ``data/<slug>/``
+    that ``capture_profiles`` and the like live in. Nothing here is ever
+    deleted or moved by a profile delete. Empty for an unscoped config
+    (profiles disabled), where there are no per-vehicle directories.
+    """
+    if config.scoped_profile is None:
+        return []
+    daemon = config.daemon
+    scoped_dirs = [
+        config.collection.storage_path,
+        *(getattr(daemon, name) for name in SCOPED_DAEMON_DIRS),
+        _calibration_base(config),
+    ]
+    scoped_files = [getattr(daemon, name) for name in SCOPED_DAEMON_FILES]
+    siblings = [path.parent / slug for path in scoped_dirs]
+    siblings += [path.parent.parent / slug for path in scoped_files]
+    return [path for path in dict.fromkeys(siblings) if path.exists()]
 
 
 # ---------------------------------------------------------------------------
