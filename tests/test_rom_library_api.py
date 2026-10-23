@@ -223,14 +223,39 @@ def test_default_library_dir_is_gitignored_and_scoped_per_vehicle() -> None:
     assert scoped.daemon.rom_library_dir.parent == config.daemon.rom_library_dir
 
 
-def test_no_map_definition_is_409(tmp_path: Path) -> None:
+def test_a_vehicle_without_a_map_still_keeps_lists_describes_and_compares(
+    tmp_path: Path,
+) -> None:
+    """No map is not no library: a vehicle without one stores and compares
+    images (an ECU backup is how it gets the image to map). Only what needs
+    the map says so: a plain upload cannot be size-checked, and the table
+    view is 409."""
     profile = tmp_path / "profile"
     profile.mkdir()
-    (profile / "afr_calibration.yaml").write_text((PROFILE / "afr_calibration.yaml").read_text())
     config = isolated_config(tmp_path, daemon={"afr_calibration": profile / "afr_calibration.yaml"})
     app = FastAPI()
     register_rom_library_routes(app, config=config, resolved_control_token="secret")
     with TestClient(app) as client:
-        response = _upload(client, synthetic_image())
-    assert response.status_code == 409
-    assert "ROM map definition unavailable" in response.json()["detail"]
+        plain = _upload(client, synthetic_image())
+        assert plain.status_code == 422
+        assert plain.json()["detail"].startswith(
+            "no ROM map for this vehicle (rom_map.yaml), so a plain file of 1,048,576 bytes "
+            "cannot be checked as an image"
+        )
+        a = _upload(client, osiris_container(synthetic_image(k=27089)), "a.OsirisROM").json()
+        b = _upload(client, osiris_container(synthetic_image(k=28715)), "b.OsirisROM").json()
+        assert a["source"] == "upload_osirisrom" and a["checksum"] is None
+        assert a["map_reason"] == "no ROM map for this vehicle (rom_map.yaml)"
+        assert client.get("/control/rom/library", headers=AUTH).json()["count"] == 2
+        detail = client.get(f"/control/rom/library/{a['sha256']}", headers=AUTH).json()
+        assert detail["map"] is None and len(detail["blocks"]) == 256
+        compare = client.get(
+            "/control/rom/compare", params={"a": a["sha256"], "b": b["sha256"]}, headers=AUTH
+        ).json()
+        assert compare["map_applied"] is False and compare["changed_bytes"] > 0
+        assert all(r["labels"] == [] for r in compare["ranges"])
+        tables = client.get(f"/control/rom/library/{a['sha256']}/tables", headers=AUTH)
+        assert tables.status_code == 409
+        assert "ROM map definition unavailable" in tables.json()["detail"]
+        download = client.get(f"/control/rom/library/{a['sha256']}/download", headers=AUTH)
+        assert download.content == synthetic_image(k=27089)

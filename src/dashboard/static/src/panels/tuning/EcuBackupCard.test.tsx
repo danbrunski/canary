@@ -233,6 +233,27 @@ describe("ECU backup card (W08.8)", () => {
     expect(onLibraryChanged).toHaveBeenCalled();
   });
 
+  it("done without a ROM map: complete, kept, and says what went unchecked", async () => {
+    route(
+      backupState({
+        state: "done",
+        reason: "unverified: no ROM map for this vehicle (rom_map.yaml): checksums not checked",
+        bytes: 1048576,
+        stored: true,
+        sha256: SHA_TUNED,
+        verified: false,
+      }),
+    );
+    renderCard();
+    expect(await screen.findByText(/Backup complete: 1 MiB/)).toBeVisible();
+    expect(
+      screen.getByText(
+        "Kept, not fully checked: unverified: no ROM map for this vehicle (rom_map.yaml): checksums not checked",
+      ),
+    ).toBeVisible();
+    expect(screen.queryByText(/Backup failed/)).not.toBeInTheDocument();
+  });
+
   it("done before the library list has the entry: says so and asks for a refresh", async () => {
     route(backupState({ state: "done", stored: true, sha256: SHA_TUNED, bytes: 1048576 }));
     const { onLibraryChanged } = renderCard({ entries: [] });

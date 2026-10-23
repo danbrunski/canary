@@ -35,6 +35,7 @@ from src.collection.capture_profiles import CaptureProfile
 from src.config import CanBusConfig
 from src.control.rom_backup import (
     HOLDER,
+    ROM_BACKUP_FILE,
     BackupRefusedError,
     RomBackupJob,
     VehicleReading,
@@ -46,6 +47,9 @@ from src.dashboard.routes.rom_library import (
     register_rom_library_routes,
     vehicle_reading,
 )
+from src.paths import REPO_ROOT
+from src.vehicle.platforms import vehicle_data_file
+from src.vehicle.profiles import read_registry_file
 from tests.configs import isolated_config
 from tests.rom_fixtures import PROFILE, xterra_map
 
@@ -82,6 +86,7 @@ def _write_profile(
     timeout: float = 1.0,
     block: int = 63,
     ecm_broadcast_ids: list[int] | None = None,
+    rom_map: bool = True,
 ) -> Path:
     profile = root / "profile"
     profile.mkdir(parents=True, exist_ok=True)
@@ -101,7 +106,8 @@ def _write_profile(
     }
     if ecm_broadcast_ids is not None:
         recipe["ecm_broadcast_ids"] = ecm_broadcast_ids
-    (profile / "rom_map.yaml").write_text(yaml.safe_dump(_rom_map_data()))
+    if rom_map:
+        (profile / "rom_map.yaml").write_text(yaml.safe_dump(_rom_map_data()))
     (profile / "rom_backup.yaml").write_text(yaml.safe_dump(recipe))
     return profile
 
@@ -293,7 +299,15 @@ def rig_factory(tmp_path: Path) -> Iterator[Callable[..., Rig]]:
             return bus_wrapper(bus) if bus_wrapper is not None else bus
 
         job = RomBackupJob(
-            profile_dir=profile,
+            # No platform: the rig's recipe is the profile's own.
+            recipe_file=lambda: vehicle_data_file(
+                profile,
+                ROM_BACKUP_FILE,
+                make="",
+                model="",
+                year=None,
+                platforms_dir=tmp_path / "no-platforms",
+            ),
             library=library,
             open_bus=open_bus or virtual,
             vehicle=vehicle or (lambda: truck.reading),
@@ -326,8 +340,16 @@ def _assert_released() -> None:
 # -- the recipe --------------------------------------------------------------
 
 
+def _shipped_recipe(make: str, model: str, year: int, slug: str) -> Path:
+    return vehicle_data_file(
+        REPO_ROOT / "data" / slug, ROM_BACKUP_FILE, make=make, model=model, year=year
+    ).path
+
+
 def test_shipped_recipe_reads_the_whole_image_like_uprev() -> None:
-    recipe = load_backup_recipe(PROFILE, xterra_map())
+    recipe = load_backup_recipe(
+        _shipped_recipe("Nissan", "Xterra", 2008, PROFILE.name), xterra_map()
+    )
     blocks = recipe.read.blocks()
     assert len(blocks) == 16645
     assert blocks[0] == (0, 63)
@@ -342,6 +364,28 @@ def test_shipped_recipe_reads_the_whole_image_like_uprev() -> None:
     assert recipe.provenance.capture == "docs/skunkworks/uprev-backup-20261004.md"
 
 
+def test_every_shipped_xterra_n50_profile_finds_the_shared_recipe() -> None:
+    """The 2013 was refused a backup because only the 2008's profile directory
+    held a recipe (2026-10-23). Every N50 Xterra in the tracked registry now
+    resolves the one platform recipe, and a 2013 that has no map yet can
+    still load it."""
+    profiles = [
+        p
+        for p in read_registry_file(REPO_ROOT / "profiles.yaml")
+        if p.make.casefold() == "nissan"
+        and p.model.casefold() == "xterra"
+        and p.year is not None
+        and 2005 <= p.year <= 2015
+    ]
+    assert {p.slug for p in profiles} >= {"nissan-xterra-2008", "nissan-xterra-2013"}
+    shared = REPO_ROOT / "data" / "platforms" / "nissan-xterra-n50" / ROM_BACKUP_FILE
+    for p in profiles:
+        assert p.year is not None
+        assert _shipped_recipe(p.make, p.model, p.year, p.slug) == shared, p.slug
+    recipe = load_backup_recipe(shared, None)
+    assert recipe.read.size == 1 << 20
+
+
 def test_a_recipe_that_misses_part_of_the_image_is_refused(tmp_path: Path) -> None:
     profile = _write_profile(tmp_path)
     data = yaml.safe_load((profile / "rom_backup.yaml").read_text())
@@ -349,14 +393,25 @@ def test_a_recipe_that_misses_part_of_the_image_is_refused(tmp_path: Path) -> No
     (profile / "rom_backup.yaml").write_text(yaml.safe_dump(data))
     rom_map = RomMap.model_validate(yaml.safe_load((profile / "rom_map.yaml").read_text()))
     with pytest.raises(ValueError, match="the image is 0x000000-0x0007FF"):
-        load_backup_recipe(profile, rom_map)
+        load_backup_recipe(profile / ROM_BACKUP_FILE, rom_map)
+    # Without a map the range is the image: any whole range from 0 loads.
+    assert load_backup_recipe(profile / ROM_BACKUP_FILE, None).read.size == SMALL_SIZE - 1
+
+
+def test_without_a_map_a_recipe_must_still_start_at_zero(tmp_path: Path) -> None:
+    profile = _write_profile(tmp_path, rom_map=False)
+    data = yaml.safe_load((profile / "rom_backup.yaml").read_text())
+    data["read"]["start"] = 0x100
+    (profile / "rom_backup.yaml").write_text(yaml.safe_dump(data))
+    with pytest.raises(ValueError, match="reads from 0x000100; an image starts at 0x000000"):
+        load_backup_recipe(profile / ROM_BACKUP_FILE, None)
 
 
 def test_a_diagnostic_id_cannot_stand_for_an_ecm_broadcast(tmp_path: Path) -> None:
     profile = _write_profile(tmp_path, ecm_broadcast_ids=[0x551, RESPONSE_ID])
     rom_map = RomMap.model_validate(yaml.safe_load((profile / "rom_map.yaml").read_text()))
     with pytest.raises(ValueError, match="0x7E8 is a diagnostic id"):
-        load_backup_recipe(profile, rom_map)
+        load_backup_recipe(profile / ROM_BACKUP_FILE, rom_map)
 
 
 # -- the transmit gate -------------------------------------------------------
@@ -432,6 +487,7 @@ def test_backup_byte_matches_the_fake_ecu_and_releases_everything(
         "image": CAL_ID.decode(),
         "ecu": CAL_ID.decode(),
         "ok": True,
+        "offset": "0x000100",  # the map's
     }
     assert meta["integrity"]["reread"] == {"blocks": 8, "mismatches": []}
     assert meta["revision_match"]["status"] == "unrecognised"
@@ -670,9 +726,12 @@ def test_elm327_source_is_refused(rig_factory: Callable[..., Rig]) -> None:
 
 def test_missing_recipe_is_refused(rig_factory: Callable[..., Rig]) -> None:
     rig = rig_factory()
-    (rig.job.profile_dir / "rom_backup.yaml").unlink()
-    with pytest.raises(BackupRefusedError, match="no backup recipe"):
+    (rig.library.profile_dir / "rom_backup.yaml").unlink()
+    with pytest.raises(BackupRefusedError, match="no backup recipe") as refused:
         rig.job.start()
+    # It names where it looked, and what the platform match saw.
+    assert "rom_backup.yaml does not exist, and no platform in" in str(refused.value)
+    assert "model '(blank)'" in str(refused.value)
 
 
 def test_another_backup_running_is_refused(rig_factory: Callable[..., Rig]) -> None:
@@ -965,9 +1024,149 @@ def test_a_calibration_id_mismatch_is_unverified(rig_factory: Callable[..., Rig]
     state = rig.run()
     assert state["state"] == "failed"
     assert "image calibration ID 1ZS44A00000 != ECM-reported 1ZS04C00000" in state["reason"]
+
+
+def test_a_calibration_the_map_does_not_know_is_still_checked_at_its_offset(
+    rig_factory: Callable[..., Rig],
+) -> None:
+    """A different ID at the map's offset is what makes the map not apply, so
+    it cannot excuse the comparison: disagreeing with the ECM still fails.
+    Agreeing leaves only the checksums unchecked."""
+    other = b"1ZS04C00000"
+    rig = rig_factory(_small_image(cal=other))
+    state = rig.run()
+    assert state["state"] == "failed"
+    assert "image calibration ID 1ZS04C00000 != ECM-reported 1ZS44A00000" in state["reason"]
+    assert state["integrity"]["calibration_id"]["offset"] == "0x000100"
+    rig.truck.ecu_id = other.decode()
+    state = rig.run()
+    assert state["state"] == "done" and state["verified"] is False
+    assert state["reason"] == (
+        "unverified: no map definition for calibration 1ZS04C00000: checksums not checked"
+    )
+
+
+def test_an_unreported_ecm_calibration_id_is_done_but_unverified(
+    rig_factory: Callable[..., Rig],
+) -> None:
+    """Nothing to check against is not evidence against the read."""
+    rig = rig_factory()
     rig.truck.ecu_id = None
     state = rig.run()
-    assert "the ECM has not reported its calibration ID" in state["reason"]
+    assert state["state"] == "done" and state["verified"] is False
+    assert state["reason"].startswith(
+        "unverified: the ECM has not reported its calibration ID (/status calibration), so "
+        "the image's 1ZS44A00000 could not be checked against it"
+    )
+    entry = rig.library.entry(state["sha256"])
+    assert entry["read_meta"]["verified"] is False
+    assert entry["checksum"]["ok"] is True
+
+
+# -- no ROM map yet ------------------------------------------------------------
+
+
+def test_a_vehicle_without_a_rom_map_backs_up_and_keeps_the_image(
+    rig_factory: Callable[..., Rig],
+) -> None:
+    """A backup is how a vehicle gets the image to map, so it cannot need a
+    map. The read runs, the image is stored and listed, its calibration ID is
+    found where the ECM's own ASCII sits, and only the checksums go
+    unchecked."""
+    image = _small_image()
+    rig = rig_factory(image, rom_map=False)
+    checks = {c["id"]: c for c in rig.job.state()["preconditions"]}
+    assert checks["recipe"]["ok"] is True
+    assert checks["recipe"]["detail"].endswith("no ROM map, so checksums go unchecked")
+    state = rig.run()
+    assert state["state"] == "done", state
+    assert state["verified"] is False and state["stored"] is True
+    assert state["reason"] == (
+        "unverified: no ROM map for this vehicle (rom_map.yaml): checksums not checked; with "
+        "no map, nothing confirms the recipe's 2,048 bytes are the whole flash"
+    )
+    assert state["integrity"]["checksum"] is None
+    assert state["integrity"]["calibration_id"] == {
+        "image": CAL_ID.decode(),
+        "ecu": CAL_ID.decode(),
+        "ok": True,
+        "offset": "0x000100",
+    }
+    assert state["bytes_total"] == SMALL_SIZE
+    assert rig.library.image(state["sha256"]) == image
+    (entry,) = rig.library.entries()
+    assert entry["sha256"] == state["sha256"] and entry["source"] == "ecu_read"
+    assert entry["checksum"] is None
+    assert entry["map_reason"] == "no ROM map for this vehicle (rom_map.yaml)"
+    described = rig.library.describe(state["sha256"])
+    assert described["map"] is None and described["tables"] == [] and described["blocks"]
+    assert described["map_reason"] == entry["map_reason"]
+    start = rig.events[0]
+    assert start[0] == "rom_backup.start" and start[2]["rom_map"] is False
+    _assert_released()
+
+
+def test_without_a_map_an_ecm_id_missing_from_the_image_is_unverified(
+    rig_factory: Callable[..., Rig],
+) -> None:
+    rig = rig_factory(rom_map=False)
+    rig.truck.ecu_id = "1ZS04C00000"
+    state = rig.run()
+    assert state["state"] == "done" and state["verified"] is False
+    assert (
+        "the ECM reports calibration ID 1ZS04C00000, and the image does not hold it as ASCII"
+        in state["reason"]
+    )
+    assert state["integrity"]["calibration_id"]["ok"] is False
+    # Whitespace around the reported ID is not part of it.
+    rig.truck.ecu_id = f"  {CAL_ID.decode()} "
+    state = rig.run()
+    assert state["integrity"]["calibration_id"]["ok"] is True
+    assert "does not hold it as ASCII" not in state["reason"]
+
+
+def test_without_a_map_a_reread_mismatch_still_fails(rig_factory: Callable[..., Rig]) -> None:
+    rig = rig_factory(rom_map=False, reread=8)
+    rig.ecu.corrupt_on_reread.add(0)
+    state = rig.run()
+    assert state["state"] == "failed" and state["stored"] is True
+    assert state["reason"].startswith("unverified: 1 re-read block(s) differ: 0x000000")
+
+
+def test_a_platform_recipe_serves_a_profile_without_one(
+    rig_factory: Callable[..., Rig], tmp_path: Path
+) -> None:
+    """The profile has no recipe of its own; its platform's is used and named."""
+    rig = rig_factory(rom_map=False)
+    own = rig.library.profile_dir / ROM_BACKUP_FILE
+    platform = tmp_path / "platforms" / "test-gen"
+    platform.mkdir(parents=True)
+    (platform / ROM_BACKUP_FILE).write_text(own.read_text())
+    own.unlink()
+    (platform / "platform.yaml").write_text(
+        yaml.safe_dump(
+            {
+                "schema_version": 1,
+                "name": "Test generation",
+                "vehicles": [{"make": "Nissan", "model": "Xterra", "years": [2005, 2015]}],
+                "evidence": "test",
+            }
+        )
+    )
+    rig.job._recipe_file = lambda: vehicle_data_file(
+        rig.library.profile_dir,
+        ROM_BACKUP_FILE,
+        make="Nissan",
+        model="Xterra",
+        year=2013,
+        platforms_dir=tmp_path / "platforms",
+    )
+    detail = {c["id"]: c for c in rig.job.state()["preconditions"]}["recipe"]["detail"]
+    assert "platforms/test-gen/rom_backup.yaml (platform Test generation)" in detail
+    state = rig.run()
+    assert state["state"] == "done" and state["stored"] is True
+    meta = rig.library.entry(state["sha256"])["read_meta"]
+    assert meta["recipe"].endswith("platforms/test-gen/rom_backup.yaml (platform Test generation)")
 
 
 def test_a_reread_mismatch_is_unverified(rig_factory: Callable[..., Rig]) -> None:
@@ -1006,6 +1205,9 @@ def test_backup_routes(tmp_path: Path) -> None:
         assert idle["state"] == "idle" and idle["blocks_done"] == 0
         checks = {c["id"]: c for c in idle["preconditions"]}
         assert checks["recipe"]["ok"] is True  # the shipped Xterra recipe
+        assert checks["recipe"]["detail"].startswith(
+            "data/platforms/nissan-xterra-n50/rom_backup.yaml (platform Nissan Xterra N50"
+        )
         # No live source in this app: the engine watch is unavailable.
         assert checks["engine_watch"]["ok"] is False
         refused = client.post("/control/rom/backup", headers=auth)
@@ -1014,6 +1216,37 @@ def test_backup_routes(tmp_path: Path) -> None:
         assert client.get("/control/rom/backup", headers=auth).json()["state"] == "refused"
         cancel = client.post("/control/rom/backup/cancel", headers=auth)
         assert cancel.status_code == 409 and cancel.json()["detail"] == "no backup is running"
+
+
+def test_a_2013_xterra_with_no_profile_data_is_offered_a_backup(tmp_path: Path) -> None:
+    """The reported refusal (2026-10-23): ``data/nissan-xterra-2013/`` holds
+    neither a recipe nor a ROM map. Only the vehicle is left blocking."""
+    profile = tmp_path / "data" / "nissan-xterra-2013"
+    config = isolated_config(
+        tmp_path,
+        daemon={"afr_calibration": profile / "afr_calibration.yaml"},
+        vehicle={"make": "Nissan", "model": "Xterra", "year": 2013},
+    )
+    app = FastAPI()
+    register_rom_library_routes(app, config=config, resolved_control_token="secret")
+    auth = {"Authorization": "Bearer secret"}
+    with TestClient(app) as client:
+        checks = {
+            c["id"]: c
+            for c in client.get("/control/rom/backup", headers=auth).json()["preconditions"]
+        }
+        assert checks["recipe"] == {
+            "id": "recipe",
+            "ok": True,
+            "detail": (
+                "data/platforms/nissan-xterra-n50/rom_backup.yaml (platform Nissan Xterra N50, "
+                "2005-2015): 16,645 reads; no ROM map, so checksums go unchecked"
+            ),
+        }
+        assert client.get("/control/rom/library", headers=auth).json() == {
+            "entries": [],
+            "count": 0,
+        }
 
 
 def test_capture_activity_names_profile_captures() -> None:

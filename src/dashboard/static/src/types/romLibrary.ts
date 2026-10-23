@@ -366,7 +366,14 @@ export type RomBackupStateName = "idle" | "refused" | "running" | "done" | "fail
  *  themselves failed (the reason says so). */
 export interface RomBackupIntegrity {
   checksum: RomChecksumVerdict | null;
-  calibration_id: { image: string | null; ecu: string | null; ok: boolean };
+  /** `offset`: where the ID sits in the image (the map's offset, or where the
+   *  ECM-reported ID was found when no map describes the image). */
+  calibration_id: {
+    image: string | null;
+    ecu: string | null;
+    ok: boolean;
+    offset?: string | null;
+  };
   reread: { blocks: number; mismatches: string[] };
 }
 
@@ -383,7 +390,8 @@ export interface RomBackupCheck {
 /** `GET /control/rom/backup`, and the response of its POST routes (W08.7). */
 export interface RomBackupState {
   state: RomBackupStateName;
-  /** Why it was refused, failed or cancelled; names its cause. */
+  /** Why it was refused, failed or cancelled, or why a `done` read is
+   *  unverified (a check with nothing to check against); names its cause. */
   reason?: string | null;
   /** What a running (or just-finished) read is doing. */
   phase?: string | null;
@@ -409,7 +417,9 @@ export interface RomBackupState {
   /** Library sha256 of the image: set only when `stored` (on `done`, and on a
    *  `failed` read whose image was kept as unverified). */
   sha256?: string | null;
-  /** False: kept, marked unverified (checksum, calibration ID or re-read). */
+  /** False: kept, marked unverified. On `failed` a check disagreed (checksum,
+   *  calibration ID or re-read); on `done` one could not run (no ROM map yet,
+   *  or no ECM-reported calibration ID). */
   verified?: boolean | null;
   integrity?: RomBackupIntegrity | null;
   revision_match?: RomRevisionMatch | null;

@@ -1,0 +1,13 @@
+schema_version: 1
+# The N50 Xterra: data every vehicle of this generation shares, beside this
+# file. src/vehicle/platforms.py matches a profile here by its make, model and
+# year; a profile's own data/<slug>/ file of the same name overrides it.
+name: Nissan Xterra N50, 2005-2015
+vehicles:
+  - {make: Nissan, model: Xterra, years: [2005, 2015]}
+evidence: >-
+  Operator, 2026-10-23: every 2005-2015 Xterra is the same generation and
+  answers the same commands. A second operator's 2013 (profile
+  nissan-xterra-2013) was refused a ROM backup because its profile directory
+  had no rom_backup.yaml. The recipe here was established on the 2008
+  (nissan-xterra-2008) only.

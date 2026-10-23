@@ -275,6 +275,14 @@ to direct HTTP.
   bus; skip TCM steps in capture protocols for it. (A vehicle-specific
   fact, not a platform assumption — TCM-equipped vehicles are in
   scope.)
+- **Generation-wide facts go in a platform, not a copy per profile.**
+  `data/platforms/<id>/` (a `platform.yaml` naming make, model and model
+  years, plus the shared files) serves every profile it covers, and a
+  profile's own `data/<slug>/` file of the same name overrides it
+  (`src.vehicle.platforms.vehicle_data_file`). The ROM backup recipe is shared
+  this way by every 2005-2015 Xterra (2026-10-23, after a 2013 was refused a
+  backup for lacking a copy). A new reader of generation-wide data uses the
+  same lookup rather than requiring the file in each profile.
 - **Fix at source, quarantine bad data**: telemetry is replaceable —
   fix collection and archive bad sessions rather than building runtime
   tolerance/threshold machinery. Prefer principled solutions over

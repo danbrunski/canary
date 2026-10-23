@@ -3,8 +3,9 @@
 Every route requires the control token, like ``/control/rom/inspect``. The
 library stores plain images per vehicle under ``daemon.rom_library_dir``
 (outside the checkout); the backup job reads the ECU's flash with the
-vehicle's recipe and stores the result as ``source: ecu_read``. Nothing here
-writes the ECU.
+vehicle's recipe (its profile's, else its platform's) and stores the result as
+``source: ecu_read``, whether or not the vehicle has a ROM map yet. Nothing
+here writes the ECU.
 """
 
 from __future__ import annotations
@@ -24,7 +25,12 @@ from src.collection import tuning_profile
 from src.collection.can_bus import bus_factory
 from src.config import CanaryConfig
 from src.control.capture import CaptureController
-from src.control.rom_backup import BackupRefusedError, RomBackupJob, VehicleReading
+from src.control.rom_backup import (
+    ROM_BACKUP_FILE,
+    BackupRefusedError,
+    RomBackupJob,
+    VehicleReading,
+)
 from src.control.rom_library import (
     MAX_ROM_UPLOAD,
     RomLibrary,
@@ -34,6 +40,7 @@ from src.control.rom_library import (
 )
 from src.dashboard.security import control_auth_dependency
 from src.dashboard.status import derive_vehicle_state_from_storage
+from src.vehicle.platforms import config_data_file
 from src.vehicle.profiles import active_registry
 from src.vehicle.profiles import profile_dir as vehicle_profile_dir
 from src.vehicle.tune_revisions import TuneRevisionRegistry
@@ -137,7 +144,7 @@ def register_rom_library_routes(
 
     library = RomLibrary(config.daemon.rom_library_dir, profile_dir=profile, registry=registry)
     job = RomBackupJob(
-        profile_dir=profile,
+        recipe_file=lambda: config_data_file(config, ROM_BACKUP_FILE),
         library=library,
         open_bus=lambda: bus_factory(config.hardware.can),
         vehicle=lambda: vehicle_reading(

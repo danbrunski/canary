@@ -1,10 +1,13 @@
 """Back up the ECU's flash into the ROM library, read-only (W08.7).
 
-The read recipe is vehicle data (``<profile>/rom_backup.yaml``): the request
-and response ids, the DiagnosticSessionControl sequence (sub-functions sent
-once, before each read, and after the read), the address range and block
-size, and the pacing, with the capture that established them as provenance.
-This module holds no vehicle constants. It sends only DiagnosticSessionControl
+The read recipe is vehicle data (``rom_backup.yaml``, the profile's own or its
+platform's: :func:`src.vehicle.platforms.vehicle_data_file`): the request and
+response ids, the DiagnosticSessionControl sequence (sub-functions sent once,
+before each read, and after the read), the address range and block size, and
+the pacing, with the capture that established them as provenance. The image is
+the recipe's range; a ROM map is not needed to read one, since a backup is how
+a vehicle without a map gets the image to build one from. This module holds no
+vehicle constants. It sends only DiagnosticSessionControl
 (0x10) and ReadMemoryByAddress (0x23), through
 :meth:`src.collection.can_obd_client.CanObdClient.query_raw`, whose probe-only
 allowlist cannot build a write.
@@ -43,8 +46,13 @@ with the summary, go to the control-event log.
 
 **Integrity.** The finished image must pass the vehicle's checksums, carry the
 calibration ID the ECM reports, and match a re-read of blocks spread across
-the image. A failure keeps the image, marked unverified with the reason, and
-the job ends ``failed``; it is never stored as good.
+the image. A check that ran and disagreed keeps the image, marked unverified
+with the reason, and the job ends ``failed``. A check with nothing to check
+against (no ROM map describes the image, so no checksums; the ECM never
+reported its calibration ID) also keeps it unverified with the reason, but the
+job ends ``done``: that is absence of evidence, not evidence against the read.
+Without a map the calibration ID is looked for in the image as the ASCII the
+ECM reports. An unverified image is never stored as good.
 """
 
 from __future__ import annotations
@@ -74,10 +82,11 @@ from src.collection.can_obd_client import CanObdClient, RawReply
 from src.collection.isotp import DEFAULT_REQUEST_ID, nrc_name
 from src.control.rom_library import RomLibrary
 from src.operating import ENGINE_RUNNING_MIN_RPM
+from src.vehicle.platforms import VehicleDataFile
 
 log = logging.getLogger(__name__)
 
-#: File name of the recipe in a vehicle profile directory.
+#: File name of the recipe in a vehicle profile or platform directory.
 ROM_BACKUP_FILE = "rom_backup.yaml"
 #: The ECM-session holder name, and the private-traffic owner.
 HOLDER: tx_gate.EcmSessionHolder = "rom_backup"
@@ -137,6 +146,12 @@ class RecipeRead(_Strict):
             raise ValueError("read range must run start..end within 32-bit addresses")
         return self
 
+    @property
+    def size(self) -> int:
+        """Bytes in the image: the range, which starts at 0
+        (:func:`load_backup_recipe`)."""
+        return self.end + 1 - self.start
+
     def blocks(self) -> list[tuple[int, int]]:
         """``(address, length)`` for every read, in address order."""
         return [
@@ -188,16 +203,24 @@ class BackupRecipe(_Strict):
         return self
 
 
-def load_backup_recipe(profile_dir: Path, rom_map: RomMap) -> BackupRecipe:
-    """The vehicle's recipe, refused when it would not produce a whole image."""
-    recipe = BackupRecipe.model_validate(
-        yaml.safe_load((profile_dir / ROM_BACKUP_FILE).read_text())
-    )
-    span = recipe.read.end + 1 - recipe.read.start
-    if recipe.read.start != 0 or span != rom_map.image_size:
+def load_backup_recipe(path: Path, rom_map: RomMap | None) -> BackupRecipe:
+    """The recipe at ``path``, refused when it would not produce a whole image.
+
+    The range must start at 0, so that image offsets are flash addresses. With
+    a map it must also cover the map's image exactly; without one, the range is
+    the image.
+    """
+    recipe = BackupRecipe.model_validate(yaml.safe_load(path.read_text()))
+    span = recipe.read.size
+    if rom_map is not None and (recipe.read.start != 0 or span != rom_map.image_size):
         raise ValueError(
             f"{ROM_BACKUP_FILE} reads 0x{recipe.read.start:06X}-0x{recipe.read.end:06X} "
             f"({span:,} bytes); the image is 0x000000-0x{rom_map.image_size - 1:06X}"
+        )
+    if recipe.read.start != 0:
+        raise ValueError(
+            f"{ROM_BACKUP_FILE} reads from 0x{recipe.read.start:06X}; an image starts at "
+            "0x000000, so that its offsets are flash addresses"
         )
     return recipe
 
@@ -300,6 +323,8 @@ class RomBackupJob:
     Everything that touches the daemon is injected, so the job runs against a
     fake ECU on a virtual bus in tests:
 
+    * ``recipe_file`` finds the recipe (profile, then platform), raising
+      ``FileNotFoundError`` that names where it looked;
     * ``open_bus`` opens a bus handle of its own (SocketCAN serves several
       per interface, as ``/control/obd_request`` relies on);
     * ``vehicle`` returns a :class:`VehicleReading`;
@@ -311,7 +336,7 @@ class RomBackupJob:
     def __init__(
         self,
         *,
-        profile_dir: Path,
+        recipe_file: Callable[[], VehicleDataFile],
         library: RomLibrary,
         open_bus: Callable[[], can.BusABC],
         vehicle: Callable[[], VehicleReading],
@@ -323,7 +348,7 @@ class RomBackupJob:
         pre_read_listen_seconds: float = PRE_READ_LISTEN_SECONDS,
         recheck_seconds: float = RECHECK_SECONDS,
     ) -> None:
-        self.profile_dir = Path(profile_dir)
+        self._recipe_file = recipe_file
         self.library = library
         self._open_bus = open_bus
         self._vehicle = vehicle
@@ -344,6 +369,8 @@ class RomBackupJob:
         self._ecm_ids: frozenset[int] = frozenset()
         self._ecm_heard_at: float | None = None
         self._started_mono = 0.0
+        #: Where the running read's recipe came from, for its records.
+        self._recipe_source = ROM_BACKUP_FILE
 
     # -- public -------------------------------------------------------------
 
@@ -371,6 +398,16 @@ class RomBackupJob:
             payload["blocked_by"] = "a backup is running"
         return payload
 
+    def _definitions(self) -> tuple[BackupRecipe, VehicleDataFile, RomMap | None]:
+        """The recipe, where it came from, and the vehicle's map if it has one.
+
+        ``FileNotFoundError``: no recipe. ``ValueError``: an invalid recipe,
+        platform or map; a broken map is refused, only a missing one is fine.
+        """
+        source = self._recipe_file()
+        rom_map = self.library.rom_map_or_none()
+        return load_backup_recipe(source.path, rom_map), source, rom_map
+
     def preconditions(self) -> list[dict[str, Any]]:
         """Every start precondition, each ``{id, ok, detail}``; all are evaluated."""
         checks: list[dict[str, Any]] = []
@@ -384,13 +421,13 @@ class RomBackupJob:
             "no backup running",
         )
         try:
-            rom_map = self.library.rom_map()
-            recipe = load_backup_recipe(self.profile_dir, rom_map)
-            check("recipe", None, f"{ROM_BACKUP_FILE}: {len(recipe.read.blocks()):,} reads")
+            recipe, source, rom_map = self._definitions()
+            unmapped = "" if rom_map is not None else "; no ROM map, so checksums go unchecked"
+            check("recipe", None, f"{source}: {len(recipe.read.blocks()):,} reads{unmapped}")
         except FileNotFoundError as exc:
-            check("recipe", f"no backup recipe or ROM map for this vehicle ({exc})", "")
-        except ValueError as exc:
-            check("recipe", f"{ROM_BACKUP_FILE} or the ROM map is invalid: {exc}", "")
+            check("recipe", f"no backup recipe for this vehicle: {exc}", "")
+        except (ValueError, yaml.YAMLError) as exc:
+            check("recipe", f"the backup recipe, its platform or the ROM map is invalid: {exc}", "")
         check(
             "obd_source",
             None
@@ -475,8 +512,8 @@ class RomBackupJob:
                 reason = "; ".join(failed)
                 self._state = {**_idle_state(), "state": "refused", "reason": reason}
                 raise BackupRefusedError(reason)
-            rom_map = self.library.rom_map()
-            recipe = load_backup_recipe(self.profile_dir, rom_map)
+            recipe, source, rom_map = self._definitions()
+            self._recipe_source = str(source)
             blocks = recipe.read.blocks()
             wall = time.time()
             self._cancel.clear()
@@ -487,7 +524,7 @@ class RomBackupJob:
                 "state": "running",
                 "phase": "starting",
                 "blocks_total": len(blocks),
-                "bytes_total": rom_map.image_size,
+                "bytes_total": recipe.read.size,
                 "started_at": _now_iso(wall),
             }
             worker = threading.Thread(
@@ -506,7 +543,8 @@ class RomBackupJob:
                 "block_size": recipe.read.block_size,
                 "request_id": f"0x{recipe.request_id:03X}",
                 "response_id": f"0x{recipe.response_id:03X}",
-                "recipe": ROM_BACKUP_FILE,
+                "recipe": self._recipe_source,
+                "rom_map": rom_map is not None,
             },
         )
         worker.start()
@@ -604,7 +642,7 @@ class RomBackupJob:
             )
         return None
 
-    def _run(self, recipe: BackupRecipe, rom_map: RomMap, started_wall: float) -> None:
+    def _run(self, recipe: BackupRecipe, rom_map: RomMap | None, started_wall: float) -> None:
         started = time.monotonic()
         self._started_mono = started
         counters: dict[str, Any] = {
@@ -659,7 +697,7 @@ class RomBackupJob:
             for sub in recipe.session.enter_once:
                 self._enter_session(client, recipe, sub, counters)
             self._update(phase="reading")
-            image = self._read_all(client, recipe, rom_map, counters, started)
+            image = self._read_all(client, recipe, counters, started)
             if recipe.verify.reread_blocks:
                 self._update(phase="verifying")
                 reread_mismatches = self._reread(client, recipe, image, counters)
@@ -903,12 +941,11 @@ class RomBackupJob:
         self,
         client: CanObdClient,
         recipe: BackupRecipe,
-        rom_map: RomMap,
         counters: dict[str, Any],
         started: float,
     ) -> bytearray:
         blocks = recipe.read.blocks()
-        image = bytearray(rom_map.image_size)
+        image = bytearray(recipe.read.size)
         next_check = 0.0
         last_cycle = 0.0
         done_bytes = 0
@@ -1002,25 +1039,31 @@ class RomBackupJob:
         self,
         image: bytes,
         recipe: BackupRecipe,
-        rom_map: RomMap,
+        rom_map: RomMap | None,
         summary: dict[str, Any],
         reread_mismatches: list[str],
     ) -> tuple[BackupStateName, str | None]:
         """Add the image to the library, then report its integrity.
 
-        Unverified is kept, never hidden. Nothing that can raise runs before
+        Unverified is kept, never hidden: ``failed`` when a check disagreed,
+        ``done`` with the reason when a check had nothing to check against.
+        Nothing that can raise runs before
         :meth:`RomLibrary.add_image`: the integrity checks are wrapped (a
         failure there is itself a reason the image is unverified) and the
         revision match cannot raise (a broken flash history reads ``unknown``
         with its reason), so a bad registry or a callback error can no longer
         lose a ten-minute read.
         """
+        unchecked: list[str] = []
         try:
-            integrity, problems = self._integrity(image, recipe, rom_map, reread_mismatches)
+            integrity, failures, unchecked = self._integrity(
+                image, recipe, rom_map, reread_mismatches
+            )
         except Exception as exc:  # noqa: BLE001 - recorded as the reason, never raised
             log.exception("ROM backup: integrity check failed")
             integrity = None
-            problems = [f"the integrity check failed: {type(exc).__name__}: {exc}"]
+            failures = [f"the integrity check failed: {type(exc).__name__}: {exc}"]
+        problems = failures + unchecked
         verified = not problems
         sha = sha256_hex(image)
         match = self.library.revision_match(sha)
@@ -1031,7 +1074,7 @@ class RomBackupJob:
             "range": [f"0x{recipe.read.start:06X}", f"0x{recipe.read.end:06X}"],
             "request_id": f"0x{recipe.request_id:03X}",
             "response_id": f"0x{recipe.response_id:03X}",
-            "recipe": ROM_BACKUP_FILE,
+            "recipe": self._recipe_source,
             "verified": verified,
             "unverified_reason": None if verified else "; ".join(problems),
             "integrity": integrity,
@@ -1055,36 +1098,62 @@ class RomBackupJob:
         )
         if verified:
             return "done", None
-        return "failed", "unverified: " + "; ".join(problems)
+        return ("failed" if failures else "done"), "unverified: " + "; ".join(problems)
 
     def _integrity(
         self,
         image: bytes,
         recipe: BackupRecipe,
-        rom_map: RomMap,
+        rom_map: RomMap | None,
         reread_mismatches: list[str],
-    ) -> tuple[dict[str, Any], list[str]]:
-        """Checksums, calibration ID against the ECM's, and the re-read."""
-        problems: list[str] = []
+    ) -> tuple[dict[str, Any], list[str], list[str]]:
+        """Checksums, calibration ID against the ECM's, and the re-read.
+
+        Returns the payload, the *failures* (a check ran and disagreed) and
+        the *unchecked* (a check had nothing to check against).
+        """
+        failures: list[str] = []
+        unchecked: list[str] = []
         calibration_id = read_calibration_id(image, rom_map)
         no_map = map_applies(calibration_id, rom_map)
         checksum = None
-        if no_map is not None:
-            problems.append(f"{no_map}: checksums not checked")
+        if rom_map is None or no_map is not None:
+            unchecked.append(f"{no_map}: checksums not checked")
         else:
             checksum = checksum_verdict(image, rom_map.checksums)
             if not checksum["ok"]:
-                problems.append(checksum["reason"] or "checksum mismatch")
-        ecu_id = self._ecu_calibration_id()
-        if ecu_id is None:
-            problems.append(
-                "the ECM has not reported its calibration ID (/status calibration), so the "
-                f"image's {calibration_id} could not be checked against it"
+                failures.append(checksum["reason"] or "checksum mismatch")
+        if rom_map is None:
+            unchecked.append(
+                f"with no map, nothing confirms the recipe's {recipe.read.size:,} bytes are the "
+                "whole flash"
             )
-        elif ecu_id != calibration_id:
-            problems.append(f"image calibration ID {calibration_id} != ECM-reported {ecu_id}")
+        # Blank is as good as unreported: an empty string is found anywhere.
+        ecu_id = (self._ecu_calibration_id() or "").strip() or None
+        offset: int | None = None
+        if rom_map is not None:
+            # The map says where the ID lives, whether or not it describes this
+            # calibration: a different ID there is the image disagreeing with
+            # the ECM, which is exactly what makes the map not apply.
+            offset = rom_map.calibration_id.offset
+        elif ecu_id is not None and ecu_id.isascii() and ecu_id.isprintable():
+            # Nothing says where the ID lives: look for the ECM's own as ASCII.
+            found = image.find(ecu_id.encode("ascii"))
+            if found >= 0:
+                offset, calibration_id = found, ecu_id
+        if ecu_id is None:
+            unchecked.append(
+                "the ECM has not reported its calibration ID (/status calibration), so the "
+                f"image's {calibration_id or 'calibration ID'} could not be checked against it"
+            )
+        elif rom_map is not None and ecu_id != calibration_id:
+            failures.append(f"image calibration ID {calibration_id} != ECM-reported {ecu_id}")
+        elif rom_map is None and offset is None:
+            unchecked.append(
+                f"the ECM reports calibration ID {ecu_id}, and the image does not hold it as ASCII"
+            )
         if reread_mismatches:
-            problems.append(
+            failures.append(
                 f"{len(reread_mismatches)} re-read block(s) differ: {', '.join(reread_mismatches)}"
             )
         integrity = {
@@ -1093,13 +1162,14 @@ class RomBackupJob:
                 "image": calibration_id,
                 "ecu": ecu_id,
                 "ok": ecu_id is not None and ecu_id == calibration_id,
+                "offset": None if offset is None else f"0x{offset:06X}",
             },
             "reread": {
                 "blocks": min(recipe.verify.reread_blocks, len(recipe.read.blocks())),
                 "mismatches": reread_mismatches,
             },
         }
-        return integrity, problems
+        return integrity, failures, unchecked
 
     def _wait_for_polling(self, released: float) -> tuple[float | None, str]:
         """Seconds until an OBD observation newer than the release, or why none came.

@@ -349,9 +349,15 @@ Read-only throughout: these routes store and describe flash images and read
 the ECU's flash. Nothing writes the ECU. The vehicle's image layout is data
 (`<profile>/rom_map.yaml`, validated by `src/analysis/rom_map.py`; every
 region and table carries `confidence` = `verified` / `inferred` / `unknown`
-and required `evidence`), and so is the read recipe
-(`<profile>/rom_backup.yaml`). Addresses in payloads are integers (byte
-offsets into the plain image).
+and required `evidence`), and so is the read recipe: `<profile>/rom_backup.yaml`,
+else the vehicle's platform's (`data/platforms/<id>/rom_backup.yaml`, matched by
+the profile's make, model and year; `src/vehicle/platforms.py`). Every
+2005-2015 Xterra shares `data/platforms/nissan-xterra-n50/`. A vehicle with no
+map can still back up, store, list, describe, compare and download images;
+only `GET .../tables` (409) and the map's verdicts need one, and a plain upload
+is refused by name (nothing says what size the image is), while an
+`.OsirisROM` is accepted. Addresses in payloads are integers (byte offsets into
+the plain image).
 
 **Library entry** (`POST` response, `GET /control/rom/library` `entries[]`,
 `PATCH` response):
@@ -450,18 +456,25 @@ both images' calibration IDs are mapped.
  "preconditions": null, "can_start": false, "blocked_by": "a backup is running"}
 ```
 
-`state` is `idle`, `refused` (with `reason`), `running`, `done` (image stored
-and verified: `stored: true`, `sha256`, `revision_match`), `failed` (with
-`reason`) or `cancelled`. `stored` says whether the image is in the library,
-and `sha256` is set only when it is: an image that read completely but failed
-integrity is still stored, marked unverified (`reason` starts `unverified:`,
-`stored: true`), while a read that finished but could not be written is
+`state` is `idle`, `refused` (with `reason`), `running`, `done` (image stored:
+`stored: true`, `sha256`, `revision_match`), `failed` (with `reason`) or
+`cancelled`. `stored` says whether the image is in the library, and `sha256`
+is set only when it is: an image that read completely but failed integrity (a
+check ran and disagreed: checksum, calibration ID, re-read) is still stored,
+`failed`, marked unverified (`reason` starts `unverified:`, `stored: true`).
+A check with nothing to check against (no map describes the image, so no
+checksums; with no map at all, nothing confirms the recipe's range is the whole
+flash; the ECM never reported its calibration ID) leaves the read `done`
+with `verified: false` and the `unverified:` reason. A read that finished but
+could not be written is
 `failed` with `stored: false`, no `sha256`, and a reason ending "nothing was
 kept". `send_errors` counts frames the bus itself refused (`can.CanError`);
 they are retried like timeouts and named "CAN send failed", never confused
 with the transmit gate suppressing a frame. `integrity` is
-`{checksum, calibration_id: {image, ecu, ok}, reread: {blocks, mismatches}}`,
-or `null` if the checks themselves failed. While not
+`{checksum, calibration_id: {image, ecu, ok, offset}, reread: {blocks, mismatches}}`,
+or `null` if the checks themselves failed. `offset` is where the ID sits: the
+map's, or, with no map that describes the image, where the ECM-reported ID
+was found as ASCII. While not
 running, `preconditions` lists every start check `{id, ok, detail}` — ids
 `backup`, `recipe`, `obd_source`, `vehicle_state`, `engine_watch`, `passive`,
 `foreign_tester`, `ecm_session`, `capture` — with `can_start` and `blocked_by`.
@@ -505,10 +518,12 @@ into the library as `source: ecu_read` with `read_meta`:
 {"started_at": "...", "ended_at": "...", "duration_s": ..., "requests": ...,
  "retries": 0, "timeouts": 0, "send_errors": 0, "negative_responses": {}, "frames_excluded": ...,
  "blocks": 16645, "block_size": 63, "range": ["0x000000", "0x0FFFFF"],
- "request_id": "0x7E0", "response_id": "0x7E8", "recipe": "rom_backup.yaml",
+ "request_id": "0x7E0", "response_id": "0x7E8",
+ "recipe": "data/platforms/nissan-xterra-n50/rom_backup.yaml (platform Nissan Xterra N50, 2005-2015)",
  "verified": true, "unverified_reason": null,
  "integrity": {"checksum": {...}, "calibration_id": {"image": "1ZS44A00000",
-               "ecu": "1ZS44A00000", "ok": true}, "reread": {"blocks": 64, "mismatches": []}},
+               "ecu": "1ZS44A00000", "ok": true, "offset": "0x008204"},
+               "reread": {"blocks": 64, "mismatches": []}},
  "revision_match": {"revision": "ZS44A-20260920", "status": "matched", "reference": null}}
 ```
 

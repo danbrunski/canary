@@ -303,6 +303,11 @@ function BackupState({
               text: `Backup complete: ${formatBytes(job.bytes)} in ${formatClockDuration(job.elapsed_s)}, ${job.retries} retries.`,
             }}
           />
+          {/* Done but unverified: a check had nothing to check against (no
+              ROM map yet, no ECM-reported calibration ID). */}
+          {job.verified === false && job.reason && (
+            <p className="text-warn">Kept, not fully checked: {job.reason}</p>
+          )}
           {link}
           {details}
         </div>

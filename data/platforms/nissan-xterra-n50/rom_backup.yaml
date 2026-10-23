@@ -1,8 +1,13 @@
 schema_version: 1
-# W08.7: how this ECM hands out its flash, read-only. Loaded by
+# W08.7: how the N50 Xterra ECM hands out its flash, read-only. Loaded by
 # src/control/rom_backup.py, which holds no vehicle constants of its own.
+# Shared by every vehicle platform.yaml covers; a profile's own
+# data/<slug>/rom_backup.yaml overrides it (src/vehicle/platforms.py). Only the
+# 2008 has been read with it; the other years rest on the operator's statement
+# that the generation shares its commands (2026-10-23, platform.yaml).
 #
-# Provenance: UpRev's own ROM backup, captured 2026-10-04 with CANary passive
+# Provenance: the 2008's (nissan-xterra-2008) UpRev ROM backup, captured
+# 2026-10-04 with CANary passive
 # (docs/skunkworks/uprev-backup-20261004.md). Osiris sent `10 85` once, then
 # `10 FB` and `23 [BE32 address] [BE16 0x003F]` per 63-byte block, about
 # 35 ms per cycle, 624 s for 1 MiB, with no SecurityAccess. The ECM answered
@@ -23,7 +28,10 @@ session:
 read:
   # ReadMemoryByAddress, KWP32 form (32-bit address, 16-bit length), the only
   # form this ECM answers. 0x100000 is not a multiple of 63, so the last read
-  # is the 4 bytes at 0x0FFFFC, as UpRev's was.
+  # is the 4 bytes at 0x0FFFFC, as UpRev's was. 1 MiB is the 2008's SH7058
+  # flash (docs/ecu-firmware-analysis.md); a later ECM with more flash would
+  # be read only to here, so a different size goes in that profile's own
+  # recipe.
   start: 0x000000
   end: 0x0FFFFF
   block_size: 63

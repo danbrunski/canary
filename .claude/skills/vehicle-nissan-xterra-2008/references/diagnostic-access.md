@@ -144,7 +144,8 @@ site.
   about 35 ms per read. 1 MiB took 624 s. The result was byte-identical to
   the decoded tune. It was only done key on, engine off. See
   `docs/skunkworks/uprev-backup-20261004.md` and
-  `data/nissan-xterra-2008/rom_backup.yaml` (the recipe as data, from W08).
+  `data/platforms/nissan-xterra-n50/rom_backup.yaml` (the recipe as data, from
+  W08, shared with every 2005-2015 Xterra).
 
 ## CAN: the BCM (0x745 → 0x765)
 

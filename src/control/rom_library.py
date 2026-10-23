@@ -11,8 +11,11 @@ Git.
 Everything derived from the bytes — checksum verdict, calibration ID, map,
 revision match — is computed when read, from the bytes and the vehicle's
 current map and flash history, so an edit to either can never leave a stale
-verdict on disk. The metadata file holds only what the bytes cannot say: where
-the image came from, when, and the operator's label.
+verdict on disk. A vehicle with no map still stores, lists, describes,
+compares and downloads images (an ECU backup is how it gets one to map); only
+the table views and the map's verdicts need the map, and say so. The metadata
+file holds only what the bytes cannot say: where the image came from, when,
+and the operator's label.
 
 Read-only with respect to the ECU: the library stores and describes images.
 Downloads are plain ``.bin``; there is no ``.OsirisROM`` export (W08 pre-made
@@ -43,7 +46,7 @@ from src.analysis.rom_image import (
     sha256_hex,
     tables_payload,
 )
-from src.analysis.rom_map import RomMap, load_rom_map
+from src.analysis.rom_map import ROM_MAP_FILE, RomMap, load_rom_map
 from src.atomic_write import atomic_write_text
 from src.vehicle.tune_revisions import TuneRevisionRegistry
 
@@ -99,6 +102,13 @@ class RomLibrary:
         """The vehicle's map. ``FileNotFoundError`` when it has none."""
         return load_rom_map(self.profile_dir)
 
+    def rom_map_or_none(self) -> RomMap | None:
+        """The vehicle's map, or ``None`` when it has none. An invalid map
+        still raises ``ValueError``: broken is not the same as absent."""
+        if not (self.profile_dir / ROM_MAP_FILE).exists():
+            return None
+        return load_rom_map(self.profile_dir)
+
     def registry(self) -> TuneRevisionRegistry | None:
         return self._registry()
 
@@ -149,7 +159,7 @@ class RomLibrary:
         if len(data) > MAX_ROM_UPLOAD:
             raise RomLibraryError(f"the upload exceeds the {MAX_ROM_UPLOAD:,}-byte (2 MiB) limit")
         try:
-            loaded = load_image(data, self.rom_map())
+            loaded = load_image(data, self.rom_map_or_none())
         except ImageFormatError as exc:
             raise RomLibraryError(str(exc)) from exc
         source: RomSource = "upload_osirisrom" if loaded.format == "osirisrom" else "upload_plain"
@@ -170,9 +180,15 @@ class RomLibrary:
         read_meta: dict[str, Any] | None = None,
         label: str | None = None,
     ) -> tuple[dict[str, Any], bool]:
-        """Store a plain image (deduplicated by sha256) and record its source."""
-        rom_map = self.rom_map()
-        if len(image) != rom_map.image_size:
+        """Store a plain image (deduplicated by sha256) and record its source.
+
+        With a map, the image must be the map's size; without one, any
+        non-empty image (an ECU read is the recipe's range).
+        """
+        rom_map = self.rom_map_or_none()
+        if not image:
+            raise RomLibraryError("the image is empty")
+        if rom_map is not None and len(image) != rom_map.image_size:
             raise RomLibraryError(
                 f"image is {len(image):,} bytes; this vehicle's image is {rom_map.image_size:,}"
             )
@@ -244,7 +260,7 @@ class RomLibrary:
         return self._entry_from(meta, self._bin(sha).read_bytes())
 
     def _entry_from(self, meta: dict[str, Any], image: bytes) -> dict[str, Any]:
-        rom_map = self.rom_map()
+        rom_map = self.rom_map_or_none()
         sources: list[dict[str, Any]] = meta.get("sources") or []
         calibration_id = read_calibration_id(image, rom_map)
         reason = map_applies(calibration_id, rom_map)
@@ -270,7 +286,11 @@ class RomLibrary:
             "added_at": meta["added_at"],
             "last_added_at": sources[-1]["added_at"] if sources else meta["added_at"],
             "calibration_id": calibration_id,
-            "checksum": None if reason else checksum_verdict(image, rom_map.checksums),
+            "checksum": (
+                checksum_verdict(image, rom_map.checksums)
+                if rom_map is not None and reason is None
+                else None
+            ),
             "revision_match": self.revision_match(meta["sha256"]),
             "map_reason": reason,
             "read_meta": reads[-1] if reads else None,
@@ -293,7 +313,7 @@ class RomLibrary:
         image = self.image(sha)
         entry = self.entry(sha)
         description = describe(
-            image, self.rom_map(), None, container_sha256=entry["container_sha256"]
+            image, self.rom_map_or_none(), None, container_sha256=entry["container_sha256"]
         )
         # The registry read that cannot raise (see revision_match).
         description["revision_match"] = entry["revision_match"]
@@ -303,7 +323,7 @@ class RomLibrary:
         return tables_payload(self.image(sha), self.rom_map())
 
     def compare(self, a: str, b: str) -> dict[str, Any]:
-        return compare_images(self.image(a), self.image(b), self.rom_map())
+        return compare_images(self.image(a), self.image(b), self.rom_map_or_none())
 
 
 def _clean_label(label: str | None) -> str | None:

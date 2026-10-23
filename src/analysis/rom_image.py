@@ -43,6 +43,8 @@ SPARSE_MIN_FF_PCT = 50.0
 DENSE_MIN_ENTROPY = 6.0
 #: Changed bytes closer than this merge into one compare range (W08.5).
 COMPARE_MERGE_GAP = 16
+#: Why no map describes an image, for a vehicle that has no map at all.
+NO_MAP_REASON = f"no ROM map for this vehicle ({ROM_MAP_FILE})"
 
 ImageFormat = Literal["plain", "osirisrom"]
 
@@ -70,9 +72,13 @@ def crc32_hex(data: bytes) -> str:
     return f"{zlib.crc32(data) & 0xFFFFFFFF:08x}"
 
 
-def load_image(data: bytes, rom_map: RomMap) -> LoadedImage:
-    """Detect the format and return the plain image, or refuse by name."""
-    size = rom_map.image_size
+def load_image(data: bytes, rom_map: RomMap | None) -> LoadedImage:
+    """Detect the format and return the plain image, or refuse by name.
+
+    Without a map an ``.OsirisROM`` still decodes (the container says what it
+    holds), but a plain file is refused: nothing says how big this vehicle's
+    image is, or that the file is not an encrypted backup of the same size.
+    """
     if data.startswith(SIGNATURE):
         try:
             image = Container.parse(data).decoded()
@@ -80,11 +86,20 @@ def load_image(data: bytes, rom_map: RomMap) -> LoadedImage:
             raise ImageFormatError(
                 f"not a readable .OsirisROM ({len(data):,} bytes): {exc}"
             ) from exc
+        if rom_map is None:
+            return LoadedImage(image=image, format="osirisrom", container_sha256=sha256_hex(data))
+        size = rom_map.image_size
         if len(image) != size:
             raise ImageFormatError(
                 f".OsirisROM decodes to {len(image):,} bytes; this vehicle's image is {size:,}"
             )
         return LoadedImage(image=image, format="osirisrom", container_sha256=sha256_hex(data))
+    if rom_map is None:
+        raise ImageFormatError(
+            f"{NO_MAP_REASON}, so a plain file of {len(data):,} bytes cannot be checked as an "
+            "image; upload an .OsirisROM, or back up the ECU from CANary"
+        )
+    size = rom_map.image_size
     for refused in rom_map.refused_formats:
         if refused.matches(data):
             raise ImageFormatError(f"{refused.name}: {refused.reason}")
@@ -96,8 +111,11 @@ def load_image(data: bytes, rom_map: RomMap) -> LoadedImage:
     )
 
 
-def read_calibration_id(image: bytes, rom_map: RomMap) -> str | None:
-    """ASCII calibration ID at the declared offset, or ``None`` if not text."""
+def read_calibration_id(image: bytes, rom_map: RomMap | None) -> str | None:
+    """ASCII calibration ID at the declared offset, or ``None`` if not text
+    (or no map declares an offset)."""
+    if rom_map is None:
+        return None
     where = rom_map.calibration_id
     raw = image[where.offset : where.offset + where.length]
     body = raw.rstrip(b"\x00\xff ")
@@ -106,8 +124,10 @@ def read_calibration_id(image: bytes, rom_map: RomMap) -> str | None:
     return body.decode("ascii")
 
 
-def map_applies(calibration_id: str | None, rom_map: RomMap) -> str | None:
+def map_applies(calibration_id: str | None, rom_map: RomMap | None) -> str | None:
     """``None`` when the map describes this image, else the reason it does not."""
+    if rom_map is None:
+        return NO_MAP_REASON
     if calibration_id in rom_map.calibration_ids:
         return None
     if calibration_id is None:
@@ -381,7 +401,9 @@ def _map_slots_info(rom_map: RomMap) -> dict[str, Any] | None:
     }
 
 
-def identity(image: bytes, rom_map: RomMap, *, container_sha256: str | None) -> dict[str, Any]:
+def identity(
+    image: bytes, rom_map: RomMap | None, *, container_sha256: str | None
+) -> dict[str, Any]:
     return {
         "sha256": sha256_hex(image),
         "crc32": crc32_hex(image),
@@ -393,28 +415,29 @@ def identity(image: bytes, rom_map: RomMap, *, container_sha256: str | None) -> 
 
 def describe(
     image: bytes,
-    rom_map: RomMap,
+    rom_map: RomMap | None,
     registry: TuneRevisionRegistry | None,
     *,
     container_sha256: str | None = None,
 ) -> dict[str, Any]:
-    """The full W08.2 description of a plain image."""
-    if len(image) != rom_map.image_size:
+    """The full W08.2 description of a plain image. Without a map (or one that
+    does not describe it): identity and block statistics, and ``map_reason``."""
+    if rom_map is not None and len(image) != rom_map.image_size:
         raise ImageFormatError(
             f"image is {len(image):,} bytes; this vehicle's image is {rom_map.image_size:,}"
         )
     ident = identity(image, rom_map, container_sha256=container_sha256)
     reason = map_applies(ident["calibration_id"], rom_map)
-    mapped = reason is None
+    mapped = rom_map if reason is None else None
     return {
         **ident,
-        "checksum": checksum_verdict(image, rom_map.checksums) if mapped else None,
+        "checksum": checksum_verdict(image, mapped.checksums) if mapped is not None else None,
         "revision_match": revision_match(ident["sha256"], registry),
         "blocks": block_stats(image),
-        "regions": resolved_regions(rom_map) if mapped else [],
-        "tables": table_definitions(rom_map) if mapped else [],
-        "map_slots": _map_slots_info(rom_map) if mapped else None,
-        "map": _map_info(rom_map, ident["calibration_id"]) if mapped else None,
+        "regions": resolved_regions(mapped) if mapped is not None else [],
+        "tables": table_definitions(mapped) if mapped is not None else [],
+        "map_slots": _map_slots_info(mapped) if mapped is not None else None,
+        "map": _map_info(mapped, ident["calibration_id"]) if mapped is not None else None,
         "map_reason": reason,
     }
 
@@ -536,25 +559,27 @@ def changed_ranges(
 def compare_images(
     a: bytes,
     b: bytes,
-    rom_map: RomMap,
+    rom_map: RomMap | None,
     *,
     gap: int = COMPARE_MERGE_GAP,
 ) -> dict[str, Any]:
     """Changed byte ranges of ``a`` -> ``b``, labelled by the map (W08.5).
 
     The map labels the ranges only when it describes both images (both
-    calibration IDs are in ``calibration_ids``); otherwise the ranges come
-    back unlabelled with the reason.
+    calibration IDs are in ``calibration_ids``); otherwise, or with no map,
+    the ranges come back unlabelled with the reason.
     """
     reasons = [map_applies(read_calibration_id(img, rom_map), rom_map) for img in (a, b)]
     reason = next((r for r in reasons if r is not None), None)
-    mapped = reason is None
-    regions = resolved_regions(rom_map) if mapped else []
-    placements = table_placements(rom_map) if mapped else []
-    checks = rom_map.checksums
+    mapped = rom_map if reason is None else None
+    regions = resolved_regions(mapped) if mapped is not None else []
+    placements = table_placements(mapped) if mapped is not None else []
     checksum_words = (
-        [("Checksum sum word", checks.sum_offset), ("Checksum XOR word", checks.xor_offset)]
-        if mapped
+        [
+            ("Checksum sum word", mapped.checksums.sum_offset),
+            ("Checksum XOR word", mapped.checksums.xor_offset),
+        ]
+        if mapped is not None
         else []
     )
     ranges = []
@@ -653,7 +678,7 @@ def compare_images(
         "changed_bytes": total,
         "gap": gap,
         "ranges": ranges,
-        "map_applied": mapped,
+        "map_applied": mapped is not None,
         "map_reason": reason,
     }
 
@@ -666,6 +691,7 @@ __all__ = [
     "ImageFormat",
     "ImageFormatError",
     "LoadedImage",
+    "NO_MAP_REASON",
     "block_stats",
     "changed_ranges",
     "checksum_values",
