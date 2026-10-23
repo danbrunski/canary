@@ -809,6 +809,14 @@
     },
     {
       "auth": "control",
+      "body": false,
+      "method": "DELETE",
+      "path": "/control/profiles/{slug}",
+      "query": [],
+      "status_code": null
+    },
+    {
+      "auth": "control",
       "body": true,
       "method": "PATCH",
       "path": "/control/profiles/{slug}",
@@ -820,6 +828,14 @@
       "body": true,
       "method": "POST",
       "path": "/control/profiles/{slug}/name",
+      "query": [],
+      "status_code": null
+    },
+    {
+      "auth": "control",
+      "body": false,
+      "method": "POST",
+      "path": "/control/profiles/{slug}/restore",
       "query": [],
       "status_code": null
     },
