@@ -1,0 +1,378 @@
+schema_version: 1
+# W08.1: the 2013 Xterra ECM's 1 MiB flash image, as data
+# (src/analysis/rom_map.py validates it).
+#
+# Source: one image, this truck's first CANary ECU read (sha256
+# 437ba37efa779287459b5e0a92fba4f7370dba64f8fe88018d46c5ad701f3eaf,
+# 2026-10-23), a stock calibration with no UpRev map slots. Everything here
+# is read from that image's bytes and from the code that reads them, located
+# by comparison with the 2008's map (data/nissan-xterra-2008/rom_map.yaml) and
+# docs/ecu-firmware-analysis.md. The program differs from the 2008's
+# (another reset vector, a calibration block ~0x3000 bytes further on, a
+# 16 x 16 Target AFR where the 2008 has 8 x 8), so no 2008 offset carries
+# over unchecked. Code addresses quoted in evidence are where this program
+# reads a table; the disassembly stays outside Git.
+#
+# Offsets are into the plain image. Confidence, as in the 2008 map:
+#   verified  checked against an independent answer;
+#   inferred  strong evidence, not yet confirmed by a deliberate single-change
+#             save or a drive;
+#   unknown   bytes whose meaning is not known.
+# No table here is verified: none has met a known edit or live data yet.
+image_size: 1048576
+calibration_ids: [19CF2B00000]
+calibration_id:
+  offset: 0x8204
+  length: 11
+  evidence: >-
+    ASCII 19CF2B00000 at 0x008204, where the checksum range starts: the 2008's
+    offset. A second copy follows at 0x00820F. That the ECM reports the same
+    id (service 0x21 local identifier 0x10) is not yet checked on this truck.
+checksums:
+  algorithm: be32_sum_xor
+  start: 0x8204
+  excluded: [0x20000, 0x970C, 0x9710]
+  sum_offset: 0x9710
+  xor_offset: 0x970C
+  markers:
+    0x20008: 0xFFFF7FFC
+    0x20010: 0xFFFF7FFC
+regions:
+  - name: Boot
+    start: 0x000000
+    end: 0x007FFF
+    kind: boot
+    confidence: inferred
+    added_by_uprev: false
+    evidence: >-
+      Starts with the boot vector table and holds the strings LOADER80
+      (0x004E3C) and SH705828N (0x004E5A); the span is the 2008's erase
+      sectors 0-7, not measured on this ECM.
+  - name: Boot vector table
+    start: 0x000000
+    end: 0x000007
+    kind: boot
+    confidence: verified
+    added_by_uprev: false
+    evidence: >-
+      Reset vector 0x00002470 and initial stack 0xFFFF7FFC, read from the bytes.
+      Entries 2-229 are addresses too (all but three 0x00002470); code starts
+      by 0x0003A0.
+  - name: Erased
+    start: 0x006480
+    end: 0x006EFD
+    kind: erased
+    confidence: verified
+    added_by_uprev: false
+    evidence: All 0xFF in the 2026-10-23 image.
+  - name: Erased
+    start: 0x007030
+    end: 0x007FFF
+    kind: erased
+    confidence: verified
+    added_by_uprev: false
+    evidence: All 0xFF in the 2026-10-23 image.
+  - name: Calibration
+    start: 0x008000
+    end: 0x01FFFF
+    kind: calibration
+    confidence: inferred
+    added_by_uprev: false
+    evidence: >-
+      The 2008's erase sector 8. It holds the calibration ID, the checksum
+      words, the tables below and their axes. The checksum covers more than
+      this: it runs from 0x008204 to the end of the image.
+  - name: Erased
+    start: 0x008000
+    end: 0x00807F
+    kind: erased
+    confidence: verified
+    added_by_uprev: false
+    evidence: All 0xFF in the 2026-10-23 image.
+  - name: Calibration ID
+    start: 0x008204
+    end: 0x00820E
+    kind: calibration
+    confidence: inferred
+    added_by_uprev: false
+    evidence: ASCII 19CF2B00000; the checksum range starts here. Not yet compared with the ECM-reported id.
+  - name: Calibration ID, second copy
+    start: 0x00820F
+    end: 0x008219
+    kind: calibration
+    confidence: unknown
+    added_by_uprev: false
+    evidence: The same 11 ASCII bytes again, read from the image. Why there are two is not known.
+  - name: Checksum XOR word
+    start: 0x00970C
+    end: 0x00970F
+    kind: calibration
+    confidence: verified
+    added_by_uprev: false
+    evidence: >-
+      The BE32 XOR over 0x008204 onward (excluding 0x020000 and both words)
+      equals it. With the 2008's algorithm and start, 0x00970C/0x009710 is the
+      only pair of words in the image that satisfies both the sum and the XOR.
+  - name: Checksum sum word
+    start: 0x009710
+    end: 0x009713
+    kind: calibration
+    confidence: verified
+    added_by_uprev: false
+    evidence: The BE32 sum over the same words equals it (see the XOR word).
+  - name: Erased
+    start: 0x019C08
+    end: 0x01FFFF
+    kind: erased
+    confidence: verified
+    added_by_uprev: false
+    evidence: All 0xFF in the 2026-10-23 image.
+  - name: Application
+    start: 0x020000
+    end: 0x0FFFFF
+    kind: application
+    confidence: inferred
+    added_by_uprev: false
+    evidence: >-
+      Starts with the application header and vector table; code and data run
+      to 0x0F8FFB. Nothing in the image points past 0x0FFFFF: all 256
+      application vectors and all 4,159 mov.l/jsr call targets land inside the
+      image or in RAM, and the boot code names an SH7058 (1 MiB flash).
+  - name: Application header word
+    start: 0x020000
+    end: 0x020003
+    kind: application
+    confidence: verified
+    added_by_uprev: false
+    evidence: 0x67DAFFFF; the checksum skips this word.
+  - name: Application vector table
+    start: 0x020004
+    end: 0x020403
+    kind: application
+    confidence: verified
+    added_by_uprev: false
+    evidence: >-
+      Reset vector 0x00021A08 and stack 0xFFFF7FFC, read from the bytes, at the
+      2008's address. All 256 entries are addresses in the image or in RAM.
+  - name: Erased
+    start: 0x0F8FFC
+    end: 0x0FFF7F
+    kind: erased
+    confidence: verified
+    added_by_uprev: false
+    evidence: All 0xFF in the 2026-10-23 image.
+  - name: End values
+    start: 0x0FFF80
+    end: 0x0FFF87
+    kind: unknown
+    confidence: unknown
+    added_by_uprev: false
+    evidence: >-
+      0x01 at 0x0FFF80 and 0x4E4855F9 at 0x0FFF84, read from the bytes: the
+      same eight bytes as at the 2008's 0x0FFF80. Meaning unknown.
+  - name: Erased
+    start: 0x0FFF88
+    end: 0x0FFFFF
+    kind: erased
+    confidence: verified
+    added_by_uprev: false
+    evidence: All 0xFF in the 2026-10-23 image.
+tables:
+  # -- Target AFR. The 2008 reads an 8 x 8 table; this program reads a 16 x 16
+  # one, at a resolution that contains the 2008's: its load axis ends with the
+  # 2008's eight BFS breakpoints (34 44 5D 64 6C 6E 7F 80) and its rpm axis
+  # holds all eight of the 2008's rpm breakpoints.
+  - id: fuel_targets
+    kind: fuel_targets
+    name: Fuel Targets
+    offset: 0xAEA4
+    rows: 16
+    cols: 16
+    dtype: u8
+    decode: &afr_decode
+      kind: reciprocal
+      quantity: afr
+      unit: AFR
+      numerator: 1881.6
+      confidence: inferred
+      evidence: >-
+        The 2008's verified Target AFR decode, AFR = 14.7 x 128 / raw. This
+        program treats the cell the same way: after the lookup at 0x0557C0 it
+        scales the excess over 128 (stoichiometric) under the High Det flag,
+        as the 2008's 0x055E26 does. Cells run 128-171 (14.7-11.0 AFR), rich
+        at high rpm and load.
+    axes: {rows: fuel_targets_rpm_axis, cols: fuel_targets_bfs_axis}
+    confidence: inferred
+    evidence: >-
+      Read at 0x0557C0 through the wrapper 0x022DB4 with r5 = 0xFAA5 (rpm,
+      against the engine-speed word) and r6 = 0xF894 (load, against the X byte
+      0xFFFF103C): 16 x 16 bytes, rows rpm, row-major, the 2008's Target AFR
+      wrapper shape. The code takes this table while bit 6 of 0xFFFF24F4 is
+      clear and 0xFFFF24F4 is also the byte that selects timing trim A, so
+      this is the normal table.
+  - id: fuel_targets_high_det
+    kind: fuel_targets
+    name: Fuel Targets (High Det)
+    offset: 0xAFA4
+    rows: 16
+    cols: 16
+    dtype: u8
+    decode: *afr_decode
+    axes: {rows: fuel_targets_rpm_axis, cols: fuel_targets_bfs_axis}
+    confidence: inferred
+    evidence: >-
+      The same call site (0x0557BA) loads this table instead while bit 6 of
+      0xFFFF24F4 is set, the flag that also selects timing trim B. Identical
+      to Fuel Targets cell for cell in this calibration.
+  - id: fuel_targets_rpm_axis
+    name: Fuel Targets rpm axis
+    offset: 0xFAA5
+    rows: 16
+    cols: 1
+    dtype: u8
+    decode: &rpm_decode
+      kind: linear
+      quantity: rpm
+      unit: rpm
+      scale: 50
+      confidence: inferred
+      evidence: >-
+        Searched by 0x023588, which shifts each axis byte left 2 and compares
+        it with the engine-speed word, as the 2008's 0x027194 does with its
+        12.5 rpm/count word: raw x 50 is rpm.
+    confidence: inferred
+    evidence: >-
+      The literal passed in r5 at 0x0557B4. Raw 08 10 18 20 28 38 48 50 58 5F
+      62 68 70 78 7C 80, 400-6,400 rpm, a superset of the 2008's Target AFR
+      breakpoints.
+  - id: fuel_targets_bfs_axis
+    name: Fuel Targets BFS axis
+    offset: 0xF894
+    rows: 1
+    cols: 16
+    dtype: u8
+    confidence: inferred
+    evidence: >-
+      The literal passed in r6 at 0x0557B2, compared byte for byte with the X
+      byte 0xFFFF103C by 0x023508. Raw 29 2A 2C 2D 2E 2F 31 32 34 44 5D 64 6C
+      6E 7F 80: the last eight are the 2008's BFS axis exactly. Shown raw, as
+      the 2008's is.
+  # -- Ignition timing trims. Same shape, axes and flag bit as the 2008's.
+  - id: timing_trim_a
+    kind: timing_trim_a
+    name: Ignition timing trim A
+    offset: 0x9A54
+    rows: 16
+    cols: 16
+    dtype: u8
+    decode: &trim_decode
+      kind: linear
+      quantity: timing trim
+      unit: count
+      scale: 1
+      mask: 0x7F
+      confidence: inferred
+      evidence: >-
+        The readers mask the lookup with 0x7F (0x047562, 0x04757E), and bit 7
+        is set on 143 of 256 cells in one block while the masked cells form
+        one smooth 43-68 surface: the 2008's trims to the cell count. Counts,
+        not degrees, as on the 2008; more counts is more advance.
+    axes: {rows: timing_trim_rpm_axis, cols: timing_trim_load_axis}
+    confidence: inferred
+    evidence: >-
+      0x04D094 loads trim B (0x9B54) and switches to this table only while bit
+      6 of 0xFFFF24F4 is clear (0x04D09A): the 2008's selection of trim A, the
+      normal table. Read with 0x9B54 at 0x04755C through the wrapper 0x022DF4
+      (r5 = 0xFCD2 rpm, r6 = 0xFCC2 load), 16 x 16, rows rpm.
+  - id: timing_trim_b
+    kind: timing_trim_b
+    name: Ignition timing trim B (High Det)
+    offset: 0x9B54
+    rows: 16
+    cols: 16
+    dtype: u8
+    decode: *trim_decode
+    axes: {rows: timing_trim_rpm_axis, cols: timing_trim_load_axis}
+    confidence: inferred
+    evidence: >-
+      The default at 0x04D094, kept while bit 6 of 0xFFFF24F4 is set: the
+      2008's High Det trim. Identical to trim A cell for cell in this
+      calibration.
+  - id: timing_trim_rpm_axis
+    name: Timing trim rpm axis
+    offset: 0xFCD2
+    rows: 16
+    cols: 1
+    dtype: u8
+    decode: *rpm_decode
+    confidence: inferred
+    evidence: >-
+      The literal passed in r5 at 0x04755A. Raw 08 0C 10 18 ... 78, 400-6,000
+      rpm: the 2008's trim rpm axis byte for byte.
+  - id: timing_trim_load_axis
+    name: Timing trim load axis (BFS X counts)
+    offset: 0xFCC2
+    rows: 1
+    cols: 16
+    dtype: u8
+    confidence: inferred
+    evidence: >-
+      The literal passed in r6 at 0x047554. Raw 08 10 18 ... 80: the 2008's
+      trim load axis byte for byte. Shown raw.
+  # -- Fuel Compensation, read by two routines as on the 2008.
+  - id: fuel_compensation
+    kind: fuel_compensation
+    name: Fuel Compensation
+    offset: 0xA3D4
+    rows: 16
+    cols: 16
+    dtype: u8
+    decode:
+      kind: linear
+      quantity: fuel compensation
+      unit: '%'
+      scale: 0.78125
+      confidence: inferred
+      evidence: >-
+        The 2008's verified decode, 100 x raw / 128; 128 is 100 %. Cells run
+        125-139 (97.7-108.6 %).
+    axes: {rows: fuel_comp_engine_speed_axis, cols: fuel_comp_flow_axis}
+    confidence: inferred
+    evidence: >-
+      Read at 0x02A222 and 0x03910C through 0x022DB4, the Target AFR wrapper,
+      with r5 = 0xFAC5 (rpm, against the engine-speed word) and r6 = 0xFB09
+      (load, against the stacked byte 0xFFFF116A): 16 x 16, rows rpm. The 2008
+      reads its Fuel Comp the same way from two routines, with the same
+      16..255 load axis.
+  - id: fuel_comp_engine_speed_axis
+    name: Fuel Comp rpm axis
+    offset: 0xFAC5
+    rows: 16
+    cols: 1
+    dtype: u8
+    decode: *rpm_decode
+    confidence: inferred
+    evidence: The literal passed in r5 at 0x02A21C. Raw 08 10 18 ... 80, 400-6,400 rpm.
+  - id: fuel_comp_flow_axis
+    name: Fuel Comp load axis (throttle-model fill)
+    offset: 0xFB09
+    rows: 1
+    cols: 16
+    dtype: u8
+    confidence: inferred
+    evidence: >-
+      The literal passed in r6 at 0x02A218. Raw 10 20 30 ... F0 FF, the full
+      range of a load byte, as the 2008's stock Fuel Comp load axis runs.
+      Shown raw: the 2008's fill scale is not checked on this program.
+  - id: load_point_scaler
+    kind: load_point_scaler
+    name: Load Point Scaler
+    offset: 0x94F6
+    rows: 1
+    cols: 1
+    dtype: be16
+    confidence: inferred
+    evidence: >-
+      44,019, the 2008's value. 0x038C5A divides a load word by it to make the
+      X byte, min(255, word x 128 / scaler) (the 2008's formula at 0x03C4D0).
+      Four more routines load it. Shown raw.
