@@ -50,12 +50,12 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal, Protocol
 
-import yaml
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from src.analysis.fault_model import FaultModel, Feature
 from src.collection.capture_profiles import CaptureProfile, CaptureProfileCatalog
 from src.evidence.text import no_numerals
+from src.yaml_load import load_yaml
 
 __all__ = [
     "MEASUREMENT_PLAN_FILE",
@@ -192,7 +192,7 @@ def load_measurement_plan(
     (the pressure residuals' airflow limits; B06's WOT load and rpm floors).
     """
     raw = Path(path).read_bytes()
-    data = yaml.safe_load(raw)
+    data = load_yaml(raw)
     if not isinstance(data, dict) or data.get("schema") != MEASUREMENT_PLAN_SCHEMA:
         raise MeasurementPlanError(f"{path} is not a {MEASUREMENT_PLAN_SCHEMA} file")
     plan = MeasurementPlan.model_validate(data)

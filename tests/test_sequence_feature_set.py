@@ -6,7 +6,6 @@ import json
 from pathlib import Path
 
 import pytest
-import yaml
 
 from src.models.sequence_feature_set import (
     ALL_CHANNELS,
@@ -16,6 +15,7 @@ from src.models.sequence_feature_set import (
     load_vehicle_sequence_roles,
     resolve_feature_set,
 )
+from src.yaml_load import load_yaml
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 XTERRA_ROLES = REPO_ROOT / "data" / "nissan-xterra-2008" / "sequence_roles.yaml"
@@ -95,7 +95,7 @@ def test_every_dropped_mirror_is_confirmed_by_the_ground_truth_suite() -> None:
     ``unit_agreement`` confirms it 1:1 against that PID."""
     confirmed = {
         (entry["signal"].replace("can:", "decoded:", 1), entry["reference"])
-        for entry in yaml.safe_load(GROUND_TRUTH.read_text())["unit_agreement"]
+        for entry in load_yaml(GROUND_TRUTH.read_text())["unit_agreement"]
     }
     roles = load_vehicle_sequence_roles(XTERRA_ROLES)
     assert roles.mirrors, "the Xterra file declares mirrors"

@@ -10,9 +10,9 @@ from pathlib import Path
 import pyarrow as pa
 import pyarrow.parquet as pq
 import pytest
-import yaml
 
 from src.storage.parquet_writer import TELEMETRY_SCHEMA
+from src.yaml_load import load_yaml
 from tools import migrate_channel_names as tool
 
 REPO = Path(__file__).resolve().parents[1]
@@ -392,7 +392,7 @@ def test_a_saved_profile_memory_list_is_rewritten_and_then_accepted(tmp_path: Pa
         "  - ECM_TARGET_EQUIV_RATIO\n"
         "deleted: []\n"
     )
-    stale = CaptureProfileOverrides.model_validate(yaml.safe_load(overrides.read_text()))
+    stale = CaptureProfileOverrides.model_validate(load_yaml(overrides.read_text()))
     with pytest.raises(ValueError, match=OLD_MEM):
         profile_memory_union(stale.profiles)
 
@@ -402,7 +402,7 @@ def test_a_saved_profile_memory_list_is_rewritten_and_then_accepted(tmp_path: Pa
     text = overrides.read_text()
     assert f"  - {NEW_MEM}\n" in text
     assert f"  # 2842 ({NEW_MEM}); not {OLD_MEM}X, X{OLD_MEM} or {OLD_MEM}_SENTINELS\n" in text
-    migrated = CaptureProfileOverrides.model_validate(yaml.safe_load(text))
+    migrated = CaptureProfileOverrides.model_validate(load_yaml(text))
     assert migrated.profiles[0].memory == (
         "ECM_PEDAL_ENRICH_FLAGS",
         NEW_MEM,
@@ -576,7 +576,7 @@ def test_a_saved_profile_naming_the_audit_dids_is_rewritten_and_then_parses(
     )
     assert rc == tool.EXIT_OK
 
-    doc = yaml.safe_load(overrides.read_text())
+    doc = load_yaml(overrides.read_text())
     profile = doc["profiles"][0]
     assert profile["mode22"] == [
         "ECM_MONITOR_RUN_COUNTER_123F",
@@ -620,6 +620,6 @@ def test_the_enrichment_phi_map_renames_both_earlier_names_whole(tmp_path: Path)
     )
     args = ["--map", str(ENRICHMENT_MAP), "--file", str(profiles), "--apply", "--daemon-stopped"]
     assert tool.main(args) == tool.EXIT_OK
-    loaded = yaml.safe_load(profiles.read_text())["profiles"][0]
+    loaded = load_yaml(profiles.read_text())["profiles"][0]
     assert loaded["mode22"] == ["ECM_ENRICHMENT_PHI_REQUEST", "ECM_ENRICHMENT_PHI_REQUEST"]
     assert loaded["mode22_rate_weights"] == {"ECM_ENRICHMENT_PHI_REQUEST": 0.5}

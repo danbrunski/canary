@@ -18,17 +18,18 @@ from src.analysis.rom_map import (
 )
 from src.analysis.rom_targets import Definition
 from src.signals.afr import load_afr_calibration
+from src.yaml_load import load_yaml
 from tests.rom_fixtures import PROFILE
 
 
 def _shipped() -> dict[str, Any]:
-    data = yaml.safe_load((PROFILE / "rom_map.yaml").read_text())
+    data = load_yaml((PROFILE / "rom_map.yaml").read_text())
     assert isinstance(data, dict)
     return data
 
 
 def _targets() -> Definition:
-    return Definition.model_validate(yaml.safe_load((PROFILE / "rom_targets.yaml").read_text()))
+    return Definition.model_validate(load_yaml((PROFILE / "rom_targets.yaml").read_text()))
 
 
 def test_shipped_map_loads_and_matches_every_verified_rom_targets_fact() -> None:
@@ -226,7 +227,7 @@ def test_drift_from_rom_targets_is_refused_by_name(tmp_path: Path) -> None:
     # And the loader runs the check: a drifted copy of the profile refuses.
     for name in ("rom_map.yaml", "rom_targets.yaml"):
         (tmp_path / name).write_text((PROFILE / name).read_text())
-    drifted = yaml.safe_load((tmp_path / "rom_targets.yaml").read_text())
+    drifted = load_yaml((tmp_path / "rom_targets.yaml").read_text())
     drifted["checksums"]["sum_offset"] = 0x95A4
     drifted["checksums"]["excluded"] = [0x20000, 0x9598, 0x95A4]
     (tmp_path / "rom_targets.yaml").write_text(yaml.safe_dump(drifted))

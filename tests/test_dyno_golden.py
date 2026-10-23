@@ -30,7 +30,6 @@ from typing import Any
 
 import numpy as np
 import pytest
-import yaml
 from pydantic import BaseModel
 
 from src.analysis import dyno
@@ -56,6 +55,7 @@ from src.analysis.dyno import (
     record_dyno_floor,
     save_dyno_profile,
 )
+from src.yaml_load import load_yaml
 from tests import test_dyno as td
 from tests import test_dyno_power as tp
 
@@ -741,7 +741,7 @@ def test_the_saved_profile_is_byte_for_byte_the_pinned_text(
     path = tmp_path / DYNO_FILENAME
     save_dyno_profile(path, full_profile())
     assert path.read_text() == pinned["stored"]["full_profile_yaml"]
-    assert yaml.safe_load(path.read_text())["schema_version"] == 1
+    assert load_yaml(path.read_text())["schema_version"] == 1
 
 
 if __name__ == "__main__":

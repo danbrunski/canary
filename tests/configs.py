@@ -24,6 +24,7 @@ import yaml
 
 from src.config import CanaryConfig, VehicleParameters, _daemon_path_fields, rebase_state_paths
 from src.vehicle.profiles import VehicleProfile, scope_config
+from src.yaml_load import load_yaml
 
 REPO = Path(__file__).resolve().parents[1]
 EXAMPLE_YAML = REPO / "canary.example.yaml"
@@ -104,7 +105,7 @@ def _base_data(base: Base) -> dict[str, Any]:
     if base == "daemon":
         return _merge(copy.deepcopy(MINIMAL), copy.deepcopy(DAEMON_DELTA))
     if base == "example":
-        data = yaml.safe_load(EXAMPLE_YAML.read_text())
+        data = load_yaml(EXAMPLE_YAML.read_text())
         assert isinstance(data, dict)
         return data
     raise ValueError(f"unknown base config {base!r}; use 'minimal', 'daemon' or 'example'")
@@ -265,7 +266,7 @@ def isolate(config: CanaryConfig, tmp_path: Path) -> CanaryConfig:
 
 def isolated_from_yaml(tmp_path: Path, text: str) -> CanaryConfig:
     """Parse a test's own YAML, then :func:`isolate` it."""
-    return isolate(CanaryConfig.model_validate(yaml.safe_load(text)), tmp_path)
+    return isolate(CanaryConfig.model_validate(load_yaml(text)), tmp_path)
 
 
 def write_isolated_config(

@@ -37,6 +37,7 @@ from src.collection.reconnect import ReconnectPolicy
 from src.config import KlineConfig
 from src.decode.dids import load_did_map
 from src.telemetry import TelemetryRecord
+from src.yaml_load import load_yaml
 from tests.builders import abs_scan_tool_frames, kline_wire
 
 DIDS = Path("data/dids.yaml")
@@ -657,7 +658,7 @@ async def test_a_reply_the_profile_does_not_record_refuses_the_plan(
 def _profile_with_keepalive(tmp_path: Path, seconds: float) -> Path:
     import yaml
 
-    doc = yaml.safe_load(PROFILE.read_text())
+    doc = load_yaml(PROFILE.read_text())
     doc["modules"][0x28]["reader"]["tester_present_seconds"] = seconds
     out = tmp_path / "kline.yaml"
     out.write_text(yaml.safe_dump(doc))

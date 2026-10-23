@@ -27,7 +27,6 @@ from typing import Any
 
 import pandas as pd
 import pytest
-import yaml
 
 from src.analysis.ecu_application import (
     ApplicationModel,
@@ -35,10 +34,11 @@ from src.analysis.ecu_application import (
     coverage_report,
     load_application_model,
 )
+from src.yaml_load import load_yaml
 
 REPO = Path(__file__).resolve().parents[1]
 PROFILE = REPO / "data" / "nissan-xterra-2008"
-EXPECT = yaml.safe_load((REPO / "tests/fixtures/ground_truth/target_phi.yaml").read_text())
+EXPECT = load_yaml((REPO / "tests/fixtures/ground_truth/target_phi.yaml").read_text())
 
 #: The 2026-10-04 fuel_target read started at 0xFFFF26AE and held 18 bytes;
 #: the command word is its last two (pinned against the decoded channel below).
@@ -52,7 +52,7 @@ NEUTRAL_TRIM = 0x6400
 
 
 def _raw() -> dict[str, Any]:
-    loaded: dict[str, Any] = yaml.safe_load((PROFILE / "ecu_application_model.yaml").read_text())
+    loaded: dict[str, Any] = load_yaml((PROFILE / "ecu_application_model.yaml").read_text())
     return loaded
 
 

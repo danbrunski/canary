@@ -22,8 +22,9 @@ from typing import Literal
 
 import numpy as np
 import pandas as pd
-import yaml
 from pydantic import BaseModel, ConfigDict, Field, model_validator
+
+from src.yaml_load import load_yaml
 
 
 class _Strict(BaseModel):
@@ -238,7 +239,7 @@ def load_tune_revisions(path: Path) -> TuneRevisionRegistry | None:
     """Load the registry, or ``None`` when the vehicle has none recorded."""
     if not path.exists():
         return None
-    return TuneRevisionRegistry.model_validate(yaml.safe_load(path.read_text()))
+    return TuneRevisionRegistry.model_validate(load_yaml(path.read_text()))
 
 
 #: What makes two entries with one ``revision`` name the same flash. ``notes``

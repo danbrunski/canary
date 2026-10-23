@@ -69,7 +69,6 @@ from typing import Any, Literal
 
 import numpy as np
 import pandas as pd
-import yaml
 from numpy.typing import ArrayLike, NDArray
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -95,6 +94,7 @@ from src.analysis.sim_contract import (
 from src.signals.derived import DERIVED_CHANNEL_INPUTS, DERIVED_CHANNEL_OPTIONAL_INPUTS
 from src.signals.pairing import PairingPolicy, match_ordered, to_seconds
 from src.signals.time_lookup import nearest_sample_indices, values_or_nan
+from src.yaml_load import load_yaml
 
 MANIFOLD_FILE = "manifold_plant.yaml"
 MANIFOLD_SUBSYSTEM = "manifold_breathing"
@@ -175,7 +175,7 @@ class ManifoldPlantProfile(_Strict):
 def load_manifold_plant(profile_dir: Path) -> tuple[ManifoldPlantProfile, str]:
     text = (profile_dir / MANIFOLD_FILE).read_bytes()
     return (
-        ManifoldPlantProfile.model_validate(yaml.safe_load(text)),
+        ManifoldPlantProfile.model_validate(load_yaml(text)),
         hashlib.sha256(text).hexdigest(),
     )
 

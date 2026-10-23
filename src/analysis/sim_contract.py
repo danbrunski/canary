@@ -59,10 +59,10 @@ import re
 from pathlib import Path
 from typing import Any, Literal
 
-import yaml
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from src.analysis.ecu_application import ApplicationModel
+from src.yaml_load import load_yaml
 
 CONTRACT_FILE = "engine_sim_contract.yaml"
 
@@ -1189,7 +1189,7 @@ def _check_mode_kind(mode: Mode, by_id: dict[str, Quantity], computed: set[str])
 def load_contract(profile_dir: Path) -> tuple[SimContract, str]:
     """The profile's contract and the sha256 of its file."""
     text = (profile_dir / CONTRACT_FILE).read_bytes()
-    return SimContract.model_validate(yaml.safe_load(text)), hashlib.sha256(text).hexdigest()
+    return SimContract.model_validate(load_yaml(text)), hashlib.sha256(text).hexdigest()
 
 
 def check_against_application_model(contract: SimContract, model: ApplicationModel) -> list[str]:

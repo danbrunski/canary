@@ -92,6 +92,7 @@ from src.collection.isotp import DEFAULT_REQUEST_ID, nrc_name
 from src.control.rom_library import RomLibrary
 from src.operating import ENGINE_RUNNING_MIN_RPM
 from src.vehicle.platforms import VehicleDataFile
+from src.yaml_load import load_yaml
 
 log = logging.getLogger(__name__)
 
@@ -222,7 +223,7 @@ def load_backup_recipe(path: Path, rom_map: RomMap | None) -> BackupRecipe:
     a map it must also cover the map's image exactly; without one, the range is
     the image.
     """
-    recipe = BackupRecipe.model_validate(yaml.safe_load(path.read_text()))
+    recipe = BackupRecipe.model_validate(load_yaml(path.read_text()))
     span = recipe.read.size
     if rom_map is not None and (recipe.read.start != 0 or span != rom_map.image_size):
         raise ValueError(

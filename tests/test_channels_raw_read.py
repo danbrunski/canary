@@ -27,6 +27,7 @@ from src.paths import DIDS_YAML
 from src.preprocessing.loader import STORED_COLUMNS, read_session
 from src.storage.parquet_writer import write_records_to_parquet
 from src.telemetry import TelemetryRecord
+from src.yaml_load import load_yaml
 
 FIXTURES = Path(__file__).parent / "fixtures"
 DRIVE = FIXTURES / "ground_truth" / "drive-slice"
@@ -35,7 +36,6 @@ CAPTURE = FIXTURES / "lambda_delivery" / "_capture-tuning-2026-09-21T223734"
 
 def _specs(session: Path) -> list[str]:
     """One spec per stored channel, in every form a reader takes."""
-    import yaml
 
     frame = read_session(session)
     pairs = {(str(s), str(c)) for s, c in frame[["source", "channel"]].itertuples(index=False)}
@@ -47,7 +47,7 @@ def _specs(session: Path) -> list[str]:
             specs.add(f"obd:{channel}")
         elif source in ("gps", "decoded"):
             specs.add(f"{source}:{channel}")
-    for entry in yaml.safe_load(DIDS_YAML.read_text()).get("dids") or []:
+    for entry in load_yaml(DIDS_YAML.read_text()).get("dids") or []:
         if ("obd", f"DID_{int(entry['did']):04X}") in pairs:
             specs.add(f"did:{entry['name']}")
     decoded = sorted(s.split(":", 1)[1] for s in specs if s.startswith("decoded:"))
@@ -255,9 +255,8 @@ def test_a_shared_read_still_says_which_kind_of_empty(tmp_path: Path) -> None:
     """A DID whose only rows are a pre-K01.1 K-line module's is refused by name,
     not returned empty, whether the rows come from the disk or the shared read;
     a DID never read is an empty answer, the same both ways."""
-    import yaml
 
-    entries = yaml.safe_load(DIDS_YAML.read_text())["dids"]
+    entries = load_yaml(DIDS_YAML.read_text())["dids"]
     foreign, absent = entries[0], entries[1]
     t0 = pd.Timestamp("2026-08-05T12:00:00Z").to_pydatetime()
     session = tmp_path / "_capture-2026-08-05T120000"

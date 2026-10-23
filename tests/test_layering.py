@@ -56,6 +56,7 @@ LAYERS: dict[str, int] = {
     "telemetry": 0,
     "timefmt": 0,
     "trainability": 0,
+    "yaml_load": 0,
     # 1 persistence
     "storage": 1,
     "vehicle": 1,

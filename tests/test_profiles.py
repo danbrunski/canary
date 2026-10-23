@@ -25,6 +25,7 @@ from src.vehicle.profiles import (
     update_profile_name,
 )
 from src.vehicle.vehicle_ledger import VehicleLedgerStore
+from src.yaml_load import load_yaml
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 EXAMPLE_YAML = REPO_ROOT / "canary.example.yaml"
@@ -97,7 +98,7 @@ def test_runtime_writes_never_touch_the_tracked_registry(tmp_path: Path):
     tracked_before = registry.registry_path.read_text()
     update_profile_name(registry, "xterra", "The Truck")
     assert registry.registry_path.read_text() == tracked_before
-    overlay = yaml.safe_load(registry.registry_overlay_path.read_text())
+    overlay = load_yaml(registry.registry_overlay_path.read_text())
     assert overlay["profiles"] == [{"slug": "xterra", "name": "The Truck"}]
 
 

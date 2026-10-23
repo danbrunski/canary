@@ -25,7 +25,6 @@ from typing import Any
 
 import numpy as np
 import pytest
-import yaml
 from pydantic import ValidationError
 
 from src.analysis.engine_dynamics import check_internal_models, subsystem_standing
@@ -44,6 +43,7 @@ from src.analysis.torque_plant import (
     retard_from_mbt,
     spark_efficiency,
 )
+from src.yaml_load import load_yaml
 
 REPO = Path(__file__).resolve().parents[1]
 PROFILE = REPO / "data" / "nissan-xterra-2008"
@@ -67,7 +67,7 @@ CASE: dict[str, float] = {
 
 @functools.cache
 def _parsed_plant() -> dict[str, Any]:
-    parsed: dict[str, Any] = yaml.safe_load((PROFILE / PLANT_FILE).read_text())
+    parsed: dict[str, Any] = load_yaml((PROFILE / PLANT_FILE).read_text())
     return parsed
 
 
@@ -276,7 +276,7 @@ def test_spark_is_an_actuator_commanded_by_the_ecus_timing_byte(world: Any) -> N
         "timing_final_byte",
     )
     # The catalog's decode of the same byte (DID 0x110A): degrees = 110 - raw.
-    dids = yaml.safe_load((REPO / "data" / "dids.yaml").read_text())["dids"]
+    dids = load_yaml((REPO / "data" / "dids.yaml").read_text())["dids"]
     (timing,) = [d for d in dids if d["did"] == 0x110A]
     assert (timing["scale"], timing["offset"]) == (-1.0, 110.0)
     assert spark.actuator.maximum == 110.0 and spark.actuator.minimum == 110.0 - 255
@@ -310,7 +310,7 @@ def test_the_torque_stage_is_built_bounded_and_not_validated(world: Any) -> None
 
 
 def test_a_pass_against_the_fuel_energy_estimate_does_not_validate_torque() -> None:
-    raw = yaml.safe_load((PROFILE / "engine_sim_contract.yaml").read_text())
+    raw = load_yaml((PROFILE / "engine_sim_contract.yaml").read_text())
     sub = next(s for s in raw["subsystems"] if s["id"] == "torque_production")
     sub["validations"] = [
         {
@@ -367,7 +367,7 @@ def test_a_pull_identifies_the_energy_product_never_its_parts(world: Any) -> Non
     assert product.id in baseline.identifies
     assert not set(product.components) & set(baseline.identifies)
     # Listing a part as identified by the pull is refused.
-    raw = yaml.safe_load((PROFILE / "engine_sim_contract.yaml").read_text())
+    raw = load_yaml((PROFILE / "engine_sim_contract.yaml").read_text())
     sub = next(s for s in raw["subsystems"] if s["id"] == "torque_production")
     m = next(m for m in sub["required_measurements"] if m["id"] == "h07_na_baseline")
     m["identifies"].append("indicated_efficiency_peak")
@@ -378,7 +378,7 @@ def test_a_pull_identifies_the_energy_product_never_its_parts(world: Any) -> Non
 def test_a_measurement_two_stages_name_is_one_fact() -> None:
     """vehicle_mass and h07_road_load are named by torque_production and
     rotational_dynamics: their status and task cannot drift apart."""
-    raw = yaml.safe_load((PROFILE / "engine_sim_contract.yaml").read_text())
+    raw = load_yaml((PROFILE / "engine_sim_contract.yaml").read_text())
     SimContract.model_validate(raw)
     sub = next(s for s in raw["subsystems"] if s["id"] == "rotational_dynamics")
     m = next(m for m in sub["required_measurements"] if m["id"] == "vehicle_mass")

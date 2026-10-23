@@ -18,7 +18,6 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-import yaml
 from pydantic import ValidationError
 
 from src.analysis.ecu_application import load_application_model
@@ -36,6 +35,7 @@ from src.analysis.sim_contract import (
     load_contract,
     score_group,
 )
+from src.yaml_load import load_yaml
 
 PROFILE = Path(__file__).resolve().parents[1] / "data" / "nissan-xterra-2008"
 SHA_A = "a" * 64
@@ -43,7 +43,7 @@ SHA_B = "b" * 64
 
 
 def _raw() -> dict[str, Any]:
-    raw: dict[str, Any] = yaml.safe_load((PROFILE / CONTRACT_FILE).read_text())
+    raw: dict[str, Any] = load_yaml((PROFILE / CONTRACT_FILE).read_text())
     return raw
 
 

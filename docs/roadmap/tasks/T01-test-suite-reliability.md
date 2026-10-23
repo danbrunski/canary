@@ -928,3 +928,43 @@ measurement in hand.
     `_rank_feature_contributors`, which catches it.
   - **Next:** read what the test waits for after a skipped tick; reproduce beside a CPU burner
     (T01.1's method) and keep the failure text and load average.
+- [x] **T01.31 Every xdist worker ran torch's and OpenBLAS's thread pools at
+  full width, so the parallel run oversubscribed the cores eight times over.**
+  - **Seen** 2026-10-23, measuring the push gate (8 cores, quiet host):
+    `tests/test_evaluation_detectors.py::test_batched_sequence_scoring_matches_the_served_engine`
+    took 33.7 s in the gate and 2.0 s alone;
+    `tests/test_synthetic_fault_eval.py::test_lstm_training_completes_and_populates_per_mode_thresholds`
+    24.3 s against 0.17 s. Neither was in the slow tier, because each is
+    fast alone.
+  - **Cause:** torch's OpenMP pool and OpenBLAS each default to every core,
+    and OpenMP's idle threads spin rather than sleep. Eight workers ran up to
+    64 compute threads, and the spinning slowed every test sharing those
+    cores. It is a plausible common cause for the torch-adjacent and
+    timing-window rows above that fail only under load; none has been
+    re-checked against it.
+  - **Fixed:** `tests/conftest.py` `_limit_native_threads` gives each worker
+    `cores // workers` threads (`OMP_NUM_THREADS`, `OPENBLAS_NUM_THREADS`,
+    `MKL_NUM_THREADS`) in `pytest_configure`, before anything loads numpy or
+    torch. A serial run keeps every core, and a variable already set wins.
+  - **Effect:** the gate's pytest ran 108 s before and 81 s after, both with
+    cold bytecode; the `ml_training` tier (four workers) ran 224 s before
+    and 38 s after.
+  - **Tests:** `tests/test_worker_threads.py` checks the budget arithmetic,
+    and checks that a worker's OpenBLAS pool really has the budgeted size.
+    That check fails if numpy loads before `pytest_configure` (shown with
+    `-p numpy`: `{8} == {4}`).
+- [x] **T01.32 `tests/test_target_afr_revision.py::test_an_edited_flash_history_is_reread`
+  failed once the suite got faster: the flash-history cache served a stale
+  registry.**
+  - **Seen** 2026-10-23, in the first parallel run with libyaml parsing
+    (`src/yaml_load.py`): `['ZS44A-20260920'] == ['ZS44A-k106']`.
+  - **Cause, production code:** `src.vehicle.profiles.active_flash_history`
+    keyed its cache on `st_mtime_ns` alone. The kernel stamps writes from its
+    coarse clock, so an in-place rewrite within one tick (~4 ms) kept the old
+    stamp. Once parsing got fast, the test's read-rewrite-read fit in one tick.
+  - **Fixed:** the key is the sha256 of each registry file's bytes (a few
+    kB). A loop of the test failed 182 of 300 before and 0 of 300 after.
+  - **Not swept:** other caches keyed on mtime alone, such as
+    `src.signals.afr`'s `_load_afr_calibration_cached`,
+    `src.decode.engineering` and `src.collection.capture_profiles`. None has
+    failed yet. Each one that does has the same fix.

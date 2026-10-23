@@ -32,7 +32,6 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-import yaml
 
 from src.collection import bus_budget, tuning_profile
 from src.collection.can_obd_collector import run_can_obd_loop
@@ -53,13 +52,14 @@ from src.decode.dids import (
     plan_memory_reads,
     select_memory_channels,
 )
+from src.yaml_load import load_yaml
 from tests.capture_round_fakes import FakeClock, ScriptedEcu, install_clock
 from tests.test_memory_window_burst import XTERRA_MODE06
 
 CATALOG_PATH = (
     Path(__file__).resolve().parents[1] / "data" / "nissan-xterra-2008" / "capture_profiles.yaml"
 )
-TRACKED = CaptureProfileCatalog.model_validate(yaml.safe_load(CATALOG_PATH.read_text()))
+TRACKED = CaptureProfileCatalog.model_validate(load_yaml(CATALOG_PATH.read_text()))
 DEFAULT = TRACKED.by_name("default")
 TUNING = TRACKED.by_name("tuning")
 assert DEFAULT is not None and TUNING is not None

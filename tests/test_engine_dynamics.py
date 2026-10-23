@@ -17,7 +17,6 @@ from typing import Any
 import numpy as np
 import pandas as pd
 import pytest
-import yaml
 from pydantic import ValidationError
 
 from src.analysis.engine_dynamics import (
@@ -54,6 +53,7 @@ from src.analysis.sim_contract import (
     SimContract,
     SimulationRefusalError,
 )
+from src.yaml_load import load_yaml
 
 PROFILE = Path(__file__).resolve().parents[1] / "data" / "nissan-xterra-2008"
 HW = "na_stock_injectors_2026_10"
@@ -88,7 +88,7 @@ def _passing_stub(contract: SimContract, *, passed: bool = True) -> ConvergenceR
 
 @functools.cache
 def _parsed_contract() -> dict[str, Any]:
-    parsed: dict[str, Any] = yaml.safe_load((PROFILE / CONTRACT_FILE).read_text())
+    parsed: dict[str, Any] = load_yaml((PROFILE / CONTRACT_FILE).read_text())
     return parsed
 
 

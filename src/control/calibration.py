@@ -38,6 +38,7 @@ from src.vehicle.tune_revisions import (
     TuneRevisionRegistry,
     calibration_matches,
 )
+from src.yaml_load import load_yaml
 
 
 def operational_memory_path(config: CanaryConfig) -> Path:
@@ -252,7 +253,7 @@ def seed_operational_memory(config: CanaryConfig, source: Path) -> Path:
     destination = operational_memory_path(config)
     _seed(active_memory_path(config, source), destination)
     # Validate the copy before callers are allowed to edit it.
-    DidMap.model_validate(yaml.safe_load(destination.read_text()))
+    DidMap.model_validate(load_yaml(destination.read_text()))
     return destination
 
 

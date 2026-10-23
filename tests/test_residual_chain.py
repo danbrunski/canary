@@ -42,7 +42,6 @@ from typing import Any
 import numpy as np
 import pandas as pd
 import pytest
-import yaml
 
 from src.analysis.behavior_residual_evidence import (
     BehaviorModelIdentity,
@@ -54,7 +53,6 @@ from src.analysis.change_evaluation import TOOL as CHANGE_TOOL
 from src.analysis.delivery_evidence import mint_delivery_error
 from src.analysis.delivery_investigation import NotEngineResponseError, detect_discrepancy
 from src.analysis.ecu_application import (
-    MODEL_FILE,
     ApplicationModel,
     load_application_model,
     program_sha256,
@@ -116,12 +114,9 @@ def _definition_cached() -> tuple[TwinDefinition, str]:
 
 @functools.cache
 def _application_model() -> tuple[ApplicationModel, str]:
-    """``load_application_model(PROFILE)`` loaded once, parsed with libyaml
-    (the pure-Python loader dominated a worker's first test). Same model:
-    ``test_the_cached_application_model_is_the_loaders``."""
-    text = (PROFILE / MODEL_FILE).read_bytes()
-    loaded = yaml.load(text, Loader=getattr(yaml, "CSafeLoader", yaml.SafeLoader))  # noqa: S506
-    return ApplicationModel.model_validate(loaded), hashlib.sha256(text).hexdigest()
+    """``load_application_model(PROFILE)`` loaded once (loading and validating
+    it dominated a worker's first test)."""
+    return load_application_model(PROFILE)
 
 
 @functools.cache

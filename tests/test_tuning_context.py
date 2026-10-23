@@ -32,6 +32,7 @@ from src.vehicle.profiles import (
     source_registry_path,
 )
 from src.vehicle.tune_revisions import TuneRevision, load_tune_revisions
+from src.yaml_load import load_yaml
 
 _TRACKED = load_tune_revisions(Path("data/nissan-xterra-2008/tune_revisions.yaml"))
 assert _TRACKED is not None
@@ -45,14 +46,14 @@ FLASH = TuneRevision(revision="R05-dashboard-flash", flashed_at=T0 - timedelta(d
 
 
 def _raw_config(tmp_path: Path, *, fuel_type: str = "gasoline") -> dict:
-    raw = yaml.safe_load(Path("canary.example.yaml").read_text())
+    raw = load_yaml(Path("canary.example.yaml").read_text())
     raw.setdefault("collection", {})["storage_path"] = str(tmp_path / "sessions")
     # The operational registry lives beside ``jobs_dir``; keep it in tmp.
     raw.setdefault("daemon", {})["jobs_dir"] = str(tmp_path / "control" / "jobs")
     raw.setdefault("vehicle", {}).setdefault("parameters", {})["fuel_type"] = fuel_type
     # The registry entry is the vehicle's facts and wins over the vehicle:
     # block (S03.8), so the fuel goes on a tmp copy of the tracked registry.
-    registry = yaml.safe_load(Path("profiles.yaml").read_text())
+    registry = load_yaml(Path("profiles.yaml").read_text())
     for entry in registry["profiles"]:
         entry.setdefault("parameters", {})["fuel_type"] = fuel_type
     registry_path = tmp_path / "profiles.yaml"

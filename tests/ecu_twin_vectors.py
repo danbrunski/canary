@@ -35,9 +35,8 @@ from collections.abc import Callable, Iterator
 from pathlib import Path
 from typing import Any
 
-import yaml
-
 from src.decode import ecm_lookup, fuel_comp_load, target_phi_command
+from src.yaml_load import load_yaml
 
 REPO = Path(__file__).resolve().parents[1]
 CONTRACT_PATH = REPO / "data" / "ecu_twin_contract.yaml"
@@ -52,7 +51,7 @@ Json = dict[str, Any]
 
 
 def contract() -> Json:
-    data: Json = yaml.safe_load(CONTRACT_PATH.read_text())
+    data: Json = load_yaml(CONTRACT_PATH.read_text())
     return data
 
 
@@ -763,7 +762,7 @@ def _hand_lookup() -> Iterator[Json]:
 def _capture_target_phi() -> Iterator[Json]:
     """The two October 4 enrichment commands (target_phi.yaml known_override):
     observed word 0x4A80 at the captured rpm word, forced column."""
-    expect = yaml.safe_load(TARGET_PHI_EXPECT.read_text())
+    expect = load_yaml(TARGET_PHI_EXPECT.read_text())
     for n, case in enumerate(expect["known_override"]):
         source = f"capture:tests/fixtures/ground_truth/target_phi.yaml#known_override[{n}]"
         inputs = {

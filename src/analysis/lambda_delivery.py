@@ -50,7 +50,6 @@ from typing import Any, Literal
 
 import numpy as np
 import pandas as pd
-import yaml
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from src.analysis.channels import refuse_as_of
@@ -65,6 +64,7 @@ from src.signals.afr import (
     voltage_to_afr,
 )
 from src.signals.pairing import PairingPolicy, match_ordered, to_seconds
+from src.yaml_load import load_yaml
 
 Quantity = Literal["phi", "lambda", "afr"]
 Regime = Literal["closed_loop", "enrichment", "lean_target"]
@@ -472,7 +472,7 @@ def load_lambda_delivery(
     ``commanded_afr`` must be declared here (usable or refused), so the two
     files cannot silently name different targets.
     """
-    declaration = LambdaDeliveryDeclaration.model_validate(yaml.safe_load(path.read_text()))
+    declaration = LambdaDeliveryDeclaration.model_validate(load_yaml(path.read_text()))
     if dids_path is not None:
         from src.decode.dids import load_did_map
 

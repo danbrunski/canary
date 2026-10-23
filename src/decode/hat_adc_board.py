@@ -36,10 +36,10 @@ import math
 from pathlib import Path
 from typing import Literal
 
-import yaml
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from src.decode.analog_sensors import AdcModule, AnalogChannel, AnalogSensorCatalog
+from src.yaml_load import load_yaml
 
 INPUTS = 8
 #: An ADS8688A code is 16 bits, straight binary: ``volts = code * full_scale / CODES``.
@@ -261,7 +261,7 @@ class HatAdcBoard(_Strict):
 
 
 def load_hat_adc_board(path: Path) -> HatAdcBoard:
-    return HatAdcBoard.model_validate(yaml.safe_load(path.read_text()))
+    return HatAdcBoard.model_validate(load_yaml(path.read_text()))
 
 
 __all__ = [

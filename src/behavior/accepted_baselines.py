@@ -51,6 +51,7 @@ from src.evidence import (
 )
 from src.evidence import Provenance as MemoryProvenance
 from src.paths import DATA_DIR
+from src.yaml_load import load_yaml
 
 #: Default (unscoped) location — always resolve the real path through
 #: ``src.vehicle.profiles.scope_config`` (``DaemonConfig.accepted_baselines``); this
@@ -307,7 +308,7 @@ def load_accepted_baselines(path: Path) -> AcceptedBaselines:
     """
     if not path.exists():
         return AcceptedBaselines(schema_version=CURRENT_SCHEMA_VERSION, overrides=[])
-    raw = yaml.safe_load(path.read_text()) or {}
+    raw = load_yaml(path.read_text()) or {}
     return AcceptedBaselines.model_validate(raw)
 
 

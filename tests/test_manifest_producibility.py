@@ -33,6 +33,7 @@ from src.models.spec_producibility import (
     unproducible_feature_columns,
 )
 from src.vehicle.profiles import resolve_profile_for_tooling, scope_config
+from src.yaml_load import load_yaml
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 EXAMPLE_YAML = REPO_ROOT / "canary.example.yaml"
@@ -74,7 +75,7 @@ def _catalog(slug: str, dids_path: Path = DIDS_PATH) -> ProducibleCatalog:
 
 
 def _load_allowlist() -> list[dict[str, Any]]:
-    doc = yaml.safe_load(ALLOWLIST_PATH.read_text()) or {}
+    doc = load_yaml(ALLOWLIST_PATH.read_text()) or {}
     entries = doc.get("entries") or []
     for entry in entries:
         missing = {"manifest", "model_version", "reason", "columns"} - set(entry)
@@ -171,7 +172,7 @@ def test_catches_the_retracted_bindings() -> None:
 
 def test_derived_channel_stranded_by_its_input_is_caught(tmp_path: Path) -> None:
     """Removing a DID strands the derived channel computed from it, transitively."""
-    doc = yaml.safe_load(DIDS_PATH.read_text())
+    doc = load_yaml(DIDS_PATH.read_text())
     doc["dids"] = [d for d in doc["dids"] if d["name"] != "ECM_AF_SENSOR_V_B2"]
     trimmed = tmp_path / "dids.yaml"
     trimmed.write_text(yaml.safe_dump(doc, sort_keys=False))

@@ -113,6 +113,37 @@ def pytest_xdist_auto_num_workers(config: pytest.Config) -> int | None:
     return min(ML_TRAINING_MAX_WORKERS, len(os.sched_getaffinity(0)))
 
 
+#: The native thread pools an xdist worker sizes from these. torch's OpenMP
+#: pool and OpenBLAS each default to every core, so eight workers on eight
+#: cores ran up to 64 compute threads, and OpenMP's idle threads spin rather
+#: than sleep. A torch test that takes 2.0 s alone took 34 s in the push gate,
+#: a 0.17 s one took 24 s, and the spinning slowed every test sharing their
+#: cores: the gate's pytest ran 108 s at the default pools and 81 s at one
+#: thread per worker (2026-10-23, 8 cores, cold bytecode both times).
+NATIVE_THREAD_VARIABLES = ("OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS")
+
+
+def worker_thread_budget(cores: int, workers: int) -> int:
+    """Threads each of ``workers`` parallel processes may run on ``cores``."""
+    return max(1, cores // max(1, workers))
+
+
+def _limit_native_threads() -> None:
+    """Give each xdist worker its share of the cores, before numpy or torch loads.
+
+    Both read the variables once, when their library loads, and nothing this
+    conftest imports loads either (``tests/test_worker_threads.py`` holds that).
+    A serial run is one process and keeps every core; a variable already set
+    wins.
+    """
+    workers = os.environ.get("PYTEST_XDIST_WORKER_COUNT")
+    if workers is None:
+        return
+    budget = str(worker_thread_budget(len(os.sched_getaffinity(0)), int(workers)))
+    for name in NATIVE_THREAD_VARIABLES:
+        os.environ.setdefault(name, budget)
+
+
 _REPO_BASELINE = pytest.StashKey[repo_guard.RunBaseline]()
 #: Refusals the xdist workers reported that no test was charged with.
 _WORKER_REFUSALS: list[str] = []
@@ -123,6 +154,7 @@ def _is_xdist_worker(config: pytest.Config) -> bool:
 
 
 def pytest_configure(config: pytest.Config) -> None:
+    _limit_native_threads()
     GUARD.install()
 
 

@@ -50,6 +50,7 @@ from src.collection.capture_profiles import CaptureProfileCatalog
 from src.config import CanaryConfig
 from src.evidence import Evidence, Investigation, MemoryLedger
 from src.vehicle.profiles import profile_dir, resolve_profile_for_tooling, scope_config
+from src.yaml_load import load_yaml
 from tests.test_delivery_investigation import PROFILE, Clock, Vehicle, _mint_all, _synthetic_drive
 
 PRESSURE = "Log fuel pressure through a full-throttle pull (supercharger-build NA2)."
@@ -83,7 +84,7 @@ def world(tmp_path_factory: pytest.TempPathFactory) -> World:
         data / MEASUREMENT_PLAN_FILE, model, mode01_wot=context.mode01_wot
     )
     catalog = CaptureProfileCatalog.model_validate(
-        yaml.safe_load((data / "capture_profiles.yaml").read_text())
+        load_yaml((data / "capture_profiles.yaml").read_text())
     )
     root = tmp_path_factory.mktemp("tracking")
     a = _synthetic_drive(
@@ -467,7 +468,7 @@ def test_missing_or_stale_region_inputs_defer_with_a_named_reason(world: World) 
 def test_the_plan_refuses_thresholds_that_differ_from_their_sources(
     world: World, tmp_path: Path
 ) -> None:
-    data = yaml.safe_load((world.vehicle.data / MEASUREMENT_PLAN_FILE).read_text())
+    data = load_yaml((world.vehicle.data / MEASUREMENT_PLAN_FILE).read_text())
     data["regions"]["enrichment"]["all"][0]["value"] = 80.0
     path = tmp_path / "plan.yaml"
     path.write_text(yaml.safe_dump(data))
@@ -475,12 +476,12 @@ def test_the_plan_refuses_thresholds_that_differ_from_their_sources(
         load_measurement_plan(
             path, world.vehicle.model, mode01_wot=world.vehicle.context.mode01_wot
         )
-    data = yaml.safe_load((world.vehicle.data / MEASUREMENT_PLAN_FILE).read_text())
+    data = load_yaml((world.vehicle.data / MEASUREMENT_PLAN_FILE).read_text())
     data["measurements"] = data["measurements"][:-1]
     path.write_text(yaml.safe_dump(data))
     with pytest.raises(MeasurementPlanError, match="independent_lambda"):
         load_measurement_plan(path, world.vehicle.model)
-    data = yaml.safe_load((world.vehicle.data / MEASUREMENT_PLAN_FILE).read_text())
+    data = load_yaml((world.vehicle.data / MEASUREMENT_PLAN_FILE).read_text())
     data["fault_model_version"] = 1
     path.write_text(yaml.safe_dump(data))
     with pytest.raises(MeasurementPlanError, match="v1"):

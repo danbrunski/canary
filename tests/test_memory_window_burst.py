@@ -23,7 +23,6 @@ from typing import Any
 
 import can
 import pytest
-import yaml
 
 from src.collection import bus_budget, can_obd_loop, tuning_profile, tx_gate
 from src.collection.can_obd_collector import run_can_obd_loop
@@ -39,6 +38,7 @@ from src.collection.obd_scheduler import (
 )
 from src.config import CanBusConfig, CollectionConfig
 from src.decode.dids import MEMORY_SOURCE, select_memory_channels
+from src.yaml_load import load_yaml
 from tests.capture_round_fakes import FakeClock, ScriptedEcu, install_clock, support_bits
 
 #: ``poll_rate_hz`` 1 derives the 8 req/s the Pi serves at.
@@ -418,7 +418,7 @@ def _tuning_counts(monkeypatch: pytest.MonkeyPatch, seconds: float, *, paced: bo
         monkeypatch.setattr(can_obd_loop._CanObdLoop, "_memory_burst", lambda *_a: None)
     clock = FakeClock()
     install_clock(monkeypatch, clock)
-    catalog = CaptureProfileCatalog.model_validate(yaml.safe_load(XTERRA_CATALOG.read_text()))
+    catalog = CaptureProfileCatalog.model_validate(load_yaml(XTERRA_CATALOG.read_text()))
     default = catalog.by_name("default")
     tuning = catalog.by_name("tuning")
     assert default is not None and tuning is not None and tuning.memory
@@ -489,7 +489,7 @@ RATE_TOLERANCE = 0.01
 def _planned_hz() -> dict[str, float]:
     """Planned reads/s per decoded channel, from the capture preview: the
     scheduler's own plan for `tuning`, not a figure written here."""
-    catalog = CaptureProfileCatalog.model_validate(yaml.safe_load(XTERRA_CATALOG.read_text()))
+    catalog = CaptureProfileCatalog.model_validate(load_yaml(XTERRA_CATALOG.read_text()))
     default, tuning = catalog.by_name("default"), catalog.by_name("tuning")
     assert default is not None and tuning is not None
     collection = CollectionConfig(
@@ -569,7 +569,7 @@ def _switch_rates(
     Measured from each channel's own reads over ``span`` seconds starting 2 s
     after the switch, as (reads - 1) / (last - first): a window that skips a
     read moves it, where the edges of the span do not."""
-    catalog = CaptureProfileCatalog.model_validate(yaml.safe_load(XTERRA_CATALOG.read_text()))
+    catalog = CaptureProfileCatalog.model_validate(load_yaml(XTERRA_CATALOG.read_text()))
     default, tuning = catalog.by_name("default"), catalog.by_name("tuning")
     assert default is not None and tuning is not None
     collection = CollectionConfig(

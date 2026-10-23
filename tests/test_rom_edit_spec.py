@@ -47,6 +47,7 @@ from src.analysis.rom_edit_spec import (
 from src.analysis.rom_effects import CellEdit, RomEffectRefusalError, write_candidate
 from src.analysis.rom_map import RomMap, TableAxes
 from src.vehicle.tune_revisions import TuneRevision, TuneRevisionRegistry
+from src.yaml_load import load_yaml
 from tests.rom_fixtures import (
     PROFILE,
     encrypted_backup_lookalike,
@@ -740,10 +741,10 @@ def test_the_example_spec_parses_and_resolves(world: dict[str, Any]) -> None:
 def test_the_spec_hash_is_over_content_not_layout(world: dict[str, Any], tmp_path: Path) -> None:
     text = (FIXTURES / "fuel_comp_light_load.yaml").read_text()
     reflowed = tmp_path / "reflowed.yaml"
-    reflowed.write_text("# another comment\n" + yaml.safe_dump(yaml.safe_load(text)))
+    reflowed.write_text("# another comment\n" + yaml.safe_dump(load_yaml(text)))
     first = load_edit_spec(FIXTURES / "fuel_comp_light_load.yaml")
     assert load_edit_spec(reflowed).sha256() == first.sha256()
-    changed = yaml.safe_load(text)
+    changed = load_yaml(text)
     changed["edits"][1]["add_raw"] = -3
     assert parse_edit_spec(changed).sha256() != first.sha256()
     broken = tmp_path / "broken.yaml"

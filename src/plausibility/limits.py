@@ -44,11 +44,11 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
 
-import yaml
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from src.config import DEFAULT_BROADCAST_STALE_TIMEOUT_SECONDS
 from src.storage.broadcast_storage import is_broadcast_channel
+from src.yaml_load import load_yaml
 
 if TYPE_CHECKING:
     from src.config import CanaryConfig
@@ -272,7 +272,7 @@ class PlausibilityProfile(_Strict):
 
 def load_plausibility_profile(path: Path) -> PlausibilityProfile:
     """Parse and validate a ``plausibility.yaml``. Raises on a bad file."""
-    raw = yaml.safe_load(path.read_text())
+    raw = load_yaml(path.read_text())
     return PlausibilityProfile.model_validate(raw)
 
 

@@ -19854,7 +19854,8 @@
    "src",
    "src.config",
    "src.lsm6dsox_settings",
-   "src.paths"
+   "src.paths",
+   "src.yaml_load"
   ],
   "third_party": [
    "annotated_types",

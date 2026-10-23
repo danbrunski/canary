@@ -17,10 +17,8 @@ from typing import Any
 import numpy as np
 import pandas as pd
 import pytest
-import yaml
 
 from src.analysis.ecu_application import (
-    MODEL_FILE,
     ApplicationModel,
     load_application_model,
     program_sha256,
@@ -54,6 +52,7 @@ from src.behavior.behavior_models import BehaviorModel2D
 from src.decode.dids import load_did_map
 from src.paths import DIDS_YAML
 from src.signals.pairing import PairingPolicy
+from src.yaml_load import load_yaml
 from tests import test_operating_context as operating_context_tests
 from tests.rom_fixtures import PROFILE, xterra_map
 from tests.test_operating_context import (
@@ -74,12 +73,10 @@ POLICY = PairingPolicy.within("250ms")
 
 @functools.cache
 def _application_model() -> tuple[ApplicationModel, str]:
-    """``load_application_model(PROFILE)`` parsed once with libyaml, as
-    ``tests.test_residual_chain`` does: the pure-Python parse of this file was
-    most of the module's setup (two loads, ~1.2 s)."""
-    text = (PROFILE / MODEL_FILE).read_bytes()
-    loaded = yaml.load(text, Loader=getattr(yaml, "CSafeLoader", yaml.SafeLoader))  # noqa: S506
-    return ApplicationModel.model_validate(loaded), hashlib.sha256(text).hexdigest()
+    """``load_application_model(PROFILE)`` loaded once, as
+    ``tests.test_residual_chain`` does: loading and validating this file was
+    most of the module's setup."""
+    return load_application_model(PROFILE)
 
 
 def _program(image: bytes) -> tuple[ApplicationModel, str]:
@@ -98,10 +95,6 @@ def image() -> bytes:
             operating_context_tests, "load_application_model", lambda _profile: _application_model()
         )
         return context_image()
-
-
-def test_the_cached_application_model_is_the_loaders() -> None:
-    assert _application_model() == load_application_model(PROFILE)
 
 
 @pytest.fixture(scope="module")
@@ -216,7 +209,7 @@ def test_the_contract_names_the_final_timing_channels(provider: ContextProvider)
 
 
 def test_a_definition_without_final_timing_channels_is_refused() -> None:
-    raw: dict[str, Any] = yaml.safe_load((PROFILE / "operating_context.yaml").read_text())
+    raw: dict[str, Any] = load_yaml((PROFILE / "operating_context.yaml").read_text())
     del raw["timing_trim"]["final_timing_channels"]
     with pytest.raises(ValueError, match="final_timing_channels"):
         ContextDefinition.model_validate(raw)
@@ -587,7 +580,7 @@ TIMING_RAM = "mem:ECM_IGNITION_TIMING_RAM"
 
 
 def _raw_definition() -> dict[str, Any]:
-    raw: dict[str, Any] = yaml.safe_load((PROFILE / "operating_context.yaml").read_text())
+    raw: dict[str, Any] = load_yaml((PROFILE / "operating_context.yaml").read_text())
     return raw
 
 

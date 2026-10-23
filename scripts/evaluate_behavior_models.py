@@ -60,6 +60,8 @@ import numpy as np
 import pandas as pd
 import yaml
 
+from src.yaml_load import load_yaml
+
 try:
     from _cli import (
         add_bindings_arg,
@@ -245,7 +247,7 @@ def _resolve_sessions(args: argparse.Namespace) -> tuple[list[Path], list[str]]:
     """Explicit sessions, or a manifest whose hashes must still match."""
     if args.manifest is None:
         return [Path(s).expanduser() for s in args.sessions], []
-    manifest = yaml.safe_load(args.manifest.read_text())
+    manifest = load_yaml(args.manifest.read_text())
     root = (args.corpus_root or Path(manifest.get("corpus_root", "."))).expanduser()
     sessions: list[Path] = []
     mismatches: list[str] = []

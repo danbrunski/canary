@@ -6,7 +6,6 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-import yaml
 
 from src.collection.kline import protocol as kp
 from src.collection.kline.profile import (
@@ -14,6 +13,7 @@ from src.collection.kline.profile import (
     KlineProfile,
     load_kline_profile,
 )
+from src.yaml_load import load_yaml
 
 XTERRA = Path("data/nissan-xterra-2008/kline.yaml")
 
@@ -42,7 +42,7 @@ def test_a_vehicle_without_a_kline_file_is_named_not_defaulted(tmp_path: Path) -
 
 
 def test_vehicle_facts_have_no_defaults() -> None:
-    raw = yaml.safe_load(XTERRA.read_text())
+    raw = load_yaml(XTERRA.read_text())
     for field in ("tester_address", "ecm_address", "wakeups", "baud", "timing"):
         broken = {k: v for k, v in raw.items() if k != field}
         with pytest.raises(ValueError, match=field):
@@ -50,7 +50,7 @@ def test_vehicle_facts_have_no_defaults() -> None:
 
 
 def test_same_ecm_and_tester_address_is_refused() -> None:
-    raw = yaml.safe_load(XTERRA.read_text())
+    raw = load_yaml(XTERRA.read_text())
     with pytest.raises(ValueError, match="must differ"):
         KlineProfile.model_validate({**raw, "tester_address": raw["ecm_address"]})
 
@@ -61,7 +61,7 @@ def test_same_ecm_and_tester_address_is_refused() -> None:
 
 
 def _with_abs_did(**did: object) -> dict[str, object]:
-    raw = yaml.safe_load(XTERRA.read_text())
+    raw = load_yaml(XTERRA.read_text())
     raw["modules"][0x28]["dids"] = [{"did": 0x1303, "width": 2, "evidence": "test", **did}]
     return raw
 
@@ -124,14 +124,14 @@ def test_a_flag_is_one_bit_inside_its_reply(mask: int, named: str) -> None:
 
 
 def test_a_module_name_that_reads_as_a_hex_address_is_refused() -> None:
-    raw = yaml.safe_load(XTERRA.read_text())
+    raw = load_yaml(XTERRA.read_text())
     raw["modules"][0x28]["name"] = "AB"
     with pytest.raises(ValueError, match="reads as a hex address"):
         KlineProfile.model_validate(raw)
 
 
 def test_a_local_id_reader_needs_its_reply_limit() -> None:
-    raw = yaml.safe_load(XTERRA.read_text())
+    raw = load_yaml(XTERRA.read_text())
     del raw["modules"][0x10]["reader"]["max_local_id_reply_bytes"]
     with pytest.raises(ValueError, match="max_local_id_reply_bytes"):
         KlineProfile.model_validate(raw)
@@ -149,7 +149,7 @@ def test_the_airbag_module_records_its_code_read() -> None:
 
 
 def _srs_read() -> dict[str, Any]:
-    raw: dict[str, Any] = yaml.safe_load(XTERRA.read_text())
+    raw: dict[str, Any] = load_yaml(XTERRA.read_text())
     return raw
 
 

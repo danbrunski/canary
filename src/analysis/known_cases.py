@@ -71,6 +71,7 @@ from src.evidence.records import (
 from src.paths import BINDINGS_YAML, DIDS_YAML, REPO_ROOT
 from src.vehicle.interventions import intervention_history
 from src.vehicle.tune_revisions import TuneRevisionRegistry, load_tune_revisions
+from src.yaml_load import load_yaml
 
 __all__ = [
     "CASES_SCHEMA",
@@ -463,7 +464,7 @@ def _recurrences_span_drives(name: str, case: Case) -> None:
 
 
 def load_case_file(path: Path) -> CaseFile:
-    return CaseFile.model_validate(yaml.safe_load(path.read_text()))
+    return CaseFile.model_validate(load_yaml(path.read_text()))
 
 
 # -- running a case -------------------------------------------------------------
@@ -499,7 +500,7 @@ def _common_calibration(records: list[AnyRecord]) -> str | None:
 
 
 def _mutated_bindings(workdir: Path, mutation: BindingScale) -> Path:
-    raw = yaml.safe_load(BINDINGS_YAML.read_text())
+    raw = load_yaml(BINDINGS_YAML.read_text())
     signals = [s for s in raw["signals"] if s["name"] == mutation.signal]
     if len(signals) != 1:
         raise ValueError(f"binding {mutation.signal!r} is not in {BINDINGS_YAML}")

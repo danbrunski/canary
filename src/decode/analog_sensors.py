@@ -27,8 +27,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
-import yaml
 from pydantic import BaseModel, ConfigDict, Field, model_validator
+
+from src.yaml_load import load_yaml
 
 #: Recorded unit <- transfer unit, multiply by. A pair missing here is refused
 #: at load rather than recorded in the wrong unit.
@@ -163,7 +164,7 @@ class AnalogSensorCatalog(_Strict):
 
 
 def load_analog_sensor_catalog(path: Path) -> AnalogSensorCatalog:
-    return AnalogSensorCatalog.model_validate(yaml.safe_load(path.read_text()))
+    return AnalogSensorCatalog.model_validate(load_yaml(path.read_text()))
 
 
 @dataclass(frozen=True)

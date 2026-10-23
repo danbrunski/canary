@@ -60,6 +60,7 @@ from src.analysis.rom_levers import (
 )
 from src.analysis.rom_map import RomMap
 from src.analysis.sim_contract import SimContract, SimulationRefusalError, load_contract
+from src.yaml_load import load_yaml
 from tests.rom_fixtures import PROFILE, xterra_map
 from tests.test_rom_effects import _bump, modelled_image
 
@@ -79,7 +80,7 @@ TORQUE_CODES = {
 
 
 def _raw_contract() -> dict[str, Any]:
-    raw: dict[str, Any] = yaml.safe_load((PROFILE / "engine_sim_contract.yaml").read_text())
+    raw: dict[str, Any] = load_yaml((PROFILE / "engine_sim_contract.yaml").read_text())
     return raw
 
 
@@ -243,7 +244,7 @@ def test_a_node_the_manifest_calls_implemented_stops_blocking(world: World, tmp_
     assert "knock_trim_difference" in _joined(before)
 
     text = (PROFILE / "ecu_application_model.yaml").read_text()
-    data = yaml.safe_load(text)
+    data = load_yaml(text)
     (node,) = [n for n in data["nodes"] if n["id"] == "knock_trim_difference"]
     assert node["twin"] == "not_modelled"
     node["twin"] = "implemented"

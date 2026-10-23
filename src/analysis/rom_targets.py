@@ -7,11 +7,11 @@ import struct
 from pathlib import Path
 from typing import Any, Literal
 
-import yaml
 from pydantic import BaseModel, ConfigDict, Field
 
 from src.analysis.osiris import Container
 from src.signals.afr import TargetAfrMap, load_afr_calibration
+from src.yaml_load import load_yaml
 
 
 class Strict(BaseModel):
@@ -142,7 +142,7 @@ class TargetEditor:
     @classmethod
     def from_bytes(cls, data: bytes, definition_path: Path) -> TargetEditor:
         """Inspect an upload without persisting proprietary ROM bytes."""
-        definition = Definition.model_validate(yaml.safe_load(definition_path.read_text()))
+        definition = Definition.model_validate(load_yaml(definition_path.read_text()))
         calibration = load_afr_calibration(definition_path.parent / definition.calibration_file)
         matches = [
             t

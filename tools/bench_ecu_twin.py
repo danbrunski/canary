@@ -178,14 +178,13 @@ def real_twin() -> tuple[Any, Any, str, Json, Json]:
     """The shipped twin definition, the Xterra table the October 4 capture
     ran on (transcribed, no private ROM), the definition's sha256, and the
     table/constants in the vectors' ``named`` shape."""
-    import yaml
-
     from src.analysis.ecu_application import load_application_model
     from src.analysis.rom_trace import load_viewer_definition
     from src.analysis.target_phi import load_twin_definition, table_from_calibration
     from src.signals.afr import load_afr_calibration
+    from src.yaml_load import load_yaml
 
-    expect = yaml.safe_load(GROUND_TRUTH.read_text())
+    expect = load_yaml(GROUND_TRUTH.read_text())
     definition, sha = load_twin_definition(PROFILE)
     table = table_from_calibration(
         load_afr_calibration(PROFILE / "afr_calibration.yaml"),
@@ -216,9 +215,10 @@ def real_twin() -> tuple[Any, Any, str, Json, Json]:
 def ground_truth_frame() -> Any:
     """The committed October 4 slices as one session frame, hash-checked."""
     import pandas as pd
-    import yaml
 
-    expect = yaml.safe_load(GROUND_TRUTH.read_text())
+    from src.yaml_load import load_yaml
+
+    expect = load_yaml(GROUND_TRUTH.read_text())
     frames = []
     for part in expect["telemetry"]:
         path = REPO / part["path"]

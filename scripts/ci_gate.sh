@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# The push gate on one commit, in a throwaway worktree, before anything reaches
+# The push gate on one commit, in a worktree of its own, before anything reaches
 # origin. On success it stamps that exact commit, which is what the pre-push
 # hook checks. Usually run by scripts/push.sh rather than by hand.
 #
@@ -14,6 +14,9 @@
 #
 # - A worktree, not the working tree: several agent sessions share this checkout,
 #   and their uncommitted edits must not decide whether *your* commits pass.
+#   The worktrees are kept (.git/ci-gate/worktrees/<slot>, one per concurrent
+#   gate) so their bytecode survives from one gate to the next; each is reset
+#   to the commit and cleaned of everything else first.
 # - The venv must match constraints-dev.txt (scripts/check_dev_env.py), because
 #   that file is what CI installs. Green on other versions proves nothing.
 # - Python: ruff check, ruff format --check, mypy (with a cache kept between
@@ -56,11 +59,44 @@ keep_log() {
   ls -1t "$kept_logs" | tail -n +21 | sed "s|^|$kept_logs/|" | xargs -r rm -f
 }
 
-wt="$(mktemp -d "${TMPDIR:-/tmp}/canary-gate-XXXXXX")"
-cleanup() { git -C "$repo_root" worktree remove --force "$wt" >/dev/null 2>&1; rm -rf "$wt"; }
-trap cleanup EXIT
-git -C "$repo_root" worktree add --detach --force "$wt" "$sha" >/dev/null 2>&1 || {
-  echo "ci_gate: could not create a worktree for $sha" >&2; exit 1; }
+# Kept worktrees, one per concurrent gate, each locked while a gate uses it. A
+# fresh tree has no bytecode, so every pytest worker compiled the same ~1,200
+# files at once: collection took 16 s cold against 5 s warm (2026-10-23). A
+# kept tree is checked out to the commit and cleaned of everything untracked
+# except __pycache__ and node_modules. Checkout rewrites only the files that
+# differ, which gives them a new mtime, so Python and pytest's assertion
+# rewriter recompile exactly those; a deleted module cannot import from its
+# stale __pycache__ entry. Every slot busy: a throwaway tree, cold.
+slots="$stamp_dir/worktrees"
+mkdir -p "$slots"
+wt=""
+for slot in 0 1 2; do
+  exec {slot_lock}>"$slots/$slot.lock"
+  if flock -n "$slot_lock"; then wt="$slots/$slot"; break; fi
+  exec {slot_lock}>&-
+done
+reuse_tree() {
+  [[ "$(git -C "$wt" rev-parse --show-toplevel 2>/dev/null)" == "$wt" ]] \
+    && git -C "$wt" checkout -q --detach --force "$sha" >/dev/null 2>&1 \
+    && git -C "$wt" clean -q -ffdx -e __pycache__ -e node_modules
+}
+new_tree() {
+  git -C "$repo_root" worktree add --detach --force "$wt" "$sha" >/dev/null 2>&1
+}
+if [[ -n "$wt" ]]; then
+  # A tree a killed gate left half-written (an index.lock, a missing .git
+  # file) is rebuilt rather than trusted.
+  reuse_tree || {
+    rm -rf -- "${wt:?}"
+    git -C "$repo_root" worktree prune
+    new_tree
+  } || { echo "ci_gate: could not check out $sha in $wt" >&2; exit 1; }
+else
+  wt="$(mktemp -d "${TMPDIR:-/tmp}/canary-gate-XXXXXX")"
+  cleanup() { git -C "$repo_root" worktree remove --force "$wt" >/dev/null 2>&1; rm -rf "$wt"; }
+  trap cleanup EXIT
+  new_tree || { echo "ci_gate: could not create a worktree for $sha" >&2; exit 1; }
+fi
 echo "ci_gate: gating ${sha:0:7} in $wt"
 start=$(date +%s)
   (

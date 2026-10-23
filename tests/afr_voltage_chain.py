@@ -19,9 +19,9 @@ from pathlib import Path
 from typing import Any
 
 import pandas as pd
-import yaml
 
 from src.columns import arrived_column
+from src.yaml_load import load_yaml
 
 PROFILE_AFR = Path("data/nissan-xterra-2008/afr_calibration.yaml")
 BARO = "obd:BAROMETRIC_PRESSURE"
@@ -32,7 +32,7 @@ VOLTS_PER_X2 = 0.0025
 
 @cache
 def _profile() -> dict[str, Any]:
-    return dict(yaml.safe_load(PROFILE_AFR.read_text()))
+    return dict(load_yaml(PROFILE_AFR.read_text()))
 
 
 def transfer(points: list[dict[str, float]], **extra: Any) -> dict[str, Any]:

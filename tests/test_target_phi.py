@@ -21,7 +21,6 @@ from typing import Any
 
 import pandas as pd
 import pytest
-import yaml
 
 from src.analysis.channels import read_channels
 from src.analysis.ecu_application import (
@@ -45,12 +44,13 @@ from src.analysis.target_phi import (
     x_formula_check,
 )
 from src.signals.afr import load_afr_calibration
+from src.yaml_load import load_yaml
 from tests.rom_fixtures import synthetic_image, xterra_map
 
 REPO = Path(__file__).resolve().parents[1]
 PROFILE = REPO / "data" / "nissan-xterra-2008"
 EXPECT_PATH = REPO / "tests" / "fixtures" / "ground_truth" / "target_phi.yaml"
-EXPECT: dict[str, Any] = yaml.safe_load(EXPECT_PATH.read_text())
+EXPECT: dict[str, Any] = load_yaml(EXPECT_PATH.read_text())
 IMAGE_SHA = EXPECT["calibration"]["image_sha256"]
 
 
@@ -147,7 +147,7 @@ def test_the_shipped_definition_declares_every_input_gate_and_limit() -> None:
 
 
 def _raw_definition() -> dict[str, Any]:
-    loaded: dict[str, Any] = yaml.safe_load((PROFILE / "target_phi_twin.yaml").read_text())
+    loaded: dict[str, Any] = load_yaml((PROFILE / "target_phi_twin.yaml").read_text())
     return loaded
 
 

@@ -17,7 +17,6 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-import yaml
 
 from src.analysis.ecu_application import ApplicationModel, program_sha256
 from src.analysis.fuel_plant import PLANT_FILE, FuelPlantProfile
@@ -59,6 +58,7 @@ from src.evidence.records import (
     SourceRef,
     VehicleIdentity,
 )
+from src.yaml_load import load_yaml
 from tests.rom_fixtures import PROFILE, synthetic_image
 
 
@@ -412,7 +412,7 @@ def test_absorbed_nodes_must_feed_the_fixed_point(kit_and_image: tuple[SimKit, b
     node off BFS's upstream graph is a claim with no computation behind it."""
     kit, _ = kit_and_image
     assert check_against_application_model(kit.contract, kit.model) == []
-    raw = yaml.safe_load((PROFILE / CONTRACT_FILE).read_text())
+    raw = load_yaml((PROFILE / CONTRACT_FILE).read_text())
     mode = next(m for m in raw["modes"] if m["id"] == "conditional_rom_comparison")
     mode["roles"]["base_fuel_schedule"]["init"]["absorbs"].append("timing_rate_limit")
     contract = SimContract.model_validate(raw)
@@ -556,7 +556,7 @@ def _minted(result: Any, verdict: str, **over: Any) -> InterventionVerdict:
 
 
 def _plant_with(verdict: str, *, synthetic: bool = False) -> FuelPlantProfile:
-    raw: dict[str, Any] = yaml.safe_load((PROFILE / PLANT_FILE).read_text())
+    raw: dict[str, Any] = load_yaml((PROFILE / PLANT_FILE).read_text())
     raw["synthetic"] = synthetic
     for rec in raw["spent_held_out"]:
         rec["verdict"] = verdict

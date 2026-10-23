@@ -20,7 +20,6 @@ from typing import Any
 
 import pandas as pd
 import pytest
-import yaml
 
 from src.analysis.ecu_state_models import (
     MODEL_VERSION,
@@ -58,9 +57,10 @@ from src.analysis.ecu_state_models import (
     uprev_power_on,
     uprev_step,
 )
+from src.yaml_load import load_yaml
 
 REPO = Path(__file__).resolve().parents[1]
-EXPECT = yaml.safe_load((REPO / "tests/fixtures/ground_truth/target_phi.yaml").read_text())
+EXPECT = load_yaml((REPO / "tests/fixtures/ground_truth/target_phi.yaml").read_text())
 #: Curve 0xCEDB on every listed image (and Map1Change): 200 at every rpm.
 CEDB = (200,) * 16
 

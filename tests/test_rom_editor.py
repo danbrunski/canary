@@ -40,6 +40,7 @@ from src.analysis.rom_levers import classify_edit
 from src.analysis.sim_contract import SimulationRefusalError
 from src.analysis.sim_montecarlo import DESIGN_ASSUMPTION_PREFIX, MonteCarloResult
 from src.vehicle.tune_revisions import ReferenceImage, TuneRevision, TuneRevisionRegistry
+from src.yaml_load import load_yaml
 from tests.rom_fixtures import PROFILE
 from tests.test_sim_montecarlo import build_kit_and_image
 
@@ -593,11 +594,10 @@ def test_a_k_edit_moves_bfs_by_the_realised_raw_ratio_in_every_open_loop_pair(
 
 
 def load_spec_sha(text: str) -> str:
-    import yaml
 
     from src.analysis.rom_edit_spec import parse_edit_spec
 
-    return parse_edit_spec(yaml.safe_load(text)).sha256()
+    return parse_edit_spec(load_yaml(text)).sha256()
 
 
 def test_the_target_afr_grid_and_a_reflash_event_are_carried(
@@ -963,7 +963,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 
 
 def _typical_declaration() -> dict[str, Any]:
-    loaded = yaml.safe_load(TYPICAL_FILE.read_text())
+    loaded = load_yaml(TYPICAL_FILE.read_text())
     assert isinstance(loaded, dict)
     return loaded
 
@@ -1127,7 +1127,7 @@ def test_each_typical_value_equals_the_constant_its_source_names() -> None:
     assert values["pedal_flag"] == env["pedal_flag"]
 
     # The rail's value is the plant's own declared reference pressure.
-    plant = yaml.safe_load((PROFILE / "fuel_plant_mv2.yaml").read_text())
+    plant = load_yaml((PROFILE / "fuel_plant_mv2.yaml").read_text())
     reference = _find_parameter(plant, "reference_delta_p")
     assert reference is not None and reference["value"] == values["rail_kpa"]
 

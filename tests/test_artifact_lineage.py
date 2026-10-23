@@ -44,6 +44,7 @@ from src.analysis.artifact_lineage import (
 )
 from src.analysis.compare import PairingPolicy, compare_channels
 from src.signals.derived import DERIVED_CHANNEL_INPUTS, DERIVED_CHANNEL_OPTIONAL_INPUTS
+from src.yaml_load import load_yaml
 
 REPO = Path(__file__).resolve().parents[1]
 ALIASES = load_observation_aliases(REPO / "data/nissan-xterra-2008/observation_aliases.yaml")
@@ -525,7 +526,7 @@ def test_every_trim_channel_in_the_catalogs_declares_its_claim() -> None:
     """Claims are data; this keeps a new trim PID or DID from going unchecked."""
     from src.analysis.artifact_lineage import MODE01_PIDS
 
-    dids = yaml.safe_load((REPO / "data/dids.yaml").read_text())["dids"]
+    dids = load_yaml((REPO / "data/dids.yaml").read_text())["dids"]
     names = [f"did:{e['name']}" for e in dids if "FUEL_TRIM" in e["name"]]
     names += [f"obd:{n}" for n in MODE01_PIDS if "FUEL_TRIM" in n]
     assert names
@@ -534,7 +535,7 @@ def test_every_trim_channel_in_the_catalogs_declares_its_claim() -> None:
 
 def test_shipped_aliases_agree_with_the_current_catalog() -> None:
     """Every DID in a shared register exists, and its unit matches the register."""
-    dids = {e["did"]: e for e in yaml.safe_load((REPO / "data/dids.yaml").read_text())["dids"]}
+    dids = {e["did"]: e for e in load_yaml((REPO / "data/dids.yaml").read_text())["dids"]}
     units = {"road_speed": "km/h"}
     for register in ALIASES.registers:
         for kind, value in register.identities:

@@ -19,10 +19,10 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
-import yaml
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
 from src.analysis.sim_contract import SimulationRefusalError
+from src.yaml_load import load_yaml
 
 SIM_KIT_FILE = "sim_kit.yaml"
 
@@ -72,7 +72,7 @@ def load_sim_kit_declaration(profile_dir: Path) -> LoadedSimKitDeclaration:
             "never defaulted to the contract's",
         ) from exc
     try:
-        declaration = SimKitDeclaration.model_validate(yaml.safe_load(text))
+        declaration = SimKitDeclaration.model_validate(load_yaml(text))
     except ValidationError as exc:
         raise SimulationRefusalError(
             "sim_kit_invalid", f"{SIM_KIT_FILE}: {exc.error_count()} error(s): {exc}"

@@ -17,6 +17,7 @@ from src.features.feature_pipeline import load_resampled_session
 from src.models import evaluation as model_evaluation
 from src.models import training_entry
 from src.models.feedback import FeedbackStore
+from src.yaml_load import load_yaml
 from tests.builders import IFConfig, write_fixture_session
 from tests.configs import example_config, retrain_argv
 from tests.repo_guard import RepoTreeGuard
@@ -215,7 +216,7 @@ def test_retrain_sequence_model_tcn(
     """--sequence-model tcn dispatches to the TCN trainer, not the LSTM one."""
     import yaml
 
-    data = yaml.safe_load(Path("canary.example.yaml").read_text())
+    data = load_yaml(Path("canary.example.yaml").read_text())
     data["models"]["tcn_autoencoder"]["enabled"] = True
     cfg_path = tmp_path / "canary.yaml"
     cfg_path.write_text(yaml.safe_dump(data))
@@ -273,7 +274,7 @@ def test_retrain_since_boundary_excludes_older_sessions(
     from src.vehicle.vehicle_ledger import VehicleLedgerStore
 
     ledger_path = tmp_path / "vehicle_ledger.jsonl"
-    data = yaml.safe_load(EXAMPLE_YAML.read_text())
+    data = load_yaml(EXAMPLE_YAML.read_text())
     data["daemon"] = {"vehicle_ledger": str(ledger_path)}
     cfg_path = tmp_path / "canary.yaml"
     cfg_path.write_text(yaml.safe_dump(data))

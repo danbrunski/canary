@@ -66,9 +66,11 @@ def _load_canary_yaml(config_path: str | None) -> dict[str, Any]:
         return {}
     import yaml
 
+    from src.yaml_load import load_yaml
+
     try:
         with open(config_path) as handle:
-            data = yaml.safe_load(handle) or {}
+            data = load_yaml(handle) or {}
     except (OSError, yaml.YAMLError):
         return {}
     return data if isinstance(data, dict) else {}

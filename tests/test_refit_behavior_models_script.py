@@ -15,6 +15,7 @@ import scripts.refit_behavior_models as refit_cli
 # Importable as a module so we can call main() and patch its dependencies.
 from scripts import _cli
 from src.analysis.behavior_validation import ValidationContext
+from src.yaml_load import load_yaml
 
 
 def _frame(session_name: str = "2026-05-13T120000", seed: int = 0) -> pd.DataFrame:
@@ -401,7 +402,7 @@ def test_main_no_sessions_returns_error_code(
 def _write_config_with_ledger(tmp_path: Path, ledger_path: Path) -> Path:
     import yaml
 
-    data = yaml.safe_load(Path("canary.example.yaml").read_text())
+    data = load_yaml(Path("canary.example.yaml").read_text())
     data["daemon"] = {"vehicle_ledger": str(ledger_path)}
     # Disable profile scoping so `scoped.daemon.vehicle_ledger` in the CLI
     # resolves to exactly `ledger_path` — the test writes/asserts against

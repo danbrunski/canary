@@ -31,6 +31,7 @@ from src.control.rom_library import RomLibrary
 from src.evidence import memory_ledger_for
 from src.vehicle.profiles import VehicleProfile, scope_config
 from src.vehicle.tune_revisions import load_tune_revisions
+from src.yaml_load import load_yaml
 from tests.configs import isolated_config
 from tests.rom_fixtures import synthetic_image
 from tests.test_brain_jobs import SESSION, scheduler, scoped_config, submit_twin, write_session
@@ -104,7 +105,7 @@ def _library_flashes(tmp_path: Path) -> tuple[CanaryConfig, dict[str, str]]:
     model is edited, and none of the images is listed in it."""
     config, profile = copied_profile_config(tmp_path)
     model_path = profile / "ecu_application_model.yaml"
-    model_yaml = yaml.safe_load(model_path.read_text())
+    model_yaml = load_yaml(model_path.read_text())
     application, _sha = load_application_model(profile)
     a = bytearray(synthetic_image())
     b = bytearray(a)
@@ -125,7 +126,7 @@ def _library_flashes(tmp_path: Path) -> tuple[CanaryConfig, dict[str, str]]:
     }
     shas["D"] = "d" * 64
     registry_path = profile / "tune_revisions.yaml"
-    registry = yaml.safe_load(registry_path.read_text())
+    registry = load_yaml(registry_path.read_text())
     for day, name in enumerate("ABCD", start=1):
         registry["revisions"].append(
             {
@@ -245,7 +246,7 @@ def test_current_identity_states_unknown_rather_than_guessing(tmp_path: Path) ->
 def test_an_image_the_model_never_checked_is_unverified(tmp_path: Path) -> None:
     config, profile = copied_profile_config(tmp_path)
     model_path = profile / "ecu_application_model.yaml"
-    model = yaml.safe_load(model_path.read_text())
+    model = load_yaml(model_path.read_text())
     model["program"]["images"] = [i for i in model["program"]["images"] if i["role"] == "decoded"]
     model_path.write_text(yaml.safe_dump(model, sort_keys=False))
     identity = current_identity(config, now=AFTER_FLASH)

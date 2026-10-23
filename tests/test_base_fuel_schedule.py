@@ -64,6 +64,7 @@ from src.signals.derived import DERIVED_CHANNEL_INPUTS
 from src.signals.vehicle_signals import DidView, did_views, load_axis_columns
 from src.signals.vehicle_signals.nissan_xterra_2008 import BASE_FUEL_SCHEDULE
 from src.vehicle.profiles import resolve_profile_for_tooling, scope_config
+from src.yaml_load import load_yaml
 from tests.configs import EXAMPLE_YAML
 
 SLICE = Path(__file__).parent / "fixtures/base_fuel_schedule/_capture-tuning-2026-09-23T164007"
@@ -175,7 +176,7 @@ def test_the_workbench_and_featurization_read_the_same_ms_on_a_real_slice() -> N
 
 
 def _edited_catalog(tmp_path: Path, edit: dict[str, object]) -> Path:
-    document = yaml.safe_load(DIDS_YAML.read_text())
+    document = load_yaml(DIDS_YAML.read_text())
     (entry,) = [e for e in document["dids"] if e["did"] == 0x1208]
     for key, value in edit.items():
         if key == "evidence_method":
@@ -219,7 +220,7 @@ def test_the_scale_must_come_from_exactly_one_named_record(
     """No record under the method: refused. Two: refused, rather than one
     picked by list order."""
     if method is None:
-        document = yaml.safe_load(DIDS_YAML.read_text())
+        document = load_yaml(DIDS_YAML.read_text())
         (entry,) = [e for e in document["dids"] if e["did"] == 0x1208]
         (record,) = [r for r in entry["evidence"] if r["method"] == _view().scale_method]
         entry["evidence"].append({**record, "constant": 1 / 2048})

@@ -60,6 +60,7 @@ from src.analysis.fuel_plant_eval import (
     plant_inputs,
 )
 from src.analysis.sim_contract import COMPUTED, leak_channels, load_contract
+from src.yaml_load import load_yaml
 
 PROFILE = Path("data/nissan-xterra-2008")
 FIXTURE = Path("tests/fixtures/fuel_plant/_capture-tuning-2026-09-23T142926")
@@ -80,7 +81,7 @@ def fixture_samples(plant: tuple[FuelPlantProfile, B06Rules]) -> pd.DataFrame:
 
 
 def _raw() -> dict[str, Any]:
-    raw: dict[str, Any] = yaml.safe_load((PROFILE / PLANT_FILE).read_text())
+    raw: dict[str, Any] = load_yaml((PROFILE / PLANT_FILE).read_text())
     return raw
 
 
@@ -335,7 +336,7 @@ def test_the_lambda_delay_is_b06s_frozen_one_never_refitted(
     with pytest.raises(FuelPlantRefusalError) as err:
         resolve_parameters(profile, replace(delay, seconds=0.25))
     assert err.value.reason == "delay_mismatch"
-    declared = yaml.safe_load((PROFILE / profile.delay.file).read_text())
+    declared = load_yaml((PROFILE / profile.delay.file).read_text())
     declared["eligibility"]["regimes"]["enrichment"]["transport_delays"]["ram_final_target"] = {
         "status": "not_estimated",
         "seconds": None,
@@ -667,7 +668,7 @@ def test_ve_is_fitted_on_identification_drives_only_as_a_lower_envelope(
 
 
 def test_the_ve_curve_belongs_to_a_refusing_plant_only() -> None:
-    raw: dict[str, Any] = yaml.safe_load((PROFILE / MV2_FILE).read_text())
+    raw: dict[str, Any] = load_yaml((PROFILE / MV2_FILE).read_text())
     capped = copy.deepcopy(raw)
     capped["manifold_model"] = "speed_density_capped"
     with pytest.raises(ValidationError, match="volumetric_efficiency"):
@@ -694,7 +695,7 @@ def test_fuel_mv_2_cannot_hold_out_a_drive_fuel_mv_1_spent(
 ) -> None:
     _, delay = plant
     # Its own ledger is empty, so the sibling's is read at load.
-    raw: dict[str, Any] = yaml.safe_load((PROFILE / MV2_FILE).read_text())
+    raw: dict[str, Any] = load_yaml((PROFILE / MV2_FILE).read_text())
     raw["split"]["held_out"] = [FIXTURE.name]
     del raw["split"]["held_out_pending"]
     FuelPlantProfile.model_validate(raw)  # the file alone cannot see it...
@@ -736,7 +737,7 @@ def test_a_plant_without_held_out_drives_never_qualifies(plant_mv2: FuelPlantPro
         "scored_on": "2026-10-08",
         "verdict": "pass",
     }
-    raw: dict[str, Any] = yaml.safe_load((PROFILE / MV2_FILE).read_text())
+    raw: dict[str, Any] = load_yaml((PROFILE / MV2_FILE).read_text())
     raw["spent_held_out"] = [record]
     with pytest.raises(ValidationError, match="not in split.held_out"):
         FuelPlantProfile.model_validate(raw)

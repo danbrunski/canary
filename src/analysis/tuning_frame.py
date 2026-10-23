@@ -8,7 +8,6 @@ from typing import Literal
 
 import numpy as np
 import pandas as pd
-import yaml
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from src.analysis.channels import (
@@ -21,6 +20,7 @@ from src.paths import DIDS_YAML
 from src.signals.afr import AfrCalibration, BaroSamples, voltage_route_refusal, voltage_to_afr
 from src.signals.pairing import to_seconds
 from src.storage.capture_manifest import read_capture_manifest
+from src.yaml_load import load_yaml
 
 Role = Literal[
     "rpm",
@@ -194,7 +194,7 @@ class TuningFrame:
 
 
 def load_provider_registry(path: Path) -> ProviderRegistry:
-    return ProviderRegistry.model_validate(yaml.safe_load(path.read_text()))
+    return ProviderRegistry.model_validate(load_yaml(path.read_text()))
 
 
 def build_tuning_frame(

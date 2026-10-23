@@ -15,7 +15,6 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-import yaml
 from pydantic import ValidationError
 
 from src.analysis.known_cases import (
@@ -31,15 +30,16 @@ from src.analysis.known_cases import (
 )
 from src.evidence import render_text
 from src.evidence.cards import investigation_card
+from src.yaml_load import load_yaml
 
 FIXTURE_ROOT = Path(__file__).parent / "fixtures" / "ground_truth"
 CASES_PATH = FIXTURE_ROOT / "investigation_cases.yaml"
 CASES = load_case_file(CASES_PATH)
-EXPECTED = yaml.safe_load((FIXTURE_ROOT / "investigation_cases.expected.yaml").read_text())
+EXPECTED = load_yaml((FIXTURE_ROOT / "investigation_cases.expected.yaml").read_text())
 
 
 def _raw() -> dict[str, Any]:
-    data: dict[str, Any] = yaml.safe_load(CASES_PATH.read_text())
+    data: dict[str, Any] = load_yaml(CASES_PATH.read_text())
     return data
 
 

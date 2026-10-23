@@ -190,6 +190,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     sys.path.insert(0, str(REPO_ROOT))
     import yaml
 
+    from src.yaml_load import load_yaml
+
     if args.verify_sources is not None:
         problems = verify_sources(args.verify_sources)
         for line in problems:
@@ -207,7 +209,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(f"wrote {EXPECTED.relative_to(REPO_ROOT)}")
         return 0
     current = EXPECTED.read_text() if EXPECTED.exists() else ""
-    if yaml.safe_load(current or "{}") != yaml.safe_load(text):
+    if load_yaml(current or "{}") != load_yaml(text):
         print(f"{EXPECTED.name} differs from what the chain says now; rerun with --write")
         return 1
     print(f"{EXPECTED.name} matches the chain")

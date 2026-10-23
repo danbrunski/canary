@@ -59,8 +59,9 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
 
 import pandas as pd
-import yaml
 from pydantic import BaseModel, ConfigDict, Field, model_validator
+
+from src.yaml_load import load_yaml
 
 if TYPE_CHECKING:
     from src.config import CanaryConfig
@@ -678,7 +679,7 @@ def committees_path(config: CanaryConfig) -> Path:
 
 def load_committee_profile(path: Path) -> CommitteeProfile:
     """Parse and validate a ``committees.yaml``. Raises on a bad file."""
-    return CommitteeProfile.model_validate(yaml.safe_load(path.read_text()))
+    return CommitteeProfile.model_validate(load_yaml(path.read_text()))
 
 
 def resolve_committee_profile(config: CanaryConfig) -> tuple[CommitteeProfile | None, str]:

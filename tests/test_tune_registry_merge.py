@@ -35,6 +35,7 @@ from src.vehicle.tune_revisions import (
     load_tune_revisions,
     merge_tune_registries,
 )
+from src.yaml_load import load_yaml
 
 STOCK = TuneRevision(
     revision="stock", calibration_id="1ZS04C", flashed_at=datetime(2026, 7, 1, tzinfo=UTC)
@@ -54,7 +55,7 @@ def _no_running_revision_leak(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def _config(tmp_path: Path) -> CanaryConfig:
-    raw = yaml.safe_load(Path("canary.example.yaml").read_text())
+    raw = load_yaml(Path("canary.example.yaml").read_text())
     raw.setdefault("collection", {})["storage_path"] = str(tmp_path / "sessions")
     raw.setdefault("daemon", {})["jobs_dir"] = str(tmp_path / "control" / "jobs")
     raw["daemon"]["afr_calibration"] = str(tmp_path / "data" / "afr_calibration.yaml")

@@ -17,7 +17,6 @@ from typing import Any
 
 import numpy as np
 import pytest
-import yaml
 from pydantic import ValidationError
 
 from src.analysis.fuel_plant import (
@@ -47,6 +46,7 @@ from src.analysis.fuel_plant import (
     sensitivity_cases,
 )
 from src.analysis.fuel_plant_eval import build_samples, identify, plant_inputs
+from src.yaml_load import load_yaml
 
 PROFILE = Path("data/nissan-xterra-2008")
 MV3 = "fuel-mv-3"
@@ -66,7 +66,7 @@ CURVE = VeCurve(
 
 
 def _raw() -> dict[str, Any]:
-    raw: dict[str, Any] = yaml.safe_load((PROFILE / MV3_FILE).read_text())
+    raw: dict[str, Any] = load_yaml((PROFILE / MV3_FILE).read_text())
     return raw
 
 

@@ -56,7 +56,6 @@ from typing import Any, Literal
 
 import numpy as np
 import pandas as pd
-import yaml
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 import src.models.adaptive_candidate as candidate_module
@@ -108,6 +107,7 @@ from src.signals.pairing import (
 from src.storage.corpus_eligibility import default_profile_exclusion
 from src.storage.session_files import session_footer_span
 from src.vehicle.tune_revisions import TuneRevisionRegistry, resolve_session_revision
+from src.yaml_load import load_yaml
 
 __all__ = [
     "CHANGE_RESIDUALS_FILE",
@@ -296,7 +296,7 @@ class ChangeResiduals(_Strict):
 def load_change_residuals(path: Path) -> tuple[ChangeResiduals, str]:
     """The declarations at ``path`` and the sha256 of its bytes."""
     raw = Path(path).read_bytes()
-    data = yaml.safe_load(raw)
+    data = load_yaml(raw)
     if not isinstance(data, dict) or data.get("schema") != CHANGE_RESIDUALS_SCHEMA:
         raise ValueError(f"{path} is not a {CHANGE_RESIDUALS_SCHEMA} file")
     return ChangeResiduals.model_validate(data), hashlib.sha256(raw).hexdigest()

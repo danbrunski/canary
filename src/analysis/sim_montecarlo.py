@@ -53,7 +53,6 @@ from typing import Any, Literal
 
 import numpy as np
 import pandas as pd
-import yaml
 from numpy.random import PCG64, Generator
 from numpy.typing import NDArray
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
@@ -117,6 +116,7 @@ from src.analysis.twin_runner import (
     stated_pulse,
 )
 from src.session import SYNTHETIC_SESSION_PREFIX
+from src.yaml_load import load_yaml
 
 #: Bump when what a result means changes. 2: per-output blanking under a
 #: scoped gate, and held working and design assumptions named (E08.10).
@@ -218,7 +218,7 @@ class LoadedUncertainty:
 
 def load_uncertainty(path: Path) -> LoadedUncertainty:
     text = path.read_bytes()
-    declaration = UncertaintyDeclaration.model_validate(yaml.safe_load(text))
+    declaration = UncertaintyDeclaration.model_validate(load_yaml(text))
     return LoadedUncertainty(declaration, hashlib.sha256(text).hexdigest(), str(path))
 
 

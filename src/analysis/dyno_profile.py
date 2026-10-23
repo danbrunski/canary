@@ -26,6 +26,7 @@ from src.analysis.dyno_driveline import InertiaData
 from src.analysis.dyno_road_load import RoadLoadCoefficients
 from src.analysis.dyno_squat import SquatCoefficient
 from src.atomic_write import atomic_write_text
+from src.yaml_load import load_yaml
 
 if TYPE_CHECKING:
     from src.config import CanaryConfig
@@ -92,7 +93,7 @@ def load_dyno_profile(path: Path) -> DynoProfile | None:
     """
     if not path.exists():
         return None
-    raw = yaml.safe_load(path.read_text())
+    raw = load_yaml(path.read_text())
     if not isinstance(raw, dict):
         kind = "empty" if raw is None else f"a {type(raw).__name__}, not a mapping"
         raise ValueError(f"{path} is {kind}; a dyno profile needs at least schema_version")

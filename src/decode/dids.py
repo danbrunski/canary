@@ -24,7 +24,6 @@ from pathlib import Path
 from typing import Any, Literal
 
 import pandas as pd
-import yaml
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from src.decode import slices
@@ -35,6 +34,7 @@ from src.decode.memory_relations import (
 )
 from src.decode.slices import ByteSlice, LinearScale, PlausibleRange
 from src.paths import DIDS_YAML
+from src.yaml_load import load_yaml
 
 log = logging.getLogger(__name__)
 
@@ -776,7 +776,7 @@ def load_did_map(path: Path) -> DidMap:
 @lru_cache(maxsize=8)
 def _parsed_yaml(path: str, mtime_ns: int, size: int) -> Any:
     del mtime_ns, size  # cache key only
-    return yaml.load(Path(path).read_text(), Loader=getattr(yaml, "CSafeLoader", yaml.SafeLoader))
+    return load_yaml(Path(path).read_text())
 
 
 # The repo catalog accessors (R01.2): the one cached loader of the checked-in

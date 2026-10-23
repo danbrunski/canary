@@ -847,9 +847,9 @@ class MahalanobisBaseline:
 
 def load_curated_channels(path: Path) -> tuple[str, ...]:
     """A profile's curated outlier channels (``channels: [...]``), A04.13."""
-    import yaml
+    from src.yaml_load import load_yaml
 
-    raw = yaml.safe_load(path.read_text()) or {}
+    raw = load_yaml(path.read_text()) or {}
     channels = raw.get("channels")
     if not isinstance(channels, list) or not channels:
         raise ValueError(f"{path}: 'channels' must be a non-empty list")

@@ -60,6 +60,7 @@ import yaml  # noqa: E402
 from src.config import DAEMON_STATE_LAYOUT, CanaryConfig  # noqa: E402
 from src.control.rom_library import RomLibraryError  # noqa: E402
 from src.paths import REPO_ROOT  # noqa: E402
+from src.yaml_load import load_yaml  # noqa: E402
 
 SIM_CONFIG = REPO_ROOT / "canary.sim.example.yaml"
 STATIC_DIR = REPO_ROOT / "src" / "dashboard" / "static"
@@ -143,7 +144,7 @@ def build_config(
     ``sessions/`` then replaces ``collection.storage_path``). Models stay as
     the sim file has them (disabled). Returns the dict that is written."""
     state = resolve_state_dir(state_dir)
-    raw: dict[str, Any] = yaml.safe_load(base.read_text())
+    raw: dict[str, Any] = load_yaml(base.read_text())
     daemon = raw.setdefault("daemon", {})
     for name in DAEMON_STATE_LAYOUT:
         daemon.pop(name, None)

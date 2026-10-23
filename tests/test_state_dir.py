@@ -5,8 +5,6 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-import yaml
-
 from src.config import (
     DAEMON_STATE_LAYOUT,
     DAEMON_TRACKED_PATHS,
@@ -15,6 +13,7 @@ from src.config import (
 )
 from src.paths import REPO_ROOT
 from src.vehicle.profiles import VehicleProfile, operational_dir, scope_config
+from src.yaml_load import load_yaml
 
 EXAMPLE = REPO_ROOT / "canary.example.yaml"
 #: Not a location the daemon writes on its own: the root itself, and the
@@ -23,7 +22,7 @@ UNCLASSIFIED_BY_DESIGN = frozenset({"state_dir", "calibration_dir"})
 
 
 def _config(**daemon: Any) -> CanaryConfig:
-    raw = yaml.safe_load(EXAMPLE.read_text())
+    raw = load_yaml(EXAMPLE.read_text())
     raw.setdefault("daemon", {}).update(daemon)
     return CanaryConfig.model_validate(raw)
 

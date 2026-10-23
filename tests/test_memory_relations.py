@@ -48,6 +48,7 @@ from src.decode.memory_relations import (
     trunc_div,
 )
 from src.paths import DIDS_YAML
+from src.yaml_load import load_yaml
 
 REPO = Path(__file__).resolve().parents[1]
 CATALOG = load_did_map(DIDS_YAML)
@@ -941,12 +942,11 @@ def test_a_refused_reentry_is_unverifiable_and_named() -> None:
 
 
 def _route_config(tmp_path: Path) -> Any:
-    import yaml
 
     from src.config import CanaryConfig
     from src.vehicle.profiles import resolve_profile_for_tooling, scope_config
 
-    raw = yaml.safe_load((REPO / "canary.example.yaml").read_text())
+    raw = load_yaml((REPO / "canary.example.yaml").read_text())
     raw.setdefault("collection", {})["storage_path"] = str(tmp_path / "sessions")
     raw.setdefault("daemon", {})["jobs_dir"] = str(tmp_path / "control" / "jobs")
     raw["daemon"]["afr_calibration"] = str(tmp_path / "data" / "afr_calibration.yaml")

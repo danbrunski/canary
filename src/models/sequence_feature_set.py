@@ -34,11 +34,10 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Literal
 
-import yaml
-
 from src.columns import ROC_SUFFIX, split_rolling
 from src.config import CanaryConfig, require_profile_scoped
 from src.trainability import non_trainable_inputs, source_exclusion_reason
+from src.yaml_load import load_yaml
 
 FEATURE_SET_SCHEMA_KEY = "sequence_feature_set"
 ALL_CHANNELS = "all_channels"
@@ -175,7 +174,7 @@ def load_vehicle_sequence_roles(path: Path | None) -> VehicleSequenceRoles:
     vehicle channel unassigned), which the resolution record then says."""
     if path is None or not path.exists():
         return VehicleSequenceRoles(source=None if path is None else f"{path} (absent)")
-    raw = yaml.safe_load(path.read_text()) or {}
+    raw = load_yaml(path.read_text()) or {}
     channels: dict[str, ChannelRole] = {}
     for role in ROLES:
         for quantity, members in (raw.get(role + "s") or {}).items():

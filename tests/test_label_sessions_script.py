@@ -22,6 +22,7 @@ from src.storage.session_products import (
     FINGERPRINT_FILENAME,  # noqa: E402
 )
 from src.telemetry import TelemetryRecord  # noqa: E402
+from src.yaml_load import load_yaml
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 EXAMPLE_YAML = REPO_ROOT / "canary.example.yaml"
@@ -116,7 +117,7 @@ def _config_path_with_alarm_epoch(tmp_path: Path) -> Path:
     under a profile subdir) with a reference epoch whose ``idle_rpm_mean``
     is far enough from ``_write_session``'s flat 800 rpm that a single
     session already trips the default CUSUM alarm."""
-    data = yaml.safe_load(EXAMPLE_YAML.read_text())
+    data = load_yaml(EXAMPLE_YAML.read_text())
     data["profiles"] = {"enabled": False}
     # The trend-alert hook (unlike --sessions-root) walks
     # ``config.collection.storage_path`` when no override is given — match

@@ -89,6 +89,7 @@ from src.analysis.rom_effects import (
 )
 from src.analysis.rom_image import ImageFormatError, compare_images, load_image, sha256_hex
 from src.analysis.rom_map import DTYPE_BYTES, RomMap, Table
+from src.yaml_load import load_yaml
 
 #: Bump when resolution or the provenance changes meaning.
 TOOL_VERSION = "1"
@@ -277,7 +278,7 @@ def parse_edit_spec(data: Any) -> EditSpec:
 def load_edit_spec(path: Path) -> EditSpec:
     """``path``'s YAML as an :class:`EditSpec`."""
     try:
-        data = yaml.safe_load(Path(path).read_text())
+        data = load_yaml(Path(path).read_text())
     except yaml.YAMLError as exc:
         raise EditSpecRefusalError("spec_invalid", f"{path}: {exc}") from exc
     return parse_edit_spec(data)

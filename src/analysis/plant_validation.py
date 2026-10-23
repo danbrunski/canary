@@ -66,7 +66,6 @@ from typing import Any, Literal
 
 import numpy as np
 import pandas as pd
-import yaml
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from src.analysis.channels import read_channels
@@ -107,6 +106,7 @@ from src.signals.derived import FUEL_PROPERTIES
 from src.signals.pairing import PairingPolicy, match_ordered, to_seconds
 from src.storage.sessions import session_started_at
 from src.vehicle.tune_revisions import TuneRevision, TuneRevisionRegistry, session_dated_at
+from src.yaml_load import load_yaml
 
 INTERVENTIONS_FILE = "plant_interventions.yaml"
 
@@ -850,7 +850,7 @@ class InterventionFile(_Strict):
 
 
 def load_interventions(profile_dir: Path) -> InterventionFile:
-    raw = yaml.safe_load((profile_dir / INTERVENTIONS_FILE).read_text())
+    raw = load_yaml((profile_dir / INTERVENTIONS_FILE).read_text())
     return InterventionFile.model_validate(raw)
 
 

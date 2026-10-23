@@ -47,12 +47,12 @@ from pathlib import Path
 from typing import Literal
 
 import numpy as np
-import yaml
 from numpy.typing import ArrayLike, NDArray
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from src.analysis.fuel_plant import load_fuel_plant
 from src.analysis.sim_contract import SimContract, SimulationRefusalError
+from src.yaml_load import load_yaml
 
 PLANT_FILE = "torque_plant_tq0.yaml"
 SUBSYSTEM = "torque_production"
@@ -228,7 +228,7 @@ class TorquePlantProfile(_Strict):
 def load_torque_plant(profile_dir: Path) -> tuple[TorquePlantProfile, str]:
     """The profile's torque plant declaration and the sha256 of its file."""
     text = (profile_dir / PLANT_FILE).read_bytes()
-    profile = TorquePlantProfile.model_validate(yaml.safe_load(text))
+    profile = TorquePlantProfile.model_validate(load_yaml(text))
     return profile, hashlib.sha256(text).hexdigest()
 
 

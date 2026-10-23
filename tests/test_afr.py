@@ -8,7 +8,6 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 import pytest
-import yaml
 
 from src.config import VehicleParameters
 from src.decode.dids import load_repo_did_map
@@ -33,6 +32,7 @@ from src.signals.afr import (
 )
 from src.signals.vehicle_signals import LoadAxisChannel
 from src.vehicle.tune_revisions import TuneRevision, TuneRevisionRegistry
+from src.yaml_load import load_yaml
 from tests.afr_voltage_chain import baro_columns, transfer, voltage_chain
 
 #: A synthetic vehicle's verified channel for the target map's load axis. The
@@ -527,7 +527,7 @@ def test_a_wide_baro_cell_with_no_arrival_in_the_frame_is_stale() -> None:
 
 
 def test_a_transfer_without_the_gain_or_its_residual_sources_is_refused() -> None:
-    raw = yaml.safe_load(Path("data/nissan-xterra-2008/afr_calibration.yaml").read_text())
+    raw = load_yaml(Path("data/nissan-xterra-2008/afr_calibration.yaml").read_text())
     without_gain = {k: v for k, v in raw.items() if k != "baro_gain"}
     with pytest.raises(ValueError, match="baro_gain is required"):
         AfrCalibration.model_validate(without_gain)
@@ -584,7 +584,7 @@ def test_a_declared_gain_needs_baro_and_a_gain_needs_its_term_declared() -> None
     calibration = _profile_calibration()
     with pytest.raises(ValueError, match="needs baro"):
         voltage_to_afr(pd.Series([2.0]), calibration, baro=None)
-    raw = yaml.safe_load(Path("data/nissan-xterra-2008/afr_calibration.yaml").read_text())
+    raw = load_yaml(Path("data/nissan-xterra-2008/afr_calibration.yaml").read_text())
     transfer_ = dict(raw["voltage_transfer"])
     transfer_["provenance"] = dict(transfer_["provenance"], excludes=[])
     with pytest.raises(ValueError, match="does not name baro_gain"):

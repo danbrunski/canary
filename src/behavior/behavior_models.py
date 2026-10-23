@@ -52,6 +52,7 @@ from src.operating import (
 from src.paths import DATA_DIR
 from src.telemetry import source_of
 from src.trainability import source_exclusion_reason
+from src.yaml_load import load_yaml
 
 log = logging.getLogger(__name__)
 
@@ -1576,7 +1577,7 @@ def load_behavior_policy(path: Path) -> BehaviorPolicy:
     """Load ``behavior_policy.yaml``; a missing file is an empty policy."""
     if not path.exists():
         return BehaviorPolicy()
-    raw = yaml.safe_load(path.read_text()) or {}
+    raw = load_yaml(path.read_text()) or {}
     return BehaviorPolicy.model_validate(raw)
 
 
@@ -1618,7 +1619,7 @@ def load_behavior_models(path: Path) -> BehaviorModels:
     refit, feature pipeline) goes through — so no caller can read an
     artifact without the demotions that govern it.
     """
-    raw = yaml.safe_load(path.read_text())
+    raw = load_yaml(path.read_text())
     models = BehaviorModels.model_validate(raw)
     unmatched = apply_behavior_policy(models, load_behavior_policy(behavior_policy_path(path)))
     if unmatched:

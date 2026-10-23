@@ -51,6 +51,7 @@ from src.analysis.ecu_application import program_sha256
 from src.analysis.paired_scenarios import SimKit, run_paired
 from src.analysis.sim_design import load_design, write_design
 from src.decode.air_charge import TP_SCALE, TP_SCALE_SHIFT
+from src.yaml_load import load_yaml
 from tests.rom_fixtures import PROFILE
 from tests.test_paired_scenarios import LEARNED, WOT, _edit_all, _scenario
 from tests.test_sim_montecarlo import build_kit_and_image
@@ -88,7 +89,7 @@ E076_LEARNED = ["--stft-pct", "0", "--ltft-pct", "2.34", "--candidate-events", "
 
 
 def _yaml(path: Path) -> Any:
-    return yaml.safe_load(path.read_text())
+    return load_yaml(path.read_text())
 
 
 def _with_ceiling(image: bytes, kit: SimKit, byte: int) -> bytes:

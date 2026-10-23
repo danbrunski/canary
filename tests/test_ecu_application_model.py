@@ -20,7 +20,6 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-import yaml
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
@@ -42,6 +41,7 @@ from src.config import CanaryConfig
 from src.dashboard.routes import rom_maps
 from src.decode.dids import load_did_map
 from src.paths import DIDS_YAML
+from src.yaml_load import load_yaml
 
 REPO = Path(__file__).resolve().parents[1]
 PROFILE = REPO / "data" / "nissan-xterra-2008"
@@ -49,7 +49,7 @@ OUTPUT = "target_equiv_ratio"
 
 
 def _raw() -> dict[str, Any]:
-    loaded: dict[str, Any] = yaml.safe_load((PROFILE / "ecu_application_model.yaml").read_text())
+    loaded: dict[str, Any] = load_yaml((PROFILE / "ecu_application_model.yaml").read_text())
     return loaded
 
 
@@ -145,7 +145,7 @@ def test_the_listed_images_are_the_registrys() -> None:
     """Only images a session can run under: tune_revisions.yaml revisions and
     reference images, by both hash and name."""
     model, _ = _model()
-    raw = yaml.safe_load((PROFILE / "tune_revisions.yaml").read_text())
+    raw = load_yaml((PROFILE / "tune_revisions.yaml").read_text())
     registry = {
         **{r["image_sha256"]: r["revision"] for r in raw["revisions"] if r.get("image_sha256")},
         **{r["image_sha256"]: r["name"] for r in raw.get("reference_images", [])},

@@ -26,6 +26,7 @@ from src.config import CanaryConfig  # noqa: E402
 from src.storage.parquet_writer import write_records_to_parquet  # noqa: E402
 from src.storage.session_products import FINGERPRINT_FILENAME, read_fingerprint
 from src.telemetry import TelemetryRecord  # noqa: E402
+from src.yaml_load import load_yaml
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 EXAMPLE_YAML = REPO_ROOT / "canary.example.yaml"
@@ -47,7 +48,7 @@ def _config_path_with_reference_epoch(tmp_path: Path, reference_epoch: Path) -> 
     ``daemon.reference_epoch`` under ``tmp_path`` (the ``trends`` subcommand
     has no ``--out``-style override, unlike ``freeze``). Profiles disabled so
     ``_scoped_config`` doesn't rewrite the path under a profile slug."""
-    data = yaml.safe_load(EXAMPLE_YAML.read_text())
+    data = load_yaml(EXAMPLE_YAML.read_text())
     data.setdefault("daemon", {})["reference_epoch"] = str(reference_epoch)
     # ``trends`` opens the session catalog; keep it off data/control (R07.2).
     data["daemon"]["catalog_db"] = str(tmp_path / "catalog.db")

@@ -49,6 +49,7 @@ from src.vehicle.profiles import (
     update_profile_name,
     vehicle_block_slug,
 )
+from src.yaml_load import load_yaml
 from tests.configs import isolated_config
 
 NA_VIN = "1M8GDM9AXKP042788"
@@ -87,7 +88,7 @@ def _write_tracked(registry: ProfilesConfig, *profiles: VehicleProfile) -> None:
 
 
 def _overlay_file(registry: ProfilesConfig) -> dict[str, Any]:
-    return dict(yaml.safe_load(registry.registry_overlay_path.read_text()))
+    return dict(load_yaml(registry.registry_overlay_path.read_text()))
 
 
 def _slugs(registry: ProfilesConfig) -> list[str]:

@@ -118,6 +118,7 @@ from src.analysis.sim_montecarlo import (
     run_monte_carlo,
 )
 from src.vehicle.tune_revisions import TuneRevisionRegistry
+from src.yaml_load import load_yaml
 
 #: Bump when a payload's meaning changes.
 TOOL_VERSION = "1"
@@ -831,7 +832,7 @@ def typical_values(profile_dir: Path) -> dict[str, Any]:
             "values, and none are assumed",
         ) from exc
     try:
-        declared = TypicalValuesDeclaration.model_validate(yaml.safe_load(raw))
+        declared = TypicalValuesDeclaration.model_validate(load_yaml(raw))
     except (yaml.YAMLError, ValidationError) as exc:
         problems = (
             [

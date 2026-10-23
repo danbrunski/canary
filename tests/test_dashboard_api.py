@@ -9,7 +9,6 @@ from typing import Any
 import pyarrow as pa
 import pyarrow.parquet as pq
 import pytest
-import yaml
 from fastapi.testclient import TestClient
 
 from src.alerts.event_logger import AnomalyEventLogger
@@ -25,6 +24,7 @@ from src.dashboard.api import (
 )
 from src.dashboard.status import compact_status, gather_status_sources
 from src.storage.parquet_writer import TELEMETRY_SCHEMA
+from src.yaml_load import load_yaml
 from tests.configs import isolated_config, scoped_test_config
 
 # ---------------------------------------------------------------------------
@@ -1372,7 +1372,7 @@ dids:
 
 def _config_with_dids(tmp_path: Path, storage: Path, dids: str) -> CanaryConfig:
     # Parsed as YAML, as a config file would be: a bare 0x1219 is an int.
-    return _config(tmp_path, storage, collection={"obd_dids": yaml.safe_load(f"[{dids}]")})
+    return _config(tmp_path, storage, collection={"obd_dids": load_yaml(f"[{dids}]")})
 
 
 def test_dids_endpoint_reports_which_dids_are_polled(anomalies_dir: Path, tmp_path: Path) -> None:

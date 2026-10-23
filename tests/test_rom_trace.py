@@ -65,6 +65,7 @@ from src.storage.capture_manifest import CAPTURE_MANIFEST_FILENAME
 from src.storage.parquet_writer import write_records_to_parquet
 from src.telemetry import TelemetryRecord
 from src.vehicle.tune_revisions import load_tune_revisions
+from src.yaml_load import load_yaml
 
 BINDINGS = Path("data/bindings.yaml")
 DIDS = Path("data/dids.yaml")
@@ -606,7 +607,7 @@ def test_residency_names_an_unknown_revision(tmp_path: Path) -> None:
 def _profile(tmp_path: Path, *, verified: bool) -> Path:
     profile = tmp_path / "profile"
     profile.mkdir(exist_ok=True)
-    viewer = yaml.safe_load((PROFILE / "rom_viewer.yaml").read_text())
+    viewer = load_yaml((PROFILE / "rom_viewer.yaml").read_text())
     trace = _verified_trace() if verified else _unverified_trace()
     viewer["tables"][0]["trace"] = trace.model_dump(exclude_none=True)
     (profile / "rom_viewer.yaml").write_text(yaml.safe_dump(viewer))

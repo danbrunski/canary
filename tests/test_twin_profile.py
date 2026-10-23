@@ -27,7 +27,6 @@ from pathlib import Path
 
 import numpy as np
 import pytest
-import yaml
 
 from src.analysis.ecu_application import (
     ApplicationModel,
@@ -60,6 +59,7 @@ from src.collection.obd_scheduler import (
 from src.config import CanaryConfig, CanBusConfig, CollectionConfig
 from src.decode.dids import DidMap, MemoryChannel, load_did_map
 from src.paths import DIDS_YAML
+from src.yaml_load import load_yaml
 from tests.capture_round_fakes import FakeClock, ScriptedEcu, install_clock
 from tests.test_memory_catalog_knock_lambda import LIVE_READ_METHODS
 
@@ -283,7 +283,7 @@ def model() -> ApplicationModel:
 
 @pytest.fixture(scope="module")
 def twin_profile() -> CaptureProfile:
-    catalog = CaptureProfileCatalog.model_validate(yaml.safe_load(CATALOG_PATH.read_text()))
+    catalog = CaptureProfileCatalog.model_validate(load_yaml(CATALOG_PATH.read_text()))
     profile = catalog.by_name("twin")
     assert profile is not None
     return profile
@@ -642,7 +642,7 @@ def simulate(
     answering in 10 ms. Mode 06 is refused at once, so its discovery never
     waits out a timeout the truck does not have. Requests come back on the
     readings' (wall) clock; ``metrics`` collects the scheduler snapshots."""
-    tracked = CaptureProfileCatalog.model_validate(yaml.safe_load(CATALOG_PATH.read_text()))
+    tracked = CaptureProfileCatalog.model_validate(load_yaml(CATALOG_PATH.read_text()))
     catalog = tracked.model_copy(
         update={"profiles": [profile if p.name == profile.name else p for p in tracked.profiles]}
     )

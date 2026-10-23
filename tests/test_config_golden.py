@@ -57,7 +57,6 @@ from pathlib import Path
 from typing import Annotated, Any, Literal, Union, get_args, get_origin
 
 import pytest
-import yaml
 from pydantic import BaseModel, ValidationError
 from pydantic_core import PydanticUndefined
 
@@ -81,6 +80,7 @@ from src.config import (
     validate_broadcast_stale_timeout,
 )
 from src.paths import REPO_ROOT
+from src.yaml_load import load_yaml
 
 GOLDEN = Path(__file__).parent / "fixtures" / "config_golden.json"
 REPO = Path(__file__).resolve().parents[1]
@@ -375,7 +375,7 @@ def _with_typo(data: dict[str, Any], path: tuple[str, ...]) -> dict[str, Any]:
 
 
 def _strict() -> dict[str, Any]:
-    data = yaml.safe_load(EXAMPLES["example"].read_text())
+    data = load_yaml(EXAMPLES["example"].read_text())
     record: dict[str, Any] = {}
     for path in _mapping_paths(data):
         record["/".join(path) or "<root>"] = _outcome(
@@ -394,7 +394,7 @@ def _strict() -> dict[str, Any]:
 
 
 def _example() -> dict[str, Any]:
-    data = yaml.safe_load(EXAMPLES["example"].read_text())
+    data = load_yaml(EXAMPLES["example"].read_text())
     assert isinstance(data, dict)
     return data
 

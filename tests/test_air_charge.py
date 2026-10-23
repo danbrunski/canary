@@ -17,11 +17,11 @@ from pathlib import Path
 
 import pandas as pd
 import pytest
-import yaml
 
 from src.analysis import air_charge_twin as twin
 from src.analysis.ecu_application import load_application_model
 from src.decode import air_charge as ac
+from src.yaml_load import load_yaml
 
 REPO = Path(__file__).resolve().parents[1]
 PROFILE = REPO / "data" / "nissan-xterra-2008"
@@ -376,7 +376,7 @@ def test_bfs_is_a_conditional_output_and_target_phi_did_not_move() -> None:
 def test_every_inventoried_air_charge_kernel_exists_and_is_python_only() -> None:
     """The contract lists each E05.2 kernel as Python-only (no operation, no
     Rust symbol, no vectors) and names that gap as a blocker."""
-    contract = yaml.safe_load((REPO / "data" / "ecu_twin_contract.yaml").read_text())
+    contract = load_yaml((REPO / "data" / "ecu_twin_contract.yaml").read_text())
     listed = {
         e["python"].split(":")[1]
         for e in contract["inventory"]

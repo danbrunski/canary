@@ -30,6 +30,7 @@ from src.features.feature_pipeline import (
     trainable_feature_columns as _trainable_feature_columns,
 )
 from src.storage.parquet_writer import TELEMETRY_SCHEMA
+from src.yaml_load import load_yaml
 from tests.configs import example_config
 
 # ---------------------------------------------------------------------------
@@ -514,7 +515,7 @@ def _one_drive_config(tmp_path: Path) -> str:
     CLI tests train on one synthetic session."""
     import yaml
 
-    raw = yaml.safe_load(Path("canary.example.yaml").read_text())
+    raw = load_yaml(Path("canary.example.yaml").read_text())
     block = raw["models"]["isolation_forest"]
     block["min_training_drives_per_mode"] = 1
     block["min_calibration_drives_per_mode"] = 1

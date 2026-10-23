@@ -16,10 +16,10 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Literal
 
-import yaml
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from src.collection.kline import protocol as kp
+from src.yaml_load import load_yaml
 
 
 class _Strict(BaseModel):
@@ -549,7 +549,7 @@ def load_kline_profile(path: Path) -> KlineProfile:
         raise KlineNotConfiguredError(
             f"K-line not configured for this vehicle: {path} does not exist"
         )
-    raw = yaml.safe_load(path.read_text())
+    raw = load_yaml(path.read_text())
     return KlineProfile.model_validate(raw)
 
 

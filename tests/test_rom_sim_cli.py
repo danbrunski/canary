@@ -40,6 +40,7 @@ from src.analysis.sim_cells import CellTable
 from src.analysis.sim_montecarlo import load_sim_kit
 from src.analysis.sim_report import render_report
 from src.session import is_synthetic_session
+from src.yaml_load import load_yaml
 from tests.rom_fixtures import PROFILE, encrypted_backup_lookalike
 from tests.test_sim_montecarlo import build_kit_and_image
 from tools import rom_sim
@@ -71,7 +72,7 @@ TIMING_ARGS = ("--high-det", "clear", "--knock-control", "active", "--timing-coo
 
 
 def _yaml(path: Path) -> Any:
-    return yaml.safe_load(path.read_text())
+    return load_yaml(path.read_text())
 
 
 @pytest.fixture(scope="module")

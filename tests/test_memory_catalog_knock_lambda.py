@@ -14,7 +14,6 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-import yaml
 from pydantic import ValidationError
 
 from src.collection.can_obd_client import ObdResponse
@@ -30,6 +29,7 @@ from src.decode.dids import (
     plan_memory_reads,
 )
 from src.paths import DIDS_YAML
+from src.yaml_load import load_yaml
 
 REPO = Path(__file__).resolve().parents[1]
 CATALOG = load_did_map(DIDS_YAML)
@@ -153,7 +153,7 @@ def test_selecting_the_old_members_still_sends_the_old_requests() -> None:
     """Widening fuel_target and flags_2841 changes no saved profile's request:
     a read is planned from the members a profile selects, and the window
     names (which the Pi's saved profiles poll under) are unchanged."""
-    tuning = yaml.safe_load((REPO / "data/nissan-xterra-2008/capture_profiles.yaml").read_text())
+    tuning = load_yaml((REPO / "data/nissan-xterra-2008/capture_profiles.yaml").read_text())
     selected = next(p for p in tuning["profiles"] if p["name"] == "tuning")["memory"]
     reads = {r.name: r for r in plan_memory_reads([BY_NAME[n] for n in selected])}
     assert (reads["fuel_target"].address, reads["fuel_target"].length) == (0xFFFF26AE, 18)
@@ -255,7 +255,7 @@ def test_a_profile_polls_only_live_read_channels(path: Path) -> None:
     hypothesized AND carries live-read evidence. Code-verified is not enough:
     on 2026-10-08 the knock_chain, knock_detect and knock_intensity windows
     were added to `tuning` before any read covered them."""
-    profiles = yaml.safe_load(path.read_text()).get("profiles", [])
+    profiles = load_yaml(path.read_text()).get("profiles", [])
     assert _profiles_breaking_the_live_read_rule(profiles) == []
 
 
@@ -263,7 +263,7 @@ def test_the_live_read_rule_refuses_an_unread_knock_channel() -> None:
     """The rule can fail: an unread intensity word inserted into `tuning`
     breaks it."""
     path = REPO / "data/nissan-xterra-2008/capture_profiles.yaml"
-    tuning = next(p for p in yaml.safe_load(path.read_text())["profiles"] if p["name"] == "tuning")
+    tuning = next(p for p in load_yaml(path.read_text())["profiles"] if p["name"] == "tuning")
     mutated = {**tuning, "memory": [*tuning["memory"], "ECM_KNOCK_INTENSITY_IDX1"]}
     assert _profiles_breaking_the_live_read_rule([tuning]) == []
     assert _profiles_breaking_the_live_read_rule([mutated]) == [

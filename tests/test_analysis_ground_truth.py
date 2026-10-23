@@ -37,10 +37,11 @@ from src.decode.bindings import load_bindings
 from src.decode.dids import load_did_map
 from src.preprocessing.loader import read_session
 from src.storage.broadcast_storage import ChangeOnlyStorageError, change_only_copy
+from src.yaml_load import load_yaml
 
 BINDINGS_PATH = Path("data/bindings.yaml")
 FIXTURE_ROOT = Path(__file__).parent / "fixtures" / "ground_truth"
-EXPECTATIONS = yaml.safe_load((FIXTURE_ROOT / "expectations.yaml").read_text())
+EXPECTATIONS = load_yaml((FIXTURE_ROOT / "expectations.yaml").read_text())
 SESSION = FIXTURE_ROOT / EXPECTATIONS["fixture"]
 
 #: Acquisition tolerance for pairing a ~1 Hz Mode 01 PID against the fixture's
@@ -635,7 +636,7 @@ def test_did_agrees_with_its_independent_reference(
 
 
 def _did_catalog_with(tmp_path: Path, did: int, **changes: Any) -> Path:
-    raw = yaml.safe_load(DIDS_PATH.read_text())
+    raw = load_yaml(DIDS_PATH.read_text())
     entry = next(e for e in raw["dids"] if e["did"] == did)
     entry.update(changes)
     path = tmp_path / "dids.yaml"

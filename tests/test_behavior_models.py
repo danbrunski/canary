@@ -23,6 +23,7 @@ from src.behavior.behavior_models import (
     flatten_grid,
     load_behavior_models,
 )
+from src.yaml_load import load_yaml
 
 # ---------------------------------------------------------------------------
 # Minimal fixtures used across the suite
@@ -375,9 +376,8 @@ def test_shipped_air_charge_surface_is_revision_scoped() -> None:
     # Scoped to one registered calibration. Not necessarily the newest: a
     # flash is recorded before any drive on it exists to refit from
     # (ZS44A-20261004 was flashed after the 2026-09-23 refresh).
-    import yaml
 
-    revisions = yaml.safe_load(
+    revisions = load_yaml(
         (
             Path(__file__).resolve().parents[1] / "data/nissan-xterra-2008/tune_revisions.yaml"
         ).read_text()

@@ -36,7 +36,6 @@ from typing import Any, Literal, NamedTuple
 
 import numpy as np
 import pandas as pd
-import yaml
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from src.analysis.channels import ChannelSpecError, as_of_refusal, read_channels
@@ -45,6 +44,7 @@ from src.decode.dids import MEMORY_SOURCE, DidMap, load_did_map
 from src.decode.ecm_lookup import AxisEdge, search_axis
 from src.decode.slices import linear_factors
 from src.signals.pairing import PairingPolicy, match_ordered, to_seconds
+from src.yaml_load import load_yaml
 
 TableKind = Literal["fuel_targets", "fuel_compensation"]
 
@@ -183,9 +183,7 @@ class ViewerDefinition(_Strict):
 
 def load_viewer_definition(profile_dir: Path) -> ViewerDefinition:
     """The vehicle profile's ``rom_viewer.yaml``. Raises ``FileNotFoundError``."""
-    return ViewerDefinition.model_validate(
-        yaml.safe_load((profile_dir / "rom_viewer.yaml").read_text())
-    )
+    return ViewerDefinition.model_validate(load_yaml((profile_dir / "rom_viewer.yaml").read_text()))
 
 
 def request_channel(spec: str, dids_path: Path) -> str | None:

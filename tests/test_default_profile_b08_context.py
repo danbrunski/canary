@@ -37,7 +37,6 @@ from collections.abc import Iterable
 from pathlib import Path
 
 import pytest
-import yaml
 
 from src.collection import bus_budget, tuning_profile
 from src.collection.can_obd_collector import run_can_obd_loop
@@ -48,6 +47,7 @@ from src.collection.obd_scheduler import CanObdSpec, did_alias_table, profile_di
 from src.config import CanBusConfig, CollectionConfig
 from src.decode.dids import MEMORY_SOURCE, plan_memory_reads, select_memory_channels
 from src.features.feature_pipeline import MEMORY_FEATURE_PREFIX
+from src.yaml_load import load_yaml
 from tests.capture_round_fakes import FakeClock, ScriptedEcu, install_clock, support_bits
 
 REPO = Path(__file__).resolve().parents[1]
@@ -78,7 +78,7 @@ B08_MEMORY = (
 
 
 def _catalog() -> CaptureProfileCatalog:
-    return CaptureProfileCatalog.model_validate(yaml.safe_load(CATALOG.read_text()))
+    return CaptureProfileCatalog.model_validate(load_yaml(CATALOG.read_text()))
 
 
 def _default() -> CaptureProfile:
@@ -100,7 +100,7 @@ def _learned_memory_channels(manifest: Path) -> set[str]:
 def _coordinate_tuple() -> tuple[tuple[str, ...], float]:
     """The timing-trim lookup's rows, columns and selector channels, and its
     tuple skew limit, from the data that declares them."""
-    context = yaml.safe_load(CONTEXT.read_text())
+    context = load_yaml(CONTEXT.read_text())
     timing = context["timing_trim"]
     inputs = context["inputs"]
     names = (timing["rows"]["input"], timing["columns"]["input"], timing["select_input"])

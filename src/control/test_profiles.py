@@ -22,6 +22,8 @@ from typing import Literal
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
+from src.yaml_load import load_yaml
+
 
 class _Strict(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -95,7 +97,7 @@ def load_test_profiles(directory: Path) -> TestProfileCatalog:
     seen: dict[str, str] = {}
     for path in sorted([*directory.glob("*.yaml"), *directory.glob("*.yml")]):
         try:
-            raw = yaml.safe_load(path.read_text())
+            raw = load_yaml(path.read_text())
             if raw is None:
                 raise ValueError("empty file")
             profile = TestProfile.model_validate(raw)

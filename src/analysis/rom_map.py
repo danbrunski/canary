@@ -30,10 +30,10 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Literal
 
-import yaml
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from src.analysis.rom_targets import Checksums, Definition
+from src.yaml_load import load_yaml
 
 #: File name of the map definition in a vehicle profile directory.
 ROM_MAP_FILE = "rom_map.yaml"
@@ -608,10 +608,10 @@ def load_rom_map(profile_dir: Path) -> RomMap:
     ``ValueError`` (naming the problem) when it is invalid.
     """
     path = profile_dir / ROM_MAP_FILE
-    rom_map = RomMap.model_validate(yaml.safe_load(path.read_text()))
+    rom_map = RomMap.model_validate(load_yaml(path.read_text()))
     targets_path = profile_dir / "rom_targets.yaml"
     if targets_path.exists():
-        targets = Definition.model_validate(yaml.safe_load(targets_path.read_text()))
+        targets = Definition.model_validate(load_yaml(targets_path.read_text()))
         check_against_targets(rom_map, targets)
     return rom_map
 

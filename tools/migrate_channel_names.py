@@ -63,7 +63,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-import yaml
+from src.yaml_load import load_yaml
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_MAP = Path(__file__).resolve().parent / "channel_renames" / "2026-09-18-fuel-relabel.yaml"
@@ -175,7 +175,7 @@ MAP_SECTIONS = ("channels", "identifiers", "memory_channels")
 
 
 def load_rename_map(path: Path) -> RenameMap:
-    raw = yaml.safe_load(path.read_text())
+    raw = load_yaml(path.read_text())
     if not isinstance(raw, dict) or set(raw) - set(MAP_SECTIONS):
         raise MapError(f"{path}: expected only {', '.join(repr(s) for s in MAP_SECTIONS)}")
     channels = _str_map(raw.get("channels"), "channels")
@@ -205,7 +205,7 @@ def check_against_catalog(rename_map: RenameMap, dids_path: Path) -> list[str]:
     is a memory channel, and the source no longer names any channel (memory
     and DID names share one namespace, ``DidMap._unique_channel_names``).
     """
-    raw = yaml.safe_load(dids_path.read_text())
+    raw = load_yaml(dids_path.read_text())
     current: set[str] = set()
     former: set[str] = set()
     for entry in raw.get("dids", []):

@@ -28,6 +28,7 @@ import pytest
 import yaml
 
 from src.telemetry import TelemetryRecord
+from src.yaml_load import load_yaml
 from tests.configs import example_config
 
 REPO = Path(__file__).resolve().parents[1]
@@ -226,7 +227,7 @@ def test_the_derived_numeric_frame_decodes_on_read_and_versions_by_the_catalog(
     store = DerivedStore(tmp_path / "derived")
     assert store.load_numeric(copies["stripped"], resample)[1].status == "reused"
 
-    catalog = yaml.safe_load((REPO / "data" / "bindings.yaml").read_text())
+    catalog = load_yaml((REPO / "data" / "bindings.yaml").read_text())
     for signal in catalog["signals"]:
         if signal["name"] == "ECM_RPM":
             signal["byte_start"] = 0
@@ -246,7 +247,7 @@ def test_a_binding_edit_reaches_old_and_new_sessions_alike(
     from src.decode import on_read
     from src.preprocessing.loader import read_session
 
-    catalog = yaml.safe_load((REPO / "data" / "bindings.yaml").read_text())
+    catalog = load_yaml((REPO / "data" / "bindings.yaml").read_text())
     for signal in catalog["signals"]:
         if signal["name"] == "ECM_RPM":
             signal["byte_start"] = 0
@@ -432,7 +433,7 @@ def test_a_saved_catalog_carrying_broadcast_decode_loads_and_says_so(
     from src.collection.capture_profiles import CaptureProfileSources, load_capture_profiles
 
     config = example_config(REPO / "canary.example.yaml")
-    saved = yaml.safe_load((REPO / "data" / "capture_profiles.yaml").read_text())
+    saved = load_yaml((REPO / "data" / "capture_profiles.yaml").read_text())
     for profile in saved["profiles"]:
         profile["broadcast_decode"] = True
     path = tmp_path / "capture_profiles.yaml"

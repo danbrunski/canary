@@ -17,8 +17,6 @@ from functools import partial
 from pathlib import Path
 from typing import Any, Literal, Protocol
 
-import yaml
-
 from src.atomic_write import atomic_write_text
 from src.collection.obd_scheduler.spec import DidSessionSpec
 from src.decode.dids import (
@@ -40,6 +38,7 @@ from src.decode.memory_relations import (
     MemoryRelation,
     Mode01PidRelation,
 )
+from src.yaml_load import load_yaml
 
 
 class MemoryVerificationClient(Protocol):
@@ -864,7 +863,7 @@ def restamp(dids_path: Path, stamps: dict[str, str | None], revision: str) -> in
     if not changed:
         return 0
     try:
-        DidMap.model_validate(yaml.safe_load(text))
+        DidMap.model_validate(load_yaml(text))
     except Exception as exc:
         raise RestampRefusedError(f"the stamped catalog would not load: {exc}") from exc
     atomic_write_text(dids_path, text, mkdir=True)

@@ -88,7 +88,14 @@ SECTION_SCHEMAS = frozenset(
     {"vehicle", "hardware", "collection", "preprocessing", "models", "daemon", "auxiliary"}
 )
 #: ``src`` modules the package may import, and the third-party roots.
-ALLOWED_SRC = frozenset({"src.paths", "src.lsm6dsox_settings"})
+ALLOWED_SRC = frozenset(
+    {
+        "src.paths",
+        "src.lsm6dsox_settings",
+        # The repo's one YAML loader (tests/test_yaml_load.py): yaml alone.
+        "src.yaml_load",
+    }
+)
 ALLOWED_THIRD_PARTY = frozenset({"pydantic", "yaml"})
 
 #: Every name ``src/config.py`` defined at the commit before R21, public and

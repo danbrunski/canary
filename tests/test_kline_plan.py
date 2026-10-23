@@ -7,11 +7,11 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-import yaml
 
 from src.collection.kline.plan import KlinePlanError, resolve_module_plan, split_module
 from src.collection.kline.profile import KlineProfile, load_kline_profile
 from src.decode.dids import load_did_map
+from src.yaml_load import load_yaml
 
 PROFILE_PATH = Path("data/nissan-xterra-2008/kline.yaml")
 PROFILE = load_kline_profile(PROFILE_PATH)
@@ -19,7 +19,7 @@ DIDS = load_did_map(Path("data/dids.yaml"))
 
 
 def _profile(edit: Any) -> KlineProfile:
-    doc = yaml.safe_load(PROFILE_PATH.read_text())
+    doc = load_yaml(PROFILE_PATH.read_text())
     edit(doc)
     return KlineProfile.model_validate(doc)
 

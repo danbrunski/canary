@@ -13,15 +13,15 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-import yaml
 
 from src.collection.can_obd_client import decode_baro, decode_percent_b_minus_128
 from src.collection.can_obd_collector import _batched_pid_width
 from src.collection.isotp import split_batched_response
 from src.collection.obd_registry import MODE01_REGISTRY
+from src.yaml_load import load_yaml
 
 _TABLE_PATH = Path(__file__).parent / "fixtures" / "j1979_mode01_widths.yaml"
-J1979_WIDTHS: dict[int, int] = yaml.safe_load(_TABLE_PATH.read_text())
+J1979_WIDTHS: dict[int, int] = load_yaml(_TABLE_PATH.read_text())
 
 
 def test_the_table_is_keyed_by_integer_pid() -> None:

@@ -60,7 +60,6 @@ from typing import Annotated, Any, Literal
 
 import numpy as np
 import pandas as pd
-import yaml
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from src.analysis.ecu_application import (
@@ -91,6 +90,7 @@ from src.decode.fuel_comp_load import BYTE_SHIFT, LOW_CURVE_MULTIPLIER, X_SPLIT
 from src.decode.slices import SENTINEL_SUFFIX, linear_factors
 from src.paths import DIDS_YAML
 from src.signals.pairing import to_seconds
+from src.yaml_load import load_yaml
 
 #: Bumped when the evaluator's record shape, reasons or contract change.
 #: 3 (B08.4): records carry ``timing_coordinate``, the image-free rpm word x
@@ -335,7 +335,7 @@ def load_context_definition(profile_dir: Path) -> tuple[ContextDefinition, str]:
     """The profile's context definition and the sha256 of its file.
     ``FileNotFoundError`` when the vehicle declares none."""
     text = (profile_dir / CONTEXT_FILE).read_bytes()
-    return ContextDefinition.model_validate(yaml.safe_load(text)), hashlib.sha256(text).hexdigest()
+    return ContextDefinition.model_validate(load_yaml(text)), hashlib.sha256(text).hexdigest()
 
 
 # -- catalog decodes ---------------------------------------------------------------

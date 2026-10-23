@@ -42,7 +42,6 @@ from collections.abc import Iterable
 from pathlib import Path
 
 import pytest
-import yaml
 
 from src.collection import tuning_profile
 from src.collection.can_obd_collector import run_can_obd_loop
@@ -61,6 +60,7 @@ from src.collection.obd_scheduler import (
     profile_did_union,
 )
 from src.config import CanBusConfig, CollectionConfig
+from src.yaml_load import load_yaml
 from tests.capture_round_fakes import FakeClock, ScriptedEcu, install_clock, support_bits
 
 CATALOG = Path("data/nissan-xterra-2008/capture_profiles.yaml")
@@ -104,7 +104,7 @@ def clock(monkeypatch: pytest.MonkeyPatch) -> FakeClock:
 
 
 def _catalog() -> CaptureProfileCatalog:
-    return CaptureProfileCatalog.model_validate(yaml.safe_load(CATALOG.read_text()))
+    return CaptureProfileCatalog.model_validate(load_yaml(CATALOG.read_text()))
 
 
 def _pid(channel: str) -> int:

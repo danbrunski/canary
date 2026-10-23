@@ -49,6 +49,7 @@ from src.vehicle.profiles import (
     update_profile,
 )
 from src.vehicle.vin import InvalidVinError, inspect_vin, validate_vin
+from src.yaml_load import load_yaml
 from tests.capture_round_fakes import FakeClock, ScriptedEcu, install_clock, isotp_frames
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -109,7 +110,7 @@ def _xterra(**params: Any) -> VehicleProfile:
 
 
 def _overlay(registry: ProfilesConfig) -> list[dict[str, Any]]:
-    return list(yaml.safe_load(registry.registry_overlay_path.read_text())["profiles"])
+    return list(load_yaml(registry.registry_overlay_path.read_text())["profiles"])
 
 
 # ---------------------------------------------------------------------------

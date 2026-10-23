@@ -32,6 +32,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from src.atomic_write import atomic_write_text
 from src.evidence.floors import floor_source_ref
 from src.evidence.records import DETECTABLE_SIGMA, NoiseFloorRef, Quantity
+from src.yaml_load import load_yaml
 
 
 class _Strict(BaseModel):
@@ -197,7 +198,7 @@ def load_noise_floor(path: Path) -> NoiseFloor | None:
     """Load a floor, or ``None`` when none has been measured for this vehicle."""
     if not path.exists():
         return None
-    return NoiseFloor.model_validate(yaml.safe_load(path.read_text()))
+    return NoiseFloor.model_validate(load_yaml(path.read_text()))
 
 
 def save_noise_floor(path: Path, floor: NoiseFloor) -> None:
@@ -291,7 +292,7 @@ def floor_reference(
             )
         )
     raw = source_path.read_bytes()
-    floor = NoiseFloor.model_validate(yaml.safe_load(raw))
+    floor = NoiseFloor.model_validate(load_yaml(raw))
     entry = floor.channels.get(channel)
     if entry is None or entry.conditions != conditions:
         refusal = floor.significance(channel, pd.Series(dtype=float), conditions=conditions)

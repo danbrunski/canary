@@ -16,6 +16,7 @@ from src.models import training_entry
 from src.models.sequence_training import ValidationChoice
 from src.storage.parquet_writer import write_records_to_parquet
 from src.telemetry import TelemetryRecord
+from src.yaml_load import load_yaml
 from tests.configs import example_config
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -53,7 +54,7 @@ def test_a_column_seen_only_in_validation_is_not_a_feature_and_is_named(
     """2026-09-23: a channel polled only on the validation drive left the
     training rows with no value for it, and the scaler fit raised, killing the
     retrain. Such a column is dropped and recorded in the schema."""
-    data = yaml.safe_load((REPO_ROOT / "canary.example.yaml").read_text())
+    data = load_yaml((REPO_ROOT / "canary.example.yaml").read_text())
     data["models"]["lstm_autoencoder"].update({"sequence_length": 6, "validation_fraction": 0.3})
     config_path = tmp_path / "canary.yaml"
     config_path.write_text(yaml.safe_dump(data))
@@ -120,7 +121,7 @@ def test_parked_rows_neither_train_nor_validate(
     near are dropped at the training entry, before the validation split."""
     from src.preprocessing.drives import DRIVE_COLUMN
 
-    data = yaml.safe_load((REPO_ROOT / "canary.example.yaml").read_text())
+    data = load_yaml((REPO_ROOT / "canary.example.yaml").read_text())
     data["models"]["lstm_autoencoder"].update({"sequence_length": 6, "validation_fraction": 0.3})
     config_path = tmp_path / "canary.yaml"
     config_path.write_text(yaml.safe_dump(data))
@@ -172,7 +173,7 @@ def test_a_tail_block_validation_never_moves_the_scaler(
     the rows before the tail, and says where it stopped per session."""
     from src.models.sequence_training import validation_split
 
-    data = yaml.safe_load((REPO_ROOT / "canary.example.yaml").read_text())
+    data = load_yaml((REPO_ROOT / "canary.example.yaml").read_text())
     data["models"]["lstm_autoencoder"].update(
         {"sequence_length": 6, "validation_fraction": 0.25, "training_stride": 1}
     )
@@ -241,7 +242,7 @@ def test_both_trainers_exclude_a_once_a_minute_channel_and_name_why(
     reason; the 1 Hz channels are kept by both."""
     from src.features.feature_pipeline import COVERAGE_FLOOR_SCHEMA_KEY, SPARSE_FOR_GRID
 
-    data = yaml.safe_load((REPO_ROOT / "canary.example.yaml").read_text())
+    data = load_yaml((REPO_ROOT / "canary.example.yaml").read_text())
     data["models"]["lstm_autoencoder"].update({"sequence_length": 6, "validation_fraction": 0.3})
     config_path = tmp_path / "canary.yaml"
     config_path.write_text(yaml.safe_dump(data))

@@ -51,6 +51,7 @@ from src.dashboard.routes.rom_library import (
 from src.paths import REPO_ROOT
 from src.vehicle.platforms import vehicle_data_file
 from src.vehicle.profiles import read_registry_file
+from src.yaml_load import load_yaml
 from tests.configs import isolated_config
 from tests.rom_fixtures import PROFILE, xterra_map
 
@@ -404,10 +405,10 @@ def test_every_shipped_xterra_n50_profile_finds_the_shared_recipe() -> None:
 
 def test_a_recipe_that_misses_part_of_the_image_is_refused(tmp_path: Path) -> None:
     profile = _write_profile(tmp_path)
-    data = yaml.safe_load((profile / "rom_backup.yaml").read_text())
+    data = load_yaml((profile / "rom_backup.yaml").read_text())
     data["read"]["end"] = SMALL_SIZE - 2
     (profile / "rom_backup.yaml").write_text(yaml.safe_dump(data))
-    rom_map = RomMap.model_validate(yaml.safe_load((profile / "rom_map.yaml").read_text()))
+    rom_map = RomMap.model_validate(load_yaml((profile / "rom_map.yaml").read_text()))
     with pytest.raises(ValueError, match="the image is 0x000000-0x0007FF"):
         load_backup_recipe(profile / ROM_BACKUP_FILE, rom_map)
     # Without a map the range is the image: any whole range from 0 loads.
@@ -416,7 +417,7 @@ def test_a_recipe_that_misses_part_of_the_image_is_refused(tmp_path: Path) -> No
 
 def test_without_a_map_a_recipe_must_still_start_at_zero(tmp_path: Path) -> None:
     profile = _write_profile(tmp_path, rom_map=False)
-    data = yaml.safe_load((profile / "rom_backup.yaml").read_text())
+    data = load_yaml((profile / "rom_backup.yaml").read_text())
     data["read"]["start"] = 0x100
     (profile / "rom_backup.yaml").write_text(yaml.safe_dump(data))
     with pytest.raises(ValueError, match="reads from 0x000100; an image starts at 0x000000"):
@@ -425,7 +426,7 @@ def test_without_a_map_a_recipe_must_still_start_at_zero(tmp_path: Path) -> None
 
 def test_a_diagnostic_id_cannot_stand_for_an_ecm_broadcast(tmp_path: Path) -> None:
     profile = _write_profile(tmp_path, ecm_broadcast_ids=[0x551, RESPONSE_ID])
-    rom_map = RomMap.model_validate(yaml.safe_load((profile / "rom_map.yaml").read_text()))
+    rom_map = RomMap.model_validate(load_yaml((profile / "rom_map.yaml").read_text()))
     with pytest.raises(ValueError, match="0x7E8 is a diagnostic id"):
         load_backup_recipe(profile / ROM_BACKUP_FILE, rom_map)
 

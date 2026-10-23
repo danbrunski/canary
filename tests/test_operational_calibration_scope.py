@@ -46,6 +46,7 @@ from src.vehicle.profiles import (
     source_registry_path,
 )
 from src.vehicle.tune_revisions import TuneRevision, load_tune_revisions
+from src.yaml_load import load_yaml
 
 XTERRA = "nissan-xterra-2008"
 
@@ -71,7 +72,7 @@ def _no_running_revision_leak(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def _base(tmp_path: Path) -> CanaryConfig:
-    raw = yaml.safe_load(Path("canary.example.yaml").read_text())
+    raw = load_yaml(Path("canary.example.yaml").read_text())
     raw.setdefault("collection", {})["storage_path"] = str(tmp_path / "sessions")
     raw.setdefault("daemon", {})["jobs_dir"] = str(tmp_path / "control" / "jobs")
     raw.setdefault("profiles", {})["registry_path"] = str(tmp_path / "profiles.yaml")
@@ -111,7 +112,7 @@ def test_each_profile_gets_its_own_operational_directory(tmp_path: Path) -> None
 
 def test_pi_paths_stay_under_the_data_root() -> None:
     """The Pi pins ``jobs_dir`` under /data/canary; calibration state follows it."""
-    base = CanaryConfig.model_validate(yaml.safe_load(Path("canary.pi.example.yaml").read_text()))
+    base = CanaryConfig.model_validate(load_yaml(Path("canary.pi.example.yaml").read_text()))
     scoped = _scoped(base)
     assert operational_dir(scoped) == Path("/data/canary/control/calibration") / XTERRA
 
@@ -178,7 +179,7 @@ def test_the_xterras_shared_memory_catalog_and_verify_record_are_still_read(
     legacy = _write_legacy_registry(base, source_registry_path(xterra)).parent
     legacy_dids = legacy / "dids.yaml"
     legacy_dids.write_text(DIDS_YAML.read_text())
-    channel = yaml.safe_load(DIDS_YAML.read_text())["memory"][0]["name"]
+    channel = load_yaml(DIDS_YAML.read_text())["memory"][0]["name"]
     (legacy / "memory_verify.json").write_text(
         json.dumps({channel: {"outcome": "pass", "at": "2026-09-20T00:00:00+00:00"}})
     )
@@ -207,7 +208,7 @@ def _verify_only_legacy(base: CanaryConfig) -> tuple[Path, str]:
     legacy = _legacy_dir(base)
     legacy.mkdir(parents=True)
     (legacy / "dids.yaml").write_text(DIDS_YAML.read_text())
-    channel = yaml.safe_load(DIDS_YAML.read_text())["memory"][0]["name"]
+    channel = load_yaml(DIDS_YAML.read_text())["memory"][0]["name"]
     (legacy / "memory_verify.json").write_text(
         json.dumps({channel: {"outcome": "pass", "at": "2026-09-20T00:00:00+00:00"}})
     )
@@ -264,7 +265,7 @@ def test_an_unowned_legacy_dir_warns_and_is_surfaced(
 
 def test_a_hand_added_tracked_flash_does_not_orphan_dashboard_flashes(tmp_path: Path) -> None:
     """The tracked registry gains a flash by hand; the legacy one had its own."""
-    raw = yaml.safe_load(Path("canary.example.yaml").read_text())
+    raw = load_yaml(Path("canary.example.yaml").read_text())
     raw.setdefault("collection", {})["storage_path"] = str(tmp_path / "sessions")
     raw.setdefault("daemon", {})["jobs_dir"] = str(tmp_path / "control" / "jobs")
     raw["daemon"]["afr_calibration"] = str(tmp_path / "data" / "afr_calibration.yaml")

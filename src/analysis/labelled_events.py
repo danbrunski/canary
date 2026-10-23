@@ -26,10 +26,10 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Literal
 
-import yaml
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from src.vehicle.tune_revisions import TuneRevisionRegistry
+from src.yaml_load import load_yaml
 
 LabelKind = Literal["fault", "novelty", "intervention"]
 
@@ -140,7 +140,7 @@ def load_labelled_events(
     """
     events: list[LabelledEvent] = []
     if path.exists():
-        events.extend(LabelledEventRegistry.model_validate(yaml.safe_load(path.read_text())).events)
+        events.extend(LabelledEventRegistry.model_validate(load_yaml(path.read_text())).events)
     if tune_registry is not None:
         events.extend(flash_events(tune_registry, sources=tune_sources))
     return LabelledEventRegistry(events=sorted(events, key=lambda event: event.start))

@@ -44,6 +44,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 from src.atomic_write import atomic_write_text
 from src.coerce import finite_float
 from src.paths import DATA_DIR
+from src.yaml_load import load_yaml
 
 __all__ = [
     "DEFAULT_CUSTOM_PIDS_PATH",
@@ -309,7 +310,7 @@ def load_custom_pids(path: Path = DEFAULT_CUSTOM_PIDS_PATH) -> CustomPidSet:
     """Load + validate the custom PID file. Empty set if the file is absent."""
     if not Path(path).exists():
         return CustomPidSet()
-    raw = yaml.safe_load(Path(path).read_text()) or {}
+    raw = load_yaml(Path(path).read_text()) or {}
     return CustomPidSet.model_validate(raw)
 
 

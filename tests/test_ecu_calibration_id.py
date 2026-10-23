@@ -13,7 +13,6 @@ import threading
 from pathlib import Path
 
 import pytest
-import yaml
 from pydantic import ValidationError
 
 from src.collection import tuning_profile
@@ -40,6 +39,7 @@ from src.control.tuning_readiness import (
 )
 from src.dashboard.status import build_status
 from src.decode.dids import DidAccess, is_memory_checkable, load_did_map
+from src.yaml_load import load_yaml
 from tests.capture_round_fakes import FakeClock, ScriptedEcu, install_clock, isotp_frames
 
 REPO = Path(__file__).resolve().parents[1]
@@ -502,5 +502,5 @@ def test_readiness_builder_is_additive_only(tmp_path: Path) -> None:
 
 
 def test_example_config_documents_the_readiness_floor() -> None:
-    raw = yaml.safe_load((REPO / "canary.example.yaml").read_text())
+    raw = load_yaml((REPO / "canary.example.yaml").read_text())
     assert raw["tuning_readiness"]["min_ups_soc_percent"] == 40.0

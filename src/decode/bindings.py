@@ -25,7 +25,6 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Literal
 
-import yaml
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from src.decode.slices import (
@@ -36,6 +35,7 @@ from src.decode.slices import (
     SentinelState,
     check_sentinel,
 )
+from src.yaml_load import load_yaml
 
 
 class _Strict(BaseModel):
@@ -298,7 +298,7 @@ def on_read_signals(bindings: Bindings) -> list[Signal]:
 
 def load_bindings(path: Path) -> Bindings:
     """Load and validate a bindings.yaml file. Raises ValidationError on schema mismatch."""
-    raw = yaml.safe_load(path.read_text())
+    raw = load_yaml(path.read_text())
     return Bindings.model_validate(raw)
 
 

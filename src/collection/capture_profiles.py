@@ -32,6 +32,7 @@ from src.decode.dids import (
     select_memory_channels,
 )
 from src.signals.derived import DERIVED_CHANNEL_INPUTS
+from src.yaml_load import load_yaml
 
 if TYPE_CHECKING:
     from src.collection.kline.plan import KlineCatalog
@@ -751,7 +752,7 @@ def seed_catalog(
     profiles = [default_profile(collection)]
     if starter_path.exists():
         try:
-            starter = CaptureProfileCatalog.model_validate(yaml.safe_load(starter_path.read_text()))
+            starter = CaptureProfileCatalog.model_validate(load_yaml(starter_path.read_text()))
         except (OSError, ValueError, yaml.YAMLError):
             log.exception(
                 "starter capture catalog %s is unreadable; seeding default only", starter_path
@@ -835,13 +836,13 @@ def save_capture_profiles(path: Path, catalog: CaptureProfileCatalog) -> None:
 def _read_catalog(path: Path) -> CaptureProfileCatalog | None:
     if not path.exists():
         return None
-    return CaptureProfileCatalog.model_validate(yaml.safe_load(path.read_text()))
+    return CaptureProfileCatalog.model_validate(load_yaml(path.read_text()))
 
 
 def load_overrides(path: Path | None) -> CaptureProfileOverrides:
     if path is None or not path.exists():
         return CaptureProfileOverrides()
-    return CaptureProfileOverrides.model_validate(yaml.safe_load(path.read_text()) or {})
+    return CaptureProfileOverrides.model_validate(load_yaml(path.read_text()) or {})
 
 
 def save_overrides(path: Path, overrides: CaptureProfileOverrides) -> None:

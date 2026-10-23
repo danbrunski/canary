@@ -38,6 +38,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from src.atomic_write import atomic_write_text
 from src.paths import CONTROL_DIR
+from src.yaml_load import load_yaml
 
 log = logging.getLogger(__name__)
 
@@ -147,7 +148,7 @@ def load_tuning_config(path: Path = DEFAULT_TUNING_PATH) -> TuningConfig:
     """Load the active tuning config; empty (no-op) config if absent."""
     if not Path(path).exists():
         return TuningConfig()
-    return TuningConfig.model_validate(yaml.safe_load(Path(path).read_text()) or {})
+    return TuningConfig.model_validate(load_yaml(Path(path).read_text()) or {})
 
 
 def save_tuning_config(

@@ -20,7 +20,6 @@ from typing import Any
 import numpy as np
 import pandas as pd
 import pytest
-import yaml
 from pydantic import ValidationError
 
 from src.analysis.fuel_plant import (
@@ -53,6 +52,7 @@ from src.analysis.plant_validation import (
     verify_prediction_of_record,
 )
 from src.vehicle.tune_revisions import TuneRevision, TuneRevisionRegistry, load_tune_revisions
+from src.yaml_load import load_yaml
 
 PROFILE = Path("data/nissan-xterra-2008")
 FIXTURE = Path("tests/fixtures/fuel_plant/_capture-tuning-2026-09-23T142926")
@@ -177,7 +177,7 @@ def test_qualification_is_read_from_the_recorded_verdicts(
     real: tuple[FuelPlantProfile, B06Rules, InterventionCase, Boundary],
 ) -> None:
     profile, *_ = real
-    raw: dict[str, Any] = yaml.safe_load((PROFILE / PLANT_FILE).read_text())
+    raw: dict[str, Any] = load_yaml((PROFILE / PLANT_FILE).read_text())
     for verdict, expect in (
         ("pass", ("closed_loop", "enrichment")),
         ("pass_closed_loop_only", ("closed_loop",)),
@@ -220,7 +220,7 @@ POST = ["_sim-post-a"]
 
 
 def _synthetic_profile() -> FuelPlantProfile:
-    raw: dict[str, Any] = yaml.safe_load((PROFILE / PLANT_FILE).read_text())
+    raw: dict[str, Any] = load_yaml((PROFILE / PLANT_FILE).read_text())
     raw.update(synthetic=True, plant_version="synthetic-mv-1", baseline=None, spent_held_out=[])
     raw["split"].update(identification=IDENT, held_out=HELD)
     return FuelPlantProfile.model_validate(raw)
@@ -569,7 +569,7 @@ def test_synthetic_and_recorded_never_mix(
 
 
 def _case_raw() -> dict[str, Any]:
-    raw: dict[str, Any] = yaml.safe_load((PROFILE / "plant_interventions.yaml").read_text())
+    raw: dict[str, Any] = load_yaml((PROFILE / "plant_interventions.yaml").read_text())
     return raw
 
 

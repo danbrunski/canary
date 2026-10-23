@@ -33,6 +33,7 @@ from src.storage.async_writer import AsyncParquetTelemetryWriter
 from src.storage.parquet_writer import ParquetTelemetryWriter
 from src.storage.sessions import list_sessions
 from src.telemetry import TelemetryRecord
+from src.yaml_load import load_yaml
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 EXAMPLE_YAML = REPO_ROOT / "canary.example.yaml"
@@ -765,7 +766,7 @@ def test_every_shipped_capture_catalogue_still_loads() -> None:
     catalogues = sorted(REPO_ROOT.glob("data/**/capture_profiles*.yaml"))
     assert catalogues, "no committed capture catalogues found"
     for path in catalogues:
-        raw = yaml.safe_load(path.read_text()) or {}
+        raw = load_yaml(path.read_text()) or {}
         entries = raw.get("profiles", raw) if isinstance(raw, dict) else raw
         items = entries.values() if isinstance(entries, dict) else entries
         for entry in items:
@@ -831,7 +832,7 @@ def test_required_tuple_must_name_channels_the_profile_polls() -> None:
 def test_only_default_is_built_in_and_starters_are_data(tmp_path: Path) -> None:
     """A new vehicle's catalog is default (from config) plus the starter file."""
     config = CanaryConfig.from_yaml(EXAMPLE_YAML)
-    starter = CaptureProfileCatalog.model_validate(yaml.safe_load(STARTER_CATALOG_PATH.read_text()))
+    starter = CaptureProfileCatalog.model_validate(load_yaml(STARTER_CATALOG_PATH.read_text()))
     seeded = seed_catalog(config.collection)
     assert [p.name for p in seeded.profiles] == [p.name for p in starter.profiles]
     assert seeded.profiles[1:] == starter.profiles[1:]
@@ -897,9 +898,7 @@ def test_laptop_edits_reach_every_profile_this_machine_did_not_touch(tmp_path: P
     fuel_map = store.load().by_name("fuel-map")
     assert fuel_map is not None
     store.save(_retitled(fuel_map, "edited on the Pi"), previous_name="fuel-map")
-    tracked = CaptureProfileCatalog.model_validate(
-        yaml.safe_load(store.sources.catalog.read_text())
-    )
+    tracked = CaptureProfileCatalog.model_validate(load_yaml(store.sources.catalog.read_text()))
     save_capture_profiles(  # a git pull lands a laptop edit to two profiles
         store.sources.catalog,
         CaptureProfileCatalog(
@@ -924,9 +923,7 @@ def test_a_shadowed_profile_that_changed_in_the_repo_is_reported(
     with caplog.at_level("WARNING", logger="src.collection.capture_profiles"):
         store.load()
     assert not [r for r in caplog.records if "overridden on this machine" in r.getMessage()]
-    tracked = CaptureProfileCatalog.model_validate(
-        yaml.safe_load(store.sources.catalog.read_text())
-    )
+    tracked = CaptureProfileCatalog.model_validate(load_yaml(store.sources.catalog.read_text()))
     save_capture_profiles(
         store.sources.catalog,
         CaptureProfileCatalog(
@@ -1427,13 +1424,13 @@ def test_shipped_catalog_keeps_rationale_in_notes_not_comments(path: Path) -> No
 @pytest.mark.parametrize("path", _SHIPPED_CATALOGS, ids=lambda p: p.parent.name)
 def test_shipped_catalog_rationale_survives_a_write_back(path: Path, tmp_path: Path) -> None:
     """The whole point of the field: safe_dump must preserve it."""
-    original = CaptureProfileCatalog.model_validate(yaml.safe_load(path.read_text()))
+    original = CaptureProfileCatalog.model_validate(load_yaml(path.read_text()))
     documented = {p.name: p.notes for p in original.profiles if p.notes}
     assert documented, f"{path} carries no rationale at all — did a write-back eat it?"
 
     round_tripped = tmp_path / "catalog.yaml"
     save_capture_profiles(round_tripped, original)
-    reloaded = CaptureProfileCatalog.model_validate(yaml.safe_load(round_tripped.read_text()))
+    reloaded = CaptureProfileCatalog.model_validate(load_yaml(round_tripped.read_text()))
 
     assert {p.name: p.notes for p in reloaded.profiles if p.notes} == documented
 
@@ -1459,7 +1456,7 @@ def test_every_capture_profile_carries_air_density_and_thermal_context(path: Pat
     polls yet; until one does, those captures take baro from the adjacent
     default session, and this test says so rather than pretending otherwise.
     """
-    catalog = CaptureProfileCatalog.model_validate(yaml.safe_load(path.read_text()))
+    catalog = CaptureProfileCatalog.model_validate(load_yaml(path.read_text()))
     missing: dict[str, list[str]] = {}
     for profile in catalog.profiles:
         mode01 = {name.upper() for name in profile.mode01} if profile.mode01_enabled else set()

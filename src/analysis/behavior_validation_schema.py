@@ -18,12 +18,12 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Literal
 
-import yaml
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from src.analysis.splits import DEFAULT_JOIN_GAP_SECONDS
 from src.artifact_hash import sha256_file_or_none
 from src.behavior.behavior_models import ValidationCriteria, governing_profile_file
+from src.yaml_load import load_yaml
 
 #: Bump when the evaluator's definitions change (denominators, metrics,
 #: event accounting). Persisted in every evidence record.
@@ -187,7 +187,7 @@ def validation_document_path(behavior_models_path: Path) -> Path:
 def load_validation_document(path: Path) -> BehaviorValidationDocument | None:
     if not path.exists():
         return None
-    return BehaviorValidationDocument.model_validate(yaml.safe_load(path.read_text()))
+    return BehaviorValidationDocument.model_validate(load_yaml(path.read_text()))
 
 
 # ---------------------------------------------------------------------------

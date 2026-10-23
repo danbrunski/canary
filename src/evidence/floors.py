@@ -21,10 +21,9 @@ import hashlib
 from pathlib import Path
 from typing import Any
 
-import yaml
-
 from src.evidence.records import DETECTABLE_SIGMA, NoiseFloorRef
 from src.paths import REPO_ROOT
+from src.yaml_load import load_yaml
 
 __all__ = ["FloorVerificationError", "floor_source_path", "floor_source_ref", "verify_floor"]
 
@@ -61,7 +60,7 @@ def verify_floor(ref: NoiseFloorRef) -> None:
             f"{ref.source!r} no longer hashes to the cited source_sha256: derive the floor "
             "again from the file as it stands (src.analysis.noise_floor.floor_reference)"
         )
-    data: Any = yaml.safe_load(raw) or {}
+    data: Any = load_yaml(raw) or {}
     entry = (data.get("channels") or {}).get(ref.quantity) if isinstance(data, dict) else None
     if not isinstance(entry, dict):
         raise FloorVerificationError(f"{ref.source!r} measured no floor for {ref.quantity!r}")

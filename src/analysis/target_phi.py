@@ -38,7 +38,6 @@ from typing import Any, Literal
 
 import numpy as np
 import pandas as pd
-import yaml
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from src.analysis.channels import ChannelSpecError, read_channels
@@ -71,6 +70,7 @@ from src.decode.target_phi_command import x_from_bfs as _x_from_bfs
 from src.paths import DIDS_YAML
 from src.signals.pairing import PairingPolicy, match_ordered, to_seconds
 from src.signals.time_lookup import MISSING, bracketing_sample_indices
+from src.yaml_load import load_yaml
 
 #: Bumped when the evaluator's states, reasons or record shape change.
 #: 2: provenance names the application model; blockers come from it (E05.1).
@@ -416,7 +416,7 @@ def load_twin_definition(profile_dir: Path) -> tuple[TwinDefinition, str]:
     path = profile_dir / TWIN_FILE
     text = path.read_bytes()
     return (
-        TwinDefinition.model_validate(yaml.safe_load(text)),
+        TwinDefinition.model_validate(load_yaml(text)),
         hashlib.sha256(text).hexdigest(),
     )
 

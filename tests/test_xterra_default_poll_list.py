@@ -17,7 +17,6 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-import yaml
 
 from src.collection.capture_profiles import (
     CaptureProfile,
@@ -27,6 +26,7 @@ from src.collection.obd_registry import MODE01_REGISTRY, PollTier
 from src.collection.obd_scheduler.cadence import TIER_RATE_FACTORS
 from src.collection.pid_decoders import PID_DECODERS
 from src.features.capture_inputs import model_input_warnings
+from src.yaml_load import load_yaml
 
 CATALOG = Path("data/nissan-xterra-2008/capture_profiles.yaml")
 BEHAVIOR_MODELS = Path("data/nissan-xterra-2008/behavior_models.yaml")
@@ -70,7 +70,7 @@ CORE_PLANNED_HZ = 1.5
 
 @pytest.fixture(scope="module")
 def default_profile() -> CaptureProfile:
-    catalog = CaptureProfileCatalog.model_validate(yaml.safe_load(CATALOG.read_text()))
+    catalog = CaptureProfileCatalog.model_validate(load_yaml(CATALOG.read_text()))
     return next(p for p in catalog.profiles if p.name == "default")
 
 

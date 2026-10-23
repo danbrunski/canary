@@ -37,6 +37,7 @@ import re
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
+from hashlib import sha256
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
@@ -44,6 +45,7 @@ import yaml
 
 from src.atomic_write import atomic_write_text
 from src.config import CanaryConfig, ProfilesConfig, VehicleConfig, VehicleParameters
+from src.yaml_load import load_yaml
 
 if TYPE_CHECKING:
     from src.signals.afr import FlashHistory
@@ -200,7 +202,7 @@ def _dedupe_slug(slug: str, taken: set[str]) -> str:
 def _registry_entries(path: Path) -> list[dict[str, Any]]:
     if not path.exists():
         return []
-    raw = yaml.safe_load(path.read_text()) or {}
+    raw = load_yaml(path.read_text()) or {}
     entries = raw.get("profiles", []) if isinstance(raw, dict) else []
     return [_current_spelling(dict(entry)) for entry in entries]
 
@@ -256,7 +258,7 @@ def deleted_slugs(profiles: ProfilesConfig) -> list[str]:
     path = profiles.registry_overlay_path
     if not path.exists():
         return []
-    raw = yaml.safe_load(path.read_text()) or {}
+    raw = load_yaml(path.read_text()) or {}
     listed = raw.get("deleted", []) if isinstance(raw, dict) else []
     return sorted({str(slug) for slug in listed or []})
 
@@ -1670,9 +1672,13 @@ def active_registry(config: CanaryConfig) -> TuneRevisionRegistry | None:
     )
 
 
-#: ``active_flash_history`` by the identity of the files it read. The live path
+#: ``active_flash_history`` by the content of the files it read. The live path
 #: featurizes every tick, and parsing the registry costs ~2.5 ms on the laptop.
-_flash_history_cache: dict[tuple[tuple[str, int], ...], Any] = {}
+#: Keyed by bytes, not ``st_mtime_ns``: the kernel stamps a write with its
+#: coarse clock, so an in-place rewrite within one tick (~4 ms here) kept the
+#: old stamp and the old history (``test_an_edited_flash_history_is_reread``,
+#: 2026-10-23, once parsing got fast). The files are a few kB.
+_flash_history_cache: dict[tuple[tuple[str, str], ...], Any] = {}
 
 
 def active_flash_history(config: CanaryConfig) -> FlashHistory:
@@ -1691,7 +1697,7 @@ def active_flash_history(config: CanaryConfig) -> FlashHistory:
 
     sources = active_registry_sources(config)
     try:
-        key = tuple((str(path), path.stat().st_mtime_ns) for path in sources)
+        key = tuple((str(path), sha256(path.read_bytes()).hexdigest()) for path in sources)
     except OSError:
         key = ()
     cached = _flash_history_cache.get(key) if key else None

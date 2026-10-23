@@ -14,7 +14,6 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-import yaml
 from pydantic import ValidationError
 
 from src.analysis.fault_model import (
@@ -42,6 +41,7 @@ from src.evidence import (
     SourceRef,
     VehicleIdentity,
 )
+from src.yaml_load import load_yaml
 
 MODEL_PATH = Path("data/nissan-xterra-2008") / FAULT_MODEL_FILE
 
@@ -70,7 +70,7 @@ def model() -> FaultModel:
 
 
 def _raw() -> dict[str, Any]:
-    data = yaml.safe_load(MODEL_PATH.read_text())
+    data = load_yaml(MODEL_PATH.read_text())
     assert isinstance(data, dict)
     return data
 

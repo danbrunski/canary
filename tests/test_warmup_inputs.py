@@ -29,6 +29,7 @@ from src.analysis.cold_start_inventory import (
 )
 from src.analysis.warmup_checks import catalyst_estimation_evidence, runtime_clock_report
 from src.preprocessing.loader import read_session
+from src.yaml_load import load_yaml
 
 SLICE = Path("tests/fixtures/warmup_inputs/2026-09-18T134345")
 SPECS = [
@@ -231,16 +232,15 @@ def test_the_legacy_catalyst_artifact_is_preserved_and_quarantined() -> None:
     erase the evidence that it failed; the artifact keeps its own bands and
     the policy keeps it out of alerting until a new fit passes B02.
     """
-    import yaml
 
-    artifact = yaml.safe_load(Path("data/nissan-xterra-2008/behavior_models.yaml").read_text())
+    artifact = load_yaml(Path("data/nissan-xterra-2008/behavior_models.yaml").read_text())
     model = next(m for m in artifact["models"] if m["name"] == "cat_warmup")
     assert model["deviation"]["warning_band"] == 30.0
     assert model["deviation"]["critical_band"] == 80.0
     assert model["version"] == 4
     assert model["fit"]["validation_sample_count"] == 0
 
-    policy = yaml.safe_load(Path("data/nissan-xterra-2008/behavior_policy.yaml").read_text())
+    policy = load_yaml(Path("data/nissan-xterra-2008/behavior_policy.yaml").read_text())
     entry = next(item for item in policy["entries"] if item["model"] == "cat_warmup")
     assert entry["lifecycle"] == "quarantined"
     assert entry["permitted_uses"] == ["display"]

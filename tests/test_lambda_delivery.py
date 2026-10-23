@@ -31,6 +31,7 @@ from src.analysis.lambda_delivery import (
 from src.analysis.noise_floor import ChannelFloor, NoiseFloor
 from src.analysis.tuning import DeliveryInputs, gate_delivery_samples, mode01_route
 from src.signals.afr import AfrCalibration
+from src.yaml_load import load_yaml
 from tests.afr_voltage_chain import SEA_LEVEL_KPA, voltage_chain
 
 T0 = datetime(2026, 9, 21, 12, 0, tzinfo=UTC)
@@ -39,7 +40,7 @@ DECLARATION_PATH = PROFILE / "lambda_delivery.yaml"
 
 
 def declaration(**overrides: Any) -> Any:
-    doc = yaml.safe_load(DECLARATION_PATH.read_text())
+    doc = load_yaml(DECLARATION_PATH.read_text())
     doc.update(overrides)
     from src.analysis.lambda_delivery import LambdaDeliveryDeclaration
 
@@ -345,7 +346,7 @@ def test_a_voltage_route_without_baro_is_a_named_state_not_a_gain_1_value() -> N
 
 def test_two_routes_through_one_sensor_cannot_claim_independence() -> None:
     """B06.7: PID 0x24 and the A/F voltage DID are bank 1's one A/F sensor."""
-    doc = yaml.safe_load(DECLARATION_PATH.read_text())
+    doc = load_yaml(DECLARATION_PATH.read_text())
     disagreements = [
         dict(item, relation="independent_sensors") for item in doc["source_disagreements"]
     ]
@@ -364,7 +365,7 @@ def test_two_routes_through_one_sensor_cannot_claim_independence() -> None:
     assert item.explanation is not None
     assert item.explanation.predicted_pct == -2.36
     assert item.explanation.unexplained_pct == -1.48
-    doc = yaml.safe_load(DECLARATION_PATH.read_text())
+    doc = load_yaml(DECLARATION_PATH.read_text())
     overclaimed = [dict(doc["source_disagreements"][0], status="explained")]
     with pytest.raises(ValueError, match="keep it unresolved"):
         declaration(source_disagreements=overclaimed)
@@ -512,7 +513,7 @@ def test_declaration_is_cross_checked_against_the_catalogs() -> None:
 
 
 def test_a_target_whose_catalog_unit_disagrees_is_refused(tmp_path: Path) -> None:
-    doc = yaml.safe_load(DECLARATION_PATH.read_text())
+    doc = load_yaml(DECLARATION_PATH.read_text())
     doc["commanded_sources"][0]["quantity"] = "lambda"
     path = tmp_path / "lambda_delivery.yaml"
     path.write_text(yaml.safe_dump(doc))
@@ -521,7 +522,7 @@ def test_a_target_whose_catalog_unit_disagrees_is_refused(tmp_path: Path) -> Non
 
 
 def test_a_target_without_its_declared_sentinel_is_refused(tmp_path: Path) -> None:
-    doc = yaml.safe_load(DECLARATION_PATH.read_text())
+    doc = load_yaml(DECLARATION_PATH.read_text())
     doc["commanded_sources"][0]["sentinel_spec"] = None
     doc["commanded_sources"][0]["fuel_cut_value"] = 0.0
     path = tmp_path / "lambda_delivery.yaml"
@@ -531,7 +532,7 @@ def test_a_target_without_its_declared_sentinel_is_refused(tmp_path: Path) -> No
 
 
 def test_a_commanded_source_must_say_how_fuel_cut_appears_on_it(tmp_path: Path) -> None:
-    doc = yaml.safe_load(DECLARATION_PATH.read_text())
+    doc = load_yaml(DECLARATION_PATH.read_text())
     doc["commanded_sources"][1].pop("fuel_cut_value")
     path = tmp_path / "lambda_delivery.yaml"
     path.write_text(yaml.safe_dump(doc))
@@ -540,7 +541,7 @@ def test_a_commanded_source_must_say_how_fuel_cut_appears_on_it(tmp_path: Path) 
 
 
 def test_the_provider_registry_and_the_declaration_must_name_one_target(tmp_path: Path) -> None:
-    doc = yaml.safe_load(DECLARATION_PATH.read_text())
+    doc = load_yaml(DECLARATION_PATH.read_text())
     doc["commanded_sources"] = [doc["commanded_sources"][1]]
     for rule in doc["eligibility"]["regimes"].values():
         del rule["transport_delays"]["ram_final_target"]
@@ -557,7 +558,7 @@ def test_the_provider_registry_and_the_declaration_must_name_one_target(tmp_path
 
 
 def _doc_with(path: tuple[str, ...], value: Any) -> dict[str, Any]:
-    doc = yaml.safe_load(DECLARATION_PATH.read_text())
+    doc = load_yaml(DECLARATION_PATH.read_text())
     node = doc
     for key in path[:-1]:
         node = node[key]
@@ -605,7 +606,7 @@ def test_a_drive_cannot_both_inform_and_judge_a_rule() -> None:
 
     from src.analysis.lambda_delivery import LambdaDeliveryDeclaration
 
-    doc = yaml.safe_load(DECLARATION_PATH.read_text())
+    doc = load_yaml(DECLARATION_PATH.read_text())
     rule = doc["eligibility"]["regimes"]["enrichment"]
     rule["held_out"] = [*rule["held_out"], rule["informed_by"][0]]
     with pytest.raises(ValidationError, match="both informed and held out"):
@@ -618,7 +619,7 @@ def test_a_frozen_delay_names_its_drives_and_sits_inside_its_bracket() -> None:
     from src.analysis.lambda_delivery import LambdaDeliveryDeclaration
 
     path = ("eligibility", "regimes", "enrichment", "transport_delays", "ram_final_target")
-    delay = yaml.safe_load(DECLARATION_PATH.read_text())
+    delay = load_yaml(DECLARATION_PATH.read_text())
     for key in path:
         delay = delay[key]
     with pytest.raises(ValidationError, match="outside its bracket"):

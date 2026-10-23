@@ -49,6 +49,7 @@ from src.collection.obd_scheduler import (
 from src.collection.profile_view import ProfileView
 from src.config import CanaryConfig, CanBusConfig
 from src.decode.dids import MEMORY_SOURCE, memory_channels, select_memory_channels
+from src.yaml_load import load_yaml
 from tests.capture_round_fakes import FakeClock, ScriptedEcu, install_clock
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -314,7 +315,7 @@ def test_tracked_xterra_profiles_keep_their_digests_and_memory_rates() -> None:
     its two original windows at its 4 Hz target capped to one per 0.5 s
     cycle, i.e. 2 Hz. The knock windows it gained on 2026-10-08 are weighted:
     0.5 still hits the 2 Hz cap, 0.125 runs at 0.5 Hz."""
-    catalog = CaptureProfileCatalog.model_validate(yaml.safe_load(XTERRA_CATALOG.read_text()))
+    catalog = CaptureProfileCatalog.model_validate(load_yaml(XTERRA_CATALOG.read_text()))
     for profile in catalog.profiles:
         if not profile.memory_rate_weights:
             assert profile_digest(profile) == _pre_d0338_digest(profile)
@@ -351,7 +352,7 @@ def test_a_pi_override_saved_before_the_field_loads_and_is_not_reported_shadowed
     """An overrides file written before D03.38 -- no ``memory_rate_weights``
     key anywhere, ``base_digests`` from the old digest -- loads, wins by name,
     and does not trigger the "repo's version has changed" warning."""
-    tracked = CaptureProfileCatalog.model_validate(yaml.safe_load(XTERRA_CATALOG.read_text()))
+    tracked = CaptureProfileCatalog.model_validate(load_yaml(XTERRA_CATALOG.read_text()))
     # A profile the repo has not given weights since: `tuning` gained
     # weighted knock windows on 2026-10-08, so an override of it saved before
     # then is correctly reported as shadowing a changed repo version.
@@ -384,7 +385,7 @@ def test_a_pi_override_saved_before_the_field_loads_and_is_not_reported_shadowed
     assert layered.memory_rate_weights == {}
     assert not [r for r in caplog.records if "overridden on this machine" in r.getMessage()]
     # The same comparison layer_catalog makes, stated directly.
-    overrides = CaptureProfileOverrides.model_validate(yaml.safe_load(overrides_path.read_text()))
+    overrides = CaptureProfileOverrides.model_validate(load_yaml(overrides_path.read_text()))
     assert overrides.base_digests[name] == profile_digest(base)
     assert layer_catalog(tracked, overrides).by_name(name) == layered
 

@@ -12,7 +12,6 @@ from typing import Any, Literal, Protocol, cast
 
 import numpy as np
 import pandas as pd
-import yaml
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from src.columns import SESSION_COLUMN, arrived_column
@@ -26,6 +25,7 @@ from src.signals.vehicle_signals import (
     load_axis_channels,
     wideband_lambda_columns,
 )
+from src.yaml_load import load_yaml
 
 log = logging.getLogger(__name__)
 
@@ -689,7 +689,7 @@ def load_afr_calibration(path: Path) -> AfrCalibration:
 @lru_cache(maxsize=16)
 def _load_afr_calibration_cached(path: Path, mtime_ns: int) -> AfrCalibration:
     del mtime_ns
-    return AfrCalibration.model_validate(yaml.safe_load(path.read_text()))
+    return AfrCalibration.model_validate(load_yaml(path.read_text()))
 
 
 #: B06.7 — the voltage route's two barometric refusals, as row states and as

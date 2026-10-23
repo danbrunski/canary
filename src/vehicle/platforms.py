@@ -27,6 +27,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_valida
 from src.config import CanaryConfig
 from src.paths import PLATFORMS_DIR, REPO_ROOT
 from src.vehicle.profiles import profile_dir
+from src.yaml_load import load_yaml
 
 #: The definition file in each platform directory.
 PLATFORM_FILE = "platform.yaml"
@@ -104,7 +105,7 @@ def load_platforms(platforms_dir: Path = PLATFORMS_DIR) -> list[ResolvedPlatform
     platforms = []
     for path in sorted(platforms_dir.glob(f"*/{PLATFORM_FILE}")):
         try:
-            definition = Platform.model_validate(yaml.safe_load(path.read_text()))
+            definition = Platform.model_validate(load_yaml(path.read_text()))
         except (yaml.YAMLError, ValidationError) as exc:
             raise ValueError(f"{_shown(path)} is invalid: {exc}") from exc
         platforms.append(ResolvedPlatform(path.parent.name, path.parent, definition))

@@ -19,6 +19,7 @@ from scripts.train_tcn import (
 from src.config import CanaryConfig
 from src.models.false_positive_benchmark import FalsePositiveBenchmarkReport
 from src.models.tcn_training import load_tcn_autoencoder_model
+from src.yaml_load import load_yaml
 from tests.builders import write_obd_session
 from tests.configs import example_config
 
@@ -53,7 +54,7 @@ def _torch():
 
 
 def _write_config(tmp_path: Path, **tcn_overrides: object) -> Path:
-    data = yaml.safe_load(EXAMPLE_YAML.read_text())
+    data = load_yaml(EXAMPLE_YAML.read_text())
     data["models"]["tcn_autoencoder"].update(_TINY_TCN)
     data["models"]["tcn_autoencoder"].update(tcn_overrides)
     data["models"]["sequence_detector"] = "tcn"

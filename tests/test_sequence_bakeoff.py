@@ -18,6 +18,7 @@ from scripts.sequence_bakeoff import (
     run_bakeoff,
 )
 from src.models import evaluation as model_evaluation
+from src.yaml_load import load_yaml
 from tests.builders import write_obd_session
 from tests.configs import example_config
 
@@ -72,7 +73,7 @@ def test_channel_rate_class() -> None:
 
 
 def _write_config(tmp_path: Path) -> Path:
-    data = yaml.safe_load(EXAMPLE_YAML.read_text())
+    data = load_yaml(EXAMPLE_YAML.read_text())
     data["models"]["lstm_autoencoder"].update(_TINY_LSTM)
     data["models"]["tcn_autoencoder"].update(_TINY_TCN)
     path = tmp_path / "canary.yaml"

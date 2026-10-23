@@ -46,6 +46,7 @@ from src.models.inference import (
     require_budget_cadence,
     served_windows,
 )
+from src.yaml_load import load_yaml
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 EXAMPLES = (
@@ -57,9 +58,8 @@ EXAMPLES = (
 
 
 def _example(**models: Any) -> dict[str, Any]:
-    import yaml
 
-    data = yaml.safe_load((REPO_ROOT / "canary.example.yaml").read_text())
+    data = load_yaml((REPO_ROOT / "canary.example.yaml").read_text())
     data["models"].update(models)
     return data
 
@@ -342,9 +342,8 @@ def test_the_shipped_configs_load_at_every_tick(example: str) -> None:
 
 @pytest.mark.parametrize("example", ["canary.example.yaml", "canary.pi.example.yaml"])
 def test_the_example_configs_declare_the_cadence(example: str) -> None:
-    import yaml
 
-    models = yaml.safe_load((REPO_ROOT / example).read_text())["models"]
+    models = load_yaml((REPO_ROOT / example).read_text())["models"]
     assert models["sequence_forward_every_n_ticks"] == 1
 
 

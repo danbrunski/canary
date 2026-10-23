@@ -38,8 +38,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal
 
-import yaml
 from pydantic import BaseModel, ConfigDict, Field, model_validator
+
+from src.yaml_load import load_yaml
 
 MODEL_FILE = "ecu_application_model.yaml"
 
@@ -665,7 +666,7 @@ def load_application_model(profile_dir: Path) -> tuple[ApplicationModel, str]:
     """The profile's application model and the sha256 of its file.
     ``FileNotFoundError`` when the vehicle declares none."""
     text = (profile_dir / MODEL_FILE).read_bytes()
-    return ApplicationModel.model_validate(yaml.safe_load(text)), hashlib.sha256(text).hexdigest()
+    return ApplicationModel.model_validate(load_yaml(text)), hashlib.sha256(text).hexdigest()
 
 
 # -- identity checks ----------------------------------------------------------------

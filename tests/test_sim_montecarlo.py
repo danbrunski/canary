@@ -55,6 +55,7 @@ from src.analysis.sim_montecarlo import (
     run_monte_carlo,
 )
 from src.session import is_synthetic_session
+from src.yaml_load import load_yaml
 from tests.rom_fixtures import PROFILE
 from tests.test_paired_scenarios import (
     CRUISE,
@@ -623,7 +624,7 @@ def test_a_monte_carlo_run_imports_nothing_that_talks_to_the_ecu() -> None:
 
 
 def test_the_declaration_file_is_plain_yaml_with_every_form_explained() -> None:
-    raw = yaml.safe_load((PROFILE / UNCERTAINTY_FILE).read_text())
+    raw = load_yaml((PROFILE / UNCERTAINTY_FILE).read_text())
     assert raw["schema_version"] == 1
     assert all(len(e["evidence"]) > 40 for e in raw["parameters"].values())
 
@@ -720,7 +721,7 @@ def test_an_unstated_map_is_the_contracts_declared_internal_model(
     assert "manifold_pressure" not in contract_scenario.boundaries
     result = run_paired(kit, scenario, image, bytes(image))
     assert result.points[0]["outputs"]["delivered_lambda"]["status"] == "supported"
-    raw = yaml.safe_load((PROFILE / CONTRACT_FILE).read_text())
+    raw = load_yaml((PROFILE / CONTRACT_FILE).read_text())
     mode = next(m for m in raw["modes"] if m["id"] == "conditional_rom_comparison")
     del mode["roles"]["manifold_pressure"]["unstated"]
     strict = dataclasses.replace(kit, contract=SimContract.model_validate(raw))
@@ -1004,7 +1005,7 @@ def test_the_sim_kit_is_declared_data_with_its_own_uncertainty(
     crossed = tmp_path / "crossed"
     shutil.copytree(PROFILE, crossed, ignore=shutil.ignore_patterns("_*"))
     kit_file = crossed / "sim_kit.yaml"
-    raw = yaml.safe_load(kit_file.read_text())
+    raw = load_yaml(kit_file.read_text())
     raw["uncertainty"]["fuel-mv-2"] = "sim_uncertainty.yaml"
     kit_file.write_text(yaml.safe_dump(raw))
     assert _refusal(sim_montecarlo.load_sim_kit, crossed) == "uncertainty_plant_mismatch"

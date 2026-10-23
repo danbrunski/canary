@@ -44,11 +44,10 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-import yaml
-
 from src.collection.obd_registry import MISFIRE_COUNT_CHANNEL_PREFIX, MODE01_REGISTRY
 from src.collection.pid_decoders import PID_DECODERS
 from src.storage.sessions import session_started_at
+from src.yaml_load import load_yaml
 
 #: Channel source prefixes an artifact may name. Anything else in an artifact
 #: (mode labels, session columns) is not an observation.
@@ -232,15 +231,10 @@ def _git_show(repo: Path, rev: str, path: str) -> str | None:
     return result.stdout if result.returncode == 0 else None
 
 
-#: libyaml's safe loader when built in: the history is ~60 revisions of a
-#: 3,000-line catalog, and the pure-Python loader takes seconds over it.
-_YAML_LOADER: Any = getattr(yaml, "CSafeLoader", yaml.SafeLoader)
-
-
 def _load_yaml(text: str | None) -> Mapping[str, Any] | None:
     if text is None:
         return None
-    loaded = yaml.load(text, Loader=_YAML_LOADER)  # noqa: S506 - a safe loader
+    loaded = load_yaml(text)
     return loaded if isinstance(loaded, Mapping) else None
 
 
@@ -290,7 +284,7 @@ class Rename:
 def load_renames(directory: Path) -> tuple[Rename, ...]:
     renames: list[Rename] = []
     for path in sorted(directory.glob("*.yaml")):
-        doc = yaml.safe_load(path.read_text()) or {}
+        doc = load_yaml(path.read_text()) or {}
         for kind, key in (("did", "channels"), ("memory", "memory_channels")):
             for old, new in (doc.get(key) or {}).items():
                 renames.append(Rename(kind, str(old), str(new), path.name))
@@ -364,7 +358,7 @@ def _identity_key(raw: Mapping[str, Any]) -> IdentityKey:
 def load_observation_aliases(path: Path) -> ObservationAliases:
     if not path.is_file():
         return ObservationAliases()
-    doc = yaml.safe_load(path.read_text()) or {}
+    doc = load_yaml(path.read_text()) or {}
     registers = tuple(
         Register(
             register=int(item["register"]),
@@ -1041,7 +1035,7 @@ def _parse_time(value: Any) -> datetime | None:
 
 def behavior_artifacts(path: Path, *, label: str | None = None) -> list[Artifact]:
     """One :class:`Artifact` per model in a ``behavior_models.yaml``."""
-    doc = yaml.safe_load(path.read_text()) or {}
+    doc = load_yaml(path.read_text()) or {}
     out: list[Artifact] = []
     for model in doc.get("models") or []:
         recipe = {k: v for k, v in model.items() if k not in ("fit", "validation", "description")}

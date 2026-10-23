@@ -17,7 +17,6 @@ from typing import Any
 
 import numpy as np
 import pytest
-import yaml
 from pydantic import ValidationError
 
 from src.analysis.fuel_comp_inputs import (
@@ -40,6 +39,7 @@ from src.analysis.rom_map import load_rom_map
 from src.decode.dids import load_did_map
 from src.decode.fuel_comp_load import Interval
 from src.vehicle.tune_revisions import load_tune_revisions
+from src.yaml_load import load_yaml
 from tests.rom_fixtures import OPERATOR_ROMS, PROFILE
 
 SLICE = Path("tests/fixtures/fuel_comp/_capture-ram-study-2026-10-04T204557")
@@ -51,7 +51,7 @@ def declaration() -> FuelCompDeclaration:
 
 
 def _shipped() -> dict[str, Any]:
-    data = yaml.safe_load((PROFILE / FUEL_COMP_FILE).read_text())
+    data = load_yaml((PROFILE / FUEL_COMP_FILE).read_text())
     assert isinstance(data, dict)
     return data
 

@@ -56,9 +56,10 @@ from pathlib import Path
 from typing import Any, Literal
 
 import numpy as np
-import yaml
 from numpy.typing import ArrayLike, NDArray
 from pydantic import BaseModel, ConfigDict, Field, model_validator
+
+from src.yaml_load import load_yaml
 
 PLANT_FILE = "fuel_plant.yaml"
 #: Specific gas constant of dry air, J/(kg K).
@@ -778,7 +779,7 @@ def _check_breathing_form(declared: Mapping[str, PlantParameter]) -> None:
 def _parsed(text: bytes) -> Any:
     """One parse per distinct file content (every load reads its siblings'
     ledgers too). Read-only: callers validate, never mutate."""
-    return yaml.safe_load(text)
+    return load_yaml(text)
 
 
 def plant_files(profile_dir: Path) -> dict[str, Path]:
@@ -915,7 +916,7 @@ def load_b06(profile_dir: Path, ref: DelayReference) -> B06Rules:
     """
     from src.analysis.lambda_delivery import Eligibility
 
-    raw = yaml.safe_load((profile_dir / ref.file).read_text())
+    raw = load_yaml((profile_dir / ref.file).read_text())
     try:
         elig = Eligibility.model_validate(raw["eligibility"])
         entry = elig.regimes.for_regime(ref.regime).transport_delays[ref.source]

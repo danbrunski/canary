@@ -14,7 +14,6 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-import yaml
 from pydantic import ValidationError
 
 from src.collection.collectors import _usb_adc_collectors
@@ -37,6 +36,7 @@ from src.decode.analog_sensors import (
     sensor_volts,
 )
 from src.telemetry import TelemetryRecord
+from src.yaml_load import load_yaml
 
 REPO = Path(__file__).resolve().parents[1]
 CATALOG_PATH = REPO / "data/usb_adc_sensors.yaml"
@@ -46,7 +46,7 @@ PSI_TO_KPA = 6.894757293168361
 
 
 def _raw_catalog() -> dict[str, Any]:
-    loaded = yaml.safe_load(CATALOG_PATH.read_text())
+    loaded = load_yaml(CATALOG_PATH.read_text())
     assert isinstance(loaded, dict)
     return loaded
 

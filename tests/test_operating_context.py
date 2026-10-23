@@ -17,7 +17,6 @@ from typing import Any
 
 import pandas as pd
 import pytest
-import yaml
 
 from src.analysis.channels import read_channels
 from src.analysis.ecu_application import ApplicationModel, load_application_model, program_sha256
@@ -38,6 +37,7 @@ from src.decode.dids import load_did_map
 from src.decode.fuel_comp_load import LoadInputCurves, load_byte, rpm_reciprocal
 from src.paths import DIDS_YAML
 from src.vehicle.tune_revisions import load_tune_revisions
+from src.yaml_load import load_yaml
 from tests.rom_fixtures import PROFILE, load_byte_image, with_checksums, xterra_map
 
 REPO = Path(__file__).resolve().parents[1]
@@ -678,7 +678,7 @@ def test_a_resampled_grid_is_refused(provider: ContextProvider) -> None:
 
 
 def _ram_study_frame() -> pd.DataFrame:
-    expect = yaml.safe_load((REPO / "tests/fixtures/ground_truth/target_phi.yaml").read_text())
+    expect = load_yaml((REPO / "tests/fixtures/ground_truth/target_phi.yaml").read_text())
     frames = []
     for part in expect["telemetry"]:
         path = REPO / part["path"]

@@ -29,7 +29,6 @@ from typing import Any
 import numpy as np
 import pandas as pd
 import pytest
-import yaml
 from pydantic import ValidationError
 
 from src.analysis.ecu_application import load_application_model
@@ -55,6 +54,7 @@ from src.analysis.plant_validation import (
     verify_prediction_artifact,
 )
 from src.vehicle.tune_revisions import load_tune_revisions
+from src.yaml_load import load_yaml
 
 PROFILE = Path("data/nissan-xterra-2008")
 CASE_ID = "fuel-comp-restore-2026-10-04"
@@ -64,7 +64,7 @@ POST = "_sim-ecu-post-2026-10-06T000000"
 
 
 def _raw() -> dict[str, Any]:
-    raw: dict[str, Any] = yaml.safe_load((PROFILE / "plant_interventions.yaml").read_text())
+    raw: dict[str, Any] = load_yaml((PROFILE / "plant_interventions.yaml").read_text())
     return raw
 
 

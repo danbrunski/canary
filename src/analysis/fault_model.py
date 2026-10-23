@@ -58,11 +58,11 @@ from itertools import combinations
 from pathlib import Path
 from typing import Any, Literal
 
-import yaml
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from src.evidence.ledger import MemoryLedger, MemoryReferenceError
 from src.evidence.text import no_numerals
+from src.yaml_load import load_yaml
 
 __all__ = [
     "FAULT_MODEL_FILE",
@@ -293,7 +293,7 @@ class FaultModel(_Strict):
 def load_fault_model(path: Path) -> tuple[FaultModel, str]:
     """The model at ``path`` and the sha256 of its bytes (evidence cites both)."""
     raw = Path(path).read_bytes()
-    data = yaml.safe_load(raw)
+    data = load_yaml(raw)
     if not isinstance(data, dict) or data.get("schema") != FAULT_MODEL_SCHEMA:
         raise FaultModelError(f"{path} is not a {FAULT_MODEL_SCHEMA} file")
     return FaultModel.model_validate(data), hashlib.sha256(raw).hexdigest()

@@ -16,7 +16,6 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-import yaml
 
 from src.collection.can_obd_client import ObdResponse
 from src.collection.can_obd_collector import _decode_response
@@ -29,6 +28,7 @@ from src.decode.dids import (
     plan_memory_reads,
 )
 from src.paths import DIDS_YAML
+from src.yaml_load import load_yaml
 
 REPO = Path(__file__).resolve().parents[1]
 CATALOG = load_did_map(DIDS_YAML)
@@ -101,7 +101,7 @@ def test_new_channels_are_code_verified_carry_their_known_answers_and_no_profile
         assert channel.known_answer is None, name
         assert channel.notes and "Known answer" in channel.notes, name
     for path in (REPO / "data").rglob("capture_profiles*.yaml"):
-        for profile in yaml.safe_load(path.read_text()).get("profiles", []):
+        for profile in load_yaml(path.read_text()).get("profiles", []):
             assert not set(PINNED) & set(profile.get("memory") or ()), (path, profile["name"])
 
 

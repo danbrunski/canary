@@ -12,7 +12,6 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Self
 
-import yaml
 from pydantic import PrivateAttr, model_validator
 
 from src.config.auxiliary import (
@@ -36,6 +35,7 @@ from src.config.hardware import HardwareConfig
 from src.config.models import AlertsConfig, ModelsConfig
 from src.config.preprocessing import PreprocessingConfig
 from src.config.vehicle import VehicleConfig
+from src.yaml_load import load_yaml
 
 
 class CanaryConfig(_Strict):
@@ -154,5 +154,5 @@ class CanaryConfig(_Strict):
     @classmethod
     def from_yaml(cls, path: Path) -> Self:
         with path.open("r") as f:
-            data = yaml.safe_load(f)
+            data = load_yaml(f)
         return cls.model_validate(data)

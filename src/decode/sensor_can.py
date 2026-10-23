@@ -13,10 +13,10 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
-import yaml
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from src.decode.slices import in_range, slice_raw
+from src.yaml_load import load_yaml
 
 
 class SensorCanSignal(BaseModel):
@@ -70,7 +70,7 @@ class SensorCanCatalog(BaseModel):
 
 
 def load_sensor_can_catalog(path: Path) -> SensorCanCatalog:
-    return SensorCanCatalog.model_validate(yaml.safe_load(path.read_text()))
+    return SensorCanCatalog.model_validate(load_yaml(path.read_text()))
 
 
 @dataclass(frozen=True)

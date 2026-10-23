@@ -22,6 +22,7 @@ from src.models.false_positive_benchmark import FalsePositiveBenchmarkReport
 from src.models.lstm_training import load_lstm_autoencoder_model
 from src.storage.parquet_writer import write_records_to_parquet
 from src.telemetry import TelemetryRecord
+from src.yaml_load import load_yaml
 from tests.builders import write_obd_session
 from tests.configs import example_config
 
@@ -52,7 +53,7 @@ def _torch():
 
 
 def _write_config(tmp_path: Path, **lstm_overrides: object) -> Path:
-    data = yaml.safe_load(EXAMPLE_YAML.read_text())
+    data = load_yaml(EXAMPLE_YAML.read_text())
     data["models"]["lstm_autoencoder"].update(_TINY_LSTM)
     data["models"]["lstm_autoencoder"].update(lstm_overrides)
     path = tmp_path / "canary.yaml"

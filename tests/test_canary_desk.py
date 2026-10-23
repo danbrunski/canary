@@ -35,6 +35,7 @@ from src.config import DAEMON_STATE_LAYOUT, CanaryConfig
 from src.control.rom_library import RomLibrary, RomLibraryError
 from src.paths import REPO_ROOT
 from src.vehicle.profiles import VehicleProfile, scope_config
+from src.yaml_load import load_yaml
 from tests.rom_fixtures import (
     PROFILE,
     encrypted_backup_lookalike,
@@ -47,7 +48,7 @@ from tests.rom_fixtures import (
 
 def test_the_config_is_the_sim_file_with_only_the_named_overrides(tmp_path: Path) -> None:
     raw = desk.build_config(tmp_path / "state")
-    sim = yaml.safe_load(desk.SIM_CONFIG.read_text())
+    sim = load_yaml(desk.SIM_CONFIG.read_text())
     state = (tmp_path / "state").resolve()
 
     assert raw["daemon"]["state_dir"] == str(state)

@@ -45,7 +45,6 @@ from typing import Any, Literal
 
 import numpy as np
 import pandas as pd
-import yaml
 
 from src.columns import SESSION_COLUMN, TIMESTAMP_COLUMN, arrived_column, gap_column
 from src.dataframe_utils import require_columns as _require_columns
@@ -57,6 +56,7 @@ from src.decode.engineering import (
 )
 from src.operating import CLOSED_LOOP_FUEL_STATES, ENGINE_RUNNING_MIN_RPM
 from src.storage.broadcast_storage import is_broadcast_channel
+from src.yaml_load import load_yaml
 
 AnomalyKind = Literal["spike", "drift", "dropout", "stuck", "scale", "intermittent"]
 
@@ -604,7 +604,7 @@ def load_fault_channel_roles(path: Path | None) -> dict[str, tuple[str, ...]]:
     roles = {role: tuple(channels) for role, channels in DEFAULT_FAULT_CHANNEL_ROLES.items()}
     if path is None or not path.exists():
         return roles
-    raw = yaml.safe_load(path.read_text()) or {}
+    raw = load_yaml(path.read_text()) or {}
     extra = raw.get("roles", {})
     if not isinstance(extra, Mapping):
         raise ValueError(f"{path}: 'roles' must be a mapping of role -> channel list")

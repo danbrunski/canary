@@ -44,6 +44,7 @@ from src.decode.hat_adc_board import (
 )
 from src.paths import DATA_DIR
 from src.telemetry import TelemetryRecord
+from src.yaml_load import load_yaml
 from tests.ads8688a_fake import AbsentBus, FakeAds8688a
 
 REPO = Path(__file__).resolve().parents[1]
@@ -142,7 +143,7 @@ def test_the_rev_2_1_map_accounts_for_every_input() -> None:
 
 
 def test_an_unmapped_or_doubly_mapped_input_is_refused() -> None:
-    raw = yaml.safe_load(BOARD_PATH.read_text())
+    raw = load_yaml(BOARD_PATH.read_text())
     raw["tied_to_ground"] = [5, 6]
     with pytest.raises(ValueError, match=r"inputs \[7\] are not mapped"):
         HatAdcBoard.model_validate(raw)
@@ -189,7 +190,7 @@ def test_the_resistance_solve_includes_the_adcs_leakage() -> None:
 
 def test_every_recorded_name_is_one_roles() -> None:
     assert SUPPLY_CHANNEL == supply_voltage_collector.CHANNEL  # rev 2.0's channel
-    raw = yaml.safe_load(BOARD_PATH.read_text())
+    raw = load_yaml(BOARD_PATH.read_text())
     raw["sensors"][0]["name"] = "PORT_V1_RATIO"
     with pytest.raises(ValueError, match=r"\['PORT_V1_RATIO'\] would be recorded by two roles"):
         HatAdcBoard.model_validate(raw)
@@ -668,7 +669,7 @@ def test_bring_up_says_why_in_one_line(capsys: pytest.CaptureFixture[str], tmp_p
 
 
 def _gate_hardware(rev: str, *, gain_trim: float | None, tmp_path: Path):  # type: ignore[no-untyped-def]
-    raw = yaml.safe_load(BOARD_PATH.read_text())
+    raw = load_yaml(BOARD_PATH.read_text())
     raw["supply"]["gain_trim"] = gain_trim
     board = tmp_path / "board.yaml"
     board.write_text(yaml.safe_dump(raw))

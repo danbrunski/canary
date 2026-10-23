@@ -38,7 +38,6 @@ from typing import Any, Literal
 
 import numpy as np
 import pandas as pd
-import yaml
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from src.analysis.channels import parse_spec, read_channels
@@ -57,6 +56,7 @@ from src.decode.fuel_comp_load import (
 from src.paths import BINDINGS_YAML, DIDS_YAML
 from src.signals.pairing import to_seconds
 from src.signals.time_lookup import previous_sample_indices, values_or_nan
+from src.yaml_load import load_yaml
 
 #: File name of the declaration in a vehicle profile directory.
 FUEL_COMP_FILE = "fuel_comp_fit.yaml"
@@ -578,7 +578,7 @@ def load_fuel_comp_declaration(profile_dir: Path) -> FuelCompDeclaration:
     """``<profile_dir>/fuel_comp_fit.yaml``, validated (``FileNotFoundError``
     when the vehicle has none)."""
     path = profile_dir / FUEL_COMP_FILE
-    return FuelCompDeclaration.model_validate(yaml.safe_load(path.read_text()))
+    return FuelCompDeclaration.model_validate(load_yaml(path.read_text()))
 
 
 # -- logged values to raw words -----------------------------------------------------
