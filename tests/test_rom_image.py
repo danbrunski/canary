@@ -7,6 +7,7 @@ files (outside Git) are used when present and skipped otherwise.
 from __future__ import annotations
 
 import struct
+from typing import Any
 
 import pytest
 
@@ -21,7 +22,7 @@ from src.analysis.rom_image import (
     tables_payload,
 )
 from src.signals.afr import load_afr_calibration
-from src.vehicle.tune_revisions import load_tune_revisions
+from src.vehicle.tune_revisions import TuneRevisionRegistry, load_tune_revisions
 from tests.rom_fixtures import (
     ECU_READ_20261004_SHA256,
     IMAGE_SIZE,
@@ -41,7 +42,7 @@ from tests.rom_fixtures import (
 operator_rom = pytest.mark.slow
 
 
-def _registry():  # type: ignore[no-untyped-def]
+def _registry() -> TuneRevisionRegistry | None:
     return load_tune_revisions(PROFILE / "tune_revisions.yaml")
 
 
@@ -190,8 +191,9 @@ def test_known_answer_k106_and_the_uprev_base() -> None:
 # -- table values (W08.4) ----------------------------------------------------
 
 
-def _table(payload: dict, table_id: str, slot: int | None) -> dict:  # type: ignore[type-arg]
+def _table(payload: dict[str, Any], table_id: str, slot: int | None) -> dict[str, Any]:
     (table,) = [t for t in payload["tables"] if t["id"] == table_id and t["slot"] == slot]
+    assert isinstance(table, dict)
     return table
 
 

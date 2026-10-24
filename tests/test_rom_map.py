@@ -380,6 +380,7 @@ def test_shipped_map_flags_uprevs_swapped_fuel_comp_labels_on_every_copy_and_now
 
 def _fuel_comp(data: dict[str, Any]) -> dict[str, Any]:
     (table,) = [t for t in data["tables"] if t["id"] == "fuel_compensation"]
+    assert isinstance(table, dict)
     return table
 
 
