@@ -13,6 +13,7 @@ import {
   TABLES,
   TABLES_WITH_CURVES,
   TABLES_WITH_FUEL_COMP,
+  TABLES_WITH_TRIM,
   backupState,
   readyStatus,
 } from "../../test/romLibraryFixtures";
@@ -442,6 +443,36 @@ describe("ROM Library page — list, memory map, regions and tables", () => {
     expect(
       within(screen.getByRole("region", { name: "Fuel Targets slot 2" })).queryByRole("note"),
     ).not.toBeInTheDocument();
+  });
+
+  it("draws a timing trim as UpRev does: rpm rows, BFS ms columns, masked counts", async () => {
+    withEntries([ENTRY_TUNED], DESCRIPTION, {
+      [`GET /control/rom/library/${SHA_TUNED}/tables`]: TABLES_WITH_TRIM,
+    });
+    render(<RomLibraryPage token="t" status={null} />);
+    const trim = await screen.findByRole("region", { name: "Timing Main (trim A) slot 1" });
+    expect(
+      within(trim).getByText(
+        "Rows: Timing trim rpm axis (rpm) · Columns: Timing trim load axis (BFS X counts), UpRev's base fuel schedule (ms) · Cells: count",
+      ),
+    ).toBeInTheDocument();
+    const grid = within(trim).getByRole("table", { name: "Timing Main (trim A) values" });
+    const headers = within(grid).getAllByRole("columnheader");
+    expect(headers.map((th) => th.textContent)).toEqual(["", "1.35", "2.70", "10.78", "21.57"]);
+    // Hovering a heading gives the byte the ECM compares.
+    expect(headers[4]).toHaveAttribute("title", "raw 128");
+    expect(within(grid).getByRole("rowheader", { name: "1,200" })).toBeInTheDocument();
+    // The flagged cell shows its masked count, its raw byte on hover.
+    const first = within(grid).getAllByRole("cell")[0];
+    expect(first).toHaveTextContent("43");
+    expect(first).toHaveAttribute("title", "raw 171");
+    expect(within(trim).getByLabelText("Timing Main (trim A) axis labels")).toHaveTextContent(
+      "Timing trim load axis (BFS X counts): UpRev's labels, base fuel schedule = raw / 128 × load_point_scaler (inferred); the ECM compares the raw bytes",
+    );
+    // Fuel Targets gets the same labels on its map.
+    const fuel = screen.getByRole("region", { name: "Fuel Targets slot 1" });
+    expect(within(fuel).getByRole("columnheader", { name: "8.76" })).toBeInTheDocument();
+    expect(within(fuel).getByLabelText("Fuel Targets axis labels")).toHaveTextContent("(verified)");
   });
 
   it("draws 1-row word curves on their axis and word scalars, outside any slot", async () => {

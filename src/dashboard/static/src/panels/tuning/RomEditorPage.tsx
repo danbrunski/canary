@@ -26,6 +26,7 @@ import {
 } from "../../lib/romEditor";
 import {
   ROM_UPLOAD_LIMIT,
+  axisBreakpoints,
   describeEditorDisagreement,
   entryTitle,
   refusalText,
@@ -443,8 +444,8 @@ function Workspace({ token, entry }: { token: string; entry: RomLibraryEntry }) 
   ]
     .filter(Boolean)
     .join(" · ");
-  const rowAxis = table.axes.rows;
-  const colAxis = table.axes.cols;
+  const rowAxis = table.axes.rows ? axisBreakpoints(table.axes.rows) : null;
+  const colAxis = table.axes.cols ? axisBreakpoints(table.axes.cols) : null;
   const mask = valueMask(table.decode);
   const maskBits = mask === null ? null : `the low ${mask.toString(2).length} bits`;
   const simBlockedReason =
@@ -484,11 +485,11 @@ function Workspace({ token, entry }: { token: string; entry: RomLibraryEntry }) 
           <p className="font-num text-xs text-fg-faint">{decodeLine}</p>
           <p className="text-xs text-fg-dim">
             {rowAxis
-              ? `Rows: ${rowAxis.name}${rowAxis.unit ? ` (${rowAxis.unit})` : ""}`
+              ? `Rows: ${rowAxis.label}${rowAxis.unit ? ` (${rowAxis.unit})` : ""}`
               : "Rows: index"}
             {" · "}
             {colAxis
-              ? `Columns: ${colAxis.name}${colAxis.unit ? ` (${colAxis.unit})` : ""}`
+              ? `Columns: ${colAxis.label}${colAxis.unit ? ` (${colAxis.unit})` : ""}`
               : "Columns: index"}
             {" · "}Cells: {table.decoded ? (table.unit ?? "value") : "raw"}
           </p>

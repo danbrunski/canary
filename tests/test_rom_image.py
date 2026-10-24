@@ -222,6 +222,41 @@ def test_tables_synthetic_fuel_targets_and_k() -> None:
     assert _table(payload, "fuel_targets_maps_2_5", 3)["raw"] == target_raw("ZS44A-k106")
 
 
+def test_tables_label_the_x_count_axes_in_uprevs_bfs_ms_from_the_images_own_scaler() -> None:
+    """The trims' and Fuel Targets' columns carry UpRev's BFS labels, computed
+    from the Load Point Scaler in the same image: an edited scaler moves them,
+    and the axis itself stays in raw X counts."""
+    rom_map = xterra_map()
+    image = bytearray(synthetic_image())
+    trim_axis = rom_map.table("timing_trim_load_axis").offset or 0
+    image[trim_axis : trim_axis + 16] = bytes(range(8, 136, 8))  # the stock axis
+    struct.pack_into(">H", image, rom_map.table("load_point_scaler").offset or 0, 44019)
+    payload = tables_payload(with_checksums(bytes(image)), rom_map)
+    trim = _table(payload, "timing_trim_b", 1)["axes"]["cols"]
+    assert trim["decoded"] is None and trim["raw"][0] == 8 and trim["raw"][-1] == 128
+    labels = trim["editor_labels"]
+    assert (labels["editor"], labels["unit"], labels["confidence"]) == ("UpRev", "ms", "inferred")
+    assert [round(v, 2) for v in labels["values"]][::5] == [1.35, 8.09, 14.83, 21.57]
+    fuel = _table(payload, "fuel_targets", 1)["axes"]["cols"]["editor_labels"]
+    assert fuel["confidence"] == "verified"
+    assert [round(v, 2) for v in fuel["values"]] == [
+        8.76,
+        11.46,
+        15.67,
+        16.85,
+        18.2,
+        18.54,
+        21.4,
+        21.57,
+    ]
+    assert _table(payload, "timing_trim_b", 1)["axes"]["rows"]["editor_labels"] is None
+
+    struct.pack_into(">H", image, rom_map.table("load_point_scaler").offset or 0, 44019 // 2)
+    halved = tables_payload(with_checksums(bytes(image)), rom_map)
+    moved = _table(halved, "timing_trim_b", 1)["axes"]["cols"]["editor_labels"]["values"]
+    assert moved == pytest.approx([v / 2 for v in labels["values"]], rel=1e-4)
+
+
 def test_tables_need_a_map() -> None:
     payload = tables_payload(synthetic_image(calibration_id=b"1ZS04C00000"), xterra_map())
     assert payload["tables"] == []
@@ -282,7 +317,7 @@ def test_compare_known_answer_base_to_k106() -> None:
     assert len(ranges) == 9
     assert {"Checksum sum word", "Checksum XOR word"} <= set(ranges[0]["labels"])
     assert "Fuel Compensation load axis (throttle-model fill, alpha-N)" in ranges[1]["labels"]
-    assert "Ignition timing trim A (Map 1)" in ranges[2]["labels"]
+    assert "Timing Main (trim A) (Map 1)" in ranges[2]["labels"]
     assert "Fuel Targets (Map 1)" in ranges[3]["labels"]
     assert len(ranges[3]["cells"]) == 10
     assert {"Fuel Compensation (Map 1)", "K (injector constant) (Map 1)"} <= set(

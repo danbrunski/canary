@@ -357,9 +357,21 @@ tables:
     dtype: u8
     confidence: verified
     evidence: >-
-      The only match for raw 34 44 5D 64 6C 6E 7F 80 in the image. No scale to
-      ms is established (the ms values in afr_calibration.yaml are the
-      editor's transcription), so it is shown raw.
+      The only match for raw 34 44 5D 64 6C 6E 7F 80 in the image. Its decode
+      stays raw: the code compares X counts with these bytes unchanged
+      (rom_viewer.yaml's trace evidence), so edits and traces keep counts.
+    editor_labels:
+      editor: UpRev
+      quantity: base fuel schedule
+      unit: ms
+      relative_to: load_point_scaler
+      full_scale: 128
+      confidence: verified
+      evidence: >-
+        X = BFS x 128 / Load Point Scaler (0x03C4D0), so count 128 is the
+        scaler's BFS, 21.57 ms at 44,019 x 0.00049 ms (DID 0x1208). raw / 128
+        x that reproduces every BFS breakpoint UpRev displays for Fuel Targets
+        (afr_calibration.yaml: 8.76 ... 21.40, 21.57 ms).
   # -- Slot tables confirmed from the code that reads the RAM copy
   # (docs/ecu-firmware-analysis.md, "Map-slot tables"). Every 2-D lookup here
   # goes through the same wrapper shape as Target AFR's (0x0269AC, verified):
@@ -370,7 +382,7 @@ tables:
   # load index. Rows are rpm, columns are load, row-major.
   - id: timing_trim_a
     kind: timing_trim_a
-    name: Ignition timing trim A
+    name: Timing Main (trim A)
     slot_offset: 0x020
     slots: [1]
     rows: 16
@@ -389,9 +401,14 @@ tables:
         which the reader at 0x04A4F6 strips again; bit 7 is a flag (set on 143
         of 256 cells, one contiguous block), not part of the value. Masked, the
         cells form one smooth surface (43-68); raw they jump by 128 at the
-        block's edge. There are no degrees: the UpRev guide says the trim has no
-        conversion to degrees BTDC (docs/roadmap/engine-tuning-support.md), so
-        the unit is counts, and more counts is more advance.
+        block's edge. The unit is counts, as UpRev shows them (its guide gives
+        no conversion to degrees BTDC, docs/roadmap/engine-tuning-support.md);
+        more counts is more advance. The decoded ignition chain adds the masked
+        cell unscaled to the base timing sum (E09.7,
+        src.analysis.ecu_state_models), so one count is predicted to be one
+        degree wherever no clamp binds. No drive has measured that yet (N01.2),
+        and the absolute timing a cell gives depends on terms nobody has
+        identified, so no degree value is declared.
     axes: {rows: timing_trim_rpm_axis, cols: timing_trim_load_axis}
     confidence: verified
     evidence: >-
@@ -416,7 +433,7 @@ tables:
       said 2842 selected it; that was wrong.
   - id: timing_trim_a_maps_2_5
     kind: timing_trim_a
-    name: Ignition timing trim A
+    name: Timing Main (trim A)
     slot_offset: 0x020
     slots: [2, 3, 4, 5]
     rows: 16
@@ -438,7 +455,7 @@ tables:
       Maps 2-5 has confirmed the layout there.
   - id: timing_trim_b
     kind: timing_trim_b
-    name: Ignition timing trim B
+    name: Timing High Det (trim B)
     slot_offset: 0x120
     slots: [1]
     rows: 16
@@ -463,7 +480,7 @@ tables:
       name inferred). See timing_trim_a.
   - id: timing_trim_b_maps_2_5
     kind: timing_trim_b
-    name: Ignition timing trim B
+    name: Timing High Det (trim B)
     slot_offset: 0x120
     slots: [2, 3, 4, 5]
     rows: 16
@@ -513,9 +530,21 @@ tables:
     evidence: >-
       The literal passed in r6 to 0x026A64, compared directly with the X byte
       0xFFFF103E: the same units as the Target AFR BFS axis at 0x00C894 (raw
-      08 10 18 ... 80; 0x80 is that axis's last point too). Shown raw, as that
-      axis is: one X count is load_point_scaler / 128 BFS counts, so a fixed
-      ms scale here would go wrong the moment the scaler is edited.
+      08 10 18 ... 80; 0x80 is that axis's last point too). Its decode stays
+      raw, as that axis's does; the ms labels are computed from the image's
+      own Load Point Scaler, so an edited scaler moves them.
+    editor_labels:
+      editor: UpRev
+      quantity: base fuel schedule
+      unit: ms
+      relative_to: load_point_scaler
+      full_scale: 128
+      confidence: inferred
+      evidence: >-
+        The Target AFR BFS axis's labels, which reproduce UpRev's display there:
+        this axis holds the same X counts (8 is 1.35 ms, 128 is 21.57 ms at
+        the stock scaler), and UpRev's guide puts BFS on the trims' columns.
+        UpRev's own timing labels have not been transcribed to check them.
   # E09.7: the base ignition timing the trims are added to. It is not one
   # table: 0xFFFF1A58 = 0xFFFF1D3E + 0xFFFF27C6 + 0xFFFF2793 - 0xFFFF279A -
   # 0xFFFF134A - 0xFFFF174A - 0x80 + 0xFFFF1344 (0x04CB9E), and the trim term

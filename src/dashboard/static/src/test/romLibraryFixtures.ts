@@ -540,3 +540,84 @@ export function readyStatus(overrides: Partial<StatusResponse> = {}): StatusResp
     ...overrides,
   } as StatusResponse;
 }
+
+/** UpRev's BFS labels for an X-count axis, as rom_image._editor_labels_payload
+ *  sends them: raw / 128 x the stock scaler's 21.57 ms. */
+export function bfsLabels(raw: number[], confidence: "verified" | "inferred" = "verified") {
+  return {
+    editor: "UpRev",
+    quantity: "base fuel schedule",
+    unit: "ms",
+    formula: "base fuel schedule = raw / 128 × load_point_scaler",
+    values: raw.map((count) => (count / 128) * 44019 * 0.00049),
+    confidence,
+    evidence: "X = BFS x 128 / Load Point Scaler.",
+  };
+}
+
+const TRIM_RPM_RAW = [8, 12, 16, 24];
+const TRIM_LOAD_RAW = [8, 16, 64, 128];
+/** Masked counts 43..; the first cell carries the bit-7 flag, as 143 cells do. */
+const TRIM_RAW = TRIM_RPM_RAW.map((_, r) => TRIM_LOAD_RAW.map((_, c) => 43 + 4 * r + c));
+TRIM_RAW[0][0] += 0x80;
+
+/** TABLES with UpRev's ms labels on the Fuel Targets columns, plus a 4 x 4
+ *  timing trim whose columns carry them too. Synthetic values. */
+export const TABLES_WITH_TRIM: RomTablesResponse = {
+  ...TABLES,
+  tables: [
+    {
+      ...TABLES.tables[0],
+      axes: {
+        ...FUEL_AXES,
+        cols: { ...FUEL_AXES.cols, editor_labels: bfsLabels(BFS_RAW) },
+      },
+    },
+    {
+      id: "timing_trim_a",
+      name: "Timing Main (trim A)",
+      label: "Timing Main (trim A) (Map 1)",
+      slot: 1,
+      kind: "timing_trim_a",
+      role: "table",
+      decode: {
+        formula: "timing trim = (raw & 0x7F) × 1",
+        kind: "linear",
+        quantity: "timing trim",
+        unit: "count",
+        confidence: "verified",
+        evidence: "Masked with 0x7F before interpolating.",
+      },
+      offset: 0x0e0020,
+      end: 0x0e002f,
+      rows: 4,
+      cols: 4,
+      dtype: "u8",
+      unit: "count",
+      raw: TRIM_RAW,
+      decoded: TRIM_RAW.map((row) => row.map((raw) => raw & 0x7f)),
+      axes: {
+        rows: {
+          id: "timing_trim_rpm_axis",
+          name: "Timing trim rpm axis",
+          raw: TRIM_RPM_RAW,
+          decoded: TRIM_RPM_RAW.map((raw) => raw * 50),
+          unit: "rpm",
+          confidence: "verified",
+          editor_labels: null,
+        },
+        cols: {
+          id: "timing_trim_load_axis",
+          name: "Timing trim load axis (BFS X counts)",
+          raw: TRIM_LOAD_RAW,
+          decoded: null,
+          unit: null,
+          confidence: "verified",
+          editor_labels: bfsLabels(TRIM_LOAD_RAW, "inferred"),
+        },
+      },
+      confidence: "verified",
+      evidence: "Read from its RAM copy through the trim wrapper.",
+    },
+  ],
+};

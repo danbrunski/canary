@@ -255,12 +255,24 @@ tables:
     evidence: >-
       The literal passed in r6 at 0x0557B2, compared byte for byte with the X
       byte 0xFFFF103C by 0x023508. Raw 29 2A 2C 2D 2E 2F 31 32 34 44 5D 64 6C
-      6E 7F 80: the last eight are the 2008's BFS axis exactly. Shown raw, as
-      the 2008's is.
+      6E 7F 80: the last eight are the 2008's BFS axis exactly. Its decode
+      stays raw, as the 2008's does; the ms labels come from this image's Load
+      Point Scaler.
+    editor_labels:
+      editor: UpRev
+      quantity: base fuel schedule
+      unit: ms
+      relative_to: load_point_scaler
+      full_scale: 128
+      confidence: inferred
+      evidence: >-
+        The 2008's labels, which reproduce UpRev's Fuel Targets display there:
+        this program forms X the same way (0x038C5A), so count 128 is the
+        scaler's BFS. Not checked against UpRev on this calibration.
   # -- Ignition timing trims. Same shape, axes and flag bit as the 2008's.
   - id: timing_trim_a
     kind: timing_trim_a
-    name: Ignition timing trim A
+    name: Timing Main (trim A)
     offset: 0x9A54
     rows: 16
     cols: 16
@@ -276,7 +288,9 @@ tables:
         The readers mask the lookup with 0x7F (0x047562, 0x04757E), and bit 7
         is set on 143 of 256 cells in one block while the masked cells form
         one smooth 43-68 surface: the 2008's trims to the cell count. Counts,
-        not degrees, as on the 2008; more counts is more advance.
+        as on the 2008 and as UpRev shows them; more counts is more advance.
+        The 2008's ignition chain adds a count as one degree (predicted, not
+        measured); this program's chain is not traced.
     axes: {rows: timing_trim_rpm_axis, cols: timing_trim_load_axis}
     confidence: inferred
     evidence: >-
@@ -286,7 +300,7 @@ tables:
       (r5 = 0xFCD2 rpm, r6 = 0xFCC2 load), 16 x 16, rows rpm.
   - id: timing_trim_b
     kind: timing_trim_b
-    name: Ignition timing trim B (High Det)
+    name: Timing High Det (trim B)
     offset: 0x9B54
     rows: 16
     cols: 16
@@ -318,7 +332,19 @@ tables:
     confidence: inferred
     evidence: >-
       The literal passed in r6 at 0x047554. Raw 08 10 18 ... 80: the 2008's
-      trim load axis byte for byte. Shown raw.
+      trim load axis byte for byte. Its decode stays raw; the ms labels come
+      from this image's Load Point Scaler.
+    editor_labels:
+      editor: UpRev
+      quantity: base fuel schedule
+      unit: ms
+      relative_to: load_point_scaler
+      full_scale: 128
+      confidence: inferred
+      evidence: >-
+        The Fuel Targets BFS axis's labels: the same X counts (8 is 1.35 ms,
+        128 is 21.57 ms at the stock scaler). UpRev's own timing labels have
+        not been transcribed to check them.
   # -- Fuel Compensation, read by two routines as on the 2008.
   - id: fuel_compensation
     kind: fuel_compensation
@@ -375,4 +401,14 @@ tables:
     evidence: >-
       44,019, the 2008's value. 0x038C5A divides a load word by it to make the
       X byte, min(255, word x 128 / scaler) (the 2008's formula at 0x03C4D0).
-      Four more routines load it. Shown raw.
+      Four more routines load it.
+    decode:
+      kind: linear
+      quantity: BFS at load point 128
+      unit: ms
+      scale: 0.00049
+      confidence: inferred
+      evidence: >-
+        The 2008's verified 0.00049 ms per BFS count (its DID 0x1208), which
+        makes 44,019 21.57 ms. This program's BFS word has not been compared
+        with a DID.

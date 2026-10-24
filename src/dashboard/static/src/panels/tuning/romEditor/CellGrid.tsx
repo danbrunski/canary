@@ -7,7 +7,7 @@ import {
   moveSelection,
   selectionContains,
 } from "../../../lib/romEditor";
-import { formatCell } from "../../../lib/romLibrary";
+import { axisBreakpoints, formatCell } from "../../../lib/romLibrary";
 import { cn } from "../../../styles";
 import type { CellSelection } from "../../../types/romEditor";
 import type { RomTableValues } from "../../../types/romLibrary";
@@ -35,7 +35,7 @@ export function deltaPercent(
 function axisLabels(table: RomTableValues, axis: "rows" | "cols"): string[] | null {
   const found = table.axes[axis];
   if (!found) return null;
-  return (found.decoded ?? found.raw).map((value) => formatCell(value ?? null));
+  return axisBreakpoints(found).values.map((value) => formatCell(value ?? null));
 }
 
 /** One table as a grid of cells, decoded with the raw count on hover.

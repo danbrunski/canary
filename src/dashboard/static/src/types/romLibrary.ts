@@ -278,6 +278,23 @@ export interface RomTableAxis {
   unit?: string | null;
   decode?: RomDecode | null;
   confidence?: RomConfidence;
+  /** How a tuning editor labels these breakpoints (e.g. UpRev's BFS in ms),
+   *  computed from this image; the decode stays the code's own units. */
+  editor_labels?: RomEditorLabels | null;
+}
+
+/** `EditorLabels` in src/analysis/rom_map.py: an editor's labels for an axis
+ *  whose code compares raw counts, relative to another table's value. */
+export interface RomEditorLabels {
+  /** The tool that shows these labels, e.g. `UpRev`. */
+  editor: string;
+  quantity: string;
+  unit: string;
+  formula: string;
+  /** Null when the table they are relative to has no value in this image. */
+  values: number[] | null;
+  confidence: "verified" | "inferred";
+  evidence: string;
 }
 
 /** One table in one slot: `GET /control/rom/library/{sha}/tables` (W08.4).

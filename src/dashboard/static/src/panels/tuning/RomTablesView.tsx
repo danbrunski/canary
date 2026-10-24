@@ -4,6 +4,7 @@ import { TableScroll } from "../../components/TableScroll";
 import { getRomTables } from "../../api/workbench";
 import { useControlResource } from "../../hooks/useControlResource";
 import {
+  axisBreakpoints,
   cellBytes,
   describeEditorDisagreement,
   formatBytes,
@@ -16,7 +17,13 @@ import {
 } from "../../lib/romLibrary";
 import { mapColor } from "../../lib/romMaps";
 import { inputClass } from "../../styles";
-import type { RomConfidence, RomMapSlots, RomRegion, RomTableValues } from "../../types/romLibrary";
+import type {
+  RomConfidence,
+  RomMapSlots,
+  RomRegion,
+  RomTableAxis,
+  RomTableValues,
+} from "../../types/romLibrary";
 import { MapTable } from "../MapTable";
 import { ConfidenceChip, UpRevChip } from "./romLibraryParts";
 
@@ -129,6 +136,7 @@ function TableSection({ table }: { table: RomTableValues }) {
           {describeEditorDisagreement(table.editor_disagreement)}
         </p>
       )}
+      <AxisLabelsNote table={table} />
       {asMap ? (
         <MapTable
           table={asMap}
@@ -143,6 +151,24 @@ function TableSection({ table }: { table: RomTableValues }) {
         <ValuesGrid table={table} />
       )}
     </section>
+  );
+}
+
+/** Which axes are labelled the editor's way, how, and how sure: the code
+ *  compares those axes as raw counts, so the labels are never edited in. */
+function AxisLabelsNote({ table }: { table: RomTableValues }) {
+  const notes = [table.axes.rows, table.axes.cols]
+    .filter((axis): axis is RomTableAxis => Boolean(axis?.editor_labels?.values))
+    .map(({ name, editor_labels: labels }) =>
+      labels
+        ? `${name}: ${labels.editor}'s labels, ${labels.formula} (${labels.confidence}); the ECM compares the raw bytes (hover a heading).`
+        : "",
+    );
+  if (!notes.length) return null;
+  return (
+    <p aria-label={`${table.name} axis labels`} className="text-xs text-fg-dim">
+      {notes.join(" ")}
+    </p>
   );
 }
 
@@ -166,17 +192,19 @@ function ValuesGrid({ table }: { table: RomTableValues }) {
   const max = Math.max(...flat);
   const rowAxis = table.axes.rows;
   const colAxis = table.axes.cols;
-  const rowLabels = rowAxis ? (rowAxis.decoded ?? rowAxis.raw) : null;
-  const colLabels = colAxis ? (colAxis.decoded ?? colAxis.raw) : null;
+  const rowShown = rowAxis ? axisBreakpoints(rowAxis) : null;
+  const colShown = colAxis ? axisBreakpoints(colAxis) : null;
+  const rowLabels = rowShown?.values ?? null;
+  const colLabels = colShown?.values ?? null;
   return (
     <div className="space-y-1">
       <p className="text-xs text-fg-dim">
-        {rowAxis
-          ? `Rows: ${rowAxis.name}${rowAxis.unit ? ` (${rowAxis.unit})` : ""}`
+        {rowShown
+          ? `Rows: ${rowShown.label}${rowShown.unit ? ` (${rowShown.unit})` : ""}`
           : "Rows: index"}
         {" · "}
-        {colAxis
-          ? `Columns: ${colAxis.name}${colAxis.unit ? ` (${colAxis.unit})` : ""}`
+        {colShown
+          ? `Columns: ${colShown.label}${colShown.unit ? ` (${colShown.unit})` : ""}`
           : "Columns: index"}
         {" · "}Cells: {unit || "value"}
       </p>
@@ -190,7 +218,12 @@ function ValuesGrid({ table }: { table: RomTableValues }) {
               <tr>
                 <th scope="col" className="p-1" />
                 {colLabels.map((label, c) => (
-                  <th key={c} scope="col" className="p-1 text-fg-dim">
+                  <th
+                    key={c}
+                    scope="col"
+                    title={colAxis ? `raw ${colAxis.raw[c] ?? "?"}` : undefined}
+                    className="p-1 text-fg-dim"
+                  >
                     {formatCell(label)}
                   </th>
                 ))}

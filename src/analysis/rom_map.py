@@ -218,6 +218,39 @@ class EditorDisagreement(_Strict):
     evidence: str = Field(min_length=1)
 
 
+class EditorLabels(_Strict):
+    """The labels a tuning editor puts on an axis the code compares as raw
+    counts.
+
+    The timing trims' and Target AFR's load axes hold X counts, which the code
+    compares byte for byte with the X byte. UpRev labels each count with the
+    base fuel schedule it stands for, in ms. That depends on another table: X
+    is BFS x 128 / Load Point Scaler, so count 128 sits at the scaler's BFS.
+    The labels are therefore declared relative to that table and computed from
+    the same image, because a fixed ms scale would go wrong the moment the
+    scaler is edited. They are labels, never the axis's decode: edits, traces
+    and the simulator keep the code's own units.
+    """
+
+    #: The tool that shows these labels, e.g. ``UpRev``.
+    editor: str = Field(min_length=1)
+    quantity: str = Field(min_length=1)
+    unit: str = Field(min_length=1)
+    #: ``label = raw / full_scale x`` the decoded value of this 1 x 1 table.
+    relative_to: str = Field(pattern=r"^[a-z][a-z0-9_]*$")
+    #: The raw count whose label is the ``relative_to`` table's value.
+    full_scale: int = Field(ge=1)
+    confidence: Literal["verified", "inferred"]
+    evidence: str = Field(min_length=1)
+
+    def labels(self, raw: list[int], reference: float) -> list[float]:
+        return [value / self.full_scale * reference for value in raw]
+
+    @property
+    def formula(self) -> str:
+        return f"{self.quantity} = raw / {self.full_scale} × {self.relative_to}"
+
+
 class Table(_Strict):
     """A table at one absolute offset, or at one offset inside each map slot."""
 
@@ -244,6 +277,9 @@ class Table(_Strict):
     #: Where a tuning editor labels this table's axes differently from the
     #: code (:class:`EditorDisagreement`). Only on a table with both axes.
     editor_disagreement: EditorDisagreement | None = None
+    #: How a tuning editor labels this axis's breakpoints
+    #: (:class:`EditorLabels`). Only on a one-dimensional table.
+    editor_labels: EditorLabels | None = None
 
     @model_validator(mode="after")
     def _placement(self) -> Table:
@@ -264,6 +300,11 @@ class Table(_Strict):
             raise ValueError(
                 f"table {self.id!r}: editor_disagreement describes a 2-D table's row and "
                 "column axes, so it needs both axes.rows and axes.cols"
+            )
+        if self.editor_labels is not None and not self.is_axis:
+            raise ValueError(
+                f"table {self.id!r}: editor_labels label an axis's breakpoints, so the "
+                "table must be one-dimensional"
             )
         return self
 
@@ -421,6 +462,7 @@ class RomMap(_Strict):
                         f"table {table.id!r}: {role} axis {ref!r} has "
                         f"{axis.rows * axis.cols} entries for {length} {role}"
                     )
+            _check_editor_labels(table, by_id)
         _refuse_overlaps(spans, nesting=False, what="tables")
         constant_ids = [constant.id for constant in self.program_constants]
         clashes = sorted({i for i in constant_ids if constant_ids.count(i) > 1 or i in by_id})
@@ -477,6 +519,31 @@ class RefusedFormat(_Strict):
 
 
 RomMap.model_rebuild()
+
+
+def _check_editor_labels(table: Table, by_id: dict[str, Table]) -> None:
+    """``editor_labels`` name a 1 x 1 table at an absolute offset whose decode
+    is in the labels' unit: the one value they are computed from."""
+    labels = table.editor_labels
+    if labels is None:
+        return
+    reference = by_id.get(labels.relative_to)
+    if reference is None:
+        raise ValueError(
+            f"table {table.id!r}: editor_labels.relative_to {labels.relative_to!r} "
+            "is not a table id"
+        )
+    if reference.rows * reference.cols != 1 or reference.offset is None:
+        raise ValueError(
+            f"table {table.id!r}: editor_labels.relative_to {labels.relative_to!r} must be a "
+            "1 x 1 table at an absolute offset"
+        )
+    if reference.decode is None or reference.decode.unit != labels.unit:
+        found = "no decode" if reference.decode is None else repr(reference.decode.unit)
+        raise ValueError(
+            f"table {table.id!r}: editor_labels are in {labels.unit!r}, but "
+            f"{labels.relative_to!r} has {found}"
+        )
 
 
 def _refuse_overlaps(
@@ -624,6 +691,7 @@ __all__ = [
     "ConstantDtype",
     "Decode",
     "EditorDisagreement",
+    "EditorLabels",
     "EraseSector",
     "MapSlots",
     "ProgramConstant",

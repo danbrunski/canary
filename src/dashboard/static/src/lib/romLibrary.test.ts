@@ -6,10 +6,12 @@ import {
   ENTRY_TUNED,
   REGIONS,
   TABLES,
+  TABLES_WITH_TRIM,
   UPREV_FUEL_COMP_LABELS,
   readyStatus,
 } from "../test/romLibraryFixtures";
 import {
+  axisBreakpoints,
   backupPreconditions,
   backupStartBlocker,
   describeEditorDisagreement,
@@ -270,6 +272,44 @@ describe("tables", () => {
     expect(table.values[0][0]).toBeCloseTo(14.7, 2);
     expect(table.raw[0][0]).toBe(128);
     expect(mapTableOf({ ...fuel, decoded: null })).toBeNull();
+  });
+
+  it("labels an X-count axis with UpRev's BFS ms where the map declares them", () => {
+    const [fuel, trim] = TABLES_WITH_TRIM.tables;
+    const table = mapTableOf(fuel)!;
+    expect(table.x_axis.map((ms) => ms.toFixed(2))).toEqual([
+      "8.76",
+      "11.46",
+      "15.67",
+      "16.85",
+      "18.20",
+      "18.54",
+      "21.40",
+      "21.57",
+    ]);
+    expect(table.x_unit).toBe("ms");
+    expect(table.x_label).toBe("Fuel Targets BFS axis, UpRev's base fuel schedule");
+    // The raw counts stay what the cells are matched by.
+    expect(table.raw[0][0]).toBe(128);
+    const cols = trim.axes.cols!;
+    expect(axisBreakpoints(cols).values.map((ms) => ms?.toFixed(2))).toEqual([
+      "1.35",
+      "2.70",
+      "10.78",
+      "21.57",
+    ]);
+    // Labels without values (no scaler value in the image) fall back to raw.
+    const unlabelled = { ...cols, editor_labels: { ...cols.editor_labels!, values: null } };
+    expect(axisBreakpoints(unlabelled)).toEqual({
+      label: "Timing trim load axis (BFS X counts)",
+      unit: "",
+      values: [8, 16, 64, 128],
+    });
+    expect(axisBreakpoints(trim.axes.rows!)).toEqual({
+      label: "Timing trim rpm axis",
+      unit: "rpm",
+      values: [400, 600, 800, 1200],
+    });
   });
 });
 

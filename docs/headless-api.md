@@ -441,6 +441,22 @@ has `decoded: null` and is shown raw; a scalar is `[[value]]`. `role` is
 `axis` for a table another table uses as an axis. `slot` is `null` for a
 single-copy table.
 
+Each axis also carries `editor_labels`, `null` unless the map declares how a
+tuning editor labels it. The Xterra maps declare UpRev's BFS in ms on the
+Fuel Targets and timing trim load axes, whose code compares raw X counts:
+
+```json
+"editor_labels": {"editor": "UpRev", "quantity": "base fuel schedule", "unit": "ms",
+                  "formula": "base fuel schedule = raw / 128 × load_point_scaler",
+                  "values": [1.35, 2.70, ..., 21.57], "confidence": "inferred",
+                  "evidence": "..."}
+```
+
+`values` are computed from the named table's value in the same image, so an
+edited Load Point Scaler moves them (`null` when that table has no value).
+They are labels only: `decoded` stays `null`, and edits, traces and the
+simulator keep the raw counts.
+
 **Compare** (`GET /control/rom/compare?a=&b=`): `{a, b, changed_bytes, gap: 16,
 ranges, map_applied, map_reason}`; each range `{start, end, length, changed,
 labels: [str], overlaps: [{type: table|checksum|slot_region|region, id, label,

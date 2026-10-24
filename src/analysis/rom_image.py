@@ -480,6 +480,30 @@ def _axis_payload(image: bytes, rom_map: RomMap, ref: str | None) -> dict[str, A
         "unit": None if decode is None else decode.unit,
         "decode": _decode_payload(decode),
         "confidence": axis.confidence,
+        "editor_labels": _editor_labels_payload(image, rom_map, axis, raw),
+    }
+
+
+def _editor_labels_payload(
+    image: bytes, rom_map: RomMap, axis: Table, raw: list[int]
+) -> dict[str, Any] | None:
+    """An axis's editor labels, computed from the value of the table they are
+    relative to in this same image (an edited scaler moves them)."""
+    labels = axis.editor_labels
+    if labels is None:
+        return None
+    reference = rom_map.table(labels.relative_to)
+    assert reference.decode is not None  # RomMap refuses a reference without one
+    address = rom_map.table_address(reference, None)
+    value = reference.decode.apply(_cell(image, address, reference.dtype))
+    return {
+        "editor": labels.editor,
+        "quantity": labels.quantity,
+        "unit": labels.unit,
+        "formula": labels.formula,
+        "values": None if value is None else labels.labels(raw, value),
+        "confidence": labels.confidence,
+        "evidence": labels.evidence,
     }
 
 

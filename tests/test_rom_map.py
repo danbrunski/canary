@@ -417,6 +417,86 @@ def test_editor_disagreement_fields_are_required(field: str) -> None:
     _refuse(data, field)
 
 
+# -- Editor labels: UpRev's BFS ms on the X-count axes, never their decode -----------
+
+
+def test_shipped_bfs_labels_reproduce_uprevs_displayed_breakpoints() -> None:
+    """The labels the tables view shows are the ones UpRev displays: the
+    transcribed Fuel Targets BFS breakpoints, from the axis bytes and 44,019."""
+    rom_map = load_rom_map(PROFILE)
+    labelled = {t.id: t for t in rom_map.tables if t.editor_labels is not None}
+    assert set(labelled) == {"fuel_targets_bfs_axis", "timing_trim_load_axis"}
+    for table in labelled.values():
+        # A label, not a decode: edits and traces keep comparing raw X counts.
+        assert table.decode is None
+    scaler = rom_map.table("load_point_scaler").decode
+    assert scaler is not None
+    full_scale_ms = scaler.apply(44019)
+    assert full_scale_ms is not None
+    bfs = labelled["fuel_targets_bfs_axis"].editor_labels
+    assert bfs is not None and (bfs.editor, bfs.unit, bfs.confidence) == ("UpRev", "ms", "verified")
+    calibration = load_afr_calibration(PROFILE / "afr_calibration.yaml")
+    target = next(t for t in calibration.target_maps if t.raw_load_breakpoints is not None)
+    assert target.raw_load_breakpoints is not None
+    shown = bfs.labels(list(target.raw_load_breakpoints), full_scale_ms)
+    assert [round(v, 2) for v in shown] == pytest.approx(target.load_breakpoints, abs=1e-9)
+    trims = labelled["timing_trim_load_axis"].editor_labels
+    assert trims is not None and trims.confidence == "inferred"  # UpRev's not transcribed
+    ends = trims.labels([8, 128], full_scale_ms)
+    assert [round(v, 2) for v in ends] == [1.35, 21.57]
+
+
+def _trim_axis(data: dict[str, Any]) -> dict[str, Any]:
+    return next(t for t in data["tables"] if t["id"] == "timing_trim_load_axis")
+
+
+@pytest.mark.parametrize(
+    ("mutate", "match"),
+    [
+        (lambda d: _trim_axis(d)["editor_labels"].update(relative_to="nowhere"), "not a table id"),
+        (
+            lambda d: _trim_axis(d)["editor_labels"].update(relative_to="fuel_targets_rpm_axis"),
+            "must be a 1 x 1 table",
+        ),
+        (
+            lambda d: _trim_axis(d)["editor_labels"].update(
+                relative_to="load_point_scaler_slot_copy"
+            ),
+            "must be a 1 x 1 table at an absolute offset",
+        ),
+        (lambda d: _trim_axis(d)["editor_labels"].update(unit="s"), "in 's', but"),
+        (
+            lambda d: next(t for t in d["tables"] if t["id"] == "load_point_scaler").pop("decode"),
+            "has no decode",
+        ),
+        (
+            lambda d: next(t for t in d["tables"] if t["id"] == "fuel_targets").update(
+                editor_labels=copy.deepcopy(_trim_axis(d)["editor_labels"])
+            ),
+            "must be one-dimensional",
+        ),
+        (lambda d: _trim_axis(d)["editor_labels"].update(full_scale=0), "greater than or equal"),
+        (lambda d: _trim_axis(d)["editor_labels"].pop("evidence"), "evidence"),
+    ],
+    ids=[
+        "unknown",
+        "not-scalar",
+        "slot-copy",
+        "unit",
+        "no-decode",
+        "on-a-2d-table",
+        "full-scale",
+        "no-evidence",
+    ],
+)
+def test_editor_labels_are_refused_unless_computable_from_one_mapped_value(
+    mutate: Any, match: str
+) -> None:
+    data = _shipped()
+    mutate(data)
+    _refuse(data, match)
+
+
 # -- N02.1: the Fuel Comp load byte's inputs, and program constants ------------------
 
 

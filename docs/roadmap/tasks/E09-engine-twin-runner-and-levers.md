@@ -1574,6 +1574,32 @@ Pi; E09.13 Light. Items marked **listing** need the firmware session
   "spark response unmeasured"; "no torque plant" is produced only while the
   stage is unbuilt. `rom_levers` `TOOL_VERSION` 2; the parity test and
   fixture assert the new string.)*
+
+- [ ] **E09.15 — The timing trims in degrees, beside their counts.**
+  **listing**, **truck**
+  The ROM Library shows the trims as UpRev does, in counts, on rpm rows and
+  UpRev's BFS ms columns (`editor_labels`, 2026-10-24). The operator wants a
+  degree view as well, and both available: a counts / degrees switch on the
+  trim tables, with counts as the default (operator, 2026-10-24). What a
+  degree value can honestly be today:
+  - **Per count:** the chain adds the trim term unscaled, so one count is
+    one degree wherever no clamp binds (E09.7's prediction,
+    `test_one_trim_count_is_one_degree_through_all_seven_nodes`). N01.2
+    measures it. That alone gives the same numbers as counts, so it is not
+    a view.
+  - **Absolute, per cell:** `0xFFFF27C6` is computable per cell at stated
+    conditions, but the sum also needs `0xFFFF1D3E`, `1344`, `174A`, `11CB`
+    and the other terms `TIMING_DELTA_CONDITIONS` lists as unidentified, and
+    `ecu_state_models` refuses a typical value for any of them.
+  **Do:** read those words at warm idle and steady cruise on the 2008 (E09.7's
+  truck window set, plus `0xFFFF1344` and `0xFFFF1D3E`), then compute each
+  cell's degrees at a stated condition (warm, φ 1, no knock retard, the trim
+  the HI DET latch selects). Add the switch only when that number has a known
+  answer.
+  **Accept:** at steady cruise points, the per-cell degrees of the table in
+  force agree with logged PID 0x0E within a declared tolerance, and the switch
+  names that condition and its confidence. The 2013 needs its own chain
+  traced first: its program differs.
   *14a done 2026-10-16 (simulator session); 14b open (W09 session).*
   `src/analysis/rom_levers.py` holds `classify_edit(report, *, rom_map,
   model, contract, qualification, regime=None, cells=None) ->

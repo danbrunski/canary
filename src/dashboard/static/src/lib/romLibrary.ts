@@ -15,6 +15,7 @@ import type {
   RomLibraryEntry,
   RomRegion,
   RomSource,
+  RomTableAxis,
   RomTableValues,
 } from "../types/romLibrary";
 import type { RomTable } from "../types/workbench";
@@ -230,6 +231,30 @@ function complete(values: (number | null)[]): values is number[] {
   return values.every((value) => value !== null);
 }
 
+/** How an axis's breakpoints are shown: the editor's labels where the map
+ *  declares them (UpRev's BFS in ms), else the decode, else the raw bytes. */
+export interface AxisBreakpoints {
+  label: string;
+  unit: string;
+  values: (number | null)[];
+}
+
+export function axisBreakpoints(axis: RomTableAxis): AxisBreakpoints {
+  const labels = axis.editor_labels;
+  if (labels?.values) {
+    return {
+      label: `${axis.name}, ${labels.editor}'s ${labels.quantity}`,
+      unit: labels.unit,
+      values: labels.values,
+    };
+  }
+  return {
+    label: axis.name,
+    unit: axis.decoded ? (axis.unit ?? "") : "",
+    values: axis.decoded ?? axis.raw,
+  };
+}
+
 /** A library table as `MapTable` draws it, or null when it lacks a decode,
  *  an axis, or a value in any cell (it is then shown raw). */
 export function mapTableOf(table: RomTableValues): RomTable | null {
@@ -237,17 +262,19 @@ export function mapTableOf(table: RomTableValues): RomTable | null {
   const cols = table.axes.cols;
   if (!rows || !cols || !table.decoded) return null;
   const values = table.decoded.map((row) => (complete(row) ? row : null));
-  const xAxis = cols.decoded ?? cols.raw;
-  const yAxis = rows.decoded ?? rows.raw;
+  const x = axisBreakpoints(cols);
+  const y = axisBreakpoints(rows);
+  const xAxis = x.values;
+  const yAxis = y.values;
   if (!complete(xAxis) || !complete(yAxis) || values.some((row) => row === null)) return null;
   return {
     slot: table.slot ?? 0,
     kind: "fuel_targets",
     title: table.name,
-    x_label: cols.name,
-    x_unit: cols.unit ?? "",
-    y_label: rows.name,
-    y_unit: rows.unit ?? "",
+    x_label: x.label,
+    x_unit: x.unit,
+    y_label: y.label,
+    y_unit: y.unit,
     unit: table.unit ?? "",
     status: "available",
     reason: null,

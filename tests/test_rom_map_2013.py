@@ -29,6 +29,8 @@ CALIBRATION_ID = "19CF2B00000"
 #: The 2008's Target AFR breakpoints (data/nissan-xterra-2008/rom_map.yaml).
 BFS_2008 = bytes.fromhex("34445D646C6E7F80")
 RPM_2008 = bytes.fromhex("1820283848505868")
+#: Those BFS breakpoints as UpRev displays them (afr_calibration.yaml).
+BFS_2008_MS = [8.76, 11.46, 15.67, 16.85, 18.2, 18.54, 21.4, 21.57]
 
 
 @pytest.fixture(scope="module")
@@ -113,6 +115,20 @@ def test_the_2013_read_is_what_the_map_says(rom_map: RomMap) -> None:
     scaler = rom_map.table("load_point_scaler")
     assert scaler.offset is not None
     assert struct.unpack_from(">H", image, scaler.offset)[0] == 44019
+    # UpRev's BFS labels, from that scaler: the trims' 8..128 counts are
+    # 1.35..21.57 ms, and Fuel Targets' last eight are the 2008's displayed ones.
+    payload = {t["id"]: t for t in tables_payload(image, rom_map)["tables"]}
+
+    def ms(table_id: str) -> list[float]:
+        labels = payload[table_id]["axes"]["cols"]["editor_labels"]
+        assert labels["editor"] == "UpRev" and labels["unit"] == "ms"
+        return [round(v, 2) for v in labels["values"]]
+
+    assert ms("timing_trim_a")[0] == 1.35 and ms("timing_trim_a")[-1] == 21.57
+    assert ms("timing_trim_b") == ms("timing_trim_a")
+    assert ms("fuel_targets")[-8:] == BFS_2008_MS
+    assert payload["timing_trim_a"]["name"] == "Timing Main (trim A)"
+    assert payload["timing_trim_b"]["name"] == "Timing High Det (trim B)"
 
 
 def test_the_shared_backup_recipe_reads_exactly_this_image(rom_map: RomMap) -> None:
