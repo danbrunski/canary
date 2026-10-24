@@ -474,7 +474,7 @@ def test_a_what_if_cannot_stand_where_measurements_go(tmp_path: Path) -> None:
         ledger.resolve_evidence(pid)
     with pytest.raises(MemoryReferenceError, match="not evidence"):
         detect_discrepancy(ledger, pid)
-    base = {
+    base: dict[str, Any] = {
         "vehicle": prediction.vehicle,
         "conditions": prediction.conditions,
         "valid_from": T0,

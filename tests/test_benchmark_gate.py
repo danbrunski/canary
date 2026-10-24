@@ -24,7 +24,9 @@ from src.models.benchmark_gate import (
 )
 
 
-def _recall_block(detected: int, graded: int, ttd: float | None = 10.0, **extra: int) -> dict:
+def _recall_block(
+    detected: int, graded: int, ttd: float | None = 10.0, **extra: int
+) -> dict[str, Any]:
     return {
         "recall": {"estimate": detected / graded if graded else None},
         "injections": graded + sum(extra.values()),

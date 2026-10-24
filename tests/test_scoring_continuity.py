@@ -24,10 +24,11 @@ from __future__ import annotations
 import multiprocessing as mp
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any
+from typing import Any, cast
 
 import numpy as np
 import pandas as pd
+import pytest
 
 from src.columns import SESSION_COLUMN, TIMESTAMP_COLUMN
 from src.daemon import inference as inference_mod
@@ -84,7 +85,7 @@ def _reply(index: int) -> WorkerReply:
 def _fast_worker(conn: Any) -> InferenceWorker:
     worker = InferenceWorker(object())
     worker._conn = conn
-    worker._proc = _AliveProc()
+    worker._proc = cast(Any, _AliveProc())
     worker._answered_once = True  # past the startup allowance
     worker._result_timeout_seconds = 0.2
     return worker
@@ -105,7 +106,7 @@ def test_a_late_reply_is_never_applied_to_the_next_tick() -> None:
     result = worker.compute(_tick(1))
 
     assert isinstance(result, _TickResult)
-    assert result.if_computed == "result-for-1"  # not tick 0's
+    assert result.if_computed == "result-for-1"  # type: ignore[comparison-overlap]  # not tick 0's
     assert worker.stale_replies == 1
 
 
@@ -206,8 +207,10 @@ def test_offline_windows_and_live_delta_restart_at_the_same_gap() -> None:
     buffer = SequenceWindowBuffer(feature_columns=("rpm",), sequence_length=3)
     live_windows = []
     for position, row in frame.iterrows():
-        if buffer.append(row.to_dict()):
-            live_windows.append((int(position), buffer.delta_array(), buffer.mask_array()))
+        if buffer.append(cast(dict[str, Any], row.to_dict())):
+            live_windows.append(
+                (int(cast(int, position)), buffer.delta_array(), buffer.mask_array())
+            )
 
     assert [end + 1 for end, _, _ in live_windows] == [end for _, end in spans]
     for (end, live_delta, live_mask), (start, stop) in zip(live_windows, spans, strict=True):
@@ -255,7 +258,7 @@ def _token(*, replay_id: str | None = None) -> GenerationToken:
     )
 
 
-def test_a_generation_change_asks_for_a_window_reset(monkeypatch) -> None:
+def test_a_generation_change_asks_for_a_window_reset(monkeypatch: pytest.MonkeyPatch) -> None:
     detector = _detector(monkeypatch, _FakeEngine())
     row = pd.DataFrame([{"rpm": 1.0}])
 
@@ -270,7 +273,7 @@ def test_a_generation_change_asks_for_a_window_reset(monkeypatch) -> None:
     assert back is not None and back.reset is True  # replay stopped
 
 
-def test_in_process_compute_clears_the_window_when_asked(monkeypatch) -> None:
+def test_in_process_compute_clears_the_window_when_asked(monkeypatch: pytest.MonkeyPatch) -> None:
     engine = _FakeEngine()
     observed: list[Any] = []
     monkeypatch.setattr(sequence_mod, "_sequence_observe", lambda e, r: observed.append(r))
@@ -282,10 +285,10 @@ def test_in_process_compute_clears_the_window_when_asked(monkeypatch) -> None:
     assert observed == ["row-a", "row-b"]
 
 
-def test_the_reset_rides_to_the_scoring_child(monkeypatch) -> None:
+def test_the_reset_rides_to_the_scoring_child(monkeypatch: pytest.MonkeyPatch) -> None:
     pipeline = LiveInferencePipeline.__new__(LiveInferencePipeline)
-    pipeline._if = SimpleNamespace(model_version="if-v1")
-    pipeline._sequence = SimpleNamespace(model_version="seq-v1")
+    pipeline._if = cast(Any, SimpleNamespace(model_version="if-v1"))
+    pipeline._sequence = cast(Any, SimpleNamespace(model_version="seq-v1"))
     request = SimpleNamespace(
         slot=SimpleNamespace(index=9),
         if_job=None,
@@ -344,7 +347,9 @@ def test_a_recorded_suppress_list_names_what_serving_added_and_dropped() -> None
     assert changed.trained_columns_suppressed_at_serve == ("obd:HVAC",)
 
 
-def test_the_suppress_comparison_reaches_status_when_the_engine_loads(monkeypatch) -> None:
+def test_the_suppress_comparison_reaches_status_when_the_engine_loads(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """Named at load on ``/status``, not only in a log line."""
     from src.daemon.health import HealthMonitor
 
@@ -355,7 +360,7 @@ def test_the_suppress_comparison_reaches_status_when_the_engine_loads(monkeypatc
     )
     detector = _detector(monkeypatch, engine)
     health = HealthMonitor()
-    detector._components.health_monitor = health  # type: ignore[attr-defined]
+    detector._components.health_monitor = health
 
     detector.prepare(pd.DataFrame([{"rpm": 1.0}]), _ctx(), generation=_token())
 
@@ -415,7 +420,7 @@ def test_a_hot_swap_holds_ticks_back_instead_of_timing_out() -> None:
     result = worker.compute(_versioned_tick(3, sequence_version="seq-v2"))
 
     assert isinstance(result, _TickResult)
-    assert result.if_computed == "result-for-3"
+    assert result.if_computed == "result-for-3"  # type: ignore[comparison-overlap]
     assert worker.fallbacks == {}  # the swap window was never a timeout
     assert worker.stale_replies == 0
     swaps = worker.swaps
@@ -452,18 +457,18 @@ def test_a_late_load_acknowledgement_is_not_a_bad_reply() -> None:
     result = worker.compute(_versioned_tick(5, sequence_version="seq-v1"))
 
     assert isinstance(result, _TickResult)
-    assert result.if_computed == "result-for-5"
+    assert result.if_computed == "result-for-5"  # type: ignore[comparison-overlap]
     assert worker.fallbacks == {}
 
 
 def test_the_pipeline_scores_the_forest_but_not_the_sequence_while_the_child_loads(
-    monkeypatch,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     captured: list[Any] = []
     monkeypatch.setattr(
         inference_mod,
         "_compute_tick",
-        lambda request: captured.append(request) or _TickResult(None, None, {}),
+        lambda request: captured.append(request) or _TickResult(None, None, {}),  # type: ignore[func-returns-value]
     )
 
     class _LoadingWorker:
@@ -476,7 +481,7 @@ def test_the_pipeline_scores_the_forest_but_not_the_sequence_while_the_child_loa
     engine = _FakeEngine()
     pipeline = LiveInferencePipeline.__new__(LiveInferencePipeline)
     pipeline._worker = _LoadingWorker()  # type: ignore[assignment]
-    pipeline._if = SimpleNamespace(model_version="if-v1")  # type: ignore[assignment]
+    pipeline._if = cast(Any, SimpleNamespace(model_version="if-v1"))
     pipeline._sequence = SimpleNamespace(model_version="seq-v2")  # type: ignore[assignment]
     request = inference_mod._TickRequest(
         slot=SimpleNamespace(index=4),  # type: ignore[arg-type]
@@ -510,7 +515,7 @@ class _FakeManager:
             self.current = SimpleNamespace(serving_version=self._versions.pop(0))
 
 
-def test_the_child_loads_then_acknowledges_a_swap(monkeypatch) -> None:
+def test_the_child_loads_then_acknowledges_a_swap(monkeypatch: pytest.MonkeyPatch) -> None:
     from src.daemon.inference_worker import _WorkerState
 
     built: list[_FakeEngine] = []
@@ -543,7 +548,7 @@ def test_the_child_loads_then_acknowledges_a_swap(monkeypatch) -> None:
     assert built[-1].resets == before + 1
 
 
-def test_a_started_child_acknowledges_readiness(tmp_path) -> None:
+def test_a_started_child_acknowledges_readiness(tmp_path: Path) -> None:
     """End to end over a real spawned child: the startup load is announced,
     and until it is the parent sends the child nothing."""
     import time

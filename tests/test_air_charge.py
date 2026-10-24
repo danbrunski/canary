@@ -14,6 +14,7 @@ import json
 import random
 from dataclasses import asdict, replace
 from pathlib import Path
+from typing import Any
 
 import pandas as pd
 import pytest
@@ -165,7 +166,12 @@ def test_the_transient_is_an_arithmetic_shift_clamped_to_a_signed_word() -> None
     assert ac.fill_transient(0, 0xFFFF, gain=160, active=True) == -0x8000
     assert ac.fill_transient(0xFFFF, 0, gain=160, active=True) == 0x7FFF
     assert ac.fill_transient(2000, 1000, gain=160, active=False) == 0
-    active = {"flags_283c": 0x0C, "near_wot": False, "maf_fault_hold": 0, "throttle_fault_hold": 0}
+    active: dict[str, Any] = {
+        "flags_283c": 0x0C,
+        "near_wot": False,
+        "maf_fault_hold": 0,
+        "throttle_fault_hold": 0,
+    }
     assert ac.transient_active(**active)
     for change in (
         {"flags_283c": 0x08},
@@ -174,7 +180,7 @@ def test_the_transient_is_an_arithmetic_shift_clamped_to_a_signed_word() -> None
         {"maf_fault_hold": 1},
         {"throttle_fault_hold": 4},
     ):
-        assert not ac.transient_active(**{**active, **change})  # type: ignore[arg-type]
+        assert not ac.transient_active(**{**active, **change})
 
 
 def test_the_near_wot_latch_blend_and_bfs_word() -> None:
@@ -279,7 +285,7 @@ def test_the_gates_are_the_ones_declared_before_scoring() -> None:
 def _rows(samples: list[tuple[float, int, int, int]]) -> pd.DataFrame:
     """Raw telemetry rows as the parquet writer stores them: DIDs as hex text,
     Mode 01 as payload bytes, acquisition time in metadata."""
-    rows = []
+    rows: list[tuple[Any, ...]] = []
     for at, bfs, maf, rpm_word in samples:
         meta = json.dumps({"acquired_at": at})
         rows.append(("DID_1208", None, f"{bfs:04x}", None, meta))

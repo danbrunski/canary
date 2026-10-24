@@ -21,6 +21,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from mcp.server.fastmcp import FastMCP
 
 from src.mcp_server.config import MCPConfig
 from src.mcp_server.server import build_server
@@ -98,7 +99,7 @@ async def test_delegated_tool_forwards_injected_client_and_audit(tmp_path: Path)
     entry = server_module.Delegation(fake_pin, needs_audit=True)
     client, audit = object(), object()
     tool = server_module.bind_delegation(entry, client, audit)  # type: ignore[arg-type]
-    mcp = server_module.FastMCP(name="t")
+    mcp = FastMCP(name="t")
     mcp.tool()(tool)
     await mcp.call_tool("unpin_session", {"session_id": "2026-09-10T142711"})
     assert seen == {"client": client, "audit": audit, "session_id": "2026-09-10T142711"}

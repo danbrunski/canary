@@ -7,7 +7,9 @@ import logging
 import math
 import threading
 import time
+from collections.abc import Callable
 from functools import partial
+from typing import Any
 
 import pytest
 
@@ -43,7 +45,8 @@ class _FakeClock:
         self.now += seconds
 
 
-def _lines(caplog: pytest.LogCaptureFixture, message: str) -> list[logging.LogRecord]:
+def _lines(caplog: pytest.LogCaptureFixture, message: str) -> list[Any]:
+    # Records carry the throttle's ``extra`` fields as attributes.
     return [record for record in caplog.records if record.getMessage() == message]
 
 
@@ -60,7 +63,7 @@ def test_put_nowait_or_drop_counts_full_queue() -> None:
     assert counter.dropped == 1
 
 
-def test_queue_depth_monitor_warns_near_capacity(caplog) -> None:
+def test_queue_depth_monitor_warns_near_capacity(caplog: pytest.LogCaptureFixture) -> None:
     queue: asyncio.Queue[TelemetryRecord] = asyncio.Queue(maxsize=2)
     monitor = QueueDepthMonitor(warning_fraction=0.5)
     queue.put_nowait(_record())
@@ -207,12 +210,12 @@ async def test_thread_handoff_one_wakeup_per_burst_vs_one_per_record() -> None:
     scheduled = 0
     original = loop.call_soon_threadsafe
 
-    def counting(callback, *args, **kwargs):  # type: ignore[no-untyped-def]
+    def counting(callback: Any, *args: Any, **kwargs: Any) -> Any:
         nonlocal scheduled
         scheduled += 1
         return original(callback, *args, **kwargs)
 
-    loop.call_soon_threadsafe = counting  # type: ignore[method-assign]
+    loop.call_soon_threadsafe = counting  # type: ignore[assignment]
     try:
         queue: asyncio.Queue[TelemetryRecord] = asyncio.Queue()
         handoff = ThreadHandoff(loop, queue, capacity=1000)
@@ -247,16 +250,16 @@ async def test_thread_handoff_benchmark_reduces_loop_callbacks_from_a_thread() -
     n = 20_000
     records = [_can(i) for i in range(n)]
 
-    async def run(push, label: str) -> tuple[int, float]:  # type: ignore[no-untyped-def]
+    async def run(push: Callable[[TelemetryRecord], Any], label: str) -> tuple[int, float]:
         scheduled = 0
         original = loop.call_soon_threadsafe
 
-        def counting(callback, *args, **kwargs):  # type: ignore[no-untyped-def]
+        def counting(callback: Any, *args: Any, **kwargs: Any) -> Any:
             nonlocal scheduled
             scheduled += 1
             return original(callback, *args, **kwargs)
 
-        loop.call_soon_threadsafe = counting  # type: ignore[method-assign]
+        loop.call_soon_threadsafe = counting  # type: ignore[assignment]
         try:
             started = time.perf_counter()
             thread = threading.Thread(target=lambda: [push(r) for r in records], name=label)
@@ -299,7 +302,9 @@ async def test_thread_handoff_benchmark_reduces_loop_callbacks_from_a_thread() -
 # ---------------------------------------------------------------------------
 
 
-def test_drop_log_first_line_is_immediate_then_one_per_interval(caplog) -> None:
+def test_drop_log_first_line_is_immediate_then_one_per_interval(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
     """The first drop of a burst is the signal that loss started, so it logs
     at once; after that the interval — not the drop count — sets the rate."""
     clock = _FakeClock()
@@ -315,7 +320,7 @@ def test_drop_log_first_line_is_immediate_then_one_per_interval(caplog) -> None:
     assert len(_lines(caplog, "dropped")) == 2
 
 
-def test_drop_log_volume_does_not_grow_with_drop_volume(caplog) -> None:
+def test_drop_log_volume_does_not_grow_with_drop_volume(caplog: pytest.LogCaptureFixture) -> None:
     """The 2026-09-17 defect: 150,114 dropped records produced 1,502 warning
     lines (one per 100 drops) from inside the producer path. Within one
     interval, any number of drops is one line."""
@@ -336,7 +341,7 @@ def test_drop_log_volume_does_not_grow_with_drop_volume(caplog) -> None:
     assert ten == many == 1
 
 
-def test_drop_log_breakdown_is_bounded_and_counts_add_up(caplog) -> None:
+def test_drop_log_breakdown_is_bounded_and_counts_add_up(caplog: pytest.LogCaptureFixture) -> None:
     """Each line carries the interval's shape — distinct source/channel pairs
     with counts — capped so the line itself cannot grow without bound."""
     clock = _FakeClock()
@@ -370,7 +375,7 @@ def test_drop_log_breakdown_is_bounded_and_counts_add_up(caplog) -> None:
     assert last.dropped_total == total
 
 
-def test_drop_log_flush_is_a_no_op_without_a_pending_tail(caplog) -> None:
+def test_drop_log_flush_is_a_no_op_without_a_pending_tail(caplog: pytest.LogCaptureFixture) -> None:
     caplog.set_level(logging.WARNING)
     throttle = DropLogThrottle("dropped", clock=_FakeClock())
     assert throttle.flush() is False
@@ -385,7 +390,9 @@ def test_drop_log_rejects_nonpositive_bounds() -> None:
         DropLogThrottle("dropped", breakdown_limit=0)
 
 
-def test_queue_drop_counter_stays_exact_under_rate_limiting(caplog) -> None:
+def test_queue_drop_counter_stays_exact_under_rate_limiting(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
     """Requirement 2: only lines are rate-limited. ``dropped`` is what
     ``/status`` and the loss reconciliation read, and it counts every drop."""
     clock = _FakeClock()
@@ -405,7 +412,9 @@ def test_queue_drop_counter_stays_exact_under_rate_limiting(caplog) -> None:
     assert lines[-1].queue == "gps"
 
 
-async def test_handoff_drop_burst_is_bounded_and_fully_accounted(caplog) -> None:
+async def test_handoff_drop_burst_is_bounded_and_fully_accounted(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
     """A 3-second burst at 100 drops/s: at most one line per interval (plus
     the immediate first), the counts sum to the exact number dropped, and
     ``HandoffStats.dropped`` is untouched by any of it."""
@@ -448,7 +457,9 @@ async def test_handoff_drop_burst_is_bounded_and_fully_accounted(caplog) -> None
     assert handoff.stats().dropped == drops
 
 
-async def test_handoff_close_forces_the_final_drop_summary(caplog) -> None:
+async def test_handoff_close_forces_the_final_drop_summary(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
     """The producer can die mid-burst before any drain: close() is the last
     chance to emit the tail, and it ignores the interval."""
     clock = _FakeClock()
@@ -469,7 +480,9 @@ async def test_handoff_close_forces_the_final_drop_summary(caplog) -> None:
     assert lines[-1].closed is True
 
 
-async def test_handoff_flushes_the_queue_drop_counters_tail_too(caplog) -> None:
+async def test_handoff_flushes_the_queue_drop_counters_tail_too(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
     """Both loss causes on this path hold a tail: buffer-full in the handoff,
     ingest-queue-full in the ``on_drop`` counter. Draining flushes both."""
     clock = _FakeClock()
@@ -495,7 +508,9 @@ async def test_handoff_flushes_the_queue_drop_counters_tail_too(caplog) -> None:
 _CAN_PARSE_MESSAGE = "dropped malformed CAN frame"
 
 
-def test_can_frame_parse_error_storm_is_bounded_and_keeps_the_tail(caplog) -> None:
+def test_can_frame_parse_error_storm_is_bounded_and_keeps_the_tail(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
     """A parse-error storm is proportional to a failure rate too (63M errors
     in 27 minutes, session 2026-05-15T020322): 10k errors inside one second
     are one line, not 100, and the final summary still lands."""
@@ -516,7 +531,7 @@ def test_can_frame_parse_error_storm_is_bounded_and_keeps_the_tail(caplog) -> No
     assert lines[0].dropped_by == {"ValueError": 1}
 
 
-def test_can_frame_parse_error_throttles_are_per_owner(caplog) -> None:
+def test_can_frame_parse_error_throttles_are_per_owner(caplog: pytest.LogCaptureFixture) -> None:
     """Two live buses must not suppress each other's lines — a shared
     throttle would also make ``dropped_total`` flip between two counters."""
     caplog.set_level(logging.WARNING)
@@ -528,13 +543,17 @@ def test_can_frame_parse_error_throttles_are_per_owner(caplog) -> None:
     assert [line.dropped_total for line in lines] == [1, 1]
 
 
-def test_flush_can_frame_parse_error_log_is_a_no_op_for_an_unknown_owner(caplog) -> None:
+def test_flush_can_frame_parse_error_log_is_a_no_op_for_an_unknown_owner(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
     caplog.set_level(logging.WARNING)
     flush_dropped_can_frame_log(owner="never-logged", force=True)
     assert _lines(caplog, _CAN_PARSE_MESSAGE) == []
 
 
-def test_dropped_total_accumulates_across_a_collector_restart(caplog) -> None:
+def test_dropped_total_accumulates_across_a_collector_restart(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
     """Found by verification, 2026-09-17. A ``CanReader`` is rebuilt on every
     reconnect attempt with ``parse_errors`` back at 0, and
     ``run_can_obd_loop`` gets a fresh ``CanObdLoopStats`` per attempt, while

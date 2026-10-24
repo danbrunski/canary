@@ -193,13 +193,12 @@ def test_the_calibration_reaches_offline_featurization_for_a_calibrated_profile(
     assert scoped.daemon.afr_calibration.is_file()
     # B06.7: the voltage route applies the ECM's barometric gain, from the
     # baro read as of each row; 80 kPa is a real, non-unity gain.
-    wide = _wide().assign(
-        **{
-            "did:ECM_AF_SENSOR_V_B1": np.linspace(1.0, 2.5, 40),
-            "obd:BAROMETRIC_PRESSURE": 80.0,
-            "obd:BAROMETRIC_PRESSURE__arrived": True,
-        }
-    )
+    baro_columns: dict[str, Any] = {
+        "did:ECM_AF_SENSOR_V_B1": np.linspace(1.0, 2.5, 40),
+        "obd:BAROMETRIC_PRESSURE": 80.0,
+        "obd:BAROMETRIC_PRESSURE__arrived": True,
+    }
+    wide = _wide().assign(**baro_columns)
     operating = featurize_wide_frame(
         wide, scoped, behavior_models=None, did_map=load_repo_did_map()
     ).operating_frame

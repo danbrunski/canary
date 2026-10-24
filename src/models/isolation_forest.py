@@ -189,16 +189,23 @@ def calibration_flag_rate(requested: float, holdout_rows: int) -> float:
 
 
 class IsolationForestConfigLike(Protocol):
-    """Subset of ``src.config.IsolationForestConfig`` needed by the trainer."""
+    """The fields of ``src.config.IsolationForestConfig`` the trainer requires.
 
-    enabled: bool
-    n_estimators: int
-    contamination: float
-    random_state: int
-    calibration_holdout_fraction: float
-    target_flag_rate: float
-    min_samples_per_mode: int
-    n_jobs: int
+    Read-only, so a frozen dataclass satisfies it. Every other field
+    (``calibration_holdout_fraction``, ``target_flag_rate``, ``n_jobs``,
+    ``min_samples_per_mode``, the drive-count gates…) is read with ``getattr``
+    and a default, and is deliberately not listed: listing it would demand it of
+    configs and test doubles the trainer already accepts without it.
+    """
+
+    @property
+    def enabled(self) -> bool: ...
+    @property
+    def n_estimators(self) -> int: ...
+    @property
+    def contamination(self) -> float: ...
+    @property
+    def random_state(self) -> int: ...
 
 
 class MissingModelDependencyError(ImportError):
@@ -770,8 +777,8 @@ class _ModeFitPlan:
 
 def exceedance_episodes(
     flags: np.ndarray[Any, Any] | Sequence[bool],
-    timestamps: pd.Series | Sequence[Any],
-    sessions: pd.Series | Sequence[Any] | None = None,
+    timestamps: pd.Series | pd.Index | Sequence[Any],
+    sessions: pd.Series | pd.Index | Sequence[Any] | None = None,
     *,
     gap_seconds: float = DEFAULT_EXCEEDANCE_EPISODE_GAP_SECONDS,
 ) -> int:

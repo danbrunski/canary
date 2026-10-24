@@ -9,6 +9,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
+
+import pytest
 
 import scripts.replay as replay_script
 from scripts.replay import main
@@ -136,7 +139,7 @@ def test_replay_sessions_can_score_with_isolation_forest_artifact(tmp_path: Path
     assert set(scoring["predicted_anomalies_by_mode"]) == {"city", "idle"}
 
 
-def test_replay_main_prints_json_report(tmp_path: Path, capsys) -> None:
+def test_replay_main_prints_json_report(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     session = _write_obd_session(tmp_path, n=4)
 
     rc = main(["--config", str(EXAMPLE_YAML), str(session)])
@@ -147,7 +150,9 @@ def test_replay_main_prints_json_report(tmp_path: Path, capsys) -> None:
     assert '"numeric_value_column_count": 4' in out
 
 
-def test_replay_main_returns_error_for_missing_session(tmp_path: Path, capsys) -> None:
+def test_replay_main_returns_error_for_missing_session(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
     rc = main(["--config", str(EXAMPLE_YAML), str(tmp_path / "missing")])
 
     assert rc == 1
@@ -205,7 +210,7 @@ def test_replay_reports_can_only_payload_sessions_as_unusable_numeric_features(
 
 def test_script_reexports_are_the_library_objects() -> None:
     """Old programmatic callers keep working, and the names are not copies."""
-    assert replay_script.replay_sessions is replay_library.replay_sessions
+    assert replay_script.replay_sessions is replay_library.replay_sessions  # type: ignore[attr-defined]
     assert replay_script.ReplayFrames is replay_library.ReplayFrames
     assert replay_script.ReplayResult is replay_library.ReplayResult
     assert replay_library.ReplayResult.__module__ == "src.analysis.replay"
@@ -222,15 +227,15 @@ def test_script_is_an_entrypoint_not_the_implementation() -> None:
 
 
 def test_replay_main_runs_the_library_and_prints_its_report(
-    tmp_path: Path, monkeypatch, capsys
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     """``main`` prints exactly the library's report, sorted, one JSON document."""
     import json
 
     session = _write_obd_session(tmp_path, n=6)
-    returned: list[object] = []
+    returned: list[Any] = []
 
-    def _through(*args, **kwargs):
+    def _through(*args: Any, **kwargs: Any) -> Any:
         result = replay_library.replay_sessions(*args, **kwargs)
         returned.append(result)
         return result
@@ -245,14 +250,14 @@ def test_replay_main_runs_the_library_and_prints_its_report(
 
 
 def test_replay_main_forwards_value_and_model_to_the_library(
-    tmp_path: Path, monkeypatch, capsys
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     seen: dict[str, object] = {}
 
     class _Result:
         report = {"ok": True}
 
-    def _spy(session_dirs, config, **kwargs):
+    def _spy(session_dirs: Any, config: Any, **kwargs: Any) -> Any:
         seen["sessions"] = list(session_dirs)
         seen.update(kwargs)
         return _Result()

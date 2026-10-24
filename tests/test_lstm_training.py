@@ -4,12 +4,14 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import Any
 
 import pandas as pd
 import pytest
 
 from src.columns import SESSION_COLUMN, TIMESTAMP_COLUMN
 from src.config import CanaryConfig
+from src.config.models import LSTMAutoencoderConfig
 from src.models.lstm_training import (
     LSTMAutoencoderManifest,
     calibrate_lstm_thresholds,
@@ -30,13 +32,13 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 EXAMPLE_YAML = REPO_ROOT / "canary.example.yaml"
 
 
-def _torch():
+def _torch() -> Any:
     return pytest.importorskip("torch")
 
 
-def _config(**updates):
+def _config(**updates: Any) -> LSTMAutoencoderConfig:
     base = CanaryConfig.from_yaml(EXAMPLE_YAML).models.lstm_autoencoder
-    defaults = {
+    defaults: dict[str, Any] = {
         "sequence_length": 4,
         "hidden_size": 6,
         "num_layers": 1,

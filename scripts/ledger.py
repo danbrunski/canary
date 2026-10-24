@@ -28,9 +28,9 @@ from collections.abc import Sequence
 from pathlib import Path
 
 try:
-    import _cli  # run as a file: scripts/ is on sys.path; bootstraps the repo root
+    import _cli  # type: ignore[import-not-found]  # run as a file: scripts/ is on sys.path; bootstraps the repo root
 except ImportError:  # loaded as `scripts.ledger` — repo root on path, not scripts/
-    import scripts._cli as _cli  # type: ignore[no-redef]
+    import scripts._cli as _cli
 
 from src.models.manifest import ManifestValidationError  # noqa: E402
 from src.models.promotion_gate import (  # noqa: E402

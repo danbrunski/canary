@@ -8,6 +8,7 @@ import pytest
 
 from src.signals.pairing import (
     ComparisonRefusedError,
+    MatchedSamples,
     PairingPolicy,
     basis_floor_s,
     check_clock_support,
@@ -21,7 +22,9 @@ def _policy(tolerance: str, **kwargs: object) -> PairingPolicy:
     return PairingPolicy.within(tolerance, **kwargs)  # type: ignore[arg-type]
 
 
-def _assert_valid(matched, times_a, times_b, policy: PairingPolicy) -> None:
+def _assert_valid(
+    matched: MatchedSamples, times_a: np.ndarray, times_b: np.ndarray, policy: PairingPolicy
+) -> None:
     """Every pair is two identifiable observations within tolerance, none reused."""
     assert len(matched.index_a) == len(matched.index_b) == matched.n_pairs
     assert len(np.unique(matched.index_a)) == matched.n_pairs

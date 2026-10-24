@@ -7,6 +7,8 @@ real FSM PDFs (intentionally not committed) and is sanity-checked manually.
 
 from __future__ import annotations
 
+from typing import Any
+
 import pytest
 
 from src.signals.fsm import (
@@ -40,7 +42,7 @@ from src.signals.fsm import (
         ("MAS A/F SE-B1", "MAS A/F SE-B1"),
     ],
 )
-def test_clean_param_name(raw: str, cleaned: str):
+def test_clean_param_name(raw: str, cleaned: str) -> None:
     assert clean_param_name(raw) == cleaned
 
 
@@ -82,7 +84,7 @@ def test_clean_param_name(raw: str, cleaned: str):
         "AC PRESS SEN (V)",
     ],
 )
-def test_real_param_names_accepted(name: str):
+def test_real_param_names_accepted(name: str) -> None:
     assert looks_like_param_name(name), f"should accept {name!r}"
 
 
@@ -109,7 +111,7 @@ def test_real_param_names_accepted(name: str):
         "ROOM)",  # unbalanced parens — header fragment
     ],
 )
-def test_noise_rejected(noise: str):
+def test_noise_rejected(noise: str) -> None:
     assert not looks_like_param_name(noise), f"should reject {noise!r}"
 
 
@@ -119,7 +121,7 @@ def test_noise_rejected(noise: str):
 
 
 def test_parse_simple_range_with_unit():
-    ranges = parse_ranges("11 - 14V")
+    ranges: list[dict[str, Any]] = parse_ranges("11 - 14V")
     assert len(ranges) == 1
     assert ranges[0]["min"] == 11.0
     assert ranges[0]["max"] == 14.0
@@ -127,7 +129,7 @@ def test_parse_simple_range_with_unit():
 
 
 def test_parse_range_with_decimal_and_compound_unit():
-    ranges = parse_ranges("2.0 - 6.0 g·m/s")
+    ranges: list[dict[str, Any]] = parse_ranges("2.0 - 6.0 g·m/s")
     assert len(ranges) == 1
     assert ranges[0]["min"] == 2.0
     assert ranges[0]["max"] == 6.0
@@ -135,7 +137,7 @@ def test_parse_range_with_decimal_and_compound_unit():
 
 
 def test_parse_percent_range():
-    ranges = parse_ranges("0% - 35%")
+    ranges: list[dict[str, Any]] = parse_ranges("0% - 35%")
     assert len(ranges) == 1
     assert ranges[0]["min"] == 0.0
     assert ranges[0]["max"] == 35.0
@@ -144,26 +146,26 @@ def test_parse_percent_range():
 
 def test_parse_multiple_ranges_in_one_string():
     """FSM often gives both idle and 2,500 rpm conditions in one cell."""
-    ranges = parse_ranges("Idle 2.0 - 6.0 g·m/s | 2,500 rpm 7.0 - 20.0 g·m/s")
+    ranges: list[dict[str, Any]] = parse_ranges("Idle 2.0 - 6.0 g·m/s | 2,500 rpm 7.0 - 20.0 g·m/s")
     assert len(ranges) == 2
 
 
 def test_parse_unbounded_more_than():
-    ranges = parse_ranges("More than 70°C (158°F)")
+    ranges: list[dict[str, Any]] = parse_ranges("More than 70°C (158°F)")
     assert len(ranges) == 1
     assert ranges[0]["min"] == 70.0
     assert ranges[0]["max"] == float("inf")
 
 
 def test_parse_unbounded_less_than():
-    ranges = parse_ranges("Less than 4.75V")
+    ranges: list[dict[str, Any]] = parse_ranges("Less than 4.75V")
     assert len(ranges) == 1
     assert ranges[0]["min"] == float("-inf")
     assert ranges[0]["max"] == 4.75
 
 
 def test_parse_approx_value_yields_narrow_range():
-    ranges = parse_ranges("Approximately 2.5V")
+    ranges: list[dict[str, Any]] = parse_ranges("Approximately 2.5V")
     assert len(ranges) == 1
     assert ranges[0]["min"] < 2.5 < ranges[0]["max"]
     assert ranges[0]["max"] - ranges[0]["min"] < 1.0  # ~10% wide
@@ -171,7 +173,7 @@ def test_parse_approx_value_yields_narrow_range():
 
 def test_parse_negative_minus_sign_unicode():
     """FSM often uses unicode '−' for negative numbers."""
-    ranges = parse_ranges("−5° - 5°CA")
+    ranges: list[dict[str, Any]] = parse_ranges("−5° - 5°CA")
     assert len(ranges) == 1
     assert ranges[0]["min"] == -5.0
     assert ranges[0]["max"] == 5.0

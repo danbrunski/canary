@@ -23,6 +23,7 @@ import sys
 from collections import defaultdict
 from collections.abc import Sequence
 from pathlib import Path
+from typing import Literal
 
 from cantools.database import Database, Message, Signal
 from cantools.database.conversion import BaseConversion
@@ -42,6 +43,7 @@ def _to_signal(b: Binding) -> Signal:
     sawtooth numbering: byte_start*8 + 7. Little-endian starts at the LSB:
     byte_start*8. The round-trip test pins this.
     """
+    order: Literal["little_endian", "big_endian"]
     if b.byte_order == "big":
         start = b.byte_start * 8 + 7
         order = "big_endian"

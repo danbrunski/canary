@@ -21,6 +21,7 @@ import logging
 import statistics
 import threading
 from pathlib import Path
+from typing import Any
 
 import pytest
 import yaml
@@ -241,7 +242,9 @@ def runtime_reset() -> object:
     tuning_profile.set_active(False, source="test")
 
 
-def _run(clock: FakeClock, profile: CaptureProfile, seconds: float) -> tuple[ScriptedEcu, list]:
+def _run(
+    clock: FakeClock, profile: CaptureProfile, seconds: float
+) -> tuple[ScriptedEcu, list[Any]]:
     tuning_profile.activate(profile, source="test")
     bus = ScriptedEcu(clock, session_gated=True)
     readings: list[ObdReading] = []
@@ -455,11 +458,11 @@ def test_memory_weighted_beyond_the_budget_shows_infeasible_in_the_preview() -> 
 # ``unanswered_input`` although every read was answered.
 
 
-def _memory_rows(quality: dict) -> dict[str, str]:
+def _memory_rows(quality: dict[str, Any]) -> dict[str, str]:
     return {row["channel"]: row["status"] for row in quality["channels"] if row["kind"] == "memory"}
 
 
-def _unanswered(quality: dict) -> list[str]:
+def _unanswered(quality: dict[str, Any]) -> list[str]:
     return [
         name
         for failure in quality["failures"]
@@ -496,7 +499,9 @@ def test_the_live_verdict_scores_memory_reads_by_their_decoded_channels(
             on_scheduler_metrics=snapshots.append,
             scheduler_metrics_interval_seconds=1.0,
         )
-        lifetime = capture_lifetime.snapshot(clock.monotonic()).to_dict()
+        snapshot = capture_lifetime.snapshot(clock.monotonic())
+        assert snapshot is not None
+        lifetime = snapshot.to_dict()
     finally:
         capture_lifetime.end()
     scheduler = snapshots[-1].to_dict()
@@ -520,8 +525,8 @@ def test_the_live_verdict_scores_memory_reads_by_their_decoded_channels(
         assert rows[FAULT] != "missing" and rows[LEVEL_1] != "missing"
 
 
-def _plan_member(window: str, address: int, decoded: list[str] | None) -> dict:
-    member = {
+def _plan_member(window: str, address: int, decoded: list[str] | None) -> dict[str, Any]:
+    member: dict[str, Any] = {
         "kind": "memory",
         "service": "0x23",
         "request_id": "0x7E0",
@@ -549,7 +554,7 @@ _OLD_PLAN = [_plan_member("knock_fault_flag", 0x0000, None)]
 @pytest.mark.parametrize("plan", [_NEW_PLAN, _OLD_PLAN], ids=["new-plan", "pre-d0338-plan"])
 @pytest.mark.parametrize("answered", [(FAULT, OTHER), (FAULT,)], ids=["all", "one-silent"])
 def test_the_stop_verdict_scores_memory_from_the_manifest_plan(
-    tmp_path: Path, plan: list[dict], answered: tuple[str, ...]
+    tmp_path: Path, plan: list[dict[str, Any]], answered: tuple[str, ...]
 ) -> None:
     """The recompute path (``manifest.resolved_polling_plan`` over persisted
     rows), for a plan written since D03.38 and for one written before it."""

@@ -3,16 +3,17 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from pathlib import Path
 
 import pyarrow.parquet as pq
 import pytest
 
 from src.collection.record_arming import RecordArmingGate
 from src.storage.parquet_writer import ParquetTelemetryWriter
-from src.telemetry import TelemetryRecord
+from src.telemetry import TelemetryRecord, TelemetryValue
 
 
-def _record(channel: str, value: object, ts: float = 1_778_000_000.0) -> TelemetryRecord:
+def _record(channel: str, value: TelemetryValue, ts: float = 1_778_000_000.0) -> TelemetryRecord:
     return TelemetryRecord.obd(ts, channel, value, "")
 
 
@@ -74,7 +75,7 @@ def test_gate_negative_threshold_arms_on_zero() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_writer_without_gate_records_everything(tmp_path) -> None:
+def test_writer_without_gate_records_everything(tmp_path: Path) -> None:
     """No ``arming_gate`` (the default) is byte-identical to pre-8.6 behavior."""
     writer = ParquetTelemetryWriter(
         tmp_path,
@@ -83,10 +84,10 @@ def test_writer_without_gate_records_everything(tmp_path) -> None:
     )
     path = writer.write(_record("SPEED", 0.0))
     assert path is not None
-    assert pq.read_table(path).to_pylist()[0]["channel"] == "SPEED"
+    assert pq.read_table(path).to_pylist()[0]["channel"] == "SPEED"  # type: ignore[no-untyped-call]
 
 
-def test_writer_with_gate_drops_records_until_armed(tmp_path) -> None:
+def test_writer_with_gate_drops_records_until_armed(tmp_path: Path) -> None:
     gate = RecordArmingGate(arm_sources=(), arm_channels=("RPM",))
     writer = ParquetTelemetryWriter(
         tmp_path,
@@ -99,7 +100,7 @@ def test_writer_with_gate_drops_records_until_armed(tmp_path) -> None:
     assert gate.dropped_count == 1
 
 
-def test_writer_with_gate_records_normally_once_armed(tmp_path) -> None:
+def test_writer_with_gate_records_normally_once_armed(tmp_path: Path) -> None:
     gate = RecordArmingGate(arm_sources=(), arm_channels=("RPM",))
     writer = ParquetTelemetryWriter(
         tmp_path,
@@ -110,11 +111,11 @@ def test_writer_with_gate_records_normally_once_armed(tmp_path) -> None:
     writer.write(_record("RPM", 800.0))
     path = writer.write(_record("COOLANT_TEMP", 91.0))
     assert path is not None
-    channels = [row["channel"] for row in pq.read_table(path).to_pylist()]
+    channels = [row["channel"] for row in pq.read_table(path).to_pylist()]  # type: ignore[no-untyped-call]
     assert channels == ["RPM", "COOLANT_TEMP"]
 
 
-def test_writer_rearms_gate_on_session_rotation(tmp_path) -> None:
+def test_writer_rearms_gate_on_session_rotation(tmp_path: Path) -> None:
     """A new key cycle (RUN_TIME reset -> rotate_session) re-disarms the gate
     — a later idle period between drives is gated again, not left armed."""
     first_started = datetime(2026, 5, 11, 12, 0, tzinfo=UTC)

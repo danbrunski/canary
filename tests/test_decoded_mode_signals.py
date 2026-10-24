@@ -19,6 +19,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from typing import cast
 
 import pandas as pd
 import pytest
@@ -78,7 +79,7 @@ def _decoded_row(
     for can_id, payload in frames:
         record = TelemetryRecord.can(ts.timestamp(), can_id, payload)
         for decoded in source.decode_for_telemetry(record):
-            row[f"decoded:{decoded.channel}"] = float(decoded.value)
+            row[f"decoded:{decoded.channel}"] = float(cast(float, decoded.value))
     return row
 
 

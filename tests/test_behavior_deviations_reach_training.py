@@ -16,6 +16,7 @@ import hashlib
 import inspect
 import json
 from pathlib import Path
+from typing import Any
 
 import pytest
 import yaml
@@ -47,7 +48,7 @@ from tests.configs import EXAMPLE_YAML, example_config
 DEVIATION = "deviation:timing_vs_rpm_load"
 
 
-def _behavior_models_yaml() -> dict:
+def _behavior_models_yaml() -> dict[str, Any]:
     """One 2-D surface over rpm x load that expects 10 deg at idle."""
     return {
         "schema_version": 1,

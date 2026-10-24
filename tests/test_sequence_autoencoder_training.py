@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -58,11 +59,11 @@ def _dataset(rows: int = 14, sequence_length: int = 4) -> SequenceWindowDataset:
     )
 
 
-def _lstm_config(**updates: object) -> object:
+def _lstm_config(**updates: object) -> Any:
     from src.config import CanaryConfig
 
     base = CanaryConfig.from_yaml(EXAMPLE_YAML).models.lstm_autoencoder
-    defaults = {
+    defaults: dict[str, Any] = {
         "sequence_length": 4,
         "hidden_size": 6,
         "num_layers": 1,
@@ -80,7 +81,7 @@ def _lstm_config(**updates: object) -> object:
     return base.model_copy(update=defaults)
 
 
-def _tcn_config() -> object:
+def _tcn_config() -> Any:
     from dataclasses import dataclass
 
     @dataclass(frozen=True)

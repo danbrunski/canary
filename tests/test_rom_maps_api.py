@@ -7,6 +7,7 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+from src.analysis.rom_targets import TargetEditor
 from src.config import CanaryConfig
 from src.dashboard.routes import rom_maps
 
@@ -71,7 +72,7 @@ def test_profile_driven_slots_and_unverified_tables(tmp_path, monkeypatch):
             "raw": [[128, 145], [145, 157]],
         },
     )
-    monkeypatch.setattr(rom_maps.TargetEditor, "from_bytes", lambda data, path: fake)
+    monkeypatch.setattr(TargetEditor, "from_bytes", lambda data, path: fake)
     before = set(tmp_path.iterdir())
     result = rom_maps.inspect_rom(b"synthetic", tmp_path, revisions=None)
     assert set(tmp_path.iterdir()) == before

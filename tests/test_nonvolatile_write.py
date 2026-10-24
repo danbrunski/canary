@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
+from functools import partial
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import pytest
 
@@ -93,7 +94,9 @@ def audit(tmp_path: Path) -> ControlAuditLogger:
     return ControlAuditLogger(tmp_path / "audit.jsonl")
 
 
-def request(reader=lambda: signals()) -> NonvolatileWriteRequest:  # type: ignore[no-untyped-def]
+def request(
+    reader: Callable[[], NonvolatileWriteSignals] = lambda: signals(),
+) -> NonvolatileWriteRequest:
     return NonvolatileWriteRequest(
         image_sha256=IMAGE,
         ecu=ECU,
@@ -145,10 +148,10 @@ def test_every_vehicle_state_literal_has_a_table_row() -> None:
     ],
 )
 def test_motion_and_supply_refusals_name_their_cause(
-    reader,
+    reader: Callable[[], NonvolatileWriteSignals],
     code: str,
     audit: ControlAuditLogger,
-    clock: Clock,  # type: ignore[no-untyped-def]
+    clock: Clock,
 ) -> None:
     with pytest.raises(AuthorizationRefusedError) as caught:
         guard(audit, clock).authorize(request(reader))
@@ -325,7 +328,7 @@ def test_no_http_or_mcp_route_can_mint_authorization(tmp_path: Path) -> None:
     )
     app = create_app(config, anomalies_dir=tmp_path / "anomalies")
     mutation_routes = {
-        route.path
+        cast(Any, route).path
         for route in app.routes
         if getattr(route, "methods", set()) & {"POST", "PUT", "PATCH"}
     }
@@ -443,7 +446,7 @@ def test_the_guard_refuses_an_unknown_or_low_supply_with_the_readers_reason(
 ) -> None:
     reading = _read(*rows)
     with pytest.raises(AuthorizationRefusedError) as caught:
-        guard(audit, clock).authorize(request(lambda: _signals_with(reading)))
+        guard(audit, clock).authorize(request(partial(_signals_with, reading)))
     assert caught.value.code == code
     if code == "battery_unknown":
         assert "no fresh supply voltage" in caught.value.detail
@@ -458,7 +461,7 @@ def test_the_guard_passes_a_fresh_sensor_or_ecm_voltage(
     for rows in ((_row(SENSOR, 12.6, 0.5),), (_row(SENSOR, 12.6, 60.0), _row(OBD, 12.4, 0.5))):
         reading = _read(*rows)
         assert isinstance(
-            write_guard.authorize(request(lambda r=reading: _signals_with(r))), Authorization
+            write_guard.authorize(request(partial(_signals_with, reading))), Authorization
         )
 
 

@@ -17,6 +17,8 @@ keep that impossible.
 from __future__ import annotations
 
 import threading
+from collections.abc import Callable, Sequence
+from typing import Any
 
 import can
 import pytest
@@ -150,7 +152,9 @@ class _FakeTransport:
         self.single_reads.append(did)
         return self._values.get(did)
 
-    def read_dids(self, dids, byte_length_for):  # type: ignore[no-untyped-def]
+    def read_dids(
+        self, dids: Sequence[int], byte_length_for: Callable[[int], int | None]
+    ) -> BatchRead:
         self.batched_groups.append(list(dids))
         payload = b"".join(
             bytes([d >> 8, d & 0xFF]) + self._values[d] for d in dids if d in self._values
@@ -275,8 +279,8 @@ class _SchedulerDidEcu:
         )
 
 
-def _scheduler_spec(**overrides: object) -> CanObdSpec:
-    values: dict[str, object] = {
+def _scheduler_spec(**overrides: Any) -> CanObdSpec:
+    values: dict[str, Any] = {
         "can": CanBusConfig(interface="virtual", channel="test", bitrate=500000),
         "poll_rate_hz": 30.0,
         "pids": ("RPM",),
@@ -298,7 +302,7 @@ def test_active_scheduler_batches_known_width_dids_with_full_provenance(
     clock = FakeClock()
     install_clock(monkeypatch, clock)
     bus = _SchedulerDidEcu(clock=clock)
-    readings: list = []
+    readings: list[Any] = []
     stats = run_can_obd_loop(
         bus,  # type: ignore[arg-type]
         _scheduler_spec(),
@@ -325,7 +329,7 @@ def test_known_answer_decode_matches_single_and_batched_scheduler_paths(
     for batch_max in (1, 3):
         clock = FakeClock()
         install_clock(monkeypatch, clock)
-        readings: list = []
+        readings: list[Any] = []
         run_can_obd_loop(
             _SchedulerDidEcu(clock=clock),  # type: ignore[arg-type]
             _scheduler_spec(did_batch_max_dids=batch_max),
@@ -355,8 +359,8 @@ def test_rejected_did_batches_fall_back_without_backing_off_members(
     clock = FakeClock()
     install_clock(monkeypatch, clock)
     bus = _SchedulerDidEcu(reject_batches=True, clock=clock)
-    readings: list = []
-    snapshots: list = []
+    readings: list[Any] = []
+    snapshots: list[Any] = []
     stats = run_can_obd_loop(
         bus,  # type: ignore[arg-type]
         _scheduler_spec(),
@@ -392,7 +396,7 @@ def test_physical_did_batch_rejects_a_different_ecu_responder(
     clock = FakeClock()
     install_clock(monkeypatch, clock)
     bus = _SchedulerDidEcu(responder_id=0x7E9, clock=clock)
-    readings: list = []
+    readings: list[Any] = []
     stats = run_can_obd_loop(
         bus,  # type: ignore[arg-type]
         _scheduler_spec(request_timeout_seconds=0.005),
@@ -432,7 +436,7 @@ def test_did_batch_silence_from_a_sleeping_ecu_does_not_disable_batching(
     clock = FakeClock()
     install_clock(monkeypatch, clock)
     bus = _SleepyDidEcu(wake_after=14, clock=clock)
-    readings: list = []
+    readings: list[Any] = []
     stats = run_can_obd_loop(
         bus,  # type: ignore[arg-type]
         _scheduler_spec(),

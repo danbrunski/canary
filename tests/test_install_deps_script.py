@@ -26,14 +26,16 @@ def test_parse_cuda_version_returns_none_when_absent() -> None:
 
 
 def test_select_torch_wheel_uses_highest_supported_cuda_not_newer_than_driver() -> None:
-    assert select_torch_wheel("auto", (12, 7)).wheel.name == "cu126"
-    assert select_torch_wheel("auto", (12, 8)).wheel.name == "cu128"
-    assert select_torch_wheel("auto", (13, 0)).wheel.name == "cu130"
+    for cuda, expected in (((12, 7), "cu126"), ((12, 8), "cu128"), ((13, 0), "cu130")):
+        wheel = select_torch_wheel("auto", cuda).wheel
+        assert wheel is not None
+        assert wheel.name == expected
 
 
 def test_select_torch_wheel_falls_back_to_cpu_without_cuda_detection() -> None:
     selection = select_torch_wheel("auto", None)
 
+    assert selection.wheel is not None
     assert selection.wheel.name == "cpu"
     assert "No usable CUDA version" in selection.reason
 
@@ -41,6 +43,7 @@ def test_select_torch_wheel_falls_back_to_cpu_without_cuda_detection() -> None:
 def test_select_torch_wheel_supports_explicit_override() -> None:
     selection = select_torch_wheel("cu126", None)
 
+    assert selection.wheel is not None
     assert selection.wheel.name == "cu126"
     assert "forced" in selection.reason
 

@@ -42,7 +42,9 @@ def test_the_poisson_bound_reproduces_the_garwood_table() -> None:
     assert poisson_upper_rate(5, 2.0) == pytest.approx(11.6683 / 2.0, abs=1e-4)
 
 
-def _drive(name: str, hours: float, episodes: dict[str, int], *, cross_era: bool = False) -> dict:
+def _drive(
+    name: str, hours: float, episodes: dict[str, int], *, cross_era: bool = False
+) -> dict[str, Any]:
     return {
         "drive": name,
         "cross_era": cross_era,

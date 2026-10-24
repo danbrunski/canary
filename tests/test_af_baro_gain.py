@@ -43,6 +43,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+from typing import cast
 
 import numpy as np
 import pandas as pd
@@ -121,7 +122,7 @@ def steady_pairs(
         & (pairs["a"].to_numpy(dtype=float) < 1.9)
     )
     pairs = pairs[steady]
-    baro_long = long[long["spec"] == calibration.baro_gain.baro_channel]  # type: ignore[union-attr]
+    baro_long = cast(pd.DataFrame, long[long["spec"] == calibration.baro_gain.baro_channel])  # type: ignore[union-attr]
     baro = BaroSamples.from_long(to_seconds(pairs["timestamp_b"]), baro_long)
     volts = pairs["b"].reset_index(drop=True)
     route = voltage_to_afr(volts, calibration, baro=baro)

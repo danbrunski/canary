@@ -24,6 +24,7 @@ from src.behavior.behavior_models import (
     PolynomialFit,
 )
 from src.config import CanaryConfig
+from src.features.session_resampling import decode_session_to_resampled
 from src.storage.parquet_writer import write_records_to_parquet
 from src.telemetry import TelemetryRecord
 from tests.configs import example_config
@@ -449,6 +450,7 @@ def test_same_per_cell_behaviour_with_a_different_rpm_mix_is_no_difference() -> 
     delta calls that a +3.3 shift; cell matching reports none."""
     a = _summary([(0.0, 100, 1.0), (1000.0, 10, 5.0)])
     b = _summary([(0.0, 10, 1.0), (1000.0, 100, 5.0)])
+    assert a.mean_deviation is not None and b.mean_deviation is not None
     assert b.mean_deviation - a.mean_deviation == pytest.approx(3.27, abs=0.01)
     comparison = _compare_surface(a, b, min_n=5, noise_floor=None, conditions=None)
     assert comparison.n_matched_cells == 2
@@ -463,7 +465,7 @@ def test_a_deviation_floor_measured_elsewhere_is_refused() -> None:
 
     floor = NoiseFloor(
         channels={
-            "timing_vs_rpm_load": {"unit": "deg", "sd": 0.5, "n_cells": 5, "conditions": "WOT"}
+            "timing_vs_rpm_load": {"unit": "deg", "sd": 0.5, "n_cells": 5, "conditions": "WOT"}  # type: ignore[dict-item]
         }
     )
     a = _summary([(0.0, 20, 1.0)])
@@ -487,7 +489,6 @@ def test_analyze_session_resamples_with_the_training_recipe(
     then analysed a session on a different grid from the one the surfaces were
     fit on. Non-default values here make that divergence visible.
     """
-    import src.analysis.session_deviations as session_deviations
     from src.features.feature_pipeline import resample_config_for
 
     tuned = config.model_copy(
@@ -497,14 +498,14 @@ def test_analyze_session_resamples_with_the_training_recipe(
             )
         }
     )
-    real = session_deviations._decode_session_to_resampled
+    real = decode_session_to_resampled
     seen = []
 
     def spy(session_dir, bindings, dbc_database, did_map, resample_config):
         seen.append(resample_config)
         return real(session_dir, bindings, dbc_database, did_map, resample_config)
 
-    monkeypatch.setattr(session_deviations, "_decode_session_to_resampled", spy)
+    monkeypatch.setattr("src.analysis.session_deviations._decode_session_to_resampled", spy)
     session = _write_deviation_session(
         tmp_path, rpm=500.0, load=25.0, run_time_base=100.0, coolant_offset=0.0, timing_offset=0.0
     )

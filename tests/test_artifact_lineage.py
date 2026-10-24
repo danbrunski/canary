@@ -387,7 +387,9 @@ def test_stored_ram_windows_are_re_decoded_then_and_now() -> None:
 
 def test_derived_inputs_come_from_the_build_time_definition() -> None:
     """Expansion uses what was committed at build; a missing or changed definition shows."""
-    then = {"derived:TOTAL_TRIM_B1": (("obd:SHORT_FUEL_TRIM_1",), ("did:ECM_LONG_FUEL_TRIM_B1",))}
+    then: dict[str, tuple[tuple[str, ...], ...]] = {
+        "derived:TOTAL_TRIM_B1": (("obd:SHORT_FUEL_TRIM_1",), ("did:ECM_LONG_FUEL_TRIM_B1",))
+    }
     ctx = _ctx([OLD, NEW], CURRENT, derived_at_build=then)
 
     changed = audit_artifact(_artifact(("derived:TOTAL_TRIM_B1",), BEFORE), ctx)

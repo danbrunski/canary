@@ -17,6 +17,7 @@ from collections.abc import Mapping
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from typing import Any, cast
 
 import numpy as np
 import pandas as pd
@@ -492,7 +493,7 @@ def _slice_with_imu(root: Path) -> tuple[Path, pd.Series, pd.DataFrame, list[Tel
             values = pd.Series(np.unwrap(np.radians(values.to_numpy())), index=values.index)
         per_second = values.resample("1s").last().dropna()
         own = (per_second.index - t0).total_seconds().to_numpy()
-        return np.interp(seconds, own, per_second.to_numpy())
+        return cast(np.ndarray, np.interp(seconds, own, per_second.to_numpy()))
 
     speed_ms = at_imu(gps_speed) / 3.6
     lon_g = np.gradient(speed_ms, seconds) / STANDARD_GRAVITY
@@ -523,7 +524,7 @@ def _live_on_records(inputs: pd.DataFrame, imu: list[TelemetryRecord]) -> dict[p
     ticked at each whole second: ``{bin start: imu:ACCEL_LON_MEAN}``."""
     stream: list[tuple[float, int, str, float]] = [
         (row.timestamp.timestamp(), 0, str(row.source_channel), float(row.value_number))
-        for row in inputs.itertuples()
+        for row in cast(Any, inputs).itertuples()
     ]
     stream += [(r.timestamp.timestamp(), 1, r.channel, float(r.value)) for r in imu]  # type: ignore[arg-type]
     stream.sort()

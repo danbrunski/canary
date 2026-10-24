@@ -23,7 +23,7 @@ from concurrent.futures import Executor, Future
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any
+from typing import Any, cast
 
 import pandas as pd
 import pytest
@@ -698,7 +698,7 @@ def test_a_replay_is_resolved_paired_and_decided_as_the_stored_brain_job(
     twin.tick(session="_replay-r1", vehicle_state="replay", session_dir=session)
     replayed = _replayed(session)
     # The rebase really moved the clock: the emit-time acquired_at is "now".
-    assert abs(float(replayed[0].metadata["acquired_at"]) - time.time()) < 3600
+    assert abs(float(cast(float, replayed[0].metadata["acquired_at"])) - time.time()) < 3600
     next_tick: datetime | None = None
     for record in replayed:
         if next_tick is None:

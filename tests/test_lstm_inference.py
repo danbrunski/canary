@@ -2,16 +2,23 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import replace
 from pathlib import Path
+from typing import Any
 
 import pandas as pd
 import pytest
 
 from src.columns import SESSION_COLUMN, TIMESTAMP_COLUMN
 from src.config import CanaryConfig
-from src.models.inference import SequenceInferenceEngine, SequenceWindowBuffer
-from src.models.lstm_training import train_lstm_autoencoder
+from src.config.models import LSTMAutoencoderConfig
+from src.models.inference import (
+    SequenceInferenceEngine,
+    SequenceInferenceResult,
+    SequenceWindowBuffer,
+)
+from src.models.lstm_training import TrainedLSTMAutoencoder, train_lstm_autoencoder
 from src.models.sequence_dataset import SequenceWindowDataset
 
 # Torch training: not a commit gate (see the pyproject test tiers).
@@ -21,13 +28,13 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 EXAMPLE_YAML = REPO_ROOT / "canary.example.yaml"
 
 
-def _torch():
+def _torch() -> Any:
     return pytest.importorskip("torch")
 
 
-def _config(**updates):
+def _config(**updates: Any) -> LSTMAutoencoderConfig:
     base = CanaryConfig.from_yaml(EXAMPLE_YAML).models.lstm_autoencoder
-    defaults = {
+    defaults: dict[str, Any] = {
         "sequence_length": 4,
         "hidden_size": 6,
         "num_layers": 1,
@@ -66,7 +73,7 @@ def _dataset(sequence_length: int = 4) -> SequenceWindowDataset:
     )
 
 
-def _trained(**config_updates):
+def _trained(**config_updates: Any) -> TrainedLSTMAutoencoder:
     _torch()
     dataset = _dataset()
     return train_lstm_autoencoder(
@@ -88,7 +95,7 @@ def test_sequence_buffer_scores_only_after_full_window() -> None:
     assert engine.observe(frame.iloc[2]) is None
     result = engine.observe(frame.iloc[3])
 
-    assert result is not None
+    assert isinstance(result, SequenceInferenceResult)
     assert result.model_version == "inference-test"
     assert result.session == "s1"
     assert result.window_start_timestamp == "2026-05-12T00:00:00Z"
@@ -125,7 +132,7 @@ def test_score_window_populates_top_channel_evidence(tmp_path: Path) -> None:
     result = None
     for _, row in _frame().iloc[:4].iterrows():
         result = engine.observe(row)
-    assert result is not None
+    assert isinstance(result, SequenceInferenceResult)
     # Only two feature columns ⇒ the top-K is the full set, ordered by
     # ratio. Larger K than feature count is fine — the slice is bounded.
     assert set(result.top_channels) == {"rpm", "speed"}
@@ -157,7 +164,7 @@ def test_inference_flags_anomaly_against_low_thresholds() -> None:
     for _, row in _frame().iloc[:4].iterrows():
         result = engine.observe(row)
 
-    assert result is not None
+    assert isinstance(result, SequenceInferenceResult)
     assert result.is_anomaly is True
     assert result.global_score > result.global_threshold
     assert result.anomalous_channels
@@ -192,7 +199,7 @@ def test_inference_scores_when_a_channel_is_never_observed() -> None:
                 "rpm": 700.0 + (i % 3),
             }
         )
-    assert result is not None
+    assert isinstance(result, SequenceInferenceResult)
     assert math.isfinite(result.global_score)
     assert math.isfinite(result.channel_scores["rpm"])
     # The never-observed channel contributes no reconstruction error.
@@ -426,7 +433,7 @@ def test_score_window_validates_shape() -> None:
         )
 
 
-def _fake_clock():
+def _fake_clock() -> Callable[[], float]:
     values = iter([1.0, 1.1, 2.0, 2.1, 3.0, 3.1])
     return lambda: next(values)
 
@@ -451,7 +458,7 @@ def test_sequence_inference_suppress_channels_silences_alert_from_noise_channel(
     window[:, 0] = 700.0  # rpm — normal
     window[:, 1] = 9999.0  # speed — extreme OOD value
 
-    common = dict(
+    common: dict[str, Any] = dict(
         timestamp="2026-05-12T12:00:00Z",
         session="s1",
         window_start_timestamp="2026-05-12T12:00:00Z",
@@ -498,7 +505,7 @@ def test_a_channel_never_observed_in_calibration_is_not_scored() -> None:
     assert engine.uncalibrated_channels == ("speed",)
 
     window = np.array([[700.0, 9999.0]] * engine.sequence_length, dtype=np.float32)
-    common = dict(
+    common: dict[str, Any] = dict(
         timestamp="t", session="s", window_start_timestamp="t0", window_end_timestamp="t1"
     )
     result = engine.score_window(window, **common)
@@ -524,7 +531,7 @@ def test_suppressing_a_channel_does_not_change_what_the_encoder_sees() -> None:
     seen: list[np.ndarray] = []
     forward = engine.trained.model.forward
 
-    def recording_forward(value, mask, delta):  # type: ignore[no-untyped-def]
+    def recording_forward(value, mask, delta):
         seen.append(mask.detach().cpu().numpy()[0].copy())
         return forward(value, mask, delta)
 
@@ -567,7 +574,7 @@ def test_a_scored_window_carries_its_wall_span() -> None:
     for _, row in frame.iloc[:4].iterrows():
         result = engine.observe(row)
 
-    assert result is not None
+    assert isinstance(result, SequenceInferenceResult)
     assert result.window_rows == 4
     assert result.window_span_seconds == 4.0
     assert result.window_max_step_seconds == 2.0
@@ -603,7 +610,7 @@ def test_context_inputs_are_never_scored_or_ranked() -> None:
     )
     window = np.zeros((4, 2), dtype=np.float32)
     window[:, 1] = 50.0  # a huge error on the context input
-    kwargs = {
+    kwargs: dict[str, Any] = {
         "timestamp": "t",
         "session": "s",
         "window_start_timestamp": "a",

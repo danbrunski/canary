@@ -10,6 +10,7 @@ that carry each caller's one divergence not actually being called.
 from __future__ import annotations
 
 import json
+from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 
@@ -18,6 +19,7 @@ import pytest
 from src.companion import services
 from src.companion.library import CanaryLibrary
 from src.dashboard.routes.control import responses
+from src.mcp_server.client import DaemonError
 
 
 class _FakeDaemonClient:
@@ -58,17 +60,17 @@ class _FakeDaemonClient:
 
 class _FailingDaemonClient(_FakeDaemonClient):
     async def get_json(self, path: str) -> dict[str, Any]:
-        raise services.DaemonError("boom", status=404, detail="not found")
+        raise DaemonError("boom", status=404, detail="not found")
 
     async def get_bytes(self, path: str) -> bytes:
-        raise services.DaemonError("boom", status=500, detail="server error")
+        raise DaemonError("boom", status=500, detail="server error")
 
     async def download_file(self, path: str, dest: Path, **_kwargs: Any) -> Path:
-        raise services.DaemonError("boom", status=500, detail="server error")
+        raise DaemonError("boom", status=500, detail="server error")
 
 
 @pytest.fixture(autouse=True)
-def _reset_instances() -> None:
+def _reset_instances() -> Iterator[None]:
     _FakeDaemonClient.instances.clear()
     yield
     _FakeDaemonClient.instances.clear()

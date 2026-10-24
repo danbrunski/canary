@@ -175,13 +175,18 @@ async def test_provisioned_pi_without_window_is_locked(rig: Rig) -> None:
     assert rig.sink.errors()[-1] == ImprovError.NOT_AUTHORIZED
 
 
+def _state(rig: Rig) -> State:
+    """Read the state through a call, so mypy does not carry an earlier assert's narrowing."""
+    return rig.controller.state
+
+
 async def test_window_authorizes_a_provisioned_pi(rig: Rig) -> None:
     rig.network.profiles = ["uuid-home"]
     write_window(5, rig.window, now=NOW)
     await rig.controller.refresh()
     assert rig.controller.state == State.AUTHORIZED
     await _provision(rig)
-    assert rig.controller.state == State.PROVISIONED
+    assert _state(rig) == State.PROVISIONED
 
 
 async def test_nmcli_failure_fails_closed(rig: Rig) -> None:
@@ -216,7 +221,7 @@ async def test_provisioned_state_survives_the_gate_closing(rig: Rig) -> None:
     # A window opened afterwards reads as "change networks".
     write_window(5, rig.window, now=NOW)
     await rig.controller.refresh()
-    assert rig.controller.state == State.AUTHORIZED
+    assert _state(rig) == State.AUTHORIZED
 
 
 async def test_failed_join_reports_and_returns_to_authorized(rig: Rig) -> None:

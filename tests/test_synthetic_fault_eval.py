@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 import pandas as pd
@@ -573,7 +574,7 @@ def test_intermittent_fault_caught_by_m_of_n_not_strict_at_unchanged_clean_fp() 
         n_injections=30,
     )
 
-    def _if_rate(report: dict) -> float:
+    def _if_rate(report: dict[str, Any]) -> float:
         (metric,) = [
             m
             for m in report["per_fault"]

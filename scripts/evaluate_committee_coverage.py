@@ -61,9 +61,9 @@ import numpy as np
 import pandas as pd
 
 try:
-    from _cli import add_common_args, add_profile_arg, load_config
+    from _cli import add_common_args, add_profile_arg, load_config  # type: ignore[import-not-found]
 except ImportError:  # loaded as `scripts.evaluate_committee_coverage`
-    from scripts._cli import add_common_args, add_profile_arg, load_config  # type: ignore[no-redef]
+    from scripts._cli import add_common_args, add_profile_arg, load_config
 
 from src.plausibility.benchmark import (
     BENCHMARK_CHANNELS,
@@ -270,7 +270,9 @@ def evaluate_session(
     clean_records = run_evaluator(
         PlausibilityEvaluator(context.catalog, session=session.name), stream
     )
-    clean_keys = {(r.channel, r.check, r.detected_at) for r in clean_records}
+    clean_keys: set[tuple[str, str, str]] = {
+        (r.channel, r.check, r.detected_at) for r in clean_records
+    }
     frame = _session_frame(session, context, options.assume_gps_fix)
     committee_clean = evaluate_committee_frame(
         frame, committee_profile, bindings=context.bindings, session=session.name

@@ -10,6 +10,7 @@ field once (C06.12).
 from __future__ import annotations
 
 import dataclasses
+from typing import Any
 
 from src.collection import capture_quality, obd_scheduler
 from src.collection.obd_scheduler import (
@@ -21,7 +22,7 @@ from src.collection.obd_scheduler import (
 from src.config import CanBusConfig
 
 
-def _batching_block() -> dict[str, object]:
+def _batching_block() -> dict[str, Any]:
     spec = CanObdSpec(
         can=CanBusConfig(interface="virtual", channel="test", bitrate=500000),
         batch_max_pids=6,
@@ -53,7 +54,7 @@ def test_a_renamed_counter_is_refused_not_read_as_zero() -> None:
     assert scoped["failures"] is None, "an absent counter must not read as a verified 0"
     assert scoped["desyncs"] == 0
     assert any("failures" in note and "not read as zero" in note for note in notes)
-    mode22 = dict(block["mode22"])  # type: ignore[arg-type]
+    mode22 = dict(block["mode22"])
     del mode22["fallbacks"]
     scoped, notes = capture_quality.scope_batching(
         {**block, "mode22": mode22}, {"recorded": True, "batching": block}

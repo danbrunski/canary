@@ -29,7 +29,7 @@ import asyncio
 import dataclasses
 import time
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import pandas as pd
 import pytest
@@ -269,22 +269,28 @@ def test_limiting_stage_names_loss_before_headroom() -> None:
         ended_wall = 10.0
 
     stalled = limiting_stage(
-        _A(), {"storage_dropped": 5, "buffer_dropped": 0, "queue_dropped": 0}, {}, {}
-    )  # type: ignore[arg-type]
+        cast(RunArtifacts, _A()),
+        {"storage_dropped": 5, "buffer_dropped": 0, "queue_dropped": 0},
+        {},
+        {},
+    )
     assert stalled["stage"] == "storage_sink"
     handoff = limiting_stage(
-        _A(), {"storage_dropped": 0, "buffer_dropped": 3, "queue_dropped": 0}, {}, {}
-    )  # type: ignore[arg-type]
+        cast(RunArtifacts, _A()),
+        {"storage_dropped": 0, "buffer_dropped": 3, "queue_dropped": 0},
+        {},
+        {},
+    )
     assert handoff["stage"] == "thread_handoff"
-    clean = limiting_stage(  # type: ignore[arg-type]
-        _A(),
+    clean = limiting_stage(
+        cast(RunArtifacts, _A()),
         {"storage_dropped": 0, "buffer_dropped": 0, "queue_dropped": 0},
         {"failures": []},
         {"event_loop_heartbeat_overshoot": {"p99_ms": 1.0}},
     )
     assert clean["stage"] == "none_reached" and clean["data_loss"] is False
-    short = limiting_stage(  # type: ignore[arg-type]
-        _A(),
+    short = limiting_stage(
+        cast(RunArtifacts, _A()),
         {"storage_dropped": 0, "buffer_dropped": 0, "queue_dropped": 0},
         {"failures": ["rate_shortfall"]},
         {},
@@ -688,7 +694,7 @@ def test_starved_channels_are_not_reported_as_unsupported_by_the_ecu() -> None:
                 "request_timeouts": 0,
             },
         )
-        return limiting_stage(artifacts, {}, quality, {})
+        return limiting_stage(cast(RunArtifacts, artifacts), {}, quality, {})
 
     # 39 requests in 10 s against a 4 req/s budget is saturated.
     starved = classify(4.0)
@@ -745,7 +751,9 @@ def test_an_idle_bus_missing_its_rate_blames_the_schedule_not_the_ecu() -> None:
                 "request_timeouts": timeouts,
             },
         )
-        return limiting_stage(artifacts, {}, {"failures": ["rate_shortfall"]}, {})
+        return limiting_stage(
+            cast(RunArtifacts, artifacts), {}, {"failures": ["rate_shortfall"]}, {}
+        )
 
     idle = classify(sent=239, timeouts=0)  # utilisation 0.266
     assert idle["stage"] == "scheduling_policy_idle_bus", idle

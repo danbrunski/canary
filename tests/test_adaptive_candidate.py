@@ -9,6 +9,7 @@ import ast
 import dataclasses
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 import pytest
@@ -33,6 +34,7 @@ from src.models.adaptive_candidate import (
     CalibrationBoundaryError,
     CandidateCheckpoint,
     CandidateSpec,
+    Disposition,
     InterventionBoundaryError,
     KalmanCandidate,
     PredictionOrderError,
@@ -184,7 +186,9 @@ def ledger(tmp_path: Path) -> MemoryLedger:
     return MemoryLedger(tmp_path / "memory.jsonl", vehicle=PROFILE)
 
 
-def _make(ledger: MemoryLedger, reference: FrozenReference | None = None, **kw) -> KalmanCandidate:
+def _make(
+    ledger: MemoryLedger, reference: FrozenReference | None = None, **kw: Any
+) -> KalmanCandidate:
     spec = kw.pop("spec", _spec())
     return candidate_from_ledger(
         ledger,
@@ -197,18 +201,20 @@ def _make(ledger: MemoryLedger, reference: FrozenReference | None = None, **kw) 
     )
 
 
-def _run(candidate: KalmanCandidate, blocks: list[Block], disposition: str = "accept") -> list[str]:
+def _run(
+    candidate: KalmanCandidate, blocks: list[Block], disposition: Disposition = "accept"
+) -> list[str]:
     """Monitor, predict, learn each block of one drive (the replay order)."""
     monitor = candidate.monitor
     monitor.start_drive(blocks[0].drive)
     candidate.start_drive()
-    out = []
+    out: list[str] = []
     for b in blocks:
         verdict = monitor.observe(b)
         out.append(
             candidate.learn(
                 candidate.predict(b), verdict, disposition=disposition, calibration="REV"
-            )  # type: ignore[arg-type]
+            )
         )
     monitor.close_drive()
     return out

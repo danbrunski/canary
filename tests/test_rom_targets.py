@@ -3,6 +3,7 @@
 import json
 import struct
 from datetime import UTC, date, datetime, timedelta
+from typing import Any, cast
 
 import pytest
 import yaml
@@ -63,21 +64,24 @@ def editor():
         raw_load_breakpoints=[52, 68],
         raw_values=[[128, 129], [130, 131]],
         afr=[[1881.6 / n for n in row] for row in [[128, 129], [130, 131]]],
-        provenance={
-            "method": "verified_rom_decode",
-            "rom_file": "synthetic.OsirisROM",
-            "rom_sha256": sha256(source),
-            "rom_modified_at": datetime(2026, 1, 1, tzinfo=UTC),
-            "recorded_on": date(2026, 1, 1),
-            "map_slot": 1,
-            "cell_decode": "1881.6 / raw",
-            "guide_reference": "synthetic fixture",
-        },
+        provenance=cast(
+            Any,
+            {
+                "method": "verified_rom_decode",
+                "rom_file": "synthetic.OsirisROM",
+                "rom_sha256": sha256(source),
+                "rom_modified_at": datetime(2026, 1, 1, tzinfo=UTC),
+                "recorded_on": date(2026, 1, 1),
+                "map_slot": 1,
+                "cell_decode": "1881.6 / raw",
+                "guide_reference": "synthetic fixture",
+            },
+        ),
     )
     return TargetEditor(source, definition, target)
 
 
-def patch_for(editor, **change):
+def patch_for(editor: TargetEditor, **change: Any) -> Patch:
     return Patch.model_validate(
         {
             "schema_version": 1,
@@ -145,11 +149,12 @@ def test_raw_values_must_be_nonzero_bytes(editor, value):
 
 def test_patch_identity_and_duplicates(editor):
     patch = patch_for(editor)
-    for changes, message in [
+    cases: list[tuple[dict[str, Any], str]] = [
         ({"source_sha256": "0" * 64}, "hash"),
         ({"map_slot": 2}, "slot"),
         ({"changes": patch.changes * 2}, "Duplicate"),
-    ]:
+    ]
+    for changes, message in cases:
         with pytest.raises(ValueError, match=message):
             editor.apply(patch.model_copy(update=changes))
 
@@ -179,7 +184,12 @@ def test_wrong_table_scaling_and_overlapping_definition(editor):
 
 def test_patch_cannot_smuggle_other_tables_or_empty_changes(editor):
     base = patch_for(editor).model_dump()
-    for fields in [{"table": "fuel_compensation"}, {"changes": []}, {"axes": [1, 2]}]:
+    field_cases: list[dict[str, Any]] = [
+        {"table": "fuel_compensation"},
+        {"changes": []},
+        {"axes": [1, 2]},
+    ]
+    for fields in field_cases:
         with pytest.raises(ValueError):
             Patch.model_validate({**base, **fields})
 
@@ -263,15 +273,22 @@ def test_actual_revision_boundary_and_historical_table():
 
     root = Path(__file__).resolve().parents[1] / "data/nissan-xterra-2008"
     registry = load_tune_revisions(root / "tune_revisions.yaml")
+    assert registry is not None
     boundary = datetime(2026, 9, 21, 3, 8, 45, 954035, tzinfo=UTC)
-    assert registry.at(boundary - timedelta(microseconds=1)).revision == "ZS44A-k106"
-    assert registry.at(boundary).revision == "ZS44A-20260920"
+    before = registry.at(boundary - timedelta(microseconds=1))
+    assert before is not None and before.revision == "ZS44A-k106"
+    at_boundary = registry.at(boundary)
+    assert at_boundary is not None and at_boundary.revision == "ZS44A-20260920"
     calibration = load_afr_calibration(root / "afr_calibration.yaml")
     old, new = calibration.target_map("ZS44A-k106"), calibration.target_map("ZS44A-20260920")
+    assert old is not None and new is not None
+    assert old.raw_values is not None and new.raw_values is not None
     assert old.raw_values[7][4] == 162
     assert new.raw_values[7][4] == 163
     differences = [
         (r, c) for r in range(8) for c in range(8) if old.raw_values[r][c] != new.raw_values[r][c]
     ]
     assert differences == [(7, 4)]
-    assert calibration.active_revision == registry.at(datetime.now(UTC)).revision
+    now_revision = registry.at(datetime.now(UTC))
+    assert now_revision is not None
+    assert calibration.active_revision == now_revision.revision

@@ -23,6 +23,7 @@ import yaml
 
 from src.analysis import sim_montecarlo
 from src.analysis.ecu_application import program_sha256
+from src.analysis.fuel_plant_eval import plant_inputs
 from src.analysis.paired_scenarios import (
     BATTERY_UNMEASURED,
     OUTPUTS,
@@ -35,6 +36,7 @@ from src.analysis.paired_scenarios import (
     rank_as_improvement,
     run_paired,
 )
+from src.analysis.paired_steady import steady_bfs
 from src.analysis.rom_effects import CellEdit, make_candidate
 from src.analysis.rom_image import sha256_hex
 from src.analysis.sim_contract import CONTRACT_FILE, SimContract, SimulationRefusalError
@@ -1138,7 +1140,7 @@ def test_run_paired_and_the_fast_path_run_the_twin_runners_one_ecu_path(
     before = run_paired(kit, scenario, image, candidate)
     mc_before = _run(kit, image, candidate, design, uncertainty, draws=4)
 
-    real_bfs, real_inputs = twin_runner.steady_bfs, twin_runner.plant_inputs
+    real_bfs, real_inputs = steady_bfs, plant_inputs
 
     def bfs_plus(air: Any, **kw: Any) -> Any:
         out = real_bfs(air, **kw)

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import time
 from pathlib import Path
+from typing import Any
 
 import pytest
 from fastapi.testclient import TestClient
@@ -102,7 +103,9 @@ def test_post_files_a_request_the_runner_accepts(client: TestClient, paths: Upda
     "body",
     [{"action": "reflash"}, {"action": "update", "force": True}, {"action": "check", "full": True}],
 )
-def test_post_validates_the_body(client: TestClient, paths: UpdatePaths, body: dict) -> None:
+def test_post_validates_the_body(
+    client: TestClient, paths: UpdatePaths, body: dict[str, Any]
+) -> None:
     assert client.post("/control/update", json=body, headers=AUTH).status_code == 422
     assert not paths.request.exists()
 

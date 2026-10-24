@@ -329,7 +329,7 @@ def _fallback_decisions(
         with mock.patch.object(
             feature_perturbation,
             "featurize_wide_frame",
-            wraps=feature_perturbation.featurize_wide_frame,
+            wraps=feature_perturbation.featurize_wide_frame,  # type: ignore[attr-defined]
         ) as whole:
             got = fp.featurize_perturbed_frame(
                 clean,
@@ -387,14 +387,14 @@ def _worker_grid() -> dict[str, int]:
             for cpus in (1, 4, 12):
                 for sessions in (1, 2, 3, 8):
                     for explicit in (None, 3):
-                        os.cpu_count = lambda cpus=cpus: cpus  # type: ignore[misc,assignment]
-                        feature_workers.available_memory_bytes = lambda memory=memory: memory  # type: ignore[assignment]  # noqa: SLF001
+                        os.cpu_count = lambda cpus=cpus: cpus  # type: ignore[misc]
+                        feature_workers.available_memory_bytes = lambda memory=memory: memory  # type: ignore[misc]  # noqa: SLF001
                         grid[f"{memory}|{cpus}|{sessions}|{explicit}"] = (
                             feature_workers._resolve_worker_count([SLICE] * sessions, explicit)  # noqa: SLF001
                         )
     finally:
-        os.cpu_count = real_cpu  # type: ignore[assignment]
-        feature_workers.available_memory_bytes = real_memory  # type: ignore[assignment]  # noqa: SLF001
+        os.cpu_count = real_cpu
+        feature_workers.available_memory_bytes = real_memory  # noqa: SLF001
     return grid
 
 

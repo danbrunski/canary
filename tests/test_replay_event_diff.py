@@ -14,7 +14,7 @@ import asyncio
 import sys
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import pytest
 
@@ -34,7 +34,7 @@ class _RpmStub(StubIsolationForest):
 
     def score(self, frame: Any) -> Any:
         out = super().score(frame)
-        rpm = out["obd:RPM"].astype(float).fillna(0.0) if "obd:RPM" in out else 0.0
+        rpm: Any = out["obd:RPM"].astype(float).fillna(0.0) if "obd:RPM" in out else 0.0
         out["isolation_forest_score"] = rpm / 1000.0
         out["isolation_forest_calibrated_threshold"] = FIRE_RPM / 1000.0
         out["isolation_forest_calibrated_anomaly"] = rpm >= FIRE_RPM
@@ -162,13 +162,19 @@ def test_the_capture_profile_gate_reads_the_replayed_sessions_manifest(tmp_path:
     profile, so a replayed tuning capture scored as default collection."""
     from types import SimpleNamespace
 
+    from src.daemon.components import DaemonComponents
     from src.daemon.inference import capture_profile_gate
     from tools.replay_event_diff import _SessionReplay
 
     tuning = capture_profile_gate(
-        SimpleNamespace(replay_controller=_SessionReplay(_tuning_capture(tmp_path)))
+        cast(
+            DaemonComponents,
+            SimpleNamespace(replay_controller=_SessionReplay(_tuning_capture(tmp_path))),
+        )
     )
-    plain = capture_profile_gate(SimpleNamespace(replay_controller=_SessionReplay(DRIVE_SLICE)))
+    plain = capture_profile_gate(
+        cast(DaemonComponents, SimpleNamespace(replay_controller=_SessionReplay(DRIVE_SLICE)))
+    )
 
     assert (tuning.scoring_allowed, tuning.profile, tuning.source) == (
         False,

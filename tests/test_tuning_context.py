@@ -11,6 +11,7 @@ from __future__ import annotations
 
 from datetime import timedelta
 from pathlib import Path
+from typing import Any, cast
 
 import pytest
 import yaml
@@ -45,7 +46,7 @@ STAMP, LATER = (f"{t:%Y-%m-%dT%H%M%S}" for t in (T0, T0 + timedelta(hours=1)))
 FLASH = TuneRevision(revision="R05-dashboard-flash", flashed_at=T0 - timedelta(days=1))
 
 
-def _raw_config(tmp_path: Path, *, fuel_type: str = "gasoline") -> dict:
+def _raw_config(tmp_path: Path, *, fuel_type: str = "gasoline") -> dict[str, Any]:
     raw = load_yaml(Path("canary.example.yaml").read_text())
     raw.setdefault("collection", {})["storage_path"] = str(tmp_path / "sessions")
     # The operational registry lives beside ``jobs_dir``; keep it in tmp.
@@ -61,10 +62,10 @@ def _raw_config(tmp_path: Path, *, fuel_type: str = "gasoline") -> dict:
     profiles = raw.setdefault("profiles", {})
     profiles["registry_path"] = str(registry_path)
     profiles["registry_overlay_path"] = str(tmp_path / "control" / "profiles.yaml")
-    return raw
+    return cast(dict[str, Any], raw)
 
 
-def _scoped(raw: dict) -> CanaryConfig:
+def _scoped(raw: dict[str, Any]) -> CanaryConfig:
     config = CanaryConfig.model_validate(raw)
     return scope_config(config, resolve_profile_for_tooling(config, None))
 

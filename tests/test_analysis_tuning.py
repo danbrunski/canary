@@ -7,9 +7,10 @@ assert refusal and visibility, not just arithmetic.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import numpy as np
 import pandas as pd
@@ -73,7 +74,7 @@ def _mode01(session: Path | pd.DataFrame, **overrides: object) -> DeliveryError:
 
 def _rows(
     tmp_path: Path,
-    samples: list[tuple[float, float, float, float, float]],
+    samples: Sequence[tuple[float, float, float, float, float]],
     *,
     name: str = "2026-08-05T120000",
     start: datetime = T0,
@@ -445,15 +446,18 @@ def test_floor_significance_calls_small_deltas_indistinguishable() -> None:
     The gate's job is to surface that arithmetic, not to make it vanish.
     """
     floor = NoiseFloor(
-        channels={
-            "timing_advance_deg": {
-                "unit": "deg",
-                "sd": 0.64,
-                "mean": 0.01,
-                "n_cells": 5,
-                "conditions": WOT,
-            }
-        }
+        channels=cast(
+            Any,
+            {
+                "timing_advance_deg": {
+                    "unit": "deg",
+                    "sd": 0.64,
+                    "mean": 0.01,
+                    "n_cells": 5,
+                    "conditions": WOT,
+                }
+            },
+        )
     )
     out = floor.significance(
         "timing_advance_deg", pd.Series([-1.57, -1.01, -0.74, 3.0]), conditions=WOT
@@ -467,9 +471,10 @@ def test_floor_significance_calls_small_deltas_indistinguishable() -> None:
 def test_an_idle_comparison_against_the_wot_floor_refuses() -> None:
     """R05.2: a WOT floor quoted against idle cells understates noise ~16x."""
     floor = NoiseFloor(
-        channels={
-            "timing_advance_deg": {"unit": "deg", "sd": 0.48, "n_cells": 5, "conditions": WOT}
-        }
+        channels=cast(
+            Any,
+            {"timing_advance_deg": {"unit": "deg", "sd": 0.48, "n_cells": 5, "conditions": WOT}},
+        )
     )
     out = floor.significance("timing_advance_deg", pd.Series([1.0, 2.0]), conditions=IDLE)
     assert isinstance(out, FloorRefusal)
@@ -490,12 +495,12 @@ def test_missing_floor_refuses_as_no_floor() -> None:
 
 def test_a_floor_without_its_conditions_is_not_representable() -> None:
     with pytest.raises(ValidationError, match="conditions"):
-        NoiseFloor(channels={"spark": {"unit": "deg", "sd": 0.48, "n_cells": 5}})
+        NoiseFloor(channels=cast(Any, {"spark": {"unit": "deg", "sd": 0.48, "n_cells": 5}}))
 
 
 def test_an_idle_session_comparison_against_the_wot_floor_refuses(tmp_path: Path) -> None:
     floor = NoiseFloor(
-        channels={"spark": {"unit": "deg", "sd": 0.48, "n_cells": 5, "conditions": WOT}}
+        channels=cast(Any, {"spark": {"unit": "deg", "sd": 0.48, "n_cells": 5, "conditions": WOT}})
     )
     session = _rows(tmp_path, [(2000 + 100 * i, 50, 4, 1.2, 0.83) for i in range(30)])
     result = compare_sessions(
@@ -518,7 +523,7 @@ def test_an_idle_session_comparison_against_the_wot_floor_refuses(tmp_path: Path
 
 def test_a_floor_without_comparison_conditions_is_refused(tmp_path: Path) -> None:
     floor = NoiseFloor(
-        channels={"spark": {"unit": "deg", "sd": 0.48, "n_cells": 5, "conditions": WOT}}
+        channels=cast(Any, {"spark": {"unit": "deg", "sd": 0.48, "n_cells": 5, "conditions": WOT}})
     )
     session = _rows(tmp_path, [(2000 + 100 * i, 90, 4, 1.2, 0.83) for i in range(30)])
     with pytest.raises(GateError, match="without conditions"):
@@ -716,15 +721,18 @@ def test_floor_conditions_travel_with_the_sigma_figures(tmp_path: Path) -> None:
     from src.analysis.noise_floor import NoiseFloor
 
     floor = NoiseFloor(
-        channels={
-            "spark": {
-                "unit": "deg",
-                "sd": 0.48,
-                "mean": 0.07,
-                "n_cells": 5,
-                "conditions": "WOT: throttle>=85, 3000-5000 rpm",
-            }
-        }
+        channels=cast(
+            Any,
+            {
+                "spark": {
+                    "unit": "deg",
+                    "sd": 0.48,
+                    "mean": 0.07,
+                    "n_cells": 5,
+                    "conditions": "WOT: throttle>=85, 3000-5000 rpm",
+                }
+            },
+        )
     )
     samples = [(2000 + 100 * i, 50, 4, 1.2, 0.83) for i in range(30)]
     session = _rows(tmp_path, samples)
@@ -751,7 +759,9 @@ def test_a_floor_object_without_a_named_channel_is_refused(tmp_path: Path) -> No
     from src.analysis.noise_floor import NoiseFloor
 
     floor = NoiseFloor(
-        channels={"spark": {"unit": "deg", "sd": 0.48, "n_cells": 5, "conditions": "WOT"}}
+        channels=cast(
+            Any, {"spark": {"unit": "deg", "sd": 0.48, "n_cells": 5, "conditions": "WOT"}}
+        )
     )
     session = _rows(tmp_path, [(2000 + 100 * i, 90, 4, 1.2, 0.83) for i in range(30)])
     with pytest.raises(GateError, match="floor_channel"):

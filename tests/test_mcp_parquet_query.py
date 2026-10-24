@@ -34,7 +34,7 @@ def _write_fixture(root: Path, session_id: str, rows: list[dict[str, object]]) -
     session_dir.mkdir(parents=True, exist_ok=True)
     table = pa.Table.from_pylist(rows, schema=_SCHEMA)
     out = session_dir / "telemetry-001.parquet"
-    pq.write_table(table, out)
+    pq.write_table(table, out)  # type: ignore[no-untyped-call, unused-ignore]
     return out
 
 
@@ -396,7 +396,7 @@ def test_date_filter_excludes_unparseable_session_dirs(tmp_path: Path) -> None:
     table = pa.Table.from_pylist(
         [_row(dt.datetime(2026, 7, 10, 9, tzinfo=dt.UTC), 999.0)], schema=_SCHEMA
     )
-    pq.write_table(table, weird / "telemetry-001.parquet")
+    pq.write_table(table, weird / "telemetry-001.parquet")  # type: ignore[no-untyped-call, unused-ignore]
 
     q = TelemetryQuery(tmp_path)
     assert len(q.run("SELECT * FROM telemetry")) == 1  # unscoped: included

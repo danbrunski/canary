@@ -13,6 +13,7 @@ from __future__ import annotations
 import io
 import json
 from pathlib import Path
+from typing import cast
 
 import pytest
 
@@ -35,6 +36,7 @@ from src.decode.dids import (
     side_effect_dids,
 )
 from tools import did_log
+from tools.did_log import LogTransport
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 FIRST_FLAGGED = 0x120B
@@ -147,7 +149,7 @@ def test_did_log_never_logs_it_even_from_supplied_widths() -> None:
     buf = io.StringIO()
     ticks = iter(range(10_000))
     did_log.run(
-        transport,
+        cast(LogTransport, transport),
         {0x1201: 2, FIRST_FLAGGED: 2},
         buf,
         duration_seconds=1.0,

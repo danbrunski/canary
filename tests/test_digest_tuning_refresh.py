@@ -14,7 +14,7 @@ import json
 import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import pytest
 from fastapi.testclient import TestClient
@@ -49,7 +49,12 @@ def caps(monkeypatch: pytest.MonkeyPatch) -> list[int]:
     ``setrlimit`` would cap the pytest worker: it then could not start a
     thread, and every later test on that worker hung or failed."""
     recorded: list[int] = []
-    monkeypatch.setattr(trip_end, "limit_address_space", lambda n: recorded.append(n) or (n, n))
+
+    def record_cap(n: int) -> tuple[int, int]:
+        recorded.append(n)
+        return (n, n)
+
+    monkeypatch.setattr(trip_end, "limit_address_space", record_cap)
     return recorded
 
 
@@ -71,7 +76,7 @@ def _write(session: Path, payload: dict[str, Any]) -> None:
 
 
 def _read(session: Path) -> dict[str, Any]:
-    return json.loads((session / "digest.json").read_text())
+    return cast(dict[str, Any], json.loads((session / "digest.json").read_text()))
 
 
 @pytest.mark.parametrize(
@@ -102,7 +107,7 @@ def test_a_stale_section_is_recomputed_and_nothing_else_moves(
 
     assert note is None
     # The section is computed under the digest child's own ceiling.
-    assert caps == [trip_end.digest_address_space_bytes(config)]
+    assert caps == [trip_end.digest_address_space_bytes(config)]  # type: ignore[attr-defined]
     assert served == _read(session)
     assert served["tuning"] == CURRENT
     assert served["tuning_refreshed"]["from_schema_version"] == 1

@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -101,7 +102,7 @@ def test_untrusted_state_breaks_the_cycle(untrusted: str) -> None:
 # --- the coordinator ------------------------------------------------------
 
 
-def _collect(car: Car, req_id: str, secret: str) -> dict:
+def _collect(car: Car, req_id: str, secret: str) -> dict[str, Any]:
     status = car.pairing.status(req_id, secret)
     assert status is not None
     return status

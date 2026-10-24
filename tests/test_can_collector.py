@@ -17,6 +17,7 @@ import can
 import pytest
 
 from src.collection.can_collector import (
+    CanReceiveStats,
     bus_factory,
     collect_can,
     collect_can_from_config,
@@ -26,6 +27,7 @@ from src.collection.can_collector import (
 from src.collection.reconnect import ReconnectPolicy
 from src.config import CanBusConfig, VehicleConfig
 from src.session import make_session_dir
+from src.telemetry import TelemetryRecord
 from tests.waits import settle, wait_until
 
 VIRTUAL_CHANNEL = "canary-test"
@@ -78,7 +80,7 @@ async def test_collect_can_enqueues_frames():
             return self.messages.pop(0) if self.messages else None
 
     bus = FakeBus()
-    queue = asyncio.Queue()
+    queue: asyncio.Queue[TelemetryRecord] = asyncio.Queue()
     stop = asyncio.Event()
     task = asyncio.create_task(collect_can(bus, queue, stop, poll_interval=0.01))  # type: ignore[arg-type]
 
@@ -119,7 +121,7 @@ async def test_collect_can_from_config_retries_after_factory_failure():
             raise RuntimeError("can adapter missing")
         return bus
 
-    queue = asyncio.Queue()
+    queue: asyncio.Queue[TelemetryRecord] = asyncio.Queue()
     stop = asyncio.Event()
     task = asyncio.create_task(
         collect_can_from_config(
@@ -144,7 +146,7 @@ async def test_collect_can_from_config_retries_after_factory_failure():
     assert bus.shutdown_called is True
 
 
-def test_make_session_dir_creates_layout(tmp_path: Path):
+def test_make_session_dir_creates_layout(tmp_path: Path) -> None:
     started = datetime(2026, 5, 10, 20, 30, 45, tzinfo=UTC)
     paths = make_session_dir(tmp_path, started)
     assert paths.root == tmp_path / "2026-05-10T203045"
@@ -153,7 +155,7 @@ def test_make_session_dir_creates_layout(tmp_path: Path):
     assert paths.manifest == paths.root / "manifest.json"
 
 
-def test_make_session_dir_refuses_collision(tmp_path: Path):
+def test_make_session_dir_refuses_collision(tmp_path: Path) -> None:
     started = datetime(2026, 5, 10, 20, 30, 45, tzinfo=UTC)
     make_session_dir(tmp_path, started)
     # second call at the same instant must not silently reuse — that would
@@ -162,7 +164,7 @@ def test_make_session_dir_refuses_collision(tmp_path: Path):
         make_session_dir(tmp_path, started)
 
 
-def test_record_captures_frames_and_writes_manifest(tmp_path: Path):
+def test_record_captures_frames_and_writes_manifest(tmp_path: Path) -> None:
     """End-to-end: a sender thread pumps frames; the recorder captures them
     into frames.log and writes a manifest with correct counts."""
     spec = _virtual_spec("canary-test-capture")
@@ -225,7 +227,7 @@ def test_record_captures_frames_and_writes_manifest(tmp_path: Path):
     assert manifest["duration_seconds"] >= 0.4
 
 
-def test_record_stops_on_event_before_deadline(tmp_path: Path):
+def test_record_stops_on_event_before_deadline(tmp_path: Path) -> None:
     """stop_event takes precedence over duration; manifest reflects 'signal'."""
     spec = _virtual_spec("canary-test-stop")
     bus = bus_factory(spec)
@@ -260,7 +262,7 @@ def test_record_stops_on_event_before_deadline(tmp_path: Path):
     assert manifest["frames_recorded"] == 0  # nothing was sending
 
 
-def test_record_writes_manifest_even_with_zero_frames(tmp_path: Path):
+def test_record_writes_manifest_even_with_zero_frames(tmp_path: Path) -> None:
     spec = _virtual_spec("canary-test-empty")
     bus = bus_factory(spec)
     paths = make_session_dir(tmp_path, datetime.now(UTC))
@@ -283,7 +285,7 @@ def test_record_writes_manifest_even_with_zero_frames(tmp_path: Path):
     assert manifest["vehicle_state"] is None  # default when not passed
 
 
-def test_record_persists_vehicle_state_in_manifest(tmp_path: Path):
+def test_record_persists_vehicle_state_in_manifest(tmp_path: Path) -> None:
     spec = _virtual_spec("canary-test-state")
     bus = bus_factory(spec)
     paths = make_session_dir(tmp_path, datetime.now(UTC))
@@ -346,7 +348,7 @@ class FlakyBus:
         )
 
 
-def test_record_skips_malformed_frames_without_aborting(tmp_path: Path):
+def test_record_skips_malformed_frames_without_aborting(tmp_path: Path) -> None:
     """A single ValueError from python-can's slcan parser must not kill the run.
     The bad frames are counted and the recording continues."""
     spec = _virtual_spec("canary-test-flaky")
@@ -372,7 +374,7 @@ def test_record_skips_malformed_frames_without_aborting(tmp_path: Path):
     assert manifest["stopped_by"] == "deadline"
 
 
-def test_record_skips_index_error_from_truncated_slcan(tmp_path: Path):
+def test_record_skips_index_error_from_truncated_slcan(tmp_path: Path) -> None:
     """python-can's slcan parser raises IndexError when an extended-frame line
     is truncated before the DLC byte (slcan.py:304). This was the second
     observed crash mode in real driving (commit cf4bca0 only caught the
@@ -399,7 +401,7 @@ def test_record_skips_index_error_from_truncated_slcan(tmp_path: Path):
     assert result.stopped_by == "deadline"
 
 
-def test_record_treats_can_operation_error_as_bus_failure_not_parse_error(tmp_path: Path):
+def test_record_treats_can_operation_error_as_bus_failure_not_parse_error(tmp_path: Path) -> None:
     """Regression: session 2026-05-15T020322 had `CanOperationError: Could not
     read from serial device` from a Canable USB drop on a 28-min drive. The
     `except (ValueError, IndexError, can.CanError)` trap caught it as a parse
@@ -493,7 +495,7 @@ class ReconnectableBus:
         type(self).instances_shutdown += 1
 
 
-def test_record_auto_reconnects_on_bus_failure(tmp_path: Path):
+def test_record_auto_reconnects_on_bus_failure(tmp_path: Path) -> None:
     """OSError from a USB disconnect should trigger reconnect via factory,
     not kill the recording. Mirrors what collect_can_from_config does for
     the daemon path."""
@@ -535,7 +537,7 @@ def test_record_auto_reconnects_on_bus_failure(tmp_path: Path):
     assert manifest["dropped_writes"] == 0
 
 
-def test_record_bails_after_max_consecutive_reconnect_failures(tmp_path: Path):
+def test_record_bails_after_max_consecutive_reconnect_failures(tmp_path: Path) -> None:
     """If the factory fails to rebuild N times in a row, record() stops with
     stopped_by='reconnect_exhausted' rather than spinning forever. Protects
     against wedged-USB-adapter scenarios where every rebuild attempt blocks
@@ -580,7 +582,7 @@ def test_record_bails_after_max_consecutive_reconnect_failures(tmp_path: Path):
     assert "adapter wedged" in manifest["error"]
 
 
-def test_record_resets_failure_count_on_successful_reconnect(tmp_path: Path):
+def test_record_resets_failure_count_on_successful_reconnect(tmp_path: Path) -> None:
     """A successful reconnect must reset the failed-rebuild counter so
     intermittent USB flaps don't accumulate toward the cap."""
     spec = _virtual_spec("canary-test-reset")
@@ -620,7 +622,7 @@ def test_record_resets_failure_count_on_successful_reconnect(tmp_path: Path):
     assert result.reconnects >= 2
 
 
-def test_record_without_factory_still_propagates_bus_errors(tmp_path: Path):
+def test_record_without_factory_still_propagates_bus_errors(tmp_path: Path) -> None:
     """Backward compatibility: when factory/reconnect_policy are not provided,
     bus-level OSError should propagate as before (caller decides what to do)."""
 
@@ -644,7 +646,7 @@ def test_record_without_factory_still_propagates_bus_errors(tmp_path: Path):
     assert manifest["stopped_by"] == "error"
 
 
-def test_record_stops_cleanly_on_disk_write_failure(tmp_path: Path):
+def test_record_stops_cleanly_on_disk_write_failure(tmp_path: Path) -> None:
     """OSError from writer.on_message_received should end the loop cleanly,
     set stopped_by='disk_error', and still flush the manifest."""
 
@@ -713,7 +715,7 @@ def test_record_stops_cleanly_on_disk_write_failure(tmp_path: Path):
     assert "No space left on device" in manifest["error"]
 
 
-def test_record_writes_error_manifest_when_recv_raises(tmp_path: Path):
+def test_record_writes_error_manifest_when_recv_raises(tmp_path: Path) -> None:
     spec = _virtual_spec("canary-test-error")
     paths = make_session_dir(tmp_path, datetime.now(UTC))
 
@@ -807,7 +809,7 @@ async def _heartbeat_gaps(duration: float, period: float = 0.01) -> list[float]:
 
 async def _blocking_reference_collector(
     bus: _SnifferBus,
-    queue: asyncio.Queue,
+    queue: asyncio.Queue[TelemetryRecord],
     stop: asyncio.Event,
     *,
     poll_interval: float,
@@ -826,7 +828,7 @@ async def test_blocking_receive_reference_stalls_event_loop_heartbeat() -> None:
     coroutine delays an unrelated 10 ms ticker by the whole receive timeout.
     Kept as a reference implementation so the contrast stays measurable."""
     bus = _SnifferBus()
-    queue: asyncio.Queue = asyncio.Queue()
+    queue: asyncio.Queue[TelemetryRecord] = asyncio.Queue()
     stop = asyncio.Event()
     task = asyncio.create_task(_blocking_reference_collector(bus, queue, stop, poll_interval=0.2))
     gaps = await _heartbeat_gaps(0.6)
@@ -842,7 +844,7 @@ async def test_collect_can_idle_bus_does_not_stall_event_loop() -> None:
     recv cannot delay unrelated asyncio work for the receive timeout
     (measured ~1 ms max; the bound is loose for a loaded CI worker)."""
     bus = _SnifferBus()
-    queue: asyncio.Queue = asyncio.Queue()
+    queue: asyncio.Queue[TelemetryRecord] = asyncio.Queue()
     stop = asyncio.Event()
     task = asyncio.create_task(collect_can(bus, queue, stop, poll_interval=0.2))  # type: ignore[arg-type]
     gaps = await _heartbeat_gaps(0.6)
@@ -876,7 +878,7 @@ async def test_collect_can_sparse_frame_reaches_queue_promptly() -> None:
             return None
 
     bus = _EventBus()
-    queue: asyncio.Queue = asyncio.Queue()
+    queue: asyncio.Queue[TelemetryRecord] = asyncio.Queue()
     stop = asyncio.Event()
     task = asyncio.create_task(collect_can(bus, queue, stop, poll_interval=0.2))  # type: ignore[arg-type]
     await asyncio.sleep(0.1)  # bus is idle, reader is parked inside recv
@@ -899,7 +901,7 @@ async def test_collect_can_busy_bus_preserves_order_and_timestamps() -> None:
     survive the thread handoff; sniffer never sends."""
     frames = _frames(5000)
     bus = _SnifferBus(list(frames))
-    queue: asyncio.Queue = asyncio.Queue()
+    queue: asyncio.Queue[TelemetryRecord] = asyncio.Queue()
     stop = asyncio.Event()
     # The fake bus returns instantly and never paces, so an unpaced 5000-frame
     # burst can outrun the loop's drain and legitimately hit the default 4096
@@ -934,7 +936,7 @@ async def test_collect_can_stop_during_receive_joins_reader_before_returning() -
     coroutine returns only after the thread exited, and no recv happens on
     the bus afterwards."""
     bus = _SnifferBus()
-    queue: asyncio.Queue = asyncio.Queue()
+    queue: asyncio.Queue[TelemetryRecord] = asyncio.Queue()
     stop = asyncio.Event()
     task = asyncio.create_task(collect_can(bus, queue, stop, poll_interval=0.2))  # type: ignore[arg-type]
     await asyncio.sleep(0.05)  # mid-recv
@@ -973,8 +975,8 @@ async def test_collect_can_from_config_reconnect_replaces_reader_and_never_reads
     def factory(_spec: CanBusConfig) -> _SnifferBus:
         return buses.pop(0)
 
-    reports = []
-    queue: asyncio.Queue = asyncio.Queue()
+    reports: list[CanReceiveStats] = []
+    queue: asyncio.Queue[TelemetryRecord] = asyncio.Queue()
     stop = asyncio.Event()
     task = asyncio.create_task(
         collect_can_from_config(
@@ -1012,7 +1014,7 @@ async def test_collect_can_counts_malformed_frames_without_aborting() -> None:
     """C07.3/C07.8 — parser errors are counted (``parse_errors``), skipped,
     and never end the reader."""
     bus = FlakyBus(bad_every=3, total_calls=12)
-    queue: asyncio.Queue = asyncio.Queue()
+    queue: asyncio.Queue[TelemetryRecord] = asyncio.Queue()
     stop = asyncio.Event()
     task = asyncio.create_task(collect_can(bus, queue, stop, poll_interval=0.01))  # type: ignore[arg-type]
     # T01.14: wait until the reader has asked past the script, not until 8
@@ -1033,7 +1035,7 @@ async def test_collect_can_queue_overflow_is_counted_and_reconciles() -> None:
     stage: frames -> handoff (accepted/dropped) -> queue (queued/queue_dropped)."""
     frames = _frames(500)
     bus = _SnifferBus(list(frames))
-    queue: asyncio.Queue = asyncio.Queue(maxsize=10)
+    queue: asyncio.Queue[TelemetryRecord] = asyncio.Queue(maxsize=10)
     stop = asyncio.Event()
     task = asyncio.create_task(collect_can(bus, queue, stop, poll_interval=0.01))  # type: ignore[arg-type]
     deadline = time.perf_counter() + 5.0
@@ -1065,7 +1067,7 @@ async def test_collect_can_late_reader_after_join_timeout_is_a_noop(
             return _frames(1)[0]
 
     bus = _WedgedBus()
-    queue: asyncio.Queue = asyncio.Queue()
+    queue: asyncio.Queue[TelemetryRecord] = asyncio.Queue()
     stop = asyncio.Event()
     caplog.set_level("WARNING")
     task = asyncio.create_task(
@@ -1086,9 +1088,9 @@ async def test_collect_can_reports_stats_periodically_and_on_exit() -> None:
     """C07.5 — the producer buffer's bound, high-water and drops are visible
     through the stats callback while running and once more at exit."""
     bus = _SnifferBus(_frames(20))
-    queue: asyncio.Queue = asyncio.Queue()
+    queue: asyncio.Queue[TelemetryRecord] = asyncio.Queue()
     stop = asyncio.Event()
-    reports = []
+    reports: list[CanReceiveStats] = []
     task = asyncio.create_task(
         collect_can(bus, queue, stop, poll_interval=0.02, on_receive_stats=reports.append)  # type: ignore[arg-type]
     )

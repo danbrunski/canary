@@ -292,7 +292,7 @@ def test_decode_mil_on_reads_bit_seven() -> None:
 # ---------------------------------------------------------------------------
 
 
-def _make_pair():
+def _make_pair() -> tuple[can.BusABC, can.BusABC]:
     """Two `Bus` ends on the same virtual channel for request/response."""
     tester = can.interface.Bus(interface="virtual", channel="canary-test")
     ecu = can.interface.Bus(interface="virtual", channel="canary-test")

@@ -8,6 +8,7 @@ here compares against :func:`featurize_wide_frame` with ``check_exact``.
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any, cast
 from unittest import mock
 
 import numpy as np
@@ -76,7 +77,7 @@ def config() -> CanaryConfig:
 def inputs(config: CanaryConfig) -> dict[str, object]:
     frame = load_resampled_session(SLICE, config)
     rng = np.random.default_rng(7)
-    added = {}
+    added: dict[str, Any] = {}
     for column, (centre, spread) in _ADDED.items():
         values = rng.normal(centre, spread, len(frame))
         stale = rng.random(len(frame)) < 0.3
@@ -94,7 +95,7 @@ def inputs(config: CanaryConfig) -> dict[str, object]:
     }
 
 
-def _full(frame: pd.DataFrame, config: CanaryConfig, inputs: dict[str, object]):
+def _full(frame: pd.DataFrame, config: CanaryConfig, inputs: dict[str, object]) -> Any:
     return featurize_wide_frame(
         frame,
         config,
@@ -104,7 +105,9 @@ def _full(frame: pd.DataFrame, config: CanaryConfig, inputs: dict[str, object]):
     )
 
 
-def _incremental(clean, frame: pd.DataFrame, config: CanaryConfig, inputs: dict[str, object]):
+def _incremental(
+    clean: Any, frame: pd.DataFrame, config: CanaryConfig, inputs: dict[str, object]
+) -> Any:
     return featurize_perturbed_frame(
         clean,
         inputs["frame"],  # type: ignore[arg-type]
@@ -143,7 +146,7 @@ def test_every_realistic_fault_featurizes_incrementally_exactly(
     wrapped = mock.patch.object(
         feature_perturbation,
         "featurize_wide_frame",
-        wraps=feature_perturbation.featurize_wide_frame,
+        wraps=feature_perturbation.featurize_wide_frame,  # type: ignore[attr-defined]
     )
     with wrapped as whole:
         got = _incremental(clean, faulted, config, inputs)
@@ -219,7 +222,7 @@ def _scrambled(frame: pd.DataFrame, keep: set[str], seed: int) -> pd.DataFrame:
         name = str(column)
         if name in _ROW or _column_root(name) in keep or frame[column].dtype.kind != "f":
             continue
-        out[column] = rng.normal(50.0, 30.0, len(frame)).astype(frame[column].dtype)
+        out[column] = rng.normal(50.0, 30.0, len(frame)).astype(cast(Any, frame[column].dtype))
     return out
 
 
@@ -304,7 +307,7 @@ def test_decode_catalogs_load_once_per_process_and_reload_on_an_edit(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     calls: list[Path] = []
-    real = session_resampling.load_dbc_dir
+    real = session_resampling.load_dbc_dir  # type: ignore[attr-defined]
 
     def counting(path: Path) -> object:
         calls.append(path)

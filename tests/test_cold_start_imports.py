@@ -96,7 +96,7 @@ def test_models_package_lazy_reexports_still_resolve() -> None:
     assert models.SEQUENCE_BACKENDS is not None
     assert models.SequenceInferenceEngine.__name__ == "SequenceInferenceEngine"
     with pytest.raises(AttributeError):
-        _ = models.not_a_model_export  # type: ignore[attr-defined]
+        _ = models.not_a_model_export
 
 
 def test_sequence_inference_module_does_not_import_torch() -> None:
@@ -165,7 +165,7 @@ def test_preprocessing_package_lazy_reexports_still_resolve() -> None:
     assert ResampleConfig is preprocessing.ResampleConfig
     assert feature_pipeline.__name__ == "src.features.feature_pipeline"
     with pytest.raises(AttributeError):
-        _ = preprocessing.not_a_preprocessing_export  # type: ignore[attr-defined]
+        _ = preprocessing.not_a_preprocessing_export
 
 
 def test_daemon_package_lazy_reexports_still_resolve() -> None:
@@ -175,4 +175,4 @@ def test_daemon_package_lazy_reexports_still_resolve() -> None:
     assert daemon.build_live_feature_source is inference.build_live_feature_source
     assert daemon._score_and_emit is inference._score_and_emit
     with pytest.raises(AttributeError):
-        _ = daemon.not_a_daemon_export  # type: ignore[attr-defined]
+        _ = daemon.not_a_daemon_export

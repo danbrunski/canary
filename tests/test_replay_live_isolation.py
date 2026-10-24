@@ -36,7 +36,7 @@ LIVE_CHANNEL = "LIVE_RECEIVER_LAT"
 def _channels(session_dir: Path) -> dict[str, int]:
     counts: dict[str, int] = {}
     for chunk in sorted(session_dir.glob("telemetry-*.parquet")):
-        for channel in pq.read_table(chunk, columns=["channel"]).column("channel").to_pylist():
+        for channel in pq.read_table(chunk, columns=["channel"]).column("channel").to_pylist():  # type: ignore[no-untyped-call, unused-ignore]
             counts[channel] = counts.get(channel, 0) + 1
     return counts
 
@@ -77,6 +77,7 @@ async def test_live_gps_is_withheld_from_a_replay_and_restored_after(
             what="daemon up and live GPS flowing",
         )
         controller = components.replay_controller
+        assert controller is not None
         started = await controller.start(source.name, speed=50.0, loop=False)
         replay_dir = Path(started.output_session_dir or "")
         # A non-looping replay idles after its pass until stopped.
@@ -85,8 +86,10 @@ async def test_live_gps_is_withheld_from_a_replay_and_restored_after(
         idle = controller.status()
         after_stop = len(produced)
         await wait_until(lambda: len(produced) > after_stop + 10, what="live GPS after replay")
-        live_dir = components.storage_writer.paths.root
-        await components.storage_writer.flush()
+        writer = components.storage_writer
+        assert writer is not None
+        live_dir = writer.paths.root
+        await writer.flush()
     finally:
         stop.set()
         await settle(task)

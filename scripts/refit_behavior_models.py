@@ -33,9 +33,10 @@ import sys
 from collections.abc import Sequence
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import cast
 
 try:
-    from _cli import (
+    from _cli import (  # type: ignore[import-not-found]
         add_bindings_arg,
         add_common_args,
         add_log_level_arg,
@@ -45,7 +46,7 @@ try:
         resolve_sessions,
     )
 except ImportError:  # loaded as `scripts.refit_behavior_models` — repo root on path, not scripts/
-    from scripts._cli import (  # type: ignore[no-redef]
+    from scripts._cli import (
         add_bindings_arg,
         add_common_args,
         add_log_level_arg,
@@ -71,9 +72,10 @@ from src.analysis.behavior_validation_schema import (
 )
 from src.analysis.recipe_contract import Recipe
 from src.analysis.recipes.catalog import default_recipes
-from src.analysis.refit import attach_criteria, refit_all
+from src.analysis.refit import RecipeResult, attach_criteria, refit_all
 from src.analysis.splits import group_drives, piece_time_ranges
 from src.behavior.behavior_models import (
+    GridBinnedMeanFit,
     apply_behavior_policy,
     behavior_policy_path,
     dump_behavior_models,
@@ -652,7 +654,7 @@ def preserve_prior_artifact(
     return target
 
 
-def _print_report(results: Sequence, frame_rows: int) -> None:
+def _print_report(results: Sequence[RecipeResult], frame_rows: int) -> None:
     """Stdout summary so an interactive run shows which recipes won / lost."""
     fitted = [r for r in results if r.fitted]
     skipped = [r for r in results if r.skipped]
@@ -687,7 +689,7 @@ def _print_report(results: Sequence, frame_rows: int) -> None:
     print()
 
 
-def _write_bakeoff_report(path: Path, results: Sequence, *, frame_rows: int) -> None:
+def _write_bakeoff_report(path: Path, results: Sequence[RecipeResult], *, frame_rows: int) -> None:
     payload: dict[str, object] = {"frame_rows": frame_rows, "recipes": []}
     recipes: list[dict[str, object]] = []
     for result in results:
@@ -731,7 +733,9 @@ def _write_bakeoff_report(path: Path, results: Sequence, *, frame_rows: int) -> 
                 }
             )
             if model.kind == "surface_2d":
-                entry["cells"] = [cell.model_dump() for cell in model.fit.cells]
+                entry["cells"] = [
+                    cell.model_dump() for cell in cast("GridBinnedMeanFit", model.fit).cells
+                ]
         recipes.append(entry)
     payload["recipes"] = recipes
     path.parent.mkdir(parents=True, exist_ok=True)

@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 import pandas as pd
@@ -25,7 +26,7 @@ from src.telemetry import TelemetryRecord
 BINDINGS = Path("data/bindings.yaml")
 DIDS = Path("data/dids.yaml")
 T0 = datetime(2026, 8, 6, 12, 0, 0, tzinfo=UTC)
-CATALOGS = {"bindings_path": BINDINGS, "dids_path": DIDS}
+CATALOGS: dict[str, Any] = {"bindings_path": BINDINGS, "dids_path": DIDS}
 #: Rows written by the batch writer carry ``metadata_json`` with no
 #: ``acquired_at``, so their basis is ``stored`` and any tolerance is allowed.
 STRICT = PairingPolicy.within("0ms")
@@ -49,7 +50,7 @@ def _obd(
     records = []
     for index, value in enumerate(values):
         stamp = T0 + timedelta(seconds=index * step_s + offset_s)
-        metadata = None
+        metadata: dict[str, Any] | None = None
         if acquired_offset_s is not None:
             metadata = {"acquired_at": stamp.timestamp() + acquired_offset_s}
         records.append(
@@ -212,7 +213,7 @@ def test_grid_is_refused_by_name_not_reinterpreted(tmp_path: Path) -> None:
     with pytest.raises(TypeError, match="binned_summary"):
         align_pairs(session, "obd:RPM", "obd:SPEED", policy=STRICT, grid="1s", **CATALOGS)
     with pytest.raises(TypeError):
-        compare_channels(session, "obd:RPM", "obd:SPEED", **CATALOGS)  # type: ignore[call-arg]
+        compare_channels(session, "obd:RPM", "obd:SPEED", **CATALOGS)
 
 
 # --- C01.9 / C01.10: pairing behaviour through the public path --------------

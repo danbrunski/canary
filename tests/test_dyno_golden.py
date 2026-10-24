@@ -55,6 +55,8 @@ from src.analysis.dyno import (
     record_dyno_floor,
     save_dyno_profile,
 )
+from src.analysis.dyno_squat import _grade_with_se
+from src.config import VehicleParameters
 from src.yaml_load import load_yaml
 from tests import test_dyno as td
 from tests import test_dyno_power as tp
@@ -248,7 +250,7 @@ def _squat_cases() -> dict[str, Any]:
         ),
         altitude_noise=td._noise(),
     )
-    out["grade_with_se"] = td._grade_with_se(
+    out["grade_with_se"] = _grade_with_se(
         flat.t_s,
         np.concatenate(
             [[0.0], np.cumsum(np.diff(flat.t_s) * 0.5 * (flat.speed_mps[1:] + flat.speed_mps[:-1]))]
@@ -265,7 +267,7 @@ def _driveline_cases() -> dict[str, Any]:
     assert isinstance(drive, Driveline)
     out["effective_mass"] = [drive.effective_mass(td.MASS, g) for g in range(1, 7)]
     out["neutral_effective_mass"] = drive.neutral_effective_mass(td.MASS)
-    out["missing_facts"] = Driveline.from_vehicle(td.VehicleParameters(mass_kg=2000.0), None)
+    out["missing_facts"] = Driveline.from_vehicle(VehicleParameters(mass_kg=2000.0), None)
     out["bad_efficiency"] = Driveline.from_vehicle(
         td.PARAMS.model_copy(update={"drivetrain_loss_fraction": 1.5}), td.INERTIA
     )
@@ -662,7 +664,8 @@ def stored_side(tmp: Path) -> dict[str, Any]:
 def snapshot(tmp: Path) -> dict[str, Any]:
     """Everything pinned, as one canonical JSON-able mapping."""
     canonical = {"cases": canon(cases()), "stored": stored_side(tmp)}
-    return json.loads(json.dumps(canonical, allow_nan=True))
+    snap: dict[str, Any] = json.loads(json.dumps(canonical, allow_nan=True))
+    return snap
 
 
 def _write() -> None:

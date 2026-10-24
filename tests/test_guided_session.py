@@ -102,7 +102,7 @@ class _FakeWriteTag:
         return record
 
 
-def test_run_step_writes_tag_with_step_label(tmp_path: Path):
+def test_run_step_writes_tag_with_step_label(tmp_path: Path) -> None:
     step = Step("idle_cold", "Just sit at idle.", 30)
     inp, out, wt = _FakeInput(), _FakeOutput(), _FakeWriteTag()
     run_step(step, 1, 1, tmp_path, input_fn=inp, output_fn=out, write_tag_fn=wt)
@@ -111,7 +111,7 @@ def test_run_step_writes_tag_with_step_label(tmp_path: Path):
     assert wt.calls[0]["session_dir"] == tmp_path
 
 
-def test_run_step_uses_event_kind(tmp_path: Path):
+def test_run_step_uses_event_kind(tmp_path: Path) -> None:
     step = Step("blip_2k_start", "Blip.", None)
     wt = _FakeWriteTag()
     run_step(
@@ -126,7 +126,7 @@ def test_run_step_uses_event_kind(tmp_path: Path):
     assert wt.calls[0]["kind"] == "event"
 
 
-def test_run_step_prompt_shows_description(tmp_path: Path):
+def test_run_step_prompt_shows_description(tmp_path: Path) -> None:
     step = Step("engine_start", "Crank now.", None)
     inp, out = _FakeInput(), _FakeOutput()
     run_step(
@@ -142,7 +142,7 @@ def test_run_step_prompt_shows_description(tmp_path: Path):
     assert "Crank now." in all_prompts
 
 
-def test_run_step_prompt_shows_advisory_duration_when_set(tmp_path: Path):
+def test_run_step_prompt_shows_advisory_duration_when_set(tmp_path: Path) -> None:
     step = Step("idle_cold", "Idle.", 60)
     inp = _FakeInput()
     run_step(
@@ -157,7 +157,7 @@ def test_run_step_prompt_shows_advisory_duration_when_set(tmp_path: Path):
     assert any("60s" in p for p in inp.prompts)
 
 
-def test_run_step_prompt_omits_duration_for_instant_steps(tmp_path: Path):
+def test_run_step_prompt_omits_duration_for_instant_steps(tmp_path: Path) -> None:
     step = Step("engine_start", "Crank now.", None)
     inp = _FakeInput()
     run_step(
@@ -173,7 +173,7 @@ def test_run_step_prompt_omits_duration_for_instant_steps(tmp_path: Path):
     assert not any("Suggested" in p for p in inp.prompts)
 
 
-def test_run_step_header_shows_step_number(tmp_path: Path):
+def test_run_step_header_shows_step_number(tmp_path: Path) -> None:
     out = _FakeOutput()
     run_step(
         Step("foo", "bar"),
@@ -193,7 +193,7 @@ def test_run_step_header_shows_step_number(tmp_path: Path):
 # ---------------------------------------------------------------------------
 
 
-def test_run_protocol_writes_all_steps_in_order(tmp_path: Path):
+def test_run_protocol_writes_all_steps_in_order(tmp_path: Path) -> None:
     steps = [
         Step("a", "first"),
         Step("b", "second"),
@@ -211,7 +211,7 @@ def test_run_protocol_writes_all_steps_in_order(tmp_path: Path):
     assert [c["label"] for c in wt.calls] == ["a", "b", "c"]
 
 
-def test_run_protocol_returns_records(tmp_path: Path):
+def test_run_protocol_returns_records(tmp_path: Path) -> None:
     wt = _FakeWriteTag(fixed_t=999.5)
     records = run_protocol(
         [Step("x", "y")],
@@ -224,7 +224,7 @@ def test_run_protocol_returns_records(tmp_path: Path):
     assert records[0]["label"] == "x"
 
 
-def test_run_protocol_propagates_write_tag_failure(tmp_path: Path):
+def test_run_protocol_propagates_write_tag_failure(tmp_path: Path) -> None:
     """If write_tag raises (e.g. session went away), the runner should bubble."""
 
     def angry_write(*a: Any, **k: Any) -> dict[str, Any]:
@@ -283,7 +283,7 @@ class _ScriptedInput:
         return self._responses.pop(0) if self._responses else ""
 
 
-def test_run_step_skips_on_s_input(tmp_path: Path):
+def test_run_step_skips_on_s_input(tmp_path: Path) -> None:
     wt = _FakeWriteTag()
     record = run_step(
         Step("nt510_fan_test_on", "Fan on."),
@@ -298,7 +298,7 @@ def test_run_step_skips_on_s_input(tmp_path: Path):
     assert wt.calls == []
 
 
-def test_run_step_skips_on_skip_word_case_insensitive(tmp_path: Path):
+def test_run_step_skips_on_skip_word_case_insensitive(tmp_path: Path) -> None:
     wt = _FakeWriteTag()
     record = run_step(
         Step("nt510_evap_purge_on", "Purge on."),
@@ -313,7 +313,7 @@ def test_run_step_skips_on_skip_word_case_insensitive(tmp_path: Path):
     assert wt.calls == []
 
 
-def test_run_step_tags_normally_on_empty_input(tmp_path: Path):
+def test_run_step_tags_normally_on_empty_input(tmp_path: Path) -> None:
     wt = _FakeWriteTag()
     record = run_step(
         Step("idle_settle", "Idle."),
@@ -328,7 +328,7 @@ def test_run_step_tags_normally_on_empty_input(tmp_path: Path):
     assert len(wt.calls) == 1
 
 
-def test_run_protocol_skips_steps(tmp_path: Path):
+def test_run_protocol_skips_steps(tmp_path: Path) -> None:
     steps = [Step("a", "first"), Step("b", "second"), Step("c", "third")]
     wt = _FakeWriteTag()
     records = run_protocol(

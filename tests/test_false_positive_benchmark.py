@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any
 
 import numpy as np
 import pandas as pd
@@ -14,6 +15,7 @@ from scripts.fp_benchmark import main as fp_benchmark_main
 from scripts.fp_benchmark import run_false_positive_benchmark
 from src.columns import MODE_COLUMN, SESSION_COLUMN, TIMESTAMP_COLUMN
 from src.config import CanaryConfig
+from src.config.models import LSTMAutoencoderConfig
 from src.models.false_positive_benchmark import (
     DEFAULT_K_GRID,
     DEFAULT_QUANTILE_GRID,
@@ -21,7 +23,7 @@ from src.models.false_positive_benchmark import (
     _window_modes,
     benchmark_false_positives,
 )
-from src.models.lstm_training import train_lstm_autoencoder
+from src.models.lstm_training import TrainedLSTMAutoencoder, train_lstm_autoencoder
 from src.models.sequence_dataset import SequenceWindow, SequenceWindowDataset
 from src.models.sequence_training import (
     ReconstructionErrorDistribution,
@@ -40,13 +42,13 @@ EXAMPLE_YAML = REPO_ROOT / "canary.example.yaml"
 FEATURE_COLUMNS = ("rpm", "speed")
 
 
-def _torch():
+def _torch() -> Any:
     return pytest.importorskip("torch")
 
 
-def _config(**updates):
+def _config(**updates: Any) -> LSTMAutoencoderConfig:
     base = CanaryConfig.from_yaml(EXAMPLE_YAML).models.lstm_autoencoder
-    defaults = {
+    defaults: dict[str, Any] = {
         "sequence_length": 4,
         "hidden_size": 6,
         "num_layers": 1,
@@ -85,7 +87,7 @@ def _dataset(frame: pd.DataFrame, sequence_length: int = 4) -> SequenceWindowDat
     )
 
 
-def _trained(**config_updates):
+def _trained(**config_updates: Any) -> TrainedLSTMAutoencoder:
     _torch()
     dataset = _dataset(_frame("train", rows=20, start="2026-05-12T00:00:00Z"))
     return train_lstm_autoencoder(
@@ -145,6 +147,7 @@ def test_periodic_rows_give_no_zero_width_family_band() -> None:
     band was `mean + k * 0` and 8 held-out windows flagged at k = 1000 on
     float noise. Operator 2026-10-13: that family is uncalibrated, named."""
     trained = _trained(threshold_k=1_000.0)
+    assert trained.manifest.thresholds is not None
     calibration = SequenceThresholdCalibration.from_dict(trained.manifest.thresholds)
     assert calibration.family_errors is not None
     tied = {
@@ -556,6 +559,7 @@ def test_benchmark_scores_the_served_rule_with_a_suppressed_noisy_channel() -> N
     )
     # Held out: the suppressed channel is far noisier than anything calibrated.
     raw = _noisy_frame("holdout", rows=40, start="2026-05-12T01:00:00Z", noise=40.0, seed=2)
+    assert trained.manifest.scaler is not None
     scaler = ZScoreScaler.from_dict(dict(trained.manifest.scaler))
     held_out = SequenceWindowDataset(
         scaler.transform(raw), sequence_length=4, feature_columns=columns

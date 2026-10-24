@@ -36,8 +36,9 @@ import shutil
 import subprocess
 import sys
 import textwrap
+from collections.abc import Callable
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import numpy as np
 import pandas as pd
@@ -77,7 +78,7 @@ from src.analysis.twin_runner import (
     stage_order,
 )
 from src.decode import air_charge as air_kernel
-from src.decode.target_phi_command import GATE_STATE_UNKNOWN
+from src.decode.target_phi_command import GATE_STATE_UNKNOWN, target_command, x_from_bfs
 from src.preprocessing.loader import read_session
 from tests.test_target_phi import EXPECT, _session, _table, fixture_frame, record_lines
 from tools import fuel_plant_check
@@ -194,13 +195,14 @@ def test_a_stage_whose_node_the_model_moved_on_from_refuses(kit: TwinKit) -> Non
 
 
 def test_a_reason_no_kind_names_refuses_rather_than_counting() -> None:
-    for call in (
+    calls: list[Callable[[], object]] = [
         lambda: _bfs_kind("a_new_gate", {}),
         lambda: _phi_kind("unevaluable", ["a_new_reason"], identity_captured=True),
         lambda: _pulse_kind(
             "a_new_check", {}, load_twin_kit(PROFILE, plant_version=PLANT).plant, fuel_cut_reads=0
         ),
-    ):
+    ]
+    for call in calls:
         with pytest.raises(TwinRunnerRefusalError) as refused:
             call()
         assert refused.value.reason == "reason_unclassified"
@@ -333,7 +335,7 @@ def _check_october_4(run: TwinRun, native_expected: dict[str, Any]) -> None:
     }
     # Per record, the runner's observed and predicted words are the evaluator's.
     assert len(rows) == len(phi["records"])
-    for row, record in zip(rows.itertuples(), phi["records"], strict=True):
+    for row, record in zip(cast(Any, rows.itertuples()), phi["records"], strict=True):
         sample = record["sample"]
         assert row.observed_spec == sample["spec"]
         assert row.acquired_at == pd.Timestamp(sample["acquired_at"]).timestamp()
@@ -420,19 +422,21 @@ def test_a_mutated_lookup_kernel_moves_both_front_ends(
     frame = _session()
     ecu = _committed_ecu(kit)
     assert ecu.table is not None
+    table = ecu.table
 
     def both() -> tuple[float, float]:
         run = run_twin(frame, kit, ecu, name="synthetic", plant_version=PLANT)
-        (row,) = run.eligible("target_equiv_ratio").itertuples()
-        old = evaluate_session(frame, kit.twin, ecu.table, definition_sha256=kit.twin_sha256)
+        (row,) = cast(Any, run.eligible("target_equiv_ratio").itertuples())
+        old = evaluate_session(frame, kit.twin, table, definition_sha256=kit.twin_sha256)
         (record,) = old["records"]
         return float(row.residual), float(record["difference_words"])
 
     assert both() == (0.0, 0.0)
-    real = target_phi.target_command
+    real = target_command
 
     def off_by_one(*args: Any, **kwargs: Any) -> Any:
         command = real(*args, **kwargs)
+        assert command.word is not None
         return dataclasses.replace(command, word=command.word + 1)
 
     monkeypatch.setattr(target_phi, "target_command", off_by_one)
@@ -456,14 +460,14 @@ def test_a_mutated_lookup_kernel_moves_the_replay_and_the_paired_comparison(
 
     def both() -> tuple[float, int]:
         run = run_twin(frame, kit, ecu, name="synthetic", plant_version=PLANT)
-        (row,) = run.eligible("target_equiv_ratio").itertuples()
+        (row,) = cast(Any, run.eligible("target_equiv_ratio").itertuples())
         paired = run_paired(sim_kit, _scenario(sim_kit, image, image, WOT), image, image)
         phi = paired.points[0]["outputs"]["target_phi"]["base"]
         assert phi is not None
         return float(row.residual), round(phi * q)
 
     residual, word = both()
-    real = target_phi.target_command
+    real = target_command
 
     def off_by_one(*args: Any, **kwargs: Any) -> Any:
         command = real(*args, **kwargs)
@@ -492,7 +496,7 @@ def test_a_mutated_x_kernel_moves_both_front_ends(
 ) -> None:
     frame = fixture_frame()
     scaler = EXPECT["calibration"]["load_point_scaler"]
-    real = target_phi._x_from_bfs
+    real = x_from_bfs
     monkeypatch.setattr(target_phi, "_x_from_bfs", lambda bfs, sc, **kw: real(bfs + 400, sc, **kw))
     run = run_twin(frame, kit, _committed_ecu(kit), name=RAM_STUDY, plant_version=PLANT)
     old = x_formula_check(frame, kit.twin, scaler=scaler)
@@ -561,15 +565,15 @@ def test_the_october_4_accounting_from_the_image(kit: TwinKit, image_ecu: Resolv
     }
     # ... which is E05.2's own October 4 answer, through its evaluator.
     assert image_ecu.air is not None
-    old = air_charge_twin.evaluate_steady_bfs(
+    steady_report = air_charge_twin.evaluate_steady_bfs(
         frame,
         image_ecu.air,
         bfs_channel="mem:ECM_AIR_CHARGE_SLOT_103A",
         maf_channel="MAF",
         load_channel="mem:ECM_FUEL_COMP_X_INPUT",
     )
-    assert run.native["base_fuel_schedule_word"] == {"mem:ECM_AIR_CHARGE_SLOT_103A": old}
-    assert old.excluded == {"maf_unpaired": 194}
+    assert run.native["base_fuel_schedule_word"] == {"mem:ECM_AIR_CHARGE_SLOT_103A": steady_report}
+    assert steady_report.excluded == {"maf_unpaired": 194}
 
 
 # -- E05.2: steady BFS (private) ------------------------------------------------------------
@@ -1057,7 +1061,7 @@ def test_a_mutated_plant_kernel_moves_both_front_ends(
 # -- E09.2b on the recorded drives (private) -----------------------------------------------
 
 #: E07.3 / E07.5's identification numbers, as frozen into each baseline.
-IDENTIFICATION = {
+IDENTIFICATION: dict[str, dict[str, Any]] = {
     PLANT: {
         "value": 0.051063,
         "interval": [0.050591, 0.051501],
@@ -1107,6 +1111,7 @@ def test_the_identification_numbers_through_the_runner_and_the_cli(
     runs = request.getfixturevalue("mv1_runs" if version == PLANT else "mv2_runs")
     kit_v = load_twin_kit(PROFILE, plant_version=version)
     plant = kit_v.plant
+    assert plant.baseline is not None
     ident = [runs[n] for n in plant.split.identification]
     # Handed in any order: the runner concatenates in the split's order.
     result = twin_runner.identify_plant(ident[::-1], kit_v, sessions_root=SESSIONS)

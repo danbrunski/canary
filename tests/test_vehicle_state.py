@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from datetime import datetime
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -25,9 +26,9 @@ def _broadcast_rpm(timestamp: datetime, counts: int) -> TelemetryRecord:
     return TelemetryRecord(timestamp=timestamp, source="can", channel="0x1F9", payload=payload)
 
 
-def _common_telemetry(**overrides: object) -> dict[str, object]:
+def _common_telemetry(**overrides: object) -> dict[str, Any]:
     """Classifier kwargs; ``rpm`` is shorthand for the Mode 01 ``obd_rpm``."""
-    base: dict[str, object] = {
+    base: dict[str, Any] = {
         "obd_rpm": None,
         "broadcast_rpm": None,
         "coolant_temp": None,
@@ -505,7 +506,7 @@ def test_parked_from_stored_rows() -> None:
     from src.vehicle_state import derive_from_latest_rows
 
     now = datetime(2026, 10, 5, 3, 0, tzinfo=UTC)
-    rows = [
+    rows: list[dict[str, Any]] = [
         {
             "source": "can",
             "channel": "0x1F9",
@@ -528,7 +529,7 @@ def test_supply_voltage_is_a_required_argument() -> None:
     kwargs = _common_telemetry()
     del kwargs["supply_voltage"]
     with pytest.raises(TypeError):
-        classify_vehicle_state(**kwargs)  # type: ignore[arg-type]
+        classify_vehicle_state(**kwargs)
 
 
 def test_broadcast_rpm_is_a_required_argument() -> None:
@@ -540,7 +541,7 @@ def test_broadcast_rpm_is_a_required_argument() -> None:
     kwargs = _common_telemetry(rpm=800.0, obd_freshness_seconds=0.2)
     del kwargs["broadcast_rpm"]
     with pytest.raises(TypeError):
-        classify_vehicle_state(**kwargs)  # type: ignore[arg-type]
+        classify_vehicle_state(**kwargs)
 
 
 def test_classifier_uses_a_fresh_broadcast_when_obd_is_stale() -> None:

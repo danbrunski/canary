@@ -12,8 +12,10 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import cast
 
 from src.alerts.event_logger import read_events_dir
+from src.alerts.notifier import Notifier
 from src.collection import tuning_profile
 from src.collection.capture_profiles import CaptureProfile
 from src.config import CanaryConfig
@@ -67,7 +69,7 @@ def test_a_confirmed_detection_reaches_the_emitter_and_replay_never_pushes(
     config = _config(tmp_path)
     components = build_components(config)
     notifier = _RecordingNotifier()
-    components.emitter._notifier = notifier  # type: ignore[attr-defined]
+    components.emitter._notifier = cast(Notifier, notifier)
     # R03.12(c): plausibility is not withheld under a tuning capture.
     tuning_profile.activate(
         CaptureProfile(

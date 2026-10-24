@@ -112,7 +112,7 @@ def test_imu_config_enabled_mirrors_source():
     assert ImuConfig().enabled is False
 
 
-def test_unknown_top_level_key_rejected(tmp_path: Path):
+def test_unknown_top_level_key_rejected(tmp_path: Path) -> None:
     bad = tmp_path / "bad.yaml"
     bad.write_text(EXAMPLE_YAML.read_text() + "\nbogus_section: 1\n")
     with pytest.raises(ValidationError) as exc_info:
@@ -120,7 +120,7 @@ def test_unknown_top_level_key_rejected(tmp_path: Path):
     assert "bogus_section" in str(exc_info.value)
 
 
-def test_unknown_nested_key_rejected(tmp_path: Path):
+def test_unknown_nested_key_rejected(tmp_path: Path) -> None:
     bad = tmp_path / "bad.yaml"
     bad.write_text(
         EXAMPLE_YAML.read_text().replace(
@@ -133,7 +133,7 @@ def test_unknown_nested_key_rejected(tmp_path: Path):
     assert "bogus_field" in str(exc_info.value)
 
 
-def test_user_extensible_operating_modes(tmp_path: Path):
+def test_user_extensible_operating_modes(tmp_path: Path) -> None:
     custom = tmp_path / "custom.yaml"
     custom.write_text(
         EXAMPLE_YAML.read_text().replace(

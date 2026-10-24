@@ -232,7 +232,7 @@ def _tuple_spreads(
     members = [f"{MEMORY_SOURCE}:{name}" for name in channels]
     out = []
     for anchor in stamps[members[0]]:
-        reads = [min(stamps[m], key=lambda t, a=anchor: abs(t - a)) for m in members]
+        reads = [min(stamps[m], key=lambda t, a=anchor: abs(t - a)) for m in members]  # type: ignore[misc]
         lo, hi = min(reads), max(reads)
         joined_lo, joined_hi = lo, hi
         for pid in MODE01_LEG:

@@ -11,6 +11,7 @@ from src.alerts.event_logger import AnomalyEventLogger, read_events_dir
 from src.alerts.events import AnomalyEvent
 from src.config import FusionConfig
 from src.models.fusion import (
+    FusedResult,
     FusionScorer,
     isolation_forest_source,
     lstm_source,
@@ -208,7 +209,7 @@ def test_emit_fused_logs_and_dedupes(tmp_path: Path) -> None:
     emitter = AnomalyEventEmitter(AnomalyEventLogger(tmp_path), min_seconds_between_events=1.0)
     fs = FusionScorer(FusionConfig())
 
-    def _fused(ts: str):
+    def _fused(ts: str) -> FusedResult:
         # 6.2: two independent sources so agreement (2) clears min_agreement
         # and the fused event actually emits.
         return fs.fuse(

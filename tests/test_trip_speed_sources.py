@@ -489,6 +489,11 @@ class _Sink:
         self.unobservable: list[tuple[Path, TripEnd]] = []
         self.queue: asyncio.Queue[TelemetryRecord] = asyncio.Queue()
         self.stop = asyncio.Event()
+
+        def on_trip_ended(path: Path | None, end: TripEnd) -> None:
+            self.ended.append(path)
+            self.ends.append(end)
+
         self.task = asyncio.create_task(
             run_gps_sink(
                 self.queue,
@@ -496,7 +501,7 @@ class _Sink:
                 self.stop,
                 poll_interval=0.02,
                 active_session_path=lambda: self.session,
-                on_trip_ended=lambda path, end: (self.ended.append(path), self.ends.append(end)),
+                on_trip_ended=on_trip_ended,
                 on_trip_unobservable=lambda path, end: self.unobservable.append((path, end)),
                 clock=lambda: self.now,
             )

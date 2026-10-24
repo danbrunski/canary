@@ -24,7 +24,7 @@ import json
 import os
 from collections.abc import Callable, Iterator
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from fastapi import FastAPI
 from fastapi.dependencies.models import Dependant
@@ -53,7 +53,7 @@ def _auth_kind(dependant: Dependant) -> str | None:
     kinds = {getattr(call, "canary_auth", None) for call in _calls(dependant)}
     kinds.discard(None)
     if len(kinds) > 1:
-        raise AssertionError(f"route carries two auth rules: {sorted(kinds)}")
+        raise AssertionError(f"route carries two auth rules: {sorted(cast(set[str], kinds))}")
     return next(iter(kinds), None)
 
 

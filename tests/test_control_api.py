@@ -7,6 +7,7 @@ import json
 import sys
 import time
 import zipfile
+from collections.abc import Mapping, MutableMapping
 from datetime import UTC, datetime
 from io import BytesIO
 from pathlib import Path
@@ -389,7 +390,7 @@ def test_control_jobs_run_restricted_background_commands(tmp_path: Path) -> None
     cfg_path = _write_config(tmp_path, storage)
     config = CanaryConfig.from_yaml(cfg_path)
 
-    def _command_builder(_kind: str, _params: dict[str, Any]) -> list[str]:
+    def _command_builder(_kind: str, _params: Mapping[str, Any]) -> list[str]:
         return [sys.executable, "-c", "print('job ok')"]
 
     app = create_app(
@@ -458,7 +459,7 @@ def test_control_job_result_reads_replay_report(tmp_path: Path) -> None:
     jobs_dir = tmp_path / "jobs"
     jobs_dir.mkdir()
 
-    def _command_builder(_kind: str, _params: dict[str, Any]) -> list[str]:
+    def _command_builder(_kind: str, _params: Mapping[str, Any]) -> list[str]:
         return [sys.executable, "-c", "print('job ok')"]
 
     app = create_app(
@@ -523,7 +524,7 @@ def test_control_job_result_reads_did_sweep_snapshot(tmp_path: Path) -> None:
     jobs_dir = tmp_path / "jobs"
     jobs_dir.mkdir()
 
-    def _command_builder(_kind: str, _params: dict[str, Any]) -> list[str]:
+    def _command_builder(_kind: str, _params: Mapping[str, Any]) -> list[str]:
         return [sys.executable, "-c", "print('job ok')"]
 
     app = create_app(
@@ -730,7 +731,7 @@ def test_control_jobs_can_cancel_running_process(tmp_path: Path) -> None:
     cfg_path = _write_config(tmp_path, storage)
     config = CanaryConfig.from_yaml(cfg_path)
 
-    def _command_builder(_kind: str, _params: dict[str, Any]) -> list[str]:
+    def _command_builder(_kind: str, _params: Mapping[str, Any]) -> list[str]:
         return [sys.executable, "-c", "import time; time.sleep(10)"]
 
     app = create_app(
@@ -975,7 +976,7 @@ async def test_control_websocket_rule_matches_the_http_rule() -> None:
         async def _receive() -> dict[str, Any]:
             return {}
 
-        async def _send(_message: dict[str, Any]) -> None:
+        async def _send(_message: MutableMapping[str, Any]) -> None:
             return None
 
         return WebSocket(scope, _receive, _send)

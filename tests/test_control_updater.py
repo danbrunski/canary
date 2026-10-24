@@ -7,6 +7,7 @@ import os
 import re
 import subprocess
 from pathlib import Path
+from typing import Any, cast
 
 import pytest
 
@@ -75,7 +76,7 @@ def test_a_written_request_parses_back(tmp_path: Path) -> None:
 )
 def test_a_malformed_request_is_refused(body: object, error: str) -> None:
     base = {"action": "update", "request_id": "a1", "requested_at": utc_iso(NOW)}
-    raw = body if isinstance(body, str) else json.dumps({**base, **body})
+    raw = body if isinstance(body, str) else json.dumps({**base, **cast(dict[str, Any], body)})
     with pytest.raises(UpdateRequestError, match=error):
         parse_request(raw, now=NOW)
 

@@ -18,11 +18,13 @@ from dataclasses import dataclass
 from itertools import pairwise
 from pathlib import Path
 from statistics import median
+from typing import Any
 
 import pytest
 
 from src.collection import can_obd_loop, tuning_profile, tx_gate
 from src.collection.can_obd_collector import run_can_obd_loop
+from src.collection.can_obd_io import _drain_frames_until
 from src.collection.capture_profiles import CaptureProfile
 from src.collection.hybrid_cycle import WakeDecision, next_wake_at, plan_cycle
 from src.collection.obd_collector import ObdReading
@@ -203,7 +205,7 @@ def _record_wakes(monkeypatch: pytest.MonkeyPatch) -> list[tuple[float, WakeDeci
 
 def _record_drains(monkeypatch: pytest.MonkeyPatch) -> list[float]:
     untils: list[float] = []
-    real = can_obd_loop._drain_frames_until
+    real = _drain_frames_until
 
     def wrapped(
         bus: object, on_frame: object, stats: object, stop: object, until: float, deadline: object
@@ -240,10 +242,11 @@ def assert_on_cycle_grid(starts: list[float], cycle: float, *, latency: float = 
         assert later - earlier >= cycle - slack, "two windows opened inside one cycle"
 
 
-def last_cycle(snapshots: list[ObdSchedulerMetrics]) -> dict[str, object]:
+def last_cycle(snapshots: list[ObdSchedulerMetrics]) -> dict[str, Any]:
     profile = snapshots[-1].did_profile
     assert profile is not None
-    return profile["cycle"]
+    cycle: dict[str, Any] = profile["cycle"]
+    return cycle
 
 
 @pytest.fixture
@@ -363,7 +366,7 @@ def test_cycle_seconds_schedules_windows_start_to_start(clock: FakeClock) -> Non
     cycle = last_cycle(snaps)
     assert cycle["timing_policy"] == "cycle"
     assert cycle["cycle_seconds"] == CYCLE
-    assert cycle["cycle_duration_s"]["median"] == pytest.approx(CYCLE, abs=1e-4)  # type: ignore[index]
+    assert cycle["cycle_duration_s"]["median"] == pytest.approx(CYCLE, abs=1e-4)
     assert cycle["cycles_missed"] == 0
     assert_recv_continuous(bus)
 
@@ -484,7 +487,7 @@ def test_infeasible_cycle_is_reported_once_and_still_progresses(
     cycle = last_cycle(snaps)
     assert cycle["cycle_feasible"] is False
     plan = cycle["plan"]
-    assert plan["shortfall_seconds"] == pytest.approx(0.1375, abs=1e-4)  # type: ignore[index]
+    assert plan["shortfall_seconds"] == pytest.approx(0.1375, abs=1e-4)
     assert cycle["cycles_missed"] > 0
     warnings = [r for r in caplog.records if "infeasible" in r.getMessage()]
     assert len(warnings) == 1
@@ -525,7 +528,7 @@ def test_sustained_overload_skips_cycles_without_catch_up_or_starving_mode01(
     # missed cycles, not paid for by Mode 01.
     assert cycle["mode01_shortfall"] == 0
     assert cycle["cycle_feasible"] is True  # nominal plan fits; latency did not
-    assert cycle["cycle_duration_s"]["median"] == pytest.approx(0.75, abs=0.06)  # type: ignore[index]
+    assert cycle["cycle_duration_s"]["median"] == pytest.approx(0.75, abs=0.06)
     assert cycle["cycles_missed"] >= 2 * (len(starts) - 1) - 2
     for second in range(2, 8, 2):
         window = kinds_between(log, 1000.0 + second, 1000.0 + second + 2)
@@ -580,7 +583,7 @@ def test_lapse_is_not_recovery_until_mode01_actually_answers(clock: FakeClock) -
     # Between the lapse ending and the ECU actually answering (30 s of miss
     # backoff later), every snapshot says recovery is pending, not done.
     during = [
-        s.did_profile["cycle"]  # type: ignore[index]
+        s.did_profile["cycle"]
         for s in snaps
         if s.did_profile is not None and s.did_profile["windows_completed"] >= 1
     ]
@@ -602,7 +605,7 @@ TRANSIENT_EXIT_FAILURES = pytest.mark.parametrize(
 
 @TRANSIENT_EXIT_FAILURES
 def test_transient_exit_failure_is_retried_once_instead_of_the_lapse(
-    clock: FakeClock, reply: object, counter: str, reply_cost: float
+    clock: FakeClock, reply: int | str | None, counter: str, reply_cost: float
 ) -> None:
     """D03.18: one failed ``10 81`` used to cost the whole lapse — 5.0 s of
     Mode-01 blackout on the truck (three all-channel gaps of 5.003–5.011 s on
@@ -635,7 +638,7 @@ def test_transient_exit_failure_is_retried_once_instead_of_the_lapse(
 
 @TRANSIENT_EXIT_FAILURES
 def test_transient_exit_failing_twice_costs_one_lapse_and_is_retried_next_window(
-    clock: FakeClock, reply: object, counter: str, reply_cost: float
+    clock: FakeClock, reply: int | str | None, counter: str, reply_cost: float
 ) -> None:
     """The retry is bounded to one per window: a second failure waits that
     window's lapse out (no Mode 01 inside it, no third exit), and the next
@@ -853,7 +856,7 @@ def test_no_eligible_dids_leaves_mode01_alone_without_probing(clock: FakeClock) 
     assert len(mode01_after) >= 2 * 4 * 8  # two PIDs at 4 Hz for ~9 s
     # The one window overran its cycle (two 0.2 s timeouts): those boundaries
     # are missed. The idle stretch after it is not.
-    missed = [s.did_profile["cycle"]["cycles_missed"] for s in snaps if s.did_profile]  # type: ignore[index]
+    missed = [s.did_profile["cycle"]["cycles_missed"] for s in snaps if s.did_profile]
     assert missed[2] == missed[-1] > 0
     assert stats.rounds_skipped == 0
 
@@ -1086,25 +1089,25 @@ def test_end_to_end_mixed_capture_orders_requests_and_wakes_at_deadlines(
     assert cycle["cycle_feasible"] is True and cycle["cycles_missed"] == 0
     assert cycle["mode01_shortfall"] == 0 and cycle["did_shortfall"] == 0
     duration = cycle["cycle_duration_s"]
-    assert duration["median"] == duration["max"] == pytest.approx(CYCLE, abs=1e-4)  # type: ignore[index]
+    assert duration["median"] == duration["max"] == pytest.approx(CYCLE, abs=1e-4)
     # Transition latency is request -> first *response* of the other service:
     # exit + reply, grace, Mode 01 request + reply; entry + reply, budget
     # slot, DID request + reply. Both are read off the wire log.
     latency = cycle["transition_latency_s"]
     exit_gaps = exit_to_mode01_gaps(log)[1:]
     assert median(exit_gaps) == pytest.approx(0.05 + LATENCY, abs=1e-3)
-    assert latency["exit_to_mode01"]["median"] == pytest.approx(  # type: ignore[index]
+    assert latency["exit_to_mode01"]["median"] == pytest.approx(
         median(exit_gaps) + LATENCY, abs=1e-3
     )
     entry_gaps = [next(s.at for s in log if s.kind == "did" and s.at > at) - at for at in starts]
-    assert latency["entry_to_did"]["median"] == pytest.approx(  # type: ignore[index]
+    assert latency["entry_to_did"]["median"] == pytest.approx(
         median(entry_gaps) + LATENCY, abs=1e-3
     )
     occupancy = cycle["occupancy_s"]
-    assert set(occupancy) == {"mode01", "mode22", "session"}  # type: ignore[arg-type]
-    assert occupancy["session"] == pytest.approx(2 * LATENCY, abs=1e-3)  # type: ignore[index]
+    assert set(occupancy) == {"mode01", "mode22", "session"}
+    assert occupancy["session"] == pytest.approx(2 * LATENCY, abs=1e-3)
     separation = cycle["cross_mode_separation_s"]
-    assert separation is not None and 0 < separation["max"] < CYCLE  # type: ignore[index]
+    assert separation is not None and 0 < separation["max"] < CYCLE
     control = snaps[-1].to_dict()["session_control"]
     assert control["sent"] == control["responses"] == stats.session_controls_sent
     assert control["channel_requests_sent"] == stats.requests_sent - stats.session_controls_sent

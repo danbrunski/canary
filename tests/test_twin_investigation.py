@@ -11,7 +11,7 @@ from __future__ import annotations
 import dataclasses
 import json
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import pandas as pd
 import pyarrow as pa
@@ -54,7 +54,7 @@ def _store(root: Path, frame: pd.DataFrame, name: str) -> Path:
         for row in frame.to_dict("records")
     ]
     table = pa.Table.from_pylist(rows, schema=TELEMETRY_SCHEMA)
-    pq.write_table(table, session / "telemetry-00000.parquet")
+    pq.write_table(table, session / "telemetry-00000.parquet")  # type: ignore[no-untyped-call]
     return session
 
 
@@ -330,7 +330,9 @@ def test_the_brain_twin_job_links_each_minted_record_to_its_investigation(tmp_pa
     else:
         assert ledger.get(again_evidence).supersedes == (evidence_id,)
     current_evidence = [
-        e.record.id for e in ledger.query(kinds=("evidence",)) if e.record.subject.endswith(":tol1")
+        e.record.id
+        for e in ledger.query(kinds=("evidence",))
+        if cast(Evidence, e.record).subject.endswith(":tol1")
     ]
     current_investigations = [e.record for e in ledger.query(kinds=("investigation",)) if e.current]
     assert current_evidence == [again_evidence]

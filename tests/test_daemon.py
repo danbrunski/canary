@@ -7,9 +7,10 @@ import json
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import pytest
+import uvicorn
 
 from src.alerts.events import AnomalyEvent
 from src.config import CanaryConfig, DaemonConfig
@@ -102,7 +103,7 @@ def test_emitter_publishes_to_anomalies_broadcaster_when_logging(
             threshold=3.0,
         )
         # The emitter's logger is the wrapper; calling .log() drives both paths.
-        components.emitter._logger.log(event)  # type: ignore[attr-defined]
+        components.emitter._logger.log(event)
         return await settle(sub.get())
 
     published = asyncio.run(_exercise())
@@ -465,10 +466,10 @@ async def test_poll_swaps_when_new_manifest_appears(tmp_path: Path) -> None:
     artifact = tmp_path / "model.joblib"
     _write_manifest_pair(artifact, version="v1", mtime=1_000_000.0)
 
-    def _loader(p: Path) -> dict:
+    def _loader(p: Path) -> dict[str, Any]:
         return {"contents": p.read_text()}
 
-    manager: ModelManager[dict] = ModelManager(artifact, loader=_loader)
+    manager: ModelManager[dict[str, Any]] = ModelManager(artifact, loader=_loader)
     manager.load_initial()
     assert manager.current is not None and manager.current.manifest.model_version == "v1"
 
@@ -906,7 +907,9 @@ async def test_serve_in_background_force_exits_when_server_wont_stop(
     wedged = _WedgedServer()
 
     async def _use() -> None:
-        async with serve_in_background(components, server_factory=lambda config: wedged):
+        async with serve_in_background(
+            components, server_factory=lambda config: cast(uvicorn.Server, wedged)
+        ):
             pass
 
     # If the force-exit path regresses this fails on the hang guard instead
@@ -1232,7 +1235,7 @@ async def test_run_live_inference_sequence_detector_emits_on_full_window(
             await settle(feeder)
     finally:
         if original is not None:
-            inf_mod.SequenceInferenceEngine = original  # type: ignore[assignment]
+            inf_mod.SequenceInferenceEngine = original  # type: ignore[misc]
         elif hasattr(inf_mod, "SequenceInferenceEngine"):
             delattr(inf_mod, "SequenceInferenceEngine")
         del daemon_mod  # keep linter quiet about unused import

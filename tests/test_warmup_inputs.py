@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 import pandas as pd
@@ -20,6 +21,7 @@ from src.analysis.cold_start_inventory import (
     IAT_CHANNEL,
     INVENTORY_CHANNELS,
     LOAD_CHANNEL,
+    EngineRun,
     InventorySpec,
     SessionInventory,
     group_into_drives,
@@ -102,14 +104,14 @@ def test_catalyst_verdict_is_unresolved_without_two_indicators() -> None:
 
 
 @pytest.fixture(scope="module")
-def inventory_runs() -> list:
+def inventory_runs() -> list[EngineRun]:
     session = read_session(SLICE)
     session["source_channel"] = session["source"] + ":" + session["channel"]
     view = per_second_view(session, INVENTORY_CHANNELS)
     return runs_of_session(view, InventorySpec())
 
 
-def test_the_committed_cold_start_is_inventoried_as_one(inventory_runs: list) -> None:
+def test_the_committed_cold_start_is_inventoried_as_one(inventory_runs: list[EngineRun]) -> None:
     cold = [run for run in inventory_runs if run.classification == "cold_start"]
     assert len(cold) == 1
     run = cold[0]
@@ -182,7 +184,7 @@ def test_two_runs_in_one_recording_are_counted_separately() -> None:
 
 def test_a_start_without_load_or_iat_spread_is_not_usable_context() -> None:
     """The 4.6 "usable" rule, applied per run."""
-    base = dict(
+    base: dict[str, Any] = dict(
         started_at=None,
         ended_at=None,
         duration_s=300.0,
@@ -197,8 +199,6 @@ def test_a_start_without_load_or_iat_spread_is_not_usable_context() -> None:
         warmup_seconds=300.0,
         catalyst_rows=10,
     )
-    from src.analysis.cold_start_inventory import EngineRun
-
     flat = EngineRun(**base, load_spread=2.0, iat_spread=1.0)
     varied = EngineRun(**base, load_spread=40.0, iat_spread=1.0)
     inventories = [
@@ -315,7 +315,12 @@ def test_session_discovery_weighs_duplicate_copies_once_per_directory(
 
     calls: list[Path] = []
     real_bytes = cli._bytes
-    monkeypatch.setattr(cli, "_bytes", lambda path: (calls.append(path), real_bytes(path))[1])
+
+    def _spy(path: Path) -> int:
+        calls.append(path)
+        return real_bytes(path)
+
+    monkeypatch.setattr(cli, "_bytes", _spy)
     found = cli.find_sessions(tmp_path)
 
     assert found == [big, other]

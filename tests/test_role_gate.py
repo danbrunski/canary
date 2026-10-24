@@ -181,7 +181,7 @@ def test_a_hot_swap_to_an_artifact_without_a_verdict_demotes_at_the_swap(
 
     serving["isolation_forest"] = _Loaded(second, "if-v2")  # the ModelManager swapped
 
-    assert gate["isolation_forest"] == "evidence"
+    assert gate["isolation_forest"] == "evidence"  # type: ignore[comparison-overlap]
     snapshot = published[-1]["isolation_forest"]
     assert (snapshot["configured"], snapshot["effective"]) == ("alert", "evidence")
     assert snapshot["model_version"] == "if-v2"
@@ -198,7 +198,7 @@ def test_a_verdict_that_lands_after_its_binary_is_picked_up_by_refresh(tmp_path:
     _write(artifact, _check(passed=True))  # scp'd a moment later
     assert gate["isolation_forest"] == "evidence"  # lookups never touch the disk
     gate.refresh()  # the model poller, off the event loop
-    assert gate["isolation_forest"] == "alert"
+    assert gate["isolation_forest"] == "alert"  # type: ignore[comparison-overlap]
 
 
 def test_the_emitter_stamps_the_effective_role_after_a_swap(tmp_path: Path) -> None:

@@ -17,6 +17,7 @@ profile files (``ecu_application_model.yaml``'s ``program.identity.sha256`` and
 
 from __future__ import annotations
 
+import argparse
 import contextlib
 import hashlib
 import io
@@ -167,7 +168,7 @@ def grid_design(world: dict[str, Any], tmp_path_factory: pytest.TempPathFactory)
     return directory
 
 
-def _run_args(world: dict[str, Any], design: Path, out: Path, *extra: str) -> list[str]:
+def _run_args(world: dict[str, Any], design: Path, out: Path, *extra: str | Path) -> list[str]:
     return [
         "run",
         *_profile_args(world),
@@ -185,7 +186,7 @@ def _run_args(world: dict[str, Any], design: Path, out: Path, *extra: str) -> li
         *LEARNED,
         "--out",
         str(out),
-        *extra,
+        *(str(e) for e in extra),
     ]
 
 
@@ -234,7 +235,9 @@ def test_a_synthetic_pair_and_a_grid_design_write_all_three_files(
     assert len(bfs) == 9 and table.n_points == 9
     assert {k for k, v in bfs.items() if v.status == "changed"} == {(4, 4)}
     assert {v.status for k, v in bfs.items() if k != (4, 4)} == {"unchanged"}
-    assert bfs[(4, 4)].quantiles.relative_delta.p05 > 0.05
+    quantiles = bfs[(4, 4)].quantiles
+    assert quantiles is not None and quantiles.relative_delta is not None
+    assert quantiles.relative_delta.p05 > 0.05
     # traces.parquet: a long frame under one synthetic session.
     traces = pd.read_parquet(out / "traces.parquet")
     assert set(traces["session"]) == {result["traces_session"]}
@@ -580,7 +583,7 @@ def _expected_messages(world: dict[str, Any], candidate: bytes, **kwargs: Any) -
 
 
 def _trim_spec(world: dict[str, Any]) -> Path:
-    spec = world["root"] / "trim_lever.yaml"
+    spec: Path = world["root"] / "trim_lever.yaml"
     spec.write_text(
         yaml.safe_dump(
             {
@@ -1094,7 +1097,7 @@ def test_every_option_of_every_subcommand_is_in_its_help(
 ) -> None:
     """Introspect the parser: an argument added without help text is a failure."""
     parser = rom_sim._parser()
-    stack = [((), parser)]
+    stack: list[tuple[tuple[str, ...], argparse.ArgumentParser]] = [((), parser)]
     seen = 0
     while stack:
         path, p = stack.pop()

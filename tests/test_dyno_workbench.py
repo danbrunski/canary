@@ -13,6 +13,7 @@ from __future__ import annotations
 import datetime as dt
 import json
 import math
+from collections.abc import Iterator
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any
@@ -24,11 +25,13 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from src.analysis import dyno_workbench
+from src.analysis.channels import read_channels
 from src.analysis.dyno import DynoRefusal, load_dyno_profile
 from src.analysis.dyno_pulls import FoundPull
 from src.analysis.dyno_workbench import DynoRequest, dyno_runs, prerequisites
 from src.analysis.tuning_frame import WotCriterion
 from src.analysis.workbench import WorkbenchInputs
+from src.collection import tuning_profile
 from src.config import CanaryConfig, VehicleParameters
 from src.control import workbench_jobs
 from src.dashboard.routes import workbench as workbench_routes
@@ -470,7 +473,7 @@ def test_each_session_is_read_whole_once(tmp_path: Path, monkeypatch: pytest.Mon
     storage = tmp_path / "storage"
     sessions = [_session(storage)]
     calls: list[list[str]] = []
-    real = dyno_workbench.read_channels
+    real = read_channels
 
     def counted(session: Any, specs: list[str], **kwargs: Any) -> Any:
         calls.append(list(specs))
@@ -525,7 +528,7 @@ AUTH = {"Authorization": "Bearer secret"}
 
 
 @pytest.fixture
-def client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+def client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[TestClient]:
     """The workbench routes on the example config, a thread standing in for
     the spawn child (the spawn path is test_workbench_analysis's)."""
     config = CanaryConfig.from_yaml(Path("canary.example.yaml"))
@@ -585,9 +588,9 @@ def test_dyno_route_defers_while_a_capture_records(
 ) -> None:
     storage = client.config.collection.storage_path  # type: ignore[attr-defined]
     _session(storage)
-    monkeypatch.setattr(workbench_jobs.tuning_profile, "is_active", lambda: True)
+    monkeypatch.setattr(tuning_profile, "is_active", lambda: True)
     monkeypatch.setattr(
-        workbench_jobs.tuning_profile,
+        tuning_profile,
         "active_profile",
         lambda: type("P", (), {"name": "tuning"})(),
     )

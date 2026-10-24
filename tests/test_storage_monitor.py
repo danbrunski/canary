@@ -3,15 +3,18 @@
 from __future__ import annotations
 
 import logging
+import shutil
 from collections import namedtuple
 from pathlib import Path
+
+import pytest
 
 from src.storage import monitor
 
 
 def test_free_space_uses_nearest_existing_parent(
     tmp_path: Path,
-    monkeypatch,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     usage = namedtuple("usage", "total used free")
 
@@ -19,19 +22,19 @@ def test_free_space_uses_nearest_existing_parent(
         assert path == tmp_path
         return usage(total=100, used=90, free=10 * monitor.BYTES_PER_MIB)
 
-    monkeypatch.setattr(monitor.shutil, "disk_usage", fake_disk_usage)
+    monkeypatch.setattr(shutil, "disk_usage", fake_disk_usage)
 
     assert monitor.free_space_mb(tmp_path / "missing" / "child") == 10
 
 
 def test_warn_if_storage_low_logs_threshold(
     tmp_path: Path,
-    monkeypatch,
-    caplog,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
 ) -> None:
     usage = namedtuple("usage", "total used free")
     monkeypatch.setattr(
-        monitor.shutil,
+        shutil,
         "disk_usage",
         lambda _path: usage(total=100, used=90, free=10 * monitor.BYTES_PER_MIB),
     )

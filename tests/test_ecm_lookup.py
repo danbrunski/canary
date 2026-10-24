@@ -40,6 +40,13 @@ RPM = [b * 4 for b in (0x18, 0x20, 0x28, 0x38, 0x48, 0x50, 0x58, 0x68)]
 LOAD = [0x34, 0x44, 0x5D, 0x64, 0x6C, 0x6E, 0x7F, 0x80]
 
 
+def _hit(breakpoints: list[int], value: int) -> AxisHit:
+    """``search_axis`` for a value the test knows is on the axis."""
+    hit = search_axis(breakpoints, value)
+    assert hit is not None
+    return hit
+
+
 # -- axis search ------------------------------------------------------------------
 
 
@@ -53,30 +60,30 @@ def test_a_value_on_a_breakpoint_is_that_index_with_no_fraction() -> None:
 
 def test_a_value_between_breakpoints_is_the_lower_index_and_a_q16_fraction() -> None:
     # 0x64..0x6C spans 8 counts; 0x68 is half way: (4 << 16) // 8.
-    hit = search_axis(LOAD, 0x68)
+    hit = _hit(LOAD, 0x68)
     assert (hit.index, hit.fraction_q16, hit.edge) == (3, 32768, None)
     # 0x6C..0x6E spans 2: 0x6D is (1 << 16) // 2.
-    assert search_axis(LOAD, 0x6D).fraction_q16 == 32768
+    assert _hit(LOAD, 0x6D).fraction_q16 == 32768
     # 0x34..0x44 spans 16: 0x35 is 65536 // 16 = 4096; 0x43 is 15 x 4096.
-    assert search_axis(LOAD, 0x35).fraction_q16 == 4096
-    assert search_axis(LOAD, 0x43).fraction_q16 == 61440
+    assert _hit(LOAD, 0x35).fraction_q16 == 4096
+    assert _hit(LOAD, 0x43).fraction_q16 == 61440
     # rpm word 300 (3,750 rpm) sits 12 of 32 counts past 288: (12 << 16) // 32.
-    assert search_axis(RPM, 300).fraction_q16 == 24576
+    assert _hit(RPM, 300).fraction_q16 == 24576
 
 
 def test_the_fraction_truncates_like_the_firmware_divide() -> None:
     # 0x44..0x5D spans 25: (1 << 16) / 25 = 2621.44 -> 2621, never 2622.
-    assert search_axis(LOAD, 0x45).fraction_q16 == 2621
+    assert _hit(LOAD, 0x45).fraction_q16 == 2621
     # rpm word 129 is 1 of 32 counts past 128: 2048 exactly.
-    assert search_axis(RPM, 129).fraction_q16 == 2048
+    assert _hit(RPM, 129).fraction_q16 == 2048
 
 
 def test_past_either_end_the_search_clamps_and_names_the_edge() -> None:
-    below = search_axis(LOAD, 0x10)
+    below = _hit(LOAD, 0x10)
     assert (below.index, below.fraction_q16, below.edge) == (0, 0, "below")
-    above = search_axis(LOAD, 0xFF)
+    above = _hit(LOAD, 0xFF)
     assert (above.index, above.fraction_q16, above.edge) == (7, 0, "above")
-    assert search_axis(RPM, 2000).edge == "above"
+    assert _hit(RPM, 2000).edge == "above"
 
 
 def test_an_empty_axis_or_a_non_finite_value_has_no_position() -> None:
@@ -167,7 +174,7 @@ def test_the_rom_maps_ecm_cell_uses_this_search(monkeypatch: pytest.MonkeyPatch)
     calls: list[float] = []
     real = ecm_lookup.search_axis
 
-    def spy(breakpoints, value):  # type: ignore[no-untyped-def]
+    def spy(breakpoints, value):
         calls.append(value)
         return real(breakpoints, value)
 

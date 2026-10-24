@@ -174,12 +174,12 @@ def test_real_fifo_capture_decodes_to_one_g_at_rest() -> None:
     settings = ImuSettings(**fixture["settings"])
     decoder = FifoDecoder(settings)
     decoder.power_up()  # the capture began at power-up, as the collector's does
-    per_second = 40_000.0 * (1.0 + 0.0015 * fixture["internal_freq_fine"])
+    per_second: float = 40_000.0 * (1.0 + 0.0015 * fixture["internal_freq_fine"])
     samples = []
     settled = 0
     for batch in fixture["batches"]:
         now_ticks = int.from_bytes(bytes.fromhex(batch["timestamp_reg"]), "little")
-        host_now = (batch["host_before"] + batch["host_after"]) / 2
+        host_now: float = (batch["host_before"] + batch["host_after"]) / 2
 
         def to_host(ticks: float, now_ticks: int = now_ticks, host_now: float = host_now) -> float:
             return host_now - ((now_ticks - ticks) % (1 << 32)) / per_second

@@ -7,7 +7,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any
+from typing import Any, cast
 
 import numpy as np
 import pandas as pd
@@ -109,7 +109,7 @@ def test_scaled_bands_make_the_served_verdict_exactly_severity_over_the_level(
     rng = np.random.default_rng(7)
     error = rng.gamma(2.0, 0.4, size=(400, 5, len(COLUMNS)))
     mask = (rng.random(error.shape) > 0.1).astype(np.float64)
-    modes = list(rng.choice(["idle", "city", "highway", None], size=400))
+    modes = list(rng.choice(cast(Any, ["idle", "city", "highway", None]), size=400))
     before = SequenceScoringRule(_calibration(), COLUMNS, use_family_path=family_path)
     batch = before.score_batch(error, mask, modes)
     severity = served_severity(_sequence_scores(batch))
@@ -646,7 +646,7 @@ def test_the_levels_drives_still_score_the_if_and_refuse_an_alert_role_sequence_
     ).features
     forest = fit_isolation_forest(
         features,
-        IFConfig(n_estimators=20),
+        cast(Any, IFConfig(n_estimators=20)),
         feature_columns=["obd:RPM", "obd:SPEED"],
         fitted_at="2026-05-12T00:00:00Z",
     )
@@ -788,7 +788,7 @@ def test_in_sample_results_leave_every_summary_of_their_drive() -> None:
     )
     outcomes = [{"detector": "sequence"}, {"detector": "isolation_forest"}]
     slices = [{"detector": "sequence"}, {"detector": "isolation_forest"}]
-    shift = {"detectors": {"sequence": {}, "isolation_forest": {}}}
+    shift: dict[str, Any] = {"detectors": {"sequence": {}, "isolation_forest": {}}}
     drop_in_sample(
         {"sequence": "sequence budget_level on s"},
         sessions=["s"],
@@ -827,7 +827,9 @@ def _gate_report(drives: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
-def _gate_drive(name: str, episodes: dict[str, int], in_sample: tuple[str, ...] = ()) -> dict:
+def _gate_drive(
+    name: str, episodes: dict[str, int], in_sample: tuple[str, ...] = ()
+) -> dict[str, Any]:
     return {
         "drive": name,
         "sessions": [name],

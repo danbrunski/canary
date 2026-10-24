@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 import scripts.vehicle_log as vehicle_log_cli
 from src.vehicle.vehicle_ledger import VehicleLedgerStore  # noqa: E402
 
@@ -11,7 +13,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 EXAMPLE_YAML = REPO_ROOT / "canary.example.yaml"
 
 
-def test_add_then_list_round_trips(tmp_path: Path, capsys) -> None:
+def test_add_then_list_round_trips(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     ledger_path = tmp_path / "vehicle_ledger.jsonl"
     rc = vehicle_log_cli.main(
         [
@@ -59,14 +61,16 @@ def test_add_then_list_round_trips(tmp_path: Path, capsys) -> None:
     assert "[boundary]" in out
 
 
-def test_list_on_empty_ledger_prints_placeholder(tmp_path: Path, capsys) -> None:
+def test_list_on_empty_ledger_prints_placeholder(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
     ledger_path = tmp_path / "vehicle_ledger.jsonl"
     rc = vehicle_log_cli.main(["--config", str(EXAMPLE_YAML), "--ledger", str(ledger_path), "list"])
     assert rc == 0
     assert "no vehicle events recorded" in capsys.readouterr().out
 
 
-def test_add_rejects_bad_date(tmp_path: Path, capsys) -> None:
+def test_add_rejects_bad_date(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     ledger_path = tmp_path / "vehicle_ledger.jsonl"
     rc = vehicle_log_cli.main(
         [

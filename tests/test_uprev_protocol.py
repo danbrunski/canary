@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -25,7 +26,7 @@ from src.collection.uprev_protocol import (
 FIXTURE = Path(__file__).parent / "fixtures" / "uprev_usb" / "stream_transcript.jsonl"
 
 
-def _fixture_rows() -> list[dict[str, object]]:
+def _fixture_rows() -> list[dict[str, Any]]:
     return [json.loads(line) for line in FIXTURE.read_text().splitlines() if line.strip()]
 
 

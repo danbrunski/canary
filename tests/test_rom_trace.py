@@ -20,6 +20,7 @@ BFS word at ``0xFFFF103A``, read in the same window as the X byte) and
 from __future__ import annotations
 
 import json
+from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -42,6 +43,7 @@ from src.analysis.rom_trace import (
     EdgeBehaviour,
     TableInfo,
     TableTrace,
+    TraceAxes,
     axis_coordinates,
     axis_position,
     cell_residency,
@@ -56,6 +58,7 @@ from src.analysis.rom_trace import (
     trace_axes,
     trace_payload,
 )
+from src.collection import tuning_profile
 from src.config import CanaryConfig
 from src.control import workbench_jobs
 from src.dashboard.routes import workbench as workbench_routes
@@ -279,7 +282,7 @@ def test_nearest_index_is_none_outside_the_axis() -> None:
 # --------------------------------------------------------------------------- known answers
 
 
-def _shipped_axes():
+def _shipped_axes() -> TraceAxes:
     table = load_viewer_definition(PROFILE).table("fuel_targets")
     assert table is not None
     axes = trace_axes(table, "any", SHIPPED_AXES)
@@ -378,7 +381,9 @@ def test_real_drive_ecm_cell_lands_where_bfs_and_rpm_put_it() -> None:
     # after it, at 23:02Z); every revision shares these axes.
     registry = load_tune_revisions(PROFILE / "tune_revisions.yaml")
     assert registry is not None
-    revision = registry.at(datetime(2026, 10, 4, 20, 45, 56, tzinfo=UTC)).revision
+    active = registry.at(datetime(2026, 10, 4, 20, 45, 56, tzinfo=UTC))
+    assert active is not None
+    revision = active.revision
     assert revision == "ZS44A-20260920"
     axes = trace_axes(load_viewer_definition(PROFILE).table("fuel_targets"), revision, calibration)  # type: ignore[arg-type]
     assert not isinstance(axes, dict)
@@ -413,7 +418,7 @@ def test_real_drive_ecm_cell_lands_where_bfs_and_rpm_put_it() -> None:
     assert matched.n_pairs == 141
     # Candidate mappings of the X trace onto the raw axis bytes: the shipped
     # one, and controls that must fail.
-    candidates = {
+    candidates: dict[str, Callable[[int], float]] = {
         "raw": lambda ix: float(x_counts[ix]),
         "stored_scaled": lambda ix: float(xs["value"].iloc[ix]),
         "raw_plus_4": lambda ix: float(x_counts[ix]) + 4,
@@ -490,7 +495,9 @@ def test_real_drive_residency_through_the_shipped_mapping() -> None:
 # --------------------------------------------------------------------------- residency
 
 
-def _residency(session: Path, trace: TableTrace | None, revision: str | None = "REV-A"):
+def _residency(
+    session: Path, trace: TableTrace | None, revision: str | None = "REV-A"
+) -> dict[str, Any]:
     return cell_residency(
         session,
         table=_table(trace),
@@ -722,9 +729,9 @@ def test_cell_residency_route_defers_while_a_capture_records(
 ) -> None:
     config = _config(tmp_path, verified=True)
     name = _capture_session(config.collection.storage_path, [(12.0, 2000.0)])
-    monkeypatch.setattr(workbench_jobs.tuning_profile, "is_active", lambda: True)
+    monkeypatch.setattr(tuning_profile, "is_active", lambda: True)
     monkeypatch.setattr(
-        workbench_jobs.tuning_profile,
+        tuning_profile,
         "active_profile",
         lambda: type("P", (), {"name": "tuning"})(),
     )

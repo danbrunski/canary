@@ -6,7 +6,7 @@ from collections import deque
 
 import pytest
 
-from src.collection.uprev_protocol import UprvProtocolError, encode_message
+from src.collection.uprev_protocol import UprvMessage, UprvProtocolError, encode_message
 from src.collection.uprev_usb import (
     UPREV_USB_ENDPOINT_IN,
     UPREV_USB_ENDPOINT_OUT,
@@ -167,7 +167,7 @@ def test_short_bulk_write_is_refused() -> None:
     device = _Device()
     transport, _usb_util = _transport(device)
     transport.open()
-    device.write = lambda _endpoint, data, *, timeout: len(data) - 1  # type: ignore[method-assign]
+    device.write = lambda endpoint, data, *, timeout: len(data) - 1  # type: ignore[method-assign]
 
     with pytest.raises(UpRevUsbError, match="short UpRev USB write"):
         transport.send(b"\x07")
@@ -184,10 +184,10 @@ def test_receive_reports_framing_failure_as_a_transport_error() -> None:
     transport, _usb_util = _transport(device)
     transport.open()
 
-    def _explode(_data: bytes) -> list[object]:
+    def _explode(_data: bytes) -> list[UprvMessage]:
         raise UprvProtocolError("synthetic framing failure")
 
-    transport._decoder.feed = _explode  # type: ignore[method-assign]
+    transport._decoder.feed = _explode  # type: ignore[method-assign, assignment]
 
     with pytest.raises(UpRevUsbError, match="framing failed"):
         transport.receive()

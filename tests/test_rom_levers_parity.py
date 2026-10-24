@@ -42,6 +42,7 @@ from src.analysis.ecu_application import program_sha256
 from src.analysis.fuel_plant import plant_qualification
 from src.analysis.rom_image import revision_match, sha256_hex
 from src.analysis.rom_levers import Blocker, LeverClassification, LeverEntry, OutputBlockers
+from src.analysis.sim_montecarlo import load_sim_kit
 from src.vehicle.tune_revisions import load_tune_revisions
 from tests.rom_fixtures import PROFILE
 from tests.test_rom_editor import FC_EDIT, K_EDIT
@@ -287,7 +288,7 @@ def test_a_side_that_rewords_a_string_fails_the_comparison(
 def test_a_side_that_drops_a_message_fails_the_comparison(
     world: dict[str, Any], capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    real = rom_editor.classify_edit
+    real = rom_levers.classify_edit
 
     def dropped(*args: Any, **kwargs: Any) -> Any:
         result = real(*args, **kwargs)
@@ -309,7 +310,7 @@ def test_the_page_classifies_with_the_simulators_plant_not_the_contracts(
     cli = _cli_for(world, capsys, page, "plant")
     assert page["levers"] == cli["levers"]
     contract_plant = world["kit"].plant
-    declared = rom_editor.load_sim_kit(world["profile"]).kit.plant
+    declared = load_sim_kit(world["profile"]).kit.plant
     other = plant_qualification(contract_plant)
     if (contract_plant.plant_version, other) == (
         declared.plant_version,

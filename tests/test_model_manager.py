@@ -7,6 +7,7 @@ import logging
 import os
 import time
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -90,7 +91,7 @@ def _write_pair(
     return manifest_path
 
 
-def _loader(path: Path) -> dict:
+def _loader(path: Path) -> dict[str, str]:
     """Trivial loader — returns the artifact text so tests can spot which one is live."""
     return {"contents": path.read_text()}
 
@@ -103,7 +104,7 @@ def _loader(path: Path) -> dict:
 def test_load_initial_loads_present_artifact(tmp_path: Path) -> None:
     artifact = tmp_path / "model.joblib"
     _write_pair(artifact, version="v1")
-    mgr: ModelManager[dict] = ModelManager(artifact, loader=_loader)
+    mgr: ModelManager[dict[str, str]] = ModelManager(artifact, loader=_loader)
     result = mgr.load_initial()
     assert result.kind == "swapped"
     assert result.new_version == "v1"
@@ -112,7 +113,7 @@ def test_load_initial_loads_present_artifact(tmp_path: Path) -> None:
 
 
 def test_load_initial_missing_files_returns_missing(tmp_path: Path) -> None:
-    mgr: ModelManager[dict] = ModelManager(tmp_path / "absent.joblib", loader=_loader)
+    mgr: ModelManager[dict[str, str]] = ModelManager(tmp_path / "absent.joblib", loader=_loader)
     result = mgr.load_initial()
     assert result.kind == "missing"
     assert mgr.current is None
@@ -171,7 +172,7 @@ def test_serving_version_falls_back_to_manifest_without_embedded(tmp_path: Path)
     kinds) keep the old manifest-derived behavior."""
     artifact = tmp_path / "model.joblib"
     _write_pair(artifact, version="v1")
-    mgr: ModelManager[dict] = ModelManager(artifact, loader=_loader)
+    mgr: ModelManager[dict[str, str]] = ModelManager(artifact, loader=_loader)
     mgr.load_initial()
     assert mgr.current is not None
     assert mgr.current.embedded_version is None
@@ -186,7 +187,7 @@ def test_serving_version_falls_back_to_manifest_without_embedded(tmp_path: Path)
 def test_poll_no_change_when_mtime_unchanged(tmp_path: Path) -> None:
     artifact = tmp_path / "model.joblib"
     _write_pair(artifact, version="v1")
-    mgr: ModelManager[dict] = ModelManager(artifact, loader=_loader)
+    mgr: ModelManager[dict[str, str]] = ModelManager(artifact, loader=_loader)
     mgr.load_initial()
     result = mgr.poll()
     assert result.kind == "no_change"
@@ -197,7 +198,7 @@ def test_poll_no_change_when_mtime_unchanged(tmp_path: Path) -> None:
 def test_poll_swaps_when_manifest_is_newer(tmp_path: Path) -> None:
     artifact = tmp_path / "model.joblib"
     _write_pair(artifact, version="v1", mtime=1_000_000.0)
-    mgr: ModelManager[dict] = ModelManager(artifact, loader=_loader)
+    mgr: ModelManager[dict[str, str]] = ModelManager(artifact, loader=_loader)
     mgr.load_initial()
 
     # Replace with a newer manifest
@@ -212,7 +213,7 @@ def test_poll_swaps_when_manifest_is_newer(tmp_path: Path) -> None:
 def test_poll_accepts_feature_schema_expansion(tmp_path: Path) -> None:
     artifact = tmp_path / "model.joblib"
     _write_pair(artifact, version="v1", feature_columns=["a", "b"], mtime=1_000_000.0)
-    mgr: ModelManager[dict] = ModelManager(artifact, loader=_loader)
+    mgr: ModelManager[dict[str, str]] = ModelManager(artifact, loader=_loader)
     mgr.load_initial()
 
     _write_pair(
@@ -231,7 +232,7 @@ def test_poll_accepts_feature_schema_expansion(tmp_path: Path) -> None:
 def test_poll_retries_when_only_artifact_mtime_changes(tmp_path: Path) -> None:
     artifact = tmp_path / "model.joblib"
     _write_pair(artifact, version="v1", mtime=1_000_000.0)
-    mgr: ModelManager[dict] = ModelManager(artifact, loader=_loader)
+    mgr: ModelManager[dict[str, str]] = ModelManager(artifact, loader=_loader)
     mgr.load_initial()
 
     artifact.write_text("artifact:v2")
@@ -272,7 +273,7 @@ def test_poll_rejects_partial_pair_then_loads_when_binary_lands(tmp_path: Path) 
 def test_poll_rejects_unhealthy_feature_spec(tmp_path: Path) -> None:
     artifact = tmp_path / "model.joblib"
     _write_pair(artifact, version="v1", feature_columns=["obd:RPM"], mtime=1_000_000.0)
-    mgr: ModelManager[dict] = ModelManager(artifact, loader=_loader)
+    mgr: ModelManager[dict[str, str]] = ModelManager(artifact, loader=_loader)
     mgr.load_initial()
 
     _write_pair(
@@ -291,7 +292,7 @@ def test_poll_rejects_unhealthy_feature_spec(tmp_path: Path) -> None:
 def test_poll_rejects_unknown_model_type_when_allowed_list_set(tmp_path: Path) -> None:
     artifact = tmp_path / "model.joblib"
     _write_pair(artifact, version="v1", model_type="isolation_forest", mtime=1_000_000.0)
-    mgr: ModelManager[dict] = ModelManager(
+    mgr: ModelManager[dict[str, str]] = ModelManager(
         artifact, loader=_loader, allowed_model_types=("isolation_forest",)
     )
     mgr.load_initial()
@@ -307,7 +308,7 @@ def test_poll_rejects_unknown_model_type_when_allowed_list_set(tmp_path: Path) -
 def test_poll_rejects_malformed_manifest(tmp_path: Path) -> None:
     artifact = tmp_path / "model.joblib"
     _write_pair(artifact, version="v1", mtime=1_000_000.0)
-    mgr: ModelManager[dict] = ModelManager(artifact, loader=_loader)
+    mgr: ModelManager[dict[str, str]] = ModelManager(artifact, loader=_loader)
     mgr.load_initial()
 
     # Corrupt the manifest with newer mtime
@@ -323,15 +324,15 @@ def test_poll_rejects_malformed_manifest(tmp_path: Path) -> None:
 def test_poll_rejects_when_loader_raises(tmp_path: Path) -> None:
     artifact = tmp_path / "model.joblib"
     _write_pair(artifact, version="v1", mtime=1_000_000.0)
-    mgr: ModelManager[dict] = ModelManager(artifact, loader=_loader)
+    mgr: ModelManager[dict[str, str]] = ModelManager(artifact, loader=_loader)
     mgr.load_initial()
 
-    def _broken(path: Path) -> dict:
+    def _broken(path: Path) -> dict[str, str]:
         raise RuntimeError("artifact corrupt")
 
     _write_pair(artifact, version="v2", mtime=2_000_000.0)
     # Swap the loader to a broken one for the next poll.
-    mgr._loader = _broken  # type: ignore[assignment]
+    mgr._loader = _broken
     result = mgr.poll()
     assert result.kind == "rejected"
     assert "loader failed" in result.detail
@@ -344,18 +345,18 @@ def test_poll_uses_lock_so_two_pollers_dont_double_load(tmp_path: Path) -> None:
     each see a consistent ``current`` even if one swaps in between."""
     artifact = tmp_path / "model.joblib"
     _write_pair(artifact, version="v1", mtime=1_000_000.0)
-    mgr: ModelManager[dict] = ModelManager(artifact, loader=_loader)
+    mgr: ModelManager[dict[str, str]] = ModelManager(artifact, loader=_loader)
     mgr.load_initial()
 
     load_calls: list[Path] = []
 
-    def _tracking_loader(path: Path) -> dict:
+    def _tracking_loader(path: Path) -> dict[str, str]:
         load_calls.append(path)
         # Yield to let other thread's poll try to slip in
         time.sleep(0.05)
         return {"contents": path.read_text()}
 
-    mgr._loader = _tracking_loader  # type: ignore[assignment]
+    mgr._loader = _tracking_loader
     _write_pair(artifact, version="v2", mtime=2_000_000.0)
 
     import threading
@@ -407,7 +408,7 @@ def test_manager_for_artifact_with_wrong_type_returns_unloaded(tmp_path: Path) -
 def test_current_is_a_dataclass_snapshot(tmp_path: Path) -> None:
     artifact = tmp_path / "model.joblib"
     _write_pair(artifact, version="v1")
-    mgr: ModelManager[dict] = ModelManager(artifact, loader=_loader)
+    mgr: ModelManager[dict[str, str]] = ModelManager(artifact, loader=_loader)
     mgr.load_initial()
     snap1 = mgr.current
     assert isinstance(snap1, LoadedModel)
@@ -430,7 +431,7 @@ def test_load_initial_warns_when_manifest_is_in_sample_calibrated(
 ) -> None:
     artifact = tmp_path / "model.joblib"
     _write_pair(artifact, version="v1", model_type="lstm_autoencoder", calibration="in_sample")
-    mgr: ModelManager[dict] = ModelManager(artifact, loader=_loader)
+    mgr: ModelManager[dict[str, str]] = ModelManager(artifact, loader=_loader)
     with caplog.at_level(logging.WARNING, logger="src.models.manager"):
         result = mgr.load_initial()
 
@@ -443,7 +444,7 @@ def test_load_initial_does_not_warn_for_held_out_calibration(
 ) -> None:
     artifact = tmp_path / "model.joblib"
     _write_pair(artifact, version="v1", model_type="lstm_autoencoder", calibration="held_out")
-    mgr: ModelManager[dict] = ModelManager(artifact, loader=_loader)
+    mgr: ModelManager[dict[str, str]] = ModelManager(artifact, loader=_loader)
     with caplog.at_level(logging.WARNING, logger="src.models.manager"):
         result = mgr.load_initial()
 
@@ -461,14 +462,14 @@ def test_load_initial_logs_version_window_and_data_hash(
 ) -> None:
     artifact = tmp_path / "model.joblib"
     _write_pair(artifact, version="v1")
-    mgr: ModelManager[dict] = ModelManager(artifact, loader=_loader)
+    mgr: ModelManager[dict[str, str]] = ModelManager(artifact, loader=_loader)
     with caplog.at_level(logging.INFO, logger="src.models.manager"):
         result = mgr.load_initial()
 
     assert result.kind == "swapped"
     swapped = [r for r in caplog.records if r.message == "model swapped"]
     assert len(swapped) == 1
-    record = swapped[0]
+    record: Any = swapped[0]
     assert record.new_version == "v1"
     assert record.prior_version is None
     assert record.training_data_hash == "sha256:deadbeef"
@@ -482,7 +483,7 @@ def test_poll_swap_logs_the_new_manifests_provenance(
 ) -> None:
     artifact = tmp_path / "model.joblib"
     _write_pair(artifact, version="v1", mtime=1_000_000.0)
-    mgr: ModelManager[dict] = ModelManager(artifact, loader=_loader)
+    mgr: ModelManager[dict[str, str]] = ModelManager(artifact, loader=_loader)
     mgr.load_initial()
 
     _write_pair(artifact, version="v2", mtime=2_000_000.0)
@@ -492,7 +493,7 @@ def test_poll_swap_logs_the_new_manifests_provenance(
     assert result.kind == "swapped"
     swapped = [r for r in caplog.records if r.message == "model swapped"]
     assert len(swapped) == 1
-    record = swapped[0]
+    record: Any = swapped[0]
     assert record.prior_version == "v1"
     assert record.new_version == "v2"
     assert record.training_data_hash == "sha256:deadbeef"

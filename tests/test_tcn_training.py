@@ -6,6 +6,7 @@ import json
 import math
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any, cast
 
 import numpy as np
 import pytest
@@ -23,6 +24,7 @@ from src.models.manifest import validate_manifest_common  # noqa: E402
 from src.models.sequence_dataset import SequenceWindowDataset  # noqa: E402
 from src.models.sequence_training import SequenceThresholdCalibration  # noqa: E402
 from src.models.tcn_training import (  # noqa: E402
+    TCNAutoencoderTrainingConfigLike,
     default_tcn_manifest_path,
     load_tcn_autoencoder_model,
     train_tcn_autoencoder,
@@ -53,6 +55,12 @@ class _Cfg:
     threshold_k: float = 2.0
 
 
+def _cfg(**overrides: Any) -> TCNAutoencoderTrainingConfigLike:
+    """A ``_Cfg`` as the training protocol sees it (the protocol's attributes
+    are writable, a frozen dataclass's are not)."""
+    return cast(TCNAutoencoderTrainingConfigLike, _Cfg(**overrides))
+
+
 def _dataset(rows: int = 14, sequence_length: int = 4) -> SequenceWindowDataset:
     frame = sequence_training_frame(rows)
     scaler = ZScoreScaler.fit(frame, columns=["rpm", "speed"])
@@ -67,7 +75,7 @@ def test_train_tcn_autoencoder_produces_manifest() -> None:
     dataset = _dataset()
     trained = train_tcn_autoencoder(
         dataset,
-        _Cfg(max_epochs=2),
+        _cfg(max_epochs=2),
         trained_at="2026-05-12T12:00:00Z",
         model_version="unit-tcn",
         allow_in_sample_calibration=True,
@@ -105,7 +113,7 @@ def test_train_tcn_autoencoder_produces_manifest() -> None:
 def test_train_tcn_autoencoder_supports_no_validation_split() -> None:
     trained = train_tcn_autoencoder(
         _dataset(),
-        _Cfg(validation_fraction=0.0, max_epochs=1),
+        _cfg(validation_fraction=0.0, max_epochs=1),
         trained_at="2026-05-12T12:00:00Z",
         allow_in_sample_calibration=True,
     )
@@ -117,7 +125,7 @@ def test_save_and_load_tcn_checkpoint(tmp_path: Path) -> None:
     dataset = _dataset()
     trained = train_tcn_autoencoder(
         dataset,
-        _Cfg(max_epochs=1),
+        _cfg(max_epochs=1),
         trained_at="2026-05-12T12:00:00Z",
         model_version="save-load-tcn",
         allow_in_sample_calibration=True,
@@ -142,7 +150,7 @@ def test_save_and_load_tcn_checkpoint(tmp_path: Path) -> None:
 def test_load_rejects_tcn_feature_mismatch(tmp_path: Path) -> None:
     trained = train_tcn_autoencoder(
         _dataset(),
-        _Cfg(max_epochs=1),
+        _cfg(max_epochs=1),
         trained_at="2026-05-12T12:00:00Z",
         allow_in_sample_calibration=True,
     )
@@ -163,7 +171,7 @@ def test_sequence_inference_engine_serves_a_tcn_bundle() -> None:
     dataset = _dataset()
     trained = train_tcn_autoencoder(
         dataset,
-        _Cfg(max_epochs=1),
+        _cfg(max_epochs=1),
         trained_at="2026-05-12T12:00:00Z",
         allow_in_sample_calibration=True,
     )
@@ -203,7 +211,7 @@ def test_train_tcn_autoencoder_calibrates_on_held_out_dataset_when_given() -> No
 
     trained = train_tcn_autoencoder(
         train_ds,
-        _Cfg(max_epochs=2),
+        _cfg(max_epochs=2),
         trained_at="2026-05-12T12:00:00Z",
         model_version="oos-calib",
         calibration_dataset=calib_ds,
@@ -224,7 +232,7 @@ def test_train_tcn_autoencoder_requires_calibration_dataset_or_escape_hatch() ->
     default — in-sample calibration was the exact mechanism behind an
     earlier FPR≈1.0 flood, so it must never be a silent fallback."""
     with pytest.raises(ValueError, match="calibration_dataset"):
-        train_tcn_autoencoder(_dataset(), _Cfg(max_epochs=2), trained_at="2026-05-12T12:00:00Z")
+        train_tcn_autoencoder(_dataset(), _cfg(max_epochs=2), trained_at="2026-05-12T12:00:00Z")
 
 
 def test_train_tcn_autoencoder_allow_in_sample_calibration_stamps_manifest() -> None:
@@ -233,7 +241,7 @@ def test_train_tcn_autoencoder_allow_in_sample_calibration_stamps_manifest() -> 
     dataset = _dataset()
     trained = train_tcn_autoencoder(
         dataset,
-        _Cfg(max_epochs=2),
+        _cfg(max_epochs=2),
         trained_at="2026-05-12T12:00:00Z",
         allow_in_sample_calibration=True,
     )
@@ -248,7 +256,7 @@ def test_train_tcn_autoencoder_calibrate_thresholds_false_skips_the_gate() -> No
     in-sample risk 3.1 targets — no escape hatch needed."""
     trained = train_tcn_autoencoder(
         _dataset(),
-        _Cfg(max_epochs=1),
+        _cfg(max_epochs=1),
         trained_at="2026-05-12T12:00:00Z",
         calibrate_thresholds=False,
     )

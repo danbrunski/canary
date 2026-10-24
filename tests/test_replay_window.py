@@ -21,6 +21,7 @@ from unittest.mock import patch
 import pandas as pd
 
 from src.analysis import replay_window as rw
+from src.models.isolation_forest import SCORE_COLUMN
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -49,7 +50,7 @@ def _features_frame(rows: list[dict[str, Any]]) -> pd.DataFrame:
 
 def _scored_from(features: pd.DataFrame, scores: list[float], labels: list[int]) -> pd.DataFrame:
     out = features.copy()
-    out[rw.SCORE_COLUMN] = scores
+    out[SCORE_COLUMN] = scores
     from src.models.isolation_forest import LABEL_COLUMN
 
     out[LABEL_COLUMN] = labels

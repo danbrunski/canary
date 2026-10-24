@@ -18,6 +18,7 @@ import threading
 from datetime import UTC, datetime
 from itertools import pairwise
 from pathlib import Path
+from typing import cast
 
 import pandas as pd
 import pytest
@@ -217,7 +218,7 @@ def test_round_state_ends_on_completion_or_deadline_and_counts_skips() -> None:
     # The frozen state is replaced, never mutated in place.
     assert first.attempted == frozenset() and first.observations == {}
     with pytest.raises(AttributeError):
-        first.attempted = frozenset({1})  # type: ignore[misc]
+        first.attempted = frozenset({1})
 
 
 def test_new_generation_restarts_round_numbering() -> None:
@@ -246,7 +247,7 @@ def test_context_channel_joins_every_fourth_round(clock: FakeClock, profile_rese
     spec = _spec(pids=("RPM", "COOLANT_TEMP"), poll_rate_hz=4.0)  # 32 req/s: budget is not binding
     requests = build_poll_requests(bus, spec)  # type: ignore[arg-type]
     states = [type("S", (), {"suppressed_until": 0.0, "next_due_at": 0.0})() for _ in requests]
-    assert round_period_seconds(requests, states, spec, 0.0) == pytest.approx(0.25)  # type: ignore[arg-type]
+    assert round_period_seconds(requests, states, spec, 0.0) == pytest.approx(0.25)
 
     readings, stats = _run(clock, bus, spec, seconds=4.0)
 
@@ -332,7 +333,7 @@ def test_six_pid_batch_plus_extra_members_share_a_round_with_distinct_arrivals(
         arrivals = {r.acquired_at for r in members}
         assert len(stamps) == 1, "one round, one presentation stamp"
         assert len(arrivals) == 2, "two batches, two receipt instants — retained, not merged"
-        skew = max(arrivals) - min(arrivals)  # type: ignore[type-var]
+        skew = max(cast(set[float], arrivals)) - min(cast(set[float], arrivals))
         assert 0 < skew < 0.5, "measured, positive, and inside the round period"
     assert stats.round_skew_max_s > 0
     assert stats.round_skew_max_s == pytest.approx(
@@ -625,7 +626,7 @@ def test_resampler_and_gap_flags_see_the_presentation_stamp_unchanged(tmp_path: 
                 continue  # a 5 s hole -> gap flags
             stamp = t0 + k
             for channel, value in (("RPM", 900.0 + k), ("SPEED", 10.0 + k)):
-                metadata = (
+                metadata: dict[str, bool | int | float | str | None] | None = (
                     {
                         "ts_schema": 2,
                         "acquired_at": stamp + 0.05,

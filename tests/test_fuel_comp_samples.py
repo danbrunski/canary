@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -25,7 +26,13 @@ from src.analysis.fuel_comp_rom import (
     FuelCompRomRefusalError,
     RevisionImageResolver,
 )
-from src.analysis.fuel_comp_samples import COLUMNS, STATES, eligible_summary, session_samples
+from src.analysis.fuel_comp_samples import (
+    COLUMNS,
+    STATES,
+    SessionSamples,
+    eligible_summary,
+    session_samples,
+)
 from src.analysis.lambda_delivery import (
     ELIGIBLE,
     LambdaDeliveryDeclaration,
@@ -99,7 +106,7 @@ def _registry(*flashes: tuple[str, datetime]) -> TuneRevisionRegistry:
     )
 
 
-def _resolver(refuse: dict[str, str] | None = None):  # type: ignore[no-untyped-def]
+def _resolver(refuse: dict[str, str] | None = None) -> Callable[[str], FuelCompCalibration]:
     refuse = refuse or {}
 
     def resolve(name: str) -> FuelCompCalibration:
@@ -159,7 +166,13 @@ def _session(seconds: int = 120, step: float = 1.0, **overrides: Any) -> pd.Data
     return pd.DataFrame(rows)
 
 
-def _run(frame: pd.DataFrame, declaration, delivery, afr, **kwargs: Any):  # type: ignore[no-untyped-def]
+def _run(
+    frame: pd.DataFrame,
+    declaration: FuelCompDeclaration,
+    delivery: LambdaDeliveryDeclaration,
+    afr: AfrCalibration,
+    **kwargs: Any,
+) -> SessionSamples:
     return session_samples(
         frame,
         declaration=declaration,
@@ -173,11 +186,17 @@ def _run(frame: pd.DataFrame, declaration, delivery, afr, **kwargs: Any):  # typ
     )
 
 
-def _closed(result) -> pd.DataFrame:  # type: ignore[no-untyped-def]
+def _closed(result: SessionSamples) -> pd.DataFrame:
     return result.frame[result.frame["route"] == "closed_loop"].reset_index(drop=True)
 
 
-def _accounted(result) -> None:  # type: ignore[no-untyped-def]
+def _empty(result: SessionSamples, route: str) -> str:
+    kind = result.empty[route]
+    assert kind is not None
+    return kind
+
+
+def _accounted(result: SessionSamples) -> None:
     frame = result.frame
     assert list(frame.columns) == list(COLUMNS)
     assert set(frame["state"]) <= set(STATES)
@@ -191,8 +210,8 @@ def _accounted(result) -> None:  # type: ignore[no-untyped-def]
 
 
 def test_a_steady_warm_cruise_is_eligible_with_the_bank_mean_total_trim(
-    declaration, delivery, afr
-) -> None:  # type: ignore[no-untyped-def]
+    declaration: FuelCompDeclaration, delivery: LambdaDeliveryDeclaration, afr: AfrCalibration
+) -> None:
     result = _run(_session(), declaration, delivery, afr)
     _accounted(result)
     closed = _closed(result)
@@ -222,7 +241,9 @@ def test_the_total_trim_keeps_the_codebase_additive_definition() -> None:
     assert b2.input_groups == (("obd:SHORT_FUEL_TRIM_2",), ("obd:LONG_FUEL_TRIM_2",))
 
 
-def test_each_gate_names_itself(declaration, delivery, afr) -> None:  # type: ignore[no-untyped-def]
+def test_each_gate_names_itself(
+    declaration: FuelCompDeclaration, delivery: LambdaDeliveryDeclaration, afr: AfrCalibration
+) -> None:
     frame = _session(
         COOLANT_TEMP=lambda s: 60.0 if s < 10 else 90.0,
         BAROMETRIC_PRESSURE=lambda s: 70.0 if 100 <= s < 110 else 80.0,
@@ -248,7 +269,9 @@ def test_each_gate_names_itself(declaration, delivery, afr) -> None:  # type: ig
     assert result.counts["closed_loop"]["gated:cold"] >= 9
 
 
-def test_a_read_outside_the_separation_is_unpaired_not_guessed(declaration, delivery, afr) -> None:  # type: ignore[no-untyped-def]
+def test_a_read_outside_the_separation_is_unpaired_not_guessed(
+    declaration: FuelCompDeclaration, delivery: LambdaDeliveryDeclaration, afr: AfrCalibration
+) -> None:
     # Closed loop pairs within 500 ms (fuel_comp_fit.yaml). From 60 s bank 2's
     # LTFT is read every third second, so the other anchors are 1-2 s away
     # from any read.
@@ -263,8 +286,8 @@ def test_a_read_outside_the_separation_is_unpaired_not_guessed(declaration, deli
 
 
 def test_the_steadiness_window_reaches_forward_to_the_paired_read(
-    declaration, delivery, afr
-) -> None:  # type: ignore[no-untyped-def]
+    declaration: FuelCompDeclaration, delivery: LambdaDeliveryDeclaration, afr: AfrCalibration
+) -> None:
     """rpm is read 0.43 s after each trim anchor and steps at 59 s: the
     anchor at 59 pairs that read, so the step is inside its window."""
     frame = _session(RPM=lambda s: 2400.0 if s >= 59 else 2000.0, RPM_offset=0.45)
@@ -280,7 +303,9 @@ def test_the_steadiness_window_reaches_forward_to_the_paired_read(
     assert set(closed["pairing_max_separation_s"]) == {0.5}
 
 
-def test_a_clock_that_cannot_carry_the_separation_says_so(declaration, delivery, afr) -> None:  # type: ignore[no-untyped-def]
+def test_a_clock_that_cannot_carry_the_separation_says_so(
+    declaration: FuelCompDeclaration, delivery: LambdaDeliveryDeclaration, afr: AfrCalibration
+) -> None:
     frame = _session().drop(columns=["metadata_json"])  # no provenance: unknown basis
     closed = _closed(_run(frame, declaration, delivery, afr))
     assert set(closed["state"]) == {"unpaired"}
@@ -297,14 +322,20 @@ def test_a_clock_that_cannot_carry_the_separation_says_so(declaration, delivery,
     ids=["input-never-captured", "gated", "anchor-never-captured"],
 )
 def test_never_captured_and_filtered_are_different_empties(
-    declaration, delivery, afr, override: dict[str, object], empty: str
-) -> None:  # type: ignore[no-untyped-def]
-    values = {name: (lambda s, v=value: v) for name, value in override.items()}
+    declaration: FuelCompDeclaration,
+    delivery: LambdaDeliveryDeclaration,
+    afr: AfrCalibration,
+    override: dict[str, object],
+    empty: str,
+) -> None:
+    values: dict[str, Any] = {name: (lambda s, v=value: v) for name, value in override.items()}
     result = _run(_session(**values), declaration, delivery, afr)
-    assert result.empty["closed_loop"].startswith(empty)
+    assert _empty(result, "closed_loop").startswith(empty)
 
 
-def test_a_session_straddling_a_flash_splits_by_sample(declaration, delivery, afr) -> None:  # type: ignore[no-untyped-def]
+def test_a_session_straddling_a_flash_splits_by_sample(
+    declaration: FuelCompDeclaration, delivery: LambdaDeliveryDeclaration, afr: AfrCalibration
+) -> None:
     flash = pd.Timestamp(T0) + pd.Timedelta(seconds=60)
     registry = _registry(
         ("before", datetime(2026, 8, 1, tzinfo=UTC)), ("after", flash.to_pydatetime())
@@ -384,13 +415,13 @@ def test_the_b06_fixture_gives_its_committed_numbers_through_this_path(
         )
     # The slice holds no throttle input: every candidate says so, none is guessed.
     assert set(open_rows["state"]) == {"input_missing"}
-    assert result.empty["open_loop"].startswith("never_captured: input_missing:throttle")
+    assert _empty(result, "open_loop").startswith("never_captured: input_missing:throttle")
     assert np.isnan(open_rows["byte_lo"].astype(float)).all()
 
 
 def test_a_cell_that_depends_on_idle_air_or_purge_is_flagged_not_placed(
-    declaration, delivery, afr
-) -> None:  # type: ignore[no-untyped-def]
+    declaration: FuelCompDeclaration, delivery: LambdaDeliveryDeclaration, afr: AfrCalibration
+) -> None:
     """Near idle the unlogged inputs move the byte across columns; at a wide
     throttle they cannot. The flags say which input is responsible."""
     idle = _closed(
@@ -411,12 +442,12 @@ def test_a_cell_that_depends_on_idle_air_or_purge_is_flagged_not_placed(
 
 
 def test_a_route_missing_only_the_image_is_unresolvable_not_never_captured(
-    declaration, delivery, afr
-) -> None:  # type: ignore[no-untyped-def]
+    declaration: FuelCompDeclaration, delivery: LambdaDeliveryDeclaration, afr: AfrCalibration
+) -> None:
     result = _run(
         _session(), declaration, delivery, afr, resolver=_resolver({"synthetic": "image_not_found"})
     )
-    assert result.empty["closed_loop"].startswith(
+    assert _empty(result, "closed_loop").startswith(
         "unresolvable: input_missing:rom_image:image_not_found"
     )
     # A channel the session never recorded is still never_captured.
@@ -427,12 +458,15 @@ def test_a_route_missing_only_the_image_is_unresolvable_not_never_captured(
         afr,
         resolver=_resolver({"synthetic": "image_not_found"}),
     )
-    assert no_baro.empty["closed_loop"].startswith("never_captured: ")
+    assert _empty(no_baro, "closed_loop").startswith("never_captured: ")
 
 
 def test_a_refused_image_marks_its_samples_instead_of_aborting(
-    tmp_path: Path, declaration, delivery, afr
-) -> None:  # type: ignore[no-untyped-def]
+    tmp_path: Path,
+    declaration: FuelCompDeclaration,
+    delivery: LambdaDeliveryDeclaration,
+    afr: AfrCalibration,
+) -> None:
     """The real resolver over an image whose low fill curve falls."""
     image = load_byte_image(fill_low=tuple(30000 - 1000 * i for i in range(16)))
     path = tmp_path / "falling.bin"
@@ -458,10 +492,12 @@ def test_a_refused_image_marks_its_samples_instead_of_aborting(
     assert result.refusals == {"falling": "curves_not_monotone"}
     closed = _closed(result)
     assert set(closed["reason"]) == {"rom_image:curves_not_monotone"}
-    assert result.empty["closed_loop"].startswith("unresolvable: ")
+    assert _empty(result, "closed_loop").startswith("unresolvable: ")
 
 
-def test_eligible_samples_are_split_by_throttle_route(declaration, delivery, afr) -> None:  # type: ignore[no-untyped-def]
+def test_eligible_samples_are_split_by_throttle_route(
+    declaration: FuelCompDeclaration, delivery: LambdaDeliveryDeclaration, afr: AfrCalibration
+) -> None:
     pid = _run(_session(), declaration, delivery, afr)
     split = eligible_summary(pid.frame)["synthetic"]["closed_loop"]
     assert split["by_throttle_route"]["pid_0x11"]["validated"] is True
@@ -503,8 +539,8 @@ def _enrichment(**overrides: Any) -> pd.DataFrame:
 
 
 def test_bank_2_is_judged_by_its_declared_source_and_the_error_is_the_bank_mean(
-    declaration, delivery, afr
-) -> None:  # type: ignore[no-untyped-def]
+    declaration: FuelCompDeclaration, delivery: LambdaDeliveryDeclaration, afr: AfrCalibration
+) -> None:
     result = _run(_enrichment(), declaration, delivery, afr)
     _accounted(result)
     rows = result.frame[result.frame["route"] == "open_loop"]
@@ -525,13 +561,13 @@ def test_bank_2_is_judged_by_its_declared_source_and_the_error_is_the_bank_mean(
 # -- the open-loop route as an interval over the delay bracket (N02.5) ------------------
 
 
-def _open(result) -> pd.DataFrame:  # type: ignore[no-untyped-def]
+def _open(result: SessionSamples) -> pd.DataFrame:
     return result.frame[result.frame["route"] == "open_loop"].reset_index(drop=True)
 
 
 def test_a_steady_enrichment_reads_one_rpm_word_across_the_delay_bracket(
-    declaration, delivery, afr
-) -> None:  # type: ignore[no-untyped-def]
+    declaration: FuelCompDeclaration, delivery: LambdaDeliveryDeclaration, afr: AfrCalibration
+) -> None:
     rows = _open(_run(_enrichment(THROTTLE_POS=200 * 100 / 255), declaration, delivery, afr))
     eligible = rows[rows["state"] == ELIGIBLE]
     assert len(eligible) > 50
@@ -545,8 +581,8 @@ def test_a_steady_enrichment_reads_one_rpm_word_across_the_delay_bracket(
 
 
 def test_a_pull_is_placed_as_an_interval_not_gated_as_a_transient(
-    declaration, delivery, afr
-) -> None:  # type: ignore[no-untyped-def]
+    declaration: FuelCompDeclaration, delivery: LambdaDeliveryDeclaration, afr: AfrCalibration
+) -> None:
     """rpm climbs 2,000 rpm per second: the old 0.5 s / 100 rpm gate refused
     every row; now each row carries the bracket's rpm words and is marked
     ambiguous because they read more than one pair of Fuel Comp rows."""
@@ -573,8 +609,8 @@ def test_a_pull_is_placed_as_an_interval_not_gated_as_a_transient(
 
 
 def test_a_bracket_without_a_bounding_read_is_unpaired_and_says_so(
-    declaration, delivery, afr
-) -> None:  # type: ignore[no-untyped-def]
+    declaration: FuelCompDeclaration, delivery: LambdaDeliveryDeclaration, afr: AfrCalibration
+) -> None:
     """A 0.75 s hole in the rpm reads: the read at the target instant pairs,
     but nothing bounds the start of the delay bracket within 0.25 s."""
     result = _run(
@@ -588,7 +624,9 @@ def test_a_bracket_without_a_bounding_read_is_unpaired_and_says_so(
     assert "obd:RPM (delay bracket)" in reasons
 
 
-def test_maf_and_bfs_ride_along_without_gating(declaration, delivery, afr) -> None:  # type: ignore[no-untyped-def]
+def test_maf_and_bfs_ride_along_without_gating(
+    declaration: FuelCompDeclaration, delivery: LambdaDeliveryDeclaration, afr: AfrCalibration
+) -> None:
     result = _run(_session(MAF=55.0, DID_1208=20000), declaration, delivery, afr)
     _accounted(result)
     eligible = _closed(result)
@@ -603,8 +641,8 @@ def test_maf_and_bfs_ride_along_without_gating(declaration, delivery, afr) -> No
 
 
 def test_a_bracket_that_holds_a_stopped_engine_is_gated_not_placed(
-    declaration, delivery, afr
-) -> None:  # type: ignore[no-untyped-def]
+    declaration: FuelCompDeclaration, delivery: LambdaDeliveryDeclaration, afr: AfrCalibration
+) -> None:
     """rpm 0 inside the span: the chain's divide guard (w116A = 0 at word 0)
     breaks the byte's monotonicity in rpm, so no interval exists
     (_capture-tuning-2026-09-22T235224 raised on it before this gate)."""
@@ -620,8 +658,8 @@ def test_a_bracket_that_holds_a_stopped_engine_is_gated_not_placed(
 
 
 def test_the_ram_target_is_preferred_and_pid_0x44_carries_its_caveat(
-    declaration, delivery, afr
-) -> None:  # type: ignore[no-untyped-def]
+    declaration: FuelCompDeclaration, delivery: LambdaDeliveryDeclaration, afr: AfrCalibration
+) -> None:
     """PID 0x44 is the phi word times the A/F feedback target / 3675
     (firmware, 2026-10-05): phi only while that target is 14.7, which history
     never logged. So the RAM word leads, and PID 0x44 must declare why it is

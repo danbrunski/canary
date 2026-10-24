@@ -135,10 +135,11 @@ def test_expected_value_respects_operating_mode_filter() -> None:
     model = _make_coolant_model(operating_mode="warmup")
     # right mode → expected available
     assert expected_value(
-        model, {"obd:RUN_TIME": 100.0, "operating_mode": "warmup"}
+        model,
+        {"obd:RUN_TIME": 100.0, "operating_mode": "warmup"},  # type: ignore[dict-item]
     ) == pytest.approx(40.0)
     # wrong mode → no expectation
-    assert expected_value(model, {"obd:RUN_TIME": 100.0, "operating_mode": "city"}) is None
+    assert expected_value(model, {"obd:RUN_TIME": 100.0, "operating_mode": "city"}) is None  # type: ignore[dict-item]
 
 
 def test_rate_condition_is_enforced_by_scalar_and_vectorized_serving() -> None:
@@ -223,7 +224,10 @@ def test_deviation_relative_2d_uses_cell_std() -> None:
             kind="grid_binned_mean", cells=cells, sample_count=100, fitted_at="now"
         ),
         deviation=DeviationConfig(
-            kind="relative", warning_band=3.0, critical_band=6.0, sigma_floor=0.01
+            kind="relative",  # type: ignore[arg-type]
+            warning_band=3.0,
+            critical_band=6.0,
+            sigma_floor=0.01,
         ),
     )
     # 1.0 + 1.5 (delta) → 3.0 sigma → warning
@@ -240,7 +244,7 @@ def test_deviation_relative_2d_uses_cell_std() -> None:
 def test_deviation_relative_1d_uses_reference_std() -> None:
     model = _make_coolant_model(
         DeviationConfig(
-            kind="relative",
+            kind="relative",  # type: ignore[arg-type]
             warning_band=2.0,
             critical_band=4.0,
             reference_std=1.0,
@@ -400,7 +404,10 @@ def _make_quantized_timing_surface(sigma_floor: float) -> BehaviorModel2D:
             fitted_at="now",
         ),
         deviation=DeviationConfig(
-            kind="relative", warning_band=3.0, critical_band=6.0, sigma_floor=sigma_floor
+            kind="relative",  # type: ignore[arg-type]
+            warning_band=3.0,
+            critical_band=6.0,
+            sigma_floor=sigma_floor,
         ),
     )
 
@@ -439,7 +446,10 @@ def test_sigma_floor_does_not_revive_off_map_points() -> None:
     model = model.model_copy(
         update={
             "deviation": DeviationConfig(
-                kind="relative", warning_band=3.0, critical_band=6.0, sigma_floor=0.5
+                kind="relative",  # type: ignore[arg-type]
+                warning_band=3.0,
+                critical_band=6.0,
+                sigma_floor=0.5,
             )
         }
     )

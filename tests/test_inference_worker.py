@@ -13,12 +13,20 @@ import multiprocessing as mp
 import pickle
 from dataclasses import dataclass
 from types import SimpleNamespace
-from typing import Any
+from typing import Any, cast
 
 import pandas as pd
 import pytest
 
-from src.daemon.inference import LiveInferencePipeline, _IFComputed, _TickResult
+from src.daemon.components import DaemonComponents
+from src.daemon.detectors.isolation_forest import IsolationForestDetector
+from src.daemon.detectors.sequence import SequenceDetector
+from src.daemon.inference import (
+    LiveInferencePipeline,
+    _IFComputed,
+    _TickRequest,
+    _TickResult,
+)
 from src.daemon.inference_worker import InferenceWorker, WorkerReply, WorkerTick
 
 
@@ -55,7 +63,7 @@ def test_if_result_survives_the_process_boundary() -> None:
     every tick. It is pure data now, and this pins that."""
     computed = _IFComputed(
         model_version="if_v1",
-        report=None,
+        report=cast(Any, None),
         scored=pd.Series({"score": 0.5}),
         latency_ms=1.5,
         timestamp="2026-09-09T00:00:00Z",
@@ -145,7 +153,7 @@ def test_compute_returns_a_result_from_a_real_child_process() -> None:
             )
         )
         assert isinstance(result, _TickResult)
-        assert result.if_computed == "scored-in-child"
+        assert cast(Any, result.if_computed) == "scored-in-child"
         assert result.durations["compute"] == pytest.approx(0.01)
     finally:
         worker.stop()
@@ -200,7 +208,6 @@ def test_compute_returns_none_when_the_pipe_is_broken() -> None:
 def test_stop_is_safe_without_a_started_worker() -> None:
     worker = _detached_worker(conn=None, proc=None)
     worker._failures = 0
-    worker._config_path = ""
 
     worker.stop()  # must not raise
 
@@ -222,29 +229,36 @@ class _StubWorker:
         pass
 
 
-def test_pipeline_scores_in_process_when_the_worker_declines(monkeypatch) -> None:
+def test_pipeline_scores_in_process_when_the_worker_declines(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """The fallback is the whole safety story: a worker that returns ``None``
     must produce the same result the thread-only path produced, not a
     dropped tick."""
     from src.daemon import inference as inference_mod
 
-    sentinel = _TickResult(if_computed="scored-in-parent", sequence_result=None, durations={})
+    sentinel = _TickResult(
+        if_computed=cast(Any, "scored-in-parent"), sequence_result=None, durations={}
+    )
     monkeypatch.setattr(inference_mod, "_compute_tick", lambda _request: sentinel)
 
     pipeline = LiveInferencePipeline.__new__(LiveInferencePipeline)
     worker = _StubWorker()
-    pipeline._worker = worker
+    pipeline._worker = cast(InferenceWorker, worker)
 
     class _Detector:
         model_version = "v1"
 
-    pipeline._if = _Detector()
-    pipeline._sequence = _Detector()
+    pipeline._if = cast(IsolationForestDetector, _Detector())
+    pipeline._sequence = cast(SequenceDetector, _Detector())
 
-    request = SimpleNamespace(
-        slot=SimpleNamespace(index=3),
-        if_job=SimpleNamespace(row=pd.DataFrame([{"a": 1.0}])),
-        sequence_job=None,
+    request = cast(
+        _TickRequest,
+        SimpleNamespace(
+            slot=SimpleNamespace(index=3),
+            if_job=SimpleNamespace(row=pd.DataFrame([{"a": 1.0}])),
+            sequence_job=None,
+        ),
     )
 
     result = pipeline._compute(request)
@@ -253,7 +267,7 @@ def test_pipeline_scores_in_process_when_the_worker_declines(monkeypatch) -> Non
     assert result is sentinel
 
 
-def test_pipeline_uses_the_worker_result_when_it_answers(monkeypatch) -> None:
+def test_pipeline_uses_the_worker_result_when_it_answers(monkeypatch: pytest.MonkeyPatch) -> None:
     from src.daemon import inference as inference_mod
 
     monkeypatch.setattr(
@@ -262,7 +276,9 @@ def test_pipeline_uses_the_worker_result_when_it_answers(monkeypatch) -> None:
         lambda _request: pytest.fail("must not score in-process when the worker answered"),
     )
 
-    from_child = _TickResult(if_computed="scored-in-child", sequence_result=None, durations={})
+    from_child = _TickResult(
+        if_computed=cast(Any, "scored-in-child"), sequence_result=None, durations={}
+    )
 
     class _AnsweringWorker:
         def ready_for(self, _tick: WorkerTick) -> bool:
@@ -272,24 +288,29 @@ def test_pipeline_uses_the_worker_result_when_it_answers(monkeypatch) -> None:
             return from_child
 
     pipeline = LiveInferencePipeline.__new__(LiveInferencePipeline)
-    pipeline._worker = _AnsweringWorker()
+    pipeline._worker = cast(InferenceWorker, _AnsweringWorker())
 
     class _Detector:
         model_version = "v1"
 
-    pipeline._if = _Detector()
-    pipeline._sequence = _Detector()
+    pipeline._if = cast(IsolationForestDetector, _Detector())
+    pipeline._sequence = cast(SequenceDetector, _Detector())
 
-    request = SimpleNamespace(
-        slot=SimpleNamespace(index=4),
-        if_job=SimpleNamespace(row=pd.DataFrame([{"a": 1.0}])),
-        sequence_job=None,
+    request = cast(
+        _TickRequest,
+        SimpleNamespace(
+            slot=SimpleNamespace(index=4),
+            if_job=SimpleNamespace(row=pd.DataFrame([{"a": 1.0}])),
+            sequence_job=None,
+        ),
     )
 
     assert pipeline._compute(request) is from_child
 
 
-def test_worker_is_handed_the_live_scoped_config_not_a_path(monkeypatch) -> None:
+def test_worker_is_handed_the_live_scoped_config_not_a_path(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """Profiles rewrite every vehicle-specific path under the active slug.
 
     A worker given a config *path* would re-read the unscoped YAML and look
@@ -303,7 +324,7 @@ def test_worker_is_handed_the_live_scoped_config_not_a_path(monkeypatch) -> None
         models=SimpleNamespace(out_of_process_scoring=True),
         daemon=SimpleNamespace(models_dir="models/nissan-xterra-2008"),
     )
-    components = SimpleNamespace(config=scoped)
+    components = cast(DaemonComponents, SimpleNamespace(config=scoped))
     captured: dict[str, Any] = {}
 
     class _Recorder:
@@ -323,7 +344,7 @@ def test_worker_is_handed_the_live_scoped_config_not_a_path(monkeypatch) -> None
     assert captured["config"].daemon.models_dir == "models/nissan-xterra-2008"
 
 
-def test_no_worker_is_started_when_the_flag_is_off(monkeypatch) -> None:
+def test_no_worker_is_started_when_the_flag_is_off(monkeypatch: pytest.MonkeyPatch) -> None:
     from src.daemon import inference as inference_mod
 
     monkeypatch.setattr(
@@ -331,8 +352,11 @@ def test_no_worker_is_started_when_the_flag_is_off(monkeypatch) -> None:
         "InferenceWorker",
         lambda _config: pytest.fail("must not construct a worker when disabled"),
     )
-    components = SimpleNamespace(
-        config=SimpleNamespace(models=SimpleNamespace(out_of_process_scoring=False))
+    components = cast(
+        DaemonComponents,
+        SimpleNamespace(
+            config=SimpleNamespace(models=SimpleNamespace(out_of_process_scoring=False))
+        ),
     )
 
     assert inference_mod._start_inference_worker(components) is None

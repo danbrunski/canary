@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import Any, cast
 
 import pytest
 
@@ -316,7 +317,7 @@ def test_validate_model_feature_spec_rejects_missing_health() -> None:
 
 def test_validate_model_feature_spec_rejects_selected_all_nan_column() -> None:
     schema = _feature_schema()
-    health = dict(schema["feature_health"])  # type: ignore[arg-type]
+    health = dict(cast(dict[str, Any], schema["feature_health"]))
     health["all_nan_columns"] = ["obd:RPM"]
     schema["feature_health"] = health
     with pytest.raises(FeatureSpecValidationError, match="all-NaN"):

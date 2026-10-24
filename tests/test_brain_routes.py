@@ -87,7 +87,7 @@ def test_http_and_mcp_return_the_same_computed_facts(
         return response.json()
 
     started = brain_routes._STARTED_AT
-    cases = [
+    cases: list[tuple[Any, Any, Any, dict[str, Any]]] = [
         (
             get("/control/brain/status"),
             brain_reads.brain_status(config, process_started_at=started),

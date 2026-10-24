@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from pathlib import Path
+from typing import Any, cast
 
+from src.analysis.memory_verification import MemoryVerificationClient
 from src.decode.dids import MemoryChannel, MemoryKnownAnswer, is_memory_checkable, load_did_map
 from tools.verify_memory_channels import (
     ChannelVerdict,
@@ -11,6 +14,12 @@ from tools.verify_memory_channels import (
     restamp,
     verify_channel,
 )
+
+
+def _client(ecu: object) -> MemoryVerificationClient:
+    """A fake ECU as the verifier's protocol sees it (the fakes answer only
+    the services their test exercises)."""
+    return cast(MemoryVerificationClient, ecu)
 
 
 class _Reply:
@@ -32,7 +41,7 @@ class _FakeEcu:
     neighbours are filler that changes every sample.
     """
 
-    def __init__(self, words: list[int], did_for, width: int = 2) -> None:
+    def __init__(self, words: list[int], did_for: Callable[[int], int], width: int = 2) -> None:
         self._words = list(words)
         self._did_for = did_for
         self._width = width
@@ -61,8 +70,8 @@ class _FakeEcu:
         return _Reply(bytes([self._did_for(self.last_word)]))
 
 
-def _channel(**overrides) -> MemoryChannel:
-    base = dict(
+def _channel(**overrides: Any) -> MemoryChannel:
+    base: dict[str, Any] = dict(
         name="ECM_TARGET_EQUIV_RATIO",
         address=0xFFFF26BE,
         length=2,
@@ -88,7 +97,9 @@ def _truthful(word: int) -> int:
 def test_address_that_still_holds_the_quantity_passes() -> None:
     ecu = _FakeEcu([0x4000, 0x4A80, 0x4380], _truthful)
 
-    verdict = verify_channel(ecu, _channel(), catalog=(), samples=3, request_id=0x7E0, session=0xC0)
+    verdict = verify_channel(
+        _client(ecu), _channel(), catalog=(), samples=3, request_id=0x7E0, session=0xC0
+    )
 
     assert verdict.passed is True
     assert verdict.agreements == 3
@@ -100,7 +111,9 @@ def test_fuel_cut_still_satisfies_the_relation() -> None:
     The fuel-cut sample agrees; the exercised samples above it carry the pass."""
     ecu = _FakeEcu([0x0000, 0x4A80, 0x4380], _truthful)
 
-    verdict = verify_channel(ecu, _channel(), catalog=(), samples=3, request_id=0x7E0, session=0xC0)
+    verdict = verify_channel(
+        _client(ecu), _channel(), catalog=(), samples=3, request_id=0x7E0, session=0xC0
+    )
 
     assert verdict.passed is True
     assert verdict.agreements == 3
@@ -112,7 +125,9 @@ def test_agreement_only_at_the_clamp_floor_is_not_evidence() -> None:
     there, so agreement on it says nothing about the address."""
     ecu = _FakeEcu([0x0000, 0x4000, 0x0000, 0x4000], _truthful)
 
-    verdict = verify_channel(ecu, _channel(), catalog=(), samples=4, request_id=0x7E0, session=0xC0)
+    verdict = verify_channel(
+        _client(ecu), _channel(), catalog=(), samples=4, request_id=0x7E0, session=0xC0
+    )
 
     assert verdict.outcome == "unverifiable"
     assert "did_constant" in verdict.reason
@@ -128,7 +143,9 @@ def test_moved_address_is_caught_even_while_decoding_plausibly() -> None:
     dids = iter([70, 74, 79])
     ecu = _FakeEcu([0x4100, 0x4100, 0x4100], lambda _word: next(dids))
 
-    verdict = verify_channel(ecu, _channel(), catalog=(), samples=3, request_id=0x7E0, session=0xC0)
+    verdict = verify_channel(
+        _client(ecu), _channel(), catalog=(), samples=3, request_id=0x7E0, session=0xC0
+    )
 
     assert verdict.outcome == "fail"
     assert "probably moved" in verdict.reason
@@ -139,7 +156,9 @@ def test_a_disagreement_with_a_constant_did_is_unverifiable_not_a_fail() -> None
     disagreed with a reference that said something (key-on 2026-10-10)."""
     ecu = _FakeEcu([0x4100, 0x4100], lambda _word: 70)
 
-    verdict = verify_channel(ecu, _channel(), catalog=(), samples=2, request_id=0x7E0, session=0xC0)
+    verdict = verify_channel(
+        _client(ecu), _channel(), catalog=(), samples=2, request_id=0x7E0, session=0xC0
+    )
 
     assert verdict.outcome == "unverifiable"
     assert "did_constant" in verdict.reason
@@ -148,7 +167,7 @@ def test_a_disagreement_with_a_constant_did_is_unverifiable_not_a_fail() -> None
 def test_channel_without_a_declared_check_is_skipped_not_failed() -> None:
     """A catalog gap must not block re-stamping every other channel."""
     verdict = verify_channel(
-        _FakeEcu([0x4000], _truthful),
+        _client(_FakeEcu([0x4000], _truthful)),
         _channel(known_answer=None),
         catalog=(),
         samples=1,
@@ -167,7 +186,9 @@ def test_refused_session_is_unverifiable_not_agreement_and_not_a_fail() -> None:
     ecu = _FakeEcu([0x4000], _truthful)
     ecu.enter_diagnostic_session = lambda subfunction, *, request_id=None: False  # type: ignore[method-assign]
 
-    verdict = verify_channel(ecu, _channel(), catalog=(), samples=1, request_id=0x7E0, session=0xC0)
+    verdict = verify_channel(
+        _client(ecu), _channel(), catalog=(), samples=1, request_id=0x7E0, session=0xC0
+    )
 
     assert verdict.passed is False
     assert verdict.outcome == "unverifiable"
@@ -180,7 +201,9 @@ def test_unanswered_reads_are_unverifiable_not_a_fail() -> None:
     ecu = _FakeEcu([0x4000], _truthful)
     ecu.query_raw = lambda service, body, *, request_id=None: _Reply(b"")  # type: ignore[method-assign]
 
-    verdict = verify_channel(ecu, _channel(), catalog=(), samples=3, request_id=0x7E0, session=0xC0)
+    verdict = verify_channel(
+        _client(ecu), _channel(), catalog=(), samples=3, request_id=0x7E0, session=0xC0
+    )
 
     assert verdict.outcome == "unverifiable"
     assert "reads_unanswered" in verdict.reason
@@ -190,7 +213,7 @@ class _TimingEcu:
     """0x23 answers one s8 timing byte between two neighbours; 0x22 answers
     DID 0x110A (110 - t)."""
 
-    def __init__(self, timings: list[int], did_for) -> None:
+    def __init__(self, timings: list[int], did_for: Callable[[int], int]) -> None:
         self._timings = list(timings)
         self._did_for = did_for
         self.last = 0
@@ -229,7 +252,12 @@ def test_final_timing_passes_against_the_110_minus_did_encoding() -> None:
     ecu = _TimingEcu([20, 35, -5], lambda t: 110 - t)
 
     verdict = verify_channel(
-        ecu, _final_timing(), catalog=_CATALOG_MEMORY, samples=3, request_id=0x7E0, session=0xC0
+        _client(ecu),
+        _final_timing(),
+        catalog=_CATALOG_MEMORY,
+        samples=3,
+        request_id=0x7E0,
+        session=0xC0,
     )
 
     assert verdict.passed is True
@@ -242,7 +270,12 @@ def test_final_timing_fails_when_the_byte_is_not_the_timing() -> None:
     ecu = _TimingEcu([20, 35, -5], lambda t: 110 - t + 1)
 
     verdict = verify_channel(
-        ecu, _final_timing(), catalog=_CATALOG_MEMORY, samples=3, request_id=0x7E0, session=0xC0
+        _client(ecu),
+        _final_timing(),
+        catalog=_CATALOG_MEMORY,
+        samples=3,
+        request_id=0x7E0,
+        session=0xC0,
     )
 
     assert verdict.outcome == "fail"
@@ -390,7 +423,7 @@ def test_restamp_is_idempotent(tmp_path: Path) -> None:
     copy = tmp_path / "dids.yaml"
     copy.write_text(_CATALOG.read_text())
     memory = load_did_map(copy).memory
-    stamps = {c.name: None for c in memory}
+    stamps: dict[str, str | None] = {c.name: None for c in memory}
     stale = [c for c in memory if c.verified_tune_revision != "ZS44A-20260920"]
 
     assert restamp(copy, stamps, "ZS44A-20260920") == len(stale)
@@ -417,7 +450,12 @@ class _CatalogEcu:
     ``unset(address, sample)``.
     """
 
-    def __init__(self, ram, dids, unset) -> None:
+    def __init__(
+        self,
+        ram: Callable[[int], dict[int, int]],
+        dids: Callable[[int], dict[int, int]],
+        unset: Callable[[int, int], int],
+    ) -> None:
         self.ram, self.dids, self.unset = ram, dids, unset
         self.sample = 0
 
@@ -470,7 +508,12 @@ def _key_on_ecu() -> _CatalogEcu:
 def _verify_legacy(ecu: _CatalogEcu, channel: MemoryChannel, samples: int) -> ChannelVerdict:
     ecu.sample = 0
     return verify_channel(
-        ecu, channel, catalog=_CATALOG_MEMORY, samples=samples, request_id=0x7E0, session=0xC0
+        _client(ecu),
+        channel,
+        catalog=_CATALOG_MEMORY,
+        samples=samples,
+        request_id=0x7E0,
+        session=0xC0,
     )
 
 

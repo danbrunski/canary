@@ -8,9 +8,11 @@ runner standing in for `ip link`.
 from __future__ import annotations
 
 import subprocess
+from collections.abc import Sequence
 from pathlib import Path
 
 from scripts.preflight import (
+    CommandRunner,
     check_can_link,
     check_config,
     check_storage,
@@ -23,8 +25,8 @@ def _proc(returncode: int, stdout: str = "") -> subprocess.CompletedProcess[str]
     return subprocess.CompletedProcess(args=["ip"], returncode=returncode, stdout=stdout)
 
 
-def _runner(returncode: int, stdout: str = ""):
-    def run(_cmd):
+def _runner(returncode: int, stdout: str = "") -> CommandRunner:
+    def run(_cmd: Sequence[str]) -> subprocess.CompletedProcess[str]:
         return _proc(returncode, stdout)
 
     return run

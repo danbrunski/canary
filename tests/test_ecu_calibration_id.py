@@ -11,6 +11,7 @@ from __future__ import annotations
 import logging
 import threading
 from pathlib import Path
+from typing import Any, cast
 
 import pytest
 from pydantic import ValidationError
@@ -85,7 +86,7 @@ class _IdentifyingEcu(ScriptedEcu):
         #: ``(time, session held?)`` of every ``21 10`` received.
         self.id_requests: list[tuple[float, int | None]] = []
 
-    def send(self, msg, timeout=None):  # type: ignore[no-untyped-def]
+    def send(self, msg, timeout=None):
         data = bytes(msg.data)
         if len(data) >= 3 and data[1] == 0x21:
             now = self.clock.monotonic()
@@ -224,12 +225,16 @@ def test_a_session_requirement_without_a_session_does_not_load() -> None:
         DidAccess(
             ecu_request_id=0x7E0,
             ecu_response_id=0x7E8,
-            calibration_id={"local_identifier": 0x10, "session": "extended", "evidence": "x"},
+            calibration_id=cast(
+                Any, {"local_identifier": 0x10, "session": "extended", "evidence": "x"}
+            ),
         )
     access = DidAccess(
         ecu_request_id=0x7E0,
         ecu_response_id=0x7E8,
-        calibration_id={"local_identifier": 0x10, "session": "default", "evidence": "probe"},
+        calibration_id=cast(
+            Any, {"local_identifier": 0x10, "session": "default", "evidence": "probe"}
+        ),
     )
     spec = resolve_calibration_id_spec(access)
     assert spec is not None and spec.needs_session is False

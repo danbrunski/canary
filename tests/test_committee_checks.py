@@ -8,7 +8,7 @@ synthetic 25 % VSS drop pin the speed committee's two acceptance claims.
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -96,7 +96,7 @@ def _point(gps: float, obd: float | None, **extra: Any) -> dict[str, Any]:
 
 
 def _run(
-    evaluator: CommitteeEvaluator, points: list[Mapping[str, Any]], start: float = 0.0
+    evaluator: CommitteeEvaluator, points: Sequence[Mapping[str, Any]], start: float = 0.0
 ) -> list[CommitteeFlag]:
     flags: list[CommitteeFlag] = []
     base = T0.timestamp() + start

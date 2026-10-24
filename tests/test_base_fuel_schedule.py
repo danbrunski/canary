@@ -167,7 +167,8 @@ def test_the_workbench_and_featurization_read_the_same_ms_on_a_real_slice() -> N
     pairs = operating[["did:ECM_AIR_CHARGE", BASE_FUEL_SCHEDULE]].dropna()
     matched = [(by_raw[raw], ms) for raw, ms in pairs.itertuples(index=False) if raw in by_raw]
     assert len(matched) > 50
-    np.testing.assert_allclose(*zip(*matched, strict=True))
+    raws, schedules = zip(*matched, strict=True)
+    np.testing.assert_allclose(raws, schedules)
 
 
 # ---------------------------------------------------------------------------

@@ -292,8 +292,8 @@ def _one_bank_ecu(clock: FakeClock, *, silent_after_desync: bool = False) -> Scr
     return ecu
 
 
-def _spec(**kw) -> CanObdSpec:
-    base = {
+def _spec(**kw: Any) -> CanObdSpec:
+    base: dict[str, Any] = {
         "can": CanBusConfig(interface="virtual", channel="test", bitrate=500000),
         "poll_rate_hz": 50.0,
         "request_timeout_seconds": 0.05,
@@ -393,7 +393,7 @@ def test_only_plain_mode01_pids_are_batchable() -> None:
 def test_loop_batches_and_emits_one_reading_per_channel(clock: FakeClock) -> None:
     """The payoff: fewer round trips, same per-channel readings downstream."""
     bus = _batching_ecu(clock)
-    readings: list = []
+    readings: list[Any] = []
     run_can_obd_loop(
         bus,  # type: ignore[arg-type]
         _spec(pids=("RPM", "SPEED", "ENGINE_LOAD", "THROTTLE_POS"), batch_max_pids=6),
@@ -425,7 +425,7 @@ def test_batching_beats_single_pid_on_round_trips(monkeypatch: pytest.MonkeyPatc
 
     def run(batch_max: int) -> tuple[int, int]:
         bus = _batching_ecu(clock)
-        got: list = []
+        got: list[Any] = []
         run_can_obd_loop(
             bus,  # type: ignore[arg-type]
             _spec(pids=pids, batch_max_pids=batch_max),
@@ -444,12 +444,12 @@ def test_batching_beats_single_pid_on_round_trips(monkeypatch: pytest.MonkeyPatc
     assert (batch_readings / batch_requests) > (single_readings / single_requests)
 
 
-def _run_against_a_batch_refusing_ecu(monkeypatch: pytest.MonkeyPatch) -> tuple:
+def _run_against_a_batch_refusing_ecu(monkeypatch: pytest.MonkeyPatch) -> tuple[Any, ...]:
     """RPM/SPEED/ENGINE_LOAD against an ECU that ignores every batch, on a fake clock."""
     clock = FakeClock()
     install_clock(monkeypatch, clock)
     ecu = ScriptedEcu(clock, answer_batches=False)
-    readings: list = []
+    readings: list[Any] = []
     stats = run_can_obd_loop(
         ecu,  # type: ignore[arg-type]
         _spec(pids=("RPM", "SPEED", "ENGINE_LOAD"), batch_max_pids=6),
@@ -483,7 +483,9 @@ def test_batch_size_steps_down_instead_of_giving_up(clock: FakeClock) -> None:
     bus = _batching_ecu(clock, max_batch_pids=4)  # batches, just not the J1979 six
     # Stops once every asserted channel has been read (T01): a 0.8 s wall-clock
     # deadline had to cover three batch timeouts before the step-down.
-    sink: StopWhen = StopWhen(lambda got: {r.pid for r in got} >= {"RPM", "SPEED", "ENGINE_LOAD"})
+    sink: StopWhen[Any] = StopWhen(
+        lambda got: {r.pid for r in got} >= {"RPM", "SPEED", "ENGINE_LOAD"}
+    )
     run_can_obd_loop(
         bus,  # type: ignore[arg-type]
         _spec(
@@ -526,7 +528,7 @@ def test_every_pid_in_a_batch_lands_on_one_timestamp(clock: FakeClock) -> None:
     reading a batch as one row.
     """
     bus = _batching_ecu(clock)
-    readings: list = []
+    readings: list[Any] = []
     run_can_obd_loop(
         bus,  # type: ignore[arg-type]
         _spec(pids=("RPM", "SPEED", "ENGINE_LOAD", "THROTTLE_POS"), batch_max_pids=6),
@@ -568,7 +570,7 @@ def test_a_capture_round_puts_every_channel_on_one_row(clock: FakeClock) -> None
         "TIMING_ADVANCE",
         "MAF",
     )
-    readings: list = []
+    readings: list[Any] = []
     try:
         tuning_profile.activate(
             CaptureProfile(
@@ -647,7 +649,7 @@ def test_batch_readings_share_receipt_time_and_round_but_not_a_claim_of_atomicit
     """Every PID in one batched response carries the same ``acquired_at`` —
     the payload's receipt — and the same round. That is all it says."""
     bus = _batching_ecu(clock)
-    readings: list = []
+    readings: list[Any] = []
     run_can_obd_loop(
         bus,  # type: ignore[arg-type]
         _spec(pids=("RPM", "SPEED", "ENGINE_LOAD", "THROTTLE_POS"), batch_max_pids=6),
@@ -687,7 +689,7 @@ def test_batch_silence_from_a_sleeping_ecu_does_not_narrow(
     install_clock(monkeypatch, clock)
     wake_after = 3 * MAX_CONSECUTIVE_BATCH_FAILURES * 2 + 2
     bus = _sleepy_ecu(clock, wake_after)
-    readings: list = []
+    readings: list[Any] = []
     stats = run_can_obd_loop(
         bus,  # type: ignore[arg-type]
         _spec(pids=_SIX_FAST, batch_max_pids=6, request_timeout_seconds=0.02),
@@ -718,7 +720,7 @@ def test_an_awake_ecu_that_ignores_batches_still_disables_batching(
     clock = FakeClock()
     install_clock(monkeypatch, clock)
     bus = _batching_ecu(clock, answer_batches=False)
-    readings: list = []
+    readings: list[Any] = []
     stats = run_can_obd_loop(
         bus,  # type: ignore[arg-type]
         _spec(pids=_SIX_FAST, batch_max_pids=6, request_timeout_seconds=0.02),
@@ -748,7 +750,7 @@ def test_an_ecu_that_refuses_batches_with_an_nrc_narrows_regardless(
     clock = FakeClock()
     install_clock(monkeypatch, clock)
     bus = _batching_ecu(clock, batch_nrc=0x12)
-    readings: list = []
+    readings: list[Any] = []
     stats = run_can_obd_loop(
         bus,  # type: ignore[arg-type]
         _spec(pids=_SIX_FAST, batch_max_pids=6, request_timeout_seconds=0.02),
@@ -798,7 +800,7 @@ def test_a_capture_round_with_baro_walks_every_member(
     from src.collection.capture_profiles import CaptureProfile
 
     bus = _batching_ecu(clock, values=_BARO_VALUES)
-    readings: list = []
+    readings: list[Any] = []
     try:
         tuning_profile.activate(
             CaptureProfile(
@@ -857,7 +859,7 @@ def _run_capture(bus: ScriptedEcu, channels: tuple[str, ...], seconds: float):  
     from src.collection import tuning_profile
     from src.collection.capture_profiles import CaptureProfile
 
-    readings: list = []
+    readings: list[Any] = []
     try:
         tuning_profile.activate(
             CaptureProfile(
@@ -1002,7 +1004,7 @@ def test_exit_snapshot_reports_the_narrowed_batch_size(monkeypatch: pytest.Monke
     clock = FakeClock()
     install_clock(monkeypatch, clock)
     bus = _batching_ecu(clock, answer_batches=False)
-    snapshots: list = []
+    snapshots: list[Any] = []
     stats = run_can_obd_loop(
         bus,  # type: ignore[arg-type]
         _spec(pids=_SIX_FAST, batch_max_pids=6, request_timeout_seconds=0.02),

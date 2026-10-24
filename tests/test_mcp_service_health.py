@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import shutil
 import subprocess
 from typing import Any
 
@@ -26,13 +27,13 @@ def _show_output(
 
 
 def test_unavailable_when_systemctl_missing(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(health_tool.shutil, "which", lambda _: None)
+    monkeypatch.setattr(shutil, "which", lambda _: None)
     out = health_tool.get_service_health()
     assert out == {"available": False, "services": []}
 
 
 def test_reports_healthy_service_with_uptime(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(health_tool.shutil, "which", lambda _: "/usr/bin/systemctl")
+    monkeypatch.setattr(shutil, "which", lambda _: "/usr/bin/systemctl")
     monkeypatch.setattr(health_tool, "_read_uptime_seconds", lambda: 3600.0)
 
     def fake_run(cmd: list[str], **_kwargs: Any) -> subprocess.CompletedProcess[str]:
@@ -42,7 +43,7 @@ def test_reports_healthy_service_with_uptime(monkeypatch: pytest.MonkeyPatch) ->
             stdout=_show_output(monotonic_usec=1_000_000)
         )  # active for 1s (monotonic)
 
-    monkeypatch.setattr(health_tool.subprocess, "run", fake_run)
+    monkeypatch.setattr(subprocess, "run", fake_run)
     out = health_tool.get_service_health(["canary"])
     assert out["available"] is True
     svc = out["services"][0]
@@ -57,10 +58,10 @@ def test_reports_healthy_service_with_uptime(monkeypatch: pytest.MonkeyPatch) ->
 def test_flags_crash_loop_via_restart_count(monkeypatch: pytest.MonkeyPatch) -> None:
     """A climbing NRestarts is the crash-loop tell (what the UPS watchdog did
     before its power-loss-detect fix)."""
-    monkeypatch.setattr(health_tool.shutil, "which", lambda _: "/usr/bin/systemctl")
+    monkeypatch.setattr(shutil, "which", lambda _: "/usr/bin/systemctl")
     monkeypatch.setattr(health_tool, "_read_uptime_seconds", lambda: 100.0)
     monkeypatch.setattr(
-        health_tool.subprocess,
+        subprocess,
         "run",
         lambda cmd, **_: completed_process(stdout=_show_output(restarts=47)),
     )
@@ -69,10 +70,10 @@ def test_flags_crash_loop_via_restart_count(monkeypatch: pytest.MonkeyPatch) -> 
 
 
 def test_inactive_service_has_no_uptime(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(health_tool.shutil, "which", lambda _: "/usr/bin/systemctl")
+    monkeypatch.setattr(shutil, "which", lambda _: "/usr/bin/systemctl")
     monkeypatch.setattr(health_tool, "_read_uptime_seconds", lambda: 100.0)
     monkeypatch.setattr(
-        health_tool.subprocess,
+        subprocess,
         "run",
         lambda cmd, **_: completed_process(
             stdout=_show_output(active_state="inactive", sub_state="dead")
@@ -85,9 +86,9 @@ def test_inactive_service_has_no_uptime(monkeypatch: pytest.MonkeyPatch) -> None
 
 
 def test_nonzero_exit_surfaces_as_error(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(health_tool.shutil, "which", lambda _: "/usr/bin/systemctl")
+    monkeypatch.setattr(shutil, "which", lambda _: "/usr/bin/systemctl")
     monkeypatch.setattr(
-        health_tool.subprocess,
+        subprocess,
         "run",
         lambda cmd, **_: completed_process(stderr="unit not found", returncode=1),
     )
@@ -96,7 +97,7 @@ def test_nonzero_exit_surfaces_as_error(monkeypatch: pytest.MonkeyPatch) -> None
 
 
 def test_defaults_to_the_three_canary_units(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(health_tool.shutil, "which", lambda _: "/usr/bin/systemctl")
+    monkeypatch.setattr(shutil, "which", lambda _: "/usr/bin/systemctl")
     monkeypatch.setattr(health_tool, "_read_uptime_seconds", lambda: None)
     captured: list[str] = []
 
@@ -104,17 +105,17 @@ def test_defaults_to_the_three_canary_units(monkeypatch: pytest.MonkeyPatch) -> 
         captured.append(cmd[2])  # unit name is argv[2]
         return completed_process(stdout=_show_output())
 
-    monkeypatch.setattr(health_tool.subprocess, "run", fake_run)
+    monkeypatch.setattr(subprocess, "run", fake_run)
     health_tool.get_service_health()
     assert captured == ["canary", "canary-mcp", "ups-shutdown"]
 
 
 def test_subprocess_error_is_caught(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(health_tool.shutil, "which", lambda _: "/usr/bin/systemctl")
+    monkeypatch.setattr(shutil, "which", lambda _: "/usr/bin/systemctl")
 
     def raise_oserror(cmd: list[str], **_kwargs: Any) -> subprocess.CompletedProcess[str]:
         raise OSError("boom")
 
-    monkeypatch.setattr(health_tool.subprocess, "run", raise_oserror)
+    monkeypatch.setattr(subprocess, "run", raise_oserror)
     out = health_tool.get_service_health(["canary"])
     assert "boom" in out["services"][0]["error"]

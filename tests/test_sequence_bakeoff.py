@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import Any
 
 import pytest
 import yaml
@@ -58,7 +59,7 @@ _TINY_TCN = {
 }
 
 
-def _torch():
+def _torch() -> Any:
     return pytest.importorskip("torch")
 
 

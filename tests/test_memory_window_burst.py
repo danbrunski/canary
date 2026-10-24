@@ -160,6 +160,10 @@ def _run(
     return requests, readings
 
 
+def _nearest(times: list[float], anchor: float) -> float:
+    return min(times, key=lambda t: abs(t - anchor))
+
+
 def _service(data: bytes) -> int:
     return data[1]
 
@@ -222,10 +226,10 @@ def test_the_coordinate_and_its_mode01_leg_meet_the_lookup_skew_at_the_serving_b
     anchors = stamps[tuple_channels[0]]
     assert len(anchors) >= 5
     for anchor in anchors:
-        reads = [min(stamps[c], key=lambda t, a=anchor: abs(t - a)) for c in tuple_channels]
+        reads = [_nearest(stamps[c], anchor) for c in tuple_channels]
         lo, hi = min(reads), max(reads)
         assert hi - lo <= LOOKUP_SKEW_S / 5, reads
-        joined = [min(stamps[p], key=lambda t, a=anchor: abs(t - a)) for p in MODE01]
+        joined = [_nearest(stamps[p], anchor) for p in MODE01]
         assert max(hi, *joined) - min(lo, *joined) <= LOOKUP_SKEW_S, (reads, joined)
         # Final timing rides the rpm word's read: the same acquisition.
         timing = min(

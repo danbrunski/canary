@@ -31,6 +31,7 @@ from src.models.isolation_forest import (  # noqa: E402
     SKIP_TOO_FEW_CALIBRATION_DRIVES,
     SKIP_TOO_FEW_TRAINING_DRIVES,
     ModeTrainingSummary,
+    TrainedIsolationForest,
     exceedance_episodes,
     fit_isolation_forest,
     load_isolation_forest_model,
@@ -151,7 +152,7 @@ def test_a_tolerated_missing_cell_is_imputed_to_the_modes_own_median() -> None:
 # ---------------------------------------------------------------- A04.8 / A04.6
 
 
-def _with_unknown_model(trained):  # type: ignore[no-untyped-def]
+def _with_unknown_model(trained: TrainedIsolationForest) -> TrainedIsolationForest:
     city = next(m for m in trained.manifest.modes if m.mode == "city")
     schema = dict(trained.manifest.schema)
     schema["mode_feature_columns"] = {

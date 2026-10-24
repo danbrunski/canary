@@ -71,7 +71,7 @@ def _rpm(i: int) -> TelemetryRecord:
 def _stored_rpms(session: Path) -> list[float]:
     values: list[float] = []
     for chunk in sorted(session.glob("telemetry-*.parquet")):
-        values.extend(row["value_number"] for row in pq.read_table(chunk).to_pylist())
+        values.extend(row["value_number"] for row in pq.read_table(chunk).to_pylist())  # type: ignore[no-untyped-call]
     return values
 
 
@@ -113,7 +113,7 @@ def test_a_periodic_write_returns_a_chunk_only_once_it_is_durable(
         if finished is not None:
             break
     assert finished == writer.paths.root / "telemetry-00000.parquet"
-    assert pq.read_table(finished).num_rows == 2
+    assert pq.read_table(finished).num_rows == 2  # type: ignore[no-untyped-call]
     writer.close()
 
 

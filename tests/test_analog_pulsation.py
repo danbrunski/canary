@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import numpy as np
 import pandas as pd
@@ -137,16 +137,25 @@ def test_the_tool_reads_its_columns_and_reports_the_same(
         )
 
     records = [
-        record("sensor", "FUEL_PRESSURE", r.timestamp, r.value, **json.loads(r.metadata_json))
+        record(
+            "sensor",
+            "FUEL_PRESSURE",
+            cast(pd.Timestamp, r.timestamp),
+            cast(float, r.value),
+            **json.loads(cast(str, r.metadata_json)),
+        )
         for r in pressure.itertuples(index=False)
     ]
-    records += [record("obd", "RPM", r.timestamp, float(r.value)) for r in rpm.itertuples()]
+    records += [
+        record("obd", "RPM", cast(pd.Timestamp, r.timestamp), float(cast(float, r.value)))
+        for r in rpm.itertuples()
+    ]
     records.append(record("gps", "speed", T0, 0.0))
     session = tmp_path / "2026-10-04T200000"
     write_records_to_parquet(records, session)
     assert tool.main([str(session)]) == 0
     narrowed = capsys.readouterr().out
-    real = tool.read_session
+    real = tool.read_session  # type: ignore[attr-defined]
     monkeypatch.setattr(tool, "read_session", lambda path, **kw: real(path, filters=kw["filters"]))
     assert tool.main([str(session)]) == 0
     assert narrowed and "rpm from obd:RPM" in narrowed and narrowed == capsys.readouterr().out
@@ -168,7 +177,7 @@ def test_switch_over_rows_at_the_edges_are_skipped_and_counted() -> None:
 def test_rows_at_another_rate_mid_capture_are_refused() -> None:
     pressure, _ = _capture([2000], seconds_each=4.0)
     middle = pressure.copy()
-    middle.iloc[500, middle.columns.get_loc("metadata_json")] = json.dumps(
+    middle.iloc[500, cast(int, middle.columns.get_loc("metadata_json"))] = json.dumps(
         {"adc_seq": 500, "adc_samples": 5}
     )
     with pytest.raises(PulsationRefusedError, match="mid-capture"):
@@ -179,7 +188,7 @@ def test_lines_above_the_staircase_limit_are_labelled_images() -> None:
     """Under an output held at 150 Hz the rail is resolved below 75 Hz only;
     order 3 at 2850 rpm (142.5 Hz) is folded, and the lines above 75 Hz are
     images of real lines below it, never engine orders."""
-    from scipy import signal  # type: ignore[import-untyped]
+    from scipy import signal
 
     pressure, rpm = _capture([1150, 1950, 2850], update_hz=150.0)
     b, a = signal.butter(6, 180, fs=FS)

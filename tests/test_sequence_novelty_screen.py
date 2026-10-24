@@ -229,7 +229,7 @@ def _stub_engine(training_envelope: dict[str, Any] | None, *, features: tuple[st
         training_envelope=training_envelope,
     )
     trained = SimpleNamespace(model=_ZeroModel(), feature_columns=features, manifest=manifest)
-    return SequenceInferenceEngine(trained)  # type: ignore[arg-type]
+    return SequenceInferenceEngine(trained)
 
 
 def test_a_scored_window_carries_the_envelope_verdict_into_its_event() -> None:
@@ -397,8 +397,9 @@ def test_applying_a_sequence_result_feeds_the_meter() -> None:
         envelope=envelope.check("city", _observed(63.0, 22.0, 60.0)),
     )
 
-    pipeline._apply(  # type: ignore[arg-type]
-        request, _TickResult(if_computed=None, sequence_result=result, durations={})
+    pipeline._apply(
+        request,  # type: ignore[arg-type]
+        _TickResult(if_computed=None, sequence_result=result, durations={}),
     )
 
     meter = recorder.snapshot().to_dict()["sequence_envelope"]

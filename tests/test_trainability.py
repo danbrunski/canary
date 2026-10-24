@@ -119,7 +119,7 @@ def test_every_telemetry_source_is_classified_exactly_once() -> None:
     assert TRAINABLE_SOURCES == {"obd", "decoded"}
     assert TRAINABLE_SOURCES | INPUT_GATED_SOURCES | set(NON_TRAINABLE_SOURCES) == sources
     for external in ("gps", "imu", "sensor"):
-        assert "H00 operator decision 1" in NON_TRAINABLE_SOURCES[external]  # type: ignore[index]
+        assert "H00 operator decision 1" in NON_TRAINABLE_SOURCES[external]
 
 
 def test_a_source_added_without_a_classification_fails_at_import() -> None:

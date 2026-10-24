@@ -69,7 +69,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from src.analysis.artifact_lineage import parse_derived_sources
+from src.analysis.artifact_lineage import DerivedDefinitions, parse_derived_sources
 from src.collection.capture_profiles import CaptureProfile, channel_satisfied
 from src.config import VehicleParameters
 from src.decode import engineering
@@ -114,7 +114,7 @@ MIN_MEMBERS = {committee.output: committee.min_members for committee in COMMITTE
 # ---------------------------------------------------------------------------
 
 
-def _working_tree_definitions():  # type: ignore[no-untyped-def]
+def _working_tree_definitions() -> DerivedDefinitions:
     vehicles = sorted((REPO / "src/signals/vehicle_signals").glob("*.py"))
     return parse_derived_sources(
         (REPO / "src/signals/derived.py").read_text(),
@@ -336,7 +336,7 @@ def _covering(frames: list[frozenset[str]]) -> list[frozenset[str]]:
     return chosen
 
 
-def _real_physical_series():  # type: ignore[no-untyped-def]
+def _real_physical_series() -> Callable[..., pd.Series]:
     return engineering.physical_series
 
 
@@ -346,7 +346,7 @@ def chain() -> Iterator[_Chain]:
 
     def readable(values: pd.Series, column: str, bindings: object = None) -> pd.Series:
         try:
-            return real(values, column, bindings)  # type: ignore[arg-type]
+            return real(values, column, bindings)
         except UnscaledDecodedChannelError:
             return pd.to_numeric(values, errors="coerce").astype(float)
 
@@ -731,7 +731,7 @@ _VOLTAGE_ONLY = CaptureProfile(
     name="repro",
     storage_prefix="_capture-repro",
     mode01={"RPM": 1.0},
-    mode22=["ECM_AF_SENSOR_V_B1", "ECM_AF_SENSOR_V_B2", "ECM_AIR_CHARGE"],
+    mode22=["ECM_AF_SENSOR_V_B1", "ECM_AF_SENSOR_V_B2", "ECM_AIR_CHARGE"],  # type: ignore[arg-type]
 )
 
 

@@ -78,7 +78,7 @@ class _AlwaysFiresIF:
         return out
 
 
-def _loaded(model_type: str, artifact: Any) -> LoadedModel:
+def _loaded(model_type: str, artifact: Any) -> LoadedModel[Any]:
     return LoadedModel(
         artifact=artifact,
         manifest=ModelManifestCommon(
@@ -96,11 +96,11 @@ def _loaded(model_type: str, artifact: Any) -> LoadedModel:
 
 
 class _StubManager:
-    def __init__(self, loaded: LoadedModel) -> None:
+    def __init__(self, loaded: LoadedModel[Any]) -> None:
         self._loaded = loaded
 
     @property
-    def current(self) -> LoadedModel:
+    def current(self) -> LoadedModel[Any]:
         return self._loaded
 
     def poll(self) -> None:
@@ -208,7 +208,7 @@ async def test_replay_of_a_non_eligible_capture_scores_nothing(config: CanaryCon
                 source_corpus_eligible=False,
             )
 
-    components.replay_controller = _StubReplayController()  # type: ignore[assignment]
+    components.replay_controller = _StubReplayController()
     assert tuning_profile.active_profile().corpus_eligible is True
     source = _running_source(components)
     sub = components.anomalies_broadcaster.subscribe()

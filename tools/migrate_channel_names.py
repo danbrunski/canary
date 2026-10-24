@@ -281,7 +281,7 @@ def rewrite_text(text: str, rename_map: RenameMap) -> tuple[str, int]:
     return pattern.sub(lambda m: rename_map.replacement(m.group(0)), text), count
 
 
-def _replace_atomically(path: Path, write_tmp: Callable[[Path], None]) -> None:
+def _replace_atomically(path: Path, write_tmp: Callable[[Path], object]) -> None:
     """Write via ``write_tmp`` to a sibling temp file, then rename over ``path``.
 
     Mode and (when the caller may) owner are copied from the original, so a
@@ -307,30 +307,30 @@ def migrate_parquet(path: Path, rename_map: RenameMap, *, apply: bool) -> int:
     import pyarrow.compute as pc
     import pyarrow.parquet as pq
 
-    schema = pq.read_schema(path)
+    schema = pq.read_schema(path)  # type: ignore[no-untyped-call, unused-ignore]
     if "channel" not in schema.names:
         return 0
-    channels = pq.read_table(path, columns=["channel"]).column("channel")
+    channels = pq.read_table(path, columns=["channel"]).column("channel")  # type: ignore[no-untyped-call, unused-ignore]
     renames = {
         value: rename_map.rename(value)
-        for value in pc.unique(channels.cast(pa.string())).to_pylist()
+        for value in pc.unique(channels.cast(pa.string())).to_pylist()  # type: ignore[attr-defined, unused-ignore]
         if isinstance(value, str) and rename_map.rename(value) != value
     }
     if not renames:
         return 0
     as_text = channels.cast(pa.string())
-    count = sum(int(pc.sum(pc.equal(as_text, old)).as_py() or 0) for old in renames)
+    count = sum(int(pc.sum(pc.equal(as_text, old)).as_py() or 0) for old in renames)  # type: ignore[attr-defined, misc, unused-ignore]
     if not apply:
         return count
 
-    table = pq.read_table(path)
+    table = pq.read_table(path)  # type: ignore[no-untyped-call, unused-ignore]
     index = table.schema.get_field_index("channel")
     column = table.column(index).cast(pa.string())
     for old, new in renames.items():
-        column = pc.if_else(pc.equal(column, old), new, column)
+        column = pc.if_else(pc.equal(column, old), new, column)  # type: ignore[attr-defined, unused-ignore]
     field_ = table.schema.field(index)
     table = table.set_column(index, field_, column.cast(field_.type))
-    metadata = pq.ParquetFile(path).metadata
+    metadata = pq.ParquetFile(path).metadata  # type: ignore[no-untyped-call, unused-ignore]
     compression = "snappy"
     row_group_size = None
     if metadata.num_row_groups and metadata.num_columns:
@@ -340,7 +340,7 @@ def migrate_parquet(path: Path, rename_map: RenameMap, *, apply: bool) -> int:
         row_group_size = metadata.row_group(0).num_rows or None
     _replace_atomically(
         path,
-        lambda tmp: pq.write_table(
+        lambda tmp: pq.write_table(  # type: ignore[no-untyped-call, unused-ignore]
             table, tmp, compression=compression, row_group_size=row_group_size
         ),
     )

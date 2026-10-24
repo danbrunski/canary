@@ -8,9 +8,10 @@ re-export would change nothing (``test_a_patch_on_the_script_does_not_reach_the_
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any
+from typing import Any, Literal
 
 import pytest
 
@@ -24,7 +25,7 @@ def test_the_scoring_pool_is_capped_by_the_measured_worker_peak(
     import src.models.evaluation_workers as harness
 
     peak = harness.SCORING_WORKER_PEAK_BYTES
-    monkeypatch.setattr(harness.os, "cpu_count", lambda: 12)
+    monkeypatch.setattr(os, "cpu_count", lambda: 12)
     room = int(3 * peak / harness.SCORING_MEMORY_FRACTION) + 1
     monkeypatch.setattr(harness, "_available_memory_bytes", lambda: room)
     assert harness.scoring_workers(4, 18) == 3
@@ -57,7 +58,7 @@ def test_the_scoring_pool_respects_the_cgroup_and_stays_in_process_on_the_pi(
     )
 
     peak = harness.SCORING_WORKER_PEAK_BYTES
-    monkeypatch.setattr(harness.os, "cpu_count", lambda: 12)
+    monkeypatch.setattr(os, "cpu_count", lambda: 12)
     monkeypatch.setattr(harness, "on_the_pi", lambda: False)
     monkeypatch.setattr(harness, "_available_memory_bytes", lambda: 100 * peak)
     # The cgroup's headroom caps the pool below what MemAvailable would allow.
@@ -99,7 +100,7 @@ def test_a_patch_on_the_script_does_not_reach_the_pool(monkeypatch: pytest.Monke
     import src.models.evaluation_workers as owner
 
     peak = owner.SCORING_WORKER_PEAK_BYTES
-    monkeypatch.setattr(owner.os, "cpu_count", lambda: 12)
+    monkeypatch.setattr(os, "cpu_count", lambda: 12)
     monkeypatch.setattr(owner, "on_the_pi", lambda: False)
     monkeypatch.setattr(owner, "_available_memory_bytes", lambda: 100 * peak)
     monkeypatch.setattr(owner, "_cgroup_memory_headroom", lambda: None)
@@ -131,7 +132,7 @@ def test_the_pool_is_spawned_not_forked_and_falls_back_in_process() -> None:
         def __enter__(self) -> _Broken:
             return self
 
-        def __exit__(self, *exc: object) -> bool:
+        def __exit__(self, *exc: object) -> Literal[False]:
             return False
 
         def submit(self, *_a: object) -> object:
@@ -153,7 +154,7 @@ def test_the_pool_is_spawned_not_forked_and_falls_back_in_process() -> None:
             local=lambda: _Scorer(),  # type: ignore[arg-type,return-value]
             spec=lambda: "spec",  # type: ignore[arg-type,return-value]
         )
-    assert results == ["scored t0", "scored t1", "scored t2"]
+    assert results == ["scored t0", "scored t1", "scored t2"]  # type: ignore[comparison-overlap]
     assert seen["max_workers"] == 2
     assert seen["mp_context"].get_start_method() == "spawn"  # type: ignore[attr-defined]
     assert seen["initializer"] is owner._init_scoring_worker

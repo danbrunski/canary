@@ -15,6 +15,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 import pyarrow as pa
+import pyarrow.compute as pc
 import pyarrow.parquet as pq
 import pytest
 
@@ -52,8 +53,8 @@ def _split_into_chunks(source: Path, out: Path, *, chunks: int, overlapping: set
     across each seam in ``overlapping`` so those neighbours' time ranges
     overlap (the writer's flush order is not a time order), then add a 0-byte
     tail chunk (a crash mid-write), which every reader skips."""
-    table = pq.read_table(source)
-    order = pa.compute.sort_indices(table, sort_keys=[("timestamp", "ascending")])
+    table = pq.read_table(source)  # type: ignore[no-untyped-call]
+    order = pc.sort_indices(table, sort_keys=[("timestamp", "ascending")])  # type: ignore[attr-defined]
     table = table.take(order)
     out.mkdir(parents=True)
     bounds = [int(b) for b in np.linspace(0, table.num_rows, chunks + 1)]
@@ -63,7 +64,9 @@ def _split_into_chunks(source: Path, out: Path, *, chunks: int, overlapping: set
         members[seam - 1] = left[:-30] + right[:30]
         members[seam] = left[-30:] + right[30:]
     for i, rows in enumerate(members):
-        pq.write_table(table.take(pa.array(sorted(rows))), out / f"telemetry-{i:05d}.parquet")
+        pq.write_table(  # type: ignore[no-untyped-call]
+            table.take(pa.array(sorted(rows))), out / f"telemetry-{i:05d}.parquet"
+        )
     (out / f"telemetry-{chunks:05d}.parquet").write_bytes(b"")
     return out
 
@@ -80,7 +83,7 @@ def test_real_drive_slice_matches_the_whole_session_chain(
     dids = load_did_map(DIDS_YAML)
 
     parts: list[int] = []
-    real = session_decode.iter_session_parts
+    real = iter_session_parts
 
     def spy(
         session_dir: Path, *, target_rows: int, filters: object = None, decoded: str = "on_read"
@@ -94,7 +97,7 @@ def test_real_drive_slice_matches_the_whole_session_chain(
             parts.append(len(part))
             yield part
 
-    monkeypatch.setattr(session_decode, "iter_session_parts", spy)
+    monkeypatch.setattr("src.preprocessing.session_decode.iter_session_parts", spy)
     bounded = resample_session_bounded(
         session, bindings, dbc, dids, ResampleConfig(), part_rows=2_000
     )

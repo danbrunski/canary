@@ -44,9 +44,9 @@ import numpy as np
 import pandas as pd
 
 try:
-    from _cli import add_common_args, add_profile_arg, load_config
+    from _cli import add_common_args, add_profile_arg, load_config  # type: ignore[import-not-found]
 except ImportError:  # loaded as `scripts.evaluate_plausibility`
-    from scripts._cli import add_common_args, add_profile_arg, load_config  # type: ignore[no-redef]
+    from scripts._cli import add_common_args, add_profile_arg, load_config
 
 from src.plausibility.benchmark import (
     BENCHMARK_CHANNELS,
@@ -189,7 +189,9 @@ def run_job(job: Job) -> dict[str, Any]:
         ),
         "pending_records": [_record_brief(r) for r in pending[:40]],
     }
-    clean_keys = {(r.channel, r.check, r.detected_at) for r in clean_records}
+    clean_keys: set[tuple[str, str, str]] = {
+        (r.channel, r.check, r.detected_at) for r in clean_records
+    }
 
     faults: list[dict[str, Any]] = []
     for channel in job.fault_channels:

@@ -40,25 +40,26 @@ from src.collection.obd_collector import (
 )
 from src.collection.queueing import QueueDropCounter
 from src.collection.reconnect import ReconnectPolicy
+from src.telemetry import TelemetryRecord
 
 # ---------------------------------------------------------------------------
 # Reading + writer
 # ---------------------------------------------------------------------------
 
 
-def test_obd_reading_serializes_to_json_line():
+def test_obd_reading_serializes_to_json_line() -> None:
     r = ObdReading(timestamp=1700000000.5, pid="RPM", value=752.0, unit="rpm")
     parsed = json.loads(r.to_json_line())
     assert parsed == {"t": 1700000000.5, "pid": "RPM", "value": 752.0, "unit": "rpm"}
 
 
-def test_obd_reading_handles_string_value():
+def test_obd_reading_handles_string_value() -> None:
     """VIN and similar PIDs return strings, not floats."""
     r = ObdReading(timestamp=1.0, pid="VIN", value="JN8AR05Y...", unit="")
     assert json.loads(r.to_json_line())["value"] == "JN8AR05Y..."
 
 
-def test_reading_to_record_maps_obd_reading():
+def test_reading_to_record_maps_obd_reading() -> None:
     record = reading_to_record(
         ObdReading(timestamp=1_778_000_000.0, pid="RPM", value=752.0, unit="rpm")
     )
@@ -69,8 +70,8 @@ def test_reading_to_record_maps_obd_reading():
 
 
 @pytest.mark.asyncio
-async def test_queue_reading_callback_enqueues_threadsafe():
-    queue = asyncio.Queue()
+async def test_queue_reading_callback_enqueues_threadsafe() -> None:
+    queue: asyncio.Queue[TelemetryRecord] = asyncio.Queue()
     callback = queue_reading_callback(queue, asyncio.get_running_loop())
 
     callback(ObdReading(timestamp=1_778_000_000.0, pid="RPM", value=700.0, unit="rpm"))
@@ -80,8 +81,8 @@ async def test_queue_reading_callback_enqueues_threadsafe():
 
 
 @pytest.mark.asyncio
-async def test_queue_reading_callback_counts_full_queue_drop():
-    queue: asyncio.Queue = asyncio.Queue(maxsize=1)
+async def test_queue_reading_callback_counts_full_queue_drop() -> None:
+    queue: asyncio.Queue[TelemetryRecord] = asyncio.Queue(maxsize=1)
     counter = QueueDropCounter("obd-test")
     callback = queue_reading_callback(queue, asyncio.get_running_loop(), on_drop=counter)
 
@@ -93,7 +94,7 @@ async def test_queue_reading_callback_counts_full_queue_drop():
     assert counter.dropped == 1
 
 
-def test_jsonl_writer_appends_one_line_per_reading(tmp_path: Path):
+def test_jsonl_writer_appends_one_line_per_reading(tmp_path: Path) -> None:
     path = tmp_path / "pids.jsonl"
     w = JsonlReadingWriter(path)
     try:
@@ -108,7 +109,7 @@ def test_jsonl_writer_appends_one_line_per_reading(tmp_path: Path):
     assert json.loads(lines[1])["pid"] == "COOLANT_TEMP"
 
 
-def test_jsonl_writer_creates_parent_dirs(tmp_path: Path):
+def test_jsonl_writer_creates_parent_dirs(tmp_path: Path) -> None:
     path = tmp_path / "nested" / "deep" / "pids.jsonl"
     w = JsonlReadingWriter(path)
     try:
@@ -118,7 +119,7 @@ def test_jsonl_writer_creates_parent_dirs(tmp_path: Path):
     assert path.exists()
 
 
-def test_jsonl_writer_flushes_per_write(tmp_path: Path):
+def test_jsonl_writer_flushes_per_write(tmp_path: Path) -> None:
     """A crash mid-session should lose at most the last in-flight line."""
     path = tmp_path / "pids.jsonl"
     w = JsonlReadingWriter(path)
@@ -135,14 +136,14 @@ def test_jsonl_writer_flushes_per_write(tmp_path: Path):
 # ---------------------------------------------------------------------------
 
 
-def test_resolve_pids_known_commands():
+def test_resolve_pids_known_commands() -> None:
     cmds = resolve_pids(("RPM", "COOLANT_TEMP", "MAF"))
     assert len(cmds) == 3
     # python-obd commands have a `name` attr
     assert all(hasattr(c, "name") for c in cmds)
 
 
-def test_resolve_pids_unknown_command_raises_with_helpful_message():
+def test_resolve_pids_unknown_command_raises_with_helpful_message() -> None:
     with pytest.raises(ValueError, match="unknown OBD command 'RMP'"):
         resolve_pids(("RPM", "RMP"))  # typo in second item
 
@@ -189,7 +190,7 @@ def test_assert_read_only_command_passes_through_at_commands() -> None:
 
 
 def test_enforce_read_only_wraps_watch_and_query() -> None:
-    calls: list[str] = []
+    calls: list[tuple[str, str]] = []
 
     class _FakeConn:
         def watch(self, cmd: Any) -> None:
@@ -317,7 +318,7 @@ class _FakeResponse:
         return self.null
 
 
-def test_callback_unwraps_pint_quantity_into_value_and_unit():
+def test_callback_unwraps_pint_quantity_into_value_and_unit() -> None:
     captured: list[ObdReading] = []
     cb = _make_callback("RPM", captured.append)
     cb(_FakeResponse(value=_FakeQuantity(magnitude=752.0, units="rpm")))
@@ -329,7 +330,7 @@ def test_callback_unwraps_pint_quantity_into_value_and_unit():
     assert r.timestamp > 0
 
 
-def test_callback_drops_dimensionless_unit_string():
+def test_callback_drops_dimensionless_unit_string() -> None:
     """python-obd uses 'dimensionless' for unitless PIDs (e.g. THROTTLE_POS %)
     but we'd rather store an empty string than that token."""
     captured: list[ObdReading] = []
@@ -338,7 +339,7 @@ def test_callback_drops_dimensionless_unit_string():
     assert captured[0].unit == ""
 
 
-def test_callback_skips_null_responses():
+def test_callback_skips_null_responses() -> None:
     captured: list[ObdReading] = []
     cb = _make_callback("RPM", captured.append)
     cb(_FakeResponse(value=None, null=True))
@@ -346,7 +347,7 @@ def test_callback_skips_null_responses():
     assert captured == []
 
 
-def test_callback_passes_through_string_values():
+def test_callback_passes_through_string_values() -> None:
     """VIN-style responses come back as strings, not Quantities."""
     captured: list[ObdReading] = []
     cb = _make_callback("VIN", captured.append)
@@ -360,7 +361,7 @@ def test_callback_passes_through_string_values():
 # ---------------------------------------------------------------------------
 
 
-def test_obd_factory_rejects_unknown_pid_before_opening_connection():
+def test_obd_factory_rejects_unknown_pid_before_opening_connection() -> None:
     """Don't burn a connect attempt on a session that's going to fail anyway."""
     spec = ObdSpec(port="/dev/ttyUSB0", pids=("RPM", "BOGUS_PID"))
     with patch("src.collection.obd_collector.obd.Async") as fake_async:
@@ -369,7 +370,7 @@ def test_obd_factory_rejects_unknown_pid_before_opening_connection():
         fake_async.assert_not_called()
 
 
-def test_obd_factory_raises_when_adapter_does_not_connect():
+def test_obd_factory_raises_when_adapter_does_not_connect() -> None:
     spec = ObdSpec(port="/dev/ttyUSB-fake", pids=("RPM",))
     with patch("src.collection.obd_collector.obd.Async") as fake_async:
         instance = fake_async.return_value
@@ -378,7 +379,7 @@ def test_obd_factory_raises_when_adapter_does_not_connect():
             obd_factory(spec, on_reading=lambda _r: None)
 
 
-def test_obd_factory_skips_unsupported_pids_and_watches_supported():
+def test_obd_factory_skips_unsupported_pids_and_watches_supported() -> None:
     spec = ObdSpec(port="/dev/ttyUSB0", pids=("RPM", "MAF"))
     with patch("src.collection.obd_collector.obd.Async") as fake_async:
         instance = fake_async.return_value
@@ -411,7 +412,7 @@ class _FakeObdConnection:
 async def test_collect_obd_starts_and_stops_connection() -> None:
     conn = _FakeObdConnection()
     stop = asyncio.Event()
-    queue = asyncio.Queue()
+    queue: asyncio.Queue[TelemetryRecord] = asyncio.Queue()
 
     def factory(_spec: ObdSpec, on_reading: Any) -> _FakeObdConnection:
         on_reading(ObdReading(timestamp=1_778_000_000.0, pid="RPM", value=710.0, unit="rpm"))
@@ -431,7 +432,7 @@ async def test_collect_obd_starts_and_stops_connection() -> None:
 async def test_collect_obd_retries_after_factory_failure() -> None:
     conn = _FakeObdConnection()
     stop = asyncio.Event()
-    queue = asyncio.Queue()
+    queue: asyncio.Queue[TelemetryRecord] = asyncio.Queue()
     attempts = 0
 
     def factory(_spec: ObdSpec, on_reading: Any) -> _FakeObdConnection:

@@ -255,7 +255,7 @@ def _registry() -> TuneRevisionRegistry:
 
 
 def test_session_crossing_a_flash_needs_a_named_resolution() -> None:
-    ranges = {
+    ranges: dict[str, tuple[datetime | None, datetime | None]] = {
         "2026-07-26T214348": (
             datetime(2026, 7, 26, 21, 43, 49, tzinfo=UTC),
             datetime(2026, 7, 26, 22, 31, 47, tzinfo=UTC),

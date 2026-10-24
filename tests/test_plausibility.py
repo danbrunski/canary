@@ -7,12 +7,13 @@ import json
 from datetime import UTC, datetime
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any
+from typing import Any, cast
 
 import numpy as np
 import pandas as pd
 import pytest
 
+from src.alerts.notifier import Notifier
 from src.config import CanaryConfig
 from src.decode.bindings import Bindings, load_bindings
 from src.decode.dids import load_did_map
@@ -840,7 +841,9 @@ def test_a_confirmed_detection_is_an_anomaly_event_and_a_push(tmp_path: Path) ->
 
     notifier = _RecordingNotifier()
     emitter = AnomalyEventEmitter(
-        AnomalyEventLogger(tmp_path), min_seconds_between_events=0, notifier=notifier
+        AnomalyEventLogger(tmp_path),
+        min_seconds_between_events=0,
+        notifier=cast(Notifier, notifier),
     )
     written: list[EvidenceRecord] = []
     evaluator = _evaluator(_profile(), sink=written.append, alert_sink=emitter.emit_plausibility)
@@ -887,7 +890,9 @@ def test_plausibility_events_dedupe_per_channel_and_check_and_never_push_in_repl
 
     notifier = _RecordingNotifier()
     emitter = AnomalyEventEmitter(
-        AnomalyEventLogger(tmp_path), min_seconds_between_events=60.0, notifier=notifier
+        AnomalyEventLogger(tmp_path),
+        min_seconds_between_events=60.0,
+        notifier=cast(Notifier, notifier),
     )
     confirmed: list[EvidenceRecord] = []
     evaluator = _evaluator(_profile(), alert_sink=confirmed.append)
@@ -939,18 +944,18 @@ def test_the_part_by_part_stream_equals_the_whole_session_one(tmp_path: Path) ->
 
     config, (catalog, bindings) = _xterra_catalog()
     did_map = load_did_map(REPO / "data" / "dids.yaml")
-    table = pq.read_table(DRIVE_SLICE / "telemetry-00000.parquet")
-    table = table.take(pc.sort_indices(table, sort_keys=[("timestamp", "ascending")]))
+    table = pq.read_table(DRIVE_SLICE / "telemetry-00000.parquet")  # type: ignore[no-untyped-call, unused-ignore]
+    table = table.take(pc.sort_indices(table, sort_keys=[("timestamp", "ascending")]))  # type: ignore[attr-defined, unused-ignore]
     session = tmp_path / "2026-08-03T231900"
     session.mkdir()
     step = table.num_rows // 6
     for i in range(6):
         piece = table.slice(i * step, step if i < 5 else table.num_rows - i * step)
-        pq.write_table(piece, session / f"telemetry-{i:05d}.parquet")
+        pq.write_table(piece, session / f"telemetry-{i:05d}.parquet")  # type: ignore[no-untyped-call, unused-ignore]
     # One chunk of stored decoded rows for a checked signal, with made-up
     # values: never read (P02.8), in any part; the frames are decoded instead.
     stored = next(iter(sorted(_checked_decoded(catalog))))
-    can = table.filter(pc.equal(table["source"], "can")).slice(0, 50)
+    can = table.filter(pc.equal(table["source"], "can")).slice(0, 50)  # type: ignore[attr-defined, unused-ignore]
     n = can.num_rows
     rows = can.set_column(
         can.schema.get_field_index("source"),
@@ -967,7 +972,7 @@ def test_the_part_by_part_stream_equals_the_whole_session_one(tmp_path: Path) ->
         table.schema.field("value_number"),
         pa.array([float(i) for i in range(n)], type=pa.float64()),
     )
-    pq.write_table(rows, session / "telemetry-00006.parquet")
+    pq.write_table(rows, session / "telemetry-00006.parquet")  # type: ignore[no-untyped-call, unused-ignore]
 
     wanted = _checked_decoded(catalog) | set(segmenter_decoded())
     long = session_long(session, bindings=bindings, did_map=did_map, decoded=wanted)

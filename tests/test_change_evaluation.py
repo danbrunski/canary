@@ -19,6 +19,7 @@ from __future__ import annotations
 import json
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 import pandas as pd
@@ -26,7 +27,9 @@ import pytest
 
 from src.analysis.change_evaluation import (
     CHANGE_RESIDUALS_FILE,
+    ChangeReport,
     PolicyNotFrozenError,
+    Preparation,
     ResidualDefinition,
     SessionSamples,
     _fit,
@@ -158,7 +161,12 @@ def test_a_tuning_session_never_scores_the_detector(tmp_path, definition):
 
 
 def _synthetic_session(
-    name: str, start: datetime, calibration: str = CALIBRATION, *, n: int = 30, exclusion=None
+    name: str,
+    start: datetime,
+    calibration: str = CALIBRATION,
+    *,
+    n: int = 30,
+    exclusion: str | None = None,
 ) -> SessionSamples:
     t = start.timestamp() + 3.0 * np.arange(n)
     return SessionSamples(
@@ -253,7 +261,7 @@ def test_real_drives_refuse_a_reference_under_the_declared_policy(real, definiti
     assert "0.74" in outer["four_cells"]
     policy = definition.policy_for("merged_cells")
 
-    def fold(name: str) -> list:
+    def fold(name: str) -> list[Any]:
         return [
             b
             for i in prep.folds[name]
@@ -267,7 +275,8 @@ def test_real_drives_refuse_a_reference_under_the_declared_policy(real, definiti
 
 def test_real_idle_only_drives_fix_one_combination_not_each_parameter(real, definition):
     drives, _e, _m, _prep = real
-    idle, mixed = [], []
+    idle: list[Any] = []
+    mixed: list[Any] = []
     for drive in drives:
         blocks = blocks_of(definition.policy, drive.drive_id, drive.samples(definition))[0]
         if blocks:
@@ -370,6 +379,7 @@ def test_the_tool_refuses_to_monitor_test_drives_without_a_persistent_ledger(tmp
         rows.append(
             pd.DataFrame({"session": s.session, "t": s.t, "y": s.y, "condition": s.condition})
         )
+        assert s.first is not None and s.last is not None
         meta[s.session] = {
             "first": s.first.isoformat(), "last": s.last.isoformat(),
             "calibration": s.calibration, "exclusion": None, "unevaluable": None,
@@ -386,7 +396,7 @@ def test_the_tool_refuses_to_monitor_test_drives_without_a_persistent_ledger(tmp
     assert '"policy_frozen"' in ledger.read_text()
 
 
-def _report(tmp_path, prep):
+def _report(tmp_path: Path, prep: Preparation) -> tuple[MemoryLedger, ChangeReport]:
     ledger = MemoryLedger(tmp_path / "memory.jsonl", vehicle=PROFILE)
     frozen = freeze_policy(ledger, prep, vehicle=VEHICLE)
     return ledger, evaluate(prep, ledger=ledger, frozen_record=frozen)

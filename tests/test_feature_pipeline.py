@@ -11,6 +11,7 @@ these tests lock the builder's own contract.
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 
 import pandas as pd
 import pytest
@@ -575,7 +576,7 @@ def test_resolve_worker_count_trims_pool_to_available_memory(
 
     sessions = _sized_sessions(tmp_path, 6, megabytes=45.0)  # ~1.8 GB/worker at 40×
     monkeypatch.setattr(feature_workers, "available_memory_bytes", lambda: 2 * 1024**3)
-    monkeypatch.setattr(feature_workers.os, "cpu_count", lambda: 12)
+    monkeypatch.setattr("os.cpu_count", lambda: 12)
 
     assert feature_workers._resolve_worker_count(sessions, None) == 1
 
@@ -589,7 +590,7 @@ def test_resolve_worker_count_uses_cpu_ceiling_when_memory_is_ample(
 
     sessions = _sized_sessions(tmp_path, 8, megabytes=1.0)
     monkeypatch.setattr(feature_workers, "available_memory_bytes", lambda: 64 * 1024**3)
-    monkeypatch.setattr(feature_workers.os, "cpu_count", lambda: 12)
+    monkeypatch.setattr("os.cpu_count", lambda: 12)
 
     assert (
         feature_workers._resolve_worker_count(sessions, None)
@@ -604,7 +605,7 @@ def test_resolve_worker_count_is_bounded_by_session_count(
 
     sessions = _sized_sessions(tmp_path, 2, megabytes=1.0)
     monkeypatch.setattr(feature_workers, "available_memory_bytes", lambda: 64 * 1024**3)
-    monkeypatch.setattr(feature_workers.os, "cpu_count", lambda: 12)
+    monkeypatch.setattr("os.cpu_count", lambda: 12)
 
     assert feature_workers._resolve_worker_count(sessions, None) == 2
 
@@ -636,7 +637,7 @@ def test_resolve_worker_count_falls_back_when_memory_is_unknown(
 
     sessions = _sized_sessions(tmp_path, 6, megabytes=45.0)
     monkeypatch.setattr(feature_workers, "available_memory_bytes", lambda: None)
-    monkeypatch.setattr(feature_workers.os, "cpu_count", lambda: 12)
+    monkeypatch.setattr("os.cpu_count", lambda: 12)
 
     assert (
         feature_workers._resolve_worker_count(sessions, None)
@@ -685,7 +686,7 @@ def _synth_can_long(n: int, can_id: int = 0x551) -> pd.DataFrame:
     )
 
 
-def _single_pass_decode(long: pd.DataFrame, bindings) -> pd.DataFrame:
+def _single_pass_decode(long: pd.DataFrame, bindings: Any) -> pd.DataFrame:
     """The pre-chunking implementation, kept here as the parity reference."""
     from src.preprocessing.session_decode import _LONG_SORT_COLUMNS
 

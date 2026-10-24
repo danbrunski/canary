@@ -1077,7 +1077,7 @@ def _call_keywords(path: Path, name: str) -> dict[str, Any]:
     read from its source (importing the private-ROM module would run its imports
     and mark nothing)."""
     for node in ast.parse(path.read_text()).body:
-        target = node.target if isinstance(node, ast.AnnAssign) else None
+        target: ast.expr | None = node.target if isinstance(node, ast.AnnAssign) else None
         if isinstance(node, ast.Assign) and len(node.targets) == 1:
             target = node.targets[0]
         if not (isinstance(target, ast.Name) and target.id == name):

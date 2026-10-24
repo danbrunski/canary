@@ -490,7 +490,7 @@ def test_the_select_takes_the_coolant_value_on_its_flags_unless_the_mode_byte_ho
 
 
 def test_the_retard_combine_takes_the_larger_retard_and_its_two_paths() -> None:
-    args = dict(
+    args: dict[str, Any] = dict(
         w274e=25, w1215=0, w26d2=-5, w272a=0, w2334=0, w46e6=0,
         flag_28ab_bit4=False, bypass_28b4_bit1=False,
     )  # fmt: skip

@@ -2,9 +2,14 @@
 
 from __future__ import annotations
 
+from argparse import Namespace
+from collections.abc import Callable
+from typing import Any
+
 import pytest
 
 from src.analysis.did_scan import CanableMode22Transport
+from src.config import CanaryConfig
 from tools import _bus_tool
 from tools import scan_constant_dids as scd
 
@@ -58,14 +63,14 @@ class _FakeConfig:
     hardware = _FakeConfigHardware()
 
 
-def _patch_canable(monkeypatch: pytest.MonkeyPatch) -> tuple[_FakeBus, list[dict]]:
+def _patch_canable(monkeypatch: pytest.MonkeyPatch) -> tuple[_FakeBus, list[dict[str, Any]]]:
     bus = _FakeBus()
-    constructed: list[dict] = []
+    constructed: list[dict[str, Any]] = []
 
-    monkeypatch.setattr(_bus_tool.CanaryConfig, "from_yaml", staticmethod(lambda _p: _FakeConfig()))
+    monkeypatch.setattr(CanaryConfig, "from_yaml", staticmethod(lambda _p: _FakeConfig()))
     monkeypatch.setattr(_bus_tool, "bus_factory", lambda _spec: bus)
 
-    def _fake_client(bus_arg, **kwargs):  # type: ignore[no-untyped-def]
+    def _fake_client(bus_arg: object, **kwargs: object) -> object:
         constructed.append({"bus": bus_arg, **kwargs})
         return object()  # CanableMode22Transport only stores it, never calls here
 
@@ -73,9 +78,9 @@ def _patch_canable(monkeypatch: pytest.MonkeyPatch) -> tuple[_FakeBus, list[dict
     return bus, constructed
 
 
-def _build(args: object) -> tuple[object, object, str]:
+def _build(args: Namespace) -> tuple[Any, Callable[[], None], str]:
     """``_build_transport`` with a bench verdict (``--no-daemon``)."""
-    return scd._build_transport(args, _bus_tool.require_passive(args))  # type: ignore[arg-type]
+    return scd._build_transport(args, _bus_tool.require_passive(args))
 
 
 def test_build_transport_canable_wires_request_and_response_ids(

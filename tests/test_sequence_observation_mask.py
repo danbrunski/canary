@@ -8,6 +8,8 @@ trained before the record existed (the deployed 2026-09-20 model).
 
 from __future__ import annotations
 
+from typing import Any, cast
+
 import numpy as np
 import pandas as pd
 import pytest
@@ -118,7 +120,7 @@ def test_serve_buffer_builds_the_offline_mask_and_delta_for_the_same_rows(rule: 
         freshness_fallback_columns=frozenset(offline.freshness_fallback_columns),
     )
     for _, row in frame.iterrows():
-        buffer.append(row.to_dict())
+        buffer.append(cast(dict[str, Any], row.to_dict()))
     assert buffer.ready
     np.testing.assert_array_equal(buffer.mask_array(), offline.mask.astype(np.float32))
     np.testing.assert_array_equal(buffer.delta_array(), offline.delta.astype(np.float32))

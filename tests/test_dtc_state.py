@@ -14,7 +14,7 @@ from src.telemetry import TelemetryRecord
 from src.vehicle.vehicle_ledger import VehicleLedgerStore
 
 
-def _reading(channel: str, value: object) -> TelemetryRecord:
+def _reading(channel: str, value: bool | int | float | str | None) -> TelemetryRecord:
     return TelemetryRecord.obd(time.time(), channel, value, "")
 
 

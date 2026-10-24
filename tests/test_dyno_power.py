@@ -16,8 +16,10 @@ import datetime as dt
 import math
 from collections.abc import Callable
 from dataclasses import dataclass, replace
+from typing import Any, cast
 
 import numpy as np
+import numpy.typing as npt
 import pandas as pd
 import pytest
 from pydantic import ValidationError
@@ -121,7 +123,8 @@ def _imu(accel: np.ndarray, theta: np.ndarray, squat: float, offset_deg: float) 
     """What a longitudinal accelerometer pitched by φ = squat·a/g + μ against
     the road reads on a grade θ (nose-up positive): a·cos φ + g·sin(θ + φ)."""
     phi = np.radians(squat * accel / G + offset_deg)
-    return accel * np.cos(phi) + G * np.sin(theta + phi)
+    reading: np.ndarray = accel * np.cos(phi) + G * np.sin(theta + phi)
+    return reading
 
 
 class _Noise:
@@ -281,7 +284,7 @@ def _cruise_pair(noise: _Noise, speed: float = 22.0) -> list[Leg]:
             Leg(
                 heading,
                 MotionSamples(
-                    t_s=np.arange(n) * (600.0 / speed / n),
+                    t_s=cast(npt.NDArray[np.float64], np.arange(n) * (600.0 / speed / n)),
                     speed_mps=np.full(n, speed),
                     accel_mps2=zeros + noise(0.02, n),
                     sf_lon_mps2=_imu(zeros, theta, SQUAT_DEG_PER_G, MOUNT_OFFSET_DEG)
@@ -392,7 +395,8 @@ def _refused(result: object, kind: str) -> DynoRefusal:
 
 def _torque_error(power: DynoPower) -> np.ndarray:
     """Relative error of the engine torque estimate against the true curve."""
-    return power.curve.engine_torque_nm_estimate / torque(power.curve.rpm) - 1.0
+    error: np.ndarray = power.curve.engine_torque_nm_estimate / torque(power.curve.rpm) - 1.0
+    return error
 
 
 SILENT = _Noise(None)
@@ -561,7 +565,8 @@ def test_power_curves_feed_the_noise_floor() -> None:
 
 
 def _edit(pull: PowerPull, **changes: object) -> PowerPull:
-    samples = replace(pull.samples, **{k: v for k, v in changes.items() if k != "demand"})
+    kept: dict[str, Any] = {k: v for k, v in changes.items() if k != "demand"}
+    samples = replace(pull.samples, **kept)
     demand = changes.get("demand", pull.demand)
     return PowerPull(pull.heading, pull.gear, samples, demand)  # type: ignore[arg-type]
 
@@ -608,16 +613,18 @@ def test_pull_refusals_name_their_cause() -> None:
     part = np.zeros(n, dtype=bool)
     part[n // 2 : n // 2 + 60] = True
     ratio_4_over_3 = GEARBOX[3] / GEARBOX[2]
+    north_rpm = north.samples.rpm
+    assert north_rpm is not None
 
     _refused(_power([_edit(north, rpm=None), south]), "inputs_missing")
     refusal = _refused(_power([_edit(north, demand=None), south]), "inputs_missing")
     assert "operator-demand" in refusal.reason
     # A shift into 4th halfway: the engine speed drops onto 4th's line.
-    shifted = np.where(part, north.samples.rpm * ratio_4_over_3, north.samples.rpm)  # type: ignore[operator]
+    shifted = np.where(part, north_rpm * ratio_4_over_3, north_rpm)
     refusal = _refused(_power([_edit(north, rpm=shifted), south]), "gear_change")
     assert "gear 4" in refusal.reason
     # The engine flares 8 % above the road speed's line: the clutch slipped.
-    flared = np.where(part, north.samples.rpm * 1.08, north.samples.rpm)  # type: ignore[operator]
+    flared = np.where(part, north_rpm * 1.08, north_rpm)
     _refused(_power([_edit(north, rpm=flared), south]), "clutch_slip")
     # Speed 10 % high everywhere: rpm under the line, which slip cannot do.
     fast = north.samples.speed_mps * 1.10

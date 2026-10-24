@@ -19,6 +19,8 @@ from scripts.evaluate_detectors import (  # noqa: E402
     main,
 )
 from src.decode.dids import load_repo_did_map
+from src.models.evaluation_identity import key_inputs
+from src.models.evaluation_workers import score_drives
 from src.storage.parquet_writer import write_records_to_parquet  # noqa: E402
 from src.storage.sessions import recorded_sessions  # noqa: E402
 from src.telemetry import TelemetryRecord  # noqa: E402
@@ -376,7 +378,7 @@ def _record_scoring_pids(monkeypatch: pytest.MonkeyPatch) -> list[int]:
     from src.analysis import detector_evaluation_run as run_phase
 
     pids: list[int] = []
-    real = run_phase.score_drives
+    real = score_drives
 
     def recording(*args: Any, **kwargs: Any) -> Any:
         results = real(*args, **kwargs)
@@ -494,7 +496,9 @@ def test_score_cache_keys_follow_content_and_entries_round_trip_exactly(
     output = DetectorOutput(verdict, np.array([0.5, np.nan, 1.0, 2.0]))
     assert cache.get("iforest-abc", "unit") is None
     cache.put("iforest-abc", "unit", {"iforest": output})
-    back = cache.get("iforest-abc", "unit")["iforest"]
+    loaded = cache.get("iforest-abc", "unit")
+    assert loaded is not None
+    back = loaded["iforest"]
     # The same element types, not merely equal values: the harness tests
     # ``v is True or v is np.True_`` and must see what a fresh score gives.
     assert [type(v) for v in back.verdict] == [type(v) for v in verdict]
@@ -530,7 +534,7 @@ def test_an_input_edited_mid_run_leaves_no_entry_under_either_key(
     argv = [*base[:at], workers, *base[at + 1 :], "--bindings", str(bindings)]
     monkeypatch.setattr(workers_module, "SCORING_WORKER_PEAK_BYTES", 1)
 
-    real = run_phase.score_drives
+    real = score_drives
 
     def edit_then_score(*args: Any, **kwargs: Any) -> Any:
         bindings.write_bytes(bindings.read_bytes() + b"\n# edited mid-run\n")
@@ -631,7 +635,7 @@ def test_the_key_hashes_the_afr_calibration_featurization_reads(
     from src.analysis import detector_evaluation_inputs
 
     seen: list[Any] = []
-    real = detector_evaluation_inputs.key_inputs
+    real = key_inputs
 
     def recording(sources: Any) -> Any:
         seen.append(sources)
@@ -745,7 +749,7 @@ def test_spawned_workers_return_the_serial_results_array_for_array(
     from src.analysis import detector_evaluation_run as run_phase
 
     scored: list[list[Any]] = []
-    real = run_phase.score_drives
+    real = score_drives
 
     def recording(*args: Any, **kwargs: Any) -> Any:
         results = real(*args, **kwargs)
@@ -790,7 +794,7 @@ def test_an_interrupted_run_publishes_no_score(
 
     interrupted = [*base]
     interrupted[interrupted.index("--cache-dir") + 1] = str(tmp_path / "cache-interrupted")
-    real = run_phase.score_drives
+    real = score_drives
 
     def score_then_interrupt(*args: Any, **kwargs: Any) -> Any:
         real(*args, **kwargs)

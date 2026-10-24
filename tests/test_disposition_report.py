@@ -5,6 +5,8 @@ from __future__ import annotations
 from datetime import date
 from pathlib import Path
 
+import pytest
+
 from scripts.disposition_report import build_report_markdown, main
 from src.analysis.training_disposition import ChannelDisposition, DispositionSummary
 from src.behavior.accepted_baselines import (
@@ -145,7 +147,9 @@ def test_main_no_sessions_found_returns_error(tmp_path: Path) -> None:
     assert not (tmp_path / "report.md").exists()
 
 
-def test_main_loads_accepted_baselines_override(tmp_path: Path, monkeypatch) -> None:
+def test_main_loads_accepted_baselines_override(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """An active `accepted_baselines.yaml` override reclassifies what would
     otherwise be Quarantine as Accept-recenter in the written report."""
 

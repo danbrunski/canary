@@ -19,7 +19,7 @@ assumptions used to build it, which is the circularity this exists to break.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import numpy as np
 import pandas as pd
@@ -350,7 +350,7 @@ def _per_sample_ratio(
         frame, case["signal"], case["reference"], policy=POLICY, dids_path=dids_path
     ).pairs
     moving = pairs["b"] > case["ratio_min_reference"]
-    return (pairs["a"][moving] / pairs["b"][moving]).to_numpy(dtype=float)
+    return cast(np.ndarray, (pairs["a"][moving] / pairs["b"][moving]).to_numpy(dtype=float))
 
 
 @pytest.mark.parametrize(

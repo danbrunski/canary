@@ -6,6 +6,7 @@ import json
 import logging
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import cast
 
 import numpy as np
 import pandas as pd
@@ -169,7 +170,7 @@ def test_score_orients_anomaly_score_so_outlier_is_larger() -> None:
     )
     scored = trained.score(inference)
 
-    assert scored.loc[1, SCORE_COLUMN] > scored.loc[0, SCORE_COLUMN]
+    assert cast(float, scored.loc[1, SCORE_COLUMN]) > cast(float, scored.loc[0, SCORE_COLUMN])
     assert scored.loc[1, LABEL_COLUMN] == -1
     assert scored.loc[0, MODEL_MODE_COLUMN] == "idle"
     assert scored.loc[1, MODEL_MODE_COLUMN] == "idle"
@@ -234,7 +235,7 @@ def test_other_modes_deviation_nan_does_not_suppress_the_verdict() -> None:
     )
     scored = trained.score(idle_row)
     assert bool(scored.loc[0, MISSING_FEATURES_COLUMN]) is False
-    assert np.isfinite(scored.loc[0, SCORE_COLUMN])
+    assert np.isfinite(cast(float, scored.loc[0, SCORE_COLUMN]))
     assert scored.loc[0, MODEL_MODE_COLUMN] == "idle"
 
     # But a genuinely-missing in-mode feature still suppresses (idle_only NaN).
@@ -798,7 +799,7 @@ def test_score_imputes_small_gaps_instead_of_withholding() -> None:
     row["obd:CH00"] = [np.nan]  # 1 of 40 == 2.5%
     scored = trained.score(row)
     assert bool(scored.loc[0, MISSING_FEATURES_COLUMN]) is False
-    assert np.isfinite(scored.loc[0, SCORE_COLUMN])
+    assert np.isfinite(cast(float, scored.loc[0, SCORE_COLUMN]))
     assert scored.loc[0, MISSING_FEATURE_FRACTION_COLUMN] == pytest.approx(1 / 40)
 
 
@@ -958,6 +959,8 @@ def test_small_holdout_calibrates_at_a_resolvable_rate_and_says_so(
     assert mode.resolvable_flag_rate == pytest.approx(10 / 400)
     # The rate actually used is the resolvable one, not the claimed 0.001 ...
     assert mode.target_flag_rate == pytest.approx(10 / 400)
+    assert mode.target_flag_rate is not None
+    assert mode.requested_flag_rate is not None
     assert mode.target_flag_rate > mode.requested_flag_rate
     # ... and it was APPLIED: ~10 of the 400 held-out rows sit at/over the threshold.
     assert mode.achieved_flag_rate == pytest.approx(10 / 400, abs=1 / 400)

@@ -39,14 +39,14 @@ from collections.abc import Sequence
 from pathlib import Path
 
 try:
-    from _cli import (
+    from _cli import (  # type: ignore[import-not-found]
         add_common_args,
         add_log_level_arg,
         discover_live_session_dirs,
         load_config,
     )
 except ImportError:  # loaded as `scripts.autotag` — repo root on path, not scripts/
-    from scripts._cli import (  # type: ignore[no-redef]
+    from scripts._cli import (
         add_common_args,
         add_log_level_arg,
         discover_live_session_dirs,
@@ -141,7 +141,7 @@ def _already_tagged(existing: list[dict[str, object]], event: TagEvent) -> bool:
         if record.get("label") != event.label:
             continue
         try:
-            recorded_t = float(record["t"])
+            recorded_t = float(record["t"])  # type: ignore[arg-type]
         except (KeyError, TypeError, ValueError):
             continue
         if abs(recorded_t - target_t) <= _DEDUPE_TOLERANCE_SECONDS:

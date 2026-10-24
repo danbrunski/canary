@@ -217,7 +217,9 @@ def test_a_lone_pi_found_at_startup_is_linked_several_are_listed(tmp_path: Path)
     second = companion_link.register_companion_link_routes(
         again, config=config, resolved_control_token="secret", discover_fn=lambda **_k: []
     )
-    assert second.pi()["source"] == "discovered" and second.discovery.state == "idle"
+    second_pi = second.pi()
+    assert second_pi is not None
+    assert second_pi["source"] == "discovered" and second.discovery.state == "idle"
 
     two = [found("http://a:8000", "canary-aaaa"), found("http://b:8000", "canary-bbbb")]
     other = FastAPI()

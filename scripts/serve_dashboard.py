@@ -30,13 +30,13 @@ from pathlib import Path
 import uvicorn
 
 try:
-    from _cli import (
+    from _cli import (  # type: ignore[import-not-found]
         add_common_args,
         add_log_level_arg,
         load_config,
     )
 except ImportError:  # loaded as `scripts.serve_dashboard` — repo root on path, not scripts/
-    from scripts._cli import (  # type: ignore[no-redef]
+    from scripts._cli import (
         add_common_args,
         add_log_level_arg,
         load_config,

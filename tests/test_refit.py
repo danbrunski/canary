@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 import numpy as np
 import pandas as pd
 
@@ -235,7 +237,7 @@ def test_fit_recipe_2d_with_explicit_edges_overrides_auto() -> None:
     )
     result = fit_recipe(recipe, frame)
     assert result.fitted, result.reason
-    assert result.model is not None
+    assert isinstance(result.model, BehaviorModel2D)
     assert list(result.model.axes[0].bin_edges) == [600.0, 1000.0, 2000.0, 4000.0]
 
 
@@ -549,13 +551,16 @@ def test_min_rpm_gate_excludes_koeo_rows_from_fit_and_auto_edges() -> None:
         min_rpm=400.0,
         min_cell_count=1,
         deviation=DeviationConfig(
-            kind="relative", warning_band=3.0, critical_band=6.0, sigma_floor=0.5
+            kind="relative",  # type: ignore[arg-type]  # the deprecated alias, loaded on purpose
+            warning_band=3.0,
+            critical_band=6.0,
+            sigma_floor=0.5,
         ),
     )
     result = fit_recipe(recipe, frame)
     assert result.fitted, result.reason
     model = result.model
-    assert model is not None
+    assert isinstance(model, BehaviorModel2D)
     # No KOEO mass: the grid starts at running RPM and no cell mean is near 63°.
     assert model.axes[0].bin_edges[0] >= 400.0
     populated = [cell for cell in model.fit.cells if cell.count > 0]
@@ -814,7 +819,7 @@ def test_count_usable_cold_start_sessions_requires_spread() -> None:
 
 
 def test_count_usable_cold_start_sessions_counts_usable_sessions() -> None:
-    load_by_session = {
+    load_by_session: dict[str, Any] = {
         "s0": np.linspace(10, 60, 20),  # 50% spread — usable
         "s1": [20.0] * 20,  # flat — not usable
         "s2": np.linspace(5, 80, 20),  # usable
@@ -836,7 +841,7 @@ def test_choose_warmup_confounding_strategy_branches_at_floor() -> None:
 
 
 def test_robust_recipe_calibrates_on_a_whole_held_out_session() -> None:
-    rows = []
+    rows: list[dict[str, Any]] = []
     for session, center in (
         ("2026-08-01T100000", 0.0),
         ("2026-08-02T100000", 0.1),

@@ -255,6 +255,11 @@ def test_snapshot_reports_can0_counters_and_delta_since_start(tmp_path: Path) ->
     assert second["can0"]["since_start"] == {"rx_over_errors": 3, "rx_dropped": 5, "rx_errors": 0}
 
 
+def _blind_modes(mon: HealthMonitor) -> tuple[str, ...]:
+    """Read through a call so mypy does not narrow the property after an assert."""
+    return mon.if_blind_modes
+
+
 def test_observe_inference_latches_if_mode_blindness_edge_triggered() -> None:
     """2.1: a mode only latches "blind" once a full window of consecutive
     missing-feature ticks has landed for it, and the transition into that
@@ -268,26 +273,26 @@ def test_observe_inference_latches_if_mode_blindness_edge_triggered() -> None:
         for _ in range(window - 1)
     ]
     assert not any(transitions)
-    assert mon.if_blind_modes == ()
+    assert _blind_modes(mon) == ()
 
     # The tick that completes the window latches it — exactly once.
     assert mon.observe_inference(missing_features=True, operating_mode="idle") is True
-    assert mon.if_blind_modes == ("idle",)
+    assert _blind_modes(mon) == ("idle",)
 
     # Further missing ticks for the same mode don't re-fire the transition.
     assert mon.observe_inference(missing_features=True, operating_mode="idle") is False
-    assert mon.if_blind_modes == ("idle",)
+    assert _blind_modes(mon) == ("idle",)
 
     # A single clean tick resets the window — the mode is no longer blind...
     assert mon.observe_inference(missing_features=False, operating_mode="idle") is False
-    assert mon.if_blind_modes == ()
+    assert _blind_modes(mon) == ()
 
     # ...and going missing again for a fresh full window re-latches (and
     # would re-warn) rather than staying silently suppressed forever.
     for _ in range(window - 1):
         mon.observe_inference(missing_features=True, operating_mode="idle")
     assert mon.observe_inference(missing_features=True, operating_mode="idle") is True
-    assert mon.if_blind_modes == ("idle",)
+    assert _blind_modes(mon) == ("idle",)
 
 
 def test_if_missing_feature_rate_by_mode_and_blind_modes_are_per_mode() -> None:

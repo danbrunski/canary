@@ -96,7 +96,7 @@ def _inputs(n: int = 1, **over: float) -> PlantInputs:
         rail_kpa=350.0,
     )
     base.update(over)
-    return PlantInputs(**{k: np.full(n, v, dtype=float) for k, v in base.items()})  # type: ignore[arg-type]
+    return PlantInputs(**{k: np.full(n, v, dtype=float) for k, v in base.items()})
 
 
 # -- profile, contract -------------------------------------------------------------

@@ -49,7 +49,8 @@ def test_last_seen_is_written_sparingly(tmp_path: Path) -> None:
     _, token = store.pair("Pixel", method="test")
 
     def on_disk() -> float | None:
-        return json.loads(path.read_text())["devices"][0]["last_seen"]
+        last_seen: float | None = json.loads(path.read_text())["devices"][0]["last_seen"]
+        return last_seen
 
     store.authenticate(token)
     assert on_disk() == NOW

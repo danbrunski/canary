@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 
 import cantools
 import pandas as pd
@@ -66,7 +67,7 @@ BO_ 1361 ECM_551: 8 ECM
 
 
 @pytest.fixture
-def dbc_db():
+def dbc_db() -> Any:
     return cantools.database.load_string(SINGLE_DBC, database_format="dbc")
 
 
@@ -119,7 +120,7 @@ def test_dbc_channel_format() -> None:
     assert dbc_channel("RPM") == "dbc:RPM"
 
 
-def _long_can_row(channel: str, payload: bytes, ts: float = 1.0) -> dict:
+def _long_can_row(channel: str, payload: bytes, ts: float = 1.0) -> dict[str, Any]:
     return {
         "timestamp": pd.to_datetime(ts, unit="s", utc=True),
         "source": "can",
@@ -137,7 +138,7 @@ def _long_can_row(channel: str, payload: bytes, ts: float = 1.0) -> dict:
     }
 
 
-def test_decode_can_rows_dbc_appends_signal_rows(dbc_db) -> None:
+def test_decode_can_rows_dbc_appends_signal_rows(dbc_db: Any) -> None:
     # DBC big-endian / Motorola bit numbering is fiddly; round-trip
     # through cantools.encode so the test doesn't have to encode the
     # signal layout itself.
@@ -151,7 +152,7 @@ def test_decode_can_rows_dbc_appends_signal_rows(dbc_db) -> None:
     assert rows.iloc[0]["value_number"] == pytest.approx(700.0, abs=0.5)
 
 
-def test_decode_can_rows_dbc_skips_unknown_can_ids(dbc_db) -> None:
+def test_decode_can_rows_dbc_skips_unknown_can_ids(dbc_db: Any) -> None:
     long = pd.DataFrame([_long_can_row("999", bytes(8))])
     out = decode_can_rows_dbc(long, dbc_db)
     assert (out["source"] == DBC_SOURCE).sum() == 0
@@ -165,7 +166,7 @@ def test_decode_can_rows_dbc_handles_empty_frame() -> None:
     assert out.empty
 
 
-def test_decode_can_rows_dbc_handles_too_short_payload(dbc_db) -> None:
+def test_decode_can_rows_dbc_handles_too_short_payload(dbc_db: Any) -> None:
     # 0x551 expects 8 bytes; give 4 — cantools should reject and we skip.
     long = pd.DataFrame([_long_can_row("551", b"\x00\x00\x00\x00")])
     out = decode_can_rows_dbc(long, dbc_db)
@@ -174,7 +175,7 @@ def test_decode_can_rows_dbc_handles_too_short_payload(dbc_db) -> None:
     assert len(out) == 1
 
 
-def test_decode_can_rows_dbc_passes_through_when_no_can_rows(dbc_db) -> None:
+def test_decode_can_rows_dbc_passes_through_when_no_can_rows(dbc_db: Any) -> None:
     long = pd.DataFrame(
         [
             {
@@ -192,7 +193,7 @@ def test_decode_can_rows_dbc_passes_through_when_no_can_rows(dbc_db) -> None:
     assert (out["source"] == DBC_SOURCE).sum() == 0
 
 
-def test_decode_can_rows_dbc_preserves_unknown_frames_alongside_decoded(dbc_db) -> None:
+def test_decode_can_rows_dbc_preserves_unknown_frames_alongside_decoded(dbc_db: Any) -> None:
     rows = [
         _long_can_row("551", bytes([0, 0, 0x15, 0xE0, 0, 0, 0, 0]), ts=1.0),
         _long_can_row("999", bytes(8), ts=2.0),  # unknown — pass through

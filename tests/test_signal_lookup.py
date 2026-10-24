@@ -55,7 +55,7 @@ def test_can_id_to_module_unknown_returns_none():
 # ---------------------------------------------------------------------------
 
 
-def test_load_catalog_round_trip(tmp_path: Path):
+def test_load_catalog_round_trip(tmp_path: Path) -> None:
     payload = {
         "modules": [
             {

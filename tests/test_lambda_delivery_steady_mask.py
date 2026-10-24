@@ -9,12 +9,21 @@ with cuts, NaNs, duplicate stamps and gaps.
 from __future__ import annotations
 
 import numpy as np
+import numpy.typing as npt
 import pytest
 
 from src.analysis.lambda_delivery import _seconds_since_cut, _steady_target_mask
 
 
-def _walk(times, target, cut, *, dwell_s, max_gap_s, tolerance):  # type: ignore[no-untyped-def]
+def _walk(
+    times: npt.NDArray[np.float64],
+    target: npt.NDArray[np.float64],
+    cut: npt.NDArray[np.bool_],
+    *,
+    dwell_s: float,
+    max_gap_s: float,
+    tolerance: float,
+) -> tuple[npt.NDArray[np.bool_], npt.NDArray[np.float64]]:
     """The pre-R05.12 loop, verbatim in substance."""
     n = len(times)
     steady = np.zeros(n, dtype=bool)

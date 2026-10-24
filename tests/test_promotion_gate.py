@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 
 from src.models.promotion_gate import (
     compute_golden_divergence,
@@ -19,7 +20,7 @@ _CLEAN_DISPOSITIONS = {
 }
 
 
-def _report(*, recall: float, per_hour: float) -> dict:
+def _report(*, recall: float, per_hour: float) -> dict[str, Any]:
     """An evaluate_detectors report (R06.5) grading one IF cell and rate."""
     return evaluation_report({"isolation_forest": recall}, {"isolation_forest": per_hour})
 
@@ -28,10 +29,10 @@ def _record(
     run_id: str,
     *,
     calibration: str | None = None,
-    dispositions: dict | None = _CLEAN_DISPOSITIONS,
+    dispositions: dict[str, Any] | None = _CLEAN_DISPOSITIONS,
     report_path: str | None = None,
 ) -> TrainingRunRecord:
-    metrics: dict = {}
+    metrics: dict[str, Any] = {}
     if calibration is not None:
         metrics["manifest_extras"] = {"calibration": calibration}
     return TrainingRunRecord(
@@ -45,7 +46,7 @@ def _record(
     )
 
 
-def _dispositions_with_quarantine_fraction(fraction: float, *, total: int = 1000) -> dict:
+def _dispositions_with_quarantine_fraction(fraction: float, *, total: int = 1000) -> dict[str, Any]:
     quarantine = int(total * fraction)
     return {
         "groups": [],
@@ -384,7 +385,9 @@ def test_compute_golden_divergence_handles_zero_golden_rate() -> None:
 # ---------------------------------------------------------------------------
 
 
-def _two_detector_report(*, sequence_recall: float | None, sequence_per_hour: float | None) -> dict:
+def _two_detector_report(
+    *, sequence_recall: float | None, sequence_per_hour: float | None
+) -> dict[str, Any]:
     return evaluation_report(
         {"isolation_forest": 1.0, "sequence": sequence_recall},
         {"isolation_forest": 1.0, "sequence": sequence_per_hour},

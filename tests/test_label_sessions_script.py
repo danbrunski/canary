@@ -8,9 +8,11 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
 import yaml
 
 import scripts.label_sessions as label_sessions_cli
+from src.analysis.fingerprint import compute_fingerprint
 from src.analysis.reference_epoch import (  # noqa: E402
     ReferenceEpoch,
     StatSummary,
@@ -62,13 +64,15 @@ def test_main_writes_classification_and_fingerprint(tmp_path: Path) -> None:
     assert (session / FINGERPRINT_FILENAME).exists()
 
 
-def test_fingerprint_computed_exactly_once_per_session(tmp_path: Path, monkeypatch) -> None:
+def test_fingerprint_computed_exactly_once_per_session(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """One post-session pass: the fingerprint hook fires once per targeted
     session per invocation, not once per classification pass plus a
     duplicate corpus walk."""
     session = _write_session(tmp_path)
     calls: list[str] = []
-    real_compute = label_sessions_cli.compute_fingerprint
+    real_compute = compute_fingerprint
 
     def _spy(session_dir: Path, config: object) -> dict[str, float]:
         calls.append(session_dir.name)

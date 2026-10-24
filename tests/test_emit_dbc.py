@@ -8,10 +8,13 @@ fails loudly.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from pathlib import Path
+from typing import Any, cast
 
 import cantools
 import pytest
+from cantools.database.can import Database as CanDatabase
 
 from src.decode.bindings import load_bindings
 from tools.emit_dbc import build_database
@@ -43,24 +46,25 @@ signals:
 """
 
 
-def _db(tmp_path):  # type: ignore[no-untyped-def]
+def _db(tmp_path: Path) -> tuple[CanDatabase, Path]:
     bpath = tmp_path / "bindings.yaml"
     bpath.write_text(_BINDINGS)
     dbc_str = build_database(bpath).as_dbc_string()
-    return cantools.database.load_string(dbc_str, database_format="dbc"), bpath
+    db = cast(CanDatabase, cantools.database.load_string(dbc_str, database_format="dbc"))
+    return db, bpath
 
 
-def test_dbc_roundtrip_big_endian_scaled(tmp_path) -> None:  # type: ignore[no-untyped-def]
+def test_dbc_roundtrip_big_endian_scaled(tmp_path: Path) -> None:
     db, _ = _db(tmp_path)
     msg = db.get_message_by_frame_id(0x1F9)
     # bytes 2-3 = 0x1840 = 6208 → ×0.125 = 776.0 rpm; byte 0 raw = 0x20.
     frame = bytes([0x20, 0x00, 0x18, 0x40, 0, 0, 0, 0])
-    decoded = msg.decode(frame)
+    decoded = cast(Mapping[str, Any], msg.decode(frame))
     assert decoded["ECM_RPM"] == 776.0
     assert decoded["FLAG_BYTE0"] == 0x20  # unscaled binding → raw passthrough
 
 
-def test_dbc_matches_bindings_decoder(tmp_path) -> None:  # type: ignore[no-untyped-def]
+def test_dbc_matches_bindings_decoder(tmp_path: Path) -> None:
     """Cross-check: cantools decode == our own decode_raw/apply_scaling."""
     from src.decode.bindings import apply_scaling, decode_raw
 
@@ -68,23 +72,25 @@ def test_dbc_matches_bindings_decoder(tmp_path) -> None:  # type: ignore[no-unty
     rpm_sig = next(s for s in load_bindings(bpath).signals if s.name == "ECM_RPM")
     frame = bytes([0xAA, 0xBB, 0x0A, 0xF0, 0, 0, 0, 0])  # bytes 2-3 = 0x0AF0 = 2800
     ours = apply_scaling(rpm_sig, decode_raw(rpm_sig, frame) or 0)
-    theirs = db.get_message_by_frame_id(0x1F9).decode(frame)["ECM_RPM"]
+    theirs = cast(Mapping[str, Any], db.get_message_by_frame_id(0x1F9).decode(frame))["ECM_RPM"]
     assert ours == theirs == 350.0  # 2800 × 0.125
 
 
-def test_real_bindings_emit_loads(tmp_path) -> None:  # type: ignore[no-untyped-def]
+def test_real_bindings_emit_loads(tmp_path: Path) -> None:
     """The real data/bindings.yaml emits a DBC cantools can parse back."""
     from pathlib import Path
 
     db = build_database(Path("data/bindings.yaml"))
-    reloaded = cantools.database.load_string(db.as_dbc_string(), database_format="dbc")
+    reloaded = cast(
+        CanDatabase, cantools.database.load_string(db.as_dbc_string(), database_format="dbc")
+    )
     assert len(reloaded.messages) == len(db.messages) > 0
     # ECM_RPM (confirmed) must survive the round trip on 0x1F9.
     rpm = reloaded.get_message_by_frame_id(0x1F9)
     assert any(s.name == "ECM_RPM" for s in rpm.signals)
 
 
-def test_model_feature_flag_does_not_change_the_emitted_dbc(tmp_path) -> None:  # type: ignore[no-untyped-def]
+def test_model_feature_flag_does_not_change_the_emitted_dbc(tmp_path: Path) -> None:
     """`model_feature: false` keeps a signal out of the trained feature set and
     nothing else: the DBC (and so every decoder built from it) is unchanged."""
     plain = tmp_path / "plain.yaml"

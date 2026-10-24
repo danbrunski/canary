@@ -48,7 +48,7 @@ from collections.abc import Callable
 from datetime import timedelta
 from functools import partial
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import numpy as np
 import pandas as pd
@@ -748,7 +748,7 @@ def _documents_scenario(tmp: Path) -> dict[str, Any]:
         "neither": {"session": "s", "reason": "x"},
         "no_reason": {"session": "s", "exclude": True, "reason": ""},
     }.items():
-        out[f"resolution_{bad}"] = _refusal(lambda p=payload: bv.ProvenanceResolution(**p))
+        out[f"resolution_{bad}"] = _refusal(lambda p=payload: bv.ProvenanceResolution(**p))  # type: ignore[misc]
     out["regime_edges"] = _refusal(
         lambda: bv.ReportRegimes.model_validate(
             {"axes": {"a": {"channel": "c", "unit": "u", "edges": [2, 1]}}}
@@ -848,7 +848,7 @@ def _documents_scenario(tmp: Path) -> dict[str, Any]:
     out["constants"]["_PAIRABLE_BASES"] = sorted(bv._PAIRABLE_BASES)
     out["constants"]["_PROFILE_SCOPED_KINDS"] = sorted(str(k) for k in bv._PROFILE_SCOPED_KINDS)
     out["__all__"] = list(bv.__all__)
-    return _norm(out)
+    return cast(dict[str, Any], _norm(out))
 
 
 def _evaluation_frame_scenario(tmp: Path) -> dict[str, Any]:
@@ -868,7 +868,7 @@ def _evaluation_frame_scenario(tmp: Path) -> dict[str, Any]:
             models,
             bindings_path=BINDINGS_YAML,
             dids_path=DIDS_YAML,
-            decode_can=decode,  # type: ignore[arg-type]
+            decode_can=decode,
         )
         out[decode] = _frame(frame)
     unstamped = bv.build_evaluation_frame(
@@ -895,11 +895,11 @@ SCENARIOS: dict[str, Callable[[Path], dict[str, Any]]] = {
 
 def _run(name: str, tmp: Path) -> Any:
     # Round-trip through JSON so the comparison sees exactly what is stored.
-    return json.loads(json.dumps(_norm(SCENARIOS[name](tmp)), sort_keys=True))
+    return cast(dict[str, Any], json.loads(json.dumps(_norm(SCENARIOS[name](tmp)), sort_keys=True)))
 
 
 def _golden() -> dict[str, Any]:
-    return json.loads(GOLDEN.read_text())
+    return cast(dict[str, Any], json.loads(GOLDEN.read_text()))
 
 
 def _first_difference(expected: Any, actual: Any, path: str = "") -> str | None:

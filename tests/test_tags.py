@@ -5,18 +5,20 @@ from __future__ import annotations
 import json
 import threading
 from pathlib import Path
+from typing import Any
 
 import pytest
 
-from src.collection.tags import TAGS_FILENAME, find_latest_session, write_correction, write_tag
+from src.collection.tags import find_latest_session, write_correction, write_tag
+from src.session import TAGS_FILENAME
 
 
-def _read_tags(session_dir: Path) -> list[dict]:
+def _read_tags(session_dir: Path) -> list[dict[str, Any]]:
     text = (session_dir / TAGS_FILENAME).read_text()
     return [json.loads(line) for line in text.splitlines() if line.strip()]
 
 
-def test_write_tag_appends_jsonl(tmp_path: Path):
+def test_write_tag_appends_jsonl(tmp_path: Path) -> None:
     write_tag(tmp_path, "hello")
     write_tag(tmp_path, "world", kind="phase_start", phase="warmup")
 
@@ -28,19 +30,19 @@ def test_write_tag_appends_jsonl(tmp_path: Path):
     assert tags[1] == {**tags[1], "label": "world", "kind": "phase_start", "phase": "warmup"}
 
 
-def test_write_tag_uses_explicit_timestamp(tmp_path: Path):
+def test_write_tag_uses_explicit_timestamp(tmp_path: Path) -> None:
     record = write_tag(tmp_path, "backfilled", timestamp=1234567890.5)
     assert record["t"] == 1234567890.5
     assert _read_tags(tmp_path)[0]["t"] == 1234567890.5
 
 
-def test_write_tag_rejects_t_in_extra_fields(tmp_path: Path):
+def test_write_tag_rejects_t_in_extra_fields(tmp_path: Path) -> None:
     """`t` would silently overwrite the record's timestamp — must error."""
     with pytest.raises(ValueError, match="reserved tag field 't'"):
         write_tag(tmp_path, "x", t=999.0)
 
 
-def test_write_tag_concurrent_writers_dont_interleave(tmp_path: Path):
+def test_write_tag_concurrent_writers_dont_interleave(tmp_path: Path) -> None:
     """A second terminal tagging while the RE runner also tags must produce
     valid JSONL — no half-written lines or merged records."""
     n_per_thread = 50
@@ -63,7 +65,7 @@ def test_write_tag_concurrent_writers_dont_interleave(tmp_path: Path):
     assert all("label" in tag and "thread" in tag for tag in tags)
 
 
-def test_find_latest_session_picks_newest_timestamped_name(tmp_path: Path):
+def test_find_latest_session_picks_newest_timestamped_name(tmp_path: Path) -> None:
     older = tmp_path / "2026-05-10T100000"
     newer = tmp_path / "2026-05-10T200000"
     older.mkdir()
@@ -72,14 +74,14 @@ def test_find_latest_session_picks_newest_timestamped_name(tmp_path: Path):
     assert find_latest_session(tmp_path) == newer
 
 
-def test_find_latest_session_ignores_non_timestamp_directories(tmp_path: Path):
+def test_find_latest_session_ignores_non_timestamp_directories(tmp_path: Path) -> None:
     (tmp_path / "scratch").mkdir()
     sess = tmp_path / "2026-05-10T100000"
     sess.mkdir()
     assert find_latest_session(tmp_path) == sess
 
 
-def test_find_latest_session_returns_an_open_capture(tmp_path: Path):
+def test_find_latest_session_returns_an_open_capture(tmp_path: Path) -> None:
     """R01.1: "which session is live?" includes captures.
 
     The plain-name-only ``max(name)`` tagged the *previous* session for the
@@ -92,7 +94,7 @@ def test_find_latest_session_returns_an_open_capture(tmp_path: Path):
     assert find_latest_session(tmp_path) == capture
 
 
-def test_find_latest_session_orders_by_time_not_name(tmp_path: Path):
+def test_find_latest_session_orders_by_time_not_name(tmp_path: Path) -> None:
     """``_capture-`` sorts before every plain name as a string."""
     (tmp_path / "_capture-fuel-map-2026-09-20T101500").mkdir()
     newer = tmp_path / "2026-09-20T110000"
@@ -100,7 +102,7 @@ def test_find_latest_session_orders_by_time_not_name(tmp_path: Path):
     assert find_latest_session(tmp_path) == newer
 
 
-def test_find_latest_session_never_picks_replay_output(tmp_path: Path):
+def test_find_latest_session_never_picks_replay_output(tmp_path: Path) -> None:
     """A tag records a physical action; replay rows are re-emitted."""
     sess = tmp_path / "2026-09-20T100000"
     sess.mkdir()
@@ -108,17 +110,17 @@ def test_find_latest_session_never_picks_replay_output(tmp_path: Path):
     assert find_latest_session(tmp_path) == sess
 
 
-def test_find_latest_session_errors_when_empty(tmp_path: Path):
+def test_find_latest_session_errors_when_empty(tmp_path: Path) -> None:
     with pytest.raises(FileNotFoundError, match="no session"):
         find_latest_session(tmp_path)
 
 
-def test_find_latest_session_errors_when_root_missing(tmp_path: Path):
+def test_find_latest_session_errors_when_root_missing(tmp_path: Path) -> None:
     with pytest.raises(FileNotFoundError, match="does not exist"):
         find_latest_session(tmp_path / "nonexistent")
 
 
-def test_find_latest_session_ignores_files(tmp_path: Path):
+def test_find_latest_session_ignores_files(tmp_path: Path) -> None:
     (tmp_path / "stray-file").write_text("not a session")
     sess = tmp_path / "2026-05-10T100000"
     sess.mkdir()
@@ -130,7 +132,7 @@ def test_find_latest_session_ignores_files(tmp_path: Path):
 # ---------------------------------------------------------------------------
 
 
-def test_write_correction_appends_invalidate_record(tmp_path: Path):
+def test_write_correction_appends_invalidate_record(tmp_path: Path) -> None:
     write_correction(tmp_path, "hvac_ac_on", reason="never engaged")
     tags = _read_tags(tmp_path)
     assert len(tags) == 1
@@ -142,18 +144,18 @@ def test_write_correction_appends_invalidate_record(tmp_path: Path):
     assert record["label"].startswith("invalidate:")
 
 
-def test_write_correction_narrows_by_target_t(tmp_path: Path):
+def test_write_correction_narrows_by_target_t(tmp_path: Path) -> None:
     write_correction(tmp_path, "right_turn_sharp", target_t=1778811025.0123)
     record = _read_tags(tmp_path)[0]
     assert record["target_t"] == 1778811025.0123
 
 
-def test_write_correction_uses_explicit_timestamp(tmp_path: Path):
+def test_write_correction_uses_explicit_timestamp(tmp_path: Path) -> None:
     record = write_correction(tmp_path, "x", timestamp=42.0)
     assert record["t"] == 42.0
 
 
-def test_write_correction_coexists_with_event_tags(tmp_path: Path):
+def test_write_correction_coexists_with_event_tags(tmp_path: Path) -> None:
     """Real-world: event tags written during the session, corrections appended after."""
     write_tag(tmp_path, "hvac_ac_on")
     write_tag(tmp_path, "steady_25_flat")

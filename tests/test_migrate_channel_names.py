@@ -51,7 +51,7 @@ def _write_session(root: Path) -> Path:
         ],
         schema=TELEMETRY_SCHEMA,
     )
-    pq.write_table(table, session / "telemetry-00000.parquet", compression="snappy")
+    pq.write_table(table, session / "telemetry-00000.parquet", compression="snappy")  # type: ignore[no-untyped-call]
     (session / "capture_quality.json").write_text(
         json.dumps(
             {
@@ -161,11 +161,11 @@ def test_dry_run_changes_nothing_but_reports(
 
 def test_apply_rewrites_only_mapped_names(tree: dict[str, Path]) -> None:
     chunk = tree["session"] / "telemetry-00000.parquet"
-    before = pq.read_table(chunk)
+    before = pq.read_table(chunk)  # type: ignore[no-untyped-call]
 
     assert tool.main(_args(tree, "--apply", "--daemon-stopped")) == tool.EXIT_OK
 
-    after = pq.read_table(chunk)
+    after = pq.read_table(chunk)  # type: ignore[no-untyped-call]
     assert after.schema == before.schema
     assert after.num_rows == before.num_rows
     assert after.column("channel").to_pylist() == [
@@ -336,7 +336,7 @@ def _write_chunk(path: Path, channels: list[tuple[str, str]]) -> Path:
         ],
         schema=TELEMETRY_SCHEMA,
     )
-    pq.write_table(table, path, compression="snappy")
+    pq.write_table(table, path, compression="snappy")  # type: ignore[no-untyped-call]
     return path
 
 
@@ -358,13 +358,13 @@ def test_memory_readings_in_parquet_are_renamed_exactly(tmp_path: Path) -> None:
         sessions / "_capture-ram-study-2026-10-04T204557" / "telemetry-00000.parquet",
         [(source, before) for source, before, _ in _MEM_ROWS],
     )
-    before = pq.read_table(chunk)
+    before = pq.read_table(chunk)  # type: ignore[no-untyped-call]
 
     assert tool.main(_knock("--sessions-root", str(sessions))) == tool.EXIT_OK
-    assert pq.read_table(chunk).equals(before)  # dry run
+    assert pq.read_table(chunk).equals(before)  # type: ignore[no-untyped-call]  # dry run
 
     assert tool.main(_knock("--sessions-root", str(sessions), "--apply", "--daemon-stopped")) == 0
-    after = pq.read_table(chunk)
+    after = pq.read_table(chunk)  # type: ignore[no-untyped-call]
     assert after.column("channel").to_pylist() == [expected for *_, expected in _MEM_ROWS]
     assert after.schema == before.schema
     for name in before.schema.names:

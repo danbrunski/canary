@@ -7,8 +7,11 @@ the happy path.
 
 from __future__ import annotations
 
+import json
+from collections.abc import Sequence
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from typing import Any
 
 import pandas as pd
 import pytest
@@ -21,6 +24,7 @@ from src.analysis.channels import (
     read_aligned,
     read_channels,
 )
+from src.signals.afr import AfrCalibration
 from src.storage.parquet_writer import write_records_to_parquet
 from src.telemetry import TelemetryRecord
 
@@ -271,7 +275,7 @@ def test_a_frame_without_metadata_has_unknown_provenance() -> None:
     assert out[TIMESTAMP_BASIS_COLUMN].iloc[0] == "unknown"
 
 
-def _metadata_frame(metadata: list[str | None]) -> pd.DataFrame:
+def _metadata_frame(metadata: Sequence[str | None]) -> pd.DataFrame:
     """One OBD row per raw ``metadata_json`` text, in that order."""
     return pd.DataFrame(
         {
@@ -353,17 +357,15 @@ def test_metadata_json_is_parsed_at_most_once_per_row(monkeypatch: pytest.Monkey
     122 s ``recompute_capture_quality`` on a 3.5 M-row capture (2026-09-17).
     A caller that needs no acquisition clock must pay nothing at all.
     """
-    import src.analysis.channels as channels
-
     calls = 0
-    real_loads = channels.json.loads
+    real_loads = json.loads
 
-    def counting_loads(text: str, /, **kwargs: object) -> object:
+    def counting_loads(text: str, /, **kwargs: Any) -> object:
         nonlocal calls
         calls += 1
         return real_loads(text, **kwargs)
 
-    monkeypatch.setattr(channels.json, "loads", counting_loads)
+    monkeypatch.setattr(json, "loads", counting_loads)
     frame = _metadata_frame(
         [f'{{"acquired_at": {T0.timestamp() + i}}}' for i in range(4)]
         + ['{"can_id": 1783, "dlc": 8}'] * 6
@@ -466,9 +468,7 @@ def test_missing_binding_names_the_catalog(tmp_path: Path) -> None:
         read_channels(session, ["decoded:NOT_A_SIGNAL"], bindings_path=BINDINGS, dids_path=DIDS)
 
 
-def _calibration(convention: str):
-    from src.signals.afr import AfrCalibration
-
+def _calibration(convention: str) -> AfrCalibration:
     return AfrCalibration(commanded_equiv_ratio_convention=convention)  # type: ignore[arg-type]
 
 

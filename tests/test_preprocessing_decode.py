@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import Any, cast
 
 import numpy as np
 import pandas as pd
@@ -56,7 +57,7 @@ def _bindings(*signals: Signal) -> Bindings:
     return Bindings(schema_version=1, signals=list(signals))
 
 
-def _sig(**kw) -> Signal:
+def _sig(**kw: Any) -> Signal:
     defaults = dict(
         name="TEST_SIG",
         module="ECM",
@@ -361,11 +362,11 @@ def _write_synthetic_parquet_session(root: Path) -> Path:
         },
     ]
     table = pa.Table.from_pylist(rows, schema=TELEMETRY_SCHEMA)
-    pq.write_table(table, session / "telemetry-00000.parquet")
+    pq.write_table(table, session / "telemetry-00000.parquet")  # type: ignore[no-untyped-call]
     return session
 
 
-def test_read_session_decoded_appends_decoded_rows(tmp_path: Path):
+def test_read_session_decoded_appends_decoded_rows(tmp_path: Path) -> None:
     session = _write_synthetic_parquet_session(tmp_path)
     bindings_path = tmp_path / "bindings.yaml"
     bindings_path.write_text(
@@ -391,7 +392,7 @@ signals:
     assert sorted(decoded["value"].tolist()) == [42.0, 55.0]
 
 
-def test_read_session_decoded_falls_back_when_no_bindings_file(tmp_path: Path):
+def test_read_session_decoded_falls_back_when_no_bindings_file(tmp_path: Path) -> None:
     session = _write_synthetic_parquet_session(tmp_path)
     missing = tmp_path / "nope.yaml"
     out = read_session_decoded(session, bindings_path=missing)
@@ -575,7 +576,7 @@ def _sentinel_frames() -> list[tuple[float, int, bytes]]:
 def _rows_as_tuples(frame: pd.DataFrame) -> set[tuple[float, str, object]]:
     decoded = frame[frame["source"] == "decoded"]
     out: set[tuple[float, str, object]] = set()
-    for row in decoded.itertuples():
+    for row in cast(Any, decoded.itertuples()):
         value = row.value_text if isinstance(row.value_text, str) else float(row.value_number)
         out.add((round(pd.Timestamp(row.timestamp).timestamp(), 3), str(row.channel), value))
     return out

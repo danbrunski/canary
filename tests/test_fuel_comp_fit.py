@@ -100,7 +100,7 @@ def _logged() -> FuelCompCalibration:
 
 
 def _prepared(rows: list[dict[str, Any]]) -> pd.DataFrame:
-    base = {name: np.nan for name in PREPARED_COLUMNS}
+    base: dict[str, Any] = {name: np.nan for name in PREPARED_COLUMNS}
     base.update(route="closed_loop", unvalidated_route=False, fit_refusal=None, k_now=28715)
     rows = [{"drive": row.get("session"), **row} for row in rows]
     frame = pd.DataFrame([{**base, **row} for row in rows], columns=list(PREPARED_COLUMNS))
@@ -561,7 +561,7 @@ def test_the_report_is_a_proposal_and_the_outputs_are_never_a_rom(
     tmp_path: Path, declaration: FuelCompDeclaration
 ) -> None:
     logged = _logged()
-    specs = [
+    specs: list[dict[str, Any]] = [
         {"session": f"drive-{d}", "counts": (c, c + 2), "error": 2.0 + 0.1 * d, "maf": 30.0}
         for d in range(4)
         for c in range(300, 420, 4)

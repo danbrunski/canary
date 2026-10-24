@@ -10,8 +10,9 @@ from __future__ import annotations
 
 import hashlib
 import json
+from collections.abc import Callable
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import pytest
 from fastapi import FastAPI, HTTPException
@@ -23,6 +24,9 @@ from src.dashboard.routes.stored_sessions import (
     session_export_checksum,
 )
 from src.storage.sessions import write_session_zip
+
+#: ``dict`` stands in for the real describe callback (identity on the dict it is given).
+_DESCRIBE = cast("Callable[[str], dict[str, Any]]", dict)
 
 
 def _session(root: Path) -> Path:
@@ -60,7 +64,9 @@ def test_session_export_checksum_matches_the_zip_hash(tmp_path: Path) -> None:
 def test_metadata_carries_a_session_only_when_the_store_reindexes(tmp_path: Path) -> None:
     """Daemon shape: no ``session`` key. Companion shape: the re-indexed session."""
     session = _session(tmp_path)
-    daemon = _client(SessionStore(resolve=_resolver(session), describe=dict, export_prefix="x-"))
+    daemon = _client(
+        SessionStore(resolve=_resolver(session), describe=_DESCRIBE, export_prefix="x-")
+    )
     body = daemon.post(
         f"/control/sessions/{session.name}/metadata", json={"metadata": {"route": "mesa"}}
     ).json()
@@ -74,7 +80,9 @@ def test_metadata_carries_a_session_only_when_the_store_reindexes(tmp_path: Path
         return {"refreshed": True}
 
     companion = _client(
-        SessionStore(resolve=_resolver(session), describe=dict, export_prefix="x-", reindex=reindex)
+        SessionStore(
+            resolve=_resolver(session), describe=_DESCRIBE, export_prefix="x-", reindex=reindex
+        )
     )
     body = companion.post(
         f"/control/sessions/{session.name}/metadata", json={"metadata": {"route": "mesa"}}
@@ -87,7 +95,7 @@ def test_pin_serializes_through_the_reindex_when_there_is_one(tmp_path: Path) ->
     session = _session(tmp_path)
     store = SessionStore(
         resolve=_resolver(session),
-        describe=dict,
+        describe=_DESCRIBE,
         export_prefix="x-",
         reindex=lambda path: {"session_id": path.name, "reimported": True},
     )
@@ -103,7 +111,7 @@ def test_pin_serializes_through_the_reindex_when_there_is_one(tmp_path: Path) ->
     assert body["metadata"]["terrain"] == "city"
 
     # Without one, the written session is re-summarized from disk.
-    plain = SessionStore(resolve=_resolver(session), describe=dict, export_prefix="x-")
+    plain = SessionStore(resolve=_resolver(session), describe=_DESCRIBE, export_prefix="x-")
     body = _client(plain).post(f"/control/sessions/{session.name}/unpin").json()
     assert body["session"]["session_id"] == session.name
 
@@ -114,7 +122,7 @@ def test_delete_runs_the_guard_first_and_the_index_drop_after(tmp_path: Path) ->
     published: list[tuple[str, dict[str, Any]]] = []
     store = SessionStore(
         resolve=_resolver(session),
-        describe=dict,
+        describe=_DESCRIBE,
         export_prefix="x-",
         guard_delete=lambda sid: calls.append(f"guard:{sid}"),
         after_delete=lambda sid: calls.append(f"after:{sid}:{session.exists()}"),
@@ -133,7 +141,7 @@ def test_a_guard_refusal_leaves_the_session_on_disk(tmp_path: Path) -> None:
         raise HTTPException(status_code=409, detail="cannot delete the active capture session")
 
     store = SessionStore(
-        resolve=_resolver(session), describe=dict, export_prefix="x-", guard_delete=refuse
+        resolve=_resolver(session), describe=_DESCRIBE, export_prefix="x-", guard_delete=refuse
     )
     response = _client(store).delete(f"/control/sessions/{session.name}")
     assert response.status_code == 409
@@ -155,7 +163,7 @@ def test_every_write_is_published_with_its_payload(
     published: list[tuple[str, dict[str, Any]]] = []
     store = SessionStore(
         resolve=_resolver(session),
-        describe=dict,
+        describe=_DESCRIBE,
         export_prefix="x-",
         on_write=lambda name, payload: published.append((name, payload)),
     )

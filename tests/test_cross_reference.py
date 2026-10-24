@@ -43,7 +43,7 @@ def test_linear_regression_handles_noise():
 
 
 def test_linear_regression_constant_x_returns_zero():
-    pairs = [(5.0, y) for y in range(0, 20)]
+    pairs: list[tuple[float, float]] = [(5.0, y) for y in range(0, 20)]
     slope, _, r2 = linear_regression(pairs)
     assert slope == 0.0
     assert r2 == 0.0
@@ -99,7 +99,7 @@ def test_pair_by_timestamp_empty_inputs():
     assert pair_by_timestamp([(1.0, 2.0)], []) == []
 
 
-def test_pid_jsonl_loaders_skip_malformed_lines(tmp_path: Path):
+def test_pid_jsonl_loaders_skip_malformed_lines(tmp_path: Path) -> None:
     path = tmp_path / "pids.jsonl"
     path.write_text(
         json.dumps({"t": 1.0, "pid": "RPM", "value": 700.0, "unit": "rpm"}) + "\n"
@@ -146,7 +146,7 @@ def _write_pids_jsonl(path: Path, samples: list[tuple[float, str, float, str]]) 
     path.write_text("\n".join(lines) + "\n")
 
 
-def test_cross_reference_recovers_battery_voltage_scaling(tmp_path: Path):
+def test_cross_reference_recovers_battery_voltage_scaling(tmp_path: Path) -> None:
     """0x1204 raw / 16 = battery voltage. After regression we should get
     slope ≈ 1/16, offset ≈ 0, high r²."""
     session = tmp_path / "synth"
@@ -181,7 +181,7 @@ def test_cross_reference_recovers_battery_voltage_scaling(tmp_path: Path):
     assert top.n_pairs >= 10
 
 
-def test_cross_reference_errors_when_no_pids_jsonl(tmp_path: Path):
+def test_cross_reference_errors_when_no_pids_jsonl(tmp_path: Path) -> None:
     """Helpful error when the OBD sidecar doesn't exist."""
     session = tmp_path / "synth-noobd"
     session.mkdir()
@@ -193,7 +193,7 @@ def test_cross_reference_errors_when_no_pids_jsonl(tmp_path: Path):
         cross_reference(session)
 
 
-def test_cross_reference_skips_low_correlation_pairings(tmp_path: Path):
+def test_cross_reference_skips_low_correlation_pairings(tmp_path: Path) -> None:
     """A DID whose values are uncorrelated with any PID should not bind."""
     session = tmp_path / "synth-noise"
     session.mkdir()

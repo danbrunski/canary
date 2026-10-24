@@ -416,7 +416,7 @@ async def test_the_pipeline_refuses_to_score_a_tick_older_than_the_last(
         for index in (0, 1):
             now = start + timedelta(seconds=index)
             _observe(source, now - timedelta(milliseconds=200))
-            pipeline._wall_clock = lambda now=now: now  # type: ignore[misc]
+            pipeline._wall_clock = lambda now=now: now
             requests.append(
                 await pipeline._snapshot(
                     TickSlot(
@@ -429,7 +429,7 @@ async def test_the_pipeline_refuses_to_score_a_tick_older_than_the_last(
                 )
             )
         pipeline._dispatch(requests[1])
-        await asyncio.wait_for(pipeline.inflight, timeout=5.0)  # type: ignore[arg-type]
+        await asyncio.wait_for(pipeline.inflight, timeout=5.0)
         pipeline._dispatch(requests[0])  # older than the tick just scored
         assert pipeline.inflight is not None and pipeline.inflight.done()
     finally:

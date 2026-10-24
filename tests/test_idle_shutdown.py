@@ -8,6 +8,8 @@ power off the operator's bench rig.
 from __future__ import annotations
 
 import subprocess
+from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -15,9 +17,11 @@ from src.daemon.idle_shutdown import (
     DEFAULT_ACTIVE_STATES,
     DEFAULT_IDLE_STATES,
     IdleShutdownDecider,
+    IdleShutdownMonitor,
     input_power_present,
     run_shutdown,
 )
+from src.daemon.ups import read_watchdog_status
 
 
 def _parked(d: IdleShutdownDecider, *, now: float, input_present: bool | None = True) -> bool:
@@ -36,7 +40,7 @@ class TestInputPowerPresent:
         assert input_power_present({"input_lost": True}) is False
 
     @pytest.mark.parametrize("status", [None, {}, {"soc": 90}, {"input_lost": "no"}])
-    def test_unknown_when_watchdog_silent_or_old(self, status) -> None:
+    def test_unknown_when_watchdog_silent_or_old(self, status: dict[str, Any] | None) -> None:
         """No heartbeat, or one without the field, must read as unknown —
         never as 'power is fine, go ahead and shut down'."""
         assert input_power_present(status) is None
@@ -183,16 +187,16 @@ class TestStateSets:
 
 
 class TestRunShutdown:
-    def test_dry_run_does_not_execute(self, monkeypatch) -> None:
+    def test_dry_run_does_not_execute(self, monkeypatch: pytest.MonkeyPatch) -> None:
         called: list[object] = []
         monkeypatch.setattr(subprocess, "run", lambda *a, **k: called.append(a))
         assert run_shutdown(("systemctl", "poweroff"), dry_run=True) is True
         assert called == []
 
-    def test_executes_when_not_dry_run(self, monkeypatch) -> None:
+    def test_executes_when_not_dry_run(self, monkeypatch: pytest.MonkeyPatch) -> None:
         called: list[tuple[str, ...]] = []
 
-        def _fake_run(cmd, **kwargs):
+        def _fake_run(cmd: tuple[str, ...], **kwargs: Any) -> subprocess.CompletedProcess[str]:
             called.append(cmd)
             return subprocess.CompletedProcess(cmd, 0)
 
@@ -203,11 +207,13 @@ class TestRunShutdown:
     @pytest.mark.parametrize(
         "exc", [OSError("nope"), subprocess.CalledProcessError(1, ("systemctl",))]
     )
-    def test_failure_is_swallowed(self, monkeypatch, exc) -> None:
+    def test_failure_is_swallowed(
+        self, monkeypatch: pytest.MonkeyPatch, exc: BaseException
+    ) -> None:
         """A daemon that crashes because poweroff failed is worse than one
         that keeps collecting."""
 
-        def _boom(cmd, **kwargs):
+        def _boom(cmd: tuple[str, ...], **kwargs: Any) -> None:
             raise exc
 
         monkeypatch.setattr(subprocess, "run", _boom)
@@ -218,9 +224,10 @@ class TestIdleShutdownMonitor:
     """The tick-facing wrapper: throttled I/O, inhibits, execution."""
 
     @staticmethod
-    def _monitor(tmp_path, *, enabled: bool = True, **overrides):
+    def _monitor(
+        tmp_path: Path, *, enabled: bool = True, **overrides: Any
+    ) -> tuple[IdleShutdownMonitor, Path, Path]:
         from src.config import IdleShutdownConfig
-        from src.daemon.idle_shutdown import IdleShutdownMonitor
 
         status = tmp_path / "ups_status"
         keepalive = tmp_path / "ups_keepalive"
@@ -234,26 +241,26 @@ class TestIdleShutdownMonitor:
         )
         return IdleShutdownMonitor.from_config(cfg), status, keepalive
 
-    def test_fires_when_parked_with_input_power(self, tmp_path) -> None:
+    def test_fires_when_parked_with_input_power(self, tmp_path: Path) -> None:
         mon, status, _ = self._monitor(tmp_path)
         status.write_text('{"input_lost": false}')
         mon.observe(state="engine_running", now=0.0)
         assert mon.observe(state="engine_off", now=1.0) is False
         assert mon.observe(state="engine_off", now=200.0) is True
 
-    def test_bench_no_status_file_never_fires(self, tmp_path) -> None:
+    def test_bench_no_status_file_never_fires(self, tmp_path: Path) -> None:
         """No watchdog heartbeat at all — the desk case."""
         mon, _, _ = self._monitor(tmp_path)
         mon.observe(state="engine_running", now=0.0)
         assert not any(mon.observe(state="no_data", now=float(t)) for t in range(1, 2000, 25))
 
-    def test_input_lost_never_fires(self, tmp_path) -> None:
+    def test_input_lost_never_fires(self, tmp_path: Path) -> None:
         mon, status, _ = self._monitor(tmp_path)
         status.write_text('{"input_lost": true}')
         mon.observe(state="engine_running", now=0.0)
         assert not any(mon.observe(state="no_data", now=float(t)) for t in range(1, 2000, 25))
 
-    def test_keepalive_hold_inhibits(self, tmp_path) -> None:
+    def test_keepalive_hold_inhibits(self, tmp_path: Path) -> None:
         import time as _time
 
         mon, status, keepalive = self._monitor(tmp_path)
@@ -262,7 +269,7 @@ class TestIdleShutdownMonitor:
         mon.observe(state="engine_running", now=0.0)
         assert not any(mon.observe(state="engine_off", now=float(t)) for t in range(1, 2000, 25))
 
-    def test_passive_mode_inhibits(self, tmp_path, monkeypatch) -> None:
+    def test_passive_mode_inhibits(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         from src.collection import tx_gate
 
         mon, status, _ = self._monitor(tmp_path)
@@ -271,7 +278,7 @@ class TestIdleShutdownMonitor:
         mon.observe(state="engine_running", now=0.0)
         assert not any(mon.observe(state="engine_off", now=float(t)) for t in range(1, 2000, 25))
 
-    def test_active_capture_inhibits(self, tmp_path, monkeypatch) -> None:
+    def test_active_capture_inhibits(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         """Mode 22 captures make OBD go stale by design — the parked
         inference is invalid for their whole duration."""
         from src.collection import tuning_profile
@@ -282,22 +289,31 @@ class TestIdleShutdownMonitor:
         mon.observe(state="engine_running", now=0.0)
         assert not any(mon.observe(state="engine_off", now=float(t)) for t in range(1, 2000, 25))
 
-    def test_status_reads_are_throttled(self, tmp_path, monkeypatch) -> None:
+    def test_status_reads_are_throttled(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """The heartbeat is re-read on a slow cadence, not every tick."""
         from src.daemon import idle_shutdown as mod
 
         mon, status, _ = self._monitor(tmp_path)
         status.write_text('{"input_lost": false}')
         reads: list[object] = []
-        real = mod.read_watchdog_status
-        monkeypatch.setattr(mod, "read_watchdog_status", lambda p: (reads.append(p), real(p))[1])
+        real = read_watchdog_status
+
+        def _spy(p: Path) -> dict[str, Any] | None:
+            reads.append(p)
+            return real(p)
+
+        monkeypatch.setattr(mod, "read_watchdog_status", _spy)
         for t in range(0, 60):
             mon.observe(state="engine_off", now=float(t))
         # poll_seconds defaults to 15 -> ~4 reads over 60 virtual seconds,
         # not 60.
         assert len(reads) <= 6
 
-    def test_trigger_respects_dry_run(self, tmp_path, monkeypatch) -> None:
+    def test_trigger_respects_dry_run(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         import subprocess as _sp
 
         mon, _, _ = self._monitor(tmp_path)
@@ -306,7 +322,7 @@ class TestIdleShutdownMonitor:
         assert mon.trigger() is True
         assert called == []
 
-    def test_disabled_config_builds_no_monitor(self, tmp_path) -> None:
+    def test_disabled_config_builds_no_monitor(self, tmp_path: Path) -> None:
         from src.config import CanaryConfig
 
         assert CanaryConfig.model_fields["collection"] is not None

@@ -8,7 +8,10 @@ from pathlib import Path
 import pytest
 
 import scripts.trip_report as trip_report_cli
-from src.analysis.trip_summary_sidecar import read_trip_summary  # noqa: E402
+from src.analysis.trip_summary_sidecar import (  # noqa: E402
+    get_or_compute_trip_summary,
+    read_trip_summary,
+)
 from src.storage.parquet_writer import write_records_to_parquet  # noqa: E402
 from src.telemetry import TelemetryRecord  # noqa: E402
 
@@ -86,7 +89,7 @@ def test_trip_report_rebuild_forces_recompute(
     )
 
     calls: list[str] = []
-    real = trip_report_cli.get_or_compute_trip_summary
+    real = get_or_compute_trip_summary
 
     def _spy(session_dir: Path, config: object, *, force: bool = False) -> object | None:
         calls.append(session_dir.name)

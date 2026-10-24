@@ -35,6 +35,7 @@ from src.control.brain_jobs import (
     run_brain_job,
 )
 from src.evidence import memory_ledger_for
+from src.evidence.records import Evidence
 from src.vehicle.profiles import VehicleProfile, scope_config
 from tests.configs import isolated_config
 from tests.test_target_phi import EXPECT, REPO
@@ -51,7 +52,7 @@ def scoped_config(tmp_path: Path) -> CanaryConfig:
 
 def write_session(config: CanaryConfig, *, finished: bool = True) -> Path:
     """The two committed October 4 slices as one stored capture session."""
-    session = config.collection.storage_path / SESSION
+    session: Path = config.collection.storage_path / SESSION
     session.mkdir(parents=True)
     for i, part in enumerate(EXPECT["telemetry"]):
         shutil.copyfile(REPO / part["path"], session / f"telemetry-{i:05d}.parquet")
@@ -120,6 +121,7 @@ def test_a_twin_job_completes_on_the_pi_without_a_remote_host(config: CanaryConf
     ledger = memory_ledger_for(config)
     (evidence_id,) = result["evidence"]
     record = ledger.resolve_evidence(evidence_id).record
+    assert isinstance(record, Evidence)
     assert record.labels["computation"] == "ecu_command"
     # Blocked qualification is unvalidated with the blockers named, never a pass.
     assert record.result.status == "unevaluable"
@@ -133,7 +135,7 @@ def test_a_twin_job_completes_on_the_pi_without_a_remote_host(config: CanaryConf
 def test_collection_defers_and_a_resumed_capture_preempts(config: CanaryConfig) -> None:
     write_session(config)
     job_id = submit_twin(config)
-    state = {"activity": "collecting:engine_off"}
+    state: dict[str, str | None] = {"activity": "collecting:engine_off"}
     release = threading.Event()
     started = threading.Event()
     calls: list[int] = []

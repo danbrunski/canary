@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import inspect
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -83,7 +84,7 @@ def test_build_feature_frame_did_columns_do_not_depend_on_the_working_directory(
     config = example_config(REPO_ROOT / "canary.example.yaml")
     session = _did_session(tmp_path / "sessions")
 
-    def did_columns(frame: object) -> list[str]:
+    def did_columns(frame: Any) -> list[str]:
         return sorted(c for c in frame.columns if "did:" in str(c))
 
     monkeypatch.chdir(REPO_ROOT)

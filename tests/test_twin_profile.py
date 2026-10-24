@@ -24,6 +24,7 @@ import threading
 from collections import Counter
 from collections.abc import Iterator, Mapping
 from pathlib import Path
+from typing import Any, cast
 
 import numpy as np
 import pytest
@@ -557,7 +558,7 @@ def _plan(profile: CaptureProfile) -> dict[str, object]:
 #: plus the 0.05 s exit grace. ``worst_case_seconds`` is that plus one request
 #: timeout (1.0 s), the cycle one unanswered request costs. Before ignition
 #: timing was derived (2026-10-17): 18 / 3 / 9, 0.2056 s and 1.2056 s.
-CYCLE_PLAN = {
+CYCLE_PLAN: dict[str, Any] = {
     "mode01_channels": 19,
     "mode01_requests": 4,
     "did_requests": 11,
@@ -575,9 +576,9 @@ def _cycle_plan(batch_max_pids: int) -> dict[str, object]:
     return plan_cycle(
         cycle_seconds=0.5,
         budget_rps=90.0,
-        mode01_channels=CYCLE_PLAN["mode01_channels"],  # type: ignore[arg-type]
+        mode01_channels=CYCLE_PLAN["mode01_channels"],
         batch_max_pids=batch_max_pids,
-        did_requests=CYCLE_PLAN["did_requests"],  # type: ignore[arg-type]
+        did_requests=CYCLE_PLAN["did_requests"],
         fast_exit=True,
         exit_grace_seconds=0.05,
         lapse_seconds=5.0,
@@ -726,7 +727,11 @@ PAIRING_MARGIN_S = 1 / 90
 
 def _acquired(readings: list[ObdReading], pid: str, after: float) -> np.ndarray:
     return np.array(
-        sorted(r.acquired_at for r in readings if r.pid == pid and (r.acquired_at or 0) > after)
+        sorted(
+            cast(float, r.acquired_at)
+            for r in readings
+            if r.pid == pid and (r.acquired_at or 0) > after
+        )
     )
 
 
@@ -735,7 +740,8 @@ def nearest_gaps(readings: list[ObdReading], anchor: str, other: str, after: flo
     a, b = _acquired(readings, anchor, after), _acquired(readings, other, after)
     assert len(a) and len(b), (anchor, other)
     idx = np.searchsorted(b, a).clip(1, len(b) - 1)
-    return np.minimum(np.abs(a - b[idx - 1]), np.abs(b[idx] - a))
+    gaps: np.ndarray = np.minimum(np.abs(a - b[idx - 1]), np.abs(b[idx] - a))
+    return gaps
 
 
 def _first_entry(requests: list[tuple[float, bytes]]) -> float:
@@ -871,9 +877,9 @@ def test_the_awaited_timing_windows_do_not_fit_beside_the_fuel_pairings(
     plan = plan_cycle(
         cycle_seconds=0.5,
         budget_rps=90.0,
-        mode01_channels=CYCLE_PLAN["mode01_channels"],  # type: ignore[arg-type]
+        mode01_channels=CYCLE_PLAN["mode01_channels"],
         batch_max_pids=6,
-        did_requests=CYCLE_PLAN["did_requests"] + 9,  # type: ignore[operator]
+        did_requests=CYCLE_PLAN["did_requests"] + 9,
         fast_exit=True,
         exit_grace_seconds=0.05,
         lapse_seconds=5.0,

@@ -22,7 +22,7 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any
+from typing import Any, cast
 
 import numpy as np
 import pandas as pd
@@ -32,6 +32,7 @@ from pydantic import ValidationError
 from src.columns import SESSION_COLUMN, TIMESTAMP_COLUMN
 from src.config import CanaryConfig
 from src.daemon.detectors import sequence as sequence_mod
+from src.daemon.detectors.common import log as sequence_log
 from src.daemon.inference_metrics import InferenceTimingRecorder
 from src.models import budget_level as budget_mod
 from src.models.budget_level import choose_budget_level, score_budget_traces
@@ -61,7 +62,7 @@ def _example(**models: Any) -> dict[str, Any]:
 
     data = load_yaml((REPO_ROOT / "canary.example.yaml").read_text())
     data["models"].update(models)
-    return data
+    return cast(dict[str, Any], data)
 
 
 # --- the rule ------------------------------------------------------------------
@@ -247,7 +248,7 @@ def test_the_daemon_build_path_refuses_a_mismatched_artifact_once(
             )
         ),
     )
-    with caplog.at_level(logging.ERROR, logger=sequence_mod.log.name):
+    with caplog.at_level(logging.ERROR, logger=sequence_log.name):
         first = sequence_mod._build_sequence_engine(loaded, forward_every_n_ticks=3)
         again = sequence_mod._build_sequence_engine(loaded, forward_every_n_ticks=3)
     assert first is None and again is None
@@ -621,8 +622,8 @@ def test_the_harness_grades_the_sequence_detector_on_the_served_windows(
 
     monkeypatch.setattr(ed, "BatchedSequenceScorer", _FakeScorer)
     frame = _budget_frame(20)
-    every = ed.DeployedStack(_cadence_config(1), None, SimpleNamespace())  # type: ignore[arg-type]
-    third = ed.DeployedStack(_cadence_config(3), None, SimpleNamespace())  # type: ignore[arg-type]
+    every = ed.DeployedStack(_cadence_config(1), None, SimpleNamespace())
+    third = ed.DeployedStack(_cadence_config(3), None, SimpleNamespace())
 
     full = every.score(frame)["sequence"]
     served = third.score(frame)["sequence"]
@@ -800,7 +801,7 @@ def test_the_synthetic_fault_harness_builds_its_engine_at_the_configured_cadence
             SimpleNamespace(score_scales={}),  # type: ignore[arg-type]
             fault_channel="obd:RPM",
             did_map=None,
-            trained_sequence=SimpleNamespace(),  # type: ignore[arg-type]
+            trained_sequence=SimpleNamespace(),
         )
     assert stopped.value.args[0] == {"forward_every_n_ticks": 3}
 

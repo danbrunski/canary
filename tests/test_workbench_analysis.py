@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+from collections.abc import Iterator
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -35,6 +36,7 @@ from src.analysis.workbench import (
     timing_surface,
     trim_surface,
 )
+from src.collection import tuning_profile
 from src.config import CanaryConfig
 from src.control import workbench_jobs
 from src.control.logs import list_logs, summarize_log
@@ -469,7 +471,7 @@ def test_capture_browser_orders_by_parsed_start_not_directory_name(tmp_path: Pat
 
 
 @pytest.fixture
-def client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+def client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[TestClient]:
     config = _config(tmp_path)
     app = FastAPI()
     workbench_routes.register_workbench_routes(
@@ -511,9 +513,9 @@ def test_every_whole_session_route_defers_while_a_capture_records(
 ) -> None:
     storage = client.config.collection.storage_path  # type: ignore[attr-defined]
     _write(storage, "2026-09-18T120000", [_closed()] * 3)
-    monkeypatch.setattr(workbench_jobs.tuning_profile, "is_active", lambda: True)
+    monkeypatch.setattr(tuning_profile, "is_active", lambda: True)
     monkeypatch.setattr(
-        workbench_jobs.tuning_profile,
+        tuning_profile,
         "active_profile",
         lambda: type("P", (), {"name": "tuning"})(),
     )

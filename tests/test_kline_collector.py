@@ -7,7 +7,7 @@ from __future__ import annotations
 import asyncio
 import time
 from collections import deque
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterator, Sequence
 from dataclasses import replace
 from pathlib import Path
 
@@ -97,14 +97,14 @@ class FakeTransport:
         return []
 
 
-def _collector(entries: list[tuple[str, ...]], **kwargs: object) -> KlineCollector:
+def _collector(entries: Sequence[tuple[str, ...]], **kwargs: object) -> KlineCollector:
     FakeTransport.instances.clear()
     return KlineCollector(
         KlineConfig(enabled=True, poll_interval_seconds=0.01, sniff=False),
         PROFILE,
         DIDS,
         entries=lambda: entries[0],
-        transport_factory=lambda profile, mode: FakeTransport(profile, **kwargs),  # type: ignore[arg-type]
+        transport_factory=lambda profile, mode: FakeTransport(profile, **kwargs),  # type: ignore[arg-type,return-value]
         reconnect_policy=FAST,
     )
 
@@ -465,7 +465,7 @@ class FakeAbs(FakeTransport):
 
 
 def _abs_collector(
-    entries: list[tuple[str, ...]],
+    entries: Sequence[tuple[str, ...]],
     *,
     transport: type[FakeTransport] = FakeAbs,
     profile: Path = PROFILE,

@@ -7,6 +7,7 @@ import pandas as pd
 import pytest
 
 from src.config import VehicleParameters
+from src.signals.afr import AfrCalibration
 from src.signals.derived import (
     FUEL_PROPERTIES,
     compute_derived_channels,
@@ -247,6 +248,7 @@ def test_summarize_trip_avg_speed_is_distance_over_duration() -> None:
     df = _frame(10, **{"obd:SPEED": [36.0] * 10})
     summary = summarize_trip(df, GASOLINE)
     assert summary.avg_speed_kph is not None
+    assert summary.distance_km is not None
     assert summary.avg_speed_kph == pytest.approx(
         summary.distance_km / (summary.duration_s / 3600.0), rel=1e-6
     )
@@ -358,15 +360,11 @@ def test_gear_estimate_masks_low_speed() -> None:
 # --- PID 0x44 is phi on some ECMs and lambda on others ---
 
 
-def _phi_cal() -> object:
-    from src.signals.afr import AfrCalibration
-
+def _phi_cal() -> AfrCalibration:
     return AfrCalibration(commanded_equiv_ratio_convention="phi")
 
 
-def _lambda_cal() -> object:
-    from src.signals.afr import AfrCalibration
-
+def _lambda_cal() -> AfrCalibration:
     return AfrCalibration(commanded_equiv_ratio_convention="lambda")
 
 

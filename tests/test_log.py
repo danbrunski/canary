@@ -3,12 +3,13 @@
 import json
 import logging
 import sys
+from typing import Any
 
 from src.log import JSONFormatter, configure_logging
 
 
-def _record(**overrides):
-    base = dict(
+def _record(**overrides: Any) -> logging.LogRecord:
+    base: dict[str, Any] = dict(
         name="test",
         level=logging.INFO,
         pathname="x.py",

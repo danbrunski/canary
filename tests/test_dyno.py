@@ -15,6 +15,7 @@ import math
 from collections.abc import Callable
 from dataclasses import replace
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 import pytest
@@ -44,7 +45,6 @@ from src.analysis.dyno import (
     SquatCoefficient,
     SquatConditions,
     SquatFit,
-    _grade_with_se,
     compare_runs,
     correct_specific_force,
     estimate_pitch_offset,
@@ -56,6 +56,7 @@ from src.analysis.dyno import (
     record_dyno_floor,
     save_dyno_profile,
 )
+from src.analysis.dyno_squat import _grade_with_se
 from src.config import VehicleParameters
 from src.signals.committees import STANDARD_GRAVITY as G
 from src.vehicle.profiles import read_registry_file
@@ -246,12 +247,12 @@ def _coastdown(
         t += dt_sim
         step += 1
     arr = np.array(rows)
-    accel = arr[:, 2]
-    sf = _pitch_sf(accel, slope, squat_deg_per_g)
+    accel_col = arr[:, 2]
+    sf = _pitch_sf(accel_col, slope, squat_deg_per_g)
     return MotionSamples(
         t_s=arr[:, 0],
         speed_mps=arr[:, 1],
-        accel_mps2=accel + rng.normal(0, noise_a, len(arr)),
+        accel_mps2=accel_col + rng.normal(0, noise_a, len(arr)),
         sf_lon_mps2=sf + rng.normal(0, noise_f, len(arr)),
         altitude_m=arr[:, 3],
     )
@@ -300,14 +301,14 @@ def _pull(
         v += accel * dt_sim
         t += dt_sim
     arr = np.array(rows)
-    accel = arr[:, 2]
-    sf = _pitch_sf(accel, grade, TRUE_SQUAT_DEG_PER_G)
+    accel_col = arr[:, 2]
+    sf = _pitch_sf(accel_col, grade, TRUE_SQUAT_DEG_PER_G)
     return GearPull(
         gear=gear,
         samples=MotionSamples(
             t_s=arr[:, 0],
             speed_mps=arr[:, 1],
-            accel_mps2=accel + rng.normal(0, 0.02, len(arr)),
+            accel_mps2=accel_col + rng.normal(0, 0.02, len(arr)),
             sf_lon_mps2=sf + rng.normal(0, 0.03, len(arr)),
             rpm=arr[:, 3] + rng.normal(0, 5.0, len(arr)),
         ),
@@ -365,15 +366,20 @@ def _true_road_load() -> RoadLoadFit:
 # ---------------------------------------------------------------------------
 
 
+def _loose_motion(**columns: Any) -> MotionSamples:
+    """``MotionSamples`` from plain lists, which its constructor accepts at runtime."""
+    return MotionSamples(**columns)
+
+
 def test_motion_samples_refuse_mismatched_and_non_finite_columns() -> None:
     with pytest.raises(ValueError, match="differ in length"):
-        MotionSamples(t_s=[0, 1, 2], speed_mps=[1, 1], accel_mps2=[0, 0, 0], sf_lon_mps2=[0, 0, 0])
+        _loose_motion(t_s=[0, 1, 2], speed_mps=[1, 1], accel_mps2=[0, 0, 0], sf_lon_mps2=[0, 0, 0])
     with pytest.raises(ValueError, match="non-finite"):
-        MotionSamples(
+        _loose_motion(
             t_s=[0, 1], speed_mps=[1, float("nan")], accel_mps2=[0, 0], sf_lon_mps2=[0, 0]
         )
     with pytest.raises(ValueError, match="strictly increasing"):
-        MotionSamples(t_s=[0, 0], speed_mps=[1, 1], accel_mps2=[0, 0], sf_lon_mps2=[0, 0])
+        _loose_motion(t_s=[0, 0], speed_mps=[1, 1], accel_mps2=[0, 0], sf_lon_mps2=[0, 0])
 
 
 # ---------------------------------------------------------------------------
@@ -603,7 +609,7 @@ def test_each_standard_error_takes_the_noisier_reference() -> None:
     )
 
 
-_AR_1M = {"altitude_noise_m": 0.0, "altitude_ar_sd_m": 1.0, "altitude_tau_s": 10.0}
+_AR_1M: dict[str, Any] = {"altitude_noise_m": 0.0, "altitude_ar_sd_m": 1.0, "altitude_tau_s": 10.0}
 
 
 @pytest.mark.parametrize("seed", [0, 1, 2])
@@ -734,7 +740,7 @@ def test_squat_record_requires_conditions() -> None:
         SquatConditions(payload_kg=127.0, road="x", date=dt.date(2026, 9, 26), sessions=["s"])  # type: ignore[call-arg]
     record = _squat_record()
     accel = np.array([G * 0.1])
-    one = MotionSamples(t_s=[0.0], speed_mps=[20.0], accel_mps2=accel, sf_lon_mps2=accel)
+    one = _loose_motion(t_s=[0.0], speed_mps=[20.0], accel_mps2=accel, sf_lon_mps2=accel)
     corrected = correct_specific_force(one, squat=record, pitch_offset=_stated_offset(0.0))
     assert not isinstance(corrected, DynoRefusal), corrected
     # 0.1 g of acceleration pitches 0.12 deg: sin(0.12 deg)·g removed.
@@ -1038,7 +1044,7 @@ def _stated_offset(deg: float = TRUE_MOUNT_OFFSET_DEG) -> PitchOffset:
     return PitchOffset(deg=deg, heading_pitch_deg={}, n_samples=0, reference_id=None)
 
 
-def _inertia_kwargs(driveline: Driveline) -> dict[str, object]:
+def _inertia_kwargs(driveline: Driveline) -> dict[str, Any]:
     return {
         "driveline": driveline,
         "test_mass_kg": MASS,

@@ -13,9 +13,11 @@ from __future__ import annotations
 import json
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from typing import Any, cast
 
 import numpy as np
 import pandas as pd
+import pyarrow as pa
 import pyarrow.parquet as pq
 import pytest
 
@@ -205,8 +207,16 @@ def _writer(root: Path, **kwargs: object) -> ParquetTelemetryWriter:
     return ParquetTelemetryWriter(root, session_started_at=T0, flush_interval_seconds=1e9, **kwargs)  # type: ignore[arg-type]
 
 
+def _read_schema(path: Path) -> pa.Schema:
+    return pq.read_schema(path)  # type: ignore[no-untyped-call, unused-ignore]
+
+
+def _read_metadata(path: Path) -> pq.FileMetaData:
+    return pq.read_metadata(path)  # type: ignore[no-untyped-call, unused-ignore]
+
+
 def _footer(path: Path) -> dict[str, object]:
-    return json.loads(pq.read_schema(path).metadata[FOOTER_KEY])
+    return cast(dict[str, object], json.loads(_read_schema(path).metadata[FOOTER_KEY]))
 
 
 def test_the_writer_stores_change_only_and_records_it_in_every_chunk(tmp_path: Path) -> None:
@@ -267,13 +277,13 @@ def test_every_session_stands_alone_and_a_capture_can_store_every_frame(tmp_path
 def test_the_batch_writer_filters_only_when_told_and_never_fakes_a_footer(tmp_path: Path) -> None:
     records = _drive(20.0)
     legacy = write_records_to_parquet(records, tmp_path / "legacy")
-    assert FOOTER_KEY not in (pq.read_schema(legacy[0]).metadata or {})
+    assert FOOTER_KEY not in (_read_schema(legacy[0]).metadata or {})
     assert not session_can_storage(tmp_path / "legacy").any_change_only
     written = write_records_to_parquet(
         records, tmp_path / "new", can_storage=CanStorage.change_only(10.0)
     )
     assert _footer(written[0])["mode"] == "change_only"
-    assert pq.read_metadata(written[0]).num_rows < len(records)
+    assert _read_metadata(written[0]).num_rows < len(records)
 
 
 def test_a_change_only_copy_never_rewrites_its_source(tmp_path: Path) -> None:
@@ -429,9 +439,11 @@ def test_a_shorter_read_timeout_than_the_session_was_stored_with_is_refused(
 # ---------------------------------------------------------------------------
 
 
-def _live_rows(config: CanaryConfig, records: list[TelemetryRecord], ticks: int) -> list[dict]:
+def _live_rows(
+    config: CanaryConfig, records: list[TelemetryRecord], ticks: int
+) -> list[dict[str, Any]]:
     source = LiveFeatureSource(config=config, bindings=load_bindings(BINDINGS))
-    rows: list[dict] = []
+    rows: list[dict[str, Any]] = []
     pending = sorted(records, key=lambda r: r.timestamp)
     for k in range(ticks):
         now = T0 + timedelta(seconds=k)
@@ -439,7 +451,7 @@ def _live_rows(config: CanaryConfig, records: list[TelemetryRecord], ticks: int)
             source.observe(pending.pop(0))
         prepared = source.prepare_tick(now)
         assert prepared is not None
-        rows.append(prepared.wide.iloc[-1].to_dict())
+        rows.append(cast(dict[str, Any], prepared.wide.iloc[-1].to_dict()))
     return rows
 
 
@@ -458,7 +470,7 @@ def test_live_features_on_the_raw_stream_equal_a_replay_of_the_stored_session(
         TelemetryRecord.can(row.timestamp.timestamp(), RPM_ID, bytes(row.payload))
         if row.source == "can"
         else TelemetryRecord.obd(row.timestamp.timestamp(), row.channel, row.value_number, "")
-        for row in stored.itertuples()
+        for row in cast(Any, stored).itertuples()
     ]
     live = _live_rows(config, records, 85)
     replay = _live_rows(config, replayed, 85)
@@ -532,10 +544,13 @@ def test_dyno_motion_inputs_build_a_steady_cruise_leg_stored_change_only(tmp_pat
     sources = MotionSources(
         speed=[SpeedSource(channel="decoded:VEHICLE_SPEED_2D1", ratio_to_gps=0.932, evidence="t")]
     )
-    window = {"start": pd.Timestamp(T0) + pd.Timedelta(seconds=12), "sources": sources}
+    window: dict[str, Any] = {
+        "start": pd.Timestamp(T0) + pd.Timedelta(seconds=12),
+        "sources": sources,
+    }
     window["end"] = window["start"] + pd.Timedelta(seconds=20)
-    a = read_motion_inputs(full, **window)  # type: ignore[arg-type]
-    b = read_motion_inputs(changed, **window)  # type: ignore[arg-type]
+    a = read_motion_inputs(full, **window)
+    b = read_motion_inputs(changed, **window)
     assert isinstance(a, DynoInputs), a
     assert isinstance(b, DynoInputs), b
     assert b.speed_source == "decoded:VEHICLE_SPEED_2D1"
@@ -870,7 +885,7 @@ def test_a_session_without_can_frames_gets_no_storage_footer(tmp_path: Path) -> 
     writer.write_many([_obd(float(t), "RPM", 800.0) for t in range(30)])
     writer.close()
     chunk = next(writer.paths.root.glob("telemetry-*.parquet"))
-    assert FOOTER_KEY not in (pq.read_schema(chunk).metadata or {})
+    assert FOOTER_KEY not in (_read_schema(chunk).metadata or {})
     refuse_change_only(writer.paths.root, reader="frame counter")
 
 

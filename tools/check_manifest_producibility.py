@@ -30,6 +30,7 @@ import json
 import sys
 from collections.abc import Sequence
 from pathlib import Path
+from typing import Any
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
@@ -84,7 +85,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     catalog = build_producible_catalog(config)
     behavior_path = config.daemon.behavior_models
     behavior_models = load_behavior_models(behavior_path) if behavior_path.exists() else None
-    report: dict[str, object] = {}
+    report: dict[str, Any] = {}
     status = 0
     for path in manifests:
         try:

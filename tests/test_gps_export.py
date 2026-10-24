@@ -44,7 +44,7 @@ def test_read_gps_track_reads_its_columns_and_finds_the_same_fixes(
 
     session = _write_session(tmp_path)
     narrowed = read_gps_track(session)
-    real = gps_export.read_session
+    real = gps_export.read_session  # type: ignore[attr-defined]
     monkeypatch.setattr(
         gps_export, "read_session", lambda path, **kw: real(path, filters=kw["filters"])
     )

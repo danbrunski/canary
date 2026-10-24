@@ -15,6 +15,7 @@ import ast
 import inspect
 import threading
 from pathlib import Path
+from typing import cast
 
 import pytest
 
@@ -422,7 +423,10 @@ def test_keepalive_policy_while_waiting_and_mid_burst() -> None:
     assert policy(T0, last_read_slot) == (True, 0.0)
     # About to start: one due within the burst goes now, led by its length.
     burst_s = 3 * SESSION_S
-    assert policy(plan.start_at, last_read_slot) == (True, pytest.approx(burst_s + SESSION_S))
+    assert policy(plan.start_at, last_read_slot) == (
+        True,
+        cast(float, pytest.approx(burst_s + SESSION_S)),
+    )
     # ...unless the burst is estimated at a whole keep-alive interval.
     assert policy(plan.start_at, last_read_slot, keepalive_s=burst_s) == (True, 0.0)
 

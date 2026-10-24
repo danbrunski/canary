@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 
 import yaml
 
@@ -34,7 +35,7 @@ daemon: {{behavior_models: {behavior_models}}}
 """
 
 
-def _behavior_models_yaml() -> dict:
+def _behavior_models_yaml() -> dict[str, Any]:
     return {
         "schema_version": 1,
         "models": [

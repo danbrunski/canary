@@ -7,7 +7,7 @@ import threading
 import time
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import can
 import pytest
@@ -282,7 +282,7 @@ def test_dids_reaching_one_identifier_are_polled_once() -> None:
         # Two catalogue names for one register, then the same DID twice by hex.
         dids=("ECM_MAF_GPS", "ECM_BASE_FUEL_SCHEDULE_CANDIDATE", "1208", "1208"),
     )
-    requests = build_poll_requests(_StaticDiscovery(), spec)
+    requests = build_poll_requests(cast(Any, _StaticDiscovery()), spec)
     did_channels = [r.channel for r in requests if r.kind == "did"]
 
     assert did_channels == ["DID_1209", "DID_1208"]
@@ -294,7 +294,7 @@ def test_build_poll_requests_combines_auto_explicit_and_dids() -> None:
         pids=("auto", "SPEED"),
         dids=("1101",),
     )
-    requests = build_poll_requests(_StaticDiscovery(), spec)
+    requests = build_poll_requests(cast(Any, _StaticDiscovery()), spec)
     channels = [r.channel for r in requests]
     assert channels[:2] == ["RPM", "COOLANT_TEMP"]
     assert "SPEED" in channels
@@ -309,7 +309,9 @@ def test_build_poll_requests_assigns_registry_poll_tiers() -> None:
         pids=("RPM", "COOLANT_TEMP", "FUEL_LEVEL"),
     )
 
-    tiers = {r.channel: r.poll_tier for r in build_poll_requests(_StaticDiscovery(), spec)}
+    tiers = {
+        r.channel: r.poll_tier for r in build_poll_requests(cast(Any, _StaticDiscovery()), spec)
+    }
 
     assert tiers["RPM"] == "fast"
     assert tiers["COOLANT_TEMP"] == "medium"
@@ -325,7 +327,9 @@ def test_build_poll_requests_channel_and_tier_come_from_the_same_registry_row() 
         can=CanBusConfig(interface="virtual", channel="test", bitrate=500000),
         pids=("auto",),
     )
-    requests = [r for r in build_poll_requests(_StaticDiscovery(), spec) if r.kind == "pid"]
+    requests = [
+        r for r in build_poll_requests(cast(Any, _StaticDiscovery()), spec) if r.kind == "pid"
+    ]
     assert requests  # sanity: the auto set isn't empty
     for request in requests:
         definition = MODE01_REGISTRY[request.identifier]
@@ -343,7 +347,7 @@ def test_auto_poll_requests_probe_full_decoded_pid_catalog_when_discovery_is_spa
         pids=("auto",),
     )
 
-    channels = [r.channel for r in build_poll_requests(_SparseDiscovery(), spec)]
+    channels = [r.channel for r in build_poll_requests(cast(Any, _SparseDiscovery()), spec)]
 
     assert "EVAPORATIVE_PURGE" in channels
     assert "FUEL_LEVEL" in channels
@@ -358,7 +362,7 @@ def test_monitor_status_pid_is_in_the_default_auto_poll_set() -> None:
         can=CanBusConfig(interface="virtual", channel="test", bitrate=500000),
         pids=("auto",),
     )
-    requests = {r.channel: r for r in build_poll_requests(_StaticDiscovery(), spec)}
+    requests = {r.channel: r for r in build_poll_requests(cast(Any, _StaticDiscovery()), spec)}
     assert requests["MONITOR_STATUS"].poll_tier == "slow"
 
 
@@ -381,7 +385,9 @@ def test_build_poll_requests_marks_mode_critical_channels_priority() -> None:
         pids=("RPM", "SPEED", "THROTTLE_POS", "COOLANT_TEMP"),
     )
 
-    priority = {r.channel: r.priority for r in build_poll_requests(_StaticDiscovery(), spec)}
+    priority = {
+        r.channel: r.priority for r in build_poll_requests(cast(Any, _StaticDiscovery()), spec)
+    }
 
     assert priority["RPM"] is True
     assert priority["THROTTLE_POS"] is True
@@ -394,11 +400,11 @@ def test_build_poll_requests_priority_channels_are_configurable() -> None:
     pids = ("RPM", "COOLANT_TEMP")
 
     opted_out = build_poll_requests(
-        _StaticDiscovery(),
+        cast(Any, _StaticDiscovery()),
         CanObdSpec(can=can_config, pids=pids, priority_channels=()),
     )
     reassigned = build_poll_requests(
-        _StaticDiscovery(),
+        cast(Any, _StaticDiscovery()),
         CanObdSpec(can=can_config, pids=pids, priority_channels=("coolant_temp",)),
     )
 
@@ -411,7 +417,7 @@ def test_active_profile_reassigns_the_priority_lane_used_for_selection() -> None
     from src.collection.capture_profiles import CaptureProfile
 
     requests = build_poll_requests(
-        _StaticDiscovery(),
+        cast(Any, _StaticDiscovery()),
         CanObdSpec(
             can=CanBusConfig(interface="virtual", channel="test", bitrate=500000),
             pids=("RPM", "COOLANT_TEMP"),
@@ -611,7 +617,9 @@ def test_build_poll_requests_adds_dtc_kind_for_services_03_07_0a() -> None:
         pids=(),
         dtc_poll_interval_seconds=300.0,
     )
-    dtc_requests = [r for r in build_poll_requests(_StaticDiscovery(), spec) if r.kind == "dtc"]
+    dtc_requests = [
+        r for r in build_poll_requests(cast(Any, _StaticDiscovery()), spec) if r.kind == "dtc"
+    ]
     assert {(r.service, r.channel) for r in dtc_requests} == {
         (0x03, "DTC_STORED"),
         (0x07, "DTC_PENDING"),
@@ -625,7 +633,9 @@ def test_build_poll_requests_dtc_poll_disabled_when_interval_non_positive() -> N
         pids=(),
         dtc_poll_interval_seconds=0.0,
     )
-    assert not [r for r in build_poll_requests(_StaticDiscovery(), spec) if r.kind == "dtc"]
+    assert not [
+        r for r in build_poll_requests(cast(Any, _StaticDiscovery()), spec) if r.kind == "dtc"
+    ]
 
 
 def test_dtc_poll_reads_codes_and_mil_with_engine_off_koeo(clock: FakeClock) -> None:
@@ -674,7 +684,7 @@ def test_build_poll_requests_adds_service_kind_for_mode06() -> None:
         service_poll_interval_seconds=300.0,
     )
     service_requests = [
-        r for r in build_poll_requests(_StaticDiscovery(), spec) if r.kind == "service"
+        r for r in build_poll_requests(cast(Any, _StaticDiscovery()), spec) if r.kind == "service"
     ]
     assert {(r.service, r.channel) for r in service_requests} == {(0x06, "MONITOR_RESULTS")}
     assert service_requests[0].poll_tier == "dtc"
@@ -706,7 +716,9 @@ def test_build_poll_requests_service_poll_disabled_when_interval_non_positive() 
         pids=(),
         service_poll_interval_seconds=0.0,
     )
-    assert not [r for r in build_poll_requests(_StaticDiscovery(), spec) if r.kind == "service"]
+    assert not [
+        r for r in build_poll_requests(cast(Any, _StaticDiscovery()), spec) if r.kind == "service"
+    ]
 
 
 def test_response_to_reading_service_kind_emits_hex_payload_and_misfire_counts() -> None:
@@ -739,7 +751,9 @@ def test_build_poll_requests_freeze_frame_disabled_without_a_trigger() -> None:
         pids=(),
     )
     assert not [
-        r for r in build_poll_requests(_StaticDiscovery(), spec) if r.kind == "freeze_frame"
+        r
+        for r in build_poll_requests(cast(Any, _StaticDiscovery()), spec)
+        if r.kind == "freeze_frame"
     ]
 
 
@@ -750,7 +764,9 @@ def test_build_poll_requests_adds_freeze_frame_kind_when_triggered() -> None:
         freeze_frame_trigger=FreezeFrameTrigger(),
     )
     ff_requests = [
-        r for r in build_poll_requests(_StaticDiscovery(), spec) if r.kind == "freeze_frame"
+        r
+        for r in build_poll_requests(cast(Any, _StaticDiscovery()), spec)
+        if r.kind == "freeze_frame"
     ]
     assert {r.channel for r in ff_requests} == {
         "FREEZE_FRAME_RPM",
@@ -1110,7 +1126,9 @@ def test_build_poll_requests_includes_custom_pids() -> None:
         pids=(),
         custom_pids=(custom,),
     )
-    requests = [r for r in build_poll_requests(_StaticDiscovery(), spec) if r.kind == "custom"]
+    requests = [
+        r for r in build_poll_requests(cast(Any, _StaticDiscovery()), spec) if r.kind == "custom"
+    ]
     assert len(requests) == 1
     request = requests[0]
     assert request.channel == "custom:OIL_PRESS"
@@ -1133,8 +1151,8 @@ def test_build_poll_requests_custom_pid_defaults_request_id_by_mode() -> None:
         custom_pids=(mode22, mode01),
     )
     by_name = {
-        r.custom_pid.name: r
-        for r in build_poll_requests(_StaticDiscovery(), spec)
+        cast(CustomPid, r.custom_pid).name: r
+        for r in build_poll_requests(cast(Any, _StaticDiscovery()), spec)
         if r.kind == "custom"
     }
     assert by_name["A"].request_id == 0x7E1
@@ -1794,7 +1812,7 @@ def test_a_lapse_always_leaves_mode_01_a_share_of_the_bus() -> None:
     assert controller.phase == "lapse"
 
     controller.advance(states, now=105.02)
-    assert controller.phase == "mode01"
+    assert controller.phase == "mode01"  # type: ignore[comparison-overlap]
     assert controller.session_control_due(states, now=105.02) is False
     assert controller.session_control_due(states, now=105.03 + MODE01_MIN_SHARE_SECONDS) is True
 

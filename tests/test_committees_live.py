@@ -14,11 +14,12 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import httpx
 
 from src.alerts.event_logger import read_events_dir
+from src.alerts.notifier import Notifier
 from src.collection import tuning_profile
 from src.collection.capture_profiles import CaptureProfile
 from src.config import CanaryConfig
@@ -109,7 +110,7 @@ def test_a_sustained_speed_disagreement_is_an_event_status_and_mcp_payload(
     config = _config(tmp_path)
     components = build_components(config)
     notifier = _RecordingNotifier()
-    components.emitter._notifier = notifier  # type: ignore[attr-defined]
+    components.emitter._notifier = cast(Notifier, notifier)
     _tuning_capture()  # R03.12: committees keep running under a tuning capture
     recorder = InferenceTimingRecorder()
     source = LiveFeatureSource(config=components.config)
@@ -216,7 +217,7 @@ def test_committee_events_default_to_the_evidence_role(tmp_path: Path) -> None:
     config = _config(tmp_path, committee_role="evidence")
     components = build_components(config)
     notifier = _RecordingNotifier()
-    components.emitter._notifier = notifier  # type: ignore[attr-defined]
+    components.emitter._notifier = cast(Notifier, notifier)
     recorder = InferenceTimingRecorder()
     source = LiveFeatureSource(config=components.config)
     live = build_live_committees(components, source, recorder)

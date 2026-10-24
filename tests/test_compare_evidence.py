@@ -148,6 +148,7 @@ def test_the_tool_states_its_own_conditions_and_calibration(tmp_path: Path) -> N
             dids_path=DIDS,
         )
     record = ledger.resolve_evidence(_mint(ledger, session)).record
+    assert isinstance(record, Evidence)
     assert record.conditions.regime == ALL_CONDITIONS
     assert record.vehicle.calibration == "ZS44A-new"  # the flash in force on 2026-08-06
     assert record.vehicle.profile == "truck"
@@ -187,6 +188,7 @@ def test_the_cli_mints_into_the_scoped_ledger(
     assert main(argv) == 0
     printed = json.loads(capsys.readouterr().out)
     stored = memory_ledger_for(config).resolve_evidence(printed["id"]).record
+    assert isinstance(stored, Evidence)
     assert stored.provenance.producer == "compare_channels"
     assert stored.conditions.regime == ALL_CONDITIONS
     assert memory_ledger_for(config).path.is_relative_to(tmp_path)

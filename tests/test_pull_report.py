@@ -2,21 +2,23 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+from typing import Any
+
 import numpy as np
 import pandas as pd
 import pytest
 
+from src.analysis.pulls import Pull, RpmSeries, detect_pulls
 from tools import pull_report as tool
 
 
-def _series(seconds: np.ndarray, rpm: np.ndarray) -> tool.RpmSeries:
-    return tool.RpmSeries(
-        "test", seconds, rpm, pd.Timestamp("2026-07-28T16:46:57Z"), low_rate=False
-    )
+def _series(seconds: np.ndarray, rpm: np.ndarray) -> RpmSeries:
+    return RpmSeries("test", seconds, rpm, pd.Timestamp("2026-07-28T16:46:57Z"), low_rate=False)
 
 
-def _detect(series: tool.RpmSeries, **overrides: float) -> list[tool.Pull]:
-    kwargs: dict = {
+def _detect(series: RpmSeries, **overrides: float) -> list[Pull]:
+    kwargs: dict[str, Any] = {
         "grid_ms": 100,
         "min_drdt": 120.0,
         "min_duration": 1.5,
@@ -24,7 +26,7 @@ def _detect(series: tool.RpmSeries, **overrides: float) -> list[tool.Pull]:
         "band": 250,
     }
     kwargs.update(overrides)
-    return tool.detect_pulls(series, **kwargs)
+    return detect_pulls(series, **kwargs)
 
 
 def test_detects_single_clean_pull() -> None:
@@ -66,7 +68,7 @@ def test_mid_pull_lift_sets_dip_flag() -> None:
     assert pulls[0].dip
 
 
-def test_rpm_source_prefers_decoded_over_obd(tmp_path) -> None:
+def test_rpm_source_prefers_decoded_over_obd(tmp_path: Path) -> None:
     ts = pd.date_range("2026-07-28T16:46:57Z", periods=5, freq="10ms")
     frame = pd.DataFrame(
         {
@@ -95,7 +97,7 @@ def test_rpm_source_prefers_decoded_over_obd(tmp_path) -> None:
     assert not series.low_rate
 
 
-def test_rpm_source_falls_back_to_obd_with_caveat(tmp_path) -> None:
+def test_rpm_source_falls_back_to_obd_with_caveat(tmp_path: Path) -> None:
     ts = pd.date_range("2026-07-28T16:46:57Z", periods=3, freq="1s")
     frame = pd.DataFrame(
         {

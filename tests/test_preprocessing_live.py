@@ -232,6 +232,7 @@ def test_rolling_mean_aggregates_observed_history(config: CanaryConfig) -> None:
         row = src.tick(now)
         assert row is not None
     # window is 30 s, every tick is 1 s → all values are in-window → mean of all 5
+    assert row is not None
     assert row["obd:RPM__mean"].iloc[0] == pytest.approx(np.mean(values))
 
 

@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Any, cast
 
 import pytest
 
 torch = pytest.importorskip("torch")
+
+from torch import Tensor  # noqa: E402
 
 from src.models.tcn import (  # noqa: E402 — after importorskip guard
     TCNAutoencoder,
@@ -44,7 +47,7 @@ def _model(
     return model
 
 
-def _window(batch: int, seq: int, feats: int) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+def _window(batch: int, seq: int, feats: int) -> tuple[Tensor, Tensor, Tensor]:
     value = torch.randn(batch, seq, feats)
     mask = torch.ones(batch, seq, feats)
     delta = torch.zeros(batch, seq, feats)
@@ -127,7 +130,7 @@ def test_reconstruction_error_reductions() -> None:
     model = _model()
     value, mask, delta = _window(4, 8, 3)
 
-    def err(reduction: str) -> torch.Tensor:
+    def err(reduction: str) -> Any:
         return model.reconstruction_error(value, mask, delta, reduction=reduction)  # type: ignore[arg-type]
 
     assert tuple(err("none").shape) == (4, 8, 3)
@@ -201,7 +204,7 @@ def test_build_from_config() -> None:
         dropout: float = 0.0
         use_delta_decay: bool = True
 
-    cfg: TCNAutoencoderConfigLike = _Cfg()
+    cfg = cast(TCNAutoencoderConfigLike, _Cfg())
     model = build_tcn_autoencoder(cfg, input_size=3, dtype="float32")
     value, mask, delta = _window(1, 8, 3)
     assert tuple(model.forward(value, mask, delta).shape) == (1, 8, 3)

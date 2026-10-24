@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import random
-from typing import Any
+from typing import Any, cast
 
 import httpx
 import pydantic_core
@@ -55,7 +55,7 @@ async def _daemon(
     def wrapped(request: httpx.Request) -> httpx.Response:
         if seen is not None:
             seen.append(request)
-        return handler(request)
+        return cast(httpx.Response, handler(request))
 
     client = DaemonClient("http://daemon", token)
     await client._client.aclose()

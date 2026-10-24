@@ -46,7 +46,7 @@ def test_parse_candump_returns_none_on_garbage():
     assert parse_candump_line("\n") is None
 
 
-def test_iter_frames_skips_blanks_and_garbage(tmp_path: Path):
+def test_iter_frames_skips_blanks_and_garbage(tmp_path: Path) -> None:
     log = tmp_path / "frames.log"
     log.write_text("(1.0) vcan0 100#AABB\n\ngarbage line\n(2.0) vcan0 200#CCDD R\n")
     frames = list(iter_frames(log))

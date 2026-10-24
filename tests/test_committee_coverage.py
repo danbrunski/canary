@@ -26,7 +26,7 @@ KINDS = ("spike", "drift", "dropout", "stuck", "scale")
 
 
 @pytest.fixture(scope="module")
-def context():  # type: ignore[no-untyped-def]
+def context():
     from src.plausibility.benchmark import load_benchmark_context
 
     return load_benchmark_context(CONFIG, "nissan-xterra-2008")

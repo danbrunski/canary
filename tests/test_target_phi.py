@@ -535,6 +535,7 @@ def _evaluate(
 
 
 def _only(result: dict[str, Any]) -> dict[str, Any]:
+    record: dict[str, Any]
     (record,) = result["records"]
     return record
 

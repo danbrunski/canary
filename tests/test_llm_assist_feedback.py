@@ -7,7 +7,7 @@ into the retraining ledger the same way existing verdicts already do.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import cast
+from typing import Any, cast
 
 import pandas as pd
 import pytest
@@ -23,7 +23,7 @@ from src.models.retraining_policy import (
 )
 from tests.configs import isolated_config
 
-_EVENT = {
+_EVENT: dict[str, Any] = {
     "timestamp": "2026-07-20T10:00:00+00:00",
     "source": "lstm_autoencoder",
     "model_version": "lstm_2026",

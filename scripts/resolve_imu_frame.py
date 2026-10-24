@@ -28,9 +28,9 @@ from collections.abc import Sequence
 from pathlib import Path
 
 try:
-    from _cli import add_log_level_arg
+    from _cli import add_log_level_arg  # type: ignore[import-not-found]
 except ImportError:  # loaded as `scripts.resolve_imu_frame`
-    from scripts._cli import add_log_level_arg  # type: ignore[no-redef]
+    from scripts._cli import add_log_level_arg
 
 from src.log import configure_logging
 from src.preprocessing.imu_session import (

@@ -19,7 +19,7 @@ import numpy as np
 import pytest
 
 from src.analysis import paired_scenarios, rom_editor, twin_runner
-from src.analysis.fuel_plant import ParameterRegistry, plant_reads
+from src.analysis.fuel_plant import ParameterRegistry, plant_reads, resolve_parameters
 from src.analysis.paired_scenarios import (
     OUTPUTS,
     PLANT_ASSUMPTION_PREFIX,
@@ -36,6 +36,7 @@ from src.analysis.sim_montecarlo import (
     kit_for_plant,
 )
 from src.analysis.sim_report import render_report
+from src.analysis.target_phi import predict as predict_phi
 from src.vehicle.tune_revisions import TuneRevisionRegistry
 from tests import test_rom_editor, test_rom_sim_cli, test_sim_montecarlo
 from tests.rom_fixtures import PROFILE
@@ -215,7 +216,7 @@ def test_a_target_lookup_gate_leaves_bfs_supported_in_run_paired_and_the_fast_pa
     cand = _edit_all(image, kit, "fuel_compensation", 1, 3)
     # The lookup is the twin runner's target-phi stage (E09.2c): one patch
     # reaches run_paired and the fast path alike.
-    real_predict = twin_runner.predict_phi
+    real_predict = predict_phi
     gated_rpm = rpm_word(P_WOT.rpm, kit.contract)
 
     def in_the_band(*args: Any, **kw: Any) -> Any:
@@ -371,7 +372,7 @@ def test_a_parameter_is_a_working_assumption_only_at_its_registry_value(
     kit, _ = kit_and_image
     named = {a.parameter for a in paired_scenarios.plant_assumptions(kit, [P_WOT], drawn=())}
     assert "lambda_observation_delay" in named and "bank_air_split" in named
-    real = paired_scenarios.resolve_parameters
+    real = resolve_parameters
 
     def moved(*args: Any, **kw: Any) -> Any:
         out = real(*args, **kw)

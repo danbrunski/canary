@@ -326,7 +326,9 @@ async def test_two_captures_started_in_one_second_keep_both_recordings(
     for path, value in zip(captured, (1.0, 2.0), strict=True):
         chunks = sorted(path.glob("telemetry-*.parquet"))
         values = [
-            v for chunk in chunks for v in pq.read_table(chunk).column("value_number").to_pylist()
+            v
+            for chunk in chunks
+            for v in pq.read_table(chunk).column("value_number").to_pylist()  # type: ignore[no-untyped-call]
         ]
         assert values == [value], path.name
         manifest = read_capture_manifest(path)

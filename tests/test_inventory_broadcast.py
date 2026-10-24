@@ -11,7 +11,7 @@ def _write_log(path: Path, lines: list[str]) -> None:
     path.write_text("\n".join(lines) + "\n")
 
 
-def test_inventory_excludes_diagnostic_ids(tmp_path: Path):
+def test_inventory_excludes_diagnostic_ids(tmp_path: Path) -> None:
     """0x7DF/0x7E0..0x7EF should be filtered as diagnostic, not broadcast."""
     log = tmp_path / "frames.log"
     _write_log(
@@ -28,7 +28,7 @@ def test_inventory_excludes_diagnostic_ids(tmp_path: Path):
     assert [r.can_id for r in inv] == [0x180]
 
 
-def test_inventory_counts_frames_per_id(tmp_path: Path):
+def test_inventory_counts_frames_per_id(tmp_path: Path) -> None:
     log = tmp_path / "frames.log"
     _write_log(
         log,
@@ -45,7 +45,7 @@ def test_inventory_counts_frames_per_id(tmp_path: Path):
     assert by_id[0x280].n_frames == 1
 
 
-def test_inventory_sorted_by_count_descending(tmp_path: Path):
+def test_inventory_sorted_by_count_descending(tmp_path: Path) -> None:
     log = tmp_path / "frames.log"
     _write_log(
         log,
@@ -60,7 +60,7 @@ def test_inventory_sorted_by_count_descending(tmp_path: Path):
     assert [r.can_id for r in inv] == [0x180, 0x280]
 
 
-def test_inventory_computes_median_period(tmp_path: Path):
+def test_inventory_computes_median_period(tmp_path: Path) -> None:
     """20ms spacing → median period 20ms."""
     log = tmp_path / "frames.log"
     _write_log(
@@ -72,14 +72,14 @@ def test_inventory_computes_median_period(tmp_path: Path):
     assert abs(inv[0].period_ms - 20.0) < 0.01
 
 
-def test_inventory_period_zero_for_single_frame(tmp_path: Path):
+def test_inventory_period_zero_for_single_frame(tmp_path: Path) -> None:
     log = tmp_path / "frames.log"
     _write_log(log, ["(1.0) vcan0 180#00"])
     inv = inventory(log)
     assert inv[0].period_ms == 0.0
 
 
-def test_byte_variability_tracks_unique_values_per_position(tmp_path: Path):
+def test_byte_variability_tracks_unique_values_per_position(tmp_path: Path) -> None:
     """Byte 0 varies (3 unique), byte 1 constant (1 unique)."""
     log = tmp_path / "frames.log"
     _write_log(
@@ -94,7 +94,7 @@ def test_byte_variability_tracks_unique_values_per_position(tmp_path: Path):
     assert inv[0].byte_variability == (3, 1)
 
 
-def test_sample_frames_capped_at_n_samples(tmp_path: Path):
+def test_sample_frames_capped_at_n_samples(tmp_path: Path) -> None:
     log = tmp_path / "frames.log"
     _write_log(log, [f"(1.{i}) vcan0 180#0{i}" for i in range(10)])
     inv = inventory(log, n_samples=3)
@@ -104,7 +104,7 @@ def test_sample_frames_capped_at_n_samples(tmp_path: Path):
     assert inv[0].sample_frames[2] == bytes([0x02])
 
 
-def test_first_and_last_seen_timestamps(tmp_path: Path):
+def test_first_and_last_seen_timestamps(tmp_path: Path) -> None:
     log = tmp_path / "frames.log"
     _write_log(
         log,
@@ -119,7 +119,7 @@ def test_first_and_last_seen_timestamps(tmp_path: Path):
     assert inv[0].last_seen == 22.3
 
 
-def test_dlc_locked_to_first_sighting(tmp_path: Path):
+def test_dlc_locked_to_first_sighting(tmp_path: Path) -> None:
     """Real bus frames are fixed-length per ID; first sighting wins."""
     log = tmp_path / "frames.log"
     _write_log(
@@ -134,13 +134,13 @@ def test_dlc_locked_to_first_sighting(tmp_path: Path):
     assert len(inv[0].byte_variability) == 8
 
 
-def test_empty_log_returns_empty_inventory(tmp_path: Path):
+def test_empty_log_returns_empty_inventory(tmp_path: Path) -> None:
     log = tmp_path / "frames.log"
     log.write_text("")
     assert inventory(log) == []
 
 
-def test_only_diagnostic_returns_empty(tmp_path: Path):
+def test_only_diagnostic_returns_empty(tmp_path: Path) -> None:
     log = tmp_path / "frames.log"
     _write_log(
         log,
@@ -152,7 +152,7 @@ def test_only_diagnostic_returns_empty(tmp_path: Path):
     assert inventory(log) == []
 
 
-def test_custom_exclude_set(tmp_path: Path):
+def test_custom_exclude_set(tmp_path: Path) -> None:
     """Caller can pass their own exclude_ids."""
     log = tmp_path / "frames.log"
     _write_log(

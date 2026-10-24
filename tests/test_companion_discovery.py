@@ -24,7 +24,7 @@ IDENTITY = {
 }
 
 
-def fetcher(answers: dict[str, tuple[int, Any]]):  # noqa: ANN201 - a test double
+def fetcher(answers: dict[str, tuple[int, Any]]) -> Any:  # a test double
     calls: list[str] = []
 
     def fetch(url: str, timeout: float) -> tuple[int, Any]:
@@ -79,7 +79,7 @@ def test_something_else_on_port_8000_is_not_a_canary() -> None:
     silent = fetcher({})
     assert d.probe("http://d:8000", fetch=silent) is None
     # Nothing answered /identity at all: the status fallback is not even tried.
-    assert silent.calls == ["http://d:8000/identity"]  # type: ignore[attr-defined]
+    assert silent.calls == ["http://d:8000/identity"]
 
 
 def test_interface_networks_keeps_lan_prefixes_and_skips_loopback_docker_and_link_local() -> None:
@@ -152,15 +152,15 @@ class _FakeZeroconf:
 
 def _fake_zeroconf_module() -> types.ModuleType:
     module = types.ModuleType("zeroconf")
-    change = enum.Enum("ServiceStateChange", "Added Removed Updated")
+    ServiceStateChange = enum.Enum("ServiceStateChange", "Added Removed Updated")  # noqa: N806
 
     class ServiceBrowser:
         def __init__(self, zc: _FakeZeroconf, service: str, handlers: list[Any]) -> None:
             self.cancelled = False
             for name, state in (
-                ("canary-8974._canary._tcp.local.", change.Added),
-                ("ghost._canary._tcp.local.", change.Added),
-                ("gone._canary._tcp.local.", change.Removed),
+                ("canary-8974._canary._tcp.local.", ServiceStateChange.Added),
+                ("ghost._canary._tcp.local.", ServiceStateChange.Added),
+                ("gone._canary._tcp.local.", ServiceStateChange.Removed),
             ):
                 for handler in handlers:
                     handler(zc, service, name, state)
@@ -168,8 +168,9 @@ def _fake_zeroconf_module() -> types.ModuleType:
         def cancel(self) -> None:
             self.cancelled = True
 
-    module.IPVersion = enum.Enum("IPVersion", "V4Only V6Only All")  # type: ignore[attr-defined]
-    module.ServiceStateChange = change  # type: ignore[attr-defined]
+    IPVersion = enum.Enum("IPVersion", "V4Only V6Only All")  # noqa: N806
+    module.IPVersion = IPVersion  # type: ignore[attr-defined]
+    module.ServiceStateChange = ServiceStateChange  # type: ignore[attr-defined]
     module.ServiceBrowser = ServiceBrowser  # type: ignore[attr-defined]
     module.Zeroconf = _FakeZeroconf  # type: ignore[attr-defined]
     return module

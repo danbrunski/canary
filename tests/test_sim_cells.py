@@ -26,7 +26,7 @@ from pydantic import ValidationError
 
 from src.analysis import twin_runner
 from src.analysis.paired_scenarios import OUTPUTS, SimKit, rpm_word, run_paired
-from src.analysis.paired_steady import TRIM_AUTHORITY_UNDECODED
+from src.analysis.paired_steady import TRIM_AUTHORITY_UNDECODED, steady_bfs
 from src.analysis.rom_effects import (
     CellEdit,
     EffectReport,
@@ -901,7 +901,7 @@ def test_a_points_row_is_the_word_the_paired_run_read(
     seen: list[int] = []
     # The steady-BFS call is the twin runner's ECU stage (E09.2c), which
     # run_paired calls on its stated points.
-    real = twin_runner.steady_bfs
+    real = steady_bfs
 
     def spy(*args: Any, **kw: Any) -> Any:
         seen.append(int(kw["rpm_word"]))

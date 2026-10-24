@@ -35,7 +35,7 @@ from pathlib import Path
 import pandas as pd
 
 try:
-    from _cli import (
+    from _cli import (  # type: ignore[import-not-found]
         add_bindings_arg,
         add_common_args,
         add_log_level_arg,
@@ -44,7 +44,7 @@ try:
         scoped_models_dir,
     )
 except ImportError:  # loaded as `scripts.train_anomaly_model` — repo root on path, not scripts/
-    from scripts._cli import (  # type: ignore[no-redef]
+    from scripts._cli import (
         add_bindings_arg,
         add_common_args,
         add_log_level_arg,

@@ -70,12 +70,12 @@ from typing import Any
 import numpy as np
 
 try:
-    from _cli import (
+    from _cli import (  # type: ignore[import-not-found]
         add_bindings_arg,
         load_scoped_config,
     )
 except ImportError:
-    from scripts._cli import (  # type: ignore[no-redef]
+    from scripts._cli import (
         add_bindings_arg,
         load_scoped_config,
     )

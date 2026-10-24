@@ -11,6 +11,7 @@ channels).
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 
 import pandas as pd
 import pytest
@@ -56,7 +57,7 @@ def _specs(session: Path) -> list[str]:
 
 
 def _unfiltered(
-    monkeypatch: pytest.MonkeyPatch, session: Path, specs: list[str], **kwargs: bool
+    monkeypatch: pytest.MonkeyPatch, session: Path, specs: list[str], **kwargs: Any
 ) -> pd.DataFrame:
     """Today's reference: the whole session, every row and every column, with
     the clock put on all of it (no P02.19 narrowing)."""
@@ -121,10 +122,10 @@ def _recording_reads(monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, tuple[s
     reads: list[tuple[str, tuple[str, ...] | None]] = []
     real = pd.read_parquet
 
-    def recording(path: object, *args: object, **kwargs: object) -> pd.DataFrame:
+    def recording(path: Any, *args: Any, **kwargs: Any) -> pd.DataFrame:
         columns = kwargs.get("columns")
-        reads.append((Path(str(path)).parent.name, None if columns is None else tuple(columns)))  # type: ignore[arg-type]
-        return real(path, *args, **kwargs)  # type: ignore[arg-type]
+        reads.append((Path(str(path)).parent.name, None if columns is None else tuple(columns)))
+        return real(path, *args, **kwargs)
 
     monkeypatch.setattr(pd, "read_parquet", recording)
     return reads
@@ -205,7 +206,7 @@ def test_a_shared_read_serves_every_spec_exactly_from_one_read(
         for clock in (False, True)
     }
     calls: list[Path] = []
-    real = channels.read_session
+    real = read_session
 
     def counting(path: Path, **kwargs: object) -> pd.DataFrame:
         calls.append(path)
@@ -229,7 +230,7 @@ def test_a_spec_the_shared_read_does_not_hold_is_read_from_disk_not_dropped(
     """Missing a spec from the shared set costs a read, never a row; a
     nested block over rows already held reuses the outer read."""
     calls: list[Path] = []
-    real = channels.read_session
+    real = read_session
 
     def counting(path: Path, **kwargs: object) -> pd.DataFrame:
         calls.append(path)

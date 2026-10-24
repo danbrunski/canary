@@ -23,13 +23,13 @@ from src.collection.obd_registry import (
     decode_minutes,
     decode_torque_percent,
     decode_vin,
-    decode_wide_lambda,
     lookup,
     misfire_counts_from_results,
     misfire_cylinder_number,
     mode01_support_group,
     parse_mode06_response,
 )
+from src.collection.pid_decoders import decode_wide_lambda
 
 # ---------------------------------------------------------------------------
 # Registry integrity

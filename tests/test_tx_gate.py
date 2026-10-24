@@ -13,12 +13,12 @@ import json
 import threading
 import time
 from collections.abc import Iterator
-from typing import Any
+from typing import Any, cast
 
 import can
 import pytest
 
-from src.collection import tx_gate
+from src.collection import capture_lifetime, tx_gate
 from src.collection.can_obd_client import CanObdClient
 from src.collection.can_obd_collector import run_can_obd_loop
 from src.collection.obd_scheduler import CanObdSpec
@@ -84,8 +84,10 @@ def test_set_passive_returns_previous_state() -> None:
 def test_snapshot_reports_state_source_and_count() -> None:
     bus = _RecordingBus()
     tx_gate.set_passive(True, source="control")
-    tx_gate.send(  # type: ignore[arg-type]
-        bus, can.Message(arbitration_id=0x7E0, data=b"\x01", is_extended_id=False), what="t"
+    tx_gate.send(
+        cast(can.BusABC, bus),
+        can.Message(arbitration_id=0x7E0, data=b"\x01", is_extended_id=False),
+        what="t",
     )
 
     snap = tx_gate.snapshot()
@@ -372,7 +374,7 @@ def test_ownership_changes_open_and_close_capture_pause_windows(
 ) -> None:
     calls: list[tuple[bool, str]] = []
     monkeypatch.setattr(
-        tx_gate.capture_lifetime,
+        capture_lifetime,
         "mark_paused",
         lambda paused, *, reason, now: calls.append((paused, reason)),
     )

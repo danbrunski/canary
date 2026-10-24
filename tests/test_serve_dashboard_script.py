@@ -67,7 +67,7 @@ def test_main_uses_config_defaults_when_no_flags(
         captured["host"] = kwargs.get("host")
         captured["port"] = kwargs.get("port")
 
-    monkeypatch.setattr(serve_dashboard.uvicorn, "run", _fake_uvicorn_run)
+    monkeypatch.setattr("scripts.serve_dashboard.uvicorn.run", _fake_uvicorn_run)
 
     rc = serve_dashboard.main(["--config", "canary.example.yaml"])
     assert rc == 0
@@ -83,7 +83,7 @@ def test_main_cli_flags_override_config(monkeypatch: pytest.MonkeyPatch) -> None
         captured["host"] = kwargs.get("host")
         captured["port"] = kwargs.get("port")
 
-    monkeypatch.setattr(serve_dashboard.uvicorn, "run", _fake_uvicorn_run)
+    monkeypatch.setattr("scripts.serve_dashboard.uvicorn.run", _fake_uvicorn_run)
 
     rc = serve_dashboard.main(
         [
@@ -115,7 +115,7 @@ def test_main_creates_app_with_anomalies_dir(
         pass
 
     monkeypatch.setattr(serve_dashboard, "create_app", _fake_create_app)
-    monkeypatch.setattr(serve_dashboard.uvicorn, "run", _fake_uvicorn_run)
+    monkeypatch.setattr("scripts.serve_dashboard.uvicorn.run", _fake_uvicorn_run)
 
     rc = serve_dashboard.main(
         [

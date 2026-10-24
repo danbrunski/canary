@@ -178,9 +178,9 @@ def test_transfer_deselects_between_frames_and_returns_what_was_clocked_in(
                 for i in range(slot.len):
                     rx[i] = tx[i] ^ 0xFF
 
-    monkeypatch.setattr(spi_dev.os, "open", lambda *_a, **_k: 99)
-    monkeypatch.setattr(spi_dev.os, "close", lambda _fd: None)
-    monkeypatch.setattr(spi_dev.fcntl, "ioctl", fake_ioctl)
+    monkeypatch.setattr("src.collection.spi_dev.os.open", lambda *_a, **_k: 99)
+    monkeypatch.setattr("src.collection.spi_dev.os.close", lambda _fd: None)
+    monkeypatch.setattr("src.collection.spi_dev.fcntl.ioctl", fake_ioctl)
     bus = spi_dev.LinuxSpiBus("/dev/spidev0.1", mode=spi_dev.SPI_MODE_1, speed_hz=8_000_000)
     assert [c[0] for c in calls] == [
         spi_dev.SPI_IOC_WR_MODE,

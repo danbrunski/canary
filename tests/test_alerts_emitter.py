@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import math
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import pandas as pd
 import pytest
@@ -12,14 +12,15 @@ import pytest
 from src.alerts.emitter import AnomalyEventEmitter
 from src.alerts.event_logger import AnomalyEventLogger, read_events_dir
 from src.alerts.events import AnomalyEvent
-from src.models.inference import IsolationForestInferenceEngine
+from src.alerts.notifier import Notifier
+from src.models.inference import IsolationForestInferenceEngine, SequenceInferenceResult
 
 # ---------------------------------------------------------------------------
 # Fake result types — kept lightweight to avoid torch / sklearn imports here
 # ---------------------------------------------------------------------------
 
 
-class _FakeLSTMResult:
+class _FakeLSTMResultImpl:
     """Stand-in for ``SequenceInferenceResult``; matches the attribute surface
     ``AnomalyEvent.from_lstm_result`` reads. Adding fields to the real type
     will surface here as missing-attr errors, which is the failure mode we want."""
@@ -58,6 +59,11 @@ class _FakeLSTMResult:
         self.top_channels = top_channels
         self.reconstruction_series = reconstruction_series or {}
         self.reconstruction_overlays = reconstruction_overlays or {}
+
+
+def _FakeLSTMResult(**kwargs: Any) -> SequenceInferenceResult:  # noqa: N802 - stands in for a class
+    """Build a fake result typed as the real one the emitter accepts."""
+    return cast(SequenceInferenceResult, _FakeLSTMResultImpl(**kwargs))
 
 
 def _scored_if_row(
@@ -295,7 +301,7 @@ def test_qualifying_event_pushes_a_notification(tmp_path: Path) -> None:
     emitter = AnomalyEventEmitter(
         logger,
         min_seconds_between_events=0,
-        notifier=notifier,
+        notifier=cast(Notifier, notifier),
         notify_min_severity=0.5,
     )
     emitter.emit_lstm(_FakeLSTMResult(global_score=5.0))  # well above 0.5
@@ -308,7 +314,7 @@ def test_below_min_severity_does_not_push(tmp_path: Path) -> None:
     emitter = AnomalyEventEmitter(
         logger,
         min_seconds_between_events=0,
-        notifier=notifier,
+        notifier=cast(Notifier, notifier),
         notify_min_severity=10.0,  # above the fake result's global_score=5.0
     )
     emitter.emit_lstm(_FakeLSTMResult(global_score=5.0))
@@ -321,7 +327,7 @@ def test_max_pushes_per_session_caps_pushes(tmp_path: Path) -> None:
     emitter = AnomalyEventEmitter(
         logger,
         min_seconds_between_events=0,
-        notifier=notifier,
+        notifier=cast(Notifier, notifier),
         notify_min_severity=0.5,
         notify_max_pushes_per_session=2,
     )
@@ -341,7 +347,7 @@ def test_reset_notification_count_reopens_the_budget(tmp_path: Path) -> None:
     emitter = AnomalyEventEmitter(
         logger,
         min_seconds_between_events=0,
-        notifier=notifier,
+        notifier=cast(Notifier, notifier),
         notify_min_severity=0.5,
         notify_max_pushes_per_session=1,
     )
@@ -363,7 +369,7 @@ def test_replay_mode_never_pushes_notifications(tmp_path: Path) -> None:
     emitter = AnomalyEventEmitter(
         logger,
         min_seconds_between_events=0,
-        notifier=notifier,
+        notifier=cast(Notifier, notifier),
         notify_min_severity=0.5,
     )
     emitter.enter_replay_mode()

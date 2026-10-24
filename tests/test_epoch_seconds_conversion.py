@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import re
 from pathlib import Path
+from typing import Literal
 
 import numpy as np
 import pandas as pd
@@ -25,7 +26,7 @@ PATTERN = re.compile(r'astype\(\s*["\']int64["\']\s*\)[^\n]{0,80}(?:/\s*1e9|1_00
 
 
 @pytest.mark.parametrize("unit", ["ns", "us", "ms", "s"])
-def test_to_seconds_is_the_same_in_every_unit(unit: str) -> None:
+def test_to_seconds_is_the_same_in_every_unit(unit: Literal["ns", "us", "ms", "s"]) -> None:
     stamps = pd.Series(
         pd.to_datetime(["2026-09-22T10:00:00Z", "2026-09-22T10:00:08.25Z"], format="ISO8601")
     )

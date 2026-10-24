@@ -116,10 +116,14 @@ select = ["E", "F", "I", "B", "UP", "N", "W"]
 # Kept in step with requires-python above: checking src/ against 3.11 would
 # constrain code that never runs there, and numpy's stubs no longer support a
 # 3.11 target. NB scripts/ups_shutdown_watch.py deliberately runs on the Pi's
-# *system* interpreter, so it is not covered by this (mypy only checks src/).
+# *system* interpreter: tests/test_ups_shutdown.py imports it, so it is checked,
+# but against 3.12, not against that interpreter.
+# tests/ is checked too (2026-10-24): while only src/ was, ~2,400 errors had
+# piled up there unseen. The scripts/ and tools/ modules the tests import are
+# checked through them.
 python_version = "3.12"
 strict = true
-files = ["src"]
+files = ["src", "tests"]
 
 [[tool.mypy.overrides]]
 module = "tests.*"

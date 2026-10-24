@@ -12,6 +12,7 @@ from __future__ import annotations
 import math
 from collections.abc import Callable
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 import pandas as pd
@@ -133,10 +134,12 @@ def _refused(result: object, kind: str) -> DynoRefusal:
     return result
 
 
-def _build(channels: dict[str, pd.Series], imu: object, **kwargs: object) -> object:
-    options: dict[str, object] = {"start": START, "end": END, "sources": SOURCES, "imu": imu}
+def _build(
+    channels: dict[str, pd.Series], imu: object, **kwargs: object
+) -> DynoInputs | DynoRefusal:
+    options: dict[str, Any] = {"start": START, "end": END, "sources": SOURCES, "imu": imu}
     options.update(kwargs)
-    return build_motion_inputs(channels, **options)  # type: ignore[arg-type]
+    return build_motion_inputs(channels, **options)
 
 
 # ---------------------------------------------------------------------------
@@ -327,8 +330,9 @@ def test_a_hole_in_a_selected_channel_is_refused_not_bridged() -> None:
     channels, imu = _channels()
 
     def holed(series: pd.Series, lo: float, hi: float) -> pd.Series:
-        seconds = (series.index - T0) / pd.Timedelta(seconds=1)
-        return series[(seconds < lo) | (seconds > hi)]
+        seconds = (series.index - T0) / pd.Timedelta(seconds=1)  # type: ignore[operator]
+        holed_series: pd.Series = series[(seconds < lo) | (seconds > hi)]
+        return holed_series
 
     refusal = _refused(
         _build({**channels, SPEED: holed(channels[SPEED], 9.0, 9.4)}, imu), "inputs_gap"

@@ -24,9 +24,9 @@ from collections.abc import Sequence
 from pathlib import Path
 
 try:
-    from _cli import add_common_args, load_scoped_config
+    from _cli import add_common_args, load_scoped_config  # type: ignore[import-not-found]
 except ImportError:  # loaded as `scripts.fp_benchmark` — repo root on path, not scripts/
-    from scripts._cli import add_common_args, load_scoped_config  # type: ignore[no-redef]
+    from scripts._cli import add_common_args, load_scoped_config
 
 from src.config import CanaryConfig
 from src.models.false_positive_benchmark import FalsePositiveBenchmarkReport

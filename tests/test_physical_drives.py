@@ -118,7 +118,7 @@ def test_frames_carry_physical_drives_and_every_count_reads_them(
         [corpus.before, corpus.after, corpus.other, corpus.parked], config, max_workers=1
     )
     assert DRIVE_COLUMN in frame.columns
-    by_session = frame.groupby("session")[DRIVE_COLUMN].agg(lambda s: set(s.dropna()))
+    by_session = frame.groupby("session")[DRIVE_COLUMN].agg(lambda s: set(s.dropna()))  # type: ignore[type-var]
     assert by_session[corpus.before.name] == by_session[corpus.after.name]
     assert len(by_session[corpus.parked.name]) == 2
 

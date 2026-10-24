@@ -10,7 +10,7 @@ from __future__ import annotations
 import threading
 import time
 from collections.abc import Iterator
-from typing import Any
+from typing import Any, cast
 
 import can
 import pytest
@@ -19,7 +19,12 @@ from pydantic import ValidationError
 from src.collection import tuning_profile, tx_gate
 from src.collection.can_obd_collector import run_can_obd_loop
 from src.collection.capture_profiles import CaptureProfile
-from src.collection.obd_scheduler import CanObdSpec, SessionControlResult, _PollRequest
+from src.collection.obd_scheduler import (
+    CanObdSpec,
+    PollRequest,
+    SessionControlResult,
+    _PollRequest,
+)
 from src.config import CanBusConfig
 
 
@@ -98,10 +103,10 @@ def test_request_eligible_restricts_to_the_tuning_set() -> None:
         def __init__(self, channel: str) -> None:
             self.channel = channel
 
-    assert tuning_profile.request_eligible(0, R("RPM")) is True
-    assert tuning_profile.request_eligible(0, R("TIMING_ADVANCE")) is True
-    assert tuning_profile.request_eligible(0, R("FUEL_LEVEL")) is False
-    assert tuning_profile.request_eligible(0, R("CATALYST_TEMP_B1S1")) is False
+    assert tuning_profile.request_eligible(0, cast(PollRequest, R("RPM"))) is True
+    assert tuning_profile.request_eligible(0, cast(PollRequest, R("TIMING_ADVANCE"))) is True
+    assert tuning_profile.request_eligible(0, cast(PollRequest, R("FUEL_LEVEL"))) is False
+    assert tuning_profile.request_eligible(0, cast(PollRequest, R("CATALYST_TEMP_B1S1"))) is False
 
 
 def test_poll_loop_only_requests_tuning_channels_when_active() -> None:
@@ -247,16 +252,25 @@ def test_dtc_reads_survive_tuning_mode() -> None:
             self.channel = channel
             self.kind = kind
 
-    assert tuning_profile.request_eligible(0, R("DTC_STORED", "dtc")) is True
-    assert tuning_profile.request_eligible(0, R("DTC_PENDING", "dtc")) is True
+    assert tuning_profile.request_eligible(0, cast(PollRequest, R("DTC_STORED", "dtc"))) is True
+    assert tuning_profile.request_eligible(0, cast(PollRequest, R("DTC_PENDING", "dtc"))) is True
     # Mode 06 stays excluded unless the profile names MONITOR_RESULTS (or
     # AUTO) — a sweep is slow-tier bulk (C06.7: `service` × focused_mode01).
-    assert tuning_profile.request_eligible(0, R("MONITOR_RESULTS", "service")) is False
-    assert tuning_profile.request_verdict(R("MONITOR_RESULTS", "service")).reason == "not_selected"
+    assert (
+        tuning_profile.request_eligible(0, cast(PollRequest, R("MONITOR_RESULTS", "service")))
+        is False
+    )
+    assert (
+        tuning_profile.request_verdict(cast(PollRequest, R("MONITOR_RESULTS", "service"))).reason
+        == "not_selected"
+    )
     # A freeze frame is DTC-owned one-shot work: it fires only when the
     # admitted DTC poll finds a stored code, so it rides the same admission
     # (C06.7/C06.10) instead of being filtered by the telemetry selection.
-    assert tuning_profile.request_eligible(0, R("FREEZE_FRAME_RPM", "freeze_frame")) is True
+    assert (
+        tuning_profile.request_eligible(0, cast(PollRequest, R("FREEZE_FRAME_RPM", "freeze_frame")))
+        is True
+    )
 
 
 def test_speed_is_polled_so_operating_mode_survives() -> None:
@@ -340,7 +354,7 @@ def test_target_rate_hz_is_bounded() -> None:
         )
 
 
-def _did_controller(monkeypatch: pytest.MonkeyPatch, *, continuous: bool):
+def _did_controller(monkeypatch: pytest.MonkeyPatch, *, continuous: bool) -> tuple[Any, list[Any]]:
     """A window controller over two DIDs, with the profile's continuity forced."""
     from src.collection.obd_scheduler import DidSessionSpec, DidWindowController, _PollRequestState
 

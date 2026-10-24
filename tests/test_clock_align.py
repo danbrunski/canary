@@ -23,7 +23,7 @@ def test_recovers_a_known_offset() -> None:
     t0 = pd.Timestamp("2026-08-05T12:00:00Z")
     reference = _rpm_series(t0, 120, 20)
     # Candidate's clock runs 1.6 s behind, the larger of the two real offsets.
-    candidate = pd.Series(reference.to_numpy(), index=reference.index - pd.Timedelta(seconds=1.6))
+    candidate = pd.Series(reference.to_numpy(), index=reference.index - pd.Timedelta(seconds=1.6))  # type: ignore[operator]
     alignment = align_clocks(reference, candidate)
     assert alignment.offset_seconds == pytest.approx(1.6, abs=0.11)
     assert alignment.r > 0.99

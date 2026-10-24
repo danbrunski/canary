@@ -15,6 +15,8 @@ import scripts.refit_behavior_models as refit_cli
 # Importable as a module so we can call main() and patch its dependencies.
 from scripts import _cli
 from src.analysis.behavior_validation import ValidationContext
+from src.analysis.recipes.catalog import default_recipes
+from src.analysis.refit import refit_all
 from src.yaml_load import load_yaml
 
 
@@ -98,18 +100,18 @@ def test_filter_sessions_by_boundary_keeps_on_and_after(tmp_path: Path) -> None:
 
 
 def test_select_recipes_default_returns_full_catalog() -> None:
-    catalog = refit_cli.default_recipes("nissan-xterra-2008")
+    catalog = default_recipes("nissan-xterra-2008")
     assert refit_cli._select_recipes(catalog, None) == catalog
 
 
 def test_select_recipes_filters_by_name() -> None:
-    catalog = refit_cli.default_recipes("nissan-xterra-2008")
+    catalog = default_recipes("nissan-xterra-2008")
     selected = refit_cli._select_recipes(catalog, ["coolant_warmup", "warm_idle_rpm_baseline"])
     assert [r.name for r in selected] == ["coolant_warmup", "warm_idle_rpm_baseline"]
 
 
 def test_select_recipes_rejects_unknown_name() -> None:
-    catalog = refit_cli.default_recipes("nissan-xterra-2008")
+    catalog = default_recipes("nissan-xterra-2008")
     with pytest.raises(SystemExit, match="unknown recipe"):
         refit_cli._select_recipes(catalog, ["nope"])
 
@@ -636,7 +638,7 @@ def test_main_hands_the_session_directories_to_per_read_grading(
     (and the catalogs that decode them) into the evidence context."""
     _patch_pipeline(monkeypatch, tmp_path)
     seen: list[ValidationContext] = []
-    real_refit_all = refit_cli.refit_all
+    real_refit_all = refit_all
 
     def spy(*args: object, **kwargs: object) -> object:
         context = kwargs["validation_context"]

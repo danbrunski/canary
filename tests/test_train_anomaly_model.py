@@ -76,7 +76,7 @@ def _write_can_session(
             }
         )
     table = pa.Table.from_pylist(rows, schema=TELEMETRY_SCHEMA)
-    pq.write_table(table, session / "telemetry-00000.parquet")
+    pq.write_table(table, session / "telemetry-00000.parquet")  # type: ignore[no-untyped-call, unused-ignore]
     return session
 
 
@@ -122,7 +122,7 @@ def _config() -> CanaryConfig:
 # ---------------------------------------------------------------------------
 
 
-def test_build_feature_frame_produces_decoded_feature_columns(tmp_path: Path):
+def test_build_feature_frame_produces_decoded_feature_columns(tmp_path: Path) -> None:
     session = _write_can_session(tmp_path, "sess1")
     bindings = tmp_path / "bindings.yaml"
     _write_bindings(bindings)
@@ -139,7 +139,7 @@ def test_build_feature_frame_produces_decoded_feature_columns(tmp_path: Path):
     assert pd.api.types.is_numeric_dtype(features["decoded:ECM_COOLANT_TEMP"])
 
 
-def test_build_feature_frame_without_bindings_still_works(tmp_path: Path):
+def test_build_feature_frame_without_bindings_still_works(tmp_path: Path) -> None:
     """Missing bindings file → no decoded columns, but pipeline doesn't crash."""
     session = _write_can_session(tmp_path, "sess1")
     features = build_feature_frame([session], _config(), bindings_path=tmp_path / "nope.yaml")
@@ -219,7 +219,7 @@ def test_feature_frame_cache_key_changes_when_bindings_change(tmp_path: Path) ->
 # ---------------------------------------------------------------------------
 
 
-def test_segment_or_constant_adds_constant_mode_when_no_obd(tmp_path: Path):
+def test_segment_or_constant_adds_constant_mode_when_no_obd(tmp_path: Path) -> None:
     resampled = pd.DataFrame(
         {
             "session": ["s1"] * 3,
@@ -233,7 +233,7 @@ def test_segment_or_constant_adds_constant_mode_when_no_obd(tmp_path: Path):
     assert fell_back  # 4.7 — no segmenter inputs is a real runtime fallback
 
 
-def test_segment_or_constant_uses_segmenter_when_obd_present(tmp_path: Path):
+def test_segment_or_constant_uses_segmenter_when_obd_present(tmp_path: Path) -> None:
     resampled = pd.DataFrame(
         {
             "session": ["s1"] * 3,
@@ -253,7 +253,7 @@ def test_segment_or_constant_uses_segmenter_when_obd_present(tmp_path: Path):
     assert not fell_back  # 4.7 — real segmentation ran, not a fallback
 
 
-def test_segment_or_constant_single_mode_flag_overrides_segmenter(tmp_path: Path):
+def test_segment_or_constant_single_mode_flag_overrides_segmenter(tmp_path: Path) -> None:
     """single_operating_mode=True forces a constant 'all' mode even when the
     OBD segmenter inputs are present."""
     resampled = pd.DataFrame(
@@ -466,7 +466,7 @@ def test_reconcile_feature_frame_to_spec_aligns_missing_and_extra_columns():
 # ---------------------------------------------------------------------------
 
 
-def test_train_writes_artifact_and_manifest(tmp_path: Path):
+def test_train_writes_artifact_and_manifest(tmp_path: Path) -> None:
     pytest.importorskip("joblib")
     pytest.importorskip("sklearn")
     # n_frames=650 (~163 rows after resample) clears the production
@@ -492,7 +492,7 @@ def test_train_writes_artifact_and_manifest(tmp_path: Path):
     assert "all" in trained.models  # single mode (no OBD)
 
 
-def test_train_raises_when_no_trainable_columns(tmp_path: Path):
+def test_train_raises_when_no_trainable_columns(tmp_path: Path) -> None:
     pytest.importorskip("joblib")
     pytest.importorskip("sklearn")
     # A session whose only CAN ID has no binding → no decoded columns →
@@ -524,7 +524,9 @@ def _one_drive_config(tmp_path: Path) -> str:
     return str(path)
 
 
-def test_main_refuses_a_single_drive_corpus_and_says_why(tmp_path: Path, capsys):
+def test_main_refuses_a_single_drive_corpus_and_says_why(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
     """A04.4: the shipped config refuses a mode resting on fewer than three
     independent drives, naming the reason."""
     pytest.importorskip("joblib")
@@ -550,7 +552,7 @@ def test_main_refuses_a_single_drive_corpus_and_says_why(tmp_path: Path, capsys)
     assert not (tmp_path / "model" / "model.joblib").exists()
 
 
-def test_main_errors_when_no_sessions(tmp_path: Path, capsys):
+def test_main_errors_when_no_sessions(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     rc = main(
         [
             "--sessions-root",
@@ -565,7 +567,7 @@ def test_main_errors_when_no_sessions(tmp_path: Path, capsys):
     assert "no sessions" in capsys.readouterr().err
 
 
-def test_main_trains_and_reports(tmp_path: Path, capsys):
+def test_main_trains_and_reports(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     pytest.importorskip("joblib")
     pytest.importorskip("sklearn")
     # n_frames=650 (~163 rows after resample) clears the production
@@ -595,7 +597,7 @@ def test_main_trains_and_reports(tmp_path: Path, capsys):
     assert (tmp_path / "model" / "model.joblib").exists()
 
 
-def test_main_with_evaluate(tmp_path: Path, capsys):
+def test_main_with_evaluate(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     pytest.importorskip("joblib")
     pytest.importorskip("sklearn")
     # n_frames=650 (~163 rows after resample) clears the production

@@ -416,7 +416,9 @@ def test_replaying_a_k106_session_gets_the_k106_map_not_todays(tmp_path: Path) -
     assert prepared.flash_history.revisions_at(prepared.wide["timestamp"]).tolist() == [
         "ZS44A-k106"
     ]
-    today = _registry().at(now).revision
+    active = _registry().at(now)
+    assert active is not None
+    today = active.revision
     assert today != "ZS44A-k106"
     assert _registry().revisions_at(prepared.wide["timestamp"]).tolist() == [today]
     point = build_prepared_live_tick(pickle.loads(pickle.dumps(prepared))).operating_point

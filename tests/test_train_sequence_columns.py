@@ -14,6 +14,7 @@ import yaml
 
 from src.models import training_entry
 from src.models.sequence_training import ValidationChoice
+from src.models.sequence_validation_split import choose_validation_sessions
 from src.storage.parquet_writer import write_records_to_parquet
 from src.telemetry import TelemetryRecord
 from src.yaml_load import load_yaml
@@ -131,7 +132,7 @@ def test_parked_rows_neither_train_nor_validate(
         _parked_session(root, f"2026-08-0{i + 1}T120000", start=1_785_600_000.0 + 86_400 * i)
         for i in range(3)
     ]
-    real_choice = training_entry.choose_validation_sessions
+    real_choice = choose_validation_sessions
     seen: dict[str, Any] = {}
 
     def spy_choice(frame: Any, **kwargs: Any) -> Any:

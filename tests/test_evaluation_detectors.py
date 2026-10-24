@@ -26,7 +26,9 @@ from src.models.evaluation_detectors import (  # noqa: E402
     ThresholdedScore,
     raw_channels,
 )
-from src.models.isolation_forest import fit_isolation_forest  # noqa: E402
+from src.models.isolation_forest import (  # noqa: E402
+    fit_isolation_forest,
+)
 from tests.builders import IFConfig
 from tests.configs import example_config
 

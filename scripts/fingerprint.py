@@ -36,14 +36,14 @@ from collections.abc import Sequence
 from pathlib import Path
 
 try:
-    from _cli import (
+    from _cli import (  # type: ignore[import-not-found]
         add_common_args,
         add_log_level_arg,
         discover_live_session_dirs,
         load_config,
     )
 except ImportError:  # loaded as `scripts.fingerprint` — repo root on path, not scripts/
-    from scripts._cli import (  # type: ignore[no-redef]
+    from scripts._cli import (
         add_common_args,
         add_log_level_arg,
         discover_live_session_dirs,
@@ -138,7 +138,7 @@ def _parse_args(argv: Sequence[str] | None) -> argparse.Namespace:
 
 
 def _scoped_config(args: argparse.Namespace) -> CanaryConfig:
-    config = load_config(args)
+    config: CanaryConfig = load_config(args)
     if not config.profiles.enabled:
         return config
     return scope_config(config, resolve_profile_for_tooling(config, args.profile))

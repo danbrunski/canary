@@ -106,6 +106,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         if dlo is None:
             decoded = "—  (scale not pinned)"
         else:
+            assert dhi is not None  # same entry, same scale: pinned for rlo means pinned for rhi
             lo, hi = sorted((dlo, dhi))
             verdict = ""
             for d in (lo, hi):

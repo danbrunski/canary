@@ -11,6 +11,7 @@ from dataclasses import replace
 from datetime import date
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any, cast
 
 import pandas as pd
 import pytest
@@ -37,6 +38,7 @@ from src.daemon.behavior_live import (
     BehaviorObservation,
 )
 from src.dashboard.api import create_app
+from src.features.live import LiveFeatureSource
 
 
 def _cfg_yaml(storage: Path) -> str:
@@ -165,8 +167,12 @@ def _poly_model(operating_mode: str | None = None) -> BehaviorModel1D:
     )
 
 
-def _source(model: BehaviorModel1D, point: dict[str, object]) -> SimpleNamespace:
-    return SimpleNamespace(
+def _fake_source(**attrs: Any) -> LiveFeatureSource:
+    return cast(LiveFeatureSource, SimpleNamespace(**attrs))
+
+
+def _source(model: BehaviorModel1D, point: dict[str, object]) -> LiveFeatureSource:
+    return _fake_source(
         behavior_models=BehaviorModels(schema_version=1, models=[model]),
         latest_operating_point=point,
         accepted_baselines=None,
@@ -275,11 +281,11 @@ def test_observation_normalises_severity_at_construction() -> None:
 def test_observe_behavior_noop_without_models_or_point() -> None:
     state = BehaviorLiveState()
     _observe_behavior(
-        SimpleNamespace(behavior_models=None, latest_operating_point={}, accepted_baselines=None),
+        _fake_source(behavior_models=None, latest_operating_point={}, accepted_baselines=None),
         state,
     )
     _observe_behavior(
-        SimpleNamespace(
+        _fake_source(
             behavior_models=BehaviorModels(schema_version=1, models=[_poly_model()]),
             latest_operating_point=None,
             accepted_baselines=None,
@@ -372,7 +378,7 @@ def test_observe_behavior_consults_active_channel_override() -> None:
         "obd:SHORT_FUEL_TRIM_1": 19.0,  # center 12 → Δ +7 ≥ worse_critical 6
     }
     baselines = AcceptedBaselines(schema_version=1, overrides=[_channel_override()])
-    source = SimpleNamespace(
+    source = _fake_source(
         behavior_models=None,
         latest_operating_point=point,
         accepted_baselines=baselines,
@@ -401,7 +407,7 @@ def test_observe_behavior_channel_override_within_tolerance_is_ok() -> None:
         "obd:SHORT_FUEL_TRIM_1": 14.0,  # center 12 → Δ +2 < tolerance 3
     }
     baselines = AcceptedBaselines(schema_version=1, overrides=[_channel_override()])
-    source = SimpleNamespace(
+    source = _fake_source(
         behavior_models=None,
         latest_operating_point=point,
         accepted_baselines=baselines,
@@ -425,7 +431,7 @@ def test_observe_behavior_channel_override_skips_wrong_mode() -> None:
         "obd:SHORT_FUEL_TRIM_1": 19.0,
     }
     baselines = AcceptedBaselines(schema_version=1, overrides=[_channel_override()])
-    source = SimpleNamespace(
+    source = _fake_source(
         behavior_models=None,
         latest_operating_point=point,
         accepted_baselines=baselines,
@@ -444,7 +450,7 @@ def test_observe_behavior_channel_override_missing_channel_skips_cleanly() -> No
         # obd:SHORT_FUEL_TRIM_1 absent this tick.
     }
     baselines = AcceptedBaselines(schema_version=1, overrides=[_channel_override()])
-    source = SimpleNamespace(
+    source = _fake_source(
         behavior_models=None,
         latest_operating_point=point,
         accepted_baselines=baselines,

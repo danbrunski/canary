@@ -249,7 +249,9 @@ def test_check_fetch_failures_say_which_kind(
 
 
 def test_check_without_an_upstream_says_so(paths: UpdatePaths) -> None:
-    answers = {("rev-parse", "--abbrev-ref"): CommandResult(128, "", "no upstream")}
+    answers: dict[tuple[str, ...], CommandResult] = {
+        ("rev-parse", "--abbrev-ref"): CommandResult(128, "", "no upstream")
+    }
     status = _serve(paths, FakeCommands(answers=answers))
     assert status["last_check"]["reason"] == "no_upstream"
 

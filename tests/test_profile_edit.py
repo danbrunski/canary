@@ -13,6 +13,7 @@ from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 
+import can
 import pytest
 import yaml
 from fastapi.testclient import TestClient
@@ -778,7 +779,7 @@ class _VinEcu(ScriptedEcu):
         self.vin = vin
         self.vin_requests = 0
 
-    def send(self, msg, timeout=None):  # type: ignore[no-untyped-def]
+    def send(self, msg: can.Message, timeout: float | None = None) -> None:
         data = bytes(msg.data)
         if len(data) >= 3 and data[1] == 0x09 and data[2] == 0x02:
             now = self.clock.monotonic()
@@ -897,7 +898,7 @@ class _SessionVinEcu(_VinEcu):
         self.ticket: vin_read.VinReadTicket | None = None
         self.submitted_at: float | None = None
 
-    def send(self, msg, timeout=None):  # type: ignore[no-untyped-def]
+    def send(self, msg: can.Message, timeout: float | None = None) -> None:
         data = bytes(msg.data)
         if len(data) >= 3 and data[1] == 0x09 and data[2] == 0x02:
             self.session_at_vin.append(self.session)

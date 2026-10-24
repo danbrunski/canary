@@ -213,11 +213,9 @@ def test_classification_route_computes_in_the_bounded_child(
 def test_classification_route_defers_while_a_capture_records(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from src.control import workbench_jobs
-
     session = _write_session(tmp_path)
     client, _config, jobs = _route_client(tmp_path, monkeypatch)
-    monkeypatch.setattr(workbench_jobs.tuning_profile, "is_active", lambda: True)
+    monkeypatch.setattr("src.control.workbench_jobs.tuning_profile.is_active", lambda: True)
 
     response = client.post(f"/control/sessions/{session.name}/classification", headers=_AUTH)
 

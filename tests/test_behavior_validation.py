@@ -760,7 +760,7 @@ def test_first_runtime_answer_after_the_first_running_rows_places_the_start() ->
 
     spec = StartContextSpec("obd:RPM", "obd:RUN_TIME", "obd:COOLANT_TEMP", 400.0, 60.0)
     tracker = EngineStartTracker(spec)
-    assert tracker.update(1550.0, None, None, 0.0) == (
+    assert tracker.update(1550.0, None, None, 0.0) == (  # type: ignore[comparison-overlap]
         0.0,
         pytest.approx(float("nan"), nan_ok=True),
     )

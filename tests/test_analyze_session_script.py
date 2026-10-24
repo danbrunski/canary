@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 
 import pytest
 import yaml
@@ -34,7 +35,7 @@ dashboard: {{host: 127.0.0.1, port: 8000}}
 """
 
 
-def _behavior_models_yaml() -> dict:
+def _behavior_models_yaml() -> dict[str, Any]:
     return {
         "schema_version": 1,
         "models": [
@@ -79,7 +80,7 @@ def _write_session(slug_dir: Path, session_id: str, *, timing_advance: float) ->
 
 
 @pytest.fixture
-def env(tmp_path: Path) -> dict[str, Path]:
+def env(tmp_path: Path) -> dict[str, Any]:
     # The default profile for this vehicle block slugs to nissan-xterra-2008
     # (see src/vehicle/profiles.py:_default_profile) — the session must live there.
     storage = tmp_path / "data"
@@ -100,7 +101,9 @@ def env(tmp_path: Path) -> dict[str, Path]:
     }
 
 
-def test_cli_prints_deviation_table(env: dict[str, Path], capsys: pytest.CaptureFixture) -> None:
+def test_cli_prints_deviation_table(
+    env: dict[str, Any], capsys: pytest.CaptureFixture[str]
+) -> None:
     exit_code = main(
         [
             "--config",
@@ -119,7 +122,7 @@ def test_cli_prints_deviation_table(env: dict[str, Path], capsys: pytest.Capture
 
 
 def test_cli_mode_filter_excludes_non_matching_surfaces(
-    env: dict[str, Path], capsys: pytest.CaptureFixture
+    env: dict[str, Any], capsys: pytest.CaptureFixture[str]
 ) -> None:
     exit_code = main(
         [
@@ -140,7 +143,7 @@ def test_cli_mode_filter_excludes_non_matching_surfaces(
 
 
 def test_cli_unknown_session_errors_cleanly(
-    env: dict[str, Path], capsys: pytest.CaptureFixture
+    env: dict[str, Any], capsys: pytest.CaptureFixture[str]
 ) -> None:
     exit_code = main(
         [
@@ -157,7 +160,7 @@ def test_cli_unknown_session_errors_cleanly(
 
 
 def test_cli_against_flag_prints_ab_comparison(
-    env: dict[str, Path], capsys: pytest.CaptureFixture
+    env: dict[str, Any], capsys: pytest.CaptureFixture[str]
 ) -> None:
     against_id = "2026-07-20T000000"
     _write_session(env["slug_dir"], against_id, timing_advance=20.0)  # expected 10 -> Δ=+10
@@ -182,7 +185,7 @@ def test_cli_against_flag_prints_ab_comparison(
 
 
 def test_cli_against_unknown_session_errors_cleanly(
-    env: dict[str, Path], capsys: pytest.CaptureFixture
+    env: dict[str, Any], capsys: pytest.CaptureFixture[str]
 ) -> None:
     exit_code = main(
         [

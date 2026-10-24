@@ -61,7 +61,7 @@ def _registry(tmp_path: Path) -> ProfilesConfig:
     )
 
 
-def test_registry_roundtrip(tmp_path: Path):
+def test_registry_roundtrip(tmp_path: Path) -> None:
     registry = _registry(tmp_path)
     assert load_registry(registry) == []  # missing files → empty
     profiles = [
@@ -75,7 +75,7 @@ def test_registry_roundtrip(tmp_path: Path):
     assert loaded[0].year == 2008
 
 
-def test_update_profile_name(tmp_path: Path):
+def test_update_profile_name(tmp_path: Path) -> None:
     registry = _registry(tmp_path)
     save_registry(registry, [VehicleProfile(slug="vin999", vin="VIN999", name="")])
     updated = update_profile_name(registry, "vin999", "  Daily Driver  ")
@@ -91,7 +91,7 @@ def _write_tracked(registry: ProfilesConfig, *profiles: VehicleProfile) -> None:
     )
 
 
-def test_runtime_writes_never_touch_the_tracked_registry(tmp_path: Path):
+def test_runtime_writes_never_touch_the_tracked_registry(tmp_path: Path) -> None:
     """S03.2: the Pi's rename lands in the overlay; the tracked file is untouched."""
     registry = _registry(tmp_path)
     _write_tracked(registry, VehicleProfile(slug="xterra", vin="", name="Xterra", year=2008))
@@ -102,7 +102,7 @@ def test_runtime_writes_never_touch_the_tracked_registry(tmp_path: Path):
     assert overlay["profiles"] == [{"slug": "xterra", "name": "The Truck"}]
 
 
-def test_a_later_laptop_edit_to_parameters_still_reaches_the_pi(tmp_path: Path):
+def test_a_later_laptop_edit_to_parameters_still_reaches_the_pi(tmp_path: Path) -> None:
     """The overlay stores only what this machine changed, so the tracked file's
     other fields keep flowing (operator decision 2026-10-04)."""
     registry = _registry(tmp_path)
@@ -123,14 +123,14 @@ def test_a_later_laptop_edit_to_parameters_still_reaches_the_pi(tmp_path: Path):
     assert merged.parameters.mass_kg == 2200.0
 
 
-def test_read_vin_noop_when_not_canable(tmp_path: Path):
+def test_read_vin_noop_when_not_canable(tmp_path: Path) -> None:
     from src.collection.vehicle_probe import read_vin
 
     config = _base_config(tmp_path, obd_source="disabled")
     assert read_vin(config) is None  # never opens a bus
 
 
-def test_read_vin_noop_on_virtual_bus(tmp_path: Path):
+def test_read_vin_noop_on_virtual_bus(tmp_path: Path) -> None:
     from src.collection.vehicle_probe import read_vin
 
     config = _base_config(tmp_path, obd_source="canable")
@@ -144,7 +144,7 @@ def test_read_vin_noop_on_virtual_bus(tmp_path: Path):
     assert read_vin(config) is None
 
 
-def test_probe_vehicle_info_noop_when_not_canable(tmp_path: Path):
+def test_probe_vehicle_info_noop_when_not_canable(tmp_path: Path) -> None:
     from src.collection.vehicle_probe import probe_vehicle_info
 
     config = _base_config(tmp_path, obd_source="disabled")
@@ -152,12 +152,16 @@ def test_probe_vehicle_info_noop_when_not_canable(tmp_path: Path):
     assert probe == VehicleInfoProbe(vin=None, calibration_id=None, cvn=None)
 
 
-def test_probe_vehicle_info_reads_vin_calibration_id_and_cvn(tmp_path: Path, monkeypatch):
+def test_probe_vehicle_info_reads_vin_calibration_id_and_cvn(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """Task 3.4 — one bus connection answers all three Mode 09 InfoTypes."""
     from src.collection.isotp import ObdResponse
 
     class _FakeClient:
-        def __init__(self, _bus, *, timeout_seconds: float, on_frame: object = None) -> None:
+        def __init__(
+            self, _bus: object, *, timeout_seconds: float, on_frame: object = None
+        ) -> None:
             del timeout_seconds, on_frame
 
         def query_mode_09(self, info_type: int) -> ObdResponse | None:
@@ -337,7 +341,7 @@ def test_probe_partial_vin_answer_still_asks_the_others(
     assert probe.cvn == "0B4B7C60"
 
 
-def test_resolve_falls_back_to_default_and_registers(tmp_path: Path):
+def test_resolve_falls_back_to_default_and_registers(tmp_path: Path) -> None:
     config = _base_config(tmp_path)  # probe disabled → VIN is None
     profile = resolve_active_profile(config, probe=probe_vehicle_info)
     # Default profile derived from the vehicle: block, with a sensible name.
@@ -360,7 +364,7 @@ def _must_not_probe(_config: CanaryConfig) -> VehicleInfoProbe:
     pytest.fail("resolve_active_profile probed the bus on a path that must not")
 
 
-def test_resolve_override_returns_registry_entry(tmp_path: Path):
+def test_resolve_override_returns_registry_entry(tmp_path: Path) -> None:
     config = _base_config(tmp_path)
     save_registry(
         config.profiles,
@@ -370,14 +374,14 @@ def test_resolve_override_returns_registry_entry(tmp_path: Path):
     assert profile.name == "Work Truck"
 
 
-def test_resolve_override_unknown_slug_synthesizes(tmp_path: Path):
+def test_resolve_override_unknown_slug_synthesizes(tmp_path: Path) -> None:
     config = _base_config(tmp_path)
     profile = resolve_active_profile(config, probe=_must_not_probe, override_slug="brand-new")
     assert profile.slug == "brand-new"
     assert any(p.slug == "brand-new" for p in load_registry(config.profiles))
 
 
-def test_resolve_disabled_does_not_write(tmp_path: Path):
+def test_resolve_disabled_does_not_write(tmp_path: Path) -> None:
     config = _base_config(tmp_path)
     config = config.model_copy(
         update={"profiles": config.profiles.model_copy(update={"enabled": False})}
@@ -397,7 +401,7 @@ def _base_config_with_ledger(tmp_path: Path) -> CanaryConfig:
     )
 
 
-def test_resolve_persists_calibration_id_and_cvn_on_first_probe(tmp_path: Path):
+def test_resolve_persists_calibration_id_and_cvn_on_first_probe(tmp_path: Path) -> None:
     """Task 3.4 — a registered profile's Mode 09 calibration ID/CVN land in
     the registry alongside its VIN."""
     config = _base_config_with_ledger(tmp_path)
@@ -420,7 +424,7 @@ def test_resolve_persists_calibration_id_and_cvn_on_first_probe(tmp_path: Path):
     )
 
 
-def test_resolve_flags_a_changed_calibration_id_as_a_corpus_boundary(tmp_path: Path):
+def test_resolve_flags_a_changed_calibration_id_as_a_corpus_boundary(tmp_path: Path) -> None:
     """Task 3.4 — a calibration ID that changed vs. the previously-stored
     one is an ECU reflash: a `corpus_boundary` vehicle-ledger event."""
     config = _base_config_with_ledger(tmp_path)
@@ -451,7 +455,7 @@ def test_resolve_flags_a_changed_calibration_id_as_a_corpus_boundary(tmp_path: P
     assert "CAL0002" in records[0].title
 
 
-def test_resolve_unchanged_calibration_id_does_not_flag_a_boundary(tmp_path: Path):
+def test_resolve_unchanged_calibration_id_does_not_flag_a_boundary(tmp_path: Path) -> None:
     config = _base_config_with_ledger(tmp_path)
     save_registry(
         config.profiles,
@@ -469,14 +473,14 @@ def test_resolve_unchanged_calibration_id_does_not_flag_a_boundary(tmp_path: Pat
     assert ledger.records() == []
 
 
-def test_resolve_for_tooling_never_probes(tmp_path: Path):
+def test_resolve_for_tooling_never_probes(tmp_path: Path) -> None:
     # canable + non-virtual would normally probe; tooling must not open a bus.
     config = _base_config(tmp_path, obd_source="canable")
     profile = resolve_profile_for_tooling(config, None)
     assert profile.slug  # returns the default profile without touching the bus
 
 
-def test_scope_config_nests_every_vehicle_path(tmp_path: Path):
+def test_scope_config_nests_every_vehicle_path(tmp_path: Path) -> None:
     config = _base_config(tmp_path)
     config = config.model_copy(
         update={
@@ -522,7 +526,7 @@ def test_scope_config_nests_every_vehicle_path(tmp_path: Path):
     assert scoped.profiles.registry_path == config.profiles.registry_path
 
 
-def test_scope_config_covers_every_daemon_path_field(tmp_path: Path):
+def test_scope_config_covers_every_daemon_path_field(tmp_path: Path) -> None:
     """Every ``Path``-typed field on ``DaemonConfig`` must come out with the
     slug inserted as a path component. Exhaustive by construction (iterates
     ``DaemonConfig.model_fields`` rather than naming fields), so a future
@@ -579,7 +583,7 @@ def _auth() -> dict[str, str]:
     return {"Authorization": "Bearer secret"}
 
 
-def test_get_profiles_requires_auth_and_marks_active(tmp_path: Path):
+def test_get_profiles_requires_auth_and_marks_active(tmp_path: Path) -> None:
     client, _config = _api(tmp_path)
     assert client.get("/control/profiles").status_code == 401
     body = client.get("/control/profiles", headers=_auth()).json()
@@ -588,7 +592,7 @@ def test_get_profiles_requires_auth_and_marks_active(tmp_path: Path):
     assert {p["slug"] for p in body["profiles"]} == {"nissan-xterra-2008", "work-truck"}
 
 
-def test_post_profile_name_persists(tmp_path: Path):
+def test_post_profile_name_persists(tmp_path: Path) -> None:
     client, config = _api(tmp_path)
     resp = client.post(
         "/control/profiles/nissan-xterra-2008/name",
@@ -601,7 +605,7 @@ def test_post_profile_name_persists(tmp_path: Path):
     assert persisted["nissan-xterra-2008"] == "2008 Xterra"
 
 
-def test_post_profile_name_unknown_slug_404(tmp_path: Path):
+def test_post_profile_name_unknown_slug_404(tmp_path: Path) -> None:
     client, _config = _api(tmp_path)
     resp = client.post("/control/profiles/nope/name", json={"name": "x"}, headers=_auth())
     assert resp.status_code == 404

@@ -21,6 +21,7 @@ import subprocess
 import sys
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -409,7 +410,7 @@ def _hat_product_file(installer: Installer, product: str = "CANary-HAT rev 2.0")
     return path
 
 
-def _hat_eeprom(installer: Installer, rev: str) -> dict[str, str]:
+def _hat_eeprom(installer: Installer, rev: str) -> dict[str, Any]:
     """The env for a CANary-HAT whose EEPROM carries product_ver (eeprom_settings*.txt)."""
     ver = installer.root / "proc-hat-product_ver"
     ver.write_bytes({"2.0": b"0x0200", "2.1": b"0x0201"}[rev] + b"\0")

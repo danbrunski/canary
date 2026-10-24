@@ -134,7 +134,9 @@ def test_off_map_cooler_iat_is_refused_not_graded() -> None:
     assert metrics.evaluated == 0
     assert metrics.refusals["off_map"] == metrics.eligible > 0
     iat = ev.y[ev.fresh]
-    domain_low = _model("timing_advance_vs_rpm_iat").axes[1].bin_edges[0]
+    iat_model = _model("timing_advance_vs_rpm_iat")
+    assert isinstance(iat_model, BehaviorModel2D)
+    domain_low = iat_model.axes[1].bin_edges[0]
     assert np.nanmax(iat) < domain_low  # 13-22 degC vs a 29 degC floor
 
 

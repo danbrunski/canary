@@ -31,6 +31,7 @@ from src.analysis import rom_editor
 from src.analysis.ecu_application import program_sha256
 from src.analysis.paired_scenarios import SimKit
 from src.analysis.rom_image import ImageFormatError, revision_match, sha256_hex
+from src.collection import tuning_profile
 from src.config import CanaryConfig
 from src.control import workbench_jobs
 from src.dashboard.routes import rom_editor as rom_editor_routes
@@ -512,9 +513,9 @@ def test_simulate_runs_the_child_and_returns_the_cells(
 def test_simulate_defers_while_a_capture_records_and_runs_no_child(
     client: TestClient, sha: str, in_process: CountingExecutor, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr(workbench_jobs.tuning_profile, "is_active", lambda: True)
+    monkeypatch.setattr(tuning_profile, "is_active", lambda: True)
     monkeypatch.setattr(
-        workbench_jobs.tuning_profile, "active_profile", lambda: type("P", (), {"name": "tuning"})()
+        tuning_profile, "active_profile", lambda: type("P", (), {"name": "tuning"})()
     )
     response = client.post(simulate_url(sha), json=sim_request(), headers=AUTH)
     assert response.status_code == 409, response.text
@@ -535,7 +536,7 @@ def test_simulate_defers_while_a_capture_records_and_runs_no_child(
 def test_simulate_is_busy_while_another_child_runs(
     client: TestClient, sha: str, in_process: CountingExecutor, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setitem(workbench_jobs._IN_FLIGHT, "other", object())  # type: ignore[arg-type]
+    monkeypatch.setitem(workbench_jobs._IN_FLIGHT, "other", object())
     response = client.post(simulate_url(sha), json=sim_request(), headers=AUTH)
     assert response.status_code == 409, response.text
     assert detail(response)["error"] == "analysis_busy"
@@ -652,9 +653,9 @@ def test_an_unrecorded_base_is_refused_before_anything_is_deferred_or_spawned(
     capture records, and no child is spawned for it."""
     for recording in (False, True):
         if recording:
-            monkeypatch.setattr(workbench_jobs.tuning_profile, "is_active", lambda: True)
+            monkeypatch.setattr(tuning_profile, "is_active", lambda: True)
             monkeypatch.setattr(
-                workbench_jobs.tuning_profile,
+                tuning_profile,
                 "active_profile",
                 lambda: type("P", (), {"name": "tuning"})(),
             )

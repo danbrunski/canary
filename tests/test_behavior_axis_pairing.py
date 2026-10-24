@@ -329,7 +329,7 @@ def test_the_profile_pairs_every_timing_recipe_on_all_its_axes() -> None:
     for recipe in timing:
         criteria = document.recipes[recipe.name]
         assert criteria.axis_pairing is not None, recipe.name
-        axes = {recipe.x_column, recipe.y_column}  # type: ignore[attr-defined]
+        axes = {recipe.x_column, recipe.y_column}  # type: ignore[union-attr]
         assert set(criteria.axis_pairing.max_separation_s) == axes, recipe.name
         assert criteria.axis_pairing.max_separation_s[RPM] <= 0.5
 

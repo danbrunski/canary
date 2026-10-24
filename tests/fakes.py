@@ -15,7 +15,7 @@ import subprocess
 import time
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import can
 import httpx
@@ -92,7 +92,7 @@ class StubModelManager:
         model_type: str = "isolation_forest",
         model_version: str | None = None,
     ) -> None:
-        version = model_version or getattr(artifact.manifest, "model_version", "fake")
+        version = cast(str, model_version or getattr(artifact.manifest, "model_version", "fake"))
         self._loaded = LoadedModel(
             artifact=artifact,
             manifest=ModelManifestCommon(

@@ -95,6 +95,7 @@ def test_fit_polynomial_skips_nan_rows() -> None:
     model = fit_polynomial(frame, x_column="x", y_column="y", name="t", output="y", degree=1)
     # 2 rows had NaN, so 9 clean rows
     assert model.fit.sample_count == 9
+    assert isinstance(model.fit, PolynomialFit)
     assert model.fit.coefficients == pytest.approx([0.0, 1.0], abs=1e-9)
 
 
@@ -231,7 +232,10 @@ def test_relative_deviation_reference_std_auto_fills_from_residuals() -> None:
         output="derived:TPS_VOLTAGE_PER_PCT",
         degree=1,
         deviation=DeviationConfig(
-            kind="relative", warning_band=5.0, critical_band=12.0, sigma_floor=0.01
+            kind="relative",  # type: ignore[arg-type]  # legacy alias, loads as sigma
+            warning_band=5.0,
+            critical_band=12.0,
+            sigma_floor=0.01,
         ),
     )
     assert model.deviation is not None
@@ -246,7 +250,7 @@ def test_relative_deviation_reference_std_auto_fills_from_residuals() -> None:
         output="derived:TPS_VOLTAGE_PER_PCT",
         degree=1,
         deviation=DeviationConfig(
-            kind="relative",
+            kind="relative",  # type: ignore[arg-type]  # legacy alias, loads as sigma
             warning_band=5.0,
             critical_band=12.0,
             reference_std=9.0,

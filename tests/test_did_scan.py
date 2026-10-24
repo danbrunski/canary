@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable, Sequence
+from typing import cast
+
 import pytest
 
 from src.analysis.did_scan import (
@@ -15,6 +18,7 @@ from src.analysis.did_scan import (
     sweep_dids,
     sweep_dids_batched,
 )
+from src.collection.can_obd_client import CanObdClient
 
 # ---------------------------------------------------------------------------
 # parse_mode22_response
@@ -203,14 +207,14 @@ class _FakeCanObdClient:
 
 def test_canable_transport_returns_payload_and_passes_request_id() -> None:
     client = _FakeCanObdClient({0x1101: b"\x12\x34"})
-    transport = CanableMode22Transport(client, request_id=0x7E0)
+    transport = CanableMode22Transport(cast(CanObdClient, client), request_id=0x7E0)
     assert transport.read_did(0x1101) == b"\x12\x34"
     assert client.calls == [(0x1101, 0x7E0)]
 
 
 def test_canable_transport_none_on_negative_or_timeout() -> None:
     client = _FakeCanObdClient({0x1101: None})
-    transport = CanableMode22Transport(client)  # default request_id 0x7E0
+    transport = CanableMode22Transport(cast(CanObdClient, client))  # default request_id 0x7E0
     assert transport.read_did(0x1101) is None
     assert client.calls == [(0x1101, 0x7E0)]
 
@@ -235,7 +239,11 @@ def test_canable_transport_primes_and_reprimes_session() -> None:
     clk = [100.0]
     c = _SessionClient()
     tr = CanableMode22Transport(
-        c, request_id=0x7E0, session=0xC0, keepalive_seconds=2.0, time_fn=lambda: clk[0]
+        cast(CanObdClient, c),
+        request_id=0x7E0,
+        session=0xC0,
+        keepalive_seconds=2.0,
+        time_fn=lambda: clk[0],
     )
     tr.read_did(0x1101)  # first read primes the session
     tr.read_did(0x1102)  # within keepalive window → no re-prime
@@ -248,15 +256,19 @@ def test_canable_transport_primes_and_reprimes_session() -> None:
 
 def test_canable_transport_no_session_is_passthrough() -> None:
     c = _SessionClient()
-    CanableMode22Transport(c, session=None).read_did(0x1101)
+    CanableMode22Transport(cast(CanObdClient, c), session=None).read_did(0x1101)
     assert c.sessions == []  # never enters a session when none requested
 
 
 def test_canable_transport_drives_sweep_and_classify() -> None:
     idle = _FakeCanObdClient({0x1100: b"\x00", 0x1101: b"\x10", 0x1102: b"\xaa"})
-    snap_idle = sweep_dids(CanableMode22Transport(idle), range(0x1100, 0x1103), label="idle")
+    snap_idle = sweep_dids(
+        CanableMode22Transport(cast(CanObdClient, idle)), range(0x1100, 0x1103), label="idle"
+    )
     revving = _FakeCanObdClient({0x1100: b"\x00", 0x1101: b"\x20"})  # 0x1102 dropped out
-    snap_rev = sweep_dids(CanableMode22Transport(revving), range(0x1100, 0x1103), label="rev")
+    snap_rev = sweep_dids(
+        CanableMode22Transport(cast(CanObdClient, revving)), range(0x1100, 0x1103), label="rev"
+    )
     cls = classify_dids([snap_idle, snap_rev])
     assert cls.constant == frozenset({0x1100})  # same both passes
     assert cls.varying == frozenset({0x1101})  # 0x10 → 0x20
@@ -296,7 +308,9 @@ class _RejectingBatchTransport:
         self.single_calls.append(did)
         return self._values.get(did)
 
-    def read_dids(self, dids, byte_length_for):  # type: ignore[no-untyped-def]
+    def read_dids(
+        self, dids: Sequence[int], byte_length_for: Callable[[int], int | None]
+    ) -> BatchRead:
         self.batch_calls.append(list(dids))
         return BatchRead(readings={}, clean=False, rejected=True, negative_response_code=self._nrc)
 
@@ -313,7 +327,9 @@ class _BatchingTransport:
         self.single_calls.append(did)
         return self._values.get(did)
 
-    def read_dids(self, dids, byte_length_for):  # type: ignore[no-untyped-def]
+    def read_dids(
+        self, dids: Sequence[int], byte_length_for: Callable[[int], int | None]
+    ) -> BatchRead:
         self.batch_calls.append(list(dids))
         return BatchRead(
             readings={d: self._values[d] for d in dids if d in self._values}, clean=True
@@ -378,7 +394,9 @@ class _FlippingTransport(_BatchingTransport):
         super().__init__(values)
         self._after = after
 
-    def read_dids(self, dids, byte_length_for):  # type: ignore[no-untyped-def]
+    def read_dids(
+        self, dids: Sequence[int], byte_length_for: Callable[[int], int | None]
+    ) -> BatchRead:
         if len(self.batch_calls) >= self._after:
             self.batch_calls.append(list(dids))
             return BatchRead(readings={}, clean=False, rejected=True, negative_response_code=0x12)

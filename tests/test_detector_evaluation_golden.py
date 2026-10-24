@@ -44,6 +44,7 @@ import math
 import os
 import re
 import sys
+from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -98,7 +99,10 @@ def build_fixture(base: Path) -> dict[str, Path]:
 
     from src.decode.dids import load_repo_did_map
     from src.features.feature_pipeline import featurize_wide_frame, load_resampled_session
-    from src.models.isolation_forest import default_manifest_path, fit_isolation_forest
+    from src.models.isolation_forest import (
+        default_manifest_path,
+        fit_isolation_forest,
+    )
     from src.storage.capture_manifest import CAPTURE_MANIFEST_FILENAME
     from tests.builders import IFConfig
     from tests.configs import example_config
@@ -450,7 +454,8 @@ def golden() -> dict[str, Any]:
 
 @pytest.fixture(scope="module")
 def current(tmp_path_factory: pytest.TempPathFactory) -> dict[str, Any]:
-    return _round_trip(run_all(tmp_path_factory.mktemp("golden")))
+    result: dict[str, Any] = _round_trip(run_all(tmp_path_factory.mktemp("golden")))
+    return result
 
 
 @pytest.mark.slow
@@ -515,7 +520,7 @@ def test_the_comparison_fails_on_a_real_change() -> None:
     noisy = json.loads(json.dumps(base))
     noisy["report"]["x"] = 1.0 + 1e-12
     assert differences(base, noisy) == []
-    for mutate in (
+    mutations: tuple[Callable[[Any], object], ...] = (
         lambda d: d["report"].__setitem__("x", 1.001),
         lambda d: d["report"].__setitem__("ok", False),
         lambda d: d["report"]["reasons"].__setitem__(0, "skipped: unseen"),
@@ -524,7 +529,8 @@ def test_the_comparison_fails_on_a_real_change() -> None:
         lambda d: d["scored"]["d"]["score"].__setitem__("n", 299),
         lambda d: d["scored"]["d"]["score"]["types"].reverse(),
         lambda d: d["scored"]["d"]["score"].__setitem__("sum", 12.6),
-    ):
+    )
+    for mutate in mutations:
         changed = json.loads(json.dumps(base))
         mutate(changed)
         assert differences(base, changed), mutate

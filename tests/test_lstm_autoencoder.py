@@ -3,26 +3,29 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 
 import pytest
 
 from src.config import CanaryConfig
+from src.config.models import LSTMAutoencoderConfig
 from src.models.lstm_autoencoder import (
     GRUDEncoderCell,
     LSTMAutoencoder,
     MissingLSTMAutoencoderDependencyError,
     build_lstm_autoencoder,
 )
+from src.models.sequence_module import ReconstructionReduction
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 EXAMPLE_YAML = REPO_ROOT / "canary.example.yaml"
 
 
-def _torch():
+def _torch() -> Any:
     return pytest.importorskip("torch")
 
 
-def _config():
+def _config() -> LSTMAutoencoderConfig:
     return CanaryConfig.from_yaml(EXAMPLE_YAML).models.lstm_autoencoder
 
 
@@ -36,7 +39,7 @@ def test_config_exposes_architecture_knobs() -> None:
     assert config.dropout == 0.0
 
 
-def _vmd(torch, batch: int, length: int, features: int):
+def _vmd(torch: Any, batch: int, length: int, features: int) -> tuple[Any, Any, Any]:
     """Value/mask/delta triple of fully-observed (mask 1, delta 0) inputs."""
     value = torch.randn(batch, length, features)
     mask = torch.ones(batch, length, features)
@@ -226,7 +229,7 @@ def test_reconstruction_error_reductions() -> None:
     )
     value, mask, delta = _vmd(torch, 2, 5, 3)
 
-    def _shape(reduction: str) -> tuple[int, ...]:
+    def _shape(reduction: ReconstructionReduction) -> tuple[int, ...]:
         return tuple(model.reconstruction_error(value, mask, delta, reduction=reduction).shape)
 
     assert _shape("none") == (2, 5, 3)

@@ -217,7 +217,7 @@ def _by_loop(kind: str, outputs: dict[str, Any]) -> list[dict[str, Any]]:
 
 def hand_table() -> dict[str, Any]:
     """A 3 x 4 Fuel Comp grid with every status (see :data:`_VISITED`)."""
-    cells = []
+    cells: list[dict[str, Any]] = []
     for r, rpm in enumerate(ROW_RPM):
         for c, pct in enumerate(COL_PCT):
             kind = _VISITED.get((r, c))
@@ -861,7 +861,9 @@ def test_a_cell_hover_names_what_else_moves_in_the_same_cell() -> None:
     other = next(x for x in unchanged[1].split("\n") if x.startswith("same cell, other"))
     assert "\u0394BFS p50 0 %" in other and "target" not in other
     # A cell nobody visited has no such line.
-    assert "same cell, other" not in re.search(r"<title>(cell \(2, 3\).*?)</title>", lam, re.S)[1]
+    title = re.search(r"<title>(cell \(2, 3\).*?)</title>", lam, re.S)
+    assert title is not None
+    assert "same cell, other" not in title[1]
 
 
 def test_run_identity_checks_each_catch_their_own_mismatch() -> None:

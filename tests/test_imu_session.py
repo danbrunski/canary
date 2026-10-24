@@ -14,6 +14,7 @@ import math
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from typing import Any, cast
 
 import numpy as np
 import pandas as pd
@@ -66,7 +67,7 @@ def _rot(axis: str, deg: float) -> np.ndarray:
 
 def mount(roll: float, pitch: float, yaw: float) -> np.ndarray:
     """Body ← vehicle rotation for a mount rolled, pitched and yawed (deg)."""
-    return _rot("z", yaw) @ _rot("y", pitch) @ _rot("x", roll)
+    return cast(np.ndarray, _rot("z", yaw) @ _rot("y", pitch) @ _rot("x", roll))
 
 
 @dataclass(frozen=True)
@@ -475,7 +476,7 @@ def _write_session(session_dir: Path, recorded: dict[str, pd.Series]) -> None:
     for column, series in recorded.items():
         source, channel = column.split(":", 1)
         for ts, value in series.items():
-            stamp = pd.Timestamp(ts).timestamp()
+            stamp = pd.Timestamp(cast(Any, ts)).timestamp()
             unit = units.get(source, "")
             if source == "imu":
                 records.append(TelemetryRecord.imu(stamp, channel, float(value), unit))

@@ -4,7 +4,7 @@ windows (A02.12 calibration half, A02.3), and the coverage refusal (A02.2)."""
 from __future__ import annotations
 
 from types import SimpleNamespace
-from typing import Any
+from typing import Any, cast
 
 import numpy as np
 import pandas as pd
@@ -17,6 +17,7 @@ from src.columns import (  # noqa: E402
     SESSION_COLUMN,
     TIMESTAMP_COLUMN,
 )
+from src.models.inference import SequenceInferenceResult  # noqa: E402
 from src.models.sequence_dataset import SequenceWindowDataset  # noqa: E402
 from src.models.sequence_training import (  # noqa: E402
     MIN_OBSERVED_BLOCKS,
@@ -119,10 +120,10 @@ def test_an_unobserved_channel_gets_no_threshold_and_never_flags() -> None:
             scaler=None,
         ),
     )
-    engine = SequenceInferenceEngine(trained)  # type: ignore[arg-type]
+    engine = SequenceInferenceEngine(trained)
     assert engine.uncalibrated_channels == ("c",)
     results = [engine.observe(serve.iloc[i]) for i in range(len(serve))]
-    scored = [r for r in results if r is not None]
+    scored = [cast(SequenceInferenceResult, r) for r in results if r is not None]
     assert scored and not any(r.is_anomaly for r in scored)
     assert all("c" not in r.family_scores for r in scored)
 
@@ -171,9 +172,9 @@ def test_a_zero_spread_family_is_uncalibrated_and_never_flags() -> None:
             scaler=None,
         ),
     )
-    engine = SequenceInferenceEngine(trained)  # type: ignore[arg-type]
+    engine = SequenceInferenceEngine(trained)
     results = [engine.observe(serve.iloc[i]) for i in range(len(serve))]
-    scored = [r for r in results if r is not None]
+    scored = [cast(SequenceInferenceResult, r) for r in results if r is not None]
     assert scored and all("c" not in r.family_scores for r in scored)
     assert not any(r.is_anomaly for r in scored)
 
@@ -334,5 +335,6 @@ def test_an_explicit_override_publishes_and_is_stamped() -> None:
     assert holdout is not None
     assert holdout["override"]["reason"].startswith("operator 2026-09-22")
     assert len(holdout["override"]["violations"]) == 3
+    assert trained.manifest.thresholds is not None
     calibration_block = SequenceThresholdCalibration.from_dict(trained.manifest.thresholds)
     assert calibration_block.uncalibrated_channels == {"c": "never observed in calibration"}

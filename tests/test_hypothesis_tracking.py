@@ -17,6 +17,7 @@ import shutil
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from typing import Any, cast
 
 import pandas as pd
 import pytest
@@ -323,7 +324,7 @@ def _determinate(model: FaultModel, evidence: str, weights: dict[str, float]) ->
     for h in model.hypotheses:
         signature = {k: dict(v) for k, v in h.signature.items()}
         for residual, regions in signatures.get(h.name, {}).items():
-            signature[residual].update(regions)
+            signature[residual].update(cast(Any, regions))
         likelihood = (
             Likelihood(value=weights[h.name], evidence=(evidence,), method="labelled test weight")
             if h.name in weights
@@ -379,7 +380,7 @@ def test_information_gain_per_cost_ranks_only_with_evidence_backed_likelihoods(
 # -- proposals (replayed drives) ----------------------------------------------------
 
 
-def _ranked(world: World) -> list:
+def _ranked(world: World) -> list[Any]:
     """Drive A's measurement ranking (the order proposals are made in)."""
     track = track_hypotheses(world.vehicle.model, world.ledger, world.drive_a)
     choices = select_measurement(
@@ -389,7 +390,7 @@ def _ranked(world: World) -> list:
     return list(ranking.measurements)
 
 
-def _replay(world: World, session: Path, capture: CaptureState, **kw) -> list[Proposal]:
+def _replay(world: World, session: Path, capture: CaptureState, **kw: Any) -> list[Proposal]:
     ticks = replay_proposals(
         world.plan, world.vehicle.model, world.catalog, _ranked(world), _rows(session),
         capture=capture, default_budget=BUDGET, **kw,

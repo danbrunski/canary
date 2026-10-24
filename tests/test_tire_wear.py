@@ -16,6 +16,7 @@ from src.analysis.rolling_circumference import (
     MIN_PAIRS,
     measure_rolling_circumference,
 )
+from src.config import CanaryConfig
 from src.control.tires import tire_status
 from src.storage.parquet_writer import write_records_to_parquet
 from src.telemetry import TelemetryRecord
@@ -54,7 +55,7 @@ def _measure(session: Path, **kwargs: float) -> dict:  # type: ignore[type-arg]
         rpm_channels=["decoded:ECM_RPM", "obd:RPM"],
         gearbox_ratios=GEARS,
         final_drive=FD,
-        **kwargs,  # type: ignore[arg-type]
+        **kwargs,
     ).to_dict()
 
 
@@ -256,7 +257,7 @@ def test_the_backfill_measures_sessions_without_a_digest_and_copies_old_fields(
         class collection:  # noqa: N801
             storage_path = storage
 
-    monkeypatch.setattr(backfill.CanaryConfig, "from_yaml", staticmethod(lambda _p: _Config))
+    monkeypatch.setattr(CanaryConfig, "from_yaml", staticmethod(lambda _p: _Config))
     monkeypatch.setattr(backfill, "resolve_profile_for_tooling", lambda *_a: None)
     monkeypatch.setattr(backfill, "scope_config", lambda base, _p: base)
     monkeypatch.setattr(backfill, "measure_session", _measure_session)

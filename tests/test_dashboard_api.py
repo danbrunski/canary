@@ -82,7 +82,7 @@ def _make_session_with_parquet(storage_root: Path, name: str, rows: int = 3) -> 
         ],
         schema=TELEMETRY_SCHEMA,
     )
-    pq.write_table(table, session / "telemetry-00000.parquet")
+    pq.write_table(table, session / "telemetry-00000.parquet")  # type: ignore[no-untyped-call, unused-ignore]
     return session
 
 
@@ -823,7 +823,7 @@ def _make_session_with_chunks(
                 }
             )
             counter += 1
-        pq.write_table(
+        pq.write_table(  # type: ignore[no-untyped-call, unused-ignore]
             pa.Table.from_pylist(recs, schema=TELEMETRY_SCHEMA),
             session / f"telemetry-{c:05d}.parquet",
         )
@@ -863,7 +863,9 @@ def test_echo_config_round_trips(config: CanaryConfig) -> None:
 # ---------------------------------------------------------------------------
 
 
-def _client(config: CanaryConfig, anomalies_dir: Path, models_dir: Path | None = None):
+def _client(
+    config: CanaryConfig, anomalies_dir: Path, models_dir: Path | None = None
+) -> TestClient:
     app = create_app(config, anomalies_dir=anomalies_dir, models_dir=models_dir)
     return TestClient(app)
 
@@ -1433,7 +1435,7 @@ def test_telemetry_latest_seeds_decoded_did_rows(
         ],
         schema=TELEMETRY_SCHEMA,
     )
-    pq.write_table(table, session / "telemetry-00000.parquet")
+    pq.write_table(table, session / "telemetry-00000.parquet")  # type: ignore[no-untyped-call, unused-ignore]
 
     dids_path = tmp_path / "dids.yaml"
     dids_path.write_text(_DIDS_YAML)

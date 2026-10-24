@@ -291,6 +291,7 @@ def test_bootstrap_resamples_drives_and_reports_the_ratio_of_sums() -> None:
     estimate = bootstrap_ratio_ci([2, 0, 4], [1.0, 1.0, 2.0], seed=3)
     assert estimate.estimate == pytest.approx(6 / 4)
     assert estimate.low is not None and estimate.high is not None
+    assert estimate.estimate is not None
     assert estimate.low <= estimate.estimate <= estimate.high
     assert estimate == bootstrap_ratio_ci([2, 0, 4], [1.0, 1.0, 2.0], seed=3)
     one = bootstrap_ratio_ci([1], [2.0])

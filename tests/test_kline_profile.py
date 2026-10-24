@@ -61,7 +61,7 @@ def test_same_ecm_and_tester_address_is_refused() -> None:
 
 
 def _with_abs_did(**did: object) -> dict[str, object]:
-    raw = load_yaml(XTERRA.read_text())
+    raw: dict[str, Any] = load_yaml(XTERRA.read_text())
     raw["modules"][0x28]["dids"] = [{"did": 0x1303, "width": 2, "evidence": "test", **did}]
     return raw
 

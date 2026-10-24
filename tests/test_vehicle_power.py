@@ -122,7 +122,7 @@ def test_one_shot_supply_read_notes_the_reading() -> None:
     adc = FakeAdc(1143)  # 12.68 V through the HAT's divider
     volts = read_supply_once(
         SupplyVoltageConfig(enabled=True),
-        bus_factory=lambda _c: adc,  # type: ignore[arg-type,return-value]
+        bus_factory=lambda _c: adc,
     )
     assert volts == pytest.approx(12.68, abs=0.01)
     assert adc.closed

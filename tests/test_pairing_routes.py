@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any, cast
 
 import pytest
 from fastapi.testclient import TestClient
@@ -49,19 +50,19 @@ class Rig:
                 self.now += 1
                 self.pairing.tick()
 
-    def pair(self, name: str = "Android phone") -> dict:
+    def pair(self, name: str = "Android phone") -> dict[str, Any]:
         created = self.client.post("/pair/request", json={"name": name})
         assert created.status_code == 201
         req = created.json()
         self.key(ACC, ON, ACC)
         return self.poll(req)
 
-    def poll(self, req: dict) -> dict:
+    def poll(self, req: dict[str, Any]) -> dict[str, Any]:
         response = self.client.get(
             f"/pair/request/{req['id']}", headers={"X-Pairing-Secret": req["secret"]}
         )
         assert response.status_code == 200, response.text
-        return response.json()
+        return cast(dict[str, Any], response.json())
 
 
 @pytest.fixture
@@ -265,5 +266,5 @@ def test_an_unguarded_route_cannot_name_a_caller() -> None:
 
 def test_non_ascii_bearer_is_refused_not_a_crash(rig: Rig) -> None:
     # Sent as raw latin-1 bytes, the way a misbehaving client can.
-    response = rig.client.get("/control/power", headers={"Authorization": b"Bearer caf\xe9"})
+    response = rig.client.get("/control/power", headers={"Authorization": b"Bearer caf\xe9"})  # type: ignore[arg-type]
     assert response.status_code == 401

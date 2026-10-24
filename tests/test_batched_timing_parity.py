@@ -19,6 +19,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 import pandas as pd
@@ -149,9 +150,9 @@ def config() -> CanaryConfig:
     return example_config(Path("canary.example.yaml"))
 
 
-def _live_gap_history(config: CanaryConfig, *, batched: bool) -> list[dict[str, object]]:
+def _live_gap_history(config: CanaryConfig, *, batched: bool) -> list[dict[str, Any]]:
     src = LiveFeatureSource(config=config)
-    history: list[dict[str, object]] = []
+    history: list[dict[str, Any]] = []
     for second in range(6):
         if second in (0, 1):  # two batches, then the whole batch goes silent
             for i, name in enumerate(BATCH):
@@ -182,6 +183,6 @@ def test_live_path_ages_a_batch_as_one(config: CanaryConfig) -> None:
     assert batched == single
     for tick in batched:
         # Six channels observed at one instant age together: never split.
-        assert len(set(tick["gaps"])) == 1  # type: ignore[arg-type]
-        assert tick["present"] == tuple(not g for g in tick["gaps"])  # type: ignore[union-attr]
-    assert [tick["gaps"][0] for tick in batched] == [False, False, False, True, True, True]  # type: ignore[index]
+        assert len(set(tick["gaps"])) == 1
+        assert tick["present"] == tuple(not g for g in tick["gaps"])
+    assert [tick["gaps"][0] for tick in batched] == [False, False, False, True, True, True]

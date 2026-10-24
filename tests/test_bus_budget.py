@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 from collections.abc import Iterator
+from typing import Any, cast
+from unittest.mock import patch
 
 import pytest
 
@@ -170,18 +172,18 @@ async def test_mcp_write_tool_can_express_no_ttl() -> None:
 
     sent: dict[str, object] = {}
 
-    async def _capture(client, audit, *, tool, path, body):  # type: ignore[no-untyped-def]
+    async def _capture(
+        client: object, audit: object, *, tool: str, path: str, body: dict[str, object]
+    ) -> dict[str, object]:
         sent.update(body)
         return {}
 
     import src.mcp_server.write_tools.bus_budget as module
 
-    original = module.audited_post
-    module.audited_post = _capture  # type: ignore[assignment]
-    try:
-        await write_tool.set_bus_budget(None, None, requests_per_second=25.0, ttl_seconds=None)
-    finally:
-        module.audited_post = original  # type: ignore[assignment]
+    with patch.object(module, "audited_post", _capture):
+        await write_tool.set_bus_budget(
+            cast(Any, None), cast(Any, None), requests_per_second=25.0, ttl_seconds=None
+        )
 
     assert "ttl_seconds" in sent, "the opt-out never reached the daemon"
     assert sent["ttl_seconds"] is None

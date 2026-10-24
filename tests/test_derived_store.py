@@ -34,6 +34,7 @@ from src.preprocessing.derived_store import (
 )
 from src.preprocessing.loader import read_session
 from src.preprocessing.resampler import ResampleConfig
+from src.preprocessing.session_decode import reduce_session
 
 DRIVE_SLICE = Path("tests/fixtures/ground_truth/drive-slice/telemetry-00000.parquet")
 DID_HEX = "1206"
@@ -41,17 +42,17 @@ DID_HEX = "1206"
 
 def _session(root: Path) -> Path:
     """The ground-truth slice as three chunks, plus a chunk of Mode 22 reads."""
-    table = pq.read_table(DRIVE_SLICE)
-    table = table.take(pc.sort_indices(table, sort_keys=[("timestamp", "ascending")]))
+    table = pq.read_table(DRIVE_SLICE)  # type: ignore[no-untyped-call, unused-ignore]
+    table = table.take(pc.sort_indices(table, sort_keys=[("timestamp", "ascending")]))  # type: ignore[attr-defined, unused-ignore]
     session = root / "2026-08-03T231900"
     session.mkdir(parents=True)
     bounds = [int(b) for b in np.linspace(0, table.num_rows, 4)]
     for i in range(3):
-        pq.write_table(
+        pq.write_table(  # type: ignore[no-untyped-call, unused-ignore]
             table.slice(bounds[i], bounds[i + 1] - bounds[i]),
             session / f"telemetry-{i:05d}.parquet",
         )
-    obd = table.filter(pc.equal(table["channel"], "RPM"))
+    obd = table.filter(pc.equal(table["channel"], "RPM"))  # type: ignore[attr-defined, unused-ignore]
     n = obd.num_rows
     payloads = [f"{(200 + 7 * i) % 900:04X}" for i in range(n)]
     reads = obd.set_column(
@@ -65,14 +66,14 @@ def _session(root: Path) -> Path:
     reads = reads.set_column(
         reads.schema.get_field_index("value_text"), "value_text", pa.array(payloads)
     )
-    pq.write_table(reads, session / "telemetry-00003.parquet")
+    pq.write_table(reads, session / "telemetry-00003.parquet")  # type: ignore[no-untyped-call, unused-ignore]
     # K-line reads name their module in the channel (``<module>:<hex>``), so a
     # channel may itself contain the source separator.
     kline = obd.set_column(obd.schema.get_field_index("source"), "source", pa.array(["kline"] * n))
     kline = kline.set_column(
         kline.schema.get_field_index("channel"), "channel", pa.array(["ABS:1210"] * n)
     )
-    pq.write_table(kline, session / "telemetry-00004.parquet")
+    pq.write_table(kline, session / "telemetry-00004.parquet")  # type: ignore[no-untyped-call, unused-ignore]
     return session
 
 
@@ -112,7 +113,7 @@ def _through(store: DerivedStore, session: Path, decoders: DecodeInputs) -> pd.D
 def reduce_calls(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, Any]]:
     """Every ``reduce_session`` call (what was decoded, and from which rows)."""
     calls: list[dict[str, Any]] = []
-    real = derived_store.reduce_session
+    real = reduce_session
 
     def spy(session_dir: Path, *decoders: Any, **kwargs: Any) -> Any:
         bindings, dbc, did_map, _resample = decoders
@@ -151,8 +152,8 @@ def test_a_stale_frame_is_rebuilt_and_says_why(
     store = DerivedStore(tmp_path / "derived")
     store.load(session, decoders, ResampleConfig())
 
-    extra = pq.read_table(session / "telemetry-00000.parquet").slice(0, 10)
-    pq.write_table(extra, session / "telemetry-00009.parquet")
+    extra = pq.read_table(session / "telemetry-00000.parquet").slice(0, 10)  # type: ignore[no-untyped-call, unused-ignore]
+    pq.write_table(extra, session / "telemetry-00009.parquet")  # type: ignore[no-untyped-call, unused-ignore]
     assert store.status(session, decoders, ResampleConfig()) == "the session's chunk files changed"
     _, report = store.load(session, decoders, ResampleConfig())
     assert (report.status, report.reason) == ("built", "the session's chunk files changed")
@@ -194,15 +195,15 @@ def test_racing_writers_never_serve_one_writers_meta_over_the_others_cells(
 
     def replace(src: Any, dst: Any) -> None:
         if not other and str(dst).endswith("meta.json"):
-            monkeypatch.setattr(derived_store.os, "replace", real_replace)
+            monkeypatch.setattr(os, "replace", real_replace)
             _, report_b = DerivedStore(tmp_path / "derived").load(session, v2, ResampleConfig())
             other.append(report_b.status)
-            monkeypatch.setattr(derived_store.os, "replace", replace)
+            monkeypatch.setattr(os, "replace", replace)
         real_replace(src, dst)
 
-    monkeypatch.setattr(derived_store.os, "replace", replace)
+    monkeypatch.setattr(os, "replace", replace)
     store.load(session, v1, ResampleConfig())
-    monkeypatch.setattr(derived_store.os, "replace", real_replace)
+    monkeypatch.setattr(os, "replace", real_replace)
     assert other == ["built"]  # B really ran inside A's write
 
     _, report = store.load(session, v1, ResampleConfig())

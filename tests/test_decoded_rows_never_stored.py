@@ -50,24 +50,24 @@ def _write(root: Path, tables: list[pa.Table]) -> Path:
     session = root / NAME
     session.mkdir(parents=True)
     for index, table in enumerate(tables):
-        pq.write_table(table, session / f"telemetry-{index:05d}.parquet")
+        pq.write_table(table, session / f"telemetry-{index:05d}.parquet")  # type: ignore[no-untyped-call]
     return session
 
 
 def _not_decoded(table: pa.Table) -> pa.Table:
-    return table.filter(pc.not_equal(table["source"], "decoded"))
+    return table.filter(pc.not_equal(table["source"], "decoded"))  # type: ignore[attr-defined, unused-ignore]
 
 
 @pytest.fixture
 def copies(tmp_path: Path) -> dict[str, Path]:
     """``stored`` (as recorded before P02.8), ``stripped`` (no decoded rows) and
     ``mixed`` (a stored chunk, then a stripped one), one storage root each."""
-    table = pq.read_table(SLICE)
-    assert pc.sum(pc.equal(table["source"], "decoded")).as_py() > 0
+    table = pq.read_table(SLICE)  # type: ignore[no-untyped-call]
+    assert pc.sum(pc.equal(table["source"], "decoded")).as_py() > 0  # type: ignore[attr-defined, unused-ignore]
     stamps = table["timestamp"]
-    middle = pc.min(stamps).as_py() + (pc.max(stamps).as_py() - pc.min(stamps).as_py()) / 2
-    early = table.filter(pc.less(stamps, pa.scalar(middle, stamps.type)))
-    late = table.filter(pc.greater_equal(stamps, pa.scalar(middle, stamps.type)))
+    middle = pc.min(stamps).as_py() + (pc.max(stamps).as_py() - pc.min(stamps).as_py()) / 2  # type: ignore[attr-defined, unused-ignore]
+    early = table.filter(pc.less(stamps, pa.scalar(middle, stamps.type)))  # type: ignore[attr-defined, unused-ignore]
+    late = table.filter(pc.greater_equal(stamps, pa.scalar(middle, stamps.type)))  # type: ignore[attr-defined, unused-ignore]
     return {
         "stored": _write(tmp_path / "stored", [table]),
         "stripped": _write(tmp_path / "stripped", [_not_decoded(table)]),

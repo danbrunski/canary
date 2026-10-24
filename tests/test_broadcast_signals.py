@@ -21,7 +21,7 @@ def _write_log(path: Path, lines: list[str]) -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_collect_byte_stats_groups_by_window(tmp_path: Path):
+def test_collect_byte_stats_groups_by_window(tmp_path: Path) -> None:
     """Frames should be assigned to the window covering their timestamp."""
     log = tmp_path / "frames.log"
     _write_log(
@@ -43,7 +43,7 @@ def test_collect_byte_stats_groups_by_window(tmp_path: Path):
     assert byte0["revved"].mean == (0x50 + 0x52) / 2
 
 
-def test_collect_skips_frames_in_gaps(tmp_path: Path):
+def test_collect_skips_frames_in_gaps(tmp_path: Path) -> None:
     """Frames between windows should be ignored."""
     log = tmp_path / "frames.log"
     _write_log(
@@ -65,7 +65,7 @@ def test_collect_skips_frames_in_gaps(tmp_path: Path):
     assert sum(s.n for s in stats[(0x180, 0)].values()) == 2
 
 
-def test_collect_excludes_diagnostic_ids(tmp_path: Path):
+def test_collect_excludes_diagnostic_ids(tmp_path: Path) -> None:
     """Diagnostic IDs are skipped by default."""
     log = tmp_path / "frames.log"
     _write_log(
@@ -81,7 +81,7 @@ def test_collect_excludes_diagnostic_ids(tmp_path: Path):
     assert not any(can_id == 0x7E8 for can_id, _ in stats)
 
 
-def test_collect_computes_min_max_and_unique(tmp_path: Path):
+def test_collect_computes_min_max_and_unique(tmp_path: Path) -> None:
     log = tmp_path / "frames.log"
     _write_log(
         log,
@@ -101,7 +101,7 @@ def test_collect_computes_min_max_and_unique(tmp_path: Path):
     assert s.n == 4
 
 
-def test_collect_locks_dlc_per_id(tmp_path: Path):
+def test_collect_locks_dlc_per_id(tmp_path: Path) -> None:
     """DLC is locked to first sighting — never grows across frames."""
     log = tmp_path / "frames.log"
     _write_log(
@@ -194,7 +194,7 @@ def test_signal_byte_is_flagged_even_with_overlap():
 # ---------------------------------------------------------------------------
 
 
-def test_end_to_end_finds_planted_signal(tmp_path: Path):
+def test_end_to_end_finds_planted_signal(tmp_path: Path) -> None:
     """Two windows: byte 0 of 0x180 sits at 10 in 'idle' and at 100 in 'revved'.
     The differential should rank that byte at the top."""
     log = tmp_path / "frames.log"

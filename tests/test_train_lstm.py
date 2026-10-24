@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import argparse
 import json
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any, cast
 
 import pytest
 import yaml
@@ -48,7 +50,7 @@ _TINY_LSTM = {
 }
 
 
-def _torch():
+def _torch() -> Any:
     return pytest.importorskip("torch")
 
 
@@ -332,8 +334,11 @@ def test_calibration_and_evaluate_sessions_take_their_whole_drive(tmp_path: Path
     held_out = write_obd_session(root, "c", rows=10, start_epoch=1_778_700_000.0)
 
     holdout = _resolve_holdout(
-        SimpleNamespace(
-            sessions=[], sessions_root=root, evaluate=[held_out], calibration_sessions=[calib]
+        cast(
+            argparse.Namespace,
+            SimpleNamespace(
+                sessions=[], sessions_root=root, evaluate=[held_out], calibration_sessions=[calib]
+            ),
         )
     )
     assert holdout is not None
@@ -343,8 +348,14 @@ def test_calibration_and_evaluate_sessions_take_their_whole_drive(tmp_path: Path
 
     with pytest.raises(ValueError, match="both the calibration and the evaluation"):
         _resolve_holdout(
-            SimpleNamespace(
-                sessions=[], sessions_root=root, evaluate=[restart], calibration_sessions=[calib]
+            cast(
+                argparse.Namespace,
+                SimpleNamespace(
+                    sessions=[],
+                    sessions_root=root,
+                    evaluate=[restart],
+                    calibration_sessions=[calib],
+                ),
             )
         )
 

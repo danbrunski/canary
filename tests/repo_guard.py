@@ -71,7 +71,7 @@ def _as_path(value: Any) -> str | None:
     if isinstance(value, int) or value is None:
         return None
     try:
-        raw = os.fspath(value)
+        raw: str | bytes = os.fspath(value)
     except TypeError:
         return None
     if isinstance(raw, bytes):

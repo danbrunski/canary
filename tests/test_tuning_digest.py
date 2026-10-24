@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Sequence
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -25,7 +26,7 @@ def config() -> CanaryConfig:
 
 
 def _capture(
-    root: Path, name: str, samples: list[tuple[float, float, float, float, float]]
+    root: Path, name: str, samples: Sequence[tuple[float, float, float, float, float]]
 ) -> Path:
     records: list[TelemetryRecord] = []
     for i, (rpm, load, fs, ratio, lam) in enumerate(samples):
@@ -664,7 +665,7 @@ def test_the_digest_reads_its_capture_once_and_says_the_same(
 
     capture = Path("tests/fixtures/lambda_delivery/_capture-tuning-2026-09-21T223734")
     calls: list[Path] = []
-    real = channels.read_session
+    real = channels.read_session  # type: ignore[attr-defined]
 
     def counting(path: Path, **kwargs: Any) -> Any:
         calls.append(Path(path))

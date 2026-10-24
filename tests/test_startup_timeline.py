@@ -255,7 +255,7 @@ def test_main_marks_the_stages_before_the_daemon(
     loaded = loaded.model_copy(
         update={"profiles": loaded.profiles.model_copy(update={"enabled": False})}
     )
-    monkeypatch.setattr(main_mod.CanaryConfig, "from_yaml", classmethod(lambda cls, _p: loaded))
+    monkeypatch.setattr(CanaryConfig, "from_yaml", classmethod(lambda cls, _p: loaded))
 
     main_mod.main(["--config", str(example)])
 

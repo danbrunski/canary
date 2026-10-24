@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+from typing import cast
 
 import numpy as np
 import pandas as pd
@@ -61,10 +62,10 @@ def test_apply_quality_gate_nans_per_cell_not_whole_row() -> None:
 
     # Row 1's bad RPM is rejected, but its coolant reading (which is fine)
     # survives — this is a per-cell reject, not a row drop.
-    assert math.isnan(gated.loc[1, "obd:RPM"])
+    assert math.isnan(cast(float, gated.loc[1, "obd:RPM"]))
     assert gated.loc[1, "obd:COOLANT_TEMP"] == 91.0
     # Row 2's bad coolant reading is rejected, its good RPM survives.
-    assert math.isnan(gated.loc[2, "obd:COOLANT_TEMP"])
+    assert math.isnan(cast(float, gated.loc[2, "obd:COOLANT_TEMP"]))
     assert gated.loc[2, "obd:RPM"] == 3000.0
     # Untouched channel is bit-for-bit identical.
     assert gated["obd:MAF"].tolist() == [5.0, 6.0, 7.0]

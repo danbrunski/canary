@@ -10,9 +10,11 @@ by an aggregate.
 from __future__ import annotations
 
 import ast
+from collections.abc import Iterator
 from pathlib import Path
 
 import numpy as np
+import numpy.typing as npt
 import pytest
 
 from src.signals.pairing import PairingPolicy, match_ordered
@@ -28,7 +30,12 @@ from src.signals.time_lookup import (
 SRC = Path(__file__).resolve().parents[1] / "src"
 
 
-def legacy_previous(times, values, at, max_age):  # fuel_comp_samples / fuel_comp_inputs
+def legacy_previous(
+    times: npt.NDArray[np.float64],
+    values: npt.NDArray[np.float64],
+    at: npt.NDArray[np.float64],
+    max_age: float,
+) -> npt.NDArray[np.float64]:  # fuel_comp_samples / fuel_comp_inputs
     out = np.full(len(at), np.nan)
     if not len(times) or not len(at):
         return out
@@ -41,7 +48,12 @@ def legacy_previous(times, values, at, max_age):  # fuel_comp_samples / fuel_com
     return out
 
 
-def legacy_next_within(times, values, at, max_age):  # fuel_comp_samples._next_within
+def legacy_next_within(
+    times: npt.NDArray[np.float64],
+    values: npt.NDArray[np.float64],
+    at: npt.NDArray[np.float64],
+    max_age: float,
+) -> npt.NDArray[np.float64]:  # fuel_comp_samples._next_within
     out = np.full(len(at), np.nan)
     if not len(times) or not len(at):
         return out
@@ -54,7 +66,12 @@ def legacy_next_within(times, values, at, max_age):  # fuel_comp_samples._next_w
     return out
 
 
-def legacy_nearest(t, v, at, max_age_s):  # engine_dynamics / fuel_plant_eval
+def legacy_nearest(
+    t: npt.NDArray[np.float64],
+    v: npt.NDArray[np.float64],
+    at: npt.NDArray[np.float64],
+    max_age_s: float,
+) -> npt.NDArray[np.float64]:  # engine_dynamics / fuel_plant_eval
     out = np.full(len(at), np.nan)
     if not len(t):
         return out
@@ -67,7 +84,9 @@ def legacy_nearest(t, v, at, max_age_s):  # engine_dynamics / fuel_plant_eval
     return out
 
 
-def legacy_bracket(times, t, max_age):  # target_phi._as_of
+def legacy_bracket(
+    times: npt.NDArray[np.float64], t: float, max_age: float
+) -> tuple[int | None, int | None]:  # target_phi._as_of
     if not len(times):
         return None, None
     before = int(np.searchsorted(times, t, side="right")) - 1
@@ -77,7 +96,9 @@ def legacy_bracket(times, t, max_age):  # target_phi._as_of
     return prior, nxt
 
 
-def fixtures():
+def fixtures() -> Iterator[
+    tuple[npt.NDArray[np.float64], npt.NDArray[np.float64], npt.NDArray[np.float64]]
+]:
     """Sorted stamps on a 1/8 s grid (duplicates, exact hits, exact midpoint
     ties) and anchors on a 1/16 s grid, plus non-finite and out-of-range ones."""
     rng = np.random.default_rng(11)

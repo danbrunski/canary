@@ -159,7 +159,7 @@ class FakeEcu:
         self.fail_first: dict[int, int] = {}
         self.nrc_reads: dict[int, int] = {}
         self.corrupt_on_reread: set[int] = set()
-        self.on_read: Callable[[int, int], None] | None = None
+        self.on_read: Callable[[int, int], object] | None = None
         self._pending: bytes | None = None
         self._stop = threading.Event()
         self._thread = threading.Thread(target=self._run, daemon=True, name="fake-ecu")
@@ -673,7 +673,7 @@ def _engine_running(truck: Truck) -> None:
     truck.reading = VehicleReading(state="engine_running", rpm=750.0, broadcast_rpm=750.0)
 
 
-REFUSALS: dict[str, tuple[Callable[[Truck], None], str]] = {
+REFUSALS: dict[str, tuple[Callable[[Truck], object], str]] = {
     "engine running": (_engine_running, "broadcast engine speed 750 rpm >= 400"),
     "broadcast rpm while OBD reads 0": (
         lambda t: setattr(
@@ -1568,7 +1568,12 @@ def test_the_app_lifespan_shuts_the_job_down(tmp_path: Path) -> None:
     app = FastAPI()
     job = register_rom_library_routes(app, config=config, resolved_control_token="secret")
     calls: list[str] = []
-    job.shutdown = lambda timeout=5.0: calls.append("shutdown") or True  # type: ignore[method-assign]
+
+    def shutdown(timeout: float = 5.0) -> bool:
+        calls.append("shutdown")
+        return True
+
+    job.shutdown = shutdown  # type: ignore[method-assign]
     with TestClient(app):
         assert calls == []
     assert calls == ["shutdown"]
@@ -1589,7 +1594,7 @@ def _send_fails(times: int) -> Callable[[can.BusABC], can.BusABC]:
                 raise can.CanOperationError("Transmit buffer full")
             real(message, timeout)
 
-        bus.send = send  # type: ignore[method-assign]
+        bus.send = send  # type: ignore[method-assign, assignment]
         return bus
 
     return wrap

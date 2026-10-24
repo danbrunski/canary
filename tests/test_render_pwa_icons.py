@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import cast
 
 import pytest
 
@@ -14,7 +15,7 @@ AMBER = (255, 184, 74, 255)
 def test_plain_icon_keeps_the_rounded_corners() -> None:
     image = render(PUBLIC / "canary.svg", 64, full_bleed=False, art_scale=1.0)
     assert image.size == (64, 64)
-    assert image.getpixel((0, 0))[3] == 0  # transparent corner
+    assert cast(tuple[int, ...], image.getpixel((0, 0)))[3] == 0  # transparent corner
     assert image.getpixel((32, 8)) == AMBER
 
 

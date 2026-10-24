@@ -26,9 +26,14 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 try:
-    from _cli import add_bindings_arg, add_common_args, add_log_level_arg, load_config
+    from _cli import (  # type: ignore[import-not-found]
+        add_bindings_arg,
+        add_common_args,
+        add_log_level_arg,
+        load_config,
+    )
 except ImportError:  # loaded as `scripts.derive_sessions`: repo root on path
-    from scripts._cli import (  # type: ignore[no-redef]
+    from scripts._cli import (
         add_bindings_arg,
         add_common_args,
         add_log_level_arg,

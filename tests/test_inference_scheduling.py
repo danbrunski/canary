@@ -614,7 +614,7 @@ async def test_replay_transition_mid_compute_discards_the_stale_result(
 ) -> None:
     h = _make_harness(config, released=False)
     replay = FlippableReplay()
-    h.components.replay_controller = replay  # type: ignore[assignment]
+    h.components.replay_controller = replay
     try:
         await h.tick(0)
         await h.worker_started(1)

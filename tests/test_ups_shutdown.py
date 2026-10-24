@@ -7,6 +7,7 @@ lazily imported inside main(), so this module imports cleanly under the venv.
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 import scripts.ups_shutdown_watch as ups
 
@@ -241,7 +242,7 @@ def test_build_status_record_disarmed_has_none_fields() -> None:
     assert record["soc"] is None
 
 
-def test_write_status_round_trips_json(tmp_path) -> None:
+def test_write_status_round_trips_json(tmp_path: Path) -> None:
     path = str(tmp_path / "ups_status")
     record = ups.build_status_record(
         armed=True,

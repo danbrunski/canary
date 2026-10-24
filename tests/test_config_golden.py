@@ -54,7 +54,7 @@ import sys
 import types
 from collections.abc import Callable
 from pathlib import Path
-from typing import Annotated, Any, Literal, Union, get_args, get_origin
+from typing import Annotated, Any, Literal, Union, cast, get_args, get_origin
 
 import pytest
 from pydantic import BaseModel, ValidationError
@@ -127,7 +127,7 @@ def _errors(exc: ValidationError) -> list[dict[str, Any]]:
     ]
 
 
-def _outcome(call: Callable[[], Any]) -> dict[str, Any]:
+def _outcome(call: Callable[..., Any]) -> dict[str, Any]:
     """What ``call`` returns, or the refusal (type, message, validation errors)."""
     try:
         return {"ok": _norm(call())}
@@ -430,7 +430,7 @@ def _cases() -> dict[str, Any]:
 
     cases: dict[str, Any] = {}
 
-    def add(label: str, call: Callable[[], Any]) -> None:
+    def add(label: str, call: Callable[..., Any]) -> None:
         cases[label] = _with_logs(call)
 
     # Vehicle parameters: the retired and renamed keys, and the evidence rule.
@@ -464,6 +464,8 @@ def _cases() -> dict[str, Any]:
 
     # Collection: retired key, the broadcast floor, bounds.
     collection = _example()["collection"]
+    value: Any
+    update: dict[str, Any]
     for label, value in (
         ("confirmed_only", ["confirmed"]),
         ("confirmed_tuple_order", ["confirmed", "confirmed"]),
@@ -492,7 +494,7 @@ def _cases() -> dict[str, Any]:
     ):
         add(
             f"broadcast_floor:direct:{seconds!r}",
-            lambda seconds=seconds: validate_broadcast_stale_timeout(seconds),  # type: ignore[arg-type]
+            lambda seconds=seconds: validate_broadcast_stale_timeout(seconds),
         )
         add(
             f"broadcast_floor:field:{seconds!r}",
@@ -541,7 +543,7 @@ def _cases() -> dict[str, Any]:
     add(
         "imu:enabled_property",
         lambda: [
-            ImuConfig(source=s, sample_rate_hz=104.0).enabled
+            ImuConfig(source=cast(Any, s), sample_rate_hz=104.0).enabled
             for s in ("disabled", "bno055", "lsm6dsox")
         ],
     )
@@ -678,7 +680,7 @@ def _rooted(config: CanaryConfig) -> dict[str, Any]:
 def _rebased(config: CanaryConfig, root: Path, kwargs: dict[str, Any]) -> dict[str, Any]:
     before = config.model_dump(mode="json")
     result = rebase_state_paths(config, root, **kwargs)
-    rest = {"exclude": {"daemon"}, "mode": "json"}
+    rest: dict[str, Any] = {"exclude": {"daemon"}, "mode": "json"}
     return {
         "daemon": result.daemon.model_dump(mode="json"),
         "rest_unchanged": result.model_dump(**rest) == config.model_dump(**rest),
@@ -901,12 +903,12 @@ def capture() -> dict[str, Any]:
 
 
 def _golden() -> dict[str, Any]:
-    return json.loads(GOLDEN.read_text())
+    return cast(dict[str, Any], json.loads(GOLDEN.read_text()))
 
 
 @pytest.fixture(scope="module")
 def captured() -> dict[str, Any]:
-    return json.loads(json.dumps(capture()))
+    return cast(dict[str, Any], json.loads(json.dumps(capture())))
 
 
 SECTIONS = ("configs", "classes", "schemas", "strict", "cases", "paths", "scope")

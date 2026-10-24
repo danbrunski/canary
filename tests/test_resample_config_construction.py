@@ -17,7 +17,7 @@ from __future__ import annotations
 import ast
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import pandas as pd
 import pytest
@@ -69,7 +69,7 @@ def _direct_constructions(path: Path) -> list[int]:
 
 
 def test_no_direct_resample_config_outside_the_allowlist() -> None:
-    offenders = []
+    offenders: list[str] = []
     for top in ("src", "scripts", "tools"):
         for path in sorted((REPO_ROOT / top).rglob("*.py")):
             rel = path.relative_to(REPO_ROOT).as_posix()
@@ -213,7 +213,7 @@ def _spy_resample_wide(
         seen.append(kwargs["config"])
         if stop:
             raise _StopError
-        return real(wide, **kwargs)
+        return cast(pd.DataFrame, real(wide, **kwargs))
 
     monkeypatch.setattr(module, "resample_wide", spy)
     return seen

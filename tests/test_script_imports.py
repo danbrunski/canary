@@ -12,7 +12,7 @@ from __future__ import annotations
 import ast
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any
+from typing import Any, cast
 
 import pytest
 
@@ -110,7 +110,7 @@ def test_benchmark_held_out_leaves_the_configured_suppress_list_out(
     benchmark without ``suppress_channels`` (R04.1's remainder); both now go
     through ``benchmark_held_out``, which passes the serving config's list."""
     config = CanaryConfig.from_yaml(REPO_ROOT / "canary.example.yaml")
-    config.models.lstm_autoencoder.suppress_channels = ["obd:FUEL_LEVEL"]
+    config.models.lstm_autoencoder.suppress_channels = cast(Any, ["obd:FUEL_LEVEL"])
     seen: dict[str, Any] = {}
 
     class _Windows:
@@ -130,11 +130,11 @@ def test_benchmark_held_out_leaves_the_configured_suppress_list_out(
     )
     report = training_entry.benchmark_held_out(
         training_entry.SEQUENCE_BACKBONES["lstm"],
-        trained,  # type: ignore[arg-type]
+        trained,
         [Path("held-out")],
         config,
     )
-    assert report == "report"
+    assert cast(object, report) == "report"
     assert seen["suppress_channels"] == ("obd:FUEL_LEVEL",)
 
 
@@ -153,7 +153,7 @@ def test_benchmark_held_out_is_none_without_windows(monkeypatch: pytest.MonkeyPa
     assert (
         training_entry.benchmark_held_out(
             training_entry.SEQUENCE_BACKBONES["tcn"],
-            trained,  # type: ignore[arg-type]
+            trained,
             [Path("held-out")],
             config,
         )

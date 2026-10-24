@@ -10,6 +10,7 @@ so the recipe layer skips cleanly rather than fitting to NaN.
 from __future__ import annotations
 
 import math
+from typing import Any
 
 import pandas as pd
 
@@ -75,14 +76,13 @@ def test_air_mass_per_cycle_handles_zero_rpm_safely() -> None:
 
 
 def test_air_mass_per_cycle_propagates_source_freshness() -> None:
-    frame = _base(2).assign(
-        **{
-            "obd:MAF": [5.0, 5.0],
-            "obd:RPM": [600.0, 600.0],
-            "obd:MAF__gap": [False, True],
-            "obd:RPM__gap": [False, False],
-        }
-    )
+    columns: dict[str, Any] = {
+        "obd:MAF": [5.0, 5.0],
+        "obd:RPM": [600.0, 600.0],
+        "obd:MAF__gap": [False, True],
+        "obd:RPM__gap": [False, False],
+    }
+    frame = _base(2).assign(**columns)
     out = compute_anomaly_signals(frame)
     assert out["derived:AIR_MASS_PER_CYCLE__gap"].tolist() == [False, True]
 

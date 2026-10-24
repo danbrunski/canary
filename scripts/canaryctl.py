@@ -518,7 +518,8 @@ def _request_bytes(host: str, method: str, path: str, *, token: str | None) -> b
     req = Request(f"{host}{path}", headers=headers, method=method)
     try:
         with urlopen(req, timeout=120) as response:  # noqa: S310 - operator-provided LAN URL
-            return response.read()
+            body: bytes = response.read()
+            return body
     except HTTPError as exc:
         detail = exc.read().decode("utf-8", "replace")
         raise RuntimeError(f"{method} {path} failed: HTTP {exc.code}: {detail}") from exc

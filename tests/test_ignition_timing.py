@@ -646,7 +646,15 @@ def test_a_minus_three_count_trim_b_edit_is_minus_three_degrees_in_every_cell(
     _images("r20261004")
     rom_dir = OPERATOR_ROMS["r20261004"].parent
     spec = _trim_b_spec(tmp_path)
-    common = ["inspect", "--edits", spec, "--rom-dir", rom_dir, "--timing-coolant-c", "90"]
+    common: list[str | Path] = [
+        "inspect",
+        "--edits",
+        spec,
+        "--rom-dir",
+        rom_dir,
+        "--timing-coolant-c",
+        "90",
+    ]
     code, payload = _cli(*common, "--high-det", "set", "--knock-control", "fallback")
     assert code == 0, payload
     timing = payload["ignition_timing"]
@@ -670,7 +678,7 @@ def test_the_paired_run_carries_the_timing_change_at_every_design_point(tmp_path
     _images("r20261004")
     rom_dir = OPERATOR_ROMS["r20261004"].parent
     designs = tmp_path / "designs"
-    grid = [
+    grid: list[str | Path] = [
         "design", "grid", "--base-revision", "ZS44A-20261004",
         "--rpm-edges", "1900", "2100", "2900", "3100", "--load-edges", "25", "32", "60", "70",
         "--load-basis", "fill_fraction_as_manifold_ratio", "--baro-kpa", "80", "--iat-c", "25",

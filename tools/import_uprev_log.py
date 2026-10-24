@@ -311,7 +311,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     # pointed at ``data/tune_revisions.yaml``, which no profile has.
     scoped = scope_config(config, resolve_profile_for_tooling(config, None))
     registry = active_registry(scoped)
-    inferred = registry.at(started_at).revision if registry and registry.at(started_at) else None
+    found = registry.at(started_at) if registry else None
+    inferred = found.revision if found else None
     manifest["tune_revision"] = args.tune_revision or inferred
     manifest["tune_revision_source"] = (
         "import_manifest"

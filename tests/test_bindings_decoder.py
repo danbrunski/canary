@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any, cast
 
 import pytest
 from pydantic import ValidationError
@@ -93,8 +94,8 @@ def test_signal_rejects_unknown_fields():
 # ---------------------------------------------------------------------------
 
 
-def _sig(**kw) -> Signal:
-    defaults = dict(
+def _sig(**kw: Any) -> Signal:
+    defaults: dict[str, Any] = dict(
         name="X",
         module="ECM",
         can_id=0x100,
@@ -103,7 +104,7 @@ def _sig(**kw) -> Signal:
         confidence="high",
     )
     defaults.update(kw)
-    return Signal(**defaults)  # type: ignore[arg-type]
+    return Signal(**defaults)
 
 
 def test_decode_raw_single_byte():
@@ -217,11 +218,11 @@ def test_is_plausible_coolant_minus_40_caught():
         plausible_max=130.0,
     )
     # raw=0 → -40 → implausible (engine-off sentinel)
-    assert is_plausible(s, apply_scaling(s, 0)) is False
+    assert is_plausible(s, cast(float, apply_scaling(s, 0))) is False
     # raw=53 → 13degC → plausible (cold engine)
-    assert is_plausible(s, apply_scaling(s, 53)) is True
+    assert is_plausible(s, cast(float, apply_scaling(s, 53))) is True
     # raw=130 → 90degC → plausible (thermostat-regulated)
-    assert is_plausible(s, apply_scaling(s, 130)) is True
+    assert is_plausible(s, cast(float, apply_scaling(s, 130))) is True
 
 
 # ---------------------------------------------------------------------------
@@ -229,7 +230,7 @@ def test_is_plausible_coolant_minus_40_caught():
 # ---------------------------------------------------------------------------
 
 
-def test_load_bindings_round_trips(tmp_path: Path):
+def test_load_bindings_round_trips(tmp_path: Path) -> None:
     path = tmp_path / "bindings.yaml"
     path.write_text(
         """
@@ -260,7 +261,7 @@ signals:
     assert b.signals[0].evidence[0].method == "byte_vs_tag_differential"
 
 
-def test_load_bindings_rejects_unknown_top_level_key(tmp_path: Path):
+def test_load_bindings_rejects_unknown_top_level_key(tmp_path: Path) -> None:
     path = tmp_path / "bindings.yaml"
     path.write_text(
         """
@@ -302,7 +303,7 @@ def _write_candump(path: Path, rows: list[tuple[float, int, bytes]]) -> None:
     path.write_text("\n".join(lines) + "\n")
 
 
-def test_collect_stats_aggregates_per_signal(tmp_path: Path):
+def test_collect_stats_aggregates_per_signal(tmp_path: Path) -> None:
     """Synthetic session with known frames → known min/max."""
     frames = tmp_path / "frames.log"
     _write_candump(
@@ -351,7 +352,7 @@ def test_collect_stats_aggregates_per_signal(tmp_path: Path):
     assert e.raw_min == 205 and e.raw_max == 254
 
 
-def test_collect_stats_handles_signal_without_scaling(tmp_path: Path):
+def test_collect_stats_handles_signal_without_scaling(tmp_path: Path) -> None:
     """Signals with scale=None should still get raw stats, no decoded."""
     frames = tmp_path / "frames.log"
     _write_candump(
@@ -382,7 +383,7 @@ def test_collect_stats_handles_signal_without_scaling(tmp_path: Path):
     assert r.decoded_max is None
 
 
-def test_collect_stats_ignores_unrelated_frames(tmp_path: Path):
+def test_collect_stats_ignores_unrelated_frames(tmp_path: Path) -> None:
     """Frames on CAN IDs not in any signal should be skipped silently."""
     frames = tmp_path / "frames.log"
     _write_candump(
@@ -409,7 +410,7 @@ def test_collect_stats_ignores_unrelated_frames(tmp_path: Path):
     assert stats["COOLANT"].n_samples == 1
 
 
-def test_collect_stats_zero_samples_for_signal_not_seen(tmp_path: Path):
+def test_collect_stats_zero_samples_for_signal_not_seen(tmp_path: Path) -> None:
     """A signal whose CAN ID never appears should have n_samples=0."""
     frames = tmp_path / "frames.log"
     _write_candump(frames, [(1.0, 0x551, bytes([60, 0]))])
@@ -429,7 +430,7 @@ def test_collect_stats_zero_samples_for_signal_not_seen(tmp_path: Path):
     assert stats["GHOST"].raw_max is None
 
 
-def test_collect_stats_counts_implausible_samples(tmp_path: Path):
+def test_collect_stats_counts_implausible_samples(tmp_path: Path) -> None:
     """COOLANT with plausibility bounds: engine-off sentinel (raw=0 → -40degC)
     must be counted as implausible while real readings stay plausible."""
     frames = tmp_path / "frames.log"
@@ -465,7 +466,7 @@ def test_collect_stats_counts_implausible_samples(tmp_path: Path):
     assert c.implausible_max == -40.0  # both bad samples were the same value
 
 
-def test_collect_stats_no_plausibility_when_bounds_unset(tmp_path: Path):
+def test_collect_stats_no_plausibility_when_bounds_unset(tmp_path: Path) -> None:
     """A signal without plausibility bounds should have implausible_samples=0
     regardless of decoded value range."""
     frames = tmp_path / "frames.log"
@@ -490,7 +491,7 @@ def test_collect_stats_no_plausibility_when_bounds_unset(tmp_path: Path):
     assert stats["COOLANT"].implausible_samples == 0
 
 
-def test_collect_stats_implausible_skipped_when_no_scaling(tmp_path: Path):
+def test_collect_stats_implausible_skipped_when_no_scaling(tmp_path: Path) -> None:
     """Plausibility lives in decoded space; signals without scaling can't
     have decoded values, so implausible count stays 0 even if bounds are set."""
     frames = tmp_path / "frames.log"

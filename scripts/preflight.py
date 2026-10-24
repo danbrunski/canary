@@ -39,12 +39,12 @@ from dataclasses import dataclass
 from pathlib import Path
 
 try:
-    from _cli import (
+    from _cli import (  # type: ignore[import-not-found]
         add_common_args,
         add_log_level_arg,
     )
 except ImportError:  # loaded as `scripts.preflight` — repo root on path, not scripts/
-    from scripts._cli import (  # type: ignore[no-redef]
+    from scripts._cli import (
         add_common_args,
         add_log_level_arg,
     )

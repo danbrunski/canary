@@ -10,7 +10,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -30,7 +30,7 @@ _MODES = {"idle": {"rpm_max": 900, "speed_max": 0}}
 _EDITED = {**_MODES, "cruise": {"rpm_min": 1200, "speed_min": 40}}
 
 
-def _write(path: Path, config: CanaryConfig, modes: dict[str, object]) -> None:
+def _write(path: Path, config: CanaryConfig, modes: Mapping[str, object]) -> None:
     data = config.model_dump(mode="json")
     data["preprocessing"]["operating_modes"] = modes
     path.write_text(yaml.safe_dump(data, sort_keys=False))

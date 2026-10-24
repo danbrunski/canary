@@ -28,7 +28,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import Any
 
@@ -94,10 +94,11 @@ def fuel_cut_coincidence(
     s_t, _ = _times_values(_long(session, ram.sentinel_spec))
     out: dict[str, Any] = {"sentinel_reads": int(len(s_t))}
     policy = PairingPolicy.within(pd.Timedelta(seconds=max_separation_s), reference="a")
-    for label, spec, test in (
+    tests: tuple[tuple[str, str, Callable[[np.ndarray], np.ndarray]], ...] = (
         ("pid_0x44_zero", pid.spec, lambda v: v == 0.0),
         ("lambda_at_rail", sensor.spec, lambda v: v >= (sensor.rail_high or np.inf)),
-    ):
+    )
+    for label, spec, test in tests:
         o_t, o_v = _times_values(_long(session, spec))
         if not len(s_t) or not len(o_t):
             out[label] = {"paired": 0, "agree": 0}

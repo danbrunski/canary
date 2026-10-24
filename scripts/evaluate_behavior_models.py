@@ -63,13 +63,13 @@ import yaml
 from src.yaml_load import load_yaml
 
 try:
-    from _cli import (
+    from _cli import (  # type: ignore[import-not-found]
         add_bindings_arg,
         add_log_level_arg,
         load_config,
     )
 except ImportError:  # loaded as `scripts.evaluate_behavior_models`: repo root on path
-    from scripts._cli import (  # type: ignore[no-redef]
+    from scripts._cli import (
         add_bindings_arg,
         add_log_level_arg,
         load_config,

@@ -908,7 +908,7 @@ def test_importing_the_module_never_re_launches() -> None:
     # The prologue runs only under ``__main__``; this test file imported the module.
     assert desk.__name__ != "__main__"
     assert "yaml" in sys.modules
-    assert desk.ensure_venv is venv_launch.ensure_venv
+    assert desk.ensure_venv is venv_launch.ensure_venv  # type: ignore[attr-defined]
 
 
 def test_ensure_venv_refuses_with_exit_2_and_execs_nothing(

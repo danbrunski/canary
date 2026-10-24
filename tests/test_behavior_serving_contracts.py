@@ -14,7 +14,7 @@ from __future__ import annotations
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any
+from typing import Any, cast
 
 import numpy as np
 import pandas as pd
@@ -209,7 +209,7 @@ def test_local_range_gate_refuses_a_blip_identically_batch_and_live(config: Cana
         wide, config, behavior_models=models, did_map=load_repo_did_map()
     ).operating_frame
     _, batch = explain_expected_column(framed, model)
-    expected = [None] * len(wide)
+    expected: list[str | None] = [None] * len(wide)
     for i in range(5):
         expected[i] = "range_insufficient_history:obd:RPM"
     # 5 s windows holding the 1700 (rows 21..25); the 1600 alone is 100, not > 100.
@@ -224,7 +224,7 @@ def test_local_range_gate_refuses_a_blip_identically_batch_and_live(config: Cana
     for second, row in wide.iterrows():
         _live_tick(
             source,
-            T0 + timedelta(seconds=int(second)),
+            T0 + timedelta(seconds=int(cast(int, second))),
             {"RPM": row["obd:RPM"], "SPEED": 40.0, "TIMING_ADVANCE": 22.0},
         )
         live.append(_live_result(source).reason)
@@ -419,20 +419,25 @@ def test_cold_start_evidence_warm_restart_and_mid_drive() -> None:
         _drive("mid", initial_coolant=20.0, koeo_seconds=0, first_runtime=600.0), [_SPEC]
     )
     model = _cold_model()
-    last = lambda frame: frame.iloc[-1].to_dict()  # noqa: E731
+
+    def last(frame: pd.DataFrame) -> dict[str, Any]:
+        return cast(dict[str, Any], frame.iloc[-1].to_dict())
 
     assert point_eligibility(last(cold), model) is None
     assert point_eligibility(last(warm), model) == "cold_start_initial_coolant_above_limit"
     # Unknown initial temperature is never read as cold.
     assert point_eligibility(last(mid), model) == "cold_start_no_start_evidence"
     # KOEO rows before the start are refused by engine state, not context.
-    assert point_eligibility(cold.iloc[0].to_dict(), model) == "engine_not_running"
+    assert (
+        point_eligibility(cast(dict[str, Any], cold.iloc[0].to_dict()), model)
+        == "engine_not_running"
+    )
 
 
 def test_start_tracker_runtime_reset_and_session_boundary() -> None:
     tracker = EngineStartTracker(_SPEC)
     # Mid-drive join: no evidence.
-    assert tracker.update(1500.0, 900.0, 80.0, 0.0) == (0.0, pytest.approx(np.nan, nan_ok=True))
+    assert tracker.update(1500.0, 900.0, 80.0, 0.0) == (0.0, pytest.approx(np.nan, nan_ok=True))  # type: ignore[comparison-overlap]
     # Run-time clock goes backwards: an unseen restart the new clock places.
     observed, coolant = tracker.update(800.0, 3.0, 25.0, 1.0)
     assert observed == 1.0 and coolant == 25.0
@@ -551,7 +556,7 @@ def test_start_context_live_matches_batch_across_a_writer_rotation(config: Canar
     source = LiveFeatureSource(
         config=config, behavior_models=models, session_identity=lambda: writing["dir"]
     )
-    live = []
+    live: list[Any] = []
     for _, row in both.iterrows():
         writing["dir"] = row[SESSION_COLUMN]
         live.extend(point[observed_col] for point in _feed_live(source, row.to_frame().T))
@@ -907,7 +912,7 @@ def _batch_results(
     for row in framed.to_dict(orient="records"):
         per_model: dict[str, tuple[Any, ...]] = {}
         for model in models.models:
-            result = deviation(model, row.get(model.output), row)
+            result = deviation(model, row.get(model.output), cast(dict[str, Any], row))
             per_model[model.name] = (
                 result.expected,
                 result.deviation,

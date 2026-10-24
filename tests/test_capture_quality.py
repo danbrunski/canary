@@ -9,6 +9,7 @@ and equal per-channel rates with zero joint coverage.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from typing import Any
 
 import pandas as pd
@@ -55,7 +56,9 @@ def _profile(**overrides: object) -> dict[str, Any]:
     return base
 
 
-def _scheduler(channels: list[str], *, trailing_hz: dict[str, float] | None = None) -> dict:
+def _scheduler(
+    channels: list[str], *, trailing_hz: dict[str, float] | None = None
+) -> dict[str, Any]:
     return {
         "capture_observed_seconds": 60.0,
         "achieved_hz_capture": dict(trailing_hz or {}),
@@ -131,11 +134,17 @@ def _epoch(counters: dict[str, int | None], at: float = 0.0) -> LossEpoch:
     return LossEpoch(taken_at_monotonic=at, taken_at_wall=at, counters=counters)
 
 
-def _verified_losses(start: dict[str, int | None], stop: dict[str, int | None]) -> dict[str, Any]:
-    return summarize_losses(reconcile_losses(_epoch(start), _epoch(stop, 300.0)))
+def _verified_losses(
+    start: Mapping[str, int | None], stop: Mapping[str, int | None]
+) -> dict[str, Any]:
+    return summarize_losses(reconcile_losses(_epoch(dict(start)), _epoch(dict(stop), 300.0)))
 
 
-CLEAN = {"storage.dropped_records": 0, "storage.errors": 0, "can0.rx_dropped": 0}
+CLEAN: dict[str, int | None] = {
+    "storage.dropped_records": 0,
+    "storage.errors": 0,
+    "can0.rx_dropped": 0,
+}
 CHANNELS = [*TUPLE, "COOLANT_TEMP"]
 
 
@@ -307,7 +316,9 @@ def test_dashboard_only_drops_are_reported_beside_recording_loss_not_inside_it()
 # ---------------------------------------------------------------------------
 
 
-def _obd(t: float, channel: str, *, generation: int = 1, round_id: int, value: float = 1.0):
+def _obd(
+    t: float, channel: str, *, generation: int = 1, round_id: int, value: float = 1.0
+) -> TelemetryRecord:
     return TelemetryRecord.obd(
         t,
         channel,
@@ -604,7 +615,7 @@ def test_batching_off_is_called_out() -> None:
     assert quality.tuples["source"] == "no_required_tuple"
 
 
-def _batching(*, desyncs: int, failures: int, requests: int, loop: float = 12.5) -> dict:
+def _batching(*, desyncs: int, failures: int, requests: int, loop: float = 12.5) -> dict[str, Any]:
     """The scheduler's cumulative batching block, as ``/status`` reports it."""
     return {
         "max_pids": 6,

@@ -156,7 +156,7 @@ def test_fuel_system_states_are_compared_sample_by_sample(tmp_path: Path) -> Non
             "payload": pa.array(payloads, type=pa.binary()),
         }
     )
-    pq.write_table(table, session / "telemetry-000001.parquet")
+    pq.write_table(table, session / "telemetry-000001.parquet")  # type: ignore[no-untyped-call]
     result = fuel_system_state_agreement(session)
     assert result["samples"] == 9
     assert result["with_payload"] == 8

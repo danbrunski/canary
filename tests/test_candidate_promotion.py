@@ -432,8 +432,9 @@ def test_the_vehicle_job_stays_pending_until_independent_evidence_exists(tmp_pat
     # Today's real state: no reference has been frozen (E03.3).
     ran = asyncio.run(scheduler(config).step())
     assert ran is None
-    job = jobs.get(job.job_id)
-    assert job is not None and job.state == "pending" and job.reason == "no_frozen_reference"
+    pending = jobs.get(job.job_id)
+    assert pending is not None
+    assert pending.state == "pending" and pending.reason == "no_frozen_reference"
     status = candidate_status(brain_jobs.candidate_store(config), "stft_bank_balance")
     assert status["state"] == "no_frozen_reference" and status["checkpoints"] == [checkpoint]
 

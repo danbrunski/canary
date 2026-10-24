@@ -2,6 +2,7 @@
 
 import asyncio
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -31,7 +32,7 @@ async def test_run_exits_on_stop_event():
     config = CanaryConfig.from_yaml(EXAMPLE_YAML)
     stop = asyncio.Event()
 
-    async def trigger_stop():
+    async def trigger_stop() -> None:
         await asyncio.sleep(0.01)
         stop.set()
 
@@ -87,7 +88,7 @@ def test_main_restores_passive_before_the_vin_probe(
         raise SystemExit(0)  # stop before scope_config/run; the probe is the point
 
     monkeypatch.setattr(main_mod, "configure_logging", lambda _level: None)
-    monkeypatch.setattr(main_mod.CanaryConfig, "from_yaml", classmethod(lambda cls, _p: config))
+    monkeypatch.setattr(CanaryConfig, "from_yaml", classmethod(lambda cls, _p: config))
     monkeypatch.setattr(main_mod, "resolve_active_profile", _probe)
 
     with pytest.raises(SystemExit):
@@ -208,7 +209,7 @@ async def test_default_collectors_legacy_elm327_starts_passive_can_and_obd(
     config = config.model_copy(
         update={"collection": config.collection.model_copy(update={"obd_source": "elm327"})}
     )
-    started: dict[str, object] = {}
+    started: dict[str, Any] = {}
 
     async def fake_collect_can_from_config(
         spec, queue, stop_event, *, reconnect_policy, on_receive_stats=None
@@ -235,10 +236,10 @@ async def test_default_collectors_legacy_elm327_starts_passive_can_and_obd(
         await collector(queue, stop)
 
     assert set(started) == {"can", "obd"}
-    can_spec, can_queue, hook = started["can"]  # type: ignore[misc]
+    can_spec, can_queue, hook = started["can"]
     assert can_spec == config.hardware.can
     assert can_queue is queue
     assert hook is stats_hook
-    obd_spec, obd_queue = started["obd"]  # type: ignore[misc]
+    obd_spec, obd_queue = started["obd"]
     assert obd_spec.port == config.hardware.elm327_port
     assert obd_queue is queue

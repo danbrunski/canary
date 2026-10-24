@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import Any
 
 import pandas as pd
 import pytest
@@ -332,7 +333,7 @@ def test_ledger_cli_ingest_list_publish_show(
 # ---------------------------------------------------------------------------
 
 
-def _benchmark_report(*, recall: float, per_hour: float) -> dict:
+def _benchmark_report(*, recall: float, per_hour: float) -> dict[str, Any]:
     """An evaluate_detectors report (R06.5: the protocol the gates read)."""
     return evaluation_report({"isolation_forest": recall}, {"isolation_forest": per_hour})
 

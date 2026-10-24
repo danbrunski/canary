@@ -24,6 +24,7 @@ from scripts.benchmark_live_pipeline import (
     SCENARIO_EPOCH,
     SUPPORTED_OBD_CHANNELS,
     BenchmarkReport,
+    TickWorkload,
     build_tick_workload,
     channel_value,
     drive_state,
@@ -70,7 +71,9 @@ def _run(config: CanaryConfig, **overrides: object) -> BenchmarkReport:
     return run_benchmark(config, **kwargs)  # type: ignore[arg-type]
 
 
-def _workloads(config: CanaryConfig, count: int, *, channels: int = 7, frames: int = 20):
+def _workloads(
+    config: CanaryConfig, count: int, *, channels: int = 7, frames: int = 20
+) -> list[TickWorkload]:
     period = tick_period_seconds(config)
     rng = np.random.default_rng(0)
     return [
@@ -115,6 +118,7 @@ def test_scenario_clock_is_monotonic_across_warmup_and_measurement(config: Canar
     assert ticks == [tick_time(i, period) for i in range(12)]
     assert all(later > earlier for earlier, later in pairwise(ticks))
     for previous, workload in pairwise([None, *workloads]):
+        assert workload is not None
         floor = (
             workload.tick_at.timestamp() - period
             if previous is None

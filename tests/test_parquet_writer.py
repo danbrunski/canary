@@ -24,7 +24,7 @@ from src.telemetry import TelemetryRecord
 
 def _write_valid_parquet(path: Path) -> None:
     """A real (PAR1-terminated) Parquet file, so the husk sweep keeps it."""
-    pq.write_table(pa.table({"x": [1]}), path)
+    pq.write_table(pa.table({"x": [1]}), path)  # type: ignore[no-untyped-call]
 
 
 def test_writer_flushes_records_to_readable_parquet(tmp_path: Path) -> None:
@@ -41,7 +41,7 @@ def test_writer_flushes_records_to_readable_parquet(tmp_path: Path) -> None:
     assert second is not None
     assert second == tmp_path / "2026-05-11T120000" / "telemetry-00000.parquet"
 
-    table = pq.read_table(second)
+    table = pq.read_table(second)  # type: ignore[no-untyped-call]
     rows = table.to_pylist()
     assert len(rows) == 2
     assert rows[0]["source"] == "obd"
@@ -132,8 +132,8 @@ def test_writer_rotates_session_when_engine_run_time_resets(tmp_path: Path) -> N
         tmp_path / "2026-05-11T120000" / "telemetry-00000.parquet",
         tmp_path / "2026-05-11T121000" / "telemetry-00000.parquet",
     ]
-    first_rows = pq.read_table(files[0]).to_pylist()
-    second_rows = pq.read_table(files[1]).to_pylist()
+    first_rows = pq.read_table(files[0]).to_pylist()  # type: ignore[no-untyped-call]
+    second_rows = pq.read_table(files[1]).to_pylist()  # type: ignore[no-untyped-call]
     assert [row["channel"] for row in first_rows] == ["RUN_TIME", "RPM"]
     assert [row["channel"] for row in second_rows] == ["RUN_TIME"]
 
@@ -159,7 +159,7 @@ def test_failed_atomic_write_does_not_publish_final_file(
     assert not list(tmp_path.glob("*/telemetry-*.parquet"))
     path = writer.flush()
     assert path is not None
-    assert pq.read_table(path).to_pylist()[0]["channel"] == "RPM"
+    assert pq.read_table(path).to_pylist()[0]["channel"] == "RPM"  # type: ignore[no-untyped-call]
 
 
 def test_crash_mid_flush_preserves_prior_chunks(
@@ -205,7 +205,7 @@ def test_crash_mid_flush_preserves_prior_chunks(
 
     session_dir = first_flush.parent
     # The intact chunk is still readable — its footer is fine.
-    intact_rows = pq.read_table(first_flush).to_pylist()
+    intact_rows = pq.read_table(first_flush).to_pylist()  # type: ignore[no-untyped-call]
     assert len(intact_rows) == 2
     assert [r["channel"] for r in intact_rows] == ["RPM", "RPM"]
 
@@ -259,7 +259,7 @@ def test_crash_recovery_with_fresh_writer_appends_new_chunks(
     # Both session dirs exist; the old one is untouched.
     sessions = sorted(d for d in tmp_path.iterdir() if d.is_dir())
     assert len(sessions) == 2
-    assert pq.read_table(survived).to_pylist()[0]["value_number"] == 700.0
+    assert pq.read_table(survived).to_pylist()[0]["value_number"] == 700.0  # type: ignore[no-untyped-call]
 
 
 def test_delete_expired_sessions_removes_only_old_timestamped_dirs(tmp_path: Path) -> None:
@@ -425,7 +425,7 @@ def test_flushed_chunk_is_complete_and_durable(tmp_path: Path) -> None:
     with path.open("rb") as handle:
         handle.seek(-4, 2)
         assert handle.read(4) == b"PAR1"
-    assert pq.read_table(path).num_rows == 1
+    assert pq.read_table(path).num_rows == 1  # type: ignore[no-untyped-call]
     assert list(path.parent.glob("*.tmp")) == []
 
 
@@ -672,7 +672,7 @@ def _values(session: Path) -> list[float]:
     return [
         value
         for chunk in sorted(session.glob("telemetry-*.parquet"))
-        for value in pq.read_table(chunk).column("value_number").to_pylist()
+        for value in pq.read_table(chunk).column("value_number").to_pylist()  # type: ignore[no-untyped-call]
     ]
 
 

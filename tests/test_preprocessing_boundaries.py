@@ -171,6 +171,7 @@ def scan_edges(sources: Mapping[str, str]) -> list[Edge]:
             if isinstance(node, ast.Import):
                 targets = [alias.name for alias in node.names]
             else:
+                assert isinstance(node, ast.ImportFrom)
                 base = node.module or ""
                 if node.level:
                     parts = package.split(".")
@@ -347,7 +348,7 @@ def test_importing_the_loader_facade_loads_none_of_the_services() -> None:
     """``src.models.sequence_dataset`` imports ``loader``, so the daemon's boot
     does (``tests/test_cold_start_imports.py``): the reduction, cache and IMU
     services stay off that path until ``resample_and_segment`` runs."""
-    services = ("derived", "derived_store", "imu_stream", "imu_session")
+    services: tuple[str, ...] = ("derived", "derived_store", "imu_stream", "imu_session")
     services += ("session_decode", "decoded_reader")
     heavy = sorted(f"{PACKAGE}.{name}" for name in services)
     code = (

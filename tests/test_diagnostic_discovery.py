@@ -18,6 +18,7 @@ from collections import Counter
 from itertools import pairwise
 from pathlib import Path
 
+import can
 import pytest
 from fastapi.testclient import TestClient
 
@@ -139,7 +140,7 @@ def _run(
     return run
 
 
-def untapped_frames(bus: ScriptedEcu, run: Run) -> list[object]:
+def untapped_frames(bus: ScriptedEcu, run: Run) -> list[can.Message]:
     """Frames the bus handed out that never reached ``on_frame``."""
     tapped = Counter(id(msg) for msg in run.tapped)
     return [msg for msg in bus.handed_out if tapped[id(msg)] == 0]
@@ -181,11 +182,7 @@ def test_startup_discovery_does_not_consume_broadcast_frames_untapped(
     assert probes(bus, 0x01), "no Mode 01 support probe was ever issued"
     assert [group for _at, group in probes(bus, 0x01)][:2] == [0x00, 0x20]
     lost = untapped_frames(bus, run)
-    lost_sequences = sorted(
-        seq
-        for seq in (broadcast_sequence(m) for m in lost)
-        if seq is not None  # type: ignore[arg-type]
-    )
+    lost_sequences = sorted(seq for seq in (broadcast_sequence(m) for m in lost) if seq is not None)
     assert not lost, (
         f"{len(lost)} of {len(bus.handed_out)} frames consumed untapped "
         f"(broadcast sequences {lost_sequences})"
@@ -781,7 +778,7 @@ class _GarbledProbeEcu(ScriptedEcu):
         if not self.garbled and len(data) >= 3 and data[1] == 0x01 and data[2] in SUPPORT_GROUPS:
             self._armed = True
 
-    def recv(self, timeout: float | None = None) -> object:
+    def recv(self, timeout: float | None = None) -> can.Message | None:
         if self._armed:
             self._armed = False
             self.garbled += 1

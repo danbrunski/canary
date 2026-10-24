@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass, field
 from types import SimpleNamespace
+from typing import cast
 
 import numpy as np
 import pandas as pd
@@ -18,6 +19,7 @@ from src.models.isolation_forest import (
     LABEL_COLUMN,
     MISSING_FEATURES_COLUMN,
     SCORE_COLUMN,
+    TrainedIsolationForest,
 )
 from src.models.isolation_forest_evaluation import (
     classification_metrics,
@@ -115,7 +117,7 @@ def test_evaluation_grades_the_served_threshold_and_counts_withheld_rows_apart()
         labels=(1, 1, 1, -1, -1, 1),
         withheld=(False, False, False, False, False, True),
     )
-    report = evaluate_isolation_forest(trained, frame, labels).report
+    report = evaluate_isolation_forest(cast(TrainedIsolationForest, trained), frame, labels).report
 
     assert report.withheld_rows == 1
     assert report.withheld_positive_rows == 1
@@ -145,7 +147,9 @@ def test_evaluate_isolation_forest_reports_overall_and_per_mode_results() -> Non
         labels=(1, -1, 1, -1, 1, 1),
     )
 
-    evaluation = evaluate_isolation_forest(trained, injector.df, labels, windows=injector.windows)
+    evaluation = evaluate_isolation_forest(
+        cast(TrainedIsolationForest, trained), injector.df, labels, windows=injector.windows
+    )
     report = evaluation.report
 
     assert report.model_version == "iforest-eval-test"
@@ -174,4 +178,4 @@ def test_evaluate_isolation_forest_requires_label_coverage() -> None:
     incomplete = pd.Series([False], index=[frame.index[0]])
 
     with pytest.raises(ValueError, match="labels must cover"):
-        evaluate_isolation_forest(trained, frame, incomplete)
+        evaluate_isolation_forest(cast(TrainedIsolationForest, trained), frame, incomplete)

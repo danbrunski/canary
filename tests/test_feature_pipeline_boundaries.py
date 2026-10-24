@@ -534,9 +534,9 @@ def test_one_featurize_wide_frame_serves_batch_live_and_the_fast_path() -> None:
 
     shared = feature_transform.featurize_wide_frame
     assert facade_module.featurize_wide_frame is shared
-    assert feature_build.featurize_wide_frame is shared
-    assert feature_perturbation.featurize_wide_frame is shared
-    assert live.featurize_wide_frame is shared
+    assert feature_build.featurize_wide_frame is shared  # type: ignore[attr-defined]
+    assert feature_perturbation.featurize_wide_frame is shared  # type: ignore[attr-defined]
+    assert live.featurize_wide_frame is shared  # type: ignore[attr-defined]
     defined = [
         str(path.relative_to(REPO))
         for root in ("src", "scripts", "tools")

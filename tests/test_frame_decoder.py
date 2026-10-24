@@ -168,7 +168,7 @@ def test_the_storage_sink_never_writes_a_decoded_row() -> None:
         task = asyncio.create_task(
             run_storage_sink(
                 queue,
-                _Writer(),  # type: ignore[arg-type] — protocol subset is what the sink uses
+                _Writer(),  # type: ignore[arg-type]  # protocol subset is what the sink uses
                 stop,
                 poll_interval=0.01,
             )

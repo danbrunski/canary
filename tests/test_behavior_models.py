@@ -79,7 +79,10 @@ def _model_2d(rows: int = 2, cols: int = 3) -> BehaviorModel2D:
         fit=_grid_fit(rows=rows, cols=cols),
         operating_mode="idle",
         deviation=DeviationConfig(
-            kind="relative", warning_band=3.0, critical_band=6.0, sigma_floor=0.5
+            kind="relative",  # type: ignore[arg-type]
+            warning_band=3.0,
+            critical_band=6.0,
+            sigma_floor=0.5,
         ),
     )
 
@@ -157,7 +160,10 @@ def test_relative_deviation_on_1d_needs_reference_std() -> None:
             axis=Axis1D(name="t", channel="obd:RUN_TIME", domain=(0.0, 600.0)),
             fit=_poly_fit(),
             deviation=DeviationConfig(
-                kind="relative", warning_band=1.0, critical_band=2.0, sigma_floor=0.1
+                kind="relative",  # type: ignore[arg-type]
+                warning_band=1.0,
+                critical_band=2.0,
+                sigma_floor=0.1,
             ),
         )
 
@@ -170,7 +176,7 @@ def test_relative_deviation_on_1d_with_reference_std_ok() -> None:
         axis=Axis1D(name="t", channel="obd:RUN_TIME", domain=(0.0, 600.0)),
         fit=_poly_fit(),
         deviation=DeviationConfig(
-            kind="relative",
+            kind="relative",  # type: ignore[arg-type]
             warning_band=1.0,
             critical_band=2.0,
             reference_std=4.0,
@@ -185,9 +191,9 @@ def test_deviation_config_relative_requires_positive_sigma_floor() -> None:
     """4.2 — schema-enforced: kind='relative' without a sigma_floor (or a
     non-positive one) is a live hair-trigger, not a valid config."""
     with pytest.raises(ValidationError, match="sigma_floor"):
-        DeviationConfig(kind="relative", warning_band=1.0, critical_band=2.0)
+        DeviationConfig(kind="relative", warning_band=1.0, critical_band=2.0)  # type: ignore[arg-type]
     with pytest.raises(ValidationError, match="sigma_floor"):
-        DeviationConfig(kind="relative", warning_band=1.0, critical_band=2.0, sigma_floor=0.0)
+        DeviationConfig(kind="relative", warning_band=1.0, critical_band=2.0, sigma_floor=0.0)  # type: ignore[arg-type]
     # absolute kind is unaffected — no floor required.
     DeviationConfig(kind="absolute", warning_band=1.0, critical_band=2.0)
 
@@ -205,7 +211,10 @@ def test_deviation_config_sigma_and_legacy_relative_alias_load_identically(
 
     with caplog.at_level("WARNING"):
         aliased = DeviationConfig(
-            kind="relative", warning_band=1.0, critical_band=2.0, sigma_floor=0.1
+            kind="relative",  # type: ignore[arg-type]
+            warning_band=1.0,
+            critical_band=2.0,
+            sigma_floor=0.1,
         )
     assert aliased.kind == "sigma"  # normalized, not left as "relative"
     assert aliased == canonical  # identical validated config either way
@@ -214,7 +223,7 @@ def test_deviation_config_sigma_and_legacy_relative_alias_load_identically(
     # An unrecognized kind is still rejected — the alias is a narrow,
     # explicit exception, not a loosened literal.
     with pytest.raises(ValidationError):
-        DeviationConfig(kind="percent", warning_band=1.0, critical_band=2.0)
+        DeviationConfig(kind="percent", warning_band=1.0, critical_band=2.0)  # type: ignore[arg-type]
 
 
 # ---------------------------------------------------------------------------

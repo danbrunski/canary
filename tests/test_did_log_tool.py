@@ -14,7 +14,7 @@ from typing import Any
 
 import pytest
 
-from src.analysis.did_scan import BatchRead
+from src.analysis.did_scan import BatchRead, load_widths
 from src.collection.isotp import split_batched_did_response
 from src.control.passive_client import PassiveStatus, http_passive_checker
 from tools import _bus_tool, did_log
@@ -319,7 +319,7 @@ def test_load_widths_from_did_sweep_snapshot(tmp_path: Path) -> None:
             indent=2,
         )
     )
-    assert did_log.load_widths(snap) == {0x1201: 2, 0x1101: 1}
+    assert load_widths(snap) == {0x1201: 2, 0x1101: 1}
 
 
 def test_load_widths_from_previous_did_log_header(tmp_path: Path) -> None:
@@ -335,14 +335,14 @@ def test_load_widths_from_previous_did_log_header(tmp_path: Path) -> None:
     )
     prior = tmp_path / "prior.jsonl"
     prior.write_text(buf.getvalue())
-    assert did_log.load_widths(prior) == {d: len(v) for d, v in VALUES.items()}
+    assert load_widths(prior) == {d: len(v) for d, v in VALUES.items()}
 
 
 def test_load_widths_rejects_unrelated_json(tmp_path: Path) -> None:
     bogus = tmp_path / "bogus.json"
     bogus.write_text(json.dumps({"hello": "world"}))
     with pytest.raises(ValueError):
-        did_log.load_widths(bogus)
+        load_widths(bogus)
 
 
 # ---------------------------------------------------------------------------

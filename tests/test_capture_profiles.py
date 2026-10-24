@@ -4,9 +4,11 @@ import asyncio
 import json
 import time
 from collections.abc import Callable, Iterator
+from collections.abc import Set as AbstractSet
 from datetime import UTC, datetime
 from pathlib import Path
 from types import SimpleNamespace
+from typing import TYPE_CHECKING, cast
 
 import pytest
 import yaml
@@ -26,6 +28,7 @@ from src.collection.capture_profiles import (
     save_capture_profiles,
     seed_catalog,
 )
+from src.collection.obd_scheduler.requests import PollRequest
 from src.config import CanaryConfig
 from src.dashboard.api import create_app
 from src.features.capture_inputs import model_input_warnings
@@ -34,6 +37,9 @@ from src.storage.parquet_writer import ParquetTelemetryWriter
 from src.storage.sessions import list_sessions
 from src.telemetry import TelemetryRecord
 from src.yaml_load import load_yaml
+
+if TYPE_CHECKING:
+    from src.daemon.health import HealthMonitor
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 EXAMPLE_YAML = REPO_ROOT / "canary.example.yaml"
@@ -288,7 +294,7 @@ def _round_record(t: float, channel: str, *, generation: int, round_id: int) -> 
 
 
 def _capture_rows(
-    profile: CaptureProfile, clock: _Clock, *, seconds: float, skip: set[str] = frozenset()
+    profile: CaptureProfile, clock: _Clock, *, seconds: float, skip: AbstractSet[str] = frozenset()
 ) -> list[TelemetryRecord]:
     """Every profile channel at its requested rate, round-tagged, for ``seconds``.
 
@@ -317,7 +323,9 @@ def _capture_rows(
     return records
 
 
-def _capture_app(tmp_path: Path, clock: _Clock, monkeypatch: pytest.MonkeyPatch):
+def _capture_app(
+    tmp_path: Path, clock: _Clock, monkeypatch: pytest.MonkeyPatch
+) -> tuple[TestClient, AsyncParquetTelemetryWriter, CaptureProfileStore, HealthMonitor, Path]:
     """An app whose capture clocks are ``clock`` and whose can0 counters exist."""
     import src.collection.tuning_profile as tuning_profile_mod
     import src.daemon.health as health_mod
@@ -1304,7 +1312,7 @@ def test_pause_suspends_polling_without_ending_the_capture(tmp_path: Path) -> No
     )
     session_dir = writer.paths.root
 
-    request = SimpleNamespace(kind="pid", channel="RPM")
+    request = cast(PollRequest, SimpleNamespace(kind="pid", channel="RPM"))
     assert tuning_profile.request_eligible(0, request) is True
 
     paused = client.post("/control/capture/pause", headers=headers, json={"paused": True})

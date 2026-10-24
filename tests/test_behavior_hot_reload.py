@@ -91,6 +91,7 @@ async def test_poll_picks_up_new_yaml_without_restart(tmp_path: Path, yaml_path:
                 await asyncio.sleep(0.05)
 
         await asyncio.wait_for(_wait_for_swap(), timeout=2.0)
+        assert live_source.behavior_models is not None
         assert live_source.behavior_models.models[0].operating_mode == "warmup"
     finally:
         stop.set()

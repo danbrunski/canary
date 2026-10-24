@@ -60,7 +60,7 @@ def test_compute_digest_resamples_session_once(
 
     session = _session(tmp_path)
     calls = 0
-    real_resample = digest_mod.resample_and_segment
+    real_resample = digest_mod.resample_and_segment  # type: ignore[attr-defined]
 
     def counted(*args: object, **kwargs: object):  # type: ignore[no-untyped-def]
         nonlocal calls
@@ -182,7 +182,7 @@ def test_capture_prefixed_digest_uses_its_timestamp_for_all_windows(tmp_path: Pa
     ledger.append(
         VehicleEvent(
             recorded_at="2026-05-20T18:00:03+00:00",
-            occurred_at="2026-05-20",
+            occurred_at="2026-05-20",  # type: ignore[arg-type]
             kind="observation",
             title="capture began",
         )
@@ -190,7 +190,7 @@ def test_capture_prefixed_digest_uses_its_timestamp_for_all_windows(tmp_path: Pa
     ledger.append(
         VehicleEvent(
             recorded_at="2026-05-20T18:06:00+00:00",
-            occurred_at="2026-05-20",
+            occurred_at="2026-05-20",  # type: ignore[arg-type]
             kind="observation",
             title="later record",
         )
@@ -225,7 +225,7 @@ def test_compute_digest_new_ledger_events_windowed(tmp_path: Path) -> None:
     ledger.append(
         VehicleEvent(
             recorded_at="2026-05-20T18:01:00+00:00",
-            occurred_at="2026-05-20",
+            occurred_at="2026-05-20",  # type: ignore[arg-type]
             kind="dtc",
             title="DTC P0171 stored",
         )
@@ -233,7 +233,7 @@ def test_compute_digest_new_ledger_events_windowed(tmp_path: Path) -> None:
     ledger.append(
         VehicleEvent(
             recorded_at="2020-01-01T00:00:00+00:00",  # long before this trip
-            occurred_at="2020-01-01",
+            occurred_at="2020-01-01",  # type: ignore[arg-type]
             kind="maintenance",
             title="oil change",
         )

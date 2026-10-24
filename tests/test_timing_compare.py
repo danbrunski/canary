@@ -11,6 +11,7 @@ from __future__ import annotations
 import importlib.util
 import sys
 from pathlib import Path
+from typing import Any
 
 import pandas as pd
 import pytest
@@ -25,14 +26,16 @@ sys.modules["timing_compare"] = timing_compare
 _spec.loader.exec_module(timing_compare)
 
 
-def _run(label: str, rows: list[tuple[float, float, float]], air_temp: float = 40.0):
+def _run(label: str, rows: list[tuple[float, float, float]], air_temp: float = 40.0) -> Any:
     """rows: (timing, rpm, load)."""
     df = pd.DataFrame(rows, columns=["timing", "rpm", "load"])
     df["air_temp"] = air_temp
     return timing_compare.Run(label, df, "test")
 
 
-def _cell(timing: float, n: int = 20, rpm: float = 1200.0, load: float = 20.0):
+def _cell(
+    timing: float, n: int = 20, rpm: float = 1200.0, load: float = 20.0
+) -> list[tuple[float, float, float]]:
     return [(timing, rpm, load)] * n
 
 
@@ -48,7 +51,9 @@ def test_load_floor_drops_decel_cells() -> None:
     assert kept.iloc[0]["load"] == 40.0
 
 
-def test_practical_floor_suppresses_trivially_small_deltas(capsys) -> None:
+def test_practical_floor_suppresses_trivially_small_deltas(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
     """The regression this exists for: with large n the standard error shrinks
     until a 1.0 deg difference clears any sigma threshold, so two logs of the
     SAME calibration light up as retard everywhere. The tuning increment is
@@ -62,7 +67,7 @@ def test_practical_floor_suppresses_trivially_small_deltas(capsys) -> None:
     assert "RETARD" not in out
 
 
-def test_real_retard_is_flagged(capsys) -> None:
+def test_real_retard_is_flagged(capsys: pytest.CaptureFixture[str]) -> None:
     before = _run("b", _cell(20.0, n=50))
     after = _run("a", _cell(14.0, n=50))
 
@@ -72,7 +77,9 @@ def test_real_retard_is_flagged(capsys) -> None:
     assert "candidate knock limit" in out
 
 
-def test_advance_that_took_cleanly_is_not_flagged_as_retard(capsys) -> None:
+def test_advance_that_took_cleanly_is_not_flagged_as_retard(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
     before = _run("b", _cell(14.0, n=50))
     after = _run("a", _cell(20.0, n=50))
 
@@ -82,7 +89,7 @@ def test_advance_that_took_cleanly_is_not_flagged_as_retard(capsys) -> None:
     assert "RETARD" not in out
 
 
-def test_thin_cells_get_no_verdict(capsys) -> None:
+def test_thin_cells_get_no_verdict(capsys: pytest.CaptureFixture[str]) -> None:
     """n=2 yields a standard deviation but not a trustworthy one. CANary polls
     TIMING_ADVANCE at 0.06-0.26 Hz and routinely gives n=1-9 per cell."""
     before = _run("b", _cell(20.0, n=3))
@@ -94,7 +101,7 @@ def test_thin_cells_get_no_verdict(capsys) -> None:
     assert "RETARD" not in out
 
 
-def test_iat_gap_marks_cells_not_comparable(capsys) -> None:
+def test_iat_gap_marks_cells_not_comparable(capsys: pytest.CaptureFixture[str]) -> None:
     """Knock margin is IAT-dependent, so a before/after across a temperature
     gap is not a valid comparison even when the delta looks real."""
     before = _run("b", _cell(20.0, n=50), air_temp=30.0)

@@ -60,9 +60,11 @@ CATALOG_PATH = (
     Path(__file__).resolve().parents[1] / "data" / "nissan-xterra-2008" / "capture_profiles.yaml"
 )
 TRACKED = CaptureProfileCatalog.model_validate(load_yaml(CATALOG_PATH.read_text()))
-DEFAULT = TRACKED.by_name("default")
-TUNING = TRACKED.by_name("tuning")
-assert DEFAULT is not None and TUNING is not None
+_DEFAULT = TRACKED.by_name("default")
+_TUNING = TRACKED.by_name("tuning")
+assert _DEFAULT is not None and _TUNING is not None
+DEFAULT: CaptureProfile = _DEFAULT
+TUNING: CaptureProfile = _TUNING
 
 #: Not in `default` or `tuning`: a PID neither polls.
 EXTRA_PID = "ABSOLUTE_LOAD"
@@ -96,7 +98,7 @@ def _catalogs(target: CaptureProfile) -> dict[str, tuple[CaptureProfile, ...]]:
     other tracked profile, and every tracked profile plus the synthetic one."""
     base = (DEFAULT,) if target.name == DEFAULT.name else (DEFAULT, target)
     others = [p for p in TRACKED.profiles if p.name not in {DEFAULT.name, target.name}]
-    variants = {"reference": base}
+    variants: dict[str, tuple[CaptureProfile, ...]] = {"reference": base}
     for other in others:
         variants[f"+{other.name}"] = (*base, other)
     variants["+all+synthetic"] = (*base, *others, _synthetic())

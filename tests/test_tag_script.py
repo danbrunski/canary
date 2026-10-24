@@ -7,6 +7,7 @@ import json
 import re
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -131,27 +132,27 @@ def _write_manifest(session_dir: Path, started_at: str, ended_at: str | None = N
     (session_dir / "manifest.json").write_text(json.dumps(payload))
 
 
-def test_load_session_start_reads_manifest(tmp_path: Path):
+def test_load_session_start_reads_manifest(tmp_path: Path) -> None:
     _write_manifest(tmp_path, "2026-05-11T15:29:00+00:00")
     start = _load_session_start(tmp_path)
     assert start == pytest.approx(datetime(2026, 5, 11, 15, 29, 0, tzinfo=UTC).timestamp())
 
 
-def test_load_session_start_returns_none_when_manifest_missing(tmp_path: Path):
+def test_load_session_start_returns_none_when_manifest_missing(tmp_path: Path) -> None:
     assert _load_session_start(tmp_path) is None
 
 
-def test_load_session_start_returns_none_on_corrupt_manifest(tmp_path: Path):
+def test_load_session_start_returns_none_on_corrupt_manifest(tmp_path: Path) -> None:
     (tmp_path / "manifest.json").write_text("{not json")
     assert _load_session_start(tmp_path) is None
 
 
-def test_load_session_start_returns_none_when_started_at_missing(tmp_path: Path):
+def test_load_session_start_returns_none_when_started_at_missing(tmp_path: Path) -> None:
     (tmp_path / "manifest.json").write_text(json.dumps({"other": "field"}))
     assert _load_session_start(tmp_path) is None
 
 
-def test_load_session_end_reads_manifest(tmp_path: Path):
+def test_load_session_end_reads_manifest(tmp_path: Path) -> None:
     _write_manifest(
         tmp_path,
         "2026-05-11T15:29:00+00:00",
@@ -166,17 +167,17 @@ def test_load_session_end_reads_manifest(tmp_path: Path):
 # ---------------------------------------------------------------------------
 
 
-def test_resolve_timestamp_none_when_no_flags(tmp_path: Path):
+def test_resolve_timestamp_none_when_no_flags(tmp_path: Path) -> None:
     args = parse_args(["mylabel"])
     assert _resolve_timestamp(args, tmp_path) is None
 
 
-def test_resolve_timestamp_uses_timestamp_flag(tmp_path: Path):
+def test_resolve_timestamp_uses_timestamp_flag(tmp_path: Path) -> None:
     args = parse_args(["mylabel", "--timestamp", "1778513400.0"])
     assert _resolve_timestamp(args, tmp_path) == 1778513400.0
 
 
-def test_resolve_timestamp_uses_offset_against_session_start(tmp_path: Path):
+def test_resolve_timestamp_uses_offset_against_session_start(tmp_path: Path) -> None:
     _write_manifest(tmp_path, "2026-05-11T15:29:00+00:00")
     start_epoch = datetime(2026, 5, 11, 15, 29, 0, tzinfo=UTC).timestamp()
 
@@ -185,7 +186,7 @@ def test_resolve_timestamp_uses_offset_against_session_start(tmp_path: Path):
     assert resolved == pytest.approx(start_epoch + 750.0)
 
 
-def test_resolve_timestamp_offset_errors_without_manifest(tmp_path: Path):
+def test_resolve_timestamp_offset_errors_without_manifest(tmp_path: Path) -> None:
     args = parse_args(["mylabel", "--offset", "1m"])
     with pytest.raises(ValueError, match="manifest with started_at"):
         _resolve_timestamp(args, tmp_path)
@@ -201,7 +202,7 @@ def test_argparse_rejects_both_timestamp_and_offset():
 # ---------------------------------------------------------------------------
 
 
-def test_warn_outside_session_before_start(tmp_path: Path):
+def test_warn_outside_session_before_start(tmp_path: Path) -> None:
     _write_manifest(
         tmp_path,
         "2026-05-11T15:29:00+00:00",
@@ -213,7 +214,7 @@ def test_warn_outside_session_before_start(tmp_path: Path):
     assert "before session start" in stream.getvalue()
 
 
-def test_warn_outside_session_after_end(tmp_path: Path):
+def test_warn_outside_session_after_end(tmp_path: Path) -> None:
     _write_manifest(
         tmp_path,
         "2026-05-11T15:29:00+00:00",
@@ -225,7 +226,7 @@ def test_warn_outside_session_after_end(tmp_path: Path):
     assert "after session end" in stream.getvalue()
 
 
-def test_warn_silent_when_within_bounds(tmp_path: Path):
+def test_warn_silent_when_within_bounds(tmp_path: Path) -> None:
     _write_manifest(
         tmp_path,
         "2026-05-11T15:29:00+00:00",
@@ -237,7 +238,7 @@ def test_warn_silent_when_within_bounds(tmp_path: Path):
     assert stream.getvalue() == ""
 
 
-def test_warn_silent_when_no_manifest(tmp_path: Path):
+def test_warn_silent_when_no_manifest(tmp_path: Path) -> None:
     """No manifest → no ground truth → silent."""
     stream = io.StringIO()
     _warn_if_outside_session(1.0, tmp_path, stream=stream)
@@ -249,12 +250,14 @@ def test_warn_silent_when_no_manifest(tmp_path: Path):
 # ---------------------------------------------------------------------------
 
 
-def _read_tags(session_dir: Path) -> list[dict]:
+def _read_tags(session_dir: Path) -> list[dict[str, Any]]:
     text = (session_dir / "tags.jsonl").read_text()
     return [json.loads(line) for line in text.splitlines() if line.strip()]
 
 
-def test_main_writes_tag_with_explicit_timestamp(tmp_path: Path, capsys):
+def test_main_writes_tag_with_explicit_timestamp(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
     _write_manifest(
         tmp_path,
         "2026-05-11T15:29:00+00:00",
@@ -269,7 +272,7 @@ def test_main_writes_tag_with_explicit_timestamp(tmp_path: Path, capsys):
     assert tags[0]["t"] == pytest.approx(datetime(2026, 5, 11, 15, 32, 0, tzinfo=UTC).timestamp())
 
 
-def test_main_writes_tag_with_offset(tmp_path: Path):
+def test_main_writes_tag_with_offset(tmp_path: Path) -> None:
     _write_manifest(
         tmp_path,
         "2026-05-11T15:29:00+00:00",
@@ -283,7 +286,9 @@ def test_main_writes_tag_with_offset(tmp_path: Path):
     assert tags[0]["t"] == pytest.approx(expected)
 
 
-def test_main_warns_when_timestamp_outside_bounds(tmp_path: Path, capsys):
+def test_main_warns_when_timestamp_outside_bounds(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
     _write_manifest(
         tmp_path,
         "2026-05-11T15:29:00+00:00",
@@ -297,7 +302,7 @@ def test_main_warns_when_timestamp_outside_bounds(tmp_path: Path, capsys):
     assert len(_read_tags(tmp_path)) == 1
 
 
-def test_main_default_still_uses_now(tmp_path: Path):
+def test_main_default_still_uses_now(tmp_path: Path) -> None:
     """Backward-compatibility: no flag → wall-clock now, as before."""
     _write_manifest(tmp_path, "2026-05-11T15:29:00+00:00")
     rc = main(["just_now", "--session", str(tmp_path)])
@@ -310,26 +315,30 @@ def test_main_default_still_uses_now(tmp_path: Path):
     assert abs(tags[0]["t"] - time.time()) < 3600
 
 
-def test_main_returns_2_on_bad_timestamp(tmp_path: Path, capsys):
+def test_main_returns_2_on_bad_timestamp(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
     _write_manifest(tmp_path, "2026-05-11T15:29:00+00:00")
     rc = main(["x", "--session", str(tmp_path), "--timestamp", "yesterday"])
     assert rc == 2
     assert "not a Unix epoch or ISO 8601" in capsys.readouterr().err
 
 
-def test_main_returns_2_on_bad_offset(tmp_path: Path, capsys):
+def test_main_returns_2_on_bad_offset(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     _write_manifest(tmp_path, "2026-05-11T15:29:00+00:00")
     rc = main(["x", "--session", str(tmp_path), "--offset", "yesterday"])
     assert rc == 2
 
 
-def test_main_returns_2_on_offset_without_manifest(tmp_path: Path, capsys):
+def test_main_returns_2_on_offset_without_manifest(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
     rc = main(["x", "--session", str(tmp_path), "--offset", "1m"])
     assert rc == 2
     assert "manifest with started_at" in capsys.readouterr().err
 
 
-def test_main_echoes_record_as_json(tmp_path: Path, capsys):
+def test_main_echoes_record_as_json(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     _write_manifest(tmp_path, "2026-05-11T15:29:00+00:00")
     rc = main(["echo_test", "--session", str(tmp_path)])
     assert rc == 0

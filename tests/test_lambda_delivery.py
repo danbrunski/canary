@@ -6,6 +6,7 @@ Synthetic data only; the committed-slice known answers are in
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -47,7 +48,7 @@ def declaration(**overrides: Any) -> Any:
     return LambdaDeliveryDeclaration.model_validate(doc)
 
 
-def _long(values: list[float | None], *, start: float = 0.0, step: float = 1.0) -> pd.DataFrame:
+def _long(values: Sequence[float | None], *, start: float = 0.0, step: float = 1.0) -> pd.DataFrame:
     return pd.DataFrame(
         {
             "timestamp": [T0 + timedelta(seconds=start + i * step) for i in range(len(values))],
@@ -558,7 +559,7 @@ def test_the_provider_registry_and_the_declaration_must_name_one_target(tmp_path
 
 
 def _doc_with(path: tuple[str, ...], value: Any) -> dict[str, Any]:
-    doc = load_yaml(DECLARATION_PATH.read_text())
+    doc: dict[str, Any] = load_yaml(DECLARATION_PATH.read_text())
     node = doc
     for key in path[:-1]:
         node = node[key]

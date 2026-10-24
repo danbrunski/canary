@@ -303,7 +303,7 @@ CAPTURE_STARTED = datetime.fromtimestamp(CAPTURE_T0, tz=UTC)
 def capture_obd_record(
     t: float, channel: str, *, round_id: int | None, generation: int = 1
 ) -> TelemetryRecord:
-    metadata = None
+    metadata: dict[str, bool | int | float | str | None] | None = None
     if round_id is not None:
         metadata = {
             "ts_schema": 2,
@@ -316,7 +316,7 @@ def capture_obd_record(
 
 
 def write_capture_session(
-    root: Path, records: list[TelemetryRecord], *, profile: dict | None = None
+    root: Path, records: list[TelemetryRecord], *, profile: dict[str, Any] | None = None
 ) -> Path:
     session = root / "_capture-fuel-map-2026-08-05T142720"
     write_records_to_parquet(records, session)

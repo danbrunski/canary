@@ -22,6 +22,7 @@ import pytest
 import scripts.lambda_delivery_evidence as evidence
 from src.analysis.lambda_delivery import (  # noqa: E402
     ELIGIBLE,
+    LambdaDeliveryDeclaration,
     delivery_samples,
     load_lambda_delivery,
     target_source_agreement,
@@ -35,7 +36,7 @@ SLICE = Path("tests/fixtures/lambda_delivery/_capture-tuning-2026-09-21T223734")
 
 
 @pytest.fixture(scope="module")
-def declaration():  # type: ignore[no-untyped-def]
+def declaration() -> LambdaDeliveryDeclaration:
     return load_lambda_delivery(
         PROFILE / "lambda_delivery.yaml",
         dids_path=Path("data/dids.yaml"),
@@ -49,7 +50,7 @@ def session() -> pd.DataFrame:
 
 
 def test_ram_target_and_pid_0x44_agree_exactly_on_steady_enrichment(
-    session: pd.DataFrame, declaration
+    session: pd.DataFrame, declaration: LambdaDeliveryDeclaration
 ) -> None:
     """The chain that pins the RAM word's phi convention.
 
@@ -70,7 +71,9 @@ def test_ram_target_and_pid_0x44_agree_exactly_on_steady_enrichment(
     assert enrichment["exact_fraction"] == 1.0
 
 
-def test_pid_0x44_is_not_the_closed_loop_target(session: pd.DataFrame, declaration) -> None:
+def test_pid_0x44_is_not_the_closed_loop_target(
+    session: pd.DataFrame, declaration: LambdaDeliveryDeclaration
+) -> None:
     """Why the declaration restricts PID 0x44 to enrichment.
 
     With the RAM target holding exactly 1.0, PID 0x44 agrees on a minority of
@@ -102,7 +105,7 @@ def test_a_neighbouring_ram_word_fails_the_same_agreement_test(session: pd.DataF
 
 
 def test_fuel_cut_sentinel_coincides_with_both_mode01_signatures(
-    session: pd.DataFrame, declaration
+    session: pd.DataFrame, declaration: LambdaDeliveryDeclaration
 ) -> None:
     """Fuel cut is a state on three independent channels at once."""
     out = evidence.fuel_cut_coincidence(session, declaration, max_separation_s=0.25)
@@ -118,7 +121,7 @@ def test_fuel_cut_sentinel_coincides_with_both_mode01_signatures(
 
 
 def test_pid_0x44_follows_phi_above_stoich_and_the_sensor_below_it(
-    session: pd.DataFrame, declaration
+    session: pd.DataFrame, declaration: LambdaDeliveryDeclaration
 ) -> None:
     """The two-behaviour finding, judged per side and away from stoich.
 
@@ -145,7 +148,7 @@ def test_pid_0x44_follows_phi_above_stoich_and_the_sensor_below_it(
 
 
 def test_the_convention_check_fails_on_a_channel_that_is_not_a_mixture(
-    session: pd.DataFrame, declaration
+    session: pd.DataFrame, declaration: LambdaDeliveryDeclaration
 ) -> None:
     out = evidence.convention_evidence(
         session,
@@ -161,7 +164,7 @@ def test_the_convention_check_fails_on_a_channel_that_is_not_a_mixture(
 
 
 def test_state_counts_account_for_every_target_observation(
-    session: pd.DataFrame, declaration
+    session: pd.DataFrame, declaration: LambdaDeliveryDeclaration
 ) -> None:
     """Nothing disappears: cut, rail, post-cut and transient are all counted."""
     target = evidence._long(session, "mem:ECM_TARGET_EQUIV_RATIO")
@@ -203,7 +206,7 @@ def test_state_counts_account_for_every_target_observation(
 
 
 def test_acquisition_mismatch_is_within_the_declared_tolerance(
-    session: pd.DataFrame, declaration
+    session: pd.DataFrame, declaration: LambdaDeliveryDeclaration
 ) -> None:
     """Polling skew, measured — separate from any transport delay."""
     out = evidence.acquisition_separation(

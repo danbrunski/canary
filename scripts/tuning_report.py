@@ -26,9 +26,9 @@ from collections.abc import Sequence
 from pathlib import Path
 
 try:
-    from _cli import add_common_args, load_config
+    from _cli import add_common_args, load_config  # type: ignore[import-not-found]
 except ImportError:  # loaded as `scripts.tuning_report`
-    from scripts._cli import add_common_args, load_config  # type: ignore[no-redef]
+    from scripts._cli import add_common_args, load_config
 
 from src.analysis.noise_floor import load_noise_floor, record_null_run, save_noise_floor
 from src.analysis.tuning import GateError, compare_sessions, delivery_error

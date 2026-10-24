@@ -6,6 +6,7 @@ import json
 import logging
 from datetime import date
 from pathlib import Path
+from typing import Any
 
 import pandas as pd
 import pytest
@@ -16,7 +17,11 @@ from src.decode.dids import load_repo_did_map
 from src.features.feature_pipeline import load_resampled_session
 from src.models import evaluation as model_evaluation
 from src.models import training_entry
+from src.models.evaluation import MIN_CALIBRATION_HOLDOUT_SESSIONS
 from src.models.feedback import FeedbackStore
+from src.models.publish import SEQUENCE_SOURCE
+from src.models.retrain_exit_codes import WINDOW_TOO_SMALL_FOR_HOLDOUT
+from src.models.training_ledger import TrainingLedger
 from src.yaml_load import load_yaml
 from tests.builders import IFConfig, write_fixture_session
 from tests.configs import example_config, retrain_argv
@@ -34,11 +39,12 @@ def test_retrain_calls_both_trainers(
 
     feature_frame = object()
     calls: list[str] = []
-    monkeypatch.setattr(
-        retrain,
-        "build_feature_frame",
-        lambda *a, **k: calls.append("build") or feature_frame,
-    )
+
+    def _build(*_a: Any, **_k: Any) -> object:
+        calls.append("build")
+        return feature_frame
+
+    monkeypatch.setattr(retrain, "build_feature_frame", _build)
 
     def _if_train(*_a: object, **kwargs: object) -> None:
         assert kwargs["feature_frame"] is feature_frame
@@ -111,11 +117,12 @@ def test_retrain_applies_feedback_policy_for_single_trainer(
         }
     )
     calls: list[str] = []
-    monkeypatch.setattr(
-        retrain,
-        "build_feature_frame",
-        lambda *a, **k: calls.append("build") or feature_frame,
-    )
+
+    def _build(*_a: Any, **_k: Any) -> object:
+        calls.append("build")
+        return feature_frame
+
+    monkeypatch.setattr(retrain, "build_feature_frame", _build)
 
     def _if_train(*_a: object, **kwargs: object) -> None:
         calls.append("if")
@@ -404,7 +411,7 @@ def test_retrain_since_window_too_small_for_holdout_refuses(
             str(tmp_path / "lstm"),
         )
     )
-    assert rc == retrain.WINDOW_TOO_SMALL_FOR_HOLDOUT
+    assert rc == WINDOW_TOO_SMALL_FOR_HOLDOUT
     assert "too small to reserve a calibration holdout" in capsys.readouterr().err
 
 
@@ -762,7 +769,7 @@ def test_benchmark_gate_asks_the_harness_for_every_fault_on_a_fixed_seed(
         ]
     )
     run = retrain._start_run(args, config)
-    seq_artifact = run.train_dir(retrain.SEQUENCE_SOURCE) / "model.pt"
+    seq_artifact = run.train_dir(SEQUENCE_SOURCE) / "model.pt"
     seq_artifact.parent.mkdir(parents=True)
     seq_artifact.write_bytes(b"x")
     calls: list[list[str]] = []
@@ -1207,7 +1214,7 @@ def test_holdout_picker_tops_up_to_three_even_when_the_newest_covers_every_mode(
 
     picked = model_evaluation.pick_calibration_holdouts(sessions)
 
-    assert len(picked) == retrain.MIN_CALIBRATION_HOLDOUT_SESSIONS == 3
+    assert len(picked) == MIN_CALIBRATION_HOLDOUT_SESSIONS == 3
     assert picked[0].name == "2026-09-19T120000"  # newest still anchors
     # The top-ups are spread across the corpus, not the next two newest.
     assert {p.name for p in picked} == {
@@ -1447,7 +1454,7 @@ def test_default_cli_paths_cannot_append_to_the_real_training_ledger(
     # _ingest_ledger logs and swallows an OSError; the guard still refused it.
     with repo_write_guard.expect() as refused:
         retrain._ingest_ledger(
-            retrain.TrainingLedger(DEFAULT_TRAINING_LEDGER_PATH),
+            TrainingLedger(DEFAULT_TRAINING_LEDGER_PATH),
             tmp_path / "if",
             "succeeded",
             None,
@@ -1516,7 +1523,7 @@ def test_gate_scores_evaluation_drives_disjoint_from_calibration(
     monkeypatch.setattr(_cli, "discover_sessions", lambda _root: list(sessions))
     monkeypatch.setattr(retrain, "build_feature_frame", lambda *a, **k: object())
     monkeypatch.setattr(model_evaluation, "session_parquet_bytes", lambda _p: 5_000_000)
-    seen: dict[str, object] = {}
+    seen: dict[str, Any] = {}
 
     def _seq_train(_backend: object, positional: list[Path], *_a: object, **kwargs: object) -> None:
         seen["training"] = list(positional)
@@ -1552,16 +1559,16 @@ def test_gate_scores_evaluation_drives_disjoint_from_calibration(
     )
 
     assert rc == 0
-    calibration = set(seen["calibration"])  # type: ignore[arg-type]
-    evaluation = set(seen["gate"])  # type: ignore[arg-type]
-    training = set(seen["training"])  # type: ignore[arg-type]
+    calibration = set(seen["calibration"])
+    evaluation = set(seen["gate"])
+    training = set(seen["training"])
     assert calibration and evaluation
     assert not calibration & evaluation
     assert not training & (calibration | evaluation)
-    assert set(seen["evaluation"]) == evaluation  # type: ignore[arg-type]
+    assert set(seen["evaluation"]) == evaluation
     assert len(training) >= 2
     split = seen["split"]
-    assert set(split.evaluation) == {s.name for s in evaluation}  # type: ignore[attr-defined]
+    assert set(split.evaluation) == {s.name for s in evaluation}
     assert seen["override"] == "test fixture"
 
 

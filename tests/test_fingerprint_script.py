@@ -13,7 +13,7 @@ import pytest
 import yaml
 
 import scripts.fingerprint as fingerprint_cli
-from src.analysis.fingerprint import is_stale, write_fingerprint
+from src.analysis.fingerprint import compute_fingerprint, is_stale, write_fingerprint
 from src.analysis.reference_epoch import (  # noqa: E402
     DEFAULT_REFERENCE_EPOCH_PATH,
     ReferenceEpoch,
@@ -112,7 +112,9 @@ def test_backfill_computes_missing_fingerprint(tmp_path: Path) -> None:
     assert read_fingerprint(session) is not None
 
 
-def test_backfill_skips_current_without_rebuild(tmp_path: Path, monkeypatch) -> None:
+def test_backfill_skips_current_without_rebuild(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     session = _write_ready_session(tmp_path, "2026-05-20T120000")
     _classify_ready(session, _config())
     fingerprint_cli.main(
@@ -121,7 +123,7 @@ def test_backfill_skips_current_without_rebuild(tmp_path: Path, monkeypatch) -> 
     assert not is_stale(read_fingerprint(session))
 
     calls: list[str] = []
-    real_compute = fingerprint_cli.compute_fingerprint
+    real_compute = compute_fingerprint
 
     def _spy(session_dir: Path, config: object) -> dict[str, float]:
         calls.append(session_dir.name)
@@ -135,7 +137,7 @@ def test_backfill_skips_current_without_rebuild(tmp_path: Path, monkeypatch) -> 
     assert calls == []  # already current -> skipped, not recomputed
 
 
-def test_backfill_rebuild_forces_recompute(tmp_path: Path, monkeypatch) -> None:
+def test_backfill_rebuild_forces_recompute(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     session = _write_ready_session(tmp_path, "2026-05-20T120000")
     _classify_ready(session, _config())
     fingerprint_cli.main(
@@ -143,7 +145,7 @@ def test_backfill_rebuild_forces_recompute(tmp_path: Path, monkeypatch) -> None:
     )
 
     calls: list[str] = []
-    real_compute = fingerprint_cli.compute_fingerprint
+    real_compute = compute_fingerprint
 
     def _spy(session_dir: Path, config: object) -> dict[str, float]:
         calls.append(session_dir.name)

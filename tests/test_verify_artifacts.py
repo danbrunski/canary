@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import subprocess
+from collections.abc import Sequence
 from pathlib import Path
 
 import pytest
@@ -189,7 +190,7 @@ def test_collect_remote_parses_find_cat_sha256sum_over_mocked_ssh() -> None:
 
     calls: list[list[str]] = []
 
-    def fake_runner(cmd: list[str]) -> subprocess.CompletedProcess[str]:
+    def fake_runner(cmd: Sequence[str]) -> subprocess.CompletedProcess[str]:
         calls.append(list(cmd))
         assert cmd[0] == "ssh"
         assert cmd[1] == "canary@192.168.137.2"
@@ -220,7 +221,7 @@ def test_collect_remote_parses_find_cat_sha256sum_over_mocked_ssh() -> None:
 
 
 def test_collect_remote_returns_empty_when_ssh_listing_fails() -> None:
-    def failing_runner(cmd: list[str]) -> subprocess.CompletedProcess[str]:
+    def failing_runner(cmd: Sequence[str]) -> subprocess.CompletedProcess[str]:
         raise subprocess.TimeoutExpired(cmd=list(cmd), timeout=20.0)
 
     assert (
@@ -229,7 +230,7 @@ def test_collect_remote_returns_empty_when_ssh_listing_fails() -> None:
 
 
 def test_collect_remote_skips_manifest_with_bad_json() -> None:
-    def fake_runner(cmd: list[str]) -> subprocess.CompletedProcess[str]:
+    def fake_runner(cmd: Sequence[str]) -> subprocess.CompletedProcess[str]:
         remote_cmd = cmd[2]
         if remote_cmd.startswith("find"):
             return subprocess.CompletedProcess(
@@ -260,7 +261,7 @@ def test_end_to_end_local_vs_mocked_remote_via_compare() -> None:
         )
     }
 
-    def fake_runner(cmd: list[str]) -> subprocess.CompletedProcess[str]:
+    def fake_runner(cmd: Sequence[str]) -> subprocess.CompletedProcess[str]:
         remote_cmd = cmd[2]
         if remote_cmd.startswith("find"):
             stdout = "/data/canary/models/isolation_forest/model.manifest.json\n"

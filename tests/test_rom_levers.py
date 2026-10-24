@@ -227,7 +227,7 @@ def test_a_regime_other_than_closed_loop_does_not_carry_the_closed_loop_blocker(
     assert TEXT_CLOSED_LOOP in _joined(world.classify(candidate))  # not stated: listed
     assert TEXT_CLOSED_LOOP not in _joined(world.classify(candidate, regime="fuel_cut"))
     with pytest.raises(ValueError, match="regime"):
-        world.classify(candidate, regime="wot")  # type: ignore[arg-type]
+        world.classify(candidate, regime="wot")
 
 
 # -- everything is derived, nothing is a table kept here -----------------------------------------

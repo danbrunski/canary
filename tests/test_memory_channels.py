@@ -30,7 +30,7 @@ from src.collection.obd_scheduler import (
     build_poll_requests,
     profile_memory_union,
 )
-from src.collection.request_eligibility import SESSION_PHASES, evaluate
+from src.collection.request_eligibility import SESSION_PHASES, SessionPhase, evaluate
 from src.config import CanaryConfig, CanBusConfig, CollectionConfig
 from src.decode.dids import (
     DidMap,
@@ -122,11 +122,11 @@ def test_decoded_slice_must_fit_the_read() -> None:
 def test_address_cannot_be_recorded_without_a_calibration() -> None:
     """The whole difference between a DID and an address."""
     with pytest.raises(ValidationError):
-        MemoryChannel(name="X", address=0x1000, length=2, byte_length=2, confidence="low")
+        MemoryChannel(name="X", address=0x1000, length=2, byte_length=2, confidence="low")  # type: ignore[call-arg]
 
 
 @pytest.mark.parametrize("phase", SESSION_PHASES)
-def test_memory_is_gated_exactly_like_mode_22(phase: str) -> None:
+def test_memory_is_gated_exactly_like_mode_22(phase: SessionPhase) -> None:
     """Same diagnostic session, so it must not sit on the Mode 01-side row.
 
     On the Mode 01-side row every read would be issued in the one phase
@@ -411,7 +411,7 @@ def test_a_window_may_not_mix_calibrations() -> None:
         )
 
 
-def test_a_windowed_request_is_admitted_by_its_members(monkeypatch) -> None:
+def test_a_windowed_request_is_admitted_by_its_members(monkeypatch: pytest.MonkeyPatch) -> None:
     """A window is named after the window, not any one channel it carries.
 
     Matching the profile's selection against that name finds nothing, which
@@ -443,7 +443,9 @@ def test_a_windowed_request_is_admitted_by_its_members(monkeypatch) -> None:
         tuning_profile.set_active(False)
 
 
-def test_a_windowed_request_with_no_selected_member_is_refused(monkeypatch) -> None:
+def test_a_windowed_request_with_no_selected_member_is_refused(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     from src.collection import tuning_profile
     from src.collection.capture_profiles import CaptureProfile
 

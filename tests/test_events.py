@@ -7,6 +7,8 @@ a degenerate input (empty / missing column) that should return [] cleanly.
 
 from __future__ import annotations
 
+from collections.abc import Callable
+
 import pandas as pd
 import pytest
 
@@ -20,6 +22,7 @@ from src.analysis.events import (
     detect_wot_runs,
 )
 from src.columns import MODE_COLUMN, SESSION_COLUMN, TIMESTAMP_COLUMN
+from src.storage.session_products import DetectedEvent, ModeSegment
 
 
 def _base_frame(rows: int) -> pd.DataFrame:
@@ -240,6 +243,8 @@ def test_wot_run_skips_brief_punch() -> None:
         detect_wot_runs,
     ],
 )
-def test_detector_handles_empty_frame_cleanly(detector) -> None:
+def test_detector_handles_empty_frame_cleanly(
+    detector: Callable[[pd.DataFrame, list[ModeSegment]], list[DetectedEvent]],
+) -> None:
     frame = pd.DataFrame(columns=[SESSION_COLUMN, TIMESTAMP_COLUMN, MODE_COLUMN, "obd:RPM"])
     assert detector(frame, []) == []

@@ -9,6 +9,9 @@ was reported confidently and nothing owned the difference. See
 from __future__ import annotations
 
 import threading
+from collections.abc import Iterator, Sequence
+from types import ModuleType
+from typing import TYPE_CHECKING, Any, cast
 
 import pytest
 
@@ -34,6 +37,13 @@ from tests.capture_round_fakes import (
     install_clock,
 )
 
+if TYPE_CHECKING:
+    from src.collection.capture_profiles import CaptureProfile
+    from src.collection.capture_quality import ChannelQuality
+    from src.collection.obd_reading import ObdReading
+    from src.collection.obd_scheduler import CanObdLoopStats, ObdSchedulerMetrics, PollRequest
+    from src.features.feature_spec import FeatureSpecReconciliation
+
 #: ``build_poll_requests`` asks discovery only for ``auto``; these specs name PIDs.
 _NO_DISCOVERY = object()
 
@@ -51,8 +61,8 @@ def clock(monkeypatch: pytest.MonkeyPatch) -> FakeClock:
     return fake
 
 
-def _spec(**kw) -> CanObdSpec:
-    base = {
+def _spec(**kw: Any) -> CanObdSpec:
+    base: dict[str, Any] = {
         "can": CanBusConfig(interface="virtual", channel="test", bitrate=500000),
         "poll_rate_hz": 50.0,
         "request_timeout_seconds": 0.05,
@@ -150,8 +160,8 @@ def test_accounting_reconciles_over_a_whole_run_with_failing_batches(
     clock = FakeClock()
     install_clock(monkeypatch, clock)
     bus = _batch_refusing_ecu(clock)
-    seen: list = []
-    readings: list = []
+    seen: list[ObdSchedulerMetrics] = []
+    readings: list[ObdReading] = []
     stats = run_can_obd_loop(
         bus,  # type: ignore[arg-type]
         _spec(pids=("RPM", "SPEED", "ENGINE_LOAD"), batch_max_pids=6),
@@ -394,7 +404,7 @@ def test_worker_timeout_is_derived_from_the_tick_not_a_flat_30s() -> None:
     assert floored.result_timeout_seconds == MIN_RESULT_TIMEOUT_SECONDS
 
 
-def _batchable(requests, channels: tuple[str, ...]) -> list[int]:
+def _batchable(requests: Sequence[PollRequest], channels: tuple[str, ...]) -> list[int]:
     """Indices of `channels` in plan order — `build_poll_requests` adds auto
     PIDs and DTC reads, and a batch is capped at six members."""
     wanted = {
@@ -403,7 +413,7 @@ def _batchable(requests, channels: tuple[str, ...]) -> list[int]:
     return sorted(wanted.values())
 
 
-def _stats():
+def _stats() -> CanObdLoopStats:
     from src.collection.obd_scheduler import CanObdLoopStats
 
     return CanObdLoopStats()
@@ -418,7 +428,7 @@ if __name__ == "__main__":  # pragma: no cover
 # ---------------------------------------------------------------------------
 
 
-def _reconciliation(*, expected: int, absent: int):
+def _reconciliation(*, expected: int, absent: int) -> FeatureSpecReconciliation:
     from src.features.feature_pipeline import FeatureSpecReconciliation
 
     columns = tuple(f"decoded:CH_{i}" for i in range(expected))
@@ -464,7 +474,9 @@ def test_a_satisfiable_spec_reports_nothing() -> None:
     assert structural_blindness(_reconciliation(expected=88, absent=0)) is None
 
 
-def _report_missing(expected: tuple[str, ...], missing: tuple[str, ...]):
+def _report_missing(
+    expected: tuple[str, ...], missing: tuple[str, ...]
+) -> FeatureSpecReconciliation:
     from src.features.feature_pipeline import FeatureSpecReconciliation
 
     return FeatureSpecReconciliation(
@@ -479,7 +491,7 @@ def _report_missing(expected: tuple[str, ...], missing: tuple[str, ...]):
 
 
 @pytest.fixture
-def _fresh_blindness():
+def _fresh_blindness() -> Iterator[ModuleType]:
     from src.daemon import inference as inference_mod
     from src.models.feature_spec_health import reset_blindness_tracking
 
@@ -490,7 +502,15 @@ def _fresh_blindness():
     inference_mod._SCHEMA_RECONCILIATION_WARNED.clear()
 
 
-def _feed(inference_mod, version, report, *, start: float, seconds: float, step: float = 1.0):
+def _feed(
+    inference_mod: ModuleType,
+    version: str,
+    report: FeatureSpecReconciliation,
+    *,
+    start: float,
+    seconds: float,
+    step: float = 1.0,
+) -> float:
     t = start
     while t <= start + seconds:
         inference_mod._log_schema_reconciliation_once("isolation_forest", version, report, now=t)
@@ -498,7 +518,7 @@ def _feed(inference_mod, version, report, *, start: float, seconds: float, step:
     return t
 
 
-def test_blindness_verdict_reaches_the_status_snapshot(_fresh_blindness) -> None:
+def test_blindness_verdict_reaches_the_status_snapshot(_fresh_blindness: ModuleType) -> None:
     """`blind_modes` said a detector scored nothing; this says why — once the
     absence has held over a sustained window, not from one report."""
     from src.models.feature_spec_health import (
@@ -524,7 +544,9 @@ def test_blindness_verdict_reaches_the_status_snapshot(_fresh_blindness) -> None
     assert structural_blindness_snapshot() == {}
 
 
-def test_startup_sparsity_is_not_structural(_fresh_blindness, caplog) -> None:
+def test_startup_sparsity_is_not_structural(
+    _fresh_blindness: ModuleType, caplog: pytest.LogCaptureFixture
+) -> None:
     """The 2026-09-18 defect: the first window after start had no GPS fix and
     no slow-tier PIDs yet, and that was frozen as 17-of-88 "structural" for
     the whole drive. Only columns absent in *every* report are structural."""
@@ -590,7 +612,7 @@ def test_startup_sparsity_is_not_structural(_fresh_blindness, caplog) -> None:
     assert len([r for r in caplog.records if "structural absence" in r.getMessage()]) == 1
 
 
-def test_pending_until_both_floors_are_met(_fresh_blindness) -> None:
+def test_pending_until_both_floors_are_met(_fresh_blindness: ModuleType) -> None:
     from src.models.feature_spec_health import (
         STRUCTURAL_MIN_OBSERVED_SECONDS,
         STRUCTURAL_MIN_REPORTS,
@@ -615,7 +637,7 @@ def test_pending_until_both_floors_are_met(_fresh_blindness) -> None:
 
 
 def test_a_column_absent_throughout_stays_structural_and_errors_once(
-    _fresh_blindness, caplog
+    _fresh_blindness: ModuleType, caplog: pytest.LogCaptureFixture
 ) -> None:
     import logging
 
@@ -669,7 +691,7 @@ COOLANT_P999_DEGC_PER_S = 0.441
 COOLANT_QUANTUM_DEGC = 1.0
 
 
-def _tuning_did_profile():
+def _tuning_did_profile() -> CaptureProfile:
     from pathlib import Path
 
     from src.collection.capture_profiles import seed_catalog
@@ -680,7 +702,8 @@ def _tuning_did_profile():
     return next(p for p in catalog.profiles if p.name == "tuning-did")
 
 
-def _effective_hz(profile, channel: str) -> float:
+def _effective_hz(profile: CaptureProfile, channel: str) -> float:
+    assert profile.target_rate_hz is not None
     weight = profile.mode22_rate_weights.get(channel.upper(), 1.0)
     return profile.target_rate_hz * weight
 
@@ -714,6 +737,7 @@ def test_every_other_tuning_did_channel_keeps_full_rate() -> None:
     move on 84.6 % of samples and are undersampled even at the full rate, so
     nothing else may be traded away without its own measurement."""
     p = _tuning_did_profile()
+    assert p.target_rate_hz is not None
 
     down_weighted = {c for c in p.mode22 if _effective_hz(p, c) < p.target_rate_hz}
 
@@ -728,6 +752,7 @@ def test_declared_demand_matches_the_weighted_sum() -> None:
     total = sum(_effective_hz(p, c) for c in p.mode22)
 
     assert total == pytest.approx(p.expected_total_demand_hz)
+    assert p.bus_budget_override is not None
     assert total < p.bus_budget_override
 
 
@@ -746,4 +771,4 @@ def test_down_weighted_coolant_cannot_fail_the_rate_floor() -> None:
         requested_hz = 1.0
         cadence = {"hz": 1.0}
 
-    assert _channel_failures([_Row()], floor) == []
+    assert _channel_failures(cast("list[ChannelQuality]", [_Row()]), floor) == []

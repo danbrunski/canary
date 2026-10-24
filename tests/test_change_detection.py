@@ -205,9 +205,12 @@ def test_calibration_must_be_out_of_sample():
         )
 
 
-def _ar_drive(drive: str, n: int, t0: float, seed: int, phi: float, offset: float = 0.0):
+def _ar_drive(
+    drive: str, n: int, t0: float, seed: int, phi: float, offset: float = 0.0
+) -> list[Block]:
     rng = np.random.default_rng(seed)
-    level, out = 0.0, []
+    level = 0.0
+    out: list[Block] = []
     for i in range(n):
         level = phi * level + rng.normal(0.0, 0.5)
         out.append(
@@ -390,7 +393,7 @@ def test_a_short_drive_is_unevaluable_at_drive_level():
 def test_the_reference_is_frozen_and_self_hashed():
     reference = _reference()
     with pytest.raises(ValidationError):
-        reference.theta = (5.0,)  # type: ignore[misc]
+        reference.theta = (5.0,)
     widened = reference.model_dump(mode="json")
     widened["alarm"]["cusum_h"] = 50.0
     with pytest.raises(ValidationError, match="fingerprint"):
