@@ -1793,6 +1793,29 @@ live here now, so the documents could be archived
     *2026-09-24 16:04Z key-on (Pi up since 04:55Z):* `/status.gps` showed a fix
     within ~1 min of the engine starting (fix_quality 1, 10 satellites, HDOP
     1.07, 2,014 m). One good start; the 09-23 no-fix drive stays unexplained.
+- [ ] **GNSS sees no satellites (since at least 2026-10-10).** The no-fix case
+  above has come back, and this time it doesn't clear. Every GPS row in
+  `2026-10-10T171856`, `_capture-tuning-2026-10-10T171518`,
+  `_capture-tuning-2026-10-26T010515` and the 23-min outdoor drive
+  `_capture-tuning-2026-10-26T140411` (13,647 reads) has `num_satellites` 0
+  and `fix_quality` 0.
+  - The receiver is alive: on 2026-10-26 `gpspipe -w` showed the MAX-M10M
+    (SPG 5.10) on `/dev/ttyAMA2`, reporting SKY at 10 Hz.
+  - It has never been given the time: SKY `time` reads 2019-04-07, the
+    module's power-on default. nSat 0, `uSat` 0, TPV mode 1.
+  - chrony runs on network NTP only, so the PPS isn't disciplining it.
+  - Seeing nothing at all through an outdoor drive points at the antenna
+    (connector, cable or the active antenna's bias), not at the 10 Hz
+    configuration: `73daa36` landed 10-13, after the 10-10 sessions were
+    already dark.
+  - **Operator:** check the antenna connector at the HAT and the cable run.
+    Then confirm satellites in `gpspipe -w` within a few minutes outdoors.
+  - Owed with it: the H07.11 gear holds and every GPS-referenced committee
+    (`SPEED_SOURCE_DIVERGENCE` reads `reference_missing`). Note too that the
+    daemon logs "model feature spec is unsatisfiable … this detector will
+    withhold every row until retrained": 32 of 254 features are absent, and
+    `gps:speed` is one of them (2026-10-26 08:02). I didn't establish which
+    detector it is.
 
 - [~] **D03.30 Passive mode does not survive a daemon restart.** On 2026-09-24
   the operator had a scan tool connected with CANary passive (armed through
@@ -2398,7 +2421,9 @@ live here now, so the documents could be archived
     trim held at −5 to −7 % (purge off) after a new fuel pump raised rail
     pressure 48 → 56 psi. A sustained offset did not move learned trim, so
     waiting for it to move may not work on this tune: find out first whether
-    learning is disabled (UpRev calibration) or just slow.
+    learning is disabled (UpRev calibration) or just slow. Same again on the
+    next morning's 23-min drive from a 28 °C start
+    (`_capture-tuning-2026-10-26T140411`, 2,646 / 2,631 reads, all 0.00).
   - [x] **0x1110 is commanded EVAP purge, not intake VVT duty.** The
     CAN Mode 22 handler (`FUN_000d16b8`) sends DID high byte 0x11 to table
     0x24988. Entry 16 there is 0xFFFF272E (read back from the ROM image), and

@@ -152,7 +152,12 @@ block wider than where the truck operates, not by knowing which cell it sits in.
     ~2,500 rpm, with `mem:ECM_KS_FAULT_FLAGS` 0x80 on all 233 reads (KS1
     pegged at 255, knock target −5°). So **trim B is in force**, latched by the
     KS1 fault rather than by measured knock. That holds until KS1 is repaired:
-    re-read after the harness fix, because trim A may take over.
+    re-read after the harness fix, because trim A may take over. Through a
+    warm-up the next morning (`_capture-tuning-2026-10-26T140411`, coolant
+    28 → 93 °C) it was 0x40 on every read in every band: 219 below 50 °C, 55
+    at 50–56, 34 at 56–60, 357 at 60–75 and 1,934 above. So the trim blend
+    across 56–60 °C runs on trim B too while the fault holds. That is the
+    0x283F half of the warm-up pass. The `twin` channels are still unlogged.
   - [ ] The `twin` holds, the 56–60 °C warm-up pass and the chain windows'
     key-on/idle read are still owed.
 - [ ] **The edit:** retard only (knock-safe), a few counts, over the same cruise
